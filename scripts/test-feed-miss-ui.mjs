@@ -16,7 +16,7 @@ import path from 'node:path';
 import { execSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE } from './scratch.mjs';
 const VNC_ENV = await vncEnv();
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -86,7 +86,7 @@ const NEW = (f) => ({ ...OLD(f), mode: 'measuring', lastFlip: null, measureRev: 
 const CDP_PORT = await freePort();
 const chromeDir = scratch('feed-miss-chrome');
 roots.push(chromeDir);
-const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--window-size=1400,1000', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore' });
+const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--window-size=1400,1000', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore' });
 procs.push(chrome);
 const WebSocket = require('ws');
 for (let i = 0; i < 120; i++) { try { await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json(); break; } catch { await sleep(250); } }

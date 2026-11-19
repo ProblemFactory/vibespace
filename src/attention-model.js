@@ -123,7 +123,7 @@ function rowOf(item, now = 0) {
     judged: j && (j.group === 'now' || j.group === 'later') ? { group: j.group, p: num(j.p) } : null,
     reasks: Math.max(0, Math.floor(num(item.reasks) || (f ? num(f.reasks) : 0) || 0)),
     blocked: !!(f && f.state === 'blocked'), waitedBy: item.waitedBy === 'person' ? 'person' : null,
-    deadlineMoney: item.deadlineMoney === true, answered: !!(item.reply && item.reply.text), notice: item.kind === 'notice',
+    deadlineMoney: item.deadlineMoney === true, answered: !!(item.reply && (item.reply.text || item.reply.pictures)), notice: item.kind === 'notice',
   };
   row.band = bandOfRow(row, now);
   return row;

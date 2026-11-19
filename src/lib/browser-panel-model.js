@@ -19,7 +19,7 @@ export const GRID = Object.freeze({ mins: Object.freeze([140, 100, 170, 120]), g
 export function gridNeed(actsPx) { return GRID.mins.reduce((s, n) => s + n, 0) + Math.max(0, Number(actsPx) || 0) + GRID.gap * GRID.mins.length; }
 
 /** Every act a profile row offers, once: the primary, the ⋯ menu's items, the who cell's Change… (the ACT CENSUS). */
-export const ROW_ACTS = Object.freeze(['browse', 'record', 'record-mine', 'replay', 'build', 'rename', 'stop', 'restart', 'restart-hold', 'passkeys', 'delete', 'who']); // lane passkey-ui: + Passkeys (n)…
+export const ROW_ACTS = Object.freeze(['browse', 'record', 'record-mine', 'replay', 'build', 'proxy-move', 'proxy', 'exit-check', 'rename', 'stop', 'restart', 'restart-hold', 'passkeys', 'delete', 'who']); // + B-8b87: Proxy… and «Move the password to the vault» // lane passkey-ui: + Passkeys (n)…
 
 const T = (x) => (x && x.w && typeof x.w.t === 'function' ? x.w.t : (s) => s);
 const W = (x, k, d) => (x && x.w && typeof x.w[k] === 'function' ? x.w[k] : d);
@@ -40,6 +40,19 @@ export function nameChips(r, x = {}) {
   const mine = String(x.mine || '');
   if (!rf && r.launchHost && mine && String(r.launchHost) !== mine) out.push({ key: 'launch-host', text: String(r.launchHost), title: t('The machine this profile\'s browser last started on') });
   if (r.legacy) out.push({ key: 'legacy', text: t('legacy') });
+  // B-8b87: a profile's proxy — its address on the chip's title; an address saved WITH its password (never used) says so
+  // B-8b87 cure: a running browser launched on ANOTHER road than the profile names now (an edit, or started before) — «from its next start»
+  const liveRoad = r.proxyLive === undefined ? undefined : String(r.proxyLive || ''), bare = (s) => String(s || '').replace(/[[\]]/g, '');
+  if (r.proxy && r.proxyPasswordInProfile) out.push({ key: 'proxy', cls: 'bprof-chip bprof-chip-warn', text: t('proxy password not in the vault'), title: t('Its proxy address carries its password, which is never used — «Move the password to the vault» in ⋯') });
+  else if (r.proxy && liveRoad !== undefined && (bare(liveRoad) !== bare(r.proxy) || String(r.proxyLiveLogin || '') !== String(r.proxyCredential || ''))) out.push({ key: 'proxy', text: t('proxy from its next start'), title: t('Through its proxy {address} from its next start — the running browser still uses {road}', { address: String(r.proxy), road: liveRoad || t('no proxy') }) });
+  else if (r.proxy) out.push({ key: 'proxy', text: t('proxy'), title: r.proxyCredential ? t('Through its proxy {address}, with its login from the vault', { address: String(r.proxy) }) : t('Through its proxy {address}', { address: String(r.proxy) }) });
+  else if (liveRoad) out.push({ key: 'proxy', text: t('no proxy from its next start'), title: t('The running browser still goes through {road} — no proxy from its next start', { road: liveRoad }) });
+  // the exit check (the owner 2026-11-17): the KEPT exit with its age (the person's view — never an agent's)
+  if (r.egress && typeof r.egress === 'object') {
+    const e = r.egress, ago = W(x, 'ago', () => ''), where = [e.country, e.timezone].filter(Boolean).join(' · ') || String(e.publicIp || '');
+    const age = e.checkedAt && x.now ? String(ago((Number(x.now) || 0) - Number(e.checkedAt)) || '') : '';
+    out.push({ key: 'exit', text: t('exit {where}', { where }), title: t('Its exit: {ip} · {where} — {how}, {age}', { ip: String(e.publicIp || '—'), where, how: e.source === 'measured' ? t('measured') : t('typed'), age: age || '—' }) });
+  }
   if (r.mediated) out.push({ key: 'mediated', text: t('separate tabs'), title: t('Each conversation sees and drives only its own tabs through a mediated CDP endpoint; while you drive, its input and navigation are refused.') });
   if (rf) out.push({ key: 'renamed', text: t('renamed from {host}', { host: String(rf.host) }), title: t('This machine was renamed (a pod restarted under a new name) — the lock its previous name {from} left on this profile was taken over; its browser runs here as {host}.', { from: String(rf.host), host: mine || String(r.launchHost || '') }) });
   return out.filter((c) => c.text);
@@ -107,6 +120,13 @@ export function rowMenu(r, x = {}) {
   if (canBrowse(r)) out.push({ id: 'record-mine', label: t('Also record my own actions'), check: r.recordMine !== false, title: t('When you browse this profile yourself, record what you do like an agent\'s actions (before / after frames; typed text is kept as a length only) — off keeps only when you started and stopped') });
   if (r.trace && r.trace.n) out.push({ id: 'replay', label: t('Replay…'), title: t('Every browser session on this profile, action by action') });
   if (r.buildChoice && !notOurs(r)) out.push({ id: 'build', label: t('Change build…'), title: t('Choose which installed Chrome build this profile runs') });
+  // B-8b87: the proxy and its login (this machine's own browsers); a password still in the address moves to the vault in one press
+  if (ours(r) && !r.host && !notOurs(r)) {
+    if (r.proxyPasswordInProfile) out.push({ id: 'proxy-move', label: t('Move the password to the vault'), title: t('Its proxy address carries its password, which is never used — one press keeps it in the vault as this proxy\'s login and removes it from the profile') });
+    out.push({ id: 'proxy', label: t('Proxy…'), title: t('This profile\'s proxy and its login (kept in the vault)') });
+    // the exit check (the owner 2026-11-17): a person's press, through this profile's own proxy
+    out.push({ id: 'exit-check', label: t('Check the exit…'), title: t('Read this profile\'s public address, country and time zone through its own proxy — kept only when you press Keep') });
+  }
   out.push({ id: 'rename', label: t('Rename…') });
   if (r.live) out.push({ id: 'stop', label: t('Stop'), title: t('Stop this profile\'s browser now — its logins stay in the profile; the next command starts it again (this also resets a browser that keeps closing)') });
   if (hung(r, x)) { /* Restart is the row's primary (never twice) */ } else if (x.stuck && x.stuck.action && r.live && !r.host) out.push({ id: 'restart', label: String(x.stuck.action), title: String(x.stuck.tooltip || '') });
@@ -149,6 +169,8 @@ export function rowFold(r, x = {}) {
   const bl = x.buildLine || null; // the view's cardBuildLine (the choice + the build the running browser reports)
   if (bl && bl.text) out.push({ key: 'build', k: t('Browser build'), v: String(bl.text), tone: bl.warn ? 'warn' : '' });
   // lane browser-profile-clone (B-9669): where a copy's logins came from — a one-time snapshot, dated in the viewer's locale
+  // the exit check: the KEPT exit and its AGE, findable on every screen (the chip's title is a hover — a phone has none)
+  if (r.egress && typeof r.egress === 'object') { const e = r.egress, age = e.checkedAt && x.now ? String(ago((Number(x.now) || 0) - Number(e.checkedAt)) || '') : ''; out.push({ key: 'exit', k: t('Proxy exit'), v: t('{ip} · {where} — {how}, checked {age}', { ip: String(e.publicIp || '—'), where: [e.country, e.timezone].filter(Boolean).join(' · ') || '—', how: e.source === 'measured' ? t('measured') : t('typed'), age: age || '—' }) }); }
   if (r.clonedFrom && r.clonedFrom.label) out.push({ key: 'cloned', k: t('Logins'), v: t('copied from {label} on {date}', { label: String(r.clonedFrom.label), date: String(W(x, 'date', (ms) => new Date(ms).toISOString().slice(0, 10))(Number(r.clonedFrom.at) || 0)) }) });
   const tr = r.trace || { n: 0 };
   const lim = Number(tr.limit) || (x.limits && x.limits.bytesPerProfile) || 0;

@@ -851,21 +851,7 @@ e2e: {
 // ── § 5 ONE HEALER, TWO TRIGGERS ───────────────────────────────────────────
 console.log('— §5 the attach probe and the input detector share ONE re-attach —');
 {
-  const wsSrc = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf-8');
-  // the detector moved with THE typing path into src/server/user-input.js
-  // (design-user-inbox-reply D1.1: the ws chat-input case + the For-you reply share it)
-  const uiSrc = fs.readFileSync(path.join(REPO, 'src/server/user-input.js'), 'utf-8');
-  ok(/reattachLocalPty\(sessionId, session, `Broken pty stdin detected \(/.test(uiSrc) && /sendUserInput\(data\.sessionId, data\.text/.test(wsSrc),
-    'WIRING PIN: the broken-stdin detector calls the shared reattachLocalPty');
-  ok(!/pty\.spawn\(DTACH_CMD/.test(wsSrc),
-    'WIRING PIN: ws-handler no longer spawns its own dtach attach (one implementation, not two)');
-  ok(/ptyQuietSince\(session, sentAt\)/.test(uiSrc),
-    'WIRING PIN: the detector asks the liveness STAMP, not session.buffer.length');
-  const stdoutSrc = fs.readFileSync(path.join(REPO, 'src/server/session-stdout.js'), 'utf-8');
-  ok((stdoutSrc.match(/pty\.spawn\(DTACH_CMD/g) || []).length === 2,
-    'WIRING PIN: exactly two local dtach spawns remain (the first attach + the ONE healer)');
-  ok(/ptyProcess\.onData\(\(\) => \{ session\._lastPtyDataAt = Date\.now\(\); \}\);/.test(stdoutSrc),
-    'WIRING PIN: the liveness stamp is registered in setupSessionPty — the one place every pty is wired');
+  // (§5 the wiring pins — MOVED to the fast scripts/test-restore-liveness-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 
   // functional: the healer re-attaches and RESENDS
   const dmNone = null;

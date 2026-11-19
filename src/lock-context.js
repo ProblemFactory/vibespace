@@ -1,6 +1,7 @@
 'use strict';
 /**
- * THE CONTEXT A LOCK KEEPS — PURE, imports nothing; CJS so the hub, the page and the suites share ONE spelling (B-6c55).
+ * THE CONTEXT A LOCK KEEPS — PURE, imports only the model-id core (src/model-core.js); CJS so the hub, the page and the suites
+ * share ONE spelling (B-6c55).
  *
  * A Lock records the model the chip showed — the CLI's RESOLVED id (`claude-fable-5`), never its 1M-context form: the
  * CLI reports a model without its `[1m]` suffix (zero of 2650 transcripts' `message.model` carry one), and the Lock
@@ -22,6 +23,7 @@
  * lockContextFor(ask)       → the fact a Lock (or a re-target) records from the person's ask
  * longContextOf(catalog, m) → the installed CLI's own word on the model's 1M form (true / false / null = not known)
  */
+const { core } = require('./model-core.js');   // the catalog's own name rule (batch 21's cure)
 const LONG = '1m';
 const SUFFIX_RE = /\[1m\]$/i;
 
@@ -52,8 +54,12 @@ function longContextOf(catalog, model) {
   const rows = catalog && Array.isArray(catalog.models) ? catalog.models : null;
   if (!name || !rows) return null;
   const al = catalog.aliases && typeof catalog.aliases === 'object' ? catalog.aliases : {};
-  const id = Object.prototype.hasOwnProperty.call(al, name) && typeof al[name] === 'string' ? al[name] : name;   // an alias → its model
-  const row = rows.find((m) => m && (m.id === id || m.firstParty === id));   // the catalog id, or the dated first-party id the CLI reports
+  // (an alias in ANY case — the verdict's own choice, not the catalog's: the catalog reader keys aliases as written; refusing the 1M form
+  // of a spelling the CLI itself might reject costs nothing)
+  const alias = Object.keys(al).find((k) => typeof al[k] === 'string' && k.toLowerCase() === name.toLowerCase());   // an alias → its model
+  // MATCHED AS THE CATALOG MATCHES (its core: lowercased, no `claude-`): the catalog id, or the dated first-party id the CLI reports
+  const key = core(alias ? al[alias] : name);
+  const row = key ? rows.find((m) => m && ((m.id && core(m.id) === key) || (m.firstParty && core(m.firstParty) === key))) : null;
   if (!row) return null;
   return row.oneM === 'native' || row.oneM === 'beta';
 }

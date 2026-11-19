@@ -271,7 +271,7 @@ async function openDialog(w, roster, { answers = [] } = {}) {
       const known = new Map();
       const seen = () => { for (const r of [...(typeof o.items === 'function' ? o.items() : o.items || []), ...((o.except && o.except.extra) || [])]) if (r && r.key != null && !known.has(String(r.key))) known.set(String(r.key), r); return [...known.values()]; };
       seen();
-      return { el: new El('div'), selected: () => st.sel.slice(), except: () => st.ex.filter((k) => !st.sel.includes(k)), knownRows: () => seen(), close() {} };
+      return { el: new El('div'), selected: () => st.sel.slice(), setSelected: (keys) => { st.sel = (keys || []).map(String); st.ex = st.ex.filter((k) => !st.sel.includes(k)); }, except: () => st.ex.filter((k) => !st.sel.includes(k)), knownRows: () => seen(), close() {} };   // B-f212: + setSelected (a landed Save sets the picker to the hub's row — the real picker's own method)
     },
     fetchJson: async (url, o = {}) => {   // src/routes/vault.js's two doors the Save uses, on this world's door
       let b = {}; try { b = JSON.parse((o && o.body) || '{}'); } catch { b = {}; }

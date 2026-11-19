@@ -70,6 +70,11 @@ export function routeErrorText(r, { fallback = null, ruleLabel = (k) => k } = {}
     // person's language, never dropped
     case 'not-durable': return t('Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.');
     case 'not-found': return t('No such conversation');
+    // lane bl-msg B-da74 cure: «Send the rest»'s four refusals, in the person's language (the engine's English `error` is the CLI's)
+    case 'rest-not-sent': return t('Only a sent message has a rest to send');
+    case 'rest-already': return t('The rest is on its way already');
+    case 'rest-nothing-left': return t('Nothing of it is left to send');
+    case 'rest-files-gone': return t('Its files are no longer kept — attach them again in a new reply');
     // r4 (design-integrations-per-account): the OAuth client is the ACCOUNT's — the remedy is its own dialog, never the Integrations window
     case 'needs-credentials': return t('No usable OAuth client — pick a preset or enter your own client (Edit or Re-authorize)');
     // the account model (2026-09-22): a key the integration no longer offers / an account that is gone

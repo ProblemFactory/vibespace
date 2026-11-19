@@ -1677,6 +1677,7 @@ const esrc2 = engineSource(REPO);
     const noCidReply = await call('POST /api/agent/channels/reply', { token: 'vsst_N', body: { conv: `${A}/${OPS}`, text: 'from a newborn' } });
     const noCidCompose = await call('POST /api/agent/channels/compose', { token: 'vsst_N', body: { account: A, to: ['x@example.com'], subject: 's', text: 'from a newborn' } });
     const noCidWithdraw = await call('POST /api/agent/channels/proposals/:id/withdraw', { token: 'vsst_N', params: { id: own.body && own.body.proposal ? own.body.proposal.id : 'p-none' } });
+    const noCidResend = await call('POST /api/agent/channels/proposals/:id/resend', { token: 'vsst_N', params: { id: own.body && own.body.proposal ? own.body.proposal.id : 'p-none' } });   // lane bl-msg B-da74: the fifth guard
     const browser = await call('POST /api/agent/channels/proposals/:id/withdraw', { headers: { cookie: 'vs_token=deadbeef', 'sec-fetch-site': 'same-origin' }, params: { id: own.body && own.body.proposal ? own.body.proposal.id : 'p-none' } });
     const bare = await call('POST /api/agent/channels/proposals/:id/withdraw', { params: { id: 'p-none' } });
     // verify r3: the pending fork may neither take Alpha's draft back nor draft as Alpha; the adopted codex fork drafts as itself
@@ -1702,7 +1703,7 @@ const esrc2 = engineSource(REPO);
     const made = Object.keys(e.store.outbox.snapshot().proposals).length - n0;
     const drafters = Object.values(e.store.outbox.snapshot().proposals).map((p) => p.draftedBy && p.draftedBy.id);
     e.stop();
-    return { own: own.status, ownState: own.body && own.body.proposal && own.body.proposal.state, noCid: [noCidReply, noCidCompose, noCidWithdraw].map((r) => `${r.status}:${r.body.code}`), sentence: noCidReply.body.error, browser: `${browser.status}:${browser.body.code}`, browserText: browser.body.error, bare: bare.status, ownWithdraw: ownWithdraw.status, made, drafters,
+    return { own: own.status, ownState: own.body && own.body.proposal && own.body.proposal.state, noCid: [noCidReply, noCidCompose, noCidWithdraw].map((r) => `${r.status}:${r.body.code}`), noCidResend: `${noCidResend.status}:${noCidResend.body.code}`, sentence: noCidReply.body.error, browser: `${browser.status}:${browser.body.code}`, browserText: browser.body.error, bare: bare.status, ownWithdraw: ownWithdraw.status, made, drafters,
       fork: [forkWithdraw, forkReply, forkCompose].map((r) => `${r.status}:${r.body.code}`), forkSentence: forkWithdraw.body.error, stateAfterFork, madeBeforeCodex, forkArray: `${forkArray.status}:${forkArray.body.code}`, codex: `${codex.status}:${codex.body.code || (codex.body.proposal && codex.body.proposal.state)}`,
       request: [forkRequest, noCidRequest, ownRequest].map((r) => `${r.status}:${r.body.code || 'ok'}`), requestSentence: forkRequest.body.error, requests };
   }
@@ -1729,6 +1730,13 @@ const esrc2 = engineSource(REPO);
     ok([G1, G2, G3, G4].every((g) => asrc.split(g).length === 2), 'the four own-conversation-id guards (reply / compose / withdraw / request) are present once each (the control removes exactly them)');
     const cp = patchPath('src', 'agent-routes'); writeCopy(cp, asrc.replace(G1, "  const cidR = s.claudeSessionId || s.backendSessionId || null;").replace(G2, '').replace(G3, '').replace(G4, ''));
     const g2c = await agentRouteLeg(require(cp), 'r4-agentroutes-ctl');
+    // lane bl-msg B-da74 (restack-411, the checkpoint's red): the REST route's own guard is a FIFTH row with its own control — the
+    // four above keep their count; a session with no conversation id asking a rest is 409 bad-member by name
+    const G5 = "  if (who.s && !who.job) { const ownS = ownConversationIdOf(who.s); if (!ownS.cid) return res.status(409).json({ error: ownS.why, code: 'bad-member' }); }";
+    ok(asrc.split(G5).length === 2 && g2.noCidResend === '409:bad-member', `the FIFTH own-conversation-id guard (the rest) is present once, and a rest asked by a session with no conversation id yet ⇒ 409 bad-member by name (${g2.noCidResend})`);
+    const cp5 = patchPath('src', 'agent-routes'); writeCopy(cp5, asrc.replace(G5, ''));
+    const g2c5 = await agentRouteLeg(require(cp5), 'r4-agentroutes-ctl5');
+    ok(asrc.split(G5).length === 2 && g2c5.noCidResend !== '409:bad-member' && g2c5.noCid.every((x) => x === '409:bad-member'), `CONTROL (the fifth guard alone removed): the rest asked with no conversation id is no longer refused by name (${g2c5.noCidResend}) while the four still answer 409 — the fifth row would go red`);
     ok(g2c.noCid[0] === '200:undefined' && g2c.drafters.some((d) => /^webui:/.test(d)), `CONTROL: the routes without the guards create a draft whose drafter is "webui:<id>" (${g2c.drafters.find((d) => /^webui:/.test(d))}) — the leg would go red`, JSON.stringify(g2c));
     ok(g2c.fork[0] === '200:undefined' && g2c.stateAfterFork === 'withdrawn' && g2c.fork[1] === '200:undefined', `CONTROL: without the guard the pending fork withdraws its parent's draft and drafts as the parent (${g2c.fork.join(', ')}) — the leg would go red`);
     ok(g2c.request[0] === '200:ok' && g2c.requests.some((r) => r === 'agent-A:Alpha (fork)') && g2c.requests.some((r) => /^webui:/.test(r)), `CONTROL: without the request guard the pending fork asks AS Alpha under the fork's name and the newborn as webui:<id> (${g2c.requests.join(', ')}) — the leg would go red`);
@@ -2063,7 +2071,11 @@ function chainCensus(src) {
   ok(c5.violations.some((v) => /wakeNow\(\) called outside billedWake/.test(v)), `CONTROL: a section body called outside the door reddens (${c5.violations.join('; ')})`);
   const c6 = plant("    if (!per.length) await reserveWake(rec, convId, null, {});");
   ok(c6.violations.some((v) => /reserveWake\(\) called outside a section/.test(v)), `CONTROL: a reservation outside a section body reddens (${c6.violations.join('; ')})`);
-  const c7 = chainCensus(esrc12.replace('    let r = null;\n    if (!deliver || typeof deliver.deliverToConversation !== \'function\') {\n      r = { ok: false, reason: \'no delivery ladder wired\', refused: \'unwired\' };', '    let r = null; // if (!per.length) await deliver.deliverToConversation(\'x\', \'y\', { spendReason: \'channel-message\' });\n    if (!deliver || typeof deliver.deliverToConversation !== \'function\') {\n      r = { ok: false, reason: \'no delivery ladder wired\', refused: \'unwired\' };'));
+  // lane bl-msg B-84b4: the anchor follows wakeNow's lines as they are now (the press's stamp sits between `let r = null;` and the ladder
+  // check) — and a control whose anchor is gone fails BY NAME (RULES 06:25Z), never a census of the unchanged source
+  const C7A = "    if (r) { /* held: the stamp is the send's precondition */ } else if (!deliver || typeof deliver.deliverToConversation !== 'function') {";
+  ok(esrc12.split(C7A).length === 2, 'CONTROL (comment hygiene): its anchor is in the source exactly once (else the control would census the unchanged source)');
+  const c7 = chainCensus(esrc12.replace(C7A, C7A + " // if (!per.length) await deliver.deliverToConversation('x', 'y', { spendReason: 'channel-message' });"));
   ok(c7.violations.length === 0 && c7.rows.filter((r) => r.kind === 'ladder').length === 3, 'CONTROL (comment hygiene): a ladder call spelled inside an inline comment is not counted, and the real three still are');
 }
 

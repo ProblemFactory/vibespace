@@ -263,13 +263,16 @@ const auditLines = () => { try { return fs.readFileSync(k.auditFile, 'utf8').tri
   k.handback({ browserKey: KEY_A, profileId: null, viewerId: 'v1', cause: 'explicit' });
   c = await cli(['click', '@e1'], cliEnvFor(sessA));
   ok(c.status === 0 && cmds().length === 2, '…handed back, it runs');
-  // ─ an idle-out: the daemon's pid gone ⇒ stopped (not an error), the next verb relaunches
+  // ─ a daemon gone (killed seconds after a verb): stopped (not an error), the next verb relaunches — B-346d law 2: gone long
+  //   before its idle timeout, its words say it was FOUND GONE within a bound of a command it served (why not known), never «idled out»
   const pid0 = k.browserOf(p.id).pid;
   process.kill(pid0, 'SIGKILL');
   for (let i = 0; i < 40 && alive(pid0); i++) await new Promise((res) => setTimeout(res, 25));
   await k.tick();
   const r0 = k.browserOf(p.id);
-  ok(r0.state === 'stopped' && r0.stoppedBy === 'idle' && r0.lastError === null && /idled out/.test(r0.note || ''), 'the daemon gone ⇒ the tick records `stopped` (idle), no error', r0);
+  ok(r0.state === 'stopped' && r0.stoppedBy === 'idle' && r0.lastError === null && r0.endedEarly && r0.endedEarly.withinMs >= 0 && r0.endedEarly.withinMs < r0.endedEarly.idleMs
+    && /^the browser was found gone within \d+ s of a command it served, before its idle timeout of \d+ min — why is not known here; the next command starts it again$/.test(r0.note || '') && !/idled out/.test(r0.note || ''),
+    'the daemon gone ⇒ the tick records `stopped` (stoppedBy idle, no error) — killed seconds after a verb, its words say it was FOUND GONE before its idle timeout (B-346d law 2), never «idled out»', r0);
   ok(k._reg().leases.some((l) => l.profileId === p.id), '…and the lease stays (an idle-out is not a conversation end)');
   c = await cli(['snapshot'], cliEnvFor(sessA));
   const r1 = k.browserOf(p.id);
@@ -354,8 +357,8 @@ const auditLines = () => { try { return fs.readFileSync(k.auditFile, 'utf8').tri
     const ry = await post('/api/agent/browser/resolve', { argv: ['snapshot'] }, sy.agentToken);
     ok(ry.status === 200 && ry.json.kind === 'ephemeral' && ry.json.config === EPH_CFG, 'r3: /resolve names that file (`config`) — the one the keeper launched with', ry.json);
     const ec = (() => { try { return JSON.parse(fs.readFileSync(EPH_CFG, 'utf8')); } catch { return {}; } })(); // a pre-r4 tree goes RED here, never crashes
-    ok(ec.args === '--no-sandbox,' + B.keeperMarkArg(KEY_Y) && ec.proxy === 'http://127.0.0.1:3128' && JSON.stringify(ec.allowedDomains) === '["example.com"]' && !('profile' in ec) && !('cdp' in ec) && ((() => { try { return fs.statSync(EPH_CFG).mode; } catch { return 0; } })() & 0o777) === 0o600,
-      'r3/r4: its content is the user file by the one rule — the machine\'s own args / proxy / fence carried, the raw debugging port, `cdp` and the ephemeral-denied `profile` gone, THIS conversation\'s launch mark appended; 0600', ec);
+    ok(ec.args === '--no-sandbox,--disable-logging,--log-level=3,' + B.keeperMarkArg(KEY_Y) && ec.proxy === 'http://127.0.0.1:3128' && JSON.stringify(ec.allowedDomains) === '["example.com"]' && !('profile' in ec) && !('cdp' in ec) && ((() => { try { return fs.statSync(EPH_CFG).mode; } catch { return 0; } })() & 0o777) === 0o600,
+      'r3/r4: its content is the user file by the one rule — the machine\'s own args / proxy / fence carried, the raw debugging port, `cdp` and the ephemeral-denied `profile` gone, THIS conversation\'s launch tail appended (B-1789 cure: the quiet log switches, then its mark); 0600', ec);
     ok(!/42945|dumpchrome|R3-UA-LAYERED/.test(JSON.stringify(ec)), 'r3: nothing of the agent directory\'s agent-browser.json reached it');
     // an attachment: the profile browser's file (the machine's own `profile` stays — AGENT_BROWSER_PROFILE names the dir anyway;
     // the fence goes first: a persistent profile is refused under one, §6.3)
@@ -787,8 +790,7 @@ console.log('— ④ lane H: the managed ephemeral browser is a holder row, its 
   // …and the words: the PURE overlap rule the tool card uses, and its wiring (chat-view routes the status to the loader)
   const gw = { from: 1000, to: 5000 };
   ok(TR.armGapFor(gw, { code: 'arm_failed', at: 4000, until: 34000, error: 'x' })?.until === 34000 && TR.armGapFor({ from: 40000, to: 41000 }, { code: 'arm_failed', at: 4000, until: 34000 }) === null && TR.armGapFor(gw, { code: 'armed', at: 4000 }) === null && TR.armGapFor(gw, null) === null, '④ r2 L5: armGapFor — a card window overlapping [at, until] of an arm_failed status gets the gap; a later window, `armed`, or no status gets none');
-  const cvSrc = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8'), tvSrc = fs.readFileSync(path.join(REPO, 'src/lib/browser-trace-view.js'), 'utf8');
-  ok((cvSrc.match(/msg\.type === 'browser-trace-status'\) \{\n\s*(?:\/\/[^\n]*\n\s*)?this\._browserTrace\?\.onStatus\?\.\(msg\)/g) || []).length === 2 && /gap: armGapFor\(w, st\.armFail\)/.test(tvSrc) && /else if \(gap\) sum\.textContent = t\('not recorded until \{time\}: \{why\}'/.test(tvSrc), '④ r2 L5: WIRING — both chat-view handlers hand `browser-trace-status` to the loader, whose empty card reads "not recorded until {time}: {why}"');
+  // (④ r2 L5 the trace-status wiring pin — MOVED to the fast scripts/test-browser-ephemeral-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   const ML = mutantCopies('browser-ephemeral-l1', REPO);
   const tsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-trace.js'), 'utf8');
   const tmut = tsrc.replace("if (ev.kind === 'verb') return armOnVerb(ev);", "if (ev.kind === 'verb') return armEphemeral(ev);");
@@ -1759,9 +1761,7 @@ out({ success: false, error: 'fake: unknown verb ' + process.argv.slice(2).join(
     ok(hk[0] && /keeps closing/.test(hk[0].why || '') && hk[0].browserClosed === 'browser_unstable', '⑥ r5: the Agent browser panel row says the browser keeps closing (not "attached"/"running" alone)', hk[0]);
     const hkf = TRc.housekeepingVerdict({ profiles: [{ id: 'bp-00000001', label: 'Bank', provider: 'chromium', dir: '/x/vs-bp-00000001' }], leases: [{ profileId: 'bp-00000001', browserKey: 'bk-00000001' }], browsers: { 'bp-00000001': { state: 'ready', browser: null, closed: { code: 'browser_unstable', error: 'x', unstable: 'failing' } } }, now: 1 });
     ok(hkf[0] && /could not be started/.test(hkf[0].why || '') && !/keeps closing/.test(hkf[0].why || '') && hkf[0].browserClosed === 'browser_unstable', '⑥ r6: …and a browser whose relaunch asks kept FAILING says it could not be started (never "keeps closing")', hkf[0]);
-    const tv = fs.readFileSync(path.join(REPO, 'src/lib/browser-trace-view.js'), 'utf8');
-    const pr = tv.slice(tv.indexOf('  function profileRow('), tv.indexOf('  function ephemeralRow('));
-    ok(/bprof-stop/.test(pr) && /\/stop`/.test(pr) && /r\.live/.test(pr), '⑥ r5: a NAMED profile row carries a Stop while its browser is live — the unstable remedy the notice names is one click', pr.length);
+    // (⑥ r5 the profile row's Stop pin — MOVED to the fast scripts/test-browser-ephemeral-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   }
   // (i) VERIFY r4 LOW 4 — a wrapper that does not exec between the daemon and the chrome (its argv carries the chrome's
   //     flags): the record names the LOCK's holder (the chrome), so a daemon SIGKILL ends the chrome — never "ended" the

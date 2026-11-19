@@ -327,7 +327,7 @@ ok(real.doors.size >= 7 && [...real.doors.keys()].every((d) => VK.addOrderOf(d) 
 ok(VK.ADD_DOORS.map((d) => d.door).join() === 'account,integration,channel,totp,automation,web-login,secret' && VK.ADD_DOORS.every((d, i, a) => !i || a[i - 1].order < d.order),
   '添加…\'s order is the registry\'s: Account… · Integration key… · Channel account… · Two-step code… · Automation key… · Website login… · Other key or password…', VK.ADD_DOORS);
 ok(R.cells.get('totp') && R.cells.get('totp').add.mark === '✓', 'TOTP\'s add surface: the 两步验证… door is registered (the gap the owner found is closed)', R.cells.get('totp'));
-ok(R.heads.join() === 'host,frp,file,apikey,totp,secret,web-login', `the engine's SECRET_RE heads read: ${R.heads.join(', ')} (+ the agent namespace) — each held by a family`, R.heads);
+ok(R.heads.join() === 'host,frp,file,apikey,totp,secret,provider,web-login,proxy-login', `the engine's SECRET_RE heads read: ${R.heads.join(', ')} (+ the agent namespace) — each held by a family`, R.heads);
 ok(VI.PURPOSES === VK.CATEGORIES && VI.PURPOSE_IDS.join() === VK.CATEGORY_IDS.join(), 'the inventory\'s purposes ARE the registry\'s categories (one list — the rail reads it)');
 {
   const off = VK.FAMILIES.filter((f) => { const st = (f.stores && f.stores[0]) || 'secrets'; const fam = VK.familyOf(st, f.sample); return !fam || fam.id !== f.id || VI.purposeOf({ store: st, entry: f.sample }) !== f.category || VK.categoryOf(st, f.sample) !== f.category; });
@@ -338,8 +338,10 @@ ok(VK.categoryOf('secrets', 'weird:x') === 'other' && VK.familyOf('secrets', 'we
 ok(R.doorless.length >= 1 && R.doorless.every((d) => / — /.test(d)), 'every category with no 添加… door says why, in its families\' words (printed above)', R.doorless);
 {
   const a = R.cells.get('agent-secret');
-  ok(a && a.delete.mark === '⏳' && R.words.includes('agent-secret·delete ⏳ unscheduled · B-3fb5 — design q-047 §3.3 lists 删除 for an agent\'s entry; no route drops one yet'),
-    'the one deferral today: agent-secret · delete — PRINTED as unscheduled, with its backlog id B-3fb5 (no lane holds it yet)', R.words.filter((w) => w.includes('⏳')));
+  // B-3fb5: the one deferral there was (agent-secret · delete, unscheduled since 2026-10-26) is DECLARED now — its door in the tree
+  const ad = VI.doorsOf({ store: 'secrets', entry: 'agent:conv-census/sample', field: 'secret' }).delete;
+  ok(a && a.delete.mark === '✓' && !R.words.some((w) => w.startsWith('agent-secret·delete ')) && ad && ad.method === 'DELETE' && ad.path === '/api/vault/agent-secrets/agent%3Aconv-census%2Fsample' && ad.confirm === 'agent-secret',
+    'B-3fb5: agent-secret · delete is DECLARED and present (doorsOf\'s DELETE /api/vault/agent-secrets/<the whole name, encoded>, its confirm «agent-secret», the route mounted) — its deferral is gone', { mark: a && a.delete.mark, door: ad, deferred: R.words.filter((w) => w.includes('⏳')) });
   const fams = [...new Set(VK.FAMILIES.map((f) => f.confirmKey).filter(Boolean))].sort().join();
   ok(real.confirmKeys && [...real.confirmKeys].sort().join() === fams && VK.FAMILIES.every((f) => !(f.surfaces.delete && typeof f.surfaces.delete.method === 'string') || typeof f.confirmKey === 'string'),
     `删除's confirm words: every { method, path } delete names its confirmKey, and the window words exactly those keys (${fams})`, { window: real.confirmKeys && [...real.confirmKeys], registry: fams });
@@ -354,6 +356,13 @@ console.log('④ RED CONTROLS (in memory)');
   const line = win.split('\n').find((l) => /^registerVaultAdd\(\{ id: 'totp',/.test(l));
   const gap = census(VK.FAMILIES, factsOf(treeOf({ 'src/lib/vault-window.js': win.replace(`${line}\n`, '') })));
   ok(line && gap.problems.length === 1 && /^totp·add: the 添加… door «totp» is not registered/.test(gap.problems[0]) && gap.cells.get('totp').add.mark === '✗', 'TODAY\'S GAP — the window without the two-step door\'s registration ⇒ RED, naming totp·add (and only it)', gap.problems);
+  // B-3fb5's door, each half taken away: the route unmounted, the window's confirm words for it gone ⇒ RED by name
+  const routesSrc = realRead('src/routes/vault.js'), routeLine = routesSrc.split('\n').find((l) => l.includes("app.delete('/api/vault/agent-secrets/:entry'"));
+  const noAgentRoute = census(VK.FAMILIES, factsOf(treeOf({ 'src/routes/vault.js': routesSrc.replace(`${routeLine}\n`, '') })));
+  ok(routeLine && noAgentRoute.cells.get('agent-secret').delete.mark === '✗' && noAgentRoute.problems.some((p) => /^agent-secret·delete: no route DELETE \/api\/vault\/agent-secrets\/… is mounted/.test(p)), 'B-3fb5 RED: the agent entry\'s delete route unmounted ⇒ agent-secret·delete ✗ by name', noAgentRoute.problems);
+  const wordsLine = win.split('\n').find((l) => l.startsWith("  'agent-secret': (row) => ("));
+  const noAgentWords = census(VK.FAMILIES, factsOf(treeOf({ 'src/lib/vault-window.js': win.replace(`${wordsLine}\n`, '') })));
+  ok(wordsLine && noAgentWords.cells.get('agent-secret').delete.mark === '✗' && noAgentWords.problems.some((p) => /^agent-secret·delete: the window has no confirm words for «agent-secret»/.test(p)), 'B-3fb5 RED: the window without the agent entry\'s confirm words ⇒ agent-secret·delete ✗ by name (its 删除 would ask in no words of its own)', noAgentWords.problems);
   // a door outside the closure never runs
   const lost = census(VK.FAMILIES, factsOf(treeOf({ 'src/lib/vault-window.js': win.replace(`${line}\n`, ''), 'src/lib/vault-lost-door.js': `${line}\n` })));
   ok(lost.problems.some((p) => /^totp·add: .*never imports/.test(p)), 'a door registered in a module the window never imports ⇒ RED (it never runs)', lost.problems);
@@ -445,7 +454,7 @@ console.log('④ RED CONTROLS (in memory)');
   const docLess = census(VK.FAMILIES, factsOf(treeOf({ 'docs/kb-features.md': realRead('docs/kb-features.md').split('**Two-step codes (TOTP)**').join('**Codes**') })));
   ok(docLess.problems.length === 1 && /^totp·doc:/.test(docLess.problems[0]), 'no kb-features line naming the kind ⇒ RED', docLess.problems);
   const eng = realRead('src/server/vault-engine.js');
-  const newHead = census(VK.FAMILIES, factsOf(treeOf({ 'src/server/vault-engine.js': eng.replace('(?:host|frp|file|apikey|totp|secret):', '(?:host|frp|file|apikey|totp|secret|vapid):') })));
+  const newHead = census(VK.FAMILIES, factsOf(treeOf({ 'src/server/vault-engine.js': eng.replace('(?:host|frp|file|apikey|totp|secret|provider):', '(?:host|frp|file|apikey|totp|secret|provider|vapid):') })));
   ok(newHead.problems.length === 1 && /«vapid:» is held by no family/.test(newHead.problems[0]), 'a SECRET_RE head nobody holds (a new hub secret kind with no registry row) ⇒ RED', newHead.problems);
   const sourceLess = census(VK.FAMILIES, factsOf(treeOf({ 'src/server/mounts-plugins-wiring.js': realRead('src/server/mounts-plugins-wiring.js').replace("  passkeys: () =>", '  passkeysGone: () =>') })));
   ok(sourceLess.problems.length === 1 && /^passkey·list: the hub's wiring lists no source for the store «passkeys»/.test(sourceLess.problems[0]), 'a store with no source in the wiring ⇒ RED on its family\'s list surface', sourceLess.problems);

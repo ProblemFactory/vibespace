@@ -1,4 +1,5 @@
 import { SETTINGS_SCHEMA } from './settings-schema.js';
+import { unsetValue } from '../harness-settings.js';
 
 /**
  * SettingsManager — centralized settings with server persistence and live change events.
@@ -26,6 +27,7 @@ class SettingsManager {
     this._inflight = new Map();
     this._saveSeq = 0;
     this._failed = new Set();
+    this._refused = new Map();   // the exit check (主开发 17:04Z): path → { code } the server set aside (the stored value kept) — said at the row
     this._saved = new Set();
     this._saveListeners = new Set();
     this._server = {};
@@ -38,10 +40,13 @@ class SettingsManager {
   saveStateOf(path) {
     if (this._dirty.has(path)) return 'pending';
     if (this._inflight.has(path)) return 'saving';
+    if (this._refused.has(path)) return 'refused';
     if (this._failed.has(path)) return 'failed';
     if (this._saved.has(path)) return 'saved';
     return 'idle';
   }
+  /** A row the server set aside at its last save → { code } (its words: settings-view saveMarkWords), else null. */
+  refusedOf(path) { return this._refused.get(path) || null; }
   /** Subscribe to save-state changes: fn(path, state). Returns the unsubscribe. */
   onSaveState(fn) { if (typeof fn !== 'function') return () => {}; this._saveListeners.add(fn); return () => this._saveListeners.delete(fn); }
   _emitSave(paths) { for (const p of paths) { const st = this.saveStateOf(p); for (const fn of [...this._saveListeners]) { try { fn(p, st); } catch (e) { console.error(`Settings save listener error [${p}]:`, e); } } } }
@@ -103,11 +108,13 @@ class SettingsManager {
     } catch {}
   }
 
-  /** Get a setting value. Returns the stored override or the schema default. */
+  /** Get a setting value. Returns the stored override or the schema default — for a row nobody set that declares
+   *  `unsetFollows` (Antigravity's automatic usage reads), the followed answer first: the value the server reads
+   *  (src/harness-settings.js unsetValue, ONE rule for both halves). */
   get(path) {
     if (path in this._values) return this._values[path];
     const schema = SETTINGS_SCHEMA[path];
-    if (schema) return schema.default;
+    if (schema) { const u = schema.unsetFollows ? unsetValue(schema, (p) => this.get(p)) : undefined; return u !== undefined ? u : schema.default; }
     return undefined;
   }
 
@@ -117,9 +124,12 @@ class SettingsManager {
     if (!schema) return;
 
     const old = this.get(path);
+    // the rows nobody set that follow this one (unsetFollows) redraw with it
+    const followers = Object.keys(SETTINGS_SCHEMA).filter((p) => SETTINGS_SCHEMA[p] && SETTINGS_SCHEMA[p].unsetFollows && SETTINGS_SCHEMA[p].unsetFollows.setting === path).map((p) => [p, this.get(p)]);
 
-    // If value equals default, remove the override (sparse storage)
-    if (value === undefined || JSON.stringify(value) === JSON.stringify(schema.default)) {
+    // If value equals default, remove the override (sparse storage) — EXCEPT a `storeDefault` row: a person's own pick of
+    // its default is kept as a value, told apart from a row nobody set (which may follow another: unsetFollows)
+    if (value === undefined || (!schema.storeDefault && JSON.stringify(value) === JSON.stringify(schema.default))) {
       delete this._values[path];
     } else {
       this._values[path] = value;
@@ -129,7 +139,8 @@ class SettingsManager {
     if (JSON.stringify(old) !== JSON.stringify(now)) {
       this._notify(path, now, old);
     }
-    this._dirty.add(path); this._failed.delete(path); this._saved.delete(path);
+    for (const [p, was] of followers) { const is = this.get(p); if (JSON.stringify(was) !== JSON.stringify(is)) this._notify(p, is, was); }
+    this._dirty.add(path); this._failed.delete(path); this._saved.delete(path); this._refused.delete(path);
     this._scheduleSave();
     this._emitSave([path]);
   }
@@ -178,8 +189,12 @@ class SettingsManager {
     // the authoritative state; skip the echo while dirty.
     if (this._saveTimer) return;
     const old = { ...this._values };
+    // the exit check (主开发 17:56Z): a refused row's mark drops once the STORED value changes from another page
+    const stale = [...this._refused.keys()].filter((p) => JSON.stringify((data || {})[p]) !== JSON.stringify((this._server || {})[p]));
     this._values = data;
     this._server = { ...(data || {}) };
+    for (const p of stale) this._refused.delete(p);
+    if (stale.length) this._emitSave(stale);
     this._live = spend && typeof spend === 'object' ? { spend } : null;
     this._emitAllMarks();
     // localStorage backup
@@ -254,10 +269,13 @@ class SettingsManager {
       });
       landed = !!(res && res.ok);
       if (landed) {
+        const before = this._server || {};
         this._server = { ...data };
         let j = null;
         try { j = await res.json(); } catch { j = null; }
         if (j && j.spend && typeof j.spend === 'object') this._live = { spend: j.spend };
+        // a row the server SET ASIDE keeps its stored value there (the server's copy says so); its words wait at the row
+        for (const [p, why] of Object.entries((j && j.refused && typeof j.refused === 'object') ? j.refused : {})) { this._server[p] = before[p]; this._refused.set(p, { code: String((why && why.code) || '') }); }
       }
     } catch {} finally {
       if (this._saveTimer === myTimer) this._saveTimer = null;
@@ -265,7 +283,7 @@ class SettingsManager {
       for (const p of carried) {
         if (this._inflight.get(p) !== mySeq) continue;
         this._inflight.delete(p);
-        if (landed) { this._failed.delete(p); this._saved.add(p); } else { this._saved.delete(p); this._failed.add(p); }
+        if (landed && this._refused.has(p)) { this._failed.delete(p); this._saved.delete(p); } else if (landed) { this._failed.delete(p); this._saved.add(p); } else { this._saved.delete(p); this._failed.add(p); }
       }
       this._emitSave(carried);
     }

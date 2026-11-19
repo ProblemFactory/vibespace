@@ -1141,7 +1141,7 @@ function create(engineCtx) {
   function referencesOf(adapterId) {
     const refs = [];
     const seenGrant = new Set();
-    for (const en of Object.values(store.index.live())) {   // B-f32b: a read-only scan of the live rows (was a whole-index copy)
+    for (const en of store.index.rowsOf(adapterId)) {   // B-f32b: a read-only scan of the live rows (was a whole-index copy); B-dfa4 cut 1: this account's rows only
       if (!en) continue;
       if (en.adapterId === adapterId) {
         for (const r of convGrainOf(en).access) refs.push({ kind: 'access', key: en.key, convId: en.id, title: conversationName(en.adapterId, en.id) || en.id, scope: 'conversation', principal: { kind: r.principal.kind, id: r.principal.id, name: r.principal.name || null } });

@@ -151,7 +151,7 @@ function create({ dataDir, requestAuthed = () => true, publicUrl = () => null, l
    *  share URL. Returns the public record or {error}. */
   function publish({ srcPath, name, makePublic, req }) {
     const abs = path.resolve(String(srcPath || ''));
-    if (DOOR.blocked(abs)) return { error: DOOR.SENTENCE };   // B-afc4: a file on a storage that is not answering
+    if (DOOR.blocked(abs)) return { error: DOOR.sentenceFor(abs) };   // B-afc4: a file on a storage that is not answering
     let st;
     try { st = fs.statSync(abs); } catch (e) { return { error: e && e.code === 'EVSMOUNTSYNC' ? `${e.message} (${e.mount}) — copy the page to a local folder to publish it` : 'file not found: ' + abs }; } // lane hub-fuse-sync-guard: a refusal by name
     if (!st.isFile()) return { error: 'not a file: ' + abs };

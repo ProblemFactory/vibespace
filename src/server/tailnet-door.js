@@ -198,7 +198,10 @@ function create({ dataDir = null, reach = () => null, fresh = null, settleMs = S
       const bad = addrs.map((a) => [a, TR.vetAddress(a, { own })]).find(([, w]) => w);
       if (bad) return refusal(`${h} resolves to ${bad[0]} — ${VET_WORDS[bad[1]]}: this door is never a way back into the hub`);
       return addrs.length ? { allow: true, to: addrs[0] } : { allow: true, error: Object.assign(new Error(`${h} has no address`), { code: 'ENOTFOUND' }) };
-    }, (e) => ({ allow: true, error: e }));
+    }, (e) => {
+      const r2 = reachNow({ now: true }); // B-05e8 ①: a lookup that FAILED re-reads the road too — off ⇒ its words, never a 502 of a road that is gone
+      return TR.roadOn(r2) ? { allow: true, error: e } : offRoad(r2, h);
+    });
   };
   /** the vetted address → where the door dials (`dial` maps it in a suite: the tunnel there is a loopback server) */
   const resolve = (to) => (dial ? dial(to) : to);

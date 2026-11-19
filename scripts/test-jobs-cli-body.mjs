@@ -207,7 +207,7 @@ const readFlags = (src) => new Set([...branchOf(src).matchAll(/flags\.([a-z][a-z
 // the census invocations: every flag below rides one of them (mutually exclusive shapes get their own)
 const INV = {
   svc: ['run', 'sleep 60', '--name', 'census-svc', '--note', 'a note', '--context', 'ctx words', '--cwd', CWD, '--until', 'READY', '--timeout', '6h', '--stdin-open', '--notify', 'on',
-    '--view', 'all', '--control', 'group', '--stop-with-owner', '--keep-up', '--restart', 'always', '--port', '8123', '--publish', '--memory', '8G'],
+    '--view', 'all', '--control', 'group', '--keep-up', '--restart', 'always', '--port', '8123', '--publish', '--memory', '8G'],
   task: ['run', 'true', '--name', 'census-task', '--notify-user', '--vault', 'TOK=vault://agent:conv-census/tok'],
   every: ['run', 'echo hi', '--name', 'census-every', '--every', '30m', '--jitter', '5', '--notify-ok', '--notify-user'],
   cron: ['run', 'true', '--name', 'census-cron', '--cron', '41 9 * * *'],
@@ -227,7 +227,7 @@ const PINS = {
   '--notify': [['svc', 'notify', 'on']], '--notify-ok': [['every', 'action.task.notifyOk', true]],
   '--every': [['every', 'schedule.everyMs', 30 * 60e3]], '--jitter': [['every', 'schedule.jitterPct', 5]], '--cron': [['cron', 'schedule.cron', '41 9 * * *']], '--at': [['nc', 'schedule.at', atOk]],
   '--keep-up': [['svc', 'kind', 'service']], '--restart': [['svc', 'restart', 'always']], '--port': [['svc', 'ports', [8123]]], '--publish': [['svc', 'publish', true]],
-  '--view': [['svc', 'access.view', 'all']], '--control': [['svc', 'access.control', 'group']], '--stop-with-owner': [['svc', 'stopWithOwner', true]],
+  '--view': [['svc', 'access.view', 'all']], '--control': [['svc', 'access.control', 'group']],
   '--text': [['nc', 'action.text', 'census reminder']], '--urgency': [['nc', 'action.urgency', 'high']],
 };
 const censusFindings = (src) => {

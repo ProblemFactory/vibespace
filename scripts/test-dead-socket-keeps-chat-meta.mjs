@@ -26,8 +26,8 @@
 //   §9 THE HELD ACCOUNT (r2) — a resume that states no account goes to its row's, server-side, from every door (B-a5a4: a
 //      kept agy meta naming none ran on the machine's own login — resumed there)
 //   §10 B-a5a4 (the r2 reviewer's nine follow-ups): a deleted account on an account-bound harness refused; the seam before
-//      the first sweep; ONE refusal sentence; a pending fork's copy swept by the next boot (item (2), the copy consumed at
-//      the resume, was reverted — not built, nothing here pins it)
+//      the first sweep; ONE refusal sentence; a pending fork's copy swept by the next boot; item (2) (its remainder, 2.369.411):
+//      a resume that RAN — its turn ended WELL — consumes its copy at once (a failed resume's error result keeps it: r1 lost it)
 //   §11 B-a5a4 follow-up: ONE precedence for «which account holds it» (the page's merge rule, on a copy); the refusal names
 //      that account; the Resume switch offers no account the server refuses; the rescue reads the server's message; the
 //      deleted-account refusal DRIVEN through the real create (the error arrives, nothing spawns); the seam's wiring
@@ -48,6 +48,37 @@ let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : J(extra)).slice(0, 900) : '')); } return !!c; };
 const section = async (title, fn) => { console.log('— ' + title); try { await fn(); } catch (e) { ok(false, title + ' — threw', e && e.stack ? e.stack.split('\n').slice(0, 4).join(' | ') : String(e)); } };
 const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms));
+/** server.js's turn-end entry (`const noteTurnEnd = …` at its top level) as a function over STAND-INS: its own source, cut out by
+ *  acorn and run in a scope where the pool engine, the delivery ladder, the consume and console are recorders, and any other
+ *  name it reaches is a recorder too (another unit may add a step: the law still reads). → ({consume, deliverThrows}) → {calls,
+ *  warns, threw, S, M} | null (no such declaration) */
+function serverTopOf(src) {
+  try { return require('acorn').parse(src, { ecmaVersion: 'latest', sourceType: 'script', allowHashBang: true, allowReturnOutsideFunction: true }).body; } catch { return null; }
+}
+function turnEndEntryOf(src) {
+  const body = serverTopOf(src);
+  if (!body) return null;
+  const inits = [];
+  for (const n of body) if (n.type === 'VariableDeclaration') for (const d of n.declarations) if (d.id && d.id.name === 'noteTurnEnd' && d.init) inits.push(d.init);
+  return inits.length === 1 ? entryRunner(src.slice(inits[0].start, inits[0].end)) : null;   // declared ONCE at the top level, or no law to read
+}
+/** the runner over an entry's TEXT (server.js's own, or a planted one — the law's red control) */
+function entryRunner(text) {
+  return ({ consume = () => Promise.resolve(null), deliverThrows = false } = {}) => {
+    const calls = [], warns = [], S = { id: 'turn-end-stand-in' }, M = { type: 'result', subtype: 'success' };
+    const stubs = {
+      noteTurnEndEngine: (...a) => { calls.push(['engine', ...a]); },
+      deliver: { noteTurnEnd: (...a) => { calls.push(['deliver', ...a]); if (deliverThrows) throw new Error('deliver down'); } },
+      consumeKeptOf: (...a) => { calls.push(['consume', ...a]); const r = consume(); if (r && typeof r.catch === 'function') r.catch(() => { }); return r; },   // handled here first: an entry that dropped its own .catch fails by name, never as an unhandled rejection
+      console: { warn: (...a) => { warns.push(a.map(String).join(' ')); }, log() { }, error() { } },
+    };
+    const scope = new Proxy(stubs, { has: (t, k) => typeof k === 'string' && (k in t || !(k in globalThis)), get: (t, k) => (typeof k !== 'string' ? undefined : k in t ? t[k] : (...a) => { calls.push(['other:' + k, ...a]); }) });
+    const fn = new Function('scope', 'with (scope) { return (' + text + '); }')(scope);
+    let threw = null;
+    try { fn(S, M); } catch (e) { threw = e; }
+    return { calls, warns, threw, S, M };
+  };
+}
 const REAL = { log: console.log, warn: console.warn };
 globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
 
@@ -387,7 +418,7 @@ await section('§9 THE HELD ACCOUNT (r2, major 2) — a resume that states no ac
   try { fs.rmSync(d, { recursive: true, force: true }); } catch { }
 });
 
-await section('§10 B-a5a4 — the r2 reviewer\'s follow-ups: a deleted account on an account-bound harness, the seam before the first sweep, the copy consumed at the resume, one sentence, a pending fork\'s copy swept', async () => {
+await section('§10 B-a5a4 — the r2 reviewer\'s follow-ups: a deleted account on an account-bound harness, the seam before the first sweep, the copy consumed when the resume ran a turn, one sentence, a pending fork\'s copy swept', async () => {
   const RS = require(path.join(REPO, 'src/routes/sessions.js'));
   const IR = require(path.join(REPO, 'src/inbox-reopen.js'));
   // (6) ONE sentence: the PURE reopen module owns it, the seam reads it
@@ -430,6 +461,155 @@ await section('§10 B-a5a4 — the r2 reviewer\'s follow-ups: a deleted account 
   const LSRC = fs.readFileSync(path.join(REPO, 'src/lib/session-lifecycle.js'), 'utf8');
   ok(/if \(sessionMode === 'chat' && resumeId && !\/\^sess-\\d\/\.test\(resumeId\)\) \{/.test(LSRC) && /\(msg\.message \? t\(msg\.message\) : ''\)/.test(LSRC),
     '§10 (5) the failed-resume rescue (and its account re-check) is no longer claude\'s alone; (1) the refusal reaches the page translated (t(msg.message))');
+  // (2) A RESUME THAT RAN CONSUMES ITS COPY AT ONCE: a turn that ended WELL (server.js's ONE turn-end entry) takes the copy, with no
+  // /api/sessions sweep between — never a FAILED resume's end (r1 lost a failed resume's copy), never a pending fork's borrowed id
+  {
+    const WC = world('consume2');
+    const k2 = (n, o) => ({ webuiSessionId: 'sess-2-' + n, backend: 'claude', mode: 'chat', name: 'Resumed ' + n, cwd: '/srv/u/two', status: 'stopped', stoppedAt: 1793300000700, stopReason: 'dead-socket-at-boot', accountId: 'sub-old-' + n, ...o });
+    const put = (n, o) => fs.writeFileSync(path.join(WC.META, `cw-2-${n}.json.stopped`), J(k2(n, o)));
+    put(1, { claudeSessionId: CID(8) }); put(2, { claudeSessionId: CID(9) });
+    put(4, { backend: 'antigravity', claudeSessionId: undefined, backendSessionId: UUID(8), accountId: 'agy-0a0a0a0a0a0a' });
+    put(5, { backend: 'codex', backendSessionId: 'thr-25', accountId: 'acct-c25' });
+    const kept = (n) => fs.existsSync(path.join(WC.META, `cw-2-${n}.json.stopped`));
+    const nextBoot = async () => { let r = []; await quiet(async () => { r = await api(WC).stoppedSessions(); }); return r; };
+    // the CLI's own answer to a resume it cannot load (scripts/test-resume-breaker.mjs's stub — that suite's breaker reads it):
+    // a stream-json error RESULT on stdout, then exit 1 — a «turn end» for the stdout consumer
+    const FAILED = { type: 'result', subtype: 'error_during_execution', is_error: true, errors: ['No conversation found with session ID: ' + CID(8)] };
+    const RAN = { type: 'result', subtype: 'success', is_error: false, session_id: CID(8) };
+    const claudeS = { backend: 'claude', claudeSessionId: CID(8), backendSessionId: CID(8), name: 'Resumed 1' };
+    const agyS = (stop) => ({ backend: 'antigravity', backendSessionId: UUID(8), _promptStopReason: stop });
+    const forkLive = { backend: 'claude', claudeSessionId: CID(9), _forkRequested: true, _forkSourceId: CID(9), name: 'A fork of 2' };
+    // CONTROL first (rule (b)): before any turn end, with no sweep, a next boot lists the stale rows, the old accounts on them
+    const pre = await nextBoot();
+    ok(pre.some((x) => x.backendSessionId === CID(8) && x.accountId === 'sub-old-1') && pre.some((x) => x.backendSessionId === UUID(8)) && pre.some((x) => x.backendSessionId === 'thr-25') && kept(1),
+      '§10 (2) CONTROL: before any turn end and with no sweep, the copies stand — a next boot lists the old rows (the old accounts on them): the stale rows this cure removes are really there', pre.map((x) => x.name));
+    const A2 = api(WC, { active: new Map([['sess-c', claudeS], ['sess-f', forkLive]]) });
+    // a FAILED resume's end and an ACP prompt ended in 'error' — then another harness's session with the same id and a live pending
+    // fork — while every copy still stands
+    const gFail = await A2.consumeKeptOf(claudeS, FAILED), gAgyErr = await A2.consumeKeptOf(agyS('error'));
+    const gOther = await A2.consumeKeptOf({ backend: 'codex', backendSessionId: CID(8) }), gFork = await A2.consumeKeptOf(forkLive, RAN);
+    const mid = await nextBoot();
+    ok(gFail === null && gAgyErr === null && kept(1) && kept(4) && mid.some((x) => x.backendSessionId === CID(8) && x.accountId === 'sub-old-1' && x.name === 'Resumed 1') && mid.some((x) => x.backendSessionId === UUID(8) && x.accountId === 'agy-0a0a0a0a0a0a'),
+      '§10 (2) a FAILED resume keeps its copy: the CLI\'s error result («No conversation found…», is_error) and an ACP prompt ended in \'error\' consume nothing — the next boot still lists each row with its name and its account', { gFail, gAgyErr, mid: mid.map((x) => [x.name, x.accountId]) });
+    ok(gOther === null && gFork === null && kept(1) && kept(2), '§10 (2) another harness\'s session carrying the same id, and a live pending fork (a borrowed id), consume nothing', { gOther, gFork });
+    // turns that ended WELL: a claude success result, an ACP end_turn, codex's task_complete (its one call — no record)
+    const gRan = await A2.consumeKeptOf(claudeS, RAN), gAgy = await A2.consumeKeptOf(agyS('end_turn')), gCodex = await A2.consumeKeptOf({ backend: 'codex', backendSessionId: 'thr-25' });
+    const after = await nextBoot();
+    ok(gRan === 'cw-2-1' && gAgy === 'cw-2-4' && gCodex === 'cw-2-5' && !kept(1) && !kept(4) && !kept(5) && !after.some((x) => [CID(8), UUID(8), 'thr-25'].includes(x.backendSessionId)) && after.some((x) => x.backendSessionId === CID(9) && x.name === 'Resumed 2'),
+      '§10 (2) a resume that RAN — its turn ended well (claude success, ACP end_turn, codex task_complete) — consumes its conversation\'s copy at once: the next boot lists no stale row for it; the untouched conversation\'s stays', { gRan, gAgy, gCodex, after: after.map((x) => x.name) });
+    // PURE: the one predicate
+    ok(BRm.turnRan(RAN, claudeS) && !BRm.turnRan(FAILED, claudeS) && !BRm.turnRan({ type: 'result', subtype: 'error_max_turns', is_error: false }, claudeS) && BRm.turnRan(null, { backend: 'codex' })
+        && !BRm.turnRan(null, agyS('error')) && !BRm.turnRan(null, agyS('cancelled')) && BRm.turnRan(null, agyS('end_turn')) && BRm.turnRan(undefined, null),
+      '§10 (2) turnRan (PURE): a claude result proves the resume only as a success; an ACP prompt only when it ended neither in \'error\' nor \'cancelled\' (agy can cancel before its agent answered); codex\'s task_complete (no record) does');
+    // the WIRING, as the LAWS it holds — by behaviour, never one line's text (another unit rewrites these lines around them:
+    // the .411 block's third checkpoint went red on an exact pin of codex's call)
+    // (a) server.js's ONE turn-end entry — ITS OWN SOURCE, read out of server.js and run over stand-ins: the delivery steps
+    //     first and unchanged (the pool engine gets the session and the record, the ladder the session), the consume LAST with
+    //     the record; a consume that throws or rejects is warned by name and skips nothing before it; a ladder that throws
+    //     skips the consume no more than before
+    const entry = turnEndEntryOf(read('server.js'));
+    ok(typeof entry === 'function', '§10 (2) ANCHOR: server.js declares its turn-end entry `noteTurnEnd` once, at the top level (the law below runs its own source)');
+    if (typeof entry === 'function') {
+      const e1 = entry(), e2 = entry({ consume: () => { throw new Error('consume down'); } }), e3 = entry({ consume: () => Promise.reject(new Error('consume rejected')) }), e4 = entry({ deliverThrows: true });
+      await tick(0);
+      const kinds = (e) => e.calls.map((c) => c[0]);
+      // the delivery steps (whatever their order — test-notify-retry pins that) ran with their arguments as before; the consume is LAST
+      const steps = (e) => { const c = e.calls; const en = c.find((x) => x[0] === 'engine'), dl = c.find((x) => x[0] === 'deliver'), co = c[c.length - 1];
+        return !!en && en[1] === e.S && en[2] === e.M && !!dl && dl[1] === e.S && !!co && co[0] === 'consume' && co[1] === e.S && co[2] === e.M && c.filter((x) => x[0] === 'consume').length === 1; };
+      ok(steps(e1) && !e1.threw && !e1.warns.length, '§10 (2) LAW: the turn-end entry runs the pool engine (session, record) and the delivery ladder (session), and the kept-copy consume LAST with the record', kinds(e1));
+      ok(steps(e2) && !e2.threw && e2.warns.some((w) => w.includes('[kept] turn-end consume failed: consume down')) && steps(e3) && !e3.threw && e3.warns.some((w) => w.includes('[kept] turn-end consume failed: consume rejected')),
+        '§10 (2) LAW: a consume that THROWS or REJECTS is warned by name and skips nothing before it — the engine and the ladder ran, nothing escapes the entry', { e2: [kinds(e2), e2.warns], e3: e3.warns });
+      ok(steps(e4) && !e4.threw && e4.warns.some((w) => w.includes('deliver down')), '§10 (2) LAW: a ladder that throws is warned and the consume still runs last (it skips nothing after it either)', [kinds(e4), e4.warns]);
+      // RED CONTROL (rule (b)): the same runner over a PLANTED entry that consumes first and guards nothing — the law sees both
+      const bad = entryRunner('(s, m) => { consumeKeptOf(s, m); noteTurnEndEngine(s, m); deliver.noteTurnEnd(s); }');
+      const b1 = bad(), b2 = bad({ consume: () => { throw new Error('consume down'); } });
+      ok(!steps(b1) && !!b2.threw && !b2.calls.some((x) => x[0] === 'engine'), '§10 (2) LAW RED CONTROL: a planted entry that consumes FIRST fails the order, and its unguarded throw skips the engine and escapes', [kinds(b1), kinds(b2), String(b2.threw)]);
+    }
+    // the consume the entry calls IS boot-restore's: server.js destructures consumeKeptOf from boot-restore's create, at its top level
+    const TOP = serverTopOf(read('server.js')) || [], SVsrc = read('server.js');
+    const wired = TOP.some((n) => n.type === 'VariableDeclaration' && n.declarations.some((d) => d.id && d.id.type === 'ObjectPattern' && d.id.properties.some((p) => p.key && p.key.name === 'consumeKeptOf' && p.value && p.value.name === 'consumeKeptOf')
+      && d.init && /^require\('\.\/src\/server\/boot-restore\.js'\)\.create\(/.test(SVsrc.slice(d.init.start, d.init.end))));
+    ok(wired, '§10 (2) WIRING: server.js takes consumeKeptOf from boot-restore\'s own create (a merge that drops it leaves every turn end a caught ReferenceError — nothing consumed, said only as a warning)');
+    // (b) the consumers hand each turn end as their harness ends it — driven, records in, the engine stand-in's view out
+    const sinks = () => ({ feedLive() { }, broadcastToSession() { }, broadcastActiveSessions() { }, readSessionMeta: () => null, writeSessionMeta() { }, updateSessionTodos() { } });
+    const seenA = [], sA = { backend: 'opencode', backendSessionId: 'ses_a5a4', buffer: '', clients: new Map() };
+    let feedA = null;
+    require(path.join(REPO, 'src/server/stdout/acp-events.js')).create({ engine: { noteTurnEnd: (s) => seenA.push(s._promptStopReason) } }).attach(sA, 'pA', { onData: (cb) => { feedA = cb; } }, sinks());
+    const ACP_ENDS = ['error', 'end_turn', 'cancelled', 'max_tokens', 'refusal'];
+    for (const stop of ACP_ENDS) feedA(J({ type: 'acp', kind: 'prompt_end', stopReason: stop, ts: new Date().toISOString() }) + '\n');
+    ok(J(seenA) === J(ACP_ENDS) && J(ACP_ENDS.map((x) => BRm.turnRan(null, { _promptStopReason: x }))) === J([false, true, false, true, true]) && BRm.turnRan(null, { _promptStopReason: null }),
+      '§10 (2) ACP: each prompt_end is a turn end whose stop is STAMPED on the session before the entry sees it — error and cancelled prove no resume, end_turn / max_tokens / refusal ran (the conversation answered), an end naming none counts as ran', seenA);
+    const seenC = [], sC = { backend: 'codex', backendSessionId: 'thr-a5a4', buffer: '', clients: new Map(), mode: 'chat' };
+    let feedC = null;
+    let endsC = 0;
+    require(path.join(REPO, 'src/server/stdout/codex-events.js')).create({ engine: { noteTurnEnd: () => { endsC++; } } }).attach(sC, 'pC', { onData: (cb) => { feedC = cb; } }, sinks());
+    for (const t of ['task_started', 'turn_aborted', 'task_failed', 'task_complete']) { feedC(J({ type: 'event_msg', payload: { type: t } }) + '\n'); seenC.push(endsC); }
+    ok(J(seenC) === J([0, 0, 0, 1]) && BRm.turnRan({ type: 'event_msg', payload: { type: 'task_complete' } }, sC) && BRm.turnRan(undefined, sC),
+      '§10 (2) codex: only task_complete is a turn end (its record proves the turn ran); an aborted or failed turn calls nothing — the copy stays', seenC);
+    const seenL = [], stub = () => { };
+    const CL = require(path.join(REPO, 'src/server/stdout/claude-stream-json.js')).create({
+      activeSessions: new Map(), CLAUDE_STREAM_TYPES: new Set(['system', 'assistant', 'user', 'result']), _seenStreamTypes: new Set(), USAGE_SCANNER_PATH: '/nonexistent', checkClaudeGoalStatus: stub,
+      noteModelSeen: stub, sbSeenFirst: () => true, hosts: null, usageHistory: null,
+      engine: new Proxy({ _vsuPending: new Map(), armWorkflowUsageWatcher: stub, kickPoolEval: stub, markLimitBanner: stub, maybeRepinLockedModel: stub, maybeStopOnFallback: stub, notePoolAuthFailure: stub, modelsMatch: () => false,
+        noteServedModel: stub, noteModelFallback: stub, noteSessionProduced: stub, noteTurnEnd: (s, r) => seenL.push(r), recordRateLimitEvent: stub, resolveUsageKey: () => '__g__', usageEstimator: { noteLive: stub } },
+        { get: (t, k) => (k in t ? t[k] : typeof k === 'string' ? stub : undefined) }),
+    });
+    const ptyL = { data: null, onData(cb) { ptyL.data = cb; }, onExit: stub };
+    const sL = { mode: 'chat', backend: 'claude', cwd: '/srv/u/two', sockName: 'cw-a5a4-l', buffer: '', createdAt: Date.now(), _normalizer: { processLive: stub, listeners: [] } };
+    await quiet(async () => {
+      CL.attach(sL, 'pL', ptyL, { feedLive: stub, broadcastActiveSessions: stub, readSessionMeta: () => ({}), writeSessionMeta: stub, updateSessionTodos: stub, applyTaskToolUpdate: stub, emitTaskListTodos: stub, broadcastToSession: stub });
+      ptyL.data(J(FAILED) + '\n'); ptyL.data(J(RAN) + '\n');
+    });
+    ok(seenL.length === 2 && seenL[0] && seenL[0].is_error === true && J(seenL[0].errors) === J(FAILED.errors) && seenL[1] && seenL[1].subtype === 'success' && !BRm.turnRan(seenL[0], sL) && BRm.turnRan(seenL[1], sL),
+      '§10 (2) claude: every result is a turn end that hands its OWN record — a failed resume\'s error result reaches the entry as such (turnRan refuses it), a success proves the resume', seenL.map((r) => r && [r.subtype, r.is_error]));
+    ok(read('scripts/test-resume-breaker.mjs').includes("process.stdout.write(JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true, errors: [msg] }) + '\\\\n');"),
+      '§10 (2) the failed-resume record above is the stub\'s own (test-resume-breaker: what the CLI answers to a resume it cannot load)');
+    // (c) the consume's own failure is SAID (主开发's first should): an unlink refused for a reason other than «already gone» is warned
+    //     by name — the copy forgotten here, the file left, the next boot lists it again; a copy already gone is no news
+    put(6, { claudeSessionId: CID(6) }); put(7, { claudeSessionId: CID(5) }); put(8, { claudeSessionId: CID(3) });
+    const A6 = api(WC);
+    // a session on a PAIRED machine ends a turn well: its address names no machine, the copy is this machine's — nothing consumed;
+    // the same conversation run HERE consumes it
+    const SSH = { backend: 'claude', claudeSessionId: CID(3), host: 'gpu-box-1' }, DIAL = { backend: 'claude', claudeSessionId: CID(3), host: 'h-dial-1', _dialDeviceId: 'dev-1' };
+    const gPaired = [await A6.consumeKeptOf(SSH, RAN), await A6.consumeKeptOf(DIAL, RAN)];
+    const swept = await api(WC, { active: new Map([['sess-ssh', SSH], ['sess-dial', DIAL]]) }).stoppedSessions();   // the SWEEP road, the same predicate
+    const keptPaired = kept(8) && swept.some((x) => x.backendSessionId === CID(3));
+    const gHere = await A6.consumeKeptOf({ backend: 'claude', claudeSessionId: CID(3), host: 'local' }, RAN);
+    ok(J(gPaired) === J([null, null]) && keptPaired && gHere === 'cw-2-8' && !kept(8) && BRm.pairedSession(SSH) && BRm.pairedSession(DIAL) && !BRm.pairedSession({ host: 'local' }) && !BRm.pairedSession({ backend: 'claude' }),
+      '§10 (2) a session on a PAIRED machine (an ssh session\'s host, a dial session\'s host + device) consumes nothing — at a turn end OR in the sweep: the kept copy is this machine\'s socket and the address names no machine; the same conversation run here (host local) consumes it', { gPaired, gHere });
+    await A6.stoppedSessions();
+    fs.unlinkSync(path.join(WC.META, 'cw-2-7.json.stopped'));   // gone before its consume: ENOENT
+    const realUnlink = fs.unlink;
+    fs.unlink = (f, cb) => (String(f).endsWith('cw-2-6.json.stopped') ? cb(Object.assign(new Error('resource busy'), { code: 'EBUSY' })) : realUnlink(f, cb));
+    let g6 = null, g7 = null;
+    let said = [];
+    try { said = await quiet(async () => { g6 = await A6.consumeKeptOf({ backend: 'claude', claudeSessionId: CID(6) }, RAN); g7 = await A6.consumeKeptOf({ backend: 'claude', claudeSessionId: CID(5) }, RAN); }); } finally { fs.unlink = realUnlink; }
+    const next6 = await nextBoot();
+    ok(g6 === 'cw-2-6' && g7 === 'cw-2-7' && kept(6) && said.some((l) => l.includes('[kept] cw-2-6: its stopped copy could not be removed (EBUSY) — it stays on disk and the next boot reads it again')) && !said.some((l) => l.includes('cw-2-7'))
+        && next6.some((x) => x.backendSessionId === CID(6)),
+      '§10 (2) an unlink the disk refuses (EBUSY) is WARNED by name — the copy forgotten, the file left, the next boot lists it again; a copy already gone (ENOENT) says nothing', { g6, g7, said });
+    fs.rmSync(path.join(WC.META, 'cw-2-6.json.stopped'), { force: true });
+    // MUTANTS RED — each plant proven first: the guard, spelled once; the consume, spelled once
+    const BS2 = read('src/server/boot-restore.js'), GUARD = '  if (!turnRan(rec, session)) return null;\n';
+    const TAKE = '  keptStopped.delete(k);\n';
+    ok(BS2.split(GUARD).length === 2 && BS2.split(TAKE).length === 2, '§10 (2) ANCHORS: the turn-end guard and the consume, each spelled once (the controls below plant there)');
+    if (BS2.split(GUARD).length === 2 && BS2.split(TAKE).length === 2) {
+      const MM = mutantCopies('dead-socket-a5a4-2', REPO);
+      const mk = (M3, live) => M3.create({ rootDir: WC.d, PORT: 0, BUFFERS_DIR: WC.BUF, META_DIR: WC.META, SOCKETS_DIR: WC.SOCK, DTACH_CMD: 'dtach', NODE_CMD: process.execPath, CHAT_WRAPPER: '',
+        activeSessions: live, sessionCounterRef: { value: 0 }, attachToDtach: () => {}, setupSessionPty: () => {}, readSessionMeta: () => ({}), writeSessionMeta: () => {}, deleteSessionMeta: () => {},
+        broadcastToSession: () => {}, broadcastActiveSessions: () => {}, refreshWebuiPids: () => {}, sbNoteServerOp: () => {}, getHosts: () => null, getDialBridge: () => null, getExitProxy: () => null, note: () => {} });
+      put(3, { claudeSessionId: CID(7) });
+      const s3 = { backend: 'claude', claudeSessionId: CID(7), backendSessionId: CID(7) };
+      const gu = await mk(MM.load('src/server/boot-restore.js', BS2.replace(GUARD, ''), 'turn-end-unguarded'), new Map()).consumeKeptOf(s3, { ...FAILED, errors: ['No conversation found with session ID: ' + CID(7)] });
+      const afterU = await nextBoot();
+      ok(gu === 'cw-2-3' && !afterU.some((x) => x.backendSessionId === CID(7)), 'MUTANT RED: a consume without the turnRan guard takes a FAILED resume\'s copy (r1\'s loss again: its name and account gone)', { gu, rows: afterU.map((x) => x.name) });
+      put(3, { claudeSessionId: CID(7) });
+      const gm = await mk(MM.load('src/server/boot-restore.js', BS2.replace(TAKE, '  return null;\n'), 'turn-end-takes-nothing'), new Map()).consumeKeptOf(s3, { ...RAN, session_id: CID(7) });
+      const afterM = await nextBoot();
+      ok(gm === null && afterM.some((x) => x.backendSessionId === CID(7) && x.accountId === 'sub-old-3'), 'MUTANT RED: a boot-restore whose turn end takes nothing leaves the ended resume\'s stale row (and its old account) for the next boot', afterM.map((x) => x.name));
+    }
+    try { fs.rmSync(WC.d, { recursive: true, force: true }); } catch { }
+  }
   // (9) a pending fork's copy an earlier boot kept is swept by the next boot; the parent's stays
   const W = world('fork9');
   const pf = { webuiSessionId: 'sess-9-1', backend: 'claude', mode: 'chat', name: 'Fork never named', cwd: '/srv/u/fork', claudeSessionId: CID(4), forkRequested: true, forkSourceId: CID(4), status: 'stopped', stoppedAt: 1793300000500, stopReason: 'dead-socket-at-boot' };
@@ -441,7 +621,7 @@ await section('§10 B-a5a4 — the r2 reviewer\'s follow-ups: a deleted account 
   ok(!rows9.some((x) => x.name === 'Fork never named') && rows9.some((x) => x.name === 'Its parent') && !fs.existsSync(path.join(W.META, 'cw-9-1.json.stopped')) && fs.existsSync(path.join(W.META, 'cw-9-2.json.stopped')) && notes.some((l) => /^kept copies: a pending fork's copy swept \(nothing to resume: cw-9-1\)/.test(l)) && !notes.some((l) => /^dead sockets: /.test(l)),
     '§10 (9) the NEXT boot sweeps a pending fork\'s kept copy (its own id never arrived — nothing resumes it, nothing consumed it), says so; its parent\'s copy stays', { rows: rows9.map((x) => x.name), notes });
   const BSRC = fs.readFileSync(path.join(REPO, 'src/server/boot-restore.js'), 'utf8');
-  const SWEEP = "      if (restoredForkPending(m)) { fs.promises.unlink(path.join(META_DIR, f)).catch(() => { }); say(`kept copies: a pending fork's copy swept (nothing to resume: ${sockFile})`); continue; }\n";
+  const SWEEP = "      if (restoredForkPending(m)) { fs.promises.unlink(path.join(META_DIR, f)).catch((err) => saidUnlinkFailure(sockFile, err)); say(`kept copies: a pending fork's copy swept (nothing to resume: ${sockFile})`); continue; }\n";
   ok(BSRC.split(SWEEP).length === 2, '§10 (9) ANCHOR: the sweep, spelled once');
   try { fs.rmSync(W.d, { recursive: true, force: true }); } catch { }
 });
@@ -560,7 +740,7 @@ await section('§11 B-a5a4 follow-up (主开发\'s reading of b4e2af305): one pr
     'WIRING (§11 (2)): the Resume verdict and the create both resume an account-bound harness on the held account (a host\'s resume aside); a sentence with a name is said from its key + params');
   ok(read('src/server/inbox-reopen.js').includes("return { ok: false, why, ...(err && err.i18n && err.i18n.key ? { i18n: err.i18n } : {}) };")
     && read('src/routes/user-todos-reply.js').includes("fail(res, 'resume_failed', (o && o.why) || 'the conversation could not be reopened', o && o.i18n ? { i18n: o.i18n } : null)")
-    && read('src/lib/user-todos-actions.js').includes("const why = r && r.i18n && r.i18n.key ? t(r.i18n.key, i18nParams(r.i18n)) : r && r.error ? t(r.error) : t('server unreachable');"),
+    && read('src/lib/user-todos-actions.js').includes("const why = r && r.code === 'bad_image' && r.picture ? pictureRefusalText([r.picture], t) : r && r.words && r.words.key ? t(r.words.key, r.words.params || {}) : r && r.i18n && r.i18n.key ? t(r.i18n.key, i18nParams(r.i18n)) : r && r.error ? t(r.error) : t('server unreachable');"),   // (bl-chat-b restack-411: the line also words a refused picture by its harness's numbers and a reopen's words first; the i18n road unchanged)
     'WIRING (§11 (2) r2): a For-you reply\'s refusal keeps its key + params from the create to the page (a zh / ja page says it in the reader\'s words)');
   ok(read('src/server/inbox-reopen.js').includes("try { held = await require('../routes/sessions').heldAccountOfNow(conv.backend, conv.id); } catch { held = null; }")
     && read('src/server/inbox-reopen.js').includes('if (held && held.accountId) spec.data.accountId = held.accountId;'),

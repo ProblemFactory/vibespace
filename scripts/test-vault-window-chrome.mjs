@@ -30,7 +30,7 @@
 //   PNG of the header in each state (vw-head-*.png).
 //   ⑥c (lane vault-agent-own — the owner: 「它自己存的使用为啥还要我的允许？」): an agent's own rows (a value it PUT, a seed it added
 //      with `totp add`) sealed while the hub was down: the agent row's meta says the rule «Its own conversation uses it directly
-//      · other conversations cannot use it» + who kept it, and carries NO «Usable by agent runs» switch (the owner's rows keep
+//      · another one only as you share it («Who may use it…»)» (B-bc3b) + who kept it, and carries NO «Usable by agent runs» switch (the owner's rows keep
 //      theirs); its chip says «stored by an agent» (a PUT is never «never shown»); the seed's row says «· other conversations
 //      need a grant»; «Kept by agents» says its rule under its name; ⑧ the same words in Chinese (本对话可直接使用 · …)
 //   V2 (lane vault-window-v2, design q-047 §3): ②b the RAIL — 全部 + the nine purposes, each count = its rows in the list =
@@ -55,7 +55,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
@@ -100,7 +100,7 @@ const srvLog = fs.openSync(path.join(SHOTS, 'server.log'), 'a');
 const startServer = () => { srv = spawn(process.execPath, ['-r', SHIM, 'server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: SIGN_IN, VIBESPACE_CHANGELOG_FIXTURE_DIR: FIXTURE }, stdio: ['ignore', srvLog, srvLog] }); };
 const stopServer = async () => { const p = srv; srv = null; if (!p) return; p.kill('SIGTERM'); await new Promise((r) => { const t = setTimeout(() => { try { p.kill('SIGKILL'); } catch { } r(); }, 8000); if (p.exitCode !== null || p.signalCode !== null) { clearTimeout(t); r(); return; } p.once('exit', () => { clearTimeout(t); r(); }); }); };
 const ready = async (ms = 60000) => { const t0 = Date.now(); for (;;) { try { const r = await fetch(`http://127.0.0.1:${PORT}/login`); if (r.status === 200) return true; } catch { } if (Date.now() - t0 > ms) return false; await sleep(300); } };
-const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage',
+const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage',
   '--window-size=1280,800', '--disable-background-timer-throttling', `--user-data-dir=${PROFILE}`, 'about:blank'], { stdio: 'ignore' });
 const cleanup = () => {
   try { chrome.kill('SIGKILL'); } catch { }
@@ -476,10 +476,10 @@ console.log('⑥c lane vault-agent-own: an agent\'s own rows say the rule — no
     const rule = r?.querySelector('.vw-own-rule'), rb = rule?.getBoundingClientRect();
     return { meta: rule?.textContent || '', ruleSeen: !!(rb && rb.height > 0 && rule.scrollWidth <= rule.clientWidth + 1 && getComputedStyle(rule).whiteSpace !== 'nowrap'), run: !!r?.querySelector('.vw-run'), prov: r?.dataset.prov, chip: r?.querySelector('.vw-chip-prov')?.getAttribute('aria-label') || '', purpose: r?.dataset.purpose,
       seedMeta: s?.querySelector('.vw-own-rule')?.textContent || '', seedProv: s?.dataset.prov, ownerRun: own ? !!own.querySelector('.vw-run') : null, help: head?.querySelector('.vw-group-help')?.textContent || '', railHelp: document.querySelector('.vw-rail-item[data-purpose="agents"]')?.title || '' }; })()`);
-  check('⑥c the agent row (a value it PUT): its own line says the rule — «Its own conversation uses it directly · other conversations cannot use it» and who kept it — WHOLE (it wraps; the one-line meta would clip it); NO «Usable by agent runs» switch', /Its own conversation uses it directly · other conversations cannot use it/.test(ag.meta) && /kept by Deploy helper/.test(ag.meta) && ag.ruleSeen && ag.run === false && ag.purpose === 'agents', ag);
+  check('⑥c the agent row (a value it PUT): its own line says the rule — «Its own conversation uses it directly · another one only as you share it («Who may use it…»)» (B-bc3b) and who kept it — WHOLE (it wraps; the one-line meta would clip it); NO «Usable by agent runs» switch', /Its own conversation uses it directly · another one only as you share it/.test(ag.meta) && /kept by Deploy helper/.test(ag.meta) && ag.ruleSeen && ag.run === false && ag.purpose === 'agents', ag);
   check('⑥c …its chip says «Stored by an agent · it saw the value» (a PUT — never «never shown»)', ag.prov === 'agent-put' && /Stored by an agent/.test(ag.chip), [ag.prov, ag.chip]);
   check('⑥c the seed an agent added itself (Two-step codes): «stored by an agent», «… · other conversations need a grant»', ag.seedProv === 'agent-put' && /Its own conversation uses it directly · other conversations need a grant/.test(ag.seedMeta), [ag.seedProv, ag.seedMeta]);
-  check('⑥c «Kept by agents» says its rule under its name (and as the rail item\'s help)', /the conversation that kept it uses it without asking you; other conversations cannot use it/.test(ag.help) && ag.help === ag.railHelp, [ag.help, ag.railHelp]);
+  check('⑥c «Kept by agents» says its rule under its name (and as the rail item\'s help)', /the conversation that kept it uses it without asking you; another conversation only as you share it/.test(ag.help) && ag.help === ag.railHelp, [ag.help, ag.railHelp]);
   check('⑥c an OWNER\'s row (storage / an app login) keeps its «Usable by agent runs» switch', ag.ownerRun !== false, ag.ownerRun);
   await evalJs(`document.querySelector(${JSON.stringify(AGENT_ROW)})?.scrollIntoView({ block: 'center' }); true`);
   await shot('vw-agent-row.png');
@@ -541,7 +541,7 @@ check('「显示」', (await evalJs(`document.querySelector(${JSON.stringify(ROW
 check('the setup-token row says 「长期 OAuth 令牌」', /长期 OAuth 令牌/.test(await evalJs(`document.querySelector(${JSON.stringify(ROW_OAT + ' .vw-meta')})?.textContent || ''`)));
 // lane vault-agent-own: the agent row's rule in Chinese (the brief's words), and the group's help sentence
 const zhAgent = await evalJs(`({ meta: document.querySelector(${JSON.stringify(AGENT_ROW + ' .vw-own-rule')})?.textContent || '', help: document.querySelector('.vw-group[data-purpose="agents"] .vw-group-help')?.textContent || '' })`);
-check('⑥c in Chinese: the agent row says 「本对话可直接使用 · 其他对话不能使用」 + 「由 Deploy helper 保存」; «agent 存放» says its rule', zhAgent.meta.includes('本对话可直接使用 · 其他对话不能使用') && zhAgent.meta.includes('由 Deploy helper 保存') && /存它的那个对话直接使用/.test(zhAgent.help), zhAgent);
+check('⑥c in Chinese: the agent row says 「本对话可直接使用 · 其他对话只能按你的共享使用」 (B-bc3b) + 「由 Deploy helper 保存」; «agent 存放» says its rule', zhAgent.meta.includes('本对话可直接使用 · 其他对话只能按你的共享使用') && zhAgent.meta.includes('由 Deploy helper 保存') && /存它的那个对话直接使用/.test(zhAgent.help), zhAgent);
 check('the rail in Chinese: 全部 · 两步验证 · 登录与账号 · 集成与频道 · 机器与中继 · 存储 · 应用登录 · 通行密钥 · 网站登录 · 自动化 key · 密码与密钥 · agent 存放 (lane vault-paste-request: + 密码与密钥; lane browser-login: + 网站登录)', (await evalJs(`[...document.querySelectorAll('.vw-rail .vw-rail-name')].map((e) => e.textContent).join(' · ')`)) === '全部 · 两步验证 · 登录与账号 · 集成与频道 · 机器与中继 · 存储 · 应用登录 · 通行密钥 · 网站登录 · 自动化 key · 密码与密钥 · agent 存放');
 check('「显示」 on the automation key carries the owner\'s own sentence as its help; the chips read 「hub 铸造 · 从未显示」 / 「我自己」', (await evalJs(`document.querySelector('.vw-row[data-store="automation"] .vw-show')?.title`)) === '显示密钥值——只在要交给外部系统时；内部 agent 按授权使用，不需要看到值' && (await evalJs(`document.querySelector('.vw-row[data-store="automation"] .vw-chip-prov')?.textContent`)) === 'hub 铸造 · 从未显示' && (await evalJs(`document.querySelector(${JSON.stringify(rowKey(accId) + ' .vw-chip-prov')})?.textContent`)) === '我自己');
 await click(ROW_INT + ' .vw-show');

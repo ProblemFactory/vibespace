@@ -53,7 +53,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
@@ -107,7 +107,7 @@ const { VIBESPACE_INSTANCE_NAME: _instanceName, ...ENV_LOCAL } = process.env;   
 const startServer = () => { const fd = fs.openSync(LOG, 'a'); srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...ENV_LOCAL, VIBESPACE_PRESETS_DIR: '', ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: SIGN_IN }, stdio: ['ignore', fd, fd] }); fs.closeSync(fd); };
 const stopServer = async () => { const p = srv; srv = null; if (!p) return; p.kill('SIGTERM'); await new Promise((r) => { const t = setTimeout(() => { try { p.kill('SIGKILL'); } catch { } r(); }, 8000); if (p.exitCode !== null || p.signalCode !== null) { clearTimeout(t); r(); return; } p.once('exit', () => { clearTimeout(t); r(); }); }); };
 const ready = async (ms = 60000) => { const t0 = Date.now(); for (;;) { try { const r = await fetch(`http://127.0.0.1:${PORT}/login`); if (r.status === 200) return true; } catch { } if (Date.now() - t0 > ms) return false; await sleep(300); } };
-const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage',
+const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage',
   '--window-size=1280,800', '--disable-background-timer-throttling', `--user-data-dir=${PROFILE}`, 'about:blank'], { stdio: 'ignore' });
 let cleaned = false;
 const cleanup = () => {
@@ -278,7 +278,7 @@ try {
   await A.evalJs(`app.replayOpenSpec({ action: 'openVault' })`);
   const OWN_ROW = `[...document.querySelectorAll('.vw-list .vw-row')].find((r) => r.isConnected && String(r.dataset.id || '').startsWith('secrets:agent:') && String(r.dataset.id).includes('/tts-own#'))`;
   const own = await A.until(`(() => { const r = ${OWN_ROW}; const c = r && r.querySelector('.vw-use-chip'); if (!c) return null; c.scrollIntoView({ block: 'center' }); const g = r.querySelector('.vw-use-grant'); return { chip: c.textContent, x: !!c.querySelector('.vw-use-x'), add: !!(g && !g.hidden && g.getBoundingClientRect().width > 0) }; })()`, { timeout: 15000 });
-  check(`its Vault row now SHOWS the member: «Transcriber · 命令 ${PYN} transcribe.py · 无限期 · 已用 1 次 · 卡片上的总是 · HH:MM ✕» — with its ✕, and no «谁可以用…» (only its conversation may use it)`, !!own && new RegExp(`^Transcriber · 命令 ${reEsc(PYN)} transcribe\\.py · 无限期(?: · 已用 \\d+ 次)? · 卡片上的总是 · \\d\\d:\\d\\d✕$`).test(own.chip) && own.x && !own.add, own);
+  check(`its Vault row now SHOWS the member: «Transcriber · 命令 ${PYN} transcribe.py · 无限期 · 已用 1 次 · 卡片上的总是 · HH:MM ✕» — with its ✕, and «谁可以用…» (B-bc3b: the owner shares it from here)`, !!own && new RegExp(`^Transcriber · 命令 ${reEsc(PYN)} transcribe\\.py · 无限期(?: · 已用 \\d+ 次)? · 卡片上的总是 · \\d\\d:\\d\\d✕$`).test(own.chip) && own.x && own.add, own);   // B-bc3b: the own row draws «谁可以用…» too (the owner shares it)
   await sleep(300);
   await A.shot('vsr-7-own-entry-row-desktop.png');
   await A.evalJs(`(() => { const r = ${OWN_ROW}; const x = r && r.querySelector('.vw-use-chip .vw-use-x'); if (x) x.click(); return !!x; })()`);
@@ -394,15 +394,27 @@ try {
   const HOUR_ROW = () => A.evalJs(`(() => { const it = ${ITEM('/v1\\/asr/')}; if (!it) return null; it.scrollIntoView({ block: 'center' }); const ch = it.querySelector('.ut-run-changes'), ans = it.querySelector('.ut-run-answer'); const r = it.getBoundingClientRect(), q = ch && ch.getBoundingClientRect(), a = ans && ans.getBoundingClientRect(); const btns = ans ? [...ans.querySelectorAll('button')] : []; return { changes: ch ? [...ch.querySelectorAll('.ut-run-line')].map((l) => l.textContent) : null, above: !!(q && a && q.bottom <= a.top + 1), buttons: btns.map((b) => { const z = b.getBoundingClientRect(); return { t: b.textContent.trim(), inside: z.left >= r.left - 1 && z.right <= r.right + 1, h: Math.round(z.height) }; }), hints: ans ? [...ans.querySelectorAll('.ut-run-hint')].map((h) => h.textContent) : [], overflow: it.scrollWidth > it.clientWidth + 1 || document.documentElement.scrollWidth > document.documentElement.clientWidth + 1, vw: window.innerWidth }; })()`);
   const HOUR_LINE = new RegExp(`^「允许 1 小时」：到 ${FA.clockWordsPattern()} 为止，这个对话可以在任何运行中使用“TTS API key”。$`);
   const HOUR_HINT = '1 小时内这个对话用这把密钥不再问你；每次使用都会弹一条提示（不进「待你处理」）；到期后再问。';
+  // B-d868 (9e5049fba): an «Allow for 1 hour» card ends its change lines with who started the turn that asks. Nothing proves an
+  // opener in this rig — the stub's one system/init names no frame the wrapper stamped, no command runs before it, and it writes
+  // no user or assistant record — so the card says «not recorded», never «you». READ from the hosted run at checkpoint 8cef0006a
+  // (prep411 heavy 5/7, this leg's measured `changes`: [the hour line, this line]).
+  // The For-you window's pane and the phone's tray draw the same full card (runFactsHtml without `strip`: inbox-window.js's
+  // detail, the tray row — user-todos-row.js runChangesHtml draws every line), so they read the same two lines.
+  const TURN_BY_LINE = '没有记录这一轮是谁发起的';
+  // the hour card's change lines, each by its own words — the hour line, then the B-d868 line; a third line is red by name
+  const hourLines = (lines) => Array.isArray(lines) && HOUR_LINE.test(lines[0] || '') && lines[1] === TURN_BY_LINE;
+  const thirdLines = (lines) => (Array.isArray(lines) ? lines.slice(2) : []);
   await openTray();
   const h1 = await HOUR_ROW();
-  check('the tray row (1280): 允许一次 · 允许 1 小时 · 拒绝 — its OWN row above them «「允许 1 小时」：到 HH:MM 为止，这个对话可以在任何运行中使用“TTS API key”。», and beside them «1 小时内这个对话用这把密钥不再问你；每次使用都会弹一条提示（不进「待你处理」）；到期后再问。»', !!h1 && h1.buttons.map((b) => b.t).join('|') === '允许一次|允许 1 小时|拒绝' && h1.changes && h1.changes.length === 1 && HOUR_LINE.test(h1.changes[0]) && h1.above && h1.hints.includes(HOUR_HINT), h1);
+  check('the tray row (1280): 允许一次 · 允许 1 小时 · 拒绝 — its OWN row above them «「允许 1 小时」：到 HH:MM 为止，这个对话可以在任何运行中使用“TTS API key”。» then the B-d868 line «没有记录这一轮是谁发起的», and beside them «1 小时内这个对话用这把密钥不再问你；每次使用都会弹一条提示（不进「待你处理」）；到期后再问。»', !!h1 && h1.buttons.map((b) => b.t).join('|') === '允许一次|允许 1 小时|拒绝' && hourLines(h1.changes) && h1.above && h1.hints.includes(HOUR_HINT), h1);
+  check('the tray row (1280): NO third change line on the hour card (B-d868 adds one line, the turn\'s opener)', !!h1 && thirdLines(h1.changes).length === 0, h1 && thirdLines(h1.changes));
   await sleep(300);
   await A.shot('vsr-16-hour-card-desktop.png');
   await closeTray();
   await A.evalJs(`app.openInbox({ itemId: ${JSON.stringify(wc && wc.id)} }); true`);
   const wv = await A.until(`(() => { const acts = [...document.querySelectorAll('.iw-actions')].find((a) => a.getBoundingClientRect().width > 0 && a.querySelector('[data-act="shape-window"]')); if (!acts) return null; const ch = [...document.querySelectorAll('.iw-detail .ut-run-changes')].find((e) => e.getBoundingClientRect().width > 0); return { acts: [...acts.querySelectorAll('[data-act]')].map((b) => b.dataset.act), label: (acts.querySelector('[data-act="shape-window"]').textContent || '').trim(), hints: [...acts.querySelectorAll('.ut-run-hint')].map((h) => h.textContent), line: ch ? [...ch.querySelectorAll('.ut-run-line')].map((l) => l.textContent) : null }; })()`, { timeout: 10000 });
-  check('the For-you window (the other client): Allow once · 允许 1 小时 · Deny in its action row, the words beside them, the same line in its pane', !!wv && wv.acts.slice(0, 3).join() === 'hub-once,shape-window,hub-deny' && /允许 1 小时/.test(wv.label) && wv.hints.includes(HOUR_HINT) && wv.line && HOUR_LINE.test(wv.line[0]), wv);
+  check('the For-you window (the other client): Allow once · 允许 1 小时 · Deny in its action row, the words beside them, the same two lines in its pane (the hour line, then the B-d868 line)', !!wv && wv.acts.slice(0, 3).join() === 'hub-once,shape-window,hub-deny' && /允许 1 小时/.test(wv.label) && wv.hints.includes(HOUR_HINT) && hourLines(wv.line), wv);
+  check('the For-you window: NO third change line in its pane', !!wv && thirdLines(wv.line).length === 0, wv && thirdLines(wv.line));
   // r8 (the r7 acceptance, the surfaces' minor 3): the shot shows the pane's row and the hint — no transient toast over it, the
   // window maximized so the hint is inside it
   const iwMax = await A.evalJs(`(() => { for (const t of [...document.querySelectorAll('.global-toast')]) t.remove(); const w = [...app.wm.windows.values()].find((x) => x.type === 'inbox'); const el = w && (w.element || w.el); const b = el && el.querySelector('.win-maximize'); if (b) b.click(); return !!b; })()`);
@@ -414,7 +426,8 @@ try {
   await narrow(true);
   await openTray();
   const h2 = await HOUR_ROW();
-  check('the phone (390 px): the three answers inside the card and ≥ 32 px tall, the line on its own row above them, no sideways overflow', !!h2 && h2.buttons.length === 3 && h2.buttons.every((b) => b.inside && b.h >= 32) && h2.changes && HOUR_LINE.test(h2.changes[0]) && h2.above && !h2.overflow, h2);
+  check('the phone (390 px): the three answers inside the card and ≥ 32 px tall, the two lines (the hour line, then the B-d868 line) on their own rows above them, no sideways overflow', !!h2 && h2.buttons.length === 3 && h2.buttons.every((b) => b.inside && b.h >= 32) && hourLines(h2.changes) && h2.above && !h2.overflow, h2);
+  check('the phone (390 px): NO third change line on the hour card', !!h2 && thirdLines(h2.changes).length === 0, h2 && thirdLines(h2.changes));
   await sleep(300);
   await A.shot('vsr-18-hour-card-phone.png');
   await closeTray();

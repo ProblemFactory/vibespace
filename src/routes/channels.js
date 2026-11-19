@@ -1220,7 +1220,7 @@ function answer3(res, r) {
   if (r && r.ok) return res.json(r);
   const code = (r && r.code) || 'error';
   const status = code === 'not-found' ? 404
-    : code === 'send-not-available' || code === 'bad-state' || code === 'reconcile-not-available' || code === 'wake-count-mismatch' || code === 'changed-since-shown' || code === 'topic-forbidden' || code === 'not-in-effect' || code === 'rule-gone' || code === 'except_conflicts' || code === 'except_unnamed' || code === 'expired' || code === 'placement-not-offered' ? 409   // r4: `expired` = a wake ask past its end (its `expiredAt` rides the answer); lane held-except-doors r2: an Approve's grant refused by the ONE writer — by name, never a 500 (r12: these two sit BEFORE `expired` — test-wake-approve-card pins the text from `expired` to the 409 as ONE literal, exactly once, and its RED control cuts it; test-channel-placement pins the last code)
+    : code === 'send-not-available' || code === 'bad-state' || code === 'rest-not-sent' || code === 'rest-already' || code === 'rest-nothing-left' || code === 'rest-files-gone' || code === 'reconcile-not-available' || code === 'wake-count-mismatch' || code === 'changed-since-shown' || code === 'topic-forbidden' || code === 'not-in-effect' || code === 'rule-gone' || code === 'except_conflicts' || code === 'except_unnamed' || code === 'expired' || code === 'placement-not-offered' ? 409   // r4: `expired` = a wake ask past its end (its `expiredAt` rides the answer); lane held-except-doors r2: an Approve's grant refused by the ONE writer — by name, never a 500 (r12: these two sit BEFORE `expired` — test-wake-approve-card pins the text from `expired` to the 409 as ONE literal, exactly once, and its RED control cuts it; test-channel-placement pins the last code)
     : code === 'rate-floor' ? 429
     : code === 'bad-proposal' || code === 'bad-policy' || code === 'bad-grant' || code === 'bad-request' ? 400
     : code === 'failed' || code === 'unknown' ? 502 : 500;
@@ -1305,6 +1305,17 @@ router.post('/api/channels/outbox/:id/approve', async (req, res) => {
     if (!d.ok) return answer3(res, d);
     if (typeof b.shown !== 'string' || !b.shown) return answer3(res, { ok: false, code: 'bad-request', why: 'shown-required', error: 'this card did not send the digest of what it shows (shown) — nothing was approved' });
     answer3(res, await engine().approve(req.params.id, { text: typeof b.text === 'string' ? b.text : null, by: 'user', deliver: d.deliver, shown: b.shown, withoutFiles: b.withoutFiles === true, ...wakeGuards(b), pressed: press }));
+  } catch (e) { fail(res, e); }
+});
+// lane bl-msg B-da74: «SEND THE REST» — the owner sends again ONLY the files of a sent proposal that did not land (an own send: the press
+// is the approval); refused by name when it landed whole, was sent again already, or its kept files are gone
+router.post('/api/channels/outbox/:id/resend', async (req, res) => {
+  try {
+    if (refuseAgentBearer(req, res, PRESS_IS_OWNERS)) return;
+    forHost(req);
+    const press = pressOf(req);
+    const b = req.body || {};
+    answer3(res, await engine().resendRest(req.params.id, { ctx: { kind: 'user' }, pressed: press, guards: wakeGuards(b) }));
   } catch (e) { fail(res, e); }
 });
 router.post('/api/channels/outbox/:id/reject', async (req, res) => {

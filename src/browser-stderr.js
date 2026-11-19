@@ -18,28 +18,12 @@
 const fs = require('fs');
 
 const STDERR_PIPE_FULL = 'stderr-pipe-full';
-/** The switches every keeper-composed launch carries: Chromium's logging off (`--disable-logging`) and nothing below
- *  FATAL (`--log-level=3` — LOG(ERROR) reaches stderr even with logging "off", base/logging.cc ShouldLogToStderr). */
-const QUIET_LOG_ARGS = Object.freeze(['--disable-logging', '--log-level=3']);
-const LOG_SWITCH_RE = /^--(enable-logging|disable-logging|log-level|log-file|v|vmodule)(=|$)/;
+// The switches every keeper-composed launch carries (QUIET_LOG_ARGS) and their rule (quietLogVerdict / withQuietLogging — a
+// user's own logging switch wins): B-1789 cure — PURE in src/browser-verbs.js, where THE LAUNCH TAIL reads them (a PURE module
+// may require no `fs`); re-exported here unchanged
+const { QUIET_LOG_ARGS, quietLogVerdict, withQuietLogging } = require('./browser-verbs.js');
 /** The driver version that drains Chrome's stderr (agent-browser 0.38.2, #2003) — the one VibeSpace pins. */
 const FIXED_IN = '0.38.2';
-
-const argListOf = (args) => (Array.isArray(args) ? args.map(String) : (typeof args === 'string' ? args.split(/[,\n]/) : [])).map((x) => x.trim()).filter(Boolean);
-/** Should `args` gain QUIET_LOG_ARGS? `{add, why}` — `theirs` (the user's own args spell a logging switch: theirs wins,
- *  untouched — the automationFlag precedent) or `added`. PURE. */
-function quietLogVerdict(args) {
-  return argListOf(args).some((x) => LOG_SWITCH_RE.test(x)) ? { add: false, why: 'theirs' } : { add: true, why: 'added' };
-}
-/** `args` WITH the quiet switches when the verdict adds them — a string stays a string (joined as it is separated), a
- *  list a list; nothing ⇒ the switches alone. PURE. */
-function withQuietLogging(args) {
-  if (!quietLogVerdict(args).add) return args;
-  if (Array.isArray(args)) return [...args, ...QUIET_LOG_ARGS];
-  if (typeof args !== 'string' || !args.trim()) return QUIET_LOG_ARGS.join(',');
-  const sep = args.includes('\n') ? '\n' : ',';
-  return [...argListOf(args), ...QUIET_LOG_ARGS].join(sep);
-}
 
 /**
  * THE VERDICT (PURE): a browser that does not answer whose Chrome has fd 2 a PIPE and whose main thread sat in

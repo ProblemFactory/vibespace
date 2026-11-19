@@ -56,6 +56,7 @@ import { icon, el, btn } from './channel-chrome.js';
 import { accountTitle } from './channel-avatar.js';   // lane channels-badges: the badge's hover title and the card's name are ONE spelling
 // PURE, bundled: the row's `signinName` (the brand of the sign-in page — Gmail signs in with Google)
 import * as R from '../integration-registry.js';
+import { browserSignInFold } from '../may-use-model.js';   // B-e630: the fold's verdict over the grant facts (PURE)
 import { setupFold, refusalNotes, lacksLines } from './oauth-setup-card.js';   // lane oauth-setup-instructions: the setup card (the client type, the exact addresses, the console)
 import * as CR from '../consent-road.js';   // lane oauth-relay-road (PURE): does a relay page send THIS page's browser back (the custom app's setup rows)
 
@@ -597,7 +598,7 @@ function authWatcher(app, id, base) {
 // ── CONNECT AN ACCOUNT (§2.5, §8.1 #11: type-first, one dialog for every type) ──
 /** The panel's one entry: `Connect an account`. The record is created by
  *  Connect from a finished sign-in — a dialog closed half-way leaves nothing. */
-export async function showConnectAccountDialog(app, kinds, { kind = null, flowId: askedFlow = null } = {}) {
+export async function showConnectAccountDialog(app, kinds, { kind = null, flowId: askedFlow = null, conversation = null } = {}) {
   const found = (kinds || []).filter((k) => k && k.kind);
   if (!found.length) { showToast(tr('No account type can be connected on this instance'), { type: 'error' }); return null; }
   // each type's borrowable storage clients, read BEFORE the dialog draws (this file builds no option itself)
@@ -608,8 +609,11 @@ export async function showConnectAccountDialog(app, kinds, { kind = null, flowId
     { key: 'type', label: tr('Type'), type: 'select', options: list.map((k) => [k.kind, k.label || k.kind]), ...(kind && list.some((k) => k.kind === kind) ? { value: kind } : {}) },   // lane pod-oauth-callback: the chat's «Connect <type>» opens on its type
     { key: 'name', label: tr('Name'), placeholder: tr('blank = the name the sign-in reports') },
   ];
+  // B-e630: the conversation's may-use facts, read ONCE for the whole dialog (every browser-sign-in type shares it)
+  let factsP = null; const mayUseFacts = () => factsP || (factsP = fetchJson(`/api/may-use?${new URLSearchParams({ key: String(conversation.sessionKey), ...(conversation.webuiId ? { webuiId: String(conversation.webuiId) } : {}) })}`));
   for (const k of list) {
     const sfx = `.${k.kind}`;
+    if (k.browserSignIn && conversation && conversation.sessionKey) fields.push({ key: `bsi${sfx}`, type: 'node', node: browserSignInNode(app, k, conversation, mayUseFacts), when: is(k.kind) });   // B-e630: before the sign-in it can stand for
     fields.push(...clientFieldSpecs(specOf(k, list), { sfx, when: is(k.kind), stepped: true }));
     const viaPaste = (v) => isPasteSpec(k) && v[`client${sfx}`] === PASTE_CHOICE;   // design 018: the per-person steps own `pflow`
     fields.push({ key: `flow${sfx}`, label: tr('{provider} authorization', { provider: signinOf(k) }), type: 'hidden', when: (v) => is(k.kind)(v) && !viaPaste(v) });
@@ -718,6 +722,26 @@ export async function showConnectAccountDialog(app, kinds, { kind = null, flowId
     if (hook) blocks.push(hook);
   }
   return ctx;
+}
+
+/** B-e630 (主开发's ruling 2026-11-18): opened FOR a conversation (the chat's «Connect <type>»), a type whose capability row says
+ *  a browser sign-in can stand for it says so when this conversation may not use at least one of the person's browser profiles —
+ *  the grant facts only (the may-use view; PURE browserSignInFold), no profile named or guessed; its door is the conversation's own
+ *  «What it may use» (each profile it may not use there, with its «Who can use it») — nothing is granted here. Filled when the
+ *  facts land; nothing drawn when they say nothing. */
+function browserSignInNode(app, k, conversation, mayUseFacts) {
+  const box = document.createElement('div'); box.className = 'ch-bsi'; box.hidden = true;
+  mayUseFacts().then((r) => {
+    const fold = r && r.ok ? browserSignInFold(true, r.view) : null;
+    if (!fold) return;
+    const words = document.createElement('div'); words.className = 'mounts-note'; words.textContent = tr('If a browser profile is signed in to {site}, it can be used instead of a new sign-in.', { site: String(k.label || k.kind) });
+    const door = document.createElement('button'); door.type = 'button'; door.className = 'mounts-btn ch-bsi-door'; door.textContent = tr('Allow this conversation to use one');   // the dialog's own button (the pictures: an icon button's fixed box overflowed the dialog)
+    // the ONE home: this conversation's «What it may use», where each profile it may not use stands with its «Who can use it»
+    door.onclick = () => { const s = (app.sidebar?._allSessions || []).find((x) => x && x.webuiId === conversation.webuiId); if (s && typeof app.openSessionProps === 'function') app.openSessionProps(s, { section: 'may-use' }); else if (typeof app.openBrowserProfiles === 'function') app.openBrowserProfiles(); };
+    const col = document.createElement('div'); col.style.cssText = 'display:flex;flex-direction:column;align-items:flex-start;gap:4px;margin:2px 0;min-width:0;';
+    col.append(words, door); box.replaceChildren(col); box.hidden = false;
+  }).catch(() => { /* no facts: nothing claimed */ });
+  return box;
 }
 
 // ── RE-AUTHORIZE (§8.1 #3: the storage re-authorize dialog, verbatim + the client select) ──

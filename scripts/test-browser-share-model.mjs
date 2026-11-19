@@ -1825,7 +1825,7 @@ console.log('— ④g verify r3: the ONE ordered lock verdict (+ the swap contro
       const e1 = await threw(() => ensure(kE2)); const e2 = await threw(() => ensure(kE2));
       ok(e1 && e1.code === 'profile_locked' && /took the lock over now/.test(e1.message) && saidG(l0, /ephemeral .*reached the launch \(taken over now\)/).length === 1 && !e2, '④g ephemeral (e): a previous name\'s lock that reached the launch is taken over and named on this row too (said in the journal); the next command launches', { e1: e1 && e1.message.slice(0, 160), e2: e2 && e2.message });
       try { await kE2.stop(kE2.ephemeralFor(KG).profileId, { why: 'user' }); } catch { } kE2.shutdown(); }
-  } else ok(true, '④g ephemeral row SKIPPED under root (directory modes)');
+  } else ok(true, '④g ephemeral row SKIPPED: under root (directory modes)');
   for (const pr of procsG) { try { pr.kill('SIGKILL'); } catch { } }
 }
 // ═══ ④h VERIFY r4 (T1): THE THIRD JUDGEMENT — USERW'S SCENARIOS AGAINST A HAND-WRITTEN TRUTH ════════════════════════════

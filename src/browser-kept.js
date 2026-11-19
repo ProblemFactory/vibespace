@@ -70,9 +70,9 @@ const isParentKey = (k) => KEY_RE.test(String(k || ''));
 const RESTORE_ID_RE = /^bres-[0-9a-f]{8,16}$/;
 
 /** The closed vocabulary of why a kept browser stopped. */
-const STOP_WHYS = Object.freeze(['turn-idle', 'idle', 'heal', 'restart', 'conversation-gone', 'user', 'agent']);
+const STOP_WHYS = Object.freeze(['turn-idle', 'idle', 'ended', 'heal', 'restart', 'conversation-gone', 'user', 'agent']); // B-346d: + 'ended' — its daemon was found gone before its idle timeout (why not known)
 /** D2: the automatic stops — their next start reopens the kept tabs by itself. */
-const AUTO_RESTORE_WHYS = Object.freeze(['turn-idle', 'idle', 'heal', 'restart', 'conversation-gone']);
+const AUTO_RESTORE_WHYS = Object.freeze(['turn-idle', 'idle', 'ended', 'heal', 'restart', 'conversation-gone']); // 'ended' reopens as 'idle' does (B-346d: only its words differ)
 /** The keeper's own `why` strings (its stop() allow-list + the idle-out) → the closed vocabulary. An unknown why is the
  *  keeper's own act (a heal, a failed launch) — AUTOMATIC, never the user's. */
 function stopWhyOf(raw) {
@@ -365,7 +365,7 @@ const clip = (s, n) => { const x = String(s == null ? '' : s); return x.length >
 const tabLine = (t) => `${t.title ? clip(t.title, 80) + ' — ' : ''}${clip(t.url, 200)}`;
 /** Why the conversation's browser stopped, in the agent's words (the closed vocabulary). */
 function stopWhyWords(w) {
-  return ({ 'turn-idle': 'released after the turn ended', idle: 'it idled out', heal: 'it was restarted', restart: 'VibeSpace restarted', 'conversation-gone': 'its session ended', user: 'the user stopped it', agent: 'you closed it' }[w] || 'it stopped');
+  return ({ 'turn-idle': 'released after the turn ended', idle: 'it idled out', ended: 'it was found gone before its idle timeout (why is not known here)', heal: 'it was restarted', restart: 'VibeSpace restarted', 'conversation-gone': 'its session ended', user: 'the user stopped it', agent: 'you closed it' }[w] || 'it stopped');
 }
 /** ≤ 8 tabs, each bounded, and the whole within `budget` characters — a frame that rides a prompt stays small (the
  *  injection's 9600-byte cap); the CURRENT tab is always named (past the list when it did not fit), the rest counted. */

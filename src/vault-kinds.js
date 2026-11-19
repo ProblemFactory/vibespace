@@ -61,7 +61,7 @@ const CATEGORIES = Object.freeze([
   Object.freeze({ id: 'web-logins', label: i18nKey('Web logins') }),
   Object.freeze({ id: 'automation', label: i18nKey('Automation keys') }),
   Object.freeze({ id: 'keys', label: i18nKey('Passwords & keys') }),
-  Object.freeze({ id: 'agents', label: i18nKey('Kept by agents'), help: i18nKey('What an agent kept itself: the conversation that kept it uses it without asking you; other conversations cannot use it') }),   // lane vault-agent-own: the rule in words (the only category with a help sentence)
+  Object.freeze({ id: 'agents', label: i18nKey('Kept by agents'), help: i18nKey('What an agent kept itself: the conversation that kept it uses it without asking you; another conversation only as you share it') }),   // lane vault-agent-own: the rule in words (the only category with a help sentence)
   Object.freeze({ id: 'other', label: i18nKey('Other'), onlyWhenAny: true }),
 ]);
 const CATEGORY_IDS = Object.freeze(CATEGORIES.map((c) => c.id));
@@ -76,15 +76,20 @@ const fam = (row) => Object.freeze({ ...row, surfaces: Object.freeze(row.surface
 
 /** THE KIND FAMILIES, in matching order. */
 const FAMILIES = Object.freeze([
-  fam({ id: 'agent-secret', label: 'An agent\'s own secret (mint / put)', category: 'agents', stores: null, entryRe: /^agent:/, sample: 'agent:conv-census/sample',
+  fam({ id: 'agent-secret', label: 'An agent\'s own secret (mint / put)', category: 'agents', stores: null, entryRe: /^agent:/, sample: 'agent:conv-census/sample', confirmKey: 'agent-secret',
     surfaces: { request: NONE('an agent puts its own (vibespace-vault mint / put) — it never asks the user for one'), list: true, row: 'base', add: NONE('an agent puts it in (vibespace-vault mint / put) — a person never adds one'), reveal: true,
       use: { route: 'POST /api/agent/vault/run', also: ['POST /api/agent/jobs'] }, cli: { bin: 'vibespace-vault', verbs: ['mint', 'put'] },   // lane vault-job-road: + a Background Work job (--vault, its own conversation's)
-      route: ['POST /api/agent/vault/mint', 'POST /api/agent/vault/put'], words: WORDS(['mint', 'put']), doc: '**Agents put their OWN secrets in' },
-    // found by this registry's census; no lane holds it yet (the coordinator took the backlog item, 2026-10-26)
-    deferred: { delete: { lane: 'unscheduled', backlog: 'B-3fb5', why: 'design q-047 §3.3 lists 删除 for an agent\'s entry; no route drops one yet' } } }),
+      delete: { method: 'DELETE', path: '/api/vault/agent-secrets/' },   // B-3fb5 (found by this registry's census, deferred 2026-10-26): the person's 删除 — design q-047 §3.3
+      route: ['POST /api/agent/vault/mint', 'POST /api/agent/vault/put', 'DELETE /api/vault/agent-secrets/:entry'], words: WORDS(['mint', 'put']), doc: '**Agents put their OWN secrets in' } }),
   fam({ id: 'account', label: 'An account\'s API key or long-lived token', category: 'accounts', stores: ['accounts'], entryRe: null, sample: 'acc-census', confirmKey: 'account',
     surfaces: { request: NONE('an account signs in on its own card (Accounts) — an agent asks for no account key'), list: true, row: 'base', add: { door: 'account', order: 10 }, reveal: true, use: SYSTEM('VibeSpace hands it to the CLI it starts — never to an agent'),
       delete: { method: 'DELETE', path: '/api/accounts/' }, cli: NONE('no agent verb — VibeSpace uses it itself'), route: ['POST /api/accounts', 'DELETE /api/accounts/:id'], words: NONE('its account card names it (the account\'s own name) — no words of the vault\'s'), doc: 'API keys and tokens (accounts)' } }),
+  // lane lg-providers (B-d578, q-045 §2.6 law 1): a THIRD-PARTY MODEL PROVIDER's key — a hub secret `provider:<record id>`,
+  // pasted in the provider wizard (Manage agents), used only by the spawn road and the provider Test
+  fam({ id: 'provider-key', label: 'A third-party model provider\'s key', category: 'accounts', stores: ['secrets'], entryRe: /^provider:/, sample: 'provider:pv-census', confirmKey: 'provider',   // ui-words: the registry's own name of the family, printed by its census, never drawn on a page
+    surfaces: { request: NONE('a provider\'s key is pasted in its own wizard in Manage agents — an agent asks for none'), list: true, row: 'base', add: NONE('added in Manage agents — the third-party model wizard, with the provider it belongs to'), reveal: true,
+      use: SYSTEM('VibeSpace hands it to the agent CLI it starts for that provider — never to an agent'), delete: { method: 'DELETE', path: '/api/providers/' },
+      cli: NONE('no agent verb — VibeSpace uses it itself'), route: ['POST /api/providers', 'DELETE /api/providers/:id'], words: NONE('its provider names it (the provider\'s own name in Manage agents)'), doc: '**Third-party model providers**' } }),
   fam({ id: 'integration-machine', label: 'An integration\'s per-machine key', category: 'machines', stores: ['integrations'], entryRe: /\//, sample: 'llm/host-census',
     surfaces: { request: NONE('kept per paired machine on that machine\'s card — a request names a card\'s own field, and row_per_machine refuses this one'), list: true, row: 'base', add: NONE('written by the Integrations card of that machine'), reveal: true, use: SYSTEM('the integration uses it on that machine'),
       delete: NONE('cleared in Integrations… with the machine\'s row'), cli: NONE('no agent verb — VibeSpace uses it itself'), route: ['GET /api/integrations/:id'], words: NONE('the Integrations registry names the row and the machine'), doc: 'per-machine row (`<row>/<host>`)' } }),
@@ -117,6 +122,15 @@ const FAMILIES = Object.freeze([
     surfaces: { request: REQUEST({ lands: 'login', kinds: ['login'], site: 'https://census.example.test' }), list: true, row: { module: 'src/lib/vault-login-row.js', exports: ['loginExtras'] }, add: { door: 'web-login', order: 45 }, reveal: true,
       use: { route: 'POST /api/agent/browser/fill-vault' }, delete: { method: 'DELETE', path: '/api/vault/web-logins/' }, cli: { bin: 'vibespace-browser', verbs: ['fill'] },
       route: ['GET /api/vault/web-logins', 'POST /api/vault/web-logins', 'DELETE /api/vault/web-logins/:name', 'POST /api/vault/web-logins/confirm', 'POST /api/vault/web-logins/discard'], words: NONE('the site and the user name it (web-login:<origin>#<user>)'), doc: '`web-login:<origin>#<user>`' } }),
+  // B-8b87 (lane cli-update-needs-nothing): A BROWSER PROXY'S LOGIN — its password sealed under
+  // `proxy-login:<scheme>://<host>:<port>#<user>`; ONE reader, the browser keeper's forwarder (src/server/browser-proxy-logins.js),
+  // each reading a use noted (door browser-proxy) — no agent door: the browser never sees it
+  fam({ id: 'proxy-login', label: 'A browser proxy\'s login', category: 'web-logins', stores: ['secrets'], entryRe: /^proxy-login:/, sample: 'proxy-login:socks5://census.example.test:1080#census-user', confirmKey: 'proxy-login',   // ui-words: the kind's name in the census's own table (scripts/test-vault-kinds-census prints it) — no window draws a family's label
+    surfaces: { request: NONE('saved where its proxy is set — the browser profile\'s «Proxy login», or «Move the password to the vault» on its card'), list: true, row: 'base',
+      add: NONE('added from the browser profile whose proxy it serves (its «Proxy login» field) — the Vault window lists and deletes it'), reveal: true,
+      use: SYSTEM('the browser keeper\'s forwarder hands it to the profile\'s proxy — the browser never sees it'), delete: { method: 'DELETE', path: '/api/vault/proxy-logins/' },
+      cli: NONE('no agent verb — the browser keeper uses it itself'), route: ['GET /api/vault/proxy-logins', 'POST /api/vault/proxy-logins', 'DELETE /api/vault/proxy-logins/:name', 'POST /api/vault/proxy-logins/move'],
+      words: NONE('the proxy and the user name it (proxy-login:<scheme>://<host>:<port>#<user>)'), doc: '`proxy-login:<scheme>://<host>:<port>#<user>`' } }),
   fam({ id: 'totp', label: 'A two-step code (TOTP)', category: 'two-step', stores: ['secrets'], entryRe: /^totp:/, sample: 'totp:census', confirmKey: 'totp',
     surfaces: { request: REQUEST({ lands: 'totp', kinds: ['totp'] }), list: true, row: { module: 'src/lib/vault-totp-row.js', exports: ['totpExtras', 'showTotpAddDialog'] }, /* request: lane totp-request-card (fb-251bb41646 — the card IS the 两步验证… dialog's fields: vault-totp-row.js totpFields) */ add: { door: 'totp', order: 35 }, reveal: true,
       use: { route: 'GET /api/agent/vault/totp/:name' }, delete: { method: 'DELETE', path: '/api/vault/totp/' }, cli: { bin: 'vibespace-vault', verbs: ['totp'] },

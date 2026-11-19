@@ -20,6 +20,8 @@
  *       not_chat       — no pty, or not a chat-mode session
  *       input_rejected — the adapter's POISON GUARD refused the frame (2.360.0)
  *       too_large      — > 1 MiB for a wrapper without the frame-file verb (2.361.1)
+ * `send.framesReady(sessionId)` (B-51dd) → may a big frame go now: true unless this LOCAL session's wrapper has not
+ *   reported its capabilities YET (a fresh start: no sidecar) — one sidecar read, the reopen road's wait before its ONE send
  *       send_failed    — no adapter for the backend, or the pty write threw
  *
  * Mid-turn is NOT a refusal: the frame is written and the session's own send
@@ -40,6 +42,16 @@
  * authorizer is asked before the compaction, and the dispatch's one billed
  * turn is the wake through the ladder.
  */
+// THE GROUP HAND-OVER (B-02a3, origin 'group-handover' — 主开发's ruling (1), 2026-11-18): a person's press on the strip
+// above the composer hands the GROUP MESSAGES waiting for this conversation to the turn it is running, by the road an
+// Enter takes here — or not at all. Its door (src/server/stash-handover.js handOverGroups) asks the spend authorizer under
+// the attended reason `group-handover` BEFORE it calls this path (the census row for that site). Here the frame is written
+// ONLY while a turn runs, no Stop is settling and this conversation's Enter door hands a message to the running turn
+// (`enterSteers`); else it is refused by code and nothing is written — no press starts a turn from idle. The frame carries
+// NO message id (the wrapper treats it as nobody's: no stamp, no copy, never «Rewind to here»), its words are the door's
+// (headed as handed-over group messages, never the person's), and no live record is drawn for it (the groups engine's
+// cards draw what it carried once the wrapper says it was handed). In the one edge — the turn was already finishing — the
+// CLI runs it as a turn of its own right after, exactly as it runs an Enter at that moment.
 const fs = require('fs');
 const OF = require('./owner-facts.js'); // lane agent-context-owner-facts (B-7960): a time the owner or an agent reads is in the owner's zone, named
 const path = require('path');
@@ -47,6 +59,10 @@ const { wrapperCaps } = require('./wrapper-files.js');
 const { capsOf, sendDoors, doorCapsOf } = require('../backend-caps.js');
 const { requestInFlight, noteTurnFlight, noteRequestSent } = require('../turn-state.js'); // PURE: a request's send instant — the prompt cache's in-flight fact (lane cache-warmth-tiles r4)
 const STDIN_CONFIRM_MS = 600;   // the broken-stdin detector's confirm stage (session-stdout's ATTACH_PROBE_CONFIRM_MS, same reason)
+/** B-02a3: the longest a Stop is taken to settle without the CLI's idle — the wrapper's own backstop for an owed turn (30 s,
+ *  data/bin/chat-wrapper.js OWED_BACKSTOP_MS) and a margin; the CLI's idle ends it sooner (claude-stream-json). A Stop window
+ *  the wrapper keeps open longer while a user's prompt hook runs (up to the hook's own timeout) is named, not covered. */
+const STOP_SETTLE_MS = 35 * 1000;
 
 const SENT = require('./sent-record.js'); // B-9a2e: what VibeSpace itself sent (instant, length, digest, kind — never the words)
 /** The words a send carries: a client-built frame (a picture beside them) is its text blocks — what the transcript keeps. */
@@ -67,7 +83,16 @@ function createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, b
     const session = activeSessions.get(sessionId);
     if (!session) return { ok: false, code: 'no_session', error: 'no live session ' + sessionId };
     if (!(session.pty && session.mode === 'chat')) return { ok: false, code: 'not_chat', error: 'not a live chat session' };
-    const human = origin !== 'dispatch';   // lane worker-dispatch: an agent's dispatch typing `/compact` is not the owner
+    const handing = origin === 'group-handover';   // B-02a3: the group messages a person's press hands to the RUNNING turn
+    if (handing) {
+      // the turn the CLI is RUNNING by its own records (claude-stream-json: init … result — a permission wait inside it counts;
+      // after the result the wrapper would send the frame as a turn of its own, so the hub's «running» until idle does not)
+      if (session._turnLive !== true) return { ok: false, code: 'not_mid_turn', error: 'VibeSpace does not see the agent in a turn right now — the group messages ride its next turn' };
+      // a Stop settles until the CLI says idle (the wrapper holds every frame inside that window — a held frame would become the person's row)
+      if (session._interruptTimer || (Number(session._stopAskedAt) > 0 && Date.now() - Number(session._stopAskedAt) < STOP_SETTLE_MS)) return { ok: false, code: 'stopping', error: 'the turn is being stopped — the group messages ride its next turn' };
+      if (!enterSteers(sessionId, session)) return { ok: false, code: 'not_steerable', error: 'this conversation cannot take a message into its running turn — the group messages ride its next turn' };
+    }
+    const human = origin !== 'dispatch' && !handing;   // lane worker-dispatch: an agent's dispatch typing `/compact` is not the owner
     if (human) session._userInputAt = Date.now();   // the owner's own turn (§22 D2: the next-turn reports ride it as they ride any turn)
     else session._machineInputAt = Date.now();      // a machine turn: the next-turn group reports ride it under the echo guard's words
     const adapter = adapterRegistry.get(session.backend);
@@ -91,7 +116,7 @@ function createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, b
     let stdinPayload, userMsg;
     // a dispatch's frame names its origin: should the wrapper hold it mid-turn (2.369.354), it is never the person's
     // to edit and never comes back into their composer on Stop
-    try { ({ stdinPayload, userMsg } = adapter.formatChatInput(text, msgId, human ? (steer === true ? { steer: true } : {}) : { origin: 'dispatch' })); }
+    try { ({ stdinPayload, userMsg } = adapter.formatChatInput(text, handing ? null : msgId, handing ? { steer: true } : human ? (steer === true ? { steer: true } : {}) : { origin: 'dispatch' })); }   // B-02a3: a group hand-over carries no message id — nobody's frame in the wrapper
     catch (e) {
       // POISON GUARD tripped (2.360.0): a shredded frame must reach
       // the USER as an error, never the transcript as text. The ws caller
@@ -151,7 +176,7 @@ function createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, b
           : `its wrapper (started ${started}) predates the frame-file update — Terminate + Resume the session, then send it again`;
         const refusal = `Message too large (${mb}MB) for this session: it was NOT sent — ${why}.`;
         log(`[${sessionId}] chat-input REFUSED (${mb}MB, ${origin}): wrapper caps ${caps?.reason} (pid ${caps?.pid}, started ${caps?.startedAt})`);
-        return { ok: false, code: 'too_large', error: refusal };
+        return { ok: false, code: 'too_large', error: refusal, reason: caps?.reason === 'no-sidecar' ? 'no-sidecar' : 'old-wrapper' };   // the reason by name (batch 20 cure: only «still starting» is a wait)
       }
     }
     const wasInFlight = requestInFlight({ isStreaming: session._isStreaming, turnState: session._turnState }); // read BEFORE the flag write
@@ -186,8 +211,8 @@ function createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, b
       log(`[${sessionId}] chat-input write failed (${origin}): ${e.message}`);
       return { ok: false, code: 'send_failed', error: 'the session did not accept the message: ' + e.message };
     }
-    SENT.note({ conv: SENT.convOf(session), text: wordsOfFrame(text), kind: human ? 'typed' : 'dispatch' });   // B-9a2e: the typed door's own record — a rebuild tells the person's words from a machine's
-    if (userMsg) {
+    SENT.note({ conv: SENT.convOf(session), text: wordsOfFrame(text), kind: handing ? 'peer' : human ? 'typed' : 'dispatch' });   // B-9a2e: the typed door's own record — a rebuild tells the person's words from a machine's (B-02a3 at the restack: a group hand-over's frame carries other sessions' words — `peer`, never the person's `typed`)
+    if (userMsg && !handing) {   // B-02a3: a group hand-over draws no record of its own — the groups engine's cards do, once it was handed
       // verify r1 ① (lane worker-dispatch): the live record of a frame an AGENT typed carries who typed it — the
       // owner's viewers and the buffer replay see `origin {kind:'dispatch', name}`, never a user turn of their own
       if (!human) userMsg.origin = { kind: 'dispatch', name: (by && by.name) || null };
@@ -231,7 +256,17 @@ function createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, b
     }
     return { ok: true, msgId };
   }
-  return { send };
+  /** B-51dd: a big frame's road is decided by the wrapper's sidecar (above) — a caller that just STARTED the session (the
+   *  For-you reopen) asks this before its one send, instead of sending into «has not reported its capabilities yet» */
+  function framesReady(sessionId) {
+    const s = activeSessions.get(sessionId);
+    if (!s || s.host || !(s.socketPath || s.agentdSession) || s._wrapperFrameFile === true) return true;
+    let c = null; try { c = wrapperCaps(BUFFERS_DIR, sessionId, s.socketPath); } catch { return true; }
+    if (c && c.frameFile) { s._wrapperFrameFile = true; return true; }
+    return !(c && c.reason === 'no-sidecar');
+  }
+  send.framesReady = framesReady;
+  return { send, framesReady };
 }
 
 module.exports = { createUserInputSender };

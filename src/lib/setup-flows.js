@@ -172,6 +172,7 @@ export function installSetupFlows(App) {
         const d = await res.json().catch(() => ({}));
         if (!res.ok) { err.textContent = d.error || t('Failed'); return; }
         this._authEnabled = true;
+        this._settingsUI?.redrawOpen?.();   // lane setting-doors f1: the open Settings redraws — its sign-in line is true again
         close();
         showToast(enabled ? t('Password changed — other devices were logged out') : t('Password set — other devices were logged out'));
       } catch { err.textContent = t('Failed'); }
@@ -190,6 +191,7 @@ export function installSetupFlows(App) {
         const d = await res.json().catch(() => ({}));
         if (!res.ok) { err.textContent = d.error || t('Failed'); return; }
         this._authEnabled = false;
+        this._settingsUI?.redrawOpen?.();   // lane setting-doors f1: the open Settings redraws — its sign-in line is true again
         close();
         showToast(t('Password removed — auth disabled'));
       } catch { err.textContent = t('Failed'); }
@@ -203,9 +205,12 @@ export function installSetupFlows(App) {
     welcome.classList.add('onboarding');
     const content = welcome.querySelector('.welcome-content');
     content.dataset.saved = content.dataset.saved || content.innerHTML; // restore target on finish
-    let step = startStep;
+    let step = startStep, drawnPlan = ''; // B-7959: the step plan the screen was last drawn with
+    const STEP_OF = { welcome: 0, connect: 1, protect: 2, start: 3 };
+    const dotsOf = (plan) => plan.map((name) => `<span class="ob-dot${STEP_OF[name] === step ? ' active' : ''}"></span>`).join('');
     const teardown = () => {
       this._obKeyHandler?.abort?.(); this._obKeyHandler = null;
+      this._obRedraw = null; // B-7959
       welcome.classList.remove('onboarding');
       welcome.classList.add('hidden'); // _checkWelcome re-shows it only on an empty desktop
       content.innerHTML = content.dataset.saved;
@@ -243,9 +248,9 @@ export function installSetupFlows(App) {
       // lane door-day-one-landing: the steps this workspace needs (src/day-one.js tourSteps) — a workspace the admin already
       // protects (SSO, a sign-in password) skips «Protect this workspace» and its SSO sentence: the person just signed in
       const plan = tourSteps({ ssoEnabled: !!this._ssoEnabled, authEnabled: !!this._authEnabled });
+      drawnPlan = plan.join();
       if (step === 2 && !plan.includes('protect')) step = 3;
-      const STEP_OF = { welcome: 0, connect: 1, protect: 2, start: 3 };
-      const dots = plan.map((name) => `<span class="ob-dot${STEP_OF[name] === step ? ' active' : ''}"></span>`).join('');
+      const dots = dotsOf(plan);
       if (this._obSignInCard) { try { this._obSignInCard.destroy(); } catch { } this._obSignInCard = null; } // lane door-signin-card
       if (step === 0) {
         // lane door-day-one-landing (the naive-user studies: a pitch to coding agents, a promise of a terminal UI and 6
@@ -410,6 +415,7 @@ export function installSetupFlows(App) {
             const d = await res.json().catch(() => ({}));
             if (!res.ok) { errEl.textContent = d.error || t('Failed'); return; }
             this._authEnabled = true;
+            this._settingsUI?.redrawOpen?.();   // lane setting-doors f1: the open Settings redraws — its sign-in line is true again
             step = 3; render();
           } catch { errEl.textContent = t('Failed'); }
         });
@@ -464,6 +470,16 @@ export function installSetupFlows(App) {
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && welcome.classList.contains('onboarding')) { e.stopPropagation(); done(); this._obKeyHandler.abort(); }
     }, { capture: true, signal: this._obKeyHandler.signal });
+    // B-7959: the open tour's DOTS, drawn again with the facts it has NOW (app.js _maybeShowOnboarding: a hub whose /api/home
+    // answered after the bounded wait) — only the dots, never the step (r2, the unit's adversarial read: a whole render
+    // destroyed a sign-in card mid-sign-in, refilled a typed folder, moved a step); the next press reads the plan anyway
+    this._obRedraw = () => {
+      if (!welcome.classList.contains('onboarding')) return;
+      const plan = tourSteps({ ssoEnabled: !!this._ssoEnabled, authEnabled: !!this._authEnabled });
+      if (plan.join() === drawnPlan) return;
+      drawnPlan = plan.join();
+      const box = content.querySelector('.ob-dots'); if (box) box.innerHTML = dotsOf(plan);
+    };
     render();
   },
 

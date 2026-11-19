@@ -98,8 +98,67 @@ ok(BE.FIXED_IN === '0.38.2' && cmpV(VERBS.AGENT_BROWSER_CLI.table, BE.FIXED_IN) 
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 ok(JSON.stringify(pkg).includes(`agent-browser@${VERBS.AGENT_BROWSER_CLI.table}`) && fs.readFileSync(path.join(ROOT, 'deploy/docker/Dockerfile'), 'utf8').includes(`agent-browser@${VERBS.AGENT_BROWSER_CLI.table}`), 'package.json\'s install line and the Dockerfile name the same pin');
 const KS = fs.readFileSync(path.join(ROOT, 'src/server/browser-keeper.js'), 'utf8');
-ok(/const quietLog = !p\.host && !!prow\.starts && !argvPrefix\.length;\n\s*if \(quietLog && providerEnv\.AGENT_BROWSER_ARGS\) providerEnv = \{ \.\.\.providerEnv, AGENT_BROWSER_ARGS: BE\.withQuietLogging\(/.test(KS), 'a local launch that starts a Chrome (not a host, not a cloud -p provider) is quiet; a provider\'s own AGENT_BROWSER_ARGS gains the switches too');
-ok(/\n\s*quietLog \}; \/\/ lane browser-stderr-pipe/.test(KS) && /if \(quietLogFor\(kind, markOk\)\) cfg\.args = B\.withKeeperMark\(BE\.withQuietLogging\(cfg\.args\), markOk\);/.test(KS), 'the record is stamped at its launch; its config gains the quiet switches only then (the mark rides last)');
+// B-1789 cure (主开发 11:12Z — «THE SWITCHES LIVE WHERE EVERY LAUNCH ROAD PASSES, AND A CENSUS DERIVES THE ROADS»): a LAUNCH ROAD is
+// any src code that marks a launch (withKeeperMark / keeperMarkArg — every VibeSpace launch carries its mark, lane H verify r4),
+// quiets one (withQuietLogging) or composes one (launchTail / generatedConfig / generatedConfigParts) — found HERE by what it
+// calls, never listed by hand. The law:
+//   (a) withKeeperMark( and withQuietLogging( are called only inside THE LAUNCH TAIL (src/browser-profiles.js launchTail);
+//   (b) keeperMarkArg( only inside withKeeperMark, inside a sentence (a `${…}` of words), or on the argv road — its statement
+//       carries QUIET_LOG_ARGS (attachArgv: Chrome started without the driver, a whole argv under its own census);
+//   (c) a composer call that turns the switches OFF names the record's STAMP (quietLog / quietLogFor(…)), never a bare value.
+const TAIL_CALLS = /\b(withKeeperMark|withQuietLogging|keeperMarkArg|launchTail|generatedConfig(?:Parts)?)\(/g;
+const TAIL_ANY = /\b(?:withKeeperMark|withQuietLogging|keeperMarkArg|launchTail|generatedConfig(?:Parts)?)\(/;
+const bodyOf = (text, name) => { const i = text.indexOf(`\nfunction ${name}(`); const j = i < 0 ? -1 : text.indexOf('\n}\n', i); return j < 0 ? null : [i, j]; };
+function launchRoads(files) {
+  const roads = [], bad = [];
+  for (const { rel, text } of files) {
+    if (!TAIL_ANY.test(text)) continue; // a file that calls none of them is no road (one linear scan — src is ~36 MB)
+    const own = rel === 'src/browser-profiles.js' ? { tail: bodyOf(text, 'launchTail'), mark: bodyOf(text, 'withKeeperMark') } : {};
+    if (rel === 'src/browser-profiles.js' && !own.tail) bad.push({ where: rel, call: 'launchTail', why: 'THE LAUNCH TAIL is not in the composer\'s module (function launchTail)' });
+    const inside = (span, pos) => !!span && pos > span[0] && pos < span[1];
+    let off = 0;
+    for (const [n, raw] of text.split('\n').entries()) {
+      const at0 = off; off += raw.length + 1;
+      if (/^\s*(\/\/|\*|\/\*)/.test(raw)) continue;
+      const cut = raw.indexOf(' // '), code = cut >= 0 ? raw.slice(0, cut) : raw;
+      for (const m of code.matchAll(TAIL_CALLS)) {
+        const name = m[1], pos = at0 + m.index, before = code.slice(0, m.index), road = { where: `${rel}:${n + 1}`, call: name };
+        if (/\bfunction\s+$/.test(before)) continue; // its own definition
+        if (name === 'withKeeperMark' || name === 'withQuietLogging') { if (inside(own.tail, pos)) roads.push(road); else bad.push({ ...road, why: 'marks or quiets a launch outside THE LAUNCH TAIL' }); continue; }
+        if (name === 'keeperMarkArg') {
+          if (inside(own.mark, pos) || /\$\{(?:[A-Za-z_$][\w$]*\.)?$/.test(before)) continue; // withKeeperMark's own / words naming the mark
+          if (/QUIET_LOG_ARGS/.test(code)) roads.push({ ...road, call: 'argv road (keeperMarkArg + QUIET_LOG_ARGS)' });
+          else bad.push({ ...road, why: 'a hand-made mark: a launch road that skips THE LAUNCH TAIL' });
+          continue;
+        }
+        roads.push(road);
+        const q = /\bquiet(?:Log)?:\s*([^,})]+)/.exec(code.slice(m.index));
+        if (q && !/^(quietLog\b|quietLogFor\()/.test(q[1].trim())) bad.push({ ...road, why: `turns the switches off without the record's stamp (${q[1].trim()})` });
+      }
+    }
+  }
+  return { roads, bad };
+}
+const srcTexts = srcFiles.map((f) => ({ rel: path.relative(ROOT, f), text: fs.readFileSync(f, 'utf8') }));
+const LR = launchRoads(srcTexts);
+const roadFiles = [...new Set(LR.roads.map((r) => r.where.split(':')[0]))].sort();
+ok(LR.bad.length === 0 && LR.roads.length >= 10 && ['src/browser-profiles.js', 'src/server/browser-env.js', 'src/server/browser-keeper.js'].every((f) => roadFiles.includes(f)) && LR.roads.some((r) => /^argv road/.test(r.call)),
+  `B-1789 cure, THE CENSUS OF LAUNCH ROADS (derived from ${srcTexts.length} src files: ${LR.roads.length} roads in ${roadFiles.join(', ')}): every one passes THE LAUNCH TAIL — the mark and the switches are composed in launchTail alone, the argv road carries QUIET_LOG_ARGS, a switch turned off names its stamp`, LR.bad.length ? LR.bad : LR.roads.map((r) => `${r.where} ${r.call}`));
+// its RED controls: three planted roads (a new src file), each named by file:line
+const plant = (code) => launchRoads([{ rel: 'src/server/browser-planted.js', text: `'use strict';\n${code}\n` }]).bad; // judged as a file beside the real ones (a road's verdict reads its own file only)
+ok(plant("  cfg.args = B.withKeeperMark(cfg.args, key);").length === 1, 'CONTROL: a planted road that marks its launch by withKeeperMark (no switches) is named — RED');
+ok(plant("  const argv = [dir, B.keeperMarkArg(id), url];").length === 1, 'CONTROL: a planted argv with a hand-made mark and no QUIET_LOG_ARGS is named — RED');
+ok(plant("  cfg.args = B.launchTail(cfg.args, key, { quiet: false });").length === 1 && plant("  log.warn(`it carries ${B.keeperMarkArg(id)}`); cfg.args = B.launchTail(cfg.args, key, { quiet: quietLogFor(kind, key) });").length === 0,
+  'CONTROL: a planted road that turns the switches off without its stamp is named — RED (a sentence naming the mark and a stamped opt-out are not)');
+{ const BP = fs.readFileSync(path.join(ROOT, 'src/browser-profiles.js'), 'utf8'); const i = BP.indexOf('\nfunction launchTail(');
+  ok(launchRoads([{ rel: 'src/browser-profiles.js', text: i < 0 ? BP : BP.slice(0, i) + '\nfunction launchTailRenamed(' + BP.slice(i + '\nfunction launchTail('.length) }]).bad.some((b) => /not in the composer/.test(b.why)), 'CONTROL: the composer\'s tail gone (renamed) ⇒ the census fails BY NAME, never vacuously green'); }
+// THE TAIL itself (PURE): the switches, then the mark — last
+const BP0 = require('../src/browser-profiles.js');
+ok(BP0.launchTail('--no-sandbox', 'bk-0000beef') === '--no-sandbox,--disable-logging,--log-level=3,--vibespace-keeper=bk-0000beef' && JSON.stringify(BP0.launchTail(['--a'], 'bk-1')) === JSON.stringify(['--a', '--disable-logging', '--log-level=3', '--vibespace-keeper=bk-1'])
+  && BP0.launchTail('--v=1,--vibespace-keeper=bk-evil', 'bk-1') === '--v=1,--vibespace-keeper=bk-1' && BP0.launchTail('--a', 'bk-1', { quiet: false }) === '--a,--vibespace-keeper=bk-1' && BP0.launchTail('--a', null) === '--a,--disable-logging,--log-level=3',
+  'launchTail: the switches then the mark (a list stays a list); a user\'s own logging switch wins and a forged mark is replaced; quiet:false (a stamp) = the mark alone; no mark = the switches alone');
+ok(/const quietLog = !p\.host && !!prow\.starts && !argvPrefix\.length;/.test(KS) && /\n\s*quietLog \}; \/\/ lane browser-stderr-pipe/.test(KS) && /\n\s*rec\.quietLog = true;\n/.test(KS) && /\n\s*if \(prev && prev\.quietLog\) rec\.quietLog = true;/.test(KS),
+  'the stamps: a profile launch that starts a Chrome here (not a host, not a cloud -p provider) is stamped quietLog; an ephemeral\'s fresh launch is stamped (B-1789 cure) and an ADOPTED one carries its previous record\'s stamp (a server restart keeps the view it launched with); the keeper\'s files read the stamp (the census, rule c)');
 ok(/hangCause\(rec, p, pid, fact\.since\); \}/.test(KS) && /if \(was && was\.since === fact\.since && was\.cause\) fact\.cause = was\.cause;/.test(KS), 'the hung verdict asks /proc for the cause once per run; the cause rides later asks');
 const fullK = 'The browser froze because its log pipe filled and nothing read it (a fault of the browser driver 0.38.1, fixed in 0.38.2) — Restart starts it again on the updated driver; logins stay in the profile, its tabs are re-opened and every conversation using it is told';
 const uw = BS.unresponsiveWords({ since: Date.UTC(2026, 9, 10, 18, 32), label: 'jarvis-work', clock: '18:32', cause: 'stderr-pipe-full' });

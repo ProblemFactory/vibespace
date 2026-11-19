@@ -22,6 +22,9 @@ import { providerRowsShown } from './browser-new-profile-model.js'; // lane ui-c
 import { buildRows, choiceOfRow, installHint, buildRefusalWords } from './browser-build-model.js'; // lane browser-admin 2a: the build section
 import { downloadRow, mountDownloadPicker } from './browser-build-dialog.js'; // lane chrome-builds-download: "Download another build…"
 import { enterSubmits } from './chat-enter-keys.js';
+import { mountProxyField } from './browser-proxy-field.js'; // B-8b87: the proxy and its login (kept in the vault)
+import { proxyWords, proxyDoor, PROXY_REFUSALS } from './browser-proxy-model.js';
+import { showUnlock, showSetup } from './vault-unlock.js';
 
 const DIALOG_ID = 'browser-new-profile-dialog';
 const jsonPost = (body) => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
@@ -129,16 +132,27 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
   };
   syncWho();
 
+  // ── B-8b87: THE PROXY — the address alone and its login from the vault; offered for a browser THIS machine starts (a paired
+  //    machine's, or one VibeSpace only connects to, takes none — the server refuses it by name too) ──
+  const proxyWrap = el('div', 'bnew-proxy');
+  const proxyField = mountProxyField(proxyWrap, { fetchJson });
+  body.appendChild(proxyWrap);
+  const proxyOffered = () => adopt !== 'keep' && !st.host && st.provider !== 'cdp' && !/^cloud:/.test(String(st.provider || ''));   // B-8b87 cure: a cloud browser runs at its vendor
+  const syncProxy = () => { proxyWrap.style.display = proxyOffered() ? '' : 'none'; };
+
   // ── the refusal line + the footer ──
   const refusal = noteLine('bwho-refusal bnew-refusal', '', { warn: true });
   refusal.style.display = 'none';
-  const notes = el('div', 'bwho-notes'); notes.appendChild(refusal);
+  // B-8b87 round 3: a locked (or never set up) vault's refusal carries ITS press here too — Unlock… / Set up the vault…
+  const door = btn('', () => { try { (door.dataset.door === 'setup' ? showSetup : showUnlock)(); } catch { /* the vault's own window */ } }, 'bproxy-door');
+  door.style.display = 'none';
+  const notes = el('div', 'bwho-notes'); notes.append(refusal, door);
   const footer = el('div', 'dialog-footer bwho-footer');
   const cancel = btn(t('Cancel'), () => shell.close(), 'bnew-cancel');
   const create = btn(adopt ? t('Create and use it here') : t('Create'), () => doCreate(), 'mounts-btn-primary bnew-create');
   footer.append(cancel, create);
   shell.dialog.append(notes, footer);
-  const say = (text) => { noteText(refusal, text || ''); refusal.style.display = text ? '' : 'none'; notes.style.display = text ? '' : 'none'; };
+  const say = (text, which = null) => { noteText(refusal, text || ''); refusal.style.display = text ? '' : 'none'; notes.style.display = text ? '' : 'none'; door.dataset.door = which || ''; door.textContent = which === 'setup' ? t('Set up the vault…') : t('Unlock…'); door.style.display = text && which ? '' : 'none'; };
   say('');
 
   // ── drawing the two lists (keyed by id: a re-draw after a broadcast patches the rows, the choice stays) ──
@@ -181,6 +195,7 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
     portRow.style.display = st.provider === 'cdp' ? '' : 'none';
   }
   function drawMachines() {
+    try { syncProxy(); } catch { /* drawn before the proxy section */ }
     if (adopt === 'keep') return;
     const list = machWrap.querySelector('.bnew-machines');
     const chosen = (st.hostRows || []).find((r) => r && r.id === st.provider);
@@ -220,6 +235,7 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
   // rows yet (or none readable) = the default provider's, which offers one
   const buildChoiceOf = (id) => { const r = st.providers.find((x) => x && x.id === id); return r ? !!r.buildChoice : !st.providers.length; };
   function drawBuilds() {
+    try { syncProxy(); } catch { /* drawn before the proxy section */ }
     if (adopt === 'keep') return;
     if (!fromSession && st.cloneKey !== 'none') { buildWrap.style.display = 'none'; return; } // lane browser-profile-clone: a copy runs its source's build
     const show = buildChoiceOf(st.provider);
@@ -350,8 +366,15 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
       if (!browser) { say(buildRefusalWords({ code: 'browser_choice_invalid' }, t)); if (buildPath) buildPath.focus(); return; }
     }
     const cloneFrom = !fromSession && st.cloneKey && st.cloneKey !== 'none' ? st.cloneKey : null;
-    const c = createBody({ label: nameInput.value, provider: st.provider, host: st.host, cdpPort: portInput.value, mode: whoMode(), who, adopt, browser, cloneFrom });
-    if (!c.ok) { say(createRefusalWords({ code: c.code }, t)); (c.field === 'label' ? nameInput : c.field === 'cdpPort' ? portInput : picker).focus(); return; }
+    // B-8b87: the proxy read first — a new login is saved INTO the vault now (its password never rides the profile's request)
+    // B-8b87 cure: BUSY before the login is saved — a second press while it is saved sends no second create
+    st.busy = true; create.disabled = true;
+    const unbusy = () => { st.busy = false; create.disabled = false; };
+    const pv = proxyOffered() ? await proxyField.read() : { ok: true, proxy: null, proxyCredential: null };
+    if (st.closed) return;
+    if (!pv.ok) { unbusy(); say(proxyWords(pv.code, t, pv.error, { act: 'save', word: pv.word }), proxyDoor(pv.code, pv.word)); if (pv.focus) pv.focus.focus(); return; }
+    const c = createBody({ label: nameInput.value, provider: st.provider, host: st.host, cdpPort: portInput.value, mode: whoMode(), who, adopt, browser, cloneFrom, proxy: pv.proxy, proxyCredential: pv.proxyCredential });
+    if (!c.ok) { unbusy(); say(createRefusalWords({ code: c.code }, t)); (c.field === 'label' ? nameInput : c.field === 'cdpPort' ? portInput : picker).focus(); return; }
     st.busy = true; create.disabled = true; cancel.disabled = true; picker.setBusy(true);
     const cloneName = cloneFrom ? String(((st.cloneSources || []).find((x) => x && x.id === cloneFrom) || {}).label || cloneFrom) : '';
     if (cloneFrom) { cloneHint.textContent = t('Copying {source}… the new profile appears when it is done.', { source: cloneName }); cloneHint.style.display = ''; cloneWrap.setAttribute('aria-busy', 'true'); create.textContent = t('Copying…'); }
@@ -372,7 +395,8 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
         openNewProfileDialog(app, { label: nameInput.value, fromSession: { ...fromSession, adoptKeeps: r.now === 'keep' }, onCreated, onDismissed, opener: 'person' });   // (the person's Create press re-opens it: in front, as it was — r3's 'system' put it behind their window; a field they moved on to and type in keeps its keys through typedLast; lane dialog-yield r4)
         return;
       }
-      say(createRefusalWords(r, t) || buildRefusalWords(r, t) || (t('Could not create the profile') + ' — ' + ((r && r.error) || t('server unreachable'))));
+      const pw = r && PROXY_REFUSALS.includes(r.code) ? proxyWords(r.code, t, '', { act: 'save', word: r.word }) : '';
+      say(pw || createRefusalWords(r, t) || buildRefusalWords(r, t) || (t('Could not create the profile') + ' — ' + ((r && r.error) || t('server unreachable'))), pw ? proxyDoor(r.code, r.word) : null);
       if (r && (r.code === 'label_required' || r.code === 'label_taken')) nameInput.focus();
       return;
     }

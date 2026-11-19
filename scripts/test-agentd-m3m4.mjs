@@ -30,7 +30,11 @@ process.env.VIBESPACE_AGENTD_ROOT = AGENTD_ROOT;
 // discovery reads ~/.claude — point HOME at a fixture so the test is hermetic
 const fakeHome = path.join(tmp, 'home');
 fs.mkdirSync(path.join(fakeHome, '.claude', 'sessions'), { recursive: true });
-fs.mkdirSync(path.join(fakeHome, '.claude', 'projects', '-tmp-proj'), { recursive: true });
+// the fixture's project folder (the EXCLUDED package): the lock's cwd is DATA — nothing opens it — so it names no /tmp path (test-ci-gate-tiers:
+// no gated suite claims a fixed /tmp path) and none under this run's /tmp/vs-… scratch either (the discovery fixture guard hides
+// project folders of a /tmp/vs-* cwd — the jsonl legs would go vacuous); PROJ_DIR is the CLI's own encoding of it
+const PROJ_CWD = '/work/m34-proj', PROJ_DIR = PROJ_CWD.replace(/[/._]/g, '-');
+fs.mkdirSync(path.join(fakeHome, '.claude', 'projects', PROJ_DIR), { recursive: true });
 const dataDir = path.join(tmp, 'data'); fs.mkdirSync(dataDir, { recursive: true });
 
 let failed = 0;
@@ -52,6 +56,11 @@ const daemon = spawn(process.execPath, [path.join(AGENTD_ROOT, 'current', 'agent
   detached: true, stdio: 'ignore', env: { ...process.env, HOME: fakeHome },
 });
 daemon.unref();
+// the EXCLUDED package's adversarial read: a first connect that fails under load makes connect() start a SECOND daemon with
+// daemonEnv(process.env) — so THIS process's HOME is the fake one from here (that daemon reads the fixture too, never the
+// user's ~/.claude), and every daemon of this root is ended at ANY exit, not only after the last leg
+process.env.HOME = fakeHome;
+process.on('exit', () => { try { endDaemonsAndWait(AGENTD_ROOT); } catch { } });
 await sleep(700);
 await dm.connect();
 
@@ -96,15 +105,19 @@ console.log('— M3.3 discovery: raw-facts snapshot + dirty push —');
   // process — must be filtered as PID reuse), one dead lock, one jsonl.
   // NOT a symlink to sleep: /bin/sleep can be a multi-call binary (uutils/
   // busybox) that dispatches on argv0 and dies when invoked as 'claude'.
-  // A script named 'claude' gets comm='claude' (script basename) portably.
-  const claudeLn = path.join(fakeHome, 'claude');
-  fs.writeFileSync(claudeLn, '#!/bin/sh\nsleep 300\n', { mode: 0o755 });
-  const fakeClaude = (await import('node:child_process')).spawn(claudeLn, [], { stdio: 'ignore' });
+  // NOR a `#!/bin/sh` script named 'claude' any more (the EXCLUDED package, 2026-11-17 — why this suite sat red): the lock scan
+  // asks THE CLI identity rule (src/cli-identity.js isCliProcess, B-3185 r3 — the substring rule retired), and a shebang script
+  // runs as argv ['/bin/sh', '…/claude'] — argv[0] is `sh`, not an interpreter the rule knows, its image is the shell's. The real
+  // CLI runs as node over its entry point, so the fixture does too: rung 2 — `node …/claude.js` (an interpreter running the
+  // CLI's entry point). This process's own pid (node over THIS suite's file) stays the PID-reuse case below.
+  const claudeLn = path.join(fakeHome, 'claude.js');
+  fs.writeFileSync(claudeLn, 'setTimeout(() => {}, 300000);\n');
+  const fakeClaude = (await import('node:child_process')).spawn(process.execPath, [claudeLn], { stdio: 'ignore' });
   await new Promise((r) => setTimeout(r, 200));
-  fs.writeFileSync(path.join(fakeHome, '.claude', 'sessions', fakeClaude.pid + '.json'), JSON.stringify({ pid: fakeClaude.pid, sessionId: 'live-1', cwd: '/tmp/proj' }));
-  fs.writeFileSync(path.join(fakeHome, '.claude', 'sessions', process.pid + '.json'), JSON.stringify({ pid: process.pid, sessionId: 'pid-reused-1', cwd: '/tmp/proj' }));
-  fs.writeFileSync(path.join(fakeHome, '.claude', 'sessions', '999999.json'), JSON.stringify({ pid: 999999, sessionId: 'dead-1', cwd: '/tmp/proj' }));
-  fs.writeFileSync(path.join(fakeHome, '.claude', 'projects', '-tmp-proj', 'aaaa.jsonl'), '{"type":"user"}\n');
+  fs.writeFileSync(path.join(fakeHome, '.claude', 'sessions', fakeClaude.pid + '.json'), JSON.stringify({ pid: fakeClaude.pid, sessionId: 'live-1', cwd: PROJ_CWD }));
+  fs.writeFileSync(path.join(fakeHome, '.claude', 'sessions', process.pid + '.json'), JSON.stringify({ pid: process.pid, sessionId: 'pid-reused-1', cwd: PROJ_CWD }));
+  fs.writeFileSync(path.join(fakeHome, '.claude', 'sessions', '999999.json'), JSON.stringify({ pid: 999999, sessionId: 'dead-1', cwd: PROJ_CWD }));
+  fs.writeFileSync(path.join(fakeHome, '.claude', 'projects', PROJ_DIR, 'aaaa.jsonl'), '{"type":"user"}\n');
   const snap = await dm.discoverySnapshot();
   check('live claude lock reported; dead AND pid-reused locks filtered', snap.locks.length === 1 && snap.locks[0].sessionId === 'live-1', JSON.stringify(snap.locks));
   try { fakeClaude.kill(); } catch { }
@@ -112,7 +125,7 @@ console.log('— M3.3 discovery: raw-facts snapshot + dirty push —');
   let dirty = false;
   await dm.watchDiscovery(() => { dirty = true; });
   await sleep(300);
-  fs.writeFileSync(path.join(fakeHome, '.claude', 'projects', '-tmp-proj', 'bbbb.jsonl'), '{"type":"user"}\n');
+  fs.writeFileSync(path.join(fakeHome, '.claude', 'projects', PROJ_DIR, 'bbbb.jsonl'), '{"type":"user"}\n');
   for (let i = 0; i < 20 && !dirty; i++) await sleep(200);
   check('fs.watch dirty PUSH on a new transcript', dirty, '');
   const snap2 = await dm.discoverySnapshot();

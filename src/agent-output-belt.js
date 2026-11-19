@@ -91,18 +91,25 @@ function compiledFor(v, vr) {
  * the belt finds the vault); omit it (or point at a locked vault) and only the shape census runs. Returns the masked
  * string — never throws (both scrubbers are internally bounded and swallow their own faults; `maskText` throws only on a
  * value under its MIN, which we filter out first).
+ * lane bl-msg B-3e61 (THE LAW of its cure): `message: true` = a MESSAGE another agent reads (the group log, the msg stash, the
+ * prose sinks) — the shape census in its message mode: a masked value's region is the line rule's own, and inside it only PLAIN
+ * WORDS stay (the first chunk is masked unless it is the mask itself or a member's @ under a `:` head; a value that opens on a mark,
+ * a stop or an open pair takes the line rule whole);
+ * `mentions` = the members' names / ids — a member's @ alone is never a value; `said: []` collects what triggered each mask (the
+ * gap filter's too), so the sender's answer names it instead of reading a shorter count as a cut ⇒ kb-file-structure.md
+ * («src/secret-shapes.js», THE MESSAGE MODE).
  */
-function maskForSink(text, { dataDir } = {}) {
+function maskForSink(text, { dataDir, message = false, said = null, mentions = null } = {}) {
   let s = String(text == null ? '' : text);
   if (!s) return s;
   const vr = vaultRun();
   if (vr && dataDir) {
     try {
       const forms = compiledFor(SB.vaultForDir(dataDir), vr);   // lane vault-masker-once: built once per vault state, not per text
-      if (forms && forms.size) s = vr.maskText(s, forms);
+      if (forms && forms.size) { const was = s.split('[vault:').length; s = vr.maskText(s, forms); if (Array.isArray(said) && s.split('[vault:').length > was && !said.includes('a vault value')) said.push('a vault value'); }
     } catch { /* the shape census below still runs — the belt never loses the write */ }
   }
-  try { s = redactSecrets(s).text; } catch { /* redactSecrets is internally guarded; this is belt-and-braces */ }
+  try { s = redactSecrets(s, { message: !!message, said, mentions }).text; } catch { /* redactSecrets is internally guarded; this is belt-and-braces */ }
   return s;
 }
 

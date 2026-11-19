@@ -42,6 +42,7 @@ const i18nKey = (s) => s;
 /** THE KIND REGISTRY (lane vault-totp-add): one row per kind family — the rail's categories and the row → category mapping
  *  below READ it (no second list); scripts/test-vault-kinds-census.mjs checks every surface a family declares. */
 const VK = require('./vault-kinds.js');
+const FA = require('./foryou-actions.js');   // PURE (B-ef1b): a row's DECLARED buttons — the 需要你 band draws them as every surface does
 /** The sealed stores, in the window's order — the ids of src/server/vault-engine.js STORE_KEYS `store` (each one key). */
 const STORES = Object.freeze([
   Object.freeze({ store: 'accounts', label: 'Accounts' }),
@@ -73,6 +74,9 @@ const SECRET_ROWS = Object.freeze([   // the entry name's shape → its row's fi
   // design q-047 L1 (lane vault-totp): a two-step code — its row names the entry only (the issuer, the account and the
   // settings are the entry's VALUE: shown with the seed, behind 显示 — owner decision ① as amended); the code is its own door
   { re: /^totp:([\w.-]{1,120})$/, field: 'seed', kind: 'totp', label: (rest) => rest, detail: '' },
+  // lane lg-providers (B-d578): a third-party model provider's key — its record (data/providers.json) names it; the row names
+  // the provider (its label, through `machineName`'s twin `providerName` — the hub's provider store), never a character of it
+  { re: /^provider:(pv-[a-z0-9][a-z0-9-]{0,63})$/, field: 'key', kind: 'api-key', label: (rest, nameOf, providerName) => `Model provider key · ${providerName(rest)}`, detail: 'VibeSpace hands it to the agent CLI it starts for this provider' },   // ui-words: the Vault window words a hub secret's head and detail through t() (labelWord, t(row.detail)); zh / ja rows exist
 ]);
 /** lane vault-mint-put (design q-043 §9): an `agent:<scope>/<name>` entry's provenance — the Vault window v2's provenance
  *  chip renders `row.provenance` (SEAM: the integrator wires the chip onto the v2 window, lane vault-window-v2; this base
@@ -92,20 +96,27 @@ const LOGIN_SOURCES = Object.freeze({
   'vault-minted': { origin: 'mint', label: i18nKey('Registered by an agent · its password made by the vault, never shown'), sawPlaintext: false },
   'agent-typed': { origin: 'put', label: i18nKey('Typed by an agent itself · strength unknown — the agent knows it'), sawPlaintext: true },
 });
+/** B-8b87: a browser proxy's login `proxy-login:<scheme>://<host>:<port>#<user>` (src/browser-profiles.js PROXY_LOGIN_RE is the strict
+ *  shape; this reads its two halves) — its row names the user and the proxy; its one reader is the browser keeper's forwarder. */
+const PROXY_LOGIN_ROW_RE = /^proxy-login:((?:https?|socks5):\/\/[^#\s]{1,270})#([^\s#\u0000-\u001f\u007f]{1,128})$/;
+const PROXY_LOGIN_DETAIL = i18nKey('A browser proxy\'s login — VibeSpace hands it to the proxy for the browser profile that names it; the browser never sees it');
 const TOTP_TYPED = i18nKey('Added by an agent itself — the agent saw the seed');   // lane vault-agent-own: `vibespace-vault totp add`
 const FREE_ENTRY_RE = /^secret:[\w.-]{1,160}$/;   // lane vault-paste-request (src/vault-paste.js — the hub's ids are 10 hex characters)
 const FREE_KINDS = Object.freeze(['api-key', 'password', 'secret']);
-function secretRowOf(s, { machineName = (k) => k } = {}) {
+function secretRowOf(s, { machineName = (k) => k, providerName = (k) => k } = {}) {
   const name = String((s && s.name) || ''), at = s && s.at;
   const nameOf = (k) => { try { return String(machineName(k) || k); } catch { return k; } };
+  const provOf = (k) => { try { return String(providerName(k) || k); } catch { return k; } };
   for (const r of SECRET_ROWS) {
     const m = r.re.exec(name);
     if (!m) continue;
     const typed = r.kind === 'totp' && s && s.kind === 'agent-typed';   // lane vault-agent-own: a seed an agent added itself (`vibespace-vault totp add`) — the agent saw it
-    return { entry: name, field: r.field, kind: r.kind, label: r.label(m[1], nameOf), detail: typed ? TOTP_TYPED : r.detail, createdAt: at, ...(typed ? { origin: 'put', provenance: { by: 'agent', prov: 'agent-typed', sawPlaintext: true, actor: s.actor || null, owner: s.owner || null } } : {}) };
+    return { entry: name, field: r.field, kind: r.kind, label: r.label(m[1], nameOf, provOf), detail: typed ? TOTP_TYPED : r.detail, createdAt: at, ...(typed ? { origin: 'put', provenance: { by: 'agent', prov: 'agent-typed', sawPlaintext: true, actor: s.actor || null, owner: s.owner || null } } : {}) };
   }
   // lane vault-paste-request: a FREE entry (`secret:<id>` — pasted by the owner in For you at an agent's request, or added
   // in the Vault window's 「其他密钥或密码…」): its row says the label, the kind and the note a person wrote (never a value)
+  const pl = PROXY_LOGIN_ROW_RE.exec(name);   // B-8b87
+  if (pl) return { entry: name, field: 'password', kind: 'proxy-login', label: `${pl[2]} · ${pl[1]}`, detail: PROXY_LOGIN_DETAIL, createdAt: at };
   const wl = WEB_LOGIN_RE.exec(name);
   if (wl) { const src = Object.prototype.hasOwnProperty.call(LOGIN_SOURCES, s && s.kind) ? s.kind : 'owner'; const p = LOGIN_SOURCES[src]; return { entry: name, field: 'password', kind: 'login', label: `${wl[2]} · ${wl[1].replace(/^https:\/\//, '')}`, detail: p.label, createdAt: at, ...(p.origin ? { origin: p.origin } : {}), ...(src !== 'owner' ? { provenance: { by: 'agent', prov: src, sawPlaintext: p.sawPlaintext, actor: (s && s.actor) || null, owner: (s && s.owner) || null } } : {}) }; }   // lane browser-login (+ lane vault-agent-own: the conversation that stored it, `owner`)
   if (FREE_ENTRY_RE.test(name)) {
@@ -176,7 +187,7 @@ function plainBytesOf(blob) {
 }
 
 // ── THE REFERENCE: `<store>:<entry>#<field>` ──
-const ENTRY_RE = /^(?:web-login:[^\s\u0000-\u001f]{1,440}|[^#\s\u0000-\u001f]{1,240})$/;   // lane browser-login: a web login's name holds its own `#` (parseRef splits at the LAST one)
+const ENTRY_RE = /^(?:web-login:[^\s\u0000-\u001f]{1,440}|proxy-login:[^\s\u0000-\u001f]{1,440}|[^#\s\u0000-\u001f]{1,240})$/;   // + B-8b87: a proxy login's name holds its own `#` too   // lane browser-login: a web login's name holds its own `#` (parseRef splits at the LAST one)
 const FIELD_RE = /^[\w.:-]{1,160}$/;
 function refOf(store, entry, field) {
   const e = String(entry == null ? '' : entry), f = String(field == null ? '' : field);
@@ -209,7 +220,10 @@ function doorsOf({ store, entry, field }) {
   // person's GET, no 「验证是你」, audited); no 换新 (a site that changed the seed = delete + add — design §4 #9)
   // lane vault-paste-request: a free entry — its own delete door (the run door's switch and grants on it go with it)
   if (store === 'secrets' && FREE_ENTRY_RE.test(e)) return { delete: { method: 'DELETE', path: `/api/vault/secrets/${enc(e.slice(7))}`, confirm: cf }, rotate: null };
+  if (store === 'secrets' && PROXY_LOGIN_ROW_RE.test(e)) return { delete: { method: 'DELETE', path: `/api/vault/proxy-logins/${enc(e)}`, confirm: cf }, rotate: null };   // B-8b87: its own delete door
   if (store === 'secrets' && WEB_LOGIN_RE.test(e)) return { delete: { method: 'DELETE', path: `/api/vault/web-logins/${enc(e)}`, confirm: cf }, rotate: null, login: { name: e } };   // lane browser-login: its own delete door (its grant row goes with it) + 用于…
+  if (store === 'secrets' && /^provider:pv-[a-z0-9][a-z0-9-]{0,63}$/.test(e)) return { delete: { method: 'DELETE', path: `/api/providers/${enc(e.slice(9))}`, confirm: cf }, rotate: null };   // lane lg-providers: the provider's own remove (its record goes with it)
+  if (store === 'secrets' && AGENT_ENTRY_RE.test(e)) return { delete: { method: 'DELETE', path: `/api/vault/agent-secrets/${enc(e)}`, confirm: cf }, rotate: null };   // B-3fb5: an agent's own entry — its delete door (the person's; the whole name, encoded)
   if (store === 'secrets' && /^totp:[\w.-]{1,120}$/.test(e)) { const p = `/api/vault/totp/${enc(e.slice(5))}`; return { delete: { method: 'DELETE', path: p, confirm: cf }, rotate: null, code: { path: p } }; }
   return { delete: null, rotate: null };
 }
@@ -401,6 +415,10 @@ function bandDoorsOf(item) {
   if (type === 'vault-rotate') return ['renew', 'ack'];
   if (type === 'secret-request') return ['paste', 'deny'];
   if (type === 'vault-words-ask') return ['allow', 'deny'];   // lane vault-entry-description: an agent's proposal of an entry's words — 允许 / 拒绝   // lane vault-paste-request: an agent's request for a secret — THE paste box (a dialog here) / refuse
+  // B-ef1b (the pictures: the band drew the retired job-secrets notice with «Open the row» / «Got it» — no way to answer it there):
+  // a row that DECLARES its buttons (src/foryou-actions.js buttonsOf — never a branch per type) draws them, + «Got it»
+  const declared = FA.buttonsOf(type);
+  if (declared) return [...declared.map((b) => `btn:${b.answer}`), 'ack'];
   return ['open', 'ack'];
 }
 

@@ -95,7 +95,7 @@ console.log('— the list\'s wiring pins and the src/ censuses (pins, <select>, 
     const out = [];
     for (const m of src.matchAll(/\b(?:const|let)\s+(\w+)\s*=\s*noteLine\(/g)) {
       const v = m[1];
-      if (new RegExp('\\b' + v + '\\.(?:querySelector|firstElementChild|firstChild|children\\[0\\]|childNodes\\[0\\])').test(src.replace(/\/\/.*$/gm, ''))) out.push(v);
+      if (new RegExp('\\b' + v + '\\.(?:querySelector|firstElementChild|firstChild|children\\[0\\]|childNodes\\[0\\])').test(src.replace(/\/\/.*$/gm, ''))) out.push(v); // stale-pins: kept — a word of this census's alternation (noteLine children), not a pin of a product line
     }
     return out;
   };

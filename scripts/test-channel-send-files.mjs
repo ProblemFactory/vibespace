@@ -166,12 +166,12 @@ const MC = mutantCopies('send-files', REPO);
 // lane dc-channels-seams: the engine's patched copy is the engine + its three family files as ONE closed world
 async function mutantEngine(from, to, judge, tag) {
   const s = engineSource(REPO);
-  if (!s.includes(from)) return null;
+  if (!s.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`);
   return judge(require(MC.write('src/server/channels-engine.js', s.replace(from, to), tag)));
 }
 async function mutant(file, from, to, judge, tag) {
   const s = fs.readFileSync(path.join(REPO, 'src', file), 'utf8');
-  if (!s.includes(from)) return null;
+  if (!s.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`);
   return judge(require(MC.write(`src/${file}`, s.replace(from, to), tag)));
 }
 
@@ -271,6 +271,110 @@ ok(rcj.length === 0, `lark: the text's answer lost ⇒ unknown ⇒ reconciled SE
 // through the SAME store + adapter path as an agent's: out at once (no card, the attachment guard is for agents), the
 // record keeps name/size/sha256, a refused upload is "partly sent" + ONE For-you item, a file changed on disk between the
 // store and the send is refused by name (attachment-changed), nothing sent
+async function restJudge(ENGm) {
+  const out = [];
+  const fake = require(path.join(REPO, 'src/channels/fake.js'));
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-send-files-rest-'));
+  const calls = []; let refuse = true;
+  const fetchFn = async (url, init = {}) => {
+    const c = { url: String(url), method: init.method || 'GET', form: init.body instanceof FormData }; calls.push(c);
+    if (c.method === 'GET') return jsonRes(200, { code: 0, data: { items: [], has_more: false } });
+    if (c.form && c.url.includes('/im/v1/files')) return refuse ? jsonRes(400, LF.answers.scopeRefusal) : jsonRes(200, LF.answers.file);   // r4: a FILE upload answers a file_key (the image answer failed the rest's own send)
+    return c.form ? jsonRes(200, LF.answers.image) : jsonRes(200, LF.answers.message);
+  };
+  const A = lark.create({ id: 'l', options: {} }, { resolveIntegration: () => CRED, fetch: fetchFn, now: () => T0, tokens: tokens({ access_token: 'u-fixture-user-token', expiresAt: T0 + 3600e3, refresh_token: 'r', refreshExpiresAt: T0 + 30 * 86400e3, scopes: ['im:message', 'im:message.send_as_user', 'im:resource'] }) });
+  const mod = { kind: 'lark-own', caps: { ...fake.fakePoll.caps, idempotency: lark.caps.idempotency, sendAttachments: lark.caps.sendAttachments, sendAttachmentsWhy: null, budget: undefined, pace: undefined },
+    create(record, deps) { return Object.assign(Object.create(fake.fakePoll.create(record, { ...deps })), { send: (c, o) => A.send(c, o) }); } };
+  const registry = CH.createChannelRegistry(); registry.register(mod);
+  fs.mkdirSync(path.join(dataDir, 'channels'), { recursive: true });
+  fs.writeFileSync(path.join(dataDir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [{ id: 'la', kind: 'lark-own', label: 'la', enabled: true, auth: { tokenEnc: null, expiresAt: null, scopes: [] }, lastPass: null, consecutiveFailures: 0, push: { enabled: false }, options: {} }] }));
+  const todos = [];
+  try {
+    const eng = ENGm.create({ dataDir, registry, env: {}, now: () => T0, broadcast: () => {}, serverSetting: (k) => ({ 'channels.guardAttachmentsReview': true })[k], liveSessions: () => [], userTodos: { add: (key, item) => { todos.push(item); return { id: `t${todos.length}` }; } }, log: { log() {}, warn() {}, error() {} } });
+    await eng.pass('la', { force: true });
+    const conv = Object.keys(eng.store.index.live()).find((k) => k.startsWith('la/')).slice(3);
+    const att = () => files().map((f) => ({ name: f.name, data: f.data.toString('base64') }));
+    // lane bl-msg B-da74: the owner's send of 2 files, the second refused ⇒ partly sent; «Send the rest» sends ONLY it, once
+    const pr = await eng.propose({ kind: 'user' }, 'la', conv, { text: 'the report', attachments: att(), direct: true });
+    const id = pr.ok ? pr.proposal.id : null;
+    const q0 = id ? eng.store.outbox.snapshot().proposals[id] : null;
+    if (!(q0 && q0.state === 'sent' && /^partly sent/.test(q0.reason || ''))) { out.push(`the first send is not partly sent (${q0 && q0.state} ${q0 && q0.reason})`); return out; }
+    const v0 = (eng.outboxView().proposals || []).find((x) => x.id === id) || {};
+    if (v0.restLeft !== 1) out.push(`the card does not offer «Send the rest» for the one file left (restLeft ${v0.restLeft})`);
+    const nobody = await eng.resendRest(id, { ctx: { kind: 'agent', id: 'agent-x' } });
+    if (!(nobody && nobody.ok === false && nobody.code === 'not-found')) out.push(`an agent that did not draft it could ask a resend (${JSON.stringify(nobody).slice(0, 120)})`);
+    refuse = false;
+    const before = calls.length;
+    const r = await eng.resendRest(id, { ctx: { kind: 'user' } });
+    const q1 = r && r.ok && r.proposal ? eng.store.outbox.snapshot().proposals[r.proposal.id] : null;
+    const names = q1 ? (q1.attachments || []).map((x) => x.name) : null;
+    if (!(q1 && q1.state === 'sent' && JSON.stringify(names) === JSON.stringify(['b.pdf']) && !String(q1.text || '').trim() && q1.restOf === id)) out.push(`the rest is not ONE new sent proposal with only b.pdf and no text (${JSON.stringify({ ok: r && r.ok, state: q1 && q1.state, names, text: q1 && q1.text, restOf: q1 && q1.restOf, code: r && r.code })})`);
+    if (calls.slice(before).filter((c) => c.form && c.url.includes('/im/v1/images')).length) out.push('the resend uploaded the image that had already landed');
+    const q0b = eng.store.outbox.snapshot().proposals[id];
+    const v1 = (eng.outboxView().proposals || []).find((x) => x.id === id) || {};
+    if (!(q0b.restSentAs === (q1 && q1.id) && !v1.restLeft)) out.push(`the first card still offers the rest (${JSON.stringify({ restSentAs: q0b.restSentAs, restLeft: v1.restLeft })})`);
+    const again = await eng.resendRest(id, { ctx: { kind: 'user' } });
+    if (!(again && again.ok === false && again.code === 'rest-already')) out.push(`a second «Send the rest» was not refused by name (${JSON.stringify(again).slice(0, 120)})`);
+    const whole = q1 ? await eng.resendRest(q1.id, { ctx: { kind: 'user' } }) : null;
+    if (!(whole && whole.ok === false && whole.code === 'rest-nothing-left')) out.push(`a proposal that landed whole offered a rest (${JSON.stringify(whole).slice(0, 120)})`);
+    // the shoulds (主开发 11:18Z): a rest a STOP left in 'proposed' (its create landed, its first move never did) holds no «once» — the
+    // card offers the rest again and the press sends it (the stale record never sends: 'proposed' leaves only by the policy's move)
+    refuse = true;
+    const pr2 = await eng.propose({ kind: 'user' }, 'la', conv, { text: 'the second report', attachments: att(), direct: true });
+    const id2 = pr2.ok ? pr2.proposal.id : null, sid = 'p-stale-rest';
+    if (id2) await eng.store.outbox.update((ob) => { const q = ob.proposals[id2]; const st = JSON.parse(JSON.stringify(q)); delete st.restSentAs; delete st.alsoFor; ob.proposals[sid] = { ...st, id: sid, state: 'proposed', restOf: id2, result: null, reason: null, receipt: null, text: '', attachments: [q.attachments[1]], history: [{ state: 'proposed', at: T0, by: 'user' }] }; q.restSentAs = sid; });
+    const v2 = id2 ? (eng.outboxView().proposals || []).find((x) => x.id === id2) || {} : {};
+    refuse = false;
+    const r2 = id2 ? await eng.resendRest(id2, { ctx: { kind: 'user' } }) : null;
+    const q2 = r2 && r2.ok && r2.proposal ? eng.store.outbox.snapshot().proposals[r2.proposal.id] : null;
+    if (!(id2 && v2.restLeft === 1)) out.push(`a stamp a stop left on a 'proposed' rest still hides «Send the rest» (restLeft ${v2.restLeft})`);
+    if (!(q2 && q2.state === 'sent' && q2.restOf === id2 && eng.store.outbox.snapshot().proposals[id2].restSentAs === q2.id)) out.push(`after a stop left the rest 'proposed', the press did not send it (${JSON.stringify(r2).slice(0, 140)})`);
+  } finally { fs.rmSync(dataDir, { recursive: true, force: true }); }
+  return out;
+}
+// lane bl-msg B-da74 cure (主开发 09:24Z): «Send the rest» is ONCE across a restart — the hub stops INSIDE the rest's upload (the
+// first rest upload never answers); a fresh engine over the same folder is the boot: the first card offers no rest and a second press
+// is refused by name, nothing uploaded again
+async function restRestartJudge(ENGm) {
+  const out = [];
+  const fake = require(path.join(REPO, 'src/channels/fake.js'));
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-send-files-rr-'));
+  const calls = []; let refuse = true, hung = 0, atUpload = null;
+  const inUpload = new Promise((r) => { atUpload = r; });
+  const fetchFn = async (url, init = {}) => {
+    const c = { url: String(url), method: init.method || 'GET', form: init.body instanceof FormData }; calls.push(c);
+    if (c.method === 'GET') return jsonRes(200, { code: 0, data: { items: [], has_more: false } });
+    if (c.form && c.url.includes('/im/v1/files')) { if (refuse) return jsonRes(400, LF.answers.scopeRefusal); if (hung++ === 0) { atUpload(); return new Promise(() => {}); } return jsonRes(200, LF.answers.file); }
+    return c.form ? jsonRes(200, LF.answers.image) : jsonRes(200, LF.answers.message);
+  };
+  const A = lark.create({ id: 'l', options: {} }, { resolveIntegration: () => CRED, fetch: fetchFn, now: () => T0, tokens: tokens({ access_token: 'u-fixture-user-token', expiresAt: T0 + 3600e3, refresh_token: 'r', refreshExpiresAt: T0 + 30 * 86400e3, scopes: ['im:message', 'im:message.send_as_user', 'im:resource'] }) });
+  const mod = { kind: 'lark-own', caps: { ...fake.fakePoll.caps, idempotency: lark.caps.idempotency, sendAttachments: lark.caps.sendAttachments, sendAttachmentsWhy: null, budget: undefined, pace: undefined },
+    create(record, deps) { return Object.assign(Object.create(fake.fakePoll.create(record, { ...deps })), { send: (c, o) => A.send(c, o) }); } };
+  const registry = CH.createChannelRegistry(); registry.register(mod);
+  fs.mkdirSync(path.join(dataDir, 'channels'), { recursive: true });
+  fs.writeFileSync(path.join(dataDir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [{ id: 'la', kind: 'lark-own', label: 'la', enabled: true, auth: { tokenEnc: null, expiresAt: null, scopes: [] }, lastPass: null, consecutiveFailures: 0, push: { enabled: false }, options: {} }] }));
+  const mk = () => ENGm.create({ dataDir, registry, env: {}, now: () => T0, broadcast: () => {}, serverSetting: (k) => ({ 'channels.guardAttachmentsReview': true })[k], liveSessions: () => [], userTodos: { add: () => ({ id: 't1' }) }, log: { log() {}, warn() {}, error() {} } });
+  try {
+    const eng = mk();
+    await eng.pass('la', { force: true });
+    const conv = Object.keys(eng.store.index.live()).find((k) => k.startsWith('la/')).slice(3);
+    const pr = await eng.propose({ kind: 'user' }, 'la', conv, { text: 'the report', attachments: files().map((f) => ({ name: f.name, data: f.data.toString('base64') })), direct: true });
+    const id = pr.ok ? pr.proposal.id : null;
+    if (!id) return [`setup: the first send (${JSON.stringify(pr).slice(0, 120)})`];
+    refuse = false;
+    eng.resendRest(id, { ctx: { kind: 'user' } });   // never answered: the hub stops inside its upload
+    await inUpload;   // the rest is created and its file is on its way
+    const files0 = calls.filter((c) => c.form && c.url.includes('/im/v1/files')).length;
+    const eng2 = mk();   // THE RESTART: a fresh engine over the folder as the stop left it
+    const v = (eng2.outboxView().proposals || []).find((x) => x.id === id) || {};
+    const again = await eng2.resendRest(id, { ctx: { kind: 'user' } });
+    if (v.restLeft) out.push(`after the restart the first card offers «Send the rest» again (restLeft ${v.restLeft})`);
+    if (!(again && again.ok === false && again.code === 'rest-already')) out.push(`after the restart a second «Send the rest» was not refused by name (${JSON.stringify(again).slice(0, 140)})`);
+    const files1 = calls.filter((c) => c.form && c.url.includes('/im/v1/files')).length;
+    if (files1 !== files0) out.push(`after the restart the same file went up again (${files1 - files0} upload(s))`);
+  } finally { fs.rmSync(dataDir, { recursive: true, force: true }); }
+  return out;
+}
 async function ownerJudge(ENGm) {
   const out = [];
   const fake = require(path.join(REPO, 'src/channels/fake.js'));
@@ -317,6 +421,33 @@ async function ownerJudge(ENGm) {
   return out;
 }
 console.log('⑨ the owner\'s own send (POST …/send) carries files through the same path');
+// lane bl-msg B-da74 («Send the rest»): a SENT proposal whose second file was refused sends ONLY that file again, as a new message —
+// once, from the owner's door; another agent cannot ask; a whole one has no rest; RED CONTROL = the rest never found
+const rest = await restJudge(ENG);
+ok(rest.length === 0, `«Send the rest»: a partly sent proposal (b.pdf refused) is offered the rest, the owner's press sends ONLY b.pdf as one new message, the image is not uploaded again, the first card stops offering it, a second press and a whole one are refused by name, a rest a stop left 'proposed' holds no «once»${rest.length ? ' — ' + rest.join(' · ') : ''}`);
+// the shoulds: RED CONTROL — the door's «once» read off the bare stamp again (a stop's 'proposed' rest holds it for good)
+{ const STALE = "if (restHeldBy(p)) return { ok: false, code: 'rest-already',";
+  const staleRed = await mutantEngine(STALE, "if (p.restSentAs) return { ok: false, code: 'rest-already',", restJudge, 'rest-stale-holds');   // stale-pins: kept (the OLD door line is the mutant compiled back in, never an anchor)
+  ok(Array.isArray(staleRed) && staleRed.some((x) => /a stop left the rest 'proposed'/.test(x)), `RED CONTROL (the bare stamp holds): after a stop left the rest 'proposed', the press is refused — the leg goes red (${staleRed ? staleRed.join(' · ').slice(0, 200) : 'the control missed its line'})`); }
+const restRed = await mutantEngine("parts.forEach((x, k) => { if (!x.ok && !x.lost && !REST_NEVER.has(x.code)", "parts.forEach((x, k) => { if (false && !x.ok && !x.lost && !REST_NEVER.has(x.code)", restJudge, 'no-rest');
+ok(Array.isArray(restRed) && restRed.length > 0, `RED CONTROL (the rest never found): the leg goes red (${restRed ? restRed.length : 'the control missed its line'})`);
+const restart = await restRestartJudge(ENG);
+ok(restart.length === 0, `«Send the rest» ONCE ACROSS A RESTART: the hub stops inside the rest's upload — the fresh engine's first card offers no rest, a second press is refused by name (rest-already), nothing goes up again${restart.length ? ' — ' + restart.join(' · ') : ''}`);
+{ // RED CONTROL: today's order — the stamp and the back-link written AFTER propose() returns (after the upload)
+  const STAMP = "        if (guards && guards.restOf) { created.restOf = guards.restOf; const q0 = ob.proposals[guards.restOf]; if (q0) q0.restSentAs = id; }\n";
+  const LATE = '    if (r && r.ok && r.proposal && r.proposal.id) notifyOutbox([p.id, r.proposal.id]);';
+  const LATE_OLD = "    if (r && r.ok && r.proposal && r.proposal.id) { const live = ['proposed', 'awaiting-approval', 'sending', 'unknown', 'sent'].includes(r.proposal.state); await store.outbox.update((ob) => { const q = ob.proposals[r.proposal.id]; if (q) q.restOf = p.id; const q0 = ob.proposals[p.id]; if (q0 && live) q0.restSentAs = r.proposal.id; }); notifyOutbox([p.id, r.proposal.id]); }";
+  const es = engineSource(REPO), found = es.split(STAMP).length === 2 && es.split(LATE).length === 2;
+  ok(found, 'the control «today\'s order» finds its two lines (the stamp in the create update, the notify after propose)');
+  const late = found ? await restRestartJudge(require(MC.write('src/server/channels-engine.js', es.replace(STAMP, '').replace(LATE, LATE_OLD), 'rest-late-stamp'))) : null;
+  ok(Array.isArray(late) && late.length > 0, `RED CONTROL (today's order — the stamp after the upload): after the restart the rest is offered and sent again — the leg goes red (${late ? late.join(' · ') : 'the control missed its lines'})`);
+}
+{ // the cure: the four refusals reach the owner's toast in the owner's words (routeErrorText), never the engine's English sentence
+  const CW = await import(pathToFileURL(path.join(REPO, 'src/lib/channel-words.js')).href);
+  const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
+  const rows = ['rest-not-sent', 'rest-already', 'rest-nothing-left', 'rest-files-gone'].map((code) => { const w = CW.routeErrorText({ code, error: 'ENGLISH SENTENCE' }); return { code, w, zh: zh.includes(`"${w}":`), ja: ja.includes(`"${w}":`) }; });
+  ok(rows.every((x) => x.w && !x.w.includes('ENGLISH SENTENCE') && x.zh && x.ja), `the four «Send the rest» refusals are worded by code, in zh and ja (${rows.map((x) => `${x.code} → «${x.w}»${x.zh && x.ja ? '' : ' (a dictionary lacks it)'}`).join(' · ')})`);
+}
 const own = await ownerJudge(ENG);
 ok(own.length === 0, `the owner's send with 2 files: out at once as the owner, the record keeps name/size/sha256, a refused upload "partly sent" + ONE For-you item, a changed file refused attachment-changed${own.length ? ` — ${own.join('; ')}` : ''}`);
 
@@ -730,7 +861,7 @@ ok(rej.length === 0, `the words reach the agent (real engine over the Slack adap
 {
   const keepR = setInterval(() => {}, 1000);
   const SS = fs.readFileSync(path.join(REPO, 'src/channels/slack.js'), 'utf8'), LS = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf8');
-  const copy = (src, file, from, to, tag) => (src.includes(from) ? require(MC.write(`src/channels/${file}`, src.replace(from, to), tag)) : null);
+  const copy = (src, file, from, to, tag) => (src.includes(from) ? require(MC.write(`src/channels/${file}`, src.replace(from, to), tag)) : (() => { throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); })());
   const redBy = async (M, judge, pins) => { if (!M) return null; const r = await judge(M); return pins.filter((p) => r[p]); };
   const say = (red, pins) => (red === null ? 'the patch site is gone' : red.length === pins.length ? `red by ${red.join(' ')}` : `red by ${red.join(' ') || 'nothing'} — GREEN on ${pins.filter((p) => !red.includes(p)).join(' ')}`);
   const NO_RETRY = '        if (!next.go) throw stoppedUpload(e, n, next.stop);';
@@ -1065,9 +1196,10 @@ ok(!zw['m2·lark'], `m2 lark: a pace that eats the window before the retry's upl
 {
   const keepR = setInterval(() => {}, 1000);
   const SS = fs.readFileSync(path.join(REPO, 'src/channels/slack.js'), 'utf8'), LS = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf8');
+  const ASIS = (src) => src; // the ONE side left as it is on purpose (B-0d3e: only it may mark its copy `same`)
   const both = (pS, pL, tag) => {
     const s2 = pS(SS), l2 = pL(LS);
-    return s2 && l2 ? { S: require(MC.write('src/channels/slack.js', s2, `${tag}-slack`)), L: require(MC.write('src/channels/lark.js', l2, `${tag}-lark`)) } : null;
+    return s2 && l2 ? { S: require(MC.write('src/channels/slack.js', s2, `${tag}-slack`, { same: pS === ASIS })), L: require(MC.write('src/channels/lark.js', l2, `${tag}-lark`, { same: pL === ASIS })) } : null; // a side left as it is (ASIS) says so (B-0d3e); `sub` answers null when its anchor is gone; any other patcher whose copy equals the file fails by name
   };
   const sub = (from, to) => (src) => (src.includes(from) ? src.replace(from, to) : null);
   const ASK_ON = '{ convId, windowOf: () => windowOf(ASK_WINDOW) }';
@@ -1079,7 +1211,7 @@ ok(!zw['m2·lark'], `m2 lark: a pace that eats the window before the retry's upl
   const ASK_CATCH = "catch (e) { if ((n > 1 || bounded) && e instanceof ChannelError && e.code === 'transport') windowOf(ASK_WINDOW); throw e; }";
   const say = (red, pins) => (red === null ? 'the patch site is gone' : red.length === pins.length ? `red by ${red.join(' ')}` : `red by ${red.join(' ') || 'nothing'} — GREEN on ${pins.filter((p) => !red.includes(p)).join(' ')}`);
   const m1 = both(sub(ASK_ON, '{ convId }'), lWin, 'r3-m1-ask-outside-budget');
-  const m1w = both(sub(ASK_CATCH, 'catch (e) { throw e; }'), (src) => src, 'r3-m1-ask-own-words');
+  const m1w = both(sub(ASK_CATCH, 'catch (e) { throw e; }'), ASIS, 'r3-m1-ask-own-words');
   const m2a = both(sub(STOP_S, STOP_S.replace('if (!w)', 'if (false)')), sub(STOP_L, STOP_L.replace('if (!w)', 'if (false)')), 'r3-m2-no-stop');
   const m2b = both(sub(STOP_S, STOP_S.replace('n - 1', 'n')), sub(STOP_L, STOP_L.replace('n - 1', 'n')), 'r3-m2-off-by-one');
   const rows = [

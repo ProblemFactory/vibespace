@@ -7,7 +7,7 @@ const {
   parseCodexSessionJsonl,
   transcriptWorkerCall,
 } = require('./adapters/codex');
-const { listOpenCodexRolloutPaths, codexThreadIdOf, CODEX_ROLLOUT_RE } = require('./discovery-facts');
+const { CODEX_ROLLOUT_RE } = require('./discovery-facts');   // B-f64b: the open-rollout walk runs in the transcript worker only (codexOpenThreads)
 
 function getCodexHistorySessionId(session) {
   return session?.backendSessionId || session?.claudeSessionId || null;
@@ -32,33 +32,35 @@ function parseBufferRecords(buffer) {
 // Codex LIVENESS = a rollout held open by a codex process (no lock files).
 // The fd/lsof scan is ONE implementation in discovery-facts
 // (listOpenCodexRolloutPaths — shared with the daemon snapshot's CO lines and
-// mirrored by the ssh script); this file only turns paths into thread ids.
-function _openThreadIdsUncached() {
-  const ids = new Set();
-  for (const p of listOpenCodexRolloutPaths({ sessionsDir: CODEX_SESSIONS_DIR })) {
-    const tid = codexThreadIdOf(p);
-    if (tid) ids.add(tid);
-  }
-  return ids;
+// mirrored by the ssh script); the transcript worker runs it (codexOpenThreads)
+// and this file only keeps its answer.
+// B-f64b: the walk NEVER runs on the main thread — not on the sync listing, not as the async road's fallback. The witness
+// (test-boot-loop-hold, 33 s held at the hotfix's gate on a packed machine) was this walk on the loop with a ps per exited
+// pid: the worker missed its 15 s deadline and the inline fallback walked it here. A worker that cannot answer (the pool
+// down, a deadline missed, the op inline on the main thread) answers null: the kept answer stands KEPT_MAX_MS, then the
+// rows say their liveness is not known (liveness: 'unknown'); a null is never kept.
+let _openThreadsCache = null; // {ids, at} — external-codex detection tolerates 10s staleness easily (audit round-2)
+let _openThreadsInflight = null;   // ONE walk in flight, for both roads
+const KEPT_MAX_MS = 120000;   // a worker that cannot answer: the kept answer stands this long, then «not known»
+const keptIds = () => (_openThreadsCache && Date.now() - _openThreadsCache.at <= KEPT_MAX_MS ? _openThreadsCache.ids : null);
+/** The sync road's answer: the KEPT ids (of any age; a stale one starts the worker's walk) or null = not known yet. */
+function keptOpenThreadIds() {
+  const c = _openThreadsCache;
+  if (!c || Date.now() - c.at >= 10000) listOpenCodexThreadIdsAsync().catch(() => null);
+  return keptIds();
 }
-
-let _openThreadsCache = null; // {ids, at} — the /proc walk (readdir all pids +
-// per-codex-fd readlinks) ran every ~5s sweep; external-codex detection
-// tolerates 10s staleness easily (audit round-2)
-function listOpenCodexThreadIds() {
-  if (_openThreadsCache && Date.now() - _openThreadsCache.at < 10000) return _openThreadsCache.ids;
-  const ids = _openThreadIdsUncached();
-  _openThreadsCache = { ids, at: Date.now() };
-  return ids;
-}
-/** Off-loop twin (S3 hot path): the /proc walk runs in the transcript worker
- *  (`codexOpenThreads` op); same 10s cache, same result shape. */
-async function listOpenCodexThreadIdsAsync() {
-  if (_openThreadsCache && Date.now() - _openThreadsCache.at < 10000) return _openThreadsCache.ids;
-  const arr = await transcriptWorkerCall('codexOpenThreads', {}, () => [..._openThreadIdsUncached()]);
-  const ids = new Set(Array.isArray(arr) ? arr : []);
-  _openThreadsCache = { ids, at: Date.now() };
-  return ids;
+/** The worker's walk (`codexOpenThreads`), one in flight; same 10s cache → a Set of thread ids, or null = not known
+ *  (the worker could not answer). */
+function listOpenCodexThreadIdsAsync() {
+  if (_openThreadsCache && Date.now() - _openThreadsCache.at < 10000) return Promise.resolve(_openThreadsCache.ids);
+  if (_openThreadsInflight) return _openThreadsInflight;
+  _openThreadsInflight = transcriptWorkerCall('codexOpenThreads', {}, () => null).then((arr) => {
+    if (!Array.isArray(arr)) return keptIds();   // the worker could not answer: the kept answer (≤ KEPT_MAX_MS), else null = not known — nothing new kept
+    const ids = new Set(arr);
+    _openThreadsCache = { ids, at: Date.now() };
+    return ids;
+  }, () => null).finally(() => { _openThreadsInflight = null; });
+  return _openThreadsInflight;
 }
 
 // ── The rollout walk (S3 hot path) ──
@@ -135,7 +137,7 @@ function collectCodexThreadMetas() {
 
 /** Pass 2: metas + live sessions + open rollouts → the session-list entries
  *  (merged fork sources hidden; live/external/stopped status). */
-function assembleCodexThreads({ metas, mergedThreadIds }, { activeSessions, openThreadIds }) {
+function assembleCodexThreads({ metas, mergedThreadIds }, { activeSessions, openThreadIds, livenessUnknown = false }) {
   const sessions = [];
   const activeByThreadId = new Map();
   const merged = new Set(mergedThreadIds || []);
@@ -158,6 +160,7 @@ function assembleCodexThreads({ metas, mergedThreadIds }, { activeSessions, open
       cwd: meta.cwd || '',
       startedAt: meta.updatedAt || Date.now(),
       status: active ? 'live' : (isExternal ? 'external' : 'stopped'),
+      ...(livenessUnknown && !active ? { liveness: 'unknown' } : {}),   // B-f64b: the liveness walk has not answered — SAID (the card: «still checking»), its row's actions as a stopped one
       name: meta.name || meta.agentNickname || meta.agentRole || '',
       source: meta.source || null,
       sourceKind: meta.sourceKind || null,
@@ -797,9 +800,12 @@ class CodexSessionMessages {
   }
 }
 
-/** Sync listing (user-action consumers). Behaviour unchanged. */
+/** Sync listing (user-action consumers: the create's thread baseline and capture, the persistence key map — none reads a
+ *  row's status). B-f64b: liveness from the KEPT walk answer (keptOpenThreadIds), never a /proc walk on the main loop;
+ *  before an answer a row that is not ours carries liveness: 'unknown'. */
 function listCodexThreads({ activeSessions } = {}) {
-  return assembleCodexThreads(collectCodexThreadMetas(), { activeSessions, openThreadIds: listOpenCodexThreadIds() });
+  const kept = keptOpenThreadIds();
+  return assembleCodexThreads(collectCodexThreadMetas(), { activeSessions, openThreadIds: kept || new Set(), livenessUnknown: !kept });
 }
 
 /** The walk alone, OFF the event loop (the worker twin of
@@ -812,13 +818,14 @@ async function collectCodexThreadMetasAsync() {
 
 /** The 5s-poll listing (S3): walk + head reads + the /proc scan run in the
  *  transcript worker; only the assembly touches the main thread. Worker
- *  down ⇒ the same functions run inline (identical result, no isolation). */
+ *  down ⇒ the metas walk runs inline (identical result, no isolation); the LIVENESS walk never does (B-f64b: the
+ *  kept answer, else liveness: 'unknown' on the rows). */
 async function listCodexThreadsAsync({ activeSessions } = {}) {
   const [facts, openThreadIds] = await Promise.all([
     transcriptWorkerCall('codexThreadMetas', {}, collectCodexThreadMetas),
     listOpenCodexThreadIdsAsync(),
   ]);
-  return assembleCodexThreads(facts, { activeSessions, openThreadIds });
+  return assembleCodexThreads(facts, { activeSessions, openThreadIds: openThreadIds || new Set(), livenessUnknown: !openThreadIds });   // B-f64b: a walk that could not answer is said (liveness: 'unknown'), never a bare «stopped»
 }
 
 module.exports = {
@@ -831,7 +838,7 @@ module.exports = {
   collectCodexThreadMetas,
   collectCodexThreadMetasAsync,
   assembleCodexThreads,
-  listOpenCodexThreadIds,
+  listOpenCodexThreadIdsAsync,
   dirCacheStats,
   mergeCodexRecords,
   recordFingerprint,

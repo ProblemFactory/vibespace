@@ -56,7 +56,7 @@ const RR_SRC = fs.readFileSync(RRpath, 'utf8');
 const ENG_SRC = fs.readFileSync(ENGpath, 'utf8');
 const ASK_FNS = ['readText', 'readlink', 'entryExists', 'readdir', 'facts', 'stat', 'signature'];
 /** a copy of a product file with ONE named edit — null when its needle does not hit exactly once (said as a red by the caller) */
-const copyOf = (rel, src, from, to, tag) => (src.split(from).length === 2 ? MU.write(rel, src.replace(from, to), tag) : null);
+const copyOf = (rel, src, from, to, tag) => (src.split(from).length === 2 ? MU.write(rel, src.replace(from, to), tag) : (() => { throw new Error(`ANCHOR GONE OR NOT UNIQUE (${src.split(from).length - 1} times): ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); })());
 /** swap a copy's asks onto the module every routed site reads through (`RR.readText(…)` is looked up at each call) */
 async function withAsks(copy, fn) { const saved = {}; for (const k of ASK_FNS) { saved[k] = RR[k]; RR[k] = copy[k]; } try { return await fn(); } finally { Object.assign(RR, saved); } }
 const tok = (k) => ['tok', k, 'x'.repeat(8)].join('-');
@@ -169,15 +169,25 @@ for (const { S, M } of SIZES) {
   // direct by design, never the run's answer), and its first write creates the anchors folder (mkdir). Named here, and pinned
   // as once per process: the steady pass asks rates.json NOT AT ALL and writes nothing.
   const ONCE = (r) => r.p.endsWith(path.join('data', 'usage-anchors', 'rates.json'));
+  // B-403e follow-up (3): the two kinds IN ORDER — a sign-in file is asked twice only as its signature (a stat, memberLoginState)
+  // BEFORE its content (the next reader's open); a signature asked AFTER the content RIDES it (src/run-reads.js signature(): the
+  // run's read answers, no ask) — a stat after the open is named, never a «two kinds» pass (r.m keeps the first-ask order)
+  const keysOf = (r) => [...r.m.keys()];
+  const twoKinds = (r) => r.m.size === 2 && keysOf(r).join() === 'statSync,openSync' && r.p.endsWith('.credentials.json');
+  const ridesNot = (r) => r.p.endsWith('.credentials.json') && r.m.has('openSync') && r.m.has('statSync') && keysOf(r).indexOf('statSync') > keysOf(r).indexOf('openSync');
   for (const k of ['pass', 'steady', 'record', 'broadcast']) {
     console.log(`    S=${S} M=${M} ${k}: today at least ${today[k].asks} asks over ${today[k].files} files (max ${today[k].max} per file: ${today[k].worst.join(', ')}) · with the memo ${memo[k].asks} asks over ${memo[k].files} files (max ${memo[k].max}; ${kindsSaid(memo[k])}) · writes in it: ${memo[k].writes.length ? memo[k].writes.join(', ') : 'none'}`);
     // THE LAW, per file AND question: a file is asked each question (its content, its link, its listing, its signature) at
     // most once between two writes — and asked twice only as a sign-in file whose SIGNATURE (memberLoginState, a stat as at
     // the release) came before its content (the next reader's open); a signature asked after the content rides it (no ask)
-    const twoKinds = (r) => r.m.size === 2 && r.m.has('statSync') && r.m.has('openSync') && r.p.endsWith('.credentials.json');
     const over = memo[k].rows.filter((r) => ([...r.m.values()].some((v) => v > 1) || (r.m.size > 1 && !twoKinds(r))) && !(k === 'pass' && ONCE(r))).map((r) => `${path.relative(w.root, r.p)} ×${r.n} (${[...r.m].map(([q, v]) => q.replace('Sync', '') + '×' + v).join('+')})`);
     ok(!over.length, `S=${S} M=${M}: in ONE ${k} every file is asked each question at most once between two writes (${memo[k].asks} asks over ${memo[k].files} files, ${memo[k].writes.length} write(s); ${memo[k].rows.filter(twoKinds).length} sign-in file(s) asked for a signature before their content${k === 'pass' ? '; the estimator\'s once-per-process rates.json reads named' : ''})`, over);
+    ok(!memo[k].rows.some(ridesNot), `S=${S} M=${M}: in ONE ${k} THE SIGNATURE RIDES THE CONTENT ASK — no sign-in file is asked for its signature (a stat) AFTER its content (an open)`, memo[k].rows.filter(ridesNot).map((r) => path.relative(w.root, r.p)));
   }
+  // RED CONTROL (follow-up 3): the classifier itself — a sign-in file stat'ed AFTER its open is named «the signature did not ride»
+  // and is no «two kinds»; stat-then-open is the one pair allowed; another file's pair is neither
+  const planted = (p, ks) => ({ p, m: new Map(ks.map((x) => [x, 1])) }), CR = '/w/subs/m1/.credentials.json';
+  ok(ridesNot(planted(CR, ['openSync', 'statSync'])) && !twoKinds(planted(CR, ['openSync', 'statSync'])) && twoKinds(planted(CR, ['statSync', 'openSync'])) && !ridesNot(planted(CR, ['statSync', 'openSync'])) && !twoKinds(planted('/w/usage-cache/m1.json', ['statSync', 'openSync'])), 'RED CONTROL: a sign-in file asked open-then-stat is NAMED (the signature did not ride the content ask), never counted as the two kinds; stat-then-open is the one allowed pair, and only for a sign-in file');
   const steadyRates = memo.steady.rows.filter(ONCE).reduce((x, r) => x + r.n, 0);
   const sTwo = memo.steady.rows.filter((r) => r.m.size > 1).length;
   const STEADY = { '3x2': 13, '12x6': 38 };   // measured alone on the test machine, both zones (b3de847b3): every file once, no sign-in file twice
@@ -331,7 +341,7 @@ console.log('⑦ ONE WRAPPER PER PROCESS — a second copy of the module, one wr
 {
   const w = world({ S: 1, M: 1 });
   const p = path.join(w.cacheDir, w.ids[0] + '.json');
-  const B = require(MU.write('src/run-reads.js', RR_SRC, 'second'));
+  const B = require(MU.write('src/run-reads.js', RR_SRC, 'second', { same: true }));
   B.watch(w.cacheDir);
   const G = globalThis[Symbol.for('vibespace.run-reads.writes')];
   await turn();
@@ -572,14 +582,36 @@ console.log('⑭ A LOOK-AGAIN READ ASKS THE MOUNT ITSELF — another process cha
   // RED CONTROL: the look-again WITHOUT its forget (both doors: _lookAgain and the slot writers' table) — every site acts on
   // the run's stale answer
   const ACC_SRC = fs.readFileSync(path.join(REPO, 'src/accounts.js'), 'utf8');
-  const N1 = '  _lookAgain(id) { RR.forget(this.subDir(id)); return this.readSubCreds(id); }', N2 = 'for (const d of dirs) { try { if (d) RR.forget(d); } catch { } }';
+  const N1 = '  _lookAgain(id) { RR.forget(this.subDir(id)); return this.readSubCreds(id); }', N2 = '} if (d) RR.forget(d); }';
   const hits = ACC_SRC.split(N1).length === 2 && ACC_SRC.split(N2).length === 2;
   ok(hits, 'RED CONTROL: both forget needles hit once in a copy of src/accounts.js');
   if (hits) {
-    const blindAM = require(MU.write('src/accounts.js', ACC_SRC.replace(N1, '  _lookAgain(id) { return this.readSubCreds(id); }').replace(N2, 'void dirs;'), 'no-forget')).AccountManager;
+    const blindAM = require(MU.write('src/accounts.js', ACC_SRC.replace(N1, '  _lookAgain(id) { return this.readSubCreds(id); }').replace(N2, '} void d; }'), 'no-forget')).AccountManager;
     const stale = [];
     for (const [label, make] of SITES) { const r = await siteRun({ AccountManager: blindAM, engMod }, make); if (r.got !== r.want) stale.push(label.split(' — ')[0] + ': ' + JSON.stringify(r.got)); }
     ok(stale.length === SITES.length, `RED CONTROL: with the look-again's forget removed, EVERY site (${stale.length} of ${SITES.length}) acts on the run's stale answer — ${stale.join(' · ')}`);
+  }
+  // B-403e FOLLOW-UP (1): a folder the look-again cannot NAME drops the whole run's memo. The hotfix named every folder in ONE
+  // try: one throw skipped EVERY forget, the run was never dropped, and the writer acted on the run's stale answer. Planted: the
+  // member's folder cannot be named once (the look-again's own call — the writer's later calls answer) while another process
+  // signs the member out; the writer must still refuse it
+  const throwOnce = (o, k) => { const f = o[k]; let n = 0; o[k] = function (...a) { if (n++ === 0) throw new Error('this folder cannot be named (planted)'); return f.apply(this, a); }; };
+  const UNNAMED = (w) => { const m = w.ids[1]; return { prime: () => w.am.readSubCreds(m).loggedIn, change: () => writes(w.am.subCredsPath(m), loginBody('gone', false)), act: () => { throwOnce(w.am, 'subDir'); return refused(() => w.am.ensureSessionPoolLink(w.P, 'conv-0', m, { why: 'leg' })); }, want: 'refused' }; };
+  const UNNAMED_T = (w) => { const m = w.ids[1]; return { prime: () => w.am.readSubCreds(m).loggedIn, change: () => writes(w.am.subCredsPath(m), loginBody('gone', false)), act: () => { throwOnce(w.am, '_acctDir'); return refused(() => w.am.setPoolTarget(w.P, m)); }, want: 'refused' }; };
+  const unT = await siteRun({ AccountManager, engMod }, UNNAMED_T);
+  ok(unT.got === 'refused' && unT.memo === unT.before, `…and setPoolTarget's: its member's folder cannot be named once — the pool default is NOT re-pointed to the member another process signed out (${JSON.stringify(unT.got)}; the run's memo answered ${JSON.stringify(unT.memo)})`, unT);
+  const un = await siteRun({ AccountManager, engMod }, UNNAMED);
+  ok(un.got === 'refused' && un.memo === un.before, `a folder the look-again cannot NAME drops the run's memo: the member another process signed out is refused (${JSON.stringify(un.got)}) while the run's memo still answered the old state (${JSON.stringify(un.memo)})`, un);
+  // RED CONTROL: the hotfix's ONE try (every folder named together, no drop) — the anchor fails BY NAME when it moves
+  const ONE_TRY_FROM = 'for (const nameOf of namers) { let d = null; try { d = nameOf.apply(this, args); } catch { RR.dropRun(); continue; } if (d) RR.forget(d); }';
+  const ONE_TRY_TO = 'let dirs = []; try { dirs = namers.map((f) => f.apply(this, args)); } catch { } for (const d of dirs) { try { if (d) RR.forget(d); } catch { } }';
+  ok(ACC_SRC.split(ONE_TRY_FROM).length === 2, 'the anchor of the RED CONTROL (the look-again\'s per-folder tries) is in the source (src/accounts.js)');
+  if (ACC_SRC.split(ONE_TRY_FROM).length === 2) {
+    const oneTryAM = require(MU.write('src/accounts.js', ACC_SRC.replace(ONE_TRY_FROM, ONE_TRY_TO), 'one-try')).AccountManager;
+    const r1 = await siteRun({ AccountManager: oneTryAM, engMod }, UNNAMED);
+    const r1T = await siteRun({ AccountManager: oneTryAM, engMod }, UNNAMED_T);
+    ok(r1T.got === 'written', `RED CONTROL: …and setPoolTarget under the hotfix's one try re-points the pool default to that member (${JSON.stringify(r1T.got)})`, r1T);
+    ok(r1.got === 'written', `RED CONTROL: the hotfix's one try — a folder that cannot be named skips every forget, the run is never dropped, and the billing link is WRITTEN to the member another process signed out (${JSON.stringify(r1.got)})`, r1);
   }
 }
 
@@ -587,7 +619,7 @@ console.log('⑮ dropRun() — the hand-off for a write no wrapper sees — drop
 {
   const w = world({ S: 1, M: 1 });
   const p = path.join(w.cacheDir, w.ids[0] + '.json');
-  const B = require(MU.write('src/run-reads.js', RR_SRC, 'drop-second'));
+  const B = require(MU.write('src/run-reads.js', RR_SRC, 'drop-second', { same: true }));
   B.watch(w.cacheDir);
   await turn();
   const r = countRun(w.root, () => { RR.readText(p); B.readText(p); RR.dropRun(); RR.readText(p); B.readText(p); });
@@ -612,6 +644,7 @@ console.log('⑯ EVERY SITE THAT PUTS A FUNCTION ON fs IS ROWED WITH ITS UNDO �
     walk(ast, (n) => {
       if (n.type === 'ImportDeclaration' && /^(?:node:)?fs$/.test(String(n.source.value))) for (const s of n.specifiers) if (s.type !== 'ImportSpecifier') fsNames.add(s.local.name);
       if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && isFsModule(n.init)) fsNames.add(n.id.name);
+      if (n.type === 'AssignmentExpression' && n.operator === '=' && n.left.type === 'Identifier' && isFsModule(n.right)) fsNames.add(n.left.name);   // follow-up (2): `let f; f = require('fs')`
     });
     const isFsValue = (v) => !!v && (isFsModule(v) || (v.type === 'Identifier' && fsNames.has(v.name)));
     const fnName = new Map();   // function node → its name (a declaration, or the const it is assigned to)
@@ -639,15 +672,20 @@ console.log('⑯ EVERY SITE THAT PUTS A FUNCTION ON fs IS ROWED WITH ITS UNDO �
     for (let changed = true; changed;) {
       changed = false;
       walk(ast, (n, parents) => {
-        if (n.type !== 'VariableDeclarator' || n.id.type !== 'Identifier' || !n.init) return;
-        const init = n.init.type === 'LogicalExpression' ? n.init.left : n.init;
-        if (init.type !== 'MemberExpression') return;
-        const r = rootOf(init);
-        if (!r || r.type !== 'Identifier' || !derivedAt(r.name, parents)) return;
+        // follow-up (2): a declarator OR a later assignment to a bare name; its value a member chain of an fs-derived name, an
+        // ALIAS of one (`const f2 = fs`), or a chain rooted at require('fs') itself
+        let id = null, val = null;
+        if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init) { id = n.id.name; val = n.init; }
+        else if (n.type === 'AssignmentExpression' && n.operator === '=' && n.left.type === 'Identifier') { id = n.left.name; val = n.right; }
+        if (!id) return;
+        const init = val.type === 'LogicalExpression' ? val.left : val;
+        if (init.type !== 'MemberExpression' && init.type !== 'Identifier') return;
+        const r = init.type === 'Identifier' ? init : rootOf(init);
+        if (!r || !((r.type === 'Identifier' && derivedAt(r.name, parents)) || isFsModule(r))) return;
         const f = [...parents].reverse().find(isFn);
-        if (!f) { if (!fsNames.has(n.id.name)) { fsNames.add(n.id.name); changed = true; } return; }
+        if (!f) { if (!fsNames.has(id)) { fsNames.add(id); changed = true; } return; }
         const set = fsParams.get(f) || new Set();
-        if (!set.has(n.id.name)) { set.add(n.id.name); fsParams.set(f, set); changed = true; }
+        if (!set.has(id)) { set.add(id); fsParams.set(f, set); changed = true; }
       });
     }
     const out = [];
@@ -655,12 +693,13 @@ console.log('⑯ EVERY SITE THAT PUTS A FUNCTION ON fs IS ROWED WITH ITS UNDO �
     walk(ast, (n, parents) => {
       if (n.type === 'AssignmentExpression' && n.left.type === 'MemberExpression') {
         const r = rootOf(n.left);
-        if (r && r.type === 'Identifier' && derivedAt(r.name, parents)) out.push(said(n.left, n.right));
+        if (r && ((r.type === 'Identifier' && derivedAt(r.name, parents)) || isFsModule(r))) out.push(said(n.left, n.right));   // follow-up (2): require('fs').x = …
       }
       // Object.defineProperty / Object.assign onto an fs-derived object changes it as an assignment does
-      if (n.type === 'CallExpression' && n.callee.type === 'MemberExpression' && n.callee.object.type === 'Identifier' && n.callee.object.name === 'Object' && n.callee.property.type === 'Identifier' && /^(?:defineProperty|defineProperties|assign)$/.test(n.callee.property.name)) {
+      // follow-up (2): Reflect.set / Reflect.defineProperty too
+      if (n.type === 'CallExpression' && n.callee.type === 'MemberExpression' && n.callee.object.type === 'Identifier' && n.callee.property.type === 'Identifier' && ((n.callee.object.name === 'Object' && /^(?:defineProperty|defineProperties|assign)$/.test(n.callee.property.name)) || (n.callee.object.name === 'Reflect' && /^(?:set|defineProperty)$/.test(n.callee.property.name)))) {
         const t = n.arguments[0], r = t && rootOf(t);
-        if (r && r.type === 'Identifier' && derivedAt(r.name, parents)) out.push(src.slice(n.start, Math.min(n.end, n.start + 60)).replace(/\s+/g, ' '));
+        if (r && ((r.type === 'Identifier' && derivedAt(r.name, parents)) || isFsModule(r))) out.push(src.slice(n.start, Math.min(n.end, n.start + 60)).replace(/\s+/g, ' '));
       }
     });
     return out;
@@ -689,9 +728,29 @@ console.log('⑯ EVERY SITE THAT PUTS A FUNCTION ON fs IS ROWED WITH ITS UNDO �
     'P.readSync = function () {};',                              // a member chain of it
     'function arm(m, k) { const o = m[k]; m[k] = (...a) => o(...a); } arm(fs, "renameSync");',   // a parameter handed fs
     'function install({ fsMod = fs } = {}) { fsMod.openSync = null; const rp = fsMod.realpathSync; Object.defineProperty(rp, "native", { value: 1 }); }',   // a parameter defaulted to fs, a member chain of it
+    'const fsAlias = fs; fsAlias.mkdirSync = null;',             // follow-up (2): an ALIAS of the binding
+    'require("fs").rmSync = null;',                              // follow-up (2): a require call as the root
+    'Reflect.set(fs, "statSync", null);',                        // follow-up (2): the reflect form
+    'let later; later = require("fs"); later.readdirSync = null;',   // follow-up (2): an assignment after a bare declaration
     'const console2 = {}; console2.log = () => {}; function other(m) { m.x = 1; } other({});',   // not fs: no site
   ].join('\n'));
-  ok(Array.isArray(planted) && planted.length === 5, `CONTROL: a planted assignment to the binding, to a member chain of it, through a parameter handed fs, through one defaulted to fs and a defineProperty on a member of it are all found — and none elsewhere (${planted && planted.length})`, planted);
+  // follow-up (2), a reader's should: each planted form ALONE is its own count (a rule that double-counts one and misses another
+  // cannot hide in the total) — the parameter-defaulted install line holds two sites, the negative line none
+  const PL = ["const fs = require('fs'); const P = fs.Dir.prototype;",
+    'fs.writeFileSync = function () {};',                        // the binding
+    'P.readSync = function () {};',                              // a member chain of it
+    'function arm(m, k) { const o = m[k]; m[k] = (...a) => o(...a); } arm(fs, "renameSync");',   // a parameter handed fs
+    'function install({ fsMod = fs } = {}) { fsMod.openSync = null; const rp = fsMod.realpathSync; Object.defineProperty(rp, "native", { value: 1 }); }',   // a parameter defaulted to fs, a member chain of it
+    'const fsAlias = fs; fsAlias.mkdirSync = null;',             // follow-up (2): an ALIAS of the binding
+    'require("fs").rmSync = null;',                              // follow-up (2): a require call as the root
+    'Reflect.set(fs, "statSync", null);',                        // follow-up (2): the reflect form
+    'let later; later = require("fs"); later.readdirSync = null;',   // follow-up (2): an assignment after a bare declaration
+    'const console2 = {}; console2.log = () => {}; function other(m) { m.x = 1; } other({});',   // not fs: no site
+  ];
+  const PER = [null, 1, 1, 1, 2, 1, 1, 1, 1, 0];
+  const each = PL.map((l, i) => (i === 0 ? null : (fsSites(PL[0] + '\n' + l) || []).length));
+  ok(PL.length === PER.length && each.every((n, i) => n === PER[i]), `CONTROL: each planted form alone — ${each.slice(1).join(', ')} (want ${PER.slice(1).join(', ')})`, each);
+  ok(Array.isArray(planted) && planted.length === 9, `CONTROL: a planted assignment to the binding, to a member chain of it, through a parameter handed fs, through one defaulted to fs, a defineProperty on a member of it — and (B-403e follow-up 2) through an alias, onto require('fs') itself, by Reflect.set, and through a bare declaration assigned later — are all found, and none elsewhere (${planted && planted.length})`, planted);
   // EACH ROW'S UNDO, run in a fresh process: after it, a write under a watched folder still drops the memo
   const LB = path.join(REPO, 'src/server/loop-blame.js');
   const undoProbe = path.join(tmpdir('vs-pool-reads-undo-'), 'undo.cjs');

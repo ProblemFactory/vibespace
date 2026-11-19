@@ -85,7 +85,7 @@ ok(O.BROWSER_ENDED_MS === 60000 && O.SCAN_MS === 60000, 'the bound: 60 s after i
 ok(O.rowNote(130 * MIN) === 'stopped — the daemon was ended after 2.2 h idle (restarts on the next command)', 'the row\'s words', O.rowNote(130 * MIN));
 function mutant(from, to, name) {
   const src = fs.readFileSync(path.join(REPO, 'src/browser-orphans.js'), 'utf8');
-  if (!src.includes(from)) return null;
+  if (!src.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`);
   const f = path.join(ROOT, `mut-${name}.js`); fs.writeFileSync(f, src.replace(from, to));
   return table(require(f));
 }

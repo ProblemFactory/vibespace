@@ -2049,8 +2049,8 @@ async function reholdLeg16(ENGM, name) {
 // THE MUTANT «re-hold after the block» (beb0cc795: the press's re-hold written once the block had let go of its chains)
 function lateReholdMutant16() {
   const src = engineSource(REPO);
-  const A16 = 'delivery = await deliverHeld(rec, req0, plan, settle);';
-  return { src, cut: src.split(A16).length === 2 ? src.replace(A16, 'delivery = await deliverHeld(rec, req0, plan, null);') : src };
+  const A16 = 'delivery = await deliverHeld(rec, req0, plan, settle, sending);';   // lane bl-msg B-84b4: the press hands its stamp too
+  return { src, cut: cutOrFail(src, A16, 'delivery = await deliverHeld(rec, req0, plan, null, sending);', 'late re-hold (A16)') };
 }
 try {
   const g = await reholdLeg16(ENG, 'e16-rehold');
@@ -2068,10 +2068,13 @@ try {
 // own); its Deliver works and closes it «delivered» (beb0cc795: the request stayed 'approved' with its card open — a press answered
 // bad-state, ✓ / ✕ were refused — and the boot held the same rows again in a NEW request beside it)
 const held16 = (m) => (m.eng.store.index.table('watchRequests') || []).filter((r) => r && r.kind === 'held');
+// the cure of batch 10 (RULES 06:25Z): a control built from an ANCHOR fails BY NAME when the anchor is not in the source — never a copy
+// that is the source itself, never null in silence
+function cutOrFail(src, from, to, name) { if (src.split(from).length !== 2) { ok(false, `the anchor of the control «${name}» is not in the source (exactly once) — the control would build nothing`); throw new Error(`control anchor missing: ${name}`); } return src.replace(from, to); }
 const cards16 = (m) => m.userTodos.openItems().filter((x) => x && x.action && x.action.type === 'channel-held-digest').map((x) => x.id);
-async function stopLeg16(ENGM, name, { done = false } = {}) {
+async function stopLeg16(ENGM, name, { done = false, refuse = false } = {}) {
   const live = [];
-  await digestWorld13(ENGM, name, { live });
+  const { pid } = await digestWorld13(ENGM, name, { live });
   let in0 = () => {};
   const entered0 = new Promise((r) => { in0 = r; });
   const m1 = await boot13(name, { ENGM, live, gate: (k) => (k === 0 ? (in0(), new Promise(() => {})) : null) });
@@ -2085,25 +2088,53 @@ async function stopLeg16(ENGM, name, { done = false } = {}) {
   if (done) await m2.eng.store.index.update(() => { for (const cv of [C, C2_13]) { const e2 = m2.eng.store.index.entry(A, cv, { create: false }); if (e2) e2.pending = []; } });   // the block HAD cleared what it carried (its finalize written, the re-hold not)
   m2.eng.start(); await new Promise((r) => setTimeout(r, 40)); if (m2.eng.settleWakes) await m2.eng.settleWakes();
   try {
-    const boot = { reqs: held16(m2).map((r) => ({ id: r.id, status: r.status, n: r.held && r.held.n, inFlight: !!(r.held && r.held.inFlight) })), cards: cards16(m2), card: st13(m2).card };
+    const boot = { reqs: held16(m2).map((r) => ({ id: r.id, status: r.status, n: r.held && r.held.n, inFlight: !!(r.held && r.held.inFlight), ...(r.held && r.held.inDoubt ? { doubt: r.held.inDoubt.n } : {}) })), cards: cards16(m2), card: st13(m2).card };   // lane bl-msg B-84b4: `doubt` = the rows a stop inside the SEND re-held
     const it0 = r0.todoId ? m2.userTodos.get(r0.todoId) : null;
+    // the cure of batch 10 (must 1): a press REFUSED before its send (the watcher's day spent — the pace) reopens the card; it must still
+    // say the doubt, and the record keep it — only a delivery that answered ok takes it away
+    let refused = null;
+    if (refuse && !done) {
+      await m2.eng.setGrain(A, { kind: 'pattern', id: pid }, { watchers: [{ principal: AGENT, delivery: 'wake', notify: 'digest', digestMinutes: 60, dailyWakeCap: 1 }] }, { person: true });
+      await inject16(m2, C, 'fill', 1, 'fresh');
+      await m2.eng.flushScope(A, 'pattern', pid, 'agent:agent-1');   // the day's one wake, spent
+      const dR = await m2.eng.decideRequest(r0.id, true, 'user', { person: true });
+      if (m2.eng.settleWakes) await m2.eng.settleWakes();
+      const rq = held16(m2).find((r) => r.id === r0.id) || {};
+      refused = { delivered: !!(dR && dR.delivered), status: rq.status, doubt: rq.held && rq.held.inDoubt ? rq.held.inDoubt.n : 0, card: st13(m2).card };
+      await m2.eng.setGrain(A, { kind: 'pattern', id: pid }, { watchers: [{ principal: AGENT, delivery: 'wake', notify: 'digest', digestMinutes: 60, dailyWakeCap: 5 }] }, { person: true });
+    }
     const d = done ? null : await m2.eng.decideRequest(r0.id, true, 'user', { person: true });
     if (m2.eng.settleWakes) await m2.eng.settleWakes();
-    return { r0: { id: r0.id, todoId: r0.todoId }, inFlight, boot, it0: it0 && { status: it0.status, resolvedBy: it0.resolvedBy || null, n: it0.resolvedFact ? it0.resolvedFact.n : null }, press: d && PRESS10(d), after: st13(m2), pend: { ops: pend13(m2.eng, KEY), ann: pend13(m2.eng, K2_13) } };
+    return { r0: { id: r0.id, todoId: r0.todoId }, inFlight, boot, refused, pressDoubt: d ? d.inDoubt || 0 : null, it0: it0 && { status: it0.status, resolvedBy: it0.resolvedBy || null, n: it0.resolvedFact ? it0.resolvedFact.n : null }, press: d && PRESS10(d), after: st13(m2), pend: { ops: pend13(m2.eng, KEY), ann: pend13(m2.eng, K2_13) } };
   } finally { m2.eng.stop(); }
 }
 // THE MUTANT «no boot reconcile» (beb0cc795: a boot never looks at a press cut short)
 function noReconcileMutant16() {
   const src = engineSource(REPO);
   const J16 = "(r.status === 'open' || (r.status === 'approved' && pressLeftOf(r)))", R16 = '    const presses = await reconcilePresses(t);';
-  return { src, cut: src.split(J16).length === 2 && src.split(R16).length === 2 ? src.replace(J16, "r.status === 'open'").replace(R16, '    const presses = 0;') : src };
+  return { src, cut: cutOrFail(cutOrFail(src, J16, "r.status === 'open'", 'no boot reconcile (J16)'), R16, '    const presses = 0;', 'no boot reconcile (R16)') };
 }
 try {
   const g = await stopLeg16(ENG, 'e16-stop');
   ok(J2s(g.inFlight) === J2s([{ id: g.r0.id, status: 'approved', inFlight: true }]) && g.boot.reqs.length === 1 && g.boot.reqs[0].id === g.r0.id && g.boot.reqs[0].status === 'open' && g.boot.reqs[0].n === 60 && !g.boot.reqs[0].inFlight
-    && J2s(g.boot.cards) === J2s([g.r0.todoId]) && /^60 messages for Worker held since .* — deliver or discard$/.test(g.boot.card || '')
+    && J2s(g.boot.cards) === J2s([g.r0.todoId]) && /^60 messages for Worker held since .* — 60 of them may already have reached Worker: VibeSpace restarted while delivering them — deliver again or discard$/.test(g.boot.card || '') && g.boot.reqs[0].doubt === 60 && g.pressDoubt === 60
     && g.press && g.press.ok && g.press.delivered === true && g.press.n === 60 && g.after.status === 'approved' && g.after.card === 'delivered' && J2s(g.pend) === J2s({ ops: 0, ann: 0 }),
     `(b) a stop inside the block (the request 'approved', its press record kept) ⇒ the boot finds ONE request (${g.boot.reqs.length}: the same, open, n ${g.boot.reqs[0] && g.boot.reqs[0].n}) and ONE card (its own «${(g.boot.card || '').replace(/since .* —/, 'since … —')}»); its Deliver sends ${g.press && g.press.n} and closes it «${g.after.card}» (beb0cc795: the old card a door-less 'approved', a twin request beside it)`, J2s(g));
+  // lane bl-msg B-84b4 (ruled B): the stop came INSIDE the send (the stamp written before it) ⇒ the card SAYS the 60 may already have
+  // reached Worker, the press answer says it once; CONTROL — the stamp removed ⇒ the boot's card is the plain «deliver or discard» again
+  const STAMP = 'if (r2 && r2.held && r2.held.inFlight && !r2.held.inFlight.sendingAt) r2.held.inFlight.sendingAt = now();';
+  const s0 = engineSource(REPO);
+  const ns = await stopLeg16(MUT.load('src/server/channels-engine.js', cutOrFail(s0, STAMP, '', 'no stamp before the send'), 'held-no-stamp'), 'e16-stop-nostamp');
+  ok(/ — deliver or discard$/.test(ns.boot.card || '') && !ns.boot.reqs[0].doubt && !ns.pressDoubt, 'CONTROL «no stamp before the send»: the boot card says nothing of the doubt — the (b) leg goes red', J2s({ card: ns.boot.card, reqs: ns.boot.reqs }));
+  // the cure of batch 10 (must 1): a doubt card, a press REFUSED before its send (the pace) — the reopened card still says it, the record
+  // keeps it, and the next press (the day given back) delivers and says it once. RED: the reopen without the doubt (the batch-10 tip)
+  const DOUBT_RE = / — 60 of them may already have reached Worker: VibeSpace restarted while delivering them — deliver again or discard$/;
+  const gr = await stopLeg16(ENG, 'e16-stop-refused', { refuse: true });
+  ok(gr.refused && gr.refused.delivered === false && gr.refused.status === 'open' && gr.refused.doubt === 60 && DOUBT_RE.test(gr.refused.card || '') && gr.press && gr.press.delivered === true && gr.pressDoubt === 60,
+    '(b2) a doubt card and a press REFUSED by the pace: the reopened card still says the 60 may already have reached Worker, the record keeps the doubt, the next press delivers and says it', J2s({ refused: gr.refused, press: gr.press, pressDoubt: gr.pressDoubt }));
+  const REOPEN = 'dbt = heldDoubtOf(rq), line = heldLine(still, who, day, drop, dbt), key = heldKey(still, who, day, drop, dbt);';
+  const nr = await stopLeg16(MUT.load('src/server/channels-engine.js', cutOrFail(s0, REOPEN, 'dbt = 0, line = heldLine(still, who, day, drop, dbt), key = heldKey(still, who, day, drop, dbt);', 'the reopen without the doubt'), 'held-reopen-plain'), 'e16-stop-refused-red', { refuse: true });
+  ok(nr.refused && !DOUBT_RE.test(nr.refused.card || ''), 'CONTROL «the reopen without the doubt» (the batch-10 tip): the refused press reopens a plain card — the (b2) leg goes red', J2s({ refused: nr.refused }));
   const m = noReconcileMutant16();
   const r = await stopLeg16(MUT.load('src/server/channels-engine.js', m.cut, 'held-no-press-reconcile'), 'e16-stop-red');
   ok(m.cut !== m.src && r.boot.reqs.length === 2 && r.boot.reqs.some((x) => x.id === r.r0.id && x.status === 'approved') && r.press && !r.press.ok,

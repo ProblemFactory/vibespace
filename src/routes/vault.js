@@ -56,6 +56,8 @@ const STATUS = Object.freeze({
   login_exists: 409, login_bad_origin: 400, login_bad_user: 400, bad_totp: 400,   // lane vault-agent-own: `vibespace-vault login add`
   login_no_door: 409, login_totp_unknown: 400, login_site_required: 400, login_one_site: 400, login_words: 400, login_password_lines: 400,   // lane login-request-card: a website login asked for (src/server/vault-paste-door.js)
   login_no_entry: 404, login_not_pending: 409, login_pending_exists: 409, card_changed: 409, // lane vault-login r22/r23: human-only Confirm / Discard of pending web-login slots
+  login_site_exists: 409, login_sites_full: 409, login_site_first: 400, login_site_absent: 404, login_merge_same: 400, login_merge_clash: 409,   // lane login-request-card: one login, several sites (the person's add / remove, the merge)
+  job_secrets_answer: 400, job_secrets_busy: 409, job_secrets_gone: 404, job_secrets_not_a_file: 409, job_secrets_unreadable: 422, job_secrets_nothing: 409, job_secrets_undeletable: 500, job_secrets_value_shape: 422, job_secrets_changed: 409,   // B-ef1b (src/server/job-secrets-door.js)
 });
 const WORDS = Object.freeze({
   ...UGC.WORDS,
@@ -128,7 +130,20 @@ const WORDS = Object.freeze({
   login_no_entry: 'that website login is not in the vault any more',
   login_not_pending: 'that website login has no pending password waiting for your confirmation',
   login_pending_exists: 'that website login already has a pending password — confirm or discard it first',
+  login_site_exists: 'that site is on this login already',   // lane login-request-card: one login, several sites — the answer's `why` says which
+  login_sites_full: 'a login keeps at most nine sites — remove one first',
+  login_site_first: 'the first site is the login itself — delete the login instead',
+  login_site_absent: 'that site is not on this login',
+  login_merge_same: 'pick two different logins',
+  login_merge_clash: 'a site is on both logins under two names — remove it from one first',
   card_changed: 'that website login changed after it was shown — nothing was changed; read it again',
+  // B-ef1b: the retired job-secrets notice's buttons (src/server/job-secrets-door.js) — the client words them itself (zh / ja)
+  job_secrets_answer: 'the answer is move or delete', job_secrets_busy: 'the file is being moved — try again in a moment',
+  job_secrets_gone: 'the file is not there any more — the notice is settled', job_secrets_not_a_file: 'something other than a file has that name — nothing was read',
+  job_secrets_unreadable: 'the file could not be read as a list of names and values — nothing was moved', job_secrets_nothing: 'the file holds no value to move — delete it instead',
+  job_secrets_undeletable: 'the file could not be deleted — nothing was moved; delete it yourself or try again',
+  job_secrets_value_shape: 'a value is not a plain text, number or true/false (a list, an object, or text with spaces around it) — nothing was moved; the file is kept',
+  job_secrets_changed: 'the file changed while it was being moved — nothing was moved; press again',
 });
 const isAnyBearer = (req) => /^Bearer\s+\S/i.test(String((req.headers && req.headers.authorization) || '')) || typeof (req.body && req.body.token) === 'string';
 const ipOf = (req) => String(req.ip || (req.socket && req.socket.remoteAddress) || '').replace(/^::ffff:/, '') || null;
@@ -151,8 +166,8 @@ function slowLineOf(req, ms) {
   return `[vault] ${req.method} ${route} answered in ${Math.round(ms)} ms`;
 }
 
-function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs = () => null, contents = null, who = () => null, linkTokenFor = null, onVaultWait = () => {}, auditLink = () => {}, run = null, paste = null,
-  totp = null, callerOf = () => null, runOf = () => null, grantLive = () => true, subjects = () => ({ sessions: [], groups: [] }), logins = null, log = (line) => console.log(line), slowMs = VAULT_SLOW_MS }) {
+function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs = () => null, contents = null, who = () => null, linkTokenFor = null, onVaultWait = () => {}, auditLink = () => {}, run = null, paste = null, jobSecrets = null,
+  totp = null, callerOf = () => null, runOf = () => null, grantLive = () => true, subjects = () => ({ sessions: [], groups: [] }), logins = null, proxyLogins = null /* B-8b87: src/server/browser-proxy-logins.js */, proxyMove = null /* B-8b87: the keeper's moveProxyPassword(profileId) */, log = (line) => console.log(line), slowMs = VAULT_SLOW_MS }) {
   app.use(['/api/vault', '/api/agent/vault'], (req, res, next) => {
     const t0 = process.hrtime.bigint();
     res.once('finish', () => { const ms = Number(process.hrtime.bigint() - t0) / 1e6; if (ms > slowMs) { try { log(slowLineOf(req, ms)); } catch { /* the answer went out */ } } });
@@ -192,8 +207,8 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
   };
   const person = (fn) => async (req, res) => {
     const v = personVerdict(req);
-    if (!v.ok) { take(req, 'password', 'old', 'new', 'seed', 'uri', 'value', 'loginPassword'); refusedBearer(req, v.code); return answer(res, v); }   // lane vault-paste-request: a pasted `value` too — lane browser-login: a typed `loginPassword`
-    try { answer(res, await fn(req)); } catch (e) { take(req, 'password', 'old', 'new', 'seed', 'uri', 'value', 'loginPassword'); res.status(500).json({ ok: false, code: 'error', error: 'the vault door failed — nothing changed' }); }
+    if (!v.ok) { take(req, 'password', 'old', 'new', 'seed', 'uri', 'value', 'loginPassword', 'proxyPassword'); refusedBearer(req, v.code); return answer(res, v); }   // lane vault-paste-request: a pasted `value` too — lane browser-login: a typed `loginPassword`
+    try { answer(res, await fn(req)); } catch (e) { take(req, 'password', 'old', 'new', 'seed', 'uri', 'value', 'loginPassword', 'proxyPassword'); res.status(500).json({ ok: false, code: 'error', error: 'the vault door failed — nothing changed' }); }
   };
   /** An AGENT (vsst_ session / jbt_ job token) — it may read the state and lock, nothing else. */
   const agentOk = (req) => {
@@ -275,6 +290,21 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
   //    agent-generated pending password), 删除 (its own grant row with it), 用于… (grant / take back: this account, any account on
   //    this site, any site). The password itself shows only through /api/vault/reveal. An agent has NO door here: its own is
   //    `vibespace-browser fill @ref --vault <entry>/password` (Hub types; VibeSpace never returns a value). Never cached by a proxy. ──
+  // ── B-8b87: A BROWSER PROXY'S LOGINS — the person's list (names only), save, removal, and the profile card's «Move the password
+  //    to the vault». The password is taken from the body at once and never answered; no bearer has a door here (the person guard):
+  //    its one reader is the browser keeper's forwarder (src/server/browser-proxy-logins.js read). Never cached by a proxy. ──
+  if (proxyLogins) {
+    const noStoreP = (fn) => (req, res) => { res.set('Cache-Control', 'no-store'); return fn(req, res); };
+    const bodyP = (req) => (req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {});
+    app.get('/api/vault/proxy-logins', noStoreP(person(() => ({ ok: true, logins: proxyLogins.names() }))));
+    app.post('/api/vault/proxy-logins', noStoreP(person((req) => {
+      const [pw] = take(req, 'proxyPassword');
+      const b = bodyP(req);
+      return proxyLogins.save({ proxy: b.proxy, user: b.user, password: typeof pw === 'string' ? pw : '' });
+    })));
+    app.delete('/api/vault/proxy-logins/:name', noStoreP(person((req) => proxyLogins.remove(String(req.params.name || '')))));
+    app.post('/api/vault/proxy-logins/move', noStoreP(person(async (req) => (typeof proxyMove === 'function' ? proxyMove(String(bodyP(req).profileId || '')) : { ok: false, code: 'unavailable', error: 'the browser keeper is not running on this server' }))));
+  }
   if (logins) {
     const whoL = (req) => { try { return who(req) || 'sign-in-off'; } catch { return 'sign-in-off'; } };
     const noStoreL = (fn) => (req, res) => { res.set('Cache-Control', 'no-store'); return fn(req, res); };
@@ -291,6 +321,17 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
     app.delete('/api/vault/web-logins/:name', noStoreL(person((req) => logins.drop(String(req.params.name || ''), { who: whoL(req) }))));
     app.post('/api/vault/web-logins/grants', noStoreL(person((req) => { const b = bodyL(req); return logins.grant(String(b.name || ''), String(b.scope || ''), String(b.subject || ''), { by: `user:${whoL(req).slice(0, 24)}`, ...(Array.isArray(b.except) ? { except: b.except.map(String) } : {}) }); })));   // + «除了» for a group / Everyone
     app.post('/api/vault/web-logins/ungrant', noStoreL(person((req) => { const b = bodyL(req); return logins.ungrant(String(b.resource || ''), String(b.principal || ''), { by: `user:${whoL(req).slice(0, 24)}` }); })));
+    // lane login-request-card — ONE LOGIN, SEVERAL SITES (the owner 2026-11-17; 主开发 20:05Z): the person adds a site to a login (exactly
+    // the site, an optional name it signs in under there) and removes one where it shows; two logins that are one account merge in
+    // ONE act (the secret never shown). The words before an add say the exact address, its ASCII form, a look-alike, and BY NAME
+    // who may then have it filled there. A refusal keeps its own sentence in `why` (which login, which site).
+    const whyL = (r) => (r && r.ok === false && r.error && !r.why ? { ...r, why: r.error } : r);
+    app.get('/api/vault/web-logins/site-words', noStoreL(person((req) => whyL(logins.siteWordsFor(String(req.query.name || ''), String(req.query.site || ''), { user: String(req.query.user || ''), subjects: subjects() })))));   // subjects: every principal NAMED as the Vault window's chips name it (主开发 12:17Z)
+    app.post('/api/vault/web-logins/sites', noStoreL(person((req) => { const b = bodyL(req); return whyL(logins.addSite(String(b.name || ''), { site: String(b.site || ''), user: String(b.user || '') }, { who: whoL(req) })); })));
+    app.post('/api/vault/web-logins/sites/remove', noStoreL(person((req) => { const b = bodyL(req); return whyL(logins.removeSite(String(b.name || ''), String(b.site || ''), { who: whoL(req) })); })));
+    // the merge's words BEFORE the press (主开发 23:01Z, must 2): the sites that join, the two-step code dropped, the owner that loses its fill, who may then have it filled
+    app.get('/api/vault/web-logins/merge-words', noStoreL(person((req) => whyL(logins.mergeWordsFor(String(req.query.keep || ''), String(req.query.other || ''))))));
+    app.post('/api/vault/web-logins/merge', noStoreL(person((req) => { const b = bodyL(req); return whyL(logins.merge(String(b.keep || ''), String(b.other || ''), { who: whoL(req) })); })));
     // lane vault-agent-own: AN AGENT stores a login it holds itself (`vibespace-vault login add <origin> --user <name> --from-file |
     // --stdin [--totp <name>]`) — the password taken OFF the body (never the URL); a `web-login:` entry, provenance agent-typed,
     // owned by the storing conversation (its fill there needs no grant). The answer names the entry — never the password.
@@ -402,7 +443,7 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
     }
   });
   if (run) registerRunRoutes(app, { run, activeSessions, getJobs, contents, who, person, take, paste });
-  if (paste) registerPasteRoutes(app, { paste, activeSessions, person, take });
+  if (paste) registerPasteRoutes(app, { paste, activeSessions, person, take, who, jobSecrets });   // B-3fb5 (the read): + who — the agent entry's delete names who pressed; B-ef1b (the read): + jobSecrets — its door is the paste routes'
 }
 
 /**
@@ -430,7 +471,7 @@ function pasteCallerIn(activeSessions, req) {
   }
   return null;
 }
-function registerPasteRoutes(app, { paste, activeSessions, person, take }) {
+function registerPasteRoutes(app, { paste, activeSessions, person, take, who = () => null, jobSecrets = null }) {
   const pasteCallerOf = (req) => pasteCallerIn(activeSessions, req);
   const refusal = (res, r) => res.status(paste.statusOf(r.code)).json({ ok: false, code: r.code, error: r.words || paste.words(r.code), ...Object.fromEntries(['until', 'fields'].filter((k) => r[k] != null).map((k) => [k, r[k]])) });
   const bodyOf = (req) => (req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {});
@@ -448,9 +489,12 @@ function registerPasteRoutes(app, { paste, activeSessions, person, take }) {
     if (!r || !r.ok) return refusal(res, r || { code: 'unfiled' });
     return res.json({ ok: true, requestId: r.requestId, target: r.target, ...(r.already ? { already: r.already } : { filed: CN.filedLine('secret-request', r.requestId, OF.tray()) }), tray: OF.tray() });
   });
-  app.post('/api/vault/secret-requests/:id/answer', person((req) => { const [value, loginPassword, totpLink, totpSeed] = take(req, 'value', 'loginPassword', 'totpLink', 'totpSeed'); const b = req.body || {}; const tw = b.totp && typeof b.totp === 'object' && !Array.isArray(b.totp) ? b.totp : {}; return paste.answer(String(req.params.id), { answer: b.answer, value, by: 'user', person: true, name: typeof b.name === 'string' ? b.name : undefined, note: typeof b.note === 'string' ? b.note : undefined, login: { username: b.username, password: loginPassword, totpName: b.totpName, allow: b.allow === true }, totp: { uri: totpLink, seed: totpSeed, name: tw.name, digits: tw.digits, period: tw.period, algorithm: tw.algorithm, allow: b.allow === true } }); }));   // totp: lane totp-request-card — the link and the seed taken off the body (never logged, never echoed), the two-step dialog's own fields   // login: lane login-request-card — a website login's fields (the password off the body, as the add door's route takes it)   // name / note: lane vault-entry-description — the owner's words in the box win   // lane wake-approve-card r3: `person` — THE person verdict was asked (the record says «stored · 09:41»)
+  app.post('/api/vault/secret-requests/:id/answer', person((req) => { const [value, loginPassword, totpLink, totpSeed] = take(req, 'value', 'loginPassword', 'totpLink', 'totpSeed'); const b = req.body || {}; const tw = b.totp && typeof b.totp === 'object' && !Array.isArray(b.totp) ? b.totp : {}; return paste.answer(String(req.params.id), { answer: b.answer, value, by: 'user', person: true, name: typeof b.name === 'string' ? b.name : undefined, note: typeof b.note === 'string' ? b.note : undefined, login: { username: b.username, password: loginPassword, totpName: b.totpName, allow: b.allow === true, ...(typeof b.useLogin === 'string' && b.useLogin ? { useLogin: b.useLogin } : {}) }, totp: { uri: totpLink, seed: totpSeed, name: tw.name, digits: tw.digits, period: tw.period, algorithm: tw.algorithm, allow: b.allow === true } }); }));   // totp: lane totp-request-card — the link and the seed taken off the body (never logged, never echoed), the two-step dialog's own fields   // login: lane login-request-card — a website login's fields (the password off the body, as the add door's route takes it)   // name / note: lane vault-entry-description — the owner's words in the box win   // lane wake-approve-card r3: `person` — THE person verdict was asked (the record says «stored · 09:41»)
   app.post('/api/vault/secrets', person((req) => { const [value] = take(req, 'value'); const b = req.body || {}; return paste.addEntry({ label: b.label, note: b.note, kind: b.kind, value, by: 'user' }); }));
   app.delete('/api/vault/secrets/:id', person((req) => paste.dropEntry(String(req.params.id), { by: 'user' })));
+  // B-ef1b: the retired job-secrets notice's two buttons — move each value into the vault (then the file goes), or delete the file
+  app.post('/api/vault/job-secrets/:answer', person((req) => (jobSecrets ? jobSecrets.answer(String(req.params.answer), { by: 'user', who: (() => { try { return who(req) || 'sign-in-off'; } catch { return 'sign-in-off'; } })(), ip: ipOf(req) }) : { ok: false, code: 'job_secrets_gone' })));
+  app.delete('/api/vault/agent-secrets/:entry', person((req) => paste.dropAgentEntry(String(req.params.entry), { by: 'user', who: (() => { try { return who(req) || 'sign-in-off'; } catch { return 'sign-in-off'; } })(), ip: ipOf(req) })));   // B-3fb5: an agent's own entry's 删除 (the whole agent:<scope>/<name>, encoded)
   // lane vault-entry-description: THE OWNER answers an agent's proposal of an entry's words (允许 / 拒绝), and the owner's own edit of them
   app.post('/api/vault/words-asks/:id/answer', person((req) => { const b = req.body || {}; return paste.answerWords(String(req.params.id), { answer: b.answer, by: 'user', person: true }); }));
   app.post('/api/vault/entry-words', person((req) => { const b = req.body || {}; return paste.ownerWords({ entry: typeof b.entry === 'string' ? b.entry : '', name: typeof b.name === 'string' ? b.name : undefined, note: typeof b.note === 'string' ? b.note : undefined, by: 'user' }); }));
@@ -535,7 +579,8 @@ function registerRunRoutes(app, { run, activeSessions, getJobs, contents, who, p
     const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
     const pr = require('../vault-run.js').parseRef(typeof b.entry === 'string' ? b.entry.trim() : '');
     const list = caller.job ? null : run.runnableFor(caller);
-    const seen = !!(pr && list && list.ok && Array.isArray(list.entries) && list.entries.some((e) => e && e.ref === pr.ref));
+    const VRm = require('../vault-run.js'), foreignAgent = !!(pr && VRm.agentScopeOf(pr) && !VRm.ownsAgentEntry(pr, caller));   // B-bc3b (the read): a conversation the owner SHARED an agent's entry with uses it — it never proposes its words (only its own conversation does)
+    const seen = !foreignAgent && !!(pr && list && list.ok && Array.isArray(list.entries) && list.entries.some((e) => e && e.ref === pr.ref));
     const pc = pasteCallerIn(activeSessions, req) || {};   // r2 (MINOR c): the paste door's ONE resolver — a pending fork has no id of its own and is refused, never filed under its parent
     const r = paste.propose({ caller: { job: !!pc.job, conversationId: pc.conversationId || null, sessionKey: pc.sessionKey || null, scope: pc.scope, name: pc.name }, entry: pr && pr.store === 'secrets' ? pr.entry : null, ref: pr ? pr.ref : '', seen, name: typeof b.name === 'string' ? b.name : undefined, note: typeof b.note === 'string' ? b.note : undefined });
     if (!r || !r.ok) return res.status(paste.statusOf((r && r.code) || 'unfiled')).json({ ok: false, code: (r && r.code) || 'unfiled', error: (r && r.words) || paste.words((r && r.code) || 'unfiled'), ...(r && r.until ? { until: r.until } : {}) });

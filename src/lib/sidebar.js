@@ -1,5 +1,5 @@
 import { Resizer } from './resizer.js';
-import { agoText, escHtml, createPopover, hostStateChip, sessionMatchesFilter, showContextMenu } from './utils.js';
+import { agoText, escHtml, createPopover, hostStateChip, sessionMatchesFilter, showContextMenu, showToast } from './utils.js';
 import { t as tr } from './i18n.js';
 import { BACKEND_META, createAgentKindIcon, createBackendIcon, getAgentKindMeta, getBackendMeta, getSessionKey, AGENT_KIND_FILTER_KEY, agentKindFilterAtLoad, passesAgentKindFilter, agentKindsIn } from './agent-meta.js';
 import { installSidebarState } from './sidebar-state.js';
@@ -12,6 +12,8 @@ import { installSidebarWorkbench } from './sidebar-workbench.js';
 import { installSidebarColumn } from './sidebar-column.js'; // lane duo-build-1: the regular class's list column (one stream of rows)
 import { installSidebarTasks } from './sidebar-tasks.js';
 import { openRefreshLive, REFRESH_ICON } from './refresh-live.js'; // lane refresh-live-sessions: the list's ⋯ menu entry 「刷新所有活着的会话」
+import { isStoppedBy, filterWords as stoppedFilterWords, stillWalled } from '../stopped-by.js'; // lane auto-resume-bulk: the «因限额/过载停止 (N)» filter + the menu's count
+import { setAutoResumeForAll, openResumeStoppedDialog } from './bulk-resume.js'; // lane auto-resume-bulk: the two bulk acts
 import { UI_ICONS } from './icons.js';
 import { createBarFold } from './bar-fold.js'; // lane ui-controls-and-bugs: the filter row folds through THE chrome-bar fold
 import { patchStashHints } from './stash-strip.js'; // 2026-09-27: the card's "N waiting" hint (the stash fact), patched in place
@@ -148,6 +150,13 @@ const LIVE_SESSION_FACTS = Object.freeze({
   // lane bypass-no-prompts: how many of the CLI's own asks the bypass door answered this run (server.js `autoAllowed`) —
   // CARRIED-ONLY: Session Properties reads the merged row when it opens; no card draws it
   autoAllowed: { digest: null },
+  // B-460d: the CPU priority the conversation started at (server.js `cpuNice`) — CARRIED-ONLY: Session Properties' row
+  cpuNice: { digest: null },
+  // lane auto-resume-bulk (.349): WHY the conversation stopped — {kind: 'quota'|'overload', at, resetsAt, said,
+  // autoResume} (src/stopped-by.js) — the card's chip («因用量停止 · 重置 14:00» + «自动继续：开/关») and the filter
+  // row's «因限额/过载停止 (N)» draw it, so it GATES — on a scalar projection (never the object, the trap above). It
+  // moves at most twice per stop (set at the turn end, cleared when the session runs) plus a toggle.
+  stoppedBy: { digest: (v) => (v && typeof v === 'object' ? `${v.kind}|${v.at || ''}|${v.resetsAt || ''}|${v.autoResume === true ? 'on' : v.autoResume === false ? 'off' : ''}|${v.waiting || ''}|${v.resetsAt && v.resetsAt <= Date.now() ? 'passed' : ''}` : '') },   // «waiting» and a reset that PASSED redraw the card
 });
 const LIVE_SESSION_FACT_KEYS = Object.freeze(Object.keys(LIVE_SESSION_FACTS));
 /** Carry the live facts verbatim; an absent live row states nothing (null). */
@@ -357,13 +366,28 @@ class Sidebar {
       listMenuBtn.onclick = (e) => {
         e.stopPropagation();
         const r = listMenuBtn.getBoundingClientRect();
+        // lane auto-resume-bulk: the two bulk acts (also on Settings → Spending, the auto-resume row). N = the marked
+        // sessions whose own stated reset has passed (the dialog re-asks the pool and says who is still walled)
+        const stoppedN = (this._allSessions || []).filter((s) => isStoppedBy(s) && !stillWalled(s.stoppedBy).walled).length;
+        const flipAll = async (on) => {
+          try {
+            const r = await setAutoResumeForAll(this.app, on);
+            showToast(on ? tr('Auto-continue is on for {n} more sessions', { n: r.changed || 0 }) : tr('Auto-continue is off for {n} sessions', { n: r.changed || 0 }) + (r.stoppedBatch ? ' ' + tr('The running resume of stopped sessions was stopped.') : ''));   // lg-recovery U2 cure: the flip stopped a running batch — said
+          } catch (err) { showToast(tr('Could not change auto-continue: {why}', { why: err.message }), { type: 'error' }); }
+        };
         const ROWS = {
           refresh: { labelHtml: `${REFRESH_ICON} ${escHtml(tr('Refresh all live sessions…'))}`, label: tr('Refresh all live sessions…'), action: () => openRefreshLive(this.app) },
           sort: { label: tr('Sort by'), action: () => document.getElementById('sort-toggle')?.onclick?.(null, listMenuBtn) },   // its menu at this ⋯
           manage: { label: tr('Manage mode — show quick terminate buttons'), action: () => document.getElementById('manage-toggle')?.click() },
         };
         // the regular class's head has no room for sort / manage, and a narrow row folds them: they are rows of this ⋯ then
-        showContextMenu(r.left, r.bottom + 2, listMenuKeys({ regular: this._regularMode, folded: this._filterFold?.folded() }).map((k) => ROWS[k]));
+        const rows = listMenuKeys({ regular: this._regularMode, folded: this._filterFold?.folded() }).map((k) => ROWS[k]);
+        rows.splice(1, 0,   // the bulk acts sit beside the other act on every session (refresh), above the folded controls
+          { labelHtml: `${UI_ICONS.autoContinue || ''} ${escHtml(tr('Turn auto-continue on for every session'))}`, label: tr('Turn auto-continue on for every session'), action: () => flipAll(true) },
+          { labelHtml: `${UI_ICONS.pause || ''} ${escHtml(tr('Turn auto-continue off for every session'))}`, label: tr('Turn auto-continue off for every session'), action: () => flipAll(false) },
+          { labelHtml: `${UI_ICONS.playAll || ''} ${escHtml(tr('Resume every session a usage limit or overload stopped ({n})', { n: stoppedN }))}…`, label: tr('Resume every session a usage limit or overload stopped ({n})', { n: stoppedN }), action: () => openResumeStoppedDialog(this.app) },
+        );
+        showContextMenu(r.left, r.bottom + 2, rows);
       };
       // THE FILTER ROW never runs past the sidebar: search · filter · manage · sort · ⋯ through THE chrome-bar fold — the sort's
       // words go first (its icon, the order in its title), then manage, then sort fold into the ⋯ (above); the search and the
@@ -480,6 +504,7 @@ class Sidebar {
     show('manage-toggle', t !== 'mounts');
     show('session-list-menu', t !== 'mounts'); // the list-wide ⋯ menu: wherever sessions are listed
     show('status-quick-tabs', t === 'folders');
+    show('stopped-quick-tabs', t === 'folders'); // lane auto-resume-bulk: the «stopped by a limit or overload» pill — a quick-view tab like its neighbour
     show('agent-kind-quick-tabs', t !== 'mounts'); // agentKind filter applies on tasks too
   }
 
@@ -854,6 +879,44 @@ class Sidebar {
     row.append(label, btn);
     this.listEl.appendChild(row);
     return row;
+  }
+
+  /** «因限额/过载停止 (N)» (lane auto-resume-bulk): the filter row's pill for the sessions a usage wall or an overloaded
+   *  model stopped (the live `stoppedBy` fact) — drawn only while there are some (or while it is on), so it never sits
+   *  there greyed; a press shows only them, a second press shows everything again. */
+  _renderStoppedQuickTab() {
+    const box = document.getElementById('stopped-quick-tabs');
+    if (!box) return;
+    const n = this._stoppedUnderFilters().length;   // N = exactly what a press shows (every other filter of the list applied)
+    // a stated reset that passes REDRAWS the cards («resets 14:00» becomes «the limit has reset») — one timer, the earliest
+    if (this._stopTimer) { clearTimeout(this._stopTimer); this._stopTimer = null; }
+    const nextReset = Math.min(...(this._allSessions || []).filter((s) => isStoppedBy(s) && Number(s.stoppedBy.resetsAt) > Date.now()).map((s) => Number(s.stoppedBy.resetsAt)));
+    if (Number.isFinite(nextReset)) this._stopTimer = setTimeout(() => { this._stopTimer = null; this._renderStoppedQuickTab(); this._render(); }, Math.min(2 ** 31 - 1, nextReset - Date.now() + 500));   // re-arms the NEXT reset at once
+    // rebuilt only when what it shows moved (every render asks — its focus and hover are kept otherwise)
+    const key = `${n}|${this._stoppedOnly ? 1 : 0}|${stoppedFilterWords(n, tr)}`;
+    if (key === this._stoppedPillKey) return;
+    this._stoppedPillKey = key;
+    box.innerHTML = '';
+    if (!n && !this._stoppedOnly) return;
+    const btn = document.createElement('button');
+    btn.className = 'status-quick-tab stopped-quick-tab' + (this._stoppedOnly ? ' active' : '');
+    btn.style.setProperty('--tab-color', 'var(--yellow)');
+    btn.textContent = stoppedFilterWords(n, tr);
+    btn.title = this._stoppedOnly ? tr('Showing only the sessions a usage limit or an overloaded model stopped — click to show all')
+      : tr('Show only the sessions a usage limit or an overloaded model stopped');
+    btn.onclick = () => { this._stoppedOnly = !this._stoppedOnly; this._renderStoppedQuickTab(); this._render(); };
+    box.appendChild(btn);
+  }
+
+  /** The stopped sessions a press of the pill shows: the list's own filters (text, backend, host, agent kind, archived). */
+  _stoppedUnderFilters() {
+    const f = (document.getElementById('session-filter')?.value || '').toLowerCase();
+    const showArchived = this._statusFilter && this._statusFilter.has('archived');
+    const nonArch = new Set([...(this._statusFilter || [])]); nonArch.delete('archived');   // _render's status filter and quick view, as it applies them
+    const statusOk = (s) => (showArchived ? (this.isArchived(s) || this._statusFilter.has(s.status)) : (!this.isArchived(s) && (nonArch.size >= 4 || nonArch.has(s.status))));
+    return (this._allSessions || []).filter((s) => isStoppedBy(s) && statusOk(s) && (!this._activeView || s.status === this._activeView)
+      && (!f || sessionMatchesFilter(s, f)) && !(this._backendFilter.size > 0 && !this._backendFilter.has(s.backend || 'claude'))
+      && !(this._hostFilter.size > 0 && !this._hostFilter.has(s.host || 'local')) && (!this._agentKindFilter || passesAgentKindFilter(s, this._agentKindFilter)));
   }
 
   _renderAgentKindQuickTabs() {
@@ -1244,6 +1307,7 @@ class Sidebar {
     this._sessionDigest = digest;
     this._updateBackendFilterBtn(document.getElementById('backend-filter'));
     this._renderAgentKindQuickTabs();
+    this._renderStoppedQuickTab();
     // Preserve scroll position across the auto-refresh re-render so browsing a
     // session lower in the list isn't interrupted by a jump to the top.
     const hosts = [this.listEl, this.listEl?.closest('.sidebar-section')].filter(Boolean);
@@ -1294,6 +1358,7 @@ class Sidebar {
   }
 
   _render() {
+    try { this._renderStoppedQuickTab(); } catch { }   // the pill's N follows every filter as it changes (typing, backend, host) — U1 cure 2
     // The ACTUAL scrolling element moved over time (.sidebar-section
     // classically; #all-sessions-list itself in the current layout — measured
     // 391/7106 vs the section's 443/443). Anchoring the preserve on one
@@ -1382,6 +1447,8 @@ class Sidebar {
     if (this._agentKindFilter) {
       sessions = sessions.filter(s => passesAgentKindFilter(s, this._agentKindFilter));
     }
+    // lane auto-resume-bulk: «因限额/过载停止 (N)» — only the sessions a usage wall or an overloaded model stopped
+    if (this._stoppedOnly && this._activeTab !== 'tasks') sessions = sessions.filter((s) => isStoppedBy(s));   // never the Tasks board (below)
 
     const searched = sessions.length; let statusLeft = null, archivedHid = 0; // the rows the search and the other filters leave, before the status filter (B-54d9 N5)
     // Archive filter: hide archived sessions unless 'archived' filter is on

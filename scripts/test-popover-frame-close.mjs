@@ -24,7 +24,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, takeCspReports } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, takeCspReports, CHROME_STORE } from './scratch.mjs';
+import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for the server this suite boots (test-architecture §57)
 const require = createRequire(import.meta.url);
 
@@ -33,7 +34,8 @@ const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 
 const [PORT, CDP_PORT] = await freePorts(2);
-const wt = scratch('popover-frame-smoke');
+const root = mintRoot('popover-frame-smoke'), wt = path.join(root, 't');
+const chromeHome = path.join(root, 'chrome-home'); fs.mkdirSync(chromeHome, { recursive: true });   // rule nine (hub-boot.mjs): the suite's own browser carries a HOME in the root, so the helper ends it before the root goes
 const PROFILE = scratch('popover-frame-chrome');
 const DESIGN = scratch('popover-frame-design'); // the artboards the Design window draws
 let failed = 0;
@@ -43,7 +45,6 @@ let untilJs = null;
 const until = async (expr, { timeout = 3000, step = 50 } = {}) => { const t0 = Date.now(); for (;;) { const v = await untilJs(expr); if (v) return v; if (Date.now() - t0 > timeout) return v; await sleep(step); } };
 
 // ── throwaway server in a worktree (overlays the gate's ALREADY-BUILT public/) ──
-try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js', 'package.json']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
@@ -58,20 +59,17 @@ fs.writeFileSync(path.join(DESIGN, 'About.html'), '<!doctype html><html><head><m
 // the registry row the Design window needs (data/designs.json — the server reads it at boot; the read refuses an unregistered folder)
 fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
 fs.writeFileSync(path.join(wt, 'data', 'designs.json'), JSON.stringify({ designs: [{ id: 'd-frame-probe', sessionId: null, conversationId: null, host: null, dir: DESIGN, title: 'frame probe', createdAt: Date.now(), openedAt: Date.now() }] }));
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
+fs.mkdirSync(path.join(root, 'home'), { recursive: true }); // the hub's HOME lies in its root (hub-boot.mjs)
+const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', HOME: path.join(root, 'home') } });
 // a REAL MOUSE (test-gear-menu's lesson): headless linux chrome answers hover:none without these blink settings
 const REAL_MOUSE = '--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4';
-const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--window-size=1280,800', REAL_MOUSE, '--disable-background-timer-throttling', `--user-data-dir=${PROFILE}`, 'about:blank'], { stdio: 'ignore' });
+const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--window-size=1280,800', REAL_MOUSE, '--disable-background-timer-throttling', `--user-data-dir=${PROFILE}`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, HOME: chromeHome } });
 const cleanup = () => {
   try { chrome.kill('SIGKILL'); } catch {}
-  try { srv.kill('SIGKILL'); } catch {}
-  for (const root of [wt, PROFILE]) try { endRootedProcesses(root); } catch {} // §57b: whatever the server (or Chrome) started under its root ends with it
-  try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
   for (const d of [PROFILE, DESIGN]) try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch {} // Chrome releases its profile a beat after SIGKILL
 };
 process.on('exit', cleanup);
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
-for (let i = 0; i < 60; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); break; } catch { await sleep(250); } }
+await hub.ready();
 
 // ── raw CDP ──
 const WebSocket = require('ws');

@@ -25,6 +25,8 @@ function create({ app, server, rootDir, HOST, PORT, BUFFERS_DIR, PERMISSION_MODE
   getTasks = null, sessionStatusKey = null, getSessionStatus = null, persistSessionMeta = null, rebindSessionMeta = null,
   // lane jobs-browser (B-dbc1): the Background Work engine — a job browses as its owner conversation while its run is alive
   getJobs = null,
+  // unit what-it-may-use: the doors built AFTER this wiring (server.js — the channels engine, the exit manager, the window engine), asked at each read
+  mayUseDoors = null,
   // B-f7ab: the late browser key reads the record it extends (never a partial one) and asks THE integration switch
   readSessionMetaOf = null, integrationEnabled = null,
   // agent browser P3 (§4.3.1): the ONE delivery ladder the handback announcer forwards to, and the "For you" inbox
@@ -70,10 +72,11 @@ require('../routes/feedback.js').registerFeedbackRoutes(app, {
   store: feedback, activeSessions, getJobs,
   groupOf: (s, id) => {
     const tasks = getTasks && getTasks();
-    const gs = tasks && sessionStatusKey ? tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }) : [];
+    const gs = tasks && sessionStatusKey ? tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }) : [];
     const g = gs.find((x) => x.id === s._initialGroupId) || gs[0];
     return g ? { id: g.id, name: g.title || null } : null;
   },
+  groupRead: (s, id) => { const tasks = getTasks && getTasks(); return tasks && sessionStatusKey && typeof tasks.membershipRead === 'function' ? tasks.membershipRead({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }) : null; },
   instance: () => ({ name: process.env.VIBESPACE_INSTANCE_NAME || os.hostname(), version: require('../../package.json').version }),
   collectorToken: () => process.env.VIBESPACE_TELEMETRY_INGEST_TOKEN || '', selfKeyId: () => feedbackForward.keyId(),
   forwardOf: (id) => feedbackForward.forwardOf(id),   // lane feedback-forward-404: `vibespace-feedback list` says a report stayed here
@@ -101,7 +104,7 @@ const vaultHostOf = (k) => { try { const s = String(k || ''); return s ? (s.star
 const vaultMachineName = (k) => { const h = vaultHostOf(k); return String((h && (h.name || h.id)) || k); };
 const vaultSources = {
   accounts: () => getAccounts(), integrations: () => (integrations ? { vaultRows: () => integrations.vaultRows({ machineName: vaultMachineName }), vaultReveal: (e, f) => integrations.vaultReveal(e, f) } : null), channels: () => getChannels(), mounts: () => mounts, 'app-secrets': () => appSecretsDoor,
-  secrets: () => require('./vault-contents.js').secretSource({ vault, machineName: vaultMachineName }),
+  secrets: () => require('./vault-contents.js').secretSource({ vault, machineName: vaultMachineName, providerName: (id) => { const s = require('./provider-store.js').forDir(path.join(rootDir, 'data')); const p = s && s.get(id); return p ? p.label : id; } }),   // lane lg-providers: a provider key's row names its provider
   passkeys: () => (browserDialogs && typeof browserDialogs.passkeyVaultRows === 'function' ? { vaultRows: () => browserDialogs.passkeyVaultRows(), vaultReveal: (e, f) => browserDialogs.passkeyVaultReveal(e, f) } : null),
   automation: () => automation,   // design q-046: the automation keys (their values, one per reveal — to hand to an outside party)
 };
@@ -122,8 +125,9 @@ const vaultUseFacts = (caller) => {
     if (!s || s.isTmuxView || !caller || require('../claude-lock-capture.js').addressableId(s) !== caller.conversationId) continue;   // fork-safe: a pending fork shares its parent's id and is never picked
     let groupIds = [], groupsUnreadable = false;
     const tasks = getTasks && getTasks();
-    if (tasks && sessionStatusKey) { try { groupIds = tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }).map((g) => g.id); } catch { groupsUnreadable = true; } }
-    return { conversationKeys: require('../grant-model.js').conversationKeysOf(s, s._webuiId || id), groupIds, groupsUnreadable };
+    if (tasks && sessionStatusKey) { try { const gs = tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }); groupIds = gs.map((g) => g.id); if (gs.unread) groupsUnreadable = true; /* B-55dc: still being read */ } catch { groupsUnreadable = true; } }
+    const tb = s._turnBy && typeof s._turnBy === 'object' ? s._turnBy : null;   // B-d868: who started the turn now running (claude-stream-json's kept fact)
+    return { conversationKeys: require('../grant-model.js').conversationKeysOf(s, s._webuiId || id), groupIds, groupsUnreadable, turnBy: tb ? require('../message-manager.js').turnByForAsk({ ...tb, by: String(tb.by || 'unrecorded') }, s._turnByBackground) : null };   // B-d868: background work of another turn ⇒ «not recorded»
   }
   return { conversationKeys: caller && caller.conversationId ? [caller.conversationId] : [] };
 };
@@ -155,6 +159,7 @@ const totpRunOf = (cid) => { const s = totpSessionOf(cid); return s ? require('.
 // src/browser-login.js; ONE writer src/server/browser-logins.js): Hub types them over CDP, VibeSpace never hands an agent a value; the
 // `browser-login` grant (the ONE grants store) decides who may, and covers the login's paired two-step code (D3); an account
 // an agent registers is saved automatically, with its provenance, and ONE For-you notice tells the owner (D5 as reversed)
+const browserProxyLogins = require('./browser-proxy-logins.js').create({ vault });   // B-8b87: a browser proxy's login — the ONE writer and reader (its reader: the keeper's forwarder)
 const browserLogins = require('./browser-logins.js').create({ vault, grants: () => require('./grants-store.js').store(), totpCode: (name, o) => vaultTotp.codeForLogin(name, o),
   forYou: { add: (profileId, item) => { if (!userTodos) return null; const r = userTodos.add('browser', { origin: 'browser', by: 'agent', sessionName: 'Agent browser', ...item }); return r && (r.id || (typeof r === 'string' ? r : null)); },
     resolve: (id) => { if (userTodos && userTodos.get(id)?.status === 'open') userTodos.setStatus(id, 'done', 'browser'); } },
@@ -163,6 +168,7 @@ const browserLogins = require('./browser-logins.js').create({ vault, grants: () 
 // owner PASTES it into its For-you item's masked box (or refuses); the value goes to the one writer of its place (a registry
 // field: the integration store; a free entry: the vault's `secret:<id>`); the asker reads a receipt at its next turn (the stash)
 const vaultPaste = require('./vault-paste-door.js').create({ vault, integrations, userTodos, deliver, vaultRun, useGrants: vaultUseGrants, logins: browserLogins, totp: vaultTotp, runOf: totpRunOf, setting: (k) => serverSetting(k), log: (m) => console.log('[vault-paste]', m) });   // useGrants + setting: lane vault-use-grants (a request's default grant)
+const vaultJobSecrets = require('./job-secrets-door.js').create({ dataDir: path.join(rootDir, 'data'), vault, paste: vaultPaste, userTodos, log: (m) => console.log('[vault-job-secrets]', m) });   // B-ef1b: the retired job-secrets notice's two buttons (move into the vault / delete the file)
 // lane chat-attachments-persist (the cut, 主开发 2026-11-13: «the record is the store»): a picture a message showed is READ
 // from the record it came in (the route, through the transcript service: this hub's transcript worker, or a paired
 // machine's agent); the files a person dropped into a temporary folder live with the conversation — the store, its stray
@@ -179,9 +185,20 @@ require('../routes/chat-attachments.js').registerChatAttachmentRoutes(app, { sto
   transcripts: require('../transcript-service').createTranscriptService({ activeSessions, createSessionMessages: null, hosts }),
   hostKnown: (h) => { try { return !!(hosts && hosts.get(h)); } catch { return false; } },
   cwdOf: (tx, b) => { for (const s of activeSessions.values()) if (s && !s.host && (s.backend || 'claude') === b && (s.backendSessionId || s.claudeSessionId) === tx) return s.cwd || ''; return ''; } });
+// lane setting-doors pick 2: THE HOLDS of a one-press setting change — the press's ONE act (the hold on disk before the value) and the
+// quiet return (src/server/setting-holds.js); the door asks the pick 0 verdict (src/routes/setting-holds.js)
+const settingHolds = require('./setting-holds.js').create({ dataDir: path.join(rootDir, 'data'),
+  readSettings: () => persistenceRouter.readSettings(), patchSettings: (p) => persistenceRouter.patchSettings(p),
+  broadcast: (m) => bcastAll(m), log: (m) => console.log(m),
+  userTodos });
+settingHolds.start().catch((e) => console.log('[setting-holds] start failed:', e && e.message));
+require('../routes/setting-holds.js').registerSettingHoldRoutes(app, { holds: settingHolds });
+app.locals.settingHolds = settingHolds;   // the agent's ask route judges a lasting change against a live hold (law A)
 require('../routes/vault.js').registerVaultRoutes(app, { vault, activeSessions, getJobs, contents: vaultContents, who: (req) => require('../auth.js').Auth.signInHandle(req), run: vaultRun, paste: vaultPaste,
   totp: vaultTotp, callerOf: (token) => sessionCallerOf(token), runOf: totpRunOf, grantLive: (g) => !g.subject.startsWith('session:') || totpRunOf(g.subject.slice(8)) === g.run, subjects: () => conversationSubjects(),
+  proxyLogins: browserProxyLogins, proxyMove: (id) => { const k = require('./browser-keeper.js').keeper(); return k && typeof k.moveProxyPassword === 'function' ? k.moveProxyPassword(id) : { ok: false, code: 'unavailable', error: 'the browser keeper is not running on this server' }; },   // B-8b87
   logins: browserLogins,   // lane browser-login: the Vault window's web logins (add / delete / 用于… — a person's doors)
+  jobSecrets: vaultJobSecrets,   // B-ef1b: the retired job-secrets notice's buttons (a person's door)
   linkTokenFor: (hostKey, who) => hostTokens.tokenFor(hostKey, who), onVaultWait: () => { try { broadcastActiveSessions && broadcastActiveSessions(); } catch { } },
   // int317 (RED-3): the door's audit row → the device audit (the machine card's Activity…) — the session, its host key, the status
   auditLink: ({ sid, hostKey, status }) => { const h = vaultHostOf(hostKey); if (hosts && hosts.deviceAudit) hosts.deviceAudit.append(require('../device-acts.js').linkTokenLine({ at: Date.now(), sid, hostKey, hostId: h ? h.id : null, machine: h ? (h.name || h.id) : null, status })); } });
@@ -190,7 +207,7 @@ require('../routes/vault.js').registerVaultRoutes(app, { vault, activeSessions, 
 // (src/server/automation-engine.js over PURE src/automation-keys.js), audited, and stops while the vault is locked
 // lane key-grant-everyone r2: a read that failed is SAID (`unreadable`) — the caller's groups judge a Task Group «除了», and []
 // would admit the conversation the owner left out of All agents (the engine refuses groups_unreadable instead)
-const automationGroupsRead = (s, id) => { const tasks = getTasks && getTasks(); if (!tasks || !sessionStatusKey) return { ids: [], unreadable: true }; try { return { ids: tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }).map((g) => g.id), unreadable: false }; } catch { return { ids: [], unreadable: true }; } };
+const automationGroupsRead = (s, id) => { const tasks = getTasks && getTasks(); if (!tasks || !sessionStatusKey) return { ids: [], unreadable: true }; try { return { ids: tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }).map((g) => g.id), unreadable: false }; } catch { return { ids: [], unreadable: true }; } };
 const automationGroupsOf = (s, id) => automationGroupsRead(s, id).ids;
 // lane automation-open-limits (the q-048 verify's M2): an open's limits judge the EFFECTIVE open — what it names, else the
 // account store's default and the instance's default model (the typed accessor ws-create's ladder reads)
@@ -200,7 +217,7 @@ const automationSettings = require('./harness-config-sync.js').accessorsFor({ se
 const sessionCallerOf = (token) => { for (const [id, s] of activeSessions) if (s && sameToken(token, s.agentToken)) { const cid = s.backendSessionId || s.claudeSessionId || null; const g = automationGroupsRead(s, id); return { conversationId: cid, sessionKey: cid ? `${s.backend || 'claude'}:${cid}` : null, name: s.name || s.webuiName || null, live: !s.isTmuxView, groups: g.ids, groupsUnreadable: g.unreadable,
   scope: String(s._webuiId || id), conv: require('../claude-lock-capture.js').addressableId(s) }; } return null; };   // scope / conv: lane vault-agent-own — the conversation's registered and durable ids (an entry it stored itself is its own)
 // the grant pickers' subjects: every running conversation and every Task Group (automation keys' 授权给…, two-step codes' 用于…)
-const conversationSubjects = () => { const tasks = getTasks && getTasks(); const sessions = []; for (const [id, s] of activeSessions) { const cid = s && (s.backendSessionId || s.claudeSessionId); if (cid && !s.isTmuxView) sessions.push({ subject: `session:${cid}`, name: s.name || s.webuiName || cid, backend: s.backend || 'claude', groupIds: automationGroupsOf(s, id) /* lane grants-unify: the «除了» row offers a picked group's members */ }); } let groups = []; try { groups = tasks ? tasks.list().filter((t) => t && !t.archivedAt).map((t) => ({ subject: `group:${t.id}`, name: t.title || t.id })) : []; } catch { groups = []; } return { sessions, groups }; };
+const conversationSubjects = () => { const tasks = getTasks && getTasks(); const sessions = []; for (const [id, s] of activeSessions) { const cid = s && (s.backendSessionId || s.claudeSessionId); if (cid && !s.isTmuxView) sessions.push({ subject: `session:${cid}`, name: s.name || s.webuiName || cid, backend: s.backend || 'claude', webuiId: String(s._webuiId || id) /* lane login-request-card: a grant written under its page id names it too */, groupIds: automationGroupsOf(s, id) /* lane grants-unify: the «除了» row offers a picked group's members */ }); } let groups = []; try { groups = tasks ? tasks.list().filter((t) => t && !t.archivedAt).map((t) => ({ subject: `group:${t.id}`, name: t.title || t.id })) : []; } catch { groups = []; } return { sessions, groups }; };
 // lane vault-window-v2 (design q-047 §3.4): the Vault window's 「需要你」 producers — a use door's refusal (使用失败), an agent's put (建议轮换)
 const vaultAttention = require('./vault-hooks.js').createVaultAttention({ userTodos });
 const automation = require('./automation-engine.js').create({ dataDir: path.join(rootDir, 'data'), vault, userTodos, attention: vaultAttention, log: (m) => console.log('[automation]', m),
@@ -354,6 +371,7 @@ async function graduateHostToDial(h, { serverUrl, viaRelay, by = 'system:graduat
     const gradDevice = hosts.get(h.id).deviceId;
     const dialUrl = `${base.replace(/^http/, 'ws')}/api/device-dial?device=${gradDevice}`;
     const pair = agentdMintDialPair(gradDevice, { host: require('../dial-facts.js').hostOf(dialUrl), base, by, from });
+    if (typeof hosts.persisted === 'function' && !(await hosts.persisted())) throw Object.assign(new Error('the pairing is minted, but hosts.json is not on disk yet — the hub keeps trying; try the graduation again once it lands'), { code: 'not_durable' });   // B-48a4 cure: its dial token's hash on disk before the installer ships it
     // ship + run the installer over ssh STDIN — the installer AND its arguments (verify-r3 B-grad): the tokens used to
     // ride `ssh … -- 'bash -s -- … --dial-token vsdt_… --host-token vsht_…'`, i.e. the argv of the LOCAL ssh (readable
     // by every user of this machine through /proc/<pid>/cmdline for the whole install, ≤ 300 s) and the remote shell's
@@ -386,8 +404,9 @@ app.post('/api/hosts/:id/graduate-dial', async (req, res) => {
     if (h.transport === 'dial') return res.status(400).json({ error: 'already a dial device' });
     const sshRun = (script, timeout = 30000, input = null) => new Promise((resolve) => {
       const { execFile } = require('child_process');
-      execFile('ssh', [...hosts.sshArgs(h, { multiplex: true }), '--', script],
+      const child = execFile('ssh', [...hosts.sshArgs(h, { multiplex: true }), '--', script],
         { env: hosts.sshEnv(), timeout, maxBuffer: 4 * 1024 * 1024 }, (err, so, se) => resolve({ ok: !err, out: String(so || ''), err: String(se || err?.message || '') }));
+      if (input != null) { child.stdin.on('error', () => { }); child.stdin.end(input); }   // B-8475: a script on stdin (`bash -s`)
       });
     if (req.body?.remove) {
       // best-effort remote teardown, ALWAYS clear the record (dead host must
@@ -395,9 +414,21 @@ app.post('/api/hosts/:id/graduate-dial', async (req, res) => {
       const root = h.dialRoot || '';
       if (root && /^\$HOME\/[\w@.\/-]+$/.test(root)) {
         const key = require('path').basename(root).replace(/[^A-Za-z0-9.-]/g, '-').replace(/-+$/, '');
-        await sshRun(`systemctl --user disable --now "vibespace-device-${key}.service" 2>/dev/null; ` +
+        // B-8475: a container's boot-hook block of this key leaves FIRST, in the same one call — the installer's OWN functions
+        // (a whole begin…end pair only, written through the hook's real file) on `bash -s` stdin, whatever the login shell is;
+        // an installer that cannot be read here costs only the drop (the record is ALWAYS cleared)
+        let hookDrop = '';
+        try {
+          const inst = await fs.promises.readFile(path.join(rootDir, 'scripts', 'vibespace-agentd-install.sh'), 'utf-8'); // off the loop (the checkout may sit on a network mount)
+          const h0 = inst.indexOf("# >>> B-8475 THE IMAGE'S USER BOOT HOOK"), h1 = inst.indexOf('# <<< B-8475 <<<');
+          if (key && h0 >= 0 && h1 > h0) hookDrop = `${inst.slice(h0, h1)}\ndrop_hook_block ${key} || true\n`;
+        } catch { }
+        const teardown = (`systemctl --user disable --now "vibespace-device-${key}.service" 2>/dev/null; ` +
           `launchctl bootout "gui/$(id -u)/cc.vibespace.device.${key}" 2>/dev/null; ` +
-          `pkill -f "${root}/" 2>/dev/null; sleep 1; rm -rf "${root}"; echo VS_REMOVED`, 30000);
+          `pkill -f "${root}/" 2>/dev/null; sleep 1; rm -rf "${root}"; echo VS_REMOVED`);
+        // one call; a host whose non-login PATH has no bash (the run never says VS_REMOVED) gets the teardown alone, as before
+        const ran = hookDrop ? await sshRun('bash -s', 30000, hookDrop + teardown + '\n') : null;
+        if (!ran || !String(ran.out || '').includes('VS_REMOVED')) await sshRun(teardown, 30000);
       }
       const devId = h.deviceId;
       hosts.ungraduateDial(h.id);
@@ -486,6 +517,8 @@ app.post(['/api/device/dial-pair', '/api/agentd/dial-pair'], async (req, res) =>
     try { pair = agentdMintDialPair(deviceId, { host: DF.hostOf(dialUrl), base, keepLink: pushV.push, by: actBy, from: (req.socket && req.socket.remoteAddress) || '' }); }
     catch (e) { return res.status(e && e.code === 'vault_locked' ? 423 : 400).json({ error: e.message, code: e && e.code === 'vault_locked' ? 'vault_locked' : /collides/.test(e.message) ? 'collision' : 'mint_failed' }); }
     bcastAll({ type: 'hosts-updated' });
+    // B-48a4 cure: the pairing command is handed out only once its dial token's hash is on disk (a restart before would leave the device unable to dial)
+    if (typeof hosts.persisted === 'function' && !(await hosts.persisted())) return res.status(503).json({ error: 'the pairing is minted, but hosts.json is not on disk yet — the hub keeps trying; mint it again once it lands', code: 'not_durable' });
     let updatedInPlace = false;
     let lockedOut = !!pair.lockedOut;
     if (pushV.push) {
@@ -618,7 +651,15 @@ app.post('/api/plugins/:id/mode', (req, res) => {
   try { res.json(plugins.setMode(req.params.id, String(req.body?.mode || 'auto'))); } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.post('/api/plugins/:id/config', (req, res) => {
-  try { res.json(plugins.setConfig(req.params.id, req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); }
+  // lane setting-doors f4 (主开发 2026-11-15): the judge's daily dollar cap is a SPENDING row — this old door writes it through the
+  // plugin's own settings, so it asks the one verdict too: a change of it that is not the owner's page is refused by name, nothing written
+  const b = req.body || {}, why = req.params.id === 'llm' ? require('../write-origin.js').ownerPageWhy(req) : null;
+  const asked = b.dailyBudgetCents !== undefined ? Number(b.dailyBudgetCents) / 100 : b.dailyBudgetUsd !== undefined ? Number(b.dailyBudgetUsd) : null;
+  const cur = (persistenceRouter.readSettings() || {})['plugin.llm.dailyBudgetUsd'];
+  if (why && asked !== null && asked !== (cur === undefined ? require('../plugin-settings.js').PLUGIN_SETTINGS.llm.rows.find((r) => r.key === 'dailyBudgetUsd').default : Number(cur))) {
+    return res.status(403).json({ error: `plugin.llm.dailyBudgetUsd: the judge's daily dollar cap changes only by the owner's press on the owner's own page (Settings › Spending — vibespace://settings/plugin.llm.dailyBudgetUsd); ${why === 'bearer' ? 'a request carrying a bearer token' : 'a request with no mark of the owner\'s page'} cannot change it; nothing was written. Ask the owner with vibespace-ask and give that link`, code: 'spend_row_owner_only', why, rows: ['plugin.llm.dailyBudgetUsd'], door: 'vibespace://settings/plugin.llm.dailyBudgetUsd' });
+  }
+  try { res.json(plugins.setConfig(req.params.id, b)); } catch (e) { res.status(400).json({ error: e.message }); }
 });
 // "we already offered this plugin" — the first-use dialog is asked ONCE per
 // instance (owner: "Not now" is remembered), so the flag is INSTANCE state
@@ -683,6 +724,7 @@ try { onMountsUpdated?.(); } catch (e) { console.warn('[mounts] boot ctx resync 
 // it returned the id — which is why an env-provisioned My storage (S3 or
 // CephFS) came up `desired: unmounted` on its very first boot.
 mounts.pathGuard = (p) => mountTokens.list().some((t) => String(t.root || '').startsWith(p));
+{ const fy = require('./mount-for-you.js').create({ getUserTodos: () => userTodos, mountCount: () => mounts._state.mounts.length, log: (l) => console.warn(l) }); Object.assign(mounts, { onPark: (m, info) => fy.park(m, info), onUnpark: (m) => fy.unpark(m), onKilled: (m, info) => fy.killed(m, info), onAnswered: (m) => fy.answered(m), onStranded: (m, info) => fy.stranded(m, info), onRemoved: (m) => fy.removed(m) }); } // B-5ce7: the mounts' For-you items (a parked mount + its Reconnect door; B-f230: a stopped process, stranded files)
 setTimeout(() => mounts.restore().catch(e => console.error('[mounts] restore:', e.message)), 2000);
 vault.onUnlock(() => mounts.restore().catch((e) => console.error('[mounts] restore after the vault unlocked:', e.message))); // lane vault-e2e-password: a boot over a LOCKED vault could not open a mount's secret — the unlock re-mounts what is desired
 vault.onUnlock(() => { try { instanceUrl?.restore?.({ ifFailed: true }); } catch (e) { console.error('[instance-url] restore after the vault unlocked:', e.message); } }); // lane fleet-instance-publish: a desired instance URL whose restore FAILED tries again once the vault opens — one cycle per unlock
@@ -697,6 +739,7 @@ require('./vault-hooks.js').wireVaultHooks({ vault, auth, wss, hostTokens, plugi
 mounts.startHealthWatchdog();
 app.locals.mounts = mounts; // files.js circuit breaker asks it about blocked mount roots
 require('../mount-door').register(mounts); // B-afc4: every other user-path reader asks the same answer (src/mount-door.js)
+require('./cwd-wait.js').register({ vault, mounts }); // B-864f: a session folder on a mount that waits for the vault is PENDING, never gone (src/server/cwd-wait.js)
 // Self-mount guard: a bridge token WE minted = the share points back at this
 // instance; fuse→HTTP→self deadlocks the threadpool (real incident).
 mounts.selfTokenCheck = (raw) => mountTokens.has(raw);
@@ -901,6 +944,11 @@ app.post('/api/mounts/:id/mount', async (req, res) => {
     res.json({ success: ok === 'starting' || ok, starting: ok === 'starting', mounts: mounts.list() });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
+// B-5ce7: the parked mount's Reconnect door (the For-you row `mount-reconnect` declares it — {ok, state} as the row's said words read)
+app.post('/api/mounts/:id/reconnect', async (req, res) => {
+  try { res.json(await mounts.reconnect(req.params.id)); }   // B-5ce7: MountManager.reconnect answers {ok, state} as the row's words read
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
 app.post('/api/mounts/:id/unmount', async (req, res) => {
   try { res.json({ success: await mounts.unmount(req.params.id) }); }
   catch (e) { res.status(400).json({ error: e.message }); }
@@ -1036,6 +1084,7 @@ function createSessionMessages(session, sessionId) {
       // (a real host is never in the map), its url fetched over plain http on loopback at the url's own port
       ...(testEgressMap.size ? { chromeBuildsResolve: (u) => { try { const x = new URL(u); const ip = testEgressMap.get(x.hostname.toLowerCase()); return ip ? `http://${ip}:${x.port || 80}${x.pathname}${x.search}` : u; } catch { return u; } } } : {}),
       kept: browserKept, // lane browser-resume (§3.9)
+      proxyLogins: browserProxyLogins, // B-8b87: a profile proxy's login — read by the forwarder alone, a use noted
       // lane engine-plugin: THE ENGINE REGISTRY (a manifest plugin with contributes.browserEngine, enabled + trusted + running;
       // a built-in one providing 'browser-engine') + the fleet facts `browser.defaultEngine` reads (presets fleet.json)
       engines: browserEngines,
@@ -1057,10 +1106,10 @@ function createSessionMessages(session, sessionId) {
       // else the earliest bound group naming a default). Belonging is the
       // store's own LIVE rule (`groupsForSession`), asked with the facts a
       // create has: cwd + the dialog's taskId (+ the session key when known).
-      taskGroupDefault: ({ cwd = null, initialGroupId = null, initialGroupIds = null, sessionKey = null } = {}) => {
+      taskGroupDefault: ({ cwd = null, hostId = null, initialGroupId = null, initialGroupIds = null, sessionKey = null } = {}) => {
         const tasks = getTasks ? getTasks() : null;
         if (!tasks) return '';
-        const groups = tasks.groupsForSession({ sessionKey, cwd, initialGroupId, initialGroupIds }) || [];
+        const groups = tasks.groupsForSession({ sessionKey, cwd, hostId, initialGroupId, initialGroupIds }) || [];
         // lane new-session-form: the FIRST spawned-into group in selection order that names a default (then any group)
         const picked = [...(Array.isArray(initialGroupIds) ? initialGroupIds : []), initialGroupId].filter(Boolean);
         const first = picked.map((id) => groups.find((g) => g.id === id && g.browserProfileId)).find(Boolean) || groups.find((g) => g.browserProfileId);
@@ -1085,11 +1134,16 @@ function createSessionMessages(session, sessionId) {
         return { turn: TF.turnKnown(s) ? TF.turnOf(s) : null, name: String(s.webuiName || s.name || '') || null };
       },
       // MULTIVIEW D4 (lane P verify, finding 5): the Task Group's default per-conversation cap for a CREATE —
+      // B-55dc: the deciding door's first reads for a create's facts — ws-create awaits them before the two reads here
+      taskGroupRead: ({ cwd = null, hostId = null, initialGroupId = null, initialGroupIds = null, sessionKey = null } = {}) => {
+        const tasks = getTasks ? getTasks() : null;
+        return tasks && typeof tasks.membershipRead === 'function' ? tasks.membershipRead({ sessionKey, cwd, hostId, initialGroupId, initialGroupIds }) : null;
+      },
       // the same belonging rule and facts as the pin's rung above; ws-create stamps it once per conversation
-      taskGroupCap: ({ cwd = null, initialGroupId = null, initialGroupIds = null, sessionKey = null } = {}) => {
+      taskGroupCap: ({ cwd = null, hostId = null, initialGroupId = null, initialGroupIds = null, sessionKey = null } = {}) => {
         const tasks = getTasks ? getTasks() : null;
         if (!tasks) return null;
-        const groups = tasks.groupsForSession({ sessionKey, cwd, initialGroupId, initialGroupIds }) || [];
+        const groups = tasks.groupsForSession({ sessionKey, cwd, hostId, initialGroupId, initialGroupIds }) || [];
         const picked = [...(Array.isArray(initialGroupIds) ? initialGroupIds : []), initialGroupId].filter(Boolean);
         const first = picked.map((id) => groups.find((g) => g.id === id && Number.isInteger(g.browserCap))).find(Boolean) || groups.find((g) => Number.isInteger(g.browserCap));
         return first ? first.browserCap : null;
@@ -1108,7 +1162,9 @@ function createSessionMessages(session, sessionId) {
         if (!hit) return { ids: [], unreadable: false, live: false };
         try {
           const key = sessionStatusKey ? sessionStatusKey(hit, hitId) : null;
-          return { ids: (tasks.groupsForSession({ sessionKey: key, cwd: hit.cwd, initialGroupId: hit._initialGroupId, initialGroupIds: hit._initialGroupIds }) || []).map((g) => g.id), unreadable: false };
+          const gs = tasks.groupsForSession({ sessionKey: key, cwd: hit.cwd, hostId: hit.host || null, initialGroupId: hit._initialGroupId, initialGroupIds: hit._initialGroupIds }) || [];
+          // B-55dc: an answer still being read is UNREADABLE here — the keeper then KEEPS a lease (undecided) and refuses a new one
+          return { ids: gs.map((g) => g.id), unreadable: !!gs.unread };
         } catch (e) { console.warn(`[browser] the Task Group list could not be read for ${bk} — ${e && e.message}`); return { ids: [], unreadable: true }; }
       },
       // lane grants-unify: "Who can use it" names a conversation by its CONVERSATION id in the ONE grants store — a browser
@@ -1137,7 +1193,10 @@ function createSessionMessages(session, sessionId) {
       const tasks = getTasks ? getTasks() : null;
       if (!tasks || !s) return [];
       const key = sessionStatusKey ? sessionStatusKey(s, id) : null;
-      return (tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }) || []).map((g) => g.id);
+      const gs = tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }) || [];
+      const ids = gs.map((g) => g.id);
+      if (gs.unread) Object.defineProperty(ids, 'unread', { value: true, enumerable: false });   // B-55dc: still being read (the callers say unreadable)
+      return ids;
     };
     let browserEnvMemo;
     // the pin route re-points a RUNNING session's indirection through the
@@ -1184,7 +1243,7 @@ function createSessionMessages(session, sessionId) {
         }
         let taskIds = [], groupsUnreadable = false;
         if (s) {
-          try { taskIds = taskIdsFor(s, sid); } catch { taskIds = []; groupsUnreadable = true; }
+          try { taskIds = taskIdsFor(s, sid); if (taskIds.unread) groupsUnreadable = true; } catch { taskIds = []; groupsUnreadable = true; }
         }
         const cid = s ? addressableId(s) : (caller && caller.conversationId ? caller.conversationId : null);
         const conversationKeys = [...new Set([...(cid ? [String(cid)] : []), ...(sid ? [`webui:${sid}`] : []), ...(bk ? [String(bk)] : [])])];
@@ -1542,7 +1601,27 @@ function createSessionMessages(session, sessionId) {
     } catch (e) { console.warn('[browser-trace] boot failed:', e && e.message); }
   };
 
-  return { decisionEngine, feedback, mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, pluginLoader, browserKeeper, bootBrowserKeeper: () => { bootBrowserKeeper(bootBrowserTrace); }, browserStream, browserHandback, browserTrace, browserKeys, browserDialogs,
+  // «WHAT IT MAY USE» (unit what-it-may-use — the owner, 2026-11-17): Session Properties' section reads ONE route; every door
+  // answers through its own lister (src/server/may-use.js), the cookie only (THE person verdict)
+  try {
+    let bindingsMemo = null;
+    const later = () => { try { return (typeof mayUseDoors === 'function' ? mayUseDoors() : null) || {}; } catch { return {}; } };
+    const mayUse = require('./may-use.js').create({
+      activeSessions, sessionKeyOf: (s, id) => (sessionStatusKey ? sessionStatusKey(s, id) : ''), addressableId: (s) => require('../claude-lock-capture.js').addressableId(s),
+      // a stopped conversation: the rows the sessions route already KEPT (no new sweep per read — cure r1, SHOULD a); a sweep only
+      // when it kept none, never while discovery is paused (then said by name)
+      storedRow: (key) => { const S = require('../routes/sessions'); const k = S.keptSessions(); const find = (rows) => (rows || []).find((x) => x && x.sessionKey === key) || null;
+        if (k.rows) return find(k.rows); if (k.paused) return { paused: true }; return S.warmSessions().then((r) => find(r && r.sessions)); },
+      groupsOf: ({ sessionKey, cwd, hostId = null, initialGroupId, initialGroupIds } = {}) => { const tasks = getTasks ? getTasks() : null; if (!tasks) throw new Error('the Task Group store is not ready'); return tasks.groupsForSession({ sessionKey, cwd, hostId, initialGroupId, initialGroupIds }); },   // B-df5f: the conversation's machine, as every caller hands it
+      noAgentOf: (b) => !!require('../backend-caps.js').capsOf(b).terminalOnly,
+      browserKeyOf: (cid) => { bindingsMemo = bindingsMemo || require('./browser-bindings.js').create({ dataDir: path.join(rootDir, 'data'), log: console }); return bindingsMemo.lookup(String(cid)) || ''; },
+      grants: () => require('./grants-store.js').store(),
+      doors: { channels: () => later().channels, browser: () => browserKeeper, logins: browserLogins, vaultUse: vaultUseGrants, automation, exits: () => later().exitProxy, windows: () => later().windows, jobs: () => (getJobs ? getJobs() : null) },
+      log: (m) => console.log(m),
+    });
+    mayUse.mount(app, { personVerdict: require('../routes/vault.js').personVerdict });
+  } catch (e) { console.warn('[may-use] the route could not be mounted — ' + (e && e.message)); }
+  return { settingHolds, decisionEngine, feedback, mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, pluginLoader, browserKeeper, bootBrowserKeeper: () => { bootBrowserKeeper(bootBrowserTrace); }, browserStream, browserHandback, browserTrace, browserKeys, browserDialogs,
     // lane engine-distribution (P4, §5.4): THE FLEET'S ENGINE PLUGIN at boot — ONE job after the listen, never on the boot path
     bootEngineDistribution: () => { if (!engineDistribution) return; engineDistribution.bootFleet().then((r) => { const line = engineDistribution.bootLine(r); if (line) console.log(line); }, (e) => console.warn(`[plugins] the fleet's engine plugin boot job failed — ${e && e.message}`)); } };
 }

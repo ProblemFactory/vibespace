@@ -50,9 +50,9 @@ function fakeApp() {
   return { app, call };
 }
 const policy = { doneAfterHours: 24, failedAfterDays: 7 };
-function boot(dir, { broadcasts = [] } = {}) {
+function boot(dir, { broadcasts = [], mod = wiring } = {}) {   // mod: a wiring module (a control's copy)
   const { app, call } = fakeApp();
-  const W = wiring.create({
+  const W = mod.create({
     app, dataDir: dir, broadcastAll: (m) => broadcasts.push(m), userTodos: { add() { }, resolveByJob() { return 0; } }, log: () => { },
     serverSetting: (k) => (k === 'jobs.archiveDoneAfterHours' ? policy.doneAfterHours : k === 'jobs.archiveFailedAfterDays' ? policy.failedAfterDays : undefined),
     taskGroups: null, activeSessions: null, deliver: { peerReachable: () => false, deliverToConversation: async () => ({ ok: false, reason: 'no lane' }) },
@@ -921,7 +921,8 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
     if (J._logsNoteP) await J._logsNoteP;
     const wrote = fs.existsSync(note);
     fs.rmdirSync(F); if (after === 'torn') fs.writeFileSync(F, '[{"id":"jb-f2760g01",');   // gone: nothing there at all
-    await J._unreadRetry('store'); await new Promise((r) => setTimeout(r, 80));
+    await J._unreadRetry('store'); if (after === 'gone') await J._unreadRetry('store');   // cure 3: «missing» is read once more
+    await new Promise((r) => setTimeout(r, 80));
     const mine = filed.slice(f0), fact = (k) => mine.find((n) => n && n.fact === k) || null;
     const out = { wrote, ended: !J._unread.store, noteLeft: fs.existsSync(note), done: fs.readdirSync(d).some((n) => /^jobs\.json\.unread-done-\d+$/.test(n)), held: J._logsUnread.store, readAgain: !!fact('records-read-again'), gone: fact('records-gone'), corrupt: fact('store-corrupt'), resolved: resolved.length - r0, asides: asides(d, 'jobs.json'), skel: J.jobs.has('jb-f2760g01'), said: lg.filter((l) => /read again after/.test(l)).join(' | ') };
     J.shutdown(); return out;
@@ -957,7 +958,176 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   const pf = await prefScene({ JobManager }, 'jobs-triage-reread-prefetch'), pfx = await prefScene(JS2, 'jobs-triage-reread-prefetch-mut');
   ok(pf.during && pf.during.tries >= 5 && pf.during.storeReads === 1 && pf.during.ctlReads === 1 && pf.during.held && pf.back && pf.said === 1 && pf.loads === 1, 'cure 2: a SLOW prefetch holds the one slot — the tries go on, ONE read of the store, ONE control file in flight at a time, said once, ONE load once it answers', pf);
   ok(pfx.during && (pfx.during.storeReads > 1 || pfx.during.ctlReads > 1), 'cure 2 CONTROL (r2: the slot covers the read only, in a copy): a second try reads the store and starts its prefetch over the slow one', pfx);
-  for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 5, label: 'B-f276 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+  // ── CURE 3 (主开发 11:10Z, as if a must): a store that answers «missing» RIGHT AFTER an unreadable answer is read once more before
+  // anything is written at its path — the storage that says «no such file» for a moment about a file that is there
+  const onceScene = async (Mod, name) => {
+    const d = mkDir(name), F = path.join(d, 'jobs.json'), b = JSON.stringify([rec('jb-f2760m01')]), lm = [];
+    plant(F, b, 'folder');
+    const J = engine(Mod, d, lm, { unreadRetry: { firstMs: 3600e3, maxMs: 3600e3 } });
+    fs.rmdirSync(F);   // «no such file», for a moment
+    await J._unreadRetry('store');
+    const heldAfterOne = !!J._unread.store;
+    J._dirty = true; J._save();   // the next save meanwhile
+    const wroteOver = fs.existsSync(F);
+    if (!wroteOver) fs.writeFileSync(F, b);   // the storage answers again: the file was there all along
+    await J._unreadRetry('store');
+    const out = { heldAfterOne, wroteOver, back: !J._unread.store && J.jobs.has('jb-f2760m01'), said: lm.some((l) => /a read again answered «no such file» — read once more before anything is written there/.test(l)) };
+    if (J._logsNoteP) await J._logsNoteP; J.shutdown(); return out;
+  };
+  const ONCE_A = "    if (a.state === 'missing' && !this._unreadMissingAt[which]) {";
+  ok(jsrc.split(ONCE_A).length === 2, 'B-f276 cure 3 control setup: «missing» read once more is one line');
+  const JO = MJ.load('src/jobs.js', jsrc.replace(ONCE_A, '    if (false /* MUTANT: cure 2 — «missing» believed at once */) {'), 'missing-once');
+  const on = await onceScene({ JobManager }, 'jobs-triage-reread-once'), onx = await onceScene(JO, 'jobs-triage-reread-once-mut');
+  ok(on.heldAfterOne && !on.wroteOver && on.back && on.said, 'cure 3: a store that answers «missing» right after an unreadable answer is READ ONCE MORE — the hold stands, the next save writes nothing at its path, and the file that was there all along is read back whole', on);
+  ok(!onx.heldAfterOne && onx.wroteOver && !onx.back, 'cure 3 CONTROL (cure 2: «missing» believed at once, in a copy): the hold ends and the next save WRITES OVER the path — the records that were there are lost', onx);
+  // CURE 3: no «unread» item after «gone» was said for the same failure (its note, still being written, lands after)
+  {
+    const d = mkDir('jobs-triage-gone-owed'), F = path.join(d, 'jobs.json');
+    plant(F, '[]', 'folder');
+    const J = engine({ JobManager }, d, [], { unreadRetry: { firstMs: 3600e3, maxMs: 3600e3 } });
+    if (J._logsNoteP) await J._logsNoteP;
+    const f0 = filed.length;
+    J._logsRemover = () => ({ note: async () => ({ notes: { 'jobs.json.corrupt-unread': 'written' } }) });
+    const o1 = { error: 'EISDIR', at: T0 + 1 }; J._logsNoteOwed.store = o1; J._unreadGoneOwed.store = o1;
+    await J._logsWriteNotes();
+    const after1 = filed.slice(f0).filter((n) => n && n.fact === 'records-unread').length;
+    const o2 = { error: 'EISDIR', at: T0 + 2 }; J._logsNoteOwed.store = o2; J._unreadGoneOwed.store = null;   // the release's state: nothing said «gone»
+    await J._logsWriteNotes();
+    const after2 = filed.slice(f0).filter((n) => n && n.fact === 'records-unread').length;
+    ok(after1 === 0 && after2 === 1, 'cure 3: a note that lands after «gone» was said for the SAME failure files no «unread» item (it holds the clean-up, said in the journal); CONTROL: without the «gone» mark the note files its item', { after1, after2 });
+    J.shutdown();
+  }
+  // CURE 3: a read-only engine's torn read again reads the archive's ids in the prefetch — no synchronous read on the loop
+  const roScene = async (Mod, name) => {
+    const d = mkDir(name), F = path.join(d, 'jobs.json');
+    fs.writeFileSync(path.join(d, 'jobs-archive.json'), JSON.stringify([{ ...rec('jb-f2760r02'), archivedAt: T0 - D, archivedWhy: 'done' }]));
+    for (const id of ['jb-f2760r01', 'jb-f2760r02']) fs.mkdirSync(path.join(d, 'job-logs', id), { recursive: true });
+    const holder = spawn('sleep', ['60'], { stdio: 'ignore' }), PIx = require(path.join(ROOT, 'src/proc-identity.js'));
+    await until(() => !!PIx.identityOf(holder.pid));
+    fs.writeFileSync(path.join(d, 'jobs.lock'), JSON.stringify({ pid: holder.pid, starttime: PIx.identityOf(holder.pid).starttime, at: T0 }));   // another engine holds the lock
+    plant(F, '[]', 'folder');
+    const J = engine(Mod, d, [], { unreadRetry: { firstMs: 3600e3, maxMs: 3600e3 } });
+    const ro = J.readOnly;
+    fs.rmdirSync(F); fs.writeFileSync(F, '[{"id":"jb-f2760r01",');   // torn bytes
+    const rfs = fs.readFileSync; let sync = 0;
+    fs.readFileSync = function (f, ...a) { if (String(f).startsWith(d)) sync++; return rfs.call(this, f, ...a); };
+    try { await J._unreadRetry('store'); } finally { fs.readFileSync = rfs; }
+    const out = { ro, sync, skel: J.jobs.has('jb-f2760r01'), archivedSkel: J.jobs.has('jb-f2760r02') };
+    J.shutdown(); try { holder.kill('SIGKILL'); } catch { }
+    return out;
+  };
+  const AR_A = "      if (which === 'store' && this.archive == null) {";
+  ok(jsrc.split(AR_A).length === 2, 'B-f276 cure 3 control setup: the archive prefetch is one line');
+  const JR = MJ.load('src/jobs.js', jsrc.replace(AR_A, '      if (false /* MUTANT: cure 2 — the load reads the archive on the loop */) {'), 'ro-archive');
+  const ro = await roScene({ JobManager }, 'jobs-triage-reread-ro'), rox = await roScene(JR, 'jobs-triage-reread-ro-mut');
+  ok(ro.ro && ro.sync === 0 && ro.skel && !ro.archivedSkel, 'cure 3: a READ-ONLY engine\'s torn read again makes no synchronous read on the loop — the archive\'s ids come with the prefetch (its skeletons skip the archived job)', ro);
+  ok(rox.ro && rox.sync > 0, 'cure 3 CONTROL (cure 2, in a copy): the load reads jobs-archive.json synchronously on the loop', rox);
+  for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 7, label: 'B-f276 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+}
+
+console.log('§15 B-6c1a: a record whose runs is not a list never breaks the list');
+{
+  const recOf = (id, extra = {}) => ({ id, kind: 'task', name: 'odd ' + id.slice(-2), state: 'done', owner: {}, access: { view: 'session', control: 'session' }, runs: [], createdAt: T0 - D, ...extra });
+  const scene = async (mod, name) => {
+    const d = mkDir(name);
+    const { W, jm, call: callR } = boot(d, { mod });
+    jm.jobs.set('jb-6c1a0001', recOf('jb-6c1a0001', { runs: { a: 1 } }));
+    jm.jobs.set('jb-6c1a0002', recOf('jb-6c1a0002', { runs: 5 }));
+    jm.jobs.set('jb-6c1a0003', recOf('jb-6c1a0003', { runs: [null, { startedAt: T0 - D, endedAt: T0 - D + 1, exit: 0 }] }));
+    jm.archive = [{ ...recOf('jb-6c1a0004', { runs: 'x' }), archivedAt: T0 - D, archivedWhy: 'done' }];
+    let list = null, arch = null;
+    try { list = await callR('GET', '/api/jobs', {}); } catch (e) { list = { threw: String(e && e.message) }; }
+    try { arch = await callR('GET', '/api/jobs', { query: { archived: '1' } }); } catch (e) { arch = { threw: String(e && e.message) }; }
+    const detail = {};   // the adversarial read r1: the row's DETAIL (GET /api/jobs/:id) — the panel reads its runs as a list of records
+    for (const id of ['jb-6c1a0001', 'jb-6c1a0002', 'jb-6c1a0003', 'jb-6c1a0004']) { try { const r = await callR('GET', '/api/jobs/:id', { params: { id } }); detail[id] = r.status === 200 ? r.body.job.runs : { status: r.status }; } catch (e) { detail[id] = { threw: String(e && e.message) }; } }
+    W.shutdown?.();
+    return { list, arch, detail };
+  };
+  const real = await scene(wiring, 'jobs-triage-runs-shape');
+  const rowsOf = (r) => (r && r.body && Array.isArray(r.body.jobs) ? r.body.jobs : []), runsBy = (r, id) => (rowsOf(r).find((j) => j.id === id) || {}).runs;
+  ok(real.list && real.list.status === 200 && ['jb-6c1a0001', 'jb-6c1a0002'].every((id) => Array.isArray(runsBy(real.list, id)) && runsBy(real.list, id).length === 0) && runsBy(real.list, 'jb-6c1a0003').length === 1
+    && real.arch && real.arch.status === 200 && Array.isArray(runsBy(real.arch, 'jb-6c1a0004')) && runsBy(real.arch, 'jb-6c1a0004').length === 0,
+    'B-6c1a: records whose runs is an object, a number, a string, or a list holding a null are LISTED (live and archived) — their runs read as none, never a list that fails', { live: rowsOf(real.list).map((j) => [j.id, j.runs]), arch: rowsOf(real.arch).map((j) => [j.id, j.runs]) });
+  const recordsOnly = (v) => Array.isArray(v) && v.every((r) => r && typeof r === 'object');
+  ok(recordsOnly(real.detail['jb-6c1a0001']) && real.detail['jb-6c1a0001'].length === 0 && recordsOnly(real.detail['jb-6c1a0002']) && recordsOnly(real.detail['jb-6c1a0003']) && real.detail['jb-6c1a0003'].length === 1 && recordsOnly(real.detail['jb-6c1a0004']),
+    'B-6c1a: the row\'s DETAIL (live and archived) serves its runs as a list of whole records — the panel\'s detail never meets an object, a number, a string or a null', real.detail);
+  const WSRC = fs.readFileSync(path.join(ROOT, 'src/server/jobs-wiring.js'), 'utf8'), NEW_RUNS = "(Array.isArray(j.runs) ? j.runs : []).filter((r) => r && typeof r === 'object').map((r) => ({";
+  const DETAIL = ['runs: runsWhole(rec) } });', 'runs: runsWhole(job) } });'];
+  ok(DETAIL.every((a) => WSRC.split(a).length === 2), 'B-6c1a control setup: the anchors of the detail\'s control (its two runs reads) are in the source');
+  ok(WSRC.split(NEW_RUNS).length === 2, 'B-6c1a control setup: the guarded runs read is in jobs-wiring once (the plant the control swaps)');
+  const MJ6 = mutantCopies('jobs-runs-shape-6c1a', ROOT);
+  const old = await scene(MJ6.load('src/server/jobs-wiring.js', WSRC.replace(NEW_RUNS, '(j.runs || []).map((r) => ({').replace(DETAIL[0], 'runs: rec.runs } });').replace(DETAIL[1], 'runs: job.runs } });'), 'release'), 'jobs-triage-runs-shape-mut');   // stale-pins: kept — the control writes the release's runs read back into a copy
+  ok(!(old.list && old.list.status === 200) || !(old.arch && old.arch.status === 200), 'B-6c1a CONTROL (the release\'s runs read, in a copy): the list FAILS on such a record', { list: old.list && (old.list.status || old.list.threw), arch: old.arch && (old.arch.status || old.arch.threw) });
+  ok(!recordsOnly(old.detail['jb-6c1a0001']) && !recordsOnly(old.detail['jb-6c1a0003']), 'B-6c1a CONTROL (the release\'s detail, in the same copy): the detail serves the object as it is and the list with its null', old.detail);
+  for (const r of copiesCensus(MJ6.files, MJ6.dir, ROOT, { minCopies: 1, label: 'B-6c1a ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+}
+
+console.log('§16 B-c330: the job-logs clean-up\'s steady passes fold into ONE journal line a day; a big pass speaks at once');
+{
+  const DAY1 = Date.UTC(2026, 10, 17, 10, 0, 0), DAY2 = Date.UTC(2026, 10, 18, 0, 5, 0);
+  const scene = async (Mod, name) => {
+    const d = mkDir(name), logs = [];
+    const J = new Mod.JobManager({ dataDir: d, broadcast() { }, notifyUser() { return { ok: true }; }, log: (...a) => logs.push(a.join(' ')), logsSweep: { bootDelayMs: 3600e3 } });
+    J.init();
+    J._logsAdopt({});
+    const answers = [3, 3, 3, 60, 2].map((n) => ({ removed: n, entries: n * 2, more: false, ms: 1, state: {} }));
+    let k = 0; J._logsRemover = () => ({ sweep: async () => answers[k++] });
+    for (const at of [DAY1, DAY1 + 3600e3, DAY1 + 7200e3, DAY1 + 9000e3]) await J._logsPass(at, 'tick');
+    const day1 = logs.filter((l) => /job-logs: /.test(l));
+    await J._logsPass(DAY2, 'tick');
+    const all = logs.filter((l) => /job-logs: /.test(l));
+    const kept = JSON.parse(JSON.stringify(J._logsState)); J._logsAdopt(kept);   // the record across a restart
+    const out = { day1, all, keptDay: J._logsState.day };
+    J.shutdown(); return out;
+  };
+  const r = await scene({ JobManager }, 'jobs-triage-logs-fold');
+  ok(r.day1.length === 1 && /job-logs: 60 run dir\(s\) past the 14-day retention that no record lists removed \(120 entries\)/.test(r.day1[0]), 'B-c330: three small steady passes say NOTHING yet; a pass that removes fifty or more speaks at once', r.day1);
+  ok(r.all.length === 2 && /job-logs: on 2026-11-17 \(UTC\) 9 run dir\(s\) past the 14-day retention that no record lists were removed over 3 steady pass\(es\) \(18 entries\)/.test(r.all[1]), 'B-c330: the day\'s first pass after it says the day\'s ONE folded line — the counts summed', r.all);
+  ok(r.keptDay && r.keptDay.day === '2026-11-18' && r.keptDay.removed === 2 && r.keptDay.passes === 1, 'B-c330: the day\'s folded counts are in the clean-up\'s record — a restart loses none', r.keptDay);
+  const JSRC = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8'), FOLD = '    else if (ans.removed) { const d = st.day || (st.day = { day: today, removed: 0, entries: 0, passes: 0 }); d.removed += ans.removed; d.entries += ans.entries || 0; d.passes++; }';
+  ok(JSRC.split(FOLD).length === 2, 'B-c330 control setup: the fold is one line in jobs.js (the plant the control swaps)');
+  const MJ30 = mutantCopies('jobs-logs-fold-c330', ROOT);
+  const rx = await scene(MJ30.load('src/jobs.js', JSRC.replace(FOLD, '    else if (ans.removed) this.d.log(LS.words.pass(ans));   /* MUTANT: the release — a line every pass */'), 'release'), 'jobs-triage-logs-fold-mut');
+  ok(rx.day1.length === 4, 'B-c330 CONTROL (the release, in a copy): every steady pass says its own line (four in a morning)', rx.day1.length);
+  for (const rr of copiesCensus(MJ30.files, MJ30.dir, ROOT, { minCopies: 1, label: 'B-c330 ' })) ok(rr.pass, rr.name + (rr.pass ? '' : ' — ' + rr.detail));
+}
+
+console.log('§17 B-8bd5: the job that filed a panel withdraws it once its cause is gone — its For-you item resolved');
+{
+  const PANEL8 = { title: 'Mirror', blocks: [{ type: 'md', text: 'the mirror is stale' }, { type: 'buttons', options: [{ id: 'ok', label: 'OK' }] }] };
+  const scene = async (Mod, name) => {
+    const d = mkDir(name), resolved = [];
+    const J = new Mod.JobManager({ dataDir: d, broadcast() { }, notifyUser() { return { ok: true, id: 'it-8bd5' }; }, log: () => { }, resolveJobAsk: (id) => resolved.push(id), logsSweep: { bootDelayMs: 3600e3 } });
+    J.init();
+    const job = { id: 'jb-8bd50001', kind: 'task', name: 'mirror teller', state: 'up', owner: {}, access: { view: 'session', control: 'session' }, runs: [{ startedAt: T0 }], createdAt: T0, stdinOpen: true };
+    J.jobs.set(job.id, job);
+    const ctl = J._ctlDir(job, T0); fs.mkdirSync(ctl, { recursive: true });   // 主开发 21:46Z: a stdin-open job reads what its panel got on its stdin
+    const posted = J.ask(job, PANEL8);
+    const waiting = J.waitFor(J.ansWaiters, job.id, 60_000).then(() => 'woken');
+    const asked = job.state;
+    const w = J.withdrawAsk(job);
+    const woke = await Promise.race([waiting, new Promise((r) => setImmediate(() => r('still waiting')))]);
+    const again = J.withdrawAsk(job);
+    let tail = ''; for (let k = 0; k < 50 && !tail; k++) { try { tail = fs.readFileSync(path.join(ctl, 'answers.jsonl'), 'utf8'); } catch { } if (!tail) await new Promise((r) => setTimeout(r, 10)); }   // the mirror appends OFF the loop
+    const out = { posted: posted.version, asked, w, state: job.state, pending: job.interaction && job.interaction.pending, resolved, woke, again, recorded: ((job.interaction && job.interaction.answers) || []).filter((x) => x && x.withdrawn === true).map((x) => x.version), stdin: tail.split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((x) => x && x.withdrawn === true).length };
+    J.shutdown(); return out;
+  };
+  const r = await scene({ JobManager }, 'jobs-triage-withdraw');
+  ok(r.asked === 'awaiting-user' && r.w.ok && r.w.version === r.posted && r.pending === null && r.state === 'up' && r.resolved.join() === 'jb-8bd50001' && r.woke === 'woken' && r.recorded.join() === String(r.posted), 'B-8bd5: a job WITHDRAWS its own panel — closed, its For-you item resolved, a waiting `answers --wait` woken (the answers record the withdraw, as an expiry), back to «up»', r);
+  ok(r.again.ok && /no panel of this job is open/.test(r.again.already || ''), 'B-8bd5: withdrawn twice — answered, nothing changed');
+  ok(r.stdin === 1, 'B-8bd5 (主开发 21:46Z): a stdin-open job reads the withdraw on its stdin (the wrapper\'s answers tail file), as it reads an answer', r.stdin);
+  const JSRC = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8'), RES = "    try { this.d.resolveJobAsk && this.d.resolveJobAsk(job.id); } catch { }\n    this._touch(job, { what: `withdrew its panel #${p.version} (its cause is gone)`, verb: 'answers' });\n";
+  ok(JSRC.split(RES).length === 2, 'B-8bd5 control setup: the withdraw\'s resolve is one place in jobs.js (the plant the control cuts)');
+  const MJ8 = mutantCopies('jobs-withdraw-8bd5', ROOT);
+  const rx = await scene(MJ8.load('src/jobs.js', JSRC.replace(RES, "    this._touch(job, { what: `withdrew its panel #${p.version} (its cause is gone)`, verb: 'answers' });   /* MUTANT: no resolve — the item stays */\n"), 'no-resolve'), 'jobs-triage-withdraw-mut');
+  ok(rx.resolved.length === 0, 'B-8bd5 CONTROL (the withdraw without its resolve, in a copy): the For-you item STAYS open — what the row reported', rx.resolved);
+  const MIR = "      if (run) { try { fs.promises.appendFile(path.join(this._ctlDir(job, run.startedAt), 'answers.jsonl'), JSON.stringify(wrec) + '\\n').catch(() => { }); } catch { } }";
+  ok(JSRC.split(MIR).length === 2, 'B-8bd5 control setup: the anchor of the control «the stdin mirror of a withdraw» is in jobs.js');
+  const rm = await scene(MJ8.load('src/jobs.js', JSRC.replace(MIR, '      /* MUTANT: no stdin mirror */'), 'no-mirror'), 'jobs-triage-withdraw-mut2');
+  ok(rm.stdin === 0, 'B-8bd5 CONTROL (no mirror, in a copy): the stdin-open job never sees the withdraw', rm.stdin);
+  for (const rr of copiesCensus(MJ8.files, MJ8.dir, ROOT, { minCopies: 1, label: 'B-8bd5 ' })) ok(rr.pass, rr.name + (rr.pass ? '' : ' — ' + rr.detail));
+  const ar = fs.readFileSync(path.join(ROOT, 'src/agent-routes.js'), 'utf8'), cli = fs.readFileSync(path.join(ROOT, 'data/bin/vibespace-job'), 'utf8');
+  ok(/const selfActs = \['progress', 'ask', 'withdraw', 'announce'\];/.test(ar) && !/const needsControl = \[[^\]]*'withdraw'[^\]]*\];/.test(ar) && /if \(!a\.selfJob && act === 'withdraw' && !jobModel\.canEdit\(job, a\.caller\)\) return jobModel\.canView\(job, a\.caller\) \? res\.status\(403\)/.test(ar) && /else if \(act === 'withdraw'\) r = a\.jm\.withdrawAsk\(job, \{ self: !!a\.selfJob \}\);/.test(ar) && /case 'withdraw': \{/.test(cli) && /vibespace-job withdraw \(its cause is gone\)/.test(cli), 'WIRING: a job token withdraws its OWN panel; a conversation only as its owner — a control grant never withdraws (its route leg: test-jobs-addressed §0); the CLI has `withdraw` (in its usage)');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

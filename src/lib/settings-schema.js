@@ -636,6 +636,16 @@ const SETTINGS_SCHEMA = {
   // kill switch exists because every path in this feature falls back
   // structurally: OFF restores exactly today's behaviour (one shared profile,
   // one shared session) for sessions spawned after the change.
+  // the exit check (lane cli-update-needs-nothing; the owner 2026-11-17 «A就行»): THE ONE check address — asked only at a person's
+  // press, only through the profile's own proxy (src/server/browser-keeper.js exitCheck); empty by default, the tree names no
+  // address; a person's write only (src/routes/persistence.js refuseExitUrl — https only, no login, no private literal)
+  'browser.exitCheckUrl': {
+    type: 'text', default: '',
+    label: t('Exit check address'),
+    description: t('An https address that answers a browser profile\'s public address, country and time zone as JSON. It is asked only when you press «Check the exit…» on a profile, and only through that profile\'s own proxy. Empty: no check — type the exit by hand.'),
+    category: t('Agent browser'), liveApply: true, tier: 'advanced',
+    serverVerdict: true,   // the server judges it (https, no login, no private literal): a refused value is said at the row, never blocks another row
+  },
   'browser.isolateSessions': {
     type: 'boolean', default: true,
     label: t('Give each session its own agent browser'),
@@ -1058,6 +1068,10 @@ const SETTINGS_SCHEMA = {
     label: t('Continue automatically when a usage limit resets'),
     description: t('DEFAULT for new chat sessions on any agent that reports usage limits (Claude, Codex): when the account is out of quota and there is no other account to switch to, wait for the reset — or for the quota to come back early — and then continue the interrupted task by itself. Each session can override this in the chat status bar. Off by default because continuing spends quota without you being there.'),
     category: t('Spending'), liveApply: true,
+    // lane auto-resume-bulk (.349): the row also holds the two bulk acts — «对所有会话开启自动继续» / «全部关闭» over the
+    // sessions you HAVE (never this default), «恢复所有因用量/过载停止的会话 (N)» and the passive cost line
+    // (src/lib/bulk-resume.js renderAutoResumeBulk; settings-ui draws it on this tag)
+    fact: 'auto-resume-bulk',
   },
   // lane design-systems-home (design 003 §2 S5): the design system a new design follows when the agent names none
   // (vibespace-design new copies its tokens.css); the chat's design chip preselects it. Read by the hub (serverSetting).
@@ -1097,6 +1111,14 @@ const SETTINGS_SCHEMA = {
     type: 'boolean', default: false, category: t('Session'),
     label: t('Local sessions via device daemon (R6)'),
     description: t('New local chat sessions run as device-daemon pipe sessions instead of dtach — the session-brain final form (survives server restarts via the daemon). Existing sessions are never migrated; any daemon failure falls back to dtach at spawn. Leave off until the device-assisted consumer path has soaked.'),
+  },
+  // B-460d (the owner's yes, 2026-11-17): WHAT A CONVERSATION STARTS NEVER OUTRANKS THE HUB — src/server/spawn-priority.js;
+  // read at each START (a running conversation keeps the priority it started with); off = the spawn as it was
+  'agents.lowerCpuPriority': {
+    tier: 'advanced',
+    type: 'boolean', default: true, category: t('Session'), liveApply: true,   // read at each start — never a page refresh
+    label: t('Run conversations below the server\u2019s priority'),
+    description: t('Every conversation and background job on this machine starts at a lower CPU priority than the server (nice +5), and so does everything it starts \u2014 a busy build in a conversation then gives way to the server. Off: they start at the server\u2019s own priority. A change applies from the next start; a running one keeps its priority (Session Properties shows it).'),
   },
   'agentd.localDiscovery': {
     tier: 'advanced',
@@ -1174,19 +1196,19 @@ const SETTINGS_SCHEMA = {
   // forced; 21 of them on ONE conversation inside ONE hour), and an auto-resume
   // loop that once fired 130 billed continues into a wall in one night.
   'spend.unattendedPerIdentityHour': {
-    type: 'number', default: 30, min: 0, max: 200, step: 1,
+    type: 'number', default: 30, min: 0, max: 200, step: 1, proposable: true,   // lane setting-doors pick 2: an agent's ask may PROPOSE a change of this row, taken in ONE press (src/ask-setting.js mirrors the list)
     label: t('Unattended turns per account per hour'),
-    description: t('The most turns VibeSpace may start by itself on ONE account in a rolling hour — the auto-continue after a usage limit, the Stop bookkeeping nudge, Background Work notifications and messages from other sessions all count. Turns YOU type are never counted, and neither is a button you press that says \u201cstarts a turn\u201d (Hand over now, Wake now, Hand back). 0 = no automatic turns at all on any account. When a budget is spent the refusal is journalled and filed in the \u201cFor you\u201d inbox; nothing is lost — a notification that cannot be delivered live is injected into the conversation\u2019s next turn instead.'),
+    description: t('The most turns VibeSpace may start by itself on ONE account in a rolling hour — the auto-continue after a usage limit, the Stop bookkeeping nudge, Background Work notifications and messages from other sessions all count. Turns YOU type are never counted, and neither is a button you press that says \u201cstarts a turn\u201d (Hand over now, Wake now, Hand back, Resume all). 0 = no automatic turns at all on any account. When a budget is spent the refusal is journalled and filed in the \u201cFor you\u201d inbox; nothing is lost — a notification that cannot be delivered live is injected into the conversation\u2019s next turn instead.'),
     category: t('Spending'), liveApply: true,
   },
   'spend.unattendedPerIdentityDay': {
-    type: 'number', default: 200, min: 0, max: 2000, step: 5,
+    type: 'number', default: 200, min: 0, max: 2000, step: 5, proposable: true,   // lane setting-doors pick 2: an agent's ask may PROPOSE a change of this row, taken in ONE press (src/ask-setting.js mirrors the list)
     label: t('Unattended turns per account per day'),
     description: t('The same ceiling over a rolling 24 hours. An account can be busy for an hour without spending its whole day.'),
     category: t('Spending'), liveApply: true,
   },
   'spend.unattendedPerInstanceDay': {
-    type: 'number', default: 800, min: 0, max: 10000, step: 10,
+    type: 'number', default: 800, min: 0, max: 10000, step: 10, proposable: true,   // lane setting-doors pick 2: an agent's ask may PROPOSE a change of this row, taken in ONE press (src/ask-setting.js mirrors the list)
     label: t('Unattended turns for this instance per day'),
     description: t('The ceiling across every account together, over a rolling 24 hours — the bound that still holds when a new subscription is added mid-incident.'),
     category: t('Spending'), liveApply: true,
@@ -1502,13 +1524,15 @@ const SETTINGS_SCHEMA = {
   'accounts.onDemandQuotaRefresh': {
     type: 'enum', default: 'manual',
     options: [
-      { value: 'manual', label: t('Manual (⟳ button) — plus ONE automatic read after a usage wall') },
+      { value: 'manual', label: t('Manual (⟳ button)') },
       { value: 'auto', label: t('Auto on popup open (when >30 min stale)') },
       { value: 'auto-cli', label: t('Auto via the CLI (burn-aware background refresh)') },
       { value: 'off', label: t('Off (never contact Anthropic)') },
     ],
-    label: t('On-demand quota refresh (model-scoped limits like Fable)'),
-    description: t('The passive statusline feed only carries the 5h/7d windows — model-scoped weekly limits (e.g. Fable) can ONLY come from asking Anthropic’s usage endpoint with the account’s own login token. This is the same non-billable call the CLI makes when you run /usage, throttled to ≥60s per account and honoring rate-limit backoff, and it NEVER runs on a timer. It is user-initiated traffic, categorically different from the background polling that has gotten accounts banned — but it is still an off-CLI request with a subscription token, so it is your call: Manual = when you click ⟳, and once by itself when an Antigravity conversation hits a usage wall; Auto = also once when you open the quota popup and the data is stale; Off = never (the ⟳ button disappears and scoped limits stay unknown); Auto via the CLI = a background loop spawns “claude -p /usage” (the official binary makes the fetch — this app never calls the endpoint itself) with a BURN-AWARE cadence: refreshes within minutes when the dead-reckoner sees real spending drift, 45min-with-jitter staleness cap for active accounts, and idle accounts are never polled.'),
+    label: t('Claude usage refresh (model-scoped limits like Fable)'),
+    // ONE VENDOR (lane usage-predict, 2026-11-16 — the owner's «fable是antigravity吗？»): this row governs Claude's reads only;
+    // Antigravity's automatic reads have their own row (antigravity.autoUsageReads, src/harness-settings.js)
+    description: t('Reads each Claude account’s limits from Anthropic — the only source of model-scoped weekly limits like Fable, which the passive statusline feed does not carry. Manual: only when you press ⟳, at most once a minute per account. Auto on popup open: also once when you open the quota popup and its reading is over 30 minutes old. Auto via the CLI: the official claude CLI reads /usage in the background — sooner while an account burns quota, never for an idle one. Off: never contacts Anthropic; the popup hides its ⟳, and Refresh all says it is off.'),
     category: t('Session'), liveApply: true,
   },
   'usage.dashboard': {
@@ -1715,7 +1739,7 @@ const HARNESS_SETTING_OWNERS = new Map(); // prefix → { category, paths[], tab
 function deriveHarnessRow(tbl, r) {
   const entry = { type: r.type, default: r.default, label: t(r.label), description: t(r.description), category: t(tbl.category), liveApply: true, harness: tbl.prefix, apply: r.apply };
   if (r.options) entry.options = r.options.map((o) => ({ value: o.value, label: t(o.label) }));
-  for (const k of ['combobox', 'min', 'max', 'step']) if (r[k] !== undefined) entry[k] = r[k];
+  for (const k of ['combobox', 'min', 'max', 'step', 'storeDefault', 'unsetFollows']) if (r[k] !== undefined) entry[k] = r[k];   // + the U2 pair (src/harness-settings.js unsetValue): the store keeps the person's own default; a row nobody set follows
   // the view fields (settings-view.js): the row's own tier, and the TABLE's `when` on every row of it
   // (`when: { harness: 'codex' }` hides the whole Codex section where that CLI is not installed)
   if (r.tier !== undefined) entry.tier = r.tier;
@@ -1972,6 +1996,12 @@ export function clampToSchema(schema, num) {
   if (schema.min !== undefined && n < schema.min) return { value: schema.min, bound: 'min' };
   return { value: n, bound: null };
 }
+
+/** A DOOR TO ONE SETTING (lane setting-doors pick 1): THE CLIENT'S SCHEMA TEST a `vibespace://settings/<key>` link is
+ *  judged by (src/internal-link.js `has` — the chat, a For-you item's words, a toast): is `key` a row of the schema NOW?
+ *  A derived harness / channel / plugin row counts from the moment it is registered; an own key only, never a prototype
+ *  name. An unknown key stays plain text. */
+export function isSettingKey(key) { return typeof key === 'string' && key !== '' && Object.hasOwn(SETTINGS_SCHEMA, key); }
 
 export { SETTINGS_SCHEMA, SETTINGS_CATEGORIES, SETTINGS_GROUPS };
 // The closed `when` tag set, the facts and the tiers (defined in settings-view.js, PURE) — exported here too,

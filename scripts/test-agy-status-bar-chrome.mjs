@@ -35,16 +35,18 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePorts, ONBOARDED_SOURCE, vncEnv, CHROME_STORE } from './scratch.mjs';
+import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const VNC_ENV = await vncEnv();
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome'); process.exit(0); }
 const [PORT, CDP_PORT] = await freePorts(2);
-const wt = scratch('agy-bar-chrome-wt');
-const fakeHome = scratchHome('agy-bar-chrome-home', fs);
-const stubDir = scratch('agy-bar-chrome-stub');
+const root = mintRoot('agy-bar-chrome-wt'), wt = path.join(root, 't');
+const chromeHome = path.join(root, 'chrome-home'); fs.mkdirSync(chromeHome, { recursive: true });   // rule nine (hub-boot.mjs): the suite's own browser carries a HOME in the root, so the helper ends it before the root goes
+const fakeHome = path.join(root, 'home'); for (const d of ['.claude/projects', '.claude/sessions', '.config', '.vibespace']) fs.mkdirSync(path.join(fakeHome, d), { recursive: true });
+const stubDir = path.join(root, 'stub');
 fs.mkdirSync(stubDir, { recursive: true });
 const CWD = path.join(fakeHome, 'proj');
 fs.mkdirSync(CWD, { recursive: true });
@@ -53,7 +55,6 @@ let failed = 0, passed = 0;
 const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js', 'package.json', 'data/bin', 'scripts/fixtures/antigravity-agy', 'scripts/fixtures/antigravity-cli-1.4.3.json']) execSync(`rm -rf ${wt}/${f} && mkdir -p ${path.dirname(path.join(wt, f))} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
@@ -108,21 +109,16 @@ process.stdin.on('data', (d) => {
 process.stdin.on('end', () => process.exit(0));
 `, { mode: 0o755 });
 
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: claudePath, ANTIGRAVITY_CMD: agyPath, AGY_STUB_TRANSCRIPT: '1', VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
-const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
-  '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${wt}-chrome`, 'about:blank'], { stdio: 'ignore' });
+const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, HOME: fakeHome, CLAUDE_CMD: claudePath, ANTIGRAVITY_CMD: agyPath, AGY_STUB_TRANSCRIPT: '1', VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' } });
+const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
+  '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${wt}-chrome`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, HOME: chromeHome } });
 let cleaned = false;
 const cleanup = () => {
   if (cleaned) return; cleaned = true;
   try { chrome.kill('SIGKILL'); } catch {}
-  try { srv.kill('SIGKILL'); } catch {}
-  for (const root of [wt, fakeHome, stubDir]) { try { endRootedProcesses(root); } catch {} } // dtach, the wrappers, the stubs carry one of these roots
-  try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
-  for (const d of [wt, `${wt}-chrome`, fakeHome, stubDir]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 };
 process.on('exit', cleanup);
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
-for (let i = 0; i < 60; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); break; } catch { await sleep(250); } }
+await hub.ready();
 
 const WebSocket = require('ws');
 let target = null;

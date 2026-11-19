@@ -49,7 +49,8 @@
 // writes no stamp, only the `attended` tally (the census and the snapshot still see every press). The credential,
 // spend-control and paid-overage refusals still bind — a press is not an opt-in to paying overage. Each attended
 // reason's AUTOMATIC twin keeps its own gated reason (stash-handover ↔ stash-retry, browser-handback ↔
-// browser-handback-idle, outbox-wake-now ↔ channel-receipt, owner-group-wake / owner-channel-send ↔ peer-message).
+// browser-handback-idle, outbox-wake-now ↔ channel-receipt, owner-group-wake / owner-channel-send ↔ peer-message,
+// bulk-resume ↔ auto-resume).
 // On an instance nobody signs in to the press still passes the write-origin verdict and the owner routes' wake PACER
 // (the groups engine's `mayWake`) — only the BUDGET is exempt. scripts/test-spend-paths.mjs §2b: every attended
 // reason's site is a cookie-only door.
@@ -109,6 +110,11 @@ const SPEND_REASONS = Object.freeze({
   // what waits for the agent's next turn, and its "Hand over now" delivers the whole stash at once — ONE ladder call,
   // ONE turn. The producer is src/server/stash-handover.js (POST /api/sessions/:id/stash/hand-over, cookie only).
   'stash-handover': { turn: true, attended: true, what: 'the user handed a conversation its waiting notices now' },
+  // B-02a3 (主开发's ruling (1), 2026-11-18): the same strip's press for the GROUP messages waiting for a conversation that is
+  // mid-turn — handed to the RUNNING turn by the road an Enter takes (src/server/user-input.js origin 'group-handover'); a turn
+  // only in the one edge where that turn was already finishing (the CLI then runs it right after, as it runs an Enter). The
+  // producer is src/server/stash-handover.js handOverGroups (POST /api/sessions/:id/stash/hand-over-groups, a person's press)
+  'group-handover': { turn: true, attended: true, what: 'the user handed the group messages waiting for a conversation to its running turn' },
   // lane notify-retry (R3, 2026-10-01): the waiting notices that did not fit a prompt's inline context are posted as
   // their own message the moment that turn ends — the hand-over's own machinery, run by the turn end instead of a click;
   // declared beside its producer (src/server/stash-handover.js, the auto path)
@@ -118,6 +124,14 @@ const SPEND_REASONS = Object.freeze({
   // `channel-message`. Declared HERE first; its ONE site is wired by wake-approve-card — test-spend-paths §2b's DEFERRED
   // census row names that lane, and goes red the day the site exists without the row being retired.
   'held-deliver': { turn: true, attended: true, what: 'a held channel digest the user chose to deliver now' },
+  // lane auto-resume-bulk (.349, a fleet power user): «恢复所有因用量/过载停止的会话» — ONE press for N continues. THE
+  // OWNER'S RULING 2026-11-18 (B): that press IS THE PERSON'S OWN ACT — ATTENDED: none of the N is counted against the
+  // unattended caps and none is stamped (the attended tally sees them); the account's hourly room stays for its own
+  // automatic continues. Still binding, slot by slot, before the attended answer: paid overage in use (refused BY NAME),
+  // a credential that cannot serve, the spend control. Producer: src/server/auto-resume.js resumeBatch, selected on the
+  // press (POST /api/sessions/resume-stopped mints it — the owner's cookie door, every bearer refused first); its gated
+  // twin there is 'auto-resume' (a batch no door pressed is N automatic continues, each counted).
+  'bulk-resume': { turn: true, attended: true, what: 'the resume of every conversation a usage limit or an overloaded model stopped' },
 });
 /** Is this reason ATTENDED (see the header of SPEND_REASONS)? Read off the table — never a second list. */
 const isAttended = (reason) => !!(reason && Object.prototype.hasOwnProperty.call(SPEND_REASONS, reason) && SPEND_REASONS[reason].attended === true);
@@ -248,8 +262,19 @@ const stampReason = (t) => (t && typeof t === 'object' && t.reason ? String(t.re
  *  reason-less legacy stamp counts under 'unknown'). */
 function producerCounts(list) {
   const out = {};
-  for (const t of Array.isArray(list) ? list : []) { const r = stampReason(t) || 'unknown'; out[r] = (out[r] || 0) + 1; }
+  for (const t of Array.isArray(list) ? list : []) {
+    if (t && Number(t.total) >= 0 && t.press) continue;   // a PRESS row (notePressRow) is the record of the press, not one more turn
+    const r = stampReason(t) || 'unknown'; out[r] = (out[r] || 0) + (t && Number(t.count) > 1 ? Number(t.count) : 1);   // a press's folded row counts its continues
+  }
   return out;
+}
+/** PURE (the cure, 主开发 20:16Z): THE RECORD OF A PRESS — one row in the attended tally: when, how many it started, the batch
+ *  id (`press`) — kept beside its folded per-continue rows; what the owner reads afterwards as what a press cost. */
+function notePressRow(state, { at = Date.now(), reason = null, press = null, n = 0 } = {}) {
+  const s = pruneBudget(state, at, LOAD_RETENTION);
+  if (!isAttended(reason) || !press) return s;
+  s.attended = [...s.attended, { at, reason, press: String(press).slice(0, 80), total: Math.max(0, Math.floor(Number(n)) || 0) }].slice(-ATTENDED_KEEP);
+  return s;
 }
 /** PURE. "job-notification ×9, auto-resume ×3" — the top producers, most first. */
 function producersText(counts, { top = 3 } = {}) {
@@ -375,6 +400,15 @@ function releasePending(pending, id) {
   if (!id) return list.slice();
   const want = String(id);
   return list.filter((p) => p && p.id !== want);
+}
+
+/** PURE. Renew holds by id (lane auto-resume-bulk, U2 cure): a batch opens all its holds at once and delivers them paced,
+ *  each behind a pre-fire gate (bounded at 90 s) — so the holds it has not reached yet are re-stamped `at = now` on every
+ *  pass, or a batch longer than RESERVE_TTL_MS would drop them and let another producer into budget the batch then
+ *  charges. Returns a NEW list; an id not held is ignored. */
+function renewPending(pending, ids, now = Date.now()) {
+  const want = new Set((Array.isArray(ids) ? ids : []).filter(Boolean).map(String));
+  return (Array.isArray(pending) ? pending : []).map((p) => (p && want.has(p.id) ? { ...p, at: Number(now) || 0 } : p));
 }
 
 /** PURE. Split holds into the live ones and the ones that timed out. The
@@ -566,6 +600,10 @@ function authorizeUnattendedSpend({
   reason, identity = null, state = null, limits = BUDGET_DEFAULTS,
   overage = null, overagePolicy = 'refuse', credential = null,
   spendControl = null, pending = null, ledger = null, now = Date.now(),
+  // HOW MANY TURNS this one answer is for (lane auto-resume-bulk): 1 for every producer but the batch, whose share on
+  // this slot is `need` and whose whole size is `instanceNeed` — so a cap is checked against what the batch WILL spend,
+  // never against its first turn. need = 1 is the old rule exactly (`used + 1 > cap` ⇔ `used >= cap`).
+  need = 1, instanceNeed = need,
 } = {}) {
   const L = { ...BUDGET_DEFAULTS, ...(limits || {}) };
   const key = identity && identity.key ? String(identity.key) : null;
@@ -625,14 +663,66 @@ function authorizeUnattendedSpend({
   // which refusalText prints as nothing at all). A window full of HOLDS alone has
   // no oldest stamp — its retryAfter is 0, never `0 + HOUR_MS` (a 1970 instant the
   // client would say as «free now», lane owner-press-attended r2).
-  const unsetSaid = (what) => `no cap is set for ${what} (the setting is empty) — every unattended turn is refused until a number is set in Settings → Spending`;   // B-0a33 (3)
-  if (L.perIdentityHour === 0) return no('hour-cap', capUnset(L, 'perIdentityHour') ? unsetSaid('unattended turns per identity per hour') : `unattended turns per identity per hour are set to 0`, 0, null, capUnset(L, 'perIdentityHour') ? { capUnset: true } : null);
-  if (counts.hour + inFlight.identity >= L.perIdentityHour) return no('hour-cap', `${name} has ${spentWord(counts.promisedHour)} ${counts.hour}${flight(inFlight.identity)} unattended turns this hour${promisedTail(counts.promisedHour)} (cap ${L.perIdentityHour})`, counts.hourOldest ? counts.hourOldest + HOUR_MS : 0, counts.producers.hour);
-  if (L.perIdentityDay === 0) return no('day-cap', capUnset(L, 'perIdentityDay') ? unsetSaid('unattended turns per identity per day') : `unattended turns per identity per day are set to 0`, 0, null, capUnset(L, 'perIdentityDay') ? { capUnset: true } : null);
-  if (counts.day + inFlight.identity >= L.perIdentityDay) return no('day-cap', `${name} has ${spentWord(counts.promisedDay)} ${counts.day}${flight(inFlight.identity)} unattended turns today${promisedTail(counts.promisedDay)} (cap ${L.perIdentityDay})`, counts.dayOldest ? counts.dayOldest + DAY_MS : 0, counts.producers.day);
-  if (L.perInstanceDay === 0) return no('instance-cap', capUnset(L, 'perInstanceDay') ? unsetSaid('unattended turns for this instance') : `unattended turns for this instance are set to 0`, 0, null, capUnset(L, 'perInstanceDay') ? { capUnset: true } : null);
-  if (counts.instanceDay + inFlight.instance >= L.perInstanceDay) return no('instance-cap', `this instance has ${spentWord(counts.promisedInstanceDay)} ${counts.instanceDay}${flight(inFlight.instance)} unattended turns today${promisedTail(counts.promisedInstanceDay)} (cap ${L.perInstanceDay})`, counts.instanceOldest ? counts.instanceOldest + DAY_MS : 0, counts.producers.instanceDay);
+  const unsetSaid = (what, field) => `no cap is set for ${what} (the setting is empty) — every unattended turn is refused until a number is set in its row of Settings → Spending: ${SL.settingLink(SPEND_ROW_KEYS[field])}`;   // B-0a33 (3); lane login-request-card (the links unit's owed row link): the row, as its link
+  // `need` / `instanceNeed` (lane auto-resume-bulk, the signature above): a cap holds what a batch WILL spend
+  const n = Math.max(1, Math.floor(Number(need)) || 1);
+  const nAll = Math.max(n, Math.floor(Number(instanceNeed)) || n);
+  const asks = (k) => (k > 1 ? ` — this batch needs ${k} more` : '');
+  if (L.perIdentityHour === 0) return no('hour-cap', capUnset(L, 'perIdentityHour') ? unsetSaid('unattended turns per identity per hour', 'perIdentityHour') : `unattended turns per identity per hour are set to 0`, 0, null, capUnset(L, 'perIdentityHour') ? { capUnset: true } : null);
+  if (counts.hour + inFlight.identity + n > L.perIdentityHour) return no('hour-cap', `${name} has ${spentWord(counts.promisedHour)} ${counts.hour}${flight(inFlight.identity)} unattended turns this hour${promisedTail(counts.promisedHour)} (cap ${L.perIdentityHour})${asks(n)}`, counts.hourOldest ? counts.hourOldest + HOUR_MS : 0, counts.producers.hour);
+  if (L.perIdentityDay === 0) return no('day-cap', capUnset(L, 'perIdentityDay') ? unsetSaid('unattended turns per identity per day', 'perIdentityDay') : `unattended turns per identity per day are set to 0`, 0, null, capUnset(L, 'perIdentityDay') ? { capUnset: true } : null);
+  if (counts.day + inFlight.identity + n > L.perIdentityDay) return no('day-cap', `${name} has ${spentWord(counts.promisedDay)} ${counts.day}${flight(inFlight.identity)} unattended turns today${promisedTail(counts.promisedDay)} (cap ${L.perIdentityDay})${asks(n)}`, counts.dayOldest ? counts.dayOldest + DAY_MS : 0, counts.producers.day);
+  if (L.perInstanceDay === 0) return no('instance-cap', capUnset(L, 'perInstanceDay') ? unsetSaid('unattended turns for this instance', 'perInstanceDay') : `unattended turns for this instance are set to 0`, 0, null, capUnset(L, 'perInstanceDay') ? { capUnset: true } : null);
+  if (counts.instanceDay + inFlight.instance + nAll > L.perInstanceDay) return no('instance-cap', `this instance has ${spentWord(counts.promisedInstanceDay)} ${counts.instanceDay}${flight(inFlight.instance)} unattended turns today${promisedTail(counts.promisedInstanceDay)} (cap ${L.perInstanceDay})${asks(nAll)}`, counts.instanceOldest ? counts.instanceOldest + DAY_MS : 0, counts.producers.instanceDay);
   return { ok: true, why: null, detail: null, retryAfter: 0, counts, inFlight, limits: L, reason, identity: identity || null };
+}
+
+/** PURE. ONE AUTHORIZATION FOR A BATCH (lane auto-resume-bulk): one owner action that opens N billed turns — the resume of
+ *  every conversation a wall stopped — is decided ONCE, over the whole batch. `groups` = [{identity, n}] (the batch split
+ *  by the slot each turn bills — the engine's fireIdentityFor, exactly as every auto-resume); `ofKey(key)` hands the
+ *  per-slot facts ({overage, credential, spendControl}). Each slot must hold ALL of its share (`need: n`) and the
+ *  instance all N (`instanceNeed`), against charges AND live holds; the FIRST refusal refuses the WHOLE batch and names
+ *  its bucket and slot — a partial batch is a decision nobody made. FAIL CLOSED: an empty or malformed group refuses.
+ *  @returns {ok, why, detail, retryAfter, identity, reason, n, groups:[verdict…]} */
+function authorizeUnattendedBatch({
+  reason, groups = [], state = null, limits = BUDGET_DEFAULTS, ofKey = () => ({}), overagePolicy = 'refuse', pending = null, ledger = null, now = Date.now(),
+} = {}) {   // `ledger` (the cure, 主开发 20:16Z): every layer of the money gate fails closed — an unreadable budget refuses a gated batch by name
+  const list = Array.isArray(groups) ? groups.filter((g) => g && Number(g.n) > 0) : [];
+  const total = list.reduce((a, g) => a + Math.floor(Number(g.n)), 0);
+  const no = (why, detail, extra = {}) => ({ ok: false, why, detail, retryAfter: 0, identity: null, reason, n: total, groups: [], ...extra });
+  if (!list.length || !total) return no('empty-batch', 'the batch names no turn to authorize');
+  const out = [], refusedSlots = [];
+  const attended = isAttended(reason);
+  for (const g of list) {
+    const key = g.identity && g.identity.key ? String(g.identity.key) : null;
+    let facts = {};
+    try { facts = (key && ofKey(key)) || {}; } catch { facts = {}; }
+    const v = authorizeUnattendedSpend({
+      reason, identity: g.identity || null, state, limits, overagePolicy, pending, ledger, now,
+      overage: facts.overage || null, credential: facts.credential || null, spendControl: facts.spendControl || null,
+      need: Math.floor(Number(g.n)), instanceNeed: total,
+    });
+    // THE ACCOUNT, NOT THE PRESS (主开发 2026-11-18 16:20Z, the owner's ruling's own words — «an ACCOUNT already in paid
+    // overage is still refused»): an ATTENDED batch skips each refusing slot's conversations BY NAME and the rest go on — the
+    // per-continue re-ask's rule, at the start too. A gated batch (the twin) is all or nothing, as ever
+    if (!v.ok && attended) { refusedSlots.push({ identity: v.identity || g.identity || null, why: v.why, detail: v.detail, n: Math.floor(Number(g.n)) }); continue; }
+    if (!v.ok) {
+      // the bucket's headroom, for the person's words (U2 cure: the batch's own numbers)
+      const c = v.counts || {}, f = v.inFlight || {}, L = v.limits || {};
+      const left = v.why === 'hour-cap' ? L.perIdentityHour - (c.hour || 0) - (f.identity || 0) : v.why === 'day-cap' ? L.perIdentityDay - (c.day || 0) - (f.identity || 0)
+        : v.why === 'instance-cap' ? L.perInstanceDay - (c.instanceDay || 0) - (f.instance || 0) : null;
+      return { ...v, n: total, need: v.why === 'instance-cap' ? total : Math.floor(Number(g.n)), left: left === null ? null : Math.max(0, Math.floor(left)), groups: [v] };
+    }
+    out.push(v);
+  }
+  // …and when EVERY slot refuses, the press starts nothing and says each one
+  if (attended && refusedSlots.length && !out.length) {
+    const r0 = refusedSlots[0];
+    return { ok: false, why: r0.why, detail: r0.detail, retryAfter: 0, identity: r0.identity, reason, n: total, need: null, left: null, groups: [], refusedSlots };
+  }
+  // AN ATTENDED BATCH (the owner's ruling 2026-11-18 — the bulk press): every slot was still asked what binds a press
+  // (overage, a credential, the spend control — above), and none of the caps; the guard takes no hold for it
+  return { ok: true, ...(attended ? { attended: true } : {}), why: null, detail: null, retryAfter: 0, identity: null, reason, n: total, groups: out, ...(refusedSlots.length ? { refusedSlots } : {}) };
 }
 
 /** PURE. Record a spend that ACTUALLY happened (two-phase, like the loop
@@ -640,7 +730,7 @@ function authorizeUnattendedSpend({
  *  not consume budget). Returns the new state plus, when this spend crossed the
  *  notice threshold on some axis, ONE warn object — the 80% line the owner
  *  asked for, emitted at the crossing and never again inside that window. */
-function noteUnattendedSpend(state, { identity, at = Date.now(), limits = BUDGET_DEFAULTS, reason = null, rid = null, carried = false, drain = false, ended = false, behind = null } = {}) {
+function noteUnattendedSpend(state, { identity, at = Date.now(), limits = BUDGET_DEFAULTS, reason = null, rid = null, carried = false, drain = false, ended = false, behind = null, press = null } = {}) {
   const L = { ...BUDGET_DEFAULTS, ...(limits || {}) };
   const key = identity && identity.key ? String(identity.key) : null;
   // A PRUNE NEVER FORGIVES (lane queued-is-not-woke round 4): it keeps what the LARGEST caps the settings accept could count —
@@ -668,7 +758,15 @@ function noteUnattendedSpend(state, { identity, at = Date.now(), limits = BUDGET
   // A STASH DRAIN NEVER STAMPS (round 4): it rides somebody else's turn — it converts a stamp still there, adds nothing if gone
   if (ridKey && drain) return { state: s, warn: null };
   // ATTENDED: no stamp — the press joins the tally only (it never fills a window, never crosses the 80 % line)
-  if (isAttended(reason)) { s.attended = [...s.attended, { at, reason, key }].slice(-ATTENDED_KEEP); return { state: s, warn: null }; }
+  if (isAttended(reason)) {
+    // A PRESS'S CONTINUES ARE ONE ROW PER ACCOUNT (the cure, 主开发 20:16Z): a press of any size never pushes its own first rows
+    // or the day's earlier ones out of the tally — its per-continue rows are folded by (press, account), `count` = how many
+    const pid = press ? String(press).slice(0, 80) : null;
+    const i = pid ? s.attended.findIndex((t) => t && t.press === pid && t.key === key && t.reason === reason && !(Number(t.total) >= 0)) : -1;
+    if (i >= 0) { const row = s.attended[i]; s.attended = [...s.attended.slice(0, i), { ...row, count: (Number(row.count) || 1) + 1, last: at }, ...s.attended.slice(i + 1)]; return { state: s, warn: null }; }
+    s.attended = [...s.attended, { at, reason, key, ...(pid ? { press: pid, count: 1 } : {}) }].slice(-ATTENDED_KEEP);
+    return { state: s, warn: null };
+  }
   if (!key) return { state: s, warn: null };
   const cap = stampCap(LOAD_RETENTION);   // round 4: the retention, never the live caps (a lowered cap must not cut a stamp a raise needs)
   // the stamp names its producer (5b ②) — a SPEND_REASONS member or null
@@ -788,7 +886,8 @@ function refusalText(v, { sessionName = null, behind = null } = {}) {
   const spent = spentBy ? ` ${promisedHere > 0 ? 'Spent or promised' : 'Spent'} by: ${spentBy}.` : '';
   // B-0a33 round 1: when waiting frames hold the cap, the line names the conversations they wait behind (at most three)
   const wb = promisedHere > 0 && Array.isArray(behind) && behind.length ? ` They wait behind ${behind.slice(0, 3).map((b) => `«${b.name || '?'}»`).join(', ')}${behind.length > 3 ? ` and ${behind.length - 3} more conversations` : ''}.` : '';
-  return `VibeSpace refused ${what}${where}: ${v.detail}.${when}${spent}${wb}`;
+  const row = spendRowOf(v), door = row && !String(v.detail || '').includes(SL.settingLink(row)) ? ` The limit: ${SL.settingLink(row)} — the owner changes it there.` : '';   // lane setting-doors pick 1 (an empty cap's detail carries its link already: never said twice)
+  return `VibeSpace refused ${what}${where}: ${v.detail}.${when}${spent}${wb}${door}`;
 }
 
 /** PURE. THE REFUSAL AS STRUCTURE (lane owner-press-attended; r2: «a notice never loses a fact it carried» — r1 filed one
@@ -849,6 +948,26 @@ const DOOR_WORDS = Object.freeze({
   ledger: 'This is VibeSpace failing closed, not a limit: the hub could not read data/spend-budget.json. Turns nobody typed start again within a minute of the file reading again — repair it, or remove it to start the count over. The limits in Settings → Spending cannot help here.',   // B-3b0f
   wiring: 'This is VibeSpace failing closed, not a limit: the Usage window lists the accounts and the hub log’s [spend] lines name the conversation — the limits in Settings → Spending cannot help here.',
 });
+// lane setting-doors pick 1 (2026-11-14): a refusal that names a value names where to change it — THE ROW, as its link
+// (src/internal-link.js `vibespace://settings/<key>`; the owner's page draws it as a door to that one row)
+// PURE, imports nothing: the link's spelling is src/internal-link.js SCHEME (test-setting-links pins the two equal)
+const SL = Object.freeze({ settingLink: (key) => `vibespace://settings/${key}` });
+const SPEND_ROW_KEYS = Object.freeze({ perIdentityHour: 'spend.unattendedPerIdentityHour', perIdentityDay: 'spend.unattendedPerIdentityDay', perInstanceDay: 'spend.unattendedPerInstanceDay', noticePct: 'spend.budgetNoticePct', allowOverage: 'spend.allowOverageTurns' });
+const DOOR_LINK_WORDS = Object.freeze({
+  spending: 'Turns you type, and the buttons you press that say «starts a turn», are never counted. Change this limit in Settings → Spending: {link}',
+  overage: 'Paid overage refuses even the turns you press. Whether turns nobody typed may spend it is Settings → Spending → «Allow unattended turns while an account bills paid overage»: {link}',
+  unset: 'A limit left empty refuses every turn nobody typed until it is set: set a number in this row of Settings → Spending: {link}. Turns you type, and the buttons you press that say «starts a turn», are never counted.',   // lane login-request-card (the links unit's owed row link): the empty row, linked
+});
+/** PURE. The spending row a verdict names (a ceiling by its cap, overage by its switch), or null. */
+function spendRowOf(v) {
+  const cap = v && CAP_OF[v.why];
+  if (cap) return SPEND_ROW_KEYS[cap[0]];
+  return v && v.why === 'overage-in-use' ? SPEND_ROW_KEYS.allowOverage : null;
+}
+/** PURE. The row a verdict names, as its link (`vibespace://settings/<key>`), or '' — the hand-over toast's words (src/stash-summary.js). */
+function spendRowLink(v) { const row = spendRowOf(v); return row ? SL.settingLink(row) : ''; }
+/** PURE. The ceiling an 80 % warning is about. */
+function warnRowOf(warn) { return warn ? SPEND_ROW_KEYS[warn.scope === 'hour' ? 'perIdentityHour' : warn.scope === 'instance' ? 'perInstanceDay' : 'perIdentityDay'] : null; }
 const ROW_DOOR = Object.freeze({ 'hour-cap': 'spending', 'day-cap': 'spending', 'instance-cap': 'spending', 'switched-off': 'spending', 'switched-off-instance': 'spending', 'cap-unset': 'unset', 'cap-unset-instance': 'unset', 'overage-in-use': 'overage', 'identity-cannot-serve': 'usage', 'spend-control-reached': 'vendor', 'identity-unknown': 'wiring', 'ledger-unreadable': 'ledger', 'unknown-reason': 'wiring', other: 'wiring' });
 const SPENT_ROWS = 6;
 const CAP_OF = Object.freeze({ 'hour-cap': ['perIdentityHour', 'hour'], 'day-cap': ['perIdentityDay', 'day'], 'instance-cap': ['perInstanceDay', 'instance'] });
@@ -899,7 +1018,8 @@ function refusalI18n(v, { sessionName = null, behind = null } = {}) {
   // r3: the fold is for the EYE, not the record — «And N more» carries the folded rows (`more`); Copy says every producer
   if (by.length > SPENT_ROWS) detail.push({ key: LINE_WORDS.more, params: { n: by.length - SPENT_ROWS }, more: by.slice(SPENT_ROWS).map(spentRow) });
   const door = waits ? 'waiting' : ROW_DOOR[row];
-  detail.push(door === 'usage' ? { key: DOOR_WORDS.usage, params: { account } } : { key: DOOR_WORDS[door] });
+  const rowKey = spendRowOf(v);   // lane setting-doors pick 1: the row this refusal names, as its link
+  detail.push(door === 'usage' ? { key: DOOR_WORDS.usage, params: { account } } : rowKey && DOOR_LINK_WORDS[door] ? { key: DOOR_LINK_WORDS[door], params: { link: SL.settingLink(rowKey) } } : { key: DOOR_WORDS[door] });
   return { text, detail, door };
 }
 
@@ -911,14 +1031,18 @@ function noticeText(warn) {
   const window = warn.scope === 'hour' ? 'this hour' : 'today';
   const spentBy = producersText(warn.producers);
   const spent = spentBy ? ` Top producers ${window}: ${spentBy}.` : '';
-  return `${scope} has used ${warn.used} of its ${warn.limit} unattended turns ${window} (${warn.pct}%).${spent} VibeSpace will refuse further automatic turns on it when the budget is spent.`;
+  // lane setting-doors pick 1: the warning names its row — l2: BEFORE the producers list (the For-you question is stored under a
+  // 300-character bound: a long account name and four producers cut a link said last, and it drew as words)
+  return `${scope} has used ${warn.used} of its ${warn.limit} unattended turns ${window} (${warn.pct}%) — the limit: ${SL.settingLink(warnRowOf(warn))}.${spent} VibeSpace will refuse further automatic turns on it when the budget is spent.`;
 }
 
 module.exports = {
+  SPEND_ROW_KEYS, DOOR_LINK_WORDS, spendRowOf, spendRowLink, warnRowOf,
+  authorizeUnattendedBatch, // lane auto-resume-bulk: ONE authorization for N turns (the resume of every wall-stopped session)
   SPEND_REASONS, BUDGET_DEFAULTS, HOUR_MS, DAY_MS, MAX_STAMPS, CAP_MAX, stampCap, OVERAGE_STALE_MS,
   LOAD_RETENTION, RESERVE_TTL_MS, RESERVE_CAP, RESERVATION_WAIT_MAX_MS,
-  budgetLimits, capUnset, waitingOverCap, emptyBudget, pruneBudget, mergeBudget, spendCounts, stampAt, countAt, waitingStamp, waitingRids, waitingBehind, stampReason, producerCounts, producersText,
-  pendingCounts, reservePending, releasePending, expirePending,
+  budgetLimits, capUnset, waitingOverCap, emptyBudget, pruneBudget, mergeBudget, spendCounts, stampAt, countAt, waitingStamp, waitingRids, waitingBehind, stampReason, producerCounts, producersText, notePressRow,
+  pendingCounts, reservePending, releasePending, renewPending, expirePending,
   overageState, overageAllowed, overageText, spendControlState,
   authorizeUnattendedSpend, noteUnattendedSpend, returnReservation, reservationState, refusalText, refusalI18n, refusalRow, noticeText,
   REFUSAL_WORDS, NEXT_WORDS, LINE_WORDS, DOOR_WORDS,

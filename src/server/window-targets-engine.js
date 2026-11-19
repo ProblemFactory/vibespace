@@ -345,7 +345,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   function ctxOf(facts) {
     const s = (facts && sessionsMap().get(facts.sessionId)) || (facts && facts.session) || {};
     let groupIds = [], unreadable = false;
-    if (typeof groupsOf === 'function') { try { groupIds = (groupsOf(s, facts.sessionId) || []).map((g) => String(g && typeof g === 'object' ? g.id : g)); } catch (e) { unreadable = true; log.warn?.(`[window] group membership unreadable for ${facts.sessionId}: ${e.message}`); } }
+    if (typeof groupsOf === 'function') { try { const gs = groupsOf(s, facts.sessionId) || []; groupIds = gs.map((g) => String(g && typeof g === 'object' ? g.id : g)); if (gs.unread) unreadable = true; /* B-55dc: still being read ⇒ the lease is KEPT, a verb refused by name */ } catch (e) { unreadable = true; log.warn?.(`[window] group membership unreadable for ${facts.sessionId}: ${e.message}`); } }
     const sessionKeys = keysOf(s, facts.sessionId);
     return { sessionKeys, conversationKeys: sessionKeys.map(R.sessionKeyNow).filter(Boolean), groupIds, ...(unreadable ? { unreadable: true } : {}) };   // verify r6: a borrowed id is not a key · lane grants-unify: + the ONE spelling
   }
@@ -1615,7 +1615,28 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   /** Is this handle a window THIS engine addresses (a paired machine's app is not — lane C)? */
   const addressable = (handle) => !!liveRecord(handle);
 
-  return { factsForToken, list, open, openAgentBrowser, agentBrowserFor, stopOwn, setSize, setLaunchMode, setViewerCount, attach, attachWithMode, isHumanBrowser, detach, dropSession, reconcile, boot, tick, shutdown, snapshot, act, screenshot, watch,
+  /** «WHAT IT MAY USE» (Session Properties, unit what-it-may-use): every desktop-app window record judged for ONE conversation
+   *  by THE door's verdict (`R.reachFor`, as `sharedRows` asks it) — `facts` = { conversationKeys, groupIds, groupsUnreadable }
+   *  — as may-use-model answer rows (the window's label). */
+  function mayUseFor(facts = {}) {
+    const ctx = { conversationKeys: (facts.conversationKeys || []).map(String), groupIds: (facts.groupIds || []).map(String), unreadable: !!facts.groupsUnreadable };
+    const out = [];
+    for (const rec of (keeper.listApps() || [])) {
+      if (!rec || rec.origin === 'desktop') continue;
+      const r = R.reachFor(reachRecord(rec.id), ctx);
+      const base = { door: 'window', resource: String(rec.id), name: String(rec.label || rec.id), ...(rec.origin ? { detail: { origin: String(rec.origin) } } : {}) };
+      if (r.level === 'exposed') {
+        const p = r.row && r.row.principal;
+        out.push({ ...base, ok: true, via: r.via, ...(r.via === 'group' && p && p.id ? { groupId: String(p.id) } : {}) });
+      } else if (r.excepted) {
+        const e = r.except;
+        out.push({ ...base, ok: false, code: 'excepted', ...(e ? { except: e.kind === 'group' ? { kind: 'group', id: String(e.id) } : { kind: 'conversation', key: String(e.id || e.key || '') } } : {}) });
+      } else if (r.unreadable) out.push({ ...base, ok: false, code: 'groups_unreadable' });
+      else if (r.unknown) out.push({ ...base, ok: false, code: 'unknown_shape' });
+    }
+    return out;
+  }
+  return { factsForToken, mayUseFor, list, open, openAgentBrowser, agentBrowserFor, stopOwn, setSize, setLaunchMode, setViewerCount, attach, attachWithMode, isHumanBrowser, detach, dropSession, reconcile, boot, tick, shutdown, snapshot, act, screenshot, watch,
     // lane E: reach + the share mode (the user's side)
     reachOf, reachViews, grantReach, revokeReach, setReachExcept, setShareMode, shareAtLaunch, endHold, addressable, modeInfo, reachFile, resolvePrincipal,
     takeover, handback, noteUserInput, inputPolicy, leaseInput, viewerLeft, sweepIdleTakeovers, onInput, setViewerProbe, inputStateFor, inputSummaryFor, takeoverIdleMs, leaseOf,

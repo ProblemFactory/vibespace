@@ -8,6 +8,7 @@
 // usageHistory, recordUsageAttribution) arrive as lazy getters/lambdas —
 // every use is at RUNTIME, after boot completes. ORCH tier.
 const os = require('os');
+const SFW = require('../settings-file-words.js'); // B-8dcf item two (PURE): loaded with the engine, never on the stream's pass (batch 21's cure)
 const OF = require('./owner-facts.js'); // lane agent-context-owner-facts (B-7960): a time the owner or an agent reads is in the owner's zone, named
 const fs = require('fs');
 const path = require('path');
@@ -37,7 +38,10 @@ function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN, g
   resetCreditAckMs = null,
   // lane reset-path: the helper's codex command — default the one src/codex-thread-read.js is configured
   // with (server.js / cli-env, re-resolved with the CLI); a SUITE hands a stub app-server here
-  resetCreditHelper = null}) {
+  resetCreditHelper = null,
+  // lane auto-resume-bulk: the session list's ONE notify point (server.js broadcastActiveSessions) — a stop fact that
+  // appears or clears moves the sidebar card's chip and the filter's count; debounced here, one broadcast per burst
+  onSessionListChange = () => { }}) {
   RR.watch(USAGE_CACHE_DIR);   // B-403e: the readings folder — each reading asked once per synchronous run (a pass, a record, a broadcast)
   // the model facts' broadcaster (lane fable-52-cli-321): a verdict reached on either feed (a refusal) is told at once
   try { const MA = require('./model-ask.js'); MA.useBroadcast((s) => MA.broadcastFacts(s, s._webuiId, broadcastToSession)); } catch { }
@@ -68,7 +72,7 @@ function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN, g
 // conversations (headless instances degrade to hot behavior until a client
 // appears — the switch itself never waits on a browser).
 const { orderProviderFields } = require('../sealed-orders.js'); // (lane pool-provider-latents, q-055 M1) the sealed order's provider fields — the device obeys the same file
-const { decidePoolSwitch, decidePinnedPlacement, soonestUsableMember, rankPoolMembers, poolBlockedNotice, poolCheckingNotice, poolBlockedDetail, poolNoticeCut, poolCreditsNotice, conversationDisplayName, bucketRemaining, warmCache, cacheTtlSecFor, recordCacheFact, nowSecOf, crossProviderMode, providerLabel, providerKey, sameProvider, conversationInTurn, projectCacheAhead, projectionCrossing, PROJECTION_LEAD_SEC, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('../account-pool-auto.js');
+const { evalGateOpen, EVAL_GATE_MS, decidePoolSwitch, decidePinnedPlacement, soonestUsableMember, rankPoolMembers, poolBlockedNotice, poolCheckingNotice, poolBlockedDetail, poolNoticeCut, poolCreditsNotice, conversationDisplayName, bucketRemaining, warmCache, cacheTtlSecFor, recordCacheFact, nowSecOf, crossProviderMode, providerLabel, providerKey, sameProvider, conversationInTurn, projectCacheAhead, projectionCrossing, PROJECTION_LEAD_SEC, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('../account-pool-auto.js');
 const { requestInFlight } = require('../turn-state.js'); // PURE: is a request in flight (never a turn paused on the owner) — the prompt cache's in-flight fact (lane cache-warmth-tiles r3)
 const arSignal = require('../auto-resume-signal.js'); // PURE: the limit LANE a snapshot is about + the fresh-window edge
 const resetCredit = require('../reset-credit.js'); // PURE: is a stored reset credit worth spending at THIS wall, at THIS rung (design-reset-credits §4)
@@ -97,7 +101,10 @@ const harnesses = require('../harnesses');
 const { harnessSetting, harnessDeclares } = (injectedHarnessSetting && injectedHarnessDeclares)
   ? { harnessSetting: injectedHarnessSetting, harnessDeclares: injectedHarnessDeclares }
   : require('./harness-config-sync').accessorsFor({ serverSetting, harnesses });
-const _poolAutoLast = new Map(); // poolId → ts of last DECISION (eval gate)
+const _poolAutoLast = new Map(); // poolId → ts of the last default SWITCH: every un-forced pass waits 10 s after one (B-37f9: what it always was — «last DECISION» since 2.266.1 named the kicks' gate below)
+const _poolEvalAt = new Map(); // B-37f9: poolId → ts of the last EVALUATION (any pass past the pool's own guards) — the per-record KICKS' gate
+const _poolGateHeld = new Map(); // B-37f9: poolId → kicks the gate held (a count the legs read; a held kick decides nothing)
+const _poolKickTrail = new Map(); // B-37f9: poolId → the ONE re-run a held kick arms for the gate's opening (no record's decision is lost)
 const _poolSwitchAt = new Map(); // poolId → ts of last actual SWITCH (dwell belt)
 // A 'spare-lane' move (B-8a65 S5) is pure convenience — the member it leaves can serve — so it waits
 // an HOUR after the conversation's last move, not the belt's 3 min (design desk 2026-10-02, verify r1
@@ -233,7 +240,7 @@ function quotaBackendFor(key, session) {
 }
 const { quotaVerdict, THRESH: VERDICT_THRESH, lapseCleared, serveAfterFailure, SERVE_LAPSED, memberLapsed, readingFingerprint } = require('../account-pool-auto.js'); // THE account-usability verdict (2.369.0, owner-designed)
 const { loginUsable, loginBucketLabel, loginAgeText, loginWallPhrase } = require('../login-expiry.js'); // PURE: is this member's LOGIN SESSION still alive (2026-09-07)
-const { UsageEstimator, overlayCache: estOverlayCache, predictCalib, sweepAnchorGroup, wholeLedgerGate, CLAUDE_MAX_PRIOR_FULL_USD } = require('../usage-estimator.js');
+const { UsageEstimator, overlayCache: estOverlayCache, predictCalib, sweepAnchorGroup, wholeLedgerGate } = require('../usage-estimator.js');
 const usageAnchors = new UsageAnchors({ dataDir: path.join(rootDir, 'data') });
 // READ-ONLY view of the transition ledger. The single WRITER is accounts.js
 // (every re-point goes through ensureSessionPoolLink / setPoolTarget — spawn,
@@ -329,7 +336,9 @@ const usageEstimator = new UsageEstimator({
   // measured claude Max-20x quota sizes — meaningless for ChatGPT plans);
   // the no-prior fallback needs ≥$1 cost + ≥0.5% observed movement before
   // it emits a rate, which is the honest cold-start for an unmeasured plan.
-  priorsFor: (identityKey) => String(identityKey || '').startsWith('codex:') ? null : CLAUDE_MAX_PRIOR_FULL_USD,
+  // THE SOURCE'S OWN PRIOR (lane usage-predict pick 3): its adapter's (Claude: the measured Max-20x table; codex and
+  // Antigravity: none — before this pick Antigravity's keys were handed Claude's)
+  priorsFor: (identityKey) => require('../usage-predict.js').priorsForIdentity(identityKey),
 });
 app.locals.usageEstimator = usageEstimator;
 // ── OFFLINE-BIAS defense (2.297.0, design §Cross-device aggregation) ──
@@ -563,7 +572,8 @@ function poolReadCache(poolId, now = Date.now()) {
   return (id) => {
     const raw = reading(id);
     if (rawBasis) return raw;
-    try { return estOverlayCache(raw, usageEstimator.estimateFor(id, raw, now)); } catch { return raw; }
+    // usage-predict P5: only a lane whose verdict is ON on THIS instance is overlaid — a learning, provisional or off lane is the raw reading
+    try { return estOverlayCache(raw, usageEstimator.poolEstimateFor(id, raw, now)); } catch { return raw; }
   };
 }
 // THE READING the overlay starts from — the member's own file or its identity group's freshest — never an estimate.
@@ -2785,10 +2795,75 @@ function settleTurnLane(session) {
   resolveTurnLane(session, verdict, why);
 }
 
+// ── WHY A SESSION STOPPED — A FACT OF THE SESSION (lane auto-resume-bulk, .349) ──────────────────────────────────────
+// A turn the wall ended (onWalledTurn — the verdict this machine already takes) or the model's overload ended (the
+// harness's TYPED error: claude's assistant `error`, codex's `codexErrorInfo`) leaves `session._stoppedBy` behind —
+// PURE src/stopped-by.js decides it, this file writes it: in memory, in the session's meta (the spread idiom of
+// persistFallbackStamp, through the same lazy store), and on the live list (one debounced broadcast). It is cleared by
+// the next turn that RUNS (noteTurnRunning: the first main-thread output of a claude turn, codex task_started, an ACP
+// prompt) and by a turn that ends for any other reason. Nothing here spends or arms — the auto-resume wait keeps its
+// own ladder; this is what the card, the filter and the bulk resume read.
+const stoppedBy = require('../stopped-by.js');
+let _stoppedListTimer = null;
+function stoppedListChanged() {
+  if (_stoppedListTimer) return;
+  _stoppedListTimer = setTimeout(() => { _stoppedListTimer = null; try { onSessionListChange(); } catch { } }, 300);
+  if (_stoppedListTimer.unref) _stoppedListTimer.unref();
+}
+function persistStoppedBy(session) {
+  try {
+    if (!session || !session.sockName) return;
+    // the stream's road reads NOTHING from the mount: the store patches its own pending copy, or reads off the loop (and
+    // never writes a stub for a socket with no meta of its own) — session-stdout.js patchSessionMeta
+    if (typeof sessionMetaStore.patchSessionMeta === 'function') { Promise.resolve(sessionMetaStore.patchSessionMeta(session.sockName, { stoppedBy: session._stoppedBy || null }, { owner: session._webuiId || null })).then((ok) => { if (ok === false) console.warn(`[stopped-by] ${session._webuiId || session.sockName}: the stop fact is in memory but NOT on disk yet (the store gave up on this patch) — it is written with this conversation's next meta patch`); }, () => { }).then(() => null).catch((e) => console.warn('[stopped-by] not persisted:', e && e.message)); return; }
+  } catch (e) { console.warn('[stopped-by] not persisted:', e.message); }
+}
+/** Write the stop fact (a verdict from stoppedBy.stopVerdict; null = nothing to write). */
+function noteStoppedBy(session, verdict) {
+  const f = stoppedBy.normalizeStoppedBy(verdict);
+  if (!session || !f) return null;
+  session._stoppedBy = f;
+  persistStoppedBy(session);
+  console.log(`[stopped-by] ${session._webuiId || '?'}: stopped by ${f.kind === 'quota' ? 'a usage limit' : 'an overloaded model'}${f.resetsAt ? ` (resets ${new Date(f.resetsAt).toISOString()})` : ''}`);
+  stoppedListChanged();
+  return f;
+}
+/** Clear it — the session runs again. Cheap when there is nothing to clear:
+ *  noteSessionProduced calls this on every main-thread record. */
+function clearStoppedBy(session, why = 'ran again') {
+  if (!session || !session._stoppedBy) return false;
+  session._stoppedBy = null;
+  persistStoppedBy(session);
+  console.log(`[stopped-by] ${session._webuiId || '?'}: cleared (${why})`);
+  stoppedListChanged();
+  return true;
+}
+/** A turn STARTED running (the harness said so) — the stop is over. */
+function noteTurnRunning(session) { try { clearStoppedBy(session, 'a turn started'); } catch { } }
+/** A TYPED error on the turn's main thread (claude: the assistant record's `error`; codex: task_failed's
+ *  codexErrorInfo, `final` — its task_failed IS the turn's end). The turn's LAST one is what its end reads; a later
+ *  record without one clears it (a retried error the turn got past is not why it stopped). */
+function noteTurnError(session, error, said = null, { final = false, at = null } = {}) {
+  if (!session) return;
+  session._turnLastError = error ? { error: String(error), said: typeof said === 'string' ? said : null } : null;
+  if (!final || !error) return;
+  const v = stoppedBy.stopVerdict({ lastError: error, overloadErrors: harnesses.overloadErrorsOf(session.backend), said, at: Number(at) > 0 ? Number(at) : Date.now() });
+  session._turnLastError = null;
+  if (v) noteStoppedBy(session, v);
+}
+/** The pool's LIVE answer for this conversation — the bulk resume's skip rule reads it (never re-derived there). */
+function sessionWallVerdict(session) {
+  try {
+    const v = quotaVerdictFor(_wallScope(session), { model: sessionModelFor(session), session });
+    return v ? { usable: v.usable, blockedUntil: Number(v.blockedUntil) || 0, reason: v.reason || null } : null;
+  } catch { return null; }
+}
+
 /** Main-thread assistant output — work evidence for turn classification. */
 function noteSessionProduced(session, rec = null) {
   if (recordIsLate(session, rec)) return; // a backlog's work proves nothing about the turn running NOW
   if (session._turnWallSigs && session._turnWallSigs.length) session._turnWorkAfterSig = (session._turnWorkAfterSig || 0) + 1;
+  if (session._stoppedBy) noteTurnRunning(session); // lane auto-resume-bulk: a turn that produces is a turn that runs
 }
 /** The turn ended (claude `result` record / codex task_complete|task_failed).
  *  ALL wall-state transitions happen here and only here. */
@@ -2804,10 +2879,16 @@ function noteTurnEnd(session, rec = null) {
     session._turnLaneDefer = null; session._turnBannerLane = null;
     session._turnReadingSlot = null; session._turnWallRefile = null; session._turnWallRefuted = null; session._turnAsks = null;
     session._oatFileGen = null; // lane oat-identity-fix: a backlog's turn end says nothing about which token file the CLI holds
+    session._turnLastError = null; // lane auto-resume-bulk: …and a backlog's error is not why the session stopped NOW
     return;
   }
   persistRequestStamp(session); // the turn's last request outlives a restart (lane cache-warmth-tiles r1a′)
   const sigs = session._turnWallSigs || [];
+  // lane auto-resume-bulk: the turn's last TYPED error and the harness's own closing line, read once and cleared with
+  // the rest of the per-turn state (the walled branch below hands the line to onWalledTurn)
+  const lastError = session._turnLastError || null;
+  session._turnLastError = null;
+  const closingLine = rec && typeof rec.result === 'string' && rec.result ? rec.result : (lastError && lastError.said) || null;
   const workAfter = session._turnWorkAfterSig || 0;
   // THE LANE DECISION CLOSES WITH THE TURN (2026-09-13). It runs BEFORE the
   // signal list is swapped out, because resolving rewrites the provisional
@@ -2834,7 +2915,7 @@ function noteTurnEnd(session, rec = null) {
     // BLOCKED entry owns this turn's pool evaluation (B-2c9b): it runs AFTER
     // the demotion + the arm, so the link moves in the same tick and a hot
     // switch's fireNow() finds the session armed
-    try { onWalledTurn(session, sigs); } catch (e) { console.warn('[wall] blocked-entry failed:', e.message); }
+    try { onWalledTurn(session, sigs, closingLine); } catch (e) { console.warn('[wall] blocked-entry failed:', e.message); }
     clearRefile();
     return;
   }
@@ -2845,6 +2926,12 @@ function noteTurnEnd(session, rec = null) {
   // signals allowed to clear the loop breaker (round 4); a continue that
   // actually landed reaches this same line as its own turn's result
   try { getAutoResume()?.noteRecovered?.(session._webuiId, 'turn completed normally'); } catch { }
+  // lane auto-resume-bulk: a turn the MODEL'S OVERLOAD ended is a stop (the harness's typed error, its declared enum);
+  // any other turn end means the session ran — the mark clears
+  try {
+    const ov = lastError ? stoppedBy.stopVerdict({ lastError: lastError.error, overloadErrors: harnesses.overloadErrorsOf(session.backend), said: closingLine, at: Date.now() }) : null;
+    if (ov) noteStoppedBy(session, ov); else clearStoppedBy(session, 'turn completed');
+  } catch (e) { console.warn('[stopped-by] turn-end verdict failed:', e.message); }
 }
 
 /** A QUOTA READING ARRIVED FOR THIS SESSION — the harness-neutral half of the
@@ -3267,7 +3354,7 @@ function nearArmVeto(viaId, walledIds) {
   return has ? 'the verdict named a member that rejected this conversation as the way out' : null;
 }
 
-function onWalledTurn(session, sigs) {
+function onWalledTurn(session, sigs, said = null) {
   const id = session._webuiId;
   const model = sessionModelFor(session);
   const scope = _wallScope(session);
@@ -3279,6 +3366,18 @@ function onWalledTurn(session, sigs) {
   // BEFORE the verdict reads the cache (readings only confirm)
   let demoted = null;
   try { demoted = demoteWalledAccount(session, sigs); } catch (e) { console.warn('[wall] demotion failed:', e.message); }
+  // THE STOP IS A FACT OF THE SESSION (lane auto-resume-bulk) — written whether or not auto-resume is on (that is the
+  // whole point: with it off, nothing else remembers). The reset is the wall's own STATED one, else none (never a guess);
+  // the member is the slot the wall landed on (the demotion's key, else the signal's).
+  try {
+    const stated = Math.max(0, ...(sigs || []).map((s2) => (s2 && s2.resetsAtMs) || 0));
+    const resetsAt = stated || 0;   // U1 cure: the stated reset or none — the verdict's blockedUntil can be the engine's own bounded guess
+    const memberId = (demoted && demoted.key) || ((sigs || []).find((s2) => s2 && s2.key) || {}).key || null;
+    // the wall's lane / bucket / scoped name — the SAME choice the at-wall arm below makes (armWall), so a switch turned ON later
+    // arms exactly the wait the wall would have armed (a watch it can open early needs the bucket)
+    const wSig = (sigs || []).filter((s2) => s2 && s2.bucket).sort((x, y) => (y.resetsAtMs || 0) - (x.resetsAtMs || 0))[0] || null;
+    noteStoppedBy(session, stoppedBy.stopVerdict({ walled: true, resetsAt, memberId, said, at: Date.now(), lane: (sigs || []).map((s2) => s2 && s2.lane).find(Boolean) || null, bucket: wSig ? wSig.bucket : null, scopedName: wSig ? (wSig.scopedName || null) : null }));
+  } catch (e) { console.warn('[stopped-by] walled-turn fact failed:', e.message); }
   try {
     const ar = getAutoResume();
     if (!ar?.armIfEnabled) return;
@@ -4396,7 +4495,7 @@ function noteCompacted(session, rec, now = Date.now()) {
   session._compactedAt = Number(now) || Date.now();
   session._compactedBy = rec.uuid || null;
   persistRequestStamp(session);
-  kickPoolEval();
+  kickPoolEval({ kick: false });   // B-37f9: OWED — the free move window closes at the next request-out; never held by the kicks' gate (the release's road)
 }
 /** THE MEMBER THAT SERVED A REQUEST = the member the conversation's link named when that request went out (round 4). The
  *  CLI re-reads its credential at EVERY request (inc-mttbrtc0-6049: a re-point inside a single turn reached its very next
@@ -5471,7 +5570,7 @@ function handleResetCreditResult(session, payload) {
       reRead = !!(c && triedAt && (Number(c.fetchedAt) || 0) > triedAt && (c.source === 'codex-rate-limits' || c.source === 'codex-reset-helper'));
     } catch { }
     if (tKey && !reRead) holdForResetReading(tKey, session ? session._webuiId : null);
-    else kickPoolEval();
+    else kickPoolEval(userAttempt ? { kick: false } : undefined);   // B-37f9 follow-up: a person's press is attended — its re-decision is owed, never held
     // R3: every card that offered this credit says it was used (the new window's end, when the post-reset reading said it)
     try {
       let untilSec = null;
@@ -5503,7 +5602,7 @@ function handleResetCreditResult(session, payload) {
     console.log(`[reset-credit] ${sid}: credit answer ${out || 'unknown'} on ${nameOf(tKey)} — ${superseded}; not a wall (re-reading instead of demoting)`);
     settleResetCreditTry(tryRec, String(out || 'superseded'), { failed: true, superseded: true });
     if (userAttempt) serverNotice(`codex-reset-fail-${sid}-${Date.now()}`, `Reset credit not used on ${nameOf(tKey)} — ${superseded}.`, { i18n: { key: out === 'alreadyRedeemed' ? i18nKey('Reset credit not used on {account} — the vendor says this limit was already redeemed.') : i18nKey('Reset credit not used on {account} — a reading newer than the attempt shows the limit open.'), params: { account: nameOf(tKey) } } });
-    try { Promise.resolve(probeQuotaForKey(tKey, { session })).then(() => kickPoolEval(), () => kickPoolEval()); } catch { }
+    try { const ask = userAttempt ? { kick: false } : undefined; Promise.resolve(probeQuotaForKey(tKey, { session })).then(() => kickPoolEval(ask), () => kickPoolEval(ask)); } catch { }   // B-37f9 follow-up: a person's press is owed here too
     return;
   }
   // a LATE answer (the not-sent / no-answer timer settled it first) still states the true outcome:
@@ -6334,14 +6433,21 @@ function autoCliReady(id) {
 // burns are seen the moment the CLI streams them, not when the ledger scan
 // catches up. Zero network; decision reads memory + local files only.
 let _poolEvalKickAt = 0;
-function kickPoolEval() {
+let _poolEvalPending = null;   // B-37f9 follow-up: the pass scheduled and not yet run ({ kick }) — an owed ask makes it un-kicked
+// B-37f9: `kick: false` = an ask that OWES its decision (a compaction's end, a person's reset-credit press) — never held by the
+// kicks' gate, and (the follow-up, 主开发's reading of 2438a6df7) never dropped by the hub-wide 5 s throttle: it passes it, and a
+// pass already scheduled (a usage record in the same chunk) runs un-kicked
+function kickPoolEval({ kick = true } = {}) {
   const now = Date.now();
-  if (now - _poolEvalKickAt < 5000) return;
-  _poolEvalKickAt = now;
+  if (_poolEvalPending) { if (!kick) _poolEvalPending.kick = false; return; }   // one pass already scheduled: this ask rides it
+  if (kick && now - _poolEvalKickAt < 5000) return;   // the hub-wide 5 s throttle holds KICKS only
+  if (kick) _poolEvalKickAt = now;   // an owed ask never stamps it: a kick after one meets the kicks' gate (and its re-run), as before
+  const pass = _poolEvalPending = { kick };
   setImmediate(() => {
+    _poolEvalPending = null;
     try {
       for (const a of accounts.list().accounts || []) {
-        if (a.type === 'pooled' && a.auto) { try { maybePoolAutoSwitchForPool(a.id); } catch { } }
+        if (a.type === 'pooled' && a.auto) { try { maybePoolAutoSwitchForPool(a.id, pass.kick ? { kick: true } : undefined); } catch { } }   // B-37f9: a KICK — the evaluation gate holds it
       }
     } catch { }
     try { sweepResetCreditAsks(); } catch { } // an ask item whose carrier is gone (r3)
@@ -6532,7 +6638,7 @@ function noteMemberServeFailure(memberId, info = {}, { source = 'a turn', backen
         const item = !pooled ? null : todos && typeof todos.add === 'function' ? todos.add('webui:pool-serve', mode === 'off' ? {
           origin: 'pool', kind: 'notice', urgency: 'normal',
           text: `${name}'s subscription is no longer active (since ${sinceText}): the pool skips it until it answers again — usage refresh is Off in Settings: turn it on to Re-check, or run a turn on it directly`,
-          detail: `The CLI answered «${v.why}» (${source}). The account stays in its pools with its note and readings; nothing is placed on it until it answers again. On-demand quota refresh is Off in Settings, so nothing can ask it — Re-check is refused while it is Off; turn it on and press Re-check on its row, or run a turn on the account directly after renewing.`,
+          detail: `The CLI answered «${v.why}» (${source}). The account stays in its pools with its note and readings; nothing is placed on it until it answers again. Claude usage refresh is Off in Settings, so nothing can ask it — Re-check is refused while it is Off; turn it on and press Re-check on its row, or run a turn on the account directly after renewing.`,
           i18n: { text: { key: i18nKey('{account}\'s subscription is no longer active (since {since}): the pool skips it until it answers again — usage refresh is Off in Settings: turn it on to Re-check, or run a turn on it directly'), params: { account: name, since: sinceText } } },
         } : auto ? {
           origin: 'pool', kind: 'notice', urgency: 'normal',
@@ -7580,7 +7686,7 @@ function warmHoldWhy(d) {
 function projectionBurnMemo(now) {
   const memo = new Map();
   return (id) => {
-    if (!memo.has(id)) { let b = {}; try { b = usageEstimator.burnFor(id, now) || {}; } catch { b = {}; } memo.set(id, b); }
+    if (!memo.has(id)) { let b = {}; try { b = usageEstimator.poolBurnFor(id, now) || {}; } catch { b = {}; } memo.set(id, b); }   // law B3: ON lanes only
     return memo.get(id);
   };
 }
@@ -7629,7 +7735,7 @@ function projectionRereadFor(memberId, nowMs = Date.now(), billing = null) {
     if (!fams.size) return null;
     const hot = accounts.poolsWithMember(memberId).some((p) => p.auto && p.hot && capsOf(p.backend).hotSwitch === 'verified'); // memberPoolsOf's answer read live with ONE login per pool — memberPoolsOf re-listed every login per account (prod-stall-202)
     const view = poolReadCache()(memberId);
-    const burn = usageEstimator.burnFor(memberId, nowMs) || {};
+    const burn = usageEstimator.poolBurnFor(memberId, nowMs) || {};   // law B3: the lead projection reads ON lanes only
     let best = null;
     for (const fam of fams) {
       const c = projectionCrossing(projectCacheForFamily(view, fam), burn, nowMs / 1000, { hot });
@@ -7640,7 +7746,13 @@ function projectionRereadFor(memberId, nowMs = Date.now(), billing = null) {
     return { inMs: best.inSec * 1000, label: best.label, line: best.line, pctPerMin: best.pctPerMin, band: best.band, fam: best.fam, resetsAt: best.resetsAt || 0, burnPtPerMin: Math.round(burnPtPerMin * 100) / 100 };
   } catch { return null; }
 }
-function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, rosters = null } = {}) {
+/** B-37f9: the ONE re-run a held kick armed, at the gate's opening (a seam: a leg runs it without waiting for the timer). */
+function poolKickRerun(poolId) {
+  const tm = _poolKickTrail.get(poolId); if (tm) clearTimeout(tm);   // a seam call while the timer is live runs ONCE
+  _poolKickTrail.delete(poolId);
+  try { maybePoolAutoSwitchForPool(poolId, { kick: true }); } catch { }
+}
+function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, rosters = null, kick = false } = {}) {
   try {
     if (!poolId) return;
     const a = accounts.get(poolId);
@@ -7653,10 +7765,23 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
     // move owed at the first stop is decided in THAT call); a released reset hold (releaseResetHold); a basis flip found by
     // another reader (redecideOnBasis); the pre-fire gate's re-decision on its fresh probe (beforeAutoResumeFire). None is a
     // kick: each is a fact the decision was missing. The 180s dwell belt below is deliberately NOT forced, so an
-    // evaluation forced here can no more oscillate than any other one. (The gate's stamp is set only after a default
-    // switch — `_poolAutoLast` was born a switch floor and renamed «last DECISION» in 2.266.1 with its setter left where
-    // it was; filed as its own row, not changed here.)
+    // evaluation forced here can no more oscillate than any other one. Every un-forced pass waits 10 s after a default switch (as
+    // the release). B-37f9: a per-record KICK also waits 10 s after the pool's last EVALUATION (`_poolEvalAt`, stamped below) —
+    // the release stamped only at a switch, so a kick was gated only within 10 s of one. The open / closed answer is PURE
+    // (account-pool-auto evalGateOpen). A held kick is counted and arms ONE re-run at the gate's opening (poolKickRerun): its
+    // decision is not lost — except a kick inside 10 s of a default switch, which the switch gate just below returns before
+    // this one, as the release did (the 30 s tick or the next record decides it).
     if (!force && (now - (_poolAutoLast.get(poolId) || 0)) < 10000) return; // event-driven kicks need a tight gate; anti-flap = MIN_GAIN, not cadence
+    if (kick && !evalGateOpen({ now, last: _poolEvalAt.get(poolId), force })) {
+      _poolGateHeld.set(poolId, (_poolGateHeld.get(poolId) || 0) + 1);
+      if (!_poolKickTrail.has(poolId)) {
+        const wait = Math.max(0, EVAL_GATE_MS - (now - (_poolEvalAt.get(poolId) || 0)));
+        const tm = setTimeout(() => poolKickRerun(poolId), wait + 50);
+        if (tm && typeof tm.unref === 'function') tm.unref();
+        _poolKickTrail.set(poolId, tm);
+      }
+      return;
+    }
     // (lane pool-provider-latents, q-055 M2) a default a deletion left UNPLACED decides FROM its deleted member: its own
     // provider only (the default never crosses one) — and the per-session pass below still runs for every conversation
     const currentId = accounts.poolCurrent(poolId) || accounts.unplacedOf(poolId, null)?.member || null;
@@ -7665,6 +7790,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
     // still on the way (r3): the cache's spent mark is the WALL's, not a fact
     // about now — no decision off it until the reading (or 30 s) arrives
     if (resetCreditPendingFor(currentId, now)) return;
+    _poolEvalAt.set(poolId, now);   // B-37f9: THE KICKS' STAMP — this pass evaluates the pool (forced or not)
     // Capability-gated (P4 slice, src/backend-caps.js): hot only where a
     // live re-read is VERIFIED (codex: experimentally refuted, 2026-08-24 —
     // CODEX_HOME canonicalized at startup + tokens held in process memory);
@@ -8080,7 +8206,7 @@ function maybeStopOnFallback(session, id, from, to) {
   try {
     if (!harnessDeclares(session.backend, 'disableModelFallback') || harnessSetting(session.backend, 'disableModelFallback') !== true) return; // the session's harness declares the row, or there is nothing to stop on
     if (session._fallbackStopFired || session.mode !== 'chat' || !session.pty) return;
-    if (require('../settings-file-words.js').fileGoverns(session, 'noFallback')) return;   // B-8dcf item two: the person's settings file governs the fallback
+    if (SFW.fileGoverns(session, 'noFallback')) return;   // B-8dcf item two: the person's settings file governs the fallback
     const adapter = adapterRegistry.get(session.backend);
     if (!adapter?.formatInterrupt) return;
     session._fallbackStopFired = true;
@@ -8115,6 +8241,7 @@ function maybeStopOnFallback(session, id, from, to) {
     maybeRepinLockedModel, maybeStopOnFallback, modelsMatch, noteServedModel, noteModelFallback, servedDefinesModel, projectionFamilyFor, rerouteAnnouncedBy, // the two stdout-fed model facts + the fallback predicate + the PROJECTION family + THE REROUTE THIS RECORD ANNOUNCES (2026-09-13: one implementation for the parse AND the device feed; r2: one rule for "which cap can refuse this turn"; r4: the fact is placed BEFORE its readers, at both feeds)
     poolChooserForModel, poolReadCache, probeUsageForAccountKey,
     noteSessionProduced, noteTurnEnd, noteWallSignal, beforeAutoResumeFire,
+    noteStoppedBy, clearStoppedBy, noteTurnRunning, noteTurnError, sessionWallVerdict, // lane auto-resume-bulk: WHY a session stopped — the fact's writer/clearer, the turn-start + typed-error hooks the stdout consumers call, and the pool's live answer the bulk resume skips by
     noteStreamRecord, recordIsLate, liveFactVerdict, // a LATE record is not a live fact (lane-hot-switch): both feeds show every record to noteStreamRecord first
     laneIsProvisional, laneFromBanner, laneByEvidence, settleTurnLane, pendingLaneDeferrals, deferTurnLane, // the per-turn LANE decision (2026-09-13): a model-cap rejection arrives on the unscoped weekly lane (r3 exports `deferTurnLane` so its CAP — which drops a wall — can be driven; see the reachability note at LANE_DEFER_MAX)
  quotaVerdictFor, probeUsageViaSession, recordRateLimitEvent, recordCodexQuotaSignal, resolveUsageKey,
@@ -8128,7 +8255,7 @@ function maybeStopOnFallback(session, id, from, to) {
     oatIdentity, oatIdentityAttach, oatRebind, oatAnswer, tokenSpentBy, tokenGenOf, readingRoad, oatRoadOf, // lane oat-identity-postcheck: the long-lived token's identity post-check (the account routes wire its store hook + the re-bind door + the owner's answer); tokenGenOf = WHICH token a reading was produced with (lane oat-identity-fix)
     sessionBillingMember, wallKeyFor, rejectionSlotFor, readingSlotFor, memberLoginState, accountCredentialState, healthyPoolMembers, switchCandidates, poolReadLogin, slotTransitions, nearArmVeto, armCauseFor, fireIdentityFor, demoteWalledAccount, wallCount, sessionWalledMembers,
     _wallRing, _sessionWalls, _sessionWallLanes, noteSessionWall, WALL_RING_MS, SESSION_WALL_MS, // wall-ground-truth + token-slot + session-wall seams (test-auto-resume §11, test-auto-resume-loop)
-    _poolAutoLast, _poolSwitchAt, // the eval gate (10s) + dwell belt (180s) are WALL-CLOCK: a suite winds them back instead of sleeping through them
+    _poolAutoLast, _poolSwitchAt, _poolEvalAt, _poolGateHeld, _poolKickTrail, poolKickRerun, // the gates (10s) + dwell belt (180s) are WALL-CLOCK: a suite winds them back instead of sleeping through them; the held count and the trailing re-run (B-37f9) are what a leg reads
     sessionModelFor, sweepUsageAnchors, usageCacheKeyFor,
     usageIdentityAccountIds, usageIdentityGroups, usageIdentityGroupsCached,
     writeUsageCacheForKey, clearSealedOrders, pushSealedOrders,

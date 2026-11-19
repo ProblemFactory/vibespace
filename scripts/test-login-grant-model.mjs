@@ -168,7 +168,10 @@ console.log('⑤ WHAT THE LOGIN HOLDS — its two-step code bound or unbound by 
   ok(lg.bindTotp(name, 'shop-2fa').code === 'vault_locked', 'a locked vault refuses by name (vault_locked) — the dialog\'s refusal line gives Unlock…');
   const ROW = fs.readFileSync(path.join(REPO, 'src/lib/vault-login-row.js'), 'utf8');
   const imports = ROW.split('\n').filter((l) => /^import /.test(l)).map((l) => (/from '([^']+)'/.exec(l) || [])[1]).sort();
-  ok(JSON.stringify(imports) === JSON.stringify(['./i18n.js', './utils.js', './vault-totp-row.js']) && !/agoText/.test(ROW.split('\n').filter((l) => /^import /.test(l)).join('\n')),
+  // + ./use-login-words.js (lane login-request-card, one login several sites — a chip's site, chipSiteOf): PURE, it imports nothing, so
+  //   the stubbed bundles of the paste box and the login card carry it as they are (test-vault-paste ⑬b / ⑬c bundle it)
+  ok(JSON.stringify(imports) === JSON.stringify(['./i18n.js', './use-login-words.js', './utils.js', './vault-totp-row.js']) && !/agoText/.test(ROW.split('\n').filter((l) => /^import /.test(l)).join('\n'))
+    && !/^import /m.test(fs.readFileSync(path.join(REPO, 'src/lib/use-login-words.js'), 'utf8')),
     'the row module imports no dialog and nothing new (the paste box and the login card bundle it with a stubbed utils.js) — the window hands it `held` and the openers', imports);
 }
 

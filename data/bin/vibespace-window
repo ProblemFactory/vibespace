@@ -81,7 +81,7 @@ const USAGE = `vibespace-window — act on a native window through its accessibi
                                                  THE accessibility tree: @ref role "name" [actions] (x,y wxh) states — refs are per snapshot
   vibespace-window screenshot <handle> [--out <file.png>]
                                                  the window's OWN pixels (its size + origin printed): the pixel-mode read; --at x,y is a pixel of it.
-                                                 It lands in <temp dir>/vibespace-window/ (the path is printed), never in your current directory;
+                                                 It lands in <temp dir>/vibespace-window-<your uid>/ (the path is printed), never in your current directory;
                                                  a relative --out is under the session's directory (else that temp dir); ~/.ssh, any ~/.<dir>
                                                  and VibeSpace's own data are refused write_path_refused
   vibespace-window click <handle> @e7 [--action <name>]
@@ -167,7 +167,7 @@ const usageOf = (line) => { console.error('usage: ' + line); process.exit(2); };
 /** `screenshot` with no `--out` wrote `window-<h>-<ts>.png` into the invoking
  *  SHELL's directory — the session's cwd was the production checkout, so the
  *  PNG landed in the repo. Now:
- *    · no `--out` ⇒ `<os.tmpdir()>/vibespace-window/<handle>-<ts>.png` (the
+ *    · no `--out` ⇒ `<os.tmpdir()>/vibespace-window-<uid>/<handle>-<ts>.png` (the
  *      directory made 0700; refused `shot_dir_unsafe` when it is not a real
  *      directory this uid owns — a shared /tmp can hold another user's link);
  *    · a relative `--out` is resolved against the SESSION's directory
@@ -215,7 +215,9 @@ const spellingsOf = (d) => { let r = null; try { r = fs.realpathSync.native(d); 
 const SHOT_HOMES = [...new Set([process.env.HOME, (() => { try { return os.userInfo().homedir; } catch { return null; } })(), os.homedir()]
   .filter((h) => typeof h === 'string' && h[0] === '/').flatMap(spellingsOf))];
 const SHOT_DATA_DIRS = spellingsOf(path.join(__dirname, '..'));
-const shotDirPath = () => path.join(os.tmpdir(), 'vibespace-window');
+// B-3767 (lane bl-scratch, 2026-11-18): the default folder is THIS USER'S (`vibespace-window-<uid>`), never one machine-wide name a
+// second user of the machine finds owned by someone else (the refusal below still holds for anything that is not private)
+const shotDirPath = () => path.join(os.tmpdir(), `vibespace-window-${typeof process.getuid === 'function' ? process.getuid() : 'u'}`);
 /** The default directory, made private: → {dir} | a refusal. */
 function ensureShotDir() {
   const d = shotDirPath();

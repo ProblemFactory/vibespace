@@ -32,7 +32,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { freePort, scratch, endRootedProcesses, ONBOARDED_SOURCE } from './scratch.mjs';
+import { freePort, scratch, endRootedProcesses, ONBOARDED_SOURCE, CHROME_STORE } from './scratch.mjs';
 import { gitEnvFrom } from './git-env.mjs';
 
 const require = createRequire(import.meta.url);
@@ -222,7 +222,7 @@ const CDP_PORT = await freePort();
 const chromeHome = path.join(root, 'chrome-home'), chromeRun = path.join(root, 'chrome-run');
 fs.mkdirSync(chromeHome, { recursive: true }); fs.mkdirSync(chromeRun, { recursive: true, mode: 0o700 });
 const cenv = { ...process.env, HOME: chromeHome, XDG_RUNTIME_DIR: chromeRun }; delete cenv.DISPLAY; delete cenv.WAYLAND_DISPLAY;
-chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', '--font-render-hinting=none', `--user-data-dir=${path.join(root, 'chrome-profile')}`, 'about:blank'], { stdio: 'ignore', env: cenv });
+chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', '--font-render-hinting=none', `--user-data-dir=${path.join(root, 'chrome-profile')}`, 'about:blank'], { stdio: 'ignore', env: cenv });
 const WebSocket = require(path.join(REPO, 'node_modules/ws'));
 for (let i = 0; i < 120; i++) { try { await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json(); break; } catch { await sleep(250); } }
 async function page(w, h, url) {
@@ -387,11 +387,7 @@ if (baseView) {
   await loop.close();
 }
 
-console.log('§7 the launcher hands its own close to the machine\'s dialog (the Apps dialog closes with it)');
-{
-  const src = fs.readFileSync(path.join(REPO, 'src/lib/desktop-app-launcher.js'), 'utf8');
-  ok(/showMachineDesktopDialog\(app, m, \{[^}]*closeOpener: close,/.test(src) && /const \{ overlay, body, close(?:, raised)?(?:, ready, live)? \} = createModalShell\(\{ id: 'desktop-launch-dialog'/.test(src), 'desktop-app-launcher.js passes the Apps dialog\'s close as closeOpener');
-}
+// (§7 the launcher's close pin — MOVED to the fast scripts/test-mac-ard-signin-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

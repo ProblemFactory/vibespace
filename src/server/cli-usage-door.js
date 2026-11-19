@@ -4,11 +4,24 @@
 // (antigravity: `agy -p /usage --output-format json`, src/harnesses/antigravity-usage.js) — is read HERE, for ONE named
 // account, when a PERSON presses Re-check in Manage agents. Never a timer (§ban-safety: the one owner-approved usage
 // timer is Claude's auto-cli; this reading is on demand only), never an agent (a vsst_/jbt_ bearer is refused), at most
-// once a minute per account, never under `accounts.onDemandQuotaRefresh = off`.
+// once a minute per account.
+// THE ROWS IT ASKS (lane usage-predict, the row split): a vendor whose descriptor names an instance row (`quota.readsRow`) is
+// refused while that row is off, a press included — Claude's names accounts.onDemandQuotaRefresh, but Claude declares no
+// on-demand reading today, so that branch is a fence for a later one. Every other vendor's AUTOMATIC reads (a wall, a stretch
+// of work) ask its own row, `autoUsageReads` (Antigravity's: antigravity.autoUsageReads — holding no value, it reads Off while
+// Claude's row is Off: src/harness-settings.js readRow), and a PERSON's press asks no row. So a Re-check on an Antigravity
+// account READS while Claude's row is Off — once, counted, paced as any press; before the split that press was refused
+// (403 refresh-off), because Claude's row then governed every vendor.
 // THE SECOND CALLER (lane agy-wall-signal, the owner's ruling «A» 2026-11-02): a usage WALL the account's conversation
 // named (src/server/stream-wall.js) — `read(id, { wall: true })`, honoured ONLY where the descriptor declares
 // `onDemand.onWallSignal`; once per account per wall (the caller's ledger), every gate below unchanged (the minute's
 // pace, the setting, the judge's STOP). Still never a timer: the event is the wall.
+// THE THIRD CALLER (lane usage-predict, the owner's ruling «A» 2026-11-14 — «一个 agy 账号上的对话结束一轮、且该账号 5 分钟内没有
+// 新一轮时，读一次 agy 的 /usage；每账号每 30 分钟最多一次；轮次进行中不读；闲置账号不读»): the end of a stretch of work
+// (src/server/after-turn-read.js) — `read(id, { afterTurn: true })`, honoured ONLY where the descriptor declares
+// `onDemand.afterTurn`; every gate below unchanged. Each run of the CLI, by any caller, is counted on disk first
+// (src/door-reads.js: today's count by caller, shown on the account's row, and the last run the after-turn ceiling and the
+// wall's re-read are counted from).
 //   · the CLI = the path the read-time check answers NOW (src/server/cli-cmd.js `check`, forced: a person asked);
 //   · the env = the account's own spawn env (accounts.resolveForSpawn: its HOME root, the session bus disabled) over
 //     the agents' env (ws-handler agentEnv — every harness's credential names dropped), so the CLI reads THAT
@@ -20,9 +33,16 @@
 // Answers { ok, status, … } — the route maps it to HTTP. Spawns nothing at require time; no backend-id branch.
 const path = require('path');
 const { spawn } = require('child_process');
+const doorReads = require('../door-reads.js');
+const { readRow } = require('../harness-settings.js');
 
 const PACE_MS = 60000;
+// THE RULING'S OWN ARITHMETIC (the owner's A, 2026-11-14: «每账号每 30 分钟最多一次»): a day holds at most 24 h / 30 min = 48
+// after-turn reads of one account. More is a BUG somewhere upstream — refused here, and said in a log line (never a notice)
+const AFTER_TURN_DAY_MAX = Math.floor((24 * 60) / 30);
 const TIMEOUT_MS = 30000;
+// the key of a vendor's OWN row for its automatic usage reads, in its harness settings table (Antigravity's: antigravity.autoUsageReads)
+const AUTO_READS_KEY = 'autoUsageReads';
 const STDOUT_CAP = 262144;
 
 /** Run `cmd argv` once with `env`/`cwd`; resolves { code, stdout, stderr, error }. stdin is a closed pipe. */
@@ -50,10 +70,13 @@ function runOnce(spawnImpl, cmd, argv, { env, cwd, timeoutMs = TIMEOUT_MS }) {
  *  @param {(k:string)=>any} [o.setting]  a server setting
  *  @param {Function} [o.spawnImpl] @param {()=>number} [o.now] @param {(l:string)=>void} [o.log] */
 function createCliUsageDoor({ accounts, harnessOf, cliCmds, cacheDir, usageWrite = require('../usage-cache-write.js'), agentEnv = () => ({ ...process.env }),
-  setting = () => null, spawnImpl = spawn, now = Date.now, log = (l) => console.log(l), paceMs = PACE_MS, timeoutMs = TIMEOUT_MS } = {}) {
+  setting = () => null, harnessSetting = null, spawnImpl = spawn, now = Date.now, log = (l) => console.log(l), paceMs = PACE_MS, timeoutMs = TIMEOUT_MS,
+  mono = () => performance.now(), countWriter = () => require('../store-writer.js').storeWriter() } = {}) {
   const lastAt = new Map();   // account id → when a person last read it (the once-a-minute pace)
   const inflight = new Map(); // account id → the read in flight (two presses share it)
-  async function readOnce(id, a, be, od) {
+  const lastRunMono = new Map();   // account id → the steady clock at its last run in THIS life (law A2: a wall-clock step moves nothing)
+  const stopped = new Map();  // account id → why: the judge saw a turn — every AUTOMATIC caller stops for that account (law A)
+  async function readOnce(id, a, be, od, caller) {
     const cmd = await cliCmds.check(be, { force: true });
     if (!cmd) return { ok: false, status: 409, code: 'not-installed', error: `${harnessOf(be)?.label || be} is not installed on this machine` };
     let spawnEnv = null;
@@ -63,11 +86,18 @@ function createCliUsageDoor({ accounts, harnessOf, cliCmds, cacheDir, usageWrite
     const env = { ...agentEnv(), ...spawnEnv.localEnv };
     for (const k of creds.keyEnvVars || []) delete env[k]; // an ambient key would answer for ANOTHER login
     const at = now();
+    // THE COUNT FIRST, AND FAIL CLOSED (law A3): the run is counted on disk before anything spawns; a count that could not be
+    // written refuses the read by name — an uncounted read would also hold no later one back
+    let counted = false;
+    try { counted = await doorReads.bumpDoorRead(cacheDir, id, caller, at, { writer: countWriter, log }); } catch (e) { counted = false; log(`[cli-usage] ${be} ${id}: the read count failed: ${e.message}`); }
+    if (!counted) { log(`[cli-usage] ${be} ${id}: the read count could not be written — not read (${caller})`); return { ok: false, status: 503, code: 'count-failed', error: 'the read count could not be written — nothing was read' }; }
+    lastRunMono.set(id, mono());
     const r = await runOnce(spawnImpl, cmd, od.argv, { env, cwd: od.cwdOf(spawnEnv.localEnv), timeoutMs });
     if (r.error) return { ok: false, status: 502, code: 'spawn-failed', error: `could not run ${path.basename(cmd)}: ${r.error.message}` };
     const j = od.judge({ code: r.code, stdout: r.stdout, stderr: r.stderr, measuredAt: at });
     if (j.verdict === 'turn-started') {
-      log(`[cli-usage] ${be} ${id}: STOP — ${j.why} (nothing written)`);
+      stopped.set(id, j.why);   // ONE stop per account for every automatic caller (the wall's, the after-turn's), until the hub restarts
+      log(`[cli-usage] ${be} ${id}: STOP — ${j.why} (nothing written; no automatic read of this account until the hub restarts)`);
       return { ok: false, status: 502, code: 'turn-started', error: j.why };
     }
     if (j.verdict === 'auth-required') return { ok: false, status: 409, code: 'login-needed', loginNeeded: true, error: j.why };
@@ -80,26 +110,61 @@ function createCliUsageDoor({ accounts, harnessOf, cliCmds, cacheDir, usageWrite
   }
   return {
     PACE_MS: paceMs,
-    /** ONE reading of account `id`, on a person's press (`person`) or a wall its conversation named (`wall`); else refused. */
-    async read(id, { person = false, wall = false } = {}) {
-      if (!person && !wall) return { ok: false, status: 403, code: 'agent_forbidden', error: 'human-triggered only' };
+    /** The steady time since this life's last run of the account's CLI (Infinity when none ran in this life). */
+    sinceLastRunMs(id) { return lastRunMono.has(id) ? Math.max(0, mono() - lastRunMono.get(id)) : Infinity; },
+    /** Why the automatic callers stopped for this account (the judge saw a turn), or null. */
+    stoppedWhy(id) { return stopped.get(id) || null; },
+    /** ONE reading of account `id`, on a person's press (`person`), a wall its conversation named (`wall`) or the end of a
+     *  stretch of its work (`afterTurn`); else refused. */
+    async read(id, { person = false, wall = false, afterTurn = false } = {}) {
+      const caller = person ? 'person' : wall === true ? 'wall' : afterTurn === true ? 'afterTurn' : null;
+      if (!caller) return { ok: false, status: 403, code: 'agent_forbidden', error: 'human-triggered only' };
       const a = accounts.get(id);
       if (!a) return { ok: false, status: 404, code: 'unknown-account', error: 'unknown account' };
       const be = a.backend || 'claude';
       const od = harnessOf(be)?.quota?.onDemand;
       if (!od || typeof od.judge !== 'function' || !Array.isArray(od.argv)) return { ok: false, status: 400, code: 'no-reading', error: `${harnessOf(be)?.label || be} declares no on-demand usage reading` };
-      if (!person && od.onWallSignal !== true) return { ok: false, status: 400, code: 'no-wall-read', error: `${harnessOf(be)?.label || be} declares no reading on a usage wall` };
-      let mode = 'manual'; try { mode = setting('accounts.onDemandQuotaRefresh') || 'manual'; } catch { }
-      if (mode === 'off') return { ok: false, status: 403, code: 'refresh-off', error: 'on-demand usage refresh is turned off in Settings' };
+      if (caller === 'wall' && od.onWallSignal !== true) return { ok: false, status: 400, code: 'no-wall-read', error: `${harnessOf(be)?.label || be} declares no reading on a usage wall` };
+      if (caller === 'afterTurn' && od.afterTurn !== true) return { ok: false, status: 400, code: 'no-after-turn-read', error: `${harnessOf(be)?.label || be} declares no reading after a stretch of work` };
+      if (caller !== 'person' && stopped.has(id)) return { ok: false, status: 409, code: 'stopped', error: `the automatic reads of this account stopped: ${stopped.get(id)}` };
+      if (caller === 'afterTurn') {
+        const today = doorReads.todayOf(doorReads.readDoorReads(cacheDir, id), now());
+        if (today.afterTurn >= AFTER_TURN_DAY_MAX) { log(`[cli-usage] ${be} ${id}: A BUG — ${today.afterTurn} after-turn reads today already, the ruling allows ${AFTER_TURN_DAY_MAX}; refused`); return { ok: false, status: 429, code: 'over-ruling', error: `${today.afterTurn} after-turn reads today: the ruling allows ${AFTER_TURN_DAY_MAX}` }; }
+      }
+      // THE ROW OF THE VENDOR WHOSE ACCOUNT IT IS (lane usage-predict, 2026-11-16 — the owner looked at the quota row and asked
+      // «fable是antigravity吗？»: ONE row, Claude's, governed Antigravity's reads too). A vendor whose reads answer to an instance
+      // row (`quota.readsRow` — Claude's accounts.onDemandQuotaRefresh) is refused here while that row is off, a person's press
+      // included: «Off (never contact Anthropic)» is a promise, and this door is its last fence. Every other vendor answers to its
+      // OWN row: an automatic read (a wall, a stretch of work) asks `autoUsageReads` of the account's harness table; a person's
+      // press asks no row. A harness that declares an automatic read and has no such row is refused BY NAME — fail closed: a later
+      // harness gets no automatic read without a row of its own. Each row varies alone.
+      const h = harnessOf(be) || {};
+      if (h.quota && typeof h.quota.readsRow === 'string') {
+        let mode = 'manual'; try { mode = setting(h.quota.readsRow) || 'manual'; } catch { }
+        if (mode === 'off') return { ok: false, status: 403, code: 'refresh-off', error: 'on-demand usage refresh is turned off in Settings' };
+      } else if (caller !== 'person') {
+        const tbl = h.settings && Array.isArray(h.settings.rows) ? h.settings : null;
+        const row = tbl ? tbl.rows.find((r) => r && r.key === AUTO_READS_KEY) || null : null;
+        if (!row) return { ok: false, status: 403, code: 'no-auto-reads-row', error: `${harnessOf(be)?.label || be} has no row of its own for automatic usage reads in Settings — none runs without one` };
+        // the typed read (readRow: a row holding NO value follows its `unsetFollows` — Antigravity's, Claude's Off — so an Off the
+        // person chose survives a road that drops the key: a tab from before a restart saving its whole settings, an older import)
+        let v = 'off';   // an unreadable row reads as off (fail closed)
+        try { v = typeof harnessSetting === 'function' ? harnessSetting(be, AUTO_READS_KEY) : readRow(tbl, row, setting); } catch { v = 'off'; }
+        if (v === 'off' || v === false) {
+          let own; try { own = setting(`${tbl.prefix}.${AUTO_READS_KEY}`); } catch { own = undefined; }
+          const follows = (own === null || own === undefined) && row.unsetFollows ? ` — it holds no value of its own, and ${row.unsetFollows.setting} is ${row.unsetFollows.when}` : '';
+          return { ok: false, status: 403, code: 'auto-reads-off', error: `${harnessOf(be)?.label || be}'s automatic usage reads are off in Settings (${tbl.prefix}.${AUTO_READS_KEY}${follows})` };
+        }
+      }
       if (inflight.has(id)) return inflight.get(id);
       const since = now() - (lastAt.get(id) || -Infinity);
       if (since < paceMs) return { ok: false, status: 429, code: 'throttled', throttled: true, retryInMs: paceMs - since, error: 'read less than a minute ago' };
       lastAt.set(id, now());
-      const p = readOnce(id, a, be, od).finally(() => inflight.delete(id));
+      const p = readOnce(id, a, be, od, caller).finally(() => inflight.delete(id));
       inflight.set(id, p);
       return p;
     },
   };
 }
 
-module.exports = { createCliUsageDoor, PACE_MS, TIMEOUT_MS };
+module.exports = { createCliUsageDoor, PACE_MS, TIMEOUT_MS, AFTER_TURN_DAY_MAX, AUTO_READS_KEY };

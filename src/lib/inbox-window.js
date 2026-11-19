@@ -32,10 +32,12 @@ import { registerMenuItem } from './contributions.js';
 import { REACH_CHOICES, reachWord, reachTitle } from './automation-reach.js'; // lane key-instance-scope: an automation card's reach choices in the pane
 import { inboxModel, actionWords } from './user-todos-actions.js'; // THE store + the verbs (one implementation with the popup)
 import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, isNotice, noticeGroups, noticeReadAll, tabCounts, originOf, ORIGIN_LABELS } from './user-todos-layout.js'; // PURE: the popup's order, notices, counts; «Mark all read»'s ids
-import { reconcileKeyed, agoText, expiresText, statusWords, resolvedByText, endCodeOf, appCardHtml, askChipEls, linkifyInto, grantAskOf, optionWords, wordsHtml, runFactsHtml, armDeadlines, hubNow, hubClock } from './user-todos-row.js'; // THE keyed reconciler + the row words (r7: the run card's facts, its deadline's ticker)
+import { reconcileKeyed, agoText, expiresText, statusWords, resolvedByText, endCodeOf, appCardHtml, askChipEls, linkifyInto, grantAskOf, optionWords, wordsHtml, runFactsHtml, armDeadlines, hubNow, hubClock, settingCardOf, settingCardEls, patchSettingVolatile } from './user-todos-row.js'; // THE keyed reconciler + the row words (r7: the run card's facts, its deadline's ticker)
 import { TABS, nextSelection, holdSelection, paneMode, scopeRows, rowPreview, itemView, readOnSight, NOTICE_READ_MS } from './inbox-window-layout.js'; // PURE: the window's rules (test-inbox-window-model)
 import { closersOf, isDecisionRow, runCardOf, deadlineOf, factsDroppedWords, CHECK_AGAIN_TYPES, ROW_OF as FY_ROW } from '../foryou-actions.js'; // PURE (lane wake-approve-card r2): a decision row's two verbs, no generic closer; r3: a pointer's one closer, Hide
+import { fyLinkMenu } from './internal-link-door.js'; // lane login-request-card piece 1: a link of the scheme in an item's words — «Go» · «Copy link»
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
+import { replyPictures, backendOfKey } from './reply-pictures.js'; // B-51dd: a reply takes a picture (button · paste · drop) through THE picture door
 import { showSecretPasteDialog } from './vault-paste-box.js'; // lane vault-paste-request: a paste request's box, as a dialog over this window
 
 // The taskbar For-you button's own glyph (UI_ICONS.inbox's paths), in the registry's 16px chrome.
@@ -310,10 +312,16 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     if (ta.value) markTyped(ta);   // the person's own words (a draft holds only what this box held), carried into the rebuilt box: they still hold a stale page's reload
     const why = mk('div', 'iw-reply-why'); // the box's one-line note ABOVE it: the verdict's fact (an ended conversation: the send reopens it)
     reply.append(why, voiceField(ta, attachDictation(ta)));
+    const pics = replyPictures({ box: reply, ta, id, store: model.pictures, t, backend: () => { const it = model.byId(id); return backendOfKey(it && it.sessionKey); } }); // B-51dd: the item's pictures above the field, the picture button after it — judged with its conversation's harness limits (batch 20 cure)
+    reply.insertBefore(pics.strip, why.nextSibling);
+    reply.append(pics.btn, pics.input, pics.camera.input);
     const actions = mk('div', 'iw-actions');
     const arts = mk('div', 'iw-arts'); // lane foryou-attachments: the ask's --artifact chips, under the question
     el.append(head, title, dl, arts, opts, detail, cutLine, replied, reach, reply, actions); // ONE ORDER (lane ui-phone-and-fit pick 0, 主开发 13:34Z): the question, its options, then the detail
-    return { el, id, dot, sess, ld, nm, board, meta, title, dl, arts, detail, cutLine, replied, opts, reach, reply, ta, why, actions, sig: {} };
+    const setting = mk('div', 'iw-setting'); // lane setting-doors pick 2: a proposed change's box (THE row's — its press is the action row's), under the question
+    setting.style.display = 'none';
+    dl.after(setting);
+    return { el, id, dot, sess, ld, nm, board, meta, title, dl, setting, arts, detail, cutLine, replied, opts, reach, reply, ta, why, pics, actions, sig: {} };
   };
   /** A previewed detail (a resolved item's snapshot carries 300 chars): load the rest ONCE
    *  through the model; a failure lands on the pane as its sentence, never silently. */
@@ -349,9 +357,11 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     'desktop-app-show': () => actBtn('desktop-app-show', UI_ICONS.check, t('Show window'), t('Show the app’s window'), 'iw-act-primary'), // lane app-display-notify-sink
     // lane controls-that-lie: an ask that names a grant — the button DOES it («Who can use it» gains the conversation, then the agent is told)
     'browser-grant': (it) => { const g = grantAskOf(it) || { label: '' }; return actBtn('browser-grant', UI_ICONS.check, t('Let this conversation use {label}', { label: g.label }), t('Adds this conversation under “Who can use it” for {label}, then tells the agent', { label: g.label }), 'iw-act-primary'); },
+    // lane setting-doors pick 2: an ask that proposes one change of one setting — the button DOES it; its words name the amount and the moment
+    'setting-press': (it) => { const sc = settingCardOf(it, t); const b = actBtn('setting-press', UI_ICONS.check, sc && sc.button ? sc.button.words : '', sc && sc.button ? sc.button.title : '', 'iw-act-primary'); if (sc) b.dataset.shown = String(sc.now); return b; },
     'browser-restart': () => actBtn('browser-restart', UI_ICONS.check, t('Restart'), t('Restart the browser that stopped answering — logins stay in the profile, its tabs are re-opened'), 'iw-act-primary'), // lane browser-unresponsive
     // the «Check again» verbs (B-0b8c's browser version, lane cli-self-measure's held Claude Code): the registry row declares the hover
-    ...Object.fromEntries(CHECK_AGAIN_TYPES.map((ty) => [ty, () => actBtn(ty, UI_ICONS.refresh, t('Check again'), t(FY_ROW[ty].checkAgain), 'iw-act-primary')])),
+    ...Object.fromEntries(CHECK_AGAIN_TYPES.map((ty) => [ty, () => actBtn(ty, UI_ICONS.refresh, FY_ROW[ty].checkLabel ? t(FY_ROW[ty].checkLabel) : t('Check again'), t(FY_ROW[ty].checkAgain), 'iw-act-primary')])),   // B-5ce7: a row may name its verb (a parked mount's Reconnect)
     'exit-allow': () => actBtn('exit-allow', UI_ICONS.check, t('Allow'), t('Allow'), 'iw-act-primary iw-act-exit'),
     'exit-deny': () => actBtn('exit-deny', UI_ICONS.close, t('Deny'), t('Deny'), 'iw-act-exit'),
     // lane hub-act-ask: a hub act held on a cluster instance — Allow once (primary) / Always on this machine / Deny
@@ -387,6 +397,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     'app-reject': () => actBtn('app-reject', UI_ICONS.close, t('Not now'), t('Not now'), 'iw-act-exit'),
   };
   const viewOf = (it, e) => itemView(it, { buttonsOf,   // lane queued-is-not-woke: a row's declared buttons (the layout imports nothing)
+    settingAsk: (() => { const sc = settingCardOf(it, t); return sc ? { press: !!sc.button } : null; })(),   // lane setting-doors pick 2: the press only while THE verdict against the value NOW allows it
     t, words: it.card && it.action && it.action.type === 'app-install' ? cardWords(it.card, t, resolveLang()).title : (runCardOf(it, { t }) || { headline: model.wordsOf(it) }).headline, detail: model.detailOf(it), options: model.optionsFor(it), replyOpen: st.replyOpen === it.id, name: model.nameFor(it.sessionKey, [it]),
     origin: { origin: originOf(it), label: ORIGIN_LABELS[originOf(it)] || '' }, notice: isNotice(it), resolved: !!(e && e.resolved) || it.status !== 'open',
     reply: model.replyState(it), closers: closersOf(it, !!(e && e.resolved) || it.status !== 'open'), ago: (ts) => agoText(ts, t), expires: (ts) => { const d = deadlineOf(it, { t, now: hubNow(), clock: hubClock() }); return d && d.state !== 'late' ? '' : expiresText(ts, t); }, statusWords: (item) => statusWords(item, t), resolvedBy: (by, item) => resolvedByText(by, t, item), endCode: (item) => endCodeOf(item),
@@ -485,6 +496,17 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
       c.dl.style.display = dln ? '' : 'none';
       c.sig.deadline = dlSig;
     }
+    // lane setting-doors pick 2: a proposed change's box — THE row's words (the label and its door, the value NOW, the proposal and
+    // its «until», a standing hold, the ask's age, why no press); its press is the action row's. A box whose facts changed re-arms
+    // the press (a reworded button is not the one the user read); its clock words are patched in place
+    const sc = v.resolved ? null : settingCardOf(it, t);
+    const scSig = sc ? sc.sig : '';
+    if (c.sig.setting !== scSig) {
+      c.setting.replaceChildren(...(sc ? settingCardEls(it, t) : [])); // NODES — every word textContent (the pane's XSS rule)
+      if (c.sig.setting !== undefined && st.armId === id) st.armAt = performance.now();
+      c.sig.setting = scSig;
+    } else if (sc) patchSettingVolatile(c.setting, it, t);
+    c.setting.style.display = sc ? '' : 'none';
     const artsSig = JSON.stringify((!model.isCleared(it) && it.artifacts) || null);
     if (c.sig.arts !== artsSig) { c.arts.replaceChildren(...askChipEls(it, t)); c.arts.style.display = c.arts.childElementCount ? '' : 'none'; c.sig.arts = artsSig; } // NODES, its words textContent
     // verify-r4 F4: an exit ask's detail IS the command it asks to run — shown VERBATIM (textContent in a <pre>), never as
@@ -554,7 +576,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     // r7: beside a run card's missing «Always», why it is not offered (the model's words, in the answers' row)
     const hint = run && !v.resolved && acts.includes('hub-once') && (!acts.includes('shape-always') || (it && it.action && it.action.command)) ? run.always.hint : null;   // lane vault-standing-request: «Always (this command)» keeps its plain words
     const whint = run && !v.resolved && acts.includes('shape-window') && run.window && run.window.hint ? run.window.hint : run && !v.resolved && run.window && run.window.excepted ? run.window.excepted : null;   // r7: «Allow for 1 hour»'s own words; r8: or why it is not offered (除了)
-    const actSig = acts.join(',') + '\u0000' + JSON.stringify(hint) + '\u0000' + JSON.stringify(whint);
+    const actSig = acts.join(',') + '\u0000' + JSON.stringify(hint) + '\u0000' + JSON.stringify(whint) + '\u0000' + scSig;   // lane setting-doors pick 2: the press's words follow the value NOW
     if (c.sig.actions !== actSig) {
       c.actions.replaceChildren(...acts.map((a) => (ACT[a] || ((x) => btnAct(a, x)))(it)));
       const deny = hint && c.actions.querySelector('[data-act="hub-deny"]');
@@ -721,14 +743,16 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     const c = st.cur;
     if (!c || sending) return;
     const body = String(text || '').trim();
-    if (!body) return;
+    const pics = chip ? [] : (model.pictures.get(c.id) || []);   // B-51dd: the box's pictures ride its send (an option chip sends its label only)
+    if (!body && !pics.length) return;
     const it = model.byId(c.id);
     if (!it) return;
     const wasOpen = it.status === 'open';
     sending = true; patchLivePane();
-    const ok = await model.postReply(c.id, body);
+    const held = chip ? (model.pictures.get(c.id) || []).length : 0;   // B-51dd: an option chip sends its label only — said, when the box holds pictures
+    const ok = await (pics.length ? model.postReply(c.id, body, { pictures: pics }) : held ? model.postReply(c.id, body, { sentToast: t('{label} sent — the {n} picture(s) in the reply box were not sent', { label: body, n: held }) }) : model.postReply(c.id, body));
     sending = false;
-    if (ok && !chip && st.cur === c) c.ta.value = '';
+    if (ok && !chip && st.cur === c) { c.ta.value = ''; c.pics.draw(); }
     patchLivePane();
     if (ok && wasOpen) advance(c.id);
   };
@@ -738,6 +762,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     if (a === 'reply') {
       // an empty box: the button puts the cursor where the reply goes instead of doing nothing (verify round)
       const txt = st.cur ? st.cur.ta.value : '';
+      if (st.cur && (model.pictures.get(st.cur.id) || []).length) { sendReply(txt); return; }   // B-51dd: a picture alone is a reply
       if (!String(txt).trim()) { if (st.cur && !st.cur.ta.disabled) st.cur.ta.focus(); return; }
       sendReply(txt); return;
     }
@@ -776,6 +801,14 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
       const pv = pressVerdict({ since: st.armId === id ? st.armAt : null, now: performance.now() });
       if (!pv.ok) { showToast(t('That button moved under the pointer just now — read it, then press it again')); return; }
       if (await model.runAction(it, 'grant')) advance(id);
+      return;
+    }
+    if (a === 'setting-press') {
+      // lane setting-doors pick 2: the change an ask proposes, in ONE press — a pane shown (or a button reworded) a moment ago is not a press on what the user read
+      const pv = pressVerdict({ since: st.armId === id ? st.armAt : null, now: performance.now() });
+      if (!pv.ok) { showToast(t('That button moved under the pointer just now — read it, then press it again')); return; }
+      const b = st.cur && st.cur.id === id ? st.cur.actions.querySelector('[data-act="setting-press"]') : null;
+      if (await model.runAction(it, 'setting', { shown: b ? b.dataset.shown : undefined })) advance(id);
       return;
     }
     if (a.startsWith('btn:')) { const b = btnOf(it, a); if (b && await model.runAction(it, b.answer) && b.door !== 'jump' && b.door !== 'connect') advance(id); return; }   // B-8edd: a door that opens a dialog keeps the item selected   // a row's declared button (lane queued-is-not-woke)
@@ -817,7 +850,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     if (fy && st.cur && st.cur.el.contains(fy)) {
       e.preventDefault();
       const it = model.byId(st.cur.id);
-      if (it) { if (fy.classList.contains('ut-art')) model.openArtifact(it, Number(fy.dataset.ai)); else model.openLink(it, fy.dataset.fy, fy.dataset.ref); }
+      if (it) { if (fy.classList.contains('ut-art')) model.openArtifact(it, Number(fy.dataset.ai)); else model.openLink(it, fy.dataset.fy, fy.dataset.ref, { x: e.clientX, y: e.clientY, el: fy }); }
       return;
     }
     // A NAVIGATION IS A NEW VIEW (verify round): a tab or scope switch re-sorts the list like an open
@@ -855,6 +888,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
   // the row and the pane in place. The reply box keeps its own native menu.
   root.addEventListener('contextmenu', (e) => {
     if (e.target.closest('.iw-reply')) return;
+    if (fyLinkMenu(e)) return;   // lane login-request-card piece 1: a link of the scheme in the words — «Go» · «Copy link»
     const row = e.target.closest('.iw-row');
     const id = row ? row.dataset.id : (st.cur && st.cur.el.contains(e.target) ? st.cur.id : null);
     const items = id ? model.menuFor(id) : [];

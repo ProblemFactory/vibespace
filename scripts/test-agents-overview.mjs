@@ -20,16 +20,28 @@ import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, CHROME_STORE, endRootedProcesses } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(new URL('../server.js', import.meta.url));
 const repo = process.cwd();
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
 const [PORT, CDP_PORT] = await freePorts(2); // per-process (scripts/scratch.mjs) — fixed ports collided across concurrent gates
-const wt = scratch('agentsov-test'), fakeHome = scratch('agentsov-home');
+const wt = scratch('agentsov-test'), fakeHome = scratch('agentsov-home'), chromeDir = scratch('agentsov-chrome');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failed = 0;
-const check = (n, c) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}`); } };
+const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + e : ''}`); } };   // + the detail (the EXCLUDED package: a red names what it saw)
+// the stop is installed BEFORE the worktree add: a signal during the add, the copy or the build no longer kills the suite outright — Node
+// holds it and the stop runs at the first await after them (or at exit, when the signal reached the build's child too); a SIGKILL first still wins
+let srv = null, chrome = null, cleaned = false;
+const cleanup = () => {
+  if (cleaned) return; cleaned = true;
+  try { chrome?.kill('SIGKILL'); } catch {}; try { srv?.kill('SIGKILL'); } catch {}
+  for (const r of [wt, fakeHome, chromeDir]) { try { endRootedProcesses(r); } catch {} }
+  try { execSync(`git worktree remove --force ${wt}`, { stdio: 'ignore' }); } catch {}
+  for (const d of [chromeDir, fakeHome]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
+};
+process.on('exit', cleanup);
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });   // a gate's timeout ends it too
 try { execSync(`git worktree remove --force ${wt}`, { stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
@@ -50,9 +62,15 @@ fs.mkdirSync(cacheDir, { recursive: true });
 const mkSnap = (o = {}) => ({ fiveHour: { utilization: 0.42, status: 'allowed', resetsAt: Math.floor(Date.now() / 1000) + 3600 }, sevenDay: { utilization: 0.87, status: 'allowed', resetsAt: Math.floor(Date.now() / 1000) + 86400 }, scopedWeekly: [], overallStatus: 'allowed', fetchedAt: Date.now(), ...o });
 fs.writeFileSync(path.join(cacheDir, '__global__.json'), JSON.stringify(mkSnap()));
 fs.writeFileSync(path.join(cacheDir, 'host-host-deadbeef-sub-abcdefabcdef.json'), JSON.stringify({ ...mkSnap(), name: 'HeldAcct' }));
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1' }, stdio: 'ignore' });
-const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--window-size=1280,1000', `--user-data-dir=${scratch('agentsov-chrome')}`, 'about:blank'], { stdio: 'ignore' });
-process.on('exit', () => { try { chrome.kill('SIGKILL'); } catch {}; try { srv.kill('SIGKILL'); } catch {}; try { execSync(`git worktree remove --force ${wt}`, { stdio: 'ignore' }); } catch {}; try { fs.rmSync(scratch('agentsov-chrome'), { recursive: true, force: true }); } catch {}; try { fs.rmSync(fakeHome, { recursive: true, force: true }); } catch {} });
+// the hub's env: a scratch HOME, and none of the machine user's XDG stores or session bus (its children resolve them under the
+// scratch home); XDG_RUNTIME_DIR stays — the tree's own socket rules read it, keyed by the scratch root (src/agentd/client.js)
+const { DBUS_SESSION_BUS_ADDRESS: _hb, XDG_CONFIG_HOME: _hc, XDG_DATA_HOME: _hd, XDG_CACHE_HOME: _hk, XDG_STATE_HOME: _hs, ...hubBase } = process.env;
+srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...hubBase, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1' }, stdio: 'ignore' });
+// (the EXCLUDED package's verdict, the kill law — as test-window-menu: its Chrome asks no keyring and keeps its files under its
+// profile; the login terminal the add-subscription leg opens and every other process it started end BY IDENTITY at any exit)
+fs.mkdirSync(chromeDir, { recursive: true });
+const { DBUS_SESSION_BUS_ADDRESS: _bus, XDG_CONFIG_HOME: _cfg, ...chromeEnv } = process.env; chromeEnv.HOME = chromeDir;
+chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--password-store=basic', '--window-size=1280,1000', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore', env: chromeEnv });
 for (let i = 0; i < 40; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); break; } catch { await sleep(250); } }
 
 // ── server-side asserts ──
@@ -232,21 +250,27 @@ check('overview door lands on the Agents rail panel', st4.agentsActive);
 // Drive the REAL flow: method → name dialog → confirm → a terminal window.
 const winsBefore = await evalJs(`app.wm.windows.size`);
 await evalJs(`(() => { app._addSubscription(); return 1; })()`);
-await sleep(500);
-const dlgOk = await evalJs(`(() => {
-  const ovs = [...document.querySelectorAll('.dialog-overlay')];
-  const ov = ovs[ovs.length - 1];
-  const inp = ov?.querySelector('input, textarea');
-  if (!inp) return false;
-  inp.value = 'Smoke Sub';
-  inp.dispatchEvent(new Event('input', { bubbles: true }));
-  // the confirm button carries the confirmText ('Continue') — click by text,
-  // never by class (the shell's button classes are not part of this contract)
-  const btn = [...ov.querySelectorAll('button')].find((b) => /continue|确定|OK/i.test(b.textContent || ''));
-  btn?.click();
-  return !!btn;
-})()`);
-check('add-subscription name dialog confirmed', dlgOk);
+// the EXCLUDED package (2026-11-17, its runs alone on the test machine): a FORM dialog is hosted by the form host — a sheet or
+// a window's root, never the old bare .dialog-overlay — and it may MOUNT LATER than a fixed pause (a form queued behind
+// another, a window the host opens): the suite waits, bounded (8 s), for the dialog's own id (input-dialog-<n>, src/lib/utils.js
+// _modalShell) with an input in it, and when none comes it SAYS what the page held
+const dlgOk = await evalJs(`new Promise((res) => { const t0 = Date.now(); (function look() {
+  const ovs = [...document.querySelectorAll('[id^="input-dialog-"]')];
+  // its run alone at 6ab4d2475: «input-dialog 2» — the host's window root and the form carry the same id prefix, and the LAST
+  // one holds no input: take the newest one that HOLDS the input
+  const ov = ovs.slice().reverse().find((o) => o.querySelector('input, textarea'));
+  const inp = ov && ov.querySelector('input, textarea');
+  if (inp) {
+    inp.value = 'Smoke Sub';
+    inp.dispatchEvent(new Event('input', { bubbles: true }));
+    // the confirm button carries the confirmText ('Continue') — click by text, never by class
+    const btn = [...ov.querySelectorAll('button')].find((b) => /continue|确定|OK/i.test(b.textContent || ''));
+    if (btn) btn.click();
+    return res(btn ? true : 'an input dialog with no Continue button');
+  }
+  if (Date.now() - t0 > 8000) return res('no name dialog in 8 s — input-dialog ' + ovs.length + ' [' + ovs.map((o) => o.tagName.toLowerCase() + '.' + String(o.className || '').split(' ').join('.')).join(', ') + '] · .dialog-overlay ' + document.querySelectorAll('.dialog-overlay').length + ' · .dialog-form ' + document.querySelectorAll('.dialog-form').length + ' · windows ' + app.wm.windows.size);
+  setTimeout(look, 200); })(); })`);
+check('add-subscription name dialog confirmed', dlgOk === true, String(dlgOk));
 await sleep(2500);
 const addRes = await evalJs(`(() => ({
   wins: app.wm.windows.size,
@@ -258,6 +282,8 @@ const realErrors = jsErrors.filter((e) => !/favicon|net::|Failed to load resourc
 check('no JS errors', realErrors.length === 0);
 if (realErrors.length) console.error('   errors:', realErrors.slice(0, 5));
 const shot = await cdp('Page.captureScreenshot', { format: 'png', clip: { x: 0, y: 0, width: 460, height: 1000, scale: 1.5 } });
-fs.writeFileSync('/tmp/agents-overview.png', Buffer.from(shot.data, 'base64'));
+// a picture only when one is asked for (AO_SHOT=<path>) — a fixed /tmp name was left behind by every run (the test machine's
+// LEFTOVERS named it)
+if (process.env.AO_SHOT) fs.writeFileSync(path.resolve(process.env.AO_SHOT), Buffer.from(shot.data, 'base64'));
 console.log(failed === 0 ? 'ALL PASS' : `${failed} FAILED`);
 process.exit(failed ? 1 : 0);

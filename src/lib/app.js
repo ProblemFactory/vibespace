@@ -1,6 +1,8 @@
 import { ThemeManager, THEMES, BUILTIN_THEMES } from './themes.js';
 import { waitServerReady, reasonOf } from './boot-ladder.js';
 import { staleLook, staleNotice, heldWords, TYPING_QUIET_MS } from './stale-watch.js'; // lane think-tools-phone: a stale page that gave up checks again
+import { registerInternalLinks } from './internal-link-door.js'; // lane login-request-card piece 1: the renderers' door
+import { targetOf as linkTargetOfPage, pressLink, linkMenu } from './internal-link-ui.js'; // lane login-request-card piece 1: THE press of a link of the scheme (the page's own doors)
 import { awaitBootReady, bootDeps, startingLine, retryLine } from './boot-splash.js';
 import { installPluginClient } from './plugin-client.js';
 import { installKeybindings, registerKeybinding, runCommand } from './contributions.js';
@@ -20,12 +22,12 @@ import { LayoutManager } from './layout.js';
 import { ChatView } from './chat-view.js';
 import { createReconnectQueue } from './reconnect-queue.js';
 import { Resizer } from './resizer.js';
-import { anchorFixedPopup, drawnAnchorRect, api, configureToasts, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog, applyUiPrefs, uiScale, setInstanceUrl, markTyped, wasTyped, announceModal } from './utils.js';
+import { anchorFixedPopup, drawnAnchorRect, api, configureToasts, registerSettingLinks, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog, applyUiPrefs, uiScale, setInstanceUrl, markTyped, wasTyped, announceModal } from './utils.js';
 import { t, tc, resolveLang } from './i18n.js';
 import { stampAt as when, clockOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { themeWord, modelOptions } from './value-words.js'; // lane ui-language: a theme key in the reader's words (the walk's window-manager-9)
 import { reportLine, refreshLabel, signInLabel, refusalText, rowsSig, opensFor, notInReport } from './cli-models-words.js'; // PURE (lane agy-models-report): a CLI that reports its own models — the menu's line, its door, the explicit row
-import { agoText as agoWords } from './user-todos-row.js'; // the client's relative-time helper («5min ago»), in the device's words
+import { agoText as agoWords, registerSettingFacts } from './user-todos-row.js'; // the client's relative-time helper («5min ago»), in the device's words
 import { installManageAgents } from './manage-agents.js';
 import { openAccountModelsDialog } from './account-models.js'; // q-053 §3 (lane models-at-session): a provider with no models — the door to its account's models
 import { MENU_EMPTY } from '../model-providers.js'; // PURE: the one line an empty menu says
@@ -40,7 +42,7 @@ import { installNewSessionForm } from './new-session-form.js'; // lane new-sessi
 import { createPlan } from './new-session-model.js'; // PURE: what Create sends (lane new-session-layout-v3-build: Agent | Terminal + the harness's own terminal UI → the road + the v2 payload)
 import { getAvailableFonts } from './terminal.js';
 import { SettingsManager } from './settings.js';
-import { SETTINGS_SCHEMA, registerHarnessSettings } from './settings-schema.js';
+import { SETTINGS_SCHEMA, registerHarnessSettings, isSettingKey } from './settings-schema.js';
 import { SettingsUI } from './settings-ui.js';
 import { openExternalEditor, closeExternalEditor } from './external-editor.js';
 import { CommandMode } from './command-mode.js';
@@ -90,13 +92,13 @@ import { installBrowserSwitcher } from './browser-switcher.js'; // agent browser
 import { installBrowserTrace } from './browser-trace-view.js'; // agent browser P5 (§4.5/§8 step 3): the profiles panel (the trace surfaces install themselves)
 import { installBrowserReplay } from './browser-replay-window.js'; // 2026-09-27: a browser session's replay (window type browser-replay)
 import { permissionModeOptions } from './permission-mode-labels.js'; // lane L: permission modes in plain words, the raw value as a hint
-import { BACKEND_META, createBackendIconHtml, getSessionKey, pickAgentIdentity, settingsPrefixFor, effortLabel, effortOptions, hasEffortMenu, uiRow, noteModelCatalog, worktreeCapsFor, backendFeatureCaps, billingRow, terminalOnly, accountDefaultsOf } from './agent-meta.js';
+import { BACKEND_META, createBackendIconHtml, getSessionKey, pickAgentIdentity, settingsPrefixFor, effortLabel, effortOptions, hasEffortMenu, uiRow, noteModelCatalog, worktreeCapsFor, backendFeatureCaps, billingRow, terminalOnly, accountDefaultsOf, accountRowsOf } from './agent-meta.js';
 import { sessionGivenName } from '../session-name.js'; // lane session-title-record: THE name ladder's given rungs (the window title)
 import { noteVoicePlugins, followFocus } from './voice-input.js'; // lane voice-everywhere: every microphone follows the voice plugin (absent when off); lane voice-follows-focus: dictation follows the focus
 import { enterSubmits } from './chat-enter-keys.js';
 import { placeWarmthChip } from './warmth-chrome.js'; // lane cache-warmth-band (q-059 r1b): the prompt-cache warmth summary chip follows For-you like the lock chip
-import { initVault, maybeNagVault, unlockFirst, placeVaultChip } from './vault-unlock.js'; // lane vault-e2e-password: the unlock modal after every start, the setup ask until set (lane vault-locked-loud: the ⚙ press unlocks first)
-import { insideFolder } from '../task-membership.js'; // PURE (lane open-task-binds): THE Task Group folder rule (a folder includes itself)
+import { initVault, listenVaultDoor, maybeNagVault, unlockFirst, placeVaultChip } from './vault-unlock.js'; // lane vault-e2e-password: the unlock modal after every start, the setup ask until set (lane vault-locked-loud: the ⚙ press unlocks first)
+import { insideFolder, membershipCwds } from '../task-membership.js'; // PURE (lane open-task-binds): THE Task Group folder rule (a folder includes itself); B-df5f: the page's cwds of a row
 
 const BACKEND_SESSION_OPTIONS = {
   claude: {
@@ -224,6 +226,36 @@ class App {
       getSeconds: () => this.settings.get('taskbar.toastSeconds'),
       getAnchor: () => document.getElementById('taskbar-user-todos'),
     });
+    // lane setting-doors pick 1: a toast's words (a server notice, a refusal) draw a `vibespace://settings/<key>` naming a known
+    // row as a link to it — THE door, openSettingAt; every other word stays text
+    registerSettingLinks({ has: isSettingKey, open: (key) => this.openSettingAt(key) });
+    // lane login-request-card piece 1: THE door a renderer asks for a link to a conversation / desktop (what the page has, the press, Go · Copy link)
+    registerInternalLinks({ targetOf: (kind, ref) => linkTargetOfPage(this, kind, ref), press: (kind, ref, at) => pressLink(this, kind, ref, at), menu: (kind, ref, at, flash) => linkMenu(this, kind, ref, at, flash) });
+    // lane setting-doors pick 2: THE LIVE FACTS an agent's proposed change is drawn against (user-todos-row.js registerSettingFacts) —
+    // the row's value NOW (this settings store; a hub's «moved» answer to a press is noted until the store hears the row move) and its
+    // standing HOLD (GET /api/setting-holds at boot and every reconnect, then every `setting-holds` broadcast). A change of either
+    // redraws the For-you rows on the snapshot they hold; a change of the holds redraws an open Settings window too (its held line)
+    this._settingHolds = [];
+    const saidNow = new Map();   // key → the value the hub answered a press with (until the store says the row moved)
+    const proposable = Object.keys(SETTINGS_SCHEMA).filter((k) => SETTINGS_SCHEMA[k] && SETTINGS_SCHEMA[k].proposable === true);
+    registerSettingFacts({
+      value: (key) => (saidNow.has(key) ? saidNow.get(key) : this.settings.get(key)),
+      holdOf: (key) => this._settingHolds.find((h) => h && h.key === key) || null,
+      present: (key, v) => { saidNow.set(key, v); try { this._inboxModel?.redraw?.(); } catch { } },
+    });
+    for (const key of proposable) this.settings.on(key, () => { saidNow.delete(key); try { this._inboxModel?.redraw?.(); } catch { } });
+    this._setSettingHolds = (holds) => {
+      const was = this._settingHolds || [];
+      this._settingHolds = Array.isArray(holds) ? holds.filter((h) => h && typeof h.key === 'string') : [];
+      try { this._inboxModel?.redraw?.(); } catch { }
+      // only ENDED holds (a return, End now, a hand change — law B): their held lines leave in place, so a row the owner is typing
+      // in keeps its focus; a new or changed hold redraws the open Settings (its held line and «End now»)
+      const same = (a, b) => a && b && a.value === b.value && a.untilAt === b.untilAt && a.before === b.before;
+      if (this._settingHolds.every((h) => same(h, was.find((x) => x.key === h.key)))) {
+        for (const el of document.querySelectorAll('.settings-row-held[data-held]')) if (!this._settingHolds.some((h) => h.key === el.dataset.held)) el.remove();
+      } else this._settingsUI?.redrawOpen?.();
+    };
+    this._loadSettingHolds = () => fetchJson('/api/setting-holds').then((d) => { if (d && Array.isArray(d.holds)) this._setSettingHolds(d.holds); });
     this.themeManager = new ThemeManager();
     this.ws = new WsManager();
     this.wm = new WindowManager(document.getElementById('workspace'));
@@ -328,6 +360,7 @@ class App {
 
     // Load settings asynchronously (non-blocking — modules use defaults until loaded)
     this.settings.load();
+    this._loadSettingHolds(); // lane setting-doors pick 2: the rows' standing holds (a For-you card's held line, a Settings row's «End now»)
 
     // Sync settings from other clients via WebSocket
     this.ws.onGlobal((msg) => {
@@ -337,8 +370,9 @@ class App {
       if (msg.type === 'custom-themes-updated' && msg.themes) {
         this._applyCustomThemesFromServer(msg.themes);
       }
+      if (msg.type === 'setting-holds' && Array.isArray(msg.holds)) this._setSettingHolds(msg.holds);   // lane setting-doors pick 2: a press, an «End now», a return
       if (msg.type === 'accounts-updated' && Array.isArray(msg.accounts)) {
-        this._accounts = { ...(this._accounts || {}), accounts: msg.accounts, ...accountDefaultsOf(msg) }; // every harness's default field (agent-meta)
+        this._accounts = { ...(this._accounts || {}), accounts: accountRowsOf(msg), ...accountDefaultsOf(msg) }; // every harness's default field (agent-meta) + the providers' rows (lane lg-providers U5)
         // Live-re-render an OPEN Manage Agents surface — without this the
         // roster only updated on the next manual reopen, so adding an account
         // (esp. one never logged in) left the page unchanged (inc-msl890ua).
@@ -394,7 +428,9 @@ class App {
         // server log. Key-deduped server-side, once per boot per issue.
         // i18n (2026-09-28): a notice that carries {key, params} is worded by THIS device's t(); `text` is the English
         // (+ an optional `then: {key}` sentence after it — the pin notices' "Restarting the conversation to apply it.")
-        showToast(msg.i18n && msg.i18n.key ? t(msg.i18n.key, msg.i18n.params || {}) + (msg.i18n.then && msg.i18n.then.key ? ' ' + t(msg.i18n.then.key, msg.i18n.then.params || {}) : '') : msg.text, { type: msg.level >= 2 ? 'error' : undefined });
+        // a param may be WORDS (`{key, params}` — a row's label): said in this language before the sentence fills (lane setting-doors pick 2)
+        const said = (ps) => Object.fromEntries(Object.entries(ps || {}).map(([k, v]) => [k, v && typeof v === 'object' && typeof v.key === 'string' ? t(v.key, v.params || undefined) : v]));
+        showToast(msg.i18n && msg.i18n.key ? t(msg.i18n.key, said(msg.i18n.params)) + (msg.i18n.then && msg.i18n.then.key ? ' ' + t(msg.i18n.then.key, msg.i18n.then.params || {}) : '') : msg.text, { type: msg.level >= 2 ? 'error' : undefined });
       }
       if (msg.type === 'sysinfo-alert') {
         // Event-loop degradation (2.235.0): the "everything is slow but CPU
@@ -430,6 +466,7 @@ class App {
 
     this._setupToolbar();
     this._setupDialogs();
+    this._homeFacts = new Promise((r) => { this._homeFactsSeen = r; }); // B-7959: the answer the tour's first screen counts its steps from
     this._setupWelcome();
     this._setupGlobalSettings();
     this._setupChromeContextMenus();
@@ -553,6 +590,7 @@ class App {
       }
     });
 
+    listenVaultDoor(this); // B-6f65: the vault's door is heard from here on — before /api/home, whatever app.ready waits for
     fetch('/api/home').then(r => {
       if (r.status === 401) { location.href = '/login'; throw new Error('unauthorized'); }
       return r.json();
@@ -562,7 +600,9 @@ class App {
       setHubZone(d.zone);
       setPageZone(pageZone(this)); setStampFormatter(when);   // lane ui-language: every time a surface prints, in the page's zone
       this._authEnabled = !!d.authEnabled;
+      this._settingsUI?.redrawOpen?.();   // lane setting-doors f1: Settings › Spending's «Sign-in is off» line follows the flag (it may have drawn before this answer)
       this._ssoEnabled = !!d.ssoEnabled; // Clerk SSO on → password step/import ignored
+      this._homeFactsSeen?.(true); // B-7959: whether this workspace is protected is known now
       initVault(this); // THE VAULT (lane vault-e2e-password): locked ⇒ the unlock modal now, behind the sign-in this page just passed
       this._repoDir = d.repoDir || null; // server install dir (⚙ self-update)
       this._publicUrlDefault = d.publicUrlDefault || null; // cluster-injected agentd.publicUrl default (settings placeholder)
@@ -588,7 +628,7 @@ class App {
           }
         }
       }
-    }).catch(()=>{});
+    }).catch(() => { this._homeFactsSeen?.(false); }); // B-7959 r2: a failed answer ends the tour's wait at once (never the whole bound)
 
     // Initialize unified state sync (server-persisted, versioned diff broadcast, reconnect recovery)
     initStateSync(this.ws);
@@ -625,6 +665,7 @@ class App {
       // changes made while this tab was disconnected)
       fetchJson('/api/maintenance').then((m) => { if (m) this._renderMaintenance?.(m); }).catch(() => {});
       try { this.settings?.refetch?.(); } catch {}
+      try { this._loadSettingHolds?.(); } catch {} // lane setting-doors pick 2: the holds are a broadcast-only mirror too
       // user-state too (2.223.4 — the userW names/stars/archives blackout):
       // a boot-time fetch that failed during a restart window left the tab
       // permanently stateless; reconnect re-applies the authoritative copy.
@@ -951,7 +992,15 @@ class App {
       hasSessions = (d.sessions || []).length > 0;
     } catch {}
     if (hasSessions) { localStorage.setItem('vs-onboarded', '1'); maybeNagVault(); return; }
+    // B-7959 (the day-one half): the tour's first screen counts its steps from whether this workspace is protected — a fact
+    // only /api/home's answer carries. Drawn before it (/api/sessions answering first, a loaded hub), a protected pod showed
+    // FOUR dots, then three at the next press: a flash on the first screen a new person sees. The first draw waits for that
+    // answer, BOUNDED: a hub that has not answered in 3 s gets the screen with what is known, drawn again ONCE when it answers
+    const known = await Promise.race([this._homeFacts, new Promise((r) => setTimeout(() => r(false), 3000))]);
+    // r2: finished or opened meanwhile (⚙ → Welcome tour, another tab) — never opened a second time over it
+    if (localStorage.getItem('vs-onboarded') || document.getElementById('welcome')?.classList.contains('onboarding')) return;
     this._showOnboarding();
+    if (!known) this._homeFacts.then(() => this._obRedraw?.());
   }
 
   // ── Shared modal shell for the config/password dialogs ──
@@ -1977,7 +2026,7 @@ class App {
           const subs = new Map(); // session cwd inside the folder (the folder itself included — its chip is already pinned above) -> count
           for (const s of this.sidebar?._allSessions || []) {
             if (s.host || !s.cwd) continue;
-            const under = insideFolder(s.cwd, rec) || (s.realCwd && insideFolder(s.realCwd, rec));
+            const under = membershipCwds({ cwd: s.cwd, realCwd: s.realCwd, host: s.host }).some((c) => insideFolder(c, rec)); // ONE copy of the page's rule (B-df5f cure 2)
             if (under) subs.set(s.cwd, (subs.get(s.cwd) || 0) + 1);
           }
           for (const [c, n] of [...subs.entries()].sort((a, b) => b[1] - a[1]))
@@ -2102,6 +2151,9 @@ class App {
         : t('checking {host}…', { host: hostName });
       const uncertainIds = new Set(); // disabled only because the probe hasn't answered
       for (const a of list) {
+        // a THIRD-PARTY provider (lane lg-providers U5 r1): its own words; on another machine it is not offered as usable
+        // (its spawn road runs on this machine only — the create would refuse it)
+        if (a.type === 'provider') { opts.push(onHost ? [a.id, t('{name} (third party)', { name: a.name }) + ' — ' + t('this machine only'), true] : [a.id, t('{name} (third party)', { name: a.name })]); continue; }
         // Pooled pseudo-account: neither an API key (the old else-branch
         // labeled it "— API key …undefined") nor a plain subscription.
         // Local-only by design (directory-symlink mechanics).
@@ -2454,10 +2506,10 @@ class App {
   openChannelSearch(opts) { return openSearchResults(this, opts || {}); }
   /** lane pod-oauth-callback (study 1 L1 / study 2 M2): the Connect an account dialog OPEN ON ONE TYPE — the chat's
    *  «Connect <type>» row (an agent's `vibespace-channels connect <kind>`); the types are the panel's own (`kinds`). */
-  async openChannelConnect(kind, { flowId = null } = {}) {   // B-8edd: `flowId` = the landed sign-in a For-you item names
+  async openChannelConnect(kind, { flowId = null, conversation = null } = {}) {   // B-8edd: `flowId` = the landed sign-in a For-you item names; B-e630: `conversation` {sessionKey, webuiId} — the chat it was opened from (its browser-profile fold)
     const d = await fetchJson('/api/channels?scope=accounts');
     if (!d || d.error) { showToast(t('Channels are not available on this instance'), { type: 'error' }); return null; }
-    return showConnectAccountDialog(this, d.kinds || [], { kind: typeof kind === 'string' ? kind : null, flowId: typeof flowId === 'string' && flowId ? flowId : null });
+    return showConnectAccountDialog(this, d.kinds || [], { kind: typeof kind === 'string' ? kind : null, flowId: typeof flowId === 'string' && flowId ? flowId : null, conversation: conversation && conversation.sessionKey ? conversation : null });
   }
   /** THE For-you window (design-user-inbox-reply §9) — a singleton kind; `{itemId, sessionKey, syncId}`:
    *  select that item / scope to that session; an open window is revealed and re-pointed (a replay never re-points). */
@@ -2472,6 +2524,16 @@ class App {
    *  `openIntegration('lark')` scrolls to and highlights that row; an id that
    *  no longer exists opens the window with nothing highlighted, never throws. */
   openIntegration(id, opts) { return openIntegrationsWindow(this, { focus: id || null, ...(opts || {}) }); }
+  /** A DOOR TO ONE SETTING (lane setting-doors pick 1 — the owner: «…提供一个 vibespace://settings/ 之类的链接可以让我点了之后直通
+   *  对应的选项来改»): THE ONE door every `vibespace://settings/<key>` link opens through — the chat's setting span
+   *  (chat-renderers setupLinkHandler), a For-you item's words (user-todos-actions openLink, kind `setting`) and a toast
+   *  (utils registerSettingLinks). Settings opens ON that row (settings-ui open({ focusKey })): its section in view, its nav
+   *  group unfolded, an advanced / unused row drawn for this open, the row marked; a phone shows that section alone; an
+   *  open Settings window moves there. A key that is no row opens Settings as the ⚙ does. A LINK OPENS, IT NEVER WRITES:
+   *  no value rides it and nothing here touches a setting. */
+  openSettingAt(key) {
+    return this._settingsUI?.open(isSettingKey(key) ? { focusKey: key } : {});
+  }
 
   // Diagnostics report: renders the local telemetry summary (client errors,
   // boot crashes, feature usage) as a static HTML page in the embedded
@@ -2485,7 +2547,7 @@ class App {
   // list fresh between refreshes.
   refreshAccounts() {
     return fetchJson('/api/accounts').then(d => {
-      if (d) this._accounts = { accounts: d.accounts || [], ...accountDefaultsOf(d), subscription: d.subscription || {}, cliKey: d.cliKey || {} }; // every harness's default field (agent-meta)
+      if (d) this._accounts = { accounts: accountRowsOf(d), ...accountDefaultsOf(d), subscription: d.subscription || {}, cliKey: d.cliKey || {} }; // every harness's default field (agent-meta)
       if (d?.hostNames) this._hostNamesKnown = d.hostNames; // id→name for chips (2.244.1)
       return this._accounts;
     }).catch(() => this._accounts);

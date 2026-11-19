@@ -788,9 +788,10 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   /** A launcher run directly (the local rung's argv); `killAfter` bounds a CONTROL that would hang (our own launcher —
    *  never an install: the control's install is `echo`). → {code, out, ms, killed}; the promise carries `.child`. */
   // lane fleet-image-2 (the fleet e2e: this suite HUNG on a pod whose pid 1 never reaped orphans): the bound kills the
-  // launcher's WHOLE process group — its `tail --pid` follower included. Killing the shell alone left that `tail`
-  // holding the pipe, so the result (read at the pipe's close) never came while the followed runner was a zombie
-  // (`tail --pid` reads a zombie as alive). The runner is untouched: `setsid` puts it in its own session.
+  // launcher's WHOLE process group — its follower included (before B-6c46 a long-lived tail; now the launcher's own loop and
+  // its short children). Killing the shell alone once left that tail holding the pipe, so the result (read at the pipe's close)
+  // never came while the followed runner was a zombie (a zombie reads as alive). The runner is untouched: `setsid` puts it in
+  // its own session.
   const launch = (Mod, argv, stateDir, mode = 'start', { env = process.env, killAfter = 0, polls = false } = {}) => {
     const l = Mod.installLauncherArgv(argv, { stateDir, mode }); let out = ''; const t = Date.now(); let killed = false;
     const pc = polls ? withPolls(env) : null; // `polls: true` ⇒ the result counts the polls this launcher sat out
@@ -827,11 +828,16 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   const PID_WAIT = waitOf(/\[ \$n -lt (\d+) \] && \[ -e "\/proc\/\$b" \]; do sleep ([0-9.]+); n=\$\(\(n\+1\)\); done/, 'pidfile wait (bounded by the runner\'s life, r5 L4)');
   const LOCK_WAIT = waitOf(/\[ \$n -le (\d+) \] \|\| \{ echo "[^"\n]*"; exit 125; \}\n {4}sleep ([0-9.]+)\n/, 'lock wait');
   const AT_ONCE_MS = PID_WAIT.capMs / 2;
+  // B-6c46 cure: the launcher's ONE check at its top that sleep takes a fraction is no poll — the counter below skips that
+  // one call, its argument read from the module (never a literal here) and told apart from every wait's poll
+  const FRACTION = (M.INSTALL_LAUNCHER.match(/^sleep ([0-9.]+) 2>\/dev\/null \|\| \{ echo "[^"\n]*a fraction of a second/m) || [])[1] || null;
+  ok(!!FRACTION && Number(FRACTION) * 1000 !== PID_WAIT.pollMs && Number(FRACTION) * 1000 !== LOCK_WAIT.pollMs && M.INSTALL_LAUNCHER.split('\n').filter((l) => l.startsWith(`sleep ${FRACTION} 2>`)).length === 1,
+    `CONTROL setup: the launcher's fraction check is spelled once at its top, its argument (${FRACTION}) no wait's poll — the poll counter skips that one call`);
   /** A `sleep` that appends one line per call to $VS_POLLS, then execs the real one (the wait itself unchanged). On a
    *  launcher's path the only sleepers are its wait loops (and the runner's one /proc retry), so the count is how many
-   *  polls it sat out — an upper bound on any one loop's. */
+   *  polls it sat out — an upper bound on any one loop's. The fraction check's own call is not counted (above). */
   const pollDir = path.join(root, 'bin-polls'); fs.mkdirSync(pollDir, { recursive: true });
-  fs.writeFileSync(path.join(pollDir, 'sleep'), `#!/bin/sh\n[ -z "$VS_POLLS" ] || echo "$*" >> "$VS_POLLS"\nexec ${realBin('sleep')} "$@"\n`, { mode: 0o755 });
+  fs.writeFileSync(path.join(pollDir, 'sleep'), `#!/bin/sh\n[ -z "$VS_POLLS" ] || [ "$*" = '${FRACTION}' ] || echo "$*" >> "$VS_POLLS"\nexec ${realBin('sleep')} "$@"\n`, { mode: 0o755 });
   let pollSeq = 0;
   const withPolls = (env) => { const f = path.join(root, `polls-${++pollSeq}`); return { env: { ...env, PATH: `${pollDir}:${env.PATH || ''}`, VS_POLLS: f }, polls: () => linesIn(f) }; };
   const slotLock = (st, which) => { try { return fs.readFileSync(path.join(st, M.INSTALL_FILES[which]), 'utf8').trim().split(/\s+/).slice(2).join(' ') || null; } catch { return null; } };
@@ -855,7 +861,7 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   // to everything the launcher runs, minus the one tool)
   const binWithout = (tag, missing) => {
     const dir = path.join(root, `bin-${tag}`); fs.mkdirSync(dir, { recursive: true });
-    for (const b of ['sh', 'sed', 'cut', 'tail', 'sleep', 'mkdir', 'rm', 'cat', 'mv', 'date', 'touch', 'sha1sum', 'setsid', 'flock', 'id']) { const src = realBin(b); if (b !== missing && src && !fs.existsSync(path.join(dir, b))) fs.symlinkSync(src, path.join(dir, b)); }
+    for (const b of ['sh', 'sed', 'cut', 'tail', 'head', 'wc', 'sleep', 'mkdir', 'rm', 'cat', 'mv', 'date', 'touch', 'sha1sum', 'setsid', 'flock', 'id']) { const src = realBin(b); if (b !== missing && src && !fs.existsSync(path.join(dir, b))) fs.symlinkSync(src, path.join(dir, b)); }   // B-6c46: + head, wc (the launcher's own follow)
     return { PATH: dir, HOME: root, XDG_RUNTIME_DIR: XDG };
   };
   const envNoSetsid = binWithout('nosetsid', 'setsid'), envNoFlock = binWithout('noflock', 'flock');
@@ -870,7 +876,7 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   // runs (the pidfile's identity needs it; the launcher needs no identity of its own since r4 — the lock is the
   // kernel's). A `cut` that prints nothing stands in for an unreadable /proc/<pid>/stat.
   const noProc = path.join(root, 'bin-noproc'); fs.mkdirSync(noProc, { recursive: true });
-  fs.writeFileSync(path.join(noProc, 'cut'), `#!/bin/sh\ncase "$*" in *-f20*) cat > /dev/null ;; *) exec ${realBin('cut')} "$@" ;; esac\n`, { mode: 0o755 }); // only the starttime field (-f20) reads nothing
+  fs.writeFileSync(path.join(noProc, 'cut'), `#!/bin/sh\ncase "$*" in *-f20*) cat > /dev/null ;; *) exec ${realBin('cut')} "$@" ;; esac\n`, { mode: 0o755 }); // only the RUNNER's starttime read (-f20) reads nothing; the launcher's own read (-f1,20, B-6c46) is untouched
   const envNoProc = { PATH: `${noProc}:/usr/bin:/bin`, HOME: root, XDG_RUNTIME_DIR: XDG };
   const stL8 = path.join(root, 'st-l8-launch');
   const l8l = await launch(M, ['sh', '-c', 'echo never'], stL8, 'start', { env: envNoProc, killAfter: 3000, polls: true });
@@ -972,13 +978,14 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
     const pA = launch(M, heldInstall(runsKl, goKl, 4), stKl);
     const runnerPid = await until(() => runnerOf(stKl), 5000, 10);
     const K = lockOf(stKl);
-    // the launcher closes its copy on the line after the fork and only then starts `tail`: read its fd 9 once tail runs
+    // the launcher closes its copy on the line after the fork and only then follows: read its fd 9 once it is in its follow
+    // loop (B-6c46: the launcher follows by its own offset loop — its `sleep` child — never a long-lived follower process)
     const kidsOf = (pid) => { try { return fs.readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf8').trim().split(/\s+/).filter(Boolean).map(Number); } catch { return []; } };
     const commOf = (pid) => { try { return fs.readFileSync(`/proc/${pid}/comm`, 'utf8').trim(); } catch { return ''; } };
-    const tailed = !!(await until(() => kidsOf(pA.child.pid).some((k) => commOf(k) === 'tail'), 5000, 10));
-    const launcherFd9 = tailed ? fd9Of(pA.child.pid) : 'no tail yet';
-    const tailA = kidsOf(pA.child.pid).find((k) => commOf(k) === 'tail') || null;
-    const gone = new Promise((r) => pA.child.once('exit', r)); pA.child.kill('SIGKILL'); await gone; // its orphaned `tail` keeps the pipe open until the runner ends: wait for the EXIT, not the close
+    const inLoop = !!(await until(() => fs.existsSync(path.join(stKl, M.INSTALL_FILES.pid)) && kidsOf(pA.child.pid).some((k) => commOf(k) === 'sleep'), 5000, 10));
+    const launcherFd9 = inLoop ? fd9Of(pA.child.pid) : 'not in its follow loop yet';
+    const tailA = null;   // B-6c46: no follower process outlives the launcher (its loop's children live at most 0.2 s)
+    const gone = new Promise((r) => pA.child.once('exit', r)); pA.child.kill('SIGKILL'); await gone; // wait for the EXIT, not the close (a short child of its loop may hold the pipe a moment)
     await new Promise((r) => setTimeout(r, 50));
     const after = { runnerAlive: D.pidAlive(runnerPid), runnerFd9: fd9Of(runnerPid), held: !lockFree(K) };
     const pB = launch(M, ['sh', '-c', `echo "second-$$" >> '${runsKl}'; exit 9`], stKl, 'start', { killAfter: 8000 });
@@ -986,12 +993,11 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
     fs.writeFileSync(goKl, ''); // the first install ends only now — after the second start chose to follow it
     const b = await pB;
     // lane fleet-image-2: the runner, orphaned by the launcher's kill, is reparented to pid 1 — a pid 1 that never reaps
-    // leaves it a ZOMBIE that `tail --pid` (and the launcher's starttime check) read as alive, so the follower above
-    // could never end; read the runner's state so that machine is NAMED, never a hang or an unexplained red
+    // leaves it a ZOMBIE (before B-6c46 the launcher's starttime check read it as alive, and its tail did too, so the follower
+    // could never end; now the recorded exit ends the follow and a zombie counts as gone — no wait on it); read the runner's
+    // state so that machine is NAMED
     const runnerState = (() => { try { const st = fs.readFileSync(`/proc/${runnerPid}/stat`, 'utf8').replace(/^.*\) /, '').split(' '); return { state: st[0], ppid: Number(st[1]), parent: commOf(Number(st[1])) }; } catch { return null; } })();
-    // pA's orphaned follower: gone by itself once the runner is reaped; on a machine that never reaps it follows forever
-    const tailLeft = tailA && commOf(tailA) === 'tail' ? tailA : null;
-    if (tailLeft) { try { process.kill(tailLeft, 'SIGKILL'); } catch { } }
+    const tailLeft = tailA;   // B-6c46: no follower process outlives the launcher (kept for the result's shape)
     return { K, runnerPid, launcherFd9, ...after, b: { code: b.code, killed: b.killed, followsIt: new RegExp(`already running on this machine \\(pid ${runnerPid}\\)`).test(b.out), ms: b.ms }, runnerState, tailLeft, runs: (() => { try { return fs.readFileSync(runsKl, 'utf8').trim().split('\n'); } catch { return []; } })(), freeAfter: lockFree(K) };
   })();
   // (r4) a lock held by a process that is NOT a recorded install (no pidfile): a start waits on it — never runs beside
@@ -1114,7 +1120,7 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   const tNat = Date.now();
   const [nat, m1b, wide, killed5, kl, hw, l3, l1, l4, f5ctl, l5pre, lfpre, l8pre, grd, ropre] = await Promise.all([
     batches(40, 8, (i) => five(M, `nat-${i}`)).then((r) => { r.ms = Date.now() - tNat; return r; }),
-    m1(AccPreM1, 'pre', M1_PRE_MS),
+    Promise.resolve(null),   // B-6c46: the pre-M1 control's old slot — re-planted below (m1Refuse)
     batches(20, 10, (i) => five(M, `wide-${i}`, { env: envWide })),
     batches(10, 5, (i) => five(M, `killed-${i}`, { prep: killedPrev })),
     killedLauncher, heldLeg, l3Leg, l1Leg, l4Leg,
@@ -1126,11 +1132,27 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
     asRoot ? Promise.resolve(null) : launch(AppsNoRoCheck, ['sh', '-c', 'echo never'], stRo, 'start', { killAfter: 3000 }),
   ]);
   ok(nat.length === 40 && oneEach(nat), `(r3 M4 / r4) five concurrent starts on an empty state dir, 40 trials (8 at a time, beside every other leg) ⇒ ONE runner in every trial (runners ${JSON.stringify(hist(nat))}); the other four follow it (${nat.reduce((a, r) => a + r.followed, 0)} follows of 160 — each install runs until all four follow) and all answer its exit 3; the lock free after each (${nat.ms} ms)`, nat.filter((r) => !oneEach([r])).slice(0, 3));
-  ok(m1b.err === 'install_timeout' && m1b.ms >= M1_PRE_MS - EARLY_MS, `CONTROL: the pre-fix launcher follows the stale pid — install_timeout after ${m1b.ms} ms (its ${M1_PRE_MS} ms deadline) for an install that ended at once`, m1b);
+  // (M1, re-planted for B-6c46: the follow now ends on the exit file, so a stale pid can no longer be followed until a
+  // deadline) a stale pidfile naming a LIVE unrelated pid (this process, a wrong starttime) + a runner that REFUSES (its lock
+  // fd closed: envNoFd9): the fix answers 125 «did not start»; the pre-M1 copy keeps the stale pid, ends its follow on `gone`
+  // at once and answers 199 «ended without recording its exit». m1b (the old control's slot in the batch) is unused.
+  void m1b; void AccPreM1; void M1_PRE_MS;
+  const AppsPreM1 = MUT.load('src/install-slot.js', appsSrc.replace(m1Reset, '\n').replace(m1Verify, "  '  r=$pid;',\n"), 'm1pre-mod');
+  const m1Refuse = async (Mod, tag) => {
+    const st = path.join(root, `st-m1r-${tag}`); fs.mkdirSync(st, { recursive: true }); fs.writeFileSync(path.join(st, M.INSTALL_FILES.pid), `${process.pid} 1\n`);
+    const r = await launch(Mod, ['sh', '-c', 'echo never'], st, 'start', { env: envNoFd9, killAfter: 8000 });
+    let log = ''; try { log = fs.readFileSync(path.join(st, M.INSTALL_FILES.log), 'utf8'); } catch { }
+    return { ...r, refused: /does not hold the install lock/.test(log) };
+  };
+  const m1rFix = await m1Refuse(M, 'fix'), m1rPre = await m1Refuse(AppsPreM1, 'pre');
+  ok(m1rFix.refused && m1rFix.code === 125 && /did not start/.test(m1rFix.out) && !/never/.test(m1rFix.out), '(r3 M1, B-6c46) a stale pidfile naming a LIVE unrelated pid + a runner that refused ⇒ 125 «did not start» — the stale pid never followed', m1rFix);
+  ok(m1rPre.refused && m1rPre.code === 199 && /without recording its exit/.test(m1rPre.out), 'CONTROL: the pre-M1 launcher (no pid reset, no verify) — its plant held (the runner refused) — follows the stale pid and answers 199 «ended without recording its exit» (red)', m1rPre);
   ok(wide.length === 20 && oneEach(wide), `(r4) the same over 20 trials with the windows WIDENED (setsid +0.3 s, flock +0–60 ms) ⇒ ONE runner in every trial (runners ${JSON.stringify(hist(wide))}), all answer exit 3`, wide.filter((r) => !oneEach([r])).slice(0, 3));
   ok(killed5.length === 10 && oneEach(killed5) && killed5.every((r) => r.held && r.freed && r.firstRunMs !== null && r.firstRunMs < LOCK_WAIT.capMs / 2), `(r4) a previous install SIGKILLed mid-run, 10 trials (its runner held the lock — fd 9 → the lock file — until the kill: ${killed5.filter((r) => r.held).length}/10; released by the kernel at the kill: ${killed5.filter((r) => r.freed).length}/10) ⇒ five starts ⇒ ONE runner, started at once (first run ${Math.min(...killed5.map((r) => r.firstRunMs))}–${Math.max(...killed5.map((r) => r.firstRunMs))} ms after the starts, < ½ × the ${LOCK_WAIT.capMs} ms lock wait a start sits out when the lock stays held — the kernel released the dead holder's lock; nothing waited)`, killed5.filter((r) => !oneEach([r]) || !(r.firstRunMs < LOCK_WAIT.capMs / 2)).slice(0, 3));
-  if (kl.b.killed && kl.runnerState && kl.runnerState.state === 'Z') console.log(`  - SKIP (r4) the LAUNCHER SIGKILLed mid-install, followed by a second start: this machine does not reap orphans — the runner ${kl.runnerPid} ended (its exit is recorded: the lock is ${kl.freeAfter ? 'free' : 'held'}) but stays a ZOMBIE under pid ${kl.runnerState.ppid} (${kl.runnerState.parent || '?'}), which \`tail --pid\` reads as alive, so the follower cannot end (bounded at ${kl.b.ms} ms and killed with its group${kl.tailLeft ? `; the first launcher's orphaned follower ${kl.tailLeft} killed too` : ''}). Run it where pid 1 reaps (an init such as tini, or systemd)`);
-  else ok(kl.launcherFd9 === null && kl.runnerAlive && kl.runnerFd9 === kl.K && kl.held && kl.b.followsIt && kl.b.code === 4 && kl.runs.length === 1 && /^run-/.test(kl.runs[0]) && kl.freeAfter, `(r4) the LAUNCHER SIGKILLed mid-install: its runner lives on HOLDING the lock (/proc/${kl.runnerPid}/fd/9 → the lock file; the launcher had closed its own copy) and a concurrent start follows it (answered its exit 4 in ${kl.b.ms} ms) — never a second runner; the lock free once it ended`, kl);
+  // B-6c46: on a machine that never reaps orphans the runner stays a ZOMBIE; the second start's follow now ends on the recorded
+  // exit, and the zombie counts as gone (the cure: no wait on it), so its bound firing there is a hang — red, never the old SKIP
+  ok(!(kl.b.killed && kl.runnerState && kl.runnerState.state === 'Z'), '(B-6c46) the second start never hangs behind a zombie runner: a recorded exit ends its follow', { killed: kl.b.killed, runnerState: kl.runnerState });
+  ok(kl.launcherFd9 === null && kl.runnerAlive && kl.runnerFd9 === kl.K && kl.held && kl.b.followsIt && kl.b.code === 4 && kl.runs.length === 1 && /^run-/.test(kl.runs[0]) && kl.freeAfter, `(r4) the LAUNCHER SIGKILLed mid-install: its runner lives on HOLDING the lock (/proc/${kl.runnerPid}/fd/9 → the lock file; the launcher had closed its own copy) and a concurrent start follows it (answered its exit 4 in ${kl.b.ms} ms) — never a second runner; the lock free once it ended`, kl);
   ok(hw.code === 3 && hw.runners === 1 && hw.ranAfterHolder, `(r4) a lock held by a process that is no recorded install ⇒ a start WAITS (never runs beside it) and runs only once the holder has exited (${hw.gap} ms after the holder's own end stamp, written before it released; answered in ${hw.waitedMs} ms)`, hw);
   ok(l3.same.out.every((x) => x.code === 0) && l3.same.locks.length === 1 && l3.same.locks[0] === lockOf(l3.same.st) && path.dirname(l3.same.locks[0]) === LOCKROOT && l3.same.stateLock && l3.same.stateLock.lock === l3.same.locks[0] && !l3.same.locks[0].startsWith(root + '/'), `(r5 L3) the lock is named by the UID, never the environment: $XDG_RUNTIME_DIR a scratch dir, unset, or naming a gone dir ⇒ ONE lock path on one state dir (${l3.same.locks[0]}; the exit file and installState record it) — local storage, never inside a state dir`, l3.same);
   ok(l3.ctl.locks.length > 1, `CONTROL: the r4 line (T=\${XDG_RUNTIME_DIR:-/tmp}) names ${l3.ctl.locks.length} different locks for ONE state dir across the three environments (${l3.ctl.locks.join(' | ')})`, l3.ctl);

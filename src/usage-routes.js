@@ -7,6 +7,8 @@
  * See CLAUDE.md §9 + accounts.js §ban-safety before changing ANY cadence here.
  */
 const fs = require('fs');
+const UP = require('./usage-predict.js');   // the lanes a screen may draw (usage-predict)
+const doorReads = require('./door-reads.js');   // today's reads of an on-demand account, by caller (usage-predict pick 1)
 const { accountLoginState } = require('./login-state.js'); // THE credential-state reader (shared with the pool engine + the repair migration)
 const path = require('path');
 const os = require('os');
@@ -1572,8 +1574,9 @@ function onDemandReadings() {
     for (const a of (accounts.list().accounts || [])) {
       if (!a || !a.id || !harnesses.get(a.backend || 'claude')?.quota?.onDemand) continue;
       const c = usageWrite.readCacheObject(USAGE_CACHE_DIR, a.id);
-      if (!c || !Array.isArray(c.limits) || !c.limits.length) continue;
-      out[a.id] = { limits: c.limits, fetchedAt: c.fetchedAt || null, source: c.source || null, windowNames: c.windowNames && typeof c.windowNames === 'object' ? c.windowNames : null };
+      const reads = doorReads.todayOf(doorReads.readDoorReads(USAGE_CACHE_DIR, a.id), Date.now());   // how often its CLI was asked today, by whom
+      const row = doorReads.homeAccountEntry(c, reads);   // law A3: an account read today with no reading yet is still served — its count is shown
+      if (row) out[a.id] = row;
     }
   } catch { }
   return out;
@@ -1614,16 +1617,29 @@ app.get('/api/usage', (req, res) => {
         const e = app.locals.usageEstimator;
         if (!e) return {};
         const out = {}; const now = Date.now();
+        // usage-predict P2/P3: a lane is DRAWN only where this instance's verdict for its source is on (or, in the popup alone, provisional)
+        // (src/usage-predict.js); every lane says its state, and how much was used here since the reading (the plain line)
+        const screen = (id, est) => {
+          if (!est) return null;
+          const st = typeof e.predictStatesFor === 'function' ? e.predictStatesFor(id, est, now) : {};
+          // law B4 (the look of 2026-11-15): the estimate carries ON lanes only — every surface draws those; a PROVISIONAL lane
+          // rides `provisional`, read by the popup alone, which marks it
+          const drawn = UP.gateEstimate(est, (k) => (st[k] || {}).state, (x) => x === 'on');
+          const prov = UP.gateEstimate(est, (k) => (st[k] || {}).state, (x) => x === 'provisional');
+          return { ...(drawn || { estimated: true, anchorAt: est.anchorAt, asOf: est.asOf, fiveHour: null, sevenDay: null, scopedWeekly: [] }),
+            provisional: prov ? { fiveHour: prov.fiveHour || null, sevenDay: prov.sevenDay || null, scopedWeekly: prov.scopedWeekly || [] } : null,
+            sinceCostUsd: est.sinceCostUsd, sinceRequests: est.sinceRequests ?? null, predict: st };
+        };
         for (const [id, snap] of Object.entries(viewedAccounts)) {
-          const est = e.estimateFor(id, snap, now);
+          const est = screen(id, e.estimateFor(id, snap, now));
           if (est) out[id] = est;
         }
-        const g = e.estimateFor(null, viewedGlobal, now);
+        const g = screen(null, e.estimateFor(null, viewedGlobal, now));
         if (g) out.__global__ = g;
         // codex identities estimate too (P1): same estimator, codex-prefixed
         // identities learned prior-less; keys match `codexAccounts`
         for (const [key, snap] of Object.entries(codexRl.byAccount || {})) {
-          try { const est = e.estimateFor(key, snap, now); if (est) out[key] = est; } catch {}
+          try { const est = screen(key, e.estimateFor(key, snap, now)); if (est) out[key] = est; } catch {}
         }
         return out;
       } catch { return {}; }

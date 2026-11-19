@@ -405,7 +405,12 @@ function classifyServeFailure(info = {}) {
 }
 module.exports = { projectReset, WEEK_SEC, unscopedWeeklyTypes: UNSCOPED_WEEKLY_TYPES,
   normalize,
+  predict: 'claude', // its prediction adapter, by name (src/harnesses/predict-adapters.js)
   signalFromStream,
+  // THE ROW ITS READS ANSWER TO (lane usage-predict, 2026-11-16 — one row per vendor): every Claude usage read (the ⟳, the popup's
+  // refresh, the CLI's background refresh) answers to this instance row; its «off» («never contact Anthropic») refuses them all,
+  // a person's press included — src/server/cli-usage-door.js reads it as the vendor's row for any account of this harness
+  readsRow: 'accounts.onDemandQuotaRefresh',
   probe: capsOf('claude').quotaProbe, // 'cli-usage': the `claude -p /usage` auto-cli rung (usage-routes refreshViaCliPanel)
   classifyAuthFailure,               // account-pool-auto's Anthropic-wording classifier, verbatim
   classifyServeFailure, SERVE_CENSUS, // a LAPSED subscription (durable) vs a transient auth failure (the 10-min mark)
@@ -414,6 +419,10 @@ module.exports = { projectReset, WEEK_SEC, unscopedWeeklyTypes: UNSCOPED_WEEKLY_
   // about the vendor, not a capability — `capsOf('claude').resetCredit` stays
   // false (the CLI offers only the interactive /limit-reset, §ban-safety).
   resetCreditVendor: 'anthropic',
+  // THE OVERLOAD ENUM (lane auto-resume-bulk): the values of the assistant record's typed `error` that mean "the model
+  // was overloaded" — the CLI fills it from the HTTP status (2.1.308: 529 or `overloaded_error` → "overloaded"; 429 →
+  // "rate_limit", a different fact). A turn that ENDS on one is a stop the card marks (src/stopped-by.js stopVerdict).
+  overloadErrors: Object.freeze(['overloaded']),
   // THE TYPED PRODUCERS (src/quota-model.js) — the write path takes these.
   // `limitSetFromSnapshot` is the HARNESS-NEUTRAL name the engine dispatches on
   // (`quotaSourceFor(backend).limitSetFromSnapshot`), never a backend-id branch:

@@ -408,6 +408,56 @@ function knownOnDisk(dir, fp) {
   return knownMeta.has(fp);
 }
 const storeWriter = () => require('../store-writer.js').storeWriter();
+const metaSeq = new Map();   // fp → writes handed to the store so far (patchSessionMeta's «did one land while I read?»)
+const metaPatchChain = new Map();   // fp → the newest patch in flight: the patches of ONE file land in the order they were asked
+/** PATCH a session's meta with NO synchronous read on the caller's road (lg-recovery U2 cure, law 2 — the bulk flip; U1's
+ *  stop fact): a pending copy is patched in memory; else the file is read OFF the loop (fs.promises) and patched; a write
+ *  that landed meanwhile ⇒ read again (bounded — then nothing: a stale copy never overwrites a newer one); the version read
+ *  is the owner check's (`prev` — no second read); a socket with no meta of its own gets none (never a stub); the patches
+ *  of one file are CHAINED (ON then OFF pressed fast: OFF lands last, whichever read answers first); never rejects.
+ *  → Promise<boolean> */
+const PATCH_LINK_MS = 10 * 1000;   // a link whose read never answers (a hung mount) lets the chain move on after this; its late answer writes nothing
+// A PATCH THE STORE GAVE UP ON IS NOT LOST (主开发 10:30Z, «as if a must»: a dropped clear of a stop fact let a restart restore
+// the old stop, and the restored-reset arm could continue a finished conversation — a turn nobody typed): it is kept here,
+// merged (the newest keys win), and written WITH the next patch of that file; the next patch's own keys win over it
+const owedPatch = new Map();   // fp → the owed keys
+function patchSessionMeta(sockName, patch, { owner = null } = {}) {
+  const fp = path.join(META_DIR, sockName + '.json');
+  const link = () => {
+    const owed = owedPatch.get(fp) || null;
+    const full = owed ? { ...owed, ...patch } : patch;   // never an older value over a newer one: this patch's keys last
+    const tok = { dead: false }; let t = null;
+    return Promise.race([patchMetaOnce(sockName, fp, full, 3, owner, tok), new Promise((r) => { t = setTimeout(() => { tok.dead = true; console.warn(`[session] ${sockName}: a meta patch's read gave no answer in ${PATCH_LINK_MS / 1000} s — dropped (its keys ride the next patch)`); r(false); }, PATCH_LINK_MS); if (t.unref) t.unref(); })])
+      .finally(() => clearTimeout(t))
+      .then((ok) => { if (ok) { if (owedPatch.get(fp) === owed) owedPatch.delete(fp); } else owedPatch.set(fp, full); return ok; });
+  };
+  const p = (metaPatchChain.get(fp) || Promise.resolve()).then(link, link);
+  metaPatchChain.set(fp, p);
+  p.then(() => { if (metaPatchChain.get(fp) === p) metaPatchChain.delete(fp); }, () => { if (metaPatchChain.get(fp) === p) metaPatchChain.delete(fp); });
+  return p;
+}
+// the fields a patch may carry WITHOUT the identity work a meta write does (the usage attribution, the browser binding): a
+// flag the person or the engine sets — it changes neither the conversation, the account nor the browser the record names
+const META_FLAG_KEYS = new Set(['autoResume', 'stoppedBy']);
+function patchMetaOnce(sockName, fp, patch, tries, owner, tok = null) {
+  if (tok && tok.dead) return Promise.resolve(false);   // its link timed out: a late answer never writes behind a later patch
+  const flagOnly = Object.keys(patch || {}).every((k) => META_FLAG_KEYS.has(k));
+  // THE OWNER, by the patcher's own id (the read's should): a file another session owns is never patched with this one's
+  // choice — the collision is said, as writeSessionMeta's own check says it
+  // refused only when ANOTHER LIVE session owns the file (a restored conversation whose id was derived from its socket's name is
+  // still the file's — the readers' should: a plain id comparison refused its own patches)
+  const mine = (m) => { if (!owner || !m || !m.webuiSessionId || m.webuiSessionId === owner || !(activeSessions && typeof activeSessions.has === 'function' && activeSessions.has(m.webuiSessionId))) return true; console.error(`[session] META COLLISION on ${sockName}: owned by ${m.webuiSessionId}, patched for ${owner} — not written`); try { global.__vsMetric?.('session-meta-collision', 1); } catch { } return false; };
+  const owed = pendingMeta.get(fp);
+  if (owed !== undefined) { let m = null; try { m = JSON.parse(owed); } catch { m = null; } return m && typeof m === 'object' && mine(m) ? writeSessionMeta(sockName, { ...m, ...patch }, { prev: m, flagOnly }) : Promise.resolve(false); }
+  const seq0 = metaSeq.get(fp) || 0;
+  return fs.promises.readFile(fp, 'utf-8').then((t) => { try { return JSON.parse(t); } catch { return null; } }, () => null).then((m) => {
+    if (tok && tok.dead) return false;
+    if (pendingMeta.has(fp)) return patchMetaOnce(sockName, fp, patch, tries, owner, tok);   // a newer copy in memory: patch IT (never «gave up» while one is there)
+    if ((metaSeq.get(fp) || 0) !== seq0) return tries > 0 ? patchMetaOnce(sockName, fp, patch, tries - 1, owner, tok) : false;
+    if (!m || typeof m !== 'object' || !Object.keys(m).length || !mine(m)) return false;
+    return writeSessionMeta(sockName, { ...m, ...patch }, { prev: m, flagOnly });
+  }).catch(() => false);
+}
 function readSessionMeta(sockName) {
   const fp = path.join(META_DIR, sockName + '.json');
   const owed = pendingMeta.get(fp);
@@ -428,9 +478,9 @@ const _metaTombstones = new Map(); // sockName → deletedAt
 // cross — that is how a session ended up carrying ANOTHER conversation's
 // claudeSessionId (and then resuming the wrong, possibly-live conversation:
 // the double-writer hazard, not a cosmetic bug). Never silent.
-function sessionMetaOwnerConflict(sockName, meta) {
+function sessionMetaOwnerConflict(sockName, meta, had = undefined) {
   try {
-    const prev = readSessionMeta(sockName);
+    const prev = had !== undefined ? had : readSessionMeta(sockName);   // a caller that just read it hands it in (no second read)
     const a = prev && prev.webuiSessionId, b = meta && meta.webuiSessionId;
     if (a && b && a !== b) {
       console.error(`[session] META COLLISION on ${sockName}: owned by ${a}, written by ${b} — two sessions share a socket name (identity fields would cross)`);
@@ -457,9 +507,9 @@ const browserBindings = () => _browserBindings || (_browserBindings = require('.
  *  — a caller that renames / reads the file itself right after (boot-restore's retireDeadSocket): written here, now.
  *  Everything else (stamps, caches, rings re-derived) is paced. Census ⑦ (scripts/test-store-write-census.mjs) pins every
  *  call by scope. */
-function writeSessionMeta(sockName, meta, { durable = false, sync = false } = {}) {
+function writeSessionMeta(sockName, meta, { durable = false, sync = false, prev = undefined, flagOnly = false } = {}) {
   if (_metaTombstones.has(sockName)) return Promise.resolve(true);
-  sessionMetaOwnerConflict(sockName, meta);
+  sessionMetaOwnerConflict(sockName, meta, prev);
   // SESSION-BRAIN step 1 (design §session-brain campaign): the buffer's OWNER
   // is EXPLICIT in every session record. Today the server writes
   // data/session-buffers/<id>.buf for every session including remote ones
@@ -468,15 +518,17 @@ function writeSessionMeta(sockName, meta, { durable = false, sync = false } = {}
   // path routes by THIS FIELD instead of assuming. Both readers work either
   // way; no behavior changes until a record actually says 'device'.
   if (meta && typeof meta === 'object' && !meta.bufferOwner) meta.bufferOwner = 'server';
-  ensureDir(META_DIR);
   // tmp+rename (2.219.0): the most frequently written core store was the only
   // non-atomic one — an OOM kill mid-write left truncated JSON that poisoned
   // the next restore.
   const fp = path.join(META_DIR, sockName + '.json');
   const tmp = fp + '.tmp';
   const text = JSON.stringify(meta);
+  metaSeq.set(fp, (metaSeq.get(fp) || 0) + 1);
   let done = Promise.resolve(true);
-  if (!sync && !knownOnDisk(META_DIR, fp)) {   // its FIRST version (a socket being born — never a live socket without its meta after a kill): here, now
+  const firstVersion = !sync && !knownOnDisk(META_DIR, fp);
+  if (sync || firstVersion) ensureDir(META_DIR);   // ONE call, only where THIS thread writes (a paced write is a file known on disk — no sync call; lg-recovery cure)
+  if (firstVersion) {   // its FIRST version (a socket being born — never a live socket without its meta after a kill): here, now   // only where THIS thread writes (a paced write — a file known on disk — makes no sync call)
     timedSync('session-meta.write', () => { fs.writeFileSync(tmp, text); fs.renameSync(tmp, fp); });
     knownMeta.add(fp); pendingMeta.delete(fp);
   } else if (sync) {
@@ -497,6 +549,9 @@ function writeSessionMeta(sockName, meta, { durable = false, sync = false } = {}
       onWritten: (ok) => { const t = writingMeta.get(fp); writingMeta.delete(fp); if (ok && pendingMeta.get(fp) === t) pendingMeta.delete(fp); } });
     if (durable) done = storeWriter().durable(fp).then((ok) => { if (!ok) { let wn = null; try { wn = storeWriter().whyNotDurable(fp); } catch { } console.warn(`[session] ${sockName}: a binding / a person's choice is in memory but not on disk yet (${wn && wn.why === 'queued' ? `its write is still queued${wn.ahead > 0 ? ` behind at least ${wn.ahead} other write${wn.ahead === 1 ? '' : 's'}` : ''} — the storage is slow; kept, written in its turn` : 'its write failed — kept, retried'})`); } return ok; });
   }
+  // A FLAG PATCH skips the identity work (the U2 cure's read: a pooled hub's attribution scans every session with a sync
+  // readlink inside): it changes none of the fields the attribution and the binding read
+  if (flagOnly && prev && typeof prev === 'object') return done;
   try { recordUsageAttribution(meta); } catch {} // usage-ledger account-by-time
   // r6: the id a record may BIND is not always the id it NAMES — a claude/codex
   // fork carries the PARENT's conversation id until the harness announces its
@@ -514,7 +569,7 @@ function deleteSessionMeta(sockName) {
   _metaTombstones.set(sockName, Date.now());
   if (_metaTombstones.size > 4096) _metaTombstones.delete(_metaTombstones.keys().next().value);
   const fp = path.join(META_DIR, sockName + '.json');
-  pendingMeta.delete(fp); knownMeta.delete(fp);
+  pendingMeta.delete(fp); knownMeta.delete(fp); metaSeq.delete(fp); owedPatch.delete(fp);   // (the patch's counter and owed keys go with the file)
   try { storeWriter().forget(fp); } catch {}   // its pending write dropped; one in flight lands BEFORE the unlink, never after
   try { fs.unlinkSync(fp); } catch {}
 }
@@ -785,7 +840,7 @@ function attachToDtach(id, socketPath, session, { repaint = false } = {}) {
 }
 
 // On startup, reconnect to existing dtach sockets
-  return { setupSessionPty, attachToDtach, readSessionMeta, writeSessionMeta,
+  return { setupSessionPty, attachToDtach, readSessionMeta, writeSessionMeta, patchSessionMeta,
     deleteSessionMeta, sessionMetaOwnerConflict, _metaTombstones,
     applyTaskToolUpdate, emitTaskListTodos, updateSessionTodos,
     reattachLocalPty, ptyQuietSince, writeSessionInput }; // the ONE healer + the ONE liveness reader (ws-handler's input detector shares both) + the ONE typed-input write (B-c20d)

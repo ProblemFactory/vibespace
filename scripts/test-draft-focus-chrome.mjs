@@ -20,16 +20,18 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePorts, ONBOARDED_SOURCE, vncEnv, CHROME_STORE } from './scratch.mjs';
+import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const VNC_ENV = await vncEnv();
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome'); process.exit(0); }
 const [PORT, CDP_PORT] = await freePorts(2);
-const wt = scratch('draft-focus-wt');
-const fakeHome = scratchHome('draft-focus-home', fs);
-const stubDir = scratch('draft-focus-stub');
+const root = mintRoot('draft-focus-wt'), wt = path.join(root, 't');
+const chromeHome = path.join(root, 'chrome-home'); fs.mkdirSync(chromeHome, { recursive: true });   // rule nine (hub-boot.mjs): the suite's own browser carries a HOME in the root, so the helper ends it before the root goes
+const fakeHome = path.join(root, 'home'); for (const d of ['.claude/projects', '.claude/sessions', '.config', '.vibespace']) fs.mkdirSync(path.join(fakeHome, d), { recursive: true });
+const stubDir = path.join(root, 'stub');
 fs.mkdirSync(stubDir, { recursive: true });
 const CWD = path.join(fakeHome, 'proj');
 fs.mkdirSync(CWD, { recursive: true });
@@ -37,7 +39,6 @@ let failed = 0, passed = 0;
 const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js', 'package.json', 'data/bin']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
@@ -53,22 +54,17 @@ const stubLog = (sid) => { try { return fs.readFileSync(path.join(stubDir, `stdi
 const agyRead = (sid) => stubLog(sid).filter((x) => x.stdin).map((x) => { try { return String(JSON.parse(x.stdin).message.content).replace(/^(?:<(vibespace-[a-z-]+)>[\s\S]*?<\/\1>\n*)+/, ''); } catch { return null; } });
 const agyStarted = (sid) => stubLog(sid).some((x) => Array.isArray(x.argv) && x.argv.includes('--input-format'));
 
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, ANTIGRAVITY_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
-const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
+const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, HOME: fakeHome, ANTIGRAVITY_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' } });
+const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
   '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows',
-  `--user-data-dir=${wt}-chrome`, 'about:blank'], { stdio: 'ignore' });
+  `--user-data-dir=${wt}-chrome`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, HOME: chromeHome } });
 let cleaned = false;
 const cleanup = () => {
   if (cleaned) return; cleaned = true;
   try { chrome.kill('SIGKILL'); } catch {}
-  try { srv.kill('SIGKILL'); } catch {}
-  for (const root of [wt, fakeHome, stubDir]) { try { endRootedProcesses(root); } catch {} } // dtach, the wrapper, the fake agy carry one of these roots
-  try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
-  for (const d of [wt, `${wt}-chrome`, fakeHome, stubDir]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 };
 process.on('exit', cleanup);
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
-for (let i = 0; i < 60; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); break; } catch { await sleep(250); } }
+await hub.ready();
 
 const WebSocket = require('ws');
 const pageErrors = [];
@@ -108,13 +104,17 @@ const A = await connect(firstTarget.webSocketDebuggerUrl, 'A');
 const B = await connect(secondTarget.webSocketDebuggerUrl, 'B');
 const V = (sid) => `([...(window.app.sessions?.values?.() || [])].find((v) => v && v._messageList && v.sessionId === ${JSON.stringify(sid)}))`;
 const CI = (sid) => `(${V(sid)})._chatInput`;
-const box = (P, sid) => P.evalJs(`${CI(sid)}._textarea.value`);
-const held = (P, sid) => P.evalJs(`${CI(sid)}._heldDraft`);
-const activeIsBox = (P, sid) => P.evalJs(`document.activeElement === ${CI(sid)}._textarea && document.hasFocus()`);
-const focusBox = (P, sid) => P.evalJs(`${CI(sid)}._textarea.focus(); true`);
-const blurBox = (P, sid) => P.evalJs(`${CI(sid)}._textarea.blur(); true`);
+// THE VIEW FIRST (the hosted run 44141280569, heavy 2/7: «B page threw … reading '_chatInput'» 16.8 s in — page B's session view was
+// replaced for a moment by a re-render, so V(sid) was undefined): every read through CI(sid) first polls — bounded, on a named effect —
+// for THAT page's view carrying its chat input, instead of dereferencing a view that is not there yet
+const viewReady = async (P, sid) => { if (!(await P.waitFor(`!!(${V(sid)})?._chatInput?._textarea`, 15000))) throw new Error(`${P.name || 'a'} page: the chat view of ${sid} never carried its chat input`); };
+const box = async (P, sid) => { await viewReady(P, sid); return P.evalJs(`${CI(sid)}._textarea.value`); };
+const held = async (P, sid) => { await viewReady(P, sid); return P.evalJs(`${CI(sid)}._heldDraft`); };
+const activeIsBox = async (P, sid) => { await viewReady(P, sid); return P.evalJs(`document.activeElement === ${CI(sid)}._textarea && document.hasFocus()`); };
+const focusBox = async (P, sid) => { await viewReady(P, sid); return P.evalJs(`${CI(sid)}._textarea.focus(); true`); };
+const blurBox = async (P, sid) => { await viewReady(P, sid); return P.evalJs(`${CI(sid)}._textarea.blur(); true`); };
 const typeChar = (P, ch) => P.cdp('Input.insertText', { text: ch });
-const replaceBox = async (P, sid, text) => { await P.evalJs(`${CI(sid)}._textarea.select(); true`); await P.cdp('Input.insertText', { text }); };
+const replaceBox = async (P, sid, text) => { await viewReady(P, sid); await P.evalJs(`${CI(sid)}._textarea.select(); true`); await P.cdp('Input.insertText', { text }); };
 const sentFor = (P, sid, from = 0) => P.sent.slice(from).filter((f) => f.key === 'chat:' + sid).map((f) => f.value);
 const enter = async (P) => {
   for (const type of ['keyDown', 'keyUp']) await P.cdp('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13, ...(type === 'keyDown' ? { text: '\r' } : {}) });
@@ -161,7 +161,7 @@ const replied = (P, sid, n) => P.waitFor(`(((${V(sid)})?._messageList?.textConte
 // ① A typing, B saving: A keeps A's text and sends it
 const A_TEXT = '好，退款那条也改成同样的策略';
 // the CONTROL patch goes on AFTER ensureChat (a rebuilt window is a new composer)
-const patchBase = async (pages, sid) => { for (const P of pages) await P.evalJs(`${CI(sid)}._landDraft = ${BASE_LAND}; true`); };
+const patchBase = async (pages, sid) => { for (const P of pages) { await viewReady(P, sid); await P.evalJs(`${CI(sid)}._landDraft = ${BASE_LAND}; true`); } };
 async function legTyping(sid, name, { base = [] } = {}) {
   await ensureChat(sid, name);
   await patchBase(base, sid);

@@ -7,7 +7,7 @@
 // working set). Pins: (1) the op returns the module's own shape byte-
 // compatible with the local read; (2) the capability gates an old daemon;
 // (3) the ssh-script fallback's parse still yields the same field names.
-import { endDaemonsAndWait } from './scratch.mjs';
+import { endDaemonsAndWait, DAEMON_ROOT_ENV, DAEMON_ARGV, DAEMON_COMM } from './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -32,17 +32,22 @@ const dm = new DeviceManager({ dataDir, bundlePath: path.join(REPO, 'data/bin/vi
 const enderTakes = path.resolve(String(process.env.VIBESPACE_AGENTD_ROOT || '')).startsWith('/tmp/');
 // B-b403 cure 2 (主开发 06:13Z): OFF /tmp the ender refuses the root (endDaemonsOf's rule), so the daemon is ended by ITS OWN pid —
 // the one it wrote in <root>/state/agentd.pid, taken only while that process names this very root (VIBESPACE_DEVICE_ROOT /
-// VIBESPACE_AGENTD_ROOT, as the ender reads them) and is a daemon (comm or argv); anything else is refused by name, never signalled
+// VIBESPACE_AGENTD_ROOT, as the ender reads them) and is a daemon (comm or argv); anything else is refused by name, never signalled.
+// The identity is the ender's own (scratch.mjs DAEMON_ROOT_ENV / DAEMON_COMM / DAEMON_ARGV, cure 3), never a copy. Said limit: only
+// the pid in the pid file is ended — a self-upgrade re-exec child that has not yet written its pid would be missed; this suite runs
+// bundle 0.0.0-t against the version it expects, so its daemon never self-upgrades
 const endOwnDaemonByPid = (root, { waitMs = 5000 } = {}) => {
   const r = path.resolve(String(root || '')), under = (v) => !!v && (path.resolve(v) === r || path.resolve(v).startsWith(r + '/'));
-  if (!r.startsWith(path.resolve(os.tmpdir()) + '/')) return { pid: null, why: `root ${r} is not under this process's temp folder — refused` };   // never a person's own root
+  const tmpR = path.resolve(os.tmpdir());
+  if (tmpR === '/') return { pid: null, why: 'the temp folder is / — no root can be told from a person\'s own here: refused' };
+  if (!r.startsWith(tmpR + '/')) return { pid: null, why: `root ${r} is not under this process's temp folder — refused` };   // never a person's own root
   let pid = 0; try { pid = Number(fs.readFileSync(path.join(r, 'state', 'agentd.pid'), 'utf8').trim()); } catch { return { pid: null, why: 'no pid file' }; }
   const gone = () => { try { return /^\d+ \([^)]*\) [ZX]/.test(fs.readFileSync(`/proc/${pid}/stat`, 'utf8')); } catch { return true; } };
   if (!Number.isInteger(pid) || pid <= 1 || pid === process.pid) return { pid, why: 'not a pid' };
   if (gone()) return { pid, gone: true, why: 'already gone' };
   let env = [], comm = '', argv = []; try { env = fs.readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0'); comm = fs.readFileSync(`/proc/${pid}/comm`, 'utf8').trim(); argv = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0'); } catch { }
-  const mine = ['VIBESPACE_DEVICE_ROOT', 'VIBESPACE_AGENTD_ROOT'].some((n) => under((env.find((kv) => kv.startsWith(n + '=')) || '').slice(n.length + 1)));
-  if (!mine || !(comm.startsWith('vibespace-devic') || argv.some((a) => /(?:^|\/)(?:vibespace-)?agentd\.js$/.test(a)))) return { pid, why: `pid ${pid} is not this root's daemon — refused, not signalled` };
+  const mine = DAEMON_ROOT_ENV.some((n) => under((env.find((kv) => kv.startsWith(n + '=')) || '').slice(n.length + 1)));
+  if (!mine || !(comm.startsWith(DAEMON_COMM) || argv.some((a) => DAEMON_ARGV.test(a)))) return { pid, why: `pid ${pid} is not this root's daemon — refused, not signalled` };
   try { process.kill(pid, 'SIGKILL'); } catch { }
   const end = Date.now() + waitMs; while (!gone() && Date.now() < end) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
   return { pid, gone: gone() };

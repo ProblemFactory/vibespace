@@ -9,6 +9,8 @@
 
 const DAY_ONE = require('./day-one.js');   // lane door-day-one-landing: SIGN_IN — a sign-in terminal is not a session row
 const LOCKCTX = require('./lock-context.js'); // B-6c55: the context a lock keeps (PURE)
+const SFW = require('./settings-file-words.js'); // B-8dcf item two: a person's own settings file at a start (PURE; loaded with the create, never on a pass)
+const BILLPICK = require('./billing-pick.js'); // unit «billing pick alive»: a subscription pick sets the machine's key helper aside (PURE)
 const { ensureGitIdentity } = require('./server/git-identity.js');   // lane door-day-one-landing: git's name / email default from the sign-in's account
 const { MessageManager } = require('./message-manager');
 const { capsOf, worktreeRefusal, worktreeSpawnArgs, toolAllowlistArgs } = require('./backend-caps');
@@ -19,7 +21,9 @@ const { cwdToProjectDir, findSessionJsonlPath, warmSessionJsonlAsync } = require
 const crypto = require('crypto');
 const { execFile } = require('child_process');
 const { spawnFor } = require('./spawn'); // decoupling wave 2b: the per-transport spawn ladders (local / ssh / dial)
+const { remoteCmdFor, remoteRefusal } = require('./server/remote-cli'); // B-69ec: a paired machine's OWN login shell says where its CLI is
 const { sessionSpawnLine } = require('./spawn/line'); // PURE (lane antigravity-spawn-argv): THE local session line — node <wrapper> <buf> <meta> <ONE executable> …args + the env
+const SPRI = require('./server/spawn-priority.js'); // B-460d: the start's CPU priority — a local conversation starts below the hub (nice +5 on the line itself)
 const { pipePtyShim } = require('./pty-duck'); // B-ae4b: the R6 pipe duck holds a listener SET (the liveness stamp + the consumer)
 const { writerSweepOpts, forkChainEnv } = require('./resume-store'); // descriptor store hooks (writerSweep / forkChain), no id branch
 const { lockCaptureWanted, captureLockId, captureForkProof, armLockCapture, adoptCapturedId } = require('./claude-lock-capture'); // the ONE local lock capture (create + boot re-arm; a terminal fork included; the witness is the wrapper's pid, 2026-09-25)
@@ -101,7 +105,7 @@ function resumePoolPin(data, accounts, backend = 'claude') {
 }
 
 function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
-  execFileAsync, pickCodexThreadCandidate, getSessionKey, normalizeComparablePath }) {
+  execFileAsync, pickCodexThreadCandidate, getSessionKey, normalizeComparablePath, helperFactMs = 8000 }) {
   const {
     activeSessions, WS_OPEN, broadcastActiveSessions, broadcastToSession, resizeSessionToMin,
     setupSessionPty, refreshWebuiPids, deleteSessionMeta, writeSessionMeta, readSessionMeta,
@@ -114,6 +118,46 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
     accounts, scheduleCtxSync, activeSessionsPayload, otelEnv,
     USAGE_STATUSLINE_CMD, userStatuslineCmd, serverNotice, autoResume,
   } = ctx;
+  const helperSaidKeys = new Set();   // unit «billing pick alive»: the helper-set-aside keys this hub has said (for the notice, a said key asks no machine again)
+  // THE FACT (the unit's cure, src/billing-pick.js): does the machine the CLI runs on name a key helper? → true / false / null (it
+  // cannot be read). A paired machine: its backend status, bounded (no answer in HELPER_FACT_MS = cannot be read). This machine:
+  // the CLI's settings file as the SPAWN's own env places it (its config dir, its HOME) — opened non-blocking (a FIFO never holds a
+  // start), a regular file under 1 MiB, else cannot be read; no such file names nothing.
+  // BOTH roads are bounded (its reader's S1: a config dir on a stuck mount never holds a start): no answer in HELPER_FACT_MS = cannot be read
+  const HELPER_FACT_MS = Number(helperFactMs) > 0 ? Number(helperFactMs) : 8000;   // (helperFactMs: the factory's seam for a suite — the bound's own leg; never a ctx key)
+  // (a stuck mount: the race below frees the START at the bound, never the libuv threadpool thread a hung open holds — named in the kb)
+  const readHelperFactOf = async ({ hostId, backend, creds, env, cwd = null, ownFile = null }) => {
+    const row = creds && creds.keyHelper;
+    if (hostId) return BILLPICK.remoteHelperFact(await hosts.backendStatus(hostId), backend);
+    const file = BILLPICK.settingsFileOf(row, { creds, env, home: (env && env.HOME) || os.homedir() });
+    if (!file) return null;
+    // cure 2 (主开发 11:18Z): every file the CLI reads a helper from on this machine — its config dir's, the project's two, the person's own
+    const files = [file, ...BILLPICK.projectSettingsFilesOf(cwd, ownFile)];
+    return BILLPICK.combinedFact(await Promise.all(files.map((f) => readOneFactOnce(f, row))));
+  };
+  // ONE READ IN FLIGHT PER FILE across starts (cure 2, its readers' should): a start that finds a read of the same file still pending
+  // joins it — a hung open on a stuck mount holds ONE threadpool thread, never one more per start; the entry leaves when the read ends
+  const factReadsInFlight = new Map();
+  const readOneFactOnce = (file, row) => {
+    const had = factReadsInFlight.get(file);
+    if (had) return had;
+    const p = readOneFact(file, row).finally(() => factReadsInFlight.delete(file));
+    factReadsInFlight.set(file, p);
+    return p;
+  };
+  const readOneFact = async (file, row) => {
+    let fh = null;
+    try {
+      fh = await fs.promises.open(file, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
+      const st = await fh.stat();
+      return st.isFile() && st.size <= 1 << 20 ? BILLPICK.localHelperFact({ text: await fh.readFile('utf8') }, row) : null;
+    } catch (e) { return e && e.code === 'ENOENT' ? BILLPICK.localHelperFact({ missing: true }, row) : null; } finally { try { await fh?.close(); } catch { } }
+  };
+  const readHelperFact = (o) => {
+    let timer = null;
+    const late = new Promise((r) => { timer = setTimeout(() => r(null), HELPER_FACT_MS); timer.unref?.(); });
+    return Promise.race([readHelperFactOf(o).catch(() => null), late]).finally(() => clearTimeout(timer));
+  };
 
   // ── THE AGENT BROWSER'S SPAWN ENVIRONMENT (P0, docs/design-agent-browser-v2
   //    §3.2) — constructed HERE, not in server.js, for two reasons that are both
@@ -402,14 +446,15 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // usable; a transcript-coupled session in the wrong dir is not.)
             let missing = false;
             let hostName = '';
+            const dirMissing = () => new Promise((resolve) => {
+              execFile('test', ['-d', cwd], { timeout: 4000 }, (err) => resolve(!!err && err.code === 1));
+            });
             try {
               if (!data.hostId) {
                 // Child-process probe, NEVER node fs (§2.108.3 hung-mount
                 // doctrine: a wedged FUSE path blocks sync fs / eats a
                 // threadpool slot; a stuck child just gets killed by timeout).
-                missing = await new Promise((resolve) => {
-                  execFile('test', ['-d', cwd], { timeout: 4000 }, (err) => resolve(!!err && err.code === 1));
-                });
+                missing = await dirMissing();
               } else if (hosts) {
                 const hh = hosts.get(data.hostId);
                 if (hh) {
@@ -423,6 +468,24 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 }
               }
             } catch { /* probe failure must never block a create */ }
+            // A FOLDER THAT WAITS IS NOT GONE (B-864f, src/server/cwd-wait.js), asked for EVERY local cwd (a mount point left as a
+            // bare folder passes `test -d`) and BEFORE the recreate below (an empty folder made under a mount point that is not up
+            // would shadow the mount): the vault locked over the mount's secret ⇒ vault_locked (the page resumes it at the unlock);
+            // a mount being brought up ⇒ waited for, bounded; a missing folder under a recorded mount still down ⇒ mount_down.
+            if (!data.hostId) {
+              const CW = require('./server/cwd-wait.js');
+              let w = CW.verdict(cwd, { missing });
+              if (w && w.why === 'mount_starting') {
+                if (await CW.whenBack(cwd)) missing = await dirMissing();
+                w = CW.verdict(cwd, { missing });
+                if (w && w.why === 'mount_starting') w = { ...w, why: 'mount_down' };   // it waited its bound: still not up
+              }
+              if (w && (w.why === 'vault_locked' || w.why === 'mount_down')) {
+                global.__vsEvent?.('spawn-cwd-waits', `${w.why}/${data.resume ? 'resume' : 'new'}`);
+                ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, code: w.why, cwd, waitsFor: w.name, message: w.why === 'vault_locked' ? CW.lockedWords(cwd, w) : CW.downWords(cwd, w) }));
+                break;
+              }
+            }
             // Recreate-empty-and-resume (B-7812, user-approved DANGER path):
             // only on the client's EXPLICIT flag (set after a red confirm that
             // spells out the files are gone). The resumed agent is told the
@@ -696,6 +759,11 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, scope: 'action', code: effortNo.code, effort: effortNo.effort, levels: effortNo.levels, message: effortNo.message }));
             break;
           }
+          // A THIRD-PARTY PROVIDER serves only ITS OWN rows (lane lg-providers U2 r1): the model this session starts with is
+          // re-resolved against them — an alias onto its row, nothing ⇒ its default; one it does not serve is REFUSED by name
+          const pvModel = accounts && typeof accounts.providerModelFor === 'function' ? ((r) => { if (!(r && !r.ok && r.code === 'model-not-served' && /^(instance|harness)$/.test(String(data._modelOrigin || '')))) return r; const bare = String(data.model || '').replace(/\[1m\]$/i, ''); const a = bare !== String(data.model || '') ? accounts.providerModelFor(data.accountId, backend, bare) : null; return a && a.ok ? a : accounts.providerModelFor(data.accountId, backend, ''); })(accounts.providerModelFor(data.accountId, backend, data.model)) : null;   // an instance / harness DEFAULT the provider does not serve (through its aliases) is no pick at a third party: its own default (U2 cure)
+          if (pvModel && !pvModel.ok) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, scope: 'action', code: pvModel.code, message: pvModel.message })); break; }
+          if (pvModel) data.model = pvModel.model;
           // B-6c55: A LOCKED CONVERSATION'S CONTEXT ASK rides the spawn — the saved fact (the person's, src/lock-context.js), else the
           // spawn's own model when it names [1m]. The TARGET (data.model, the lock, _spawnModel, the pool's request model) stays as it
           // was (law b): only the --model the CLI is COMMANDED with gains [1m]. A CLI whose own catalog says the model has no long
@@ -709,84 +777,9 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           const cmdOf = LOCKCTX.commandOf(data.model, data._lockContext, catalog);
           const commandModel = data._lockContext ? cmdOf.model : data.model;
           data._spawnContext = LOCKCTX.contextOf(commandModel);   // what the spawn COMMANDED (a later Lock on this process reads it)
-          if (cmdOf.refused) {
-            const said = LOCKCTX.NO_LONG_CONTEXT, name = String(data.name || data.sessionName || '').slice(0, 80) || 'This conversation';
-            try { serverNotice?.(`lock-context-${id}`, said.replace(/\{model\}/g, data.model).replace('{name}', name), { level: 2, i18n: { key: said, params: { model: data.model, name } } }); } catch { }
-          }
-          const sessionSpec = adapter.buildSessionArgs({
-            cwd,
-            model: commandModel,
-            permissionMode: data.permissionMode,
-            resumeId: data.resume && data.resumeId ? data.resumeId : null,
-            fork: data.fork || false,
-            // the message a fork is cut at (the chat's fork-from-here) — the
-            // adapter derives the fork flags from these two facts (B-8b7b)
-            forkAt: data.fork && data.forkAtUuid ? String(data.forkAtUuid) : null,
-            sessionName: data.sessionName,
-            effort: data.effort,
-            // client value wins; else the instance default (covers every create
-            // path uniformly — resume, layout restore, billing switch)
-            // RESPONSE STYLE (2.369.58): client value wins; else the
-            // instance default for THIS harness's settings family
-            // (`<prefix>.outputStyle` — never the hardcoded claude key, which
-            // would have handed a codex spawn "Concise"). A value outside the
-            // harness's own vocabulary is dropped here so it never reaches a
-            // spawn: the caps row is the ONE enum.
-            outputStyle: (data._effOutputStyle = (() => {
-              const rs = capsOf(backend).responseStyle || { closed: true, values: [] };
-              const want = data.outputStyle || (() => { try { return harnessDeclares(backend, 'outputStyle') ? String(harnessSetting(backend, 'outputStyle') || '') : ''; } catch { return ''; } })();
-              // A CLOSED vocabulary (codex Personality) is validated here so an
-              // out-of-enum value can never reach a spawn; an OPEN one (claude,
-              // whose ~/.claude/output-styles/*.md are real user-defined styles)
-              // passes through — `values` there is only what the picker offers,
-              // and filtering on it would silently eat the user's own style.
-              return (!rs.closed || rs.values.includes(want)) ? want : '';
-            })()),
-            extraArgs,
-            // PER-SESSION GIT WORKTREE (owner ruling 9): the client's tick,
-            // preflighted above. `fork` already rides this object; the PURE
-            // rule in backend-caps decides whether the flag is actually
-            // emitted (never on a plain resume — the CLI re-enters its own).
-            worktree: !!data.worktree,
-            // THE 「可用工具」 PICK (lane new-session-form): the harness's own tool switch — each adapter judges it with
-            // backend-caps toolAllowlistArgs (claude --allowedTools/--disallowedTools, codex sandbox + approval)
-            tools: data.tools && typeof data.tools === 'object' ? data.tools : undefined,
-            // EVERY declared spawn row of this harness, typed, in ONE bag
-            // (design-harness-settings §5): --brief, the prompt-cache trio,
-            // disableModelFallback, tuiRenderer, … — INSTANCE settings read
-            // server-side so every create path (new, resume, layout restore,
-            // billing switch) behaves the same, and the adapter consumes them
-            // as `opts.settings.<key>` (test-harness-contract drives each row).
-            settings: (() => { try { return harnessSpawnSettings(backend); } catch { return {}; } })(),
-            initialPrompt: data.initialPrompt || '',
-            mode: sessionMode,
-            // an explicit per-session pick only; the instance default rides `settings.tuiRenderer`
-            tuiRenderer: data.tuiRenderer || '',
-            // Shell helper terminals auto-type this — the adapter arms the
-            // DISABLE_UPDATE_PROMPT guard (oh-my-zsh's rc-time [Y/n] eats the
-            // first typed char: "claude /login" → "laude"). 2.196.0: the field
-            // never reached the server before, so the guard was dead code and
-            // the mangling hit REMOTE shells (env rides the exec-env prefix).
-            initialCommand: data.initialCommand || undefined,
-            // Background-job owner notify (2.344.0): our sessions run bypass-
-            // permissions, whose inbound default HOLDS an unattested peer
-            // message — pre-accept via the CLI's documented --settings knob so
-            // job notifications actually deliver. Follows the same global
-            // toggle that gates sending; repo/managed settings can tighten.
-            // LOCAL spawns only (the remote field is data.hostId — a data.host
-            // guard was a dead check, caught by the 2.344.0 review): accept
-            // only where our peer-messaging can actually deliver.
-            acceptPeerMessages: (() => { try { return !data.hostId && serverSetting('agents.jobNotify') !== false; } catch { return !data.hostId; } })(),
-          });
-          // Resume: the harness's persisted fork chain (store.forkChain → store.forkChainEnv; codex's forked_from).
-          // MODEL CONTINUITY (2.369.32) and EFFORT CONTINUITY (B-21e4 item 4)
-          // used to sit HERE, as two `if (!sessionSpec.env.CODEX_WEBUI_*)`
-          // post-fills. They now run BEFORE the spawn spec, for every harness,
-          // through the resume-continuity ladder above — the post-fill could
-          // only ever fire when the client sent nothing, and the client sent
-          // the instance default on every resume (B-6b6d), so the fallback the
-          // env test was guarding was unreachable exactly when it was needed.
-          if (data.resumeId && sessionSpec.env) Object.assign(sessionSpec.env, forkChainEnv(backend, data.resumeId));
+          // SAID after the start registered (batch 21's cure: below, beside the settings-file notices) — a resume refused on the way
+          // never «resumed with the standard context»
+          data._contextRefused = cmdOf.refused ? String(data.model || '') : null;
           const codexThreadBaseline = typeof SP.threadBaseline === 'function' && !data.resumeId // spawn.threadBaseline: the id appears after the spawn
             ? SP.threadBaseline({ activeSessions })
             : null;
@@ -904,6 +897,8 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               }
               if (!rescued) {
                 // the last resort (lane resume-account-door): a refusal the resume bar's verdict did not foresee names the doors too
+                // a THIRD-PARTY provider's refusal says itself, with its code (an unlock door for vault_locked — lane lg-providers r1)
+                if (/^(provider-|vault_|key-unreadable|no-key)/.test(String(e && e.code || ''))) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, code: e.code, message: e.message })); return; }
                 ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: 'Account error: ' + e.message + ' — log it in again in Manage agents, or pick another account in Session Properties.' }));
                 return;
               }
@@ -981,6 +976,106 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               }
             }
           }
+
+          // A SUBSCRIPTION PICK SETS THE MACHINE'S KEY HELPER ASIDE (unit «billing pick alive», 主开发 2026-11-18 01:45Z;
+          // src/billing-pick.js). A helper named in the machine's Claude settings outranks every OAuth login, and from 2.236.0 nothing
+          // passed the adapter its neutralizer — a picked subscription billed the helper's paid credential. So the ONE spawn spec is
+          // built HERE, after the account is resolved: the local dtach line, the daemon pipe and every remote builder run its args.
+          // ONE VARIABLE (主开发 22:14Z, the meeting with lane lg-providers): the helper is set aside when the billing pick's verdict says so
+          // OR the conversation runs on a third-party provider — the rule answers both (src/billing-pick.js: the resolved account's kind
+          // 'provider'; its own key must never be outranked by the machine's helper — U2); every reader below (the named fact, the
+          // notice a person sees) follows it, and a provider's words are its own (onProvider)
+          const keyHelperOff = BILLPICK.setsHelperAside({ creds: harness && harness.creds, account: spawnAccount, linked: linkedAccountId });
+          const onProvider = !!(spawnAccount && spawnAccount.kind === 'provider');
+          // THE CURE (主开发 09:09Z, «as if a must»): the person's own settings FILE is set aside only when that is needed — the ONE read of
+          // the fact for this start (shared with the notice below), asked BEFORE the build only by a start that carries such a file (a
+          // start without one never waits on a machine); the spawn's own env places the CLI's settings (agentEnv + the account's env)
+          let helperFactP = null;
+          const helperFact = () => (helperFactP = helperFactP || readHelperFact({ hostId: data.hostId || null, backend, creds: harness && harness.creds,
+            env: { ...agentEnv(), ...((spawnAccount && spawnAccount.localEnv) || {}) },
+            cwd, ownFile: typeof adapter.ownSettingsFile === 'function' ? adapter.ownSettingsFile(extraArgs) : null }));
+          // (an ADOPTED process — keeperSid known here — keeps the argv it started with: nothing is asked, and its record reads the file as
+          // GOVERNING — false — so no later push to the running CLI writes over a file it may hold; its reader's m1)
+          const keyHelperNamed = keyHelperOff && typeof adapter.ownSettingsFile === 'function' && adapter.ownSettingsFile(extraArgs) !== null ? (data.keeperSid ? false : await helperFact()) : undefined;
+          const sessionSpec = adapter.buildSessionArgs({
+            cwd,
+            model: commandModel,
+            permissionMode: data.permissionMode,
+            resumeId: data.resume && data.resumeId ? data.resumeId : null,
+            fork: data.fork || false,
+            // the message a fork is cut at (the chat's fork-from-here) — the
+            // adapter derives the fork flags from these two facts (B-8b7b)
+            forkAt: data.fork && data.forkAtUuid ? String(data.forkAtUuid) : null,
+            sessionName: data.sessionName,
+            effort: data.effort,
+            // client value wins; else the instance default (covers every create
+            // path uniformly — resume, layout restore, billing switch)
+            // RESPONSE STYLE (2.369.58): client value wins; else the
+            // instance default for THIS harness's settings family
+            // (`<prefix>.outputStyle` — never the hardcoded claude key, which
+            // would have handed a codex spawn "Concise"). A value outside the
+            // harness's own vocabulary is dropped here so it never reaches a
+            // spawn: the caps row is the ONE enum.
+            outputStyle: (data._effOutputStyle = (() => {
+              const rs = capsOf(backend).responseStyle || { closed: true, values: [] };
+              const want = data.outputStyle || (() => { try { return harnessDeclares(backend, 'outputStyle') ? String(harnessSetting(backend, 'outputStyle') || '') : ''; } catch { return ''; } })();
+              // A CLOSED vocabulary (codex Personality) is validated here so an
+              // out-of-enum value can never reach a spawn; an OPEN one (claude,
+              // whose ~/.claude/output-styles/<name>.md are real user-defined styles)
+              // passes through — `values` there is only what the picker offers,
+              // and filtering on it would silently eat the user's own style.
+              return (!rs.closed || rs.values.includes(want)) ? want : '';
+            })()),
+            extraArgs,
+            // PER-SESSION GIT WORKTREE (owner ruling 9): the client's tick,
+            // preflighted above. `fork` already rides this object; the PURE
+            // rule in backend-caps decides whether the flag is actually
+            // emitted (never on a plain resume — the CLI re-enters its own).
+            worktree: !!data.worktree,
+            // THE 「可用工具」 PICK (lane new-session-form): the harness's own tool switch — each adapter judges it with
+            // backend-caps toolAllowlistArgs (claude --allowedTools/--disallowedTools, codex sandbox + approval)
+            tools: data.tools && typeof data.tools === 'object' ? data.tools : undefined,
+            // EVERY declared spawn row of this harness, typed, in ONE bag
+            // (design-harness-settings §5): --brief, the prompt-cache trio,
+            // disableModelFallback, tuiRenderer, … — INSTANCE settings read
+            // server-side so every create path (new, resume, layout restore,
+            // billing switch) behaves the same, and the adapter consumes them
+            // as `opts.settings.<key>` (test-harness-contract drives each row).
+            settings: (() => { try { return harnessSpawnSettings(backend); } catch { return {}; } })(),
+            initialPrompt: data.initialPrompt || '',
+            mode: sessionMode,
+            // an explicit per-session pick only; the instance default rides `settings.tuiRenderer`
+            tuiRenderer: data.tuiRenderer || '',
+            // Shell helper terminals auto-type this — the adapter arms the
+            // DISABLE_UPDATE_PROMPT guard (oh-my-zsh's rc-time [Y/n] eats the
+            // first typed char: "claude /login" → "laude"). 2.196.0: the field
+            // never reached the server before, so the guard was dead code and
+            // the mangling hit REMOTE shells (env rides the exec-env prefix).
+            initialCommand: data.initialCommand || undefined,
+            // Background-job owner notify (2.344.0): our sessions run bypass-
+            // permissions, whose inbound default HOLDS an unattested peer
+            // message — pre-accept via the CLI's documented --settings knob so
+            // job notifications actually deliver. Follows the same global
+            // toggle that gates sending; repo/managed settings can tighten.
+            // LOCAL spawns only (the remote field is data.hostId — a data.host
+            // guard was a dead check, caught by the 2.344.0 review): accept
+            // only where our peer-messaging can actually deliver.
+            acceptPeerMessages: (() => { try { return !data.hostId && serverSetting('agents.jobNotify') !== false; } catch { return !data.hostId; } })(),
+            // unit «billing pick alive» (src/billing-pick.js): a subscription the person picked sets the machine's key helper aside —
+            // false for the bare «the CLI's own login» case, whose argv stays the release's byte for byte
+            neutralizeKeyHelper: keyHelperOff,
+            // the fact (true / false / null = cannot be read; undefined = not read: the start carries no settings file of the person's)
+            keyHelperNamed,
+          });
+          // Resume: the harness's persisted fork chain (store.forkChain → store.forkChainEnv; codex's forked_from).
+          // MODEL CONTINUITY (2.369.32) and EFFORT CONTINUITY (B-21e4 item 4)
+          // used to sit HERE, as two `if (!sessionSpec.env.CODEX_WEBUI_*)`
+          // post-fills. They now run BEFORE the spawn spec, for every harness,
+          // through the resume-continuity ladder above — the post-fill could
+          // only ever fire when the client sent nothing, and the client sent
+          // the instance default on every resume (B-6b6d), so the fallback the
+          // env test was guarding was unreachable exactly when it was needed.
+          if (data.resumeId && sessionSpec.env) Object.assign(sessionSpec.env, forkChainEnv(backend, data.resumeId));
 
           // THE MEMBER THIS PROCESS WILL HOLD (design-reset-credits r2): a pool on
           // a backend that cannot hot-switch (caps row, never an id — codex's
@@ -1091,7 +1186,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             _lockedModel: data.modelLock ? (data.lockModel || data.model || null) : null,
             _lockedContext: data._lockContext || null,   // B-6c55: the person's context ask beside the target (the repin sends both)
             _spawnContext: data._spawnContext || null,   // B-6c55: the context the spawn's --model carried
-            _settingsFileGoverns: ((sessionSpec && sessionSpec.settingsNotes) || []).filter((k) => k !== 'billing'),   // B-8dcf item two: what the person's settings file governs (running-CLI pushes skip it)
+            _settingsFileGoverns: sessionSpec && sessionSpec.settingsFileGoverns ? [...SFW.GOVERNED_KINDS] : [],   // B-8dcf item two: what the person's settings file governs (running-CLI pushes skip it) — EVERY kind it covers (batch 21's cure)
             // Claude --fork-session mints a NEW session id at startup; this arms
             // the stdout parser to adopt it (so the fork becomes its own session
             // instead of shadowing the parent). One-shot, cleared on adoption.
@@ -1135,6 +1230,9 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           // network drop doesn't kill the agent; reattach = re-ssh.
           let spawnCmd = sessionSpec.cmd || cliCmds?.current?.('claude') || CLAUDE_CMD; // ONE CLI, ONE BINARY (lane cli-shell-truth r2)
           let spawnArgs = sessionSpec.args || [];
+          // a THIRD-PARTY PROVIDER's command-line items (lane lg-providers U2 — codex's `-c model_providers…` table): the
+          // descriptor's PURE plan, NON-secret by construction (the key rides localEnv / the 0600 file), ahead of the subcommand
+          if (spawnAccount && Array.isArray(spawnAccount.argv) && spawnAccount.argv.length) spawnArgs = [...spawnAccount.argv, ...spawnArgs];
           let spawnEnvPairs = Object.entries(sessionSpec.env || {}).map(([k, v]) => `${k}=${v == null ? '' : String(v)}`);
           // B-0f13: REMOTE claude terminal sessions get the SAME passive
           // statusline capture local ones have had since 2.60.0 — the script
@@ -1218,10 +1316,13 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             let forkParentKey = ''; // VERIFY S5: the fork's copy of the parent's pin needs the parent's KEY below
             try {
               const kp = require('./server/browser-keeper.js').keeper();
+              // B-55dc THE SPAWN ROAD DECIDES: the Task Group store's first reads for this create (the cwd's realpath, a
+              // relative discover row) are awaited off the loop, bounded — the profile and cap rungs below then answer as the release
+              if (kp && integrationOn && typeof kp.taskGroupReadFor === 'function') { const rp = kp.taskGroupReadFor({ cwd, hostId: data.hostId || null, initialGroupId: spawnGroups[0] || null, initialGroupIds: spawnGroups }); if (rp) await rp; }
               if (kp && integrationOn) {
                 forkParentKey = (data.fork && be0) ? be0.priorKeyFor(data.forkedFromId || data.resumeId) : '';
                 // the Task-Group rung asks the store with the facts a create has (cwd + the dialog's taskId)
-                const taskGroupDefault = kp.taskGroupDefaultFor({ cwd, initialGroupId: spawnGroups[0] || null, initialGroupIds: spawnGroups });
+                const taskGroupDefault = kp.taskGroupDefaultFor({ cwd, hostId: data.hostId || null, initialGroupId: spawnGroups[0] || null, initialGroupIds: spawnGroups });
                 pin = kp.pinForCreate({ explicit: data.browserProfileId || '', priorKey: prior, forkParentKey, taskGroupDefault, resume: !!(data.resume && data.resumeId), fork: !!data.fork });
                 if (pin.refused) console.warn(`[browser] ${id}: ${pin.refused} — starting ephemeral`);
                 // B-6b6d r3 for this knob: the New Session dialog sends the value it
@@ -1260,11 +1361,11 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             }
             if (!be.variant && spawnPinWitness) {
               // + the Task Group's default cap in force NOW (stampGroupCap's read, unstamped — there is no key to stamp it on)
-              try { const kc = require('./server/browser-keeper.js').keeper(); spawnPinWitness.cap = kc && typeof kc.taskGroupCapFor === 'function' ? kc.taskGroupCapFor({ cwd, initialGroupId: spawnGroups[0] || null, initialGroupIds: spawnGroups }) : null; } catch { spawnPinWitness.cap = null; }
+              try { const kc = require('./server/browser-keeper.js').keeper(); spawnPinWitness.cap = kc && typeof kc.taskGroupCapFor === 'function' ? kc.taskGroupCapFor({ cwd, hostId: data.hostId || null, initialGroupId: spawnGroups[0] || null, initialGroupIds: spawnGroups }) : null; } catch { spawnPinWitness.cap = null; }
             } else if (!be.variant && be0 && integrationOn) {
               // the ladder ran and picked NOTHING: witnessed too (a cap may still be in force), so the late key knows the
               // start had no default rather than guessing from the default the user has by then
-              let c = null; try { const kc = require('./server/browser-keeper.js').keeper(); c = kc && typeof kc.taskGroupCapFor === 'function' ? kc.taskGroupCapFor({ cwd, initialGroupId: spawnGroups[0] || null, initialGroupIds: spawnGroups }) : null; } catch { c = null; }
+              let c = null; try { const kc = require('./server/browser-keeper.js').keeper(); c = kc && typeof kc.taskGroupCapFor === 'function' ? kc.taskGroupCapFor({ cwd, hostId: data.hostId || null, initialGroupId: spawnGroups[0] || null, initialGroupIds: spawnGroups }) : null; } catch { c = null; }
               spawnPinWitness = { profileId: '', origin: 'harness', at: Date.now(), by: 'user', cap: c };
             }
             if (be.variant) {
@@ -1297,7 +1398,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               // (once — a conversation that has its stamp keeps it), never read live off the group afterwards
               try {
                 const kc = require('./server/browser-keeper.js').keeper();
-                if (kc && typeof kc.stampGroupCap === 'function') kc.stampGroupCap(bk.key, { cwd, initialGroupId: spawnGroups[0] || null, initialGroupIds: spawnGroups });
+                if (kc && typeof kc.stampGroupCap === 'function') kc.stampGroupCap(bk.key, { cwd, hostId: data.hostId || null, initialGroupId: spawnGroups[0] || null, initialGroupIds: spawnGroups });
                 session._browserCap = kc && typeof kc.capOf === 'function' ? kc.capOf(bk.key) : null;
               } catch { session._browserCap = null; }
               spawnBrowserPre = be.remotePrelude || '';
@@ -1330,7 +1431,17 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             try { h = hosts.get(data.hostId); }
             catch { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: 'Unknown host: ' + data.hostId })); return; } // the request named (lane phone-resume-keeps-layout r4 N2: a bare error ended no create on the page)
             const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
-            const sp = await spawnFor(h).terminal(ladderCtx({ h, shq }));
+            // B-69ec THE REMOTE TWIN: a CLI's terminal runs the program THAT machine's login shell found (src/server/remote-cli.js);
+            // it holds none ⇒ refused by name before anything starts; it could not be asked ⇒ the prelude decides, as before
+            let rcmdT = null;
+            if (cliCmds?.current?.(backend) != null) {
+              try { rcmdT = await remoteCmdFor({ hosts, h, backend, name: cliCmds.remoteName ? cliCmds.remoteName(backend, spawnCmd) : (spawnCmd.includes('/') ? path.basename(spawnCmd) : spawnCmd), integrationOn }); } catch (e) {
+                if (!e || e.code !== 'cli-missing') throw e;
+                global.__vsEvent?.('spawn-cli-missing', `${backend}/remote`);
+                ws.send(JSON.stringify(remoteRefusal(e, data.reqId))); return;
+              }
+            }
+            const sp = await spawnFor(h).terminal(ladderCtx({ h, shq, ...(rcmdT ? { rcmd: rcmdT } : {}) }));
             if (!sp) return; // the ladder answered the socket
             ({ spawnCmd, spawnArgs, spawnEnvPairs, spawnCwd } = sp);
           } else if (data.hostId && hosts && sessionMode === 'chat') {
@@ -1361,6 +1472,15 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // no-op on devices without the keeper).
             // the LOCAL shell's answer is LOCAL (lane cli-shell-truth r3): the remote runs the CLI's configured NAME
             const rcmd = cliCmds?.remoteName ? cliCmds.remoteName(backend, spawnCmd) : (spawnCmd.includes('/') ? path.basename(spawnCmd) : spawnCmd);
+            // B-69ec THE REMOTE TWIN: the chat runs the program THAT machine's login shell found for the name (none ⇒ refused)
+            let rcmdR = rcmd;
+            if (cliCmds?.current?.(backend) != null) {
+              try { rcmdR = (await remoteCmdFor({ hosts, h, backend, name: rcmd, integrationOn })) || rcmd; } catch (e) {
+                if (!e || e.code !== 'cli-missing') throw e;
+                global.__vsEvent?.('spawn-cli-missing', `${backend}/remote`);
+                ws.send(JSON.stringify(remoteRefusal(e, data.reqId))); return;
+              }
+            }
             const rargs = [...spawnArgs];
             // The harness's chat transport flags (adapter.chatTransportArgs —
             // claude's stream-json set; the local chat-wrapper appends the same
@@ -1368,7 +1488,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // hazard: a blanket append once reached every future backend).
             const ta = adapter && typeof adapter.chatTransportArgs === 'function' ? adapter.chatTransportArgs() : [];
             for (const fl of ta) { if (!rargs.includes(fl[0])) rargs.push(...fl); }
-            const sp = await spawnFor(h).chat(ladderCtx({ h, shq, rcmd, rargs }));
+            const sp = await spawnFor(h).chat(ladderCtx({ h, shq, rcmd: rcmdR, rargs }));
             if (!sp) return; // the ladder answered the socket
             ({ spawnCmd, spawnArgs, spawnEnvPairs, spawnCwd } = sp);
           }
@@ -1498,6 +1618,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 // (dtach → wrapper `env: process.env` → CLI), never argv — argv
                 // is world-readable in /proc/cmdline. No account → explicitly
                 // strip any ambient key so the CLI uses its global login.
+                for (const n of require('./server/provider-spawn.js').ambientPlanNames(backend, env, undefined, process.env)) delete env[n];   // lane lg-providers U2 cure: no start inherits a provider's plan (address, key, models — told by its home, so BEFORE the deletes below) from the hub's env; a provider start lays its own below
                 delete env.ANTHROPIC_API_KEY;
                 delete env.CLAUDE_SECURESTORAGE_CONFIG_DIR;
                 delete env.CLAUDE_CODE_OAUTH_TOKEN;                 // top-precedence in the CLI — ambient copy = wrong billing
@@ -1525,9 +1646,13 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 }
                 return env;
               })();
-            // THE ONE LINE: `node <wrapper> <buf> <meta> <spawnCmd> …spawnArgs`; the names ride r6Env
+            // THE ONE LINE: `node <wrapper> <buf> <meta> <spawnCmd> …spawnArgs`; the names ride r6Env. B-460d: a LOCAL
+            // conversation's line starts with `nice -n 5` (both roads run it: dtach below, the daemon pipe above it) — the
+            // setting read at THIS start; the fact rides the session (Session Properties) and its meta (a restart keeps it)
+            const r6Pri = SPRI.priorityFor({ serverSetting, local: !session.host });
+            session._cpuNice = ocPty ? null : r6Pri.fact;   // an OpenCode serve terminal runs in the serve's pty, not this line: no fact
             const r6Line = sessionSpawnLine({ node: NODE_CMD, wrapper, bufFile, metaFile: metaFileW, env: r6Base, pairs: r6Pairs,
-              exe: spawnCmd, args: spawnArgs,
+              exe: spawnCmd, args: spawnArgs, priority: r6Pri.priority,
             });
             const r6Argv = r6Line.argv, r6Env = r6Line.env;
             if (r6Wanted && hosts?.device) {
@@ -1577,9 +1702,32 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           // B-8dcf item two: what the person's own settings file met at this start (the adapter's `settingsNotes`, read off the argv the hub
           // builds — local and remote alike, nothing reads the file) — SAID by name, once per start, where the person looks, with its door;
           // only a start that got this far is told (a refused one says its refusal)
-          for (const k of (sessionSpec && sessionSpec.settingsNotes) || []) {
-            const w = require('./settings-file-words.js').SETTINGS_FILE_WORDS[k], name = String(session.name || data.name || '').slice(0, 80) || 'This conversation';
-            if (w) { try { serverNotice?.(`settings-file-${k}-${id}`, w.replace('{name}', name), { level: 1, i18n: { key: w, params: { name } } }); } catch { } }
+          // (unit «billing pick alive»: an ADOPTED process — keeperSid — keeps the argv it started with; this start's notes are not its own)
+          for (const k of (!data.keeperSid && sessionSpec && sessionSpec.settingsNotes) || []) {
+            // a third-party provider's start says ITS billing words (no subscription bills it; no «CLI login» door)
+            const w = (onProvider && SFW.PROVIDER_BILLING_WORDS[k]) || SFW.SETTINGS_FILE_WORDS[k], name = String(session.name || data.name || '').slice(0, 80) || 'This conversation';
+            if (w) { try { serverNotice?.(`settings-file-${k}-${id}`, w.replace('{name}', () => name), { level: 1, i18n: { key: w, params: { name } } }); } catch { } }   // a function: a «$&» in a name is words
+          }
+          // B-6c55 (c): the CLI's own catalog gives the locked model no 1M form — SAID here, after the start's refusals (batch 21's cure);
+          // an adopted process keeps the context it started with
+          if (data._contextRefused && !data.keeperSid) {
+            const said = LOCKCTX.NO_LONG_CONTEXT, model = data._contextRefused, name = String(data.name || data.sessionName || '').slice(0, 80) || 'This conversation';
+            try { serverNotice?.(`lock-context-${id}`, said.replace(/\{(model|name)\}/g, (m, k) => (k === 'model' ? model : name)), { level: 2, i18n: { key: said, params: { model, name } } }); } catch { }
+          }
+          // unit «billing pick alive»: the rule SAID where the person looks — once per picked account and machine (src/billing-pick.js
+          // noticeKey), only at a start that spawned with it (an adopted process keeps the argv it started with) and only when the
+          // Claude settings of the machine the CLI runs on name a helper it set aside — the ONE fact of this start (helperFact: read
+          // before the build when the start carries the person's settings file, else now, after the spawn: the start never waits on it)
+          if (keyHelperOff && !data.keeperSid && harness && harness.creds && harness.creds.keyHelper) {
+            const acctId = (spawnAccount && spawnAccount.id) || linkedAccountId;
+            // the paired machine by the name the person reads (the hosts store's record), never its id
+            const hostName = data.hostId ? (() => { try { const h = (hosts && hosts.get(data.hostId)) || {}; return h.name || h.host || null; } catch { return null; } })() : null;
+            const said = BILLPICK.helperNotice({ name: session.name || data.name, accountId: acctId, host: hostName, hostId: data.hostId || null, provider: onProvider,
+              account: (() => { try { return accounts?.get?.(acctId)?.name || accounts?.providerRecordOf?.(acctId)?.label || acctId; } catch { return acctId; } })() });   // a provider conversation: its record's name, never its pv- id
+            // a key this hub already said asks the machine nothing more — the notice channel says a key once per hub run
+            if (said && !helperSaidKeys.has(said.key)) try { helperFact().then((on) => {
+              if (on === true && serverNotice && serverNotice(said.key, said.text, { level: 1, i18n: { key: said.words, params: said.params } }) > 0) helperSaidKeys.add(said.key);
+            }).catch(() => { }); } catch { }   // a notice never ends a registered start (a line comment: suites strip block comments across the file)
           }
           // 2.368.0: what this session was spawned with / prefers. undefined on
           // _autoResume means "follow the global default" — the tri-state is
@@ -1631,6 +1779,8 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             purpose: session._purpose || undefined, // lane door-day-one-landing: a sign-in terminal stays one after a restart
             cwd,
             spawnModel: data.model || null, // plan C model ladder's floor — survives restarts
+            cpuNice: session._cpuNice || undefined, // B-460d: the CPU priority this start got — a restored session still says it
+            autoResume: data.autoResume !== undefined && data.autoResume !== null ? !!data.autoResume : undefined, // lane auto-resume-bulk: the carried choice survives a restart (boot-restore reads it)
             agentdPipe: r6Handle ? true : undefined, // R6: daemon-owned pipe session (restore re-opens it, no dtach socket exists)
             host: session.host || null,
             hostName: session.hostName || null,
@@ -1935,6 +2085,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
   return Object.assign(async function handleCreate(ws, data, attachedSessions) {
     try { require('./server/loop-counts.js').inc(data && (data.resumeId || data.resume) ? 'resumes' : 'creates'); } catch { }   // loop-day-report M5
     const held = { release: null };
+    if (data && typeof data === 'object') data._contextRefused = null;   // the hub's own field (B-6c55's block writes it): a client's create frame never sets it
     try { return await createBody(ws, data, attachedSessions, held); } finally { try { held.release?.(); } catch { } }
   }, { onClientConnected });
 }

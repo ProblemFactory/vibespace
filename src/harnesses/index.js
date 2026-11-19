@@ -47,7 +47,14 @@ function assertResumeContract(id, resume) {
 
 /** The quota contract every harness carries (S4): the engine reaches quota
  *  behaviour through this object, never through a backend-id branch. */
-function assertQuotaContract(id, quota) {
+/** `quota.predict`'s shape → the errors (empty = good): an adapter's NAME, or `{ none: '<why>' }`. */
+const PREDICT_NAME_RE = /^[a-z][a-z0-9-]{0,39}$/;
+function predictShapeErrs(p) {
+  if (typeof p === 'string') return PREDICT_NAME_RE.test(p) ? [] : [`a name must match ${PREDICT_NAME_RE} (got ${JSON.stringify(p)})`];
+  if (p && typeof p === 'object' && !Array.isArray(p) && 'none' in p) return typeof p.none === 'string' && p.none.trim() ? [] : ['`none` must say why'];
+  return ["missing — name the adapter ('<source>', resolved on the hub) or declare { none: '<why>' }"];
+}
+function assertQuotaContract(id, quota, { full = true } = {}) {
   if (!quota || typeof quota !== 'object') throw new Error(`harness '${id}': quota contract missing (use NULL_QUOTA for a harness without quota)`);
   for (const fn of ['normalize', 'signalFromStream', 'classifyAuthFailure']) {
     if (typeof quota[fn] !== 'function') throw new Error(`harness '${id}': quota.${fn} must be a function`);
@@ -55,6 +62,17 @@ function assertQuotaContract(id, quota) {
   for (const fn of ['readLive', 'settleLive', 'classifyServeFailure']) { // classifyServeFailure: a LAPSED subscription's closed census (2026-10-08) — optional, the engine asks with ?.
     if (quota[fn] !== undefined && typeof quota[fn] !== 'function') throw new Error(`harness '${id}': quota.${fn} must be a function when declared`);
   }
+  // THE PREDICTION ADAPTER (lane usage-predict pick 3): every harness declares `quota.predict` — its adapter's NAME (data), or
+  // `{ none: '<why>' }`. This registry runs on the device agent too, which never predicts and carries no prediction code
+  // (主开发 2026-11-17: the device agent carries no code it never runs; test-architecture §107 holds the bundle's inputs), so it
+  // checks the name's SHAPE only; the hub checks that every built-in name resolves to an adapter that keeps its contract
+  // (src/harnesses/predict-adapters.js checkRegistry, at the hub's boot: src/server/harness-config-sync.js). A CONTRIBUTED harness (a plugin written before the
+  // member) may omit it — read as none, the safe default; a name it declares that no hub adapter answers is read as none too
+  // (the core reaches adapters only through predict-adapters.js: the three built-in sources — the said limit; the safe direction)
+  const predictErrs = (!full && quota.predict === undefined) ? [] : predictShapeErrs(quota.predict);
+  if (predictErrs.length) throw new Error(`harness '${id}': quota.predict — ${predictErrs.join('; ')}`);
+  // lane auto-resume-bulk: the harness's typed "the model was overloaded" values (optional; absent = it reports none)
+  if (quota.overloadErrors !== undefined && !(Array.isArray(quota.overloadErrors) && quota.overloadErrors.every((x) => typeof x === 'string' && x))) throw new Error(`harness '${id}': quota.overloadErrors must be a list of non-empty strings when declared`);
   if (!QUOTA_PROBE_RUNGS.includes(quota.probe)) throw new Error(`harness '${id}': quota.probe must be one of ${QUOTA_PROBE_RUNGS.map(String).join('|')} (got ${String(quota.probe)})`);
 }
 
@@ -122,7 +140,7 @@ function validate(h, { full = true } = {}) {
       for (const k of ['wrapper', 'Normalizer', 'store']) if (!h[k]) throw new Error(`harness "${h.id}" is chat-capable but declares no ${k}`);
     }
   }
-  assertQuotaContract(h.id, h.quota);
+  assertQuotaContract(h.id, h.quota, { full });
   assertResumeContract(h.id, h.resume);
   assertRewindContract(h);
   assertSettingsContract(h, { full });
@@ -199,6 +217,11 @@ function unregister(id) {
 function resumeVerb(id) {
   try { return get(id).resume || null; } catch { return null; }
 }
+/** The harness's declared overload enum (quota.overloadErrors) — [] when it declares none or the id is unknown. The stop
+ *  verdict (src/stopped-by.js) reads THIS, never a backend id (lane auto-resume-bulk). */
+function overloadErrorsOf(id) {
+  try { const q = get(id).quota; return q && Array.isArray(q.overloadErrors) ? q.overloadErrors : []; } catch { return []; }
+}
 
 /** THE REWIND ROAD (B-437e): the harness's own `rewind.request(plan) → {line, requestId}` — null when it has none. The
  *  server's door (src/server/rewind-requests.js) asks THIS, never the row's granularity word: a contributed harness's
@@ -214,5 +237,5 @@ function assertRewindContract(h) {
   }
 }
 
-module.exports = { HARNESSES, harnessOf, harnessIds, chatHarnessIds, REQUIRED_DESCRIPTOR_KEYS: REQUIRED, validate, get, has, isBuiltin, list, ids, register, unregister, assertSettingsContract, assertQuotaContract, QUOTA_PROBE_RUNGS, NULL_QUOTA,
-  hasLimitSignal, assertResumeContract, resumeVerb, rewindRoad, assertRewindContract, AUTO_RESUME_FORMS, NO_AUTO_RESUME, SPAWN_ROWS, assertSpawnContract, spawnOf };
+module.exports = { HARNESSES, harnessOf, harnessIds, chatHarnessIds, REQUIRED_DESCRIPTOR_KEYS: REQUIRED, validate, get, has, isBuiltin, list, ids, register, unregister, assertSettingsContract, assertQuotaContract, predictShapeErrs, QUOTA_PROBE_RUNGS, NULL_QUOTA,
+  hasLimitSignal, assertResumeContract, resumeVerb, overloadErrorsOf, rewindRoad, assertRewindContract, AUTO_RESUME_FORMS, NO_AUTO_RESUME, SPAWN_ROWS, assertSpawnContract, spawnOf };

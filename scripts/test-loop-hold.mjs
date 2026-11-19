@@ -275,8 +275,8 @@ console.log('④ the lines');
     const own = [at('hr', 'src/server/loop-blame.js', 51), at('wrapped', 'src/server/loop-blame.js', 58), at('refresh', 'src/server/sync-fs-witness.js', 129), at('listOnTimeout', 'node:internal/timers', 594)];
     const plain = [at('busyHog', 'src/x.js', 38)];
     const T = typeof LH.instrumentTrim === 'function' ? LH.instrumentTrim : (x) => x;
-    ok(T(owner, ROOT)[0].fn === '_loadArchive' && T(owner, ROOT).length === 2 && T(hook, ROOT)[0].fn === 'readJson' && T(own, ROOT) === own && T(plain, ROOT) === plain,
-      'the instrument\'s innermost frames (loop-blame, the witness\'s hook, the node frames among them) are dropped — the owner\'s sample lands on _loadArchive (src/jobs.js:291), a hook frame on readJson; the witness\'s OWN work (its timer) and a stack with no instrument frame are kept whole');
+    ok(T(owner, ROOT)[0].fn === '_loadArchive' && T(owner, ROOT).length === 2 && T(hook, ROOT)[0].fn === 'readJson' && T(own, ROOT)[0].fn === 'refresh' && T(own, ROOT).length === 2 && T(plain, ROOT) === plain,
+      'the instrument\'s innermost frames (loop-blame, the witness\'s hook, the node frames among them) are dropped — the owner\'s sample lands on _loadArchive (src/jobs.js:291), a hook frame on readJson; the witness\'s OWN work (its timer, which called through the wrapper) names its own frame — refresh, never the wrapper (主开发 2026-11-18 12:20Z) — and a stack with no instrument frame is kept whole');
     const enc = (frames) => 'C' + frames.map((f) => `${f.fn.length}:${f.fn}${f.file.length}:${f.file}${f.line},${f.encl}n`).join('');
     const sm = LH.sampleOf(enc(owner), ROOT, () => true);
     ok(sm.form === 'calls' && sm.frames[0] && sm.frames[0].cls === 'repo' && sm.frames[0].file === 'src/jobs.js' && !sm.frames.some((f) => /loop-blame/.test(f.file || '')),
@@ -865,24 +865,24 @@ console.log('⑭ B-fe0b — the ask\'s own delivery names no hold; node\'s own c
   const INSPECTOR_ONLY = [['get', '', 0], ['#onMessage', 'node:inspector', 70], ['', 'node:inspector', 120], ['', 'node:internal/inspector/network', 5]];
   const ud = A(UNDICI8), u31 = A(UNDICI31), w22 = A(WEBSTREAMS22), zl = A(ZLIB), tm = A(TIMERS), ht = A(HTTP), osn = A(OWN_SESSION), st = A(STREAM);
   const NO = 'with no frame of ours below it', CUT = 'the stack cut before any frame of ours';
-  ok(ud.words === `node’s own code — undici, ${NO}` && ud.key === '(node’s own code — undici)' && ud.keyWords === ud.key && !ud.empty,
+  ok(ud.words.startsWith(`node’s own code — undici, ${NO}: `) && ud.key === '(node’s own code — undici)' && ud.keyWords === ud.key && !ud.empty,
     `a channel's first MessageEvent (undici's lazy load, measured): «${ud.words}», keyed by the module — never a frame of undici's bundle`, ud);
   { // the two answer forms judge «cut» at the SAME depth (the batch-78 readers' should): the call-site form's own frame is
     // skipped inside the expression (i = 1), the string form's at sampleOf (raw.slice(1)) — 31 frames below it is a full
     // answer in both, 30 is not
     const SS = (n) => { const t = ['Error', '    at self (node:internal/self:1:1)', ...Array.from({ length: n }, (_, i) => `    at f${i} (node:internal/deps/undici/undici:${i + 1}:1)`)].join('\n'); return 'S' + t.length + ':' + t; };
     const CC = (n) => enc(Array.from({ length: n }, (_, i) => [`f${i}`, 'node:internal/deps/undici/undici', i + 1]));
-    const f = (t) => { const sm = LH.sampleOf(t, ROOT); return [sm.form, sm.cut, sm.frames.length, LH.framesAnswer(sm.frames, sm.form, sm.cut).words.replace(/^.*undici, /, '')]; };
+    const f = (t) => { const sm = LH.sampleOf(t, ROOT); return [sm.form, sm.cut, sm.frames.length, LH.framesAnswer(sm.frames, sm.form, sm.cut).words.replace(/^.*undici, /, '').split(': ')[0]]; };
     const r = { s31: f(SS(31)), s30: f(SS(30)), c31: f(CC(31)), c30: f(CC(30)) };
     ok(r.s31[0] === 'string' && r.c31[0] === 'calls' && r.s31[1] === true && r.c31[1] === true && r.s30[1] === false && r.c30[1] === false
       && r.s31[3] === CUT && r.c31[3] === CUT && r.s30[3] === NO && r.c30[3] === NO && r.s31[2] === 31 && r.c31[2] === 31,
       'the string form and the call-site form judge a full answer at the same depth: 31 frames below the sample\'s own = «the stack cut…», 30 = «no frame of ours below it», in both', r);
   }
-  ok(UNDICI31.length === LH.SAMPLE_FRAMES && u31.words === `node’s own code — undici, ${CUT}` && u31.key === ud.key && w22.words === ud.words,
+  ok(UNDICI31.length === LH.SAMPLE_FRAMES && u31.words.startsWith(`node’s own code — undici, ${CUT}: `) && u31.key === ud.key && w22.words.split(': ')[0] === ud.words.split(': ')[0],
     'the same load in a FULL answer (31 frames, cut inside crypto / tls / http2 — Node 24) and inside webstreams (Node 22): still undici — the bundled dependency in the run names it, never the innermost module; the full one never claims «no frame of ours»', { u31, w22 });
   ok(zl.words === 'node’s own code — zlib, driven by zlibHog (src/hogs.js:9)' && zl.key === 'src/hogs.js:9' && zl.keyWords === 'zlibHog (src/hogs.js:9)',
     `a sync gzip answered in slice (node:buffer) under processChunkSync: «${zl.words}» — keyed by our frame, as before`, zl);
-  ok(st.words === `node’s own code — streams, ${NO}` && tm.words === `node’s own code — timers, ${NO}` && ht.words === 'node’s own code — http, driven by loadHttp (src/x.js:3)' && osn.words === 'node’s own code — inspector, driven by askSelf (src/x.js:7)' && !osn.empty,
+  ok(st.words.startsWith(`node’s own code — streams, ${NO}: `) && tm.words.startsWith(`node’s own code — timers, ${NO}: `) && ht.words === 'node’s own code — http, driven by loadHttp (src/x.js:3)' && osn.words === 'node’s own code — inspector, driven by askSelf (src/x.js:7)' && !osn.empty,
     'stream glue run from the loop (its innermost module, never stream_base_commons); node\'s timers with nothing of ours (priority_queue is a helper); a lazy require of http by our code (the module node\'s loader was loading at the outermost level, never the http_agent it pulled); this thread\'s OWN inspector session — held code driven by ours, never the delivery', { st: st.words, tm: tm.words, ht: ht.words, osn: osn.words });
   const del = A([]), ins = A(INSPECTOR_ONLY), bi = A([['test', '', 0]]), ours = A([['busyHog', ROOT + '/src/hogs.js', 38], ['', 'node:internal/timers', 585]]);
   ok(del.empty && ins.empty && del.words === LH.WORDS.between && !bi.empty && bi.words === '(built-in)' && ours.words === 'busyHog (src/hogs.js:38) ← (anonymous) (node:internal/timers:585)' && ours.key === 'src/hogs.js:38',
@@ -895,7 +895,7 @@ console.log('⑭ B-fe0b — the ask\'s own delivery names no hold; node\'s own c
   // the ask's own delivery: posted inside the hold, answered in its LAST beat once the held code returned (an empty
   // answer earlier in a hold is a promise flood's — read as the hold's end too, round 4's law, kept here)
   const mixed = holdOf([at(0, ud), at(1, ud), at(2, null)]), gz = holdOf([at(0, zl), at(1, zl)]), idle = holdOf([{ postedAt: TO - 100, answeredAt: TO - 99.95, state: 'running', answer: del, beat: B0 }]);
-  ok(mixed.fo.verdict === LH.V.js && mixed.line.includes(`node’s own code — undici, ${NO} ×2`) && mixed.fo.frame === '(node’s own code — undici)',
+  ok(mixed.fo.verdict === LH.V.js && mixed.line.includes(`node’s own code — undici, ${NO}: `) && mixed.line.includes(' ×2') && mixed.fo.frame === '(node’s own code — undici)',
     `undici's load inside a hold: JavaScript for the verdict, and the hold says whose — ${mixed.line}`, mixed);
   ok(gz.fo.verdict === LH.V.js && gz.line.includes('node’s own code — zlib, driven by zlibHog (src/hogs.js:9) ×2') && gz.fo.frame === 'zlibHog (src/hogs.js:9)', `a zlib hold: ${gz.line}`, gz);
   // an inspector frame ABOVE a frame of ours is never the delivery (the batch-78 readers' should): the thread's own session,
@@ -916,11 +916,11 @@ console.log('⑭ B-fe0b — the ask\'s own delivery names no hold; node\'s own c
     const cut = (from, to) => (SRC.split(from).length === 2 ? load(SRC.replace(from, to)) : null);
     const noOwn = cut('  const o = nodeOwnOf(frames);\n', '  const o = null;\n'), noIns = cut('  return inspector > 0;\n', '  return false;\n'), noDeps = cut('if (DEPS_FILE.test(run[j].file)) owner = run[j];', '{ }');
     const noLoader = cut('    for (let j = k - 1; j >= 0 && !owner; j--) if (!LOADER_FILE.test(run[j].file)) owner = run[j];\n', ''), noHelper = cut('!HELPER_MODULE.has(moduleOf(run[j].file))', 'true');
-    const noCut = cut(": cut ? ', the stack cut before any frame of ours' :", ':');
+    const noCut = cut("(cut ? ', the stack cut before any frame of ours' : ', with no frame of ours below it')", "', with no frame of ours below it'");
     const r = (L, f) => { const sm = L.sampleOf(enc(f), ROOT); return L.framesAnswer(sm.frames, sm.form, sm.cut); };
     const red = { own: noOwn && !/node’s own code/.test(r(noOwn, UNDICI8).words) && !/node’s own code/.test(r(noOwn, ZLIB).words), inspector: noIns && !r(noIns, INSPECTOR_ONLY).empty,
       deps: noDeps && /— http2, /.test(r(noDeps, UNDICI31).words) && r(noDeps, UNDICI8).words === ud.words, loader: noLoader && /— http_agent, /.test(r(noLoader, HTTP).words),
-      helper: noHelper && /— buffer, /.test(r(noHelper, ZLIB).words), cut: noCut && r(noCut, UNDICI31).words.endsWith(NO) };
+      helper: noHelper && /— buffer, /.test(r(noHelper, ZLIB).words), cut: noCut && r(noCut, UNDICI31).words.includes(`, ${NO}: `) };
     ok(Object.values(red).every((v) => v === true), `RED CONTROLS: without the rule undici and zlib say their chains (${noOwn && r(noOwn, UNDICI8).words.slice(0, 60)}…); without the inspector branch its dispatch is a sample; without the bundled dependency first the full stack says «${noDeps && r(noDeps, UNDICI31).words}»; without the loader rule «${noLoader && r(noLoader, HTTP).words}»; without the helpers «${noHelper && r(noHelper, ZLIB).words}»; without the cut the full stack claims «${NO}»`, red);
   }
 }
@@ -940,8 +940,8 @@ console.log('⑮ B-7c97 — a hold never names the measuring wrapper; every coun
   const a62 = ans(R62), a217 = ans(R217), a496 = ans(R496), alone = ans(ALONE), evald = ans(EVALD);
   ok(a62.key === 'src/agy-store-fs.js:24' && /^storePath \(src\/agy-store-fs\.js:24\)/.test(a62.words) && !/loop-blame/.test(a62.words) && a217.key === 'src/x.js:3' && a496.key === 'src/harnesses/claude.js:103',
     `a sample answered in a V8 built-in under the instrument names the CALLER of the wrapped call, never the wrapper: «${a62.words}» (the hub's «(built-in) ← realpathSync ← wrapped (loop-blame line 64)», 28.4 s in 4 holds); callerOf / the witness's hook the same`, { a62, a217, a496 });
-  ok(/src\/server\/loop-blame\.js/.test(alone.key) && /src\/server\/loop-blame\.js/.test(evald.key),
-    'a stack that is the instrument\'s ALONE (built-ins and node around it) stays the instrument\'s — that time is its own; an eval\'d frame is never passed (it stops the trim)', { alone: alone.key, evald: evald.key });
+  ok(alone.key === 'src/server/sync-fs-witness.js:129' && !/loop-blame/.test(alone.words) && /src\/server\/loop-blame\.js/.test(evald.key),
+    'a stack that is the instrument\'s ALONE (the witness\'s own timer, calling through the wrapper) stays the instrument\'s — named by its OWN frame, refresh, never the wrapper\'s line (主开发 12:20Z); an eval\'d frame is never passed (it stops the trim)', { alone: alone.key, evald: evald.key });
   // THE FIRST ASK: for every phase of the watchdog's check against the last beat, the first check at or past firstAskMs falls
   // INSIDE the smallest gap the book counts (the one bar); due at the bar itself, some phases miss a 1.0–1.25 s hold
   const H = LH.HOLD_MS, B = LH.BEAT_MS;
@@ -1049,8 +1049,8 @@ console.log('⑯ the train\'s close (主开发 2026-11-18 12:37Z; test-loop-hold
   ok(!/node’s own code/.test(a.words) && /node:internal\/forged:1/.test(a.words) && a.key === 'node:internal/forged:1' && !/forgedInternal/.test(a.words + a.key + a.keyWords)
     && b.words === 'node’s own code — bootstrap, driven by node:internal/forged:1' && !/forgedInternal/.test(b.words + b.key),
     `(a) ONLY AN ID THE RUNTIME LOADED IS THE RUNTIME'S OWN: a vm script named node:internal/forged is said by its location alone — «${a.words}» — and below a real runtime frame it is the driver by its location: «${b.words}»`, { a, b });
-  ok(none.words === 'node’s own code — bootstrap, with no frame of ours below it' && none.key === '(node’s own code — bootstrap)',
-    'nothing below the run: «with no frame of ours below it», keyed by the module, as B-fe0b ruled', none);
+  ok(none.words.startsWith('node’s own code — bootstrap, with no frame of ours below it: ') && none.key === '(node’s own code — bootstrap)' && none.noOurs === true,
+    'nothing below the run: «with no frame of ours below it: <the runtime\'s top frames>», keyed by the module, counted apart (noOurs)', none);
   // the holds, through the watchdog's own road (askOf → judgeAsks → the fold → the line), as the live suite reads them
   const FROM = 90000, TO = FROM + 300, B0 = 6;
   const hold = (answers) => { const J = LH.judgeAsks(answers.map((x, i) => ({ postedAt: FROM + 50 + i * 100, answeredAt: FROM + 50.05 + i * 100, state: 'running', answer: x, beat: B0 })), { beat0: B0, holdEnd: TO }); return LH.holdLine({ from: FROM, to: TO, fromM: FROM, toM: TO, ms: 300, samples: J.samples, outside: J.outside, d: null }); };
@@ -1064,7 +1064,7 @@ console.log('⑯ the train\'s close (主开发 2026-11-18 12:37Z; test-loop-hold
   const tipDriver = cut('driver: end < frames.length && frames[end] ? frames[end] : null };', 'driver: repoFrame(frames.slice(end)) };');   // stale-pins: kept (the red control rebuilds the tip's driver)
   const tipForged = cut("const runtimeOwn = (f) => !!f && f.cls === 'node' && f.notLoaded !== true;", "const runtimeOwn = (f) => !!f && f.cls === 'node';");
   const rd = tipDriver ? ans(D2, tipDriver) : null, rp = tipDriver ? ans(DEEP, tipDriver) : null, rf = tipForged ? ans(D3a, tipForged) : null;
-  ok(rd && rd.words === 'node’s own code — bootstrap, with no frame of ours below it' && rp && rp.words === 'node’s own code — bootstrap, driven by busyHog (src/hogs.js:38)' && rf && rf.words.startsWith('node’s own code — forged, '),
+  ok(rd && rd.words.startsWith('node’s own code — bootstrap, with no frame of ours below it') && rp && rp.words === 'node’s own code — bootstrap, driven by busyHog (src/hogs.js:38)' && rf && rf.words.startsWith('node’s own code — forged, '),
     `RED CONTROLS (the tip as it was): the driver read as the first frame OF OURS forgets the script outside the repo («${rd && rd.words}») and skips the plugin for our frame past it («${rp && rp.words}»); a forged id taken as the runtime's own: «${rf && rf.words}»`, { rd, rp, rf });
 }
 
@@ -1108,6 +1108,84 @@ console.log('⑰ B-9f0c — the runtime\'s own ids, WHOLE: its bootstrap scripts
     && /if \(RUNTIME_IDS\.why\) \{ try \{ parentPort && parentPort\.postMessage\(\{ ev: 'idsFallback', why: RUNTIME_IDS\.why \}\); \} catch \{ \} \}/.test(WK)
     && /if \(m && m\.ev === 'idsFallback'\) \{ const w = LH\.RUNTIME_IDS_WORDS\[m\.why\]; if \(w\) \{ try \{ log\.warn\?\.\(`\[sync-fs\] the watchdog names node frames from the modules loaded at its start/.test(SWS),
     'the watchdog thread asks the whole list with its own flags and says a fallback ONCE; the witness turns it into ONE journal line of fixed words');
+}
+
+console.log('⑱ 主开发 2026-11-18 12:20Z — a stack that ends in the runtime, or is cut before any frame of ours, says so: never the measuring wrapper\'s line');
+{
+  const ans = (frames, L = LH) => { const sm = L.sampleOf(enc(frames), ROOT); return L.framesAnswer(sm.frames, sm.form, sm.cut); };
+  // every control of this section is built from an ANCHOR in src/loop-hold.js and fails BY NAME when the anchor is not there once
+  const mutantLH = (name, anchor, repl) => {
+    const src = fs.readFileSync(path.join(REPO, 'src/loop-hold.js'), 'utf8');
+    if (src.split(anchor).length !== 2) { ok(false, `the anchor of the control «${name}» is not in the source (once): ${JSON.stringify(anchor.trim())}`); return null; }
+    const m = { exports: {} };
+    vm.compileFunction(src.replace(anchor, () => repl), ['module', 'exports', 'require'], { filename: `loop-hold-${name}-mutant.js` })(m, m.exports, require);
+    return m.exports;
+  };
+  const LBF = ROOT + '/src/server/loop-blame.js', SWF = ROOT + '/src/server/sync-fs-witness.js', LDR = 'node:internal/modules/cjs/loader';
+  // a wrapped realpathSync made by node's own module loader: nothing of the tree below it (the owner's incident row)
+  const RUNTIME = [['', '', 0], ['realpathSync', 'node:fs', 2878], ['wrapped', LBF, 64], ['toRealPath', LDR, 467], ['Module._findPath', LDR, 700], ['Module._resolveFilename', LDR, 1180], ['Module._load', LDR, 1010], ['require', 'node:internal/modules/helpers', 136]];
+  // the witness's hook INSIDE the wrapper (its clock, its slot) goes with the wrapper
+  const HOOKED = [['liveBegin', SWF, 139], ['before', SWF, 174], ['wrapped', LBF, 60], ['toRealPath', LDR, 467], ['Module._findPath', LDR, 700]];
+  // a FULL answer (31 frames) cut inside the loader under the wrapper: a frame of ours may lie beyond the cut
+  const CUT31 = [['', '', 0], ['statSync', 'node:fs', 1700], ['wrapped', LBF, 64], ...Array.from({ length: 28 }, (_, i) => [`f${i}`, LDR, 100 + i])];
+  const rt = ans(RUNTIME), hk = ans(HOOKED), c31 = ans(CUT31);
+  const NO = 'with no frame of ours below it', CUTW = 'the stack cut before any frame of ours';
+  ok(rt.words.startsWith(`node’s own code — fs, ${NO}: `) && /realpathSync \(node:fs:2878\)/.test(rt.words) && !/loop-blame/.test(rt.words + rt.key + rt.keyWords) && rt.key === '(node’s own code — fs)' && rt.noOurs === true,
+    `a wrapped call made by node's own loader, nothing of ours below it: «${rt.words}» — the runtime's own top frames, keyed by the module, never «src/server/loop-blame.js:64»`, rt);
+  ok(!/sync-fs-witness|loop-blame/.test(hk.words + hk.key) && hk.noOurs === true && CUT31.length === LH.SAMPLE_FRAMES && c31.words.startsWith(`node’s own code — fs, ${CUTW}: `) && c31.noOurs === true && !/loop-blame/.test(c31.key + c31.words),
+    `the witness's hook inside the wrapper goes with it («${hk.words}»); a full answer cut inside the loader says «${CUTW}» with its top frames, never the wrapper's line`, { hk, c31 });
+  // the hold, through the watchdog's own road (askOf → judgeAsks → the fold), and an «after» row from the same answer
+  const FROM = 70000, TO = FROM + 1400, B0 = 4;
+  const q = (at, late, state = 'running') => ({ postedAt: FROM + at, answeredAt: FROM + at + (late ? 1000 : 0.05), state, answer: rt, beat: B0 });
+  const J = LH.judgeAsks([q(300), q(700)], { beat0: B0, holdEnd: TO }), hj = { from: FROM, to: TO, fromM: FROM, toM: TO, ms: 1400, samples: J.samples, outside: J.outside, d: null };
+  const fo = LH.foldHold(hj), line = LH.holdLine(hj);
+  const JA = LH.judgeAsks([q(300, true)], { beat0: B0, holdEnd: TO });
+  const fa = LH.foldHold({ from: FROM, to: TO, fromM: FROM, toM: TO, ms: 1400, samples: JA.samples, outside: JA.outside, d: null, after: JA.after && JA.after.words, afterKey: JA.after && JA.after.key, afterKeyWords: JA.after && JA.after.keyWords, afterModule: JA.after && JA.after.module });
+  const ours = LH.foldHold({ from: FROM, to: TO, fromM: FROM, toM: TO, ms: 1400, samples: LH.judgeAsks([{ ...q(300), answer: ans([['busyHog', ROOT + '/src/hogs.js', 38]]) }], { beat0: B0, holdEnd: TO }).samples, outside: {}, d: null });
+  ok(fo.verdict === LH.V.js && fo.noOurs === true && line.includes(`node’s own code — fs, ${NO}: `) && !/loop-blame/.test(line) && fa.frameKey === '(node’s own code — fs) (after)' && fa.noOurs === false && ours.noOurs === false,
+    `the hold says it — ${line}; its fold is marked for the day report (noOurs); an «after» row from the same answer (read only when no ask found JavaScript: «${fa.verdict}») keeps that verdict as its cause, unmarked (its second reader's S1); a hold of our own code never`, { fo: { v: fo.verdict, k: fo.frameKey, n: fo.noOurs }, fa: { k: fa.frameKey, n: fa.noOurs }, ours: ours.noOurs });
+  { // the main thread hands the fold's mark to the day report; the watchdog thread carries none for an «after» row
+    const WK = fs.readFileSync(path.join(REPO, 'src/server/sync-fs-witness-worker.js'), 'utf8'), HL = fs.readFileSync(path.join(REPO, 'src/server/loop-holds.js'), 'utf8');
+    ok(!/afterNoOurs/.test(WK) && /f\(\{ ms: h\.ms, verdict: h\.fold\.verdict, frame: h\.fold\.frame, boot: !!h\.boot, noOurs: !!h\.fold\.noOurs \}\)/.test(HL),
+      'the watchdog thread carries no «after» mark into the hold\'s facts (an «after» row never marks a hold); the main thread hands the fold\'s mark to the hour\'s tally (loop-day-report)');
+  }
+  // (its reader's S1) the wrapper's OWN clock read inside it — perfNow → performance.now — goes with the wrapper: a runtime frame
+  // stays only when the wrapper itself called it (the wrapped call's work)
+  const CLOCK = [['now', 'node:internal/perf/utils', 30], ['perfNow', LBF, 61], ['wrapped', LBF, 75], ['toRealPath', LDR, 467], ['Module._findPath', LDR, 700]];
+  const ck = ans(CLOCK);
+  const KEEPALL = '    if (k === w) left.push(raw[j]);\n';
+  const mk = mutantLH('keep-all', KEEPALL, '    left.push(raw[j]);\n');
+  const ckRed = mk ? ans(CLOCK, mk) : null;
+  ok(ck.words.startsWith(`node’s own code — modules, ${NO}: `) && !/perf|loop-blame/.test(ck.words + ck.key) && ck.noOurs === true && ckRed && /node’s own code — perf/.test(ckRed.words),
+    `the wrapper's own clock read under a loader-made call goes with the wrapper: «${ck.words}»; RED CONTROL (every runtime frame inside the wrapper kept): «${ckRed && ckRed.words}»`, { ck, ckRed });
+  { // (its reader's M1) the watchdog thread hands each sample's mark to the main thread; the hold's record carries it to the day table
+    const WK = fs.readFileSync(path.join(REPO, 'src/server/sync-fs-witness-worker.js'), 'utf8'), HB = fs.readFileSync(path.join(REPO, 'src/server/loop-holds.js'), 'utf8');
+    ok(/keyWords: x\.keyWords, \.\.\.\(x\.noOurs === true \? \{ noOurs: true \} : \{\}\)/.test(WK) && /\$\{h\.fold\.noOurs \? ' · \(no frame of ours\)' : ''\}\$\{h\.boot \? ' · \(the boot\)' : ''\}/.test(HB),
+      'the watchdog thread\'s samples keep their mark across the thread (the fold\'s JavaScript top reads it live); the hold\'s journal record says it for the day table');
+  }
+  // (its second reader's S1 / S2) THE MARK IS THE «JavaScript» VERDICT'S ALONE, and EVERY sample of the row says it: the same
+  // runtime-only row under a window that says «waiting for a CPU» keeps that verdict as its cause, as the release booked it;
+  // a plugin's stack topped by a built-in shares the key «(built-in)» with a stack of built-ins alone and never marks the hold
+  const WAITD = { wallMs: 1400, ranMs: 300, waitMs: 1000 };
+  const fw = LH.foldHold({ ...hj, d: WAITD });
+  const MARK = '  const noOurs = v === V.js && !!jsTop && samples.every((x) => clsOf(x) !== \'js\' || x.key !== jsTop.key || x.noOurs === true);\n';
+  const mv = mutantLH('any-verdict', MARK, '  const noOurs = !!jsTop && samples.every((x) => clsOf(x) !== \'js\' || x.key !== jsTop.key || x.noOurs === true);\n');
+  const fwRed = mv ? mv.foldHold({ ...hj, d: WAITD }) : null;
+  ok(fw.verdict === LH.V.waiting && fw.frameKey === '(node’s own code — fs)' && fw.noOurs === false && fwRed && fwRed.verdict === LH.V.waiting && fwRed.noOurs === true,
+    `a runtime-only row under «${fw.verdict}» keeps that verdict as the hold's cause, unmarked; RED CONTROL (the mark under any verdict): noOurs ${fwRed && fwRed.noOurs}`, { fw: { v: fw.verdict, k: fw.frameKey, n: fw.noOurs }, red: fwRed && fwRed.noOurs });
+  const PLUG = [['', '', 0], ['plugHog', '/opt/a-plugin/hog.js', 12]], BUILT = [['', '', 0], ['', '', 0]];
+  const pa = ans(PLUG), ba = ans(BUILT);
+  const hp = { from: FROM, to: TO, fromM: FROM, toM: TO, ms: 1400, samples: LH.judgeAsks([{ ...q(200), answer: pa }, { ...q(500), answer: pa }, { ...q(800), answer: ba }], { beat0: B0, holdEnd: TO }).samples, outside: {}, d: null };
+  const fp = LH.foldHold(hp);
+  const msm = mutantLH('one-sample', MARK, '  const noOurs = v === V.js && !!jsTop && samples.some((x) => clsOf(x) === \'js\' && x.key === jsTop.key && x.noOurs === true);\n');
+  const fpRed = msm ? msm.foldHold(hp) : null;
+  ok(pa.key === '(built-in)' && !pa.noOurs && ba.key === '(built-in)' && ba.noOurs === true && fp.verdict === LH.V.js && fp.frameKey === '(built-in)' && fp.noOurs === false && fpRed && fpRed.noOurs === true,
+    `a plugin's hold topped by a built-in (key «${fp.frameKey}», shared with a stack of built-ins alone) is never marked; RED CONTROL (one marked sample of the row marks it): noOurs ${fpRed && fpRed.noOurs}`, { pa, ba, fp: { v: fp.verdict, k: fp.frameKey, n: fp.noOurs }, red: fpRed && fpRed.noOurs });
+  // RED CONTROL: the release's trim (a run that reaches the stack's end is kept whole) names the wrapper's line
+  const CUTR = '  if (w < 0) return raw;\n';
+  const m = mutantLH('cutstack', CUTR, '  return raw;\n');
+  const rel = m ? ans(RUNTIME, m) : null;
+  ok(rel && rel.key === 'src/server/loop-blame.js:64' && /loop-blame/.test(rel.words) && !rel.noOurs, `RED CONTROL: the release's trim keeps the stack whole and names the wrapper's line — «${rel && rel.words}»`, rel);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

@@ -31,6 +31,7 @@ const GENERATED_LEN = 24;     // default-only policy: 24 chars across all 4 char
 const TEXT_MAX = 900;
 const NOTES_MAX = 400;
 const PENDING_REMIND_MS = 7 * 86_400_000;   // remind ONCE after 7 days if still unconfirmed, then never again
+const SITES_MAX = 8;   // a login's OTHER sites (the `origins` list the record has always kept — one login, several sites)
 
 const VAULT_FIELDS = Object.freeze(['user', 'password', 'previous', 'pending', 'otp']);
 const TYPED_SLOTS = Object.freeze(['current', 'password', 'previous', 'pending', 'otp']);
@@ -63,6 +64,8 @@ const REFUSALS = Object.freeze([
   'login_check_failed',
   'code_paced',
   'target_not_found',
+  // lane login-request-card — one login, several sites: the person's add / remove of a site and the merge of two logins
+  'login_site_exists', 'login_sites_full', 'login_site_first', 'login_site_absent', 'login_merge_same', 'login_merge_clash',
 ]);
 
 /** Verbs an agent may run while a live vault fill is still unsubmitted on the tab (read verbs stay blocked -> 409 login_fill_live). */
@@ -161,6 +164,123 @@ function grantResources(origin, user) { const o = originOf(origin), u = userOf(u
 const resourceOk = (r) => GM.resourceShapeOk(DOOR, r);
 /** The words a grant scope is said in (the Vault window's 「用于…」 choices). */
 function scopeOf(resource) { const r = str(resource); if (r === '*') return 'any-site'; if (/#\*$/.test(r)) return 'any-account'; return resourceOk(r) ? 'this-account' : null; }
+
+// ── ONE LOGIN, SEVERAL SITES (lane login-request-card, the owner 2026-11-17: «这两个login其实是同一个») ─────────────────────────
+// A login is ONE account: its first site + user is its name (the vault entry, unchanged); `origins` lists its OTHER sites, each named
+// exactly (an origin: https, or plain http on this machine — never a pattern, a path or a frame); `siteUsers` the name a site signs
+// in under when it is not the login's. The secret slots, their history and the bound two-step code are the login's — every site.
+// THE GRANT FOLLOWS THE LOGIN (主开发 2026-11-17 20:05Z, Q1): the fill on site X of login L asks FOUR rows — L's own row (THE login,
+// every site of it), X's own row for the name X signs in under (what a merged login's grants named — it stays on its site), «any
+// account on X», «any site». A login with one site asks today's three rows: every grant reads as it is.
+/** Every site of a login (a record, or a list entry that carries its sites) → [{origin, user}] — its first site first. `user` = the
+ *  name that site signs in under (the user name a fill types there). */
+function sitesOf(e) {
+  if (!e || typeof e !== 'object') return [];
+  const first = originOf(e.origin);
+  if (!first) return [];
+  const own = str(e.username != null ? e.username : e.user);
+  const su = e.siteUsers && typeof e.siteUsers === 'object' ? e.siteUsers : {};
+  const more = Array.isArray(e.origins) ? e.origins.filter((o) => originOf(o) === o && o !== first) : [];
+  return [{ origin: first, user: own }, ...[...new Set(more)].map((o) => ({ origin: o, user: typeof su[o] === 'string' && su[o] ? su[o] : own }))];
+}
+/** The name login `e` signs in under on `origin` (as stored), or null when that site is not one of its sites. */
+function userOnSite(e, origin) { const s = sitesOf(e).find((x) => x.origin === origin); return s ? s.user : null; }
+/** Does login `e` hold the pair (site, user)? (user compared as the entry name spells it: trimmed, lower-cased) */
+function holdsPair(e, origin, user) { const u = userOnSite(e, origin); return u !== null && !!userOf(u) && userOf(u) === userOf(user); }
+/** THE FOUR ROWS that may admit login `e` filled on `origin` (deduped; a one-site login on its site = today's three). */
+function loginResources(e, origin) {
+  const first = originOf(e && e.origin), own = userOf(e && (e.username != null ? e.username : e.user));
+  const o = originOf(origin), here = userOf(userOnSite(e, o));
+  const out = [];
+  if (first && own) out.push(`${first}#${own}`);
+  if (o && here) out.push(`${o}#${here}`);
+  if (o) out.push(`${o}#*`);
+  out.push('*');
+  return [...new Set(out)];
+}
+/** A host's REGISTRABLE domain, by the small public-suffix list the grant model keeps (the tree has no full list — a mistake
+ *  guard only): an address or a one-label host is itself. */
+function registrableOf(host) {
+  const h = str(host).toLowerCase().replace(/\.$/, '');
+  if (!h || /^\[|^\d{1,3}(?:\.\d{1,3}){3}$/.test(h) || !h.includes('.')) return h;
+  const labels = h.split('.');
+  const two = labels.slice(-2).join('.');
+  return labels.length > 2 && GM.PUBLIC_SUFFIXES.has(two) ? labels.slice(-3).join('.') : two;
+}
+/** THE WORDS BEFORE A SITE IS ADDED (主开发's ADDITION 1 — a look-alike is SAID, never blocked): the exact address; its ASCII form
+ *  beside a host that is not plain ASCII (`decode` = the caller's punycode → Unicode, the server's url.domainToUnicode); and, when
+ *  the site lies under ANOTHER registrable domain than every site the login has, both domains named. → {site, unicode?, lookalike?} */
+function siteWords(rec, site, { decode = null } = {}) {
+  const o = originOf(site);
+  if (!o) return null;
+  const host = hostOf(o);
+  let unicode = null;
+  if (/(^|\.)xn--/.test(host) && typeof decode === 'function') { try { const u = decode(host); if (u && u !== host) unicode = u; } catch { unicode = null; } }
+  const mine = [...new Set(sitesOf(rec).map((x) => registrableOf(hostOf(x.origin))).filter(Boolean))];
+  const reg = registrableOf(host);
+  const lookalike = mine.length && !mine.includes(reg) ? { domain: reg, loginDomains: mine } : null;
+  return { site: o, ...(unicode ? { unicode, ascii: host } : {}), ...(lookalike ? { lookalike } : {}) };
+}
+/** THE ADD (the person's, at the login's row — and, later, the approved proposal): `rec` = the login, `site` + an optional name it
+ *  signs in under there, `entries` = every login (each with its sites) for the one-pair-one-login rule. → {ok, record, origin, user}
+ *  | a refusal by name. The fence stays: an exact origin, https (or plain http on this machine), never the login's first site twice. */
+function addSiteVerdict({ rec, name = '', site, user = '', entries = [] } = {}) {
+  const r = recordOf(rec);
+  if (!r) return no('login_no_entry', 'that login could not be read from the vault');
+  const typed = str(site).trim().replace(/\/$/, '');
+  // EXACTLY the site the person names: an origin and nothing else — no path, no query, no pattern (the fence stays)
+  if (!/^https?:\/\/[^/?#*\s]+$/i.test(typed)) return no('login_bad_origin', 'a website address (https://host[:port]) — exactly the site, no path, no pattern');
+  const o = originOf(typed);
+  if (!o) return no('login_bad_origin', 'a website address (https://host[:port]) — exactly the site, no path, no pattern');
+  if (!secureOrigin(o)) return no('login_bad_origin', 'a login is kept for an https site (plain http on this machine\'s localhost only)');
+  const u = str(user).trim();
+  if (u && !userOf(u)) return no('login_bad_user', 'a user name (no spaces, no #)');
+  const there = u || r.username;
+  if (o === r.origin) return no('login_site_exists', `${o} is this login's own site already`);
+  if ((r.origins || []).includes(o)) return no('login_site_exists', `${o} is on this login's sites already — remove it first to change the name it signs in under`);
+  if ((r.origins || []).length >= SITES_MAX) return no('login_sites_full', `a login keeps at most ${SITES_MAX + 1} sites — remove one first`);
+  const other = (entries || []).find((e) => e && e.name !== name && holdsPair(e, o, there));
+  if (other) return no('login_exists', `${userOf(there)} on ${o} is already the login ${other.name} — merge the two logins instead (one act, the secret never shown)`, { other: other.name });
+  const su = { ...(r.siteUsers || {}) };
+  if (u && userOf(u) !== userOf(r.username)) su[o] = u.slice(0, USER_MAX);
+  const record = recordOf({ ...r, origins: [...(r.origins || []), o], ...(Object.keys(su).length ? { siteUsers: su } : {}) });
+  return record ? { ok: true, record, origin: o, user: there } : no('login_bad_origin', 'that site could not be kept');
+}
+/** THE REMOVE (where a site shows — 主开发 Q3: a wrong pick is undone in one press): an added site leaves; the first stays. */
+function removeSiteVerdict(rec, site) {
+  const r = recordOf(rec);
+  if (!r) return no('login_no_entry', 'that login could not be read from the vault');
+  const o = originOf(site);
+  if (o && o === r.origin) return no('login_site_first', 'the first site is the login itself — delete the login instead');
+  if (!o || !(r.origins || []).includes(o)) return no('login_site_absent', 'that site is not on this login');
+  const origins = r.origins.filter((x) => x !== o);
+  const su = { ...(r.siteUsers || {}) }; delete su[o];
+  const { origins: _o, siteUsers: _s, ...rest } = r; void _o; void _s;
+  const record = recordOf({ ...rest, ...(origins.length ? { origins } : {}), ...(Object.keys(su).length ? { siteUsers: su } : {}) });
+  return record ? { ok: true, record, origin: o } : no('login_no_entry', 'that login could not be kept');
+}
+/** THE MERGE (law 6 — two rows that are one account become one, in ONE act, the secret never shown or compared): `keep` keeps its
+ *  secret slots, history, notes and its two-step code (it takes `other`'s code only when it has none); `other`'s sites join — its
+ *  first site under the name it signs in under there. `entries` = every login (with sites), for the one-pair-one-login rule. The
+ *  caller deletes `other` and LEAVES its grant rows: each names <site>#<user> of a site now on `keep`, admitted there (and only
+ *  there) by the fill's second row — none lost, none widened. → {ok, record, joined: [{origin, user}]} | a refusal by name. */
+function mergeVerdict({ keep, keepName = '', other, otherName = '', entries = [] } = {}) {
+  const k = recordOf(keep), x = recordOf(other);
+  if (!k || !x) return no('login_no_entry', 'both logins must be readable from the vault (unlock it)');
+  if (keepName && keepName === otherName) return no('login_merge_same', 'pick two different logins');
+  const have = new Set(sitesOf(k).map((s) => s.origin));
+  const joined = sitesOf(x).filter((s) => !have.has(s.origin) || userOf(userOnSite(k, s.origin)) !== userOf(s.user));
+  const clash = joined.find((s) => have.has(s.origin));
+  if (clash) return no('login_merge_clash', `${clash.origin} is on both logins under two names (${userOf(userOnSite(k, clash.origin))} and ${userOf(clash.user)}) — remove it from one first`);
+  const third = joined.map((s) => ({ s, e: (entries || []).find((e) => e && e.name !== keepName && e.name !== otherName && holdsPair(e, s.origin, s.user)) })).find((t) => t.e);
+  if (third) return no('login_exists', `${userOf(third.s.user)} on ${third.s.origin} is already the login ${third.e.name} — merge that one first`, { other: third.e.name });
+  const origins = [...(k.origins || []), ...joined.map((s) => s.origin)];
+  if (origins.length > SITES_MAX) return no('login_sites_full', `the two logins hold ${origins.length + 1} sites — a login keeps at most ${SITES_MAX + 1}; remove some first`);
+  const su = { ...(k.siteUsers || {}) };
+  for (const s of joined) if (userOf(s.user) !== userOf(k.username)) su[s.origin] = str(s.user).slice(0, USER_MAX);
+  const record = recordOf({ ...k, origins, ...(Object.keys(su).length ? { siteUsers: su } : {}), ...(!k.totpName && x.totpName ? { totpName: x.totpName } : {}) });
+  return record ? { ok: true, record, joined } : no('login_no_entry', 'the merged login could not be kept');
+}
 
 // ── 3-slot record (`current` · `previous` · `pending`) & human-only transitions ──
 function currentSlotOf(c) {
@@ -262,8 +382,16 @@ function recordOf(text) {
     pending,
   };
   if (typeof r.entryGen === 'string' && ENTRY_GEN_RE.test(r.entryGen)) out.entryGen = r.entryGen;
-  const origins = Array.isArray(r.origins) ? r.origins.map(originOf).filter((o) => o && o !== origin).slice(0, 8) : [];
+  const origins = Array.isArray(r.origins) ? r.origins.map(originOf).filter((o) => o && o !== origin).slice(0, SITES_MAX) : [];
   if (origins.length) out.origins = [...new Set(origins)];
+  // ONE LOGIN, SEVERAL SITES (lane login-request-card, the owner 2026-11-17): a site of the login that signs in under ANOTHER name
+  // keeps it here — only a site on the list, only a name of the entry name's shape (an older hub drops this field on its own write:
+  // that site then types the login's first name — a refused sign-in, never a leak)
+  if (out.origins && r.siteUsers && typeof r.siteUsers === 'object' && !Array.isArray(r.siteUsers)) {
+    const su = {};
+    for (const o of out.origins) { const u = typeof r.siteUsers[o] === 'string' ? r.siteUsers[o].trim() : ''; if (u && userOf(u) && userOf(u) !== userOf(r.username)) su[o] = u.slice(0, USER_MAX); }
+    if (Object.keys(su).length) out.siteUsers = su;
+  }
   const totp = TOTP_NAME_RE.test(str(r.totpName)) ? str(r.totpName) : (TOTP_NAME_RE.test(str(r.totp)) ? str(r.totp) : '');
   if (totp) out.totpName = totp;
   if (typeof r.notes === 'string' && r.notes) out.notes = r.notes.slice(0, NOTES_MAX);
@@ -302,10 +430,10 @@ function publicOf(rec) {
 }
 
 /** Resolve which value a named vault `<field>` (`user | password | previous | pending`) yields on `rec`. */
-function resolveSlotValue(rec, field) {
+function resolveSlotValue(rec, field, { origin = null } = {}) {
   const r = rec && rec.v === 1 ? rec : recordOf(rec);
   if (!r) return no('login_no_entry', 'that login could not be read from the vault');
-  if (field === 'user') return { ok: true, slot: 'user', value: r.username, secret: false };
+  if (field === 'user') return { ok: true, slot: 'user', value: (origin && userOnSite(r, origin)) || r.username, secret: false };   // one login, several sites: the name THAT site signs in under
   if (field === 'password') {
     if (r.current) return { ok: true, slot: 'current', value: r.current.password, secret: true };
     if (r.pending) return { ok: true, slot: 'pending', value: r.pending.password, secret: true };
@@ -601,8 +729,9 @@ function fillVerdict({ tabOrigin, inFrame = false, spec, entries = [], grantRows
 
   const ownSet = owners instanceof Set ? owners : new Set(Array.isArray(owners) ? owners.filter(Boolean) : []);
   const isOwn = (e) => !!(e && e.owner && ownSet.has(e.owner));
-  const checkGrantFor = (targetU) => {
-    const resources = grantResources(spec.origin, targetU);
+  // a chosen login asks ITS four rows (the grant follows the login — one login, several sites); no login yet: the site's own three
+  const checkGrantFor = (targetU, login = null) => {
+    const resources = login ? loginResources(login, spec.origin) : grantResources(spec.origin, targetU);
     const rows = typeof grantRows === 'function'
       ? resources.flatMap((r) => { try { return grantRows(r) || []; } catch { return [{ door: DOOR, resource: r, to: null }]; } })
       : (Array.isArray(grantRows) ? grantRows.filter((r) => r && resources.includes(r.resource)) : []);
@@ -620,7 +749,7 @@ function fillVerdict({ tabOrigin, inFrame = false, spec, entries = [], grantRows
         origin: spec.origin,
       });
     }
-    const dup = (entries || []).find((e) => e && e.origin === spec.origin && e.user === spec.user);
+    const dup = (entries || []).find((e) => e && holdsPair(e, spec.origin, spec.user));   // a pair a login holds on ANY of its sites
     if (dup) {
       const unconfirmed = dup.pending === 'register' || (dup.hasPending && !dup.hasCurrent);
       return no(
@@ -631,10 +760,10 @@ function fillVerdict({ tabOrigin, inFrame = false, spec, entries = [], grantRows
       );
     }
   } else {
-    const onSite = (entries || []).filter((e) => e && (e.origin === spec.origin || (Array.isArray(e.origins) && e.origins.includes(spec.origin))));
+    const onSite = (entries || []).filter((e) => e && userOnSite(e, spec.origin) !== null);   // its first site, or one on its list — exactly
     if (spec.user) {
-      const exact = onSite.find((e) => e.user === spec.user) || null;
-      const gm = exact && isOwn(exact) ? { ok: true } : checkGrantFor(spec.user);
+      const exact = onSite.find((e) => holdsPair(e, spec.origin, spec.user)) || null;
+      const gm = exact && isOwn(exact) ? { ok: true } : checkGrantFor(spec.user, exact);
       if (!gm.ok) {
         return no('login_not_granted', grantWords(gm.code || 'no_grant', spec.origin, false, spec.user), {
           grant: gm.code || 'no_grant',
@@ -648,7 +777,7 @@ function fillVerdict({ tabOrigin, inFrame = false, spec, entries = [], grantRows
         );
       }
       chosen = exact;
-      targetUser = exact.user;
+      targetUser = userOf(userOnSite(exact, spec.origin)) || exact.user;
     } else {
       if (!onSite.length) {
         const gmSite = checkGrantFor('');
@@ -670,7 +799,7 @@ function fillVerdict({ tabOrigin, inFrame = false, spec, entries = [], grantRows
           admitted.push(m);
           continue;
         }
-        const gm = checkGrantFor(m.user);
+        const gm = checkGrantFor(userOnSite(m, spec.origin), m);
         if (gm.ok) admitted.push(m);
         else if (!firstDeny) firstDeny = gm;
       }
@@ -682,14 +811,14 @@ function fillVerdict({ tabOrigin, inFrame = false, spec, entries = [], grantRows
         });
       }
       if (admitted.length > 1) {
-        const shownUsers = admitted.map((e) => e.user).slice(0, 5).join(', ');
+        const shownUsers = admitted.map((e) => userOf(userOnSite(e, spec.origin)) || e.user).slice(0, 5).join(', ');
         return no(
           'login_ambiguous',
           `${admitted.length} logins match ${spec.origin} (${shownUsers}) — name the account with #user or --user <name>`
         );
       }
       chosen = admitted[0];
-      targetUser = chosen.user;
+      targetUser = userOf(userOnSite(chosen, spec.origin)) || chosen.user;
     }
   }
 
@@ -1022,6 +1151,7 @@ module.exports = {
   valueShownVerdict, CHECK_TEXT_CAP, CHECK_PIECE_CAP, CHECK_NODE_CAP, credDestinationOk,
   LOCKED, HOLD_TOO_MUCH_TEXT, HOLD_UNKNOWN_TYPED, HOLD_VALUE_SHOWN, HOLD_AWAIT_VAULT, HOLD_ENTRY_GONE, HOLD_WORD_OF_REASON, HOLD_WORDS, HOLD_PHASES, isHoldWord,
   hasExplicitScheme, originOf, hostOf, siteOriginOf, secureOrigin, userOf, entryName, parseName, isEntryName, grantResources, resourceOk, scopeOf,
+  SITES_MAX, sitesOf, userOnSite, holdsPair, loginResources, registrableOf, siteWords, addSiteVerdict, removeSiteVerdict, mergeVerdict,   // one login, several sites
   recordOf, textOf, publicOf, resolveSlotValue, scrubSecretsOf, mintEntryGen,
   newRecord, mintChangeRecord, confirmPendingRecord, discardPendingRecord, ownerUpdatedRecord, totpBoundRecord,
   shouldRemindPending, pendingRemindKey,

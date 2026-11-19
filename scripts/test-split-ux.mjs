@@ -67,7 +67,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, CHROME_STORE } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const { WebSocket } = require('ws');
@@ -128,7 +128,7 @@ else await (async () => {
   await sleep(1200);
 
   // ── headless chrome, the desktop page ──
-  chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${path.join(ROOT, 'chrome')}`, '--window-size=1280,900', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
+  chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${path.join(ROOT, 'chrome')}`, '--window-size=1280,900', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
   procs.add(chrome);
   let target = null; for (let i = 0; i < 120 && !target; i++) { try { target = (await (await fetch(`http://127.0.0.1:${CDP}/json`)).json()).find((t) => t.type === 'page'); } catch { } if (!target) await sleep(250); }
   if (!ok(!!target, 'chrome exposed a CDP page target')) return;
@@ -1149,6 +1149,8 @@ else await (async () => {
       const s0 = await showB(P1, 'click');
       ok(s0.chain && s0.layout === 'tabs' && s0.host === sidA && s0.active === sidB && S(s0.shown) === S([sidB]) && s0.hit === sidB, '13 scene (the incident): a real merge made ONE tabs group — Alpha the HOST, Bravo the guest ON SHOW', S(s0));
       const T = s0.titles || {};
+      // the phone's nav title names the window — its NAME, « (n)» on the compact bar (lane phone-six: the folder cut a 390 px bar to «Sessio…»)
+      const navNames = (nav, title) => { const n = String(title || '').split(' — ')[0], v = String(nav || ''); return !!n && (v === n || v.startsWith(n + ' (') || (!!title && v.startsWith(String(title)))); }; // the NAME on the regular class (phone-six's head), the WHOLE title + « (n)» on the compact class (the release's words, kept by the recovery port onto .397)
       // D1 · the sidebar card (default click = focus) of the HOST
       const nameA = String(T[sidA] || '').split(' — ')[0];
       await ev(`if (!app.sidebar.isOpen) app.sidebar.toggle(true); if (app.sidebar._activeTab !== 'folders' && app.sidebar._railGo) app.sidebar._railGo('folders'); return true;`); await sleep(500);
@@ -1247,20 +1249,20 @@ else await (async () => {
           // the incident's screen: the group on show with its GUEST (the owner was reading Project B) — reached by its row
           await pickRow(T[sidB]);
           const p0b = await R13(P);
-          ok(p0b.active === sidB && S(p0b.shown) === S([sidB]) && p0b.hit === sidB && (p0b.nav || '').startsWith(T[sidB]), '13 P0 the GUEST\'s row puts the group on screen showing Bravo (the incident\'s starting screen)', S(p0b));
+          ok(p0b.active === sidB && S(p0b.shown) === S([sidB]) && p0b.hit === sidB && navNames(p0b.nav, T[sidB]), '13 P0 the GUEST\'s row puts the group on screen showing Bravo (the incident\'s starting screen)', S(p0b));
           // P1 · THE INCIDENT: the title → the HOST's row
           const r1 = await pickRow(T[sidA]);
           const p1 = await R13(P);
-          ok(!!r1.pt && p1.active === sidA && S(p1.shown) === S([sidA]) && p1.hit === sidA && p1.activeWin === sidA && (p1.nav || '').startsWith(T[sidA]), `13 P1 THE INCIDENT: the phone switcher's HOST row shows the host — the group's active tab is Alpha, the pane on screen is Alpha, the nav title says Alpha (as shipped: Bravo stayed under the title "Alpha")`, S({ rows: r1.rows, p1 }));
+          ok(!!r1.pt && p1.active === sidA && S(p1.shown) === S([sidA]) && p1.hit === sidA && p1.activeWin === sidA && navNames(p1.nav, T[sidA]), `13 P1 THE INCIDENT: the phone switcher's HOST row shows the host — the group's active tab is Alpha, the pane on screen is Alpha, the nav title says Alpha (as shipped: Bravo stayed under the title "Alpha")`, S({ rows: r1.rows, p1 }));
           // P2 · the guest's row still works (the door that always worked)
           await pickRow(T[sidB]);
           const p2 = await R13(P);
-          ok(p2.active === sidB && S(p2.shown) === S([sidB]) && p2.hit === sidB && (p2.nav || '').startsWith(T[sidB]), '13 P2 the GUEST\'s row shows Bravo (unchanged)', S(p2));
+          ok(p2.active === sidB && S(p2.shown) === S([sidB]) && p2.hit === sidB && navNames(p2.nav, T[sidB]), '13 P2 the GUEST\'s row shows Bravo (unchanged)', S(p2));
           // P3 · a tap INTO the shown guest's content keeps the tab and the title names Bravo (never the hidden host)
           const mid = await P.ev(`const B = bySid(${S(sidB)}); const r = B.content.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height * 0.3 };`);
           await tap(mid);
           const p3 = await R13(P);
-          ok(p3.active === sidB && S(p3.shown) === S([sidB]) && p3.activeWin === sidB && (p3.nav || '').startsWith(T[sidB]), '13 P3 a tap into the shown content keeps the tab (the pointer contract) and the nav title / active window stay Bravo (as shipped: the tap named the hidden host — its title, its highlight, its ✕)', S(p3));
+          ok(p3.active === sidB && S(p3.shown) === S([sidB]) && p3.activeWin === sidB && navNames(p3.nav, T[sidB]), '13 P3 a tap into the shown content keeps the tab (the pointer contract) and the nav title / active window stay Bravo (as shipped: the tap named the hidden host — its title, its highlight, its ✕)', S(p3));
           // P2b · the HOST's row while ANOTHER window is on screen (Charlie): the group comes back on the host, not on its guest
           await pickRow(T[sidB]);
           const cTitle = await P.ev(`const C = bySid(${S(sidC)}); if (C && C.isMinimized) wm.restore(C.id); return C ? C.title : null;`);

@@ -10,7 +10,15 @@
 // A MASKED LINK (lane mask-value-shape, the owner 2026-11-07): a URL a belt masked INSIDE (`?token=«redacted»`, a
 // `[vault:<entry>]`) points at a mangled target — it is WORDS with a note (maskedLinkNote), never a link that looks whole.
 // The marks are the belt's own (src/secret-shapes.js maskedLink); every surface that draws an agent's words asks here.
+// A LINK TO ONE SETTING (lane setting-doors pick 1): `vibespace://settings/<key>` naming a KNOWN row (src/internal-link.js — the
+// key judged by the caller's `has`, the client's schema test) is the kind `setting`, ref = the key; a run naming NO row is words —
+// both spans no other hit may start inside (the path rule would link the `//settings/…` tail). It opens Settings on that row;
+// A LINK TO A CONVERSATION OR A DESKTOP (lane login-request-card piece 1): the same scheme's other two targets (src/internal-link.js —
+// ONE grammar, `has` is this renderer's OPTION for all three) are the kinds `conversation` / `desktop`, ref = the key / the stored id;
+// a press GOES through the page's door; the caller's `draw` (internal-link-door vsLinkHtml) adds the icon, the real name, the chip.
+// no value ever rides it.
 import { pathRe, cleanPath, looksRelPath, relCandidates } from '../path-linkify.js';
+import { linkHits as vsLinkHits, runRe as vsRunRe, runFloor as vsRunFloor, KEY_CH as SETTING_KEY_CH, TARGETS as VS_TARGETS } from '../internal-link.js'; // PURE (CJS): THE scheme's ONE grammar — a setting (lane setting-doors pick 1), a conversation, a desktop (lane login-request-card piece 1)
 import { CJK_PUNCT, SEG, isTrailing } from '../path-linkify.js'; // lane mask-value-shape r4: THE token grammar's classes (one definition — the path rule's own)
 import { maskedLink } from '../secret-shapes.js'; // PURE: THE belt's marks — «redacted» / [vault:<entry>], raw or in an href
 import { cutRuns, FIELD_CAPS } from '../inbox-reply-text.js'; // PURE: the tokens a cut went through (lane artifacts-by-intent r7)
@@ -58,14 +66,26 @@ const CODE_RE = /`([^`\n]+)`/g;
 const VAULT_RE = /\bvault:\/\/[^\s<>"'`]+/g;   // lane vault-standing-request r2: a vault reference is NEVER a link (the phone linkified «://secrets/secret:7…» out of one) — a span no other hit may start inside
 const LEAD = /^[([{"'“‘「『（]+/;
 const FILE_TAIL = /\.[A-Za-z0-9]{1,8}$/;
-const RANK = { vault: -1, masked: 0, url: 0, mail: 1, page: 2, path: 3 };
+const RANK = { vault: -1, setting: -1, conversation: -1, desktop: -1, words: -1, masked: 0, url: 0, mail: 1, page: 2, path: 3 };
+const SETTING_KEY_RE = new RegExp('^[' + SETTING_KEY_CH + ']+$');
 const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ESC[c]);
 
-/** Prose spans: [{start, end, kind, ref}] — the earliest wins; one starting inside an earlier one is dropped. */
-function proseHits(s) {
+/** Prose spans: [{start, end, kind, ref}] — the earliest wins; one starting inside an earlier one is dropped. `has` = the
+ *  caller's schema test (lane setting-doors pick 1): absent ⇒ no setting link is drawn. */
+function proseHits(s, has) {
   const hits = [];
   for (const m of s.matchAll(VAULT_RE)) hits.push({ start: m.index, end: m.index + m[0].length, kind: 'vault', ref: m[0] });
+  {   // the scheme (pick 1 + piece 1): with the option (`has`) a door = its kind (`setting` for a KNOWN row, `conversation`, `desktop`);
+      // EVERY other run = words, claimed whole — the option off too (the path rule never links a run's `//…` tail)
+    const known = new Set();
+    if (has) for (const h of vsLinkHits(s, has)) { known.add(h.start); hits.push({ start: h.start, end: h.end, kind: h.kind, ref: h.ref }); }
+    for (const m of s.matchAll(vsRunRe())) {   // l1 (2026-11-15): EVERY run of the scheme, glued to a word or a path too
+      if (known.has(m.index)) continue;
+      const keyAt = m.index + vsRunFloor(m[0]); let end = m.index + m[0].length; while (end > keyAt && isTrailing(s[end - 1])) end--;   // the scheme stays whole
+      hits.push({ start: m.index, end, kind: 'words', ref: '' });
+    }
+  }
   // r3 (E): a BARE vault mark (`[vault:secrets/db/secret]`, `NAME=[vault:…]`) is words — a span no other hit may start inside (its
   // label holds `/` and may hold a URL); a mark INSIDE a URL / path token is covered by that token's earlier hit
   const marked = MARK_HINT_RE.test(s);
@@ -85,6 +105,15 @@ function proseHits(s) {
     const mk = marked && m.index >= scannedTo ? pathToken(s, m.index) : null;
     if (mk) scannedTo = mk.runEnd;
     hits.push(mk && mk.mask ? { start: m.index, end: mk.end, kind: 'masked', mask: mk.mask } : { start: m.index, end: m.index + ref.length, kind: 'path', ref });
+  }
+  {   // l1: a PATH never takes a run of the scheme — one that reaches into a run ends where the run begins, one starting inside it goes
+    const runs = hits.filter((h) => h.kind === 'setting' || h.kind === 'conversation' || h.kind === 'desktop' || h.kind === 'words');
+    for (let i = hits.length - 1; i >= 0; i--) {
+      const h = hits[i]; if (h.kind !== 'path') continue;
+      const r = runs.find((x) => h.start < x.end && h.end > x.start); if (!r) continue;
+      if (h.start >= r.start) { hits.splice(i, 1); continue; }
+      const ref = cleanPath(s.slice(h.start, r.start)); if (ref.length < 4) hits.splice(i, 1); else { h.end = h.start + ref.length; h.ref = ref; }
+    }
   }
   hits.sort((a, b) => a.start - b.start || RANK[a.kind] - RANK[b.kind] || b.end - a.end);
   const out = [];
@@ -149,37 +178,39 @@ function relHits(s, base) {
   }
   return out;
 }
-function proseSegments(s, segs) {
+function proseSegments(s, segs, has) {
   const hits = [];
   let last = 0;
-  for (const h of proseHits(s)) { hits.push(...relHits(s.slice(last, h.start), last), h); last = h.end; }
+  for (const h of proseHits(s, has)) { hits.push(...relHits(s.slice(last, h.start), last), h); last = h.end; }
   hits.push(...relHits(s.slice(last), last));
   let at = 0;
   for (const h of hits) {
     if (h.start > at) segs.push({ t: 'text', s: s.slice(at, h.start) });
-    segs.push(h.kind === 'vault' ? { t: 'text', s: s.slice(h.start, h.end) }
+    segs.push(h.kind === 'vault' || h.kind === 'words' ? { t: 'text', s: s.slice(h.start, h.end) }
       : h.kind === 'masked' ? { t: 'masked', s: s.slice(h.start, h.end), mask: h.mask }   // words + a note, never a link
         : { t: 'link', s: s.slice(h.start, h.end), kind: h.kind, ref: h.ref });
     at = h.end;
   }
   if (at < s.length) segs.push({ t: 'text', s: s.slice(at) });
 }
-/** THE SEGMENTER: text → [{t:'text', s} | {t:'link', s, kind: url|mail|page|path|rel, ref} | {t:'masked', s, mask}]; the `s`
+/** THE SEGMENTER: text → [{t:'text', s} | {t:'link', s, kind: url|mail|page|path|rel|setting, ref} | {t:'masked', s, mask}]; the `s`
  *  of every segment joined IS the text (nothing added, nothing dropped). A `code span` holds a relative path or a bare
- *  filename. A `masked` segment is a URL a belt masked inside (mask = secret-shapes maskedLink's {shape, vault}). */
-export function segmentText(text, { whole = false } = {}) {   // B-3f50: `whole` = the text IS a whole stored field (its caps judge the end mark)
+ *  filename. A `masked` segment is a URL a belt masked inside (mask = secret-shapes maskedLink's {shape, vault}).
+ *  `has` (lane setting-doors pick 1) = the caller's schema test: a `vibespace://settings/<key>` naming a row it knows is the
+ *  kind `setting` (ref = the key), in prose and in a code span; absent ⇒ none (the grammar stays PURE — the client passes it). */
+export function segmentText(text, { whole = false, has = null } = {}) {   // B-3f50: `whole` = the text IS a whole stored field (its caps judge the end mark)
   const src = typeof text === 'string' ? text : '';
-  return uncutLinks(src, segmentWords(src), whole ? FIELD_CAPS : null);
+  return uncutLinks(src, segmentWords(src, has), whole ? FIELD_CAPS : null, has);   // lane setting-doors pick 1 (on .402's split): the schema test rides both passes
 }
-function segmentWords(src) {
+function segmentWords(src, has = null) {
   const segs = [];
   let at = 0;
   for (const m of src.matchAll(CODE_RE)) {
-    if (m.index > at) proseSegments(src.slice(at, m.index), segs);
+    if (m.index > at) proseSegments(src.slice(at, m.index), segs, has);
     const inner = m[1];
     const before = segs.length;
     segs.push({ t: 'text', s: '`' });
-    proseSegments(inner, segs);
+    proseSegments(inner, segs, has);
     // r5 (m4): a code span holding a belt's mark is never a rel link (`a«redacted».txt`, `x[vault:k].md` — a press would open a file that does not
     // exist); with a `/` before the mark it is a masked path (words + the note), else words — the chat's code-span rule, one grammar
     if (!segs.slice(before + 1).some((x) => x.t === 'link' || x.t === 'masked') && !/^vault:\/\//.test(inner.trim()) && !maskedLink(inner) && looksRelPath(inner.trim())) {
@@ -192,7 +223,7 @@ function segmentWords(src) {
     segs.push({ t: 'text', s: '`' });
     at = m.index + m[0].length;
   }
-  if (at < src.length) proseSegments(src.slice(at), segs);
+  if (at < src.length) proseSegments(src.slice(at), segs, has);
   return segs;
 }
 /** A CUT TOKEN IS NO LINK (lane artifacts-by-intent r7 → r8 — every reader of a cut text drops the WHOLE token the cut went
@@ -220,7 +251,7 @@ function continuation(src, e) {
   }
   return '0' + open.reverse().join('');
 }
-function uncutLinks(src, segs, caps = null) {
+function uncutLinks(src, segs, caps = null, has = null) {
   // B-3f50: on a WHOLE stored field of the agent's own (caps given) a cut is the store's — at the field's END, only at its caps: a «…»
   // the writer put at a line's end is its own words. Every other text (a template a producer filled, a line list, a text node)
   // keeps cutRuns' conservative defaults (a producer may cut a line with the same mark)
@@ -232,7 +263,7 @@ function uncutLinks(src, segs, caps = null) {
   for (const e of ends) { probe += src.slice(from, e); for (let i = from; i < e; i++) map.push(i); const c = continuation(src, e); probe += c; for (let i = 0; i < c.length; i++) map.push(e); from = e + 1; }
   probe += src.slice(from); for (let i = from; i < src.length; i++) map.push(i);
   let at = 0;
-  for (const g of segmentWords(probe)) {
+  for (const g of segmentWords(probe, has)) {
     const q = at; at += g.s.length;
     if (g.t !== 'link' && g.t !== 'masked') continue;
     const a = map[q], z = map[at - 1];
@@ -245,9 +276,11 @@ function uncutLinks(src, segs, caps = null) {
 }
 /** The words as HTML: every segment ESCAPED; a link = a span around its own words carrying its kind + ref (escaped); a
  *  masked link = its words + the note (`note(g)` — the caller's translated words, maskedLinkNote) — no ref, no role. */
-export function linkedHtml(text, { escape = esc, note = (g) => maskedLinkNote(g), whole = false } = {}) {
-  return segmentText(text, { whole }).map((g) => (g.t === 'link'
-    ? `<span class="fy-link" role="link" tabindex="0" data-fy="${escape(g.kind)}" data-ref="${escape(g.ref)}">${escape(g.s)}</span>`
+export function linkedHtml(text, { escape = esc, note = (g) => maskedLinkNote(g), whole = false, has = null, draw = null } = {}) {   // `draw(g, inner, attrs)`: a conversation / desktop link's drawing (internal-link-door vsLinkHtml)
+  return segmentText(text, { whole, has }).map((g) => (g.t === 'link'
+    ? (draw && (g.kind === 'conversation' || g.kind === 'desktop')
+      ? draw(g, escape(g.s), ` role="link" tabindex="0" data-fy="${escape(g.kind)}" data-ref="${escape(g.ref)}"`)
+      : `<span class="fy-link" role="link" tabindex="0" data-fy="${escape(g.kind)}" data-ref="${escape(g.ref)}">${escape(g.s)}</span>`)
     : g.t === 'masked' ? `<span class="fy-masked">${escape(g.s)}</span> <span class="masked-link-note">${escape(note(g))}</span>`
       : escape(g.s))).join('');
 }
@@ -275,12 +308,17 @@ export function pathMask(token) {
   const k = t.search(MARK_HINT_RE);
   return k >= 0 && t.lastIndexOf('/', k) >= 0 ? mask : null;
 }
-const KINDS = new Set(['url', 'mail', 'page', 'path', 'rel']);
+const KINDS = new Set(['url', 'mail', 'page', 'path', 'rel', 'setting', 'conversation', 'desktop']);
 /** What a link opens, resolved against the ASKING conversation (`cwd` + `host` the store stamped): {open:'url', href} |
- *  {open:'mail', href} | {open:'page', path} | {open:'file', cands, line, host} (probed in order on `host`), or null. */
+ *  {open:'mail', href} | {open:'page', path} | {open:'file', cands, line, host} (probed in order on `host`) |
+ *  {open:'setting', key} (lane setting-doors pick 1: Settings on that row — app.openSettingAt) | {open:'conversation', key} |
+ *  {open:'desktop', id} (lane login-request-card piece 1: the page's door — it only navigates), or null. */
 export function linkTarget(kind, ref, { cwd = '', host = '' } = {}) {
   const r = String(ref || '');
   if (!KINDS.has(kind) || !r) return null;
+  if (kind === 'setting') return SETTING_KEY_RE.test(r) ? { open: 'setting', key: r } : null;   // a key, never a value
+  if (kind === 'conversation') return VS_TARGETS.conversation.shape.test(r) ? { open: 'conversation', key: r } : null;
+  if (kind === 'desktop') return VS_TARGETS.desktop.shape.test(r) ? { open: 'desktop', id: r } : null;
   if (kind === 'url') return /^https?:\/\//i.test(r) ? { open: 'url', href: r } : null;
   if (kind === 'mail') return { open: 'mail', href: r.startsWith('mailto:') ? r : 'mailto:' + r };
   if (kind === 'page') return { open: 'page', path: r };

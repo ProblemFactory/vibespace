@@ -1610,6 +1610,14 @@ html[data-vc="compact"] .drawer-foryou svg { width: 18px; height: 18px; flex: no
 .ut-art-host { flex: none; color: var(--text-dim); font-size: 10px; }
 .fy-link { color: var(--accent); text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; cursor: pointer; overflow-wrap: anywhere; }
 .fy-link:hover, .fy-link:focus-visible { text-decoration-style: solid; outline: none; }
+/* lane login-request-card piece 1: a link to a conversation or a desktop (src/lib/internal-link-door.js vsLinkHtml) — the chat and For you:
+   its SVG icon, the target's real name muted after a label that lacks it, and the unknown chip that cannot be pressed */
+.chat-vs-link { cursor: pointer; }
+.vs-link-icon { display: inline-flex; vertical-align: -2px; margin-right: 3px; }
+.vs-link-icon svg { width: 12px; height: 12px; }
+.vs-link-name { margin-left: 0.4em; color: var(--text-dim); }
+.vs-link-unknown { color: var(--text-dim); cursor: default; }
+.vs-link-chip { display: inline-block; padding: 0 5px; border-radius: var(--radius-sm); font-size: 10px; line-height: 15px; background: var(--bg-hover); color: var(--text-dim); }
 /* lane mask-value-shape: a link a belt masked inside — its WORDS (never a link: the target is mangled) + the note naming the road */
 .fy-masked, .chat-link-masked { overflow-wrap: anywhere; }
 .masked-link-note { color: var(--warn-text); font-size: 0.92em; }
@@ -1670,6 +1678,19 @@ html:not(.voice-absent) .voice-field-grip > textarea { padding-right: 44px; }
 }
 .ut-reply-send { display: inline-flex; align-items: center; justify-content: center; padding: 0; height: 22px; width: 22px; color: var(--accent); }
 .ut-reply-send[data-reopen="1"] { width: auto; gap: 4px; padding: 0 8px; white-space: nowrap; font-size: 11px; } /* "Reopen and send" — its words beside the icon */
+/* B-51dd: a reply box's pictures (src/lib/reply-pictures.js) — the strip above the field, the picture button beside Send, the
+   box outlined while files are dragged over it */
+.ut-reply-pics { flex: 0 0 100%; display: flex; flex-wrap: wrap; gap: 6px; padding-top: 4px; }
+.ut-reply-pics[hidden] { display: none; }
+.ut-reply-pic-item { position: relative; width: 40px; height: 40px; box-sizing: border-box; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); cursor: zoom-in; }
+.ut-reply-pic-item img { display: block; width: 100%; height: 100%; object-fit: cover; border-radius: var(--radius-sm); }
+.ut-reply-pic-remove { position: absolute; top: -6px; right: -6px; width: 16px; height: 16px; padding: 0; border: none; border-radius: 50%; background: var(--red); color: var(--accent-fg); font-size: 9px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.ut-reply-pic { display: inline-flex; align-items: center; justify-content: center; padding: 0; height: 22px; width: 22px; }
+.ut-reply-pic svg { width: 13px; height: 13px; }
+.ut-reply-pic:hover { color: var(--accent); border-color: var(--accent); }
+.ut-reply.ut-reply-drop, .iw-reply.ut-reply-drop { outline: 1px dashed var(--accent); outline-offset: 2px; }
+.iw-reply .ut-reply-pics { padding: 0 0 6px; }
+.iw-reply > .ut-reply-pic { margin-top: 6px; }
 .ut-live-dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; box-sizing: border-box; border: 1.5px solid var(--text-dim); background: var(--text-dim); }
 .ut-live-dot[data-state="running"] { border-color: var(--green, #3fb950); background: var(--green, #3fb950); }
 .ut-live-dot[data-state="idle"] { border-color: var(--green, #3fb950); background: transparent; }
@@ -1797,6 +1818,13 @@ html:not(.voice-absent) .voice-field-grip > textarea { padding-right: 44px; }
 /* item base lives in viewers.css (.context-menu-item); keep taskbar items identical */
 .taskbar-context-menu-item { padding: 5px 12px; font-size: calc(11px * var(--ui-font-scale, 1)); cursor: pointer; color: var(--text-secondary); display: flex; align-items: center; gap: 8px; }
 .taskbar-context-menu-item:hover { background: var(--bg-hover); color: var(--text); }
+/* lane phone-six (主开发 2026-11-17, the switcher row's yield): a window menu opened by a row's ⋯ near the screen's right edge
+   keeps its natural width — menuPlace slides it left (it shrank to the 104 px left of the edge at 320: «分 / 屏», one glyph a
+   line) — and an OFF row stacks its why under its words, as the context menu's does (utils.js showContextMenu's `off`) */
+.taskbar-context-menu { width: max-content; max-width: calc(100vw - 8px); }
+.taskbar-context-menu-item.disabled:has(> .door-why) { flex-direction: column; align-items: flex-start; gap: 2px; }
+.taskbar-context-menu-item.disabled .door-label { white-space: nowrap; }
+.taskbar-context-menu-off .door-why { color: var(--text-dim); white-space: normal; line-height: 1.4; }
 
 /* ── Dialogs ── */
 .dialog-overlay {
@@ -1964,6 +1992,9 @@ html.vs-kb-open .dialog-overlay:not(#dialog-overlay) > .dialog { max-height: cal
   padding: 8px 0; border-bottom: 1px solid rgba(128,128,128,0.1);
 }
 .settings-row.modified { background: color-mix(in srgb, var(--accent) 5%, transparent); margin: 0 -8px; padding: 8px; border-radius: var(--radius-sm); }
+/* lane setting-doors pick 1: the row a `vibespace://settings/<key>` link opened on, marked for a moment (settings-ui _focusRow) —
+   the width a modified row takes (no shift), the highlight-flash every «found it» mark uses */
+.settings-row.settings-row-focus { margin: 0 -8px; padding: 8px; border-radius: var(--radius-sm); animation: highlight-flash 1.6s ease-out; }
 .settings-row-info { flex: 1; min-width: 0; }
 .settings-row-label { font-size: 12px; font-weight: 500; color: var(--text); display: flex; align-items: center; gap: 6px; }
 .settings-row-desc { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
@@ -1971,7 +2002,7 @@ html.vs-kb-open .dialog-overlay:not(#dialog-overlay) > .dialog { max-height: cal
 /* Harness sections (derived from the descriptor tables): the section intro + the per-row apply chip / CLI-config receipts */
 .settings-section-note { font-size: 11px; color: var(--text-dim); margin: -4px 0 10px; line-height: 1.4; }
 /* the session search / filter row and the quick tabs hide on the tabs they do not filter (2.369.136) */
-#sidebar.sb-no-session-filter #session-filter-row, #sidebar.sb-no-session-filter #agent-kind-quick-tabs, #sidebar.sb-no-session-filter #status-quick-tabs { display: none !important; }
+#sidebar.sb-no-session-filter #session-filter-row, #sidebar.sb-no-session-filter #agent-kind-quick-tabs, #sidebar.sb-no-session-filter #stopped-quick-tabs, #sidebar.sb-no-session-filter #status-quick-tabs { display: none !important; }
 /* the vnc paste box (2.369.136): a textarea route for the clipboard when the browser will not hand it over */
 .vnc-paste-box { display: flex; flex-direction: column; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--border); background: var(--bg-secondary); }
 .vnc-paste-note { font-size: 11px; color: var(--text-secondary); line-height: 1.4; }
@@ -1997,9 +2028,41 @@ html.vs-kb-open .dialog-overlay:not(#dialog-overlay) > .dialog { max-height: cal
 .settings-https-fact { order: 3; flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .settings-https-fact .settings-https-text { flex: 1 1 220px; min-width: 0; overflow-wrap: break-word; }
 .settings-https-fact.is-live { border-left-color: var(--accent); color: var(--text); }
-.settings-https-copy, .settings-https-recheck { flex: none; padding: 2px 10px; font-size: 11px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); cursor: pointer; }
-.settings-https-copy:hover, .settings-https-recheck:hover { border-color: var(--border-active); }
-.settings-https-recheck:disabled { opacity: 0.6; cursor: default; }
+/* lane auto-resume-bulk: the auto-resume row's bulk acts span the row (the counts, three buttons, the passive cost line) */
+.auto-resume-bulk { order: 3; flex: 1 1 100%; display: flex; flex-direction: column; gap: 4px; }
+.auto-resume-bulk-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+.auto-resume-bulk-buttons button { font-size: 11px; padding: 3px 8px; }
+.auto-resume-bulk-passive { color: var(--text); }
+.resume-stopped-dialog { max-width: 560px; }
+.resume-stopped-cost { margin: 8px 0; padding: 6px 10px; border-left: 2px solid var(--yellow); font-size: 12px; display: flex; flex-direction: column; gap: 2px; }
+.resume-stopped-dollars { font-weight: 600; color: var(--text); }
+.resume-stopped-member { color: var(--text); }
+.resume-stopped-basis { color: var(--text-secondary); font-size: 11px; }
+.resume-stopped-sub { font-size: 11px; color: var(--text-secondary); margin-top: 6px; }
+.resume-stopped-skipped .dialog-list { max-height: 160px; overflow-y: auto; font-size: 11px; }
+.resume-stopped-group-head { color: var(--text-secondary); margin-top: 4px; }   /* U2 cure: every skipped row under its reason, with the count */
+.resume-stopped-names { margin: 2px 0 0; padding-left: 16px; }
+.resume-stopped-status { font-size: 12px; min-height: 1.4em; }
+.resume-stopped-status.done { font-weight: 600; color: var(--text); }
+.resume-stopped-refused { font-size: 12px; color: var(--red); }
+.resume-stopped-empty { font-size: 12px; color: var(--text); }
+.session-card-stop { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; min-width: 0; margin-top: 2px; font-size: 10.5px; line-height: 1.4; } /* the toggle wraps under the words on a narrow card — the words stay whole */
+.session-card-stop .chip-icon { display: inline-flex; align-items: center; flex: none; }
+.session-card-stop .chip-icon svg { width: 11px; height: 11px; display: block; }
+.sess-stopped-chip { display: inline-flex; align-items: flex-start; gap: 3px; min-width: 0; max-width: 100%; color: var(--yellow); }
+.sess-stopped-chip.overload { color: var(--red); }
+.sess-stopped-chip .chip-icon { height: 1.4em; }   /* the icon box is the first line's height: the hourglass sits on that line's centre when the words wrap (the follow-up's read) */
+.sess-stopped-chip .chip-text { white-space: normal; overflow-wrap: anywhere; min-width: 0; } /* the stop's words WRAP, never cut with «…» (the follow-up's pictures: zh at the default width) */
+.sess-stopped-autoresume { font: inherit; background: transparent; display: inline-flex; align-items: center; gap: 3px; flex: 0 1 auto; min-width: 0; max-width: 100%; padding: 0 5px; border: 1px solid var(--border); border-radius: 8px; color: var(--text-dim); cursor: pointer; text-align: start; }
+.sess-stopped-autoresume .chip-text { white-space: normal; overflow-wrap: anywhere; min-width: 0; } /* «on · continues only if the limit clears early» WRAPS inside the card, never past its edge (the cure's pictures) */
+.sess-stopped-autoresume.on { color: var(--accent); border-color: var(--accent); }
+.sess-stopped-autoresume:hover { background: var(--bg-hover); color: var(--text); }
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .session-card-stop { font-size: 12px; } .sess-stopped-autoresume { min-height: 26px; padding: 0 8px; } }
+.settings-https-copy, .settings-https-recheck, .settings-engine-download { flex: none; padding: 2px 10px; font-size: 11px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); cursor: pointer; }
+.settings-https-copy:hover, .settings-https-recheck:hover, .settings-engine-download:hover { border-color: var(--border-active); }
+.settings-https-recheck:disabled, .settings-engine-download.is-busy { opacity: 0.6; cursor: default; }
+.settings-engine-doors { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; } /* B-0bc7: the engine row's «Download kernel» doors + their answer */
+.settings-engine-said { font-size: 11px; color: var(--text-secondary); }
 .settings-https-probe { flex: 1 1 100%; font-size: 11px; color: var(--text-secondary); opacity: 0.85; overflow-wrap: anywhere; } /* lane tls-pass-retry: the last failed tailscale call */
 /* lane attention-policy: a block of rows under its own head (the Settings window and the Channels ⚙ door draw the same one) */
 .settings-block { display: block; }
@@ -2842,6 +2905,10 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
   /* lane voice-everywhere: the microphone inside the reply box's trailing edge, like the chat composer (40×40 hit area) */
   html:not(.voice-absent) #user-todos-popup .voice-field > .ut-reply-input, html:not(.voice-absent) .ut-mini-popover .voice-field > .ut-reply-input, html:not(.voice-absent) #phone-home .voice-field > .ut-reply-input { min-height: 44px; padding-right: 46px; }
   #user-todos-popup .ut-reply-send, #phone-home .ut-reply-send { min-width: 36px; min-height: 36px; }
+  #user-todos-popup .ut-reply-pic, #phone-home .ut-reply-pic, .iw-reply > .ut-reply-pic { min-width: 36px; min-height: 36px; } /* B-51dd: the picture button is a touch target */
+  .ut-reply-pic svg { width: 17px; height: 17px; }
+  .ut-reply-pic-item { width: 52px; height: 52px; }
+  .ut-reply-pic-remove { width: 24px; height: 24px; top: -8px; right: -8px; font-size: 11px; }
   #user-todos-popup .ut-reply-btn svg, #user-todos-popup .ut-reply-send svg, #phone-home .ut-reply-btn svg, #phone-home .ut-reply-send svg { width: 15px; height: 15px; }
   #user-todos-popup .ut-live-dot, #phone-home .ut-live-dot { width: 9px; height: 9px; }
   /* chunk 4: "Mark all seen" and the fold's expander are touch targets too */
@@ -2934,13 +3001,27 @@ html[data-vc="compact"] #mobile-nav-overflow.on { display: inline-flex; align-it
 html[data-vc="compact"] #mobile-nav-overflow svg { width: 20px; height: 20px; }
 /* r3: the ⋯ that stands in for a folded ⚙ wears ⚙'s lock while the vault is locked (vault-locked-loud; mobile-nav.js _fitBar) */
 html[data-vc="compact"] #mobile-nav-overflow.vault-locked { position: relative; color: var(--red); }
-html[data-vc="compact"] #mobile-nav-todos[data-badges="one"] { padding: 0 4px; }
-html[data-vc="compact"] #mobile-nav-todos[data-badges="one"] .ut-count { display: none; }
-html[data-vc="compact"] #mobile-nav-todos[data-badges="one"] .mnav-one { display: inline-block; min-width: 14px; height: 14px; padding: 0 4px; border-radius: 999px; font-size: 9px; font-weight: 700; line-height: 14px; text-align: center; background: var(--accent); color: var(--accent-fg); }
+/* lane phone-six ③ (userW: 「非常多的数字围绕在周围」; 主开发's ruling 2026-11-13): on the COMPACT class the For-you button carries exactly
+   ONE number, always — the honest count in the worst urgency's colour — whatever room the bar has (the fold's one-badge form, now
+   the only form); its digit at the 14 px floor of chrome a person reads to act */
+html[data-vc="compact"] #mobile-nav-todos { padding: 0 4px; }
+html[data-vc="compact"] #mobile-nav-todos .ut-count { display: none; }
+html[data-vc="compact"] #mobile-nav-todos .mnav-one { display: inline-block; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; font-size: 14px; font-weight: 700; line-height: 18px; text-align: center; background: var(--accent); color: var(--accent-fg); }
 html[data-vc="compact"] #mobile-nav-todos .mnav-one[data-seg="urgent"] { background: var(--red); color: var(--red-fg); }
 html[data-vc="compact"] #mobile-nav-todos .mnav-one[data-seg="high"] { background: var(--yellow); color: var(--yellow-fg); }
-html[data-vc="compact"] #mobile-nav-todos .mnav-one[data-seg="quiet"] { background: none; color: var(--accent); border: 1px solid var(--accent); line-height: 12px; }
-html[data-vc="compact"] #mobile-nav-todos .mnav-one[data-seg="notice"] { background: none; color: var(--text-dim); border: 1px solid var(--border); line-height: 12px; }
+html[data-vc="compact"] #mobile-nav-todos .mnav-one[data-seg="quiet"] { background: none; color: var(--accent); border: 1px solid var(--accent); line-height: 16px; }
+html[data-vc="compact"] #mobile-nav-todos .mnav-one[data-seg="notice"] { background: none; color: var(--text-dim); border: 1px solid var(--border); line-height: 16px; }
+/* lane phone-six ③ (userW 2026-10-26: 「inbox 按钮看着比较花里胡哨，非常多的数字围绕在周围」), the recovery port onto .398: the ONE
+   badge above is the compact fold's form; the REGULAR class keeps its five (lane phone-titlebar-title, pinned) — and in its
+   portrait bar beside the list they took the window's name down to its icon (669 px). So they yield like the bar's other
+   buttons, BY MEASURE: mobile-nav.js _paintHead's YIELD_LADDER step 'badges' (and every later step) shows the same .mnav-one
+   (title-chips.js navOneBadge — the honest count in the worst urgency's colour) — only when the name needs the room. */
+html[data-vc="regular"] #mobile-nav:is([data-yield="badges"], [data-yield="gear"], [data-yield="icon"]) #mobile-nav-todos .ut-count { display: none; }
+html[data-vc="regular"] #mobile-nav:is([data-yield="badges"], [data-yield="gear"], [data-yield="icon"]) #mobile-nav-todos .mnav-one { display: inline-block; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; font-size: 14px; font-weight: 700; line-height: 18px; text-align: center; background: var(--accent); color: var(--accent-fg); }
+html[data-vc="regular"] #mobile-nav-todos .mnav-one[data-seg="urgent"] { background: var(--red); color: var(--red-fg); }
+html[data-vc="regular"] #mobile-nav-todos .mnav-one[data-seg="high"] { background: var(--yellow); color: var(--yellow-fg); }
+html[data-vc="regular"] #mobile-nav-todos .mnav-one[data-seg="quiet"] { background: none; color: var(--accent); border: 1px solid var(--accent); line-height: 16px; }
+html[data-vc="regular"] #mobile-nav-todos .mnav-one[data-seg="notice"] { background: none; color: var(--text-dim); border: 1px solid var(--border); line-height: 16px; }
 /* the ⋯ menu: the folded chips, each a 44 px row of ≥ 16 px words with its live value at the end */
 .mobile-sheet.mnav-more-menu .context-menu-item { min-height: 44px; font-size: 16px; display: flex; align-items: center; }
 /* r4: ONE glyph column — the widest glyph's (the ring's and the cog's 20 px; the desktops and lock glyphs draw 16), each centred in
@@ -3109,14 +3190,26 @@ html[data-vc="regular"] #all-sessions-list { overflow: visible !important; flex:
 /* the conversation's head: its name + its state word (src/lib/trailing-bar.js writes data-state) */
 @media (orientation: landscape) {
   html[data-vc="regular"] .window.window-active > .window-titlebar .window-title { font-size: 0 !important; overflow: hidden; }
-  html[data-vc="regular"] .window.window-active > .window-titlebar .window-title::before { content: attr(data-name); font-size: 15px; font-weight: 600; color: var(--text); }
+  html[data-vc="regular"] .window.window-active > .window-titlebar .window-title::before { content: attr(data-name); display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 15px; font-weight: 600; color: var(--text); } /* lane phone-six (the recovery's reader): a cut name ends in a VISIBLE ellipsis — the ::before is the box */
   html[data-vc="regular"] .window.window-active > .window-titlebar .window-title::after { content: attr(data-state); margin-left: 10px; font-size: 13px; font-weight: 500; color: var(--state-color, var(--text-dim)); }
   html[data-vc="regular"] .window.window-active > .window-titlebar > :not(.window-title) { display: none !important; }
 }
 .mnav-state { display: none; }
 @media (orientation: portrait) {
-  html[data-vc="regular"] #mobile-nav-title { flex: 0 1 auto; min-width: 0; text-align: left; padding-left: 4px; }
-  html[data-vc="regular"] #mobile-nav .mnav-state { display: inline; order: 3; flex: 1 1 auto; min-width: max-content; padding: 0 6px; font-size: 13px; font-weight: 500; color: var(--state-color, var(--text-dim)); white-space: nowrap; }
+  /* lane phone-six (userW: the title blank): the state word yielded nothing (min-width: max-content) and the title gave all
+     its width — 4 px at 669 beside the list column, an empty bar; now the state word yields first (to nothing) and the name
+     keeps 3.5em — the six 44 px buttons of a 348 px column leave it ~58 px, so none of them leaves the screen */
+  html[data-vc="regular"] #mobile-nav-title { flex: 0 1 auto; min-width: 3.5em; text-align: left; padding-left: 4px; }
+  html[data-vc="regular"] #mobile-nav .mnav-state { display: inline; order: 3; flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; padding: 0 0 0 4px; font-size: 13px; font-weight: 500; color: var(--state-color, var(--text-dim)); white-space: nowrap; }
+  /* round 2 (the integrator's pass: «/tm…» — three glyphs of a path): the name keeps ≥ 8 em or its whole width, the bar's
+     buttons yield first (mobile-nav.js _paintHead over PURE src/phone-head.js YIELD_LADDER, each step tried in the layout):
+     'win' — the window's own extras leave the bar (the switcher row's ✕ closes, the chat's status bar holds Artifacts, ⋯
+     the live view); 'gear' — ⚙ folds into ⋯ (trailing-bar.js: its row «Global settings»), never with the locked vault's
+     mark; 'icon' — the head is the window's type icon + the count, the name lives in the switcher */
+  html[data-vc="regular"] #mobile-nav[data-yield] :is(#mobile-nav-viewer-close, #mobile-nav-artifacts, #mobile-nav-live) { display: none !important; }
+  html[data-vc="regular"] #mobile-nav:is([data-yield="gear"], [data-yield="icon"]) #mobile-nav-gear:not(.vault-locked) { display: none !important; }
+  html[data-vc="regular"] #mobile-nav[data-yield="icon"] #mobile-nav-title { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
+  html[data-vc="regular"] #mobile-nav[data-yield="icon"] .mnav-state { display: none; }
 }
 
 /* Mobile terminal key toolbar (hidden on desktop) */
@@ -3148,6 +3241,17 @@ html[data-vc="regular"] #all-sessions-list { overflow: visible !important; flex:
   /* Suppress the iOS long-press callout on surfaces that have our own context menus */
   .mobile-folder-card, .session-item-card, .file-item, .folder-header { -webkit-touch-callout: none; }
 }
+/* ── EVERY FIELD AT 16 PX ON A FINGER (lane phone-six — userW 2026-10-26: 「在任意 session 的地方点击输入框，就会让整个屏幕放大一点。
+   输完东西回来找不到发送键，每次都要双指缩放。」). iOS zooms the page to a focused field whose text is under 16 px and never
+   zooms back — the composer's send button then sits off the screen. The ONE fix is the size: never `maximum-scale=1` /
+   `user-scalable=no` in the viewport meta (iOS ignores it, and it takes the person's own zoom away). Every focusable field
+   of every surface on a touch screen (the chat composer was 13 px, the channel composer 13, the session search 14, the
+   fork dialog 12): ≥ 16 px, inline sizes included. Gate: test-phone-six-chrome ① (the census over every phone door's
+   surface — RED on the base). ── */
+@media (hover: none) and (pointer: coarse) {
+  input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"], [type="button"], [type="submit"], [type="reset"], [type="image"], [type="hidden"]),
+  textarea, select, [contenteditable]:not([contenteditable="false"]) { font-size: max(16px, 1em) !important; }
+}
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
@@ -3176,6 +3280,13 @@ html[data-vc="regular"] #all-sessions-list { overflow: visible !important; flex:
   overflow-wrap: anywhere;
 }
 .global-toast-x, .global-toast-action, .global-toast-tap { pointer-events: auto; }
+/* lane setting-doors pick 1: a `vibespace://settings/<key>` in a toast's words (utils.js registerSettingLinks) — a link to that
+   row inside the words; it takes the pointer, the words around it still pass it through (B-a42d) */
+.global-toast-setting {
+  pointer-events: auto; border: none; background: none; padding: 0; margin: 0; font: inherit; line-height: inherit;
+  color: var(--accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; text-align: start; overflow-wrap: anywhere;
+}
+.global-toast-setting:hover { color: var(--accent-hover); }
 .global-toast-body { min-width: 0; }
 .global-toast-x {
   flex: none; border: none; background: none; color: var(--text-dim);
@@ -3336,10 +3447,10 @@ html[data-vc="regular"] #all-sessions-list { overflow: visible !important; flex:
 .ns-tg-reason.dim { color: var(--text-dim); }
 .ns-tg-it { display: flex; flex-direction: column; min-width: 0; text-align: left; }
 .ns-tg-it small { font-size: 10.5px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#ns-right .ns-acc { display: grid; grid-template-columns: 16px auto minmax(0, 1fr) auto; align-items: center; column-gap: 7px; font-size: 11.5px; font-weight: 400; color: var(--text); padding: 2px 0; cursor: pointer; }
-#ns-right .ns-acc.granted { cursor: default; }
-#ns-right .ns-acc input { accent-color: var(--accent); width: 14px; height: 14px; margin: 0; }
-#ns-right .ns-acc .ns-acc-n { font-weight: 500; white-space: nowrap; display: inline-flex; gap: 5px; align-items: center; }
+#ns-right .ns-acc, .mu-section .ns-acc { display: grid; grid-template-columns: 16px auto minmax(0, 1fr) auto; align-items: center; column-gap: 7px; font-size: 11.5px; font-weight: 400; color: var(--text); padding: 2px 0; cursor: pointer; }
+#ns-right .ns-acc.granted, .mu-section .ns-acc.granted { cursor: default; }
+#ns-right .ns-acc input, .mu-section .ns-acc input { accent-color: var(--accent); width: 14px; height: 14px; margin: 0; }
+#ns-right .ns-acc .ns-acc-n, .mu-section .ns-acc .ns-acc-n { font-weight: 500; white-space: nowrap; display: inline-flex; gap: 5px; align-items: center; }
 .ns-exc { display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px; color: var(--text-secondary); border: 1px dashed var(--border-active); border-radius: 8px; padding: 0 6px; line-height: 16px; }
 .ns-exc b { font-weight: 500; color: var(--text); }
 .ns-plain { font-size: 11.5px; color: var(--text-secondary); line-height: 1.5; padding: 8px 10px; }
@@ -3364,10 +3475,18 @@ html[data-vc="regular"] #all-sessions-list { overflow: visible !important; flex:
 .ns-res.open .ns-res-body { display: flex; }
 .ns-res-body .ns-builtin .ns-prov { grid-template-columns: 18px minmax(0, 1fr) auto; }
 .ns-res-body .ns-builtin .ns-prov .ns-pv-what { grid-column: 2 / -1; }
-#ns-right .ns-res-body .ns-acc { grid-template-columns: 20px minmax(0, 1fr); row-gap: 2px; padding: 6px 0; font-size: 13px; min-height: 32px; }
-#ns-right .ns-res-body .ns-acc input { width: 18px; height: 18px; }
-#ns-right .ns-res-body .ns-acc .ns-pv-via { grid-column: 2; font-size: 12px; }
-#ns-right .ns-res-body .ns-acc .ns-acc-end { grid-column: 2; justify-self: start; }
+#ns-right .ns-res-body .ns-acc, .mu-section .ns-res-body .ns-acc { grid-template-columns: 20px minmax(0, 1fr); row-gap: 2px; padding: 6px 0; font-size: 13px; min-height: 32px; }
+#ns-right .ns-res-body .ns-acc input, .mu-section .ns-res-body .ns-acc input { width: 18px; height: 18px; }
+#ns-right .ns-res-body .ns-acc .ns-pv-via, .mu-section .ns-res-body .ns-acc .ns-pv-via { grid-column: 2; font-size: 12px; }
+#ns-right .ns-res-body .ns-acc .ns-acc-end, .mu-section .ns-res-body .ns-acc .ns-acc-end { grid-column: 2; justify-self: start; }
+/* «What it may use» in Session Properties (unit what-it-may-use): the New Session form's rows (the shared .ns-* classes) in
+   the Properties body — its own lines only: a grain under its account, the count of the rest, an empty kind, the stored line */
+.mu-section { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.mu-section .ns-card { padding: 0; }
+.mu-section .mu-kids { display: flex; flex-direction: column; gap: 3px; padding: 2px 0 6px 23px; min-width: 0; }
+.mu-section .mu-line b { font-weight: 500; color: var(--text); overflow-wrap: anywhere; }
+.mu-section .mu-line, .mu-section .mu-more, .mu-section .mu-none { overflow-wrap: anywhere; }
+.mu-section .ns-pv-sub { min-width: 0; }
 .ns-res-body .ns-pv-subrow select { width: 100%; }
 /* the group picker as a BOTTOM SHEET on the phone (full-width rows under the thumb, ✓, 完成 — not a 220 px popover) */
 .ns-tg-scrim { position: fixed; inset: 0; background: rgba(0,0,0,.38); z-index: 99999; }
@@ -6155,6 +6274,31 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 /* THE ACCOUNT DIALOG'S MODEL SECTION (lane provider-record, design q-053 §3 — src/lib/account-models.js): the provider line,
    the rows (id · label · context · caps · 测试), each refusal under its field; a phone stacks each row */
 .am-body { display: flex; flex-direction: column; gap: 8px; }
+/* lane lg-providers U5 (B-d578): the third-party provider wizard + the roster's provider rows — theme variables only */
+#provider-wizard .pw-lead { margin: 0 0 10px; }
+#provider-wizard .pw-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; }
+#provider-wizard .pw-card { display: flex; flex-direction: column; gap: 4px; text-align: left; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-input); color: var(--text); cursor: pointer; }
+#provider-wizard .pw-card:hover, #provider-wizard .pw-card:focus-visible { border-color: var(--accent); }
+#provider-wizard .pw-card span, #provider-wizard .pw-note, .acct-provider-line { color: var(--text-dim); font-size: 0.9em; }
+#provider-wizard .pw-field { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
+#provider-wizard .pw-field input[type="password"], #provider-wizard .pw-field input[type="text"], #provider-wizard .pw-field input[type="url"], #provider-wizard .pw-field select { min-height: 32px; }
+#provider-wizard .pw-error { color: var(--red); min-height: 1.2em; }
+#provider-wizard .pw-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
+#provider-wizard .pw-fit { margin: 6px 0; }
+#provider-wizard .pw-detail { white-space: pre-wrap; max-height: 8em; overflow: auto; font-size: 0.85em; background: var(--bg-input); border-radius: var(--radius-sm); padding: 6px; }
+#provider-wizard .pw-tech { margin-top: 12px; color: var(--text-dim); font-size: 0.9em; }
+#provider-wizard .pw-tech-row { margin: 4px 0; overflow-wrap: anywhere; }
+.acct-providers-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.acct-provider-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 4px 0; }
+.acct-provider-row .acct-provider-line { flex-basis: 100%; }
+.acct-provider-icon { display: inline-flex; color: var(--text-dim); }
+.acct-provider-row .acct-name { font-weight: 600; }
+.acct-provider-row .acct-tail, .acct-provider-row .acct-model-chip { font-size: 0.9em; color: var(--text-dim); }
+.acct-provider-row .acct-model-chip { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0 6px; }
+.acct-provider-more { display: inline-flex; align-items: center; margin-left: auto; }
+#provider-wizard .pw-radio { display: inline-flex; align-items: center; gap: 4px; margin-right: 12px; }
+#provider-wizard .pw-card-off { opacity: 0.75; }
+#provider-wizard .pw-card em { font-style: normal; font-size: 0.85em; color: var(--text-dim); }
 .am-prov { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .am-kind { font-weight: 600; color: var(--text); }
 .am-kind-of { font-weight: 400; font-size: 11px; color: var(--text-dim); }
@@ -7524,6 +7668,12 @@ a.chan-prop-file-name:hover, a.chan-prop-file-name:focus-visible { text-decorati
 .chan-prop-mark { flex-shrink: 0; font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 999px; white-space: nowrap; color: var(--text-secondary); background: color-mix(in srgb, var(--text-secondary) 10%, transparent); border: 0; font-family: inherit; line-height: inherit; }
 .chan-prop-mark-edited { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 button.chan-prop-mark-replaced { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+/* lane bl-msg B-9b9c: another reply to the same message — said on the card, before Approve */
+.chan-prop-also { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; margin: 4px 0; color: var(--warn-text, var(--yellow)); }
+.chan-prop-also-text { min-width: 0; }
+button.chan-prop-also-show { cursor: pointer; background: none; border: none; padding: 0; color: var(--accent); text-decoration: underline; text-underline-offset: 2px; font: inherit; }
+@media (pointer: coarse) { button.chan-prop-also-show { min-height: 36px; padding: 0 8px; } }   /* the touch rule beside «replaced» */
+.chan-prop-also-ask { margin: 4px 0; padding: 4px 6px; border-radius: 4px; border: 1px solid var(--yellow); color: var(--text); }
 button.chan-prop-mark-replaced:hover { color: var(--text); }
 button.chan-prop-mark-replaced:focus-visible, .chan-outbox-filter-x:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 /* a finger's target (acceptance r1 N3): on a phone / a touch screen the filter's × and the «replaced» door are ≥ 36 px, like their
@@ -8423,9 +8573,9 @@ label.chan-cap-row { cursor: default; }
    body and the footer, always on screen; every body part keeps its height and the body scrolls instead of squeezing */
 .bwho-body > * { flex-shrink: 0; }
 .bwho-notes { flex-shrink: 0; display: flex; flex-direction: column; gap: 4px; padding: 0 14px 8px; }
-.bwho-lose, .bwho-refusal { display: flex; align-items: flex-start; gap: 4px; font-size: 11px; line-height: 1.4; }
-.bwho-lose > .chan-ic, .bwho-refusal > .chan-ic { margin-top: 2px; }
-.bwho-lose > span:not(.chan-ic), .bwho-refusal > span:not(.chan-ic) { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.bwho-lose, .bwho-refusal, .bproxy-legacy { display: flex; align-items: flex-start; gap: 4px; font-size: 11px; line-height: 1.4; }   /* ONE rule for a dialog note's mark (主开发 18:36Z: the legacy note too) */
+.bwho-lose > .chan-ic, .bwho-refusal > .chan-ic, .bproxy-legacy > .chan-ic { margin-top: 2px; }
+.bwho-lose > span:not(.chan-ic), .bwho-refusal > span:not(.chan-ic), .bproxy-legacy > span:not(.chan-ic) { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .bwho-footer { display: flex; justify-content: flex-end; gap: 8px; }
 .bwho-footer .mounts-btn { min-height: 28px; padding: 4px 14px; font-size: 12px; }
 /* lane browser-admin: THE New profile… dialog (src/lib/browser-new-profile.js) — the who dialog's shell + answer rows,
@@ -8581,6 +8731,24 @@ label.chan-cap-row { cursor: default; }
   .tab-item.tab-pane:not(.active) { background: transparent; box-shadow: none; color: var(--text-dim); }
   .tab-item.tab-pane:not(.active):not(.waiting)::after { content: none; }
 }
+/* ── THE TAB STRIP ON A PHONE (lane phone-six — userW 2026-10-26: 「竖屏时窗口上的 tab 会展示出来，横屏之后 tab 就不见了」).
+   The strip is the window's own door to its other tabs: a SPLIT group showed it in portrait (27 px tabs) and the regular
+   class's landscape head hid it (its `> :not(.window-title)` rule below the name), a plain group showed none at all. Now
+   every group shows ONE strip in both orientations — 44 px tabs, the names ellipsised, no 16 px ✕ inside a tab (a window
+   closes from the switcher / the bar) — and in landscape the strip IS the conversation's head (the ☰ keeps its 52 px).
+   Gate: test-phone-six-chrome ⑤ (RED on the base: no strip at 844 × 390). ── */
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
+  :is(.window.window-active, .window.phone-pane):has(> .window-titlebar .tab-item) > .window-titlebar { display: flex !important; height: 44px; min-height: 44px; align-items: stretch; }
+  :is(.window.window-active, .window.phone-pane):has(> .window-titlebar .tab-item) > .window-titlebar > :not(.tab-bar-tabs):not(.phone-pane-close) { display: none !important; }
+  :is(.window.window-active, .window.phone-pane):has(> .window-titlebar .tab-item) > .window-titlebar > .tab-bar-tabs { display: flex !important; flex: 1 1 auto; min-width: 0; height: 44px; align-items: stretch; overflow-x: auto; }
+  :is(.window.window-active, .window.phone-pane) > .window-titlebar .tab-item { height: 44px; min-height: 44px; min-width: 44px; max-width: 45vw; margin-top: 0; flex: 0 0 auto; font-size: 14px; padding: 0 12px; }
+  /* the recovery's reader (2026-11-13): six tabs drew six icons and no name — every tab keeps its NAME at a readable floor (4 em =
+     four CJK or six Latin glyphs); when they cannot all keep it the strip SCROLLS (overflow-x above); a chip beside the name
+     (the plan / owner pill, a badge) yields to it first */
+  :is(.window.window-active, .window.phone-pane) > .window-titlebar .tab-item > .tab-label { flex: 0 1 auto; min-width: 4em; }
+  :is(.window.window-active, .window.phone-pane) > .window-titlebar .tab-item > :not(.tab-icon-wrap):not(.tab-label):not(.tab-close) { flex-shrink: 1000; min-width: 0; overflow: hidden; }
+  :is(.window.window-active, .window.phone-pane) > .window-titlebar .tab-item .tab-close { display: none; }
+}
 /* backlog priority chip (Task Group log → Backlog): high = accent, low = muted, normal = none */
 .bl-prio { flex-shrink: 0; font-size: 9px; line-height: 14px; padding: 0 5px; border-radius: var(--radius-sm); border: 1px solid transparent; }
 .bl-prio-high { color: var(--accent); font-weight: 600; background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
@@ -8684,6 +8852,17 @@ label.chan-cap-row { cursor: default; }
 /* lane exit-see-whole: the last-run line is a button — it opens the machine's command list */
 button.mounts-exit-last { width: 100%; box-sizing: border-box; margin: 0; padding-top: 0; padding-right: 0; padding-bottom: 0; border: 0; background: none; font-family: inherit; line-height: inherit; text-align: left; cursor: pointer; }
 button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: underline; }
+/* B-cb72 (the owner's pick A): the summary of who may use a machine IS its door — a full-width button with a button's skin at
+   rest, the exit glyph at its head, a chevron at its end, accent while a grant is not nobody; theme variables only */
+button.mounts-exit-door { display: flex; align-items: center; gap: 6px; width: 100%; box-sizing: border-box; margin: 3px 0 2px; padding: 3px 6px; min-height: 24px; font: inherit; font-size: 10px; line-height: 1.35; text-align: left; color: var(--text-secondary); background: var(--bg-dialog); border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
+button.mounts-exit-door:hover { border-color: var(--text-dim); color: var(--text); }
+button.mounts-exit-door:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+button.mounts-exit-door.mounts-exit-door-open { border-color: var(--accent); }
+.mounts-exit-door-glyph, .mounts-exit-door-chev { display: inline-flex; flex: 0 0 auto; }
+.mounts-exit-door-open .mounts-exit-door-glyph { color: var(--accent); }
+.mounts-exit-door-text { flex: 1 1 auto; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.mounts-exit-door-chev { color: var(--text-dim); }
+@media (hover: none) and (pointer: coarse) { button.mounts-exit-door { min-height: 36px; } }
 .agents-mach-sum:has(.agents-mach-line2) { flex-wrap: wrap; }
 .agents-mach-line2 { flex-basis: 100%; order: 10; padding-left: 16px; white-space: normal; font-size: 10px; color: var(--text-dim); }
 .agents-mach-line2[data-dial-state="refused"], .agents-mach-line2[data-dial-state="auth-fail"] { color: var(--red); }
@@ -8797,6 +8976,20 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .ut-decide-ico svg { width: 12px; height: 12px; display: block; }
 .ut-action-grant { width: auto; padding: 0 8px; font-size: 11px; font-weight: 600; border-radius: var(--radius-sm); } /* lane controls-that-lie: the GRANT an ask names — a WORDED button on the 24 px .ut-act icon box, its own width (the exit ask's rule); a long profile label wraps */
 .ut-grant-answer .ut-action-grant { height: auto; min-height: 24px; min-width: 64px; white-space: normal; overflow-wrap: anywhere; text-align: start; background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+/* lane setting-doors pick 2: AN ASK THAT PROPOSES ONE CHANGE OF ONE SETTING — one box: the row's label and its door, the value NOW
+   (a value that moved since the ask in the warning accent), the proposal with its «until», a standing hold, the ask's age, then
+   ONE worded press (the grant's shape) or why there is none. Theme vars only. */
+.ut-setting-change { margin-top: 4px; padding: 3px 0 3px 8px; border-inline-start: 2px solid var(--accent); font-size: 11px; line-height: 1.45; color: var(--text); min-width: 0; overflow-wrap: anywhere; cursor: default; }
+.ut-sc-label { font-weight: 600; }
+.ut-sc-link { margin-inline-start: 0.3em; }
+.ut-sc-moved, .ut-sc-held { color: var(--warn-text); }
+.ut-sc-asked { color: var(--text-dim); }
+.ut-sc-why { font-size: 11px; color: var(--text-secondary); }
+.ut-action-setting { width: auto; padding: 0 8px; font-size: 11px; font-weight: 600; border-radius: var(--radius-sm); }
+.ut-setting-answer .ut-action-setting { height: auto; min-height: 24px; min-width: 64px; white-space: normal; overflow-wrap: anywhere; text-align: start; background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.iw-setting { margin-top: 6px; }
+.iw-setting .ut-setting-change { font-size: 12px; }
+.settings-row-held { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 4px; font-size: 12px; color: var(--warn-text); }
 /* lane vault-paste-request: an agent's request for a secret — the MASKED paste box under its words (the field, 存入保险库, 拒绝)
    and its state line (a locked vault said by name, 解锁… inline); the same box as a dialog over the For-you / Vault window */
 .ut-secret { margin-top: 5px; cursor: default; }
@@ -8860,6 +9053,7 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
   .ut-exit-answer .ut-action-exit, .ut-action-exit { min-height: 36px; min-width: 72px; }
   .ut-proposal-answer .ut-action-proposal, .ut-action-proposal { min-height: 36px; min-width: 72px; }
   .ut-grant-answer .ut-action-grant, .ut-action-grant { min-height: 36px; min-width: 72px; }
+  .ut-setting-answer .ut-action-setting, .ut-action-setting { min-height: 36px; min-width: 72px; } /* lane setting-doors pick 2: the proposed change's one press — the grant's floor */
   .exit-access-dialog .pp-row { min-height: 40px; }
   .exit-access-dialog .pp-chip { min-height: 36px; }
   .exit-access-actions { position: sticky; bottom: 0; background: var(--bg-dialog); padding-top: 6px; }
@@ -9742,12 +9936,18 @@ button.vw-chip { cursor: pointer; }
 .ut-secret-login .ut-secret-totp { flex: none; height: 26px; font-size: 11px; padding: 0 8px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: transparent; color: var(--text); cursor: pointer; }
 .ut-login-allow { display: flex; gap: 6px; align-items: center; font-size: 12px; cursor: pointer; }
 .ut-login-allow > input { margin: 0; flex: none; }
+/* lane login-request-card (one login, several sites): «Use a login you already saved…» — a picked login HIDES the typed fields (their own
+   display rules beat [hidden]); the pick wears the card's input (.vault-pw), its two buttons the card's small buttons */
+.ut-secret-login :is(.vault-secret-field, .ut-login-otp, .vw-ak-hint, .ut-login-use, .ut-login-use-pane, .ut-login-use-pick, .ut-login-use-unlock)[hidden] { display: none; }
+.ut-login-use-pane { display: flex; flex-direction: column; gap: 4px; }
+.ut-secret-login :is(.ut-login-use, .ut-login-use-back, .ut-login-use-unlock) { align-self: flex-start; height: 26px; font-size: 11px; padding: 0 8px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: transparent; color: var(--text); cursor: pointer; }
 @media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {   /* :is(#…) — the phone tray's own rules are id-level (#phone-home .ut-act …) */
   :is(#user-todos-popup, #phone-home, .vault-paste-dialog, .cn-card, .ut-mini-popover) .ut-secret-login :is(.vault-secret-field, .vault-secret-label, .vw-ak-hint, .ut-secret-note, .ut-secret-state, .ut-secret-words, .ut-login-allow, .ut-login-allow > span) { font-size: 16px; }
   :is(#user-todos-popup, #phone-home, .vault-paste-dialog, .cn-card, .ut-mini-popover) .ut-secret-login .vault-pw { min-height: 44px; font-size: 16px; }
   :is(#user-todos-popup, #phone-home, .vault-paste-dialog, .cn-card, .ut-mini-popover) .ut-secret-login :is(.ut-act, .ut-secret-totp, .ut-secret-state button) { min-height: 44px; font-size: 16px; }
   .ut-login-allow { min-height: 44px; }
   .ut-login-allow > input { width: 24px; height: 24px; }
+  :is(#user-todos-popup, #phone-home, .vault-paste-dialog, .cn-card, .ut-mini-popover) .ut-secret-login :is(.ut-login-use, .ut-login-use-back, .ut-login-use-unlock) { min-height: 44px; font-size: 16px; }
   /* the touch tray's floor is `#user-todos-popup * { font-size: max(14px, 1em) !important }` (each element ≥ its parent): the
      card's ROOT at 16 px carries every text inside it to 16 through that same floor */
   :is(#user-todos-popup, #phone-home, .cn-card, .ut-mini-popover) .ut-secret-login { font-size: 16px !important; }
@@ -9764,4 +9964,39 @@ button.vw-chip { cursor: pointer; }
   :is(#user-todos-popup, #phone-home, .vault-paste-dialog, .cn-card, .ut-mini-popover) .ut-secret-totp-ask :is(.vault-pw, .vt-set) { min-height: 44px; font-size: 16px; }
   :is(#user-todos-popup, #phone-home, .vault-paste-dialog, .cn-card, .ut-mini-popover) .ut-secret-totp-ask :is(.ut-act, .vt-way, .vt-reveal, .vt-preview-b, .vt-unlock, .ut-secret-state button) { min-height: 44px; height: auto; font-size: 16px; }
   :is(#user-todos-popup, #phone-home, .cn-card, .ut-mini-popover) .ut-secret-totp-ask { font-size: 16px !important; }
+}
+
+/* ── SIDE BY SIDE ON A PHONE (lane phone-six, 2026-10-26 — userW's wish, the owner: 「不是窗口，只能支持左右分屏」): two windows
+   of the active desktop as the LEFT and RIGHT panes of the window area (src/lib/phone-split-view.js marks them
+   .phone-pane[data-pane]), a fixed 8 px divider — no drag; each pane's head names its window (or is its tab strip) with
+   its ✕ (the split ends, the other pane stays). Only where each pane keeps MIN_PANE (350 px, PURE src/phone-split.js). ── */
+#phone-split-divider, .phone-pane-close { display: none; }
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
+  html.vs-split .window.phone-pane[data-pane] { display: flex !important; position: absolute !important; top: 0 !important; height: 100% !important; width: calc(50% - 4px) !important; }
+  html.vs-split .window.phone-pane[data-pane="left"] { left: 0 !important; }
+  html.vs-split .window.phone-pane[data-pane="right"] { left: calc(50% + 4px) !important; }
+  html.vs-split #phone-split-divider { display: block; position: absolute; top: 0; bottom: 0; left: calc(50% - 4px); width: 8px; background: var(--border); pointer-events: none; }
+  html.vs-split .window.phone-pane[data-pane] > .window-titlebar { display: flex !important; height: 44px; min-height: 44px; align-items: center; gap: 4px; padding: 0 0 0 12px; touch-action: auto; background: var(--bg-titlebar); }
+  html.vs-split .window.phone-pane[data-pane].window-active > .window-titlebar { background: var(--bg-titlebar-active); box-shadow: inset 0 -2px 0 var(--accent); }
+  html.vs-split .window.phone-pane[data-pane] > .window-titlebar > :not(.window-title):not(.tab-bar-tabs):not(.phone-pane-close) { display: none !important; }
+  html.vs-split .window.phone-pane[data-pane] > .window-titlebar > .window-title { display: block !important; flex: 1 1 auto; min-width: 0; font-size: 0 !important; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  html.vs-split .window.phone-pane[data-pane] > .window-titlebar > .window-title::before { content: attr(data-name); display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 15px; font-weight: 600; color: var(--text); } /* the box that cuts is the ::before (its parent is 0 px): the ellipsis is drawn at 15 px */
+  html.vs-split .window.phone-pane[data-pane]:not(.window-active) > .window-titlebar > .window-title::before { color: var(--text-secondary); font-weight: 500; }
+  html.vs-split .window.phone-pane[data-pane] > .window-titlebar > .phone-pane-close {
+    display: inline-flex !important; flex: 0 0 44px; width: 44px; height: 44px; align-items: center; justify-content: center;
+    background: none; border: none; padding: 0; color: var(--text-dim); font-size: 16px; cursor: pointer;
+  }
+  /* the window switcher's door: «Split» (or why not) beside a window */
+  .mobile-win-split {
+    flex-shrink: 0; min-height: 44px; min-width: 44px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+    background: none; color: var(--accent); font-size: 14px; white-space: nowrap; cursor: pointer;
+    margin-block: -8px; /* its 44 px target reaches into the row's 12 px padding instead of growing the row: every row keeps the release's 61 px (the ✕'s 36 px line sets it) — test-mobile-gaps' phone list */
+  }
+  .mobile-win-split.refused { color: var(--text-secondary); border-style: dashed; }
+  .mobile-win-split.refused { width: 44px; min-width: 44px; padding: 0; display: inline-flex; align-items: center; justify-content: center; } /* an icon at the row's end: the row's centre stays its name (主开发 09:33Z) */
+  .mobile-win-split.refused svg { width: 18px; height: 18px; }
+}
+@media (orientation: landscape) {
+  /* the list column's ☰ stands over the left pane's head (as over the single head): its 52 px */
+  html.vs-split[data-vc="regular"] .window.phone-pane[data-pane="left"] > .window-titlebar { padding-left: 52px; }
 }

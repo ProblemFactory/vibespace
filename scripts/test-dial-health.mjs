@@ -230,11 +230,13 @@ console.log('— lane device-node-version: the node a machine\'s agent runs on (
   hm.dialOnline = () => false;
   const said = { node: 'v22.22.0', openssl: '3.0.15+quic', own: true, platform: 'darwin' };
   const m1 = hm.noteRuntime('host-dial-Macbook', said);
+  hm.flushThrottled();   // B-48a4: hosts.json is written by the store writer's thread — what it owes, on disk now
   const disk1 = JSON.parse(fs.readFileSync(path.join(dir, 'hosts.json'), 'utf8')).hosts[0].deviceRuntime;
   const m2 = hm.noteRuntime('host-dial-Macbook', { ...said });
   const m3 = hm.noteRuntime('host-dial-Macbook', { ...said, openssl: '3.0.16+quic' });
   ok(m1 === true && disk1 && disk1.node === 'v22.22.0' && disk1.own === true && Number.isFinite(disk1.at) && m2 === false && m3 === true && hm.noteRuntime('host-nope', said) === false,
     'H-RT1: noteRuntime keeps the statement on the record (`deviceRuntime`, on disk at once) — the same one again moves nothing, a new OpenSSL moves it, an unknown row is no-op', { m1, m2, m3, disk1 });
+  hm.flushThrottled();   // B-48a4: the restart below reads hosts.json from disk — what the store writer owes, written now
   const rows = new HostManager({ dataDir: dir }).list();
   const dRow = rows.find((r) => r.id === 'host-dial-Macbook'), sRow = rows.find((r) => r.id === 'host-ssh-box');
   ok(dRow.runtime && dRow.runtime.state === 'old' && dRow.runtime.fix === 'reinstall' && dRow.runtime.node === 'v22.22.0' && dRow.runtime.openssl === '3.0.16+quic' && dRow.online === false

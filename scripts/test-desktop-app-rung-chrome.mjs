@@ -24,7 +24,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WebSocket = require(path.join(repo, 'node_modules', 'ws'));
@@ -71,7 +71,7 @@ const srvEnv = { ...baseEnv, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, XDG
 const srvLog = [];
 const srv = spawn(DBUS, ['--', process.execPath, 'server.js'], { cwd: wt, env: srvEnv, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
 srv.stdout.on('data', (d) => srvLog.push(String(d))); srv.stderr.on('data', (d) => srvLog.push(String(d)));
-const client = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--window-size=1400,900', `--user-data-dir=${scratch('da-rung-client')}`, 'about:blank'], { stdio: 'ignore', detached: true });
+const client = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--window-size=1400,900', `--user-data-dir=${scratch('da-rung-client')}`, 'about:blank'], { stdio: 'ignore', detached: true });
 const hits = [];
 const page = http.createServer((req, res) => { hits.push({ url: req.url, ua: req.headers['user-agent'] || '' }); res.setHeader('Content-Type', 'text/html'); res.end('<!doctype html><title>E2A rung page</title><h1>Hello rung</h1><button>Press me</button>'); });
 await new Promise((r) => page.listen(PAGE_PORT, '127.0.0.1', r));

@@ -175,13 +175,13 @@ function register(app) {
     if (!v.rel) return res.status(404).type('text/plain').send('not in the folder');
     const abs = path.resolve(f.dir, v.rel);
     if (!inside(abs, f.dir)) return res.status(404).type('text/plain').send('not in the folder');
-    if (DOOR.blocked(abs)) return res.status(503).type('text/plain').send(DOOR.SENTENCE);
+    if (DOOR.blocked(abs)) return res.status(503).type('text/plain').send(DOOR.sentenceFor(abs));
     let real = '';
     try {
       const safeFs = sfsOf(req);
       real = (await safeFs.call('realpath', { path: abs }, { timeoutMs: 8000 })).path;
       if (!inside(real, f.dir) || !(await safeFs.call('stat', { path: real }, { timeoutMs: 8000 })).isFile) real = '';
-    } catch (e) { if (e && e.status === 503) return res.status(503).type('text/plain').send('Storage not responding — try again in a moment.'); real = ''; }
+    } catch (e) { if (e && e.status === 503) return res.status(503).type('text/plain').send(e.code === 'storage-blocked' && e.message ? e.message : 'Storage not responding — try again in a moment.'); real = ''; }   // the door's own words (a parked mount's)
     if (!real) return res.status(404).type('text/plain').send('not in the folder');
     res.sendFile(path.relative(f.dir, real), { root: f.dir, dotfiles: 'deny', headers: { 'Content-Security-Policy': policy, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' } }, (err) => { if (err && !res.headersSent) res.status(404).type('text/plain').send('not in the folder'); });
   });

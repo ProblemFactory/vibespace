@@ -213,7 +213,7 @@ console.log('③ the wiring pins');
     && /case 'kill': \{\n\s+await convOps\.endConversation\(data, byOfWs\(ws\), \{ reply: \(m\) => ws\.send\(JSON\.stringify\(m\)\) \}\);/.test(wh), 'the three ws cases call the seams (create / rename-session / kill)');
   const co = read('src/server/conversation-ops.js');
   const rb = co.slice(co.indexOf('function renameSession(deps, data) {'), co.indexOf('let shared = {};') > co.indexOf('function renameSession(') ? co.indexOf('let shared = {};') : co.indexOf('/** The harness registry'));
-  const kb = wh.slice(wh.indexOf('  const endSessionBody = async (data, { reply, actBy } = {}) => {'), wh.indexOf('  const byOfWs = '));
+  const kb = wh.slice(wh.indexOf('  const endSessionBody = async (data, { reply, actBy, endTree = false } = {}) => {'), wh.indexOf('  const byOfWs = '));   // B-c134 cure: + endTree (an end that asks for its background tree)
   ok(rb.length > 1500 && /if \(trimmedName\) \{ session\._nameExplicit = true;/.test(rb) && /if \(!targetId\) return \{ ok: false, code: 'not_found' \};/.test(rb) && !/\bws\./.test(rb) && !/const trimmedName/.test(wh)
     && /rename: \(data\) => ConversationOps\.renameSession\(\{ activeSessions, setCustomName, writeSessionMeta, readSessionMeta, broadcastActiveSessions, getSessionKey \}, data\),/.test(wh),
     "the rename body is conversation-ops' renameSession (L1 moved it there whole — its customNames marker kept, no socket in it); the ws handler provides it bound to its ctx as `rename`");

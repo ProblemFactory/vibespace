@@ -20,7 +20,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { scratchDir } from './scratch.mjs';
+import { scratchDir, anchored } from './scratch.mjs';
+import { mutantCopies, unanchoredEdits, anchorHelpers } from './mutant-copy.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const acorn = createRequire(path.join(REPO, 'package.json'))('acorn');
@@ -61,10 +62,11 @@ const OPTS = {
   module: { ecmaVersion: 'latest', sourceType: 'module', allowHashBang: true },
   commonjs: { ecmaVersion: 'latest', sourceType: 'script', allowHashBang: true, allowReturnOutsideFunction: true },
 };
-const tryParse = (src, kind) => { try { acorn.parse(src, OPTS[kind]); return null; } catch (e) { return e; } };
+let lastAst = null;   // the tree the last good parse built (§3 reads it — ONE parse per file serves both laws)
+const tryParse = (src, kind) => { try { lastAst = acorn.parse(src, OPTS[kind]); return null; } catch (e) { lastAst = null; return e; } };
 
 /** The files under <root>/scripts that do not parse: [{ file, line, column, kind, message }]; plus what was read. */
-export function unparseable(root) {
+export function unparseable(root, { visit = null } = {}) {
   const cache = new Map(); const bad = []; const kinds = { module: 0, commonjs: 0, detect: 0 }; let bytes = 0;
   const files = codeFiles(root);
   for (const rel of files) {
@@ -78,6 +80,7 @@ export function unparseable(root) {
       if (err && !/'import' and 'export'|import\.meta|Cannot use keyword 'await'/.test(cjs.message) ) err = cjs;
     } else err = tryParse(src, kind);
     if (err) bad.push({ file: rel, line: err.loc ? err.loc.line : 0, column: err.loc ? err.loc.column : 0, kind, message: String(err.message).replace(/ \(\d+:\d+\)$/, '') });
+    else if (visit && lastAst) visit(rel, src, lastAst);
   }
   return { files, bad, kinds, bytes };
 }
@@ -86,7 +89,10 @@ const said = (b) => `${b.file}:${b.line}:${b.column} ${b.message} (read as ${b.k
 console.log('§1 THE TREE — every file under scripts/ that Node would load as code parses as the module kind it is');
 {
   const t0 = performance.now();
-  const r = unparseable(REPO);
+  // §3's census rides this pass: every suite / lib module under scripts/ (not this file: its plants spell edits in strings)
+  const self = path.basename(fileURLToPath(import.meta.url));
+  var EDITS = {}, HELPERS = {};   // eslint-disable-line no-var — §3 reads them
+  const r = unparseable(REPO, { visit: (rel, src, ast) => { const m = /^scripts\/((?:lib\/)?[^/]+\.mjs)$/.exec(rel); if (!m || m[1] === self) return; const e = unanchoredEdits(src, { ast }); if (e.length) EDITS[m[1]] = e; const h = anchorHelpers(src, { ast }); if (h.length) HELPERS[m[1]] = h; } });
   const ms = Math.round(performance.now() - t0);
   ok(r.files.length >= 1000 && r.files.includes('scripts/ci.mjs') && r.files.includes('scripts/test-suite-files-parse.mjs'),
     `the walk met ${r.files.length} files (${(r.bytes / 1e6).toFixed(1)} MB: ${r.kinds.module} ES modules, ${r.kinds.commonjs} CommonJS, ${r.kinds.detect} by Node's detection), this suite and scripts/ci.mjs among them`);
@@ -138,6 +144,69 @@ console.log('§2 THE CONTROLS — a scratch tree through the same walk and the s
     ok(!r.files.some((f) => f.includes('node_modules') || /\.(txt|json)$/.test(f)), 'node_modules and non-code files are never read');
     ok(r.bad.length === 6, `exactly the six planted reds, nothing else (${r.bad.length}: ${r.bad.map((b) => b.file).join(', ')})`);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
+}
+
+console.log('\n§3 A RED CONTROL THAT BUILDS NOTHING FAILS BY NAME (B-0d3e) — the anchored door, the loader\'s guard, the unanchored edits only fall');
+{
+  // THE TREE: every `.replace` / `.replaceAll` / `.split().join()` on a product file's text whose result reaches a loader
+  // without scripts/scratch.mjs `anchored()` — each the anchor of a red control that says nothing when its line moves.
+  // ONE-WAY (the §7b rule): a file that ADDS one is red by name and the red prints the row that admits it on purpose; a
+  // file whose count falls is never red (many lanes merge suites into one train) — its stale row is only said. Every
+  // mutant copy written through scripts/mutant-copy.mjs fails by name besides when its copy equals the file (all its
+  // anchors gone); anchored() fails by name on each one.
+  const LISTED = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts', 'fixtures', 'unanchored-controls.json'), 'utf-8')).files || {};
+  const per = Object.fromEntries(Object.entries(EDITS).map(([f, e]) => [f, e.length]));
+  const total = Object.values(per).reduce((a, b) => a + b, 0);
+  const judge = (p, listed) => ({ added: Object.entries(p).filter(([f, n]) => n > (listed[f] || 0)).map(([f]) => f), fell: Object.keys(listed).filter((f) => (p[f] || 0) < listed[f]) });
+  const j = judge(per, LISTED);
+  ok(total > 1000 && Object.keys(per).length > 200, `${total} unanchored control edits in ${Object.keys(per).length} scripts (non-vacuous: the walk reads the tree)`);
+  ok(!j.added.length, `the unanchored control edits only fall (the list ${Object.values(LISTED).reduce((a, b) => a + b, 0)} in ${Object.keys(LISTED).length} files)`, j.added.length ? j.added.slice(0, 6).map((f) => `${f}: ${per[f]} > ${LISTED[f] || 0} — a new edit: ${EDITS[f].slice(0, 2).map((e) => `line ${e.line} ${e.text}`).join(' · ')} — build it with anchored() from scripts/scratch.mjs, or raise the row "${f}": ${per[f]} in scripts/fixtures/unanchored-controls.json with its why`) : undefined);
+  if (j.fell.length) console.log(`    (${j.fell.length} listed file(s) now carry fewer — not red; lower their rows when convenient: ${j.fell.slice(0, 8).join(', ')}${j.fell.length > 8 ? ', …' : ''})`);
+  // THE CONTROLS — the door, the guard, the walk, the one-way rule
+  const T = 'const x = 1;\nconst y = 2;\n';
+  ok(anchored(T, 'const y = 2;', 'const y = 3;', 'plant') === 'const x = 1;\nconst y = 3;\n', 'anchored(): an anchor present once is replaced');
+  const threw = (f) => { try { f(); return null; } catch (e) { return String(e.message); } };
+  ok(/^ANCHOR GONE «plant-gone»/.test(threw(() => anchored(T, 'const z = 9;', '', 'plant-gone')) || ''), 'CONTROL: an anchor that is gone THROWS BY NAME («ANCHOR GONE» + the control\'s name)');
+  ok(/^ANCHOR NOT UNIQUE «plant-two»: .* — 2 times/.test(threw(() => anchored(T, 'const ', 'let ', 'plant-two')) || ''), 'CONTROL: an anchor found twice THROWS BY NAME («ANCHOR NOT UNIQUE» + its count)');
+  ok(anchored(T, /const (\w)/, 'let $1', 're', { count: 'any' }) === 'let x = 1;\nlet y = 2;\n' && /^ANCHOR GONE/.test(threw(() => anchored(T, /var /, '', 're-gone')) || ''), 'anchored(): a RegExp anchor (count any); a RegExp that matches nothing throws by name');
+  const seen = []; const viaFn = anchored(T, 'const ', (m, at) => { seen.push(at); return 'let '; }, 'plant-fn', { count: 'any' });
+  ok(anchored(T, /const y/y, 'let y', 're-sticky') === 'const x = 1;\nlet y = 2;\n' && /^ANCHOR MATCHES NOTHING «re-empty»/.test(threw(() => anchored(T, /z*/, '!', 're-empty', { count: 'any' })) || '')
+    && viaFn === 'let x = 1;\nlet y = 2;\n' && seen.join() === '0,13',
+    'anchored(): a sticky RegExp is found anywhere (its flag ignored); one that can match the empty string is refused by name; a replacer is called once per match with its offset, whatever the count');
+  const MUT = mutantCopies('files-parse-b0d3e', REPO);
+  const real = fs.readFileSync(path.join(REPO, 'src/pairing-token.js'), 'utf-8');
+  ok(/^CONTROL BUILT NOTHING: the copy of src\/pairing-token\.js \(«gone-anchor»\)/.test(threw(() => MUT.write('src/pairing-token.js', real.replace('a line no file has', ''), 'gone-anchor')) || ''), 'CONTROL: a mutant copy byte-identical to its file (its edit found no anchor) FAILS BY NAME in scripts/mutant-copy.mjs');
+  ok(!threw(() => MUT.write('src/pairing-token.js', real, 'deliberate', { same: true })) && !threw(() => MUT.write('src/pairing-token.js', real, null, { name: 'closed-world-copy' })) && !threw(() => MUT.write('src/pairing-token.js', real + '\n// planted', 'edited')), 'a deliberate unpatched copy says so ({ same: true }, or a closed world\'s name); a real edit writes');
+  const P = (body) => `import fs from 'node:fs';\nconst src = fs.readFileSync(path.join(REPO, 'src/x.js'), 'utf8');\n${body}\n`;
+  const nA = unanchoredEdits(P("const m = MUT.load('src/x.js', src.replace('a', 'b'), 't');")).length;
+  const nB = unanchoredEdits(P("const m = MUT.load('src/x.js', anchored(src, 'a', 'b', 't'), 't');")).length;
+  const nC = unanchoredEdits(P("const code = src.replace(/\\/\\/.*$/gm, ''); ok(code.includes('x'), 'read'); const real = MUT.load('src/x.js', src, 'as-is', { same: true });")).length;
+  const nD = unanchoredEdits(P("const p = src.replace('a', 'b').replace('c', 'd'); const f = new Function(p);")).length;
+  ok(nA === 1 && nB === 0 && nC === 0 && nD === 2, `CONTROL: the walk finds a replace-then-load (1), never an anchored() edit (0) nor a read that feeds no loader (0), and each link of a chain bound once and loaded (2) — ${[nA, nB, nC, nD].join(' / ')}`);
+  const jA = judge({ 'test-new.mjs': 1, 'test-old.mjs': 3 }, { 'test-old.mjs': 3 }), jB = judge({ 'test-old.mjs': 1 }, { 'test-old.mjs': 3 });
+  ok(jA.added.join() === 'test-new.mjs' && !jB.added.length && jB.fell.join() === 'test-old.mjs', 'CONTROL: a file that ADDS an unanchored edit is red by name; one whose count falls is only said (the one-way rule)');
+  // THE ANCHOR HELPERS (the row's «every helper that builds a control from an anchor»): a function whose own parameter is
+  // an anchor and whose body reaches a loader FAILS BY NAME — it throws, or it builds through anchored(). The ones that
+  // answer null or an unpatched copy instead are listed in scripts/fixtures/anchor-helpers.json, ONE-WAY like the edits:
+  // a file that adds one is red by name (a new helper takes scratch.mjs anchored()); a fall is said.
+  const HLISTED = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts', 'fixtures', 'anchor-helpers.json'), 'utf-8')).files || {};
+  const hper = Object.fromEntries(Object.entries(HELPERS).map(([f, h]) => [f, h.length]));
+  const htotal = Object.values(hper).reduce((a, b) => a + b, 0), hj = judge(hper, HLISTED);
+  console.log(`    ${htotal} anchor helper(s) in ${Object.keys(hper).length} script(s) answer null or an unpatched copy when their anchor moves (the controls below prove the walk finds one)`);
+  ok(!hj.added.length, `the anchor helpers that do not fail by name only fall (the list ${Object.values(HLISTED).reduce((a, b) => a + b, 0)} in ${Object.keys(HLISTED).length} files)${hj.added.length ? ` — ${hj.added.slice(0, 6).map((f) => `${f}: ${hper[f]} > ${HLISTED[f] || 0} — ${HELPERS[f].map((h) => `line ${h.line} ${h.name}`).join(', ')}`).join(' | ')} — build it through scripts/scratch.mjs anchored() (it throws «ANCHOR GONE» by the control's name); live ${JSON.stringify(hper)}` : ''}`);
+  if (hj.fell.length) console.log(`    (${hj.fell.length} listed file(s) now carry fewer helpers — not red; lower their rows when convenient: ${hj.fell.slice(0, 8).join(', ')}${hj.fell.length > 8 ? ', …' : ''})`);
+  // a listed helper that stays on purpose says why («<file>#<name>»: a control skipped by name on a base without its line, or a caller that names the anchor)
+  const HWHY = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts', 'fixtures', 'anchor-helpers.json'), 'utf-8')).why || {};
+  const whyDead = Object.keys(HWHY).filter((k) => { const [f, n] = k.split('#'); return !(HELPERS[f] || []).some((h) => h.name === n); });
+  ok(Object.values(HWHY).every((w) => typeof w === 'string' && w.length >= 20), `every helper that stays on purpose says why (${Object.keys(HWHY).length} in the list)`);
+  if (whyDead.length) console.log(`    (${whyDead.length} why row(s) name no live helper — not red; drop them: ${whyDead.join(', ')})`);
+  const H = (body) => anchorHelpers(P(body)).length;
+  const hA = H("const cut = (from, to) => { if (src.split(from).length !== 2) return null; return MUT.load('src/x.js', src.replace(from, to), 't'); };");
+  const hB = H("const cut = (from, to) => { if (!src.includes(from)) throw new Error('ANCHOR GONE ' + from); return MUT.load('src/x.js', src.replace(from, to), 't'); };");
+  const hC = H("const strip = (re) => src.replace(re, ''); ok(strip(/x/).length > 0, 'n'); const real = MUT.load('src/x.js', src, 'as-is', { same: true });");
+  const hD = H("function swap(a, b) { return require(MUT.write('src/x.js', anchored(src.replace('k', 'k'), a, b, 'swap'), 'swap')); }");
+  const hE = H("const patch = (from, to, tag) => { const m = src.replace(from, to); ok(m !== src, `CONTROL (${tag}): the patch applies`); return MUT.load('src/x.js', m, tag); };");
+  ok(hA === 1 && hB === 0 && hC === 0 && hD === 0 && hE === 0, `CONTROL: the helper walk finds a cut that answers null (1), never one that throws by name (0), one whose body reaches no loader (0), one that builds through anchored() (0) nor one that reports through the suite's check (0) — ${[hA, hB, hC, hD, hE].join(' / ')}`);
 }
 
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass} passed${fail ? `, ${fail} failed` : ''})`);

@@ -356,6 +356,7 @@ const ROUTES = {
   'GET /api/session-status/history': 'reads',
   'GET /api/agent/task-context': 'reads',               // the SessionStart injection (Activity lines, the jobs digest, the held job notifications)
   'GET /api/agent/prompt-context': 'reads',             // the per-turn injection (Activity deltas, the jobs updates ring, the override notices, the group reports — folded)
+  'GET /api/may-use': 'meta',                           // unit what-it-may-use: Session Properties' «What it may use» — Task Group NAMES (its membership) and a job's LABEL (jm.labelOf), never a record's words
   'GET /api/agent/stop-check': 'meta',                  // the Stop nudge: fixed words + the status entry's TIME
   'GET /api/agent/task': 'reads',
   'POST /api/agent/task-progress': 'echo',
@@ -398,6 +399,7 @@ const ROUTES = {
   'GET /api/user-todos/:id': 'reads',
   // ── verify r3 on the merged tree: the rows the DERIVED file list + the call closure add ──
   'POST /api/sessions/:id/stash/hand-over': 'writes',  // src/server/stash-handover.js: reads BOTH stashes (peekNotifs / stashEntries) and delivers them as ONE turn; answers counts; a hand-over after a clear carries the sentence (the walk hands over after its clear)
+  'POST /api/sessions/:id/stash/hand-over-groups': 'writes',  // B-02a3 (src/server/stash-handover.js handOverGroups): the groups engine's next-turn report for the member typed into its RUNNING turn (THE typing path), the engine's marks committed on the wrapper's word; answers counts + the hand-over id, never a message's words
   'POST /api/sessions/refresh-note': 'writes',  // lane refresh-live-sessions (src/server/stash-handover.js refreshLive): the OWNER's typed note stashed into each live conversation (a waiting refresh note taken out by identity — its own words, never a record's); answers counts + session ids
   'GET /api/agent/channels/list': 'meta',              // msgCaller: the caller's identity + its group ids (jobByToken / groupsForSession) — adapter conversations, never a store's text
   'GET /api/agent/channels/read': 'meta',
@@ -406,6 +408,7 @@ const ROUTES = {
   'POST /api/agent/channels/reply': 'meta',
   'POST /api/agent/channels/compose': 'meta',
   'POST /api/agent/channels/proposals/:id/withdraw': 'meta',
+  'POST /api/agent/channels/proposals/:id/resend': 'meta',   // lane bl-msg B-da74: the drafting agent proposes the rest
   'GET /api/agent/channels/search': 'meta',
   'GET /api/agent/channels/status': 'meta',
   'GET /api/agent/channels/watches': 'meta',           // lane agent-watch-parity: the caller's own notification rows read back (msgCaller identity) — no store's text
@@ -418,6 +421,7 @@ const ROUTES = {
   'POST /api/channels/:adapterId/:convId/send': 'meta',
   'POST /api/channels/outbox/:id/approve': 'meta',
   'POST /api/channels/outbox/:id/reject': 'meta',
+  'POST /api/channels/outbox/:id/resend': 'meta',   // lane bl-msg B-da74: the owner's «Send the rest»
   'DELETE /api/mounts/:id': 'meta',                    // mounts-plugins-wiring: the browser keeper's deps (getTasks → group ids / browserProfileId) sit lexically after this registration
   // ── the .197 integration: the other lanes' routes the derived census now sees ──
   'POST /api/ports/kill-orphan': 'meta',               // server.js: ends a port's orphan pid; the store tokens are lane-pairing's ExitProxyManager construction (userTodos / tasks.groupsForSession) that sits lexically after this registration
@@ -460,6 +464,8 @@ const ROUTES = {
   // the same way (use-law's bearerOf → jobByToken), so each reaches the jobs stash to name who it refused; no record of the five kinds
   'GET /api/vault/totp': 'meta', 'POST /api/vault/totp': 'meta', 'GET /api/vault/totp/:name': 'meta', 'DELETE /api/vault/totp/:name': 'meta', 'POST /api/vault/totp/:name/grants': 'meta', 'DELETE /api/vault/totp/grants/:id': 'meta',
   // lane browser-login: the Vault window's web logins (names, provenance words and grant rows — never a password; a person's doors)
+  'GET /api/vault/web-logins/site-words': 'meta', 'POST /api/vault/web-logins/sites': 'meta', 'POST /api/vault/web-logins/sites/remove': 'meta', 'POST /api/vault/web-logins/merge': 'meta', 'GET /api/vault/web-logins/merge-words': 'meta',   // lane login-request-card: one login, several sites — a login's sites, the grant rows' principals as the list carries them (no record text)
+  'GET /api/vault/proxy-logins': 'meta', 'POST /api/vault/proxy-logins': 'meta', 'DELETE /api/vault/proxy-logins/:name': 'meta', 'POST /api/vault/proxy-logins/move': 'meta',   // B-8b87: a browser proxy's logins — names only / a person's save, removal, «Move the password to the vault»; no record of the five kinds
   'GET /api/vault/web-logins': 'meta', 'POST /api/vault/web-logins': 'meta', 'DELETE /api/vault/web-logins/:name': 'meta', 'POST /api/vault/web-logins/grants': 'meta', 'POST /api/vault/web-logins/ungrant': 'meta', 'POST /api/vault/web-logins/confirm': 'meta', 'POST /api/vault/web-logins/discard': 'meta', 'POST /api/vault/web-logins/totp': 'meta', 'POST /api/vault/use-grants': 'meta', 'POST /api/vault/use-grants/revoke': 'meta', 'POST /api/vault/use-grants/resume': 'meta', 'POST /api/vault/use-policy': 'meta', 'POST /api/vault/use-policy/revoke': 'meta',   // lane vault-use-grants: a vault-use grant row (ids, hosts, an end — no record text); round 6: /resume un-pauses one member
   // the run door's two person doors (lane vault-run-door) ride the same person() wrapper — the bearer it refuses is named the same way
   'POST /api/vault/runnable': 'meta', 'POST /api/vault/run/asks/:askId': 'meta',
@@ -468,7 +474,7 @@ const ROUTES = {
   'POST /api/agent/vault/request': 'meta', 'GET /api/agent/vault/uses': 'meta', 'POST /api/vault/request/asks/:askId': 'meta',
   // lane vault-paste-request: a person's answer to a paste request (the person() wrapper names a refused bearer through the jobs
   // stash, like every person door), the Vault window's free entry and its delete door — no record of the five kinds' words
-  'POST /api/vault/secret-requests/:id/answer': 'meta', 'POST /api/vault/secrets': 'meta', 'DELETE /api/vault/secrets/:id': 'meta',
+  'POST /api/vault/secret-requests/:id/answer': 'meta', 'POST /api/vault/secrets': 'meta', 'DELETE /api/vault/secrets/:id': 'meta', 'DELETE /api/vault/agent-secrets/:entry': 'meta', 'POST /api/vault/job-secrets/:answer': 'meta',
   'POST /api/vault/words-asks/:id/answer': 'meta', 'POST /api/vault/entry-words': 'meta', 'POST /api/agent/vault/words': 'meta',   // lane vault-entry-description: an entry's name / description — the vault's own words (an Allow writes the card's words and resolves it; never a record's text)
   'GET /api/agent/design/systems': 'meta', 'GET /api/agent/design/system': 'meta', // lane design-systems-home: the design systems' names (belted) + ONE system's tokens.css — registry rows and a folder's file, no record
   // ── the 2.369.202 integration: lane jobs-browser's job principal — agentFacts → jobAgentFacts / refuseAgentBearer ask the
@@ -866,6 +872,7 @@ const STORAGE = {
   'src/lib/sidebar.js|localStorage|\'hostFilter\'': ['ids', 'host filter (host ids)'],
   'src/lib/sidebar.js|sessionStorage|AGENT_KIND_FILTER_KEY': ['pref', 'the agent-kind filter (this tab)'],
   'src/lib/mobile-nav.js|sessionStorage|SHOWN_KEY': ['ids', 'the phone\'s window on show per desktop id (this tab — §6b guard 10)'],
+  'src/lib/phone-split-view.js|sessionStorage|SPLIT_KEY': ['ids', 'the phone\'s side by side per desktop id — the two window ids, left and right (this tab — lane phone-six, beside SHOWN_KEY)'],
   'src/lib/sidebar.js|sessionStorage|LIST_HIDDEN_KEY': ['pref', 'lane desktop-switch-phone: the regular class\'s landscape list column hidden or not — \'1\' / \'0\', this tab only; no words of any record'],
   'src/lib/user-todos-panel.js|sessionStorage|HOME_ON_KEY': ['marker', 'was the phone\'s first-screen page on show when this tab last ran (\'1\' / \'0\'; this tab — a reload keeps the window on show, lane foryou-honest)'],
   'src/lib/telemetry-client.js|localStorage|PENDING_KEY': ['telemetry', 'unsent telemetry events: names / stacks / versions, never content (the module\'s privacy rule)'],
@@ -1193,6 +1200,7 @@ const CACHES = {
   'src/lib/user-todos-actions.js|liveByKey': 'live facts per session key (mode, turn) — no words',
   'src/lib/user-todos-actions.js|keyByWebuiId': 'ids',
   'src/lib/user-todos-actions.js|drafts': 'the OWNER\'s own unsent reply text per item — never a record\'s words',
+  'src/lib/user-todos-actions.js|pictures': 'B-51dd: the OWNER\'s own unsent reply pictures per item (what they pasted / dropped / picked) — never a record\'s words; deleted by the sent reply or a picture\'s ✕',
   'src/lib/user-todos-actions.js|fullById': 'the whole details this client saw — restoreDetails prunes to the ids the snapshot lists and a cleared item carries no detail (r3 + test-user-todos-layout ⑫)',
   'src/lib/user-todos-actions.js|detailLoads': 'id → an in-flight load (deleted on answer; ensureDetail re-checks isCleared after its GET)',
   'src/lib/user-todos-actions.js|replyFailures': 'id → THIS page\'s last refused reply {code, why} — the route\'s / the create\'s own reason (lane inbox-reply-dead-session), never an item\'s words; deleted on the next sent reply',
@@ -1336,6 +1344,7 @@ const ORDER = [
   ['src/lib/channel-group-dialogs.js', "const r = await fetchJson('/api/channel-groups/roster');", null, 'no-words', 'the invite roster: live sessions (ids + their own names) — no group message'],
   ['src/lib/user-todos-actions.js', 'const p = fetchJson(`/api/user-todos/${encodeURIComponent(id)}`).then((r) => {', /^[^\n]*\n(?:(?![^\n]*fullById\.set)[^\n]*\n){0,4}?\s*if \(isCleared\(byId\(id\)\) \|\| \(r && r\.item && isCleared\(r\.item\)\)\) return/, 'recheck', 'ensureDetail: the live record AND the answer are asked isCleared after the GET, before the detail is kept — a detail cleared while it was on its way is never kept'],
   ['src/lib/session-props.js', "fetchJson('/api/jobs').then((r) => {", /^[^\n]*\n\s*if \(gen !== ownedJobsGen\) return;/, 'generation', 'the owned-jobs list (B-70f9 ②): every jobs-updated bumps ownedJobsGen and drops the memo — a read begun before a clear is discarded, the repaint asks again (G2, for-you-jobs verify r1)'],
+  ['src/lib/session-lifecycle.js', "try { r = await fetchJson('/api/jobs'); } catch { r = null; }", /^[^\n]*\n\s*const jobs = [^\n]*clearedNow\.has\(j\.id\) && !j\.clearedAt \? \{ \.\.\.j, clearedAt: Date\.now\(\) \}/, 'recheck', 'the end-of-conversation notice (B-70f9 ②): a clear broadcast that lands while the GET is on its way marks its jobs cleared BEFORE the notice is made (endNotice names a cleared job by id, never by the cleared words); one that lands while the notice shows takes it down; the toast history keeps the head and the count'],
   ['src/lib/user-todos-actions.js', "if (connected) { const g0 = gen; fetchJson('/api/user-todos')", /^fetchJson\('\/api\/user-todos'\)\.then\(\(d\) => \{ if \(d\?\.todos && gen === g0\) setTodos\(d\.todos\);/, 'generation', 'the For-you reconnect resync: a list older than a snapshot the model applied meanwhile is dropped (r5 ⑧)'],
   ['src/lib/user-todos-actions.js', "fetchJson('/api/user-todos').then((d) => { if (d?.todos && !liveSeen) setTodos(d.todos); });", /^fetchJson\('\/api\/user-todos'\)\.then\(\(d\) => \{ if \(d\?\.todos && !liveSeen\) setTodos\(d\.todos\);/, 'generation', 'the For-you first load: dropped once any broadcast was applied (liveSeen)'],
   ['src/lib/channel-window.js', 'const r = await fetchJson(`/api/channel-groups/${encodeURIComponent(groupId)}/messages?${q}`);', /^[^\n]*\n(?:(?![^\n]*(?:innerHTML|textContent|appendChild))[^\n]*\n){0,4}?\s*return \{ n: place\(recs, \{ prepend \}\) \};/, 'substitute', 'a group page goes straight to place(), which draws every record a clear broadcast named from clearedSeen, never the page\'s copy (r5 ⑧; the substitution is pinned file-wide below)'],
@@ -1938,7 +1947,7 @@ const I_RECV = {
   'src/lib/browser-trace-view.js|k': ['browser profile', 'a kept conversation browser\'s label (the session name it was kept for — lane browser-resume §3.9)'], 'src/server/browser-kept.js|e': ['browser profile', 'a kept conversation browser\'s label (the session name it was kept for — lane browser-resume §3.9)'],
   'src/lib/browser-who-dialog.js|r.profile': ['browser profile', 'a profile label'],
   'src/lib/user-todos-actions.js|r.browser': ['browser profile', 'a profile label (the For-you Restart of a browser that stopped answering — int220, lane browser-unresponsive)'],
-  'src/lib/new-session-form.js|acc': ['channel account', 'lane new-session-form: the account ticked in the New Session form — its name in the toast that says its access row was not written'], 'src/lib/channel-account-dialogs.js|k': ['channel account', 'an integration key label'], 'src/lib/channel-account-dialogs.js|v': ['channel account', 'an account name'],
+  'src/lib/new-session-form.js|acc': ['channel account', 'lane new-session-form: the account ticked in the New Session form — its name in the toast that says its access row was not written'], 'src/lib/may-use-section.js|a': ['channel account', 'unit what-it-may-use: the account a tick in Session Properties\' «What it may use» takes back — its name in the toast that says its access row was not removed'], 'src/lib/channel-account-dialogs.js|k': ['channel account', 'an integration key label'], 'src/lib/channel-account-dialogs.js|v': ['channel account', 'an account name'],
   'src/lib/channel-group-dialogs.js|group': ['agent group', 'a group\'s name'], 'src/lib/channel-outbox.js|r': ['outbox proposal', 'a send\'s refusal reason'],
   'src/lib/channel-webhook.js|v': ['channel author', 'a webhook caller\'s registered name (the owner typed it; the author of its calls)'], 'src/lib/channel-webhook.js|o': ['outbox proposal', 'a send\'s outcome — the caller\'s name + the server\'s refusal reason'], // lane webhook-l2-ui
   'src/lib/channel-webhook.js|ck': ['channel author', 'the other VibeSpace\'s name its pairing code carries (its owner\'s reply name), worded in the join box\'s done toast'], 'src/routes/webhook.js|cv': ['channel author', 'the other VibeSpace\'s name its pairing code carries, named in the join\'s refusal sentence'], // lane webhook-pair-join
@@ -1956,6 +1965,7 @@ const I_RECV = {
   'src/lib/plugins-ui.js|meta': ['plugin', 'a plugin label'], 'src/lib/plugins-ui.js|p': ['plugin', 'a plugin label'], 'src/lib/plugins-ui.js|st': ['plugin', 'a plugin\'s status reason'],
   'src/lib/session-lifecycle.js|a': ['account', 'an account'], 'src/lib/session-props.js|s0': ['session', 'the session\'s own name'],
   'src/lib/task-detail.js|info': ['path', 'lane task-group-context: the path field\'s commit (src/lib/path-field.js `info.text`) — the path the person typed into a Context row; never a record\'s words'],
+  'src/lib/user-todos-actions.js|card': ['setting', 'a proposed change\'s card (lane setting-doors pick 2, settingCardOf): card.label = the schema row\'s label in the press\'s toast — never an item\'s words'],
   'src/lib/settings-ui.js|schema': ['setting', 'a setting\'s label'], 'src/lib/sidebar-mounts.js|h': ['host', 'a machine name'], 'src/lib/sidebar-mounts.js|v': ['host', 'the Add-machine form\'s values — the name the person just typed, said back in the refusal «a machine named … already exists» (lane ui-language)'], 'src/lib/sidebar-mounts.js|s': ['share', 'a share name'], 'src/lib/sidebar-mounts.js|t': ['mount token', 'a token name'],
   'src/lib/window-share.js|r': ['session', 'an agent\'s name'],
   'src/lib/machine-desktop-handover.js|r.lease.holder': ['session', 'the conversation a machine\'s desktop was handed to (its name in the hand-over toast — lane desktop-handover)'],
@@ -1969,7 +1979,8 @@ const I_RECV = {
   'src/routes/design.js|req.query': ['caller', 'the agent\'s own ?name= — the design system it asks for, handed to the engine (lane design-systems-home)'],
   'src/routes/desktop-apps.js|rec': ['desktop app', 'an app label'], 'src/routes/desktop-apps.js|row': ['desktop app', 'a machine\'s reason'], 'src/routes/desktop-apps.js|spec': ['desktop app', 'an app label'],
   'src/routes/files.js|shadow': ['mount', 'a storage name'],
-  'src/server/browser-handback.js|sess.s': ['session', 'a session\'s name'], 'src/server/browser-propose.js|sess.s': ['session', 'a session\'s name'], 'src/server/browser-keeper.js|n': ['browser notice', 'the keeper\'s own notice (resources, a heal)'], 'src/server/browser-keeper.js|p': ['browser profile', 'a profile label'], 'src/server/browser-keeper.js|src': ['browser profile', 'the label of the profile a copy is made from (lane browser-profile-clone)'], 'src/server/browser-keeper.js|out': ['browser profile', 'the new copy\'s label (lane browser-profile-clone)'], 'src/browser-clone.js|h': ['session', 'a lease holder\'s name in the source_leased refusal — the user\'s own conversation, said to the user (lane browser-profile-clone)'], 'src/server/browser-disk-run.js|p': ['browser profile', 'a profile label (lane browser-disk-sample: the disk sample\'s journal lines)'], 'src/server/browser-disk-run.js|n': ['browser notice', 'the disk sample\'s own For-you notice (src/browser-disk.js diskNotice)'],
+  'src/routes/files.js|pk': ['mount', 'a PARKED storage name in its refusal (B-5ce7 cure: the refusal names it and its doors)'], 'src/mount-door.js|pk': ['mount', 'a PARKED storage name in the door\'s refusal (B-5ce7 cure)'],
+  'src/server/browser-handback.js|sess.s': ['session', 'a session\'s name'], 'src/server/browser-propose.js|sess.s': ['session', 'a session\'s name'], 'src/server/browser-keeper.js|n': ['browser notice', 'the keeper\'s own notice (resources, a heal)'], 'src/server/browser-keeper.js|p': ['browser profile', 'a profile label'], 'src/server/browser-keeper.js|r': ['vault entry', 'B-8b87: a proxy login\'s vault entry NAME (proxy-login:<scheme>://<host>:<port>#<user>) in the «Move the password to the vault» journal line — no record\'s text'], 'src/browser-profiles.js|p': ['browser profile', 'a profile label (B-8b87: the proxy launch verdict\'s sentences)'], 'src/server/browser-keeper.js|src': ['browser profile', 'the label of the profile a copy is made from (lane browser-profile-clone)'], 'src/server/browser-keeper.js|out': ['browser profile', 'the new copy\'s label (lane browser-profile-clone)'], 'src/browser-clone.js|h': ['session', 'a lease holder\'s name in the source_leased refusal — the user\'s own conversation, said to the user (lane browser-profile-clone)'], 'src/server/browser-disk-run.js|p': ['browser profile', 'a profile label (lane browser-disk-sample: the disk sample\'s journal lines)'], 'src/server/browser-disk-run.js|n': ['browser notice', 'the disk sample\'s own For-you notice (src/browser-disk.js diskNotice)'],
   'src/server/channel-api.js|e': ['channel', 'a vendor fetch error\'s name'], 'src/server/channel-api.js|p': ['outbox proposal', 'an API proposal\'s reject / failure reason'], 'src/mounts.js|c': ['mount', 'a storage mount\'s name'],
   'src/server/channels-engine.js|e': ['channel', 'a SecretBoxError\'s `reason` — a refusal CODE (key-unreadable:vault_locked), compared, never worded (lane vault-e2e-password-fix-r2)'],
   'src/server/channels-engine.js|ctx': ['session', 'an agent session\'s name'], 'src/server/channels-engine.js|err': ['channel', 'a vendor error\'s detail'], 'src/server/channels-engine.js|fresh': ['outbox proposal', 'a decision reason'],
@@ -2011,10 +2022,13 @@ const I_RECV = {
   'src/spawn/ssh.js|h': ['host', 'a machine name'], 'src/spawn/dial.js|h': ['host', 'a machine name'], 'src/ws-handler.js|data': ['caller', 'the owner\'s own queued text (a refusal echoes its LENGTH to the owner who typed it)'],
   'src/ws-handler.js|h': ['host', 'a machine name'], 'src/ws-handler.js|wcaps': ['harness', 'a wrapper capability\'s reason'],
   'src/ws-handler.js|w': ['words', 'the withheld-signal sentence (B-5ee1, proc-identity withheldWords): the killed session\'s name or its machine, a pid number and a start minute — never a record\'s words'],
+  'src/ws-handler.js|tn': ['words', 'the stop\'s notice to the person (B-c134 cure, PURE proc-identity treeNotice): the ended conversation\'s own name and the kernel\'s process names (comm), counted — never a record\'s words'],
   // ── verify r8 ③: the journal's receivers (every server console / log line rides the incident ring) ──
   'data/bin/codex-chat-wrapper.js|r': ['harness', 'an app-server answer\'s reason / detail (an RPC refusal)'], 'data/bin/codex-chat-wrapper.js|st': ['harness', 'a steer answer\'s reason / detail (an RPC refusal)'],
   'src/accounts.js|to': ['account', 'a pool member (the deleted default\'s re-point target — lane pool-pin)'], 'src/accounts.js|pool': ['account', 'a pool'],
   // lane pool-provider-latents (q-055 M2): a pool default a deletion left UNPLACED — its deleted member's name and provider label (the store's own refusal of a spawn that would read it)
+  'src/lib/provider-roster.js|p': ['account', 'a third-party model provider\'s own label (the owner named it) in the roster\'s rename / new-key / remove dialogs — lane lg-providers U5'],
+  'src/server/provider-spawn.js|p': ['account', 'a third-party model provider\'s own label (the owner named it in the wizard) in the spawn road\'s refusal sentences — lane lg-providers U2'],
   'src/accounts.js|ud': ['account', 'a pool default\'s UNPLACED mark (the deleted member\'s name)'], 'src/accounts.js|ud.provider': ['account', 'the UNPLACED mark\'s provider (its label)'],
   // lane vault-e2e-password: a key file the vault seals — its NAME is a STORE_KEYS constant (.accounts-key …), never a record's words
   'src/server/vault-engine.js|it': ['migration', 'a key file the vault seals (its constant name)'], 'src/server/vault-engine.js|k': ['migration', 'a STORE_KEYS row (a key file\'s constant name)'],
@@ -2032,7 +2046,9 @@ const I_RECV = {
   'src/port-forward.js|h': ['host', 'a machine name'], 'src/server/auto-cli-loop.js|it.pj': ['quota', 'a projection\'s label'],
   // lane hub-sync-holds rank 16 (round 2): the mail walk's directory entry — its file name builds the folder path the walk's «could not be read» error names (the person's own mail folder, said on their own mount's row), never a record's words
   'src/gmail-sync.js|ent': ['mail folder', 'a directory entry of the person\'s own Gmail mount folder (its file name, in the walk\'s «the mail folder could not be read» error)'],
-  'src/server/auto-resume.js|chk': ['quota', 'a pre-fire check\'s reason'], 'src/server/auto-resume.js|ident': ['account', 'a billing identity'],
+  'src/server/auto-resume.js|chk': ['quota', 'a pre-fire check\'s reason'], 'src/server/auto-resume.js|x.identity': ['account', 'the account an attended bulk press is refused on (form two) — its name in the journal'], 'src/server/spend-guard.js|r.identity': ['account', 'a refused account of an attended batch (form two)'], 'src/server/spend-guard.js|r': ['quota', 'a refused slot of an attended batch — its rule and the authorizer\'s detail'], 'src/server/auto-resume.js|h': ['quota', 'the model cap a stop fact names (modelCapHold — the vendor\'s cap name, never a person\'s text)'], 'src/server/auto-resume.js|ident': ['account', 'a billing identity'],
+  // lane auto-resume-bulk (.349): the bulk resume's journal — the identity a continue landed on (re-resolved after the gate) and the batch's spend refusal
+  'src/server/auto-resume.js|ident2': ['account', 'a billing identity (the bulk resume\'s continue, re-resolved after its gate)'], 'src/server/auto-resume.js|bill': ['account', 'the slot that BILLS a bulk resume\'s continue — its spend re-asked before each deliver (lg-recovery U2 cure)'], 'src/server/auto-resume.js|rec.refused': ['quota', 'the bulk resume\'s spend refusal (its bucket + the verdict\'s detail)'],
   'src/server/boot-restore.js|h': ['host', 'a machine name'], 'src/server/boot-restore.js|session': ['session', 'a session\'s name'],
   'src/server/boot-restore.js|tally': ['count', 'the re-probe tally — its `open` is the list of sock files still unanswered, never a For-you item\'s door (lane foryou-plugin-notices gave the item an `open` field, a SHAPES drop row)'],
   'src/server/browser-env.js|f': ['browser profile', 'a pin repoint\'s previous profile'], 'src/server/browser-keeper.js|rec': ['browser profile', 'a browser record\'s label'], 'src/server/browser-builds-keeper.js|p': ['browser profile', 'a profile label (rv-browser F7: Change build… moved out of the keeper)'], 'src/server/browser-builds-keeper.js|bc': ['browser profile', 'verify r2 (B5): a Chrome build change\'s from / to — build words ("Chrome 151.0.7922.34"), never a record\'s text'],
@@ -2063,7 +2079,7 @@ const I_RECV = {
   'src/server/user-input.js|caps': ['harness', 'a wrapper capability\'s reason'], 'src/task-groups.js|shadow': ['mount', 'the storage shadowing a context folder'],
   'src/server/session-brain.js|b': ['harness', 'a fallback banner\'s model (from → to)'], 'src/server/stdout/claude-stream-json.js|b': ['harness', 'a fallback banner\'s model (from → to)'],
   'src/server/session-stdout.js|death': ['harness', 'a CLI death\'s reason code'], 'src/ws-create.js|refusal': ['harness', 'a worktree refusal\'s reason code'],
-  'src/ws-create.js|pin': ['browser profile', 'a pinned profile\'s label'], 'src/ws-create.js|session': ['session', 'a session\'s name'], 'src/ws-handler.js|session': ['session', 'a session\'s name'],
+  'src/ws-create.js|said': ['words', 'a PURE verdict\'s sentence (src/billing-pick.js helperNotice — unit «billing pick alive»: the conversation\'s name, the picked account\'s name, the machine — the helper-set-aside notice)'],   'src/ws-create.js|pin': ['browser profile', 'a pinned profile\'s label'], 'src/ws-create.js|session': ['session', 'a session\'s name'], 'src/ws-handler.js|session': ['session', 'a session\'s name'],
   // ── the .197 integration: the other lanes' receivers, each named by what it is ──
   'src/agentd/agentd.js|f': ['dial', 'the daemon\'s own dial attempt facts (a code + the network\'s detail) — lane-pairing, never a record'],
   'src/server/dial-pairing.js|facts': ['dial', 'where a dial came from (an address) — lane-pairing'],
@@ -2157,6 +2173,12 @@ const I_RECV = {
   'src/lib/voice-teach-ui.js|skip': ['vendor code', 'Dropline\'s skip reason for ONE dictionary word (review / refused mapped to fixed words, else the vendor\'s own short code) — never a record\'s text'],
   // lane vault-login: an existing web-login summary's pending kind ('register' | 'change' | null), compared to pick a fixed refusal
   'src/browser-login.js|dup': ['vault entry', 'an existing web-login entry summary\'s `pending` kind (\'register\' | \'change\' | null) compared to choose one of two fixed login_exists sentences — never a record\'s words'],
+  // lane login-request-card: one login, several sites — another login's CLEAR name (the vault's names) in login_exists, and the person's own request
+  'src/browser-login.js|other': ['vault entry', 'another web-login entry\'s clear name (web-login:<origin>#<user>, the vault\'s names) named in login_exists so the person can merge the two — never a record\'s words'],
+  'src/server/browser-logins.js|h': ['vault entry', 'the login that already holds a (site, user) pair — its clear name (web-login:<origin>#<user>, the vault\'s names) named in login_exists at the doors that make a login, so the person changes it at that row — never a record\'s words'],
+  'src/browser-login.js|third.e': ['vault entry', 'a third web-login entry\'s clear name named in the merge\'s login_exists — never a record\'s words'],
+  'src/routes/vault.js|req.query': ['caller', 'the person\'s own ?name= / ?site= / ?user= — the login and the site an add is asked about, handed to the web-login store'],
+  'src/routes/vault.js|b': ['caller', 'the request body — the person\'s own login name, site and the name it signs in under there, or the two logins to merge, handed to the web-login store'],
 };
 // the per-site class of every record / carrier read: `file|sink|read` → [class, why]
 const I_SITES = {

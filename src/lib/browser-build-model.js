@@ -52,13 +52,13 @@ export function liveKernelWords(kl, t) {
  *  why it cannot be picked (the refusal by its code, the kernel's state). Lane engine-distribution: the kernel's download as
  *  it runs / why it failed; the version VibeSpace MEASURED («measured x») beats the plugin's word, which beats the declared
  *  one («declared x (not measured)»); a verified receipt says so. B-cf42: + what its running browsers answer when that is not
- *  what its probe says (`e.live`). */
-export function engineNote(e, t) {
-  const base = engineNoteOf(e, t);
+ *  what its probe says (`e.live`). B-0bc7: `door` — the Settings row's words, where «Download kernel» stands. */
+export function engineNote(e, t, { door = false } = {}) {
+  const base = engineNoteOf(e, t, { door });
   const lw = base && e && !e.code && e.live && Number(e.live.n) > 0 ? liveKernelWords(e.live, t) : '';
   return lw ? base + ' · ' + t(i18nKey('{n} browser(s) on it: {live}'), { n: Number(e.live.n), live: lw }) : base;
 }
-function engineNoteOf(e, t) {
+function engineNoteOf(e, t, { door = false } = {}) { // B-0bc7: `door` — the Settings row's words, where «Download kernel» stands
   if (!e || typeof e !== 'object') return '';
   const plugin = String(e.label || e.id || '');
   if (e.code) return engineFailedWords(e.failed, plugin, t) || buildRefusalWords({ code: e.code }, t) || t(i18nKey('{plugin} does not answer as a browser engine.'), { plugin });
@@ -90,7 +90,7 @@ function engineNoteOf(e, t) {
   // of the very kernel that waits is said as a SECOND download of it
   const nx = k && k.next && k.next.version ? k.next : null, dk = k && k.discarded ? k.discarded : null;
   const again = !!(nx && dk && (dk.version === nx.version || (dk.sha256 && dk.sha256 === nx.sha256)));
-  const kept = nx ? ' · ' + nextKernelWords(nx, t) : '', gone = dk ? ' · ' + discardedWords(dk, t, { again }) : '';
+  const kept = nx ? ' · ' + nextKernelWords(nx, t, { door }) : '', gone = dk ? ' · ' + discardedWords(dk, t, { again }) : '';
   const verified = (e.integrity && e.integrity.verified === true ? ' · ' + t(i18nKey('verified')) : '') + (k && k.landing ? ' · ' + t(i18nKey('waiting for the new kernel to land (≤ {s} s)'), { s: String(k.landing.waitS) }) : kept + gone);
   if (e.measuredVersion) return t(i18nKey('{plugin} · measured {version}'), { plugin, version: String(e.measuredVersion) }) + verified;
   if (e.version) return t(i18nKey('{plugin} · version {version}'), { plugin, version: String(e.version) }) + verified;
@@ -110,8 +110,9 @@ export function discardedWords(d, t, { again = false } = {}) {
 }
 /** lane fleet-plugin-catalog: a new kernel that WAITS beside the running one (`kernelFact().next`). r8 (s3): one that could not
  *  be read when last asked (`next.unread` — the error) says so, never «it serves the next browser start». */
-export function nextKernelWords(next, t) {
-  if (next && next.unread) return t(i18nKey('the waiting kernel {version} could not be read ({code}) — it is kept beside its place and asked again at the next start'), { version: String(next.version || ''), code: String(next.unread) });
+export function nextKernelWords(next, t, { door = false } = {}) {
+  // B-0bc7: …and, where the door stands (the Settings engine row — never Change build… or New profile…, which have none), names it
+  if (next && next.unread) return t(i18nKey('the waiting kernel {version} could not be read ({code}) — it is kept beside its place and asked again at the next start'), { version: String(next.version || ''), code: String(next.unread) }) + (door ? ' · ' + t(i18nKey('press «Download kernel» to fetch it again')) : '');
   return t(i18nKey('new kernel {version} downloaded — it serves the next browser start'), { version: String((next && next.version) || '') });
 }
 const short = (sha) => String(sha || '').slice(0, 12);
@@ -178,8 +179,63 @@ function kernelFailWords(code, t) {
     case 'kernel_credential_unusable': return t(i18nKey('the Plugin Git credential cannot download it — a release asset needs an access token (https)'));
     // round 2: GitHub serves `releases/download/…` to a browser's session, never a token — the fix is the plugin's kernel.json
     case 'kernel_asset_browser_form': return t(i18nKey("the plugin's kernel.json names the browser download form; a private repository's asset needs the API form (api.github.com/repos/<owner>/<repo>/releases/assets/<id>) — tell the plugin's author"));
+    case 'engine_kernel_landing': return t(i18nKey('its kernel is being replaced or put back in its place — try again in a moment')); // B-0bc7: a person's download beside a landing / a put-back
     default: return String(code);
   }
+}
+/** B-0bc7: THE «Download kernel» DOORS (POST /api/browser/engines/:id/kernel — a person's act): an engine PLUGIN that answers as one
+ *  (never the owner's own program — VibeSpace never downloads that), whose kernel is not installed on this computer (none yet, or
+ *  its download failed) or whose waiting kernel could not be read — never one waiting for consent or one this Node cannot unpack.
+ *  `busy` while it downloads (the card says its progress then). `r` = the GET /api/browser/engines answer. → [{id, label, busy}] */
+export function kernelDoors(r) {
+  const engines = r && !r.error && Array.isArray(r.engines) ? r.engines : [];
+  const out = [];
+  for (const e of engines) {
+    if (!e || typeof e !== 'object' || !e.id || e.code || e.source === 'user') continue;
+    const k = e.kernel && typeof e.kernel === 'object' ? e.kernel : null;
+    // the lane's adversarial read: never where a download cannot help — a package waiting for consent, a Node that cannot unpack it
+    if (k && (k.state === 'untrusted' || (k.state === 'failed' && k.code === 'engine_node_unsupported'))) continue;
+    if (!e.installed || (k && k.next && k.next.unread)) out.push({ id: String(e.id), label: String(e.label || e.id), busy: !!(k && k.state === 'downloading') });
+  }
+  return out;
+}
+/** B-0bc7 (the lane's adversarial read): is a kernel DOWNLOADING now (whoever started it)? — the Settings row asks again while one is: the
+ *  route answers a person's press when the download STARTS, so the card's progress and its end come only from asking again. */
+export function kernelPollDue(r) {
+  return !!(r && !r.error && Array.isArray(r.engines) && r.engines.some((e) => e && e.kernel && typeof e.kernel === 'object' && e.kernel.state === 'downloading'));
+}
+/** B-0bc7 (the second adversarial read): the Settings row's step after an engines answer — `polling` = a download ran at the row's
+ *  last GOOD read. A read that failed (fetchJson's null, an error) never ends a running download's progress: the doors stay as drawn
+ *  (`redraw` false) and the row asks again. → {polling, tick, redraw} */
+export function kernelPollStep(r, polling = false) {
+  if (!r || r.error) return { polling: !!polling, tick: !!polling, redraw: false };
+  const due = kernelPollDue(r);
+  return { polling: due, tick: due, redraw: true };
+}
+/** B-0bc7 (its verdict's must): a door's old answer ends when its download STARTS — an engine whose kernel moves INTO
+ *  `downloading` from another state (or at the first read this Settings view makes of it) — never on a read that still says
+ *  downloading, so a press on a busy door shows its own words. Cure 2 (主开发, as a must): …and when a download ENDS — ANY change
+ *  of a known state ends the answer beside the door (never «its kernel is already downloading» beside a fact line that says it
+ *  FAILED). `said` / `states` = id → the answer / id → the last state seen (the SettingsUI's own: a row redrawn by Reset keeps
+ *  them — an answer still ends at the next change). PURE (new Maps). → {said, states} */
+export function kernelSaidStep({ said = new Map(), states = new Map(), engines = [] } = {}) {
+  const s = new Map(said), st = new Map(states);
+  for (const e of engines || []) {
+    if (!e || e.id == null) continue;
+    const id = String(e.id), now = e.kernel && typeof e.kernel === 'object' ? String(e.kernel.state || '') : '';
+    if (st.has(id) ? st.get(id) !== now : now === 'downloading') s.delete(id); // a known state that CHANGED (a start, an end) — else only a download running at the first read
+    st.set(id, now);
+  }
+  return { said: s, states: st };
+}
+/** B-0bc7: what a person's «Download kernel» answered, in words — '' when it ran (the card's line says the rest through kernel.state);
+ *  a refusal by its CODE (the route's own refusals before any byte: disk, build_platform_unsupported, install_running,
+ *  browser_engine_protocol; a landing / a put-back in flight; anything else by its code); null ⇒ the hub did not answer. */
+export function kernelDownloadWords(ans, t) {
+  if (!ans) return t(i18nKey('VibeSpace did not answer — nothing was downloaded'));
+  if (ans.ok !== false && !ans.code && !ans.error) return '';
+  if (ans.code === 'install_running') return t(i18nKey('its kernel is already downloading'));
+  return t(i18nKey('the kernel could not be downloaded: {why}'), { why: kernelFailWords(ans.code || 'error', t) });
 }
 /** The Settings row's fact beside «Default browser engine» (GET /api/browser/engines): where the value in effect comes from
  *  (a cluster preset says so) + each engine on this computer. */
@@ -193,7 +249,7 @@ export function engineFactText(r, t) {
   const parts = [d.source === 'fleet' ? t(i18nKey('Set by the cluster preset: {value}.'), { value }) : d.source === 'user' ? t(i18nKey('Your choice: {value}.'), { value }) : t(i18nKey('Default: {value}.'), { value })];
   // lane engine-spi-egress: an engine the value names that is not in the table is a FACT said here — never a refusal of the value
   if (pid && !row) parts.push(t(i18nKey('That browser engine plugin is not running on this computer — enable it in ⚙ → Plugins.')));
-  parts.push(engines.length ? engines.map((e) => engineNote(e, t)).join(' · ') : t(i18nKey('No browser engine plugin is enabled on this computer.')));
+  parts.push(engines.length ? engines.map((e) => engineNote(e, t, { door: true })).join(' · ') : t(i18nKey('No browser engine plugin is enabled on this computer.'))); // B-0bc7: the row where «Download kernel» stands
   return parts.join(' ');
 }
 /** lane engine-spi-egress r2: THE ROW'S <select>, drawn from engineOptions at EVERY draw — the first, a Reset's redraw, the engines'

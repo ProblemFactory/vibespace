@@ -9,9 +9,9 @@
 // them directly). Zero API calls anywhere (§ban-safety): inputs are the local
 // anchor files + the local usage-history ledger only.
 //
-// PRIORS: seeded from the measured ProblemFactory Max quotas (2026-08-09,
-// odometer method over full windows, 5 anchors self-consistent to ±3%):
-// 5h ≈ $500, 7d ≈ $1730, Fable weekly ≈ $875 API-equivalent. Blended as a
+// PRIORS: a source's own (its adapter's, src/harnesses/<source>-predict.js — lane usage-predict pick 3). Claude's are the
+// measured Max quotas (2026-08-09, odometer method over full windows, 5 anchors self-consistent to ±3%); codex and
+// Antigravity declare none and learn first. Blended as a
 // pseudo-pair with Δu-weight PRIOR_WEIGHT_DU so real observations dominate
 // once an identity has ~15%+ of observed utilization movement. Caveat: these
 // are Max-20x numbers — a Pro account starts ~4-10× off and self-corrects as
@@ -25,21 +25,15 @@ const fs = require('fs');
 const RR = require('./run-reads.js'); // B-403e: one ask per file of the mount per synchronous run
 const path = require('path');
 const { resetLanded, withOwnAbsence } = require('./quota-model.js');
+const UP = require('./usage-predict.js');   // whether a source's projection may be drawn / read by the pool (usage-predict)
 const { evictIdle, cacheRow, ESTIMATOR_LINES_MAX_BYTES, ESTIMATOR_LINES_IDLE_MS, ESTIMATOR_LIVE_MAX_BYTES } = require('./cache-bounds.js'); // PURE (B-9428)
 
 // Δu-equivalent weight of the prior pseudo-observation.
 const PRIOR_WEIGHT_DU = 0.15;
-// Measured Max-20x full-quota sizes in API-equivalent USD (see header).
-const CLAUDE_MAX_PRIOR_FULL_USD = { fiveHour: 500, sevenDay: 1730, 'scoped:fable': 875 };
-// 5h TOKEN-CLASS priors (B-536b; 3-class since 2.268.1): the 5h bucket
-// weights each token class differently from our $ pricing — cache WRITES
-// burn ~half per $, cache READS are nearly FREE (incremental caching makes
-// cr-dominated windows: real-data fit cw ~$443 / cr ~$2556 / fresh ~$185).
-// Three pure-class pseudo-pairs seed the regression; real data dominates
-// quickly (PRIOR_WEIGHT_DU each).
-const PRIOR_5H_CW_FULL_USD = 500;
-const PRIOR_5H_CR_FULL_USD = 3000;
-const PRIOR_5H_FRESH_FULL_USD = 200;
+// A SOURCE'S PRIOR IS ITS ADAPTER'S (lane usage-predict pick 3, the owner's «预测系统做成通用的adapter»): the measured full-quota
+// sizes and the 5h token-class priors are Claude's facts (src/harnesses/claude-predict.js); codex and Antigravity declare none
+// (learn first). An identity's prior = its source's (src/usage-predict.js priorsForIdentity); nothing here assumes a source.
+const { SEED_FAMILIES } = require('./model-family.js');   // the ONE model-family vocabulary (B-a612): the scoped buckets' words
 const WEEK_SEC = 7 * 86400;
 
 function normU(u) {
@@ -53,7 +47,7 @@ function scopedKey(name) { return 'scoped:' + String(name || '').trim().toLowerC
 // fable-family column; unknown scope names fall back to total cost).
 function scopedFamily(name) {
   const n = String(name || '').toLowerCase();
-  for (const fam of ['fable', 'opus', 'sonnet', 'haiku']) if (n.includes(fam)) return fam;
+  for (const fam of SEED_FAMILIES) if (n.includes(fam)) return fam;
   return null;
 }
 function costForKey(key, costSince) {
@@ -158,8 +152,9 @@ function* _extractPairsSteps(lines, opts = {}, step = Infinity) {
       // 20% of what the measured Max-20x priors say that movement costs is
       // not rate information. Taint like the anomalous decrease so the
       // recovery pair off this anchor is skipped too.
-      if (du >= 0.05) {
-        const full = CLAUDE_MAX_PRIOR_FULL_USD[key] || CLAUDE_MAX_PRIOR_FULL_USD.sevenDay;
+      // judged by the IDENTITY's own prior (its source's adapter); a source with none (learn first) has no scale to judge by
+      const full = opts.priors ? (Number(opts.priors[key]) || Number(opts.priors.sevenDay) || 0) : 0;
+      if (du >= 0.05 && full > 0) {
         const corroborating = costForKey(key, (liveCost && liveCost.total > 0) ? liveCost : l.costSince);
         if (corroborating != null && corroborating < du * full * 0.2) {
           (tainted[key] = tainted[key] || new Set()).add(l.fetchedAt);
@@ -195,11 +190,12 @@ function* _extractPairsSteps(lines, opts = {}, step = Infinity) {
 // pseudo-pair {du: PRIOR_WEIGHT_DU, cost: PRIOR_WEIGHT_DU × priorFullUsd}.
 // Without a prior, a bucket needs real signal (≥$1 cost AND ≥0.5% movement)
 // before we dare emit a rate at all.
-function learnRates(lines, { priors = null, costFn = null } = {}) { return _fitRates(extractPairs(lines, { costFn }), priors); }
+function learnRates(lines, { priors = null, costFn = null } = {}) { return _fitRates(extractPairs(lines, { costFn, priors }), priors); }
 /** The fit over the extracted pairs (per bucket: the sums; the 5h token-class normal equations) — a fold in the pairs' order,
  *  run whole at the end of a relearn (≈ 10 ns a pair: under a millisecond for the owner's largest identity). */
 function _fitRates(pairs, priors = null) {
-  const keys = new Set([...Object.keys(pairs), ...Object.keys(priors || {})]);
+  const keys = new Set([...Object.keys(pairs), ...Object.keys(priors || {}).filter(UP.isLaneKey)]);   // a prior's own members (classes5h) are no lanes
+  const cls5 = priors && priors.classes5h;   // the 5h token-class priors, where the source's adapter states them (Claude)
   const out = {};
   for (const key of keys) {
     let sumDu = 0, sumCost = 0, n = 0;
@@ -223,14 +219,14 @@ function _fitRates(pairs, priors = null) {
     // squares on class-split pairs + the two pure-class prior pseudo-pairs;
     // the blended rate above stays as DISPLAY/back-compat + the fallback for
     // degenerate data (all pairs same mix ⇒ near-singular normal equations).
-    if (key === 'fiveHour' && prior) {
+    if (key === 'fiveHour' && prior && cls5) {
       const cls = (pairs[key] || []).filter((p) => Number.isFinite(p.cw) && Number.isFinite(p.cr));
       if (cls.length >= 3) {
         const obs = [
           ...cls.map((p) => [p.cw, p.cr, p.ot, p.du]),
-          [PRIOR_WEIGHT_DU * PRIOR_5H_CW_FULL_USD, 0, 0, PRIOR_WEIGHT_DU],
-          [0, PRIOR_WEIGHT_DU * PRIOR_5H_CR_FULL_USD, 0, PRIOR_WEIGHT_DU],
-          [0, 0, PRIOR_WEIGHT_DU * PRIOR_5H_FRESH_FULL_USD, PRIOR_WEIGHT_DU],
+          [PRIOR_WEIGHT_DU * cls5.cw, 0, 0, PRIOR_WEIGHT_DU],
+          [0, PRIOR_WEIGHT_DU * cls5.cr, 0, PRIOR_WEIGHT_DU],
+          [0, 0, PRIOR_WEIGHT_DU * cls5.fresh, PRIOR_WEIGHT_DU],
         ];
         // 3-var normal equations, Cramer solve
         const A = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], Bv = [0, 0, 0];
@@ -280,7 +276,7 @@ function estimateBuckets({ anchor, rates, costFn, nowMs, lagS = 20 }) {
     if (!costMemo.has(fromMs)) { try { costMemo.set(fromMs, costFn(fromMs, nowMs) || { total: 0, byFamily: {} }); } catch { costMemo.set(fromMs, { total: 0, byFamily: {} }); } }
     return costMemo.get(fromMs);
   };
-  let sinceCostUsd = 0;
+  let sinceCostUsd = 0, sinceRequests = null;
   // ③ LEDGER TAIL (2.340.0 audit): the transcript scan is throttled (~15s)
   // and writes lag the requests, so at predict time the last ~LAG seconds of
   // burn are not in the ledger yet — during a fast burst that's a standing
@@ -334,7 +330,7 @@ function estimateBuckets({ anchor, rates, costFn, nowMs, lagS = 20 }) {
       const trailC = costForKey(key, trail());
       if (trailC != null && trailC > 0) c += (trailC / 120) * lagS;
     }
-    sinceCostUsd = Math.max(sinceCostUsd, (cost(fromMs).total || 0));
+    { const cAll = cost(fromMs); if ((cAll.total || 0) >= sinceCostUsd) { sinceCostUsd = cAll.total || 0; if (Number.isFinite(Number(cAll.requests))) sinceRequests = Number(cAll.requests); } }   // the requests of the same window (usage-predict P2's plain line)
     // 5h class-aware prediction (B-536b): when the regression produced class
     // rates AND the cost source carries the split, predict per component —
     // the blended rate stays the fallback (pre-B-536b snapshots, degenerate
@@ -362,6 +358,7 @@ function estimateBuckets({ anchor, rates, costFn, nowMs, lagS = 20 }) {
   }
   if (!out.fiveHour && !out.sevenDay && !out.scopedWeekly.length) return null;
   out.sinceCostUsd = Math.round(sinceCostUsd * 100) / 100;
+  out.sinceRequests = sinceRequests;   // usage-predict P2: how much was used HERE since the reading (the ledger's own count)
   return out;
 }
 
@@ -389,15 +386,16 @@ const PROOF_WIN = 64, PROOF_SAMPLES = 8, PROOF_MAX = 24;
 const sigOf = (st) => st ? `${st.ino}:${st.size}:${st.mtimeMs}:${st.ctimeMs}:${st.birthtimeMs || 0}` : 'absent';
 /** What the account walk and the estimate need of an identity's lines (round 3 — kept per identity, tiny, whether or not the
  *  cache keeps the lines): its named account ids, the last record by fetchedAt, the newest ts and the newest __global__ ts. */
-function linesMeta(lines) {
-  const named = new Set(); let lastGlobalTs = 0, lastTs = 0;
+function linesMeta(lines, predictSince = -Infinity) {
+  const named = new Set(); let lastGlobalTs = 0, lastTs = 0; const predict = [];
   for (const l of lines) {
+    if (l.calib) for (const p of UP.pairsOf(l, predictSince)) predict.push(p);   // the instance's own record of projected vs read (usage-predict)
     const ts = l.ts || l.fetchedAt || 0;
     if (ts > lastTs) lastTs = ts;
     if (l.accountId === undefined || l.accountId === null || l.accountId === '__global__') { if (ts > lastGlobalTs) lastGlobalTs = ts; }
     else named.add(l.accountId);
   }
-  return { named: [...named], lastGlobalTs, lastTs, last: lines.length ? lines[lines.length - 1] : null, n: lines.length };
+  return { named: [...named], lastGlobalTs, lastTs, last: lines.length ? lines[lines.length - 1] : null, n: lines.length, predict };
 }
 // round 6 follow-up: a turn that spent nothing while folds are owed looks again after this (one unref'd timer: never a spin — a hub
 // with no auto pool and no fresh reading may not ask for minutes: the auto pools' tick asks every 30 s, the anchor sweep only on a new reading)
@@ -569,7 +567,7 @@ class UsageEstimator {
     // lazy ref; everything here only dereferences at call time.
     this._usageHistory = usageHistory;
     this.resolveIdentity = resolveIdentity; // (accountId|null) → {identityKey} | null
-    this.priorsFor = priorsFor || (() => CLAUDE_MAX_PRIOR_FULL_USD);
+    this.priorsFor = priorsFor || UP.priorsForIdentity;   // the identity's source's prior (pick 3) — none for codex / Antigravity
     this.lagS = lagS == null ? 20 : lagS; // ledger-tail extrapolation seconds (0 = off, exact-math tests)
     this._lineCache = new Map();  // identityKey → {mtimeMs, size, lines} — LRU by file bytes (B-9428, cache-bounds.js)
     this._rateCache = new Map();  // identityKey → {rates, at}
@@ -714,7 +712,7 @@ class UsageEstimator {
   _readDone(key, st, lines, wins = null, endsNl = true) {
     const sig = sigOf(st); this._lastRead = { key, sig };
     if (!this._meta) this._meta = new Map();
-    const m = this._meta.get(key); if (!m || m.sig !== sig) this._meta.set(key, { sig, ino: st.ino, btime: st.birthtimeMs || 0, size: st.size, endsNl, wins, ...linesMeta(lines) });
+    const m = this._meta.get(key); if (!m || m.sig !== sig) { this._meta.set(key, { sig, ino: st.ino, btime: st.birthtimeMs || 0, size: st.size, endsNl, wins, ...linesMeta(lines, UP.keepSince(Date.now())) }); if (this._predictMemo) this._predictMemo.clear(); }
   }
   /** The identity's meta now: by its file's signature (one stat), else one read of its lines. */
   _metaOf(key) {
@@ -743,7 +741,12 @@ class UsageEstimator {
       const named = new Set(m.named); let { lastTs, lastGlobalTs, last } = m;
       for (const l of add) { const ts = l.ts || l.fetchedAt || 0; if (ts > lastTs) lastTs = ts; if (l.accountId === undefined || l.accountId === null || l.accountId === '__global__') { if (ts > lastGlobalTs) lastGlobalTs = ts; } else named.add(l.accountId); if (!last || (l.fetchedAt || 0) >= (last.fetchedAt || 0)) last = l; }
       const tw = proofWindows(buf, m.size, st.size, 2), base = m.wins.slice(0, PROOF_SAMPLES + 2), tails = m.wins.slice(PROOF_SAMPLES + 2).concat(tw);
-      const nm = { sig: sigOf(st), ino: st.ino, btime: st.birthtimeMs || 0, size: st.size, endsNl: true, wins: base.concat(tails.slice(Math.max(0, tails.length - (PROOF_MAX - base.length)))), named: [...named], lastTs, lastGlobalTs, last, n: m.n + add.length };
+      // law B1 (the look of 2026-11-15): a meta GROWN by its tail keeps the pairs it had and adds the tail's — one pair set,
+      // whatever road read the file (it lost them: the verdict fell to learning, an OFF lane of 80 read ON with 40)
+      const since = UP.keepSince(Date.now()), predict = (m.predict || []).filter((p) => p.t >= since);
+      for (const l of add) if (l && l.calib) for (const p of UP.pairsOf(l, since)) predict.push(p);
+      const nm = { sig: sigOf(st), ino: st.ino, btime: st.birthtimeMs || 0, size: st.size, endsNl: true, wins: base.concat(tails.slice(Math.max(0, tails.length - (PROOF_MAX - base.length)))), named: [...named], lastTs, lastGlobalTs, last, n: m.n + add.length, predict };
+      if (this._predictMemo) this._predictMemo.clear();
       this._meta.set(key, nm); this.metaTailReads = (this.metaTailReads || 0) + 1;
       return nm;
     } catch { return null; } finally { if (fd !== null) { try { fs.closeSync(fd); } catch { } } }
@@ -844,7 +847,7 @@ class UsageEstimator {
       try { f.seq0 = !loading && uh && typeof uh.arrivalSeq === 'function' ? uh.arrivalSeq() : null; } catch { f.seq0 = null; }
       // learn-time LIVE cost recomputation (see extractPairs) — the frozen costSince snapshots under-count fast burns whose ledger
       // events land after the sweep; the live ledger heals them retroactively (while loading: the frozen ones only)
-      f.steps = _extractPairsSteps(lines, { costFn: loading ? null : this._costFn(f.ids) }, RELEARN_CHUNK_LINES);
+      f.steps = _extractPairsSteps(lines, { costFn: loading ? null : this._costFn(f.ids), priors: this.priorsFor(f.key) }, RELEARN_CHUNK_LINES);
       if ((this.wholeReads || 0) !== w0) { let sz = 0; try { sz = RR.stat(this._file(identityKey)).size; } catch { } this._coldSpent(sz); } // this turn's cold reads (a budget of COLD_READ_TURN_BYTES)
     };
     f.late = () => { // round 3 (small 1): a row of its accounts that ARRIVED mid-fold with a ts inside its anchors' span (the hub's own session rows bring no invalidation) — the landing is a mix of two ledger states: stale at once
@@ -1260,6 +1263,54 @@ class UsageEstimator {
     this._estMemo.set(memoKey, { at: nowMs, est, baseFetchedAt, ik, rv });
     return ownEstimate(est, rawCache); // read through the member's own «no 5h limit» on EVERY return (the memo is the identity's)
   }
+  /** THE VERDICT OF ONE SOURCE'S LANE ON THIS INSTANCE (usage-predict; the hold of the look of 2026-11-15): the WALK over the
+   *  fixed boundaries (src/usage-predict.js walkVerdict) of that source's recorded pairs — every identity of it whose lines
+   *  were read, the pairs kept back to `keepSince`. It moves only at a boundary; held per boundary, dropped when a file moves.
+   *  A source the estimator does not learn reads OFF (the said limit). */
+  predictVerdict(source, lane, nowMs = Date.now()) {
+    if (!UP.knownSource(source)) return { state: 'off', n: 0, why: 'unknown-source' };
+    if (!this._predictMemo) this._predictMemo = new Map();
+    const key = source + '|' + lane, boundary = UP.boundaryAt(nowMs), m = this._predictMemo.get(key);
+    if (m && m.boundary === boundary) return m.v;
+    const since = UP.keepSince(nowMs), pairs = [];
+    for (const [ik, meta] of (this._meta || new Map())) {
+      if (UP.sourceOf(ik) !== source || !Array.isArray(meta.predict)) continue;
+      for (const p of meta.predict) if (p.lane === lane && p.t >= since) pairs.push(p);
+    }
+    pairs.sort((x, y) => x.t - y.t);
+    if (!this._walkCache) this._walkCache = new Map();
+    if (!this._walkCache.has(key)) this._walkCache.set(key, new Map());
+    const v = UP.walkVerdict(pairs, nowMs, UP.PREDICT, this._walkCache.get(key));
+    this._predictMemo.set(key, { boundary, v });
+    return v;
+  }
+  /** The source of the identity an account reads by (claude / codex / antigravity). */
+  sourceFor(accountId) { try { const ident = this.resolveIdentity(accountId); return UP.sourceOf(ident && ident.identityKey); } catch { return 'claude'; } }
+  /** Each lane of `est` and its state on this instance: { fiveHour, sevenDay, 'scoped:<name>' } → { state, n }. */
+  predictStatesFor(accountId, est, nowMs = Date.now()) {
+    const src = this.sourceFor(accountId), out = {};
+    if (!est) return out;
+    for (const k of ['fiveHour', 'sevenDay']) if (est[k]) { const v = this.predictVerdict(src, k, nowMs); out[k] = { state: v.state, n: v.n }; }
+    for (const s of est.scopedWeekly || []) { const k = scopedKey(s && s.name); const v = this.predictVerdict(src, k, nowMs); out[k] = { state: v.state, n: v.n }; }
+    return out;
+  }
+  /** THE POOL'S BURN (law B3 of the look, 2026-11-15): `burnFor` held to the lanes whose verdict is ON — the projection's lead
+   *  (when a member crosses its switch line) is the learned rate too, so a lane the verdict found worse than the reading moves
+   *  nothing in the pool. Every pool read of the estimator goes through a gate (test-usage-predict ⑧'s census). */
+  poolBurnFor(accountId, nowMs = Date.now(), opts = undefined) {
+    const burn = this.burnFor(accountId, nowMs, opts) || {};
+    const src = this.sourceFor(accountId), out = {};
+    for (const [lane, v] of Object.entries(burn)) if (this.predictVerdict(src, lane, nowMs).state === 'on') out[lane] = v;
+    return out;
+  }
+  /** THE POOL'S ESTIMATE (usage-predict P5): the estimate kept to the lanes whose verdict is ON — a provisional, learning or
+   *  off lane is read as the raw reading. The pool is never moved by a guess this instance has not checked. */
+  poolEstimateFor(accountId, rawCache, nowMs = Date.now()) {
+    const est = this.estimateFor(accountId, rawCache, nowMs);
+    if (!est) return null;
+    const src = this.sourceFor(accountId);
+    return UP.gateEstimate(est, (lane) => this.predictVerdict(src, lane, nowMs).state, (st) => st === 'on');
+  }
 }
 
 // ── Estimator telemetry hygiene (B-a5c0) ─────────────────────────────────────
@@ -1393,7 +1444,7 @@ function wholeLedgerGate({ ledger, log = () => {}, onWhole = () => {}, prime = n
 
 module.exports = {
   claimRebase,
-  PRIOR_WEIGHT_DU, CLAUDE_MAX_PRIOR_FULL_USD,
+  PRIOR_WEIGHT_DU,
   normU, scopedKey, scopedFamily, costForKey,
   extractPairs, learnRates, estimateBuckets, overlayCache, predictCalib,
   CALIB_METRIC, calibMetricRows, sweepAnchorGroup, cliRefreshDrift, wholeLedgerGate,

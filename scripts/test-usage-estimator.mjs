@@ -8,6 +8,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const est = require(path.resolve('src/usage-estimator.js'));
+const CLP = require(path.resolve('src/harnesses/claude-predict.js')).prior;   // Claude's adapter (usage-predict pick 3): its 5h class priors ride its prior
 const { costBetween, costBetweenMulti } = require(path.resolve('src/usage-anchors.js'));
 
 let pass = 0, fail = 0;
@@ -402,7 +403,7 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
     mk5(T0 + 40 * 60000, 0.37, T0 + 32 * 60000, csC(0, 0, 20)),
     mk5(T0 + 48 * 60000, 0.38, T0 + 40 * 60000, csC(0, 32, 0)),
   ];
-  const r = est.learnRates(chain, { priors: { fiveHour: 500 } });
+  const r = est.learnRates(chain, { priors: { fiveHour: 500, classes5h: CLP.classes5h } });
   // two cw pairs vs the $500 prior pseudo-pair: honest Bayesian shrinkage —
   // the fit lands BETWEEN prior and the $800 data truth, nearer truth as
   // pairs accumulate
@@ -410,6 +411,9 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   ck('class regression: recovers cr full ≈ $3200 (reads nearly free)', r.fiveHour.impliedFullCrUsd > 2600 && r.fiveHour.impliedFullCrUsd < 3800);
   ck('class regression: recovers fresh full ≈ $250', r.fiveHour.impliedFullFreshUsd > 215 && r.fiveHour.impliedFullFreshUsd < 290);
   ck('class regression: blended rate still present (display/fallback)', Number.isFinite(r.fiveHour.rate));
+  // usage-predict pick 3: the class priors are the SOURCE's (Claude's adapter); a prior without them (codex, Antigravity: none) fits no class regression
+  const rn = est.learnRates(chain, { priors: { fiveHour: 500 } });
+  ck('class regression: a prior that states no class priors fits none (the blended rate only)', rn.fiveHour && rn.fiveHour.rateCw == null && Number.isFinite(rn.fiveHour.rate));
   // class-aware prediction: a cr-dominated window must NOT be priced blended
   const anchor = { fetchedAt: T0, buckets: { fiveHour: { u: 0.10, resetsAt: R5 }, sevenDay: null, scopedWeekly: [] } };
   const eC = est.estimateBuckets({ lagS: 0, anchor, rates: { fiveHour: r.fiveHour }, costFn: () => csC(1, 32, 1), nowMs: T0 + HR });
@@ -426,7 +430,7 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
     mk5(T0 + 20 * 60000, 0.102, T0 + 10 * 60000, csC(900, 0, 0)),
     mk5(T0 + 30 * 60000, 0.103, T0 + 20 * 60000, csC(900, 0, 0)),
   ];
-  const rb = est.learnRates(bad, { priors: { fiveHour: 500 } });
+  const rb = est.learnRates(bad, { priors: { fiveHour: 500, classes5h: CLP.classes5h } });
   ck('absurd implied cw full (> sanity bound) → class rates withheld, blended kept',
     rb.fiveHour && rb.fiveHour.rateCw == null && Number.isFinite(rb.fiveHour.rate));
 }
@@ -500,12 +504,15 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   // ① uncorroborated jump: 20pt in a minute with $0.10 of ledger cost = poison
   const j0 = { ...mkAnchor(T0, { u7: 0.10 }), source: 'statusline' };
   const j1 = { ...mkAnchor(T0 + 60e3, { u7: 0.30, prevFetchedAt: T0, costSince: cs(0.1) }), source: 'statusline' };
-  const rJ = est.learnRates([j0, j1], { priors: null });
-  ck('① uncorroborated 20pt jump (cost ≪ prior-implied) does not teach a rate', !rJ.sevenDay);
+  // usage-predict pick 3: the jump is judged by the identity's OWN prior (Claude's here) — no longer Claude's for every source
+  const rJ = est.learnRates([j0, j1], { priors: CLP });
+  ck('① uncorroborated 20pt jump (cost ≪ the source\'s prior-implied) is no pair: the rate is the prior\'s alone', rJ.sevenDay && rJ.sevenDay.nPairs === 0, JSON.stringify(rJ.sevenDay));
+  const rN = est.learnRates([j0, j1], { priors: null });
+  ck('① a source with NO prior (codex, Antigravity) has no scale to judge a jump by: the pair stands, and the no-prior floor ($1 of cost) still withholds a rate', !rN.sevenDay && (est.extractPairs([j0, j1], {}).sevenDay || []).length === 1);
   // corroborated: same jump with plausible cost (20% of prior-implied ≈ $69) learns
   const k1 = { ...mkAnchor(T0 + 60e3, { u7: 0.30, prevFetchedAt: T0, costSince: cs(340) }), source: 'statusline' };
-  const rK = est.learnRates([j0, k1], { priors: null });
-  ck('① corroborated jump still learns', !!rK.sevenDay);
+  const rK = est.learnRates([j0, k1], { priors: CLP });
+  ck('① corroborated jump still learns (one pair beside the prior)', rK.sevenDay && rK.sevenDay.nPairs === 1, JSON.stringify(rK.sevenDay));
 }
 {
   // ③ ledger-tail extrapolation: burn in the last 120s extends the estimate

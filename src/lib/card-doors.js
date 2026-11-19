@@ -14,12 +14,35 @@
 // Census: scripts/test-path-linkify.mjs ⑩ (the real delegation over every card kind's door + the static census of the
 // modules that draw cards into the chat), scripts/test-channel-outbox.mjs (every anchor of the real Outbox card),
 // scripts/test-chat-proposal-card.mjs ⑧ (chrome: the ⤓ in the chat downloads the bytes). PURE: imports nothing, DOM-free.
+// A LINK TO ONE SETTING (lane setting-doors pick 1): a `.chat-setting-link` span (data-setting = the row's key — what the
+// chat's renderer drew over a `vibespace://settings/<key>` naming a known row) is no copy / open menu link either: a click
+// or a tap OPENS Settings on that row through the app's one door (settingLinkOf; ChatRenderers.setupLinkHandler).
+// A LINK TO A CONVERSATION OR A DESKTOP (lane login-request-card piece 1): a `.chat-vs-link` span (data-vs-kind + data-vs-ref — what
+// the chat's renderer drew over a `vibespace://conversation/…` / `vibespace://desktop/…` where its option is on) GOES on a press
+// (vsLinkOf; the page's door); right-click or long-press offers Go · Copy link. The unknown chip carries neither class: nothing to press.
 
 /** THE verdict: the link the chat's delegation acts on for an event at `target`, else null (no link, or a card's door). */
 export function chatLinkOf(target) {
   if (!target || typeof target.closest !== 'function') return null;
   const link = target.closest('.chat-link') || target.closest('a[href]');
   if (!link || link.classList.contains('chat-sub-link')) return null;   // lane agy-subagent-cards: a conversation:// link is ChatView's
+  if (link.classList.contains('chat-setting-link')) return null;   // lane setting-doors pick 1: a link to one setting opens it (settingLinkOf), never copies
+  if (link.classList.contains('chat-vs-link')) return null;   // lane login-request-card piece 1: a link to a conversation / desktop goes (vsLinkOf), never copies
   if (link.classList.contains('chat-link')) return link;
   return link.classList.length ? null : link;
+}
+
+/** lane setting-doors pick 1: the link to ONE SETTING an event at `target` is on (`.chat-setting-link[data-setting]`), else null. */
+export function settingLinkOf(target) {
+  if (!target || typeof target.closest !== 'function') return null;
+  const link = target.closest('.chat-setting-link[data-setting]');
+  return link && link.dataset && link.dataset.setting ? link : null;
+}
+
+/** lane login-request-card piece 1: the link to a CONVERSATION or a DESKTOP an event at `target` is on
+ *  (`.chat-vs-link[data-vs-ref]`, its data-vs-kind one of the two), else null. */
+export function vsLinkOf(target) {
+  if (!target || typeof target.closest !== 'function') return null;
+  const link = target.closest('.chat-vs-link[data-vs-ref]');
+  return link && link.dataset && (link.dataset.vsKind === 'conversation' || link.dataset.vsKind === 'desktop') && link.dataset.vsRef ? link : null;
 }

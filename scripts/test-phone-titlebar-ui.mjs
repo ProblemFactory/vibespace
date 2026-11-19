@@ -57,7 +57,9 @@
 //      360 en — cut where it BEGINS in reading order (its first character outside the box, its last 12 inside) — CONTROL: r4's box
 //      (an rtl box over every name: the END cut) RED
 //   ⑤ THE TIERS — a rotation to landscape (the regular class): no fold, no ⋯, the five badges back; portrait again: folded again; a
-//      tablet in portrait (the regular class, 700 px): its column bar keeps 文件, no fold; a desktop page (1280, a mouse): no ⋯ built,
+//      tablet in portrait (the regular class, 700 px): its column bar keeps 文件, no fold — the five numbers become ONE only when the
+//      name would fall under its readable minimum (主开发 09:45Z: the name wins; the owner's 12 glyphs do, a short name keeps the five);
+//      a desktop page (1280, a mouse): no ⋯ built,
 //      the nav hidden — the desktop chrome's markup hash is printed (the report compares it with the base's)
 //   ⑪ «+» IS THE CREATE MENU (r6 L1) — 360 px compact, a web view open, the attention list EMPTY (no For-you page, so no 文件 card):
 //      from EVERY drawn door of the bar (a real touch tap each, never a long press) the roads to Files in two taps — «+» → its Files
@@ -76,7 +78,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (test-architecture §57)
 const require = createRequire(import.meta.url);
 const { WebSocket } = require('ws');
@@ -143,7 +145,7 @@ else await (async () => {
   const until = async (pred, ms, every = 100) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pred()) return true; await sleep(every); } return !!(await pred()); };
   if (!ok(await until(() => journal.includes('Ready.'), 40000), 'the worktree server booted', journal.slice(-800))) return;
 
-  const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling',
+  const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling',
     '--proxy-server=http://127.0.0.1:9', '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1', `--user-data-dir=${PROFILE}`, '--window-size=1280,900', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
   procs.add(chrome);
   let target = null; for (let i = 0; i < 120 && !target; i++) { try { target = (await (await fetch(`http://127.0.0.1:${CDP}/json`)).json()).find((t) => t.type === 'page'); } catch { } if (!target) await sleep(250); }
@@ -236,9 +238,13 @@ else await (async () => {
   const ids = (b) => b.ctl.map((c) => c.id).join(' ');
   const say = (b) => `${b.vw} px ${b.vc}: [${b.ctl.map((c) => c.id + ' ' + c.w).join(' · ')}] title ${b.title.w} px (min ${b.title.minW} «${b.title.min}», whole ${b.title.fullW}) · badges ${b.badges.map((x) => x.n).join('/')} · folded ${b.folded.join(',') || '—'}`;
   /** THE OWNER'S PHONE RULES on the drawn bar: the title readable, the doors standing, every control a 44 px target, no folder icon */
-  const judgeBar = (b, tag, { wantFolded = null, wantOne = true } = {}) => {
+  const judgeBar = (b, tag, { wantFolded = null, wantOne = true, titleFloorPx = null } = {}) => {
     console.log(`    ${tag}: ${say(b)}`);
-    ok(b.title.readable || b.title.whole, `${tag}: the title's box (${b.title.w} px) holds its readable minimum «${b.title.min}» (${b.title.minW} px) — exactly, no slack`, say(b));
+    // titleFloorPx (主开发's ruling 2026-11-13 09:33Z, the recovery of phone-six): at 320 px the For-you chip's ONE number keeps its
+    // READABLE 14 px digit — «a count a person cannot read is worth less than two pixels of title on the narrowest phone» — and the
+    // title gets what the bar measures with it (94.1 px, under the 96 px readable minimum); every wider bar keeps the release's rule
+    if (titleFloorPx != null) ok(b.title.whole || b.title.w + 0.05 >= titleFloorPx, `${tag}: the title's box (${b.title.w} px) is what the bar leaves beside the readable one-number chip — ≥ ${titleFloorPx} px (the readable minimum «${b.title.min}» is ${b.title.minW} px; 主开发 09:33Z: the digit stays 14 px)`, say(b));
+    else ok(b.title.readable || b.title.whole, `${tag}: the title's box (${b.title.w} px) holds its readable minimum «${b.title.min}» (${b.title.minW} px) — exactly, no slack`, say(b));
     ok(['menu', 'todos', 'close', 'new'].every((k) => b.ctl.some((c) => c.id === k)), `${tag}: ☰ · For you · ✕ · + stand (${ids(b)})`, ids(b));
     ok(b.ctl.every((c) => c.w >= 44 && c.h >= 43.5), `${tag}: every control is a ≥ 44 px target (${b.ctl.map((c) => c.id + ' ' + c.w + '×' + c.h).join(', ')})`, b.ctl);
     ok(!b.ctl.some((c) => c.id === 'files'), `${tag}: the bar shows no folder icon (LAW 3)`, ids(b));
@@ -422,7 +428,7 @@ else await (async () => {
     for (const vw of [360, 320]) {
       await device(vw, 780); await sleep(400); await settle();
       const b = await bar();
-      judgeBar(b, `${lang} ${vw} px`, { wantFolded: ['desktops', 'usage', 'gear'] });
+      judgeBar(b, `${lang} ${vw} px`, { wantFolded: ['desktops', 'usage', 'gear'], titleFloorPx: vw === 320 ? 94 : null });
       ok(b.badges.length === 1 && b.badges[0].n === '31' && b.badges[0].seg === 'urgent', `${lang} ${vw} px: the one badge is the honest count 31 in the urgent colour (${b.badges[0]?.n} ${b.badges[0]?.seg} ${b.badges[0]?.bg})`, b.badges);
       ok(b.text === OWNER, `${lang} ${vw} px: the title is the window's own, as typed («${b.text}»)`, b.text);
       await shot(`after-${lang}-${vw}.png`);
@@ -506,8 +512,16 @@ else await (async () => {
   await device(360, 780); await sleep(500); await settle();
   await dress({ title: 'Notes' });
   {
+    // 主开发's ruling (2026-11-13 09:33Z): ONE number on the compact class, always — its chip (49.9 px) is narrower than the five
+    // numbers this leg was written for, so at 360 NOTHING folds and two more doors show (the pin encoded the five-number chip's
+    // arithmetic). The slack's law is judged where its edge now lies: the widest bar under 360 that folds the desktops door and
+    // the ring and keeps ⚙
+    const b360 = await bar();
+    ok(!b360.folded.length && b360.title.whole && b360.badges.length === 1, `the owner's bar with a short title at 360: NOTHING folds, the title whole — one number (主开发 09:33Z; it was «desktops + ring in the ⋯» with five) (${say(b360)})`, say(b360));
+    let edge = null;
+    for (let vw = 359; vw >= 300 && !edge; vw--) { await device(vw, 780); await sleep(120); await settle(); const bb = await bar(); if (bb.folded.join() === 'desktops,usage') edge = vw; }
     const b0 = await bar();
-    ok(b0.folded.join() === 'desktops,usage' && !b0.folded.includes('gear') && b0.badges.length === 1, `the owner's bar with a short title: ⚙ stands, desktops + ring in the ⋯ (${say(b0)})`, say(b0));
+    ok(!!edge && b0.folded.join() === 'desktops,usage' && !b0.folded.includes('gear') && b0.badges.length === 1, `…its edge now lies at ${edge} px: ⚙ stands, desktops + ring in the ⋯ (${say(b0)})`, say(b0));
     const band = await evalJs(`(() => {
       const title = document.getElementById('mobile-nav-title'), ts = getComputedStyle(title);
       const R = title.getBoundingClientRect().width - parseFloat(ts.paddingLeft) - parseFloat(ts.paddingRight);
@@ -534,7 +548,7 @@ else await (async () => {
       const b = await bar();
       const gearFolds = b.folded.includes('gear');
       ok(b.title.whole && gearFolds === d > -1 / 64, `«${s}» (${d >= 0 ? '+' : ''}${d.toFixed(4)} px against the room ⚙ leaves): ⚙ ${gearFolds ? 'folds' : 'stands'}, the title WHOLE (${b.title.fullW} in ${b.title.w}, over by ${b.title.over.toFixed(4)})`, say(b));
-      if (d > 0 && d <= 0.5 && k < 2) await shot(`after-en-360-slack-${++k}.png`);
+      if (d > 0 && d <= 0.5 && k < 2) await shot(`after-en-edge-slack-${++k}.png`);
     }
   }
 
@@ -559,7 +573,9 @@ else await (async () => {
   await dress({ title: OWNER }); await vault(true); await sleep(200); await settle();
   {
     const b = await bar();
-    ok(b.folded.join() === 'desktops,usage' && b.title.whole, `…the owner's title: the count folds the desktops door, the width the ring — TWO in the ⋯, the title whole (${say(b)})`, say(b));
+    // 主开发's ruling (09:33Z): ONE number — the width no longer folds the ring, and the count's one fold would leave the
+    // desktops door alone in a ⋯, which ⑧'s give-back refuses: NOTHING folds at 600 (the pin encoded the five-number chip)
+    ok(!b.folded.length && b.title.whole, `…the owner's title: NOTHING folds at 600, the title whole — one number (主开发 09:33Z; it was «TWO in the ⋯» with five) (${say(b)})`, say(b));
   }
   await device(360, 780); await sleep(500); await settle();
   {
@@ -944,7 +960,9 @@ else await (async () => {
   await dress({ title: '游戏' });
   {
     const b = await bar(); console.log(`    430 px, a 2-character title: ${say(b)}`);
-    ok(!b.folded.length && b.badges.length === 5 && !b.ctl.some((c) => c.id === 'overflow'), `a 2-character title at 430 px: everything fits, nothing folds (${ids(b)}; badges ${b.badges.map((x) => x.n).join('/')})`, say(b));
+    // 主开发's ruling (2026-11-13, the phone-six recovery — userW's «非常多的数字围绕在周围»): the compact class's For-you button carries
+    // exactly ONE number ALWAYS (the honest count in the worst urgency's colour), whatever room the bar has — no longer five here
+    ok(!b.folded.length && b.badges.length === 1 && b.badges[0].c.includes('mnav-one') && b.badges[0].n === '31' && !b.ctl.some((c) => c.id === 'overflow'), `a 2-character title at 430 px: everything fits, nothing folds — and the For-you button carries ONE number (${ids(b)}; badges ${b.badges.map((x) => x.n).join('/')})`, say(b));
     ok(b.title.whole, `…the whole title shows (${b.title.w} ≥ ${b.title.fullW}, exactly)`, say(b));
     await shot('after-en-430-two-chars.png');
   }
@@ -971,9 +989,20 @@ else await (async () => {
   { const b = await bar(); judgeBar(b, 'back to portrait', { wantFolded: ['desktops', 'usage', 'gear'] }); }
   await device(700, 1000); await sleep(600); await settle();
   {
-    const b = await bar(); console.log(`    tablet portrait: ${say(b)}`);
-    ok(b.vc === 'regular' && !b.folded.length && !b.ctl.some((c) => c.id === 'overflow') && b.badges.every((x) => !x.c.includes('mnav-one')), `a tablet in portrait (the regular class): its own bar — no fold, no ⋯, no one-badge form (${b.dir}; ${ids(b)})`, say(b));
+    // 主开发 09:45Z, ruling 4's order (B): THE NAME'S READABLE MINIMUM WINS. In the tablet's 348 px column the five numbers
+    // become ONE only when the name would fall under its readable minimum (the ladder's «badges» step, after «win»); with room
+    // the tablet keeps its five. The case (the owner's 12-glyph name, 31 open) and its opposite (a short name) side by side.
+    const YIELD = `document.getElementById('mobile-nav').dataset.yield || ''`;
+    const b = await bar(), y = await evalJs(YIELD); console.log(`    tablet portrait, the owner's name: ${say(b)} · yield ${y || '—'}`);
+    ok(b.vc === 'regular' && b.title.readable && y === 'badges' && b.badges.length === 1 && b.badges[0].c.includes('mnav-one') && !b.folded.length && !b.ctl.some((c) => c.id === 'overflow'),
+      `a tablet in portrait (the regular class), the owner's 12-glyph name in its 348 px column: the five numbers become ONE only because the name would fall under its readable minimum (the ladder's «${y || 'no'}» step) — the name readable (${b.title.w} px ≥ ${b.title.minW}), no fold, no ⋯ (${b.dir}; ${ids(b)})`, say(b));
     await shot('after-en-tablet.png');
+    await dress({ title: '游戏' }); await sleep(400); await settle();
+    const s5 = await bar(), y5 = await evalJs(YIELD); console.log(`    tablet portrait, a short name: ${say(s5)} · yield ${y5 || '—'}`);
+    ok(s5.vc === 'regular' && s5.title.whole && y5 !== 'badges' && s5.badges.length >= 2 && s5.badges.every((x) => !x.c.includes('mnav-one')) && !s5.folded.length && !s5.ctl.some((c) => c.id === 'overflow'),
+      `…its opposite: the same tablet with a short name («游戏») keeps its FIVE numbers (${s5.badges.map((x) => x.n).join('/')}) — the name whole, no one-badge form, no fold, no ⋯`, say(s5));
+    await shot('after-en-tablet-short.png');
+    await dress({ title: OWNER }); await sleep(400); await settle();
   }
   // ── ④ THE + ROAD ──
   console.log('④ the + road (LAW 3)');

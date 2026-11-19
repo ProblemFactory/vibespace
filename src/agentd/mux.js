@@ -120,6 +120,11 @@ class Mux {
     if (!q.length) { this._sendQ.delete(chan); this.onWritable(chan); }
   }
 
+  /** B-beaf: bytes still queued on a channel for the peer's credit (0 = all sent). Local only — no wire change. */
+  queued(chan) { return (this._sendQ.get(chan) || []).reduce((n, b) => n + b.length, 0); }
+  /** B-beaf: forget a channel this side is done with — its send window and anything still queued on it. Local only. */
+  forget(chan) { this._sendQ.delete(chan); this._sendWin.delete(chan); }
+
   /** grant the peer n consumed bytes back on a byte channel. */
   credit(chan, n) {
     const p = Buffer.alloc(4);
@@ -173,7 +178,10 @@ class Mux {
       case T.CREDIT: {
         if (payload.length !== 4) break;
         const n = payload.readUInt32BE(0);
-        this._sendWin.set(chan, (this._sendWin.get(chan) ?? INITIAL_WINDOW) + n);
+        // B-beaf (its readers): a credit for a channel this side never sent on, or forgot (a detached pipe channel: the peer
+        // still credits the input it took before the CLOSE), is stale — never a send window made again for it (data() makes one)
+        if (!this._sendWin.has(chan)) break;
+        this._sendWin.set(chan, this._sendWin.get(chan) + n);
         this._flush(chan); // window grew — send whatever now fits
         break;
       }

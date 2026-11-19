@@ -11,11 +11,14 @@ const path = require('path');
 const net = require('net');
 const http = require('http');
 const PI = require('./proc-identity.js'); // B-1cc6: a pid is never an identity
+const WRAPPER_HELD = new Set(['up', 'starting', 'awaiting-user']);   // B-c134 cure: a job state whose wrapper the engine holds (an «unverified» one is a previous boot's pid: never kept out)
+const LOGS_SAY_AT_ONCE = 50;   // B-c330: a job-logs pass that removes this many run dirs or more is said at once (the steadier ones fold into a day's line)
 const crypto = require('crypto');
 const { withoutNoticeHead } = require('./notification-senders.js'); // lane notify-retry: a parked frame carries the ladder's head; the floor's digest is of the raw text
 const textDigest = (t) => crypto.createHash('sha256').update(String(t)).digest('hex'); // a flood floor's memory of a text (verify r9)
 const { spawn, execFile } = require('child_process');
 const M = require('./job-model.js');
+const { priorityArgv } = require('./spawn/line.js'); // PURE (B-460d): a job's wrapper starts with `nice -n 5` — the words of a start's priority
 const VJ = require('./vault-job.js'); // PURE (lane vault-job-road): a job's --vault values — the grammar, the verdict at every spawn, the fd plan, the frame
 const JN = require('./job-notice.js'); // PURE (lane job-notice-dedupe): a published service's notice is a STATE CHANGE — the verdict over its down record
 const { credentialEnvNames } = require('./harness-env.js'); // PURE: B-6be2 — the job door's credential strip, derived from the descriptors
@@ -25,7 +28,8 @@ const { applyClear, CLEARED_TEXT } = require('./record-clear.js'); // PURE: "Cle
 const SR = require('./store-read.js'); // B-f276: THE STORE READ — a read that failed is no answer (never set aside, never «empty»)
 const asideOf = (file) => file + '.corrupt-' + now();   // the ONE set-aside name (the load's and the read again's — test-store-write-census ⑧ counts it once)
 const READ_AGAIN_MS = 10_000;   // cure r1: a read again past this is said slow; the next try is armed before it is awaited
-const STORE_SHAPE = (v) => Array.isArray(v) && v.every((j) => j != null);   // jobs.json: a list of records (a null entry is torn)
+const STORE_SHAPE = (v) => Array.isArray(v) && v.every((j) => j != null);
+const PARKED_NO_START = 'it ended out of memory and is parked — raise its bound (vibespace-job memory), then start it';   // B-cac2 r2: a park is never undone by an asked start   // jobs.json: a list of records (a null entry is torn)
 // B-2204: a recovered skeleton is the person's alone — one the release wrote with view 'all' is read back owner-less, view 'session'
 const skeletonAccess = (j) => { if (LS.isSkeleton(j)) { j.owner = {}; j.access = { view: 'session', control: 'session' }; } return j; };
 const LS = require('./job-logs-sweep.js'); // lane job-logs-sweep: what a record no longer lists leaves data/job-logs after 14 days — every removal under job-logs off the main thread
@@ -198,6 +202,7 @@ class JobManager {
     this._unread = { store: null, archive: null }; this._unreadT = { store: null, archive: null }; this._unreadTries = { store: 0, archive: 0 }; this._unreadSaid = { store: false, archive: false }; this._unreadStopped = false;
     // cure r1 (主开发 00:40Z): one read again in flight a store, bounded; the note THIS process wrote and the items its hold filed — lifted when a read answers
     this._unreadP = { store: null, archive: null }; this._unreadSlow = { store: 0, archive: 0 }; this._unreadNoteAt = { store: null, archive: null }; this._unreadLiftedOwed = { store: null, archive: null }; this._unreadItems = { store: [], archive: [] };   // cure 2: _unreadLiftedOwed — a failure's note still being written when a read again ended it
+    this._unreadMissingAt = { store: 0, archive: 0 }; this._unreadGoneOwed = { store: null, archive: null };   // cure 3: «missing» read once more; a gone failure's note
     this._logsSaidNow = new Set();   // set-aside files whose item was filed in this process, merged into the record's `heldSaid`
     this._logsHeldSaid = '';         // the journal's last HELD line (said once per process per set of files)
     this._logsOwed = new Set();   // ids whose whole-dir removal the storage did not do (held / failed) — re-sent before every pass; ≤ LOGS_OWED_MAX, a restart forgets them (the law's pass takes them 14 days after their newest file)
@@ -242,6 +247,7 @@ class JobManager {
       if (this._skeletonsOwed) { this._skeletonsOwed = false; this._save({ storeOnly: true }); }   // B-ef97: the recovered skeletons, on disk before anything else runs — jobs.json ALONE (a notifications file that did not load is not written over here)
       this._bootAt = now(); // this server generation's start: a run begun before it was an older generation's (update window)
       this._adoptAndReplay();
+      this._goneSaid = new Set(); this._keepOutOff = PI.keepOut('jobs', () => this._wrappersHeld());   // B-c134 cure (MUST A): no stop's walk enters another job's wrapper
       // boot sweep (triage §13 rule 5): housekeeping happens as soon as the
       // store is trustworthy again, isolated like every other init step
       try { this.archiveSweep({ why: 'boot' }); } catch (e) { this.d.log('[jobs] archive sweep at boot failed:', e.message); }
@@ -261,7 +267,7 @@ class JobManager {
       this._forYou(null, M.forYouCopy(null, 'engine-failed', { error: e.message }));
     }
   }
-  shutdown() { this._unreadStopped = true; for (const w of ['store', 'archive']) { if (this._unreadT[w]) clearTimeout(this._unreadT[w]); this._unreadT[w] = null; } this._logsNoteAtExit(); try { if (this._dirty) this._save(); } catch { } try { if (!this.readOnly) fs.unlinkSync(this.lockFile); } catch { } this._logsStop(); }
+  shutdown() { if (this._keepOutOff) { this._keepOutOff(); this._keepOutOff = null; } this._unreadStopped = true; for (const w of ['store', 'archive']) { if (this._unreadT[w]) clearTimeout(this._unreadT[w]); this._unreadT[w] = null; } this._logsNoteAtExit(); try { if (this._dirty) this._save(); } catch { } try { if (!this.readOnly) fs.unlinkSync(this.lockFile); } catch { } this._logsStop(); }
 
   _takeLock() {
     try {
@@ -295,7 +301,7 @@ class JobManager {
     this.d.log('[jobs] store corrupt → preserved at', bad || (this.readOnly ? '(nowhere — a read-only engine writes nothing)' : '(nowhere — its note holds the job-logs clean-up)'), '— rebuilding skeletons; error:', e.message);
     try {
       // B-ef97: an id the archive holds has its record there — a skeleton beside it would be a second, empty record of it
-      const archived = new Set(this._loadArchive().map((r) => r.id));   // cure r1: set aside or not (a held store's skeleton beside its archived copy)
+      const archived = new Set(pre && Array.isArray(pre.archivedIds) ? pre.archivedIds : this._loadArchive().map((r) => r.id));   // cure r1: set aside or not (a held store's skeleton beside its archived copy); cure 3: read off the loop by a read again
       for (const id of (pre && pre.logIds) || fs.readdirSync(this.logsDir)) {   // cure r2: the read again lists it off the loop
         if (!id.startsWith('jb-') || archived.has(id)) continue;
         // B-2204: owner-less and view 'session' — the person sees it (isUser), no conversation does (was view 'all': every one)
@@ -342,6 +348,9 @@ class JobManager {
         if (pre.bad) this.d.log(`[jobs] ${path.basename(file)}: torn bytes when read again — set aside as ${path.basename(pre.bad)}, before its load`);   // cure 2: said where it is done
       }
       if (which === 'store') { try { pre.logIds = await fs.promises.readdir(this.logsDir); } catch { pre.logIds = []; } }   // cure 2: a read-only engine lists off the loop too
+      // cure 3: the archive's ids (the load drops a skeleton the archive holds) — read here, off the loop, when nothing loaded it yet (a
+      // read-only engine never sweeps); a read that fails leaves the load its own road
+      if (which === 'store' && this.archive == null) { try { const v = JSON.parse(await fs.promises.readFile(this.archiveFile, 'utf-8')); pre.archivedIds = Array.isArray(v) ? v.map((r) => r && r.id).filter(Boolean) : null; } catch (e) { pre.archivedIds = e && e.code === 'ENOENT' ? [] : null; } }
     }
     if (which === 'store' && a.state === 'data' && !this.readOnly) {
       // cure 2: ONE FILE AT A TIME — the read it serves holds one pool thread a store (r2 fanned out with no bound)
@@ -397,9 +406,19 @@ class JobManager {
     clearTimeout(timer);
     if (!first && !this._unreadSlow[which]++) this.d.log(`[jobs] ${base}: a read again did not answer in ${Math.round(ms / 1000)} s — the storage may hang; it is waited on (never doubled) and tried again on the same pace (said once)`);
     const got = first || await job.catch(() => null);
-    if (!got || this._unreadStopped || !this._unread[which]) { this._ctlPre = null; return; }
+    if (!got || this._unreadStopped || !this._unread[which]) {
+      this._ctlPre = null;
+      // cure 3: torn bytes set aside, then the engine stopped before their load — said here; the next start's clean-up pass names the
+      // held file to the person (records-held), and its prefix holds the clean-up
+      if (got && got.pre && got.pre.bad) this.d.log(`[jobs] ${base}: its torn bytes were set aside as ${path.basename(got.pre.bad)} and the engine stopped before loading them — the next start names that file`);
+      return;
+    }
     const { a, pre } = got;
-    if (a.state === 'unreadable') { this._unread[which].code = a.code; return; }   // the next try is armed already
+    if (a.state === 'unreadable') { this._unread[which].code = a.code; this._unreadMissingAt[which] = 0; return; }   // the next try is armed already
+    // cure 3 (主开发 11:10Z, as if a must): a store that answers «missing» RIGHT AFTER an unreadable answer is READ ONCE MORE before
+    // anything is written at its path — a storage that says «no such file» for a moment about a file that exists must not have it
+    // written over by the next save: the hold stands until a SECOND read again says missing too
+    if (a.state === 'missing' && !this._unreadMissingAt[which]) { this._unreadMissingAt[which] = now(); this.d.log(`[jobs] ${base}: a read again answered «no such file» — read once more before anything is written there (the hold stands)`); return; }
     const tries = this._unreadTries[which], was = this._unread[which];
     this._unread[which] = null;   // the answer is loaded as the boot loads it: torn bytes that still cannot be set aside hold again
     try {
@@ -417,7 +436,7 @@ class JobManager {
       // WHOLE read. A file that is GONE, or torn bytes, end the hold with THEIR own true sentence, and the clean-up stays held
       if (a.state === 'data') this._unreadLift(which, was).catch((e) => this.d.log(`[jobs] ${base}: its note could not be lifted:`, e && e.message));
       else this._unreadEnded(which, was, a, pre).catch((e) => this.d.log(`[jobs] ${base}: its end could not be said:`, e && e.message));
-      this._unreadTries[which] = 0; this._unreadSaid[which] = false; this._unreadSlow[which] = 0;
+      this._unreadTries[which] = 0; this._unreadSaid[which] = false; this._unreadSlow[which] = 0; this._unreadMissingAt[which] = 0;
       this.d.log(`[jobs] ${base} read again after ${tries} tr${tries === 1 ? 'y' : 'ies'}: ${a.state === 'data' ? `${a.value.length} record(s)` : a.state === 'missing' ? 'the file is GONE — the records it held are not here; a new list starts, the job-logs clean-up stays held' : `torn bytes, set aside${pre && pre.bad ? ` as ${path.basename(pre.bad)}` : ''} — rebuilt from the job logs; the job-logs clean-up stays held`} — ${this.readOnly ? 'a read-only engine writes nothing' : 'writes resume'}`);
       try { this.d.broadcast('jobs-updated', { reread: which }); } catch { }
     }
@@ -460,6 +479,7 @@ class JobManager {
     for (const id of items) { try { this.d.resolveNotice && this.d.resolveNotice(id); } catch { } }
     if (a.state === 'missing') {
       this._unreadNoteAt[which] = null;   // the note stands: it is a person's to move now, no read's to lift
+      this._unreadGoneOwed[which] = this._logsNoteOwed[which] || null;   // cure 3: its note still being written lands with no second item
       if (!this._logsUnread[which]) this._logsUnread[which] = 'ENOENT';
       if (!this.readOnly) this._forYou(null, M.forYouCopy(null, 'records-gone', { store: base, note: name, error: was && was.code, when: was && was.at, until: now() }));
       this.d.log(`[jobs] ${base}: the file was GONE when read again — the records it held are not here; ${name} holds the job-logs clean-up until a person moves it`);
@@ -536,7 +556,10 @@ class JobManager {
       }
       if (r === 'written' || r === 'stood') {
         this._logsNoteOwed[t.side] = null;
-        if (r === 'written') {
+        if (r === 'written' && this._unreadGoneOwed[t.side] === t.o) {   // cure 3: «gone» was said for this very failure — no «unread» item after it
+          this._unreadGoneOwed[t.side] = null;
+          this.d.log(`[jobs] ${t.side}: the note ${t.file} landed after «gone» was said for the same failure — it holds the job-logs clean-up; no second item`);
+        } else if (r === 'written') {
           this.d.log(`[jobs] ${t.side} could not be read (${t.o.error}) — the note ${t.file} holds the job-logs clean-up until a person moves it`);
           // «said» keyed by the note AND its moment: a note a person moved and a later failure wrote again is told again
           const v = this._logsSay(`${t.file}@${t.o.at}`, 'records-unread', { store: t.base, note: t.file, error: t.o.error, when: t.o.at });
@@ -1482,7 +1505,42 @@ class JobManager {
   _killGroup(job, sig) { // handle-kill with act-time re-verification (B-16d9 law)
     const stamp = this._readStamp(job);
     if (!this._verifyAlive(stamp)) return false;
+    if (sig === 'SIGKILL') this._killTree(job, stamp);   // B-c134: a SIGKILL ends the wrapper before it can end its tree — the engine does, first
     return PI.signalIdentity(stamp, sig, { group: true, what: `job ${job.id}` }).ok; // the group, else its leader
+  }
+  /** B-c134 A STOP ENDS THE WHOLE TREE IT STARTED — where the wrapper cannot: a FORCE stop and the ladder's kill step SIGKILL it (its
+   *  own stop step, which ends its tree through its one table, never runs). The tree under the wrapper read FIRST (PI.treeOf — the
+   *  tree's own cost, procfs, bounded), each member SIGKILLed by identity (pid + start at the act), said in the log; then the caller's
+   *  SIGKILL of the group / the scope, in the same tick. A SIGTERM is never sent here (the wrapper's stop step delivers a stop's). */
+  _killTree(job, stamp) {
+    const t = PI.treeOf([Number(stamp.pid)], { since: Number(stamp.starttime) || 0 }), tree = t.filter((m) => m.pgid !== Number(stamp.pid));   // the group dies with the group's SIGKILL
+    const killed = [], refused = [];
+    let unjudged = 0;
+    for (const m of tree) { const r = PI.signalIdentity(m, 'SIGKILL', { what: `job ${job.id}'s tree` }); if (r.ok) killed.push(m.comm); else if (r.why === 'not-ours') refused.push(m.comm); else if (r.why !== 'gone' && r.why !== 'stale' && r.why !== 'pid-recycled') unjudged++; }   // a recycled pid: that member had ended
+    // B-c134 cure (MUST B): said where the person reads — the job's OWN log (a force stop's wrapper is dead: nobody else writes it),
+    // a refused signal named, a cut walk said; and in the hub's log as before
+    const n = killed.length, line = `its forced end killed ${n} process${n === 1 ? '' : 'es'} it started outside its group (${[...new Set(killed)].join(', ') || '—'})`
+      + (refused.length ? `; could not end ${refused.length} (${[...new Set(refused)].join(', ')}: not ours to signal)` : '') + (unjudged ? `; ${unjudged} could not be judged (its identity unreadable): not signalled` : '') + (t.cut ? ' — its tree was read only in part: what it started may be left' : '');
+    if (n || refused.length || unjudged || t.cut) { this.d.log(`[jobs] ${job.id}: ${line}`); this._runLogLine(this._runLogFile(job), `[jobs] stop: ${line}`); }
+    return n;
+  }
+  /** B-c134 cure: the latest run's own log file (the path alone) */
+  _runLogFile(job) {
+    const run = job.runs && job.runs[job.runs.length - 1];
+    return run ? run.log || path.join(this._ctlDir(job, run.startedAt), 'current.log') : null;
+  }
+  /** B-c134 cure: one line into a run's own log (off the loop, appended — the wrapper's lines and ours, in order); the words are the
+   *  stop's own (counts, kernel process names), never a record's */
+  _runLogLine(file, text) {
+    if (!file) return;
+    fs.promises.appendFile(file, `\n${text}\n`).catch(() => { });
+  }
+  /** B-c134 cure (MUST A): the wrappers this engine holds — each live job's, by the pid it spawned or adopted — kept out of every
+   *  stop's walk but their own job's (a recycled pid only makes a stop end less) */
+  _wrappersHeld() {
+    const out = [];
+    for (const j of this.jobs.values()) if (j && j.proc && Number(j.proc.pid) > 1 && WRAPPER_HELD.has(j.state)) out.push([Number(j.proc.pid), 0]);
+    return out;
   }
   // A STOP ENDS THE JOB (lane jobs-memory-bound, acceptance round 4): on the cgroup rung the job's group is its SCOPE — every
   // process it started, in its process group or not, and whether or not its wrapper still lives (the base killed nothing once
@@ -1563,6 +1621,7 @@ class JobManager {
     }
     if (k && !['refused', 'unread', 'nokill'].includes(k.r)) return true; // its kill in flight or landed: the next rung waits its step
     const rec = job._scopeKilled = { unit: scope.unit, at: k ? k.at : now() };
+    if (!k) { const st = this._readStamp(job); if (this._verifyAlive(st)) this._killTree(job, st); }   // B-c134: what moved out of the scope dies with it (read first)
     this._killScope(scope).then((r) => { rec.r = r; if (r === 'killed') said('its scope was killed'); });
     return true;
   }
@@ -1574,8 +1633,19 @@ class JobManager {
       // round 10: A STOP GOES ONCE — a wrapper already delivering a stop step itself (its stopping.json: its own stop, an agent's
       // signal to it; or the drain of what its ended job left) is signalled ALONE, the intent saying so — it delivers the rest
       // through its one table (round 9 signalled the whole group again: a process mid-cleanup heard SIGTERM twice, code 143)
+      // B-c134 A STOP ENDS THE WHOLE TREE IT STARTED: the tree under the wrapper is read FIRST (a child of its main is re-parented the
+      // moment the main dies — and the group's signal reaches the main and the wrapper at once) and rides the intent; the wrapper's stop
+      // step delivers it through its ONE table (one SIGTERM a process — the engine sends the tree none). Synchronous, as the release's
+      // member walk: procfs, the tree's own cost, bounded — the stop's signal stays in this same tick
       const ctl = this._ctlDir(job, run.startedAt), alone = !!this._ctlJson(job, run, 'stopping.json');
-      try { writeJsonAtomic(path.join(ctl, 'stop.json'), { sig: 'SIGTERM', at: now(), ...(alone ? { alone: true } : {}) }); } catch { }
+      const st = this._readStamp(job), live = !!(st && this._verifyAlive(st)), tree = live ? PI.treeOf([Number(st.pid)], { since: Number(st.starttime) || 0 }) : Object.assign([], { cut: false, keptOut: [] });
+      const all = tree.filter((m) => m.pgid !== Number(st && st.pid)), rows = all.slice(0, 256).map((m) => [m.pid, m.starttime, m.pgid, m.comm]);
+      const treeCut = tree.cut || all.length > rows.length;   // cure: the intent's row cap is a cut too — said by the wrapper
+      // cure (MUST A): the intent names what the wrapper's walk must not enter (the hub, the conversations' holders, the other jobs' wrappers)
+      try { writeJsonAtomic(path.join(ctl, 'stop.json'), { sig: 'SIGTERM', at: now(), ...(alone ? { alone: true } : {}), ...(rows.length ? { tree: rows } : {}), ...(treeCut ? { treeCut: true } : {}), ...(tree.keptOut && tree.keptOut.length ? { keepOut: tree.keptOut.slice(0, 512) } : {}) }); } catch { }
+      // cure r2 (its own read F6): said only of a wrapper PROVEN gone — a stamp of this boot whose process is not there, no end record — once a run
+      if (st && !live && st.bootId === bootId() && PI.aliveIdentity(st) === false && !this._ctlJson(job, run, 'exit.json') && !(this._goneSaid || (this._goneSaid = new Set())).has(ctl)) { this._goneSaid.add(ctl); this._runLogLine(this._runLogFile(job), '[jobs] stop: its wrapper had already ended — what the job started could not be read, and may still be running'); }
+      if (tree.pruned) this._runLogLine(this._runLogFile(job), `[jobs] stop: its tree walk left alone ${tree.pruned} process${tree.pruned === 1 ? '' : 'es'} it does not own (the hub's, another conversation's or another job's)`);
       if (alone) { const stamp = this._readStamp(job); return this._verifyAlive(stamp) && PI.signalIdentity(stamp, 'SIGTERM', { what: `job ${job.id}'s wrapper` }).ok; }
     }
     return this._killGroup(job, 'SIGTERM');
@@ -2031,6 +2101,7 @@ class JobManager {
     job.state = 'starting';
     delete job.ack; // a NEW run is a new claim on the user's attention (triage §13)
     delete job._stopRequested; delete job._termAt; delete job._stopForce; delete job._forced; // round 5: a stop said to an ENDED run never stops the next
+    delete job._startAfterStop;   // B-cac2 (its read r2): a start asked during a stop is the next run's — any new run ends the ask (never a later run's end)
     for (const t of job._killSteps || []) clearTimeout(t); // round 6: …nor does its kill timer — a new run disarms every timer of the last
     delete job._killSteps;
     job.runs = job.runs || [];
@@ -2064,7 +2135,16 @@ class JobManager {
       try { fs.writeFileSync(fd, JSON.stringify(spec)); } finally { fs.closeSync(fd); }
       // lane vault-job-road: the values' frame is built LAST — nothing that can throw stands between it and its hand-off but the spawn
       if (vj) { const p = vj.door.payload(vj); if (!p.ok) throw new Error(p.words || 'the vault values could not be read'); frame = p.frame; }
-      child = spawn(process.execPath, [wrapper, ctl, specPath, '--proto=' + WRAPPER_PROTO], { detached: true, stdio: vj ? ['ignore', 'ignore', 'ignore', 'pipe'] : 'ignore', env: wrapperEnv(job.id) });
+      // B-460d: WHAT A JOB STARTS NEVER OUTRANKS THE HUB — its wrapper is born at `nice -n 5` (the wiring's spawnPriority:
+      // the setting read at THIS start). The wrapper's systemd-run --scope runs in its own process, so the job keeps the
+      // VALUE — but that scope is a cgroup beside the hub's service, where only cpu weights compete (the remainder, named).
+      // The wrapper's own words stay ONE array (suites cut it as a whole: test-vault-job, test-jobs-engine).
+      const pri = typeof this.d.spawnPriority === 'function' ? this.d.spawnPriority() : null;
+      const argv = [...priorityArgv(pri && pri.priority), process.execPath, ...[wrapper, ctl, specPath, '--proto=' + WRAPPER_PROTO]];
+      child = spawn(argv[0], argv.slice(1), { detached: true, stdio: vj ? ['ignore', 'ignore', 'ignore', 'pipe'] : 'ignore', env: wrapperEnv(job.id) });
+      // an exec that fails late (the nice program gone since the one look) is an 'error' event: never the hub's crash —
+      // the run's wrapper never appears, and the engine's supervision judges a start that wrote no pid
+      child.once('error', (e) => { try { this.d.log && this.d.log(`[jobs] ${job.id}: its wrapper did not start (${argv[0]}): ${e && e.message}`); } catch { } });
     } catch (e) { try { fs.unlinkSync(specPath); } catch { } if (frame) frame.fill(0); throw e; } // a failed write or spawn leaves no spec behind (nor a frame)
     child.unref();
     if (vj) this._handValues(child, job, vj, frame, job.runs[job.runs.length - 1]);
@@ -2481,6 +2561,9 @@ class JobManager {
     run.endedAt = exit.endedAt || now();
     // lane jobs-browser (B-dbc1): the run is over — what it held as its conversation (its browser lease + window) is released
     try { this.d.onRunEnded?.(job, run); } catch { }
+    // B-cac2: a start asked while this run's stop ran (or a restart) is taken HERE — after the release above (a browser the run held is
+    // let go first; test-jobs-browser pins that order), before every road out below
+    const startAsked = !!job._startAfterStop; delete job._startAfterStop;
     run.exit = exit.code;
     const untilHit = job._untilHit;
     // AN UPDATE'S WINDOW IS NOT A FAILURE (lane job-wrapper-update-window, fb-7f7be1e24e): the wrapper on disk spoke another
@@ -2544,7 +2627,7 @@ class JobManager {
       // log's own output (under a forced stop / OOM the process's last words —
       // the wrapper's exit marker only when the wrapper outlived the group)
       run.lastLine = job.clearedAt && !((run.startedAt || 0) > job.clearedAt) ? null : this._lastLogLine(job, run);
-      if (memPark && memPark.park) { this._parkForMemory(job, run); return; } // lane jobs-memory-bound: the park says the end (once)
+      if (memPark && memPark.park) { this._parkForMemory(job, run); this._startAskedAtStop(job, startAsked, PARKED_NO_START); return; } // lane jobs-memory-bound: the park says the end (once); B-cac2 r2: never undone by an asked start
       // quiet-success is the DEFAULT, not a law (2.346.0, owner decision): the
       // creating agent opts scheduled successes into events+notify with
       // --notify-ok (job.notifyOk, inherited by the cron child via the
@@ -2563,6 +2646,21 @@ class JobManager {
     }
     // round 5 (the ruling): a service keeps what its run left only while it runs — stopped or parked, they are stopped too
     if (job.kind === 'service' && left && left.kept && (!job.desiredUp || job.state === 'failed')) this._clearKept(job, run).then(() => this._cutSaid(job, run)).catch(() => { });
+    this._startAskedAtStop(job, startAsked, memPark && memPark.park ? PARKED_NO_START : null);   // B-cac2: done now that the run has ended — once (a memory park: said, not done)
+  }
+  /** B-cac2: THE START ASKED DURING A STOP, done when the run ended (runtime only — a hub restarted inside the stop's grace
+   *  forgets it, and any new run or later stop ends it). Not done for a job removed meanwhile or after the engine's end; not
+   *  done over a memory park (`refusal`); a start that cannot be done is SAID where the person and the owner look */
+  _startAskedAtStop(job, asked, refusal = null) {
+    if (!asked) return;
+    const say = (why) => { const what = `the start asked during its stop was not done: ${why}`; this._touch(job, { what, alarm: true }); this._notifyOwner(job, { what }); this._save(); };
+    if (refusal) { say(refusal); return; }
+    setImmediate(() => {
+      if (this._unreadStopped || this.jobs.get(job.id) !== job) return;   // the engine ended, or the job was removed meanwhile
+      let r; try { r = this.start(job); } catch (e) { r = { error: (e && e.message) || String(e) }; }
+      this.d.log(`[jobs] ${job.id}: the start asked during its stop — ${r && r.error ? `refused: ${r.error}` : 'started'}`);
+      if (r && r.error) say(r.error);
+    });
   }
   /** round 10: A CUT WALK OF THE PARK'S OR THE STOP'S OWN CLEAR IS SAID AT ONCE — never only when someone presses start (round 9
    *  stamped it silently; the base said it): a parked service by the doubt's door (its journal line, ONE For-you notice — a later
@@ -2915,9 +3013,14 @@ class JobManager {
       this._logsSave(); await require('./store-writer.js').storeWriter().durable(this.logsSweepFile).catch(() => { });   // round 2: on disk at the open — a restart resumes it, never a second start line
       this.d.log(LS.words.start({ counted: st.catchUp.counted, max: cfg.max, gapMs: cfg.gapMs }));   // round 3 §8: said AFTER the record is on disk (a kill between never says it twice)
     }
+    // B-c330 (主开发's ruling B): a steady pass FOLDS into one line a day (the counts summed, kept in the record — a restart loses none);
+    // a pass that removes LOGS_SAY_AT_ONCE or more speaks at once (the journal's stamp is its hour); a HOLD speaks at once (_logsHeld)
+    const today = new Date(at).toISOString().slice(0, 10);
+    if (st.day && st.day.day !== today) { this.d.log(LS.words.day(st.day)); st.day = null; }
     const cu = st.catchUp;
     if (cu) { if (!opened) { cu.removed += ans.removed; cu.entries += ans.entries; cu.jobDirs = (cu.jobDirs || 0) + (ans.jobDirs || 0); cu.passes++; } }   // the opening pass is in the record already
-    else if (ans.removed) this.d.log(LS.words.pass(ans));
+    else if (ans.removed >= LOGS_SAY_AT_ONCE) this.d.log(LS.words.pass(ans));
+    else if (ans.removed) { const d = st.day || (st.day = { day: today, removed: 0, entries: 0, passes: 0 }); d.removed += ans.removed; d.entries += ans.entries || 0; d.passes++; }
     st.last = { at, why, removed: ans.removed, entries: ans.entries, more: !!ans.more, ms: ans.ms };
     if (cu && !ans.more) { this.d.log(LS.words.done({ ...cu, kept: ans.keptOld || 0 })); st.catchUp = null; } // …and once when it is done, with its total (the last, complete pass's «kept»)
     this._logsSave();
@@ -2991,7 +3094,8 @@ class JobManager {
     this._logsState = { catchUp: cu && typeof cu === 'object' && ['startedAt', 'counted', 'removed', 'entries', 'passes'].every((k) => fin(cu[k])) ? { jobDirs: 0, ...cu } : null,
       last: r && r.last && typeof r.last === 'object' ? r.last : null, heldSaid: Array.isArray(r && r.heldSaid) ? r.heldSaid.filter((x) => typeof x === 'string').slice(-100) : [],
       owed: Array.isArray(r && r.owed) ? r.owed.filter((x) => typeof x === 'string' && LS.JOB_NAME.test(x)).slice(-LOGS_OWED_MAX) : [], heldNow: Array.isArray(r && r.heldNow) ? r.heldNow.filter((x) => typeof x === 'string').slice(0, 20) : [],
-      orphansCounted: Array.isArray(r && r.orphansCounted) ? r.orphansCounted.filter((x) => typeof x === 'string').slice(-50) : [] };
+      orphansCounted: Array.isArray(r && r.orphansCounted) ? r.orphansCounted.filter((x) => typeof x === 'string').slice(-50) : [],
+      day: r && r.day && typeof r.day === 'object' && /^\d{4}-\d{2}-\d{2}$/.test(String(r.day.day)) && ['removed', 'entries', 'passes'].every((k) => fin(r.day[k])) ? { ...r.day } : null };   // B-c330: the day's folded counts
     for (const id of this._logsState.owed) this._logsOwed.add(id);   // what an earlier process owed survives its restart
   }
   /** a set-aside's item was filed: its file is «said» — on disk at once (durably), so a restart never files it twice */
@@ -3111,7 +3215,7 @@ class JobManager {
       schedule: spec.schedule || null, catchUp: spec.catchUp || 'once', action: M.storedAction(spec.action),
       context: spec.context || null, interaction: { pending: null, answers: [] },
       owner: spec.owner, access: spec.access || { view: 'group', control: 'session' },
-      stopWithOwner: !!spec.stopWithOwner, desiredUp: true,
+      desiredUp: true,
       state: spec.kind === 'cron' ? 'scheduled' : 'starting', proc: null, supervise: { consecutiveFails: 0, parkedAt: null },
       runs: [], createdAt: now(),
       ...(memMb !== null && !task ? { memoryMb: memMb } : {}),
@@ -3126,8 +3230,22 @@ class JobManager {
     if (vaultWait) return { job: this.snapshot(job, { author: true }), renamed, vaultWait };
     return { job: this.snapshot(job, { author: true }), renamed };   // the creator IS the author (r4: the record's own name — r7: belted at create)
   }
+  /** B-cac2: STOP, WAIT, START — ONE answer. A live run is stopped and the start is remembered (_finalizeRun does it when the stop
+   *  ends); nothing running, or nothing the stop could reach, starts now */
+  restart(job) {
+    if (this.readOnly) return { error: 'registry is read-only in this process' };
+    const run = job.runs && job.runs[job.runs.length - 1];
+    if (!this._runLive(job, run)) return this.start(job);
+    const s = this.stop(job);
+    if (s && s.error) return s;
+    // a live run whose stop reached no process yet (no pid stamp; its wrapper gone, not judged yet) still ends: the sweep honours
+    // the stop once the stamp exists, or judges the run — the start waits for that end too (never «already running»)
+    job._startAfterStop = true;
+    return { ok: true, pending: true, words: 'stopping — it starts again when the stop ends (a VibeSpace restart before then forgets it: start it again)' };   // 主开发 21:46Z (b): the runtime-only ask SAID where the person is told
+  }
   stop(job, { force } = {}) {
     if (this.readOnly) return { error: 'registry is read-only in this process' };
+    delete job._startAfterStop;   // B-cac2: a stop pressed after a remembered start (or a restart) means stopped — it starts no more
     if (job.kind === 'service' || job.kind === 'cron') { job.desiredUp = false; }
     job._stopRequested = true;
     if (job.kind === 'service') this._teardownPublish(job);
@@ -3157,6 +3275,15 @@ class JobManager {
   }
   start(job) {
     if (this.readOnly) return { error: 'registry is read-only in this process' };
+    // B-cac2 (fb-f4a0c70a84): a START while a STOP's grace runs is no «already running» (the service then ended down and a second
+    // start was needed) — it is REMEMBERED and done when the stop ends (_finalizeRun), said with the grace left
+    const run0 = job.runs && job.runs[job.runs.length - 1];
+    if ((job._termAt || job._stopForce) && this._runLive(job, run0)) {
+      job._startAfterStop = true;
+      this.d.log(`[jobs] ${job.id}: a start asked while its stop runs — it starts when the stop ends`);
+      const left = job._termAt ? Math.max(0, Math.ceil((job._termAt + this._killStepMs() - now()) / 1000)) : null;   // a forced / not-yet-reached stop has no grace clock
+      return { ok: true, pending: true, words: (left != null ? `still stopping (${left} s left) — it starts when the stop ends` : 'still stopping — it starts when the stop ends') + ' (a VibeSpace restart before then forgets it: start it again)' };   // 主开发 21:46Z (b): said where the person is told
+    }
     job.desiredUp = true;
     job.supervise = { consecutiveFails: 0, parkedAt: null };
     // lane jobs-memory-bound: the owner acted — a cron parked for its child's out-of-memory ends counts its child afresh
@@ -3250,6 +3377,30 @@ class JobManager {
     this._save();
     return { ok: true, version };
   }
+  /** B-8bd5: the job that FILED a panel may WITHDRAW it once its cause is gone (a monitor's alarm that cleared) — the panel closed,
+   *  its For-you item resolved, a waiting `answers --wait` woken, said in its events; no panel open: answered, nothing changed */
+  withdrawAsk(job, { self = false } = {}) {   // `self`: the job withdrew its own question (its jbt_) — it knows; nothing echoes on its stdin
+    if (this.readOnly) return { error: 'registry is read-only in this process' };
+    const p = job.interaction && job.interaction.pending;
+    if (!p) return { ok: true, already: 'no panel of this job is open' };
+    // its adversarial read r1: the withdraw is a RECORD in the answers (as an expiry is) — a loop waiting on `answers --wait` learns
+    // the panel is gone, whoever closed it
+    job.interaction.answers = job.interaction.answers || [];
+    const wrec = { withdrawn: true, version: p.version, ts: now() };
+    job.interaction.answers.push(wrec);
+    if (job.interaction.answers.length > 50) job.interaction.answers.splice(0, job.interaction.answers.length - 50);   // its read r2: the same cap as an answer's
+    if (job.stdinOpen && !self) { // 主开发 21:46Z: a stdin-open job reads a withdraw BY ITS OWNER on its stdin, as it reads an answer (the wrapper's answers tail file) — never an echo of its own
+      const run = job.runs && job.runs[job.runs.length - 1];
+      if (run) { try { fs.promises.appendFile(path.join(this._ctlDir(job, run.startedAt), 'answers.jsonl'), JSON.stringify(wrec) + '\n').catch(() => { }); } catch { } }   // OFF the loop (test-store-write-census: no new synchronous store write)
+    }
+    job.interaction.pending = null;
+    if (job.state === 'awaiting-user') job.state = 'up';
+    this._resolveAns(job);
+    try { this.d.resolveJobAsk && this.d.resolveJobAsk(job.id); } catch { }
+    this._touch(job, { what: `withdrew its panel #${p.version} (its cause is gone)`, verb: 'answers' });
+    this._save();
+    return { ok: true, version: p.version };
+  }
   answerPanel(job, answers) { // user-side (routes verify user auth)
     const p = job.interaction && job.interaction.pending;
     // r6 D-F5: the answer names its panel — missing or another panel's ⇒ refused by name, nothing recorded
@@ -3324,7 +3475,7 @@ class JobManager {
       // field is never read (`vibespace-job run --at … --notify-ok` showed notifyOk=false for fires that notify);
       // notifyUser is the one reader's answer (lane job-notify-user: `show` printed nothing about the For-you copy)
       untilOutput: job.untilOutput || M.spawnTaskOf(job).untilOutput || null, notifyUser: M.notifyUserOf(job), notifyOk: !!job.notifyOk || !!(job.action && job.action.type === 'spawn-task' && job.action.task && job.action.task.notifyOk),
-      catchUp: job.catchUp || null, stopWithOwner: !!job.stopWithOwner, singleInstance: job.singleInstance !== false,
+      catchUp: job.catchUp || null, singleInstance: job.singleInstance !== false,
       // lane jobs-memory-bound: THE LADDER's answer now (a cron's: its task's), the rung its latest run measured, the park's
       // reason and the out-of-memory ends counted toward it
       ...(() => { const m = M.memoryMbOf(job.kind === 'cron' && job.action && job.action.task ? job.action.task : job, this._memoryCtx()); return { memoryMb: m.mb, memoryAskedMb: m.askedMb !== undefined ? m.askedMb : m.mb, memorySource: m.source, memoryCap: m.cap || null }; })(), // round 4: the NEXT run's (a live run's own rides its memoryBound.cap)

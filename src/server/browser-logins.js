@@ -94,6 +94,26 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
   function metaOf(name) {
     return names().find((e) => e.name === name) || null;
   }
+  /** ONE LOGIN, SEVERAL SITES: the names, each with the sites its sealed record keeps (`origins`, `siteUsers`) — the vault's clear
+   *  names hold only the first site and user, so each login is opened (unlocked only; a record that cannot be read keeps its first
+   *  site alone). Used by the fill and by the writes' one-pair-one-login rule. */
+  function namesWithSites() {
+    const list = names();
+    if (vstate() !== 'unlocked') return list;
+    return list.map((e) => {
+      const o = open(e.name);
+      if (!o.ok || !o.rec) return e;
+      return { ...e, ...(o.rec.origins ? { origins: o.rec.origins.slice() } : {}), ...(o.rec.siteUsers ? { siteUsers: { ...o.rec.siteUsers } } : {}) };
+    });
+  }
+  /** ONE PAIR, ONE LOGIN AT EVERY DOOR THAT MAKES A LOGIN (主开发 23:01Z, must 1): the OTHER login that already holds (site, user) —
+   *  its first site or one added to it — or null. The person's add, an agent's add and the save card's new login each refuse
+   *  login_exists naming it: a second login for a held pair would fill the older one's secret and share its grant row. */
+  function pairHolder(name, origin, user) {
+    if (vstate() !== 'unlocked') return null;
+    return namesWithSites().find((e) => e && e.name !== name && BL.holdsPair(e, origin, user)) || null;
+  }
+  const heldPair = (h, origin, user) => named('login_exists', `${BL.userOf(user)} on ${origin} is already a site of the login ${h.name} — change its password at that login's row in the Vault window (or remove the site there first); nothing was saved`, { other: h.name });
 
   /** THE ONE WRITER of a web-login entry (`vault.secretPut`). */
   function writeEntry(name, rec, { actor = undefined, owner = undefined } = {}) {
@@ -334,7 +354,7 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
       blocked(actor, parsed.origin || tabOrigin || '');
       return named('vault_locked', BL.LOCKED);
     }
-    const allEntries = names();
+    const allEntries = namesWithSites();   // one login, several sites: each login with the sites it keeps
     if (skipOrigin && !tabOrigin && typeof parsed.origin === 'string' && parsed.origin.startsWith('https://')) {
       const specBody = str(rawSpec).trim().replace(/^new:/i, '');
       if (!BL.hasExplicitScheme(specBody)) {
@@ -346,12 +366,15 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
           const isAdmittedLocal = (e) => {
             if (!e) return false;
             if (e.owner && ownSetLocal.has(e.owner)) return true;
-            const rs = BL.grantResources(e.origin, e.user).flatMap((r) => rowsOf(r) || []);
+            // the login's FOUR rows on the local site it would be filled on (one login, several sites) — never the first site's three
+            const there = e.origin === httpLocal || (Array.isArray(e.origins) && e.origins.includes(httpLocal)) ? httpLocal : e.origin;
+            const rs = BL.loginResources(e, there).flatMap((r) => rowsOf(r) || []);
             return GM.admits(rs, facts).ok;
           };
           const httpMatches = allEntries.filter((e) => (e.origin === httpLocal || (Array.isArray(e.origins) && e.origins.includes(httpLocal)) || (localHost && BL.hostOf(e.origin) === localHost && String(e.origin || '').startsWith('http://'))) && isAdmittedLocal(e));
           if (!parsed.isNew && !hasHttps && httpMatches.length > 0) {
-            const targetLocal = httpMatches.some((e) => e.origin === httpLocal) ? httpLocal : httpMatches[0].origin;
+            // the local site itself when a login holds it (its first site or an added one — one login, several sites), else the match's own
+            const targetLocal = httpMatches.some((e) => e.origin === httpLocal || (Array.isArray(e.origins) && e.origins.includes(httpLocal))) ? httpLocal : httpMatches[0].origin;
             parsed = BL.parseVaultFillSpec(rawSpec, { user, generate: !!generate, tabOrigin: targetLocal });
           } else if (parsed.isNew) {
             const httpsRows = BL.grantResources(parsed.origin, parsed.user).flatMap((r) => rowsOf(r) || []);
@@ -554,7 +577,7 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
       };
     }
 
-    const sv = BL.resolveSlotValue(o.rec, v.field);
+    const sv = BL.resolveSlotValue(o.rec, v.field, { origin: v.origin });   // the user name THIS site signs in under
     if (!sv.ok) return sv;
     if (checkOnly) {
       return { ok: true, checkOnly: true, name: v.name, origin: v.origin, user: v.user, field: v.field, slot: sv.slot, generated: false, pending: o.rec.pending ? o.rec.pending.kind : null };
@@ -683,13 +706,17 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
       say(`[browser-login] save-login card refused on ${str(origin).slice(0, 120) || 'none'} (login_bad_origin: not an https site)`);
       return named('login_bad_origin', 'not an https site');
     }
-    const n = BL.entryName(o, username);
+    let n = BL.entryName(o, username);
     if (!n || typeof password !== 'string' || !password) {
       const why = !n ? 'missing or invalid username' : 'missing password';
       say(`[browser-login] save-login card refused on ${o} (bad_request: ${why})`);
       return named('bad_request', 'missing username or password');
     }
-    const ex = vstate() === 'unlocked' ? open(n) : { ok: false };
+    let ex = vstate() === 'unlocked' ? open(n) : { ok: false };
+    // one pair, one login: a hand sign-in on a site another login HOLDS (an added site) is that login's — the card offers its UPDATE
+    // (or nothing when the password is the same), never a new login the save would refuse
+    const holder = ex.ok && !ex.rec ? pairHolder(n, o, username) : null;
+    if (holder) { const hx = open(holder.name); if (hx.ok && hx.rec) { n = holder.name; ex = hx; } }
     const existing = !!(ex.ok && ex.rec);
     if (existing && ex.rec.current && ex.rec.current.password === password) return { ok: true, same: true };
     for (const c of cards.values()) if (c.name === n) dropCard(c.id);
@@ -699,9 +726,11 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
     c.shown = shownOf(c);
     const site = BL.hostOf(o) || o;
     const text = existing ? 'Update the saved login {user} on {site}?' : 'Save the login {user} on {site} to the vault?';
-    const detail = existing ? 'You signed in with a different password in the agent browser. Update keeps the old one in the entry for one revision.' : 'You signed in by hand in the agent browser. Saved logins can be filled on that site for conversations you allow — VibeSpace never hands them the password, and its fence guards against accidental reads and wrong sites.';
+    const others = holder && existing ? BL.sitesOf(ex.rec).map((x) => BL.hostOf(x.origin) || x.origin) : null;   // one login, several sites: the update reaches each
+    const detail = others && others.length > 1 ? 'You signed in on {site} with a different password. {site} is one of this login\'s sites ({sites}) — Update changes its one password for every one of them and keeps the old one for one revision.'
+      : existing ? 'You signed in with a different password in the agent browser. Update keeps the old one in the entry for one revision.' : 'You signed in by hand in the agent browser. Saved logins can be filled on that site for conversations you allow — VibeSpace never hands them the password, and its fence guards against accidental reads and wrong sites.';
     if (forYou && typeof forYou.add === 'function') {
-      try { c.item = forYou.add(profileId, { origin: 'browser', kind: 'action', urgency: 'normal', text: text.replace('{user}', c.username).replace('{site}', site), detail, i18n: { text: { key: text, params: { user: c.username, site } }, detail: [{ key: detail }] }, action: { type: 'save-login', id, shown: c.shown, update: !!existing } }); } catch (e) { say(`[browser-login] the save card was not filed — ${e && e.message}`); }
+      try { c.item = forYou.add(profileId, { origin: 'browser', kind: 'action', urgency: 'normal', text: text.replace('{user}', c.username).replace('{site}', site), detail: others && others.length > 1 ? detail.split('{site}').join(site).replace('{sites}', others.join(', ')) : detail, i18n: { text: { key: text, params: { user: c.username, site } }, detail: [others && others.length > 1 ? { key: detail, params: { site, sites: others.join(', ') } } : { key: detail }] }, action: { type: 'save-login', id, shown: c.shown, update: !!existing } }); } catch (e) { say(`[browser-login] the save card was not filed — ${e && e.message}`); }
     }
     c.timer = setTimeout(() => dropCard(id), cardMs);
     if (c.timer.unref) c.timer.unref();
@@ -747,6 +776,8 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
       if (vstate() !== 'unlocked') return named('vault_locked', 'the vault is locked — unlock it, then save');
       const ex = open(c.name);
       if (!ex.ok) return named(ex.code, ex.error);
+      const holder = ex.rec ? null : pairHolder(c.name, c.origin, c.username);
+      if (holder) return heldPair(holder, c.origin, c.username);
       const rec = ex.rec
         ? BL.ownerUpdatedRecord(ex.rec, c.password, { now: now() })
         : BL.newRecord({ origin: c.origin, username: c.username, password: c.password, source: 'owner', now: now(), rev: nextFloorRev(c.name), entryGen: BL.mintEntryGen(randomBytes) });
@@ -789,9 +820,9 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
     const byWhatSubjects = subjects ? BL.byWhatSubjects(subjects) : null;
     const rawAt = (r) => (g ? g.rowsFor(BL.DOOR, r) : []);
     if (st === 'unlocked') maybeRemindPending();
-    const rowsAt = (r) => {
+    const rowsAt = (r, site = null) => {
       const rows = g ? g.rowsFor(BL.DOOR, r) : [];
-      return rows.map((x) => ({ resource: r, scope: BL.scopeOf(r), ...GM.publicRow(x) }));
+      return rows.map((x) => ({ resource: r, scope: BL.scopeOf(r), site, ...GM.publicRow(x) }));
     };
     const wild = rowsAt('*');
     return {
@@ -811,8 +842,11 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
               ...(pub.pendingCreatedAt != null ? { pendingCreatedAt: pub.pendingCreatedAt } : {}),
               ...(pub.previousReplacedAt != null ? { previousReplacedAt: pub.previousReplacedAt } : {}),
               ...(pub.totpName ? { totpName: pub.totpName } : {}),
+              ...(BL.sitesOf(o.rec).length > 1 ? { sites: BL.sitesOf(o.rec).slice(1) } : {}),   // one login, several sites: its added sites, each with the name it signs in under
             } : {}),
-            grants: [...rowsAt(`${e.origin}#${e.user}`), ...rowsAt(`${e.origin}#*`), ...wild],
+            // one login, several sites: the rows for EVERY site of it, each with the site it belongs to (after a merge the kept rows are seen and removable)
+            grants: [...rowsAt(`${e.origin}#${e.user}`, e.origin), ...rowsAt(`${e.origin}#*`, e.origin),
+              ...(o && o.ok && o.rec ? BL.sitesOf(o.rec).slice(1).flatMap((x) => [...rowsAt(`${x.origin}#${BL.userOf(x.user)}`, x.origin), ...rowsAt(`${x.origin}#*`, x.origin)]) : []), ...wild],
             ...(byWhatSubjects ? { byWhat: BL.byWhatOf({ rows: { thisAccount: rawAt(`${e.origin}#${e.user}`), anyAccount: rawAt(`${e.origin}#*`), anySite: rawAt('*') }, subjects: byWhatSubjects }) } : {}),
           };
         }),
@@ -837,6 +871,8 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
     }
     const ex = open(n);
     if (!ex.ok) return ex;
+    const holder = ex.rec ? null : pairHolder(n, o, username);
+    if (holder) return heldPair(holder, o, username);
     const baseEx = ex.rec && !ex.rec.entryGen ? { ...ex.rec, entryGen: BL.mintEntryGen(randomBytes) } : ex.rec;
     const rec = baseEx
       ? BL.ownerUpdatedRecord({ ...baseEx, username: str(username).trim(), ...(notes ? { notes } : {}) }, password, { ...(totpName ? { totpName } : {}), now: now() })
@@ -898,6 +934,8 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
     if (ex.rec) {
       return named('login_exists', `a login for ${user} on ${o} is already in the vault — fill it with vibespace-browser fill @ref --vault ${o}#${user}/password`);
     }
+    const holder = pairHolder(n, o, user);
+    if (holder) return named('login_exists', `a login for ${user} on ${o} is already in the vault (a site of another login) — fill it with vibespace-browser fill @ref --vault ${o}#${user}/password`, { other: holder.name });
     const rec = BL.newRecord({
       origin: o,
       username: str(username).trim(),
@@ -918,14 +956,161 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
   function drop(name, { who = null } = {}) {
     const p = BL.parseName(name);
     if (!p) return named('not_found', 'no such web login');
-    const ex = vstate() === 'unlocked' ? open(name) : null;
+    // one login, several sites: a locked vault cannot read which sites the login holds, so their own grant rows could not go with it —
+    // refused by name (a later login for one of those pairs must never inherit a row)
+    if (vstate() !== 'unlocked') return named('vault_locked', 'the vault is locked — unlock it, then remove the login (its sites\' own grant rows go with it)');
+    const ex = open(name);
     const prevPendingItemId = ex && ex.ok && ex.rec && ex.rec.pending ? ex.rec.pending.itemId : null;
+    // THE ROWS FIRST, each answer read (the store never throws on a failed write): a stop between loses a grant, never leaves one behind
+    const own = [`${p.origin}#${p.user}`, ...(ex && ex.ok && ex.rec ? BL.sitesOf(ex.rec).slice(1).map((x) => `${x.origin}#${BL.userOf(x.user)}`) : [])];   // + its added sites' own rows (one login, several sites)
+    const gone = [];   // the rows already removed — a refusal after them says so (lost permissions are named)
+    const goneWords = () => (gone.length ? `; its grant row${gone.length === 1 ? '' : 's'} ${gone.join(', ')} ${gone.length === 1 ? 'was' : 'were'} removed already` : '');
+    for (const res of own) {
+      let rr = null;
+      try { const g = store(); if (g && g.rowsFor(BL.DOOR, res).length) rr = g.remove(BL.DOOR, res, 'user'); } catch (e) { rr = { ok: false, error: e && e.message }; }
+      if (rr && rr.ok === false) return named(rr.code || 'not_written', `the login's grant row ${res} could not be removed (${rr.error || 'not written'}) — the login was not removed${goneWords()}`);
+      if (rr && rr.ok) gone.push(res);
+    }
     const r = vault.secretDrop(name);
-    if (r && r.ok === false) return named(r.code || 'not_written', r.error || 'not removed');
+    if (r && r.ok === false) return named(r.code || 'not_written', `${r.error || 'not removed'} — the login was not removed${goneWords()}`);
     resolvePendingItemsForName(name, prevPendingItemId);
-    try { const g = store(); if (g && g.rowsFor(BL.DOOR, `${p.origin}#${p.user}`).length) g.remove(BL.DOOR, `${p.origin}#${p.user}`, 'user'); } catch (e) { say(`[browser-login] ${name}: its grant row was not removed — ${e && e.message}`); }
     try { vault.audit?.('vault-web-login-removed', { why: name, by: 'human', who: who ? str(who).slice(0, 40) : null }); } catch { /* */ }
     return { ok: true, name };
+  }
+
+  // ── ONE LOGIN, SEVERAL SITES (lane login-request-card, the owner 2026-11-17; 主开发 20:05Z): the person's add and remove at the
+  //    login's row, the merge of two logins that are one account — THIS store's writes (writeEntry), each audited, never a secret
+  //    shown, logged or compared. THE GRANT FOLLOWS THE LOGIN: `siteWordsFor` says BY NAME, before the press, who may then have it
+  //    filled on the new site (the login's own row, and by their own rows «any account on that site» / «any site»).
+  const principalsAt = (resource) => { const [row] = rowsOf(resource); const pub = row ? GM.publicRow(row) : null; return pub && !pub.unknown ? (pub.to || []) : []; };
+  // the same public row's EXCEPTIONS (主开发 13:02Z: «Release crew, except X» — the owner asked for exceptions by name)
+  const exceptAt = (resource) => { const [row] = rowsOf(resource); const pub = row ? GM.publicRow(row) : null; return pub && !pub.unknown ? (pub.except || []) : []; };
+  /** The grant pickers' subjects (the Vault window's chips: `{sessions:[{subject:'session:<cid>', name}], groups:[{subject:'group:<id>', name}]}`)
+   *  → the roster GM.namesNow reads — so the words before the press name each principal as the person's chips do (主开发 12:17Z, the
+   *  use door's must: a stored principal carries no name — a group's none at all). */
+  const rosterOf = (subjects) => {
+    const sj = subjects && typeof subjects === 'object' ? subjects : {};
+    const tail = (x, head) => { const v = str(x && x.subject); return v.startsWith(head) ? v.slice(head.length) : ''; };
+    return {
+      // id = its PAGE id when the subject carries it: a grant written under `webui:<id>` names a running conversation too (13:02Z (2))
+      sessions: (Array.isArray(sj.sessions) ? sj.sessions : []).map((x) => { const cid = tail(x, 'session:'); return cid ? { id: str(x.webuiId) || cid, name: str(x.name), backendSessionId: cid } : null; }).filter(Boolean),
+      groups: (Array.isArray(sj.groups) ? sj.groups : []).map((x) => { const id = tail(x, 'group:'); return id ? { id, name: str(x.name) } : null; }).filter(Boolean),
+    };
+  };
+  function siteWordsFor(name, site, { user = '', subjects = null } = {}) {
+    const p = BL.parseName(name);
+    if (!p) return named('not_found', 'no such web login');
+    if (vstate() !== 'unlocked') return named('vault_locked', 'the vault is locked — unlock it, then add the site');
+    const o = open(name);
+    if (!o.ok) return o;
+    if (!o.rec) return named('not_found', 'no such web login');
+    const w = BL.siteWords(o.rec, site, { decode: (h) => { try { return require('node:url').domainToUnicode(h); } catch { return null; } } });
+    if (!w) return named('login_bad_origin', 'a website address (https://host[:port]) — exactly the site');
+    // every principal NAMED by the roster (a live conversation's / a listed group's current name; an absent one keeps its id and is
+    // marked absent — never dropped); the owner too. `there` = the name the login already signs in under on that site (null: not one
+    // of its sites yet) — the card says it, and the answer refuses a different typed name by name
+    const roster = rosterOf(subjects), named2 = (list) => GM.namesNow(list, roster);
+    const owner = (metaOf(name) || {}).owner;
+    const ownerName = owner ? (named2([{ kind: 'conversation', key: str(owner) }])[0] || {}).name || null : null;
+    return { ok: true, name, ...w, user: str(user).trim() || o.rec.username, there: BL.userOnSite(o.rec, w.site),
+      widens: { login: named2(principalsAt(`${p.origin}#${p.user}`)), anyAccount: named2(principalsAt(`${w.site}#*`)), anySite: named2(principalsAt('*')),
+        except: { login: named2(exceptAt(`${p.origin}#${p.user}`)), anyAccount: named2(exceptAt(`${w.site}#*`)), anySite: named2(exceptAt('*')) },   // each row's exceptions, named the same way
+        ...(owner ? { owner, ...(ownerName ? { ownerName } : {}) } : {}) } };   // its owner fills with no grant at all
+  }
+  function addSite(name, { site, user = '' } = {}, { who = null } = {}) {
+    if (!BL.parseName(name)) return named('not_found', 'no such web login');
+    if (vstate() !== 'unlocked') return named('vault_locked', 'the vault is locked — unlock it, then add the site');
+    const o = open(name);
+    if (!o.ok) return o;
+    if (!o.rec) return named('not_found', 'no such web login');
+    const v = BL.addSiteVerdict({ rec: o.rec, name, site, user, entries: namesWithSites() });
+    if (!v.ok) return v;
+    const w = writeEntry(name, { ...v.record, rev: v.record.rev + 1 });
+    if (!w.ok) return w;
+    try { vault.audit?.('vault-web-login-site-added', { why: name, site: v.origin, by: 'human', who: who ? str(who).slice(0, 40) : null }); } catch { /* */ }
+    return { ok: true, name, site: v.origin, user: v.user };
+  }
+  function removeSite(name, site, { who = null } = {}) {
+    if (!BL.parseName(name)) return named('not_found', 'no such web login');
+    if (vstate() !== 'unlocked') return named('vault_locked', 'the vault is locked — unlock it, then remove the site');
+    const o = open(name);
+    if (!o.ok) return o;
+    if (!o.rec) return named('not_found', 'no such web login');
+    const there = BL.userOnSite(o.rec, BL.originOf(site));
+    const v = BL.removeSiteVerdict(o.rec, site);
+    if (!v.ok) return v;
+    // the site's own row (a merged login's grants named it) goes with the site — a later login holding that pair must not inherit it.
+    // The ROW FIRST (主开发 23:01Z (b)): a stop between the two writes then leaves a site without its own row (a grant lost, said),
+    // never a row a later login inherits
+    const res = `${v.origin}#${BL.userOf(there)}`;
+    let rowGone = false;
+    try {
+      const g = store();
+      if (g && g.rowsFor(BL.DOOR, res).length) {
+        // the grants store answers a failed write as {ok:false} (the row put back) — it never throws: read its answer
+        const rr = g.remove(BL.DOOR, res, 'user');
+        if (!rr || rr.ok === false) return named((rr && rr.code) || 'not_written', `the site's own grant row ${res} could not be removed (${(rr && rr.error) || 'not written'}) — nothing was changed`);
+        rowGone = true;
+      }
+    } catch (e) { return named('not_written', `the site's own grant row ${res} could not be removed (${e && e.message}) — nothing was changed`); }
+    const w = writeEntry(name, { ...v.record, rev: v.record.rev + 1 });
+    if (!w.ok) return rowGone ? { ...w, error: `${w.error || w.code} — the site's own grant row ${res} was removed already; the site stays on the login` } : w;
+    try { vault.audit?.('vault-web-login-site-removed', { why: name, site: v.origin, by: 'human', who: who ? str(who).slice(0, 40) : null }); } catch { /* */ }
+    return { ok: true, name, site: v.origin, ...(rowGone ? { grantRemoved: res } : {}) };
+  }
+  /** THE MERGE'S PLAN (主开发 23:01Z, must 2): the verdict, and what it CHANGES — said before the press (mergeWordsFor) and in its answer:
+   *  the sites that join, the other's two-step code dropped when both have one (by name), the other login's own conversation that loses
+   *  its no-grant fill there (an agent stored it), and BY NAME who may then have the kept login filled on the joined sites (its own
+   *  row). A MERGE NEVER DESTROYS THE ONLY COPY OF A SECRET: the other login holding a pending value (a change nobody confirmed —
+   *  maybe the only live copy of that site's password) is refused by name, nothing changed. */
+  function mergePlan(keepName, otherName) {
+    if (!BL.parseName(keepName) || !BL.parseName(otherName)) return named('not_found', 'two web logins by name');
+    if (vstate() !== 'unlocked') return named('vault_locked', 'the vault is locked — unlock it, then merge');
+    const k = open(keepName), x = open(otherName);
+    if (!k.ok) return k;
+    if (!x.ok) return x;
+    if (!k.rec || !x.rec) return named('not_found', 'no such web login');
+    if (x.rec.pending) return named('login_pending_exists', `${otherName} has a password waiting for your confirmation — confirm or discard it at its row first, then merge; nothing was changed`);
+    // the KEPT login must hold a confirmed password: a registration waiting for confirmation would drop the other's confirmed secret
+    if (!k.rec.current) return named('login_pending_exists', `${keepName} has no confirmed password yet (a registration waiting for your confirmation) — confirm it at its row first, then merge; nothing was changed`);
+    const v = BL.mergeVerdict({ keep: k.rec, keepName, other: x.rec, otherName, entries: namesWithSites() });
+    if (!v.ok) return v;
+    const km = metaOf(keepName), xm = metaOf(otherName);
+    const dropsTotp = k.rec.totpName && x.rec.totpName && x.rec.totpName !== k.rec.totpName ? x.rec.totpName : null;
+    const ownerLoses = xm && xm.owner && xm.owner !== (km && km.owner) ? xm.owner : null;
+    const kp = BL.parseName(keepName);
+    // (主开发 10:54Z, as if a must) the other login's password is NOT kept — said before the press and in the answer, with which of
+    // the two was set later: DATES only, no byte compared or shown (a person who keeps the older login loses the newer password)
+    const kAt = Number(k.rec.current && k.rec.current.setAt) || 0, xAt = Number(x.rec.current && x.rec.current.setAt) || 0;
+    const otherPassword = { kept: false, setAt: xAt || null, keptSetAt: kAt || null, later: kAt && xAt ? (xAt > kAt ? 'other' : xAt < kAt ? 'kept' : 'same') : null };
+    return { ok: true, v, k, x, joined: v.joined.map((s) => ({ origin: s.origin, user: s.user })), ...(dropsTotp ? { dropsTotp } : {}), ...(ownerLoses ? { ownerLoses } : {}), otherPassword,
+      widens: { login: principalsAt(`${kp.origin}#${kp.user}`), ...(km && km.owner ? { owner: km.owner } : {}) } };   // its owner fills with no grant at all
+  }
+  function mergeWordsFor(keepName, otherName) {
+    const m = mergePlan(keepName, otherName);
+    if (!m.ok) return m;
+    return { ok: true, keep: keepName, other: otherName, joined: m.joined, ...(m.dropsTotp ? { dropsTotp: m.dropsTotp } : {}), ...(m.ownerLoses ? { ownerLoses: m.ownerLoses } : {}), otherPassword: m.otherPassword, widens: m.widens };
+  }
+  function merge(keepName, otherName, { who = null } = {}) {
+    const m = mergePlan(keepName, otherName);
+    if (!m.ok) return m;
+    const { v, x } = m;
+    const xPending = x.rec.pending ? x.rec.pending.itemId : null;
+    let out = null;
+    try {
+      batchWrite(() => {
+        const w = writeEntry(keepName, { ...v.record, rev: v.record.rev + 1 });
+        if (!w.ok) throw Object.assign(new Error(w.error || w.code), { code: w.code });
+        const d = vault.secretDrop(otherName);
+        if (d && d.ok === false) throw Object.assign(new Error(d.error || d.code), { code: d.code || 'not_written' });
+        out = { ok: true, name: keepName, merged: otherName, joined: m.joined, ...(m.dropsTotp ? { dropsTotp: m.dropsTotp } : {}), ...(m.ownerLoses ? { ownerLoses: m.ownerLoses } : {}), otherPassword: m.otherPassword, widens: m.widens };
+      });
+    } catch (e) { return named(str(e && e.code) === 'vault_locked' ? 'vault_locked' : 'not_written', `the merge was not written (${(e && e.message) || 'not written'}) — both logins are as they were`); }
+    resolvePendingItemsForName(otherName, xPending);
+    // its grant rows STAY: each names <site>#<user> of a site now on the kept login, admitted there (and only there) by the fill's
+    // second row — none lost, none widened
+    try { vault.audit?.('vault-web-login-merged', { why: keepName, merged: otherName, sites: v.joined.map((s) => s.origin), by: 'human', who: who ? str(who).slice(0, 40) : null }); } catch { /* */ }
+    return out;
   }
 
   function resourceFor(name, scope) { const p = BL.parseName(name); if (scope === 'any-site') return '*'; if (!p) return null; return scope === 'any-account' ? `${p.origin}#*` : `${p.origin}#${p.user}`; }
@@ -999,8 +1184,27 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
     }
   } catch { /* engine without hooks */ }
 
+  /** «WHAT IT MAY USE» (Session Properties, unit what-it-may-use): every saved web login ONE conversation may have filled —
+   *  the fill verdict's own admission (a login it saved itself, else THE model's `admits` over the grant rows of its origin
+   *  and user: the one account, «any account on this site», «any site» — rows ADD) — as may-use-model answer rows: the site
+   *  and the user name, never a value (`names()` opens no entry). */
+  function mayUseFor(facts = {}) {
+    const keys = new Set((facts.conversationKeys || []).map(String));
+    const out = [];
+    for (const e of names()) {
+      if (e.pending) continue;   // a login waiting for its owner's card is nobody's to fill yet
+      const base = { door: BL.DOOR, resource: e.name, name: `${BL.hostOf(e.origin) || e.origin} · ${e.user}`, detail: { origin: e.origin, user: e.user } };
+      if (e.owner && keys.has(String(e.owner))) { out.push({ ...base, ok: true, via: 'own' }); continue; }
+      const v = GM.admits(BL.grantResources(e.origin, e.user).flatMap((r) => rowsOf(r) || []), facts);
+      if (v.ok) out.push({ ...base, ok: true, via: v.via, ...(v.via === 'group' && v.entry ? { groupId: String(v.entry.id) } : {}) });
+      else if (v.code === 'excepted') out.push({ ...base, ok: false, code: 'excepted', ...(v.entry ? { except: GM.bareOf(v.entry) } : {}) });
+      else if (v.code === 'groups_unreadable' || v.code === 'unknown_shape') out.push({ ...base, ok: false, code: v.code });
+    }
+    return out;
+  }
   return {
     names,
+    mayUseFor,
     resolveFill,
     confirmOwn,
     discardPending,
@@ -1015,6 +1219,11 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
     bindTotp,
     addAgent,
     drop,
+    siteWordsFor,
+    mergeWordsFor,
+    addSite,
+    removeSite,
+    merge,
     grant,
     ungrant,
     scrubSecretsOf,

@@ -164,6 +164,13 @@ const SHAPES = [
   { title: '个人项目', obj: 155, open: 51, item: 274, progress: 500, note: 121, files: 78, nameLen: 33 },
   { title: '学校', obj: 135, open: 0, item: 0, progress: 76, note: 172, files: 158, nameLen: 55 },
 ];
+// B-55dc: the hook routes decide membership on a READ answer — the deciding door awaits a cwd's first realpath and a
+// discover row's first stat, off the loop, then re-enters. This rig calls the routes SYNCHRONOUSLY, so a store is warmed
+// (those first reads landed) before its first prompt, as a live hub's hook answers after them.
+async function warmMembership(tasks, cwds) {
+  for (const cwd of cwds) await tasks.groupsForSessionDecided({ cwd });
+  for (let k = 0; k < 12; k++) { await tasks._mfacts.settled(); await new Promise((r) => setImmediate(() => setImmediate(r))); if (!tasks._mfacts.busy()) break; }
+}
 function mkStore(tag, { shapes = SHAPES, cwd, sessionKeys = [], settings = {} } = {}) {
   const dataDir = path.join(tmp, tag);
   fs.mkdirSync(dataDir, { recursive: true });
@@ -195,6 +202,7 @@ const PEERS = Array.from({ length: 13 }, (_, i) => `claude:P${i}`);
 fs.mkdirSync(work, { recursive: true });
 {
   const { tasks, ids } = mkStore('r2', { cwd: work, sessionKeys: PEERS });
+  await warmMembership(tasks, [work]);
   const meta = mkMeta();
   const rig = mkRig({ tasks, meta });
   const A = mkSession('A', work);
@@ -238,6 +246,7 @@ fs.mkdirSync(work, { recursive: true });
   // a session holding more than SNAP_MAX_ITEMS items has no lite snapshot: a moved group is re-sent whole once
   {
     const { tasks: t2, ids: i2 } = mkStore('r2h', { cwd: work, sessionKeys: ['claude:H'], shapes: [SHAPES[1]] });   // H parked / holds all 51
+    await warmMembership(t2, [work]);
     const metaH = mkMeta(), rigH = mkRig({ tasks: t2, meta: metaH });
     const H = mkSession('H', work); rigH.activeSessions.set('H', H); seedMeta(metaH, H);
     rigH.prompt('H');
@@ -249,6 +258,7 @@ fs.mkdirSync(work, { recursive: true });
   // ACCEPTED EDGE: an item the session claimed AFTER its last delivery is not in its lite snapshot — the diff names it as parked
   {
     const { tasks: t3, ids: i3 } = mkStore('r2e', { cwd: work, sessionKeys: PEERS, shapes: [SHAPES[0]] });
+    await warmMembership(t3, [work]);
     const metaE = mkMeta(), rigE = mkRig({ tasks: t3, meta: metaE });
     const E = mkSession('E', work); rigE.activeSessions.set('E', E); seedMeta(metaE, E);
     rigE.prompt('E');
@@ -315,6 +325,7 @@ const loadPatched = (rel, cuts) => {
 {
   const noPersist = loadPatched('src/agent-routes.js', [['carry.close(ctx, () => persistSeenMarks(s, key));', 'carry.close(ctx, () => {});']]);   // lane report-mark-on-ack: the persist rides the carry's close
   const { tasks, ids } = mkStore('r3', { cwd: work, sessionKeys: PEERS });
+  await warmMembership(tasks, [work]);
   const run = (routesMod) => {
     const meta = mkMeta();
     const rig = mkRig({ tasks, meta, routesMod });
@@ -340,6 +351,7 @@ const loadPatched = (rel, cuts) => {
 console.log('§4 the Context table budget (the old folder index)');
 {
   const { tasks, ids } = mkStore('r4', { cwd: work, shapes: [SHAPES[2]] });
+  await warmMembership(tasks, [work]);
   const id = ids[0], dir = tasks.contextDirOf(id);
   const set = (v) => { tasks._getSetting = (k) => (k === 'tasks.contextIndexBytes' ? v : undefined); };
   set(undefined);
@@ -412,6 +424,7 @@ console.log('§5 measurement — 13 sessions × 3 groups, the real shape');
   const N = 13;
   const keys = Array.from({ length: N }, (_, i) => `claude:S${i}`);
   const { tasks, ids } = mkStore('r5', { cwd: work, sessionKeys: keys });
+  await warmMembership(tasks, [work]);
   const firstTurn = (routesMod, { change = false, marks = true } = {}) => {
     const meta = mkMeta();
     const rig = mkRig({ tasks, meta, routesMod });
@@ -471,6 +484,7 @@ console.log('§6 the Context read off the main thread (lane task-group-fanout): 
   const g2 = tasks.create({ title: 'Fanout handbook', objective: textOf(90, 2), ctx: [{ path: work6, tags: ['discover'], tell: 'note' }, { path: dirC, tell: 'index' }, { ref: g1 }] }).id;
   const rigC = mkRig({ tasks, meta: mkMeta() }), rigN = mkRig({ tasks, meta: mkMeta() });
   for (const rig of [rigC, rigN]) rig.activeSessions.set('A', mkSession('A', work6));
+  await warmMembership(tasks, [work6]);   // B-55dc: membership's first reads landed before the synchronous CONTROL rig asks (road null = fs.promises)
   const fresh = () => { for (const c of [tasks._sigCache, tasks._walkCache, tasks._resCache]) if (c) c.clear(); };   // every turn reads (the 4 s TTL is not the subject)
   // the new road's call, awaited (the route re-enters itself once the read settled); main-thread readdir under the fixture counted
   const callN = (route, id) => new Promise((resolve) => {
@@ -624,6 +638,7 @@ console.log('§7 confirm, then mark (lane report-mark-on-ack): the census, the d
 
   // ── the REAL routes: staged until the confirm; a turn that never confirmed is composed again under the repeat line ──
   const { tasks, ids } = mkStore('r7', { cwd: work, sessionKeys: PEERS });
+  await warmMembership(tasks, [work]);
   const meta = mkMeta();
   const rig = mkRig({ tasks, meta });
   const S = mkSession('S', work); rig.activeSessions.set('S', S); seedMeta(meta, S);
@@ -676,6 +691,7 @@ console.log('§7b acceptance r1: by identity, a repeat is always said, the told 
   const clearAfter0 = TC.LIMITS.clearAfterMs; TC.LIMITS.clearAfterMs = 10;   // the durable-row delay, shortened for the suite
   const { SessionStatusManager: SSM } = require('../src/session-status.js');
   const { tasks, ids } = mkStore('r7b', { cwd: work, sessionKeys: PEERS });
+  await warmMembership(tasks, [work]);
   const ssDir = fs.mkdtempSync(path.join(tmp, 'ss-'));
   const ssm = new SSM({ dataDir: ssDir });
   const meta = mkMeta();
@@ -727,6 +743,7 @@ console.log('§7b acceptance r1: by identity, a repeat is always said, the told 
   // ── r3 item 2: THE RESTART IS A FACT ABOUT THE CONVERSATION — the outstanding deliveries persisted by conversation ──
   const carryDir = fs.mkdtempSync(path.join(tmp, 'carry-'));
   const away = fs.mkdtempSync(path.join(tmp, 'away-'));   // a cwd in no Task Group: SessionStart has nothing to stage there
+  await warmMembership(tasks, [away]);   // B-55dc: its realpath (could it reach a group's folder?) is read before the synchronous rig asks
   const quiet = { cwd: away, _toolsIntroSeen: true, _mgrIntroSeen: true };
   const oldHub = mk2({ carryDir });
   add(oldHub, 'NS', quiet); add(oldHub, 'NC', quiet); add(oldHub, 'NL', quiet);

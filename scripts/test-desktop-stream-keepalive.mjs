@@ -145,12 +145,7 @@ console.log('§3 the VNC server dropping its socket closes the browser side and 
   ok('…and the log names the VNC server side', logs.slice(before).some((l) => /closed \(the VNC server closed its socket\)/.test(l)), logs.slice(before));
 }
 
-console.log('§4 the client opts in: the singleton Desktop window walks the reconnect ladder too');
-{
-  const fs = await import('node:fs');
-  const dw = fs.readFileSync(path.join(repo, 'src/lib/desktop-window.js'), 'utf8');
-  ok('desktop-window.js passes autoReconnect: true (2.369.118 — the Desktop no longer sits on "Disconnected" until a click)', /autoReconnect: true/.test(dw));
-}
+// (§4 the client's reconnect opt-in pin — MOVED to the fast scripts/test-desktop-stream-keepalive-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 
 console.log('§6 lane desktop-keepalive (userW inc-muoshmqn-dect, "no pong for 40000 ms" ×6 in 12 h): a SLOW but LIVE browser behind a full send queue is never cut — its pong waits behind the bytes it is still reading; a socket that acknowledges NOTHING still is');
 {

@@ -217,6 +217,37 @@ export function stateIconEl(state) { const s = el('span', 'vault-state-icon'); s
  *  unlocked meanwhile, the Vault window; not set up, the setup modal). One event (`window.dispatchEvent(new CustomEvent('vs-vault-door'))`), so a card
  *  needs no import of this module. */
 const VAULT_DOOR_EVENT = 'vs-vault-door';
+/** THE DOOR LISTENS FROM THE START (B-6f65): app.js calls this in the App's construction, before /api/home is asked — a door a
+ *  card shows is heard however slow the hub is (initVault ran only in /api/home's then, which nothing ordered before
+ *  app.ready: a press right after the splash was lost). A press before the facts are known WAITS for them (the boot read in
+ *  flight, else its own read), then opens what the state asks — never the unlock dialog over an unlocked vault; presses
+ *  while it waits are one open. A hub that answers nothing within DOOR_WAIT_MS (a held loop) gets the unlock dialog — it
+ *  removes itself when the facts land, and the press is still answered then (unlocked: the Vault window; not set up: setup). */
+const DOOR_WAIT_MS = 3000;
+let bootRead = null, doorWait = null, doorPast = false, doorHeard = false;
+function doorOpens() { if (facts && facts.state === 'unlocked') replayOpenSpec(appRef, { action: 'openVault' }); else if (facts && facts.state === 'not_set_up') showSetup(); else showUnlock(); }   // lane vault-one-door: the window, not the old ⚙ dialog
+function pressDoor() {
+  if (facts) { doorOpens(); return; }
+  if (doorWait && doorPast) { showUnlock(); return; }   // a press AFTER the bound, the facts still unknown: the dialog again (raised, or back after 「稍后」) — never a silent press; the one answer still comes
+  doorWait ||= (async () => {
+    const read = (async () => { try { await bootRead; } catch { } if (!facts) await refreshVaultFacts().catch(() => null); })();
+    const bound = new Promise((r) => setTimeout(r, DOOR_WAIT_MS));
+    await Promise.race([read, bound]);
+    if (facts) { doorWait = null; doorOpens(); return; }
+    doorPast = true;
+    showUnlock();   // the state is not known yet: the dialog says what the door is for
+    await read;   // …and the press is answered once it is — a later press while it waits joins THIS answer (one window, never two)
+    doorWait = null;
+    doorPast = false;
+    if (facts && facts.state !== 'locked') doorOpens();
+  })();
+}
+export function listenVaultDoor(app) {
+  if (app) appRef = app;
+  if (doorHeard) return;
+  doorHeard = true;
+  window.addEventListener(VAULT_DOOR_EVENT, pressDoor);
+}
 
 /** THE UNLOCK MODAL — right after the page loads while the vault is locked. lane vault-locked-loud: 「稍后」, Esc and ✕ close it
  *  and set THIS lock's ask aside for the tab (the strip, the chip and the ⚙ mark stay); `then` runs once it closes, whichever
@@ -240,9 +271,11 @@ export function showUnlock({ then = null, opener = 'person' } = {}) {
     err.textContent = '';
     if (!pw.value) { pw.focus(); return; }
     const done = sayVaultWait(go, err, t('Unlocking…'), t('Checking the second password…'));
-    const r = await post('/api/vault/unlock', { password: pw.value });
+    unlockAsked++;   // this page's own unlock is in flight: the hub's broadcast of it may land BEFORE this answer (unlockThen `here`)
+    let r; try { r = await post('/api/vault/unlock', { password: pw.value }); } finally { unlockAsked--; }
     done();
-    if (r && r.ok) { pw.value = ''; applyVaultFacts(r); close(); showToast(t('Vault unlocked')); return; }
+    if (r && r.ok) { pw.value = ''; applyUnlockHere(r); close(); showToast(t('Vault unlocked')); return; }
+    if (!unlockAsked) ownUnlockMissed();   // this page's unlock did not land (and no other press of it is still in flight — a second Enter): a `here` wait another page's unlock raced ends unrun (the restack read)
     pw.value = ''; pw.focus();
     err.textContent = vaultWords(r);
     if (r && r.state) applyVaultFacts(r);
@@ -256,7 +289,7 @@ export function showUnlock({ then = null, opener = 'person' } = {}) {
 /** The ⚙ button's press (app.js, mobile-nav.js — lane vault-locked-loud): while LOCKED the unlock dialog first, then `open` (the
  *  menu, as today) once it closes; otherwise `open` at once. */
 export function unlockFirst(open) {
-  if (vaultLoudState({ facts }).mark) { showUnlock({ then: open }); return; }
+  if (vaultLoudState({ facts }).mark) { unlockThen(open, { here: true }); return; }   // B-864f cure: an unlock in this dialog removes it (`then` alone never opened the menu) — and only THIS page's unlock opens it (cure 2)
   open();
 }
 
@@ -319,6 +352,40 @@ export function showChange() {
   setTimeout(() => o.focus(), 0);
 }
 
+/** THIS page's own unlock answer (the dialog's submit) — applied with `unlockedHere` raised, so a wait that asked for THIS
+ *  page's unlock (unlockThen `here`) tells it from another tab's or device's (the broadcast applies the same facts). */
+let unlockedHere = false, unlockAsked = 0;
+// the restack read (a narrow race): `here` waits that saw ANOTHER page's unlock while this page's own was in flight wait for its
+// answer — applied ⇒ they run (applyUnlockHere); NOT ok (a network error, a refusal) ⇒ they end unrun (ownUnlockMissed), never
+// left armed with no dialog to pop the menu at some later unlock here
+const raceWaits = new Set();
+function applyUnlockHere(r) { unlockedHere = true; try { applyVaultFacts(r); } finally { unlockedHere = false; raceWaits.clear(); } }
+function ownUnlockMissed() { for (const end of [...raceWaits]) end(); raceWaits.clear(); }
+
+/** RUN `go` ONCE AFTER THE UNLOCK ASK (B-864f cure — the reader round's must): when the person closes the unlock dialog (an
+ *  unlock, 「稍后」, Esc, ✕) OR the vault turns unlocked (this dialog, another tab, another device), whichever comes first.
+ *  applyVaultFacts REMOVES the unlock dialog when the facts say unlocked, and a removed form runs none of its closers — so a
+ *  `then` alone never ran after a successful unlock. The boot offer's «Unlock and resume all n» (src/lib/layout.js). A RESET
+ *  (not_set_up) while it waits is no unlock: `go` never runs; `ended` (when given) runs once instead (cure 4). */
+export function unlockThen(go, { here = false, ended = null } = {}) {
+  let ran = false, off = null;
+  const once = () => { if (ran) return; ran = true; if (off) off(); setTimeout(go, 0); };   // after the closing press / outside the facts loop — a zero timer, as a close always ran it
+  // `here`: only an unlock made in THIS page counts (the ⚙ press asked for this page's menu — another device's unlock minutes
+  // later must not pop it open); the close here still runs it
+  // cure 2b (the read): another page's unlock ENDS a `here` wait unrun — left armed, a later unlock here for another reason
+  // would pop the menu hours after the press; one that lands while THIS page's own unlock is in flight waits for its answer
+  const endUnrun = () => { if (ran) return; ran = true; if (off) off(); };
+  off = onVaultFacts((f) => {
+    if (!f) return;
+    if (f.state === 'not_set_up') { if (ran) return; endUnrun(); if (typeof ended === 'function') setTimeout(ended, 0); return; }   // cure 4 (主开发): a RESET is no unlock — the wait ends unrun, nothing it waited for runs; a caller that asked to hear it (`ended` — the boot offer) gives its door back
+    if (f.state !== 'unlocked') return;
+    if (!here || unlockedHere) { once(); return; }
+    if (!unlockAsked) endUnrun(); else raceWaits.add(endUnrun);
+  });
+  if (facts && facts.state === 'unlocked') { once(); return; }
+  showUnlock({ then: once });
+}
+
 /** The setup ask while NOT SET UP — at a load (after the welcome tour, or straight away when there is none: app.js
  *  `_maybeShowOnboarding`) and at the broadcast that says a secret was just stored (onVaultState). PURE src/day-one.js
  *  vaultSetupAsk decides: only once a secret waits (`secretWaiting`), never on day one; snoozed by 「稍后」 or by
@@ -367,8 +434,8 @@ export async function initVault(app) {
   };
   document.addEventListener('pointerdown', ping, { capture: true, passive: true });
   document.addEventListener('keydown', ping, { capture: true, passive: true });
-  window.addEventListener(VAULT_DOOR_EVENT, () => { if (facts && facts.state === 'unlocked') replayOpenSpec(appRef, { action: 'openVault' }); else if (facts && facts.state === 'not_set_up') showSetup(); else showUnlock(); });   // lane vault-one-door: the window, not the old ⚙ dialog
-  const f = await fetchJson('/api/vault/state');
+  listenVaultDoor(app);   // (app.js already did, at the construction — B-6f65; once)
+  const f = await (bootRead = fetchJson('/api/vault/state'));   // a press before it answers waits for it (pressDoor)
   vaultBooted = true;   // from here a reconnect may re-ask; the first connect was the load, handled by this read
   if (!f || !f.state) return;
   // the LOAD-TIME ask never looks at startedAt (`maybeNagVault` (app.js) may have pre-read the facts — the relock-door trap):

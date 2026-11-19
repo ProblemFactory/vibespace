@@ -33,6 +33,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -88,15 +89,16 @@ console.log('§0 the incident: two conversations, one Task Group, A\'s notify cr
   const routes = {};
   const app = { get: (p, h) => { routes[`GET ${p}`] = h; }, post: (p, h) => { routes[`POST ${p}`] = h; }, put() { }, patch() { }, delete() { }, use() { } };
   const metaM = new Map();
-  AR.setupAgentRoutes({
-    app, activeSessions, tasks,
+  const AR_DEPS = {   // B-8bd5's control mounts a copy of the routes over the same deps
+    activeSessions, tasks,
     sessionStatus: { snapshot: () => ({}), get: () => null, consumeNotice: () => null, consumeNotices: () => [], pendingNotices: () => [], dropNotices: () => { }, rekey: () => { }, clear: () => null, setByUser: () => null, setByAgent: () => null, history: () => [] },
     SessionStatusManager: { renderNotice: () => '', renderNotices: () => '' },
     userTodos: { rekey: () => { }, forSession: () => [], resolveByAgent: () => null, add: () => ({}) },
     sessionStatusKey: (s, id) => `claude:${id}`, serverSetting: () => undefined, integrationEnabled: () => true,
     scheduleCtxSync: () => { }, remoteCtxBaseFor: () => null, readUserState: () => ({}), getJobs: () => jm, getGroups: () => null,
     getSessionMetaStore: () => ({ readSessionMeta: (k) => metaM.get(k) || null, writeSessionMeta: (k, v) => metaM.set(k, v) }),
-  });
+  };
+  AR.setupAgentRoutes({ app, ...AR_DEPS });
   const hook = (route, who) => { let out = null; const res = { json: (o) => { out = o; }, status: () => res }; hush(() => routes[`GET ${route}`]({ headers: { authorization: 'Bearer vsst_' + who }, query: {}, body: {} }, res)); return (out && out.context) || ''; };
   const server = http.createServer((req, res) => {
     let raw = ''; req.on('data', (c) => { raw += c; });
@@ -163,6 +165,26 @@ console.log('§0 the incident: two conversations, one Task Group, A\'s notify cr
   const fb = hook('/api/agent/prompt-context', 'A');
   jm.updatesFor = real;
   ok(fb.includes(OWN_ONLY) && !fb.includes('zzzz') && activeSessions.get('A')._jobsEventsSeenTs === 9e15, 'the route (r3): the block with the count does not fit the room left ⇒ the OWN lines ride now (r2: the whole block waited a prompt), the marker moves with them', fb.slice(-300));
+  // B-8bd5 (its adversarial read r1): WHO MAY WITHDRAW a job's question — the one that filed it (the job itself, its owner
+  // conversation); a CONTROL grant (B holds it here) never closes the person's question; the withdraw is recorded in the answers
+  const PANEL_W = { title: 'Digest', blocks: [{ type: 'md', text: 'is the digest stale?' }, { type: 'buttons', options: [{ id: 'ok', label: 'OK' }] }] };
+  job.access = { ...(job.access || {}), control: 'group' };   // B may stop / start it…
+  jm.ask(job, PANEL_W);
+  const wB = await cli('B', ['withdraw', job.id]);
+  const stillOpen = !!(job.interaction && job.interaction.pending);
+  const wA = await cli('A', ['withdraw', job.id]);
+  ok(wB.code !== 0 && /withdrawn by the job itself or by its owner conversation/.test(wB.err) && stillOpen && wA.code === 0 && !(job.interaction && job.interaction.pending) && (job.interaction.answers || []).some((x) => x && x.withdrawn === true),
+    'B-8bd5: a groupmate holding CONTROL cannot withdraw the job\'s question (refused NAMING its door — 主开发 21:46Z; it stays open); its owner can — and the answers record the withdraw', { B: [wB.code, wB.err.slice(0, 160)], A: [wA.code, wA.err.slice(0, 160)] });
+  const ARSRC = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8'), WD = "act === 'withdraw' && !jobModel.canEdit(job, a.caller)) return jobModel.canView(job, a.caller) ? res.status(403)";
+  ok(ARSRC.split(WD).length === 2, 'B-8bd5 control setup: the anchor of the control «only the filer withdraws» is in the source');
+  const MJW = mutantCopies('jobs-addressed-withdraw', REPO);
+  const ARX = MJW.load('src/agent-routes.js', ARSRC.replace(WD, WD.replace('!jobModel.canEdit(', '/* MUTANT: batch 8\'s first cut — a control grant withdraws */ !jobModel.canControl(')), 'control-gate');
+  const routesX = {};
+  hush(() => ARX.setupAgentRoutes({ app: { get: (p, h) => { routesX[`GET ${p}`] = h; }, post: (p, h) => { routesX[`POST ${p}`] = h; }, put() { }, patch() { }, delete() { }, use() { } }, ...AR_DEPS }));
+  jm.ask(job, PANEL_W);
+  const xr = await new Promise((resolve) => { let code = 200; const R = { status(c) { code = c; return R; }, json(o) { resolve({ code, o }); return R; } }; Promise.resolve(routesX['POST /api/agent/jobs/:ref/:act']({ headers: { authorization: 'Bearer vsst_B' }, body: {}, query: {}, params: { ref: job.id, act: 'withdraw' } }, R)).catch((e) => resolve({ code: 500, o: { error: e.message } })); });
+  ok(xr.code === 200 && !(job.interaction && job.interaction.pending), 'B-8bd5 CONTROL (the gate by control, in a copy): the groupmate holding control WITHDRAWS the person\'s question', xr);
+  for (const r of copiesCensus(MJW.files, MJW.dir, REPO, { minCopies: 1, label: 'B-8bd5 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
   server.close();
 }
 
@@ -220,7 +242,8 @@ const CLASS = {
   '_waitFor#1': 'event', '_adoptAndReplay#1': 'event', '_bootNoExit#1': 'alarm', '_bootNoExit#2': 'alarm', '_bootNoExit#3': 'event',
   '_parkForMemory#1': 'alarm', '_finalizeRun#1': 'event', '_finalizeRun#2': 'event', '_finalizeRun#3': 'event', '_finalizeRun#4': 'alarm',
   '_finalizeRun#5': 'end', '_sweepPass#1': 'event', '_sweepPass#2': 'event', '_untilScan#1': 'event', '_cronTick#1': 'alarm',
-  '_fireCron#1': 'event', 'setMemory#1': 'event', 'ask#1': 'event', 'answerPanel#1': 'event',
+  '_fireCron#1': 'event', 'setMemory#1': 'event', 'ask#1': 'event', 'answerPanel#1': 'event', 'withdrawAsk#1': 'event',   // B-8bd5: the filer withdraws its panel
+  '_startAskedAtStop#1': 'alarm',   // B-cac2 (cure r1): a start asked during a stop that cannot be done — said in its events and to its owner
 };
 for (const s of SITES) ok(CLASS[s.key], `census row: ${s.key} (src/jobs.js:${s.line}) has a class`, s.src);
 ok(Object.keys(CLASS).every((k) => SITES.some((s) => s.key === k)), 'every class row names a site that exists (a removed producer leaves no stale row)', Object.keys(CLASS).filter((k) => !SITES.some((s) => s.key === k)));
@@ -290,6 +313,8 @@ const DRIVERS = {
   'setMemory#1': async () => { const j = task('drv-memory'); jm.setMemory(j, '2G', { byUser: true }); return j; },
   'ask#1': async () => { const j = task('drv-ask'); j.state = 'up'; jm.ask(j, PANEL); return j; },
   'answerPanel#1': async () => { const j = task('drv-answer'); j.state = 'up'; const r = jm.ask(j, PANEL); jm.answerPanel(j, { version: r.version, c: 'a', button: 'OK' }); return j; },
+  'withdrawAsk#1': async () => { const j = task('drv-withdraw'); j.state = 'up'; jm.ask(j, PANEL); jm.withdrawAsk(j); return j; },   // B-8bd5
+  '_startAskedAtStop#1': async () => { const j = task('drv-start-asked'); const un = stub(jm, { start: () => ({ error: 'refused for the driver' }) }); jm._startAskedAtStop(j, true); await new Promise((r) => setImmediate(r)); un(); return j; },   // B-cac2 cure r1
 };
 const driven = [];   // {key, site, job, t0, alarm}
 const unaddressed = (c, since) => {   // THE BASE's rendering of what a caller may view (the per-turn lines before this lane)

@@ -125,6 +125,8 @@ const KERNEL_GONE_CODES = Object.freeze(['no_such_request', 'no_such_surface', '
 const KERNEL_PROBE_MS = 2000; // VibeSpace.getVersion — standard Chrome refuses it in ms (-32601); a socket that never answers is today's road
 
 const ANSWERED_KEEP = 32;
+const AUTH_FETCH_MODES = new Set(['doc-auth', 'all-auth', 'fill-auth']); // B-b56d: the Fetch modes that hook an HTTP sign-in
+const ENDED_SHOW_MS = 60 * 60 * 1000; // B-b56d (its read, S2): a sign-in cancelled at its bound is said in the person's window for an hour at most
 const OUTCOMES_KEEP = 16;
 const VERB_RUNNING_MAX_MS = 5 * 60 * 1000;   // a /resolve without its audit is forgotten after this (a crashed CLI)
 const SAW_SETTLE_MS = 2000;                  // int347: the audit's wait for a dialog the verb's daemon saw (waitSettled) — bounds only a watch that never sees it
@@ -261,6 +263,10 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   const viewed = (pid) => { try { return !!(keeper && typeof keeper.viewersFor === 'function' && keeper.viewersFor(String(pid)) > 0); } catch { return false; } };
   const agentHolds = (pid) => { if (typeof holdersOf !== 'function') return false; try { return (holdersOf(String(pid)) || []).some((h) => h && !h.human); } catch { return false; } };
   const modeOf = (pid) => (humanHolds(pid) && !agentHolds(pid) ? 'person' : 'agent');
+  // B-b56d (the owner's ruling B, 2026-11-18): profileId → how many of the PERSON'S OWN live windows show that browser (the live view
+  // says it as they open and close). The person's watch hooks HTTP sign-ins only while one is open — law 6: a browser nobody watches
+  // or drives changes nothing beyond what the watch already does
+  const personViews = new Map();
   const rearms = new Map(); // profileId → {t: the one pending re-arm, n: the tries so far} of a socket that closed under his browsing
   const gaveUp = new Map(); // profileId → when the re-arms stopped (REARM_TRIES failed) — his fact says so until the next arm
   // acceptance r2 (MINOR): profileId → WHO opened its watch — 'agent' (a conversation's verb), 'viewer' (a live view's own arm),
@@ -567,7 +573,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       // 0.38.1: it precedes frameStartedNavigating by ≤ 2 ms; a browser-initiated navigation (the agent's open) has none
       case 'Page.frameRequestedNavigation': { const e = tabOf(w, m); if (e && String(p.frameId || '') === e.targetId) { e.req = { reason: String(p.reason || 'other').slice(0, 40), at: now() }; if (e.activeFill && p.url) { const reqOrigin = BL().originOf(String(p.url)); if (!reqOrigin || (e.activeFill.wantOrigin && reqOrigin !== e.activeFill.wantOrigin)) { e.activeFill.crossNav = reqOrigin || 'an unverified page'; e.activeFill.abort?.(); } } } return; }
       case 'Page.frameNavigated': { const e = tabOf(w, m); if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId && w.prompts.get(e.targetId)?.type === 'file') dropPrompt(w, w.prompts.get(e.targetId), 'navigated');
-        if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId && w.prompts.get(e.targetId)?.native && !NATIVE_SHEET_PAGE_RE.test(String(p.frame.url || ''))) settleNative(w, w.prompts.get(e.targetId)); /* lane browser-x-in-window: Chrome's own sheet answered (or cancelled) — the tab committed a real page (MEASURED: the sheet itself stands over a `chrome-error://chromewebdata/` commit) */ if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId) { const navUrl = String(p.frame.url || '') + String(p.frame.urlFragment || ''); /* lane chrome-157 (the real-browser claim, scene 16): Chrome sends the fragment APART (frame.urlFragment) — the address the page shows, and the one check reads, is both */ if (navUrl) e.loginNavUrl = navUrl; e.navTextsStale = true; /* lane chrome-157 (the cure of 2026-11-15, 主开发's GO 18:22Z): the tab's url and title stay the browser's own target info for every reader (a busy verdict, site-reset, a takeover card name the tab as the browser names it); the old document's url and title are only marked STALE for the fence's one check, which reads the navigation's own address until the next target info clears the mark (tabCheckTexts) */ e.navSeq = (e.navSeq || 0) + 1; e.docId = String(p.frame.loaderId || '') || ('nav:' + (++docSeq)); if (e.activeFill) { const navOrigin = BL().originOf(navUrl); if (!navOrigin || (e.activeFill.wantOrigin && navOrigin !== e.activeFill.wantOrigin)) e.activeFill.crossNav = navOrigin || 'an unverified page'; else e.activeFill.contextGone = true; e.activeFill.abort?.(); } if (e.snapshotRefs) e.snapshotExpiredByNav = true; e.snapshotRefs = null; if (e.inflightCredReqs) e.inflightCredReqs.clear(); clearPostLiftOnTab(e, w); endNav(e); hop(w, e, { url: navUrl }); if (e.liveFill) clearLiveFillOnTab(w, e, 'navigated'); } return; }
+        if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId && w.prompts.get(e.targetId)?.native && !NATIVE_SHEET_PAGE_RE.test(String(p.frame.url || ''))) settleNative(w, w.prompts.get(e.targetId)); { const hr = e && w.mode === 'person' && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId ? w.prompts.get(e.targetId) : null; if (hr && hr.type === 'http-auth' && !hr.native && w.authReq.has(hr.id)) dropHeldAuth(w, e, hr); } /* B-b56d (its read, S1): the person's tab committed another page — its held sign-in was abandoned (Chrome dropped that request): dropped, its hook read again, never said as «cancelled» */ /* lane browser-x-in-window: Chrome's own sheet answered (or cancelled) — the tab committed a real page (MEASURED: the sheet itself stands over a `chrome-error://chromewebdata/` commit) */ if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId) { const navUrl = String(p.frame.url || '') + String(p.frame.urlFragment || ''); /* lane chrome-157 (the real-browser claim, scene 16): Chrome sends the fragment APART (frame.urlFragment) — the address the page shows, and the one check reads, is both */ if (navUrl) e.loginNavUrl = navUrl; e.navTextsStale = true; /* lane chrome-157 (the cure of 2026-11-15, 主开发's GO 18:22Z): the tab's url and title stay the browser's own target info for every reader (a busy verdict, site-reset, a takeover card name the tab as the browser names it); the old document's url and title are only marked STALE for the fence's one check, which reads the navigation's own address until the next target info clears the mark (tabCheckTexts) */ e.navSeq = (e.navSeq || 0) + 1; e.docId = String(p.frame.loaderId || '') || ('nav:' + (++docSeq)); if (e.activeFill) { const navOrigin = BL().originOf(navUrl); if (!navOrigin || (e.activeFill.wantOrigin && navOrigin !== e.activeFill.wantOrigin)) e.activeFill.crossNav = navOrigin || 'an unverified page'; else e.activeFill.contextGone = true; e.activeFill.abort?.(); } if (e.snapshotRefs) e.snapshotExpiredByNav = true; e.snapshotRefs = null; if (e.inflightCredReqs) e.inflightCredReqs.clear(); clearPostLiftOnTab(e, w); endNav(e); hop(w, e, { url: navUrl }); if (e.liveFill) clearLiveFillOnTab(w, e, 'navigated'); } return; }
       case 'Page.navigatedWithinDocument': case 'Page.frameStoppedLoading': {
         const e = tabOf(w, m);
         if (e && m.method === 'Page.navigatedWithinDocument' && String(p.frameId || '') === e.targetId) {
@@ -970,7 +976,10 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
    *  sign-in hooks off, each tab's authenticator removed, the permission overrides reset (his saved grants stand again). */
   async function toPerson(w) {
     const tabs = [...w.targets.values()].filter((e) => e.sid);
-    for (const rec of [...w.prompts.values()]) { const ar = w.authReq.get(rec.id); if (ar) { w.authReq.delete(rec.id); await call(w, 'Fetch.continueWithAuth', { requestId: ar.requestId, authChallengeResponse: { response: 'Default' } }, ar.sid || null); } dropPrompt(w, rec, 'person'); }
+    for (const rec of [...w.prompts.values()]) {
+      if (rec.type === 'http-auth' && w.authReq.has(rec.id) && !w.kernel && (personViews.get(w.profileId) || 0) > 0) continue; // B-b56d: a window of the person shows it — the person answers it there
+      const ar = w.authReq.get(rec.id); if (ar) { w.authReq.delete(rec.id); await call(w, 'Fetch.continueWithAuth', { requestId: ar.requestId, authChallengeResponse: { response: 'Default' } }, ar.sid || null); } dropPrompt(w, rec, 'person');
+    }
     await Promise.all(tabs.map(async (e) => {
       if (e.enabled) { await syncTabFetchMode(w, e); await call(w, 'Page.setInterceptFileChooserDialog', { enabled: false }, e.sid); }
       if (e.pk.auth) { const id = e.pk.auth; e.pk.auth = null; e.pk.once = false; const x = await call(w, 'WebAuthn.removeVirtualAuthenticator', { authenticatorId: id }, e.sid), d = await call(w, 'WebAuthn.disable', {}, e.sid); const xa = pkAnswer(w, e, x), da = pkAnswer(w, e, d); if ((xa === 'refused' || xa === 'silent') && (da === 'refused' || da === 'silent')) { const uvHeld = [...e.pk.holds.values()].some((h) => h.auth === id && h.uv); const seen = await pkLook(w, e, id, [], uvHeld, { anyKey: true }); if (seen) pkLeftSet(w, e, id, seen, [pkWhy('WebAuthn.removeVirtualAuthenticator', x, xa), pkWhy('WebAuthn.disable', d, da)]); } } // round 3: the same look as the others (its UV too) // B-97ae round 2 MUST 3(ii): the handover's removal judged and said as (b)'s
@@ -1008,9 +1017,14 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const tabs = [...w.targets.values()].filter((e) => e.sid);
     const fronts = []; const t0 = now();
     for (const e of tabs) { const v = await settle(call(w, 'Runtime.evaluate', { expression: 'document.visibilityState', returnByValue: true }, e.sid, 1000)); if (v && v.result && v.result.result && v.result.result.value === 'visible') fronts.push(e.targetId); }
+    // B-1626 cure 3 (its readers): each front's window, read ONCE here — a viewer's thaw then knows at once whether a front sits in
+    // its holder's own window (no round of window reads for a front that is another holder's)
+    // (cure 4: the reads at once — each its own 1 s cap, so the freeze waits at most ~1 s for them, never a second per front)
+    const wins = new Map(); (await Promise.all(fronts.map((tid) => windowOfTarget(w, tid)))).forEach((win, i) => wins.set(fronts[i], win));
     if (w.thawing || (w.lastVerbAt || 0) >= t0) return { ok: false }; // a verb arrived while the fronts were read
     // r2: a front another conversation has not shown again since the last freeze stays owed to it (it is hidden now, not visible)
     const owed = [...(w.hiddenFronts || [])].filter((tid) => w.targets.has(tid));
+    w.frontWin = new Map([...[...(w.frontWin || new Map())].filter(([tid]) => owed.includes(tid)), ...wins]);
     w.paint = 'frozen'; w.fronts = fronts; w.hiddenFronts = new Set([...owed, ...fronts]); w.frozenAt = now();
     for (const e of tabs) await settle(call(w, 'Page.setWebLifecycleState', { state: 'frozen' }, e.sid, 1000));
     return { ok: true, tabs: tabs.length, fronts: fronts.length };
@@ -1028,22 +1042,49 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (w.thawing) return w.thawing.then(() => thawPaint(profileId, { holder }), () => thawPaint(profileId, { holder }));
     const scope = holder ? scopeFor(holder) : null;
     const need = [...(w.hiddenFronts || [])].filter((tid) => inScope(scope, tid));
-    if (w.paint !== 'frozen' && !need.length) return Promise.resolve({ ok: true, thawed: false });
+    // B-1626 / K23 (its cure 2, 主开发 13:03Z): a hidden front in the holder's OWN window (`holder.windowId`, the keeper's answer
+    // — one window per holder) is its own whatever a scope names yet: the bridge names a viewer's tab only after its relay has
+    // read a tabs record, and the witness and the grant can miss a tab. Its window is read off Chrome at the thaw; a front in
+    // another holder's window stays owed (heavy test-browser-hidden-paint e)
+    const ownWin = holder && holder.windowId != null ? holder.windowId : null;
+    if (!w.frontWin) w.frontWin = new Map();
+    const fw = w.frontWin;
+    // B-1626 cure 4 (its verdict's must): a window Chrome did not report at the freeze (null) is UNKNOWN, never «not yours» — it is
+    // read again at this thaw (below); a missed read never blanks every later visit
+    const byWindow = ownWin == null ? [] : [...(w.hiddenFronts || [])].filter((tid) => !need.includes(tid) && (fw.get(tid) == null || fw.get(tid) === ownWin));
+    if (w.paint !== 'frozen' && !need.length && !byWindow.length) return Promise.resolve({ ok: true, thawed: false });
     w.thawing = (async () => {
       try {
         if (w.paint === 'frozen') { for (const e of w.targets.values()) if (e.sid) await settle(call(w, 'Page.setWebLifecycleState', { state: 'active' }, e.sid, 1000)); w.paint = 'active'; w.thawedAt = now(); }
+        // B-1626 cure 3 (its readers): the stamp is never trusted alone — a mediated lease keeps a previous run's windowId, and a
+        // window id is a small number per Chrome run (it can name ANOTHER holder's window now). The window is the holder's only
+        // while a tab the keeper names the holder's (its scope: its root, its witnessed tabs) sits in it at this thaw
+        // (the restack's small, 主开发 14:28Z: EVERY tab the keeper names the holder's is read, at once — each read its own 1 s cap,
+        // so the whole probe is a second however many tabs; a cap could judge a holder whose first tabs sit in another window
+        // (pop-ups, its root closed) «not in its window» though a later one is, and leave its front owed: blank)
+        if (byWindow.length) {
+          const probe = (scope instanceof Set ? [...scope] : []).filter((t) => w.targets.has(t));
+          const mine = probe.length > 0 && (await Promise.all(probe.map((t) => windowOfTarget(w, t)))).includes(ownWin);
+          if (mine) {
+            const unknown = byWindow.filter((tid) => w.targets.has(tid) && fw.get(tid) == null);
+            (await Promise.all(unknown.map((tid) => windowOfTarget(w, tid)))).forEach((win, i) => { if (win != null) fw.set(unknown[i], win); });
+            for (const tid of byWindow) if (w.targets.has(tid) && fw.get(tid) === ownWin) need.push(tid);
+          }
+        }
         const shown = [];
-        for (const tid of need) { w.hiddenFronts.delete(tid); if (w.targets.has(tid)) shown.push(await showFront(w, tid)); }
+        for (const tid of need) { w.hiddenFronts.delete(tid); if (w.frontWin) w.frontWin.delete(tid); if (w.targets.has(tid)) shown.push(await showFront(w, tid)); }
         return { ok: true, thawed: true, shown };
       } finally { w.fronts = []; w.thawing = null; }
     })();
     return w.thawing;
   }
+  /** The CDP window a tab sits in (Browser.getWindowForTarget), null when Chrome does not say. */
+  async function windowOfTarget(w, id) { const r = await settle(call(w, 'Browser.getWindowForTarget', { targetId: id }, null, 1000)); return r && r.result && r.result.windowId != null ? r.result.windowId : null; }
   /** One frozen front shown again IN ITS OWN WINDOW: activated first (its window becomes the last activated one — where a
    *  plain create lands), a blank opened, its window read off Chrome (getWindowForTarget), closed, the front activated. A
    *  blank that landed elsewhere (another holder's activation raced it) is closed at once and journaled — never kept. */
   async function showFront(w, tid) {
-    const winOf = async (id) => { const r = await settle(call(w, 'Browser.getWindowForTarget', { targetId: id }, null, 1000)); return r && r.result ? r.result.windowId : null; };
+    const winOf = (id) => windowOfTarget(w, id);
     w.flipping = (w.flipping || 0) + 1;
     try {
       const want = await winOf(tid);
@@ -1238,6 +1279,37 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       if (fact) return { ...fact, profileId: c.profileId };
     }
     return null;
+  }
+
+  /** B-b56d (the owner's ruling B, 2026-11-18): WHAT THE PERSON'S OWN WINDOW SAYS BESIDE ITS PROMPT FACT — PURE over the watch's
+   *  state, never a typed value. `ended`: the newest sign-in of the person's tabs that VibeSpace cancelled because nobody answered it
+   *  within its bound (law 4: said, never a silent refusal). `hook`: while a window of the person shows the browser, whether its
+   *  sign-ins are hooked — `armed: false` with why when a tab's hook was refused, or on a kernel (law 5: never a silent dead end);
+   *  `x`: the browser is on the X road (Chrome's own sheet stands in its window there). */
+  function personPromptStateOf(browserKey) {
+    const bk = String(browserKey || '');
+    if (!/^hu-/.test(bk)) return null;
+    let pid = null; try { pid = HM().profileOfHumanKey(bk); } catch { pid = null; }
+    if (!pid) return null;
+    const views = (personViews.get(String(pid)) || 0) > 0;
+    const w = watches.get(String(pid));
+    // its read (S3): NO open watch while a window of the person shows the browser (refused, another machine, the re-arms given up) —
+    // its sign-ins cannot be seen there: said (a watch still connecting is `null`: nothing said yet)
+    if (!w || w.state === 'down') return views ? { ended: null, hook: { armed: false, why: 'unwatched', x: xRoad(pid) } } : null;
+    const scope = scopeFor({ profileId: pid, browserKey: bk });
+    const t = now();
+    // its read (S2): only a note made on the PERSON'S road (never a conversation's), and only within the hour
+    const note = [...w.promptNotes].reverse().find((n) => n && n.person && n.how === 'expired' && n.prompt && n.prompt.type === 'http-auth' && t - (Number(n.at) || 0) < ENDED_SHOW_MS && inScope(scope, n.targetId)) || null;
+    const ended = note ? { id: String(note.id), how: 'expired', origin: note.prompt.origin, realm: note.prompt.realm || '', proxy: !!note.prompt.proxy, at: note.at, boundMs: Number(note.boundMs) || authHoldMaxMs } : null; // the cure: the bound the note was armed with
+    let hook = null;
+    if (w.mode === 'person' && views) {
+      const x = xRoad(pid);
+      if (w.kernel) hook = { armed: false, why: 'kernel', x };
+      else if (w.state !== 'open') hook = { armed: null, why: 'connecting', x };
+      else if ([...w.targets.values()].some((e) => e.sid && e.enabled && e.authHookOff && inScope(scope, e.targetId))) hook = { armed: false, why: 'refused', x };
+      else hook = { armed: true, x };
+    }
+    return { ended, hook };
   }
 
   // ── the verb in flight (rule 1) ──
@@ -2241,6 +2313,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
    *  an ARRAY of lines (user-todos' normalizeI18n refuses an object — the item was never filed from 2.369.237 to this cure). */
   function promptAsk(w, rec) {
     if (!forYou || w.prompts.get(rec.targetId) !== rec || w.promptForYou.has(rec.id)) return;
+    if (w.mode === 'person') return; // B-b56d (its read): the person's own browsing — the person's window shows the form (and says the bound); a tray item there is noise
     let label = null; try { label = labelOf ? labelOf(w.profileId) : null; } catch { label = null; }
     const host = ST.hostOf(rec.origin) || rec.origin;
     const text = 'A page in the agent browser asks you to sign in ({host})'; const detail = 'Open its live view and type the username and password there — the agent never sees them.';
@@ -2269,13 +2342,19 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   }
   /** Is this profile's browser on the X road (the keeper's Chrome on its display session — B2's picture switch)? */
   function xRoad(profileId) { try { return !!(keeper && typeof keeper.pictureSourceFor === 'function' && keeper.pictureSourceFor(profileId).source === 'x'); } catch { return false; } }
+  /** B-b56d (its read, S1): a held sign-in of the person's that the page itself abandoned (its tab committed another document): the
+   *  record goes and the tab's hook is read again — no CancelAuth (that request is gone), no note, never «VibeSpace cancelled it» */
+  function dropHeldAuth(w, e, rec) { w.authReq.delete(rec.id); dropPrompt(w, rec, 'gone'); if (e && e.sid && e.enabled) syncTabFetchMode(w, e); }
   /** The credential goes to Chrome and nowhere else: never logged, never in a record, a note or an answer. */
   async function settleAuth(w, rec, { how, by, username = '', password = '' }) {
     const q = w.authReq.get(rec.id); w.authReq.delete(rec.id);
     dropPrompt(w, rec, how);
     if (!q) return { ok: false, code: 'gone', error: 'the sign-in already ended' };
     const r = await call(w, 'Fetch.continueWithAuth', { requestId: q.requestId, authChallengeResponse: how === 'signed-in' ? { response: 'ProvideCredentials', username: String(username).slice(0, 512), password: String(password).slice(0, 1024) } : { response: 'CancelAuth' } }, q.sid || null);
-    w.promptNotes.push({ id: rec.id, prompt: rec, how, by, at: now(), targetId: rec.targetId }); if (w.promptNotes.length > ANSWERED_KEEP) w.promptNotes.shift();
+    const took = !(r && (r.error || r.timeout)); // B-b56d (its read, S1): did Chrome take the answer? (a request the page abandoned did not)
+    if (took || w.mode !== 'person') { w.promptNotes.push({ id: rec.id, prompt: rec, how, by, at: now(), targetId: rec.targetId, person: w.mode === 'person', boundMs: authHoldMaxMs }); if (w.promptNotes.length > ANSWERED_KEEP) w.promptNotes.shift(); } // the agent's road as before; the person's: a note only for an answer Chrome took
+    if (w.mode === 'person') { const e = w.targets.get(rec.targetId); if (e && e.sid && e.enabled) syncTabFetchMode(w, e); } // B-b56d: after Chrome has the answer — the hook it held for goes when no window of the person shows the browser
+    if (how === 'expired' && took) emit({ kind: 'prompt-ended', profileId: w.profileId, targetId: rec.targetId, how }); // B-b56d (law 4): the person's window SAYS it (its note is kept by now) — whatever the mode now
     return r && (r.error || r.timeout) ? { ok: false, code: 'gone', error: 'the page no longer waits for that sign-in' } : { ok: true };
   }
   /** The live view's answer: a sign-in (username + password, or Cancel), or a file chooser dismissed (the page got nothing). */
@@ -3459,6 +3538,27 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     } catch { /* optional */ }
   }
 
+  /** B-b56d (the owner's ruling B, 2026-11-18): IS AN HTTP SIGN-IN HOOKED ON TAB `e`? The agent's watch on a standard Chrome: always
+   *  (as before). The PERSON'S watch: while a live window of the person shows this browser, or while a sign-in of that tab is held
+   *  (it keeps its hook until it is answered or its bound cancels it — never left hanging). A kernel: never (its sign-in is its own).
+   *  Chrome hands a challenge to DevTools only on a request it PAUSED (Fetch.enable refuses handleAuthRequests with no pattern), so
+   *  the hook pauses DOCUMENT requests only and continues each at once — a sub-resource is never paused. */
+  function authHookOn(w, e) {
+    if (!w || w.kernel) return false;
+    if (w.mode !== 'person') return true;
+    if ((personViews.get(w.profileId) || 0) > 0) return true;
+    const rec = e ? w.prompts.get(e.targetId) : null;
+    return !!(rec && rec.type === 'http-auth' && w.authReq.has(rec.id));
+  }
+  /** B-b56d: the live view tells the watch how many of the person's own windows show browser `profileId`; the person's tabs follow. */
+  function personWindows(profileId, n) {
+    const pid = String(profileId || ''); const k = Math.max(0, Math.floor(Number(n) || 0));
+    if (!pid) return;
+    if (k) personViews.set(pid, k); else personViews.delete(pid);
+    const w = watches.get(pid);
+    if (!w || w.state !== 'open' || w.mode !== 'person' || w.kernel) return;
+    for (const e of [...w.targets.values()]) if (e.sid && e.enabled) syncTabFetchMode(w, e);
+  }
   /** N1 + Shape S + m2: THE ONE Fetch + Network mode driver for tab `e`.
    *  While ANY live fill fence (`e.liveFill`) or pre-insert arming (`e.credPreArming`) stands on `e` — including during EVERY hold
    *  state (`too_much_text`, `unknown_typed`), post-restart Shape S (`credSigs: []`),
@@ -3470,11 +3570,12 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       if (!e.sid || w.state !== 'open') return { ok: false, fenceErr: 'browser CDP session is closed' };
       const wantCred = Boolean(e.liveFill || e.credPreArming);
       const wantActiveFill = Boolean(e.activeFill);
+      const hookAuth = authHookOn(w, e); // B-b56d: the person's watch too, while a window of the person shows it
       const wantFetch = wantActiveFill
-        ? ((!w.kernel && w.mode !== 'person') ? 'fill-auth' : 'fill-noauth')
+        ? (hookAuth ? 'fill-auth' : 'fill-noauth')
         : wantCred
-          ? ((!w.kernel && w.mode !== 'person') ? 'all-auth' : 'all-noauth')
-          : ((e.enabled && !w.kernel && w.mode !== 'person') ? 'doc-auth' : 'off');
+          ? (hookAuth ? 'all-auth' : 'all-noauth')
+          : ((e.enabled && hookAuth) ? 'doc-auth' : 'off');
       let failReason = '';
       const noteFail = (domain, r) => {
         if (!failReason) {
@@ -3530,6 +3631,9 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         }
       }
       if (ops.length) await Promise.all(ops);
+      // B-b56d (law 5): a person's tab whose sign-in hook was refused (or came back) is told to the person's window — never a silent dead end
+      if (w.mode === 'person' && !w.kernel) { const off = hookAuth && e.fetchMode !== wantFetch; if (off !== !!e.authHookOff) { e.authHookOff = off; emit({ kind: 'prompt-hook', profileId: w.profileId, targetId: e.targetId, armed: !off }); } }
+      if (w.mode === 'person' && !w.kernel) { const armedNow = AUTH_FETCH_MODES.has(e.fetchMode); if (armedNow !== !!e.personHookArmed) { e.personHookArmed = armedNow; try { log.log?.(`[browser-dialog] ${w.profileId}: the person's sign-in hook ${armedNow ? 'armed' : 'off'} on tab ${String(e.targetId || '').slice(0, 8)}`); } catch { /* */ } } } // B-b56d cure (5): the hook's state, said once per change
       const fetchOk = e.fetchMode === wantFetch && (!wantActiveFill || (e.fetchMode === 'fill-auth' || e.fetchMode === 'fill-noauth')) && (!wantCred || e.credFetchAll);
       const netOk = !wantCred || Boolean(e.credNetEnabled);
       const ok = Boolean(e.sid && w.state === 'open' && fetchOk && netOk);
@@ -5256,6 +5360,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     answerPasskey, passkeyRegister, passkeyList, passkeyForget, passkeyPolicy, passkeySwitch, dropPasskeys, passkeyCounts, passkeyCards, // lane passkey-ui: + the counts // int258: + the chat cards a rebuild draws // lane passkey-store-core: the store, its cards, its grants
     paintFacts, freezePaint, thawPaint, // lane browser-swiftshader-cpu: a browser nobody watches and nobody drives paints nothing
     promptIn, answerPrompt, // lane browser-ui-prompts: a file chooser / an HTTP sign-in, named and answerable
+    personWindows, personPromptStateOf, // B-b56d (the owner's ruling B, 2026-11-18): the person's own windows hook a sign-in; what they say beside it
     setPermission, permissionsOf, // lane browser-ui-prompts-r2: every permission decided ahead; the agent's per-origin flip
     answerSurface, surfacesIn, blockingOn, surfaceById, blockOf, kernelFactOf, // lane browser-surfaces: a kernel's surfaces — the answer door, the list, the relay's drop, the owner's card, the readers' block
     fillVaultField, precheckVaultFill, checkLoginChannelFor, noteSnapshot, liveFillVerdictFor, liveFillOnTarget, fencedTargetsFor, allowVerbInFlight, noteActiveTab, noteActiveTarget, hasScrubSecrets, scrubOutput, scrubText, scrubCdpFrame, loginFenceStats, hasPostLiftGuard, recheckPostLift, recheckPostLiftFor, // lane browser-login r22..r29

@@ -116,7 +116,10 @@ router.use((req, res, next) => {
   if (!raw || req.query.host || req.body?.host) return next();
   let p; try { p = safePath(String(raw)); } catch { return next(); }
   if (mounts.pathBlocked(p)) {
-    return res.status(503).json({ error: 'This storage is connecting or not responding — try again in a moment.' });
+    // B-5ce7 cure: a PARKED mount says so and names its doors (nothing reconnects it by itself — «try again» would be false)
+    const pk = mounts.parkedAt?.(p);
+    if (pk) return res.status(503).json({ error: require('../mount-door.js').parkedSentence(pk.name), code: 'storage_parked', params: { name: pk.name } });
+    return res.status(503).json({ error: require('../mount-door.js').sentenceFor(p) });   // the door's own words (one spelling)
   }
   // A registered storage that is NOT mounted: its mount point is a bare local
   // directory — anything written there is stranded (and blocks the next
@@ -367,7 +370,7 @@ router.get('/api/file/raw', async (req, res) => {
   // can't be pooled without a rewrite); a missing file (non-503) falls through
   // to sendFile's own 404 so behaviour is unchanged for the normal cases.
   try { await sfs(req).call('stat', { path: filePath }, { timeoutMs: 8000 }); }
-  catch (e) { if (e.status === 503) return res.status(503).json({ error: 'Storage not responding — try again in a moment.' }); }
+  catch (e) { if (e.status === 503) return res.status(503).json({ error: e.code === 'storage-blocked' && e.message ? e.message : 'Storage not responding — try again in a moment.' }); }   // the door's own words (a parked mount's)
   const named = contentDisposition(fileNameOf(filePath), 'inline');
   // dotfiles 'allow' (r2): without it send's LEGACY rule answered 404 for any basename starting
   // with '.', so `.env.png` could not be previewed — this route serves the paths the user opens
@@ -394,7 +397,7 @@ router.get('/api/download', async (req, res) => {
   if (R) return remoteStream(res, () => R.fs.downloadTo(R.host, remotePath(req.query.path), res, { attachment: true }));
   const filePath = safePath(req.query.path);
   try { await sfs(req).call('stat', { path: filePath }, { timeoutMs: 8000 }); }
-  catch (e) { if (e.status === 503) return res.status(503).json({ error: 'Storage not responding — try again in a moment.' }); }
+  catch (e) { if (e.status === 503) return res.status(503).json({ error: e.code === 'storage-blocked' && e.message ? e.message : 'Storage not responding — try again in a moment.' }); }   // the door's own words (a parked mount's)
   try {
     res.download(filePath, { dotfiles: 'allow' }); // r2: a `.env` Download was send's legacy-dotfile 404
   } catch (err) { res.status(400).json({ error: err.message }); }
@@ -502,6 +505,20 @@ router.post('/api/file/write', async (req, res) => {
   catch (err) { res.status(err.status || 400).json({ error: err.message + roMountHint(req, req.body.path, err) }); }
 });
 
+// B-3767 (lane bl-scratch, 2026-11-18): A TEMP FILE THE HUB NAMES — «open in editor» on a chat block. The client used to write
+// /tmp/claude-webui/<name> (a machine-wide folder another user's hub may own); the hub now writes it into its own temp folder
+// (src/server/hub-tmp.js: <tmp>/vibespace-<uid>-<data hash>/editor) and answers the path; a refusal says the path and why
+router.post('/api/file/temp', async (req, res) => {
+  const name = String(req.body?.name || '');
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(name)) return res.status(400).json({ error: 'name must be a plain file name', code: 'bad_name' });
+  sweepOwnTmp();
+  const r = await HUB_TMP.hubTmpDir('editor', { dataDir: HUB_DATA });
+  if (!r.dir) return res.status(500).json({ error: `the editor's temp folder: ${r.why}`, code: 'hub_tmp_refused' });
+  const p = path.join(r.dir, name);
+  try { await sfs(req).call('writeFile', { path: p, content: String(req.body?.content || '') }); res.json({ success: true, path: p }); }
+  catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+});
+
 router.post('/api/rename', async (req, res) => {
   const R = rfs(req);
   if (R) { try { return res.json(await R.fs.rename(R.host, remotePath(req.body.oldPath), remotePath(req.body.newPath))); } catch (e) { return res.status(400).json(fsErrorBody(e)); } }
@@ -520,7 +537,20 @@ router.delete('/api/file', async (req, res) => {
 });
 
 // File upload
-const upload = multer({ dest: '/tmp/claude-webui-uploads/' });
+// B-3767 (lane bl-scratch, 2026-11-18): the multer temp files land in THIS hub's own temp folder (src/server/hub-tmp.js:
+// <tmp>/vibespace-<uid>-<data hash>/uploads, 0700, judged before use), never a machine-wide name another user may own; a
+// folder it cannot use is the request's error BY NAME (the upload route answers it, never a hang)
+const HUB_TMP = require('../server/hub-tmp.js');
+const HUB_DATA = path.join(__dirname, '..', '..', 'data');
+// B-3767 unit 2 (B-4371): the hub's own temp root gets the tree's age sweep — asked by the roads that write there (upload, temp
+// file, paste), at most once in 10 min, off the request (never awaited); what it removed or refused is said in one line
+let ownTmpSweptAt = 0;
+const sweepOwnTmp = () => {
+  const now = Date.now(); if (now - ownTmpSweptAt < 10 * 60 * 1000) return; ownTmpSweptAt = now;
+  HUB_TMP.sweepHubTmp({ dataDir: HUB_DATA }).then((r) => { if (r.removed.length || r.refused.length) console.log(`[files] the hub's own temp root: ${r.removed.length} old file(s) removed${r.refused.length ? ' — refused: ' + r.refused.join('; ') : ''}`); }, () => { });
+};
+const upload = multer({ storage: HUB_TMP.hubTmpStorage(multer, 'uploads', { dataDir: HUB_DATA }) });
+const uploadFiles = (req, res, next) => { sweepOwnTmp(); upload.array('files')(req, res, (err) => (err ? res.status(err.status || 500).json({ error: err.message, code: err.code || 'upload_failed' }) : next())); };
 // lane chat-attachments-persist (road a): a file the person gives a conversation whose cwd is TEMPORARY — chat.uploadDir
 // unset, the cwd under os.tmpdir() / /tmp / /var/tmp — is kept with the conversation instead (data/chat-attachments/<conv>/
 // files/, a remote host's ~/.vibespace/chat-attachments/<conv>/), and the answer says where; a cwd that is not temporary
@@ -550,7 +580,7 @@ function noteChatUploads(req, files) {
   if (!sessionId || !files.length) return;
   try { require('../server/artifact-registry.js').noteUploads({ sessionId, host: req.query.host ? String(req.query.host) : '', files }); } catch (e) { console.warn('[upload] artifacts rows not fed:', e.message); }
 }
-router.post('/api/upload', upload.array('files'), async (req, res) => {
+router.post('/api/upload', uploadFiles, async (req, res) => {
   let destDir = req.body.destDir || os.homedir();
   const conv = req.body && req.body.sessionId ? String(req.body.sessionId) : '';
   const keepWithConv = req.body.uploadDirSet !== '1' && CA.convOk(conv);   // chat.uploadDir unset (today's default = the cwd) and a conversation named
@@ -650,14 +680,17 @@ function sweepPasteTemps(rfsInst, host) {
     rfsInst._run(host, `find ~/.vibespace/paste -type f -mmin +1440 -delete 2>/dev/null || true`).catch(() => {});
     return;
   }
-  // async only — os.tmpdir() is local disk, but never risk a pool stall
-  fs.promises.readdir(os.tmpdir()).then(async (names) => {
+  // async only — os.tmpdir() is local disk, but never risk a pool stall. B-3767: new pastes live in the hub's own folder
+  // (<tmp>/vibespace-<uid>-<data hash>/paste), swept with the rest of that root by HUB_TMP.sweepHubTmp (judged, by age); here
+  // only the LEGACY root's old claude-paste-* files of this user remain (retired a release later: B-5527)
+  const sweepDir = (dir) => fs.promises.readdir(dir).then(async (names) => {
     for (const n of names) {
       if (!n.startsWith('claude-paste-')) continue;
-      const p = path.join(os.tmpdir(), n);
+      const p = path.join(dir, n);
       try { const st = await fs.promises.stat(p); if (now - st.mtimeMs > 24 * 3600 * 1000) await fs.promises.unlink(p); } catch {}
     }
   }).catch(() => {});
+  sweepDir(os.tmpdir());
 }
 
 // Paste image from clipboard → save to temp file + set X clipboard via xclip
@@ -685,8 +718,12 @@ router.post('/api/paste-image', async (req, res) => {
       sweepPasteTemps(rfsInst, sess.host);
       return res.json({ ready: true, remotePath });
     }
-    const tmpPath = path.join(os.tmpdir(), `claude-paste-${Date.now()}.${ext}`);
-    fs.writeFileSync(tmpPath, buf);
+    // B-3767: the paste lands in THIS hub's own temp folder (never the shared root, where any user could read it)
+    sweepOwnTmp();
+    const pasteDir = await HUB_TMP.hubTmpDir('paste', { dataDir: HUB_DATA });
+    if (!pasteDir.dir) return res.status(500).json({ error: `the paste's temp folder: ${pasteDir.why}`, code: 'hub_tmp_refused' });
+    const tmpPath = path.join(pasteDir.dir, `claude-paste-${Date.now()}.${ext}`);
+    await fs.promises.writeFile(tmpPath, buf);   // B-3767 follow-up: off the loop (a reader's should)
     sweepPasteTemps();
     // Set system clipboard with image — macOS uses osascript, Linux uses xclip
     const isMac = process.platform === 'darwin';

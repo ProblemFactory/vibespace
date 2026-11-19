@@ -198,7 +198,7 @@ function registerWebdav(app, { tokens }) {
     const rel = decodeURIComponent(req.path).replace(/\/+$/, '');
     const target = path.resolve(tok.root, '.' + (rel || '/'));
     if (target !== tok.root && !target.startsWith(tok.root + path.sep)) return res.status(403).end();
-    if (DOOR.blocked(target)) return res.status(503).type('text/plain').send(DOOR.SENTENCE);   // B-afc4: answered, never read
+    if (DOOR.blocked(target)) return res.status(503).type('text/plain').send(DOOR.sentenceFor(target));   // B-afc4: answered, never read
     // symlink escape: the closest EXISTING ancestor's realpath must stay inside
     const containedReal = async (p) => {
       let probe = p;

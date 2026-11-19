@@ -94,7 +94,7 @@ const ok = (cond, name, detail) => {
 };
 const read = (rel) => fs.readFileSync(path.join(repo, rel), 'utf-8');
 const MUT = mutantCopies('back-guard', repo);
-const BG = await import(pathToFileURL(MUT.write('src/lib/back-guard.js', read('src/lib/back-guard.js'), 'as-is')).href); // an .mjs copy: the tree's package.json has no "type"
+const BG = await import(pathToFileURL(MUT.write('src/lib/back-guard.js', read('src/lib/back-guard.js'), 'as-is', { same: true })).href); // an .mjs copy: the tree's package.json has no "type"
 
 // ── §1 the PURE table ──
 const TABLE = [

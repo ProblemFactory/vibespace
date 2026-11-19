@@ -151,6 +151,8 @@ function engineWorld(T, { def = 'B', fableA = 1.0, fableB = 1.0 } = {}) {
   const mkSession = (sid, member) => { const s = { backend: 'claude', mode: 'chat', host: null, _webuiId: sid, claudeSessionId: 'cid-' + sid, _accountId: P, name: sid, cwd: root, sockName: 'cw-' + sid, buffer: '', createdAt: Date.now(), pty: { write() { } }, _isStreaming: false, _turnState: 'idle', _spawnModel: 'claude-fable-5-1' }; sessions.set(sid, s); am.ensureSessionPoolLink(P, sid, id[member], { why: 'drill' }); return s; };
   const tagOf = (x) => Object.keys(id).find((k) => id[k] === x) || x;
   const claim = (tag, lanes) => (claimMod ? claimMod.at(dataDir).claim(id[tag], lanes, JSON.parse(fs.readFileSync(path.join(cacheDir, id[tag] + '.json'), 'utf8'))) : { ok: false, code: 'no-module' });
+  // the pool reads an estimate only where this instance's verdict is ON (usage-predict P5): this world's estimates are made — stated on
+  if (app.locals.usageEstimator) app.locals.usageEstimator.predictVerdict = () => ({ state: 'on', n: 99 });
   return { r, eng, am, P, id, sessions, arms, mkSession, tagOf, claim, cacheDir, est: app.locals.usageEstimator, linkOf: (sid) => tagOf(am.poolCurrentFor(P, sid)) };
 }
 // ── K1's world (主开发's rebuild drive-basis shape): a hot pool A, B, C (default A), 5h at 88 / 50 / 30 % read 2 h ago — A sits
@@ -184,6 +186,9 @@ function basisWorld(T, { learning = 'C', pool2 = false, onProbe = null, tags = [
   });
   const est = app.locals.usageEstimator, st = { learning };
   est.basisRaw = (ids) => !!st.learning && (ids || []).includes(id[st.learning]);
+  // the pool reads an estimate only where THIS instance's verdict for its lane is ON (usage-predict P5): this suite's estimates are
+  // made, so their verdict is stated — on — and the pool reads them as before
+  est.predictVerdict = () => ({ state: 'on', n: 99 });
   est.estimateFor = (aid, raw) => { if (st.learning && aid === id[st.learning]) return null; if (!raw || !raw.fiveHour) return null; return { fiveHour: { ...raw.fiveHour, utilization: raw.fiveHour.utilization + 0.08 }, sevenDay: raw.sevenDay, scopedWeekly: [] }; };
   const mkSession = (sid, member) => { const s = { backend: 'claude', mode: 'chat', host: null, _webuiId: sid, claudeSessionId: 'cid-' + sid, _accountId: P, name: sid, cwd: root, sockName: 'cw-' + sid, buffer: '', createdAt: Date.now(), pty: { write() { } }, _isStreaming: false, _turnState: 'idle', _spawnModel: 'claude-sonnet-4-5' }; sessions.set(sid, s); am.ensureSessionPoolLink(P, sid, id[member], { why: 'drill' }); return s; };
   const mkDirect = (sid, tag) => { const s = { backend: 'claude', mode: 'chat', host: null, _webuiId: sid, claudeSessionId: 'cid-' + sid, _accountId: id[tag], name: sid, cwd: root, sockName: 'cw-' + sid, buffer: '', createdAt: Date.now(), pty: { write() { } }, _isStreaming: false, _turnState: 'idle', _spawnModel: 'claude-sonnet-4-5' }; sessions.set(sid, s); return s; };
@@ -231,7 +236,8 @@ const CACHE_READ_ROWS = {
   'src/server/migrations.js': [3, 'the boot migrations over the cache dir'],
   'src/quota-model-migrate.js': [2, 'the backfill migration'],
   'src/server/stream-wall.js': [2, 'the stream wall\'s own write base and its room line'],
-  'src/server/account-usage-routes.js': [2, 'the accounts routes\' cache paths (an account removed: its files)'],
+  'src/server/account-usage-routes.js': [3, 'the accounts routes\' cache paths (an account removed: its files) + the after-turn road\'s cache dir (usage-predict pick 1)'],
+  'src/door-reads.js': [2, 'the `.door-reads-` sidecar\'s one reader and lastReadAt\'s read of the stored fetchedAt — a count and a time for the door\'s callers, never a quota decision (usage-predict pick 1)'],
   'src/server/auto-cli-loop.js': [1, 'the auto-cli pacing: the stored fetchedAt / drift'],
   'src/window-stamp.js': [1, 'the established-window sidecar'],
   'src/agentd/agentd.js': [1, 'the DEVICE\'s own ~/.vibespace/usage-cache (the usage-scan op) — not the hub\'s'],

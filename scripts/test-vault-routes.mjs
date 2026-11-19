@@ -540,7 +540,7 @@ const hit0 = hit, PAGE0 = PAGE;
   ok(rG.status === 200 && rG.json.ok && rG.json.stdout === 'curl got [vault:mounts/m1/secretKey]\n' && /^vr-[0-9a-f]{16}$/.test(rG.json.receipt), 'THE GRANT ROW IS HONOURED BY THE RUN VERDICT: the closed entry runs for that conversation (the cluster still shows the run card), scrubbed, with its receipt', rG.json);
   const rG2 = await hit('/api/agent/vault/run', { headers: B, body: { args: CURL, cwd: WORK } });
   const us2 = await hit('/api/agent/vault/uses', { method: 'GET', headers: B });
-  ok(rG2.status === 403 && rG2.json.code === 'entry_not_runnable' && us2.json.uses.some((u) => u.receipt === rG.json.receipt && u.purpose === REQ.purpose && u.outcome === 'ok' && u.door === 'run') && !JSON.stringify(us2.json).includes(RUNV),
+  ok(rG2.status === 403 && rG2.json.code === 'grant_expired' && /its one run was used at/.test(rG2.json.error || rG2.json.words || '') && us2.json.uses.some((u) => u.receipt === rG.json.receipt && u.purpose === REQ.purpose && u.outcome === 'ok' && u.door === 'run') && !JSON.stringify(us2.json).includes(RUNV),
     'once was once (the next run is refused); USES reads the run back — the entry, its purpose, the outcome, the same receipt — never a value', us2.json.uses && us2.json.uses.slice(0, 2));
   // B-4934 (q-043 verify L2): the hub-wide bound counts CONVERSATIONS — 32 asking at once, the 33rd refused BY NAME over the
   // route (429 too_many_askers); past 8 asking, the owner's For you holds ONE Vault notice «N conversations are asking»

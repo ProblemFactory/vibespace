@@ -4,7 +4,8 @@
  * A measurement release reads what the hub's main loop did per hour and per day WITHOUT opening the page: on a fleet pod
  * the journal is all there is. So once an hour (and once at exit) the ORCH half (src/server/loop-day-report.js) folds what
  * it kept in memory into ONE line of a fixed shape a grep can count:
- *   [loop-hour] hour=<UTC hour>Z span=<s> held=<s> holds=<n> longest=<s> boot-held=<s> boot-holds=<n> lost-holds=<n> busy=<%>
+ *   [loop-hour] hour=<UTC hour>Z span=<s> held=<s> holds=<n> longest=<s> boot-held=<s> boot-holds=<n> lost-holds=<n>
+ *     no-ours-holds=<n> no-ours-held=<s> busy=<%>
  *     top="<cause> <s>; …" engines="interface <%>; vault; channels; money; workspace; machines; conversation; <split>* <%>; …; native; outside"
  *     census-ticks=<n> busy-ticks=<n> held-ticks=<n> idle-ticks=<n> stopped-ticks=<n> not-sampled=<n> via-helper=<n> deep=<n>
  *     census-asks=<n> census-paid=<s> hub-up=<h> hub-heap=<MB>/<MB> hub-rss=<MB> cli=<n>/<MB> wrapper=<n>/<MB> browser=<n>/<MB>
@@ -13,7 +14,9 @@
  *     page-sockets=<n> device-links=<n> ws-in=<n> ws-out=<n> parsed=<M chars> creates=<n> resumes=<n> writes=<n> write-max=<s>
  * EACH FIELD COUNTS WHAT ITS NAME SAYS: held / holds / longest / top = the hour's holds of a second or more AFTER the boot (an hour
  * no watchdog watched prints «?» — never a clean hour); boot-held / boot-holds = the boot's own, apart; lost-holds = holds the
- * watchdog's ring dropped before the hour's book read them; busy = the loop's utilization between the two cuts (the runtime's own
+ * watchdog's ring dropped before the hour's book read them; no-ours-holds / no-ours-held = the hour's holds whose
+ * row came from a sample with NO FRAME OF OURS (the stack ended in the runtime, or was cut before a frame of the tree — never the
+ * measuring wrapper's line: src/loop-hold.js instrumentTrim), counted apart and booked in top under «(no frame of ours)»; busy = the loop's utilization between the two cuts (the runtime's own
  * event-loop measure — a DIFFERENT instrument from the census's busy-ticks below, so the two need not agree). ENGINES = each
  * FUTURE OWNER's share of the census's BUSY ticks (src/loop-census.js: the owner of the nearest frame of an owned file), then each
  * SPLIT file's own share («<short>*»: one file that holds two owners' work today — booked under its own name, never guessed onto
@@ -45,6 +48,7 @@ const VERDICTS = Object.freeze([   // src/loop-hold.js V — the hold verdict's 
   'on the CPU — JavaScript or native code, no sample of that part', 'not in JavaScript when asked (running or waiting for a CPU)',
 ]);
 const NO_CAUSE = '(no cause recorded)';
+const NO_OURS = '(no frame of ours)';   // 主开发 12:20Z: a hold whose row had no frame of the tree — apart, never a verdict's word
 const OTHER = '(other)';
 const TOP_N = 3;
 const KIDS = Object.freeze(['cli', 'wrapper', 'browser', 'agentd', 'other']);
@@ -55,20 +59,22 @@ const SHORT_RE = /^[a-z][a-z0-9-]{0,39}$/;   // a split file's short name (src/l
 const AGES = Object.freeze(['turn-running', 'turn-waiting', 'idle-under-1h', 'idle-1-2h', 'idle-2-4h', 'idle-over-4h', 'turn-unknown']);
 
 /** a hold's CAUSE: the hub's own code location in its frame (`src/x.js:12`), else its verdict (one of the fixed words) */
-function causeOf({ verdict = null, frame = null } = {}) {
+function causeOf({ verdict = null, frame = null, noOurs = false } = {}) {
+  if (noOurs === true) return NO_OURS;
   const m = typeof frame === 'string' ? /(?:^|[\s(])((?:src\/[\w./-]+|server\.js):\d+)(?=[)\s]|$)/.exec(frame) : null;
   if (m && !m[1].includes('..')) return m[1];
   if (typeof verdict === 'string' && verdict) return VERDICTS.includes(verdict) ? verdict : OTHER;
   return NO_CAUSE;
 }
 /** an empty hour from `fromMs` (wall clock) */
-function newHour(fromMs, { watched = true } = {}) { return { fromMs, watched: !!watched, holds: 0, heldMs: 0, longestMs: 0, by: {}, boot: { holds: 0, heldMs: 0 }, lost: null }; }
+function newHour(fromMs, { watched = true } = {}) { return { fromMs, watched: !!watched, holds: 0, heldMs: 0, longestMs: 0, by: {}, boot: { holds: 0, heldMs: 0 }, noOurs: { holds: 0, heldMs: 0 }, lost: null }; }
 /** a hold (ms, and its verdict / frame) into the hour */
-function holdAdd(h, { ms, verdict = null, frame = null, boot = false } = {}) {
+function holdAdd(h, { ms, verdict = null, frame = null, boot = false, noOurs = false } = {}) {
   if (!h || !(Number(ms) >= 0)) return h;
   if (boot) { h.boot.holds++; h.boot.heldMs += ms; return h; }   // the boot's own hold: apart, never the hour's
-  const c = causeOf({ verdict, frame });
+  const c = causeOf({ verdict, frame, noOurs });
   h.holds++; h.heldMs += ms; if (ms > h.longestMs) h.longestMs = ms;
+  if (noOurs === true) { if (!h.noOurs) h.noOurs = { holds: 0, heldMs: 0 }; h.noOurs.holds++; h.noOurs.heldMs += ms; }
   h.by[c] = (h.by[c] || 0) + ms;
   return h;
 }
@@ -122,7 +128,8 @@ function line(rep = {}) {
   const how = k && ['service', 'container', 'tree'].includes(k.how) ? k.how : '?';
   return [`[loop-${rep.kind === 'exit' ? 'exit' : 'hour'}]`, `hour=${hourOf(h.fromMs)}`, `span=${span == null ? '?' : `${Math.round(span / 1000)}s`}`,
     `held=${w ? s1(h.heldMs) : '?'}`, `holds=${w ? h.holds : '?'}`, `longest=${w ? s1(h.longestMs) : '?'}`,
-    `boot-held=${w ? s1(h.boot ? h.boot.heldMs : 0) : '?'}`, `boot-holds=${w ? (h.boot ? h.boot.holds : 0) : '?'}`, `lost-holds=${int(h.lost)}`, `busy=${pct(rep.busy)}`, `top="${top}"`,
+    `boot-held=${w ? s1(h.boot ? h.boot.heldMs : 0) : '?'}`, `boot-holds=${w ? (h.boot ? h.boot.holds : 0) : '?'}`, `lost-holds=${int(h.lost)}`,
+    `no-ours-holds=${w ? (h.noOurs ? h.noOurs.holds : 0) : '?'}`, `no-ours-held=${w ? s1(h.noOurs ? h.noOurs.heldMs : 0) : '?'}`, `busy=${pct(rep.busy)}`, `top="${top}"`,
     `engines="${e.words}"`, `census-ticks=${int(e.ticks)}`, `busy-ticks=${int(e.busy)}`, `held-ticks=${int(e.held)}`, `idle-ticks=${int(e.idle)}`, `stopped-ticks=${int(e.stopped)}`,
     `not-sampled=${int(e.notSampled)}`, `via-helper=${int(e.viaHelper)}`, `deep=${int(e.deep)}`,
     `census-asks=${int(e.asks)}`, `census-paid=${Number.isFinite(e.paidMs) ? `${(e.paidMs / 1000).toFixed(2)}s` : '?'}`,
@@ -137,18 +144,18 @@ function line(rep = {}) {
 
 const N = '(\\d+|\\?)', S = '(\\d+\\.\\ds|\\?)';
 const LINE_RE = new RegExp('^\\[loop-(hour|exit)\\] hour=(\\d{4}-\\d\\d-\\d\\dT\\d\\dZ|\\?) span=(\\d+s|\\?)'
-  + ` held=${S} holds=${N} longest=${S} boot-held=${S} boot-holds=${N} lost-holds=${N} busy=(\\d+\\.\\d%|\\?) top="[^"]*" engines="[^"]*"`
+  + ` held=${S} holds=${N} longest=${S} boot-held=${S} boot-holds=${N} lost-holds=${N} no-ours-holds=${N} no-ours-held=${S} busy=(\\d+\\.\\d%|\\?) top="[^"]*" engines="[^"]*"`
   + ` census-ticks=${N} busy-ticks=${N} held-ticks=${N} idle-ticks=${N} stopped-ticks=${N} not-sampled=${N} via-helper=${N} deep=${N}`
   + ` census-asks=${N} census-paid=(\\d+\\.\\d\\ds|\\?) hub-up=(\\d+\\.\\dh|\\?)`
   + ' hub-heap=(\\d+MB|\\?)\\/(\\d+MB|\\?) hub-rss=(\\d+MB|\\?)' + KIDS.map((n) => ` ${n}=${N}\\/(\\d+MB|\\?)`).join('') + ' procs-by=(service|container|tree|\\?)'
   + ` conversations=${N}` + AGES.map((a) => ` ${a}=${N}`).join('') + ` ages-read=${N}\\/${N} browsers-ready=${N} browsers-idle-1h=${N}`
   + ` page-sockets=${N} device-links=${N} ws-in=${N} ws-out=${N} parsed=(\\d+\\.\\dM|\\?) creates=${N} resumes=${N} writes=${N} write-max=${S}$`);
-/** the causes a line may name: a code location of the hub's own, a verdict's fixed words, the two markers */
+/** the causes a line may name: a code location of the hub's own, a verdict's fixed words, the three markers */
 function causesOk(text) {
   const m = /top="([^"]*)"/.exec(String(text || ''));
   if (!m) return false;
   if (m[1] === 'none' || m[1] === '?') return true;
-  return m[1].split('; ').every((p) => { const c = p.replace(/ \d+\.\ds$/, ''); return /^(?:src\/[\w./-]+|server\.js):\d+$/.test(c) || VERDICTS.includes(c) || c === NO_CAUSE || c === OTHER; });
+  return m[1].split('; ').every((p) => { const c = p.replace(/ \d+\.\ds$/, ''); return /^(?:src\/[\w./-]+|server\.js):\d+$/.test(c) || VERDICTS.includes(c) || c === NO_CAUSE || c === OTHER || c === NO_OURS; });
 }
 
 /** the engines a line may name: the seven owners in their order, then any split files' own buckets («<short>* <n>%»), then native
@@ -166,7 +173,7 @@ function enginesOk(text) {
 
 /** THE DAY (Diagnostics): the hours kept, folded — held, holds, the longest, the busy share weighted by span, the causes */
 function dayFold(hours = []) {
-  const out = { hours: 0, unwatched: 0, heldMs: 0, holds: 0, longestMs: 0, busy: null, by: {}, boot: { holds: 0, heldMs: 0 } };
+  const out = { hours: 0, unwatched: 0, heldMs: 0, holds: 0, longestMs: 0, busy: null, by: {}, boot: { holds: 0, heldMs: 0 }, noOurs: { holds: 0, heldMs: 0 } };
   let busyW = 0, busyS = 0;
   for (const r of hours) {
     const h = r && r.hour; if (!h) continue;
@@ -174,6 +181,7 @@ function dayFold(hours = []) {
     if (h.watched === false) { out.unwatched++; continue; }   // left OUT of the day's sums — the day says how many hours that was
     out.heldMs += h.heldMs; out.holds += h.holds; out.longestMs = Math.max(out.longestMs, h.longestMs);
     if (h.boot) { out.boot.holds += h.boot.holds; out.boot.heldMs += h.boot.heldMs; }
+    if (h.noOurs) { out.noOurs.holds += h.noOurs.holds; out.noOurs.heldMs += h.noOurs.heldMs; }
     for (const [c, ms] of Object.entries(h.by || {})) out.by[c] = (out.by[c] || 0) + ms;
     const span = Number.isFinite(r.toMs) && Number.isFinite(h.fromMs) ? r.toMs - h.fromMs : 0;
     if (Number.isFinite(r.busy) && span > 0) { busyW += span; busyS += r.busy * span; }
@@ -186,4 +194,4 @@ function dayFold(hours = []) {
 /** the next hour boundary after `ms` (UTC) */
 const nextHourAt = (ms) => Math.floor(ms / HOUR_MS) * HOUR_MS + HOUR_MS;
 
-module.exports = { VERDICTS, NO_CAUSE, OTHER, KIDS, ENGINES, ENGINE_FIELDS, AGES, HOUR_MS, causeOf, newHour, holdAdd, topOf, censusWords, line, LINE_RE, causesOk, enginesOk, dayFold, nextHourAt };
+module.exports = { VERDICTS, NO_CAUSE, OTHER, NO_OURS, KIDS, ENGINES, ENGINE_FIELDS, AGES, HOUR_MS, causeOf, newHour, holdAdd, topOf, censusWords, line, LINE_RE, causesOk, enginesOk, dayFold, nextHourAt };

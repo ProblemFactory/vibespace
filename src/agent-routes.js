@@ -8,6 +8,7 @@
  * CLAUDE.md notes on renderContext/persisted-output before touching payloads.
  */
 const os = require('os');
+const { jobWhere, answersEveryThrow } = require('./server/job-where.js'); // B-70f9: where a job runs — a remote conversation's folder asked through the blocked-path door, bounded
 const path = require('path');
 const crypto = require('crypto');
 const OF = require('./server/owner-facts.js'); // lane agent-context-owner-facts (B-7960): the owner's clock + tray words — every time and tray sentence an agent reads here
@@ -132,8 +133,9 @@ const taskShowAnswer = (t, openSorted) => ({ id: t.id, title: taskLine(t.title),
 // lane task-group-context: + every Context-table row's files (`rows`) — a stepped-down row's line points here
 const contextIndexAnswer = (ix) => ({ dir: ix.dir == null ? null : taskLine(ix.dir), files: (ix.files || []).map((f) => ({ path: taskLine(f.path), size: Number(f.size) || 0 })), rows: (ix.rows || []).map((r) => ({ path: taskLine(r.path), note: taskLine(r.note || ''), files: (r.files || []).map((f) => ({ path: taskLine(f.path), size: Number(f.size) || 0 })) })) });
 const taskGroupBrief = (t) => ({ id: t.id, title: taskLine(t.title), archived: !!t.archived, contextDir: t.contextDir ? taskLine(t.contextDir) : null, sessions: (t.sessions || []).length });   // verify r5 F2: a manager's context-dir path is its words too (group-list prints it)
-const msgSendAnswer = (r) => ({ posted: true, group: { id: r.group.id, name: msgName(r.group.name), pair: !!r.group.pair }, pairCreated: !!r.pairCreated, woke: msgNames(r.woke), refused: msgRefusals(r.refused), nextTurn: msgNames(r.later), ...(r.message && typeof r.message.text === 'string' ? { chars: cliText.chars(r.message.text) } : {}), queued: (r.queued || []).map((w) => ({ name: msgName(w && w.name), since: w && Number.isFinite(w.since) ? w.since : null })), intoTurn: msgNames((r.woke || []).filter((w) => w && w.intoTurn)) });   // queued / intoTurn: lane queued-is-not-woke (law 1)
+const msgSendAnswer = (r) => ({ posted: true, group: { id: r.group.id, name: msgName(r.group.name), pair: !!r.group.pair }, pairCreated: !!r.pairCreated, woke: msgNames(r.woke), refused: msgRefusals(r.refused), nextTurn: msgNames(r.later), ...(r.message && typeof r.message.text === 'string' ? { chars: cliText.chars(r.message.text) } : {}), ...(Array.isArray(r.masked) && r.masked.length ? { masked: r.masked.slice(0, 8).map((x) => msgName(String(x).slice(0, 60))), ...(r.masked.length > 8 ? { maskedMore: true } : {}) } : {}), queued: (r.queued || []).map((w) => ({ name: msgName(w && w.name), since: w && Number.isFinite(w.since) ? w.since : null })), intoTurn: msgNames((r.woke || []).filter((w) => w && w.intoTurn)) });   // queued / intoTurn: lane queued-is-not-woke (law 1)
 // lane cli-one-text-arg: chars = the STORED message, counted (code points) — vibespace-msg send / dispatch echo it as sent: N characters
+// lane bl-msg B-3e61: masked = what the secret belt masked in it (the heads as the SENDER wrote them, their own words) — said, never read as a cut
 // lane worker-dispatch: POST /api/agent/msg/dispatch's answer — the send echo (msgSendAnswer) + the dispatch record. The
 // worker's name and the record's sentence (it can carry the CLI's compact_error words) leave as pieces of the belt.
 const dispatchAnswer = (r) => ({
@@ -431,7 +433,7 @@ const carryOutstanding = TC.createOutstanding(carryDir);
     catch (e) { console.warn(`[inject] ${s.sockName}: the seen marks were not persisted — a restart repeats this delivery: ${(e && e.message) || e}`); }
   };
 // ── vibespace-ask / vibespace-status — src/agent-routes/status.js (the status / todos family, decoupling wave 2b)
-require('./agent-routes/status.js').register(app, { activeSessions, sessionStatus, userTodos, sessionStatusKey, clearAsAgent, agentSession, toolOn, toolDisabled, bookkept, handoverItems: (b) => handoverItems(b) }); // lane foryou-attachments: vibespace-ask --artifact reads the hand-over's argument shape
+require('./agent-routes/status.js').register(app, { activeSessions, sessionStatus, userTodos, sessionStatusKey, clearAsAgent, agentSession, toolOn, toolDisabled, bookkept, handoverItems: (b) => handoverItems(b), serverSetting }); // lane foryou-attachments: vibespace-ask --artifact reads the hand-over's argument shape
 // "CLEAR CONTENT…" AS AN AGENT (2026-09-28): the caller an agent's own verbs
 // hand the ONE clear entry point (src/server/record-clear.js) — its keys (the
 // status key and the pre-conversation webui key: an entry written before the
@@ -471,6 +473,19 @@ async function clearAsAgent(hit, item, res) {
 // (tasks.readSignatures: SafeFs, ≤ 1 s inside the hook's 3 s) and the route is entered AGAIN once that settled — nothing
 // above the call consumes anything. With nothing to read (every signature fresh, no off-thread reader) it stays synchronous.
 const turnRead = new WeakSet();   // the requests whose Context read already ran (the second entry goes straight through)
+// B-55dc THE DECIDING DOOR on the hooks' road: who is a member decides what the agent is TOLD, so the first read of a path
+// membership needs (the cwd's realpath, a relative / file-candidate discover row) is awaited OFF the loop, bounded
+// (tasks.membershipRead), and the route is entered AGAIN once it settled — the same seam as readTurnSigs, placed before
+// anything is consumed; with everything already read it stays synchronous.
+const memberRead = new WeakSet();
+function readMembership(req, res, route, s, id) {
+  if (memberRead.has(req) || typeof tasks.membershipRead !== 'function') return false;
+  const p = tasks.membershipRead({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds });
+  if (!p) return false;
+  memberRead.add(req);
+  p.then(() => route(req, res), () => route(req, res));
+  return true;
+}
 function readTurnSigs(req, res, route, s, groups) {
   if (turnRead.has(req) || typeof tasks.readSignatures !== 'function') return false;
   const p = tasks.readSignatures(groups, { stale: s._sigStale || null });
@@ -508,7 +523,7 @@ function agentSession(req, res) {
 function resolveAgentGroup(hit, req, res) {
   const [s, id] = hit;
   const key = sessionStatusKey(s, id);
-  const groups = tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds });
+  const groups = tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds });
   const want = String(req.query?.group || req.body?.group || '').trim();
   if (want) {
     const g = groups.find((x) => x.id === want);
@@ -640,8 +655,9 @@ app.get('/api/agent/task-context', function taskContextRoute(req, res) {
     // prompt found nothing. Nothing is rendered, drained, stamped or consumed here for such a harness — its first
     // prompt-context call IS its delivery (a codex sub-agent thread's SessionStart is the same call).
     if (!honoursSessionStart(s)) return res.json({ success: true, context: '' });
+    if (readMembership(req, res, taskContextRoute, s, id)) return;   // B-55dc: the deciding door's first reads, then again
     const key = sessionStatusKey(s, id);
-    const groups = tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds });
+    const groups = tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds });
     // agents.contextInjection off (2.211.0) ⇒ no group content is injected at
     // all (falls through to the baseline tools intro) — the per-group
     // injectContext toggle stays the finer-grained instrument.
@@ -781,9 +797,10 @@ app.get('/api/agent/prompt-context', function promptContextRoute(req, res) {
   try {
     const [s, id] = hit;
     const key = sessionStatusKey(s, id);
+    if (readMembership(req, res, promptContextRoute, s, id)) return;   // B-55dc: who is a member FIRST (the deciding door), then again
     // lane task-group-fanout: the Context read FIRST (off the loop, bounded) — the route is entered again once it settled,
     // and nothing above this line consumed anything
-    if (readTurnSigs(req, res, promptContextRoute, s, ctxInjectionOn() ? tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }).filter((g) => g.injectContext !== false) : [])) return;
+    if (readTurnSigs(req, res, promptContextRoute, s, ctxInjectionOn() ? tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }).filter((g) => g.injectContext !== false) : [])) return;
     // lane report-mark-on-ack: every mark this answer would move is STAGED (carry.stage) and moves when the caller confirms the
     // turn carried it (TC.CONFIRM_ROUTE) — a previous answer never confirmed is dropped here, said in the journal, and composed again
     const carry = openCarry(s, { owner: key, route: 'UserPromptSubmit', turn: turnIsUserInitiated(s) ? 'person' : 'machine', confirm: TC.confirmable(req), sent: TC.sentAt(req), store: carryOutstanding });
@@ -799,7 +816,7 @@ app.get('/api/agent/prompt-context', function promptContextRoute(req, res) {
       parts.push(`<vibespace-cwd-notice>\nYour working directory (${s.cwd || ''}) did NOT exist when this session was resumed — the user chose to recreate it as an EMPTY directory. Files from earlier in this conversation are GONE from disk. Re-verify every assumption about existing files/state before acting, and tell the user what is missing if it affects the task.\n</vibespace-cwd-notice>`);
     }
     const toolFlags = toolsFor(s, id);   // lane channels-teach: + `channels` (the session's reach), asked once per call
-    const groups = tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds });
+    const groups = tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds });
     // agents.contextInjection off ⇒ no group payloads/diffs (see task-context)
     const injectGroups = ctxInjectionOn() ? groups.filter((g) => g.injectContext !== false) : []; // P6: per-group context toggle
     // ── THE ROOM (channel-jump verify r7, 2026-09-27) ──
@@ -1334,6 +1351,7 @@ app.get('/api/agent/task', function taskShowRoute(req, res) {
   // endpoints inject (objective/backlog/activity) — `vibespace-task show` from
   // a pre-toggle session must not bypass the pristine state through it.
   if (!integrationOnMaster()) return res.status(403).json({ error: 'VibeSpace integration is disabled (master switch)' });
+  if (readMembership(req, res, taskShowRoute, hit[0], hit[1])) return;   // B-55dc: an agent's right to its group, decided on a READ answer
   const gid = resolveAgentGroup(hit, req, res);
   if (!gid) return;
   // lane task-group-fanout: `--full` lists every row's files — read OFF the loop first (bounded), entered again once settled
@@ -1355,10 +1373,11 @@ app.get('/api/agent/task', function taskShowRoute(req, res) {
     res.json({ success: true, you, task: taskShowAnswer(t, openSorted), ...(ix ? { contextIndex: contextIndexAnswer(ix) } : {}) });   // verify r4 F1: every peer-written field through the belt
   } catch (e) { res.status(404).json({ error: e.message }); }
 });
-app.post('/api/agent/task-progress', (req, res) => {
+app.post('/api/agent/task-progress', function taskProgressRoute(req, res) {
   const hit = agentSession(req, res);
   if (!hit) return;
   if (!toolOn('Task')) return toolDisabled(res, 'vibespace-task progress');
+  if (readMembership(req, res, taskProgressRoute, hit[0], hit[1])) return;   // B-55dc: an agent's right to its group, decided on a READ answer
   const gid = resolveAgentGroup(hit, req, res);
   if (!gid) return;
   try {
@@ -1377,12 +1396,13 @@ app.post('/api/agent/task-progress', (req, res) => {
 // Activity-log entry THIS session wrote keeps its time and place, its words
 // become the one cleared sentence. The owner clears any entry from the Task
 // Group log window. A job token never (a named 403, before anything is read).
-app.post('/api/agent/task/progress-redact', async (req, res) => {
+app.post('/api/agent/task/progress-redact', async function taskRedactRoute(req, res) {
   const tok = (req.headers.authorization || '').replace(/^Bearer\s+/i, '') || req.body?.token || '';
   if (String(tok).startsWith('jbt_')) return res.status(403).json({ error: 'a job token cannot clear records — ask the user to clear it, or clear it from the session that wrote it', code: 'job_token' });
   const hit = agentSession(req, res);
   if (!hit) return;
   if (!toolOn('Task')) return toolDisabled(res, 'vibespace-task progress-redact');
+  if (readMembership(req, res, taskRedactRoute, hit[0], hit[1])) return;   // B-55dc: an agent's right to its group, decided on a READ answer
   const gid = resolveAgentGroup(hit, req, res);
   if (!gid) return;
   const ref = String(req.body?.ref ?? req.body?.id ?? req.body?.at ?? '').trim();
@@ -1405,10 +1425,11 @@ app.post('/api/agent/task-plan', (req, res) => {
 // Refs resolve by stable item id (B-xxxx — the user can copy one to ANY
 // member agent), by 1-based index into the OPEN-items list (what
 // `show`/`backlog` display), or by unique text substring.
-app.post('/api/agent/task-backlog', (req, res) => {
+app.post('/api/agent/task-backlog', function taskBacklogRoute(req, res) {
   const hit = agentSession(req, res);
   if (!hit) return;
   if (!toolOn('Task')) return toolDisabled(res, 'vibespace-task backlog');
+  if (readMembership(req, res, taskBacklogRoute, hit[0], hit[1])) return;   // B-55dc: an agent's right to its group, decided on a READ answer
   const gid = resolveAgentGroup(hit, req, res);
   if (!gid) return;
   try {
@@ -1649,7 +1670,7 @@ function jobsCaller(s, id) {
   return {
     conversationId: own.cid, borrowed: own.cid ? null : (own.why === FORK_PENDING ? own.why : null),
     sessionId: id, sessionCreatedAt: s.createdAt || 0,
-    groups: new Set(tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }).map((g) => g.id)),
+    groups: new Set(tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }).map((g) => g.id)),
   };
 }
 function jobAuth(req, res) {
@@ -1737,14 +1758,14 @@ function _msgEndpoints(exceptId) {
     // parent was refused `ambiguous`. ONE predicate with server.js's roster (`liveSessions`): addressableId.
     const cid = addressableId(t);
     if (!cid) continue;
-    const groups = (tasks.groupsForSession({ sessionKey: sessionStatusKey(t, tid), cwd: t.cwd, initialGroupId: t._initialGroupId, initialGroupIds: t._initialGroupIds }) || []).map((g) => g.id);
+    const groups = (tasks.groupsForSession({ sessionKey: sessionStatusKey(t, tid), cwd: t.cwd, hostId: t.host || null, initialGroupId: t._initialGroupId, initialGroupIds: t._initialGroupIds }) || []).map((g) => g.id);
     out.push({ id: tid, t, cid, groups, reachability: t._msgReachability || null });
   }
   return out;
 }
 // lane grants-unify: a Task Group's outside visibility = its ROWS of the ONE grants store (msg-acl judges them — a member left out is not exposed)
 const _groupExtVis = (gid) => { try { const g = require('./server/grants-store.js').store(); return g ? g.rowsFor('group-visibility', String(gid)) : []; } catch { return []; } };
-const _myGroupIds = (s, id) => (tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }) || []).map((g) => g.id);
+const _myGroupIds = (s, id) => (tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }) || []).map((g) => g.id);
 app.get('/api/agent/msg/peers', (req, res) => {
   const who = msgCaller(req, res);   // a session, or a job speaking for its owner conversation
   if (!who) return;
@@ -2090,7 +2111,7 @@ const chanAnswer = (res, r) => {
   if (r && r.ok) return res.json(r);
   const code = (r && r.code) || 'error';
   if (r && r.badSpec) return res.status(400).json({ ...r, error: r.error || 'refused', code });   // lane agent-watch-parity: a watch row the dialog's validators refuse (src/channel-watch-spec.js) — a request to fix, never a retry
-  const status = code === 'not-found' ? 404 : code === 'not-yours' ? 403 : code === 'send-not-available' || code === 'account-changed' || code === 'compose-not-available' || code === 'not-withdrawable' ? 409 : code === 'refresh-queue-full' || code === 'rate-floor' || code === 'refresh-floor' || code === 'vendor-budget' || code === 'backoff' ? 429 : code === 'bad-proposal' || code === 'bad-request' || code === 'bad-filter' ? 400 : code === 'stopped' ? 503 : code === 'no-access' || code === 'excepted' ? 403 : code === 'except_conflicts' || code === 'except_unnamed' ? 409 : code === 'not-watching' ? 404 : code === 'watcher-needs-access' ? 400 : 500;   // r5: the request set's cap is a 429 with its wait; an account changed mid-wait a 409; the engine stopping a 503; R4: an adapter that cannot start a conversation a 409; 2026-09-27: somebody else's proposal a 403, one past withdrawing a 409
+  const status = code === 'not-found' ? 404 : code === 'not-yours' ? 403 : code === 'send-not-available' || code === 'account-changed' || code === 'compose-not-available' || code === 'not-withdrawable' || code === 'rest-not-sent' || code === 'rest-already' || code === 'rest-nothing-left' || code === 'rest-files-gone' ? 409 : code === 'refresh-queue-full' || code === 'rate-floor' || code === 'refresh-floor' || code === 'vendor-budget' || code === 'backoff' ? 429 : code === 'bad-proposal' || code === 'bad-request' || code === 'bad-filter' ? 400 : code === 'stopped' ? 503 : code === 'no-access' || code === 'excepted' ? 403 : code === 'except_conflicts' || code === 'except_unnamed' ? 409 : code === 'not-watching' ? 404 : code === 'watcher-needs-access' ? 400 : 500;   // r5: the request set's cap is a 429 with its wait; an account changed mid-wait a 409; the engine stopping a 503; R4: an adapter that cannot start a conversation a 409; 2026-09-27: somebody else's proposal a 403, one past withdrawing a 409
   if (r && r.retryAfterSec) res.setHeader('Retry-After', String(r.retryAfterSec));
   return res.status(status).json({ ...(r || {}), error: (r && r.error) || 'refused', code });
 };
@@ -2350,6 +2371,10 @@ async function composeCallers(req, res, eng, s, id, b) {
 // as the conversation that owns it. Somebody else's proposal is 403
 // `not-yours` (the uniform not-found when the caller cannot even see it); one
 // already decided / sending / of unknown outcome is 409 `not-withdrawable`.
+// THE JOB CALLER'S PRINCIPAL, BUILT ONCE (lane-redact verify r9; restack-411: the withdraw route and lane bl-msg B-da74's rest
+// route both call it — test-record-clear-stores swaps exactly this literal): a session speaks as its conversation; a JOB
+// speaks for its conversation, NAMELESS (its name is words its «Clear content…» never reaches)
+const callerChannelPrincipal = (who) => (who.s ? channelPrincipal(who.s, who.id) : (who.cid ? { kind: 'agent', id: who.cid, name: null, groups: who.myGroups || [] } : null));
 app.post('/api/agent/channels/proposals/:id/withdraw', async (req, res) => {
   // verify r2 (round 1 LOW 6): a BROWSER here (the owner's cookie / a fetch from a page, no agent token) is
   // refused BY NAME — withdraw is the drafting agent's verb; the user rejects from the card — not "missing token".
@@ -2368,10 +2393,27 @@ app.post('/api/agent/channels/proposals/:id/withdraw', async (req, res) => {
   // A JOB SPEAKS FOR ITS CONVERSATION, NAMELESS (lane-redact verify r9): the engine stores this principal on the outbox
   // proposal (`withdrawal.by` — data/channels outbox, every client's outbox broadcast); a job's NAME there was a copy of its
   // words the job's "Clear content…" never reaches. The id is the conversation's; the name falls back to the draft's drafter.
-  const by = who.s ? channelPrincipal(who.s, who.id) : (who.cid ? { kind: 'agent', id: who.cid, name: null, groups: who.myGroups || [] } : null);
+  const by = callerChannelPrincipal(who);
   if (!by) return res.status(409).json({ error: NO_CID_YET, code: 'bad-member' });
   const b = req.body || {};
+  // lane bl-msg B-ae13: a WAKE REQUEST id (wr-…) is the asker's own request, taken back the same way (approval stays the person's click)
+  if (/^wr-/.test(String(req.params.id)) && typeof eng.withdrawWatchRequest === 'function') { try { return chanAnswer(res, await eng.withdrawWatchRequest({ requestId: String(req.params.id), why: typeof b.why === 'string' ? b.why : null, by })); } catch (e) { return res.status(500).json({ error: e.message }); } }
   try { chanAnswer(res, await eng.withdrawProposal({ proposalId: String(req.params.id), why: typeof b.why === 'string' ? b.why : null, by })); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+// lane bl-msg B-da74: the DRAFTING agent asks to send the rest of its sent proposal — the files that did not land, as a NEW
+// proposal the user approves (never sent by the agent itself); the same caller rules as withdraw
+app.post('/api/agent/channels/proposals/:id/resend', async (req, res) => {
+  if (!/^Bearer\s+\S/i.test(String(req.headers.authorization || '')) && !(req.body && req.body.token) && (req.headers.cookie || req.headers['sec-fetch-site'])) return res.status(403).json({ error: 'only the agent that drafted it can ask to resend — the user uses «Send the rest» on the card' });
+  const who = msgCaller(req, res);
+  if (!who) return;
+  if (!integrationOnMaster()) return res.status(403).json({ error: 'VibeSpace integration is off' });
+  const eng = channelsEngine();
+  if (!eng || typeof eng.resendRest !== 'function') return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
+  if (who.s && !who.job) { const ownS = ownConversationIdOf(who.s); if (!ownS.cid) return res.status(409).json({ error: ownS.why, code: 'bad-member' }); }   // the rest route's OWN guard (test-channels-engine's fifth row)
+  const by = callerChannelPrincipal(who);
+  if (!by) return res.status(409).json({ error: NO_CID_YET, code: 'bad-member' });
+  try { const r = await eng.resendRest(String(req.params.id), { ctx: by }); if (r && r.ok && r.proposal) { try { touchChannel(who.id, [{ op: 'reply', adapterId: r.proposal.adapterId, convId: r.proposal.convId, title: r.proposal.title, account: r.proposal.adapterLabel, proposalId: r.proposal.id, placement: r.proposal.placement || null }]); } catch { } } chanAnswer(res, r); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 // R4: SEARCH the messages the agent can SEE (reach filters every hit; the
@@ -2693,9 +2735,15 @@ app.get('/api/agent/pages', (req, res) => {
   if (!a.sessionId && !a.conversationId) return res.json({ pages: [] }); // a caller with no scope sees nothing (no all-pages oracle — review-caught)
   res.json({ pages: publishedPages ? publishedPages.list({ sessionId: a.sessionId || undefined, conversationId: a.conversationId || undefined }).map(pageAnswer) : [] });   // verify r6 F3: every name through the belt
 });
-app.post('/api/agent/jobs', (req, res) => {
+// B-70f9 cure 2: the create door answers EVERY throw by name (src/server/job-where.js answersEveryThrow — async since the folder check).
+// B-55dc ⋈ B-70f9: the handler is NAMED so the membership read can enter it again — and it enters it through the same door
+// (`answersEveryThrow(jobsCreateRoute)` below): a throw on the second entry is answered by name too, never a request left open
+app.post('/api/agent/jobs', answersEveryThrow(async function jobsCreateRoute(req, res) {
   const a = jobAuth(req, res); if (!a) return;
   if (a.selfJob) return res.status(403).json({ error: 'a job token cannot create jobs' });
+  // B-55dc: the job KEEPS its creator's groups (groupsSnapshot) — who is a member is read first (the deciding door), so a
+  // snapshot is never taken from an answer still being read; the route is entered again once it settled (nothing consumed)
+  if (a.session && readMembership(req, res, answersEveryThrow(jobsCreateRoute), a.session, a.sessionId)) return;
   // verify r5: a job is OWNED for good by the conversation that makes it — a borrowed id (a pending fork) is refused
   // by name, like every verb that records a principal; a session with no id yet keeps its lineage-less job
   if (a.caller.borrowed) return res.status(409).json({ error: a.caller.borrowed, code: 'bad-member' });
@@ -2706,7 +2754,7 @@ app.post('/api/agent/jobs', (req, res) => {
     singleInstance: b.singleInstance, timeoutMs: b.timeoutMs, untilOutput: b.untilOutput,
     stdinOpen: b.stdinOpen, notifyUser: b.notifyUser, schedule: b.schedule,
     catchUp: b.catchUp, action: b.action, context: b.context, access: b.access,
-    stopWithOwner: b.stopWithOwner, notify: b.notify, memoryMb: b.memoryMb, // lane jobs-memory-bound: `--memory 8G` (the engine judges it; 0 is the user's alone)
+    notify: b.notify, memoryMb: b.memoryMb, // lane jobs-memory-bound: `--memory 8G` (the engine judges it; 0 is the user's alone)
     vault: b.vault, // lane vault-job-road: `--vault NAME=vault://…` REFERENCES (the engine judges them; a value never rides this body)
     owner: {
       conversation: a.caller.conversationId ? { id: a.caller.conversationId } : null,
@@ -2718,12 +2766,23 @@ app.post('/api/agent/jobs', (req, res) => {
   // DERIVED from the copy above (a field removed there is unknown here at once) + the body's bearer `token` + `notifyOk` (the CLI
   // sends it with every shape; only a cron's task reads it). An older hub meeting a newer CLI says so — it never starts a job
   // without what it was asked to carry (its --vault values)
-  const known = new Set([...Object.keys(spec).filter((k) => k !== 'owner'), 'token', 'notifyOk']);
+  const known = new Set([...Object.keys(spec).filter((k) => k !== 'owner'), 'token', 'notifyOk', 'stopWithOwner']);
+  // B-70f9 ②: the stored stop-with-conversation flag is RETIRED (0 of 2 950 stored jobs carried it) — an older CLI's `false` passes;
+  // asked for, it is refused by name with its door: the notice where a person ends the conversation
+  if (b.stopWithOwner === true) return res.status(400).json({ error: '--stop-with-owner was retired: when a person ends or archives a conversation, a notice names the jobs it still runs and «Stop these too» stops them in one press — nothing was created', code: 'retired-flag' });
   const unknownFields = Object.keys(b).filter((k) => !known.has(k));
   if (unknownFields.length) return res.status(400).json({ error: `unknown field${unknownFields.length === 1 ? '' : 's'}: ${unknownFields.map((k) => (/^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(k) ? k : '(a field of another shape)')).join(', ')} — this hub does not read ${unknownFields.length === 1 ? 'it' : 'them'}; nothing was created (an older hub than the CLI? update VibeSpace)`, code: 'unknown_field', fields: unknownFields.filter((k) => /^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(k)) });
   if (!spec.cmd && b.action && b.action.type === 'spawn-task') { /* notify-cron / cron shapes carry cmd inside action */ }
   else if (!spec.cmd && b.action && b.action.type === 'notify') { /* pure notify cron */ }
   else if (!spec.cmd) return res.status(400).json({ error: 'cmd required' });
+  // B-70f9: A JOB RUNS ON THE HUB'S MACHINE. A conversation on ANOTHER machine (its session's host) asking for a folder the hub's
+  // machine does not have is refused NOW, by name — src/server/job-where.js (a task's folder or a schedule's task's; the blocked-path
+  // door first, one bounded stat off the loop; a relative folder refused). A check that throws is said — never a request left open
+  const hubMachine = os.hostname();
+  let where;
+  try { where = await jobWhere({ body: b, session: a.session, hubMachine }); }
+  catch (e) { return res.status(500).json({ error: `the folder check failed: ${(e && e.message) || e} — nothing was created`, code: 'where-failed', machine: hubMachine }); }
+  if (!where.ok) return res.status(where.code === 'folder-blocked' ? 503 : 400).json({ error: where.error, code: where.code, machine: hubMachine });
   const r = a.jm.create(spec, a.caller);
   if (r.error) return res.status(400).json({ error: r.error });
   // Tell the creating agent up front whether ITS conversation will hear back
@@ -2731,8 +2790,8 @@ app.post('/api/agent/jobs', (req, res) => {
   // resume / off, with the deciding layer named.
   let notify = null;
   try { notify = a.jm.notifyPreview(a.jm.jobs.get(r.job.id)); } catch { }
-  res.json({ success: true, job: jobWhen(r.job), renamed: r.renamed, notify, ...(r.vaultWait ? { vaultWait: r.vaultWait } : {}) });   // lane vault-job-road r2: a scheduled job whose fires would wait for their vault values
-});
+  res.json({ machine: hubMachine, where: where.words,  success: true, job: jobWhen(r.job), renamed: r.renamed, notify, ...(r.vaultWait ? { vaultWait: r.vaultWait } : {}) });   // lane vault-job-road r2: a scheduled job whose fires would wait for their vault values
+}));
 app.get('/api/agent/jobs', (req, res) => {
   const a = jobAuth(req, res); if (!a) return;
   // ?archived=1 → the caller's VISIBLE archived one-shots (triage §13 rule 5;
@@ -2784,6 +2843,7 @@ app.get('/api/agent/jobs/:ref', async (req, res) => {
   const mine = a.selfJob ? true : jobModel.isOwner(job, a.caller);
   res.json({
     success: true,
+    machine: os.hostname(),   // B-70f9: a job runs on the hub's machine — the show names it
     job: jobWhen({
       ...jobModel.agentJobView(a.jm.snapshot(job, { tail: Math.min(Number(req.query.tail) || 0, 400), author: mine }), { mine }),   // lane job-notify-user r3: `author` (a notify cron's --text whole for its lineage) · verify r5 F1 (lane peer-census): another lineage's context / command / last line / LOG TAIL through the belt; `progress` (any viewer writes it) for everyone
       mine,
@@ -2803,9 +2863,12 @@ app.post('/api/agent/jobs/:ref/:act', (req, res) => {
     if (arc) return res.status(400).json({ error: `${arc.id} is archived (${arc.archivedWhy || 'terminal'}) — only rm applies; vibespace-job list --archived` });
     return res.status(404).json({ error: NOT_VISIBLE(ref) });
   }
-  const selfActs = ['progress', 'ask', 'announce'];
-  if (a.selfJob && !selfActs.includes(act)) return res.status(403).json({ error: 'a job token may only report progress, ask, or announce' });
-  const needsControl = ['stop', 'start', 'rm', 'announce']; // announce puts text in front of the owner+subscribers — view alone doesn't grant that
+  const selfActs = ['progress', 'ask', 'withdraw', 'announce'];   // B-8bd5: a job withdraws ITS OWN panel
+  if (a.selfJob && !selfActs.includes(act)) return res.status(403).json({ error: 'a job token may only report progress, ask (or withdraw its ask), or announce' });
+  const needsControl = ['stop', 'start', 'restart', 'rm', 'announce']; // announce puts text in front of the owner+subscribers — view alone doesn't grant that
+  // B-8bd5 (its adversarial read r1): the panel is withdrawn only by the one that FILED it — the job itself (its jbt_) or its owner
+  // conversation's lineage; a control grant (--control all) never closes the person's question
+  if (!a.selfJob && act === 'withdraw' && !jobModel.canEdit(job, a.caller)) return jobModel.canView(job, a.caller) ? res.status(403).json({ error: `${job.id}'s question is withdrawn by the job itself or by its owner conversation — never by another conversation, one that holds control included`, code: 'not-the-filer' }) : res.status(404).json({ error: NOT_VISIBLE(ref) });   // 主开发 21:46Z: the refusal names its door
   if (!a.selfJob && needsControl.includes(act) && !jobModel.canControl(job, a.caller)) return res.status(404).json({ error: NOT_VISIBLE(ref) });
   if (!a.selfJob && (act === 'access' || act === 'notify' || act === 'memory')) {
     if (!jobModel.canEdit(job, a.caller)) return res.status(404).json({ error: NOT_VISIBLE(ref) });
@@ -2815,9 +2878,11 @@ app.post('/api/agent/jobs/:ref/:act', (req, res) => {
     let r;
     if (act === 'stop') r = a.jm.stop(job, { force: !!req.body?.force });
     else if (act === 'start') r = a.jm.start(job);
+    else if (act === 'restart') r = a.jm.restart(job);   // B-cac2: stop, wait, start — one answer
     else if (act === 'rm') r = a.jm.rm(job, { stop: !!req.body?.stop, orphan: !!req.body?.orphan });
     else if (act === 'progress') r = a.jm.progress(job, req.body?.text || '');
     else if (act === 'ask') r = a.jm.ask(job, req.body?.panel);
+    else if (act === 'withdraw') r = a.jm.withdrawAsk(job, { self: !!a.selfJob });   // B-8bd5: the filer closes its own ask once its cause is gone (a job's own: no stdin echo)
     else if (act === 'access') {
       for (const k of ['view', 'control']) if (req.body?.[k] && ['session', 'group', 'all'].includes(req.body[k])) job.access[k] = req.body[k];
       a.jm._touch(job); a.jm._save(); r = { ok: true };
@@ -2825,7 +2890,7 @@ app.post('/api/agent/jobs/:ref/:act', (req, res) => {
     }
     else if (act === 'subscribe') r = a.jm.subscribe(job, a.caller, { filter: req.body?.filter });   // canView already proven by findVisible
     else if (act === 'unsubscribe') r = a.jm.unsubscribe(job, a.caller);
-    else if (act === 'announce') r = a.jm.announce(job, req.body?.text); // in-job (jbt_) or any viewer — the watch-job "found something" verb
+    else if (act === 'announce') r = a.jm.announce(job, req.body?.text); // in-job (jbt_) or a holder of CONTROL (needsControl above — view alone never puts text in front of the owner) — the watch-job "found something" verb
     else if (act === 'notify') {
       // owner-only post-create override (2.344.2 — field report: changing
       // notify used to require rm + recreate)

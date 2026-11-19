@@ -246,14 +246,23 @@ function readLen(t, i) {
  *  frames (innermost first, {file, …}) → the same frames without the innermost run of the instrument's own frames
  *  (src/server/loop-blame.js, src/server/sync-fs-witness.js) and the node frames among them, so the time lands on the
  *  JavaScript CALLER that made the call, as for any native call. A stack that is the instrument's alone (its own work, a
- *  timer of the witness) is kept whole: that time IS the instrument's.
+ *  timer of the witness) stays the instrument's: named by its own frame (the witness's refresh), never the wrapper's line.
  *  B-7c97 (the owner's incident inc-mwlgtu4o-uosz: «loop-blame.js line 64» was the third hold site of an hour, 28.4 s in 4
  *  holds over five): a V8 BUILT-IN frame (no file, not eval'd) inside that innermost run is passed like a node frame — a
  *  sample answered in a built-in under realpathSync under the wrapper («(built-in) ← realpathSync (node:fs) ← wrapped
- *  (loop-blame)») kept the whole stack, so the WRAPPER named the hold and the caller of the call was lost. */
+ *  (loop-blame)») kept the whole stack, so the WRAPPER named the hold and the caller of the call was lost.
+ *  THE RUN THAT REACHES THE STACK'S END (主开发 2026-11-18 12:20Z, the owner's incident row the readers of B-7c97 left open):
+ *  no caller of ours lies outside the instrument — a wrapped call made by node itself (its module loader), or an answer cut
+ *  inside the runtime. The measuring wrapper never names it: the outermost loop-blame frame and every instrument frame inside
+ *  it (the hook, its clock) are dropped, everything else is kept — the runtime's frames, and an instrument frame OUTSIDE the
+ *  wrapper (the witness's own timer that called through it names itself). What is left with no frame of ours says so
+ *  (`framesAnswer`: «… with no frame of ours below it: <the runtime's top frames>», `noOurs`). loop-blame.js runs no work of
+ *  its own (no timer): its frames are the wrapper's and what the wrapper calls. A run with no loop-blame frame is the
+ *  instrument's own work and is kept whole. */
 // B-403e: + src/run-reads.js — its process-wide write wrappers and its asks sit between a caller and the fs call: the hold is
 // the caller's (the pass, a record, a broadcast, a store's write), exactly as before the helper existed
 const INSTRUMENT_FILES = Object.freeze(['src/server/loop-blame.js', 'src/server/sync-fs-witness.js', 'src/run-reads.js']);
+const WRAPPER_FILE = 'src/server/loop-blame.js';   // the measuring wrapper (its frames: the wrapper's and what the wrapper calls)
 /** the capture's frame for time ASLEEP in a wrapped synchronous fs call (the watchdog read the call from the live slot at
  *  its post): `fn` = the call (one of loop-blame's SYNC_FNS), never a path */
 const SYNC_FS_URL = 'vibespace:sync-fs';
@@ -267,7 +276,24 @@ function instrumentTrim(raw, root) {
   const ours = (f) => f.startsWith(r) && INSTRUMENT_FILES.includes(f.slice(r.length));
   let i = 0, n = 0;
   for (; i < raw.length; i++) { const f = fileOf(raw[i]); if (ours(f)) n++; else if (!/^node:/.test(f) && !(f === '' && !(raw[i] && raw[i].evalish))) break; }
-  return n && i < raw.length ? raw.slice(i) : raw;
+  if (!n) return raw;
+  if (i < raw.length) return raw.slice(i);
+  // the run reaches the stack's end: drop the wrapper (the outermost loop-blame frame) and the instrument frames inside it
+  let w = -1;
+  for (let j = 0; j < raw.length; j++) if (fileOf(raw[j]) === r + WRAPPER_FILE) w = j;
+  if (w < 0) return raw;
+  // a runtime frame at or inside the wrapper stays only when the WRAPPER itself called it (the wrapped call's own work: the
+  // first instrument frame outward of it is the wrapper); one called by another instrument function — its clock (perfNow →
+  // performance.now), its hook (liveBegin → encodeInto) — goes with them (the cut-stack reader's S1)
+  const left = [];
+  for (let j = 0; j < raw.length; j++) {
+    if (j > w) { left.push(raw[j]); continue; }
+    if (ours(fileOf(raw[j]))) continue;
+    let k = j + 1;
+    while (k <= w && !ours(fileOf(raw[k]))) k++;
+    if (k === w) left.push(raw[j]);
+  }
+  return left.length ? left : raw;
 }
 function sampleOf(text, root, isRepoFile = null, lineOf = null, isInternal = null) {
   if (typeof text !== 'string') return { form: 'none', frames: [] };
@@ -396,7 +422,7 @@ function nodeOwnOf(frames) {
   return { module: moduleOf((owner || run[0]).file), driver: end < frames.length && frames[end] ? frames[end] : null };
 }
 /** PURE: the words of a sample of node's own code */
-const nodeOwnWords = (o, cut = false) => `${NODE_OWN} \u2014 ${o.module}${o.driver ? `, driven by ${frameText(o.driver)}` : cut ? ', the stack cut before any frame of ours' : ', with no frame of ours below it'}`;
+const nodeOwnWords = (o, cut = false, chain = '') => `${NODE_OWN} \u2014 ${o.module}${o.driver ? `, driven by ${frameText(o.driver)}` : (cut ? ', the stack cut before any frame of ours' : ', with no frame of ours below it') + (chain ? `: ${chain}` : '')}`;
 /** PURE: a sample's frames (+ `cut`: the answer was SAMPLE_FRAMES long) → the watchdog's answer {kind 'js', words, key,
  *  keyWords, empty | form}: the delivery is the empty answer; node's own code says so (above); any other sample its
  *  chain, keyed by its first repo frame */
@@ -404,8 +430,13 @@ function framesAnswer(frames, form, cut = false) {
   if (isDelivery(frames)) return { kind: 'js', words: WORDS.between, key: KEYS.between, keyWords: KEYS.between, empty: true };
   const o = nodeOwnOf(frames);
   if (o && o.driver) return { kind: 'js', words: nodeOwnWords(o), key: frameLoc(o.driver), keyWords: frameText(o.driver), form, module: o.module };
-  if (o) { const k = `(${NODE_OWN} \u2014 ${o.module})`; return { kind: 'js', words: nodeOwnWords(o, cut), key: k, keyWords: k, form, module: o.module }; }
-  return { kind: 'js', words: chainWords(frames), key: keyFrame(frames), keyWords: keyWords(frames), form };
+  // no frame of ours (主开发 12:20Z): the words carry the runtime's own top frames, and the answer is marked `noOurs` — the
+  // hold's fold and the day report count it apart. `noOurs` = the stack holds the runtime's own frames and built-ins ONLY (it
+  // ended in the runtime, or was cut there): a frame outside the repo (a plugin, 12:37Z law b) or a not-loaded id names the
+  // hold by its own words and is never folded into «(no frame of ours)»
+  if (o) { const k = `(${NODE_OWN} \u2014 ${o.module})`; return { kind: 'js', words: nodeOwnWords(o, cut, chainWords(frames)), key: k, keyWords: k, form, module: o.module, noOurs: true }; }
+  const runtimeOnly = frames.length > 0 && frames.every((f) => f && (f.cls === 'builtin' || runtimeOwn(f)));
+  return { kind: 'js', words: chainWords(frames), key: keyFrame(frames), keyWords: keyWords(frames), form, ...(runtimeOnly ? { noOurs: true } : {}) };
 }
 
 // ── the scheduler's facts ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -586,13 +617,13 @@ function askOf({ postedAt = null, answeredAt = null, state = 'unknown', kernel =
   if (Number.isFinite(holdEnd) && Number.isFinite(postedAt) && postedAt >= holdEnd) return { cls: 'outside' };
   const ranInside = Number.isInteger(beat) && beat !== -1 && beat === beat0;
   const framed = !!(answer && answer.kind === 'js' && !answer.empty);
-  const after = framed && ranInside && !answer.deep && !answer.failed && answer.key !== KEYS.unreadable ? { words: answer.words, key: answer.key, keyWords: answer.keyWords, ...(answer.module ? { module: answer.module } : {}) } : null;
+  const after = framed && ranInside && !answer.deep && !answer.failed && answer.key !== KEYS.unreadable ? { words: answer.words, key: answer.key, keyWords: answer.keyWords, ...(answer.noOurs ? { noOurs: true } : {}), ...(answer.module ? { module: answer.module } : {}) } : null;
   // B-1409: the stat read said asleep and the syscall read, a moment later, «running» — two reads that disagree say so,
   // never the self-contradicting «asleep: on the CPU»
   if (state === 'asleep') { const w = kernel === RUNNING_KERNEL_WORDS ? WOKE_WORDS : `asleep: ${kernel || 'in a call'}`; return { cls: 'kernel', words: w, key: `(${w})`, keyWords: `(${w})`, after }; }
   if (state === 'stopped') return { cls: 'stopped', words: ASK_WORDS.stopped, key: '(stopped)', keyWords: '(stopped)', after };
   const fast = !!answer && answer.kind === 'js' && (answer.deep === true || (Number.isFinite(answeredAt) && Number.isFinite(postedAt) && answeredAt - postedAt <= jsFastMs));
-  if (fast) return !ranInside || !framed ? { cls: 'end' } : { cls: 'js', words: answer.words, key: answer.key, keyWords: answer.keyWords };
+  if (fast) return !ranInside || !framed ? { cls: 'end' } : { cls: 'js', words: answer.words, key: answer.key, keyWords: answer.keyWords, ...(answer.noOurs ? { noOurs: true } : {}) };
   // round 5 (smaller 3): stat R is «running OR runnable» — only a scheduler window covering the hold tells the two apart
   if (state === 'running' && !windowed) return { cls: 'runnable', words: ASK_WORDS.runnable, key: '(running or waiting for a CPU)', keyWords: '(running or waiting for a CPU)', after };
   if (state === 'running') return { cls: 'native', words: ASK_WORDS.native, key: '(native)', keyWords: '(native)', after };
@@ -774,7 +805,14 @@ function foldHold(h) {
   const cKey = starting ? CHILD_START_KEY : CHILD_WAIT_KEY, cWords = starting ? CHILD_START_WORDS : CHILD_WAIT_WORDS;
   const frameKey = spawnBy ? `${h.afterKey} (${cKey})` : top ? top.key : h.afterKey ? `${h.afterKey} (after)` : !samples.length ? '(not sampled)' : '(no JavaScript frame)';
   const frame = spawnBy ? `${cWords} \u2014 ${h.afterKeyWords || h.afterKey}` : top ? top.words : h.afterKey ? `${h.afterKeyWords || h.afterKey} (after)` : frameKey;
-  return { verdict: v, frame, frameKey, js, none, n, gc, inside: samples.length, parts, interleaved };
+  // NO FRAME OF OURS (主开发 12:20Z): the row's frame came from answers with no frame of the tree — counted apart by the day
+  // report. ONLY under the verdict «JavaScript», the one verdict a JavaScript row stands for (its second reader's S1): a hold
+  // the scheduler, the kernel, a collection, native code or two parts judged keeps that verdict as its cause, as the release
+  // booked it — so an «(after)» row, read only when no ask found JavaScript, never marks one. And EVERY sample of the row says
+  // so (S2): a plugin's stack topped by a built-in shares the key «(built-in)» with a stack of built-ins alone
+  const jsTop = topOf('js');
+  const noOurs = v === V.js && !!jsTop && samples.every((x) => clsOf(x) !== 'js' || x.key !== jsTop.key || x.noOurs === true);
+  return { verdict: v, frame, frameKey, js, none, n, gc, inside: samples.length, parts, interleaved, noOurs };
 }
 /** B-7c97: the words and key of a hold asleep while starting a child process (fork + exec: the parent waits on the exec-status
  *  pipe) — and of one asleep for a WHOLE synchronous child run (spawnSync / execFileSync: any other wait channel) */

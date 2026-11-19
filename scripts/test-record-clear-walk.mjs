@@ -42,7 +42,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePorts, scratch, vncEnv } from './scratch.mjs';
+import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const VNC_ENV = await vncEnv();
 const require = createRequire(import.meta.url);
@@ -50,9 +51,9 @@ const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 const T0 = Date.now();
 const [PORT, SVC_PORT] = await freePorts(2);
-const wt = scratch('rc-walk-wt');
-const fakeHome = scratchHome('rc-walk-home', fs);
-const stubDir = scratch('rc-walk-stub');
+const root = mintRoot('rc-walk-wt'), wt = path.join(root, 't');
+const fakeHome = path.join(root, 'home'); for (const d of ['.claude/projects', '.claude/sessions', '.config', '.vibespace']) fs.mkdirSync(path.join(fakeHome, d), { recursive: true });
+const stubDir = path.join(root, 'stub');
 fs.mkdirSync(stubDir, { recursive: true });
 const CWD = path.join(fakeHome, 'proj');
 const CTX = path.join(fakeHome, 'ctx');
@@ -83,7 +84,6 @@ const W = 'T-260928-work', W2 = 'T-260928-side', WX = 'T-260928-other';
 const PASSWORD = 'walk-pw-' + process.pid;
 
 // ── the worktree ──
-try { execSync('git worktree prune', { cwd: repo, stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js', 'package.json', path.join('data', 'bin'), 'docs']) {
   fs.rmSync(path.join(wt, f), { recursive: true, force: true });
@@ -238,19 +238,13 @@ process.stdin.on('end', () => process.exit(0));
 `, { mode: 0o755 });
 // `claude` HIDDEN from PATH: every PATH dir that holds a `claude` is dropped (the stub is named by CLAUDE_CMD)
 const PATH_NO_CLAUDE = (process.env.PATH || '').split(':').filter((d) => { try { return d && !fs.existsSync(path.join(d, 'claude')); } catch { return true; } }).join(':');
-const JOURNAL = path.join(stubDir, 'server-journal.log');
-const journalFd = fs.openSync(JOURNAL, 'w');
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PATH: PATH_NO_CLAUDE, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, CODEX_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: PASSWORD, ANTHROPIC_API_KEY: '', ANTHROPIC_AUTH_TOKEN: '' }, stdio: ['ignore', journalFd, journalFd] });
+const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, PATH: PATH_NO_CLAUDE, HOME: fakeHome, CLAUDE_CMD: stubPath, CODEX_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: PASSWORD, ANTHROPIC_API_KEY: '', ANTHROPIC_AUTH_TOKEN: '' } });
 let cleaned = false;
 const cleanup = () => {
   if (cleaned) return; cleaned = true;
-  try { srv.kill('SIGKILL'); } catch {}
-  for (const root of [wt, fakeHome, stubDir]) { try { endRootedProcesses(root); } catch {} }
-  if (!process.env.VS_KEEP) for (const d of [wt, fakeHome, stubDir]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
-  try { execSync('git worktree prune', { cwd: repo, stdio: 'ignore' }); } catch {}
+  // the tree, the home and the stub live in the helper's root: its end removes them (the worktree through git)
 };
 process.on('exit', cleanup);
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
 for (let i = 0; i < 120; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/login`, { method: 'POST' }); break; } catch { await sleep(250); } }
 
 // ── the owner's cookie (sign-in ON) ──
@@ -545,7 +539,7 @@ await turn('second turn');
   check('…and the declared holders are exactly the group log and the run logs (the clear withholds both from every reader)', rel.some((f) => f.startsWith('data/channels/msgs/groups/')) && rel.some((f) => f.startsWith('data/job-logs/')), rel);
 }
 // the server's own journal: ids only
-{ const j = fs.readFileSync(JOURNAL, 'utf8'); const lines = j.split('\n').filter((l) => has(l)); check('the server journal carries no word (the [clear] lines name ids only)', !lines.length, lines.slice(0, 5)); check('…and it DID write the [clear] receipts', /\[clear\] (activity|todo|status|job|group-message)/.test(j), j.split('\n').filter((l) => l.includes('[clear]')).slice(0, 3)); }
+{ const j = hub.log(); const lines = j.split('\n').filter((l) => has(l)); check('the server journal carries no word (the [clear] lines name ids only)', !lines.length, lines.slice(0, 5)); check('…and it DID write the [clear] receipts', /\[clear\] (activity|todo|status|job|group-message)/.test(j), j.split('\n').filter((l) => l.includes('[clear]')).slice(0, 3)); }
 // verify r8 ③ ②: an incident captured AFTER the clear (its server half copies the console ring — the journal) and the
 // published service's forward (relabelled by the door) carry no word
 { const inc = await raw('/api/incident', { method: 'POST', body: { note: 'walk after the clear', rings: {}, snapshot: {} } });
@@ -579,7 +573,7 @@ console.log('\n§6 THE SIGN-IN ROAD: a code typed into the sign-in card reaches 
   check('§6 no answer of the sign-in routes holds the typed code (start, code, GET after the death)', !holds(st.text) && !holds(sent.text) && !holds(g.text), { st: holds(st.text), sent: holds(sent.text), get: g.text.slice(0, 300) });
   const seen = frames.slice(f0).filter((f) => f.type === 'claude-signin');
   check(`§6 no claude-signin broadcast holds it (${seen.length} frames)`, seen.length > 0 && !seen.some(holds), seen.filter(holds).slice(0, 2));
-  afterStop.push({ name: '§6 … nor any file under data/ or HOME, nor the server journal (the code reached the CLI only)', v: SW, also: () => !fs.readFileSync(JOURNAL, 'utf8').includes(SW) });   // item 7 (store-writer follow-up): read after the stop
+  afterStop.push({ name: '§6 … nor any file under data/ or HOME, nor the server journal (the code reached the CLI only)', v: SW, also: () => !hub.log().includes(SW) });   // item 7 (store-writer follow-up): read after the stop
   await raw(`/api/accounts/${aid}`, { method: 'DELETE' });
 }
 
@@ -607,7 +601,7 @@ console.log('\n§7 THE PASTE ROAD: a value pasted into a paste request reaches i
   check(`§7 no probe's answer holds the pasted value (${PROBES.length} probes)`, answers.length === 0, answers);
   const seen = frames.slice(f0);
   check(`§7 no broadcast holds it (${seen.length} frames — the For-you snapshot and the integration's masked view among them)`, seen.length > 0 && !seen.some((f) => holds(f)), seen.filter((f) => holds(f)).slice(0, 2));
-  afterStop.push({ name: '§7 … nor any file under data/ or HOME (sealed in the integration store), nor the journal, nor the stub\'s stdin', v: PV, also: () => !fs.readFileSync(JOURNAL, 'utf8').includes(PV) && !stdinLog().includes(PV) });   // item 7 (store-writer follow-up): read after the stop
+  afterStop.push({ name: '§7 … nor any file under data/ or HOME (sealed in the integration store), nor the journal, nor the stub\'s stdin', v: PV, also: () => !hub.log().includes(PV) && !stdinLog().includes(PV) });   // item 7 (store-writer follow-up): read after the stop
   // the request's item is the record: it holds the agent's words (never the value) — the owner's clear takes them
   const items = ((await raw('/api/user-todos')).json || {}).todos || {};
   const it = [...(items.open || []), ...(items.resolved || [])].find((x) => x && x.action && x.action.requestId === rid);
@@ -625,8 +619,8 @@ console.log('\nitem 7: §6\'s and §7\'s file censuses, after the server\'s stop
 {
   try { wsc.close(); } catch {}
   const t0s = Date.now();
-  const exited = srv.exitCode !== null || srv.signalCode !== null ? { code: srv.exitCode, signal: srv.signalCode, before: true }
-    : await new Promise((res) => { const to = setTimeout(() => res(null), 60000); srv.once('exit', (code, signal) => { clearTimeout(to); res({ code, signal }); }); try { srv.kill('SIGTERM'); } catch {} });
+  const exited = hub.child.exitCode !== null || hub.child.signalCode !== null ? { code: hub.child.exitCode, signal: hub.child.signalCode, before: true }
+    : await new Promise((res) => { const to = setTimeout(() => res(null), 60000); hub.child.once('exit', (code, signal) => { clearTimeout(to); res({ code, signal }); }); hub.stop({ signal: 'SIGTERM', hubOnly: true }); });   // the hub alone, by its identity
   const flushed = !!exited && !exited.before && exited.code === 0;
   check(`the server STOPPED on SIGTERM through its shutdown (exit 0 — the exit flush ran): ${exited ? `${exited.before ? 'it had already exited, ' : ''}exit ${exited.code}${exited.signal ? ` (${exited.signal})` : ''} after ${Date.now() - t0s} ms` : 'NOT EXITED within 60 s'}`, flushed, exited);
   for (const a of afterStop) {

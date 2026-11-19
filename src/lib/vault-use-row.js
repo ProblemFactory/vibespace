@@ -68,15 +68,19 @@ const windowWords = (s) => `${t('any destination')} · ${s.expired ? t('expired'
  *  had not swept it yet — a restart or a lock inside the hour drops the hour-end prune) is `pruned`: sent with no scope, the
  *  hub prunes it (one it still holds LIVE it keeps) — never a refusal; `refused` = nothing to send and no window (the dialog
  *  names that member).
+ *  B-f212 (r11's second follow-up): `endFrom` = the instant a chosen end counts from — the dialog pins it at the Save that
+ *  LANDED (before one: the press's own instant), so a repeated Save (the row landed, the policy did not) posts the SAME ends,
+ *  never the row again with later ones; a Save that CHANGES the row counts from its own press (r13); `now` still judges what
+ *  has ended.
  *  → { scopes, fresh: [index of each new scope], kept: [{kind: 'window', until}], pruned, refused } */
 const KEEP_DEFAULT = '30d';
-export function saveScopesOf({ was = null, hosts = [], cmds = [], endId = 'keep', now = Date.now() } = {}) {
+export function saveScopesOf({ was = null, hosts = [], cmds = [], endId = 'keep', now = Date.now(), endFrom = now } = {}) {
   const wasSc = was ? scopesOfM(was) : [];
   const ended = (s) => !!s.expired || (Number(s.until) > 0 && Number(s.until) <= now);
   const live = wasSc.filter((s) => !ended(s) && s.kind !== 'window'), finite = live.map((s) => Number(s.until)).filter((u) => u > 0);   // r7: a 1-hour window is no «now» a new host keeps
-  const keepNew = !live.length ? now + (ENDS.find(([id]) => id === KEEP_DEFAULT) || [])[1] : finite.length ? Math.min(...finite) : null;
+  const keepNew = !live.length ? endFrom + (ENDS.find(([id]) => id === KEEP_DEFAULT) || [])[1] : finite.length ? Math.min(...finite) : null;
   const endMs = (ENDS.find(([id]) => id === endId) || [])[1];
-  const endFor = (s0) => (endId === 'keep' ? (s0 ? (Number(s0.until) > 0 ? Number(s0.until) : null) : keepNew) : endMs ? now + endMs : null);
+  const endFor = (s0) => (endId === 'keep' ? (s0 ? (Number(s0.until) > 0 ? Number(s0.until) : null) : keepNew) : endMs ? endFrom + endMs : null);
   const cmdKey = (c) => JSON.stringify([c.program, preOf(c), c.arg == null ? null : c.arg, c.sha || null, c.psha || null]);
   const scopes = [], fresh = [];
   for (const host of hosts) {
@@ -167,6 +171,7 @@ export function useExtras(row, { app = null, refresh = () => {} } = {}) {
   const host = el('div', 'vw-use-host');
   const useB = el('button', 'vw-btn vw-use-grant', t('Who may use it…'));
   useB.type = 'button';
+  const ownTitle = t('Share it: let another conversation or a Task Group run commands with it for the hosts you name. Another host is refused — an agent\'s own value goes only where you say.');   // B-bc3b: an agent's OWN entry (no card for another host: it is refused)
   useB.title = t('Let a conversation, a Task Group or all agents run commands with it for the hosts you name — no card each time. Another host still asks you.');
   let cur = row;
   useB.onclick = () => showUseGrantDialog(cur, { app, refresh });
@@ -174,7 +179,8 @@ export function useExtras(row, { app = null, refresh = () => {} } = {}) {
     cur = r;
     host.textContent = '';
     const u = (r && r.run && r.run.use) || null;
-    useB.hidden = !!(u && u.own);   // lane vault-standing-request r2 (MAJOR 3): an agent's OWN entry shows the standing grants it holds (chips + ✕) — nobody else may use it, so there is no «Who may use it…» to add with
+    if (u && u.own) useB.title = ownTitle;
+    useB.hidden = false;   // lane vault-standing-request r2 (MAJOR 3): an agent's OWN entry shows the standing grants it holds (chips + ✕); B-bc3b: and «Who may use it…» — the owner shares it with another conversation or a Task Group (the run door admits them only as the row says)
     if (!u) return;
     if (u.unknown) { host.append(el('div', 'vw-use-bad', t('Who may use it could not be read — it is refused as it is (never read wider). Save it again to repair it.'))); return; }
     const live = (u.to || []).filter(Boolean);
@@ -251,6 +257,12 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   // the row as a Save LANDED it (`landedRow`: the hub's answer names it — null for an older hub's answer: every next Save then
   // posts the row whole); `held` = its 除了 as picker keys (r10)
   let snap = { to: members, except: u.except || [] }, held = stored.except;
+  // B-f212: the instant a chosen end counts from — the press's own now, then the Save that LANDED (a repeated Save posts the same
+  // ends, never later ones; the read: pinned at the open, a dialog left open an hour posted «8 hours» as seven, a day as one past).
+  // r13: the pin holds only while the OWNER'S inputs (who, 除了, the hosts, the end) are what landed — planNow, for the preview and
+  // the Save alike
+  let endPin = null, saveAt = null, landedInputs = null;
+  const endsFrom = () => (saveAt != null ? saveAt : endPin != null ? endPin : Date.now());
   let picker = null;
   // the unsaved guard (test-dialog-unsaved-census): who, the hosts and the end as the dialog opened — a close with a change asks
   let start = null, saveNow = () => false;
@@ -259,14 +271,14 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
     unsaved: { isDirty: () => start !== null && stateOf() !== start, save: () => saveNow() } });
   if (raised) return null;   // raised: the same entry's «Who may use» form, as it was (int361, dialog-yield §103 r3: key = the entry)
   let ownBox = null, hostsIn = null, endSel = null, polIn = null, previewNow = () => {};
-  body.append(el('div', 'vw-ak-hint', t('They run commands with it — vibespace-vault run — for the hosts below with no card each time; they never see it. Another host, or a command whose destination cannot be told (a shell, a script), still asks you.')));
+  body.append(el('div', 'vw-ak-hint', u.own ? t('They run commands with it — vibespace-vault run — for the hosts below with no card each time; they never see it. Another host, or a command whose destination cannot be told, is refused: an agent\'s own value goes only where you say.') : t('They run commands with it — vibespace-vault run — for the hosts below with no card each time; they never see it. Another host, or a command whose destination cannot be told (a shell, a script), still asks you.')));   // B-bc3b: an agent's own entry — another host is REFUSED there, never a card
   picker = principalPicker({ items: () => [...roster(), ...extra.filter((x) => !roster().some((r) => r.key === x.key))], app, multi: true, selected: stored.selected, placeholder: t('Search sessions and groups…'), label: t('Who may use it'), emptyText: t('No agent session is running'), everyone: { key: EVERYONE_KEY }, except: { selected: stored.except, extra, onChange: () => previewNow() }, onChange: () => previewNow() });
   body.append(el('div', 'vw-ak-sec', t('Who')), picker.el);
   // THE HOSTS: one list for the members this save writes; the entry's own («the hosts it was stored for») when it has them
   const common = (() => { if (!members.length) return null; const k = JSON.stringify(members[0].hosts || []); return members.every((m) => JSON.stringify(m.hosts || []) === k) ? members[0].hosts || [] : null; })();
   body.append(el('div', 'vw-ak-sec', t('For which hosts')));
   // lane vault-standing-request (B-eba2 — the owner: 「主机是什么东西？我该怎么填」): what a host IS, said where it is typed
-  body.append(el('div', 'vw-ak-hint vw-use-hosts-what', t('A host is where a command connects to with it — e.g. api.openai.com for an API key, 192.168.1.1 for a router. A program whose destination VibeSpace cannot read (a script) is allowed by its command instead, from its run card.')));
+  body.append(el('div', 'vw-ak-hint vw-use-hosts-what', u.own ? t('A host is where a command connects to with it — e.g. api.openai.com for an API key, 192.168.1.1 for a router. Another conversation sends an agent\'s value only to the hosts you name here; a command whose destination cannot be told is refused.') : t('A host is where a command connects to with it — e.g. api.openai.com for an API key, 192.168.1.1 for a router. A program whose destination VibeSpace cannot read (a script) is allowed by its command instead, from its run card.')));   // B-bc3b (the read): an agent's own entry — no card for a grantee
   if (entryHosts.length) {
     const lab = el('label', 'vw-ak-pick vw-use-own');
     ownBox = el('input'); ownBox.type = 'checkbox';
@@ -282,7 +294,7 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   // «让 agent 自己申请» (B-eba2): right under the field the owner could not fill — the agent can ask for exactly this grant, one card to allow
   const askAgent = el('div', 'vw-ak-hint vw-use-ask-agent');
   askAgent.append(el('b', null, t('Not sure what to fill in? Let the agent ask.')), document.createTextNode(' ' + t('It asks with vibespace-vault request {ref} --standing (--host … or --command …), and you get ONE card with exactly this grant to allow.', { ref: u.ref || 'vault://…' })));
-  body.append(askAgent);
+  if (!u.own) body.append(askAgent);   // B-bc3b (the read): an agent's own entry — another conversation's --standing ask is refused there (use_not_granted), its own needs none
   const syncOwn = () => { hostsIn.hidden = !!(ownBox && ownBox.checked); };
   if (ownBox) { ownBox.onchange = syncOwn; syncOwn(); }
   // THE END
@@ -331,7 +343,7 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
       const was = had.get(pkOf(p));
       const h = hosts.length ? hosts : was ? (was.hosts || []) : [];
       const cmds = was && Array.isArray(was.commands) ? was.commands : [];   // lane vault-standing-request: a member's command shapes ride the Save unchanged
-      const plan = saveScopesOf({ was, hosts: h, cmds, endId: endSel.value });   // r8: no window in it — the hub keeps the live one (`kept`)
+      const plan = saveScopesOf({ was, hosts: h, cmds, endId: endSel.value, endFrom: endsFrom() });   // r8: no window in it — the hub keeps the live one (`kept`); B-f212: the ends from the press (then the first landed Save)
       // r9 (主开发's acceptance of r8, MINOR C): a member whose only scope is an ENDED 1-hour window the hub has not swept yet is
       // sent with none (`plan.pruned` — the hub prunes it); never a refusal for a scope the hub failed to sweep. A refusal that
       // remains names the member.
@@ -342,8 +354,18 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
     const removed = exceptRemovedOf(snap ? snap.except : u.except || [], pick.except);   // r10: every exception this Save takes away — said, and named to the hub
     return { to, fresh, kept, gone, pick, removed, changed: !snap || rowChanged(snap, { to, except: pick.except }) };
   };
+  // r13 (the readers of B-f212): the owner's own inputs — a change the hub made (a row answered without `use`, a 1-hour window
+  // that ended meanwhile) is no reason to count the ends anew
+  const inputsOf = () => JSON.stringify([picker ? picker.selected().slice().sort() : [], picker ? picker.except({ held }).slice().sort() : [], ownBox ? ownBox.checked : null, hostsIn ? hostsIn.value.trim() : '', endSel ? endSel.value : '']);
+  // the plan as THIS press would post it: the ends from the landed pin; a Save whose inputs differ from what landed counts from now
+  const planNow = () => {
+    saveAt = endPin != null ? endPin : Date.now();
+    let p = planOf();
+    if (endPin != null && !p.error && p.changed && inputsOf() !== landedInputs) { saveAt = Date.now(); p = planOf(); }
+    return p;
+  };
   const drawPreview = () => {
-    let plan = null; try { plan = planOf(); } catch { plan = null; }
+    let plan = null; try { plan = planNow(); } catch { plan = null; }   // r13: the preview says what the Save would post
     preview.textContent = '';
     if (!plan || plan.error || !(plan.to.length || plan.removed.length)) { preview.hidden = true; return; }
     preview.hidden = false;
@@ -369,11 +391,16 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
     const lu = r && r.use && Array.isArray(r.use.to) ? r.use : null;
     snap = lu ? { to: lu.to.filter(Boolean), except: Array.isArray(lu.except) ? lu.except : [] } : null;
     held = rowToPick({ to: [], except: snap ? snap.except : sent }, picker.knownRows(), pickWords()).except;
+    // B-f212 (r11's first follow-up): a member the hub SWEPT at this Save (an ended 1-hour window it pruned) leaves the picker
+    // too — kept there, the next Save posted it as a member new to the row and asked for its hosts
+    if (lu) picker.setSelected(rowToPick({ to: snap.to, except: [] }, picker.knownRows(), pickWords()).selected);
     start = stateOf(polWas);
   };
   async function doSave() {
     err.textContent = '';
-    const plan = planOf();
+    // B-f212: every end of this press's plan counts from the landed pin; r13: a Save the OWNER changed since (another end, a member
+    // added, hours later in the same open dialog) counts from THIS press, never a past one
+    const plan = planNow();
     if (plan.error) { err.textContent = plan.error; return false; }
     const { to, pick, removed, changed } = plan;
     const polWas = (u.policy && u.policy.text) || '', polNow = polIn.value.trim();
@@ -384,7 +411,7 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
     if (changed) {
       r = await send();
       if (r && r.code === 'reveal_needs_password') { forgetReveal(); if (!(await askRevealPassword())) return false; r = await send(); }
-      if (r && r.ok) { rowSaved = true; landedRow(r, pick.except, polWas); }
+      if (r && r.ok) { rowSaved = true; landedRow(r, pick.except, polWas); endPin = saveAt; landedInputs = inputsOf(); previewNow(); }   // B-f212: the landed row's instant pins the next Save's ends (r13: every landing moves it, with the inputs it landed); the preview redrawn over the picker as landed (the read's nit: setSelected fires no onChange)
     }
     if (r && r.ok && polNow !== polWas) {   // R4: the policy rides the same Save (a non-empty one asks 验证是你 too)
       const sendP = () => post('/api/vault/use-policy', { id: row.id, text: polNow }, revealLeftMs() ? revealHeaders() : {});

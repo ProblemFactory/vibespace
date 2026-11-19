@@ -107,7 +107,7 @@ console.log('— M1: dtach session SURVIVES a dropped connection (invariant #1) 
   // start a dtach session THROUGH the daemon; drop the whole connection; the
   // dtach session must still be alive to reattach (like restoreSessions).
   const hasDtach = (() => { try { execSync('command -v dtach', { stdio: 'ignore' }); return true; } catch { return false; } })();
-  if (!hasDtach) { console.log('  · dtach not installed — skipping (informational)'); }
+  if (!hasDtach) { console.log('  · SKIP (informational): dtach not installed'); }
   else {
     const sock = path.join(tmp, 'dtach.sock');
     // dtach -c creates+attaches; run a marker shell that stays alive
@@ -267,9 +267,9 @@ if (!fs.existsSync('/proc/self/environ')) {
   //    the same held daemon hands it straight down — the leg can go red
   const bundleSrc = fs.readFileSync(bundle, 'utf8');
   // esbuild re-spells the source line (`...(extra || {})` loses its parens), so
-  // the anchor is a regex over the BUNDLE and the source pin below keeps the
-  // source spelling; both must hit exactly once
-  const ANCHOR = 'const merged = { ...daemonEnv(process.env), ...(extra || {}) };';
+  // the anchor is a regex over the BUNDLE and the source pin (its ANCHOR, in the
+  // fast scripts/test-agentd-session-pins.mjs since B-94d3) keeps the source
+  // spelling; both must hit exactly once
   const BUNDLE_RE = /const merged = \{ \.\.\.daemonEnv\(process\.env\), \.\.\.\(?extra \|\| \{\}\)? \};/g;
   check('the built bundle carries the sanitized spawnEnv base exactly once (patch anchor)', (bundleSrc.match(BUNDLE_RE) || []).length === 1, String((bundleSrc.match(BUNDLE_RE) || []).length));
   const preBundle = path.join(tmp, 'agentd-prefix.js');
@@ -279,15 +279,7 @@ if (!fs.existsSync('/proc/self/environ')) {
   check('③  PRE-FIX CONTROL: the raw `process.env` base hands the held secret to the child (≥ 1 secret line) — the shape the verifier measured on a real claude', c3.secret >= 1, JSON.stringify(c3));
   dm6.stop();
 
-  // wiring pins: the three daemon birth sites + the child base name the sanitizer, and no raw process.env env literal survives in the daemon tier
-  const clientSrc = fs.readFileSync(path.join(repo, 'src/agentd/client.js'), 'utf8').replace(/^\s*\/\/.*$/gm, '');
-  const daemonSrc = fs.readFileSync(path.join(repo, 'src/agentd/agentd.js'), 'utf8').replace(/^\s*\/\/.*$/gm, '');
-  // B-6be2 (lane jobenv-strip-census): the daemon birth also drops the harness credential names — `daemonEnv(process.env, { drop: … })`
-  check('WIRING: _spawnLocal spawns the daemon from daemonEnv(process.env[, { drop }])', /env:\s*\{\s*\.\.\.daemonEnv\(process\.env(?:\)|,\s*\{\s*drop:)/.test(clientSrc));
-  check('WIRING: spawnEnv() merges over daemonEnv(process.env), and the --stdio bridge + the upgrade re-exec are born from it too', daemonSrc.includes(ANCHOR) && (daemonSrc.match(/daemonEnv\(process\.env\)/g) || []).length >= 3);
-  const RAW = /env:\s*(?:process\.env\b|\{\s*\.\.\.process\.env\b)/;
-  check('WIRING: no `env: process.env` / `env: { ...process.env` literal survives in src/agentd/{client,agentd}.js', !RAW.test(clientSrc) && !RAW.test(daemonSrc));
-  check('CONTROL: the raw-literal rule matches the retired spellings', RAW.test('spawn(x, [], { env: { ...process.env, A: 1 } })') && RAW.test('{ detached: true, stdio: "ignore", env: process.env,') && !RAW.test('env: daemonEnv(process.env)') && !RAW.test('env: spawnEnv(msg.env)'));
+  // (the daemon tier's wiring pins — MOVED to the fast scripts/test-agentd-session-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   delete process.env.VIBESPACE_INTEGRATION_FAKE_APIKEY; delete process.env.VIBESPACE_INTEGRATIONS; delete process.env.VS_CANARY_KEEP;
 }
 

@@ -164,8 +164,83 @@ const quiet = { warn() {}, log() {}, error() {} };
   const a = await mk(P_CANCEL, 60000);
   const b = await mk(P_CANCEL, 60000);
   ok(ol.status(a.flowId).cancelled === 'superseded' && ol.status(b.flowId).running === true && ol.runningFor('lark').flowId === b.flowId, 'a second begin() for the same id SUPERSEDES the first (one running flow per id, gmail-sync\'s rule) — and the port moved with it');
-  ol.stopAll();
-  ok(ol.status(b.flowId).cancelled === 'shutdown' && (await portFreed(P_CANCEL)), 'stopAll() releases everything (the shutdown path)');
+  // B-cabe's remainder: stopAll() hands back its servers' own close events — the leg AWAITS them (every connection ended),
+  // then judges «free» by the same bounded re-ask as every release (the .367 mirror's 112/1 cause is still unnamed: the listener
+  // was already gone at close(), so the close event is no proof the port is free — the re-ask stays)
+  const stopped = ol.stopAll();
+  ok(stopped instanceof Promise, 'stopAll() hands back a promise of its servers\' close events (B-cabe)');
+  await stopped;
+  ok(ol.status(b.flowId).cancelled === 'shutdown' && (await portFreed(P_CANCEL)), 'stopAll() releases everything (the shutdown path) — its promise resolved, the port free by the bounded re-ask');
+  // CONTROL of the shape leg (its plant proves itself first: the line it replaces is in the tree): a copy whose stopAll() only
+  // closes (the old shape) hands back nothing to wait on — the «hands back a promise» leg is RED on it (the port leg is not a
+  // control of this change: the listener is gone at close() either way)
+  {
+    const src = fs.readFileSync(path.join(REPO, 'src/oauth-loopback.js'), 'utf8');
+    const NEW = "return Promise.all(sts.map((st) => st.closing || Promise.resolve())).then(() => undefined);";
+    ok(src.includes(NEW), 'B-cabe control: its plant is where it claims (stopAll\'s promise line is in src/oauth-loopback.js)');
+    const MC = mutantCopies('oauth-loopback-stopall', REPO);
+    const OL0 = src.includes(NEW) ? require(MC.write('src/oauth-loopback.js', src.replace(NEW, 'return undefined;'))) : null;
+    for (const c of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 1 })) ok(c.pass, 'tree: ' + c.name, c.pass ? undefined : c.detail);
+    const old = OL0 ? OL0.createOAuthLoopback({ log: quiet }) : null;
+    const handed = old ? old.stopAll() : 'no copy';
+    ok(!!OL0 && !(handed instanceof Promise), 'CONTROL: a copy whose stopAll() only closes (the old shape) hands back no promise — the «hands back a promise» leg is RED on it', String(handed));
+  }
+  // B-cabe's follow-up (the coordinator's 21:59Z (1)): THE DROP has its leg. A keep-alive connection the server still SERVES at
+  // the stop — its response pending (a chain page answers only AFTER its exchange, and the leg holds the exchange) — is the one
+  // close() leaves open (Node ≥ 19's close() ends the IDLE connections itself: an idle one could not make this leg red; what holds
+  // this one is its PENDING RESPONSE — closeIdleConnections skips it on Node 22, the test machine's and the hosted runner's, and 24).
+  // stopAll()'s promise is awaited under a COUNT of loop turns: with the drop it lands inside the count; the control — a copy
+  // without the drop line — does not while the connection is held (the hold then ends, its page is written, its close lands)
+  {
+    const src = fs.readFileSync(path.join(REPO, 'src/oauth-loopback.js'), 'utf8');
+    const DROP = 'if (drop) { try { srv.closeAllConnections?.(); } catch {} }';
+    const TURNS = 50;
+    const turn = () => new Promise((r) => setImmediate(r));
+    const heldStop = async (OLm, port) => {
+      const o = OLm.createOAuthLoopback({ log: quiet });
+      let entered = null, letGo = null;
+      const inExchange = new Promise((r) => { entered = r; }), held = new Promise((r) => { letGo = r; });
+      let f = null, threw = '';
+      try {
+        f = await o.begin({
+          id: 'lark', mode: 'fixed', callbackUrl: `http://127.0.0.1:${port}/lark/cb`, timeoutMs: 60000, chain: { page: 1, total: 2 },
+          buildConsentUrl: ({ redirectUri, state }) => `https://x.example/a?r=${encodeURIComponent(redirectUri)}&state=${state}`,
+          exchange: async () => { entered(); await held; return {}; },
+        });
+      } catch (e) { threw = String(e && e.message); }
+      if (!(f && f.listening === true)) { o.stopAll(); return { listening: false, began: false, early: threw || 'the flow did not listen', within: false, landedTurn: -1 }; }
+      const state = new URL(f.consentUrl).searchParams.get('state');
+      const agent = new http.Agent({ keepAlive: true });
+      const req = http.get({ host: '127.0.0.1', port, path: `/lark/cb?state=${encodeURIComponent(state || '')}&code=held`, agent });
+      let began = false, early = '';
+      const ended = new Promise((r) => {
+        req.on('error', (e) => { if (!began) early = early || String(e && e.message); r(); });   // (after the stop: the drop ends it)
+        req.on('response', (res) => { if (!began) early = early || `answered ${res.statusCode} before its exchange`; res.resume(); r(); });
+      });
+      let turns = 0, landedTurn = -1, cleanup = 0;
+      // the request is IN the server (its exchange began): its response is pending — the connection is not idle. (A request that
+      // ends first — refused, or answered before its exchange — is the wrong road: said, never waited on.)
+      await Promise.race([inExchange.then(() => { began = true; }), ended]);
+      if (!began) { letGo(); o.stopAll(); req.destroy(); agent.destroy(); return { listening: true, began: false, early, within: false, landedTurn: -1 }; }
+      const stopping = o.stopAll();
+      stopping.then(() => { landedTurn = turns; });
+      while (landedTurn < 0 && turns < TURNS) { await turn(); turns++; }
+      letGo();   // the hold ends: the exchange returns and the page is written (on the drop's road the socket is already gone)
+      while (landedTurn < 0 && cleanup < 4000) { await turn(); cleanup++; }   // cleanup only — never the verdict: the control's close lands once its page is written
+      req.destroy(); agent.destroy();
+      return { listening: true, began: true, within: landedTurn >= 0 && landedTurn < TURNS, landedTurn };
+    };
+    const D = await heldStop(OL, P_CANCEL);
+    ok(D.listening && D.began && D.within, `B-cabe THE DROP: a keep-alive connection whose response is pending at the stop is dropped — stopAll()'s promise lands within ${TURNS} loop turns (at turn ${D.landedTurn})`, D.began ? undefined : `the held request never reached its exchange: ${D.early || '?'}`);
+    ok(await portFreed(P_CANCEL), 'B-cabe THE DROP: …and the port is free by the bounded re-ask');
+    ok(src.includes(DROP), 'B-cabe THE DROP control: its plant is where it claims (the drop line is in src/oauth-loopback.js)', src.includes(DROP) ? undefined : 'the anchor of the control «the drop» is not in the source');
+    const MD = mutantCopies('oauth-loopback-drop', REPO);
+    const OLd = src.includes(DROP) ? require(MD.write('src/oauth-loopback.js', src.replace(DROP, '/* the drop cut out (the control) */'))) : null;
+    for (const c of copiesCensus(MD.files, MD.dir, REPO, { minCopies: 1, label: 'drop control: ' })) ok(c.pass, c.name, c.pass ? undefined : c.detail);
+    const C = OLd ? await heldStop(OLd, P_CANCEL) : { listening: false, began: false, within: true, landedTurn: -1 };
+    ok(!!OLd && C.listening && C.began && !C.within, `B-cabe THE DROP CONTROL: a copy without the drop — stopAll()'s promise has NOT landed within ${TURNS} loop turns while the connection is held (landed at ${C.landedTurn < 0 ? 'never, not even in the cleanup after the hold ended' : 'turn ' + C.landedTurn + ', after the hold ended'}) — the drop leg is RED on it`);
+    ok(await portFreed(P_CANCEL), 'B-cabe THE DROP control: …its port is free again (the listener went at close())');
+  }
   // B-cabe PLACED: a listener that closes only once the FIRST probe has answered «held» (the probe's onTry) — a close landing after
   // the leg's probe. ONE probe reads «held» (the old leg's shape, red); the bounded re-ask reads free. NOTE (the adversarial read):
   // release() closes its server synchronously, so the .367 mirror's 112/1 is NOT proven to be this race — the cause stays unnamed

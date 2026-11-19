@@ -251,7 +251,7 @@ try {
     const gone = await new Promise((r) => { proc.on('exit', () => r(true)); setTimeout(() => r(false), 5000); });
     check('killOrphan terminates the orphan', !!kr.ok && gone);
   } else {
-    console.log('  (skipping orphan e2e — /proc is linux-only)');
+    console.log('  · SKIP orphan e2e: /proc is linux-only');
   }
   // ── lane job-publish-stable: a published forward keeps its public NAME, and the protocol probe never races a
   //    service start (the 2026-10-04 incident: a boot-replayed service probed before it listened was republished TCP

@@ -256,7 +256,7 @@ if (fs.existsSync('/proc/self')) {
     'NEGATIVE CONTROL: the pre-fix spelling leaks the SHELL\'s `cannot open …` for that exact input — the noise this fix removed from every machine-wide scan', { stderr: argvBuggy.stderr });
   await new Promise((res) => srv.close(res));
   fs.rmSync(argvDir, { recursive: true, force: true });
-} else { console.log('  · /proc absent — skipping the awk attribution leg'); }
+} else { console.log('  · SKIP the awk attribution leg: /proc absent'); }
 
 // ── 2. LOCAL and REMOTE run the IDENTICAL script ──
 const localDev = fakeDevice('local', { swept: ['111'] });
@@ -730,7 +730,7 @@ if (fs.existsSync('/proc/self')) {
   process.off('SIGTERM', onTerm);
   for (const h of [...holders.map((h) => h.p), rTail, lockWriter, lockStale, ...versFixtures.map(([, p]) => p), ...delFixtures.map(([, p]) => p), ...nlFixtures.map(([, p]) => p), ...capFixtures.map(([, p]) => p)]) { try { h.kill('SIGKILL'); } catch {} }
   fs.rmSync(dir, { recursive: true, force: true });
-} else { console.log('  · /proc absent — skipping the live fd-scan leg'); }
+} else { console.log('  · SKIP the live fd-scan leg: /proc absent'); }
 
 // ── 7. FORK EXCLUSION drift guard (2.284.4, real incident on the dev
 // machine): forking a LIVE conversation ran the sweep against the parent's
@@ -976,7 +976,7 @@ if (fs.existsSync('/proc/self')) {
   coKeeper.kill('SIGKILL');
   coMaster.kill('SIGKILL');
   fs.rmSync(home, { recursive: true, force: true });
-} else { console.log('  · /proc absent — skipping the live codex holder legs'); }
+} else { console.log('  · SKIP the live codex holder legs: /proc absent'); }
 
 // ── 10. ws-create pins: the resume-already-live guard covers codex (functional,
 // real handler instantiation) + every sweep site passes the backend/protect list.
@@ -1136,7 +1136,7 @@ if (fs.existsSync('/proc/self')) {
   const retiredCommIncludes = /comm\.includes\('claude'\)/;
   const retiredCmdlineIncludes = /readFileSync\(`\/proc\/\$\{pid\}\/cmdline`, 'utf-8'\)\.includes\('claude'\)/;
   const retiredCodexArgvRegex = /\(\^\|\\0\|\[\\\/\\s\]\)codex/;
-  const PRE_R3_FACTS = `function pidLooksClaude(pid) {
+  const PRE_R3_FACTS = `function pidLooksClaude(pid) {   // stale-pins: kept — the verbatim pre-r3 source, a retired shape
   try {
     const comm = fs.readFileSync(\`/proc/\${pid}/comm\`, 'utf-8').trim();
     if (comm) return comm.includes('claude') || cmdlineLooksClaude(pid);
@@ -1355,7 +1355,7 @@ if (fs.existsSync('/proc/self')) {
     'and its SYNC twin — the one that gated /api/kill-pid\'s SIGTERM — no longer exists');
   for (const { p } of kprocs) { try { p.kill('SIGKILL'); } catch { } }
   fs.rmSync(kdir, { recursive: true, force: true });
-} else { console.log('  · /proc absent — skipping the kill-path legs'); }
+} else { console.log('  · SKIP the kill-path legs: /proc absent'); }
 
 // ── 15. THE `ps` FALLBACK RUNG — THE NO-/proc HALF NOBODY HAD DRIVEN (r5,
 // defect 1). `vs_argv`'s `else` branch is what runs on a machine with no /proc
@@ -1455,10 +1455,11 @@ echo
   const jsDrv = path.join(pdir, 'noproc-driver.cjs');
   const identPath = new URL('../src/cli-identity.js', import.meta.url).pathname;
   fs.writeFileSync(jsDrv, `const fs = require('fs');
-const rr = fs.readFileSync, rl = fs.readlinkSync;
+const rr = fs.readFileSync, rl = fs.readlinkSync, rs = fs.statSync;
 const gone = () => { const e = new Error('ENOENT: this machine has no /proc'); e.code = 'ENOENT'; throw e; };
 fs.readFileSync = (p, ...r) => (typeof p === 'string' && /^\\/proc\\/\\d+\\/cmdline$/.test(p) ? gone() : rr(p, ...r));
 fs.readlinkSync = (p, ...r) => (typeof p === 'string' && /^\\/proc\\/\\d+\\/exe$/.test(p) ? gone() : rl(p, ...r));
+fs.statSync = (p, ...r) => (p === '/proc/self' ? gone() : rs(p, ...r)); // B-f64b: a machine with NO /proc (where /proc exists, an unreadable pid is gone — no ps)
 const { procArgv, isCliProcess } = require(${JSON.stringify(identPath)});
 const pid = process.argv[2];
 console.log(JSON.stringify({ argv: [0, 1, 2].map((i) => procArgv(pid, i)), isCli: isCliProcess(pid, 'claude') }));
@@ -1482,7 +1483,7 @@ console.log(JSON.stringify({ argv: [0, 1, 2].map((i) => procArgv(pid, i)), isCli
     { preR4: preR4Verdicts, js: jsRows.map(([n, r]) => [n, r.isCli]) });
   for (const p of pprocs) { try { p.kill('SIGKILL'); } catch { } }
   fs.rmSync(pdir, { recursive: true, force: true });
-} else { console.log('  · /proc absent — skipping the `ps`-fallback rung legs'); }
+} else { console.log('  · SKIP the `ps`-fallback rung legs: /proc absent'); }
 
 // ── 16. THE REMOTE TERMINATE UNDER BUSYBOX (r5, defect 3). §14 proved
 // killPidShell asks THE identity; it drove the script under `sh` only. The
@@ -1524,7 +1525,7 @@ if (fs.existsSync('/proc/self')) {
   ok(bprocs.every((p) => bArgv(p.pid).length > 0 && bAlive(p)),
     'every busybox kill-path fixture is live and has EXEC\'d its own argv before any verdict is taken',
     { argvs: bprocs.map((p) => bArgv(p.pid).join(' ').slice(0, 50)) });
-  if (!bbPath) console.log('  · busybox absent — the busybox kill-path legs below are SKIPPED (install busybox to run them)');
+  if (!bbPath) console.log('  · SKIP the busybox kill-path legs below: busybox absent (install busybox to run them)');
   const runIn = (argv, script) => {
     const r = spawnSync(argv[0], [...argv.slice(1), '-c', script], { encoding: 'utf8', timeout: 20000 });
     return String(r.stdout || '').trim();
@@ -1606,7 +1607,7 @@ fi`;
     'WIRING PIN: killPidShell embeds the SHARED `vs_alive` text verbatim — the ladder has one author (B-3185 r6)');
   for (const p of bprocs) { try { p.kill('SIGKILL'); } catch { } }
   fs.rmSync(bdir, { recursive: true, force: true });
-} else { console.log('  · /proc absent — skipping the busybox kill-path legs'); }
+} else { console.log('  · SKIP the busybox kill-path legs: /proc absent'); }
 
 // ── 17. THE SIGNAL VERDICT UNDER BUSYBOX (r6, found by review). §16 fixed the
 // existence probe on ONE kill path and ENUMERATED the other —
@@ -1696,7 +1697,7 @@ if (fs.existsSync('/proc/self')) {
   }
   const runIn2 = (argv, script) => String((spawnSync(argv[0], [...argv.slice(1), '-c', script], { encoding: 'utf8', timeout: 20000 }).stdout) || '').trim();
   const bbArgv2 = bbPath ? [bbPath, 'sh'] : null;
-  if (!bbPath) console.log('  · busybox absent — the §17 busybox legs are SKIPPED (install busybox to run them)');
+  if (!bbPath) console.log('  · SKIP the §17 busybox legs: busybox absent (install busybox to run them)');
   // (a) THE CAPABILITY THE PRE-r6 PROBE ASSUMED — asserted, not inherited from
   // §16 (that leg measured `ps -p N -o args=`; this one measures the QUIET
   // form the signal script actually used).
@@ -1737,7 +1738,7 @@ if (fs.existsSync('/proc/self')) {
     if (n <= 1) continue;
     try { process.kill(n, 0); } catch (e) { if (e.code === 'EPERM') { foreignPid = n; break; } }
   }
-  if (!foreignPid) console.log('  · no live pid this uid may not signal — the §17 EPERM legs are SKIPPED (running as root?)');
+  if (!foreignPid) console.log('  · SKIP the §17 EPERM legs: no live pid this uid may not signal (running as root?)');
   ok(!bbPath || !foreignPid || runIn2(bbArgv2, signalVerdictScript(foreignPid, 'TERM')) === 'EPERM',
     'the SHIPPED script under busybox explains a permission-denied kill as EPERM — the /proc rung sees a process we may not signal', { foreignPid });
   ok(!bbPath || !foreignPid || runIn2(bbArgv2, preR6Sig(foreignPid, 'TERM')) === 'ESRCH',
@@ -1823,7 +1824,7 @@ if (fs.existsSync('/proc/self')) {
     //    sweep until B-eac2 residual (c) taught `namesPsP` about it. Every one
     //    of these existed before that and every one of them is a VALUE read;
     //    what was missing was the REASON, which is the thing the sweep is for.
-    { file: 'src/cli-identity.js', needle: `execFileSync('ps', ['-p', String(pid), '-o', 'args=']`,
+    { file: 'src/cli-identity.js', needle: `execImpl('ps', ['-p', String(pid), '-o', 'args=']`,
       why: 'ARGV READ — the JS twin of vs_argv\'s allowlisted `ps -p "$1" -o args=` rung, same non-decision: an unanswerable `ps` yields the empty word that already means "no evidence" to isCliProcess.' },
     { file: 'src/proc-identity.js', needle: `spawnSync('ps', ['-p', String(pid), '-o', 'lstart=']`,
       why: 'START-TIME READ (startToken, moved verbatim from agentd pidStartTime by lane pid-identity-census, B-1cc6 — the no-/proc rung of the pid-identity stamp): it makes a recycled pid DISTINGUISHABLE from the original. An unanswerable `ps` returns \'\' = "no stamp", which is compared as a non-match and therefore never credits a stranger with being ours.' },
@@ -2129,7 +2130,7 @@ if (fs.existsSync('/proc/self')) {
     'NEGATIVE CONTROL: that same built-text scanner FIRES on the verbatim pre-r6 signal script — leg (k) is a measurement, not an empty loop');
   for (const p of spids) { try { process.kill(p, 'SIGKILL'); } catch { } }
   fs.rmSync(sdir, { recursive: true, force: true });
-} else { console.log('  · /proc absent — skipping the signal-verdict legs'); }
+} else { console.log('  · SKIP the signal-verdict legs: /proc absent'); }
 function a2key(a) { return a.file + '\u0000' + a.needle; }
 
 // ── 13. THE KB ADVERTISES A NUMBER (r2, defect 7). It said 66 while the suite
@@ -2153,7 +2154,7 @@ if (fs.existsSync('/proc/self')) {
   ok(claims.every((c) => c.ns.length > 0 && c.ns.every((n) => n === total)),
     `every doc that names this suite advertises the REAL assert count (${total})`,
     claims.map((c) => [c.rel, c.ns]));
-} else { console.log('  · /proc absent — skipping the advertised-assert-count pin'); }
+} else { console.log('  · SKIP the advertised-assert-count pin: /proc absent'); }
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

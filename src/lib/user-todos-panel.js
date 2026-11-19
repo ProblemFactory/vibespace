@@ -35,11 +35,13 @@ import { trayWhere } from './user-todos-layout.js'; // lane S3: the new-item toa
 import { renderRow, patchRow, applyLive, replyBoxEl, reconcileKeyed, agoText as agoTextOf, reachFor, pickReach, forgetReachPicks } from './user-todos-row.js'; // THE row renderer (one spelling of a row; keyed patching keeps a reply box alive)
 import { anchorFixedPopup, copyText, createPopover, escHtml, fetchJson, getToastHistory, isTouchDevice, onOutsidePress, showContextMenu, showToast, stripLegacyRecordToasts, uiScale, chromeAvoidRects, frontRects, seenAt, toastDeskSpot, placeToastsSoon, MODAL_OPEN_EVENT, markTyped } from './utils.js';
 import { UI_ICONS } from './icons.js';
+import { fyLinkMenu } from './internal-link-door.js'; // lane login-request-card piece 1: a link of the scheme in an item's words — «Go» · «Copy link»
 import { announceWords, newestFirst } from '../foryou-actions.js'; // PURE (lane needs-card-tail r10 addendum, r11): the announce card's words + clock, its stack's newest-first order (WHICH arrival announces: toastWorthy — one policy)
 import { filesCard } from './phone-files.js'; // lane phone-files-door: the 文件 card under the phone page's bands
 import { navOneBadge } from './title-chips.js'; // lane phone-titlebar-title: the phone bar's ONE-badge form
 import { BACK_DISMISS_EVENT } from './back-guard.js'; // lane mobile-back-guard: the phone's back closes this sheet through hidePopup
 import { pressVerdict, armAfterLayout } from './press-arm.js'; // verify-r6 V1: an Allow counts only once it sat still where it was read
+import { replyPictures, backendOfKey } from './reply-pictures.js'; // B-51dd: a reply box takes a picture (button · paste · drop) through THE picture door
 import { applySecretBox, submitSecretBox } from './vault-paste-box.js'; // lane vault-paste-request: an agent's request for a secret — its paste box's presses + state
 import { onVaultFacts, showUnlock, showSetup } from './vault-unlock.js'; // … the box says a locked vault by name (live), its 解锁… is THE unlock dialog
 
@@ -148,7 +150,7 @@ export function installUserTodos(app) {
     if (!it) return true;
     close();
     if (fy.classList.contains('ut-art')) model.openArtifact(it, Number(fy.dataset.ai));
-    else model.openLink(it, fy.dataset.fy, fy.dataset.ref);
+    else model.openLink(it, fy.dataset.fy, fy.dataset.ref, { x: e.clientX, y: e.clientY, el: fy });
     return true;
   };
   const setStatus = (id, status) => model.setStatus(id, status);
@@ -363,7 +365,7 @@ export function installUserTodos(app) {
   };
   const armExitButtons = (root = document) => {
     const now = performance.now();
-    for (const b of root.querySelectorAll('.ut-action-exit.ut-exit-allow, .ut-action-proposal.ut-proposal-approve, .ut-action-app.ut-app-install, .ut-action-grant')) { // lane browser-propose: an Approve is armed the same way; design 009: so is a card's one-click Install
+    for (const b of root.querySelectorAll('.ut-action-exit.ut-exit-allow, .ut-action-proposal.ut-proposal-approve, .ut-action-app.ut-app-install, .ut-action-grant, .ut-action-setting')) { // lane browser-propose: an Approve is armed the same way; design 009: so is a card's one-click Install; lane setting-doors pick 2: so is a proposed change's one button
       stampArm(b, now);
       armed.add(b);
     }
@@ -624,6 +626,11 @@ export function installUserTodos(app) {
       const ta = box.querySelector('textarea');
       ta.value = drafts.get(i.id) || '';
       if (ta.value) markTyped(ta);   // the person's own words (a draft holds only what a reply box held), carried into the rebuilt box: they still hold a stale page's reload
+      // B-51dd: the item's pictures (kept across a fold) above the field, the picture button beside Send
+      const pics = replyPictures({ box, ta, id: i.id, store: model.pictures, t, backend: () => backendOfKey(i.sessionKey) });   // batch 20 cure: its conversation's harness limits
+      box.insertBefore(pics.strip, box.querySelector(':scope > .voice-field') || ta);
+      box.insertBefore(pics.btn, box.querySelector(':scope > .ut-reply-send'));
+      box.append(pics.input, pics.camera.input);
       applyLive(row, i, rowCtx);
       growBox(ta);
     }
@@ -637,19 +644,23 @@ export function installUserTodos(app) {
     const row = rowOf(box);
     const ta = box.querySelector('textarea');
     if (row && ta && ta.value && !sent) drafts.set(row.dataset.id, ta.value); else if (row) drafts.delete(row.dataset.id);
+    // B-51dd: a folded box keeps its pictures (model.pictures); a sent reply removed the ones it carried (postReply)
     box.remove();
     row?.dispatchEvent(new CustomEvent('ut-box-left', { bubbles: true }));
   };
   const sendReply = async (row, text, { chip = false } = {}) => {
     const id = row.dataset.id;
     const body = String(text || '').trim();
-    if (!body || row.dataset.sending === '1') return;
+    const pics = chip ? [] : (model.pictures.get(id) || []);   // B-51dd: the box's pictures ride its send (an option chip sends its label only)
+    if ((!body && !pics.length) || row.dataset.sending === '1') return;
     row.dataset.sending = '1';
     const item0 = byId(id);
     if (item0) applyLive(row, item0, rowCtx);
     // THE model's POST: both outcomes reach the user as a toast (no silent
     // failures); on a failure the box keeps its text
-    const sent = await model.postReply(id, body);
+    const held = chip ? (model.pictures.get(id) || []).length : 0;   // B-51dd: an option chip sends its label only — said, when the box holds pictures
+    const replyOpts = pics.length ? { pictures: pics } : held ? { sentToast: t('{label} sent — the {n} picture(s) in the reply box were not sent', { label: body, n: held }) } : {};
+    const sent = await model.postReply(id, body, replyOpts);
     delete row.dataset.sending;
     if (sent && !chip) { const box = row.querySelector(':scope > .ut-body > .ut-reply'); if (box) foldBox(box, { sent: true }); }
     const item1 = byId(id);
@@ -887,7 +898,7 @@ export function installUserTodos(app) {
   onOutsidePress(popup, (e) => hidePopup(e?.type === 'blur' ? 'frame' : 'outside'), {
     exclude: [btn, mBtn],
     // a row's own menu (right-click → Clear content…) and the confirm dialog it opens are ABOVE the panel too
-    ignore: (t) => !!t?.closest?.('.ut-mini-popover, .win-inbox-badge, .context-menu, #record-clear-dialog'),
+    ignore: (t) => !!t?.closest?.('.ut-mini-popover, .win-inbox-badge, .context-menu, #record-clear-dialog, .chat-img-overlay'),   // B-51dd: a reply picture shown full size is not a press outside
     nested: false, once: false,
   });
   // Escape closes the popup / phone sheet (verifier r2). This is a PERSISTENT
@@ -948,6 +959,7 @@ export function installUserTodos(app) {
   // A reply box is a place to type — its own native menu stays.
   function rowMenu(e) {
     if (e.target.closest('.ut-reply')) return;
+    if (fyLinkMenu(e)) return;   // a link of the scheme in the words: its own menu
     const row = e.target.closest('.ut-item');
     const items = row ? model.menuFor(row.dataset.id) : [];
     if (!items.length) return;
@@ -1085,6 +1097,17 @@ export function installUserTodos(app) {
         { label: t('Copy'), action: () => { copyText([model.wordsOf(rec), model.recordOf ? model.recordOf(rec) : model.detailOf(rec)].filter(Boolean).join('\n\n')); showToast(t('Copied')); } },   // r3 (lane owner-press-attended): the RECORD — a fold said whole
         ...model.menuFor(id),
       ]);
+      return;
+    }
+    const setBtn = e.target.closest('.ut-action-setting');
+    if (setBtn) {
+      // lane setting-doors pick 2: the change an ask proposes, in ONE press (the model's runAction → POST /api/setting-holds/press,
+      // the value the button drew as `shown`) — a button that appeared, moved or was reworded a moment ago is not the one the user read
+      armExitButtons();
+      const pv = pressVerdict({ since: setBtn._armSince ?? null, now: performance.now() });
+      if (!pv.ok) { showToast(t('That button moved under the pointer just now — read it, then press it again')); return; }
+      setBtn.disabled = true;
+      Promise.resolve(model.runAction(todos.open.find((i) => i.id === id), 'setting', { shown: setBtn.dataset.shown })).finally(() => { setBtn.disabled = false; });
       return;
     }
     const grantBtn = e.target.closest('.ut-action-grant');

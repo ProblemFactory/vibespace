@@ -417,6 +417,7 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
     if ((s.backend || 'claude') === 'claude' || s.backend === 'codex') items.push({ label: tr('Switch billing…') });
     if (s.status === 'stopped' && !s.host) items.push({ label: tr('Rescue transcript…') });
     items.push({ label: tr('Properties…') });
+    items.push({ label: tr('What it may use…') });   // unit what-it-may-use: Properties at that section
     if (s.status !== 'stopped') items.push({ label: tr('Terminate'), style: 'color: var(--red, #e55)' });
     return items;
   };
@@ -445,6 +446,8 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
   click('Focus window'); click('Star'); click('Switch billing…'); click('Rename…'); click('Set status…'); click('Copy path'); click('Open working directory'); click('Properties…'); click('Go to window'); click('View History');
   ok(J(calls) === J([['attachSession', 'sess-1', 'W', '/w', { mode: 'chat', backend: 'claude' }], ['toggleStar'], ['showBillingSwitcher', s, { x: 1, y: 2 }], ['rename', true, 'N'], ['status', true, true], ['openFileExplorer', '/w', { host: 'h1' }], ['openSessionProps', s], ['goToWindow', 'sess-1'], ['viewSession', 'abc', '/w', 'C', { backend: 'claude' }]]) && J(copyCalls) === J(['/w']),
     'session-card actions call the same app/state handlers with the same arguments', J(calls));
+  calls.length = 0; items.find((i) => i.label === 'What it may use…').action();
+  ok(J(calls) === J([['openSessionProps', s, { section: 'may-use' }]]), 'unit what-it-may-use: «What it may use…» opens Properties AT that section (openSessionProps(s, {section: \'may-use\'}))', J(calls));
   const stoppedItems = menuItems('session-card', { ...ctx, s: { ...s, status: 'stopped', webuiId: null } });
   calls.length = 0; stoppedItems.find((i) => i.label === 'Resume in Terminal').action();
   ok(J(calls) === J([['resumeSession', 'abc', '/w', 'C', { mode: 'terminal', accountId: 'acct-1', backend: 'claude' }]]), 'Resume in Terminal reads the per-session account config at click time (legacy cfgA)', J(calls));
@@ -545,7 +548,7 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
   const sess = { status: 'live', webuiId: 'w1', sessionId: 'abc', name: 'N' };
   const items = menuItems('window', { app, id: 'win-1', win: app.wm.windows.get('win-1'), s: sess, switchSubmenu: false, closeLabel: '✕ Close' });
   for (const l of ['✥ Move', '□ Restore', 'Rename…', '⟳ Restart session', 'Terminate session', 'Locate in sidebar', 'Session properties…', '✕ Close']) items.find((i) => i.label === l).action();
-  ok(J(calls) === J([['wm.startMoveMode', 'win-1'], ['wm.witnessGeometry', 'win-1'], ['wm.restore', 'win-1'], ['renameSession', 'N', 'N'], ['restartConversationInPlace', sess], ['killSession', 'w1'], ['locateSessionInSidebar', 'abc'], ['openSessionProps', sess], ['wm.requestClose', 'win-1']] /* round 3 A2: the menu's Close asks the veto point */),
+  ok(J(calls) === J([['wm.startMoveMode', 'win-1'], ['wm.witnessGeometry', 'win-1'], ['wm.restore', 'win-1'], ['renameSession', 'N', 'N'], ['restartConversationInPlace', sess], ['endConversation', 'w1', undefined, { endTree: true }], ['locateSessionInSidebar', 'abc'], ['openSessionProps', sess], ['wm.requestClose', 'win-1']] /* round 3 A2: the menu's Close asks the veto point */),
     'window actions call the same wm/app handlers with the same arguments (session ops via the shared session.* commands; the Restore / Minimize row stamps the geometry witness first — desktop-move verify r4 ③)', J(calls));
   ok(J(items.map((i) => i.kind).filter(Boolean)) === J(['move', 'minimize', 'rename', 'restart', 'terminate', 'fork', 'locate', 'props', 'close']), 'every window item carries its onAction kind');
 

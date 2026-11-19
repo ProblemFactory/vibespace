@@ -43,10 +43,21 @@ export { stampScratchRun, readRunRecord, runOwnerState, RUN_RECORD };
  *  a literal of its own: the .314 mirror went red when the vault key joined and the relay census still knew only the first. */
 export const PRESET_KEYS = Object.freeze({ 'vs-onboarded': '1', 'vs-vault-later': '9999999999999', 'vs-rail-labels': 'done' });   // vs-rail-labels (lane door-day-one-landing): the first week's rail words, done
 export const ONBOARDED_SOURCE = `try { ${Object.entries(PRESET_KEYS).map(([k, v]) => `localStorage.setItem(${JSON.stringify(k)}, ${JSON.stringify(v)});`).join(' ')} } catch {}`;
+// lane setting-doors (主开发 2026-11-16): EVERY Chrome a suite launches keeps its own store — Chrome's basic store flag + the mock
+// keychain, the product's own src/browser-attach.js PROFILE_STORE (test-architecture pins the two equal) — so a suite never asks
+// the session bus's Secret Service: a LOCKED login keyring hung 14 heavy Chrome suites to their full budget on 2026-11-15.
+// scripts/chrome-store-census.mjs + test-architecture §47b: a Chrome launch without it is red.
+export const CHROME_STORE = Object.freeze(['--password-store=basic', '--use-mock-keychain']);
 
 /** `/tmp/vs-<name>-<pid>` — unique per process, cleaned by the owning suite. */
 // B-d8e3: name → the path this PROCESS decided for it (below) — one map for every copy of this module in the process (a mutant)
 const MINTED = (globalThis[Symbol.for('vibespace.scratch.minted')] ??= new Map());
+/** lane setting-doors pick 0 (2026-11-14): THE OWNER'S PAGE, written once for every suite — the marks a browser on this instance's own
+ *  page sends (Sec-Fetch-Site same-origin and its Origin). A spend.* row changes ONLY with them (src/routes/persistence.js
+ *  refuseSpendRows: a bearer, or a request with no mark of the page, is refused): a suite that writes a spending row on its scratch
+ *  hub writes it with these headers, so «who may write» has one place in the tests too (test-spend-rows-owner ⑤ is the census). */
+export function ownerPageHeaders(base) { return { Origin: new URL(base).origin, 'Sec-Fetch-Site': 'same-origin' }; }
+
 export function scratch(name) {
   if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) throw new Error(`scratch(): bad name ${JSON.stringify(name)}`);
   // lane H verify r2: `vs-ab-<n>` is the PRODUCT's socket-dir fallback shape (src/browser-profiles.js socketDirDecision),
@@ -254,7 +265,10 @@ export function stillLookSource(sel) {
   const target = sel.startsWith('JS:') ? sel.slice(3) : `document.querySelector(${JSON.stringify(sel)})`;
   return `(() => { const e = ${target}; if (!e || !e.isConnected) return { found: false };
     const desc = (n) => (n ? n.tagName.toLowerCase() + (n.id ? '#' + n.id : '') + (typeof n.className === 'string' && n.className.trim() ? '.' + n.className.trim().split(/\\s+/).slice(0, 2).join('.') : '') : null);
-    const q = e.getBoundingClientRect(); const x = q.left + q.width / 2, y = q.top + q.height / 2; const h = document.elementFromPoint(x, y);
+    // a target that WRAPS (an inline link over two lines) is aimed at its FIRST line fragment: its bounding box's centre is its own
+    // paragraph, never the link (lane login-request-card — the UI train's hosted mirror: «covered, under its point: div.ut-text»)
+    const q = e.getBoundingClientRect(); const fr = typeof e.getClientRects === 'function' ? e.getClientRects() : null; const a = fr && fr.length > 1 && fr[0].width > 0 && fr[0].height > 0 ? fr[0] : q;
+    const x = a.left + a.width / 2, y = a.top + a.height / 2; const h = document.elementFromPoint(x, y);
     const MOV = ${STILL_MOVERS};
     const kebab = (p) => String(p).replace(/[A-Z]/g, (c) => '-' + c.toLowerCase());
     const movers = (typeof document.getAnimations === 'function' ? document.getAnimations() : []).filter((a) => a.playState === 'running' && a.effect && a.effect.target && typeof a.effect.target.contains === 'function' && a.effect.target.contains(e))
@@ -465,6 +479,29 @@ export function scratchHome(name, fsArg, dirs = ['.claude/projects', '.claude/se
   return home;
 }
 
+/** B-0d3e: THE ONE DOOR FOR A RED CONTROL'S EDIT. `src` with `anchor` (a string, or a RegExp) replaced by `to` (a string
+ *  or a replacer). The anchor must be in `src` exactly `count` times (1 by default; `count: 'any'` = at least once):
+ *  anything else THROWS BY NAME — «ANCHOR GONE» / «ANCHOR NOT UNIQUE: n times» with the control's name and the anchor's
+ *  first characters — so a control never builds nothing in silence, and the red says which product line moved.
+ *  A string anchor's `to` is literal; a RegExp anchor's string `to` reads `$1` as String.prototype.replace does; a replacer
+ *  is called once per match as replace calls it (match, …groups, offset, string), whatever `count` is. A RegExp that can
+ *  match the empty string is refused by name (it would "match" between every character); a sticky flag is ignored. */
+export function anchored(src, anchor, to, name, { count = 1 } = {}) {
+  const text = String(src);
+  const label = `${name ? `«${name}»: ` : ''}${String(anchor instanceof RegExp ? anchor : JSON.stringify(anchor)).slice(0, 80)}`;
+  let n, all = null;
+  if (anchor instanceof RegExp) {
+    all = new RegExp(anchor.source, anchor.flags.replace(/[gy]/g, '') + 'g');
+    if (new RegExp(`(?:${anchor.source})`, anchor.flags.replace(/[gy]/g, '')).test('') || [...text.matchAll(all)].some((m) => m[0] === '')) throw new Error(`ANCHOR MATCHES NOTHING ${label} — a RegExp anchor that can match the empty string marks no product line`);
+    n = [...text.matchAll(all)].length;
+  } else n = anchor === '' ? 0 : text.split(String(anchor)).length - 1;
+  if (!n) throw new Error(`ANCHOR GONE ${label} — the control's anchor is not in the source (move it with the product line)`);
+  if (count !== 'any' && n !== count) throw new Error(`ANCHOR NOT UNIQUE ${label} — ${n} times, the control expects ${count}`);
+  if (all) return count === 1 ? text.replace(new RegExp(anchor.source, anchor.flags.replace(/[gy]/g, '')), to) : text.replace(all, to);
+  const rep = typeof to === 'function' ? to : () => to;
+  return count === 1 ? text.replace(String(anchor), rep) : text.replaceAll(String(anchor), rep);
+}
+
 /** A suite's synthetic conversation id: `e2e00000-0000-4000-8000-<12 hex>`.
  *  Nothing else may mint one — the walk and discovery both refuse this family
  *  wherever it lands, which is the only guard that still works when the
@@ -594,7 +631,10 @@ export function endRootedProcesses(root, { signal = 'SIGKILL', procRoot = '/proc
 /** The env names a vibespace-device daemon takes its root from (src/agentd/agentd.js ROOT: VIBESPACE_DEVICE_ROOT, else
  *  VIBESPACE_AGENTD_ROOT, else ~/.vibespace/agentd under HOME) — both kept by agent-env.js daemonEnv across a re-exec. */
 export const DAEMON_ROOT_ENV = Object.freeze(['VIBESPACE_DEVICE_ROOT', 'VIBESPACE_AGENTD_ROOT']);
-const DAEMON_ARGV = /(?:^|\/)(?:vibespace-)?agentd\.js$/;
+/** A daemon's argv (the bundle it runs) and its comm (vibespace-device, cut to 15 bytes by the kernel) — exported so a suite that
+ *  ends a daemon by its own pid judges it by THIS rule, never a copy (B-b403 cure 3). */
+export const DAEMON_ARGV = /(?:^|\/)(?:vibespace-)?agentd\.js$/;
+export const DAEMON_COMM = 'vibespace-devic';
 /** B-442c (2026-10-02, the 16:23 OOM): END THE DAEMON(S) OF ONE DAEMON ROOT, MID-RUN — and nothing else its server started
  *  (a suite restarting its server over a fresh daemon keeps its dtach sessions). A daemon = a process whose
  *  VIBESPACE_DEVICE_ROOT / VIBESPACE_AGENTD_ROOT lies in `root` AND that is one (comm `vibespace-devic…`, or an argv
@@ -618,7 +658,7 @@ export function endDaemonsOf(root, { signal = 'SIGKILL', procRoot = '/proc', pas
       if (!DAEMON_ROOT_ENV.some((n) => under((env.find((kv) => kv.startsWith(n + '=')) || '').slice(n.length + 1)))) continue;
       let comm = '', argv = []; try { comm = fs.readFileSync(`${procRoot}/${pid}/comm`, 'utf8').trim(); } catch { }
       try { argv = fs.readFileSync(`${procRoot}/${pid}/cmdline`, 'utf8').split('\0'); } catch { }
-      if (comm.startsWith('vibespace-devic') || argv.some((a) => DAEMON_ARGV.test(a))) end(pid);
+      if (comm.startsWith(DAEMON_COMM) || argv.some((a) => DAEMON_ARGV.test(a))) end(pid);
     }
   }
   return [...hit];

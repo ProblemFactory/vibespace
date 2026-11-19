@@ -169,6 +169,7 @@ function dialLadder(c) {
               // preamble; rcmd0 just execs it.
               // the LOCAL shell's answer is LOCAL (lane cli-shell-truth r3): the CLI's configured NAME, never a local path's basename
               const rcmd0 = SP.loginShell ? '"$S0"' : (ctx.cliCmds?.remoteName ? ctx.cliCmds.remoteName(backend, spawnCmd) : (spawnCmd.includes('/') ? path.basename(spawnCmd) : spawnCmd));
+              const rcmd1 = SP.loginShell ? rcmd0 : (rcmd || rcmd0); // B-69ec: the device's own login shell's program (ws-create asked it), else the name
               // THE LADDER is spelled ONCE (src/login-shell.js S0_SH — the hub's own CLI ask reads the same rungs; test-cli-env
               // runs this string under sh against pickLoginShell on the same inputs).
               const shellResolve = SP.loginShell ? S0_SH : '';
@@ -188,7 +189,7 @@ function dialLadder(c) {
                   pre: buildRemoteShellPrelude({ toolsOnPath: integrationOn, withNodeFinder: integrationOn }),
                   browser: spawnBrowserPre,
                   resolve: shellResolve, tokenAssign: da.tokenAssign, acctEnv: dialAcctAssign,
-                  parts: [...da.envPairs.map(shq), ...spawnEnvPairs.map(shq), rcmd0, ...(SP.loginShell ? ['-l'] : spawnArgs.map(shq))],
+                  parts: [...da.envPairs.map(shq), ...spawnEnvPairs.map(shq), rcmd1, ...(SP.loginShell ? ['-l'] : spawnArgs.map(shq))],
                 });
                 // lane vault-e2e-password-fix-r2: NO TOKEN in this file — the attach asks the hub for its link token at every
                 // (re)start (src/agentd/attach-cli.js askLinkToken; `hub` = where), holding it in memory only

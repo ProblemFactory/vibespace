@@ -121,10 +121,13 @@ function clauseWords(c, ctx, t) {
  *   4. an advanced row draws only while `showAdvanced`; off, its category
  *      counts it in `hiddenAdvanced` (the "N advanced settings hidden · Show"
  *      line). Rows rules 1–2 drew are never counted.
+ *  `reveal` (lane setting-doors pick 1) = the ONE key a `vibespace://settings/<key>` link opened the window on
+ *  (settingFocusOf): that row draws like a MODIFIED row for this open — past the advanced tier and a false `when`,
+ *  with its chips — and the per-device switch is never flipped; a held row stays undrawn.
  *  Returns `{ sections, byCategory, drawn, hiddenAdvanced }`; a section is
  *  `{ category, rows: [{ path, schema, chips, advanced, modified, why }], hiddenAdvanced, show }`,
  *  a chip `{ kind: 'advanced' | 'unused' | 'reload', text, title? }`. */
-export function settingsViewModel(schema, { categories = [], query = '', showAdvanced = false, ctx = {}, isModified = () => false, t = (s) => s } = {}) {
+export function settingsViewModel(schema, { categories = [], query = '', showAdvanced = false, ctx = {}, isModified = () => false, t = (s) => s, reveal = '' } = {}) {
   const q = String(query || '').toLowerCase();
   const byCategory = {};
   for (const cat of categories) byCategory[cat] = { category: cat, rows: [], hiddenAdvanced: 0, show: false };
@@ -138,12 +141,14 @@ export function settingsViewModel(schema, { categories = [], query = '', showAdv
     const advanced = row.tier === 'advanced';
     const modified = !!isModified(path);
     if (!q && !modified) {
-      if (why) continue;
-      if (advanced && !showAdvanced) { sec.hiddenAdvanced++; continue; }
+      if (reveal && path === reveal) { /* lane setting-doors pick 1: the ONE row a link opened on draws like a modified row */ }
+      else if (why) continue;
+      else if (advanced && !showAdvanced) { sec.hiddenAdvanced++; continue; }
     }
     const chips = [];
     if (advanced) chips.push({ kind: 'advanced', text: t('advanced'), title: t('An advanced setting — shown while “Show advanced settings” is on') });
-    if (why) chips.push({ kind: 'unused', text: t('not in use here: {why}', { why }), title: why });
+    const fc = why ? failingClause(row, ctx) : null; // B-544d r2: a harness folded because its CLI is not found here carries the Re-check door
+    if (why) chips.push({ kind: 'unused', text: t('not in use here: {why}', { why }), title: why, ...(fc && clauseKind(fc) === 'harness' ? { recheck: String(fc.harness) } : {}) });
     if (!row.liveApply) chips.push({ kind: 'reload', text: t('reload'), title: t('Requires page reload to take effect') });
     sec.rows.push({ path, schema: row, chips, advanced, modified, why });
   }
@@ -151,6 +156,18 @@ export function settingsViewModel(schema, { categories = [], query = '', showAdv
   let drawn = 0, hiddenAdvanced = 0;
   for (const s of sections) { s.show = s.rows.length > 0 || s.hiddenAdvanced > 0; drawn += s.rows.length; hiddenAdvanced += s.hiddenAdvanced; }
   return { sections, byCategory, drawn, hiddenAdvanced };
+}
+
+/** A DOOR TO ONE SETTING (lane setting-doors pick 1): what the Settings window does for a link to `key`
+ *  (`vibespace://settings/<key>`, app.openSettingAt) → `{ key, category, advanced, held }` — the row's category in view, the
+ *  row drawn for this open (settingsViewModel `reveal`), scrolled to and marked — or null when the key names no row the
+ *  window can draw (unknown, or its category is not in `categories`): Settings then opens as it always did. Reads only;
+ *  a link opens, it never writes. */
+export function settingFocusOf(schema, key, { categories = [] } = {}) {
+  const k = typeof key === 'string' ? key : '';
+  const row = k && schema && Object.prototype.hasOwnProperty.call(schema, k) ? schema[k] : null;
+  if (!row || !categories.includes(row.category)) return null;
+  return { key: k, category: row.category, advanced: row.tier === 'advanced', held: !!row.held };
 }
 
 /** The line that ends a category while advanced rows are folded. */
@@ -220,7 +237,9 @@ export const IN_FORCE_UNSET = 'unset';
 /** The row's save mark: 'typed' «Not saved yet — press Enter or leave the field» (the field differs from the store; nothing
  *  is stored) → 'pending' / 'saving' «Saving…» (committed; the debounce, then the POST) → 'saved' «Saved» — it STAYS
  *  until the next edit | 'failed'; a Spending row adds the number in force (`inForce`, see inForceOf). '' = nothing. */
-export function saveMarkWords(state, t = (s) => s, { inForce = null } = {}) {
+export function saveMarkWords(state, t = (s) => s, { inForce = null, refused = null } = {}) {
+  // the exit check (主开发 17:04Z): a value the server set aside — the reason AT THE ROW, by its code, in the page's language
+  if (state === 'refused') return refused && refused.code === 'exit_url_invalid' ? t('Not saved — the exit check address must be a public https address with no user name or password in it; the stored one is kept') : t('Not saved — the server refused this value ({code}); the stored one is kept', { code: String((refused && refused.code) || '?') });
   const live = inForce === IN_FORCE_UNSET ? { value: t('none — every turn nobody typed is held until a number is set') } : inForce !== null && inForce !== undefined ? { value: inForce } : null;   // B-0a33 (3)
   if (state === 'typed') return live ? t('Not saved yet — press Enter or leave the field · in force now: {value}', live) : t('Not saved yet — press Enter or leave the field');
   if (state === 'pending' || state === 'saving') return t('Saving…');

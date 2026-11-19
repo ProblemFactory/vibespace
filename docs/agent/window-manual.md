@@ -315,13 +315,13 @@ screen of the person viewing it) — is refused **`outside_window`**, never
 clamped to the edge.
 
 **Where the PNG lands.** Without `--out` it goes to
-`<temp dir>/vibespace-window/<handle>-<time>.png` (a private directory, made
+`<temp dir>/vibespace-window-<your uid>/<handle>-<time>.png` (a private directory, made
 0700) and the CLI prints that path — it is **never** written into your
 current directory (a screenshot must not litter the project you stand in).
 Name the file yourself with `--out`:
 
 ```
-vibespace-window screenshot da-1                       # → /tmp/vibespace-window/da-1-1790000000000.png
+vibespace-window screenshot da-1                       # → /tmp/vibespace-window-1000/da-1-1790000000000.png
 vibespace-window screenshot da-1 --out shots/calc.png  # relative: under the SESSION's directory
 vibespace-window screenshot da-1 --out /tmp/calc.png   # absolute: exactly there
 ```

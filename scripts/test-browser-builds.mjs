@@ -1249,7 +1249,8 @@ const pxReq = (pxUrl, method, target) => new Promise((resolve) => {
     'the EGRESS VARIANT through the REAL loader: features [egress-allowlist] — no surfaces, optional now — and the fact names its reserved row (the table\'s public rows carry no manifest settings)', pg);
   const EA = ENGN.engineArgs || (({ args = [] }) => args), WP = ENGN.withoutProxyArgs || ((l) => l); // (a tree without them: ✗ by name below)
   const leW = ENGN.engineLaunchEnv({ args: [] }, { base: ['--m', ...(ENGN.egressArgs || (() => []))('http://127.0.0.1:9')], always: true });
-  ok(leW.AGENT_BROWSER_ARGS === '--m,--proxy-server=http://127.0.0.1:9,--proxy-bypass-list=<-loopback>' && !('AGENT_BROWSER_ARGS' in ENGN.engineLaunchEnv({ args: [] }, { base: ['--m'] })) && EA({ args: ['--a'], egress: 'http://127.0.0.1:9' }).join(' ') === '--a --proxy-server=http://127.0.0.1:9 --proxy-bypass-list=<-loopback>' && EA({ args: ['--a'] }).join() === '--a'
+  // B-8b87 (主开发 2026-11-17 14:28Z): the egress pair also carries the WebRTC policy that lets UDP out only through a proxy — LAST
+  ok(leW.AGENT_BROWSER_ARGS === '--m,--proxy-server=http://127.0.0.1:9,--proxy-bypass-list=<-loopback>,--force-webrtc-ip-handling-policy=disable_non_proxied_udp' && !('AGENT_BROWSER_ARGS' in ENGN.engineLaunchEnv({ args: [] }, { base: ['--m'] })) && EA({ args: ['--a'], egress: 'http://127.0.0.1:9' }).join(' ') === '--a --proxy-server=http://127.0.0.1:9 --proxy-bypass-list=<-loopback> --force-webrtc-ip-handling-policy=disable_non_proxied_udp' && EA({ args: ['--a'] }).join() === '--a'
     && WP(['--a', '--proxy-pac-url=http://p', ' --no-proxy-server', '-proxy-server=x', '--proxy-auto-detect']).join() === '--a',
     'a WRAPPED launch carries the keeper\'s proxy switches in the KEEPER\'s part of the driver line (`<-loopback>`: the proxy answers loopback too), even when the plugin names no switch (`always`); engineArgs = the plugin\'s + the proxy\'s (the attach argv); the keeper\'s own list loses every proxy switch (Chromium ranks a pac url / no-proxy above --proxy-server)', leW);
   if (!pg.ok) ok(false, '⑦b the egress variant is refused on this tree — the legs that wrap it are not reached', pg);
@@ -1268,8 +1269,8 @@ const pxReq = (pxUrl, method, target) => new Promise((resolve) => {
   const la = fake.launches().at(-1), args = String(la.args || '').split(/[,\n]/);
   const wrG = wrapperOf(la.exe) || { program: null, args: [] }; // lane engine-args-string r2: the program is the keeper's wrapper
   const pxArg = wrG.args.find((a) => a.startsWith('--proxy-server=')) || args.find((a) => a.startsWith('--proxy-server=')) || '', pxUrl = pxArg.slice('--proxy-server='.length); // (a tree that put it on the driver line: found there, judged below)
-  ok(/^http:\/\/127\.0\.0\.1:\d+$/.test(pxUrl) && wrG.program === GKP && JSON.stringify(wrG.args.slice(-2)) === JSON.stringify([pxArg, '--proxy-bypass-list=<-loopback>']) && wrG.args.includes('--vibespace-engine=fixture') && args.includes(BPR.keeperMarkArg(pe.id)) && !args.some((a) => /^--?proxy/.test(a)),
-    'THE KEEPER WRAPS IT: --proxy-server=<this profile\'s allowlisting proxy> + --proxy-bypass-list=<-loopback> ride the keeper\'s WRAPPER over its kernel, LAST (after the plugin\'s switches — nothing the driver adds before can undo them); the driver\'s line carries the mark, no proxy switch', { args, wrG });
+  ok(/^http:\/\/127\.0\.0\.1:\d+$/.test(pxUrl) && wrG.program === GKP && JSON.stringify(wrG.args.slice(-3)) === JSON.stringify([pxArg, '--proxy-bypass-list=<-loopback>', '--force-webrtc-ip-handling-policy=disable_non_proxied_udp']) && wrG.args.includes('--vibespace-engine=fixture') && args.includes(BPR.keeperMarkArg(pe.id)) && !args.some((a) => /^--?proxy/.test(a)),
+    'THE KEEPER WRAPS IT: --proxy-server=<this profile\'s allowlisting proxy> + --proxy-bypass-list=<-loopback> + the WebRTC policy (UDP only through a proxy; B-8b87) ride the keeper\'s WRAPPER over its kernel, LAST (after the plugin\'s switches — nothing the driver adds before can undo them); the driver\'s line carries the mark, no proxy switch', { args, wrG });
   const cs = callsOf('vs-' + pe.id, c0);
   ok(cs.length >= 2 && cs.every((c) => c.exe === la.exe) && (wrapperOf(la.exe) || { args: [] }).args.includes(pxArg), `V2: the proxy rides EVERY call's launch view (${cs.map((c) => c.verb).join(' · ')}) — each names the same wrapper, which carries it`, cs);
   // L2's F4: the env list REPLACES the config's — so it carries the keeper's OWN list from the config the launch names (the display
@@ -1780,7 +1781,7 @@ const ENGRU = require('../src/server/browser-engines.js').create({ loader: LDRU,
   const proxAnchor = '    const proxied = args.map(switchFormOf).filter((a) => PROXY_ARG_RE.test(a));'; // L1b r4: the rule reads the trimmed form
   const ENg = MUT.load('src/browser-engines.js', es.replace(ownAnchor, 'const OWN_ARG_RE = /^--(?:remote-debugging-(?:port|pipe|address)|user-data-dir)(?:=|$)/;').replace(proxAnchor, '    const proxied = [];'), 'old-own-args');
   ok(es.includes(ownAnchor) && es.includes(proxAnchor) && ENg.engineAnswerVerdict('launchOptions', { status: 200, body: { executablePath: '/k/chrome', args: ['--proxy-server=http://evil.test:8080'] } }, { id: EID }).ok === true, 'control (g): the base\'s own-argument rule ACCEPTS a plugin\'s --proxy-server — exactly what ⑦\'s V1 row catches');
-  const wrapAnchor = '    const egress = engine.egress ? await egressUrlFor(p.id, { engine: c.id, label: engine.label || \'\', setting: engine.egress.setting, fallback: engine.egress.default }) : null;';
+  const wrapAnchor = '    const egress = engine.egress || pproxy ? await egressUrlFor(p.id, { engine: c.id, label: engine.label || \'\', ...(engine.egress ? { setting: engine.egress.setting, fallback: engine.egress.default } : {}), ...(pproxy ? { proxy: pproxy } : {}) }) : null;';   // B-8b87: + a profile's proxy rides the same egress pair
   if (!ks.includes(wrapAnchor)) ok(false, 'control (h): the anchor (the keeper\'s wrap) is not in this tree', wrapAnchor);
   else await (async () => {
   const Kw = MUT.load('src/server/browser-keeper.js', ks.replace(wrapAnchor, '    const egress = null;'), 'no-wrap');
@@ -2870,6 +2871,139 @@ console.log('— ⑧ lane engine-distribution: kernel.json, the download over a 
   const MCf = mutantCopies('browser-builds-folder', REPO);
   const f0 = await folderRun(MCf.load('src/server/browser-keeper.js', ksrc.replace(sub, "  if (false) mediator.onFolder((ev) => {"), 'no-folder-notice'));
   ok(f0.once === 0 && f0.all === 0, 'CONTROL (B-0645 cure): a keeper that does not hear the folder signal tells the person nothing — the base\'s journal line only (RED for the leg above)', f0);
+  // B-0645 cure 2 (主开发 10:26Z): A HUB RESTART — the notices live in memory, the items in the For-you store; the keeper's first
+  // load takes an open one back (its browser alive ⇒ held, a later put-back ends it) or resolves it (its browser gone)
+  const restartRun = async (Kmod, tag) => {
+    const items = [], statuses = [];
+    const uT = { add: (k, it) => { const id = 'r' + (items.length + 1); items.push({ ...it, id, status: 'open' }); return { id }; }, setStatus: (id, st, by) => { statuses.push({ id, st, by }); const x = items.find((i) => i.id === id); if (x) x.status = st; },
+      get: (id) => items.find((i) => i.id === id) || null, openItems: () => items.filter((i) => i.status === 'open').map((i) => ({ ...i })) };
+    const dd = path.join(ROOT, 'data-folder-restart-' + tag);
+    fs.mkdirSync(dd, { recursive: true });
+    const mk = (cbBox) => Kmod.create({ dataDir: dd, homeDir: HOME, env: () => ({ PATH: PATH_ENV, HOME, FAKE_AB_STATE: path.join(ROOT, 'ab-state'), FAKE_AB_CDP_PORT: String(CDP_PORT) }), serverSetting: () => undefined, liveKeys: () => new Set([KEY_A]), install: false, tickMs: 3600e3,
+      log: { log() { }, warn() { }, error() { } }, hostKnown: () => false, userTodos: uT,
+      mediator: { available: () => false, repoint() { }, revoke() { }, admitTarget() { }, adopt: async () => { }, onTold: () => () => { }, onFolder: (fn) => { cbBox.cb = fn; return () => { }; } } });
+    const b1 = {}, k1 = mk(b1);
+    const pa = k1.createProfile({ label: 'Lent A' }), pb = k1.createProfile({ label: 'Lent B' });
+    await k1.start(pa.id, { why: 'test' });
+    b1.cb({ kind: 'lost', profileId: pa.id, browserKey: KEY_A });
+    // an item of a browser that is not running when the hub comes back (it ended while the hub was down)
+    const n = MED.folderLostNotice({ label: 'Lent B' });
+    uT.add('browser', { origin: 'browser', kind: 'action', text: n.text, i18n: n.i18n, action: { type: 'browser-restart', profileId: pb.id } });
+    const b2 = {}, k2 = mk(b2);
+    k2.list();   // the first load
+    const atLoad = statuses.map((x) => x.id + ':' + x.by).join();
+    if (b2.cb) b2.cb({ kind: 'back', profileId: pa.id, browserKey: KEY_A });
+    const out = { atLoad, after: statuses.map((x) => x.id + ':' + x.by).join(), open: uT.openItems().map((x) => x.id).join() };
+    await k2.stop(pa.id, { why: 'user' }).catch(() => { });
+    return out;
+  };
+  const rr = await restartRun(K, 'real');
+  ok(rr.atLoad === 'r2:browser-ended' && rr.after === 'r2:browser-ended,r1:put-back-confirmed' && rr.open === '',
+    'B-0645 cure 2: after a hub restart the keeper takes the open folder notices back — one of a browser that ended is resolved at the first load, one of a running browser is held and ended by its next confirmed put-back', rr);
+  const rcCut = "cliBoot(); reclaimFolderNotices(); } }";
+  if (!ksrc.includes(rcCut)) throw new Error('the anchor of the control «B-0645 cure 2: no reclaim» is not in the source');
+  const r0 = await restartRun(MCf.load('src/server/browser-keeper.js', ksrc.replace(rcCut, 'cliBoot(); } }'), 'no-reclaim'), 'mut');
+  ok(r0.atLoad === '' && r0.open.split(',').length === 2, 'CONTROL (B-0645 cure 2): a keeper that does not take them back leaves both open after a restart — the first one ends only by its Restart press (RED for the leg above)', r0);
+}
+
+// ═══ B-0bc7: THE «Download kernel» DOOR — which engine's card offers it, what its answer says (en / zh / ja, the real dictionaries),
+// the unread kernel's words naming it WHERE IT STANDS (the Settings row, never Change build… / New profile…), the row asked again while
+// a kernel downloads (the route answers a press when the download STARTS), the Settings row's wiring; CONTROL: no door for a FAILED download ═══
+console.log('— B-0bc7: the engine card\'s «Download kernel» door');
+{
+  const BMk = await import('../src/lib/browser-build-model.js');
+  const zhK = (await import('../src/lib/i18n-zh.js')).default, jaK = (await import('../src/lib/i18n-ja.js')).default;
+  const tOf = (d) => (k, p) => { let x = (d && d[k]) || k; if (p) x = x.replace(/\{(\w+)\}/g, (m, y) => (p[y] !== undefined ? String(p[y]) : m)); return x; };
+  const tE = tOf(null);
+  // the engines' table in the states kernelFact gives (absent / failed / downloading / installed) + the fleet's «untrusted»
+  const R0 = { defaultEngine: { value: 'default', source: 'default' }, engines: [
+    { id: 'eng-missing', label: 'Missing', installed: false, kernel: { state: 'absent' } },
+    { id: 'eng-failed', label: 'Failed', installed: false, kernel: { state: 'failed', code: 'disk' } },
+    { id: 'eng-busy', label: 'Busy', installed: false, kernel: { state: 'downloading', bytes: 1, total: 4 } },
+    { id: 'eng-unread', label: 'Unread', installed: true, executable: true, measuredVersion: '1.0', kernel: { state: 'installed', next: { version: '2.0', unread: 'EIO' } } },
+    { id: 'eng-ok', label: 'Ok', installed: true, executable: true, measuredVersion: '1.0', kernel: { state: 'installed' } },
+    { id: 'eng-own', label: 'Own', source: 'user', installed: false },
+    { id: 'eng-bad', label: 'Bad', code: 'browser_engine_protocol' },
+    { id: 'eng-consent', label: 'Consent', installed: false, kernel: { state: 'untrusted' } },
+    { id: 'eng-node', label: 'Node', installed: false, kernel: { state: 'failed', code: 'engine_node_unsupported', need: '22.15', node: '20.0' } },
+  ] };
+  const WANT = [{ id: 'eng-missing', label: 'Missing', busy: false }, { id: 'eng-failed', label: 'Failed', busy: false }, { id: 'eng-busy', label: 'Busy', busy: true }, { id: 'eng-unread', label: 'Unread', busy: false }];
+  const judgeDoors = (M) => JSON.stringify(M.kernelDoors(R0)) === JSON.stringify(WANT) && M.kernelDoors(null).length === 0 && M.kernelDoors({ error: 'unreachable' }).length === 0;
+  ok(judgeDoors(BMk), 'B-0bc7 kernelDoors: a door for a kernel not here (none yet, a failed download), one BUSY while it downloads, one for a waiting kernel that could not be read — none for an installed kernel, the owner\'s own program, an engine that does not answer, a package waiting for consent, a Node that cannot unpack it; none when the engines could not be read', BMk.kernelDoors(R0));
+  const DOOR = ' · press «Download kernel» to fetch it again';
+  const unreadSet = BMk.engineNote(R0.engines[3], tE, { door: true }), unreadCard = BMk.engineNote(R0.engines[3], tE);
+  ok(unreadSet.endsWith('the waiting kernel 2.0 could not be read (EIO) — it is kept beside its place and asked again at the next start' + DOOR) && !unreadCard.includes('Download kernel') && BMk.engineFactText(R0, tE).includes(DOOR),
+    'B-0bc7: the unread waiting kernel\'s words name the door in the Settings row (engineFactText) — and NOT on the Change build… / New profile… cards, which have none (the adversarial read)', { unreadSet, unreadCard });
+  ok(BMk.kernelPollDue(R0) === true && BMk.kernelPollDue({ ...R0, engines: R0.engines.filter((e) => e.id !== 'eng-busy') }) === false && BMk.kernelPollDue(null) === false && BMk.kernelPollDue({ error: 'unreachable' }) === false,
+    'B-0bc7 kernelPollDue: the row asks again while ANY kernel downloads (the press\'s POST answers at the start) and stops when none does');
+  // the second adversarial read: a read that FAILED in the middle of a download never ends its progress
+  const judgeStep = (M) => { const a = M.kernelPollStep(R0, false), b = M.kernelPollStep(null, true), c = M.kernelPollStep({ error: 'unreachable' }, true), d = M.kernelPollStep(null, false), e = M.kernelPollStep({ ...R0, engines: R0.engines.filter((x) => x.id !== 'eng-busy') }, true);
+    return a.polling && a.tick && a.redraw && b.polling && b.tick && !b.redraw && c.tick && !c.redraw && !d.tick && !d.polling && !e.polling && !e.tick && e.redraw; };
+  ok(judgeStep(BMk), 'B-0bc7 kernelPollStep: a good read with a download ⇒ polling, ask again; a FAILED read while a download ran ⇒ the doors stay as drawn and the row asks again; a failed read with none running ⇒ nothing; a good read with none ⇒ the poll ends');
+  const ANS = [[{ ok: true, started: true, id: 'eng-missing' }, ''], [{ ok: false, code: 'install_running', error: 'x' }, 'its kernel is already downloading'],
+    [{ ok: false, code: 'disk', error: 'x' }, 'the kernel could not be downloaded: not enough free disk space'],
+    [{ ok: false, code: 'build_platform_unsupported', error: 'x' }, 'the kernel could not be downloaded: the engine offers no kernel for this computer'],
+    [{ ok: false, code: 'engine_kernel_landing', error: 'x' }, 'the kernel could not be downloaded: its kernel is being replaced or put back in its place — try again in a moment'],
+    [{ error: 'boom', code: 'odd_code' }, 'the kernel could not be downloaded: odd_code'], [null, 'VibeSpace did not answer — nothing was downloaded']];
+  const badAns = ANS.filter(([a, w]) => BMk.kernelDownloadWords(a, tE) !== w).map(([a, w]) => ({ a, want: w, got: BMk.kernelDownloadWords(a, tE) }));
+  ok(badAns.length === 0, 'B-0bc7 kernelDownloadWords: a started download says nothing (the card\'s line says the rest), a refusal says itself BY CODE (install_running, disk, platform, a landing or put-back, any other by its code), no answer says so', badAns);
+  const KEYS = ['Download kernel', 'Download kernel: {plugin}', 'press «Download kernel» to fetch it again', 'its kernel is already downloading', 'the kernel could not be downloaded: {why}', 'its kernel is being replaced or put back in its place — try again in a moment', 'VibeSpace did not answer — nothing was downloaded'];
+  const ph = (k) => (k.match(/\{\w+\}/g) || []);
+  const missing = KEYS.flatMap((k) => [['zh', zhK], ['ja', jaK]].filter(([, d]) => !(typeof d[k] === 'string' && d[k] !== k && ph(k).every((x) => d[k].includes(x)))).map(([l]) => `${l}: ${k}`));
+  ok(missing.length === 0, `B-0bc7: every new word (${KEYS.length}) in zh AND ja, its placeholders kept`, missing);
+  ok(BMk.engineNote(R0.engines[3], tOf(zhK), { door: true }).endsWith('按「下载内核」重新获取') && BMk.engineNote(R0.engines[3], tOf(jaK), { door: true }).endsWith('「カーネルをダウンロード」を押すと取得し直します') && BMk.kernelDownloadWords({ ok: false, code: 'install_running' }, tOf(zhK)) === '它的内核正在下载',
+    'B-0bc7: …said in zh / ja through the real dictionaries');
+  // the Settings row's wiring (DOM-free here; the drawn row is the integrator's heavy read): the doors drawn with EVERY answer of the
+  // engines, the person's POST, the row asked again while a kernel downloads (by the LINE's own tick), each door's answer beside it
+  const ui = read('src/lib/settings-ui.js'), css = read('public/style.css');
+  ok(/line\.textContent = engineFactText\(r, t\); this\._paintKernelDoors\(line, r, \(\) => this\._loadEngines\(row, path, line\)\);/.test(ui)
+    && /fetchJson\(`\/api\/browser\/engines\/\$\{encodeURIComponent\(id\)\}\/kernel`, \{ method: 'POST' \}\)/.test(ui)
+    && ui.includes('const tick = () => { if (!line._kernelTick) line._kernelTick = setTimeout(() => { line._kernelTick = null; if (line.isConnected) again(); }, 1500); };')
+    && ui.includes('    const step = kernelPollStep(r, line._kernelPolling);\n    line._kernelPolling = step.polling;\n    if (!step.redraw) { if (step.tick) tick(); return; }') && ui.includes('    if (step.tick) tick();\n')
+    && !/setInterval\(again/.test(ui) && /const words = kernelDownloadWords\(ans, t\);\n\s+if \(words\) this\._kernelSaid\.set\(id, words\);/.test(ui) && /b\.classList\.toggle\('is-busy', busy\);/.test(ui) && /if \(d\.busy \|\| this\._kernelAsks\.has\(d\.id\)\) \{ this\._kernelSaid\.set\(d\.id, t\('its kernel is already downloading'\)\); again\(\); return; \}/.test(ui) && !/\.disabled = /.test(ui.slice(ui.indexOf('  _paintKernelDoors('), ui.indexOf('\n  }\n', ui.indexOf('  async _downloadKernel(')))) /* the doors' own code (another row's button, e.g. hooks-create's Apply, is not these doors) */
+    && /, \.settings-engine-download \{ flex: none;/.test(css) && /\.settings-engine-doors \{/.test(css),
+    'B-0bc7 wiring: the Settings engine row draws the doors with every engines answer, POSTs a press, asks the row again by the line\'s own tick while a kernel downloads (never a timer tied to the POST), keeps a busy door LIVE and has it say why, says each door\'s answer beside it (the old answer ends only when a download STARTS), redraws only when the doors moved and gives the focus back to its door — the row\'s own button rule (theme variables)');
+  // CONTROL: a model copy whose doors skip a FAILED download (only «none yet») — the engine whose download failed would have no door
+  const MUTK = mutantCopies('b0bc7-doors', REPO);
+  const msrc = read('src/lib/browser-build-model.js');
+  const needle = "    if (!e.installed || (k && k.next && k.next.unread)) out.push(";
+  ok(msrc.split(needle).length === 2, 'B-0bc7 control setup: the door rule is found once in src/lib/browser-build-model.js');
+  const fCopy = MUTK.write('src/lib/browser-build-model.js', msrc.replace(needle, "    if ((!e.installed && !(k && k.state === 'failed')) || (k && k.next && k.next.unread)) out.push("), 'no-failed-door', { esm: true });
+  const BMx = await import('file://' + fCopy);
+  ok(!judgeDoors(BMx) && !BMx.kernelDoors(R0).some((d) => d.id === 'eng-failed'), 'CONTROL (B-0bc7): a door rule without the failed download — that engine has no «Download kernel» ⇒ the door table goes RED', BMx.kernelDoors(R0));
+  const stepNeedle = "  if (!r || r.error) return { polling: !!polling, tick: !!polling, redraw: false };";
+  ok(msrc.split(stepNeedle).length === 2, 'B-0bc7 control setup: the failed-read step is found once');
+  const fCopy2 = MUTK.write('src/lib/browser-build-model.js', msrc.replace(stepNeedle, "  if (!r || r.error) return { polling: false, tick: false, redraw: true };"), 'failed-read-ends', { esm: true });
+  const BMy = await import('file://' + fCopy2);
+  ok(!judgeStep(BMy), 'CONTROL (B-0bc7, round 2\'s should): a step that lets ONE failed read end the poll (the doors removed, never asked again) goes RED');
+  // its verdict's MUST: a press on a busy door SHOWS its words — the old answer ends when a download STARTS, never on a read that still
+  // says downloading. The leg: the row's first read (a download running), a press on the busy door, the redraw's read (still
+  // downloading) ⇒ the words are drawn; the download ends, a NEW one starts ⇒ the old answer goes
+  const BUSY = 'its kernel is already downloading';
+  const judgeSaid = (BM) => {
+    const dl = [{ id: 'eng-x', kernel: { state: 'downloading' } }], failed = [{ id: 'eng-x', kernel: { state: 'failed', code: 'build_fetch_failed' } }];
+    const s1 = BM.kernelSaidStep({ engines: dl });
+    const pressed = new Map(s1.said); pressed.set('eng-x', BUSY); // the press on the busy door
+    const s2 = BM.kernelSaidStep({ said: pressed, states: s1.states, engines: dl }); // the redraw the press asks for: still downloading
+    const s3 = BM.kernelSaidStep({ said: s2.said, states: s2.states, engines: failed }); // cure 2: the download ENDED (it failed)
+    const refused = new Map(s3.said); refused.set('eng-x', 'the kernel could not be downloaded: not enough free disk space'); // a press now, refused by code
+    const s4 = BM.kernelSaidStep({ said: refused, states: s3.states, engines: failed }); // nothing changed since
+    const s5 = BM.kernelSaidStep({ said: s4.said, states: s4.states, engines: dl }); // a NEW download starts
+    return { drawn: s2.said.get('eng-x') === BUSY, endsAtEnd: !s3.said.has('eng-x'), standsWhileSame: s4.said.has('eng-x'), endsAtStart: !s5.said.has('eng-x') };
+  };
+  const js = judgeSaid(BMk);
+  ok(js.drawn && js.endsAtEnd && js.standsWhileSame && js.endsAtStart, `B-0bc7 (its verdict's must + cure 2): a press on a busy door, then a read that still says downloading — its words are DRAWN (${js.drawn}); the download then FAILS — «already downloading» is gone (${js.endsAtEnd}, never beside a fact line that says it failed); a refusal stands while nothing changes (${js.standsWhileSame}); a download that STARTS ends it (${js.endsAtStart})`, js);
+  const saidNeedle = "    if (st.has(id) ? st.get(id) !== now : now === 'downloading') s.delete(id);";
+  ok(msrc.split(saidNeedle).length === 2, 'B-0bc7 control setup: the «ends at the start» rule is found once in src/lib/browser-build-model.js');
+  const fCopy3 = MUTK.write('src/lib/browser-build-model.js', msrc.replace(saidNeedle, "    if (now === 'downloading') s.delete(id);"), 'said-every-read', { esm: true }); // stale-pins: kept — the batch's first rule, planted back
+  const BMz = await import('file://' + fCopy3);
+  ok(!judgeSaid(BMz).drawn, 'CONTROL (B-0bc7, its verdict\'s must): the batch\'s own rule — a downloading read ends the answer (settings-ui\'s old line) — erases the busy press\'s words before they are drawn ⇒ RED', judgeSaid(BMz));
+  const fCopy4 = MUTK.write('src/lib/browser-build-model.js', msrc.replace(saidNeedle, "    if (now === 'downloading' && st.get(id) !== 'downloading') s.delete(id);"), 'said-only-at-start', { esm: true }); // stale-pins: kept — the first cure's rule, planted back as this control's mutant
+  const BMw = await import('file://' + fCopy4);
+  ok(!judgeSaid(BMw).endsAtEnd && judgeSaid(BMw).drawn, 'CONTROL (B-0bc7 cure 2): the first cure\'s rule — the answer ends only when a download STARTS — keeps «its kernel is already downloading» beside a download that FAILED ⇒ RED', judgeSaid(BMw));
+  const ui2 = read('src/lib/settings-ui.js');
+  ok(ui2.includes('kernelSaidStep({ said: this._kernelSaid, states: this._kernelStates || new Map(), engines: r.engines })') && !ui2.includes("if (e && e.kernel && e.kernel.state === 'downloading') this._kernelSaid.delete(String(e.id));") && ui2.includes('if (box._doorsSig === sig) { if (step.tick) tick(); return; }') && /if \(focused\) \{ const fb = \[\.\.\.box\.querySelectorAll\('button\.settings-engine-download'\)\]\.find\(\(x\) => x\.dataset\.engine === focused\); if \(fb\) fb\.focus\(\); \}/.test(ui2), // stale-pins: kept — a deliberate absence check: the old delete-on-every-read line is gone
+    'B-0bc7 wiring (its verdict): the Settings row asks the PURE step for its answers (the old delete-on-every-downloading-read line gone — stale-pins: kept), redraws only when the doors moved, and gives the focus back to its door');
 }
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);

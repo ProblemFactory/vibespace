@@ -92,7 +92,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, realClicker } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, realClicker, CHROME_STORE } from './scratch.mjs';
+import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for the server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 
@@ -103,9 +104,10 @@ try { execSync('command -v dtach', { stdio: 'ignore', shell: '/bin/bash' }); } c
 const { claudeAllowRules } = require(path.join(repo, 'src/agent-tool-rules.js'));
 
 const [PORT, CDP_PORT] = await freePorts(2);
-const wt = scratch('new-session-dialog-wt');
-const fakeHome = scratchHome('new-session-dialog-home', fs);
-const stubDir = scratch('new-session-dialog-stub');
+const root = mintRoot('new-session-dialog-wt'), wt = path.join(root, 't');
+const chromeHome = path.join(root, 'chrome-home'); fs.mkdirSync(chromeHome, { recursive: true });   // rule nine (hub-boot.mjs): the suite's own browser carries a HOME in the root, so the helper ends it before the root goes
+const fakeHome = path.join(root, 'home'); for (const d of ['.claude/projects', '.claude/sessions', '.config', '.vibespace']) fs.mkdirSync(path.join(fakeHome, d), { recursive: true });
+const stubDir = path.join(root, 'stub');
 fs.rmSync(stubDir, { recursive: true, force: true });
 fs.mkdirSync(stubDir, { recursive: true });
 const sshDir = scratch('new-session-dialog-ssh'); // I: a stub ssh for a machine that cannot be reached (never a real one)
@@ -173,7 +175,6 @@ process.stdin.on('end', () => process.exit(0));
 `, { mode: 0o755 });
 
 // ── throwaway server in a worktree (overlays the working src/ + the built public/) ──
-try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js', 'package.json', 'data/bin']) execSync(`rm -rf ${wt}/${f} && mkdir -p ${path.dirname(`${wt}/${f}`)} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
@@ -202,25 +203,17 @@ fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
     { id: 'pv-lane-empty', kind: 'self-hosted', label: 'Empty', modelsSource: 'none' },
   ] }), { mode: 0o600 });
 }
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_CHANNELS_FAKE: '1' /* H: the fake channel accounts the form's 「账号 · 以你的身份」 lists */, PATH: `${sshDir}:${process.env.PATH}` /* I: the stub ssh */ }, stdio: 'ignore' });
-const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
-  '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${wt}-chrome`, 'about:blank'], { stdio: 'ignore' });
+const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_CHANNELS_FAKE: '1' /* H: the fake channel accounts the form's 「账号 · 以你的身份」 lists */, PATH: `${sshDir}:${process.env.PATH}` /* I: the stub ssh */ } });
+const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
+  '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${wt}-chrome`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, HOME: chromeHome } });
 let cleaned = false;
 const cleanup = () => {
   if (cleaned) return; cleaned = true;
   try { chrome.kill('SIGKILL'); } catch {}
-  try { srv.kill('SIGKILL'); } catch {}
-  // every process this suite caused carries one of these scratch paths (dtach, the wrapper, the stub, the device daemon)
-  for (const pat of [wt, fakeHome, stubDir]) { try { execSync(`pkill -9 -f ${JSON.stringify(pat)}`, { stdio: 'ignore' }); } catch {} }
-  // …and what lives there only by cwd / HOME / daemon root — the server's device daemon is title-rewritten, so no argv
-  // names it (it outlived every run: the gate's reaper found it later)
-  for (const root of [wt, `${wt}-chrome`, fakeHome, stubDir]) { try { endRootedProcesses(root); } catch {} }
-  try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
-  for (const d of [wt, `${wt}-chrome`, fakeHome, stubDir]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
+  // the hub and every process it caused end with hub-boot.mjs's root (no pattern kill — rule five)
 };
 process.on('exit', cleanup);
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
-for (let i = 0; i < 80; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); break; } catch { await sleep(250); } }
+await hub.ready();
 
 // ── raw CDP ─────────────────────────────────────────────────────────────────
 const WebSocket = require('ws');

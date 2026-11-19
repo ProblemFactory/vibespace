@@ -45,8 +45,8 @@ function create({ dataDir, writer = null, readFile = null, log = () => { }, now 
       // the batch's readers: a file that was READ but is not a record is kept beside it (through the store writer — no write of
       // its own) and a fresh record starts; before, the record stayed off in every run with one boot line as its only sign
       byConv.clear();
-      const bad = raw;
-      try { storeWriter().dirty(file + '.bad', { name: STORE_NAME_BAD, debounceMs: 0, allowEmpty: true, produce: () => bad }); log(`[sent-record] ${file} is not a record (${(e && e.message) || e}) — kept as ${FILE}.bad, a fresh record starts`); }
+      let bad = raw;   // dropped once written (the readers: a damaged file's text is not held for the rest of the run)
+      try { storeWriter().dirty(file + '.bad', { name: STORE_NAME_BAD, debounceMs: 0, allowEmpty: true, produce: () => bad || '', onWritten: (ok) => { if (ok) bad = null; } }); log(`[sent-record] ${file} is not a record (${(e && e.message) || e}) — kept as ${FILE}.bad, a fresh record starts`); }
       catch (e2) { unread = true; log(`[sent-record] ${file} is not a record and could not be kept aside (${(e2 && e2.message) || e2}) — nothing is written over it in this run`); }
     } else { unread = true; log(`[sent-record] ${file} could not be read (${(e && (e.code || e.message)) || e}) — nothing is written over it in this run`); }
   }
@@ -77,6 +77,8 @@ function create({ dataDir, writer = null, readFile = null, log = () => { }, now 
       return row;
     } catch (e) { log('[sent-record] a send was not recorded:', e && e.message); return null; }
   }
+  /** READ ONLY: the store keeps each conversation's encoding until its next send — a caller that changed the list would part the
+   *  bytes on disk from memory (every reader today only reads: a worker call copies it, SP.kindFor reads it). */
   const rowsFor = (conv) => (typeof conv === 'string' ? byConv.get(conv) || null : null);
   return { note, rowsFor, file, isUnread: () => unread, encodes: () => encodes };
 }

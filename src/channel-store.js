@@ -336,8 +336,18 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   const adaptersFile = path.join(dir, 'adapters.json');
   const auditFile = path.join(dir, 'audit.ndjson');
 
-  fs.mkdirSync(msgsDir, { recursive: true });
-  fs.mkdirSync(archiveDir, { recursive: true });
+  fs.mkdirSync(msgsDir, { recursive: true, mode: 0o700 });
+  fs.mkdirSync(archiveDir, { recursive: true, mode: 0o700 });
+  // THE STORE IS THE OWNING ACCOUNT'S ALONE (the owner, 2026-11-17): channel content — heads, bodies, attachments — stays
+  // PLAIN at rest, as transcripts and the search index are; only an account's sign-in token and app secret are sealed (the
+  // vault's channels key). So the store's folder is CLOSED to other OS accounts: the ROOT alone loses its group / other bits,
+  // which closes everything under it — never a walk (an instance holds some 200 000 conversation files; a walk at the store's
+  // start would hold the main loop). It only TAKES bits away (mode & 0o700): an owner's own bits are never granted, so a
+  // read-only root stays read-only and the BLOCKED rung still holds. Asynchronous, never awaited by the open; already closed
+  // = no chmod; a filesystem without modes (or one that refuses) is one line, never an error.
+  const rootClosed = fs.promises.stat(dir)
+    .then((s) => ((s.mode & 0o077) ? fs.promises.chmod(dir, s.mode & 0o700).then(() => true) : true))
+    .catch((e) => { warn(`[channels] the store's folder was not closed to other accounts (${(e && e.code) || (e && e.message) || e}) — its files keep the modes they have`); return false; });
 
   // ── FAIL CLOSED ON AN UNREADABLE STORE FILE (r2, 2026-09-23 verifier: a
   // truncated groups.json read as EMPTY with no log line, and the first group
@@ -562,14 +572,27 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (next === '') oddKeys.add(key);
     else { let set = byAcct.get(next); if (!set) byAcct.set(next, (set = new Set())); set.add(key); }
   }
-  /** B-dfa4 U2: the keys of ONE account's rows (with any row whose key and account disagree) — a fresh array; the caller
-   *  reads each row from `live()` and keeps its own test. Inside an update a row may be born or gone before its touch
-   *  fires, so there it is every key (the walk's old cost, never a missed row). */
+  /** B-dfa4 U2: the keys of ONE account's rows (with any row whose key and account disagree) — a fresh array, in the
+   *  map's own order (a birth joins both at the end); the caller reads each row from `live()` and keeps its own test.
+   *  B-dfa4 cut 1: INSIDE an update a row may be born, moved or gone before its touch fires — there the kept set as it
+   *  stood at the update's start PLUS every key the update touched so far (a born or moved row is touched; a gone one
+   *  reads undefined), and every key once the update reached the whole map: a superset, never a missed row. */
   function keysOf(adapterId) {
-    if (curTouch) return Object.keys(ix.conversations);
+    if (curTouch && curTouch.all) return Object.keys(ix.conversations);
     if (!byAcct) { byAcct = new Map(); acctOfKey.clear(); oddKeys.clear(); acctStats.builds++; for (const k of Object.keys(ix.conversations)) acctPlace(k); }
     const set = byAcct.get(String(adapterId));
-    return oddKeys.size ? [...(set || []), ...oddKeys] : (set ? [...set] : []);
+    const out = oddKeys.size ? [...(set || []), ...oddKeys] : (set ? [...set] : []);
+    if (curTouch) for (const k of curTouch) if (!(set && set.has(k)) && !oddKeys.has(k)) out.push(k);
+    return out;
+  }
+  /** B-dfa4 cut 1: ONE account's rows for a READ-ONLY scan — keysOf's keys read off the map: the account's own rows in the
+   *  map's order, a row whose key is not its account's (only a damaged act line) and, inside an update, a row it touched
+   *  after them (a key gone meanwhile is skipped). Never a touch: a caller that CHANGES a row inside an update walks
+   *  `keysOf` + `rows()` and touches the MAP key, as a `rows()` scan does. Each caller keeps its own test. */
+  function rowsOf(adapterId) {
+    const out = [];
+    for (const k of keysOf(adapterId)) { const en = ix.conversations[k]; if (en) out.push(en); }
+    return out;
   }
   const fire = (key) => {
     if (byAcct) { if (key === null) byAcct = null; else acctPlace(key); }   // B-dfa4 U2: before the hooks (a hook may walk an account)
@@ -596,7 +619,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     // in flight when the engine stopped holds its hits pending) is written
     // NOW — the debounce is gone, and an unflushed hold was a lost message
     if (closed) { try { flush(); } catch (e) { warn('[channels] index.json not written after close:', (e && e.message) || e); } return; }
-    W().dirty(indexFile, { name: 'channels-index.write', produce: produceIndex, debounceMs: FLUSH_DEBOUNCE_MS, onWritten: indexWritten, ...(act ? { rank: 0 } : {}) });
+    W().dirty(indexFile, { name: 'channels-index.write', produce: produceIndex, debounceMs: FLUSH_DEBOUNCE_MS, mode: 0o600, onWritten: indexWritten, ...(act ? { rank: 0 } : {}) });
   }
 
   // THE WRITER ASKS FOR THE BYTES when the index is due (lane hub-loop-stalls commit 2): the serialization runs HERE on
@@ -625,7 +648,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       // the acts this index holds leave the journal: a COMPACTION is owed (one small whole-file rewrite at its own pace — a
       // line the index holds is skipped at load anyway)
       const before = actLines.length; actLines = actLines.filter((x) => x.seq > pendingActsSeq);
-      if (actLines.length !== before) { compactOwed = true; W().dirty(actsFile, { name: 'channels-acts.write', produce: produceActs, debounceMs: FLUSH_DEBOUNCE_MS, allowEmpty: true, onWritten: actsWritten }); }
+      if (actLines.length !== before) { compactOwed = true; W().dirty(actsFile, { name: 'channels-acts.write', produce: produceActs, debounceMs: FLUSH_DEBOUNCE_MS, mode: 0o600, allowEmpty: true, onWritten: actsWritten }); }
       return;
     }
     bytesOwed = true; lastTop = null; dirty = true;   // owed: the writer has kept it dirty and retries
@@ -637,7 +660,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   function flush({ full = false } = {}) {
     if (!dirty && !W().pending(indexFile)) return false;   // a clean index is not rewritten (`full` = HOW, when there is something to write)
     if (full) fullOwed = true;
-    W().dirty(indexFile, { name: 'channels-index.write', produce: produceIndex, debounceMs: FLUSH_DEBOUNCE_MS, onWritten: indexWritten });
+    W().dirty(indexFile, { name: 'channels-index.write', produce: produceIndex, debounceMs: FLUSH_DEBOUNCE_MS, mode: 0o600, onWritten: indexWritten });
     const r = W().flushSync([indexFile]);
     // a failed write THROWS, as the inline write did (the writer keeps it owed and retries): a caller ordering a cursor
     // after the rows never advances it past rows that are not on disk
@@ -862,7 +885,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (!rows.length && !topPart) return 'none';
     const seq = ++actSeq;
     actLines.push({ seq, text: `{"seq":${seq},"rows":{${rows.join(',')}}${topPart}}\n` });
-    W().dirty(actsFile, { name: 'channels-acts.write', produce: produceActs, debounceMs: FLUSH_DEBOUNCE_MS, rank: 0, allowEmpty: true, onWritten: actsWritten });
+    W().dirty(actsFile, { name: 'channels-acts.write', produce: produceActs, debounceMs: FLUSH_DEBOUNCE_MS, mode: 0o600, rank: 0, allowEmpty: true, onWritten: actsWritten });
     if (journalBytes > ACTS_MAX_BYTES) {   // THE BOUND: said, and the index's own write made urgent (it folds the journal)
       if (actsOverSaid++ % 100 === 0) warn(`[channels] index-acts.ndjson is past its bound (${Math.round(journalBytes / 1048576)} MB of ${ACTS_MAX_BYTES / 1048576}) — the index is written now to fold it${actsOverSaid > 1 ? ` (still past it: the index has not landed since — ${flushStats.writes} index write${flushStats.writes === 1 ? '' : 's'} so far; the acts keep coming faster than its paced turn)` : ''}`);
       if (!closed) { markDirty(); W().durable(indexFile).catch(() => { }); }
@@ -1028,7 +1051,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     const widened = offers.length ? widenQuiet(adapterId, convId, offers, { src: placeSrcOf(records) }) : [];
     if (!fresh.length) return { appended: 0, duplicates, lastAt: null, lastText: null, healed: false, freshAt: [], fresh: [], widened };
     const fp = logPath(adapterId, convId);
-    fs.mkdirSync(path.dirname(fp), { recursive: true });
+    fs.mkdirSync(path.dirname(fp), { recursive: true, mode: 0o700 });
     let healed;
     try {
       healed = appendLines(fp, fresh.map((r) => JSON.stringify(r)).join('\n') + '\n');
@@ -1078,7 +1101,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    * shape this function exists to recover from. Returns whether it healed.
    */
   function appendLines(fp, payload) {
-    const fd = fs.openSync(fp, 'a+');
+    const fd = fs.openSync(fp, 'a+', 0o600);   // a new log is the owning account's alone (an existing one keeps its bits; the root's 0700 closes it)
     let healed = false;
     try {
       const size = fs.fstatSync(fd).size;
@@ -1398,7 +1421,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     const widened = offers.length ? widenQuiet(adapterId, convId, offers, { src: placeSrcOf(records) }) : [];
     if (!fresh.length) return { appended: 0, duplicates, widened };
     const fp = logPath(adapterId, convId);
-    fs.mkdirSync(path.dirname(fp), { recursive: true });
+    fs.mkdirSync(path.dirname(fp), { recursive: true, mode: 0o700 });
     let lines = [];
     try { lines = fs.readFileSync(fp, 'utf-8').split('\n').filter(Boolean); } catch (e) { if (e.code !== 'ENOENT') throw e; }
     const parsed = [];
@@ -1463,7 +1486,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     }
     if (!fresh.length) return { appended: 0, duplicates, msgs: [] };
     const fp = sidePath(adapterId, convId);
-    fs.mkdirSync(path.dirname(fp), { recursive: true });
+    fs.mkdirSync(path.dirname(fp), { recursive: true, mode: 0o700 });
     try { appendLines(fp, fresh.map((x) => JSON.stringify(x)).join('\n') + '\n'); }
     catch (e) { sideDedup.delete(`${adapterId}/${convId}`); throw e; }
     for (const x of fresh) { set.add(sideKey(x)); if (set.size > SIDE_DEDUP_MAX) { const it = set.values(); for (let i = set.size - SIDE_DEDUP_MAX; i > 0; i--) set.delete(it.next().value); } }
@@ -1732,7 +1755,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     names = names.filter((n) => n.endsWith('.ndjson') && (!wanted || wanted.has(n)));
     // NEWEST CONVERSATION FIRST (design 010): the index's lastAt per log file, read-only (no copy, no touch)
     const lastAtOf = new Map(), titleOf = new Map();
-    for (const en of Object.values(ix.conversations)) if (en && en.adapterId === adapterId && en.id != null) { lastAtOf.set(`${safeSeg(en.id)}.ndjson`, Number(en.lastAt) || 0); if (en.title) titleOf.set(`${safeSeg(en.id)}.ndjson`, String(en.title).toLowerCase()); }
+    for (const k of keysOf(adapterId)) { const en = ix.conversations[k]; if (en && en.adapterId === adapterId && en.id != null) { lastAtOf.set(`${safeSeg(en.id)}.ndjson`, Number(en.lastAt) || 0); if (en.title) titleOf.set(`${safeSeg(en.id)}.ndjson`, String(en.title).toLowerCase()); } }   // B-dfa4 cut 1: this account's rows only
     names.sort((a, b) => (lastAtOf.has(b) - lastAtOf.has(a)) || ((lastAtOf.get(b) || 0) - (lastAtOf.get(a) || 0)) || (a < b ? -1 : a > b ? 1 : 0));
     let scanned = 0, truncated = false, files = 0, capped = false, oldestAt = null, matched = 0;
     const hits = [];
@@ -2328,12 +2351,13 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   }
 
   return {
+    rootClosed,   // the root closed to other accounts: resolves true once it is (or already was), false when the filesystem refused (said once)
     dir, indexFile, adaptersFile, auditFile, archiveDir, outboxFile, groupsFile, aliasesFile, logPath, purgeAccount,
     // `blocked()` = the refusal sentence while a family's file could not be set aside (null = writable)
     index: {
       update, snapshot, peek, has, live: liveConversations, rows, touch, table: liveTable, entry, flush, durable: durableIndex, isDirty: () => dirty, blocked: () => ixBlocked || null,
       // B-dfa4 U2: `keysOf(adapterId)` = that account's row keys, kept (a walk of one account reads its own rows); `keysStats()` for the gates
-      keysOf, keysStats: () => ({ ...acctStats, kept: !!byAcct, odd: oddKeys.size }),
+      keysOf, rowsOf, keysStats: () => ({ ...acctStats, kept: !!byAcct, odd: oddKeys.size }),   // B-dfa4 cut 1: `rowsOf(adapterId)` = those rows, read-only
       // B-f32b: `onTouch(fn)` = fn(key) after an update touched that row, fn(null) after it reached the whole map (the
       // engine's kept unread total); `sweep()` / `flushStats()` for the gates
       onTouch: (fn) => { if (typeof fn === 'function') touchHooks.push(fn); }, sweep, flushStats: () => ({ ...flushStats, chunks: layout ? layout.chunks.length : 0 }),

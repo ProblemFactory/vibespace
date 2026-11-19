@@ -28,11 +28,15 @@ if (!API || (!SESS && !JOBT)) { console.error('vibespace-job: not inside a VibeS
 const args = process.argv.slice(2);
 const flags = {};
 const pos = [];
+// B-0bda (its adversarial read r1): a flag that takes NO value never eats the next word — `run --notify-ok bash /srv/gate.sh` made
+// notify-ok «bash», left ONE positional word and ran /srv/gate.sh alone, unrefused
+const BOOL_FLAGS = new Set(['stdin-open', 'notify-user', 'notify-ok', 'keep-up', 'publish']);
 for (let i = 0; i < args.length; i++) {
   const a = args[i];
   if (a.startsWith('--')) {
     const k = a.slice(2);
     if (k === 'vault') { if (i + 1 < args.length && !args[i + 1].startsWith('--')) (flags.vault = flags.vault || []).push(args[++i]); else flags.vault = true; } // repeatable (lane vault-job-road)
+    else if (BOOL_FLAGS.has(k)) flags[k] = true;
     else if (i + 1 < args.length && !args[i + 1].startsWith('--')) { flags[k] = args[++i]; }
     else flags[k] = true;
   } else pos.push(a);
@@ -43,7 +47,7 @@ const verb = pos[0];
 // never learned — `--vault` before it existed) was SWALLOWED and the job started without it. test-jobs-cli-body pins this list
 // to the usage the CLI prints and the flags the branch reads.
 const RUN_FLAGS = Object.freeze(['name', 'note', 'context', 'cwd', 'until', 'timeout', 'stdin-open', 'notify', 'notify-user', 'notify-ok', 'memory',
-  'keep-up', 'restart', 'port', 'publish', 'view', 'control', 'stop-with-owner', 'every', 'jitter', 'cron', 'at', 'text', 'urgency', 'vault']);
+  'keep-up', 'restart', 'port', 'publish', 'view', 'control', 'every', 'jitter', 'cron', 'at', 'text', 'urgency', 'vault']);
 // a --vault is a REFERENCE (NAME=vault://…): anything else is refused HERE, before anything is sent — a value typed where a
 // reference belongs never leaves this command line (refused at its position, its text never echoed). The hub judges the rest.
 function vaultRefusal(v, isNotify) {
@@ -183,14 +187,14 @@ read:    vibespace-job list [--mine|--subscribed|--archived] · vibespace-job po
             poll/show/logs of an archived id still answer, marked archived; list --archived shows them)
          vibespace-job show <id>  (FULL params: cmd/schedule/access/notify/subscribers/your subscription)
          vibespace-job logs <id> [--tail 200]
-control: vibespace-job stop <id> [--force] · vibespace-job start <id> · vibespace-job rm <id> [--stop]
+control: vibespace-job stop <id> [--force] · vibespace-job start <id> · vibespace-job restart <id> · vibespace-job rm <id> [--stop]
          vibespace-job access <id> [--view session|group|all] [--control session|group|all]
          vibespace-job notify <id> on|off|inherit   (owner only — change auto-notify without recreating)
          vibespace-job memory <id> 8G|512M|inherit  (owner only — its memory bound from its next run; 0 is the user's call)
          vibespace-job subscribe <id> [--filter "SpaceX|Starship"] · unsubscribe <id>   (any session that can VIEW
            the job gets its notifications; --filter = case-insensitive regex on the message text, re-subscribe updates it;
            the OWNER subscribing to its own job: the filter shapes its auto-notify too)
-in-job:  vibespace-job progress "text"     · vibespace-job ask --form @panel.json [--timeout 30m]
+in-job:  vibespace-job progress "text"     · vibespace-job ask --form @panel.json [--timeout 30m] · vibespace-job withdraw (its cause is gone)
          vibespace-job answers [--wait 100] · vibespace-job announce "what happened" (notify owner+subscribers NOW —
            for watch jobs where exit code ≠ newsworthiness; --notify-ok at create = scheduled successes notify too)
 Pick the right tool: turn-scoped waits → background Bash/Monitor · session continuation → /goal ·
@@ -207,11 +211,16 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
   switch (verb) {
     case 'run': case 'notify-cron': {
       const isNotify = verb === 'notify-cron';
+      // B-70f9 ②: the retired flag says so by name (an older habit, an older agent's note) — never a generic unknown flag
       const unknown = Object.keys(flags).filter((k) => !RUN_FLAGS.includes(k));
+      if (unknown.includes('stop-with-owner')) { console.error('--stop-with-owner was retired: when a person ends or archives a conversation, a notice names the jobs it still runs and «Stop these too» stops them in one press — nothing was sent'); process.exit(2); }   // read off the unknown list, never `flags[…]` — test-jobs-cli-body: a flag the branch reads is one the usage prints
       if (unknown.length) { console.error(`vibespace-job ${verb}: ${unknown.length === 1 ? 'an unknown flag' : `${unknown.length} unknown flags`} (${unknown.map((k) => (/^[a-z][a-z0-9-]{0,39}$/.test(k) ? '--' + k : 'a flag of another shape')).join(', ')}) — nothing was sent. The flags ${verb} knows: ${RUN_FLAGS.map((f) => '--' + f).join(' ')}`); process.exit(2); }
       const vaultBad = vaultRefusal(flags.vault, isNotify);
       if (vaultBad) { console.error(vaultBad); process.exit(2); }
       const cmdStr = pos[1];
+      // B-0bda (fb-dd15343aa4): a command line with MORE positional words than the ONE command string ran its first word alone — 0 s, «ok»,
+      // a gate believed passed. Refused by name, with the quoted form to type; nothing is sent
+      if (!isNotify && pos.length > 2) { const q = (w) => "'" + String(w).replace(/'/g, "'\\''") + "'", word = (w) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(String(w)) ? String(w) : q(w));   /* each word quoted as a shell needs it, THEN the whole line (the adversarial read r1: a bare join suggested `bash -c cd …`) */ console.error(`vibespace-job run: the command must be ONE quoted string — ${pos.length - 1} words were given (${pos.slice(1, 4).map((w) => JSON.stringify(w)).join(' ')}${pos.length > 4 ? ' …' : ''}) and only the first would run. Type: vibespace-job run ${q(pos.slice(1).map(word).join(' '))} [flags] — nothing was sent`); process.exit(2); }
       if (!isNotify && !cmdStr) { console.error('usage: vibespace-job run "CMD" --name NAME [flags] — run with no args for full usage'); process.exit(1); }
       // --at forms: epoch ms | RELATIVE "+2m"/"+1h30m" (unambiguous — prefer
       // this) | ISO with Z/offset (exact) | bare datetime = SERVER-LOCAL time.
@@ -235,7 +244,6 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
         context: flags.context ? { payload: readArg(flags.context) } : null,
         schedule,
         access: { view: flags.view || 'group', control: flags.control || 'session' },
-        stopWithOwner: !!flags['stop-with-owner'],
         notify: flags.notify === 'on' || flags.notify === 'off' ? flags.notify : undefined,
         // lane job-notify-user: the For-you copy is ONE top-level field for every shape — notify-cron never sent it (the
         // fire woke only the agent) and a scheduled run hid it inside action.task, where the cron's own record said false
@@ -260,7 +268,7 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
         echoReminder = !!schedule && flags['notify-ok'] === undefined && flags.notify !== 'off'
           && /^\s*(echo|printf)\b[^|&;<>`$()]*$/.test(cmdStr);
         const task = {
-          cmd: { argv: ['sh', '-c', cmdStr], cwd: flags.cwd || process.cwd() },
+          cmd: { argv: ['sh', '-c', cmdStr], cwd: typeof flags.cwd === 'string' && flags.cwd ? require('node:path').resolve(flags.cwd) : process.cwd() },   // B-70f9: resolved HERE, where the conversation runs (a relative folder would name the hub's own)
           untilOutput: flags.until || null, timeoutMs: flags.timeout ? dur(flags.timeout) : null,
           stdinOpen: !!flags['stdin-open'], memoryMb: typeof flags.memory === 'string' ? flags.memory : undefined,
           notifyOk: !!flags['notify-ok'] || echoReminder, restart: flags.restart || 'on-failure',
@@ -283,6 +291,7 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       if (j.state === 'waiting') console.log(`waiting: ${j.id} (${j.kind} ${j.name}) was created and is NOT started${renamed} — ${j.waitWords || 'poll it for what it waits on'}`);
       else if (r.vaultWait && r.vaultWait.words) console.log(`scheduled: ${j.id} (${j.kind} ${j.name})${renamed} — but each fire's run WAITS and is NOT started: ${r.vaultWait.words}`);
       else console.log(`started ${j.id} (${j.kind} ${j.name})${renamed}`);
+      if (r.where) console.log(`where: ${r.where}`);   // B-70f9: a job runs on the hub's machine — said with the path
       // RESOLVED-TIME ECHO: always show WHEN it actually fires, absolute (the
       // owner's zone, named — B-7960) + countdown — a timezone mis-parse (bare
       // datetimes are server-local) must be visible the second the job is created.
@@ -333,11 +342,12 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       const r = await call('GET', `/api/agent/jobs/${encodeURIComponent(pos[1])}`);
       const j = r.job;
       console.log(`${j.id} [${j.kind}] ${j.state} — ${j.name}${j.mine ? '  (yours)' : j.mine === false ? NOT_MINE : ''}${j.archived ? '  (ARCHIVED ' + (j.archivedWhy || '') + ')' : ''}`);
+      if (r.machine) console.log(`machine: ${r.machine} (a job runs on the hub's machine)`);   // B-70f9
       if (j.cmd) console.log(`cmd: ${JSON.stringify(j.cmd.argv)}${j.cmd.cwd ? ' @ ' + j.cmd.cwd : ''}${j.cmd.envKeys.length ? ' env:[' + j.cmd.envKeys.join(',') + ']' : ''}${j.envFrom.length ? ' envFrom:[' + j.envFrom.join(',') + ']' : ''}`);
       if (j.schedule) console.log(`schedule: ${JSON.stringify(j.schedule)} catchUp=${j.catchUp}${j.nextFireAt ? ' next=' + atWords(j, 'nextFireAt') : ''}`);
       // lane job-notify-user r3: a notify cron's reminder (the snapshot kept none)
       if (j.actionText) console.log('text: ' + j.actionText);
-      console.log(`params: restart=${j.restart} timeout=${j.timeoutMs || '—'} until=${j.untilOutput || '—'} singleInstance=${j.singleInstance} stopWithOwner=${j.stopWithOwner} notifyOk=${j.notifyOk} notifyUser=${j.kind === 'service' ? 'n/a (a service never tells at its end)' : j.notifyUser}`);
+      console.log(`params: restart=${j.restart} timeout=${j.timeoutMs || '—'} until=${j.untilOutput || '—'} singleInstance=${j.singleInstance} notifyOk=${j.notifyOk} notifyUser=${j.kind === 'service' ? 'n/a (a service never tells at its end)' : j.notifyUser}`);
       if (forYouLine(j)) console.log(forYouLine(j));
       if (memLine(j)) console.log(memLine(j));
       if (vaultLine(j)) console.log(vaultLine(j));
@@ -371,7 +381,13 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       if (verb === 'stop') console.log('stopped (services stay down until an explicit start)');
       else if (r.state === 'waiting') console.log(`waiting: NOT started — ${r.after || 'poll it for what it waits on'}`);
       else if (r.vaultWait && r.vaultWait.words) console.log(`scheduled — but each fire's run WAITS and is NOT started: ${r.vaultWait.words}`);
+      else if (r.pending) console.log(`not started yet: ${r.words || 'it starts when its stop ends'}`);   // B-cac2: a start during a stop
       else console.log('started');
+      break;
+    }
+    case 'restart': {   // B-cac2: stop, wait, start — ONE answer (the hub starts it again when the stop ends)
+      const r = await call('POST', `/api/agent/jobs/${encodeURIComponent(pos[1] || JOBID)}/restart`, {});
+      console.log(r.pending ? `restarting: ${r.words || 'it starts again when the stop ends'}` : r.state === 'waiting' ? `waiting: NOT started — ${r.after || 'poll it for what it waits on'}` : 'restarted');
       break;
     }
     case 'rm': {
@@ -425,6 +441,13 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       if (!ref || !text) { console.error('usage: vibespace-job progress [id] "text"'); process.exit(1); }
       await call('POST', `/api/agent/jobs/${encodeURIComponent(ref)}/progress`, { text });
       console.log('progress recorded (shown in the Jobs panel and in polls)');
+      break;
+    }
+    case 'withdraw': {   // B-8bd5: the job that filed a panel closes it once its cause is gone — its For-you item resolved
+      const ref = pos[1] && pos[1].startsWith('jb-') ? pos[1] : JOBID;
+      if (!ref) { console.error('usage: vibespace-job withdraw [id]   (inside a job: its own panel)'); process.exit(1); }
+      const w = await call('POST', `/api/agent/jobs/${encodeURIComponent(ref)}/withdraw`, {});
+      console.log(w.already ? w.already : `panel${Number.isInteger(w.version) ? ' #' + w.version : ''} withdrawn — its For-you item is resolved`);
       break;
     }
     case 'ask': {

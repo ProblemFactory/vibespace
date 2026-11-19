@@ -457,7 +457,7 @@ console.log('— §A7 wiring');
   ok('§A7 …and hands the record to the banner (both producers) and the turn end',
     (cs.match(/markLimitBanner\(session, [^,]+, msg\)/g) || []).length === 2 && /noteTurnEnd\?\.\(session, msg\)/.test(cs) && /noteSessionProduced\?\.\(session, msg\)/.test(cs));
   ok('§A7 the device feed does the same', /noteStreamRecord\?\.\(session, msg\)/.test(br) && /markLimitBanner\(session, b\.text, msg\)/.test(br));
-  ok('§A7 both feeds keep a backlog\'s spend off the live odometer', /recordIsLate\?\.\(session, msg\)\)/.test(cs) && /recordIsLate\?\.\(session, msg\)\)/.test(br));
+  ok('§A7 both feeds keep a backlog\'s spend off the live odometer', /recordIsLate\?\.\(session, msg\)\)/.test(cs) && /recordIsLate\?\.\(session, msg\)\)/.test(br));   // stale-pins: kept — it reads claude-stream-json and session-brain (both still say it), not acp-events
   ok('§A7 the three live-fact consumers are gated in the engine',
     /function recordRateLimitEvent\(session, msg\) \{\s*\n\s*return gateLiveFact\(session, msg, 'rate_limit_event'/.test(eng)
     && /function markLimitBanner\(session, text, rec = null\) \{\s*\n\s*return gateLiveFact\(session, rec, 'limit banner'/.test(eng)

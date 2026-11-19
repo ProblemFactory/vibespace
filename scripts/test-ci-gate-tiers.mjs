@@ -308,8 +308,9 @@ console.log('\n§7 no gate suite pins the codex prose reset as a literal date');
 // ── §7b A LEG NEVER PASSES BY ITS NAME (B-1747, lane bl-tests-e, 2026-11-17) ──
 // Lane fable-52-cli-321 r5 (2026-11-10): thirteen new legs of test-status-bar-chips called ok(name, condition) against a
 // helper defined ok(condition, name) — a non-empty string is truthy, so the suite read ALL PASS (67) and four census plants
-// stayed green. Both orders live in the tree, every suite with its own copy. This census reads every script's OWN ok /
-// check helper (its order = the parameter its body tests, scripts/lib/check.mjs helperDefs) and fails a call whose
+// stayed green. Both orders live in the tree, every suite with its own copy. This census reads every script's OWN
+// assertion helper — every name in scripts/lib/check.mjs HELPER_NAMES: ok, check, and since B-1747's remainder (2.369.411) the
+// ck / leg / assert a shape survey found — (its order = the parameter its body tests, helperDefs) and fails a call whose
 // CONDITION slot holds a string literal while its name slot does not: on 2.369.407 eight such legs, in test-record-shape,
 // test-queue-steer (the catch of ⑪'s browser leg: a THROWING leg passed), test-voice-follow-chrome and
 // test-path-field-chrome. The one helper (scripts/lib/check.mjs checker) THROWS on a non-boolean condition and a
@@ -318,8 +319,9 @@ console.log('\n§7 no gate suite pins the codex prose reset as a literal date');
 console.log('\n§7b a leg never passes by its name: no swapped call anywhere, one guarded helper, the unguarded only fall');
 {
   const C = await import('./lib/check.mjs');
-  // The inline ok / check helpers without the swap guard, BY FILE (scripts/fixtures/unguarded-helpers.json — 1020 in 1016 files on
-  // 2.369.407). ONE-WAY (主开发 2026-11-17, the batch-36 readers): a file that ADDS one is red by name — a new suite takes
+  // The inline helpers without the swap guard, BY FILE (scripts/fixtures/unguarded-helpers.json — 1020 in 1016 files on
+  // 2.369.407; 1030 in 1026 at 2.369.410; + 80 in 32 files = 1110 in 1041 when the census learned ck / leg / assert at 2.369.411 —
+  // a first reading of helpers the tree already held, none new). ONE-WAY (主开发 2026-11-17, the batch-36 readers): a file that ADDS one is red by name — a new suite takes
   // `import { checker } from './lib/check.mjs'` — and the red prints the row that admits it on purpose; a file whose helper is
   // gone or guarded is NEVER red (forty-six lanes merge suites into one train), its stale row is only said.
   const LISTED = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts', 'fixtures', 'unguarded-helpers.json'), 'utf-8')).files || {};
@@ -333,10 +335,10 @@ console.log('\n§7b a leg never passes by its name: no swapped call anywhere, on
     for (const x of d) if (x.order !== 'unknown' && !x.guarded) { unguarded.push(`${f}:${x.line}`); (perFile[f] = perFile[f] || []).push(x.line); }
     for (const c of C.swappedCalls(src, d)) swapped.push(`${f}:${c.line} (a ${c.order} helper, :${c.defLine}) ${c.text.slice(0, 90)}`);
   }
-  ok(files.length > 1000 && defs > 900, `${files.length} scripts read, ${defs} inline ok / check helpers found (non-vacuous; this file exempts itself)`);
+  ok(files.length > 1000 && defs > 900, `${files.length} scripts read, ${defs} inline ${C.HELPER_NAMES.join(' / ')} helpers found (non-vacuous; this file exempts itself)`);
   ok(swapped.length === 0, `no call hands its own helper a string where the condition goes${swapped.length ? ' — ' + swapped.slice(0, 12).join(' · ') : ''}`);
   const added = Object.entries(perFile).filter(([f, ls]) => ls.length > (LISTED[f] || 0)), fell = Object.keys(LISTED).filter((f) => (perFile[f] || []).length < LISTED[f]);
-  ok(Object.keys(LISTED).length > 900 && added.length === 0, `the inline helpers without the swap guard only fall (${unguarded.length} in ${Object.keys(perFile).length} files, the list ${Object.values(LISTED).reduce((a, b) => a + b, 0)})${added.length ? ' — ADDED by ' + added.map(([f, ls]) => `${f}:${ls.join(',')} (import { checker } from './lib/check.mjs'; on purpose: "${f}": ${ls.length} in scripts/fixtures/unguarded-helpers.json)`).join(' · ') : ''}`);
+  ok(Object.keys(LISTED).length > 900 && added.length === 0, `the inline helpers without the swap guard only fall (${unguarded.length} in ${Object.keys(perFile).length} files, the list ${Object.values(LISTED).reduce((a, b) => a + b, 0)})${added.length ? ' — ADDED by ' + added.map(([f, ls]) => `${f}:${ls.join(',')} (import { checker } from './lib/check.mjs', or give the helper a guard line — if (typeof c !== 'boolean') throw new TypeError(…); on purpose: "${f}": ${ls.length} in scripts/fixtures/unguarded-helpers.json)`).join(' · ') : ''}`);
   if (fell.length) console.log(`    (${fell.length} listed file(s) no longer carry an unguarded helper — not red; drop their rows when convenient: ${fell.slice(0, 8).join(', ')}${fell.length > 8 ? ', …' : ''})`);
   // the one-way rule over plants: an added helper is red by name, a removed one is not
   const judge = (per, listed) => ({ added: Object.entries(per).filter(([f, ls]) => ls.length > (listed[f] || 0)).map(([f]) => f), fell: Object.keys(listed).filter((f) => (per[f] || []).length < listed[f]) });
@@ -358,6 +360,19 @@ console.log('\n§7b a leg never passes by its name: no swapped call anywhere, on
   ok(sw(NF + "ok('the leg', x === 1);\n" + "ok(`leg ${n}`, y > 2, 'detail');\n") === '' && sw(CF + "ok(x === 1, 'the leg');\nok(/a'b\\(/.test(s), 'regex');\nok(s === \"it's\", `t ${f({ a: 1 })}`);\n") === '',
     'the right orders pass — a regex holding a quote and a paren, a template with an object in its ${…}, a string compared in the condition');
   ok(sw(CF + "ok(c, name);\nok(f('x'), 'leg');\n") === '', 'a variable or a call in the condition slot is not a swap (the runtime guard owns those)');
+  // B-1747's remainder (2.369.411): the names the shape survey found are read — a ck, leg or assert helper handed a swap is found
+  // as an ok one is. RED CONTROL: the library as it was (ok / check only), a copy built from its names line, misses all three —
+  // and still finds an ok swap (the copy is the old census, never a copy that reads nothing)
+  const CK = `${K} ck = (n, c) => { if (c) { pass++; } else { fail++; } };\n`, LG = 'function le' + 'g(c, n) { if (c) { pass++; } else { fail++; } }\n';
+  const AS = `${K} assert = (cond, name) => {\n  if (!cond) failed++;\n};\n`;
+  ok(C.HELPER_NAMES.join() === 'ok,check,ck,leg,assert' && sw(CK + "ck(x === 1, 'the leg');\n") === '2' && sw(LG + "leg('the leg', y);\n") === '2' && sw(AS + "assert('the leg', y);\n") === '4', 'NEG: a ck, leg or assert helper handed a swap is found (the names the shape survey found: ok, check, ck, leg, assert)');
+  const LIB = fs.readFileSync(path.join(REPO, 'scripts', 'lib', 'check.mjs'), 'utf-8'), NAMES_LINE = "export const HELPER_NAMES = Object.freeze(['ok', 'check', 'ck', 'leg', 'assert']);";
+  ok(LIB.split(NAMES_LINE).length === 2, 'the anchor of the RED CONTROL (the names line) is in the source (scripts/lib/check.mjs)');
+  if (LIB.split(NAMES_LINE).length === 2) {
+    const OLD = await import(pathToFileURL(mutantCopies('cigate7b-lib', REPO).write('scripts/lib/check.mjs', LIB.replace(NAMES_LINE, "export const HELPER_NAMES = Object.freeze(['ok', 'check']);"), 'old-names')).href);
+    ok(OLD.swappedCalls(NF + "ok(x === 1, 'the leg');\n").length === 1, 'the RED CONTROL proves itself first: the old copy still finds an ok helper\'s swap (it is the census as it was, not a copy that reads nothing)');
+    ok(OLD.swappedCalls(CK + "ck(x === 1, 'the leg');\n").length === 0 && OLD.swappedCalls(LG + "leg('the leg', y);\n").length === 0 && OLD.swappedCalls(AS + "assert('the leg', y);\n").length === 0, 'RED CONTROL: the census as it was (ok / check only) reads no ck, leg or assert helper — their swaps pass unseen');
+  }
   ok(sw(NF + "ok('a' === x, 'the leg');\n") === '2' && sw(CF + "ok('the leg', 'a' === x);\n") === '2', 'NEG: a condition that OPENS with a quote is still found in the name\'s place — the slot is judged as one whole literal, not by its first character');
   ok(sw(CF + "ok('k' in o, label);\n// never write ok('the leg', cond)\n * ok('in a doc block', x)\n") === '' && sw(CF + "ok(f(() => { return /a'b(/.test(s); }), 'leg');\nok('swapped', y);\n") === '3',
     'a condition that only opens with a quote is no swap, a call quoted in a whole-line comment is skipped, and a regex after `return` holding a quote and a paren does not end the scan early');
@@ -495,6 +510,21 @@ console.log('\n§8 lanes, the serial table, the impact scope, the full-tier cloc
   const silent = realHeavy.filter((s) => !s.always && !(s.reads && s.reads.length) && inputless(s, REPO)).map((s) => s.name);
   ok(silent.length === 0, `every heavy row without always:/reads: has a PRODUCT input the affected tier can match (silent rows: ${silent.join(', ') || 'none'})`);
   ok(inputless({ name: 'test-d' }, root) && !inputless({ name: 'test-a' }, root), 'CONTROL: the census predicate flags a suite that reads no product file and passes one that does');
+  // THE SUITES' ONE HUB BOOT (lane boot-helper, 主开发 2026-11-17): a suite on scripts/hub-boot.mjs spawns no server.js itself —
+  // the BOOT INPUTS reach it through the helper's own text (BOOTS_THE_PRODUCT matches its 'server.js'), which sits in every helper
+  // suite's import closure. Pinned over the helper ALONE: a stub tree holding a suite that imports and calls startHub and the
+  // helper's real bytes (its own imports absent, so nothing else is walked); the control is the same helper no longer spelling
+  // the server's name — that suite then carries no boot input, the affected tier would never select it for a product change.
+  {
+    const hb = mktmp('helper-boot');
+    const hw = (rel, body) => { fs.mkdirSync(path.dirname(path.join(hb, rel)), { recursive: true }); fs.writeFileSync(path.join(hb, rel), body); };
+    const helperSrc = fs.readFileSync(path.join(REPO, 'scripts', 'hub-boot.mjs'), 'utf-8');
+    hw('scripts/test-on-helper.mjs', "import { mintRoot, startHub } from './hub-boot.mjs';\nconst hub = startHub({ root: mintRoot('x'), tree: 't', port: 1 });\nawait hub.ready();\n");
+    const bootOf = (helperText) => { hw('scripts/hub-boot.mjs', helperText); const { files, prefixes, via } = suiteInputs({ name: 'test-on-helper' }, { root: hb }); return { files: files.has('scripts/hub-boot.mjs'), boot: files.has('server.js') && ['src/', 'public/', 'data/bin/'].every((p) => prefixes.has(p)) && ['server.js', 'src/', 'public/', 'data/bin/'].every((p) => via.get(p) === 'boot') }; };
+    const real = bootOf(helperSrc), blind = bootOf(helperSrc.replace(/server\.js/g, 'the-hub'));
+    ok(real.files && real.boot && blind.files && !blind.boot,
+      'a suite on the boot helper carries the BOOT INPUTS (server.js, src/, public/, data/bin/ — «boots the product») through scripts/hub-boot.mjs alone; CONTROL: the same helper no longer spelling the server\'s name — the suite still loads it and carries none', { real, blind });
+  }
   // changedFiles over real history: a..b is the diff, a lone sha is its unpublished range.
   const repo = makeRepo('range');
   const A = commit(repo, 'src/one.js', '1\n', 'A');
@@ -787,6 +817,166 @@ console.log('\n§8f a red fast suite runs once more — green again is FLAKY and
   ok(/ledger: path\.join\(repo, \.\.\.FAST_RERUNS\.split\('\/'\)\)/.test(src) && ci.FAST_RERUNS === 'data/ci-fast/reruns.jsonl' && /hang: \{ dir: hangDir, attempt \} \}\)/.test(src)
     && /const line = rerunRecord\(\{ sha, suite: s\.name, lane, first, again \}\);/.test(src),
     'WIRING: fastGate keeps its ledger in data/ci-fast/reruns.jsonl, a retry\'s hang report is named by its try, and the heavy tier writes the same rerunRecord');
+}
+// ── §8g A VERSION BUMP IS NO DEPENDENCY CHANGE · EVERY SELECTION SAYS ITS ONE RULE (主开发 2026-11-17, the owner's «开发和测试太慢») ──
+console.log('\n§8g a version-only bump is no global input; --rules names the one rule behind each selection');
+{
+  const { affectedSuites, versionOnlyChange, rulesReport } = await import('./ci.mjs');
+  // ONE commit per state (a git spawn per file cost ~2 s here)
+  const state = (repo, files, msg) => { for (const [f, body] of Object.entries(files)) { fs.mkdirSync(path.dirname(path.join(repo, f)), { recursive: true }); fs.writeFileSync(path.join(repo, f), body); } git(repo, ['add', '-f', ...Object.keys(files)]); git(repo, ['commit', '-q', '-m', msg]); return git(repo, ['rev-parse', 'HEAD']); };
+  const pj = (o = {}) => JSON.stringify({ name: 'x', version: '1.0.0', dependencies: { a: '1.0.0' }, scripts: { build: 'b' }, engines: { node: '>=22' }, ...o }, null, 2) + '\n';
+  const lk = (v, dep = '1.0.0') => JSON.stringify({ name: 'x', version: v, lockfileVersion: 3, packages: { '': { name: 'x', version: v, dependencies: { a: dep } }, 'node_modules/a': { version: dep } } }, null, 2) + '\n';
+  ok(versionOnlyChange('package.json', pj(), pj({ version: '1.0.1' })) && versionOnlyChange('package-lock.json', lk('1.0.0'), lk('1.0.1')),
+    'PURE: a diff that moves only package.json\'s version — or the lock\'s two mirrored version lines — is version-only');
+  ok(!versionOnlyChange('package.json', pj(), pj({ version: '1.0.1', dependencies: { a: '1.0.1' } })) && !versionOnlyChange('package.json', pj(), pj({ scripts: { build: 'c' } })) && !versionOnlyChange('package.json', pj(), pj({ engines: { node: '>=24' } }))
+    && !versionOnlyChange('package-lock.json', lk('1.0.0'), lk('1.0.1', '1.0.1')) && !versionOnlyChange('package.json', pj(), '{ not json'),
+    'PURE CONTROLS: a dependency, a script or an engine moved with the version, a lock whose dependency moved, a text that is not JSON — never version-only');
+  // A REAL RANGE: the bump alone selects only the suite that DECLARES reads: package.json — never one whose product module loads it
+  const vrepo = makeRepo('version');
+  const v0 = state(vrepo, { 'src/a.js': "const v = require('../package.json').version;\nmodule.exports = v;\n", 'scripts/test-a.mjs': "import a from '../src/a.js';\nconsole.log(a);\n", 'scripts/test-b.mjs': "console.log('b');\n", 'package-lock.json': lk('1.0.0'), 'package.json': pj() }, 'the tree: a reads the version, test-a loads it');
+  const v1 = state(vrepo, { 'package-lock.json': lk('1.0.1'), 'package.json': pj({ version: '1.0.1' }) }, 'the bump: package.json and its lock, the version only');
+  const VS = [{ name: 'test-a' }, { name: 'test-b' }, { name: 'test-reads', reads: ['package.json'] }];
+  const bump = affectedSuites({ range: `${v0}..${v1}`, suites: VS, root: vrepo });
+  ok(bump.selected.map((s) => s.name).join() === 'test-reads' && bump.ruleOf.get('test-reads').rule === 'reads' && bump.ruleOf.get('test-reads').file === 'package.json',
+    `a version-only bump of package.json AND its lock selects ONLY the suite that declares reads: package.json — not test-a, whose product module loads it (${bump.selected.map((s) => s.name).join() || 'nothing'})`);
+  const v2 = state(vrepo, { 'package.json': pj({ version: '1.0.2', dependencies: { a: '2.0.0' } }) }, 'a dependency bump with the version');
+  const dep = affectedSuites({ range: `${v1}..${v2}`, suites: VS, root: vrepo });
+  ok(dep.selected.length === 3 && [...dep.ruleOf.values()].every((r) => r.rule === 'global' && r.file === 'package.json'), 'RED CONTROL: a dependency bump (with the version) still selects the WHOLE tier — every suite by the global rule');
+  ok(affectedSuites({ range: v1, suites: VS, root: vrepo }).selected.length === 3, 'a lone-sha range has no single base to diff against: the global rule stands');
+  // --rules: ONE rule per selected suite — own · closure · names · boot · reads · always (and global above)
+  const rrepo = makeRepo('rules');
+  const r0 = state(rrepo, { 'src/a.js': 'module.exports = 1;\n', 'src/b.js': 'module.exports = 2;\n', 'src/c.js': 'module.exports = 3;\n', 'scripts/test-closure.mjs': "import a from '../src/a.js';\nconsole.log(a);\n",
+    'scripts/test-names.mjs': "const f = 'src/b.js';\nconsole.log(f);\n", 'scripts/test-boot.mjs': "const s = 'server.js';\nconsole.log(s);\n", 'scripts/test-own.mjs': "console.log(1);\n", 'scripts/test-reads.mjs': "console.log(1);\n" }, 'the suites');
+  const r1 = state(rrepo, { 'src/a.js': 'module.exports = 11;\n', 'src/b.js': 'module.exports = 22;\n', 'src/c.js': 'module.exports = 33;\n', 'scripts/test-own.mjs': "console.log(2);\n" }, 'a, b, c and test-own move');
+  const RS = [{ name: 'test-closure' }, { name: 'test-names' }, { name: 'test-boot' }, { name: 'test-own' }, { name: 'test-reads', reads: ['src/c.js'] }, { name: 'test-al', always: true }];
+  const ru = affectedSuites({ range: `${r0}..${r1}`, suites: RS, root: rrepo, reach: false });
+  const said = RS.map((s) => `${s.name}=${(ru.ruleOf.get(s.name) || {}).rule}`).join(' ');
+  ok(said === 'test-closure=closure test-names=names test-boot=boot test-own=own test-reads=reads test-al=always' && ru.ruleOf.get('test-closure').file === 'src/a.js',
+    `every selected suite carries the ONE rule that selected it and its input file (${said})`);
+  const rep = rulesReport(['test-closure', 'test-own', 'test-al'], ru.ruleOf, { range: `${r0}..${r1}` });
+  ok(JSON.stringify(rep.ruleLines) === JSON.stringify(['test-closure\tclosure\tsrc/a.js', 'test-own\town\tscripts/test-own.mjs', 'test-al\talways\t-']) && JSON.stringify(rep.ruleCount) === '{"closure":1,"own":1,"always":1}',
+    'the --rules report: one «name · rule · file» line per suite and the count per rule');
+  const ciSrc = fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf-8');
+  ok(/const all = SUITES\.filter\(\(s\) => s\.tier === tier\);/.test(ciSrc) && /return rules \? \{ names, summary, \.\.\.rulesReport\(names, a\.ruleOf, \{ range \}\) \} : \{ names, summary \};/.test(ciSrc)
+    && /tier: str\('tier'\) === 'fast' \? 'fast' : 'heavy', rules: !!arg\('rules'\)/.test(ciSrc) && /if \(l\.ruleLines\) \{[^\n]*console\.log\(l\.ruleLines\.join\('\\n'\)\); \} else console\.log\(l\.names\.join\(','\)\);/.test(ciSrc),
+    'WIRING: --list-affected --tier=fast lists the FAST rows; --rules prints the report (the count on stderr); without it the comma-joined names as before');
+}
+
+// ── §8h A SKIP IS NOT A GREEN (B-4829) ──
+// 2026-11-18: on a test machine with no sshd two heavy suites skipped their real road and ended rc 0 — and the green row
+// kept only the LAST stdout line (80 characters), so a skip said mid-output read as a green and only a SKIP on the last
+// line could be named. Planted suites through the REAL runSuiteAsync + runFastLanes: one says two SKIPs in the MIDDLE and
+// ends ALL PASS; one says «<leg> SKIPPED: why» on stdout and its SKIP on stderr; one is red on its first try and green with
+// a SKIP on its retry; one is a plain green whose lines carry SKIP inside a word or a sentence. The shapes are the tree's:
+// a walk of every printed literal in scripts/ (a fixed-string scan of the tracked files) — every SKIP line counted, the
+// sentences ABOUT a skip a one-way fixture. The control is a copy of ci.mjs whose green row is today's last-line rule.
+console.log('\n§8h a green suite\'s SKIP lines are counted on its row and named at the close — a skip is never a green (B-4829)');
+{
+  const ci = await import('./ci.mjs');
+  const { anchored } = await import('./scratch.mjs');
+  const root = mktmp('skiplegs');
+  fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
+  const plant = (name, body) => fs.writeFileSync(path.join(root, 'scripts', name + '.mjs'), body);
+  const once = path.join(root, 'flaky-seen');
+  plant('test-sk-mid', "console.log('§1 planted');\nconsole.log('  ✓ leg one');\nconsole.log('  ⊘ SKIP the real road — no sshd on this machine');\nconsole.log('  ✓ leg three');\nconsole.log('  · SKIP (leg four: no xpra here)');\nconsole.log('\\nALL PASS (2)');\n");
+  plant('test-sk-err', "console.log('  – corpus smoke SKIPPED: no rollouts on this machine');\nconsole.error('SKIP: no chrome binary on this machine');\nconsole.log('ALL PASS (0)');\n");
+  plant('test-sk-flaky', `import fs from 'node:fs';\nif (!fs.existsSync(${JSON.stringify(once)})) { fs.writeFileSync(${JSON.stringify(once)}, '1'); console.log('  ✗ planted flake (first try)'); console.log('1 FAILED'); process.exit(1); }\nconsole.log('  ○ SKIP the retry leg — no dtach here');\nconsole.log('ALL PASS (1)');\n`);
+  plant('test-sk-green', "console.log('  ✓ SKIP_AGENT_HOOKS is set in the child env');\nconsole.log('  ✓ a row the list scrolled away is SKIPPED by name, never sampled');\nconsole.log('  ✓ the wrapper record is SKIPPED (declared): no card');\nconsole.log('  ✓ a depth-1 read degrades to a named SKIP (the census)');\nconsole.log('ALL PASS (4)');\n");
+  const row = (name) => ({ name, tier: 'fast', budgetMs: 8000 });
+  const SHA = '5c1b4829a0000000';
+  const drive = async (M, tag, names = ['test-sk-mid', 'test-sk-err', 'test-sk-flaky', 'test-sk-green']) => {
+    const failDir = path.join(root, `fail-${tag}`), said = [], rows = [], inflight = new Set();
+    fs.rmSync(once, { force: true });
+    const res = await M.runFastLanes({ parallel: names.map(row), serial: [] }, {
+      lanes: 1, keepGoing: true, inflight, failDir, sha: SHA, log: (l) => said.push(l), refusal: (s) => (s.name === 'test-sk-flaky' ? '' : 'no retry here (§8f\'s)'),
+      run: (s, { lane }) => M.runSuiteAsync(s, { root, sha: SHA, lane, inflight }),
+      after: async (r) => { rows.push(r.lines.join('\n')); },
+    });
+    return { ...res, failDir, said, rows, fails: fs.existsSync(failDir) ? fs.readdirSync(failDir).sort() : [] };
+  };
+  const rowOf = (x, n) => (x.rows.filter((l) => l.includes(`✓ ${n} (`)).pop() || '').trim();
+  const a = await drive(ci, 'now');
+  ok(/ — ALL PASS \(2\) · SKIP 2: the real road — no sshd on this machine$/.test(rowOf(a, 'test-sk-mid')),
+    `a SKIP said in the MIDDLE of a green suite's output is on its ✓ row: «… — ALL PASS (2) · SKIP 2: first reason» (${rowOf(a, 'test-sk-mid')})`);
+  const errOk = / — ALL PASS \(0\) · SKIP 2: corpus smoke SKIPPED: no rollouts on this machine$/.test(rowOf(a, 'test-sk-err')) && / — ALL PASS \(4\)$/.test(rowOf(a, 'test-sk-green'));
+  ok(errOk, `…and a leg «SKIPPED» with its reason after a colon counts, and so does a SKIP said on stderr; a green whose lines carry SKIP only inside a word or a sentence keeps its plain row${errOk ? '' : ` (${rowOf(a, 'test-sk-err')} | ${rowOf(a, 'test-sk-green')})`}`);
+  ok(a.flaky.join(',') === 'test-sk-flaky' && / — ALL PASS \(1\) · SKIP 1: the retry leg — no dtach here$/.test(rowOf(a, 'test-sk-flaky')),
+    `…and a suite green on its RETRY is judged by the retry's output (${rowOf(a, 'test-sk-flaky')})`);
+  ok(a.skippedLegs.map((x) => `${x.name}:${x.n}`).join(',') === 'test-sk-mid:2,test-sk-err:2,test-sk-flaky:1' && !a.reds.length && a.timings.length === 4,
+    `runFastLanes NAMES every green that skipped a leg, with its count (${a.skippedLegs.map((x) => `${x.name} (${x.n})`).join(', ')}) — still green (4 timings, no red), never folded into the plain greens`);
+  const midLog = path.join(a.failDir, '5c1b4829.test-sk-mid.skip.1.log'), errLog = path.join(a.failDir, '5c1b4829.test-sk-err.skip.1.log');
+  ok(a.fails.join(',') === '5c1b4829.test-sk-err.skip.1.log,5c1b4829.test-sk-flaky.1.log,5c1b4829.test-sk-flaky.skip.2.log,5c1b4829.test-sk-mid.skip.1.log'
+    && fs.readFileSync(midLog, 'utf-8').includes('  ✓ leg one\n  ⊘ SKIP the real road') && fs.readFileSync(errLog, 'utf-8').includes('── stderr ──\nSKIP: no chrome binary')
+    && a.said.includes(`  [ci] test-sk-mid skipped 2 leg(s) — its whole output (try 1): ${midLog}`) && a.skippedLegs[0].file === midLog,
+    `…and keeps each one's WHOLE output beside the red tries' (<sha8>.<suite>.skip.<try>.log — the retry's by its try: ${a.fails.join(', ')}), said on its own line; the plain green keeps none`);
+  // the closing lines' words, both tiers (one door each: skipCount on the verdict line, skippedLegsSaid after it)
+  ok(ci.skipCount(a.skippedLegs) === ' · SKIP 5 leg(s) in 3 suite(s): test-sk-mid (2), test-sk-err (2), test-sk-flaky (1)' && ci.skipCount([]) === ''
+    && ci.skippedLegsSaid('ci:heavy', a.skippedLegs)[0] === `[ci:heavy] SKIPPED LEG(S) test-sk-mid (2): the real road — no sshd on this machine — its whole output: ${midLog}`,
+    `the closing line carries the count BY SUITE («${ci.skipCount(a.skippedLegs).trim()}»), and one line per suite names its first reason and its kept output`);
+  // a skip log is bounded with its commit's other files (pruneFailLogs reads «<suite>.skip» as the suite part)
+  {
+    const pd = mktmp('skipprune'), T0 = Date.now() / 1000 - 3600, K = ci.FAIL_LOGS_KEEP;
+    for (let i = 0; i <= K; i++) { const n = path.join(pd, `${(0xb0000000 + i).toString(16)}.test-sk.skip.1.log`); fs.writeFileSync(n, 'x'); fs.utimesSync(n, T0 + i * 10, T0 + i * 10); }
+    const gone = ci.pruneFailLogs(pd).map((f) => path.basename(f));
+    ok(gone.join(',') === 'b0000000.test-sk.skip.1.log' && fs.readdirSync(pd).length === K, `a skip log is BOUNDED like a red's: ${K + 1} commits ⇒ the oldest one's file goes (${gone.join(', ')})`);
+  }
+  // THE TREE'S SHAPES (a walk, never a hand list): every printed literal in scripts/ that says SKIP / SKIPPED as a word —
+  // (i) one whose first word (after at most one token with no letter in it: a bullet, «§3», «④») is SKIP is COUNTED by the
+  // launcher; (ii) one the launcher does not count is a sentence ABOUT a skip and its file's row in
+  // scripts/fixtures/skip-sentences.json holds it (ONE-WAY: a file that adds one is red by name, a fall is said);
+  // (iii) a lowercase «— skipping …» line is the old shape of a skip: none may stay uncounted
+  {
+    const g = spawnSync('git', ['-c', 'grep.threads=2', 'grep', '-n', '-F', '-i', 'skip', '--', 'scripts/*.mjs'], { cwd: REPO, encoding: 'utf-8', env: GIT_ENV, maxBuffer: 64 << 20 });
+    if (g.status !== 0) console.log(`  · SKIP the tree's SKIP shapes: git could not list this tree (${String(g.stderr || g.error || '').trim().slice(0, 120)})`);
+    else {
+      const WORD = /(?<![\w-])SKIP(?:PED)?(?![\w-])/, LOWER = /(?:^\s*\(?|[—–]\s*)skipping\b/, LIT = /([`'"])((?:\\.|(?!\1).)*)\1/g;
+      const firstWord = (x) => { const t = x.trim().split(/\s+/); const i = t.length > 1 && !/[A-Za-z]/.test(t[0]) ? 1 : 0; return /^SKIP(?:PED)?(?![\w-])/.test(t[i] || ''); };
+      const own = new Set(['scripts/ci.mjs', 'scripts/test-ci-gate-tiers.mjs']); // the rule's own file and this leg's planted near-misses
+      let lead = 0, counted = 0; const missed = [], lower = [], sentences = {}, sentenceAt = {};
+      for (const l of g.stdout.split('\n')) {
+        const m1 = /^([^:]+):(\d+):(.*)$/.exec(l);
+        if (!m1 || own.has(m1[1])) continue;
+        for (const m of m1[3].matchAll(LIT)) {
+          const okMsg = /\bok\w*\(\s*[^,]{0,40},\s*$/.test(m1[3].slice(0, m.index));
+          const all = m[2].replace(/\$\{[^}]*\}/g, 'x').split('\\n').map((x, i) => (okMsg && !i ? '  ✓ ' : '') + x);
+          for (const x of all) if (LOWER.test(x) && !ci.isSkipLine(x)) lower.push(`${m1[1]} line ${m1[2]} «${x.trim().slice(0, 70)}»`);
+          const printed = all.filter((x) => WORD.test(x));
+          if (!printed.length) continue;
+          const heads = printed.filter(firstWord);
+          if (heads.length) { lead++; for (const x of heads) if (!ci.isSkipLine(x)) missed.push(`${m1[1]} line ${m1[2]} «${x.trim().slice(0, 70)}»`); }
+          if (printed.some((x) => ci.isSkipLine(x))) counted++;
+          else { sentences[m1[1]] = (sentences[m1[1]] || 0) + 1; (sentenceAt[m1[1]] ||= []).push(`line ${m1[2]} «${printed[0].trim().slice(0, 70)}»`); }
+        }
+      }
+      let FIX = {}; try { FIX = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts', 'fixtures', 'skip-sentences.json'), 'utf-8')).files || {}; } catch (e) { FIX = { '(unreadable)': e.message }; }
+      const over = Object.entries(sentences).filter(([f, n]) => n > (FIX[f] || 0)).map(([f, n]) => `${f}: ${n} (its row ${FIX[f] || 0}) — ${sentenceAt[f].join('; ')}`);
+      const fell = Object.entries(FIX).filter(([f, n]) => (sentences[f] || 0) < n).map(([f, n]) => `${f} ${n}→${sentences[f] || 0}`);
+      const total = Object.values(sentences).reduce((x, y) => x + y, 0);
+      console.log(`    the tree prints ${counted} SKIP literal(s) the launcher counts (${lead} with SKIP as the first word); ${total} sentence(s) about a skip in ${Object.keys(sentences).length} file(s)${fell.length ? `; FELL (only said — lower the rows): ${fell.join(', ')}` : ''}`);
+      ok(lead >= 300 && !missed.length, `every SKIP line the tree's suites print is COUNTED by the launcher's rule (${lead} with SKIP first, by a walk of scripts/)${missed.length ? ` — NOT COUNTED: ${missed.slice(0, 12).join(' | ')}` : ''}`);
+      ok(!over.length && typeof FIX['scripts/test-architecture.mjs'] === 'number', `…every literal it does NOT count is a sentence ABOUT a skip, held by its file's row of scripts/fixtures/skip-sentences.json — a new one is red by name (lead a skip with SKIP, or put its reason after «SKIPPED» and a colon)${over.length ? ` — NEW: ${over.join(' | ')} — live ${JSON.stringify(sentences)}` : ''}`);
+      ok(!lower.length, `…and no lowercase «— skipping …» line is left uncounted (a skip says «· SKIP <leg>: <why>»)${lower.length ? ` — ${lower.slice(0, 12).join(' | ')}` : ''}`);
+    }
+  }
+  // the CONTROL: ci.mjs with today's last-line rule — the mid-output SKIP vanishes from the row, nothing is named or kept
+  const M = mutantCopies('ci-skiplegs', REPO);
+  const src = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
+  let mutSrc = null, gone = '';
+  try {
+    mutSrc = anchored(src, /      if \(status === 0\) \{\n        const sk = skipsOf\(stdout, stderr\);[^\n]*\n[^\n]*\n        return;\n      \}\n/,
+      () => "      if (status === 0) { resolve({ ok: true, ms, load, selfSkip, lines: [`  ✓ ${s.name} (${ms}ms) ${tag} ${ld} — ${(last || 'ok').slice(0, 80)}`] }); return; }\n", 'the green row (B-4829)');   // the release's last-line rule (2.369.410: B-479e's selfSkip beside it)
+  } catch (e) { gone = e.message; }
+  const mut = mutSrc ? await import(pathToFileURL(M.write('scripts/ci.mjs', mutSrc, 'last-line-rule', { esm: true })).href) : null;
+  const b = mut ? await drive(mut, 'mut', ['test-sk-mid']) : null; // the control judges the mid-output skipper alone (one child, not five)
+  ok(!!b && !rowOf(b, 'test-sk-mid').includes('SKIP') && / — ALL PASS \(2\)$/.test(rowOf(b, 'test-sk-mid')) && !b.skippedLegs.length && !b.fails.some((f) => f.includes('.skip.')),
+    `CONTROL: a copy of ci.mjs on today's last-line rule prints the mid-output skipper as a plain green (${b ? rowOf(b, 'test-sk-mid') : gone}) and names and keeps nothing — the legs above are red without the change`);
+  // WIRING: both tiers' closing lines carry the count; the heavy tier records every green that skipped (try 1 or the retry)
+  ok(/ suites ran; \$\{absent\.length\} not present at that commit` : ''\}\$\{skipCount\(skippedLegs\)\}`\);/.test(src) && /if \(skippedLegs\.length\) console\.log\(`\\n\$\{skippedLegsSaid\('ci', skippedLegs\)/.test(src)
+    && /release gate is RED, do not push\$\{skipCount\(skippedLegs\)\}/.test(src)
+    && /failed: \$\{failed\.join\(', '\)\}\$\{skipCount\(skippedLegs\)\}`/.test(src) && /not present at that commit` : ''\}\)\$\{skipCount\(skippedLegs\)\}`;/.test(src)
+    && /if \(r\.ok && r\.skips\) skippedLegs\.push\(\{ name: s\.name, n: r\.skips\.n, first: r\.skips\.first, file: keepSkipLog\(s, r, tried\) \}\);/.test(src)
+    && /r = again; tried = 2;/.test(src) && /for \(const l of skippedLegsSaid\('ci:heavy', skippedLegs\)\) console\.log\(l\);/.test(src) && /skippedLegs: skippedLegs\.length \?/.test(src),
+    'WIRING: ALL GREEN, the fast RED line and the heavy GREEN / RED lines end with the count, a line per skipping suite follows, the heavy loop keeps the try that stood, the heavy marker carries skippedLegs');
 }
 } finally {
   for (const d of tmpDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }

@@ -107,7 +107,7 @@ socket limit (104 bytes on macOS), the daemon listens on a short per-user path
 `/tmp/vs-dev-<uid>/`, owner-checked) and records it in `<root>/state/socket-path`.
 
 **Exit access.** A paired machine can lend its network or run a command for an
-agent only when you allow it: the row's exit icon → **Who can use it** — two
+agent only when you allow it: the row's «Exit: …» line → **Who can use it** — two
 lists (borrow its network / run commands on it), each Nobody / All my
 conversations / Only these (conversations and Task Groups), and *Ask me each
 time* for commands (Allow / Deny in For you, 60 s). Every run is audited

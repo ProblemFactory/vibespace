@@ -604,7 +604,7 @@ console.log('④ the words (one line, its door — en / zh / ja)');
   const has = (file, k) => read(file).includes('\n  ' + JSON.stringify(k) + ':');
   const missing = keys.filter((k) => !has('src/lib/i18n-zh.js', k) || !has('src/lib/i18n-ja.js', k));
   ok(`every sentence in zh and ja (${keys.length} keys)`, keys.length >= 21 && !missing.length, missing);
-  ok('the client reads the moment through ITS relative-time helper (user-todos-row agoText), in both menus', /import \{ agoText as agoWords \} from '\.\/user-todos-row\.js'/.test(read('src/lib/app.js')) && /import \{ agoText as agoWords \} from '\.\/user-todos-row\.js'/.test(read('src/lib/chat-status-bar.js')));
+  ok('the client reads the moment through ITS relative-time helper (user-todos-row agoText), in both menus', /import \{ agoText as agoWords(?:, \w+)* \} from '\.\/user-todos-row\.js'/.test(read('src/lib/app.js'))   /* lane setting-doors pick 2: + registerSettingFacts on the same line */ && /import \{ agoText as agoWords \} from '\.\/user-todos-row\.js'/.test(read('src/lib/chat-status-bar.js')));   // stale-pins: kept — app.js's pin takes the line's new names; the second pin is chat-status-bar.js's own import, unchanged
 }
 
 // ── ⑦ the chat's model menu, the REAL bar in a fake DOM (round 2 laws G and E, the chat's half) ─────────────────────

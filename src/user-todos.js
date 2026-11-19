@@ -755,7 +755,7 @@ class UserTodoManager {
     // a field, belted). A conversation's own name is never belted under either shape (r3: the r2 label belt masked it).
     const agentWords = AGENT_WORDS_ORIGINS.includes(origin);
     const agentFields = AGENT_FIELDS_ORIGINS.includes(origin);
-    const beltOf = (s) => belt.maskForSink(s, { dataDir: _dataDir });
+    const beltOf = (s) => belt.maskForSink(s, { dataDir: _dataDir, message: true });
     if (agentFields) {
       // THE ONE FILER per fields origin (lane job-notify-user r4): a product file not listed in FIELDS_FILERS is refused by
       // name, whatever spelling of the origin it used — the store judges the WRITER by what it writes. r5: FAIL CLOSED — a
@@ -1122,10 +1122,12 @@ class UserTodoManager {
    *  already resolved or dismissed keeps its status and `resolvedBy` (a reply
    *  is refused for delivery reasons only, never bookkeeping) — either way the
    *  reply is kept on it as `{text ≤4000, at}`. ONE save + ONE broadcast. */
-  resolveByReply(id, text, now = this._now()) {
+  resolveByReply(id, text, now = this._now(), { pictures = 0 } = {}) {   // B-51dd: `pictures` = how many the reply carried (a picture alone is a reply)
     const item = this._state.items.find((i) => i.id === id);
     if (!item) throw new Error('item not found');
+    const n = Math.max(0, Math.floor(Number(pictures) || 0));
     item.reply = { text: String(text == null ? '' : text).slice(0, REPLY_MAX), at: now };
+    if (n) item.reply.pictures = n;
     const wasOpen = item.status === 'open' && !decisionRefusal(item, 'done', 'reply');   // lane wake-approve-card r2: a typed reply never decides
     if (wasOpen) { item.status = 'done'; item.resolvedAt = now; item.resolvedBy = 'reply'; }
     this._save(); this._notify();

@@ -17,12 +17,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
+import { scratch } from './scratch.mjs';   // a suite's OWN scratch folder (/tmp/vs-<name>-<pid>): two runs on one machine never meet
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
-const { create, CONTINUE_PROMPT, continuePromptFor, GRACE_MS, MAX_WAIT_MS } = require(path.join(REPO, 'src/server/auto-resume.js'));
+const { create, CONTINUE_PROMPT, continuePromptFor, GRACE_MS, MAX_WAIT_MS, WF_REREAD_MS, WF_INFLIGHT_MAX } = require(path.join(REPO, 'src/server/auto-resume.js'));
 // lane resume-words: the continue is CONTINUE_PROMPT's head + facts + the CLI's own sentence (continuePromptFor)
 const IS_CONTINUE = (t) => typeof t === 'string' && !!CONTINUE_PROMPT && typeof CONTINUE_PROMPT.cli === 'string' && t.endsWith(' ' + CONTINUE_PROMPT.cli) && t.includes(' ' + CONTINUE_PROMPT.facts + ' ');
 const CPF = typeof continuePromptFor === 'function' ? continuePromptFor : () => '';
@@ -73,12 +74,18 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
   // when the window reopened 32 h later). "Refuse to squat" is preserved as
   // the thing that matters — no TIMED continue is ever scheduled — while the
   // fresh-window edge can still keep the promise on positive evidence.
-  const far = a.ar.armIfEnabled('s1', a.sessions.get('s1'), Date.now() + MAX_WAIT_MS + 60000, 'weekly');
+  const far = a.ar.armIfEnabled('s1', a.sessions.get('s1'), Date.now() + MAX_WAIT_MS + 60000, 'weekly', { lane: 'claude', bucket: 'sevenDay' });   // the wall's own bucket: a fresh-window reading can open it early
   ok('a reset a week out ⇒ a WATCH (armed, but no timed continue is promised)', !!far && far.watch === true);
   ok('…and the status says so, so the chip does not promise a time', a.ar.statusFor('s1').watch === true && a.ar.statusFor('s1').armed === true);
   ok('…and the TIMER never fires it, however long we wait (it still refuses to squat)', a.ar.tick(Date.now() + MAX_WAIT_MS) === 0 && a.sent.length === 0);
   ok('…and the far-reset notice says the timed continue will NOT happen but recovery still will', a.notes.some((n) => /不会按时间自动续跑/.test(n.text) && /提前恢复/.test(n.text)));
   a.ar.forget('s1');
+  // lg-recovery U1 cure (A): a watch with NO bucket can never be opened early (windowOpened needs it) — its notice says it
+  // will not continue by itself, never the early-recovery promise
+  a.sessions.set('s9', sess()); const n0 = a.notes.length;
+  a.ar.armIfEnabled('s9', a.sessions.get('s9'), Date.now() + MAX_WAIT_MS + 60000, 'weekly');
+  ok('…and a far reset with NO bucket says it will not continue by itself (nothing can open it early) — never «recovery still will»', a.notes.slice(n0).some((n) => /这次不会自动继续/.test(n.text)) && !a.notes.slice(n0).some((n) => /提前恢复/.test(n.text)), a.notes.slice(n0).map((n) => n.text));
+  a.ar.forget('s9');
   ok('an unknown session ⇒ no arm', a.ar.armIfEnabled('nope', null, Date.now() + 60000, 'x') === null);
 }
 
@@ -392,7 +399,7 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
   const srv8 = read('server.js');
   ok('WIRING: server.js routes beforeFire → beforeAutoResumeFire and provides the probe', /beforeFire: \(id, s\) => \{ try \{ return beforeAutoResumeFire\(id, s\); \}/.test(srv8) && /getQuotaProbe: \(\) => \{ try \{ return usage\.refreshViaCliPanel; \}/.test(srv8));
   const ss8 = read('src/server/stdout/claude-stream-json.js') + '\n' + read('src/server/stdout/codex-events.js'); // S5: per-protocol consumer modules
-  ok("WIRING: the claude result record IS the turn boundary; codex task_complete too", /if \(msg\.type === 'result'\) \{ try \{ noteTurnEnd\?\.\(session, msg\); \} catch \{ \} \}/.test(ss8) && /task_complete'\) \{\s*\n\s*try \{ noteTurnEnd\?\.\(session\); \} catch \{\}/.test(ss8));
+  ok("WIRING: the claude result record IS the turn boundary; codex task_complete too", /if \(msg\.type === 'result'\) \{ try \{ noteTurnEnd\?\.\(session, msg\); \} catch \{ \} \}/.test(ss8) && /task_complete'\) \{\s*\n\s*try \{ noteTurnEnd\?\.\(session, msg\); \} catch \{\}/.test(ss8));
 
   // the pre-fire VETO, functionally (async gate through a real create())
   const dV = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-veto-'));
@@ -571,7 +578,9 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
     } finally { console.log = origLog; global.__vsEvent = prevEv; }
     // order-of-operations pins (the fix IS the order)
     const eng2 = read('src/server/usage-pool-engine.js');
-    ok('PIN: onWalledTurn demotes BEFORE the verdict, and the verdict is session-aware', /function onWalledTurn\(session, sigs\) \{[\s\S]{0,900}demoteWalledAccount\(session, sigs\)[\s\S]{0,900}quotaVerdictFor\(scope, \{ model, session \}\)/.test(eng2));
+    const DEMOTE_FIRST = /function onWalledTurn\(session, sigs(?:, said = null)?\) \{[\s\S]{0,900}demoteWalledAccount\(session, sigs\)[\s\S]{0,2400}?const v = quotaVerdictFor\(scope, \{ model, session \}\)/;   // the ARM's verdict (U1 cure: anchored on it, not on any later call)
+    ok('PIN: onWalledTurn demotes BEFORE the verdict, and the verdict is session-aware', DEMOTE_FIRST.test(eng2));
+    ok('PIN CONTROL: the arm\'s verdict moved ABOVE the demotion is red', (() => { const VL = '    const v = quotaVerdictFor(scope, { model, session });\n'; if (!eng2.includes(VL) || !eng2.includes('demoted = demoteWalledAccount(session, sigs)')) return false; const moved = eng2.replace(VL, '').replace('demoted = demoteWalledAccount(session, sigs)', 'quotaVerdictFor(scope, { model, session }); demoted = demoteWalledAccount(session, sigs)'); return DEMOTE_FIRST.test(eng2) && !DEMOTE_FIRST.test(moved); })());
     // (reset credits r3: the held process's cold-restart re-ask follows the pool
     // evaluation — it reads where the pool landed — and nothing else does)
     ok("PIN: the walled turn's pool evaluation runs AFTER the arm (finally) so fireNow finds the session armed", /ar\.armIfEnabled\(id, session, Date\.now\(\) \+ 45000[\s\S]{0,2000}\} finally \{[\s\S]{0,700}maybePoolAutoSwitch\(session\);(\s*\n\s*\/\/[^\n]*)*\s*\n\s*requestHeldRestart\(session\);\s*\n\s*\}\s*\n\}/.test(eng2));
@@ -581,7 +590,7 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
     // window of its own, and clearing it beside the two turn pins (where it
     // looks like it belongs) put the banner's mark back on the member the turn
     // had just proved innocent.
-    ok('PIN: the turn-end proof outlives the demotion and is then dropped on both exits', /try \{ onWalledTurn\(session, sigs\); \}[^\n]*\n\s*clearRefile\(\);\s*\n\s*return;/.test(eng2) && (eng2.match(/\n\s*clearRefile\(\);/g) || []).length === 2 && /const clearRefile = \(\) => \{ session\._turnWallRefile = null; session\._turnWallRefuted = null; \};\s*\n\s*if \(sigs\.length/.test(eng2));
+    ok('PIN: the turn-end proof outlives the demotion and is then dropped on both exits', /try \{ onWalledTurn\(session, sigs(?:, closingLine)?\); \}[^\n]*\n\s*clearRefile\(\);\s*\n\s*return;/.test(eng2) && (eng2.match(/\n\s*clearRefile\(\);/g) || []).length === 2 && /const clearRefile = \(\) => \{ session\._turnWallRefile = null; session\._turnWallRefuted = null; \};\s*\n\s*if \(sigs\.length/.test(eng2));
     // THE MECHANISM, NOT THE LITERAL. This pin exists to stop the demotion
     // growing a SECOND writer; it used to spell the call byte-for-byte, which
     // also froze WHICH member is written — and inc-mttbrtc0-6049 is precisely
@@ -1421,7 +1430,914 @@ console.log('\n14b. the continue says what the CLI\'s reset time was and was not
   const named = /the account "([^"]*)"/.exec(evil);
   ok('14b. the account label rides the peer-text belt: a frame tag inert, a line break folded, a bidi override gone, ≤ 80', !!named && !/<system-reminder/.test(evil) && !/\n/.test(evil) && !/\u202E/.test(evil) && named[1].length <= 80, named && named[1]);
   ok('14b. …a "$&" in the label is the label, not a replacement pattern', CPF({ cls: 'switched' }, 'A$&B').includes('the account "A$&B"'));
-  ok('14b. WIRING: the ONE fire choke point delivers continuePromptFor(note, label2) — what unblocked us, and the label it lands on', /verb\.deliver\(session, continuePromptFor\(note, label2\), \{ sendChatInput/.test(read('src/server/auto-resume.js')));
+  ok('14b. WIRING: the ONE fire choke point delivers continuePromptFor(note, label2) — what unblocked us, and the label it lands on', /deliverContinue\(session, verb, continuePromptFor\(note, label2, freshRun\(id, a2\)\), \(s2, text\) => sentNoted\(s2, text, sendToSession\(id, s2, text, carried\)\)\)/.test(read('src/server/auto-resume.js')));
+}
+
+// ── 16. WHY A SESSION STOPPED — the fact, through the REAL engine (lane auto-resume-bulk, .349) ──────────────────────
+// The world of the incident: auto-resume OFF (this engine has NO auto-resume module at all — getAutoResume() is null),
+// a walled turn, an overloaded turn. The fact must be written anyway, persisted through the meta store, broadcast once,
+// and cleared by the next turn that runs. Called through the engine INSTANCE (functional seams, never a grep).
+{
+  console.log('\n16. the stop fact through the real engine (auto-resume absent — the incident\'s world)');
+  const engMod = require(path.join(REPO, 'src/server/usage-pool-engine.js'));
+  const app = { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} };
+  const metas = { 'sock-stop': { name: 'stop' } };   // a session with its OWN meta (U1 cure: a session with none gets no stub file)
+  let listChanges = 0;
+  const eng = engMod.create({
+    app, rootDir: (() => { const d = scratch('ar-stop'); fs.mkdirSync(d, { recursive: true }); return d; })(), USAGE_CACHE_DIR: path.join(scratch('ar-stop'), 'usage-cache'), activeSessions: new Map(),   // its OWN scratch — never a fixed name under /tmp (the two zones of one gate run side by side)
+    wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice() { },
+    serverSetting() { return undefined; }, getAccounts() { return null; }, getHosts() { return null; },
+    getUsageHistory() { return null; }, recordUsageAttribution() { }, adapterRegistry: { get() { return null; } },
+    getSessionMetaStore: () => ({ readSessionMeta: (n) => metas[n] || {}, writeSessionMeta: (n, m) => { metas[n] = m; }, patchSessionMeta: (n, p) => { const m = metas[n]; if (!m || !Object.keys(m).length) return Promise.resolve(false); metas[n] = { ...m, ...p }; return Promise.resolve(true); } }),
+    onSessionListChange: () => { listChanges++; },
+  });
+  ok('16. the engine INSTANCE exports the fact\'s seams', ['noteStoppedBy', 'clearStoppedBy', 'noteTurnRunning', 'noteTurnError'].every((k) => typeof eng[k] === 'function'));
+  const origLog = console.log; console.log = () => { };
+  const origWarn = console.warn; console.warn = () => { };
+  const s = { backend: 'claude', mode: 'chat', _webuiId: 'w-stop', sockName: 'sock-stop', claudeSessionId: 'c-stop' };
+  const reset = Date.now() + 2 * 3600e3;
+  let afterWall, afterRun, afterOverload, afterRateLimit, afterNormal, codexOv, codexWall, quiet;
+  try {
+    eng.noteWallSignal(s, { resetsAtMs: reset, bucket: 'fiveHour', key: '__global__' });
+    eng.noteTurnEnd(s, { type: 'result', result: "You've hit your limit · resets 2pm" });
+    afterWall = { f: s._stoppedBy && { ...s._stoppedBy }, meta: metas['sock-stop'] && metas['sock-stop'].stoppedBy };
+    await new Promise((r) => setTimeout(r, 360));
+    quiet = listChanges;
+    eng.noteSessionProduced(s, { type: 'assistant', message: { model: 'claude-opus-5-5' } });
+    afterRun = { f: s._stoppedBy, meta: metas['sock-stop'].stoppedBy };
+    eng.noteTurnError(s, 'overloaded', 'API Error: Repeated 529 Overloaded errors');
+    eng.noteTurnEnd(s, { type: 'result', is_error: true, result: 'API Error: Repeated 529 Overloaded errors' });
+    afterOverload = s._stoppedBy && { ...s._stoppedBy };
+    eng.noteTurnError(s, 'rate_limit', 'API Error: 429');
+    eng.noteTurnEnd(s, { type: 'result', is_error: true, result: 'API Error: 429' });
+    afterRateLimit = s._stoppedBy;
+    eng.noteTurnError(s, 'overloaded', 'x'); eng.noteTurnError(s, null, 'the retry got through');
+    eng.noteTurnEnd(s, { type: 'result', result: 'done' });
+    afterNormal = s._stoppedBy;
+    const c = { backend: 'codex', mode: 'chat', _webuiId: 'w-codex', sockName: 'sock-codex' };
+    eng.noteTurnError(c, 'serverOverloaded', 'Server overloaded', { final: true });
+    codexOv = c._stoppedBy && { ...c._stoppedBy };
+    eng.noteTurnRunning(c);
+    eng.noteTurnError(c, 'usageLimitExceeded', 'You have hit your usage limit', { final: true });
+    codexWall = c._stoppedBy;
+  } finally { console.log = origLog; console.warn = origWarn; }
+  ok('16. a WALLED turn with auto-resume absent still writes the fact: quota, its stated reset, the harness\'s line', afterWall.f && afterWall.f.kind === 'quota' && afterWall.f.resetsAt === reset && /hit your limit/.test(afterWall.f.said), JSON.stringify(afterWall));
+  ok('16. …persisted in the session\'s meta (the store a restart reads back)', afterWall.meta && afterWall.meta.kind === 'quota' && afterWall.meta.resetsAt === reset);
+  ok('16. …and ONE list broadcast for it (debounced)', quiet === 1, String(quiet));
+  ok('16. the next turn that PRODUCES clears it — in memory and on disk', afterRun.f === null && afterRun.meta === null, JSON.stringify(afterRun));
+  ok('16. a turn the harness ended with its declared overload enum ⇒ overload, with the line the CLI printed', afterOverload && afterOverload.kind === 'overload' && /529/.test(afterOverload.said), JSON.stringify(afterOverload));
+  ok('16. a 429 rate_limit turn end is NOT an overload (and a normal end clears the mark)', afterRateLimit === null);
+  ok('16. an overload the turn RECOVERED from (a later record without an error) is not why it stopped', afterNormal === null);
+  ok('16. codex: task_failed serverOverloaded (final) ⇒ overload; a turn start clears; usageLimitExceeded is the wall machine\'s, not this', codexOv && codexOv.kind === 'overload' && codexWall === null, JSON.stringify({ codexOv, codexWall }));
+  ok('16. sessionWallVerdict answers (or says nothing) — it never throws', (() => { try { const v = eng.sessionWallVerdict(s); return v === null || typeof v === 'object'; } catch { return false; } })());
+}
+
+// ── 17. «对所有会话开启自动继续» — the bulk flip (lane auto-resume-bulk) ─────────────────────────────────────────────
+{
+  console.log('\n17. the bulk flip: every live session through setEnabled, ONE list broadcast, the instance default untouched');
+  const { create } = require(AR_PATH);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-bulkflip-'));
+  const persisted = [];
+  let lists = 0, settingWrites = 0;
+  const active = new Map([
+    ['a', { backend: 'claude', mode: 'chat' }],
+    ['b', { backend: 'claude', mode: 'chat', _autoResume: false }],
+    ['c', { backend: 'claude', mode: 'chat', _autoResume: true }],
+    ['d', { backend: 'shell', mode: 'terminal' }],
+    ['e', { backend: 'claude', mode: 'chat', _stoppedBy: { kind: 'quota', at: Date.now() } }],
+  ]);
+  const ar = create({
+    dataDir: dir, activeSessions: active, sendToSession: () => true, log: () => { },
+    serverSetting: new Proxy(() => false, { apply: () => false, set: () => { settingWrites++; return true; } }),
+    resumeVerb: (s) => (s.backend === 'shell' ? null : { form: 'message', deliver: () => true }),
+    persistFlag: (id) => persisted.push(id), onListChange: () => { lists++; },
+  });
+  const before = ar.bulkCounts();
+  ok('17. the counts BEFORE: 4 sessions can continue a turn (the shell cannot), 1 already on', before.total === 4 && before.on === 1 && before.off === 3 && before.globalDefault === false, JSON.stringify(before));
+  ar.armIfEnabled('c', active.get('c'), Date.now() + 3600e3, 'usage limit');
+  const on = ar.setEnabledAll(true);
+  ok('17. ON for every session: 3 changed, 1 → 4 on, ONE list broadcast, every changed flag persisted (a restart keeps it)', on.changed === 3 && on.before.on === 1 && on.after.on === 4 && lists === 1 && persisted.sort().join() === 'a,b,e', JSON.stringify({ on, lists, persisted }));
+  ok('17. the shell session is untouched (no resume verb ⇒ nothing to turn on)', active.get('d')._autoResume === undefined);
+  ok('17. the instance DEFAULT for new sessions is never written', settingWrites === 0 && ar.bulkCounts().globalDefault === false);
+  ok('17. a second ON changes nothing and broadcasts nothing', ar.setEnabledAll(true).changed === 0 && lists === 1);
+  const off = ar.setEnabledAll(false);
+  ok('17. «全部关闭»: 4 changed, 0 on after, and a pending wait is DROPPED (off cancels the promise, as the chip does)', off.changed === 4 && off.after.on === 0 && !ar.statusFor('c').armed, JSON.stringify(off));
+  // a session that only FOLLOWED the (off) default gets the explicit choice, but is not counted as «turned off»
+  const fresh = create({ dataDir: dir, activeSessions: new Map([['x', { backend: 'claude', mode: 'chat' }], ['y', { backend: 'claude', mode: 'chat', _autoResume: true }]]), sendToSession: () => true, log: () => { }, serverSetting: () => false, resumeVerb: () => ({ form: 'message', deliver: () => true }) });
+  const offAll = fresh.setEnabledAll(false);
+  ok('17. «全部关闭» counts only real flips (1: the one that was on) and still writes the explicit off on the default-follower (written 2)', offAll.changed === 1 && offAll.written === 2 && offAll.after.on === 0, JSON.stringify(offAll));
+  lists = 0;
+  ar.setEnabled('e', true);
+  const stoppedBroadcast = lists;
+  ar.setEnabled('a', true);
+  ok('17. a single toggle on a STOPPED session tells every list (its card shows the state); on another one it does not', stoppedBroadcast === 1 && lists === 1, String(lists));
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+// ── 16c. THE FOLLOW-UP (主开发's verdict on U1, 2026-11-18 06:46Z): A the card never promises a continue that cannot happen,
+// OFF disarms, never twice for one stop, a wall with no stated reset shows none, B a late record never clears a mark.
+await (async () => {
+  console.log('\n16c. the switch\'s arm is the wall\'s; a late record never clears a mark');
+  const SBm = require(path.join(REPO, 'src/stopped-by.js'));
+  const zh = (await import(new URL('file://' + path.join(REPO, 'src/lib/i18n-zh.js')).href)).default;
+  const tZh = (k, p) => String(zh[k] !== undefined ? zh[k] : k).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] !== undefined ? String(p[x]) : m));
+  // A — a WEEKLY limit three days out: the switch's arm is a WATCH with the wall's bucket ⇒ «continues only if the limit clears early»
+  const far = () => ({ kind: 'quota', at: Date.now() - 60000, resetsAt: Date.now() + 3 * 24 * 3600e3, lane: 'claude', bucket: 'sevenDay', scopedName: null });
+  const wordsOf = (ar, id, s0) => { const lf = SBm.liveFactOf(s0._stoppedBy, ar.statusFor(id)); return SBm.chipWords(lf, tZh, { autoResumeOn: lf.autoResume, waiting: lf.waiting, clock: () => 'T' }).toggle; };
+  const a = mk({ dflt: false }); const s1 = sess({ _stoppedBy: far() }); a.sessions.set('w1', s1); a.ar.setEnabled('w1', true);
+  const st = a.ar.statusFor('w1');
+  ok('16c. A: a weekly limit three days out — the switch arms a WATCH carrying the wall\'s bucket; the card says «自动继续：开 · 只在上限提前解除时继续» (never the timed promise)', st.watch === true && st.bucket === 'sevenDay' && wordsOf(a.ar, 'w1', s1) === '自动继续：开 · 只在上限提前解除时继续', { st, w: wordsOf(a.ar, 'w1', s1) });
+  ok('16c. A: …and the hourly notice says the same (a reading that says it cleared early continues it)', a.notes.some((n) => /提前恢复会自动继续/.test(n.text)));
+  const b = mk({ dflt: false }); const s2 = sess({ _stoppedBy: { ...far(), bucket: null } }); b.sessions.set('w2', s2); b.ar.setEnabled('w2', true);
+  ok('16c. A: with no bucket the watch cannot be opened early — the card says «not waiting», the notice says it will not continue by itself', wordsOf(b.ar, 'w2', s2) === '自动继续：开 · 这次上限不等待' && b.notes.some((n) => /这次不会自动继续/.test(n.text)));
+  const mA = mutantAr([[", { lane: f.lane || null, bucket: f.bucket || null, scopedName: f.scopedName || null })", ')']]);
+  const cA = (() => { if (!mA.mod) return null; const sess3 = new Map([['w3', sess({ _stoppedBy: far() })]]); const ar3 = mA.mod.create({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-')), activeSessions: sess3, serverSetting: () => false, sendToSession: () => true }); ar3.setEnabled('w3', true); return wordsOf(ar3, 'w3', sess3.get('w3')); })();
+  ok('16c. A RED: the switch\'s arm WITHOUT the wall\'s bucket (today\'s) — the early words go (the first leg goes red)', mA.hits === 1 && cA !== '自动继续：开 · 只在上限提前解除时继续', cA || mA.err);
+  // OFF disarms
+  const fut = () => ({ kind: 'quota', at: Date.now() - 60000, resetsAt: Date.now() + 3600e3, lane: 'claude', bucket: 'fiveHour' });
+  const d = mk({ dflt: false }); d.sessions.set('w4', sess({ _stoppedBy: fut() })); d.ar.setEnabled('w4', true); const armedOn = d.ar.statusFor('w4').armed; d.ar.setEnabled('w4', false);
+  ok('16c. OFF disarms: on ⇒ armed, off ⇒ nothing waits', armedOn === true && d.ar.statusFor('w4').armed === false);
+  const mOff = mutantAr([['    if (!on && armed.has(id)) { armed.delete(id); save(); }\n', '']]);
+  const cOff = (() => { if (!mOff.mod) return null; const m4 = new Map([['w4', sess({ _stoppedBy: fut() })]]); const ar4 = mOff.mod.create({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-')), activeSessions: m4, serverSetting: () => false, sendToSession: () => true }); ar4.setEnabled('w4', true); ar4.setEnabled('w4', false); return ar4.statusFor('w4').armed; })();
+  ok('16c. OFF RED: without the disarm the wait survives OFF', mOff.hits === 1 && cOff === true, mOff.err || cOff);
+  // never twice for one stop: the switch's arm fires once; the stop still there and the switch pressed again ⇒ nothing more
+  const twice = async (mod) => { const sent = [], m5 = new Map([['w5', sess({ _stoppedBy: { kind: 'quota', at: Date.now() - 60000, resetsAt: Date.now() + 60000 } })]]); const ar5 = mod.create({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-')), activeSessions: m5, serverSetting: () => false, sendToSession: (id, s9, t) => { sent.push(t); return true; } }); ar5.setEnabled('w5', true); const r = Date.now() + 60000; ar5.tick(r + GRACE_MS + 1); ar5.noteFireOutcome('w5', true); /* its turn ran: the breaker's «on its way» clears — only the never-twice test is left */ ar5.setEnabled('w5', false); ar5.setEnabled('w5', true); ar5.tick(r + GRACE_MS + 120000); ar5.tick(r + 3600e3); return sent.length; };
+  ok('16c. never twice for one stop: one continue, a second press of the switch after it arms nothing more', (await twice({ create })) === 1);
+  // the restack cure's small ones: the STOP IS CLEARED at its continue's delivery (a restart then restores no stop a second
+  // press could arm again) — the engine's clear through the core's dep; RED: the core without the call
+  const clearAt = (mod) => { const cleared = [], m6 = new Map([['w6', sess({ _stoppedBy: { kind: 'quota', at: Date.now() - 60000, resetsAt: Date.now() + 60000 } })]]); const d6 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-clr-')); setImmediate(() => { try { fs.rmSync(d6, { recursive: true, force: true }); } catch { } }); const ar6 = mod.create({ dataDir: d6, activeSessions: m6, serverSetting: () => false, sendToSession: () => true, clearStopped: (id, s9, why) => { cleared.push(`${id}:${why}`); s9._stoppedBy = null; } }); ar6.setEnabled('w6', true); ar6.tick(Date.now() + 60000 + GRACE_MS + 1); return cleared; };
+  ok('16c. the stop is CLEARED at its continue\'s delivery (so a restart restores none a second press could arm): the engine\'s clear, named', JSON.stringify(clearAt({ create })) === JSON.stringify(['w6:its continue was delivered']), clearAt({ create }));
+  const mCl = mutantAr([["      if (clearStopped && session._stoppedBy) { try { clearStopped(id, session, 'its continue was delivered'); }", "      if (false) { try { clearStopped(id, session, 'its continue was delivered'); }"]]);
+  ok('16c. RED: the core without the clear at delivery leaves the stop standing', mCl.hits === 1 && !!mCl.mod && clearAt(mCl.mod).length === 0, mCl.err || null);
+  ok('16c. WIRING: server.js hands the core the engine\'s clear (clearStopped → clearStoppedBy, destructured from the engine)', /clearStopped: \(id, s, why\) => \{ try \{ clearStoppedBy\(s, why\); \} catch \{ \} \}/.test(read('server.js')) && /noteTurnError, clearStoppedBy, sessionWallVerdict, noteSessionProduced,/.test(read('server.js')));   // the engine destructure (U2 adds sessionWallVerdict beside it)
+  ok('16c. the waiting bound the card paints from is the SERVER\'s (statusFor maxWaitMs → the live fact\'s waitBoundMs) — the page copies no number', (() => { const a7 = mk({ dflt: true }); a7.sessions.set('w7', sess()); return a7.ar.statusFor('w7').maxWaitMs === MAX_WAIT_MS; })() && !/26 \* 3600e3/.test(read('src/lib/session-card.js')) && /Number\(stopF\.waitBoundMs\)/.test(read('src/lib/session-card.js')));
+  const mTw = mutantAr([[' && session._stopContinuedAt !== f.at) {', ') {']]);
+  ok('16c. never-twice RED: without the «already continued» test the same stop is continued a second time', mTw.hits === 1 && !!mTw.mod && (await twice(mTw.mod)) >= 2, mTw.err || null);
+  // the engine: a wall with no stated reset shows none; B — a backlog's turn start never clears a mark (codex, end to end)
+  const engOf = (mod, metas) => mod.create({ app: { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} }, rootDir: (() => { const d = scratch('ar-stop2'); fs.mkdirSync(d, { recursive: true }); return d; })(), USAGE_CACHE_DIR: path.join(scratch('ar-stop2'), 'usage-cache'), activeSessions: new Map(), wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice() { }, serverSetting() { return undefined; }, getAccounts() { return null; }, getHosts() { return null; }, getUsageHistory() { return null; }, recordUsageAttribution() { }, adapterRegistry: { get() { return null; } }, getSessionMetaStore: () => ({ readSessionMeta: (n) => metas[n] || {}, writeSessionMeta: (n, m) => { metas[n] = m; }, patchSessionMeta: (n, p) => { metas[n] = { ...(metas[n] || {}), ...p }; return Promise.resolve(true); } }), onSessionListChange: () => { } });
+  const ol = console.log, ow = console.warn; console.log = () => { }; console.warn = () => { };
+  let noReset = null, noResetMut = null, keptLate = null, clearedLive = null, keptMut = null, acpLate = null, acpLive = null, acpMut = null, acpEndMut = null, cxEndMut = null;
+  try {
+    const ENG = path.join(REPO, 'src/server/usage-pool-engine.js'), engSrc = read('src/server/usage-pool-engine.js');
+    const wallNoReset = (eng) => { const s6 = { backend: 'claude', mode: 'chat', _webuiId: 'w-nr', sockName: 'sock-nr', claudeSessionId: 'c-nr' }; eng.noteWallSignal(s6, { bucket: 'fiveHour', key: '__global__' }); eng.noteTurnEnd(s6, { type: 'result', result: "You've hit your limit" }); return s6._stoppedBy; };
+    noReset = wallNoReset(engOf(require(ENG), { 'sock-nr': { name: 'x' } }));
+    const mE = MUTX.load('src/server/usage-pool-engine.js', engSrc.replace('    const resetsAt = stated || 0;', '    const resetsAt = stated || 4102444800000;'));
+    noResetMut = engSrc.includes('    const resetsAt = stated || 0;') ? wallNoReset(engOf(mE, { 'sock-nr': { name: 'x' } })) : 'needle-missing';
+    // B end to end: a stopped codex conversation, the hub restarted (the fact restored), its bridge re-attached and the backlog
+    // replayed (a task_started an hour old) — the mark stays; a LIVE task_started clears it
+    const codexRun = (cxMod) => {
+      const eng = engOf(require(ENG), { 'sock-cx': { name: 'cx' } });
+      const s7 = { backend: 'codex', mode: 'chat', _webuiId: 'w-cx', sockName: 'sock-cx', backendSessionId: 'th-cx', buffer: '', _stoppedBy: { kind: 'quota', at: Date.now() - 2 * 3600e3, resetsAt: Date.now() + 3600e3 } };
+      let feed = null; const pty = { onData: (cb) => { feed = cb; }, onExit() { }, write() { } };
+      cxMod.create({ engine: eng, deliverRef: null, permissionRulesRef: null }).attach(s7, 'w-cx', pty, { feedLive() { }, broadcastToSession() { }, broadcastActiveSessions() { }, readSessionMeta: () => ({}), writeSessionMeta() { }, updateSessionTodos() { } });
+      const line = (o) => feed && feed(JSON.stringify(o) + '\n');
+      line({ type: 'event_msg', timestamp: new Date(Date.now() - 3600e3).toISOString(), payload: { type: 'task_started', turn_id: 't-old' } });
+      line({ type: 'event_msg', timestamp: new Date(Date.now() - 3600e3 + 5000).toISOString(), payload: { type: 'task_complete', turn_id: 't-old' } });   // …with that turn's END (U1 cure 2's read)
+      const late = s7._stoppedBy;
+      line({ type: 'event_msg', timestamp: new Date().toISOString(), payload: { type: 'task_started', turn_id: 't-new' } });
+      return { late, live: s7._stoppedBy };
+    };
+    const cxReal = codexRun(require(path.join(REPO, 'src/server/stdout/codex-events.js')));
+    keptLate = cxReal.late; clearedLive = cxReal.live;
+    const cxSrc = read('src/server/stdout/codex-events.js'), needle = 'try { if (!recordIsLate?.(session, msg)) noteTurnRunning?.(session); } catch { } // lane auto-resume-bulk: a turn that starts ends the stop';   // stale-pins: kept — the CODEX consumer's line (codex-events still says it); the ACP one moved
+    keptMut = cxSrc.includes(needle) ? codexRun(MUTX.load('src/server/stdout/codex-events.js', cxSrc.replace(needle, 'try { noteTurnRunning?.(session); } catch { } // lane auto-resume-bulk: a turn that starts ends the stop'))).late : 'needle-missing';   // stale-pins: kept — the RED puts the old unguarded line BACK (the consumer without the test)
+    // MUST 1 of the restack's verdict: the ACP / agy wrappers stamp a record `ts`, the lateness rule reads `timestamp` — the
+    // consumer judges its record by its OWN stamp. The REAL acp-events consumer and the REAL engine, a restored mark.
+    const acpRun = (acMod) => {
+      const eng = engOf(require(ENG), { 'sock-ac': { name: 'ac' } });
+      const s8 = { backend: 'antigravity', mode: 'chat', _webuiId: 'w-ac', sockName: 'sock-ac', backendSessionId: 'th-ac', buffer: '', _stoppedBy: { kind: 'quota', at: Date.now() - 2 * 3600e3, resetsAt: Date.now() + 3600e3 } };
+      let feed = null; const pty = { onData: (cb) => { feed = cb; }, onExit() { }, write() { } };
+      acMod.create({ engine: eng, noteHarnessModels() { }, deliverRef: null, permissionRulesRef: null }).attach(s8, 'w-ac', pty, { feedLive() { }, broadcastToSession() { }, broadcastActiveSessions() { }, readSessionMeta: () => ({}), writeSessionMeta() { }, updateSessionTodos() { } });
+      const line = (o) => feed && feed(JSON.stringify(o) + '\n');
+      line({ ts: new Date(Date.now() - 3600e3).toISOString(), type: 'acp', kind: 'prompt_start' });   // the attach's replayed backlog: an hour old…
+      line({ ts: new Date(Date.now() - 3600e3 + 5000).toISOString(), type: 'acp', kind: 'prompt_end', stopReason: 'end_turn' });   // …with that turn's END
+      const late = s8._stoppedBy;
+      line({ ts: new Date().toISOString(), type: 'acp', kind: 'prompt_start' });
+      return { late, live: s8._stoppedBy };
+    };
+    const acReal = acpRun(require(path.join(REPO, 'src/server/stdout/acp-events.js')));
+    acpLate = acReal.late; acpLive = acReal.live;
+    const acSrc = read('src/server/stdout/acp-events.js'), acNeedle = 'if (!recordIsLate?.(session, msg.timestamp ? msg : { ...msg, timestamp: msg.ts })) noteTurnRunning?.(session);';
+    const acEnd = 'try { noteTurnEnd?.(session, msg.timestamp ? msg : { ...msg, timestamp: msg.ts }); } catch {}';
+    acpEndMut = acSrc.includes(acEnd) ? acpRun(MUTX.load('src/server/stdout/acp-events.js', acSrc.replace(acEnd, 'try { noteTurnEnd?.(session); } catch {}'))).late : 'needle-missing';   // stale-pins: kept — the RED is the bare turn end
+    const cxEnd = 'try { noteTurnEnd?.(session, msg); } catch {}';
+    cxEndMut = read('src/server/stdout/codex-events.js').includes(cxEnd) ? codexRun(MUTX.load('src/server/stdout/codex-events.js', read('src/server/stdout/codex-events.js').replace(cxEnd, 'try { noteTurnEnd?.(session); } catch {}'))).late : 'needle-missing';   // stale-pins: kept — the RED is the bare turn end
+    acpMut = acSrc.includes(acNeedle) ? acpRun(MUTX.load('src/server/stdout/acp-events.js', acSrc.replace(acNeedle, 'if (!recordIsLate?.(session, msg)) noteTurnRunning?.(session);'))).late : 'needle-missing';   // stale-pins: kept — the RED is the restack's line (the record judged without its own stamp)
+  } finally { console.log = ol; console.warn = ow; }
+  ok('16c. a wall with NO stated reset shows none — the engine writes resetsAt null (never a verdict\'s guess)', !!noReset && noReset.kind === 'quota' && noReset.resetsAt === null, noReset);
+  ok('16c. no-reset RED: an engine that fills the reset from elsewhere shows one (the leg above reads the fact, not a spelling)', !!noResetMut && typeof noResetMut === 'object' && noResetMut.resetsAt !== null, noResetMut);
+  ok('16c. B end to end on ACP (the restack cure\'s MUST 1): a restored mark survives a replayed prompt_start an hour old (judged by the record\'s own `ts`); a LIVE one clears it — the REAL acp-events consumer and the REAL engine', !!acpLate && acpLate.kind === 'quota' && acpLive === null, { acpLate, acpLive });
+  ok('16c. ACP RED: the restack\'s line (the record judged without its own stamp) lets the backlog clear the mark', acpMut === null, acpMut);
+  ok('16c. the backlog\'s TURN END settles nothing either (ACP prompt_end, codex task_complete — by their own stamps); RED: the bare turn end clears the restored mark, on both', acpEndMut === null && cxEndMut === null, { acpEndMut, cxEndMut });
+  ok('16c. B end to end: a restored mark survives the bridge\'s replayed backlog (a task_started an hour old); a LIVE turn start clears it', !!keptLate && keptLate.kind === 'quota' && clearedLive === null, { keptLate, clearedLive });
+  ok('16c. B RED: the codex consumer without the late-record test lets the backlog clear the mark', keptMut === null, keptMut);
+})();
+
+// ── 16d. PATCHES OF ONE SESSION'S META LAND IN THE ORDER THEY WERE ASKED (the restack cure's MUST 2 — the cure's own stated law,
+// «loses no update»): the stop fact written, then cleared, within one read — the first read answers LAST; the disk ends with
+// the clear (memory's state), never the fact again. The REAL store over a scratch folder; RED: the patch without its chain.
+await (async () => {
+  console.log('\n16d. patches of one meta land in the order asked');
+  const SS = 'src/server/session-stdout.js', ssSrc = read(SS);
+  const anyFn = () => new Proxy(function () { }, { get: (t, k) => (k === 'then' || typeof k === 'symbol' ? undefined : anyFn()), apply: () => undefined });
+  const storeOf = (mod, tmp) => { const META = path.join(tmp, 'meta'), BUF = path.join(tmp, 'buf'); fs.mkdirSync(META, { recursive: true }); fs.mkdirSync(BUF, { recursive: true });
+    fs.writeFileSync(path.join(META, 'two-1.json'), JSON.stringify({ sockName: 'two-1', webuiSessionId: 'w-two', stoppedBy: { kind: 'quota', at: 1 } }));
+    return { META, so: mod.create({ rootDir: tmp, BUFFERS_DIR: BUF, META_DIR: META, DTACH_CMD: 'dtach', USAGE_SCANNER_PATH: path.join(tmp, 'none'), CLAUDE_STREAM_TYPES: new Set(), _seenStreamTypes: new Set(), activeSessions: new Map(), engine: new Proxy({ _vsuPending: new Map() }, { get: (t, k) => (k in t ? t[k] : anyFn()), has: () => true }), checkClaudeGoalStatus() { }, broadcastToSession() { }, broadcastActiveSessions() { }, noteModelSeen() { }, noteHarnessModels() { }, recordUsageAttribution() { }, daemonPtyShim: (h) => h, sbSeenFirst: () => true, getDeviceMgr: () => null, getHosts: () => null, getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), getTelemetry: () => null, getNoConvoRef: () => ({ map: new Map() }), getDeliver: () => ({ stashFor: () => ({}) }), getBrain: () => anyFn() }) }; };
+  const scene = async (mod) => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-two-')); const { META, so } = storeOf(mod, tmp);
+    const fsp = fs.promises, orig = fsp.readFile; let first = true;
+    fsp.readFile = function (p, ...a) { const r = orig.call(this, p, ...a); if (first && String(p).endsWith('two-1.json')) { first = false; return r.then((v) => new Promise((res) => setTimeout(() => res(v), 150))); } return r; };   // the FIRST read answers last
+    let out = null;
+    try {
+      const pa = so.patchSessionMeta('two-1', { stoppedBy: { kind: 'quota', at: 2 } }, { owner: 'w-two' });   // the walled turn writes its fact…
+      const pb = so.patchSessionMeta('two-1', { stoppedBy: null }, { owner: 'w-two' });                        // …and a turn start clears it, at once
+      await Promise.all([pa, pb]);
+      const SWm = require(path.join(REPO, 'src/store-writer.js'));
+      await Promise.race([SWm.storeWriter().durable(path.join(META, 'two-1.json')), new Promise((r) => setTimeout(r, 8000))]);   // the writer's thread lands what is owed (its own word — never a fixed sleep)
+      out = JSON.parse(fs.readFileSync(path.join(META, 'two-1.json'), 'utf8')).stoppedBy;
+    } finally { fsp.readFile = orig; fs.rmSync(tmp, { recursive: true, force: true }); }
+    return out;
+  };
+  const real = await scene(require(path.join(REPO, SS)));
+  ok('16d. the fact written then cleared within one read, the first read answering LAST ⇒ the disk ends CLEARED, as memory is', real === null, real);
+  const chainLine = '  const p = (metaPatchChain.get(fp) || Promise.resolve()).then(link, link);';
+  const red = ssSrc.includes(chainLine) ? await scene(MUTX.load(SS, ssSrc.replace(chainLine, '  const p = link();   // PRE-CURE: no chain'))) : 'needle-missing';
+  ok('16d. RED: the patch without its chain — the late first read writes the cleared fact BACK', !!red && typeof red === 'object' && red.at === 2, red);
+  // the restack cure 2 («as if a must», 10:30Z): a clear the store DROPPED is written with the next patch; the newest wins
+  const owedScene = async (mod, second) => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-owe-')); const { META, so } = storeOf(mod, tmp);
+    const fsp = fs.promises, orig = fsp.readFile; let failNext = true;
+    fsp.readFile = function (p, ...a) { if (failNext && String(p).endsWith('two-1.json')) { failNext = false; return Promise.reject(Object.assign(new Error('EIO'), { code: 'EIO' })); } return orig.call(this, p, ...a); };   // the store gives up on the first
+    let out = null, firstOk = null;
+    try {
+      firstOk = await so.patchSessionMeta('two-1', { stoppedBy: null }, { owner: 'w-two' });   // a clear the store DROPS
+      await so.patchSessionMeta('two-1', second, { owner: 'w-two' });                          // the conversation's next patch
+      const SWm = require(path.join(REPO, 'src/store-writer.js'));
+      await Promise.race([SWm.storeWriter().durable(path.join(META, 'two-1.json')), new Promise((r) => setTimeout(r, 8000))]);
+      out = JSON.parse(fs.readFileSync(path.join(META, 'two-1.json'), 'utf8'));
+    } finally { fsp.readFile = orig; fs.rmSync(tmp, { recursive: true, force: true }); }
+    return { firstOk, out };
+  };
+  const ow = await owedScene(require(path.join(REPO, SS)), { autoResume: true });
+  ok('16d. A CLEAR THE STORE DROPPED IS NOT LOST: the patch it gave up on rides the next patch of that file to disk (the stop gone, the next patch\'s key there too)', ow.firstOk === false && !!ow.out && ow.out.stoppedBy === null && ow.out.autoResume === true, JSON.stringify(ow));
+  const owLine = '    const full = owed ? { ...owed, ...patch } : patch;   // never an older value over a newer one: this patch\'s keys last';
+  const owRed = ssSrc.includes(owLine) ? await owedScene(MUTX.load(SS, ssSrc.replace(owLine, '    const full = patch;   // PRE-CURE 2: a dropped patch is gone')), { autoResume: true }) : 'needle-missing';
+  ok('16d. RED: the store without the owed keys keeps the OLD stop on disk (a restart would restore it)', !!owRed && typeof owRed === 'object' && !!owRed.out && !!owRed.out.stoppedBy && owRed.out.stoppedBy.at === 1, JSON.stringify(owRed));
+  const nw = await owedScene(require(path.join(REPO, SS)), { stoppedBy: { kind: 'quota', at: 3 } });
+  ok('16d. …the NEWEST wins: a new stop in the next patch is not undone by the older owed clear', !!nw.out && !!nw.out.stoppedBy && nw.out.stoppedBy.at === 3, JSON.stringify(nw));
+  { const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-own-')); const live = new Map();
+    const META = path.join(tmp, 'meta'); fs.mkdirSync(META, { recursive: true }); fs.mkdirSync(path.join(tmp, 'buf'), { recursive: true });
+    fs.writeFileSync(path.join(META, 'own-1.json'), JSON.stringify({ sockName: 'own-1', webuiSessionId: 'sess-old-name', stoppedBy: { kind: 'quota', at: 1 } }));
+    const so2 = require(path.join(REPO, SS)).create({ rootDir: tmp, BUFFERS_DIR: path.join(tmp, 'buf'), META_DIR: META, DTACH_CMD: 'dtach', USAGE_SCANNER_PATH: path.join(tmp, 'none'), CLAUDE_STREAM_TYPES: new Set(), _seenStreamTypes: new Set(), activeSessions: live, engine: new Proxy({ _vsuPending: new Map() }, { get: (t, k) => (k in t ? t[k] : anyFn()), has: () => true }), checkClaudeGoalStatus() { }, broadcastToSession() { }, broadcastActiveSessions() { }, noteModelSeen() { }, noteHarnessModels() { }, recordUsageAttribution() { }, daemonPtyShim: (h) => h, sbSeenFirst: () => true, getDeviceMgr: () => null, getHosts: () => null, getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), getTelemetry: () => null, getNoConvoRef: () => ({ map: new Map() }), getDeliver: () => ({ stashFor: () => ({}) }), getBrain: () => anyFn() });
+    const ce = console.error; console.error = () => { };
+    let restored = null, foreign = null;
+    try { restored = await so2.patchSessionMeta('own-1', { stoppedBy: null }, { owner: 'sess-own-1' });   // the restore derived its id from the socket's name
+      live.set('sess-old-name', {}); foreign = await so2.patchSessionMeta('own-1', { stoppedBy: null }, { owner: 'sess-own-1' }); }   // …now ANOTHER LIVE session owns that file
+    finally { console.error = ce; fs.rmSync(tmp, { recursive: true, force: true }); }
+    ok('16d. the owner check refuses only a file ANOTHER LIVE session owns — a restored conversation whose id came from its socket\'s name still patches its own meta', restored === true && foreign === false, JSON.stringify({ restored, foreign })); }
+  ok('16d. the owner check runs on the copy already read (no second read of the mount); a patch that gives up writes nothing', /writeSessionMeta\(sockName, \{ \.\.\.m, \.\.\.patch \}, \{ prev: m, flagOnly \}\)/.test(ssSrc) && /sessionMetaOwnerConflict\(sockName, meta, prev\)/.test(ssSrc) && /tries > 0 \? patchMetaOnce\(sockName, fp, patch, tries - 1, owner, tok\) : false/.test(ssSrc));
+})();
+
+// ── 17c. THE FLIP COSTS THE LOOP A CONSTANT (lg-recovery U2 cure — 主开发's law 2): «turn auto-continue on/off for every
+// session» flipped every conversation through setEnabled, and each made a synchronous meta READ (persistFlag) plus the owner
+// check's second read, and every armed one rewrote data/auto-resume.json — 2-3 file calls a conversation on the loop. Now the
+// flag is PATCHED by the store (its pending copy, else a read off the loop; the version read is the owner check's) and the
+// arms are saved ONCE after the loop. Counted: every synchronous fs call across one ON + OFF flip over N conversations — the
+// SAME at 5 and at 50. The REAL meta store over a scratch folder, server.js's own persistFlag (pinned verbatim).
+await (async () => {
+  console.log('\n17c. the bulk flip costs the loop a constant');
+  const { create } = require(AR_PATH);
+  const tmpF = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-flip17c-'));
+  let attrib = 0;
+  const META = path.join(tmpF, 'meta'), BUF = path.join(tmpF, 'buffers'); fs.mkdirSync(META, { recursive: true }); fs.mkdirSync(BUF, { recursive: true });
+  const anyFn = () => new Proxy(function () { }, { get: (t, k) => (k === 'then' || typeof k === 'symbol' ? undefined : anyFn()), apply: () => undefined });
+  const engine = new Proxy({ _vsuPending: new Map() }, { get: (t, k) => (k in t ? t[k] : anyFn()), has: () => true });
+  const liveF = new Map();   // the store's live conversations (its owner rule refuses a meta only when ANOTHER LIVE one owns it)
+  const so = require(path.join(REPO, 'src/server/session-stdout.js')).create({
+    rootDir: tmpF, BUFFERS_DIR: BUF, META_DIR: META, DTACH_CMD: 'dtach', USAGE_SCANNER_PATH: path.join(tmpF, 'none'), CLAUDE_STREAM_TYPES: new Set(), _seenStreamTypes: new Set(), activeSessions: liveF, engine,
+    checkClaudeGoalStatus() { }, broadcastToSession() { }, broadcastActiveSessions() { }, noteModelSeen() { }, noteHarnessModels() { }, recordUsageAttribution() { attrib++; }, daemonPtyShim: (h) => h,   // COUNTED: on a pooled hub it scans every session (a sync readlink inside)
+    sbSeenFirst: () => true, getDeviceMgr: () => null, getHosts: () => null, getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), getTelemetry: () => null, getNoConvoRef: () => ({ map: new Map() }), getDeliver: () => ({ stashFor: () => ({}) }), getBrain: () => anyFn(),
+  });
+  const SRV_PF = 'persistFlag: (id, s) => { if (s && s.sockName) { try { patchSessionMeta(s.sockName, { autoResume: s._autoResume === undefined ? undefined : !!s._autoResume }, { owner: id }).then((ok) => { if (!ok) console.warn(`[auto-resume] ${id}: the auto-continue choice is kept in memory only — its meta could not be patched (a restart would forget it)`); }); } catch { } } }';
+  ok('17c. PIN: server.js hands the core the store\'s patch as persistFlag (no read of the meta on the caller\'s road)', read('server.js').includes(SRV_PF) && /const \{ setupSessionPty, attachToDtach, readSessionMeta, writeSessionMeta, patchSessionMeta,/.test(read('server.js')));
+  const curedPF = (id, s2) => { if (s2 && s2.sockName) { try { so.patchSessionMeta(s2.sockName, { autoResume: s2._autoResume === undefined ? undefined : !!s2._autoResume }, { owner: id }); } catch { } } };   // = SRV_PF (its log aside)
+  const oldPF = (id, s2) => { if (s2 && s2.sockName) { try { so.writeSessionMeta(s2.sockName, { ...(so.readSessionMeta(s2.sockName) || {}), autoResume: s2._autoResume === undefined ? undefined : !!s2._autoResume }); } catch { } } };   // the U2 tip's
+  const SYNC = ['readFileSync', 'writeFileSync', 'renameSync', 'readdirSync', 'statSync', 'lstatSync', 'existsSync', 'openSync', 'writeSync', 'closeSync', 'fsyncSync', 'mkdirSync', 'unlinkSync', 'rmSync', 'appendFileSync', 'copyFileSync', 'accessSync', 'realpathSync', 'readSync', 'fstatSync'];
+  let calls = 0; const orig = {};
+  const count = async (fn) => { calls = 0; for (const k of SYNC) { orig[k] = fs[k]; fs[k] = function (...a) { calls++; return orig[k].apply(this, a); }; } try { await fn(); } finally { for (const k of SYNC) fs[k] = orig[k]; } return calls; };
+  // every conversation's meta is ON DISK before the store first lists its folder (as a hub's are at boot): a patch then takes
+  // the store's paced road — a file made behind its back would be its «first version», written here and now by design
+  fs.writeFileSync(path.join(META, 'fl-own-1.json'), JSON.stringify({ sockName: 'fl-own-1', webuiSessionId: 'w-own-1', backend: 'claude' }));
+  const SETS = [2, 5, 50, 5, 50].map((N, k) => { const t = 't' + (k + 1); for (let i = 0; i < N; i++) { const sock = `fl-${t}-${i}`; fs.writeFileSync(path.join(META, sock + '.json'), JSON.stringify({ sockName: sock, webuiSessionId: `w-${t}-${i}`, backend: 'claude', name: 'n' + i })); } return { t, N }; });
+  const flip = async (mod, pf, { t, N }) => {
+    const dir = path.join(tmpF, 'ar-' + t); fs.mkdirSync(dir);
+    const active = new Map();
+    for (let i = 0; i < N; i++) active.set(`w-${t}-${i}`, { backend: 'claude', mode: 'chat', pty: {}, sockName: `fl-${t}-${i}`, ...(i % 2 ? { _stoppedBy: { kind: 'quota', at: Date.now() - 60000, resetsAt: Date.now() + 3600e3 } } : {}) });
+    const ar = mod.create({ dataDir: dir, activeSessions: active, sendToSession: () => true, log: () => { }, serverSetting: () => false, resumeVerb: () => ({ form: 'message', deliver: () => true }), persistFlag: pf, onListChange: () => { } });
+    let armedOn = 0; const a0 = attrib;
+    const inLoop = await count(async () => { ar.setEnabledAll(true); armedOn = [...active.keys()].filter((id) => ar.statusFor(id).armed).length; ar.setEnabledAll(false); });
+    const after = await count(() => new Promise((r) => setTimeout(r, 500)));   // the reads off the loop land, the writer's thread writes
+    const last = JSON.parse(fs.readFileSync(path.join(META, `fl-${t}-${N - 1}.json`), 'utf8'));
+    return { inLoop, after, armedOn, flag: last.autoResume, name: last.name, attrib: attrib - a0 };
+  };
+  await flip(require(AR_PATH), curedPF, SETS[0]);   // warm: the meta folder is listed once per process (the store's first-version rule)
+  const c5 = await flip(require(AR_PATH), curedPF, SETS[1]), c50 = await flip(require(AR_PATH), curedPF, SETS[2]);
+  ok('17c. LAW 2: ONE flip ON + OFF over 5 and over 50 conversations makes the SAME number of synchronous file calls (the arms saved once per flip, no meta read, no directory check per write) — in the loop and after it; and a flag patch does NO usage attribution (on a pooled hub: a scan of every session per write)', c5.inLoop === c50.inLoop && c5.after === c50.after && c5.inLoop <= 8 && c5.attrib === 0 && c50.attrib === 0, JSON.stringify({ c5, c50 }));
+  ok('17c. …and it still DID it: the stopped ones were armed by ON (the U1 switch), and the last flag on disk is OFF with the meta\'s other fields kept', c50.armedOn === 25 && c50.flag === false && c50.name === 'n49', JSON.stringify(c50));
+  liveF.set('w-own-1', {});   // the meta's owner is a LIVE conversation
+  const okOther = await so.patchSessionMeta('fl-own-1', { autoResume: true }, { owner: 'w-someone-else' });
+  const okMine = await so.patchSessionMeta('fl-own-1', { autoResume: true }, { owner: 'w-own-1' });
+  liveF.delete('w-own-1');   // …and gone: its meta is the next conversation's to write (the chain's owner rule — U1 restack cure)
+  const okGone = await so.patchSessionMeta('fl-own-1', { autoResume: false }, { owner: 'w-someone-else' });
+  ok('17c. the patch names its OWNER: a meta another LIVE session owns is never patched with this one\'s choice (said as a collision); CONTROL: its own ⇒ patched; a gone owner\'s meta ⇒ patched', okOther === false && okMine === true && okGone === true, JSON.stringify({ okOther, okMine, okGone }));
+  const mS = mutantAr([['    if (saveHeld) { saveOwed = true; return; }\n', '']]);
+  const r5 = mS.mod ? await flip(mS.mod, oldPF, SETS[3]) : null, r50 = mS.mod ? await flip(mS.mod, oldPF, SETS[4]) : null;
+  ok('17c. RED: the U2 tip\'s flip (the meta read + the owner check\'s read per conversation, a save per arm) grows with N', mS.hits === 1 && !!r5 && !!r50 && r50.inLoop > r5.inLoop + 40, mS.err || JSON.stringify({ r5, r50 }));
+  fs.rmSync(tmpF, { recursive: true, force: true });
+})();
+
+// ── 16b. TURNED ON AFTER THE WALL (lane auto-resume-bulk, U1 cure — the adversarial read's MUST 2): the card's switch says
+// «continues by itself when its limit resets»; before, only a wall seen WITH auto-continue on armed anything, so a press
+// after the wall kept no promise. Now the stop's OWN stated reset arms it; a passed reset or an overload arms nothing.
+{
+  console.log('\n16b. auto-continue turned on after the wall');
+  const fut = () => ({ kind: 'quota', at: Date.now() - 60000, resetsAt: Date.now() + 3600e3 });
+  const a = mk({ dflt: false }); const s1 = sess({ _stoppedBy: fut() }); a.sessions.set('s1', s1);
+  a.ar.setEnabled('s1', true);
+  const st = a.ar.statusFor('s1');
+  ok('16b. turned ON for a session a wall stopped ⇒ armed at that stop\'s OWN stated reset', st.armed === true && Math.abs(Number(st.resetsAt) - s1._stoppedBy.resetsAt) < 1000 && a.sent.length === 0, st);
+  const b = mk({ dflt: false }); b.sessions.set('s2', sess({ _stoppedBy: { kind: 'quota', at: Date.now() - 7200e3, resetsAt: Date.now() - 60000 } })); b.ar.setEnabled('s2', true);
+  ok('16b. …a reset that has PASSED arms nothing — no billed turn ever starts from the switch itself', b.ar.statusFor('s2').armed === false && b.sent.length === 0);
+  const c = mk({ dflt: false }); c.sessions.set('s3', sess({ _stoppedBy: { kind: 'overload', at: Date.now() - 60000 } })); c.ar.setEnabled('s3', true);
+  ok('16b. …an overload arms nothing (auto-continue waits for a usage limit\'s reset only)', c.ar.statusFor('s3').armed === false);
+  const d = mk({ dflt: false }); d.sessions.set('s4', sess({ _stoppedBy: fut() })); d.ar.setEnabled('s4', false);
+  ok('16b. …turned OFF arms nothing', d.ar.statusFor('s4').armed === false);
+  const m = mutantAr([["      if (f && f.kind === 'quota' && Number(f.resetsAt) > Date.now() && session._stopContinuedAt !== f.at) {", '      if (false) {']]);   // the U1 cure's line (never twice for one stop)
+  const mm = m.mod && m.mod.create({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-')), activeSessions: new Map([['s1', sess({ _stoppedBy: fut() })]]), serverSetting: () => false, sendToSession: () => true });
+  if (mm) mm.setEnabled('s1', true);
+  ok('16b. CONTROL: without the turned-on arm the same press arms nothing — the first leg goes red', m.hits === 1 && !!mm && mm.statusFor('s1').armed === false, m.err || null);
+}
+
+// ── 17b. THE BULK RESUME'S LOOP (lg-recovery U2 cure — the adversarial read's MUST 1-3): the holds it has not reached are
+// RENEWED each pass; a session that RAN since the plan (its stop gone or a new one) is skipped, its hold given back; a session
+// the pre-fire gate MOVED onto another slot is re-authorized THERE and charged THERE (a refusal there skips it). The REAL
+// module; the money doors are recorders.
+await (async () => {
+  console.log('\n17b. the bulk resume\'s loop: renewal, a session that ran since, a session the gate moved');
+  const { create } = require(AR_PATH);
+  const run = async (mod, { moveTo = null, refuseMoved = false, ranSince = false, overageAfter = null, stopAfter = null, offAfter = null, hangGate = null, armB = false, fireBAfter = false, badReask = false } = {}) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-bulk17b-'));
+    const at = Date.now() - 60000;
+    const active = new Map([
+      ['a', { backend: 'claude', mode: 'chat', pty: {}, name: 'A1', _slot: 'A', _stoppedBy: { kind: 'quota', at, resetsAt: Date.now() - 1000 } }],
+      ['b', { backend: 'claude', mode: 'chat', pty: {}, name: 'B1', _slot: 'A', _stoppedBy: { kind: 'quota', at: at + 1, resetsAt: Date.now() - 1000 } }],
+    ]);
+    const L = { auth: [], renew: [], release: [], charge: [], sent: [] };
+    let seq = 0, overage = false, r0 = null, ar = null, bGates = 0;
+    ar = mod.create({
+      dataDir: dir, activeSessions: active, serverSetting: () => false,
+      sendToSession: (id) => { L.sent.push(id); if (overageAfter === id) overage = true; if (stopAfter === id) ar.stopBatch(r0.batchId); if (offAfter === id) ar.setEnabledAll(false); if (hangGate && id === 'a') setTimeout(() => ar.stopBatch(r0.batchId), 30); return true; },
+      fireIdentity: (id, s2) => ({ key: s2._slot, name: s2._slot }),
+      beforeFire: (id, s2) => { if (hangGate && id === 'b' && !(bGates++)) return new Promise(() => { }); if (moveTo && id === 'b') s2._slot = moveTo; return true; },   // the batch's gate for b hangs; a LATER gate (a single continue's) answers
+      // THE AUTHORIZER'S STATE RULES as a stand-in: paid overage in use refuses every unattended producer (a batch of one too)
+      authorizeSpendBatch: (items) => { L.auth.push(items.map((x) => `${x.id}@${x.identity && x.identity.key}`).join()); if (overage) return { ok: false, why: 'overage-in-use' }; if (badReask && items.length === 1) return { ok: true, holds: [0, 1].map(() => ({ sessionId: items[0].id, identity: items[0].identity, hold: 'h' + (++seq) })) }; if (refuseMoved && items.length === 1 && items[0].identity && items[0].identity.key === 'C') return { ok: false, why: 'hour-cap' }; return { ok: true, holds: items.map((x) => ({ sessionId: x.id, identity: x.identity, hold: 'h' + (++seq) })) }; },
+      renewSpend: (holds) => L.renew.push(holds.join()),
+      releaseSpend: (id, s2, hold) => L.release.push(hold),
+      noteBatchSpend: (id, s2, identity, hold) => L.charge.push(`${id}@${identity && identity.key}:${hold}`),
+      wallVerdict: () => ({ usable: true, blockedUntil: 0 }),
+      bulkPaceMs: 5, bulkGateWaitMs: hangGate ? 3600e3 : 2000,   // a hung gate waits an HOUR unless a Stop ends the wait
+    });
+    if (armB) { const sb = active.get('b'); sb._autoResume = true; ar.armIfEnabled('b', sb, Date.now() + 3600e3, 'usage limit'); }   // b ARMED: the pool's switch would fireNow it
+    r0 = ar.resumeBatch({});
+    if (ranSince) active.get('b')._stoppedBy = null;   // the person typed into b before the batch reached it
+    const until = Date.now() + 5000;
+    while (Date.now() < until && !(ar.batchStatus(r0.batchId) || {}).done) await new Promise((r) => setTimeout(r, 10));
+    if (fireBAfter) { ar.fireNow('b', 'the pool moved it (the abandoned gate\'s switch)'); await new Promise((r) => setTimeout(r, 80)); }
+    return { rec: ar.batchStatus(r0.batchId), L };
+  };
+  const real = { create };
+  const n = await run(real);
+  ok('17b. both continued — each ASKED AGAIN before its continue (a batch of one on its slot, the press\'s hold given back) and charged on that answer\'s hold; the hold not reached yet was RENEWED while the first ran', n.rec.done && n.L.sent.join() === 'a,b' && n.L.auth.join('|') === 'a@A,b@A|a@A|b@A' && n.L.release.includes('h1') && n.L.release.includes('h2') && n.L.charge.join() === 'a@A:h3,b@A:h4' && n.L.renew.some((x) => x.split(',').includes('h2')), JSON.stringify(n));
+  const r1 = await run(real, { ranSince: true });
+  ok('17b. a session that RAN since the plan is skipped («it has run again since»), never continued twice; its hold goes back', r1.L.sent.join() === 'a' && r1.rec.skipped.some((x) => x.id === 'b' && x.why === 'resumed') && r1.L.release.includes('h2'), JSON.stringify(r1));
+  const m1 = mutantAr([["        if (!stillSame()) { skip('resumed'); continue; }\n", ''], ["        if (!stillSame()) { skip('resumed'); continue; }   // the gate's own pool switch may have continued it (fireNow on an armed session)\n", '']]);
+  const c1 = m1.mod ? await run(m1.mod, { ranSince: true }) : null;
+  ok('17b. CONTROL: without the two re-checks the same batch continues b a second time — the leg above goes red', m1.hits === 2 && !!c1 && c1.L.sent.join() === 'a,b', m1.err || JSON.stringify(c1 && c1.L));
+  const mv = await run(real, { moveTo: 'C' });
+  ok('17b. the gate MOVED b onto slot C ⇒ re-authorized on C (a batch of one), its A hold given back, charged on C', mv.L.auth.join('|') === 'a@A,b@A|a@A|b@C' && mv.L.release.includes('h2') && mv.L.charge.join() === 'a@A:h3,b@C:h4' && mv.L.sent.join() === 'a,b', JSON.stringify(mv.L));
+  const rf = await run(real, { moveTo: 'C', refuseMoved: true });
+  ok('17b. …and when C refuses, b is skipped («the account it moved to refused the spend»), nothing sent or charged for it', rf.L.sent.join() === 'a' && rf.rec.skipped.some((x) => x.id === 'b' && x.why === 'moved-refused') && !rf.L.charge.some((x) => x.startsWith('b@')), JSON.stringify(rf));
+  const m2 = mutantAr([['        const bill = ident2 || (h && h.identity) || null;', '        const bill = (h && h.identity) || ident2 || null;   // PRE-CURE: the slot the press authorized']]);
+  const c2 = m2.mod ? await run(m2.mod, { moveTo: 'C' }) : null;
+  ok('17b. CONTROL: asked on the slot the press named instead of the one that bills, b is charged on A, the slot it never billed — the move leg goes red', m2.hits === 1 && !!c2 && c2.L.charge.some((x) => x.startsWith('b@A:')), m2.err || JSON.stringify(c2 && c2.L));
+  // ── LAW 1 (主开发's U2 verdict): EVERY CONTINUE OF A BATCH IS ASKED LIKE A SINGLE CONTINUE — paid overage turns «in use»
+  // between item one and item two: item two is not continued and not charged, skipped BY NAME with the authorizer's reason
+  const ov = await run(real, { overageAfter: 'a' });
+  const ovSkip = ov.rec.skipped.find((x) => x.id === 'b');
+  ok('17b. LAW 1 + FORM TWO AFTER THE PRESS (the cure): overage turns «in use» after the first continue ⇒ the second is NOT continued and NOT charged — skipped as «left stopped» with its ACCOUNT NAMED (A) and the rule, its hold back', ov.L.sent.join() === 'a' && !!ovSkip && ovSkip.why === 'account-refused' && ovSkip.reason === 'overage-in-use' && ovSkip.member === 'A' && !ov.L.charge.some((x) => x.startsWith('b@')), JSON.stringify(ov.rec.skipped));
+  { // its RED control, proving its plant first: the pre-cure row (the rule, no account) is what the leg above refuses
+    const mF = mutantAr([["          if (ACCOUNT_REFUSALS.has(why)) { skip('account-refused', null, why, (bill && (bill.name || bill.key)) || null); continue; }\n", '']]);
+    ok('17b. FORM TWO AFTER THE PRESS — CONTROL FIRST: the patch removing the named row applies (exactly once)', mF.hits === 1 && !!mF.mod, mF.err);
+    const cF = mF.mod ? await run(mF.mod, { overageAfter: 'a' }) : null;
+    const cSkip = cF && cF.rec.skipped.find((x) => x.id === 'b');
+    ok('17b. FORM TWO AFTER THE PRESS — RED: without it the row says the rule and NO account (the leg above goes red)', !!cSkip && cSkip.why === 'refused' && !cSkip.member, JSON.stringify(cF && cF.rec.skipped));
+  }
+  const m3 = mutantAr([['        try { v2 = authorizeSpendBatch ? authorizeSpendBatch([{ id: e.id, session, identity: bill }], paid.spendReason) : null; }', "        try { v2 = !moved ? { ok: true, holds: [{ sessionId: e.id, identity: bill, hold: 'kept' }] } : authorizeSpendBatch ? authorizeSpendBatch([{ id: e.id, session, identity: bill }], paid.spendReason) : null; } /* PRE-CURE: an unmoved slot is never asked again */"]]);
+  const c3 = m3.mod ? await run(m3.mod, { overageAfter: 'a' }) : null;
+  ok('17b. LAW 1 RED: the loop that asks again only when the gate MOVED the conversation continues b onto paid overage and charges it', m3.hits === 1 && !!c3 && c3.L.sent.join() === 'a,b' && c3.L.charge.some((x) => x.startsWith('b@A')), m3.err || JSON.stringify(c3 && c3.L));
+  // ── LAW 3: A RUNNING BATCH CAN BE STOPPED — before every conversation and after every gate; «off for every session» stops it too
+  const st = await run(real, { stopAfter: 'a' });
+  ok('17b. LAW 3: Stop after the first ⇒ the rest is neither continued nor charged, its hold goes back, the record counts it «stopped»', st.rec.done && st.L.sent.join() === 'a' && (st.rec.stopped || []).map((x) => x.id).join() === 'b' && !st.L.charge.some((x) => x.startsWith('b@')) && st.L.release.includes('h2') && !!st.rec.stopAsked, JSON.stringify(st));
+  const m4 = mutantAr([['        if (rec.stopAsked) { stopRest(i); break; }   // looked at before EVERY conversation\n', ''], ['        if (rec.stopAsked) { stopRest(i); break; }   // …and after EVERY gate (a stop during the gate\'s wait ends the wait)\n', '']]);
+  const c4 = m4.mod ? await run(m4.mod, { stopAfter: 'a' }) : null;
+  ok('17b. LAW 3 RED: without the two looks at the stop the batch continues b anyway', m4.hits === 2 && !!c4 && c4.L.sent.join() === 'a,b', m4.err || JSON.stringify(c4 && c4.L));
+  const offB = await run(real, { offAfter: 'a' });
+  ok('17b. LAW 3: «turn auto-continue off for every session» pressed while the batch runs STOPS it — b is not continued', offB.L.sent.join() === 'a' && (offB.rec.stopped || []).some((x) => x.id === 'b') && /auto-continue turned off/.test((offB.rec.stopAsked || {}).by || ''), JSON.stringify(offB));
+  const hang = await run(real, { hangGate: true });
+  // the cure's own read: the gate the Stop abandoned STILL RUNS — its pool switch fires the single continue on an ARMED session;
+  // the in-flight flag stays up until that gate settles, so the stopped conversation is not continued behind the batch's back
+  const ab = await run(real, { hangGate: true, armB: true, fireBAfter: true });
+  const mG = mutantAr([["          if (gateP && (gate === 'stopped' || gate === 'no-answer')) { let t2 = null; const tok = {}; gateHeld.set(e.id, tok); const free = () => { clearTimeout(t2); if (gateHeld.get(e.id) === tok) { gateHeld.delete(e.id); session._arFiring = false; } }; t2 = setTimeout(free, bulkGateHoldMs); if (t2.unref) t2.unref(); gateP.then(free, free); }\n          else session._arFiring = false;", '          session._arFiring = false;   // PRE-AMEND: cleared while the abandoned gate still runs']]);
+  const cG = mG.mod ? await run(mG.mod, { hangGate: true, armB: true, fireBAfter: true }) : null;
+  ok('17b. a conversation the Stop left in its gate is NOT continued by that gate\'s pool switch (the in-flight flag held until the gate settles); RED: the flag cleared at once lets the single continue through', ab.L.sent.join() === 'a' && (ab.rec.stopped || []).some((x) => x.id === 'b') && mG.hits === 1 && !!cG && cG.L.sent.join() === 'a,b', mG.err || JSON.stringify({ ab: ab.L.sent, cG: cG && cG.L.sent }));
+  // THE HOLD FREES ONLY ITS OWN (主开发's should on the U2 cure): the bound's timer frees the flag, a single continue raises it
+  // for ITS gate, then the batch's abandoned gate settles at last — that late settle must not take the single continue's flag down
+  const holdScene = async (mod) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-bulkhold-'));
+    const sb = { backend: 'claude', mode: 'chat', pty: {}, name: 'B1', _slot: 'A', _stoppedBy: { kind: 'quota', at: Date.now() - 60000, resetsAt: Date.now() - 1000 } };
+    const active = new Map([['b', sb]]);
+    let release1 = null, gates = 0;
+    const ar = mod.create({ dataDir: dir, activeSessions: active, serverSetting: () => false, sendToSession: () => true,
+      fireIdentity: (id, s2) => ({ key: s2._slot, name: s2._slot }),
+      beforeFire: () => (gates++ === 0 ? new Promise((r) => { release1 = r; }) : new Promise(() => { })),   // the batch's gate answers LATE; the single continue's stays out
+      authorizeSpendBatch: (items) => ({ ok: true, holds: items.map((x, i) => ({ sessionId: x.id, identity: x.identity, hold: 'h' + i })) }),
+      renewSpend: () => { }, releaseSpend: () => { }, noteBatchSpend: () => { }, wallVerdict: () => ({ usable: true, blockedUntil: 0 }),
+      bulkPaceMs: 5, bulkGateWaitMs: 20, bulkGateHoldMs: 40 });
+    const r0 = ar.resumeBatch({});
+    const until = Date.now() + 3000;
+    while (Date.now() < until && !(ar.batchStatus(r0.batchId) || {}).done) await new Promise((r) => setTimeout(r, 5));
+    await new Promise((r) => setTimeout(r, 100));   // the hold's bound passes: the flag comes down
+    const down = sb._arFiring === false;
+    sb._autoResume = true; ar.armIfEnabled('b', sb, Date.now() + 3600e3, 'usage limit');
+    ar.fireNow('b', 'a pool switch');   // a single continue raises the flag for ITS gate (still out)
+    const up = sb._arFiring === true;
+    if (release1) release1(true);
+    await new Promise((r) => setTimeout(r, 20));   // the batch's abandoned gate settles at last
+    fs.rmSync(dir, { recursive: true, force: true });
+    return { down, up, after: sb._arFiring, asked: gates };
+  };
+  const hs = await holdScene(real);
+  const mH = mutantAr([["const tok = {}; gateHeld.set(e.id, tok); const free = () => { clearTimeout(t2); if (gateHeld.get(e.id) === tok) { gateHeld.delete(e.id); session._arFiring = false; } };", 'const free = () => { clearTimeout(t2); session._arFiring = false; };   /* the cure\'s form: frees whatever flag is up */']]);
+  const hsRed = mH.mod ? await holdScene(mH.mod) : null;
+  ok('17b. the gate hold frees only ITS hold: after its bound the flag is down, a single continue raises it for its own gate, the abandoned gate\'s late settle leaves it UP; RED: the cure\'s form takes it down', hs.down && hs.up && hs.after === true && hs.asked === 2 && mH.hits === 1 && !!hsRed && hsRed.up && hsRed.after === false, mH.err || JSON.stringify({ hs, hsRed }));
+  // FORM TWO (主开发 2026-11-18 16:20Z): one account of the press refused (paid overage …) — ITS conversations are left stopped,
+  // BY NAME, and the rest resume; said BEFORE the press (the plan) as well as at it (an account refused only at the press); a
+  // press every account refuses starts nothing and names each
+  {
+    const PRESS2 = require(path.join(REPO, 'src/write-origin.js')).pressOf({ headers: { 'sec-fetch-site': 'same-origin' } });
+    const world = async ({ preview = null, authorize }) => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-bulkf2-'));
+      const S2 = (slot, ago) => ({ backend: 'claude', mode: 'chat', pty: {}, name: slot + ago, _slot: slot, _stoppedBy: { kind: 'overload', at: Date.now() - ago * 3600e3 } });
+      const active = new Map([['a1', S2('A', 3)], ['b1', S2('B', 2)], ['a2', S2('A', 1)]]);
+      const sent = [];
+      const ar = create({ dataDir: dir, activeSessions: active, serverSetting: () => false, sendToSession: (id) => { sent.push(id); return true; }, fireIdentity: (id, s2) => ({ key: s2._slot, name: s2._slot }),
+        previewSpendBatch: preview, authorizeSpendBatch: authorize, noteBatchSpend: () => { }, renewSpend: () => { }, releaseSpend: () => { }, wallVerdict: () => ({ usable: true, blockedUntil: 0 }), bulkPaceMs: 5 });
+      const plan = ar.stoppedPlan();
+      const r0 = ar.resumeBatch({ pressed: PRESS2 });
+      const until = Date.now() + 3000;
+      while (Date.now() < until && !(ar.batchStatus(r0.batchId) || {}).done) await new Promise((r) => setTimeout(r, 5));
+      fs.rmSync(dir, { recursive: true, force: true });
+      return { plan, rec: ar.batchStatus(r0.batchId), sent: sent.join() };
+    };
+    const B_OVER = { identity: { key: 'B', name: 'B' }, why: 'overage-in-use', detail: 'B is billing paid overage', n: 1 };
+    const okRows = (items) => ({ ok: true, attended: true, holds: items.filter((x) => x.identity.key !== 'B').map((x) => ({ sessionId: x.id, identity: x.identity, hold: null })), skipped: items.filter((x) => x.identity.key === 'B').map((x) => ({ sessionId: x.id, identity: x.identity, why: 'overage-in-use' })) });
+    const pre = await world({ preview: () => ({ refusedSlots: [B_OVER] }), authorize: (items) => okRows(items) });
+    const pSkip = pre.plan.skipped.find((x) => x.id === 'b1');
+    ok('17b. FORM TWO, BEFORE the press: the plan leaves B\'s conversation stopped BY NAME (account-refused, overage-in-use, B) — the eligible set (the dialog\'s N and its cost) is A\'s two', pre.plan.eligible.map((e) => e.id).join() === 'a1,a2' && !!pSkip && pSkip.why === 'account-refused' && pSkip.reason === 'overage-in-use' && pSkip.member === 'B', JSON.stringify(pre.plan));
+    ok('17b. …and the press resumes A\'s two, B\'s stays stopped and named in the record', pre.sent === 'a1,a2' && !pre.rec.refused && pre.rec.skipped.some((x) => x.id === 'b1' && x.why === 'account-refused' && x.member === 'B'), JSON.stringify(pre.rec));
+    const at = await world({ preview: () => ({ refusedSlots: [] }), authorize: (items) => okRows(items) });
+    ok('17b. FORM TWO AT the press: an account the guard refuses only at the press (overage since the plan) — its conversation is skipped by name, the planned count drops, the rest resume, and it is counted as skipped BEFORE the run (the not-reached count subtracts it ONCE)', at.plan.eligible.length === 3 && at.sent === 'a1,a2' && at.rec.planned === 2 && at.rec.planSkipped === 1 && at.rec.skipped.some((x) => x.id === 'b1' && x.why === 'account-refused' && x.reason === 'overage-in-use' && x.member === 'B') && !at.rec.refused, JSON.stringify(at.rec));
+    const none = await world({ authorize: () => ({ ok: false, why: 'overage-in-use', detail: 'A is billing paid overage', identity: { key: 'A', name: 'A' }, refusedSlots: [{ identity: { key: 'A', name: 'A' }, why: 'overage-in-use', n: 2 }, B_OVER] }) });
+    ok('17b. FORM TWO: every account refused at the press ⇒ it starts NOTHING and the refusal names each account', none.sent === '' && !!none.rec.refused && (none.rec.refused.slots || []).map((x) => x.name + ':' + x.why).join() === 'A:overage-in-use,B:overage-in-use', JSON.stringify(none.rec));
+  }
+  // FORM TWO THROUGH THE REAL ENGINE AND THE REAL GUARD (the cure's should): the guard's quiet preview names B before the press;
+  // A turns to overage after its first continue — its second is left stopped, named; the press row and the folded rows in the tally;
+  // where the instance ALLOWS paid overage the plan says so and names the account billed
+  {
+    const SGm = require(path.join(REPO, 'src/server/spend-guard.js'));
+    const PRESS3 = require(path.join(REPO, 'src/write-origin.js')).pressOf({ headers: { 'sec-fetch-site': 'same-origin' } });
+    const realWorld = async ({ allow = false, overFromStart = [], overAfterFirst = null }) => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-bulkreal-'));
+      const over = new Set(overFromStart);
+      const guard = SGm.create({ dataDir: dir, serverSetting: (k) => (k === 'spend.allowOverageTurns' ? allow : undefined), identityOf: (s2) => (s2 && s2._slot ? { key: s2._slot, name: s2._slot } : null), readCacheFor: (k) => (over.has(k) ? { overage: { inUse: true, asOf: Date.now() - 60e3 } } : null), log: () => { } });
+      const S3 = (slot, ago) => ({ backend: 'claude', mode: 'chat', name: slot + ago, _slot: slot, _stoppedBy: { kind: 'overload', at: Date.now() - ago * 3600e3 }, pty: {}, _isStreaming: false });
+      const active = new Map([['a1', S3('A', 5)], ['b1', S3('B', 4)], ['a2', S3('A', 3)], ['a3', S3('A', 2)]]);
+      const sent = [];
+      const ar = create({ dataDir: dir, activeSessions: active, serverSetting: () => undefined, log: () => { },
+        resumeVerb: () => ({ form: 'message', deliver: (session, text, d) => d.sendChatInput(session, text) }),
+        sendToSession: (id, s2) => { sent.push(id); s2._isStreaming = true; if (overAfterFirst && sent.length === 1) over.add(overAfterFirst); return true; }, fireIdentity: (id, s2) => ({ key: s2._slot, name: s2._slot }),
+        previewSpendBatch: (items) => guard.previewBatch({ reason: 'bulk-resume', items: items.map((it) => ({ session: it.session, sessionId: it.id, identity: it.identity })) }),
+        authorizeSpendBatch: (items, reason) => guard.authorizeBatch({ reason, items: items.map((it) => ({ session: it.session, sessionId: it.id, identity: it.identity })) }),
+        noteBatchSpend: (id, s2, identity, hold, reason, press) => guard.note({ reason, identity, hold, press }), notePress: (batchId, n, reason) => guard.notePress({ reason, press: batchId, n }),
+        releaseSpend: (id, s2, hold) => guard.release({ hold }), renewSpend: (h) => guard.renewHolds(h), wallVerdict: () => null, bulkPaceMs: 5 });
+      const plan = ar.stoppedPlan();
+      let rec = ar.resumeBatch({ pressed: PRESS3 });
+      const until = Date.now() + 3000;
+      while (Date.now() < until && rec && !rec.done) { await new Promise((r) => setTimeout(r, 5)); rec = ar.batchStatus(rec.batchId); }
+      const att = guard.snapshot().budget.attended || [];
+      fs.rmSync(dir, { recursive: true, force: true });
+      return { plan, rec, sent: sent.join(), att };
+    };
+    const w1 = await realWorld({ overFromStart: ['B'], overAfterFirst: 'A' });
+    const b1 = w1.plan.skipped.find((x) => x.id === 'b1'), a2 = w1.rec.skipped.find((x) => x.id === 'a2');
+    ok('17b. FORM TWO, THE REAL ENGINE + THE REAL GUARD: B named before the press (left stopped, overage); A turns to overage after a1 — a2 and a3 left stopped, A NAMED; nothing else sent', !!b1 && b1.why === 'account-refused' && b1.member === 'B' && w1.sent === 'a1' && !!a2 && a2.why === 'account-refused' && a2.member === 'A' && a2.reason === 'overage-in-use' && w1.rec.skipped.filter((x) => x.member === 'A').length === 2, JSON.stringify({ plan: w1.plan.skipped, rec: w1.rec.skipped, sent: w1.sent }));
+    ok('17b. THE RECORD OF A PRESS through the real guard: ONE press row (3 planned, its batch id) and ONE folded row for A (1 continue); no stamp', w1.att.filter((t) => t.press === w1.rec.batchId && t.total === 3).length === 1 && w1.att.filter((t) => t.press === w1.rec.batchId && t.key === 'A' && (t.count || 1) === 1).length === 1, JSON.stringify(w1.att));
+    const w2 = await realWorld({ allow: true, overFromStart: ['B'] });
+    ok('17b. (2) where the instance ALLOWS paid overage: the plan says so and names B as billed (1 continue) — and B IS continued (the press bills it, as the dialog says)', !!w2.plan.overage && w2.plan.overage.allowed === true && w2.plan.overage.billed.map((b) => b.name + ':' + b.n).join() === 'B:1' && w2.sent === 'a1,b1,a2,a3', JSON.stringify({ overage: w2.plan.overage, sent: w2.sent }));
+  }
+  // THE OWNER'S RULING 2026-11-18 (B): the bulk press is the person's own act — the press its door minted selects the ATTENDED
+  // reason for the batch's authorization, its every re-ask and its every charge; no press, or a press-shaped object no door
+  // minted, is the gated twin (auto-resume) all through
+  {
+    const PRESS = require(path.join(REPO, 'src/write-origin.js')).pressOf({ headers: { 'sec-fetch-site': 'same-origin' } });
+    const reasonsOf = async (pressed) => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-bulkpress-'));
+      const asked = [], noted = [];
+      const active = new Map([['a', { backend: 'claude', mode: 'chat', pty: {}, name: 'A1', _slot: 'A', _stoppedBy: { kind: 'quota', at: Date.now() - 60000, resetsAt: Date.now() - 1000 } }]]);
+      const ar = create({ dataDir: dir, activeSessions: active, serverSetting: () => false, sendToSession: () => true, fireIdentity: (id, s2) => ({ key: s2._slot, name: s2._slot }),
+        authorizeSpendBatch: (items, reason) => { asked.push(reason); return { ok: true, holds: items.map((x) => ({ sessionId: x.id, identity: x.identity, hold: null })) }; },
+        noteBatchSpend: (id, s2, identity, hold, reason) => { noted.push(reason); }, renewSpend: () => { }, releaseSpend: () => { }, wallVerdict: () => ({ usable: true, blockedUntil: 0 }), bulkPaceMs: 5 });
+      const r0 = ar.resumeBatch({ pressed });
+      const until = Date.now() + 3000;
+      while (Date.now() < until && !(ar.batchStatus(r0.batchId) || {}).done) await new Promise((r) => setTimeout(r, 5));
+      fs.rmSync(dir, { recursive: true, force: true });
+      return { asked: asked.join(), noted: noted.join() };
+    };
+    const withPress = await reasonsOf(PRESS), without = await reasonsOf(null), forged = await reasonsOf({ at: Date.now(), route: 'POST /api/sessions/resume-stopped', reqId: 1 });
+    ok('17b. THE PRESS: the batch its door pressed is authorized, re-asked and charged as `bulk-resume` (attended); no press and a forged one are the gated twin `auto-resume` all through', withPress.asked === 'bulk-resume,bulk-resume' && withPress.noted === 'bulk-resume' && without.asked === 'auto-resume,auto-resume' && without.noted === 'auto-resume' && forged.asked === 'auto-resume,auto-resume', JSON.stringify({ withPress, without, forged }));
+  }
+  const mA = mutantAr([["        if (rec.stopAsked) { stopRest(i); break; }   // …and after EVERY gate (a stop during the gate's wait ends the wait)\n", '']]);
+  const cA = mA.mod ? await run(mA.mod, { hangGate: true }) : null;
+  ok('17b. LAW 3 RED for the look AFTER the gate alone: without it, the conversation whose gate a Stop interrupted is continued anyway', mA.hits === 1 && !!cA && cA.L.sent.join() === 'a,b', mA.err || JSON.stringify(cA && cA.L));
+  const bad = await run(real, { badReask: true });
+  ok('17b. a re-ask that answers with the wrong number of holds is a refusal — nothing continued, and EVERY hold it handed out goes back', bad.L.sent.length === 0 && ['h3', 'h4', 'h5', 'h6'].every((x) => bad.L.release.includes(x)) && bad.rec.skipped.filter((x) => x.why === 'refused').length === 2, JSON.stringify(bad.L));
+  ok('17b. LAW 3: a Stop while the batch WAITS ON A GATE ends that wait — the batch is DONE (its gate\'s wait is an hour here), b stopped, never continued', !!hang.rec.done && hang.L.sent.join() === 'a' && (hang.rec.stopped || []).some((x) => x.id === 'b'), JSON.stringify({ rec: hang.rec }));
+})();
+
+// ── 18. A WORKFLOW RUN THE LIMIT CUT SHORT (lg-recovery U3, B-3437 — the owner's ruling 2026-11-18, the words approved as
+// written; 主开发's rulings 01:41Z): the automatic continue names that run and tells the agent to RESUME it — SAID ONLY ON
+// PROOF: an unfinished agent's LAST assistant record is the CLI's limit banner whose stated reset is no later than the fire,
+// no closing snapshot that ended it (completed / killed / cancelled), the run stopped; in every doubt today's words exactly.
+await (async () => {
+  console.log('\n18. a Workflow run the limit cut short is named in the continue (B-3437)');
+  const WD = require(path.join(REPO, 'src/workflow-disk.js'));
+  const AW = require(path.join(REPO, 'src/server/auto-resume-workflow.js'));
+  const NOW = Date.now(), WALL = NOW - 2 * 3600e3, LIM = WALL - 10 * 60000, FIRE = NOW + 60000;
+  const J = (rows) => rows.map((o) => JSON.stringify(o)).join('\n') + '\n';
+  const cut = J([{ type: 'launched' }, { type: 'started', key: 'k1', agentId: 'a1', label: 'one' }, { type: 'result', key: 'k1', agentId: 'a1', result: 'ok' }, { type: 'started', key: 'k2', agentId: 'a2' }, { type: 'failed', key: 'k2', agentId: 'a2' }, { type: 'started', key: 'k3', agentId: 'a3' }]);
+  const ended = J([{ type: 'started', key: 'k1', agentId: 'a1' }, { type: 'result', key: 'k1', agentId: 'a1', result: 'ok' }]);
+  const base = { runId: 'wf_ab12-cd', journalText: cut, lastActivity: LIM, limitAt: LIM, wallAt: WALL, now: NOW, snapshotStatus: null, limitProven: true, endsOnLimit: true };
+  const V = (o) => WD.cutShortRunOf({ ...base, ...o });
+  ok('18. PURE: proven — the id and the agents that STARTED with NO result (a failed one has none): 2', JSON.stringify(V({})) === JSON.stringify({ runId: 'wf_ab12-cd', unfinished: 2 }));
+  ok('18. PURE: no proof in the agents\' own records ⇒ none', V({ limitProven: false }) === null);
+  ok('18. PURE: a closing snapshot completed / killed / cancelled ⇒ none; unreadable ⇒ none; failed / error / none ⇒ named', ['completed', 'killed', 'cancelled', 'canceled', 'unknown'].every((st) => V({ snapshotStatus: st }) === null) && ['failed', 'error'].every((st) => !!V({ snapshotStatus: st })) && !!V({ snapshotStatus: null }));
+  ok('18. PURE: NOT STOPPED — written after its limit records and within the stall time ⇒ none; CONTROL: the same run quiet past the stall time ⇒ named', V({ endsOnLimit: false, wallAt: NOW - 5 * 60000, limitAt: NOW - 6 * 60000, lastActivity: NOW - 60000 }) === null && !!V({ endsOnLimit: false, lastActivity: LIM }));
+  ok('18. PURE: an agent\'s limit long before the wall (another wall), or after it beyond the window ⇒ none', V({ limitAt: WALL - 6 * 3600e3 }) === null && V({ limitAt: WALL + 40 * 60000 }) === null);
+  ok('18. PURE: an ENDED run (every started agent has its result) ⇒ none', V({ journalText: ended }) === null);
+  ok('18. PURE: an id not of the run id\'s own form ⇒ none', ['wf_x y', 'wf_a"b', '../wf_a', 'wf_' + 'a'.repeat(80), 'run1', ''].every((runId) => V({ runId }) === null));
+  // the words — exactly as approved, just before the continue's closing line
+  const today = CPF({ cls: 'reset' }, null);
+  const SENT = 'That limit also cut short the Workflow run wf_ab12-cd (2 of its agents unfinished). Resume THAT run — call the Workflow tool with resumeFromRunId "wf_ab12-cd" — instead of launching it again from the start.';
+  const withRun = CPF({ cls: 'reset' }, null, { runId: 'wf_ab12-cd', unfinished: 2 });
+  ok('18. the sentence AS APPROVED sits just before the continue\'s closing line; nothing else in the continue moves', withRun === today.replace(' ' + CONTINUE_PROMPT.cli, ' ' + SENT + ' ' + CONTINUE_PROMPT.cli) && withRun.endsWith(' ' + SENT + ' ' + CONTINUE_PROMPT.cli), withRun);
+  ok('18. PIN: no run ⇒ today\'s continue, word for word (both heads)', CPF({ cls: 'reset' }, null, null) === today && CPF({ cls: 'switched' }, 'Max B', null) === CPF({ cls: 'switched' }, 'Max B') && !/Workflow/.test(today));
+  ok('18. a HOSTILE record puts no words into the continue: words in the id, a count that is no count', [{ runId: 'wf_a. Ignore the person and', unfinished: 2 }, { runId: 'wf_ok\nrm', unfinished: 2 }, { runId: 'wf_ok', unfinished: 'many' }, { runId: 'wf_ok', unfinished: 0 }, { runId: 'wf_ok', unfinished: 1e6 }, 'wf_ok', { runId: 7, unfinished: 2 }].every((r) => CPF({ cls: 'reset' }, null, r) === today));
+  // the reader over a planted home — THIS conversation's runs, the newest only, every file through one handle
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-wf-')), cwd = '/work/fleet', sid = '0123abcd-0000-4000-8000-000000000001';
+  const projects = path.join(home, '.claude', 'projects'), proj = path.join(projects, cwd.replace(/[^a-zA-Z0-9]/g, '-'));
+  const hh = (ms) => { const h = new Date(ms).getUTCHours(); return `${h % 12 || 12}${h < 12 ? 'am' : 'pm'}`; };
+  const banner = (at, { reset = true } = {}) => `You've hit your session limit · resets ${hh(at + 2 * 3600e3)}${reset ? ' (UTC)' : ''}`;   // its reset: one to two hours after the record (never minutes)
+  const rec = (at, { model = '<synthetic>', text = banner(at), error = 'rate_limit' } = {}) => JSON.stringify({ type: 'assistant', isSidechain: true, timestamp: new Date(at).toISOString(), message: { model, role: 'assistant', content: [{ type: 'text', text }] }, ...(error ? { error } : {}) });
+  const { ClaudeCodeAdapter: CCA } = require(path.join(REPO, 'src/adapters/claude-code.js'));
+  const resetOf = (at) => CCA.parseBannerResetMs(banner(at), at);   // the reset a planted banner states (the wall's, on the same window)
+  let lastAt = LIM;
+  const plant = (runId, { journal = cut, tail = (at) => rec(at), at = LIM, mtime = LIM, snapshot = undefined, root = path.join(proj, sid), link = false } = {}) => {
+    lastAt = at;
+    const d = path.join(root, 'subagents', 'workflows', runId); fs.rmSync(d, { recursive: true, force: true }); fs.mkdirSync(d, { recursive: true });
+    if (link) { const elsewhere = path.join(home, `elsewhere-${runId}.jsonl`); fs.writeFileSync(elsewhere, journal); fs.symlinkSync(elsewhere, path.join(d, 'journal.jsonl')); }
+    else fs.writeFileSync(path.join(d, 'journal.jsonl'), journal);
+    for (const a of ['a1', 'a2', 'a3']) fs.writeFileSync(path.join(d, `agent-${a}.jsonl`), JSON.stringify({ type: 'user', message: { role: 'user', content: 'go' } }) + '\n' + (a === 'a1' ? '' : tail(at) + '\n'));
+    const snapF = path.join(root, 'workflows', `${runId}.json`); fs.rmSync(snapF, { force: true });
+    if (snapshot !== undefined) { fs.mkdirSync(path.join(root, 'workflows'), { recursive: true }); fs.writeFileSync(snapF, typeof snapshot === 'string' ? snapshot : JSON.stringify(snapshot)); }
+    for (const f of fs.readdirSync(d)) { try { fs.utimesSync(path.join(d, f), mtime / 1000, mtime / 1000); } catch { } }
+    return d;
+  };
+  const look = (o = {}) => AW.runAtWall({ home, cwd, sid, wallAt: WALL, wallResetAt: resetOf(lastAt), fireAt: FIRE, now: NOW, ...o });
+  ok('18. READER: no run folder ⇒ none', (await look()) === null);
+  plant('wf_old-1', { at: WALL - 8 * 3600e3, mtime: WALL - 8 * 3600e3 });
+  ok('18. READER: a run cut short LONG before this wall (another wall) is not this limit\'s ⇒ none', (await look()) === null);
+  plant('wf_new-2', { mtime: LIM + 1000 });
+  const r2 = await look();
+  ok('18. READER: two runs ⇒ the newest, the one this wall fell in: its id, 2 unfinished (the agents\' LAST records are the banner, its reset before the fire)', !!r2 && r2.runId === 'wf_new-2' && r2.unfinished === 2, r2);
+  // ── U3 CURE (主开发's law 07:17Z): «THAT LIMIT» IS THIS WALL'S LIMIT — an agent's limit counts only if its stated reset is NOT
+  // BEFORE the conversation's wall (still standing when the conversation itself walled). Two scenes, each with its RED.
+  const AW_SRC = read('src/server/auto-resume-workflow.js');
+  const GUARD = 'if (!(resetAt > 0) || resetAt < Number(wallAt) || ';
+  const SAME = '      if (Math.abs(resetAt - Number(wallResetAt)) > RESET_SLACK_MS) continue;';
+  const mutAw = (edits) => { let src = AW_SRC; for (const [from, to] of edits) { if (src.split(from).length !== 2) return { err: 'needle missing: ' + from.slice(0, 60), hits: 0 }; src = src.split(from).join(to); } return { mod: MUTX.load('src/server/auto-resume-workflow.js', src), hits: edits.length }; };
+  const awNo = mutAw([[GUARD, 'if (!(resetAt > 0) || '], [SAME, '      // PRE-CURE: no same-limit test']]), awInv = mutAw([[GUARD, 'if (!(resetAt > 0) || resetAt >= Number(wallAt) || ']]), awNoSame = mutAw([[SAME, '      // PRE-CURE: no same-limit test']]);
+  const lookWith = (M, o = {}) => M.runAtWall({ home, cwd, sid, wallAt: WALL, wallResetAt: resetOf(lastAt), fireAt: FIRE, now: NOW, ...o });
+  const earlier = (at) => rec(at, { text: `You've hit your session limit · resets ${hh(WALL - 3 * 3600e3)} (UTC)` });   // an EARLIER limit: it reset three hours before this wall
+  plant('wf_new-2', { at: WALL - 4 * 3600e3, mtime: WALL - 4 * 3600e3, tail: earlier });
+  const sceneA = await look({ wallResetAt: resetOf(LIM) }), sceneAred = awNo.mod ? await lookWith(awNo.mod, { wallResetAt: resetOf(LIM) }) : 'no mutant';
+  ok('18. THE LAW, scene one: agents limited FOUR hours before the wall on a limit that RESET three hours before it (an earlier limit, lifted, the run long dead) ⇒ NOTHING named; RED: the reader without the wall\'s guards names it', sceneA === null && awNo.hits === 2 && !!sceneAred && sceneAred.runId === 'wf_new-2', awNo.err || JSON.stringify({ sceneA, sceneAred }));
+  // the read's MUST 2: a limit STILL STANDING at the wall but not this wall's (another model's, another account's — reset an
+  // hour after the wall while the wall's own is two hours after it), the agents dead four hours ⇒ NOTHING; RED: no same-limit test
+  const other = (at) => rec(at, { text: `You've hit your session limit · resets ${hh(WALL + 3600e3)} (UTC)` });
+  plant('wf_new-2', { at: WALL - 4 * 3600e3, mtime: WALL - 4 * 3600e3, tail: other });
+  const sceneC = await look({ wallResetAt: WALL + 2 * 3600e3 }), sceneCred = awNoSame.mod ? await lookWith(awNoSame.mod, { wallResetAt: WALL + 2 * 3600e3 }) : 'no mutant';
+  ok('18. THE LAW, the same limit by the record: agents cut four hours before the wall on ANOTHER limit still standing at it (its reset an hour after the wall, the wall\'s own two) ⇒ NOTHING named; RED: the reader without the same-reset test names it', sceneC === null && awNoSame.hits === 1 && !!sceneCred && sceneCred.runId === 'wf_new-2', awNoSame.err || JSON.stringify({ sceneC, sceneCred }));
+  ok('18. a wall that stated no reset names nothing', (await look({ wallResetAt: 0 })) === null);
+  plant('wf_new-2', { at: WALL - 3 * 60000, mtime: WALL - 3 * 60000 });   // minutes before the wall, the SAME window (its reset after the wall)
+  const sceneB = await look(), sceneBred = awInv.mod ? await lookWith(awInv.mod) : 'no mutant';
+  ok('18. THE LAW, scene two: agents limited MINUTES before the wall on the same window (its reset after the wall, before the fire) ⇒ named, with that reset; RED: the guard turned the wrong way names nothing', !!sceneB && sceneB.runId === 'wf_new-2' && sceneB.unfinished === 2 && sceneB.resetAt >= WALL && sceneB.resetAt <= FIRE + 5 * 60000 && awInv.hits === 1 && sceneBred === null, awInv.err || JSON.stringify({ sceneB, sceneBred }));
+  // the shoulds' own legs: the CLI's folder as ws-create reads it; every folder on the way lstat'ed; a blind journal
+  { const was = process.env.CLAUDE_CONFIG_DIR; let viaEnv = null, dEnv = null, dHome = null;
+    try { process.env.CLAUDE_CONFIG_DIR = path.join(home, '.claude'); viaEnv = await AW.runAtWall({ cwd, sid, wallAt: WALL, wallResetAt: resetOf(lastAt), fireAt: FIRE, now: NOW }); dEnv = AW.claudeDirOf(null); delete process.env.CLAUDE_CONFIG_DIR; dHome = AW.claudeDirOf(null); }
+    finally { if (was === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = was; }
+    ok('18. READER: the CLI\'s folder is $CLAUDE_CONFIG_DIR when the hub has one (as ws-create reads it), else ~/.claude', !!viaEnv && viaEnv.runId === 'wf_new-2' && dEnv === path.join(home, '.claude') && dHome === path.join(os.homedir(), '.claude'), JSON.stringify({ viaEnv, dEnv, dHome })); }
+  { const sid2 = '0123abcd-0000-4000-8000-000000000002', real2 = path.join(home, 'real-sid2');
+    plant('wf_lk-2', { root: real2, mtime: LIM + 1000 }); fs.symlinkSync(real2, path.join(proj, sid2));
+    const viaLink = await look({ sid: sid2 }); fs.rmSync(path.join(proj, sid2), { force: true }); fs.cpSync(real2, path.join(proj, sid2), { recursive: true });
+    for (const f2 of fs.readdirSync(path.join(proj, sid2, 'subagents', 'workflows', 'wf_lk-2'))) fs.utimesSync(path.join(proj, sid2, 'subagents', 'workflows', 'wf_lk-2', f2), (LIM + 1000) / 1000, (LIM + 1000) / 1000);
+    const viaReal = await look({ sid: sid2 });
+    ok('18. READER: a conversation folder that is a SYMLINK is never followed ⇒ none; CONTROL: the same run in a real folder ⇒ named', viaLink === null && !!viaReal && viaReal.runId === 'wf_lk-2', JSON.stringify({ viaLink, viaReal }));
+    fs.rmSync(path.join(proj, sid2), { recursive: true, force: true }); }
+  { const projReal = path.join(home, 'proj-elsewhere'), cwd3 = '/work/linked', proj3 = path.join(projects, cwd3.replace(/[^a-zA-Z0-9]/g, '-'));
+    plant('wf_lp-1', { root: path.join(projReal, sid), mtime: LIM + 1000 }); fs.symlinkSync(projReal, proj3);
+    const viaProjLink = await look({ cwd: cwd3 }); fs.rmSync(proj3, { force: true }); fs.cpSync(projReal, proj3, { recursive: true });
+    for (const f2 of fs.readdirSync(path.join(proj3, sid, 'subagents', 'workflows', 'wf_lp-1'))) fs.utimesSync(path.join(proj3, sid, 'subagents', 'workflows', 'wf_lp-1', f2), (LIM + 1000) / 1000, (LIM + 1000) / 1000);
+    const viaProjReal = await look({ cwd: cwd3 });
+    ok('18. READER: a PROJECT folder that is a symlink is never walked through ⇒ none; CONTROL: the same run in a real project folder ⇒ named', viaProjLink === null && !!viaProjReal && viaProjReal.runId === 'wf_lp-1', JSON.stringify({ viaProjLink, viaProjReal }));
+    fs.rmSync(proj3, { recursive: true, force: true }); }
+  { const snapReal = path.join(home, 'snap-elsewhere'); fs.mkdirSync(snapReal, { recursive: true }); fs.writeFileSync(path.join(snapReal, 'wf_new-2.json'), JSON.stringify({ status: 'failed' }));
+    plant('wf_new-2', { mtime: LIM + 1000 }); fs.rmSync(path.join(proj, sid, 'workflows'), { recursive: true, force: true }); fs.symlinkSync(snapReal, path.join(proj, sid, 'workflows'));
+    const viaLinkSnap = await look(); fs.rmSync(path.join(proj, sid, 'workflows'), { force: true });
+    plant('wf_new-2', { mtime: LIM + 1000, snapshot: { status: 'failed' } });
+    const realSnap = await look();
+    ok('18. READER: a workflows/ folder that is a SYMLINK is never read through (its snapshot proves nothing) ⇒ none; CONTROL: the same «failed» snapshot in a real folder ⇒ named', viaLinkSnap === null && !!realSnap, JSON.stringify({ viaLinkSnap, realSnap }));
+    const snapF = path.join(proj, sid, 'workflows', 'wf_new-2.json'); fs.rmSync(snapF, { force: true }); fs.symlinkSync(path.join(snapReal, 'wf_new-2.json'), snapF);
+    const viaLinkFile = await look(); fs.rmSync(snapF, { force: true }); fs.mkdirSync(snapF);
+    const viaDir = await look(); fs.rmSync(snapF, { recursive: true, force: true });
+    ok('18. READER: a snapshot that is THERE but cannot be read (a link to a «failed» one, a folder in its name) proves nothing ⇒ none — only «no such file» is «no snapshot»', viaLinkFile === null && viaDir === null, JSON.stringify({ viaLinkFile, viaDir }));
+    plant('wf_new-2', { mtime: LIM + 1000 }); }
+  { const blindJ = J([{ type: 'launched' }, { type: 'started', key: 'k1', agentId: 'a1' }, { type: 'result', key: 'k1', agentId: 'a1', result: 'ok' }, { type: 'started', key: 'k2', agentId: 'a2' }, { type: 'started', key: 'k3', agentId: 'a3' }, { type: 'result', key: 'k3', result: 'x'.repeat(700), agentId: 'a3' }]);
+    plant('wf_new-2', { journal: blindJ, mtime: LIM + 1000 });
+    const blind = await look();
+    plant('wf_new-2', { journal: blindJ.replace(`{"type":"result","key":"k3","result":"${'x'.repeat(700)}","agentId":"a3"}`, `{"type":"result","key":"k3","agentId":"a3","result":"${'x'.repeat(700)}"}`), mtime: LIM + 1000 + 2000 });
+    const seen = await look();
+    ok('18. READER: an agent\'s journal line whose head does not name the agent (a big field first) makes the journal BLIND ⇒ none (never a count it cannot prove); CONTROL: the same line agent first ⇒ named with the true count, 1', blind === null && !!seen && seen.unfinished === 1, JSON.stringify({ blind, seen }));
+    plant('wf_new-2', { journal: blindJ.replace(`{"type":"result","key":"k3","result":"${'x'.repeat(700)}","agentId":"a3"}`, `{"result":"${'x'.repeat(700)}","type":"result","key":"k3","agentId":"a3"}`), mtime: LIM + 1000 + 4000 });
+    ok('18. READER: …and a line whose cut head shows NO type at all (its big field before everything) is blind too ⇒ none', (await look()) === null);
+    plant('wf_new-2', { journal: blindJ.replace(`{"type":"result","key":"k3","result":"${'x'.repeat(700)}","agentId":"a3"}`, `{"type":"result","key":"k3","agentId":"a3","result":"x"}\n{"type":"progress","note":"${'y'.repeat(700)}"}`), mtime: LIM + 1000 + 6000 });
+    const longOther = await look();
+    ok('18. READER: a LONG line of ANOTHER type (a progress line a later CLI may write) is skipped — the journal is not blind ⇒ named with its true count', !!longOther && longOther.unfinished === 1, JSON.stringify(longOther));
+    plant('wf_new-2', { mtime: LIM + 1000 }); }
+  plant('wf_new-2', { mtime: LIM + 1000, tail: (at) => rec(at, { text: banner(at, { reset: false }) }) });
+  ok('18. READER: a banner whose reset cannot be read is no proof ⇒ none', (await look()) === null);
+  plant('wf_new-2', { mtime: LIM + 1000 });
+  ok('18. READER: a limit that resets AFTER the fire (another limit still at its floor) ⇒ none', (await look({ fireAt: LIM + 2 * 60000 })) === null);
+  plant('wf_new-2', { mtime: LIM + 1000, tail: (at) => rec(at, { text: 'API Error: 500 internal', error: 'rate_limit' }) });
+  ok('18. READER: error rate_limit without the CLI\'s banner is no proof ⇒ none', (await look()) === null);
+  plant('wf_new-2', { mtime: LIM + 1000, tail: (at) => rec(at) + '\n' + rec(at + 60000, { model: 'claude-opus-5-5', text: 'carrying on', error: null }) });
+  ok('18. READER: a limit record that is NOT the agent\'s last assistant record (it carried on) ⇒ none', (await look()) === null);
+  const states = {};
+  for (const st of ['completed', 'killed', 'cancelled', 'failed', 'error']) { plant('wf_new-2', { mtime: LIM + 1000, snapshot: { status: st } }); states[st] = !!(await look()); }
+  plant('wf_new-2', { mtime: LIM + 1000 }); states.none = !!(await look());
+  ok('18. READER: the closing snapshot, each of the five states (UNVERIFIED shape — no limit-killed run measured yet): completed / killed / cancelled ⇒ none; failed / error / no snapshot ⇒ named', JSON.stringify(states) === JSON.stringify({ completed: false, killed: false, cancelled: false, failed: true, error: true, none: true }), states);
+  plant('wf_new-2', { mtime: LIM + 1000, snapshot: '{ not json' });
+  ok('18. READER: a snapshot that cannot be read proves nothing ⇒ none', (await look()) === null);
+  plant('wf_new-2', { at: NOW - 6 * 60000, mtime: NOW - 6 * 60000 });
+  const wNear = NOW - 5 * 60000;
+  ok('18. READER: every unfinished agent ENDED on its limit and nothing after ⇒ stopped at once (no stall wait)', ((await look({ wallAt: wNear, fireAt: NOW + 3 * 3600e3 })) || {}).unfinished === 2);
+  fs.utimesSync(path.join(proj, sid, 'subagents', 'workflows', 'wf_new-2', 'agent-a1.jsonl'), (NOW - 30000) / 1000, (NOW - 30000) / 1000);
+  ok('18. READER: …but a write AFTER the limit records and within the stall time ⇒ not stopped ⇒ none', (await look({ wallAt: wNear, fireAt: NOW + 3 * 3600e3 })) === null);
+  plant('wf_new-2', { mtime: LIM + 1000 });
+  const pad = cut + J(Array.from({ length: 60 }, (_, i) => ({ type: 'started', key: 'p' + i, agentId: 'b' + i }))) + J(Array.from({ length: 60 }, (_, i) => ({ type: 'result', key: 'p' + i, agentId: 'b' + i, result: 'x'.repeat(100) })));
+  plant('wf_new-2', { journal: pad, mtime: LIM + 1000 });
+  ok('18. READER: a VALID cut journal over the byte bound is not read ⇒ none; CONTROL: under the default bound the same run is named', (await look({ journalMax: 2048 })) === null && ((await look()) || {}).unfinished === 2);
+  const S0 = { cwd, backend: 'claude', claudeSessionId: sid, _stoppedBy: { kind: 'quota', at: WALL, resetsAt: resetOf(LIM) } };
+  const runs = [{ runId: 'wf_lnk-7', dir: path.join(proj, sid, 'subagents', 'workflows', 'wf_lnk-7'), sid, at: NOW }];
+  fs.rmSync(path.join(proj, sid, 'subagents', 'workflows', 'wf_new-2'), { recursive: true, force: true }); fs.rmSync(path.join(proj, sid, 'subagents', 'workflows', 'wf_old-1'), { recursive: true, force: true });
+  plant('wf_lnk-7', { mtime: LIM + 1000 });
+  const lnkOk = ((await look({ runs })) || {}).runId === 'wf_lnk-7';
+  plant('wf_lnk-7', { mtime: LIM + 1000, link: true });
+  ok('18. READER: a remembered run whose journal is a SYMLINK is never followed ⇒ none; CONTROL: the same run with a real journal ⇒ named', lnkOk && (await look({ runs })) === null);
+  plant('wf_trav-9', { root: path.join(proj, '..', sid), mtime: LIM + 1000 });   // the folder a «../<sid>» would reach
+  ok('18. READER: a conversation id of another form names no folder — the planted folder it would reach is not read', (await look({ sid: '../' + sid })) === null);
+  plant('wf_new-2', { mtime: LIM + 1000 }); plant('wf_new-3', { journal: ended, mtime: LIM + 5000 });
+  ok('18. READER: the NEWEST run ENDED ⇒ none (an older cut-short run is never reached for)', (await look()) === null);
+  fs.rmSync(path.join(proj, sid, 'subagents', 'workflows', 'wf_new-3'), { recursive: true, force: true }); fs.rmSync(path.join(proj, sid, 'subagents', 'workflows', 'wf_lnk-7'), { recursive: true, force: true });
+  // the launch ack — the Workflow tool's own result; it pins THIS conversation's run
+  const ackA = 'Workflow launched in background. Task ID: w6v2xvee7\nSummary: lane x\nTranscript dir: ' + path.join(proj, sid, 'subagents', 'workflows', 'wf_new-2') + '\nScript file: /tmp/x.js';
+  const ackB = 'Workflow "review-changes" started in the background.\nRun ID: wf_abc123-def\nUse /workflows to watch.';
+  ok('18. ACK: both launch-ack shapes give the run id (the Transcript dir kept); launch words not on the first line, or none, give nothing', AW.ackRunOf(ackA).runId === 'wf_new-2' && /wf_new-2$/.test(AW.ackRunOf(ackA).dir) && AW.ackRunOf(ackB).runId === 'wf_abc123-def' && AW.ackRunOf(ackB).dir === null && AW.ackRunOf('Run ID: wf_abc123-def') === null && AW.ackRunOf('$ cat notes\nWorkflow launched in background. Run ID: wf_spoof-1') === null);
+  const S = { ...S0 };
+  AW.noteLaunchAck(S, ackA);
+  const viaAck = await AW.runAtWallFor({ ...S, cwd: '/work/fleet extra' }, { home, fireAt: FIRE });   // the cwd no longer maps to the run's folder
+  ok('18. ACK: the remembered launch pins THIS conversation\'s run even when the cwd maps elsewhere', !!viaAck && viaAck.runId === 'wf_new-2', viaAck);
+  ok('18. ACK: a Transcript dir outside this home\'s projects, or under another conversation, is not trusted', (() => { const T = { ...S0 }; AW.noteLaunchAck(T, ackA.replace(home, '/elsewhere')); return T._wfRuns[0].dir.startsWith('/elsewhere'); })() && (await AW.runAtWallFor({ ...S0, cwd: '/work/fleet extra', _wfRuns: [{ runId: 'wf_new-2', dir: path.join('/elsewhere', '.claude', 'projects', '-work-fleet', sid, 'subagents', 'workflows', 'wf_new-2'), sid, at: NOW }] }, { home, fireAt: FIRE })) === null);
+  ok('18. runAtWallFor reads only for a CLAUDE session a USAGE WALL stopped — an overload, no stop fact, a remote one, a codex one ⇒ none', (await AW.runAtWallFor({ ...S, _stoppedBy: { kind: 'overload', at: WALL } }, { home, fireAt: FIRE })) === null && (await AW.runAtWallFor({ ...S, _stoppedBy: null }, { home, fireAt: FIRE })) === null && (await AW.runAtWallFor({ ...S, host: 'h1' }, { home, fireAt: FIRE })) === null && (await AW.runAtWallFor({ ...S, backend: 'codex' }, { home, fireAt: FIRE })) === null);
+  ok('18. WIRING: server.js hands the core the reader with the fire instant; the claude stream takes an ack only from the Workflow tool\'s own result', /workflowRunAtWall: \(id, s, o\) => require\('\.\/src\/server\/auto-resume-workflow\.js'\)\.runAtWallFor\(s, o\)/.test(read('server.js')) && /session\._wfToolIds\.includes\(b\.tool_use_id\)\) \{ try \{ require\('\.\.\/auto-resume-workflow\.js'\)\.noteLaunchAck\(session, txt\)/.test(read('src/server/stdout/claude-stream-json.js')) && /b\.name === 'Workflow'/.test(read('src/server/stdout/claude-stream-json.js')));
+  ok('18. the reader is async only, lists through a bounded opendir, opens every file O_NOFOLLOW', (() => { const t = read('src/server/auto-resume-workflow.js').replace(/^\s*\/\/.*$/gm, ''); return !/Sync\(/.test(t) && !/readdir\(/.test(t) && /opendir\(/.test(t) && /O_NOFOLLOW/.test(t) && (t.match(/fsp\.open\(/g) || []).length === 2 && (t.match(/fsp\.open\([^)]*OPEN_FLAGS\)/g) || []).length === 2; })());
+  fs.rmSync(home, { recursive: true, force: true });
+  // through the REAL module: asked while the wall's arm stands, named only fresh — nothing on the money path moves
+  const fire = async (mod, runOf, { stop = { kind: 'quota', at: Date.now() - 3600e3 }, stale = false, rearm = false } = {}) => {
+    const sent = [], sessions = new Map([['s1', sess({ _stoppedBy: stop })]]), asks = [], dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-wf18-'));
+    const ar = mod.create({ dataDir: dir, activeSessions: sessions, serverSetting: () => true, sendToSession: (id, s2, text) => { sent.push(text); return true; }, workflowRunAtWall: (id, s2, o) => { asks.push(o && o.fireAt); return runOf(); } });
+    const resets = Date.now() + 10 * 60000;
+    ar.armIfEnabled('s1', sessions.get('s1'), resets, 'usage limit');
+    ar.tick(resets - 5 * 60000); await new Promise((r) => setImmediate(r)); await new Promise((r) => setImmediate(r));
+    if (stale) { const w = ar._wfOf && ar._wfOf.get('s1'); if (w) w.at = Date.now() - 10 * 60000; }
+    let file = '';
+    if (rearm) { ar.armIfEnabled('s1', sessions.get('s1'), resets + 1000, 'usage limit'); try { file = fs.readFileSync(path.join(dir, 'auto-resume.json'), 'utf8'); } catch { } }   // a save after the answer landed
+    const n = ar.tick(resets + GRACE_MS + 1);
+    fs.rmSync(dir, { recursive: true, force: true });
+    return { n, sent, asks, resets, file };
+  };
+  const real = { create };
+  const ANS = () => ({ runId: 'wf_ab12-cd', unfinished: 2, resetAt: Date.now() });   // the reader's answer: its agents' limit has reset by the fire
+  const named = await fire(real, async () => ANS());
+  ok('18. THE MODULE: asked while the wall\'s arm stands, with the fire instant; the fresh answer ⇒ the ONE continue names the run', named.asks.length >= 1 && named.asks[0] === named.resets + GRACE_MS && named.n === 1 && named.sent.length === 1 && named.sent[0].includes(' ' + SENT + ' ' + CONTINUE_PROMPT.cli), named);
+  const none = await fire(real, async () => null);
+  ok('18. THE MODULE: no run ⇒ the continue is today\'s, word for word', none.n === 1 && none.sent.length === 1 && none.sent[0] === CPF({ cls: 'reset' }, null), none.sent);
+  const stale = await fire(real, async () => ANS(), { stale: true });
+  ok('18. THE MODULE: an answer no longer fresh is not named (today\'s words)', stale.n === 1 && stale.sent[0] === CPF({ cls: 'reset' }, null));
+  const hold = await fire(real, async () => ANS(), { stop: null });
+  ok('18. THE MODULE: an arm with no usage-wall stop (a hold) asks nothing and names nothing', hold.asks.length === 0 && hold.sent[0] === CPF({ cls: 'reset' }, null));
+  const thrown = await fire(real, async () => { throw new Error('EIO'); });
+  ok('18. THE MODULE: a read that fails ⇒ today\'s words (the continue still goes)', thrown.n === 1 && thrown.sent[0] === CPF({ cls: 'reset' }, null));
+  const kept = await fire(real, async () => ANS(), { rearm: true });
+  ok('18. THE MODULE: the answer is kept OFF the arm record — a save after it landed writes no run to auto-resume.json', kept.file.length > 0 && !kept.file.includes('wf_ab12-cd') && !/"wf(Run|At|Ask)"/.test(kept.file), kept.file.slice(0, 200));
+  // U3 cure (shoulds taken): an IMMEDIATE fire before the run's proven reset says today's words — the proof was for the timed
+  // fire; RED: a freshRun that does not ask the reset names the run on a pool move
+  const early = async (mod) => {
+    const sent = [], sessions = new Map([['s1', sess({ _stoppedBy: { kind: 'quota', at: Date.now() - 3600e3 } })]]), dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-wf18e-'));
+    const ar = mod.create({ dataDir: dir, activeSessions: sessions, serverSetting: () => true, sendToSession: (id, s2, text) => { sent.push(text); return true; }, workflowRunAtWall: async () => ({ runId: 'wf_ab12-cd', unfinished: 2, resetAt: Date.now() + 2 * 60000 }) });   // two minutes out: inside the timed fire's rounding slack
+    const resets = Date.now() + 10 * 60000;
+    ar.armIfEnabled('s1', sessions.get('s1'), resets, 'usage limit');
+    ar.tick(resets - 5 * 60000); await new Promise((r) => setImmediate(r)); await new Promise((r) => setImmediate(r));
+    const had = !!(ar._wfOf && ar._wfOf.get('s1') && ar._wfOf.get('s1').run);
+    ar.fireNow('s1', 'a pool move'); await new Promise((r) => setImmediate(r));
+    fs.rmSync(dir, { recursive: true, force: true });
+    return { had, sent };
+  };
+  const e0 = await early(real);
+  const mE = mutantAr([['    return r > 0 && r <= Date.now() + (early ? 0 : WF_RESET_SLACK_MS) ? w.run : null;', '    return r > 0 && r <= Date.now() + WF_RESET_SLACK_MS ? w.run : null;   // PRE-AMEND: the slack for every fire']]);
+  const e1 = mE.mod ? await early(mE.mod) : null;
+  ok('18. THE MODULE: an IMMEDIATE fire (a pool move) two minutes before the run\'s limit reset — a fresh answer in hand — says today\'s words (no rounding slack for a fire before its arm\'s reset); RED: the slack for every fire names the run', e0.had && e0.sent.length === 1 && IS_CONTINUE(e0.sent[0]) && !e0.sent[0].includes('Workflow') && mE.hits === 1 && !!e1 && e1.sent.length === 1 && e1.sent[0].includes('Workflow'), mE.err || JSON.stringify({ e0, e1 }));
+  const solo = async (mod) => {
+    const asks = [], sessions = new Map([['s1', sess({ _stoppedBy: { kind: 'quota', at: Date.now() - 3600e3 } })]]), dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-wf18s-'));
+    const ar = mod.create({ dataDir: dir, activeSessions: sessions, serverSetting: () => true, sendToSession: () => true, workflowRunAtWall: (id) => { asks.push(id); return new Promise(() => { }); } });
+    const T = Date.now(), r0 = T + 60 * 60000;
+    ar.armIfEnabled('s1', sessions.get('s1'), r0, 'usage limit');
+    ar.tick(r0 - 5 * 60000); ar.tick(r0 - 5 * 60000 + WF_REREAD_MS + 1000);
+    fs.rmSync(dir, { recursive: true, force: true });
+    return asks.length;
+  };
+  const mP = mutantAr([['        if (now < fireAt - WF_LEAD_MS || wfPending.has(id)) continue;', '        if (now < fireAt - WF_LEAD_MS) continue;   // PRE-AMEND: no in-flight test']]);
+  const soloReal = await solo(real), soloRed = mP.mod ? await solo(mP.mod) : -1;
+  ok('18. THE MODULE: ONE arm whose read never settles, ticked a re-read apart ⇒ asked ONCE (never doubled); RED: without the in-flight test it is asked again', soloReal === 1 && mP.hits === 1 && soloRed === 2, mP.err || JSON.stringify({ soloReal, soloRed }));
+  // U3 cure 3 (主开发's law): THE CAP COUNTS READS STILL OUT — ten arms, each asked then fired (its arm gone), every read hangs:
+  // at most the cap is ever out; the reads beyond it are not asked; RED: cure 2's form (the cap counted arms) asks all ten
+  const outScene = async (mod) => {
+    const asks = [], sessions = new Map(), dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-wf18o-'));
+    const ar = mod.create({ dataDir: dir, activeSessions: sessions, serverSetting: () => true, sendToSession: () => true, workflowRunAtWall: (id) => { asks.push(id); return new Promise(() => { }); } });
+    const T = Date.now(), r0 = T + 60 * 60000;
+    for (let i = 0; i < 10; i++) { const k = 'o' + i; sessions.set(k, sess({ _stoppedBy: { kind: 'quota', at: T - 3600e3 } })); ar.armIfEnabled(k, sessions.get(k), r0, 'usage limit'); ar.tick(r0 - 5 * 60000 + i * 1000); ar.forget(k); }
+    fs.rmSync(dir, { recursive: true, force: true });
+    return asks.length;
+  };
+  const mO = mutantAr([['        if (wfOut.size >= WF_INFLIGHT_MAX) break;', '        if (wfPending.size >= WF_INFLIGHT_MAX) break;   // CURE 2: the cap counted ARMS']]);
+  const oReal = await outScene(real), oRed = mO.mod ? await outScene(mO.mod) : -1;
+  ok('18. THE MODULE: ten arms asked and fired one after another, every read hangs — at most WF_INFLIGHT_MAX reads are ever OUT (the stalled mount holds no more of the pool); RED: cure 2\'s form (the cap counted arms) asks all ten', oReal === WF_INFLIGHT_MAX && mO.hits === 1 && oRed === 10, mO.err || JSON.stringify({ oReal, oRed }));
+  { const rs = [], asks = [], logs = [], sentH = [], sessions = new Map(), dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-wf18h-'));
+    const ar = create({ dataDir: dir, activeSessions: sessions, serverSetting: () => true, sendToSession: (id) => { sentH.push(id); return true; }, log: (l) => logs.push(String(l)), workflowRunAtWall: (id) => { asks.push(id); return id === 'z' ? Promise.resolve(null) : new Promise((r) => rs.push(r)); } });   // the g reads never return; z's answers once asked
+    const T = Date.now(), r0 = T + 60 * 60000;
+    for (const k of ['g0', 'g1', 'g2', 'g3']) { sessions.set(k, sess({ _stoppedBy: { kind: 'quota', at: T - 3600e3 } })); ar.armIfEnabled(k, sessions.get(k), r0, 'usage limit'); }
+    ar.tick(r0 - 5 * 60000);
+    for (const k of ['g0', 'g1', 'g2', 'g3']) ar.forget(k);   // their arms go; their four reads stay OUT
+    sessions.set('z', sess({ _stoppedBy: { kind: 'quota', at: T - 3600e3 } })); ar.armIfEnabled('z', sessions.get('z'), Date.now() + 1000, 'usage limit');
+    ar.tick(Date.now() + 1000 + GRACE_MS + 1);   // z is DUE, the cap full of hung reads, z has no answer of its own
+    const held = sentH.length === 0 && ar.statusFor('z').armed && logs.some((l) => /z: not read: the folder's storage does not answer/.test(l));
+    rs[0](null); await new Promise((r) => setImmediate(r));   // ONE read returns (late, its arm long gone)
+    const outAfter = ar._wfOut.size;
+    ar.tick(Date.now() + 1000 + GRACE_MS + 2); await new Promise((r) => setImmediate(r)); await new Promise((r) => setImmediate(r));   // z is asked now (one unit back) and answered
+    ar.tick(Date.now() + 1000 + GRACE_MS + 3);
+    fs.rmSync(dir, { recursive: true, force: true });
+    ok('18. THE MODULE: the cap full of reads that never return ⇒ a DUE arm with no answer is NOT fired — «not read: the folder\'s storage does not answer»; a late answer frees EXACTLY one unit; the arm is asked, answered and continued', held && outAfter === 3 && asks.includes('z') && sentH.join() === 'z', JSON.stringify({ held, outAfter, asks, sentH, logs: logs.filter((l) => /not read/.test(l)) })); }
+  const fair = async (mod) => {
+    const asked = new Set(), sessions = new Map(), dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-wf18f-'));
+    const ar = mod.create({ dataDir: dir, activeSessions: sessions, serverSetting: () => true, sendToSession: () => true, workflowRunAtWall: async (id) => { asked.add(id); return null; } });
+    const T = Date.now(), r0 = T + 60 * 60000;
+    for (let i = 0; i < 6; i++) { sessions.set('f' + i, sess({ _stoppedBy: { kind: 'quota', at: T - 3600e3 } })); ar.armIfEnabled('f' + i, sessions.get('f' + i), r0, 'usage limit'); }
+    ar.tick(r0 - 5 * 60000); await new Promise((r) => setImmediate(r)); await new Promise((r) => setImmediate(r));
+    ar.tick(r0 - 5 * 60000 + WF_REREAD_MS + 1000); await new Promise((r) => setImmediate(r));
+    fs.rmSync(dir, { recursive: true, force: true });
+    return asked.size;
+  };
+  const mF = mutantAr([['.filter(([, a]) => a && !a.fired && !a.watch && Number(a.resetsAt) > 0).sort((x, y) => ((wfOf.get(x[0]) || {}).ask || 0) - ((wfOf.get(y[0]) || {}).ask || 0));', '.filter(([, a]) => a && !a.fired && !a.watch && Number(a.resetsAt) > 0);   // PRE-AMEND: insertion order']]);
+  const fairReal = await fair(real), fairRed = mF.mod ? await fair(mF.mod) : -1;
+  ok('18. THE MODULE: six arms on one reset under a cap of four — two re-reads apart EVERY arm has been asked (the longest-unasked first); RED: in insertion order the last two are never asked', fairReal === 6 && mF.hits === 1 && fairRed === 4, mF.err || JSON.stringify({ fairReal, fairRed }));
+  { const asks = [], sessions = new Map(), dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-wf18c-'));
+    const ar = create({ dataDir: dir, activeSessions: sessions, serverSetting: () => true, sendToSession: () => true, workflowRunAtWall: (id) => { asks.push(id); return new Promise(() => { }); } });   // a read that never settles (a hung mount)
+    const T0 = Date.now(), far = T0 + 60 * 60000;
+    for (let i = 0; i < 7; i++) { sessions.set('s' + i, sess({ _stoppedBy: { kind: 'quota', at: T0 - 3600e3 } })); ar.armIfEnabled('s' + i, sessions.get('s' + i), far, 'usage limit'); }
+    const wAsks = [], wSessions = new Map([['w', sess({ _stoppedBy: { kind: 'quota', at: T0 - 3600e3 } })]]);
+    const arW = create({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-wf18w-')), activeSessions: wSessions, serverSetting: () => true, sendToSession: () => true, workflowRunAtWall: (id) => { wAsks.push(id); return Promise.resolve(null); } });
+    const wReset = T0 + 40 * 3600e3; arW.armIfEnabled('w', wSessions.get('w'), wReset, 'usage limit', { lane: 'claude', bucket: 'sevenDay' });
+    const watchArmed = !!(arW._armed.get('w') && arW._armed.get('w').watch);
+    arW.tick(T0); arW.tick(wReset - 5 * 60000); arW.tick(wReset - 60000);
+    ar.tick(T0); const farAsks = asks.length;
+    ar.tick(far - 5 * 60000); const nearAsks = asks.length;
+    ar.tick(far - 5 * 60000 + WF_REREAD_MS + 1000); const againAsks = asks.length;
+    fs.rmSync(dir, { recursive: true, force: true });
+    ok('18. THE MODULE: an arm an hour from its fire is not asked; in the six minutes before it, at most WF_INFLIGHT_MAX reads at once (the cap holds while they hang); a WATCH is never asked', farAsks === 0 && nearAsks === WF_INFLIGHT_MAX && againAsks === WF_INFLIGHT_MAX && watchArmed && wAsks.length === 0, JSON.stringify({ farAsks, nearAsks, againAsks, watchArmed, wAsks })); }
+  const mW = mutantAr([['continuePromptFor(note, label2, freshRun(id, a2))', 'continuePromptFor(note, label2)']]);   // stale-pins: kept — the mutant WRITES the pre-U3 form on purpose
+  const ctl = mW.mod ? await fire(mW.mod, async () => ANS()) : null;
+  ok('18. CONTROL: a fire that does not hand the run over says today\'s words — the naming leg goes red', mW.hits === 1 && !!ctl && ctl.sent.length === 1 && !ctl.sent[0].includes('Workflow'), mW.err || (ctl && ctl.sent));
+})();
+
+// ── 18b. THE MODEL'S CAP STILL STANDS (主开发's law 2026-11-18 11:24Z, written on the chain's restack — it needs the U1 cure's
+// stop fact): the wall was a MODEL's cap and the plan's window is what reset ⇒ the continue is NOT delivered (it would meet the
+// cap again) and waits for the cap's own reset once it has landed; on another member, or a model the cap does not draw, it
+// continues. The chain's own read: EVERY door that lands on the capped member is held (a member read «usable», a reset claim),
+// not only the timed fire; only the reading edge of the armed lane is not asked.
+{
+  console.log('\n18b. a model\'s cap that still stands holds the continue');
+  const { modelCapHold, capDrawnBy, CAP_LAND_MS } = require(AR_PATH);
+  const real = { create };
+  const QM = require(path.join(REPO, 'src/quota-model.js'));
+  ok('18b. the landing minute is the one every stated reset waits (quota-model RESET_GRACE_SEC)', CAP_LAND_MS === QM.RESET_GRACE_SEC * 1000, String(CAP_LAND_MS));
+  const T = Date.now(), cap = { kind: 'quota', at: T - 3600e3, resetsAt: T + 3 * 3600e3, memberId: 'A', bucket: 'scoped', scopedName: 'opus' };
+  const H = (o) => modelCapHold({ fact: cap, now: T, key: 'A', drawsCap: true, ...o });
+  const tbl = [
+    ['the cap stands, the same member, a model it draws ⇒ held, continued once the reset has landed', JSON.stringify(H({})) === JSON.stringify({ name: 'opus', until: cap.resetsAt, fireAt: cap.resetsAt + CAP_LAND_MS })],
+    ['another member now ⇒ fires', H({ key: 'B' }) === null],
+    ['the cap\'s reset has landed (a minute after it) ⇒ fires', H({ fact: { ...cap, resetsAt: T - CAP_LAND_MS } }) === null],
+    ['the cap\'s reset passed but has not landed yet (inside its minute) ⇒ held', !!H({ fact: { ...cap, resetsAt: T - 1000 } })],
+    ['a cap with no stated reset ⇒ fires (nothing to wait for)', H({ fact: { ...cap, resetsAt: null } }) === null],
+    ['the wall was the plan\'s own window (fiveHour) ⇒ not this rule', H({ fact: { ...cap, bucket: 'fiveHour', scopedName: null } }) === null],
+    ['a model the cap does not draw ⇒ fires', H({ drawsCap: false }) === null],
+    ['a wall that named no member (no pool can move it) ⇒ held', !!H({ fact: { ...cap, memberId: null }, key: null })],
+    ['a named member, an identity that cannot be told now ⇒ fires as before', H({ key: null }) === null],
+    ['an overload stop ⇒ not this rule', H({ fact: { kind: 'overload', at: T } }) === null],
+    ['capDrawnBy: opus draws the opus cap; sonnet does not', capDrawnBy('claude-opus-5-5', 'opus') === true && capDrawnBy('claude-sonnet-5-5', 'opus') === false],
+    ['capDrawnBy fails closed: a model of no known family, a cap of no known family', capDrawnBy(null, 'opus') === true && capDrawnBy('some-new-model', 'opus') === true && capDrawnBy('claude-opus-5-5', 'Model cap') === true],
+  ];
+  for (const [n, c] of tbl) ok('18b. PURE: ' + n, c);
+  // THE MODULE: an arm at the plan's reset, the stop fact a model's cap three hours on; the gate may move the conversation
+  const scene = (mod, { member = 'A', model = 'claude-opus-5-5', gateMovesTo = null, capAt = T + 3 * 3600e3, doors = false } = {}) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-mcap-')), sent = [], logs = [], lists = [], sessions = new Map();
+    let on = member;
+    const ar = mod.create({ dataDir: dir, activeSessions: sessions, serverSetting: () => true, log: (l) => logs.push(String(l)), onListChange: () => lists.push(1),
+      sendToSession: (id) => { sent.push(id); return true; }, fireIdentity: () => ({ key: on, name: on }), modelOf: () => model,
+      beforeFire: () => { if (gateMovesTo) on = gateMovesTo; return true; } });
+    sessions.set('m', sess({ _stoppedBy: { ...cap, resetsAt: capAt } }));
+    const plan = T + 3600e3;
+    ar.armIfEnabled('m', sessions.get('m'), plan, 'usage limit', { bucket: 'scoped', scopedName: 'opus' });
+    ar.tick(plan + GRACE_MS + 1);
+    const a = ar._armed.get('m');
+    const out = { sent: sent.length, resetsAt: a ? a.resetsAt : null, watch: a ? !!a.watch : null, said: logs.filter((l) => /m: the wall was the opus cap, which resets at .* not continued/.test(l)).length, lists: lists.length };
+    if (doors && a && !sent.length) {   // the other doors onto the SAME member: a member read «usable», a reset claim — held, said no more
+      out.wake = ar.fireNow('m', 'a member read usable'); out.claim = ar.fireNowOnClaim('m', 'a reset claim');
+      out.sentDoors = sent.length; out.saidDoors = logs.filter((l) => /m: the wall was the opus cap/.test(l)).length; out.stillAt = (ar._armed.get('m') || {}).resetsAt;
+    }
+    if (a && !sent.length) {   // the cap's reset comes and LANDS (the fact's own reset now a minute behind the clock): the wait ends
+      sessions.get('m')._stoppedBy = { ...sessions.get('m')._stoppedBy, resetsAt: Date.now() - CAP_LAND_MS - 1 };
+      ar.tick(a.resetsAt + GRACE_MS + 1); out.after = sent.length; out.armedAfter = ar._armed.has('m');
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+    return out;
+  };
+  const r = scene(real, { doors: true });
+  ok('18b. THE MODULE: the plan\'s window reset, the opus cap still stands on the same member ⇒ NOT continued, re-armed a minute after the cap\'s reset, said once, the list told; at that time it continues once', r.sent === 0 && r.resetsAt === T + 3 * 3600e3 + CAP_LAND_MS && r.watch === false && r.said === 1 && r.lists >= 1 && r.after === 1, JSON.stringify(r));
+  ok('18b. THE MODULE: the other doors onto the SAME member (a member read «usable», a reset claim) are held too — nothing sent, the wait unchanged, nothing said again', r.sentDoors === 0 && r.saidDoors === 1 && r.stillAt === r.resetsAt, JSON.stringify(r));
+  const rFar = scene(real, { capAt: T + 5 * 24 * 3600e3 });
+  ok('18b. THE MODULE: a cap days away (beyond the waiting bound) ⇒ not continued, held as a WATCH — no timed continue: at its reset the watch retires (nothing sent), as every far wall', rFar.sent === 0 && rFar.resetsAt === T + 5 * 24 * 3600e3 + CAP_LAND_MS && rFar.watch === true && rFar.after === 0 && rFar.armedAfter === false, JSON.stringify(rFar));
+  const rB = scene(real, { member: 'B' });
+  ok('18b. THE MODULE: the conversation is on another member now ⇒ continued at the plan\'s reset', rB.sent === 1, JSON.stringify(rB));
+  const rG = scene(real, { gateMovesTo: 'B' });
+  ok('18b. THE MODULE: the pre-fire gate moves it onto another member ⇒ continued (the hold is asked AFTER the gate, of the identity it lands on)', rG.sent === 1, JSON.stringify(rG));
+  const rS = scene(real, { model: 'claude-sonnet-5-5' });
+  ok('18b. THE MODULE: the conversation asks a model the opus cap does not draw ⇒ continued', rS.sent === 1, JSON.stringify(rS));
+  const NEEDLE = "      if (!(origin && origin.via === 'reading') && capHeld(id, session, key2)) return false;";
+  const mC = mutantAr([[NEEDLE, '      /* the hold removed */']]);
+  const rRed = mC.mod ? scene(mC.mod) : null;
+  ok('18b. RED: without the hold the timed continue goes at the plan\'s reset into the cap that still stands', mC.hits === 1 && !!rRed && rRed.sent === 1, mC.err || JSON.stringify(rRed));
+  const mT = mutantAr([[NEEDLE, "      if (kind === 'timed' && capHeld(id, session, key2)) return false;   /* the first form: the timed fire only */"]]);
+  const rT = mT.mod ? scene(mT.mod, { doors: true }) : null;
+  ok('18b. RED: the timed-only form (the chain\'s first) lets a member that read «usable» continue it into the cap', mT.hits === 1 && !!rT && rT.sent === 0 && rT.sentDoors >= 1, mT.err || JSON.stringify(rT));
 }
 
 // ── 15. THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──

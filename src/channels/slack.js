@@ -179,6 +179,7 @@ const caps = Object.freeze({
   mentions: 'people',   // lane attention-rule-at-you: rich_text `user` elements → mentions (slack-text.js; usergroup / broadcast keep their own kind)
   pollInterval: { hot: 30, cold: 300, floor: 10 },   // D5: no Slack-only cadence — the tiers, the floor and the budget ladder bound it
   scanSources: null,
+  browserSignIn: true,   // B-e630: its own web app works in a signed-in browser profile
   scanLatency: null,
   history: 'page',
   historyBySource: null,

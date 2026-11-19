@@ -812,7 +812,7 @@ await step('㉖', async () => {
 
 // ── ㉗ Publish page: the re-read at the answer FAILED (a 502) ⇒ «could not re-check — try again», the person's Unpublish still theirs ──
 await step('㉗', async () => {
-  await evalJs(`(() => { window.__dyPubFetch = window.fetch; window.__dyPubFail = false; window.__dyDel = 0; window.fetch = (u, o) => { const s = String((u && u.url) || u); if (/\\/api\\/pages\\/by-path/.test(s)) { window.__dyPubN = (window.__dyPubN || 0) + 1; return !window.__dyPubFail ? Promise.resolve(new Response(JSON.stringify({ page: { id: 'pg1', url: '/p/pg1', name: 'notes', public: false } }), { headers: { 'Content-Type': 'application/json' } })) : Promise.resolve(new Response('<html><body>502 Bad Gateway</body></html>', { status: 502, headers: { 'Content-Type': 'text/html' } })); } if (/\\/api\\/pages\\/pg1/.test(s) && o && o.method === 'DELETE') { window.__dyDel++; return Promise.resolve(new Response(JSON.stringify({ ok: true }))); } return window.__dyPubFetch(u, o); }; window.__dyFx = app.openFileExplorer(${J(CWD)}); window.__dyFx._explorer._publishPageDialog(${J(CWD + '/notes.html')}, 'notes.html'); return true; })()`);
+  await evalJs(`(() => { window.__dyPubFetch = window.fetch; window.__dyPubFail = false; window.__dyDel = 0; window.fetch = (u, o) => { const s = String((u && u.url) || u); if (/\\/api\\/pages\\/by-path/.test(s)) { window.__dyPubN = (window.__dyPubN || 0) + 1; return !window.__dyPubFail ? Promise.resolve(new Response(JSON.stringify({ page: { id: 'pg1', url: '/p/pg1', name: 'notes', public: false } }), { headers: { 'Content-Type': 'application/json' } })) : Promise.resolve(new Response('<html><body>502 Bad Gateway</body></html>', { status: 502, headers: { 'Content-Type': 'text/html' } })); } if (/\\/api\\/pages\\/pg1/.test(s) && o && o.method === 'DELETE') { window.__dyDel++; return Promise.resolve(new Response(JSON.stringify({ ok: true }))); } return window.__dyPubFetch(u, o); }; window.__dyFx = app.openFileExplorer(${J(CWD)}); window.__dyFx._explorer._publishPageDialog(${J(CWD + '/notes.html')}, 'notes.html'); return true; })()`);   // stale-pins: kept — the suite's own fetch stub in the page, not a pin
   const drawn = await waitFor(`!!document.querySelector('#pp-unpub')`, 8000);
   const d0 = await evalJs(`({ n: window.__dyPubN || 0, h3: document.querySelector('#publish-page-dialog .dialog-header h3')?.textContent || null, text: (document.getElementById('publish-page-dialog')?.innerText || '').slice(0, 160), html: (document.getElementById('publish-page-dialog')?.innerHTML || '').slice(0, 400) })`);
   d0.errors = pageErrors.slice(-3).map((x) => String(x).slice(0, 300));
@@ -960,7 +960,7 @@ await step('㉞', async () => {
 
 // ── ㉟ (r4) a QUEUED form's caller is told: «Models — A» with an edit, then «Models — B» (the real openAccountModelsDialog) ⇒ A asks; Discard ⇒ B OPENS DRAWN (its models), its caller answered ──
 await step('㉟', async () => {
-  await evalJs(`(() => { window.__dyAmFetch = window.fetch; window.fetch = (u, o) => { const s = String((u && u.url) || u); const m = /\\/api\\/accounts\\/(acct-[AB])\\/models$/.exec(s); if (m && (!o || !o.method || o.method === 'GET')) { const id = m[1].slice(5); return Promise.resolve(new Response(JSON.stringify({ provider: { id: 'p-' + id, kind: 'self-hosted', label: 'Self-hosted or other', models: [{ id: 'model-' + id, label: 'model-' + id, context: 200000, caps: [] }], modelsSource: 'configured', aliases: {} }, editable: true }), { status: 200, headers: { 'Content-Type': 'application/json' } })); } return window.__dyAmFetch(u, o); }; return true; })()`);
+  await evalJs(`(() => { window.__dyAmFetch = window.fetch; window.fetch = (u, o) => { const s = String((u && u.url) || u); const m = /\\/api\\/accounts\\/(acct-[AB])\\/models$/.exec(s); if (m && (!o || !o.method || o.method === 'GET')) { const id = m[1].slice(5); return Promise.resolve(new Response(JSON.stringify({ provider: { id: 'p-' + id, kind: 'self-hosted', label: 'Self-hosted or other', models: [{ id: 'model-' + id, label: 'model-' + id, context: 200000, caps: [] }], modelsSource: 'configured', aliases: {} }, editable: true }), { status: 200, headers: { 'Content-Type': 'application/json' } })); } return window.__dyAmFetch(u, o); }; return true; })()`);   // stale-pins: kept — the suite's own fetch stub in the page, not a pin
   await evalJs(`(() => { __dyProbe.openAccountModelsDialog({ accountId: 'acct-A', name: 'A' }); return true; })()`);
   await waitFor(`!!document.querySelector('#account-models-dialog input.am-id')`, 8000);
   await tagIn(`document.getElementById('account-models-dialog')`, 'input.am-id', 'am-a');
@@ -1008,7 +1008,7 @@ await step('㊱', async () => {
 
 // ── ㊲ (r4) an app request's key is the request: Remove gimp, then Remove inkscape (the real showInstallDialog) ⇒ the inkscape plan, asked and shown ──
 await step('㊲', async () => {
-  await evalJs(`(() => { window.__dyInsFetch = window.fetch; window.__dyPlans = []; window.fetch = (u, o) => { const s = String((u && u.url) || u); if (/\\/api\\/apps\\/plan$/.test(s)) { const b = JSON.parse((o && o.body) || '{}'); window.__dyPlans.push(b.request && b.request.entryId); return Promise.resolve(new Response(JSON.stringify({ plan: { ok: true, canRun: true, commands: ['sudo apt-get remove -y ' + (b.request && b.request.entryId)] }, request: b.request, digest: 'd-' + (b.request && b.request.entryId) }), { status: 200, headers: { 'Content-Type': 'application/json' } })); } return window.__dyInsFetch(u, o); }; return true; })()`);
+  await evalJs(`(() => { window.__dyInsFetch = window.fetch; window.__dyPlans = []; window.fetch = (u, o) => { const s = String((u && u.url) || u); if (/\\/api\\/apps\\/plan$/.test(s)) { const b = JSON.parse((o && o.body) || '{}'); window.__dyPlans.push(b.request && b.request.entryId); return Promise.resolve(new Response(JSON.stringify({ plan: { ok: true, canRun: true, commands: ['sudo apt-get remove -y ' + (b.request && b.request.entryId)] }, request: b.request, digest: 'd-' + (b.request && b.request.entryId) }), { status: 200, headers: { 'Content-Type': 'application/json' } })); } return window.__dyInsFetch(u, o); }; return true; })()`);   // stale-pins: kept — the suite's own fetch stub in the page, not a pin
   await evalJs(`__dyProbe.showInstallDialog({ hostId: 'local', label: null }, { what: 'app', request: { kind: 'remove', entryId: 'gimp' } }).then(() => true)`);
   await sleep(500);
   await evalJs(`__dyProbe.showInstallDialog({ hostId: 'local', label: null }, { what: 'app', request: { kind: 'remove', entryId: 'inkscape' } }).then(() => true)`);
@@ -1447,6 +1447,37 @@ await step('㊴', async () => {
   // the RAW length, never the settled one (a listener that waits for the next frame would still be there)
   const r = await evalJs(`(() => { const n = () => app.ws.globalHandlers.length; const h0 = n(); app.openPluginsDialog(); const d = document.getElementById('plugins-dialog'); const h1 = n(); const x = d && d.querySelector('.dialog-close'); if (x) x.click(); return { mobile: !!app.isMobile, opened: !!d, closer: !!x, h0, h1, h2: n(), gone: !(d && d.isConnected) }; })()`);
   check('㊴ the Plugins modal (the phone tier) opened, then closed by its ✕ in ONE task with no socket frame between ⇒ its broadcast listener left AT THE CLOSE — the count is back (2.369.397: +1 until the next frame came)', r.mobile && r.opened && r.closer && r.gone && r.h1 === r.h0 + 1 && r.h2 === r.h0, r);
+});
+
+// ── B-3b8e ② (the row's item (2), 2026-11-18): a Plugin Git credential SAVED while Install plugin… stands open ENABLES its option
+// at once — the gap that let «not set» live ~100 releases (the dialog read the status once per open). LAST: it sets up a vault.
+// What it rests on (rule (d)), said plainly: SEEN in a run — the lane's picture walk on this dialog (bl-keys-misc logs/pics-look2.log,
+// 2026-11-18 05:39–05:40Z): POST /api/vault/setup 200 and PUT /api/integrations/plugin-git 200 from the page, and the option read as
+// `.plugin-install-cred option[value="plugin-git"]` (its text and `disabled`, with the vault locked, in a dialog opened after a
+// reload). NOT seen in any run, read from the code (src/lib/plugins-ui.js drawCred + its `integrations-updated` listener): the
+// first read redrawing the markup's bare option, the option enabling while the dialog stays open, the «— {host} ({kind})» words —
+// this leg's PROVE run is their first fact. The CONTROL waits for the first read to land (the markup's bare option redrawn, still
+// disabled) before anything is saved, so the enable below can only come from the broadcast (rule (b)).
+await step('B-3b8e②', async () => {
+  const api = (method, p, body) => evalJs(`fetch(${J(p)}, { method: ${J(method)}, headers: { 'content-type': 'application/json' }, body: ${body ? J(JSON.stringify(body)) : 'undefined'} }).then((r) => ({ status: r.status }), (e) => ({ status: 0, error: String(e) }))`);
+  await evalJs(`(() => { document.getElementById('plugin-install-dialog')?.remove(); app._pluginInstallDialog(() => {}); return true; })()`);
+  await waitFor(`!!document.querySelector('#plugin-install-dialog .plugin-install-source')`, 10000);
+  await evalJs(`(() => { const s = document.querySelector('#plugin-install-dialog .plugin-install-source'); s.value = 'git'; s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+  const OPT = `document.querySelector('#plugin-install-dialog .plugin-install-cred option[value="plugin-git"]')`;
+  const seen = await waitFor(`!!${OPT}`, 8000);
+  const read = () => evalJs(`(() => { const o = ${OPT}; return o ? { text: o.textContent, disabled: !!o.disabled } : null; })()`);
+  const MARKUP = 'Plugin Git credential';   // the option's own text in the dialog's markup (plugins-ui.js), before any read
+  const firstRead = seen && await waitFor(`(() => { const o = ${OPT}; return !!o && o.disabled && o.textContent !== ${J(MARKUP)}; })()`, 10000);
+  const before = seen ? await read() : null;
+  check('B-3b8e ② CONTROL first: the first read LANDED (the bare markup option redrawn) and, before any save, the Plugin Git option stands DISABLED', !!firstRead && !!before && before.disabled === true && before.text !== MARKUP, before);
+  const su = await api('POST', '/api/vault/setup', { password: 'dy-pass-' + 'not-real-3b8e' });
+  const sv = await api('PUT', '/api/integrations/plugin-git', { values: { host: 'example-host.invalid', username: 'x-access-token', token: 'dy-' + 'token-not-real' } });
+  const live = await waitFor(`(() => { const o = ${OPT}; return !!o && !o.disabled && /example-host\\.invalid/.test(o.textContent); })()`, 10000);
+  const after = await read();
+  await shot('b3b8e-saved-enables');
+  check('B-3b8e ② a Plugin Git credential SAVED while Install plugin… stands open ENABLES its option at once, the host in its words — no reopen', su.status === 200 && sv.status === 200 && live && !!after && after.disabled === false, { su, sv, after });
+  await api('DELETE', '/api/integrations/plugin-git');
+  await evalJs(`(() => { document.querySelector('#plugin-install-dialog .dialog-close')?.click(); return true; })()`);
 });
 
 console.log(`\n${fail ? '✗' : '✓'} test-dialog-yield-chrome: ${pass} passed, ${fail} failed${fail ? '' : ' — ALL PASS'}`);

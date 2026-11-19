@@ -684,6 +684,31 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
         reach: always.length ? A.widestReach(always.map((g) => g.reach)) : gs.slice().sort((a, b) => A.viaRank(GM.admits([A.useRowOf(b)].filter(Boolean), facts).via) - A.viaRank(GM.admits([A.useRowOf(a)].filter(Boolean), facts).via))[0].reach } : null;   // lane key-instance-scope: the reach a use would ride (useVerdict's — B-3190 r1: its most specific once-grant)
     }).filter(Boolean);
   }
+  /** «WHAT IT MAY USE» (Session Properties, unit what-it-may-use): every live key grant judged for ONE conversation by the
+   *  same calls keysFor makes — THE model's `admits` over the grant's use row (its own conversation, a Task Group, everyone,
+   *  minus the members left out), a spent once-grant held by nobody — over the LIVE grants as the door reads them (liveGrants:
+   *  a once-grant from before a vault lock or a restart is spent; restack onto 2.369.410, its B-3190 follow-up) — answered as
+   *  may-use-model rows: the key's NAME, never a
+   *  value; the refusals a person must see (a 「除了」, Task Groups that could not be read, a row this release cannot read). */
+  function mayUseFor(facts = {}) {
+    db = read();
+    const F = { conversationKeys: (facts.conversationKeys || []).map(String), groupIds: (facts.groupIds || []).map(String), groupsUnreadable: !!facts.groupsUnreadable };
+    const out = [];
+    for (const k of db.keys) {
+      if (k.revokedAt) continue;
+      for (const g of liveGrants()) {
+        if (g.keyId !== k.id || g.subject === 'external' || (g.mode === 'once' && g.spentAt)) continue;
+        const row = A.useRowOf(g);
+        const base = { door: 'automation-key-use', resource: String(g.id), name: String(k.name || k.id), detail: { mode: g.mode, keyId: String(k.id), scopes: Array.isArray(k.scopes) ? k.scopes.slice() : [] } };
+        if (!row) { out.push({ ...base, ok: false, code: 'unknown_shape' }); continue; }
+        const v = GM.admits([row], F);
+        if (v.ok) out.push({ ...base, ok: true, via: v.via, ...(v.via === 'group' && v.entry ? { groupId: String(v.entry.id) } : {}) });
+        else if (v.code === 'excepted') out.push({ ...base, ok: false, code: 'excepted', ...(v.entry ? { except: GM.bareOf(v.entry) } : {}) });
+        else if (v.code === 'groups_unreadable' || v.code === 'unknown_shape') out.push({ ...base, ok: false, code: v.code });
+      }
+    }
+    return out;
+  }
   /** THIS caller's audit lines (its own conversation's), newest last — names and ids only. */
   function auditFor(caller, { key = null, since = null, limit = 50 } = {}) {
     const subject = caller && caller.conversationId ? `session:${caller.conversationId}` : null;
@@ -707,7 +732,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     return { ok: true, lines: lines.slice(-Math.max(1, Math.min(200, Number(limit) || 50))).reverse() };
   }
 
-  return { list, mint, revoke, grant, ungrant, pruneEnded, setReach, setExcept, edit, setLimits, use, useMaintainer, answer, reconcile, keysFor, auditFor, auditOfKey, vaultRows, vaultReveal, listAsks, ACTION_TYPE, _asks: asks };
+  return { list, mint, revoke, grant, ungrant, pruneEnded, setReach, setExcept, edit, setLimits, use, useMaintainer, answer, reconcile, keysFor, mayUseFor, auditFor, auditOfKey, vaultRows, vaultReveal, listAsks, ACTION_TYPE, _asks: asks };
 }
 
 module.exports = { create, ACTION_TYPE };

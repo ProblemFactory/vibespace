@@ -241,5 +241,24 @@ console.log('§2 controls: the rule over synthetic files');
   ok(!PRIMITIVE.test(wh.replace(/fetchFence\(/g, 'X(')) && /fetchFence\(c\.delivery\.replyUrl, /.test(wh) && /EGRESS = Object\.freeze\(\[\]\)/.test(wh), 'the webhook adapter constructs no request: its one send goes through the fence (EGRESS = [] — no vendor host)');
 }
 
+// ── the exit check (lane cli-update-needs-nothing; the owner 2026-11-17 «A就行»): THE OWNER-CONFIGURED CHECK ADDRESS — no vendor's host
+// (the address is the owner's setting `browser.exitCheckUrl`, never a literal), asked ONLY at a person's press, THROUGH the profile's
+// own proxy: src/server/browser-exit-check.js is the one client (its first hop the keeper's forwarder on loopback — the name resolved by
+// the profile's proxy, never here — so the fence's address pinning cannot apply; its URL rules do, on the setting, and its answer rules
+// here: no redirect followed, a deadline, a byte cap). Gates: a person's press only; the address from the owner's setting; through the
+// profile's forwarder; never a timer ──
+{
+  const ec = fs.readFileSync(path.join(REPO, 'src/server/browser-exit-check.js'), 'utf-8');
+  const ks = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf-8');
+  const rb = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf-8');
+  const ex = fs.readFileSync(path.join(REPO, 'src/browser-exit.js'), 'utf-8');
+  ok((ec.match(/https?\.request\(/g) || []).length === 1 && /sock = net\.connect\(\{ host: fw\.hostname, port: Number\(fw\.port\) \}\);/.test(ec) && (ec.match(/net\.connect\(/g) || []).length === 1 && /CONNECT \$\{target\} HTTP\/1\.1/.test(ec) && hostsOf(blankComments(ec)).size === 0,
+    'the exit check: ONE request, its only socket to the profile\'s forwarder (CONNECT host:port — the name the proxy\'s to resolve), no host literal in the file');
+  ok(/if \(status >= 300 && status < 400\) \{ finish\(\{ ok: true, status, contentType, body: Buffer\.alloc\(0\) \}\); return; \}/.test(ec) && /n > capBytes/.test(ec) && /deadlineMs = X\.DEADLINE_MS/.test(ec) && /servername: net\.isIP\(host\) \? undefined : host/.test(ec),
+    'the exit check: a redirect is an answer (never followed), the body capped, a deadline, TLS verified as the check host itself');
+  ok((ks.match(/EXC\.requestThrough\(/g) || []).length === 1 && /const url = EXIT\.checkUrlVerdict\(serverSetting\(EXIT\.EXIT_URL_KEY\)\);/.test(ks) && /router\.post\('\/api\/browser\/profiles\/:id\/exit-check'[\s\S]{0,200}refuseAgentBearer\(req, res, EXIT_IS_USERS\)/.test(rb) && /const DEADLINE_MS = 8000;/.test(ex),
+    'the exit check\'s gates: its one caller the keeper\'s exitCheck, the address read from the owner\'s setting (judged by checkUrlVerdict), the route a person\'s (an agent\'s token refused) — never a timer');
+}
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

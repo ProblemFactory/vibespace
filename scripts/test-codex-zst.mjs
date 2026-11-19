@@ -32,6 +32,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -1827,6 +1828,142 @@ console.log('— ⑥ ONE remote cache slot, MANY remote files (codex .jsonl ⇄ 
           'NEGATIVE CONTROL: the very next poll heals the slot the race refused — the transient costs one poll, not ten minutes', { err: out2.err, probes: r.log.probes });
       }
     }
+  }
+}
+console.log('— ⑦ B-f64b: the boot\'s process walk — no ps per exited pid, no /proc walk on the sync listing');
+{
+  // (a) where /proc exists, a pid /proc cannot read is GONE — zero ps (Linux's ps reads the same /proc). The boot's walk held
+  // the loop 33 s on one synchronous fork + exec per pid that exited mid-walk. Counted, never timed
+  const CI = require(path.join(REPO, 'src/cli-identity.js'));
+  const gonePids = [];
+  for (let q = 4194000; gonePids.length < 25 && q < 4194300; q++) { try { process.kill(q, 0); } catch (e) { if (e.code === 'ESRCH') gonePids.push(q); } }
+  const countRun = (C) => {
+    let execs = 0; const execImpl = () => { execs++; return ''; };
+    const words = gonePids.map((q) => C.procArgv(q, 0, { execImpl })), cmds = gonePids.map((q) => C.procCmdline(q, { execImpl })), uids = gonePids.map((q) => C.procUid(q, { execImpl }));
+    return { execs, words: words.every((w) => w === ''), cmds: cmds.every((c) => c === null), uids: uids.every((u) => u === null) };
+  };
+  const c1 = countRun(CI);
+  ok(fs.existsSync('/proc/self') && gonePids.length === 25 && c1.execs === 0 && c1.words && c1.cmds && c1.uids,
+    'B-f64b: 25 pids that exist nowhere — procArgv / procCmdline / procUid answer «gone» with ZERO ps calls where /proc exists', { pids: gonePids.length, ...c1 });
+  const NOP = path.join(os.tmpdir(), `vs-noproc-${process.pid}`);   // never created: a machine with no /proc
+  let psAsked = 0;
+  const w = CI.procArgv(gonePids[0], 0, { procRoot: NOP, execImpl: () => { psAsked++; return '/usr/bin/claude --x'; } });
+  ok(psAsked === 1 && w === '/usr/bin/claude', 'B-f64b: where there is NO /proc the ps rung still answers (macOS / BSD)', { psAsked, w });
+  const ciSrc = fs.readFileSync(path.join(REPO, 'src/cli-identity.js'), 'utf8');
+  const guard = "  if (hasProcfs(procRoot)) return '';   // B-f64b: gone — never a ps per exited pid\n";
+  if (!ciSrc.includes(guard)) throw new Error('the anchor of the control «B-f64b: the ps fallthrough» is not in the source');
+  const MCi = mutantCopies('codex-zst-f64b', REPO);
+  const c0 = countRun(MCi.load('src/cli-identity.js', ciSrc.replace(guard, ''), 'ps-per-gone-pid'));
+  ok(c0.execs >= 25, 'CONTROL (B-f64b): the base\'s fallthrough runs one ps per gone pid (RED for the leg above)', { execs: c0.execs });
+  // (b) THE WALK NEVER RUNS ON THE MAIN THREAD (the read's must, 09:5xZ): the sync listing reads the kept answer, and a
+  // worker that cannot answer (the pool down; the op inline on the main thread) answers null = NOT KNOWN — counted as
+  // readdirSync('/proc') calls on this thread; before an answer the rows say `unknown`, never «stopped»
+  const csSrc = fs.readFileSync(path.join(REPO, 'src/codex-session-store.js'), 'utf8');
+  const spyProc = () => { const rd = fs.readdirSync; const box = { n: 0 }; fs.readdirSync = function (q, ...r) { if (String(q) === '/proc') box.n++; return rd.call(this, q, ...r); }; return { box, undo: () => { fs.readdirSync = rd; } }; };
+  const procWalks = (fn) => { const s0 = spyProc(); try { return { out: fn(), n: s0.box.n }; } finally { s0.undo(); } };
+  const procWalksAsync = async (fn) => { const s0 = spyProc(); try { const out = await fn(); return { out, n: s0.box.n }; } finally { s0.undo(); } };
+  const fresh = MCi.load('src/codex-session-store.js', csSrc, 'fresh-cache', { same: true }); // a fresh instance of the real module on purpose (B-0d3e)
+  const said = (rows) => [...new Set(rows.map((t) => t.status + (t.liveness ? '/' + t.liveness : '')))].join();
+  const s1 = procWalks(() => fresh.listCodexThreads({ activeSessions: new Map() }));
+  const sw = await procWalksAsync(() => fresh.listOpenCodexThreadIdsAsync());
+  const s2 = procWalks(() => fresh.listCodexThreads({ activeSessions: new Map() }));
+  ok(s1.n === 0 && sw.n === 0 && s2.n === 0 && s1.out.length > 0 && said(s1.out) === 'stopped/unknown' && said(s2.out) === 'stopped',
+    'B-f64b: the sync listing and the worker\'s walk make ZERO /proc walks on the main loop — before the first answer the rows SAY it (stopped, liveness unknown: the card «still checking»), after it the kept answer (stopped: no codex runs here)', { n1: s1.n, nw: sw.n, n2: s2.n, st1: said(s1.out), st2: said(s2.out) });
+  // the POOL DOWN: an adapter copy whose pool is unavailable, the store copy over it — both roads, zero walks here
+  const adSrc = fs.readFileSync(path.join(REPO, 'src/adapters/codex.js'), 'utf8');
+  const poolCut = 'function _transcriptPoolGet() {\n';
+  if (!adSrc.includes(poolCut)) throw new Error('the anchor of the leg «B-f64b: the pool down» is not in the source');
+  const twcCut = 'async function transcriptWorkerCall(op, payload, inlineFn) {\n';
+  if (!adSrc.includes(twcCut)) throw new Error('the anchor of the leg «B-f64b: one walk in flight» is not in the source');
+  const adDown = MCi.write('src/adapters/codex.js', adSrc.replace(poolCut, 'function _transcriptPoolGet() {\n  return null;   // the leg: the pool is unavailable\n')
+    .replace(twcCut, twcCut + "  if (op === 'codexOpenThreads') globalThis.__vsOpenAsks = (globalThis.__vsOpenAsks || 0) + 1;   // the leg counts the walks asked\n"), 'pool-down');
+  const reqCut = "} = require('./adapters/codex');";
+  if (!csSrc.includes(reqCut)) throw new Error('the anchor of the leg «B-f64b: the store over a pool-down adapter» is not in the source');
+  const downCs = (src, tag) => MCi.load('src/codex-session-store.js', src.replace(reqCut, `} = require(${JSON.stringify(adDown)});`), tag);
+  const dn = downCs(csSrc, 'pool-down-store');
+  const d1 = await procWalksAsync(async () => ({ sync: dn.listCodexThreads({ activeSessions: new Map() }), ids: await dn.listOpenCodexThreadIdsAsync(), list: await dn.listCodexThreadsAsync({ activeSessions: new Map() }) }));
+  ok(d1.n === 0 && d1.out.ids === null && d1.out.list.length > 0 && said(d1.out.list) === 'stopped/unknown' && said(d1.out.sync) === 'stopped/unknown',
+    'B-f64b: the worker POOL DOWN — the liveness walk runs ZERO times on the main thread; both listings SAY the liveness is not known (nothing kept, the next ask tries again)', { n: d1.n, ids: d1.out.ids, st: said(d1.out.list) });
+  // ONE walk in flight for both roads: five asks at once are one ask of the worker
+  const flight = async (store) => { globalThis.__vsOpenAsks = 0; await Promise.all([store.listOpenCodexThreadIdsAsync(), store.listOpenCodexThreadIdsAsync(), store.listCodexThreadsAsync({ activeSessions: new Map() }), store.listOpenCodexThreadIdsAsync(), store.listOpenCodexThreadIdsAsync()]); return globalThis.__vsOpenAsks; };
+  const asks1 = await flight(downCs(csSrc, 'one-in-flight'));
+  const ifCut = '  if (_openThreadsInflight) return _openThreadsInflight;\n';
+  if (!csSrc.includes(ifCut)) throw new Error('the anchor of the control «B-f64b: one walk in flight» is not in the source');
+  const asks0 = await flight(downCs(csSrc.replace(ifCut, ''), 'many-in-flight'));
+  ok(asks1 === 1 && asks0 === 5, 'B-f64b: ONE liveness walk in flight for both roads — five asks at once ask the worker once; CONTROL: without the shared one, five (RED)', { asks1, asks0 });
+  // the worker's op run on the main thread (SafeFs's inline run when no worker is alive) answers null
+  const TW = require(path.join(REPO, 'src/transcript-worker.js'));
+  const op1 = procWalks(() => TW.runOp('codexOpenThreads', {}));
+  ok(op1.n === 0 && op1.out && op1.out.result === null, 'B-f64b: the codexOpenThreads op on the main thread answers null (not known) and walks nothing — locate\'s rule', { n: op1.n, out: op1.out });
+  // RED ×2: the base's inline fallback (the walk on this thread when the worker cannot answer); the op without its guard
+  const inl = "transcriptWorkerCall('codexOpenThreads', {}, () => null)";
+  if (!csSrc.includes(inl)) throw new Error('the anchor of the control «B-f64b: the inline walk» is not in the source');
+  const baseInline = "transcriptWorkerCall('codexOpenThreads', {}, () => { const D = require('./discovery-facts'), ids = []; for (const q of D.listOpenCodexRolloutPaths({ sessionsDir: CODEX_SESSIONS_DIR })) { const t = D.codexThreadIdOf(q); if (t) ids.push(t); } return ids; })";
+  const bd = downCs(csSrc.replace(inl, baseInline), 'pool-down-base-inline');
+  const d0 = await procWalksAsync(() => bd.listOpenCodexThreadIdsAsync());
+  ok(d0.n >= 1, 'CONTROL (B-f64b): the base\'s fallback walks /proc on the main thread when the worker cannot answer (RED for the leg above)', { n: d0.n });
+  const twSrc = fs.readFileSync(path.join(REPO, 'src/transcript-worker.js'), 'utf8');
+  const twCut = "      if (isMainThread) return { result: null };\n      const { listOpenCodexRolloutPaths, codexThreadIdOf } = require('./discovery-facts');";
+  if (!twSrc.includes(twCut)) throw new Error('the anchor of the control «B-f64b: the op\'s guard» is not in the source');
+  const TW0 = MCi.load('src/transcript-worker.js', twSrc.replace(twCut, "      const { listOpenCodexRolloutPaths, codexThreadIdOf } = require('./discovery-facts');"), 'op-no-guard');
+  const op0 = procWalks(() => TW0.runOp('codexOpenThreads', {}));
+  ok(op0.n >= 1, 'CONTROL (B-f64b): the op without its guard walks /proc on the main thread (RED for the leg above)', { n: op0.n });
+}
+// ⑦ B-3767 unit 2 (主开发 11:40Z): THE TWO PER-USER FOLDERS ARE JUDGED BEFORE USE (sock-path ensureSocketDir — 0700, a folder, not
+// a link, this uid's, no group/other bits). A link planted at the per-user name (a stray, or another user's) is refused BY NAME
+// with the way out, and nothing goes through it: the zst cache throws EZSTCACHE and writes no twin there; the ssh control folder
+// turns connection sharing off (no ControlPath into it). RED controls: the release's mkdir-in-a-catch, then used.
+console.log('⑦ the zst cache and the ssh control folder are judged before use (B-3767 unit 2)');
+{
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const M = mutantCopies('zst-own', REPO);
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-zst-own-')), away = path.join(T, 'away'), good = path.join(T, 'good');
+  fs.mkdirSync(away); fs.mkdirSync(good, { mode: 0o700 });
+  const uid = process.getuid();
+  fs.symlinkSync(away, path.join(T, `vibespace-zst-${uid}`)); fs.symlinkSync(away, path.join(T, `vs-cm-${uid}`));
+  const prevT = process.env.TMPDIR, warn0 = console.warn, warned = [];
+  try {
+    process.env.TMPDIR = T;
+    // the zst cache
+    const cxSrc = read('src/adapters/codex.js');
+    const CXA = '  const v = SOCK.ensureSocketDir(dir);\n';
+    const NEW = M.load('src/adapters/codex.js', cxSrc, 'own', { same: true }); // a fresh real module under this TMPDIR, on purpose (B-0d3e)
+    let err = null; try { NEW.plainJsonlPath(zstPath); } catch (e) { err = e; }
+    const awayAfterNew = fs.readdirSync(away).length;
+    ok(cxSrc.includes(CXA) && !!err && err.code === 'EZSTCACHE' && err.message.includes(path.join(T, `vibespace-zst-${uid}`)) && /SYMLINK/.test(err.message) && /the way out/.test(err.message) && awayAfterNew === 0,
+      `B-3767 unit 2: a link at the zst cache's per-user name is refused by name with the way out, and no twin is written through it (${err ? err.code + ': ' + err.message.slice(0, 160) : 'no error'}; ${awayAfterNew} file(s) behind the link)`);
+    const OLD = M.load('src/adapters/codex.js', cxSrc.replace(CXA, '  const v = { ok: true }; try { fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); } catch { }\n'), 'old');
+    let oldTwin = null; try { oldTwin = OLD.plainJsonlPath(zstPath); } catch { }
+    ok(!!oldTwin && fs.realpathSync(oldTwin).startsWith(fs.realpathSync(away) + '/'), `CONTROL B-3767 unit 2: the release's mkdir-in-a-catch wrote the twin through the planted link (red): ${oldTwin}`);
+    for (const f of fs.readdirSync(away)) fs.rmSync(path.join(away, f), { force: true });
+    // the ssh control folder
+    console.warn = (...a) => { warned.push(a.join(' ')); };
+    const hostsSrc = read('src/hosts.js');
+    const HA = '    const cm = SOCK.ensureSocketDir(this._cmDir);\n';
+    const h = { id: 'host-own', host: 'example.invalid', user: 'u', port: 22 };
+    const dataA = path.join(T, 'data-a'); fs.mkdirSync(dataA);
+    const HM1 = M.load('src/hosts.js', hostsSrc, 'own', { same: true }).HostManager; // a fresh real module under this TMPDIR, on purpose (B-0d3e)
+    const refused = new HM1({ dataDir: dataA });
+    const argsRefused = refused.sshArgs(h, { multiplex: true }).join(' ');
+    const warnOnce = warned.filter((w) => /ssh connection sharing is off/.test(w));
+    const cmdRefused = refused.sshCmd(h);   // read while the planted name is still there
+    fs.unlinkSync(path.join(T, `vs-cm-${uid}`));   // the planted name goes: sharing comes back at the next ask, no restart
+    const argsBack = refused.sshArgs(h, { multiplex: true }).join(' ');
+    const warnAfter = warned.filter((w) => /ssh connection sharing is off/.test(w)).length;
+    process.env.TMPDIR = good;
+    const fine = new HM1({ dataDir: path.join(T, 'data-b') });
+    const argsFine = fine.sshArgs(h, { multiplex: true }).join(' ');
+    ok(hostsSrc.includes(HA) && !/ControlMaster|ControlPath/.test(argsRefused) && !/ControlPath/.test(cmdRefused) && warnOnce.length === 1 && warnOnce[0].includes(path.join(T, `vs-cm-${uid}`)) && /the way out/.test(warnOnce[0]) && /ControlPath=/.test(argsFine) && argsFine.includes(path.join(good, `vs-cm-${uid}`)) && argsBack.includes(`ControlPath=${path.join(T, `vs-cm-${uid}`)}`) && warnAfter === 1,
+      `B-3767 unit 2: a link at the ssh control folder's name turns connection sharing OFF (no ControlPath into it), said once with the path and the way out; once the planted name is gone sharing comes back by itself (no restart, no second warning); a private folder keeps it (${JSON.stringify({ refusedHasCM: /ControlMaster/.test(argsRefused), warned: warnOnce.length })})`);
+    process.env.TMPDIR = T;
+    fs.rmSync(path.join(T, `vs-cm-${uid}`), { recursive: true, force: true }); fs.symlinkSync(away, path.join(T, `vs-cm-${uid}`));   // planted again for the control
+    const HM0 = M.load('src/hosts.js', hostsSrc.replace(HA, '    const cm = { ok: true }; try { fs.mkdirSync(this._cmDir, { recursive: true, mode: 0o700 }); } catch { }\n'), 'old').HostManager;
+    const oldArgs = new HM0({ dataDir: path.join(T, 'data-c') }).sshArgs(h, { multiplex: true }).join(' ');
+    ok(oldArgs.includes(`ControlPath=${path.join(T, `vs-cm-${uid}`)}`), 'CONTROL B-3767 unit 2: the release put its ControlPath into the planted link (red)');
+  } finally {
+    console.warn = warn0;
+    if (prevT === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = prevT;
+    try { fs.rmSync(T, { recursive: true, force: true }); } catch { }
   }
 }
 try { fs.rmSync(home, { recursive: true, force: true }); } catch {}

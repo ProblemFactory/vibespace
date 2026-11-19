@@ -29,6 +29,8 @@ export function fsErrorText(d) {
   // syncRefusedBody) — the storage by name, why, the way on; never the guard's raw «refused: a synchronous fs call…»
   if (d && d.code === 'storage_sync_refused') return p.mount ? t('this file is on the storage «{mount}», and this kind of preview cannot be shown for a file on a storage yet — download it, or copy it to a local folder and open it there', { mount: p.mount }) : t('this file is on a storage, and this kind of preview cannot be shown for a file on a storage yet — download it, or copy it to a local folder and open it there');
   if (d && d.code === 'parse_busy') return t('another document is being parsed — try again in a moment'); // the parse lane's turn never came (src/safe-fs.js LANES)
+  // B-5ce7's cure: a PARKED storage's folder — its name and its doors, in the reader's language (src/routes/files.js storage_parked)
+  if (d && d.code === 'storage_parked') return t('“{name}” is kept disconnected (its listing kept hanging) — press Connect on its row, or Reconnect in For you.', { name: p.name || '' });
   if (d && d.code === 'windows_no_shell') return t('this needs a POSIX shell ({shell}), and this Windows machine has none — not available on Windows machines without one yet', { shell: p.shell || 'sh' });
   return String((d && d.error) || '');
 }

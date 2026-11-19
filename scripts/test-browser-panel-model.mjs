@@ -94,9 +94,23 @@ console.log('— ② the fold: only the facts present');
 console.log('— ③ the menu: the closed act list, no disabled item');
 {
   const ids = (r, more) => M.rowMenu(r, x(r, more)).map((m) => (m.sep ? '|' : m.id)).join(',');
-  ok(ids(P.personal) === 'record,record-mine,replay,build,rename,stop,passkeys,|,delete', 'a live local profile: record ☐ · record mine ☑ · Replay… · Change build… · Rename… · Stop | Delete…', ids(P.personal));
-  ok(ids(P.sales, { stuck: STUCK }) === 'record,record-mine,replay,build,rename,stop,restart,passkeys,|,delete' && ids(P.dialogs, { autoDialogs: true, autoText: AUTO }) === 'record,record-mine,replay,build,rename,stop,restart-hold,passkeys,|,delete', 'stuck ⇒ Restart (its words), else leave-page dialogs ⇒ Restart to hold dialogs — never both', [ids(P.sales, { stuck: STUCK }), ids(P.dialogs, { autoDialogs: true })]);
-  ok(ids(P.sales, { stuck: BS.stuckWords({ state: 'blind', why: 'held' }, tOf(null)) }) === 'record,record-mine,replay,build,rename,stop,passkeys,|,delete', 'lane browser-held-not-hung: a blind watch offers NO Restart (the page answers — a restart is not the cure the row pushes)');
+  ok(ids(P.personal) === 'record,record-mine,replay,build,proxy,exit-check,rename,stop,passkeys,|,delete', 'a live local profile: record ☐ · record mine ☑ · Replay… · Change build… · Proxy… · Check the exit… · Rename… · Stop | Delete… (B-8b87: + Proxy…; the exit check: + Check the exit…)', ids(P.personal));
+  ok(ids(P.sales, { stuck: STUCK }) === 'record,record-mine,replay,build,proxy,exit-check,rename,stop,restart,passkeys,|,delete' && ids(P.dialogs, { autoDialogs: true, autoText: AUTO }) === 'record,record-mine,replay,build,proxy,exit-check,rename,stop,restart-hold,passkeys,|,delete', 'stuck ⇒ Restart (its words), else leave-page dialogs ⇒ Restart to hold dialogs — never both', [ids(P.sales, { stuck: STUCK }), ids(P.dialogs, { autoDialogs: true })]);
+  ok(ids(P.sales, { stuck: BS.stuckWords({ state: 'blind', why: 'held' }, tOf(null)) }) === 'record,record-mine,replay,build,proxy,exit-check,rename,stop,passkeys,|,delete', 'lane browser-held-not-hung: a blind watch offers NO Restart (the page answers — a restart is not the cure the row pushes)');
+  // the exit check: the KEPT exit on the card's chip with its age (the person's view)
+  { const er = { ...P.personal, proxy: 'socks5://proxy.example.test:1080', egress: { publicIp: '203.0.113.9', country: 'JP', timezone: 'Asia/Tokyo', checkedAt: 1000, source: 'measured' } };
+    const ec = M.nameChips(er, x(er, { now: 1000 + 3 * 3600e3 })).find((c) => c.key === 'exit');
+    ok(ec && /JP · Asia\/Tokyo/.test(ec.text) && /203\.0\.113\.9/.test(ec.title) && /measured/.test(ec.title) && !M.nameChips(P.personal, x(P.personal)).some((c) => c.key === 'exit'),
+      'the exit check: the card\'s chip names the kept exit (country · zone), its title the address, how it was got and its age; a profile that keeps none shows none', ec);
+    const ef = M.rowFold(er, x(er, { now: 1000 + 3 * 3600e3 })).find((f) => f.key === 'exit');
+    ok(ef && /^203\.0\.113\.9 · JP · Asia\/Tokyo — measured, checked .+/.test(ef.v) && !/—$/.test(ef.v) && !M.rowFold(P.personal, x(P.personal)).some((f) => f.key === 'exit'),
+      'the exit check: the row\'s fold names the kept exit WITH its age — findable on a phone, where the chip\'s title (a hover) is not; a profile that keeps none shows none', ef); }
+  // B-8b87: a profile whose proxy address still carries its password (saved before the proxy law) — «Move the password to the vault»
+  // right before Proxy…, a warn chip; a paired machine's row offers neither (the forwarder is this hub's); a proxied row's chip names it
+  { const leg = { ...P.personal, proxy: 'http://***@proxy.example.test:3128', proxyPasswordInProfile: true };
+    const pc = M.nameChips(leg, x(leg)).find((c) => c.key === 'proxy'), ok2 = M.nameChips({ ...P.personal, proxy: 'socks5://proxy.example.test:1080', proxyCredential: 'proxy-login:socks5://proxy.example.test:1080#u' }, x(P.personal)).find((c) => c.key === 'proxy');
+    ok(ids(leg) === 'record,record-mine,replay,build,proxy-move,proxy,exit-check,rename,stop,passkeys,|,delete' && !/proxy/.test(ids({ ...P.personal, host: 'm1', proxy: 'http://p.example.test:1' })) && pc && /warn/.test(pc.cls || '') && ok2 && /with its login from the vault/.test(ok2.title),
+      'B-8b87: an address that holds its password ⇒ «Move the password to the vault» before Proxy… and a warn chip; a paired machine\'s row offers neither; a proxied row\'s chip names its proxy and its vault login', [ids(leg), pc, ok2 && ok2.title]); }
   ok(ids(P.office) === 'build,rename,passkeys,|,delete' && ids(P.notours) === 'rename', "a paired machine's: no record switches; a not-ours: Rename… only (no record, no build, no Delete…)", [ids(P.office), ids(P.notours)]);
   const all = Object.values(P).flatMap((r) => M.rowMenu(r, x(r, { stuck: STUCK, autoDialogs: true, autoText: AUTO })));
   ok(all.every((m) => !('disabled' in m)) && all.filter((m) => m.check !== undefined).every((m) => ['record', 'record-mine'].includes(m.id)), 'no menu item is ever `disabled`; only the two switches are check rows', all.filter((m) => 'disabled' in m));
@@ -117,7 +131,7 @@ const census = (Mod) => {
   return { missing, dup, union: [...union] };
 };
 {
-  ok(Object.values(TODAY).length === 11 && Object.values(TODAY).every((id) => M.ROW_ACTS.includes(id)) && M.ROW_ACTS.length === 12 && M.ROW_ACTS.includes('passkeys'), 'the model names the eleven acts the 2.369.204 row offered + lane passkey-ui\'s Passkeys (n)… (ROW_ACTS)');
+  ok(Object.values(TODAY).length === 11 && Object.values(TODAY).every((id) => M.ROW_ACTS.includes(id)) && M.ROW_ACTS.length === 15 && M.ROW_ACTS.includes('passkeys') && M.ROW_ACTS.includes('proxy') && M.ROW_ACTS.includes('proxy-move') && M.ROW_ACTS.includes('exit-check'), 'the model names the eleven acts the 2.369.204 row offered + lane passkey-ui\'s Passkeys + B-8b87\'s Proxy… and «Move the password to the vault» (n)… (ROW_ACTS)');
   const c = census(M);
   ok(!c.missing.length && !c.dup.length, 'every act appears in the primary ∪ the ⋯ menu ∪ the who cell — exactly once per row (a full live row + a leave-page-dialogs row cover all eleven)', c);
   for (const r of Object.values(P)) { const a = M.rowActs(r, x(r, { stuck: STUCK, autoDialogs: true, autoText: AUTO })); if (new Set(a).size !== a.length) ok(false, `no act twice on ${r.label}`, a); }
@@ -126,7 +140,7 @@ const census = (Mod) => {
   const tv = read('src/lib/browser-trace-view.js');
   const runBlk = tv.slice(tv.indexOf('  const RUN = {'), tv.indexOf('\n  };\n', tv.indexOf('  const RUN = {')));
   const runIds = [...runBlk.matchAll(/^    '?([a-z-]+)'?: (?:async )?\(r\) =>/gm)].map((m) => m[1]);
-  ok(M.ROW_ACTS.filter((id) => id !== 'browse' && id !== 'who').every((id) => runIds.includes(id)) && runIds.length === 10, 'the view runs each of the ten menu acts by its id (RUN; lane passkey-ui: + passkeys)', runIds);
+  ok(M.ROW_ACTS.filter((id) => id !== 'browse' && id !== 'who').every((id) => runIds.includes(id)) && runIds.length === 13, 'the view runs each of the thirteen menu acts by its id (RUN; lane passkey-ui: + passkeys; B-8b87: + proxy, proxy-move; the exit check: + exit-check)', runIds);
   ok(/if \(L\.primary\) \{[\s\S]{0,400}app\.browseYourself\(r\.id/.test(tv) && /btn\(t\('Change…'\), \(\) => \{ if \(rowNow\) openWhoDialog\(app, rowNow\.id/.test(tv), 'the primary opens Browse yourself; the who cell\'s Change… opens the who dialog');
   // lane browser-unresponsive: a hung row's primary is Restart — the view runs RUN.restart (THE user's restart route)
   ok(/if \(L\.primary\.id === 'restart'\) \{[^\n]*bb\.onclick = \(\) => RUN\.restart\(r\);/.test(tv), 'a hung row\'s primary (Restart) runs RUN.restart');

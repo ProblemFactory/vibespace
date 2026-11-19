@@ -1245,7 +1245,7 @@ async function noticeCase(scenario, { Dmod = D, SSmod = null } = {}) {
     await new Promise((rr) => srv.close(() => rr()));
     return { r, answered: answered.length };
   }
-  const Rb = MUT.load('src/routes/browser.js', fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8'), 'busy-real'); // its own module state (the ③ routes keep theirs)
+  const Rb = MUT.load('src/routes/browser.js', fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8'), 'busy-real', { same: true }); // its own module state (the ③ routes keep theirs)
   const b1 = await busyRoute(Rb);
   ok(b1.r.status === 409 && b1.r.body.code === 'browser_interrupted' && /your window of this browser/.test(b1.r.body.error) && b1.answered === 0, 'A1: while the user drives the window this lease is in, its `dialog accept` is refused browser_interrupted (named: your window) — the route\'s own input check', b1);
   const rsrc = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8');

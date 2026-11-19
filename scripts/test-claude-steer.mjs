@@ -14,8 +14,18 @@
 //   §6 (r2) a mid-turn frame the person sent is a RECORD of the conversation: the wrapper's buffer copy draws its bubble
 //      after a restart — ONCE (the live send's msgId, the CLI's own later record of the same words claim it)
 //   §7 (r2) the strip draws no ⚡ on a row the wrapper marks `steerable: false`; each refusal says why in its own words
+//   §8 (B-28b1, the same row as B-1c04) THE STOP THAT CAME LATE: the REAL wrapper over the stand-in CLI with a stall PLACED in
+//      the window BY ORDER (the stand-in reads the wrapper's second interrupt only after its follow-up's request left / its answer
+//      was said / it ended — never by a clock):
+//      the stop-late fact rides the follow-up's result and the page draws it once; answered / ran to its end / a second Stop
+//      (held by COUNT: the stand-in reads nothing until both interrupts wait) / a 2.1.308 CLI; the stall the other way tells
+//      nothing; RED CONTROLS: a wrapper that never looks reports a clean stop, a rebuild that drops the mark loses the fact
+//   §8 (B-fcd6) once this CLI process has named a frame, a follow-up init that leaves `user_message_uuids` out took none of
+//      the stamped frames (the real 2.1.308 / 2.1.312 recordings) — the rider the model read lands; RED: the r4 rule, and a
+//      rule without the witness (the race CLI's held rider called read)
 // THE REAL WRAPPER over the stand-in (the hand-over, the witness, Stop's follow-up interrupt, the RED legs on the 6428c67e
-// wrapper) is §0 of scripts/test-claude-steer-chrome.mjs — the fast tier's 910 s sum had 0.77 s left.
+// wrapper) is §0 of scripts/test-claude-steer-chrome.mjs — the fast tier's 910 s sum had 0.77 s left; §8 here is the one fast
+// exception (B-28b1: ten runs at once, 0.6 s on the test machine).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -340,6 +350,191 @@ await guard('§r7 the hook bound is two facts: which hooks the CLI loads AND how
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
   ok(/const b = promptHookBound\(hooksStarted\);/.test(w) && /promptHooks\.add\(hid\); hooksStarted\+\+;/.test(w), '(r7) the wrapper arms the bound with the count the CLI said started (r6 read the census alone)');
   ok(/function settleStopCopies\(why\) \{\n\s+landRiding\(why\);[\s\S]{0,200}settleCopies\(kept\); settleCopies\(rode\);/.test(w) && (w.match(/settleStopCopies\(/g) || []).length === 3, '(r7) every frame a Stop touched settles once — kept AND riding (the follow-up took it), at the settle and at the backstop');
+});
+// ── §8 THE STOP THAT CAME LATE (B-28b1 — the same row as B-1c04; the coordinator's ruling 2026-11-18 «TELL, DO NOT PRETEND») ──
+// A frame the CLI still held at Stop runs as a follow-up the wrapper interrupts on its init; on a loaded machine the CLI read that
+// second interrupt after its request had left (hosted: settle +57..66 ms). Proven with a STALL PLACED in the stand-in's window — a
+// placed by ORDER, never load or a clock (the coordinator's rule): the stand-in reads no stdin line after a follow-up's init until
+// its request has left (or its answer was said, or it ended) — so the wrapper's interrupt on that init is read only THEN; the other
+// direction gives the follow-up no request at all, so the interrupt is read first and ends it.
+// Every follow-up waits for ever unless its interrupt ends it (FOLLOW_MS 600 s) and the tool runs 5 s: Stop ends each run early.
+console.log('§8 the Stop that came late: the REAL chat-wrapper over the stand-in CLI, a stall placed in the window');
+await guard('§8', async () => {
+  const { spawn } = await import('node:child_process');
+  const { createMessageManager } = require(path.join(REPO, 'src/normalizers.js'));
+  const STAND_IN = path.join(REPO, 'scripts/fixtures/claude-stand-in-cli.cjs');
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const until = async (fn, ms = 4000) => { const end = Date.now() + ms; while (Date.now() < end) { if (fn()) return true; await sleep(5); } return fn(); };
+  const lines = (f) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8').trim().split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return {}; } }) : []);
+  const run = async (wrapperPath, label, env, { secondStop = false } = {}) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-stop-late-' + label + '-'));
+    const dlv = path.join(dir, 'delivered.jsonl');
+    const w = spawn(process.execPath, [wrapperPath, path.join(dir, 's.buf'), path.join(dir, 's.json'), process.execPath, STAND_IN], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, STAND_IN_DELIVERED: dlv, STAND_IN_LONG_MS: '5000', VIBESPACE_SKIP_AGENT_HOOKS: '1', ...env } });
+    const recs = []; let lb = '';
+    w.stdout.setEncoding('utf8');
+    w.stdout.on('data', (d) => { lb += d; let i; while ((i = lb.indexOf('\n')) >= 0) { const l = lb.slice(0, i); lb = lb.slice(i + 1); try { recs.push(JSON.parse(l)); } catch { } } });
+    const log = () => { try { return fs.readFileSync(path.join(dir, 'chat-wrapper.log'), 'utf8'); } catch { return ''; } };
+    try {
+      await until(() => fs.existsSync(path.join(dir, 's.json')));
+      w.stdin.write(ad.formatChatInput('TOOL-A run a slow command', 'm-a').stdinPayload + '\n');
+      await until(() => recs.some((r) => r.type === 'assistant' && JSON.stringify(r.message?.content || []).includes('"tool_use"')));
+      w.stdin.write(ad.formatChatInput('MARK-B handed while the tool runs', 'm-b', { steer: true }).stdinPayload + '\n');
+      await until(() => recs.some((r) => r.type === 'input_handover' && r.state === 'handed'), 3000);
+      w.stdin.write(ad.formatInterrupt() + '\n');
+      // a SECOND Stop pressed while the follow-up runs (its init came, its result not yet): the window is rebuilt around it
+      if (secondStop && await until(() => recs.filter((r) => r.type === 'system' && r.subtype === 'init').length >= 2, 3000)) w.stdin.write(ad.formatInterrupt() + '\n');
+      await until(() => /stop settled/.test(log()), 6000);
+      await sleep(20);
+      const lg = log(), d1 = lg.indexOf('interrupt: dropped'), d2 = d1 < 0 ? -1 : lg.indexOf('interrupt: dropped', d1 + 1);
+      const endAt = lg.indexOf('stop late: ') >= 0 ? lg.indexOf('stop late: ') : lg.indexOf('stop settled');   // the result's judgement, else the settle after it
+      return { recs: recs.filter((r) => r.type !== '_stdin_ack'), late: recs.filter((r) => r.type === 'result' && r.webui_stop_late).map((r) => r.webui_stop_late), requests: lines(dlv).filter((d) => d.how === 'request').length, settled: /stop settled/.test(lg), lateLines: (lg.match(/stop late: /g) || []).length, secondBeforeResult: d2 >= 0 && endAt >= 0 && d2 < endAt };
+    } finally { try { w.kill('SIGKILL'); } catch { } fs.rmSync(dir, { recursive: true, force: true }); }
+  };
+  // RED CONTROLS: wrapper copies — one that NEVER LOOKS (the release's: the follow-up is not marked), one whose rebuilt window on a
+  // second Stop DROPS the mark
+  const cwSrc = read('data/bin/chat-wrapper.js');
+  const MARK = "        stopping.followRun = { n: stopping.follows, answered: false };   // B-28b1: judged at its result (stopLateOf)\n";
+  const CARRY = ', followRun: stopping ? stopping.followRun || null : null }; armBound(); }';
+  ok(cwSrc.split(MARK).length === 2 && cwSrc.split(CARRY).length === 2, '§8 ANCHORS: the follow-up\'s mark and the rebuilt window\'s carry, each spelled once (a missing anchor builds no control: RED by name)');
+  const ctlDirs = [];
+  const mutantWrapper = (tag, src) => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-stop-late-ctl-' + tag + '-')); ctlDirs.push(d);
+    fs.mkdirSync(path.join(d, 'data', 'bin'), { recursive: true });
+    fs.symlinkSync(path.join(REPO, 'src'), path.join(d, 'src'));
+    fs.writeFileSync(path.join(d, 'data', 'bin', 'chat-wrapper.js'), src);
+    return path.join(d, 'data', 'bin', 'chat-wrapper.js');
+  };
+  const TOK = "  const tokens = sum(result && result.usage, ['input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens']);\n";
+  ok(cwSrc.split(TOK).length === 2, '§8 ANCHOR: the follow-up\'s own tokens (its result\'s usage), spelled once');
+  const LANE = path.join(REPO, 'data/bin/chat-wrapper.js'), BLIND = mutantWrapper('blind', cwSrc.replace(MARK, '')), DROPS = mutantWrapper('drops', cwSrc.replace(CARRY, ' }; armBound(); }'));
+  const SINCE = mutantWrapper('since', cwSrc.replace(TOK, "  const tokens = Object.values((result && result.model_usage_since_last_result) || {}).reduce((a, v) => a + sum(v, ['inputTokens', 'outputTokens', 'cacheReadInputTokens', 'cacheCreationInputTokens']), 0);\n"));
+  // every follow-up waits for ever unless its interrupt ends it (FOLLOW_MS 600 s): the ORDER is the stand-in's own steps
+  const LATE = { STAND_IN_FOLLOW_REQ_MS: '12', STAND_IN_FOLLOW_HOLD_UNTIL: 'request', STAND_IN_FOLLOW_MS: '600000' };
+  const ONTIME = { STAND_IN_FOLLOW_MS: '600000' };   // no request at all: the interrupt is read first and ends the follow-up
+  const AGENT = { ...ONTIME, STAND_IN_FOLLOW_AGENT_TOKENS: '900' };
+  let L, A, E, O, C, T2, M2, V, G, GS;
+  try {
+    [L, A, E, O, C, T2, M2, V, G, GS] = (await Promise.allSettled([
+      run(LANE, 'late', LATE),                                                                                  // the request left, THEN the interrupt read
+      run(LANE, 'answered', { ...LATE, STAND_IN_FOLLOW_REQ_MS: '5', STAND_IN_FOLLOW_ANSWER_MS: '10', STAND_IN_FOLLOW_HOLD_UNTIL: 'answer' }),   // …the model spoke, THEN
+      run(LANE, 'ran', { ...LATE, STAND_IN_FOLLOW_REQ_MS: '5', STAND_IN_FOLLOW_ANSWER_MS: '10', STAND_IN_FOLLOW_MS: '40', STAND_IN_FOLLOW_HOLD_UNTIL: 'end' }),   // …it ended, THEN
+      run(LANE, 'ontime', ONTIME),                                                                              // the other way: no request at all, the interrupt read first
+      run(BLIND, 'blind', LATE),                                                                                // RED CONTROL: never looks
+      run(LANE, 'second', { ...LATE, STAND_IN_FOLLOW_HOLD_INTERRUPTS: '2' }, { secondStop: true }),            // a second Stop during the follow-up (held by count)
+      run(DROPS, 'drops', { ...LATE, STAND_IN_FOLLOW_HOLD_INTERRUPTS: '2' }, { secondStop: true }),            // RED CONTROL: the rebuild drops the mark
+      run(LANE, 'old', { ...LATE, STAND_IN_CLI_VERSION: '2.1.308' }),                                           // a CLI before the per-result count: its `usage`
+      run(LANE, 'agent', AGENT),                                                                                // on time, but an agent's tokens in the since-last count
+      run(SINCE, 'since', AGENT),                                                                               // RED CONTROL: the since-last count tells falsely
+    ])).map((x) => { if (x.status === 'rejected') throw x.reason; return x.value; });   // every run ends (its finally kills its pair) before a throw
+  } finally { for (const d of ctlDirs) fs.rmSync(d, { recursive: true, force: true }); }
+  const rowsOf = (recs, live) => { const mm = createMessageManager('claude', 'stop-late'); if (live) { for (const r of recs) mm.processLive(r); } else mm.convertHistory(recs); return mm.messages.filter((m) => m.content?.[0]?.stopLate).map((m) => ({ status: m.status, text: m.content[0].text, late: m.content[0].stopLate })); };
+  const S8 = (x) => ({ late: x.late, requests: x.requests, settled: x.settled, lateLines: x.lateLines });
+  console.log(`    §8 agent tokens only — ${G.late.length} told (the since-last copy: ${GS.late.length})`);
+  console.log(`    §8 leaked follow-ups (told) — late ${L.requests} (${L.late.length}) · answered ${A.requests} (${A.late.length}) · ran ${E.requests} (${E.late.length}) · on time ${O.requests} (${O.late.length}) · blind ${C.requests} (${C.late.length}) · second Stop ${T2.requests} (${T2.late.length}) · drops ${M2.requests} (${M2.late.length}) · 2.1.308 ${V.requests} (${V.late.length})`);
+  ok(L.settled && L.requests === 1 && L.late.length === 1 && L.late[0].follow === 1 && L.late[0].how === 'billed' && L.late[0].cut === true && L.late[0].tokens > 0 && L.lateLines === 1,
+    '§8 the follow-up\'s request LEFT, THEN the CLI read the second interrupt (the stall placed by order) ⇒ the stop-late fact rides ITS result (billed, cut off), one log line', S8(L));
+  ok(A.requests === 1 && A.late.length === 1 && A.late[0].how === 'answered' && A.late[0].cut === true, '§8 …the model answered before the interrupt was read ⇒ the fact says answered (cut off)', S8(A));
+  ok(E.requests === 1 && E.late.length === 1 && E.late[0].how === 'answered' && E.late[0].cut === false, '§8 …the follow-up RAN TO ITS END before the interrupt was read ⇒ the fact says so (not cut off)', S8(E));
+  ok(O.settled && O.requests === 0 && O.late.length === 0 && O.lateLines === 0, '§8 the other way (the follow-up sends no request at all; the interrupt is read first and ends it): nothing reached the model and NOTHING is told — no false alarm', S8(O));
+  ok(C.settled && C.requests === 1 && C.late.length === 0 && C.lateLines === 0, '§8 RED CONTROL: the wrapper that never looks (the release\'s) — the same leaked request, and it reports a clean stop', S8(C));
+  ok(T2.settled && T2.secondBeforeResult && T2.requests === 1 && T2.late.length === 1 && T2.late[0].how === 'billed', '§8 a SECOND Stop pressed while the follow-up runs (the wrapper saw it before the result — the stand-in held by count) rebuilds the window — the follow-up is still judged at its result and told', { ...S8(T2), secondBeforeResult: T2.secondBeforeResult });
+  ok(M2.secondBeforeResult && M2.requests === 1 && M2.late.length === 0, '§8 RED CONTROL: a rebuild that drops the follow-up\'s mark — the second Stop (seen before the result) loses the fact', { ...S8(M2), secondBeforeResult: M2.secondBeforeResult });
+  ok(V.requests === 1 && V.late.length === 1 && V.late[0].how === 'billed' && V.late[0].tokens > 0, '§8 a CLI before the per-result count (2.1.308): its result\'s own usage says it, as on every version', S8(V));
+  ok(G.requests === 0 && G.late.length === 0 && G.lateLines === 0, '§8 an agent\'s tokens in the since-last count (the follow-up itself sent nothing) tell NOTHING — the follow-up\'s own usage is empty', S8(G));
+  ok(GS.requests === 0 && GS.late.length === 1, '§8 RED CONTROL: a wrapper that reads the since-last count tells «billed» for a follow-up that sent nothing', S8(GS));
+  const rL = rowsOf(L.recs, true), rR = rowsOf(L.recs, false);
+  ok(rL.length === 1 && rL[0].status === 'interrupted' && rL[0].text === 'Interrupted' && rL[0].late.cut === true && JSON.stringify(rL) === JSON.stringify(rR),
+    '§8 the page says it ONCE, in that Stop\'s own «Interrupted» line — live and after a reload the same (the fact rides the turn\'s record)', { live: rL, reload: rR });
+  const rE = rowsOf(E.recs, false);
+  ok(rE.length === 1 && rE[0].status === 'interrupted' && rE[0].late.cut === false && rE[0].late.own === true && rE[0].text === '', '§8 …a follow-up that ran to its end gets the line as a row of its own (no «Interrupted» to stand beside) — the stored row holds NO words: the renderer says them in the reader\'s language', rE);
+  // the result shapes no recording shows, judged on the record alone: no subtype ⇒ its own row (it draws none); success with
+  // is_error ⇒ ONE row, the error row's (never the own row beside it)
+  const lone = (rec) => rowsOf([{ type: 'result', session_id: 'stop-late', ...rec }], false);
+  // the turn's meta (system/turn_duration) rides the follow-up's own answer, never the Stop's own late row after it
+  const mmT = createMessageManager('claude', 'stop-late-meta');
+  mmT.convertHistory([{ type: 'assistant', message: { id: 'msg_t1', role: 'assistant', content: [{ type: 'text', text: 'the answer' }] } }, { type: 'result', subtype: 'success', is_error: false, session_id: 'x', webui_stop_late: { follow: 1, how: 'answered', cut: false } }, { type: 'system', subtype: 'turn_duration', duration_ms: 1234, message_count: 2 }]);
+  const metaOn = mmT.messages.filter((m) => m.meta && m.meta.turn).map((m) => (m.content?.[0]?.stopLate ? 'late-row' : m.role));
+  ok(JSON.stringify(metaOn) === JSON.stringify(['assistant']), '§8 the turn\'s meta (its duration) rides the follow-up\'s answer, never the Stop\'s own late row — the skip reads the mark on the record', metaOn);
+  ok(read('src/lib/chat-renderers.js').includes("if (late && late.own) { const lel = this.appendSystem(stopLateLine(late));"), '§8 WIRING: the renderer draws the own row\'s words keyed on the record\'s `own` mark (the stored row holds none)');
+  const noSub = lone({ is_error: false, webui_stop_late: { follow: 1, how: 'billed', cut: true, tokens: 9 } }), errOk = lone({ subtype: 'success', is_error: true, webui_stop_late: { follow: 1, how: 'answered', cut: false } });
+  ok(noSub.length === 1 && noSub[0].late.own === true && noSub[0].text === '' && errOk.length === 1 && !errOk[0].late.own && errOk[0].status === 'error', '§8 a result with NO subtype carrying the fact gets its own row (it draws none); a success with is_error says it once, on its error row', { noSub, errOk });
+  ok(rowsOf(O.recs, false).length === 0 && rowsOf(C.recs, false).length === 0, '§8 …and nothing is drawn where nothing was told');
+  const CR = read('src/lib/chat-renderers.js'), ZH = read('src/lib/i18n-zh.js'), JA = read('src/lib/i18n-ja.js');
+  const CUT = 'The Stop arrived after the message handed in earlier had already gone to the model — it was cut off at once, and it may be billed';
+  const RAN = 'The Stop arrived after the message handed in earlier had already gone to the model — it was answered before the Stop reached it, and it is billed';
+  ok(CR.includes(`t('${CUT}')`) && CR.includes(`t('${RAN}')`) && CR.includes("if (late) { const line = document.createElement('div'); line.className = 'chat-system chat-stop-late'; line.textContent = stopLateLine(late); el.appendChild(line); }"),
+    '§8 WIRING: the renderer says the fact through t() beside «Interrupted» (or as its own line) — never a toast, never a For-you item');
+  ok([ZH, JA].every((D) => D.includes(`  "${CUT}": "`) && D.includes(`  "${RAN}": "`)), '§8 …in zh and ja');
+  ok(cwSrc.includes("msg.message?.model !== '<synthetic>') stopping.followRun.answered = true;") && cwSrc.includes("const tokens = sum(result && result.usage, ['input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens']);") && !/stopLateOf[\s\S]{0,1200}model_usage_since_last_result\s*;/.test(cwSrc),
+    '§8 WIRING: the follow-up\'s OWN tokens only — its result\'s usage (a background agent\'s calls are in the since-last count, never in it), and a <synthetic> record is no answer');
+});
+await guard('§8 (B-fcd6) once this CLI has named a frame, a follow-up init without the names took NONE — the rider the model read lands', () => {
+  const w = read('data/bin/chat-wrapper.js');
+  const cut = (from, to, name) => {
+    const a = w.indexOf(from), b = a < 0 ? -1 : w.indexOf(to, a);
+    if (a < 0 || b < 0) throw new Error(`the anchor of the control «${name}» is not in the source`);
+    return w.slice(a, b);
+  };
+  const SRC = cut('let initNamesSeen = false;', '/** EVERY FRAME A STOP TOUCHED SETTLES ONCE', 'the wrapper slice');
+  const build = (src) => new Function('stopping', 'copies', 'record', 'settleCopies', 'log', src + '\nreturn { initNames, noteInitNames, noteFollowUpNames, noteWindowRecord, landRiding };');
+  const swap = (src, from, to, name) => { if (!src.includes(from)) throw new Error(`the anchor of the control «${name}» is not in the source`); return src.replace(from, to); };
+  // THE MEASUREMENT FIRST — the real CLI, recorded through the real wrapper (lane claude-steer-inject r5): the init of a turn that
+  // took a stamped frame names it; the init of a turn that took none leaves the field OUT (never []); read IN ORDER, as the
+  // wrapper reads them, an omission before this process saw a naming init cannot say (null), after it says «none» ([])
+  for (const v of ['2.1.308-stamped', '2.1.312-stamped', '2.1.312-frames']) {
+    const inits = read(`scripts/fixtures/claude-cli/${v}.jsonl`).split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((r) => r && r.type === 'system' && r.subtype === 'init');
+    const f = build(SRC)({ named: new Set() }, new Map(), () => { }, () => { }, () => { });
+    const read2 = [], seenAt = [];
+    let seen = false;
+    for (const r of inits) { read2.push(S(f.initNames(r, seen))); f.noteInitNames(r); if (Array.isArray(r.user_message_uuids) && r.user_message_uuids.length) seen = true; seenAt.push(seen); }
+    const first = inits.findIndex((r) => Array.isArray(r.user_message_uuids));
+    const want = inits.map((r, i) => Array.isArray(r.user_message_uuids) ? S(r.user_message_uuids) : (first >= 0 && i > first ? '[]' : 'null'));
+    // the reader's should: a recording that lost its naming init would make every expected value «null» and still agree — the
+    // stamped recordings MUST witness and then omit (the post-witness «[]» half on real data); the frames recording names nothing
+    const proves = v.endsWith('-stamped') ? first >= 0 && read2.slice(first + 1).includes('[]') : first === -1 && read2.every((x) => x === 'null');
+    ok(proves && inits.length >= 2 && inits.every((r) => !Array.isArray(r.user_message_uuids) || r.user_message_uuids.length > 0) && S(read2) === S(want),
+      `${v} (the real CLI, recorded): no init writes an empty list; read in order, an omission before the first naming init cannot say, after it says «none» (${read2.join(' ')})`, { read2, want });
+  }
+  const PURE = [[{}, false, 'null'], [{}, true, '[]'], [{ user_message_uuids: ['u-1', 2] }, false, '["u-1","2"]'], [{ user_message_uuids: [] }, false, '[]'], [{ claude_code_version: '2.1.312' }, false, 'null']];
+  const helpers = build(SRC)({ named: new Set() }, new Map(), () => { }, () => { }, () => { });
+  const pureBad = PURE.filter(([m, seen, want]) => S(helpers.initNames(m, seen)) !== want);
+  ok(!pureBad.length, 'PURE initNames(init, witnessed): a list is read as written; no list ⇒ [] only with the witness, else null — a version alone proves nothing', pureBad);
+  // the Stop window's judgment, the REAL helpers over the wrapper's state (stubbed): rider m-b (its copy stamped u-b) rode the
+  // tool result at Stop, the CLI started follow-up(s) the window interrupted on the init, the window settles
+  const judge = (src, inits, { witness = true, witnessWith = ['u-a'], records = [] } = {}) => {
+    const recs = [];
+    const stopping = { riding: ['m-b'], follows: inits.length, namesSaid: false, named: new Set(), kept: [] };
+    const f = build(src)(stopping, new Map([['m-b', { cliUuid: 'u-b' }]]), (type, o) => recs.push({ type, ...o }), () => { }, () => { });
+    if (witness) f.noteInitNames({ type: 'system', subtype: 'init', claude_code_version: '2.1.312', user_message_uuids: witnessWith });   // the session's first turn: a stamped frame, named
+    for (const r of records) f.noteWindowRecord(r);   // records the CLI wrote on stdout inside the Stop window
+    for (const m of inits) { f.noteInitNames(m); f.noteFollowUpNames(m); }
+    f.landRiding('idle');
+    return recs.filter((r) => r.type === 'input_handover' && r.state === 'landed').flatMap((r) => r.msg_ids);
+  };
+  const TASK = { type: 'system', subtype: 'init', claude_code_version: '2.1.312' };   // a background task-notification follow-up: it took no stamped frame
+  ok(S(judge(SRC, [TASK])) === '["m-b"]', 'the verifier\'s case (r4, pre-existing): this CLI named a frame before, and the only follow-up\'s init leaves the names out ⇒ the rider the model read LANDS (it was drawn «Unread when stopped»)', judge(SRC, [TASK]));
+  ok(S(judge(SRC, [TASK], { witness: false })) === '[]', 'a CLI that never named a frame (scripts/fixtures/claude-race-cli.cjs: 2.1.312 by its word, no names — test-claude-steer-chrome ⑮ «riding is not landed») ⇒ the rider stays kept');
+  ok(S(judge(SRC, [{ ...TASK, user_message_uuids: ['u-b'] }])) === '[]', 'a follow-up that NAMES the rider (the CLI still held it) ⇒ kept, as before');
+  ok(S(judge(SRC, [TASK, { ...TASK, user_message_uuids: ['u-b'] }])) === '[]', 'two follow-ups, one naming none and one naming the rider ⇒ kept (every follow-up\'s names are judged together)');
+  ok(S(judge(SRC, [TASK], { witnessWith: [] })) === '[]', 'the reader\'s should: an init with an EMPTY list is no witness — the follow-up that names nothing keeps the rider');
+  ok(S(judge(SRC, [TASK], { records: [{ type: 'user', uuid: 'u-b', message: { role: 'user', content: '[Request interrupted by user]' } }] })) === '[]' && S(judge(SRC, [TASK], { records: [{ type: 'attachment', attachment: { type: 'queued_command', source_uuid: 'u-b' } }] })) === '[]',
+    '主开发 11:12Z, the row\'s condition (1): a user record or an attachment the CLI writes inside the Stop window carrying the rider\'s stamp keeps it, whatever the follow-up\'s init omitted');
+  // RED CONTROLS, each anchored on a line of the slice (a missing anchor fails by name)
+  const r4 = swap(SRC, '  return seen ? [] : null;\n', '  return null;\n', 'the r4 rule');
+  ok(S(judge(r4, [TASK])) === '[]', 'RED CONTROL the midturn-order r4 rule (no list ⇒ unknown) leaves the read rider kept');
+  const noWitness = swap(SRC, '  return seen ? [] : null;\n', '  return [];\n', 'no witness');
+  ok(S(judge(noWitness, [TASK], { witness: false })) === '["m-b"]', 'RED CONTROL a rule without the witness (every omission = none — this commit\'s first cut, keyed on the version) calls the race CLI\'s still-held rider read');
+  const emptyWitness = swap(SRC, '  if (Array.isArray(msg.user_message_uuids) && msg.user_message_uuids.length) initNamesSeen = true;\n', '  if (Array.isArray(msg.user_message_uuids)) initNamesSeen = true;\n', 'an empty list witnesses');
+  ok(S(judge(emptyWitness, [TASK], { witnessWith: [] })) === '["m-b"]', 'RED CONTROL a witness that takes an EMPTY list lands the rider');
+  const blindWindow = swap(SRC, "  for (const u of [msg.uuid, msg.attachment && msg.attachment.source_uuid]) if (typeof u === 'string' && u) stopping.named.add(u);\n", '', 'the window records');
+  ok(S(judge(blindWindow, [TASK], { records: [{ type: 'user', uuid: 'u-b' }] })) === '["m-b"]', 'RED CONTROL a wrapper blind to the window\'s records lands a rider the CLI wrote it still held');
+  // THE WIRING: every init line feeds the witness; the Stop window's follow-up branch asks noteFollowUpNames(msg) — the ONE
+  // writer of namesSaid (dropHeldForStop only carries the flag over into a second Stop's window)
+  const branch = cut('      if (stopping && stopping.held > 0) {', '      } else if (cliOwesTurn) {', 'the follow-up branch');
+  ok(/\n\s+noteFollowUpNames\(msg\);/.test(branch) && (w.match(/noteFollowUpNames\(msg\);/g) || []).length === 1 && (w.match(/stopping\.namesSaid = true/g) || []).length === 1
+    && (w.match(/namesSaid = /g) || []).length === 1 && (w.match(/if \(msg\.type === 'system' && msg\.subtype === 'init'\) noteInitNames\(msg\);/g) || []).length === 1
+    && w.includes("    if (stopping && (msg.type === 'user' || msg.type === 'attachment')) noteWindowRecord(msg);") && /function startChild\(\) \{\n  reconnectTimer = null;\n  if \(!OFFSET_MODE\) initNamesSeen = false;/.test(w),
+    'the wiring: every init feeds the witness; the follow-up branch (inside the Stop window, before the owed-turn branch) calls noteFollowUpNames(msg), the ONE writer of namesSaid');
 });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

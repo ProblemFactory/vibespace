@@ -47,7 +47,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, vncEnv, ONBOARDED_SOURCE } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, vncEnv, ONBOARDED_SOURCE, CHROME_STORE } from './scratch.mjs';
 
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -140,7 +140,7 @@ wsc.on('message', (d) => { try { const m = JSON.parse(d); if (m && m.type === 'f
 await new Promise((r) => { wsc.once('open', r); wsc.once('error', r); });
 
 // ── chrome ──
-chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--disable-background-timer-throttling', '--window-size=1400,900', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore' });
+chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--disable-background-timer-throttling', '--window-size=1400,900', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore' });
 const cdpTargets = async () => (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json());
 async function page(tg) {
   const ws = new WebSocket(tg.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });

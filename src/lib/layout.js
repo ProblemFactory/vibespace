@@ -9,7 +9,7 @@ import { chainSyncKey, ratioDiffers, heldRatio, releaseRatio, withoutMembers, re
 import { writerClass, deferKey, deferKeysOf, releaseNext, noteApplied, recordStamp, behindStamp, noteStamp } from './layout-model.js'; // B-4767: the deferred records — one slot per desktop AND writer class, released in arrival order (PURE)
 import { conversationOf, hostOf, sessionOf, liveSessionOf } from './desktop-record.js'; // PURE (lane layout-stopped-window): the conversation a session entry names — a placeholder's door
 import { noteStoppedRows, stoppedWhyFor } from './stopped-why.js'; // lane dead-socket-keeps-chat-meta: a kept stopped session says why — the tile, the resume-all offer
-import { resumePaced } from './resume-pacer.js'; // lane resume-all-paced (L1): a bulk resume never floods the hub — one create in flight
+import { resumePaced, unknownRowOf } from './resume-pacer.js'; // lane resume-all-paced (L1): a bulk resume never floods the hub — one create in flight
 import { applyForViewport, arrangementFor } from './desktop-record.js'; // THE LAYER LAW's read half (design q-039 P0, §6b item 10): every read site of a record takes this page's subsets of it here (PURE)
 
 // The MEMBERS of a chain (host first) — NOT a sync key (chainSyncKey is): two
@@ -1978,16 +1978,26 @@ class LayoutManager {
   async _offerResumeAll(stopped) {
     // WHY (lane dead-socket-keeps-chat-meta): the ones a boot kept stopped because their process ended while it was down
     const ended = stopped.filter((d) => stoppedWhyFor(d.opts?.backend, d.opts?.backendSessionId || d.sessionId, this.app.sidebar?._allSessions)).length;
+    // B-864f: while the vault is LOCKED (every restart) a conversation whose folder is on a machine or a storage mount cannot
+    // start yet — the offer says so and unlocks FIRST; the resumes begin at the unlock or when the unlock dialog closes, whichever first (unlocked, or 「稍后」:
+    // then such a conversation waits in its window and resumes once the vault is unlocked)
+    const { vaultFacts, unlockThen, refreshVaultFacts } = await import('./vault-unlock.js');
+    if (!vaultFacts()) await refreshVaultFacts();   // a slow hub's page may not have read them yet (fetchJson never throws)
+    const locked = vaultFacts()?.state === 'locked';
     const ok = await this.askResumeAll({
       title: t('Resume interrupted sessions?'),
       message: t('{n} sessions were interrupted (the server or a machine restarted) and reopened as read-only history. Resume all of them now?', { n: stopped.length }) // plain words: showConfirmDialog prints its message as TEXT (the tags showed, literally)
-        + (ended ? ' ' + t('{n} of them stopped because their process ended while the server was down.', { n: ended }) : ''),
-      confirmText: t('Resume all {n}', { n: stopped.length }),
+        + (ended ? ' ' + t('{n} of them stopped because their process ended while the server was down.', { n: ended }) : '')
+        + (locked ? ' ' + t('The vault is locked: a conversation whose folder is on a machine or a storage mount waits for it, so unlock first.') : ''),
+      confirmText: locked ? t('Unlock and resume all {n}', { n: stopped.length }) : t('Resume all {n}', { n: stopped.length }),
     }).catch(() => false);
     if (!ok) { this._keepOffer(stopped); return; } // dismissed: a door stays while they stay stopped (B-6352)
     this._keepOffer(null);
-    try { return await this._resumeAll(stopped); }
-    finally { this._keepOffer(stopped); } // a Stop, a refusal, a throw: the ones still stopped keep their door
+    try {
+      if (locked && vaultFacts()?.state === 'locked') return await new Promise((done) => unlockThen(() => done(this._resumeAll(stopped)), { ended: () => done(null) }));   // B-864f: unlock FIRST — on the dialog's close OR the unlock, whichever first (a removed dialog runs no closers); a RESET meanwhile is no unlock: `ended` gives the door back (cure 4)
+      if (locked && vaultFacts()?.state !== 'unlocked') return null;   // cure 4 (its read): a reset that landed while the question was open — no unlock happened: nothing resumed, the finally gives the door back
+      return await this._resumeAll(stopped);
+    } finally { this._keepOffer(stopped); } // a Stop, a refusal, a throw: the ones still stopped keep their door
   }
 
   /** The offer's question (showConfirmDialog — a method, so a suite answers it the way confirmRemovePlaceholder is answered). */
@@ -2063,7 +2073,11 @@ class LayoutManager {
   async _resumeAll(stopped) {
     // A RESUME RE-OPENS ITS ROW (lane phone-resume-keeps-layout, LAW 1): each conversation in its own row — its window id, box, z
     // and group, on its own desktop, whatever this viewport can show; `stay`: a bulk resume switches nothing
-    const r = await resumePaced(this.app, stopped, { extra: { stay: true } });
+    // B-f64b cure: a row still being checked (it may run in another terminal) is never in a bulk resume — said, resumed by its own press
+    const rows = this.app.sidebar?._allSessions || [];
+    const go = (stopped || []).filter((d) => !unknownRowOf(rows, d.opts?.backend, d.opts?.backendSessionId || d.sessionId));
+    if (go.length < (stopped || []).length) showToast(t('{n} not resumed: still checking whether they run in another terminal — resume each one by itself', { n: (stopped || []).length - go.length }), { type: 'info', duration: 6000 });
+    const r = await resumePaced(this.app, go, { extra: { stay: true } });
     const kept = r.rows;
     // NOTHING SILENT (LAW 3): the conversations re-opened in their own rows are said once
     if (kept) showToast(kept === 1 ? t('Resumed 1 conversation where it was') : t('Resumed {n} conversations where they were', { n: kept }), { type: 'info', duration: 5000 });
@@ -2184,6 +2198,7 @@ class LayoutManager {
 
     // Track which backend session IDs have already been processed (prevent duplicates)
     const processedBackendSessionIds = new Set();
+    let stillChecking = 0;   // B-f64b cure 2: the rows a person's preset left because they are still being checked — SAID at its end
 
     // Process each preset window
     for (const ws of preset.windows) {
@@ -2231,7 +2246,9 @@ class LayoutManager {
             }
           } else if (backendSessionId) {
             // Check stopped sessions for resume
-            const stoppedMatch = allSessions.find(s => (s.backend || 'claude') === backend && (s.backendSessionId || s.sessionId) === backendSessionId && s.status === 'stopped');
+            const anyStopped = allSessions.find(s => (s.backend || 'claude') === backend && (s.backendSessionId || s.sessionId) === backendSessionId && s.status === 'stopped');
+            const stoppedMatch = anyStopped && anyStopped.liveness !== 'unknown' ? anyStopped : null; // B-f64b cure: a row still being checked is never resumed by a preset —
+            if (anyStopped && !stoppedMatch) stillChecking++;                                         // counted, and said at the preset's end with its door
             if (stoppedMatch) {
               const customName = this.app.sidebar?.getCustomName(backendSessionId);
               this.app.resumeSession(stoppedMatch.sessionId, stoppedMatch.cwd, customName || stoppedMatch.name, {
@@ -2353,6 +2370,10 @@ class LayoutManager {
         this.app.wm.minimize(id);
       }
     }
+
+    // B-f64b cure 2 (主开发 12:17Z): the person who loaded the preset is TOLD how many rows it left because they are still being
+    // checked — the boot's sentence, with the door to try again (the same preset, once the check has answered)
+    if (stillChecking) showToast(t('{n} not resumed: still checking whether they run in another terminal — resume each one by itself', { n: stillChecking }), { type: 'info', duration: 15000, actions: [{ label: t('Try again'), run: () => { this.loadPreset(name); } }] });
 
     // Update active preset name
     await fetch('/api/layouts-active', {

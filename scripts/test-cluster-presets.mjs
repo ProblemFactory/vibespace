@@ -46,6 +46,10 @@
 //    (one line), a relayUrl that is no relay page address said ONCE (never the value), the file withdrawn ⇒ null (the
 //    env fallback), fleet.json no longer a stray. CONTROL: a merge reading the layers in the wrong order lets the
 //    cluster win.
+// B-e0d1 (end of file): THE DROPLINE CLUSTER PRESET RESOLVES — the real store over a scratch data dir: the Connect plan takes the
+//   preset's client id and its relay page beside the hub's own https; no preset ⇒ unchanged; ONE PAIR, NEVER MIXED (batch 11
+//   cure): the person's own relay page beside the preset ⇒ the person's values alone (no preset client id), with a planted
+//   mixed answer as the leg's control
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -779,6 +783,32 @@ console.log('§7 fleet.json browserEngine — the cluster layer, the override, b
   ok(changes.length === 2 && changes[1].kinds.length === 0 && changes[1].sources.includes('fleet') && !cap.lines.some((l, i) => i > 0 && /\[presets\] changed/.test(l) && l !== ln[0]),
     'an override equal to the cluster\'s pin moves only the layer (sources: fleet, no kind) — no «changed» line, so the engine job sees no new pin', { kinds: changes[1] && changes[1].kinds, sources: changes[1] && changes[1].sources });
   r.stop();
+}
+
+// B-e0d1: THE DROPLINE CLUSTER PRESET RESOLVES — the real store over a scratch data dir, the preset in the environment's
+// single-field form (VIBESPACE_INTEGRATION_DROPLINE_*): the Connect plan takes its client id and its relay page
+{
+  const DO = require(path.join(REPO, 'src/server/dropline-oauth.js'));
+  const quiet = capture();
+  const empty = CP.create({ dir: path.join(ROOT, 'dl-none'), log: quiet.log });
+  const mk = (env, tag) => { const dataDir = path.join(ROOT, 'dl-' + tag); fs.mkdirSync(dataDir, { recursive: true }); return IS.create({ dataDir, env, presets: empty, log: quiet.log }); };
+  const planOf = (st, url = 'https://hub.example.ts.net') => DO.create({ client: {}, flows: {}, integrations: () => st, instanceUrl: () => url, tokens: {} }).callbackPlan();
+  const CID = 'dlclient' + 'Cluster01', RL = 'https://relay.example.test/relay/';
+  const withPreset = mk({ VIBESPACE_INTEGRATION_DROPLINE_CLIENTID: CID, VIBESPACE_INTEGRATION_DROPLINE_RELAYURL: RL }, 'preset');
+  const p = planOf(withPreset);
+  ok(p.clientId === CID && p.preset === true && p.via === 'relay' && p.redirectUri === RL, 'B-e0d1: a fleet Dropline preset RESOLVES — the Connect plan takes the preset\'s client id and sends the browser to ITS relay page (the client is registered there), even beside the hub\'s own https', JSON.stringify(p));
+  const noPreset = planOf(mk({}, 'bare'));
+  ok(noPreset.clientId === '' && noPreset.preset === false && noPreset.via === 'own-https', 'B-e0d1: …with no preset nothing changes: no client id, the hub\'s own https address', JSON.stringify(noPreset));
+  // ONE PAIR, NEVER MIXED: the person saved their own relay page on a cluster that has a preset — the person's values outrank
+  // the WHOLE preset (the store's precedence), so the plan carries no preset client id beside the person's page
+  const OWN = 'https://own.example.test/relay/';
+  const mixedStore = mk({ VIBESPACE_INTEGRATION_DROPLINE_CLIENTID: CID, VIBESPACE_INTEGRATION_DROPLINE_RELAYURL: RL }, 'mixed');
+  mixedStore.setIntegration('dropline', { relayUrl: OWN });
+  const onePair = (q) => q.clientId === '' && q.preset === false && q.relayUrl === OWN && q.via === 'own-https' && /^https:\/\/hub\.example\.ts\.net\//.test(q.redirectUri || '');
+  const m = planOf(mixedStore);
+  ok(onePair(m), 'B-e0d1: ONE PAIR, NEVER MIXED — the person\'s own relay page beside a preset gives the person\'s values alone: no preset client id, preset false', JSON.stringify(m));
+  ok(!onePair({ ...m, clientId: CID, preset: true }), 'CONTROL: a mixed answer (the preset\'s client id beside the person\'s page — a per-field merge) fails that leg');
+  quiet.lines.length = 0; empty.stop?.();
 }
 
 for (const row of copiesCensus(M.files, M.dir, REPO, { minCopies: 8 })) ok(row.pass, row.name, row.detail);

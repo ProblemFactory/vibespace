@@ -192,6 +192,8 @@ function refuseHost(req, res) {
   return true;
 }
 const STATUS = { // lane browser-profile-clone: the copy's refusals by name
+  // B-8b87 cure: a profile proxy's refusals by name (a person's page words them by code — never a 500 for a refusal)
+  proxy_cloud_browser: 400, proxy_off_machine: 400, bad_proxy_credential: 400, bad_proxy_inline_credential: 400, proxy_unusable: 409, proxy_password_in_profile: 409, proxy_scheme_unsupported: 409, proxy_external_browser: 409, egress_proxy_missing: 409, proxy_credential_unreadable: 423,
   'bad-size': 400, size_out_of_bounds: 400, not_your_window: 403, // lane launch-picture-size: a fixed picture size refused by name
   source_not_found: 404, source_same_machine_only: 409, source_leased: 409, source_still_running: 409, source_no_folder: 409, clone_too_big: 413, clone_failed: 500, clone_unsupported_platform: 400, clone_agent_too_old: 400,
   'not-found': 404, no_lease: 404, 'bad-request': 400, label_required: 400, label_taken: 409, provider_unknown: 400, provider_unavailable: 400, 'unsupported-host': 400, sharing_refused: 400, fence_refused: 409, bad_proxy: 400, ambiguous: 409, not_owner: 403, leased: 409, running: 409, cap: 409, launch_failed: 502, dir_unwritable: 500, unavailable: 503,
@@ -226,7 +228,7 @@ const STATUS = { // lane browser-profile-clone: the copy's refusals by name
   backend_unavailable: 400, backend_no_key: 409, backend_seat_taken: 409, backend_seat_ceiling: 409, downgrade_refused: 409, downgrade_unknown: 409,
   switch_refused: 400, switch_export_only: 400, switch_noop: 409, browser_restarting: 409, hint_tier_with_backend: 400, host_underivable: 400, no_profile: 409,
   // the install slot's typed refusals (the browser CLI's install, a Chrome build's download, an engine's kernel)
-  install_local_only: 400, already_installed: 409, install_running: 409, kernel_credential_unusable: 409 /* lane kernel-asset-credential */, install_unavailable: 503,
+  install_local_only: 400, already_installed: 409, install_running: 409, kernel_credential_unusable: 409 /* lane kernel-asset-credential */, engine_kernel_landing: 409 /* B-4d35: the kernel is being replaced or put back — try again */, install_unavailable: 503,
   // takeover C3 (design-browser-takeover §5): the managed ephemeral browser — the shared ceiling (D2), a record that is
   // never attached / edited by id, pairs that name no browser of this conversation, the real CLI missing on this machine
   browser_cap: 409, not_attachable: 409, not_editable: 409, not_managed: 409, binary_absent: 503,
@@ -297,7 +299,7 @@ function fail(res, e) {
   // B-f7ab verify r2 (LOW): a key minted by THIS call rides a refused answer too (`res.locals.minted`, set by needKey) — the
   // agent's first command may be refused (not_owner, launch_failed…) and it still needs to know nothing needs restarting
   // lane remote-profile-start: a machine's refusal keeps the user's one command (`step`) — never on an agent's route
-  res.status(STATUS[code] || 500).json({ error: agentRoad ? agentSafeText(String(e?.message || e), e?.failed) : String(e?.message || e), code, ...(e?.holders ? { holders: e.holders } : {}), ...(e?.why ? { why: e.why } : {}), ...(e?.remedy ? { remedy: e.remedy } : {}), ...(e?.step && !/^\/api\/agent\//.test(String((res.req && res.req.path) || '')) ? { step: e.step } : {}), ...(res.locals && res.locals.minted ? { minted: res.locals.minted } : {}),
+  res.status(STATUS[code] || 500).json({ error: agentRoad ? agentSafeText(String(e?.message || e), e?.failed) : String(e?.message || e), code, ...(typeof e?.word === 'string' && e.word ? { word: e.word } : {}), ...(e?.holders ? { holders: e.holders } : {}), ...(e?.why ? { why: e.why } : {}), ...(e?.remedy ? { remedy: e.remedy } : {}), ...(e?.step && !/^\/api\/agent\//.test(String((res.req && res.req.path) || '')) ? { step: e.step } : {}), ...(res.locals && res.locals.minted ? { minted: res.locals.minted } : {}),
     // P4 (§7.4): a refusal carries its ACTIONABLE way out (`action.openIntegration`), the ways out of a refused downgrade, and whether one human confirmation would do
     // MULTIVIEW D4: WHICH cap refused (this conversation's own, or the machine's) + the counts — never another session's name
     ...(e?.scope ? { scope: e.scope } : {}), ...(Number.isFinite(e?.others) ? { others: e.others } : {}), ...(Number.isFinite(e?.capOwn) ? { own: e.capOwn, cap: e.capOf } : {}),
@@ -387,7 +389,7 @@ function sessionFacts(id) {
   const s = ctx?.activeSessions?.get?.(id) || null;
   if (!s) return null;
   let taskIds = [], groupsUnreadable = false;
-  try { taskIds = (ctx.tasksForSession?.(s, id) || []).map((t) => (typeof t === 'string' ? t : t && t.id)).filter(Boolean); } catch (e) { taskIds = []; groupsUnreadable = true; console.warn(`[browser] ${id}: the Task Group list could not be read — ${e && e.message}`); }
+  try { const raw = ctx.tasksForSession?.(s, id) || []; if (raw.unread) groupsUnreadable = true; taskIds = raw.map((t) => (typeof t === 'string' ? t : t && t.id)).filter(Boolean); } catch (e) { taskIds = []; groupsUnreadable = true; console.warn(`[browser] ${id}: the Task Group list could not be read — ${e && e.message}`); }
   // identity verify r2 (2026-09-28): a session on ANOTHER machine (an ssh host / a paired device — rung H) is named so
   const remote = !!(s.hostId || s.host || s._browserVariant === require('../browser-profiles.js').VARIANTS.H);
   // lane grants-unify: the keys the grants store names this conversation by (its id — a borrowed one is nobody's —, its
@@ -601,6 +603,7 @@ router.post('/api/browser/profiles', async (req, res) => {
   // verify r1 (F6): "Who can use it" is the USER's too — an agent's token never writes the list (its own `new` makes a
   // profile every conversation can use; the PATCH in routes/browser-trace.js and the adopt below refuse the same way)
   if (use !== undefined && refuseAgentBearer(req, res, USE_IS_USERS)) return;
+  if (input.proxyCredential != null && input.proxyCredential !== '' && refuseAgentBearer(req, res, 'an agent may give a proxy address when it creates a profile, but never names its login — the person chooses it on the profile\'s card (Proxy…) (B-8b87)')) return;
   try {
     const u = await resolveUseRows(use);
     if (!u.ok) return res.status(u.status).json(u.body);
@@ -702,6 +705,29 @@ const { pressBearer, pressOf } = require('../write-origin.js');
 // hand-back, a takeover's Done, a proposal's Approve: presses the spend ceiling neither refuses nor counts) — so the refusal
 // covers EVERY bearer (vsst_, jbt_ and an automation key's vsak_; `pressBearer`), never only the two agent prefixes
 function refuseAgentBearer(req, res, error = OWN_BROWSING_IS_USERS) { if (!isAgentBearer(req) && !pressBearer(req.headers)) return false; res.status(403).json({ error, code: 'agent_forbidden' }); return true; }
+// THE EXIT CHECK (the owner 2026-11-17 «A就行»): a PERSON's press — the profile's proxy exit read through its own forwarder from the
+// owner's check address (nothing kept) — and the person's confirm (kept on the profile, handed to an engine plugin at its launch). No
+// agent's token, no CLI verb, no automation verb; the cookie write's same-origin verdict runs before these (src/auth.js).
+const EXIT_IS_USERS = 'checking a browser profile\'s exit and keeping it are the user\'s acts — an agent\'s token cannot press them';
+const EXIT_STATUS = Object.freeze({ 'not-found': 404, exit_no_proxy: 409, exit_url_unset: 409, exit_url_invalid: 409, exit_restart_first: 409, proxy_credential_unreadable: 423, proxy_password_in_profile: 409, proxy_scheme_unsupported: 409, proxy_off_machine: 409, bad_proxy_credential: 409, exit_check_timeout: 504, exit_proxy_timeout: 504, exit_proxy_hung_up: 502, exit_external_browser: 409, proxy_cloud_browser: 409, proxy_unusable: 409, exit_check_failed: 502, exit_check_refused: 502, exit_check_too_big: 502, exit_answer_unreadable: 502, exit_timezone_invalid: 400, exit_ip_invalid: 400, exit_country_invalid: 400, exit_empty: 400 });
+router.post('/api/browser/profiles/:id/exit-check', async (req, res) => {
+  if (refuseHost(req, res)) return;
+  if (refuseAgentBearer(req, res, EXIT_IS_USERS)) return;
+  const k = keeperOr503(res); if (!k) return;
+  if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
+  if (typeof k.exitCheck !== 'function') return res.status(503).json({ error: 'the exit check is not available on this server', code: 'unavailable' });
+  try { const r = await k.exitCheck(req.params.id); return res.status(r.ok ? 200 : EXIT_STATUS[r.code] || 422).json(r); }
+  catch (e) { return res.status(500).json({ error: String((e && e.message) || e), code: 'error' }); }
+});
+router.post('/api/browser/profiles/:id/egress', async (req, res) => {
+  if (refuseHost(req, res)) return;
+  if (refuseAgentBearer(req, res, EXIT_IS_USERS)) return;
+  const k = keeperOr503(res); if (!k) return;
+  if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
+  if (typeof k.keepEgress !== 'function') return res.status(503).json({ error: 'the exit check is not available on this server', code: 'unavailable' });
+  try { const r = await k.keepEgress(req.params.id, req.body && typeof req.body === 'object' ? req.body : {}); return res.status(r.ok ? 200 : EXIT_STATUS[r.code] || 422).json(r); }
+  catch (e) { return res.status(500).json({ error: String((e && e.message) || e), code: 'error' }); }
+});
 router.post('/api/browser/profiles/:id/browse', async (req, res) => {
   if (refuseHost(req, res)) return;
   if (refuseAgentBearer(req, res)) return;
@@ -1607,6 +1633,7 @@ function jobFactsOf(token, { mint = true } = {}) {
   let taskIds = [], groupsUnreadable = false;
   try {
     const raw = s ? (ctx.tasksForSession?.(s, id) || []) : (typeof ctx.tasksForConversation === 'function' ? (ctx.tasksForConversation(cid) || []) : []);
+    if (raw.unread) groupsUnreadable = true;   // B-55dc: an answer still being read (the keeper refuses a grant, keeps a lease)
     taskIds = raw.map((t) => (typeof t === 'string' ? t : t && t.id)).filter(Boolean);
   } catch (e) { taskIds = []; groupsUnreadable = true; }
   const k = ctx.keeper;
@@ -2769,7 +2796,7 @@ router.post('/api/agent/browser/backend', async (req, res) => {
     const r = await k.switchBackend({ profileId: p.id, target: req.body?.provider, by: { kind: 'agent' }, browserKey: f.browserKey, sessionId: f.sessionId, confirmDowngrade: req.body?.confirmDowngrade === true, taskIds: f.taskIds, groupsUnreadable: f.groupsUnreadable });
     if (r.mode === 'proposal') return res.json({ ...r, filed: fileProposal(f, r, { by: 'agent' }) });
     k.tell(f.browserKey);
-    res.json(r);
+    res.json({ ...r, ...(r && r.profile ? { profile: require('../browser-profiles.js').agentProfileView(r.profile, agentFactsOf(f)) } : {}) });   // the exit check (主开发 17:04Z): the switch's record as an AGENT may read it — no kept exit, no login name
   } catch (e) { fail(res, e); }
 });
 /**

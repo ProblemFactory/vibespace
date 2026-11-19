@@ -11,7 +11,7 @@ import { revealHeaders, askRevealPassword } from './vault-reveal.js'; // lane va
 import { classifyPrivateKey } from '../ssh-key-format.js'; // shared with the server (CJS pulled into the bundle, like task-color-seq.js)
 import { dialRowState, pairNameVerdict, pairNameShown, deviceIdOf, commandOsOf } from '../dial-facts.js'; // lane-pairing ③: THE one dial state of a machine row (PURE, bundled); verify-r4 F6: the name rule + its collision verdict
 import { dialAddressPicker, dialStateText, generateConsequenceText } from './dial-address-picker.js'; // lane-pairing ①③: the address choice + the state's words
-import { openExitAccessDialog, exitSummaryText, lastRunText, agentUpgradeText } from './exit-access-dialog.js'; // lane-pairing ⑥: "Who can use it" 
+import { openExitAccessDialog, exitSummaryText, exitGranted, lastRunText, agentUpgradeText } from './exit-access-dialog.js'; // lane-pairing ⑥: "Who can use it" 
 import { openExitRunsDialog } from './exit-runs-dialog.js'; // lane exit-see-whole: the machine's command list, ONE click from its row (the icon + the last-run line)
 import { UI_ICONS } from './icons.js'; // lane host-stale-dialer: the second-dialer line's warning glyph
 import { keyFileWords } from './key-file-words.js'; // lane key-file-law-stores: .mounts-key cannot open a row's secret ⇒ the row says restore
@@ -1107,12 +1107,9 @@ export function installSidebarMounts(Sidebar) {
         ibtn(MI.folderPush, tr('Mount a folder from this VibeSpace onto "{name}"', { name: h.name }), () => { this._showHostMountDialog(h); }),
         ibtn(MI.folderPull, tr('Mount a folder from "{name}" into this VibeSpace', { name: h.name }), () => { this._showMachinePullDialog(h); }),
         ibtn(MI.ports, tr('Forward a port from "{name}" (open its dev servers here)', { name: h.name }), () => { this._showPortsDialog(h); }),
-        // lane-pairing ⑥: the exit icon OPENS "Who can use it" (two lists — borrow the network / run commands);
-        // accent while either grant is not nobody
-        ibtn(MI.exit, tr('Who can use "{name}" as an exit…', { name: h.name }),
-          async () => { openExitAccessDialog(this.app, { hostId: h.id, name: h.name }); },
-          (h.exit && ((h.exit.use && h.exit.use.mode && h.exit.use.mode !== 'nobody') || (h.exit.run && h.exit.run.mode && h.exit.run.mode !== 'nobody'))) ? 'mounts-icon-accent' : ''),
-        // lane exit-see-whole (design 013 piece 1c): the machine's command list ONE click from its row (it was two deep, under the exit icon)
+        // B-cb72 (the owner's pick A, 2026-11-18): «Who can use it» is no longer an icon here — the row's own summary of who
+        // may use the machine IS its door (below, after the sub line)
+        // lane exit-see-whole (design 013 piece 1c): the machine's command list ONE click from its row (it was two deep, under the exit door)
         ibtn(MI.list, tr('Commands run on {machine}', { machine: h.name }) + '…', async () => { openExitRunsDialog(this.app, { hostId: h.id, name: h.name }); }),
         ibtn(MI.termNew, isDial ? tr('New session on this device') : 'New session on this host', () => { this.app.showNewSessionDialog?.({ hostId: h.id, hostName: h.name }); }),
         ibtn(MI.cross, isDial ? tr('Unpair (the device can no longer dial in)') : 'Remove host', async () => {
@@ -1149,9 +1146,21 @@ export function installSidebarMounts(Sidebar) {
       // lane-pairing ⑥: the exit lists' summary (every machine — a record with no `exit` reads nobody / nobody through
       // the ONE reader) + the last command run on the machine (who / when / exit code)
       {
-        const ex = document.createElement('div');
-        ex.className = 'mounts-path mounts-exit-line';
-        ex.textContent = exitSummaryText(h.exit);
+        // B-cb72 (the owner's pick A): THE WORDS THAT SAY WHO MAY USE THE MACHINE ARE ITS DOOR — a full-width button (keyboard
+        // reaches it as any button), the exit glyph at its head and a chevron at its end, a button's skin at rest, accent while
+        // either grant is not nobody (the strip icon's rule, moved with it); the words unchanged, the title the icon's own
+        const ex = document.createElement('button');
+        ex.type = 'button';
+        ex.className = 'mounts-exit-line mounts-exit-door' + (exitGranted(h.exit) ? ' mounts-exit-door-open' : '');
+        ex.title = tr('Who can use "{name}" as an exit…', { name: h.name });
+        // cure: the NAME a screen reader hears says what the door OPENS and joins the status words («Who can use NAME as an
+        // exit: network — …, commands — …») — one label, its own dictionary key (zh / ja)
+        ex.setAttribute('aria-label', tr('Who can use "{name}" as an exit: {summary}', { name: h.name, summary: exitSummaryText(h.exit) }));
+        const exG = document.createElement('span'); exG.className = 'mounts-exit-door-glyph'; exG.setAttribute('aria-hidden', 'true'); exG.innerHTML = MI.exit;
+        const exT = document.createElement('span'); exT.className = 'mounts-exit-door-text'; exT.textContent = exitSummaryText(h.exit);
+        const exC = document.createElement('span'); exC.className = 'mounts-exit-door-chev'; exC.setAttribute('aria-hidden', 'true'); exC.innerHTML = UI_ICONS.chevronRight;
+        ex.append(exG, exT, exC);
+        ex.onclick = (e) => { e.stopPropagation(); openExitAccessDialog(this.app, { hostId: h.id, name: h.name }); }; // never also a row's own press
         row.appendChild(ex);
         { const lr = this._lastRunLine(h); if (lr) row.appendChild(lr); } // B-a31a: the same line the row patch replaces in place
         // lane device-upgrade-stuck: the agent's failed update stays on the row until the device reports the version

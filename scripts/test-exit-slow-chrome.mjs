@@ -35,7 +35,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, CHROME_STORE } from './scratch.mjs';
+import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
@@ -44,8 +45,9 @@ const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 
 const [PORT, CDP_PORT, AUX_PORT] = await freePorts(3);
-const wt = scratch('exit-slow-wt');
-const fakeHome = scratchHome('exit-slow-home', fs);
+const root = mintRoot('exit-slow-wt'), wt = path.join(root, 't');
+const chromeHome = path.join(root, 'chrome-home'); fs.mkdirSync(chromeHome, { recursive: true });   // rule nine (hub-boot.mjs): the suite's own browser carries a HOME in the root, so the helper ends it before the root goes
+const fakeHome = path.join(root, 'home'); for (const d of ['.claude/projects', '.claude/sessions', '.config', '.vibespace']) fs.mkdirSync(path.join(fakeHome, d), { recursive: true });
 const chromeRoot = scratch('exit-slow-chrome');
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const AUX = `http://localhost:${AUX_PORT}`; // another site
@@ -54,14 +56,13 @@ const check = (n, c, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── throwaway server in a worktree (no rebuild: overlays the built public/) ──
-try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js', 'package.json']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
 const stubPath = `${wt}-claude-stub`; // never a vendor CLI: the boot probes get a version and nothing else
 fs.writeFileSync(stubPath, '#!/bin/sh\nfor a in "$@"; do case "$a" in --version) echo "2.1.288 (Claude Code) stub"; exit 0;; esac; done\nexit 0\n', { mode: 0o755 });
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
+const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' } });
 // the other site: /link — one link (the older document's embedded page); /p204-<n> — a page the first time, then 204
 // (no-store + an unload listener, so a back asks the site again — test-exit-hop-chrome's measured trap); /plain-<n> — a page
 const aux = spawn(process.execPath, ['-e', `const hits = {}; require('http').createServer((q, s) => {
@@ -72,24 +73,20 @@ const aux = spawn(process.execPath, ['-e', `const hits = {}; require('http').cre
   if (p === '/link') return s.end('<a href="/b" style="display:block;width:100%;height:200px;background:#eee">follow</a>');
   if (p.startsWith('/p204-')) { s.setHeader('cache-control', 'no-store'); if (hits[p] > 1) { s.statusCode = 204; return s.end(); } return s.end(page + '<script>addEventListener("unload", () => {});</script>'); }
   s.end(page);
-}).listen(${AUX_PORT}, '127.0.0.1')`], { stdio: 'ignore' });
+}).listen(${AUX_PORT}, '127.0.0.1')`], { stdio: 'ignore', env: { ...process.env, HOME: chromeHome } });   // rule nine: the suite's own aux server carries a HOME in the root
 let chrome = null;
 const cleanup = () => {
   try { chrome?.kill('SIGKILL'); } catch {}
-  try { srv.kill('SIGKILL'); } catch {}
   try { aux.kill('SIGKILL'); } catch {}
-  for (const root of [wt, fakeHome, chromeRoot]) { try { endRootedProcesses(root); } catch { } } // whatever the server / Chrome started under its roots (§57b)
-  try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
-  for (const d of [chromeRoot, fakeHome, stubPath]) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch {} }
+  for (const d of [chromeRoot, stubPath]) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch {} }
 };
 process.on('exit', cleanup);
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
 const PENDS = new Map();
 // run bare (no gate) the suite assumes its ci.mjs row's budget (budgetFor: a chrome heavy row, 900 s) and says so
 const BARE = !process.env.VIBESPACE_SUITE_BUDGET_MS;
 const WD = armWatchdog({ capMs: 840e3, env: BARE ? { ...process.env, VIBESPACE_SUITE_BUDGET_MS: '900000' } : process.env, exit: (code) => process.exit(code), pending: () => [...PENDS.values()].map((x) => `CDP ${x.method} (${((Date.now() - x.at) / 1000).toFixed(1)} s)`) });
 console.log(`watchdog: ${Math.round(WD.deadline.ms / 1000)} s (${WD.deadline.capped ? "the suite's own ceiling" : 'the budget − 30 s'}; the budget ${Math.round(WD.deadline.budgetMs / 1000)} s — ${BARE ? "a bare run: its ci.mjs row's" : "the gate's"})`);
-for (let i = 0; i < 80; i++) { try { await fetch(`${ORIGIN}/api/home`); break; } catch { await sleep(250); } }
+await hub.ready();
 
 // ── raw CDP onto the Chrome of the moment ──
 const WebSocket = require('ws');
@@ -121,8 +118,8 @@ const waitFor = async (expr, ms = 15000) => { const t0 = Date.now(); while (Date
 /** Chrome with the back/forward cache off or on, its first page target attached (the init scripts on it). */
 const launch = async (cache) => {
   const dir = path.join(chromeRoot, cache); fs.mkdirSync(dir, { recursive: true });
-  chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling',
-    ...(cache === 'off' ? ['--disable-features=BackForwardCache'] : []), '--window-size=382,580', `--user-data-dir=${dir}`, 'about:blank'], { stdio: 'ignore' });
+  chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling',
+    ...(cache === 'off' ? ['--disable-features=BackForwardCache'] : []), '--window-size=382,580', `--user-data-dir=${dir}`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, HOME: chromeHome } });
   let target = null;
   for (let i = 0; i < 120 && !target; i++) { try { target = (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json()).find((x) => x.type === 'page'); } catch {} if (!target) await sleep(250); }
   if (!target) throw new Error('chrome never exposed a CDP page target');
@@ -134,7 +131,6 @@ const launch = async (cache) => {
 const quit = async () => {
   try { sock.close(); } catch { }
   if (chrome && chrome.exitCode === null) { const gone = new Promise((r) => chrome.once('exit', r)); chrome.kill('SIGKILL'); await Promise.race([gone, sleep(3000)]); }
-  try { endRootedProcesses(chromeRoot); } catch { }
   chrome = null;
 };
 /** The older document's HTML held `ms` from now on (a cold cache: the HTTP cache off while held); 0 = the network as it is. */

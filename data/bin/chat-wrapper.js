@@ -674,13 +674,50 @@ function deliverHeldInterrupt(why) {
   log(`the second Stop held in the window delivered (${why})`);
   return true;
 }
+/** WHAT A FOLLOW-UP'S INIT SAYS ABOUT THE STAMPED FRAMES IT TOOK (B-fcd6). The init of a turn that took a stamped frame
+ *  names its uuid in `user_message_uuids`; the init of a turn that took NONE leaves the field OUT, never an empty list
+ *  (the real 2.1.308 / 2.1.312 recordings, scripts/fixtures/claude-cli/<v>-stamped.jsonl and 2.1.312-frames.jsonl — a
+ *  background-agent notification turn among them; the CLI's own init writer spreads the list it has, so an absent list
+ *  is no key at all — test-record-shape reads that writer). So an init without the field is a judgment, «this turn took
+ *  none of them» (a background task-notification follow-up), ONLY where this CLI is known to write the names: THIS
+ *  PROCESS has already read an init that named a frame (`initNamesSeen` — since B-437e every person frame is stamped, so
+ *  a session's first turn is the witness). No witness ⇒ null, «cannot say»: every rider stays kept, as before (a CLI
+ *  before 2.1.307, a build that stopped writing the field, a stand-in that never names — the wrong «kept» costs a
+ *  repeated message, a wrong «landed» tells the person the agent read words it never saw). The midturn-order r4 rule
+ *  read every omission as unknown and left a rider the model HAD read drawn «Unread when stopped».
+ *  ONE SHAPE IS UNRECORDED (主开发 10:59Z — the law: when the wrapper cannot know, its mistake is «kept»): a Stop with a rider
+ *  the CLI still holds AND a background notification, merged by the CLI into ONE follow-up whose init names nothing (the rider
+ *  as a queued_command attachment). The wrapper cannot see that attachment — the CLI says nothing on stdout about a frame it
+ *  takes in (the head of this file) and records it in the transcript only — so here it would read «landed». unmeasured: read it at the next recording of a real CLI through the integrator's fenced suite. */
+let initNamesSeen = false;
+function initNames(msg, seen) {
+  if (Array.isArray(msg.user_message_uuids)) return msg.user_message_uuids.map(String);
+  return seen ? [] : null;
+}
+/** Every init this process reads: one that names a frame is the witness that this CLI writes the names. */
+function noteInitNames(msg) {
+  if (Array.isArray(msg.user_message_uuids) && msg.user_message_uuids.length) initNamesSeen = true;
+}
+/** …and every record the CLI writes on stdout INSIDE the Stop window that carries a rider's stamp — a user record's own uuid,
+ *  an attachment's source_uuid (a queued_command: never seen on stdout so far) — says the CLI still held that rider: it is named,
+ *  so kept, whatever an init omitted (主开发 11:12Z, the row's condition (1)). The judgment itself stays at the settle. */
+function noteWindowRecord(msg) {
+  for (const u of [msg.uuid, msg.attachment && msg.attachment.source_uuid]) if (typeof u === 'string' && u) stopping.named.add(u);
+}
+/** A follow-up the Stop window interrupted on its init: remember who it named (every follow-up's, judged once at the settle). */
+function noteFollowUpNames(msg) {
+  const names = initNames(msg, initNamesSeen);
+  if (!names) return;
+  stopping.namesSaid = true;
+  for (const u of names) stopping.named.add(u);
+}
 /** A frame that RODE the tool result at Stop counted as held (the CLI may still hold it — r4); a window that closes with
  *  no follow-up turn proves the turn's last request took it: it is the turn's, as read — and the record says so. */
 // lane midturn-order r4 (m15): with follow-up turns, the riders are judged ONCE, here, when the window settles — against
 // EVERY uuid any follow-up's init named (`stopping.named`; the CLI may split what it held into several follow-ups, each
 // naming its own frames): a rider NO follow-up named went into the request built after its tool result (the model read
-// it) — landed; a rider some follow-up named was still the CLI's — kept. A CLI whose inits name nothing (before 2.1.307)
-// leaves every rider kept, as before.
+// it) — landed; a rider some follow-up named was still the CLI's — kept. A CLI whose inits cannot name (before 2.1.307)
+// leaves every rider kept, as before; once this CLI has named a frame, an init without the field named none (B-fcd6, initNames above).
 function landRiding(why) {
   if (!stopping || !stopping.riding || !stopping.riding.length) return;
   let read = stopping.riding;
@@ -774,7 +811,7 @@ function dropHeldForStop() {
   const held = handed.length + (stopping ? stopping.held : 0);
   const live = turnBusy || cliOwesTurn || !!stopping;
   handed.length = 0; landedThisTurn = []; cliOwesTurn = false;
-  if (live) { stopping = { held, follows: stopping ? stopping.follows : 0, riding: (stopping ? stopping.riding || [] : []).concat(riding), heldInterrupt: stopping ? stopping.heldInterrupt || null : null, named: stopping && stopping.named ? stopping.named : new Set(), namesSaid: !!(stopping && stopping.namesSaid), kept: (stopping ? stopping.kept || [] : []).concat(keptIds.filter((x) => !riding.includes(x))) }; armBound(); }
+  if (live) { stopping = { held, follows: stopping ? stopping.follows : 0, riding: (stopping ? stopping.riding || [] : []).concat(riding), heldInterrupt: stopping ? stopping.heldInterrupt || null : null, named: stopping && stopping.named ? stopping.named : new Set(), namesSaid: !!(stopping && stopping.namesSaid), kept: (stopping ? stopping.kept || [] : []).concat(keptIds.filter((x) => !riding.includes(x))), followRun: stopping ? stopping.followRun || null : null }; armBound(); }   // B-28b1: a second Stop inside the follow-up keeps its mark — it is still judged at its result
   const dropped = promptQueue.splice(0, promptQueue.length);
   settleCopies(dropped.map((q) => q.msgId)); // put back (or VibeSpace's own): never run — its kept files go
   for (const q of dropped) record('queue_op_result', { op: 'remove', id: q.id, ok: true, msg_id: q.msgId, reason: 'stopped' });
@@ -789,6 +826,21 @@ function dropHeldForStop() {
   if (dropped.length) publishQueue();
   log(`interrupt: dropped ${dropped.length} held frame(s) (put back=${putBack.length}); handed: ${keptIds.length} kept (${riding.length} of them riding a tool result), ${landedIds.length} landed${live ? ' — the Stop window is open' : ''}`);
   saySettle();
+}
+/** THE STOP THAT CAME LATE (B-28b1 — the same row as B-1c04; the coordinator's ruling 2026-11-18: «TELL, DO NOT PRETEND»). The
+ *  follow-up the window interrupted on its init still reached the model when the CLI read that second interrupt after its
+ *  request had left (about 12 ms after the init, measured on 2.1.312; a loaded machine loses that race — hosted runners: the
+ *  stop settled at +57..66 ms and the follow-up reached the mock model). The CLI's own records say so: an assistant record of
+ *  that turn before its result (the model answered; a `<synthetic>` record sent nothing — the processLine mark skips it), or
+ *  tokens in its result's OWN `usage` — that turn's main-thread calls only (recorded on 2.1.312: a background agent's calls
+ *  land in model_usage_since_last_result, never in `usage`; a follow-up that sent nothing says 0/0), on every CLI version. A
+ *  request the CLI aborted before the model's first event leaves neither (the heavy suite's mock counts that one).
+ *  → null, or the fact the follow-up's result carries: { follow, how: 'answered' | 'billed', cut (false: it ran to its end), tokens? } */
+function stopLateOf(result, run) {
+  const sum = (o, keys) => keys.reduce((a, k) => { const v = Number(o && o[k]); return a + (Number.isFinite(v) && v > 0 ? v : 0); }, 0);
+  const tokens = sum(result && result.usage, ['input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens']);
+  if (!run.answered && !(tokens > 0)) return null;
+  return { follow: run.n, how: run.answered ? 'answered' : 'billed', cut: !(result && result.subtype === 'success'), ...(tokens > 0 ? { tokens } : {}) };
 }
 /** The Stop window closes: the CLI settled (its idle — or its result, where it says no state word). */
 function settleStop(why) {
@@ -991,6 +1043,8 @@ function processLine(line) {
     }
     const busyWord = cliState === 'running' || cliState === 'requires_action';
     const starts = msg.type === 'system' && msg.subtype === 'init' && busyWord;
+    if (msg.type === 'system' && msg.subtype === 'init') noteInitNames(msg); // B-fcd6: the witness that this CLI names the frames a turn took
+    if (stopping && (msg.type === 'user' || msg.type === 'attachment')) noteWindowRecord(msg); // B-fcd6: a record carrying a rider's stamp keeps it
     const idle = msg.type === 'system' && msg.subtype === 'session_state_changed' && msg.state === 'idle';
     // THE WITNESS (2.369.361): a handed frame rides the request the CLI builds after a tool result (not one Stop
     // rejected), and the model speaking after it is that request answered
@@ -1006,6 +1060,8 @@ function processLine(line) {
         settleCopies(ids);
       }
     }
+    // B-28b1: the follow-up interrupted on its init SPOKE — its request had left before the CLI read the second interrupt
+    if (msg.type === 'assistant' && stopping && stopping.followRun && msg.message?.model !== '<synthetic>') stopping.followRun.answered = true;   // a <synthetic> record sent nothing
     if (starts) {
       turnBusy = true; awaitingStart = false;
       clearTimeout(boundTimer); boundTimer = null; boundUntil = null;
@@ -1018,12 +1074,13 @@ function processLine(line) {
         // A second Stop the person sent inside the window IS that interrupt (its request id, answered by the CLI).
         if (!deliverHeldInterrupt('on the follow-up init')) sendChild(JSON.stringify({ type: 'control_request', request_id: `vs-stop-follow-${process.pid}-${++handSeq}`, request: { subtype: 'interrupt' } }));
         stopping.follows++;
+        stopping.followRun = { n: stopping.follows, answered: false };   // B-28b1: judged at its result (stopLateOf)
         log(`interrupt: the CLI started follow-up turn ${stopping.follows} for what it held at Stop — interrupted on its init`);
         // WHO THE FOLLOW-UP CARRIES IS SAID BY ITS INIT (lane midturn-order r3–r4, m15; measured: `user_message_uuids` names every
         // stamped frame the turn consumed, 2.1.307 on). Every follow-up's names are REMEMBERED — the CLI may split what it held
         // into several follow-ups — and the riders are judged once, when the window settles (landRiding): never at an init,
         // where a frame the next follow-up will name would be called read
-        if (Array.isArray(msg.user_message_uuids)) { stopping.namesSaid = true; for (const u of msg.user_message_uuids) stopping.named.add(String(u)); }
+        noteFollowUpNames(msg); // B-fcd6: a CLI that writes the names says «none» by leaving the field out
       } else if (cliOwesTurn) {
         // the CLI's own turn for what it was still holding: theirs now — a Stop in it stops a TURN, it keeps no message
         cliOwesTurn = false;
@@ -1034,6 +1091,18 @@ function processLine(line) {
     } else if (msg.type === 'result' || (idle && !awaitingStart)) {
       turnBusy = false; awaitingStart = false; turnEnded = true;
       if (msg.type === 'result') {
+        // B-28b1 (TELL, DO NOT PRETEND): the follow-up the window interrupted on its init ended. If it still reached the model,
+        // the fact rides ITS OWN result record (a second client and a reload read the same line) and the page says it once,
+        // in that Stop's line. Nothing is sent, held or dropped because of it: a frame held behind the window waits for the
+        // settle as before.
+        if (stopping && stopping.followRun) {
+          const late = stopLateOf(msg, stopping.followRun);
+          stopping.followRun = null;
+          if (late) {
+            msg.webui_stop_late = late; line = JSON.stringify(msg);
+            log(`stop late: follow-up turn ${late.follow} reached the model before the CLI read the second interrupt (${late.how}${late.tokens ? `, ${late.tokens} tokens` : ''}, ${late.cut ? 'cut off' : 'ran to its end'}) — recorded on its result, said once`);
+          }
+        }
         // a frame that rode this turn's last request is in the conversation as read, whatever the model said after
         const rode = handed.filter((h) => h.phase === 'riding');
         if (rode.length) { for (const h of rode) handed.splice(handed.indexOf(h), 1); record('input_handover', { state: 'landed', msg_ids: rode.map((h) => h.msgId).filter(Boolean) }); settleCopies(rode.map((h) => h.msgId)); }
@@ -1107,6 +1176,7 @@ function processLine(line) {
 
 function startChild() {
   reconnectTimer = null;
+  if (!OFFSET_MODE) initNamesSeen = false;   // B-fcd6 (its reader): a freshly spawned CLI proves its own names (an offset reconnect is the same keeper's CLI)
   // Remote reconnect: substitute the consumed-bytes offset so the keeper
   // replays exactly what we missed (__VS_OFFSET__ rides inside the ssh
   // inner-command string).

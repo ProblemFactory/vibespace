@@ -100,6 +100,8 @@ const ROWS = Object.freeze([
   { type: 'main-ask', identity: 'requestId', producer: 'src/server/main-asks.js', builtIn: 'src/main-ask.js', waits: true, answer: 'card', card: 'none', handled: true, chat: false, owner: 'the conversation\'s own permission / question card (lane parked-ask-inbox) — src/lib/chat-renderers.js', on: 'the permission card in this conversation', scope: 'conversation' },
   { type: 'helper-ask', identity: null, producer: 'src/server/helper-asks.js', builtIn: 'src/helper-ask.js', waits: true, answer: 'card', card: 'none', handled: true, chat: false, owner: 'the helper\'s permission card on its Agent card (lane S1) — src/lib/chat-renderers.js', on: 'the helper\'s permission card in this conversation', scope: 'conversation' },
   { type: 'browser-grant', identity: 'profileId', producer: 'src/agent-routes/status.js', builtIn: 'src/ask-grant.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-ask', '--grant browser:<profile>', 'filed'), scope: 'conversation' },
+  // lane setting-doors pick 2: an ask that PROPOSES one change of one row — the owner's one press writes it (src/server/setting-holds.js)
+  { type: 'setting-change', identity: 'key', producer: 'src/agent-routes/status.js', builtIn: 'src/ask-setting.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-ask', '--propose <row>=<value> [--until …]', 'filed'), scope: 'conversation' },
   // ── machines ──
   // lane queued-is-not-woke laws 2 + 3, SHAPE C (主开发 2026-11-13 13:35Z / 13:42Z): ONE item per conversation and TURN — filed
   // when a group message has not been handed to a conversation in a RUNNING turn for FOUR HOURS (read from the hub's own record
@@ -135,6 +137,15 @@ const ROWS = Object.freeze([
   { type: 'vault-store-refused', identity: null, producer: 'src/server/vault-run-door.js', waits: false, answer: 'reply', card: 'none', handled: true, chat: true, kind: 'check', scope: 'group' },
   { type: 'vault-grant-stale', identity: null, producer: 'src/server/vault-run-door.js', waits: false, answer: 'reply', card: 'none', handled: true, chat: true, kind: 'check', scope: 'group' },
   { type: 'vault-policy-approved', identity: null, producer: 'src/server/vault-run-door.js', waits: false, answer: 'reply', card: 'none', handled: true, chat: true, kind: 'check', scope: 'conversation' },
+  // B-ef1b: the retired job-secrets notice (src/server/migrations.js — 2026-10-job-secrets-retired, re-filed by
+  // 2026-11-job-secrets-buttons): its two buttons ARE the step it used to ask for in words — «Move into the vault» seals each value
+  // as a vault entry and then deletes the file, «Delete the file» deletes it as it is (src/server/job-secrets-door.js answers both,
+  // a person's door; src/lib/vault-paste-box.js answerJobSecrets asks the unlock / the confirm first)
+  { type: 'job-secrets-retired', identity: null, producer: 'src/server/migrations.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'check', scope: 'group',
+    buttons: Object.freeze([
+      Object.freeze({ answer: 'move', label: i18nKey('Move into the vault'), title: i18nKey('Seal each value as a vault entry, then delete the file'), door: 'job-secrets' }),
+      Object.freeze({ answer: 'delete', label: i18nKey('Delete the file'), title: i18nKey('Delete the file and the values in it'), door: 'job-secrets' }),
+    ]) },
   // ── the account pool ──
   { type: 'pool-cross-provider', identity: 'askId', producer: 'src/server/usage-pool-engine.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', scope: 'conversation' },
   { type: 'reset-credit', identity: null, producer: 'src/server/usage-pool-engine.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: false, owner: 'the limit wall card\'s «Use a reset credit» (design-reset-credits) — src/lib/chat-renderers.js', on: 'the limit card in this conversation', scope: 'conversation' },
@@ -149,6 +160,11 @@ const ROWS = Object.freeze([
   { type: 'cli-check-again', identity: null, producer: 'src/server/cli-unmeasured-notice.js', builtIn: 'src/cli-caps.js', waits: false, answer: 'reply', card: 'inbox-window', handled: true, chat: true, kind: 'check', scope: 'group', checkAgain: i18nKey('Check this Claude Code version on this machine once more now — this item goes away by itself when it passes'),
     // the door the model posts ({ok, state}) and what it says after: the row declares it (the model never branches on this type)
     checkRoute: '/api/accounts/cli-check-again', checkSaid: { done: i18nKey('Claude Code is checked — those accounts are back in the pool'), started: i18nKey('Checking Claude Code on this machine again — about five minutes'), already: i18nKey('Already checking — about {n} min left'), off: i18nKey('Checking a new Claude Code is turned off in Settings (Accounts) — those accounts wait for a VibeSpace update'), none: i18nKey('Nothing to check on this machine right now'), failed: i18nKey('Could not start the check') } },
+  // B-5ce7: a PARKED mount's Reconnect (its listing hung while the provider answered — nothing automatic reconnects it): one
+  // item per mount (merged by mountId), its door declared here — the For-you window's Reconnect posts the route with the
+  // item's mountId filled in ({mountId}); the item resolves itself once the park ends
+  { type: 'mount-reconnect', identity: 'mountId', producer: 'src/server/mount-for-you.js', waits: false, answer: 'reply', card: 'inbox-window', handled: true, chat: true, kind: 'check', scope: 'group', checkAgain: i18nKey('Reconnect this storage now — this item goes away by itself once it is connected'), checkLabel: i18nKey('Reconnect'),
+    checkRoute: '/api/mounts/{mountId}/reconnect', checkSaid: { done: i18nKey('Reconnected — the storage answers again'), started: i18nKey('Connected — the storage is still being checked; it is parked again if its listing keeps hanging'), none: i18nKey('Could not reconnect the storage'), failed: i18nKey('Could not reconnect the storage') } },
   { type: 'browser-restart', identity: null, producer: 'src/server/browser-keeper.js', waits: false, answer: 'reply', card: 'inbox-window', handled: true, chat: true, kind: 'check', scope: 'group' },
   // the base's two browser cards (int358: lanes browser-surfaces + browser-login, after this registry's own base — int360 seam (e)):
   // filed under the browser's group key, drawn on the row by proposalAskHtml, answered by their own Approve / Reject; merged by
@@ -156,7 +172,7 @@ const ROWS = Object.freeze([
   { type: 'browser-surface', identity: null, producer: 'src/server/browser-dialogs.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: true, kind: 'browser', scope: 'group' },
   { type: 'save-login', identity: null, producer: 'src/server/browser-logins.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: true, kind: 'approval', scope: 'group' },
   // ── channels ──
-  { type: 'channel-watch-request', identity: 'id', producer: 'src/server/channels-access.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-channels', 'watch --mode wake', 'filed'), scope: 'about', decide: 'person', ends: ['allowed', 'denied', 'expired'], showsExpiry: true },
+  { type: 'channel-watch-request', identity: 'id', producer: 'src/server/channels-access.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-channels', 'watch --mode wake', 'filed'), scope: 'about', decide: 'person', ends: ['allowed', 'denied', 'expired', 'agent'], showsExpiry: true },   // lane bl-msg B-ae13: + 'agent' — the asker withdrew it («withdrawn by the agent»)
   { type: 'channel-held-digest', identity: 'id', producer: 'src/server/channels-access.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', scope: 'group', decide: 'person', ends: ['delivered', 'discarded', 'expired'], stamp: 'deliver', showsExpiry: true, verbs: Object.freeze({ approve: i18nKey('Deliver'), reject: i18nKey('Discard'), title: i18nKey('Sends them now, as one block — a billed turn') }) },   // lane wake-approve-card r6: hits a boot found held longer than their window × 24 — Deliver (a billed turn) / Discard, never sent by themselves
   { type: 'open-channel', identity: 'key', producer: 'src/server/channels-access.js', waits: false, answer: 'reply', card: 'none', handled: true, chat: true, kind: 'approval', cli: C('vibespace-channels', 'request', 'filed'), scope: 'about', decide: 'person', closer: 'hide' },
   { type: 'channel-api-proposal', identity: 'id', producer: 'src/server/channel-api-cards.js', builtIn: 'src/channel-api-card.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: false, owner: 'the raw-API card the chat draws where it was proposed (B-2198) — src/lib/channel-api-card-view.js', on: 'the API card in this conversation', scope: 'group' },
@@ -522,7 +538,7 @@ function settledWords(item, t = fmt, kind = null) {
   item = ruledOf(item);
   const by = item && item.resolvedBy;
   const k = kind || (needOf(item) || {}).kind;
-  if (item && item.reply && item.reply.text) return t('you replied');
+  if (item && item.reply && (item.reply.text || item.reply.pictures)) return t('you replied');   // B-51dd: a picture alone is a reply
   if (by === 'allowed' && item.resolvedFact && item.resolvedFact.late === true) return t('let through once · waiting for it to run again');   // r8: a late Allow without the person mark (its stamp says «by you» when it has one)
   if (by === 'allowed') return k === 'approval' ? t('approved') : t('allowed');
   if (by === 'denied') return t('denied');
@@ -643,7 +659,13 @@ function deadlineOf(item, { t = fmt, now = Date.now(), clock = 'hub' } = {}) {  
   const marked = !!(item.action && item.action.late);   // the PRODUCER says the deadline passed and the card still answers
   const at = Number(item.expiresAt), from = Number(item.createdAt);
   if (!marked && !(Number.isFinite(at) && Number.isFinite(from) && at > from && at - from <= DEADLINE_LIVE_MS)) return null;
-  const left = Number.isFinite(at) ? at - now : 0, total = Number.isFinite(at) && Number.isFinite(from) ? at - from : 0;
+  const total = Number.isFinite(at) && Number.isFinite(from) ? at - from : 0;
+  // B-ba7b (hardening): never more time left than the deadline's whole length. On the product's road the hub's `now` is noted
+  // before any draw (setTodos → noteHubClock) and every createdAt is at or before it, so «now» does not fall before a card's
+  // stamp — but a device clock that steps back between the note and a tick, or the 'device' clock (an older hub sends no `now`),
+  // can: then «left» read past the whole length («61 sec left» for a 60 s ask). A card before its own stamp shows its whole
+  // length, unmoving, until the stamp passes (scripts/test-deadline-clock.mjs)
+  const left = Number.isFinite(at) ? (total > 0 ? Math.min(at - now, total) : at - now) : 0;
   const state = marked ? 'late' : left <= 0 ? 'due' : 'live';
   const lost = marked && item.action.restartLost === true;   // r8: a restart since — an Allow would mint nothing (r23); said, and not offered
   const dev = clock === 'device' ? '-device' : '';
@@ -955,7 +977,7 @@ function runCardOf(item, { t = fmt } = {}) {
   const cmd = full && !/\u2026$/.test(cmd0) ? cmd0 + '\u2026' : cmd0;   // the body's cut is drawn as one
   const cutText = !full ? null : !foldCut ? t('The command is {n} characters long; the card shows its first {m} — the whole command is under “{fold}”.', { n: total, m: shown, fold: t('Technical details') })
     : t('The command is over {max} characters, so the whole command was not kept: see its run record in the Vault window. The card shows its first {m}.', { max: full.length, m: shown });   // r12: the cut point is what ARRIVED (the store's 4 096) — no producer states a total past it
-  return { headline, cmd, cut: full ? { n: total, whole: !foldCut, shown, text: cutText } : null, again, rows, changes, output: f.masking ? said(RUN_MASKING, f.masking) : null, always: { offered: a.offered === true && !alwaysGone, hint }, window: win ? { offered: true, hint: [{ text: t(WINDOW_HINT_WORDS) }], short: [{ text: t(WINDOW_SHORT_WORDS) }], lines: winLines } : { offered: false, hint: null, ...(winOff.length ? { excepted: [{ text: t(WINDOW_EXCEPTED_WORDS, { entry: winOff.join('”, “') }) }] } : {}) }, fold };   // r7: `window` — «Allow for 1 hour» and its words; r8: `excepted` — why it is not offered
+  return { headline, cmd, cut: full ? { n: total, whole: !foldCut, shown, text: cutText } : null, again, rows, changes, output: f.masking ? said(RUN_MASKING, f.masking) : null, always: { offered: a.offered === true && !alwaysGone, hint }, window: win ? { offered: true, hint: [{ text: t(WINDOW_HINT_WORDS) }], short: [{ text: t(WINDOW_SHORT_WORDS) }], ...(win.turnBy && typeof win.turnBy === 'object' ? { by: [{ text: turnByWords(win.turnBy, t) }] } : {}), lines: winLines } : { offered: false, hint: null, ...(winOff.length ? { excepted: [{ text: t(WINDOW_EXCEPTED_WORDS, { entry: winOff.join('”, “') }) }] } : {}) }, fold };   // r7: `window` — «Allow for 1 hour» and its words; r8: `excepted` — why it is not offered
 }
 /** lane vault-standing-request r2 (VISUAL — 主开发's read of the standing card's shots: PROSE, the raw vault:// reference in
  *  its first line and half linkified on the phone; the run card already had the right shape): AN AGENT'S STANDING REQUEST
@@ -998,7 +1020,26 @@ function windowWords(w, t = fmt) {
   const until = clockWords(Number(w.until)), entries = (Array.isArray(w.entries) ? w.entries : []).filter((x) => typeof x === 'string' && x);
   return [t(WINDOW_WRITES_WORDS, { entry: entries.join('”, “'), until }),
     ...(Array.isArray(w.changes) ? w.changes : []).filter((c) => c && typeof c === 'object').map((c) => t(c.expired === true ? WINDOW_ENDED_WORDS : WINDOW_REPLACES_WORDS, { entry: s(c.entry), when: clockWords(Number(c.until)), until })),
-    ...(w.switchOn === true ? [t(WINDOW_SWITCH_WORDS)] : [])];   // r8: the switch it turns on (the detail used to say it)
+    ...(w.switchOn === true ? [t(WINDOW_SWITCH_WORDS)] : []),   // r8: the switch it turns on (the detail used to say it)
+    ...(w.turnBy && typeof w.turnBy === 'object' ? [turnByWords(w.turnBy, t)] : [])];   // B-d868: who started the turn asking (a card from before says nothing)
+}
+/** B-d868: who started the turn that asks — the door's kept fact (claude-stream-json `_turnBy`, read off the CLI's own record
+ *  and the wrapper's stamp of a person's frame) in words; anything unproved says «not recorded», never «you» */
+const TURN_BY_WORDS = Object.freeze({
+  person: i18nKey('The turn running when this asked was started by you'),
+  peer: i18nKey('The turn running when this asked was started by another session, «{name}»'),
+  notification: i18nKey('The turn running when this asked was started by a VibeSpace notification ({name})'),
+  group: i18nKey('The turn running when this asked was started by a group report'),
+  task: i18nKey('The turn running when this asked was started by a background task finishing'),
+  server: i18nKey('The turn running when this asked was started by a delivered message, not typed here'),
+  unrecorded: i18nKey('Who started this turn is not recorded'),
+});
+const TURN_BY_BACKGROUND_WORDS = i18nKey('Who started this is not recorded: background work another turn started is still running');
+function turnByWords(tb, t = fmt) {
+  const by = tb && typeof tb.by === 'string' && Object.prototype.hasOwnProperty.call(TURN_BY_WORDS, tb.by) ? tb.by : 'unrecorded';
+  const name = tb && typeof tb.name === 'string' && tb.name ? tb.name : '';
+  if (by === 'unrecorded' && tb && tb.why === 'background') return t(TURN_BY_BACKGROUND_WORDS);
+  return (by === 'peer' || by === 'notification') && !name ? t(by === 'peer' ? TURN_BY_WORDS.server : TURN_BY_WORDS.unrecorded) : t(TURN_BY_WORDS[by], { name });
 }
 const END_DAYS_WORDS = i18nKey('for {n} days'), END_HOURS_WORDS = i18nKey('for {n} hours'), END_NONE_WORDS = i18nKey('with no end');
 /** One change (vault-run-door changeFactsOf: {scope, until, expired?, entry?, end: {days} | {hours} | {none}}) in words. */

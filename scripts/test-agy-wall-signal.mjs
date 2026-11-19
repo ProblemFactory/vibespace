@@ -423,15 +423,92 @@ console.log('⑨ THE REAL CONSUMER (acp-events) under server.js\'s REAL engine l
   ok('a session that names NO model anywhere (no lock, pick, spawn or usage record) ⇒ no signal, the line — never a guess', disk(fake.id) === null && logs.slice(n0).some((l) => /not read \(model\)/.test(l)), logs.slice(n0).join(' | '));
 }
 
-console.log('⑨b the on-demand setting says the truth (the owner\'s ruling A)');
+console.log('⑨b THE TWO ROWS SAY THE TRUTH — one vendor each (the owner 2026-11-16, looking at the quota row: «fable是antigravity吗？»)');
 {
   const src = read('src/lib/settings-schema.js');
-  const OPT = 'Manual (⟳ button) — plus ONE automatic read after a usage wall', DESC = 'Manual = when you click ⟳, and once by itself when an Antigravity conversation hits a usage wall;';
-  ok('the «manual» option and the description name the one automatic read after a wall', src.includes(`{ value: 'manual', label: t('${OPT}') }`) && src.includes(DESC) && !src.includes('Manual only (⟳ button)') && !src.includes('Manual = only when you click ⟳'));
+  const S = await import(path.join(REPO, 'src/lib/settings-schema.js'));
   const zh = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default, ja = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
-  const dk = Object.keys(zh).find((k) => k.includes(DESC));
-  ok('…in zh and ja too (the option, and the description\'s manual clause)', !!zh[OPT] && !!ja[OPT] && !!dk && /Antigravity/.test(zh[dk]) && /Antigravity/.test(ja[dk]), JSON.stringify([zh[OPT], ja[OPT]]));
-  ok('…and the door\'s behaviour is unchanged by the words: «off» still refuses a wall read', /if \(mode === 'off'\) return \{ ok: false, status: 403, code: 'refresh-off'/.test(read('src/server/cli-usage-door.js')));
+  const C = S.SETTINGS_SCHEMA['accounts.onDemandQuotaRefresh'], A = S.SETTINGS_SCHEMA['antigravity.autoUsageReads'];
+  const words = (row) => [row.label, row.description, ...row.options.map((o) => o.label)];
+  const inAll = (row, re) => [words(row), words(row).map((w) => zh[w]), words(row).map((w) => ja[w])].map((ws) => ws.some((w) => re.test(String(w))));
+  // law 1: Claude's row says Claude, and only Claude
+  ok('law 1: Claude\'s row is titled for Claude, its four choices are Claude\'s (⟳ · the popup · the CLI · off — «Off (never contact Anthropic)» kept as it was)',
+    C.label === 'Claude usage refresh (model-scoped limits like Fable)' && JSON.stringify(C.options.map((o) => o.label)) === JSON.stringify(['Manual (⟳ button)', 'Auto on popup open (when >30 min stale)', 'Auto via the CLI (burn-aware background refresh)', 'Off (never contact Anthropic)']) && C.default === 'manual', JSON.stringify(C.options));
+  ok('…and NO word of Antigravity in it — title, choices or description — in English, Chinese or Japanese', inAll(C, /Antigravity/).every((x) => !x) && words(C).every((w) => !!zh[w] && !!ja[w]), JSON.stringify(inAll(C, /Antigravity/)));
+  // law 2: Antigravity's two reads have their own row, where Antigravity's settings are
+  ok('law 2: Antigravity\'s row sits in its own section (Antigravity CLI), on / off, on by default', A && A.category === S.SETTINGS_SCHEMA['antigravity.defaultModel'].category && A.default === 'on' && JSON.stringify(A.options.map((o) => [o.value, o.label])) === JSON.stringify([['on', 'Automatically'], ['off', 'Only when I press Re-check']]), JSON.stringify(A && { cat: A.category, opts: A.options }));
+  ok('…its description says when each read fires and its bounds — a usage wall; a stretch of work + 5 minutes; once per account per 30 minutes; never during a turn; never idle — and that Re-check reads either way, the row deciding only the reads that happen by themselves (U1), in three languages',
+    /usage wall/.test(A.description) && /a turn ends and 5 minutes pass with no new turn on the account/.test(A.description) && /at most once per account per 30 minutes/.test(A.description) && /never during a turn/.test(A.description) && /never for an idle account/.test(A.description) && /Either way, Re-check in the account's menu reads it: this row decides only the reads that happen by themselves\./.test(A.description) && words(A).every((w) => !!zh[w] && !!ja[w]), A.description);
+  // U3 (主开发's bounded check, 2026-11-16): A ROW PROMISES ONLY WHAT THE CODE DOES — the thirty minutes bound only the read after a
+  // stretch of work (after-turn-read.js PACE_MS); the wall read is once per wall (stream-wall.js's ledger). The clause sits on the
+  // read it bounds, naming it («that read» / «这一次» / «後者は»), after the stretch-of-work read; the wall's clause says once per wall
+  const U3 = {
+    en: { wall: 'usage wall', each: 'once each time', work: 'stretch of work', bound: 'that read comes at most once per account per 30 minutes' },
+    zh: { wall: '用量上限', each: '每撞到一次', work: '一段工作结束', bound: '这一次每账号每 30 分钟最多一次' },
+    ja: { wall: '使用量の上限', each: 'たびに 1 回', work: '作業の区切り', bound: '後者はアカウントごとに 30 分に最大 1 回' },
+  };
+  const bounds = (d, w) => { d = String(d); const a = d.indexOf(w.wall), b = d.indexOf(w.work), c = d.indexOf(w.bound), e = d.indexOf(w.each); return a >= 0 && e >= 0 && b > a && c > b && !d.slice(0, b).includes('30'); };
+  const descOf = { en: A.description, zh: zh[A.description], ja: ja[A.description] };
+  ok('U3: the thirty minutes bound only the read after a stretch of work — the clause comes after that read and names it; the wall read is once each time a wall is hit; no «30» before the stretch of work — in English, Chinese and Japanese',
+    ['en', 'zh', 'ja'].every((l) => bounds(descOf[l], U3[l])), JSON.stringify(Object.fromEntries(['en', 'zh', 'ja'].map((l) => [l, bounds(descOf[l], U3[l])]))));
+  // its RED: the words this round replaced (the clause after both reads, bounding the wall read too), as they shipped in the row
+  const BEFORE_U3 = {
+    en: "Automatically: an account's usage is read once when a conversation hits a usage wall, and once when its stretch of work ends and 5 minutes pass with no new turn — at most once per account per 30 minutes, never during a turn, never for an idle account. Only when I press Re-check: nothing is read by itself; Re-check in the account's menu still reads it.",
+    zh: '自动：对话撞到用量上限时读一次；一段工作结束且 5 分钟内没有新一轮时再读一次——每账号每 30 分钟最多一次，轮次进行中不读，闲置账号不读。仅在我按「重新检查」时：不会自己读；账号菜单里的「重新检查」仍然可以读。',
+    ja: '自動：会話が使用量の上限に達した時に 1 回、作業の区切りが来て 5 分間新しいターンがない時に 1 回読み取ります——アカウントごとに 30 分に最大 1 回、ターン中は読まず、アイドルのアカウントも読みません。「再チェック」を押した時だけ：自動では読みません。アカウントのメニューの「再チェック」ではいつでも読めます。',
+  };
+  ok('CONTROL (U3): the words before this round fail that leg in every language — the leg goes RED on a clause that bounds both reads', ['en', 'zh', 'ja'].every((l) => !bounds(BEFORE_U3[l], U3[l])) && !zh[BEFORE_U3.en] && !ja[BEFORE_U3.en], JSON.stringify(Object.fromEntries(['en', 'zh', 'ja'].map((l) => [l, bounds(BEFORE_U3[l], U3[l])]))));
+  // 主开发 2026-11-17 03:25Z: THE NOTE UNDER THE ROW IS IN THE PERSON'S LANGUAGE — the apply note (advanced mode, and the head's
+  // tooltip) said engineers' English on a Chinese screen («the CLI usage door — the wall read and the after-turn read»). It now says
+  // WHO and WHEN in the description's own words, through the dictionary; a module's name never reaches the screen
+  const { applyHead } = await import(path.join(REPO, 'src/lib/cli-config-chips.js'));
+  const trOf = (d) => (k) => (Object.prototype.hasOwnProperty.call(d, k) ? d[k] : k);
+  const MODULE_WORDS = /door|wall read|after-turn|engine|wrapper|rung/i;
+  const noteOf = (apply, head) => {
+    const en = head(apply, { t: (k) => k, advanced: true }), zhH = head(apply, { t: trOf(zh), advanced: true }), jaH = head(apply, { t: trOf(ja), advanced: true });
+    return { en, zh: zhH, ja: jaH, ok: !MODULE_WORDS.test(en) && /usage wall/.test(en) && /stretch of work/.test(en) && [zhH, jaH].every((h) => !/[A-Za-z]{3,}/.test(String(h).replace(/VibeSpace/g, ''))) };
+  };
+  const note1 = noteOf(A.apply, applyHead);
+  ok('the note under Antigravity\'s row (advanced mode, and the head\'s tooltip) says who reads and when in the description\'s own words — «Read by VibeSpace · when a conversation hits a usage wall, and after a stretch of work» — and on a Chinese or Japanese screen it is that language alone (no English word but VibeSpace), no module\'s name',
+    note1.ok && !!zh[A.apply.how] && !!ja[A.apply.how] && /head\.title = t\(schema\.apply\.how\)/.test(read('src/lib/settings-ui.js')), JSON.stringify(note1));
+  // its REDs: the words before this fix; the chip that draws the note without the dictionary (an in-memory copy of cli-config-chips.js)
+  const note2 = noteOf({ ...A.apply, how: 'the CLI usage door — the wall read and the after-turn read' }, applyHead);
+  const CHIPS = read('src/lib/cli-config-chips.js'), DICT_LINE = "const how = apply.how ? t(apply.how) : '';";
+  const headNoDict = (await import('data:text/javascript;base64,' + Buffer.from(CHIPS.split(DICT_LINE).join("const how = apply.how || '';")).toString('base64'))).applyHead;
+  const note3 = noteOf(A.apply, headNoDict);
+  ok('RED (the note): the words before this fix fail that leg (a module\'s name; English on the zh and ja screens), and so does the chip that draws the note without the dictionary',
+    CHIPS.includes(DICT_LINE) && !note2.ok && !note3.ok && /when a conversation hits a usage wall/.test(note3.zh), JSON.stringify({ before: note2, noDict: note3.zh }));
+  // law 6: the words — what each choice DOES, one sentence each, a few lines
+  ok('law 6: each description opens a sentence per choice with the choice\'s own words, and stays a few lines (≤ 560 characters)',
+    ['Manual:', 'Auto on popup open:', 'Auto via the CLI:', 'Off:'].every((c) => C.description.includes(c)) && ['Automatically:', 'Only when I press Re-check:'].every((c) => A.description.includes(c)) && C.description.length <= 560 && A.description.length <= 560, JSON.stringify([C.description.length, A.description.length]));
+  // THE WORDS NAME THE CONTROL THE PERSON WILL FIND (主开发 2026-11-16 09:46Z): an Antigravity account's row draws no ⟳ — its own
+  // read is its menu's «Re-check» (manage-agents' home rows: doRecheck, the sign-in check then the usage read through the door).
+  // The row says that word, and in each language it is the menu item's OWN dictionary word, so the two cannot drift apart
+  const MA_SRC = read('src/lib/manage-agents.js');
+  const offW = A.options.find((o) => o.value === 'off').label;
+  ok('…the Antigravity row names the control the person will find: «Re-check» in the account\'s menu — the menu item\'s own word in English, Chinese and Japanese (its off choice and its description)',
+    MA_SRC.includes("{ label: t('Re-check'), action: doRecheck },") && !/⟳/.test(offW) && !/⟳/.test(A.description)
+      && [[(x) => x, 'Re-check'], [(x) => zh[x], zh['Re-check']], [(x) => ja[x], ja['Re-check']]].every(([tr, word]) => !!word && String(tr(offW)).includes(word) && String(tr(A.description)).includes(word)),
+    JSON.stringify({ zh: [zh['Re-check'], zh[offW]], ja: [ja['Re-check'], ja[offW]] }));
+  // …and Claude's Off sentence says what is true in BOTH places: the popup hides its ⟳; the Agents panel keeps «Refresh all», which
+  // answers Off with a toast naming the row by its title
+  ok('…Claude\'s «Off» sentence is true in both places: the popup hides its ⟳ under Off, and «Refresh all» stays and says it is off (its toast names «Claude usage refresh») — the button\'s own word in each language',
+    C.description.includes('Off: never contacts Anthropic; the popup hides its ⟳, and Refresh all says it is off.') && /const refreshBtn = odMode === 'off' \? '' :/.test(read('src/lib/usage-meter.js'))
+      && MA_SRC.includes("showToast(t('Claude usage refresh is Off in Settings'), { type: 'error' });") && MA_SRC.includes("refreshAll.innerHTML = `${UI_ICONS.refresh}<span>${t('Refresh all')}</span>`;")
+      && String(zh[C.description]).includes(zh['Refresh all']) && String(ja[C.description]).includes(ja['Refresh all']) && !!zh['Claude usage refresh is Off in Settings'] && !!ja['Claude usage refresh is Off in Settings'],
+    JSON.stringify([zh['Refresh all'], ja['Refresh all']]));
+  ok('…and no word anywhere names the old title «On-demand quota refresh» (the explainer, the toast, the pool\'s notice name «Claude usage refresh»)',
+    ['src/lib/usage-meter.js', 'src/lib/manage-agents.js', 'src/server/usage-pool-engine.js'].every((f) => !/On-demand quota refresh/.test(read(f).replace(/\/\/[^\n]*/g, ''))) && Object.keys(zh).every((k) => !/On-demand quota refresh/.test(k)));
+  // the select's width: every option of both rows no wider than the release's manual option (which fit the 390 phone)
+  const wu = (t) => [...String(t)].reduce((n, c) => n + (/[　-鿿＀-￯]/.test(c) ? 2 : 1), 0);   // width units: a full-width character counts two
+  const REL = { en: wu('Manual (⟳ button) — plus ONE automatic read after a usage wall'), zh: wu('手动（⟳ 按钮）— 另外在撞到用量上限后自动读一次'), ja: wu('手動（⟳ ボタン）— 使用量の上限に達した後に 1 回だけ自動で読み取り') };
+  const opts = [...C.options, ...A.options].map((o) => o.label);
+  const widest = { en: Math.max(...opts.map(wu)), zh: Math.max(...opts.map((o) => wu(zh[o]))), ja: Math.max(...opts.map((o) => wu(ja[o]))) };
+  ok('…every choice of both rows is no wider than the release\'s manual option in English, Chinese and Japanese (a select is as wide as its longest option)', ['en', 'zh', 'ja'].every((l) => widest[l] <= REL[l]), JSON.stringify({ widest, release: REL }));
+  const LONG = { en: wu('Manual (⟳ button) — plus Antigravity’s own reads: after a usage wall, after a stretch of work'), zh: wu('手动（⟳ 按钮）— 另外 Antigravity 自己读：撞到用量上限后、一段工作结束后'), ja: wu('手動（⟳ ボタン）— さらに Antigravity は自動で：上限到達後、作業の区切り後') };
+  ok('CONTROL: the words of the hosted heavy run\'s red (the option that overflowed the 390 phone) are wider than the release\'s in every language — the leg above goes RED on them', ['en', 'zh', 'ja'].every((l) => LONG[l] > REL[l]), JSON.stringify({ long: LONG, release: REL }));
+  ok('…the door asks the row of the vendor whose account it is (test-agy-after-turn-read ⑭ drives it): Claude\'s Off still refuses there for an account on Claude\'s row, and Antigravity\'s automatic reads are refused under their own row\'s Off',
+    /if \(mode === 'off'\) return \{ ok: false, status: 403, code: 'refresh-off'/.test(read('src/server/cli-usage-door.js')) && /code: 'auto-reads-off'/.test(read('src/server/cli-usage-door.js')) && /code: 'no-auto-reads-row'/.test(read('src/server/cli-usage-door.js')) && !src.includes('plus Antigravity’s own reads'));
 }
 
 console.log('⑩ the gauge law on the account row');

@@ -181,6 +181,16 @@ answers with `vibespace-job answers [--wait 100]`; with `--stdin-open` they
 also stream to your stdin as JSONL. The owner conversation is notified when
 the panel is posted AND when the user answers.
 
+Its cause gone (the alarm cleared, the mirror fresh again)? `vibespace-job withdraw`
+(inside the job: its own panel; from the owner conversation: `withdraw <id>`)
+closes it and resolves its For-you item; `answers` then holds `{"withdrawn": true}`
+for that panel, as an unanswered one holds `{"expired": true}`. The job
+withdraws its own question from inside, or its owner conversation does — never another
+conversation (one that holds control included: it is refused, 403 `not-the-filer`). A
+`--stdin-open` job reads a withdraw BY ITS OWNER on its stdin as
+`{"withdrawn": true, "version": N}` (match the version to the panel you asked); its own
+withdraw is not echoed there.
+
 Example panel.json:
 ```json
 { "title": "Need the 2FA code", "timeoutS": 1800, "blocks": [
@@ -242,7 +252,11 @@ URL — share the new one.
   before the clear is withheld (`logs` says so) — runs after it log normally;
   a panel it was waiting on is withdrawn with the clear (`answers --wait`
   returns nothing for it — ask again if you still need the answer)
-- `stop <id> [--force]` · `start <id>` (revive parked) · `rm <id> [--stop]`
+- `stop <id> [--force]` · `start <id>` (revive parked) · `restart <id>` (stop, wait, start —
+  one answer; it asks the user first like `start`) · `rm <id> [--stop]`. A `start`
+  pressed while a stop's grace runs answers «still stopping (k s left) — it starts when
+  the stop ends (a VibeSpace restart before then forgets it: start it again)» and does
+  start then; a later `stop` cancels that start
 - `access <id> --view session|group|all --control session|group|all` —
   owner-only; the user can lock access against agent edits
 
@@ -304,7 +318,7 @@ it, a limit on the user slice does (`show` names which).
 
 view/control scopes: `session` (owner conversation only) / `group` (sessions in
 a Task Group the creator was in WHEN IT CREATED the job — the default view; never
-refreshed, so a job created outside any group is its owner's and the user's alone) /
+refreshed, so under `group` a job created outside any group is its owner's and the user's alone) /
 `all`. An id you
 can't view behaves as NONEXISTENT (uniform not-found — don't retry, it's not
 an error in your call). Owner = conversation lineage (survives resume).

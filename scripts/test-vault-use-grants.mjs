@@ -458,7 +458,7 @@ console.log('⑩ CONTROLS — patched copies, each RED on its leg');
 {
   const M = mutantCopies('vault-use-grants', REPO);
   const DSRC = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
-  const cut = "if (!verdict.ok && verdict.ask && !refused && spec.refs.length && spec.refs.every((r) => (standing.get(r.id) || {}).ok === true && memberUsable(d, r.id, (standing.get(r.id) || {}).id))) {";
+  const cut = "if (!verdict.ok && verdict.ask && !refused && spec.refs.length && spec.refs.every((r) => (standing.get(r.id) || {}).ok === true && (memberUsable(d, r.id, (standing.get(r.id) || {}).id) || sharedIds.has(r.id)))) {";   // B-bc3b: + a shared agent entry (no switch is its)
   ok(DSRC.split(cut).length === 2, 'the short-circuit line is there once (the control below patches it)');
   // (⑩ round 9's ruling-C pins of src/server/vault-run-door.js: MOVED to the fast scripts/test-vault-use-grants-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
   const noShort = M.load('src/server/vault-run-door.js', DSRC.replace(cut, 'if (false) {'), 'noshort');

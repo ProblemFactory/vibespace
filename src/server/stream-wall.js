@@ -15,6 +15,7 @@
 const fs = require('fs');
 const path = require('path');
 const quotaModel = require('../quota-model.js');
+const doorReads = require('../door-reads.js');
 
 const LIVE_MS = 5 * 60 * 1000;   // a wall stamped longer ago is history (a replayed record): written, never a trigger
 const SAME_RESET_S = 60;         // one wall said again (a retry on it, a re-attach) states its reset to within a second or two
@@ -83,6 +84,10 @@ function createStreamWallRoad({ harnessOf, cacheDir, usageWrite = require('../us
   function readOnce(key, sig, say) {
     if (disarmed.has(key)) { once('disarmed|' + key, `[stream-wall] ${key}: the wall re-check stays disarmed (${disarmed.get(key)}) — the stream's wall stands`); return null; }
     if (fired.some((f) => f.key === key && f.limitId === sig.limitId && Math.abs(f.resetsAt - sig.resetsAt) <= SAME_RESET_S)) return null;
+    // the ledger above is the hub's memory; a restart forgets it, and the wall replayed at attach (still live) would read the
+    // account AGAIN. The rule on disk (lane usage-predict): a wall measured at or before the account's last read — its
+    // recorded reading or the door's last run (src/door-reads.js) — was answered already
+    if (doorReads.lastReadAt(cacheDir, key, usageWrite) >= sig.measuredAt) return null;
     fired.push({ key, limitId: sig.limitId, resetsAt: sig.resetsAt });
     if (fired.length > 512) fired.shift();
     return Promise.resolve().then(() => door.read(key, { wall: true })).then((r) => {

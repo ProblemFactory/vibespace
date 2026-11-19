@@ -372,7 +372,7 @@ console.log('§21 THE BASIS IS BOUNDED — a member that cannot learn holds its 
   const rp = restart(null);
   ok(rp.seeded >= 4 && !rp.raw && rp.healthy && rp.problemRaw && rp.marked && rp.said === 1 && rp.back === 1 && rp.backEst, `THE POISON AFTER A RESTART (its rates in the seed): basisRaw false, 3 estimated on the seeded rates (marked ratesSeeded), the poisoned member read raw and NAMED («${rp.line}»); repaired ⇒ «${rp.again}»`, rp);
   const src = read('src/usage-estimator.js');
-  const mut = (tag, from, to) => { const M = mutantCopies('usage-relearn-stepped-' + tag, REPO); return src.includes(from) ? require(M.write('src/usage-estimator.js', src.replace(from, to), tag)) : null; };
+  const mut = (tag, from, to) => { const M = mutantCopies('usage-relearn-stepped-' + tag, REPO); return src.includes(from) ? require(M.write('src/usage-estimator.js', src.replace(from, to), tag)) : (() => { throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); })(); };
   const E60 = mut('unbounded', 'age >= (this.basisHoldMaxMs || BASIS_HOLD_MAX_MS) ?', 'false ?');
   const R60 = E60 ? ['storm', 'starve'].map((k) => scene(E60.UsageEstimator, k)) : null;
   ok(!!R60 && R60.every((x) => x.raw && x.lateRaw && !x.healthy), `RED: the 60 s removed (the hold unbounded) ⇒ ${R60 && R60.filter((x) => x.lateRaw).length} of 2 pools raw for good (${R60 && R60.map((x) => x.kind).join(', ')}: raw at 61 s and at 10 min)`, R60);
@@ -495,7 +495,7 @@ console.log('§24 THE FOLLOW-UP (round 6, picked): an idle turn looks again by i
   const id = idle(null);
   ok(id.idle >= 1 && id.armed === 0 && id.retries === 1 && id.landed === 3, `AN IDLE TURN LOOKS AGAIN BY ITSELF: a planted ghost holder ⇒ ${id.idle} turn spent nothing («${id.line}…»), no turn armed, ONE retry armed (1 s, unref'd — never a spin); the defect cleared with no ask and no fold's end ⇒ all ${id.landed} owed folds landed`, id);
   const src = read('src/usage-estimator.js');
-  const mut = (tag, from, to) => { const M = mutantCopies('usage-relearn-stepped-' + tag, REPO); return src.includes(from) ? require(M.write('src/usage-estimator.js', src.replace(from, to), tag)) : null; };
+  const mut = (tag, from, to) => { const M = mutantCopies('usage-relearn-stepped-' + tag, REPO); return src.includes(from) ? require(M.write('src/usage-estimator.js', src.replace(from, to), tag)) : (() => { throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); })(); };
   const EI = mut('noretry', '  _idleRetry() {\n', '  _idleRetry() { return;\n');
   const RI = EI ? idle(EI.UsageEstimator) : null;
   ok(!!RI && RI.retries === 0 && RI.landed === 0, `RED: round 6's idle turn (no retry) ⇒ ${RI && RI.landed} of 3 owed folds landed once the defect cleared — they wait for an ask that a hub nobody watches may not make`, RI);

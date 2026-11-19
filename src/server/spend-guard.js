@@ -171,6 +171,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
   // B-0a33 (2) × B-3b0f: while the ledger cannot be read no wait can be judged — '*' = every waiting frame is held
   const overCapNow = (now) => (unreadable ? ['*'] : A.waitingOverCap(state, limits(), now));
   const overagePolicy = () => (serverSetting('spend.allowOverageTurns') === true ? 'allow' : 'refuse');
+  const ledgerFact = () => (unreadable ? { unreadable: true, error: unreadable.error } : null);   // B-3b0f, handed to every layer (the batch too)
 
   /** Retire the holds whose producer never came back. THE COUNT IS A CENSUS,
    *  not garbage collection: a hold that timed out is a site that authorized a
@@ -295,6 +296,12 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
       return { ...v, hold };
     }
     if (v.ok) return v;
+    return sayRefusal({ reason, session, sessionId, sessionName, cid, identity, key, v, now });
+  }
+
+  /** A refusal's side effects, ONCE: the journal line (deduped), the telemetry event and the "For you" notice (one per
+   *  identity per why per 6 h). Shared by the single gate and the batch gate so a batch refusal reads like any other. */
+  function sayRefusal({ reason, session = null, sessionId = null, sessionName = null, cid = null, identity = null, key = null, v, now = Date.now(), inbox = true }) {
     const sig = `${reason}|${key || '?'}|${v.why}`;
     const last = spoke.get(sig) || { at: 0, more: 0 };
     // r2: THE NOTICE NAMES THE CONVERSATION — the delivery ladder passes the session, not its name (its refusals said
@@ -340,7 +347,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     const waitItemStands = !!(wait && wait.key) && (() => { try { const ut = getUserTodos(); const sn = ut && typeof ut.snapshot === 'function' ? ut.snapshot() : null; return !!sn && (sn.open || []).some((i) => i && i.sessionKey === wait.key && String(i.itemKey || '').startsWith('messages-waiting:')); } catch { return false; } })();
     const heldSig = 'held|' + inboxSig;
     if (waitItemStands && now - lastInbox > REFUSE_INBOX_MS && now - (Number(state.notices[heldSig]) || 0) > REFUSE_INBOX_MS) { state.notices[heldSig] = now; persist(); log(`[spend-guard] ${v.why}: the spending notice at ${wait.key} is not filed — its «messages waiting» item stands and speaks for that turn`); }
-    if (now - lastInbox > REFUSE_INBOX_MS && !waitItemStands) {
+    if (inbox && now - lastInbox > REFUSE_INBOX_MS && !waitItemStands) {   // inbox:false = a batch, answered in the person's own dialog (U2 cure)
       const filed = fileInbox(text,
         `Reason: ${reason}\nIdentity: ${identity ? identity.name : 'unknown'}\nRefusal: ${v.why}\n`
         + (v.why === 'ledger-unreadable' ? `The ledger data/spend-budget.json could not be read (${unreadable ? unreadable.error : '?'}): no count can be said, so none run until it reads again or is removed.\n\n`   // B-3b0f
@@ -348,17 +355,97 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
           + `(instance ${v.counts.instanceDay}/${v.limits.perInstanceDay}).\n\n`)
         + (wait ? `${promisedHere} of them are messages waiting behind running turns — in ${behind.slice(0, 3).map((b) => `«${b.name || '?'}»`).join(', ')}${behind.length > 3 ? ` and ${behind.length - 3} more` : ''}. They run when that turn ends, or when you stop it there.\n\n` : '')
         + 'These ceilings bound every turn VibeSpace starts without you — the auto-continue after a usage limit, the Stop bookkeeping nudge, '
-        + 'Background Work notifications and messages from other sessions. Adjust them in Settings → Spending, or act on the account named above.',
+        + `Background Work notifications and messages from other sessions. ${A.spendRowOf(v) ? `Adjust this one in Settings → Spending — vibespace://settings/${A.spendRowOf(v)} — or act on the account named above.` : 'Adjust them in Settings → Spending, or act on the account named above.'}`,   // lane setting-doors pick 1: the row, as its link
         v.why === 'overage-in-use' || v.why === 'ledger-unreadable' ? 'high' : 'normal', noticeExpiry('refusal', now), A.refusalI18n(v, { sessionName: convName, behind }), wait && wait.key ? { key: wait.key } : null, v.why === 'ledger-unreadable' ? LEDGER_ITEM : null);   // B-3b0f: ONE item across restarts, resolved when the file reads again
       if (filed) { state.notices[inboxSig] = now; persist(); }
     }
     return v;
   }
 
+  /** THE GATE FOR A BATCH (lane auto-resume-bulk): ONE owner action that opens N billed turns — the resume of every
+   *  conversation a wall stopped — is ONE authorization. `items` = [{session, sessionId, sessionName, identity}] where
+   *  `identity` is the slot each turn would bill as the caller resolved it (the engine's fireIdentityFor, as every
+   *  auto-resume). The PURE batch decision checks every slot's share and the instance's total against charges AND live
+   *  holds; a refusal refuses the WHOLE batch (named: its bucket, its slot) and reserves nothing. An ALLOWED batch holds
+   *  one slot per item — each converted by `note()` when its turn is delivered or given back by `release()` when not,
+   *  exactly like a single authorization. FAIL CLOSED: an item whose slot cannot be named refuses the batch. */
+  function authorizeBatch({ reason, items = [], now = Date.now() } = {}) {
+    sweepHolds(now);
+    const list = Array.isArray(items) ? items.filter(Boolean) : [];
+    const resolved = list.map((it) => ({ ...it, identity: identityFor(it.session || null, it.identity || null) }));
+    const unnamed = resolved.find((it) => !(it.identity && it.identity.key));
+    // A CONVERSATION WITH NO BILLING SLOT never refuses the whole PRESS (the cure's should): an attended batch skips it by
+    // name and goes on with the named ones; a gated batch (the twin) still fails closed whole
+    const pressBatch = !!(A.SPEND_REASONS[reason] && A.SPEND_REASONS[reason].attended === true);
+    const named = resolved.filter((it) => it.identity && it.identity.key);
+    if (!list.length || (unnamed && (!pressBatch || !named.length))) {
+      const v = { ok: false, why: list.length ? 'identity-unknown' : 'empty-batch', detail: list.length ? `the credential slot ${(unnamed && unnamed.sessionName) || 'one conversation'} would bill could not be resolved` : 'the batch names no turn to authorize', retryAfter: 0, identity: null, reason, n: list.length, groups: [], counts: { hour: 0, day: 0, instanceDay: 0 }, limits: limits() };
+      if (list.length) sayRefusal({ reason, sessionId: unnamed && unnamed.sessionId, sessionName: unnamed && unnamed.sessionName, identity: null, key: null, v, now, inbox: false });
+      return v;
+    }
+    const byKey = new Map();
+    for (const it of named) {
+      const g = byKey.get(it.identity.key) || { identity: it.identity, n: 0 };
+      g.n++; byKey.set(it.identity.key, g);
+    }
+    const v = A.authorizeUnattendedBatch({
+      reason, groups: [...byKey.values()], state, limits: limits(), overagePolicy: overagePolicy(), pending, now, ledger: ledgerFact(),
+      ofKey: (k) => ({ overage: overageFor(k), credential: credentialFor(k), spendControl: spendControlFor(k) }),
+    });
+    if (!v.ok) {
+      const g0 = (v.groups && v.groups[0]) || v;
+      // a re-ask of ONE continue (the batch's loop, before each deliver) names ITS conversation in the journal, never «a batch of
+      // 1» (U2 cure's should)
+      const one = list.length === 1 ? list[0] : null;
+      return sayRefusal({ reason, sessionId: one ? one.sessionId || 'a batch of 1' : `a batch of ${list.length}`, sessionName: one ? one.sessionName || null : null, identity: g0.identity || null, key: g0.identity && g0.identity.key, v: { ...g0, ...v, counts: g0.counts || { hour: 0, day: 0, instanceDay: 0 }, limits: g0.limits || limits(), identity: g0.identity || null }, now, inbox: false });
+    }
+    // AN ATTENDED BATCH HOLDS NOTHING (the owner's ruling 2026-11-18 — the bulk press is the person's own act): one row per
+    // item, no hold — `note()` turns each delivered continue into the attended tally, never a stamp
+    // …and an account it refused (form two — 主开发 16:20Z) hands back its items as SKIPPED rows, by name: the rest go on
+    if (v.attended) {
+      const off = new Map((v.refusedSlots || []).filter((r) => r && r.identity && r.identity.key).map((r) => [String(r.identity.key), r]));
+      for (const r of off.values()) log(`[spend] bulk-resume: ${r.n} on ${r.identity.name || r.identity.key} left stopped — ${r.why}: ${r.detail || ''}`);
+      return { ...v, holds: named.filter((it) => !off.has(it.identity.key)).map((it) => ({ sessionId: it.sessionId || null, identity: it.identity, hold: null })),
+        skipped: [...named.filter((it) => off.has(it.identity.key)).map((it) => ({ sessionId: it.sessionId || null, identity: it.identity, why: off.get(it.identity.key).why })),
+          ...resolved.filter((it) => !(it.identity && it.identity.key)).map((it) => ({ sessionId: it.sessionId || null, identity: null, why: 'identity-unknown' }))] };
+    }
+    const holds = named.map((it) => {
+      const hold = `h${++holdSeq}`;
+      pending = A.reservePending(pending, { id: hold, key: it.identity.key, at: now });
+      return { sessionId: it.sessionId || null, identity: it.identity, hold };
+    });
+    return { ...v, holds };
+  }
+
+  /** THE RECORD OF A PRESS (the cure, 主开发 20:16Z): one row in the attended tally — when, how many, the batch id. */
+  function notePress({ reason, press, n = 0, now = Date.now() } = {}) { state = A.notePressRow(state, { at: now, reason, press, n }); persist(); return true; }
+
+  /** A QUIET LOOK at what a batch's authorization WOULD answer, per account (the bulk dialog's plan, BEFORE the press — 主开发
+   *  16:20Z: «… 10 on account B are left stopped: B is billing paid overage» is said before as well as after): nothing held,
+   *  nothing journalled, nothing filed, nothing granted. `refusedSlots` = [{identity, why, detail, n}]. */
+  function previewBatch({ reason, items = [], now = Date.now() } = {}) {
+    const resolved = (Array.isArray(items) ? items.filter(Boolean) : []).map((it) => ({ ...it, identity: identityFor(it.session || null, it.identity || null) })).filter((it) => it.identity && it.identity.key);
+    if (!resolved.length) return { refusedSlots: [] };
+    const byKey = new Map();
+    for (const it of resolved) { const g = byKey.get(it.identity.key) || { identity: it.identity, n: 0 }; g.n++; byKey.set(it.identity.key, g); }
+    const v = A.authorizeUnattendedBatch({ reason, groups: [...byKey.values()], state, limits: limits(), overagePolicy: overagePolicy(), pending, now, ledger: ledgerFact(),
+      ofKey: (k) => ({ overage: overageFor(k), credential: credentialFor(k), spendControl: spendControlFor(k) }) });
+    const refusedSlots = Array.isArray(v.refusedSlots) ? v.refusedSlots : v.ok ? [] : [{ identity: v.identity || null, why: v.why, detail: v.detail, n: resolved.length }];
+    // THE OVERAGE SENTENCE IS TRUE ON EVERY INSTANCE (the cure, 主开发 20:16Z): where the instance allows turns in paid overage,
+    // the accounts the press would BILL as overage — named for the dialog's cost box
+    const overageAllowed = overagePolicy() === 'allow';
+    const off = new Set(refusedSlots.map((r) => r && r.identity && r.identity.key).filter(Boolean));
+    const overageBilled = overageAllowed ? [...byKey.values()].filter((g) => !off.has(g.identity.key)).filter((g) => { const o = overageFor(g.identity.key); return !!o && o.inUse === 'yes'; }).map((g) => ({ identity: g.identity, n: g.n })) : [];
+    return { refusedSlots, overageAllowed, overageBilled };
+  }
+
+  /** Renew the batch's holds it has not reached yet (spend-authorizer renewPending) — see authorizeBatch. */
+  function renewHolds(holds, now = Date.now()) { pending = A.renewPending(pending, holds, now); return true; }
+
   /** Charge a spend that actually happened. The identity is the one
    *  `authorize()` resolved and put on its verdict — see identityFor; `hold` is
    *  the reservation that verdict opened, converted here into the stamp. */
-  function note({ reason = null, identity: identityHint = null, session = null, hold = null, reservation = null, carried = false, drain = false, ended = false, behind = null, now = Date.now() } = {}) {   // carried: a queued frame's reservation CONVERTED (round 3) — marked; durable like any spend (the guard's debounce, round 4)   // drain: a stash drain never stamps   // reservation: a queued frame's id (lane queued-is-not-woke) — its unit taken once, returnable by release
+  function note({ reason = null, identity: identityHint = null, session = null, hold = null, reservation = null, carried = false, drain = false, ended = false, behind = null, press = null, now = Date.now() } = {}) {   // carried: a queued frame's reservation CONVERTED (round 3) — marked; durable like any spend (the guard's debounce, round 4)   // drain: a stash drain never stamps   // reservation: a queued frame's id (lane queued-is-not-woke) — its unit taken once, returnable by release
     sweepHolds(now);
     // convert, never double-count: the stamp below IS this hold's outcome
     if (hold) pending = A.releasePending(pending, hold);
@@ -377,14 +464,14 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     const identity = identityFor(session, identityHint);
     // the stamp carries its producer (5b ②) so a later reader can say who spent the slot
     // ended (B-0a33): queued-wakes stopped waiting for the frame and cannot tell whether it ran — the unit stays, placed in this hour
-    const r = A.noteUnattendedSpend(state, { identity, at: now, limits: limits(), reason, rid: reservation, carried: !!carried, drain: !!drain, ended: !!ended, behind });
+    const r = A.noteUnattendedSpend(state, { identity, at: now, limits: limits(), reason, rid: reservation, carried: !!carried, drain: !!drain, ended: !!ended, behind, press });
     state = r.state;
     persist();   // round 4: a reservation and a conversion are as durable as any spent turn — the guard's own debounce, never a write inside the send call or the carry callback
     if (r.warn) {
       const text = A.noticeText(r.warn);
       log(`[spend] ${text}`);
       try { global.__vsEvent?.('spend-budget-notice', `${r.warn.scope}:${r.warn.pct}`); } catch { }
-      fileInbox(text, `Reason of the latest turn: ${reason || 'unattended'}\nScope: ${r.warn.scope}\nUsed: ${r.warn.used} of ${r.warn.limit}`, 'normal', noticeExpiry(r.warn.scope, now));
+      fileInbox(text, `Reason of the latest turn: ${reason || 'unattended'}\nScope: ${r.warn.scope}\nUsed: ${r.warn.used} of ${r.warn.limit}\n\nThe limit, to raise or lower it: vibespace://settings/${A.warnRowOf(r.warn)}`, 'normal', noticeExpiry(r.warn.scope, now));   // lane setting-doors pick 1: the warning names its row
     }
     return r.warn;
   }
@@ -431,7 +518,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
   }
 
   return {
-    authorize, note, release, overageFor, spendControlFor, nudgeRec, noteNudge, flush,
+    authorize, authorizeBatch, previewBatch, notePress, renewHolds, note, release, overageFor, spendControlFor, nudgeRec, noteNudge, flush,
     reservationState: (rid) => A.reservationState(state, rid),   // lane queued-is-not-woke round 3: 'converted' | 'reserved' | null
     // B-0a33 round 1: queued-wakes ends the ones no live entry holds. B-0a33 (2): the answer also carries `overCap` (read
     // lazily) — the waiting reservations no cap holds now: server.js wires this ONE function into the ladder, so the

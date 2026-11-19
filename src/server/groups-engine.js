@@ -326,6 +326,12 @@ function create({
    *  be stale-free or absent: `list()`/`listFor()` read no log after the
    *  first count. The first count is warmed in the background after boot. */
   const unreadMemo = new Map();   // `${gid}|${who}` → {since, lastAt, n}
+  // B-b17f's remainder (2.369.411): until the boot warm-up has PASSED a group, a reader never reads that group's log on the
+  // loop — an owed count is null («not counted yet»). The release's readers counted every group the warm-up had not reached
+  // from its log, synchronously, all in ONE turn (a page asking at the hub's start: every cold group's log at once). The
+  // warm-up's end announces the list once when a reader was answered null. coldIds: the groups of the start, not yet passed
+  let coldIds = null;
+  const coldAsked = new Set();
   // B-a354: a `mention` member counts only what reaches it (B-a354's rule, read through reachFor) — its mode is part of the memo's facts
   const modeOf = (g, who) => { const m = who === G.OWNER ? null : G.memberOf(g, who); return m ? m.notify : null; };
   function unreadFor(g, who, since, log = null) {   // `log` (B-b17f, the boot warm-up): the group's records already read
@@ -333,6 +339,9 @@ function create({
     const lastAt = Number(g.lastAt) || 0;
     const mode = modeOf(g, who);
     const sig = mode === 'mention' ? reachSig(g, who) : '';
+    // B-b17f's remainder: a COLD group's reader memoises nothing (the warm-up's count is the first memo) — an owed count is
+    // null, «not counted yet»; nothing owed is 0 by the facts alone
+    if (!log && coldIds && coldIds.has(g.id)) { if (!(lastAt > since)) return 0; coldAsked.add(g.id); return null; }
     if (!(lastAt > since)) { unreadMemo.set(key, { since, lastAt, mode, sig, n: 0 }); return 0; }
     const m = unreadMemo.get(key);
     if (m && m.since === since && m.lastAt === lastAt && m.mode === mode && m.sig === sig) return m.n;
@@ -404,11 +413,13 @@ function create({
 
   /** Append ONE record to the group's log, inside the groups door (the caller
    *  holds it): unique `at` per group, log FIRST, summary SECOND. */
+  /** the cure of batch 6: the words a member's @ answers to (display names + conversation ids) — the belt spares only these */
+  const memberWords = (g) => (g && Array.isArray(g.members) ? g.members.flatMap((m) => [m.member, displayName(g, m.member)]).filter(Boolean).map(String) : []);
   function appendIn(g, { author, text, mentions = [], raw: raw0 }) {
     const prevLastAt = Number(g.lastAt) || 0;
     const at = Math.max(now(), prevLastAt + 1);
     const raw = typeof raw0 === 'function' ? raw0(at) : raw0;   // B-eba8: an await's `until` is reckoned from the record's own instant
-    if (raw && raw.kind === 'message') text = belt.maskForSink(String(text == null ? '' : text), { dataDir });   // agent-output-sinks: belt a MEMBER's message only — never a system event (create/invite/kick/leave/rename/archive/closed/ended)
+    if (raw && raw.kind === 'message') text = belt.maskForSink(String(text == null ? '' : text), { dataDir, message: true, mentions: memberWords(g) });   // agent-output-sinks: belt a MEMBER's message only — never a system event (create/invite/kick/leave/rename/archive/closed/ended); lane bl-msg B-3e61: the MESSAGE mode (the rest of a line arrives)
     const rec = makeRecord({
       adapterId: A, convId: g.id, vendorId: `${raw.kind === 'message' ? 'gm' : 'gs'}-${at.toString(36)}-${(++seq).toString(36)}`, at,
       author: { id: author, name: displayName(g, author), isSelf: author === G.OWNER, isBot: false },
@@ -1161,18 +1172,31 @@ function create({
    *  owner's @-picker chose by id; `wake:true` (`--wake`) @mentions every OTHER
    *  member — an explicit act, each one a billed turn through the ladder. */
   async function post({ group: ref, from, text, wake: wakeEveryone = false, mayWake = null, consent = null, at: atRefs = [], mentions: picked = [], awaitReply: awaits = false, pressed = null } = {}) {
-    const body = String(text == null ? '' : text);
-    if (!body.trim()) return { ok: false, code: 'bad-request', error: 'an empty message' };
-    if (Buffer.byteLength(body, 'utf-8') > TEXT_MAX) return { ok: false, code: 'bad-request', error: 'message too large (16KB cap) — write a file and send its path instead' };
+    const given = String(text == null ? '' : text);
+    if (!given.trim()) return { ok: false, code: 'bad-request', error: 'an empty message' };
+    if (Buffer.byteLength(given, 'utf-8') > TEXT_MAX) return { ok: false, code: 'bad-request', error: 'message too large (16KB cap) — write a file and send its path instead' };
     const rg = resolveGroup(ref, from);
     if (!rg.ok) return rg;
     let rec = null;
+    // lane bl-msg B-3e61: the belt in its MESSAGE mode BEFORE the @-scan — a mention's place is read on the words the log keeps (a
+    // mask before it moves it), and `masked` = what was masked (the head as written), told to the sender; appendIn's belt is the
+    // sink's own and finds nothing more (idempotent)
+    const masked = [];
+    const mw = memberWords(getGroup(rg.group.id));
+    const body = belt.maskForSink(given, { dataDir, message: true, said: masked, mentions: mw });
+    // the owner's @-picker places (start / end on the words as typed) moved by what the belt masked before each — its prefix, masked
+    const picks = body === given || !Array.isArray(picked) ? picked : picked.map((x) => {
+      const ps = Number(x && x.start), pe = Number(x && x.end);
+      if (!Number.isInteger(ps) || !Number.isInteger(pe) || ps < 0 || pe > given.length) return x;
+      const d = belt.maskForSink(given.slice(0, ps), { dataDir, message: true, mentions: mw }).length - ps;
+      return { ...x, start: ps + d, end: pe + d };
+    });
     const res = await store.groups.update((gr) => {
       const g = gr.groups[rg.group.id];
       if (!g || g.archivedAt) return { ok: false, code: 'archived', error: `group "${rg.group.name}" is archived` };
       if (!(from === G.OWNER || G.memberOf(g, from))) return { ok: false, code: 'not-member', error: 'only a member can post' };
       const named = g.members.map((m) => ({ member: m.member, name: displayName(g, m.member) }));
-      const scan = G.scanAts(body, named, { explicit: picked });
+      const scan = G.scanAts(body, named, { explicit: picks });
       const atNo = G.atRefusal(scan, named);
       if (atNo) return { ...atNo, group: view(g) };
       const front = [];
@@ -1211,7 +1235,7 @@ function create({
     const others = res.group.members.map((m) => m.member).filter((m) => m !== from);
     const w = await wakeAll(res.group.id, rec, others, mayWake, { pressed });
     const aw = await awaitWakes(res.group.id, rec, w, mayWake, !!wakeEveryone, { pressed });
-    return { ok: true, group: view(getGroup(res.group.id)), message: rec, woke: w.woke, refused: w.refused, later: w.later, queued: w.queued, awaited: aw };
+    return { ok: true, group: view(getGroup(res.group.id)), message: rec, masked, woke: w.woke, refused: w.refused, later: w.later, queued: w.queued, awaited: aw };
   }
   /** an await entry is kept a day past its `until` (read's clause), then dropped on the next write */
   function pruneAwaits(awaits, at) {
@@ -1843,9 +1867,10 @@ function create({
     const turn = () => new Promise((r) => { const h = setImmediate(r); if (h && h.unref) h.unref(); });
     const whos = (g) => [[G.OWNER, ownerReadOf(g.id)], ...g.members.map((m) => [m.member, memberSince(m)])];
     const clearedN = (g) => (g.cleared && typeof g.cleared === 'object' ? Object.keys(g.cleared).length : 0);
+    try { coldIds = new Set(Object.keys(all())); } catch { coldIds = null; }   // the groups of the start (a later one is never cold)
     (async () => {
       await turn();
-      let ids; try { ids = Object.keys(all()); } catch { return; }
+      let ids; if (coldIds) ids = [...coldIds]; else { try { ids = Object.keys(all()); } catch { return; } }   // no start set (the store unread at create): as before
       for (const id of ids) {
         try {
           const g = getGroup(id);
@@ -1857,9 +1882,15 @@ function create({
           if (!now2 || (Number(now2.lastAt) || 0) !== lastAt || clearedN(now2) !== cl) continue;
           for (const [who, since] of whos(now2)) unreadFor(now2, who, since, records);
         } catch { /* an unreadable log: the next reader counts it */ }
+        finally { if (coldIds) coldIds.delete(id); }   // passed: counted, nothing owed, a record landed during the read or unreadable — the next reader counts it
         await turn();
       }
-    })().catch(() => { });
+    })().catch(() => { }).finally(() => {
+      coldIds = null;
+      if (!coldAsked.size) return;
+      const asked = [...coldAsked]; coldAsked.clear();
+      announce(asked, null, null, { pending: false });   // the counts a reader was answered null for, said once (no pending moved)
+    });
   })();
 
   return {

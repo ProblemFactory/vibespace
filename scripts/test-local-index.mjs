@@ -396,7 +396,7 @@ if (CLI) {
 
 console.log('⑯ RED controls (patched copies of the PURE module)');
 const SRC = fs.existsSync(LI_PATH) ? fs.readFileSync(LI_PATH, 'utf8') : '';
-const mutant = (tag, from, to) => { if (!SRC.includes(from)) return null; const f = path.join(DIR, `mut-${tag}.js`); fs.writeFileSync(f, SRC.replace(from, to)); return require(f); };
+const mutant = (tag, from, to) => { if (!SRC.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); const f = path.join(DIR, `mut-${tag}.js`); fs.writeFileSync(f, SRC.replace(from, to)); return require(f); };
 const M1 = mutant('trust', "      if (child === 'same') return { state: 'alive', why: 'its process runs; its socket sits on a mount that is not answering' };", "      return { state: 'alive', why: 'trusted' };");
 ok('M1 a judge that calls a no-answer socket alive (the hub\'s word) is caught by ⑦', M1 && !deq(staleDoc.sessions.map((r) => M1.judgeRow(r, { socket: kernel.sock[r.socket], child: r.child ? kernel.child[r.child.pid] : null }).state), ['alive', 'dead', 'alive', 'unknown']));
 const M2 = mutant('spread', "  return {\n    id: String(id), name:", "  return { ...s,\n    id: String(id), name:");

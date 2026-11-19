@@ -255,7 +255,8 @@ console.log('§1 EQUALITY — every interval, rate and estimate is 05082bbd0\'s:
     let bad = 0, n = 0, first = null;
     const both = (fn) => { const x = fn(A), y = fn(B); n++; if (!near(x, y)) { bad++; first = first || { x, y }; } };
     for (const [key] of A.IDS) both((w) => w.est.ratesFor(key));
-    for (const a of ['sub-a', 'sub-b', 'sub-c', 'sub-d', null]) both((w) => { w.est._estMemo.clear(); return w.est.estimateFor(a, null, NOW + 5000); });
+    // the estimate as the released code makes it — `sinceRequests` (usage-predict P2's plain line) is new since, and is not compared
+    for (const a of ['sub-a', 'sub-b', 'sub-c', 'sub-d', null]) both((w) => { w.est._estMemo.clear(); const e = w.est.estimateFor(a, null, NOW + 5000); if (!e) return e; const { sinceRequests, ...rest } = e; return rest; });
     for (let k = 0; k < 80; k++) { const t0 = NOW - (k % 40) * DAY - k * 997, len = [60e3, 3600e3, DAY, 8 * DAY][k % 4]; both((w) => w.UA.costBetweenMulti(w.uh, [['sub-a'], ['sub-b'], [null], ['sub-c', 'sub-d']][k % 4], t0, t0 + len)); }
     ok(bad === 0, `the RELEASED code (a git archive of 05082bbd0) on the same seeds: ${n} rates / estimates / intervals, ${bad} differ`, first);
     fs.rmSync(dd, { recursive: true, force: true });
@@ -341,7 +342,7 @@ console.log('§4 MUTANTS — each red by name');
 let storeBlind = null, twoLoads = null, countBlind = null, boundFatal = null; // rounds 2 and 3's rules and the boot's, planted here, judged in §9
 {
   const M = mutantCopies('usage-ledger-walk', REPO), src = read('src/usage-anchors.js');
-  const plant = (name, from, to) => { if (!src.includes(from)) return null; return require(M.write('src/usage-anchors.js', src.replace(from, to), name)); };
+  const plant = (name, from, to) => { if (!src.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); return require(M.write('src/usage-anchors.js', src.replace(from, to), name)); };
   const withAnchors = (UA2, fn) => { const k = require.resolve('../src/usage-anchors.js'), real = require.cache[k]; require.cache[k] = { ...real, exports: UA2 }; try { return fn(); } finally { require.cache[k] = real; } };
   const relearnWith = (UA2) => withAnchors(UA2, () => relearnRows(2400));
   const plantMany = (name, pairs) => { let t = src; for (const [a, b] of pairs) { if (!t.includes(a)) return null; t = t.replace(a, b); } return require(M.write('src/usage-anchors.js', t, name)); };
@@ -432,6 +433,7 @@ console.log('§5 THE CENSUS (law 4) — every main-thread reader of the ledger\'
     ['src/usage-anchors.js', 'for (const ev of usageHistory._events(undefined, undefined)) return ev.ts || 0;', 'the whole-ledger sweep\'s first slice start', 'one row'],
     ['src/usage-history.js', 'const evs = this._loadEvents();\n    const c = this._evCache;\n    if (!c.sorted', '_sortedEvents — the hot rows in ts order, for every walk', 'the rows that arrived since the last sort are sorted and appended (merged)'],
     ['src/usage-history.js', 'for (const ev of this._events(since, to)) if (ev.host && hs.has(ev.host)', 'hostAccountsIn\'s fallback (B2 r2) — an ask reaching before the dark-host index\'s floor', 'never on the product\'s road (the pool engine asks 7 days; the floor stays 8 days behind its last ask) — when it runs, master\'s darkTaintedAccounts loop: the asked 7 days of rows'],
+    ['src/server/bulk-resume-routes.js', 'for (const ev of uh._events(now - LEDGER_LOOKBACK_MS, now))', 'the bulk resume\'s estimate (lg-recovery U2) — GET /api/sessions/stopped: the dialog a person opens and the Settings row', 'the last LEDGER_LOOKBACK_MS (3 days) of rows, once per eligible set — cached under the eligible ids for ESTIMATE_TTL_MS (30 s)'],
   ];
   const walk = (d) => fs.readdirSync(path.join(REPO, d), { withFileTypes: true }).flatMap((e) => e.isDirectory() ? (e.name === 'node_modules' || e.name.startsWith('.') ? [] : walk(path.join(d, e.name))) : (/\.(c|m)?js$/.test(e.name) ? [path.join(d, e.name)] : []));
   const files = walk('src'); // THE TREE (A4), not named files

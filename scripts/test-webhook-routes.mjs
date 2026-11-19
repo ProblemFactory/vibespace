@@ -16,7 +16,8 @@ import crypto from 'node:crypto';
 import { spawn, execSync, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { freePort, scratch, scratchHome, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePort, vncEnv } from './scratch.mjs';
+import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WA = require(path.join(repo, 'src/webhook-auth.js'));
@@ -31,9 +32,8 @@ try { execFileSync('dtach', ['--help'], { stdio: 'ignore' }); } catch (e) { if (
 
 const VNC_ENV = await vncEnv();
 const PORT = await freePort();
-const wt = scratch('webhook-routes');
-const fakeHome = scratchHome('webhook-routes-home', fs);
-try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
+const root = mintRoot('webhook-routes'), wt = path.join(root, 't');
+const fakeHome = path.join(root, 'home'); for (const d of ['.claude/projects', '.claude/sessions', '.config', '.vibespace']) fs.mkdirSync(path.join(fakeHome, d), { recursive: true });
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js', 'package.json']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
@@ -63,18 +63,12 @@ const received = [];
 const stub = http.createServer((req, res) => { let b = ''; req.on('data', (d) => { b += d; }); req.on('end', () => { received.push({ url: req.url, headers: req.headers, body: b }); res.end('{"ok":true}'); }); });
 await new Promise((r) => stub.listen(0, '127.0.0.1', r));
 const PASSWORD = 'webhook-routes-' + process.pid;
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, stdio: 'ignore', env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: PASSWORD } });
+const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: PASSWORD } });
 const cleanup = () => {
-  try { srv.kill('SIGKILL'); } catch { }
-  try { endRootedProcesses(wt); } catch { }   // §57b: whatever the server (and the dtach stub) started under the scratch tree
   try { stub.close(); } catch { }
-  try { execFileSync('pkill', ['-KILL', '-f', STUB], { stdio: 'ignore' }); } catch { }
-  try { execFileSync('pkill', ['-KILL', '-f', SOCK_DIR], { stdio: 'ignore' }); } catch { }
-  try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
-  for (const d of [fakeHome, wt]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } }
+  // the suite's own dtach stubs carry HOME: fakeHome (in the root — rule nine): hub-boot.mjs ends them by identity (no pattern kill)
 };
 process.on('exit', cleanup);
-for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => { cleanup(); process.exit(143); });
 
 let COOKIE = '';
 const raw = (method, p, { headers = {}, body = null } = {}) => new Promise((resolve) => {

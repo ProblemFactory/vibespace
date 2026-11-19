@@ -212,13 +212,13 @@ const strip = (msgs) => JSON.stringify(msgs.map((m) => ({ ...m, ts: undefined })
   const sl = fs.readFileSync(path.join(REPO, 'src/lib/session-lifecycle.js'), 'utf8');
   ok(/killSession\(webuiId, backendSessionId\) \{[\s\S]{0,900}resend: true/.test(sl), 'client killSession = ws.request with resend:true (re-sent on every reconnect until acknowledged)');
   ok(/const cancel = this\.ws\.request\(msg[\s\S]{0,200}onTimeout: \(\) => cancel\(\)/.test(sl), 'the kill watchdog DISARMS the request (ws.request leaves the handler live on timeout)');
-  ok(/if \(backendSessionId\) this\.ws\.send\(\{ type: 'kill', sessionId: webuiId, backendSessionId \}\);/.test(sl) && /const msg = \{ type: 'kill', sessionId: webuiId \};/.test(sl), 'the backendSessionId (stale-id fallback) frame is a ONE-SHOT — only the plain kill rides the resend chase, so a resend can never kill a resumed successor');
+  ok(/if \(backendSessionId\) this\.ws\.send\(\{ type: 'kill', sessionId: webuiId, backendSessionId, \.\.\.tree \}\);/.test(sl) && /const msg = \{ type: 'kill', sessionId: webuiId, \.\.\.tree \};/.test(sl), 'the backendSessionId (stale-id fallback) frame is a ONE-SHOT — only the plain kill rides the resend chase, so a resend can never kill a resumed successor');   // B-c134 cure: both frames carry the door's endTree
   const cvsrc = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8');
   ok(/const freshAck = acked && Date\.now\(\) - this\._lastAttachAckAt < 30000/.test(cvsrc) && /if \(!freshAck\) waits\+\+;/.test(cvsrc), 'the re-attach ladder keeps waiting while fresh progress acks arrive (bounded 15min) instead of flipping read-only at 2 minutes');
   const clientKillSends = ['src/lib/session-lifecycle.js', 'src/lib/chat-view.js', 'src/lib/manage-agents.js', 'src/lib/session-card.js', 'src/lib/taskbar.js', 'src/lib/sidebar-workbench.js', 'src/lib/setup-flows.js', 'src/lib/app.js']
     .map((f) => fs.readFileSync(path.join(REPO, f), 'utf8')).join('\n');
   const bareKills = (clientKillSends.match(/ws\.send\(\{ type: 'kill'/g) || []).length;
-  ok(bareKills === 1 && /killSession\(webuiId, backendSessionId\) \{[\s\S]{0,400}this\.ws\.send\(\{ type: 'kill', sessionId: webuiId, backendSessionId \}\)/.test(sl), `the ONLY bare kill send is killSession's own one-shot fallback frame (found ${bareKills}) — every other site routes through killSession`);
+  ok(bareKills === 1 && /killSession\(webuiId, backendSessionId\) \{[\s\S]{0,500}this\.ws\.send\(\{ type: 'kill', sessionId: webuiId, backendSessionId, \.\.\.tree \}\)/.test(sl), `the ONLY bare kill send is killSession's own one-shot fallback frame (found ${bareKills}) — every other site routes through killSession`);
   const schema = fs.readFileSync(path.join(REPO, 'src/session-schema.js'), 'utf8');
   ok(/_rebuildQueue:/.test(schema) && /_rebuildPromise:/.test(schema) && /_rebuildProgress:/.test(schema), 'the three new session fields are registered with an owner');
   const cmm = fs.readFileSync(path.join(REPO, 'src/codex-message-manager.js'), 'utf8');

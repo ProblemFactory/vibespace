@@ -12,6 +12,7 @@ const fs = require('fs');
 const SP = require('../sent-provenance.js'); // B-9a2e (PURE): a scan's own conversation rows, handed as data
 const os = require('os');
 const crypto = require('crypto');
+const SOCK = require('../sock-path.js');   // B-3767 unit 2: THE folder verdict (ensureSocketDir) for the zst cache
 // S3: the codex naming rule + zstd rollout readers live in discovery-facts
 // (the tiny module the daemon bundle and every discovery collector share)
 const { deriveCodexSessionName, classifyCodexThread, deriveCodexAgentName, ZSTD_SUPPORTED, isZstPath, isZstBuffer, zstdDecompressFrames, readHeadText, CODEX_ROLLOUT_RE } = require('../discovery-facts');
@@ -32,14 +33,18 @@ const CODEX_SESSIONS_DIR = path.join(os.homedir(), '.codex', 'sessions');
 // reader fails with a NAMED error instead of a >512MB string.
 const ZST_MAX_PLAIN = 256 * 1024 * 1024;
 const ZST_CACHE_MAX = 24;
+// B-3767 unit 2 (主开发 11:40Z): the cache folder is judged before use — sock-path's ensureSocketDir (made 0700; a folder, not a link,
+// this uid's, no group/other bits). A folder another user planted is refused BY NAME with the way out (a coded error, as the
+// reader's other refusals are), never written through; a refusal is not kept, so a removed folder is used at the next read
 let _zstCacheDir = null;
 function zstCacheDir() {
   if (_zstCacheDir) return _zstCacheDir;
   let uid = '';
   try { uid = String(os.userInfo().uid); } catch { uid = 'u'; }
-  _zstCacheDir = path.join(os.tmpdir(), `vibespace-zst-${uid}`);
-  try { fs.mkdirSync(_zstCacheDir, { recursive: true, mode: 0o700 }); } catch { }
-  return _zstCacheDir;
+  const dir = path.join(os.tmpdir(), `vibespace-zst-${uid}`);
+  const v = SOCK.ensureSocketDir(dir);
+  if (!v.ok) throw Object.assign(new Error(`the compressed-transcript cache ${dir} is refused: ${String(v.why).split(' — a socket')[0]} (the way out: start the hub again with TMPDIR set to a private folder — or have the folder's owner remove it (in a shared, sticky temp folder only its owner or root can))`), { code: 'EZSTCACHE' });
+  return (_zstCacheDir = dir);
 }
 function fileIsZst(fp) {
   if (isZstPath(fp)) return true;
@@ -521,8 +526,12 @@ function getJsonlLineIndex(fp) {
 // side where the work happens). Worker down/timeout ⇒ sync inline fallback,
 // identical behavior without the isolation.
 let _transcriptPool = null;
+// B-f64b cure (主开发 11:47Z): a pool whose construction failed is tried again — every POOL_RETRY_MS, POOL_RETRY_MAX times in all,
+// each failure said with its try — never «inline for good» after one failure (every codex row would read «still checking» until a restart)
+const POOL_RETRY_MS = 60000, POOL_RETRY_MAX = 5;
+let _poolFails = 0, _poolRetryAt = 0;
 function _transcriptPoolGet() {
-  if (_transcriptPool === null) {
+  if (_transcriptPool === null || (_transcriptPool === false && _poolFails < POOL_RETRY_MAX && Date.now() >= _poolRetryAt)) {
     try {
       const { SafeFs } = require('../safe-fs');
       const { runOp } = require('../transcript-worker');
@@ -532,9 +541,10 @@ function _transcriptPoolGet() {
         inlineRun: runOp,
         timeouts: { default: 60000, gapInfo: 120000, lineRange: 60000, userTurns: 120000, boundedParsed: 60000, jsonlTail: 60000, codexThreadMetas: 30000, codexOpenThreads: 15000, locate: 20000 },
       });
+      if (_poolFails) console.log(`[transcript-worker] the pool is up (try ${_poolFails + 1})`);
     } catch (e) {
-      _transcriptPool = false; // construction failed once — stay inline forever
-      console.error('[transcript-worker] pool unavailable, staying inline:', e.message);
+      _transcriptPool = false; _poolFails++; _poolRetryAt = Date.now() + POOL_RETRY_MS;
+      console.error(`[transcript-worker] pool unavailable (try ${_poolFails} of ${POOL_RETRY_MAX}${_poolFails < POOL_RETRY_MAX ? `, tried again in ${POOL_RETRY_MS / 1000} s` : ', staying inline'}):`, e.message);
     }
   }
   return _transcriptPool || null;

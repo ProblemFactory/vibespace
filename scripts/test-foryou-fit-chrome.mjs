@@ -22,7 +22,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
 import { LADDER, PHONE_LADDER, fitVerdictSource, fits, runLadder, ladderFaults } from './lib/fit-ladder.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (test-architecture §57)
@@ -36,10 +37,11 @@ if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 if (!fs.existsSync(path.join(TREE, 'public', 'bundle.js'))) { console.log(`✗ no ${TREE}/public/bundle.js — run \`npm run build\` first`); process.exit(1); }
 
 const [PORT, CDP_PORT] = await freePorts(2);
-const wt = scratch('foryou-fit-wt');
-const fakeHome = scratchHome('foryou-fit-home', fs);
+const root = mintRoot('foryou-fit-wt'), wt = path.join(root, 't');
+const chromeHome = path.join(root, 'chrome-home'); fs.mkdirSync(chromeHome, { recursive: true });   // rule nine (hub-boot.mjs): the suite's own browser carries a HOME in the root, so the helper ends it before the root goes
+const fakeHome = path.join(root, 'home'); for (const d of ['.claude/projects', '.claude/sessions', '.config', '.vibespace']) fs.mkdirSync(path.join(fakeHome, d), { recursive: true });
 const chromeDir = scratch('foryou-fit-chrome');
-const stubDir = scratch('foryou-fit-stub');
+const stubDir = path.join(root, 'stub');
 const CWD = path.join(stubDir, 'work');
 const ENVF = path.join(stubDir, 'stub-env.json');
 const SHOTS = arg('--shots') ? path.resolve(arg('--shots')) : scratch('foryou-fit-shots');
@@ -69,28 +71,22 @@ process.stdin.on('end', () => process.exit(0));
 `, { mode: 0o755 });
 
 // ── throwaway server in a worktree (the tree under test's src/ + built public/) ──
-try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js', 'package.json']) execSync(`rm -rf ${wt}/${f} && cp -r ${TREE}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
-const srvLog = fs.openSync(path.join(SHOTS, 'server.log'), 'a');
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOST: '127.0.0.1', HOME: fakeHome, CLAUDE_CMD: path.join(stubDir, 'claude'), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', NO_AUTO_UPDATE: '1', VS_NO_REAL_CLI: '1' }, stdio: ['ignore', srvLog, srvLog] });
-const chromeEnv = { ...process.env }; delete chromeEnv.DBUS_SESSION_BUS_ADDRESS; delete chromeEnv.DISPLAY;
+const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, HOST: '127.0.0.1', HOME: fakeHome, CLAUDE_CMD: path.join(stubDir, 'claude'), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', NO_AUTO_UPDATE: '1', VS_NO_REAL_CLI: '1' }, keepLog: path.join(SHOTS, 'server.log') });
+const chromeEnv = { ...process.env, HOME: chromeHome }; delete chromeEnv.DBUS_SESSION_BUS_ADDRESS; delete chromeEnv.DISPLAY;   // HOME: rule nine
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--password-store=basic',
   '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore', env: chromeEnv });
 const cleanup = () => {
   try { chrome.kill('SIGKILL'); } catch { }
-  try { srv.kill('SIGKILL'); } catch { }
-  for (const root of [wt, fakeHome, stubDir, chromeDir]) { try { endRootedProcesses(root); } catch { } } // the server, dtach, the wrapper, the stub (§57b)
-  try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
-  for (const d of [chromeDir, fakeHome, stubDir]) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { } }
+  for (const d of [chromeDir]) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { } }
 };
 process.on('exit', cleanup);
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
 const PENDS = new Map();
 armWatchdog({ capMs: 840e3, exit: (code) => process.exit(code), pending: () => [...PENDS.values()].map((x) => `CDP ${x.method} (${((Date.now() - x.at) / 1000).toFixed(1)} s)`) });
-for (let i = 0; i < 160; i++) { try { await fetch(`${ORIGIN}/api/home`); break; } catch { await sleep(250); } }
+await hub.ready();
 
 // ── raw CDP ──
 const WebSocket = require('ws');

@@ -95,7 +95,7 @@ const VALUE = ['tts', 'api', 'key', crypto.randomBytes(8).toString('hex')].join(
 const CID = 'cid-transcriber-1';
 
 let worldN = 0;
-async function world({ instance = 'cluster', timers, bin = BIN } = {}) {
+async function world({ instance = 'cluster', timers, bin = BIN, entryMax = 0, now = null, doorMod = DOOR } = {}) {   // B-be21: a small run-list bound, a stand-in clock, a mutant door
   const dir = path.join(ROOT, 'w' + (++worldN)); const dataDir = path.join(dir, 'data'), work = path.join(dir, 'work'), runRoot = path.join(dir, 'run');
   for (const d of [dataDir, work, runRoot]) fs.mkdirSync(d, { recursive: true });
   fs.writeFileSync(path.join(work, 'transcribe.py'), 'import os, sys\nprint("segment", sys.argv[1:])\n');
@@ -109,7 +109,7 @@ async function world({ instance = 'cluster', timers, bin = BIN } = {}) {
   const useGrants = UG.create({ grants: () => grants, vault, dataDir, log: (m) => logs.push(String(m)) });
   const sources = { secrets: () => VC.secretSource({ vault }) };
   const facts = (caller) => ({ conversationKeys: [caller.conversationId], groupIds: [] });
-  const door = DOOR.create({ dataDir, vault, userTodos, sources, instanceKind: () => instance, runRoot: () => runRoot, home: os.homedir(), agentEnv: () => ({ ...process.env, PATH: bin + ':' + process.env.PATH }), killGraceMs: 400, pipeGraceMs: 300, liveOf: () => true, log: (m) => logs.push(String(m)), useGrants, useFacts: facts, isRootOwned: (p) => p === bin || String(p).startsWith(bin + '/'), ...(timers ? { timers } : {}) });
+  const door = doorMod.create({ dataDir, vault, userTodos, sources, ...(entryMax ? { entryMax } : {}), ...(now ? { now } : {}), instanceKind: () => instance, runRoot: () => runRoot, home: os.homedir(), agentEnv: () => ({ ...process.env, PATH: bin + ':' + process.env.PATH }), killGraceMs: 400, pipeGraceMs: 300, liveOf: () => true, log: (m) => logs.push(String(m)), useGrants, useFacts: facts, isRootOwned: (p) => p === bin || String(p).startsWith(bin + '/'), ...(timers ? { timers } : {}) });
   const caller = (cid = CID, name = 'Transcriber') => ({ conversationId: cid, sessionKey: `claude:${cid}`, name, cwd: work, scope: cid });
   const name = 'secret:' + crypto.randomBytes(5).toString('hex');
   const put = vault.secretPut(name, VALUE, { prov: 'owner', label: 'TTS API key', kind: 'api-key', hosts: [] });
@@ -403,7 +403,7 @@ await leg('⑧ seen and revoked', async () => {
   const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : e.name.endsWith('.js') ? [path.join(d, e.name)] : []));
   const direct = walk(path.join(REPO, 'src')).filter((p) => !p.endsWith('vault-use-grants.js') && /\.(?:set|remove)\(\s*(?:'vault-use'|U\.DOOR|VUG\.DOOR)\b/.test(fs.readFileSync(p, 'utf8'))).map((p) => path.relative(REPO, p));
   const win = fs.readFileSync(path.join(REPO, 'src/lib/vault-window.js'), 'utf8'), ux = fs.readFileSync(path.join(REPO, 'src/lib/vault-use-row.js'), 'utf8'), dr = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
-  ok(!direct.length && /if \(row\.run && row\.run\.use\) \{ const ux = useExtras\(/.test(win) && /'vw-ak-x vw-use-x'/.test(ux) && /useB\.hidden = !!\(u && u\.own\)/.test(ux) && /if \(VR\.agentScopeOf\(ref\)\) \{ const use = ownUseOf\(row, ref\);/.test(dr), '⑧d grep: no file but the ONE writer (vault-use-grants.js) writes a vault-use row; the window draws every row whose facts carry `use` — no class left out — each member with its ✕; an own entry hides only «Who may use it…»', direct);
+  ok(!direct.length && /if \(row\.run && row\.run\.use\) \{ const ux = useExtras\(/.test(win) && /'vw-ak-x vw-use-x'/.test(ux) && /useB\.hidden = false;   \/\/ lane vault-standing-request r2 \(MAJOR 3\)/.test(ux) && /if \(VR\.agentScopeOf\(ref\)\) \{ const use = ownUseOf\(row, ref\);/.test(dr), '⑧d grep: no file but the ONE writer (vault-use-grants.js) writes a vault-use row; the window draws every row whose facts carry `use` — no class left out — each member with its ✕; B-bc3b: an own entry draws «Who may use it…» too (the owner shares it)', direct);
 });
 
 console.log('⑨ (r2 JUDGE 4, probe P2 — r4: re-derived on per-scope ends) A STANDING WRITE BESIDE A TIMED SCOPE NEVER TOUCHES IT — its own scope is added, the other keeps ITS OWN end');
@@ -970,7 +970,7 @@ await leg('㉚ the Save\'s new-host end', async () => {
   const r4 = S && S({ was: null, hosts: ['c.example'], endId: 'keep', now }), r5 = S && S({ was: { scopes: [host('a.example', null)] }, hosts: ['a.example', 'c.example'], endId: '8h', now });
   ok(!!(r4 && endIn(r4, 'c.example') === now + 30 * DAY && r5 && endIn(r5, 'a.example') === now + 8 * 3600e3 && endIn(r5, 'c.example') === now + 8 * 3600e3), '㉚d a member new to the row the same (30 days); an explicit choice («8 hours») gives every scope that end', { r4, r5 });
   const src = fs.readFileSync(path.join(REPO, 'src/lib/vault-use-row.js'), 'utf8');
-  ok(/const plan = saveScopesOf\(\{ was, hosts: h, cmds, endId: endSel\.value \}\)/.test(src) && /const plan = planOf\(\);/.test(src) && /t\('What Save writes:'\)/.test(src) && /hostsIn\.addEventListener\('input', drawPreview\)/.test(src), '㉚e the dialog\'s Save AND its «What Save writes:» line (redrawn as the hosts, the end or who change) both go through saveScopesOf — the end a new host gets is on the screen before Save');
+  ok(/const plan = saveScopesOf\(\{ was, hosts: h, cmds, endId: endSel\.value, endFrom: endsFrom\(\) \}\)/.test(src) && /const plan = planNow\(\);/.test(src) && /t\('What Save writes:'\)/.test(src) && /hostsIn\.addEventListener\('input', drawPreview\)/.test(src), '㉚e the dialog\'s Save AND its «What Save writes:» line (redrawn as the hosts, the end or who change) both go through saveScopesOf — the end a new host gets is on the screen before Save');
   // r6 (the r5 review F2 — «Math.min → Math.max» survived 119/119: no leg had two FINITE live ends)
   const H8 = now + 8 * 3600e3;
   const r6 = S && S({ was: { scopes: [host('a.example', D5), host('b.example', H8), host('d.example', null)] }, hosts: ['a.example', 'b.example', 'd.example', 'c.example'], endId: 'keep', now });
@@ -1018,6 +1018,115 @@ await leg('㉜ a throw mid-press', async () => {
   const vE1 = w.useGrants.verdictFor(w.e.id, { conversationKeys: [CID], groupIds: [] }, { hosts: ['new.example'], destinationKnown: true });
   ok(!!(r && r.a && r.a.ok === false && r.a.code === 'not_written' && row1 === row0 && vE1 && !vE1.ok && w.logs.some((l) => /a press's write for .* threw/.test(l))), '㉜ the second entry\'s write THROWS: the press answers `not_written` (never a throw out of the door), the first entry\'s row is exactly as before (new.example not admitted), and the hub\'s log names it', { a: r && r.a, row0, row1, vE1: vE1 && vE1.code });
 });
+
+console.log('㉝ B-be21 (vault-use-grants r13 — the r12 verdict\'s two eviction minors): THE TOGGLE ORDER ONLY MOVES FORWARD; A PRESS THAT FAILS LEAVES NO FALSE «SWITCHED OFF»');
+{
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const MC = mutantCopies('vsr-be21', REPO), DSRC = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
+  const mutant = (from, to, tag) => (DSRC.split(from).length === 2 ? MC.load('src/server/vault-run-door.js', DSRC.replace(from, to), tag) : null);
+  const storeOf = (w) => JSON.parse(fs.readFileSync(path.join(w.dataDir, DOOR.STORE_FILE), 'utf8'));
+  const mk = (w, label) => { const nm = 'secret:' + crypto.randomBytes(5).toString('hex'); const r = w.vault.secretPut(nm, VALUE, { prov: 'owner', label, kind: 'api-key', hosts: [] }); if (!r.ok) throw new Error('secretPut ' + r.code); return `secrets:${nm}#secret`; };
+  // (r12 minor 2) a run list of 3 (the door's entryMax seam): three ON, the clock steps back an hour, a fourth switched ON
+  const clockLeg = async (doorMod) => {
+    let clock = Date.now();
+    const w = await world({ entryMax: 3, now: () => clock, doorMod });
+    const F = [mk(w, 'F0'), mk(w, 'F1'), mk(w, 'F2')];
+    for (const id of F) { clock += 10; w.door.setRunnable({ id, on: true, reauthed: true }); }
+    clock -= 3600e3;   // an NTP correction / a resumed box: the wall clock went BACK
+    const E = mk(w, 'E'); const sr = w.door.setRunnable({ id: E, on: true, reauthed: true });
+    const disk = storeOf(w);
+    return { open: sr.open, kept: disk.runnable.includes(E), evicted: sr.evicted || [], F0gone: !disk.runnable.includes(F[0]), n: disk.runnable.length };
+  };
+  await leg('㉝a the toggle order after a backward clock step', async () => {
+    const c = await clockLeg(DOOR);
+    ok(c.open && c.kept && c.F0gone && c.n === 3, '㉝a a backward clock step: the entry switched on AFTER it stays ON (its toggle is the newest), the OLDEST toggle (F0) is the one the bound turns off', c);
+    const m = mutant('[key]: Math.max(now(), tNewest + 1) };', '[key]: now() };', 'rawclock');
+    const r = m ? await clockLeg(m) : null;
+    ok(!!(m && r && !r.kept && r.evicted.length === 1), '㉝a RED control: the raw wall clock as the stamp (the r12 shape) ⇒ the entry JUST switched on is the one evicted', r);
+  });
+  // (r12 minor 1 — the r12 harness's road, repro/accept-r12/always-restore-notice.mjs) a run list of 3, all ON (F0, F1 and E1 — E1's
+  // member for this conversation covers another host); E2 (this world's entry) closed but OPEN to it by an 8-hour grant (the
+  // request card), its member already at the host bound; a run naming both to a host neither member covers ⇒ the card, answered
+  // «Always»: the press switches E2 ON (the bound turns F0 off), then E2's member write is REFUSED ⇒ the whole press is put back
+  const pressLeg = async (doorMod, { hold = false } = {}) => {   // r13 «also»: hold ⇒ E2's member far under its host bound (the press HOLDS)
+    let clock = Date.now();
+    const w = await world({ entryMax: 3, now: () => clock, doorMod });
+    const F = [mk(w, 'F0'), mk(w, 'F1')];
+    for (const id of F) { clock += 10; w.door.setRunnable({ id, on: true, reauthed: true }); }
+    const nm1 = 'secret:' + crypto.randomBytes(5).toString('hex'); if (!w.vault.secretPut(nm1, VALUE, { prov: 'owner', label: 'E1', kind: 'api-key', hosts: [] }).ok) throw new Error('secretPut E1');
+    const E1 = { id: `secrets:${nm1}#secret`, ref: `vault://secrets/${nm1}/secret` };
+    clock += 10; w.door.setRunnable({ id: E1.id, on: true, reauthed: true });
+    const stamp0 = (storeOf(w).touched || {})[F[0]];
+    w.useGrants.addMember(E1.id, { kind: 'conversation', key: CID, name: 'Transcriber' }, { hosts: ['a.example'] });
+    w.useGrants.addMember(w.e.id, { kind: 'conversation', key: CID, name: 'Transcriber' }, { hosts: Array.from({ length: hold ? 1 : 16 }, (_, i) => `h${i}.example`) });
+    const q = await w.door.request({ caller: w.caller(), entry: w.e.ref, purpose: 'read the TTS status' });
+    const g8 = q && q.askId ? w.door.answerRequest(q.askId, { answer: '8h', reauthed: true }) : null;
+    if (!(g8 && g8.ok)) throw new Error('the 8-hour grant on E2 did not land: ' + JSON.stringify(g8 || q));
+    clock += 10;
+    const ra = await runAnswered(w, ['--env', `T1=${E1.ref}`, '--env', `T2=${w.e.ref}`, '--', 'curl', 'https://b.example/x'], { answer: 'always', reauthed: true, ttl: '30d' });
+    const disk = storeOf(w);
+    const notice = (w.userTodos.snapshot().open || []).find((i) => i.origin === 'vault' && /switched off/.test(i.text || ''));
+    const noticeAll = notice ? `${notice.text || ''} ${notice.detail || ''}` : null, noticeN = (w.userTodos.snapshot().open || []).filter((i) => i.origin === 'vault' && /switched off/.test(i.text || '')).length;
+    return { asked: !!ra.card, refused: !!(ra.a && !ra.a.ok), code: ra.a && ra.a.code, F0on: disk.runnable.includes(F[0]), Eon: disk.runnable.includes(w.e.id), stamp0, stamp1: (disk.touched || {})[F[0]], notice: notice ? notice.detail : null, noticeAll, noticeN, F0: F[0] };
+  };
+  // r13 «also» (the readers of batch 52: no leg for it) — a press that HOLDS at the cap: the run list's oldest switch goes OFF,
+  // and since B-be21 the owner hears of it ONLY from the press's own notice (the switch itself is quiet then)
+  await leg('㉝c a press that holds tells the owner what the cap turned off', async () => {
+    const p = await pressLeg(DOOR, { hold: true });
+    ok(p.asked && !p.refused && !p.F0on && p.Eon && p.noticeN === 1 && !!p.noticeAll && p.noticeAll.includes(p.F0), '㉝c the «Always» press HOLDS at the cap ⇒ F0 (the oldest) is switched OFF and ONE For-you notice names it', p);
+    const plant = 'if (off.length) noteEvicted(off); }   // B-be21: the press HELD';
+    ok(DSRC.split(plant).length === 2, '㉝c the RED control\'s plant is where it claims: the held press\'s notice, once', DSRC.split(plant).length - 1);
+    const mh = mutant(plant, '}   // B-be21: the press HELD', 'heldquiet');
+    const rh = mh ? await pressLeg(mh, { hold: true }) : null;
+    ok(!!(mh && rh && !rh.refused && !rh.F0on && rh.noticeN === 0), '㉝c RED control: the held press without its notice ⇒ F0 goes OFF and nobody is told', rh);
+  });
+  await leg('㉝b a refused press leaves no false notice and keeps the order', async () => {
+    const p = await pressLeg(DOOR);
+    ok(p.asked && p.refused && p.F0on && !p.Eon && !p.notice, '㉝b the press is REFUSED (its member at the host bound) and put back: F0 is ON again and NO «switched off» notice says otherwise', p);
+    ok(p.stamp0 && p.stamp1 === p.stamp0, '㉝b …and F0 keeps its place in the toggle order (its stamp put back — the next bound judges it as before the press)', { stamp0: p.stamp0, stamp1: p.stamp1 });
+    const mn = mutant('if (r.evicted && r.evicted.length && !quietEvict) noteEvicted(r.evicted);', 'if (r.evicted && r.evicted.length) noteEvicted(r.evicted);', 'loudpress');   // stale-pins: kept — a RED control: the pre-B-be21 press (a notice at the switch) restored on purpose
+    const rn = mn ? await pressLeg(mn) : null;
+    ok(!!(mn && rn && rn.refused && rn.F0on && rn.notice), '㉝b RED control: the notice filed at the switch (the r12 shape) ⇒ For you says F0 was switched off while F0 is ON', rn);
+    const ms = mutant(', opened: prior.opened, touched: prior.touched });', ', opened: prior.opened });', 'nostamps');   // stale-pins: kept — a RED control: the pre-B-be21 restore (no stamps) restored on purpose
+    const rs = ms ? await pressLeg(ms) : null;
+    ok(!!(ms && rs && rs.F0on && rs.stamp1 !== rs.stamp0), '㉝b RED control: the restore without the stamps (the r12 shape) ⇒ F0 is back ON with its place in the order lost', rs && { stamp0: rs.stamp0, stamp1: rs.stamp1 });
+  });
+}
+
+console.log('㉞ r13 should (the readers of batch 52 — B-a14b × the standing answer): AN ENDED APPROVAL IS DROPPED BY THE KEY IT IS KEPT UNDER');
+{
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const MC = mutantCopies('vsr-r13', REPO), DSRC = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
+  // an end is kept under the SCOPE × the entry (noteEnded: the grant's conv = the caller's scope). A caller whose scope is not its
+  // conversation's id (a fork borrows its parent's): the standing answer dropped the end by the conversation's id and missed it.
+  // While the switch is ON neither the run nor `uses` shows it (the reader: no harm today), so the leg reads the door's own record
+  // (its `_ended` seam, beside `_grants`)
+  const standingLeg = async (doorMod) => {
+    const t8 = [];
+    const hold8 = { set: (fn, ms) => { if (ms > 3600e3) { t8.push(fn); return { held8: true }; } return setTimeout(fn, ms); }, clear: (h) => { if (!(h && h.held8)) clearTimeout(h); } };
+    const w = await world({ timers: hold8, doorMod });
+    const cs = { ...w.caller('conv-fork'), scope: 'webui-parent' };
+    const endOf = () => [...w.door._ended.values()].some((e) => e.conv === 'webui-parent' && e.id === w.e.id);
+    const q8 = await w.door.request({ caller: cs, entry: w.e.ref, purpose: 'read the TTS status', cwd: w.work });
+    const g8 = q8 && q8.askId ? w.door.answerRequest(q8.askId, { answer: '8h', reauthed: true, person: true }) : null;
+    for (const fn of t8.splice(0)) fn();   // its 8 hours ran out (the door's timer, held by hand)
+    const ended = endOf();
+    w.door.setRunnable({ id: w.e.id, on: true, reauthed: true });
+    const qs = await w.door.request({ caller: cs, entry: w.e.ref, purpose: 'transcribe', standing: true, command: 'python3 transcribe.py', cwd: w.work });
+    const yes = qs && qs.askId ? w.door.answerRequest(qs.askId, { answer: 'standing', reauthed: true, person: true }) : null;
+    return { g8: !!(g8 && g8.ok), ended, standing: !!(yes && yes.ok && yes.grantedFor === 'standing'), endAfter: endOf() };
+  };
+  await leg('㉞ the standing answer drops the end by its key', async () => {
+    const r = await standingLeg(DOOR);
+    ok(r.g8 && r.ended && r.standing && !r.endAfter, '㉞ a caller whose scope is not its conversation\'s id: its 8 hours ran out (the end kept under the scope), then the owner allows it standing ⇒ the old end is gone', r);
+    const plant = '      endedGrants.delete(q.quietPair);';
+    const n = DSRC.split(plant).length - 1;
+    ok(n === 1, '㉞ the RED control\'s plant is where it claims: the standing answer\'s delete by q.quietPair, once', n);
+    const mq = n === 1 ? MC.load('src/server/vault-run-door.js', DSRC.replace(plant, '      endedGrants.delete(pairOf(q.conv, q.id));'), 'r13-quiet') : null;   // stale-pins: kept — a RED control: the batch's delete by the conversation's id restored on purpose
+    const rq = mq ? await standingLeg(mq) : null;
+    ok(!!(mq && rq && rq.standing && rq.endAfter), '㉞ RED control: the delete by the conversation\'s id (the batch\'s shape) ⇒ the old end outlives the standing answer', rq);
+  });
+}
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
 process.exit(fail ? 1 : 0);

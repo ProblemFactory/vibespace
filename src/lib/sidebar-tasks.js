@@ -4,7 +4,7 @@ import { track } from './telemetry-client.js';
 import { t as tr } from './i18n.js';
 import { valueWord } from './value-words.js'; // lane ui-language: the board's state / urgency words live in the ONE door
 import { mergePendingBind, pendingBindVerdict, sweepPendingBinds } from './fork-groups.js';
-import { folderOf, insideFolder } from '../task-membership.js'; // PURE (lane open-task-binds): THE folder rule, the server's groupsForSession asks the same one
+import { folderOf, insideFolder, membershipCwds } from '../task-membership.js'; // PURE (lane open-task-binds): THE folder rule, the server's groupsForSession asks the same one
 import { applyTasksDelta, applyStatusDelta, frameStep, fetchVerdict, metaChanged } from '../task-delta.js'; // PURE (lane task-group-fanout): a broadcast is a DELTA in the hub's order
 import { pressResumeGroup } from './resume-pacer.js'; // lane resume-all-paced (L1): the group's button paces its resumes
 
@@ -495,16 +495,18 @@ export function installSidebarTasks(SidebarClass) {
   // recursive:true → a session whose cwd is UNDER the folder counts; false →
   // only an exact cwd match (the old behavior was always recursive).
   // THE folder-match rule — the single client-side implementation (mirrors the
-  // server's groupsForSession): a session matches a folder by cwd OR its
-  // symlink-resolved realCwd (stamped by discovery). Board, Task View and the
-  // expanded card must all agree, so they all call this.
+  // server's groupsForSession): a session matches a folder by cwd OR the
+  // symlink-resolved realCwd the HUB stamped — the latter only for the hub's own
+  // conversations (B-df5f: task-membership membershipCwds; a row merged with
+  // another machine's live session keeps no hub real path). Board, Task View and
+  // the expanded card must all agree, so they all call this.
   proto._sessionFolderMatch = function(s, folderRecs) {
     // Remote webui sessions carry the merged DISPLAY cwd "<host>: /path"
     // (the sidebar's grouping key) — strip the label before comparing or
     // every remote session fails folder-match while the server's
     // groupsForSession (which sees the raw cwd) says it belongs (B-b87b:
     // board membership and injected context disagreed for remote sessions).
-    const cwds = [stripCwdHostLabel(s.cwd), s.realCwd].filter(Boolean);
+    const cwds = membershipCwds({ cwd: stripCwdHostLabel(s.cwd), realCwd: s.realCwd, host: s.host });
     for (const f of folderRecs) {
       for (const c of cwds) {
         if (insideFolder(c, f)) return true;
@@ -534,7 +536,8 @@ export function installSidebarTasks(SidebarClass) {
   };
 
   // Task Groups this session BELONGS to — explicit tag OR auto-include folder
-  // match (cwd or its symlink-resolved realCwd). Mirrors the board's
+  // match (_sessionFolderMatch: cwd, or the hub-stamped realCwd for the hub's
+  // own conversations — task-membership membershipCwds). Mirrors the board's
   // _getTaskSessionKeys and the server's groupsForSession, so Task View
   // membership matches Group view. Excludes archived. (Distinct from
   // _getSessionTasks, which is tag-only for the toggleable bind popover.)

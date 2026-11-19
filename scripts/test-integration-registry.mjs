@@ -1089,6 +1089,55 @@ if (tracked.length) {
 
 server.close();
 
+// ── B-3b8e (4b — the coordinator's ruling (B), NO DOOR THAT CAN ONLY REFUSE): a Test its consumer says cannot run YET is not
+// offered — the view carries `testWaits` (when it will be), a direct call is refused by name; once it can run, both go ──
+console.log('\nB-3b8e 4b: a Test that cannot run yet is not offered — the card says when');
+{
+  const dW = path.join(ROOT, 'waits-store'); fs.mkdirSync(dW, { recursive: true });
+  const make = (mod, sub) => {
+    const d = path.join(dW, sub); fs.mkdirSync(d, { recursive: true });
+    const sent = [];
+    const s = mod.create({ dataDir: d, env: {}, now: () => Date.now(), drivePresets: () => [], log: { log() {}, warn() {}, error() {} }, broadcast: (m) => sent.push(m) });
+    let wait = { code: 'repository-unknown', params: { host: 'repo.test' } };
+    const ran = [];
+    s.registerTest(CARD, async (x) => { ran.push(1); return shapeRunner(x); }, { waits: () => wait });
+    return { s, ran, sent, set: (w) => { wait = w; } };
+  };
+  const thrown = async (p) => { try { await p; return null; } catch (e) { return e; } };
+  const A = make(storeMod, 'lane');
+  const v0 = A.s.publicView(CARD), e0 = await thrown(A.s.test(CARD));
+  const m0 = A.s.testWaitsMoved(CARD), p0 = A.sent.slice();
+  A.set(null);
+  const m1 = A.s.testWaitsMoved(CARD), p1 = A.sent.slice(p0.length);
+  const v1 = A.s.publicView(CARD), r1 = await A.s.test(CARD);
+  A.sent.length = 0;
+  const unknownCard = A.s.testWaitsMoved('no-such-card'), N = make(storeMod, 'lane-nowaits');
+  N.s.registerTest(CARD, async (x) => shapeRunner(x));   // re-registered WITHOUT waits: the card never waits
+  ok(p0.length === 1 && p0[0].type === 'integrations-updated' && p0[0].id === CARD && p0[0].why === 'test-waits' && p0[0].integration.testWaits.code === 'repository-unknown' && m0 && m0.testWaits.code === 'repository-unknown'
+      && p1.length === 1 && p1[0].integration.testWaits === null && m1.testWaits === null && unknownCard === null && N.s.testWaitsMoved(CARD) === null && !A.sent.length && !N.sent.length,
+    'B-3b8e 4b (the read\'s should): when what a Test waits for moves, the card\'s RECOMPUTED view is pushed (integrations-updated, why test-waits) — waiting, then offered; a row that never waits pushes nothing',
+    { p0: p0.map((m) => [m.why, m.integration.testWaits]), p1: p1.map((m) => [m.why, m.integration.testWaits]) });
+  ok(v0.testWaits && v0.testWaits.code === 'repository-unknown' && v0.testWaits.params.host === 'repo.test' && e0 && e0.code === 'test-waits' && e0.status === 409 && v1.testWaits === null && r1 && typeof r1.ok === 'boolean' && A.ran.length === 1,
+    'B-3b8e 4b: while the consumer says its Test cannot run yet, the view carries WHEN (testWaits) and a direct Test is refused by name (409 test-waits) — the runner never ran; once it can, testWaits is null and the Test runs',
+    { v0: v0.testWaits, e0: e0 && e0.code, v1: v1.testWaits, ran: A.ran.length });
+  // RED CONTROL — its plant proven first: the store's one reader of the consumer's answer, spelled once
+  const SRCW = fs.readFileSync(STORE_PATH, 'utf-8'), WANCHOR = '    const w = testWaitsFns.get(row.id);\n';
+  ok(SRCW.split(WANCHOR).length === 2, 'ANCHOR: the store reads the consumer\'s waits in ONE place (the control below plants there)');
+  if (SRCW.split(WANCHOR).length === 2) {
+    const B = make(require(patchCopy(STORE_PATH, 'waits-ignored', [[WANCHOR, '    const w = null;\n']])), 'mutant');
+    const vb = B.s.publicView(CARD), eb = await thrown(B.s.test(CARD));
+    const mb = B.s.testWaitsMoved(CARD);
+    ok(vb.testWaits === null && !eb && B.ran.length === 1 && mb && mb.testWaits === null, 'MUTANT RED: a store that ignores the consumer\'s waits offers a Test that can only refuse (no testWaits — in the view and in the pushed one — the runner runs)', { vb: vb.testWaits, ran: B.ran.length });
+  }
+  // the card: no Test button while testWaits stands; the one sentence instead, in zh and ja
+  const IW = fs.readFileSync(path.join(REPO, 'src/lib/integrations-window.js'), 'utf-8');
+  const ZH = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf-8'), JA = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf-8');
+  const WORDS = ['The Test is offered after the first install from {host} (⚙ → Plugins → Install plugin…)', 'The Test is offered after the first install from its host (⚙ → Plugins → Install plugin…)', 'The Test is not offered yet'];
+  ok(IW.includes("if (v.testWaits) actions.appendChild(el('div', 'plugin-detail integ-test-waits', testWaitsLine(v.testWaits)));\n  else actions.appendChild(testBtn);")
+      && IW.includes("if (r && r.code === 'test-waits') { result.textContent = ''; result.appendChild(el('div', 'plugin-detail integ-test-waits', testWaitsLine(r.detail))); refresh(v.id); return; }") && WORDS.every((w) => IW.includes(`t('${w}'`) && ZH.includes(`  "${w}": "`) && JA.includes(`  "${w}": "`)),
+    'B-3b8e 4b WIRING: the card draws NO Test button while testWaits stands — one sentence says when it will be there (zh / ja rows); a Test pressed on a card drawn before its repository went says that sentence and draws the card again');
+}
+
 // ── tree: THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
 // Measured HERE, while every patched copy this run made still exists (the exit
 // handlers remove them — a census taken after exit passes on the pre-fix

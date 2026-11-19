@@ -31,8 +31,9 @@ const until = async (fn, ms) => { const t0 = Date.now(); while (Date.now() - t0 
 const D = fs.mkdtempSync(path.join(process.env.VS_TEST_TMP || os.tmpdir(), 'vs-mstart-'));
 const FAKE = path.join(D, 'bin', 'rclone');
 fs.mkdirSync(path.dirname(FAKE), { recursive: true });
+fs.symlinkSync('/bin/bash', path.join(D, 'bin', 'rclone-bash'));   // B-e783: the re-exec'd fake is an rclone by its comm too (the kernel names it after the file it ran)
 fs.writeFileSync(FAKE, `#!/bin/bash
-if [ -z "$FAKE_REEXEC" ]; then FAKE_REEXEC=1 exec -a "$0" /bin/bash "$0" "$@"; fi
+if [ -z "$FAKE_REEXEC" ]; then FAKE_REEXEC=1 exec -a "$0" "$(dirname "$0")/rclone-bash" "$0" "$@"; fi
 [ "$1" = mount ] || exit 0
 MP="$3"; echo "$MP" >> "$FAKE_DIR/spawns"
 [ -n "$FAKE_SAY" ] && echo "$FAKE_SAY $$"
@@ -81,17 +82,17 @@ try {
   ok(!!mgr.pathBlocked(path.join(mpA, 'AIWorkspace', '.restore')) && mgr.shadowedBy(path.join(mpA, 'x')) === A0, '① the mount point stays BLOCKED and shadowed through the starting window');
   const capped = await mgr._countCacheFiles(path.join(mgr._vfsCacheRoot(), 'A'), 1000);
   ok(capped.n === 1000 && capped.capped === true, '① the count is bounded (stops at the cap, says capped)', JSON.stringify(capped));
-  const pidA = mgr._daemonPids(mpA);
+  const pidA = await mgr._daemonPids(mpA);   // B-e783: the walk is async
   const r2 = await mgr.mount('A');
-  ok(r2 === 'starting' && spawns(mpA) === 1 && mgr._daemonPids(mpA).join() === pidA.join() && pidA.length === 1, '② a second connect JOINS the starting daemon (one daemon, no kill, no respawn)', `${r2} spawns=${spawns(mpA)} pids=${mgr._daemonPids(mpA)}`);
+  { const now = await mgr._daemonPids(mpA); ok(r2 === 'starting' && spawns(mpA) === 1 && now.join() === pidA.join() && pidA.length === 1, '② a second connect JOINS the starting daemon (one daemon, no kill, no respawn)', `${r2} spawns=${spawns(mpA)} pids=${now}`); }
   const mgr2 = makeMgr(MountManager, 'restart', [A]); all.push(mgr2);
   const r3 = await mgr2.mount('A');
-  ok(r3 === 'starting' && spawns(mpA) === 1 && mgr2._daemonPids(mpA).join() === pidA.join(), '③ a restarted server ADOPTS the scanning daemon instead of killing it', `${r3} spawns=${spawns(mpA)}`);
+  ok(r3 === 'starting' && spawns(mpA) === 1 && (await mgr2._daemonPids(mpA)).join() === pidA.join(), '③ a restarted server ADOPTS the scanning daemon instead of killing it', `${r3} spawns=${spawns(mpA)}`);
   const calls = []; const realUnmount = mgr.unmount.bind(mgr);
   mgr.unmount = async (id, o) => { calls.push(id); return true; };
   mgr._state.mounts.find((m) => m.id === 'H').desired = 'unmounted';
   await mgr._healthSweep();
-  ok(calls.length === 0 && mgr._daemonPids(mpA).join() === pidA.join() && spawns(mpA) === 1, '④ the health sweep neither unmounts, remounts nor kills a starting daemon', calls.join());
+  ok(calls.length === 0 && (await mgr._daemonPids(mpA)).join() === pidA.join() && spawns(mpA) === 1, '④ the health sweep neither unmounts, remounts nor kills a starting daemon', calls.join());
   ok(await until(() => row(mgr, 'A').mounted && !row(mgr, 'A').starting, 6000), '① …and the same daemon mounts when its scan ends');
   await until(() => !mgr.pathBlocked(mpA), 3000);
   ok(!mgr.pathBlocked(mpA) && mgr.shadowedBy(path.join(mpA, 'x')) === null && !row(mgr, 'A').error, '① the path unblocks only after the fuse mount exists + its probe passed');
@@ -100,7 +101,7 @@ try {
   const r5 = await mgr.mount('H');
   const mpH = mgr.pathOf(mgr._get('H'));
   ok(r5 === 'starting', '⑤ a fresh daemon starts as "starting"');
-  ok(await until(() => mgr._daemonPids(mpH).length === 0 && /no progress/.test(row(mgr, 'H').error || ''), 5000), '⑤ a daemon with no CPU progress for the hung window and no mount is KILLED, said on the row', row(mgr, 'H').error);
+  ok(await until(async () => (await mgr._daemonPids(mpH)).length === 0 && /no progress/.test(row(mgr, 'H').error || ''), 5000), '⑤ a daemon with no CPU progress for the hung window and no mount is KILLED, said on the row', row(mgr, 'H').error);
 
   // ── ⑥ not empty → stranded + ONE retry ──
   const mpN = mgr.pathOf(mgr._get('N'));
@@ -120,7 +121,7 @@ try {
   await mgr._healthSweep();
   ok(!calls.includes('A') && /not answering/.test(row(mgr, 'A').error || ''), '④ the first silent sweep is a STRIKE, never a teardown (lane mount-liveness: strikes ≥ 2)', calls.join());
   await mgr._healthSweep();   // the second consecutive silent sweep — the deadlock signature
-  ok(!calls.includes('B') && mgr._daemonPids(mgr.pathOf(mgr._get('B'))).length === 1 && /storage busy/.test(row(mgr, 'B').error || ''), '④ a slow listing while the daemon makes CPU progress is NOT torn down (no lazy unmount, no kill)', calls.join() + ' ' + row(mgr, 'B').error);
+  ok(!calls.includes('B') && (await mgr._daemonPids(mgr.pathOf(mgr._get('B')))).length === 1 && /storage busy/.test(row(mgr, 'B').error || ''), '④ a slow listing while the daemon makes CPU progress is NOT torn down (no lazy unmount, no kill)', calls.join() + ' ' + row(mgr, 'B').error);
   ok(calls.includes('A'), '④ …while an IDLE daemon whose listing hangs still is (the unreachable-host defense stands)', calls.join());
   mgr.unmount = realUnmount;
 
@@ -131,7 +132,7 @@ try {
     const g = makeMgr(MM, tag, [R]); all.push(g);
     await g.mount(R.id); await sleep(800);
     const mp = g.pathOf(g._get(R.id));
-    return { starting: !!row(g, R.id).starting, blocked: !!g.pathBlocked(mp), alive: g._daemonPids(mp).length === 1, error: row(g, R.id).error };
+    return { starting: !!row(g, R.id).starting, blocked: !!g.pathBlocked(mp), alive: (await g._daemonPids(mp)).length === 1, error: row(g, R.id).error };
   };
   const MC = mutantCopies('mount-starting', REPO); // patched copies live outside the tree (§51)
   const mutant = async (tag, from, to) => (src.includes(from) ? scenario(require(MC.write('src/mounts.js', src.replace(from, to), tag)).MountManager, tag) : null);
@@ -147,12 +148,12 @@ try {
   const mpL = gl.pathOf(gl._get('L'));
   await gl.mount('L');
   ok(await until(() => row(gl, 'L').mounted, 5000), '⑧ the first daemon mounts');
-  const pid1 = gl._daemonPids(mpL)[0];
-  gl._killMountDaemon(mpL); fs.rmSync(path.join(D, 'mounted-L'), { force: true });
-  await until(() => gl._daemonPids(mpL).length === 0, 3000);
+  const pid1 = (await gl._daemonPids(mpL))[0];
+  await gl._killMountDaemon(mpL); fs.rmSync(path.join(D, 'mounted-L'), { force: true });
+  await until(async () => (await gl._daemonPids(mpL)).length === 0, 3000);
   await gl.mount('L');
   ok(await until(() => row(gl, 'L').mounted, 5000), '⑧ …is killed, and a second daemon mounts the same record');
-  const pid2 = gl._daemonPids(mpL)[0];
+  const pid2 = (await gl._daemonPids(mpL))[0];
   const lines = gl.tailMountLog('L', 10);
   ok(pid1 && pid2 && pid1 !== pid2 && lines.includes(`NOTICE: fake daemon ${pid1}`) && lines.includes(`NOTICE: fake daemon ${pid2}`) && lines.filter((l) => l.startsWith(MountManager.LOG_MARK)).length === 2,
     '⑧ the dead daemon\'s last line is still readable after the remount (one spawn marker each)', `${pid1} ${pid2} ${JSON.stringify(lines)}`);
@@ -192,7 +193,7 @@ try {
 
   // (the row's source pins of src/lib/sidebar-mounts.js + the zh/ja words: MOVED to the fast scripts/test-mount-starting-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 } finally {
-  for (const g of all) for (const m of g._state.mounts) { try { g._killMountDaemon(g.pathOf(m)); } catch {} }
+  for (const g of all) for (const m of g._state.mounts) { try { await g._killMountDaemon(g.pathOf(m)); } catch {} }
   await sleep(1200);
   fs.rmSync(D, { recursive: true, force: true });
 }

@@ -218,7 +218,7 @@ try {
   ok(s.day === 24 * HOUR, 'the day-window warning expires 24 h after it is filed', s);
   ok(s.ref === 6 * HOUR && guardMod.REFUSE_INBOX_MS === 6 * HOUR, 'the refusal expires after 6 h — its own re-file cadence', s);
   ok(s.kinds.length >= 3 && s.kinds.every((k) => k === 'notice'), 'every one stays kind notice', s.kinds);
-  const sCtl = stampLeg(mutant('src/server/spend-guard.js', [["kind: 'notice', expiresAt });", "kind: 'notice' });"]]));
+  const sCtl = stampLeg(mutant('src/server/spend-guard.js', [["kind: 'notice', expiresAt });", "kind: 'notice' });"]]));   // stale-pins: kept — a mutant's replacement text (it rebuilds an older spend-guard line) — not a pin of setting-holds.js
   ok(!(sCtl.hour === HOUR || sCtl.day === 24 * HOUR || sCtl.ref === 6 * HOUR), 'CONTROL: the pre-fix fileInbox (no expiresAt) fails all three stamps', sCtl);
   const sCtl2 = stampLeg(mutant('src/server/spend-guard.js', [["noticeExpiry(r.warn.scope, now)", "noticeExpiry('day', now)"]]));
   ok(sCtl2.hour !== HOUR, 'CONTROL: stamping every warning with the day window is caught by the hour leg', sCtl2);

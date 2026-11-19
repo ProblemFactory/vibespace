@@ -6,6 +6,7 @@
 const { execFile } = require('child_process');
 const { JobManager } = require('../jobs.js');
 const M = require('../job-model.js');
+const SFW = require('../settings-file-words.js'); // B-8dcf item two (PURE): loaded with the module, never on a catch-up's pass (batch 21's cure)
 
 function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, taskGroups, activeSessions, deliver, getTelemetry = () => null, onStash = () => {}, onRunEnded = () => {}, sessionStatusKey = null }) {
   // THE FILER'S KEY (lane job-notify-user r5): this file is origin 'jobs''s one filer (src/inbox-origin.js FIELDS_FILERS) —
@@ -125,8 +126,10 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
         const { addressableId } = require('../claude-lock-capture.js');
         if (activeSessions) for (const [id, s] of activeSessions) {
           if (addressableId(s) !== cid) continue;
-          const groups = taskGroups && typeof sessionStatusKey === 'function' ? taskGroups.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }) : [];
-          return { live: true, conversationId: cid, sessionId: id, sessionCreatedAt: s.createdAt || 0, groups: new Set(groups.map((g) => g.id)) };
+          const groups = taskGroups && typeof sessionStatusKey === 'function' ? taskGroups.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }) : [];
+          // B-55dc: an answer still being READ judges like no live record — the engine HOLDS the line ('unknown': kept for the
+          // drain, never 'refused' / dropped) and the next push or drain asks again once the read landed
+          return { live: !groups.unread, conversationId: cid, sessionId: id, sessionCreatedAt: s.createdAt || 0, groups: new Set(groups.map((g) => g.id)), ...(groups.unread ? { reading: true } : {}) };
         }
         const byKey = taskGroups && typeof taskGroups.list === 'function' ? taskGroups.list().filter((g) => !g.archived && (g.sessions || []).some((k) => typeof k === 'string' && k.endsWith(':' + cid))) : [];
         return { live: false, conversationId: cid, groups: new Set(byKey.map((g) => g.id)) };
@@ -149,6 +152,8 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
     // while never set — the schema's 4096 is the ladder's last rung, not an owner's word) and the cluster's default (the
     // chart's `jobs.memoryMb` → env VIBESPACE_JOBS_MEMORY_MB)
     memoryCtx: () => ({ setting: serverSetting('jobs.memoryMb'), cluster: process.env.VIBESPACE_JOBS_MEMORY_MB }),
+    // B-460d: a job starts below the hub (nice +5 on its wrapper's spawn) while agents.lowerCpuPriority is on — read per start
+    spawnPriority: () => require('./spawn-priority.js').priorityFor({ serverSetting, log: { warn: (l) => log(l) } }),
   });
   // "Clear content…" (verify r4): every entry the ladder stashes is judged by the jobs store at its write — a frame a
   // wrapper hands back after the clear names a cleared job by id and is held as the sentence (jobs.js judgeHeldEntry)
@@ -158,7 +163,10 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
   if (deliver && typeof deliver.registerRetryJudge === 'function') deliver.registerRetryJudge('jobs', (cid, e) => jm.retryOwed(cid, e));
 
   const USER = { isUser: true, groups: new Set() };
-  const runsOf = (j) => (j.runs || []).map((r) => ({ startedAt: r.startedAt, endedAt: r.endedAt || null, exit: r.exit ?? null, cause: r.cause || null, trigger: r.trigger, lastLine: r.lastLine || '', memoryMb: r.memoryMb ?? null, memoryAskedMb: r.memoryAskedMb ?? null, memoryCap: r.memoryCap || null, memoryBound: r.memoryBound || null }));
+  // B-6c1a: a record whose runs is not a list (a hand-edited or damaged store) lists with no runs — never a list that throws
+  const runsOf = (j) => (Array.isArray(j.runs) ? j.runs : []).filter((r) => r && typeof r === 'object').map((r) => ({ startedAt: r.startedAt, endedAt: r.endedAt || null, exit: r.exit ?? null, cause: r.cause || null, trigger: r.trigger, lastLine: r.lastLine || '', memoryMb: r.memoryMb ?? null, memoryAskedMb: r.memoryAskedMb ?? null, memoryCap: r.memoryCap || null, memoryBound: r.memoryBound || null }));
+  // B-6c1a (its adversarial read r1): the DETAIL keeps whole run records (the panel's detail reads them) — a non-list or a null entry never reaches it
+  const runsWhole = (j) => (Array.isArray(j.runs) ? j.runs : []).filter((r) => r && typeof r === 'object');
   // the panel's fold groups one-shots by OWNER SESSION (§13 rule 3): the
   // conversation lineage id + the webui session id ride the user list only
   const ownerOf = (j) => ({ conversationId: (j.owner && j.owner.conversation && j.owner.conversation.id) || null, sessionId: (j.owner && j.owner.sessionId) || null });
@@ -210,10 +218,10 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
       // READ-THROUGH to the archive (triage §13 rule 5): housekeeping must
       // never turn an id somebody holds into a 404
       const rec = jm.archivedById(req.params.id);
-      if (rec) return res.json({ job: { ...jm.snapshotArchived(rec, { tail }), access: rec.access, interaction: rec.interaction, runs: rec.runs } });
+      if (rec) return res.json({ job: { ...jm.snapshotArchived(rec, { tail }), access: rec.access, interaction: rec.interaction, runs: runsWhole(rec) } });
       return res.status(jm._unread && jm._unread.store ? 503 : 404).json(jm._unread && jm._unread.store ? unreadAnswer() : { error: 'no such job' });   // B-f276 cure r1: never «no such job» while the records are unread
     }
-    res.json({ job: { ...enrichPublished(jm.snapshot(job, { tail }), job), access: job.access, interaction: job.interaction, runs: job.runs } });
+    res.json({ job: { ...enrichPublished(jm.snapshot(job, { tail }), job), access: job.access, interaction: job.interaction, runs: runsWhole(job) } });
   });
   // BATCH ACKNOWLEDGE (2.369.121, owner: 批量已读): the panel's "Mark all seen"
   // sends every ackable id once; each terminal one-shot not yet seen is
@@ -295,7 +303,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
       for (const [, s] of activeSessions) {
         if (!s.pty || s.mode !== 'chat' || (s.backend || 'claude') !== 'claude' || s.host) continue;
         if (s._csiAccepted) continue;
-        if (require('../settings-file-words.js').fileGoverns(s, 'jobNotices')) continue;   // B-8dcf item two: the person's settings file governs it
+        if (SFW.fileGoverns(s, 'jobNotices')) continue;   // B-8dcf item two: the person's settings file governs it
         try {
           s.pty.write(JSON.stringify({ type: 'control_request', request_id: `vs-csi-${++csiSeq}`, request: { subtype: 'apply_flag_settings', settings: { crossSessionInbound: 'accept' } } }) + '\n');
           s._csiAccepted = true;

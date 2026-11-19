@@ -23,7 +23,7 @@ const { groupOf: groupCardOf, readReport, cardOfReport } = require('./group-card
 const { MessageWindow } = require('./message-window.js'); // the ordered card list + its window arithmetic (dc-twins M10)
 const { COST_START, costFold, costKey, costShown, validCost } = require('./cost-segments.js'); // PURE (2.369.402): THE ONE fold of the CLI's running totals — the restore's too
 const { staleFromDenyMessage } = require('./browser-stale.js'); // PURE (lane J r2): a deny naming browser_paused = the takeover's stale answer
-const { unknownFields: shapeUnknownFields, carrierOf: shapeCarrierOf, unknownFieldsSample } = require('./record-shape.js'); // §3 schema drift (2026-09-21)
+const { unknownFields: shapeUnknownFields, carrierOf: shapeCarrierOf, unknownFieldsSample, SCHEMA_CLI_VERSIONS } = require('./record-shape.js'); // §3 schema drift (2026-09-21); B-f1a2: the record table
 const { helperAskOf, askRecordOf, askState, pendingAsksOf, asksSignature, askTransition, isWaiting, ASK_INITIAL, ASK_RECORD_EVENTS, RESULT_EVENT_OF, isUnknownOutcome } = require('./helper-ask.js'); // PURE (lane S1): a helper's permission ask — the parent's card, its view, the waiting chip
 const { permissionOutcome, outcomeHead, isStoppedRun, isAgentCutOff } = require('./permission-outcome.js'); // PURE (lane S1 verify r5): the CENSUS of the CLI's own permission-outcome sentences — the ONE reader of a tool_result's word
 const { safetyStopOf } = require('./safety-stop.js'); // PURE (lane classifier-stop-card): the CENSUS of the CLI's own safety-stop sentences — the stop card's one reader
@@ -221,6 +221,46 @@ function peerOriginOf(origin, text) {
   // OPENS the delivery (our own notice head never does); the call site draws the card (`applyPeerOrigin`, via 'peer').
   const report = NOTICE_AT_START_RE.test(s) ? null : readReport(s);
   return report ? { name: null, via: null, report } : { name: null, via: null };
+}
+/** B-d868 — WHO STARTED A TURN, read off the CLI's OWN RECORD of the command that opened it (a kept fact with its source,
+ *  never guessed afterwards): → {by, name?, kind?}
+ *    'person'       the record is a frame the wrapper STAMPED as the person's (chat-wrapper frame_stamp: a turn-opening frame
+ *                   with a message id and no origin) — `stamped`; the person typed it
+ *    'peer'         a peer record naming its sender (another session, vibespace-msg — peerOriginOf's name)
+ *    'notification' VibeSpace's own Background Work notice (peerOriginOf via 'notification')
+ *    'group'        a group report the server posted (peerOriginOf's report)
+ *    'task'         a background task's own notification (origin.kind 'task-notification')
+ *    'server'       any other origin VibeSpace or the CLI wrote (its kind kept)
+ *    'unrecorded'   no record, or a record nothing names — NEVER «the person» unproved (主开发, 2026-11-18 09:01Z) */
+function turnOpenerOf(rec, { stamped = false } = {}) {
+  if (stamped) return { by: 'person' };
+  if (!rec || rec.type !== 'user') return { by: 'unrecorded' };
+  const o = rec.origin;
+  if (!o || typeof o !== 'object') return { by: 'unrecorded' };
+  if (o.kind === 'task-notification') return { by: 'task' };
+  if (o.kind === 'peer') {
+    const c = rec.message && rec.message.content;
+    const text = typeof c === 'string' ? c : (Array.isArray(c) ? c.map((b) => (b && b.text) || '').join('\n') : '');
+    const po = peerOriginOf(o, text);
+    if (po.report) return { by: 'group' };
+    if (po.via === 'notification') return { by: 'notification', name: String(po.name || '').slice(0, 80) };
+    if (po.name) return { by: 'peer', name: String(po.name).slice(0, 80) };
+    return { by: 'server' };
+  }
+  return { by: 'server', ...(typeof o.kind === 'string' && o.kind ? { kind: o.kind.slice(0, 40) } : {}) };
+}
+/** B-d868 (the delta read's must): the fact a vault ASK reads. The ask is answered by the turn running when it arrives — but a
+ *  BACKGROUND task a turn launched (a helper agent, a background command) may ask after that turn ended, while a turn somebody
+ *  else opened runs. `background` = the openers of the turns that launched the background tasks still running (claude-stream-json
+ *  keeps them as opener KEYS `by|name`, the turn each task's own task_started came in — «unknown» when that attach never saw it
+ *  start). Any of them other than this turn's opener ⇒ «not recorded» (why: background) —
+ *  never the running turn's «you» for words a helper of another turn asked. PURE. */
+function turnByForAsk(tb, background = []) {
+  if (!tb || typeof tb !== 'object' || typeof tb.by !== 'string') return null;
+  const by = tb.by.slice(0, 20), name = typeof tb.name === 'string' && tb.name ? tb.name.slice(0, 80) : '';
+  const key = by + (name ? '|' + name : '');   // the opener's key: its kind AND its name (a helper of peer A asking in peer B's turn is not B's)
+  if ((Array.isArray(background) ? background : []).some((b) => b !== key)) return { by: 'unrecorded', why: 'background' };
+  return { by, ...(name ? { name } : {}) };
 }
 /** The words the CLI RECORDED for a peer card whose text was re-drawn from them (a framed group report) — what the
  *  rebuild's card matching reads (normalizers `recordedTextOf`); a symbol, so it never rides a message to a client. */
@@ -429,6 +469,9 @@ class MessageManager extends MessageWindow {
 
   constructor(sessionId, opts = null) {
     super(sessionId);
+    this.harnessLabel = 'Claude Code'; // B-f1a2: the words of its count (message-window _noteAddedKind)
+    // B-f1a2: THE RECORD TABLE this reader's count is judged against — a build is «registered» when this release carries its table
+    this.recordTable = { registered: (v) => SCHEMA_CLI_VERSIONS.includes(String(v)) };   // the ONE require of record-shape above (test-record-shape's controls rewire exactly one)
     // lane chat-attachments-persist: the transcript this reader renders (createMessageManager's opts.threadId — a view, the
     // transcript API, a gap slab): a picture's place when its record names none
     this._placeTx = opts && typeof opts.threadId === 'string' && opts.threadId ? opts.threadId : null;
@@ -1468,6 +1511,7 @@ class MessageManager extends MessageWindow {
       for (let i = this.messages.length - 1; i >= 0; i--) {
         const m = this.messages[i];
         if (this._afloat.includes(m)) continue; // lane midturn-order: an afloat message is below the turn, never its start
+        if (m.content?.[0]?.stopLate?.own) continue; // B-28b1: the Stop's own late row is no part of the turn (the mark rides the record)
         if (m.role === 'user' && !m.synthetic) break; // the turn began here: nothing of ours precedes it
         if (m.role === 'assistant' || m.role === 'tool' || (m.role === 'system' && m.status !== 'complete')) {
           m.meta = { ...(m.meta || {}), turn };
@@ -2489,7 +2533,19 @@ class MessageManager extends MessageWindow {
     }
     this.turnIndex++;
 
-    if (raw.is_error || (raw.subtype && raw.subtype !== 'success')) {
+    // B-28b1 (TELL, DO NOT PRETEND): the wrapper's stop-late fact on a Stop's follow-up result — the follow-up still reached the
+    // model. Said ONCE, in that Stop's own line: beside the result's own row («Interrupted», or any error row), else — a result
+    // that draws no row (one that ran to its end, one with no subtype) — as a row of its own. The stored row holds NO words
+    // (`text` empty, `stopLate.own`): the renderer says them in the reader's language, so search, an export or a preview never
+    // shows another language's sentence.
+    const lateRaw = raw.webui_stop_late && typeof raw.webui_stop_late === 'object' ? raw.webui_stop_late : null;
+    const drawsRow = !!(raw.is_error || (raw.subtype && raw.subtype !== 'success'));
+    const stopLate = lateRaw ? { how: lateRaw.how === 'answered' ? 'answered' : 'billed', cut: lateRaw.cut !== false } : null;
+    if (stopLate && !drawsRow) {
+      const lm = this._create({ role: 'system', status: 'interrupted', content: [{ type: 'system_info', text: '', stopLate: { ...stopLate, own: true } }] });
+      if (emit) this._emit({ op: 'create', message: lm });
+    }
+    if (drawsRow) {
       const label = raw.subtype === 'error_during_execution' ? 'Interrupted'
         : raw.subtype === 'error_max_turns' ? 'Max turns reached'
         : raw.subtype === 'error_max_budget_usd' ? 'Budget exceeded'
@@ -2497,7 +2553,7 @@ class MessageManager extends MessageWindow {
       const text = raw.result ? `${label}: ${raw.result}` : label;
       const msg = this._create({
         role: 'system', status: raw.subtype === 'error_during_execution' ? 'interrupted' : 'error',
-        content: [{ type: 'system_info', text }],
+        content: [{ type: 'system_info', text, ...(stopLate ? { stopLate } : {}) }],
       });
       const errorKind = classifyResultError(raw.result);
       if (errorKind) msg.errorKind = errorKind;
@@ -2895,4 +2951,4 @@ const KNOWN_IGNORED_SYSTEM_SUBTYPES = new Set([
   'ui_placed',              // the plugin UI host: the conversation's PLACED rows {rows:[{plugin, id, request_id, after_uuid?}]} (where each «Placed» ui_render sits) — a LOCAL stream-json session gets one whenever a plugin calls $.ui.place (2.1.314 Yd()); card-less: display-only (the binary: «no message carries these rows»), drawn only by a ui_render surface, which VibeSpace does not serve
 ]);
 
-module.exports = { splitToolResultContent, pictureBaseOf, pictureOrdinalsOf, toolResultText, MessageManager, classifyResultError, parseBackgroundLaunch, normalizeTaskType, TASK_TYPE_MAP, peerDisplayName, peerOriginOf, applyPeerOrigin, userRecordOf, PEER_RECORDED, initFrameFacts, commandNames, normalizeWorkflowProgress, HANDLED_SYSTEM_SUBTYPES, KNOWN_IGNORED_RECORD_TYPES, KNOWN_IGNORED_SYSTEM_SUBTYPES, unknownRecordJson, noteFieldDrift, driftLedgerRows };
+module.exports = { turnOpenerOf, turnByForAsk, splitToolResultContent, pictureBaseOf, pictureOrdinalsOf, toolResultText, MessageManager, classifyResultError, parseBackgroundLaunch, normalizeTaskType, TASK_TYPE_MAP, peerDisplayName, peerOriginOf, applyPeerOrigin, userRecordOf, PEER_RECORDED, initFrameFacts, commandNames, normalizeWorkflowProgress, HANDLED_SYSTEM_SUBTYPES, KNOWN_IGNORED_RECORD_TYPES, KNOWN_IGNORED_SYSTEM_SUBTYPES, unknownRecordJson, noteFieldDrift, driftLedgerRows };

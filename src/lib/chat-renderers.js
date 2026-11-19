@@ -49,6 +49,30 @@ const TRAIL_ONLY_RE = new RegExp('(?![' + URL_STOP + '])[' + CJK_PUNCT + ']');
 const SCHEME_AT = /https?:\/\//gi;
 // r6 (m7): a masked run's NOTE never sits inside a verbatim block (a <pre>, a code element) — the block reads exactly as written (a copy of it
 // copies the command), the note follows it. One pass over the rendered HTML, only when a note is in it (notesAfterBlocks)
+// THE SCHEME (src/internal-link.js — lane setting-doors pick 1's settings, lane login-request-card piece 1's conversation and desktop):
+// an anchor whose href IS a link of the scheme — marked's output BEFORE the sanitizer (which keeps no unknown scheme):
+// `[x](vibespace://…)`, `<vibespace://…>`, a raw <a>; inside code marked writes `&lt;a`, so only real tags. A target the grammar takes
+// becomes the fragment mark the sanitizer keeps; after linkify that anchor becomes OUR span — only where the renderer's option is on.
+const VS_HREF_RE = /(<a\b[^>]*?\shref\s*=\s*)(?:"(vibespace:\/\/[^"]*)"|'(vibespace:\/\/[^']*)')/gi;
+// THE EXACT-TAG LAW (主开发 2026-11-15, the verifier's F4): a pass that rewrites a SANITIZED anchor accepts only the open tag the tree's own
+// rewrite + sanitizer produce, every byte accounted for — for an in-page `#vs-…` href that is `<a href="…">` and nothing else (safe-html's
+// hook adds target / rel only to other hrefs). An anchor carrying anything more stays the sanitizer's inert in-page anchor: an engine
+// older than mid-2025 writes a raw `>` inside an attribute value, and a «not a greater-than sign» run would end the tag inside it
+const SANITIZED_ANCHOR_OPEN_RE = /^<a\x20href="([^"]*)"(?:\x20title="[^"]*")?(?:\x20target="_blank"\x20rel="noopener noreferrer")?>/;   // (\x20: a pattern READS an anchor, it makes none — test-path-linkify's anchor-site census)   // THE EXACT-TAG LAW: the tree's own anchor, byte for byte
+const VS_ANCHOR_RE = new RegExp('<a\\x20href="((?:' + VS_MARKS.map((m) => m.replace(/[-#]/g, (c) => '\\' + c)).join('|') + ')[^"]*)">([\\s\\S]*?)<\\/a>', 'g');   // the exact-tag law, every target's mark
+// the bare pass's PLACEHOLDER for a conversation / desktop door (text only, so every later pass skips it — _linkifyBareText); the
+// after-pass draws it (vsLinkHtml: the icon, the real name, the unknown chip)
+const VS_BARE_RE = /<span class="chat-link-vs" data-vs-kind="(conversation|desktop)" data-vs-ref="([^"]*)">([^<]*)<\/span>/g;
+/** THE STREAMING FRAME's tail (主开发 12:21Z): the LAST bare door's placeholder, when the raw text ends with that very run (nothing after
+ *  it yet), goes back to words — the next frame draws it once a character follows. Labelled links need their `)` to be links at all. */
+function streamTailWords(html, text) {
+  const tail = /(?:^|[^\w/.])(vibespace:\/\/[A-Za-z]*(?:\/[A-Za-z0-9_.:~-]*)?)$/i.exec(String(text || ''));
+  if (!tail) return html;
+  let last = null;
+  for (const m of html.matchAll(VS_BARE_RE)) last = m;
+  if (!last || tail[1] !== last[3]) return html;   // the door ENDS at the text's end (a full stop after it is a character that follows)
+  return html.slice(0, last.index) + `<span class="chat-link-words">${last[3]}</span>` + html.slice(last.index + last[0].length);
+}
 const NOTE_SPAN_RE = / ?<span class="chat-link-note masked-link-note">([^<]*)<\/span>/g;
 const BLOCK_RE = /<pre\b[^>]*>[\s\S]*?<\/pre>|<code\b[^>]*>[\s\S]*?<\/code>/gi;
 export function notesAfterBlocks(html) {
@@ -64,7 +88,10 @@ export function notesAfterBlocks(html) {
 }
 // r4 (M4) → r9: a token's tail is shed by a backward walk over path-linkify's ONE trailing set (isTrailing); cleanPath is that walk too
 import { mcpParts } from './chat-run-summary.js';
-import { chatLinkOf } from './card-doors.js'; // lane card-door-in-chat: THE boundary — the chat's own links only, never a card's door
+import { chatLinkOf, settingLinkOf, vsLinkOf } from './card-doors.js'; // lane card-door-in-chat: THE boundary — the chat's own links only, never a card's door; lane setting-doors pick 1: a link to one setting opens it
+import { splitLinks, hrefTarget, markOf, targetOfMark, runRe as vsRunRe, runFloor as vsRunFloor, hasScheme as hasVsScheme, MARK_PREFIXES as VS_MARKS } from '../internal-link.js'; // PURE (CJS): THE scheme's ONE grammar — every target (settings, conversation, desktop), the marks, the runs
+import { vsLinkHtml, pressInternalLink, internalLinkMenu } from './internal-link-door.js'; // lane login-request-card piece 1: THE drawing of a conversation / desktop link + the page's door (registered at boot)
+import { isSettingKey } from './settings-schema.js'; // lane setting-doors pick 1: THE client's schema test — a link only when the key IS a row
 import { assistantNoteOf, noteSentence, toolResultSentence } from './chat-run-summary.js'; // lane S3: text addressed to the ASSISTANT is a note, harness bookkeeping in a tool result is a sentence
 import { isVibespaceNotice, noticeCardView, impersonatesVibespace } from '../notification-senders.js'; // lane S3: a VibeSpace notice is titled "VibeSpace · …", never `Message from "…"`; S3 verify F3: decided by the record's PATH (`peerVia`), never its sender's name or first sentence
 import { handbackFacts } from '../browser-takeover.js'; // lane S3: the handback card's title, read back by the module that wrote the words
@@ -158,6 +185,24 @@ export { mcpParts };
 // Escaped HTML for a tool-card header: curated display name, or for MCP
 // tools the SHORT tool name (underscores → spaces) + a dim server chip.
 // The raw identifier always rides the card's title tooltip.
+/** lane think-tools-phone (the owner 2026-11-07, from a phone: «这个换行和复制按钮挡住了字，并且隐藏不掉。»): WHICH TOOLS A BLOCK
+ *  THE CHAT DREW CARRIES, AND WHERE THEY SIT — the one table addWrapToggles reads (test-chat-pre-tools censuses it per kind).
+ *  A PROSE block is one chat.css draws WRAPPED (white-space: pre-wrap): a Wrap there toggles nothing a person can see, so it
+ *  carries Copy only; a Thinking block is prose whose Copy is ONE door in its own summary row («Thinking  Copy» — no row of
+ *  its own over the words); a code block (a fence, a tool's input / output / error, a diff, a file) keeps Copy + Wrap, a
+ *  file its language picker, an html / xml file its Preview. Every tool row is RESERVED above its block (chat.css). */
+export const PROSE_PRE = ['.chat-thinking pre', '.chat-system-notification pre', 'pre.chat-pre-wrapped', 'pre.chat-tool-stopped-text', 'pre.chat-permission-cmd', 'pre.chat-helper-ask-cmd'];
+export function preToolsOf(block) {
+  if (block.closest('.chat-thinking')) return { kind: 'thinking', tools: ['copy'], at: 'summary' };
+  if (block.classList.contains('chat-code-block')) {
+    const lang = block.dataset.lang;
+    return { kind: 'file', tools: ['lang', ...(lang === 'html' || lang === 'xml' ? ['preview'] : []), 'copy', 'wrap'], at: 'row' };
+  }
+  if (block.classList.contains('chat-diff-body')) return { kind: 'diff', tools: ['copy', 'wrap'], at: 'row' };
+  if (PROSE_PRE.some((sel) => block.matches(sel))) return { kind: 'prose', tools: ['copy'], at: 'row' };
+  return { kind: 'code', tools: ['copy', 'wrap'], at: 'row' };
+}
+
 export function toolHeaderHtml(name) {
   const mcp = mcpParts(name);
   if (mcp) return `${escHtml(mcp.tool.replace(/_/g, ' '))} <span class="chat-tool-chip" title="MCP server">${escHtml(mcp.server)}</span>`;
@@ -710,6 +755,11 @@ const peerFoldLabel = (open, who) => (who
   : (open ? t('Hide the message') : t('Show the message')));
 
 
+// B-28b1 (TELL, DO NOT PRETEND): a Stop's follow-up that reached the model before the CLI read the second interrupt — one line,
+// in that Stop's own row (the fact rides the follow-up's result: every client and a reload draw the same)
+const stopLateLine = (f) => (f && f.cut === false
+  ? t('The Stop arrived after the message handed in earlier had already gone to the model — it was answered before the Stop reached it, and it is billed')
+  : t('The Stop arrived after the message handed in earlier had already gone to the model — it was cut off at once, and it may be billed'));
 /** A USAGE WALL'S ROOM (lane agy-wall-signal): another model group of the walled account whose weekly window is read
  *  under 90 % — agy's own group name, the whole percent; a model switch continues the conversation there. */
 const wallRoomLine = (r) => t('{name}: weekly limit {pct} % used — switch this conversation’s model to continue', { name: String(r.name || ''), pct: Number(r.usedPct) || 0 });
@@ -894,7 +944,7 @@ class ChatRenderers {
     // the item, the quote folded, the reply as the body. Every piece escaped /
     // markdown-sanitized like any user message.
     const inboxReply = origin.why === 'tray-answer' ? parseInboxReply(rawText) : null;
-    if (inboxReply) return this._renderInboxReply(msg, inboxReply);
+    if (inboxReply) return this._renderInboxReply(msg, inboxReply, content);
 
     const el = document.createElement('div');
     el.className = 'chat-msg chat-msg-user';
@@ -919,7 +969,7 @@ class ChatRenderers {
     return el;
   }
 
-  _renderInboxReply(msg, r) {
+  _renderInboxReply(msg, r, content = []) {
     const el = document.createElement('div');
     el.className = 'chat-msg chat-msg-user chat-msg-inbox-reply';
     el._rawMsg = msg;
@@ -928,7 +978,9 @@ class ChatRenderers {
     const gist = (qLines[1] || r.id).slice(0, 120);
     const html = `<div class="chat-peer-head chat-inbox-reply-head">${UI_ICONS.inbox || ''} ${escHtml(t('For you · reply to #{id}', { id: r.id }))}</div>`
       + `<details class="chat-inbox-quote"><summary>${escHtml(gist)}</summary><div class="chat-inbox-quote-body">${escHtml(r.quote)}</div></details>`
-      + `<div class="chat-text">${this.renderMarkdown(r.reply || '')}</div>`;
+      + `<div class="chat-text">${this.renderMarkdown(r.reply || '')}</div>`
+      // B-51dd: the pictures the reply carried — the plain bubble's own media card (a picture alone is a reply)
+      + content.filter((b) => b && b.type === 'image' && !b.gone && b.data).map((b) => imageMediaHtml({ dataUrl: `data:${b.mediaType || 'image/png'};base64,${b.data}`, mediaType: b.mediaType || 'image/png', name: t('Image') })).join('');
     this.wrapMsg(el, 'user', t('You'), html);
     ChatRenderers.applyQueueChip(el, msg, this._canSteerQueue() ? this._onQueueChipClick : null);
     return el;
@@ -1489,9 +1541,9 @@ class ChatRenderers {
       // chat.hideEmptyThinking (default on) hides it via a body class, and so
       // _updateRuns treats it as transparent for run-collapse adjacency.
       if (!thinkTxt.trim()) el.classList.add('chat-empty-thinking');
-      html = `<details class="chat-thinking"${msg.status === 'streaming' ? ' open' : ''}><summary>${t('Thinking')}</summary><pre>${escHtml(thinkTxt)}</pre></details>`;
+      html = `<details class="chat-thinking"${msg.status === 'streaming' ? ' open' : ''}><summary><span class="chat-thinking-label">${t('Thinking')}</span></summary><pre>${escHtml(thinkTxt)}</pre></details>`;
     } else if (block.type === 'text') {
-      html = `<div class="chat-text">${this.renderMarkdown(stripAnsi(block.text || ''))}</div>`;
+      html = `<div class="chat-text">${this.renderMarkdown(stripAnsi(block.text || ''), { vsLinks: true })}</div>`;   // the conversation's own words: the scheme's links (the option)
     } else {
       return null;
     }
@@ -1529,7 +1581,7 @@ class ChatRenderers {
         + `${COLLAB_ICONS.in}<span class="chat-collab-name" role="link" tabindex="0"${nameAttrs}>${escHtml(collab.agentName || collab.agentPath || t('sub-agent'))}</span>`
         + `${collab.msgType ? `<span class="chat-collab-type">${escHtml(collab.msgType)}</span>` : ''}`
         + `<span class="chat-agent-report-tag">${escHtml(t('sub-agent report'))}</span></div>`
-        + `<div class="chat-text chat-agent-report-body">${this.renderMarkdown(stripAnsi(body))}</div>`;
+        + `<div class="chat-text chat-agent-report-body">${this.renderMarkdown(stripAnsi(body), { vsLinks: true })}</div>`;   // a sub-agent's report: the option on
       return el;
     }
     // LIVE PROGRESS (2026-09-07): a coalesced card on a streaming turn renders
@@ -1568,7 +1620,7 @@ class ChatRenderers {
       // markdown per the tool's own describe ("Supports markdown formatting").
       // renderMarkdown is sanitizeHtml(marked(...)) — the ONE sanitizer; the PURE
       // builder never carries one (it escapes instead).
-      const body = rec.message ? `<div class="chat-text">${this.renderMarkdown(rec.message)}</div>` : '';
+      const body = rec.message ? `<div class="chat-text">${this.renderMarkdown(rec.message, { vsLinks: true })}</div>` : '';   // the agent's own words to the person (the brief channel): the option on (主开发 12:21Z)
       el.classList.add('chat-msg-userchan');
       this.wrapMsg(el, 'tool', UI_ICONS.mail, userMessageCardHtml(rec, { esc: escHtml, t, icons: { mail: UI_ICONS.mail }, body }));
       return el;
@@ -1635,7 +1687,7 @@ class ChatRenderers {
     if (msg.taskInfo && msg.taskInfo.subId) {
       // lane agy-subagent-cards: a subagent's CARD (an Antigravity invoke_subagent row read from agy's store) — role,
       // task, state, elapsed time, answer, the files it wrote; its button opens the sub's timeline (sub-<subId>)
-      html = subagentCardHtml(msg, { t, escHtml, linkifyText: (s) => this.linkifyText(s), renderMarkdown: (s) => this.renderMarkdown(s), clickablePath: (p) => this.clickablePath(p), statusChip: this.renderTaskChip(msg.taskInfo), icon: UI_ICONS.robot, now: Date.now() });
+      html = subagentCardHtml(msg, { t, escHtml, linkifyText: (s) => this.linkifyText(s), renderMarkdown: (s) => this.renderMarkdown(s, { vsLinks: true }), clickablePath: (p) => this.clickablePath(p), statusChip: this.renderTaskChip(msg.taskInfo), icon: UI_ICONS.robot, now: Date.now() });
     } else if (block.type === 'tool_call') {
       // Tool call — pending (spinner) or interrupted (error, no result ever came)
       const isAgent = block.toolName === 'Agent';
@@ -2166,8 +2218,9 @@ class ChatRenderers {
       el.className = 'chat-msg chat-msg-system chat-system-notification chat-msg-hook';
       // Full hook output, NEVER truncated — collapsed <details> + the CSS
       // scroll cap handle size. The <pre> starts pre-wrapped (hook payloads
-      // are prose-ish) and the STANDARD addWrapToggles toolbar (Wrap/Copy)
-      // picks it up like any other pre; an editor button opens the full text.
+      // are prose-ish) and the STANDARD addWrapToggles toolbar picks it up as
+      // PROSE (Copy, no Wrap — lane think-tools-phone, preToolsOf); an editor
+      // button opens the full text.
       const output = h.output ? escHtml(h.output) : '';
       el.innerHTML = `<details class="chat-hook-details"><summary class="chat-hook-summary">${escHtml(text)}${h.output ? `<button class="chat-wrap-toggle chat-hook-edit" title="${t('Open in editor')}">${t('Editor')}</button>` : ''}</summary>${output ? `<pre class="chat-hook-output chat-pre-wrapped">${output}</pre>` : ''}</details>`;
       const editBtn = el.querySelector('.chat-hook-edit');
@@ -2177,7 +2230,10 @@ class ChatRenderers {
     // Error / interrupted
     if (msg.status === 'error' || msg.status === 'interrupted') {
       if (msg.errorKind === 'prompt-too-long') return { el: this.appendContextFullCard(text), sideEffect: null };
+      const late = msg.content?.[0]?.stopLate;
+      if (late && late.own) { const lel = this.appendSystem(stopLateLine(late)); lel.classList.add('chat-stop-late'); return { el: lel, sideEffect: null }; }   // its own row: the words are said here
       const el = this.appendSystem(text);
+      if (late) { const line = document.createElement('div'); line.className = 'chat-system chat-stop-late'; line.textContent = stopLateLine(late); el.appendChild(line); }
       // the usage wall's ONE added sentence (lane agy-wall-signal): another model group of this account has weekly room
       const room = msg.content?.[0]?.wallRoom;
       if (room) { const line = document.createElement('div'); line.className = 'chat-system chat-wall-room'; line.textContent = wallRoomLine(room); el.appendChild(line); }
@@ -2643,7 +2699,17 @@ class ChatRenderers {
     }).join('');
   }
 
-  renderMarkdown(text) {
+  /** THE OPTION `vsLinks` (lane setting-doors pick 1 cure, 主开发 2026-11-17 — ONE rule for where the scheme's links render):
+   *  off by default; on ONLY where the words are the conversation's own — the assistant text block and its streaming
+   *  frame, the sub-agent report, the sub-agent card's answer, and the agent's own message card for the person (the brief
+   *  channel's message — 主开发's ruling, 12:21Z: the agent's words to the person) — LIVE OR HISTORY (the read-only history
+   *  view draws the same blocks, pressable). Off ⇒ a `vibespace://` run is words: text a PEER wrote (peer and group bodies,
+   *  a VibeSpace notice — a job's record — the person's own text, a tool's input or output) never draws a door, and a
+   *  hand-written `#vs-setting-` anchor there is its label alone. (For-you items' words are pressable WHATEVER they quote —
+   *  主开发's ruling: a press only goes somewhere; a fence there would be over-defence.)
+   *  `streaming` (the streaming frame only): a bare door that ENDS at the end of the text stays plain words until a character
+   *  follows it — a half-written address is never drawn as «unknown» (主开发's look law: a person never reads an address). */
+  renderMarkdown(text, { vsLinks = false, streaming = false } = {}) {
     try {
       // marked passes raw HTML through — sanitize before injecting into the
       // DOM (message content is model/tool-controlled and may echo hostile
@@ -2657,7 +2723,10 @@ class ChatRenderers {
       html = conversationLinksHtml(html, { known: (id) => (this._subagentKnown ? this._subagentKnown(id) : true), t, escHtml }); // lane agy-subagent-cards: [x](conversation://<id>) opens that subagent
       html = this._wrapTables(html);
       html = this._markOpenFences(text, html); // lane chat-mermaid: a fence still being streamed stays code
-      return notesAfterBlocks(this.linkify(html));   // lane mask-value-shape r6 (m7): a code block / span reads as written — the note follows it
+      html = this.linkify(html, { vsLinks });
+      if (vsLinks && streaming) html = streamTailWords(html, text);   // a door still being written stays words
+      html = this._schemeAnchors(html, { vsLinks });   // lane setting-doors pick 1 (+ the option): [x](vibespace://settings/<key>) → the setting span (after linkify: its words are never re-linked)
+      return notesAfterBlocks(html);   // lane mask-value-shape r6 (m7): a code block / span reads as written — the note follows it
     } catch {
       return escHtml(text || '');
     }
@@ -2910,11 +2979,45 @@ class ChatRenderers {
    * writes `&lt;a` / `&quot;`.
    */
   _fileHrefs(html) {
-    return html.replace(/(<a\b[^>]*?\shref\s*=\s*)(?:"(file:[^"]*)"|'(file:[^']*)')/gi, (m, pre, dq, sq) => {
+    return this._schemeHrefs(html.replace(/(<a\b[^>]*?\shref\s*=\s*)(?:"(file:[^"]*)"|'(file:[^']*)')/gi, (m, pre, dq, sq) => {
       const fp = fileUrlPath(unescHtml(dq ?? sq));
       const carried = fp && fp.replace(/%/g, '%25');
       return carried && hrefPath(carried) ? `${pre}"${escHtml(carried)}"` : m;
+    }));
+  }
+  /** THE PRE-SANITIZE REWRITE (lane setting-doors pick 1; every target of the scheme since lane login-request-card piece 1): an href
+   *  the sanitizer would drop that IS a link of the scheme (src/internal-link.js hrefTarget — a setting only when its key is a row,
+   *  isSettingKey exactly; a conversation / desktop by its shape; a value part never matches) is carried as the target's fragment mark
+   *  the sanitizer keeps (the conversation:// precedent, subagent-card.js); _schemeAnchors decides after linkify. Anything else is left
+   *  as written — dropped, as before. The mark is inert: with the option off it is its label. */
+  _schemeHrefs(html) {
+    if (!/vibespace:\/\//i.test(html)) return html;   // the scheme is case-blind in an href (a URL's scheme); the reference is not
+    return html.replace(VS_HREF_RE, (m, pre, dq, sq) => { const tg = hrefTarget(dq ?? sq, isSettingKey); return tg ? `${pre}"${markOf(tg.kind, tg.ref)}"` : m; });
+  }
+  /** THE AFTER-PASS — the sanitized, linkified HTML: each `<a href="<mark>">` of the scheme (the exact tag) and each bare placeholder.
+   *  The renderer's option OFF ⇒ its label, words — never a door; ON ⇒ a known setting is the setting span, a conversation / desktop
+   *  is THE drawing (internal-link-door vsLinkHtml: the icon, the real name, or the unknown chip that cannot be pressed). */
+  _schemeAnchors(html, { vsLinks = false } = {}) {
+    if (html.indexOf('#vs-') >= 0) html = html.replace(VS_ANCHOR_RE, (m, href, inner) => {
+      if (!vsLinks) return inner;   // the option off: the mark is its label
+      const tg = targetOfMark(href);
+      if (!tg) return m;
+      if (tg.kind === 'setting') return isSettingKey(tg.ref) ? this._settingSpan(tg.ref, inner) : m;
+      return this._vsSpan(tg.kind, tg.ref, inner);
     });
+    if (html.indexOf('chat-link-vs') >= 0) html = html.replace(VS_BARE_RE, (m, kind, ref, text) => this._vsSpan(kind, unescHtml(ref), text));
+    return html;
+  }
+  /** THE conversation / desktop span in chat (lane login-request-card piece 1): `.chat-link.chat-vs-link` + data-vs-kind / data-vs-ref
+   *  — a press GOES (setupLinkHandler → the page's door: the stated exception to copy-on-click, like the subagent link); right-click or
+   *  long-press offers Go · Copy link. */
+  _vsSpan(kind, ref, innerHtml) {
+    return vsLinkHtml(kind, ref, innerHtml, { cls: 'chat-link chat-vs-link', attrs: ` data-vs-kind="${escHtml(kind)}" data-vs-ref="${escHtml(ref)}"` });
+  }
+  /** THE setting span (lane setting-doors pick 1): `.chat-link.chat-setting-link` + data-setting — no href, no value; a click
+   *  opens Settings on the row (setupLinkHandler → app.openSettingAt), never the copy / open menu (card-doors chatLinkOf). */
+  _settingSpan(key, innerHtml) {
+    return `<span class="chat-link chat-setting-link" data-setting="${escHtml(key)}" title="${escHtml(t('Open in Settings'))}">${innerHtml}</span>`;
   }
 
   /**
@@ -2947,9 +3050,11 @@ class ChatRenderers {
   }
   /** An <a>…</a> whose HREF holds a belt's mark → its words + the note; else null (the anchor's own rules run). */
   _maskedAnchor(a) {
-    const open = /^<a\b[^>]*>/i.exec(a);
+    // THE EXACT-TAG LAW (2026-11-15): the open tag the tree writes — href, marked's optional title, the hook's target + rel — each value a
+    // QUOTED run (a raw `>` inside a value is accounted for, never ends the tag); any other open tag stays the sanitizer's own anchor
+    const open = SANITIZED_ANCHOR_OPEN_RE.exec(a);
     if (!open) return null;
-    const href = /\shref\s*=\s*"([^"]*)"/i.exec(open[0]), inner = a.slice(open[0].length, -4);
+    const href = [open[0], open[1]], inner = a.slice(open[0].length, -4);
     // r2 (m3, m6): the HREF alone is judged — raw and decoded once (marked leaves a vault mark's colon raw); the label is words
     const raw = href ? href[1].replace(/&amp;/g, '&') : '';
     let dec = raw; try { dec = decodeURIComponent(raw); } catch { /* the raw href */ }
@@ -3078,23 +3183,42 @@ class ChatRenderers {
     }));
   }
 
+  /**
+   * THE BARE PASS (lane setting-doors pick 1; every target since lane login-request-card piece 1): a door of the scheme in text
+   * (src/internal-link.js splitLinks — trailing punctuation shed; a setting only when the key is a row, the longest known key wins; a
+   * conversation / desktop by its shape) is ONE span — a setting's span, or a conversation / desktop PLACEHOLDER the after-pass draws;
+   * every other run of the scheme is WORDS — claimed whole (`chat-link-words`: every later pass skips it, the click handler never sees
+   * a .chat-link), so the path pass — whose rule linked its `//…` tail — never makes half a link of it. The renderer's option OFF ⇒
+   * every run is words. Skips a link span an earlier pass made (a URL's).
+   */
+  linkifySchemeLinks(text, { vsLinks = false } = {}) {
+    if (!hasVsScheme(text)) return text;   // l1: the scheme in any case
+    const html = !vsLinks ? text : this._linkifyBareText(text, (txt) => splitLinks(txt, isSettingKey).map((g) => (!g.kind ? g.text
+      : g.kind === 'setting' ? this._settingSpan(g.ref, g.text)
+        : `<span class="chat-link-vs" data-vs-kind="${g.kind}" data-vs-ref="${escHtml(g.ref)}">${g.text}</span>`)).join(''));
+    return this._linkifyBareText(html, (txt) => txt.replace(vsRunRe(), (run) => {   // l1: EVERY run that is no door — glued to a word or a path too — so the path pass never links its tail
+      let end = run.length; const floor = vsRunFloor(run); while (end > floor && isTrailing(run[end - 1])) end--;
+      return `<span class="chat-link-words">${run.slice(0, end)}</span>${run.slice(end)}`;
+    }));
+  }
+
   /** Combined URL + path linkification on a text segment. */
-  linkifySegment(text, esc) {
-    return this.linkifyPathsTagSafe(this.linkifyPagePaths(this.linkifyFileUrls(this.linkifyUrls(text))), esc);
+  linkifySegment(text, esc, opts = {}) {   // opts.vsLinks — renderMarkdown's option (off: a run of the scheme is words)
+    return this.linkifyPathsTagSafe(this.linkifySchemeLinks(this.linkifyPagePaths(this.linkifyFileUrls(this.linkifyUrls(text))), opts), esc);
   }
 
   /**
    * Auto-detect URLs and file paths in rendered HTML, make them interactive.
    * Click = copy, Ctrl+Click = open.
    */
-  linkify(html) {
+  linkify(html, opts = {}) {
     return html.replace(/(<a[\s>][\s\S]*?<\/a>)|(<code[\s>][\s\S]*?<\/code>)|(<[^>]*>)|([^<]+)/gi, (match, anchor, code, tag, text) => {
       if (anchor) { const masked = this._maskedAnchor(match); if (masked) return masked; } // lane mask-value-shape: a link a belt masked inside is words + the note
       if (anchor) return this._pathAnchor(match); // a path anchor is a path span; any other <a>...</a> untouched
       if (code) {
         // Linkify paths/URLs inside <code> blocks while preserving the <code> wrapper
         return code.replace(/^(<code[^>]*>)([\s\S]*?)(<\/code>)$/i, (_, open, inner, close) => {
-          const linked = this.linkifySegment(inner, true);
+          const linked = this.linkifySegment(inner, true, opts);
           if (linked === inner) {
             // No absolute match — but a code span that IS a relative path or
             // bare filename (`B2BTasks/x/final/`, `SCRIPTS.md`, `generate.py`)
@@ -3112,13 +3236,14 @@ class ChatRenderers {
       }
       if (tag) return tag;
       if (!text) return match;
-      return this.linkifySegment(text, true);
+      return this.linkifySegment(text, true, opts);
     });
   }
 
   /** Linkify plain text (for tool output, user messages that don't go through markdown) */
-  linkifyText(text) {
-    return this.linkifySegment(escHtml(text), false);
+  linkifyText(text, opts = {}) {   // a tool's words: never given the option (lane setting-doors cure); given it, the scheme's after-pass draws (one drawing)
+    const html = this.linkifySegment(escHtml(text), false, opts);
+    return opts && opts.vsLinks ? this._schemeAnchors(html, opts) : html;
   }
 
   // Resolve a clicked link into {url, fp, rel}. A local filesystem path — our
@@ -3142,6 +3267,10 @@ class ChatRenderers {
       // Our .chat-link spans and the markdown's bare <a> tags (chatLinkOf). A card's door (a classed anchor: the Outbox
       // card's ⤓ / file name, a file card's link) does its own act (lane card-door-in-chat — the owner's ⤓ said
       // «已复制！»); a conversation:// link is ChatView's (lane agy-subagent-cards)
+      const setting = settingLinkOf(e.target);   // lane setting-doors pick 1: a link to one setting OPENS it (a click, a tap) — no copy, no menu
+      if (setting) { e.preventDefault(); e.stopPropagation(); this._openSettingLink(setting.dataset.setting); return; }
+      const vs = vsLinkOf(e.target);   // lane login-request-card piece 1: a link to a conversation / desktop GOES (the page's door) — it only navigates
+      if (vs) { e.preventDefault(); e.stopPropagation(); const plan = pressInternalLink(vs.dataset.vsKind, vs.dataset.vsRef, { x: e.clientX, y: e.clientY, el: vs }); this._linkOp(vs.dataset.vsKind, plan ? `press:${plan}` : 'press', vs.dataset.vsRef); return; }
       const link = chatLinkOf(e.target);
       if (!link) return;
       e.preventDefault();
@@ -3166,6 +3295,14 @@ class ChatRenderers {
     // Right-click / long-press on a link: same Open/Copy menu (desktop native
     // menu has no useful actions for .chat-link spans)
     this._messageList.addEventListener('contextmenu', (e) => {
+      // lane login-request-card piece 1: a link of the scheme (a conversation, a desktop, a setting) — «Go» · «Copy link»
+      const vsl = vsLinkOf(e.target), setl = !vsl && settingLinkOf(e.target);
+      if (vsl || setl) {
+        e.preventDefault(); e.stopPropagation();
+        const el = vsl || setl, kind = vsl ? vsl.dataset.vsKind : 'setting', ref = vsl ? vsl.dataset.vsRef : setl.dataset.setting;
+        internalLinkMenu(kind, ref, { x: e.clientX, y: e.clientY }, (w) => this.flashLink(el, w));
+        return;
+      }
       const link = chatLinkOf(e.target);   // a card's door keeps the browser's own menu (Save link as…)
       if (!link) return;
       e.preventDefault();
@@ -3178,6 +3315,12 @@ class ChatRenderers {
         { label: (fp || rel) ? t('Copy path') : t('Copy URL'), action: () => copyText(fp || rel || url).then(() => { this.flashLink(link, t('Copied!')); this._linkOp(kind, 'copied', fp || rel || url); }) },
       ]);
     });
+  }
+
+  /** lane setting-doors pick 1: THE door of a link to one setting — app.openSettingAt (Settings on that row); it opens, never writes. */
+  _openSettingLink(key) {
+    this.app?.openSettingAt?.(key);
+    this._linkOp('setting', 'opened', key);
   }
 
   /** Resolve a RELATIVE path / bare filename against the session cwd and open
@@ -3355,17 +3498,17 @@ class ChatRenderers {
 
   openInTempEditor(text) {
     const tmpName = `chat-block-${Date.now()}.txt`;
-    const tmpPath = `/tmp/claude-webui/${tmpName}`;
-    fetch('/api/mkdir', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: '/tmp/claude-webui' }) }).catch(() => {});
-    fetch('/api/file/write', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: tmpPath, content: text }) })
-      .then(r => { if (!r.ok) throw new Error(); return r.json(); })
-      .then(() => {
+    // B-3767: the HUB picks the folder — its own temp folder (src/server/hub-tmp.js), never a machine-wide /tmp name another
+    // user may own — and answers the path; a failure reaches the person (it was silent)
+    fetch('/api/file/temp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: tmpName, content: text }) })
+      .then((r) => r.json().catch(() => ({})).then((j) => { if (!r.ok || !j.path) throw new Error(j.error || `HTTP ${r.status}`); return j.path; }))
+      .then((tmpPath) => {
         this.app.openEditor(tmpPath, tmpName, {
           _tempFile: true,
           _onCloseDelete: () => fetch(`/api/file?path=${encodeURIComponent(tmpPath)}`, { method: 'DELETE' }).catch(() => {}),
         });
       })
-      .catch(() => {});
+      .catch((e) => showToast(t('Could not open the block in an editor: {error}', { error: e.message }), { type: 'error' }));
   }
 
   addOpenInEditorBtn(el) {
@@ -3490,7 +3633,7 @@ class ChatRenderers {
     }).filter(Boolean).join('\n\n');
   }
 
-  /** Add wrap toggle button to all <pre> blocks inside an element */
+  /** The tools of every block the chat drew (<pre>, a diff, a file) — per kind, preToolsOf's table */
   addWrapToggles(el) {
     // Memoized — this ran (registry + sort) for every message create/edit
     if (!ChatRenderers._LANGS) ChatRenderers._LANGS = ['plain', ...getHljsLanguages().sort()];
@@ -3500,11 +3643,15 @@ class ChatRenderers {
     for (const block of el.querySelectorAll('pre, .chat-diff-body, .chat-code-block')) {
       if (block.parentNode?.classList?.contains('chat-pre-wrap')) continue;
       if (block.closest('.chat-diagram')) continue; // a diagram card's source has the card's own toolbar
+      const { kind, tools, at } = preToolsOf(block); // lane think-tools-phone: the per-kind table (prose: no Wrap)
+      if (at === 'summary') { this._addSummaryCopy(block); continue; }
       const wrapper = document.createElement('div');
       wrapper.className = 'chat-pre-wrap';
+      wrapper.dataset.preKind = kind;
       block.parentNode.insertBefore(wrapper, block);
       wrapper.appendChild(block);
 
+      // the toolbar is the wrapper's FIRST child — its own row ABOVE the block, outside the block's scroller (chat.css)
       const toolbar = document.createElement('div');
       toolbar.className = 'chat-code-toolbar';
 
@@ -3523,7 +3670,7 @@ class ChatRenderers {
       }
 
       // Language picker for code blocks — searchable dropdown
-      if (block.classList.contains('chat-code-block')) {
+      if (tools.includes('lang')) {
         const langPicker = document.createElement('div');
         langPicker.className = 'chat-lang-picker';
         const langBtn = document.createElement('button');
@@ -3579,7 +3726,7 @@ class ChatRenderers {
       // inside scrollable code blocks is impractical.
       // Agent replied with an ```html block → one-click render in the embedded
       // browser (blob URL, sandboxed by the iframe; transient — not persisted).
-      if (block.classList.contains('chat-code-block') && (block.dataset.lang === 'html' || block.dataset.lang === 'xml')) {
+      if (tools.includes('preview')) {
         const prevBtn = document.createElement('button');
         prevBtn.className = 'chat-wrap-toggle';
         prevBtn.textContent = t('Preview');
@@ -3617,18 +3764,40 @@ class ChatRenderers {
       };
       toolbar.appendChild(copyBtn);
 
-      const btn = document.createElement('button');
-      btn.className = 'chat-wrap-toggle';
-      btn.textContent = t('Wrap');
-      btn.title = t('Toggle word wrap');
-      btn.onclick = (e) => {
-        e.stopPropagation();
-        const on = block.classList.toggle('chat-pre-wrapped');
-        btn.textContent = on ? t('No Wrap') : t('Wrap');
-      };
-      toolbar.appendChild(btn);
-      wrapper.appendChild(toolbar);
+      if (tools.includes('wrap')) {
+        const btn = document.createElement('button');
+        btn.className = 'chat-wrap-toggle';
+        btn.textContent = t('Wrap');
+        btn.title = t('Toggle word wrap');
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          const on = block.classList.toggle('chat-pre-wrapped');
+          btn.textContent = on ? t('No Wrap') : t('Wrap');
+        };
+        toolbar.appendChild(btn);
+      }
+      wrapper.insertBefore(toolbar, block);
     }
+  }
+
+  /** lane think-tools-phone: a Thinking block's ONE door — Copy in its own summary row, beside the label (never a row
+   *  over its words); shown while the block is open (chat.css). A press copies and never folds the block. */
+  _addSummaryCopy(block) {
+    const sum = block.closest('.chat-thinking')?.querySelector('summary');
+    if (!sum || sum.querySelector('.chat-thinking-copy')) return;
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chat-wrap-toggle chat-thinking-copy';
+    b.textContent = t('Copy');
+    b.title = t('Copy to clipboard');
+    b.onclick = (e) => {
+      e.preventDefault(); e.stopPropagation(); // a press inside <summary> copies; the block stays as it is
+      copyText(block.textContent.replace(/\n$/, '')).then(() => {
+        b.textContent = t('Copied');
+        setTimeout(() => { b.textContent = t('Copy'); }, 1200);
+      });
+    };
+    sum.appendChild(b);
   }
 
 }

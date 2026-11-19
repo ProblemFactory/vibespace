@@ -97,7 +97,7 @@ function nonSwitchArgsOf(list) { return (Array.isArray(list) ? list.map(String) 
  *  BEFORE the wrapper's, and the keeper's proxy pair rides last): their proxy switches dropped (withoutProxyArgs), and every argument
  *  that is not a switch dropped too — a bare -- there would end the switches before the proxy pair. The person's config is theirs, so
  *  nothing is refused: → `{args, dropped}`, and the caller SAYS what it dropped (the journal). */
-function wrappedOwnArgs(list) { const l = withoutProxyArgs(list), dropped = nonSwitchArgsOf(l); return { args: l.filter((a) => !dropped.includes(a)), dropped }; }
+function wrappedOwnArgs(list) { const l = withoutProxyArgs(list).filter((a) => !PROXY_UDP_RE.test(String(a).trim())), dropped = nonSwitchArgsOf(l); /* + the person's own WebRTC policy: the egress pair carries the core's */ return { args: l.filter((a) => !dropped.includes(a)), dropped }; }
 /** The switch-only refusal's words (one sentence for the three walls). */
 const notSwitchWords = (list) => `an engine launch takes switches only; ${list.slice(0, 3).map((a) => `«${clip(a, 40)}»`).join(', ')} ${list.length > 1 ? 'are not switches' : 'is not a switch'} (a page, a path or a bare -- would reorder what the browser reads)`;
 /** A launcher switch in every spelling Chromium reads as one — tested on the argument's TRIMMED form (switchFormOf, r4): `--x` /
@@ -110,6 +110,14 @@ const LAUNCHER_ARG_RE = new RegExp(`^--?(?:${LAUNCHER_SWITCHES.map((r) => r.name
 function launcherArgsOf(list) { return [...new Set((Array.isArray(list) ? list.map(String) : []).map(switchFormOf).filter((a) => LAUNCHER_ARG_RE.test(a)).map((a) => clip(a.split('=')[0], 40)))]; }
 /** The proxy half of OWN_ARG_RE (refused in its own words; dropped from the keeper's own list on a wrapped launch). */
 const PROXY_ARG_RE = /^--?(?:proxy-server|proxy-bypass-list|proxy-pac-url|winhttp-proxy-resolver|no-proxy-server|proxy-auto-detect)(?:=|$)/;
+/** B-8b87 (主开发 2026-11-17 14:25Z — «never direct» by the UDP road too): a browser launched with a PROFILE'S proxy also carries
+ *  Chromium's WebRTC policy that lets UDP out only through a proxy that carries it (content_switches.cc kForceWebRtcIPHandlingPolicy;
+ *  the value from blink webrtc_ip_handling_policy.cc) — the keeper's forwarder carries none, so a call goes over TCP through the
+ *  proxy or does not connect. The person's own setting of that switch is replaced (PROXY_UDP_RE). The core's two roads only (the
+ *  driver's derived config, the attach argv) and — 14:28Z — the engine's egress pair (egressArgs: a profile's proxy or the allowlist alone);
+ *  an engine's own copy is dropped (browser-verbs KEEPER_ONLY_RE), so the browser gets exactly one, the core's. */
+const PROXY_UDP_ARG = '--force-webrtc-ip-handling-policy=disable_non_proxied_udp';
+const PROXY_UDP_RE = /^--?force-webrtc-ip-handling-policy(?:=|$)/;
 const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 const strList = (v) => Array.isArray(v) && v.every((x) => typeof x === 'string');
 const clip = (s, n = 160) => String(s == null ? '' : s).replace(/[\0-\x1f\x7f]/g, ' ').slice(0, n);
@@ -122,7 +130,9 @@ function egressRowOf(settings) {
   return r ? { default: typeof r.default === 'string' ? r.default : '' } : null;
 }
 function egressRowPath(id) { return `plugin.${String(id || '')}.${EGRESS_ROW_KEY}`; }
-function egressArgs(url) { return url ? [`--proxy-server=${String(url)}`, '--proxy-bypass-list=<-loopback>'] : []; }
+// B-8b87 (主开发 14:28Z, the plugin's answer: it returns no WebRTC policy since 0.2.0 and asks the core): THE ONE RULE — a browser pointed
+// at the keeper's forwarder (a profile's proxy, or the allowlist alone) also carries the policy that lets UDP out only through a proxy
+function egressArgs(url) { return url ? [`--proxy-server=${String(url)}`, '--proxy-bypass-list=<-loopback>', PROXY_UDP_ARG] : []; }
 /** An engine's launch switches as the KERNEL receives them after the driver's own (the keeper's wrapper on both driver roads, the
  *  attach argv): the plugin's — its part of the split (browser-verbs splitLaunchArgs: one per name, never a control / display /
  *  proxy switch) — then, when the launch is WRAPPED (`egress` = the keeper's proxy url), the keeper's own proxy switches LAST
@@ -386,7 +396,7 @@ function defaultEngineOf({ own = undefined, fleet = null } = {}) {
 
 module.exports = { ENGINE_CODES, PROTOCOL, ENGINE_ENV_KEYS, ENGINE_VERBS, ID_RE, OWN_ARG_RE, ENGINE_FEATURES, EGRESS_FEATURE, EGRESS_ROW_KEY,
   platformOf, engineWords, engineAnswerVerdict, kernelLiveVerdict, KERNEL_FEATURES, unansweredOf, missingOf, majorOfVersion, engineChoiceVerdict, engineArgs, engineLaunchEnv, engineWrapperText, choiceOfDefault, isDefaultEngineValue, defaultEngineOf,
-  egressRowOf, egressRowPath, egressArgs, PROXY_ARG_RE, withoutProxyArgs,
+  egressRowOf, egressRowPath, egressArgs, PROXY_ARG_RE, withoutProxyArgs, PROXY_UDP_ARG, PROXY_UDP_RE,
   BINARY_ROW_KEY, binaryRowOf, binaryRowPath, ENGINE_OWNER_ROW_RE, engineSourceOf, programMagicOk, userBinaryVerdict, // lane engine-spi-egress L1b
   LAUNCHER_SWITCHES, LAUNCHER_ARG_RE, launcherArgsOf, // lane engine-spi-egress L1b r3
   switchFormOf, paddedArgsOf, // lane engine-spi-egress L1b r4

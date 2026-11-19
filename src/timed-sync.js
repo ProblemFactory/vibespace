@@ -29,6 +29,7 @@ const STORES = Object.freeze({
   'session-meta.read': row('read', 'session-meta/<sock>', 'src/server/session-stdout.js'),
   'session-status.write': row('write', 'session-status', 'src/session-status.js', ['_save']),   // through the store writer (lane hub-loop-stalls commit 2)
   'reset-claims.write': row('write', 'usage-reset-claims', 'src/usage-reset-claim.js', ['save']),   // through the store writer (lane account-reset-door K2)
+  'door-reads.write': row('write', 'usage-cache/.door-reads-<account>', 'src/door-reads.js', ['bumpDoorRead']),   // through the store writer, awaited before the read (lane usage-predict, law A3)
   'session-status.read': row('read', 'session-status', 'src/session-status.js'),
   'user-todos.write': row('write', 'user-todos', 'src/user-todos.js', ['_flush']),
   'user-todos.read': row('read', 'user-todos', 'src/user-todos.js'),
@@ -38,10 +39,14 @@ const STORES = Object.freeze({
   'jobs-notifs.write': row('write', 'job-notifications', 'src/jobs.js', ['_save', '_saveNotifs']),
   'jobs.read': row('read', 'jobs', 'src/jobs.js'),
   'jobs-logs-sweep.write': row('write', 'jobs-logs-sweep', 'src/jobs.js', ['_logsSave']),   // through the store writer (lane job-logs-sweep: the job-logs catch-up's record — paced, the hub's bookkeeping)
+  'providers.write': row('write', 'providers', 'src/server/provider-store.js', ['save']),   // through the store writer (lane lg-providers U1 cure (C): the third-party provider records, a person's act durable before its answer)
   'channels-index.write': row('write', 'channels/index', 'src/channel-store.js', ['markDirty', 'flush']),   // through the store writer (lane hub-loop-stalls commit 2)
   'channels-index.read': row('read', 'channels/index', 'src/channel-store.js'),
   'channels-acts.write': row('write', 'channels/index-acts', 'src/channel-store.js', ['actOf', 'indexWritten']),   // a person's acts' journal, through the store writer (lane hub-loop-stalls commit 2)
   'channels-acts.read': row('read', 'channels/index-acts', 'src/channel-store.js'),
+  'hosts.write': row('write', 'hosts', 'src/hosts.js', ['_save']),   // B-48a4: every save of hosts.json, through the store writer (the coordinator's word (e))
+  'device-audit.write': row('write', 'device-audit', 'src/device-audit.js', ['askDevice']),   // B-48a4: the device-act ring's appends, through the store writer (THE ONE APPENDER)
+  'exit-audit.write': row('write', 'exit-audit', 'src/exit-proxy.js', ['_auditJournal']),   // B-48a4: the exit ring's appends, through the store writer (THE ONE APPENDER)
   // channel-store-off-loop (commit 1): the field-named doors through the store writer (it records each write's time here)
   'channels-adapters.write': row('write', 'channels/adapters', 'src/channel-store.js', ['adaptersUpdate']),
   'channels-outbox.write': row('write', 'channels/outbox', 'src/channel-store.js', ['outboxUpdate']),
@@ -58,6 +63,7 @@ const STORES = Object.freeze({
   'usage-cursors.write': row('write', 'usage-history/_cursors', 'src/usage-history.js', ['_writeCursors']),   // through the store writer (lane hub-loop-stalls commit 2)
   'usage-rates.write': row('write', 'usage-anchors/rates', 'src/usage-estimator.js', ['_persistRates']),   // through the store writer (lane hub-loop-stalls commit 2; was untimed)
   'usage-cursors.read': row('read', 'usage-history/_cursors', 'src/usage-history.js'),
+  'setting-holds.write': row('write', 'setting-holds', 'src/server/setting-holds.js', ['save']),   // through the store writer (lane setting-doors pick 2: a one-press change's hold, DURABLE before the value changes)
   'chat-attachments-link.write': row('write', 'chat-attachments/<conversation>/conversation', 'src/server/chat-attachments.js', ['writeLink']),   // through the store writer (lane chat-attachments-persist: which conversation a dropped file's folder belongs to)
   'usage-host-cursors.write': row('write', 'usage-history/_host-cursors/<host>', 'src/usage-hold-road.js', ['_writeHostCursor']), // lane ledger-dedup-law F2: the hub keeps each machine's usage cursor (r11: the hold road's file)
   // lane ledger-dedup-law r8: no `usage-held.write` row — a hold's every write runs on its ASYNC road (src/usage-hold-road.js

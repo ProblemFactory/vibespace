@@ -154,7 +154,7 @@ export function createMicCard({ hostId, machine, install = null } = {}) {
     if (!r || r.error) {
       if (r && r.code === 'not_desktop_machine') { row.hidden = true; return; }
       line.textContent = r && r.code === 'host_needs_daemon' ? t('The VibeSpace agent on {machine} is too old for the microphone — reconnect it to upgrade', { machine }) : t('Could not read the microphone: {why}', { why: (r && r.error) || t('server unreachable') });
-      if (r && isAgentOld(r.code)) line.append(' ', agentUpdateDoor(hostId, { cls: 'file-tool-btn agent-update-door' })); // B-bd27 X1
+      if (r && isAgentOld(r.code)) acts.append(agentUpdateDoor(hostId, { cls: 'btn-cancel agent-update-door' })); // B-bd27 X1: in the card's own actions, beside its words
       line.classList.toggle('is-bad', true); return;
     }
     const st = r.state || {}, doors = r.doors || micDefaultDoors(st, r.facts && r.facts.previous);

@@ -30,6 +30,9 @@
 //   kubectl patch); the same model on the 2.369.200 chart REPRODUCES the
 //   field finding (the key stays projected). CONTROL: a copy that renders
 //   the override Secret through `stringData:` keeps the dropped key.
+// Q THE INGRESS POLICY (lane lg-remote-hardening, B-7f0b — q-042 D7a): its own NetworkPolicy, off by default; on, the app
+//   port only from the ingress controller's namespace (+ named extras, a host-network controller's node network) and the
+//   pod itself, the metrics port alone in-cluster; it selects the Deployment's pods, and holds nothing else.
 // I THE APP-SYSTEM SWITCH (lane fleet-image-chart, App persistence Layer 1):
 //   appSystem.enabled off (the default) ⇒ no VIBESPACE_APP_SYSTEM, no
 //   container securityContext, and A / C / D render BYTE-IDENTICAL to the
@@ -555,6 +558,56 @@ ok(ephVerdict(render(reqDrop, C)).some((b) => /^requests\.ephemeral-storage miss
 
 const maintNoGuard = chartCopy('maint-no-guard', (s) => s.replace(/\{\{- with \.Values\.maintainerKeySha \}\}\{\{ if not \(regexMatch [^\n]*\n/, ''), 'templates/_helpers.tpl');
 ok(maintVerdict(render(maintNoGuard, { ...C, maintainerKeySha: MKEY_VALUE }), MKEY_VALUE).some((b) => /not a sha256/.test(b)), 'CONTROL: a chart without the sha refusal renders the KEY into the pod\'s env — RED');
+
+console.log('Q THE INGRESS POLICY (lane lg-remote-hardening, B-7f0b — q-042 D7a)');
+// the app port (3456) only from the ingress controller's namespace (+ the operator's named extras) and the pod itself; the
+// metrics port alone from any in-cluster namespace (the prometheus.io scrape); its OWN document, switched apart, OFF by default
+const ingressDoc = (out) => docs(out).find((d) => /^kind: NetworkPolicy$/m.test(d) && /^ {2}name: \S+-ingress$/m.test(d)) || '';
+function ingressVerdict(out, { extra = [], cidrs = [], metrics = true } = {}) {
+  const d = ingressDoc(out); const bad = [];
+  if (!d) return ['no <release>-ingress NetworkPolicy'];
+  if (!/^ {2}policyTypes: \[Ingress\]$/m.test(d)) bad.push('policyTypes is not [Ingress] alone');
+  // the policy SELECTS the pod the Deployment makes (a policy selecting no pod protects nothing)
+  const sel = (txt, head) => { const m = new RegExp(`^${head}\\n {4}matchLabels:\\n((?: {6}\\S[^\\n]*\\n?)+)`, 'm').exec(txt); return m ? m[1].trim() : null; };
+  const podSel = sel(d, ' {2}podSelector:'), depSel = sel(depOf(out), ' {2}selector:');
+  if (!podSel || podSel !== depSel) bad.push(`the policy selects ${podSel} — the Deployment's pods are ${depSel}`);
+  const rules = d.split(/^ {4}- from:/m).slice(1);
+  // NOTHING ELSE: the app port's rule, the pod itself, and the scrape when metrics are on — no fourth rule
+  if (rules.length !== (metrics ? 3 : 2)) bad.push(`${rules.length} rules (want ${metrics ? 3 : 2})`);
+  const portless = rules.filter((r) => !/ports:/.test(r));
+  if (portless.length !== 1 || !/app\.kubernetes\.io\/name: vibespace/.test(portless[0]) || !/app\.kubernetes\.io\/instance: alice/.test(portless[0]) || /namespaceSelector|ipBlock/.test(portless[0])) bad.push('the only rule on every port is not the pod itself, by both its labels');
+  const app = rules.filter((r) => /port: 3456 \}/.test(r));
+  if (app.length !== 1) bad.push(`${app.length} rules on the app port (want 1)`);
+  else {
+    const ns = [...app[0].matchAll(/kubernetes\.io\/metadata\.name: "([^"]+)"/g)].map((m) => m[1]);
+    if (ns.join() !== ['ingress-nginx', ...extra].join()) bad.push(`the app port's namespaces are ${ns.join() || 'none'}`);
+    const ips = [...app[0].matchAll(/ipBlock: \{ cidr: "([^"]+)" \}/g)].map((m) => m[1]);
+    if (ips.join() !== cidrs.join()) bad.push(`the app port's address blocks are ${ips.join() || 'none'}`);
+    if (/namespaceSelector: \{\}/.test(app[0]) || /podSelector: \{\}/.test(app[0])) bad.push('the app port is open to every namespace or pod');
+  }
+  const anyNs = rules.filter((r) => /namespaceSelector: \{\}/.test(r));
+  if (metrics && (anyNs.length !== 1 || !/port: 3457 \}/.test(anyNs[0]) || /port: 3456/.test(anyNs[0]))) bad.push('the in-cluster scrape is not the metrics port alone');
+  if (!metrics && anyNs.length) bad.push('an any-namespace rule while metrics are off');
+  return bad;
+}
+const ING = ['--set', 'networkPolicy.ingress.enabled=true'];
+const rOff = render(CHART, C), rOn = render(CHART, C, ING);
+ok(!ingressDoc(rOff), 'Q the ingress policy is OFF by default (a wrong rule is a fleet 502: a test cluster first)');
+ok(!ingressVerdict(rOn).length, `Q on: the app port only from the ingress controller's namespace, the pod itself, and the metrics port alone for the in-cluster scrape (${ingressVerdict(rOn).join('; ') || 'clean'})`);
+ok(!ingressVerdict(render(CHART, C, [...ING, '--set', 'networkPolicy.ingress.extraNamespaces={ops}']), { extra: ['ops'] }).length, 'Q an operator\'s named extra namespace is the one more source on the app port');
+ok(!ingressVerdict(render(CHART, C, [...ING, '--set', 'metrics.enabled=false']), { metrics: false }).length, 'Q metrics off: no in-cluster rule at all');
+ok(!ingressVerdict(render(CHART, C, [...ING, '--set', 'networkPolicy.ingress.extraCidrs={10.40.0.0/16}']), { cidrs: ['10.40.0.0/16'] }).length, 'Q a host-network ingress controller: the node network named is the one more source on the app port');
+ok(!ingressVerdict(render(CHART, C, [...ING, '--set', 'metrics=null']), { metrics: false }).length, 'Q an older values set with no metrics block renders (no nil error): the scrape rule is simply absent');
+ok(depOf(rOn) === depOf(rOff), 'Q the switch touches no pod: the Deployment renders the same on and off (no roll)');
+const egOff = docs(render(CHART, C, ['--set', 'networkPolicy.enabled=true'])).filter((d) => /^kind: NetworkPolicy$/m.test(d));
+const egOn = docs(render(CHART, C, ['--set', 'networkPolicy.enabled=true', ...ING])).filter((d) => /^kind: NetworkPolicy$/m.test(d));
+ok(egOff.length === 1 && egOn.length === 2 && egOn.includes(egOff[0]), 'Q beside the egress policy: the egress document is the same, the ingress one is its own');
+const openApp = chartCopy('ingress-open', (s) => s.replace('        - namespaceSelector:\n            matchLabels: { kubernetes.io/metadata.name: {{ $ing.controllerNamespace | default "ingress-nginx" | quote }} }\n', '        - namespaceSelector: {}\n'));
+ok(ingressVerdict(render(openApp, C, ING)).some((b) => /every namespace|namespaces are/.test(b)), 'CONTROL: a rule that admits every namespace on the app port (the neighbour pod reaching the login page) is RED');
+const extraRule = chartCopy('ingress-extra', (s) => s.replace('    - from:                                  # the pod itself\n', '    - from:                                  # a fourth rule: every pod, every port\n        - podSelector: {}\n    - from:                                  # the pod itself\n'));
+ok(ingressVerdict(render(extraRule, C, ING)).some((b) => /rules \(want|pod itself/.test(b)), 'CONTROL: a fourth rule admitting every pod on every port (the neighbour hole beside the app port\'s rule) is RED');
+const noPod = chartCopy('ingress-selects-nothing', (s) => s.replace(/(name: \{\{ \$name \}\}-ingress[\s\S]*?app\.kubernetes\.io\/name: )vibespace/, '$1vibespace-x'));
+ok(ingressVerdict(render(noPod, C, ING)).some((b) => /the policy selects/.test(b)), 'CONTROL: a policy whose selector matches no pod of the Deployment (it protects nothing) is RED');
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

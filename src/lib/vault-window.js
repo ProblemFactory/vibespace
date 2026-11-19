@@ -32,6 +32,7 @@ import { showUnlock, showSetup, showChange, vaultFacts, onVaultFacts, refreshVau
 import { revealLeftMs, revealHeaders, onRevealChange, noteRevealLeft, forgetReveal, endReveal, revealValue, revealWords, askRevealPassword } from './vault-reveal.js'; // r2: THE PAGE's window (its secret in page memory)
 import { removeAccount, showReauthAccountDialog } from './channel-account-dialogs.js';
 import { passkeyDeleteWords } from './browser-panel-model.js';
+import { namedLiveRows, runningOnWords } from './provider-roster.js';   // the Vault window's provider Remove says which conversations run on it (one wording with the roster)
 import { KIND_WORDS, countdownText, CLIPBOARD_CLEAR_MS, PURPOSES, purposeOf, PROVENANCES, provenanceOf, PROVENANCE_FILTERS, stateChipsOf, viewOf, bandItemsOf, bandDoorsOf, SEARCHED_FIELDS } from '../vault-inventory.js'; // PURE: the rows' rules (test-vault-inventory)
 import { useExtras, useSigOf } from './vault-use-row.js'; // lane vault-use-grants: «Who may use it» — the members (hosts, end, uses) + 「Who may use it…」
 import { loadAutomation, automationExtras, showMintDialog } from './vault-automation.js'; // design q-046: «Automation keys» — mint, grant, revoke (never a value)
@@ -40,6 +41,7 @@ import { wideHeaderDoors, loginHeld, showLoginGrantPicker, showAnySiteDialog, sh
 const LOGIN_DOORS = Object.freeze({ held: loginHeld, grant: showLoginGrantPicker, anySite: showAnySiteDialog, anyAccount: showAnyAccountDialog });   // handed to each login row (it imports no dialog — the paste box's bundle stays as it is)
 import { loadTotp, totpExtras, showTotpAddDialog } from './vault-totp-row.js'; // design q-047 L1 (lane vault-totp): a two-step code's row — 看码 + its ring (GET /api/vault/totp/:name), 用于…; lane vault-totp-add: 添加… ▸ 两步验证…
 import { addOrderOf, familyOf } from '../vault-kinds.js'; // PURE: THE KIND REGISTRY (lane vault-entry-description: familyOf — which kinds carry a name and a description) — which 添加… doors must exist, in its order (scripts/test-vault-kinds-census.mjs)
+import { buttonsOf } from '../foryou-actions.js'; // B-ef1b: a band item's DECLARED buttons (the registry's words; runAction runs them)
 import { inboxModel } from './user-todos-actions.js'; // lane vault-window-v2: 「需要你」 = For you's own items (one store, one set of answers)
 import { showSecretAddDialog, showSecretPasteDialog, showWordsEditDialog } from './vault-paste-box.js'; // lane vault-paste-request: 「其他密钥或密码…」 + an agent's paste request answered here (THE box, as a dialog)
 
@@ -113,12 +115,15 @@ const CONFIRM_WORDS = {
   passkey: (row) => { const [site, user] = String(row.label).split(' · '); const w = passkeyDeleteWords({ site, user: user || '' }, { w: t }); return { title: w.title, message: w.message, confirm: w.confirm }; },
   'app-logins': () => ({ title: t('Forget the logins this app keeps?'), message: t('VibeSpace keeps this app\'s logins for it in its own session; after you forget them the app asks again.'), confirm: t('Forget') }),
   secret: (row) => ({ title: t('Delete "{name}"?', { name: row.label }), message: t('The value leaves the vault. A conversation that uses it in a command loses it at its next run.'), confirm: t('Delete') }),   // lane vault-paste-request: a free entry
+  'agent-secret': (row) => ({ title: t('Delete "{name}"?', { name: row.label }), message: t('The value leaves the vault. The conversation that stored it can no longer use it: a command or a job that names it fails at its next run (the conversation may store a new one).'), confirm: t('Delete') }),   // B-3fb5: an agent's own entry (mint / put)
   'web-login': (row) => ({ title: t('Delete the login "{name}"?', { name: row.label }), message: t('Its password leaves the vault and this account\'s own grant goes with it. Agents can no longer be signed in there with it.'), confirm: t('Delete') }),   // lane browser-login
+  'proxy-login': (row) => ({ title: t('Delete the proxy login "{name}"?', { name: row.label }), message: t('Its password leaves the vault. A browser profile whose proxy uses it is refused at its next start until you choose a login again.'), confirm: t('Delete') }),   // B-8b87
   totp: (row) => ({ title: t('Delete the two-step code "{name}"?', { name: row.label }), message: t('Its seed leaves the vault and every grant of its code stops. A site that asks for this code needs it set up again.'), confirm: t('Delete') }),
+  provider: (row, app) => ({ title: t('Remove the model provider "{name}"?', { name: row.label }), message: t('Its key leaves the vault and the provider leaves every agent\'s account list. Conversations already running on it keep working until they restart.') + runningOnWords(namedLiveRows(app), String((row && row.entry) || '').replace(/^provider:/, '')), confirm: t('Remove') }),   // lane lg-providers (B-d578); the conversations on it named as the roster's Remove… names them (the remainders' read, F3)
 };
-function confirmWords(key, row) {
+function confirmWords(key, row, app = null) {
   const w = Object.prototype.hasOwnProperty.call(CONFIRM_WORDS, key) ? CONFIRM_WORDS[key] : null;
-  return w ? w(row) : { title: t('Delete'), message: row.label, confirm: t('Delete') };
+  return w ? w(row, app) : { title: t('Delete'), message: row.label, confirm: t('Delete') };
 }
 
 const STATE_WORD = { unlocked: () => t('Unlocked'), locked: () => t('Locked'), not_set_up: () => t('Not set up') };
@@ -323,7 +328,7 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
       if (await removeAccount(app, a)) refresh();
       return;
     }
-    const w = confirmWords(d.confirm, row);
+    const w = confirmWords(d.confirm, row, app);
     if (!(await showConfirmDialog({ title: w.title, message: w.message, confirmText: w.confirm, danger: true }))) return;
     const r = await fetchJson(d.path, { method: d.method, headers: { 'Content-Type': 'application/json' }, ...(d.method === 'POST' ? { body: '{}' } : {}) });
     if (!r || r.error || r.ok === false) { showToast(t('Could not delete — {reason}', { reason: (r && (r.error || r.code)) || t('server unreachable') }), { type: 'error' }); return; }
@@ -388,7 +393,7 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     // lane vault-agent-own: what an agent kept itself says its rule — its own conversation uses it with no switch, no card —
     // on its OWN line under the meta (the meta is one clipped line: words past its width were never read)
     const pv = row.provenance && row.provenance.by === 'agent' ? row.provenance : null;
-    const ruleWords = row.run && row.run.own ? t('Its own conversation uses it directly · other conversations cannot use it') : pv && pv.owner ? t('Its own conversation uses it directly · other conversations need a grant') : null;
+    const ruleWords = row.run && row.run.own ? t('Its own conversation uses it directly · another one only as you share it («Who may use it…»)') : pv && pv.owner ? t('Its own conversation uses it directly · other conversations need a grant') : null;
     const ownRule = ruleWords ? vwEl('div', 'vw-own-rule', pv && pv.actor ? `${ruleWords} · ${t('kept by {name}', { name: pv.actor })}` : ruleWords) : null;
     // lane vault-key-row-compact: an automation key's head is ONE line — its kind is the chip and a minted value's length says
     // nothing, so the meta line goes; the name's title keeps when it was made
@@ -584,6 +589,15 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
   // ── 「需要你」 — For you's own open items of origin 'vault' (the same store; answered here = answered there) ──
   const inbox = (() => { try { return inboxModel(app); } catch { return null; } })();
   function bandDoor(item, door) {
+    // B-ef1b: a declared button (src/foryou-actions.js buttonsOf) — its own words, run by THE tray's answer (runAction's declared-buttons door)
+    if (door.startsWith('btn:')) {
+      const answer = door.slice(4), bt = (buttonsOf((item.action && item.action.type) || '') || []).find((x) => x.answer === answer);
+      const b = btnEl(bt ? t(bt.label) : answer, `vw-band-btn${(buttonsOf((item.action && item.action.type) || '') || [])[0] === bt ? ' vw-primary' : ''}`);
+      if (bt && bt.title) b.title = t(bt.title);
+      b.dataset.door = door;
+      b.onclick = async () => { await inbox.runAction(item, answer); };
+      return b;
+    }
     const label = { allow: t('Allow'), once: t('Allow once'), always: t('Always for this conversation'), deny: t('Deny'), unlock: t('Unlock…'), renew: t('Renew…'), ack: t('Got it'), open: t('Open the row'), paste: t('Paste and save…') }[door];
     const b = btnEl(label, `vw-band-${door}${door === 'once' || door === 'allow' || door === 'unlock' || door === 'paste' ? ' vw-primary' : ''}${door === 'deny' ? ' vw-del' : ''}`);
     b.dataset.door = door;

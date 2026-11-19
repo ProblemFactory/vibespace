@@ -387,6 +387,9 @@ const PRIMITIVES = [
   // the owner's create handler against a headless socket for a caller with no window; every call site is a conversation
   // nobody typed into and must ask the authorizer first (reason automation-open)
   { id: 'headless-open', re: /\bcreateHeadless\s*\(/g, why: 'opens a conversation for an AUTOMATION (no window, nobody typing) — the headless create of src/server/conversation-ops.js' },
+  // lane lg-providers U4 (B-d578): THE PROVIDER TEST — one non-interactive run of a harness's CLI that spends one short request
+  // of a THIRD PARTY's own key; the census must SEE every caller (a timer or an agent calling it would be a spend nobody pressed)
+  { id: 'provider-test', re: /\brunProviderTest\s*\(/g, why: 'runs a harness CLI once against a third-party provider with its own key (src/server/provider-test.js) — one short billed request' },
 ];
 // GATED = the file ASKS THE GATE. It must be a CALL, never a mention: r2 found
 // `src/server/usage-pool-engine.js` reported GATED because it CONSTRUCTS the
@@ -395,7 +398,9 @@ const PRIMITIVES = [
 // passed. The census said "gated" about the one file that also happens to be
 // where the guard is built, so the producer inside it was invisible. Matching
 // the call shape means the construction line alone no longer satisfies it.
-const GATED_RE = /(?:authorizeSpend|spendGuard\.authorize|authorizeUnattendedSpend)\s*\(/g;
+// lane auto-resume-bulk: the BATCH gate is a gate too — ONE authorization over the whole resume of every wall-stopped
+// session (spend-guard authorizeBatch → the PURE authorizeUnattendedBatch; auto-resume's dep `authorizeSpendBatch`)
+const GATED_RE = /(?:authorizeSpend|authorizeSpendBatch|spendGuard\.authorize|spendGuard\.authorizeBatch|authorizeUnattendedSpend|authorizeUnattendedBatch)\s*\(/g;
 // A function HEADER line, and the name it declares. Only used to decide "which
 // function is this anchor in", so an over-match costs precision, never safety.
 const HEADER_LINE = /^(\s*)(?:(?:export\s+)?(?:async\s+)?function\s+[A-Za-z_$][\w$]*|(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*=\s*(?:async\s*)?(?:function\b|\([^)]*\)\s*=>|[A-Za-z_$][\w$]*\s*=>))/;
@@ -406,11 +411,13 @@ const HEADER_NAME = /(?:function\s+([A-Za-z_$][\w$]*)|(?:const|let|var)\s+([A-Za
 // round closed — a new `formatChatInput` in src/jobs.js must still be caught by
 // the row that excuses its `deliverToConversation` call.
 const ALLOW = [
+  { file: 'src/server/provider-test.js', prim: 'provider-test', why: "the PRIMITIVE's definition (lane lg-providers U4): it refuses any caller but by: 'human', a third party's address only, a key read from the vault, a child with empty homes — policy lives at its one caller, the route" },
+  { file: 'src/routes/providers.js', prim: 'provider-test', why: "THE HUMAN PATH (lane lg-providers U4): POST /api/providers/:id/test asks personVerdict first (any Bearer ⇒ 403, another site ⇒ 403) — a person's press on the page, attended, never a timer, never an agent" },
   { file: 'src/ws-handler.js', prim: 'typed-send', why: "the ws chat-input case: the OWNER typing in a chat window (a per-occurrence owner action — never counted, D6)" },
   { file: 'src/routes/user-todos-reply.js', prim: 'typed-send', why: "the For-you Reply route: the OWNER clicking Reply (owner-only, agent tokens refused — design-user-inbox-reply D1.1)" },
   { file: 'src/server/design-engine.js', prim: 'typed-send', why: "the Design window's comment: the OWNER's click on an artboard element + their words (POST /api/design/comment — ownerOnly, an agent's bearer refused by name), typed as the owner's own message (origin design-comment, never counted) — lane design-chrome L4 B③, composed with lane worker-dispatch's typed-send row at the 2.369.202 integration" },
   { file: 'src/server/doc-engine.js', prim: 'typed-send', why: "the Doc window's comments: the OWNER's notes on a markdown file (POST /api/doc/comments — owner-only, an agent's bearer refused by name), typed as the owner's own message (origin doc-comment, never counted) — the Design window's comment path, cloned (lane doc-window)" },
-  { file: 'src/server/user-input.js', prim: 'user-frame', why: 'THE HUMAN PATH: the ws chat-input case is the owner typing, and the For-you reply route (src/routes/user-todos-reply.js, owner-only, agent tokens refused) is the second caller of the SAME function — the owner clicking Reply. Owner-typed turns are never counted (D6) — this row IS that rule (design-user-inbox-reply D1.1)' },
+  { file: 'src/server/user-input.js', prim: 'user-frame', why: 'THE HUMAN PATH: the ws chat-input case is the owner typing, and the For-you reply route (src/routes/user-todos-reply.js, owner-only, agent tokens refused) is the second caller of the SAME function — the owner clicking Reply. Owner-typed turns are never counted (D6) — this row IS that rule (design-user-inbox-reply D1.1). B-02a3: its origin \'group-handover\' (a person\'s press handing the group messages to the RUNNING turn) is written only mid-turn on a steering Enter door, and its money is asked at ITS OWN caller — src/server/stash-handover.js handOverGroups, a typed-send site gated by the authorizer under the attended reason group-handover' },
   { file: 'src/stop-nudge.js', prim: 'stop-nudge', why: "the PURE Stop verdict (B-a8f0): its `block: true` is a VALUE the stop-check route reads — the route's own `block: true, reason` answer in src/agent-routes.js is the site, gated by the spend authorizer right before it" },
   { file: 'src/adapters/claude-code.js', prim: 'user-frame', why: 'a FORMATTER: builds the frame, never sends it' },
   { file: 'src/adapters/codex.js', prim: 'user-frame', why: 'a FORMATTER: builds the frame, never sends it' },
@@ -554,6 +561,128 @@ const DEFERRED_ATTENDED = [
   { reason: 'held-deliver', door: 'POST /api/channels/reach-requests/:id/:verdict (decideRequest → decideHeld → flushScope / flushPending → wakeNow; a person door under personVerdict there)', wiredIn: 'wake-approve-card r10' },
 ];
 const WO = require(path.join(REPO, 'src/write-origin.js'));
+// §2c THE GUARD IS WIRED WHERE THE HUB BUILDS IT (B-02a3 cure, 主开发 12:19Z). §2 judges a site by the SHAPE of its gate call
+// (`spendGuard.authorize(` in scope) — never by whether the guard that call reaches was ever handed in. The B-02a3 door at
+// 869399b5c read its guard through a default getter that found nothing (`require('./usage-pool-engine.js').spendGuard`: the
+// module exports only `create`), so in production every press was refused «not wired» while §2 called its site GATED. DERIVED:
+// every function that TAKES the guard as a destructured parameter named authorizeSpend / getSpendGuard / spendGuard (a
+// constructor: `function create({…})`, `function mountRoutes({…})`, `function setupAgentRoutes({…})`, any name) is handed it at
+// EVERY site that builds it — a `require(…/<module>).<fn>(` call, or a call of the name a `const { <fn> } = require(…/<module>)`
+// binds, anywhere in server.js or src/: the parameter is a key (or a shorthand) of that call's own argument, and a key whose value
+// is the literal null / undefined / `() => null` hands NOTHING. THE READER'S MUST (the cure's read): the census read only the code
+// its comment stripper left, and that stripper took a `/*` INSIDE a line comment (`// … /api/file/serve/* etc.`) for a block
+// comment — server.js lines 143–579 were invisible to it (14 construction sites). stripJsComments below knows strings, template
+// literals and regex literals: run over every tracked .js of src/, server.js, data/bin and scripts/, esbuild's whitespace-minified
+// output was byte-identical before and after it (2359 files) — it removes comments and nothing else. Only files whose RAW text
+// names a guard parameter (a taker) or a taker's module (a site) are stripped: stripping only removes text.
+const GUARD_PARAMS = ['authorizeSpend', 'getSpendGuard', 'spendGuard'];
+const GUARD_HINT = /authorizeSpend|getSpendGuard|spendGuard/;
+function matchClose(t, open, a, b) { let d = 0; for (let j = open; j < t.length; j++) { if (t[j] === a) d++; else if (t[j] === b) { d--; if (d === 0) return j; } } return -1; }
+/** A JavaScript text with its comments blanked (each comment byte a space, every line break kept): strings, template
+ *  literals (with their `${…}` parts) and regex literals pass through untouched, so a `//` or `/*` inside one is never a comment. */
+function stripJsComments(src) {   // (its locals never share a name with a clock span of this suite: the wall-clock census flows by NAME — an `end` here once flooded it, 2.369.411's first checkpoint)
+  let out = '', i = 0, prevSig = '';
+  const n = src.length, tpl = [];   // tpl: the brace depth of each open template `${…}`
+  const blank = (x) => x.replace(/[^\n]/g, ' ');
+  const regexMayStart = () => {
+    if (!prevSig || /[(,=:[!&|?{};+\-*%<>~^]/.test(prevSig)) return true;
+    const m = out.slice(-24).match(/([A-Za-z_$][\w$]*)\s*$/);   // the word before the slash, from the tail only
+    return !!(m && /^(return|typeof|case|in|of|delete|void|throw|new|instanceof|yield|await|else|do)$/.test(m[1]));
+  };
+  const templateFrom = (j) => {   // j: the first char inside a template; to its upto or its next `${`
+    while (j < n && src[j] !== '`') { if (src[j] === '\\') { j += 2; continue; } if (src[j] === '$' && src[j + 1] === '{') return { upto: j + 2, open: true }; j++; }
+    return { upto: j + 1, open: false };
+  };
+  while (i < n) {
+    const c = src[i], d = src[i + 1];
+    if (c === '/' && d === '/') { const e = src.indexOf('\n', i), upto = e < 0 ? n : e; out += blank(src.slice(i, upto)); i = upto; continue; }
+    if (c === '/' && d === '*') { const e = src.indexOf('*/', i + 2), upto = e < 0 ? n : e + 2; out += blank(src.slice(i, upto)); i = upto; continue; }
+    if (c === '"' || c === "'") { let j = i + 1; while (j < n && src[j] !== c && src[j] !== '\n') j += src[j] === '\\' ? 2 : 1; out += src.slice(i, j + 1); i = j + 1; prevSig = c; continue; }
+    if (c === '`' || (c === '}' && tpl.length && tpl[tpl.length - 1] === 0)) {
+      if (c === '}') tpl.pop();
+      const r = templateFrom(i + 1); out += src.slice(i, r.upto); i = r.upto;
+      if (r.open) { tpl.push(0); prevSig = '{'; } else prevSig = '`';
+      continue;
+    }
+    if (tpl.length && c === '{') tpl[tpl.length - 1]++; else if (tpl.length && c === '}') tpl[tpl.length - 1]--;
+    if (c === '/' && regexMayStart()) {   // a regex literal ends on its own line, its classes respected
+      let j = i + 1, cls = false;
+      while (j < n && src[j] !== '\n') { if (src[j] === '\\') { j += 2; continue; } if (src[j] === '[') cls = true; else if (src[j] === ']') cls = false; else if (src[j] === '/' && !cls) break; j++; }
+      if (j < n && src[j] === '/') { out += src.slice(i, j + 1); i = j + 1; prevSig = 'x'; continue; }
+    }
+    out += c; if (!/\s/.test(c)) prevSig = c; i++;
+  }
+  return out;
+}
+const STRIPPED = new Map();
+const stripCached = (raw) => { let x = STRIPPED.get(raw); if (x === undefined) { x = stripJsComments(raw); STRIPPED.set(raw, x); } return x; };
+const reEsc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const SCANNED = new Map();   // a raw text → what one cheap pass over it found (every control hands the same strings back)
+function scanOf(raw, stemRe) {
+  let x = SCANNED.get(raw);
+  if (!x) { x = { takes: GUARD_HINT.test(raw), stems: new Map() }; SCANNED.set(raw, x); }
+  if (stemRe && !x.stems.has(stemRe.source)) x.stems.set(stemRe.source, new Set([...raw.matchAll(stemRe)].map((m) => m[1])));
+  return x;
+}
+function guardWiring(texts) {
+  const takers = [], sites = [], unwired = [];
+  for (const f of Object.keys(texts).filter((x) => scanOf(texts[x]).takes)) {
+    const t = stripCached(texts[f]);
+    const heads = [];   // [name, the index of its destructured parameter's «{»]
+    for (const m of t.matchAll(/function\s+([A-Za-z_$][\w$]*)\s*\(\s*\{/g)) heads.push([m[1], m.index + m[0].length - 1]);
+    // (the verdict's should) an ARROW or a function EXPRESSION bound to a name — `const create = ({ spendGuard }) => …` — counts
+    // when its destructured parameter list closes into `) =>` / `) {`; and a CLASS whose constructor destructures the guard (its
+    // sites: `new X(` — a call of the bound name, read below like any other)
+    for (const m of t.matchAll(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:function\s*[\w$]*\s*)?\(\s*\{/g)) {
+      const open = m.index + m[0].length - 1, close = matchClose(t, open, '{', '}');
+      if (close > 0 && /^\s*(=\s*\{\s*\}\s*)?\)\s*(=>|\{)/.test(t.slice(close + 1, close + 40))) heads.push([m[1], open]);
+    }
+    for (const m of t.matchAll(/\bclass\s+([A-Za-z_$][\w$]*)[^{]*\{/g)) {
+      const b0 = m.index + m[0].length - 1, b1 = matchClose(t, b0, '{', '}'), body = t.slice(b0, b1 > 0 ? b1 : undefined), c = /\bconstructor\s*\(\s*\{/.exec(body);
+      if (c) heads.push([m[1], b0 + c.index + c[0].length - 1]);
+    }
+    for (const [fn, open] of heads) {
+      const close = matchClose(t, open, '{', '}');
+      if (close < 0) continue;
+      const params = t.slice(open + 1, close);
+      for (const p of GUARD_PARAMS) if (new RegExp(`(^|[\\s,])${p}\\s*(=|,|:|$)`).test(params)) takers.push({ f, fn, p });
+    }
+  }
+  const stemOf = (f) => f.split('/').pop().replace(/\.js$/, '');
+  const stemRe = takers.length ? new RegExp(`/(${[...new Set(takers.map((tk) => reEsc(stemOf(tk.f))))].join('|')})(?:\\.js)?['"]`, 'g') : null;
+  for (const tk of takers) {
+    const stem = stemOf(tk.f);
+    const req = `require\\(\\s*['"][^'"]*/${reEsc(stem)}(?:\\.js)?['"]\\s*\\)`;
+    let n = 0;
+    for (const f of Object.keys(texts).filter((x) => scanOf(texts[x], stemRe).stems.get(stemRe.source).has(stem))) {
+      const t = stripCached(texts[f]), calls = [];
+      for (const m of t.matchAll(new RegExp(`${req}\\.${reEsc(tk.fn)}\\(`, 'g'))) calls.push(m.index + m[0].length - 1);
+      for (const m of t.matchAll(new RegExp(`(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*${req}\\s*[;,\\n]`, 'g'))) {   // const SH = require(…); SH.<fn>(
+        for (const c of t.matchAll(new RegExp(`(^|[^.\\w$])${reEsc(m[1])}\\.${reEsc(tk.fn)}\\(`, 'g'))) calls.push(c.index + c[0].length - 1);
+      }
+      for (const m of t.matchAll(new RegExp(`(?:const|let|var)\\s*\\{([^}]*)\\}\\s*=\\s*${req}`, 'g'))) {
+        const b = m[1].split(',').map((x) => x.trim()).find((x) => x === tk.fn || new RegExp(`^${reEsc(tk.fn)}\\s*:`).test(x));
+        if (!b) continue;
+        const alias = b.includes(':') ? b.split(':')[1].trim() : tk.fn;
+        for (const c of t.matchAll(new RegExp(`(^|[^.\\w$])${reEsc(alias)}\\(`, 'g'))) {
+          if (/function\s*$/.test(t.slice(Math.max(0, c.index - 12), c.index + c[1].length))) continue;   // its own definition
+          calls.push(c.index + c[0].length - 1);
+        }
+      }
+      for (const open of calls) {
+        const close = matchClose(t, open, '(', ')');
+        const args = close > open ? t.slice(open + 1, close) : '';
+        const keyed = new RegExp(`(^|[{,\\s])${tk.p}\\s*(:|,|\\})`).test(args);
+        const empty = new RegExp(`(^|[{,\\s])${tk.p}\\s*:\\s*(null|undefined|\\(\\s*\\)\\s*=>\\s*(null|undefined))\\s*[,}]`).test(args)
+          || new RegExp(`(^|[{,\\s])${tk.p}\\s*:\\s*(\\(\\s*\\)\\s*=>\\s*)?require\\([^)]*\\)\\s*\\.\\s*(${GUARD_PARAMS.join('|')})\\b`).test(args);   // the 869399b5c getter, moved to a site
+        sites.push({ ...tk, at: f, wired: keyed && !empty }); n++;
+        if (!keyed || empty) unwired.push(`${tk.f} ${tk.fn}({${tk.p}}) built at ${f} ${empty ? 'handed nothing' : 'without it'}`);
+      }
+    }
+    if (!n) unwired.push(`${tk.f} ${tk.fn}({${tk.p}}) is built nowhere a census can read`);
+  }
+  return { takers, sites, unwired };
+}
 function trackedServerSource() {
   const out = execFileSync('git', ['-C', REPO, 'ls-files', '-z', '--', 'src', 'server.js', 'data/bin'], { env: GIT_ENV, maxBuffer: 64 * 1024 * 1024 }).toString();
   return out.split('\0').filter(Boolean)
@@ -617,6 +746,42 @@ function trackedServerSource() {
     ok('§2 the attended column is PER SITE: the hand-over file\'s gated stash-retry site prints no attended reason, its press site prints stash-handover; the groups site reads its `const paid` line', !!stash334 && !!stash335 && attendedAt(stash334).length === 0 && attendedAt(stash335).join() === 'stash-handover'
       && hits.some((h) => h.file === 'src/server/groups-engine.js' && attendedAt(h).join() === 'owner-group-wake'), JSON.stringify({ s334: stash334 && attendedAt(stash334), s335: stash335 && attendedAt(stash335) }));
 
+    { // §2c the guard is wired where the hub builds it — and its RED control is the B-02a3 door as 869399b5c built it
+      const texts = Object.fromEntries(files.map((f) => [f, read(f)]));
+      const W = guardWiring(texts);
+      const names = [...new Set(W.takers.map((x) => x.f.split('/').pop()))].sort();
+      ok(`§2c every function that TAKES the spend guard is handed it at every site that builds it (${W.sites.length} sites: ${names.join(', ')})`,
+        W.unwired.length === 0 && ['stash-handover.js', 'conversation-deliver.js', 'worker-dispatch.js', 'agent-routes.js'].every((x) => names.includes(x)) && W.sites.length >= 6, W.unwired);
+      const sj = texts['server.js'], key = "getSpendGuard: () => spendGuard";
+      const kept = stripJsComments(sj || '');
+      ok('§2c the census reads server.js WHOLE: its stripper keeps every line, and the constructions a `/*` inside a line comment once hid from it (the usage engine, the boot restore) are read',
+        !!sj && kept.split('\n').length === sj.split('\n').length && kept.includes("require('./src/server/usage-pool-engine.js').create(") && kept.includes("require('./src/server/boot-restore.js').create("), { lines: sj && sj.split('\n').length, kept: kept.split('\n').length });
+      const probe = "// a route like /api/file/serve/* etc.\nconst d = require('./stash-handover.js').create({ activeSessions });\n// the end */\n";
+      const Wp = guardWiring({ ...texts, 'src/server/zz-census-probe.js': probe });
+      ok('§2c RED CONTROL (the blind span): an unwired build after a line comment that holds «/*» is named', Wp.unwired.some((u) => /stash-handover\.js create\(\{getSpendGuard\}\) built at src\/server\/zz-census-probe\.js without it/.test(u)), Wp.unwired);
+      const W3 = guardWiring({ ...texts, 'server.js': sj.replace(key, 'getSpendGuard: () => null') });
+      ok('§2c RED CONTROL: a key that hands NOTHING (`getSpendGuard: () => null`) is named', W3.unwired.some((u) => /stash-handover\.js create\(\{getSpendGuard\}\) built at server\.js handed nothing/.test(u)), W3.unwired);
+      const W5 = guardWiring({ ...texts, 'server.js': sj.replace(key, "getSpendGuard: () => require('./src/server/usage-pool-engine.js').spendGuard") });
+      ok('§2c RED CONTROL: the 869399b5c getter moved to the site (`() => require(…usage-pool-engine.js).spendGuard` — a module export, never the instance) hands nothing', W5.unwired.some((u) => /stash-handover\.js create\(\{getSpendGuard\}\) built at server\.js handed nothing/.test(u)), W5.unwired);
+      const probeVar = "const SH = require('./stash-handover.js');\nconst d = SH.create({ activeSessions });\n";
+      const Wv = guardWiring({ ...texts, 'src/server/zz-census-probe.js': probeVar });
+      ok('§2c RED CONTROL: a module bound to a name (`const SH = require(…); SH.create(…)`) is read — built there without the guard, it is named', Wv.unwired.some((u) => /stash-handover\.js create\(\{getSpendGuard\}\) built at src\/server\/zz-census-probe\.js without it/.test(u)), Wv.unwired);
+      const Wn = guardWiring({ ...texts, 'src/server/zz-census-taker.js': 'function create({ activeSessions, spendGuard = null }) { return { activeSessions, spendGuard }; }\nmodule.exports = { create };\n' });
+      ok('§2c RED CONTROL: a function that takes the guard and is built nowhere the census can read is named', Wn.unwired.some((u) => /zz-census-taker\.js create\(\{spendGuard\}\) is built nowhere a census can read/.test(u)), Wn.unwired);
+      const Wa = guardWiring({ ...texts, 'src/server/zz-census-arrow.js': 'const create = ({ activeSessions, spendGuard = null }) => ({ activeSessions, spendGuard });\nmodule.exports = { create };\n',
+        'src/server/zz-census-probe.js': "const d = require('./zz-census-arrow.js').create({ activeSessions });\n" });
+      ok('§2c RED CONTROL (the verdict\'s should): an ARROW constructor that takes the guard (`const create = ({ spendGuard }) => …`), built without it, is named', Wa.unwired.some((u) => /zz-census-arrow\.js create\(\{spendGuard\}\) built at src\/server\/zz-census-probe\.js without it/.test(u)), Wa.unwired);
+      const Wk = guardWiring({ ...texts, 'src/server/zz-census-class.js': 'class Door {\n  constructor({ activeSessions, getSpendGuard = () => null }) { this.g = getSpendGuard; }\n}\nmodule.exports = { Door };\n',
+        'src/server/zz-census-probe.js': "const { Door } = require('./zz-census-class.js');\nconst d = new Door({ activeSessions });\n" });
+      ok('§2c RED CONTROL (the verdict\'s should): a CLASS whose constructor takes the guard, built by `new` without it, is named', Wk.unwired.some((u) => /zz-census-class\.js Door\(\{getSpendGuard\}\) built at src\/server\/zz-census-probe\.js without it/.test(u)), Wk.unwired);
+      const keyAR = 'serverSetting, spendGuard, scheduleCtxSync';
+      if (sj.split(keyAR).length !== 2) throw new Error('the anchor of the control «the agent routes unwired» is not in server.js once');
+      const W4 = guardWiring({ ...texts, 'server.js': sj.replace(keyAR, 'serverSetting, scheduleCtxSync') });
+      ok('§2c RED CONTROL: a DESTRUCTURED constructor is read too — server.js calling setupAgentRoutes (bound by `const { setupAgentRoutes } = require(…)`) without the guard is named', W4.unwired.some((u) => /agent-routes\.js setupAgentRoutes\(\{spendGuard\}\) built at server\.js without it/.test(u)), W4.unwired);
+      if (!sj || !sj.includes(key)) throw new Error('the anchor of the control «the B-02a3 door unwired» is not in server.js');
+      const W2 = guardWiring({ ...texts, 'server.js': sj.replace(key, 'getSpendGuardX: () => spendGuard') });
+      ok('§2c RED CONTROL: server.js building the stash door without its guard (869399b5c) is named unwired', W2.unwired.some((u) => /stash-handover\.js create\(\{getSpendGuard\}\) built at server\.js without it/.test(u)), W2.unwired);
+    }
     ok('§2 the four wired consumers are all in the GATED set', ['src/server/auto-resume.js', 'src/server/conversation-deliver.js', 'src/agent-routes.js', 'src/server/usage-pool-engine.js'].every((f) => gatedFiles.includes(f)), gatedFiles.join(', '));
     // THE OWNER'S RULING (2026-09-27 — "告知agent发生了打断，交还时提醒它重新运行"): the takeover now TELLS the agent and the
     // handback reminds it to re-run — and neither grows a producer: browser-handback.js keeps its ONE ladder site (the
@@ -841,6 +1006,7 @@ const CONTROL_DOORS = [
   ['src/routes/browser.js', "router.post('/api/browser/takeovers/:id/done'"],
   ['src/routes/browser.js', "router.post('/api/browser/proposals/:id/approve'"],   // r3: the person's Approve (tellProposal) — r1's row, dropped by r2 (accept-r2 confirmed[1])
   ['server.js', "app.post('/api/user-todos/:id'"],   // r2: the 15th door (accept-r1 claim run (a))
+  ['src/server/bulk-resume-routes.js', "app.post('/api/sessions/resume-stopped'"],   // the bulk press (the owner's ruling 2026-11-18: attended)
   ['src/server/browser-stream.js', 'onViewerMessage'],   // r2: the live view's own socket (its Hand back) — r3: the MESSAGE mints, never the handshake
 ];
 // A door refuses EVERY bearer when its first act (after `try {` and the host guard — `refuseHost` / `forHost`, which only
@@ -2995,7 +3161,7 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
     const i = A.refusalI18n(v, { sessionName: 'ops' });
     const doorKeys = i.detail.map((d) => d.key);
     ok('§5g (3) …the notice reads its own row («no limit is set … — set a number») and the door that sets it, never «switched off — its limit is 0»',
-      /no limit is set for turns nobody typed on \{account\} — set a number/.test(i.text.key) && doorKeys.includes(A.DOOR_WORDS.unset) && !/switched off/.test(i.text.key), JSON.stringify(i.text));
+      /no limit is set for turns nobody typed on \{account\} — set a number/.test(i.text.key) && doorKeys.includes(A.DOOR_LINK_WORDS.unset) && !/switched off/.test(i.text.key), JSON.stringify(i.text));
     const Li = A.budgetLimits((k) => (k === 'spend.unattendedPerInstanceDay' ? '' : undefined));
     const vi = A.authorizeUnattendedSpend({ reason: 'peer-message', identity: IDg, state: A.emptyBudget(), limits: Li });
     ok('§5g (3) a blank INSTANCE cap: refused, «on this instance»', vi.why === 'instance-cap' && /on this instance — set a number/.test(A.refusalI18n(vi, {}).text.key));
@@ -3004,9 +3170,9 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
     const SSm = require(path.join(REPO, 'src/stash-summary.js'));
     const toast = SSm.handOverRefusalWords({ code: 'spend_refused', why: 'hour-cap', cap: 0, capUnset: true, identity: IDg }, (k, p) => String(k).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] !== undefined ? String(p[x]) : m)), {});
     ok('§5g (3) the hand-over toast says it (no limit is set — set a number) with the Spending door; a 0 cap still says «switched off»',
-      /no limit is set for turns nobody typed on G: set a number in Settings → Spending/.test(toast.text) && toast.door === 'spending'
+      /no limit is set for turns nobody typed on G: set a number in its row of Settings → Spending: vibespace:\/\/settings\/spend\.unattendedPerIdentityHour\./.test(toast.text) && toast.door === 'spending'
         && /switched off/.test(SSm.handOverRefusalWords({ code: 'spend_refused', why: 'hour-cap', cap: 0, identity: IDg }, (k, p) => String(k).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] !== undefined ? String(p[x]) : m)), {}).text), toast.text);
-    const keys = [...A.REFUSAL_WORDS['cap-unset'], ...A.REFUSAL_WORDS['cap-unset-instance'], A.DOOR_WORDS.unset, 'Not handed over — no limit is set for turns nobody typed on {account}: set a number in Settings → Spending. The notices keep waiting.', 'Not handed over — no limit is set for turns nobody typed on this instance: set a number in Settings → Spending. The notices keep waiting.', 'none — every turn nobody typed is held until a number is set'];
+    const keys = [...A.REFUSAL_WORDS['cap-unset'], ...A.REFUSAL_WORDS['cap-unset-instance'], A.DOOR_WORDS.unset, A.DOOR_LINK_WORDS.unset, 'Not handed over — no limit is set for turns nobody typed on {account}: set a number in its row of Settings → Spending: {link}. The notices keep waiting.', 'Not handed over — no limit is set for turns nobody typed on this instance: set a number in its row of Settings → Spending: {link}. The notices keep waiting.', 'none — every turn nobody typed is held until a number is set'];
     ok('§5g (3) every new sentence is in zh and ja', keys.every((k) => ZH.has(k) && JA.has(k)), keys.filter((k) => !ZH.has(k) || !JA.has(k)).join(' | '));
     const m = mutantModule('src/spend-authorizer.js', [["    if (field && (v === null || (typeof v === 'string' && !v.trim()))) { unset.push(field); return 0; }\n", '']]);
     ok('§5g (3) CONTROL: the release\'s reading re-applied to a copy (the patch hit)', !m.err && m.hits === 1, m.err || '');
@@ -4182,7 +4348,7 @@ console.log('\n§9 fail closed: an authorizer that throws spends nothing (P8)');
   ok('§10 the 80 % notice carries and prints the top producers of its window', w && w.producers && w.producers['job-notification'] === 6 && /Top producers this hour: job-notification ×6, peer-message ×2\./.test(A.noticeText(w)), w && A.noticeText(w));
   // (e) the guard passes the reason through to the stamp (wiring pin + a real charge)
   const gsrc = read('src/server/spend-guard.js');
-  ok('§10 WIRING PIN: spend-guard.note() hands its `reason` to the stamp', /A\.noteUnattendedSpend\(state, \{ identity, at: now, limits: limits\(\), reason, rid: reservation, carried: !!carried, drain: !!drain, ended: !!ended, behind \}\)/.test(gsrc));   // + the reservation's id (lane queued-is-not-woke round 2)
+  ok('§10 WIRING PIN: spend-guard.note() hands its `reason` to the stamp', /A\.noteUnattendedSpend\(state, \{ identity, at: now, limits: limits\(\), reason, rid: reservation, carried: !!carried, drain: !!drain, ended: !!ended, behind, press \}\)/.test(gsrc));   // + the reservation's id (lane queued-is-not-woke round 2) + the press id (the attended bulk press's record)
   {
     const dir = tmpdir('vs-spend-reason-');
     const g = guardMod.create({ dataDir: dir, serverSetting: () => undefined, identityOf: () => ({ key: 'sub-G', name: 'G' }), getUserTodos: () => null, log: () => { } });
@@ -4621,6 +4787,193 @@ console.log('\n§12 the per-path wake budget on the wake door');
   const mut = eng.replace('const budget = pathBudgetVerdict(rec, convId, en, t);', '').replace('const pace = F.paceVerdict(paceWakes, t, F.digestCap(w));', 'const pace = F.paceVerdict(paceWakes, t, F.digestCap(w));\n    const budget = pathBudgetVerdict(rec, convId, en, t);');
   const mb = mut.indexOf('const budget = pathBudgetVerdict(', i), mp = mut.indexOf('const pace = F.paceVerdict(', i);
   ok('§12 CONTROL: the budget moved AFTER the pace is RED by the same order check', !(mb > i && mp > mb));
+}
+
+// §13 lane auto-resume-bulk (.349): «恢复所有因用量/过载停止的会话» — ONE press, N billed turns, ONE authorization over the
+// WHOLE batch. THE OWNER'S RULING 2026-11-18 (B): the press IS THE PERSON'S OWN ACT — reason `bulk-resume` is ATTENDED (none
+// of the N counted, no hold, no stamp; paid overage still refused BY NAME). The batch door's arithmetic is kept and driven on
+// the press-less twin (`auto-resume`, gated — a batch no door pressed is N automatic continues): every slot's share and the
+// instance total against charges AND holds, the first refusal refuses all, N holds that bind every concurrent producer, a
+// refusal holds nothing and is said once. The census: the bulk site is a GATED row, without its batch gate UNWIRED.
+console.log('\n§13 the bulk resume: one authorization for N turns (all or nothing)');
+{
+  const L = { perIdentityHour: 5, perIdentityDay: 50, perInstanceDay: 8, noticePct: 0 };
+  const IA = { key: 'sub-a', name: 'A' }, IB = { key: 'sub-b', name: 'B' };
+  const stamps = (k, n, now) => Array.from({ length: n }, (_, i) => ({ at: now - (i + 1) * 60e3, reason: 'auto-resume' }));
+  const now = Date.now();
+  const state = { v: 1, identities: { 'sub-a': stamps('sub-a', 2, now) }, instance: stamps('i', 2, now), notices: {} };
+  const TWIN = 'auto-resume';   // the press-less twin: the batch door's arithmetic, on a gated reason
+  const B = (groups, extra = {}) => A.authorizeUnattendedBatch({ reason: TWIN, groups, state, limits: L, now, ...extra });
+  // THE ATTENDED PRESS (the owner's ruling 2026-11-18): far over every cap, it is still allowed — and the brakes that bind a press bind it
+  ok('§13 PURE: `bulk-resume` is a row of the spend reasons marked ATTENDED', A.SPEND_REASONS['bulk-resume'] && A.SPEND_REASONS['bulk-resume'].attended === true);
+  const att = (groups, extra = {}) => A.authorizeUnattendedBatch({ reason: 'bulk-resume', groups, state, limits: L, now, ...extra });
+  ok('§13 PURE ATTENDED: 40 on A + 40 on B (A\'s hour 2 of 5, the instance\'s day 2 of 8) is ALLOWED — none counted against the caps', (() => { const v = att([{ identity: IA, n: 40 }, { identity: IB, n: 40 }]); return v.ok === true && v.attended === true; })());
+  // FORM TWO (主开发 2026-11-18 16:20Z — «an ACCOUNT already in paid overage is still refused: the account, not the press»)
+  ok('§13 PURE ATTENDED: paid overage in use on B refuses B BY NAME — and A\'s share goes on (the account, not the press)', (() => { const v = att([{ identity: IA, n: 3 }, { identity: IB, n: 2 }], { ofKey: (k) => (k === 'sub-b' ? { overage: { inUse: 'yes' } } : {}) }); return v.ok === true && v.attended === true && v.groups.length === 1 && v.refusedSlots.length === 1 && v.refusedSlots[0].identity.key === 'sub-b' && v.refusedSlots[0].why === 'overage-in-use' && v.refusedSlots[0].n === 2 && /B/.test(v.refusedSlots[0].detail); })());
+  ok('§13 PURE ATTENDED: …EVERY account in overage ⇒ the press starts nothing, refused, each account named', (() => { const v = att([{ identity: IA, n: 1 }, { identity: IB, n: 1 }], { ofKey: () => ({ overage: { inUse: 'yes' } }) }); return v.ok === false && v.why === 'overage-in-use' && v.refusedSlots.map((r) => r.identity.key).join() === 'sub-a,sub-b'; })());
+  // (4) THE BATCH LAYER FAILS CLOSED (主开发 20:16Z): handed the ledger, an unreadable budget refuses a gated batch BY NAME, as the
+  // single authorizer does; an attended press passes, as the single one does. The control proves its plant first
+  {
+    const LEDGER = { unreadable: true, error: 'Unexpected token in JSON' };
+    const tw = (ledger) => B([{ identity: IA, n: 1 }], ledger ? { ledger } : {});
+    const plant = tw(null), red = tw(LEDGER);
+    ok('§13 (4) CONTROL FIRST: the same twin batch with a READABLE ledger is allowed (the plant is the ledger fact alone)', plant.ok === true, JSON.stringify(plant));
+    ok('§13 (4) the batch authorizer handed an UNREADABLE ledger refuses the gated batch BY NAME (ledger-unreadable), as the single one does', red.ok === false && red.why === 'ledger-unreadable' && /could not be read/.test(red.detail), JSON.stringify(red));
+    ok('§13 (4) …an attended press passes it, exactly as the single authorizer does for an attended reason', att([{ identity: IA, n: 1 }], { ledger: LEDGER }).ok === true && A.authorizeUnattendedSpend({ reason: 'bulk-resume', identity: IA, state, limits: L, now, ledger: LEDGER }).ok === true);
+  }
+  // (3) THE RECORD OF A PRESS: one press row (when, how many, the batch id) beside its per-continue rows, FOLDED by account — a press
+  // of 600 never pushes its own first rows or the day's earlier ones out. The control proves the cap is the plant first
+  {
+    let st = A.emptyBudget();
+    for (let i = 0; i < 3; i++) st = A.noteUnattendedSpend(st, { identity: { key: 'Z' }, reason: 'held-deliver', at: now - 3600e3 + i }).state;
+    st = A.notePressRow(st, { reason: 'bulk-resume', press: 'rb-600', n: 600, at: now });
+    for (let i = 0; i < 600; i++) st = A.noteUnattendedSpend(st, { identity: { key: i % 2 ? 'sub-a' : 'sub-b' }, reason: 'bulk-resume', press: 'rb-600', at: now + i }).state;
+    const rows = A.pruneBudget(st, now + 1000).attended, counts = A.producerCounts(rows), pressRow = rows.find((t) => t.press === 'rb-600' && t.total === 600);
+    let un = A.emptyBudget();
+    for (let i = 0; i < 3; i++) un = A.noteUnattendedSpend(un, { identity: { key: 'Z' }, reason: 'held-deliver', at: now - 3600e3 + i }).state;
+    for (let i = 0; i < 600; i++) un = A.noteUnattendedSpend(un, { identity: { key: 'sub-a' }, reason: 'bulk-resume', at: now + i }).state;
+    ok('§13 (3) CONTROL FIRST: 600 UNFOLDED continues push the day\'s earlier rows out (the tally keeps ' + A.pruneBudget(un, now + 1000).attended.length + ' rows — the cap is the plant)', !A.pruneBudget(un, now + 1000).attended.some((t) => t.reason === 'held-deliver'));
+    ok('§13 (3) a press of 600: ONE press row (600, its batch id) + one folded row per account; the day\'s 3 earlier rows kept; the counts say 600 continues and 3 presses of the other reason', rows.length === 6 && !!pressRow && counts['bulk-resume'] === 600 && counts['held-deliver'] === 3, JSON.stringify({ n: rows.length, counts }));
+  }
+  ok('§13 PURE CONTROL: the gated twin stays ALL OR NOTHING — overage on B refuses its whole batch', (() => { const v = B([{ identity: IA, n: 1 }, { identity: IB, n: 1 }], { ofKey: (k) => (k === 'sub-b' ? { overage: { inUse: 'yes' } } : {}) }); return v.ok === false && v.why === 'overage-in-use' && !v.refusedSlots; })());
+  ok('§13 PURE CONTROL: the same 40 + 40 on the gated twin is refused by the hour cap', B([{ identity: IA, n: 40 }, { identity: IB, n: 40 }]).why === 'hour-cap');
+  ok('§13 PURE: A holds 2 of 5 this hour ⇒ a share of 3 on A + 2 on B fits (instance 2 + 5 = 7 ≤ 8)', B([{ identity: IA, n: 3 }, { identity: IB, n: 2 }]).ok === true);
+  const r1 = B([{ identity: IA, n: 4 }, { identity: IB, n: 1 }]);
+  ok('§13 PURE: a share of 4 on A (2 + 4 > 5) refuses the WHOLE batch, naming the bucket and the slot', r1.ok === false && r1.why === 'hour-cap' && r1.identity && r1.identity.key === 'sub-a' && /this batch needs 4 more/.test(r1.detail) && r1.n === 5, JSON.stringify(r1));
+  const r2 = B([{ identity: IA, n: 3 }, { identity: IB, n: 4 }]);
+  ok('§13 PURE: each slot fits but the INSTANCE does not (2 + 7 > 8) ⇒ refused by the instance cap', r2.ok === false && r2.why === 'instance-cap', JSON.stringify(r2));
+  ok('§13 PURE: the live HOLDS count like charges (3 holds on A ⇒ a share of 1 refuses)', B([{ identity: IA, n: 1 }], { pending: [{ id: 'h1', key: 'sub-a', at: now }, { id: 'h2', key: 'sub-a', at: now }, { id: 'h3', key: 'sub-a', at: now }] }).why === 'hour-cap');
+  ok('§13 PURE FAIL CLOSED: an empty batch, a slot nobody can name, an undeclared reason — all refused', B([]).ok === false && B([{ identity: null, n: 1 }]).why === 'identity-unknown' && A.authorizeUnattendedBatch({ reason: 'nope', groups: [{ identity: IA, n: 1 }], state, limits: L, now }).why === 'unknown-reason');
+  ok('§13 PURE: an overage slot in the batch refuses it (the per-slot facts ride ofKey)', B([{ identity: IA, n: 1 }, { identity: IB, n: 1 }], { ofKey: (k) => (k === 'sub-b' ? { overage: { inUse: 'yes' } } : {}) }).why === 'overage-in-use');
+  // need = 1 IS the old rule: the single gate's boundary did not move
+  const single = (n) => A.authorizeUnattendedSpend({ reason: 'auto-resume', identity: IA, state: { v: 1, identities: { 'sub-a': stamps('a', n, now) }, instance: [], notices: {} }, limits: L, now });
+  ok('§13 the SINGLE gate\'s boundary is unchanged by `need` (4 used of 5 ⇒ allowed; 5 used ⇒ refused)', single(4).ok === true && single(5).ok === false && single(5).why === 'hour-cap');
+
+  // the guard: N holds, binding every concurrent producer; a refusal holds NOTHING and is said ONCE
+  const dir = tmpdir('vs-spend-bulk-');
+  const todos = [];
+  const settings = { 'spend.unattendedPerIdentityHour': 3, 'spend.unattendedPerInstanceDay': 100 };
+  const g = guardMod.create({ dataDir: dir, serverSetting: (k) => settings[k], identityOf: (s) => s && s._slot ? { key: s._slot, name: s._slot } : null, getUserTodos: () => ({ add: (k, it) => { todos.push(it); } }), log: () => { } });
+  const sess = (slot, id) => ({ session: { _slot: slot, name: id }, sessionId: id, sessionName: id });
+  { // THE ATTENDED PRESS ON THE GUARD: no hold, nothing bound, no stamp — the attended tally sees each delivered continue
+    const gA = guardMod.create({ dataDir: tmpdir('vs-spend-bulkatt-'), serverSetting: (k) => settings[k], identityOf: (s) => s && s._slot ? { key: s._slot, name: s._slot } : null, getUserTodos: () => ({ add: () => { } }), log: () => { } });
+    const many = Array.from({ length: 10 }, (_, i) => sess('A', 'p' + i));
+    const vA = gA.authorizeBatch({ reason: 'bulk-resume', items: many });
+    ok('§13 GUARD ATTENDED: a press of 10 on A (cap 3 an hour) is allowed with one row per item and NO hold — nothing booked', vA.ok === true && vA.attended === true && vA.holds.length === 10 && vA.holds.every((h) => h.hold === null && h.identity.key === 'A') && gA.snapshot().holdsOpen === 0, JSON.stringify({ ok: vA.ok, why: vA.why, holds: (vA.holds || []).length, open: gA.snapshot().holdsOpen }));
+    for (const h of vA.holds) gA.note({ reason: 'bulk-resume', identity: h.identity, hold: h.hold });
+    const b0 = gA.snapshot().budget;
+    ok('§13 GUARD ATTENDED: the 10 delivered continues write NO stamp to the unattended ledger — 10 in the attended tally', (b0.identities.A || []).length === 0 && (b0.instance || []).length === 0 && (b0.attended || []).filter((x) => x.reason === 'bulk-resume').length === 10, JSON.stringify({ a: (b0.identities.A || []).length, att: (b0.attended || []).length }));
+    const x3 = [0, 1, 2].map(() => gA.authorize({ reason: 'auto-resume', identity: { key: 'A', name: 'A' } }));
+    ok('§13 GUARD ATTENDED: …and A\'s hourly room is whole for its OWN automatic continues (3 of 3 still authorized)', x3.every((x) => x.ok === true), JSON.stringify(x3.map((x) => x.why)));
+  }
+  { // the cure's should: a conversation with NO billing slot never refuses the whole PRESS — skipped by name, the rest held; the twin still fails closed whole
+    const gU = guardMod.create({ dataDir: tmpdir('vs-spend-bulkun-'), serverSetting: (k) => settings[k], identityOf: (s) => s && s._slot ? { key: s._slot, name: s._slot } : null, getUserTodos: () => ({ add: () => { } }), log: () => { } });
+    const ghost = { session: { name: 'ghost' }, sessionId: 'g', sessionName: 'ghost' };
+    const vU = gU.authorizeBatch({ reason: 'bulk-resume', items: [sess('A', 'a1'), ghost] }), tU = gU.authorizeBatch({ reason: TWIN, items: [sess('A', 'a1'), ghost] });
+    ok('§13 GUARD ATTENDED: an item whose slot cannot be named is skipped (identity-unknown) and the press goes on with the named; the gated twin refuses whole', vU.ok === true && vU.holds.map((h) => h.sessionId).join() === 'a1' && vU.skipped.some((x) => x.sessionId === 'g' && x.why === 'identity-unknown') && tU.ok === false && tU.why === 'identity-unknown', JSON.stringify({ vU, tU }));
+    // (3) on the guard: the press row and the folded continues, through note({press}) and notePress
+    gU.notePress({ reason: 'bulk-resume', press: 'rb-g', n: 2 });
+    gU.note({ reason: 'bulk-resume', identity: { key: 'A', name: 'A' }, hold: null, press: 'rb-g' }); gU.note({ reason: 'bulk-resume', identity: { key: 'A', name: 'A' }, hold: null, press: 'rb-g' });
+    const attG = gU.snapshot().budget.attended || [];
+    ok('§13 (3) GUARD: notePress writes ONE press row (2, rb-g); its two continues on A fold into one row counting 2; nothing stamped', attG.filter((t) => t.press === 'rb-g' && t.total === 2).length === 1 && attG.filter((t) => t.press === 'rb-g' && t.key === 'A' && t.count === 2).length === 1 && (gU.snapshot().budget.identities.A || []).length === 0, JSON.stringify(attG));
+  }
+  { // (4) on the guard: an UNREADABLE budget file — the twin batch and its quiet preview refuse by name (control first: the file is unreadable)
+    const dU = tmpdir('vs-spend-bulkled-');
+    fs.writeFileSync(path.join(dU, 'spend-budget.json'), '{ not json');
+    const gL = guardMod.create({ dataDir: dU, serverSetting: (k) => settings[k], identityOf: (s) => s && s._slot ? { key: s._slot, name: s._slot } : null, getUserTodos: () => ({ add: () => { } }), log: () => { } });
+    ok('§13 (4) CONTROL FIRST: the guard reads its budget file as UNREADABLE (the plant)', !!gL.snapshot().ledgerUnreadable, JSON.stringify(gL.snapshot().ledgerUnreadable));
+    const tL = gL.authorizeBatch({ reason: TWIN, items: [sess('A', 'a1')] }), pL = gL.previewBatch({ reason: TWIN, items: [sess('A', 'a1')] });
+    ok('§13 (4) GUARD: the twin batch AND its quiet preview refuse BY NAME on the unreadable ledger (every layer of the money gate fails closed)', tL.ok === false && tL.why === 'ledger-unreadable' && pL.refusedSlots.length === 1 && pL.refusedSlots[0].why === 'ledger-unreadable', JSON.stringify({ tL: tL.why, pL }));
+  }
+  { // FORM TWO on the guard: B in paid overage — A's items go on, B's come back SKIPPED by name; the plan's preview is QUIET
+    const logsB = [], todosB = [];
+    const gB = guardMod.create({ dataDir: tmpdir('vs-spend-bulkov-'), serverSetting: (k) => settings[k], identityOf: (s) => s && s._slot ? { key: s._slot, name: s._slot } : null, readCacheFor: (k) => (k === 'B' ? { overage: { inUse: true, asOf: Date.now() - 60e3 } } : null), getUserTodos: () => ({ add: (k, it) => { todosB.push(it); } }), log: (l) => logsB.push(String(l)) });
+    const items = [sess('A', 'a1'), sess('B', 'b1'), sess('A', 'a2'), sess('B', 'b2')];
+    const pv = gB.previewBatch({ reason: 'bulk-resume', items });
+    const quiet = logsB.length === 0 && todosB.length === 0 && gB.snapshot().holdsOpen === 0;
+    ok('§13 GUARD previewBatch: B named (overage-in-use, 2 conversations) — and QUIET: nothing held, nothing journalled, nothing filed', pv.refusedSlots.length === 1 && pv.refusedSlots[0].identity.key === 'B' && pv.refusedSlots[0].why === 'overage-in-use' && pv.refusedSlots[0].n === 2 && quiet, JSON.stringify({ pv, logsB, todosB }));
+    const vB = gB.authorizeBatch({ reason: 'bulk-resume', items });
+    // (2) where the instance ALLOWS turns in paid overage, the preview says so and names the account the press would bill as overage
+    const gO = guardMod.create({ dataDir: tmpdir('vs-spend-bulkovok-'), serverSetting: (k) => (k === 'spend.allowOverageTurns' ? true : settings[k]), identityOf: (s) => s && s._slot ? { key: s._slot, name: s._slot } : null, readCacheFor: (k) => (k === 'B' ? { overage: { inUse: true, asOf: Date.now() - 60e3 } } : null), getUserTodos: () => ({ add: () => { } }), log: () => { } });
+    const pvO = gO.previewBatch({ reason: 'bulk-resume', items });
+    ok('§13 (2) GUARD previewBatch where paid overage is ALLOWED: nothing refused, overageAllowed, and B named as billed (2 continues) — the dialog\'s sentence and cost line read it', pvO.refusedSlots.length === 0 && pvO.overageAllowed === true && pvO.overageBilled.length === 1 && pvO.overageBilled[0].identity.key === 'B' && pvO.overageBilled[0].n === 2 && pv.overageAllowed === false && pv.overageBilled.length === 0, JSON.stringify({ pvO, pv }));
+    ok('§13 GUARD ATTENDED FORM TWO: the press holds rows for A\'s two only; B\'s two come back skipped, by name and rule; the journal names B; no For-you item', vB.ok === true && vB.holds.map((h) => h.sessionId).join() === 'a1,a2' && vB.skipped.map((x) => `${x.sessionId}:${x.identity.key}:${x.why}`).join() === 'b1:B:overage-in-use,b2:B:overage-in-use' && logsB.some((l) => /bulk-resume: 2 on B left stopped — overage-in-use/.test(l)) && todosB.length === 0, JSON.stringify({ vB, logsB }));
+  }
+  const ok1 = g.authorizeBatch({ reason: TWIN, items: [sess('A', 'a1'), sess('A', 'a2'), sess('B', 'b1')] });
+  ok('§13 GUARD: an allowed batch opens ONE hold per item, each on the slot it will bill', ok1.ok && ok1.holds.length === 3 && ok1.holds.filter((h) => h.identity.key === 'A').length === 2 && g.snapshot().holdsOpen === 3, JSON.stringify(ok1.holds));
+  ok('§13 GUARD: …and those holds BIND a concurrent single producer (A has 2 held of 3 ⇒ one more fits, two do not)', (() => { const x = g.authorize({ reason: 'auto-resume', identity: { key: 'A', name: 'A' } }); const y = g.authorize({ reason: 'auto-resume', identity: { key: 'A', name: 'A' } }); g.release({ hold: x.hold }); return x.ok && !y.ok && y.why === 'hour-cap'; })());
+  for (const h of ok1.holds) g.note({ reason: TWIN, identity: h.identity, hold: h.hold });
+  ok('§13 GUARD (the twin): each delivered turn converts its hold into ONE stamp under its reason (no double count)', g.snapshot().holdsOpen === 0 && (g.snapshot().budget.identities.A || []).filter((s) => s.reason === TWIN).length === 2);
+  const no = g.authorizeBatch({ reason: TWIN, items: [sess('A', 'a3'), sess('A', 'a4')] });
+  ok('§13 GUARD: a batch that does not fit is refused WHOLE — no hold opened, its bucket + slot named', no.ok === false && no.why === 'hour-cap' && !no.holds && g.snapshot().holdsOpen === 0 && /A has spent 2/.test(no.detail), JSON.stringify(no));
+  ok('§13 a refusal made by HOLDS alone promises no instant (retryAfter 0 — never «Next allowed after 12/31/1969»)', /Next allowed after 12\/31\/1969|1970/.test(todos.map((x) => x.text).join()) === false && A.authorizeUnattendedSpend({ reason: 'auto-resume', identity: IA, state: A.emptyBudget(), limits: L, now, pending: Array.from({ length: 5 }, (_, i) => ({ id: 'p' + i, key: 'sub-a', at: now })) }).retryAfter === 0, JSON.stringify(todos.map((x) => x.text)));
+  ok('§13 the refusal carries the bucket\'s numbers for the person\'s words: A has LEFT 1 of 3 this hour, the batch NEEDS 2', no.left === 1 && no.need === 2, JSON.stringify({ left: no.left, need: no.need }));
+  // A RE-ASK OF ONE CONTINUE NAMES ITS CONVERSATION in the journal (the U2 cure's should): the batch's loop asks again before each
+  // deliver with a batch of one — its refusal line said «for a batch of 1»
+  {
+    const logs9 = [];
+    const g9 = guardMod.create({ dataDir: tmpdir('vs-spend-bulk9-'), serverSetting: (k) => settings[k], identityOf: (s) => s && s._slot ? { key: s._slot, name: s._slot } : null, getUserTodos: () => ({ add: () => { } }), log: (l) => logs9.push(String(l)) });
+    const full = g9.authorizeBatch({ reason: TWIN, items: [sess('A', 'x1'), sess('A', 'x2'), sess('A', 'x3')] });
+    for (const h of full.holds || []) g9.note({ reason: TWIN, identity: h.identity, hold: h.hold });
+    const solo = g9.authorizeBatch({ reason: TWIN, items: [sess('A', 'solo')] });
+    ok('§13 GUARD: a refused batch of ONE names its conversation in the journal («for solo»), never «a batch of 1»', solo.ok === false && solo.why === 'hour-cap' && logs9.some((l) => /refused auto-resume for solo on A/.test(l)) && !logs9.some((l) => /a batch of 1\b/.test(l)), JSON.stringify(logs9));
+  }
+  // RENEWAL (U2 cure, the adversarial read's MUST 1): a batch opens its holds at once and delivers them paced behind bounded
+  // gates — a batch longer than RESERVE_TTL_MS must not lose the holds it has not reached yet
+  ok('§13 PURE renewPending: the named holds are re-stamped, the others and an unknown id untouched', (() => { const p0 = [{ id: 'h1', key: 'A', at: 1 }, { id: 'h2', key: 'A', at: 2 }]; const p1 = A.renewPending(p0, ['h2', 'nope'], 99); return p1[0].at === 1 && p1[1].at === 99 && p0[1].at === 2 && p1.length === 2; })());
+  {
+    const t0 = Date.now(), TTL = A.RESERVE_TTL_MS;
+    const mk3 = () => guardMod.create({ dataDir: tmpdir('vs-spend-bulk3-'), serverSetting: (k) => settings[k], identityOf: (s) => s && s._slot ? { key: s._slot, name: s._slot } : null, getUserTodos: () => ({ add: () => { } }), log: () => { } });
+    const g3 = mk3(), b3 = g3.authorizeBatch({ reason: TWIN, items: [sess('A', 'r1'), sess('A', 'r2')], now: t0 });
+    g3.renewHolds(b3.holds.map((h) => h.hold), t0 + TTL - 10000);
+    const x1 = g3.authorize({ reason: 'auto-resume', identity: { key: 'A', name: 'A' }, now: t0 + TTL + 20000 }), x2 = g3.authorize({ reason: 'auto-resume', identity: { key: 'A', name: 'A' }, now: t0 + TTL + 20001 });
+    ok('§13 GUARD: RENEWED batch holds outlive their first lifetime and still BIND (2 held of 3 ⇒ one more fits, a second does not)', b3.ok && x1.ok === true && x2.ok === false && x2.why === 'hour-cap', JSON.stringify({ x1: x1.ok, x2: x2.why }));
+    const g4 = mk3(); g4.authorizeBatch({ reason: TWIN, items: [sess('A', 'r1'), sess('A', 'r2')], now: t0 });
+    const y1 = g4.authorize({ reason: 'auto-resume', identity: { key: 'A', name: 'A' }, now: t0 + TTL + 20000 }), y2 = g4.authorize({ reason: 'auto-resume', identity: { key: 'A', name: 'A' }, now: t0 + TTL + 20001 });
+    ok('§13 CONTROL: the same batch NOT renewed loses its holds past the lifetime — two more fit (the leg above would go red)', y1.ok === true && y2.ok === true);
+  }
+  // the notice leg on its own guard (the guard files ONE notice per slot and why per 6 h, whoever was refused first)
+  const todos2 = [];
+  const logs2 = [];
+  const g2 = guardMod.create({ dataDir: tmpdir('vs-spend-bulk2-'), serverSetting: (k) => settings[k], identityOf: (s) => s && s._slot ? { key: s._slot, name: s._slot } : null, getUserTodos: () => ({ add: (k, it) => { todos2.push(it); } }), log: (l) => logs2.push(String(l)) });
+  g2.authorizeBatch({ reason: TWIN, items: [sess('A', 'a1'), sess('A', 'a2'), sess('A', 'a3'), sess('A', 'a4')] });
+  ok('§13 GUARD: a BATCH refusal is answered in the person\'s own dialog — NO For-you item (its words would say what the bucket used, not what the batch needs); the journal says it once', todos2.length === 0 && logs2.filter((l) => /refused auto-resume/.test(l)).length === 1 && logs2.some((l) => /this batch needs 4 more/.test(l)), JSON.stringify({ todos2, logs2 }));
+  g2.authorizeBatch({ reason: TWIN, items: [sess('A', 'a1'), sess('A', 'a2'), sess('A', 'a3'), sess('A', 'a4')] });
+  ok('§13 GUARD: …and a second press of the same refusal files nothing either', todos2.length === 0);
+  const un = g.authorizeBatch({ reason: TWIN, items: [sess('B', 'b2'), { session: { name: 'ghost' }, sessionId: 'g', sessionName: 'ghost' }] });
+  ok('§13 GUARD FAIL CLOSED: one conversation whose slot cannot be named refuses the batch (no hold for the others)', un.ok === false && un.why === 'identity-unknown' && g.snapshot().holdsOpen === 0, JSON.stringify(un));
+
+  // the census: the bulk site is a GATED row; without its batch gate it reads UNWIRED
+  const arSrc = read('src/server/auto-resume.js');
+  const files = trackedServerSource();
+  const rows = censusOver(REPO, files).filter((h) => h.file === 'src/server/auto-resume.js' && h.prim === 'continue-send');
+  const bulkLine = arSrc.split('\n').findIndex((l) => /deliverContinue\(session, verb, prompt, \(s2, text\) => sentNoted\(s2, text, sendToSession\(e\.id/.test(l)) + 1;
+  const bulkRow = rows.find((h) => h.line === bulkLine);
+  ok('§13 CENSUS: auto-resume.js holds exactly TWO continue sites — the single continue and the bulk resume — both GATED', rows.length === 2 && rows.every((h) => h.gated), JSON.stringify(rows));
+  ok('§13 CENSUS: …the bulk site is gated by its OWN batch authorization (authorizeSpendBatch), not by a neighbour', bulkRow && bulkRow.gated && /^gate@/.test(bulkRow.via) && /authorizeSpendBatch\(/.test(arSrc.split('\n')[Number(bulkRow.via.split('@')[1]) - 1]), JSON.stringify(bulkRow));
+  const mDir = tmpdir('vs-spend-bulkmut-');
+  fs.mkdirSync(path.join(mDir, 'src', 'server'), { recursive: true });
+  const from = '      v = authorizeSpendBatch\n        ? authorizeSpendBatch(chosen.map(';
+  const fromMoved = 'v2 = authorizeSpendBatch ? authorizeSpendBatch([{ id: e.id, session, identity: bill }], paid.spendReason) : null;';   // the per-continue re-ask on the slot that bills (lg-recovery U2 cure: every item, moved or not)
+  fs.writeFileSync(path.join(mDir, 'src/server/auto-resume.js'), arSrc.replace(from, '      v = authorizeSpendBatch\n        ? ((x) => ({ ok: true, holds: x }))(chosen.map(').replace(fromMoved, 'v2 = ((x) => ({ ok: true, holds: x }))([{ sessionId: e.id, identity: bill, hold: null }], paid.spendReason);'));
+  const mRows = censusOver(mDir, ['src/server/auto-resume.js']).filter((h) => h.prim === 'continue-send');
+  ok('§13 CENSUS MUTANT: the same file without its two batch gates (the batch\'s, the per-continue re-ask\'s) reads the bulk site UNWIRED (and the single one still GATED)', arSrc.includes(from) && arSrc.includes(fromMoved) && mRows.length === 2 && mRows.filter((h) => !h.gated).length === 1 && mRows.find((h) => !h.gated).line === bulkLine, JSON.stringify(mRows));
+  ok('§13 WIRING: server.js hands the core the REAL batch gate and the batch charge, under the reason the core chose', /authorizeSpendBatch: \(items, reason\) => spendGuard\.authorizeBatch\(\{ reason, items: items\.map\(/.test(read('server.js')) && /renewSpend: \(holds\) => spendGuard\.renewHolds\(holds\)/.test(read('server.js')) && /noteBatchSpend: \(id, s, identity, hold, reason, press\) => spendGuard\.note\(\{ reason, session: s, identity, hold, press \}\)/.test(read('server.js')));
+  ok('§13 WIRING (the cure): server.js hands the core the guard\'s QUIET preview (as the press would ask), the press record, and the press id on every charge', /previewSpendBatch: \(items\) => spendGuard\.previewBatch\(\{ reason: 'bulk-resume', items: items\.map\(/.test(read('server.js')) && /notePress: \(batchId, n, reason\) => spendGuard\.notePress\(\{ reason, press: batchId, n \}\)/.test(read('server.js')) && /noteBatchSpend: \(id, s, identity, hold, reason, press\) => spendGuard\.note\(\{ reason, session: s, identity, hold, press \}\)/.test(read('server.js')));
+  ok('§13 THE PRESS (the owner\'s ruling 2026-11-18): the core selects the attended reason ONLY on the press its door minted (else the gated twin), and that reason rides the batch\'s authorization, every re-ask, every charge and the press record', /const paid = isPress\(pressed\) \? \{ spendReason: 'bulk-resume' \} : \{ spendReason: 'auto-resume' \};/.test(arSrc) && (arSrc.match(/paid\.spendReason/g) || []).length === 4);
+  { const rt = read('src/server/bulk-resume-routes.js'), h = rt.indexOf("app.post('/api/sessions/resume-stopped'"), body = rt.slice(h, rt.indexOf('app.post(', h + 10));
+    ok('§13 THE DOOR: POST /api/sessions/resume-stopped refuses EVERY bearer first, then the page, and mints the press it hands the batch (pressOf(req))', h > 0 && /try \{\s*(?:\/\/[^\n]*\n\s*)*if \(pressBearer\(req\.headers\)\) return res\.status\(403\)/.test(body) && /ar\.resumeBatch\(\{ limit, ids, pressed: pressOf\(req\) \}\)/.test(body)); }
+  { // THE REAL DOOR, driven (the read's should): a person's page reaches the batch WITH a press; every bearer is refused first; a header-less local request is not a press
+    const R = require(path.join(REPO, 'src/server/bulk-resume-routes.js'));
+    const seen = [], routes = {};
+    const arStub = { resumeBatch: (o) => { seen.push(WO.isPress(o && o.pressed)); return { ok: true, batchId: 'rb-door', planned: 0, done: true }; } };
+    R.create({ activeSessions: new Map(), getAutoResume: () => arStub }).register({ get: (p, h) => { routes['GET ' + p] = h; }, post: (p, h) => { routes['POST ' + p] = h; } });
+    const hit = (headers) => { let st = 200, body = null; const res = { status: (c) => { st = c; return res; }, json: (o) => { body = o; return res; } }; routes['POST /api/sessions/resume-stopped']({ headers, body: {}, socket: {} }, res); return { st, code: body && body.code }; };
+    const page = hit({ 'sec-fetch-site': 'same-origin' });
+    const bearers = ['vsst_t', 'jbt_t', 'vsak_t'].map((k) => hit({ authorization: 'Bearer ' + k, 'sec-fetch-site': 'same-origin' }));
+    const bare = hit({});
+    ok('§13 THE REAL DOOR: a person\'s page (same-origin) reaches the batch WITH a press (attended); vsst_ / jbt_ / vsak_ bearers are 403 agent_forbidden even beside a page header; a header-less request is 403 not_a_page — the batch never hears either', page.st === 200 && seen.join() === 'true' && bearers.every((b) => b.st === 403 && b.code === 'agent_forbidden') && bare.st === 403 && bare.code === 'not_a_page', JSON.stringify({ page, bearers, bare, seen }));
+  }
 }
 
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass})`);

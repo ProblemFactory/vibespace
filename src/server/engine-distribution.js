@@ -148,6 +148,7 @@ const RECORD_FILE = 'browser-engines.json';
 const VERSION_MS = 5000;
 const STALL_MS = 120000;
 const ANSWER_MS = 10000;
+const LATE_LOOK_MS = 50;      // B-4d35 r3: an ask whose ONE bound is spent only LOOKS at a put-back — one that finds nothing aside ends within it
 const LAND_WAIT_MS = 30000;    // lane fleet-plugin-catalog r2 (N3) / r3 (N2): a start's WHOLE ask (the waiting kernel's landing + its hold), a measure, a put-back waits at most this — ONCE — for a landing in progress (a landing never waits for a start)
 const LAUNCH_HOLD_MS = 120000; // … a start's hold ends at its spawn — or after this, whatever happens to the start
 const MANIFEST_MAX = 256 * 1024;
@@ -393,8 +394,9 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
     try {
       // round 3: an aside copy beside an empty place (a landing stopped between its renames) comes BACK first — a first use or
       // the fleet's boot then needs no download; one that cannot be put back is refused by name (engine_kernel_aside)
-      const rel0 = await holdPlace(sid, { leaseMs: 0, ask: askOf('a download') }); // r2 (N3): never beside a landing in flight
-      let back0 = null; try { back0 = await restoreAside(sid, plan); } finally { rel0(); }
+      const ask0 = askOf('a download');
+      const rel0 = await holdPlace(sid, { leaseMs: 0, ask: ask0 }); // r2 (N3): never beside a landing in flight
+      let back0 = null; try { back0 = await putBackWithin(sid, plan, ask0); } finally { rel0(); } // B-4d35: its own put-back within its bound
       if (back0 && back0.restored && by !== 'user') { running.delete(sid); notify(); return { ok: true, restored: true, id: sid }; }
       // the Node it would unpack on (round 2): no zstd ⇒ refused by name before any byte moves, remembered for this Node —
       // lane engine-spi-egress r2: kernel.json is read and judged FIRST (its format decides whether zstd is needed at all — a tar.gz
@@ -648,12 +650,39 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
     // the move-out, the move-in AND the put-back of an aside kernel into the empty place (r7, p2: from the moment it is asked —
     // its stats too)
     if (g.landing && g.torn) throw named('engine_kernel_landing', `the kernel is being replaced — try again in a moment (${who(sid)}'s new kernel has been taking its place for more than ${secs(landWaitMs)} s)`);
+    // B-4d35: a PUT-BACK in flight OUTSIDE a landing (restoreAside asked by a download's first step, a measure or the boot) renames
+    // the place too — waited for within the ask's ONE bound, refused BY NAME past it. Before: no wait at all (a start went on beside
+    // the emptied place; a later measure / boot / download took its hold, then awaited the shared rename unbounded)
+    if (!g.landing && restoring.has(sid) && !(await waitPutBack(sid, restoring.get(sid), a))) throw named('engine_kernel_landing', putBackWords(sid));
     // r6 (n1): a hold TAKEN (and maybe dropped) while a landing's in-use scan runs counts; (n5) whose it is, for the words
     g.holds++; g.taken++; g.lastAsker = a.asker; g.askers.set(a.asker, (g.askers.get(a.asker) || 0) + 1);
     let done = false, t = null;
     const release = () => { if (done) return; done = true; if (t) clearTimeout(t); g.holds = Math.max(0, g.holds - 1); const n = (g.askers.get(a.asker) || 1) - 1; if (n > 0) g.askers.set(a.asker, n); else g.askers.delete(a.asker); };
     if (leaseMs > 0) { t = setTimeout(release, leaseMs); if (t.unref) t.unref(); }
     return release;
+  }
+  /** B-4d35: the words of an ask that stepped aside from a put-back past its bound (the rename runs on; the record follows it). */
+  const putBackWords = (sid) => `the kernel is being put back in its place — try again in a moment (${who(sid)}'s previous kernel has been moving back for more than ${secs(landWaitMs)} s)`;
+  /** B-4d35: an ask waits for a PUT-BACK outside a landing (`p`, restoreAside's shared promise) — within its ONE bound (askOf), said
+   *  once per ask in the journal; never counted as «waiting for the new kernel to land» on the card (it is the previous kernel
+   *  moving back). → true when `p` ended in time. */
+  async function waitPutBack(sid, p, ask) {
+    if (await within(p, 0)) return true; // already over — nothing to wait for, nothing to say
+    // round 3 (the second adversarial read): an ask whose ONE bound is spent (it waited out a landing that only deletes — r5: it goes
+    // on) only LOOKS — a put-back that finds nothing aside, or a kernel in its place, ends within LATE_LOOK_MS; one still renaming is
+    // refused by name. Never a second bound (round 2's fresh one let an ask wait twice and the «within 30 seconds» was not true)
+    if (ask.late) return within(p, LATE_LOOK_MS);
+    if (!ask.saidBack) { ask.saidBack = true; log.log?.(`[browser] ${who(sid)}: ${ask.asker} waits for its previous kernel to be put back in its place (≤ ${secs(landWaitMs)} s)`); }
+    const ended = await within(p, ask.until - Date.now());
+    if (!ended) { ask.late = true; log.warn?.(`[browser] ${who(sid)}'s previous kernel is still being put back after ${secs(landWaitMs)} s — ${ask.asker} waits no longer (the put-back runs on)`); }
+    return ended;
+  }
+  /** B-4d35: a put-back asked OUTSIDE a landing is awaited within its asker's bound — past it the asker steps aside BY NAME
+   *  (engine_kernel_landing — never a failure of the asker: no failure record, no For-you item); `ask` null ⇒ as before. */
+  async function putBackWithin(sid, plan, ask) {
+    const p = restoreAside(sid, plan);
+    if (!ask || await waitPutBack(sid, p, ask)) return p;
+    throw named('engine_kernel_landing', putBackWords(sid));
   }
   /** Round 2: ONE writer of the place and of the waiting kernel (`rec.next`, `.next-<tag>`) per engine at a time — a landing, a
    *  staging, a discard, a leftover sweep queue behind each other. Round 3 (N2): an `ask` (a start's) stands in the queue only
@@ -690,6 +719,9 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
    *  it does (onPlace: the landing; landDir: the first rename). → null | WHICH, in words (n5 — the staging's line says it). */
   async function placeBusy(sid, plan) {
     const g = gateOf(sid), t0 = g.taken;
+    // B-4d35 (the lane's adversarial read): a put-back in flight renames the place — a landing never starts beside it (it would await
+    // the shared rename unbounded: a start's landNext once the first asker stepped aside, the fleet's landNext)
+    if (restoring.has(sid)) return 'its previous kernel is being put back in its place';
     if (g.holds > 0) return heldWords(g);
     if (await inUse(sid, plan)) return 'a browser runs the current kernel';
     return g.holds > 0 ? heldWords(g) : g.taken !== t0 ? `${g.lastAsker || 'a browser start'} took the current kernel while it was checked` : null;
@@ -1107,10 +1139,13 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
     for (const id of ids) {
       if (!BE.ID_RE.test(String(id)) || running.has(id)) continue;
       let plan; try { plan = planOf(id); } catch { continue; }
-      let rel; try { rel = await holdPlace(id, { leaseMs: 0, ask: askOf('the boot') }); } catch { continue; } // lane fleet-plugin-catalog r2 (N3): never beside a landing in flight (r4: one past the bound ⇒ this id waits for the next run)
-      try { const back = await restoreAside(id, plan); if (back && back.restored) out.push({ id, restored: true }); } // r8 (s1): unknown ⇒ nothing (said once)
-      catch (e) { await noteFailure(id, e, 'restore', 'boot'); out.push({ id, restored: false, code: e.code }); }
+      const askB = askOf('the boot');
+      let rel; try { rel = await holdPlace(id, { leaseMs: 0, ask: askB }); } catch { continue; } // lane fleet-plugin-catalog r2 (N3): never beside a landing in flight (r4: one past the bound ⇒ this id waits for the next run)
+      let aside = false; // B-4d35: its put-back past the bound ⇒ this id waits for the next run too (nothing swept or landed beside the rename)
+      try { const back = await putBackWithin(id, plan, askB); if (back && back.restored) out.push({ id, restored: true }); } // r8 (s1): unknown ⇒ nothing (said once)
+      catch (e) { if (e && e.code === 'engine_kernel_landing') aside = true; else { await noteFailure(id, e, 'restore', 'boot'); out.push({ id, restored: false, code: e.code }); } }
       finally { rel(); }
+      if (aside) continue;
       try { const gone = await sweepLeftovers(id, plan); if (gone.length) out.push({ id, swept: gone }); } catch { /* asked again at the next run */ } // r2 (N5)
       if (record.engines[id] && record.engines[id].next && await landNext(id)) out.push({ id, landed: true }); // lane fleet-plugin-catalog
     }
@@ -1159,12 +1194,14 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
     const sid = String(id || '');
     if (userPath) return measureUser(sid, String(userPath), { force, stamp }); // lane engine-spi-egress L1b: the owner's program (no receipt, no place)
     let plan; try { plan = planOf(sid); } catch (e) { return { ok: false, code: e.code, error: e.message }; }
-    let rel; try { rel = await holdPlace(sid, { leaseMs: 0, ask: askOf('a measure') }); } catch (e) { return { ok: false, code: e.code, error: e.message }; } // lane fleet-plugin-catalog r2 (N3): never beside a landing in flight (r4: past the bound ⇒ refused, nothing run)
-    try { return await measureKernel(sid, plan, { force }); } finally { rel(); }
+    const askM = askOf('a measure');
+    let rel; try { rel = await holdPlace(sid, { leaseMs: 0, ask: askM }); } catch (e) { return { ok: false, code: e.code, error: e.message }; } // lane fleet-plugin-catalog r2 (N3): never beside a landing in flight (r4: past the bound ⇒ refused, nothing run)
+    try { return await measureKernel(sid, plan, { force, ask: askM }); } finally { rel(); }
   }
-  async function measureKernel(sid, plan, { force = false } = {}) {
-    // round 3: an aside copy beside an empty place comes back BEFORE the place is read (never while a landing owns the place)
-    if (!running.has(sid)) { try { await restoreAside(sid, plan); } catch (e) { await noteFailure(sid, e, 'restore', 'first-use'); notify(); return { ok: false, code: e.code, error: e.message }; } }
+  async function measureKernel(sid, plan, { force = false, ask = null } = {}) {
+    // round 3: an aside copy beside an empty place comes back BEFORE the place is read (never while a landing owns the place);
+    // B-4d35: within the measure's bound — past it ANSWERED by name (never a failure record), the rename runs on
+    if (!running.has(sid)) { try { await putBackWithin(sid, plan, ask); } catch (e) { if (e && e.code === 'engine_kernel_landing') return { ok: false, code: e.code, error: e.message }; await noteFailure(sid, e, 'restore', 'first-use'); notify(); return { ok: false, code: e.code, error: e.message }; } }
     let st; try { st = await fsp.stat(plan.exe); } catch (e) { await placeEmpty(sid, e); return { ok: false, code: 'browser_engine_kernel_missing', error: `${who(sid)}'s kernel is not installed on this computer` }; }
     const receipt = await readJson(plan.receipt, 64 * 1024);
     const forKey = receipt && /^[0-9a-f]{64}$/.test(String(receipt.sha256 || '')) ? `sha256:${receipt.sha256}:${receipt.bytes}` : `stat:${st.size}:${Math.round(st.mtimeMs)}`;

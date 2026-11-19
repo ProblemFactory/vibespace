@@ -637,6 +637,8 @@ console.log('⑧ THE MIGRATION TABLE — a production-shaped data dir, every r2 
       ['src/server/vault-contents.js', 'the reveal door (secretSource): ONE value behind the second password — a totp entry as its otpauth link'],
       ['src/server/automation-engine.js', 'apikey:<id> only (A.entryOf)'], ['src/server/host-tokens.js', 'host:<id> only'], ['src/plugins/frp.js', 'frp:token only'], ['src/server/sealed-json.js', 'file:<name> only'],
       ['src/server/browser-logins.js', 'web-login:<origin>#<user> only (lane browser-login — the ONE writer): ONE entry opened for ONE fill the kernel makes (its values to the kernel on the loopback socket, never in an answer) or a save verdict'],
+      ['src/server/browser-proxy-logins.js', 'proxy-login:<scheme>://<host>:<port>#<user> only (B-8b87 — the ONE writer and reader): ONE entry opened when a browser profile\'s forwarder starts (its launch, or the boot that adopts it) — the password handed to the profile\'s proxy upstream, never to the browser, an argv, an env or a record; each reading a use noted (door browser-proxy)'],
+      ['src/server/provider-store.js', 'provider:<id> only (lane lg-providers, B-d578 — keyOf, the ONE reader of a third-party provider\'s key): opened for ONE spawn of a conversation that picked that provider, the person\'s Test, or the listed-model refresh — into that child\'s env or one request header — or the put-back of a failed new key / address change (the OLD key sealed back into the vault); its buffer zeroed; never an answer, never a file'],
       ['src/server/vault-job-door.js', 'secret:<id> / agent:<scope>/<name> only (lane vault-job-road): a Background Work job\'s --vault values, opened at ONE spawn the verdict allowed, framed for the wrapper\'s fd 3 and zeroed — never an answer, never a file'],
     ]);
     const walkJs = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walkJs(path.join(dir, e.name)) : e.name.endsWith('.js') ? [path.join(dir, e.name)] : []));
@@ -685,7 +687,9 @@ console.log('⑧ THE MIGRATION TABLE — a production-shaped data dir, every r2 
     ]);
     const readers = naming(/job-secrets\.json|\/api\/jobs-secrets/);
     ok(scope.length > 100 && readers.join() === [...KNOWN.keys()].sort().join(), `NO READER LEFT: outside a comment only the two named files name data/job-secrets.json or /api/jobs-secrets (${[...KNOWN].map(([f, why]) => f + ' — ' + why).join('; ')})`, readers);
-    ok(naming(/job-secrets\.retired\.json/).join() === [...KNOWN.keys()].sort().join(), 'the retired name is KNOWN: the one-shot writes it, SECRETS_AT_REST names it — no other file', naming(/job-secrets\.retired\.json/));
+    // B-ef1b: + the notice's own door — a PERSON's press moves each value into the vault (then deletes the file) or deletes it
+    const RETIRED_KNOWN = new Map([...KNOWN, ['src/server/job-secrets-door.js', 'B-ef1b: the notice\'s two buttons — a person\'s press seals each value into the vault, then deletes the file (or deletes it) — never into a job, never a value said']]);
+    ok(naming(/job-secrets\.retired\.json/).join() === [...RETIRED_KNOWN.keys()].sort().join(), 'the retired name is KNOWN: the one-shot writes it, SECRETS_AT_REST names it, the notice\'s door (B-ef1b) moves or deletes it — no other file', naming(/job-secrets\.retired\.json/));
     const row = R('src/vault.js').SECRETS_AT_REST.find((r) => /data\/job-secrets\.retired\.json/.test(r.where || ''));
     ok(!!row && /0600/.test(row.where) && /OWNER/.test(row.exception || '') && /never a value/.test(row.exception || '') && /into the vault/.test(row.exception || ''),
       'SECRETS_AT_REST names data/job-secrets.retired.json (0600) as an EXCEPTION with its reason: the owner\'s bytes, kept until they delete them; the notice names them (never a value) and the recipe', row);
@@ -884,6 +888,263 @@ console.log('⑩ THE DAILY-FAILURE CARD (lane vault-use-law — design q-043 D7)
   ok(pw && pw.urgency === 'urgent' && pw.i18n.text.params.who === 'someone at 203.0.113.5' && pw.i18n.text.params.n === VU.FAIL_PER_DAY && pw.i18n.detail.map((l) => l.key).join('|') === [FAILING_DOOR, FAILING_PW_HINT].join('|'), 'design §2 T7: 20 wrong second passwords from one address in a day ⇒ ONE URGENT item naming the address (lock the vault, change the sign-in password)', pw);
   ok(!JSON.stringify(t._state.items).includes('not the second password') && !fs.readFileSync(path.join(d, 'vault-audit.jsonl'), 'utf8').includes('not the second password'), 'no password in any item or audit line');
   t.stop();
+}
+
+console.log('⑪ THE DOOR\'S PRESS (B-6f65) — the vault\'s door is heard from the App\'s construction; a press before the facts waits for them');
+{
+  // the REAL src/lib/vault-unlock.js bundled by esbuild; stubs only for what draws a dialog, asks the hub or opens a window
+  const esbuild = require(path.join(REPO, 'node_modules/esbuild'));
+  const STUBS = {
+    'i18n.js': 'export const t = (s) => s;',
+    'utils.js': 'export const createModalShell = (o) => globalThis.__vd.shell(o); export const fetchJson = (u) => globalThis.__vd.fetch(u); export const showToast = () => {};',
+    'icons.js': 'export const UI_ICONS = {};',
+    'chat-enter-keys.js': 'export const enterSubmits = () => {};',
+    'window-types.js': 'export const replayOpenSpec = (app, spec) => globalThis.__vd.open(spec);',
+    'customize-mode.js': 'export const slotBeside = () => null;',
+  };
+  const built = new Map();   // one esbuild run per shape; each page requires a fresh copy (its own module state)
+  const bundleDoor = async (mutate) => {
+    if (!built.has(mutate)) built.set(mutate, await buildDoor(mutate));
+    const f = path.join(dirOf('door'), 'vault-unlock.cjs');
+    fs.writeFileSync(f, built.get(mutate));
+    return require(f);
+  };
+  const buildDoor = async (mutate) => {
+    const out = await esbuild.build({ entryPoints: [path.join(REPO, 'src/lib/vault-unlock.js')], bundle: true, format: 'cjs', platform: 'node', write: false, logLevel: 'silent',
+      plugins: [{ name: 'vd', setup(b) {
+        b.onResolve({ filter: /^\.\/(i18n|utils|icons|chat-enter-keys|window-types|customize-mode)\.js$/ }, (a) => ({ path: a.path.slice(2), namespace: 'vd-stub' }));
+        b.onLoad({ filter: /.*/, namespace: 'vd-stub' }, (a) => ({ contents: STUBS[a.path], loader: 'js' }));
+        if (mutate) b.onLoad({ filter: /vault-unlock\.js$/ }, (a) => { const s0 = fs.readFileSync(a.path, 'utf8'), m = mutate(s0); if (m === s0) throw new Error('the door mutant changed nothing'); return { contents: m, loader: 'js', resolveDir: path.dirname(a.path) }; });
+      } }] });
+    return out.outputFiles[0].text;
+  };
+  // a page: the window (a real EventTarget — the door's event), a document that draws nothing, the hub's answer held until told
+  const anyEl = () => new Proxy(function () { }, { get: (t0, k) => (k === Symbol.toPrimitive ? () => '' : anyEl()), set: () => true, apply: () => anyEl() });
+  const tick = async (n = 6) => { for (let i = 0; i < n; i++) await new Promise((r) => setImmediate(r)); };
+  const page = async (mutate) => {
+    const M = await bundleDoor(mutate), seen = [], gets = [], shells = [];
+    let answer = null;
+    globalThis.__vd = {
+      shell: (o) => { seen.push(`dialog:${o.id}`); shells.push(o); return { dialog: anyEl(), body: anyEl(), close() { }, raised: true }; },
+      fetch: (u) => { gets.push(String(u)); return new Promise((r) => { answer = r; }); },
+      open: (spec) => { seen.push(`window:${spec.action}`); },
+    };
+    const win = new EventTarget();
+    const press = () => win.dispatchEvent(new CustomEvent('vs-vault-door'));
+    return { M, seen, gets, shells, press, win, answer: (f) => { if (answer) answer(f); } };
+  };
+  const had = { window: globalThis.window, document: globalThis.document };
+  const scene = async (mutate, run) => {
+    const p = await page(mutate);
+    globalThis.window = p.win; globalThis.document = { getElementById: () => null, querySelector: () => null, querySelectorAll: () => [], addEventListener() { }, removeEventListener() { }, createElement: () => anyEl(), body: anyEl() };
+    try { return await run(p); } finally { globalThis.window = had.window; globalThis.document = had.document; }
+  };
+  // (a) THE EARLY PRESS: the App's construction listened (app.js), /api/home has not answered — initVault has not run
+  const early = (p) => (async () => { p.M.listenVaultDoor({}); p.press(); await tick(); const asked = p.gets.length; p.answer({ state: 'unlocked' }); await tick(); return { seen: p.seen.join(), asked }; })();
+  const e1 = await scene(null, early);
+  ok(e1.asked === 1 && e1.seen === 'window:openVault', 'a press BEFORE initVault ran (the construction listened) is heard: it reads the state and opens the Vault window (unlocked)', e1);
+  const only407 = (s0) => s0.replace('  window.addEventListener(VAULT_DOOR_EVENT, pressDoor);\n', '').replace('  listenVaultDoor(app);   // (app.js already did, at the construction — B-6f65; once)\n', '  window.addEventListener(VAULT_DOOR_EVENT, pressDoor);\n');
+  const eRed = await scene(only407, early);
+  ok(eRed.seen === '' && eRed.asked === 0, 'RED control: the door added only where initVault adds it (the .407 shape: initVault listens, the construction does not) ⇒ the same press is LOST — nothing opens', eRed);
+  // (b) THE PRESS BEFORE THE FACTS: initVault's boot read is in flight
+  const before = (state) => (p) => (async () => {
+    p.M.initVault({}); p.press(); p.press(); await tick();
+    const meanwhile = p.seen.join(), asked = p.gets.length;
+    p.answer({ state, startedAt: 7 }); await tick();
+    return { meanwhile, asked, seen: p.seen.join(), gets: p.gets.length };
+  })();
+  const b1 = await scene(null, before('unlocked'));
+  ok(b1.meanwhile === '' && b1.seen === 'window:openVault' && b1.gets === 1, 'two presses while the boot read is in flight: nothing opens over a state not yet known, then ONE Vault window once it answers unlocked — no second read, no unlock dialog', b1);
+  const b2 = await scene(null, before('locked'));
+  ok(b2.meanwhile === '' && /^dialog:vault-unlock-dialog/.test(b2.seen) && !/window:/.test(b2.seen) && b2.gets === 1, 'the same presses over a LOCKED vault ⇒ the unlock dialog (the load\'s ask and the press are one dialog), no window', b2);
+  const b3 = await scene(null, before('not_set_up'));
+  ok(b3.seen === 'dialog:vault-setup-dialog', 'over a vault NOT SET UP ⇒ the setup dialog', b3);
+  const bRed = await scene((s0) => s0.replace('  if (facts) { doorOpens(); return; }\n', '  { doorOpens(); return; }\n'), before('unlocked'));
+  // A HUB THAT ANSWERS NOTHING (a held loop): the press waits DOOR_WAIT_MS at most (3 s; 30 ms in this shape), then the unlock
+  // dialog — and the press is still answered when the facts land (unlocked ⇒ the Vault window)
+  const short = (s0) => s0.replace('const DOOR_WAIT_MS = 3000;', 'const DOOR_WAIT_MS = 30;');
+  const held = (p) => (async () => {
+    p.M.initVault({}); p.press(); await new Promise((r) => setTimeout(r, 80)); await tick();
+    const bounded = p.seen.join();
+    p.press(); await tick();   // a SECOND press after the bound, the facts still unknown (the reader's should): it joins the same answer
+    p.answer({ state: 'unlocked', startedAt: 7 }); await tick();
+    return { bounded, seen: p.seen.join() };
+  })();
+  const h1 = await scene(short, held);
+  ok(h1.bounded === 'dialog:vault-unlock-dialog' && h1.seen === 'dialog:vault-unlock-dialog,dialog:vault-unlock-dialog,window:openVault', 'a hub that answers nothing: after the bound the UNLOCK dialog (never a silent press); a second press meanwhile gets the dialog again (raised, or back after 「稍后」) and joins the one answer; once the facts say unlocked, ONE Vault window', h1);
+  const hSilent = await scene((s0) => short(s0).replace("  if (doorWait && doorPast) { showUnlock(); return; }   // a press AFTER the bound, the facts still unknown: the dialog again (raised, or back after 「稍后」) — never a silent press; the one answer still comes\n", ''), held);
+  ok(hSilent.seen === 'dialog:vault-unlock-dialog,window:openVault', 'RED control: a press after the bound swallowed by the open wait (the cure\'s first shape) ⇒ the second press shows NOTHING (after 「稍后」 the person would see no dialog for as long as the hub holds)', hSilent);
+  const h2 = await scene((s0) => short(s0).replace('    await read;   // …and the press is answered once it is — a later press while it waits joins THIS answer (one window, never two)\n    doorWait = null;\n', '    doorWait = null;\n    await read;\n'), held);
+  ok((h2.seen.match(/window:openVault/g) || []).length === 2, 'RED control: the wait released at the bound (the first cure shape) ⇒ the second press opens a second dialog and a SECOND Vault window', h2);
+  const hRed = await scene((s0) => short(s0).replace('    await Promise.race([read, bound]);\n', '    await read;\n'), held);
+  ok(hRed.bounded === '', 'RED control: the wait without its bound ⇒ a press on a held hub shows NOTHING for as long as the hub holds', hRed);
+  ok(/^dialog:vault-unlock-dialog/.test(bRed.meanwhile), 'RED control: the press decides at once (the .407 shape) ⇒ the UNLOCK dialog opens over the unlocked vault', bRed);
+  // the wiring: app.js listens in the App's construction, before /api/home is asked (initVault stays in its then)
+  const appSrc = fs.readFileSync(path.join(REPO, 'src/lib/app.js'), 'utf8');
+  const listensFirst = (src) => { const i = src.indexOf('\n    listenVaultDoor(this);'), h = src.indexOf("\n    fetch('/api/home').then(r => {"); return i > 0 && h > i && h - i < 300 && src.indexOf('initVault(this);') > h; };
+  ok(listensFirst(appSrc), 'app.js: listenVaultDoor(this) runs in the construction right before /api/home is asked; initVault(this) stays in its then');
+  ok(!listensFirst(appSrc.replace('\n    listenVaultDoor(this);', '').replace('initVault(this);', 'listenVaultDoor(this); initVault(this);')), 'RED control: the call moved into /api/home\'s then ⇒ the wiring check is red');
+  // B-864f CURE (the reader round's must): «Unlock and resume all n» waited on the unlock dialog's close alone — but the facts
+  // saying UNLOCKED remove that dialog (applyVaultFacts) and a removed form runs none of its closers, so the resumes never ran.
+  // unlockThen runs `go` ONCE on whichever comes first: the vault turning unlocked, or the person's close (Later / Esc / ✕)
+  const thenScene = (first) => (p) => (async () => {
+    p.M.initVault({}); p.answer({ state: 'locked', startedAt: 7 }); await tick();   // the boot read: LOCKED (the load's own ask opens)
+    let went = 0;
+    p.M.unlockThen(() => { went++; });
+    const sh = p.shells.filter((o) => o.id === 'vault-unlock-dialog').pop();
+    const unlock = async () => { const rp = p.M.refreshVaultFacts(); p.answer({ state: 'unlocked', startedAt: 7 }); await rp; await new Promise((r) => setTimeout(r, 5)); await tick(); };   // (go runs on a zero timer — outside the facts loop, cure 2)
+    const close = async () => { if (sh && sh.onClose) sh.onClose(); await new Promise((r) => setTimeout(r, 10)); await tick(); };
+    if (first === 'unlock') { await unlock(); const atUnlock = went; await close(); return { atUnlock, went }; }
+    await close(); const atClose = went; await unlock(); return { atClose, went };
+  })();
+  const u1 = await scene(null, thenScene('unlock'));
+  ok(u1.atUnlock === 1 && u1.went === 1, 'unlockThen: the vault turns UNLOCKED while the dialog is open (it is removed, no closer runs) ⇒ go runs ONCE, and a later close runs nothing more', u1);
+  const u2 = await scene(null, thenScene('close'));
+  ok(u2.atClose === 1 && u2.went === 1, 'unlockThen: the person closes the dialog (Later) first ⇒ go runs ONCE (the resumes start; each folder that waits says so), a later unlock runs nothing more', u2);
+  const uRed = await scene((s0) => s0.replace("  off = onVaultFacts((f) => {\n    if (!f) return;\n    if (f.state === 'not_set_up') { if (ran) return; endUnrun(); if (typeof ended === 'function') setTimeout(ended, 0); return; }   // cure 4 (主开发): a RESET is no unlock — the wait ends unrun, nothing it waited for runs; a caller that asked to hear it (`ended` — the boot offer) gives its door back\n    if (f.state !== 'unlocked') return;\n    if (!here || unlockedHere) { once(); return; }\n    if (!unlockAsked) endUnrun(); else raceWaits.add(endUnrun);\n  });\n", "  off = () => { };\n"), thenScene('unlock'));
+  // the ⚙ press (unlockFirst — the same root, the cure's own read): THIS page's unlock in its dialog (which removes it) opens the
+  // menu after it, once; ANOTHER tab's or device's unlock does not (cure 2, 主开发: a menu popping open minutes later is not what
+  // the press asked for). The leg's own bundle exposes the page's own unlock road (applyUnlockHere, the dialog's submit) by a
+  // source line it appends — the product exports nothing for it
+  const exposeHere = (s0) => s0 + '\nexport const __applyUnlockHere = applyUnlockHere;\nexport const __asking = (n) => { unlockAsked += n; };\nexport const __ownMissed = () => ownUnlockMissed();\n';
+  const gearScene = (by) => (p) => (async () => {
+    p.M.initVault({}); p.answer({ state: 'locked', startedAt: 7 }); await tick();
+    let opened = 0; p.M.unlockFirst(() => { opened++; });
+    const facts = async (state) => { const rp = p.M.refreshVaultFacts(); p.answer({ state, startedAt: 7 }); await rp; };   // the hub's facts (a broadcast / a read)
+    if (by === 'here') p.M.__applyUnlockHere({ state: 'unlocked', startedAt: 7 });
+    else if (by === 'missed') { p.M.__asking(1); await facts('unlocked'); await tick(); p.M.__asking(-1); p.M.__ownMissed(); await new Promise((r) => setTimeout(r, 5)); await facts('locked'); p.M.__applyUnlockHere({ state: 'unlocked', startedAt: 7 }); }   // the restack read: another device's unlock lands while THIS page's own is in flight, and this page's own comes back NOT ok; hours later an unlock here for another reason
+    else if (by === 'reset') { await facts('not_set_up'); await new Promise((r) => setTimeout(r, 5)); await facts('locked'); p.M.__applyUnlockHere({ state: 'unlocked', startedAt: 7 }); }   // the restack read: the vault is RESET while the dialog is open; later it is set up again and unlocked here
+    else if (by === 'raced') { p.M.__asking(1); await facts('unlocked'); await tick(); p.M.__asking(-1); p.M.__applyUnlockHere({ state: 'unlocked', startedAt: 7 }); }   // this page's unlock: the hub's broadcast lands BEFORE its answer
+    else { await facts('unlocked'); await new Promise((r) => setTimeout(r, 5)); await facts('locked'); p.M.__applyUnlockHere({ state: 'unlocked', startedAt: 7 }); }   // another device unlocks; later the vault locks and THIS page unlocks for another reason
+    await new Promise((r) => setTimeout(r, 5)); await tick();
+    return { opened };
+  })();
+  const g1 = await scene(exposeHere, gearScene('here'));
+  ok(g1.opened === 1, 'the ⚙ press while locked: THIS page\'s unlock in its dialog (which removes it) opens the menu after it, once — on a zero timer', g1);
+  const g2 = await scene(exposeHere, gearScene('elsewhere'));
+  ok(g2.opened === 0, 'the ⚙ press while locked: ANOTHER device\'s unlock ENDS the wait unrun — no menu then, and none when this page unlocks later for another reason (cure 2b)', g2);
+  const g3 = await scene(exposeHere, gearScene('raced'));
+  ok(g3.opened === 1, 'the ⚙ press: THIS page\'s unlock whose broadcast lands before its own answer still opens the menu, once', g3);
+  const gRed3 = await scene((s0) => exposeHere(s0.replace('    if (!unlockAsked) endUnrun(); else raceWaits.add(endUnrun);\n', '')), gearScene('elsewhere'));
+  ok(gRed3.opened === 1, 'RED control: a wait another device\'s unlock leaves ARMED (cure 2\'s shape) ⇒ a later unlock here pops the menu hours after the press', gRed3);
+  const gRed4 = await scene((s0) => exposeHere(s0.replace('    if (!unlockAsked) endUnrun(); else raceWaits.add(endUnrun);\n', '    endUnrun();\n')), gearScene('raced'));
+  ok(gRed4.opened === 0, 'RED control: the wait dropped on ANY other unlock, this page\'s own in flight included ⇒ the broadcast that lands first kills the press', gRed4);
+  // the restack's readers (cure 3): this page's own unlock that FAILS after another page's unlock raced it ends the ⚙ wait unrun;
+  // a RESET while the dialog is open ends it unrun too (a resume-all's wait goes on: its door comes back)
+  const g5 = await scene(exposeHere, gearScene('missed'));
+  ok(g5.opened === 0, 'the ⚙ press: another device\'s unlock lands while THIS page\'s own is in flight and this page\'s own comes back NOT ok ⇒ the wait ENDS unrun — no menu at a later unlock here (cure 3)', g5);
+  const gRed5 = await scene((s0) => exposeHere(s0.replace('function ownUnlockMissed() { for (const end of [...raceWaits]) end(); raceWaits.clear(); }', 'function ownUnlockMissed() { }')), gearScene('missed'));
+  ok(gRed5.opened === 1, 'RED control: a missed own unlock that ends nothing (cure 2\'s shape) ⇒ the wait stays armed with no dialog and pops the menu at a later unlock here', gRed5);
+  const g6 = await scene(exposeHere, gearScene('reset'));
+  ok(g6.opened === 0, 'the ⚙ press: the vault RESET while the unlock dialog is open ⇒ the wait ends unrun — no menu when it is unlocked here later (cure 3)', g6);
+  const gRed6 = await scene((s0) => exposeHere(s0.replace("    if (f.state === 'not_set_up') { if (ran) return; endUnrun(); if (typeof ended === 'function') setTimeout(ended, 0); return; }", '')), gearScene('reset'));
+  ok(gRed6.opened === 1, 'RED control: a reset that ends nothing (cure 2\'s shape) ⇒ the wait stays armed and pops the menu at the later unlock here', gRed6);
+  const resetGo = (p) => (async () => { p.M.initVault({}); p.answer({ state: 'locked', startedAt: 7 }); await tick(); let ran = 0, ends = 0; p.M.unlockThen(() => { ran++; }, { ended: () => { ends++; } }); const rp = p.M.refreshVaultFacts(); p.answer({ state: 'not_set_up' }); await rp; await new Promise((r) => setTimeout(r, 5)); await tick(); return { ran, ends }; })();
+  const g7 = await scene(null, resetGo);
+  ok(g7.ran === 0 && g7.ends === 1, 'a plain wait (the boot offer\'s «Unlock and resume all») at a RESET: what it waited for never runs (no unlock happened), its `ended` runs once — the offer gives its door back, nothing resumed (cure 4, 主开发)', g7);
+  const g7Red = await scene((s0) => s0.replace("    if (f.state === 'not_set_up') { if (ran) return; endUnrun(); if (typeof ended === 'function') setTimeout(ended, 0); return; }", "    if (f.state === 'not_set_up') { if (here) endUnrun(); else once(); return; }"), resetGo);   // stale-pins: kept — a RED control: cure 3's reset line restored on purpose
+  ok(g7Red.ran === 1, 'RED control: cure 3\'s shape (a reset RUNS a plain wait) ⇒ the resumes start for an unlock that never happened', g7Red);
+  const g7Red2 = await scene((s0) => s0.replace(" if (typeof ended === 'function') setTimeout(ended, 0); return; }", ' return; }'), resetGo);
+  ok(g7Red2.ran === 0 && g7Red2.ends === 0, 'RED control: a reset that tells nobody ⇒ the offer\'s promise hangs and its door never comes back (the restack reader\'s nit 2)', g7Red2);
+  // the dialog's submit is THIS page's road (source pin — the leg's shell stub draws no form): its unlock is counted in flight and applied as here
+  const VUs = fs.readFileSync(path.join(REPO, 'src/lib/vault-unlock.js'), 'utf8');
+  const submitHere = (x) => /unlockAsked\+\+;[^\n]*\n\s*let r; try \{ r = await post\('\/api\/vault\/unlock', \{ password: pw\.value \}\); \} finally \{ unlockAsked--; \}/.test(x) && /if \(r && r\.ok\) \{ pw\.value = ''; applyUnlockHere\(r\); close\(\);/.test(x) && /applyUnlockHere\(r\); close\(\); showToast\(t\('Vault unlocked'\)\); return; \}\n    if \(!unlockAsked\) ownUnlockMissed\(\);/.test(x);   // cure 3 (its own read): the failure branch ends a raced `here` wait — pinned, the legs call the exposed road
+  ok(submitHere(VUs), 'the unlock dialog\'s submit counts its own unlock in flight and applies its answer as THIS page\'s');
+  ok(!submitHere(VUs.replace("applyUnlockHere(r); close();", "applyVaultFacts(r); close();")), 'RED control: a submit that applies its answer plainly ⇒ the pin is red (a real unlock in the dialog would never open the ⚙ menu)');
+  ok(!submitHere(VUs.replace('    if (!unlockAsked) ownUnlockMissed();', '   ')), 'RED control: a submit whose failure branch ends nothing (cure 2\'s shape) ⇒ the pin is red (a raced `here` wait would stay armed)');
+  const gRed = await scene((s0) => exposeHere(s0.replace('  if (vaultLoudState({ facts }).mark) { unlockThen(open, { here: true }); return; }', '  if (vaultLoudState({ facts }).mark) { showUnlock({ then: open }); return; }')), gearScene('here'));   // stale-pins: kept — a RED control: the pre-cure ⚙ press restored on purpose
+  ok(gRed.opened === 0, 'RED control: the ⚙ press on `then` alone (the release\'s shape) ⇒ the menu never opens after an unlock in its dialog', gRed);
+  const gRed2 = await scene((s0) => exposeHere(s0.replace('unlockThen(open, { here: true })', 'unlockThen(open)')), gearScene('elsewhere'));   // stale-pins: kept — a RED control: cure 1's ⚙ press (any unlock) restored on purpose
+  ok(gRed2.opened === 1, 'RED control: the ⚙ press waiting on ANY unlock (cure 1\'s shape) ⇒ another device\'s unlock pops the menu open here', gRed2);
+  ok(uRed.atUnlock === 0, 'RED control: the close alone (the batch\'s first shape — showUnlock({ then })) ⇒ an unlock in the dialog never starts the resumes', uRed);
+  delete globalThis.__vd;
+}
+
+console.log('⑫ A FOLDER THAT WAITS IS NOT GONE (B-864f) — a session folder on a mount that waits for the vault is PENDING, never «gone»');
+{
+  // the REAL engine (cheap KDF) + the REAL MountManager (rows whose mount points are bare folders: one whose secret is sealed
+  // under the vault, one with none) + a machine's pull
+  const CW = R('src/server/cwd-wait.js');
+  const { MountManager } = R('src/mounts.js');
+  const d = dirOf('cwdwait'), sealedAt = path.join(d, 'mnt', 'Team_drive'), openAt = path.join(d, 'mnt', 'Open_share'), pull = path.join(d, 'mnt', 'mac');
+  for (const x of [sealedAt, openAt, pull]) fs.mkdirSync(x, { recursive: true });
+  fs.mkdirSync(path.join(d, 'data'), { recursive: true });
+  const v = mkVault(path.join(d, 'data'));
+  const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+  const mounts = new MountManager({ dataDir: path.join(d, 'data'), broadcast: () => { }, getSetting: () => undefined });
+  mounts._state.mounts.push(
+    { id: 'm-team', name: 'Team drive', type: 's3', endpoint: 'https://s3.example.test', bucket: 'team', accessKey: 'AKEXAMPLE', secretKeyEnc: SB.encWith(crypto.randomBytes(32), 'x'), desired: 'mounted', customPath: sealedAt },
+    { id: 'm-open', name: 'Open share', type: 's3', endpoint: 'https://s3.example.test', bucket: 'open', desired: 'mounted', customPath: openAt });
+  let pulls = [{ id: 'p-mac', dir: 'pull', hostId: 'h-mac', mountpoint: pull, live: false }];
+  const sshPull = path.join(d, 'mnt', 'buildbox'); fs.mkdirSync(sshPull, { recursive: true });
+  const HOSTS = { 'h-mac': { name: 'Studio Mac', transport: 'dial' }, 'h-ssh': { name: 'Build box', transport: 'ssh' } };
+  CW.register({ vault: v, mounts, getHosts: () => ({ get: (id) => HOSTS[id] || null }), getMachineMounts: () => ({ list: () => [...pulls, { id: 'p-ssh', dir: 'pull', hostId: 'h-ssh', mountpoint: sshPull, live: false }] }) });
+  const at = (root, ...p) => path.join(root, ...p);
+  const why = (cwd, o) => (CW.verdict(cwd, o) || { why: null }).why;
+  ok(why(at(sealedAt, 'proj'), { missing: false }) === null && why(at(sealedAt, 'proj')) === 'mount_down' && why(at(d, 'elsewhere')) === null && why(sealedAt + '-other/x') === null, 'a vault NOT SET UP: an existing folder waits for nothing; a MISSING one under a recorded mount that is down is mount_down (never «gone»); no mount on the path (or a prefix only) ⇒ null');
+  await v.setup(PW, {}); v.lock('door');
+  const row = mounts.list().find((r) => r.id === 'm-team');
+  ok(row && row.keyFile && row.keyFile.code === KF.VAULT_LOCKED, 'the REAL list row of a mount whose secret is sealed says its key waits for the vault', row && row.keyFile);
+  const ws = CW.verdict(at(sealedAt, 'proj'), { missing: false });
+  ok(ws && ws.why === 'vault_locked' && ws.root === sealedAt && ws.name === 'Team drive' && why(at(sealedAt, 'proj')) === 'vault_locked', 'LOCKED: a folder under a storage mount whose secret is sealed ⇒ vault_locked — the EXISTING bare mount point too (it passes test -d), its mount named', ws);
+  const wp = CW.verdict(at(pull, 'src', 'app'), { missing: false });
+  ok(wp && wp.why === 'vault_locked' && wp.root === pull && wp.name === 'Studio Mac', '…and under a DIAL machine\'s pulled folder that is not live (its link token is a vault entry) ⇒ vault_locked, the machine named', wp);
+  ok(why(at(sshPull, 'src'), { missing: false }) === 'vault_locked' && why(at(sshPull, 'src')) === 'vault_locked', 'LOCKED, an SSH machine\'s pulled folder too: its link token is a vault entry (host-tokens host-<id>) ⇒ vault_locked — the EXISTING bare mount point included (never the shadow)');
+  {
+    const { mutantCopies } = await import('./mutant-copy.mjs');
+    globalThis.__cwHosts = HOSTS;   // read by the mutant copy at its load
+    const CSRC = fs.readFileSync(path.join(REPO, 'src/server/cwd-wait.js'), 'utf8'), from = 'busy: false, failed: false, sealed: true };';
+    const CWm = CSRC.split(from).length === 2 ? mutantCopies('vs-cwdwait', REPO).load('src/server/cwd-wait.js', CSRC.replace(from, "busy: false, failed: false, sealed: !!(HOSTS[r.hostId] && HOSTS[r.hostId].transport === 'dial') };").replace("'use strict';", "'use strict'; const HOSTS = globalThis.__cwHosts || {};"), 'dialonly') : null;
+    let mw = null;
+    if (CWm) { CWm.register({ vault: v, mounts, getHosts: () => ({ get: (id) => HOSTS[id] || null }), getMachineMounts: () => ({ list: () => [{ id: 'p-ssh', dir: 'pull', hostId: 'h-ssh', mountpoint: sshPull, live: false }] }) }); mw = (CWm.verdict(at(sshPull, 'src'), { missing: false }) || { why: null }).why; }
+    delete globalThis.__cwHosts;
+    ok(!!(CWm && mw === null), 'RED control: a pull sealed only on a dial machine (the cure\'s first, refuted shape) ⇒ an ssh machine\'s bare mount point while locked reads null — the agent would start in the empty folder', mw);
+  }
+  { const wf = mounts.waitFacts(mounts._state.mounts[0]), lr = mounts.list().find((x) => x.id === 'm-team') || {};
+    ok(wf.keyCode === KF.VAULT_LOCKED && wf.keyCode === (lr.keyFile && lr.keyFile.code) && wf.connecting === !!lr.connecting && wf.starting === !!lr.starting && (wf.error || null) === (lr.error || null), 'the by-id wait facts (MountManager.waitFacts — one row, never list() every 500 ms) agree with the REAL list row', { wf, lr: { keyFile: lr.keyFile, connecting: lr.connecting, starting: lr.starting, error: lr.error } }); }
+  ok(why(at(openAt, 'x'), { missing: false }) === null && why(at(openAt, 'x')) === 'mount_down', 'LOCKED, a mount that needs NO secret: it waits for nothing of the vault — an existing folder ⇒ null, a missing one ⇒ mount_down');
+  mounts._state.mounts[0].desired = 'unmounted';
+  ok(why(at(sealedAt, 'proj')) === null, 'a storage row the person UNMOUNTED waits for nothing (the folder\'s own verdict)');
+  mounts._state.mounts[0].desired = 'mounted';
+  await v.unlock(PW, {});
+  const t0 = v.facts().unlockedSince;
+  ok(why(at(sealedAt, 'proj'), { now: t0 + 5e3 }) === 'mount_starting' && why(at(pull, 'x'), { missing: false, now: t0 + 5e3 }) === 'mount_starting', 'UNLOCKED a moment ago ⇒ mount_starting (the unlock\'s restore brings each mount up in turn)');
+  mounts._errors.set('m-team', 'the mount failed: AccessDenied');
+  ok(why(at(sealedAt, 'proj'), { now: t0 + 5e3 }) === 'mount_down', 'a mount whose restore already FAILED is not «starting» inside the heal window ⇒ mount_down at once');
+  mounts._errors.delete('m-team');
+  ok(why(at(sealedAt, 'proj'), { now: t0 + CW.HEAL_MS + 1 }) === 'mount_down' && why(at(sealedAt, 'proj'), { missing: false, now: t0 + CW.HEAL_MS + 1 }) === null, 'the heal window over, still down ⇒ a missing folder mount_down, an existing one its own verdict');
+  mounts._connecting = new Set(['m-team']);
+  ok(why(at(sealedAt, 'proj'), { now: t0 + CW.HEAL_MS + 1 }) === 'mount_starting', 'its connect in flight ⇒ mount_starting whenever it is');
+  mounts._connecting = new Set();
+  // the bounded wait: a stand-in clock; the pull comes back live at the 3rd step ⇒ true; never back ⇒ false at the bound
+  let clock = t0 + 1e3, steps = 0;
+  const now = () => clock, sleep = async (ms) => { clock += ms; if (++steps === 3) pulls = [{ ...pulls[0], live: true }]; };
+  ok(await CW.whenBack(at(pull, 'x'), { now, sleep }) === true && steps === 3, 'whenBack: waits while the mount comes up, true the moment it is live', { steps });
+  clock = t0 + 1e3; steps = -1e9;
+  ok(await CW.whenBack(at(sealedAt, 'proj'), { ms: 4e3, now, sleep }) === false && clock - (t0 + 1e3) >= 4e3 && clock - (t0 + 1e3) < 5e3, 'whenBack: never back ⇒ false at its bound (4 s here; 45 s in the product)', { waited: clock - (t0 + 1e3) });
+  v.lock('door');
+  clock = t0 + 1e3;
+  ok(await CW.whenBack(at(sealedAt, 'proj'), { now, sleep }) === false && why(at(sealedAt, 'proj')) === 'vault_locked', 'whenBack: the vault locked again ⇒ false at once, and the verdict is vault_locked again');
+  ok(/^the vault is locked — the folder X is on Team drive, which opens after the owner unlocks the vault with the second password/.test(CW.lockedWords('X', ws)) && /^the folder X is on Team drive, which is not mounted right now — nothing was started and nothing was made there/.test(CW.downWords('X', ws)), 'the refusals\' words (the hub\'s log, an older page) name the folder and its mount');
+  CW.register({ vault: null, mounts: null, getHosts: null, getMachineMounts: null });
+  // THE WIRING: ws-create asks for EVERY local cwd, BEFORE the recreate; after the bounded wait a mount still down is mount_down
+  const wc = read('src/ws-create.js');
+  const asksFirst = (src) => {
+    const probe = src.indexOf('missing = await dirMissing();'), ask = src.indexOf('let w = CW.verdict(cwd, { missing });'), rec = src.indexOf('if (missing && data.recreateCwd === true) {');
+    const blk = src.slice(ask, rec);
+    return probe > 0 && ask > probe && rec > ask && /\n            if \(!data\.hostId\) \{\n              const CW = /.test(src.slice(probe, ask + 40))
+      && /if \(await CW\.whenBack\(cwd\)\) missing = await dirMissing\(\);\n\s*w = CW\.verdict\(cwd, \{ missing \}\);\n\s*if \(w && w\.why === 'mount_starting'\) w = \{ \.\.\.w, why: 'mount_down' \};/.test(blk)
+      && /code: w\.why, cwd, waitsFor: w\.name/.test(blk) && /break;/.test(blk);
+  };
+  ok(asksFirst(wc), 'ws-create: EVERY local cwd is asked (a bare mount point passes test -d), BEFORE the recreate; after the bounded wait a mount still down is refused mount_down; the refusal names the folder and its mount');
+  const blk = wc.slice(wc.indexOf('            // A FOLDER THAT WAITS IS NOT GONE'), wc.indexOf('            // Recreate-empty-and-resume (B-7812'));
+  const moved = wc.replace(blk, '').replace("            if (missing) {\n              global.__vsEvent?.('spawn-cwd-missing'", blk + "            if (missing) {\n              global.__vsEvent?.('spawn-cwd-missing'");
+  ok(blk.length > 200 && moved !== wc && !asksFirst(moved), 'RED control: the ask moved AFTER the recreate (the recreate could make the folder under the waiting mount) ⇒ red');
+  const onlyMissing = wc.replace('            if (!data.hostId) {\n              const CW = ', '            if (missing && !data.hostId) {\n              const CW = ');
+  ok(onlyMissing !== wc && !asksFirst(onlyMissing), 'RED control: asked only for a MISSING cwd (a bare mount point resumes in an empty folder) ⇒ red');
+  const noDowngrade = wc.replace("                if (w && w.why === 'mount_starting') w = { ...w, why: 'mount_down' };   // it waited its bound: still not up\n", '');
+  ok(noDowngrade !== wc && !asksFirst(noDowngrade), 'RED control: the bound passed with the mount still starting falls through to «Working directory is gone» and its recreate ⇒ red');
+  ok(/require\('\.\/cwd-wait\.js'\)\.register\(\{ vault, mounts \}\)/.test(read('src/server/mounts-plugins-wiring.js')) && /require\('\.\/cwd-wait\.js'\)\.register\(\{ getHosts, getMachineMounts \}\)/.test(read('src/server/dial-pairing.js')), 'the vault + storage mounts register in mounts-plugins-wiring, the hosts + machine mounts in dial-pairing');
 }
 
 for (const e of engines) { try { e.close(); } catch { } }

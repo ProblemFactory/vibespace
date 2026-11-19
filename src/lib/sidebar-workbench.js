@@ -595,9 +595,10 @@ export function installSidebarWorkbench(Sidebar) {
         // s.host is MANDATORY for a remote pid — the host-less local route
         // 400s silently (the exact bug fixed on the card's own Terminate in
         // 2.191.0); killPid surfaces its own failure toast either way.
-        if (s.webuiId) this.app.killSession(s.webuiId);
+        if (s.webuiId) this.app.killSession(s.webuiId, undefined, { endTree: true });   // B-c134: a person's terminate-and-archive ends the background tree
         else if (s.pid) this.app.killPid(s.pid, s.host);
       }
+      const ended = termList.map((s) => s.sessionId || s.backendSessionId);   // B-70f9 ②: ONE notice for the jobs they still run — terminated and archived together
       // archive as a batch — toggle the set directly, single state push + render
       for (const s of archList) {
         const sk = this._getSessionStateKey(s);
@@ -611,8 +612,10 @@ export function installSidebarWorkbench(Sidebar) {
           this._dissolveFolderArchive(s, sk); // archived only via folder rule → unarchive
         } else {
           this._archivedIds.add(sk);
+          ended.push(s.sessionId || s.backendSessionId);
         }
       }
+      this.app.noticeOwnedJobs?.(ended);
       if (archList.length) { this._pushUserState(); this.app.updateTaskbar(); }
       this._manageMarks = new Map();
       showToast(skipped

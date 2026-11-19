@@ -6,7 +6,7 @@
 // `/`, a HOME outside and the device daemon root inside). A second stand-in hub in ANOTHER minted root is the look-alike: same
 // name, same argv shape. An OUTSIDER — a process the helper never started, its cwd in the root and its own HOME outside (a person's
 // shell that cd'd in to watch the log) — must survive every stop and every exit. Every stand-in process ends itself when its root
-// (or its marker) goes, or after two minutes: no endless timer is left in a detached process.
+// (or its marker) goes — never on a wall clock shorter than the suite's own deadlines.
 //   ① the root — minted fresh; a caller's root refused; the refusals BY NAME judged with EXPLICIT lists of homes, mounts, the
 //     checkout and the temp folders, so each leg reads the same in a lanes clone, in production (a checkout under a home on a
 //     network mount) and on the runner; a checkout directly under the temp folder mints (the gate's own isolated worktree);
@@ -15,14 +15,16 @@
 //     handed out); the outsider (cwd only) is near, never selected · ④ hubOnly + a second start · ⑤ stop: everything of both
 //     starts ended, the outsider and the look-alike untouched, the outsider SAID on stderr
 //   ⑥ RESOLVED paths and the order (a fake /proc over real links) · ⑦ the identity re-read, the re-list, «not ours to signal»,
-//     «no start time recorded» (fake /proc) · ⑧ the exit: no process, no root, no worktree record; the outsider survives and is
-//     named · ⑨ a signal: a child suite ended by SIGTERM leaves nothing · ⑩ nothing is stopped at a start · ⑪ a root with a
-//     mount inside it is never removed
+//     «no start time recorded», a process in an uninterruptible wait never read, another user's never read (fake /proc) · ⑧ the
+//     exit: no process, no root, no worktree record; the outsider survives and is named · ⑨ a signal: a child suite ended by
+//     SIGTERM, SIGINT or SIGHUP leaves nothing and DIES BY THAT SIGNAL (its parent reads it) · ⑩ nothing is stopped at a start ·
+//     ⑪ a mount inside the root (or an unreadable mount table) stops both removals — the worktree's and the root's
 //   ⑫ RED CONTROLS — each a copy of hub-boot.mjs with ONE named edit (scripts/mutant-copy.mjs), in the form named on its line:
 //     over a SNAPSHOT of this run's own processes (a fake /proc holding only them) with a recording kill — a cwd selects, a
-//     pattern stop, a parent-id stop; over a FAKE /proc — no start-time re-read, a lexical-only path, a realpath-only path; no
-//     /proc at all — no minted check, «inside» the checkout's parent; a REAL child suite in its own fresh root — no worktree
-//     removal, no signal armed; the suite's OWN process in a fresh root — a clean at start.
+//     pattern stop, a parent-id stop; over a FAKE /proc — the argv selects, no start-time re-read, a lexical-only path, a
+//     realpath-only path, a stuck process read; no /proc at all — no minted check, «inside» the checkout's parent; a REAL child
+//     suite in its own fresh root — no worktree removal, no signal armed, a signal ended by an exit code; the suite's OWN process
+//     in a fresh root — a clean at start.
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -53,18 +55,18 @@ const saidDuring = (fn) => {
 
 const OUT = scratchDir('hb-out');   // a dir OUTSIDE every minted root
 // a stand-in process's body: its pid to a file, then alive until `watch` is gone (or two minutes) — never an endless timer
-const KEEP = (pidFile, watch) => `require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => { if (!require('fs').existsSync(${JSON.stringify(watch)})) process.exit(0); }, 200); setTimeout(() => process.exit(0), 120000);`;
+const KEEP = (pidFile, watch) => `require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => { if (!require('fs').existsSync(${JSON.stringify(watch)})) process.exit(0); }, 200);`;
 const STANDIN = `'use strict';
 const http = require('http'), fs = require('fs'), { spawn } = require('child_process'), path = require('path');
 const R = process.env.HB_ROOT, OUT = process.env.HB_OUT, TAG = process.env.HB_TAG, PATH = process.env.PATH;
-const keep = (f) => "require('fs').writeFileSync(" + JSON.stringify(f) + ", String(process.pid)); setInterval(() => { if (!require('fs').existsSync(" + JSON.stringify(R) + ")) process.exit(0); }, 200); setTimeout(() => process.exit(0), 120000);";
+const keep = (f) => "require('fs').writeFileSync(" + JSON.stringify(f) + ", String(process.pid)); setInterval(() => { if (!require('fs').existsSync(" + JSON.stringify(R) + ")) process.exit(0); }, 200);";
 // g1: a DETACHED GRANDCHILD — started through a parent that exits, so the hub is not its parent; its cwd in the root, the HOME inherited
 const mid = spawn(process.execPath, ['-e', "require('child_process').spawn(process.execPath, ['-e', " + JSON.stringify(keep(path.join(R, TAG + '-g1.pid'))) + "], { cwd: " + JSON.stringify(path.join(R, 'proj')) + ", detached: true, stdio: 'ignore' }).unref()"], { stdio: 'ignore' });
 // g2: cwd OUTSIDE the root, the HOME it was given inside (inherited from the hub)
 spawn(process.execPath, ['-e', keep(path.join(R, TAG + '-g2.pid'))], { cwd: OUT, detached: true, stdio: 'ignore', env: { HOME: process.env.HOME, PATH } }).unref();
 // g3: cwd '/', a HOME outside, the device daemon root inside
 spawn(process.execPath, ['-e', keep(path.join(R, TAG + '-g3.pid'))], { cwd: '/', detached: true, stdio: 'ignore', env: { HOME: OUT, VIBESPACE_DEVICE_ROOT: path.join(R, 'dev'), PATH } }).unref();
-setInterval(() => { if (!fs.existsSync(R)) process.exit(0); }, 200); setTimeout(() => process.exit(0), 120000);
+setInterval(() => { if (!fs.existsSync(R)) process.exit(0); }, 200);
 mid.on('exit', () => http.createServer((q, s) => s.end('{}')).listen(Number(process.env.PORT), '127.0.0.1', () => {
   console.log('stand-in hub ' + process.pid + ' listening on ' + process.env.PORT);
   console.error('stand-in hub ' + process.pid + ' says this on stderr');
@@ -105,20 +107,21 @@ ok(throwsWith(startAt(foreign), /did not mint it/), `a /tmp root the helper did 
 ok(throwsWith(() => HB.startHub({ tree: path.join(A, 't'), port: 1, env: envFor(A, 'x') }), /a minted root is required/), 'no root at all is refused');
 // THE TABLE, with EXPLICIT lists (never the box's own: a lanes clone, production and the runner lay the checkout out differently)
 const L = { homes: ['/hh/u'], mounts: ['/mm/share'], checkout: '/vt/lanes/wt', temps: ['/tt'] };
-const TABLE = [['/', 'the filesystem root'], ['/hh/u', 'a home'], ['/hh', 'a folder holding a home'], ['/hh/u/x', 'inside a home'],
-  ['/mm/share', 'a network mount (the workspace mount)'], ['/mm', 'a folder holding a network mount (the workspace mount)'], ['/mm/share/x', 'inside a network mount (the workspace mount)'],
-  ['/vt/lanes/wt', 'this checkout'], ['/vt/lanes/wt/x', 'inside this checkout'], ['/vt/lanes', 'the folder holding this checkout (the lanes folder)'], ['/vt', 'a folder holding this checkout'],
-  ['/vt/lanes/other', null], ['/tt', 'the temp folder itself'], ['/tt/vs-x-h1', null]];
+const TABLE = [['/', 'the filesystem root'], ['/hh/u', 'a home at /hh/u'], ['/hh', 'a folder holding a home at /hh/u'], ['/hh/u/x', 'inside a home at /hh/u'],
+  ['/mm/share', 'a network mount (the workspace mount) at /mm/share'], ['/mm', 'a folder holding a network mount (the workspace mount) at /mm/share'], ['/mm/share/x', 'inside a network mount (the workspace mount) at /mm/share'],
+  ['/vt/lanes/wt', 'this checkout at /vt/lanes/wt'], ['/vt/lanes/wt/x', 'inside this checkout at /vt/lanes/wt'], ['/vt/lanes', 'the folder holding this checkout (the lanes folder) at /vt/lanes'], ['/vt', 'a folder holding this checkout at /vt/lanes/wt'],
+  ['/vt/lanes/other', null], ['/tt', 'the temp folder itself at /tt'], ['/tt/vs-x-h1', null]];
 const tableBad = TABLE.filter(([r, want]) => HB.refusalOf(r, L) !== want).map(([r, want]) => `${r}: ${HB.refusalOf(r, L)} ≠ ${want}`);
-ok(!tableBad.length, `the refusals by name, ${TABLE.length} roots over explicit lists: IS / HOLDS / INSIDE a home, a network mount, this checkout; never «inside» the checkout's parent (/vt/lanes/other) or the temp folder (/tt/vs-x-h1)`, tableBad);
+ok(!tableBad.length, `the refusals by name — each naming the entry it matched — ${TABLE.length} roots over explicit lists: IS / HOLDS / INSIDE a home, a network mount, this checkout; never «inside» the checkout's parent (/vt/lanes/other) or the temp folder (/tt/vs-x-h1)`, tableBad);
+ok(HB.refusalOf('/tt/vs-x-h1', { ...L, homes: ['/', '/tt'] }) === null && HB.refusalOf('/tt/vs-x-h1', { ...L, homes: ['/', '/tt', '/hh/u'] }) === null, 'the filesystem root and a temp root are never counted as a home (a HOME=/ or HOME=/tmp does not refuse every mint)');
 const UNDER_TEMP = { homes: [], mounts: [], checkout: '/tt/vs-ci-full-abc123-4242', temps: ['/tt'] };   // the gate's isolated worktree (ci.mjs addScratchWorktree)
 const PROD = { homes: ['/hh/u'], mounts: ['/hh/u/workspace'], checkout: '/hh/u/workspace/AIWorkspace/vibespace', temps: ['/tt'] };   // a checkout under a home on a network mount
 ok(HB.refusalOf('/tt/vs-hb-a-h1', UNDER_TEMP) === null && HB.refusalOf('/tt/vs-hb-a-h2', PROD) === null, 'MUST 3: a checkout directly under the temp folder mints; a checkout under a home on a network mount mints');
-ok(HB.refusalOf('/hh/u/workspace/AIWorkspace/vibespace/x', PROD) === 'inside a home' && HB.refusalOf('/vt/lanes/wt/x', L) === 'inside this checkout',
+ok(HB.refusalOf('/hh/u/workspace/AIWorkspace/vibespace/x', PROD) === 'inside a home at /hh/u' && HB.refusalOf('/vt/lanes/wt/x', L) === 'inside this checkout at /vt/lanes/wt',
   'MUST 2 (why every leg passes its lists): the same «inside the checkout» question answers «inside a home» under the production layout — a leg that leaned on the box\'s own lists would be red there');
 fs.mkdirSync(path.join(OUT, 'fakehome')); fs.symlinkSync(path.join(OUT, 'fakehome'), path.join(OUT, 'homelink'));
 fs.mkdirSync(path.join(OUT, 'tmpx')); fs.symlinkSync(path.join(OUT, 'tmpx'), path.join(OUT, 'templink'));
-ok(HB.refusalOf(path.join(OUT, 'homelink'), { ...L, homes: [path.join(OUT, 'fakehome')] }) === 'a home' && HB.refusalOf(path.join(OUT, 'templink'), { ...L, temps: [path.join(OUT, 'tmpx')] }) === 'the temp folder itself',
+ok(HB.refusalOf(path.join(OUT, 'homelink'), { ...L, homes: [path.join(OUT, 'fakehome')] }) === `a home at ${path.join(OUT, 'fakehome')}` && HB.refusalOf(path.join(OUT, 'templink'), { ...L, temps: [path.join(OUT, 'tmpx')] }) === `the temp folder itself at ${path.join(OUT, 'tmpx')}`,
   'a root that resolves through a link to a home or to the temp folder is refused as that');
 const mi = path.join(OUT, 'mountinfo');
 fs.writeFileSync(mi, ['22 1 0:21 / /proc rw - proc proc rw', '90 29 0:50 / /srv/work\\040space rw - fuse.bindfs bindfs rw', '91 29 0:51 / /mnt/share rw - nfs4 srv:/x rw', '92 29 0:52 / /run/x rw - tmpfs tmpfs rw'].join('\n'));
@@ -190,9 +193,10 @@ ok(alive(b1.hub.pid, b1.hub.starttime) && ['g1', 'g2', 'g3'].every((g) => alive(
 console.log('⑥ selected on RESOLVED paths, the HOME before the daemon root; a cwd or an argv alone is near');
 const R = HB.mintRoot('hb-r'); fs.mkdirSync(path.join(R, 'in')); fs.symlinkSync(OUT, path.join(R, 'out')); fs.symlinkSync(path.join(R, 'in'), path.join(OUT, 'into'));
 const FAKE = scratchDir('hb-fake');
-const fakeIn = (dir) => (pid, { cwd = null, env = null, argv = null, starttime = 1000 } = {}) => {
+const fakeIn = (dir) => (pid, { cwd = null, env = null, argv = null, starttime = 1000, state = 'S', threads = null } = {}) => {
   const d = path.join(dir, String(pid)); fs.mkdirSync(d, { recursive: true });
-  fs.writeFileSync(path.join(d, 'stat'), `${pid} (x) S 1 ${pid} ${pid} 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 ${starttime} 0 0`);
+  fs.writeFileSync(path.join(d, 'stat'), `${pid} (x) ${state} 1 ${pid} ${pid} 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 ${starttime} 0 0`);
+  if (threads) threads.forEach((st, i) => { const t = path.join(d, 'task', String(pid + i)); fs.mkdirSync(t, { recursive: true }); fs.writeFileSync(path.join(t, 'stat'), `${pid + i} (x) ${st} 1 ${pid} ${pid} 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 ${starttime} 0 0`); });
   if (cwd) fs.symlinkSync(cwd, path.join(d, 'cwd'));
   if (env) fs.writeFileSync(path.join(d, 'environ'), Object.entries(env).map(([k, v]) => `${k}=${v}`).join('\0') + '\0');
   if (argv) fs.writeFileSync(path.join(d, 'cmdline'), argv.join('\0') + '\0');
@@ -215,6 +219,37 @@ ok(JSON.stringify(f6.sel) === JSON.stringify({ 5006: 'daemon-root', 5009: 'home'
 ok(JSON.stringify(f6.near) === JSON.stringify({ 5001: 'cwd', 5004: 'argv', 5005: 'argv', 5007: 'cwd', 5008: 'cwd' }), 'near (said, never signalled): a cwd only, an argv only, a deleted cwd, a cwd beside a HOME linked out', f6.near);
 fakeIn(FAKE)(5012, { env: { HOME: path.join(R, 'h3') } }); fs.rmSync(path.join(FAKE, '5012', 'stat'));
 ok(!('5012' in jF(HB).sel), 'a pid whose start time cannot be read is never listed (the judgement is bound to one process)');
+// MUST B — a process in an uninterruptible wait (state D, wedged on a network mount) holds the lock an environ read waits on
+const FAKE3 = scratchDir('hb-fake3'), fake3 = fakeIn(FAKE3);
+fake3(5101, { env: { HOME: path.join(R, 'h') }, cwd: path.join(R, 'in'), argv: ['x', path.join(R, 'in')], state: 'D' });
+fake3(5102, { cwd: OUT, env: { HOME: OUT }, argv: ['chrome', `--user-data-dir=${path.join(R, 'in', 'p')}`] });
+fake3(5103, { env: { HOME: path.join(R, 'h') }, threads: ['S', 'D', 'S'] });   // the leader runs; ONE of its threads is in D
+const readsOf = (fn) => { const seen = [], r0 = fs.readFileSync, l0 = fs.readlinkSync, d0 = fs.readdirSync, m0 = fs.rmSync;
+  fs.readFileSync = (f, ...a) => { seen.push(String(f)); return r0(f, ...a); }; fs.readlinkSync = (f, ...a) => { seen.push(String(f)); return l0(f, ...a); };
+  fs.readdirSync = (f, ...a) => { seen.push('readdir ' + String(f)); return d0(f, ...a); }; fs.rmSync = (f, ...a) => { seen.push('rm ' + String(f)); return m0(f, ...a); };
+  let out; try { out = fn(); } finally { fs.readFileSync = r0; fs.readlinkSync = l0; fs.readdirSync = d0; fs.rmSync = m0; } return { out, seen }; };
+const rec8 = [];
+const { out: b8, seen: seen8 } = readsOf(() => saidDuring(() => HB.endRooted(R, { procRoot: FAKE3, kill: (pid) => rec8.push(pid) })));
+ok(!rec8.includes(5101) && b8.out.left.some((x) => x.pid === 5101 && x.why === 'in an uninterruptible wait') && !seen8.some((f) => /\/5101\/(environ|cwd|cmdline)$/.test(f)),
+  'MUST B: a process in state D is never read (not its environ, cwd or argv) and never signalled — it is retried by the next passes and left', { rec8, seen: seen8.filter((f) => f.includes('/5101/')) });
+ok(b8.said.some((s) => s.startsWith('hub-boot: left pid 5101 (?) unjudged — it is in an uninterruptible wait (state D')) && b8.said.filter((s) => s.includes(' 5101 ')).length === 1, 'and SAID once, after the last pass', b8.said);
+ok(!rec8.includes(5103) && b8.out.left.some((x) => x.pid === 5103 && x.why === 'in an uninterruptible wait') && !seen8.some((f) => /\/5103\/(environ|cwd|cmdline)$/.test(f)),
+  'a process whose LEADER runs but ONE THREAD is in state D is stuck too (its task/<tid>/stat read, never its environ)', seen8.filter((f) => f.includes('/5103/')));
+ok(b8.said.some((s) => s === `hub-boot: left pid 5102 (?) alone — its argv lies in ${R}, but its environ carries no HOME or daemon root the helper handed out\n`), 'an argv-only match is said in those words', b8.said);
+// THE ENDS REFUSE A ROOT THE HELPER DID NOT MINT — handed the scratch area or a home by a mistake, nothing is read or signalled
+for (const bad of ['/tmp', os.homedir(), path.join('/tmp', String(undefined))]) {
+  const recE = [];
+  const { seen: seenE } = readsOf(() => {
+    for (const [end, fn] of [['endRooted', () => HB.endRooted(bad, { kill: (p) => recE.push(p) })], ['endHub', () => HB.endHub({ pid: a1.hub.pid, starttime: a1.hub.starttime, root: bad, kill: (p) => recE.push(p) })], ['finishRoot', () => HB.finishRoot(bad)]]) {
+      let msg = ''; try { fn(); } catch (e) { msg = String(e.message); }
+      // the NAME is the start's own for THIS layout (in a checkout directly under /tmp, /tmp is the folder holding it, named first)
+      const want = HB.refusalOf(bad) || 'no root the helper mints';
+      ok(msg.startsWith(`hub-boot: ${end} refuses root ${JSON.stringify(bad)} — it is ${want}`), `${end} refuses ${bad} by name — ${msg.replace(/^hub-boot: /, '').slice(0, 90)}`, msg);
+    }
+  });
+  ok(!recE.length && !seenE.some((f) => (f.includes('/proc') && f !== '/proc/self/mountinfo') || f.startsWith('rm ')), `…and for ${bad} no process was read (only the helper's own mount table, for the refusal), nothing removed, nothing signalled`, { recE, seen: seenE.slice(0, 5) });
+}
+ok(HB.rootedProcesses(R, { procRoot: FAKE, uid: process.getuid() + 1 }).length === 0, 'another user\'s process is never read: the owner is read first (here every entry belongs to someone else, so none is listed)');
 
 // ── ⑦ THE RE-READ, THE RE-LIST, THE ANSWERS ───────────────────────────────────
 console.log('⑦ the identity re-read and the answers of the end');
@@ -247,6 +282,7 @@ const git = (...a) => spawnSync('git', a, { encoding: 'utf8', env: { PATH: proce
 git('init', '-q', GREPO); git('-C', GREPO, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'one');
 const childOf = (url) => `import * as HB from ${JSON.stringify(url)};
 import fs from 'node:fs'; import path from 'node:path'; import net from 'node:net'; import { spawn, spawnSync } from 'node:child_process';
+if (process.env.HB_THROWER === '1') process.on('exit', () => { throw new Error('a suite exit listener that throws, registered before the mint'); });
 const root = HB.mintRoot('hb-exit');
 for (const d of ['t', 'proj', 'home', 'dev']) fs.mkdirSync(path.join(root, d), { recursive: true });
 fs.writeFileSync(path.join(root, 't', 'server.js'), process.env.HB_STANDIN);
@@ -255,45 +291,75 @@ fs.writeFileSync(path.join(root, 'wt', '.git'), 'gitdir: ' + meta + '\\n'); fs.w
 fs.writeFileSync(path.join(meta, 'commondir'), '../..\\n'); fs.writeFileSync(path.join(meta, 'HEAD'), process.env.HB_HEAD + '\\n');
 const listed = spawnSync('git', ['-C', process.env.HB_GREPO, 'worktree', 'list', '--porcelain'], { encoding: 'utf8' }).stdout.includes(path.join(root, 'wt'));
 const port = await new Promise((res) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
-const hub = HB.startHub({ root, tree: path.join(root, 't'), port, env: { PATH: process.env.PATH, HOME: path.join(root, 'home'), VIBESPACE_VNC_DISPLAY: 's', VIBESPACE_VNC_PORT: 's', HB_ROOT: root, HB_OUT: process.env.HB_OUT, HB_TAG: 'e' } });
-await hub.ready({ ms: 30000 });
+const kept = path.join(process.env.HB_OUT, path.basename(root) + '.kept.log');
+const hub = HB.startHub({ root, tree: path.join(root, 't'), port, env: { PATH: process.env.PATH, HOME: path.join(root, 'home'), VIBESPACE_VNC_DISPLAY: 's', VIBESPACE_VNC_PORT: 's', HB_ROOT: root, HB_OUT: process.env.HB_OUT, HB_TAG: 'e' }, keepLog: kept });
+const ready = await hub.ready({ ms: 30000 });
 const oFile = path.join(process.env.HB_OUT, path.basename(root) + '.outsider'), oMark = oFile + '.marker'; fs.writeFileSync(oMark, '');
 spawn(process.execPath, ['-e', process.env.HB_KEEP.replace('PIDFILE', oFile).replace('WATCH', oMark)], { cwd: path.join(root, 'proj'), env: { PATH: process.env.PATH, HOME: process.env.HB_OUT }, detached: true, stdio: 'ignore' }).unref();
-const pids = [];
-for (let i = 0; i < 400 && pids.length < 4; i++) { pids.length = 0; for (const f of ['e-g1.pid', 'e-g2.pid', 'e-g3.pid'].map((x) => path.join(root, x)).concat(oFile)) { try { pids.push(Number(fs.readFileSync(f, 'utf8'))); } catch {} } if (pids.length < 4) await new Promise((r) => setTimeout(r, 25)); }
+// a stand-in BROWSER the suite starts itself, its profile in the root (rule nine: it carries the root's HOME — unless HB_BHOME=out)
+const bFile = path.join(process.env.HB_OUT, path.basename(root) + '.browser'), bMark = bFile + '.marker'; fs.writeFileSync(bMark, '');
+spawn(process.execPath, ['-e', process.env.HB_KEEP.replace('PIDFILE', bFile).replace('WATCH', bMark), '--', '--user-data-dir=' + path.join(root, 'prof')], { cwd: process.env.HB_OUT, env: { PATH: process.env.PATH, HOME: process.env.HB_BHOME === 'out' ? process.env.HB_OUT : path.join(root, 'home') }, detached: true, stdio: 'ignore' }).unref();
+const files = { g1: path.join(root, 'e-g1.pid'), g2: path.join(root, 'e-g2.pid'), g3: path.join(root, 'e-g3.pid'), outsider: oFile, browser: bFile };
+const read = (f) => { try { return Number(fs.readFileSync(f, 'utf8')) || null; } catch { return null; } };
+for (let i = 0; i < 400 && Object.values(files).some((f) => read(f) === null); i++) await new Promise((r) => setTimeout(r, 25));
 const st = (p) => { try { const s = fs.readFileSync('/proc/' + p + '/stat', 'latin1'); return Number(s.slice(s.lastIndexOf(')') + 2).split(' ')[19]); } catch { return null; } };
-const all = [hub.pid, ...pids];
-console.log(JSON.stringify({ root, pids: all.slice(0, 4), outsider: { pid: all[4], starttime: st(all[4]), marker: oMark }, starttimes: all.slice(0, 4).map(st), wt: listed }));
-if (process.env.HB_MODE === 'wait') setTimeout(() => process.exit(4), 60000);   // ended by the parent's SIGTERM long before
+const map = { hub: hub.pid, g1: read(files.g1), g2: read(files.g2), g3: read(files.g3) };   // a FIXED map: null for a missing pid
+const o = read(files.outsider);
+const b = read(files.browser);
+console.log(JSON.stringify({ root, ready, map, pids: Object.values(map), starttimes: Object.values(map).map((p) => (p ? st(p) : null)), outsider: { pid: o, starttime: o ? st(o) : null, marker: oMark }, browser: { pid: b, starttime: b ? st(b) : null, marker: bMark }, wt: listed, kept, hubPid: hub.pid }));
+if (process.env.HB_MODE === 'wait') setInterval(() => { if (!fs.existsSync(process.env.HB_OUT)) process.exit(4); }, 200);   // ended by the parent's signal; never a clock
+else if (process.env.HB_MODE === 'throw') throw new Error('a suite that throws after its boot');   // the THROWN road: an uncaught throw, no exit call
 else process.exit(3);   // a red: no stop, no cleanup of its own
 `;
-const childEnv = (mode) => ({ PATH: process.env.PATH, HOME: OUT, GIT_CONFIG_NOSYSTEM: '1', HB_STANDIN: STANDIN, HB_OUT: OUT, HB_GREPO: GREPO, HB_HEAD: git('-C', GREPO, 'rev-parse', 'HEAD').stdout.trim(), HB_KEEP: KEEP('PIDFILE', 'WATCH'), HB_MODE: mode });
-const runChild = (url) => spawnSync(process.execPath, ['--input-type=module', '-e', childOf(url)], { env: childEnv('exit'), encoding: 'utf8', timeout: 60000 });
+const childEnv = (mode, extra = {}) => ({ PATH: process.env.PATH, HOME: OUT, GIT_CONFIG_NOSYSTEM: '1', HB_STANDIN: STANDIN, HB_OUT: OUT, HB_GREPO: GREPO, HB_HEAD: git('-C', GREPO, 'rev-parse', 'HEAD').stdout.trim(), HB_KEEP: KEEP('PIDFILE', 'WATCH'), HB_MODE: mode, ...extra });
+const runChild = (url, extra = {}) => spawnSync(process.execPath, ['--input-type=module', '-e', childOf(url)], { env: childEnv('exit', extra), encoding: 'utf8', timeout: 60000 });
 const report = (stdout) => { try { return JSON.parse(String(stdout).trim().split('\n').filter((l) => l.startsWith('{')).pop()); } catch { return null; } };
 const ex = runChild(HB_URL);
 const exo = report(ex.stdout);
-ok(ex.status === 3 && exo && exo.pids.length === 4 && exo.wt && exo.outsider.pid, 'the child suite planted a git worktree in its root (git lists it), booted a stand-in hub (4 processes), started an outsider in its root, and exited 3 without a stop', { status: ex.status, out: ex.stdout.slice(-200), err: ex.stderr.slice(0, 600) });
+ok(ex.status === 3 && exo && exo.ready && exo.pids.every(Boolean) && exo.wt && exo.outsider.pid, 'the child suite planted a git worktree in its root (git lists it), booted a stand-in hub that answered (a fixed map of 4 pids, none missing), started an outsider in its root, and exited 3 without a stop', { status: ex.status, out: ex.stdout.slice(-200), err: ex.stderr.slice(0, 600) });
 ok(exo && !fs.existsSync(exo.root), 'its minted root is gone');
 const wl = git('-C', GREPO, 'worktree', 'list', '--porcelain').stdout;
 ok(exo && wl.split('\n').filter((l) => l.startsWith('worktree ')).length === 1 && !wl.includes(exo.root), 'and its git worktree went THROUGH GIT — the repository keeps no record of it', wl);
 ok(exo && await waitFor(() => exo.pids.every(gone)), 'and every process its hub started is gone', exo && exo.pids.map((p) => statOf(p)));
 ok(exo && alive(exo.outsider.pid, exo.outsider.starttime) && ex.stderr.includes(`hub-boot: left pid ${exo.outsider.pid} (`) && ex.stderr.includes(`its working directory lies in ${exo.root}`), 'the OUTSIDER survives the exit, and the child\'s stderr names it', ex.stderr.slice(0, 400));
+ok(exo && (() => { try { return fs.readFileSync(exo.kept, 'utf8').includes(`stand-in hub ${exo.hubPid} listening`); } catch { return false; } })(), 'keepLog: the hub\'s log was APPENDED to the kept path outside the root before the root went (the suite\'s artifact survives its end)', exo && exo.kept);
+ok(throwsWith(() => HB.startHub({ root: A, tree: path.join(A, 't'), port: 1, env: envFor(A, 'x'), keepLog: path.join(A, 'kept.log') }), /keepLog .* lies in the minted root/), 'a keepLog inside the minted root is refused (it would go with the root)');
+ok(exo && exo.browser.pid && !alive(exo.browser.pid, exo.browser.starttime) && !fs.existsSync(exo.root),
+  'RULE NINE: the stand-in browser the suite started itself (its profile in the root, the root\'s HOME) was ended by the helper BEFORE the root went — it watches a marker outside, so nothing but the helper ended it');
 if (exo && exo.outsider.pid) endKeeper(exo.outsider);   // the suite's own outsider, ended by its identity
+const exB = runChild(HB_URL, { HB_BHOME: 'out' });   // RED CONTROL (a real child, the real helper): the browser WITHOUT the root's HOME
+const exBo = report(exB.stdout);
+ok(exBo && exBo.browser.pid && alive(exBo.browser.pid, exBo.browser.starttime) && !fs.existsSync(exBo.root) && exB.stderr.includes(`hub-boot: left pid ${exBo.browser.pid} (`) && exB.stderr.includes(`its argv lies in ${exBo.root}`),
+  'CONTROL (a real child) the same browser WITHOUT the root\'s HOME — RED: it is only near (its profile argv), said and LEFT running while the root is removed under it', exB.stderr.slice(0, 300));
+if (exBo) { if (exBo.browser.pid) endKeeper(exBo.browser); if (exBo.outsider.pid) endKeeper(exBo.outsider); }
+const exT = runChild(HB_URL, { HB_THROWER: '1', HB_MODE: 'throw' });   // the THROWN road (an uncaught throw after the boot), and a suite 'exit' listener registered BEFORE the mint throws too
+const exTo = report(exT.stdout);
+ok(exTo && exT.status === 1 && exT.stderr.includes('a suite that throws after its boot') && !fs.existsSync(exTo.root) && await waitFor(() => exTo.pids.every((p) => !p || gone(p))) && exT.stderr.includes("hub-boot: a suite 'exit' listener threw (a suite exit listener that throws, registered before the mint) — the helper's end runs anyway"),
+  'the THROWN road: the suite throws after its boot (exit 1, its error said) and a suite \'exit\' listener registered before the mint throws too — wrapped at the mint, that throw is said and the end still runs (no root, no process)', { status: exT.status, err: exT.stderr.slice(0, 300) });
+ok(exTo && (() => { try { return fs.readFileSync(exTo.kept, 'utf8').includes(`stand-in hub ${exTo.hubPid} listening`); } catch { return false; } })(), 'keepLog on the THROWN road: the hub\'s log is kept outside the root', exTo && exTo.kept);
+if (exTo && exTo.outsider.pid) endKeeper(exTo.outsider);
 
 // ── ⑨ A SIGNAL ────────────────────────────────────────────────────────────────
-console.log('⑨ a child suite ended by SIGTERM leaves no process and no root');
-const signalRun = async (url) => {
-  const c = spawn(process.execPath, ['--input-type=module', '-e', childOf(url)], { env: childEnv('wait'), stdio: ['ignore', 'pipe', 'pipe'] });
+console.log('⑨ a child suite ended by a signal leaves no process and no root — and DIES BY THAT SIGNAL (its parent reads it)');
+const signalRun = async (url, sig = 'SIGTERM', extra = {}) => {
+  const c = spawn(process.execPath, ['--input-type=module', '-e', childOf(url)], { env: childEnv('wait', extra), stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '', err = ''; c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { err += d; });
-  const ended = new Promise((res) => c.on('exit', (code, sig) => res({ code, sig })));
+  const ended = new Promise((res) => c.on('exit', (code, s9) => res({ code, sig: s9 })));
   const rep = await waitFor(() => report(out), 2400);
-  c.kill('SIGTERM');
+  c.kill(sig);
   return { rep, end: await ended, err };
 };
-const t9 = await signalRun(HB_URL);
-ok(t9.rep && t9.end.code === 143 && t9.end.sig === null, `the helper armed SIGTERM: the child ended by exit(143) (code ${t9.end.code}, signal ${t9.end.sig})`, t9.err.slice(0, 300));
-ok(t9.rep && !fs.existsSync(t9.rep.root) && await waitFor(() => t9.rep.pids.every(gone)), 'its root is gone and every process its hub started is gone');
-if (t9.rep && t9.rep.outsider.pid) endKeeper(t9.rep.outsider);
+for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
+  const t9 = await signalRun(HB_URL, sig);
+  ok(t9.rep && t9.rep.ready && t9.end.sig === sig && t9.end.code === null, `${sig}: the child died BY ${sig} — its parent reads the signal (code ${t9.end.code}, signal ${t9.end.sig}), so the gate reads «killed from outside», never a red`, t9.err.slice(0, 300));
+  ok(t9.rep && !fs.existsSync(t9.rep.root) && await waitFor(() => t9.rep.pids.every((p) => !p || gone(p))), `${sig}: its root is gone and every process its hub started is gone`);
+  if (sig === 'SIGTERM') ok(t9.rep && (() => { try { return fs.readFileSync(t9.rep.kept, 'utf8').includes(`stand-in hub ${t9.rep.hubPid} listening`); } catch { return false; } })(), 'keepLog on the SIGNAL road: the hub\'s log is kept outside the root after a death by SIGTERM', t9.rep && t9.rep.kept);
+  if (t9.rep && t9.rep.outsider.pid) endKeeper(t9.rep.outsider);
+}
+const t9t = await signalRun(HB_URL, 'SIGTERM', { HB_THROWER: '1' });
+ok(t9t.rep && t9t.end.sig === 'SIGTERM' && !fs.existsSync(t9t.rep.root) && await waitFor(() => t9t.rep.pids.every((p) => !p || gone(p))),
+  'a suite \'exit\' listener registered before the mint THROWS during the end — the helper\'s end runs anyway (its own call after the emit): the root gone, everything ended, death by SIGTERM', t9t.end);
+if (t9t.rep && t9t.rep.outsider.pid) endKeeper(t9t.rep.outsider);
 
 // ── ⑩ NOTHING AT START ────────────────────────────────────────────────────────
 console.log('⑩ a start stops nothing');
@@ -304,14 +370,21 @@ ok(s1.ready && alive(P.pid, P.starttime), 'a process the root\'s own rule would 
 s1.hub.stop(); endKeeper(P);
 
 // ── ⑪ A MOUNT INSIDE THE ROOT ─────────────────────────────────────────────────
-console.log('⑪ a root with a mount inside it is never removed');
-const RM = scratchDir('hb-rm'); fs.mkdirSync(path.join(RM, 'mnt'), { recursive: true });
+console.log('⑪ a mount inside the root (or an unreadable mount table) stops BOTH removals — the worktree\'s and the root\'s');
+const RM = HB.mintRoot('hb-rm'); fs.mkdirSync(path.join(RM, 'mnt'), { recursive: true });   // a minted root: the ends refuse any other
+const plantWt = (root) => {   // a linked worktree of the scratch repository, in git's own layout (no checkout)
+  const meta = path.join(GREPO, '.git', 'worktrees', path.basename(root)); fs.mkdirSync(meta, { recursive: true }); fs.mkdirSync(path.join(root, 'wt'));
+  fs.writeFileSync(path.join(root, 'wt', '.git'), `gitdir: ${meta}\n`); fs.writeFileSync(path.join(meta, 'gitdir'), `${path.join(root, 'wt', '.git')}\n`);
+  fs.writeFileSync(path.join(meta, 'commondir'), '../..\n'); fs.writeFileSync(path.join(meta, 'HEAD'), git('-C', GREPO, 'rev-parse', 'HEAD').stdout);
+};
+plantWt(RM);
+const listedWt = () => git('-C', GREPO, 'worktree', 'list', '--porcelain').stdout.includes(path.join(RM, 'wt'));
 const mi2 = path.join(OUT, 'mountinfo2'); fs.writeFileSync(mi2, `22 1 0:21 / /proc rw - proc proc rw\n93 29 0:53 / ${path.join(RM, 'mnt')} rw - fuse.rclone r rw\n`);
-const { out: rmA, said: saidRm } = saidDuring(() => HB.removeRoot(RM, { mountinfo: mi2 }));
-ok(rmA === false && fs.existsSync(RM) && saidRm.some((s) => s.includes(`${path.join(RM, 'mnt')} is mounted inside it`)), 'a mount point inside the root stops the removal, and that is said', saidRm);
-const { out: rmB } = saidDuring(() => HB.removeRoot(RM, { mountinfo: path.join(OUT, 'no-such-mountinfo') }));
-ok(rmB === false && fs.existsSync(RM), 'a mount table that cannot be read stops the removal too');
-ok(HB.removeRoot(RM, { mountinfo: mi }) === true && !fs.existsSync(RM), 'with no mount inside, the root is removed');
+const { out: rmA, said: saidRm } = saidDuring(() => HB.finishRoot(RM, { mountinfo: mi2 }));
+ok(rmA === false && fs.existsSync(path.join(RM, 'wt', '.git')) && listedWt() && saidRm.some((s) => s.includes(`${path.join(RM, 'mnt')} is mounted inside it`)), 'a mount point inside the root stops the worktree\'s removal AND the root\'s, and that is said', saidRm);
+const { out: rmB } = saidDuring(() => HB.finishRoot(RM, { mountinfo: path.join(OUT, 'no-such-mountinfo') }));
+ok(rmB === false && listedWt() && fs.existsSync(RM), 'a mount table that cannot be read stops both too');
+ok(HB.finishRoot(RM, { mountinfo: mi }) === true && !fs.existsSync(RM) && !listedWt(), 'with no mount inside: the worktree through git, then the root');
 
 // ── ⑫ RED CONTROLS ────────────────────────────────────────────────────────────
 console.log('⑫ red controls — each in the form its line names');
@@ -332,6 +405,14 @@ ok(!same(sP) && sP.has(b1.hub.pid), 'CONTROL (snapshot) a pattern stop (argv nam
 const PPID = await mutant('ppid', patch('  const rest = endRooted(root, { signal, procRoot, kill, done: new Set([`${pid}:${starttime}`]) });', "  const kids = []; for (const d of fs.readdirSync(procRoot).filter((x) => /^\\d+$/.test(x))) { try { const st = fs.readFileSync(`${procRoot}/${d}/stat`, 'latin1'); if (Number(st.slice(st.lastIndexOf(')') + 2).split(' ')[1]) === pid) kids.push({ pid: Number(d), starttime: starttimeOf(Number(d), procRoot) }); } catch { /* control */ } }\n  const rest = endByIdentity(kids, { signal, procRoot, kill });"));
 const sQ = endedOver(PPID);
 ok(!same(sQ) && !sQ.has(a1.kids.g1.pid), 'CONTROL (snapshot) a parent-id stop — RED: the detached grandchild g1 is missed', [...sQ]);
+const ARGVSEL = await mutant('argv-selects', patch("return { via: null, near: 'argv' };", "return { via: 'argv', near: null };"));
+ok('5005' in jF(ARGVSEL).sel, 'CONTROL (fake /proc) the argv selects — RED: 5005, whose HOME is outside, is selected by an argument', jF(ARGVSEL).sel);
+const STUCK = await mutant('stuck-read', patch("    if (f.state === 'D' || anyThreadStuck(pid, procRoot)) { if (stuck) stuck.push({ pid, starttime: st0 }); continue; }   // an uninterruptible wait: its environ is not read\n", ''));
+const { seen: seenS } = readsOf(() => STUCK.rootedProcesses(R, { procRoot: FAKE3 }));
+const LEADER = await mutant('leader-only', patch("    if (f.state === 'D' || anyThreadStuck(pid, procRoot)) {", "    if (f.state === 'D') {"));
+const { seen: seenL } = readsOf(() => LEADER.rootedProcesses(R, { procRoot: FAKE3 }));
+ok(seenL.some((f) => f.endsWith('/5103/environ')) && !seenL.some((f) => f.endsWith('/5101/environ')), 'CONTROL (fake /proc) the leader\'s state only — RED: the process whose one thread is in D is read', seenL.filter((f) => f.includes('/510')));
+ok(seenS.some((f) => f.endsWith('/5101/environ')), 'CONTROL (fake /proc) a stuck process read — RED: the environ of the process in state D is read (on the box, that read can hang the exit)', seenS.filter((f) => f.includes('/5101/')));
 const NOREREAD = await mutant('noreread', patch('    if (now !== starttime) {', '    if (false) {'));
 const recN = []; NOREREAD.endByIdentity([{ pid: 5009, starttime: 1000 }], { procRoot: FAKE, kill: (pid) => recN.push(pid) });
 const recO = []; saidDuring(() => HB.endByIdentity([{ pid: 5009, starttime: 1000 }], { procRoot: FAKE, kill: (pid) => recO.push(pid) }));
@@ -343,23 +424,49 @@ ok('5003' in jF(REAL).sel, 'CONTROL (fake /proc) a realpath-only path — RED: t
 const NOMINT = await mutant('nomint', patch('  if (!MINTED.has(r)) throw', '  if (false) throw'));
 let eN = ''; try { NOMINT.startHub({ root: foreign, tree: path.join(foreign, 'none'), port: 1, env: envFor(foreign, 'x') }); } catch (e) { eN = String(e.message); }
 ok(!/did not mint it/.test(eN) && /no server\.js in the tree/.test(eN), 'CONTROL (no /proc) no minted check — RED: a root the helper did not make passes that gate and stops only at the NEXT one (no server.js in the tree)', eN);
-const PARENT = await mutant('inside-parent', patch('for (const [why, xs] of named.slice(1, 4)) if', 'for (const [why, xs] of named.slice(1, 5)) if'));
-ok(PARENT.refusalOf('/tt/vs-hb-a-h1', UNDER_TEMP) === 'inside the folder holding this checkout (the lanes folder)' && PARENT.refusalOf('/vt/lanes/other', L) !== null,
+const PARENT = await mutant('inside-parent', patch('for (const [why, xs] of named.slice(1, 4)) {', 'for (const [why, xs] of named.slice(1, 5)) {'));
+ok(PARENT.refusalOf('/tt/vs-hb-a-h1', UNDER_TEMP) === 'inside the folder holding this checkout (the lanes folder) at /tt' && PARENT.refusalOf('/vt/lanes/other', L) !== null,
   'CONTROL (no /proc) «inside» the checkout\'s parent refused — RED: a checkout directly under the temp folder refuses every mint (the gate\'s isolated worktree)', PARENT.refusalOf('/tt/vs-hb-a-h1', UNDER_TEMP));
-const exN = runChild(pathToFileURL(mutantFile('noworktree', patch('    try { removeWorktrees(root); } catch { /* best effort at exit */ }\n', ''))).href);
+const exK = runChild(pathToFileURL(mutantFile('no-keep', patch("    for (const h of m.hubs) if (h.keepLog) try { fs.appendFileSync(h.keepLog, h.log()); } catch (e) { say(`could not keep ${h.logFile} at ${h.keepLog} (${e && e.code})`); }   // the kept artifact, before the root goes\n", ''))).href);
+const exKo = report(exK.stdout);
+ok(exKo && !fs.existsSync(exKo.kept) && !fs.existsSync(exKo.root), 'CONTROL (a real child in its own fresh root) no copy at the end — RED: the kept log is missing, the root (and its log) gone');
+if (exKo) { if (exKo.outsider.pid) endKeeper(exKo.outsider); }
+const exN = runChild(pathToFileURL(mutantFile('noworktree', patch('  removeWorktrees(root);\n', ''))).href);
 const exNo = report(exN.stdout);
 const wlN = git('-C', GREPO, 'worktree', 'list', '--porcelain').stdout;
 ok(exNo && exNo.wt && wlN.includes(path.join(exNo.root, 'wt')), 'CONTROL (a real child in its own fresh root) no worktree removal at exit — RED: the repository keeps a record of a worktree whose directory is gone', wlN);
 ok(exNo && await waitFor(() => exNo.pids.every(gone)), '(that control\'s child still ended every process its hub started)');
 if (exNo && exNo.outsider.pid) endKeeper(exNo.outsider);
-const t9n = await signalRun(pathToFileURL(mutantFile('nosignal', patch('    for (const sig of SIGNALS) process.on(sig, () => process.exit(128 + os.constants.signals[sig]));\n', ''))).href);
-const leftN = t9n.rep ? t9n.rep.pids.map((p, i) => ({ pid: p, starttime: t9n.rep.starttimes[i] })).filter((x) => alive(x.pid, x.starttime)) : [];
+const t9c = await signalRun(pathToFileURL(mutantFile('exit-code', patch('    for (const sig of SIGNALS) { OWN[sig] = () => endBySignal(sig); process.on(sig, OWN[sig]); }\n', '    for (const sig of SIGNALS) process.on(sig, () => process.exit(128 + os.constants.signals[sig]));\n'))).href);
+ok(t9c.rep && t9c.end.code === 143 && t9c.end.sig === null, `CONTROL (a real child in its own fresh root) the exit-code form — RED: the parent reads code ${t9c.end.code} and no signal, so the gate would read a suite it ended as a product red`, t9c.end);
+if (t9c.rep && t9c.rep.outsider.pid) endKeeper(t9c.rep.outsider);
+const NOWRAP_SRC = patch("    for (const l of process.rawListeners('exit')) {\n      process.removeListener('exit', l);\n      process.on('exit', (...a) => { try { l(...a); } catch (e) { say(`a suite 'exit' listener threw (${e && e.message}) \u2014 the helper's end runs anyway`); } });\n    }\n", '');
+const exW = runChild(pathToFileURL(mutantFile('no-wrap', NOWRAP_SRC)).href, { HB_THROWER: '1', HB_MODE: 'throw' });
+const exWo = report(exW.stdout);
+ok(exWo && fs.existsSync(exWo.root), 'CONTROL (a real child in its own fresh root) the exit listeners NOT wrapped — RED: on the thrown road the throwing listener stops the emit, the end never runs, the root stays', exW.stderr.slice(0, 200));
+if (exWo) {
+  const leftW = exWo.pids.map((p, i) => ({ pid: p, starttime: exWo.starttimes[i] })).filter((x) => x.pid && alive(x.pid, x.starttime));
+  if (exWo.browser.pid) leftW.push(exWo.browser);
+  HB.endByIdentity(leftW); await waitFor(() => leftW.every((x) => gone(x.pid)));
+  saidDuring(() => HB.finishRoot(exWo.root)); if (exWo.outsider.pid) endKeeper(exWo.outsider); if (exWo.browser.pid) endKeeper(exWo.browser);
+}
+const t9e = await signalRun(pathToFileURL(mutantFile('no-wrap-no-second-end', NOWRAP_SRC.replace("  try { endAll(); } catch { /* idempotent: a no-op when the emit already ran it */ }\n", ''))).href, 'SIGTERM', { HB_THROWER: '1' });
+ok(t9e.rep && fs.existsSync(t9e.rep.root), 'CONTROL (a real child in its own fresh root) no wrap AND no end after the emit — RED: on the signal road a suite listener that throws first skips the end, the root stays', t9e.end);
+if (t9e.rep) {   // that control's leftovers: ended by their identity, then its root
+  const leftE = t9e.rep.pids.map((p, i) => ({ pid: p, starttime: t9e.rep.starttimes[i] })).filter((x) => x.pid && alive(x.pid, x.starttime));
+  if (t9e.rep.browser.pid) leftE.push(t9e.rep.browser);
+  HB.endByIdentity(leftE.filter((x) => x.pid)); await waitFor(() => leftE.every((x) => gone(x.pid)));
+  saidDuring(() => HB.finishRoot(t9e.rep.root)); if (t9e.rep.outsider.pid) endKeeper(t9e.rep.outsider); if (t9e.rep.browser.pid) endKeeper(t9e.rep.browser);
+}
+const t9n = await signalRun(pathToFileURL(mutantFile('nosignal', patch('    for (const sig of SIGNALS) { OWN[sig] = () => endBySignal(sig); process.on(sig, OWN[sig]); }\n', ''))).href);
+const leftN = t9n.rep ? t9n.rep.pids.map((p, i) => ({ pid: p, starttime: t9n.rep.starttimes[i] })).filter((x) => x.pid && alive(x.pid, x.starttime)) : [];
 ok(t9n.rep && t9n.end.sig === 'SIGTERM' && fs.existsSync(t9n.rep.root) && leftN.length > 0, `CONTROL (a real child in its own fresh root) the exit event alone — RED: SIGTERM leaves the root and ${leftN.length} processes`, t9n.end);
 if (t9n.rep) {   // that control's leftovers: ended by their identity (the child reported each pid with its start time), then its root
+  if (t9n.rep.browser.pid) leftN.push(t9n.rep.browser);
   HB.endByIdentity(leftN);
   await waitFor(() => leftN.every((x) => gone(x.pid)));
-  saidDuring(() => HB.removeRoot(t9n.rep.root));
-  if (t9n.rep.outsider.pid) endKeeper(t9n.rep.outsider);
+  saidDuring(() => HB.finishRoot(t9n.rep.root));
+  if (t9n.rep.outsider.pid) endKeeper(t9n.rep.outsider); if (t9n.rep.browser.pid) endKeeper(t9n.rep.browser);
 }
 const CLEAN = await mutant('clean-at-start', patch('  const r = ownRoot(root);\n', '  const r = ownRoot(root);\n  endRooted(r);\n'));
 const S2 = CLEAN.mintRoot('hb-clean'); plant(S2);

@@ -101,7 +101,7 @@ const MUT_DIR = MUTW.dir;
 /** Load `src` as if it were the module at `origRel`, from a file in MUT_DIR.
  *  Returns the module; `mutantFiles` records every path written. */
 const mutantFiles = MUTW.files;
-function loadCopy(origRel, src) { return MUTW.load(origRel, src); }
+function loadCopy(origRel, src, opts) { return MUTW.load(origRel, src, undefined, opts); }
 const tick = (ms = 20) => new Promise((r) => setTimeout(r, ms));
 // attemptFire returns TRUE the moment the async PRE-FIRE GATE is in flight —
 // `fired` is a decision, the send lands one or more turns later (the gate runs
@@ -338,9 +338,10 @@ console.log('\n§1 the incident: a member becomes usable while two conversations
     const w2 = mkWorld();
     ok('control setup: both conversations are LIVE on a SPENT member and nobody is armed',
       w2.linkOf(w2.A._webuiId) === w2.FISH && w2.ar.armedIds().length === 0);
-    // …and the pool was evaluated seconds ago, so its 10s event-kick gate is
-    // SHUT. A member's first reading is not a kick; without `force` the wake
-    // would be swallowed by a throttle meant for per-record chatter.
+    // …and the pool SWITCHED seconds ago, so its 10s gate after a switch is
+    // SHUT (`_poolAutoLast`; B-37f9: the kicks' own gate is `_poolEvalAt`). A
+    // member's first reading is not a kick; without `force` the wake would be
+    // swallowed by it.
     w2.eng._poolAutoLast.set(w2.P, Date.now());
     w2.writeCache(w2.NEW, w2.healthy());
     const r2 = w2.eng.onMemberReadingFresh(w2.NEW, 'manual refresh');
@@ -1232,7 +1233,7 @@ console.log('\n§8 half ② fires only the conversations nothing could move (r2)
     let masterAr = null, gitErr = null;
     try {
       const src = execFileSync('git', ['-C', REPO, 'show', 'master:src/server/auto-resume.js'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: GIT_ENV });
-      masterAr = loadCopy('src/server/auto-resume.js', src);
+      masterAr = loadCopy('src/server/auto-resume.js', src, { same: true }); // master's revision: identical to HEAD once master catches up (B-0d3e)
     } catch (e) { gitErr = e.message; }
     if (masterAr?.continueNoticeFor) {
       const SHAPES = [

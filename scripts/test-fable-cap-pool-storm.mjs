@@ -3399,6 +3399,8 @@ console.log('\n㉑3e/㉑3f «no 5h limit» at the wall (lane no-5h-window r3)');
   const estWorld = (engineModule = engMod) => {
     const w = mkWorld({ sameDeadline: true, engineModule });
     if (!w) return null;
+    // the pool reads an estimate only where this instance's verdict is ON (usage-predict P5): stated on, so the leg is the overlay's own
+    if (w.eng && w.eng.usageEstimator) w.eng.usageEstimator.predictVerdict = () => ({ state: 'on', n: 99 });
     lift(w, 'wmax');
     const own = w.readCache(w.id.wmax);
     w.writeCache(w.id.wmax, { ...own, orgUuid: 'org-n5h-est' });
@@ -4176,15 +4178,21 @@ console.log('\n§B-6c55 a lock keeps the person\'s 1M ask beside its target; the
   }
   // the create's REAL block (its own text): a resume commands target + [1m]; a catalog with no 1M form for the model is SAID
   {
-    const blockOf = (src) => { const a = src.indexOf('          // the saved fact applies only to the model the lock holds'), b = src.indexOf('          const sessionSpec = adapter.buildSessionArgs({', a); return a > 0 && b > a ? src.slice(a, b) : ''; };
+    const blockOf = (src) => { const a = src.indexOf('          // the saved fact applies only to the model the lock holds'), b = src.indexOf('          const codexThreadBaseline =', a); return a > 0 && b > a ? src.slice(a, b) : ''; };   // (unit billing pick alive: the spec is built after the account now — the block ends where the create moves on)
     const wc = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8'), BLOCK = blockOf(wc);
+    // batch 21's cure: the block RECORDS the refusal (data._contextRefused); the create SAYS it after the start registered
+    const noticeOf = (src) => { const a = src.indexOf("          // B-6c55 (c): the CLI's own catalog gives the locked model no 1M form"), b = src.indexOf('          // unit «billing pick alive»: the rule SAID where the person looks', a); return a > 0 && b > a ? src.slice(a, b) : ''; };
+    const NOTICE = noticeOf(wc), atReg = wc.indexOf('          activeSessions.set(id, session);');
+    ok('§B-6c55 (c) batch 21\'s cure: the block says nothing itself (it records data._contextRefused); the notice sits AFTER the start registered (activeSessions.set) — a resume refused on the way never «resumed with the standard context»',
+      !!NOTICE && !BLOCK.includes('serverNotice') && /data\._contextRefused = cmdOf\.refused \? String\(data\.model \|\| ''\) : null;/.test(BLOCK) && atReg > 0 && wc.indexOf(NOTICE) > atReg && wc.indexOf(NOTICE) > wc.indexOf(BLOCK), { atReg, at: wc.indexOf(NOTICE) });
     ok('§B-6c55 the create\'s block exists and the spawn is commanded with it (model: commandModel); the lock target and the spawn model keep data.model', !!BLOCK && /const sessionSpec = adapter\.buildSessionArgs\(\{\s*cwd,\s*model: commandModel,/.test(wc) && /_lockedModel: data\.modelLock \? \(data\.lockModel \|\| data\.model \|\| null\) : null,/.test(wc) && /session\._spawnModel = data\.model \|\| null;/.test(wc));
     const wcReq = createRequire(path.join(REPO, 'src/ws-create.js'));
     const runCreate = (data, catalog) => {
       const notices = [];
       const fn = new Function('data', 'LOCKCTX', 'serverNotice', 'require', 'id', `${BLOCK}\nreturn commandModel;`);
       if (!('_modelOrigin' in data)) data._modelOrigin = 'chosen';   // the person's own pick, unless a leg says otherwise
-      const cmd = fn(data, LC, (k, text, o) => notices.push({ k, text, o }), (m) => (m === './server/cli-model-catalog.js' ? { view: () => catalog } : wcReq(m)), 'sess-7-1');
+      const cmd = fn(data, LC, () => { throw new Error('the block said something itself'); }, (m) => (m === './server/cli-model-catalog.js' ? { view: () => catalog } : wcReq(m)), 'sess-7-1');
+      new Function('data', 'LOCKCTX', 'serverNotice', 'id', NOTICE)(data, LC, (k, text, o) => notices.push({ k, text, o }), 'sess-7-1');   // the start registered: the create's own notice text
       return { cmd, notices, ctx: data._lockContext === undefined ? null : data._lockContext };
     };
     const fableCat = { models: [{ id: 'claude-fable-5', oneM: 'native' }, { id: 'claude-haiku-5', oneM: null }] };
@@ -4198,6 +4206,17 @@ console.log('\n§B-6c55 a lock keeps the person\'s 1M ask beside its target; the
       c.cmd === 'claude-haiku-5' && c.notices.length === 1 && c.notices[0].k === 'lock-context-sess-7-1' && c.notices[0].o.level === 2 && c.notices[0].o.i18n.key === LC.NO_LONG_CONTEXT && c.notices[0].o.i18n.params.model === 'claude-haiku-5' && /claude-haiku-5/.test(c.notices[0].text), JSON.stringify(c));
     const c2 = runCreate({ modelLock: true, lockModel: 'claude-haiku-5[1m]', lockContext: '1m', model: 'claude-haiku-5[1m]', resumeId: 'r5', name: 'notes' }, fableCat);
     ok('§B-6c55 (c) a target already in its [1m] form that the catalog gives no 1M ⇒ the resume commands it WITHOUT the mark, and says so', c2.cmd === 'claude-haiku-5' && c2.notices.length === 1 && c2.notices[0].o.i18n.params.name === 'notes', JSON.stringify(c2));
+    // batch 21's cure: a «$» in a name (or a model) is words, never a replacement pattern
+    const dollar = runCreate({ modelLock: true, lockModel: 'claude-haiku-5', lockContext: '1m', model: 'claude-haiku-5', resumeId: 'r5d', name: "a $& b $' c" }, fableCat);
+    ok('§B-6c55 (c) a conversation named «a $& b $\' c»: the English words carry the name as written (a replacement function — a string replacement read «$&» as the match)', dollar.notices.length === 1 && dollar.notices[0].text.startsWith("a $& b $' c is locked to claude-haiku-5"), JSON.stringify(dollar.notices));
+    const adopted = { modelLock: true, lockModel: 'claude-haiku-5', lockContext: '1m', model: 'claude-haiku-5', resumeId: 'r5k' }; const ad = runCreate(adopted, fableCat);
+    const adoptedSaid = []; new Function('data', 'LOCKCTX', 'serverNotice', 'id', NOTICE)({ ...adopted, keeperSid: 'k-1' }, LC, (k) => adoptedSaid.push(k), 'sess-7-2');
+    ok('§B-6c55 (c) an ADOPTED process (keeperSid) keeps the context it started with: the start that adopted it says nothing of a context it never commanded', ad.notices.length === 1 && adoptedSaid.length === 0, { adoptedSaid });
+    {
+      const oldForm = NOTICE.replace("said.replace(/\\{(model|name)\\}/g, (m, k) => (k === 'model' ? model : name))", "said.replace(/\\{model\\}/g, model).replace('{name}', name)");
+      const got = []; new Function('data', 'LOCKCTX', 'serverNotice', 'id', oldForm)({ _contextRefused: 'claude-haiku-5', name: "a $& b" }, LC, (k, text) => got.push(text), 'sess-7-3');
+      ok('§B-6c55 (c) RED CONTROL: the string-replacement form (the tip before the cure) garbles the same name — the «$» leg can go red', oldForm !== NOTICE && got.length === 1 && !got[0].startsWith('a $& b is locked'), got);
+    }
     const gear = runCreate({ modelLock: true, lockModel: 'claude-fable-5', lockContext: '1m', model: 'claude-opus-5-5', resumeId: 'r6' }, null);
     const inst = runCreate({ modelLock: true, model: 'fable[1m]', _modelOrigin: 'instance', resumeId: 'r7' }, null);
     const chosen = runCreate({ modelLock: true, model: 'fable[1m]', _modelOrigin: 'chosen', resumeId: 'r8' }, null);
@@ -4207,9 +4226,25 @@ console.log('\n§B-6c55 a lock keeps the person\'s 1M ask beside its target; the
     const sc = { modelLock: true, lockModel: 'claude-fable-5', lockContext: '1m', model: 'claude-fable-5', resumeId: 'r10' }; runCreate(sc, null);
     ok('§B-6c55 the spawn keeps what it COMMANDED beside its model (_spawnContext \'1m\' — meta spawnContext, restored at boot): a Lock on this process later reads it', sc._spawnContext === '1m' && /_spawnContext: data\._spawnContext \|\| null,/.test(wc) && /spawnContext: session\._spawnContext \|\| undefined,/.test(wc));
     ok('§B-6c55 the catalog reads a dated first-party id and an alias (longContextOf)', LC.longContextOf({ models: [{ id: 'claude-opus-4-5', firstParty: 'claude-opus-4-5-20251101', oneM: null }], aliases: { opus: 'claude-opus-4-5' } }, 'claude-opus-4-5-20251101') === false && LC.longContextOf({ models: [{ id: 'claude-opus-4-5', oneM: null }], aliases: { opus: 'claude-opus-4-5' } }, 'opus[1m]') === false);
+    {
+      // batch 21's cure: MATCHED AS THE CATALOG MATCHES (its own core — src/model-core.js: lowercased, no claude-, no [1m])
+      const CAT = require(path.join(REPO, 'src/claude-model-catalog.js')), MC = require(path.join(REPO, 'src/model-core.js'));
+      const cat = { models: [{ id: 'claude-haiku-5', firstParty: 'claude-haiku-5-20260101', oneM: null }, { id: 'claude-fable-5', oneM: 'native' }], aliases: { haiku: 'claude-haiku-5' } };
+      const spell = ['haiku-5', 'Claude-Haiku-5', 'CLAUDE-HAIKU-5[1M]', 'haiku-5-20260101', 'HAIKU'];
+      ok('§B-6c55 (c) the verdict matches a target spelled without the claude- prefix, in another case, by its dated id or an alias in another case — the catalog\'s own matching; fable-5 has its 1M form', spell.every((m) => LC.longContextOf(cat, m) === false) && LC.longContextOf(cat, 'Fable-5') === true && LC.longContextOf(cat, 'sonnet-5') === null
+        && LC.commandOf('haiku-5', '1m', cat).refused === true, spell.map((m) => LC.longContextOf(cat, m)));
+      ok('§B-6c55 (c) ONE name rule: the catalog\'s core IS src/model-core.js (the lock\'s verdict reads the same function)', CAT.core === MC.core && /^const \{ core \} = require\('\.\/model-core\.js'\);/m.test(fs.readFileSync(path.join(REPO, 'src/lock-context.js'), 'utf8')));
+      // RED CONTROL — a copy of src/lock-context.js with the tip-before-the-cure's exact-id matching put back
+      const LCSRC = fs.readFileSync(path.join(REPO, 'src/lock-context.js'), 'utf8');
+      const CORE_MATCH = "  const alias = Object.keys(al).find((k) => typeof al[k] === 'string' && k.toLowerCase() === name.toLowerCase());   // an alias → its model\n";
+      const ROW_MATCH = "  const row = key ? rows.find((m) => m && ((m.id && core(m.id) === key) || (m.firstParty && core(m.firstParty) === key))) : null;";
+      ok('§B-6c55 (c) setup: the verdict\'s alias and row matching are ONE line each (the control edits them)', LCSRC.split(CORE_MATCH).length === 2 && LCSRC.split(ROW_MATCH).length === 2);
+      const EX = MUTF.load('src/lock-context.js', LCSRC.replace(CORE_MATCH, "  const alias = Object.prototype.hasOwnProperty.call(al, name) && typeof al[name] === 'string' ? name : null;   // stale-pins: kept — the exact-id RED control\n").replace(ROW_MATCH, "  const id = alias ? al[alias] : name; const row = rows.find((m) => m && (m.id === id || m.firstParty === id));   // stale-pins: kept — the exact-id RED control"), 'exact-id');
+      ok('§B-6c55 (c) RED CONTROL: a copy with the exact-id matching (the tip before the cure) leaves these spellings unjudged — the leg above can go red', spell.filter((m) => EX.longContextOf(cat, m) === null).length >= 3, spell.map((m) => EX.longContextOf(cat, m)));
+    }
     ok('§B-6c55 (a) no saved fact and a spawn model without [1m] commands the model as asked; no lock, no fact at all', d.cmd === 'claude-fable-5' && !d.ctx && e.cmd === 'claude-fable-5' && e.ctx === null, JSON.stringify({ d, e }));
     const relWc = baseOf('src/ws-create.js');
-    if (relWc) ok('§B-6c55 RED CONTROL: the release\'s create had no such block — the spawn commanded data.model (claude-fable-5: the 1M ask dropped on every resume after a Lock)', !blockOf(relWc) && /const sessionSpec = adapter\.buildSessionArgs\(\{\s*cwd,\s*model: data\.model,/.test(relWc));
+    if (relWc) ok('§B-6c55 RED CONTROL: the release\'s create had no such block — the spawn commanded data.model (claude-fable-5: the 1M ask dropped on every resume after a Lock)', !blockOf(relWc) && /const sessionSpec = adapter\.buildSessionArgs\(\{\s*cwd,\s*model: data\.model,/.test(relWc));   // stale-pins: kept — reads the RELEASE b06f36e90's create (its spawn commanded data.model) — an older tree on purpose
   }
   // the page's roads: the saved config keeps what the lock frame names; a resume carries it; a restart restores it
   {

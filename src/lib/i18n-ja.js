@@ -3,6 +3,15 @@
 // Generated after each i18n sweep; hand-edited for quality. Missing entries
 // fall back to English automatically.
 export default {
+  // lane login-request-card piece 1 (the design's «Internal links» — the words on screen, LINKS): a link to a conversation or a desktop
+  "Go": "移動",
+  "Go to this desktop": "このデスクトップへ移動",
+  "unknown conversation": "不明な会話",
+  "unknown desktop": "不明なデスクトップ",
+  "link::Resume here": "ここで再開",
+  "Read its history": "履歴を読む",
+  "Opened on {desktop} — it had no window.": "{desktop} で開きました。ウィンドウがありませんでした。",
+  "This conversation is archived — open it from the archived list in the sidebar.": "この会話はアーカイブ済みです。サイドバーのアーカイブ一覧から開いてください。",
   // lane sidebar-echo-order (inc-mwbn2xp8-ks0b, round 9): the page speaks only when it takes something back on the screen
   "The server refused a change ({reason}), so it was undone here": "サーバーが変更を拒否したため、ここで元に戻しました（{reason}）",
   "The server refused a change, so it was undone here.": "サーバーが変更を拒否したため、ここで元に戻しました。",
@@ -645,6 +654,14 @@ export default {
   "Live": "実行中",
   "External": "外部",
   "Stopped": "停止",
+  "Stopped (still checking)": "停止（確認中）",
+  "«{name}» was not resumed: it is running in another terminal": "「{name}」は再開していません：別の端末で動いています",
+  "«{name}» was not resumed: still checking whether it runs in another terminal — resume it by itself": "「{name}」は再開していません：別の端末で動いているか確認中です — 単独で再開してください",
+  "still checking whether it runs in another terminal": "別の端末で動いているか確認中",
+  "{n} not resumed: still checking whether they run in another terminal — resume each one by itself": "{n} 件は再開していません：別の端末で動いているか確認中です — 1 件ずつ再開してください",
+  "Still checking «{name}»": "「{name}」を確認中",
+  "VibeSpace has not finished checking whether this conversation is running in another terminal. Resuming it now could start a second agent on the same conversation.": "この会話が別の端末で動いているか、VibeSpace はまだ確認を終えていません。今再開すると、同じ会話で 2 つ目のエージェントが起動するかもしれません。",
+  "Resume anyway": "それでも再開",
   "Archived": "アーカイブ済み",
   "Focus window": "ウィンドウをフォーカス",
   "Expand card": "カードを展開",
@@ -716,6 +733,22 @@ export default {
   "At least 4 characters": "4 文字以上",
   "Attach": "アタッチ",
   "Attach image": "画像を添付",
+  // B-c9ed: THE picture rule's words (src/image-attach-rule.js REFUSAL_WORDS) + the door's toast (src/lib/image-attach.js)
+  "The file is empty": "ファイルが空です",
+  "HEIC pictures cannot be sent — save it as JPEG or PNG first": "HEIC 画像は送信できません——先に JPEG か PNG で保存してください",
+  "Not a picture the model can read (PNG, JPEG, GIF or WebP)": "モデルが読める画像ではありません（PNG、JPEG、GIF、WebP）",
+  "{size} — larger than {mb} MB, the largest picture the model takes": "{size}——モデルが受け付ける画像の上限 {mb} MB を超えています",
+  "{w} × {h} pixels — the model takes at most {side} pixels on a side": "{w} × {h} ピクセル——モデルが受け付ける画像は 1 辺 {side} ピクセルまで",
+  "With it, this message's pictures pass {total} MB — the most one request to the model carries": "これを加えると、このメッセージの画像が {total} MB を超えます——モデルへの 1 回のリクエストの上限です",
+  "The file could not be read": "ファイルを読み込めませんでした",
+  "With it, this message's pictures pass {carry} MB — the most VibeSpace carries in one message": "これを加えると、このメッセージの画像は {carry} MB を超えます——VibeSpace が 1 つのメッセージで運べる上限です",
+  "The conversation has just started and cannot take this reply ({mb} MB) yet — nothing was sent; wait a moment and send it again": "会話は起動したばかりで、まだこの返信（{mb} MB）を受け取れません——何も送信されていません。少し待ってからもう一度送信してください",
+  "{name} — {why}": "{name}——{why}",
+  "the pasted picture": "貼り付けた画像",
+  "{n} picture(s)": "画像 {n} 枚",
+  "{label} sent — the {n} picture(s) in the reply box were not sent": "「{label}」を送信しました——返信欄の画像 {n} 枚は送信していません",
+  "Picture not added: {line}": "画像を追加しませんでした：{line}",
+  "{n} pictures not added: {lines}": "{n} 枚の画像を追加しませんでした：{lines}",
   "Auth will be disabled — anyone who can reach this server gets full access.": "認証が無効になります——このサーバーに到達できる人は誰でもフルアクセスできます。",
   "Auto-fallback: the harness is serving {served} instead of {model} (capacity/overload). Click to re-pick.": "自動フォールバック：ハーネスは {model} の代わりに {served} を使用しています（容量/過負荷）。クリックで選び直し。",
   "Safety-classifier fallback: {from} flagged a message{category}, so {served} is answering instead of {model}. Your model setting is unchanged. Click to re-pick.": "安全分類器フォールバック：{from} がメッセージをブロックしました{category}。そのため {model} の代わりに {served} が応答しています。モデル設定は変わっていません。クリックで選び直し。",
@@ -891,6 +924,11 @@ export default {
   "Interrupted": "中断しました",
   "LIVE": "実行中",
   "LIVE (VibeSpace-managed)": "実行中（VibeSpace 管理）",
+  "CPU priority": "CPU 優先度",
+  "Below the server (nice +{n}) — and everything it starts": "サーバーより低い（nice +{n}）——起動するものもすべて同じ",
+  "The server’s own — lowering it is off in Settings": "サーバーと同じ——設定で引き下げがオフ",
+  "The server’s own — this machine has no nice program": "サーバーと同じ——このマシンには nice プログラムがない",
+  "Set by its own machine — not lowered from here": "そのマシンが決める——ここからは下げない",
   "Layout presets": "レイアウトプリセット",
   "Layouts & desktops": "レイアウトとデスクトップ",
   "Link folder to a task": "フォルダをタスクにリンク",
@@ -951,6 +989,7 @@ export default {
   "Open": "開く",
   "Open Login Terminal": "ログインターミナルを開く",
   "Open in editor": "エディタで開く",
+  "Could not open the block in an editor: {error}": "このブロックをエディタで開けませんでした：{error}",
   "Open link": "リンクを開く",
   "Open login terminal": "ログインターミナルを開く",
   "Optional — anyone who can reach this server gets full shell access. A password gates pages, APIs, and terminals.": "任意——このサーバーに到達できる人は誰でもフルシェルアクセスを得ます。パスワードはページ・API・ターミナルへのアクセスを制限します。",
@@ -1083,6 +1122,7 @@ export default {
   "Set model": "モデルを設定",
   "Set password": "パスワードを設定",
   "Set password…": "パスワードを設定…",
+  "Sign-in is off: anything that can reach VibeSpace can change these limits. Set a password so only you can.": "サインインがオフです：VibeSpace に接続できるものなら何でもこれらの上限を変更できます。パスワードを設定すると、あなただけが変更できます。",
   "Set status…": "ステータスを設定…",
   "Set up both…": "両方をセットアップ…",
   "Show all agent types": "すべてのエージェントタイプを表示",
@@ -1119,6 +1159,9 @@ export default {
   "Terminate": "終了",
   "Terminate Session": "セッションを終了",
   "Terminate session \"{name}\"? The running agent process will be killed.": "セッション \"{name}\" を終了しますか？実行中のエージェントプロセスが強制終了されます。",
+  "\"{name}\" ended, but {n} of the processes it started could not be stopped ({names}) — they may still be running.": "「{name}」は終了しましたが、起動したプロセスのうち {n} 件を停止できませんでした（{names}）。まだ動いている可能性があります。",
+  "\"{name}\" ended, but {n} of the processes it started could not be stopped ({names}) and its process list was read only in part — more of them may still be running.": "「{name}」は終了しましたが、起動したプロセスのうち {n} 件を停止できず（{names}）、プロセス一覧も一部しか読めませんでした。さらに多くが動いている可能性があります。",
+  "\"{name}\" ended, but its process list was read only in part — some processes it started may still be running.": "「{name}」は終了しましたが、プロセス一覧は一部しか読めませんでした。起動したプロセスの一部がまだ動いている可能性があります。",
   "Test": "テスト",
   "The agent hasn't kept a todo list": "エージェントは TODO リストを保持していません",
   "The agent keeps working until this condition is met:": "エージェントはこの条件が満たされるまで作業を続けます:",
@@ -1654,10 +1697,16 @@ export default {
   "The account is fixed when the CLI starts, so the session restarts and the conversation continues via resume.": "アカウントは CLI 起動時に固定されるため、セッションを再起動します。会話は resume で継続されます。",
   "Switch & restart": "切り替えて再起動",
   "Nothing to resume yet — send a message first, or pick the account in the New Session dialog": "まだ再開できる会話がありません — まずメッセージを送るか、新規セッションでアカウントを選んでください",
-  "Manual (⟳ button) — plus ONE automatic read after a usage wall": "手動（⟳ ボタン）— 使用量の上限に達した後に 1 回だけ自動で読み取り",
+  "Manual (⟳ button)": "手動（⟳ ボタン）",
+  "Antigravity usage reads": "Antigravity の使用量読み取り",
+  "Automatically": "自動",
+  "Only when I press Re-check": "「再チェック」を押した時だけ",
+  "Automatically: an account's usage is read once each time one of its conversations hits a usage wall, and once after a stretch of work — when a turn ends and 5 minutes pass with no new turn on the account; that read comes at most once per account per 30 minutes, never during a turn, never for an idle account. Only when I press Re-check: nothing is read by itself. Either way, Re-check in the account's menu reads it: this row decides only the reads that happen by themselves.": "自動：アカウントの会話が使用量の上限に達するたびに 1 回、作業の区切りが来てそのアカウントに 5 分間新しいターンがない時に 1 回読み取ります——後者はアカウントごとに 30 分に最大 1 回、ターン中は読まず、アイドルのアカウントも読みません。「再チェック」を押した時だけ：自動では読みません。どちらを選んでも、アカウントのメニューの「再チェック」は読み取ります：この行が決めるのは自動の読み取りだけです。",
+  "Usage read {n}× today: {person} by you · {wall} after a usage wall · {after} after a stretch of work": "今日の使用量の取得 {n} 回：手動 {person} 回 · 上限到達後 {wall} 回 · 作業の区切り後 {after} 回",
+  "usage read {n}× today": "今日 {n} 回取得",
   "Auto on popup open (when >30 min stale)": "ポップアップを開いた時に自動（30 分以上古い場合のみ）",
   "Off (never contact Anthropic)": "オフ（Anthropic に一切リクエストしない）",
-  "On-demand quota refresh (model-scoped limits like Fable)": "オンデマンドのクォータ更新（Fable などモデル別上限）",
+  "Claude usage refresh (model-scoped limits like Fable)": "Claude の使用量の更新（Fable などモデル別の上限）",
   "Model-scoped weekly limits (e.g. Fable) aren’t in the passive feed — on-demand refresh is disabled in Settings": "モデル別の週次上限（Fable など）はパッシブ収集に含まれません — オンデマンド更新は設定で無効化されています",
   "Message metadata": "メッセージメタデータ",
   "Role": "ロール",
@@ -1820,7 +1869,6 @@ export default {
   "apiKeyHelper overrides this login": "apiKeyHelper がこのログインを上書きしています",
   "That file lives on {host} — this terminal runs on {mine}; path not typed": "そのファイルは {host} 上にあります — このターミナルは {mine} で動作中のためパスは入力されませんでした",
   "this machine": "このマシン",
-  "The CLI prefers a configured apiKeyHelper over the OAuth login — sessions on this machine bill via the helper key. Remove apiKeyHelper from ~/.claude/settings.json to bill the subscription.": "CLI は OAuth ログインより設定済みの apiKeyHelper を優先します — このマシンのセッションは helper のキーで課金されます。サブスクリプションで課金するには ~/.claude/settings.json から apiKeyHelper を削除してください。",
   "Why API billing? apiKeyHelper is set on the machine": "なぜ API 課金？マシンに apiKeyHelper が設定されています",
   "VibeSpace agent integration (master switch)": "VibeSpace エージェント連携（マスタースイッチ）",
   "Everything the AGENT can see or use from VibeSpace. ON (default): sessions get the VibeSpace hooks (Task Group context, per-turn reminders, stop nudge) and the vibespace-status/ask/task tools on their PATH. OFF: the model gets a pristine claude/codex — the hook registration is removed from ~/.claude/settings.json and ~/.codex/hooks.json immediately (restored on re-enable, unless you had removed the hook manually in Manage Agents), new sessions spawn with no VibeSpace env or tools, and already-running sessions stop receiving injected context, nudges and task reads. Model-INVISIBLE plumbing keeps working either way: passive usage capture (statusline), billing/account env, the Ctrl+G editor, session persistence and remote transport. Every option below only applies while this is ON.": "エージェントから見える・使える VibeSpace 連携すべてを統括します。オン（既定）：セッションは VibeSpace フック（タスクグループのコンテキスト、ターンごとのリマインダー、停止ナッジ）と PATH 上の vibespace-status/ask/task ツールを利用します。オフ：モデルは素の claude/codex を得ます — フック登録は ~/.claude/settings.json と ~/.codex/hooks.json から即座に削除され（再度オンにすると復元。ただし Manage Agents で手動削除していた場合を除く）、新しいセッションには VibeSpace の環境変数・ツールが一切付かず、実行中のセッションもコンテキスト注入・ナッジ・タスク読み取りを受け取らなくなります。モデルから見えない配管はどちらの状態でも動き続けます：受動的な使用量キャプチャ（statusline）、課金/アカウント環境変数、Ctrl+G エディタ、セッション永続化、リモート転送。以下のオプションはすべてこのスイッチがオンの間のみ有効です。",
@@ -2413,7 +2461,7 @@ export default {
   "Extra “tailscale up” flags — applied on the next Log in / mode change. Reachability flags we manage (--socket/--tun/--accept-routes/--accept-dns/proxy) are ignored.": "追加の tailscale up フラグ——次回のログイン/モード変更時に適用。管理対象の到達性フラグ（--socket/--tun/--accept-routes/--accept-dns/proxy）は無視されます。",
   "Let Tailscale set this machine's DNS (MagicDNS)": "このマシンの DNS を Tailscale に任せる（MagicDNS）",
   "Reach tailnet hosts from browsers": "ブラウザーから tailnet のマシンに接続",
-  "On: while Tailscale runs, the browsers here open a tailnet machine by its name (https://nas:8006/) — only tailnet hosts go through Tailscale, everything else goes direct, and this machine's DNS is never changed. A browser with a proxy of its own keeps it. Kernel mode: a change takes effect at once for running browsers. Userspace: a running browser follows at its next start. A browser started while this was off reaches tailnet hosts from its next start; the in-page browser always follows at once.": "オン：Tailscale の実行中、ここのブラウザーは tailnet のマシンを名前で開けます（https://nas:8006/）—— Tailscale を通るのは tailnet のホストだけで、それ以外は直接接続し、このマシンの DNS は変更しません。独自のプロキシを持つブラウザーはそれを使い続けます。カーネルモード：変更は実行中のブラウザーにすぐ反映されます。ユーザースペース：実行中のブラウザーは次回起動から反映されます。これがオフの間に起動したブラウザーは、次回起動から tailnet のマシンに届きます。ページ内ブラウザーは常にすぐ反映されます。",
+  "On: while Tailscale runs, the browsers here open a tailnet machine by its name (https://nas:8006/) — only tailnet hosts go through Tailscale, everything else goes direct, and this machine's DNS is never changed. A browser with a proxy of its own keeps it. Kernel mode: a change takes effect at once for running browsers. Userspace: a running browser follows at its next start. A browser started while this was off reaches tailnet hosts from its next start; the in-page browser follows at its next connection.": "オン：Tailscale の実行中、ここのブラウザーは tailnet のマシンを名前で開けます（https://nas:8006/）—— Tailscale を通るのは tailnet のホストだけで、それ以外は直接接続し、このマシンの DNS は変更しません。独自のプロキシを持つブラウザーはそれを使い続けます。カーネルモード：変更は実行中のブラウザーにすぐ反映されます。ユーザースペース：実行中のブラウザーは次回起動から反映されます。これがオフの間に起動したブラウザーは、次回起動から tailnet のマシンに届きます。ページ内ブラウザーは次の接続から反映されます。",
   "Off: Tailscale never changes /etc/resolv.conf, and tailnet names still reach ssh hosts through the plugin. On: a machine of your own in kernel mode resolves through Tailscale (100.100.100.100). Never on a cluster instance.": "オフ：Tailscale は /etc/resolv.conf を変えず、tailnet の名前はプラグイン経由で ssh ホストに届きます。オン：自分のマシンのカーネルモードで Tailscale（100.100.100.100）経由の名前解決になります。クラスターのインスタンスでは常にオフ。",
   "DNS: Tailscale MagicDNS": "DNS：Tailscale MagicDNS",
   "DNS: Tailscale still holds /etc/resolv.conf — turn Tailscale off and on to restore it": "DNS：/etc/resolv.conf はまだ Tailscale のもの——Tailscale をオフにしてオンに戻すと元に戻ります",
@@ -2617,7 +2665,13 @@ export default {
   "{name}: your settings file is used as it is — the output style you picked in VibeSpace is not applied; put it into the file, or drop the --settings flag": "{name}：あなたの設定ファイルがそのまま使われます——VibeSpace で選んだ出力スタイルは適用されません。ファイルに書き込むか、--settings フラグを外してください",
   "{name}: your settings file is used as it is — «Disable model fallback» from VibeSpace is not applied; put it into the file, or drop the --settings flag": "{name}：あなたの設定ファイルがそのまま使われます——VibeSpace の「モデルフォールバックを無効化」は適用されません。ファイルに書き込むか、--settings フラグを外してください",
   "{name}: your settings file is used as it is — VibeSpace does not set crossSessionInbound, so Background Work notices reach it only if the file accepts them; or drop the --settings flag": "{name}：あなたの設定ファイルがそのまま使われます——VibeSpace は crossSessionInbound を設定しないため、バックグラウンド作業の通知はファイルが受け付ける場合だけ届きます。または --settings フラグを外してください",
-  "{name} is set to bill through the subscription, so your settings file was set aside for this start, all of it — clear the pick to use the file": "{name} はサブスクリプションで課金する設定のため、今回の起動ではあなたの設定ファイルを丸ごと使っていません——ファイルを使うには選択を解除してください",
+  "{name} bills the subscription chosen for it and the Claude settings of its machine name an apiKeyHelper, so your settings file was set aside for this start, all of it — to use the file, set its billing to «CLI login»": "{name} は選ばれたサブスクリプションで課金され、そのマシンの Claude 設定が apiKeyHelper を指定しているため、この起動では設定ファイル全体を使っていません——ファイルを使うには、課金を「CLI ログイン」に切り替えてください",
+  "{name} bills the subscription chosen for it, and whether the Claude settings of its machine name an apiKeyHelper could not be read, so your settings file was set aside for this start, all of it — to use the file, set its billing to «CLI login»": "{name} は選ばれたサブスクリプションで課金され、そのマシンの Claude 設定が apiKeyHelper を指定しているかを読み取れなかったため、この起動では設定ファイル全体を使っていません——ファイルを使うには、課金を「CLI ログイン」に切り替えてください",
+  "{name} bills {account}, the subscription you picked — the apiKeyHelper in this machine’s Claude settings is not used for it. To bill through the helper, set its billing to «CLI login» (from its next start)": "{name} は選択したサブスクリプション {account} で課金されます——このマシンの Claude 設定にある apiKeyHelper はこの会話には使われません。helper で課金するには、課金を「CLI ログイン」に切り替えてください（次の起動から）",
+  "{name} bills {account}, the subscription you picked — the apiKeyHelper in the Claude settings on {host} is not used for it. To bill through the helper, set its billing to «CLI login @ {host}» (from its next start)": "{name} は選択したサブスクリプション {account} で課金されます——{host} の Claude 設定にある apiKeyHelper はこの会話には使われません。helper で課金するには、課金を「CLI ログイン @ {host}」に切り替えてください（次の起動から）",
+  "{name} runs on {account}, a third-party provider paid by use with your own key — the apiKeyHelper named in the Claude settings it reads is not used for it (VibeSpace sets it aside so it cannot outrank the provider’s key)": "{name} はサードパーティのプロバイダー {account} で動き、自分のキーで従量課金されます——読み込む Claude 設定で指定された apiKeyHelper はこの会話には使われません（プロバイダーのキーより優先されないよう、VibeSpace が外しています）",
+  "{name} runs on a third-party provider and a Claude settings file it reads names an apiKeyHelper, so your settings file was set aside for this start, all of it — VibeSpace sets a helper aside so it cannot outrank the provider’s own key; to use your file, take the apiKeyHelper out of the settings that name it (this machine’s, the project’s .claude files, or your file itself)": "{name} はサードパーティのプロバイダーで動き、読み込む Claude 設定ファイルのどれかが apiKeyHelper を指定しているため、この起動では設定ファイル全体を使っていません——プロバイダー自身のキーより優先されないよう、VibeSpace は helper を外しています。ファイルを使うには、apiKeyHelper を指定している設定（このマシンのもの、プロジェクトの .claude のファイル、またはあなたのファイル自体）から外してください",
+  "{name} runs on a third-party provider, and whether a Claude settings file it reads names an apiKeyHelper could not be read, so your settings file was set aside for this start, all of it — VibeSpace sets a helper aside so it cannot outrank the provider’s own key": "{name} はサードパーティのプロバイダーで動き、読み込む Claude 設定ファイルが apiKeyHelper を指定しているかを読み取れなかったため、この起動では設定ファイル全体を使っていません——プロバイダー自身のキーより優先されないよう、VibeSpace は helper を外しています",
   "Disable model fallback": "モデルフォールバックを無効化",
   "When safeguards flag a message, pause the turn instead of automatically switching to another model (the CLI's \"Switch models when a message is flagged\" set to off). Applies to new sessions at start and to running chat sessions from their next turn; sessions started while enabled also cover their subagents. A stopped turn shows a notice — rephrase and resend to continue.": "セーフガードがメッセージをフラグした際、別モデルへ自動で切り替えず、そのターンを一時停止します（CLI の \"Switch models when a message is flagged\" をオフに相当）。新規セッションは起動時から、実行中のチャットセッションは次のターンから適用。有効中に開始したセッションはサブエージェントも対象。停止したターンには通知が表示されます——言い換えて再送すれば続行できます。",
   "⚠ Safeguards stopped this turn: {model} flagged the message and model fallback is disabled, so it was NOT retried on another model. Rephrase and resend to continue on {model}.": "⚠ セーフガードがこのターンを停止しました：{model} がこのメッセージをフラグし、モデルフォールバックは無効のため、別モデルでの再試行は行われませんでした。言い換えて再送すれば {model} で続行できます。",
@@ -2652,7 +2706,7 @@ export default {
   "The server did not answer the re-attach — it may have restarted. If the session is still running, Resume reconnects to it.": "サーバーが再接続に応答しませんでした——再起動した可能性があります。セッションがまだ実行中なら、Resume で再接続できます。",
   "The server is degraded — its main thread is saturated ({lag}ms median lag). Everything will feel slow; sessions are NOT dead.": "サーバーが劣化状態です——メインスレッドが飽和しています（中央値遅延 {lag}ms）。全体的に遅くなりますが、セッションは生きています。",
   "The CLI prefers a configured apiKeyHelper over the machine’s own OAuth login. Picking a NAMED subscription account below bypasses the helper for that session (the helper is neutralized at spawn); this CLI-login entry keeps billing via the helper.": "CLI はマシンの OAuth ログインより設定済み apiKeyHelper を優先します。下の名前付きサブスクリプションアカウントを選ぶと、そのセッションでは helper がバイパスされます（起動時に無効化）。この「CLI ログイン」項目は引き続き helper 経由の API 課金です。",
-  "The CLI prefers a configured apiKeyHelper over the OAuth login — sessions using the machine’s own login bill via the helper key. Sessions where you explicitly pick a subscription account bypass the helper automatically (2.236.0); to change the machine-wide default, remove apiKeyHelper from ~/.claude/settings.json.": "CLI は OAuth ログインより設定済み apiKeyHelper を優先します——マシン自身のログインを使うセッションは helper キーで API 課金されます。サブスクリプションアカウントを明示的に選んだセッションは自動的に helper をバイパスします（2.236.0）。マシン全体のデフォルトを変えるには ~/.claude/settings.json から apiKeyHelper を削除してください。",
+  "The CLI prefers a configured apiKeyHelper over the OAuth login — sessions using the machine’s own login bill via the helper key. Sessions that bill a subscription account you chose bypass the helper (from their next start); to change the machine-wide default, remove apiKeyHelper from ~/.claude/settings.json.": "CLI は OAuth ログインより設定済み apiKeyHelper を優先します——マシン自身のログインを使うセッションは helper キーで API 課金されます。選んだサブスクリプションアカウントで課金されるセッションは helper をバイパスします（次の起動から）。マシン全体のデフォルトを変えるには ~/.claude/settings.json から apiKeyHelper を削除してください。",
   "Conversation found — retry now?": "会話は残っています——今すぐ再試行しますか？",
   "The last resume failed because the CLI looked in the wrong folder, but this conversation’s transcript EXISTS — nothing is lost. Retry the resume right now (this skips the retry cooldown)?": "前回の再開は CLI が誤ったフォルダを探したため失敗しましたが、この会話のトランスクリプトは存在します——何も失われていません。今すぐ再開を再試行しますか？（再試行クールダウンをスキップします）",
   "Retry resume now": "今すぐ再試行",
@@ -2677,7 +2731,7 @@ export default {
   'Fetch fresh quota for every signed-in account and machine below — one on-demand request per identity, only when you click (never scheduled)': '下のログイン済みアカウントとマシンすべての最新クォータを取得します — 各アイデンティティにつきオンデマンドの1リクエスト、クリック時のみ（定期実行はしません）',
   'Only accounts usable on {host} are listed — the full roster lives under “This machine”. The “CLI login” row is {host}’s own login.': '{host} で使用可能なアカウントのみ表示しています — 全アカウントは「このマシン」セクションにあります。「CLI login」行は {host} 自身のログインです。',
   'Machine unreachable — account availability unknown. Accounts are managed under “This machine”.': 'マシンに到達できません — アカウントの利用可否は不明です。アカウントの管理は「このマシン」セクションで行えます。',
-  'On-demand quota refresh is disabled in Settings': 'オンデマンドのクォータ更新は設定で無効になっています',
+  "Claude usage refresh is Off in Settings": "Claude の使用量の更新は設定でオフになっています",
   'Nothing to refresh — no signed-in accounts or machines': '更新対象がありません — ログイン済みのアカウントやマシンがありません',
   'Full overview →': '全体ビュー →',
   'Refresh quota': 'クォータを更新',
@@ -2770,7 +2824,10 @@ export default {
   "Add via long-lived token": "長期トークンで追加",
   "est {pct}%": "推定 {pct}%",
   "window reset since last reading": "前回取得後にウィンドウがリセット",
-  "Dead-reckoned estimate: last confirmed reading + your local usage since, at learned rates. ⟳ fetches a fresh reading to re-calibrate.": "推測航法による推定：最後の実測値にその後のローカル使用量を学習レートで加算（破線部分）。⟳ で実測値を取得して補正します。",
+  "about {pct}%": "約 {pct}%",
+  "about {pct}% · from {n} readings on this hub": "約 {pct}% · このハブの {n} 回の取得から",
+  "An estimate, not a bound: the last reading plus this hub's use since, at this account's learned rate.": "推定値であり上限ではありません：前回の取得値に、その後このハブで使った分をこのアカウントの学習済みの速度で足したもの。",
+  "{n} requests here since": "その後このハブで {n} 回のリクエスト",
   "Pooled account — one billing identity auto-switching across your subscriptions": "プールアカウント — 1つの請求アイデンティティがサブスクリプション間を自動切替",
 
   // ── i18n coverage sweep (missing-key fill, added post-2.265.0 fix campaign) ──
@@ -3023,12 +3080,14 @@ export default {
   "Job auto-notify": "ジョブ自動通知",
   "Local session discovery via device daemon": "ローカルセッション検出をデバイスデーモン経由に",
   "Local sessions via device daemon (R6)": "ローカルセッションをデバイスデーモン経由に（R6）",
+  "Run conversations below the server\u2019s priority": "会話をサーバーより低い優先度で実行",
+  "Every conversation and background job on this machine starts at a lower CPU priority than the server (nice +5), and so does everything it starts \u2014 a busy build in a conversation then gives way to the server. Off: they start at the server\u2019s own priority. A change applies from the next start; a running one keeps its priority (Session Properties shows it).": "このマシンの会話とバックグラウンドジョブはすべてサーバーより低い CPU 優先度（nice +5）で起動し、それが起動するものもすべて同じです——会話の中の重いビルドはサーバーに譲ります。オフ：サーバーと同じ優先度で起動します。変更は次の起動から適用され、実行中のものは元の優先度のままです（セッションのプロパティに表示）。",
   "New local chat sessions run as device-daemon pipe sessions instead of dtach — the session-brain final form (survives server restarts via the daemon). Existing sessions are never migrated; any daemon failure falls back to dtach at spawn. Leave off until the device-assisted consumer path has soaked.": "新規ローカルチャットセッションを dtach ではなくデバイスデーモンの pipe セッションとして実行します — session-brain の最終形（デーモン経由でサーバー再起動を生き延びます）。既存セッションは移行されません。デーモン障害時は spawn 時に dtach へフォールバック。十分に検証されるまでオフのままに。",
   "Off": "オフ",
   "On": "オン",
   "Stopped {n} other process(es) that were still writing this conversation on {host} — resuming cleanly.": "{host} でこの会話にまだ書き込んでいた {n} 個のプロセスを停止しました — クリーンに再開します。",
   "The 5s session-list sweep reads its filesystem facts (lock files, transcript listing, tail ids) from the device daemon's snapshot — computed in a daemon child process, so a slow or network-mounted home directory can never stall the server. Local enrichment (window mapping, tmux) is unaffected. Falls back to the local scan on any failure.": "5 秒ごとのセッション一覧スイープのファイルシステム情報（ロックファイル・トランスクリプト一覧・末尾 id）をデバイスデーモンのスナップショットから読みます — デーモンの子プロセスで計算されるため、遅い／ネットワークマウントのホームでもサーバーが固まりません。ローカル補完（ウィンドウ対応、tmux）は影響なし。失敗時はローカルスキャンへフォールバック。",
-  "The passive statusline feed only carries the 5h/7d windows — model-scoped weekly limits (e.g. Fable) can ONLY come from asking Anthropic’s usage endpoint with the account’s own login token. This is the same non-billable call the CLI makes when you run /usage, throttled to ≥60s per account and honoring rate-limit backoff, and it NEVER runs on a timer. It is user-initiated traffic, categorically different from the background polling that has gotten accounts banned — but it is still an off-CLI request with a subscription token, so it is your call: Manual = when you click ⟳, and once by itself when an Antigravity conversation hits a usage wall; Auto = also once when you open the quota popup and the data is stale; Off = never (the ⟳ button disappears and scoped limits stay unknown); Auto via the CLI = a background loop spawns “claude -p /usage” (the official binary makes the fetch — this app never calls the endpoint itself) with a BURN-AWARE cadence: refreshes within minutes when the dead-reckoner sees real spending drift, 45min-with-jitter staleness cap for active accounts, and idle accounts are never polled.": "パッシブな statusline は 5h/7d ウィンドウのみを運びます — モデル別の週次上限（例：Fable）はアカウント自身のログイントークンで Anthropic の usage エンドポイントに問い合わせるしかありません。これは /usage 実行時に CLI が行うのと同じ非課金呼び出しで、アカウントごとに 60 秒以上に絞られ、レート制限バックオフに従い、タイマーでは決して実行されません。ユーザー起点のトラフィックであり、BAN の原因となったバックグラウンドポーリングとは本質的に異なります — それでも購読トークンでの CLI 外リクエストなので判断はあなた次第：手動 = ⟳ クリック時、および Antigravity の会話が使用量の上限に達した時に自動で 1 回；自動 = クォータポップアップを開いてデータが古い時にも 1 回；オフ = 常になし（⟳ ボタンは消え、モデル別上限は不明のまま）；CLI 経由の自動 = バックグラウンドループが 「claude -p /usage」 を spawn（公式バイナリが取得 — 本アプリ自身はエンドポイントを呼びません）し、消費量に応じたリズムで動きます：実消費のドリフト検出時は数分以内、アクティブなアカウントは 45 分＋ジッターの鮮度上限、アイドルなアカウントはポーリングされません。",
+  "Reads each Claude account’s limits from Anthropic — the only source of model-scoped weekly limits like Fable, which the passive statusline feed does not carry. Manual: only when you press ⟳, at most once a minute per account. Auto on popup open: also once when you open the quota popup and its reading is over 30 minutes old. Auto via the CLI: the official claude CLI reads /usage in the background — sooner while an account burns quota, never for an idle one. Off: never contacts Anthropic; the popup hides its ⟳, and Refresh all says it is off.": "各 Claude アカウントの上限を Anthropic から読み取ります——Fable などモデル別の週上限はこの方法でしか読めず、受動的な statusline には含まれません。手動：⟳ を押した時だけ、アカウントごとに 1 分に最大 1 回。ポップアップを開いた時に自動：クォータのポップアップを開き、読み取りが 30 分以上古い時にも 1 回読みます。CLI 経由の自動：公式 claude CLI がバックグラウンドで /usage を読みます——消費が速いアカウントほど早く、アイドルのアカウントは読みません。オフ：Anthropic に一切接続しません。ポップアップの ⟳ は隠れ、「すべて更新」はオフであることを知らせます。",
   "This conversation is NOT notified when its background jobs finish — agents must poll. Toggle globally in Settings → Integration, per group in the group window.": "この会話はバックグラウンドジョブの完了を通知されません — エージェントは自分でポーリングする必要があります。全体設定は 設定 → 連携、グループ別はグループウィンドウで。",
   "When a background job finishes, fails, is parked, or needs input, its owner conversation gets a message through Claude Code’s own cross-session messaging inbox (delivered by the CLI under its inbound rules; an idle session starts a turn, billed like a typed prompt). When the conversation is closed, the notification is stashed and injected the next time it resumes. Per-group override in the Task Group detail window; per-job override at creation (--notify on/off).": "バックグラウンドジョブが完了・失敗・パーク・入力要求すると、所有会話は Claude Code 自身のクロスセッションメッセージ受信箱経由でメッセージを受け取ります（CLI が自身の受信ルールに従って配送；アイドルなセッションはターンを開始し、手入力のプロンプトと同様に課金）。会話が閉じている間は通知が保管され、次回再開時に注入されます。グループ別の上書きはタスクグループ詳細ウィンドウ、ジョブ別は作成時（--notify on/off）。",
   "When a background job owned by one of this group's conversations finishes, fails, or asks for input, message that conversation (Claude Code cross-session messaging; stashed for resume when it is closed). \"Inherit\" follows the global Integration setting.": "このグループの会話が所有するバックグラウンドジョブが完了・失敗・入力要求した時、その会話へメッセージを送ります（Claude Code クロスセッションメッセージ；会話が閉じている間は再開まで保管）。「継承」はグローバルの連携設定に従います。",
@@ -3532,6 +3591,8 @@ export default {
   "Handed to the running turn — the agent reads it at its next tool call": "実行中のターンに渡しました · 次のツール呼び出しで届きます",
   "Stop came before the agent read it. It stays in the conversation and reaches the agent with the next message it gets — yours, or a notice that wakes it — so there is no need to send it again": "エージェントが読む前に停止しました。会話には残っていて、エージェントが次に受け取るメッセージ（あなたのもの、または起こす通知）と一緒に届きます — もう一度送る必要はありません",
   "{k} message(s) unread when stopped — they go with your next message": "{k} 件のメッセージは停止時に未読 · 次のメッセージと一緒に届きます",
+  "The Stop arrived after the message handed in earlier had already gone to the model — it was cut off at once, and it may be billed": "停止が届いた時点で、先に送ったメッセージはすでにモデルに送られていました——すぐに打ち切りましたが、課金される場合があります",
+  "The Stop arrived after the message handed in earlier had already gone to the model — it was answered before the Stop reached it, and it is billed": "停止が届いた時点で、先に送ったメッセージはすでにモデルに送られていました——停止が届く前に回答され、課金されます",
   "{k} message(s) you sent into the turn had already reached the agent": "ターンに送った {k} 件のメッセージはすでにエージェントに届いていました",
   "Enter hands it to the running turn — the agent reads it at its next tool call": "Enter で実行中のターンに渡す — エージェントは次のツール呼び出しで読みます",
   "Alt+Enter queues it until the turn ends — editable until then": "Alt+Enter でターン終了までキュー — それまでは編集できます",
@@ -3818,7 +3879,7 @@ export default {
   "{cmd} — not offered": "{cmd} —— 提供しません",
   "Spending": "支出",
   "Unattended turns per account per hour": "アカウントごと・1時間あたりの無人ターン上限",
-  "The most turns VibeSpace may start by itself on ONE account in a rolling hour — the auto-continue after a usage limit, the Stop bookkeeping nudge, Background Work notifications and messages from other sessions all count. Turns YOU type are never counted, and neither is a button you press that says “starts a turn” (Hand over now, Wake now, Hand back). 0 = no automatic turns at all on any account. When a budget is spent the refusal is journalled and filed in the “For you” inbox; nothing is lost — a notification that cannot be delivered live is injected into the conversation’s next turn instead.": "VibeSpace が同一アカウント上で自動的に開始できるターンの上限(直近1時間)——使用上限後の自動継続、Stop の記帳ナッジ、Background Work の通知、他セッションからのメッセージがすべて数えられます。あなたが入力したターンは決して数えません。「ターンが始まります」と書かれたボタン（今すぐ渡す・今すぐ起こす・戻す）を押した場合も数えません。0 = どのアカウントでも自動ターンを一切行いません。予算を使い切ると拒否がログと「For you」受信箱に記録されます。失われるものはありません——即時配信できない通知は、その会話の次のターンに注入されます。",
+  "The most turns VibeSpace may start by itself on ONE account in a rolling hour — the auto-continue after a usage limit, the Stop bookkeeping nudge, Background Work notifications and messages from other sessions all count. Turns YOU type are never counted, and neither is a button you press that says “starts a turn” (Hand over now, Wake now, Hand back, Resume all). 0 = no automatic turns at all on any account. When a budget is spent the refusal is journalled and filed in the “For you” inbox; nothing is lost — a notification that cannot be delivered live is injected into the conversation’s next turn instead.": "VibeSpace が同一アカウント上で自動的に開始できるターンの上限(直近1時間)——使用上限後の自動継続、Stop の記帳ナッジ、Background Work の通知、他セッションからのメッセージがすべて数えられます。あなたが入力したターンは決して数えません。「ターンが始まります」と書かれたボタン（今すぐ渡す・今すぐ起こす・戻す・すべて再開）を押した場合も数えません。0 = どのアカウントでも自動ターンを一切行いません。予算を使い切ると拒否がログと「For you」受信箱に記録されます。失われるものはありません——即時配信できない通知は、その会話の次のターンに注入されます。",
   "Unattended turns per account per day": "アカウントごと・1日あたりの無人ターン上限",
   "The same ceiling over a rolling 24 hours. An account can be busy for an hour without spending its whole day.": "同じ上限を直近24時間で見たものです。1時間忙しくても、その日ぶんを使い切らずに済みます。",
   "Unattended turns for this instance per day": "このインスタンス全体・1日あたりの無人ターン上限",
@@ -3967,6 +4028,9 @@ export default {
   "Not configured": "未設定",
   "Not set": "未設定",
   "Not tested yet": "まだテストしていません",
+  "The Test is offered after the first install from {host} (⚙ → Plugins → Install plugin…)": "{host} から最初にインストールした後にテストできます（⚙ → プラグイン → プラグインをインストール…）",
+  "The Test is offered after the first install from its host (⚙ → Plugins → Install plugin…)": "そのホストから最初にインストールした後にテストできます（⚙ → プラグイン → プラグインをインストール…）",
+  "The Test is not offered yet": "まだテストできません",
   "Not wired until {phase}": "{phase} まで配線されません",
   "Not wired until {phase} — this card only stores the values.": "{phase} まで配線されません — このカードは値を保存するだけです。",
   "Passed": "合格",
@@ -4243,6 +4307,7 @@ export default {
   "terminal mode": "ターミナルモード",
   "running chat sessions follow from their next turn": "実行中のチャットセッションは次のターンから従います",
   "Read by VibeSpace": "VibeSpace が読み取ります",
+  "when a conversation hits a usage wall, and after a stretch of work": "会話が使用量の上限に達した時と、作業の区切りの後",
   "Written into the CLI config": "CLI 設定に書き込み",
   "The CLI output style new chat sessions start with. \"Concise\" makes Claude lead with results and skip preamble. Blank = the CLI's own default. A stream-json session cannot switch style mid-conversation, so a change takes effect on the next resume; the chat status bar sets it per session.": "新しいチャットセッションが開始時に使う CLI の出力スタイル。\"Concise\" は Claude に結果を先に述べさせ前置きを省かせます。空欄 = CLI 自身の既定値。stream-json セッションは会話の途中でスタイルを切り替えられないため、変更は次回の resume で有効になります。チャットのステータスバーでセッションごとに設定できます。",
   "CLI default (leave config.toml alone)": "CLI の既定(config.toml に触れない)",
@@ -4836,6 +4901,13 @@ export default {
   "No conversation id yet": "会話 ID はまだありません",
   "Open it in Background Work": "バックグラウンド作業で開く",
   "None — no background job belongs to this conversation": "なし — この会話に属するバックグラウンドジョブはありません",
+  "Background jobs of this conversation keep running: {names}": "この会話のバックグラウンドジョブはまだ動いています：{names}",
+  "Background jobs of these conversations keep running: {names}": "これらの会話のバックグラウンドジョブはまだ動いています：{names}",
+  "Stop these too": "これらも止める",
+  "Stopping 1 background job": "バックグラウンドジョブを 1 件止めています",
+  "Stopping {n} background jobs": "バックグラウンドジョブを {n} 件止めています",
+  "Could not stop {n} of these background jobs: {error}": "このうち {n} 件のバックグラウンドジョブを止められませんでした：{error}",
+  "Background jobs keep running: {n}": "バックグラウンドジョブは動き続けています：{n} 件",
   "Background Work notifications for this conversation were dropped — {cap} were already waiting, the most it keeps": "この会話のバックグラウンド作業の通知が破棄されました — すでに上限の {cap} 件が待っていました",
   "{n} dropped, never delivered (from: {jobs}). The {cap} still waiting reach the agent with its next turn; the Background Work panel lists them.": "{n} 件を破棄し、届けていません（送信元：{jobs}）。待っている {cap} 件はエージェントの次のターンで届きます。バックグラウンド作業パネルに一覧があります。",
   "Reply with \"{label}\"": "「{label}」で返信",
@@ -4901,6 +4973,111 @@ export default {
   "Auto-continue: off": "自動続行：オフ",
   "Turn auto-continue on": "自動続行をオンにする",
   "Turn auto-continue off": "自動続行を取り消す",
+  // lane auto-resume-bulk (.349): WHY a session stopped (the card's mark, the filter) + the two bulk acts + the batch's cost (src/stopped-by.js, src/bulk-resume-cost.js, src/lib/bulk-resume.js)
+  "Stopped by a usage limit": "使用上限で停止",
+  "Stopped by a usage limit · resets {time}": "使用上限で停止 · {time} にリセット",
+  "Stopped by a usage limit · the limit has reset": "使用上限で停止 · 上限はリセット済み",
+  "Model overloaded · stopped {time}": "モデル過負荷 · {time} に停止",
+  "Auto-continue: on": "自動続行：オン",
+  "Auto-continue: on · not waiting for this limit": "自動続行：オン · この上限では待機しません",
+  "Auto-continue: on · continues only if the limit clears early": "自動続行：オン · 上限が早めに解除された場合のみ続行",
+  "Auto-continue is on, but this reset is too far to wait for — the session continues only if the limit clears early — click to turn it off": "自動続行はオンですが、このリセットは待つには先すぎます — 上限が早めに解除された場合にのみ続行します — クリックでオフ",
+  "Auto-continue is on for the next limit; this session is not waiting for this one (its reset has passed or is too far) — open it to continue": "自動続行は次の上限からオンです。このセッションは今回の上限を待ちません（リセット済みか先すぎます）— 開いて続行してください",
+  "The harness said: {said}": "ハーネスの表示：{said}",
+  "This mark stays until the session runs again.": "セッションが再び動くまで、この印は残ります。",
+  "Stopped by a limit or overload ({n})": "上限・過負荷で停止 ({n})",
+  "Will turn on {n} sessions; {m} already on": "{n} 件のセッションでオンにします（{m} 件はオン済み）",
+  "Turn auto-continue on for every session": "すべてのセッションで自動続行をオン",
+  "Turn it off for all": "すべてオフ",
+  "Turn auto-continue off for every session": "すべてのセッションで自動続行をオフ",
+  "Resume every session a usage limit or overload stopped ({n})": "使用上限・過負荷で止まったセッションをすべて再開 ({n})",
+  "No sessions stopped by a limit": "上限で止まったセッションはありません",
+  "None of the {m} stopped sessions can be resumed now": "止まっている {m} 件のセッションは、どれも今は再開できません",
+  "The stopped session cannot be resumed now": "止まっているセッションは今は再開できません",
+  "still inside a limit": "まだ上限内",
+  "already running": "実行中",
+  "its process has ended": "プロセスは終了済み",
+  "its harness cannot continue a turn": "このハーネスはターンを続けられません",
+  "a continue onto its account was just rejected": "このアカウントへの続行が直前に拒否されました",
+  "{why} until {time}": "{why}（{time} まで）",
+  "Resumed {n}": "{n} 件を再開",
+  "skipped {n} (still inside a limit)": "{n} 件をスキップ（まだ上限内）",
+  "skipped {n} ({w} still inside a limit)": "{n} 件をスキップ（うち {w} 件はまだ上限内）",
+  "skipped {n}": "{n} 件をスキップ",
+  "refused {n}": "拒否 {n}",
+  "could not deliver {n}": "届けられなかった {n}",
+  "≈ ${usd} at {model} input ${price}/M, {tokens} cold tokens": "≈ ${usd}（{model} の入力単価 ${price}/M、コールド読み込み {tokens} トークン）",
+  "≈ ${usd} for {tokens} cold tokens": "≈ ${usd}（コールド読み込み {tokens} トークン）",
+  "includes a nominal {n} output tokens per session": "セッションごとに名目上 {n} 出力トークンを含む",
+  "≈ {add} % of the 5 h window of {member}; it is at {now} % now ⇒ ~{after} % after": "{member} の 5 時間枠の約 {add} %。現在 {now} % ⇒ 実行後 約 {after} %",
+  "≈ {add} % of the 5 h window of {member}": "{member} の 5 時間枠の約 {add} %",
+  "measured in this window: 1 % ≈ {tokens} tokens": "この枠の実測：1 % ≈ {tokens} トークン",
+  "{member}: cannot estimate — this window has no measured ratio yet": "{member}：見積もれません — この枠にはまだ実測比率がありません",
+  "If you resumed them all now: ≈ ${usd} · ≈ {pct} % of the 5 h window": "今すべて再開すると：≈ ${usd} · 5 時間枠の約 {pct} %",
+  "If you resumed them all now: ≈ ${usd} · the 5 h share cannot be estimated yet": "今すべて再開すると：≈ ${usd} · 5 時間枠の割合はまだ見積もれません",
+  "{n} sessions have no known context size — not counted": "{n} 件のセッションはコンテキストサイズ不明のため未計上",
+  "Resume all ({n})": "すべて再開 ({n})",
+  "Resume sessions a limit or overload stopped": "上限・過負荷で止まったセッションを再開",
+  "Could not read the stopped sessions — try again.": "停止したセッションを読み込めませんでした。もう一度お試しください。",
+  "Skipped ({n}):": "スキップ（{n}）：",
+  "{n} sessions will be continued, earliest stopped first — each one is a billed turn. This press is your own: it is not counted against the limits on turns nobody typed; an account in paid overage is still refused, and you can stop the rest at any time.": "{n} 件のセッションを早く止まった順に続行します — それぞれが課金されるターンです。これはあなた自身の操作なので、無人のターンの上限には数えません。有料の超過利用中のアカウントは引き続き拒否され、残りはいつでも止められます。",
+  "{n} sessions will be continued, earliest stopped first — each one is a billed turn. This press is your own: it is not counted against the limits on turns nobody typed. This instance allows turns in paid overage (Settings → Spending), so a continue on an account in paid overage bills it; you can stop the rest at any time.": "{n} 件のセッションを早く止まった順に続行します — それぞれが課金されるターンです。これはあなた自身の操作なので、無人のターンの上限には数えません。このインスタンスは有料の超過利用中のターンを許可しているため（設定 → 支出）、超過利用中のアカウントでの続行は超過分として課金されます。残りはいつでも止められます。",
+  "{member}: {n} of these continues bill paid overage": "{member}：このうち {n} 件の続行は有料の超過分として課金されます",
+  "Authorizing the batch…": "一括分を承認しています…",
+  "Resuming… {done} of {n} continued": "再開中… {n} 件中 {done} 件を続行",
+  "The whole batch was refused — nothing was resumed: {detail}": "一括分がすべて拒否されました — 何も再開されていません：{detail}",
+  "Could not read the sessions — reopen Settings to retry.": "セッションを読み込めませんでした — 設定を開き直して再試行してください。",
+  "Auto-continue is on for {n} more sessions": "さらに {n} 件のセッションで自動続行をオンにしました",
+  "Auto-continue is off for {n} sessions": "{n} 件のセッションで自動続行をオフにしました",
+  "Could not change auto-continue: {why}": "自動続行を変更できません：{why}",
+  "it has run again since": "その後すでに再び動きました",
+  "a continue onto it is already on its way": "続行がすでに送られています",
+  "the account it moved to refused the spend": "移った先のアカウントが支出を拒否しました",
+  "not reached {n}": "未着手 {n}",
+  "≈ ${usd} at {model} cache-write ${price}/M, {tokens} cold tokens": "≈ ${usd}（{model} のキャッシュ書き込み価格 ${price}/M、コールド {tokens} トークン）",
+  "Auto-continue is not running on this hub — reopen VibeSpace and try again.": "このハブでは自動続行が動いていません — VibeSpace を開き直してもう一度お試しください。",
+  "The bulk acts are pressed on this VibeSpace page only.": "一括操作はこの VibeSpace のページでのみ押せます。",
+  "{member} can take {left} more turns nobody typed this hour; this batch needs {need}.": "{member} はこの 1 時間であと {left} 回の無人ターンが可能です。このまとめには {need} 回必要です。",
+  "{member} can take {left} more turns nobody typed today; this batch needs {need}.": "{member} は今日あと {left} 回の無人ターンが可能です。このまとめには {need} 回必要です。",
+  "This VibeSpace can take {left} more turns nobody typed today; this batch needs {need}.": "この VibeSpace は今日あと {left} 回の無人ターンが可能です。このまとめには {need} 回必要です。",
+  "The spend guard refused it on {member} ({why}).": "支出ガードが {member} を拒否しました（{why}）。",
+  "Could not start the resume — try again.": "再開を始められませんでした — もう一度お試しください。",
+  "The batch was lost (VibeSpace restarted) — reopen this to see which sessions are still stopped.": "このまとめは失われました（VibeSpace が再起動しました）— 開き直して、まだ止まっているセッションを確認してください。",
+  "These buttons change the sessions you have now — the default above decides for new ones.": "これらのボタンは今あるセッションだけを変えます — 新しいセッションは上の既定値に従います。",
+  "Auto-continue is on: this session continues by itself when its limit resets — click to turn it off": "自動続行オン：上限がリセットされるとこのセッションは自動で続行します — クリックでオフ",
+  "Auto-continue is off: this session waits for you — click to have it continue by itself when its limit resets": "自動続行オフ：このセッションはあなたを待ちます — クリックすると上限リセット時に自動で続行します",
+  "Showing only the sessions a usage limit or an overloaded model stopped — click to show all": "使用上限またはモデル過負荷で止まったセッションだけを表示中 — クリックですべて表示",
+  "Show only the sessions a usage limit or an overloaded model stopped": "使用上限またはモデル過負荷で止まったセッションだけを表示",
+  "the quota check before it gave no answer": "続行前のクォータ確認が応答しませんでした",
+  "an unknown model (the default price)": "不明なモデル（既定の価格）",
+  "A resume of these sessions is already running — following it here.": "これらのセッションの再開はすでに進行中です — ここで経過を表示します。",
+  // lg-recovery U2 cure: a refusal by name, the Stop door, every skipped row by reason, the unpriced said
+  "the spend guard refused it now": "支出ガードが今回は拒否しました",
+  "left stopped": "停止したまま",
+  "its billing account could not be named": "課金アカウントを特定できません",
+  "its account is billing paid overage": "アカウントが有料の超過分で課金中です",
+  "{member} is billing paid overage": "{member} は有料の超過利用中です",
+  "{member} cannot serve a turn now": "{member} は今ターンを処理できません",
+  "{member} reached the spend control set with its vendor": "{member} はベンダーで設定した支出管理に達しました",
+  "its account cannot serve a turn now": "アカウントが今はターンを処理できません",
+  "its account reached the spend control set with its vendor": "アカウントがベンダー側で設定した支出上限に達しました",
+  "its account used its turns nobody typed this hour": "アカウントはこの1時間の無人ターンを使い切りました",
+  "its account used its turns nobody typed today": "アカウントは今日の無人ターンを使い切りました",
+  "this VibeSpace used its turns nobody typed today": "この VibeSpace は今日の無人ターンを使い切りました",
+  "{why} ({reason})": "{why}（{reason}）",
+  "{why} — {n}": "{why} — {n} 件",
+  "stopped {n}": "停止 {n}",
+  "until {time}": "{time} まで",
+  "{n} sessions have no price for their model — not counted": "{n} 件のセッションはモデルの価格がないため未計上",
+  "{n} not priced": "{n} 件は価格なし",
+  "Stop the rest": "残りを止める",
+  "Stopping — nothing more is started.": "停止中 — これ以上は始めません。",
+  "The running resume of stopped sessions was stopped.": "実行中のまとめての再開を止めました。",
+  "Close — it keeps running": "閉じる（実行は続きます）",
+  "Closing leaves the resume running — reopen this from the session list’s ⋯ menu or Settings → Spending to stop it.": "閉じても再開は続きます — 止めるには、セッション一覧の ⋯ メニューか 設定 → 支出 からここを開き直してください。",
+  "The resume keeps running — reopen it from the session list’s ⋯ menu or Settings → Spending to stop it.": "再開は続いています — 止めるには、セッション一覧の ⋯ メニューか 設定 → 支出 から開き直してください。",
+  "Change it in Settings → Spending → «{setting}»: {link}": "設定 → 支出 →「{setting}」で変更できます：{link}",
+  "Could not stop it — try again.": "止められませんでした — もう一度お試しください。",
   "Every subscription is in the pool, including ones you add later": "すべてのサブスクリプションがプールに入っています（今後追加するものも含む）",
   "Every ChatGPT account is in the pool, including ones you add later": "すべての ChatGPT アカウントがプールに入っています（今後追加するものも含む）",
   // lane ui-controls-and-bugs — THE WRITE-ONLY LAW (the storage Edit dialog: a secret is saved, never shown again, only replaced)
@@ -4988,6 +5165,7 @@ export default {
   "None — no conversation has browsed without a profile since its start.": "なし — 起動以来、プロファイルなしで閲覧した会話はありません。",
   "running (adopted)": "実行中（引き継ぎ済み）",
   "idled out": "アイドルで終了",
+  "found gone early": "時間切れ前に停止",
   "Browser app": "ブラウザアプリ",
   "Open a web view": "ウェブビューを開く",
   "No display backend on {machine} ({why})": "{machine}に表示バックエンドがありません（{why}）",
@@ -5131,6 +5309,7 @@ export default {
   "Stop or remove one of its background jobs": "バックグラウンドジョブを停止または削除",
   "Schedule a reminder that wakes this conversation": "この会話を起こすリマインダーを予約",
   "Let others see or control one of its background jobs": "ほかの人にバックグラウンドジョブの閲覧や操作を許可",
+  "Close a question one of its background jobs asked you": "バックグラウンドジョブがあなたに尋ねた質問を閉じる",
   "List the pages it published": "公開したページを一覧表示",
   "Publishing a page asks every time — Always Allow is not offered.": "ページの公開は毎回確認されます — 「常に許可」はありません。",
   "Always Allow is not offered for this line: it can run any command, and only a single exact command line can be remembered.": "この行には「常に許可」がありません：どんなコマンドでも実行できるため、記憶できるのは完全に同じ 1 行のコマンドだけです。",
@@ -5360,6 +5539,9 @@ export default {
   "separate tabs": "タブを分離",
   "Each conversation sees and drives only its own tabs through a mediated CDP endpoint; while you drive, its input and navigation are refused.": "各会話は仲介された CDP エンドポイントを通じて自分のタブだけを見て操作します。あなたが操作している間、その入力とナビゲーションは拒否されます。",
   "Who can use it": "使える会話",
+  "not open to this conversation": "この会話には開かれていません",
+  "If a browser profile is signed in to {site}, it can be used instead of a new sign-in.": "{site} にサインイン済みのブラウザプロファイルがあれば、新しいサインインの代わりに使えます。",
+  "Allow this conversation to use one": "この会話にどれかを使わせる",
   "Any of your conversations can use this browser and its logins — one browser, each conversation in its own tab.": "あなたのどの会話もこのブラウザとそのログインを使えます — ブラウザは 1 つ、各会話は自分のタブで動きます。",
   "Agents cannot use this browser on this computer right now — it is shared with separate tabs, and VibeSpace's browser proxy is not running here.": "いまエージェントはこのコンピューターでこのブラウザを使えません — 個別タブで共有されていますが、VibeSpace のブラウザプロキシがここで動いていません。",
   "Any of your conversations can use this browser and its logins — they all share it: each can see and drive every tab in it.": "あなたのどの会話もこのブラウザとそのログインを使えます — 全員で共有するため、各会話はその中のすべてのタブを見て操作できます。",
@@ -6240,6 +6422,7 @@ export default {
   "REFUSED": "拒否",
   "Pairing command — see the dial state, pick an address, generate a new command (keeps the row)": "ペアリングコマンド — ダイヤル状態を確認し、アドレスを選び、新しいコマンドを生成（行は保持）",
   "Who can use \"{name}\" as an exit…": "\"{name}\" を出口として使える会話…",
+  "Who can use \"{name}\" as an exit: {summary}": "\"{name}\" を出口として使える会話：{summary}",
   "dial-out device": "発信式デバイス",
   "Send the new command to the connected device over its link (it keeps working without running anything)": "新しいコマンドを接続中のデバイスにそのリンク経由で送る（デバイス側で何も実行せずに動き続けます）",
   "Unchecked: the connected device is disconnected now and its command stops working — run the new command on the device yourself.": "未チェック: 接続中のデバイスは今すぐ切断され、そのコマンドは無効になります — 新しいコマンドをデバイスで自分で実行してください。",
@@ -6873,6 +7056,7 @@ export default {
   "Stop this browser now — the conversation's next command starts it again (what it keeps is still being checked)": "このブラウザを今すぐ停止します — 会話の次のコマンドで再び起動します（保持している内容はまだ確認中です）",
   "released after its turn": "ターン終了後に解放",
   "its browser was restarted": "ブラウザが再起動された",
+  "it was found gone before its idle timeout": "アイドル時間切れの前に停止しているのが見つかった",
   "its session ended": "セッションが終了した",
   "stopped by you": "あなたが停止",
   "closed by the agent": "agent が閉じた",
@@ -8132,6 +8316,7 @@ export default {
   "This machine keeps no app system.": "このマシンにはアプリシステムがありません。",
   "This machine already has an app system.": "このマシンにはすでにアプリシステムがあります。",
   "An app system cannot be created on this machine — its image carries neither a base system nor debootstrap.": "このマシンではアプリシステムを作れません — イメージにベースシステムも debootstrap もありません。",
+  "This machine's system does not name its release (VERSION_CODENAME in /etc/os-release), so no app system can be made for it.": "このマシンのシステムはリリース名（/etc/os-release の VERSION_CODENAME）を示していないため、アプリシステムを作れません。",
   "Delete the previous app system first — it is kept until you do.": "先に前のアプリシステムを削除してください — 削除するまで保持されます。",
   "Set up the app system on {machine}": "{machine}にアプリシステムを用意",
   "Repair the app system on {machine}": "{machine}のアプリシステムを修復",
@@ -8540,6 +8725,16 @@ export default {
   "a process VibeSpace did not start: {comm} ({pid})": "VibeSpace が起動していないプロセス：{comm}（{pid}）",
   "The folder {mount} stopped answering ({n} checks over {s} s) — the most is open by {who}": "フォルダー {mount} が応答しなくなりました（{n} 回のチェックがいずれも {s} 秒超）——最も多く開いているのは{who}",
   "The folder {mount} stopped answering ({n} checks over {s} s)": "フォルダー {mount} が応答しなくなりました（{n} 回のチェックがいずれも {s} 秒超）",
+  "Storage {name} is kept disconnected: its listing hung {n} times in a row while {provider} answered": "ストレージ {name} は切断したままです：{provider} は応答するのに一覧が {n} 回続けて止まりました",
+  "Storage {name} is kept disconnected: its listing hung {n} times in a row while its provider answered": "ストレージ {name} は切断したままです：プロバイダーは応答するのに一覧が {n} 回続けて止まりました",
+  "“{name}” is kept disconnected (its listing kept hanging) — press Connect on its row, or Reconnect in For you.": "「{name}」は切断したままです（一覧が止まり続けています）— その行の「接続」か、「あなたへ」の「再接続」を押してください。",
+  "A reconnect usually hangs it again, so VibeSpace does not reconnect it by itself. Anything written into its folder meanwhile stays on this machine and is moved aside at the next connect. Press Reconnect when it should be tried again.": "再接続すると通常また止まるため、VibeSpace は自動では再接続しません。その間にフォルダーへ書き込まれた内容はこのマシンに残り、次の接続時に別の場所へ移動されます。もう一度試すときは「再接続」を押してください。",
+  "Reconnect this storage now — this item goes away by itself once it is connected": "このストレージを今すぐ再接続 — 接続できるとこの項目は自動で消えます",
+  "Reconnected — the storage answers again": "再接続しました — ストレージが再び応答します",
+  "Connected — the storage is still being checked; it is parked again if its listing keeps hanging": "接続しました — ストレージはまだ確認中です。一覧が止まり続けると再び切断したままになります",
+  "Could not reconnect the storage": "ストレージを再接続できませんでした",
+  "Storage {name} stopped answering and was disconnected to keep VibeSpace responsive — it reconnects by itself": "ストレージ {name} が応答しなくなり、VibeSpace の応答を保つため切断しました — 自動で再接続します",
+  "Files written into {path} while storage {name} was disconnected were moved to {dest} — nothing was deleted": "ストレージ {name} の切断中に {path} へ書き込まれたファイルを {dest} に移動しました — 何も削除していません",
   "Who is using it (open files, working folders and command lines under it):": "使っているもの（その下で開いているファイル・作業フォルダー・コマンドライン）：",
   "- {hits} · {who} · {n} processes": "- {hits} · {who} · {n} 個のプロセス",
   "No process has a file open there.": "そこでファイルを開いているプロセスはありません。",
@@ -8570,6 +8765,13 @@ export default {
   "The page asks for a file": "ページがファイルを求めています", // lane browser-ui-prompts
   "No file window opens here — the agent uploads it with vibespace-browser upload": "ここではファイル選択画面は開きません — エージェントが vibespace-browser upload でアップロードします", // lane browser-ui-prompts
   "The page asks you to sign in": "ページがサインインを求めています", // lane browser-ui-prompts
+  "A sign-in is answered by a person — a view opened with a token cannot answer it": "サインインは人が応答するものです — トークンで開いたビューからは応答できません", // B-b56d
+  "The sign-in was not sent: answer it from VibeSpace’s own page": "サインインは送信されませんでした：VibeSpace 自身のページから応答してください", // B-b56d
+  "A proxy asks you to sign in": "プロキシがサインインを求めています", // B-b56d
+  "Nobody answered the sign-in for {host} within {min} min — VibeSpace cancelled it, so the page shows its own refusal": "{host} のサインインに {min} 分以内に誰も応答しなかったため、VibeSpace が取り消しました — ページには拒否の表示が出ます", // B-b56d
+  "Nobody answered the proxy sign-in for {host} within {min} min — VibeSpace cancelled it, so the page shows its own refusal": "プロキシ {host} のサインインに {min} 分以内に誰も応答しなかったため、VibeSpace が取り消しました — ページには拒否の表示が出ます", // B-b56d
+  "VibeSpace cannot show this browser’s sign-in requests here — if a page asks you to sign in, Chrome shows its own sheet: open it in Desktop and answer it there": "VibeSpace はこのブラウザのサインイン要求をここに表示できません — ページがサインインを求めると、Chrome が独自のシートを表示します：デスクトップで開いてそこで応答してください", // B-b56d
+  "VibeSpace cannot see this browser’s sign-in requests right now — a page that asks you to sign in may wait without showing anything here": "VibeSpace は現在このブラウザのサインイン要求を確認できません — サインインを求めるページは、ここに何も表示しないまま待ち続けることがあります", // B-b56d
   "Sent to this page only — never to the agent, never written down": "このページにだけ送られます — エージェントには渡らず、記録もされません", // lane browser-ui-prompts
   "A page in the agent browser asks you to sign in ({host})": "エージェントブラウザのページがサインインを求めています（{host}）", // lane browser-ui-prompts
   "Open its live view and type the username and password there — the agent never sees them.": "ライブビューを開いてユーザー名とパスワードを入力してください — エージェントには見えません。", // lane browser-ui-prompts
@@ -9970,6 +10172,13 @@ export default {
   "Passthrough · {transfer} {bits}-bit · {primaries}": "パススルー · {transfer} {bits} ビット · {primaries}", // lane stream-hdr-passthrough
   "waiting for the vault to be unlocked": "保管庫のロック解除待ち", // lane vault-e2e-password-fix-r2
   "This session waits for the vault — unlock it with the second password (Unlock… at the top of the page; For you names what is waiting on it); it reconnects by itself and nothing is lost.": "このセッションは保管庫を待っています — 第二パスワードでロックを解除すると（ページ上部の「ロック解除…」。待っているものは「あなた宛て」に載っています）自動で再接続し、何も失われません。", // lane vault-e2e-password-fix-r2
+  "This conversation’s folder is on {name}, which opens after the vault is unlocked — while this page is open it resumes by itself once you unlock; nothing is lost.": "この会話のフォルダーは {name} 上にあり、保管庫のロックを解除すると開きます — このページを開いている間は、解除すれば自動で再開し、何も失われません。",
+  "This conversation’s folder is on {name}, which opens after the vault is unlocked — while this page is open it resumes by itself once you unlock, and then sends the message you wrote; nothing is lost.": "この会話のフォルダーは {name} 上にあり、保管庫のロックを解除すると開きます — このページを開いている間は、解除すれば自動で再開し、書いておいたメッセージを送ります。何も失われません。",
+  "Not resumed — this conversation was archived while it waited for the vault.": "再開しませんでした — この会話は保管庫を待つ間にアーカイブされました。",
+  "Not resumed — this conversation was archived while it waited for the vault. The message you wrote was not sent: «{text}»": "再開しませんでした — この会話は保管庫を待つ間にアーカイブされました。書いたメッセージは送信されていません：「{text}」",
+  "This conversation’s folder is on {name}, which is not mounted right now — nothing was started; resume it once the mount is back.": "この会話のフォルダーは {name} 上にありますが、今はマウントされていません — 何も開始していません。マウントが戻ってから再開してください。",
+  "The folder is on {name}, which is not mounted right now — start again once it is back.": "フォルダーは {name} 上にありますが、今はマウントされていません — 戻ってからもう一度始めてください。",
+  "The folder is on {name}, which opens after the vault is unlocked — unlock it, then start again.": "フォルダーは {name} 上にあり、保管庫のロックを解除すると開きます — 解除してから、もう一度始めてください。",
   "vault locked": "保管庫はロック中", // lane vault-e2e-password-fix-r2
   "{machine} asks for your Mac user name and password. VibeSpace seals them in the vault and signs in by itself while the vault is unlocked.": "{machine}が Mac のユーザー名とパスワードを求めています。VibeSpace は保管庫に封印し、保管庫のロック解除中は自動でサインインします。", // lane desktop-vnc-remember
   "{machine} asks for its VNC password. VibeSpace seals it in the vault and signs in by itself while the vault is unlocked.": "{machine}が VNC パスワードを求めています。VibeSpace は保管庫に封印し、保管庫のロック解除中は自動でサインインします。", // lane desktop-vnc-remember
@@ -10157,7 +10366,6 @@ export default {
   "Search names, kinds, where they came from…": "名前・種類・出所で検索…", // lane vault-window-v2
   "Only the ones I can show": "表示できるものだけ", // lane vault-window-v2
   "Where from": "出所", // lane vault-window-v2
-  "The code could not be read — {reason}": "コードを読めません——{reason}", // lane vault-window-v2
   "{n} s left": "残り {n} 秒", // lane vault-window-v2
   "{when} · you": "{when} · あなた", // lane vault-window-v2
   "{when} · VibeSpace": "{when} · VibeSpace", // lane vault-window-v2
@@ -10172,10 +10380,10 @@ export default {
   "Integrations & channels": "連携とチャネル", // lane vault-window-v2
   "Machines & relay": "マシンとリレー", // lane vault-window-v2
   "Kept by agents": "エージェントの保管", // lane vault-window-v2
-  "Its own conversation uses it directly · other conversations cannot use it": "保存した会話はそのまま使える · 他の会話は使えない",
+  "Its own conversation uses it directly · another one only as you share it («Who may use it…»)": "この会話は直接使えます · ほかの会話はあなたが共有したときだけ（「誰が使えるか…」）",
   "Its own conversation uses it directly · other conversations need a grant": "保存した会話はそのまま使える · 他の会話は許可が必要",
   "kept by {name}": "{name} が保存",
-  "What an agent kept itself: the conversation that kept it uses it without asking you; other conversations cannot use it": "エージェントが自分で保存したもの：保存した会話はあなたに聞かずに使えます。他の会話は使えません",
+  "What an agent kept itself: the conversation that kept it uses it without asking you; another conversation only as you share it": "エージェントが自分で保存したもの：保存した会話はあなたに聞かずに使います。ほかの会話はあなたが共有したときだけ使えます",
   "Added by an agent itself — the agent saw the seed": "エージェントが自分で追加 · シードを見ている",
   "By you": "自分", // lane vault-window-v2
   "Scanned · by you": "スキャン · 自分", // lane vault-window-v2
@@ -10282,10 +10490,102 @@ export default {
   "The provider answered {status}": "提供元の応答は {status} でした", // lane models-at-session
   "The provider’s list is larger than 1 MB — nothing was kept": "提供元の一覧が 1 MB を超えています — 何も保存していません", // lane models-at-session
   "The provider’s answer is not a model list": "提供元の応答はモデル一覧ではありません", // lane models-at-session
+  "The list could not be saved — try again": "一覧を保存できませんでした — もう一度お試しください", // lane lg-providers U1 cure
   "Only a person on this page can refresh the list": "一覧を更新できるのは、このページを開いている人だけです", // lane models-at-session
   "This account’s provider has no models — set them up first": "このアカウントの提供元にはモデルがありません — 先に設定してください", // lane models-at-session
   "Models of {provider}": "{provider} のモデル", // lane models-at-session
   "{provider} does not serve the model “{model}”": "{provider} はモデル「{model}」を提供していません", // lane models-at-session
+  "Anthropic-compatible": "Anthropic 互換", // lane lg-providers
+  "DeepSeek’s models, paid by use with your own key": "DeepSeek のモデル。自分のキーで従量課金", // lane lg-providers
+  "Moonshot’s Kimi models, paid by use with your own key": "Moonshot の Kimi モデル。自分のキーで従量課金", // lane lg-providers
+  "Zhipu’s GLM models, paid by use with your own key": "Zhipu の GLM モデル。自分のキーで従量課金", // lane lg-providers
+  "MiniMax’s models, paid by use with your own key": "MiniMax のモデル。自分のキーで従量課金", // lane lg-providers
+  "Many vendors’ models behind one key, paid by use": "1 つのキーで多くのベンダーのモデル。従量課金", // lane lg-providers
+  "Other or self-hosted": "その他・セルフホスト", // lane lg-providers
+  "A service you run yourself, or one not listed here": "自分で動かしているサービス、またはここにないもの", // lane lg-providers
+  "Outside mainland China": "中国本土以外", // lane lg-providers
+  "Mainland China": "中国本土", // lane lg-providers
+  "This provider does not offer what {harness} needs": "このプロバイダーは {harness} が必要とするものを提供していません", // lane lg-providers
+  "{harness} cannot use a third-party provider yet": "{harness} はまだサードパーティのプロバイダーを使えません", // lane lg-providers
+  "Paste the key": "キーを貼り付けてください", // lane lg-providers
+  "A key has no spaces or line breaks": "キーに空白や改行は含まれません", // lane lg-providers
+  "This is too short to be a key": "キーにしては短すぎます", // lane lg-providers
+  "At most 512 characters": "最大 512 文字", // lane lg-providers
+  "This is a Claude subscription login, not a provider’s key — it is never sent to a third party": "これは Claude サブスクリプションのログインで、プロバイダーのキーではありません——第三者には決して送られません", // lane lg-providers
+  "An address starts with https:// (or http:// on your own network)": "アドレスは https:// で始まります（自分のネットワーク内なら http:// も可）", // lane lg-providers
+  "Type the address plainly — no spaces, no % sign, no backslash, no full-width or non-English characters": "アドレスはそのまま入力してください — 空白・% 記号・バックスラッシュ・全角や英語以外の文字は使えません", // lane lg-providers chain cure
+  "This is an Anthropic key — add it as an Anthropic API account, not a third party": "これは Anthropic のキーです——サードパーティではなく Anthropic API アカウントとして追加してください", // lane lg-providers
+  "Paste the key alone — without quotes or the name in front of it": "キーだけを貼り付けてください——引用符や前の名前は付けずに", // lane lg-providers
+  "Outside your own network the address must start with https://": "自分のネットワークの外では、アドレスは https:// で始まる必要があります", // lane lg-providers
+  "This provider’s address is set by VibeSpace": "このプロバイダーのアドレスは VibeSpace が設定します", // lane lg-providers
+  "This provider names another provider’s key": "このプロバイダーは別のプロバイダーのキーを指しています", // lane lg-providers
+  "Only a self-hosted provider says which interface it speaks": "どのインターフェースを話すかを指定するのはセルフホストのプロバイダーだけです", // lane lg-providers
+  "Model provider key": "モデルプロバイダーのキー", // lane lg-providers
+  "VibeSpace hands it to the agent CLI it starts for this provider": "VibeSpace はこのプロバイダー用に起動するエージェント CLI にこれを渡します", // lane lg-providers
+  "Put the key in the key field — not in the address": "キーはキーの欄に入れてください——アドレスには入れないでください", // lane lg-providers
+  "Not for {harness}": "{harness} では使えません", // lane lg-providers
+  "This provider’s model runs the agent’s tools in its conversations — pick one you trust": "このプロバイダーのモデルは会話の中でエージェントのツールを動かします——信頼できるものを選んでください", // lane lg-providers
+  "Paste the key again": "キーをもう一度貼り付けてください", // lane lg-providers
+  "Save the key and test again": "キーを保存してもう一度テスト", // lane lg-providers
+  "A third-party model runs on this machine only for now — start the conversation here": "サードパーティのモデルは今のところこのマシンでのみ動きます——会話はここで始めてください", // lane lg-providers
+  "Something went wrong": "問題が発生しました", // lane lg-providers
+  "Pick a model first — the test asks the provider with it": "先にモデルを選んでください——テストはそのモデルでプロバイダーに問い合わせます", // lane lg-providers
+  "Add a third-party model": "サードパーティのモデルを追加", // lane lg-providers
+  "Pick who serves the model — you pay them by use, with your own key": "モデルを提供するサービスを選んでください——自分のキーで、使った分だけ支払います", // lane lg-providers
+  "Could not read the providers — {reason}": "プロバイダーを読み込めませんでした——{reason}", // lane lg-providers
+  "How the key reaches the program": "キーがプログラムに渡る方法", // lane lg-providers
+  "an environment variable of that conversation only, never its command line": "その会話だけの環境変数で、コマンドラインには決して出ません", // lane lg-providers
+  "Codex sends this provider its installation id and session id with each request": "Codex はリクエストごとにインストール ID とセッション ID をこのプロバイダーに送ります", // lane lg-providers
+  "Where your account is": "アカウントのある地域", // lane lg-providers
+  "Address of your service": "サービスのアドレス", // lane lg-providers
+  "What it speaks": "対応するインターフェース", // lane lg-providers
+  "Paste your {provider} key": "{provider} のキーを貼り付けてください", // lane lg-providers
+  "Where to get a key": "キーの入手先", // lane lg-providers
+  "Key": "キー", // lane lg-providers
+  "The key is kept in the vault. The test sends the provider one short message with it — it costs a fraction of a cent.": "キーは保管庫に保存されます。テストではこのキーでプロバイダーに短いメッセージを 1 回送ります——費用はごくわずかです。", // lane lg-providers
+  "Save and test": "保存してテスト", // lane lg-providers
+  "{provider} is saved. Each agent that can use it is tested once:": "{provider} を保存しました。使える各エージェントで 1 回ずつテストします：", // lane lg-providers
+  "Which model answers in new conversations": "新しい会話でどのモデルが答えるか", // lane lg-providers
+  "Get the model list from {provider}": "{provider} からモデル一覧を取得", // lane lg-providers
+  "Get the model list first — {provider} has no model yet": "先にモデル一覧を取得してください — {provider} にはまだモデルがありません", // lane lg-providers chain cure
+  "{provider} answered an empty model list — try again later, or pick another provider": "{provider} の返したモデル一覧は空でした — 後でもう一度試すか、別のプロバイダーを選んでください", // lane lg-providers remainders
+  "Type a model id first — {provider} has no model yet": "先にモデル ID を入力してください — {provider} にはまだモデルがありません", // lane lg-providers chain cure
+  "the provider could not be changed": "プロバイダーを変更できませんでした", // lane lg-providers chain cure
+  "the provider list could not be written": "プロバイダー一覧を書き込めませんでした", // lane lg-providers chain cure
+  "the models could not be written yet — the hub tries again": "モデルはまだ書き込まれていません — ハブが再試行します", // lane lg-providers chain cure
+  "the models could not be saved": "モデルを保存できませんでした", // lane lg-providers chain cure
+  "Other model id (optional)": "その他のモデル ID（任意）", // lane lg-providers
+  "{provider} is ready. It can be used by:": "{provider} の準備ができました。使えるもの：", // lane lg-providers
+  "Pick it in the account row of New Session. It has no usage reading — you pay {provider} by use.": "「新しいセッション」のアカウント行で選んでください。使用量の表示はありません——{provider} に使った分だけ支払います。", // lane lg-providers
+  "tested {ago}": "{ago}にテスト済み", // lane lg-providers
+  "last test: {words}": "前回のテスト：{words}", // lane lg-providers
+  "not tested yet": "まだテストしていません", // lane lg-providers
+  "No usage reading": "使用量の表示なし", // lane lg-providers
+  "paid by use": "従量課金", // lane lg-providers
+  "New key for {name}": "{name} の新しいキー", // lane lg-providers
+  "Third-party models": "サードパーティのモデル", // lane lg-providers
+  "Add a third-party model…": "サードパーティのモデルを追加…", // lane lg-providers
+  "{name} (third party)": "{name}（サードパーティ）", // lane lg-providers
+  "New key…": "新しいキー…", // lane lg-providers
+  "The new key is kept in the vault": "新しいキーを保管庫に保存しました", // lane lg-providers
+  "Works": "使えます", // lane lg-providers
+  "The key was refused — check it in the provider’s console": "キーが拒否されました——プロバイダーのコンソールで確認してください", // lane lg-providers
+  "This provider does not serve the model, or not what this agent needs": "このプロバイダーはこのモデル、またはこのエージェントが必要とするものを提供していません", // lane lg-providers
+  "The address did not answer — check it in the technical details": "アドレスが応答しません——技術的な詳細で確認してください", // lane lg-providers
+  "No answer within a minute": "1 分以内に応答がありません", // lane lg-providers
+  "The test did not succeed — see the details": "テストは成功しませんでした——詳細を見てください", // lane lg-providers
+  "This agent’s program was not found on this machine": "このマシンにこのエージェントのプログラムが見つかりません", // lane lg-providers
+  "This is not a third-party provider": "これはサードパーティのプロバイダーではありません", // lane lg-providers
+  "This provider has no address — set it first": "このプロバイダーにはアドレスがありません——先に設定してください", // lane lg-providers
+  "This address is the agent’s own vendor — a third-party test never runs on it": "このアドレスはエージェント自身のベンダーのものです——サードパーティのテストはそこでは決して実行されません", // lane lg-providers
+  "This provider does not offer what this agent needs": "このプロバイダーはこのエージェントが必要とするものを提供していません", // lane lg-providers
+  "This provider has no key — paste it again": "このプロバイダーにはキーがありません——もう一度貼り付けてください", // lane lg-providers
+  "A test of this provider is running already": "このプロバイダーのテストはすでに実行中です", // lane lg-providers
+  "The key or the address changed while it was being tested — test it again": "テスト中にキーまたはアドレスが変わりました — もう一度テストしてください", // lane lg-providers chain cure
+  "Only a person on this page can run a test": "テストを実行できるのはこのページにいる人だけです", // lane lg-providers
+  "Remove the model provider \"{name}\"?": "モデルプロバイダー「{name}」を削除しますか？", // lane lg-providers
+  "Its key leaves the vault and the provider leaves every agent's account list. Conversations already running on it keep working until they restart.": "キーは保管庫から消え、プロバイダーはすべてのエージェントのアカウント一覧から外れます。すでに使っている会話は再起動するまで動き続けます。", // lane lg-providers
+  "Running on it now: {names}": "これを使っている会話：{names}", // lane lg-providers remainders
   "Always for this pool": "常に（このプール）",
   "Lets this pool move a conversation to another provider by itself from now on, with a line in the conversation each time": "今後このプールは会話を別のプロバイダーへ自動で移し、そのたびに会話に 1 行残します",
   "Moved — this pool now moves a conversation to another provider by itself": "移しました — 今後このプールは会話を別のプロバイダーへ自動で移します",
@@ -10334,9 +10634,6 @@ export default {
   "«Always» (with the second password) also turns on «Usable by agent runs» for this entry — it opens it for THIS conversation; any grants you paused stay paused.": "「常に許可」（本人確認が必要）を押すと、この項目の「エージェントの実行で使用可」もオンになります——開くのはこの会話だけで、あなたが一時停止した他の許可は停止したままです。", // lane vault-run-door
   "{tool} on this machine changed: {from} → {to} (a root-owned tool — runs continue)": "このマシンの {tool} が変更されました：{from} → {to}（root 所有のツール——実行は継続します）", // lane vault-agent-own r18 (item 5): the drift FYI notice
   "{tool} ({path}) is sealed by root ownership, so the vault trusts whatever root installs there. Its bytes changed since the last run ({from} → {to}) — root (a package roll or a reinstall) replaced it, and runs continue. This is a notice; nothing to do.": "このマシンの {tool}（{path}）は root 所有によって封印されているため、vault は root がそこにインストールするものをすべて信頼します。前回の実行以降、バイト列が変更されました（{from} → {to}）——root（パッケージ更新または再インストール）が置き換えたもので、実行は継続します。これは通知です。対応は不要です。", // lane vault-agent-own r19 (MINOR): the drift FYI DETAIL paragraph
-  "Always for this shape": "この形は常に許可", // lane vault-run-door
-  "The same tool, flags, hosts and secrets run without asking for 30 days — asks for the second password first": "同じツール・フラグ・ホスト・シークレットなら 30 日間確認せずに実行します — 先に第二パスワードを確認します", // lane vault-run-door
-  "Allowed for this shape for 30 days": "この形を 30 日間許可しました", // lane vault-run-door
   "Usable by agent runs": "エージェントの実行で使用可", // lane vault-run-door
   "An agent may use it in vibespace-vault run without ever seeing it — each new command asks you first": "エージェントは値を見ることなく vibespace-vault run でこれを使えます — 新しいコマンドごとに先に確認します", // lane vault-run-door
   "Agents may use it in a run now — each new command asks you first": "エージェントが実行でこれを使えるようになりました — 新しいコマンドごとに先に確認します", // lane vault-run-door
@@ -10714,7 +11011,7 @@ export default {
   "The sign-in screen itself. Open the link, sign in, then paste the code below.": "サインイン画面そのものです。リンクを開いてサインインし、コードを下に貼り付けてください。",
   "Set as your default account · change it in Manage agents": "デフォルトのアカウントに設定しました · 「エージェントを管理」で変更できます",
   "Check this account’s usage limits now?": "このアカウントの使用量の上限を今すぐ確認しますか？",
-  "VibeSpace asks Anthropic once how much of this account’s usage limits is left — the same check Claude Code makes when you type /usage. It costs nothing and uses no tokens. It runs only when you press refresh, at most once a minute per account. Turn it off in Settings → “On-demand quota refresh”. You see this note once.": "VibeSpace が Anthropic に一度だけ、このアカウントの使用量の上限があとどれだけ残っているかを問い合わせます — Claude Code で /usage と入力したときと同じ確認です。費用はかからず、トークンも使いません。更新を押したときだけ、アカウントごとに 1 分に 1 回までです。設定 →「オンデマンドのクォータ更新」でオフにできます。この説明は一度だけ表示されます。",
+  "VibeSpace asks Anthropic once how much of this account’s usage limits is left — the same check Claude Code makes when you type /usage. It costs nothing and uses no tokens. It runs only when you press refresh, at most once a minute per account. Turn it off in Settings → “Claude usage refresh”. You see this note once.": "VibeSpace が Anthropic に一度だけ、このアカウントの使用量の上限があとどれだけ残っているかを問い合わせます — Claude Code で /usage と入力したときと同じ確認です。費用はかからず、トークンも使いません。更新を押したときだけ、アカウントごとに 1 分に 1 回までです。設定 →「Claude の使用量の更新」でオフにできます。この説明は一度だけ表示されます。",
   "Check every account’s usage limits now?": "すべてのアカウントの使用量の上限を今すぐ確認しますか？",
   "VibeSpace asks Anthropic once for each signed-in account and machine how much of its usage limits is left — the same check Claude Code makes when you type /usage. It costs nothing and uses no tokens. It runs only when you press refresh, at most once a minute per account. You see this note once.": "VibeSpace がサインイン済みのアカウントとマシンごとに一度だけ、使用量の上限があとどれだけ残っているかを Anthropic に問い合わせます — Claude Code で /usage と入力したときと同じ確認です。費用はかからず、トークンも使いません。更新を押したときだけ、アカウントごとに 1 分に 1 回までです。この説明は一度だけ表示されます。",
   "Check now": "今すぐ確認",
@@ -10729,6 +11026,56 @@ export default {
   "the list could not be read; open the Agent browser panel → {label} → Who can use it": "一覧を読み取れませんでした。エージェントブラウザのパネル → {label} → 使える会話 を開いてください",
   "{label} was already open to this conversation — the agent was told": "{label} はもともとこの会話に開かれていました — エージェントに伝えました",
   "{label}: this conversation may use it now — the agent was told": "{label}：この会話で使えるようになりました — エージェントに伝えました",
+  "Open this setting": "この設定を開く", // lane setting-doors pick 2
+  "Now: {value}": "現在：{value}", // lane setting-doors pick 2
+  "It is {now} now — it was {was} when asked": "現在は {now} — 依頼時は {was} でした", // lane setting-doors pick 2
+  "Proposed: {value} for {span} from your press (until about {time}), then {back}": "提案：押してから {span} の間 {value}（{time} ごろまで）、その後 {back} に戻ります", // lane setting-doors pick 2
+  "Proposed: {value} until {time}, then {back}": "提案：{time} まで {value}、その後 {back} に戻ります", // lane setting-doors pick 2
+  "Proposed: {value} — it stays until you change it": "提案：{value} — 変更するまでそのままです", // lane setting-doors pick 2
+  "{value} until {time}, then {back}": "{time} まで {value}、その後 {back}", // lane setting-doors pick 2
+  "{time} tomorrow": "明日 {time}", // lane setting-doors pick 2
+  "Held at {hold} — this press replaces the hold's value and moment; it still returns to {back}": "保持中：{hold} — この操作で保持の値と時刻を置き換えます。戻り先は {back} のままです", // lane setting-doors pick 2
+  "Held at {hold} — this press ends the hold; it stays at {value}": "保持中：{hold} — この操作で保持を終え、{value} のままになります", // lane setting-doors pick 2
+  "asked {ago}": "{ago}に依頼", // lane setting-doors pick 2
+  "Raise to {value} until {time}": "{time} まで {value} に上げる", // lane setting-doors pick 2
+  "Raise to {value} for {span}": "{span} の間 {value} に上げる", // lane setting-doors pick 2
+  "Lower to {value} until {time}": "{time} まで {value} に下げる", // lane setting-doors pick 2
+  "Lower to {value} for {span}": "{span} の間 {value} に下げる", // lane setting-doors pick 2
+  "Lower to {value}": "{value} に下げる", // lane setting-doors pick 2
+  "Sets it to {value} now and back to {back} at that moment, then tells the agent": "今すぐ {value} にし、その時刻に {back} へ戻します。その後エージェントに伝えます", // lane setting-doors pick 2
+  "Sets it to {value} now, then tells the agent": "今すぐ {value} にし、その後エージェントに伝えます", // lane setting-doors pick 2
+  "It is already {value} — nothing to change": "すでに {value} です — 変更はありません", // lane setting-doors pick 2
+  "That moment ({time}) has passed — change it on the row": "その時刻（{time}）は過ぎました — 設定の行で変更してください", // lane setting-doors pick 2
+  "A raise needs its «until» — change it on the row": "引き上げには「いつまで」が必要です — 設定の行で変更してください", // lane setting-doors pick 2
+  "This change cannot be pressed here — change it on the row": "この変更はここでは実行できません — 設定の行で変更してください", // lane setting-doors pick 2
+  "It changed meanwhile — look again": "その間に変わりました — もう一度確認してください", // lane setting-doors pick 2
+  "Could not change it: {why}": "変更できませんでした：{why}", // lane setting-doors pick 2
+  "{label}: {value} until {time}, then {back} — the agent was told": "{label}：{time} まで {value}、その後 {back} — エージェントに伝えました", // lane setting-doors pick 2
+  "{label}: {value} from now on — the agent was told": "{label}：これから {value} — エージェントに伝えました", // lane setting-doors pick 2
+  "Held at {hold}": "保持中：{hold}", // lane setting-doors pick 2
+  "End now": "今すぐ終了", // lane setting-doors pick 2
+  "Ends the hold now: the row goes back at once": "保持を今すぐ終えます：設定はすぐに元に戻ります", // lane setting-doors pick 2
+  "Could not end the hold: {why}": "保持を終了できませんでした：{why}", // lane setting-doors pick 2
+  "Set to {value} for good — the hold ends": "{value} に変更してそのまま保つ — 保持は終わります", // lane setting-doors pick 2 (the check)
+  "{value} would stay above {back}, the value before the hold — a raise needs its «until»; change it on the row": "{value} は保持前の値 {back} を上回ったままになります — 引き上げには「期限」が必要です。その行で変更してください", // lane setting-doors pick 2 (the check)
+  "the hold could not be written to disk, so nothing changed": "保持をディスクに書き込めなかったため、何も変わっていません", // lane setting-doors pick 2 (the check)
+  "the setting could not be written, so nothing changed": "設定を書き込めなかったため、何も変わっていません", // lane setting-doors pick 2 (the check)
+  "only your own page can change it — nothing changed": "これを変更できるのはあなた自身のページだけです — 何も変わっていません", // lane setting-doors pick 2 (the check)
+  "this change cannot be pressed here — change it on the row": "この変更はここでは押せません — その行で変更してください", // lane setting-doors pick 2 (the check)
+  "{label}: changed to {value} until {time} — but the agent could not be told: {why}": "{label}：{time} まで {value} に変更しました — ただし agent に伝えられませんでした：{why}", // lane setting-doors pick 2 (the check)
+  "{label}: changed to {value} — but the agent could not be told: {why}": "{label}：{value} に変更しました — ただし agent に伝えられませんでした：{why}", // lane setting-doors pick 2 (the check)
+  "the settings file could not be written — it stays at {value}": "設定ファイルを書き込めませんでした — {value} のままです", // lane setting-doors pick 2 (the check)
+  "You had changed it by hand, so the hold had already ended — it stays at {value}": "あなたが手で変更したため、保持はすでに終わっています — {value} のままです", // lane setting-doors pick 2 (the check)
+  "{label} could not go back: it stays at {value}": "{label}を元に戻せませんでした：{value} のままです", // lane setting-doors pick 2 (the check)
+  "The hold said it would go back to {back} at {at}; the settings file could not be written ({why}) — tried {n} times, a minute apart. The next start of VibeSpace tries again. Change it on the row: {link}": "保持では {at} に {back} へ戻る予定でした。設定ファイルを書き込めませんでした（{why}）— 1 分おきに {n} 回試しました。VibeSpace の次回起動時にもう一度試します。その行で変更してください：{link}", // lane setting-doors pick 2 (the check)
+  "{label} is back to {value} — the hold ended: {link}": "{label}が {value} に戻りました — 保持は終了しました：{link}", // lane setting-doors pick 2 (the check)
+  "The setting holds could not be read": "設定の保持を読み込めませんでした", // lane setting-doors pick 2 (the check)
+  "data/setting-holds.json could not be read ({why}). A raised ceiling may not go back by itself — check the three ceilings: {links}": "data/setting-holds.json を読み込めませんでした（{why}）。引き上げた上限が自動で戻らない可能性があります — 3 つの上限を確認してください：{links}", // lane setting-doors pick 2 (the check)
+  "{label} may not go back by itself": "{label}が自動で戻らない可能性があります", // lane setting-doors pick 2 (the check)
+  "Its hold could not be kept at this start ({why}): it held {value}. It was dropped, so a raised value may stay where it is. Check it on the row: {link}": "今回の起動でこの保持を維持できませんでした（{why}）：{value} で保持していました。保持は破棄されたため、引き上げた値がそのまま残る可能性があります。その行で確認してください：{link}", // lane setting-doors pick 2 (the check)
+  "it is not whole": "記録が不完全です", // lane setting-doors pick 2 (the check)
+  "it is no longer a row a press may change": "ワンクリックで変更できる項目ではなくなりました", // lane setting-doors pick 2 (the check)
+  "its moment is not a number": "時刻が数値ではありません", // lane setting-doors pick 2 (the check)
   "Draft · not sent": "下書き · 未送信", // lane gmail-draft-not-a-message
   "saved {time}": "{time} に保存", // lane gmail-draft-not-a-message
   "1 deleted draft": "削除された下書き 1 件", // lane gmail-draft-not-a-message
@@ -10808,6 +11155,7 @@ export default {
   "The agent is told you refused, on its next turn": "拒否したことはエージェントに次のターンで伝わります",
   "The name is at most 80 characters": "名前は最大 80 文字です",
   "The value leaves the vault. A conversation that uses it in a command loses it at its next run.": "値は保管庫から削除されます。コマンドでこれを使う会話は、次の実行から使えなくなります。",
+  "The value leaves the vault. The conversation that stored it can no longer use it: a command or a job that names it fails at its next run (the conversation may store a new one).": "値は保管庫から削除されます。これを保存した会話はもう使えません：これを使うコマンドやジョブは次の実行で失敗します（会話は新しい値を保存し直せます）。",
   "The vault is locked (vault_locked) — unlock it, then save": "保管庫はロックされています（vault_locked）— ロックを解除してから保存してください",
   "The vault is not set up yet — set its second password, then save": "保管庫はまだ設定されていません — 第二パスワードを設定してから保存してください",
   "Value": "値",
@@ -11088,7 +11436,6 @@ export default {
   "Changes save as you make them (a path row takes effect when you leave the box, or on Enter)": "変更はその場で保存されます（パスの行は欄を離れるか Enter で反映）", // lane task-group-context
   "tab::Activity log": "アクティビティ記録", // lane task-group-context
   "Saved when you left the box — no Enter needed": "欄を離れた時点で保存しました —— Enter は不要です", // lane task-group-context
-  "Not applied: {path} was not found — the row keeps what it had": "未反映：{path} が見つかりません —— この行は元のままです", // lane task-group-context
   "Context table budget per group (bytes)": "グループごとの Context 表の注入予算（バイト）", // lane task-group-context
   "How many bytes one Task Group's Context table may take in what a conversation is told. Rows are told in table order at the depth each one chose; a row that does not fit steps down (contents, then file names with key files, then file names, then only the path and note) and says so. The room the hook carries beside the tools and the standing instructions caps it too. 0 = only that room.": "一つのタスクグループの Context 表が、会話に伝える内容の中で何バイトまで使えるか。各行は表の順に、それぞれ選んだ深さで伝えます。入りきらない行は一段下げ（内容 → ファイル名 + 主要ファイルの内容 → ファイル名 → パスと説明だけ）、そのことを書き添えます。フックがツールの説明と常駐指示の横に運べる容量も上限になります。0 = その容量だけ。", // lane task-group-context
   "「{path}」 is too big to tell as 「{chosen}」 → told as 「{level}」 (the agent still knows where it is and what it is for)": "「{path}」は「{chosen}」で伝えるには大きすぎます → 「{level}」で伝えます（エージェントは場所と用途を引き続き知っています）", // lane task-group-context
@@ -11511,6 +11858,7 @@ export default {
   "Update the saved login {user} on {site}?": "{site} に保存済みのログイン {user} を更新しますか？",
   "Save the login {user} on {site} to the vault?": "{site} のログイン {user} をボールトに保存しますか？",
   "You signed in with a different password in the agent browser. Update keeps the old one in the entry for one revision.": "エージェントブラウザーで別のパスワードでサインインしました。更新すると、古いパスワードはエントリに 1 世代分保持されます。",
+  "You signed in on {site} with a different password. {site} is one of this login's sites ({sites}) — Update changes its one password for every one of them and keeps the old one for one revision.": "{site} で別のパスワードでサインインしました。{site} はこのログインのサイトの一つです（{sites}）— 更新するとすべてのサイトでその一つのパスワードが変わり、古いものは 1 版だけ残ります。",
   "You signed in by hand in the agent browser. Saved logins can be filled on that site for conversations you allow — VibeSpace never hands them the password, and its fence guards against accidental reads and wrong sites.": "エージェントブラウザーで手動でサインインしました。保存したログインは、許可した会話のためにそのサイトで入力されます — VibeSpace はパスワードを渡さず、柵が誤読と別サイトを防ぎます。",
   "{plugin} · downloading its kernel… {pct}%": "{plugin} · カーネルをダウンロード中… {pct}%",
   "{plugin} · downloading its kernel…": "{plugin} · カーネルをダウンロード中…",
@@ -11541,6 +11889,13 @@ export default {
   "The cluster names {plugin} at «{ref}» (not a full sha, so the cluster does not vouch for it); you enabled it yourself — its kernel follows your consent": "クラスターは {plugin} を「{ref}」で指定しています（完全な sha ではないため、クラスターは保証しません）。あなたが自分で有効にしました — カーネルはあなたの同意に従います",
   "The cluster's repository holds another plugin («{got}»), not {plugin} — {plugin} is not installed from it and there is nothing to consent to; the cluster's admin corrects fleet.json": "クラスターのリポジトリにあるのは別のプラグイン（「{got}」）で、{plugin} ではありません — そこから {plugin} はインストールされず、同意するものもありません。クラスターの管理者が fleet.json を直してください",
   "waiting for the new kernel to land (≤ {s} s)": "新しいカーネルの配置を待っています（最大 {s} 秒）",
+  "Download kernel": "カーネルをダウンロード",
+  "Download kernel: {plugin}": "カーネルをダウンロード：{plugin}",
+  "press «Download kernel» to fetch it again": "「カーネルをダウンロード」を押すと取得し直します",
+  "its kernel is already downloading": "カーネルはすでにダウンロード中です",
+  "the kernel could not be downloaded: {why}": "カーネルをダウンロードできませんでした：{why}",
+  "its kernel is being replaced or put back in its place — try again in a moment": "カーネルの置き換え、または元の場所への復元の途中です — 少ししてからもう一度お試しください",
+  "VibeSpace did not answer — nothing was downloaded": "VibeSpace が応答しませんでした — 何もダウンロードしていません",
   "its new kernel {version} was discarded — {why}": "新しいカーネル {version} は破棄されました — {why}",
   "The browser kernel is being replaced — try again in a moment.": "ブラウザのカーネルを置き換え中です。しばらくしてからもう一度お試しください。",
   "the cluster moved its pin while it downloaded": "ダウンロード中にクラスターが指定を変えました",
@@ -11662,6 +12017,9 @@ export default {
   "Not handed over — {account} has reached its spend control, so its requests are refused. The notices keep waiting.": "渡せませんでした——{account} は支出管理の上限に達したため、リクエストが拒否されます。通知は待ち続けます。",
   "Open Settings → Spending": "設定 → 支出 を開く",
   "Turns you type, and the buttons you press that say «starts a turn», are never counted. Change the limits in Settings → Spending.": "あなたが入力したターンと、「ターンが始まります」と書かれたボタンを押したターンは決して数えません。上限は 設定 → 支出 で変更できます。",
+  "Turns you type, and the buttons you press that say «starts a turn», are never counted. Change this limit in Settings → Spending: {link}": "あなたが入力したターンと、「ターンが始まります」と書かれたボタンを押したターンは決して数えません。この上限は 設定 → 支出 で変更できます：{link}",
+  // lane login-request-card: the empty row's door, linked
+  "A limit left empty refuses every turn nobody typed until it is set: set a number in this row of Settings → Spending: {link}. Turns you type, and the buttons you press that say «starts a turn», are never counted.": "空のままの上限は、設定されるまで誰も入力していないターンをすべて拒否します：設定 → 支出 のこの行に数を入れてください：{link}。自分で入力したターンと、「ターンを開始する」と書かれたボタンを押したものは数えません。",
   "Not saved — the server did not answer; change it again to retry": "保存されていません——サーバーが応答しませんでした。もう一度変更すると再試行します",
   "Saved · in force now: {value}": "保存しました · 現在有効：{value}",
   "In force now: {value}": "現在有効：{value}",
@@ -11714,6 +12072,7 @@ export default {
   "And {n} more producers.": "ほか {n} 件の発生元。",
   "older builds (no reason recorded)": "旧バージョン（理由の記録なし）",
   "Paid overage refuses even the turns you press. Whether turns nobody typed may spend it is Settings → Spending → «Allow unattended turns while an account bills paid overage».": "有料の超過利用では、あなたが押したターンも拒否されます。誰も入力していないターンが超過利用を使えるかは 設定 → 支出 →「従量課金(overage)中のアカウントでも無人ターンを許可する」で決まります。",
+  "Paid overage refuses even the turns you press. Whether turns nobody typed may spend it is Settings → Spending → «Allow unattended turns while an account bills paid overage»: {link}": "有料の超過利用では、あなたが押したターンも拒否されます。誰も入力していないターンが超過利用を使えるかは 設定 → 支出 →「従量課金(overage)中のアカウントでも無人ターンを許可する」で決まります：{link}",
   "Sign {account} in again from the Usage window — the limits in Settings → Spending cannot help here.": "「使用状況」ウィンドウから {account} に再サインインしてください——設定 → 支出 の上限はここでは役に立ちません。",
   "The spend control is set with the account’s vendor — the limits in Settings → Spending cannot help here.": "支出コントロールはアカウントのベンダー側で設定されています——設定 → 支出 の上限はここでは役に立ちません。",
   "This is VibeSpace failing closed, not a limit: the Usage window lists the accounts and the hub log’s [spend] lines name the conversation — the limits in Settings → Spending cannot help here.": "これは上限ではなく、VibeSpace が安全側に止めたものです：「使用状況」ウィンドウにアカウントの一覧があり、ハブのログの [spend] 行に会話名が出ます——設定 → 支出 の上限はここでは役に立ちません。",
@@ -11737,6 +12096,7 @@ export default {
   "the user handed a conversation its waiting notices now": "あなたが会話に今すぐ渡した待機中の通知",
   "the waiting notices that did not fit a prompt, posted when its turn ended": "プロンプトに収まらず、ターン終了時に送った待機中の通知",
   "a held channel digest the user chose to deliver now": "あなたが今すぐ届けることにした保留中のチャネル要約",
+  "the resume of every conversation a usage limit or an overloaded model stopped": "使用上限やモデルの過負荷で止まったすべての会話の再開",   // lane auto-resume-bulk (lg-recovery U2): the bulk resume's producer words — a refusal of the batch names it
   "Not handed over — turns nobody typed are switched off for {account}. The notices keep waiting.": "渡せませんでした——{account} では誰も入力していないターンがオフです。通知は待ち続けます。",
   "Not handed over — turns nobody typed are switched off for this instance. The notices keep waiting.": "渡せませんでした——このインスタンスでは誰も入力していないターンがオフです。通知は待ち続けます。",
   "Not handed over — {account} has used its {cap} turns nobody typed this hour; the next is free now — press again. The notices keep waiting.": "渡せませんでした——{account} はこの 1 時間で誰も入力していないターンを {cap} 回使い切りました。今は枠が空いています——もう一度押してください。通知は待ち続けます。",
@@ -11747,8 +12107,8 @@ export default {
   "Not handed over — the account this turn would bill has reached its spend control, so its requests are refused. The notices keep waiting.": "渡せませんでした——このターンを請求するアカウントは支出コントロールに達したため、リクエストが拒否されます。通知は待ち続けます。",
   "Not handed over — VibeSpace could not tell which account this turn would bill. The notices keep waiting.": "渡せませんでした——VibeSpace はこのターンをどのアカウントに請求するか判別できませんでした。通知は待ち続けます。",
   "Not handed over — VibeSpace could not read its record of turns nobody typed, so it starts none until the record reads again. The notices keep waiting.": "渡せませんでした——VibeSpace は誰も入力していないターンの記録を読めないため、記録が再び読めるまで一つも始めません。通知は待ち続けます。",
-  "Not handed over — no limit is set for turns nobody typed on {account}: set a number in Settings → Spending. The notices keep waiting.": "渡せませんでした——{account} には誰も入力していないターンの上限が設定されていません：設定 → 支出 で数値を設定してください。通知は待ち続けます。",
-  "Not handed over — no limit is set for turns nobody typed on this instance: set a number in Settings → Spending. The notices keep waiting.": "渡せませんでした——このインスタンスには誰も入力していないターンの上限が設定されていません：設定 → 支出 で数値を設定してください。通知は待ち続けます。",
+  "Not handed over — no limit is set for turns nobody typed on {account}: set a number in its row of Settings → Spending: {link}. The notices keep waiting.": "引き渡していません — {account} の誰も入力していないターンに上限が設定されていません：設定 → 支出 のその行に数を入れてください：{link}。通知は待ち続けます。",
+  "Not handed over — no limit is set for turns nobody typed on this instance: set a number in its row of Settings → Spending: {link}. The notices keep waiting.": "引き渡していません — このインスタンスの誰も入力していないターンに上限が設定されていません：設定 → 支出 のその行に数を入れてください：{link}。通知は待ち続けます。",
   "Not handed over — the spend ceiling refused this turn ({why}). The notices keep waiting.": "渡せませんでした——支出上限がこのターンを拒否しました（{why}）。通知は待ち続けます。",
   "Open Usage": "使用状況 を開く",
   "Not saved yet — press Enter or leave the field": "未保存——Enter を押すか入力欄を離れると保存します",
@@ -11774,6 +12134,8 @@ export default {
   "used {n}× by {m} conversations": "{m} 件の会話で {n} 回使用", // lane vault-use-grants
   "Who may use «{name}»": "「{name}」を誰が使えるか", // lane vault-use-grants
   "They run commands with it — vibespace-vault run — for the hosts below with no card each time; they never see it. Another host, or a command whose destination cannot be told (a shell, a script), still asks you.": "下のホスト向けなら、毎回カードなしでこれを使ってコマンドを実行できます（vibespace-vault run）。値そのものは見えません。別のホストや、送り先を判断できないコマンド（シェル、スクリプト）は引き続き確認します。", // lane vault-use-grants
+  "Share it: let another conversation or a Task Group run commands with it for the hosts you name. Another host is refused — an agent's own value goes only where you say.": "共有する：別の会話またはタスクグループが、指定したホストに対してこれを使ってコマンドを実行できるようにします。ほかのホストは拒否されます——エージェントが保存した値は、あなたが指定した先にだけ送られます。",
+  "They run commands with it — vibespace-vault run — for the hosts below with no card each time; they never see it. Another host, or a command whose destination cannot be told, is refused: an agent's own value goes only where you say.": "彼らはこれを使ってコマンドを実行します（vibespace-vault run）。下のホストには毎回カードを出しません。値は見えません。ほかのホスト、または送り先が判断できないコマンドは拒否されます：エージェントが保存した値は、あなたが指定した先にだけ送られます。",
   "Who may use it": "誰が使えるか", // lane vault-use-grants
   "Who": "誰に", // lane vault-use-grants
   "For which hosts": "どのホスト向けか", // lane vault-use-grants
@@ -11801,7 +12163,6 @@ export default {
   "Always let this conversation use it (these hosts)": "この会話に常に使わせる（このホスト）", // lane vault-use-grants
   "A standing approval: this conversation may use it for these hosts for 30 days — the Vault window lists it": "常設の許可：この会話は 30 日間このホスト向けに使えます——保管庫ウィンドウに表示されます", // lane vault-use-grants
   "A standing approval: this conversation runs commands with these secrets for these hosts without asking for 30 days — the Vault window lists it and takes it back; asks for the second password first": "常設の許可：この会話は 30 日間、このホスト向けならこれらの秘密でコマンドを確認なしに実行できます——保管庫ウィンドウに表示され、取り消せます。先に第二パスワードを求めます", // lane vault-use-grants
-  "For: {hosts} — the conversation that asked is not allowed to use it until you allow it on its row in the Vault window («Who may use it…»).": "用途：{hosts}——保管庫ウィンドウのその行（「誰が使えるか…」）で許可するまで、依頼した会話は使えません。", // lane vault-use-grants
   "A pasted secret may be used by the conversation that asked for it": "貼り付けた秘密を、依頼した会話が使えるようにする", // lane vault-use-grants
   "When an agent asks you to paste a secret and names the hosts it is for, the conversation that asked may use it in commands to those hosts for 8 hours — they are not asked again. A command to any other host still shows you its card, a new kind of command whose destination cannot be read (a shell, an interpreter, an unknown program) still shows you its card, and a request that named no hosts shows a card for every command. Locking the vault ends the grant, and the entry's own «Usable by agent runs» switch is untouched. OFF: a paste grants nothing — the agent's receipt tells it to request the secret, and you open the entry in the Vault window.": "エージェントが秘密の貼り付けを依頼し、使うホストを指定した場合、依頼した会話は 8 時間だけそのホスト向けのコマンドで使え、再度は尋ねられません。他のホスト向けのコマンドは引き続きカードを表示し、宛先を読み取れない新しい種類のコマンド（シェル、インタープリター、未知のプログラム）も引き続きカードを表示し、ホストを指定しなかった依頼では毎コマンドでカードを表示します。保管庫をロックすると付与は終了し、項目自身の「エージェントの実行で使用可」スイッチは変わりません。オフ：貼り付けても何も付与されません——エージェントの受領メッセージが秘密の請求を促し、あなたが保管庫ウィンドウで項目を開きます。", // lane vault-use-grants
   "Policy for the judge: «{text}»": "判定用ポリシー：「{text}」", // lane vault-use-grants
@@ -11879,6 +12240,7 @@ export default {
   "Nothing was left to deliver — its conversations are gone": "配信するものが残っていません — その会話はもうありません",
   "Not delivered now ({why}) — they go with its next delivery": "今は配信されませんでした（{why}）— 次の配信と一緒に送られます",
   "{n} messages for {agent} held since {date} — deliver or discard": "{agent} 宛ての {n} 件のメッセージが {date} から保留中 — 配信するか破棄するか",
+  "{n} messages for {agent} held since {date} — {d} of them may already have reached {agent}: VibeSpace restarted while delivering them — deliver again or discard": "{agent} 宛ての {n} 件のメッセージが {date} から保留中 — うち {d} 件は配信中に VibeSpace が再起動したため、すでに {agent} に届いている可能性があります — もう一度配信するか破棄するか",
   "They were held for {agent} on {where} while it could not be woken (a restart, its daily cap, nobody running) — the oldest from {date}. A delivery that old is never sent by itself.": "{agent} を起こせなかった間（再起動・1 日の上限・実行中のセッションなし）、{where} で保留されていました — 最も古いものは {date}。これほど古い配信は自動では送られません。",
   "Deliver sends them to {agent} now, as one block (a billed turn). Discard drops them — nothing is sent.": "配信すると今すぐ 1 つのブロックとして {agent} に送ります（課金されるターン）。破棄すると削除し、何も送りません。",
   "Unanswered, it expires in {n} days — they are discarded then.": "回答がなければ {n} 日後に期限切れ — その時点で破棄されます。",
@@ -12103,7 +12465,30 @@ export default {
   "It holds {n} name(s): {names} — the values are not shown here.": "{n} 個の名前があります：{names}——値はここには表示しません。",
   "…and {n} more not shown (past the first 20, or shaped like a value rather than a name).": "…ほかに {n} 個は表示していません（先頭 20 個より後、または名前ではなく値のように見えます）。",
   "Its names could not be read — open the file to see what it holds.": "名前を読み取れませんでした——ファイルを開いて中身を確認してください。",
-  "VibeSpace no longer reads this file and never deletes it. Add each value to the vault as a secret entry, then delete the file; a job reads a stored secret with --vault NAME=vault://… (vibespace-docs jobs).": "VibeSpace はこのファイルをもう読まず、削除することもありません。それぞれの値をシークレットとして保管庫に入れてから、このファイルを削除してください。ジョブは --vault NAME=vault://… で保存したシークレットを読みます（vibespace-docs jobs）。",
+  "VibeSpace no longer reads this file and deletes it only when you say so: «Move into the vault» seals each value as a vault entry and then deletes the file, «Delete the file» deletes it as it is. A job reads a stored secret with --vault NAME=vault://… (vibespace-docs jobs).": "VibeSpace はこのファイルをもう読まず、あなたが指示したときだけ削除します：「保管庫に移す」はそれぞれの値を保管庫のエントリとして保存してからファイルを削除し、「ファイルを削除」はそのまま削除します。ジョブは --vault NAME=vault://… で保存したシークレットを読みます（vibespace-docs jobs）。",
+  "Move into the vault": "保管庫に移す",
+  "Seal each value as a vault entry, then delete the file": "それぞれの値を保管庫のエントリとして保存してから、ファイルを削除します",
+  "Delete the file": "ファイルを削除",
+  "Delete the file and the values in it": "ファイルと中の値を削除します",
+  "Delete the file?": "ファイルを削除しますか？",
+  "{n} secret(s) moved into the vault — the file is deleted": "{n} 件のシークレットを保管庫に移しました——ファイルは削除されました",
+  "The file is deleted": "ファイルを削除しました",
+  "The file is not there any more": "ファイルはもうありません",
+  "The file could not be read as names and values — nothing was moved": "ファイルを名前と値として読めませんでした——何も移していません",
+  "The file holds no value to move — delete it instead": "ファイルに移せる値がありません——代わりに削除してください",
+  "The file could not be deleted — nothing was moved": "ファイルを削除できませんでした——何も移していません",
+  "Could not move the secrets — {reason}": "シークレットを移せませんでした——{reason}",
+  "The file and every value in it are deleted. Nothing is moved into the vault.": "ファイルと中のすべての値が削除されます。保管庫には何も移されません。",
+  "{n} secret(s) moved into the vault, {m} empty one(s) left out — the file is deleted": "{n} 件のシークレットを保管庫に移しました（空の {m} 件は除外）——ファイルは削除されました",
+  "Value {n}": "{n} 番目の値",
+  "data/job-secrets.retired.json is a link, a folder or a file with a second name — nothing was read or deleted. A link: put the file it points to in its place. A second name: delete that other name. A folder: move it out of the way. Then press again": "data/job-secrets.retired.json はリンク、フォルダー、または別名のあるファイルです——何も読み取らず、削除もしていません。リンクなら、指している先のファイルをこの場所に置いてください。別名があるなら、その別名を削除してください。フォルダーなら、別の場所へ移してください。それからもう一度押してください",
+  "The file could not be deleted": "ファイルを削除できませんでした",
+  "not a plain text, number or true/false (or text with spaces around it) — nothing was moved; the file is kept: correct that value in data/job-secrets.retired.json, then press again": "プレーンなテキスト・数値・true/false ではありません（または前後に空白があります）——何も移していません。ファイルは残っています。data/job-secrets.retired.json でその値を直してから、もう一度押してください",
+  "The file changed while it was being moved — nothing was moved; press again": "移している間にファイルが変わりました——何も移していません。もう一度押してください",
+  "The file is being moved — try again in a moment": "ファイルを移しています——しばらくしてからもう一度お試しください",
+  "That answer is not offered": "その選択肢はありません",
+  "too long for the vault — nothing was moved; the file is kept": "保管庫には長すぎます——何も移していません。ファイルは残っています",
+  "Could not delete the file — {reason}": "ファイルを削除できませんでした——{reason}",
   // lane job-secrets-retire r3: both names present (2026-10-job-secrets-retired) + a failed boot migration's ONE For-you item (src/migration-runner.js)
   "Two files hold secrets for background jobs and nothing was moved: {from} and {to}. Move one of them out of data/ (or delete it), then restart — VibeSpace never chooses between your files.": "バックグラウンド作業の秘密を保存したファイルが 2 つあり、何も移動していません：{from} と {to}。どちらか一方を data/ の外へ移動（または削除）してから再起動してください——VibeSpace があなたのファイルのどちらかを選ぶことはありません。",
   "A data migration failed at startup: {id}": "データ移行が起動時に失敗しました：{id}",
@@ -12141,7 +12526,9 @@ export default {
   "Resume interrupted sessions?": "中断されたセッションを再開しますか？",
   "{n} sessions were interrupted (the server or a machine restarted) and reopened as read-only history. Resume all of them now?": "{n} 件のセッションが中断され（サーバーまたはマシンの再起動）、読み取り専用の履歴として開き直されました。今すぐすべて再開しますか？",
   "{n} of them stopped because their process ended while the server was down.": "そのうち {n} 件は、サーバーが停止している間にプロセスが終了したため停止しました。",
+  "The vault is locked: a conversation whose folder is on a machine or a storage mount waits for it, so unlock first.": "保管庫がロックされています。フォルダーがマシンやストレージのマウント上にある会話はその解除を待つので、先にロックを解除してください。",
   "Resume all {n}": "すべて再開（{n}）",
+  "Unlock and resume all {n}": "ロックを解除してすべて再開（{n}）",
   "Session unavailable": "セッションを利用できません",
   "Press a desktop to restore it alone — your other desktops stay as they are now.": "デスクトップを押すとそれだけを復元します — ほかのデスクトップは今のままです。",
   "Restore only “{desktop}”": "「{desktop}」だけを復元",
@@ -12164,6 +12551,7 @@ export default {
   "“{name}” cannot be reopened: closing deletes it from this desktop’s layout for good. Only an older rollback point (Restore a previous layout…) still holds it.": "「{name}」は開き直せません。閉じるとこのデスクトップのレイアウトから完全に削除されます。残るのは古いロールバックポイント（以前のレイアウトを復元…）だけです。",
   "{n} of these cannot be reopened ({names}): closing deletes them from this desktop’s layout for good. Only an older rollback point (Restore a previous layout…) still holds them.": "このうち {n} 個は開き直せません（{names}）。閉じるとこのデスクトップのレイアウトから完全に削除されます。残るのは古いロールバックポイント（以前のレイアウトを復元…）だけです。",
   "A host is where a command connects to with it — e.g. api.openai.com for an API key, 192.168.1.1 for a router. A program whose destination VibeSpace cannot read (a script) is allowed by its command instead, from its run card.": "ホストとは、コマンドがこれを持って接続する先です——例：API キーなら api.openai.com、ルーターなら 192.168.1.1。VibeSpace が送り先を読めないプログラム（スクリプト）は、実行カードからコマンド単位で許可します。", // lane vault-standing-request
+  "A host is where a command connects to with it — e.g. api.openai.com for an API key, 192.168.1.1 for a router. Another conversation sends an agent's value only to the hosts you name here; a command whose destination cannot be told is refused.": "ホストとは、コマンドがこれを使って接続する先です——例：API キーなら api.openai.com、ルーターなら 192.168.1.1。ほかの会話はエージェントの値を、ここに書いたホストにだけ送ります。送り先が判断できないコマンドは拒否されます。",
   "A standing approval for this command — the Vault window lists it; a changed program or script asks again": "このコマンドを常設で許可しました——保管庫ウィンドウに表示されます。プログラムやスクリプトが変わればまた確認します", // lane vault-standing-request
   "A standing approval for this command: this conversation runs it with these secrets without asking until you take it back — VibeSpace cannot see where it sends them; a changed program or script asks again. Asks for the second password first": "このコマンドの常設許可：取り消すまで、この会話はこれらのシークレットで確認なしに実行します——VibeSpace は送り先を見られません。プログラムやスクリプトが変わればまた確認します。先に第 2 パスワードを求めます", // lane vault-standing-request
   "A standing grant, the same as «Who may use it…» on its row — until you take it back there; asks for the second password first": "常設の許可。その行の「誰が使えるか…」と同じです——そこで取り消すまで有効。先に第 2 パスワードを求めます", // lane vault-standing-request
@@ -12223,6 +12611,29 @@ export default {
   "For 1 hour this conversation uses this secret without asking; each use shows a notice (never filed in For you); then it asks again.": "1 時間、この会話はこのシークレットを確認なしで使います。使うたびに通知が出ます（「あなた宛て」には入りません）。その後はまた確認します。", // lane vault-standing-request r7 («Allow for 1 hour»)
   // lane foryou-dock-layout: «Allow for 1 hour»'s consequence, shortest form — the strip's ONE dim line under its answers
   "For 1 hour in this conversation: no more asking; a notice at each use; then it asks again": "この会話は 1 時間確認なし・使うたびに通知・その後また確認",
+  // B-d868: who started the turn asking, beside «Allow for 1 hour»
+  "The turn running when this asked was started by you": "この依頼が出たときに実行中のターンは、あなたが始めました",
+  "The turn running when this asked was started by another session, «{name}»": "この依頼が出たときに実行中のターンは、別のセッション「{name}」が始めました",
+  "The turn running when this asked was started by a VibeSpace notification ({name})": "この依頼が出たときに実行中のターンは、VibeSpace の通知（{name}）で始まりました",
+  "The turn running when this asked was started by a group report": "この依頼が出たときに実行中のターンは、グループの報告で始まりました",
+  "The turn running when this asked was started by a background task finishing": "この依頼が出たときに実行中のターンは、バックグラウンドタスクの終了で始まりました",
+  "The turn running when this asked was started by a delivered message, not typed here": "この依頼が出たときに実行中のターンは、届いたメッセージで始まりました（ここで入力されたものではありません）",
+  "Who started this turn is not recorded": "このターンを誰が始めたかは記録されていません",
+  "Who started this is not recorded: background work another turn started is still running": "誰が始めたかは記録されていません：別のターンが始めたバックグラウンドの作業がまだ実行中です",
+  // B-02a3: the strip's group press (hand the group messages to the running turn)
+  "Not handed over — VibeSpace does not see the agent in a turn right now; the group messages ride its next turn": "渡していません — いまエージェントがターン中だと VibeSpace には見えていません。グループメッセージは次のターンで届きます",
+  "Not handed over — this conversation cannot take a message into its running turn; the group messages ride its next turn": "渡していません — この会話は実行中のターンにメッセージを入れられません。グループメッセージは次のターンで届きます",
+  "Not handed over — the turn is being stopped; the group messages ride the next turn": "渡していません — ターンを停止しています。グループメッセージは次のターンで届きます",
+  "The agent did not confirm it took the group messages; they keep waiting for its next turn": "エージェントはグループメッセージを受け取ったと確認しませんでした。次のターンまで待ち続けます",
+  "Hand the group message over now": "このグループメッセージを今すぐ渡す",
+  "Hand the {n} group messages over now": "{n} 件のグループメッセージを今すぐ渡す",
+  "joins the running turn; if the turn is just ending, it runs right after it": "実行中のターンに加わります。ターンが終わる直前なら、その直後に実行されます",
+  "Gives the agent the group messages waiting for it inside the turn it is running, the way a message sent with Enter goes in; if that turn is just ending, they run right after it as a turn of its own": "待っているグループメッセージを、Enter で送ったメッセージと同じ道で、エージェントが実行中のターンに渡します。そのターンが終わる直前なら、直後に独立したターンとして実行されます",
+  "Handed 1 group message to the running turn": "1 件のグループメッセージを実行中のターンに渡しました",
+  "Handed {n} group messages to the running turn": "{n} 件のグループメッセージを実行中のターンに渡しました",
+  "the user handed the group messages waiting for a conversation to its running turn": "あなたが会話を待っているグループメッセージを実行中のターンに渡した",
+  "Not handed over — the waiting group messages do not fit one hand-over; they ride the next turn": "渡していません — 待っているグループメッセージは一度に渡せる量を超えています。次のターンで届きます",
+  "Not handed over — the last hand-over still waits for the agent to say it took the group messages (up to a minute); they keep waiting": "渡していません — 前回の受け渡しは、エージェントがグループメッセージを受け取ったと言うのをまだ待っています（最大 1 分）。待ち続けます",
   "Allow for 1 hour": "1 時間許可", // lane vault-standing-request r7 («Allow for 1 hour»)
   "Allowed this conversation for 1 hour — each use shows a notice; take it back in the Vault window": "この会話を 1 時間許可しました — 使うたびに通知が出ます。保管庫ウィンドウで取り消せます", // lane vault-standing-request r7 («Allow for 1 hour»)
   "any destination": "すべての宛先", // lane vault-standing-request r7 («Allow for 1 hour»)
@@ -12374,6 +12785,15 @@ export default {
   "Nothing was started. Your {shell} has no {cli} program on its PATH, and neither has the hub’s own PATH: {dirs}.": "何も起動していません。あなたの {shell} の PATH に {cli} のプログラムはなく、hub 自身の PATH にもありません: {dirs}。",
   "The hub’s PATH has {path} — add that directory to your shell’s PATH, then try again.": "hub の PATH には {path} があります — そのディレクトリをあなたのシェルの PATH に追加してから、もう一度お試しください。",
   "{cli} was not found": "{cli} が見つかりません",
+  "found by the {shell} of {machine} at {path}": "{machine} の {shell} が {path} で見つけました",
+  "not found by the {shell} of {machine} (login shell)": "{machine} の {shell}（ログインシェル）では見つかりません",
+  "not found by the {shell} of {machine} · the PATH VibeSpace adds there has {path}, which runs": "{machine} の {shell} では見つかりません · VibeSpace がそこで加える PATH に {path} があり、それで実行します",
+  "the {shell} of {machine} could not be asked ({why}) · its own PATH decides": "{machine} の {shell} に問い合わせできません（{why}）· そのマシンの PATH で決まります",
+  "Asked: the {shell} of {machine}, as a login shell": "問い合わせ先：{machine} の {shell}（ログインシェル）",
+  "Nothing was started. The {shell} of {machine} has no {cli} program on its PATH.": "何も起動していません。{machine} の {shell} の PATH に {cli} のプログラムがありません。",
+  "Nothing was started. The alias for {cli} in the {shell} of {machine} names {path}, which is missing.": "何も起動していません。{machine} の {shell} にある {cli} のエイリアスは {path} を指していますが、存在しません。",
+  "Nothing was started. The alias for {cli} in the {shell} of {machine} names {path}, which is not executable.": "何も起動していません。{machine} の {shell} にある {cli} のエイリアスは {path} を指していますが、実行できません。",
+  "Nothing was started. The {shell} of {machine} wraps {cli} in an alias or a function, which VibeSpace does not run, and has no {cli} program on its PATH.": "何も起動していません。{machine} の {shell} は {cli} をエイリアスか関数で包んでいます（VibeSpace はそれを実行しません）。PATH に {cli} のプログラムはありません。",
   "How to install": "インストール方法",
   "Open Manage agents": "「エージェントを管理」を開く",
   "Re-check there asks your shell again once {cli} is installed": "{cli} をインストールしたら、そこで「再チェック」するとシェルにもう一度問い合わせます",
@@ -12389,6 +12809,17 @@ export default {
   "You edited this text before you approved it": "承認する前にあなたがこの文面を編集しました",
   "replaced": "差し替え済み",
   "The agent replaced this draft with a newer one — click to see it": "エージェントが新しい下書きに差し替えました — クリックで表示",
+  "Send the rest": "残りを送信",
+  "Only a sent message has a rest to send": "残りを送れるのは送信済みのメッセージだけです",
+  "The rest is on its way already": "残りはすでに送信中です",
+  "Nothing of it is left to send": "送る残りはありません",
+  "Its files are no longer kept — attach them again in a new reply": "ファイルはもう保存されていません — 新しい返信で添付し直してください",
+  "Sends only the files that did not land ({n}), as a new message": "届かなかったファイル（{n} 個）だけを新しいメッセージとして送ります",
+  "Sent the rest": "残りを送信しました",
+  "Another reply to this message is waiting — drafted by {who}": "このメッセージへの別の返信が承認待ちです — {who} の下書き",
+  "Another reply to this message is being sent — drafted by {who}": "このメッセージへの別の返信を送信中です — {who} の下書き",
+  "A reply to this message was already sent — drafted by {who}": "このメッセージへの返信はすでに送信済みです — {who} の下書き",
+  "Another reply to this same message is still open or already sent — press Approve again to send this one too": "同じメッセージへの別の返信が未決または送信済みです — これも送るにはもう一度「承認」を押してください",
   "Only drafts by {name}": "{name} が起草したものだけ",
   "Show every proposal": "すべての提案を表示",
   "This conversation has no proposal in the Outbox list.": "この会話の提案は送信箱の一覧にありません。",
@@ -12449,6 +12880,35 @@ export default {
   "VibeSpace never hands the password to the agent and types it only on {site} into a password or code field; our fence stops accidental reads and wrong sites, and we do not promise to stop an agent that deliberately digs into a page it controls.": "VibeSpace はエージェントにパスワードを渡さず、{site} のパスワード欄またはコード欄にのみ入力します。柵は誤読と別サイトを防ぎますが、自分が操作するページ内を意図的に探るエージェントを止めるとは約束しません。",
   "Save and allow": "保存して許可",
   "Save only": "保存のみ",
+  "Use a login you already saved…": "保存済みのログインを使う…",
+  "Type a new login instead": "代わりに新しいログインを入力",
+  "No website login is saved yet — type this one below.": "まだウェブサイトのログインは保存されていません — 下にこのログインを入力してください。",
+  "Pick the saved login": "保存済みのログインを選ぶ",
+  "Adds {site} to the login {login} — it is filled there with that login's one password; nothing is typed again.": "{site} をログイン {login} に追加します — そこではこのログインの同じパスワードが入力され、もう一度入力する必要はありません。",
+  "What it changes could not be read ({code}) — the press says why.": "何が変わるかを読み取れませんでした（{code}）— 押すと理由が表示されます。",
+  "The address is {unicode} — written {ascii} in plain letters.": "このアドレスは {unicode} です — 普通の文字では {ascii} と書きます。",
+  "Careful: {domain} is not the domain of this login's other sites ({mine}).": "注意：{domain} はこのログインのほかのサイトのドメイン（{mine}）ではありません。",
+  "the conversation that saved it ({key})": "これを保存した会話（{key}）",
+  "Then it may be filled on {site} by: {names}.": "その後 {site} でこれを入力できるのは：{names}。",
+  "Nobody else may have it filled on {site} yet.": "今のところ、{site} でこれを入力できる人はほかにいません。",
+  "Let {who} sign in with it on every site of this login ({sites})": "このログインのすべてのサイト（{sites}）で {who} がこれを使ってサインインすることを許可",
+  "{who} can sign in with it on every site of this login until you remove it in Vault ▸ Web logins ▸ Use for… — there is no time limit.": "保管庫 ▸ ウェブログイン ▸ 使用先… で取り消すまで、{who} はこのログインのすべてのサイトでこれを使ってサインインできます — 期限はありません。",
+  "Add the site and allow": "サイトを追加して許可",
+  "Add the site only": "サイトだけ追加",
+  "Added the site to the saved login — the agent may sign in with it there; VibeSpace never hands it the password": "保存済みのログインにサイトを追加しました — エージェントはそこでこれを使ってサインインできます。VibeSpace はパスワードを渡しません",
+  "Added the site to the saved login — the agent may not sign in with it until you allow it in Vault ▸ Web logins ▸ Use for…": "保存済みのログインにサイトを追加しました — 保管庫 ▸ ウェブログイン ▸ 使用先… で許可するまで、エージェントはこれでサインインできません",
+  "{site} is one of this login's sites already — it signs in there as {user}; the press changes only who may have it filled.": "{site} はすでにこのログインのサイトの一つです — そこでは {user} としてサインインします。押して変わるのは、そこでこれを入力できる人だけです。", // lane login-request-card: the use door's cure (主开发 12:17Z) — the site the login holds, the name it signs in under there, a locked list, a grant not written
+  "It signs in there as {user}.": "そこでは {user} としてサインインします。",
+  "a conversation not running now ({key})": "いま動いていない会話（{key}）",
+  "The vault is locked — unlock it to pick one of its saved logins.": "保管庫はロックされています — 保存済みのログインを選ぶには、ロックを解除してください。",
+  "The saved logins could not be read — try again, or type this one below.": "保存済みのログインを読み取れませんでした — もう一度試すか、下にこのログインを入力してください。",
+  "The site is on the saved login, but the permission could not be written — allow it in Vault ▸ Web logins ▸ Use for…": "サイトは保存済みのログインに入りましたが、許可を書き込めませんでした — 保管庫 ▸ ウェブログイン ▸ 使用先… で許可してください",
+  "That site was on the saved login already — the agent may now sign in with it there; VibeSpace never hands it the password": "そのサイトはもともと保存済みのログインにありました — エージェントはそこでこれを使ってサインインできるようになりました。VibeSpace はパスワードを渡しません",
+  "That site was on the saved login already — nothing was changed": "そのサイトはもともと保存済みのログインにありました — 何も変わっていません",
+  "{site} is on this login already and signs in there as {user} — to sign in there under another name, remove that site from the login in Vault ▸ Web logins first, or type a new login": "{site} はすでにこのログインにあり、そこでは {user} としてサインインします — 別の名前でサインインするには、先に 保管庫 ▸ ウェブログイン でそのサイトをログインから外すか、新しいログインを入力してください",
+  "{who} (except {names})": "{who}（{names} を除く）", // lane login-request-card: the use door's follow-up (主开发 13:02Z) — exceptions said, an owner not running, the first site's one door
+  "the conversation that saved it, not running now ({key})": "これを保存した会話、いまは動いていません（{key}）",
+  "{site} is this login's own first site and signs in there as {user} — to sign in there under another name, type a new login": "{site} はこのログイン自身の最初のサイトで、そこでは {user} としてサインインします — 別の名前でサインインするには、新しいログインを入力してください",
   "Let {who} read its current code — never the seed — while it runs": "{who} が実行中に現在のコードを読めるようにする — シードは決して渡しません",
   "{who} can read its current code (never the seed) while it runs — a restart of that conversation ends it; give it again in Vault ▸ Two-step codes ▸ Use for….": "{who} は実行中に現在のコードを読めます（シードは渡しません）— その会話が再起動すると終わります。もう一度渡すには「保管庫 ▸ 2 段階認証コード ▸ 使用先…」から。",
   "{who} cannot read its code until you give it in Vault ▸ Two-step codes ▸ Use for….": "「保管庫 ▸ 2 段階認証コード ▸ 使用先…」で渡すまで、{who} はコードを読めません。",
@@ -13096,10 +13556,177 @@ export default {
   "the connection dropped before the server answered": "サーバーが応答する前に接続が切れました",
   "the server reported an error without a reason": "サーバーがエラーを返しましたが、理由は示されませんでした",
   "the server refused it without a reason": "サーバーが拒否しましたが、理由は示されませんでした",
+  "its folder waits for the vault": "フォルダーが保管庫の解除を待っています",
+  "its folder is on a mount that is not up": "フォルダーのマウントが準備できていません",
+  "{w} of {n} conversations wait for the vault — while this page is open, each resumes by itself once you unlock it.": "{n} 件中 {w} 件の会話が保管庫を待っています — このページを開いている間は、解除するとそれぞれ自動で再開します。",
   "it could not be started on this page": "このページでは開始できませんでした",
   "it was not resumed": "再開されませんでした",
   "Resuming the group stopped early because of an error on this page.": "このページでエラーが起きたため、グループの再開が途中で止まりました。",
   "Resuming {i} of {n}…": "{n} 件中 {i} 件目の会話を再開しています…",
   "Resuming {i} of {n} — {f} could not be resumed": "{n} 件中 {i} 件目の会話を再開しています — {f} 件は再開できませんでした",
   "{f} of {n} conversations could not be resumed: {list}": "{n} 件中 {f} 件の会話を再開できませんでした：{list}",
+  "No window": "ウィンドウなし",
+  "Split": "分割",
+  "Rotate to split": "横向きで分割できます",
+  "Too narrow to split": "画面が狭く分割できません",
+  "Close the split": "分割を閉じる",
+  "The split ended: one of its windows was minimized, closed or moved to another desktop": "分割を終了しました：一方のウィンドウが最小化されたか、閉じられたか、別のデスクトップに移されました",
+  "Billing: {name}": "課金：{name}",
+  // unit what-it-may-use (Session Properties «What it may use»)
+  "may ask for it — the request comes to you": "申請できます — 申請はあなたに届きます",
+  "{n} more it may ask for": "ほかに申請できるもの {n} 件",
+  "{n} more left out or unknown": "ほかに除外・不明 {n} 件",
+  "{n} more not open to it": "ほかに開かれていないもの {n} 件",
+  "its access list could not be read": "アクセスリストを読み込めません",
+  "“{name}” has no tick of this conversation’s own to take back — it comes through a Task Group or every agent (the Channels window)": "「{name}」にはこの会話自身のチェックがありません — タスクグループかすべてのエージェント経由です（チャンネルウィンドウで変更）",
+  "Could not read what it may use: {why}": "使えるものを読み込めませんでした：{why}",
+  "Could not take “{name}” back from this conversation: {why}": "「{name}」をこの会話から外せませんでした：{why}",
+  "Desktop app windows shared with it": "この会話に共有されたデスクトップアプリのウィンドウ",
+  "Given to this conversation itself · {authority} — untick to take it back": "この会話そのものに渡しています · {authority} — チェックを外すと取り消します",
+  "Its Task Groups could not be read — what comes through a group is unknown": "タスクグループを読み込めません — グループ経由のものは不明です",
+  "Its notifications wake it — {name}": "通知でこの会話を起こします — {name}",
+  "Job {job} uses {entry} at every start": "ジョブ {job} は起動のたびに {entry} を使います",
+  "Keys an outside party uses on its behalf — names only": "外部がこの会話の代わりに使うキー — 名前のみ",
+  "Machines that lend it their network, or run commands for it": "ネットワークを貸す、またはコマンドを実行するマシン",
+  "Machines’ exits": "マシンの出口",
+  "No automation key is granted to it": "この会話に許可された自動化キーはありません",
+  "No browser profile is open to it": "この会話に開かれたブラウザプロファイルはありません",
+  "No desktop window is shared with it": "この会話に共有されたデスクトップウィンドウはありません",
+  "No machine lends it its exit": "出口を貸しているマシンはありません",
+  "No vault entry is open to it": "この会話に開かれた保管庫の項目はありません",
+  "Not given — tick to let this conversation see it (draft only)": "渡していません — チェックするとこの会話に見せます（下書きのみ）",
+  "Not running now — judged by what is stored for it": "今は動いていません — 保存された記録で判断しています",
+  "Raw API: {tier}": "生 API：{tier}",
+  "Reading what it may use…": "使えるものを読み込み中…",
+  "Shared windows": "共有されたウィンドウ",
+  "Share…": "共有…",
+  "The vault is locked — unlock it in the Vault window to see what it may use there": "保管庫はロック中 — 保管庫ウィンドウでロックを解除すると、使えるものが見えます",
+  "This conversation has no id of its own yet — try again in a moment": "この会話にはまだ自分の ID がありません — 少し待ってからもう一度",
+  "What it may use…": "使えるもの…",
+  "cannot be read by this release": "このリリースでは読めません",
+  "hosts {list}": "ホスト {list}",
+  "itself": "この会話そのもの",
+  "left out — Except: {name}": "除外 — 除く：{name}",
+  "locked": "ロック中",
+  "not on this machine": "このマシン上ではありません",
+  "run commands on it": "そのマシンでコマンドを実行",
+  "through Task Group {name}": "タスクグループ{name}経由",
+  "unknown — its Task Groups could not be read": "不明 — タスクグループを読み込めません",
+  "use its network": "そのネットワークを使う",
+  "{n} a day": "1日 {n} 回",
+  "{n} entr(ies)": "{n} 件",
+  "{n} granted": "許可 {n} 件",
+  "{n} of {m} account(s)": "{m} アカウント中 {n} 件",
+  "{n} profile(s) · {m} saved login(s)": "プロファイル {n} 件 · 保存済みログイン {m} 件",
+  "proxy password not in the vault": "プロキシのパスワードが保管庫にありません", // B-8b87: a browser profile's proxy and its login
+  "Its proxy address carries its password, which is never used — «Move the password to the vault» in ⋯": "このプロキシのアドレスにはパスワードが含まれていますが、使われることはありません——⋯ の「パスワードを保管庫へ移す」で移せます", // B-8b87: a browser profile's proxy and its login
+  "proxy": "プロキシ", // B-8b87: a browser profile's proxy and its login
+  "Through its proxy {address}, with its login from the vault": "プロキシ {address} 経由（ログイン情報は保管庫から）", // B-8b87: a browser profile's proxy and its login
+  "Through its proxy {address}": "プロキシ {address} 経由", // B-8b87: a browser profile's proxy and its login
+  "Move the password to the vault": "パスワードを保管庫へ移す", // B-8b87: a browser profile's proxy and its login
+  "Its proxy address carries its password, which is never used — one press keeps it in the vault as this proxy's login and removes it from the profile": "このプロキシのアドレスにはパスワードが含まれていますが、使われることはありません——ワンタップでこのプロキシのログイン情報として保管庫に保存し、プロファイルからは削除します", // B-8b87: a browser profile's proxy and its login
+  "Proxy…": "プロキシ…", // B-8b87: a browser profile's proxy and its login
+  "This profile's proxy and its login (kept in the vault)": "このプロファイルのプロキシとそのログイン情報（保管庫に保存）", // B-8b87: a browser profile's proxy and its login
+  "Proxy of {label}": "{label} のプロキシ", // B-8b87: a browser profile's proxy and its login
+  "Applied at the browser's next start.": "ブラウザの次回起動時に反映されます。", // B-8b87: a browser profile's proxy and its login
+  "{label} goes through its proxy from its next start": "{label} は次回の起動からプロキシ経由になります", // B-8b87: a browser profile's proxy and its login
+  "{label} has no proxy from its next start": "{label} は次回の起動からプロキシを使いません", // B-8b87: a browser profile's proxy and its login
+  "Proxy": "プロキシ", // B-8b87: a browser profile's proxy and its login
+  "http, https or socks5 — the address alone; its login is kept in the vault. Empty: no proxy.": "http、https または socks5——アドレスだけを入力します。ログイン情報は保管庫に保存されます。空欄：プロキシなし。", // B-8b87: a browser profile's proxy and its login
+  "Proxy login": "プロキシのログイン", // B-8b87: a browser profile's proxy and its login
+  "Saved in the vault as this proxy's login — the browser never sees it.": "このプロキシのログイン情報として保管庫に保存されます——ブラウザからは見えません。", // B-8b87: a browser profile's proxy and its login
+  "No login": "ログインなし", // B-8b87: a browser profile's proxy and its login
+  "New login…": "新しいログイン情報…", // B-8b87: a browser profile's proxy and its login
+  "The proxy must be http://host:port, https://host:port or socks5://host:port.": "プロキシは http://ホスト:ポート、https://ホスト:ポート、socks5://ホスト:ポート のいずれかにしてください。", // B-8b87: a browser profile's proxy and its login
+  "A proxy's user name and password go in the vault — give the address alone, then choose its login below.": "プロキシのユーザー名とパスワードは保管庫に入れます——アドレスだけを入力し、下でログイン情報を選んでください。", // B-8b87: a browser profile's proxy and its login
+  "That login was saved for another proxy — choose this proxy's login, or make a new one.": "そのログイン情報は別のプロキシ用に保存されたものです——このプロキシのログイン情報を選ぶか、新しく作成してください。", // B-8b87: a browser profile's proxy and its login
+  "proxy from its next start": "次回の起動からプロキシ", // B-8b87 cure: a proxy's refusals in the page's words
+  "Through its proxy {address} from its next start — the running browser still uses {road}": "次回の起動からプロキシ {address} 経由——起動中のブラウザはまだ {road} を使っています", // B-8b87 cure: a proxy's refusals in the page's words
+  "no proxy": "プロキシなし", // B-8b87 cure: a proxy's refusals in the page's words
+  "no proxy from its next start": "次回の起動からプロキシなし", // B-8b87 cure: a proxy's refusals in the page's words
+  "The running browser still goes through {road} — no proxy from its next start": "起動中のブラウザはまだ {road} 経由です——次回の起動からプロキシなし", // B-8b87 cure: a proxy's refusals in the page's words
+  "{user} — the vault's list could not be read": "{user}——保管庫の一覧を読み取れませんでした", // B-8b87 cure: a proxy's refusals in the page's words
+  "{user} — no longer in the vault": "{user}——もう保管庫にありません", // B-8b87 cure: a proxy's refusals in the page's words
+  "The vault is locked — press Unlock…, then move the password again.": "保管庫はロックされています——「ロック解除…」を押してから、もう一度パスワードを移してください。", // B-8b87 cure: a proxy's refusals in the page's words
+  "The vault is locked — press Unlock…, then start the browser again.": "保管庫はロックされています——「ロック解除…」を押してから、もう一度ブラウザを起動してください。", // B-8b87 cure: a proxy's refusals in the page's words
+  "The vault is locked — press Unlock…, then save.": "保管庫はロックされています——「ロック解除…」を押してから保存してください。", // B-8b87 cure: a proxy's refusals in the page's words
+  "The vault is not set up yet — press Set up the vault…, then try again.": "保管庫はまだ設定されていません——「保管庫を設定…」を押してから、もう一度お試しください。", // B-8b87 cure: a proxy's refusals in the page's words
+  "A cloud browser runs at its vendor, where a proxy on this machine cannot reach it — clear the proxy, or set one in the vendor's own settings.": "クラウドブラウザはベンダー側で動いており、このマシンのプロキシは届きません——プロキシを空にするか、ベンダー自身の設定でプロキシを設定してください。", // B-8b87 cure: a proxy's refusals in the page's words
+  "Its proxy login is no longer in the vault — choose its login again in Proxy….": "プロキシのログインはもう保管庫にありません——「プロキシ…」でログインを選び直してください。", // B-8b87 cure: a proxy's refusals in the page's words
+  "Its proxy login could not be read from the vault ({code}).": "保管庫からプロキシのログインを読み取れませんでした（{code}）。", // B-8b87 cure: a proxy's refusals in the page's words
+  "Its proxy address carries its password, which is never used — press «Move the password to the vault» in ⋯ first.": "プロキシのアドレスにパスワードが含まれており、そのパスワードは使われません——先に ⋯ の「パスワードを保管庫へ移す」を押してください。", // B-8b87 cure: a proxy's refusals in the page's words
+  "Its proxy is socks4, which cannot carry a site's name — give an http, https or socks5 proxy in Proxy….": "プロキシが socks4 で、サイトの名前を渡せません——「プロキシ…」で http、https または socks5 のプロキシを指定してください。", // B-8b87 cure: a proxy's refusals in the page's words
+  "This profile attaches to a browser VibeSpace does not start — that browser keeps its own proxy settings.": "このプロファイルは VibeSpace が起動しないブラウザに接続します——そのブラウザは自身のプロキシ設定を使います。", // B-8b87 cure: a proxy's refusals in the page's words
+  "The browser's proxy could not be put in its config — the browser was not started without it.": "ブラウザの設定にプロキシを書き込めませんでした——プロキシなしでブラウザを起動することはしていません。", // B-8b87 cure: a proxy's refusals in the page's words
+  "Its proxy address cannot be read — give it again in Proxy….": "プロキシのアドレスを読み取れません——「プロキシ…」でもう一度指定してください。", // B-8b87 cure: a proxy's refusals in the page's words
+  "The login is saved in the vault, but the profile could not be written — press «Move the password to the vault» again.": "ログインは保管庫に保存されましたが、プロファイルを書き込めませんでした——もう一度「パスワードを保管庫へ移す」を押してください。", // B-8b87 cure: a proxy's refusals in the page's words
+  "A login's user name cannot hold a space or #, and is at most 128 characters.": "ログインのユーザー名には空白や # を含められず、最大 128 文字です。", // B-8b87 cure: a proxy's refusals in the page's words
+  "The proxy could not be used ({code}).": "このプロキシを使えませんでした（{code}）。", // B-8b87 cure: a proxy's refusals in the page's words
+  "A browser profile's proxy works for browsers on this machine only, for now.": "現時点では、ブラウザのプロファイルのプロキシはこのマシン上のブラウザでのみ使えます。", // B-8b87: a browser profile's proxy and its login
+  "A new login needs its user name and its password.": "新しいログイン情報にはユーザー名とパスワードが必要です。", // B-8b87: a browser profile's proxy and its login
+  "This profile's proxy carries no password.": "このプロファイルのプロキシにはパスワードが含まれていません。", // B-8b87: a browser profile's proxy and its login
+  "The proxy could not be saved.": "プロキシを保存できませんでした。", // B-8b87: a browser profile's proxy and its login
+  "Could not move the password": "パスワードを移せませんでした", // B-8b87: a browser profile's proxy and its login
+  "{label}'s proxy password is in the vault now — the profile keeps the address alone": "{label} のプロキシのパスワードは保管庫に移りました——プロファイルにはアドレスだけが残ります", // B-8b87: a browser profile's proxy and its login
+  "Delete the proxy login \"{name}\"?": "プロキシのログイン情報「{name}」を削除しますか？", // B-8b87: a browser profile's proxy and its login
+  "Its password leaves the vault. A browser profile whose proxy uses it is refused at its next start until you choose a login again.": "パスワードは保管庫から削除されます。これを使うブラウザのプロファイルは、ログイン情報を選び直すまで次回の起動が拒否されます。", // B-8b87: a browser profile's proxy and its login
+  "A browser proxy's login — VibeSpace hands it to the proxy for the browser profile that names it; the browser never sees it": "ブラウザのプロキシのログイン情報——VibeSpace がそれを指定したブラウザのプロファイルのためにプロキシへ渡します。ブラウザからは見えません", // B-8b87: a browser profile's proxy and its login
+  "This profile has no proxy of its own — its browser may leave by another road, so a check here could state an exit it does not use. Type the exit by hand if a plugin needs it.": "このプロファイルには独自のプロキシがありません——ブラウザは別の経路で出る場合があり、ここで確認すると実際には使わない出口を示すおそれがあります。プラグインに必要なら手入力してください。", // the exit check (the owner 2026-11-17)
+  "No exit check address is set — give one below (an https address you trust), or type the exit by hand.": "出口チェックのアドレスが未設定です——下に入力する（信頼できる https アドレス）か、出口を手入力してください。", // the exit check (the owner 2026-11-17)
+  "The exit check address must be a public https address with no user name or password in it.": "出口チェックのアドレスは、ユーザー名やパスワードを含まない公開 https アドレスにしてください。", // the exit check (the owner 2026-11-17)
+  "This browser runs on another road than its proxy now names (the address or its login changed since it started) — restart it, then check the exit.": "このブラウザは、プロキシが今指す経路とは別の経路で動いています（起動後にアドレスかログインが変わりました）——再起動してから出口を確認してください。", // the exit check (主开发 17:04Z cure)
+  "The proxy's login is in the vault, which is locked — a person unlocks it on this instance's page (Unlock…), then checks again.": "プロキシのログイン情報は保管庫にあり、保管庫はロックされています——このインスタンスのページでロックを解除（ロック解除…）してから、もう一度確認してください。", // the exit check (the owner 2026-11-17)
+  "That is not a time zone — give a zone name like Asia/Shanghai.": "これはタイムゾーンではありません——Asia/Shanghai のようなゾーン名を入力してください。", // the exit check (the owner 2026-11-17)
+  "Give at least one of the public address, the country or the time zone.": "公開アドレス・国・タイムゾーンのいずれか 1 つ以上を入力してください。", // the exit check (主开发 17:04Z cure)
+  "The exit of {label}": "{label} の出口", // the exit check (the owner 2026-11-17)
+  "Checked only when you press Check — through this profile's own proxy, at the exit check address. Nothing is kept until you press Keep; an engine plugin reads what you keep when the browser starts.": "「確認」を押したときだけ確認します——このプロファイル自身のプロキシ経由で、出口チェックのアドレスに問い合わせます。「保持」を押すまで何も保存されません。ブラウザの起動時に、エンジンのプラグインが保持した内容を読み取ります。", // the exit check (the owner 2026-11-17)
+  "Proxy exit": "プロキシの出口", // the exit check (the owner 2026-11-17)
+  "{ip} · {where} — {how}, checked {age}": "{ip} · {where}——{how}、{age}に確認", // the exit check (the owner 2026-11-17)
+  "This profile attaches to a browser VibeSpace does not start — that browser leaves by its own settings, so a check here could state an exit it does not use. Type the exit by hand if a plugin needs it.": "このプロファイルは VibeSpace が起動しないブラウザに接続します——そのブラウザは自身の設定で外に出るため、ここで確認すると使われない出口を示すおそれがあります。プラグインが必要とするなら出口を手入力してください。", // the exit check (主开发 17:04Z cure)
+  "The profile's proxy did not open the way to the check address in time.": "プロファイルのプロキシが時間内に確認アドレスへの経路を開きませんでした。", // the exit check (主开发 17:04Z cure)
+  "The profile's proxy closed the connection before the way to the check address was open.": "確認アドレスへの経路が開く前に、プロファイルのプロキシが接続を切りました。", // the exit check (主开发 17:04Z cure)
+  "The public address is one IP address, like 203.0.113.7 or 2001:db8::1.": "公開アドレスは 1 つの IP アドレスです（例：203.0.113.7 や 2001:db8::1）。", // the exit check (主开发 17:04Z cure)
+  "{label}'s kept exit is forgotten — an engine plugin gets none at the next start": "{label} の保持していた出口を忘れました——次回の起動でエンジンプラグインに出口は渡りません", // the exit check (主开发 17:04Z cure)
+  "its kept exit is forgotten (it belonged to the old proxy); check it again": "保持していた出口は忘れました（古いプロキシのものでした）。もう一度確認してください", // the exit check (主开发 17:04Z cure)
+  "Not saved — the exit check address must be a public https address with no user name or password in it; the stored one is kept": "保存されていません——出口チェックのアドレスは、ユーザー名やパスワードを含まない公開の https アドレスである必要があります。保存済みのものを維持します", // the exit check (主开发 17:04Z cure)
+  "Not saved — the server refused this value ({code}); the stored one is kept": "保存されていません——サーバーがこの値を拒否しました（{code}）。保存済みの値を維持します", // the exit check (主开发 17:04Z cure)
+  "Kept: {ip} · {country} · {timezone} ({how}, checked {age})": "保持中：{ip} · {country} · {timezone}（{how}、{age}に確認）", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The check address answered with a redirect — a redirect is never followed.": "確認アドレスはリダイレクトで応答しました——リダイレクトは追いません。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The check address answered with an error status.": "確認アドレスはエラーのステータスで応答しました。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The check address answered nothing.": "確認アドレスは何も返しませんでした。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The check address answered a web page, not JSON.": "確認アドレスが返したのは JSON ではなくウェブページでした。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The check address answered plain text, not JSON.": "確認アドレスが返したのは JSON ではなくプレーンテキストでした。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The check address answered JSON without an address, a country or a time zone in it.": "確認アドレスが返した JSON には、アドレス・国・タイムゾーンがありませんでした。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The check address answered something that could not be read.": "確認アドレスの応答を読み取れませんでした。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The profile's proxy did not open the way to the check address.": "プロファイルのプロキシが確認アドレスへの経路を開きませんでした。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The exit check address did not answer in time.": "出口チェックのアドレスが時間内に応答しませんでした。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The exit check address answered more than this check reads (64 KiB).": "出口チェックのアドレスの応答が、この確認で読む上限（64 KiB）を超えました。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The exit check could not reach the check address through the profile's proxy.": "出口チェックは、プロファイルのプロキシ経由で確認アドレスに届きませんでした。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "Type the exit by hand, or give another check address in the field above and press Check.": "出口を手入力するか、上の欄に別の確認アドレスを入れて「確認」を押してください。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The country is at most 64 characters.": "国は最大 64 文字です。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "This profile is gone — close the dialog and reload the list.": "このプロファイルはもうありません——ダイアログを閉じて一覧を再読み込みしてください。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "Only a person checks a profile's exit — an agent's token cannot.": "プロファイルの出口を確認できるのは人だけです——エージェントのトークンではできません。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The exit check runs for browsers on this machine only.": "出口チェックはこのマシンのブラウザにだけ使えます。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The request was not understood — reload the page and try again.": "リクエストを理解できませんでした——ページを再読み込みしてもう一度お試しください。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The exit check is not available on this server.": "このサーバーでは出口チェックを使えません。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The exit could not be checked — the server failed; try again.": "出口を確認できませんでした——サーバーでエラーが起きました。もう一度お試しください。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The exit could not be checked ({code}).": "出口を確認できませんでした（{code}）。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "Its saved proxy address carries its password, which is never used. The press below moves that password into the vault in one step — the profile keeps the address and that login. Or give the address here and choose its login.": "保存されたプロキシのアドレスにパスワードが含まれており、そのパスワードは使われません。下のボタンを押すと、そのパスワードを一度で保管庫へ移します——プロファイルはアドレスとそのログインを残します。または、ここでアドレスを入力してログインを選んでください。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "measured": "測定", // the exit check (the owner 2026-11-17)
+  "typed": "手入力", // the exit check (the owner 2026-11-17)
+  "Exit check address": "出口チェックのアドレス", // the exit check (the owner 2026-11-17)
+  "Public address": "公開アドレス", // the exit check (the owner 2026-11-17)
+  "Country": "国", // the exit check (the owner 2026-11-17)
+  "Time zone": "タイムゾーン", // the exit check (the owner 2026-11-17)
+  "Type it by hand": "手入力する", // the exit check (the owner 2026-11-17)
+  "Check": "確認", // the exit check (the owner 2026-11-17)
+  "Keep": "保持", // the exit check (the owner 2026-11-17)
+  "Checking through this profile's proxy…": "このプロファイルのプロキシ経由で確認しています…", // the exit check (the owner 2026-11-17)
+  "Read — check each field, then Keep.": "読み取りました——各項目を確認してから「保持」を押してください。", // the exit check (the owner 2026-11-17)
+  "{label}'s exit is kept — an engine plugin reads it when the browser starts": "{label} の出口を保持しました——ブラウザの起動時にエンジンのプラグインが読み取ります", // the exit check (the owner 2026-11-17)
+  "exit {where}": "出口 {where}", // the exit check (the owner 2026-11-17)
+  "Its exit: {ip} · {where} — {how}, {age}": "出口：{ip} · {where}——{how}、{age}", // the exit check (the owner 2026-11-17)
+  "Check the exit…": "出口を確認…", // the exit check (the owner 2026-11-17)
+  "Read this profile's public address, country and time zone through its own proxy — kept only when you press Keep": "このプロファイル自身のプロキシ経由で公開アドレス・国・タイムゾーンを読み取ります——「保持」を押したときだけ保存されます", // the exit check (the owner 2026-11-17)
+  "An https address that answers a browser profile's public address, country and time zone as JSON. It is asked only when you press «Check the exit…» on a profile, and only through that profile's own proxy. Empty: no check — type the exit by hand.": "ブラウザのプロファイルの公開アドレス・国・タイムゾーンを JSON で返す https アドレスです。プロファイルで「出口を確認…」を押したときだけ、そのプロファイル自身のプロキシ経由で問い合わせます。空欄：確認しない——出口を手入力します。", // the exit check (the owner 2026-11-17)
 };

@@ -310,7 +310,7 @@ await section('⑤', async () => {
     'chat-renderers draws the (hidden, empty) holder on all THREE card shapes of a vibespace-channels call, after the browser-actions row');
   const cv = read('src/lib/chat-view.js');
   const hook = cv.slice(cv.indexOf('  _applyElementMarks(el, msg) {'), cv.indexOf('\n  }\n', cv.indexOf('  _applyElementMarks(el, msg) {')));
-  ok(/this\._channelTouches\?\.observe\(el\);/.test(hook) && /msg\.type === 'channel-touch'\) \{\n[^\n]*\n\s*this\._channelTouches\?\.onTouch\(msg\);/.test(cv) && /this\._channelTouches\?\.noteTurn\(msg\.ts\)/.test(cv) && /this\._channelTouches\?\.dispose\(\)/.test(cv) && /this\._channelTouches\?\.onAttached\(\)/.test(cv) && /onChannelOpen: \(row\) => openTouchRow\(this\.app, row, \{ filter: this\._outboxFilter\(\) \}\)/.test(cv),
+  ok(/this\._channelTouches\?\.observe\(el\);/.test(hook) && /msg\.type === 'channel-touch'\) \{\n[^\n]*\n\s*this\._channelTouches\?\.onTouch\(msg\);/.test(cv) && /this\._channelTouches\?\.noteTurn\(msg\.ts\)/.test(cv) && /this\._channelTouches\?\.dispose\(\)/.test(cv) && /this\._channelTouches\?\.onAttached\(\)/.test(cv) && /onChannelOpen: \(row\) => openTouchRow\(this\.app, row, \{ filter: this\._outboxFilter\(\), conversation: this\._connectConversation\(\) \}\)/.test(cv),
     'ChatView: observe in the ONE element hook, the channel-touch broadcast, a live user message = a new turn, every attach re-reads, disposed; the chip opens through openTouchRow');
   const sb = read('src/lib/chat-status-bar.js');
   ok(/chip\('channels', 'chat-status-channels chat-status-clickable', tip, `\$\{glyph\} <span class="chat-status-channels-text">\$\{escHtml\(channelChipText\(v, t\)\)\}<\/span>`\)/.test(sb) && /setChannelTouches\(v\)/.test(sb) && /name\.textContent = channelRowName\(r\)/.test(sb),
@@ -1060,6 +1060,15 @@ await section('⑨', async () => {
   const CMS = read('src/codex-message-manager.js');
   const cmmNo = copy('codex-turn', '    if (msg.role === \'user\') {\n      if (!this._turnRunning)', '    if (false) {\n      if (!this._turnRunning)', 'src/codex-message-manager.js', CMS);
   ok(!eq(cxTurns(cmmNo.CodexMessageManager), [0, 9000, 20000, 31000]), 'CONTROL codex\'s turn facts removed (r2): its peer and notification cards open turns, the drained submission does not', cxTurns(cmmNo.CodexMessageManager));
+  // bl-jobs batch 8 (B-cac2's adversarial read r1): `vibespace-job restart` starts the job again — it lingers like run / start. The
+  // tell (the cure gate of 67a0a3be1: a later vibespace-status runs nothing, so it never told): a later lone python script takes the
+  // reads ONLY when nothing before it lingers
+  const jobThen = (cmd) => [one('JOB', cmd, R0 + 5_000, R0 + 5_100, { background: false }), one('PY', 'python3 tools/triage_inbox.py', R0 + 8_000, null, { background: false })];
+  const CTS = fs.readFileSync(path.join(REPO, 'src/channel-touch.js'), 'utf8'), RST = "(x.verb === 'run' || x.verb === 'start' || x.verb === 'restart')";
+  ok(CTS.split(RST).length === 2, 'control setup: the anchor of the control «a restart lingers» is in the source');
+  const rj = B9(T, tn(3, R0 + 10_000), jobThen('vibespace-job restart jb-00000001'), ctx), rr = B9(T, tn(3, R0 + 10_000), jobThen('vibespace-job run "./read-all.sh" --name r'), ctx);
+  const rjx = B9(MUT.load('src/channel-touch.js', CTS.replace(RST, "(x.verb === 'run' || x.verb === 'start')"), 'no-restart'), tn(3, R0 + 10_000), jobThen('vibespace-job restart jb-00000001'), ctx);   // stale-pins: kept — the control writes the rule without restart back into a copy
+  ok(eq(rj, rr) && !eq(rj.by, { PY: 3 }) && eq(rjx.by, { PY: 3 }), 'WHAT LINGERS (batch 8): a `vibespace-job restart` starts the job again — it lingers like a `run` (a later python script never takes its reads); CONTROL: the rule without it (a copy) — the python script takes them', { rj, rr, rjx });
   for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 15, label: '⑨ ' })) ok(c.pass, c.name, c.detail);
   // the view reads the argv through the ONE unwrapper and hands the binder its background facts
   const tv = read('src/lib/channel-touch-view.js'), cv = read('src/lib/chat-view.js');
@@ -2918,7 +2927,7 @@ await section('⑬', async () => {
   // each copy drops ONE condition of the reading: a row a shell lets outlive reads not lingering at the CALL (the copy's
   // runs through channel-touch's backgrounds() rule — a killed script's row runs the CLI only inside the script) — the
   // one-sided law broken
-  const quiet = (TT, l) => !TT.commandsRun(l).some((x) => (x.bg && !x.ended && !(!x.execs && (!!x.lookup || T.INERT_COMMANDS.includes(x.base)))) || (x.base === 'vibespace-job' && (x.verb === 'run' || x.verb === 'start')));
+  const quiet = (TT, l) => !TT.commandsRun(l).some((x) => (x.bg && !x.ended && !(!x.execs && (!!x.lookup || T.INERT_COMMANDS.includes(x.base)))) || (x.base === 'vibespace-job' && (x.verb === 'run' || x.verb === 'start' || x.verb === 'restart')));   // the rule's copy (src/channel-touch.js backgrounds, batch 8: + restart)
   const endsIn = (TT, ...labels) => labels.every((l) => TRUTH.some((x) => x[0] === l && x.slice(2).includes('lingers')) && quiet(TT, line(l)));
   const topLevel = sw('top-level', 'if (c && !c.words.depth && ', 'if (c && ');
   ok(endsIn(topLevel, 'r9: ( C & ) ; wait'), 'CONTROL a job inside a group read as the line\'s own: `( C & ) ; wait` reads ended — the subshell\'s orphan outlives the `wait`');

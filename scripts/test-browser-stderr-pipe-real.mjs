@@ -7,6 +7,11 @@
 //   Ⓑ THE PIN (the driver on PATH, ≥ 0.38.2): the SAME spam ⇒ answers for ≥ 3× the time-to-hang; fd 2 still a pipe — drained
 //     (the verdict null)
 //   Ⓒ the quiet switches (--disable-logging --log-level=3), Chrome's stderr captured by a test-local wrapper: fewer bytes
+//   Ⓓ B-1789 (a sub-agent's child browser stopped answering ~20–25 s after each start, fb-a0d05b52b6): a HELPER's browser on
+//     its OWN config — browser-env's childConfigFor, the real module — carries the quiet switches on its Chrome's command line
+//     (THIS unit's check); under the same log spam it answers a steady eval past 60 s (a REGRESSION WATCH: the pinned 0.38.2
+//     drains stderr — Ⓑ — so this part holds without the switches too). Ⓓ prints its own closing line «Ⓓ RAN: …»: a run whose
+//     log lacks it never checked «past 60 s» (the whole suite SKIPs green without a driver, Xvfb or Chrome — said there too)
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -27,7 +32,7 @@ for (const d of String(process.env.PATH || '').split(':')) {
   try { const real = fs.realpathSync(p); const nat = path.join(path.dirname(real), 'agent-browser-linux-x64'); if (/node_modules\/agent-browser\/bin\//.test(real) && fs.existsSync(nat)) { AB = nat; break; } } catch { }
 }
 const xvfb = String(process.env.PATH || '').split(':').some((d) => fs.existsSync(path.join(d, 'Xvfb')));
-if (!AB || !xvfb || process.platform !== 'linux') { console.log(`  SKIP: needs the real agent-browser (found ${AB}) + Xvfb (${xvfb}) on linux`); done(0); }
+if (!AB || !xvfb || process.platform !== 'linux') { console.log(`  SKIP: needs the real agent-browser (found ${AB}) + Xvfb (${xvfb}) on linux — Ⓐ–Ⓓ did NOT run (no «Ⓓ RAN» line)`); done(0); }
 const verOf = (bin) => { try { return (/(\d+\.\d+\.\d+)/.exec(execFileSync(bin, ['--version'], { encoding: 'utf8' })) || [])[1] || null; } catch { return null; } };
 const cmpV = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] - y[i]; return 0; };
 const ver = verOf(AB);
@@ -40,7 +45,7 @@ const S = scratch('bspr'); fs.mkdirSync(S, { recursive: true });
 const HOME = path.join(S, 'home'); fs.mkdirSync(path.join(HOME, '.agent-browser'), { recursive: true });
 let realChrome = null; // the system Chrome the driver finds on a fresh HOME (0.38.x: `which` google-chrome … chromium) — the Ⓒ wrapper execs it
 for (const n of ['google-chrome', 'google-chrome-stable', 'chromium-browser', 'chromium']) { for (const d of String(process.env.PATH || '').split(':')) { const p = path.join(d, n); try { if (fs.statSync(p).isFile()) { realChrome = p; break; } } catch { } } if (realChrome) break; }
-if (!realChrome) { console.log('  SKIP: no system Chrome on PATH (the driver on a fresh HOME needs one)'); done(0); }
+if (!realChrome) { console.log('  SKIP: no system Chrome on PATH (the driver on a fresh HOME needs one) — Ⓐ–Ⓓ did NOT run (no «Ⓓ RAN» line)'); done(0); }
 console.log(`— Chrome ${realChrome}`);
 const XDG = path.join(S, 'xdg'); fs.mkdirSync(XDG, { mode: 0o700 }); fs.mkdirSync(path.join(S, 'tmp'));
 const envOf = (name, extra) => {
@@ -122,6 +127,32 @@ try {
   const C = await quietLeg('bspc', BE.withQuietLogging('--no-sandbox'));
   ok(D.ok && C.ok && D.answers && C.answers, 'both browsers launched and answer', { D, C });
   ok(C.bytes < D.bytes, `the quiet switches cut what Chrome writes on its own: ${C.bytes} bytes vs ${D.bytes} without them (same page, same 20 s)`, { C, D });
+
+  // ═══ Ⓓ B-1789: a helper's (child) browser on its own config answers past 60 s ═══
+  console.log('— Ⓓ B-1789: a sub-agent\'s child browser, on browser-env\'s own child config, under the spam: a steady eval for 65 s');
+  {
+    const ENVM = require('../src/server/browser-env.js');
+    // its readers: Ⓐ–Ⓒ pass --no-sandbox through AGENT_BROWSER_ARGS — this child launches on its config ALONE, so the person's
+    // own file (the env's home) names it: a root runner or a user-namespace limit then fails on the leg, never on the sandbox
+    const EH = path.join(S, 'env-home'); fs.mkdirSync(path.join(EH, '.agent-browser'), { recursive: true }); fs.writeFileSync(path.join(EH, '.agent-browser', 'config.json'), JSON.stringify({ args: '--no-sandbox' }));
+    const be = ENVM.create({ dataDir: path.join(S, 'env-data'), homeDir: EH, serverSetting: () => undefined, log: { log() { }, warn() { }, error() { } }, env: {}, socketDirBase: path.join(S, 'env-sock'), facts: { floor: async () => ({ state: 'ok' }) } });
+    const PK = 'bk-0000b789';
+    be.envFor({ browserKey: PK }); // the conversation's own spawn file (the parent the child's copies)
+    const cc = be.childConfigFor(PK + '.1');
+    const ccArgs = cc.path ? String((JSON.parse(fs.readFileSync(cc.path, 'utf8')) || {}).args || '') : '';
+    ok(!!cc.path && BE.QUIET_LOG_ARGS.every((q) => ccArgs.split(/[,\n]/).map((x) => x.trim()).includes(q)), `the child's own config (browser-env childConfigFor) carries the quiet switches (${ccArgs})`, cc);
+    const K = await launch('bspk' + process.pid, { AGENT_BROWSER_CONFIG: cc.path || '' });
+    ok(K.ok && K.cpid && K.port, 'the child browser launched through the driver on its own config', K.error);
+    let cmd = ''; try { cmd = fs.readFileSync(`/proc/${K.cpid}/cmdline`, 'utf8').split('\0').join(' '); } catch { cmd = ''; }
+    ok(BE.QUIET_LOG_ARGS.every((q) => cmd.includes(q)), 'its Chrome\'s command line carries --disable-logging --log-level=3', cmd.slice(0, 300));
+    let asks = 0, misses = 0, lastAnswerAt = 0;
+    const answerOf = (out) => { try { return Number(JSON.parse(String(out).trim().split('\n').pop())); } catch { return NaN; } }; // the value itself, never «a 2 somewhere»
+    while (Date.now() - K.t0 < 65000) { asks++; const e = ab(K.env, ['eval', `${asks}*7`], 5000); if (e.ok && answerOf(e.out) === asks * 7) lastAnswerAt = Date.now() - K.t0; else misses++; await sleep(1000); }
+    ok(misses === 0 && asks >= 30 && lastAnswerAt >= 60000, `B-1789 (a regression watch — the pinned driver drains stderr): ${asks} evals over 65 s, each answered with its own value (the last at ${(lastAnswerAt / 1000).toFixed(0)} s) — the child browser keeps answering past 60 s`, { asks, misses, lastAnswerAt });
+    if (K.ok) console.log(`  Ⓓ RAN: a real child browser (Chrome pid ${K.cpid}) on browser-env's own child config — quiet switches on its command line: ${BE.QUIET_LOG_ARGS.every((q) => cmd.includes(q)) ? 'yes' : 'NO'}; ${asks} evals over 65 s, ${misses} missed, the last answer at ${(lastAnswerAt / 1000).toFixed(1)} s`);
+    else console.log('  Ⓓ DID NOT RUN: the child browser never launched (its red line above says why)');
+    await end(K);
+  }
 } finally {
   for (const it of ended) await end(it);
   fs.rmSync(S, { recursive: true, force: true });

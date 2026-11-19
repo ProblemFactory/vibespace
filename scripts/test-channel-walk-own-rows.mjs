@@ -161,7 +161,7 @@ async function enginePass(E, tag) {
     ['      const live = store.index.live();   // B-dfa4 U2: this account\'s rows only (the store keeps each account\'s keys)\n      for (const k of store.index.keysOf(rec.id)) { const en = live[k]; if (en && en.adapterId === rec.id) dueRow(rec, e, en, t, T, out, true); }\n',
       '      for (const en of Object.values(store.index.live())) if (en && en.adapterId === rec.id) dueRow(rec, e, en, t, T, out, true);\n'],   // stale-pins: kept (the old walk, restored by the control)
     ['      const live = store.index.live();\n      for (const k of store.index.keysOf(rec.id)) {   // B-dfa4 U2: the build reads this account\'s rows, never every account\'s\n        const en = live[k];\n',
-      '      for (const en of Object.values(store.index.live())) {\n'],
+      '      for (const en of Object.values(store.index.live())) {\n'],   // stale-pins: kept (the old walk, restored by the control)
     ['    const live = store.index.live();\n    for (const k of store.index.keysOf(rec.id)) {   // B-dfa4 U2: this account\'s rows only\n      const en = live[k];\n',
       '    for (const en of Object.values(store.index.live())) {\n'],
     // recheckDueFor and revisionsPass read their KEPT rows since U3 (the kept answer is the whole map's walk when it is

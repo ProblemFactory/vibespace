@@ -11,6 +11,125 @@ const { mk } = require('./lazy.js');
 const { titleFromRecord } = require('../discovery-facts.js'); // lane session-title-record: ONE title rule (discovery too)
 const { noteRequestSent, sendsRequest, noteSubRequestSent, sendsSubRequest } = require('../turn-state.js'); // PURE: a request's send instant (lane cache-warmth-tiles r4)
 
+// ── B-d868 WHO STARTED THE TURN — ONE implementation for BOTH feeds (主开发's as-if-must (2), 11:37Z) ──
+// `session._turnBy` {by, name?, at, source} is decided ONCE per turn at the turn's own `system/init`, from the CLI's records:
+// (1) the init's user_message_uuids names a frame the wrapper stamped as the person's (frame_stamp) ⇒ the person; (2) else the
+// command the CLI started BETWEEN turns (after a result this machine saw) ⇒ the CLI's own record of it, handed in by the
+// parse's one transcript lookup (noteTurnCmdRecord); (3) else the turn's first record ⇒ PURE message-manager turnOpenerOf.
+// Nothing proves it ⇒ 'unrecorded', NEVER «the person»; the result ends the fact. Each live background task keeps the opener
+// KEY of the turn its own task_started came in (`_turnByBackground`, read by turnByForAsk).
+// It is an ORDERED state machine, not a per-record idempotent family, so each record is taken ONCE, at its first arrival,
+// from whichever feed brings it — the parse (claude-stream-json: every record it sees) or the device stream
+// (claudeSideEffects: the records the parse has not seen). Both feeds carry the same ordered stream, so taking each record at
+// its first appearance keeps the order. The state lives on the SESSION (`_turnOpen`); an attach makes the opener UNKNOWN
+// until a turn starts in its sight (as-if-must (1)): a gap can never leave the previous turn's «you» standing.
+const TURN_SEEN_MAX = 600;   // the reader's should: the same bound as sbSeenFirst's SB_SEEN_MAX (a feed lagging past it is caught by the order rule below)
+function turnStateOf(session) {
+  return session._turnOpen || (session._turnOpen = { live: null, cmd: null, first: null, waitCmd: null, persons: new Set(), launched: new Map(), bgLive: [], cmdRecs: new Map(), seen: new Set(), feedAt: {}, resultAt: 0, opened: new Set() });
+}
+/** A record's identity for the once-per-record rule: the CLI's own uuid, or the wrapper's stamp of a frame (it has none). */
+function turnKeyOf(msg) {
+  if (typeof msg.uuid === 'string' && msg.uuid) return msg.uuid;
+  if (msg.type === 'frame_stamp' && typeof msg.cli_uuid === 'string' && msg.cli_uuid) return 'fs:' + msg.cli_uuid;
+  return null;
+}
+const openerKeyOf = (tb) => (tb && typeof tb.by === 'string' && tb.source !== 'pending' ? tb.by + (tb.name ? '|' + tb.name : '') : 'unrecorded');
+function setTurnBy(session, v) { const f = { ...v, at: Date.now() }; session._turnBy = f; return f; }
+function byVerdict(session, fact, v, source) {
+  if (session._turnBy !== fact) return;   // a newer turn owns the fact (by identity — never by the clock)
+  session._turnBy = { ...(v || { by: 'unrecorded' }), at: fact.at, source };
+}
+function byRecord(session, fact, rec, stamped) {
+  byVerdict(session, fact, require('../message-manager.js').turnOpenerOf(rec, { stamped }), stamped ? 'frame-stamp' : (rec ? 'cli-record' : 'no-record'));
+}
+function sayBackground(session, st) { session._turnByBackground = [...new Set(st.bgLive.map((k) => st.launched.get(k) || 'unknown'))]; }
+/** The parse's ONE transcript lookup hands the CLI's record of a started command here (null: it gave up) — a verdict is kept, never the record. */
+function noteTurnCmdRecord(session, cmdUuid, rec) {
+  const st = turnStateOf(session);
+  const v = rec ? require('../message-manager.js').turnOpenerOf(rec) : null;
+  st.cmdRecs.set(cmdUuid, v);
+  if (st.cmdRecs.size > 32) st.cmdRecs.delete(st.cmdRecs.keys().next().value);
+  if (st.waitCmd && st.waitCmd.cmd === cmdUuid) { const w = st.waitCmd; st.waitCmd = null; byVerdict(session, w.fact, v, v ? 'cli-record' : 'no-record'); }
+}
+/** An attach (a boot, a re-attach after a dead bridge): the opener is UNKNOWN until a turn starts in this attach's sight. The
+ *  background tasks still running (the normalizer's own level set) are unknown too: nobody here saw them start. */
+function noteTurnAttach(session) {
+  const prev = session._turnOpen;
+  session._turnOpen = null;
+  const st = turnStateOf(session);
+  // the STREAM's facts outlive an attach (where each feed has reached, the last result, the inits that opened a turn): a
+  // backlog arriving right after a re-attach is still a backlog
+  if (prev) { st.feedAt = { ...(prev.feedAt || {}) }; st.resultAt = prev.resultAt || 0; if (prev.opened) st.opened = prev.opened; }
+  setTurnBy(session, { by: 'unrecorded', source: 'attach' });
+  let live = []; try { live = (session._normalizer?.backgroundTasks?.() || []).map((t) => String(t && t.id).slice(0, 64)).filter(Boolean); } catch { live = []; }
+  st.bgLive = live.slice(0, 100);
+  sayBackground(session, st);
+}
+/** THE STREAM'S OWN ORDER (主开发's as-if-musts 12:09Z and 12:32Z): a feed's position is the newest stamp it has DELIVERED — noted
+ *  where the feed delivers, before ANY gate that may drop the record: noteTurnOpener notes it before its once-gate, and server.js's
+ *  device path calls this ahead of sbSeenFirst (a device record the parse took first never reaches the opener; noted there
+ *  only, the device feed's position stayed at zero on an ordinary conversation, and the result + init it alone supplied after a
+ *  parse gap were dropped as «behind» — the previous turn's «you» standing over a turn it did not start). The CLI stamps its
+ *  user / assistant records; init and result carry none. When NEITHER feed ever carries a stamp the order rule is silent (both
+ *  positions stay 0, nothing is behind): the two memories alone hold — the once-memory (600 keys) and the opened inits (2000). */
+function noteTurnFeed(session, msg, feed) {
+  if (!session || !msg || typeof msg !== 'object') return;
+  const ts = typeof msg.timestamp === 'string' ? Date.parse(msg.timestamp) : NaN;
+  if (!Number.isFinite(ts)) return;
+  const st = turnStateOf(session);
+  if (ts > (st.feedAt[feed] || 0)) st.feedAt[feed] = ts;
+}
+/** Feed ONE record (`feed`: 'parse' | 'device'). A record without an identity is taken from the parse only. */
+function noteTurnOpener(session, msg, feed = 'parse') {
+  if (!session || !msg || typeof msg !== 'object') return;
+  const st = turnStateOf(session);
+  noteTurnFeed(session, msg, feed);   // where this feed has reached — before the once-gate (the device path notes it before ITS gate too)
+  const key = turnKeyOf(msg);
+  if (key) { if (st.seen.has(key)) return; st.seen.add(key); if (st.seen.size > TURN_SEEN_MAX) st.seen.delete(st.seen.values().next().value); }
+  else if (feed !== 'parse') return;
+  if (msg.type === 'frame_stamp' && typeof msg.cli_uuid === 'string' && msg.cli_uuid) { st.persons.add(msg.cli_uuid); if (st.persons.size > 64) st.persons.delete(st.persons.values().next().value); return; }
+  // a command started BETWEEN turns — after a result THIS machine saw (after an attach `live` is unknown: a steer inside a turn already running never counts)
+  if (msg.type === 'command_lifecycle' && msg.state === 'started' && typeof msg.command_uuid === 'string' && msg.command_uuid) { if (st.live === false) st.cmd = msg.command_uuid; return; }
+  if (msg.type === 'system' && msg.subtype === 'task_started' && msg.task_id != null) {
+    const k = String(msg.task_id).slice(0, 64);
+    if (!st.launched.has(k)) { st.launched.set(k, st.live === true ? openerKeyOf(session._turnBy) : 'unrecorded'); if (st.launched.size > 200) st.launched.delete(st.launched.keys().next().value); }
+    if (st.bgLive.includes(k)) sayBackground(session, st);
+    return;
+  }
+  if (msg.type === 'system' && msg.subtype === 'background_tasks_changed' && Array.isArray(msg.tasks)) {
+    st.bgLive = msg.tasks.filter((t) => t && typeof t === 'object' && t.task_id != null).map((t) => String(t.task_id).slice(0, 64)).slice(0, 100);
+    sayBackground(session, st);
+    return;
+  }
+  // an init or a result from a feed that is BEHIND the last result this session saw is a backlog's: it opens and ends nothing
+  if ((msg.type === 'result' || (msg.type === 'system' && msg.subtype === 'init')) && (st.feedAt[feed] || 0) < st.resultAt) return;
+  // …and an init that already opened a turn never opens one again, however long ago (a stream with no stamps; the once-memory's 600)
+  if (msg.type === 'system' && msg.subtype === 'init' && key) { if (st.opened.has(key)) return; st.opened.add(key); if (st.opened.size > 2000) st.opened.delete(st.opened.values().next().value); }
+  if (msg.type === 'system' && msg.subtype === 'init') {
+    st.live = true; session._turnLive = true;   // B-02a3: the turn the CLI is running, by its own records (either feed)
+    const cmd = st.cmd;
+    st.cmd = null; st.first = null; st.waitCmd = null;
+    const names = Array.isArray(msg.user_message_uuids) ? msg.user_message_uuids.map(String) : [];
+    if (names.some((u) => st.persons.has(u)) || (cmd && st.persons.has(cmd))) { setTurnBy(session, { by: 'person', source: 'frame-stamp' }); return; }
+    const fact = setTurnBy(session, { by: 'unrecorded', source: 'pending' });
+    if (cmd && !session.host) { if (st.cmdRecs.has(cmd)) byVerdict(session, fact, st.cmdRecs.get(cmd), st.cmdRecs.get(cmd) ? 'cli-record' : 'no-record'); else st.waitCmd = { cmd, fact }; return; }
+    st.first = fact;
+    return;
+  }
+  if ((msg.type === 'user' || msg.type === 'assistant') && st.first) {
+    const c = msg.message && msg.message.content;
+    if (msg.type === 'user' && Array.isArray(c) && c.some((b) => b && b.type === 'tool_result')) return;
+    const fact = st.first; st.first = null;
+    if (msg.type === 'user') byRecord(session, fact, msg, typeof msg.uuid === 'string' && st.persons.has(msg.uuid));
+    else byRecord(session, fact, null, false);   // the model spoke first: nothing in the turn said who opened it
+    return;
+  }
+  if (msg.type === 'result') {
+    st.resultAt = Math.max(st.resultAt, st.feedAt[feed] || 0);   // where the stream stood when this turn ended
+    st.live = false; session._turnLive = false; st.cmd = null; st.first = null; st.waitCmd = null;
+    setTurnBy(session, { by: 'unrecorded', source: 'turn-ended' });
+  }
+}
 function create({ engine, applyTaskToolUpdate, updateSessionTodos, getUsageHistory,
   // design-unknown-records (2026-09-21) — the chrome-signal consumers' deps, ALL lazy/optional so the
   // dark-parity harness (which passes none of them) and older callers keep working:
@@ -129,7 +248,7 @@ function notePublishedChange(session, sid, msg) {
 // server-owned until R6 (the client protocol is untouched by this step).
 const SB_SEEN_MAX = 600;
 function sbSeenFirst(session, rec) {
-  const key = rec.uuid || ((rec.requestId || rec.message?.id || '') + ':' + (rec.type || '') + ':' + (rec.subtype || ''));
+  const key = rec.uuid || (rec.type === 'frame_stamp' && rec.cli_uuid ? 'fs:' + rec.cli_uuid : ((rec.requestId || rec.message?.id || '') + ':' + (rec.type || '') + ':' + (rec.subtype || '')));   // B-d868 (its reader): every frame_stamp collapsed onto «:frame_stamp:», so the device feed took only the first
   if (!key || key === '::') return true; // unidentifiable records: let both run (idempotent families only)
   const seen = session._sbSeen || (session._sbSeen = new Set());
   if (seen.has(key)) return false;
@@ -203,6 +322,7 @@ function claudeSideEffects(session, sid, msg) {
     if (msg.type === 'system' && msg.subtype === 'code_change_published') notePublishedChange(session, sid, msg);
     if (msg.type === 'system' && msg.subtype === 'session_title_changed') noteSessionTitle(session, sid, msg); // lane session-title-record
     if (msg.type === 'system' && msg.subtype === 'session_writes_lost') noteWritesLost(session, sid, msg); // lane cli-2-1-319-records r2
+    try { noteTurnOpener(session, msg, 'device'); } catch { }   // B-d868: who started the turn — the ONE opener, fed the records the parse has not seen
     // lane artifacts-model: the deliverable rows — the parse makes the SAME call (the row moves once per call id)
     if (msg.type === 'assistant' || msg.type === 'user') { try { require('./artifact-registry.js').observe(session, msg); } catch { } } // lane artifacts-handover: + a helper's end
     // todo/task families mirror the parse's exact consumption (lines above):
@@ -221,6 +341,6 @@ function claudeSideEffects(session, sid, msg) {
     }
   } catch (e) { console.warn('[session-brain] device side-effects failed:', e.message); }
 }
-  return { sbSeenFirst, claudeSideEffects, noteHarnessNotification, noteApiErrorAuth, noteVcsState, notePublishedChange, noteSessionTitle, noteWritesLost };
+  return { sbSeenFirst, claudeSideEffects, noteTurnFeed, noteHarnessNotification, noteApiErrorAuth, noteVcsState, notePublishedChange, noteSessionTitle, noteWritesLost };
 }
-module.exports = { create };
+module.exports = { create, noteTurnOpener, noteTurnCmdRecord, noteTurnAttach, noteTurnFeed };

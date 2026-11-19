@@ -86,7 +86,7 @@ const SHORT = 'abc1234';
 // ── THE FAKES: one bin dir first on the child's PATH — a printer (node), a curl (a known tool: «always» is offered) ──
 const BIN = path.join(ROOT, 'bin'); fs.mkdirSync(BIN, { recursive: true });
 const PRINTER = path.join(BIN, 'printer.js');
-fs.writeFileSync(PRINTER, `
+fs.writeFileSync(PRINTER, `// stale-pins: kept (the fake printer's own spawn below, not a pin on src/jobs.js)
 const fs = require('fs'), path = require('path');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const [mode, arg] = process.argv.slice(2);
@@ -361,6 +361,72 @@ console.log('②b AN AGENT\'S OWN ENTRY (vault-mint-put\'s mint / put) — opene
   ok(other.code === 'use_not_granted' && !cardsOf(w).length, 'ANOTHER conversation ⇒ use_not_granted, by name — no card, nothing read', other.code);
 }
 
+console.log('②c B-bc3b — the owner SHARES an agent\'s own entry through its grant row («Who may use it…»): another conversation runs it ONLY as the row says');
+{
+  const VUG = R('src/server/vault-use-grants.js'), GS = R('src/server/grants-store.js');
+  const ID = 'secrets:agent:conv-1/gh-token#secret', REF = 'vault://agent:conv-1/gh-token';
+  async function shareWorld(doorMod = DOOR) {
+    const w = await world({ doorMod, askMs: 50 });   // the read: a mutant that lets a card through ends it in 50 ms, never the real 60 s
+    const gs = GS.create({ memory: true }), groups = new Map();
+    const ug = VUG.create({ grants: () => gs, vault: w.vault, dataDir: w.dataDir, log: (m) => w.logs.push(String(m)) });
+    const door = w.mk(doorMod, { useGrants: ug, useFacts: (c) => ({ conversationKeys: [c.conversationId], groupIds: groups.get(c.conversationId) || [] }) });
+    const as = (cid) => ({ ...w.caller, conversationId: cid, sessionKey: `claude:${cid}`, name: `Lane ${cid}` });
+    const runAs = (cid, args) => door.run({ caller: as(cid), args, cwd: w.work });
+    return { w, ug, groups, door, as, runAs };
+  }
+  const TO = (host) => ['--env', `T=${REF}`, '--', 'curl', '-s', `https://${host}/v1/items`];
+  const s = await shareWorld();
+  const f0 = s.door.rowFacts({ id: ID });
+  ok(f0.own === true && f0.can === false && f0.use && f0.use.own === true && !(f0.use.to || []).length, 'the agent\'s row carries its `use` with NO member — the window draws «Who may use it…» on it (the owner shares it there); still no switch', f0);
+  const before = await s.runAs('conv-2', TO('api.example.com'));
+  ok(before.code === 'use_not_granted' && !cardsOf(s.w).length, 'NOT shared ⇒ another conversation is refused use_not_granted, by name — no card (as before)', before.code);
+  const add = s.ug.addMember(ID, { kind: 'conversation', key: 'conv-2', name: 'Lane conv-2' }, { hosts: ['api.example.com'] });
+  const shared = await s.runAs('conv-2', TO('api.example.com'));
+  ok(add && add.ok && shared.ok && shared.by === 'grant' && !cardsOf(s.w).length && !leaks(shared.stdout + shared.stderr, 'agent-minted-value-0123456789').length,
+    'SHARED with conv-2 for api.example.com ⇒ conv-2 runs it there BY THE GRANT, no card — the value scrubbed from what comes back', { add: add && add.ok, ok: shared.ok, by: shared.by, code: shared.code });
+  const away = await s.runAs('conv-2', TO('elsewhere.example.test'));
+  const blind = await s.runAs('conv-2', ['--env', `T=${REF}`, '--', NODE, PRINTER, 'env']);
+  const third = await s.runAs('conv-3', TO('api.example.com'));
+  ok(away.code === 'use_not_granted' && blind.code === 'use_not_granted' && third.code === 'use_not_granted' && !cardsOf(s.w).length,
+    '…ONLY as the row says: another host, a command whose destination cannot be told, a conversation the row does not name ⇒ use_not_granted, no card (what an agent stored never reaches anyone by a card)', { away: away.code, blind: blind.code, third: third.code });
+  const own = await s.runAs('conv-1', TO('api.example.com'));
+  ok(own.ok && own.by === 'own', 'its own conversation still runs it by construction (own)', own.code || own.by);
+  const l2 = s.door.runnableFor(s.as('conv-2')), l3 = s.door.runnableFor(s.as('conv-3'));
+  const e2 = (l2.entries || []).find((x) => x.ref === REF);
+  ok(e2 && e2.by === 'standing' && !e2.paused && (e2.hosts || []).includes('api.example.com') && !(l3.entries || []).some((x) => x.ref === REF), 'the list: conv-2 SEES the shared entry (standing, its hosts — not «paused»: no switch is its), conv-3 does not', { e2, l3: (l3.entries || []).map((x) => x.ref) });
+  s.groups.set('conv-4', ['g-team']);
+  s.ug.addMember(ID, { kind: 'group', id: 'g-team', name: 'Team' }, { hosts: ['api.example.com'] });
+  const viaGroup = await s.runAs('conv-4', TO('api.example.com'));
+  ok(viaGroup.ok && viaGroup.by === 'grant', 'shared with a Task Group ⇒ its member conv-4 runs it for the row\'s host', viaGroup.code || viaGroup.by);
+  // the read (r1): a MIXED run — the shared entry + a free entry the owner switched ON but granted conv-2 nothing for — never draws
+  // a card (an «Always» there would write conv-2 a member the owner never gave): use_not_granted by name
+  s.door.setRunnable({ id: 'mounts:m1#secretKey', on: true, reauthed: true });
+  const MIXED = ['--env', `T=${REF}`, '--env', 'U=vault://mounts/m1/secretKey', '--', 'curl', '-s', 'https://api.example.com/v1/items'];
+  const mixed = await s.runAs('conv-2', MIXED);
+  ok(mixed.code === 'use_not_granted' && !cardsOf(s.w).length, 'a MIXED run naming the shared entry (+ a free entry with no grant for conv-2) ⇒ use_not_granted, NO card — a card there could widen the share', { code: mixed.code, cards: cardsOf(s.w).length });
+  const rv = s.ug.revoke(ID, 'conversation:conv-2');
+  const after = await s.runAs('conv-2', TO('api.example.com'));
+  ok(rv && rv.ok && after.code === 'use_not_granted', 'the owner\'s ✕ takes it back ⇒ conv-2 is refused again', { rv: rv && rv.ok, code: after.code });
+  // RED CONTROLS — patched copies of the door
+  const SRC = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
+  const patch = (from, to, tag) => { const n = SRC.split(from).length - 1; return n === 1 ? M.load('src/server/vault-run-door.js', SRC.replace(from, to), tag) : null; };
+  const oldEarly = patch('if (foreignRefs.length && !useGrants) {', 'if (foreignRefs.length) {', 'bc3b-early');
+  let r1 = null;
+  if (oldEarly) { const m = await shareWorld(oldEarly); m.ug.addMember(ID, { kind: 'conversation', key: 'conv-2' }, { hosts: ['api.example.com'] }); r1 = await m.runAs('conv-2', TO('api.example.com')); }
+  ok(!!oldEarly && r1 && r1.code === 'use_not_granted', 'RED — the door before B-bc3b (another conversation refused before its grant is read): the SHARED conv-2 is refused — the share leg above goes red there', r1 && r1.code);
+  // an admit on ANY verdict alone is still refused there by the no-card rule (each guard alone refuses conv-3 — the restack's tb
+  // run showed the one-guard copy refusing): this RED takes BOTH away; the mixed-run RED below shows the no-card rule's own
+  const SRC2 = SRC.replace('      if (!verdict.ok && verdict.ask && sharedIds.size) {', '      if (false) {');
+  const anyRow = SRC2 !== SRC && SRC2.split("if (!(v && v.ok === true)) { note('use_not_granted'").length === 2 ? M.load('src/server/vault-run-door.js', SRC2.replace("if (!(v && v.ok === true)) { note('use_not_granted'", "if (!v) { note('use_not_granted'"), 'bc3b-anyrow') : null;
+  let r2 = null;
+  if (anyRow) { const m = await shareWorld(anyRow); m.ug.addMember(ID, { kind: 'conversation', key: 'conv-2' }, { hosts: ['api.example.com'] }); r2 = await m.runAs('conv-3', TO('api.example.com')); r2 = { code: r2.code, ok: r2.ok, cards: cardsOf(m.w).length }; }
+  ok(!!anyRow && r2 && !(r2.code === 'use_not_granted' && !r2.cards), 'RED — a door that admits on ANY verdict (the row exists for someone) AND draws cards for a shared entry: conv-3, whom the row does not name, reaches a card naming it — the «only as the row says» leg goes red there', r2);
+  const cardOk = patch('      if (!verdict.ok && verdict.ask && sharedIds.size) {', '      if (false) {', 'bc3b-card');
+  let r3 = null;
+  if (cardOk) { const m = await shareWorld(cardOk); m.ug.addMember(ID, { kind: 'conversation', key: 'conv-2' }, { hosts: ['api.example.com'] }); m.door.setRunnable({ id: 'mounts:m1#secretKey', on: true, reauthed: true }); const x = await m.runAs('conv-2', MIXED); r3 = { code: x.code, cards: cardsOf(m.w).length + (m.w.userTodos.snapshot().resolved || []).filter((i) => i.action && i.action.type === 'vault-run-ask').length }; }
+  ok(!!cardOk && r3 && r3.cards > 0, 'RED — the door without «never a card for a shared entry»: the mixed run DRAWS a card naming the shared entry (where «Always» would widen the share)', r3);
+}
+
 console.log('③ THE CARD — a NEW shape draws the card; cluster asks every time, local allows a SEEN shape; «always»');
 /** THE LEG the card mutant is judged by: a NEW shape on a LOCAL instance (the default that allows) must draw the card. */
 async function newShapeCards(doorMod) {
@@ -494,9 +560,14 @@ async function newShapeCards(doorMod) {
       onStatus: (f) => subs.push(f),
     };
     const bw = await world({ instance: 'cluster', askMs: 60 });
-    const bd = bw.mk(DOOR, { userTodos: store });
+    // B-7f97: THE VERDICT DOES NOT FOLLOW THE MACHINE'S TEMP FOLDER — this door is given a temp folder of its own (as a test
+    // machine's private TMPDIR /tmp/vt-XXXXXX gives it), and the rerun's folder is INSIDE the conversation's project folder, which
+    // the fence admits wherever the temp folder is; the folder BESIDE it (the leg as it was) was admitted only through the door's
+    // default os.tmpdir() = /tmp, the scratch root's parent — under a private TMPDIR it was refused cwd_refused and no card came
+    const privTmp = path.join(bw.dir, 'private-tmp'); fs.mkdirSync(privTmp, { recursive: true });
+    const bd = bw.mk(DOOR, { userTodos: store, tmpDir: privTmp });
     bd.setRunnable({ id: 'mounts:m1#secretKey', on: true, reauthed: true });   // open the entry for runs (the capStore door shares the vault with world)
-    const other = path.join(bw.dir, 'elsewhere'); fs.mkdirSync(other, { recursive: true });
+    const other = path.join(bw.work, 'elsewhere'); fs.mkdirSync(other, { recursive: true });
     const A = ['--env', 'T=vault://mounts/m1/secretKey', '--', 'curl', '-s', 'https://api.example.com/api/stat'];
     const openAsk = () => store.snapshot().open.find((x) => x.action && x.action.type === 'vault-run-ask');
     let dA = false; const pA = bd.run({ caller: bw.caller, args: A, cwd: bw.work }).then((r) => (dA = true, r));
@@ -510,6 +581,9 @@ async function newShapeCards(doorMod) {
     await pB;
     const wa = cb && cb.facts && cb.facts.whyAgain;
     ok(!!cb && !!wa && wa.code === 'folder', 'round 25 (minor 6b): the SAME command rerun in a DIFFERENT folder draws a card whose facts.whyAgain names the one difference (folder) — a1f79c42 drew the card but named no reason', { card: !!cb, whyAgain: wa });
+    const beside = path.join(bw.dir, 'elsewhere'); fs.mkdirSync(beside, { recursive: true });
+    const asWas = await bd.run({ caller: bw.caller, args: A, cwd: beside });
+    ok(asWas.code === 'cwd_refused', 'CONTROL B-7f97: the folder BESIDE the project (the leg as it was) under that temp folder is refused cwd_refused — no card, no reason: the leg stood on the machine\'s TMPDIR (red)', asWas.code);
   }
 
   // round 26 (minor): a rerun that differs ONLY by SPACING (same tokens, same order) names 'arg-space', not 'arg-order'. RED on 75ef16b09: arg-order was tested first and a spacing-only rerun has equal sorted word-lists too, so 'arg-space' was unreachable (the card said 参数顺序 for a pure spacing change).
@@ -964,9 +1038,9 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
   ok(!w.door._grants.size, 'Allow once is SPENT by that run (before it started)');
   { const i1b = w.userTodos.get(it.id), sb = FA.decidedStamp(i1b); ok(i1b.resolvedFact?.endedBy === 'used' && sb && /^allowed once · ended (\d+\/\d+ )?\d\d:\d\d$/.test(sb.text) && FA.decisionCard(i1b).state === 'ended', 'r6: A CARD FOLLOWS THE GRANT\'S LIFE — the once-grant that ran ends on its record: «allowed once · ended HH:MM» (the card\'s state ended)', { fact: i1b.resolvedFact, stamp: sb && sb.text }); }
   const run2 = await w.door.run({ caller, args: ENV('env'), cwd: w.work });
-  ok(run2.code === 'entry_not_runnable', 'the same (now seen) shape again ⇒ entry_not_runnable — once is once');
+  ok(run2.code === 'grant_expired' && /its one run was used at \d{4}-\d\d-\d\d \d\d:\d\d UTC/.test(run2.words || '') && !/has not opened/.test(run2.words || ''), 'the same (now seen) shape again ⇒ refused — once is once; B-a14b: said as the approval that ENDED (its one run was used, when, how to ask again), never «not opened»', run2);
   const uses = w.door.usesFor(caller).uses;
-  ok(uses.some((u) => u.outcome === 'ok' && u.entry === M1 && u.door === 'run' && u.purpose === PURPOSE && u.receipt === run1.r.receipt) && uses[0].outcome === 'entry_not_runnable' && !w.door.usesFor(other).uses.some((u) => u.outcome === 'ok'),
+  ok(uses.some((u) => u.outcome === 'ok' && u.entry === M1 && u.door === 'run' && u.purpose === PURPOSE && u.receipt === run1.r.receipt) && uses[0].outcome === 'grant_expired' && !w.door.usesFor(other).uses.some((u) => u.outcome === 'ok'),
     'THE USE LINES: `uses` reads back THIS conversation\'s own — the entry, the purpose its grant carried, the outcome, the run\'s receipt (one receipt: the answer, the run line, the use line), newest first; another conversation\'s are not its', uses.slice(0, 3));
   const lines = auditOf(w).split('\n').filter(Boolean).map((l) => JSON.parse(l));
   ok(lines.filter((l) => l.event === 'vault-request').length === 2 && lines.some((l) => l.event === 'vault-grant' && l.answer === 'once' && l.conv === 'webui-1') && lines.some((l) => l.event === 'vault-grant' && l.answer === 'deny') && !leaks(auditOf(w), VALUE).length, 'the audit: each request and each answer is a line (conversation, entry, purpose, answer) — never a value');
@@ -991,6 +1065,92 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
   ok(w.door.request({ caller, entry: M1, purpose: 'x' }).already === 'granted' && w.door.runnableFor(caller).entries.some((e) => e.ref === M1 && e.by === 'grant') && !w.door.runnableFor(other).entries.length, 'a request for an entry already granted answers so (nothing filed); `list` names it to THAT conversation alone');
   { const i3n = w.userTodos.get(i3id), at9 = (i3n.resolvedFact?.until || 0) + 3600e3, s9 = FA.decidedStamp(i3n, { now: at9 });
     ok(FA.decisionCard(i3n, { now: at9 }).state === 'ended' && s9 && /^allowed for 8 hours · ended (\d+\/\d+ )?\d\d:\d\d$/.test(s9.text) && FA.decisionCard(i3n, { now: (i3n.resolvedFact?.until || 0) + 3 * 86400e3 }).state === 'ended', 'r6: the SAME record read at +9 h (and +3 d) ⇒ «allowed for 8 hours · ended HH:MM», the card\'s state ended (was: «allowed by you for 8 h · …», approved, for ever)', { stamp: s9 && s9.text }); }
+  // B-a14b (fb-5a9b87b6e8): AN APPROVAL THAT ENDED IS SAID AS ITSELF — a second conversation's 8 hours run out: its next run names
+  // the end (grant_expired: how, when, how to ask again), never «the user has not opened that entry»; `uses` lists it as ENDED
+  {
+    const c8 = { ...w.caller, conversationId: 'conv-8', sessionKey: 'claude:conv-8', name: 'Lane Eight', scope: 'webui-8' };
+    const endedLeg = async (ww) => {
+      const q8 = ww.door.request({ caller: c8, entry: M1, purpose: 'nightly backup' });
+      ww.door.answerRequest(q8.askId, { answer: '8h', reauthed: true, person: true });
+      const r8a = await runAnswered(ww, ENV('env'), { caller: c8 });
+      const g8 = [...ww.door._grants.values()].find((g) => g.conv === 'webui-8');
+      if (g8) g8.until = Date.now() - 1;   // its 8 hours ran out
+      const r8b = await ww.door.run({ caller: c8, args: ENV('env'), cwd: ww.work });
+      return { ranFirst: !!(r8a.r && r8a.r.ok && g8), r8b, u8: ww.door.usesFor(c8) };
+    };
+    const e8 = await endedLeg(w);
+    ok(e8.ranFirst && e8.r8b.code === 'grant_expired' && /its 8 hours ran out at \d{4}-\d\d-\d\d \d\d:\d\d UTC/.test(e8.r8b.words || '') && /ask them again with its purpose: vibespace-vault request/.test(e8.r8b.words || '') && !/has not opened/.test(e8.r8b.words || ''),
+      'the run AFTER its 8 hours names the END — grant_expired, the time, how to ask again — never «the user has not opened that entry»', e8.r8b);
+    ok(e8.u8.ended.length === 1 && e8.u8.ended[0].entry === M1 && e8.u8.ended[0].endedBy === 'time' && /^\d{4}-\d\d-\d\dT/.test(e8.u8.ended[0].endedAt) && e8.u8.ended[0].purpose === 'nightly backup' && !e8.u8.grants.length && !w.door.usesFor(other).ended.length,
+      '…and `uses` lists it as ENDED for that conversation only (how, when, its purpose) — never as a live grant, never in another conversation\'s', e8.u8.ended);
+    const r8c = await w.door.run({ caller: other, args: ENV('env'), cwd: w.work });
+    ok(r8c.code === 'entry_not_runnable', 'a conversation that never held an approval still reads entry_not_runnable (the switch is the news there)', r8c.code);
+    const q8b = w.door.request({ caller: c8, entry: M1, purpose: 'nightly backup' });
+    w.door.answerRequest(q8b.askId, { answer: '8h', reauthed: true, person: true });
+    const r8d = await w.door.run({ caller: c8, args: ENV('env'), cwd: w.work });
+    ok(r8d.ok && !w.door.usesFor(c8).ended.length && w.door.usesFor(c8).grants.length === 1, 'asked again and allowed ⇒ it runs, and the old end is no longer listed', { ok: r8d.ok, code: r8d.code });
+    const SRCd = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8'), from = '  function noteEnded(g, endedBy, endedAt) {\n';
+    const md = SRCd.split(from).length === 2 ? M.load('src/server/vault-run-door.js', SRCd.replace(from, from + '    return;   // MUTANT: no end is kept\n'), 'endednote') : null;
+    let mr = null;
+    if (md) { const mw = await world({ doorMod: md }); mr = await endedLeg(mw); }
+    ok(md && mr && mr.ranFirst && mr.r8b.code === 'entry_not_runnable', 'RED control: a door that keeps no end (the .407 shape) ⇒ the same run reads «the user has not opened that entry» — the misnamed cause the agent reported as a bug', mr && mr.r8b.code);
+    // THE FIRST END STANDS (the adversarial read's must): a grant's 8-hour timer stays armed after a switch-off or a spend; when it
+    // fires it must not write «its 8 hours ran out» over «revoked» (the owner's OFF) or «used» — the door's timers held by hand here
+    const firstEnd = async (mod) => {
+      const ww = await world(), held = [];
+      ww.door = ww.mk(mod, { timers: { set: (fn, ms) => { held.push({ fn, ms }); return held.length; }, clear: () => { } } });
+      const fire8h = () => { for (const h of held.filter((x) => x.ms > 3600e3)) h.fn(); };
+      const qa = ww.door.request({ caller: c8, entry: M1, purpose: 'nightly backup' });
+      ww.door.answerRequest(qa.askId, { answer: '8h', reauthed: true, person: true });
+      openRow(ww); ww.door.setRunnable({ id: 'mounts:m1#secretKey', on: false });   // the owner switches the entry OFF (the grant revoked)
+      fire8h(); held.length = 0;
+      const offList = ww.door.usesFor(c8).ended.length, offRun = (await ww.door.run({ caller: c8, args: ENV('env'), cwd: ww.work })).code;
+      const wb = await world(), heldB = [];   // a fresh hub: the entry CLOSED (never switched), a once-grant spent by its run
+      wb.door = wb.mk(mod, { timers: { set: (fn, ms) => { heldB.push({ fn, ms }); return heldB.length; }, clear: () => { } } });
+      const qb = wb.door.request({ caller: c8, entry: M1, purpose: 'one upload' });
+      wb.door.answerRequest(qb.askId, { answer: 'once', reauthed: true, person: true });
+      const rb = await runAnswered(wb, ENV('env'), { caller: c8 });
+      for (const h of heldB.filter((x) => x.ms > 3600e3)) h.fn();
+      const used = wb.door.usesFor(c8).ended[0];
+      return { offList, offRun, ranOnce: !!(rb.r && rb.r.ok), usedBy: used && used.endedBy };
+    };
+    const fe = await firstEnd(DOOR);
+    ok(fe.offList === 0 && fe.offRun === 'entry_not_runnable', 'the owner switched the entry OFF, then the grant\'s 8-hour timer fired ⇒ no «ended» record (the OFF stands: entry_not_runnable, never «the entry was not switched off»)', fe);
+    ok(fe.ranOnce && fe.usedBy === 'used', 'a once-grant spent by its run, then its timer fired ⇒ the end stays «its one run was used»', fe);
+    const SRCf = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8'), g0 = '    if (g && g.endedBy) return;\n';
+    const mf = SRCf.split(g0).length === 2 ? M.load('src/server/vault-run-door.js', SRCf.replace(g0, ''), 'firstend') : null;
+    const fr = mf ? await firstEnd(mf) : null;
+    ok(!!(mf && fr && fr.usedBy === 'time'), 'RED control: no first-end guard (the batch\'s first shape) ⇒ the timer writes «its 8 hours ran out» over the spent run', fr);
+    // the OFF half takes BOTH guards away: the first-end guard AND the list's «an OFF after the approval is the owner's news» —
+    // either alone keeps the OFF from reading as «ran out» (the restack's tb run showed the one-guard mutant listing nothing there)
+    const f0 = " && !(dOn && dOn.suspended && dOn.suspended.has(e.id) && (offAt.get(e.id) || 0) >= e.grantAt)";
+    const mf2 = SRCf.split(g0).length === 2 && SRCf.split(f0).length === 2 ? M.load('src/server/vault-run-door.js', SRCf.replace(g0, '').replace(f0, ''), 'firstend-off') : null;
+    const fr2 = mf2 ? await firstEnd(mf2) : null;
+    ok(!!(mf2 && fr2 && fr2.offList === 1), 'RED control: no first-end guard AND no «an OFF after the approval» filter ⇒ the timer\'s «its 8 hours ran out» is listed over the owner\'s OFF', fr2);
+    // r13 should (the readers of batch 52): an approval the user gave while the entry was ALREADY switched OFF — its end is said
+    // as itself (the OFF came before it: not the news) AND the switch as it is: «the entry itself is switched off (it already was
+    // when they approved)», never «the entry was not switched off» (the door's `off` on the ended fact)
+    const offFirst = async (mod) => {
+      const wo = await world(), heldO = [];
+      wo.door = wo.mk(mod, { timers: { set: (fn, ms) => { heldO.push({ fn, ms }); return heldO.length; }, clear: () => { } } });
+      openRow(wo); wo.door.setRunnable({ id: 'mounts:m1#secretKey', on: false });   // the owner switched the entry OFF first
+      await sleep(5);   // the approval comes AFTER the OFF (offAt < the grant's at)
+      const qo = wo.door.request({ caller: c8, entry: M1, purpose: 'one upload' });
+      wo.door.answerRequest(qo.askId, { answer: 'once', reauthed: true, person: true });
+      const ro = await runAnswered(wo, ENV('env'), { caller: c8 });
+      const again = await wo.door.run({ caller: c8, args: ENV('env'), cwd: wo.work });
+      return { ran: !!(ro.r && ro.r.ok), code: again.code, words: again.words || '' };
+    };
+    const of1 = await offFirst(DOOR);
+    ok(of1.ran && of1.code === 'grant_expired' && /its one run was used at \d{4}-\d\d-\d\d \d\d:\d\d UTC/.test(of1.words) && /the entry itself is switched off \(it already was when they approved\): ask them again/.test(of1.words) && !/was not switched off/.test(of1.words),
+      'r13: a once-approval given while the entry was OFF, then spent ⇒ grant_expired says the end AND «the entry itself is switched off (it already was when they approved)» — never «the entry was not switched off»', of1);
+    const offPlant = ', ...(suspended ? { off: true } : {})';
+    const offN = SRCf.split(offPlant).length - 1;
+    ok(offN === 1, 'the RED control\'s plant is where it claims: the door\'s `off` on the ended fact, once', offN);
+    const mo = offN === 1 ? M.load('src/server/vault-run-door.js', SRCf.replace(offPlant, ''), 'endoff') : null;
+    const ro2 = mo ? await offFirst(mo) : null;
+    ok(!!(mo && ro2 && ro2.code === 'grant_expired' && /the entry was not switched off/.test(ro2.words)), 'RED control: the door without `off` (the batch\'s shape) ⇒ the agent reads «the entry was not switched off» over an entry that IS off', ro2);
+  }
   openRow(w); w.door.setRunnable({ id: 'mounts:m1#secretKey', on: false });
   ok(!w.door._grants.size, 'switching the entry OFF ends its grants too (OFF = closed for every conversation)');
   { const i3r = w.userTodos.get(i3id), sr = FA.decidedStamp(i3r); ok(i3r.resolvedFact?.endedBy === 'revoked' && sr && /^allowed · revoked (\d+\/\d+ )?\d\d:\d\d$/.test(sr.text) && FA.decisionCard(i3r).state === 'revoked', 'r6: the entry\'s switch OFF in the Vault window REVOKES the grant ⇒ its record says «allowed · revoked HH:MM» (the card\'s state revoked)', { fact: i3r.resolvedFact, stamp: sr && sr.text }); }
@@ -1025,7 +1185,7 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
   { const i8 = w.userTodos.get(i8id), s8 = i8 && FA.decidedStamp(i8); ok(i8 && i8.resolvedFact?.endedBy === 'lock' && s8 && /^allowed for 8 hours · ended (\d+\/\d+ )?\d\d:\d\d$/.test(s8.text) && FA.decisionCard(i8).state === 'ended', 'r6: …and each grant\'s RECORD says so: the 8-hour grant locked ⇒ «allowed for 8 hours · ended HH:MM» at once (was: «allowed for 8 h» after the lock)', { fact: i8 && i8.resolvedFact, stamp: s8 && s8.text }); }
   await w.vault.unlock(PW);
   const r9 = await w.door.run({ caller, args: ['--env', 'T=vault://app-secrets/app1/item.0.1', '--', NODE, PRINTER, 'env'], cwd: w.work });
-  ok(r9.code === 'entry_not_runnable', 'after the unlock the 8-hour grant is gone — the entry is closed again');
+  ok(r9.code === 'grant_expired' && /a lock of the vault ended it at \d{4}-\d\d-\d\d \d\d:\d\d UTC/.test(r9.words || ''), 'after the unlock the 8-hour grant is gone — the entry is closed again, and the run says the LOCK ended its approval (B-a14b)', r9);
   { // r6: A RESTART ENDS EVERY GRANT (the grant rows are memory; the vault locks at each start) — a record still reading live says so
     const qR = w.door.request({ caller, entry: M1, purpose: PURPOSE });
     const iRid = (reqsOf().find((x) => x.action.askId === qR.askId) || {}).id;
@@ -1062,7 +1222,7 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
   // the owner's silence / the hub's tray / the agent's own cancel never count toward the daily-failure card
   const two = await w.door.run({ caller, args: ['--env', 'A=vault://app-secrets/app1/item.0.1', '--env', 'T=vault://mounts/m1/secretKey', '--', NODE, PRINTER, 'env'], cwd: w.work });
   const twoLines = w.door.usesFor(caller).uses.slice(0, 2);
-  ok(two.code === 'entry_not_runnable' && twoLines.length === 2 && twoLines.every((u) => u.outcome === 'entry_not_runnable' && /^vr-[0-9a-f]{16}$/.test(u.receipt)) && twoLines[0].receipt === twoLines[1].receipt && !JSON.stringify(two).includes('vr-'),
+  ok(two.code === 'grant_expired' && twoLines.length === 2 && twoLines.every((u) => u.outcome === 'grant_expired' && /^vr-[0-9a-f]{16}$/.test(u.receipt)) && twoLines[0].receipt === twoLines[1].receipt && !JSON.stringify(two).includes('vr-'),
     'a refused run naming two entries: one use line each, ONE receipt between them (the audit\'s — never in the refused answer)', twoLines);
   openRow(w);
   const ac = new AbortController(), pidF = path.join(w.work, 'gone.pid');

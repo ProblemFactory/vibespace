@@ -195,6 +195,9 @@ const READERS = {
   'src/usage-anchors.js': 'columns — costBetweenMulti reads ts/acct/be/host/atype/model/tokens through _events + the _evCountUpTo version',
   // src/server/usage-pool-engine.js left the census (hotfix usage-ledger-walk B2): the dark taint asks usageHistory.hostAccountsIn — the (host, account) index — and walks no row
   'src/usage-estimator.js': 'ids — ledgerKnowsId; the _evCache sets only for a ledger stub without it',
+  // lane auto-resume-bulk (.349): the bulk resume's cost, said before the click — a conversation's last main request and
+  // each member's records in its current 5 h window, through _events over a bounded 3-day lookback (never the resident array)
+  'src/server/bulk-resume-routes.js': 'columns — the bulk resume\'s cost reads sid/origin/ts/acct/be/host/atype/model/tokens through _events (3-day lookback)',
 };
 const NEEDLE = /\._events\(|\._evCache\b|\._loadEvents\(|\._sortedEvents\(|\._evCountUpTo\(|\b_allRows\(|\b(?:usageHistory|uh)\.(?:aggregate|rows)\(/;
 function census(files) {

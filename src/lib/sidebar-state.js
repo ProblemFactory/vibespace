@@ -447,6 +447,7 @@ export function installSidebarState(SidebarClass) {
       this._dissolveFolderArchive(sessionOrKey, stateKey);
     } else if (stateKey) {
       this._archivedIds.add(stateKey);
+      if (sessionOrKey && typeof sessionOrKey === 'object') this.app.noticeOwnedJobs?.([sessionOrKey.sessionId || sessionOrKey.backendSessionId]);   // B-70f9 ②: the card's Archive — its jobs still run, named
     }
     this._pushUserState(); this._render(); this.app.updateTaskbar();
   };
@@ -501,6 +502,7 @@ export function installSidebarState(SidebarClass) {
     }
     this._pushUserState(); this._render(); this.app.updateTaskbar();
     showToast(tr('Archived {n} sessions — new sessions here start archived', { n }));
+    this.app.noticeOwnedJobs?.((sessions || []).map((s) => s.sessionId || s.backendSessionId));   // B-70f9 ②: Archive project — the jobs its conversations still run, ONE notice
   };
 
   proto.unarchiveProject = function(cwd, host) {
@@ -529,6 +531,7 @@ export function installSidebarState(SidebarClass) {
     if (!n) return;
     this._pushUserState(); this._render(); this.app.updateTaskbar();
     showToast(tr('Archived {n} sessions', { n }));
+    this.app.noticeOwnedJobs?.((sessions || []).map((s) => s.sessionId || s.backendSessionId));   // B-70f9 ②: an archived conversation's jobs still run — named, one press stops them
   };
 
   proto.getCustomName = function(sessionOrKey) { return this._stateMapGet(this._customNames, sessionOrKey); };
@@ -613,6 +616,15 @@ export function installSidebarState(SidebarClass) {
     else delete this._sessionConfigs[stateKey];
     const legacyId = this._getLegacySessionId(sessionOrKey);
     if (legacyId && legacyId !== stateKey) delete this._sessionConfigs[legacyId];
+    if (!this._configBatch) this._pushUserState();
+  };
+  /** lane auto-resume-bulk: a WHOLE BATCH of setSessionConfig writes, ONE user-state push — «对所有会话开启自动继续»
+   *  writes the resume carrier (`autoResume`) of every session the sidebar knows, live or stopped.
+   *  pairs = [[sessionOrKey, patch], …] — each patch is written OVER the session's saved config (never a fresh object:
+   *  that would drop its pin, its model pick…). */
+  proto.setSessionConfigs = function(pairs) {
+    this._configBatch = true;
+    try { for (const [s, patch] of pairs || []) this.setSessionConfig(s, { ...(this.getSessionConfig(s) || {}), ...patch }); } finally { this._configBatch = false; }
     this._pushUserState();
   };
 

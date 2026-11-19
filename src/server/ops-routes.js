@@ -4,8 +4,9 @@
 const fs = require('fs');
 const path = require('path');
 const { execFileSync, spawn } = require('child_process');
+const { isUnder } = require('../server-root.js');   // B-9dd0: the one «under a root» (segment boundary)
 
-function create({ app, rootDir, wss, WS_OPEN, bootPhase = null }) {
+function create({ app, rootDir, wss, WS_OPEN, bootPhase = null, tmpRoots = [require('os').tmpdir(), '/tmp', '/var/tmp'] }) {
 // ── Version / update visibility (⚙ menu shows current + latest at the Update entry) ──
 // Latest = the canonical repo's master package.json — fetched LAZILY on
 // request only (never a background timer), cached 6h, best-effort: offline
@@ -18,12 +19,29 @@ const versionInfo = { fetchedAt: 0, latest: null, commit: null };
 // a gate never reaches the network, and a file missing there answers 404 like
 // an older canonical without it.
 const CANONICAL_RAW = 'https://raw.githubusercontent.com/ProblemFactory/vibespace/master/';
+let saidOffline = false, tmpJudged = null;
+const realOr = (p) => fs.promises.realpath(p).catch(() => p);
+const tmpRootOf = () => (tmpJudged = tmpJudged || Promise.all([realOr(rootDir), ...tmpRoots.map(realOr)]).then(([r, ...real]) => {
+  const t = [...new Set([...tmpRoots, ...real])].find((x) => isUnder(r, x) || isUnder(rootDir, x));
+  return t ? `the hub's root ${rootDir} lies under the temp folder ${t} (server-root rule 3: never a person's instance)` : null;
+}));
 async function canonicalFile(name, timeoutMs) {
   const fixtureDir = process.env.VIBESPACE_CHANGELOG_FIXTURE_DIR;
   if (fixtureDir) {
     try { return { ok: true, status: 200, text: await fs.promises.readFile(path.join(fixtureDir, name), 'utf8') }; }
     catch (e) { return { ok: false, status: e && e.code === 'ENOENT' ? 404 : 0, text: null }; }
   }
+  // B-9dd0 (lane bl-scratch, 2026-11-17): A GATE NEVER ASKS GITHUB. A scratch hub under a suite answered /api/version by
+  // fetching this file (an acceptance's socket sampler saw raw.githubusercontent.com during a chrome suite) — an egress a test
+  // must never make. A hub whose root lies under a temp root (src/server-root.js rule 3: never the person's instance — every
+  // suite's scratch hub, flag or not, the push gate and the mirror too) or that runs under VS_NO_REAL_CLI=1 (every lane env,
+  // acceptance run, the test machine) answers offline (status 0: the menu shows the local version only); a suite that needs
+  // the files hands the fixture dir above.
+  // B-9dd0 cure (the readers, 08:54Z): the root and the temp roots are judged as rule 3's real caller judges them — each realpath'd
+  // (agent-tool-generators realOr), so a scratch hub reached through a linked temp path is one too — read once, async; the first
+  // offline answer says why in one journal line (a person's hub under a temp folder sees no «latest» and is told so here)
+  const offline = process.env.VS_NO_REAL_CLI === '1' ? 'VS_NO_REAL_CLI=1' : await tmpRootOf();
+  if (offline) { if (!saidOffline) { saidOffline = true; console.log(`[version] the canonical repo is not asked (answered offline): ${offline}`); } return { ok: false, status: 0, text: null }; }
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), timeoutMs);
   try {

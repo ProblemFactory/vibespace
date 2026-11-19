@@ -637,7 +637,7 @@ const GRAIN_PRIMITIVE = /CG\.(setGrainRows|removeRule|setLevel)\(|filtersOf\(ix\
 const ENGINE_ROADS = {   // the enclosing function → why it may call a grain writer without the gate (it is never a route)
   agentWatch: 'the agent\'s own road: next-turn only — a wake returns fileWatchRequest (its ASK) before this write; the user\'s row is never replaced',
   agentUnwatch: 'a removal of the agent\'s OWN row — never another\'s, never a wake it did not ask for',
-  decideRequest: 'THE decision: behind the decide route\'s person verdict (⑤)', decideWatchRequest: 'THE decision: behind the decide route\'s person verdict (⑤)',
+  decideRequest: 'THE decision: behind the decide route\'s person verdict (⑤)', decideWatchRequest: 'THE decision: behind the decide route\'s person verdict (⑤)', decideOpenWatch: 'THE decision\'s body (lane bl-msg B-ae13 cure: decideWatchRequest releases its mark around it) — its write, and the take-back when the request ended withdrawn',
   setAccess: 'a route\'s writer (the gate is the route\'s)', setWatchers: 'a route\'s writer (the gate is the route\'s)', setAssignment: 'a route\'s writer (the gate is the route\'s)', setScopeAssignment: 'a route\'s writer (the gate is the route\'s)',
 };
 /** writers a route may call without the gate — each answers to its own road */
@@ -988,7 +988,7 @@ try {
   ok(F7.WATCH_REQUEST_TTL_MS === 7 * DAY && FA.ROW_OF['channel-watch-request'].showsExpiry === true, 'the lifetime is ONE number (src/channel-filter.js WATCH_REQUEST_TTL_MS = 7 days); the row says its end (`showsExpiry`)', F7.WATCH_REQUEST_TTL_MS);
   const html = ROW3.renderRow({ item: wr({ expiresAt: Date.now() + 7 * DAY - 60e3, createdAt: Date.now() - 60e3 }), resolved: false, band: 5 }, rctx3).innerHTML;
   ok(/expires in 7 d/.test(html) && ROW3.expiresText(Date.now() + 7 * DAY - 60e3, tt3) === 'expires in 7 d', 'the tray row (and the chat card — one renderer) says «expires in 7 d»; the For-you window\'s expiry words say days too', (/<div class="ut-meta">([\s\S]*?)<\/div>/.exec(html) || [])[1]);
-  const RED = registryFrom(read('src/foryou-actions.js').replace(", ends: ['allowed', 'denied', 'expired'], showsExpiry: true },", ", ends: ['allowed', 'denied', 'expired'] },"));
+  const RED = registryFrom(read('src/foryou-actions.js').replace(", ends: ['allowed', 'denied', 'expired', 'agent'], showsExpiry: true },", ", ends: ['allowed', 'denied', 'expired', 'agent'] },"));   // lane bl-msg B-ae13: the row's ends gained the asker's withdraw
   ok(RED.expiryWords(wr({ expiresAt: NOW + 7 * DAY }), { now: NOW }) === null, 'RED CONTROL: the row without `showsExpiry` (the base) — the card says nothing of its end');
 } catch (e) { ok(false, '⑪ threw on this tree (an API it asks for is missing): ' + ((e && e.message) || e)); }
 

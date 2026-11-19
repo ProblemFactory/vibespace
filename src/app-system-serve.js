@@ -299,7 +299,7 @@ function create({ home, env = () => process.env, runner, log = console, now = Da
     if (kind === 'sys-create') {
       if (v.created) return no(kind, 'exists', 'this machine already has an app system');
       if (!v.rung) return no(kind, 'no_rung', 'the image carries neither a minbase tarball nor debootstrap — an app system cannot be created here');
-      if (!f.codename) return no(kind, 'no_facts', 'this machine does not name its release (VERSION_CODENAME)');
+      if (!f.codename) return no(kind, 'no_codename', 'this machine does not name its release (VERSION_CODENAME)'); // B-bd27 r2: an OS fact, its own code (never the agent's age)
       return ok({ rung: v.rung, codename: f.codename, closureKey: `create ${v.rung} ${f.codename}`, commands: S.sysCommands({ mode, rung: v.rung, codename: f.codename }), argv: S.sysArgv({ mode, id: S.SYS_RUN_ID, nonce, args: [v.rung, f.codename] }) });
     }
     if (kind === 'repair') {

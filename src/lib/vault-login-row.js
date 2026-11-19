@@ -9,6 +9,7 @@
 import { t } from './i18n.js';
 import { fetchJson, showToast, createModalShell } from './utils.js';
 import { loadTotp } from './vault-totp-row.js';   // lane vault-totp-add: the two-step field lists the vault's own codes
+import { chipSiteOf } from './use-login-words.js';   // lane login-request-card: one login, several sites — a chip's site (the picker's own row: vault-login-grants.js)
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const failWords = (r) => t('Not done — {reason}', { reason: (r && (r.error || r.code)) || t('server unreachable') });
@@ -53,9 +54,10 @@ export function loginExtras(row, data, { refresh, show, doors: open = {} } = {})
     for (const g of grants) for (const p of g.to || []) {
       const chip = el('span', 'vw-ak-chip');
       chip.dataset.scope = g.scope || '';
+      const on = chipSiteOf(entry, g);   // one login, several sites: a row of an added site names that site
       if (g.scope === 'this-account') {
         // this login's OWN grant: taken back here
-        chip.append(el('span', null, principalName(p, data)));
+        chip.append(el('span', null, on ? `${principalName(p, data)} · ${on}` : principalName(p, data)));
         const x = el('button', 'vw-ak-x', '✕');
         x.type = 'button'; x.title = t('Take this grant back'); x.setAttribute('aria-label', x.title);
         x.onclick = async () => { const r = await post('/api/vault/web-logins/ungrant', { resource: g.resource, principal: keyOfEntry(p) }); if (!r || !r.ok) showToast(failWords(r), { type: 'error' }); refresh?.(); };
@@ -63,10 +65,10 @@ export function loginExtras(row, data, { refresh, show, doors: open = {} } = {})
       } else {
         // a WIDER grant reaches this login: «through» it, NO ✕ here (it is taken back at its own door — never from one login's row)
         chip.classList.add('vw-ak-chip-through');
-        chip.append(el('span', null, `${principalName(p, data)} · ${g.scope === 'any-site' ? t('through: any site') : t('through: any account on this site')}`));
+        chip.append(el('span', null, `${principalName(p, data)} · ${g.scope === 'any-site' ? t('through: any site') : t('through: any account on this site')}${on ? ` · ${on}` : ''}`));
         const d = el('button', 'vw-ak-door', t('Open that grant…'));   // the label names the act; the «through» words name the grant
         d.type = 'button';
-        d.onclick = () => (g.scope === 'any-site' ? open.anySite?.(data, { refresh }) : open.anyAccount?.(data, { refresh, site: entry.origin }));
+        d.onclick = () => (g.scope === 'any-site' ? open.anySite?.(data, { refresh }) : open.anyAccount?.(data, { refresh, site: g.site || entry.origin }));   // an added site's row: ITS site's dialog
         chip.append(d);
       }
       chips.append(chip);
@@ -134,7 +136,10 @@ export function loginFields({ site = '', fixed = false } = {}) {
 /** The add door's refusals in words — the dialog's and the card's (one map; the card's own codes too). */
 export function loginRefusalWords(code, r) {
   return code === 'login_bad_origin' ? t('Give the site\'s address over https (http only for this machine\'s localhost)') : code === 'login_bad_user' ? t('Give the user name (no spaces, no #)') : code === 'value_required' ? t('Type its password') : code === 'bad_totp' ? t('The two-step code\'s name, as it is listed in this vault') : code === 'vault_locked' ? t('The vault is locked (vault_locked) — unlock it, then save')
-    : code === 'login_totp_unknown' ? t('No two-step code of that name is in this vault — pick one from its list, or add it with «Two-step code…»') : code === 'login_password_lines' ? t('A password holds no line break — type or paste it again') : failWords(r);   // lane login-request-card
+    : code === 'login_totp_unknown' ? t('No two-step code of that name is in this vault — pick one from its list, or add it with «Two-step code…»') : code === 'login_password_lines' ? t('A password holds no line break — type or paste it again')
+    : code === 'login_site_exists' && r && r.there && r.first ? t('{site} is this login\'s own first site and signs in there as {user} — to sign in there under another name, type a new login', { site: String(r.site || ''), user: String(r.there) })   // its first site cannot be removed: the one door is a new login
+    : code === 'login_site_exists' && r && r.there ? t('{site} is on this login already and signs in there as {user} — to sign in there under another name, remove that site from the login in Vault ▸ Web logins first, or type a new login', { site: String(r.site || ''), user: String(r.there) })   // one login, several sites: the use road's own refusal
+    : failWords(r);   // lane login-request-card
 }
 
 /** 添加 → 网站登录…: the owner's own login (by: owner). The password field is taken off the body by the route (`loginPassword`). */

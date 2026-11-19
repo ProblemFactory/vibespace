@@ -69,6 +69,11 @@ ok(REGISTERED.length === 3, `the P0 registry holds the three fakes (${REGISTERED
   bad({ ...good, search: { ...sRow, adds: 'newer' } }, /caps\.search\.adds must be one of older\|unsaved/, "a search row's unknown `adds` ('newer') is refused by name");
   bad({ ...good, search: sRow }, /caps\.search\.adds must be one of/, 'a search row that does not say what its hits add is refused (the words would guess "older")');
   bad({ ...good, vendorName: '' }, /caps\.vendorName must be a non-empty string/, 'an empty vendor name is refused (the card would say " is limiting the rate")');
+  // B-e630: caps.browserSignIn is a yes or a no (the Connect form's fold reads it); anything else is refused by name
+  ok([true, false].every((v) => CH.validateCaps('bsi', { ...good, browserSignIn: v }) === true), 'B-e630: browserSignIn true or false validates (absent = no, the line above)');
+  bad({ ...good, browserSignIn: 'yes' }, /caps\.browserSignIn must be a boolean/, "B-e630: browserSignIn 'yes' (a string) is refused by name");
+  bad({ ...good, browserSignIn: 1 }, /caps\.browserSignIn must be a boolean/, 'B-e630: browserSignIn 1 is refused by name');
+  bad({ ...good, browserSignIn: null }, /caps\.browserSignIn must be a boolean/, 'B-e630: browserSignIn null is refused by name (absent is the way to say no)');
   ok(JSON.stringify(CH.PACE_COSTS) === JSON.stringify(['fetch', 'discover', 'scanHost', 'feed']), 'the priced actions are exactly the drain\'s four vendor actions (lane lark-search-poll: a change-feed page is one)');
 
   const scan = { ...good, receive: 'scan', history: null, scanSources: { darwin: 'store', linux: 'ui' }, scanLatency: { store: 15, ui: 300 }, historyBySource: { store: 'since', ui: 'page' } };

@@ -362,4 +362,7 @@ fs.rmSync(ROOT, { recursive: true, force: true });
 const leftovers = fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith(`vs-ciqueue-${process.pid}-`));
 const children = fs.readdirSync('/proc').filter((p) => /^\d+$/.test(p)).filter((p) => { try { return fs.readFileSync(`/proc/${p}/cmdline`, 'utf-8').includes(TAG); } catch { return false; } });
 ok(leftovers.length === 0 && children.length === 0, `0 scratch dirs and 0 children left under TMPDIR (${leftovers.length} dirs, ${children.length} processes)`);
+{ const OWN = fs.readFileSync(new URL(import.meta.url), 'utf-8'), calls = OWN.match(/runBuild\(\{[^}]*\}\)/g) || [];
+  ok(/const quiet = \{ log: \(\) => \{ \}, env: BUILD_ENV \}/.test(OWN) && /NODE_COMPILE_CACHE: path\.join\(ROOT, 'node-compile-cache'\)/.test(OWN) && calls.length >= 8 && calls.every((c) => c.includes('...quiet')),
+    `WIRING: every §8 build hands BUILD_ENV — its compile cache under this run's root, never the machine's TMPDIR/node-compile-cache (${calls.length} runBuild calls)`); }
 report();

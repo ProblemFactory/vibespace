@@ -154,9 +154,9 @@ function create({ vault, sources = {}, now = () => Date.now(), mono = () => perf
  *  (VI.secretRowOf), `vaultReveal` = the relay token, or a two-step code's otpauth link (design q-047 L1 — owner decision ①
  *  amended: the seed and its settings, behind the second password, ONE value; never the record's other fields), or a web
  *  login's password (lane browser-login) — the never-shown ones are refused before a source is asked. */
-function secretSource({ vault, machineName } = {}) {
+function secretSource({ vault, machineName, providerName } = {}) {
   return {
-    vaultRows: () => (typeof vault.secretNames === 'function' ? vault.secretNames() : []).map((s) => VI.secretRowOf(s, { machineName })).filter(Boolean),
+    vaultRows: () => (typeof vault.secretNames === 'function' ? vault.secretNames() : []).map((s) => VI.secretRowOf(s, { machineName, providerName })).filter(Boolean),
     vaultReveal: (entry) => {
       if (!VI.revealableOf('secrets', entry)) return null;
       const g = vault.secretGet(entry);

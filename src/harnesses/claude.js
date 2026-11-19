@@ -148,6 +148,7 @@ function withStatusline(args, command) {
 function claudeBillingIdentity(s, { accounts, withHost, poolAuth }) {
   if (s._accountId) {
     const a = accounts.get(s._accountId);
+    if (!a && /^pv-/.test(String(s._accountId))) return providerBillingIdentity(s, accounts, withHost);   // lane lg-providers: a third party
     if (a && a.type === 'pooled') return poolAuth(a);
     // A named SUBSCRIPTION account bills the subscription (not API) — show its
     // name, no amber key warning.
@@ -169,6 +170,35 @@ function claudeBillingIdentity(s, { accounts, withHost, poolAuth }) {
   // is chat-stream-only and the /proc backfill probes the LOCAL ssh wrapper).
   if (at === 'remote-global') return withHost({ source: 'subscription', guessed: true });
   return withHost({ source: 'unknown' });
+}
+
+
+/** THE THIRD-PARTY PROVIDER SPAWN (lane lg-providers, B-d578 U2 — design q-045 §2.3, measured on claude 2.1.296 against a
+ *  loopback recorder, q-045 §1.2): a provider record (an Anthropic-compatible address) + its key → what the CLI reads.
+ *  PURE. `home` = an EMPTY secret-store dir of this provider's own (CLAUDE_SECURESTORAGE_CONFIG_DIR): the machine's
+ *  subscription login is not in it, so the CLI cannot fall back to it — the key is the only credential the child holds.
+ *  The model env (D7): every alias the CLI resolves on its own side (opus / sonnet / haiku / fable, the small-fast one)
+ *  lands on the provider's row — the record's alias when it names one, else the default — never a claude-* id at a
+ *  third party. The key rides the ENV only (localEnv; remote: `secret`, ONE 0600 file); argv carries nothing. */
+function claudeProviderSpawn({ provider, key, home }) {
+  const p = provider || {};
+  const keyVar = p.auth === 'x-api-key' ? 'ANTHROPIC_API_KEY' : 'ANTHROPIC_AUTH_TOKEN';
+  const rows = Array.isArray(p.models) ? p.models : [];
+  const def = String(p.defaultModel || (rows[0] && rows[0].id) || '');
+  const al = (name) => { const a = p.aliases && p.aliases[name]; return a && rows.some((r) => r.id === a) ? String(a) : def; };
+  // the OTHER key variable and the cloud switches EMPTIED (an ambient ANTHROPIC_AUTH_TOKEN outranks a key in ANTHROPIC_API_KEY;
+  // CLAUDE_CODE_USE_BEDROCK / _VERTEX would send the turn elsewhere — adversarial read r1)
+  const other = keyVar === 'ANTHROPIC_API_KEY' ? 'ANTHROPIC_AUTH_TOKEN' : 'ANTHROPIC_API_KEY';
+  const env = { ANTHROPIC_BASE_URL: String(p.baseUrl || ''), [keyVar]: String(key || ''), [other]: '', CLAUDE_CODE_USE_BEDROCK: '', CLAUDE_CODE_USE_VERTEX: '' };
+  if (home) env.CLAUDE_SECURESTORAGE_CONFIG_DIR = home;
+  if (def) Object.assign(env, { ANTHROPIC_MODEL: def, ANTHROPIC_DEFAULT_OPUS_MODEL: al('opus'), ANTHROPIC_DEFAULT_SONNET_MODEL: al('sonnet'), ANTHROPIC_DEFAULT_HAIKU_MODEL: al('haiku'), ANTHROPIC_DEFAULT_FABLE_MODEL: al('fable'), ANTHROPIC_SMALL_FAST_MODEL: al('haiku') });
+  return { localEnv: env, argv: [], secret: { var: keyVar, value: String(key || '') }, plainEnv: Object.fromEntries(Object.entries(env).filter(([k]) => k !== keyVar)) };
+}
+/** a provider session's badge (adversarial read r1, MAJOR 3): not an account — its record's name and tail, billed by use
+ *  ('api-other': the page draws it as pay-per-use with the name) — never «API key» / «ChatGPT» */
+function providerBillingIdentity(s, accounts, withHost) {
+  const p = accounts && typeof accounts.providerRecordOf === 'function' ? accounts.providerRecordOf(s._accountId) : null;
+  return withHost({ source: 'api-other', name: (p && p.label) || 'Third-party model', tail: (p && p.tail) || null, provider: true });
 }
 
 module.exports = {
@@ -274,8 +304,19 @@ module.exports = {
     // (accounts.resolveForSpawn localEnv). Every `creds.*EnvVar(s)` joins the job door's strip.
     homeEnvVar: 'CLAUDE_CONFIG_DIR',
     keyEnvVars: ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'],
+    // a third-party provider (an Anthropic-compatible address + its own key): the spawn plan (lane lg-providers U2)
+    providerSpawn: claudeProviderSpawn,
+    // THE PROVIDER TEST's own words (lane lg-providers U4, src/server/provider-test.js): one non-interactive «ok», one turn —
+    // ONLY ever with a third party's address and key, in a child whose homes are empty (never a subscription: §ban-safety)
+    // (not --bare: its own help says Anthropic auth there is ANTHROPIC_API_KEY or apiKeyHelper only — the presets' bearer key
+    // would read as refused; the empty homes keep the run as bare as --bare would; adversarial read r1)
+    providerTest: { argv: (model) => ['-p', 'ok', '--max-turns', '1', '--settings', '{"apiKeyHelper":""}', '--disallowedTools', 'Bash,Read,Edit,Write,WebFetch,WebSearch,Glob,Grep,NotebookEdit,Task,Agent,TodoWrite,ExitPlanMode,Skill', ...(model ? ['--model', String(model)] : [])] },
     loginLabel: 'Claude',
     defaultIdField: 'defaultAccountId',
+    // THE KEY HELPER THAT OUTRANKS THE LOGIN (2.191.0; unit «billing pick alive», src/billing-pick.js): a helper this setting
+    // names in this file of the CLI's config dir (homeEnvVar, else ~/.claude, on the machine the CLI runs on) bills every turn,
+    // whatever login the CLI holds — a subscription pick sets it aside at spawn (buildSessionArgs neutralizeKeyHelper)
+    keyHelper: { setting: 'apiKeyHelper', file: 'settings.json' },
     spawnForm: 'securestorage',                // accounts.resolveForSpawn: subscription (pool link / oat) or API key; spawnEnvVar relocates the secret store
     legacyGlobalKey: '__global__',             // the pre-registry harness: its machine login's usage key; its records may omit `backend`
     keychainSensitive: true,                   // darwin keychain service name hashes the env string ⇒ pools need Linux

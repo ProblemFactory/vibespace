@@ -251,7 +251,7 @@ for (const l of pureLegs(TB)) ok(l.c, l.n, l.extra);
 {
   // CONTROLS (patched copies, scripts/mutant-copy.mjs): each must turn a leg above red
   const src = fs.readFileSync(path.join(REPO, 'src/browser-tabs.js'), 'utf8');
-  const redOf = (needle, repl, tag) => { if (!src.includes(needle)) return null; const C = M.load('src/browser-tabs.js', src.replace(needle, repl), tag); return pureLegs(C, '[' + tag + '] ').filter((l) => !l.c).map((l) => l.n); };
+  const redOf = (needle, repl, tag) => { if (!src.includes(needle)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(needle).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); const C = M.load('src/browser-tabs.js', src.replace(needle, repl), tag); return pureLegs(C, '[' + tag + '] ').filter((l) => !l.c).map((l) => l.n); };
   const c1 = redOf("  if (owner === 'other' || human) return no('not_your_tab');\n", "  if (human) return no('not_your_tab');\n", 'other-closable');
   ok(Array.isArray(c1) && c1.some((n) => /USER'S VERDICT/.test(n)) && c1.some((n) => /ROW MODEL/.test(n) || /USER/.test(n)), 'CONTROL: a verdict that lets the user switch / close ANOTHER conversation\'s tab from a view he drives — the verdict + row legs go red', c1);
   const c2 = redOf("  const own = rows.filter((x) => owners.get(idKey(x.targetId)) === str(me)).map(tabRow);", '  const own = rows.map(tabRow);', 'view-leaks');
@@ -629,6 +629,190 @@ console.log('— ③ the real bridge over a fake upstream: tab-owners after a ta
   ok(rc2 && !rc2.ok && rc2.code === 'tab_switched', 'CONTROL: a switch the ROW did not make (the agent\'s) still refuses his input tab_switched — the anchor rule stands', rc2);
   for (const v of [v1, v2]) v.ws.close();
   bridge.shutdown?.(); upWss.close();
+}
+
+// ═══ ③b B-1626: a viewer's thaw is asked again once its relay knows the tab it streams ═══
+// heavy test-browser-hidden-paint c (red on .367/.370/.376/.391/.397/.399): a live view attaching to a FROZEN browser two
+// conversations hold streamed a hidden page — 0 frames. The bridge said its viewers when the viewer JOINED, before the relay
+// had read its `tabs` record, so the thaw's scope (activeTargetsFor) was empty and the view's own front stayed hidden.
+console.log('— ③b B-1626: the viewer\'s thaw is asked again with the tab the view streams');
+{
+  const { WebSocket, WebSocketServer } = require('ws');
+  const viewersLeg = async (Bmod, tag) => {
+    const seen = []; let br = null;
+    const fk = {
+      setFor: () => ({ attachments: [{ profileId: 'bp-0000c0f1', alias: 'work', isDefault: true, label: 'Work' }], handles: ['work'], defaultId: 'bp-0000c0f1', children: [] }),
+      list: () => ({ profiles: [{ id: 'bp-0000c0f1', label: 'Work' }] }),
+      streamPortFor: async () => ({ ok: true, port: upPort }), inputStateFor: () => ({ input: 'agent' }),
+      tabOwnersFor: async () => ({ ok: true, owners: {}, mediated: false, adoptable: false }),
+      // the keeper's side of the thaw: what the dialog watch's scope (activeTargetsFor) reads at each report
+      noteViewers: (bk, pid, n) => { seen.push({ n, tabs: br ? br.activeTargetsFor({ browserKey: bk, profileId: pid }) : [] }); },
+    };
+    const upWss = new WebSocketServer({ port: 0, host: '127.0.0.1' }); await new Promise((r) => upWss.on('listening', r));
+    const upPort = upWss.address().port;
+    // the upstream says its tabs only a moment after it connects (the stream's first `tabs` record comes after the viewer joined)
+    upWss.on('connection', (ws) => { ws.send(JSON.stringify({ type: 'status', connected: true })); const rec1 = JSON.stringify({ type: 'tabs', tabs: [{ tabId: 't1', targetId: T(1), title: 'A', url: 'https://a.example/', active: true }] }); setTimeout(() => ws.send(rec1), 80); setTimeout(() => ws.send(rec1), 200); }); // the same record twice: the second asks nothing more
+    const activeS = new Map([['sess-a', { _browserKey: KA, webuiId: 'sess-a' }]]);
+    br = Bmod.create({ keeper: fk, activeSessions: activeS, requestAuthed: () => true, log: quiet });
+    const hs = http.createServer(); servers.push(hs); hs.on('upgrade', (req, sock, head) => br.handleUpgrade(req, sock, head));
+    await new Promise((r) => hs.listen(0, '127.0.0.1', r));
+    const ws = new WebSocket(`ws://127.0.0.1:${hs.address().port}/api/browser/stream?session=sess-a`);
+    let gotTabs = 0; ws.on('message', (d) => { try { if (JSON.parse(String(d)).type === 'tabs') gotTabs++; } catch { /* binary */ } });
+    await new Promise((r, e) => { ws.on('open', r); ws.on('error', e); });
+    // its ONE reason to end, the same for the leg and its control (no fixed wait for a report the control never makes): the viewer
+    // holds the second (identical) tabs record. The bridge judges a record (notePicture: the re-ask) in onUpstream BEFORE it forwards
+    // it, so every report either record could cause is in `seen` by then
+    await until(() => gotTabs >= 2, 1500);
+    const tabsRecordSeen = (br.activeTargetsFor({ browserKey: KA, profileId: 'bp-0000c0f1' }) || []).includes(T(1));
+    ws.close(); br.shutdown?.(); upWss.close();
+    return { seen, tabsRecordSeen, gotTabs };
+  };
+  const Bmod = require('../src/server/browser-stream.js');
+  const bsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8');
+  const ANCH = '      if (relay.activeTarget && relay.activeTarget !== relay.thawAskedFor && relay.viewers.size) { relay.thawAskedFor = relay.activeTarget; noteViewers(relay); }';
+  if (!bsrc.includes(ANCH)) ok(false, 'the anchor of the control «B-1626 re-ask» is not in the source (src/server/browser-stream.js)');
+  const Bc = bsrc.includes(ANCH) ? M.load('src/server/browser-stream.js', bsrc.replace(ANCH, '      // (no re-ask)'), 'b1626-no-reask') : null;
+  const [r, c] = await Promise.all([viewersLeg(Bmod, 'now'), Bc ? viewersLeg(Bc, 'control') : Promise.resolve(null)]); // the leg beside its control
+  const first = r.seen.find((x) => x.n >= 1);
+  ok(first && first.tabs.length === 0 && r.seen.some((x) => x.n >= 1 && x.tabs.includes(T(1))), `B-1626: the viewer's join is reported before its relay knows its tab (the thaw's scope then: ${JSON.stringify(first && first.tabs)}); once the stream's tabs record names the tab on show, the viewers are reported AGAIN with that tab in scope — the thaw shows the view's own front`, r.seen);
+  ok(r.gotTabs >= 2 && r.seen.filter((x) => x.n >= 1 && x.tabs.includes(T(1))).length === 1, `B-1626: …once per tab (a later tabs record for the same tab asks nothing more) — ${r.seen.length} report(s) over ${r.gotTabs} tabs record(s) forwarded`, r.seen);
+  if (c) {
+    ok(c.gotTabs >= 2 && c.tabsRecordSeen && !c.seen.some((x) => x.n >= 1 && x.tabs.includes(T(1))), `CONTROL (B-1626, the release's bridge): the viewer is reported only at its join, with an EMPTY scope (${JSON.stringify(c.seen)}) — on a frozen browser two conversations hold, the view's own front stays hidden: RED`, c.seen);
+  }
+}
+
+// ═══ ③c B-26bb: a view reconnected after a stop draws none of the stopped run's chips (主开发 09:08Z: A, clear) ═══
+console.log('— ③c B-26bb: no stale chip after a reconnect from a stop');
+{
+  const BTx = require('../src/browser-tabs.js');
+  const kept = [{ tabId: 't1', targetId: T(1), title: 'a', url: 'https://a.example/', active: false }, { tabId: 't2', targetId: T(2), title: 'b', url: 'https://b.example/', active: true }, { tabId: 't3', targetId: T(3), title: 'c', url: 'https://c.example/', active: false }];
+  const owners = { [T(1)]: 'agent', [T(2)]: 'agent', [T(3)]: 'agent' };
+  const judge = (B) => ({ stale: B.tabRowModel({ tabs: kept, owners, stale: true }).rows.length, fresh: B.tabRowModel({ tabs: kept, owners }).rows.length });
+  const j = judge(BTx);
+  ok(j.stale === 0 && j.fresh === 3, `B-26bb: the stopped run's three kept chips draw NOTHING while the reconnected view waits for the new run's tabs record (${j.stale}); the same tabs as this run's draw all three (${j.fresh}) — nothing stale to click`, j);
+  const tsrc = fs.readFileSync(path.join(REPO, 'src/browser-tabs.js'), 'utf8');
+  const ANCH = '  const list = (Array.isArray(tabs) && !stale ? tabs : []).filter((x) => isObj(x) && isTargetId(x.targetId))';
+  if (!tsrc.includes(ANCH)) ok(false, 'the anchor of the control «B-26bb stale» is not in the source (src/browser-tabs.js)');
+  else {
+    const BTc = M.load('src/browser-tabs.js', tsrc.replace(ANCH, '  const list = (Array.isArray(tabs) ? tabs : []).filter((x) => isObj(x) && isTargetId(x.targetId))'), 'b26bb-no-stale'); // stale-pins: kept — the release's line, planted back as this control's mutant
+    ok(judge(BTc).stale === 3, 'CONTROL (B-26bb, the release\'s row): the stopped run\'s chips drawn after the reconnect (3 stale chips a person can press) — RED', judge(BTc));
+  }
+  // its verdict (NOT TAKEN, 10:27Z — the Resume press's own road cleared the stop before it connected): THE LAW — stale from the
+  // moment the view RECORDS A STOP until the next tabs record, on EVERY road back. Each road as the events the view sees, through
+  // the PURE step (the drawn row is tabRowModel's, above):
+  const road = (B, events) => { let st = false; for (const e of events) st = B.tabsStaleStep(st, e); return st; };
+  const roads = { resume: ['stopped', 'resume-press', 'hello', 'upstream-open'], rejoin: ['stopped', 'rejoin', 'hello', 'upstream-open'], reconnect: ['stopped', 'upstream-closed', 'upstream-open'] };
+  const lit = Object.fromEntries(Object.entries(roads).map(([k, ev]) => [k, road(BTx, ev)]));
+  const cleared = road(BTx, [...roads.resume, 'tabs']), switched = road(BTx, ['stopped', 'switch']);
+  ok(lit.resume && lit.rejoin && lit.reconnect && !cleared && !switched && BTx.tabRowModel({ tabs: kept, owners, stale: lit.resume }).rows.length === 0,
+    `B-26bb (its verdict): the Resume press's own road, a rejoin and a reconnect — each still stale when the new run connects (${JSON.stringify(lit)}), so no stopped-run chip is drawn; the new run's tabs record (${cleared}) or a pane switch (${switched}) ends it`, lit);
+  const stepSrc = tsrc;
+  const SANCH = "  if (event === 'stopped') return true;";
+  if (!stepSrc.includes(SANCH)) ok(false, 'the anchor of the control «B-26bb the stop rule» is not in the source (src/browser-tabs.js)');
+  else {
+    const BTr = M.load('src/browser-tabs.js', stepSrc.replace(SANCH, "  // (no stop rule)"), 'b26bb-no-stop-rule');
+    ok(!road(BTr, roads.resume), 'CONTROL (B-26bb, the rule removed): the Resume press\'s road connects with the stopped run\'s chips drawn as live — RED', road(BTr, roads.resume));
+  }
+  // THE CENSUS (one rule at the stop, never one per road): every place the view RECORDS a stop (`st.stopped = …`, anything but
+  // false) runs the step on that same line; the tabs record and a pane switch end it
+  const w = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
+  const stopSites = (src) => src.split('\n').filter((l) => /\bst\.stopped = (?!false\b)/.test(l));
+  const bare = (src) => stopSites(src).filter((l) => !l.includes('noteStop()'));
+  ok(stopSites(w).length >= 3 && bare(w).length === 0 && w.includes("const noteStop = () => { st.tabsStale = tabsStaleStep(st.tabsStale, 'stopped'); renderTabs(); };") && w.includes("st.tabsStale = tabsStaleStep(st.tabsStale, 'tabs');") && w.includes("st.tabsStale = tabsStaleStep(st.tabsStale, 'switch');") && w.includes('tabRowModel({ tabs: st.tabs, stale: !!st.tabsStale,') && w.includes('const tabsNow = st.tabsStale ? [] : st.tabs;'),
+    `B-26bb wiring: every one of the view's ${stopSites(w).length} stop records calls the ONE rule (noteStop: the stale step + the pane redrawn); the tabs record and a pane switch end it; the row model AND the tabs pane draw by it`, bare(w));
+  const planted = w + "\n          st.stopped = 'closed'; renderMode(); // a planted new road";
+  ok(bare(planted).length === 1, 'CONTROL (the census): a NEW stop site without the step is named (a rule per road would miss it)', bare(planted));
+}
+
+// ═══ ③d B-1626 / K23 (its cure 2, 主开发 13:03Z): a live view attaching shows ITS conversation's frozen front, whatever the
+//      bridge knows of the viewer's tab at that instant — the scope is the keeper's answer: the conversation's tabs + a hidden
+//      front in its OWN window (read off Chrome at the thaw); another holder's front stays owed (heavy hidden-paint e) ═══
+console.log('— ③d B-1626 / K23: a live view attaching shows its conversation\'s frozen front, the bridge\'s answer held');
+{
+  const WIN = require('../src/browser-windows.js');
+  // (1) THE KEEPER'S HALF, the real keeper of ②: A and B lease "Work" again; each lease stamped with a window of its own in this
+  //     browser run (the fake 0.38.1 has no windows: the stamp is what attach writes on a real one) — the viewer's thaw is handed it
+  for (const s of [sA, sB]) await j('POST', '/api/agent/browser/use', { profile: 'Work' }, as(s));
+  const stampWin = (bk, win, own) => k.reshapeStore((reg) => { const rec = reg.browsers[work.id]; const l = reg.leases.find((x) => x.profileId === work.id && String(x.browserKey) === bk); if (!l || !rec || !WIN.instanceOf(rec)) return false; l.windowIn = own ? WIN.instanceOf(rec) : 'an-older-run'; l.windowId = win; return true; });
+  const asked = []; const PW = { paintFacts: () => null, freezePaint: async () => ({ ok: false }), thawPaint: (pid, o) => { asked.push(o && o.holder); return Promise.resolve({ ok: true, thawed: false }); } };
+  const holderOf = async (bk) => { asked.length = 0; k.noteViewers(bk, work.id, 1); await new Promise((r) => setImmediate(r)); k.noteViewers(bk, work.id, 0); return asked.find((h) => h && h.browserKey === bk) || null; };
+  const stamped = stampWin(KA, 1, true) && stampWin(KB, 2, true);
+  k.setPaintWatch(PW);
+  const hA = await holderOf(KA), hB = await holderOf(KB);
+  const olderOk = stampWin(KB, 2, false); const hB0 = await holderOf(KB);
+  k.setPaintWatch(null);
+  for (const s of [sA, sB]) await j('POST', '/api/agent/browser/detach', { profile: work.id }, as(s));
+  ok(stamped && olderOk && hA && hA.windowId === 1 && hB && hB.windowId === 2 && hB0 && hB0.windowId === null,
+    'the KEEPER hands a viewer\'s thaw its conversation\'s own window (the lease\'s, this browser run) — never asked of the bridge; a lease still in the shared window of an older run hands none', { hA, hB, hB0 });
+  // (2) THE WATCH'S HALF, the real watch over a stand-in browser: A's blank root + A's page in window 1, B's page in window 2. THE
+  //     STALL: the bridge's answer is HELD (the viewer's relay has read no tabs record yet) and the keeper names only each one's
+  //     root (A's blank, B's blank) — A's page by no witness and no grant. The thaw must still show A's page, and only A's
+  const TA0 = T(0x80), TA = T(0x81), TB = T(0x82), TB0 = T(0x83);
+  const { WebSocketServer: WSS } = require('ws');
+  const standIn = async () => {
+    const winOf = new Map([[TA0, 1], [TA, 1], [TB, 2], [TB0, 2]]), vis = new Map([[TA0, 'hidden'], [TA, 'visible'], [TB, 'visible'], [TB0, 'hidden']]);
+    const st = { last: null, acts: [], made: [], blind: new Set() }; // blind: the tabs whose window read gets no answer (a busy Chrome)
+    const wss = new WSS({ port: 0, host: '127.0.0.1' }); await new Promise((r) => wss.once('listening', r));
+    wss.on('connection', (sock) => sock.on('message', (raw) => {
+      let m; try { m = JSON.parse(String(raw)); } catch { return; }
+      const p = m.params || {}; const re = (result) => { try { sock.send(JSON.stringify({ id: m.id, result })); } catch { /* closed */ } };
+      if (m.method === 'Target.getTargets') return re({ targetInfos: [TA0, TA, TB, TB0].map((t) => ({ targetId: t, type: 'page', title: '', url: t === TA0 || t === TB0 ? 'about:blank' : `https://${t === TA ? 'a' : 'b'}.example/`, attached: false })) });
+      if (m.method === 'Target.attachToTarget') return re({ sessionId: 'S' + p.targetId });
+      if (m.method === 'Runtime.evaluate' && p.expression === 'document.visibilityState') return re({ result: { type: 'string', value: vis.get(String(m.sessionId || '').slice(1)) || 'hidden' } });
+      if (m.method === 'Browser.getWindowForTarget') return st.blind.has(p.targetId) ? re({}) : re({ windowId: winOf.has(p.targetId) ? winOf.get(p.targetId) : null });
+      if (m.method === 'Target.activateTarget') { st.last = p.targetId; st.acts.push(p.targetId); return re({}); }
+      if (m.method === 'Target.createTarget') { const id = 'BLANK' + (st.made.length + 1); st.made.push(id); winOf.set(id, winOf.get(st.last)); return re({ targetId: id }); }
+      return re({});
+    }));
+    return { url: `ws://127.0.0.1:${wss.address().port}/devtools/browser/stand-in`, st, close: () => new Promise((r) => { for (const c of wss.clients) c.terminate(); wss.close(() => r()); }) };
+  };
+  const watchLeg = async (Dmod, holders, { blindAtFreeze = [] } = {}) => {
+    const SI = await standIn(); const PID = 'bp-0000c23a';
+    const D = Dmod.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: SI.url }), holdsDialogsFor: () => true }, log: quiet, leaseCountOf: () => 2,
+      tabsOf: (q) => (String(q && q.browserKey) === KA ? [TA0] : String(q && q.browserKey) === KB ? [TB0] : []) }); // the bridge's half held (empty), the keeper's: each one's root only
+    const shownOf = (x) => (x && Array.isArray(x.shown) ? x.shown.map((s) => s.targetId) : null);
+    try {
+      await D.arm(PID, { budgetMs: 3000 });
+      const opened = await until(() => !!D.paintFacts(PID), 3000);
+      for (const t of blindAtFreeze) SI.st.blind.add(t); // cure 4: Chrome says nothing of these windows at the freeze…
+      const fz = opened ? await D.freezePaint(PID) : null;
+      SI.st.blind.clear(); // …and answers again at the thaw
+      const out = { opened, fz };
+      if (fz && fz.ok) {
+        out.a = shownOf(await D.thawPaint(PID, { holder: { ...holders.a, profileId: PID } })); out.hiddenA = (D.paintFacts(PID) || {}).hidden;
+        out.b = shownOf(await D.thawPaint(PID, { holder: { ...holders.b, profileId: PID } })); out.hiddenB = (D.paintFacts(PID) || {}).hidden;
+      }
+      out.blanks = SI.st.made.length;
+      return out;
+    } finally { try { D.shutdown(); } catch { /* */ } await SI.close(); }
+  };
+  const DD = require('../src/server/browser-dialogs.js');
+  const dsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
+  const WANCH = '    const byWindow = ownWin == null ? [] : [...(w.hiddenFronts || [])].filter((tid) => !need.includes(tid) && (fw.get(tid) == null || fw.get(tid) === ownWin));';
+  const CANCH = '          const mine = probe.length > 0 && (await Promise.all(probe.map((t) => windowOfTarget(w, t)))).includes(ownWin);';
+  if (!dsrc.includes(CANCH)) ok(false, 'the anchor of the control «B-1626 cure 3 the window confirmed» is not in the source (src/server/browser-dialogs.js)');
+  const DDs = dsrc.includes(CANCH) ? M.load('src/server/browser-dialogs.js', dsrc.replace(CANCH, '          const mine = true; // the stamp trusted alone'), 'k23-stamp-alone') : null;
+  // cure 4's control: cure 3's rule — a window the freeze could not read is «not yours» (never read again)
+  const DDu = dsrc.includes(WANCH) ? M.load('src/server/browser-dialogs.js', dsrc.replace(WANCH, '    const byWindow = ownWin == null ? [] : [...(w.hiddenFronts || [])].filter((tid) => !need.includes(tid) && fw.get(tid) === ownWin); // cure 3: unknown = not yours'), 'k23-unknown-not-yours') : null;
+  if (!dsrc.includes(WANCH)) ok(false, 'the anchor of the control «B-1626 K23 the window rule» is not in the source (src/server/browser-dialogs.js)');
+  const DDc = dsrc.includes(WANCH) ? M.load('src/server/browser-dialogs.js', dsrc.replace(WANCH, '    const byWindow = []; // the release: no window rule'), 'k23-no-window') : null;
+  const strip = (h) => { const { windowId, ...rest } = h || {}; return rest; }; // the release's keeper line: the holder carries no window
+  const H = { a: hA || { browserKey: KA, windowId: 1 }, b: hB || { browserKey: KB, windowId: 2 } };
+  // B-1626 cure 3 (its readers): a mediated lease keeps a previous run's windowId — A's viewer arriving with a STALE id that names
+  // B's window now (window ids are small numbers per Chrome run) shows nothing of B's: the window is A's only while A's own root sits in it
+  const Hs = { a: { ...H.a, windowId: 2 }, b: H.b };
+  const [r, c1, c2, st, c3, un, c4] = await Promise.all([watchLeg(DD, H), watchLeg(DD, { a: strip(H.a), b: strip(H.b) }), DDc ? watchLeg(DDc, H) : Promise.resolve(null),
+    watchLeg(DD, Hs), DDs ? watchLeg(DDs, Hs) : Promise.resolve(null),
+    // B-1626 cure 4 (its verdict's must): Chrome says nothing of A's page's window at the freeze (a busy Chrome) and answers at the thaw
+    watchLeg(DD, H, { blindAtFreeze: [TA] }), DDu ? watchLeg(DDu, H, { blindAtFreeze: [TA] }) : Promise.resolve(null)]);
+  ok(r.fz && r.fz.ok && r.fz.fronts === 2 && J(r.a) === J([TA]) && r.hiddenA === 1 && J(r.b) === J([TB]) && r.hiddenB === 0,
+    'B-1626 / K23 (its cure 2): a viewer attaching to A — the bridge\'s answer held, A\'s page named by no witness and no grant — shows A\'s frozen front (in A\'s own window) and only it; B\'s front stays owed until B\'s own viewer shows it', r);
+  ok(c1 && c1.fz && c1.fz.ok && J(c1.a) === J([]) && c1.hiddenA === 2, 'CONTROL (the release\'s keeper: the viewer\'s holder carries no window): A\'s front stays owed — a hidden page draws no frame, the live view stays blank (K23) — RED', c1);
+  if (DDc) ok(c2 && c2.fz && c2.fz.ok && J(c2.a) === J([]) && c2.hiddenA === 2, 'CONTROL (the release\'s watch: no window rule): A\'s front stays owed — RED', c2);
+  ok(st && st.fz && st.fz.ok && J(st.a) === J([]) && st.hiddenA === 2 && J(st.b) === J([TB]), 'B-1626 cure 3: A\'s viewer with a STALE window id (a previous run\'s, naming B\'s window now) shows nothing — B\'s front is shown only by B\'s own viewer', st);
+  if (DDs) ok(c3 && c3.fz && c3.fz.ok && J(c3.a) === J([TB]), 'CONTROL (the stamp trusted alone): A\'s viewer shows B\'s page in B\'s window — the cell heavy hidden-paint e guards — RED', c3);
+  ok(un && un.fz && un.fz.ok && J(un.a) === J([TA]) && un.hiddenA === 1, 'B-1626 cure 4: a window Chrome did not report at the freeze is UNKNOWN — read again at the thaw, A\'s viewer shows A\'s page (never a blank on every later visit)', un);
+  if (DDu) ok(c4 && c4.fz && c4.fz.ok && J(c4.a) === J([]) && c4.hiddenA === 2, 'CONTROL (cure 3\'s rule: an unread window is «not yours»): A\'s front stays owed — the live view blank on this visit and every later one — RED', c4);
 }
 
 // ═══ ④ THE WORDS ═════════════════════════════════════════════════════════════

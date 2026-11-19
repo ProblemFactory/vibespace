@@ -11,6 +11,8 @@ import { createStashStrip } from './stash-strip.js'; // 2026-09-27: what waits f
 import { landDraft, PUTBACK_SEP } from '../queue-putback.js'; // PURE (lane stop-refills-composer): a Stop put-back lands as a prefix over the live box; lane draft-focus-guard: landDraft = THE verdict for every draft another client saved
 import { createAgentCards } from './agent-card.js'; // lane agent-window-no-pop: the card an agent's window leaves where nothing opened
 import { VC_PHONE_MEDIA } from '../viewport-class.js'; // lane duo-build-1: the phone paths' ONE media list (compact ∪ regular)
+import { createImageDoor, refusalText, heldOf } from './image-attach.js'; // B-c9ed: THE picture door — every picture judged by THE rule when it is handed
+import { imageLimitsOf } from '../backend-caps.js'; // batch 20 cure: the numbers a picture is judged by are its conversation's HARNESS row
 
 /** THE CAMERA DOOR (lane phone-take-photo, owner 2026-11-09 «为啥我在手机上添加图片的时候不能拍照»): Android Chrome opens an
  *  image-only file input in its system PHOTO PICKER — a gallery with no camera in it — so a phone sheet that offers
@@ -61,7 +63,7 @@ export class ChatInput {
    * @param {function} opts.getStateSync - returns StateSync instance
    * @param {function} opts.onInterrupt - called when user clicks Stop
    */
-  constructor(ws, sessionId, { onSend, onInterrupt, getCwd, getHost, getVoiceFacts, openPlugins, getUploadDir, isTouch, getTouchEnterSends, getEnterSends, onQueueOp, onSteerChord, onHoldChord, onSteerSend, onPageKey, onLogin }) {
+  constructor(ws, sessionId, { onSend, onInterrupt, getCwd, getHost, getVoiceFacts, openPlugins, getUploadDir, isTouch, getBackend, getTouchEnterSends, getEnterSends, onQueueOp, onSteerChord, onHoldChord, onSteerSend, onPageKey, onLogin }) {
     this._ws = ws;
     this._onLogin = onLogin || null; // lane signin-card-real-screen: a typed «/login» opens the sign-in card (the CLI answers «isn't available»)
     this._onPageKey = onPageKey || null; // lane door-healthy-chat: PageUp / PageDown page the conversation
@@ -74,6 +76,7 @@ export class ChatInput {
     this._getHost = getHost || (() => null);
     this._getUploadDir = getUploadDir || (() => '');
     this._isTouch = isTouch || (() => false);
+    this._getBackend = getBackend || (() => null);   // batch 20 cure: the conversation's harness — its row's picture limits
     this._getTouchEnterSends = getTouchEnterSends || (() => false);
     this._getEnterSends = getEnterSends || (() => true);   // chat.enterSends (desktop): off ⇒ Cmd/Ctrl+Enter sends
     this._enterGuard = new EnterGuard();                     // inc-muukd9oq-qyc3 r2: every compositionend arms a window that swallows the commit's Enter
@@ -410,7 +413,7 @@ export class ChatInput {
     // the microphone (desk + phone): click to record, click to stop — the text lands at the cursor (src/lib/voice-input.js)
     this._voice = createVoiceInput({ textarea: this._textarea, getFacts: () => this._getVoiceFacts(), getCwd: () => this._getCwd(), openPlugins: () => this._openPlugins() });
     attachInput.onchange = () => {
-      for (const file of attachInput.files) this._addImageAttachment(file);
+      this._addImageAttachment([...attachInput.files]);   // ONE hand-over: the refused files said in one toast
       attachInput.value = '';
     };
 
@@ -602,7 +605,10 @@ export class ChatInput {
       if (uploaded.length) this._insertUploadedPaths(destDir, uploaded);
       const kept = uploaded.find((f) => f && f.keptDir);   // lane chat-attachments-persist: said, never silent
       if (kept) showToast(t('Kept with this conversation in {dir} — {from} is a temporary folder', { dir: kept.keptDir, from: kept.keptFrom }), { duration: 8000 });
-      if (failed.length) {
+      if (failed.length && !uploaded.length && failed[0].error) {
+        // B-3767: nothing landed — the server's own reason, by name (a temp folder the hub cannot use names its path)
+        this._uploadToast(t('Upload failed: {msg}', { msg: failed[0].error }), true);
+      } else if (failed.length) {
         this._uploadToast(t("Uploaded {n}, {failed} couldn't be read (e.g. {name})", { n: uploaded.length, failed: failed.length, name: failed[0].name }), true);
       } else if (!uploaded.length) {
         this._uploadToast(t('Upload failed — no files could be read'), true);
@@ -1575,18 +1581,19 @@ export class ChatInput {
     return msgId;
   }
 
-  _addImageAttachment(file) {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result;
-      const base64 = dataUrl.split(',')[1];
-      const mediaType = file.type || 'image/png';
-      const attachment = { base64, mediaType, dataUrl, name: file.name || 'image' };
-      this._attachments.push(attachment);
-      this._renderAttachments();
-      this._textarea.focus();
-    };
-    reader.readAsDataURL(file);
+  /** THE ONE ROAD of a picture into this message (the paste, the gallery, the camera's shot): a File or a list of them,
+   *  each judged by THE rule (B-c9ed, src/image-attach-rule.js) when it is handed — an empty file, a HEIC, a file that
+   *  is not PNG / JPEG / GIF / WebP by its bytes, a picture over THIS conversation's harness limits (its size, sides, the
+   *  message's total — claude: the model API's; none stated: none) or past VibeSpace's own ceiling becomes no chip, and ONE toast names each refused file and why; a
+   *  taken picture carries the type its bytes say */
+  _addImageAttachment(files) {
+    if (!this._imageDoor) this._imageDoor = createImageDoor({
+      held: () => heldOf(this._attachments),
+      onAdd: (attachment) => { this._attachments.push(attachment); this._renderAttachments(); this._textarea.focus(); },
+      onRefused: (list) => showToast(refusalText(list, t), { type: 'error' }),
+      limits: () => imageLimitsOf(this._getBackend()),   // the harness's own numbers; one that states none takes any size
+    });
+    return this._imageDoor.add(files && typeof files.length === 'number' ? files : [files]);
   }
 
   _renderAttachments() {
@@ -1618,13 +1625,14 @@ export class ChatInput {
    *  caps = backend-caps `inputModes` projected onto the client (agent-meta):
    *  `queueVerbs` is the table, `steer`/`queueOps` its derived view. */
   /** 2026-09-27: the session's `stash` fact ({count, items} | null) + its turn — the strip patches in place. */
-  setStash(summary, opts = {}) { this._stashStrip?.set(summary || null, opts); }
+  setStash(summary, opts = {}) { this._stashArgs = [summary, opts]; this._stashStrip?.set(summary || null, { ...opts, steers: this._sendModes().enterDoor === 'steer' }); }   // B-02a3: the group press follows this composer's own Enter door
   /** lane agent-window-no-pop: `{key, title, open}` — the card an agent's window leaves (src/lib/agent-card.js). */
   showAgentCard(card) { return this._agentCards?.show(card) || null; }
 
   setQueue(items, caps) {
     this._queue = Array.isArray(items) ? items : [];
     if (caps) this._queueCaps = { queue: !!caps.queue, steer: !!caps.steer, queueOps: !!caps.queueOps, queueVerbs: Array.isArray(caps.queueVerbs) ? caps.queueVerbs.slice() : [], notifSteerMissing: !!caps.notifSteerMissing, ...(caps.enterDoor === 'steer' ? { enterDoor: 'steer' } : {}) };
+    if (caps && this._stashArgs) this.setStash(...this._stashArgs);   // B-02a3: the door changed — the strip's group press follows it
     // A row that left the queue cannot still be pending/refused/edited — the
     // republish IS the outcome (a spinner outliving its row is a lie).
     const live = new Set(this._queue.map((it) => String(it.id || '')));

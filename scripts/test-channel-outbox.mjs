@@ -3712,6 +3712,7 @@ async function chatReadLegs(ENGmod, name) {
             ['src/lib/channel-touch-view.js', "app.openChannelOutbox({ inside: true, ...(v.filter ? { filter: v.filter } : {}), ...(v.show ? { show: v.show } : {}) })", 'inside', 'a row that names a proposal: the Channels chip\'s rows + the tool-card rows, the ONE door'],
             ['src/lib/chat-view.js', 'this.app.openChannelOutbox?.({ filter: this._outboxFilter() })', 'inside', 'the chat\'s «Outbox · N» chip'],
             ['src/lib/channel-outbox.js', 'app.openChannelOutbox({ show: String(p.replacedBy) })', 'keeps', '«replaced»: keeps the view, drops the filter only when it hides the newer one'],
+            ['src/lib/channel-outbox.js', 'app.openChannelOutbox({ show: String(a.id) })', 'keeps', 'lane bl-msg B-9b9c: «Show it» on another reply to the same message — keeps the view, like «replaced»'],
             ['src/lib/channel-outbox.js', 'app.openChannelOutbox({ filter: f })', 'inside', 'a card\'s «Only drafts by <agent>»'],
             ['src/lib/channel-outbox.js', 'c.app.openChannelOutbox({ filter: { keys: sessionKeysOf(c.s), name: c.displayName || c.s.name || t(\'this conversation\') } })', 'inside', 'the session menu\'s «Outbox of this conversation»'],
             ['src/lib/channel-outbox.js', 'app.openChannelOutbox({ syncId })', 'keeps', 'a layout replay'],
@@ -3739,7 +3740,7 @@ async function chatReadLegs(ENGmod, name) {
           }
           for (const d of DOORS) if (!fs.readFileSync(path.join(REPO, d[0]), 'utf-8').includes(d[1])) bad.push({ gone: d[3] });
           const insideRows = DOORS.filter((d) => d[2] === 'inside').every((d) => /inside: true|filter:/.test(d[1]));
-          return [!bad.length && insideRows && DOORS.length === 11, bad];
+          return [!bad.length && insideRows && DOORS.length === 12, bad];   // lane bl-msg B-9b9c: + «Show it» (another reply to the same message)
         });
         await legOSC('OCD the filter bar stays on screen: sticky over an opaque background; EVERYTHING the window scrolls to clears it — one selector list, one variable for the bar\'s height, no bar no margin (the geometry: chrome ㉕)', () => {
           const css = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf-8');
@@ -3753,7 +3754,7 @@ async function chatReadLegs(ENGmod, name) {
         });
         await legOSC('OCD the wiring: the chip\'s rows and the tool-card rows reach the ONE door WITH the chat\'s filter; the row\'s state words come through the chat', () => {
           const cv = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf-8'), tv = fs.readFileSync(path.join(REPO, 'src/lib/channel-touch-view.js'), 'utf-8'), sb = fs.readFileSync(path.join(REPO, 'src/lib/chat-status-bar.js'), 'utf-8');
-          return [cv.includes('onChannelOpen: (row) => openTouchRow(this.app, row, { filter: this._outboxFilter() })') && tv.includes('openTouchRow(view.app, rowEl._row, { filter: view._outboxFilter?.() || null })') && cv.includes('channelRowWords: rowProposalWords') && sb.includes('this._paintChannelRowStates();\n    const face = outboxChipFace(v);'), 'wiring'];
+          return [cv.includes('onChannelOpen: (row) => openTouchRow(this.app, row, { filter: this._outboxFilter(), conversation: this._connectConversation() })') && tv.includes('openTouchRow(view.app, rowEl._row, { filter: view._outboxFilter?.() || null, conversation: view._connectConversation?.() || null })') && cv.includes('channelRowWords: rowProposalWords') && sb.includes('this._paintChannelRowStates();\n    const face = outboxChipFace(v);'), 'wiring'];
         });
       }
     } finally { Date.now = realNow; }
@@ -4390,6 +4391,113 @@ const sendRed = (c) => [...c.doors.filter((d) => !d.reads).map((d) => `door ${d.
   ok(planted !== CLI_SRC && sendRed(sendCensus(planted, ROUTES_SRC)).length === 1, 'CONTROL: a NEW send verb with no collect is RED', sendRed(sendCensus(planted, ROUTES_SRC)));
   const deaf = ROUTES_SRC.replace(", { collect: b.collect === true });   // lane inline-receipts-compose-api: each caller's direct send read inline", ");");
   ok(deaf !== ROUTES_SRC && sendRed(sendCensus(CLI_SRC, deaf)).some((x) => /door composeCallers does not read b\.collect/.test(x)), 'CONTROL: a send door that drops the CLI\'s collect (compose --caller) is RED by name');
+}
+
+// lane bl-msg B-9b9c (fb-8c0809911d): two conversations each proposed a reply to ONE incoming message, the person approved both cards and
+// the contact got the reply twice. A reply is CROSS-LINKED at propose with every other reply to the same message that is open or sent:
+// both views carry `also` (resolved NOW), the agent's answer names it by id and whose, never another conversation's name
+console.log('§bl-msg B-9b9c two replies to ONE message — both cards name the other; the agent is told; another message is not linked');
+{
+  const runOn = async (ENGM, name) => {
+    const W9 = mkEngine({ name, engine: ENGM, live: [{ cid: 'agent-1', name: 'Worker', groups: ['g1'] }, { cid: 'agent-2', name: 'Helper', groups: ['g1'] }] });
+    const { eng } = W9;
+    await prime(eng);
+    await eng.setReach(A, C, { principal: { kind: 'agent', id: 'agent-2', name: 'Helper' }, level: 'visible' });
+    const AG2 = { kind: 'agent', id: 'agent-2', name: 'Helper', groups: ['g1'], msgLevelFor: () => 'none' };
+    const recs = eng.store.readTail(A, C, { limit: 20 }).filter((x) => x && x.vendorId);
+    const msg = recs[recs.length - 1].vendorId, other = recs[0].vendorId;
+    const p1 = await eng.propose(AGENT, A, C, { text: 'reply one', replyTo: msg });
+    const p2 = await eng.propose(AG2, A, C, { text: 'reply two', replyTo: msg });
+    const p3 = await eng.propose(AGENT, A, C, { text: 'to another message', replyTo: other });
+    const v = (id) => eng.outboxView().proposals.find((x) => x.id === id) || {};
+    const out = { msg, other, p1: p1.proposal, p2: p2.proposal, p3: p3.proposal, v1: v(p1.proposal.id), v2: v(p2.proposal.id), v3: v(p3.proposal.id) };
+    if (p1.proposal) await eng.reject(p1.proposal.id).catch(() => null);
+    out.v2after = v(p2.proposal.id);
+    return out;
+  };
+  const g = await runOn(ENG, 'b9b9c');
+  const ids = (x) => (Array.isArray(x && x.also) ? x.also.map((a) => a.id) : []);
+  ok(g.msg !== g.other && g.p1 && g.p2 && g.p1.state === 'awaiting-approval' && g.p2.state === 'awaiting-approval', 'two agents each proposed a reply to the same message (both await approval)', JSON.stringify({ s1: g.p1 && g.p1.state, s2: g.p2 && g.p2.state }));
+  ok(JSON.stringify(ids(g.v1)) === JSON.stringify([g.p2.id]) && JSON.stringify(ids(g.v2)) === JSON.stringify([g.p1.id]) && g.v2.also[0].by && g.v2.also[0].by.name === 'Worker' && g.v2.also[0].state === 'awaiting-approval',
+    'THE CARDS: each view names the other (id, state, who drafted it) — linked both ways', JSON.stringify({ v1: g.v1.also, v2: g.v2.also }));
+  ok(Array.isArray(g.p2.also) && g.p2.also.length === 1 && g.p2.also[0].mine === false && g.p2.also[0].byUser === false && !('by' in g.p2.also[0]) && !('alsoFor' in g.p2) && !JSON.stringify(g.p2.also).includes('Worker'),
+    'THE AGENT\'S ANSWER: the second drafter is told the other proposal by id and «not yours», never the other conversation\'s name', JSON.stringify(g.p2.also));
+  ok(!ids(g.v3).length && !ids(g.v1).includes(g.p3.id), 'a reply to ANOTHER message is not linked');
+  ok(!ids(g.v2after).length, '…and once the other is rejected, the card no longer names it (resolved now, never a frozen copy)', JSON.stringify(g.v2after.also || null));
+  // RED CONTROL: the cross-link removed at propose ⇒ nothing names the other — the legs above go red
+  const src = engineSource(REPO);
+  const LINK = "const alsoIds = target ?";
+  ok(src.split(LINK).length === 2, 'the control finds its line');
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const MUTO = mutantCopies('blm-9b9c', REPO);
+  const r = await runOn(MUTO.load('src/server/channels-engine.js', src.replace(LINK, 'const alsoIds = false ?'), 'no-also'), 'b9b9c-red');
+  ok(!ids(r.v1).length && !ids(r.v2).length && !(r.p2 && r.p2.also), 'RED CONTROL (no cross-link): neither card nor the answer names the other reply — the B-9b9c legs go red');
+}
+
+// lane bl-msg B-ae13 (fb-4d94c275a2): the agent that filed a wake request takes it back once its reply came — the request ends
+// `withdrawn`, its For-you item «withdrawn by the agent»; another agent cannot, a decided one cannot, approval stays the person's click
+console.log('§bl-msg B-ae13 the asker withdraws its own open wake request — nobody else, never a decided one');
+{
+  const run = async (ENGM, name) => {
+    const W13 = mkEngine({ name, engine: ENGM, live: [{ cid: 'agent-1', name: 'Worker', groups: ['g1'] }, { cid: 'agent-2', name: 'Helper', groups: ['g1'] }] });
+    const { eng, userTodos } = W13;
+    await prime(eng);
+    const P1 = { kind: 'agent', id: 'agent-1', name: 'Worker' }, P2 = { kind: 'agent', id: 'agent-2', name: 'Helper' };
+    await eng.setGrain(A, { kind: 'account' }, { access: [{ principal: P1, authority: 'draft' }, { principal: P2, authority: 'draft' }] });
+    const AG2 = { kind: 'agent', id: 'agent-2', name: 'Helper', groups: ['g1'], msgLevelFor: () => 'none' };
+    const wk = await eng.agentWatch(AGENT, KEY, { delivery: 'wake', keywords: ['outage'], why: 'on call' });
+    const id = wk && wk.request && wk.request.id;
+    const other = id ? await eng.withdrawWatchRequest({ requestId: id, by: { kind: 'agent', id: 'agent-2' } }) : null;
+    const reqOf = () => (eng.store.index.table('watchRequests') || []).find((r) => r && r.id === id) || {};
+    const reqOf3 = (rid) => ((eng.store.index.table('watchRequests') || []).find((r) => r && r.id === rid) || {}).status;
+    const todoId = reqOf().todoId;
+    const mine = id ? await eng.withdrawWatchRequest({ requestId: id, by: { kind: 'agent', id: 'agent-1' }, why: 'the reply came' }) : null;
+    const after = { status: reqOf().status, decidedBy: reqOf().decidedBy, item: todoId && userTodos.get(todoId) ? { status: userTodos.get(todoId).status, by: userTodos.get(todoId).resolvedBy } : null };
+    const again = id ? await eng.withdrawWatchRequest({ requestId: id, by: { kind: 'agent', id: 'agent-1' } }) : null;
+    const wk2 = await eng.agentWatch(AG2, KEY, { delivery: 'wake' });
+    await (wk2 && wk2.request ? eng.decideRequest(wk2.request.id, true, 'user') : null);
+    const decided = wk2 && wk2.request ? await eng.withdrawWatchRequest({ requestId: wk2.request.id, by: { kind: 'agent', id: 'agent-2' } }) : null;
+    // the cure (主开发 09:24Z): THE OTHER ORDER — the asker's withdraw is queued (its index write waits on the store's chain) when the
+    // person's Allow starts: the decide writes its watcher, finds the request withdrawn and takes the watch back
+    const wk3 = await eng.agentWatch(AGENT, KEY, { delivery: 'wake', keywords: ['outage'], why: 'on call again' });
+    const id3 = wk3 && wk3.request && wk3.request.id;
+    const wd3 = id3 ? eng.withdrawWatchRequest({ requestId: id3, by: { kind: 'agent', id: 'agent-1' } }) : null;   // not awaited: queued
+    const dc3 = id3 ? await eng.decideRequest(id3, true, 'user') : null;
+    const wr3 = wd3 ? await wd3 : null;
+    const rows3 = eng.agentWatchesFor(AGENT, KEY);
+    const race = { filed: !!id3, decide: dc3, withdraw: wr3 && { ok: wr3.ok, code: wr3.code }, status: id3 ? reqOf3(id3) : null, live: ((rows3 && rows3.rows) || []).filter((w) => !w.inert && w.delivery === 'wake').length };
+    // the «being decided» mark is released on EVERY exit: a decide that returns early (the conversation is gone) leaves the asker free
+    const wk4 = await eng.agentWatch(AGENT, KEY, { delivery: 'wake', keywords: ['outage'], why: 'on call, third' });
+    const id4 = wk4 && wk4.request && wk4.request.id;
+    if (id4) await eng.store.index.update((ix) => { delete ix.conversations[KEY]; });
+    const dc4 = id4 ? await eng.decideRequest(id4, true, 'user') : null;
+    const wd4 = id4 ? await eng.withdrawWatchRequest({ requestId: id4, by: { kind: 'agent', id: 'agent-1' } }) : null;
+    const gone = { filed: !!id4, decide: dc4 && { ok: dc4.ok, code: dc4.code }, withdraw: wd4 && { ok: wd4.ok, code: wd4.code, error: wd4.error } };
+    return { wk, other, mine, after, again, decided, race, gone };
+  };
+  const g = await run(ENG, 'bae13');
+  ok(g.wk && g.wk.proposed && g.other && g.other.ok === false && g.other.code === 'not-found', 'another agent cannot withdraw it (the same uniform not-found)', JSON.stringify(g.other));
+  ok(g.mine && g.mine.ok && g.after.status === 'withdrawn' && g.after.decidedBy === 'agent' && g.after.item && g.after.item.status !== 'open' && g.after.item.by === 'agent',
+    'THE ASKER withdraws its open wake request: the request ends withdrawn (by the agent), its For-you item «withdrawn by the agent»', JSON.stringify(g.after));
+  ok(g.again && g.again.ok === false && g.again.code === 'not-withdrawable' && g.decided && g.decided.ok === false && g.decided.code === 'not-withdrawable', 'twice, or once the person decided it ⇒ refused by name (a decision is final)', JSON.stringify({ again: g.again, decided: g.decided }));
+  ok(g.race.filed && g.race.decide && g.race.decide.ok === false && g.race.decide.code === 'bad-state' && g.race.withdraw && g.race.withdraw.ok && g.race.status === 'withdrawn' && g.race.live === 0,
+    'THE OTHER ORDER (the cure): the asker withdraws while the person\'s Allow is writing — the request ends withdrawn, the Allow is refused, and NO live wake watch stands', JSON.stringify(g.race));
+  ok(g.gone.filed && g.gone.decide && g.gone.decide.ok === false && g.gone.withdraw && g.gone.withdraw.ok, 'a decide that returns early (the conversation is gone) leaves no «being decided» mark: the asker withdraws at once', JSON.stringify(g.gone));
+  // RED CONTROL: the withdraw that never ends the person's item ⇒ the card would sit in For you — the leg above goes red
+  const src = engineSource(REPO);
+  const RES = "try { userTodos.resolveAnswered([r0.todoId], 'agent'); } catch { }";
+  ok(src.split(RES).length === 2, 'the control finds its line');
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const r = await run(mutantCopies('blm-ae13', REPO).load('src/server/channels-engine.js', src.replace(RES, ''), 'ae13-no-resolve'), 'bae13-red');
+  ok(r.after.status === 'withdrawn' && !(r.after.item && r.after.item.status !== 'open'), 'RED CONTROL (the item never ended): the request is withdrawn but the person\'s card stays open — the leg above goes red', JSON.stringify(r.after));
+  // the cure's RED CONTROLS (each fails by name when its line is gone): no undo ⇒ the watch stands; the mark kept on an early return ⇒ refused
+  const UNDO = "      if (undo && endedAs !== 'approved') {", MARK = 'try { return await decideOpenWatch(requestId, req0, approve, by, person, t); } finally { deciding.delete(requestId); }';
+  ok(src.split(UNDO).length === 2 && src.split(MARK).length === 2, 'the cure\'s two controls find their lines');
+  const MCc = mutantCopies('blm-ae13c', REPO);
+  const ru = await run(MCc.load('src/server/channels-engine.js', src.replace(UNDO, '      if (false) {'), 'ae13-no-undo'), 'bae13-noundo');
+  ok(ru.race.status === 'withdrawn' && ru.race.live === 1, 'RED CONTROL (no undo): the request says withdrawn and a live wake watch stands — the other-order leg goes red (and the race was run: the Allow did write)', JSON.stringify(ru.race));
+  const rm = await run(MCc.load('src/server/channels-engine.js', src.replace(MARK, 'return decideOpenWatch(requestId, req0, approve, by, person, t);'), 'ae13-mark-held'), 'bae13-markheld');
+  ok(rm.gone.withdraw && rm.gone.withdraw.ok === false && rm.gone.withdraw.code === 'not-withdrawable', 'RED CONTROL (the mark kept on an early return): the asker\'s withdraw is refused «being decided» — the early-return leg goes red', JSON.stringify(rm.gone));
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

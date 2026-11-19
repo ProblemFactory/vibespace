@@ -393,13 +393,14 @@ console.log('§5 VIBESPACE\'S OWN RECORD (B-9a2e + B-3d90 item 2): what VibeSpac
   const es = encScene(SR);
   ok('…a send re-encodes ONE conversation, and the store\'s bytes are the same as one JSON.stringify of the whole', es.delta === 1 && es.same, es);
   const healScene = (M) => {
-    const bw = [], s = M.create({ dataDir: '/sent-record-suite', writer: { dirty: (f, o) => bw.push({ f, bytes: o.produce() }) }, readFile: () => '{"v":1,"byConv":{ broken', now: () => T0 });
+    const bw = [], s = M.create({ dataDir: '/sent-record-suite', writer: { dirty: (f, o) => { const bytes = o.produce(); if (o.onWritten) o.onWritten(true, null); bw.push({ f, bytes, again: o.produce() }); } }, readFile: () => '{"v":1,"byConv":{ broken', now: () => T0 });
     s.note({ conv: 'conv-h', text: 'hello there', kind: 'typed', at: T0 });
-    return { unread: s.isUnread(), files: bw.map((w) => w.f.split('/').pop()), kept: bw[0] && bw[0].bytes, fresh: bw[1] && JSON.parse(bw[1].bytes).byConv['conv-h'] };
+    return { unread: s.isUnread(), files: bw.map((w) => w.f.split('/').pop()), kept: bw[0] && bw[0].bytes, held: bw[0] && bw[0].again, fresh: bw[1] && JSON.parse(bw[1].bytes).byConv['conv-h'] };
   };
   const hs = healScene(SR);
   ok('…a file that was read but is not a record is kept beside it (sent-record.json.bad, through the store writer) and a fresh record starts',
     hs.unread === false && hs.files.join() === 'sent-record.json.bad,sent-record.json' && hs.kept === '{"v":1,"byConv":{ broken' && Array.isArray(hs.fresh) && hs.fresh.length === 1, hs);
+  ok('…and the damaged text is not held once it is written (the readers\' small thing: dropped in onWritten)', hs.held === '', hs);
   // THE NORMALIZERS with the hub's source: claude (userRecordOf) and codex (userItemOf)
   SP.setSource((conv) => (conv === 'cv-a' ? [SP.rowOf(CONT, 'auto-resume', T0), SP.rowOf('fix the login page', 'typed', T0)] : null));
   try {
@@ -473,6 +474,9 @@ console.log('§5 VIBESPACE\'S OWN RECORD (B-9a2e + B-3d90 item 2): what VibeSpac
       const left = cut(SRS, "    else if (typeof raw === 'string') {", "    else if (false) {", 'src/server/sent-record.js', 'badoff');
       const lsc = left && healScene(left);
       ok('CONTROL (a file not a record turns the record off, as before): nothing is kept aside, nothing written — the leg goes RED', !!lsc && lsc.unread === true && lsc.files.length === 0, lsc);
+      const held = cut(SRS, ", onWritten: (ok) => { if (ok) bad = null; } });", " });", 'src/server/sent-record.js', 'heldbad');
+      const hsc = held && healScene(held);
+      ok('CONTROL (the damaged text held for the run): it is still produced after its write — the leg goes RED', !!hsc && hsc.held === '{"v":1,"byConv":{ broken', hsc);
       SP.setSource((conv) => (conv === 'th-h' ? [SP.rowOf(POSE2, 'peer', T0)] : null));
       const noRoute = cut(CMS, ": (recorded || inferred.via);", ": inferred.via;", 'src/codex-message-manager.js', 'noroute');
       const nr = noRoute && noRoute.userItemOf({ type: 'message', role: 'user', content: [{ type: 'input_text', text: POSE2 }] }, { conv: 'th-h', at: T0 + 20000 });
@@ -513,8 +517,8 @@ console.log('§5 VIBESPACE\'S OWN RECORD (B-9a2e + B-3d90 item 2): what VibeSpac
   }
   // the send doors (bound 2): only VibeSpace's own — the typed door, the auto-resume continue, the rpc-queue road's peer frame
   const ui = read('src/server/user-input.js'), ar = read('src/server/auto-resume.js'), cd = read('src/server/conversation-deliver.js');
-  ok('bound 2: the three send doors note their own sends (typed / dispatch at the typed door, auto-resume, peer) — and nothing else writes the record',
-    /SENT\.note\(\{ conv: SENT\.convOf\(session\), text: wordsOfFrame\(text\), kind: human \? 'typed' : 'dispatch' \}\);/.test(ui) && /kind: 'auto-resume' \}\); return sent; \}/.test(ar) && /kind: kind === 'notification' \? 'notice' : 'peer' \}\);/.test(cd));
+  ok('bound 2: the three send doors note their own sends (typed / dispatch / a group hand-over\'s peer frame at the typed door — B-02a3 at the 2.369.411 restack, auto-resume, peer) — and nothing else writes the record',
+    /SENT\.note\(\{ conv: SENT\.convOf\(session\), text: wordsOfFrame\(text\), kind: handing \? 'peer' : human \? 'typed' : 'dispatch' \}\);/.test(ui) && /kind: 'auto-resume' \}\); return sent; \}/.test(ar) && /kind: kind === 'notification' \? 'notice' : 'peer' \}\);/.test(cd));
 }
 
 const ms = Number(process.hrtime.bigint() - T0) / 1e6;

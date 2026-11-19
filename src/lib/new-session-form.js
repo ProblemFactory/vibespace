@@ -30,12 +30,15 @@
 // The right column writes only EXISTING stores through their EXISTING verdicts: a ticked account becomes ONE access row
 // {principal: this conversation, authority: draft} through PUT /api/channels/adapters/:id/access once the conversation's
 // id exists (src/new-session-spec.js withCreateAccess); the profile list is the server's mayAttach (GET /api/browser/admits).
-import { escHtml, fetchJson, showToast } from './utils.js';
+import { escHtml, fetchJson, showToast, getStateSync } from './utils.js';
+import { metaChanged } from '../task-delta.js'; // B-a858: a Task Group delta that moves only an Activity line re-reads nothing
 import { t, tc, resolveLang } from './i18n.js';
 import { sessionDisplayName } from '../session-name.js';
 import { UI_ICONS } from './icons.js';
 import { terminalOnly, toolAllowlistFor, toolAllowlistArgs, worktreeCapsFor } from './agent-meta.js';
 import { grainState } from './channel-filter-editor.js';
+import * as CF from '../channel-filter.js';   // THE channel door's verdict (rowNames) — the account model asks it (unit what-it-may-use)
+import { provRow, accLine, doorBtn, grantedAccountHtml, tickAccountHtml } from './may-use-rows.js';
 import { openVaultWindow } from './vault-window.js';
 import { withCreateAccess } from '../new-session-spec.js';
 import { pendingBindVerdict } from './fork-groups.js'; // PURE: the task binds' rule — the session's OWN id, once announced
@@ -60,6 +63,31 @@ export function installNewSessionForm(App) {
     const dlg = $('dialog-new-session');
     if (!dlg || this._nsWired) return;
     this._nsWired = true;
+    // B-a858: THE RIGHT COLUMN IS LIVE while the form is open — a grant landed anywhere (the grants store's StateSync mirror, every
+    // landed write), a Task Group's update that moves its META (metaChanged — never a log line; session-props' rule) or a channel
+    // account connected / removed (channels-updated) re-reads what it may use, coalesced; the profiles' admission is asked again
+    // with ITS key (the old answer stands until the new one lands). The repaint waits while the person types in the column or
+    // presses in it, and runs at the release / the blur
+    { const shown = () => !!this._ns && !$('dialog-new-session')?.classList.contains('hidden');
+      const typing = () => { const r = $('ns-right'), a = document.activeElement; return !!(r && a && r.contains(a) && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && /^(text|search|)$/i.test(String(a.type || ''))))); };
+      const busy = () => this._nsPressing === true || typing();
+      const reread = () => { if (!shown()) return; clearTimeout(this._nsLiveT); this._nsLiveT = setTimeout(() => {
+        if (!shown()) return; if (busy()) { this._nsLiveOwed = true; return; } this._nsLiveOwed = false;
+        const adm = this._nsAdmits; if (adm && typeof this._loadNsAdmits === 'function') { this._nsAdmitsAsk = null; this._loadNsAdmits(adm.key ? String(adm.key).split(',') : [], adm.sig); }
+        this._nsLoadAccounts(); }, 150); };
+      this._nsLiveReread = reread;
+      const sync = getStateSync(); if (sync) { try { sync.init('grants'); sync.on('grants', '*', reread); } catch { /* no mirror: the open and the interactions still paint */ } }
+      // a channel signal re-reads only at an ACCOUNT-level change (it names no conversation: auth, enable, grains) — never at a message
+      // pass (a hot account sends one per pass: 2 + N requests and a whole column redrawn each time, an open list closed under the hand)
+      // a GRANT (who may use what, a per-conversation grain included) arrives on the grants mirror above, never on this signal
+      const accountLevel = (m) => !m.partial && !(Array.isArray(m.changedKeys) && m.changedKeys.length);
+      this.ws?.onGlobal?.((msg) => { if (msg && ((msg.type === 'tasks-updated' && metaChanged(msg)) || (msg.type === 'channels-updated' && accountLevel(msg)))) reread(); });
+      const right = $('ns-right');
+      if (right) right.addEventListener('pointerdown', () => { this._nsPressing = true; });
+      const settle = () => { if (this._nsPressing !== true && !this._nsLiveOwed) return; this._nsPressing = false; if (this._nsLiveOwed) setTimeout(() => { if (!busy() && this._nsLiveOwed) reread(); }, 0); };
+      document.addEventListener('pointerup', settle, true); document.addEventListener('pointercancel', settle, true); right?.addEventListener('focusout', settle);
+    }
+
     this._ns = { taskIds: [], ticks: {}, tools: {}, adapters: null, grains: {}, excepts: {}, open: {}, harness: null, isGit: false, gitFor: '', cwd: null, folder: null };
     for (const k of FOLD_ROWS) { const row = $(FOLD_IDS[k]); if (row && !row.__nsHome) { const a = document.createComment('ns-home:' + k); row.before(a); row.__nsHome = a; } }
     $('ns-more-toggle')?.addEventListener('click', () => {
@@ -114,6 +142,7 @@ export function installNewSessionForm(App) {
     const known = new Set((this.sidebar?._tasks || []).map((g) => g.id));
     this._ns = { ...this._ns, taskIds: (Array.isArray(taskIds) ? taskIds : []).filter((id) => known.has(id)), ticks: {}, tools: {}, adapters: null, grains: {}, excepts: {}, open: {}, harness: null, isGit: false, gitFor: '', cwd: null, folder: null };
     this._nsAdmits = null; this._nsAdmitsAsk = null; // the profiles' admission is asked again on every open (their lists may have changed since)
+    this._nsLiveOwed = false; this._nsPressing = false; // B-a858: nothing owed or held from an earlier open
     const more = $('ns-more-toggle');
     let open = false; try { open = localStorage.getItem(FOLD_KEY) === '1'; } catch { }
     more?.setAttribute('aria-expanded', String(open));
@@ -179,9 +208,14 @@ export function installNewSessionForm(App) {
     const be = $('input-backend')?.value || 'claude';
     return toolPickOf(toolAllowlistFor(be), this._ns?.tools || {});
   };
+  /** 「频道」's rows: THE account model, each access row judged by THE channel door's own verdict (channel-filter rowNames —
+   *  unit what-it-may-use: one rule, never a membership test of the form's own); a conversation not created yet is on no list. */
+  App.prototype._nsAccountRows = function () {
+    return accountRows(this._ns?.adapters || [], this._ns?.grains || {}, this._nsTaskIds(), this._ns?.excepts || {}, (row, ctx) => CF.rowNames(row, ctx));
+  };
   /** The accounts ticked for THIS conversation (rows a picked group already grants are not ticks). */
   App.prototype._nsChannelTicks = function () {
-    const rows = accountRows(this._ns?.adapters || [], this._ns?.grains || {}, this._nsTaskIds());
+    const rows = this._nsAccountRows();
     return rows.filter((r) => !r.granted && this._ns.ticks[r.id]).map((r) => ({ id: r.id, label: r.label }));
   };
 
@@ -545,10 +579,9 @@ export function installNewSessionForm(App) {
     const bprof = $('row-browser-profile');
     if (bprof) bprof.remove();   // kept across the redraw (its select is what Create reads)
     const on = `<span class="ns-on">${escHtml(t('On'))}</span>`;
-    const doorBtn = (door, label, extra = '') => `<button type="button" class="ns-link" data-door="${door}" ${extra}>${escHtml(label)} ›</button>`;
-    // one resource = { key, cls, icon, name, what, end (the desktop's door / mark), sub (its rows), sum + badge (the phone's line), body (the phone's rows) }
-    const prov = (r) => `<div class="ns-prov${r.cls ? ' ' + r.cls : ''}" ${r.data || ''}><span class="ns-pv-tick">${r.icon}</span><span class="ns-pv-name">${escHtml(r.name)}</span><span class="ns-pv-what">${escHtml(r.what || '')}</span><span class="ns-pv-end">${r.end || ''}</span>${r.sub ? `<div class="ns-pv-sub">${r.sub}</div>` : ''}</div>`;
-    const acc = (r) => { const open = !!this._ns.open[r.key]; return `<div class="ns-res${open ? ' open' : ''}${r.cls ? ' ' + r.cls : ''}" ${r.data || ''}><button type="button" class="ns-res-h" data-res-tog="${r.key}" aria-expanded="${open}"><span class="ns-res-ic">${r.icon}</span><span class="ns-res-t"><b>${escHtml(r.name)}</b><small>${escHtml(r.sum || '')}</small></span>${r.badge || '<span></span>'}<span class="ns-res-chev" aria-hidden="true">›</span></button><div class="ns-res-body">${r.body != null ? r.body : r.sub || ''}</div></div>`; };
+    // the rows are THE shared renderers (src/lib/may-use-rows.js — Session Properties' «What it may use» draws with them too)
+    const prov = provRow;
+    const acc = (r) => accLine(r, !!this._ns.open[r.key]);
     const head = `<div class="ns-col-h"><b>${escHtml(t('What it may use'))}</b><span>${escHtml(t('VibeSpace’s own records — grants by resource; what its Task Groups grant is already ticked'))}</span></div>`;
     // 会话 — READS the left column's 任务组 row (no picker here)
     const groups = this._nsGroups();
@@ -572,17 +605,11 @@ export function installNewSessionForm(App) {
     const BUILTIN = [['artifacts', t('Artifacts it makes'), t('The files it writes, shown in this conversation’s Artifacts')], ['feedback', t('Feedback'), t('Tells the maintainers where a tool felt wrong (vibespace-feedback)')], ['pages', t('Page publishing'), t('Publishes a page on this VibeSpace (vibespace pages)')]];
     const builtinRows = BUILTIN.map(([k, n, w]) => prov({ cls: 'locked', data: `data-builtin="${k}"`, icon: ic('lock'), name: n, what: w, end: on })).join('');
     // 频道 — one tick per account (the same assignment record the Channels window writes); a group grant ticked + locked, its 除了
-    const rows = accountRows(this._ns.adapters || [], this._ns.grains || {}, this._nsTaskIds(), this._ns.excepts || {});
-    const AUTH = (a) => (a === 'send' ? t('can send') : t('draft only'));
+    const rows = this._nsAccountRows();   // THE account model over THE channel door's verdict (unit what-it-may-use)
     const accRows = rows.map((r) => {
-      const kind = `<span class="ns-chan-k">${escHtml(r.vendor || r.kind)}</span>`;
-      if (r.granted) {
-        const via = r.everyone ? t('All agents · {authority}', { authority: AUTH(r.authority) }) : t('Through Task Group {names} · {authority}', { names: quoted(r.groups.map((id) => groupName(this.sidebar?._taskById?.(id) || { id }))), authority: AUTH(r.authority) });
-        const exc = r.except.map((p) => `<span class="ns-exc">${escHtml(t('Except: '))}<b>${escHtml(this._nsExceptName(p))}</b></span>`).join('');
-        return `<div class="ns-acc granted" data-acc-row="${escHtml(r.id)}"><input type="checkbox" checked disabled aria-label="${escHtml(t('“{name}” comes through its Task Group', { name: r.label }))}"><span class="ns-acc-n">${kind}${escHtml(r.label)}</span><span class="ns-pv-via">${escHtml(via)}${exc}</span><span class="ns-acc-end">${doorBtn('chan', t('Except…'), `data-acc="${escHtml(r.id)}" title="${escHtml(t('Who is left out is set where the account is shared — the Channels window'))}"`)}</span></div>`;
-      }
+      if (r.granted) return grantedAccountHtml(r, { groupNameOf: (id) => groupName(this.sidebar?._taskById?.(id) || { id }), exceptName: (p) => this._nsExceptName(p), quoted });
       const ticked = !!this._ns.ticks[r.id];
-      return `<label class="ns-acc${ticked ? ' on' : ''}" data-acc-row="${escHtml(r.id)}"><input type="checkbox" data-acc="${escHtml(r.id)}" ${ticked ? 'checked' : ''} aria-label="${escHtml(t('Let this conversation see “{name}”', { name: r.label }))}"><span class="ns-acc-n">${kind}${escHtml(r.label)}</span><span class="ns-pv-via${ticked ? ' ok' : ' dim'}">${escHtml(ticked ? t('Written into the channel assignment at create: this conversation · draft only') : t('Not assigned to the picked Task Groups — tick to give this conversation (draft only)'))}</span></label>`;
+      return tickAccountHtml(r, { ticked, words: [t('Written into the channel assignment at create: this conversation · draft only'), t('Not assigned to the picked Task Groups — tick to give this conversation (draft only)')] });
     }).join('') || `<div class="ns-pv-via dim" data-fact="noacc">${escHtml(this._ns.adapters ? t('No account connected yet') : t('Reading the accounts…'))}${this._ns.adapters ? ' ' + doorBtn('integrations', t('Integrations')) : ''}</div>`;
     const sm = resourceSummary({ rows, ticks: this._ns.ticks });
     const chanSum = [t('{n} account(s) through Task Groups', { n: sm.granted }), sm.ticked ? t('{n} ticked here', { n: sm.ticked }) : '', sm.todo ? t('{n} more to tick', { n: sm.todo }) : ''].filter(Boolean).join(' · ');

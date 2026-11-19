@@ -445,6 +445,19 @@ const HARNESS_SETTINGS = {
       apply: { kind: 'spawn', how: '--model', via: 'model' },
     },
     {
+      // Antigravity's own row for its automatic usage reads (lane usage-predict) — told above unsetValue, below the table
+      key: "autoUsageReads",
+      type: "enum", default: "on", storeDefault: true,
+      unsetFollows: { setting: "accounts.onDemandQuotaRefresh", when: "off", value: "off" },
+      options: [
+        { value: "on", label: t("Automatically") },
+        { value: "off", label: t("Only when I press Re-check") },
+      ],
+      label: t("Antigravity usage reads"),
+      description: t("Automatically: an account's usage is read once each time one of its conversations hits a usage wall, and once after a stretch of work — when a turn ends and 5 minutes pass with no new turn on the account; that read comes at most once per account per 30 minutes, never during a turn, never for an idle account. Only when I press Re-check: nothing is read by itself. Either way, Re-check in the account's menu reads it: this row decides only the reads that happen by themselves."),
+      apply: { kind: 'server', how: t("when a conversation hits a usage wall, and after a stretch of work") },   // the note a person reads under the row: plain words, through the dictionary
+    },
+    {
       key: "defaultEffort",
       type: "enum", default: "",
       options: [
@@ -538,6 +551,36 @@ function coerce(row, raw) {
     default:
       return raw === null || raw === undefined ? String(row.default == null ? '' : row.default) : String(raw);
   }
+}
+
+// ANTIGRAVITY'S OWN ROW FOR ITS AUTOMATIC USAGE READS, antigravity.autoUsageReads (lane usage-predict, 2026-11-16 — the owner
+// looked at the quota row and asked «fable是antigravity吗？»: these two reads hung on Claude's row). src/server/cli-usage-door.js
+// asks it for the two automatic callers only (the wall read, the after-turn read); a person's Re-check asks no row. Migration
+// 2026-11-agy-reads-follow-claude-off (src/server/migrations.js) keeps it off where the shared row was off.
+// AN OFF THE PERSON CHOSE SURVIVES EVERY ROAD THAT CAN DROP A KEY (主开发's bounded check U2, 2026-11-16). Two roads drop the
+// key after the migration wrote it: a tab open from before the restart saves its whole settings without it, and the import of
+// a config exported before the split replaces the settings whole. So the rule holds at the READ (readRow): while the row holds
+// NO value, it reads Off when Claude's usage refresh row is Off (`unsetFollows`) — the old law's answer — and the Settings
+// window shows the same value by the same rule (src/lib/settings.js get). `storeDefault` tells a person's own choice from an
+// absent key: the settings store keeps the row's value even when it equals the default, so a person who picks «Automatically»
+// has a stored 'on', which no Claude row overrides. (These words sit here, not in the row: esbuild keeps a comment inside an
+// object literal, and the device bundle carries this file — scripts/test-architecture.mjs §107 caps its size.)
+/** THE VALUE OF A ROW NOBODY SET (lane usage-predict, 主开发's U2): a row that declares `unsetFollows: { setting, when,
+ *  value }` reads `value` while it holds no value of its own and `read(setting)` answers `when` (an unreadable followed
+ *  setting reads `value` too — fail closed); otherwise undefined, and the row's default answers as before. */
+function unsetValue(row, read) {
+  const f = row && row.unsetFollows;
+  if (!f || typeof read !== 'function') return undefined;
+  let v; try { v = read(f.setting); } catch { return f.value; }
+  return v === f.when ? f.value : undefined;
+}
+/** THE TYPED READ of one row of `table` through a raw settings reader `read(path)`: coerce over the stored value — and a row
+ *  that holds no value and declares `unsetFollows` reads the followed answer first. The server's harnessSetting
+ *  (src/server/harness-config-sync.js) and the usage door's own fallback read through here. */
+function readRow(table, row, read) {
+  const raw = read(settingPath(table.prefix, row.key));
+  if (raw === null || raw === undefined) { const u = unsetValue(row, read); if (u !== undefined) return coerce(row, u); }
+  return coerce(row, raw);
 }
 
 /** The stored value a CLOSED enum row REFUSED (as a string), or null when the
@@ -636,6 +679,14 @@ function checkTable(table, ctx = {}) {
       }
       default: if (typeof row.default !== 'string') errs.push(`${at}: string default required`);
     }
+    // a row the store keeps at its default when a person picks it, and a row nobody set that follows another (U2 above)
+    if (row.storeDefault !== undefined && typeof row.storeDefault !== 'boolean') errs.push(`${at}: storeDefault must be true or false`);
+    if (row.unsetFollows !== undefined) {
+      const u = row.unsetFollows;
+      if (!isPlainObject(u) || typeof u.setting !== 'string' || !u.setting || typeof u.when !== 'string' || typeof u.value !== 'string') errs.push(`${at}: unsetFollows is {setting, when, value} (strings)`);
+      else if (row.type === 'enum' && Array.isArray(row.options) && !row.options.some((o) => o && o.value === u.value)) errs.push(`${at}: unsetFollows.value ${JSON.stringify(u.value)} is not among its options`);
+      if (row.storeDefault !== true) errs.push(`${at}: a row with unsetFollows needs storeDefault: true — else a person's own pick of the default is stored as no value, and follows`);
+    }
     const a = row.apply;
     if (!isPlainObject(a) || !APPLY_KINDS.includes(a.kind)) { errs.push(`${at}: apply.kind must be one of ${APPLY_KINDS.join('|')}`); return; }
     if (a.kind === 'spawn') {
@@ -712,5 +763,5 @@ function buildConfigPlan(specs) {
 
 module.exports = {
   HARNESS_SETTINGS, BUILTIN_PREFIXES, APPLY_KINDS, ROW_TYPES, FILE_FORMATS, SPAWN_MODES, ON_UNINSTALL, MAX_ROWS, GENERIC_LEGACY_KEYS,
-  settingPath, rowOf, rowsOfKind, coerce, refusedValue, isOff, checkRel, checkTable, buildConfigPlan,
+  settingPath, rowOf, rowsOfKind, coerce, unsetValue, readRow, refusedValue, isOff, checkRel, checkTable, buildConfigPlan,
 };

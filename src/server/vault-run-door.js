@@ -191,7 +191,7 @@ const STATUS = Object.freeze({
   vault_not_set_up: 409, vault_locked: 423, bad_flag: 400, bad_reference: 400, bad_env_name: 400, duplicate_name: 400, no_command: 400,
   cmd_too_long: 400, no_reference: 400, template_unread: 400, template_too_long: 400, hidden_chars: 400, card_too_long: 400,
   env_refused: 403, argv_refused: 403, tool_prints_secrets: 403, tool_wraps_another: 403, tool_has_its_own_door: 403, tool_not_sealed: 409, two_hosts: 409, bad_host: 400, url_userinfo: 403,
-  entry_has_its_own_door: 403, entry_unknown: 404, entry_not_runnable: 403, entry_too_short_to_mask: 403, use_not_granted: 403,
+  entry_has_its_own_door: 403, entry_unknown: 404, entry_not_runnable: 403, grant_expired: 403, entry_too_short_to_mask: 403, use_not_granted: 403,   // B-a14b: + grant_expired
   job_no_use: 403, device_road_later: 403, cwd_refused: 403, template_refused: 403, tool_not_found: 404, unauthorized: 401,
   ask_pending: 409, ask_denied: 403, ask_expired: 403, ask_unfiled: 503, ask_changed: 409, ask_redrawn: 409, restore_failed: 500, caller_gone: 410, too_many_runs: 429,   // r4: + ask_redrawn (the card drawn again at the press) · restore_failed (a partial write not put back — by name)
   spawn_failed: 500, failed: 500, storage_blocked: 503, request_too_large: 400, run_path_unsafe: 500, git_not_on_seal: 500,
@@ -199,11 +199,13 @@ const STATUS = Object.freeze({
   too_many_askers: 429,   // B-4934
   scope_required: 400, command_unreadable: 400, command_has_hosts: 400, standing_bad_host: 400, command_not_pinnable: 400, standing_bad_tool: 400, tool_required: 400,   // lane vault-standing-request (+ r2)
 });
+// the door's sentence for the run's storage (a PARKED mount's own words when it is one — B-5ce7's cure), + where and that nothing ran
+const storageWords = (p) => `${DOOR.sentenceFor(p)} (the run's folder, its program or a template is on it) — nothing ran`;
 const MORE_WORDS = Object.freeze({
   hidden_chars: 'the command holds characters that show differently than they run (control or direction marks) — refused',
   card_too_long: `the card that shows this run to the user would be cut (over ${DETAIL_MAX} characters) — a shorter command or template`,
   unauthorized: 'only a conversation\'s own session token runs a command with a stored secret',
-  storage_blocked: `${DOOR.SENTENCE} (the run's folder, its program or a template is on it) — nothing ran`,
+  storage_blocked: storageWords(''),
   request_too_large: `the run's words are over ${ARGS_MAX} characters or its folder over ${CWD_MAX} — refused before anything is read`,
   failed: 'the run door failed — nothing ran',
   run_path_unsafe: 'no directory on the hub PATH is safe to run this tool from — none is a root-owned system directory (every one is missing, or owned by this user, who could plant a program there) — nothing ran',   // round 11 (MAJOR 2) / round 12 (BLOCKER): a runSeal tool whose sealed PATH (ROOT-OWNED dirs only) came out empty
@@ -359,6 +361,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   now = () => Date.now(), log = () => {}, spawnImpl = spawn, killGraceMs = KILL_GRACE_MS, pipeGraceMs = PIPE_GRACE_MS,
   timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h) }, randomBytes = crypto.randomBytes,
   useGrants = null, useFacts = () => null,
+  entryMax = 256,   // B-be21: the run list's bound (a suite seam — the product keeps 256)
   notice = () => 0,   // r7: server.js serverNotice (key, text, {level, i18n}) → how many open clients got it — the 1-hour window's per-use toast
   policyJudge = null, policyOn = () => false,   // lane vault-use-grants (R4): (parts, {policy, memo}) → the decision engine's judge answer; the switch vault.policyJudge   // lane vault-use-grants: the vault-use writer (src/server/vault-use-grants.js) + a caller's admission facts ({conversationKeys, groupIds, groupsUnreadable})
   isRootOwned = rootOwnedNoWrite, toolDigest = sha256Fd, sealDir = sealDirReal, hasProcFd = HAS_PROC_FD, toolSealed = sealedToolReal, probeGit = probeGitReal } = {}) {   // round 12/13/14: the ownership predicate, the fd-digest hasher, the PATH realpath-sealer, the tool-sealed (chain root-owned + fstat) check, the git-on-seal probe — injectable test seams (defaults are the real checks)
@@ -395,7 +398,33 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
    *  once-grant's run ('used'), its 8 hours ('time'), a restart (the vault locks at each start: 'restart') — through the
    *  store's noteFact (the first end stands). The card, the tray and the window read it through foryou-actions grantLifeOf. */
   const endTimers = new Map();   // pair → the timer that ends the grant at its `until`
+  /** B-a14b: THE GRANTS THAT ENDED, per conversation × entry — memory only, ≤ ENDED_MAX, read back for ENDED_MS: the run after
+   *  an end says the end (grant_expired, VR.endedWhy), `uses` lists them («ended», how to ask again); a new grant of the pair or
+   *  the owner's switch-off (its own words: entry_not_runnable) drops the record. A restart forgets them (the vault locks then). */
+  const ENDED_MS = 24 * 3600e3, ENDED_MAX = 200, ENDS_SAID = new Set(['time', 'used', 'lock']);
+  const endedGrants = new Map();
+  const offAt = new Map();   // entry id → when the owner last switched it OFF (≤ ENDED_MAX): an end of a grant given BEFORE that OFF is not the news
+  function noteEnded(g, endedBy, endedAt) {
+    if (!g || !g.conv || !Array.isArray(g.entries) || !g.entries.length || !ENDS_SAID.has(endedBy)) return;
+    for (const id of g.entries) {
+      const p = pairOf(g.conv, id);
+      endedGrants.delete(p);
+      endedGrants.set(p, { conv: g.conv, id, endedAt: Number(endedAt) || now(), endedBy, once: !!g.once, purpose: g.purpose || '', grantAt: Number(g.at) || 0 });
+    }
+    while (endedGrants.size > ENDED_MAX) endedGrants.delete(endedGrants.keys().next().value);   // the oldest end goes first
+  }
+  function endedOf(scope, id) {
+    const e = endedGrants.get(pairOf(scope, id));
+    if (!e) return null;
+    if (now() - e.endedAt > ENDED_MS) { endedGrants.delete(pairOf(scope, id)); return null; }
+    return e;
+  }
   function grantEnded(g, endedBy, t = now()) {
+    // B-a14b (the adversarial read): THE FIRST END STANDS — a switch-off, a spend or a lock ends a grant once; its 8-hour timer
+    // firing later (it stays armed) must not write «its 8 hours ran out» over «revoked» / «used»
+    if (g && g.endedBy) return;
+    if (g && typeof g === 'object') g.endedBy = endedBy;
+    noteEnded(g, endedBy, endedBy === 'time' ? g && g.until : Math.min(t, Number(g && g.until) || t));
     if (!g || !g.todoId || !userTodos || typeof userTodos.noteFact !== 'function') return;
     try { userTodos.noteFact(g.todoId, { endedAt: endedBy === 'time' ? g.until : Math.min(t, Number(g.until) || t), endedBy }); } catch { }
   }
@@ -460,7 +489,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   // lane vault-use-grants round 3 (MAJOR item 2): every list the store serializes is CAPPED HERE (the canonical body), so what
   // is marked is always the capped form and the reader reproduces it byte-for-byte — a write that is unbounded while the reader
   // slices wiped the whole store (the mark stopped verifying) in round 2. Each list drops the OLDEST past its cap.
-  const AP_MAX = 256, REVOKE_MAX = 512, ENTRY_MAX = 256;
+  const AP_MAX = 256, REVOKE_MAX = 512, ENTRY_MAX = Number.isInteger(entryMax) && entryMax > 0 ? entryMax : 256;
   // round 9 (MINOR): ONE bound for `runnable` AND `opened`. r7 sliced `opened` to ENTRY_MAX but wrote `runnable` UNCAPPED, so an
   // entry past the cap reloaded as ON with no `opened` record = OWNER-opened = every member usable (fail OPEN — the opposite of
   // the audit's «fail closed»). Now `runnable` is capped too and `opened` holds ONLY kept-runnable entries: an entry past the cap
@@ -475,7 +504,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   // that rides the mark and covers runnable AND suspended — NOT `opened[id].at` (r11 read that, but a MANUAL ON deletes the
   // `opened` record, so its stamp was 0 ⇒ sorted oldest ⇒ the entry the owner just switched on was evicted at the cap while
   // setRunnable answered open:true, and every suspended entry — `opened` is runnable-only — had stamp 0 so its trim kept the
-  // largest ids, not the newest). `setRunnable` stamps `touched[id] = now()` on EVERY toggle (press ON, manual ON, OFF), so the
+  // largest ids, not the newest). `setRunnable` stamps `touched[id]` on EVERY toggle (press ON, manual ON, OFF) — B-be21: the later of now() and one past the newest stamp kept, an order that only moves forward — so the
   // entry an action just touched is the NEWEST and is never the one that action evicts; a no-toggle-yet entry (a pre-r12 store)
   // is stamp 0 and sorts by id. The serialized array stays sorted lexicographically so the mark verifies.
   const stampAt = (at, id) => (at && Number(at[id])) || 0;
@@ -705,14 +734,16 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   /** r2 (MAJOR 3 — the acceptance: «Always (this command)» on the agent's OWN minted entry wrote a vault-use member the Vault
    *  window never drew, so the owner could neither see nor ✕ it and the next run passed with no card for ever; the base's
    *  host «Always» road wrote the same hidden member): A STANDING GRANT EXISTS ONLY WHERE THE OWNER CAN SEE AND REVOKE IT — an
-   *  agent's own entry draws the members it holds (each chip its source and ✕; no «Who may use it…» — only its conversation
-   *  may use it, so there is nobody to add). → the row's `use` facts (as rowFacts' own) | null (no member: nothing to draw). */
+   *  agent's own entry draws the members it holds (each chip its source and ✕). B-bc3b: and «Who may use it…» — the owner SHARES
+   *  it with another conversation or a Task Group (给谁 / 除了, their hosts), the deliberate widening the owner's rule asks for
+   *  (2026-10-26: what an agent stored is its own; others need it) — so the row carries its `use` with no member too (the door
+   *  is drawn). → the row's `use` facts (as rowFacts' own) | null (no grant door). */
   function ownUseOf(row, ref) {
     if (!useGrants || !row) return null;
     try {
       const r = ref && VR.refFor(ref.store, ref.entry, ref.field), counts = typeof vault.useCounts === 'function' ? vault.useCounts() : {};
       const p = useGrants.publicFor(row.id, r ? counts[r.ref] : null);
-      if (!p || (!(p.to || []).length && !(p.except || []).length)) return null;
+      if (!p) return null;
       return { ...p, own: true, entryHosts: [], used: r && counts[r.ref] ? { uses: counts[r.ref].uses, convs: counts[r.ref].convs } : { uses: 0, convs: 0 }, ref: r ? r.ref : null, policy: null, judge: 'off', approved: null };
     } catch { return null; }
   }
@@ -743,7 +774,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
    *  member added while OFF is held too). A MANUAL ON (the owner's own switch) opens it for EVERYONE — the owner's deliberate
    *  full restore (test ⑬) — by dropping the `opened` record. «Always» passes `keepPaused`: it opens the switch as a PRESS
    *  (an `opened` record), so only the members it then RESUMES are usable; the grants the owner paused stay paused. */
-  function setRunnable({ id, on, reauthed = false, by = 'user', keepPaused = false } = {}) {
+  function setRunnable({ id, on, reauthed = false, by = 'user', keepPaused = false, quietEvict = false } = {}) {
     const st = vaultState();
     if (st !== 'unlocked') return named(st === 'not_set_up' ? 'vault_not_set_up' : 'vault_locked');
     const key = String(id || ''), ref = VI.parseRef(key);   // `<store>:<entry>#<field>` (src/vault-inventory.js — the row's id)
@@ -758,7 +789,10 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (!!on === wasRun && !on === wasSusp && !(on && !keepPaused && pressOpened(d, key))) return { ok: true, id: key, open: wasRun, already: true };   // a MANUAL ON of a press-opened entry still runs (it converts it to owner-opened)
     const runnable = new Set(d.runnable), suspended = new Set(d.suspended);
     let opened = d.opened || {};
-    const touched = { ...(d.touched || {}), [key]: now() };   // round 12 (MAJOR M3): stamp the LAST toggle (press ON, manual ON, OFF) for EVERY entry — never 0, so this entry is the NEWEST and keepNewest never evicts the one the owner just touched
+    // B-be21: the stamp is an ORDER that only moves forward — the later of the clock and one past the newest stamp kept, so a
+    // backward clock step (an NTP correction, a suspended box) never makes the entry just toggled the OLDEST, and evicts it
+    const tNewest = Object.values(d.touched || {}).reduce((m, v) => (Number(v) > m ? Number(v) : m), 0);
+    const touched = { ...(d.touched || {}), [key]: Math.max(now(), tNewest + 1) };   // round 12 (MAJOR M3): stamp the LAST toggle (press ON, manual ON, OFF) for EVERY entry — never 0, so this entry is the NEWEST and keepNewest never evicts the one the owner just touched
     if (on) {
       runnable.add(key); suspended.delete(key);
       if (keepPaused) { if (!opened[key]) opened = { ...opened, [key]: { at: now(), resumed: {} } }; }   // «Always»: a PRESS opens it — only the members it resumes are usable
@@ -769,12 +803,13 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     }
     // OFF takes back every «always» and seen shape that names this entry (the review: an «always» outlived its switch)
     const always = on ? d.always : d.always.filter((a) => !a.entries.includes(key));
+    if (!on) { for (const [p, e] of endedGrants) if (e.id === key) endedGrants.delete(p); offAt.delete(key); offAt.set(key, now()); while (offAt.size > ENDED_MAX) offAt.delete(offAt.keys().next().value); }   // B-a14b: the owner's OFF is its own news (entry_not_runnable) — and an end of a grant given before it never speaks over it
     if (!on) for (const a of d.always) if (a.entries.includes(key)) grantEnded(a, 'revoked');   // r6: each «always» record says «revoked»
     if (!on) { for (const [p, x] of shortAlways) if (x.entries.includes(key)) { shortAlways.delete(p); grantEnded(x, 'revoked'); } for (const [p, x] of seen) if (x.entries.includes(key)) seen.delete(p); for (const [p, x] of grants) if (x.entries.includes(key)) { grants.delete(p); grantEnded(x, 'revoked'); } }   // + the grants (lane vault-manual-and-lock: OFF = closed for every conversation; r6: each grant's record says «revoked»)
     const r = save({ runnable, suspended, always, opened, touched });
     if (!r.ok) return r;
     audit('vault-run-switch', { by: String(by).slice(0, 40), store: ref.store, entry: ref.entry, field: ref.field, open: !!on });
-    if (r.evicted && r.evicted.length) noteEvicted(r.evicted);   // round 12 (MAJOR M3): the cap turned some OTHER entry OFF to keep this one — tell the owner (never silent), and the answer below reads the truth AFTER the trim
+    if (r.evicted && r.evicted.length && !quietEvict) noteEvicted(r.evicted);   // B-be21: a press files its notice only once it holds (standOpen); round 12 (MAJOR M3): the cap turned some OTHER entry OFF to keep this one — tell the owner (never silent), and the answer below reads the truth AFTER the trim
     try { vault.contentsChanged && vault.contentsChanged('switch'); } catch { }   // lane vault-use-grants: every open Vault window shows the switch
     return { ok: true, id: key, open: !!(db && db.runnable.has(key)), ...(r.evicted && r.evicted.length ? { evicted: r.evicted } : {}) };   // round 12 (MAJOR M3): the TRUTH after the trim — `db` is the trimmed memory store, so `open` is never a false success for an entry the cap dropped (r11 answered `!!on` though the just-toggled entry was evicted)
   }
@@ -925,13 +960,14 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     for (const id of [...ids].sort()) {
       const ref = VI.parseRef(id), row = ref && rowOf(ref);
       if (!row || !classOf(ref, row).runnable) continue;
-      if (VR.agentScopeOf(ref) && !owns(ref)) continue;   // another conversation's own entry is never listed (its switch opens nothing to this one)
+      const sharedHere = VR.agentScopeOf(ref) && !owns(ref) && held.has(id);   // B-bc3b: another conversation's entry the owner SHARED with this one (its grant row)
+      if (VR.agentScopeOf(ref) && !owns(ref) && !sharedHere) continue;   // another conversation's own entry is never listed otherwise (its switch opens nothing to this one)
       const r = VR.refFor(ref.store, ref.entry, ref.field);   // the canonical spelling (the review: encodeURIComponent left !'()* raw)
       const g = d.runnable.has(id) || !scope ? null : grantOf(scope, id);
       const hd = held.get(id);
       const onNow = !refused && d.runnable.has(id);
       const memberPaused = !!(hd && onNow && pressOpened(d, id) && !memberUsable(d, id, hd.grant));   // round 7 (MAJOR item 2, invariant iii): the entry is ON by another conversation's PRESS and THIS member was never resumed — the list reads the SAME `opened` fact the judge does, so it can never say «yours to use» while the door refuses it
-      const paused = memberPaused || (!onNow && !g && (refused || !!(d.suspended && d.suspended.has(id)) || !!hd));   // round 3 (A6): say PAUSED for a turned-OFF entry; round 4 (A7 + item 4): a standing grant is PAUSED until the switch is ON (never «yours to use» without it)
+      const paused = sharedHere ? refused : memberPaused || (!onNow && !g && (refused || !!(d.suspended && d.suspended.has(id)) || !!hd));   // B-bc3b: a shared agent entry has no switch — only a refused store pauses it   // round 3 (A6): say PAUSED for a turned-OFF entry; round 4 (A7 + item 4): a standing grant is PAUSED until the switch is ON (never «yours to use» without it)
       const pv = (owns(ref) && row.provenance) || {};
       const ew = wordsOfRow(row);   // lane vault-entry-description: its name and description (another agent's or the owner's words — belted)
       out.push({ ref: r ? r.ref : null, store: ref.store, label: ew.name, ...(ew.note ? { note: ew.note } : {}), kind: row.kind, field: ref.field, ...(paused ? { paused: true } : {}), ...(owns(ref) ? { by: 'own', ...(pv.prov === 'minted' ? { minted: true, for: VR.forHostOf(pv.forHost) } : {}) } : g ? { by: 'grant', once: g.once, until: new Date(g.until).toISOString() } : hd ? { by: 'standing', grant: hd.grant, hosts: hd.hosts, commands: (hd.commands || []).map((c) => VUG.commandWords(c)), scopes: scopesWordsOf(hd.scopes), source: hd.source || null, ...(hd.at ? { since: new Date(hd.at).toISOString() } : {}), paused, ...(hd.until ? { until: new Date(hd.until).toISOString() } : {}) } : {}) });   // lane vault-standing-request: the scope (hosts / commands), who wrote it, since when
@@ -969,7 +1005,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   function standOpen(ids, principal, grant, by) {
     for (const id of ids) { const ref = VI.parseRef(id), row = ref && rowOf(ref), c = ref && classOf(ref, row); if (!row || !c || !c.runnable) return { ok: false, why: 'entry_unknown', judged: c && !c.runnable ? named('entry_has_its_own_door', { door: c.door }) : named('entry_unknown') }; }
     const d0 = load();
-    const prior = { runnable: new Set(d0.runnable), suspended: new Set(d0.suspended), opened: d0.opened || {} };
+    const prior = { runnable: new Set(d0.runnable), suspended: new Set(d0.suspended), opened: d0.opened || {}, touched: { ...(d0.touched || {}) } };   // B-be21: the toggle stamps too
     // r4 (C — the acceptance P4: the restore went through setRow, judged against the row the partial write had left, so a
     // replaced legacy wildcard could not be put back and its {ok:false} was never read — a REFUSED press left a no-end grant
     // written): each entry's row AS IT IS (useGrants.snapshotRow — its verified members, its exceptions), put back RAW on a
@@ -977,14 +1013,15 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     // press BY NAME (`restore_failed`), never a silent half-write
     const rowSnap = new Map();
     for (const id of ids) { let s = null; try { s = useGrants.snapshotRow(id); } catch { s = null; } if (!s || !s.ok) return { ok: false, code: (s && s.code) || 'failed' }; rowSnap.set(id, s); }
-    const touched = [], made = [], changes = []; let failCode = null;
+    const touched = [], made = [], changes = [], evicted = []; let failCode = null;   // B-be21: what the cap dropped, told only if the press holds
     for (const id of ids) {
       touched.push(id);
       // r5 (the r4 acceptance's press probe C3: a write that THREW — not {ok:false} — left E1 written, no restore, no line): a throw
       // anywhere in an entry's write is a failed write like any, restored below by the same road
       try {
-        const sr = setRunnable({ id, on: true, reauthed: true, by: String(by).slice(0, 40), keepPaused: true });
+        const sr = setRunnable({ id, on: true, reauthed: true, by: String(by).slice(0, 40), keepPaused: true, quietEvict: true });
         if (!sr.ok) { failCode = sr.code; break; }
+        if (sr.evicted) evicted.push(...sr.evicted);
         const w = useGrants.addMember(id, principal, grant, { by: String(by).slice(0, 40) });
         if (!w.ok) { failCode = w.code; break; }
         made.push(w.grant); changes.push({ id, ...(w.changes || {}) });
@@ -994,12 +1031,14 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (failCode) {
       const failed = [];
       for (const id of touched) { let r = null; try { r = useGrants.restoreRow(id, rowSnap.get(id), { by: String(by).slice(0, 40) }); } catch (e) { r = { ok: false, code: 'not_written', error: e.message }; } if (!r || !r.ok) failed.push({ entry: id, code: (r && r.code) || 'not_written' }); }   // every row back to what it WAS, raw (never resumes a member)
-      let sw = null; try { sw = save({ runnable: prior.runnable, suspended: prior.suspended, always: (load() || {}).always || [], opened: prior.opened }); } catch (e) { sw = { ok: false, code: 'not_written' }; }   // every switch + every press marker back to its prior state
+      let sw = null; try { sw = save({ runnable: prior.runnable, suspended: prior.suspended, always: (load() || {}).always || [], opened: prior.opened, touched: prior.touched }); } catch (e) { sw = { ok: false, code: 'not_written' }; }   // B-be21: the stamps back too (an evicted entry put back keeps its place in the order); no eviction notice was filed   // every switch + every press marker back to its prior state
       if (!sw || !sw.ok) failed.push({ entry: 'switches', code: (sw && sw.code) || 'not_written' });
+      if (!sw || !sw.ok) { const dd = load(); const off = evicted.filter((k) => !(dd && dd.runnable.has(k))); if (off.length) noteEvicted(off); }   // B-be21 (the adversarial read): the switches could not be put back — what the cap turned off STAYS off, so the owner is told
       try { vault.contentsChanged && vault.contentsChanged('switch'); } catch { }   // PUSH the restore like the flip was pushed — open Vault windows show the switch as it is on disk
       if (failed.length) { log(`[vault-run] a press failed (${failCode}) and ${failed.length} of what it wrote could not be put back: ${failed.map((f) => `${f.entry}: ${f.code}`).join(', ')}`); audit('vault-restore-failed', { by: String(by).slice(0, 40), cause: failCode, failed }); return { ok: false, code: 'restore_failed', cause: failCode, failed }; }
       return { ok: false, code: failCode };
     }
+    { const dd = load(); const off = evicted.filter((k) => !(dd && dd.runnable.has(k))); if (off.length) noteEvicted(off); }   // B-be21: the press HELD — now the owner is told what the cap turned off
     return { ok: true, grants: made, changes };
   }
   function ask({ caller, run, shape, key, exactKey = null, exactParts = null, detail, facts = null, signal, always = null, command = null, plan = null, window = false }) {
@@ -1232,6 +1271,19 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     reshapeLate(lq.todoId, lq.askId, { lateAt: lq.lateAt, shapeId: lq.shapeId, until: lq.until });
   }
   function consumeLate(pair) { lateOnce.delete(pair); }
+  /** B-3fb5: an entry its person's door DELETED (an agent's own entry — its name may be minted again): what this door remembers
+   *  by its id goes with it — the host passes the owner gave its value, a late «allow once» over a run that named it, an open
+   *  late card naming it (settled «ask-over»: an Allow there would pass a value minted later under that name) and the ended-grant
+   *  words — so nothing of the old entry carries over to a new one. Memory only (a lock clears every one of them all the same). */
+  function forgetEntry(id) {
+    const key = String(id || '');
+    let dropped = 0;
+    for (const [k, p] of [...hostPasses]) if (p && p.id === key) { hostPasses.delete(k); dropped++; }
+    for (const [pair, lp] of [...lateOnce]) if (lp && (lp.entries || []).includes(key)) { lateOnce.delete(pair); dropped++; }
+    for (const lq of [...lateAsks.values()]) if ((lq.entries || []).includes(key)) { removeLate(lq, 'ask-over', 'vault'); dropped++; }
+    for (const [p, e] of [...endedGrants]) if (e && e.id === key) endedGrants.delete(p);
+    return { ok: true, dropped };
+  }
   /** The owner answers a LATE card (src/routes/vault.js, people only). `once` writes a one-run pass the next identical run consumes (no reauth — «allow once» never needed it, and a late card offers no «always»); `deny` settles it; a locked vault is vault_locked as today. */
   function answerLate(lq, { answer: a, reauthed = false, by = 'user' }) {
     if (!['once', 'deny'].includes(a)) return { ok: false, code: a === 'always' ? 'always_not_offered' : a === 'window' ? 'window_not_offered' : 'bad_answer' };   // r7: a late card offers neither «Always» nor «Allow for 1 hour» (r5's law)
@@ -1492,7 +1544,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       const at = q.command && !q.always ? facts.always.command : facts.always;
       if (at && typeof at === 'object') { if (cf.length) at.changes = cf; else delete at.changes; }
     }
-    if (facts && q.window) facts.window = windowFactsOf(wList, wUntil, q.entries, { switchOn: !!q.plan.wswitch });   // r7; r8: + the switch
+    if (facts && q.window) { const tb0 = facts.window && facts.window.turnBy; facts.window = windowFactsOf(wList, wUntil, q.entries, { switchOn: !!q.plan.wswitch }); if (tb0) facts.window.turnBy = tb0; }   // r7; r8: + the switch; B-d868: a redraw keeps who started the turn (the ask's fact, never re-read)
     if (facts) facts.redrawn = { at: at0 };
     let stored = detail;
     if (q.todoId && userTodos) {
@@ -1691,6 +1743,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       if (!so.ok && so.judged) { settleRequest(q, 'denied', so.why); return so.judged; }
       if (!so.ok) { settleRequest(q, 'denied', so.code); return { ok: false, code: so.code, ...(so.failed ? { failed: so.failed } : {}) }; }
       audit('vault-grant', { ...said, answer: 'standing', grants: so.grants, ...(q.hosts.length ? { hosts: q.hosts } : {}), ...(q.commandWords ? { command: q.commandWords } : {}), changes: auditChangesOf(so.changes) });   // r4 (D): what the write added, replaced and ended — the write's own result, never the card's guess
+      endedGrants.delete(q.quietPair);   // B-a14b: a standing approval of the pair — the old end is no longer the news; r13 should: keyed as the record is, the SCOPE × the entry (q.quietPair = pairOf(scope, id)) — q.conv is the conversation's own id, which a fork's scope is not
       settleRequest(q, 'granted', 'answered', { ...(mark() || {}), grantedFor: 'standing', until: null });
       return { ok: true, outcome: 'granted', grantedFor: 'standing', grant: so.grants[0] || null };
     }
@@ -1699,6 +1752,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (prev) grantEnded(prev, 'replaced', t);
     const g = { conv: q.scope, key: null, entries: [q.id], until, once: a === 'once', at: t, by: said.by, askId: q.askId, purpose: q.purpose, todoId: q.todoId || null };
     grants.set(q.pair, g);
+    endedGrants.delete(q.pair);   // B-a14b: a new approval of the pair — the old end is no longer the news
     armGrantEnd(q.pair, g);
     audit('vault-grant', { ...said, answer: a, until });
     // r4: the item says which of its verbs. r6 (主开发: «an answer never carries a value an old reader cannot name»): the
@@ -1743,6 +1797,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (!scope) return named('unauthorized');
     const t = now(), mine = [];
     for (const [p, g] of grants) { if (!(g.until > t)) { grants.delete(p); grantEnded(g, 'time'); continue; } if (g.conv === scope) mine.push(g); }
+    const dOn = load(), onNowOf = (id) => !!(dOn && !dOn.refused && dOn.runnable.has(id));   // B-a14b: switched ON now
     const refOfId = (id) => { const r = VI.parseRef(id); const x = r && VR.refFor(r.store, r.entry, r.field); return x ? x.ref : null; };
     const wordsOfId = (id) => { const r = VI.parseRef(id), row = r && rowOf(r); if (!row) return {}; const ew = wordsOfRow(row); return { name: ew.name, ...(ew.note ? { note: ew.note } : {}) }; };   // lane vault-entry-description
     return {
@@ -1751,6 +1806,10 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       grants: mine.map((g) => ({ entry: refOfId(g.entries[0]), ...wordsOfId(g.entries[0]), purpose: g.purpose, once: g.once, until: new Date(g.until).toISOString(), at: new Date(g.at).toISOString() })),
       requests: [...requests.values()].filter((q) => q.scope === scope).map((q) => ({ entry: q.ref, purpose: q.purpose, at: new Date(q.askedAt).toISOString(), ...(q.standing ? { standing: true, hosts: q.hosts, ...(q.commandWords ? { command: q.commandWords } : {}) } : {}) })),
       standing: standingOf(caller),   // lane vault-standing-request: the STANDING grants this conversation holds — «standing · <scope> · since <when>»
+      // B-a14b: the approvals of this conversation that ENDED in the last 24 h — newest first — so an agent never reads a gone
+      // approval as a bug: how it ended, when, and the request that asks again
+      ended: [...endedGrants.values()].filter((e) => e.conv === scope && t - e.endedAt <= ENDED_MS && !mine.some((g) => g.entries.includes(e.id)) && !onNowOf(e.id) && !(dOn && dOn.suspended && dOn.suspended.has(e.id) && (offAt.get(e.id) || 0) >= e.grantAt)).sort((a, b) => b.endedAt - a.endedAt)   // (an entry switched ON — or held by a standing grant, which needs the switch — is usable: never «ask again»)
+        .map((e) => ({ entry: refOfId(e.id), ...wordsOfId(e.id), endedBy: e.endedBy, endedAt: new Date(e.endedAt).toISOString(), once: e.once, purpose: e.purpose })),
       uses: typeof vault.usesOf === 'function' ? vault.usesOf(scope) : [],
     };
   }
@@ -1788,7 +1847,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       if (!String(v).startsWith('@')) continue;
       const p = String(v).slice(1);
       if (!p || Object.prototype.hasOwnProperty.call(out, p)) continue;
-      if (DOOR.blocked(path.resolve(cwd, p))) return named('storage_blocked', { template: p });
+      if (DOOR.blocked(path.resolve(cwd, p))) return named('storage_blocked', { template: p, words: storageWords(path.resolve(cwd, p)) });
       const abs = fenced(path.resolve(cwd, p), sessionCwd);
       if (!abs) return named('template_refused', { template: p });
       try { out[p] = readBounded(abs, VR.TEMPLATE_MAX).toString('utf8'); }   // one fd: never through a link swapped in, never a FIFO's wait
@@ -1922,7 +1981,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (caller.remote || req.on) { note('device_road_later'); return named('device_road_later'); }
     const all = [...req.argv, ...(req.env || []).flat(), ...(req.file || []).flat(), req.stdin || '', String(cwd || '')];   // the cwd too: the card prints it
     if (all.some((x) => HC.hiddenCharsOf(String(x), { max: 1 }).length)) return named('hidden_chars');
-    if (cwd && DOOR.blocked(String(cwd))) { note('storage_blocked'); return named('storage_blocked'); }
+    if (cwd && DOOR.blocked(String(cwd))) { note('storage_blocked'); return named('storage_blocked', { words: storageWords(String(cwd)) }); }
     const place = fenced(String(cwd || ''), caller.cwd);
     if (!place) { note('cwd_refused', { cwd: String(cwd || '').slice(0, 300) }); return named('cwd_refused'); }
     const base = agentEnv();
@@ -1961,9 +2020,12 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     // which host gets the token cannot be told; refuse rather than silently send GH_ENTERPRISE_TOKEN to the URL's host (the r15
     // leak: the URL host was dropped from routeHosts, so the verdict saw only the -R host and approved ok:own with no card).
     if (sealedTool && shape.routeHosts.length > 1) { const hs = [...shape.routeHosts]; note('two_hosts', { ...head }); return named('two_hosts', { hosts: hs, words: `this command names two hosts it could contact — ${hs.join(' and ')}: a URL in a positional points to one and -R / GH_HOST (or a repo spec) to another. A sealed credential tool homes the token to only one host, so which one receives it cannot be told — nothing ran. Name a single host (drop the URL, or point -R at the URL's host).` }); }
-    // lane vault-agent-own: ANOTHER conversation's agent entry is refused by name before any fact of it is read (no switch opens it)
-    const foreign = spec.refs.find((r) => VR.agentScopeOf(r) && !VR.ownsAgentEntry(r, caller));
-    if (foreign) { note('use_not_granted', { ...head, ref: foreign.ref }); return named('use_not_granted', { ref: foreign.ref }); }
+    // lane vault-agent-own: ANOTHER conversation's agent entry is refused by name (no switch opens it) — B-bc3b: unless the owner
+    // SHARED it through its grant row («Who may use it…»: this caller, for this run's hosts — judged below by the grant door's
+    // PURE verdict; the row's stored hosts and the command's token are read for that verdict, and a missing, unshared or wrong-host
+    // run answers alike); with no grant door at all it is refused here, before anything is read
+    const foreignRefs = spec.refs.filter((r) => VR.agentScopeOf(r) && !VR.ownsAgentEntry(r, caller));
+    if (foreignRefs.length && !useGrants) { note('use_not_granted', { ...head, ref: foreignRefs[0].ref }); return named('use_not_granted', { ref: foreignRefs[0].ref }); }
     const dest = VR.destinationsOf(shape);   // lane vault-use-grants round 2 (BLOCKER): the grant covers the run's DESTINATIONS, judged by the reader the card uses
     // lane vault-standing-request: where NO host can be read (an interpreter + its script, a program outside the tool table), the
     // run's COMMAND TOKEN — what a standing grant on «this command» names (the program's real path, the script's real path + the
@@ -1981,6 +2043,15 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       const facts = { ...uf, conversationKeys: [...new Set([caller.conversationId, ...(Array.isArray(uf.conversationKeys) ? uf.conversationKeys : [])].filter(Boolean).map(String))], groupIds: Array.isArray(uf.groupIds) ? uf.groupIds : [], groupsUnreadable: !!uf.groupsUnreadable };
       for (const r of spec.refs) { const row = rowOf(r); if (row) { try { standing.set(r.id, useGrants.verdictFor(r.id, facts, { hosts: dest.hosts, destinationKnown: !!shape.destKnown, entryHosts: row.hosts || [], tool: shape.name, command: cmdToken })); } catch { /* unreadable: no standing approval */ } } }   // round 3 (item 5): `tool` scopes a wildcard default to its CLI; round 9 (seam ruling C): a standing grant covers the run when the reader READ every destination (`destKnown`), NOT when «always» would be offered (`shape.always`) — the two are decoupled so a keyed routing flag whose host is read is still coverable by a grant naming it
     }
+    // B-bc3b: ANOTHER conversation's agent entry runs ONLY as the owner shared it — its grant row admits THIS caller for EVERY host
+    // of this run (a refused run store refuses it too: fail closed); anything less is refused by name as before (no card: what an
+    // agent stored is its own — another may use it only by the owner's deliberate widening)
+    const sharedIds = new Set();
+    for (const r of foreignRefs) {
+      const v = standing.get(r.id);
+      if (!(v && v.ok === true)) { note('use_not_granted', { ...head, ref: r.ref }); return named('use_not_granted', { ref: r.ref }); }
+      sharedIds.add(r.id);
+    }
     // THE FACTS the verdict reads: each entry's row (exists), its switch (open), its class (the engine's check) and its length
     const d = load();
     const refused = !!(d && d.refused);   // round 3 (MAJOR item 2): the store failed its mark — fail CLOSED (every standing grant paused)
@@ -1996,10 +2067,12 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       if (g) purposes.set(r.id, g.purpose);
       if (g && !sw) admitted.push({ pair: pairOf(scope, r.id), g });
       const suspended = refused || !!(row && d && d.suspended && d.suspended.has(r.id));   // round 2 MAJOR: the owner turned this entry OFF — every grant is suspended while it is (kept, not deleted); round 3: a refused store suspends EVERYTHING
-      const open = sw || !!g;   // round 4 (MAJOR item 4): ON is an ALLOW-LIST — only the owner's switch (`runnable`, trusted store) or the once-grant his answer wrote opens the entry; a standing vault-use grant is honoured ONLY when the switch is ON too (a refused / wiped / replayed store lists nothing ON ⇒ fail closed; an entry with a grant but never switched ON is PAUSED — A7)
+      const open = sw || !!g || (sharedIds.has(r.id) && !refused);   // B-bc3b: an agent's entry the owner SHARED with this caller (its grant row, judged above) — no switch is its; round 4 (MAJOR item 4): ON is an ALLOW-LIST — only the owner's switch (`runnable`, trusted store) or the once-grant the owner's answer wrote opens the entry; a standing vault-use grant is honoured ONLY when the switch is ON too (a refused / wiped / replayed store lists nothing ON ⇒ fail closed; an entry with a grant but never switched ON is PAUSED — A7)
+      const e0 = !open && row && !own && !refused ? endedOf(scope, r.id) : null;
+      const ended = e0 && !(suspended && (offAt.get(r.id) || 0) >= e0.grantAt) ? e0 : null;   // B-a14b: an approval that ended — said as itself; an OFF that came AFTER the approval was given is the owner's news (a grant given after the OFF, then used, is said as used)
       let bytes = 0;
       if (row && (open || own)) { try { const v = valueOf(r); bytes = v == null ? 0 : Buffer.byteLength(v, 'utf8'); } catch { bytes = 0; } }
-      entries.push({ id: r.id, exists: !!row, open, bytes, on: sw, ...(own ? { own: true, prov: pv.prov === 'minted' ? 'minted' : 'stored', forHost: pv.forHost || null } : {}) });
+      entries.push({ id: r.id, exists: !!row, open, bytes, on: sw, ...(own ? { own: true, prov: pv.prov === 'minted' ? 'minted' : 'stored', forHost: pv.forHost || null } : {}), ...(ended ? { ended: { by: ended.endedBy, at: new Date(ended.endedAt).toISOString(), ...(suspended ? { off: true } : {}) } } : {}) });   // r13 should: `off` — the owner had switched the entry OFF before this approval, and it still is
     }
     // lane vault-use-grants round 5 (item 3): when «Always» is offered on an entry that is NOT already switched on, the card
     // says pressing «Always» (with 验证是你) ALSO opens it for agent runs — the switch flips in the same act (option b).
@@ -2010,7 +2083,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     const remembered = stored && (stored.until == null || stored.until > now()) ? stored : short && short.until > now() ? { until: short.until } : null;
     // granted: P0 has no who-may-use list — the owner's per-row switch and the card ARE the grant (P1 vault-use-reach narrows it
     // to whom); an AGENT's own entry (`agent:<scope>/<name>`) is its conversation's only
-    const granted = spec.refs.every((r) => !VR.agentScopeOf(r) || VR.ownsAgentEntry(r, caller));   // a mint's scope: the conversation's registered id, or (lane vault-agent-own) its durable one
+    const granted = spec.refs.every((r) => !VR.agentScopeOf(r) || VR.ownsAgentEntry(r, caller) || sharedIds.has(r.id));   // B-bc3b: + one the owner shared with it   // a mint's scope: the conversation's registered id, or (lane vault-agent-own) its durable one
     const passes = () => [...hostPasses.values()].filter((p) => p.scope === scope).map((p) => ({ id: p.id, host: p.host }));   // lane vault-agent-own: the hosts the owner let a minted value go to
     // round 14/15: the digest is taken after the PER-CALLER cap (round 15: a refused call never hashes) and memoised per inode
     // identity; no await sits between the hub-wide cap check and runs.add (20 parallel calls see callerRuns grow and 16 get
@@ -2059,7 +2132,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       // no card after it until the vault locked): a run a LIVE 1-hour window admits (every entry admitted, a window on one) is
       // judged BEFORE the local instance's `seen` pass — every use inside the hour is a window use (one notice each) and the
       // hour's end asks again, on a local instance as on a cluster
-      const winAdmits = !!useGrants && !refused && spec.refs.length > 0 && spec.refs.every((r) => (standing.get(r.id) || {}).ok === true && memberUsable(d, r.id, standing.get(r.id).id)) && spec.refs.some((r) => standing.get(r.id).scope === 'window');
+      const winAdmits = !!useGrants && !refused && spec.refs.length > 0 && spec.refs.every((r) => (standing.get(r.id) || {}).ok === true && (memberUsable(d, r.id, standing.get(r.id).id) || sharedIds.has(r.id))) && spec.refs.some((r) => standing.get(r.id).scope === 'window');
       let verdict = VR.runVerdict({ state: vaultState(), plan: spec, shape, entries, granted, remembered, seen: seen.has(pair) && !winAdmits, instance: instanceKind(), policy: policy(), passes: passes(), now: now() });
       let whyAgain = null;
       if (!verdict.ok && verdict.ask) {   // lane vault-agent-own r20b/r23: a late «allow once» pass runs this EXACT command ONCE with no card (consumed); an open late card re-asks the one card
@@ -2070,7 +2143,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       const policyNotes = [];   // int361: the policy judge's word for the card — joined where a card is drawn (vault-agent-own r19: card_too_long binds only a CARD)
       // lane vault-use-grants: A STANDING APPROVAL SHORT-CIRCUITS THE CARD — every entry admitted for every host of the run (the
       // verdict's own refusals stand: a lock, an unknown entry, a too-short value, another conversation's own entry)
-      if (!verdict.ok && verdict.ask && !refused && spec.refs.length && spec.refs.every((r) => (standing.get(r.id) || {}).ok === true && memberUsable(d, r.id, (standing.get(r.id) || {}).id))) {   // round 4 (MAJOR item 4): a grant short-circuits the card ONLY when the entry is listed ON (an allow-list, trusted store); round 7 (MAJOR item 2): `memberUsable` IS that allow-list read AND the pause fact in one — the entry ON, and either the owner opened it (everyone usable) or a PRESS did and THIS member is in the resumed set. A member a press left paused draws the card (never a silent by:grant).
+      if (!verdict.ok && verdict.ask && !refused && spec.refs.length && spec.refs.every((r) => (standing.get(r.id) || {}).ok === true && (memberUsable(d, r.id, (standing.get(r.id) || {}).id) || sharedIds.has(r.id)))) {   // B-bc3b: a shared agent entry has no switch — its grant row is the allow
+        // round 4 (MAJOR item 4): a grant short-circuits the card ONLY when the entry is listed ON (an allow-list, trusted store); round 7 (MAJOR item 2): `memberUsable` IS that allow-list read AND the pause fact in one — the entry ON, and either the owner opened it (everyone usable) or a PRESS did and THIS member is in the resumed set. A member a press left paused draws the card (never a silent by:grant).
         for (const r of spec.refs) standingIds.set(r.id, standing.get(r.id).id);
         verdict = { ok: true, by: 'grant', grants: [...new Set(standingIds.values())] };
         head.grants = verdict.grants;
@@ -2085,6 +2159,10 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
           verdict.window = { until: end, left, who: String(caller.name || caller.sessionKey || caller.conversationId).slice(0, 80), entry: wins.map((r) => nameById[r.id] || r.ref).join('”, “'), program: toolName || path.basename(String(spec.tool || '')), where: shape.destKnown && dest.hosts.length ? dest.hosts.join(', ') : null };
         }
       }
+      // B-bc3b (the read): a run that names an entry SHARED with this caller never draws a card — the owner shared it for the hosts
+      // the row names, nothing more; a card here (a mixed run: + an own minted value bound elsewhere, + a free entry not covered)
+      // would let «Allow once» fail on it and «Always» / «Allow for 1 hour» write this caller a member the owner never gave
+      if (!verdict.ok && verdict.ask && sharedIds.size) { const r0 = spec.refs.find((r) => sharedIds.has(r.id)); note('use_not_granted', { ...head, ref: r0.ref, why: 'shared-card' }); return named('use_not_granted', { ref: r0.ref }); }
       // lane vault-use-grants round 7 (MINOR): AN 8-HOUR PASTE GRANT is HOST-SCOPED — it admits a run with no card ONLY for the
       // HOSTS the request named (the Settings words «may use it in commands to those hosts for 8 hours» now match the code). A run
       // whose destinations are not ALL covered — another host, an opaque route, or a paste that named no hosts — draws its card.
@@ -2150,6 +2228,9 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
         const wplan0 = winUntil ? changesOf(caller.conversationId, ids, { window: winUntil, source: 'card' }) : [];
         let wfacts = winUntil ? windowFactsOf(wplan0, winUntil, ids, { switchOn: wSwitch }) : null;   // r8 (MINOR 3): the window's words — their OWN bound, never DETAIL_MAX
         if (wfacts && JSON.stringify(wfacts).length > WINDOW_FACTS_MAX) { winUntil = null; wfacts = null; }   // words that cannot be shown whole: no «Allow for 1 hour»
+        // B-d868: who started the turn this ask came from — the conversation's kept fact, copied AFTER the window's own bound (a
+        // short line of its own size: it never withdraws «Allow for 1 hour»); a conversation it cannot read ⇒ «unrecorded»
+        if (wfacts) { let tb = null; try { tb = (useFacts(caller) || {}).turnBy; } catch { tb = null; } wfacts.turnBy = tb && typeof tb === 'object' && typeof tb.by === 'string' ? { by: tb.by.slice(0, 20), ...(typeof tb.name === 'string' && tb.name ? { name: tb.name.slice(0, 80) } : {}), ...(tb.why === 'background' ? { why: 'background' } : {}) } : { by: 'unrecorded' }; }
         const lead = [detailOf(spec, shape, place, { facts: entries, why: verdict.why || [], away: verdict.away || [], command: !!cmdToken }), ...VUG.standingLines([...standing.values()], { always: !!shape.always }), ...(cmdToken && !shape.always ? [COMMAND_ALWAYS_LINE] : [])];
         const trail = [...(useGrants && shape.always ? [`«Always» = a standing approval: this conversation may use ${spec.refs.length > 1 ? 'these secrets' : 'this secret'} for ${dest.hosts.join(', ')} without asking (the Vault window lists it and takes it back).`] : []), ...(switchNote ? [switchNote] : []), ...policyNotes];
         const shown = [...lead, ...changeLines(plan0, planMs, { many }).map(fill), ...trail].join('\n');   // r8 (MINOR 3): no window line — its words ride facts.window   // lane vault-agent-own: + who stored each entry, why it asks   // lane vault-use-grants: + the standing approvals, the «Always» line and the policy judge's word (int361: only where a card is drawn)   // r4: + one line per scope of its own the «Always» replaces, on every entry
@@ -2375,9 +2456,9 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   // bounded — the boot law < 250 ms), never on the event loop at the first spawn (r11 fixup 1; r13's lazy memo did it at spawn #1).
   try { const t = Date.now(); const sealed = sealedPathOf(agentEnv()); sealedDirs = sealed.split(':').filter(Boolean); gitOnSeal = probeGit(sealedDirs); bootSealMs = Date.now() - t; log(`vault-run-door: sealed PATH computed at boot in ${bootSealMs} ms (git on seal: ${gitOnSeal})`); } catch (e) { log(`vault-run-door: boot seal failed (${(e && e.message) || e})`); }
 
-  return { run, answer, takeBack, saveRow, setRunnable, resumeGrant, rowFacts, runnableFor, reconcile, sweep, closeAll, onLocked, request, answerRequest, usesFor, grantPasted, useGrants, setPolicy, revokeApprovals, noteGrantStale, _bootSeal: () => ({ ms: bootSealMs, gitOnSeal }),
-    listRequests: () => [...requests.values()].map((q) => ({ askId: q.askId, who: q.who, ref: q.ref, askedAt: q.askedAt })), _grants: grants, _requests: requests, _reqQuiet: reqQuiet,
-    listAsks: () => [...asks.values()].map((q) => ({ askId: q.askId, who: q.who, always: q.always, askedAt: q.askedAt, expiresAt: q.askedAt + VR.ASK_TTL_MS })), running: () => runs.size, ACTION_TYPE, _asks: asks, _seen: seen, _lateAsks: lateAsks, _lateOnce: lateOnce };
+  return { run, answer, takeBack, saveRow, setRunnable, resumeGrant, forgetEntry, rowFacts, runnableFor, reconcile, sweep, closeAll, onLocked, request, answerRequest, usesFor, grantPasted, useGrants, setPolicy, revokeApprovals, noteGrantStale, _bootSeal: () => ({ ms: bootSealMs, gitOnSeal }),
+    listRequests: () => [...requests.values()].map((q) => ({ askId: q.askId, who: q.who, ref: q.ref, askedAt: q.askedAt })), _grants: grants, _requests: requests, _reqQuiet: reqQuiet, _ended: endedGrants,
+    listAsks: () => [...asks.values()].map((q) => ({ askId: q.askId, who: q.who, always: q.always, askedAt: q.askedAt, expiresAt: q.askedAt + VR.ASK_TTL_MS })), running: () => runs.size, ACTION_TYPE, _asks: asks, _seen: seen, _lateAsks: lateAsks, _lateOnce: lateOnce, _hostPasses: hostPasses };
 }
 
 const statusOf = (code) => STATUS[code] || 400;

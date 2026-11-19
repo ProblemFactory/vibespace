@@ -54,6 +54,7 @@ const crypto = require('crypto');
 const P = require('../vault-paste.js');   // PURE: the ask's rules, the card's words, the receipt, a free entry's facts
 const VK = require('../vault-kinds.js');   // PURE (lane vault-entry-description): which kinds carry words (the `words` surface)
 const VI = require('../vault-inventory.js');   // PURE: an entry's row (the name the window shows, its description)
+const V = require('../vault.js');   // B-3fb5: AGENT_NS_RE — the whole name of an agent's own entry (agent:<scope>/<name>)
 const VB = require('../vault-blocked.js');   // PURE: a caller's name in words; THE words toward an agent on a locked refusal
 const URL_ = require('url');   // lane login-request-card: a site's Unicode form beside its punycode one (P.siteWords takes the function)
 
@@ -269,6 +270,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     if (!logins || typeof logins.addOwn !== 'function') return named('login_no_door');
     const st = vault.state();
     if (st !== 'unlocked') return named(st === 'locked' ? 'vault_locked' : 'vault_not_set_up');
+    if (typeof l.useLogin === 'string' && l.useLogin) return answerUseLogin(q, id, l, { by, mark });   // one login, several sites
     const v = P.loginAnswerOf(l);
     if (!v.ok) return v;
     if (v.totpName) { let names = []; try { names = vault.secretNames() || []; } catch { names = []; } if (!names.some((s) => s && s.name === `totp:${v.totpName}`)) return named('login_totp_unknown'); }
@@ -294,6 +296,46 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     mark();
     settle(q, 'stored', { login: { user, updated: !!r.updated, allowed, asked: l.allow === true } });   // asked: the owner's tick (law D — granted / not ticked / ticked but not written)
     return { ok: true, outcome: 'stored', entry, updated: !!r.updated, allowed };
+  }
+
+  /** ONE LOGIN, SEVERAL SITES (lane login-request-card, step F's last part — B-a681's card): «Use a login you already saved…». The
+   *  person picks one of the vault's web logins; the request's site is ADDED to it through the web-login store's one writer
+   *  (logins.addSite — the person's act: an exact origin, one (site, user) pair per login, refused by name otherwise), signing in there
+   *  under the login's own user or the card's typed name. Nothing is typed twice: no password crosses this road. A site the login
+   *  already holds is the answer as it stands. «Let it sign in» grants the asking conversation the PICKED login's own row — the grant
+   *  follows the login (every site of it; the card said so before the press). The receipt is the stored one (law A: the user named
+   *  only with the grant), saying the site was added to a login already in the vault. Every refusal keeps the item open. */
+  function answerUseLogin(q, id, l, { by, mark }) {
+    if (typeof logins.addSite !== 'function') return named('login_no_door');
+    const name = String(l.useLogin).slice(0, 600);
+    let r = null;
+    try { r = logins.addSite(name, { site: q.target.origin, user: typeof l.username === 'string' ? l.username : '' }, { who: String(by).slice(0, 40) }); }
+    catch (e) { log(`${q.requestId}: the site could not be added to the login (${(e && e.code) || 'error'})`); return named('store_failed'); }
+    const already = !!(r && r.ok === false && r.code === 'login_site_exists');
+    if (!r || (!r.ok && !already)) { const c = String((r && r.code) || 'store_failed'); return { ok: false, code: c, words: (r && r.error) || MORE_WORDS[c] || P.WORDS[c] || c }; }
+    // a site the login holds ALREADY signs in under the name it keeps THERE (主开发 12:17Z, small): a different name typed on the card
+    // is refused by name — never ignored without a word — and the receipt names the user it really signs in with there
+    let there = null;
+    if (already && typeof logins.siteWordsFor === 'function') { try { const sw = logins.siteWordsFor(name, q.target.origin); there = sw && sw.ok && typeof sw.there === 'string' && sw.there ? sw.there : null; } catch { there = null; } }
+    const typed = typeof l.username === 'string' ? l.username.trim() : '';
+    if (already && there && typed && typed.toLowerCase() !== there.toLowerCase()) {
+      // the login's FIRST site cannot be removed from it (login_site_first): there the one door is a new login (13:02Z (3))
+      const first = P.loginOriginOf(name) === q.target.origin;
+      return { ok: false, code: 'login_site_exists', site: q.target.origin, there, ...(first ? { first: true } : {}),
+        words: first ? `${q.target.origin} is this login's own first site and signs in there as ${there} — to sign in there under another name, type a new login`
+          : `${q.target.origin} is on this login already and signs in there as ${there} — to sign in there under another name, remove that site from the login in Vault ▸ Web logins first, or type a new login` };
+    }
+    const user = String((r && r.ok && r.user) || there || P.loginUserOf(name));
+    let allowed = false;
+    if (l.allow === true && q.conv && typeof logins.grant === 'function') {
+      try { const g = logins.grant(name, 'this-account', `session:${q.conv}`, { by: String(by).slice(0, 40) }); allowed = !!(g && g.ok); if (!allowed) log(`${q.requestId}: the sign-in grant was not written (${(g && g.code) || 'error'}) — the site is on the login`); }
+      catch (e) { log(`${q.requestId}: the sign-in grant was not written (${(e && e.code) || 'error'}) — the site is on the login`); }
+    }
+    try { vault.contentsChanged && vault.contentsChanged('paste'); } catch { }
+    audit('vault-secret-stored', { by: String(by).slice(0, 40), conv: q.scope, requestId: id, place: name, allowed, joined: true });
+    mark();
+    settle(q, 'stored', { login: { user, updated: false, allowed, asked: l.allow === true, joined: true, already } });
+    return { ok: true, outcome: 'stored', entry: name, joined: true, already, allowed };
   }
 
   /** lane totp-request-card (fb-251bb41646): THE OWNER ADDS A TWO-STEP CODE on the card → THE two-step add door's ONE writer
@@ -376,6 +418,29 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     if (r.already) return named('entry_unknown_id');
     audit('vault-secret-deleted', { by: String(by).slice(0, 40), entry });
     return { ok: true, entry };
+  }
+  /** B-3fb5 (design q-047 §3.3: 显示 · 换新… · 删除 for an agent's entry): an AGENT's OWN entry's delete door — its row's 删除 in
+   *  the Vault window, a PERSON's door only (an agent stores through mint / put and deletes nothing). `entry` = the whole
+   *  `agent:<scope>/<name>`; any other name is refused by name and never reaches the drop. As for a free entry, WHO MAY USE
+   *  IT goes first (a vault-use grant row on it is removed, or the delete is refused by name — while locked too), so an
+   *  entry is never gone with its row dangling. The conversation that kept it reads «no such entry» at its next run (a
+   *  command, a job's --vault) and may store a new one under that name: what the hub REMEMBERS by the entry's id goes with
+   *  it (the run door's host passes and late allows — vaultRun.forgetEntry — and an open proposal of its words, settled
+   *  «gone»), so a value minted later under the name starts with none of it (the read: a pass the owner gave the old value
+   *  let the new one go to that host with no card). */
+  function dropAgentEntry(entry, { by = 'user', who = null, ip = null } = {}) {
+    const e = String(entry || '');
+    if (!V.AGENT_NS_RE.test(e)) return named('entry_unknown_id');
+    // an agent row's field is 'secret' too (src/vault-inventory.js secretRowOf) — the grant row's id is the row's id
+    if (useGrants) { let dr = null; try { dr = useGrants.drop(`secrets:${e}#${P.ENTRY_FIELD}`, { by }); } catch (x) { log(`${e}: its vault-use grant row could not be removed — ${x.message}`); return named('store_failed'); } if (dr && !dr.ok) return named(dr.code === 'vault_locked' ? 'vault_locked' : 'store_failed'); }
+    const r = vault.secretDrop(e);
+    if (!r || !r.ok) return named('store_failed');
+    if (r.already) return named('entry_unknown_id');
+    const id = `secrets:${e}#${P.ENTRY_FIELD}`;
+    if (vaultRun && typeof vaultRun.forgetEntry === 'function') { try { vaultRun.forgetEntry(id); } catch (x) { log(`${e}: the run door could not forget it — ${x.message}`); } }
+    index(); for (const w of [...wopen.values()]) if (w.entry === e) wsettle(w, 'gone');   // its words card answers nothing now
+    audit('vault-agent-secret-deleted', { who: who ? String(who).slice(0, 80) : null, ip, by: String(by).slice(0, 40), entry: e, why: e });   // the name and who — never a value (`why`: the engine's own line names it, as mint / put do)
+    return { ok: true, entry: e };
   }
   // ── THE WORDS OF AN ENTRY (lane vault-entry-description) ──
   const wopen = new Map();   // proposalId → { proposalId, todoId, conv, scope, sessionKey, who, entry, ref, from, to }
@@ -505,7 +570,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
   /** The open requests of ONE conversation (`vibespace-vault uses` — words, places, times; never a value). */
   function openFor(conv) { index(); return [...open.values()].filter((q) => q.conv === String(conv || '') || q.scope === String(conv || '')).map((q) => ({ requestId: q.requestId, words: q.words, purpose: q.purpose, place: q.target ? (q.target.kind === 'field' ? P.intoOf(q.target) : q.target.kind === P.LOGIN_KIND ? `a website login on ${q.target.origin}` : `a new ${q.target.entryKind} entry «${q.target.label}»`) : null })); }
 
-  return { request, answer, addEntry, dropEntry, openFor, statusOf, words: (code) => MORE_WORDS[code] || P.WORDS[code] || code, propose, answerWords, ownerWords, proposalsOpen, setLoginChannel };
+  return { request, answer, addEntry, dropEntry, dropAgentEntry, openFor, statusOf, words: (code) => MORE_WORDS[code] || P.WORDS[code] || code, propose, answerWords, ownerWords, proposalsOpen, setLoginChannel };
 }
 
 module.exports = { create, MORE_WORDS, STATUS, FROM_NAME };

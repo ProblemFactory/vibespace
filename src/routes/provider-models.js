@@ -34,7 +34,7 @@ const MP = require('../model-providers.js');
 const CMC = require('../claude-model-catalog.js'); // PURE: remoteRows (another machine's menu)
 const { personVerdict } = require('./vault.js');
 
-const STATUS = Object.freeze({ human_only: 403, cross_site: 403, unknown: 404, 'not-listed': 409, 'in-flight': 409, 'key-unreadable': 409, vault_not_set_up: 409, vault_locked: 423, cooldown: 429, unreachable: 502, http: 502, 'too-large': 502, 'bad-answer': 502, invalid: 502 });
+const STATUS = Object.freeze({ human_only: 403, cross_site: 403, unknown: 404, 'not-listed': 409, 'in-flight': 409, 'key-unreadable': 409, vault_not_set_up: 409, vault_locked: 423, cooldown: 429, unreachable: 502, http: 502, 'too-large': 502, 'bad-answer': 502, invalid: 502, 'write-failed': 500 });
 // the record as a menu shows it: its rows and words — never where its key lives
 const brief = (p) => (p ? { id: p.id, kind: p.kind, label: p.label, preset: p.preset, models: p.models, defaultModel: p.defaultModel, aliases: p.aliases, modelsSource: p.modelsSource, listedBy: p.listedBy, fetchedAt: p.fetchedAt } : null);
 

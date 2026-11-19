@@ -975,8 +975,23 @@ function promptWords(p, tIn) {
   const t = typeof tIn === 'function' ? (s, q) => tIn(s, q) : fill;
   if (p.type === 'file') return { title: t('The page asks for a file'), body: t('No file window opens here — the agent uploads it with vibespace-browser upload'), form: false, dismiss: t('Dismiss') };
   if (p.type === 'http-auth' && p.native) return { title: t('Chrome asks you to sign in — in its window below'), body: `${pageText(p.origin, URL_MAX)}${p.realm ? ` — ${pageText(p.realm, 200)}` : ''}`, form: false, native: true, hint: t('Take over and type the username and password into Chrome’s sheet — the agent never sees them'), dismiss: null }; // lane browser-x-in-window: Chrome's own sheet is IN the picture
-  if (p.type === 'http-auth') return { title: t('The page asks you to sign in'), body: `${pageText(p.origin, URL_MAX)}${p.realm ? ` — ${pageText(p.realm, 200)}` : ''}`, form: true, user: t('Username'), password: t('Password'), accept: t('Sign in'), dismiss: t('Cancel'), hint: t('Sent to this page only — never to the agent, never written down') };
+  if (p.type === 'http-auth') return { title: p.proxy ? t('A proxy asks you to sign in') : t('The page asks you to sign in'), body: `${pageText(p.origin, URL_MAX)}${p.realm ? ` — ${pageText(p.realm, 200)}` : ''}`, form: true, user: t('Username'), password: t('Password'), accept: t('Sign in'), dismiss: t('Cancel'), hint: t('Sent to this page only — never to the agent, never written down') };
   return null;
+}
+/** B-b56d (the owner's ruling B, 2026-11-18): THE PERSON'S OWN WINDOW'S TWO QUIET LINES beside its prompt fact — PURE; a site's host
+ *  is its own text (pageText; the window draws it as text, never markup). `ended` (law 4): a sign-in nobody answered within its bound,
+ *  which VibeSpace cancelled — said with its own Dismiss; `hook` not armed (law 5): this window cannot show the browser's sign-ins —
+ *  on the X road Chrome's own sheet stands in its window (open it in Desktop), elsewhere a page may wait on one this view cannot show. */
+function personPromptLines({ ended = null, hook = null } = {}, tIn) {
+  const t = typeof tIn === 'function' ? (s, q) => tIn(s, q) : fill;
+  const out = { ended: null, hook: null };
+  if (ended && typeof ended === 'object' && ended.how === 'expired') {
+    const host = hostOf(ended.origin) || pageText(ended.origin, URL_MAX);
+    const min = Math.max(1, Math.round((Number(ended.boundMs) || AUTH_HOLD_MAX_MS) / 60000));
+    out.ended = { id: str(ended.id), line: ended.proxy ? t('Nobody answered the proxy sign-in for {host} within {min} min — VibeSpace cancelled it, so the page shows its own refusal', { host, min }) : t('Nobody answered the sign-in for {host} within {min} min — VibeSpace cancelled it, so the page shows its own refusal', { host, min }), dismiss: t('Dismiss') };
+  }
+  if (hook && typeof hook === 'object' && hook.armed === false && (hook.why === 'refused' || hook.why === 'unwatched')) out.hook = { why: str(hook.why), line: hook.x ? t('VibeSpace cannot show this browser’s sign-in requests here — if a page asks you to sign in, Chrome shows its own sheet: open it in Desktop and answer it there') : t('VibeSpace cannot see this browser’s sign-in requests right now — a page that asks you to sign in may wait without showing anything here') };
+  return out;
 }
 
 // ── lane browser-ui-prompts-r2 (B-ebfc): THE TWO MEASURED HANGS — a permission prompt and print, decided before they hold ──
@@ -1060,7 +1075,7 @@ module.exports = {
   PAGE_BUSY_PASS_VERBS, busyPasses, pageBusyVerdict, pageBusyText, busyCloseText, closePendingText, // lane browser-shared-profile-freeze: a silent page is answered by name before the driver gets the verb
   restartedCardText, unresponsiveLine, answeredAgainLine, unresponsiveNotice, unresponsiveWords,
   // lane browser-ui-prompts: the browser's own prompts (a file chooser, an HTTP sign-in) — one record, one sentence, one bar
-  PROMPT_TYPES, PROMPT_ASK_MS, AUTH_HOLD_MAX_MS, promptFromCdp, promptText, promptBlock, promptAnsweredNote, promptWords, nativeSheetText /* lane browser-x-in-window */,
+  PROMPT_TYPES, PROMPT_ASK_MS, AUTH_HOLD_MAX_MS, promptFromCdp, promptText, promptBlock, promptAnsweredNote, promptWords, personPromptLines /* B-b56d */, nativeSheetText /* lane browser-x-in-window */,
   // lane browser-ui-prompts-r2: permissions decided ahead (the agent's per-origin flip) + the print preview released and told
   PERMISSION_KINDS, PERMISSION_DEFAULT, permissionPlan, permissionVerdict, permissionNote, permissionWords, PRINT_PREVIEW_RE, printTargetVerdict, PRINT_RELEASE_EXPR, PRINT_TEXT, printNote, printWords,
 };

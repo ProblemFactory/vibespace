@@ -82,11 +82,18 @@ function mountRoutes({ app, tasks, taskFanout, activeSessions, sameToken, server
   // OLDER ACTIVITY (2.369.204): one page of a group's Activity log older than ?before=<ms> (≤ ?limit=200) — the live
   // list, then data/task-groups-archive/ — for the Task log window's scroll. The owner (cookie); an agent's token reads
   // only a group it belongs to (the vibespace-task scope), a job token none.
-  app.get('/api/tasks/:id/progress', (req, res) => {
+  const progressRead = new WeakSet();   // B-55dc: the requests whose membership read already ran
+  app.get('/api/tasks/:id/progress', function progressRoute(req, res) {
     const bearer = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
     if (/^(vsst_|jbt_)/.test(bearer)) {
       const hit = bearer.startsWith('vsst_') ? [...activeSessions].find(([, s]) => sameToken(bearer, s.agentToken)) : null;
-      const mine = !!hit && tasks.groupsForSession({ sessionKey: sessionStatusKey(hit[1], hit[0]), cwd: hit[1].cwd, initialGroupId: hit[1]._initialGroupId, initialGroupIds: hit[1]._initialGroupIds }).some((g) => g.id === req.params.id);
+      // B-55dc THE DECIDING DOOR: «not a member» refuses an agent here — decided on a READ answer (awaited off the loop,
+      // bounded), the route entered again once it settled
+      if (hit && !progressRead.has(req) && typeof tasks.membershipRead === 'function') {
+        const p = tasks.membershipRead({ sessionKey: sessionStatusKey(hit[1], hit[0]), cwd: hit[1].cwd, hostId: hit[1].host || null, initialGroupId: hit[1]._initialGroupId, initialGroupIds: hit[1]._initialGroupIds });
+        if (p) { progressRead.add(req); p.then(() => progressRoute(req, res), () => progressRoute(req, res)); return; }
+      }
+      const mine = !!hit && tasks.groupsForSession({ sessionKey: sessionStatusKey(hit[1], hit[0]), cwd: hit[1].cwd, hostId: hit[1].host || null, initialGroupId: hit[1]._initialGroupId, initialGroupIds: hit[1]._initialGroupIds }).some((g) => g.id === req.params.id);
       if (!mine) return res.status(403).json({ error: 'this session does not belong to that Task Group', code: 'not_member' });
     }
     try { res.json({ success: true, ...tasks.readProgress(req.params.id, { before: req.query.before, limit: req.query.limit }) }); }
@@ -149,7 +156,7 @@ function ctxSync({ tasks, hosts, activeSessions, integrationEnabled, serverNotic
   // Groups a session belongs to that have a syncable context folder.
   function ctxGroupsOf(session, id) {
     if (!session.host) return [];
-    return tasks.groupsForSession({ sessionKey: sessionStatusKey(session, id), cwd: session.cwd, initialGroupId: session._initialGroupId, initialGroupIds: session._initialGroupIds })
+    return tasks.groupsForSession({ sessionKey: sessionStatusKey(session, id), cwd: session.cwd, hostId: session.host || null, initialGroupId: session._initialGroupId, initialGroupIds: session._initialGroupIds })
       .map((g) => tasks.view(g.id)).filter((g) => g.contextDir && g.injectContext !== false);   // lane task-group-context: the view's contextDir = the 记笔记 row
   }
   function scheduleCtxSync(session, id) {

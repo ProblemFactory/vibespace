@@ -96,6 +96,8 @@ const words = {
   start: ({ counted, max, gapMs }) => `[jobs] job-logs catch-up: ${n0(counted)} run dir(s) that started more than 14 days ago and no record lists — removing at most ${max} per pass off the main thread, resting at least ${every(gapMs)} (ten times a pass's own time) between passes`,
   done: ({ removed, entries, jobDirs = 0, kept = 0, passes, startedAt }) => `[jobs] job-logs catch-up done: ${n0(removed)} run dir(s) removed (${n0(entries)} entries) and ${n0(jobDirs)} job dir(s) no record names; ${n0(kept)} kept (young by their newest file, live, or their stamp unjudgeable) — ${passes} pass(es) since ${Number.isFinite(Number(startedAt)) ? new Date(Number(startedAt)).toISOString() : 'an earlier boot'}`,
   pass: ({ removed, entries }) => `[jobs] job-logs: ${n0(removed)} run dir(s) past the 14-day retention that no record lists removed (${n0(entries)} entries)`,
+  // B-c330 (主开发's ruling B, 2026-11-18): the steady passes of one UTC day, folded into ONE line, said at the day's first pass after it
+  day: ({ day, removed, entries, passes }) => `[jobs] job-logs: on ${day} (UTC) ${n0(removed)} run dir(s) past the 14-day retention that no record lists were removed over ${n0(passes)} steady pass(es) (${n0(entries)} entries)`,
   // round 4 §3: the words follow the batch's real fate — only a whole-dir batch is queued again (once); a cut sweep waits for its
   // pass's rest; the record's, the note's and an orphan's ops are asked again by the next pass
   failed: ({ op, error, requeued }) => `[jobs] job-logs remover: a ${op} batch failed (${error}) — ${requeued ? 'queued again' : op === 'sweep' ? 'not repeated before the pass\'s rest' : op === 'whole' ? 'given up; it is owed, re-sent before the next pass' : 'given up; the next pass asks again'}`,

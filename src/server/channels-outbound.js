@@ -126,6 +126,35 @@ function create(engineCtx) {
   }
   /** A proposal as the two surfaces read it — plus the identity warning
    *  STRUCTURE for its adapter and its expiry instant. */
+  // lane bl-msg B-9b9c (fb-8c0809911d: two conversations each proposed a reply to ONE message, both cards were approved, the contact
+  // got it twice): a reply proposal is CROSS-LINKED at propose with every other reply to the same message that is waiting, in flight
+  // or sent (`alsoFor`: ids, both ways, at most ALSO_MAX); the view resolves each id's state NOW (`also`), so a card says it, the
+  // agent's answer names it, and the card's Approve asks once more while another is still open
+  const ALSO_STATES = new Set(['proposed', 'awaiting-approval', 'sending', 'unknown', 'sent']);
+  const ALSO_MAX = 8;
+  /** lane bl-msg B-da74: «THE REST» of a SENT proposal — the attachment parts that did not land (the vendor refused a file, the
+   *  chain stopped), each aligned with its stored file by position; a file the owner approved WITHOUT (`left-out`: the account
+   *  carries none) is not the rest. → [{ n, name }] */
+  const REST_NEVER = new Set(['left-out', 'too-large']);   // r3: a refused scope or permission can land once granted — only an account that carries no file, or a file over its limit, is no rest
+  /** the shoulds (主开发 11:18Z): the rest that HOLDS a proposal's «once» — none when the stamped rest is gone or still 'proposed'. A
+   *  rest leaves 'proposed' in the write after its create; every press runs inside onProposal, so no press of this process sits between
+   *  those two writes: a 'proposed' rest seen here is one a stop left (it never left, it never sends) → its id | null */
+  function restHeldBy(p) { if (!p || !p.restSentAs) return null; const r = store.outbox.snapshot().proposals[p.restSentAs]; return r && r.state !== 'proposed' ? r.id : null; }
+  function restOf(p) {
+    if (!p || p.state !== 'sent' || p.kind) return [];
+    const parts = (p.result && Array.isArray(p.result.parts) ? p.result.parts : []).filter((x) => x && x.part === 'attachment');
+    const atts = Array.isArray(p.attachments) ? p.attachments : [];
+    const out = [];
+    parts.forEach((x, k) => { if (!x.ok && !x.lost && !REST_NEVER.has(x.code) && atts[k] && (!x.name || x.name === atts[k].name)) out.push({ n: k, name: atts[k].name }); });   // r2: a LOST part may have landed (never resent unchecked); a code no retry can cure is no rest
+    return out;
+  }
+  function alsoView(p) {
+    if (!Array.isArray(p.alsoFor) || !p.alsoFor.length) return null;
+    const all = store.outbox.snapshot().proposals || {};
+    const out = p.alsoFor.map((sid) => all[sid]).filter((q) => q && q.id !== p.id && ALSO_STATES.has(q.state))
+      .map((q) => ({ id: q.id, state: q.state, at: q.at || null, by: q.draftedBy ? { kind: q.draftedBy.kind, id: q.draftedBy.id || null, name: q.draftedBy.name || null } : null }));
+    return out.length ? out : null;
+  }
   function proposalView(p) {
     const rec = adapterRecords().adapters.find((r) => r.id === p.adapterId) || null;
     const c = rec ? registry.capsOf(rec.kind) : null;
@@ -139,8 +168,11 @@ function create(engineCtx) {
     // a reaction carries no text, so no sender line; its lost outcome is checked by ONE list call where reactions are listed
     const honestyLine = reactionKind || recallKind ? null : pending ? P.honestyLine({ draftedBy: p.draftedBy, enabled: honestyLineFor(rec) }) : (p.result && p.result.honestyLine ? P.honestyLine({ draftedBy: p.draftedBy, enabled: true }) : null);
     const can = p.state === 'unknown' ? (!c ? { ok: false, code: 'no-adapter', why: 'the adapter no longer exists' } : recallKind ? (caps.recallRowOf(c) ? { ok: true } : { ok: false, code: 'no-idempotency', why: 'this channel no longer declares a recall — only a person can check the platform' }) : reactionKind ? (reactionsRow(c).read === 'list' ? { ok: true } : { ok: false, code: 'no-idempotency', why: 'this channel does not list reactions — only a person can check the platform' }) : P.canReconcile(c)) : null;
+    const also = alsoView(p);   // lane bl-msg B-9b9c
     return {
       ...p, ...(p.convId && conversationName(p.adapterId, p.convId) ? { title: conversationName(p.adapterId, p.convId) } : {}),   // B-c127: the conversation's name NOW (a proposal froze its title — or the raw id — when it was drafted)
+      ...(also ? { also } : {}),   // lane bl-msg B-9b9c: the other replies to this message, resolved now
+      ...(!restHeldBy(p) && !p.attachmentsGoneAt && restOf(p).length ? { restLeft: restOf(p).length } : {}),   // lane bl-msg B-da74: «Send the rest» is offered
       adapterLabel: rec ? (rec.label || rec.id) : p.adapterId, identityWarning: c ? caps.identityWarning(c) : null, ttlAt, canDecide: p.state === 'awaiting-approval',
       convKind: (p.key && store.index.live()[p.key] && store.index.live()[p.key].kind) || null,
       // lane lark-upload-preflight: an awaiting card whose files this account cannot carry WARNS on the chip and its
@@ -189,6 +221,10 @@ function create(engineCtx) {
   function agentIdsOf(v) {
     if (!v || typeof v !== 'object') return v;
     const out = { ...v, convId: agentId(v.convId), threadKey: agentId(v.threadKey), replyTo: agentId(v.replyTo) };
+    // lane bl-msg B-9b9c: an agent reads the other replies to its message by id and state — whether one has its proposal's own drafter
+    // (`mine`) or the person (`byUser`), never another conversation's name; the raw ids list stays the engine's
+    delete out.alsoFor;
+    if (Array.isArray(v.also)) { const d = v.draftedBy || {}; out.also = v.also.map((a) => ({ id: a.id, state: a.state, mine: !!(a.by && a.by.kind === 'agent' && d.kind === 'agent' && a.by.id === d.id), byUser: !!(a.by && a.by.kind === 'user') })); }
     if (v.replyEnvelope && typeof v.replyEnvelope === 'object') out.replyEnvelope = agentEnvelope(v.replyEnvelope);   // B-a085: the recipients the agent's CLI prints
     if (v.receipt && typeof v.receipt === 'object') out.receipt = { ...v.receipt, vendorMessageId: agentId(v.receipt.vendorMessageId) };
     if (v.reaction && typeof v.reaction === 'object') out.reaction = { ...v.reaction, msg: agentId(v.reaction.msg), ...(v.reaction.quote && typeof v.reaction.quote === 'object' ? { quote: { ...v.reaction.quote, author: agentText(v.reaction.quote.author, { kind: 'line', max: 200 }) } } : {}) };
@@ -313,7 +349,7 @@ function create(engineCtx) {
    *  so at apply time it is either visible (skip) or the replace's check will
    *  read this write (refused before anything is made). */
   async function transition(id, to, by, patch = null, { unless = null } = {}) {
-    let verdict = { ok: false, why: 'no such proposal' };
+    let verdict = { ok: false, why: 'no such proposal' }, linkedOf = null;
     await store.outbox.update((ob) => {
       const p = ob.proposals[id];
       if (!p) return;
@@ -325,10 +361,13 @@ function create(engineCtx) {
       if (to === 'awaiting-approval') p.awaitingSince = t;
       if (!Array.isArray(p.history)) p.history = [];
       p.history.push({ state: to, at: t, by });
+      if (Array.isArray(p.alsoFor) && p.alsoFor.length) linkedOf = p.alsoFor.slice();
+      if (p.restOf && (OF.UNSENT_ENDS.includes(to) || to === 'failed')) { const q0 = ob.proposals[p.restOf]; if (q0 && q0.restSentAs === id) { delete q0.restSentAs; linkedOf = [...(linkedOf || []), q0.id]; } }   // lane bl-msg B-da74 r2: the rest did not land — its original offers it again   // lane bl-msg B-9b9c r2 (B4): its linked cards redraw on every move
       if (patch) patch(p, t);
       if (OF.UNSENT_ENDS.includes(to) && P.storedAttachments(p).length) p.attachmentsGoneAt = t;
     });
     // design 005 §2.B retention: an UNSENT end (rejected / withdrawn / expired) takes the proposal's files at once
+    if (verdict.ok && linkedOf) { try { notifyOutbox(linkedOf); } catch { } }
     if (verdict.ok && OF.UNSENT_ENDS.includes(to)) { try { OF.remove(store.dir, id); } catch (err) { log.warn(`[channels] ${id}: its attachments could not be removed now (${(err && err.message) || err}) — the sweep tries again`); } }
     return verdict;
   }
@@ -646,6 +685,7 @@ function create(engineCtx) {
     let decision = own
       ? { mode: 'direct', reasons: [], detail: { ownMessage: true } }
       : P.decideOutbound({ channelPolicy: policyFor(rec, en), guards: guardsFromSettings(), proposal: { ...v.proposal, authority }, now: t });
+    if (guards && guards.forceReview && !own && decision.mode === 'direct') decision = { ...decision, mode: 'review', reasons: [...new Set([...(decision.reasons || []), 'attachments'])] };   // lane bl-msg B-da74 r2: an agent's «rest» is the user's to approve
     if (ccByAgent && decision.mode === 'direct') {
       const effC = effectiveForAccount(rec.id);
       const capsC = { offersSend: true, sendWhy: null, policyRequiresReview: policyRequiresReview(rec, null) };
@@ -667,6 +707,11 @@ function create(engineCtx) {
       staged = OF.stage(store.dir, att.files);   // design 005: SYNCHRONOUS — no await between the reach re-check above and the record
       await store.outbox.update((ob) => {
         const id = store.outbox.nextId();
+        // lane bl-msg B-9b9c: every other reply to THIS message still open or sent (read in the same update that writes this one)
+        // r2 (the read's B3): the message a reply answers = its replyTo, else its envelope's anchor (a mail reply with no --to anchors the newest)
+        const answers = (x) => (x && (x.replyTo || (x.replyEnvelope && x.replyEnvelope.anchorId))) || null;
+        const target = v.proposal.replyTo || (ra && ra.envelope && ra.envelope.anchorId) || null;
+        const alsoIds = target ? Object.values(ob.proposals || {}).filter((q) => q && q.id !== id && q.id !== (guards && guards.restOf) && !q.kind && !q.compose && q.adapterId === adapterId && q.convId === convId && answers(q) != null && String(answers(q)) === String(target) && ALSO_STATES.has(q.state)).map((q) => q.id).slice(-ALSO_MAX) : [];
         created = ob.proposals[id] = {
           id, adapterId, convId, key: en.key, title: agentTitle(en, convId),   // verify r1 F2: the proposal's title is printed by `vibespace-channels status`
           text: v.proposal.text, originalText: v.proposal.text, replyTo: v.proposal.replyTo, why: v.proposal.why, attachments: OF.metaOf(att.files),
@@ -679,10 +724,17 @@ function create(engineCtx) {
           sendAs: who.as, identity: identityFor(rec, who.as),
           ttlMs: P.PROPOSAL_TTL_MS, awaitingSince: null, edited: false, approvedBy: null, reason: null, result: null, receipt: null, receiptDelivery: null,
           history: [{ state: 'proposed', at: t, by: drafter.kind }],
+          ...(alsoIds.length ? { alsoFor: alsoIds } : {}),
         };
+        for (const sid of alsoIds) { const q = ob.proposals[sid]; if (q) q.alsoFor = [...(Array.isArray(q.alsoFor) ? q.alsoFor.filter((x) => x !== id) : []), id].slice(-ALSO_MAX); }   // both ways: the earlier card says it too
+        // lane bl-msg B-da74 cure (主开发 09:24Z): «Send the rest» is ONCE across a restart — the rest's back-link and its original's
+        // once-stamp are written IN THE SAME UPDATE that creates the rest, before anything is uploaded (a stop inside the upload leaves
+        // both on disk); transition() frees the stamp when the rest ends unsent or failed
+        if (guards && guards.restOf) { created.restOf = guards.restOf; const q0 = ob.proposals[guards.restOf]; if (q0) q0.restSentAs = id; }
       });
       OF.commit(store.dir, staged, created.id);
       staged = null;
+      if (guards && guards.restOf) notifyOutbox([guards.restOf, created.id]);   // the shoulds: every open page stops offering the rest NOW, not after the upload
       auditOutbox(created, 'propose', { mode: decision.mode, reasons: decision.reasons });
       await markCollect(created.id, guards, decision);   // lane channel-direct-send-sync: a DIRECT send whose caller waits to read the receipt inline (a review proposal is never held)
       if (decision.mode === 'direct') {
@@ -693,12 +745,14 @@ function create(engineCtx) {
     } catch (err) {
       OF.discard(staged);
       wakeRefundIfUnsent(gate, guards, convId, created && created.id, { threw: true });
+      // the cure: a rest that threw before it was sending frees its original (one that reached `sending` may have landed — it holds)
+      if (created && guards && guards.restOf) await store.outbox.update((ob) => { const q = ob.proposals[created.id], q0 = ob.proposals[guards.restOf]; if (q && q.state === 'proposed' && q0 && q0.restSentAs === created.id) delete q0.restSentAs; }).catch((e2) => log.warn(`[channels] ${guards.restOf}: its «Send the rest» stamp could not be freed after the rest threw (${(e2 && e2.message) || e2}) — a press answers rest-already until its rest ends`));
       throw err;
     }
     if (decision.mode !== 'direct') {
       await transition(created.id, 'awaiting-approval', 'policy');
       await pointerSync(en.key);
-      notifyOutbox([created.id]);
+      notifyOutbox([created.id, ...(Array.isArray(created.alsoFor) ? created.alsoFor : [])]);   // lane bl-msg B-9b9c: the linked cards redraw too
       notify([convId]);
     }
     const fresh = store.outbox.snapshot().proposals[created.id];
@@ -1258,6 +1312,31 @@ function create(engineCtx) {
   }
   /** WITHDRAW (the agent's own verb). `by` = the caller's principal as the
    *  route resolved it (`{kind:'agent', id, name, groups}`). */
+  /** lane bl-msg B-da74 («Send the rest», userW inc-mw35tppf-jrvo follow-up): a SENT proposal whose files did not all land is sent
+   *  again for ONLY those files — a NEW proposal built from the kept bytes (sent ones are kept KEEP_MS), answering the same message,
+   *  no new draft. The OWNER's door is an own send (the press is the approval); the DRAFTING agent's (`vibespace-channels resend`)
+   *  proposes it for the owner's review. Once per proposal (`restSentAs`). → propose()'s answer | a refusal by name */
+  function resendRest(id, opts = {}) { return onProposal(String(id || ''), () => resendRestNow(String(id || ''), opts)); }   // r2: ONE press at a time per proposal (a double press, the agent's resend beside the owner's)
+  async function resendRestNow(id, { ctx = null, pressed = null, guards = {} } = {}) {
+    const p = store.outbox.snapshot().proposals[id];
+    const agent = !!(ctx && ctx.kind === 'agent');
+    if (!p || (agent && !(p.draftedBy && p.draftedBy.kind === 'agent' && p.draftedBy.id === ctx.id))) return { ok: false, code: 'not-found', error: 'no such proposal of yours' };
+    if (agent && !stillSees(ctx, p.adapterId, scopeConvOf(p))) return ACL.notFound();   // r2: reach first, before any answer about it
+    if (p.state !== 'sent') return { ok: false, code: 'rest-not-sent', error: `proposal ${p.id} is ${p.state} — only a sent one has a rest to send`, state: p.state };
+    if (restHeldBy(p)) return { ok: false, code: 'rest-already', error: `the rest of ${p.id} is on its way already — proposal ${p.restSentAs}`, proposalId: p.restSentAs };   // the shoulds: a stamp a stop left on a 'proposed' rest is no «once»
+    const rest = restOf(p);
+    if (!rest.length) return { ok: false, code: 'rest-nothing-left', error: `nothing of proposal ${p.id} is left to send (it landed whole, or what did not land cannot be sent again)` };
+    if (p.attachmentsGoneAt) return { ok: false, code: 'rest-files-gone', error: `the files of ${p.id} are no longer kept — attach them again in a new reply` };
+    const metas = rest.map((r) => ({ ...(p.attachments[r.n] || {}), n: Number.isInteger((p.attachments[r.n] || {}).n) ? p.attachments[r.n].n : r.n }));
+    const vr = await OF.verify(store.dir, p.id, metas);   // r2: the bytes that leave are the bytes the person saw (sha256 + size), read off the loop
+    if (!vr || !vr.ok) return { ok: false, code: 'rest-files-gone', error: `${(vr && vr.why) || 'a file is no longer stored'} — attach it again in a new reply` };
+    const files = (vr.files || []).map((f) => ({ name: f.name, data: Buffer.from(f.data).toString('base64') }));
+    // restack-411 (the release's law, test-spend-paths §2b r3: THE PRESS IS NEVER KEPT — it rides ONE request's chain as a call's
+    // argument): the rest's input is built IN the propose call, never held in a variable
+    const r = await propose(agent ? ctx : { kind: 'user' }, p.adapterId, p.convId, { text: '', attachments: files, ...(p.replyTo ? { replyTo: p.replyTo } : {}), ...(p.placement && p.placement !== 'chat' ? { placement: p.placement } : {}), ...(p.why ? { why: p.why } : {}), ...(!agent ? { direct: true, ...(pressed ? { pressed } : {}) } : {}) }, { ...guards, restOf: p.id, ...(agent ? { forceReview: true } : {}) });   // r2: the agent's rest is always the user's to approve
+    if (r && r.ok && r.proposal && r.proposal.id) notifyOutbox([p.id, r.proposal.id]);   // the cure: the stamp and the back-link were written with the rest (propose's create update)
+    return r;
+  }
   function withdrawProposal({ proposalId, why = null, by = null } = {}) {
     const id = String(proposalId || '');
     if (!id) return Promise.resolve({ ok: false, code: 'bad-request', error: 'a proposal id is required' });
@@ -2282,7 +2361,7 @@ function create(engineCtx) {
 
   return {
     honestyLineFor, sendIdentityFor, proposalsFor, agentProposalView, stashAbout, stashGate, outboxView, notifyOutbox, sendStartsTurn,
-    outboxAttachment, filesSweep, propose, proposeReaction, proposeRecall, compose, composeEach, approve, reject, onProposal, withdrawProposal, replaceProposal,
+    outboxAttachment, filesSweep, propose, proposeReaction, proposeRecall, compose, composeEach, approve, reject, onProposal, withdrawProposal, resendRest, replaceProposal,
     noteReceiptStash, noteReceiptWakeFell, reconcileReceiptFates, reconcile, sweepSending, sweepReplaces, receipt, expireSweep, pointerSync, learnSentFiles,
     filesOfferFor,   // lane owner-composer-attach: the owner's composer judges its chips by the same offer the send reads
     releaseHeld, stopHeld,   // lane lark-send-hold: the held sends of an account go out at its reset; stop drops the timers

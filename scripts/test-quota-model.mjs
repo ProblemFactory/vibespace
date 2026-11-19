@@ -360,6 +360,7 @@ console.log('\n⑨ backend shape detection is by FIELDS, never by key name');
       ["src/server/otel-ingest.js", "names it in one warning string (\"no usage-cache orgUuid match\"); it writes the OTel stash"],
       ["src/server/spend-guard.js", "the P4 spend ceiling (2.369.81): it READS a usage-cache object through an injected dep (deps.readCacheFor, for the overage verdict) and its own writeJsonAtomic writes data/spend-budget.json — the persisted per-identity budget, a different store"],
       ["src/usage-anchors.js", "writes the ANCHOR streams (data/usage-anchors/*.ndjson) — a different store, fed BY cache writes"],
+      ["src/timed-sync.js", "names the door's read count (usage-cache/.door-reads-<account>) in its STORES table — a timing row; it writes nothing (src/door-reads.js hands the write to the store writer; lane usage-predict, law A3)"],
       ["src/server/auto-cli-loop.js", "READS usage-cache/<id>.json to pace the auto-cli rung; its own write is data/auto-cli-state.json — the loop's persisted pacing state (quota r2), a different store"],
       ['data/bin/vibespace-usage', 'the SHIPPED statusline tool: a single file on hosts with no checkout, so it cannot require src/ — the same documented exception as vibespace-usage-scan. WHAT IT MIRRORS IS THE READING-LAG RULE, byte-for-byte between sentinels and pinned by test-readings-attribution §13 (r2: round 1 said "the RULES it needs", which was true of `windowOf` and false of the MERGE — and the merge is where it deleted `limits`). It does NOT mirror the write path: it spreads the stored object, states only the buckets it measured, and DROPS the one limit it can measure so the lift reconstructs it. §⑮ drives the real file.'],
     ]);
@@ -437,6 +438,8 @@ console.log('\n⑨ backend shape detection is by FIELDS, never by key name');
       // accessor") rather than assumed here.
       ['src/account-pool-auto.js', ['view-only', 'bucketRemaining/weeklyDeadline call bucketCounts, so no empty window can become a constraint or a deadline — but they read the projected view, so ⑯c drives the projection`s own invariant']],
       ['src/usage-anchors.js', ['migrated', 'an empty bucket anchors as no-bucket, like the fabricated status:unknown one']],
+      ['src/usage-predict.js', ['migrated', 'gateEstimate only DROPS an estimated bucket by its lane\'s verdict (usage-predict) — it never writes, invents or re-reads a bucket']],
+      ['src/harnesses/claude-predict.js', ['migrated', 'Claude\'s prior table names its lanes (fiveHour, sevenDay, scoped:fable) as DATA — it reads no bucket (usage-predict pick 3)']],
       ['src/usage-estimator.js', ['migrated', 'overlayCache never replaces a bucket the raw reading marks empty']],
       ['src/reading-lag.js', ['migrated', 'windowOf skips empty windows — a sliding reset is not identity evidence']],
       ['src/oat-identity-model.js', ['migrated', 'the long-lived token\'s identity post-check (lane oat-identity-postcheck) compares windows only through reading-lag windowOf / compareWindows, which skip empty windows; it reads no usage bucket']],
@@ -456,6 +459,8 @@ console.log('\n⑨ backend shape detection is by FIELDS, never by key name');
       ['src/lib/usage-source.js', ['view-only', 'codexRefreshToast reads the ⟳ answer\'s two windows, which the engine built through quotaModel.bucketCounts — an empty window carries no reset and is said "starts on first use"']],
       ['src/routes/reset-credit.js', ['mention', 'the codex-refresh route\'s doc comment names the answer\'s fields; the route reads no bucket']],
       ['src/server/auto-resume.js', ['mention', 'one comment cites a sevenDay reset while explaining why the loop breaker keys on the WALL and not on a reset instant; it reads no bucket']],
+      // lane auto-resume-bulk (.349): the bulk resume's cost, said before the click
+      ['src/server/bulk-resume-routes.js', ['view-only', 'a member\'s 5 h % used through account-pool-auto bucketRemaining (bucketCounts: an empty window is 100 % free, never a used %), its reset only to bound the window\'s ledger rows']],
       ['src/lib/manage-agents.js', ['pending', 'the Agents roster donuts read u.fiveHour/u.sevenDay/u.scopedWeekly directly — they show the DERIVED view (now the plan limit, deterministically) but do not yet render the other limits or the not-started note']],
       ['src/lib/session-lifecycle.js', ['pending', "the billing switcher's per-account chips read the legacy pair for a one-line summary"]],
       ['src/lib/usage-pace.js', ['pending', "the pace/burn helper is a parity port of claude-swap's pace.py and reads the legacy pair verbatim"]],
@@ -2683,7 +2688,7 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     const dir = mkd('est');
     fs.writeFileSync(path.join(dir, 'anchors-org_org-n5h-r5.ndjson'), JSON.stringify({ ts: sib8.fetchedAt, fetchedAt: sib8.fetchedAt, source: 'passive', accountId: null, identityKey: 'org:org-n5h-r5',
       buckets: { fiveHour: { u: 0.905, resetsAt: sib8.fiveHour.resetsAt }, sevenDay: { u: 0.41, resetsAt: sib8.sevenDay.resetsAt }, scopedWeekly: [] }, prevFetchedAt: null, elapsedSec: null, costSince: null }) + '\n');
-    const ue = new E.UsageEstimator({ lagS: 0, anchorsDir: dir, usageHistory: { *_events() { }, _cost: () => 0 }, resolveIdentity: () => ({ identityKey: 'org:org-n5h-r5' }), priorsFor: () => E.CLAUDE_MAX_PRIOR_FULL_USD });
+    const ue = new E.UsageEstimator({ lagS: 0, anchorsDir: dir, usageHistory: { *_events() { }, _cost: () => 0 }, resolveIdentity: () => ({ identityKey: 'org:org-n5h-r5' }), priorsFor: () => require('../src/harnesses/claude-predict.js').prior });
     return ue.estimateFor('sub-n5h-r5', view8, Date.now());
   };
   const sweep8 = (E = EST) => {
@@ -2841,6 +2846,8 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
         ['src/account-pool-auto.js', 'bucketRemaining(undefined) = null (no claim): accountRemaining / bucketRems / projection rows skip it; weeklyDeadline never reads it; fingerprint prints "-"'],
         ['src/server/usage-pool-engine.js', 'a guessed 5h banner on a «no 5h» member walls its week; wall labels come from the buckets present; trippedWindowFacts/spentWindowOf filter missing buckets; the bucket-less `|| \'fiveHour\'` fold default is unreachable (every noteWallSignal caller names one)'],
         ['src/usage-estimator.js', 'estBucket/overlay/anchors guard `b.fiveHour ?` — a missing bucket is estimated as none'],
+        ['src/usage-predict.js', 'gateEstimate keeps or drops a PRESENT fiveHour by its lane verdict — an absent one stays absent'],
+        ['src/harnesses/claude-predict.js', 'a prior\'s size for the 5h lane, never a reading: an absent 5h window takes no prior (the estimator asks it only for a bucket the reading has)'],
         ['src/usage-anchors.js', '`cache.fiveHour && …` — no bucket anchors as no-bucket'],
         ['src/reading-lag.js', 'windowOf: counts(b5) — an absent 5h is fiveHour:null, never identity evidence'],
         ['src/reading-repair.js', 'every 5h read is `if (b.fiveHour)` / `?? null`; its windows carry fiveHour:null'],
@@ -2857,6 +2864,7 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
         ['src/lib/session-lifecycle.js', 'the picker chip: pctOf(undefined) = null ⇒ seg() renders nothing'],
         ['src/lib/usage-source.js', 'codexRefreshToast skips a window with no usedPercent'],
         ['src/routes/reset-credit.js', 'a doc comment names the answer\'s fields; no read'],
+        ['src/server/bulk-resume-routes.js', '`const fh = c && c.fiveHour; rem = fh ? bucketRemaining(…) : null` — a member with no 5h window has pctNow null and windowStart 0 ⇒ no measured share, the dollars still said (lane auto-resume-bulk)'],
         ['src/claude-oat-probe.js', 'the long-lived-token measurement\'s loopback MOCK answers the vendor\'s rate-limit headers (anthropic-ratelimit-unified-5h-*) to the CLI under test — it writes them, it reads no stored 5h window (lane cli-self-measure)'],
       ]);
       console.log('  … 5h readers found:', found.length);
@@ -3314,7 +3322,7 @@ console.log('\n㉒ a reset that LANDED is shown reset (unconfirmed); a member on
     '㉒e WHY THE ENGINE HANDS THE READING: the estimator overlay re-bases a rolled week onto next week\'s reset and reads as proven — judged on the reading it is a guess (usage-pool-engine poolReadReading)');
   // ㉒f RED controls — each rule on a patched copy of the real module
   const SRC = fs.readFileSync(path.join(ROOT, 'src/quota-model.js'), 'utf8');
-  const patched = (tag, from, to) => { const hit = SRC.split(from).length === 2; return { hit, mod: hit ? require(MUTC.write('src/quota-model.js', SRC.replace(from, to), tag, { esm: false })) : null }; };
+  const patched = (tag, from, to) => { const hit = SRC.split(from).length === 2; if (!hit) throw new Error(`ANCHOR GONE OR NOT UNIQUE (${SRC.split(from).length - 1} times): ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); return { hit, mod: require(MUTC.write('src/quota-model.js', SRC.replace(from, to), tag, { esm: false })) }; };
   const noGrace = patched('q22grace', 'if (mayRoll && resetSec != null && resetLanded(resetSec, now / 1000))', 'if (mayRoll && resetSec != null && resetSec * 1000 <= now /* PATCHED: the bare instant */)');
   ok(noGrace.hit && noGrace.mod.windowDisplay({ utilization: 0.9, resetsAt: R }, (R + 1) * 1000).state === 'reset-unconfirmed',
     '㉒f RED: without the grace the display calls a bucket reset 1 s after a minute-precise instant — while the pool still counts it spent (the ㉒b leg goes red)');
@@ -3371,6 +3379,14 @@ console.log('\n㉒ a reset that LANDED is shown reset (unconfirmed); a member on
     'settings-schema.js': [['its utilization stays under 100%', 'words in a setting\'s description']],
     'usage-eta.js': [['num(b.usedPercent) ?? (num(b.utilization)', 'the countdown asks «spent?» only; bucketEta refuses a reset that passed (no percentage drawn)']],
     'usage-meter.js': [
+      ["${estStat(pp5, estPop, 'fiveHour')}", 'usage-predict P2: the lane KEY names the projection\'s verdict state (the band\'s words), never a bucket\'s reading'],
+      ["${estStat(pp7, estPop, 'sevenDay')}", '…the 7-day lane\'s verdict state'],
+      ["${estStat(cpp5, cEstPop, 'fiveHour')}", '…codex\'s 5-hour lane\'s verdict state'],
+      ["${estStat(cpp7, cEstPop, 'sevenDay')}", '…codex\'s 7-day lane\'s verdict state'],
+      ["const scPop = (estPop?.scopedWeekly || []).find((x) => String(x?.name || '').toLowerCase() === String(sc.name || '').toLowerCase()) || null;", 'usage-predict law B4: the POPUP\'s own estimate of a cap (a provisional lane merged in); its bar goes through bucketView (vScP)'],
+      ["const named = new Set((e.scopedWeekly || []).map((x) => String((x && x.name) || '').toLowerCase()));", 'usage-predict law B4: popupEst merges two ESTIMATE views (ON and provisional) by scope name — no reading is read or drawn here'],
+      ["return { ...e, fiveHour: e.fiveHour || p.fiveHour || null, sevenDay: e.sevenDay || p.sevenDay || null,", '…an ON lane kept, a provisional one added where none is ON (estimate views only)'],
+      ["scopedWeekly: [...(e.scopedWeekly || []), ...(p.scopedWeekly || []).filter((x) => x && !named.has(String(x.name || '').toLowerCase()))] };", '…the provisional scoped lanes the ON view does not hold'],
       ['const claimBtn = (lane, view, capName = null)', 'lane account-reset-door: the «I reset this» button is offered on a lane\'s VIEW (bucketView — the verdict already applied) that states a spend; it draws no percent'],
       ['const pct = un ? 0 : w.usedPct', 'limitRows rows: the row\'s `display` (windowDisplay in limitRows) decides `un`'],
       ['fmtReset(w.resetsAt, (w.usedPct || 0) / 100)', '…the same row\'s reset words'],
@@ -3403,7 +3419,7 @@ console.log('\n㉒ a reset that LANDED is shown reset (unconfirmed); a member on
       ['const eRaw = estBucket ?', 'estDisplayPair (the estimate)'],
     ],
   };
-  const VIEWS22 = { 'usage-meter.js': 5, 'manage-agents.js': 3, 'session-lifecycle.js': 1 }; // v5 v7 vSc cv5 cv7 · donut, narrow pill, host pill · eff
+  const VIEWS22 = { 'usage-meter.js': 10, 'manage-agents.js': 3, 'session-lifecycle.js': 1 }; // v5 v7 vSc cv5 cv7 + the popup's own pv5 pv7 vScP cpv5 cpv7 (usage-predict law B4: a provisional lane in the popup alone) · donut, narrow pill, host pill · eff
   const strip22 = (l) => (/^\s*(\*|\/\*)/.test(l) ? '' : l.replace(/(^|\s)\/\/.*$/, ''));
   const census22 = (texts) => {
     const offenders = [], used = new Set(), counts = {};
@@ -3431,7 +3447,7 @@ console.log('\n㉒ a reset that LANDED is shown reset (unconfirmed); a member on
   const r1 = census22(swap22('usage-meter.js', 'const v5 = bucketView(quotaModel, rl?.fiveHour, estSel?.fiveHour, Date.now(), { readAt: rl?.fetchedAt });', 'const v5 = { reading: rl?.fiveHour, est: estSel?.fiveHour };'));
   ok(r1.offenders.some((o) => /^usage-meter\.js:\d+: const v5 = \{ reading: rl\?\.fiveHour/.test(o)) && r1.short.length === 1, `㉒g RED: the usage popup's 5h read raw (the taskbar pie + the phone chip ride it) is NAMED: ${JSON.stringify(r1.offenders)}`);
   const r2 = census22(swap22('usage-meter.js', 'const vSc = bucketView(quotaModel, sc, scEst, Date.now(), { readAt: rl.scopedFetchedAt || rl.fetchedAt });', 'const vSc = { reading: sc, est: scEst };'));
-  ok(r2.short.some((x) => x.startsWith('usage-meter.js: 4 ')), `㉒g RED: the scoped (Fable) bar read raw drops usage-meter's count: ${JSON.stringify(r2.short)}`);
+  ok(r2.short.some((x) => x.startsWith('usage-meter.js: 9 ')), `㉒g RED: the scoped (Fable) bar read raw drops usage-meter's count: ${JSON.stringify(r2.short)}`);
   const r3 = census22(swap22('session-lifecycle.js', 'const v = bucketView(quotaModel, raw0, e0, Date.now(), { readAt: u.fetchedAt });', 'const v = { reading: raw0, est: e0 };'));
   ok(r3.short.some((x) => x.startsWith('session-lifecycle.js: 0 ')), `㉒g RED: the billing switcher's eff read raw is NAMED: ${JSON.stringify(r3.short)}`);
   const r4 = census22(swap22('manage-agents.js', 'const v = bucketView(quotaModel, x, null, nowMs, { readAt: hu.fetchedAt });', 'const v = { reading: x };'));

@@ -562,6 +562,12 @@ vibespace-browser blocked --url <u> [--why <code>] [--evidence <text>] [--tier 2
   used by every other conversation of the user's too — the login you make in
   it is theirs as well. It runs ONE browser: a second conversation that uses
   it JOINS that browser in a WINDOW OF ITS OWN; it is never started twice.
+* **Cookies and storage: the grant is the profile, never one site in it.** A
+  conversation that holds a shared profile's lease may read and write ANY
+  site's cookies and storage in it, so a task about one site does not fence you
+  in and a person who let you use the profile for one site has not fenced you
+  out of the others — to clear a site's LOGIN there `site-reset` still asks the
+  person, and the whole jar stays theirs (`cookies clear` is refused).
 * **The user can keep a profile to SOME conversations and Task Groups** (the
   Agent browser panel's "Who can use it" → Change…). A Task Group means every
   conversation in it, now or later. `profiles` tells you only whether YOURS

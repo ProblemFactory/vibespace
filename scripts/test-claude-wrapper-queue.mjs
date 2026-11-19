@@ -32,7 +32,7 @@ import http from 'node:http';
 import { spawn, execSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { freePorts, scratch, scratchDir, scratchHome, ONBOARDED_SOURCE, vncEnv, stopWrapper, endRootedProcesses } from './scratch.mjs';
+import { freePorts, scratch, scratchDir, scratchHome, ONBOARDED_SOURCE, vncEnv, stopWrapper, endRootedProcesses, CHROME_STORE } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const WebSocket = require('ws');
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -46,7 +46,10 @@ const S = JSON.stringify;
 
 // ── §A THE REAL CLI, A LOCAL MOCK ──
 console.log('§A the real claude CLI behind the real wrapper, a local mock of the messages API (no vendor traffic)');
-const claudeBin = (() => {
+// B-ddb9 (lane bl-scratch, 2026-11-17): VS_NO_REAL_CLI=1 (every acceptance run, every lane env, the test machine) means the
+// REAL CLI is not run here — SKIP by name, whatever the PATH holds (a claude on it ran this leg under the flag before)
+const NO_REAL_CLI = process.env.VS_NO_REAL_CLI === '1';
+const claudeBin = NO_REAL_CLI ? null : (() => {
   const cands = [process.env.VS_CLAUDE_BIN, ...String(process.env.PATH || '').split(':').filter(Boolean).map((d) => path.join(d, 'claude')), path.join(process.env.HOME || '/nonexistent', '.local/bin/claude')].filter(Boolean);
   for (const c of cands) { try { const real = fs.realpathSync(c); if (fs.statSync(real).isFile() && fs.statSync(real).size > 10 * 1048576) return real; } catch { } }
   return null;
@@ -135,7 +138,7 @@ async function realRun(name, wrapperPath, longMs, script, extraArgs = []) {
   }
 }
 if (!claudeBin) {
-  skip('§A ①–⑤ the real CLI', 'no claude binary ($VS_CLAUDE_BIN, `claude` on PATH, $HOME/.local/bin/claude) — the stand-in legs in test-queue-putback §6 / test-queue-steer ⑯ still ran');
+  skip('§A ①–⑤ the real CLI', `${NO_REAL_CLI ? 'VS_NO_REAL_CLI=1 — the real claude is not run here' : 'no claude binary ($VS_CLAUDE_BIN, `claude` on PATH, $HOME/.local/bin/claude)'} — the stand-in legs in test-queue-putback §6 / test-queue-steer ⑯ still ran`);
 } else {
   const LANE = path.join(REPO, 'data/bin/chat-wrapper.js');
   // a copy of the wrapper with the HOLD switched off (every user frame forwarded at once — the pre-.354 behaviour)
@@ -255,7 +258,7 @@ else {
   procs.add(srv);
   srv.stdout.on('data', (d) => { journal = (journal + d).slice(-8000); }); srv.stderr.on('data', (d) => { journal = (journal + d).slice(-8000); });
   const chromeDir = scratchDir('cwq-chrome');
-  const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--window-size=1400,950', '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore' });
+  const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--window-size=1400,950', '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore' });
   procs.add(chrome);
   const up = await until(async () => (await fetch(`http://127.0.0.1:${PORT}/api/home`)).ok, 60000, 250);
   ok(up, '§B the scratch server answered', journal.slice(-1200));

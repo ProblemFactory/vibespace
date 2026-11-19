@@ -265,9 +265,10 @@ ok('stdout/codex-events re-stashes on peer_message_result ok:false (a promised m
 // into a bare `catch {}` on every failed delivery: the log line above said
 // "re-stashing" and nothing was stashed. This grep only pins the SPELLING; the
 // FUNCTIONAL proof (feed the record through the real stdout registry with an
-// mk()-wrapped ref and assert stashFor received it, plus a drift guard over
-// every consumer) lives in scripts/test-permission-rules.mjs, because a pin
-// like this one is exactly what made the broken line look protected.
+// mk()-wrapped ref and assert stashFor received it) lives in
+// scripts/test-permission-rules.mjs and the drift guard over every consumer in
+// scripts/test-permission-rules-pins.mjs, because a pin like this one is
+// exactly what made the broken line look protected.
 // Comment lines are exempt from the negative half — they are where the retired
 // spelling is NAMED so the next reader knows what not to write.
 const codeOnly = (src) => src.split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l)).join('\n');

@@ -161,8 +161,9 @@ function formsOf(h) {
 }
 
 // ── a server over a router ────────────────────────────────────────────────────
-async function serve(router, remoteFs) {
+async function serve(router, remoteFs, { json = false } = {}) {
   const app = express();
+  if (json) app.use(express.json({ limit: '5mb' }));   // B-3767 ⑩: a JSON route (the real server parses bodies globally)
   app.set('env', 'test'); // finalhandler: no stack traces on the console for the expected 404s
   app.locals.getRemoteFs = () => remoteFs;
   app.use(router);
@@ -612,18 +613,91 @@ console.log('⑨ lane artifacts-registries — the composer\'s upload (POST /api
     fd.append('fileNames', JSON.stringify([name]));
     if (sessionId) fd.append('sessionId', sessionId);
     fd.append('uploadDirSet', '1');   // lane chat-attachments-persist: a chosen folder — a scratch dir under /tmp is otherwise kept with the conversation
-    const r = await fetch(S.base + '/api/upload', { method: 'POST', body: fd });
-    return r.json();
+    // B-3767: a bound of its own — an upload that never answers (multer could not write its temp folder, the second test
+    // machine's 600 s hang) ends here, by name
+    try { const r = await fetch(S.base + '/api/upload', { method: 'POST', body: fd, signal: AbortSignal.timeout(15000) }); return await r.json(); }
+    catch (e) { return { success: false, noAnswer: `the upload did not answer in 15 s (${e.name}) — the route must answer every upload, a refusal by name` }; }
   };
   const j = await up('brief.pdf', 'u1');
   const k = ':' + path.join(DIR, 'up', 'brief.pdf');
   const row = live._artifacts && live._artifacts[k];
-  ok(j.success && row && row.kind === 'upload' && row.by === 'user' && row.bytes === 9, 'an upload naming its chat ⇒ that conversation\'s `upload` row by: user (its size)', row);
+  ok(j.success && row && row.kind === 'upload' && row.by === 'user' && row.bytes === 9, 'an upload naming its chat ⇒ that conversation\'s `upload` row by: user (its size)', j.noAnswer || row);
   await up('loose.txt', '');
   ok(Object.keys(live._artifacts || {}).length === 1, 'a file-explorer upload (no chat named) feeds nothing');
   const cli = fs.readFileSync(path.join(REPO, 'src/lib/chat-input.js'), 'utf8'), ut = fs.readFileSync(path.join(REPO, 'src/lib/utils.js'), 'utf8');
   ok(cli.includes('sessionId: this._sessionId, // lane artifacts-registries') && ut.includes("if (sessionId) fd.append('sessionId', sessionId);"), 'the composer\'s upload names its chat (chat-input → uploadFilesBatched → the form\'s sessionId)');
   clearTimeout(live._artifactsTimer); await S.close();
+}
+
+console.log('⑩ B-3767 — the upload\'s temp folder is THIS hub\'s own (src/server/hub-tmp.js), and one it cannot use is said by name');
+{
+  const HT = require(path.join(REPO, 'src/server/hub-tmp.js'));
+  const uid = process.getuid(), DATA = path.join(REPO, 'data');
+  const T = path.join(DIR, 'tmp10'); fs.mkdirSync(T, { recursive: true });
+  const prevTmp = process.env.TMPDIR; process.env.TMPDIR = T;   // os.tmpdir() reads it at each call: the hub's root lands in this scratch
+  const S = await serve(filesRouter, null, { json: true });
+  const post = async () => {
+    const fd = new FormData();
+    fd.append('files', new Blob([Buffer.from('ten\n')]), 'ten.txt'); fd.append('destDir', path.join(DIR, 'up10')); fd.append('fileNames', JSON.stringify(['ten.txt'])); fd.append('uploadDirSet', '1');
+    try { const r = await fetch(S.base + '/api/upload', { method: 'POST', body: fd, signal: AbortSignal.timeout(15000) }); return { status: r.status, j: await r.json() }; } catch (e) { return { status: 'no answer', j: { error: e.name } }; }
+  };
+  try {
+    const root = HT.hubTmpRoot({ dataDir: DATA, tmpRoot: T, uid });
+    const a = await post();
+    const mode = (() => { try { return fs.statSync(path.join(root, 'uploads')).mode & 0o777; } catch { return null; } })();
+    ok(a.status === 200 && a.j.success && fs.existsSync(path.join(DIR, 'up10', 'ten.txt')) && mode === 0o700,
+      `B-3767: an upload's temp lands in the hub's own folder ${path.basename(root)}/uploads (0700, keyed by user and data folder), never a machine-wide name: ${JSON.stringify({ status: a.status, mode: mode && mode.toString(8) })}`);
+    fs.rmSync(path.join(root, 'uploads'), { recursive: true, force: true });
+    fs.symlinkSync(path.join(DIR, 'elsewhere10'), path.join(root, 'uploads'));
+    const b = await post();
+    ok(b.status === 500 && b.j.code === 'hub_tmp_refused' && b.j.error.includes(path.join(root, 'uploads')) && /SYMLINK/.test(b.j.error) && /the way out: .*TMPDIR/.test(b.j.error),
+      `B-3767: a temp folder the hub cannot use (here a link) is the upload's answer BY NAME, with the path and the way out — never a hang: ${JSON.stringify(b)}`);
+    const st = (o) => ({ isSymbolicLink: () => !!o.link, isDirectory: () => o.dir !== false, uid: o.uid ?? uid, mode: o.mode ?? 0o40700 });
+    ok(/owned by uid/.test(HT.ownVerdict(st({ uid: uid + 1 }), { uid })) && !/socket/.test(HT.ownVerdict(st({ uid: uid + 1 }), { uid })) && /group\/other/.test(HT.ownVerdict(st({ mode: 0o40777 }), { uid })) && /group\/other/.test(HT.ownVerdict(st({ mode: 0o40755 }), { uid })) && /not a directory/.test(HT.ownVerdict(st({ dir: false }), { uid })) && HT.ownVerdict(st({}), { uid }) === null,
+      "B-3767: the verdict (sock-path's own) refuses another user's folder, one open to others (0777 and 0755 alike), and a file; this user's private folder passes");
+    // «open in editor»: the hub names its own temp file (POST /api/file/temp) — a plain name only; a folder it cannot use, by name
+    const tmpFile = async (body) => { const r = await fetch(S.base + '/api/file/temp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(15000) }); return { status: r.status, j: await r.json() }; };
+    const e1 = await tmpFile({ name: 'chat-block-1.txt', content: 'the block' });
+    ok(e1.status === 200 && e1.j.path === path.join(root, 'editor', 'chat-block-1.txt') && fs.readFileSync(e1.j.path, 'utf8') === 'the block', `B-3767: POST /api/file/temp writes into the hub's own editor folder and answers the path: ${JSON.stringify(e1)}`);
+    const e2 = await tmpFile({ name: '../escape.txt', content: 'x' });
+    ok(e2.status === 400 && e2.j.code === 'bad_name' && !fs.existsSync(path.join(root, 'escape.txt')), `B-3767: …a name that is not a plain file name is refused (${e2.status} ${e2.j.code})`);
+    fs.rmSync(path.join(root, 'editor'), { recursive: true, force: true }); fs.symlinkSync(path.join(DIR, 'elsewhere10e'), path.join(root, 'editor'));
+    const e3 = await tmpFile({ name: 'chat-block-2.txt', content: 'x' });
+    ok(e3.status === 500 && e3.j.code === 'hub_tmp_refused' && e3.j.error.includes(path.join(root, 'editor')) && /the way out: .*TMPDIR/.test(e3.j.error), `B-3767: …and a folder it cannot use is its answer by name, with the path: ${JSON.stringify(e3)}`);
+    const cr = fs.readFileSync(path.join(REPO, 'src/lib/chat-renderers.js'), 'utf8');
+    ok(cr.includes("fetch('/api/file/temp'") && !cr.includes("'/tmp/claude-webui") && cr.includes(".then((tmpPath) => {"), "B-3767: the client asks the hub for its temp file and opens the path the hub answered (it spells no /tmp folder)");   // stale-pins: kept — an absence check: the client spells no /tmp folder
+    ok(HT.hubTmpRoot({ dataDir: '/a/data', tmpRoot: '/t', uid: 7 }) !== HT.hubTmpRoot({ dataDir: '/b/data', tmpRoot: '/t', uid: 7 }) && HT.hubTmpRoot({ dataDir: '/a/data', tmpRoot: '/t', uid: 7 }) !== HT.hubTmpRoot({ dataDir: '/a/data', tmpRoot: '/t', uid: 8 }),
+      'B-3767: two hubs (two data folders) and two users never share a folder');
+    // B-3767 unit 2 (主开发 11:40Z, B-4371): THE AGE SWEEP OF THE HUB'S OWN ROOT — in its purposes an old file goes and a fresh one
+    // stays, a link is removed as a link (its target kept), a purpose folder that is not ours is skipped and said (nothing behind
+    // it touched), and nothing outside the root is ever looked at. RED control: the sweep without the purpose judgment deletes
+    // through a planted link.
+    {
+      const SR = path.join(DIR, 'sweep10'), dataX = '/srv/x/data', uidX = process.getuid();
+      const rootX = HT.hubTmpRoot({ dataDir: dataX, tmpRoot: SR, uid: uidX });
+      const OLD = (Date.now() - 48 * 3600 * 1000) / 1000;
+      const mk = (f, body = 'x', old = true) => { fs.mkdirSync(path.dirname(f), { recursive: true, mode: 0o700 }); fs.writeFileSync(f, body); if (old) fs.utimesSync(f, OLD, OLD); return f; };
+      fs.mkdirSync(rootX, { recursive: true, mode: 0o700 }); fs.chmodSync(rootX, 0o700);
+      const oldUp = mk(path.join(rootX, 'uploads', 'old-upload.bin')), freshUp = mk(path.join(rootX, 'uploads', 'fresh.bin'), 'x', false);
+      const target = mk(path.join(SR, 'outside', 'target.txt')), link = path.join(rootX, 'editor', 'old-link');
+      fs.mkdirSync(path.dirname(link), { recursive: true, mode: 0o700 }); fs.symlinkSync(target, link); fs.lutimesSync(link, OLD, OLD);
+      const victim = mk(path.join(SR, 'victim', 'old-in-victim.bin')); fs.symlinkSync(path.dirname(victim), path.join(rootX, 'paste'));
+      const sharedOld = mk(path.join(SR, 'claude-paste-1.png'));   // in the shared temp folder, not in the root
+      for (const d of [path.join(rootX, 'uploads'), path.join(rootX, 'editor')]) fs.chmodSync(d, 0o700);
+      const r = await HT.sweepHubTmp({ dataDir: dataX, tmpRoot: SR, uid: uidX });
+      const there = (f) => { try { fs.lstatSync(f); return true; } catch { return false; } };
+      ok(!there(oldUp) && there(freshUp) && !there(link) && there(target) && there(victim) && there(sharedOld) && r.refused.length === 1 && r.refused[0].includes(path.join(rootX, 'paste')) && /SYMLINK/.test(r.refused[0]),
+        `B-3767 unit 2: the age sweep of the hub's own root — the old upload and the old link go (the link's target stays), the fresh file stays, a planted purpose folder is refused by name and nothing behind it is touched, the shared temp folder is never looked at: ${JSON.stringify({ removed: r.removed.length, kept: r.kept, refused: r.refused })}`);
+      const htSrc = fs.readFileSync(path.join(REPO, 'src/server/hub-tmp.js'), 'utf8'), JUDGE = '    if (!(await own(d))) continue;\n';
+      const victim2 = mk(path.join(SR, 'victim', 'old-in-victim-2.bin'));
+      const HT0 = M.load('src/server/hub-tmp.js', htSrc.replace(JUDGE, ''), 'nojudge');
+      await HT0.sweepHubTmp({ dataDir: dataX, tmpRoot: SR, uid: uidX });
+      ok(htSrc.includes(JUDGE) && !there(victim2), `CONTROL B-3767 unit 2: without the purpose judgment the sweep deletes through the planted link (red): ${there(victim2) ? 'kept' : 'deleted'}`);
+      const filesSrc = fs.readFileSync(path.join(REPO, 'src/routes/files.js'), 'utf8');
+      ok(/sweepOwnTmp\(\); upload\.array\('files'\)/.test(filesSrc) && (filesSrc.match(/\n\s+sweepOwnTmp\(\);\n/g) || []).length === 2,
+        'B-3767 unit 2: the roads that write into the root ask the sweep (upload, temp file, paste) — throttled, never awaited');
+    }
+  } finally { if (prevTmp === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = prevTmp; await S.close(); }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

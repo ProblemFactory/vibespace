@@ -168,6 +168,12 @@ console.log('the SERVED view round-trips (GET /api/hosts → the row\'s summary,
   ok(back.every((b, i) => !b.mode && J(E.summaryOf(b)) === J(E.summaryOf(shapes[i])) && E.exitStamp(b) === E.exitStamp(shapes[i])), 'exitView → accessOfView is the identity on every shape (summary and stamp alike) — a spelled-out default hub included', back.map((b) => b.mode || 'ok'));
   const { hub: _h, ...noHub } = E.exitView(shapes[1]);
   ok(J(E.summaryOf(E.accessOfView(noHub))) === J(E.summaryOf(shapes[1])) && E.accessOfView(noHub).hub.mode === 'default', 'a view WITHOUT a hub (the hosts row omits an unset one) reads back the same (the instance\'s default)');
+  // B-cb72: the row door's accent through the ONE reader — nobody at rest, a grant open to someone lit, a list that cannot be read never lit
+  const gNobody = { use: { mode: 'nobody' }, run: { mode: 'nobody' } }, gEvery = { use: { mode: 'everyone' }, run: { mode: 'nobody' } }, gBogus = { use: { mode: 'everyone' }, run: { mode: 'bogus' } };
+  ok(typeof E.grantedOf === 'function' && E.grantedOf(gNobody) === false && E.grantedOf(gEvery) === true && E.grantedOf({ mode: 'unknown' }) === false && E.grantedOf(gBogus) === false && E.grantedOf(null) === false,
+    'B-cb72 grantedOf: nobody ⇒ at rest; a grant open to someone ⇒ the accent; «unknown», an unknown mode or no view ⇒ never the accent (the words say «unreadable» there)');
+  const rawReader = (x) => !!(x && ((x.use && x.use.mode && x.use.mode !== 'nobody') || (x.run && x.run.mode && x.run.mode !== 'nobody')));   // the first cut's raw read
+  ok(rawReader(gBogus) === true, 'CONTROL: the raw-mode read (the first cut) lights a list the words call «unreadable» — the leg above tells them apart');
 }
 console.log('agentView · stamp · base · patch');
 {
@@ -313,7 +319,7 @@ function world({ Mgr = ExitProxyManager, Todos = UserTodoManager } = {}) {
   const mgr = new Mgr({ hosts, grants, log: () => {}, dataDir, userTodos: todos, sessionsMap: () => sessions, bcastAll: (m) => bc.push(m), now: () => clock, timers: T,
     emitCard: (s, c) => { cards.push({ s: s.name, ...c }); return true; },
     groupsOf: (s) => { if (groupsThrow) throw new Error('task store unreadable'); return (membership[s.claudeSessionId] || []).map((id) => ({ id })); } });
-  return { mgr, grants, recs, hosts, online, runs, dm, todos, sessions, membership, cards, bc, dataDir, advance, setGate: (p) => { runGate = p; }, setThrow: (b) => { groupsThrow = b; }, audit: () => fs.readFileSync(path.join(dataDir, 'exit-audit.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)) };
+  return { mgr, grants, recs, hosts, online, runs, dm, todos, sessions, membership, cards, bc, dataDir, advance, setGate: (p) => { runGate = p; }, setThrow: (b) => { groupsThrow = b; }, audit: () => { const out = [], ids = new Set(); let t = ''; try { t = fs.readFileSync(path.join(dataDir, 'exit-audit.jsonl'), 'utf8'); } catch { } for (const l of [...t.split('\n'), ...(mgr._jr ? mgr._jr.pending() : []).map((x) => x.replace(/\n$/, ''))]) { if (!l.trim()) continue; let j = null; try { j = JSON.parse(l); } catch { continue; } if (j && j.id) { if (ids.has(j.id)) continue; ids.add(j.id); } out.push(j); } return out; } };
 }
 const tick = () => new Promise((r) => setImmediate(r));
 const settle = async (p) => { try { return { v: await p }; } catch (e) { return { e }; } };
@@ -898,9 +904,9 @@ console.log('controls (patched copies)');
   // (f) the manager without stillGranted — a revoke during the wait no longer stops the run
   const msrc = fs.readFileSync(path.join(REPO, 'src/exit-proxy.js'), 'utf8');
   const ms = msrc.replace("if (answer === 'revoked') { card({ outcome: 'not_granted', cmd }); throw this._refused(session, sessionId, { code: 'not_granted', grant: 'run', h, has: j.has, cmd }); }", '')
-    .replace("const again = E.exitVerdict(this.access(h.id), 'run', this.ctxFor(session, sessionId));", "const again = { ok: true, via: 'session' };")
-    .replace("        const kwhy = !s ? 'conversation-gone' : (endedH.has(k.hostId) || !E.exitVerdict(this.access(k.hostId), 'run', this.ctxFor(s, k.sessionId)).ok) ? 'revoked' : null;", "        const kwhy = !s ? 'conversation-gone' : null;"); // verify-r3: setAccess re-judges through THE ONE rejudgeAll — its ask branch is what a revoke settles
-  ok(ms !== msrc && !ms.includes("? 'revoked' : null;"), '(f) the patch applies (all three edits)');
+    .replace("const again = E.exitVerdict(accNow, 'run', ctxNow);", "const again = { ok: true, via: 'session' };")   // B-48a4 U3 + (B): run's stillGranted line
+    .replace("        const kwhy = !s ? 'conversation-gone' : (endedH.has(k.hostId) || (() => { const c = this.ctxFor(s, k.sessionId); return this._endsOn(E.exitVerdict(this.access(k.hostId), 'run', c), c); })()) ? 'revoked' : null;", "        const kwhy = !s ? 'conversation-gone' : null;"); // verify-r3: setAccess re-judges through THE ONE rejudgeAll — its ask branch is what a revoke settles
+  ok(ms !== msrc && !ms.includes("? 'revoked' : null;") && ms.includes("const again = { ok: true, via: 'session' };"), '(f) the patch applies (all three edits — run\'s stillGranted line among them: the plant proves itself first)');
   const MF = M.load('src/exit-proxy.js', ms, 'nostill').ExitProxyManager;
   const w = world({ Mgr: MF });
   const A2 = w.sessions.get('wa');
@@ -945,7 +951,7 @@ console.log('controls (patched copies)');
   const rj = await pj;
   ok(still === 1 && aj.v && aj.v.state === 'allowed' && rj.v && rj.v.code === 0 && wj.runs.length === 1, 'CONTROL (j): without the subscription the item is done while the ask still waits and is then ALLOWED — the ask-b legs go red');
   // (k) verify-r2 (the open connection): the re-judge without its ask loop — B left G, its waiting ask still stands
-  const mk2 = msrc.replace("        const kwhy = !s ? 'conversation-gone' : (endedH.has(k.hostId) || !E.exitVerdict(this.access(k.hostId), 'run', this.ctxFor(s, k.sessionId)).ok) ? 'revoked' : null;", "        const kwhy = !s ? 'conversation-gone' : null;"); // verify-r3: the ask branch of THE ONE re-judge
+  const mk2 = msrc.replace("        const kwhy = !s ? 'conversation-gone' : (endedH.has(k.hostId) || (() => { const c = this.ctxFor(s, k.sessionId); return this._endsOn(E.exitVerdict(this.access(k.hostId), 'run', c), c); })()) ? 'revoked' : null;", "        const kwhy = !s ? 'conversation-gone' : null;"); // verify-r3: the ask branch of THE ONE re-judge
   ok(mk2 !== msrc, '(k) the patch applies');
   const MK = M.load('src/exit-proxy.js', mk2, 'norejudgeask').ExitProxyManager;
   const wk = world({ Mgr: MK });

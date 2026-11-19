@@ -72,7 +72,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, CHROME_STORE } from './scratch.mjs';
+import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 import { judgeHoverOpen } from './pen-hover-judge.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for the server this suite boots (never the machine-global :7/5901 — test-architecture §57)
@@ -84,9 +85,10 @@ if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 if (!fs.existsSync(path.join(repo, 'public/bundle.js'))) { console.error('  ✗ public/bundle.js missing — run `npm run build` first'); process.exit(1); }
 
 const [PORT, CDP_PORT] = await freePorts(2);
-const wt = scratch('taskbar-group-smoke');
+const root = mintRoot('taskbar-group-smoke'), wt = path.join(root, 't');
+const chromeHome = path.join(root, 'chrome-home'); fs.mkdirSync(chromeHome, { recursive: true });   // rule nine (hub-boot.mjs): the suite's own browser carries a HOME in the root, so the helper ends it before the root goes
 const PROFILE = scratch('taskbar-group-chrome');
-const HOME = scratchHome('taskbar-group-home', fs);
+const fakeHome = path.join(root, 'home'); for (const d of ['.claude/projects', '.claude/sessions', '.config', '.vibespace']) fs.mkdirSync(path.join(fakeHome, d), { recursive: true }); // the hub's HOME lies in its root (hub-boot.mjs)
 const SHOTS = scratch('taskbar-group-shots'); // kept for the human look, swept by the gate's reaper
 fs.mkdirSync(SHOTS, { recursive: true });
 let failed = 0, passed = 0;
@@ -99,27 +101,23 @@ const ARGV = process.argv.slice(2);
 const argOf = (k, d) => { const i = ARGV.indexOf(k); return i >= 0 && ARGV[i + 1] !== undefined ? ARGV[i + 1] : d; };
 const ONLY = argOf('--only', null), TRIALS = Math.max(1, +argOf('--trials', 1) || 1), THROTTLE = Math.max(1, +argOf('--throttle', 1) || 1), TRACE = ARGV.includes('--trace'), PENDING = ARGV.includes('--pending-layout');
 
-try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js', 'package.json']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, HOME, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
+const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' } });
 // a REAL mouse (headless linux chrome answers hover:none / pointer:none without these — test-gear-menu's measurement)
 const REAL_MOUSE = '--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4';
-const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
+const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
   '--no-sandbox', '--disable-dev-shm-usage', '--window-size=1280,800', REAL_MOUSE,
-  '--disable-background-timer-throttling', `--user-data-dir=${PROFILE}`, 'about:blank'], { stdio: 'ignore' });
+  '--disable-background-timer-throttling', `--user-data-dir=${PROFILE}`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, HOME: chromeHome } });
 const cleanup = () => {
   try { chrome.kill('SIGKILL'); } catch {}
-  try { srv.kill('SIGKILL'); } catch {}
-  try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
-  for (const d of [PROFILE, HOME]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
+  try { fs.rmSync(PROFILE, { recursive: true, force: true }); } catch {}
 };
 process.on('exit', cleanup);
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
 
-for (let i = 0; i < 80; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); break; } catch { await sleep(250); } }
+await hub.ready();
 
 // ── raw CDP ──
 const WebSocket = require('ws');

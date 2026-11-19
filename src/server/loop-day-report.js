@@ -246,7 +246,7 @@ function create({ log = console, census = async () => null, foldCensus = null, s
   const browsersNow = (t) => { try { return browsers(t) || null; } catch { return null; } };
 
   /** a hold the watchdog booked (src/server/loop-holds.js onEach) into the current hour */
-  function onHold(f) { if (f) LDR.holdAdd(cur, { ms: f.ms, verdict: f.verdict, frame: f.frame, boot: !!f.boot }); }   // the boot's own hold apart (R5)
+  function onHold(f) { if (f) LDR.holdAdd(cur, { ms: f.ms, verdict: f.verdict, frame: f.frame, boot: !!f.boot, noOurs: f.noOurs === true }); }   // the boot's own hold apart (R5)
 
   /** THE CUT: the hour so far is swapped out FIRST (a hold during the reads below counts in the next hour), then the census
    *  and the process table are read asynchronously, then ONE line */

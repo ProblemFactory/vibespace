@@ -60,7 +60,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, takeCspReports } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, takeCspReports, CHROME_STORE } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs'; // ⑳'s RED CONTROL: the patched copy lives outside the checkout
 import { buildPatchedBundle } from './pairing-ui-harness.mjs'; // …built into a client bundle the control page is served
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (never the machine-global :7/5901 — test-architecture §57)
@@ -209,7 +209,7 @@ process.stdin.on('end', () => process.exit(0));
 const SRV_PATH = AB_DIR + ':' + (process.env.PATH || ''); // ⑭'s browser CLI first
 const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PATH: SRV_PATH, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
 const chromeDir = `${wt}-chrome`;
-const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
+const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
   '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore' });
 let cleaned = false;
 const cleanup = () => {
@@ -740,8 +740,7 @@ try {
     const wsrc = fs.readFileSync(path.join(repo, 'src/lib/inbox-window.js'), 'utf8');
     const LANE = '    c.ta.disabled = false;', PRE = '    c.ta.disabled = !v.reply.enabled;';
     check('control: the lane\'s line is in the window module exactly once (the patched copy swaps it back to the pre-lane line)', wsrc.split(LANE).length === 2 && !wsrc.includes(PRE));
-    check('vault-run-ask (the run card) renders VERBATIM, never markdown — its type is in the isCmd command list so a `*` or `#` in the command line shows as typed (SEAM int330, q-043 P0-f)', /const isCmd = [^;]*vault-run-ask/.test(wsrc), (wsrc.match(/const isCmd = [^;]*;/) || [])[0]);
-    check('vault-grant-ask (the agent\'s request card) renders VERBATIM, never markdown — its type is in the `plain` list so the entry ref and the agent\'s OWN words (a `*`, a `# y`, two lines) show as typed, escaped (SEAM int331, q-043 P0-c / vault-scrub-forms §8)', /const plain = [^;]*vault-grant-ask/.test(wsrc), (wsrc.match(/const plain = [^;]*;/) || [])[0]);
+    // (the two cards render VERBATIM — source pins — MOVED to the fast scripts/test-inbox-window-ui-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
     const MUT = mutantCopies('inbox-window-ui-dead', repo);
     const bundleText = await buildPatchedBundle(MUT, 'src/lib/inbox-window.js', wsrc.split(LANE).join(PRE), 'pre-lane');
     for (const row of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 1, label: '⑳ ' })) check(row.name, row.pass, row.detail);

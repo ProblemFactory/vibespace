@@ -454,7 +454,7 @@ const WIN_BTN_GAPS = `(() => [...document.querySelectorAll('.window .window-cont
  *  A word, not a text node's line box (CI hotfix .358): a user message is pre-wrap, so the space that ends a wrapped line
  *  HANGS past the content box (CSS Text 3 §4.1.3) — under DejaVu Sans the one after «refund» hung 4 px into the Fork
  *  button's 2 px margin (the runner's ✗ [639,108,643,641]); an invisible space covers no word. `spaces` counts them, unjudged */
-const BTN_OVER_TEXT = `(() => { const win = [...document.querySelectorAll('.window')].filter((w) => w.querySelector('.chat-message-list')).sort((a, b) => (+b.style.zIndex || 0) - (+a.style.zIndex || 0))[0]; if (!win) return null; const bad = []; let n = 0, spaces = 0;
+const BTN_OVER_TEXT = `(() => { const win = [...document.querySelectorAll('.window')].filter((w) => w.querySelector('.chat-message-list')).sort((a, b) => (+b.style.zIndex || 0) - (+a.style.zIndex || 0))[0]; if (!win) return null; const bad = []; let n = 0, spaces = 0; /* stale-pins: kept — a coincidence of short text («continue; … if»), not a pin of settings-view.js */ /* stale-pins: kept — the suite's own browser snippet, not a pin */
   for (const m of win.querySelectorAll('.chat-msg')) { const btns = [...m.querySelectorAll(':scope > .chat-open-editor-btn')].map((b) => b.getBoundingClientRect()).filter((r) => r.width > 0); if (!btns.length) continue; n++;
     const text = m.querySelector('.chat-text'); if (!text) continue; const tw = document.createTreeWalker(text, NodeFilter.SHOW_TEXT); let node;
     const under = (rg) => [...rg.getClientRects()].find((lr) => lr.width >= 1 && btns.some((br) => lr.left < br.right - 0.5 && lr.right > br.left + 0.5 && lr.top < br.bottom - 0.5 && lr.bottom > br.top + 0.5));
@@ -490,11 +490,39 @@ const tileReady = async (id, want) => {
   return { waitedMs: Date.now() - t0, ok: !!want(st), ...st };
 };
 /** int360: one tile press's wait, printed; over 450 ms or on the bound = a NAMED row (never a failure by itself) */
-const tilePress = (tag, n, r, what) => {
+const tilePress = (tag, n, r, what, reached = null) => {
   const facts = `{waitedMs ${r.waitedMs}, active ${r.active}, reachable ${r.reachable}, min ${r.min}, box ${J(r.box)}}`;
-  if (r.waitedMs > 450 || !r.ok) console.log(`  ⓘ NAMED ① ${tag}: tile press ${n} waited ${r.waitedMs} ms for «${what}»${r.ok ? '' : ' and ended on the 2 s bound'} ${facts}`);
+  const rec = reached ? ` · what press ${n - 1} reached: ${J(reached)}` : '';
+  if (r.waitedMs > 450 || !r.ok) console.log(`  ⓘ NAMED ① ${tag}: tile press ${n} waited ${r.waitedMs} ms for «${what}»${r.ok ? '' : ' and ended on the 2 s bound'} ${facts}${rec}`);
   else console.log(`    ① ${tag}: tile press ${n} after ${r.waitedMs} ms (${what}) ${facts}`);
 };
+/** B-6cf9's remainder (the close's rule (c): a raw press at a coordinate reads what stands there first). The «async settle»
+ *  was never seen: in the 13 kept whole runs (8 faces each) all 104 first presses found the window active and reachable at
+ *  the first poll (≤ 14 ms). The red that stayed is a press that did not take: at 951x585-DejaVu the first press left the
+ *  window unminimized for the whole 2 s (3 of those 13 runs, box claims under load; green alone). So each tile press first reads what stands at its point, as a COUNTED check, and
+ *  arms a recorder: the document's capture-phase mousedown / mouseup / click (it runs before the tile's own listener, so it
+ *  holds the state the tile's handler reads), a bubble-phase «click-after» (the state the handlers left) and the strip's
+ *  redraws (#taskbar-items losing its children) in between. readTilePress() hands the record back; a wait that ends on the
+ *  bound prints it, and the final ① check carries it. A window whose tile is not on screen gets NO press: a NAMED row says
+ *  what the strip held, the real faces' «clicked twice» is red, and the RED control claims nothing about its presses. */
+const TILE_DESC = `const desc = (t) => !t || !t.tagName ? String(t) : t.tagName.toLowerCase() + (t.id ? '#' + t.id : '') + (typeof t.className === 'string' && t.className.trim() ? '.' + t.className.trim().split(/\\s+/).slice(0, 3).join('.') : '') + (t.closest && t.closest('.taskbar-item') ? ' in tile ' + t.closest('.taskbar-item').dataset.winId : '');`;
+const armTilePress = async (tag, n, id, p) => {   // `p` = the point the press will use, whole pixels (mouse() rounds the same way)
+  const top = await evalJs(`(() => { ${TILE_DESC} const e = document.elementFromPoint(${p.x}, ${p.y}); const t = e && e.closest ? e.closest('.taskbar-item') : null;
+    return { at: desc(e), tile: t ? t.dataset.winId : null }; })()`).catch((e) => ({ at: 'unread: ' + e.message, tile: null }));
+  check(`① ${tag}: tile press ${n} — what stands at its point is the window's own tile: ${String(top.at).replace(/ in tile .*$/, '')}`, top.tile === id, { ...top, want: id, at: [p.x, p.y] });
+  const armed = await evalJs(`(() => { ${TILE_DESC} const ID = ${J(id)};
+    if (window.__tilePress) window.__tilePress.off();
+    const ac = new AbortController(), rec = { ev: [], redraws: 0 }, box = document.getElementById('taskbar-items');
+    const mo = box ? new MutationObserver((ms) => { for (const m of ms) if (m.removedNodes.length) rec.redraws++; }) : null;
+    if (mo) mo.observe(box, { childList: true });
+    for (const type of ['mousedown', 'mouseup', 'click']) document.addEventListener(type, (e) => { const w = app.wm.windows.get(ID);
+      rec.ev.push({ type, on: desc(e.target), live: !!(e.target && e.target.isConnected), redraws: rec.redraws, active: app.wm.activeWindowId === ID, reachable: app.wm.isReachable ? app.wm.isReachable(ID) !== false : true, min: !!(w && w.isMinimized) }); }, { capture: true, signal: ac.signal });
+    document.addEventListener('click', () => { const w = app.wm.windows.get(ID); rec.ev.push({ type: 'click-after', active: app.wm.activeWindowId === ID, min: !!(w && w.isMinimized) }); }, { signal: ac.signal });
+    rec.off = () => { ac.abort(); if (mo) mo.disconnect(); };
+    window.__tilePress = rec; return true; })()`).catch((e) => 'unarmed: ' + e.message);
+  return { onTile: top.tile === id, armed };
+};
+const readTilePress = () => evalJs(`(() => { const r = window.__tilePress; if (!r) return null; r.off(); window.__tilePress = null; return { ev: r.ev, redraws: r.redraws }; })()`).catch((e) => ({ unread: e.message }));
 /** the legs RED in the control, shared by both runs (`red` = the mutant: the verdicts are inverted) */
 const legDragOverTaskbar = async (tag) => {
   await closeAll(); await attach(0); await attach(1); await attach(2);
@@ -510,20 +538,30 @@ const legDragOverTaskbar = async (tag) => {
   // the state it assumes (int360 — 主开发's ruling, the 450 ms clock before the first press was a race: 2 reds in 4 whole runs,
   // {min, active} = press 1 took the tile handler's activate road): press 1 = the dragged window ACTIVE and REACHABLE by the wm's
   // own reading (isReachable, the handler's branch; the RED copy's window is buried by design — active only), press 2 = it
-  // minimized; each bounded 2 s and printed. A wait over 450 ms or one that ended on the bound is a NAMED row, not a failure
-  // (product evidence: a drop whose active / reachable state settles asynchronously — the backlog line's next step).
+  // minimized; each bounded 2 s and printed. A wait over 450 ms or one that ended on the bound is a NAMED row, not a failure.
+  // B-6cf9: the drop's state does NOT settle late (the release is synchronous: endDrag → snap → _keepReachable, the focus at
+  // the press; every kept log read press 1's state at the first poll); each press reads what stands at its point (armTilePress).
   const red = tag === 'RED';
   const p1 = await tileReady(id, (s) => s.active && (red || s.reachable));
   tilePress(tag, 1, p1, red ? 'active' : 'active and reachable');
   const tile = await centre(`.taskbar-item[data-win-id="${id}"]`);
+  const presses = [];
+  let strip = null;
   if (tile) {
-    await click(tile);
-    const p2 = await tileReady(id, (s) => s.min);
-    tilePress(tag, 2, p2, 'minimized');
-    await click(tile); await sleep(300);
+    const pt = { x: Math.round(tile.x), y: Math.round(tile.y) };
+    const a1 = await armTilePress(tag, 1, id, pt);
+    let p2;
+    try { await click(pt); p2 = await tileReady(id, (s) => s.min); } finally { presses.push((await readTilePress()) || { unarmed: a1.armed }); }
+    tilePress(tag, 2, p2, 'minimized', presses[0]);
+    const a2 = await armTilePress(tag, 2, id, pt);
+    try { await click(pt); await sleep(300); } finally { presses.push((await readTilePress()) || { unarmed: a2.armed }); }
+  } else {
+    strip = await evalJs(`(() => [...document.querySelectorAll('#taskbar-items > .taskbar-item')].map((t) => { const r = t.getBoundingClientRect(); return t.dataset.winId + ' ' + Math.round(r.width) + 'x' + Math.round(r.height); }))()`).catch((e) => 'unread: ' + e.message);
+    console.log(`  ⓘ NAMED ① ${tag}: the window's tile (${id}) was not on screen — neither press was made; the strip held ${J(strip)}`);
   }
   const afterTiles = await evalJs(BOX(id));
-  return { id, ws, after, afterTiles };
+  if (afterTiles && presses.length) afterTiles.presses = presses;   // a red «clicked twice» says what each press reached
+  return { id, ws, after, afterTiles, pressed: presses.length === 2, strip };
 };
 const legTaskbar = async () => {
   await closeAll(); await attach(0); await attach(1); await openFiles(13);
@@ -657,7 +695,7 @@ const runViewport = async ([VW, VH], font) => {
   await step(`${tag} ① the release never buries a window`, async () => {
     const d = await legDragOverTaskbar(tag);
     check(`① ${tag}: Quad — a title bar released over the taskbar keeps ${d.after.bar[0]}×${d.after.bar[1]} of it inside the workspace (≥ 80×32) (P2-1)`, reachableBar(d.after), d.after);
-    check(`① ${tag}: …and its tile, clicked twice, leaves it reachable (${d.afterTiles.bar[0]}×${d.afterTiles.bar[1]})`, reachableBar(d.afterTiles) && !d.afterTiles.min, d.afterTiles);
+    check(`① ${tag}: …and its tile, clicked twice, leaves it reachable (${d.afterTiles.bar[0]}×${d.afterTiles.bar[1]})`, d.pressed && reachableBar(d.afterTiles) && !d.afterTiles.min, d.pressed ? d.afterTiles : { notPressed: 'the tile was not on screen', strip: d.strip });
     await layout('freeform');
     await evalJs(`app.settings.set('layout.enableDragSnap', false)`);
     const id = d.id;
@@ -1323,7 +1361,8 @@ const acceptanceAndControls = async () => {
     await load(1024, 600); await closeAll(); await evalJs(`app.sidebar.toggle(true)`); await sleep(500);
     const d = await legDragOverTaskbar('RED');
     check('RED P2-1: Quad — a title bar released over the taskbar is BURIED (under 80×32 of it inside)', !reachableBar(d.after), d.after);
-    check('RED P2-1: …and its tile, clicked twice, leaves it buried', !reachableBar(d.afterTiles), d.afterTiles);
+    if (d.pressed) check('RED P2-1: …and its tile, clicked twice, leaves it buried', !reachableBar(d.afterTiles), d.afterTiles);
+    else console.log(`  ⓘ NAMED RED P2-1: …its tile was not on screen, so it was never clicked — this control claims nothing about the two presses (B-6cf9: every kept log; the strip ${J(d.strip)})`);
     const t = await legTaskbar();
     check('RED P2-2: 15 windows — no «+N» chip, 60 px tiles, the wheel inert, 8 desktops piled as previews', !t.s0.chip && t.s0.rows.some((r) => r.w < 90) && t.s1.scroll[0] === t.s0.scroll[0] && t.s8.compact === null && t.s8.previews === 8, { chip: t.s0.chip, w: t.s0.rows.slice(0, 2), scroll: [t.s0.scroll[0], t.s1.scroll[0]], compact: t.s8.compact, previews: t.s8.previews });
     await evalJs(`(() => { const dm = app.desktopManager; for (const x of dm.desktops.slice(1)) dm.deleteDesktop(x.id); return 1; })()`).catch(() => 0); await sleep(500);

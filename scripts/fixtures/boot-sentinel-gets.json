@@ -250,6 +250,7 @@
   "/api/loop-holds/cpu-profiles/:name",
   "/api/machine-mounts",
   "/api/maintenance",
+  "/api/may-use",
   "/api/mount-tokens",
   "/api/mounts",
   "/api/mounts/:id/config",
@@ -278,6 +279,7 @@
   "/api/session-status/history",
   "/api/session-todos",
   "/api/sessions",
+  "/api/setting-holds",
   "/api/settings",
   "/api/subagent-messages",
   "/api/subagents",
@@ -303,6 +305,9 @@
   "/api/vault/totp",
   "/api/vault/totp/:name",
   "/api/vault/web-logins",
+  "/api/vault/web-logins/merge-words",
+  "/api/vault/web-logins/site-words",
+  "/api/vault/proxy-logins",
   "/api/version",
   "/api/vnc/last-close",
   "/api/vnc/status",
@@ -313,7 +318,9 @@
   "/api/workflow",
   "/api/chat-picture/:tx/:key/:n",
   "/api/chat-attachments/usage",
-  "/api/chat-attachments/orphans"
+  "/api/chat-attachments/orphans",
+  "/api/sessions/stopped",
+  "/api/sessions/resume-stopped/:batchId"
  ],
  "windows": {
   "skip": {

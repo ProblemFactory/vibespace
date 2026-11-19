@@ -228,7 +228,7 @@ ok(rf.files.includes('src/zz-planted-spawn.js') && rf.red.length === 1 && /power
 const rg = redOf({}, { siteExempt: [...SITE_EXEMPT, { file: ENTRY, needle: 'execFile(\'no-such-site\'', why: 'dead' }] });
 ok(rg.dead.length === 1 && /no-such-site/.test(rg.dead[0]), 'CONTROL (g): an exception row that names no site ⇒ RED (dead row)', rg.dead);
 const rh = redOf({ [ENTRY]: AD + "\nfunction plantedPs(pid) { return require('child_process').execFileSync('ps', ['-p', String(pid)]); }\nfunction plantedRe(s) { return /x/.exec(s); }\n" });
-ok(rh.red.length === 0 && rh.rows.some((r) => r.kind === 'posix-tool' && /plantedPs|execFileSync\('ps'/.test(r.text)), 'CONTROL (h): a literal POSIX tool (`ps`) needs no windowsHide; a regex\'s `.exec(` is not a site', rh.red);
+ok(rh.red.length === 0 && rh.rows.some((r) => r.kind === 'posix-tool' && /plantedPs|execFileSync\('ps'/.test(r.text)), 'CONTROL (h): a literal POSIX tool (`ps`) needs no windowsHide; a regex\'s `.exec(` is not a site', rh.red);   // stale-pins: kept — a planted module's own text, not a pin of the product
 
 const ri = redOf({ [ENTRY]: AD + "\nfunction plantedShadow() { const execFile = 'a string, not a function'; return execFile.length; }\n" });
 ok(ri.red.length === 0 && ri.rows.filter((r) => r.file === ENTRY && r.kind === 'hidden').length === C.rows.filter((r) => r.file === ENTRY && r.kind === 'hidden').length, 'CONTROL (i): a local `const execFile = \'…\'` (a value, not a function) hides none of the file\'s sites (the shape that once hid the re-exec)', ri.rows.filter((r) => r.file === ENTRY).length);

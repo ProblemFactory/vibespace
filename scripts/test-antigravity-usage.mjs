@@ -128,9 +128,9 @@ async function doorLegs(DoorMod) {
   leg('an AGENT\'s call (no person) is refused 403 and agy never runs', a0.status === 403 && a0.code === 'agent_forbidden' && runs().length === 0, JSON.stringify(a0));
   const s0 = await door.read(off.id, { person: true });
   leg('a signed-out account: 409 login-needed, agy never runs', s0.status === 409 && s0.loginNeeded === true && runs().length === 0, JSON.stringify(s0));
-  setting = 'off';
-  const o0 = await door.read(acct.id, { person: true });
-  leg('the on-demand refresh setting OFF: 403, agy never runs', o0.status === 403 && o0.code === 'refresh-off' && runs().length === 0, JSON.stringify(o0));
+  setting = 'off';   // every row Off, Antigravity's own among them (one row per vendor, lane usage-predict 2026-11-16): an AUTOMATIC read is refused by Antigravity's row
+  const o0 = await door.read(acct.id, { wall: true });
+  leg('Antigravity\'s own row OFF (antigravity.autoUsageReads): an automatic (wall) read is refused 403 auto-reads-off, agy never runs — a person\'s press asks no row (test-agy-after-turn-read ⑭)', o0.status === 403 && o0.code === 'auto-reads-off' && runs().length === 0, JSON.stringify(o0));
   setting = 'manual';
   installed = false;
   const n0 = await door.read(acct.id, { person: true });
@@ -193,9 +193,9 @@ const MA = await import(path.join(REPO, 'src/lib/manage-agents.js'));
     const body = el('div');
     await app._renderHomeAccounts({ body, selectedHost: null, done() { }, refresh() { }, st: { antigravity: { loggedIn: false } }, stale: () => false }, 'antigravity');
     const left = body.children[0]?.children?.find((k) => /acct-key-row/.test(k.innerHTML || ''));
-    const cell = new RegExp(`data-id="${acct.id}"[\\s\\S]*?<span class="acct-usage-cell" data-usage-src="home" data-usage-key="${acct.id}">([\\s\\S]*?)</span>\\s*<span class="acct-key-actions">`).exec(left?.innerHTML || '');
+    const cell = new RegExp(`data-id="${acct.id}"[\\s\\S]*?<span class="acct-usage-cell" data-usage-src="home" data-usage-key="${acct.id}"(?: title="[^"]*")?>([\\s\\S]*?)</span>\\s*<span class="acct-key-actions">`).exec(left?.innerHTML || '');
     ok('THE REPORT: the Personal Ultra row\'s usage cell (stamped home) carries the four donuts', cell && (cell[1].match(/acct-usage-donut/g) || []).length === 4, (left?.innerHTML || '').slice(0, 200));
-    const offCell = new RegExp(`data-id="${off.id}"[\\s\\S]*?<span class="acct-usage-cell" data-usage-src="home" data-usage-key="${off.id}">([\\s\\S]*?)</span>`).exec(left?.innerHTML || '');
+    const offCell = new RegExp(`data-id="${off.id}"[\\s\\S]*?<span class="acct-usage-cell" data-usage-src="home" data-usage-key="${off.id}"(?: title="[^"]*")?>([\\s\\S]*?)</span>`).exec(left?.innerHTML || '');
     ok('…an account never read draws an empty cell', offCell && offCell[1] === '');
   } finally { globalThis.document = prevDoc; }
 }
@@ -212,7 +212,7 @@ console.log('⑥ never a timer, one door, no vendor call');
   ok('the door arms no timer of its own (one setTimeout: the 30 s kill of its own child), no setInterval', (door.match(/setTimeout\(/g) || []).length === 1 && /setTimeout\(\(\) => \{ try \{ child\.kill\('SIGKILL'\)/.test(door) && !/setInterval/.test(door));
   const srcFiles = (dir) => fs.readdirSync(path.join(REPO, dir), { withFileTypes: true }).flatMap((d) => d.isDirectory() ? (d.name === 'public' ? [] : srcFiles(path.join(dir, d.name))) : /\.js$/.test(d.name) ? [path.join(dir, d.name)] : []);
   const makers = [...srcFiles('src'), 'server.js'].filter((f) => /createCliUsageDoor\(/.test(read(f)) && !/cli-usage-door\.js$/.test(f));
-  ok(`ONE door, made once (account-usage-routes), read by ONE route (a person's press) + handed to ONE wall road (src/server/stream-wall.js — test-agy-wall-signal ⑧) (${makers.join(', ')})`, makers.length === 1 && makers[0] === 'src/server/account-usage-routes.js' && (routes.match(/usageDoor\.read\(/g) || []).length === 1 && /app\.post\('\/api\/accounts\/home-subscription\/:id\/usage'/.test(routes) && /usageDoor\.read\(req\.params\.id, \{ person: !isAgentBearer\(req\) \}\)/.test(routes) && (routes.match(/door: usageDoor/g) || []).length === 1 && /require\('\.\/stream-wall\.js'\)\.configure\(/.test(routes) && (read('src/server/stream-wall.js').match(/door\.read\(/g) || []).length === 1 && /door\.read\(key, \{ wall: true \}\)/.test(read('src/server/stream-wall.js')));
+  ok(`ONE door, made once (account-usage-routes), read by ONE route (a person's press) + handed to the wall road (src/server/stream-wall.js — test-agy-wall-signal ⑧) and the after-turn road (src/server/after-turn-read.js — test-agy-after-turn-read) (${makers.join(', ')})`, makers.length === 1 && makers[0] === 'src/server/account-usage-routes.js' && (routes.match(/usageDoor\.read\(/g) || []).length === 1 && /app\.post\('\/api\/accounts\/home-subscription\/:id\/usage'/.test(routes) && /usageDoor\.read\(req\.params\.id, \{ person: !isAgentBearer\(req\) \}\)/.test(routes) && (routes.match(/door: usageDoor/g) || []).length === 2 && /require\('\.\/stream-wall\.js'\)\.configure\(/.test(routes) && /require\('\.\/after-turn-read\.js'\)\.configure\(/.test(routes) && /door\.read\(key, \{ afterTurn: true \}\)/.test(read('src/server/after-turn-read.js')) && (read('src/server/stream-wall.js').match(/door\.read\(/g) || []).length === 1 && /door\.read\(key, \{ wall: true \}\)/.test(read('src/server/stream-wall.js')));
   ok('the reading is a local CLI spawn, not a vendor HTTP call: the door names no host and makes no request', !/https?:\/\/|https\.request|fetch\(|googleapis|google\.com/.test(door));
   ok('/api/usage carries the readings as homeAccounts (what the last press left — no estimate, no poll)', /homeAccounts: onDemandReadings\(\)/.test(read('src/usage-routes.js')) && /this\._homeAccountUsage = data\?\.homeAccounts \|\| \{\};/.test(read('src/lib/usage-meter.js')));
   ok('the ⋯ Re-check reads usage only when the login check says signed in, then re-reads /api/usage', /if \(r\?\.loggedIn\) \{\n\s*try \{ u = await fetchJson\(`\/api\/accounts\/home-subscription\/\$\{encodeURIComponent\(id\)\}\/usage`, \{ method: 'POST' \}\);/.test(read('src/lib/manage-agents.js')));

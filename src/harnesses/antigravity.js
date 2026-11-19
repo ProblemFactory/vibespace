@@ -149,11 +149,14 @@ const spawnEnvOf = (dir) => ({ HOME: dir, DBUS_SESSION_BUS_ADDRESS: 'disabled:' 
  *  THE PASSIVE HALF (lane agy-wall-signal, 2026-11-02): a wall the stream names IS a reading — `signalFromStream` reads the
  *  wrapper's refusal (./antigravity-wall.js) and src/server/stream-wall.js writes it (the limit at 100 % until the reset
  *  agy named); `onDemand.onWallSignal` (the owner's ruling «A»): that wall fires ONE on-demand read of the account
- *  (judge-gated, once per account per reset, never a timer) whose measured numbers replace the stream's 100 %. */
+ *  (judge-gated, once per account per reset, never a timer) whose measured numbers replace the stream's 100 %.
+ *  `onDemand.afterTurn` (lane usage-predict, the owner's ruling «A» 2026-11-14): ONE read after a stretch of work — a turn of
+ *  the account ended and 5 minutes passed with no new one (src/server/after-turn-read.js; ≤ 1 per account per 30 min). */
 const AGY_QUOTA = Object.freeze({
   ...NULL_QUOTA,
+  predict: 'antigravity', // its prediction adapter, by name (src/harnesses/predict-adapters.js)
   signalFromStream: AGY_WALL.signalFromStream,
-  onDemand: Object.freeze({ argv: AGY_USAGE.USAGE_ARGV, source: AGY_USAGE.USAGE_SOURCE, judge: AGY_USAGE.judgeUsageAnswer, cwdOf: (env) => path.join(env.HOME, LOGIN_CWD), onWallSignal: true }),
+  onDemand: Object.freeze({ argv: AGY_USAGE.USAGE_ARGV, source: AGY_USAGE.USAGE_SOURCE, judge: AGY_USAGE.judgeUsageAnswer, cwdOf: (env) => path.join(env.HOME, LOGIN_CWD), onWallSignal: true, afterTurn: true }),
 });
 /** THE MODELS AGY REPORTS FOR AN ACCOUNT (lane agy-models-report, the owner 2026-11-10): `agy models` — MEASURED on agy 1.5.5:
  *  «Fetching available models...» then `<id>\t<label>` per model the sign-in may use; signed out «Please sign in …», rc 0.

@@ -1515,5 +1515,122 @@ console.log('㉕ r11: the harness — a page never receives a request another le
   ok(done && C.posts.length === 1 && C.inflight === 0 && !!(await late), '(b) settledOf waits for the Save\'s OWN requests — one that answers three turns later is recorded and answered before the leg looks (one timer tick was the old wait)', { posts: C.posts.map((q) => q.url), inflight: C.inflight });
 }
 
+// ═══ ㉖ B-f212 — the vault «Who may use»: a landed Save leaves the picker on the hub's row; the ends count from the landed Save ═══
+// r11's two follow-ups (lane vault-standing-request): (1) a member the hub SWEPT at a Save (its only scope an ended 1-hour window,
+// pruned) stayed picked — the next Save posted it as new to the row and asked for its hosts; (2) a chosen end counted from each
+// Save — a repeated Save (the row landed, the policy did not) re-posted the row with LATER ends. The REAL dialog; the REDs are
+// the same dialog bundled with each fix taken back.
+console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the picker at the landed Save; a repeated Save posts the SAME ends (they count from the landed Save; r13: a Save the owner changed counts from its press)');
+{
+  const realWas = globalThis.__hx.real; globalThis.__hx.real = false;   // the read (r1): ㉖ reads the STUB picker's state (⑧–⑪ left the real one on)
+  let vuBuilds = 0;
+  async function bundleVU(mutate = null) {
+    const lib = path.join(REPO, 'src/lib'), file = path.join(lib, 'vault-use-row.js');
+    const stubs = { name: 'page-edge-vu', setup(b) {
+      b.onResolve({ filter: /^\.\/(utils|i18n|principal-picker|build-version)\.js$/ }, (a) => (a.importer.startsWith(lib + path.sep) ? { path: path.join(lib, a.path.slice(2)), namespace: 'stub' } : undefined));
+      b.onLoad({ filter: /.*/, namespace: 'stub' }, (a) => ({ contents: stubOf(a.path), loader: 'js' }));
+      b.onResolve({ filter: /^hx-real:/ }, (a) => ({ path: a.path.slice('hx-real:'.length) }));
+      if (mutate) b.onLoad({ filter: /vault-use-row\.js$/ }, (a) => (a.path === file ? { contents: mutate(fs.readFileSync(file, 'utf8')), loader: 'js', resolveDir: lib } : undefined));
+    } };
+    const out = path.join(SCR, `vu-${++vuBuilds}.bundle.mjs`);
+    await esbuild.build({ stdin: { contents: `export { showUseGrantDialog } from ${J(file)};`, resolveDir: lib, loader: 'js' }, bundle: true, format: 'esm', platform: 'neutral', mainFields: ['module', 'main'], outfile: out, plugins: [stubs], logLevel: 'silent' });
+    return (await import(pathToFileURL(out).href)).showUseGrantDialog;
+  }
+  const swap = (from, to) => (src) => { const n = src.split(from).length - 1; if (n !== 1) throw new Error(`B-f212 RED anchor ${n ? 'not unique' : 'missing'} (${n}×): ${from.slice(0, 60)}`); return src.replace(from, to); };   // r13 (rule (b)): exactly once
+  const VU_APP = { sidebar: { _webuiSessions: [['cid-ada', 'Ada'], ['cid-cee', 'Cee']].map(([id, name]) => ({ id: `w-${id}`, backendSessionId: id, name })), _tasks: [], _getSessionTaskGroups: () => [], getCustomName: () => '', _allSessions: [] } };
+  const ENTRY = 'local:api-key#password';
+  const sweepRoutes = (calls) => async (url, method, body) => {
+    if (url === '/api/vault/use-grants' && method === 'POST') { calls.push(body); return { ok: true, use: { to: (body.to || []).filter((m) => Array.isArray(m.scopes) && m.scopes.length).map((m) => ({ ...m, principal: `conversation:${m.key}`, hosts: m.scopes.filter((sc) => sc.host).map((sc) => sc.host), scopes: m.scopes.map((sc) => (sc.command ? { kind: 'command', ...sc } : { kind: 'host', ...sc })) })), except: [] } }; }   // the hub's public row (publicFor's shape: hosts + kinded scopes); it prunes a member sent with no scope
+    if (url === '/api/vault/use-policy') return { ok: false, code: 'not_written' };   // the policy half refused: the dialog stays open
+    return method !== 'GET' ? { ok: true } : undefined;
+  };
+  const drive = async (show, { members, end = null }) => {
+    const calls = [];
+    const P = newPage({ routes: sweepRoutes(calls) });
+    show({ id: ENTRY, label: 'API key', run: { use: { to: members, except: [], entryHosts: [] } } }, { app: VU_APP, refresh: () => { } });
+    const pol = byCls(P.shell.body, 'vw-use-policy-in'), endSel = byCls(P.shell.body, 'vw-use-end'), err = byCls(P.shell.body, 'vault-secret-error');
+    if (end) endSel.value = end;
+    pol.value = 'Only for the staging deploy';
+    const pressAt = Date.now();
+    await saved(P, P.shell.opts.unsaved.save());
+    const first = { posts: calls.length, picked: P.pickers[0] ? P.pickers[0].selected() : null, err: textOf(err) };
+    await new Promise((r) => realSetTimeout(r, 15));   // the clock moves between the two presses
+    await saved(P, P.shell.opts.unsaved.save());
+    return { first, pressAt, posts: calls.length, picked: P.pickers[0] ? P.pickers[0].selected() : null, err: textOf(err), untils: calls.map((b) => (b.to || []).flatMap((m) => (m.scopes || []).map((sc) => sc.until || 0))) };
+  };
+  const now = Date.now();
+  const ada = { kind: 'conversation', key: 'cid-ada', principal: 'conversation:cid-ada', name: 'Ada', hosts: ['api.example.com'], scopes: [{ kind: 'host', host: 'api.example.com', until: now + 30 * 86400e3 }] };
+  const cee = { kind: 'conversation', key: 'cid-cee', principal: 'conversation:cid-cee', name: 'Cee', hosts: [], scopes: [{ kind: 'window', until: now - 60e3, expired: true }] };   // ONLY an ended 1-hour window: pruned at the Save
+  const real = await bundleVU();
+  const a = await drive(real, { members: [ada, cee] });
+  ok(a.first.posts === 1 && !(a.first.picked || []).some((k) => k.includes('cid-cee')) && (a.first.picked || []).some((k) => k.includes('cid-ada')) && /policy was not/.test(a.first.err),
+    '(a) the row lands with Cee SWEPT (the policy half refused, the dialog open): the picker holds the hub\'s row — Ada, no Cee', a.first);
+  ok(a.posts === 1 && !/Name the hosts/.test(a.err), '(b) …so the repeated Save posts NO row again and asks nobody\'s hosts (only the policy is tried again)', { posts: a.posts, err: a.err });
+  const r1 = await drive(await bundleVU(swap("    if (lu) picker.setSelected(rowToPick({ to: snap.to, except: [] }, picker.knownRows(), pickWords()).selected);\n", '')), { members: [ada, cee] });
+  ok((r1.first.picked || []).some((k) => k.includes('cid-cee')) && /Name the hosts (?:Cee|cid-cee) may use it for/.test(r1.err), '(c) RED — the swept member left in the picker (r11\'s shape): the repeated Save asks «Name the hosts Cee may use it for»', { picked: r1.first.picked, err: r1.err });
+  const b = await drive(real, { members: [ada], end: '8h' });
+  ok(b.first.posts === 1 && b.posts === 1 && b.untils[0].length === 1 && b.untils[0][0] >= b.pressAt + 8 * 3600e3 && b.untils[0][0] <= Date.now() + 8 * 3600e3, '(d) «8 hours» chosen: 8 hours from the PRESS, posted ONCE — the repeated Save is the same row (its ends count from the first landed Save), never re-posted', b);
+  const r2 = await drive(await bundleVU(swap('endId: endSel.value, endFrom: endsFrom() });', 'endId: endSel.value });')), { members: [ada], end: '8h' });   // stale-pins: kept — a RED control: the pre-B-f212 end (from each Save) restored on purpose
+  ok(r2.posts === 2 && r2.untils[1][0] > r2.untils[0][0], '(e) RED — the end counted from each Save (r11\'s shape): the repeated Save re-posts the row with a LATER end', { posts: r2.posts, untils: r2.untils });
+  // r13 (three readers of B-f212): the pin only says whether anything CHANGED since the row landed — a Save that CHANGES the row
+  // (another end chosen later in the same open dialog) counts its ends from ITS press, never the first landing's; that landing
+  // moves the pin, so the next repeated Save posts nothing again
+  const drive2 = async (show, { routes = sweepRoutes, change = true } = {}) => {
+    const calls = [];
+    const P = newPage({ routes: routes(calls) });
+    show({ id: ENTRY, label: 'API key', run: { use: { to: [ada], except: [], entryHosts: [] } } }, { app: VU_APP, refresh: () => { } });
+    const pol = byCls(P.shell.body, 'vw-use-policy-in'), endSel = byCls(P.shell.body, 'vw-use-end');
+    endSel.value = '8h'; pol.value = 'Only for the staging deploy';
+    await saved(P, P.shell.opts.unsaved.save());   // the row lands; the policy half refused: the dialog stays open
+    await new Promise((r) => realSetTimeout(r, 15));
+    if (change) endSel.value = '30d';   // the owner chooses another end in the same open dialog (else: nothing the owner changed)
+    const press2 = Date.now();
+    await saved(P, P.shell.opts.unsaved.save());
+    await new Promise((r) => realSetTimeout(r, 15));
+    await saved(P, P.shell.opts.unsaved.save());   // a repeated Save of what landed
+    return { posts: calls.length, press2, untils: calls.map((b) => (b.to || []).flatMap((m) => (m.scopes || []).map((sc) => sc.until || 0))) };
+  };
+  const f = await drive2(real);
+  ok(f.posts >= 2 && f.untils[1].length === 1 && f.untils[1][0] >= f.press2 + 30 * 86400e3, '(f) r13: another end chosen after the row landed ⇒ the row posts again with «30 days» counted from THAT press (not from the first landing)', f);
+  ok(f.posts === 2, '(g) r13: …and the next repeated Save posts nothing (the landing moved the pin)', { posts: f.posts });
+  const pinFrom = '    if (endPin != null && !p.error && p.changed && inputsOf() !== landedInputs) { saveAt = Date.now(); p = planOf(); }\n';
+  const pinMove = 'landedRow(r, pick.except, polWas); endPin = saveAt; landedInputs = inputsOf(); previewNow(); }';
+  const srcVU = fs.readFileSync(path.join(REPO, 'src/lib/vault-use-row.js'), 'utf8');
+  ok(srcVU.split(pinFrom).length === 2 && srcVU.split(pinMove).length === 2, 'the RED controls\' plants are where they claim: the changed Save\'s own instant, and the landing that moves the pin — each once', { from: srcVU.split(pinFrom).length - 1, move: srcVU.split(pinMove).length - 1 });
+  const rf = await drive2(await bundleVU(swap(pinFrom, '')));
+  ok(rf.posts === 2 && rf.untils[1][0] < rf.press2 + 30 * 86400e3, '(h) RED — the pin applied to a Save that CHANGES the row (B-f212\'s shape): «30 days» counted from the first landing, short of 30 days from the press', rf);
+  const rg = await drive2(await bundleVU(swap(pinMove, 'landedRow(r, pick.except, polWas); if (endPin == null) { endPin = saveAt; landedInputs = inputsOf(); } previewNow(); }')));   // stale-pins: kept — a RED control: the pin set only at the first landing, restored on purpose
+  ok(rg.posts === 3, '(i) RED — the pin kept at the FIRST landing: the repeated Save after the changed one posts the row a third time', { posts: rg.posts, untils: rg.untils });
+  // r13 (the shoulds' read): a change the HUB made is no reason to count anew — an older hub answers a landed Save WITHOUT the
+  // row (every next Save then posts the row whole): with nothing the owner changed, the repeated Save posts the SAME ends
+  const noUseRoutes = (calls) => async (url, method, body) => {
+    if (url === '/api/vault/use-grants' && method === 'POST') { calls.push(body); return { ok: true }; }   // no `use` in the answer
+    if (url === '/api/vault/use-policy') return { ok: false, code: 'not_written' };
+    return method !== 'GET' ? { ok: true } : undefined;
+  };
+  const j = await drive2(real, { routes: noUseRoutes, change: false });
+  ok(j.posts >= 2 && j.untils.every((u) => u.length === 1 && u[0] === j.untils[0][0]), '(j) r13: a hub answer with no row (an older hub) and nothing the owner changed ⇒ every repeated Save posts the SAME «8 hours» end', j);
+  const inPlant = ' && inputsOf() !== landedInputs';
+  ok(srcVU.split(inPlant).length === 2 && /try \{ plan = planNow\(\); \}/.test(srcVU), 'the plant of (k) is where it claims (the owner\'s inputs, once), and the preview draws planNow — the Save\'s own plan', srcVU.split(inPlant).length - 1);
+  const rk = await drive2(await bundleVU(swap(inPlant, '')), { routes: noUseRoutes, change: false });
+  ok(rk.posts >= 2 && rk.untils[1][0] > rk.untils[0][0], '(k) RED — re-timed on ANY change (the hub\'s too): the repeated Save over an older hub posts a LATER end (B-f212\'s own fault back)', { posts: rk.posts, untils: rk.untils });
+  // r13 «also» (B-bc3b's read: the own-entry dialog words had only a picture) — the REAL dialog over an agent's OWN entry says a
+  // grantee gets no card (another host is refused), and the «let the agent ask … --standing» line is not there (another
+  // conversation's --standing ask is refused on it); an owner's entry keeps that line
+  const dialogText = async (show, own) => {
+    const P = newPage({ routes: sweepRoutes([]) });
+    show({ id: own ? 'agent:cid-ada/deploy-key' : ENTRY, label: own ? 'Agent secret · deploy-key' : 'API key', run: { use: { to: [], except: [], entryHosts: [], ...(own ? { own: true } : {}) } } }, { app: VU_APP, refresh: () => { } });
+    return textOf(P.shell.body);
+  };
+  const ownT = await dialogText(real, true), ownerT = await dialogText(real, false);
+  ok(/Another host, or a command whose destination cannot be told, is refused/.test(ownT) && /Another conversation sends an agent's value only to the hosts you name here/.test(ownT) && !/--standing/.test(ownT) && /--standing/.test(ownerT) && /\(a shell, a script\), still asks you\./.test(ownerT) && !/still asks you/.test(ownT) && !/destination cannot be told, is refused/.test(ownerT),
+    '(l) r13: an agent\'s OWN entry — its dialog says another host is refused and names no «--standing» ask; an owner\'s entry says another host still asks you and keeps the ask line', { own: ownT.slice(0, 400), owner: /--standing/.test(ownerT) });
+  const askPlant = '  if (!u.own) body.append(askAgent);';
+  ok(srcVU.split(askPlant).length === 2, 'the RED control\'s plant of (m) is where it claims: the ask line held back on an own entry, once', srcVU.split(askPlant).length - 1);
+  const ownR = await dialogText(await bundleVU(swap(askPlant, '  body.append(askAgent);')), true);
+  ok(/--standing/.test(ownR), '(m) RED — the dialog without the own-entry rule ⇒ an agent\'s own entry offers «let the agent ask --standing» (a road that is refused there)', ownR.slice(0, 200));
+  globalThis.__hx.real = realWas;
+}
+
 console.log(`\n${fail ? "FAILED" : "ALL PASS"} (${pass} passed, ${fail} failed) — ${Date.now() - T0} ms`);
 process.exit(fail ? 1 : 0);

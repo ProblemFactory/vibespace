@@ -113,7 +113,7 @@ export function portOk(v) { const n = Number(String(v == null ? '' : v).trim());
  * conversation, the server's default), `browser` only when a build / path was chosen. → `{ok, body}` | `{ok:false,
  * field, code}` (the dialog says it beside the field, nothing is sent).
  */
-export function createBody({ label = '', provider = 'chromium', host = null, cdpPort = '', mode = 'all', who = [], browser = null, adopt = null, cloneFrom = null } = {}) {
+export function createBody({ label = '', provider = 'chromium', host = null, cdpPort = '', mode = 'all', who = [], browser = null, adopt = null, cloneFrom = null, proxy = null, proxyCredential = null } = {}) {
   const l = String(label || '').trim();
   if (!l) return { ok: false, field: 'label', code: 'label_required' };
   const body = { label: l };
@@ -134,6 +134,8 @@ export function createBody({ label = '', provider = 'chromium', host = null, cdp
     body.use = { mode: 'only', who: w };
   }
   if (browser && typeof browser === 'object' && browser.kind && browser.kind !== 'default' && !cloning) body.browser = { ...browser };
+  // B-8b87: the profile's proxy (the address alone) and its login (a vault entry's NAME — never a password)
+  if (proxy && adopt !== 'keep' && !host) { body.proxy = String(proxy); if (proxyCredential) body.proxyCredential = String(proxyCredential); }
   // a folder is bound to the Chrome that wrote it — the server gives the copy its source's provider and build
   if (cloning) body.cloneFrom = String(cloneFrom);
   return { ok: true, body };

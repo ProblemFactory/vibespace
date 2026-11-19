@@ -108,10 +108,33 @@ const CONFIG_TOML = cliConfigFile(HARNESS_SETTINGS.codex.files.config, { createI
 function codexBillingIdentity(s, { accounts, withHost, poolAuth }) {
   if (s._accountId) {
     const a = accounts.get(s._accountId);
+    if (!a && /^pv-/.test(String(s._accountId))) { const p = typeof accounts.providerRecordOf === 'function' ? accounts.providerRecordOf(s._accountId) : null; return withHost({ source: 'api-other', name: (p && p.label) || 'Third-party model', tail: (p && p.tail) || null, provider: true }); }   // lane lg-providers: a third party, billed by use — never «ChatGPT»
     if (a && a.type === 'pooled') return poolAuth(a);
     return withHost({ source: 'codex-subscription', name: a?.name || 'ChatGPT' });
   }
   return withHost({ source: 'codex-cli' });
+}
+
+
+/** THE THIRD-PARTY PROVIDER SPAWN (lane lg-providers, B-d578 U2 — design q-045 §2.3, measured on codex 0.159.3: only a
+ *  `-c model_providers.<id>.{base_url, env_key, wire_api = "responses"}` table is read; OPENAI_BASE_URL is not, and
+ *  `wire_api = "chat"` is refused): a provider record + its key → the `-c` items (NON-secret: the table names the key's
+ *  VARIABLE, never its value) + the env. PURE. `home` = an isolated CODEX_HOME of this provider's own, seeded like an
+ *  account's (sessions + config.toml shared, NO auth.json) — the ChatGPT login cannot ride along. `requires_openai_auth
+ *  = false`: codex sends the provider the env_key's value and nothing of its own login. TOML basic strings = JSON's. */
+const PROVIDER_KEY_VAR = 'VIBESPACE_PROVIDER_KEY';
+function codexProviderSpawn({ provider, key, home }) {
+  const p = provider || {};
+  const t = 'pv_' + String(p.id || '').replace(/^pv-/, '').replace(/[^A-Za-z0-9_]/g, '_');
+  const q = (v) => JSON.stringify(String(v == null ? '' : v));
+  const rows = Array.isArray(p.models) ? p.models : [];
+  const def = String(p.defaultModel || (rows[0] && rows[0].id) || '');
+  const c = [`model_provider=${q(t)}`, `model_providers.${t}.name=${q(p.label || t)}`, `model_providers.${t}.base_url=${q(p.baseUrl || '')}`,
+    `model_providers.${t}.env_key=${q(PROVIDER_KEY_VAR)}`, `model_providers.${t}.wire_api="responses"`, `model_providers.${t}.requires_openai_auth=false`,
+    ...(def ? [`model=${q(def)}`] : [])];
+  const env = { [PROVIDER_KEY_VAR]: String(key || '') };
+  if (home) env.CODEX_HOME = home;
+  return { localEnv: env, argv: c.flatMap((x) => ['-c', x]), secret: { var: PROVIDER_KEY_VAR, value: String(key || '') }, plainEnv: home ? { CODEX_HOME: home } : {} };
 }
 
 module.exports = {
@@ -209,9 +232,15 @@ module.exports = {
     ledgerType: 'codex-subscription',          // the usage ledger's account type for EVERY codex account (server.js resolveAccount)
     spawnEnvVar: 'CODEX_HOME',
     // B-6be2 (src/harness-env.js): the account's home IS the CLI's home — agents keep an ambient one
-    // (the machine login; sharedHome() reads it), jobs drop it. No key: codex accounts are logins only.
+    // (the machine login; sharedHome() reads it), jobs drop it. Codex ACCOUNTS hold no key (logins only); a third-party
+    // provider's key rides the one name below.
     homeEnvVar: 'CODEX_HOME',
-    keyEnvVars: [],
+    // VIBESPACE_PROVIDER_KEY: the variable a third-party provider's key rides (lane lg-providers U2) — VibeSpace writes it,
+    // so both env doors strip an ambient copy (src/harness-env.js)
+    keyEnvVars: [PROVIDER_KEY_VAR],
+    providerSpawn: codexProviderSpawn,
+    // THE PROVIDER TEST's own words (lane lg-providers U4): `codex exec` once, read-only, no repository needed
+    providerTest: { argv: (model) => ['exec', '--skip-git-repo-check', '--sandbox', 'read-only', ...(model ? ['--model', String(model)] : []), 'ok'] },
     loginLabel: 'ChatGPT',
     defaultIdField: 'defaultCodexAccountId',
     spawnForm: 'isolated-home',                // accounts.resolveForSpawn: spawnEnvVar = the account's own dir (a pool = its symlink); no API keys, no oat

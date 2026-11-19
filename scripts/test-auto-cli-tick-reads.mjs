@@ -62,7 +62,10 @@ const PRE_LOOP = require(patched('loop-pre.js', LOOP, [["d.projectionRereadFor(a
 // ── the world: production's shape — 13 logged-in members in one auto pool, 25 linked pooled conversations,
 //    2 direct ones, a codex and a remote one the projection skips ──
 let worldN = 0;
-function mkWorld({ members = 13, pooled = 25, hot = true, explicit = true, engine = engMod } = {}) {
+// `at` = the instant the world's readings and conversations are STAMPED from (B-403e follow-up 4: §4 hands its one instant, so on
+// the LOOP's clock (T4) every world it builds has the same ages whatever the build took — the engine's own readers still read
+// Date.now(); no threshold of theirs sits there; the other sections stamp from the clock, as before)
+function mkWorld({ members = 13, pooled = 25, hot = true, explicit = true, engine = engMod, at = Date.now() } = {}) {
   const root = path.join(scratchDir, 'w' + (++worldN)), dataDir = path.join(root, 'data');
   fs.mkdirSync(dataDir, { recursive: true });
   const am = new AccountManager({ dataDir });
@@ -76,8 +79,8 @@ function mkWorld({ members = 13, pooled = 25, hot = true, explicit = true, engin
   am.setPoolTarget(P, ids[0]);
   am.updatePool(P, { auto: true, hot });
   const cacheDir = path.join(dataDir, 'usage-cache'); fs.mkdirSync(cacheDir, { recursive: true });
-  const nowS = Math.floor(Date.now() / 1000);
-  ids.forEach((id, i) => fs.writeFileSync(path.join(cacheDir, id + '.json'), JSON.stringify({ fetchedAt: Date.now() - 60e3, source: 'cli-usage', fiveHour: { utilization: 0.2 + 0.03 * i, resetsAt: nowS + 4 * 3600 }, sevenDay: { utilization: 0.3, resetsAt: nowS + 5 * 86400 } })));
+  const nowS = Math.floor(at / 1000);
+  ids.forEach((id, i) => fs.writeFileSync(path.join(cacheDir, id + '.json'), JSON.stringify({ fetchedAt: at - 60e3, source: 'cli-usage', fiveHour: { utilization: 0.2 + 0.03 * i, resetsAt: nowS + 4 * 3600 }, sevenDay: { utilization: 0.3, resetsAt: nowS + 5 * 86400 } })));
   const sessions = new Map();
   const notices = [];
   const app = { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} };
@@ -90,10 +93,11 @@ function mkWorld({ members = 13, pooled = 25, hot = true, explicit = true, engin
   });
   // a burn on every member, so a member with live conversations HAS a crossing to project (the answer compared below)
   eng.usageEstimator.burnFor = (id) => { const i = ids.indexOf(id); return i < 0 ? {} : { fiveHour: 0.0015 * (1 + (i % 4)), sevenDay: 0.0002 }; };
+  eng.usageEstimator.predictVerdict = () => ({ state: 'on', n: 99 });   // usage-predict law B3: this world's lanes are stated ON (the pool reads a burn only on an ON lane)
   const models = ['claude-opus-4-5', 'claude-sonnet-4-5', 'claude-fable-5'];
   for (let k = 0; k < pooled; k++) {
     const sid = `sess-${worldN}-${k}`;
-    sessions.set(sid, { backend: 'claude', mode: 'chat', host: null, _webuiId: sid, _accountId: P, _servedModel: models[k % 3], _servedModelAt: Date.now(), createdAt: Date.now() - 6e5, name: 'c' + k });
+    sessions.set(sid, { backend: 'claude', mode: 'chat', host: null, _webuiId: sid, _accountId: P, _servedModel: models[k % 3], _servedModelAt: at, createdAt: at - 6e5, name: 'c' + k });
     am.ensureSessionPoolLink(P, sid, ids[(k * 7) % members]);
   }
   sessions.set('direct-a', { backend: 'claude', mode: 'chat', host: null, _webuiId: 'direct-a', _accountId: ids[1], _servedModel: 'claude-opus-4-5', name: 'd1' });
@@ -179,6 +183,7 @@ for (const hot of [true, false]) {
   const w = mkWorld({ hot });
   const pre = PRE_ENGINE.create({ ...{}, app: { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} }, rootDir: w.root, USAGE_CACHE_DIR: w.cacheDir, activeSessions: w.sessions, wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice() { }, serverSetting: () => undefined, getAccounts: () => w.am, getHosts: () => null, getUsageHistory: () => null, recordUsageAttribution() { }, adapterRegistry: { get() { return null; } }, getAutoResume: () => null, getQuotaProbe: () => null });
   pre.usageEstimator.burnFor = w.eng.usageEstimator.burnFor;
+  pre.usageEstimator.predictVerdict = () => ({ state: 'on', n: 99 });   // usage-predict law B3: this world's lanes are stated ON (the pool reads a burn only on an ON lane)
   let rounds = 0, bad = [], projected = 0;
   for (const [st, apply] of Object.entries(STATES)) {
     for (const victim of [w.ids[0], w.ids[7]]) { // ids[0] holds linked conversations AND is the pool default; ids[7] holds linked conversations
@@ -200,6 +205,7 @@ for (const hot of [true, false]) {
   const moves = (engine) => {
     const w = mkWorld({ engine, hot: true });
     w.eng.usageEstimator.burnFor = () => ({});
+    w.eng.usageEstimator.predictVerdict = () => ({ state: 'on', n: 99 });   // usage-predict law B3: this world's lanes are stated ON (the pool reads a burn only on an ON lane)
     fs.writeFileSync(path.join(w.cacheDir, w.ids[0] + '.json'), JSON.stringify({ fetchedAt: Date.now() - 30e3, source: 'cli-usage', fiveHour: { utilization: 0.99, resetsAt: Math.floor(Date.now() / 1000) + 3600 }, sevenDay: { utilization: 0.5, resetsAt: Math.floor(Date.now() / 1000) + 4 * 86400 } }));
     STATES['wiped (no accessToken)'](w, w.ids[7]);
     try { w.eng.maybePoolAutoSwitchForPool(w.P, { force: true }); } catch (e) { return 'threw ' + e.message; }
@@ -234,6 +240,7 @@ async function runTick(w, eng, loopMod, { midTick = null } = {}) {
     const w = mkWorld({ hot: true });
     const pre = PRE_ENGINE.create({ app: { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} }, rootDir: w.root, USAGE_CACHE_DIR: w.cacheDir, activeSessions: w.sessions, wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice() { }, serverSetting: () => undefined, getAccounts: () => w.am, getHosts: () => null, getUsageHistory: () => null, recordUsageAttribution() { }, adapterRegistry: { get() { return null; } }, getAutoResume: () => null, getQuotaProbe: () => null });
     pre.usageEstimator.burnFor = w.eng.usageEstimator.burnFor;
+    pre.usageEstimator.predictVerdict = () => ({ state: 'on', n: 99 });   // usage-predict law B3: this world's lanes are stated ON (the pool reads a burn only on an ON lane)
     if (/signs back in/.test(label)) STATES['wiped (no accessToken)'](w, w.ids[4]);
     const snap = () => Object.fromEntries(w.ids.map((id) => [id, fs.existsSync(w.credsOf(id)) && fs.statSync(w.credsOf(id)).isFile() ? fs.readFileSync(w.credsOf(id), 'utf8') : null]));
     const before = snap();
@@ -257,15 +264,20 @@ const FS_CALLS = ['readFileSync', 'statSync', 'lstatSync', 'readlinkSync', 'exis
 // test-pool-pass-reads'.
 const RR = require(path.join(REPO, 'src/run-reads.js'));
 const RR_OFF = (() => { const src = fs.readFileSync(path.join(REPO, 'src/run-reads.js'), 'utf8'); const needle = 'function ask(kind, p, fn) {\n'; if (src.split(needle).length !== 2) throw new Error('the run-reads ask needle moved'); const f = path.join(scratchDir, 'run-reads-off.cjs'); fs.writeFileSync(f, src.replace(needle, needle + '  return fn();\n')); return require(f); })();
-// §4's ONE instant, taken before any of its worlds is built (their readings are stamped a minute before it, every time)
+// §4's ONE instant, taken before any of its worlds is built — and each world is STAMPED from it (mkWorld's `at`): its readings
+// a minute before it and its conversations' times from it, every time (B-403e follow-up 4: before, the readings were stamped
+// from the clock at each build, so their age at T4 was «about a minute» and moved with the build's own time)
 const T4 = Date.now();
 async function measureTick(shape, opts = {}) {
   const saved = {};
   for (const k of ['readText', 'readlink', 'entryExists', 'readdir', 'facts', 'stat', 'signature']) { saved[k] = RR[k]; RR[k] = RR_OFF[k]; }
   try { return await measureTick0(shape, opts); } finally { Object.assign(RR, saved); }
 }
-async function measureTick0(shape, { slowUs = 0, pre = false } = {}) {
-  const w = mkWorld({ ...shape, engine: pre ? PRE_ENGINE : engMod });
+async function measureTick0(shape, { slowUs = 0, pre = false, due = false } = {}) {
+  const w = mkWorld({ ...shape, engine: pre ? PRE_ENGINE : engMod, at: T4 });
+  // B-403e follow-up (6): THE DUE TICK — member ids[0]'s reading and its last read two hours old: its refresh IS due
+  const DUE_AGO = 2 * 36e5, dueId = due ? w.ids[0] : null, refreshed = [];
+  if (due) { const f = path.join(w.cacheDir, dueId + '.json'); fs.writeFileSync(f, JSON.stringify({ ...JSON.parse(fs.readFileSync(f, 'utf8')), fetchedAt: T4 - DUE_AGO })); }
   const orig = {}; let calls = 0, counting = true;   // B-403e: the count is the TICK's work — it ends when the tick's own promise settles
   for (const k of FS_CALLS) {
     orig[k] = fs[k];
@@ -279,8 +291,8 @@ async function measureTick0(shape, { slowUs = 0, pre = false } = {}) {
     const loop = (pre ? PRE_LOOP : { createAutoCliLoop }).createAutoCliLoop({
       serverSetting: (k) => (k === 'accounts.onDemandQuotaRefresh' ? 'auto-cli' : undefined), accounts: w.am, autoCliReady: () => true,
       USAGE_CACHE_DIR: w.cacheDir, usageIdentityGroupsCached: () => w.eng.usageIdentityGroupsCached(), usageEstimator: { estimateFor: () => null },
-      projectionRereadFor: w.eng.projectionRereadFor, projectionBillingIndex: w.eng.projectionBillingIndex, lastMemberReadAt: () => T4,
-      usage: { refreshViaCliPanel: async () => false }, onMemberReadingFresh() { }, dataDir: path.join(w.root, 'loop'), log() { }, warn() { },
+      projectionRereadFor: w.eng.projectionRereadFor, projectionBillingIndex: w.eng.projectionBillingIndex, lastMemberReadAt: (id) => (id === dueId ? T4 - DUE_AGO : T4),
+      usage: { refreshViaCliPanel: async (k) => { refreshed.push(k); return false; } }, onMemberReadingFresh() { }, dataDir: path.join(w.root, 'loop'), log() { }, warn() { },
       now: () => T4, rand: () => 0.5,   // B-403e: what §3 hands the tick — a count no clock or die can move
     });
     calls = 0;
@@ -289,7 +301,7 @@ async function measureTick0(shape, { slowUs = 0, pre = false } = {}) {
     counting = false;   // the 5 ms below is the loop-gap probe's, never the count's
     await new Promise((r) => setTimeout(r, 5));
   } finally { clearInterval(probe); for (const k of FS_CALLS) fs[k] = orig[k]; }
-  return { calls, syncMs: Math.round(syncMs), gap: Math.round(gap) };
+  return { calls, syncMs: Math.round(syncMs), gap: Math.round(gap), refreshed: refreshed.map((k) => (k === dueId ? 'the due member' : k)) };
 }
 {
   const base = await measureTick({ members: 13, pooled: 25 });
@@ -303,6 +315,12 @@ async function measureTick0(shape, { slowUs = 0, pre = false } = {}) {
   ok(`§4 WORK: production's shape (13 members, 25 pooled conversations) costs ${base.calls} synchronous fs calls a tick — exactly 395 (the release's bound 600; the reverted tick: ${preBase.calls})`, base.calls === 395, String(base.calls));
   ok(`§4 WORK: ×2 conversations ⇒ ×${(twoS.calls / base.calls).toFixed(2)}, ×2 members ⇒ ×${(twoM.calls / base.calls).toFixed(2)} — linear in each, never the product (bound 2.2)`, twoS.calls / base.calls <= 2.2 && twoM.calls / base.calls <= 2.2 && twoS.calls === 520 && twoM.calls === 625, `${twoS.calls}/${twoM.calls} vs ${base.calls} (exactly 520 / 625)`);
   ok(`§4 WORK control: the reverted tick reads RED — ${preBase.calls} calls (≥ 10× the fixed ${base.calls}), ×2 members ⇒ ×${(preTwoM.calls / preBase.calls).toFixed(2)} (members × accounts × conversations)`, preBase.calls >= 10 * base.calls && preTwoM.calls / preBase.calls > 3 && preBase.calls === 11073 && preTwoM.calls === 41500, `${preBase.calls} / ${preTwoM.calls} (exactly 11073 / 41500)`);
+  // B-403e follow-up (6): THE DUE TICK on BOTH sides — one member's refresh due: each tick picks it and asks its refresh ONCE
+  // (a stand-in that says no) — the pick RAN on both sides, and it asks the mount nothing more than the steady tick (equal counts)
+  const due = await measureTick({ members: 13, pooled: 25 }, { due: true });
+  const preDue = await measureTick({ members: 13, pooled: 25 }, { due: true, pre: true });
+  console.log(`    the DUE tick (one member's refresh due) — fixed: ${due.calls} calls, asked ${JSON.stringify(due.refreshed)}; reverted: ${preDue.calls} calls, asked ${JSON.stringify(preDue.refreshed)}`);
+  ok(`§4 DUE: one member's refresh due — BOTH ticks pick it and ask its refresh once (fixed ${JSON.stringify(due.refreshed)}, reverted ${JSON.stringify(preDue.refreshed)}); the fixed tick costs ${due.calls} calls — exactly 395, the steady tick's: the pick asks the mount NOTHING more (its work is the attempt saved before the spawn, a write, and the refresh itself) — the reverted ${preDue.calls}, exactly 11073 (measured alone on the test machine, both zones, b3e2dc658)`, JSON.stringify(due.refreshed) === '["the due member"]' && JSON.stringify(preDue.refreshed) === '["the due member"]' && JSON.stringify(base.refreshed) === '[]' && due.calls === 395 && due.calls === base.calls && preDue.calls === 11073, JSON.stringify({ due, preDue }));
   const slow = await measureTick({ members: 13, pooled: 25 }, { slowUs: 150 });
   const preSlow = await measureTick({ members: 13, pooled: 25 }, { slowUs: 150, pre: true });
   console.log(`    150 µs per fs call — fixed: sync ${slow.syncMs} ms, longest loop gap ${slow.gap} ms; reverted: sync ${preSlow.syncMs} ms, gap ${preSlow.gap} ms`);

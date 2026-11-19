@@ -23,6 +23,7 @@ import { EventEmitter } from 'node:events';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
+import { mutantCopies } from './mutant-copy.mjs'; // B-f1a2's RED CONTROL: the release's lines of src/message-window.js
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -478,7 +479,8 @@ console.log('§6 R8: an ordinary update is a quiet fact; a registered build\'s u
 {
   const { MessageWindow } = require(path.join(REPO, 'src/message-window.js'));
   const evs = []; const was = global.__vsEvent; global.__vsEvent = (n, d) => evs.push([n, d]);
-  const mw = Object.create(MessageWindow.prototype); mw._emit = () => { };
+  const mw = Object.create(MessageWindow.prototype); mw._emit = () => { }; mw.harnessLabel = 'Claude Code'; // B-f1a2: a CLAUDE reader names itself and declares its record table (MessageManager's constructor)
+  mw.recordTable = new (require(path.join(REPO, 'src/message-manager.js')).MessageManager)('t-r8-table').recordTable;
   mw._noteAddedKind('record', 'brand_new_kind', '2.1.321', false); mw._noteAddedKind('record', 'brand_new_kind', '2.1.321', false);
   mw._noteAddedKind('fields', 'result/success', '2.1.399', false); mw._noteAddedKind('fields', 'result/success', '2.1.399', false);
   global.__vsEvent = was;
@@ -491,6 +493,45 @@ console.log('§6 R8: an ordinary update is a quiet fact; a registered build\'s u
   ok(/a real surprise, and it is reported/.test(s1) && /newer than this VibeSpace's record table/.test(s2) && !/not registered|has not registered/.test(s1 + s2), 'the chip\'s hover: the surprise said as one; an ordinary update as a quiet fact (never «not registered»)', [s1, s2]);
   const RW = await import(pathToFileURL(path.join(REPO, 'src/lib/cli-registration-words.js')).href);
   ok(RW.unregisteredLine('2.1.399', tt) === 'Claude Code 2.1.399 is newer than this VibeSpace’s record table — a record kind it adds is listed in Diagnostics; conversations are not affected', 'the registration line says the fact, never «until the next release» (the founding requirement)');
+  // B-f1a2 (lane bl-tests-e — the .393 before class, int359/defect-cli-record-kind.md): A COUNT NAMES THE HARNESS WHOSE RECORD IT
+  // IS, and ONE FACT IS ONE COUNT. harnessLabel was read in three places and set nowhere: every harness's kind was worded
+  // «Claude Code» and one unknown codex record fired TWO events. Driven through the THREE real managers, each meeting a record it
+  // does not know: the events, by name and text.
+  {
+    const drive = (feed) => { const ev = []; const was2 = global.__vsEvent; global.__vsEvent = (n, d) => ev.push([n, String(d)]); try { feed(); } finally { global.__vsEvent = was2; } return ev; };
+    const { CodexMessageManager } = require(path.join(REPO, 'src/codex-message-manager.js'));
+    const { AcpMessageManager } = require(path.join(REPO, 'src/acp-message-manager.js'));
+    const { MessageManager } = require(path.join(REPO, 'src/message-manager.js'));
+    CodexMessageManager._seenUnknownRecords?.clear?.();
+    const cx = drive(() => new CodexMessageManager('t-f1a2-cx').processLive({ type: 'event_msg', payload: { type: 'b_f1a2_future_codex_event' } }));
+    ok(cx.length === 1 && cx[0][0] === 'codex-unknown-record:b_f1a2_future_codex_event' && !cx.some(([n, d]) => /^cli-record-/.test(n) || /Claude Code/.test(d)), 'a CODEX manager meeting an unknown record fires ONE event — its own codex-unknown-record breadcrumb; no cli-record-kind, nothing named «Claude Code»', cx);
+    AcpMessageManager._seenUnknownUpdates?.clear?.();
+    const acp = drive(() => new AcpMessageManager('t-f1a2-acp').processLive({ type: 'acp', kind: 'update', update: { sessionUpdate: 'b_f1a2_future_update' } }));
+    ok(acp.length === 1 && acp[0][0] === 'acp-unknown-update:b_f1a2_future_update' && !acp.some(([n, d]) => /^cli-record-/.test(n) || /Claude Code/.test(d)), 'an ACP manager meeting an unknown update fires ONE event — its own acp-unknown-update breadcrumb (a GUARD, green on the release too: ACP never counts through the window — a future change that does is red here)', acp);
+    const cl = drive(() => new MessageManager('t-f1a2-cl').processLive({ type: 'system', subtype: 'b_f1a2_future_subtype', uuid: 'u-f1a2', session_id: 's-f1a2' }));
+    ok(cl.some(([n, d]) => n === 'cli-unknown-system-subtype' && d === 'b_f1a2_future_subtype') && cl.some(([n, d]) => n === 'cli-record-kind' && /^Claude Code .* · record:system\/b_f1a2_future_subtype$/.test(d)) && cl.length === 2, 'the CLAUDE manager unchanged: its own breadcrumb + the record table\'s count, named «Claude Code» (R8 above)', cl);
+    const bare = Object.create(MessageWindow.prototype); bare._emit = () => { };
+    const nb = drive(() => bare._noteAddedKind('record', 'b_f1a2_unnamed', '9.9.9', false));
+    ok(nb.length === 0 && bare.addedKinds().length === 1, 'a window that declares no record table counts nothing for one (its chip kind is kept)', nb);
+    // RED CONTROL, the .393 before class itself: the RELEASE's window lines (the «|| 'Claude Code'» default, the count fired for
+    // every manager) under a REAL codex manager that names no harness (as the release's did) — a closed world of two copies
+    const MWsrc = read('src/message-window.js'), CXsrc = read('src/codex-message-manager.js');
+    for (const [src, file, an] of [[MWsrc, 'src/message-window.js', '    const table = this.recordTable || null;'], [MWsrc, 'src/message-window.js', '    if (table && !_kindsCounted.has(counted)'],
+      [MWsrc, 'src/message-window.js', "`${this.harnessLabel} ${ver || '?'} · ${kind}:${nm}`"], [MWsrc, 'src/message-window.js', "'use strict';"],
+      [CXsrc, 'src/codex-message-manager.js', "require('./message-window.js')"], [CXsrc, 'src/codex-message-manager.js', "    this.harnessLabel = 'Codex';"]])
+      ok(src.includes(an), `the anchor of the RED CONTROL (the release's window) is in the source (${file}): ${an.trim()}`);   // each fails BY NAME when gone (rule 06:25Z)
+    const NEW_LINES = MWsrc.slice(MWsrc.indexOf('    const table = this.recordTable || null;'), MWsrc.indexOf('    if (table && !_kindsCounted.has(counted)'));
+    const REL = MWsrc.replace(NEW_LINES, "    const claude = (this.harnessLabel || 'Claude Code') === 'Claude Code';\n    const registered = !!ver && claude && registeredClaude(ver);\n    const counted = `${this.harnessLabel || 'Claude Code'}|${ver || '-'}|${key}`;\n")   // stale-pins: kept — the RELEASE's lines, re-planted on purpose (the red control)
+      .replace('    if (table && !_kindsCounted.has(counted)', '    if (!_kindsCounted.has(counted)').replace("`${this.harnessLabel} ${ver || '?'} · ${kind}:${nm}`", "`${this.harnessLabel || 'Claude Code'} ${ver || '?'} · ${kind}:${nm}`")   // stale-pins: kept — the release's lines
+      .replace("'use strict';", "'use strict'; const registeredClaude = () => false;");
+    const MX = mutantCopies('cli-self-measure-f1a2', REPO);
+    const relWin = NEW_LINES.length > 50 && REL !== MWsrc ? MX.write('src/message-window.js', REL, 'release', { esm: false }) : null;
+    const CXrel = relWin ? CXsrc.replace("require('./message-window.js')", `require(${JSON.stringify(relWin)})`).replace("    this.harnessLabel = 'Codex';", '   ') : null;
+    const CodexRel = CXrel && CXrel !== CXsrc ? MX.load('src/codex-message-manager.js', CXrel, 'release').CodexMessageManager : null;
+    CodexRel?._seenUnknownRecords?.clear?.();
+    const nr = CodexRel ? drive(() => new CodexRel('t-f1a2-rel').processLive({ type: 'event_msg', payload: { type: 'b_f1a2_release_codex_event' } })) : null;
+    ok(!!nr && nr.length === 2 && nr.some(([n]) => n === 'codex-unknown-record:b_f1a2_release_codex_event') && nr.some(([n, d]) => n === 'cli-record-kind' && /^Claude Code \? · record:b_f1a2_release_codex_event$/.test(d)), 'RED CONTROL: the release\'s window under a codex manager that names no harness fires TWO events for one record, the second worded «Claude Code» — the defect, reproduced', nr);
+  }
   const CR = read('src/lib/chat-renderers.js');
   ok(/static drawsNothing\(msg\) \{\s*return !!msg && \(\(msg\.noticeKind === 'unknown-record' && msg\.content\?\.\[0\]\?\.type === 'unknown_record'\) \|\| \(msg\.noticeKind === 'unknown-fields'/.test(CR) && /drawsNothing\(msg\)\) return null/.test(CR), 'no card is drawn in the chat for either (door-healthy-chat\'s ruling stands — ChatRenderers.drawsNothing, the .388 one rule)');
 }

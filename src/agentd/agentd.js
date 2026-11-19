@@ -331,6 +331,8 @@ if (process.argv.includes('--discovery-snapshot-child')) {
 }
 const net = require('net');
 const { Mux, PROTO_VERSION } = require('./mux.js');
+const AR = require('./attach-roads.js'); // B-beaf: the pipe pump and the terminal road stop when the link holds them back
+const { ptyInput } = require('./pty-input.js');   // B-5019: one UTF-8 decoder per pty session (a character split across frames)
 // PURE (bundled): the ONE spawn-env sanitizer the orchestrator's agentEnv()
 // also is — every daemon child and every daemon re-exec is born from
 // `daemonEnv(process.env)`, never from `process.env` (see spawnEnv below).
@@ -733,6 +735,7 @@ function pidCmdline(pid) {
 const { reExecArgv, repointCurrent, handOver, listenWithRetry } = require('./reexec');
 // lane win-device-boot-hidden: the daemon's OWN launch on Windows — the console look + the logon task (PURE rules + texts)
 const HS = require('./hidden-start.js');
+const LH = require('./lock-holder.js'); // B-8475: whose agent a live pid in the lock is
 // THE RE-EXEC — the one site that starts this daemon's successor: the self-upgrade (beginUpgrade) and the console
 // self-heal at the start (lane win-device-boot-hidden). Each caller hands `reExecArgv(<script>)` (the script + EVERY
 // original flag); the successor is born sanitized (src/agent-env.js) with the caller's own names on top.
@@ -867,6 +870,7 @@ function acquireSingleton() {
         // fresh process table hands the new agent THE SAME pid; a reboot that repeats the number — and the check below read
         // «alive, our own name» and refused to start, for good.
         if (pid === process.pid) { fs.unlinkSync(LOCK); continue; }
+        if (LH.isOwnThread(pid)) { fs.unlinkSync(LOCK); continue; } // B-8475: …or one of this agent's own threads (the pid space is shared)
         let cmd = '';
         try { cmd = fs.readFileSync('/proc/' + pid + '/cmdline', 'utf-8').replace(/\0/g, ' '); } catch { }
         // no /proc (macOS/BSD): verify via ps — without this, a RECYCLED pid
@@ -880,7 +884,9 @@ function acquireSingleton() {
         // recognize our own daemon by EITHER the bundle name or the process
         // title (process.title='vibespace-device' overwrites /proc/cmdline on
         // Linux, so the old 'agentd'-only check could miss a live sibling)
-        if (alive && (cmd === '' || cmd.includes('agentd') || cmd.includes('vibespace-device'))) { blockingPid = pid; return false; } // genuine second instance
+        // B-8475: …and only when it is an agent of THIS root — in a container the lock outlives its agent on the home volume and
+        // the next container's pid numbers are fresh: the hub's own local agent may hold the dead pod's number (lock-holder.js)
+        if (alive && (cmd === '' || cmd.includes('agentd') || cmd.includes('vibespace-device')) && LH.holdsRoot(pid, ROOT) !== false) { blockingPid = pid; return false; } // genuine second instance
         fs.unlinkSync(LOCK); // stale (dead or recycled pid) — retry
       } catch { return false; }
     }
@@ -1310,28 +1316,27 @@ const pipeSessions = {
   },
   attach(sid, chan, mux, offset) {
     const P2 = this._paths(sid);
-    let pos = Math.max(0, offset);
-    let fd = null;
-    const pump = () => {
-      if (fd === null) { try { fd = fs.openSync(P2.out, 'r'); } catch { return; } }
-      try {
-        const size = fs.fstatSync(fd).size;
-        if (pos > size) pos = 0;
-        while (pos < size) {
-          const want = Math.min(65536, size - pos);
-          const b = Buffer.alloc(want);
-          const n = fs.readSync(fd, b, 0, want, pos);
-          if (n <= 0) break;
-          pos += n;
-          mux.data(chan, b.subarray(0, n));
-        }
-      } catch { }
-    };
-    const timer = setInterval(pump, 150);
-    pump();
+    // B-beaf: the tail under credit (src/agentd/attach-roads.js fileTail → heldPump) — a held link stops the reading until the
+    // channel is writable again (pipeSessions.writable), one window + one chunk queued at most; the timer's pass reads nothing
+    // while held; the wake reads only a HELD tail (the mux says writable after every flushed send)
+    const tail = AR.fileTail({ file: P2.out, offset, fs, send: (b) => mux.data(chan, b) });
+    const timer = setInterval(tail.pass, 150);
+    tail.pass();
     let tails = this._tails.get(mux);
     if (!tails) { tails = new Map(); this._tails.set(mux, tails); }
-    tails.set(chan, { sid, timer, get fd() { return fd; } });
+    tails.set(chan, { sid, timer, get fd() { return tail.fd; }, wake: tail.wake, close: tail.close });
+  },
+  /** B-beaf: the channel's queue drained — a held pump reads again. */
+  writable(mux, chan) { const t = this._tails.get(mux)?.get(chan); if (t && t.wake) t.wake(); },
+  /** B-beaf (3): the hub is done with THIS channel (its attach client left: a CLOSE frame) — its tail ends at once, not at the
+   *  link's death. The session itself lives on (the daemon owns it; a reattach comes with an offset). → whether one ended. */
+  detach(mux, chan) {
+    const tails = this._tails.get(mux), t = tails && tails.get(chan);
+    if (!t) return false;
+    clearInterval(t.timer); t.close();
+    tails.delete(chan);
+    try { mux.forget(chan); } catch { }   // what it still queued for the gone consumer goes too
+    return true;
   },
   writeStdin(mux, chan, buf) {
     const t = this._tails.get(mux)?.get(chan);
@@ -1346,7 +1351,7 @@ const pipeSessions = {
   detachAll(mux) {
     const tails = this._tails.get(mux);
     if (!tails) return;
-    for (const t of tails.values()) { clearInterval(t.timer); try { if (t.fd !== null) fs.closeSync(t.fd); } catch { } }
+    for (const t of tails.values()) { clearInterval(t.timer); t.close(); }
     this._tails.delete(mux);
   },
   kill(sid) {
@@ -1882,7 +1887,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'transcript-picture', 'usage-scan', 'usage-scan-hub-cursor', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input', 'stream-mic', 'stream-audio'],
+          capabilities: ['probe', 'transcript-op', 'transcript-picture', 'pipe-detach' /* B-beaf: a CLOSE on a pipe session's channel ends its tail */, 'usage-scan', 'usage-scan-hub-cursor', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input', 'stream-mic', 'stream-audio'],
         }));
         return;
       }
@@ -2815,8 +2820,11 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
             cwd: useCwd,
             env: spawnEnv({ ...(env || {}), TERM: 'xterm-256color', COLORTERM: 'truecolor' }),
           });
-          sessions.set(chan, { proc });
-          proc.onData((d) => { try { mux.data(chan, Buffer.from(d, 'utf-8')); } catch { } });
+          // B-beaf: the terminal road under credit — a held link PAUSES the pty (the child blocks on its own output), the
+          // channel's writable resumes it; never a queue without bound in this daemon
+          const out = AR.heldSender({ send: (b) => mux.data(chan, b), pause: () => proc.pause(), resume: () => proc.resume() });
+          sessions.set(chan, { proc, out, input: ptyInput((s) => proc.write(s)) });   // B-5019: the session's input, decoded as ONE stream
+          proc.onData((d) => { out.send(Buffer.from(d, 'utf-8')); });
           proc.onExit(({ exitCode }) => {
             sessions.delete(chan);
             mux.control({ op: 'session-exit', chan, code: exitCode });
@@ -2843,7 +2851,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
       if (!authed) return;
       if (chan === 1 && upgrade) { upgrade.data(buf); return; }
       const sx = sessions.get(chan);
-      if (sx) { try { sx.proc.write(buf.toString('utf-8')); } catch { } mux.credit(chan, buf.length); return; }
+      if (sx) { try { sx.input(buf); } catch { } mux.credit(chan, buf.length); return; }
       if (pipeSessions.writeStdin(mux, chan, buf)) { mux.credit(chan, buf.length); return; }
       if (wsData(chan, buf)) return; // lane exit-transfer: a push's bytes (credited as the disk takes them)
       const t = tcpChans.get(chan);
@@ -2856,11 +2864,15 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
       }
     },
     onClose(chan) {
-      // peer half-closed a byte channel — tear down the matching local socket
+      // peer half-closed a byte channel — tear down the matching local socket; B-beaf (3): or end a pipe session's TAIL on
+      // that channel (the hub's attach client left — an older hub never sends it, an older daemon ignores it: no capability)
+      if (pipeSessions.detach(mux, chan)) return;
       const t = tcpChans.get(chan);
       if (t) { tcpChans.delete(chan); try { t.destroy(); } catch { } }
     },
     onWritable(chan) {
+      try { pipeSessions.writable(mux, chan); } catch { }               // B-beaf: a held pipe pump reads again
+      try { sessions.get(chan)?.out?.writable(); } catch { }           // B-beaf: a held pty resumes
       try { tcpChans.get(chan)?.resume?.(); } catch { }
       try { const r = streamChans.get(chan); if (r && !r.sink) r.child.stdout.resume(); } catch { }
       const w = writableWaiters.get(chan);

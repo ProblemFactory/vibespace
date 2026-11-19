@@ -91,7 +91,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
   const { _vsuPending, armWorkflowUsageWatcher, kickPoolEval, markLimitBanner,
     maybeRepinLockedModel, maybeStopOnFallback, notePoolAuthFailure,
     noteCompacted,
-    modelsMatch, noteSessionProduced, noteModelRequest, noteTurnEnd, recordRateLimitEvent, resolveUsageKey, usageEstimator,
+    modelsMatch, noteSessionProduced, noteModelRequest, noteTurnEnd, noteTurnError, recordRateLimitEvent, resolveUsageKey, usageEstimator,
     noteServedModel, noteModelFallback, servedDefinesModel, rerouteAnnouncedBy, settleTurnLane, noteTurnStopped,
     noteStreamRecord, recordIsLate } = engine;
 
@@ -263,6 +263,8 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
   }
 
   function attach(session, id, ptyProcess, { feedLive, broadcastToSession, broadcastActiveSessions, readSessionMeta, writeSessionMeta, updateSessionTodos, applyTaskToolUpdate, emitTaskListTodos }) {
+    try { require('../session-brain.js').noteTurnAttach(session); } catch { }   // B-d868: after an attach the opener is UNKNOWN until a turn starts in its sight
+    session._turnLive = false;   // B-02a3: a fresh attach has seen no init — no group press until the CLI's next one (a re-attach whose bridge swallowed a result never keeps a stale «live»)
     let lineBuf = '';
     // 2.369.402: the conversation's cost fold (src/cost-segments.js) KEPT on its own meta after each result (`costKept`) —
     // the boot resumes it before the buffer, whose head may have lost every earlier process. Paced: the next result
@@ -382,6 +384,9 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
      *  prompt (no origin), a task-notification, or a server-posted body-less
      *  origin is not this carrier's business — the lookup stops at the record.
      *  Local sessions only: a remote host's transcript is not on this disk. */
+    // B-d868 — who started the turn: ONE implementation for the parse and the device stream (src/server/session-brain.js
+    // noteTurnOpener — an ordered state machine on the session, each record taken once at its first arrival from either feed)
+    const TO = require('../session-brain.js');
     const peerCmdSeen = new Set();
     const PEER_CMD_RETRY_MS = [0, 150, 600, 2000];
     const peerCommandCard = (cmdUuid) => {
@@ -389,7 +394,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
       peerCmdSeen.add(cmdUuid);
       if (peerCmdSeen.size > 200) peerCmdSeen.delete(peerCmdSeen.values().next().value);
       let attempt = 0;
-      const schedule = () => { if (attempt >= PEER_CMD_RETRY_MS.length) return; setTimeout(tryOnce, PEER_CMD_RETRY_MS[attempt++]); };
+      const schedule = () => { if (attempt >= PEER_CMD_RETRY_MS.length) { TO.noteTurnCmdRecord(session, cmdUuid, null); return; } setTimeout(tryOnce, PEER_CMD_RETRY_MS[attempt++]); };   // B-d868: the turn's opener waits on this lookup
       const tryOnce = () => {
         if (!activeSessions.has(id) || !session.claudeSessionId) return;
         let fp = null;
@@ -408,6 +413,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
             try { const r = JSON.parse(line); if (r && r.uuid === cmdUuid) { rec = r; break; } } catch { }
           }
           if (!rec) return schedule();                       // not written yet — the write races the frame
+          TO.noteTurnCmdRecord(session, cmdUuid, rec);       // B-d868: the CLI's own record of a started command (the turn's opener reads it)
           if (rec.type !== 'user') return;
           const o = rec.origin;
           if (!o || o.kind !== 'peer' || typeof o.body !== 'string' || !o.body.trim()) return;
@@ -725,6 +731,13 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
           // own models — without the guard a haiku subagent both spuriously
           // triggered repins AND masked a real main-thread reroute when it
           // answered last.
+          // lane auto-resume-bulk: the turn's last TYPED error — the CLI's `error` enum on a main-thread assistant record
+          // (synthetic ones included: a 529 / overloaded_error ends the turn as `error: "overloaded"`). The turn end's stop
+          // verdict reads it (src/stopped-by.js); a later record without one clears it; a backlog's is not this turn's.
+          if (msg.type === 'assistant' && !msg.parent_tool_use_id && !msg.isSidechain && !recordIsLate?.(session, msg)) {
+            try { const tb = Array.isArray(msg.message?.content) ? msg.message.content.find((b) => b && b.type === 'text') : null; noteTurnError?.(session, typeof msg.error === 'string' ? msg.error : null, tb && typeof tb.text === 'string' ? tb.text : null); } catch { }
+            try { for (const b of (Array.isArray(msg.message?.content) ? msg.message.content : [])) if (b && b.type === 'tool_use' && b.name === 'Workflow' && typeof b.id === 'string') session._wfToolIds = [...(session._wfToolIds || []), b.id].slice(-16); } catch { }   // B-3437: whose results are a Workflow launch ack
+          }
           // STEP 3 record REGISTRATION (first-writer-wins, parse-primary):
           // the parse marks every record it processes; the DEVICE feed runs
           // the side-effect families only for records the parse has NOT yet
@@ -739,6 +752,9 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
             // main-thread work ⇒ not limit-blocked ⇒ stale armed waits drop
             // (readings-based disarm misses accounts that emit no events)
             try { noteSessionProduced?.(session, msg); } catch { }
+            // lane auto-resume-bulk: this conversation's CURRENT context size (the status bar's own formula) — what a cold
+            // resume re-reads; the bulk resume's cost estimate prefers it to the ledger's last request (the walk lags)
+            try { const u = msg.message.usage; const n = u ? (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0) : 0; if (n > 0 && !recordIsLate?.(session, msg)) session._lastContext = { tokens: n, model: msg.message.model ? String(msg.message.model) : null, at: Date.now() }; } catch { }
             // THE FACT BEFORE ITS READERS (2026-09-13 r4, the round-3 verifier).
             // The incident's FIRST announcement is a `fallback` CONTENT BLOCK on
             // the very record the substitute answered, and the loop that stamps
@@ -1282,6 +1298,15 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
           // TURN BOUNDARY (2.369.0 wall machine): classifies walled/normal,
           // runs the per-turn pool eval, arms/disarms — one owner.
           if (msg.type === 'command_lifecycle' && msg.state === 'started' && typeof msg.command_uuid === 'string' && msg.command_uuid && !session.host) peerCommandCard(msg.command_uuid);
+          // B-d868: who started the turn — every record the parse sees feeds the ONE opener (the device stream feeds it the rest)
+          try { TO.noteTurnOpener(session, msg, 'parse'); } catch { }
+          // B-02a3 (the third read): an INTERRUPTED turn's result (the real 2.1.312: terminal_reason aborted_tools / aborted_streaming) opens
+          // the Stop window whoever stopped it — the hub's own Stop, or a person's terminal writing the interrupt straight to the wrapper
+          if (msg.type === 'result' && typeof msg.terminal_reason === 'string' && msg.terminal_reason.startsWith('aborted') && !session._stopAskedAt) session._stopAskedAt = Date.now();
+          // B-02a3: a Stop settles at the CLI's idle (the wrapper's window closes on the same word)
+          if (msg.type === 'system' && msg.subtype === 'session_state_changed' && msg.state === 'idle' && session._stopAskedAt) session._stopAskedAt = 0;
+          // B-02a3: the wrapper's word on a group hand-over's frame — the only frame written with no message id, so its record names none
+          if (msg.type === 'input_handover' && Array.isArray(msg.msg_ids) && !msg.msg_ids.length && typeof msg.state === 'string' && session._groupHandover && typeof session._groupHandover.said === 'function') { try { session._groupHandover.said(msg.state); } catch { } }
           if (msg.type === 'result') { try { require('../model-ask.js').noteRefusal(session, msg, { readSessionMeta, writeSessionMeta }); } catch { } }   // the API's 404 naming the ask: the pressing page says it once (round 15: it writes nothing a person set)
           if (msg.type === 'result') { try { noteTurnEnd?.(session, msg); } catch { } }
           // THE LIVE LOGIN WALL (lane signin-card-real-screen, real 2.1.308): the CLI no longer DIES not-logged-in —
@@ -1380,6 +1405,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
                   : Array.isArray(b.content) ? b.content.map((x) => x?.text || '').join('\n') : '';
                 const wm = /Run ID: (wf_[\w-]+)/.exec(txt);
                 if (wm) armWorkflowUsageWatcher(session, id, wm[1]);
+                if (!msg.parent_tool_use_id && !msg.isSidechain && b.tool_use_id && session._wfToolIds && session._wfToolIds.includes(b.tool_use_id)) { try { require('../auto-resume-workflow.js').noteLaunchAck(session, txt); } catch { } }   // B-3437: the Workflow TOOL's own result — THIS conversation's run
               }
             } catch { }
           }

@@ -2272,7 +2272,7 @@ console.log('\n⑬ the change feed: the search page, the declared unit, the desc
     const LSRC0 = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
     const THROWL = "      if (items.length > size) throw new ChannelError('vendor-error', `lark message search: ${items.length} items for a page size of ${size} — the vendor ignored page_size`, { retryable: false, detail: { contract: 'page-size' } });";
     const bigRun = async (src, tag) => {
-      const mod = MB.load('src/channels/lark.js', src, tag);
+      const mod = MB.load('src/channels/lark.js', src, tag, { same: src === LSRC0 }); // «bigpage-real» is the real module on purpose (B-0d3e); an edit that found no anchor still fails by name
       const rgB = CH.createChannelRegistry(); rgB.register(mod.adapter);
       const tk = mkTokens(); tk.st.token = { ...tokens.st.token };
       let big = false;
@@ -2306,7 +2306,7 @@ console.log('\n⑬ the change feed: the search page, the declared unit, the desc
     const LSRC = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
     const OKL = "const top = [...new Set(items.flatMap((it) => (it && typeof it === 'object' ? Object.keys(it).filter(nameOk) : [])))].slice(0, 20);";
     const fieldsRun = async (src, tag) => {
-      const mod = MF.load('src/channels/lark.js', src, tag);
+      const mod = MF.load('src/channels/lark.js', src, tag, { same: src === LSRC }); // «fields-bounded» is the real module on purpose (B-0d3e)
       const rgF = CH.createChannelRegistry(); rgF.register(mod.adapter);
       const saidF = [];
       const tk = mkTokens(); tk.st.token = { ...tokens.st.token };

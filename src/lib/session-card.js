@@ -8,9 +8,11 @@ import { UI_ICONS } from './icons.js';
 import { shownText } from './record-clear-ui.js'; // "Clear content…": a cleared status reason is worded in this device's language
 import { sessionDisplayName } from '../session-name.js'; // lane session-title-record: THE name ladder
 import { browserFactWords } from '../browser-fact.js'; // lane S2: THE browser fact's words (the card's chip prints them)
+import { chipWords as stoppedChipWords } from '../stopped-by.js'; // lane auto-resume-bulk: WHY it stopped — the card's mark («因用量停止 · 重置 14:00»)
 import { stashHintChip } from './stash-strip.js'; // 2026-09-27: "N waiting" — what waits for this agent's next turn (the stash fact)
 import { stoppedWhyOf } from './stopped-why.js'; // lane dead-socket-keeps-chat-meta: a stopped row says WHY (its process ended while the server was down)
 import { createBackendIcon, createAgentKindIcon, createModeBackendIcon, getBackendMeta, getAgentKindMeta, getAgentRoleLabel, getAgentRoleShortLabel, getSessionKey, backendFeatureCaps, settingsPrefixFor, billingRow } from './agent-meta.js';
+const stopClock = (ms, now) => whenAt(ms, { now });   // the stop mark's time through the ONE formatter (page-time)
 
 /** Inline SVG icon helper — returns an HTML string for a 12x12 stroked icon */
 const _s = (d, fill = false) => `<svg style="width:12px;height:12px;vertical-align:-2px" viewBox="0 0 16 16" fill="${fill ? 'currentColor' : 'none'}" stroke="${fill ? 'none' : 'currentColor'}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">${d}</svg>`;
@@ -29,6 +31,22 @@ const ICON = {
   move:      _s('<path d="M8 1v14M1 8h14M8 1L6 3M8 1l2 2M8 15l-2-2M8 15l2-2M1 8l2-2M1 8l2 2M15 8l-2-2M15 8l-2 2"/>'),
   fork:      _s('<path d="M8 2v6M8 8c-3 0-4 2-4 4M8 8c3 0 4 2 4 4"/><circle cx="4" cy="13" r="1.5"/><circle cx="12" cy="13" r="1.5"/><circle cx="8" cy="2" r="1.5"/>'),
 };
+
+/** A ROW's resume / view options — ONE definition (the card's menu, and a link of the scheme's «Resume here» / «Read its history»,
+ *  lane login-request-card piece 1): remote rows resume and view ON their host; a live keeper session is ADOPTED (B-4058). */
+export function agentOptsOf(s) {
+  return {
+    backend: s.backend || 'claude',
+    backendSessionId: s.backendSessionId || s.sessionId,
+    hostId: s.host || undefined, // remote sessions resume/view ON their host
+    keeperSid: s.keeperSid || undefined, // live remote keeper session — resume ADOPTS it (B-4058)
+    agentKind: s.agentKind || 'primary',
+    agentRole: s.agentRole || '',
+    agentNickname: s.agentNickname || '',
+    sourceKind: s.sourceKind || '',
+    parentThreadId: s.parentThreadId || null,
+  };
+}
 
 /**
  * Render the detail groups section inside a session card.
@@ -49,6 +67,7 @@ const ICON = {
 //    Keep this block self-contained (the gate suite extracts + replays it):
 //    it closes over registerCommand, registerMenuItem, tr, backendFeatureCaps,
 //    copyText, showConfirmDialog only. ──
+
 export function registerSessionCardMenu() {
   const M = 'session-card';
   const live = (c) => c.s.status === 'live' && !!c.s.webuiId;
@@ -118,6 +137,8 @@ export function registerSessionCardMenu() {
     },
   });
   registerCommand({ id: 'session.properties', title: () => tr('Properties…'), run: (c) => c.app.openSessionProps(c.s) });
+  // unit what-it-may-use (the owner, 2026-11-17): ONE command opens Properties at «What it may use» — every door, by what
+  registerCommand({ id: 'session.mayUse', title: () => tr('What it may use…'), run: (c) => c.app.openSessionProps(c.s, { section: 'may-use' }) });
   registerCommand({ id: 'session.locate', title: () => tr('Locate in sidebar'), run: (c) => c.app.locateSessionInSidebar(c.s.sessionId) });
   registerCommand({
     id: 'session.terminate', title: () => tr('Terminate'),
@@ -125,8 +146,8 @@ export function registerSessionCardMenu() {
       const s = c.s;
       const ok = await showConfirmDialog({ title: tr('Terminate Session'), message: tr('Terminate session "{name}"? The running agent process will be killed.', { name: c.displayName }), confirmText: tr('Terminate'), danger: true });
       if (!ok) return;
-      if (s.webuiId) c.app.killSession(s.webuiId);
-      else if (s.pid) c.app.killPid(s.pid, s.host);
+      if (s.webuiId) c.app.endConversation(s.webuiId, undefined, { endTree: true });   // B-70f9 ②: a person's Terminate — the kill, then the notice of its running jobs · B-c134: it ends the background tree
+      else if (s.pid) { c.app.killPid(s.pid, s.host); c.app.noticeOwnedJobs?.([s.sessionId]); }
     },
   });
   // ── the card's right-click menu, group by group (explicit separators) ──
@@ -176,6 +197,7 @@ export function registerSessionCardMenu() {
   registerMenuItem({ menu: M, group: '3_admin', order: 17, command: 'session.browserHandback', when: (c) => c.s.status === 'live' && !!c.s.webuiId && !!c.s.browserKey && !c.s.host && c.s.browserInput === 'user' });
   registerMenuItem({ menu: M, group: '3_admin', order: 20, command: 'session.rescueTranscript', when: (c) => stopped(c) && !c.s.host });
   registerMenuItem({ menu: M, group: '3_admin', order: 30, command: 'session.properties' });
+  registerMenuItem({ menu: M, group: '3_admin', order: 31, command: 'session.mayUse' });
   registerMenuItem({ menu: M, group: '3_admin', order: 40, command: 'session.terminate', when: (c) => c.s.status !== 'stopped', style: 'color: var(--red, #e55)' });
 }
 registerSessionCardMenu();
@@ -263,17 +285,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
   const agentRoleLabel = getAgentRoleLabel(s.agentRole);
   const agentRoleShort = getAgentRoleShortLabel(s.agentRole);
   const showAgentKind = (s.agentKind || 'primary') !== 'primary';
-  const agentOpts = {
-    backend: s.backend || 'claude',
-    backendSessionId: s.backendSessionId || s.sessionId,
-    hostId: s.host || undefined, // remote sessions resume/view ON their host
-    keeperSid: s.keeperSid || undefined, // live remote keeper session — resume ADOPTS it (B-4058)
-    agentKind: s.agentKind || 'primary',
-    agentRole: s.agentRole || '',
-    agentNickname: s.agentNickname || '',
-    sourceKind: s.sourceKind || '',
-    parentThreadId: s.parentThreadId || null,
-  };
+  const agentOpts = agentOptsOf(s);
 
   const badgeMap = {
     live:     { cls: 'badge-live', text: tr('LIVE') },
@@ -291,7 +303,8 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
   // container query). Row 2 (task board only, via showCwd): the session's own
   // cwd, left-truncated. Left control icons center across the rows.
   const cwdText = s.cwd ? escHtml(s.cwd.replace(/^\/home\/[^/]+/, '~')) : '';
-  const connLabel = { live: tr('LIVE'), tmux: tr('TMUX'), external: tr('External'), stopped: tr('Stopped') }[s.status] || tr('Stopped');
+  const connLabel = s.status === 'stopped' && s.liveness === 'unknown' ? tr('Stopped (still checking)') // B-f64b: codex's liveness walk has not answered yet
+    : { live: tr('LIVE'), tmux: tr('TMUX'), external: tr('External'), stopped: tr('Stopped') }[s.status] || tr('Stopped');
   card.innerHTML = `<div class="session-card-row">
     <div class="session-card-lines">
       <div class="session-card-main">
@@ -399,6 +412,52 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
       rchip.dataset.tip = tr('The machine this session runs on is unreachable — the connection retries automatically; messages you send are queued and delivered when it returns.');
     }
     stateChip.after(rchip);
+  }
+  // WHY IT STOPPED (lane auto-resume-bulk, .349 — a fleet power user, 2026-10-23: dozens of conversations stopped on
+  // usage walls the same day, and nothing on the list said which). A session a usage wall or an overloaded model
+  // stopped wears the mark until it RUNS again (the server clears the fact then) — on a LINE of its own under the
+  // card's path, so the words survive a narrow sidebar (the row's chips go icon-only below 190 px, and an hourglass
+  // alone says nothing): «因用量停止 · 重置 14:00» / «模型过载 · 停于 13:42» (PURE src/stopped-by.js chipWords), and
+  // beside it its auto-resume state «自动继续：开/关» — a click flips it through the chat chip's own road (ws
+  // `auto-resume` + the resume carrier). SVG icons (the icon law), escaped text.
+  const stopF = s.stoppedBy && typeof s.stoppedBy === 'object' && s.webuiId ? s.stoppedBy : null;
+  const stopW = stopF ? stoppedChipWords(stopF, tr, { autoResumeOn: stopF.autoResume === true ? true : stopF.autoResume === false ? false : null, waiting: stopF.waiting || false, clock: stopClock }) : null;
+  if (stopW) {
+    const line = document.createElement('div');
+    line.className = `session-card-stop ${stopW.cls}`;
+    const wchip = document.createElement('span');
+    wchip.className = `sess-stopped-chip ${stopW.cls}`;
+    wchip.innerHTML = `<span class="chip-icon">${UI_ICONS.hourglass || ''}</span><span class="chip-text">${escHtml(stopW.text)}</span>`;
+    wchip.dataset.tip = stopW.tip;
+    line.appendChild(wchip);
+    if (stopW.toggle) {
+      const tchip = document.createElement('button');   // a control: focus + keyboard (a span took neither)
+      tchip.type = 'button';
+      const paintToggle = (on) => {
+        tchip.className = 'sess-stopped-autoresume' + (on ? ' on' : '');
+        tchip.setAttribute('aria-pressed', on ? 'true' : 'false');
+        const words = stoppedChipWords(stopF, tr, { autoResumeOn: on, waiting: on ? (stopF.waiting || false) : null, clock: stopClock });
+        tchip.innerHTML = `<span class="chip-icon">${UI_ICONS.autoContinue || ''}</span><span class="chip-text">${escHtml(words.toggle)}</span>`;
+        tchip.dataset.tip = on ? (stopF.waiting === 'timed' ? tr('Auto-continue is on: this session continues by itself when its limit resets — click to turn it off')
+            : stopF.waiting === 'early' ? tr('Auto-continue is on, but this reset is too far to wait for — the session continues only if the limit clears early — click to turn it off')
+            : tr('Auto-continue is on for the next limit; this session is not waiting for this one (its reset has passed or is too far) — open it to continue'))
+          : tr('Auto-continue is off: this session waits for you — click to have it continue by itself when its limit resets');
+      };
+      paintToggle(stopF.autoResume === true);
+      tchip.onclick = (e) => {
+        e.stopPropagation();
+        const on = !(stopF.autoResume === true);
+        try { app?.ws?.send({ type: 'auto-resume', sessionId: s.webuiId, enabled: on }); } catch { }
+        try { state.setSessionConfig?.(s, { ...(state.getSessionConfig?.(s) || {}), autoResume: on }); } catch { } // survives the next resume, like the chat chip
+        stopF.autoResume = on;
+        const ahead = Number(stopF.resetsAt) - Date.now();   // what the server arms (auto-resume.js setEnabled — a wait within its bound, else a watch); the next list restates it
+        const bound = Number(stopF.waitBoundMs) || 0;   // the SERVER's waiting bound (statusFor maxWaitMs) — none known ⇒ no timed promise
+        stopF.waiting = !on || !(ahead > 0) ? false : bound && ahead <= bound ? 'timed' : (stopF.bucket ? 'early' : false);
+        paintToggle(on);
+      };
+      line.appendChild(tchip);
+    }
+    row.querySelector('.session-card-lines')?.appendChild(line);
   }
   // GIT CHIP (design-unknown-records, 2026-09-21): the last `vcs_state_changed`
   // fact the CLI announced — "push · fix/x" — a session FACT, never a card in
@@ -896,6 +955,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
           o.value = opt.value || opt.id || '';
           // the default row (no value) is the page's own «Default» — never the server's English label (the walk's sidebar-sessions-2)
           o.textContent = !(opt.value || opt.id) ? tr('Default') : (opt.label || opt.value);
+          if (opt.disabled) o.disabled = true;   // a row that cannot run here (a provider on another machine) is shown, not offered
           if (String(o.value) === String(isDefault ? defaultVal : curVal)) o.selected = true;
           sel.appendChild(o);
         }
@@ -948,8 +1008,9 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
           // Pooled pseudo-account (either backend): names its CURRENT target —
           // the old else-branch labeled it "— API …undefined" (2.369.18, same
           // class as the New Session dialog's fix)
-          ...acctList.map(a => ({ value: a.id, label: (a.pooled || a.type === 'pooled') ? a.name + (a.currentName ? ` → ${a.currentName}` : ' · ' + tr('pool'))
-            : a.type === 'subscription' ? `${a.name} (${tr('subscription')})` : `${a.name} — API …${a.tail}` })),
+          ...acctList.map(a => ({ value: a.id, disabled: a.type === 'provider' && !!s.host, label: (a.pooled || a.type === 'pooled') ? a.name + (a.currentName ? ` → ${a.currentName}` : ' · ' + tr('pool'))
+            : a.type === 'provider' ? tr('{name} (third party)', { name: a.name }) + (s.host ? ' — ' + tr('this machine only') : '')   // lane lg-providers chain cure: as New Session / Session Properties name it
+            : a.type === 'subscription' ? `${a.name} (${tr('subscription')})` : (a.tail ? `${a.name} — API …${a.tail}` : a.name) })),
         ], 'account'));
       }
     };
@@ -995,8 +1056,8 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
       e.stopPropagation();
       const ok = await showConfirmDialog({ title: tr('Terminate Session'), message: tr('Terminate session "{name}"? The running agent process will be killed.', { name: displayName }), confirmText: tr('Terminate'), danger: true });
       if (!ok) return;
-      if (s.webuiId) app.killSession(s.webuiId);
-      else if (s.pid) app.killPid(s.pid, s.host);
+      if (s.webuiId) app.endConversation(s.webuiId, undefined, { endTree: true });   // B-70f9 ②: a person's Terminate — the kill, then the notice of its running jobs · B-c134: it ends the background tree
+      else if (s.pid) { app.killPid(s.pid, s.host); app.noticeOwnedJobs?.([s.sessionId]); }
     };
     actionsDiv.appendChild(terminateBtn);
   }

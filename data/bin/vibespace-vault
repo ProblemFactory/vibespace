@@ -266,6 +266,13 @@ async function usesCmd() {
   if (!d.grants || !d.grants.length) console.log('  none');
   for (const g of d.grants || []) console.log(`  ${g.entry}${g.name ? `  «${g.name}»` : ''}  ${g.once ? 'one run' : 'every run'} until ${whenAt(g.until)}  for: ${g.purpose || '-'}${g.note ? `\n      what it is: ${g.note}` : ''}`);   // name / note: lane vault-entry-description
   for (const s of d.standing || []) console.log(`  ${s.entry}  standing · ${standingScope(s)} · since ${s.since ? whenAt(s.since) : '?'}${s.until && !perScope(s) ? ` · until ${whenAt(s.until)}` : ''}${s.paused ? ' · PAUSED (the user turned the entry off)' : ''}  (${s.grant})`);   // lane vault-standing-request
+  // B-a14b: an approval that ENDED is listed as itself (an agent once reported a lost 8-hour approval as a bug) — how and when
+  // it ended, and the request that asks again
+  if (d.ended && d.ended.length) {
+    console.log('grants that ended (the last 24 hours):');
+    const how = { time: 'its 8 hours ran out', used: 'its one run was used', lock: 'a lock of the vault ended it' };
+    for (const g of d.ended) console.log(`  ${g.entry}${g.name ? `  «${g.name}»` : ''}  ${g.once ? 'one run' : 'every run'} — ${how[g.endedBy] || 'ended'} at ${whenAt(g.endedAt)}  for: ${g.purpose || '-'}\n      ask again: vibespace-vault request ${g.entry} --for '${String(g.purpose || '<why>').replace(/'/g, "'\\''")}'`);   // single-quoted: a pasted line never runs a $( ) or a backtick of the purpose
+  }
   console.log('requests waiting on the user:');
   if (!d.requests || !d.requests.length) console.log('  none');
   for (const q of d.requests || []) console.log(`  ${q.entry}  asked ${whenAt(q.at)}${q.standing ? ` (standing · ${standingScope(q)})` : ''}  for: ${q.purpose || '-'}`);

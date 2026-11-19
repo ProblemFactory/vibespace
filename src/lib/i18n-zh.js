@@ -3,6 +3,15 @@
 // Generated after each i18n sweep; hand-edited for quality. Missing entries
 // fall back to English automatically.
 export default {
+  // lane login-request-card piece 1 (the design's «Internal links» — the words on screen, LINKS): a link to a conversation or a desktop
+  "Go": "前往",
+  "Go to this desktop": "前往这个桌面",
+  "unknown conversation": "未知对话",
+  "unknown desktop": "未知桌面",
+  "link::Resume here": "在这里恢复",
+  "Read its history": "查看历史记录",
+  "Opened on {desktop} — it had no window.": "已在 {desktop} 打开——它之前没有窗口。",
+  "This conversation is archived — open it from the archived list in the sidebar.": "这个对话已归档——请从侧边栏的归档列表中打开。",
   // lane sidebar-echo-order (inc-mwbn2xp8-ks0b, round 9): the page speaks only when it takes something back on the screen
   "The server refused a change ({reason}), so it was undone here": "服务器拒绝了一项改动（{reason}），已在此撤销",
   "The server refused a change, so it was undone here.": "服务器拒绝了一项改动，已在此撤销。",
@@ -646,6 +655,14 @@ export default {
   "Live": "运行中",
   "External": "外部",
   "Stopped": "已停止",
+  "Stopped (still checking)": "已停止（仍在检查）",
+  "«{name}» was not resumed: it is running in another terminal": "「{name}」没有恢复：它正在另一个终端里运行",
+  "«{name}» was not resumed: still checking whether it runs in another terminal — resume it by itself": "「{name}」没有恢复：仍在检查它是否在另一个终端里运行——请单独恢复它",
+  "still checking whether it runs in another terminal": "仍在检查它是否在另一个终端里运行",
+  "{n} not resumed: still checking whether they run in another terminal — resume each one by itself": "{n} 个没有恢复：仍在检查它们是否在另一个终端里运行——请逐个单独恢复",
+  "Still checking «{name}»": "仍在检查「{name}」",
+  "VibeSpace has not finished checking whether this conversation is running in another terminal. Resuming it now could start a second agent on the same conversation.": "VibeSpace 还没检查完这个对话是否正在另一个终端里运行。现在恢复可能会在同一个对话上启动第二个 agent。",
+  "Resume anyway": "仍然恢复",
   "Archived": "已归档",
   "Focus window": "聚焦窗口",
   "Expand card": "展开卡片",
@@ -717,6 +734,22 @@ export default {
   "At least 4 characters": "至少 4 个字符",
   "Attach": "接入",
   "Attach image": "附加图片",
+  // B-c9ed: THE picture rule's words (src/image-attach-rule.js REFUSAL_WORDS) + the door's toast (src/lib/image-attach.js)
+  "The file is empty": "文件是空的",
+  "HEIC pictures cannot be sent — save it as JPEG or PNG first": "HEIC 图片无法发送——请先另存为 JPEG 或 PNG",
+  "Not a picture the model can read (PNG, JPEG, GIF or WebP)": "不是模型能读的图片（PNG、JPEG、GIF 或 WebP）",
+  "{size} — larger than {mb} MB, the largest picture the model takes": "{size}——超过 {mb} MB，这是模型接收的单张图片上限",
+  "{w} × {h} pixels — the model takes at most {side} pixels on a side": "{w} × {h} 像素——模型接收的图片每边最多 {side} 像素",
+  "With it, this message's pictures pass {total} MB — the most one request to the model carries": "加上它，这条消息的图片会超过 {total} MB——这是发给模型的一次请求的上限",
+  "The file could not be read": "无法读取该文件",
+  "With it, this message's pictures pass {carry} MB — the most VibeSpace carries in one message": "加上它，这条消息的图片超过 {carry} MB——这是 VibeSpace 一条消息能携带的上限",
+  "The conversation has just started and cannot take this reply ({mb} MB) yet — nothing was sent; wait a moment and send it again": "对话刚刚启动，还不能接收这条回复（{mb} MB）——什么都没有发送；请稍等片刻再发送一次",
+  "{name} — {why}": "{name}——{why}",
+  "the pasted picture": "粘贴的图片",
+  "{n} picture(s)": "{n} 张图片",
+  "{label} sent — the {n} picture(s) in the reply box were not sent": "已发送「{label}」——回复框里的 {n} 张图片没有发送",
+  "Picture not added: {line}": "图片未添加：{line}",
+  "{n} pictures not added: {lines}": "{n} 张图片未添加：{lines}",
   "Auth will be disabled — anyone who can reach this server gets full access.": "将禁用鉴权——任何能访问此服务器的人都将获得完全访问权限。",
   "Auto-fallback: the harness is serving {served} instead of {model} (capacity/overload). Click to re-pick.": "自动回退：运行环境正在用 {served} 代替 {model}（容量/过载）。点击重新选择。",
   "Safety-classifier fallback: {from} flagged a message{category}, so {served} is answering instead of {model}. Your model setting is unchanged. Click to re-pick.": "安全分类器回退：{from} 拦截了一条消息{category}，所以现在由 {served} 代替 {model} 作答。你的模型设置没有改变。点击重新选择。",
@@ -892,6 +925,11 @@ export default {
   "Interrupted": "已中断",
   "LIVE": "运行中",
   "LIVE (VibeSpace-managed)": "运行中（VibeSpace 管理）",
+  "CPU priority": "CPU 优先级",
+  "Below the server (nice +{n}) — and everything it starts": "低于服务器（nice +{n}）——它启动的一切也一样",
+  "The server’s own — lowering it is off in Settings": "与服务器相同——设置中已关闭降低优先级",
+  "The server’s own — this machine has no nice program": "与服务器相同——这台机器没有 nice 程序",
+  "Set by its own machine — not lowered from here": "由它所在的机器决定——不从这里降低",
   "Layout presets": "布局预设",
   "Layouts & desktops": "布局与桌面",
   "Link folder to a task": "将文件夹关联到任务",
@@ -952,6 +990,7 @@ export default {
   "Open": "打开",
   "Open Login Terminal": "打开登录终端",
   "Open in editor": "在编辑器中打开",
+  "Could not open the block in an editor: {error}": "无法在编辑器中打开这段内容：{error}",
   "Open link": "打开链接",
   "Open login terminal": "打开登录终端",
   "Optional — anyone who can reach this server gets full shell access. A password gates pages, APIs, and terminals.": "可选——任何能访问此服务器的人都可获得完整的 shell 访问权限。密码会保护页面、API 和终端。",
@@ -1084,6 +1123,7 @@ export default {
   "Set model": "设置模型",
   "Set password": "设置密码",
   "Set password…": "设置密码…",
+  "Sign-in is off: anything that can reach VibeSpace can change these limits. Set a password so only you can.": "未开启登录：任何能连到 VibeSpace 的程序都能修改这些上限。设置密码后只有你能改。",
   "Set status…": "设置状态…",
   "Set up both…": "两个都设置…",
   "Show all agent types": "显示所有 agent 类型",
@@ -1120,6 +1160,9 @@ export default {
   "Terminate": "终止",
   "Terminate Session": "终止会话",
   "Terminate session \"{name}\"? The running agent process will be killed.": "终止会话“{name}”？正在运行的 agent 进程将被杀死。",
+  "\"{name}\" ended, but {n} of the processes it started could not be stopped ({names}) — they may still be running.": "“{name}”已结束，但它启动的 {n} 个进程无法停止（{names}）——它们可能仍在运行。",
+  "\"{name}\" ended, but {n} of the processes it started could not be stopped ({names}) and its process list was read only in part — more of them may still be running.": "“{name}”已结束，但它启动的 {n} 个进程无法停止（{names}），且它的进程列表只读取了一部分——可能还有更多进程仍在运行。",
+  "\"{name}\" ended, but its process list was read only in part — some processes it started may still be running.": "“{name}”已结束，但它的进程列表只读取了一部分——它启动的某些进程可能仍在运行。",
   "Test": "测试",
   "The agent hasn't kept a todo list": "agent 尚未维护步骤列表",
   "The agent keeps working until this condition is met:": "agent 会持续工作，直到满足以下条件：",
@@ -1655,10 +1698,16 @@ export default {
   "The account is fixed when the CLI starts, so the session restarts and the conversation continues via resume.": "账号在 CLI 启动时固定，所以会话将重启，对话通过 resume 无缝延续。",
   "Switch & restart": "切换并重启",
   "Nothing to resume yet — send a message first, or pick the account in the New Session dialog": "还没有可恢复的对话——先发一条消息，或在新建会话对话框里选账号",
-  "Manual (⟳ button) — plus ONE automatic read after a usage wall": "手动（⟳ 按钮）— 另外在撞到用量上限后自动读一次",
+  "Manual (⟳ button)": "手动（⟳ 按钮）",
+  "Antigravity usage reads": "Antigravity 用量读取",
+  "Automatically": "自动",
+  "Only when I press Re-check": "仅在我按「重新检查」时",
+  "Automatically: an account's usage is read once each time one of its conversations hits a usage wall, and once after a stretch of work — when a turn ends and 5 minutes pass with no new turn on the account; that read comes at most once per account per 30 minutes, never during a turn, never for an idle account. Only when I press Re-check: nothing is read by itself. Either way, Re-check in the account's menu reads it: this row decides only the reads that happen by themselves.": "自动：账号的对话每撞到一次用量上限，读一次；一段工作结束、且该账号 5 分钟内没有新一轮时，再读一次——这一次每账号每 30 分钟最多一次，轮次进行中不读，闲置账号不读。仅在我按「重新检查」时：不会自己读。无论选哪项，账号菜单里的「重新检查」都会读：这一行只管自己发生的读取。",
+  "Usage read {n}× today: {person} by you · {wall} after a usage wall · {after} after a stretch of work": "今天读取用量 {n} 次：你手动 {person} 次 · 撞到上限后 {wall} 次 · 一段工作结束后 {after} 次",
+  "usage read {n}× today": "今天读取用量 {n} 次",
   "Auto on popup open (when >30 min stale)": "打开弹窗时自动（数据超 30 分钟陈旧才刷）",
   "Off (never contact Anthropic)": "关闭（绝不主动请求 Anthropic）",
-  "On-demand quota refresh (model-scoped limits like Fable)": "按需刷新配额（Fable 等模型级限额）",
+  "Claude usage refresh (model-scoped limits like Fable)": "Claude 用量刷新（Fable 等模型级限额）",
   "Model-scoped weekly limits (e.g. Fable) aren’t in the passive feed — on-demand refresh is disabled in Settings": "模型级周配额（如 Fable）不在被动采集里——按需刷新已在设置中关闭",
   "Message metadata": "消息元数据",
   "Role": "角色",
@@ -1820,7 +1869,6 @@ export default {
   "apiKeyHelper overrides this login": "apiKeyHelper 覆盖了此登录",
   "That file lives on {host} — this terminal runs on {mine}; path not typed": "该文件在 {host} 上——这个终端跑在 {mine}；路径未输入",
   "this machine": "本机",
-  "The CLI prefers a configured apiKeyHelper over the OAuth login — sessions on this machine bill via the helper key. Remove apiKeyHelper from ~/.claude/settings.json to bill the subscription.": "CLI 优先使用配置的 apiKeyHelper 而不是 OAuth 登录——这台机器上的会话都通过 helper 的 key 计费。从 ~/.claude/settings.json 里删掉 apiKeyHelper 才会走订阅计费。",
   "Why API billing? apiKeyHelper is set on the machine": "为什么是 API 计费？机器上配置了 apiKeyHelper",
   "VibeSpace agent integration (master switch)": "VibeSpace agent 集成（总开关）",
   "Everything the AGENT can see or use from VibeSpace. ON (default): sessions get the VibeSpace hooks (Task Group context, per-turn reminders, stop nudge) and the vibespace-status/ask/task tools on their PATH. OFF: the model gets a pristine claude/codex — the hook registration is removed from ~/.claude/settings.json and ~/.codex/hooks.json immediately (restored on re-enable, unless you had removed the hook manually in Manage Agents), new sessions spawn with no VibeSpace env or tools, and already-running sessions stop receiving injected context, nudges and task reads. Model-INVISIBLE plumbing keeps working either way: passive usage capture (statusline), billing/account env, the Ctrl+G editor, session persistence and remote transport. Every option below only applies while this is ON.": "管辖 AGENT 能看到或用到的一切 VibeSpace 集成。开（默认）：会话获得 VibeSpace hook（任务组上下文、每轮提醒、停止提醒）和 PATH 上的 vibespace-status/ask/task 工具。关：模型得到原汁原味的 claude/codex——立即从 ~/.claude/settings.json 和 ~/.codex/hooks.json 摘除 hook 注册（重新打开时恢复，除非你曾在 Manage Agents 里手动移除过 hook），新会话不再带任何 VibeSpace 环境变量和工具，已在运行的会话也不再收到注入的上下文、提醒和任务读取。模型不可见的管道两种状态下都照常工作：被动用量采集（statusline）、计费/账号环境变量、Ctrl+G 编辑器、会话持久化和远程传输。下方所有选项仅在此开关打开时生效。",
@@ -2413,7 +2461,7 @@ export default {
   "Extra “tailscale up” flags — applied on the next Log in / mode change. Reachability flags we manage (--socket/--tun/--accept-routes/--accept-dns/proxy) are ignored.": "额外的 tailscale up 参数——下次登录/切换模式时生效。我们管理的可达性参数（--socket/--tun/--accept-routes/--accept-dns/代理）会被忽略。",
   "Let Tailscale set this machine's DNS (MagicDNS)": "让 Tailscale 接管本机 DNS（MagicDNS）",
   "Reach tailnet hosts from browsers": "从浏览器访问 tailnet 里的机器",
-  "On: while Tailscale runs, the browsers here open a tailnet machine by its name (https://nas:8006/) — only tailnet hosts go through Tailscale, everything else goes direct, and this machine's DNS is never changed. A browser with a proxy of its own keeps it. Kernel mode: a change takes effect at once for running browsers. Userspace: a running browser follows at its next start. A browser started while this was off reaches tailnet hosts from its next start; the in-page browser always follows at once.": "开：Tailscale 运行时，这里的浏览器可以直接用名字打开 tailnet 里的机器（https://nas:8006/）—— 只有 tailnet 里的主机走 Tailscale，其余一律直连，本机 DNS 不会被改。自己设了代理的浏览器保留它的代理。内核模式：改动对正在运行的浏览器立即生效。用户态：正在运行的浏览器在下次启动时跟上。这里关着时启动的浏览器，从下次启动起才能访问 tailnet 里的机器；页内浏览器总是立即跟上。",
+  "On: while Tailscale runs, the browsers here open a tailnet machine by its name (https://nas:8006/) — only tailnet hosts go through Tailscale, everything else goes direct, and this machine's DNS is never changed. A browser with a proxy of its own keeps it. Kernel mode: a change takes effect at once for running browsers. Userspace: a running browser follows at its next start. A browser started while this was off reaches tailnet hosts from its next start; the in-page browser follows at its next connection.": "开：Tailscale 运行时，这里的浏览器可以直接用名字打开 tailnet 里的机器（https://nas:8006/）—— 只有 tailnet 里的主机走 Tailscale，其余一律直连，本机 DNS 不会被改。自己设了代理的浏览器保留它的代理。内核模式：改动对正在运行的浏览器立即生效。用户态：正在运行的浏览器在下次启动时跟上。这里关着时启动的浏览器，从下次启动起才能访问 tailnet 里的机器；页内浏览器在它下一次建立连接时跟上。",
   "Off: Tailscale never changes /etc/resolv.conf, and tailnet names still reach ssh hosts through the plugin. On: a machine of your own in kernel mode resolves through Tailscale (100.100.100.100). Never on a cluster instance.": "关：Tailscale 从不改动 /etc/resolv.conf，tailnet 名字照样经插件连到 ssh 主机。开：你自己的机器在内核模式下经 Tailscale（100.100.100.100）解析。集群实例上永远不开。",
   "DNS: Tailscale MagicDNS": "DNS：Tailscale MagicDNS",
   "DNS: Tailscale still holds /etc/resolv.conf — turn Tailscale off and on to restore it": "DNS：/etc/resolv.conf 仍被 Tailscale 占着——关掉再打开 Tailscale 即可恢复",
@@ -2617,7 +2665,13 @@ export default {
   "{name}: your settings file is used as it is — the output style you picked in VibeSpace is not applied; put it into the file, or drop the --settings flag": "{name}：你的设置文件按原样使用——你在 VibeSpace 中选的输出风格不会应用；请把它写进该文件，或去掉 --settings 参数",
   "{name}: your settings file is used as it is — «Disable model fallback» from VibeSpace is not applied; put it into the file, or drop the --settings flag": "{name}：你的设置文件按原样使用——VibeSpace 的「禁用模型 fallback」不会应用；请把它写进该文件，或去掉 --settings 参数",
   "{name}: your settings file is used as it is — VibeSpace does not set crossSessionInbound, so Background Work notices reach it only if the file accepts them; or drop the --settings flag": "{name}：你的设置文件按原样使用——VibeSpace 不设置 crossSessionInbound，只有文件接受时后台工作的通知才会送达；或去掉 --settings 参数",
-  "{name} is set to bill through the subscription, so your settings file was set aside for this start, all of it — clear the pick to use the file": "{name} 设为通过订阅计费，所以本次启动整个未使用你的设置文件——清除该选择即可使用此文件",
+  "{name} bills the subscription chosen for it and the Claude settings of its machine name an apiKeyHelper, so your settings file was set aside for this start, all of it — to use the file, set its billing to «CLI login»": "{name} 由为它选定的订阅计费，而它所在机器的 Claude 设置里指定了 apiKeyHelper，所以本次启动整个未使用你的设置文件——要使用该文件，把它的计费切换为「CLI 登录」",
+  "{name} bills the subscription chosen for it, and whether the Claude settings of its machine name an apiKeyHelper could not be read, so your settings file was set aside for this start, all of it — to use the file, set its billing to «CLI login»": "{name} 由为它选定的订阅计费，而无法读到它所在机器的 Claude 设置是否指定了 apiKeyHelper，所以本次启动整个未使用你的设置文件——要使用该文件，把它的计费切换为「CLI 登录」",
+  "{name} bills {account}, the subscription you picked — the apiKeyHelper in this machine’s Claude settings is not used for it. To bill through the helper, set its billing to «CLI login» (from its next start)": "{name} 由你选择的订阅 {account} 计费——这台机器 Claude 设置里的 apiKeyHelper 不用于它。要改由 helper 计费，把它的计费切换为「CLI 登录」（下次启动起生效）",
+  "{name} bills {account}, the subscription you picked — the apiKeyHelper in the Claude settings on {host} is not used for it. To bill through the helper, set its billing to «CLI login @ {host}» (from its next start)": "{name} 由你选择的订阅 {account} 计费——{host} 上 Claude 设置里的 apiKeyHelper 不用于它。要改由 helper 计费，把它的计费切换为「CLI 登录 @ {host}」（下次启动起生效）",
+  "{name} runs on {account}, a third-party provider paid by use with your own key — the apiKeyHelper named in the Claude settings it reads is not used for it (VibeSpace sets it aside so it cannot outrank the provider’s key)": "{name} 使用第三方提供方 {account}，用你自己的密钥按量付费——它读取的 Claude 设置里指定的 apiKeyHelper 不用于它（VibeSpace 把它搁置，使它不能盖过提供方的密钥）",
+  "{name} runs on a third-party provider and a Claude settings file it reads names an apiKeyHelper, so your settings file was set aside for this start, all of it — VibeSpace sets a helper aside so it cannot outrank the provider’s own key; to use your file, take the apiKeyHelper out of the settings that name it (this machine’s, the project’s .claude files, or your file itself)": "{name} 使用第三方提供方，而它读取的某个 Claude 设置文件指定了 apiKeyHelper，所以本次启动整个未使用你的设置文件——VibeSpace 搁置 helper，使它不能盖过提供方自己的密钥；要使用你的文件，把 apiKeyHelper 从指定它的设置里去掉（本机的、项目的 .claude 文件，或你的文件本身）",
+  "{name} runs on a third-party provider, and whether a Claude settings file it reads names an apiKeyHelper could not be read, so your settings file was set aside for this start, all of it — VibeSpace sets a helper aside so it cannot outrank the provider’s own key": "{name} 使用第三方提供方，而无法读到它读取的 Claude 设置文件是否指定了 apiKeyHelper，所以本次启动整个未使用你的设置文件——VibeSpace 搁置 helper，使它不能盖过提供方自己的密钥",
   "Disable model fallback": "禁用模型 fallback",
   "When safeguards flag a message, pause the turn instead of automatically switching to another model (the CLI's \"Switch models when a message is flagged\" set to off). Applies to new sessions at start and to running chat sessions from their next turn; sessions started while enabled also cover their subagents. A stopped turn shows a notice — rephrase and resend to continue.": "当安全机制标记某条消息时，暂停本轮而不是自动切换到另一个模型（即关闭 CLI 的 \"Switch models when a message is flagged\"）。新会话启动即生效，运行中的对话会话从下一轮生效；启用后新建的会话连 subagent 一起覆盖。被暂停的轮次会显示提示——换个说法重发即可继续。",
   "⚠ Safeguards stopped this turn: {model} flagged the message and model fallback is disabled, so it was NOT retried on another model. Rephrase and resend to continue on {model}.": "⚠ 安全机制暂停了本轮：{model} 标记了这条消息，且模型 fallback 已禁用，因此没有换用其他模型重试。换个说法重发即可继续使用 {model}。",
@@ -2652,7 +2706,7 @@ export default {
   "The server did not answer the re-attach — it may have restarted. If the session is still running, Resume reconnects to it.": "服务器未响应重连——可能经历了重启。如果会话仍在运行，Resume 会重新接入它。",
   "The server is degraded — its main thread is saturated ({lag}ms median lag). Everything will feel slow; sessions are NOT dead.": "服务器处于劣化状态——主线程饱和（中位延迟 {lag}ms）。一切都会变慢，但会话并没有死。",
   "The CLI prefers a configured apiKeyHelper over the machine’s own OAuth login. Picking a NAMED subscription account below bypasses the helper for that session (the helper is neutralized at spawn); this CLI-login entry keeps billing via the helper.": "CLI 优先使用机器上配置的 apiKeyHelper 而非该机器自身的 OAuth 登录。在下方选择一个具名订阅账号即可绕过 helper（启动时按会话中和）；本条\"CLI 登录\"则继续经 helper 按 API 计费。",
-  "The CLI prefers a configured apiKeyHelper over the OAuth login — sessions using the machine’s own login bill via the helper key. Sessions where you explicitly pick a subscription account bypass the helper automatically (2.236.0); to change the machine-wide default, remove apiKeyHelper from ~/.claude/settings.json.": "CLI 优先使用配置的 apiKeyHelper 而非 OAuth 登录——使用机器自身登录的会话经 helper key 按 API 计费。显式选择订阅账号的会话会自动绕过 helper（2.236.0）；要改机器级默认，请从 ~/.claude/settings.json 移除 apiKeyHelper。",
+  "The CLI prefers a configured apiKeyHelper over the OAuth login — sessions using the machine’s own login bill via the helper key. Sessions that bill a subscription account you chose bypass the helper (from their next start); to change the machine-wide default, remove apiKeyHelper from ~/.claude/settings.json.": "CLI 优先使用配置的 apiKeyHelper 而非 OAuth 登录——使用机器自身登录的会话经 helper key 按 API 计费。由你选定的订阅账号计费的会话会绕过 helper（从下次启动起）；要改机器级默认，请从 ~/.claude/settings.json 移除 apiKeyHelper。",
   "Conversation found — retry now?": "对话还在——现在重试？",
   "The last resume failed because the CLI looked in the wrong folder, but this conversation’s transcript EXISTS — nothing is lost. Retry the resume right now (this skips the retry cooldown)?": "上次恢复失败是因为 CLI 找错了文件夹，但这个对话的转录确实存在——什么都没丢。现在立即重试恢复吗？（将跳过重试冷却）",
   "Retry resume now": "立即重试恢复",
@@ -2677,7 +2731,7 @@ export default {
   'Fetch fresh quota for every signed-in account and machine below — one on-demand request per identity, only when you click (never scheduled)': '为下方每个已登录账号和机器拉取最新配额——每个身份一次按需请求，仅在你点击时发起（绝不定时）',
   'Only accounts usable on {host} are listed — the full roster lives under “This machine”. The “CLI login” row is {host}’s own login.': '这里只列出可在 {host} 上使用的账号——完整账号列表在“本机”一节。“CLI login”一行是 {host} 自己的登录。',
   'Machine unreachable — account availability unknown. Accounts are managed under “This machine”.': '机器不可达——账号可用性未知。账号管理在“本机”一节。',
-  'On-demand quota refresh is disabled in Settings': '按需配额刷新已在设置中禁用',
+  "Claude usage refresh is Off in Settings": "Claude 用量刷新已在设置中关闭",
   'Nothing to refresh — no signed-in accounts or machines': '没有可刷新的对象——无已登录账号或机器',
   'Full overview →': '完整总览 →',
   'Refresh quota': '刷新配额',
@@ -2770,7 +2824,10 @@ export default {
   "Add via long-lived token": "通过长期 token 添加",
   "est {pct}%": "预计 {pct}%",
   "window reset since last reading": "上次读数后窗口已重置",
-  "Dead-reckoned estimate: last confirmed reading + your local usage since, at learned rates. ⟳ fetches a fresh reading to re-calibrate.": "航位推算估计：最后一次真实读数 + 之后的本地用量按学习速率折算（虚线部分）。点 ⟳ 获取新读数校准。",
+  "about {pct}%": "约 {pct}%",
+  "about {pct}% · from {n} readings on this hub": "约 {pct}% · 依据本机 {n} 次读数",
+  "An estimate, not a bound: the last reading plus this hub's use since, at this account's learned rate.": "估算，不是上限：上次读数加上此后本机的用量，按该账号学到的速率计算。",
+  "{n} requests here since": "此后本机 {n} 次请求",
   "Pooled account — one billing identity auto-switching across your subscriptions": "池化账号 — 一个计费身份在你的订阅之间自动切换",
 
   // ── i18n coverage sweep (missing-key fill, added post-2.265.0 fix campaign) ──
@@ -3023,12 +3080,14 @@ export default {
   "Job auto-notify": "任务自动通知",
   "Local session discovery via device daemon": "本地会话发现走设备守护进程",
   "Local sessions via device daemon (R6)": "本地会话走设备守护进程（R6）",
+  "Run conversations below the server\u2019s priority": "会话以低于服务器的优先级运行",
+  "Every conversation and background job on this machine starts at a lower CPU priority than the server (nice +5), and so does everything it starts \u2014 a busy build in a conversation then gives way to the server. Off: they start at the server\u2019s own priority. A change applies from the next start; a running one keeps its priority (Session Properties shows it).": "这台机器上的每个会话和后台任务都以低于服务器的 CPU 优先级启动（nice +5），它们启动的一切也一样——会话里繁忙的构建因此会让位给服务器。关闭：它们以服务器自己的优先级启动。更改从下一次启动生效；正在运行的保持原来的优先级（会话属性中可见）。",
   "New local chat sessions run as device-daemon pipe sessions instead of dtach — the session-brain final form (survives server restarts via the daemon). Existing sessions are never migrated; any daemon failure falls back to dtach at spawn. Leave off until the device-assisted consumer path has soaked.": "新建的本地聊天会话改为设备守护进程 pipe 会话而非 dtach——session-brain 终态（借守护进程在服务器重启后存活）。现有会话绝不迁移；守护进程任何故障在 spawn 时回落 dtach。设备辅助消费路径充分浸泡前请保持关闭。",
   "Off": "关",
   "On": "开",
   "Stopped {n} other process(es) that were still writing this conversation on {host} — resuming cleanly.": "已停止 {host} 上仍在写入此对话的 {n} 个其他进程——干净地恢复。",
   "The 5s session-list sweep reads its filesystem facts (lock files, transcript listing, tail ids) from the device daemon's snapshot — computed in a daemon child process, so a slow or network-mounted home directory can never stall the server. Local enrichment (window mapping, tmux) is unaffected. Falls back to the local scan on any failure.": "5 秒会话列表巡检的文件系统事实（锁文件、转录清单、尾部 id）改读设备守护进程的快照——在守护进程子进程里计算，慢速/网络挂载的家目录再也拖不住服务器。本地增强（窗口映射、tmux）不受影响。任何失败回落本地扫描。",
-  "The passive statusline feed only carries the 5h/7d windows — model-scoped weekly limits (e.g. Fable) can ONLY come from asking Anthropic’s usage endpoint with the account’s own login token. This is the same non-billable call the CLI makes when you run /usage, throttled to ≥60s per account and honoring rate-limit backoff, and it NEVER runs on a timer. It is user-initiated traffic, categorically different from the background polling that has gotten accounts banned — but it is still an off-CLI request with a subscription token, so it is your call: Manual = when you click ⟳, and once by itself when an Antigravity conversation hits a usage wall; Auto = also once when you open the quota popup and the data is stale; Off = never (the ⟳ button disappears and scoped limits stay unknown); Auto via the CLI = a background loop spawns “claude -p /usage” (the official binary makes the fetch — this app never calls the endpoint itself) with a BURN-AWARE cadence: refreshes within minutes when the dead-reckoner sees real spending drift, 45min-with-jitter staleness cap for active accounts, and idle accounts are never polled.": "被动 statusline 只带 5h/7d 窗口——按模型的周限额（如 Fable）只能用账号自己的登录 token 询问 Anthropic 的 usage 端点。这与你运行 /usage 时 CLI 发出的同一非计费调用，按账号 ≥60 秒节流并遵守限流退避，且绝不定时运行。它是用户发起的流量，与导致封号的后台轮询有本质区别——但仍是携订阅 token 的 CLI 外请求，由你决定：手动 = 点击 ⟳ 时，以及 Antigravity 对话撞到用量上限时自己读一次；自动 = 打开配额弹窗且数据过期时也刷新一次；关 = 从不（⟳ 按钮消失，按模型限额保持未知）；CLI 自动 = 后台循环 spawn 「claude -p /usage」（官方二进制发起请求——本应用从不自己调端点），节奏燃烧感知：dead-reckoner 看到真实消耗漂移时几分钟内刷新，活跃账号 45 分钟带抖动的过期上限，闲置账号从不轮询。",
+  "Reads each Claude account’s limits from Anthropic — the only source of model-scoped weekly limits like Fable, which the passive statusline feed does not carry. Manual: only when you press ⟳, at most once a minute per account. Auto on popup open: also once when you open the quota popup and its reading is over 30 minutes old. Auto via the CLI: the official claude CLI reads /usage in the background — sooner while an account burns quota, never for an idle one. Off: never contacts Anthropic; the popup hides its ⟳, and Refresh all says it is off.": "从 Anthropic 读取每个 Claude 账号的限额——Fable 等按模型的周限额只能这样读到，被动 statusline 不带它们。手动：只在你按 ⟳ 时读，每账号每分钟最多一次。打开弹窗时自动：打开配额弹窗且读数超过 30 分钟时也读一次。CLI 自动：官方 claude CLI 在后台读 /usage——账号消耗快时更早，闲置账号从不读。关：从不联系 Anthropic；弹窗隐藏 ⟳，「全部刷新」会提示已关闭。",
   "This conversation is NOT notified when its background jobs finish — agents must poll. Toggle globally in Settings → Integration, per group in the group window.": "本对话的后台任务结束时不会收到通知——agent 只能自己 poll。全局开关在 设置 → 集成，按组开关在组窗口。",
   "When a background job finishes, fails, is parked, or needs input, its owner conversation gets a message through Claude Code’s own cross-session messaging inbox (delivered by the CLI under its inbound rules; an idle session starts a turn, billed like a typed prompt). When the conversation is closed, the notification is stashed and injected the next time it resumes. Per-group override in the Task Group detail window; per-job override at creation (--notify on/off).": "后台任务完成/失败/被停放/需要输入时，其所属对话会通过 Claude Code 自己的跨会话消息收件箱收到一条消息（由 CLI 按其入站规则投递；空闲会话会开启一个 turn，计费等同你手打的一条消息）。对话关闭期间通知暂存，下次 resume 时注入。按组覆盖在任务组详情窗口；按任务覆盖在创建时（--notify on/off）。",
   "When a background job owned by one of this group's conversations finishes, fails, or asks for input, message that conversation (Claude Code cross-session messaging; stashed for resume when it is closed). \"Inherit\" follows the global Integration setting.": "本组对话名下的后台任务完成/失败/请求输入时给该对话发消息（Claude Code 跨会话消息；对话关闭则暂存到 resume）。“继承”跟随全局集成设置。",
@@ -3533,6 +3592,8 @@ export default {
   "Handed to the running turn — the agent reads it at its next tool call": "已交给正在进行的回合 · 下一次工具调用时送达",
   "Stop came before the agent read it. It stays in the conversation and reaches the agent with the next message it gets — yours, or a notice that wakes it — so there is no need to send it again": "停止先于 agent 读到它。它留在对话里，会随 agent 收到的下一条消息（你的，或唤醒它的通知）一起送达——不必再发一次",
   "{k} message(s) unread when stopped — they go with your next message": "{k} 条消息停止时未读 · 随你的下一条消息送达",
+  "The Stop arrived after the message handed in earlier had already gone to the model — it was cut off at once, and it may be billed": "停止到达时，先前送入的消息已经发给了模型——它被立即截断，可能会计费",
+  "The Stop arrived after the message handed in earlier had already gone to the model — it was answered before the Stop reached it, and it is billed": "停止到达时，先前送入的消息已经发给了模型——在停止生效前它已得到回答，会计费",
   "{k} message(s) you sent into the turn had already reached the agent": "{k} 条已送入本轮的消息此前已送达智能体",
   "Enter hands it to the running turn — the agent reads it at its next tool call": "Enter 立即送入正在进行的回合——agent 在下一次工具调用时读到",
   "Alt+Enter queues it until the turn ends — editable until then": "Alt+Enter 排队到回合结束——在那之前都可以编辑",
@@ -3819,7 +3880,7 @@ export default {
   "{cmd} — not offered": "{cmd} —— 不提供",
   "Spending": "花费",
   "Unattended turns per account per hour": "每账号每小时的无人值守轮次上限",
-  "The most turns VibeSpace may start by itself on ONE account in a rolling hour — the auto-continue after a usage limit, the Stop bookkeeping nudge, Background Work notifications and messages from other sessions all count. Turns YOU type are never counted, and neither is a button you press that says “starts a turn” (Hand over now, Wake now, Hand back). 0 = no automatic turns at all on any account. When a budget is spent the refusal is journalled and filed in the “For you” inbox; nothing is lost — a notification that cannot be delivered live is injected into the conversation’s next turn instead.": "VibeSpace 在一个滚动小时内、在同一个账号上自行开启的轮次上限——撞限后的自动续跑、Stop 记账提醒、后台工作通知、别的会话发来的消息全都计入。你自己打字发起的轮次永不计入，你按下的标着「会开始一轮」的按钮（现在交给它、立即唤醒、交还控制）也不计入。0 = 任何账号都不允许自动轮次。预算花完时拒绝会进日志并投进「待你处理」; 什么都不会丢——投不成的通知会改由该对话的下一轮注入。",
+  "The most turns VibeSpace may start by itself on ONE account in a rolling hour — the auto-continue after a usage limit, the Stop bookkeeping nudge, Background Work notifications and messages from other sessions all count. Turns YOU type are never counted, and neither is a button you press that says “starts a turn” (Hand over now, Wake now, Hand back, Resume all). 0 = no automatic turns at all on any account. When a budget is spent the refusal is journalled and filed in the “For you” inbox; nothing is lost — a notification that cannot be delivered live is injected into the conversation’s next turn instead.": "VibeSpace 在一个滚动小时内、在同一个账号上自行开启的轮次上限——撞限后的自动续跑、Stop 记账提醒、后台工作通知、别的会话发来的消息全都计入。你自己打字发起的轮次永不计入，你按下的标着「会开始一轮」的按钮（现在交给它、立即唤醒、交还控制、全部恢复）也不计入。0 = 任何账号都不允许自动轮次。预算花完时拒绝会进日志并投进「待你处理」; 什么都不会丢——投不成的通知会改由该对话的下一轮注入。",
   "Unattended turns per account per day": "每账号每天的无人值守轮次上限",
   "The same ceiling over a rolling 24 hours. An account can be busy for an hour without spending its whole day.": "同一个上限, 按滚动 24 小时计。一个账号可以忙一个小时, 而不至于把一整天都花光。",
   "Unattended turns for this instance per day": "本实例每天的无人值守轮次上限",
@@ -3968,6 +4029,9 @@ export default {
   "Not configured": "未配置",
   "Not set": "未设置",
   "Not tested yet": "尚未测试",
+  "The Test is offered after the first install from {host} (⚙ → Plugins → Install plugin…)": "首次从 {host} 安装后即可测试（⚙ → 插件 → 安装插件…）",
+  "The Test is offered after the first install from its host (⚙ → Plugins → Install plugin…)": "首次从它的主机安装后即可测试（⚙ → 插件 → 安装插件…）",
+  "The Test is not offered yet": "暂时还不能测试",
   "Not wired until {phase}": "要到 {phase} 才接线",
   "Not wired until {phase} — this card only stores the values.": "要到 {phase} 才接线 — 这张卡片目前只保存值。",
   "Passed": "通过",
@@ -4244,6 +4308,7 @@ export default {
   "terminal mode": "终端模式",
   "running chat sessions follow from their next turn": "运行中的聊天会话从下一轮起跟随",
   "Read by VibeSpace": "由 VibeSpace 读取",
+  "when a conversation hits a usage wall, and after a stretch of work": "对话撞到用量上限时，以及一段工作结束后",
   "Written into the CLI config": "写入 CLI 配置",
   "The CLI output style new chat sessions start with. \"Concise\" makes Claude lead with results and skip preamble. Blank = the CLI's own default. A stream-json session cannot switch style mid-conversation, so a change takes effect on the next resume; the chat status bar sets it per session.": "新聊天会话启动时使用的 CLI 输出风格。\"Concise\" 让 Claude 直接给结果、省去铺垫。留空 = CLI 自己的默认值。stream-json 会话无法在对话中途切换风格,改动在下次 resume 生效;聊天状态栏可按会话设置。",
   "CLI default (leave config.toml alone)": "CLI 默认(不动 config.toml)",
@@ -4837,6 +4902,13 @@ export default {
   "No conversation id yet": "还没有对话 id",
   "Open it in Background Work": "在后台任务中打开",
   "None — no background job belongs to this conversation": "无 — 没有属于这个对话的后台任务",
+  "Background jobs of this conversation keep running: {names}": "此对话的后台任务仍在运行：{names}",
+  "Background jobs of these conversations keep running: {names}": "这些对话的后台任务仍在运行：{names}",
+  "Stop these too": "一并停止",
+  "Stopping 1 background job": "正在停止 1 个后台任务",
+  "Stopping {n} background jobs": "正在停止 {n} 个后台任务",
+  "Could not stop {n} of these background jobs: {error}": "其中 {n} 个后台任务无法停止：{error}",
+  "Background jobs keep running: {n}": "后台任务仍在运行：{n} 个",
   "Background Work notifications for this conversation were dropped — {cap} were already waiting, the most it keeps": "这个对话的后台任务通知被丢弃了 — 已有 {cap} 条在等，这是上限",
   "{n} dropped, never delivered (from: {jobs}). The {cap} still waiting reach the agent with its next turn; the Background Work panel lists them.": "丢弃 {n} 条，从未送达（来自：{jobs}）。仍在等的 {cap} 条会在 agent 的下一轮送达；后台任务面板列出了它们。",
   "Reply with \"{label}\"": "用「{label}」回复",
@@ -4902,6 +4974,111 @@ export default {
   "Auto-continue: off": "自动继续：关",
   "Turn auto-continue on": "开启自动继续",
   "Turn auto-continue off": "取消自动继续",
+  // lane auto-resume-bulk (.349): WHY a session stopped (the card's mark, the filter) + the two bulk acts + the batch's cost (src/stopped-by.js, src/bulk-resume-cost.js, src/lib/bulk-resume.js)
+  "Stopped by a usage limit": "因用量上限停止",
+  "Stopped by a usage limit · resets {time}": "因用量上限停止 · {time} 重置",
+  "Stopped by a usage limit · the limit has reset": "因用量上限停止 · 上限已重置",
+  "Model overloaded · stopped {time}": "模型过载 · 停于 {time}",
+  "Auto-continue: on": "自动继续：开",
+  "Auto-continue: on · not waiting for this limit": "自动继续：开 · 这次上限不等待",
+  "Auto-continue: on · continues only if the limit clears early": "自动继续：开 · 只在上限提前解除时继续",
+  "Auto-continue is on, but this reset is too far to wait for — the session continues only if the limit clears early — click to turn it off": "自动继续已开，但这次重置太远、不等它 —— 只有上限提前解除时这个会话才会继续 —— 点击关闭",
+  "Auto-continue is on for the next limit; this session is not waiting for this one (its reset has passed or is too far) — open it to continue": "自动继续已开，对下一次上限生效；这个会话不等这一次（重置已过或太远）—— 打开它继续",
+  "The harness said: {said}": "原话：{said}",
+  "This mark stays until the session runs again.": "会话再次运行前，这个标记一直保留。",
+  "Stopped by a limit or overload ({n})": "因用量上限/过载停止 ({n})",
+  "Will turn on {n} sessions; {m} already on": "将开启 {n} 个会话；已开启 {m} 个",
+  "Turn auto-continue on for every session": "对所有会话开启自动继续",
+  "Turn it off for all": "全部关闭",
+  "Turn auto-continue off for every session": "对所有会话关闭自动继续",
+  "Resume every session a usage limit or overload stopped ({n})": "恢复所有因用量上限/过载停止的会话 ({n})",
+  "No sessions stopped by a limit": "没有因用量上限停止的会话",
+  "None of the {m} stopped sessions can be resumed now": "{m} 个停下的会话现在都不能恢复",
+  "The stopped session cannot be resumed now": "这个停下的会话现在不能恢复",
+  "still inside a limit": "仍在用量上限内",
+  "already running": "已在运行",
+  "its process has ended": "进程已结束",
+  "its harness cannot continue a turn": "它的 harness 无法继续一轮",
+  "a continue onto its account was just rejected": "继续到它的账号刚被拒绝",
+  "{why} until {time}": "{why}，至 {time}",
+  "Resumed {n}": "恢复了 {n} 个",
+  "skipped {n} (still inside a limit)": "跳过 {n} 个（仍在用量上限内）",
+  "skipped {n} ({w} still inside a limit)": "跳过 {n} 个（其中 {w} 个仍在用量上限内）",
+  "skipped {n}": "跳过 {n} 个",
+  "refused {n}": "拒绝 {n}",
+  "could not deliver {n}": "未能送达 {n}",
+  "≈ ${usd} at {model} input ${price}/M, {tokens} cold tokens": "≈ ${usd}（按 {model} 输入价 ${price}/M，冷读 {tokens} tokens）",
+  "≈ ${usd} for {tokens} cold tokens": "≈ ${usd}（冷读 {tokens} tokens）",
+  "includes a nominal {n} output tokens per session": "含每个会话名义上 {n} 个输出 tokens",
+  "≈ {add} % of the 5 h window of {member}; it is at {now} % now ⇒ ~{after} % after": "约占 {member} 的 5 h 窗口 {add} %；现在 {now} % ⇒ 之后约 {after} %",
+  "≈ {add} % of the 5 h window of {member}": "约占 {member} 的 5 h 窗口 {add} %",
+  "measured in this window: 1 % ≈ {tokens} tokens": "按本窗口实测 1 % ≈ {tokens} tokens",
+  "{member}: cannot estimate — this window has no measured ratio yet": "{member}：无法估算：本窗口还没有实测比例",
+  "If you resumed them all now: ≈ ${usd} · ≈ {pct} % of the 5 h window": "若现在全部恢复：≈ ${usd} · ≈ {pct} % 的 5 h 窗口",
+  "If you resumed them all now: ≈ ${usd} · the 5 h share cannot be estimated yet": "若现在全部恢复：≈ ${usd} · 5 h 窗口占比暂无法估算",
+  "{n} sessions have no known context size — not counted": "{n} 个会话的上下文大小未知，未计入",
+  "Resume all ({n})": "全部恢复 ({n})",
+  "Resume sessions a limit or overload stopped": "恢复因用量上限/过载停止的会话",
+  "Could not read the stopped sessions — try again.": "读取停止的会话失败，请重试。",
+  "Skipped ({n}):": "跳过（{n}）：",
+  "{n} sessions will be continued, earliest stopped first — each one is a billed turn. This press is your own: it is not counted against the limits on turns nobody typed; an account in paid overage is still refused, and you can stop the rest at any time.": "将继续 {n} 个会话（最早停止的优先）——每个都是一次计费的轮次。这是你自己的操作：不计入无人值守轮次的上限；正在使用付费超额的账号仍会被拒绝，剩下的随时可以停止。",
+  "{n} sessions will be continued, earliest stopped first — each one is a billed turn. This press is your own: it is not counted against the limits on turns nobody typed. This instance allows turns in paid overage (Settings → Spending), so a continue on an account in paid overage bills it; you can stop the rest at any time.": "将继续 {n} 个会话（最早停止的优先）——每个都是一次计费的轮次。这是你自己的操作：不计入无人值守轮次的上限。本实例允许在付费超额时运行（设置 → 花费），所以在正在使用付费超额的账号上继续会按超额计费；剩下的随时可以停止。",
+  "{member}: {n} of these continues bill paid overage": "{member}：其中 {n} 个继续按付费超额计费",
+  "Authorizing the batch…": "正在为这一批授权…",
+  "Resuming… {done} of {n} continued": "正在恢复… 已继续 {done}/{n}",
+  "The whole batch was refused — nothing was resumed: {detail}": "整批被拒绝 —— 一个都没有恢复：{detail}",
+  "Could not read the sessions — reopen Settings to retry.": "读取会话失败 —— 重新打开设置再试。",
+  "Auto-continue is on for {n} more sessions": "又为 {n} 个会话开启了自动继续",
+  "Auto-continue is off for {n} sessions": "已为 {n} 个会话关闭自动继续",
+  "Could not change auto-continue: {why}": "无法更改自动继续：{why}",
+  "it has run again since": "之后它已再次运行",
+  "a continue onto it is already on its way": "它的继续已经在路上",
+  "the account it moved to refused the spend": "它被换到的账号拒绝了这笔花费",
+  "not reached {n}": "未轮到 {n}",
+  "≈ ${usd} at {model} cache-write ${price}/M, {tokens} cold tokens": "≈ ${usd}（按 {model} 缓存写入价 ${price}/M，冷读 {tokens} tokens）",
+  "Auto-continue is not running on this hub — reopen VibeSpace and try again.": "这个 hub 上的自动继续没有运行 —— 重新打开 VibeSpace 再试。",
+  "The bulk acts are pressed on this VibeSpace page only.": "批量操作只能在这个 VibeSpace 页面上按。",
+  "{member} can take {left} more turns nobody typed this hour; this batch needs {need}.": "{member} 这一小时还能承担 {left} 个无人输入的轮次；这一批需要 {need} 个。",
+  "{member} can take {left} more turns nobody typed today; this batch needs {need}.": "{member} 今天还能承担 {left} 个无人输入的轮次；这一批需要 {need} 个。",
+  "This VibeSpace can take {left} more turns nobody typed today; this batch needs {need}.": "这个 VibeSpace 今天还能承担 {left} 个无人输入的轮次；这一批需要 {need} 个。",
+  "The spend guard refused it on {member} ({why}).": "花费守卫拒绝了 {member}（{why}）。",
+  "Could not start the resume — try again.": "无法开始恢复 —— 请重试。",
+  "The batch was lost (VibeSpace restarted) — reopen this to see which sessions are still stopped.": "这一批丢失了（VibeSpace 重启了）—— 重新打开这里，看看哪些会话仍停着。",
+  "These buttons change the sessions you have now — the default above decides for new ones.": "这些按钮只改你现有的会话 —— 新会话仍按上面的默认值。",
+  "Auto-continue is on: this session continues by itself when its limit resets — click to turn it off": "自动继续已开：限额重置后这个会话会自己继续 —— 点击关闭",
+  "Auto-continue is off: this session waits for you — click to have it continue by itself when its limit resets": "自动继续已关：这个会话会等你 —— 点击后限额重置时它会自己继续",
+  "Showing only the sessions a usage limit or an overloaded model stopped — click to show all": "只显示因用量上限或模型过载而停止的会话 —— 点击显示全部",
+  "Show only the sessions a usage limit or an overloaded model stopped": "只显示因用量上限或模型过载而停止的会话",
+  "the quota check before it gave no answer": "发送前的额度检查没有回应",
+  "an unknown model (the default price)": "未知模型（按默认价）",
+  "A resume of these sessions is already running — following it here.": "这些会话的恢复已在进行中——在这里跟进它。",
+  // lg-recovery U2 cure: a refusal by name, the Stop door, every skipped row by reason, the unpriced said
+  "the spend guard refused it now": "花费守卫这次拒绝了它",
+  "left stopped": "留在停止状态",
+  "its billing account could not be named": "无法确定它的计费账号",
+  "its account is billing paid overage": "它的账号正在按超额付费",
+  "{member} is billing paid overage": "{member} 正在使用付费超额",
+  "{member} cannot serve a turn now": "{member} 现在无法提供轮次",
+  "{member} reached the spend control set with its vendor": "{member} 已达到在供应商处设置的花费控制",
+  "its account cannot serve a turn now": "它的账号现在无法承担轮次",
+  "its account reached the spend control set with its vendor": "它的账号已达到在服务商处设定的花费上限",
+  "its account used its turns nobody typed this hour": "它的账号这一小时的无人输入轮次已用完",
+  "its account used its turns nobody typed today": "它的账号今天的无人输入轮次已用完",
+  "this VibeSpace used its turns nobody typed today": "这个 VibeSpace 今天的无人输入轮次已用完",
+  "{why} ({reason})": "{why}（{reason}）",
+  "{why} — {n}": "{why} —— {n} 个",
+  "stopped {n}": "已停止 {n}",
+  "until {time}": "至 {time}",
+  "{n} sessions have no price for their model — not counted": "{n} 个会话的模型没有价格，未计入",
+  "{n} not priced": "{n} 个未定价",
+  "Stop the rest": "停止剩下的",
+  "Stopping — nothing more is started.": "正在停止 —— 不再开始新的。",
+  "The running resume of stopped sessions was stopped.": "正在进行的批量恢复已停止。",
+  "Close — it keeps running": "关闭（它会继续运行）",
+  "Closing leaves the resume running — reopen this from the session list’s ⋯ menu or Settings → Spending to stop it.": "关闭后恢复仍会继续 —— 要停止它，从会话列表的 ⋯ 菜单或 设置 → 花费 重新打开这里。",
+  "The resume keeps running — reopen it from the session list’s ⋯ menu or Settings → Spending to stop it.": "恢复仍在继续 —— 要停止它，从会话列表的 ⋯ 菜单或 设置 → 花费 重新打开。",
+  "Change it in Settings → Spending → «{setting}»: {link}": "可在 设置 → 花费 →「{setting}」里修改：{link}",
+  "Could not stop it — try again.": "无法停止 —— 请重试。",
   "Every subscription is in the pool, including ones you add later": "全部订阅都在池里（包括以后新加的）",
   "Every ChatGPT account is in the pool, including ones you add later": "全部 ChatGPT 账号都在池里（包括以后新加的）",
   // lane ui-controls-and-bugs — THE WRITE-ONLY LAW (the storage Edit dialog: a secret is saved, never shown again, only replaced)
@@ -4989,6 +5166,7 @@ export default {
   "None — no conversation has browsed without a profile since its start.": "没有 — 自启动以来没有对话在不使用 profile 的情况下浏览。",
   "running (adopted)": "运行中（已接管）",
   "idled out": "已空闲超时",
+  "found gone early": "已提前停止",
   "Browser app": "浏览器应用",
   "Open a web view": "打开网页视图",
   "No display backend on {machine} ({why})": "{machine}上没有显示后端（{why}）",
@@ -5132,6 +5310,7 @@ export default {
   "Stop or remove one of its background jobs": "停止或删除它的一个后台任务",
   "Schedule a reminder that wakes this conversation": "安排一个会唤醒本对话的提醒",
   "Let others see or control one of its background jobs": "允许他人查看或控制它的一个后台任务",
+  "Close a question one of its background jobs asked you": "关闭它的一个后台任务向你提出的问题",
   "List the pages it published": "列出它发布的页面",
   "Publishing a page asks every time — Always Allow is not offered.": "发布页面每次都会询问——不提供“始终允许”。",
   "Always Allow is not offered for this line: it can run any command, and only a single exact command line can be remembered.": "这一行不提供“始终允许”：它可以运行任何命令，而只有单条完全相同的命令行才能被记住。",
@@ -5361,6 +5540,9 @@ export default {
   "separate tabs": "各自的标签页",
   "Each conversation sees and drives only its own tabs through a mediated CDP endpoint; while you drive, its input and navigation are refused.": "每个会话通过中介 CDP 端点只能看到并操作自己的标签页；你接管期间，它的输入和导航会被拒绝。",
   "Who can use it": "谁能使用",
+  "not open to this conversation": "没有对这个对话开放",
+  "If a browser profile is signed in to {site}, it can be used instead of a new sign-in.": "如果有浏览器配置已登录 {site}，可以用它代替新的登录。",
+  "Allow this conversation to use one": "允许这个对话使用其中一个",
   "Any of your conversations can use this browser and its logins — one browser, each conversation in its own tab.": "你的任何会话都能使用这个浏览器和其中的登录 — 同一个浏览器，每个会话在自己的标签页里。",
   "Agents cannot use this browser on this computer right now — it is shared with separate tabs, and VibeSpace's browser proxy is not running here.": "现在 agent 无法在这台电脑上使用这个浏览器 — 它以独立标签页的方式共享，而 VibeSpace 的浏览器代理没有在这里运行。",
   "Any of your conversations can use this browser and its logins — they all share it: each can see and drive every tab in it.": "你的任何会话都能使用这个浏览器和其中的登录 — 它们共用这个浏览器：每个会话都能看到并操作其中的每个标签页。",
@@ -6241,6 +6423,7 @@ export default {
   "REFUSED": "被拒绝",
   "Pairing command — see the dial state, pick an address, generate a new command (keeps the row)": "配对命令 — 查看拨号状态、选择地址、生成新命令（保留这一行）",
   "Who can use \"{name}\" as an exit…": "谁能把 \"{name}\" 当出口使用…",
+  "Who can use \"{name}\" as an exit: {summary}": "谁能把 \"{name}\" 当出口使用：{summary}",
   "dial-out device": "拨出式设备",
   "Send the new command to the connected device over its link (it keeps working without running anything)": "把新命令通过它的连接发给当前已连上的设备（无需在设备上运行任何东西，它会继续工作）",
   "Unchecked: the connected device is disconnected now and its command stops working — run the new command on the device yourself.": "不勾选：当前连着的设备会立即断开，它的命令随即失效 — 请你自己在设备上运行新命令。",
@@ -6874,6 +7057,7 @@ export default {
   "Stop this browser now — the conversation's next command starts it again (what it keeps is still being checked)": "立即停止这个浏览器——该对话的下一条命令会重新启动它（它保留的内容还在检查中）",
   "released after its turn": "回合结束后已释放",
   "its browser was restarted": "它的浏览器被重启过",
+  "it was found gone before its idle timeout": "在空闲超时之前就发现它已停止",
   "its session ended": "它的会话已结束",
   "stopped by you": "被你停止",
   "closed by the agent": "被 agent 关闭",
@@ -8133,6 +8317,7 @@ export default {
   "This machine keeps no app system.": "这台机器没有应用系统。",
   "This machine already has an app system.": "这台机器已经有应用系统了。",
   "An app system cannot be created on this machine — its image carries neither a base system nor debootstrap.": "这台机器建不了应用系统——它的镜像既没有基础系统包，也没有 debootstrap。",
+  "This machine's system does not name its release (VERSION_CODENAME in /etc/os-release), so no app system can be made for it.": "这台机器的系统没有写明它的发行版本（/etc/os-release 里的 VERSION_CODENAME），所以无法为它建立应用系统。",
   "Delete the previous app system first — it is kept until you do.": "请先删除上一个应用系统——你删除之前它一直保留。",
   "Set up the app system on {machine}": "在{machine}上建立应用系统",
   "Repair the app system on {machine}": "修复{machine}上的应用系统",
@@ -8541,6 +8726,16 @@ export default {
   "a process VibeSpace did not start: {comm} ({pid})": "一个不是 VibeSpace 启动的进程：{comm}（{pid}）",
   "The folder {mount} stopped answering ({n} checks over {s} s) — the most is open by {who}": "文件夹 {mount} 不再响应（{n} 次检查都超过 {s} 秒）——打开最多的是{who}",
   "The folder {mount} stopped answering ({n} checks over {s} s)": "文件夹 {mount} 不再响应（{n} 次检查都超过 {s} 秒）",
+  "Storage {name} is kept disconnected: its listing hung {n} times in a row while {provider} answered": "存储 {name} 保持断开：{provider} 有回应，但列目录连续 {n} 次挂起",
+  "Storage {name} is kept disconnected: its listing hung {n} times in a row while its provider answered": "存储 {name} 保持断开：服务商有回应，但列目录连续 {n} 次挂起",
+  "“{name}” is kept disconnected (its listing kept hanging) — press Connect on its row, or Reconnect in For you.": "「{name}」保持断开（其列目录一直挂起）— 点它那一行的「连接」，或「待你处理」里的「重新连接」。",
+  "A reconnect usually hangs it again, so VibeSpace does not reconnect it by itself. Anything written into its folder meanwhile stays on this machine and is moved aside at the next connect. Press Reconnect when it should be tried again.": "重新连接通常会再次挂起，所以 VibeSpace 不会自动重连。期间写入其文件夹的内容会留在本机，并在下次连接时被移到别处。需要再试时请点「重新连接」。",
+  "Reconnect this storage now — this item goes away by itself once it is connected": "现在重新连接这个存储 — 连接成功后此项会自动消失",
+  "Reconnected — the storage answers again": "已重新连接 — 存储重新响应",
+  "Connected — the storage is still being checked; it is parked again if its listing keeps hanging": "已连接 — 仍在检查该存储；如果列目录继续挂起，会再次保持断开",
+  "Could not reconnect the storage": "无法重新连接该存储",
+  "Storage {name} stopped answering and was disconnected to keep VibeSpace responsive — it reconnects by itself": "存储 {name} 停止响应，为保持 VibeSpace 响应已断开 — 会自动重新连接",
+  "Files written into {path} while storage {name} was disconnected were moved to {dest} — nothing was deleted": "存储 {name} 断开期间写入 {path} 的文件已移到 {dest} — 没有删除任何文件",
   "Who is using it (open files, working folders and command lines under it):": "谁在使用它（在它下面打开的文件、工作目录和命令行）：",
   "- {hits} · {who} · {n} processes": "- {hits} · {who} · {n} 个进程",
   "No process has a file open there.": "没有进程在那里打开文件。",
@@ -8571,6 +8766,13 @@ export default {
   "The page asks for a file": "网页要一个文件", // lane browser-ui-prompts
   "No file window opens here — the agent uploads it with vibespace-browser upload": "这里不会弹出文件窗口 — agent 用 vibespace-browser upload 上传", // lane browser-ui-prompts
   "The page asks you to sign in": "网页要求你登录", // lane browser-ui-prompts
+  "A sign-in is answered by a person — a view opened with a token cannot answer it": "登录只能由人来回答 — 用令牌打开的视图不能回答", // B-b56d
+  "The sign-in was not sent: answer it from VibeSpace’s own page": "登录没有发送：请在 VibeSpace 自己的页面上回答", // B-b56d
+  "A proxy asks you to sign in": "代理服务器要求你登录", // B-b56d
+  "Nobody answered the sign-in for {host} within {min} min — VibeSpace cancelled it, so the page shows its own refusal": "{host} 的登录在 {min} 分钟内没有人回答 — VibeSpace 已取消它，网页显示它自己的拒绝页", // B-b56d
+  "Nobody answered the proxy sign-in for {host} within {min} min — VibeSpace cancelled it, so the page shows its own refusal": "代理服务器 {host} 的登录在 {min} 分钟内没有人回答 — VibeSpace 已取消它，网页显示它自己的拒绝页", // B-b56d
+  "VibeSpace cannot show this browser’s sign-in requests here — if a page asks you to sign in, Chrome shows its own sheet: open it in Desktop and answer it there": "VibeSpace 无法在这里显示这个浏览器的登录请求 — 如果网页要求你登录，Chrome 会显示它自己的登录框：请在桌面中打开，在那里回答", // B-b56d
+  "VibeSpace cannot see this browser’s sign-in requests right now — a page that asks you to sign in may wait without showing anything here": "VibeSpace 现在看不到这个浏览器的登录请求 — 要求你登录的网页可能会一直等待，这里不会显示任何内容", // B-b56d
   "Sent to this page only — never to the agent, never written down": "只发给这个网页 — 不给 agent，也不记录", // lane browser-ui-prompts
   "A page in the agent browser asks you to sign in ({host})": "Agent 浏览器里的网页要求你登录（{host}）", // lane browser-ui-prompts
   "Open its live view and type the username and password there — the agent never sees them.": "打开它的实时画面，在那里输入用户名和密码 — agent 看不到。", // lane browser-ui-prompts
@@ -9971,6 +10173,13 @@ export default {
   "Passthrough · {transfer} {bits}-bit · {primaries}": "直通 · {transfer} {bits} 位 · {primaries}", // lane stream-hdr-passthrough
   "waiting for the vault to be unlocked": "等待保险库解锁", // lane vault-e2e-password-fix-r2
   "This session waits for the vault — unlock it with the second password (Unlock… at the top of the page; For you names what is waiting on it); it reconnects by itself and nothing is lost.": "这个会话在等保险库——用第二密码解锁（页面顶部的「解锁…」；「待你处理」里写明了在等它的事）后它会自己重连，什么也不会丢。", // lane vault-e2e-password-fix-r2
+  "This conversation’s folder is on {name}, which opens after the vault is unlocked — while this page is open it resumes by itself once you unlock; nothing is lost.": "这个对话的文件夹在 {name} 上，要等保险库解锁后才能打开——只要这个页面开着，解锁后它会自己恢复，什么也不会丢。",
+  "This conversation’s folder is on {name}, which opens after the vault is unlocked — while this page is open it resumes by itself once you unlock, and then sends the message you wrote; nothing is lost.": "这个对话的文件夹在 {name} 上，要等保险库解锁后才能打开——只要这个页面开着，解锁后它会自己恢复，然后发出你写好的消息，什么也不会丢。",
+  "Not resumed — this conversation was archived while it waited for the vault.": "未恢复——这个对话在等保险库时被你归档了。",
+  "Not resumed — this conversation was archived while it waited for the vault. The message you wrote was not sent: «{text}»": "未恢复——这个对话在等保险库时被你归档了。你写的消息没有发送：「{text}」",
+  "This conversation’s folder is on {name}, which is not mounted right now — nothing was started; resume it once the mount is back.": "这个对话的文件夹在 {name} 上，它现在没有挂载——什么也没启动；等挂载恢复后再恢复这个对话。",
+  "The folder is on {name}, which is not mounted right now — start again once it is back.": "文件夹在 {name} 上，它现在没有挂载——等它恢复后再重新开始。",
+  "The folder is on {name}, which opens after the vault is unlocked — unlock it, then start again.": "文件夹在 {name} 上，要等保险库解锁后才能打开——请先解锁，再重新开始。",
   "vault locked": "保险库已锁定", // lane vault-e2e-password-fix-r2
   "{machine} asks for your Mac user name and password. VibeSpace seals them in the vault and signs in by itself while the vault is unlocked.": "{machine}需要你的 Mac 用户名和密码。VibeSpace 会把它们封进保险库，保险库解锁时自动登录。", // lane desktop-vnc-remember
   "{machine} asks for its VNC password. VibeSpace seals it in the vault and signs in by itself while the vault is unlocked.": "{machine}需要它的 VNC 密码。VibeSpace 会把它封进保险库，保险库解锁时自动登录。", // lane desktop-vnc-remember
@@ -10158,7 +10367,6 @@ export default {
   "Search names, kinds, where they came from…": "搜索名字、种类、来源…", // lane vault-window-v2
   "Only the ones I can show": "只看可显示", // lane vault-window-v2
   "Where from": "出处", // lane vault-window-v2
-  "The code could not be read — {reason}": "读不到验证码——{reason}", // lane vault-window-v2
   "{n} s left": "剩 {n} 秒", // lane vault-window-v2
   "{when} · you": "{when} · 你", // lane vault-window-v2
   "{when} · VibeSpace": "{when} · VibeSpace", // lane vault-window-v2
@@ -10173,10 +10381,10 @@ export default {
   "Integrations & channels": "集成与频道", // lane vault-window-v2
   "Machines & relay": "机器与中继", // lane vault-window-v2
   "Kept by agents": "agent 存放", // lane vault-window-v2
-  "Its own conversation uses it directly · other conversations cannot use it": "本对话可直接使用 · 其他对话不能使用",
+  "Its own conversation uses it directly · another one only as you share it («Who may use it…»)": "本对话可直接使用 · 其他对话只能按你的共享使用（「谁可以用…」）",
   "Its own conversation uses it directly · other conversations need a grant": "本对话可直接使用 · 其他对话需授权",
   "kept by {name}": "由 {name} 保存",
-  "What an agent kept itself: the conversation that kept it uses it without asking you; other conversations cannot use it": "agent 自己存的：存它的那个对话直接使用，不用问你；其他对话不能使用",
+  "What an agent kept itself: the conversation that kept it uses it without asking you; another conversation only as you share it": "agent 自己存的：存它的那个对话直接使用，不用问你；其他对话只能按你的共享使用",
   "Added by an agent itself — the agent saw the seed": "agent 自己添加 · agent 见过种子",
   "By you": "我自己", // lane vault-window-v2
   "Scanned · by you": "扫码 · 我自己", // lane vault-window-v2
@@ -10283,10 +10491,102 @@ export default {
   "The provider answered {status}": "提供方返回了 {status}", // lane models-at-session
   "The provider’s list is larger than 1 MB — nothing was kept": "提供方的列表超过 1 MB — 未保存任何内容", // lane models-at-session
   "The provider’s answer is not a model list": "提供方的回应不是模型列表", // lane models-at-session
+  "The list could not be saved — try again": "列表未能保存——请重试", // lane lg-providers U1 cure
   "Only a person on this page can refresh the list": "只有在此页面上的人才能刷新列表", // lane models-at-session
   "This account’s provider has no models — set them up first": "此账号的提供方没有模型 — 请先设置", // lane models-at-session
   "Models of {provider}": "{provider} 的模型", // lane models-at-session
   "{provider} does not serve the model “{model}”": "{provider} 不提供模型「{model}」", // lane models-at-session
+  "Anthropic-compatible": "Anthropic 兼容", // lane lg-providers
+  "DeepSeek’s models, paid by use with your own key": "DeepSeek 的模型，用你自己的密钥按量付费", // lane lg-providers
+  "Moonshot’s Kimi models, paid by use with your own key": "月之暗面的 Kimi 模型，用你自己的密钥按量付费", // lane lg-providers
+  "Zhipu’s GLM models, paid by use with your own key": "智谱的 GLM 模型，用你自己的密钥按量付费", // lane lg-providers
+  "MiniMax’s models, paid by use with your own key": "MiniMax 的模型，用你自己的密钥按量付费", // lane lg-providers
+  "Many vendors’ models behind one key, paid by use": "一把密钥用许多厂商的模型，按量付费", // lane lg-providers
+  "Other or self-hosted": "其他或自建", // lane lg-providers
+  "A service you run yourself, or one not listed here": "你自己运行的服务，或这里没列出的", // lane lg-providers
+  "Outside mainland China": "中国大陆以外", // lane lg-providers
+  "Mainland China": "中国大陆", // lane lg-providers
+  "This provider does not offer what {harness} needs": "这个提供方不提供 {harness} 需要的接口", // lane lg-providers
+  "{harness} cannot use a third-party provider yet": "{harness} 暂时还不能用第三方提供方", // lane lg-providers
+  "Paste the key": "请粘贴密钥", // lane lg-providers
+  "A key has no spaces or line breaks": "密钥里没有空格或换行", // lane lg-providers
+  "This is too short to be a key": "太短了，不像是密钥", // lane lg-providers
+  "At most 512 characters": "最多 512 个字符", // lane lg-providers
+  "This is a Claude subscription login, not a provider’s key — it is never sent to a third party": "这是 Claude 订阅的登录凭据，不是提供方的密钥——它绝不会发给第三方", // lane lg-providers
+  "An address starts with https:// (or http:// on your own network)": "地址以 https:// 开头（在你自己的网络里也可以是 http://）", // lane lg-providers
+  "Type the address plainly — no spaces, no % sign, no backslash, no full-width or non-English characters": "直接输入地址——不要空格、% 号、反斜杠、全角或非英文字符", // lane lg-providers chain cure
+  "This is an Anthropic key — add it as an Anthropic API account, not a third party": "这是 Anthropic 的密钥——请把它添加为 Anthropic API 账号，而不是第三方", // lane lg-providers
+  "Paste the key alone — without quotes or the name in front of it": "只粘贴密钥本身——不要带引号，也不要带前面的名字", // lane lg-providers
+  "Outside your own network the address must start with https://": "在你自己的网络之外，地址必须以 https:// 开头", // lane lg-providers
+  "This provider’s address is set by VibeSpace": "这个提供方的地址由 VibeSpace 设定", // lane lg-providers
+  "This provider names another provider’s key": "这个提供方指向了另一个提供方的密钥", // lane lg-providers
+  "Only a self-hosted provider says which interface it speaks": "只有自建的提供方才需要说明它用哪种接口", // lane lg-providers
+  "Model provider key": "模型提供方密钥", // lane lg-providers
+  "VibeSpace hands it to the agent CLI it starts for this provider": "VibeSpace 把它交给为这个提供方启动的 agent CLI", // lane lg-providers
+  "Put the key in the key field — not in the address": "请把密钥填在密钥框里——不要写进地址", // lane lg-providers
+  "Not for {harness}": "不能用于 {harness}", // lane lg-providers
+  "This provider’s model runs the agent’s tools in its conversations — pick one you trust": "这个提供方的模型会在对话里操作 agent 的工具——请选你信任的", // lane lg-providers
+  "Paste the key again": "重新粘贴密钥", // lane lg-providers
+  "Save the key and test again": "保存密钥并重新测试", // lane lg-providers
+  "A third-party model runs on this machine only for now — start the conversation here": "第三方模型目前只能在本机运行——请在本机开始这段对话", // lane lg-providers
+  "Something went wrong": "出了点问题", // lane lg-providers
+  "Pick a model first — the test asks the provider with it": "请先选一个模型——测试要用它向提供方发问", // lane lg-providers
+  "Add a third-party model": "添加第三方模型", // lane lg-providers
+  "Pick who serves the model — you pay them by use, with your own key": "选一家提供模型的服务——用你自己的密钥，按用量付给他们", // lane lg-providers
+  "Could not read the providers — {reason}": "无法读取提供方——{reason}", // lane lg-providers
+  "How the key reaches the program": "密钥怎样交给程序", // lane lg-providers
+  "an environment variable of that conversation only, never its command line": "只是那段对话的一个环境变量，从不出现在命令行里", // lane lg-providers
+  "Codex sends this provider its installation id and session id with each request": "Codex 每次请求都会把它的安装 id 和会话 id 发给这个提供方", // lane lg-providers
+  "Where your account is": "你的账号在哪里", // lane lg-providers
+  "Address of your service": "你的服务的地址", // lane lg-providers
+  "What it speaks": "它用的接口", // lane lg-providers
+  "Paste your {provider} key": "粘贴你的 {provider} 密钥", // lane lg-providers
+  "Where to get a key": "去哪里拿密钥", // lane lg-providers
+  "Key": "密钥", // lane lg-providers
+  "The key is kept in the vault. The test sends the provider one short message with it — it costs a fraction of a cent.": "密钥存放在保险库里。测试会用它给提供方发一句很短的话——花费不到一分钱。", // lane lg-providers
+  "Save and test": "保存并测试", // lane lg-providers
+  "{provider} is saved. Each agent that can use it is tested once:": "{provider} 已保存。能用它的每个 agent 各测试一次：", // lane lg-providers
+  "Which model answers in new conversations": "新对话用哪个模型回答", // lane lg-providers
+  "Get the model list from {provider}": "从 {provider} 获取模型列表", // lane lg-providers
+  "Get the model list first — {provider} has no model yet": "请先获取模型列表——{provider} 还没有模型", // lane lg-providers chain cure
+  "{provider} answered an empty model list — try again later, or pick another provider": "{provider} 返回了空的模型列表——请稍后再试，或换一家提供方", // lane lg-providers remainders
+  "Type a model id first — {provider} has no model yet": "请先输入模型 ID——{provider} 还没有模型", // lane lg-providers chain cure
+  "the provider could not be changed": "未能更改该提供方", // lane lg-providers chain cure
+  "the provider list could not be written": "未能写入提供方列表", // lane lg-providers chain cure
+  "the models could not be written yet — the hub tries again": "模型尚未写入——中枢会再试", // lane lg-providers chain cure
+  "the models could not be saved": "未能保存模型", // lane lg-providers chain cure
+  "Other model id (optional)": "其他模型 id（可选）", // lane lg-providers
+  "{provider} is ready. It can be used by:": "{provider} 已就绪。可以使用它的有：", // lane lg-providers
+  "Pick it in the account row of New Session. It has no usage reading — you pay {provider} by use.": "在「新建对话」的账号行里选它。它没有用量读数——你按用量付费给 {provider}。", // lane lg-providers
+  "tested {ago}": "{ago}测试过", // lane lg-providers
+  "last test: {words}": "上次测试：{words}", // lane lg-providers
+  "not tested yet": "尚未测试", // lane lg-providers
+  "No usage reading": "无用量读数", // lane lg-providers
+  "paid by use": "按量付费", // lane lg-providers
+  "New key for {name}": "{name} 的新密钥", // lane lg-providers
+  "Third-party models": "第三方模型", // lane lg-providers
+  "Add a third-party model…": "添加第三方模型…", // lane lg-providers
+  "{name} (third party)": "{name}（第三方）", // lane lg-providers
+  "New key…": "换新密钥…", // lane lg-providers
+  "The new key is kept in the vault": "新密钥已存放在保险库里", // lane lg-providers
+  "Works": "可用", // lane lg-providers
+  "The key was refused — check it in the provider’s console": "密钥被拒绝——去提供方的控制台看看", // lane lg-providers
+  "This provider does not serve the model, or not what this agent needs": "这个提供方不提供这个模型，或者不提供这个 agent 需要的接口", // lane lg-providers
+  "The address did not answer — check it in the technical details": "地址没有回应——在技术细节里检查一下", // lane lg-providers
+  "No answer within a minute": "一分钟内没有回应", // lane lg-providers
+  "The test did not succeed — see the details": "测试没有成功——看看详情", // lane lg-providers
+  "This agent’s program was not found on this machine": "这台机器上找不到这个 agent 的程序", // lane lg-providers
+  "This is not a third-party provider": "这不是第三方提供方", // lane lg-providers
+  "This provider has no address — set it first": "这个提供方没有地址——请先设置", // lane lg-providers
+  "This address is the agent’s own vendor — a third-party test never runs on it": "这个地址是这个 agent 自家厂商的——第三方测试绝不会在上面运行", // lane lg-providers
+  "This provider does not offer what this agent needs": "这个提供方不提供这个 agent 需要的接口", // lane lg-providers
+  "This provider has no key — paste it again": "这个提供方没有密钥——请重新粘贴", // lane lg-providers
+  "A test of this provider is running already": "这个提供方的测试已经在运行", // lane lg-providers
+  "The key or the address changed while it was being tested — test it again": "测试进行中密钥或地址已更改——请重新测试", // lane lg-providers chain cure
+  "Only a person on this page can run a test": "只有在此页面上的人才能运行测试", // lane lg-providers
+  "Remove the model provider \"{name}\"?": "移除模型提供方「{name}」？", // lane lg-providers
+  "Its key leaves the vault and the provider leaves every agent's account list. Conversations already running on it keep working until they restart.": "它的密钥会离开保险库，这个提供方也会从每个 agent 的账号列表里消失。已经在用它的对话会继续工作，直到重启。", // lane lg-providers
+  "Running on it now: {names}": "正在使用它的对话：{names}", // lane lg-providers remainders
   "Always for this pool": "一直（这个池）",
   "Lets this pool move a conversation to another provider by itself from now on, with a line in the conversation each time": "从现在起，这个池可以自己把对话切到另一个提供方，每次都会在对话里留一行",
   "Moved — this pool now moves a conversation to another provider by itself": "已切换——这个池以后会自己把对话切到另一个提供方",
@@ -10335,9 +10635,6 @@ export default {
   "«Always» (with the second password) also turns on «Usable by agent runs» for this entry — it opens it for THIS conversation; any grants you paused stay paused.": "按「总是允许」（需验证是你）也会为此条目打开「可供 agent 运行使用」——它只为当前这个对话打开；你暂停的其他授权仍保持暂停。", // lane vault-run-door
   "{tool} on this machine changed: {from} → {to} (a root-owned tool — runs continue)": "本机的 {tool} 已变更：{from} → {to}（由 root 安装的工具——运行照常继续）", // lane vault-agent-own r18 (item 5): the drift FYI notice
   "{tool} ({path}) is sealed by root ownership, so the vault trusts whatever root installs there. Its bytes changed since the last run ({from} → {to}) — root (a package roll or a reinstall) replaced it, and runs continue. This is a notice; nothing to do.": "本机的 {tool}（{path}）由 root 所有权封存，因此 vault 信任 root 在那里安装的任何内容。它的字节自上次运行以来发生了变更（{from} → {to}）——是 root（软件包滚动或重新安装）替换了它，运行照常继续。这只是一条通知；无需处理。", // lane vault-agent-own r19 (MINOR): the drift FYI DETAIL paragraph
-  "Always for this shape": "此形状总是", // lane vault-run-door
-  "The same tool, flags, hosts and secrets run without asking for 30 days — asks for the second password first": "同一工具、旗标、主机与密钥 30 天内不再问——先要再输一次第二密码", // lane vault-run-door
-  "Allowed for this shape for 30 days": "此形状 30 天内总是允许", // lane vault-run-door
   "Usable by agent runs": "可供 agent 运行使用", // lane vault-run-door
   "An agent may use it in vibespace-vault run without ever seeing it — each new command asks you first": "agent 可以在 vibespace-vault run 里使用它，却永远看不到它——每条新命令先问你", // lane vault-run-door
   "Agents may use it in a run now — each new command asks you first": "agent 现在可以在运行中使用它——每条新命令先问你", // lane vault-run-door
@@ -10715,7 +11012,7 @@ export default {
   "The sign-in screen itself. Open the link, sign in, then paste the code below.": "这就是登录画面本身。打开里面的链接登录，再把代码粘贴到下方。",
   "Set as your default account · change it in Manage agents": "已设为默认账号 · 在「管理 agent」里更改",
   "Check this account’s usage limits now?": "现在查看这个账号的用量额度？",
-  "VibeSpace asks Anthropic once how much of this account’s usage limits is left — the same check Claude Code makes when you type /usage. It costs nothing and uses no tokens. It runs only when you press refresh, at most once a minute per account. Turn it off in Settings → “On-demand quota refresh”. You see this note once.": "VibeSpace 会向 Anthropic 问一次这个账号的用量额度还剩多少——和你在 Claude Code 里输入 /usage 时做的检查一样。不花钱，也不消耗 token。只在你点刷新时才问，每个账号每分钟最多一次。可在 设置 → “按需刷新配额” 里关闭。这条说明只显示一次。",
+  "VibeSpace asks Anthropic once how much of this account’s usage limits is left — the same check Claude Code makes when you type /usage. It costs nothing and uses no tokens. It runs only when you press refresh, at most once a minute per account. Turn it off in Settings → “Claude usage refresh”. You see this note once.": "VibeSpace 会向 Anthropic 问一次这个账号的用量额度还剩多少——和你在 Claude Code 里输入 /usage 时做的检查一样。不花钱，也不消耗 token。只在你点刷新时才问，每个账号每分钟最多一次。可在 设置 → “Claude 用量刷新” 里关闭。这条说明只显示一次。",
   "Check every account’s usage limits now?": "现在查看所有账号的用量额度？",
   "VibeSpace asks Anthropic once for each signed-in account and machine how much of its usage limits is left — the same check Claude Code makes when you type /usage. It costs nothing and uses no tokens. It runs only when you press refresh, at most once a minute per account. You see this note once.": "VibeSpace 会为每个已登录的账号和机器各向 Anthropic 问一次用量额度还剩多少——和你在 Claude Code 里输入 /usage 时做的检查一样。不花钱，也不消耗 token。只在你点刷新时才问，每个账号每分钟最多一次。这条说明只显示一次。",
   "Check now": "现在查看",
@@ -10730,6 +11027,56 @@ export default {
   "the list could not be read; open the Agent browser panel → {label} → Who can use it": "名单读不到；请打开 Agent 浏览器面板 → {label} → 谁能使用",
   "{label} was already open to this conversation — the agent was told": "{label} 本来就对这个对话开放——已告诉 agent",
   "{label}: this conversation may use it now — the agent was told": "{label}：这个对话现在可以使用了——已告诉 agent",
+  "Open this setting": "打开这项设置", // lane setting-doors pick 2
+  "Now: {value}": "现在：{value}", // lane setting-doors pick 2
+  "It is {now} now — it was {was} when asked": "现在是 {now}——提出时是 {was}", // lane setting-doors pick 2
+  "Proposed: {value} for {span} from your press (until about {time}), then {back}": "提议：从你按下起 {span}内为 {value}（约到 {time}），之后回到 {back}", // lane setting-doors pick 2
+  "Proposed: {value} until {time}, then {back}": "提议：{value}，到 {time} 为止，之后回到 {back}", // lane setting-doors pick 2
+  "Proposed: {value} — it stays until you change it": "提议：{value}——一直保持，直到你再改", // lane setting-doors pick 2
+  "{value} until {time}, then {back}": "{value}，到 {time} 为止，之后回到 {back}", // lane setting-doors pick 2
+  "{time} tomorrow": "明天 {time}", // lane setting-doors pick 2
+  "Held at {hold} — this press replaces the hold's value and moment; it still returns to {back}": "正在保持：{hold}——这次按下会替换保持的数值和时刻；之后仍回到 {back}", // lane setting-doors pick 2
+  "Held at {hold} — this press ends the hold; it stays at {value}": "正在保持：{hold}——这次按下会结束保持；之后一直是 {value}", // lane setting-doors pick 2
+  "asked {ago}": "{ago}提出", // lane setting-doors pick 2
+  "Raise to {value} until {time}": "提高到 {value}，到 {time} 为止", // lane setting-doors pick 2
+  "Raise to {value} for {span}": "提高到 {value}，持续 {span}", // lane setting-doors pick 2
+  "Lower to {value} until {time}": "降低到 {value}，到 {time} 为止", // lane setting-doors pick 2
+  "Lower to {value} for {span}": "降低到 {value}，持续 {span}", // lane setting-doors pick 2
+  "Lower to {value}": "降低到 {value}", // lane setting-doors pick 2
+  "Sets it to {value} now and back to {back} at that moment, then tells the agent": "现在设为 {value}，到那个时刻自动回到 {back}，然后告诉 agent", // lane setting-doors pick 2
+  "Sets it to {value} now, then tells the agent": "现在设为 {value}，然后告诉 agent", // lane setting-doors pick 2
+  "It is already {value} — nothing to change": "已经是 {value}——无需更改", // lane setting-doors pick 2
+  "That moment ({time}) has passed — change it on the row": "那个时刻（{time}）已经过了——请在设置项上修改", // lane setting-doors pick 2
+  "A raise needs its «until» — change it on the row": "提高必须带上「到何时」——请在设置项上修改", // lane setting-doors pick 2
+  "This change cannot be pressed here — change it on the row": "这项更改不能在这里一键完成——请在设置项上修改", // lane setting-doors pick 2
+  "It changed meanwhile — look again": "这期间它已经变了——请再看一遍", // lane setting-doors pick 2
+  "Could not change it: {why}": "无法更改：{why}", // lane setting-doors pick 2
+  "{label}: {value} until {time}, then {back} — the agent was told": "{label}：{value}，到 {time} 为止，之后回到 {back}——已告诉 agent", // lane setting-doors pick 2
+  "{label}: {value} from now on — the agent was told": "{label}：从现在起为 {value}——已告诉 agent", // lane setting-doors pick 2
+  "Held at {hold}": "正在保持：{hold}", // lane setting-doors pick 2
+  "End now": "立即结束", // lane setting-doors pick 2
+  "Ends the hold now: the row goes back at once": "现在结束保持：设置项立即改回", // lane setting-doors pick 2
+  "Could not end the hold: {why}": "无法结束保持：{why}", // lane setting-doors pick 2
+  "Set to {value} for good — the hold ends": "改为 {value} 并一直保持——保持随之结束", // lane setting-doors pick 2 (the check)
+  "{value} would stay above {back}, the value before the hold — a raise needs its «until»; change it on the row": "{value} 会一直高于保持之前的值 {back}——调高需要带上「直到」；请到那一行修改", // lane setting-doors pick 2 (the check)
+  "the hold could not be written to disk, so nothing changed": "保持无法写入磁盘，所以什么都没改", // lane setting-doors pick 2 (the check)
+  "the setting could not be written, so nothing changed": "设置无法写入，所以什么都没改", // lane setting-doors pick 2 (the check)
+  "only your own page can change it — nothing changed": "只有你自己的页面能改它——什么都没改", // lane setting-doors pick 2 (the check)
+  "this change cannot be pressed here — change it on the row": "这项更改不能在这里按——请到那一行修改", // lane setting-doors pick 2 (the check)
+  "{label}: changed to {value} until {time} — but the agent could not be told: {why}": "{label}：已改为 {value}，到 {time} 为止——但没能告诉 agent：{why}", // lane setting-doors pick 2 (the check)
+  "{label}: changed to {value} — but the agent could not be told: {why}": "{label}：已改为 {value}——但没能告诉 agent：{why}", // lane setting-doors pick 2 (the check)
+  "the settings file could not be written — it stays at {value}": "设置文件无法写入——它仍是 {value}", // lane setting-doors pick 2 (the check)
+  "You had changed it by hand, so the hold had already ended — it stays at {value}": "你已经亲手改过它，所以保持早已结束——它仍是 {value}", // lane setting-doors pick 2 (the check)
+  "{label} could not go back: it stays at {value}": "{label}没能改回：它仍是 {value}", // lane setting-doors pick 2 (the check)
+  "The hold said it would go back to {back} at {at}; the settings file could not be written ({why}) — tried {n} times, a minute apart. The next start of VibeSpace tries again. Change it on the row: {link}": "保持原本会在 {at} 回到 {back}；设置文件无法写入（{why}）——已每隔一分钟试了 {n} 次。VibeSpace 下次启动时会再试。请到那一行修改：{link}", // lane setting-doors pick 2 (the check)
+  "{label} is back to {value} — the hold ended: {link}": "{label}已回到 {value}——保持已结束：{link}", // lane setting-doors pick 2 (the check)
+  "The setting holds could not be read": "无法读取设置的保持记录", // lane setting-doors pick 2 (the check)
+  "data/setting-holds.json could not be read ({why}). A raised ceiling may not go back by itself — check the three ceilings: {links}": "无法读取 data/setting-holds.json（{why}）。被调高的上限可能不会自动改回——请检查这三个上限：{links}", // lane setting-doors pick 2 (the check)
+  "{label} may not go back by itself": "{label}可能不会自动改回", // lane setting-doors pick 2 (the check)
+  "Its hold could not be kept at this start ({why}): it held {value}. It was dropped, so a raised value may stay where it is. Check it on the row: {link}": "这次启动时没能保留它的保持（{why}）：它保持在 {value}。保持已被丢弃，所以调高的值可能会一直留着。请到那一行检查：{link}", // lane setting-doors pick 2 (the check)
+  "it is not whole": "记录不完整", // lane setting-doors pick 2 (the check)
+  "it is no longer a row a press may change": "它已不是可以一键更改的设置项", // lane setting-doors pick 2 (the check)
+  "its moment is not a number": "它的时刻不是数字", // lane setting-doors pick 2 (the check)
   "Draft · not sent": "草稿 · 未发送", // lane gmail-draft-not-a-message
   "saved {time}": "保存于 {time}", // lane gmail-draft-not-a-message
   "1 deleted draft": "1 条草稿已删除", // lane gmail-draft-not-a-message
@@ -10809,6 +11156,7 @@ export default {
   "The agent is told you refused, on its next turn": "agent 会在下一轮得知你拒绝了",
   "The name is at most 80 characters": "名称最多 80 个字符",
   "The value leaves the vault. A conversation that uses it in a command loses it at its next run.": "值会从保险库删除。在命令里用到它的会话，下次运行时就用不了了。",
+  "The value leaves the vault. The conversation that stored it can no longer use it: a command or a job that names it fails at its next run (the conversation may store a new one).": "值会从保险库删除。存放它的会话从此不能再用它：引用它的命令或后台任务下次运行时会失败（该会话可以再存一个新的）。",
   "The vault is locked (vault_locked) — unlock it, then save": "保险库已锁定（vault_locked）——先解锁，再保存",
   "The vault is not set up yet — set its second password, then save": "保险库还没有设置——先设置第二密码，再保存",
   "Value": "值",
@@ -11089,7 +11437,6 @@ export default {
   "Changes save as you make them (a path row takes effect when you leave the box, or on Enter)": "改动即时保存（路径行离开字段就生效，回车也行）", // lane task-group-context
   "tab::Activity log": "活动记录", // lane task-group-context
   "Saved when you left the box — no Enter needed": "离开输入框就保存了，不用回车", // lane task-group-context
-  "Not applied: {path} was not found — the row keeps what it had": "未生效：找不到 {path} —— 这一行保持原样", // lane task-group-context
   "Context table budget per group (bytes)": "每组 Context 表的注入预算（字节）", // lane task-group-context
   "How many bytes one Task Group's Context table may take in what a conversation is told. Rows are told in table order at the depth each one chose; a row that does not fit steps down (contents, then file names with key files, then file names, then only the path and note) and says so. The room the hook carries beside the tools and the standing instructions caps it too. 0 = only that room.": "一个任务组的 Context 表在对话听到的内容里最多占多少字节。各行按表中顺序、按各自选的深度告诉 agent；装不下的一行会退一档（内容 → 文件名 + 关键文件内容 → 文件名 → 只说明路径和说明）并写明。钩子在工具说明和常驻指令之外能带的空间也会限制它。0 = 只受那个空间限制。", // lane task-group-context
   "「{path}」 is too big to tell as 「{chosen}」 → told as 「{level}」 (the agent still knows where it is and what it is for)": "「{path}」太大，无法按「{chosen}」告诉 → 退到「{level}」（agent 仍然知道它在哪、管什么）", // lane task-group-context
@@ -11512,6 +11859,7 @@ export default {
   "Update the saved login {user} on {site}?": "更新 {site} 上已保存的登录 {user}？",
   "Save the login {user} on {site} to the vault?": "把 {site} 上的登录 {user} 存入保险库？",
   "You signed in with a different password in the agent browser. Update keeps the old one in the entry for one revision.": "你在 agent 浏览器里用另一个密码登录了。更新后旧密码会在条目里保留一个版本。",
+  "You signed in on {site} with a different password. {site} is one of this login's sites ({sites}) — Update changes its one password for every one of them and keeps the old one for one revision.": "你在 {site} 用了不同的密码登录。{site} 是这个登录的网站之一（{sites}）— 更新会把它的同一个密码在每个网站都改掉，并把旧密码保留一个版本。",
   "You signed in by hand in the agent browser. Saved logins can be filled on that site for conversations you allow — VibeSpace never hands them the password, and its fence guards against accidental reads and wrong sites.": "你在 agent 浏览器里手动登录了。保存的登录可以在该网站上为你允许的对话填入 — VibeSpace 不会把密码交给它们，围栏防意外读到和输错网站。",
   "{plugin} · downloading its kernel… {pct}%": "{plugin} · 正在下载内核… {pct}%",
   "{plugin} · downloading its kernel…": "{plugin} · 正在下载内核…",
@@ -11542,6 +11890,13 @@ export default {
   "The cluster names {plugin} at «{ref}» (not a full sha, so the cluster does not vouch for it); you enabled it yourself — its kernel follows your consent": "集群为 {plugin} 指定的是「{ref}」（不是完整的 sha，集群不为它担保）；你已自己启用——它的内核随你的同意更新",
   "The cluster's repository holds another plugin («{got}»), not {plugin} — {plugin} is not installed from it and there is nothing to consent to; the cluster's admin corrects fleet.json": "集群的仓库里是另一个插件（「{got}」），不是 {plugin}——没有从中安装 {plugin}，也没有需要你同意的内容；请集群管理员修正 fleet.json",
   "waiting for the new kernel to land (≤ {s} s)": "正在等新内核就位（最多 {s} 秒）",
+  "Download kernel": "下载内核",
+  "Download kernel: {plugin}": "下载内核：{plugin}",
+  "press «Download kernel» to fetch it again": "按「下载内核」重新获取",
+  "its kernel is already downloading": "它的内核正在下载",
+  "the kernel could not be downloaded: {why}": "内核无法下载：{why}",
+  "its kernel is being replaced or put back in its place — try again in a moment": "它的内核正在被替换或放回原处——请稍后再试",
+  "VibeSpace did not answer — nothing was downloaded": "VibeSpace 没有回应——什么都没有下载",
   "its new kernel {version} was discarded — {why}": "新内核 {version} 已丢弃——{why}",
   "The browser kernel is being replaced — try again in a moment.": "浏览器内核正在替换——请稍后再试。",
   "the cluster moved its pin while it downloaded": "下载期间集群改了指定版本",
@@ -11663,6 +12018,9 @@ export default {
   "Not handed over — {account} has reached its spend control, so its requests are refused. The notices keep waiting.": "没有交出去——{account} 已达到其消费控制上限，请求会被拒绝。这些通知继续等待。",
   "Open Settings → Spending": "打开 设置 → 花费",
   "Turns you type, and the buttons you press that say «starts a turn», are never counted. Change the limits in Settings → Spending.": "你自己打字的轮次、以及你按下的标着「会开始一轮」的按钮，永不计入。上限可在 设置 → 花费 里修改。",
+  "Turns you type, and the buttons you press that say «starts a turn», are never counted. Change this limit in Settings → Spending: {link}": "你自己打字的轮次、以及你按下的标着「会开始一轮」的按钮，永不计入。这个上限可在 设置 → 花费 里修改：{link}",
+  // lane login-request-card: the empty row's door, linked
+  "A limit left empty refuses every turn nobody typed until it is set: set a number in this row of Settings → Spending: {link}. Turns you type, and the buttons you press that say «starts a turn», are never counted.": "留空的上限会拒绝每一个没人打字的轮次，直到设好为止：请在 设置 → 花费 的这一行填一个数：{link}。你自己打字的轮次、以及你按下的标着「会开始一轮」的按钮，永不计入。",
   "Not saved — the server did not answer; change it again to retry": "未保存——服务器没有回应；再改一次即可重试",
   "Saved · in force now: {value}": "已保存 · 当前生效：{value}",
   "In force now: {value}": "当前生效：{value}",
@@ -11715,6 +12073,7 @@ export default {
   "And {n} more producers.": "另有 {n} 个来源。",
   "older builds (no reason recorded)": "旧版本（未记录原因）",
   "Paid overage refuses even the turns you press. Whether turns nobody typed may spend it is Settings → Spending → «Allow unattended turns while an account bills paid overage».": "付费超额连你按下的轮次也会拒绝。无人输入的轮次能否使用超额，由 设置 → 花费 →「账号正在按量付费(overage)时仍允许无人值守 turn」决定。",
+  "Paid overage refuses even the turns you press. Whether turns nobody typed may spend it is Settings → Spending → «Allow unattended turns while an account bills paid overage»: {link}": "付费超额连你按下的轮次也会拒绝。无人输入的轮次能否使用超额，由 设置 → 花费 →「账号正在按量付费(overage)时仍允许无人值守 turn」决定：{link}",
   "Sign {account} in again from the Usage window — the limits in Settings → Spending cannot help here.": "请在「用量」窗口里重新登录 {account}——设置 → 花费 里的上限在这里帮不上忙。",
   "The spend control is set with the account’s vendor — the limits in Settings → Spending cannot help here.": "支出控制是在该账号的服务商那里设置的——设置 → 花费 里的上限在这里帮不上忙。",
   "This is VibeSpace failing closed, not a limit: the Usage window lists the accounts and the hub log’s [spend] lines name the conversation — the limits in Settings → Spending cannot help here.": "这是 VibeSpace 的安全停止，不是上限：「用量」窗口列出所有账号，中枢日志的 [spend] 行写明是哪个对话——设置 → 花费 里的上限在这里帮不上忙。",
@@ -11738,6 +12097,7 @@ export default {
   "the user handed a conversation its waiting notices now": "你立即交给对话的等待中通知",
   "the waiting notices that did not fit a prompt, posted when its turn ended": "没放进提示词、在轮次结束时补送的等待中通知",
   "a held channel digest the user chose to deliver now": "你选择立即送达的暂扣渠道摘要",
+  "the resume of every conversation a usage limit or an overloaded model stopped": "恢复所有因用量上限或模型过载而停下的会话",   // lane auto-resume-bulk (lg-recovery U2): the bulk resume's producer words — a refusal of the batch names it
   "Not handed over — turns nobody typed are switched off for {account}. The notices keep waiting.": "没有交出去——{account} 的无人输入轮次已关闭。这些通知继续等待。",
   "Not handed over — turns nobody typed are switched off for this instance. The notices keep waiting.": "没有交出去——此实例的无人输入轮次已关闭。这些通知继续等待。",
   "Not handed over — {account} has used its {cap} turns nobody typed this hour; the next is free now — press again. The notices keep waiting.": "没有交出去——{account} 本小时已用完 {cap} 个无人输入的轮次；现在已有空出的名额——请再按一次。这些通知继续等待。",
@@ -11748,8 +12108,8 @@ export default {
   "Not handed over — the account this turn would bill has reached its spend control, so its requests are refused. The notices keep waiting.": "没有交出去——这一轮要记账的账号已达到其支出控制，请求会被拒绝。这些通知继续等待。",
   "Not handed over — VibeSpace could not tell which account this turn would bill. The notices keep waiting.": "没有交出去——VibeSpace 无法确定这一轮会记在哪个账号上。这些通知继续等待。",
   "Not handed over — VibeSpace could not read its record of turns nobody typed, so it starts none until the record reads again. The notices keep waiting.": "没有交出去——VibeSpace 读不出它记录无人输入轮次的账本，在账本重新读出之前一个也不开始。这些通知继续等待。",
-  "Not handed over — no limit is set for turns nobody typed on {account}: set a number in Settings → Spending. The notices keep waiting.": "没有交出去——{account} 没有设置无人输入轮次的上限：请在 设置 → 花费 里填一个数字。这些通知继续等待。",
-  "Not handed over — no limit is set for turns nobody typed on this instance: set a number in Settings → Spending. The notices keep waiting.": "没有交出去——此实例没有设置无人输入轮次的上限：请在 设置 → 花费 里填一个数字。这些通知继续等待。",
+  "Not handed over — no limit is set for turns nobody typed on {account}: set a number in its row of Settings → Spending: {link}. The notices keep waiting.": "没有交出 — {account} 上没人打字的轮次没有设上限：请在 设置 → 花费 里它的那一行填一个数：{link}。通知继续等着。",
+  "Not handed over — no limit is set for turns nobody typed on this instance: set a number in its row of Settings → Spending: {link}. The notices keep waiting.": "没有交出 — 这个实例上没人打字的轮次没有设上限：请在 设置 → 花费 里它的那一行填一个数：{link}。通知继续等着。",
   "Not handed over — the spend ceiling refused this turn ({why}). The notices keep waiting.": "没有交出去——花费上限拒绝了这一轮（{why}）。这些通知继续等待。",
   "Open Usage": "打开 用量",
   "Not saved yet — press Enter or leave the field": "未保存——按回车或离开输入框即可保存",
@@ -11775,6 +12135,8 @@ export default {
   "used {n}× by {m} conversations": "已被 {m} 个对话使用 {n} 次", // lane vault-use-grants
   "Who may use «{name}»": "谁可以用「{name}」", // lane vault-use-grants
   "They run commands with it — vibespace-vault run — for the hosts below with no card each time; they never see it. Another host, or a command whose destination cannot be told (a shell, a script), still asks you.": "他们可以用它运行命令（vibespace-vault run），发往下面的主机时不再每次弹卡片；他们永远看不到它。其他主机，或无法判断发往何处的命令（shell、脚本），仍会问你。", // lane vault-use-grants
+  "Share it: let another conversation or a Task Group run commands with it for the hosts you name. Another host is refused — an agent's own value goes only where you say.": "共享它：让另一个会话或任务组，在你指定的主机上用它运行命令。其他主机会被拒绝——代理自己存放的值只去你说的地方。",
+  "They run commands with it — vibespace-vault run — for the hosts below with no card each time; they never see it. Another host, or a command whose destination cannot be told, is refused: an agent's own value goes only where you say.": "他们用它运行命令（vibespace-vault run），对下面的主机每次都不弹卡片；他们看不到它的值。其他主机，或无法判断去向的命令，会被拒绝：代理自己存放的值只去你说的地方。",
   "Who may use it": "谁可以用", // lane vault-use-grants
   "Who": "给谁", // lane vault-use-grants
   "For which hosts": "用于哪些主机", // lane vault-use-grants
@@ -11802,7 +12164,6 @@ export default {
   "Always let this conversation use it (these hosts)": "总是允许这个对话用它（这些主机）", // lane vault-use-grants
   "A standing approval: this conversation may use it for these hosts for 30 days — the Vault window lists it": "已设为长期授权：这个对话 30 天内可用于这些主机——保险库窗口里能看到它", // lane vault-use-grants
   "A standing approval: this conversation runs commands with these secrets for these hosts without asking for 30 days — the Vault window lists it and takes it back; asks for the second password first": "长期授权：这个对话 30 天内对这些主机使用这些秘密运行命令无需再问——保险库窗口列出它，也可收回；先要输入第二密码", // lane vault-use-grants
-  "For: {hosts} — the conversation that asked is not allowed to use it until you allow it on its row in the Vault window («Who may use it…»).": "用于：{hosts}——在你于保险库窗口该行（「谁可以用…」）允许之前，发起请求的对话不能使用它。", // lane vault-use-grants
   "A pasted secret may be used by the conversation that asked for it": "你粘贴的秘密可由请求它的对话使用", // lane vault-use-grants
   "When an agent asks you to paste a secret and names the hosts it is for, the conversation that asked may use it in commands to those hosts for 8 hours — they are not asked again. A command to any other host still shows you its card, a new kind of command whose destination cannot be read (a shell, an interpreter, an unknown program) still shows you its card, and a request that named no hosts shows a card for every command. Locking the vault ends the grant, and the entry's own «Usable by agent runs» switch is untouched. OFF: a paste grants nothing — the agent's receipt tells it to request the secret, and you open the entry in the Vault window.": "当 agent 请你粘贴一个秘密并写明用于哪些主机时，发起请求的对话可以在接下来 8 小时内用它向这些主机发命令——不再逐次询问。向其他任何主机的命令仍会给你看卡片；无法读出目的地的新类型命令（shell、解释器、未知程序）也仍会给你看卡片；若请求未写明主机，则每条命令都给你看卡片。锁定保险库即结束授权，条目自己的「可供 agent 运行使用」开关不受影响。关闭：粘贴不授予任何权限——agent 的回执会让它去请求该秘密，由你在保险库窗口打开此条目。", // lane vault-use-grants
   "Policy for the judge: «{text}»": "裁决策略：「{text}」", // lane vault-use-grants
@@ -11880,6 +12241,7 @@ export default {
   "Nothing was left to deliver — its conversations are gone": "没有可投递的了 — 它们所在的会话已不存在",
   "Not delivered now ({why}) — they go with its next delivery": "现在没有投递（{why}）— 它们会随下一次投递一起发送",
   "{n} messages for {agent} held since {date} — deliver or discard": "{n} 条给 {agent} 的消息自 {date} 起被搁置 — 投递还是丢弃",
+  "{n} messages for {agent} held since {date} — {d} of them may already have reached {agent}: VibeSpace restarted while delivering them — deliver again or discard": "{n} 条给 {agent} 的消息自 {date} 起被搁置 — 其中 {d} 条可能已送达 {agent}：投递途中 VibeSpace 重启了 — 再次投递还是丢弃",
   "They were held for {agent} on {where} while it could not be woken (a restart, its daily cap, nobody running) — the oldest from {date}. A delivery that old is never sent by itself.": "它们在 {where} 上为 {agent} 搁置，因为当时无法唤醒它（重启、每日上限、没有运行中的会话）— 最早的一条来自 {date}。这么旧的投递不会自动发送。",
   "Deliver sends them to {agent} now, as one block (a billed turn). Discard drops them — nothing is sent.": "投递会现在把它们作为一个消息块发给 {agent}（一次计费的回合）。丢弃会删除它们 — 不发送任何内容。",
   "Unanswered, it expires in {n} days — they are discarded then.": "无人回答时，{n} 天后过期 — 届时它们会被丢弃。",
@@ -12104,7 +12466,30 @@ export default {
   "It holds {n} name(s): {names} — the values are not shown here.": "它存有 {n} 个名称：{names}——这里不显示它们的值。",
   "…and {n} more not shown (past the first 20, or shaped like a value rather than a name).": "……另有 {n} 个没有显示（排在前 20 个之后，或看起来像一个值而不是名称）。",
   "Its names could not be read — open the file to see what it holds.": "读不出它存的名称——打开这个文件看看里面有什么。",
-  "VibeSpace no longer reads this file and never deletes it. Add each value to the vault as a secret entry, then delete the file; a job reads a stored secret with --vault NAME=vault://… (vibespace-docs jobs).": "VibeSpace 不再读取这个文件，也绝不会删除它。把每个值作为密钥条目放进保险库，然后删除这个文件；任务用 --vault NAME=vault://… 读取保存的密钥（vibespace-docs jobs）。",
+  "VibeSpace no longer reads this file and deletes it only when you say so: «Move into the vault» seals each value as a vault entry and then deletes the file, «Delete the file» deletes it as it is. A job reads a stored secret with --vault NAME=vault://… (vibespace-docs jobs).": "VibeSpace 不再读取这个文件，只在你说了才删除它：「放进保险库」把每个值封存为保险库条目，然后删除这个文件；「删除文件」直接删除它。任务用 --vault NAME=vault://… 读取保存的密钥（vibespace-docs jobs）。",
+  "Move into the vault": "放进保险库",
+  "Seal each value as a vault entry, then delete the file": "把每个值封存为保险库条目，然后删除这个文件",
+  "Delete the file": "删除文件",
+  "Delete the file and the values in it": "删除这个文件和其中的值",
+  "Delete the file?": "删除这个文件？",
+  "{n} secret(s) moved into the vault — the file is deleted": "{n} 个密钥已放进保险库——文件已删除",
+  "The file is deleted": "文件已删除",
+  "The file is not there any more": "这个文件已经不在了",
+  "The file could not be read as names and values — nothing was moved": "无法把这个文件读成名称和值——什么都没放进去",
+  "The file holds no value to move — delete it instead": "这个文件里没有可放进去的值——请直接删除它",
+  "The file could not be deleted — nothing was moved": "无法删除这个文件——什么都没放进去",
+  "Could not move the secrets — {reason}": "无法放进保险库——{reason}",
+  "The file and every value in it are deleted. Nothing is moved into the vault.": "这个文件和其中的每个值都会被删除，不会放进保险库。",
+  "{n} secret(s) moved into the vault, {m} empty one(s) left out — the file is deleted": "{n} 个密钥已放进保险库，{m} 个空值未放入——文件已删除",
+  "Value {n}": "第 {n} 个值",
+  "data/job-secrets.retired.json is a link, a folder or a file with a second name — nothing was read or deleted. A link: put the file it points to in its place. A second name: delete that other name. A folder: move it out of the way. Then press again": "data/job-secrets.retired.json 是链接、文件夹或带第二个名字的文件——什么都没读，也没删。是链接：把它指向的文件放到这个位置；有第二个名字：删掉那个名字；是文件夹：把它移开。然后再按一次",
+  "The file could not be deleted": "无法删除这个文件",
+  "not a plain text, number or true/false (or text with spaces around it) — nothing was moved; the file is kept: correct that value in data/job-secrets.retired.json, then press again": "不是普通文本、数字或 true/false（或前后带空格的文本）——什么都没放进去，文件保留：请在 data/job-secrets.retired.json 里改好这个值，再按一次",
+  "The file changed while it was being moved — nothing was moved; press again": "放入过程中文件变了——什么都没放进去，请再按一次",
+  "The file is being moved — try again in a moment": "文件正在放入——请稍后再试",
+  "That answer is not offered": "没有这个选项",
+  "too long for the vault — nothing was moved; the file is kept": "太长，保险库放不下——什么都没放进去，文件保留",
+  "Could not delete the file — {reason}": "无法删除文件——{reason}",
   // lane job-secrets-retire r3: both names present (2026-10-job-secrets-retired) + a failed boot migration's ONE For-you item (src/migration-runner.js)
   "Two files hold secrets for background jobs and nothing was moved: {from} and {to}. Move one of them out of data/ (or delete it), then restart — VibeSpace never chooses between your files.": "有两个文件存着后台工作任务的密钥，什么都没有移动：{from} 和 {to}。把其中一个移出 data/（或删除它），然后重启——VibeSpace 绝不替你在这两个文件之间做选择。",
   "A data migration failed at startup: {id}": "一项数据迁移在启动时失败：{id}",
@@ -12142,7 +12527,9 @@ export default {
   "Resume interrupted sessions?": "恢复被中断的会话？",
   "{n} sessions were interrupted (the server or a machine restarted) and reopened as read-only history. Resume all of them now?": "{n} 个会话被中断（服务器或机器重启），已作为只读历史重新打开。现在全部恢复吗？",
   "{n} of them stopped because their process ended while the server was down.": "其中 {n} 个是因为服务器停机期间进程结束而停止的。",
+  "The vault is locked: a conversation whose folder is on a machine or a storage mount waits for it, so unlock first.": "保险库已锁定：文件夹在某台机器或存储挂载上的对话要等它解锁，请先解锁。",
   "Resume all {n}": "全部恢复（{n}）",
+  "Unlock and resume all {n}": "解锁并全部恢复（{n}）",
   "Session unavailable": "会话不可用",
   "Press a desktop to restore it alone — your other desktops stay as they are now.": "点一个桌面只恢复它——其他桌面保持现在的样子。",
   "Restore only “{desktop}”": "只恢复「{desktop}」",
@@ -12165,6 +12552,7 @@ export default {
   "“{name}” cannot be reopened: closing deletes it from this desktop’s layout for good. Only an older rollback point (Restore a previous layout…) still holds it.": "「{name}」无法重新打开：关闭会把它从这个桌面的布局中永久删除。只有更早的回滚点（恢复之前的布局…）还保留着它。",
   "{n} of these cannot be reopened ({names}): closing deletes them from this desktop’s layout for good. Only an older rollback point (Restore a previous layout…) still holds them.": "其中 {n} 个无法重新打开（{names}）：关闭会把它们从这个桌面的布局中永久删除。只有更早的回滚点（恢复之前的布局…）还保留着它们。",
   "A host is where a command connects to with it — e.g. api.openai.com for an API key, 192.168.1.1 for a router. A program whose destination VibeSpace cannot read (a script) is allowed by its command instead, from its run card.": "主机就是命令带着它连去的地方——比如 API 密钥连 api.openai.com，路由器连 192.168.1.1。VibeSpace 读不出去向的程序（脚本）改为按命令放行，在它的运行卡片上点「总是（这条命令）」。", // lane vault-standing-request
+  "A host is where a command connects to with it — e.g. api.openai.com for an API key, 192.168.1.1 for a router. Another conversation sends an agent's value only to the hosts you name here; a command whose destination cannot be told is refused.": "主机是命令用它连接的地方——例如 API 密钥对应 api.openai.com，路由器对应 192.168.1.1。其他对话只会把 agent 存的值发到你在这里写的主机；无法判断去向的命令会被拒绝。",
   "A standing approval for this command — the Vault window lists it; a changed program or script asks again": "已为这条命令设为常驻授权——保险库窗口里能看到它；换了程序或脚本会再问", // lane vault-standing-request
   "A standing approval for this command: this conversation runs it with these secrets without asking until you take it back — VibeSpace cannot see where it sends them; a changed program or script asks again. Asks for the second password first": "这条命令的常驻授权：这个对话用这些密钥运行它不再问你，直到你收回——VibeSpace 看不到它把密钥发往哪里；换了程序或脚本会再问。会先要第二密码", // lane vault-standing-request
   "A standing grant, the same as «Who may use it…» on its row — until you take it back there; asks for the second password first": "常驻授权，和它那一行的「谁可以用…」一样——直到你在那里收回；会先要第二密码", // lane vault-standing-request
@@ -12224,6 +12612,29 @@ export default {
   "For 1 hour this conversation uses this secret without asking; each use shows a notice (never filed in For you); then it asks again.": "1 小时内这个对话用这把密钥不再问你；每次使用都会弹一条提示（不进「待你处理」）；到期后再问。", // lane vault-standing-request r7 («Allow for 1 hour»)
   // lane foryou-dock-layout: «Allow for 1 hour»'s consequence, shortest form — the strip's ONE dim line under its answers
   "For 1 hour in this conversation: no more asking; a notice at each use; then it asks again": "这个对话 1 小时内不再问；每次使用提示一条；到期再问",
+  // B-d868: who started the turn asking, beside «Allow for 1 hour»
+  "The turn running when this asked was started by you": "提出这个请求时正在运行的这一轮由你发起",
+  "The turn running when this asked was started by another session, «{name}»": "提出这个请求时正在运行的这一轮由另一个会话「{name}」发起",
+  "The turn running when this asked was started by a VibeSpace notification ({name})": "提出这个请求时正在运行的这一轮由一条 VibeSpace 通知（{name}）发起",
+  "The turn running when this asked was started by a group report": "提出这个请求时正在运行的这一轮由一份群报告发起",
+  "The turn running when this asked was started by a background task finishing": "提出这个请求时正在运行的这一轮由一个结束的后台任务发起",
+  "The turn running when this asked was started by a delivered message, not typed here": "提出这个请求时正在运行的这一轮由一条送达的消息发起（不是在这里输入的）",
+  "Who started this turn is not recorded": "没有记录这一轮是谁发起的",
+  "Who started this is not recorded: background work another turn started is still running": "由谁发起没有记录：另一轮启动的后台工作仍在运行",
+  // B-02a3: the strip's group press (hand the group messages to the running turn)
+  "Not handed over — VibeSpace does not see the agent in a turn right now; the group messages ride its next turn": "没有交出——VibeSpace 此刻没有看到这个 agent 在一轮中；这些群消息随它的下一轮送达",
+  "Not handed over — this conversation cannot take a message into its running turn; the group messages ride its next turn": "没有交出——这个对话无法把消息送进正在运行的一轮；这些群消息随它的下一轮送达",
+  "Not handed over — the turn is being stopped; the group messages ride the next turn": "没有交出——这一轮正在停止；这些群消息随下一轮送达",
+  "The agent did not confirm it took the group messages; they keep waiting for its next turn": "agent 没有确认收到这些群消息；它们继续等待它的下一轮",
+  "Hand the group message over now": "现在交出这条群消息",
+  "Hand the {n} group messages over now": "现在交出这 {n} 条群消息",
+  "joins the running turn; if the turn is just ending, it runs right after it": "并入正在运行的一轮；若这一轮正要结束，则紧接着运行",
+  "Gives the agent the group messages waiting for it inside the turn it is running, the way a message sent with Enter goes in; if that turn is just ending, they run right after it as a turn of its own": "把等待这个 agent 的群消息送进它正在运行的一轮，与用 Enter 发送的消息走同一条路；若这一轮正要结束，它们会紧接着作为单独的一轮运行",
+  "Handed 1 group message to the running turn": "已把 1 条群消息交给正在运行的一轮",
+  "Handed {n} group messages to the running turn": "已把 {n} 条群消息交给正在运行的一轮",
+  "the user handed the group messages waiting for a conversation to its running turn": "你把等待某个对话的群消息交给了它正在运行的一轮",
+  "Not handed over — the waiting group messages do not fit one hand-over; they ride the next turn": "没有交出——等待中的群消息放不进一次交出；它们随下一轮送达",
+  "Not handed over — the last hand-over still waits for the agent to say it took the group messages (up to a minute); they keep waiting": "没有交出——上一次交出仍在等 agent 确认收到这些群消息（最多一分钟）；它们继续等待",
   "Allow for 1 hour": "允许 1 小时", // lane vault-standing-request r7 («Allow for 1 hour»)
   "Allowed this conversation for 1 hour — each use shows a notice; take it back in the Vault window": "已允许这个对话 1 小时 — 每次使用都会弹一条提示；可在保险库窗口收回", // lane vault-standing-request r7 («Allow for 1 hour»)
   "any destination": "任何目的地", // lane vault-standing-request r7 («Allow for 1 hour»)
@@ -12375,6 +12786,15 @@ export default {
   "Nothing was started. Your {shell} has no {cli} program on its PATH, and neither has the hub’s own PATH: {dirs}.": "没有启动任何东西。你的 {shell} 的 PATH 上没有 {cli} 程序，hub 自己的 PATH 上也没有：{dirs}。",
   "The hub’s PATH has {path} — add that directory to your shell’s PATH, then try again.": "hub 的 PATH 上有 {path} —— 把那个目录加进你 shell 的 PATH，然后再试一次。",
   "{cli} was not found": "找不到 {cli}",
+  "found by the {shell} of {machine} at {path}": "{machine} 上的 {shell} 在 {path} 找到了它",
+  "not found by the {shell} of {machine} (login shell)": "{machine} 上的 {shell}（登录 shell）没有找到它",
+  "not found by the {shell} of {machine} · the PATH VibeSpace adds there has {path}, which runs": "{machine} 上的 {shell} 没有找到它 · VibeSpace 在那里加上的 PATH 里有 {path}，会用它运行",
+  "the {shell} of {machine} could not be asked ({why}) · its own PATH decides": "无法询问 {machine} 上的 {shell}（{why}）· 由它自己的 PATH 决定",
+  "Asked: the {shell} of {machine}, as a login shell": "询问的是：{machine} 上的 {shell}，作为登录 shell",
+  "Nothing was started. The {shell} of {machine} has no {cli} program on its PATH.": "什么都没有启动。{machine} 上的 {shell} 的 PATH 里没有 {cli} 程序。",
+  "Nothing was started. The alias for {cli} in the {shell} of {machine} names {path}, which is missing.": "什么都没有启动。{machine} 上的 {shell} 里 {cli} 的别名指向 {path}，但它不存在。",
+  "Nothing was started. The alias for {cli} in the {shell} of {machine} names {path}, which is not executable.": "什么都没有启动。{machine} 上的 {shell} 里 {cli} 的别名指向 {path}，但它不可执行。",
+  "Nothing was started. The {shell} of {machine} wraps {cli} in an alias or a function, which VibeSpace does not run, and has no {cli} program on its PATH.": "什么都没有启动。{machine} 上的 {shell} 用别名或函数包装了 {cli}（VibeSpace 不会运行它），而它的 PATH 里没有 {cli} 程序。",
   "How to install": "如何安装",
   "Open Manage agents": "打开「管理 agent」",
   "Re-check there asks your shell again once {cli} is installed": "装好 {cli} 后，在那里点「重新检查」会再问一次你的 shell",
@@ -12390,6 +12810,17 @@ export default {
   "You edited this text before you approved it": "批准前你改过这段文字",
   "replaced": "已被替换",
   "The agent replaced this draft with a newer one — click to see it": "agent 用一条更新的草稿替换了它 — 点击查看",
+  "Send the rest": "发送其余部分",
+  "Only a sent message has a rest to send": "只有已发送的消息才有其余部分可发",
+  "The rest is on its way already": "其余部分已在发送中",
+  "Nothing of it is left to send": "没有剩余可发送的部分",
+  "Its files are no longer kept — attach them again in a new reply": "它的文件已不再保留——请在新回复中重新附上",
+  "Sends only the files that did not land ({n}), as a new message": "只把未送达的文件（{n} 个）作为一条新消息再发送",
+  "Sent the rest": "其余部分已发送",
+  "Another reply to this message is waiting — drafted by {who}": "对这条消息的另一条回复正在等待 — 由 {who} 起草",
+  "Another reply to this message is being sent — drafted by {who}": "对这条消息的另一条回复正在发送 — 由 {who} 起草",
+  "A reply to this message was already sent — drafted by {who}": "对这条消息的一条回复已经发出 — 由 {who} 起草",
+  "Another reply to this same message is still open or already sent — press Approve again to send this one too": "对同一条消息的另一条回复仍在等待或已发出 — 再按一次「批准」也发送这一条",
   "Only drafts by {name}": "只看 {name} 起草的",
   "Show every proposal": "显示全部提案",
   "This conversation has no proposal in the Outbox list.": "这个会话在发件箱列表里没有提案。",
@@ -12450,6 +12881,35 @@ export default {
   "VibeSpace never hands the password to the agent and types it only on {site} into a password or code field; our fence stops accidental reads and wrong sites, and we do not promise to stop an agent that deliberately digs into a page it controls.": "VibeSpace 自己的门不会把密码交给助手，且只在 {site} 上往密码或验证码框里填；我们的围栏防意外读到和输错网站，对于故意在自己控制的页面里去挖的 agent，我们不承诺拦住。",
   "Save and allow": "保存并允许",
   "Save only": "仅保存",
+  "Use a login you already saved…": "使用已保存的登录…",
+  "Type a new login instead": "改为填写新的登录",
+  "No website login is saved yet — type this one below.": "还没有保存任何网站登录 — 请在下面填写这一个。",
+  "Pick the saved login": "选择已保存的登录",
+  "Adds {site} to the login {login} — it is filled there with that login's one password; nothing is typed again.": "把 {site} 加到登录 {login} — 在那里填入的是这个登录的同一个密码，不用再输入。",
+  "What it changes could not be read ({code}) — the press says why.": "无法读取这会改变什么（{code}）— 按下后会说明原因。",
+  "The address is {unicode} — written {ascii} in plain letters.": "这个地址是 {unicode} — 用普通字母写作 {ascii}。",
+  "Careful: {domain} is not the domain of this login's other sites ({mine}).": "注意：{domain} 不是这个登录其他网站的域名（{mine}）。",
+  "the conversation that saved it ({key})": "保存它的对话（{key}）",
+  "Then it may be filled on {site} by: {names}.": "之后可以在 {site} 上填入它的有：{names}。",
+  "Nobody else may have it filled on {site} yet.": "目前没有其他人可以在 {site} 上填入它。",
+  "Let {who} sign in with it on every site of this login ({sites})": "允许 {who} 在这个登录的每个网站上用它登录（{sites}）",
+  "{who} can sign in with it on every site of this login until you remove it in Vault ▸ Web logins ▸ Use for… — there is no time limit.": "{who} 可以在这个登录的每个网站上用它登录，直到你在 保险库 ▸ 网站登录 ▸ 用于… 中移除 — 没有时间限制。",
+  "Add the site and allow": "添加网站并允许",
+  "Add the site only": "仅添加网站",
+  "Added the site to the saved login — the agent may sign in with it there; VibeSpace never hands it the password": "已把网站加到已保存的登录 — 助手可以在那里用它登录；VibeSpace 绝不把密码交给它",
+  "Added the site to the saved login — the agent may not sign in with it until you allow it in Vault ▸ Web logins ▸ Use for…": "已把网站加到已保存的登录 — 在你于 保险库 ▸ 网站登录 ▸ 用于… 中允许之前，助手不能用它登录",
+  "{site} is one of this login's sites already — it signs in there as {user}; the press changes only who may have it filled.": "{site} 已经是这个登录的网站之一 — 它在那里以 {user} 登录；按下只会改变谁可以在那里填入它。", // lane login-request-card: the use door's cure (主开发 12:17Z) — the site the login holds, the name it signs in under there, a locked list, a grant not written
+  "It signs in there as {user}.": "它在那里以 {user} 登录。",
+  "a conversation not running now ({key})": "一个当前未运行的对话（{key}）",
+  "The vault is locked — unlock it to pick one of its saved logins.": "保险库已锁定 — 解锁后才能选择其中保存的登录。",
+  "The saved logins could not be read — try again, or type this one below.": "无法读取已保存的登录 — 请重试，或在下面填写这一个。",
+  "The site is on the saved login, but the permission could not be written — allow it in Vault ▸ Web logins ▸ Use for…": "网站已在已保存的登录上，但权限没能写入 — 请在 保险库 ▸ 网站登录 ▸ 用于… 中允许",
+  "That site was on the saved login already — the agent may now sign in with it there; VibeSpace never hands it the password": "这个网站本来就在已保存的登录上 — 助手现在可以在那里用它登录；VibeSpace 绝不会把密码交给它",
+  "That site was on the saved login already — nothing was changed": "这个网站本来就在已保存的登录上 — 没有任何改动",
+  "{site} is on this login already and signs in there as {user} — to sign in there under another name, remove that site from the login in Vault ▸ Web logins first, or type a new login": "{site} 已在这个登录上，并在那里以 {user} 登录 — 要在那里用别的名字登录，请先在 保险库 ▸ 网站登录 中把这个网站从登录里移除，或填写一个新的登录",
+  "{who} (except {names})": "{who}（{names} 除外）", // lane login-request-card: the use door's follow-up (主开发 13:02Z) — exceptions said, an owner not running, the first site's one door
+  "the conversation that saved it, not running now ({key})": "保存它的对话，当前未运行（{key}）",
+  "{site} is this login's own first site and signs in there as {user} — to sign in there under another name, type a new login": "{site} 是这个登录自己的第一个网站，并在那里以 {user} 登录 — 要在那里用别的名字登录，请填写一个新的登录",
   "Let {who} read its current code — never the seed — while it runs": "允许 {who} 在运行期间读取它的当前验证码 — 绝不给出密钥",
   "{who} can read its current code (never the seed) while it runs — a restart of that conversation ends it; give it again in Vault ▸ Two-step codes ▸ Use for….": "{who} 在运行期间可以读取它的当前验证码（绝不给出密钥）— 那个对话重启后即失效；可在「保险库 ▸ 两步验证 ▸ 用于…」中再次授予。",
   "{who} cannot read its code until you give it in Vault ▸ Two-step codes ▸ Use for….": "在你于「保险库 ▸ 两步验证 ▸ 用于…」中授予之前，{who} 无法读取它的验证码。",
@@ -13097,10 +13557,177 @@ export default {
   "the connection dropped before the server answered": "服务器回复前连接已断开",
   "the server reported an error without a reason": "服务器报告了错误，但没有说明原因",
   "the server refused it without a reason": "服务器拒绝了，但没有说明原因",
+  "its folder waits for the vault": "它的文件夹在等保险库",
+  "its folder is on a mount that is not up": "它的文件夹所在的挂载没有就绪",
+  "{w} of {n} conversations wait for the vault — while this page is open, each resumes by itself once you unlock it.": "{n} 个对话中有 {w} 个在等保险库——只要这个页面开着，解锁后它们会各自恢复。",
   "it could not be started on this page": "无法在此页面上启动",
   "it was not resumed": "没有恢复",
   "Resuming the group stopped early because of an error on this page.": "因为此页面出错，恢复该组提前停止。",
   "Resuming {i} of {n}…": "正在恢复第 {i} 个会话，共 {n} 个…",
   "Resuming {i} of {n} — {f} could not be resumed": "正在恢复第 {i} 个会话，共 {n} 个——{f} 个无法恢复",
   "{f} of {n} conversations could not be resumed: {list}": "{n} 个会话中有 {f} 个无法恢复：{list}",
+  "No window": "无窗口",
+  "Split": "分屏",
+  "Rotate to split": "横屏后可分屏",
+  "Too narrow to split": "屏幕太窄，无法分屏",
+  "Close the split": "关闭分屏",
+  "The split ended: one of its windows was minimized, closed or moved to another desktop": "分屏已结束：其中一个窗口已最小化、关闭或移到了别的桌面",
+  "Billing: {name}": "计费：{name}",
+  // unit what-it-may-use (Session Properties «What it may use»)
+  "may ask for it — the request comes to you": "可以申请 —— 申请会送到你这里",
+  "{n} more it may ask for": "另有 {n} 个可以申请",
+  "{n} more left out or unknown": "另有 {n} 个被排除或未知",
+  "{n} more not open to it": "另有 {n} 个没有对它开放",
+  "its access list could not be read": "读不到它的访问名单",
+  "“{name}” has no tick of this conversation’s own to take back — it comes through a Task Group or every agent (the Channels window)": "「{name}」没有这个对话自己的勾选可收回 —— 它经任务组或所有 agent 得来（在频道窗口里改）",
+  "Could not read what it may use: {why}": "没能读取它能用什么：{why}",
+  "Could not take “{name}” back from this conversation: {why}": "没能从这个对话收回「{name}」：{why}",
+  "Desktop app windows shared with it": "共享给它的桌面应用窗口",
+  "Given to this conversation itself · {authority} — untick to take it back": "给了这个对话本身 · {authority} —— 取消勾选即收回",
+  "Its Task Groups could not be read — what comes through a group is unknown": "读不到它所在的任务组 —— 经任务组得来的权限未知",
+  "Its notifications wake it — {name}": "它的通知会唤醒这个对话 —— {name}",
+  "Job {job} uses {entry} at every start": "后台任务 {job} 每次启动都会用 {entry}",
+  "Keys an outside party uses on its behalf — names only": "外部方代它使用的 key —— 只显示名字",
+  "Machines that lend it their network, or run commands for it": "借网络给它、或替它跑命令的机器",
+  "Machines’ exits": "机器出口",
+  "No automation key is granted to it": "没有授权给它的自动化 key",
+  "No browser profile is open to it": "没有对它开放的浏览器配置",
+  "No desktop window is shared with it": "没有共享给它的桌面窗口",
+  "No machine lends it its exit": "没有机器把出口借给它",
+  "No vault entry is open to it": "保险库里没有对它开放的条目",
+  "Not given — tick to let this conversation see it (draft only)": "没给 —— 勾上就让这个对话看得到（只起草）",
+  "Not running now — judged by what is stored for it": "现在没在运行 —— 按为它保存的记录判断",
+  "Raw API: {tier}": "原始 API：{tier}",
+  "Reading what it may use…": "正在读取它能用什么…",
+  "Shared windows": "共享的窗口",
+  "Share…": "共享…",
+  "The vault is locked — unlock it in the Vault window to see what it may use there": "保险库已锁 —— 在保险库窗口解锁后，才能看到它在保险库里能用什么",
+  "This conversation has no id of its own yet — try again in a moment": "这个对话还没有自己的 id —— 稍后再试",
+  "What it may use…": "能用什么…",
+  "cannot be read by this release": "当前版本读不了",
+  "hosts {list}": "主机 {list}",
+  "itself": "它本身",
+  "left out — Except: {name}": "被排除 —— 除了：{name}",
+  "locked": "已锁",
+  "not on this machine": "不在这台机器上",
+  "run commands on it": "在那台机器上跑命令",
+  "through Task Group {name}": "经任务组{name}",
+  "unknown — its Task Groups could not be read": "未知 —— 读不到它所在的任务组",
+  "use its network": "用它的网络",
+  "{n} a day": "每天 {n} 次",
+  "{n} entr(ies)": "{n} 个条目",
+  "{n} granted": "已授权 {n} 个",
+  "{n} of {m} account(s)": "{m} 个账号中 {n} 个",
+  "{n} profile(s) · {m} saved login(s)": "{n} 个配置 · {m} 个已存登录",
+  "proxy password not in the vault": "代理密码不在保险库", // B-8b87: a browser profile's proxy and its login
+  "Its proxy address carries its password, which is never used — «Move the password to the vault» in ⋯": "它的代理地址里带着密码，这个密码从不使用——在 ⋯ 里点「把密码移入保险库」", // B-8b87: a browser profile's proxy and its login
+  "proxy": "代理", // B-8b87: a browser profile's proxy and its login
+  "Through its proxy {address}, with its login from the vault": "经它的代理 {address}，登录信息来自保险库", // B-8b87: a browser profile's proxy and its login
+  "Through its proxy {address}": "经它的代理 {address}", // B-8b87: a browser profile's proxy and its login
+  "Move the password to the vault": "把密码移入保险库", // B-8b87: a browser profile's proxy and its login
+  "Its proxy address carries its password, which is never used — one press keeps it in the vault as this proxy's login and removes it from the profile": "它的代理地址里带着密码，这个密码从不使用——点一下就把它作为这个代理的登录信息存进保险库，并从配置里删掉", // B-8b87: a browser profile's proxy and its login
+  "Proxy…": "代理…", // B-8b87: a browser profile's proxy and its login
+  "This profile's proxy and its login (kept in the vault)": "这个配置的代理及其登录信息（存在保险库里）", // B-8b87: a browser profile's proxy and its login
+  "Proxy of {label}": "{label} 的代理", // B-8b87: a browser profile's proxy and its login
+  "Applied at the browser's next start.": "浏览器下次启动时生效。", // B-8b87: a browser profile's proxy and its login
+  "{label} goes through its proxy from its next start": "{label} 从下次启动起经它的代理上网", // B-8b87: a browser profile's proxy and its login
+  "{label} has no proxy from its next start": "{label} 从下次启动起不再使用代理", // B-8b87: a browser profile's proxy and its login
+  "Proxy": "代理", // B-8b87: a browser profile's proxy and its login
+  "http, https or socks5 — the address alone; its login is kept in the vault. Empty: no proxy.": "http、https 或 socks5——只填地址；登录信息存在保险库里。留空：不用代理。", // B-8b87: a browser profile's proxy and its login
+  "Proxy login": "代理登录", // B-8b87: a browser profile's proxy and its login
+  "Saved in the vault as this proxy's login — the browser never sees it.": "作为这个代理的登录信息存进保险库——浏览器永远看不到它。", // B-8b87: a browser profile's proxy and its login
+  "No login": "无需登录", // B-8b87: a browser profile's proxy and its login
+  "New login…": "新的登录信息…", // B-8b87: a browser profile's proxy and its login
+  "The proxy must be http://host:port, https://host:port or socks5://host:port.": "代理必须是 http://主机:端口、https://主机:端口 或 socks5://主机:端口。", // B-8b87: a browser profile's proxy and its login
+  "A proxy's user name and password go in the vault — give the address alone, then choose its login below.": "代理的用户名和密码要放进保险库——只填地址，再在下面选它的登录信息。", // B-8b87: a browser profile's proxy and its login
+  "That login was saved for another proxy — choose this proxy's login, or make a new one.": "这个登录信息是为另一个代理保存的——请选这个代理的登录信息，或新建一个。", // B-8b87: a browser profile's proxy and its login
+  "proxy from its next start": "下次启动起走代理", // B-8b87 cure: a proxy's refusals in the page's words
+  "Through its proxy {address} from its next start — the running browser still uses {road}": "下次启动起经代理 {address}——正在运行的浏览器仍走 {road}", // B-8b87 cure: a proxy's refusals in the page's words
+  "no proxy": "不走代理", // B-8b87 cure: a proxy's refusals in the page's words
+  "no proxy from its next start": "下次启动起不走代理", // B-8b87 cure: a proxy's refusals in the page's words
+  "The running browser still goes through {road} — no proxy from its next start": "正在运行的浏览器仍经 {road}——下次启动起不走代理", // B-8b87 cure: a proxy's refusals in the page's words
+  "{user} — the vault's list could not be read": "{user}——无法读取保险库的列表", // B-8b87 cure: a proxy's refusals in the page's words
+  "{user} — no longer in the vault": "{user}——已不在保险库中", // B-8b87 cure: a proxy's refusals in the page's words
+  "The vault is locked — press Unlock…, then move the password again.": "保险库已锁定——请按「解锁…」，然后再移一次密码。", // B-8b87 cure: a proxy's refusals in the page's words
+  "The vault is locked — press Unlock…, then start the browser again.": "保险库已锁定——请按「解锁…」，然后再启动浏览器。", // B-8b87 cure: a proxy's refusals in the page's words
+  "The vault is locked — press Unlock…, then save.": "保险库已锁定——请按「解锁…」，然后保存。", // B-8b87 cure: a proxy's refusals in the page's words
+  "The vault is not set up yet — press Set up the vault…, then try again.": "保险库还没有设置——请按「设置保险库…」，然后再试一次。", // B-8b87 cure: a proxy's refusals in the page's words
+  "A cloud browser runs at its vendor, where a proxy on this machine cannot reach it — clear the proxy, or set one in the vendor's own settings.": "云端浏览器运行在服务商那里，这台机器上的代理够不到它——请清空代理，或在服务商自己的设置里设代理。", // B-8b87 cure: a proxy's refusals in the page's words
+  "Its proxy login is no longer in the vault — choose its login again in Proxy….": "它的代理登录已不在保险库中——请在「代理…」里重新选择登录。", // B-8b87 cure: a proxy's refusals in the page's words
+  "Its proxy login could not be read from the vault ({code}).": "无法从保险库读取它的代理登录（{code}）。", // B-8b87 cure: a proxy's refusals in the page's words
+  "Its proxy address carries its password, which is never used — press «Move the password to the vault» in ⋯ first.": "它的代理地址里带着密码，这个密码从不使用——请先在 ⋯ 里按「把密码移入保险库」。", // B-8b87 cure: a proxy's refusals in the page's words
+  "Its proxy is socks4, which cannot carry a site's name — give an http, https or socks5 proxy in Proxy….": "它的代理是 socks4，无法传递网站的名称——请在「代理…」里填写 http、https 或 socks5 代理。", // B-8b87 cure: a proxy's refusals in the page's words
+  "This profile attaches to a browser VibeSpace does not start — that browser keeps its own proxy settings.": "这个配置连接的是一个不由 VibeSpace 启动的浏览器——那个浏览器保留它自己的代理设置。", // B-8b87 cure: a proxy's refusals in the page's words
+  "The browser's proxy could not be put in its config — the browser was not started without it.": "无法把代理写进浏览器的配置——浏览器没有在不走代理的情况下启动。", // B-8b87 cure: a proxy's refusals in the page's words
+  "Its proxy address cannot be read — give it again in Proxy….": "无法读取它的代理地址——请在「代理…」里重新填写。", // B-8b87 cure: a proxy's refusals in the page's words
+  "The login is saved in the vault, but the profile could not be written — press «Move the password to the vault» again.": "登录已存入保险库，但配置没能写入——请再按一次「把密码移入保险库」。", // B-8b87 cure: a proxy's refusals in the page's words
+  "A login's user name cannot hold a space or #, and is at most 128 characters.": "登录的用户名不能包含空格或 #，最长 128 个字符。", // B-8b87 cure: a proxy's refusals in the page's words
+  "The proxy could not be used ({code}).": "无法使用这个代理（{code}）。", // B-8b87 cure: a proxy's refusals in the page's words
+  "A browser profile's proxy works for browsers on this machine only, for now.": "目前浏览器配置的代理只对这台机器上的浏览器生效。", // B-8b87: a browser profile's proxy and its login
+  "A new login needs its user name and its password.": "新的登录信息需要用户名和密码。", // B-8b87: a browser profile's proxy and its login
+  "This profile's proxy carries no password.": "这个配置的代理里没有密码。", // B-8b87: a browser profile's proxy and its login
+  "The proxy could not be saved.": "代理没能保存。", // B-8b87: a browser profile's proxy and its login
+  "Could not move the password": "没能移动密码", // B-8b87: a browser profile's proxy and its login
+  "{label}'s proxy password is in the vault now — the profile keeps the address alone": "{label} 的代理密码现在在保险库里了——配置里只留地址", // B-8b87: a browser profile's proxy and its login
+  "Delete the proxy login \"{name}\"?": "删除代理登录信息「{name}」？", // B-8b87: a browser profile's proxy and its login
+  "Its password leaves the vault. A browser profile whose proxy uses it is refused at its next start until you choose a login again.": "它的密码会离开保险库。用到它的浏览器配置在下次启动时会被拒绝，直到你重新选择登录信息。", // B-8b87: a browser profile's proxy and its login
+  "A browser proxy's login — VibeSpace hands it to the proxy for the browser profile that names it; the browser never sees it": "浏览器代理的登录信息——VibeSpace 替指定它的浏览器配置交给代理；浏览器永远看不到它", // B-8b87: a browser profile's proxy and its login
+  "This profile has no proxy of its own — its browser may leave by another road, so a check here could state an exit it does not use. Type the exit by hand if a plugin needs it.": "这个配置没有自己的代理——它的浏览器可能经别的路出去，在这里检查可能报出它并不使用的出口。如果插件需要，请手动填写出口。", // the exit check (the owner 2026-11-17)
+  "No exit check address is set — give one below (an https address you trust), or type the exit by hand.": "还没有设置出口检查地址——请在下面填一个（你信任的 https 地址），或手动填写出口。", // the exit check (the owner 2026-11-17)
+  "The exit check address must be a public https address with no user name or password in it.": "出口检查地址必须是公网 https 地址，且不能带用户名或密码。", // the exit check (the owner 2026-11-17)
+  "This browser runs on another road than its proxy now names (the address or its login changed since it started) — restart it, then check the exit.": "这个浏览器走的路和它的代理现在写的不一样（启动后地址或登录改过了）——请重启它，再检查出口。", // the exit check (主开发 17:04Z cure)
+  "The proxy's login is in the vault, which is locked — a person unlocks it on this instance's page (Unlock…), then checks again.": "代理的登录信息在保险库里，而保险库已锁定——请在本实例的页面上解锁（解锁…），然后再检查。", // the exit check (the owner 2026-11-17)
+  "That is not a time zone — give a zone name like Asia/Shanghai.": "这不是一个时区——请填写像 Asia/Shanghai 这样的时区名。", // the exit check (the owner 2026-11-17)
+  "Give at least one of the public address, the country or the time zone.": "请至少填写公网地址、国家或时区中的一项。", // the exit check (主开发 17:04Z cure)
+  "The exit of {label}": "{label} 的出口", // the exit check (the owner 2026-11-17)
+  "Checked only when you press Check — through this profile's own proxy, at the exit check address. Nothing is kept until you press Keep; an engine plugin reads what you keep when the browser starts.": "只在你按「检查」时检查——经这个配置自己的代理，访问出口检查地址。按「保留」之前什么都不会保存；浏览器启动时，引擎插件会读取你保留的内容。", // the exit check (the owner 2026-11-17)
+  "Proxy exit": "代理出口", // the exit check (the owner 2026-11-17)
+  "{ip} · {where} — {how}, checked {age}": "{ip} · {where}——{how}，{age}检查", // the exit check (the owner 2026-11-17)
+  "This profile attaches to a browser VibeSpace does not start — that browser leaves by its own settings, so a check here could state an exit it does not use. Type the exit by hand if a plugin needs it.": "这个配置连接的是一个不由 VibeSpace 启动的浏览器——那个浏览器按它自己的设置出网，所以在这里检查可能说出一个它并不使用的出口。如果插件需要，请手动填写出口。", // the exit check (主开发 17:04Z cure)
+  "The profile's proxy did not open the way to the check address in time.": "配置的代理没有及时打开通往检查地址的路。", // the exit check (主开发 17:04Z cure)
+  "The profile's proxy closed the connection before the way to the check address was open.": "在通往检查地址的路打开之前，配置的代理就断开了连接。", // the exit check (主开发 17:04Z cure)
+  "The public address is one IP address, like 203.0.113.7 or 2001:db8::1.": "公网地址是一个 IP 地址，比如 203.0.113.7 或 2001:db8::1。", // the exit check (主开发 17:04Z cure)
+  "{label}'s kept exit is forgotten — an engine plugin gets none at the next start": "{label} 保留的出口已忘掉——下次启动时引擎插件拿不到出口", // the exit check (主开发 17:04Z cure)
+  "its kept exit is forgotten (it belonged to the old proxy); check it again": "它保留的出口已忘掉（那是旧代理的）；请重新检查", // the exit check (主开发 17:04Z cure)
+  "Not saved — the exit check address must be a public https address with no user name or password in it; the stored one is kept": "未保存——出口检查地址必须是公开的 https 地址，且不含用户名或密码；保留原来的地址", // the exit check (主开发 17:04Z cure)
+  "Not saved — the server refused this value ({code}); the stored one is kept": "未保存——服务器拒绝了这个值（{code}）；保留原来的值", // the exit check (主开发 17:04Z cure)
+  "Kept: {ip} · {country} · {timezone} ({how}, checked {age})": "已保留：{ip} · {country} · {timezone}（{how}，{age}检查）", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The check address answered with a redirect — a redirect is never followed.": "检查地址回应了一个重定向——重定向从不跟随。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The check address answered with an error status.": "检查地址回应了一个错误状态。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The check address answered nothing.": "检查地址什么都没有回应。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The check address answered a web page, not JSON.": "检查地址回应的是一个网页，不是 JSON。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The check address answered plain text, not JSON.": "检查地址回应的是纯文本，不是 JSON。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The check address answered JSON without an address, a country or a time zone in it.": "检查地址回应的 JSON 里没有地址、国家或时区。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The check address answered something that could not be read.": "检查地址回应的内容无法读懂。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The profile's proxy did not open the way to the check address.": "配置的代理没有打开通往检查地址的路。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The exit check address did not answer in time.": "出口检查地址没有及时回应。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The exit check address answered more than this check reads (64 KiB).": "出口检查地址回应的内容超过了这次检查读取的上限（64 KiB）。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The exit check could not reach the check address through the profile's proxy.": "出口检查无法经配置的代理到达检查地址。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "Type the exit by hand, or give another check address in the field above and press Check.": "请手动填写出口，或在上面的输入框里换一个检查地址，再按「检查」。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The country is at most 64 characters.": "国家最多 64 个字符。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "This profile is gone — close the dialog and reload the list.": "这个配置已不存在——请关闭对话框并重新加载列表。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "Only a person checks a profile's exit — an agent's token cannot.": "只有人才能检查配置的出口——代理的令牌不能。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The exit check runs for browsers on this machine only.": "出口检查只用于这台机器上的浏览器。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The request was not understood — reload the page and try again.": "请求没有被理解——请重新加载页面再试。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The exit check is not available on this server.": "这台服务器上没有出口检查。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The exit could not be checked — the server failed; try again.": "无法检查出口——服务器出错了，请再试一次。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The exit could not be checked ({code}).": "无法检查出口（{code}）。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "Its saved proxy address carries its password, which is never used. The press below moves that password into the vault in one step — the profile keeps the address and that login. Or give the address here and choose its login.": "它保存的代理地址里带着密码，这个密码从不使用。按下面的按钮，一步就把这个密码移入保险库——配置保留地址和这份登录。也可以在这里填写地址并选择它的登录。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "measured": "实测", // the exit check (the owner 2026-11-17)
+  "typed": "手动填写", // the exit check (the owner 2026-11-17)
+  "Exit check address": "出口检查地址", // the exit check (the owner 2026-11-17)
+  "Public address": "公网地址", // the exit check (the owner 2026-11-17)
+  "Country": "国家", // the exit check (the owner 2026-11-17)
+  "Time zone": "时区", // the exit check (the owner 2026-11-17)
+  "Type it by hand": "手动填写", // the exit check (the owner 2026-11-17)
+  "Check": "检查", // the exit check (the owner 2026-11-17)
+  "Keep": "保留", // the exit check (the owner 2026-11-17)
+  "Checking through this profile's proxy…": "正在经这个配置的代理检查…", // the exit check (the owner 2026-11-17)
+  "Read — check each field, then Keep.": "已读到——请核对每一项，然后点「保留」。", // the exit check (the owner 2026-11-17)
+  "{label}'s exit is kept — an engine plugin reads it when the browser starts": "已保留 {label} 的出口——浏览器启动时引擎插件会读取它", // the exit check (the owner 2026-11-17)
+  "exit {where}": "出口 {where}", // the exit check (the owner 2026-11-17)
+  "Its exit: {ip} · {where} — {how}, {age}": "它的出口：{ip} · {where}——{how}，{age}", // the exit check (the owner 2026-11-17)
+  "Check the exit…": "检查出口…", // the exit check (the owner 2026-11-17)
+  "Read this profile's public address, country and time zone through its own proxy — kept only when you press Keep": "经这个配置自己的代理读取它的公网地址、国家和时区——只有按「保留」才会保存", // the exit check (the owner 2026-11-17)
+  "An https address that answers a browser profile's public address, country and time zone as JSON. It is asked only when you press «Check the exit…» on a profile, and only through that profile's own proxy. Empty: no check — type the exit by hand.": "一个以 JSON 回答浏览器配置的公网地址、国家和时区的 https 地址。只有你在某个配置上按「检查出口…」时才会访问，而且只经那个配置自己的代理。留空：不检查——手动填写出口。", // the exit check (the owner 2026-11-17)
 };

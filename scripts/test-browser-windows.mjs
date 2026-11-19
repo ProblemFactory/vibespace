@@ -84,12 +84,10 @@ console.log('— ① PURE: the click verdict, the watch verb, the strip\'s drive
   const r1 = S.browserListFor(st)[0];
   const r2 = S.browserListFor({ ...st, leases: [{ ...st.leases[0], driver: { browserKey: 'bk-0000bbb2', by: 'user' } }] })[0];
   ok(r1.driver === 'agent' && r1.driverKey === null && r2.driver === 'other-user' && r2.driverKey === 'bk-0000bbb2', 'the strip: an entry is THIS conversation\'s window — no other conversation\'s agent ever "drives" it (an old `by:agent` record reads as its own agent); the user driving it from another view (an older run\'s shared window) is "you, in …"', { r1, r2 });
-  const lw = read('src/lib/browser-live-window.js');
-  ok(!/\{name\} drives/.test(lw) && /function chipClick\(row\)/.test(lw) && /type: 'watch-tab'/.test(lw) && /case 'tab-background':/.test(lw) && /case 'watching':/.test(lw) && /if \(row\) chipClick\(row\)/.test(lw), 'the client: the "{name} drives" strip words are gone; a chip click goes through chipClick (the PURE verdict); `watching` and `tab-background` records are read');
+  // (① the strip's chip-click source pin — MOVED to the fast scripts/test-browser-windows-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   const bsrc0 = read('src/server/browser-stream.js');
   ok(W.BACKGROUND_SILENCE_MS === 2000 && W.WATCH_POLL_MS === 500 && W.WATCH_FIRST_FRAME_MS === 1000 && W.UNRESPONSIVE_MS === 8000 && /bgSilenceMs = WIN\.BACKGROUND_SILENCE_MS, bgTickMs = 1000, bgPollMs = WIN\.WATCH_POLL_MS, bgHungMs = WIN\.UNRESPONSIVE_MS \}/.test(bsrc0), 'the SHIPPED clocks: 2 s of silence before the page is asked, a 1 s tick, a 500 ms poll (≤ 2 fps), 8 s without an answer before "not responding" — the bridge\'s defaults are the PURE constants (the gate below runs on short ones)');
-  const kp = read('src/server/browser-keeper.js');
-  ok(/if \(v\.noop && act === 'switch' && !eph\)/.test(kp) && /broughtForward: true/.test(kp) && /tabVisibilityFor, captureTabFor, watchTabFor,/.test(kp), 'the keeper: a driving click on the agent\'s CURRENT tab brings it forward (never a silent no-op); the visibility / capture / watch seams are exported');
+  // (① the keeper's tab-act source pin — MOVED to the fast scripts/test-browser-windows-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   // ── lane live-watch-polish (B-93d7, design 006 G1–G5) ──
   const ZH = (await import('../src/lib/i18n-zh.js')).default, JA = (await import('../src/lib/i18n-ja.js')).default;
   const fillW = (s, p) => String(s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k] !== undefined ? String(p[k]) : m));
@@ -113,8 +111,7 @@ console.log('— ① PURE: the click verdict, the watch verb, the strip\'s drive
   const allE = [{}, { watching: T2 }, { driving: true }, { driving: true, mediated: true }].flatMap((o) => menuOf(o, tOfD(ZH)));
   ok(allE.length === 6 && allE.every((e) => !('disabled' in e) && /^(查看|回到 agent 的标签页|提到最前面|切换到) — (Docs|Agent now|Other conv)$/.test(e.label)), 'G1 no menu entry is ever disabled; each says its act and the tab (zh)', allE);
   const lwG = read('src/lib/browser-live-window.js');
-  const moreSrc = lwG.slice(lwG.indexOf('tabRowMore.onclick'), lwG.indexOf('function clickOf('));
-  ok(/foldMenuRows\(rows, \(x\) => clickOf\(x\), t\)/.test(moreSrc) && /action: \(\) => chipClick\(x\)/.test(moreSrc) && !/disabled: true/.test(moreSrc), 'G1 source: the client\'s "▾+N" handler builds its entries from foldMenuRows and runs chipClick — no `disabled: true` left');
+  // (G1's menu wiring source pin — MOVED to the fast scripts/test-browser-windows-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   // G2 — the watch line names both tabs (bounded; en / zh / ja)
   const longT = 'L'.repeat(300) + '<b>x</b>';
   const g2 = { en: W.watchLineWords({ watched: 'Docs', current: 'Agent now' }, null), poll: W.watchLineWords({ watched: 'Docs', current: 'Agent now', mode: 'polling' }, null), zh: W.watchLineWords({ watched: 'Docs', current: 'Agent now' }, tOfD(ZH)), ja: W.watchLineWords({ watched: 'Docs', current: 'Agent now', mode: 'polling' }, tOfD(JA)), cut: W.watchLineWords({ watched: longT, current: 'B' }, null), none: W.watchLineWords({ watched: 'Docs', current: '' }, null) };
@@ -137,10 +134,9 @@ console.log('— ① PURE: the click verdict, the watch verb, the strip\'s drive
     const Lc = M.load('src/lib/live-strip-layout.js', lsSrc.replace(KEEP, ''), 'no-watched-keep');
     ok(Lc.tabRowFold({ rows: FR, widths: FW, avail: 250, morePx: 44, watchedRef: FR[5].targetId }).folded.includes(FR[5].targetId), 'G3 CONTROL: a layout copy without the watched keep folds the watched chip at 250 px — the leg above can go red');
   }
-  ok(/watchedRef: st\.watch \? st\.watch\.targetId : null/.test(lwG), 'G3 source: the client\'s refold passes the watched tab');
+  // (G3's refold source pin — MOVED to the fast scripts/test-browser-windows-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   // G4 + G5 — the client's reading (the bridge's halves are in ② b)
-  const helloSrc = lwG.slice(lwG.indexOf("      case 'hello':"), lwG.indexOf("      case 'mode': {"));
-  ok(/if \(st\.watch\) \{ if \(st\.mode === 'takeover' && st\.mine\) st\.watch = null; else \{ st\.watch = \{ \.\.\.st\.watch, pending: true \}; send\(\{ type: 'watch-tab', targetId: st\.watch\.targetId \}\); \}/.test(helloSrc), 'G4 source: the client\'s hello re-sends its watch (or drops it when it drives now) — one truth after a reconnect');
+  // (G4's hello source pin — MOVED to the fast scripts/test-browser-windows-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   const RW = (refused, why, d = null) => W.watchRefusalWords({ refused, why, error: 'SERVER ENGLISH' }, d ? tOfD(d) : null);
   const g5 = { en: W.WATCH_REFUSALS.map((c) => RW(c)), why: ['unreachable', 'no_screencast', 'no_tab', 'odd'].map((w) => RW('unreadable', w)), zh: [RW('unavailable', '', ZH), RW('unreadable', 'no_tab', ZH)], ja: RW('unreadable', 'unreachable', JA), unknown: RW('brand_new') };
   ok(![...g5.en, ...g5.why, ...g5.zh, g5.ja].some((x) => /SERVER ENGLISH/.test(x)) && g5.why.join('|') === 'the tab could not be reached|the tab refused a screencast|the tab is gone|the tab could not be shown' && g5.zh.join('|') === '这台服务器无法显示另一个标签页|那个标签页已经关闭' && g5.ja === JA['the tab could not be reached'] && g5.unknown === 'SERVER ENGLISH' && /watchRefusalWords\(\{ refused: m\.refused, why: m\.why, error: m\.error \}, t\)/.test(lwG), 'G5 a refusal is worded BY CODE (driving / not_your_tab / unavailable / unreadable + the capture\'s why) in en/zh/ja — never the server\'s sentence; an unknown code keeps it', g5);
@@ -295,8 +291,7 @@ async function hungLeg(BSmod) {
   ok(src.includes(HUNG_LINE), 'B-d635 control setup: the unresponsive verdict line is found');
   const c = await hungLeg(M.load('src/server/browser-stream.js', src.replace(HUNG_LINE, '      if (!r || !r.ok) return;'), 'hung-silent'));
   ok(c.ready && !c.said, 'B-d635 CONTROL: a bridge copy that returns silently on no answer (the base) leaves the hung tab unsaid — the leg above can go red', JSON.stringify(c));
-  const lw = read('src/lib/browser-live-window.js');
-  ok(/state: m\.state === 'unresponsive' \? 'unresponsive' : 'hidden'/.test(lw) && /st\.bg && st\.bg\.state === 'unresponsive'/.test(lw) && /is not responding — no picture, and it did not answer when asked/.test(lw), 'B-d635: the live view words the unresponsive verdict (watching and driving) beside the hidden one');
+  // (the unresponsive state's client words — MOVED to the fast scripts/test-browser-windows-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 
 // a3. B-d635 verify r1: a SLOW but alive tab — a page busy with JS for a few seconds misses an ask (measured on a real Chrome:
@@ -551,12 +546,8 @@ console.log('— ③ verify r1 T1: the window-ownership table (actor × target �
   ok(win8.multiWindowHolders(win8.windowCensus([{ holder: 'A', windowId: 11 }, { holder: 'A', windowId: 13 }])).length === 0, 'CONTROL R8: a copy whose census never names a two-window holder — the red cell can go red');
   const med9 = M.load('src/browser-mediation.js', msrc.replace(C9, ''), 'no-opener-admission');
   ok(popup(med9, A1) === 'dropped', 'CONTROL R9: a copy that does not admit a page-opened tab drops A\'s own popup — the opener cell can go red');
-  // R7 (the CLI): the agent's `tab new` while the user drives ITS window is refused browser_paused by resolveFor, the first
-  // judgement of its tab verbs (test-browser-tabs drives it on the real keeper); here the order is pinned
+  // (R7 the keeper's order pin — MOVED to the fast scripts/test-browser-windows-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   const kp = read('src/server/browser-keeper.js');
-  const fnStart = kp.indexOf('async function agentTabAct(');
-  const head = fnStart > 0 ? kp.slice(fnStart, kp.indexOf('const out = { ok: true, act: w.act', fnStart)) : '';
-  ok(fnStart > 0 && head.length > 0 && head.includes('resolveFor(') && !head.includes('rt.exec('), 'R7 (the CLI): the agent\'s `tab new` is judged by resolveFor (browser_paused while the user drives its window) BEFORE the act — no exec before it, never a second window to escape a takeover');
   // T2 ⑧ (the owner, 2026-10-01 23:20): ONE WINDOW PER HOLDER — the keeper's later tab opens IN the holder's window (the opener
   // rule, measured reliable; activate-then-create is not) and is verified with Browser.getWindowForTarget (window_mismatch)
   ok(/openTabInWindow\(rec\.cdpUrl, \{ anchorTargetId: x, windowId: wantWin \}\)/.test(kp) && /openTabByActivate\(rec\.cdpUrl, \{ anchorTargetId: x, windowId: wantWin, tries: WIN\.RUNG2_TRIES, breaker: plan\.breaker \}\)/.test(kp) && /rung2Serialized\(p\.id,/.test(kp) && /window_mismatch/.test(read('src/server/browser-viewport.js')) && W.ONE_WINDOW_PER_HOLDER.mechanism === 'opener-rule' && /^a window-state cycle \(never under a live view, never on a real display\) \+ activate \+ a BACKGROUND create \(verified/.test(W.ONE_WINDOW_PER_HOLDER.rung2), 'T2 ⑧ wiring: a later tab of a holder opens IN its window by the opener rule from each live anchor, then rung 2 (activate + create), every landing verified with Browser.getWindowForTarget (window_mismatch by name) — test-browser-share ③c reads Chrome\'s own windows into the census');
@@ -738,7 +729,7 @@ console.log('— ④ verify r2 T1: the opener rule\'s own table — the real kee
   const ow15 = model.openWindowCalls; r = await tabNew(k3, KB, 'https://b.example/15'); c = censusOf(k3, p1, KB);
   row('the first window id unread (null), a later tab', 'tab new', { leaseHadNoId: hadNoId, ok: r.ok, windows: c[KB] ? c[KB].count : 0, newWindowOpened: model.openWindowCalls > ow15, derived: !!lb && Number.isFinite(Number(lb.windowId)) }, { leaseHadNoId: true, ok: true, windows: 1, newWindowOpened: false, derived: true }, r);
   ok(W.OPENER_PROOF.chrome === '154.0.8037.57' && W.OPENER_PROOF.modes.length === 2 && /hijacked/.test(W.OPENER_PROOF.siteOverridesWindowOpen) && /rung 2 lands/.test(W.OPENER_PROOF.dialogOpen) && W.BACKGROUND_PAINT_PROOF.flipFrames < W.BACKGROUND_PAINT_FRAMES && W.BACKGROUND_PAINT_PROOF.hiddenFrames5s === 0, 'the measured proof behind the table (OPENER_PROOF, both modes): a site overriding window.open hijacks the main-world act, a dialog / crash / navigation fall to rung 2; a hidden tab sends 0 frames in 5 s and 1 at a flip < BACKGROUND_PAINT_FRAMES (verify r2 ⑤: no hysteresis needed)');
-  ok(/Page\.createIsolatedWorld/.test(read('src/server/browser-viewport.js')) && /'noopener'/.test(read('src/server/browser-viewport.js')) && /openTabByActivate/.test(read('src/server/browser-keeper.js')) && /window_busy/.test(read('src/routes/browser.js')), 'wiring: the opener act runs in an ISOLATED world with noopener (T2 ①), the keeper has rung 2 (openTabByActivate) and window_busy is a typed refusal the routes answer');
+  // (the opener act's wiring pin — MOVED to the fast scripts/test-browser-windows-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   const bad = rows.filter((x) => !x.okc);
   ok(!bad.length, `T1 THE OPENER RULE'S OWN TABLE: ${rows.length} rows (the opener's state × the act ⇒ one window, or refused by name) on the real keeper over the fake target model`, bad.map((x) => `${x.state} | ${x.act} ⇒ ${JSON.stringify(x.got)} (want ${JSON.stringify(x.want)})${x.extra ? ' ' + JSON.stringify(x.extra).slice(0, 200) : ''}`).join('\n    '));
   console.log('    ' + rows.map((x) => `${x.okc ? '·' : '✗'} ${x.state} · ${x.act} ⇒ ${JSON.stringify(x.got)}`).join('\n    '));
@@ -1019,18 +1010,7 @@ console.log('— ④ verify r2 T1: the opener rule\'s own table — the real kee
     ok(steps >= 100 && !viol.length && rungSeen.opener > 0 && rungSeen.activate > 0 && rungSeen['new-window'] > 0 && (codesSeen.window_busy || 0) > 0 && seen4.watched > 0 && seen4.drivenB > 0 && seen4.human > 0 && seen4.busyDriven > 0 && seen4.noCycle > 0 && seen4.cycled > 0 && seen4.strayInB > 0 && seen4.drivenMid > 0, `T1 THE SEEDED WALK: ${steps} steps over 36 walks (states × rungs × a popup × a leak × viewers × the user driving (a takeover / Browse yourself) × the display fact × a stray aimed at the other holder's window) hold the invariants — one window per holder (popups excluded), never a tab in the other holder's window, window_busy only while a tab answers, a re-mint only when none did, every outcome names its rung (${JSON.stringify(rungSeen)}) or its code (${JSON.stringify(codesSeen)}), rung 2 never while the user drives, no cycle under a live view (${JSON.stringify(seen4)}); ${viol.length} violation(s)`, viol.slice(0, 6).map((v) => JSON.stringify(v)).join('\n    '));
   }
 
-  // ── ⑥ verify r3: THE WINDOW-ID READER CENSUS (grep-derived): no `.windowId` is read through Number()/isFinite() anywhere ──
-  //    (HOTFIX cure r4, 主开发 00:05Z: + src/browser-picture.js — the follow verdict's own read of the tab's CDP window)
-  {
-    const files = ['src/server/browser-keeper.js', 'src/server/browser-viewport.js', 'src/server/browser-stream.js', 'src/routes/browser.js', 'src/browser-tabs.js', 'src/browser-windows.js', 'src/browser-profiles.js', 'src/browser-picture.js', 'src/lib/browser-live-window.js', 'data/bin/vibespace-browser'];
-    const raw = []; let sites = 0;
-    for (const f of files) { const lines = read(f).split('\n'); lines.forEach((ln, i) => { const t = ln.trim(); if (/^(\*|\/\/|\/\*\*)/.test(t)) return; if (!/\bwindowId\b/.test(ln)) return; if (/windowIdOf\(/.test(ln)) sites++; if (/(Number|isFinite)\([^)]*windowId/.test(ln) && !/function windowIdOf/.test(ln)) raw.push(`${f}:${i + 1}: ${t.slice(0, 120)}`); }); }
-    ok(!raw.length && sites >= 9, `⑥ THE WINDOW-ID READER CENSUS: ${sites} windowIdOf sites over ${files.length} files, ${raw.length} raw Number()/isFinite() read(s) of a window id (the Number(null)=0 class)`, raw.join('\n    '));
-    // lane site-reset-windows: the keeper's ladder read of a tab's window (anchors, strays, the upgrade path) names no `windowId`,
-    // so the census above never saw it — it read `Number(w)`: a dead tab (no window) was window 0, a stray "window 0" said to the
-    // agent, a lease on the upgrade path stamped window 0. It reads through THE one reader now
-    ok(/const windowOf = async \(tid\) => \{[^\n]*return WIN\.windowIdOf\(w\); \}/.test(read('src/server/browser-keeper.js')) && !/return Number\.isFinite\(Number\(w\)\)/.test(read('src/server/browser-keeper.js')), '⑥ lane site-reset-windows: the keeper\'s ladder reads a tab\'s window through windowIdOf — a dead tab is no window, never window 0');
-  }
+  // (⑥ the window-id reader census — MOVED to the fast scripts/test-browser-windows-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   // ── ⑧ verify r3: THE --version PROBE TABLE pinned both ways with the 0.38.1 fixture ──
   {
     const F2 = require('../src/browser-facts.js');

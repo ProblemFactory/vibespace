@@ -166,7 +166,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-apicards-mut-'));
 let mutN = 0;
 function mutant(rel, from, to) {
   const src = fs.readFileSync(path.join(ROOT, rel), 'utf8');
-  if (!src.includes(from)) return null;
+  if (!src.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`);
   const d = path.join(tmp, `m${++mutN}`, path.dirname(rel)); fs.mkdirSync(d, { recursive: true });
   let s = src.replace(from, to).replace(/require\('\.\.\/channel-api(-card)?\.js'\)/g, (m0, g) => `require(${JSON.stringify(path.join(ROOT, `src/channel-api${g || ''}.js`))})`)
     .replace(/require\('\.\.\/channel-policy\.js'\)/g, () => `require(${JSON.stringify(path.join(ROOT, 'src/channel-policy.js'))})`)

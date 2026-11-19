@@ -34,7 +34,10 @@ function sshLadder(c) {
             // alone to find node/claude on the host (chat branches re-export
             // inside their inner command), so this part is UNCONDITIONAL even
             // when tool shipping fails below.
-            let prelude = REMOTE_PRELUDE; // ONE definition (src/remote-shell.js) — copies drifted between builders
+            // ONE definition (src/remote-shell.js) — copies drifted between builders. Its FLAVOR follows the integration switch
+            // whatever the ship's outcome (batch 63 cure: the remote CLI ask asks this same composition — src/server/remote-cli.js
+            // — so a ship that failed must not leave the spawn a shorter prelude than the ask; the register runs only after a ship)
+            let prelude = integrationOn ? buildRemoteShellPrelude({ toolsOnPath: true, withNodeFinder: true }) : REMOTE_PRELUDE;
             let tokenAssign = '';
             // ONE ship list, parameterized by the Integration master switch:
             // ON  → all agent tools + hook + keeper + the per-session vsst_
@@ -106,14 +109,14 @@ function sshLadder(c) {
                     // base64 plan the install site sends — a host only ever
                     // spawned into (never Installed) gets the managed CLI-config
                     // keys at its next session start. base64 is shell-safe bare.
-                    // ONE composition (src/remote-shell.js): REMOTE_PRELUDE → node
-                    // finder → tools LAST (so ~/.vibespace/bin — the browser shim
-                    // included — stays first on PATH over node's own bin dir)
+                    // ONE composition (src/remote-shell.js), made ONCE at this setup's
+                    // top (integration on ⇒ REMOTE_PRELUDE → node finder → tools LAST,
+                    // so ~/.vibespace/bin — the browser shim included — stays first on
+                    // PATH over node's own bin dir): a ship that landed appends the register
                     // THE ROOT VERDICT (src/server-root.js): a worktree / temp
                     // server ships the tools but never runs the register helper —
                     // the host's CLI config belongs to the owner's instance.
-                    prelude = buildRemoteShellPrelude({ toolsOnPath: true, withNodeFinder: true })
-                      + (ownerWriteRefusal() ? '' : `[ -n "$VS_NODE" ] && VIBESPACE_CLI_CONFIG=${cliConfigPlanB64()} "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" >/dev/null 2>&1; `);
+                    prelude += (ownerWriteRefusal() ? '' : `[ -n "$VS_NODE" ] && VIBESPACE_CLI_CONFIG=${cliConfigPlanB64()} "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" >/dev/null 2>&1; `);
                     // EDITOR needs $HOME expansion → shell prefix assignment
                     // (envPairs are shq'd); PORT/SESSION_ID are static values.
                     tokenAssign = `VIBESPACE_SESSION_TOKEN="$(cat "$HOME/.vibespace/bin/${tokName}")" EDITOR="$HOME/.vibespace/editor/code" `;
@@ -220,6 +223,7 @@ function sshLadder(c) {
             // locally-resolved binary paths mean nothing on the remote
             // the LOCAL shell's answer is LOCAL (lane cli-shell-truth r3): the CLI's configured NAME, never a local path's basename
             const rcmd = ctx.cliCmds?.remoteName ? ctx.cliCmds.remoteName(backend, spawnCmd) : (spawnCmd.includes('/') ? path.basename(spawnCmd) : spawnCmd);
+            const rcmdT = c.rcmd || rcmd; // B-69ec: the machine's own login shell's program (ws-create asked it), else the configured name
             const ra = await remoteAgentSetup();
             let acctEnv = '';
             try { acctEnv = await remoteAccountEnv(h); }
@@ -229,7 +233,7 @@ function sshLadder(c) {
             // (an `env KEY=$(cat …)` argument would expand into env's argv).
             const inner = buildRemoteExec({
               cwd, shq, pre: ra.prelude, browser: spawnBrowserPre, tokenAssign: ra.tokenAssign, acctEnv,
-              parts: ['TERM=xterm-256color', 'COLORTERM=truecolor', ...ra.envPairs.map(shq), ...spawnEnvPairs.map(shq), rcmd, ...spawnArgs.map(shq)],
+              parts: ['TERM=xterm-256color', 'COLORTERM=truecolor', ...ra.envPairs.map(shq), ...spawnEnvPairs.map(shq), rcmdT, ...spawnArgs.map(shq)],
             });
             spawnCmd = 'ssh';
             spawnArgs = [...hosts.sshArgs(h, { tty: true, reverse: ra.reverse }), '--', `dtach -A /tmp/vs-${id} -r winch sh -lc ${shq(inner)}`];

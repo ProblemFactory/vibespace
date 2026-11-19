@@ -134,6 +134,7 @@ function create(deps = {}) {
   // THE KEY-FILE LAW (lane key-file-law-stores): a key is minted only while integrations.json holds no ciphertext
   const box = secretBox(path.join(dataDir, KEY_FILE), { hasCiphertext: () => holdsCiphertext({ files: [file], values: [state] }) });
   const runners = new Map();          // id -> async ({resolved, row, signal}) => {ok, detail?}
+  const testWaitsFns = new Map();     // B-3b8e (4b): id -> ({values}) => null (the Test can run) | {code, params} (when it will)
   const inflight = new Map();         // id -> Promise
   const listeners = new Set();
   let state = null;
@@ -571,6 +572,7 @@ function create(deps = {}) {
       hasOwnValues: Object.keys((r && r.values) || {}).length > 0,
       testedAt: res.testedAt, lastOk: res.lastOk, lastError: res.lastError,
       testKind: row.test.kind, testDescribe: row.test.describe || null, testCaveat: row.test.caveat || null,
+      testWaits: testWaitsOf(row, res.values),   // B-3b8e (4b): non-null ⇒ no Test button yet; the card says when (the resolved values, as test() asks)
       testButton: R.TEST_BUTTON_LABEL[row.test.kind],
       consumers: row.consumers.slice(), usedBy: row.usedBy || null, wiredIn: row.wiredIn || null, docs: row.docs || null,
       // the store-level failures outrank; else THIS row's own typed one (the card says the remedy)
@@ -861,10 +863,28 @@ function create(deps = {}) {
   }
 
   // ── test: human-triggered, bounded, one in flight per id ─────────────────
-  function registerTest(id, fn) {
+  function registerTest(id, fn, { waits = null } = {}) {
     if (!R.rowById(id)) throw new Error(`registerTest: unknown integration '${id}'`);
     if (typeof fn !== 'function') throw new Error(`registerTest(${id}): a runner function is required`);
     runners.set(id, fn);
+    if (typeof waits === 'function') testWaitsFns.set(id, waits); else testWaitsFns.delete(id);
+  }
+  /** B-3b8e (4b — the coordinator's ruling: NO DOOR THAT CAN ONLY REFUSE): a Test its consumer says cannot run YET (the Plugin
+   *  Git credential's, until a repository on its host is known) is not offered — the card says when it will be. → null | {code, params} */
+  function testWaitsOf(row, values) {
+    const w = testWaitsFns.get(row.id);
+    if (!w) return null;
+    try { const x = w({ values: values || {} }); return x && typeof x === 'object' && x.code ? { code: String(x.code), params: x.params && typeof x.params === 'object' ? { ...x.params } : {} } : null; } catch { return null; }
+  }
+  /** B-3b8e (4b) — what a Test waits for MOVED (the consumer says so: a repository installed / updated / uninstalled): the
+   *  row's recomputed view is pushed, so an open Integrations window offers the Test — or says it waits — without a reopen.
+   *  Nothing stored moved: no listener runs. → the view pushed | null (no such card, or it never waits) */
+  function testWaitsMoved(id) {
+    const row = R.rowById(id);
+    if (!row || !testWaitsFns.has(id) || bindsPer(row) || bindsMachine(row)) return null;
+    const integration = publicView(id);
+    try { broadcast({ type: 'integrations-updated', id, why: 'test-waits', integration }); } catch (e) { log.warn('[integrations] broadcast failed:', e && e.message); }
+    return integration;
   }
   async function test(id, { credentialKey = null } = {}) {
     const row = R.rowById(id);
@@ -876,6 +896,8 @@ function create(deps = {}) {
       throw new IntegrationError('no-test-runner', `${row.label} declares a test but no consumer registered a runner`, { status: 501 });
     }
     assertWritable();                 // the verdict is RECORDED; a probe whose record cannot land is refused before it runs
+    const waits = testWaitsOf(row, resolveIntegration(id, { credentialKey }).values);   // B-3b8e (4b): after the store's own refusals
+    if (waits) throw new IntegrationError('test-waits', `${row.label}'s Test cannot run yet (${waits.code}) — the card says when it will`, { status: 409, detail: waits });
     if (inflight.has(id)) return inflight.get(id);
     const p = (async () => {
       const ac = new AbortController();
@@ -906,7 +928,7 @@ function create(deps = {}) {
     setIntegration, setClusterKey, useClusterDefault, clearUserValues, plainOf, renameRecord,
     resolveMachine, machineView, setMachineValues, clearMachineValues, // lane remoteapp-r1b: the per-machine rows' only doors
     vaultRows, vaultReveal, // lane vault-contents-window: the Vault window's masked rows + its one-value reveal
-    test, registerTest, hasTestRunner: (id) => runners.has(id),
+    test, registerTest, testWaitsMoved, hasTestRunner: (id) => runners.has(id),
     onChange, presetsChanged, vaultChanged, presetItems, fleetRelayUrl, file, keyFile: box.keyFile,
     keyRefusal: () => box.refusal(), // lane desktop-vnc-remember: the key's state as a fact (`key-unreadable:vault_locked` while the vault is locked) — never throws, never mints
     IntegrationError, TEST_TIMEOUT_MS,

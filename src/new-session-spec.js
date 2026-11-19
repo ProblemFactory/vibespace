@@ -46,4 +46,16 @@ function withCreateAccess(access, cid) {
   ];
 }
 
-module.exports = { TASK_ID_RE, SPAWN_GROUPS_MAX, spawnGroupIds, createAccessRow, withCreateAccess };
+/** The tick TAKEN BACK (unit what-it-may-use — Session Properties' «What it may use»): the account's access list without THIS
+ *  conversation's own row (`createAccessRow`'s principal), every other row as withCreateAccess carries it; null when it holds
+ *  no row of its own there (nothing to write). */
+function withoutCreateAccess(access, cid) {
+  const row = createAccessRow(cid);
+  if (!row) return null;
+  const rows = (Array.isArray(access) ? access : []).filter((x) => x && x.principal && isStr(x.principal.kind));
+  const mine = (x) => x.principal.kind === 'agent' && String(x.principal.id) === row.principal.id;
+  if (!rows.some(mine)) return null;
+  return rows.filter((x) => !mine(x)).map((x) => ({ principal: { kind: x.principal.kind, id: x.principal.id, ...(x.principal.name ? { name: x.principal.name } : {}) }, authority: x.authorityStored || x.authority || 'draft' }));
+}
+
+module.exports = { TASK_ID_RE, SPAWN_GROUPS_MAX, spawnGroupIds, createAccessRow, withCreateAccess, withoutCreateAccess };

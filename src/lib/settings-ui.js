@@ -1,9 +1,10 @@
 import { SETTINGS_SCHEMA, SETTINGS_CATEGORIES, pluginSectionFor, harnessSectionFor, harnessFileRel, harnessCategory, channelVendorName, orderedCategories, settingsGroupOf, settingsGroups, clampToSchema, pluginCategoryOf } from './settings-schema.js';
-import { settingsViewModel, hiddenAdvancedText, whenClauses, clauseKind, SHOW_ADVANCED_KEY, bindNumberField, inForceOf, saveMarkWords } from './settings-view.js';
+import { settingsViewModel, hiddenAdvancedText, whenClauses, clauseKind, SHOW_ADVANCED_KEY, bindNumberField, inForceOf, saveMarkWords, settingFocusOf } from './settings-view.js';
 import { budgetLimits } from '../spend-authorizer.js';   // lane owner-press-attended: a Spending row says the number the server USES (the guard's own PURE reader) // PURE: what is drawn — tiers, `when`, search, modified (B-df40 part 2)
 import { showConfirmDialog, fetchJson, showToast, copyText, markTyped, markLandedOnSave, carryUnsaved } from './utils.js';
 import { receiptLine, offLine, applyHead, refusalLine, recoveredLine } from './cli-config-chips.js';
 import { machineDisplayText } from './browser-display-words.js'; // lane headless-fallback: the display fact beside the headed preference
+import { kernelDoors, kernelDownloadWords, kernelPollStep, kernelSaidStep } from './browser-build-model.js'; // B-0bc7: the engine row's «Download kernel» doors and their answer in words
 import { engineFactText, fillEngineSelect } from './browser-build-model.js'; // lane engine-plugin: the default engine's fact line (where it came from, the engines here); lane engine-spi-egress: its options
 import { t } from './i18n.js';
 import { escHtml } from './utils.js';
@@ -13,6 +14,8 @@ import { ATTENTION_RULES, attentionPolicy, presetOf, presetSwitches } from './ch
 import { paintDecisionLine, liveDecisionLine } from './decision-readout.js';   // lane decision-spend-readout: the judge's money (ONE PURE line)
 import { mountSuggestionList } from './voice-teach-ui.js';   // lane voice-dictionary-nag: 「词典建议」's words, each 加入 / 忽略
 import { mountLearnDraft } from './learn-card.js';   // lane rule-learning: 「从我的判定起草」 — the text model's proposal card (only with an OpenRouter key)
+import { holdWords } from './user-todos-row.js';   // lane setting-doors pick 2: a held row's words («1600 until 22:00, then 800») — ONE spelling with the For-you card's held line
+import { renderAutoResumeBulk } from './bulk-resume.js'; // lane auto-resume-bulk: the auto-resume row's two bulk acts + the passive cost line
 const DECISION_BUDGET_PATH = 'plugin.llm.dailyBudgetUsd';   // src/plugin-settings.js: the judge's daily cap row
 const VOICE_SUGGEST_PATH = 'plugin.voice-input.suggest';     // src/plugin-settings.js: 「词典建议」 — its row lists the words suggested now
 
@@ -83,21 +86,34 @@ class SettingsUI {
     if (this._advInput) this._advInput.checked = this._showAdvanced;
   }
 
-  open({ syncId, search, category } = {}) {
+  open({ syncId, search, category, focusKey } = {}) {
     // Non-blocking: Settings is a normal same-level WINDOW (not a modal overlay)
     // so you can tweak a setting and watch the effect on the workspace live.
     // Singleton — focus an already-open settings window instead of stacking.
     // `search` (the switch dialog's "Set location in Settings…", 2026-09-27): the search box is filled with it and the
     // filter applied before the first render — the rows that match are the ones on screen (there is no category focus).
-    const want = typeof search === 'string' && search ? search : null;
+    // `focusKey` (lane setting-doors pick 1 — a `vibespace://settings/<key>` link through app.openSettingAt): THE ROW — its
+    // category in view (on the phone that section alone), its nav group unfolded, the row drawn for THIS open even when it is
+    // advanced or unused here (settings-view `reveal`; the per-device switch is never flipped), scrolled to and marked for a
+    // moment; an open window moves there. An unknown key opens Settings as before. A link opens: nothing here writes a setting.
+    const focus = settingFocusOf(SETTINGS_SCHEMA, focusKey, { categories: SETTINGS_CATEGORIES });
+    this._reveal = focus ? focus.key : '';
+    const want = !focus && typeof search === 'string' && search ? search : null;
     // `category` (lane plugin-settings-p0 — a Plugins list row's ⚙): the section's tree node selected and scrolled to;
     // on the phone (one column, no tree) the list shows that section alone until the search box is used
-    const cat = typeof category === 'string' && SETTINGS_CATEGORIES.includes(category) ? category : null;
+    const cat = focus ? focus.category : typeof category === 'string' && SETTINGS_CATEGORIES.includes(category) ? category : null;
     this._onlyCategory = cat && this.app.isMobile ? cat : null;
     const existing = [...this.app.wm.windows.values()].find(w => w.type === 'settings');
     if (existing) {
       this.app.wm.revealWindow(existing.id, { replay: !!syncId }); // its own tab, restored, raised (a replay only raises)
       const inp = existing.content.querySelector('.settings-search');
+      if (focus) {   // lane setting-doors pick 1: a search the window held could hide the row — cleared, then the row
+        const content = existing.content.querySelector('.settings-content'), nav = existing.content.querySelector('.settings-nav');
+        if (inp) inp.value = '';
+        this._search = '';
+        if (content && nav) { this._renderContent(content, nav); this._focusRow(content, nav, focus); }
+        return;
+      }
       if (want && inp) {
         inp.value = want; this._search = want.toLowerCase();
         const content = existing.content.querySelector('.settings-content'), nav = existing.content.querySelector('.settings-nav');
@@ -184,8 +200,37 @@ class SettingsUI {
     this._content = content; this._nav = nav;
     this._governors = new Set(Object.values(SETTINGS_SCHEMA).flatMap((r) => whenClauses(r.when)).filter((c) => clauseKind(c) === 'setting').map((c) => c.setting));
     this._renderContent(content, nav);
-    if (cat) this._showCategory(content, nav, cat);
+    if (focus) this._focusRow(content, nav, focus);   // lane setting-doors pick 1: a link to one row
+    else if (cat) this._showCategory(content, nav, cat);
     else searchInput.focus();
+  }
+  /** lane setting-doors pick 1: THE ROW a `vibespace://settings/<key>` link opened on (settings-view settingFocusOf) — its
+   *  section in view and its nav node marked (_showCategory), its nav group unfolded for this window (as the scroll-spy does;
+   *  the saved folds are not written), the row scrolled to the middle of the list and marked for a moment
+   *  (`settings-row-focus` — style.css's highlight-flash). Returns the row, or null when it is not drawn (a held row). Reads only. */
+  _focusRow(content, nav, { key, category }) {
+    this._showCategory(content, nav, category);
+    const g = nav.querySelector(`.settings-nav-group[data-group="${settingsGroupOf(category)}"]`);
+    if (g && g.classList.contains('is-folded')) {
+      g.classList.remove('is-folded'); this._navFolds?.delete(g.dataset.group);
+      const head = g.querySelector('.settings-nav-group-head'); if (head) head.title = t('Collapse group');
+    }
+    const row = [...content.querySelectorAll('.settings-row')].find((r) => r.dataset.path === key) || null;
+    if (!row) return null;
+    const place = () => {   // only the list scrolls (never the page behind the window)
+      if (!row.isConnected) return;
+      const c = content.getBoundingClientRect(), r = row.getBoundingClientRect();
+      content.scrollTop += r.top - c.top - Math.max(0, (content.clientHeight - r.height) / 2);
+    };
+    place();
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(place);   // a window still taking its size (a fresh open, the phone)
+    // the mark is the window's STATE for its moment, not the node's: a re-render inside it (a store answering after a fresh open,
+    // the spend readout) draws the row again WITH it (_renderSetting reads _focusMark) — measured: a fresh open lost a node-only mark
+    this._focusMark = { key, until: Date.now() + 2400 };
+    row.classList.remove('settings-row-focus'); void row.offsetWidth; row.classList.add('settings-row-focus');
+    clearTimeout(this._focusMarkTimer);
+    this._focusMarkTimer = setTimeout(() => { this._focusMark = null; for (const r of content.querySelectorAll('.settings-row-focus')) r.classList.remove('settings-row-focus'); }, 2400);
+    return row;
   }
   /** the ⚙ door's landing: the category's section scrolled to the top and its nav node marked */
   _showCategory(content, nav, cat) {
@@ -237,7 +282,7 @@ class SettingsUI {
     // part 2): a search shows every match, a modified row always shows, a row
     // whose `when` is false is hidden, advanced rows wait for the header switch;
     // a category with nothing to draw is not drawn — nor its nav item.
-    const vm = settingsViewModel(SETTINGS_SCHEMA, { categories: SETTINGS_CATEGORIES, query, showAdvanced: this._showAdvanced, ctx: this._viewCtx(), isModified: (p) => this.settings.isModified(p), t });
+    const vm = settingsViewModel(SETTINGS_SCHEMA, { categories: SETTINGS_CATEGORIES, query, showAdvanced: this._showAdvanced, ctx: this._viewCtx(), isModified: (p) => this.settings.isModified(p), t, reveal: this._reveal || '' });   // reveal: lane setting-doors pick 1
     const grouped = {};
     for (const cat of SETTINGS_CATEGORIES) grouped[cat] = this._onlyCategory && cat !== this._onlyCategory ? { ...vm.byCategory[cat], show: false } : vm.byCategory[cat];
 
@@ -293,6 +338,7 @@ class SettingsUI {
       sectionTitle.textContent = cat;
       section.appendChild(sectionTitle);
       if (cat === t('Spending')) this._renderDecisionSpend(section, content, nav);   // lane decision-spend-readout: the judge bills too
+      if (cat === t('Spending') && this.app?._authEnabled === false) this._renderSpendSignInOff(section);   // lane setting-doors pick 0 (b3): the truth on a sign-in-off instance — f1: only when it is KNOWN off (a window drawn before the home answer says nothing)
       // A HARNESS section (derived from its descriptor table, design §4.2):
       // one line saying what these values are for, then THREE sub-blocks by
       // what a row is (2.369.132, owner "区分全局配置项和 session-level 配置项"):
@@ -402,6 +448,8 @@ class SettingsUI {
   _renderSetting(path, schema, chips = null) {
     const row = document.createElement('div');
     row.className = 'settings-row';
+    row.dataset.path = path;   // lane setting-doors pick 1: every row says its key — a link to it finds it (_focusRow)
+    if (this._focusMark && this._focusMark.key === path && Date.now() < this._focusMark.until) row.classList.add('settings-row-focus');   // the mark survives a re-render inside its moment
     if (this.settings.isModified(path)) row.classList.add('modified');
 
     const info = document.createElement('div');
@@ -420,6 +468,12 @@ class SettingsUI {
       badge.textContent = c.text;
       if (c.title) badge.title = c.title;
       (c.kind === 'reload' ? label : chipLine).appendChild(badge);
+      if (c.recheck) { // B-544d r2: the CLI was not found here — Manage agents' Re-check asks the login shell again (a person's press)
+        const rb = document.createElement('button'); rb.type = 'button'; rb.className = 'btn-cancel settings-chip-recheck'; rb.textContent = t('Re-check');
+        rb.title = t('Re-check there asks your shell again once {cli} is installed', { cli: c.recheck });
+        rb.onclick = (e) => { e.preventDefault(); const a = this.app || {}; a._cliRecheckDue = true; a._showAgentsDialog?.(); };
+        chipLine.appendChild(rb);
+      }
     }
     const desc = document.createElement('div');
     desc.className = 'settings-row-desc';
@@ -439,13 +493,15 @@ class SettingsUI {
     if (path === DECISION_BUDGET_PATH) this._renderDecisionToday(info);   // the cap's row says what today cost against it
     if (path === VOICE_SUGGEST_PATH) mountSuggestionList(info);            // every word suggested now, each with 加入 / 忽略 (the door)
     if (schema.fact === 'https-address') { row.classList.add('has-wide-fact'); this._renderHttpsFact(row); } // the full row's width (a phone's label column is too narrow for an address)
+    if (schema.proposable === true) this._renderHeldLine(info, path);   // lane setting-doors pick 2: a hold an agent's proposed change left on the row — its words and «End now»
+    if (schema.fact === 'auto-resume-bulk') { row.classList.add('has-wide-fact'); renderAutoResumeBulk(row, this.app); } // lane auto-resume-bulk: the two bulk acts + the batch's cost, said before the click (src/lib/bulk-resume.js)
 
     const controlWrap = document.createElement('div');
     controlWrap.className = 'settings-row-control';
 
     const control = this._createControl(path, schema, row);
     controlWrap.appendChild(control);
-    if (schema.type === 'number' && !schema.slider && !schema.store) controlWrap.appendChild(this._saveMark(path));   // lane owner-press-attended
+    if ((schema.type === 'number' && !schema.slider && !schema.store) || schema.serverVerdict) controlWrap.appendChild(this._saveMark(path));   // lane owner-press-attended (+ a row the server may refuse: its words wait here)
     // lane think-tools-phone: a text box's save says its outcome too — «Saving…» → «Saved», or «Not saved — the server did not answer…»
     // (a failed save keeps the words holding a stale page's reload; the person must be told they are not on the server)
     if ((schema.type === 'json' || (schema.type === 'text' && schema.multiline)) && !schema.store) controlWrap.appendChild(this._saveMark(path));
@@ -466,6 +522,39 @@ class SettingsUI {
 
     row.append(info, controlWrap);
     return row;
+  }
+
+  /** lane setting-doors pick 2: A HELD ROW SAYS SO — a one-press change from an agent's ask stands on it («1600 until 22:00, then 800»,
+   *  the For-you card's own words) with «End now»: POST /api/setting-holds/end — the hold returns now (the hub's act: back to its
+   *  «before» only while the row still holds the hold's value). A refusal is said in the hub's words. Redrawn when the holds change
+   *  (app.js — the `setting-holds` broadcast ⇒ redrawOpen). No hold ⇒ nothing drawn. */
+  _renderHeldLine(info, path) {
+    const words = holdWords(path, t);
+    if (!words) return;
+    const line = document.createElement('div');
+    line.className = 'settings-row-held';
+    line.dataset.held = path;
+    const said = document.createElement('span');
+    said.className = 'settings-row-held-words';
+    said.textContent = t('Held at {hold}', { hold: words });
+    const end = document.createElement('button');
+    end.type = 'button';
+    end.className = 'settings-link-btn settings-held-end';
+    end.textContent = t('End now');
+    end.title = t('Ends the hold now: the row goes back at once');
+    end.onclick = async () => {
+      end.disabled = true;
+      const r = await fetchJson('/api/setting-holds/end', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: path }) });
+      end.disabled = false;
+      // worded BY ITS CODE (the check's words-7): a settings file that refused says so and that the row stays — never «unreachable»
+      if (!(r && r.ok)) {
+        const why = !r ? t('server unreachable') : r.code === 'return-failed' ? t('the settings file could not be written — it stays at {value}', { value: Number(r.value) })
+          : r.code === 'spend_row_owner_only' ? t('only your own page can change it — nothing changed') : t('this change cannot be pressed here — change it on the row');
+        showToast(t('Could not end the hold: {why}', { why }), { type: 'error', duration: 9000 });
+      } else if (r.changedByHand) showToast(t('You had changed it by hand, so the hold had already ended — it stays at {value}', { value: Number(r.value) }));
+    };
+    line.append(said, end);
+    info.appendChild(line);
   }
 
   /** lane owner-press-attended: a number row's SAVE MARK — «Not saved yet» → «Saving…» → «Saved» (a Spending row adds the
@@ -498,7 +587,7 @@ class SettingsUI {
     const S = this.settings;
     const st = this._typed && this._typed.has(path) ? 'typed' : typeof S.saveStateOf === 'function' ? S.saveStateOf(path) : 'idle';
     const inForce = inForceOf(path, { live: typeof S.liveEcho === 'function' ? S.liveEcho() : null, server: (k) => (typeof S.serverValue === 'function' ? S.serverValue(k) : S.get(k)), budgetLimits });
-    const text = saveMarkWords(st, t, { inForce });
+    const text = saveMarkWords(st, t, { inForce, refused: typeof S.refusedOf === 'function' ? S.refusedOf(path) : null });
     if (mark.textContent !== text) mark.textContent = text;
     if (mark.dataset.state !== st) mark.dataset.state = st;
     mark.hidden = !text;
@@ -599,6 +688,33 @@ class SettingsUI {
     line.textContent = t('checking…');
     info.appendChild(line);
     liveDecisionLine(line, (L) => paintDecisionLine(line, L, 'text'));
+  }
+
+  /** lane setting-doors f1 (主开发 2026-11-15): the open Settings window redraws in place when a fact its rows read changed (the
+   *  sign-in flag: the password set or removed, the home answer) — a sentence about who can change money limits is never left
+   *  false while shown. */
+  redrawOpen() {
+    const w = [...this.app.wm.windows.values()].find((x) => x.type === 'settings');
+    const content = w && w.content.querySelector('.settings-content'), nav = w && w.content.querySelector('.settings-nav');
+    if (content && nav) this._rerenderKeepingPlace(content, nav);
+  }
+
+  /** lane setting-doors pick 0 (b3): with sign-in OFF nothing tells the owner's page from another program, so Settings › Spending
+   *  says so — the ceilings refuse a bearer and a request with no mark of the owner's page, yet anything that can reach this
+   *  instance and dresses as its page can change them — with the door to turn sign-in on (the ⚙ menu's own password dialog). */
+  _renderSpendSignInOff(section) {
+    // a STANDARD row's shape (words in .settings-row-info, the door in .settings-row-control) so the layout rail treats it as
+    // any row (test-settings-row-layout: a row of its own shape wrapped its button under the words at 600 / 390 px)
+    const row = document.createElement('div');
+    row.className = 'settings-row settings-spend-signin';
+    const info = Object.assign(document.createElement('div'), { className: 'settings-row-info' });
+    info.append(Object.assign(document.createElement('div'), { className: 'settings-row-desc', textContent: t('Sign-in is off: anything that can reach VibeSpace can change these limits. Set a password so only you can.') }));
+    const controlWrap = Object.assign(document.createElement('div'), { className: 'settings-row-control' });
+    const open = Object.assign(document.createElement('button'), { className: 'settings-link-btn', textContent: t('Set password…') });
+    open.onclick = () => this.app._showPasswordDialog();
+    controlWrap.appendChild(open);
+    row.append(info, controlWrap);
+    section.appendChild(row);
   }
 
   /** lane decision-spend-readout: Settings › Spending lists what bills — the LLM plugin's day and month beside the
@@ -725,11 +841,70 @@ class SettingsUI {
   _loadEngines(row, path, line) {
     const paint = (r) => {
       if (r && !r.error) this._engines = r;
-      if (line && (line.isConnected || line.parentNode)) line.textContent = engineFactText(r, t);
+      if (line && (line.isConnected || line.parentNode)) { line.textContent = engineFactText(r, t); this._paintKernelDoors(line, r, () => this._loadEngines(row, path, line)); }
       const sel = row ? row.querySelector('select.settings-select') : null;
       if (sel) fillEngineSelect(sel, r && !r.error ? r : null, this.settings.get(path), t, document);
     };
     Promise.resolve(fetchJson('/api/browser/engines')).then(paint, () => paint({ error: 'unreachable' }));
+  }
+  /** B-0bc7: «Download kernel» under the engine fact — one button per door (kernelDoors: an engine plugin whose kernel is not here, or
+   *  whose waiting kernel could not be read), drawn again with every answer, each door's last answer in words beside it (a refusal by
+   *  its code). While any kernel downloads the row is asked again every 1.5 s — the card's progress (kernel.state), whoever started it,
+   *  until it ends (installed, or failed with its words and the door back): the POST answers when the download STARTS. */
+  _paintKernelDoors(line, r, again) {
+    const next = line.nextElementSibling;
+    let box = next && next.classList && next.classList.contains('settings-engine-doors') ? next : null;
+    if (!this._kernelAsks) this._kernelAsks = new Set();
+    if (!this._kernelSaid) this._kernelSaid = new Map();
+    const tick = () => { if (!line._kernelTick) line._kernelTick = setTimeout(() => { line._kernelTick = null; if (line.isConnected) again(); }, 1500); }; // the tick is the LINE's: a redrawn row asks on its own
+    // the second adversarial read: a read that FAILED (fetchJson's null, an error) never ends a download's progress — the doors stay as
+    // drawn and the row is asked again while a download was running
+    const step = kernelPollStep(r, line._kernelPolling);
+    line._kernelPolling = step.polling;
+    if (!step.redraw) { if (step.tick) tick(); return; }
+    // its verdict's must: a door's old answer ends when its download STARTS (kernelSaidStep) — never on a read that still says
+    // downloading, so a press on a busy door SHOWS its words
+    { const ns = kernelSaidStep({ said: this._kernelSaid, states: this._kernelStates || new Map(), engines: r.engines }); this._kernelSaid = ns.said; this._kernelStates = ns.states; }
+    const doors = kernelDoors(r);
+    const said = doors.filter((d) => this._kernelSaid.get(d.id));
+    if (!doors.length) { if (box) box.remove(); } else {
+      if (!box) { box = document.createElement('div'); box.className = 'settings-engine-doors'; line.after(box); }
+      // its verdict's should: the 1.5 s tick redraws only when the doors MOVED, and a redraw gives the focus back to its door.
+      // (a kept draw keeps its buttons' onclick closures over the OLD `d`: every field an onclick reads must be in this signature)
+      const sig = JSON.stringify(doors.map((d) => [d.id, d.label, !!(d.busy || this._kernelAsks.has(d.id)), this._kernelSaid.get(d.id) || '']).concat([doors.length]));
+      if (box._doorsSig === sig) { if (step.tick) tick(); return; }
+      box._doorsSig = sig;
+      const focused = document.activeElement && box.contains(document.activeElement) && document.activeElement.dataset ? document.activeElement.dataset.engine || null : null;
+      box.replaceChildren(...doors.flatMap((d) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.dataset.engine = d.id;
+        b.className = 'settings-engine-download';
+        b.textContent = doors.length > 1 ? t('Download kernel: {plugin}', { plugin: d.label }) : t('Download kernel');
+        const busy = d.busy || this._kernelAsks.has(d.id);
+        b.classList.toggle('is-busy', busy); // the control-says-why census: the door stays live — a press while it downloads SAYS so (never a dead button)
+        b.onclick = () => { if (d.busy || this._kernelAsks.has(d.id)) { this._kernelSaid.set(d.id, t('its kernel is already downloading')); again(); return; } this._downloadKernel(d.id, again); };
+        if (!said.includes(d)) return [b];
+        const w = document.createElement('span'); w.className = 'settings-engine-said'; w.textContent = this._kernelSaid.get(d.id);
+        return [b, w];
+      }));
+      if (focused) { const fb = [...box.querySelectorAll('button.settings-engine-download')].find((x) => x.dataset.engine === focused); if (fb) fb.focus(); }
+    }
+    if (step.tick) tick();
+  }
+  /** B-0bc7: a person's «Download kernel» — POST /api/browser/engines/:id/kernel: it answers when the download STARTS (or at once with a
+   *  refusal by name); the row is asked again then, and keeps asking while it downloads (_paintKernelDoors); one ask per engine. */
+  async _downloadKernel(id, again) {
+    if (!this._kernelAsks) this._kernelAsks = new Set();
+    if (!this._kernelSaid) this._kernelSaid = new Map();
+    if (this._kernelAsks.has(id)) return;
+    this._kernelAsks.add(id); this._kernelSaid.delete(id);
+    again();
+    let ans = null;
+    try { ans = await fetchJson(`/api/browser/engines/${encodeURIComponent(id)}/kernel`, { method: 'POST' }); } finally { this._kernelAsks.delete(id); }
+    const words = kernelDownloadWords(ans, t);
+    if (words) this._kernelSaid.set(id, words);
+    again();
   }
 
   /** lane https-tailscale: the hub's https address (GET /api/tls — the plan src/server/tls.js holds, no probe on render):
@@ -797,7 +972,7 @@ class SettingsUI {
     const head = document.createElement('div');
     head.className = 'settings-row-apply-head';
     head.textContent = applyHead(schema.apply, { t, advanced: !!this._showAdvanced }) || '';
-    if (schema.apply.how) head.title = schema.apply.how;   // the engineer's line, on hover (lane ui-language)
+    if (schema.apply.how) head.title = t(schema.apply.how);   // the note, on hover (lane ui-language) — prose in the person's language, a flag literal (cli-config-chips.js applyHead)
     box.appendChild(head);
     if (schema.apply.kind === 'cli-config') {
       const key = path.slice(schema.harness.length + 1);

@@ -19,7 +19,7 @@
 // SOCKS5 is NOT universal: it can't carry ICMP (ping/traceroute), UDP is
 // spotty, and a tool has to honor the proxy. When `use` won't do, `run` will.
 // WHO MAY (lane-pairing ⑥): the user opens each machine to conversations under
-// "Who can use it" (Remote tab → the machine's exit icon) — TWO separate grants:
+// "Who can use it" (Remote tab → the machine row's «Exit: network — … · commands — …» line) — TWO separate grants:
 // borrow its network (use / url) and run commands on it (run, as the machine's
 // user, up to 30 s; optionally "ask me each time" — the user's Allow in For you,
 // 60 s, else refused). `vibespace-exit list` shows what THIS conversation may do.
@@ -76,7 +76,7 @@ const USAGE = [
   '                                            2.369.205 or later). Prints where it landed, the size and the sha256.',
   '',
   '  <machine> = id / name / unique name substring (omit if only one machine is open to you).',
-  '  The user decides who may: Remote tab → the machine\'s exit icon → "Who can use it" (network and commands are two grants).',
+  '  The user decides who may: Remote tab → the machine row\'s «Exit: network — … · commands — …» line → "Who can use it" (network and commands are two grants).',
   '  Use an exit ONLY when a request needs that machine\'s network position; otherwise go direct.',
 ].join('\n');
 const WAY_OUT = '  way out: ask the user to allow this conversation under "Who can use it" on the machine row (Remote tab)';
@@ -130,7 +130,7 @@ async function main() {
 
   if (cmd === 'list') {
     const { exits } = await get('/api/agent/exit');
-    if (!exits.length) { console.log('  (no machine is open to this conversation — ask the user: Remote tab → the machine\'s exit icon → "Who can use it")'); return; }
+    if (!exits.length) { console.log('  (no machine is open to this conversation — ask the user: Remote tab → the machine row\'s «Exit: network — … · commands — …» line → "Who can use it")'); return; }
     for (const e of exits) {
       const g = e.grants || {};
       console.log(`  ${e.name}${e.online ? '' : ' (offline)'}   network: ${g.use ? 'yes' : 'no'} · commands: ${g.run ? (g.runAsk ? 'ask' : 'yes') : 'no'}${e.active ? '  [active: socks5h://127.0.0.1:' + e.localPort + ']' : ''}   id=${e.id}`);
@@ -221,18 +221,12 @@ async function main() {
     const words = cmdParts; // every word, an empty one included (`ssh-keygen -N '' -f k`)
     const command = words.length === 1 ? words[0].trim() : words.join(' ').trim();
     if (!command) { console.error('vibespace-exit run: need a command after `--`, e.g. vibespace-exit run mac -- curl -s https://ifconfig.me'); process.exit(2); }
-    // "ask me each time": the route answers once — after the user's Allow (≤ 60 s) and the run (≤ 30 s). Say so
-    // when the call outlives a second and the machine asks.
-    const waitNote = setTimeout(async () => {
-      try {
-        const res = await CC.call(api + '/api/agent/exit', { headers: { Authorization: 'Bearer ' + token }, onExpiry: 'throw' }); // never get(): a failed list must not end the waiting run
-        const { exits } = res.ok ? await res.json() : { exits: [] };
-        const r0 = String(machine || '').toLowerCase();
-        const hit = (exits || []).filter((e) => !r0 || e.id === machine || String(e.name).toLowerCase().includes(r0));
-        // lane chat-needs-you-card: the line to quote names where it is answered — the card in this conversation, or the tray
-        if (hit.some((e) => e.grants && e.grants.runAsk)) console.error("# waiting for the user's approval (up to 60 s)… Filed for you: an approval — answer it on the card in this conversation or in the For-you tray");
-      } catch { }
-    }, 1000);
+    // "ask me each time": the route answers once — after the user's Allow (≤ 60 s) and the run (≤ 30 s). Say so when the
+    // call outlives a second (whether this machine asks is the hub's to know — the note names both waits).
+    // B-48a4 U3 — THE AMPLIFIER LAW: a slow hub is never sent more requests BECAUSE it is slow. The 1 s note asks the hub NOTHING
+    // (it asked GET /api/agent/exit to word itself — in the owner's storm every call outlived a second, so every command was two
+    // requests); its words name both waits, the pull / push note's own (src/exit-call.js WAIT_NOTES)
+    const waitNote = setTimeout(() => console.error("# waiting for the user's approval (up to 60 s) if the machine asks… — an approval card in this conversation and in the For-you tray"), 1000);
     const r = await post('/api/agent/exit/run', words.length > 1 ? { machine, argv: words } : { machine, cmd: command }, { cls: 'wake', ms: 105000 });   // the user's Allow ≤ 60 s + the run ≤ 30 s
     clearTimeout(waitNote);
     if (r.stdout) process.stdout.write(r.stdout.endsWith('\n') ? r.stdout : r.stdout + '\n');

@@ -120,7 +120,7 @@ try {
   //    host='127.0.0.2' reaches it; the default (loopback) does NOT.
   const lanEcho = net.createServer((c) => c.on('data', (d) => c.write(Buffer.concat([Buffer.from('LANDEV:'), d]))));
   const LAN_PORT = await new Promise((res, rej) => { lanEcho.once('error', rej); lanEcho.listen(0, '127.0.0.2', () => res(lanEcho.address().port)); }).catch(() => null);
-  if (LAN_PORT == null) { console.log('  · cannot bind 127.0.0.2 — skipping the target-host check'); }
+  if (LAN_PORT == null) { console.log('  · SKIP the target-host check: cannot bind 127.0.0.2'); }
   else {
     const roundtrip = async (host) => {
       let h; try { h = await dm.tcpForward(LAN_PORT, host, { by: 'system:test' }); } catch { return ''; } // refused (loopback, 127.0.0.2-only echo) = did not reach

@@ -28,7 +28,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, stillPresser } from './scratch.mjs';
+import { freePorts, ONBOARDED_SOURCE, vncEnv, stillPresser, CHROME_STORE } from './scratch.mjs';
+import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const AF = require(path.join(repo, 'src/artifacts.js'));
@@ -37,9 +38,10 @@ const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr
 if (!CHROME) { console.log('SKIP: no chrome'); process.exit(0); }
 const SHOTS = process.env.VS_AF_INTENT_SHOTS || '', TAG = process.env.VS_AF_INTENT_TAG || 'after';
 const [PORT, CDP_PORT] = await freePorts(2);
-const wt = scratch('af-intent-wt');
-const fakeHome = scratchHome('af-intent-home', fs);
-const stubDir = scratch('af-intent-stub');
+const root = mintRoot('af-intent-wt'), wt = path.join(root, 't');
+const chromeHome = path.join(root, 'chrome-home'); fs.mkdirSync(chromeHome, { recursive: true });   // rule nine (hub-boot.mjs): the suite's own browser carries a HOME in the root, so the helper ends it before the root goes
+const fakeHome = path.join(root, 'home'); for (const d of ['.claude/projects', '.claude/sessions', '.config', '.vibespace']) fs.mkdirSync(path.join(fakeHome, d), { recursive: true });
+const stubDir = path.join(root, 'stub');
 fs.mkdirSync(stubDir, { recursive: true });
 const CWD = path.join(fakeHome, 'proj');
 fs.mkdirSync(path.join(CWD, 'docs'), { recursive: true });
@@ -50,7 +52,6 @@ let failed = 0, passed = 0;
 const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js', 'package.json']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
@@ -134,22 +135,17 @@ const OWNER_TRAY = ownerView((r, at) => { for (const o of OF.claude(TRAY_REC)) r
 const OWNER_HOT = ownerView((r, at) => { r = AF.fold(r, { cwd: CWD, op: 'edit', path: 'src/pkg0/hot_fix.py', at: at(1) }); return AF.fold(r, { cwd: CWD, op: 'edit', path: 'src/pkg1/hot_test.py', at: at(2) }); }); // the two newest changes: code edits
 const LM = await import(pathToFileURL(path.join(repo, 'src/lib/artifacts-list-model.js')).href);
 
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
+const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' } });
 // a dead proxy for every origin but loopback (Chrome's own bypass) and no name resolves but 127.0.0.1 — the walk never leaves the box
-const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling',
-  '--proxy-server=http://127.0.0.1:9', '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1', `--user-data-dir=${wt}-chrome`, 'about:blank'], { stdio: 'ignore' });
+const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling',
+  '--proxy-server=http://127.0.0.1:9', '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1', `--user-data-dir=${wt}-chrome`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, HOME: chromeHome } });
 let cleaned = false;
 const cleanup = () => {
   if (cleaned) return; cleaned = true;
   try { chrome.kill('SIGKILL'); } catch {}
-  try { srv.kill('SIGKILL'); } catch {}
-  for (const root of [wt, fakeHome, stubDir]) { try { endRootedProcesses(root); } catch {} }
-  try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
-  for (const d of [wt, `${wt}-chrome`, fakeHome, stubDir]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 };
 process.on('exit', cleanup);
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
-for (let i = 0; i < 60; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); break; } catch { await sleep(250); } }
+await hub.ready();
 
 const WebSocket = require('ws');
 let target = null;

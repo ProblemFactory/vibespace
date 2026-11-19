@@ -213,7 +213,7 @@ console.log('③ controls: a patched copy per rule turns its own leg red');
 {
   const M = mutantCopies('principal-picker', REPO);
   const src = read('src/lib/principal-picker-model.js');
-  const load = async (from, to, tag) => { if (!src.includes(from)) return null; return import(pathToFileURL(M.write('src/lib/principal-picker-model.js', src.replace(from, to), tag, { esm: true })).href); };
+  const load = async (from, to, tag) => { if (!src.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); return import(pathToFileURL(M.write('src/lib/principal-picker-model.js', src.replace(from, to), tag, { esm: true })).href); };
   const a = await load(".normalize('NFKD').replace(/[\\u0300-\\u036f]/g, '')", '', 'nofold');
   ok(!!a && names(a.filterPrincipals(ROSTER, 'elo')).length === 0, 'CONTROL (a): a fold without NFKD misses "Élodie" for "elo" — ① reddens');
   const b = await load('const tgs = [...byTg.values()].sort((a, b) => String(a.title).localeCompare(String(b.title)));', 'const tgs = [...byTg.values()];', 'nosort');

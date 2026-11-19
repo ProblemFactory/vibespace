@@ -1512,14 +1512,123 @@ await leg('M28', async () => { // M28 — a start's ask that waits behind a plan
   ok(bad.l === false && !!bad.card && bad.card.waitS === bad.bound / 1000 && bad.said.some((l) => l.includes('waits for the new kernel to land')) && bad.said.some((l) => l.includes('waits no longer')) && bad.ms >= bad.bound / 2,
     `control M28: a start's ask with no plan-write check WAITS in the writer queue behind the git clone — said («waits for the new kernel to land», then «waits no longer»), the card's «waiting for the new kernel to land (≤ ${bad.bound / 1000} s)» — and gives up at its bound (${bad.ms} ms) while nothing lands — ㉔ RED`, bad);
 });
+// B-4d35: a PUT-BACK started OUTSIDE a landing hangs — K2 aside (an earlier landing stopped between its renames), the place EMPTY,
+// no landing: the FIRST asker (a forced measure, the boot or a fleet download) asks the put-back and its rename (.removing → place)
+// HANGS. Then (bound 0.1 s, each given LAND_WAIT_MS / 30 at most — `{hung: true}` by name) a start, a second measure, the boot and a
+// fleet download — at once while the first asker holds, or (`afterFirst`) once it has stepped aside. `next`: K3 waits too (what a stop
+// between a landing's renames leaves) — a landing must never start beside the put-back. Before: holdPlace waited only for a landing —
+// a start went on beside the emptied place and every other asker awaited the shared rename unbounded.
+async function putBackOutsideScene(EDM, { first = 'measure', next = false, afterFirst = false } = {}) {
+  const bounded = (p) => Promise.race([p, sleep(LAND_WAIT_MS / 30).then(() => ({ hung: true }))]);
+  const BOUND = 100; let hang = null, held = false; const gate = new Promise((r) => { hang = r; });
+  const io = { rename: async (a, b) => { if (!held && a.endsWith(`/${EID}/kernel/.removing-linux-x64`) && b.endsWith(`/${EID}/kernel/linux-x64`)) { held = true; await gate; } return fs.promises.rename(a, b); } };
+  const L = light(snapC, { EDM, io, opts: { landWaitMs: BOUND }, prep: ({ R, plan }) => {
+    if (!next) noNext({ R, plan });
+    fs.renameSync(plan.targetDir, plan.removingDir); // an earlier landing stopped between its renames: K2 aside, the place EMPTY
+    const f = path.join(R, 'browser-engines.json'), j = JSON.parse(fs.readFileSync(f, 'utf8'));
+    j.engines[EID].aside = j.engines[EID].kernel; delete j.engines[EID].kernel; fs.writeFileSync(f, JSON.stringify(j));
+  } });
+  await L.ED.ready;
+  const t0 = Date.now();
+  const firstOf = {
+    measure: () => L.ED.measure(EID, { force: true }).then((r) => ({ ok: r && r.ok, code: r && r.code, ms: Date.now() - t0 }), (e) => ({ threw: e && e.code, ms: Date.now() - t0 })),
+    boot: () => L.ED.bootRestore().then((out) => ({ out: out.map((x) => x.id + (x.restored ? ':restored' : '') + (x.code ? ':' + x.code : '')), ms: Date.now() - t0 }), (e) => ({ threw: e && e.code, ms: Date.now() - t0 })),
+    install: () => L.ED.installKernel(EID, { by: 'fleet' }).then(() => ({ started: true, ms: Date.now() - t0 }), (e) => ({ threw: e && e.code, ms: Date.now() - t0 })),
+  };
+  const A = firstOf[first]();
+  const inPutBack = !!(await until(() => held && !fs.existsSync(L.plan.targetDir), 2000));
+  const aLater = afterFirst ? await bounded(A) : null; // `afterFirst`: the first asker has stepped aside (its hold dropped) before the others ask
+  const t1 = Date.now();
+  const raw = [
+    startOf(L.ED).then((x) => { const empty = !fs.existsSync(L.plan.targetDir); x.release(); return { proceeded: true, empty }; }, (e) => ({ threw: e && e.code, msg: String(e && e.message).slice(0, 60), ms: Date.now() - t1 })),
+    L.ED.measure(EID, { force: true }).then((r) => ({ ok: r && r.ok, code: r && r.code }), (e) => ({ threw: e && e.code })),
+    L.ED.bootRestore().then((out) => ({ out }), (e) => ({ threw: e && e.code })),
+    L.ED.installKernel(EID, { by: 'fleet' }).then(() => ({ started: true }), (e) => ({ threw: e && e.code })),
+  ];
+  later.push(A, ...raw); // a control's hung askers end after the gate opens — awaited before the suite ends
+  const [s0, m, b, i, a1] = await Promise.all([...raw.map(bounded), afterFirst ? Promise.resolve(aLater) : bounded(A)]);
+  const failure = L.rec().failure ? L.rec().failure.code : null, todos = L.todos.length, failedLine = L.journal.filter((l) => /kernel download failed/.test(l)).length;
+  const said = L.journal.filter((l) => /waits for its previous kernel to be put back in its place/.test(l)).length;
+  const stillEmpty = !fs.existsSync(L.plan.targetDir);
+  hang();
+  const back = !!(await until(() => fs.existsSync(L.plan.exe) && !fs.existsSync(L.plan.removingDir) && L.rec().kernel, 3000));
+  return { inPutBack, stillEmpty, s: s0, m, b: { threw: b.threw, hung: b.hung, out: b.out ? b.out.map((x) => x.id + (x.restored ? ':restored' : '') + (x.code ? ':' + x.code : '')) : null }, i, a: a1, failure, todos, failedLine, said, back, place: L.receipt() === KSHA.k2 ? 'K2' : L.receipt() };
+}
+await leg('B-4d35 a put-back outside a landing is waited for within each ask\'s bound', async () => {
+  const cut = (anchor, to, what) => swap(EDsrc, anchor, to, what);
+  const holdAnchor = "    if (!g.landing && restoring.has(sid) && !(await waitPutBack(sid, restoring.get(sid), a))) throw named('engine_kernel_landing', putBackWords(sid));\n";
+  const ownAnchor = "    if (!ask || await waitPutBack(sid, p, ask)) return p;\n    throw named('engine_kernel_landing', putBackWords(sid));\n";
+  const bootAnchor = "      try { const back = await putBackWithin(id, plan, askB);";
+  const instAnchor = "      let back0 = null; try { back0 = await putBackWithin(sid, plan, ask0); } finally { rel0(); }";
+  const load = (src, tag) => MC.load('src/server/engine-distribution.js', src, tag);
+  const [x, n, bt, it, noHold, noOwn, bootOpen, instOpen] = await Promise.all([
+    putBackOutsideScene(undefined),
+    putBackOutsideScene(undefined, { next: true, afterFirst: true }),
+    putBackOutsideScene(undefined, { first: 'boot', afterFirst: true }),
+    putBackOutsideScene(undefined, { first: 'install', afterFirst: true }),
+    putBackOutsideScene(load(cut(holdAnchor, '\n', 'hold waits for a put-back'), 'b4d35-no-hold-wait')),
+    putBackOutsideScene(load(cut(ownAnchor, '    return p;\n\n', 'own put-back bounded'), 'b4d35-own-unbounded')),
+    putBackOutsideScene(load(cut(bootAnchor, '      try { const back = await restoreAside(id, plan);', 'the boot\'s own put-back bounded'), 'b4d35-boot-unbounded'), { first: 'boot', afterFirst: true }), // stale-pins: kept — the release's own line, planted back as this control's mutant (the boot's put-back unbounded)
+    putBackOutsideScene(load(cut(instAnchor, '      let back0 = null; try { back0 = await restoreAside(sid, plan); } finally { rel0(); }', 'the download\'s own put-back bounded'), 'b4d35-install-unbounded'), { first: 'install', afterFirst: true }), // stale-pins: kept — the release's own line, planted back as this control's mutant (the download's put-back unbounded)
+  ]);
+  ok(x.inPutBack && x.stillEmpty && x.s && x.s.threw === 'engine_kernel_landing' && x.s.msg.startsWith('the kernel is being put back in its place') && x.s.ms >= 50,
+    'B-4d35: a START beside a put-back outside a landing is refused BY NAME within its bound («the kernel is being put back in its place — try again in a moment») — never spawned beside the emptied place', x.s);
+  ok(x.m && x.m.ok === false && x.m.code === 'engine_kernel_landing' && !x.m.hung, 'B-4d35: a second forced MEASURE is ANSWERED by name within its bound — never left waiting on the shared rename', x.m);
+  ok(x.b && !x.b.hung && !x.b.threw && Array.isArray(x.b.out) && !x.b.out.some((o) => o.startsWith(EID)), 'B-4d35: the BOOT goes on past this engine within its bound (the engine waits for the next run — no failure, nothing swept beside the rename)', x.b);
+  ok(x.i && x.i.threw === 'engine_kernel_landing' && !x.failure && !x.todos && !x.failedLine, 'B-4d35: a DOWNLOAD by the fleet is refused by name — never recorded as a failure, no For-you item, no «download failed» line', { i: x.i, failure: x.failure, todos: x.todos, failedLine: x.failedLine });
+  ok(x.a && x.a.ok === false && x.a.code === 'engine_kernel_landing' && x.a.ms >= 50 && !x.a.hung, 'B-4d35: the FIRST asker (the measure whose put-back hangs) steps aside within ITS bound too — the rename runs on', x.a);
+  ok(x.said >= 1 && x.back && x.place === 'K2', `B-4d35: said in the journal (${x.said} ask(s) waited for the put-back), and once the rename ends the kernel is back in its place, the record following it`, { said: x.said, back: x.back, place: x.place });
+  ok(n.a && n.a.code === 'engine_kernel_landing' && n.s && n.s.threw === 'engine_kernel_landing' && !n.s.hung && n.i && n.i.threw === 'engine_kernel_landing' && !n.failure && n.back && n.place === 'K2',
+    'B-4d35 (with a WAITING kernel, asked after the first asker stepped aside): the start\'s landNext never lands beside the put-back — the start is refused by name within its bound, nothing lands, the kernel comes back', { s: n.s, i: n.i, place: n.place });
+  ok(bt.a && !bt.a.hung && !bt.a.threw && Array.isArray(bt.a.out) && !bt.a.out.some((o) => o.startsWith(EID)) && !bt.failure && bt.back && bt.place === 'K2',
+    'B-4d35 (the BOOT asks the put-back first): it steps aside within its bound — the engine left for the next run, nothing swept beside the rename (the kernel comes back whole)', { a: bt.a, failure: bt.failure, place: bt.place });
+  ok(it.a && it.a.threw === 'engine_kernel_landing' && !it.a.hung && !it.failure && !it.todos && !it.failedLine && it.back && it.place === 'K2',
+    'B-4d35 (a fleet DOWNLOAD asks the put-back first): refused by name within its bound — never a failure, no For-you item; the kernel comes back', { a: it.a, failure: it.failure, todos: it.todos });
+  ok(noHold.s && noHold.s.proceeded === true && noHold.s.empty === true, 'CONTROL (B-4d35, holdPlace without the put-back wait — the release): the start goes on beside the EMPTIED place', noHold.s);
+  ok(noOwn.a && noOwn.a.hung === true, 'CONTROL (B-4d35, the first asker\'s own await unbounded): the measure that asked the put-back HANGS on its rename', noOwn.a);
+  ok(bootOpen.a && bootOpen.a.hung === true, 'CONTROL (B-4d35, the boot\'s own put-back unbounded): the boot HANGS on its rename', bootOpen.a);
+  ok(instOpen.a && instOpen.a.hung === true, 'CONTROL (B-4d35, the download\'s own put-back unbounded): the download HANGS on its rename', instOpen.a);
+  // round 3 (the second adversarial read): an ask whose ONE bound is spent — a forced measure that waited out ㉓'s landing while it only
+  // DELETES the previous kernel (r5: it goes on) — only LOOKS at its put-back: there is a kernel in its place, so the put-back ends at
+  // once and the measure measures; never «being put back», never a second bound
+  const lateMeasure = async (EDM) => {
+    const BOUND = 100, S = {}; let rmIn = false, rmGo = null; const rmGate = new Promise((r) => { rmGo = r; });
+    const io = { rm: async (f, o) => { if (f.endsWith('/.removing-linux-x64') && S.L && S.L.receipt() === KSHA.k3) { rmIn = true; await rmGate; } return fs.promises.rm(f, o); } };
+    const L = light(snapC, { EDM, io, opts: { landWaitMs: BOUND } }); S.L = L;
+    const A = L.ED.landNext(EID);
+    const inCleanup = !!(await until(() => rmIn, 2000));
+    const m = await Promise.race([L.ED.measure(EID, { force: true }).then((r) => ({ ok: r && r.ok, code: r && r.code }), (e) => ({ threw: e && e.code })), sleep(LAND_WAIT_MS / 30).then(() => ({ hung: true }))]);
+    rmGo(); const a = await A;
+    return { inCleanup, m, a, said: L.journal.filter((l) => /is still being put back after/.test(l)).length };
+  };
+  // the control's plant (2.369.411 block 1, a red by this chain alone — the race was IN the control): «a late ask refused at once»
+  // goes at the TOP of waitPutBack, before its zero-time check `within(p, 0)`. Cut in place of the look, the refusal raced that
+  // check: a put-back with nothing aside can settle before the 0 ms timer, the ask answered «over» before it was ever refused,
+  // and the control read {ok:true}. The plant is asserted where it claims before its verdict (the close's rule b)
+  const waitAnchor = '  async function waitPutBack(sid, p, ask) {\n    if (await within(p, 0)) return true;';
+  const lateSrc = cut(waitAnchor, "  async function waitPutBack(sid, p, ask) {\n    if (ask.late) return false; // the control: a late ask refused at once, before any look\n    if (await within(p, 0)) return true;", 'a late ask refused before the zero-time check');
+  const wpAt = lateSrc.indexOf('  async function waitPutBack(sid, p, ask) {'), plantAt = lateSrc.indexOf('    if (ask.late) return false; // the control', wpAt), zeroAt = lateSrc.indexOf('    if (await within(p, 0)) return true;', wpAt); // inside waitPutBack (the zero-time check is spelled elsewhere too)
+  ok(wpAt > -1 && plantAt > wpAt && zeroAt > plantAt,
+    'CONTROL setup (B-4d35 round 3): the plant «a late ask refused at once» stands BEFORE waitPutBack\'s zero-time check — never raced by it');
+  const [lm, lmBad] = await Promise.all([lateMeasure(undefined), lateMeasure(load(lateSrc, 'b4d35-late-refused'))]);
+  // (the restack onto 2.369.410: «never a second bound» is judged by the journal — a bound waited out says «is still being put back
+  // after» — and by the answer, never by a literal wall-clock bound: the release's ratchet of those is at 0)
+  ok(lm.inCleanup && lm.m && lm.m.ok === true && !lm.m.code && !lm.said && lm.a === true,
+    'B-4d35 round 3: a forced measure whose ONE bound passed while the landing only deleted the previous kernel goes on and MEASURES — its put-back only looked (a kernel in its place) — never «being put back», never a second bound', lm);
+  ok(lmBad.m && lmBad.m.code === 'engine_kernel_landing', 'CONTROL (B-4d35 round 3, a late ask refused at once): that measure is answered «being put back» though nothing was aside', lmBad.m);
+  // the keeper's first-use road reads the step-aside by its name (never «kernel missing» + a For-you item)
+  const ksrc = read('src/server/browser-keeper.js');
+  ok(ksrc.includes("if (refused && refused.code === 'engine_kernel_landing') throw namedError('engine_kernel_landing',") && read('src/routes/browser.js').includes('engine_kernel_landing: 409'),
+    'B-4d35: the keeper\'s first use refuses a start by the step-aside\'s own name (before the verdict that would file «kernel missing»), and the route answers it 409 (never a 500)');
+});
 // r7: the scene controls M29–M37 run AT ONCE (each its own data dir, its own copy) — the suite stays in the fast tier
 const ctl = [];
 ctl.push(leg('M29', async () => { // M29 — the measure without its step-aside
-  const bad = await stepsAside(MC.load('src/server/engine-distribution.js', swap(EDsrc, "    let rel; try { rel = await holdPlace(sid, { leaseMs: 0, ask: askOf('a measure') }); } catch (e) { return { ok: false, code: e.code, error: e.message }; }", "    const rel = await holdPlace(sid, { leaseMs: 0, ask: askOf('a measure') });", 'measure'), 'measure-throws'), 'measure');
+  const bad = await stepsAside(MC.load('src/server/engine-distribution.js', swap(EDsrc, "    let rel; try { rel = await holdPlace(sid, { leaseMs: 0, ask: askM }); } catch (e) { return { ok: false, code: e.code, error: e.message }; }", "    const rel = await holdPlace(sid, { leaseMs: 0, ask: askM });", 'measure'), 'measure-throws'), 'measure');
   ok(bad.m.threw === 'engine_kernel_landing', 'control M29: a measure with no step-aside THROWS beside the half-landed place (its callers expect an answer) — ㉕ RED', bad.m);
 }));
 ctl.push(leg('M30', async () => { // M30 — the boot without its step-aside
-  const bad = await stepsAside(MC.load('src/server/engine-distribution.js', swap(EDsrc, "      let rel; try { rel = await holdPlace(id, { leaseMs: 0, ask: askOf('the boot') }); } catch { continue; }", "      const rel = await holdPlace(id, { leaseMs: 0, ask: askOf('the boot') });", 'boot'), 'boot-throws'), 'boot');
+  const bad = await stepsAside(MC.load('src/server/engine-distribution.js', swap(EDsrc, "      let rel; try { rel = await holdPlace(id, { leaseMs: 0, ask: askB }); } catch { continue; }", "      const rel = await holdPlace(id, { leaseMs: 0, ask: askB });", 'boot'), 'boot-throws'), 'boot');
   ok(bad.b.threw === 'engine_kernel_landing' && !bad.second, 'control M30: a boot with no step-aside THROWS at the half-landed engine — the next engine\'s aside kernel is never put back (and the fleet\'s run, which asks the boot first, dies) — ㉕ RED', { b: bad.b, second: bad.second });
 }));
 ctl.push(leg('M31', async () => { // M31 — a download refused beside a landing recorded as a failure

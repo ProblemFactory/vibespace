@@ -156,6 +156,8 @@ console.log('— ①b agy\'s OWN slash commands: ONE closed list (the measured f
 }
 
 let stubSeq = 0;
+// B-518e: the agy-error notice as ⑦ and ⑦b read it (one reader — ⑦b's control guards ⑦'s own read)
+const noticeSaid = (w) => w.find('notice', (r) => r.noticeKind === 'agy-error' && /model unavailable/.test(r.text));
 function startWrapper({ env = {}, wrapper = WRAPPER, dir: inDir = null } = {}) {
   // `dir`: a second wrapper in the SAME buffers dir (lane agy-harness-fixes-2 ⑯ — a Resume beside the earlier session's files)
   const dir = inDir || fs.mkdtempSync(path.join(ROOT, 'w-'));
@@ -273,7 +275,7 @@ const fixes2 = (async () => {
   const R = [];
   const ck = (n, c, e) => R.push([n, c, e]);
   const src = fs.readFileSync(WRAPPER, 'utf8');
-  const mutant = (name, cut, put) => { if (src.split(cut).length !== 2) return null; const f = path.join(MUTBIN, `agy-wrapper-${name}.js`); fs.writeFileSync(f, src.replace(cut, put)); return f; };
+  const mutant = (name, cut, put) => { if (src.split(cut).length !== 2) throw new Error(`ANCHOR GONE OR NOT UNIQUE (${src.split(cut).length - 1} times): ${JSON.stringify(String(cut).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); const f = path.join(MUTBIN, `agy-wrapper-${name}.js`); fs.writeFileSync(f, src.replace(cut, put)); return f; };
   const starts = (w) => w.stub().filter((x) => x.argv && x.argv.includes('--input-format')).map((x) => x.argv);
   const agyLines = (w) => w.stub().filter((x) => x.stdin).map((x) => JSON.parse(x.stdin).message.content);
   const ended = async (w) => { await w.stop(); await w.until(() => w.exited, 5000, 'the wrapper exit').catch(() => null); }; // its finalize persists the files 500 ms after SIGTERM
@@ -803,7 +805,12 @@ console.log('— ⑦ resume, an agent error, text only');
     ok('a resume is --conversation <id> from the first start, the session record says load', ses.how === 'load' && ses.sessionId === firstCid && startArgv.includes('--conversation') && startArgv.includes(firstCid), { ses, startArgv });
     w.send({ type: 'chat-input', text: 'this will fail', msgId: 'f1' });
     const end = await w.until(() => w.find('prompt_end'), 8000, 'end');
-    ok('agy\'s ERROR result ends the turn as an error with its words; the AGY_ERROR line is said', end.stopReason === 'error' && /model unavailable/.test(end.error.message) && w.find('notice', (r) => r.noticeKind === 'agy-error' && /model unavailable/.test(r.text)), end);
+    // B-518e (red in two packed runs on the test machine, 638450bff and 2f241bf12: the turn's end read before its notice): agy
+    // writes the AGY_ERROR line on STDERR and its result on STDOUT — two pipes nothing orders, so the wrapper may say the notice
+    // after the end. The leg WAITS for the notice's own record (8 s, an end for a notice that never comes), never reads it at the
+    // end's instant (⑦b places the other order)
+    const said = await w.until(() => noticeSaid(w), 8000, 'the AGY_ERROR notice').catch(() => null);
+    ok('agy\'s ERROR result ends the turn as an error with its words; the AGY_ERROR line is said (its own record, waited for)', end.stopReason === 'error' && /model unavailable/.test(end.error.message) && !!said, { end, said: said || null });
     // lane agy-harness-fixes, bug 3: a PASTED picture reaches agy — written once under <cwd>/.vibespace-uploads/, its path
     // FIRST in the text (the composer's upload road); agy's stream still gets text only (another block ends it, exit 1)
     const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
@@ -889,6 +896,28 @@ console.log('— ⑦ resume, an agent error, text only');
     await sleep(600);
     ok('RED control: a wrapper copy that drops pictures (the pre-fix) sends a picture-only message NOWHERE — the ⑦ asserts see it', src.includes(keep) && !m.find('prompt_start') && !m.stub().some((x) => x.stdin));
   } finally { await m.stop(); }
+}
+
+// ⑦b B-518e — THE OTHER ORDER, PLACED EXACTLY: the stub's `faillate` writes the result first and holds the AGY_ERROR line until
+// a gate file exists — the leg opens it only after its OLD-style read, so the order is the test's, never a margin load can close.
+// The plant proves itself first (the notice's record comes AFTER the end's); the old read (⑦'s reader at the end's instant)
+// misses it; the cure's wait has it
+console.log('— ⑦b B-518e: the AGY_ERROR line after the result (two pipes in the other order, placed by a gate)');
+{
+  const gate = path.join(ROOT, 'agy-err-gate');
+  try { fs.rmSync(gate, { force: true }); } catch { }
+  const w = startWrapper({ env: { AGY_STUB_ERR_GATE: gate } });
+  try {
+    await w.until(() => w.find('session'), 8000, 'session');
+    w.send({ type: 'chat-input', text: 'this will faillate', msgId: 'fl1' });
+    const end = await w.until(() => w.find('prompt_end'), 8000, 'end');
+    const atEnd = !!noticeSaid(w);   // the OLD leg's read, at the end's instant (the stub holds the line until the gate opens)
+    fs.writeFileSync(gate, '');      // now let the stub write it
+    const said = await w.until(() => noticeSaid(w), 8000, 'the held notice').catch(() => null);
+    const after = !!said && w.records.indexOf(said) > w.records.indexOf(end);
+    ok('⑦b the plant is where it claims: with the AGY_ERROR line held until the result is read, the wrapper says the notice AFTER the turn\'s end', end.stopReason === 'error' && after, { end, said: !!said, after });
+    ok('⑦b RED CONTROL: the old read (the notice looked for at the end\'s instant) misses it under the placement; the cure (its own record, waited for) has it', !atEnd && !!said, { atEnd, said: !!said });
+  } finally { await w.stop(); try { fs.rmSync(gate, { force: true }); } catch { } }
 }
 
 console.log('— ⑧ THE AUTH GATE: an unauthenticated agy');

@@ -6,7 +6,9 @@
 //   §1 THE JUDGE (pure) — every condition refused by name; every job of a needed name; a paged job list refused.
 //   §2 THE WRITER — a real repository; the marker lists the hosted half (never «full»); the markers path, a symlink at the marker path,
 //      the list read from the COMMIT (the skip-worktree move; a commit whose ci.mjs is not the running one); every refusal leaves
-//      the marker dir EMPTY, and no directory behind.
+//      the marker dir EMPTY, and no directory behind. B-18eb: a RE-RUN attempt — the recorded run (scripts/fixtures/
+//      mirror-reattempt-410.json, its workflow shape pinned) verifies with each shard read at the attempt in which it RAN; a third
+//      attempt reads each at the EARLIEST; twins by time are told apart by name; a copy with no original found still refuses.
 //   §3 THE READER — the real ghApiJson against fake `gh` binaries (absent, 403, unauthenticated, a timeout); one call, no retry.
 //   §4 THE UNION — the measured pair (a self-hosted failure is NOT cleared by a mirror verdict, IS cleared once a self-hosted green of
 //      that suite exists on a descendant); production's 109-failure red; a FULL green alone; nothing clears on the red's own sha.
@@ -18,7 +20,8 @@
 //   §4e the other readers see what the gate sees — the writer's refusal (nine broken forms × red / green), «already green», --status.
 //   §4f the guard follow-ups — an AFFECTED run never overwrites a FULL / unreadable red; a marker's identity is its FILE NAME's commit;
 //      --status prints an unreadable row's file time; a marker dir the writer cannot read / write is a named «no verdict».
-//   §5 NEGATIVE CONTROLS — a mutant without the per-job check; a mutant writer of r1's shape (a FULL `<sha>.green`) clears what it
+//   §5 NEGATIVE CONTROLS — a mutant without the per-job check; B-18eb's base red (the writer before it refuses the recorded run by
+//      heavy 4/7) and its newest-first and nameless mutants; a mutant writer of r1's shape (a FULL `<sha>.green`) clears what it
 //      must not; the shape-check line deleted (null / {} / [] greens fail §4b's legs BY NAME — never a crash; a reader that throws
 //      fails the leg that asked); the guard's catch turned back to «not blocking»; the writer's refusal asked of readable markers only.
 //   §6 THE CLI — known flags; refusals exit 3 and write nothing (a bad run id, `--markers <dir>` in the space form); one call site;
@@ -27,15 +30,16 @@
 //      it replaced agree on EVERY HEAD of that history (both run with ONE ancestry oracle in place of git; their decision code is real).
 //   §7b THE LAUNCH PATH (B-e381 part 2) — the tier a hook launches keeps the caller's env with a PATH that leaves out git's exec-path,
 //      the launching checkout's own data/bin, entries on a mount the guard REFUSES (storage), relative and empty entries; node's dir
-//      kept (by its real path), an NFS home's dirs kept; the launcher spawns with it, guarded and said. CONTROLS: no mount table and no
-//      checkout keep the dirs; a no-op seam reads red; the pre-fix spawn line fails the wiring pin.
+//      kept (by its resolved path; no entry is ever resolved), the launching checkout's mount is «home», an NFS home's dirs kept; the
+//      launcher spawns with it, guarded and said. CONTROLS: no mount table and no checkout keep the dirs; the pre-fix spawn line fails
+//      the wiring pin.
 //   §8 nothing left behind — every scratch dir removed, no child alive.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { launchPath, launchEnvOf, judgeMirrorRun, heavyVerdict, ghApiJson, workflowShardsAt, workflowFastPartsAt, repoSlugOf, hostedHeavyNamesAt, heavyBlocker, checkHeavy, pruneMarkers, markerShapeWhy, existingVerdictOf, heavyAlreadyGreen, hostPlan, SUITES, MIRROR_WORKFLOW, settleHeavyMarker, SELF_SKIP_TITLE, SELF_SKIP_TAG, selfSkipBody, selfSkippedInNotes, heavyTableOf, runSuiteAsync } from './ci.mjs';
+import { tableTiersOf, launchPath, launchEnvOf, judgeMirrorRun, heavyVerdict, ghApiJson, workflowShardsAt, workflowFastPartsAt, repoSlugOf, hostedHeavyNamesAt, heavyBlocker, checkHeavy, pruneMarkers, markerShapeWhy, existingVerdictOf, heavyAlreadyGreen, hostPlan, SUITES, MIRROR_WORKFLOW, settleHeavyMarker, SELF_SKIP_TITLE, SELF_SKIP_TAG, selfSkipBody, selfSkippedInNotes, heavyTableOf, runSuiteAsync } from './ci.mjs';
 import { REPO, ok, git, writeMarker, report } from './ci-gate-kit.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 
@@ -116,6 +120,102 @@ const tip = commit(R, MIRROR_WORKFLOW, WF, 'the ci workflow');
 const NOTE0 = Array.from({ length: N }, (_, k) => ({ title: SELF_SKIP_TITLE, message: `heavy ${k + 1}/${N} (0):`, annotation_level: 'notice' }));
 const ghFor = (run, jobs, calls, total, notes = () => NOTE0) => (p) => { calls && calls.push(p); return /\/annotations\?/.test(p) ? notes(p) && notes(p).err ? notes(p) : { json: notes(p) } : /\/jobs\?/.test(p) ? { json: { total_count: total ?? jobs.length, jobs } } : { json: run }; };
 const empty = (d) => !fs.existsSync(d) || fs.readdirSync(d).length === 0;
+// B-18eb: THE RECORDED TWO-ATTEMPT RUN (the 2.369.410 push, run 44368748819 — attempt 2 re-ran heavy 3/7 and the heavy gate; every other
+// job of attempt 2 is a COPY: a new id, attempt 1's start and end, a check run with no annotation). Each shard is read where it RAN.
+const RE_FX = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts', 'fixtures', 'mirror-reattempt-410.json'), 'utf-8'));
+// the recorded run's workflow shape, PINNED (7 heavy shards, the fast tier in 2 parts) — never the tree's ci.yml, whose matrix moves
+const RE_WF = ['name: ci', 'on: push', 'jobs:', '  fast:', '    name: fast ${{ matrix.part }}/2', '    runs-on: ubuntu-24.04', '    strategy:', '      fail-fast: false',
+  '      matrix:', '        part: [1, 2]', '    steps:', '      - run: node scripts/ci.mjs --fast-part=${{ matrix.part }}/2', '  heavy-shards:', '    name: heavy ${{ matrix.shard }}/7',
+  '    runs-on: ubuntu-24.04', '    strategy:', '      fail-fast: false', '      matrix:', '        shard: [1, 2, 3, 4, 5, 6, 7]', '    steps:',
+  '      - run: node scripts/ci.mjs --heavy --dirty-ok --host=hosted --shard ${{ matrix.shard }}/7', '  heavy:', '    runs-on: ubuntu-24.04', '    steps:', '      - run: node -e 0', ''].join('\n');
+const RE_R = makeRepo('reattempt');
+git(RE_R, ['remote', 'add', 'origin', `git@github.com:${SLUG}.git`]);
+const RE_TIP = commit(RE_R, MIRROR_WORKFLOW, RE_WF, 'the recorded run\'s workflow');
+// the fake gh over a recording: the run (its latest attempt), the latest list, each attempt's list (a job's check_run_url built from its
+// id — an Actions job IS its check run), the annotations by check-run id ('unreadable' = gh fails)
+const reGh = (fx, calls) => (p) => {
+  calls && calls.push(p);
+  const last = String(Math.max(...Object.keys(fx.attempts).map(Number)));
+  const listOf = (k) => ({ ...fx.attempts[k], jobs: fx.attempts[k].jobs.map((x) => ({ ...x, check_run_url: `https://api.github.com/repos/${SLUG}/check-runs/${x.id}` })) });
+  const at = /\/attempts\/(\d+)\/jobs\?/.exec(p);
+  if (at) return fx.attempts[at[1]] ? { json: listOf(at[1]) } : { err: 'gh failed: HTTP 404' };
+  if (/\/jobs\?filter=latest/.test(p)) return { json: listOf(last) };
+  const an = /\/check-runs\/(\d+)\/annotations\?/.exec(p);
+  if (an) return fx.annotations[an[1]] === 'unreadable' ? { err: 'gh failed: HTTP 502' } : { json: fx.annotations[an[1]] || [] };
+  return { json: runOf({ head_sha: RE_TIP, id: fx.runId, run_attempt: Number(last), ...(fx.run || {}) }) };
+};
+const reWrite = (fx, calls, mod = { heavyVerdict }) => { const dir = scratch('re'); return { v: mod.heavyVerdict({ sha: RE_TIP, runId: String(fx.runId), repoRoot: RE_R, dir, hosted: HOSTED, ghJson: reGh(fx, calls), now: 1795030000000, by: 'gate' }), dir }; };
+const reClone = () => JSON.parse(JSON.stringify(RE_FX)), reJob = (fx, k, n) => fx.attempts[k].jobs.find((x) => x.name === n);
+// a THIRD attempt: the heavy gate re-run alone (a new start and end) — every shard job copied AGAIN, with attempt 2's start and end
+const reThree = () => { const fx = reClone(), a2 = fx.attempts['2'];
+  fx.attempts['3'] = { ...a2, jobs: a2.jobs.map((x) => ({ ...x, id: x.id + 900000000, run_attempt: 3, ...(x.name === 'heavy' ? { started_at: '2026-11-18T20:10:00Z', completed_at: '2026-11-18T20:10:05Z' } : {}) })) };
+  return fx; };
+// TWINS: heavy 2/7 started AND ended in the same second as heavy 4/7 (listed before it in attempt 1) — in attempt 1 and in its copy
+const reTwin = () => { const fx = reClone(), end = reJob(fx, '1', 'heavy 4/7').completed_at; reJob(fx, '1', 'heavy 2/7').completed_at = end; reJob(fx, '2', 'heavy 2/7').completed_at = end; return fx; };
+{ const s7 = workflowShardsAt(RE_WF), f7 = workflowFastPartsAt(RE_WF);
+  ok(s7 && s7.n === 7 && f7 && f7.n === 2, `fixture: the recorded run's workflow shape, pinned in the suite — 7 heavy shards, the fast tier in 2 parts (read ${JSON.stringify(s7)} · ${JSON.stringify(f7)})`);
+  const calls = [], { v, dir } = reWrite(RE_FX, calls), rec = v.ok ? v.rec : {}, vb = rec.vouchedBy || {};
+  ok(v.ok && v.file === path.join(dir, `${RE_TIP}.mirror.green`) && rec.attempt === 2 && vb['heavy 4/7'] && vb['heavy 4/7'].attempt === 1 && vb['heavy 4/7'].job === reJob(RE_FX, '1', 'heavy 4/7').id
+    && vb['heavy 3/7'] && vb['heavy 3/7'].attempt === 2 && vb['heavy 3/7'].job === reJob(RE_FX, '2', 'heavy 3/7').id && Object.keys(vb).length === 7
+    && JSON.stringify(rec.skippedOnRunner) === JSON.stringify(['test-graduate-dial', 'test-vault-run-wire']),
+    `the RECORDED two-attempt run verifies: each copy read at attempt 1, where it ran, heavy 3/7 at attempt 2, its re-run; the marker names which attempt vouches for which shard (${v.ok ? JSON.stringify(vb) : v.why})`);
+  const anns = calls.map((p) => (/\/check-runs\/(\d+)\/annotations\?/.exec(p) || [])[1]).filter(Boolean).sort();
+  const want = ['heavy 1/7', 'heavy 2/7', 'heavy 4/7', 'heavy 5/7', 'heavy 6/7', 'heavy 7/7'].map((n) => String(reJob(RE_FX, '1', n).id)).concat(String(reJob(RE_FX, '2', 'heavy 3/7').id)).sort();
+  ok(calls.filter((p) => /\/actions\/runs\/44368748819\/attempts\/1\/jobs\?per_page=100$/.test(p)).length === 1 && !calls.some((p) => /\/attempts\/2\/jobs/.test(p)) && JSON.stringify(anns) === JSON.stringify(want),
+    `…its GETs: attempt 1's job list once; SEVEN annotation reads, one per shard, each at the job that ran it — never a copy's empty check run (${anns.length} reads)`);
+  const three = reThree(), c3 = [], v3 = reWrite(three, c3).v, vb3 = v3.ok ? v3.rec.vouchedBy : {};
+  const planted = three.attempts['3'].jobs.filter((x) => /^heavy \d/.test(x.name)).every((x) => { const o = reJob(three, '2', x.name); return o.conclusion === 'success' && o.started_at === x.started_at && o.completed_at === x.completed_at; });
+  ok(planted && v3.ok && v3.rec.attempt === 3 && Object.entries(vb3).every(([n, w]) => n === 'heavy 3/7' ? w.attempt === 2 && w.job === reJob(three, '2', n).id : w.attempt === 1 && w.job === reJob(three, '1', n).id)
+    && Object.keys(vb3).length === 7 && c3.filter((p) => /\/attempts\/1\/jobs\?/.test(p)).length === 1 && c3.filter((p) => /\/attempts\/2\/jobs\?/.test(p)).length === 1,
+    `THE EARLIEST: a third attempt (the heavy gate re-run alone) copies every shard AGAIN — attempt 2 holds a successful job of each name with the same start and end, and each shard is still read where it RAN (six at attempt 1, heavy 3/7 at attempt 2) (${v3.ok ? JSON.stringify(vb3) : v3.why})`);
+  const twin = reTwin(), vt = reWrite(twin).v, vbt = vt.ok ? vt.rec.vouchedBy : {};
+  ok(reJob(twin, '1', 'heavy 2/7').started_at === reJob(twin, '1', 'heavy 4/7').started_at && reJob(twin, '1', 'heavy 2/7').completed_at === reJob(twin, '1', 'heavy 4/7').completed_at
+    && vt.ok && vbt['heavy 2/7'].job === reJob(twin, '1', 'heavy 2/7').id && vbt['heavy 4/7'].job === reJob(twin, '1', 'heavy 4/7').id,
+    `TWINS: two shards that started AND ended in the same second are each read at their OWN original — the name is part of the match (${vt.ok ? 'verified' : vt.why})`);
+  // CONTROLS — each proves its plant first (the close's rule b), then refuses and writes nothing
+  const NONE4 = /cannot verify heavy 4\/7's suites \(read at attempt 2\): no «ci-heavy-self-skipped» annotation for heavy 4\/7/;
+  ok((RE_FX.annotations[String(reJob(RE_FX, '2', 'heavy 4/7').id)] || ['x']).length === 0, 'fixture: the copy of heavy 4/7 in attempt 2 was read by hand and carries NO annotation');
+  const moved = reClone(); reJob(moved, '1', 'heavy 4/7').completed_at = '2026-11-18T18:53:31Z';
+  const vm = reWrite(moved);
+  ok(reJob(moved, '1', 'heavy 4/7').completed_at !== reJob(moved, '2', 'heavy 4/7').completed_at && !vm.v.ok && NONE4.test(vm.v.why) && empty(vm.dir),
+    `CONTROL (the train's red): a copy whose original is NOT found (its end differs) is read as itself — no note — and REFUSES, writing nothing (${vm.v.why})`);
+  const started = reClone(); reJob(started, '1', 'heavy 4/7').started_at = '2026-11-18T18:21:11Z';
+  const vs = reWrite(started);
+  ok(reJob(started, '1', 'heavy 4/7').started_at !== reJob(started, '2', 'heavy 4/7').started_at && reJob(started, '1', 'heavy 4/7').completed_at === reJob(started, '2', 'heavy 4/7').completed_at
+    && !vs.v.ok && NONE4.test(vs.v.why) && empty(vs.dir), `CONTROL: the same end with ANOTHER start is no original either — refuses, writing nothing (${vs.v.why})`);
+  const failed = reClone(); reJob(failed, '1', 'heavy 4/7').conclusion = 'failure';
+  const vf = reWrite(failed);
+  ok(reJob(failed, '1', 'heavy 4/7').conclusion === 'failure' && !vf.v.ok && NONE4.test(vf.v.why) && empty(vf.dir), `CONTROL: an earlier job that did not conclude success vouches for nothing — refuses, writing nothing (${vf.v.why})`);
+  const unread = reClone(); unread.annotations[String(reJob(unread, '1', 'heavy 4/7').id)] = 'unreadable';
+  const vu = reWrite(unread);
+  ok(unread.annotations[String(reJob(unread, '1', 'heavy 4/7').id)] === 'unreadable' && !vu.v.ok && /cannot verify heavy 4\/7's suites \(read at attempt 1, where it ran\): its annotations could not be read \(gh failed: HTTP 502\)/.test(vu.v.why) && empty(vu.dir),
+    `CONTROL: an ORIGINAL whose annotations cannot be read refuses, naming the attempt it was read at, writing nothing (${vu.v.why})`);
+  const gone = reClone(); delete gone.attempts['1'];
+  const vg = reWrite(gone);
+  ok(!gone.attempts['1'] && !vg.v.ok && /attempt 1's jobs could not be read/.test(vg.v.why) && empty(vg.dir), `CONTROL: an earlier attempt's job list that cannot be read refuses, writing nothing (${vg.v.why})`);
+  const untold = reClone(); delete untold.attempts['1'].total_count;
+  const vt0 = reWrite(untold);
+  ok(!('total_count' in untold.attempts['1']) && untold.attempts['1'].jobs.length === RE_FX.attempts['1'].jobs.length && !vt0.v.ok && /attempt 1's job list carries no total count/.test(vt0.v.why) && empty(vt0.dir),
+    `CONTROL (主开发 21:55Z): an earlier attempt's job list with NO total count — every job still there — refuses by name, writing nothing (${vt0.v.why})`);
+  // GREEN IN ATTEMPT 1, RE-RUN BY HAND IN ATTEMPT 2 AND RED (主开发 21:55Z): attempt 1 all success; attempt 2 re-runs heavy 4/7 alone (a new
+  // start and end) and it FAILS. The latest attempt's job is the one judged: the original's success in attempt 1 vouches for nothing
+  const byHand = (runReads) => { const fx = reClone(), a1 = fx.attempts['1'];
+    for (const x of a1.jobs) x.conclusion = 'success';
+    fx.attempts['2'] = { total_count: a1.jobs.length, jobs: a1.jobs.map((x) => ({ ...x, id: x.id + 800000000, run_attempt: 2,
+      ...(x.name === 'heavy 4/7' ? { conclusion: 'failure', started_at: '2026-11-18T19:30:00Z', completed_at: '2026-11-18T19:58:00Z' } : {}),
+      ...(x.name === 'heavy' ? { conclusion: 'skipped', started_at: '2026-11-18T19:58:03Z', completed_at: '2026-11-18T19:58:03Z' } : {}) })) };
+    fx.run = runReads; return fx; };
+  const hand = byHand({ conclusion: 'failure' }), vh = reWrite(hand), handOk = byHand({ conclusion: 'success' }), vh2 = reWrite(handOk);
+  const byHandPlanted = (fx) => fx.attempts['1'].jobs.every((x) => x.conclusion === 'success') && reJob(fx, '2', 'heavy 4/7').conclusion === 'failure' && reJob(fx, '2', 'heavy 4/7').started_at !== reJob(fx, '1', 'heavy 4/7').started_at;
+  ok(byHandPlanted(hand) && !vh.v.ok && /conclusion is failure, not success/.test(vh.v.why) && empty(vh.dir),
+    `GREEN IN ATTEMPT 1, RED WHEN RE-RUN BY HAND IN ATTEMPT 2: the run as GitHub then reads it (conclusion failure) is refused by name, writing nothing (${vh.v.why})`);
+  ok(byHandPlanted(handOk) && !vh2.v.ok && /«heavy 4\/7» is failure, not success/.test(vh2.v.why) && empty(vh2.dir),
+    `…and with the run read as success, the latest attempt's job refuses by its own name — attempt 1's green original vouches for nothing (${vh2.v.why})`);
+  const paged = reClone(); paged.attempts['1'].total_count = 101;
+  const vp = reWrite(paged);
+  ok(paged.attempts['1'].total_count > paged.attempts['1'].jobs.length && !vp.v.ok && /more than one page/.test(vp.v.why) && empty(vp.dir), `CONTROL: an earlier attempt that spans more than one page refuses, writing nothing (${vp.v.why})`);
+  ok(/repos\/\$\{slug\}\/actions\/runs\/\$\{runId\}\/attempts\/\$\{k\}\/jobs\?per_page=100/.test(fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8')),
+    'WIRING: the writer reads each EARLIER attempt\'s job list (runs/<id>/attempts/<k>/jobs)'); }
 { const dir = scratch('mk'), calls = [];
   const v = heavyVerdict({ sha: tip, runId: '42745258349', repoRoot: R, dir, hosted: HOSTED, ghJson: ghFor(runOf({ head_sha: tip }), jobsOf(), calls), now: 1794280000000, by: 'gate' });
   const rec = v.ok ? JSON.parse(fs.readFileSync(v.file, 'utf-8')) : {};
@@ -508,6 +608,19 @@ console.log('§4g THE TABLE A FULL GREEN WAS RUN BY (B-479e) — it covers a fai
   { const N = makeRepo('no-table'); const nr = commit(N, 'r.txt', 'r\n', 'R'), nd = commit(N, 'd.txt', 'd\n', 'D'), nh = commit(N, 'h.txt', 'h\n', 'HEAD');
     const d = scratch('no-table'); fs.writeFileSync(path.join(d, `${nr}.red`), JSON.stringify(goodRec(nr, 'red', { failed: ['test-gone'] }))); fs.writeFileSync(path.join(d, `${nd}.green`), JSON.stringify(goodRec(nd, 'green', older)));
     ok(blockedBy(d, nh, N) === nr, '…and a green\'s commit whose table cannot be read keeps every failed name heavy (fail closed): its older table covers nothing it did not list'); }
+  // THE READER FAILS CLOSED ON A SHAPE IT DOES NOT KNOW (the cure's read, 主开发 09:32Z): tableTiersOf gives a name's tier only for the
+  // one-line row `{ name: 'x', tier: 'y'`; a name in another shape is null — heavy to the gate — and a name outside SUITES is no key
+  { const T2 = (rows) => `export const SUITES = [\n${rows}\n];\nexport const EXCLUDED = [\n  { name: 'test-ex', why: 'manual' },\n];\n`;
+    const tt = tableTiersOf(T2("  { name: 'test-a', tier: 'heavy', why: 'x · 1 s' },\n  { name: 'test-b', tier: 'fast', reads: ['src/'], why: 'x · 1 s' },\n  { name: 'test-c', reads: ['src/'], tier: 'fast', why: 'x' },\n  {\n    name: 'test-d',\n    tier: 'fast',\n  },\n  { name: \"test-e\", tier: 'fast' },"));
+    ok(tt.ok && tt.tiers.get('test-a') === 'heavy' && tt.tiers.get('test-b') === 'fast' && tt.tiers.get('test-c') === null && tt.tiers.get('test-d') === 'fast' && tt.tiers.get('test-e') === null && !tt.tiers.has('test-ex') && tableTiersOf('const X = 1;\n').ok === false,
+      `PURE tableTiersOf: a row's tier when it follows its name (a row over two lines too); a field between name and tier, or double quotes → null (a shape it does not know); EXCLUDED's names no key; no SUITES → not ok (${JSON.stringify([...tt.tiers])})`);
+    const R = makeRepo('moved-drift'); commit(R, 'scripts/ci.mjs', TABLE(), 'the table'); commit(R, 'scripts/test-moved.mjs', '// a suite\n', 'the suite');
+    const rc = commit(R, 'r.txt', 'r\n', 'C: red on test-moved'), dc = commit(R, 'scripts/ci.mjs', TABLE().replace("{ name: 'test-moved', tier: 'heavy',", "{ name: 'test-moved', reads: ['src/'], tier: 'fast',"), 'D: test-moved fast, in a shape the reader does not know'), hc = commit(R, 'h.txt', 'h\n', 'HEAD');
+    const d = scratch('moved-drift'); fs.writeFileSync(path.join(d, `${rc}.red`), JSON.stringify(goodRec(rc, 'red', { failed: ['test-moved'] }))); fs.writeFileSync(path.join(d, `${dc}.green`), JSON.stringify(goodRec(dc, 'green', older)));
+    ok(blockedBy(d, hc, R) === rc, '…so a row whose shape drifted keeps its suite HEAVY to the gate (fail closed): the older table\'s FULL green does not clear its red');
+    const real = tableTiersOf(fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8')), unknown = [...real.tiers].filter(([, t]) => t === null).map(([n]) => n);
+    ok(real.ok && real.tiers.size > 500 && unknown.length === 0 && SUITES.every((x) => real.tiers.get(x.name) === x.tier),
+      `CENSUS: every SUITES row of this ci.mjs is the one-line shape the gate reads, its tier the table's own (${real.tiers.size} rows${unknown.length ? ' — NOT READ: ' + unknown.join(', ') : ''}) — a drifted row is red here, never a silent over-defence`); }
   ok(blockedBy(dirOf({ ...knows, skipped: ['test-new'] }), h, T) === a && blockedBy(dirOf(older, ['test-new'], { scope: 'affected', selected: ['test-new'], skipped: ['test-new'] }), h, T) === a,
     '…and a green in which the suite SKIPPED ITSELF does not vouch for it (B-479e (1) on the box\'s own markers): neither a FULL green nor a list');
   const du = scratch('tbl-u'); fs.writeFileSync(path.join(du, `${a}.red`), 'null'); fs.writeFileSync(path.join(du, `${b}.green`), JSON.stringify(goodRec(b, 'green', older)));
@@ -580,6 +693,21 @@ const OLD_READER_SRC = (SRC.slice(0, UNION_AT) + OLD_BLOCK + SRC.slice(UNION_END
   const S = 'b'.repeat(40), dir = scratch('mut-refuse'); fs.writeFileSync(path.join(dir, `${S}.red`), 'null');
   const mv = safely(() => mod.existingVerdictOf(dir, S)), rv = safely(() => existingVerdictOf(dir, S));
   ok(mv === null && rv !== null && !rv.threw, 'CONTROL: round 3\'s question sees no verdict where a broken red sits (the partial run would erase it); the real one does — §4e\'s legs are the ones that red'); }
+{ // B-18eb — the writer before this cure (every shard read at the latest attempt), a newest-first search, the name left out of the match
+  const RAN = '    const { attempt: at, job: src } = ranIn(job);\n', ORDER = '    for (const { k, jobs } of earlier) {\n', NAME = 'x && x.name === job.name && ';
+  ok(SRC.split(RAN).length === 2 && SRC.split(ORDER).length === 2 && SRC.split(NAME).length === 2, 'B-18eb: where a shard is read, the order the earlier attempts are searched in and the name in the match are ONE place each (the mutants swap exactly them)');
+  const pre = await import(pathToFileURL(M.write('scripts/ci.mjs', SRC.replace(RAN, '    const at = attempt, src = job;\n'), 'pre18eb')).href);
+  const vpre = reWrite(RE_FX, null, pre);
+  ok(!vpre.v.ok && /cannot verify heavy 4\/7's suites \(read at attempt 2\): no «ci-heavy-self-skipped» annotation for heavy 4\/7/.test(vpre.v.why) && empty(vpre.dir) && reWrite(RE_FX).v.ok,
+    `BASE RED: the writer before this cure (every shard read at the latest attempt) refuses the RECORDED run by heavy 4/7, the first copy in its list — the push's red (${vpre.v.why}); the real writer verifies it`);
+  const newest = await import(pathToFileURL(M.write('scripts/ci.mjs', SRC.replace(ORDER, '    for (const { k, jobs } of [...earlier].reverse()) {\n'), 'newest18eb')).href);
+  const vn = reWrite(reThree(), null, newest).v;
+  ok(!vn.ok && /cannot verify heavy \d\/7's suites \(read at attempt 2, where it ran\): no «ci-heavy-self-skipped» annotation/.test(vn.why) && reWrite(reThree()).v.ok,
+    `CONTROL: a writer that searches the NEWEST earlier attempt first lands on attempt 2's empty copy and refuses the third attempt (${vn.why}); the real one verifies it — §2's THE EARLIEST is the leg that reds`);
+  const noname = await import(pathToFileURL(M.write('scripts/ci.mjs', SRC.replace(NAME, 'x && '), 'noname18eb')).href);
+  const vnn = reWrite(reTwin(), null, noname).v;
+  ok(!vnn.ok && /cannot verify heavy 2\/7's suites/.test(vnn.why) && reWrite(reTwin()).v.ok,
+    `CONTROL: a match without the name reads heavy 4/7's original for heavy 2/7 (the same start and end) and refuses (${vnn.why}); the real one verifies it — §2's TWINS is the leg that reds`); }
 for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 6, label: '§5 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
 
 console.log('§6 THE CLI — known flags; refusals exit 3 and write nothing; it runs only when asked');
@@ -652,14 +780,16 @@ console.log('§7b THE LAUNCH PATH (B-e381 part 2) — never the pushing shell\'s
     `…each drop said: ${born.dropped.map((x) => `${x.dir || '«»'} (${x.why})`).join(' · ')}`);
   const onMount = launchPath('/mnt/r/node/bin:/usr/bin', { mountinfo: MI, nodeDir: '/mnt/r/node/bin' });
   ok(onMount.path === '/mnt/r/node/bin:/usr/bin', 'node\'s own dir is kept even on a refused mount (the tier runs on it)');
-  const viaLink = launchPath('/opt/node-link/bin:/usr/bin', { mountinfo: MI, nodeDir: '/opt/node/bin', real: (d) => d.replace('/opt/node-link/', '/opt/node/') });
-  ok(viaLink.path === '/opt/node-link/bin:/usr/bin' && !viaLink.dropped.length, 'node\'s dir is matched by its REAL path (a symlinked version-manager dir is kept)');
+  // node's dir spelled through a link whose target sits on a refused mount: kept by its resolved spelling — and NO entry is ever resolved
+  const asked = [], viaLink = launchPath('/mnt/r/node/bin:/mnt/r/other/bin:/usr/bin', { mountinfo: MI, nodeDir: '/opt/node-link/bin', real: (d) => { asked.push(d); return d === '/opt/node-link/bin' ? '/mnt/r/node/bin' : d; } });
+  ok(viaLink.path === '/mnt/r/node/bin:/usr/bin' && JSON.stringify(asked) === JSON.stringify(['/opt/node-link/bin']), `node's dir is matched by its resolved path (a version-manager link onto a refused mount is kept) and only node's own dir is resolved — never an entry (asked: ${asked.join(', ')})`);
+  const SSHFS = MI + '39 22 0:35 / /home/u/workspace/sub rw - fuse.sshfs h:/x rw\n', SUBBIN = '/home/u/workspace/sub/tools/bin';
+  const homeRoot = launchPath(`${SUBBIN}:/usr/bin`, { mountinfo: SSHFS, repoDir: '/home/u/workspace/sub/vibespace' }), noRoot = launchPath(`${SUBBIN}:/usr/bin`, { mountinfo: SSHFS });
+  ok(homeRoot.path === `${SUBBIN}:/usr/bin` && noRoot.path === '/usr/bin', 'the launching checkout\'s own mount is the instance\'s «home» (the guard\'s class, never refused): an entry on it stays (CONTROL: with no checkout named, the same sshfs entry is storage and goes)');
   const bare = launchPath(HOOK_PATH, { mountinfo: '', gitExecPath: '/usr/lib/git-core', nodeDir: NODE });
   ok(bare.path.split(':').includes('/mnt/r/tools/bin') && bare.path.split(':').includes(PROD_BIN) && bare.judgedMounts === false,
     'CONTROL: with no mount table and no launching checkout the rclone dir and the data/bin stay — the two rules are what leave them out; the launch line then says the mounts were not judged');
-  // an EMPTIED seam is red: a launchEnvOf that hands the env back untouched fails the first leg's own predicate
-  const noop = (e) => ({ env: e, dropped: [] });
-  ok(noop(env).env.PATH !== born.env.PATH, 'CONTROL: a no-op launchEnvOf (the env handed back as given) would keep git\'s exec-path and the data/bin — the first leg reads it red');
+  // (an EMPTIED seam is red by the first leg itself: it drives the exported launchEnvOf and checks the exact PATH)
   // WIRING: the launcher's detached child is spawned with launchEnvOf's env, never the bare GIT_ENV, and a failure is said
   const launcher = (src) => { const i = src.indexOf('function heavyLaunch('); return i < 0 ? '' : src.slice(i, src.indexOf('\nexport function checkHeavy(', i)); };
   const wired = (src) => { const f = launcher(src); return /try \{ born = launchEnvOf\(GIT_ENV\); \} catch \(e\) \{ born = \{ env: GIT_ENV/.test(f) && /the tier's PATH was NOT rebuilt/.test(f) && /spawn\(process\.execPath, args, \{ cwd: repo, detached: true, stdio: \['ignore', fd, fd\], env: born\.env \}\)/.test(f) && !/detached: true[^\n]*env: GIT_ENV/.test(f); };

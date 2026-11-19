@@ -18,6 +18,9 @@
 //       text naming `deny`        → a soft-deny notice on stderr (the run continues); under --dangerously-skip-permissions
 //                                   the tool runs instead (a run_command step)
 //       text naming `fail`        → result ERROR + an AGY_ERROR line on stderr · `slow` → the turn takes $AGY_STUB_SLOW_MS
+//       text naming `faillate`    → the same two, the result FIRST and the AGY_ERROR line only once the file $AGY_STUB_ERR_GATE
+//                                   exists (8 s bound) — the two pipes in the order a loaded machine can deliver them, placed
+//                                   by the test (B-518e): an exact order, never a wait that load can close
 //       text naming `stuck`       → a run_command step ACTIVE, then nothing: no DONE, no result, the process alive (lane queued-is-not-woke)
 //       text naming `subagent`    → an invoke_subagent tool step (ACTIVE, parameters {Role, TypeName} — what the owner's
 //                                   journal recorded, lane agy-subagent-cards) at step $AGY_STUB_SPAWN_STEP (the fixture
@@ -162,6 +165,7 @@ async function turn(text) {
   // no result); the process stays alive and idle, reading stdin: a turn that never ends (Stop restarts the process)
   if (/\bstuck\b/.test(text)) { const i = step++; modelCall(i); out({ event: 'step_update', step_update: { conversation_id: cid, step_index: i, state: 'ACTIVE', step_type: 'tool', tool_name: 'run_command', tool_info: { name: 'run_command', parameters: { CommandLine: 'node driver.mjs' } } } }); await new Promise(() => { }); }
   if (/\bslow\b/.test(text)) await sleep(Number(process.env.AGY_STUB_SLOW_MS || 1500));
+  if (/\bfaillate\b/.test(text)) { out({ event: 'result', result: { conversation_id: cid, status: 'ERROR', response: '', error: 'model unavailable', duration_seconds: 0.1, num_turns: turns, usage: usage(turns) } }); const gate = process.env.AGY_STUB_ERR_GATE || ''; for (let k = 0; gate && k < 400 && !fs.existsSync(gate); k++) await sleep(20); process.stderr.write('AGY_ERROR: {"short_error":"model unavailable","status":"UNAVAILABLE","code":503,"retryable":true}\n'); return; }
   if (/\bfail\b/.test(text)) { process.stderr.write('AGY_ERROR: {"short_error":"model unavailable","status":"UNAVAILABLE","code":503,"retryable":true}\n'); out({ event: 'result', result: { conversation_id: cid, status: 'ERROR', response: '', error: 'model unavailable', duration_seconds: 0.1, num_turns: turns, usage: usage(turns) } }); return; }
   const reply = `Antigravity (${model}${effort ? ', ' + effort : ''}, ${mode}): ${text}`;
   const i = step++;

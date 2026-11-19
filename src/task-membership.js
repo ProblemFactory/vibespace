@@ -15,6 +15,10 @@
  *                              {none} · {wait, why} until it has its OWN id (a fork's row carries its source's until adopted)
  *                              · {bind, groupId, groupIds} — the birth group is a MEMBERSHIP, written through the one bind
  *                              writer; `groupIds` = every group the create named (`taskIds`, the order picked; int346).
+ *   onOtherMachine(host)       B-df5f: a conversation's host / hostId names ANOTHER machine than the hub (none, '', false and
+ *                              'local' are the hub) — task-groups _realHere and the /api/sessions row builder (routes/sessions).
+ *   membershipCwds({cwd, realCwd, host})  B-df5f: the PAGE's cwds of a conversation (sidebar-tasks _sessionFolderMatch): its
+ *                              cwd, and the hub-stamped realCwd only for the hub's own.
  *   membersWithout(list, keys, {exact})  THE unbind rule (lane task-group-fanout): a group's members (sessions[]) without
  *                              `keys` → { keep, gone }. A key `<backend>:<id>` matches itself; a BARE id (an older archive
  *                              list's spelling) matches any member with that id unless `exact`. The store's ONE unbind
@@ -44,6 +48,22 @@ function insideFolder(cwd, folder) {
   return f.recursive && c.startsWith(f.path + '/');
 }
 
+/** B-df5f — is `host` (a conversation's host / hostId) ANOTHER machine than the hub? None and 'local' are the hub. ONE
+ *  predicate for the server (task-groups _realHere), the /api/sessions row builder and the page (membershipCwds). */
+function onOtherMachine(host) { return !(host == null || host === '' || host === false || host === 'local'); }
+
+/** B-df5f — THE PAGE'S cwds of a conversation for the folder rule: its own cwd, and the row's `realCwd` (the HUB's realpath,
+ *  stamped by /api/sessions) ONLY for a conversation of the hub. A row the page merged with another machine's live session
+ *  (sidebar _merge: the hub's discovery row of a shared home + `host`) keeps no hub real path — as the server's
+ *  groupsForSession gives such a conversation none. NOT YET ONE FIELD FOR TWO FACTS: the server also takes a realCwd that the
+ *  OTHER machine resolved itself (no producer yet — backlog B-16d7); the page's `realCwd` is only ever the hub's stamp, so it
+ *  drops it — the day a machine-resolved path reaches the page, it needs its own field. → the distinct non-empty strings. */
+function membershipCwds({ cwd = null, realCwd = null, host = null } = {}) {
+  const out = [];
+  for (const c of [cwd, onOtherMachine(host) ? null : realCwd]) if (typeof c === 'string' && c && !out.includes(c)) out.push(c);
+  return out;
+}
+
 function birthBindVerdict(s) {
   const want = s && s._birthBind;
   if (!want || typeof want.groupId !== 'string' || !want.groupId) return { none: true };
@@ -66,4 +86,4 @@ function membersWithout(list, keys, { exact = false } = {}) {
   return { keep, gone };
 }
 
-module.exports = { folderOf, insideFolder, birthBindVerdict, membersWithout };
+module.exports = { folderOf, insideFolder, onOtherMachine, membershipCwds, birthBindVerdict, membersWithout };

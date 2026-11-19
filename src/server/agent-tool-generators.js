@@ -46,7 +46,8 @@ function createEditorHelper() {
 # WebUI editor disguised as "code" so Claude Code treats it as GUI (no screen clear).
 # Parse args: skip flags, last arg is the file
 FILE="\${@: -1}"
-SIGNAL="/tmp/claude-webui-edit-signal-\$\$"
+# B-3767: a fresh random name (a pid comes back, and an old signal left under it made Ctrl+G return at once)
+SIGNAL="\$(mktemp -u "\${TMPDIR:-/tmp}/claude-webui-edit-signal-XXXXXXXXXX")" || SIGNAL="\${TMPDIR:-/tmp}/claude-webui-edit-signal-\$\$-\$RANDOM\$RANDOM"   # never empty: an empty name would wait for ever
 PORT="\${CLAUDE_WEBUI_PORT:-${port}}"
 SESS="\${CLAUDE_WEBUI_SESSION_ID}"
 curl -sf -X POST "http://localhost:\${PORT}/api/editor/open" \\
@@ -512,7 +513,7 @@ const serverRoot = require('../server-root');
 const { TMP_ROOTS } = require('../fixture-guard');
 const realOr = (p) => { try { return fs.realpathSync(p); } catch { return p; } };
 function readRootFacts(root) {
-  if (DOOR.blocked(path.resolve(root))) return { root: path.resolve(root), gitDir: null, gitCommonDir: null, error: DOOR.SENTENCE };   // B-afc4
+  if (DOOR.blocked(path.resolve(root))) return { root: path.resolve(root), gitDir: null, gitCommonDir: null, error: DOOR.sentenceFor(path.resolve(root)) };   // B-afc4
   const facts = { root: realOr(path.resolve(root)), gitDir: null, gitCommonDir: null };
   const dotGit = path.join(facts.root, '.git');
   const errOf = (e) => (e && e.code) || (e && e.message) || String(e);

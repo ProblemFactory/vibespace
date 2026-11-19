@@ -561,14 +561,14 @@ const cdpTargets = new Map(); // cdp url → targets (the injected Target.getTar
   ok(keeper.ephemeralFor(KEY_A).live && kept.get(KEY_A).stoppedAt === null && launches().filter((l) => l.ns === 'vs-' + KEY_A).length === 2, 'the next command starts it again on the same key (a new daemon)');
   await keeper.stop(keeper.ephemeralFor(KEY_A).profileId, { why: 'user' });
   ok(kept.get(KEY_A).stoppedWhy === 'user' && kept.get(KEY_A).restore === null && kept.get(KEY_A).tabs.length === 2, 'the user\'s Stop keeps the logins + tabs, never reopened by themselves', kept.get(KEY_A));
-  // the daemon's idle-out (the tick), then the agent's own close heard after it
+  // the daemon gone (killed seconds after its start, its idle ten minutes — B-346d law 2: found gone EARLY, kept as «ended»), then the agent's own close heard after it
   await keeper.ensureEphemeral({ browserKey: KEY_A, sessionId: 'sess-a', envPairs: envA.pairs, sessionName: 'Research' });
   keeper.noteTabs({ kind: 'ephemeral', ns: 'vs-' + KEY_A, browserKey: KEY_A }, [{ tabId: 't9', targetId: 'AA09', url: 'https://idle.test/', title: 'Idle', active: true }]);
   const pidNow = launches().filter((l) => l.ns === 'vs-' + KEY_A).pop().pid;
   process.kill(pidNow, 'SIGKILL');
   await until(() => !F.pidAlive(pidNow), 3000);
   await keeper.tick();
-  ok(kept.get(KEY_A).stoppedWhy === 'idle' && kept.get(KEY_A).tabs[0].url === 'https://idle.test/' && kept.get(KEY_A).restore && kept.get(KEY_A).restore.mode === 'auto', 'the daemon gone (its idle-out, seen by the tick): the relay\'s last list is kept, reopened by the next start', kept.get(KEY_A));
+  ok(kept.get(KEY_A).stoppedWhy === 'ended' && kept.get(KEY_A).tabs[0].url === 'https://idle.test/' && kept.get(KEY_A).restore && kept.get(KEY_A).restore.mode === 'auto', 'the daemon gone seconds after its start (seen by the tick; B-346d law 2: found gone before its idle timeout, kept as «ended», never «idle»): the relay\'s last list is kept, reopened by the next start as an idle-out\'s is', kept.get(KEY_A));
   keeper.audit({ sessionId: 'sess-a', browserKey: KEY_A, profileId: keeper.ephemeralFor(KEY_A).profileId, verb: 'close', ok: true });
   ok(kept.get(KEY_A).stoppedWhy === 'agent' && kept.get(KEY_A).restore === null, '…the agent\'s own `close` (its audit line) re-words that stop: kept, not reopened');
   keeper.audit({ sessionId: 'sess-b', browserKey: KEY_B, profileId: keeper.ephemeralFor(KEY_A).profileId, verb: 'close', ok: true });
@@ -641,12 +641,7 @@ console.log('— ⑥ the routes: GET / DELETE /api/browser/kept, the housekeepin
   ok(hu.status === 200 && hu.body.kept.some((k) => k.tabs.length === 1) && ha.status === 200 && ha.body.kept.every((k) => k.tabs.length === 0 && Number.isInteger(k.tabCount)) && !JSON.stringify(ha.body).includes('secret.test'), 'the housekeeping answer: the user sees the kept tabs; an agent\'s token gets the counts only (no title, no url)', ha.body.kept);
 }
 
-// verify r2 (Y2): the kept sweep's report (the bound held open by running conversations) is READ by the panel, not only journalled
-{
-  const tv = fs.readFileSync(path.join(REPO, 'src/lib/browser-trace-view.js'), 'utf8');
-  const bt = fs.readFileSync(path.join(REPO, 'src/server/browser-trace.js'), 'utf8');
-  ok(/keptSweep/.test(bt) && /v\.keptSweep/.test(tv) && /conversation is running/.test(tv) && /Forget frees one/.test(tv), 'the housekeeping view carries the kept sweep and the Agent browser panel SAYS the total bound held open by running conversations (what frees it: Forget) — never a report that reaches only the journal');
-}
+// (verify r2 (Y2) the panel reads the kept sweep's report — MOVED to the fast scripts/test-browser-kept-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 
 // ═══ ⑦ patched-copy controls ══════════════════════════════════════════════
 console.log('— ⑦ controls: each leg catches its pre-fix / broken copy');

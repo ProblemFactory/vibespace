@@ -94,8 +94,17 @@ export function mutantCopies(name, repo) {
    *  the real, unpatched file and the control would judge the original. */
   const extOf = (orig, src, esm) => (esm ?? (/\.mjs$/.test(orig) || (/^(import|export)\b/m.test(src) && !/\bmodule\.exports\b|\brequire\s*\(/.test(src)))) ? '.mjs' : '.cjs';
   function pathFor(name, ext = '.cjs') { return path.join(dir, String(name).replace(/[^\w.-]/g, '_') + ext); }
-  function write(origRel, src, tag, { esm, name, selfPath = false } = {}) {
+  function write(origRel, src, tag, { esm, name, selfPath = false, same = false } = {}) {
     const orig = path.isAbsolute(origRel) ? origRel : path.join(repo, origRel);
+    // B-0d3e: A CONTROL THAT BUILDS NOTHING FAILS BY NAME. A patched copy byte-identical to its original means the edit
+    // found no anchor (`src.replace(gone, …)` answers the text unchanged): the control would judge the real module and
+    // go green — or red on a misleading sentence. A deliberate unpatched copy says so: `same: true`, or a closed world's
+    // `name` (its copies require each other by path, patched or not).
+    if (!same && name == null) {
+      let was = null;
+      try { was = fs.readFileSync(orig, 'utf-8'); } catch { /* no original to compare: a planted file */ }
+      if (was !== null && was === String(src)) throw new Error(`CONTROL BUILT NOTHING: the copy of ${path.relative(repo, orig) || origRel}${tag ? ` («${tag}»)` : ''} is byte-identical to the file — its edit's anchor is gone (move the anchor with the product line; a deliberate unpatched copy passes { same: true })`);
+    }
     // ESM by the original's own syntax unless told: top-level import/export and
     // no CommonJS surface (src/lib/*.js are ESM, the server tree is CJS).
     const ext = extOf(orig, src, esm);
@@ -118,6 +127,88 @@ export function mutantCopies(name, repo) {
   }
   function load(origRel, src, tag, opts = {}) { return req(write(origRel, src, tag, { ...opts, esm: false })); }
   return { dir, files, write, load, pathFor };
+}
+
+/** B-0d3e: THE UNANCHORED EDITS of a script — every `.replace(` / `.replaceAll(` / `.split(…).join(` on a product file's
+ *  text (a binding read from src/, server.js or data/bin) whose result reaches a LOADER (a mutant copy's write / load, a
+ *  `_compile`, a vm run, `new Function`, a written copy), directly or through the one const it is bound to — each the
+ *  anchor of a red control that says nothing when the product line moves. scripts/scratch.mjs `anchored()` is the door
+ *  that fails by name (it calls no `.replace` in the suite). → [{ line, text }] (a file that does not parse → []). */
+export function unanchoredEdits(src, { ast: given = null } = {}) {
+  // the cheap door first: no line that reads a product file, or no edit, or no loader ⇒ nothing to parse
+  if (!/\.(?:replace|replaceAll|join)\(/.test(src) || !/(?:\.load|\.write|_compile|runIn\w*Context|compileFunction|writeFileSync|new Function)\(/.test(src)) return [];
+  if (!src.split('\n').some((l) => /\b(?:readFileSync|readRepo|readSrc|readTree|readText|readFile|read)\s*\(/.test(l) && /['"`](?:src\/|server\.js|data\/bin\/|src['"`])/.test(l))) return [];
+  let ast = given;
+  if (!ast) for (const sourceType of ['module', 'script']) { try { ast = req('acorn').parse(src, { ecmaVersion: 'latest', sourceType, allowHashBang: true, allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true }); break; } catch { } }
+  if (!ast) return [];
+  const text = (n) => src.slice(n.start, n.end);
+  // ONE ancestor stack, pushed and popped (a copy per node made the walk quadratic in a long suite)
+  const walk = (n, fn, anc = []) => { if (!n || typeof n.type !== 'string') return; fn(n, anc); anc.push(n); for (const k in n) { if (k === 'type' || k === 'start' || k === 'end') continue; const v = n[k]; if (Array.isArray(v)) { for (const x of v) if (x && typeof x.type === 'string') walk(x, fn, anc); } else if (v && typeof v.type === 'string') walk(v, fn, anc); } anc.pop(); };
+  const READ = /\b(?:readFileSync|readRepo|readSrc|readTree|readText|readFile|read)\s*\(/, PRODUCT = /['"`](?:src\/|server\.js|data\/bin\/|src['"`])/;
+  const LOADER = /(?:^|\.)(?:load|write|_compile|runInThisContext|runInNewContext|compileFunction|writeFileSync)$/;
+  // ONE walk: the product bindings, the identifiers handed to a loader, and every candidate edit with what it reaches
+  const product = new Set(), loaderArgs = new Set(), cands = [];
+  const isLoader = (n) => (n.type === 'CallExpression' && LOADER.test(text(n.callee))) || (n.type === 'NewExpression' && /^(?:Function|vm\.Script|Script)$/.test(text(n.callee)));
+  const baseOf = (n) => { let b = n; while (b && b.type === 'CallExpression' && b.callee.type === 'MemberExpression' && /^(?:replace|replaceAll|split|join)$/.test(b.callee.property.name || '')) b = b.callee.object; return b; };
+  const ids = (n, into) => walk(n, (x) => { if (x.type === 'Identifier') into.add(x.name); });
+  walk(ast, (n, anc) => {
+    if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init && READ.test(text(n.init)) && PRODUCT.test(text(n.init))) product.add(n.id.name);
+    else if (n.type === 'AssignmentExpression' && n.left.type === 'Identifier' && READ.test(text(n.right)) && PRODUCT.test(text(n.right))) product.add(n.left.name);
+    if ((n.type === 'CallExpression' || n.type === 'NewExpression') && isLoader(n)) for (const a of n.arguments) ids(a, loaderArgs);
+    if (n.type !== 'CallExpression' || n.callee.type !== 'MemberExpression' || n.callee.computed) return;
+    const prop = n.callee.property.name;
+    const edit = (prop === 'replace' || prop === 'replaceAll') || (prop === 'join' && n.callee.object.type === 'CallExpression' && n.callee.object.callee.type === 'MemberExpression' && n.callee.object.callee.property.name === 'split');
+    if (!edit) return;
+    const base = baseOf(n);
+    if (!base || base.type !== 'Identifier') return;
+    let inLoader = false, decl = null;
+    for (let i = anc.length - 1; i >= 0; i--) { if (!inLoader && isLoader(anc[i])) inLoader = true; if (!decl && anc[i].type === 'VariableDeclarator' && anc[i].id.type === 'Identifier') decl = anc[i].id.name; }
+    cands.push({ n, base: base.name, inLoader, decl });
+  });
+  const out = [];
+  for (const c of cands) if (product.has(c.base) && (c.inLoader || (c.decl && loaderArgs.has(c.decl)))) out.push({ line: src.slice(0, c.n.start).split('\n').length, text: text(c.n).replace(/\s+/g, ' ').slice(0, 100) });
+  return out;
+}
+/** THE ANCHOR HELPERS (B-0d3e — the row's «every helper that builds a control from an anchor»): every function in a script
+ *  whose OWN PARAMETER is the anchor of a `.replace` / `.replaceAll` / `.split` and whose body reaches a loader (a mutant
+ *  copy's load / write, a compile, `new Function`, a require / import) — a suite's `cut` / `swap` / `mutantOf` / `patch`.
+ *  One whose body neither throws, nor calls scratch.mjs `anchored()`, nor reports through the suite's own check (`ok` /
+ *  `check` / `assert` — «CONTROL (tag): the patch applies») answers null or an unpatched copy when its anchor
+ *  moves: the control builds nothing and the suite reds on a sentence that names no anchor (test-channels-slack-send's
+ *  cut, 2026-11-18) — or stays green. → [{ line, name }] of the helpers that do NOT fail by name. */
+export function anchorHelpers(src, { ast: given = null } = {}) {
+  if (!/\.(?:replace|replaceAll|split)\(/.test(src) || !/(?:\.load|\.write|_compile|runIn\w*Context|compileFunction|writeFileSync|new Function)\s*\(/.test(src)) return [];
+  let ast = given;
+  if (!ast) for (const sourceType of ['module', 'script']) { try { ast = req('acorn').parse(src, { ecmaVersion: 'latest', sourceType, allowHashBang: true, allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true }); break; } catch { } }
+  if (!ast) return [];
+  const text = (n) => src.slice(n.start, n.end);
+  const walk = (n, fn, anc = []) => { if (!n || typeof n.type !== 'string') return; fn(n, anc); anc.push(n); for (const k in n) { if (k === 'type' || k === 'start' || k === 'end') continue; const v = n[k]; if (Array.isArray(v)) { for (const x of v) walk(x, fn, anc); } else if (v && typeof v.type === 'string') walk(v, fn, anc); } anc.pop(); };
+  const FN = new Set(['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression']);
+  const LOADER = /(?:^|\.)(?:load|write|_compile|runInThisContext|runInNewContext|runInContext|compileFunction|writeFileSync)$|^require$/;
+  const params = (fn) => { const out = new Set(); for (let q of fn.params) { if (q.type === 'AssignmentPattern') q = q.left; if (q.type === 'Identifier') out.add(q.name); } return out; };
+  const found = new Map();
+  walk(ast, (n, anc) => {
+    if (n.type !== 'CallExpression' || n.callee.type !== 'MemberExpression' || n.callee.computed || !/^(?:replace|replaceAll|split)$/.test(n.callee.property.name || '')) return;
+    const a = n.arguments[0];
+    if (!a || a.type !== 'Identifier') return;
+    for (let i = anc.length - 1; i >= 0; i--) {
+      if (!FN.has(anc[i].type) || !params(anc[i]).has(a.name)) continue;
+      if (!found.has(anc[i])) { const up = anc[i - 1]; found.set(anc[i], (anc[i].id && anc[i].id.name) || (up && up.type === 'VariableDeclarator' && up.id.type === 'Identifier' && up.id.name) || (up && up.type === 'Property' && up.key && (up.key.name || up.key.value)) || (up && up.type === 'AssignmentExpression' && text(up.left).slice(0, 40)) || '(anonymous)'); }
+      break;
+    }
+  });
+  const out = [];
+  for (const [fn, name] of found) {
+    let loads = false, names = false;
+    walk(fn.body, (x) => {
+      if (x.type === 'ThrowStatement') names = true;
+      else if (x.type === 'CallExpression' && (/(?:^|\.)anchored$/.test(text(x.callee)) || /^(?:ok|check|assert|expect)\w*$|^assert\.\w+$/.test(text(x.callee)))) names = true;
+      else if (x.type === 'CallExpression' && LOADER.test(text(x.callee))) loads = true;
+      else if (x.type === 'ImportExpression' || (x.type === 'NewExpression' && /^(?:Function|vm\.Script|Script)$/.test(text(x.callee)))) loads = true;
+    });
+    if (loads && !names) out.push({ line: src.slice(0, fn.start).split('\n').length, name: String(name) });
+  }
+  return out;
 }
 
 /** rv-browser F7 (lane dc-browser-installs): the REAL keeper over PATCHED install files — a closed world of copies: each

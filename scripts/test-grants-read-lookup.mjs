@@ -292,10 +292,13 @@ console.log('— ④ the one writer: every change of a row is read by the very n
 // ═══ ⑤ A WALK KEEPS NOTHING ACROSS A CHANGE OF THE ROWS (主开发's G1) ═══════════
 console.log('— ⑤ a search that awaits: a row granted INSIDE one of its awaits and a row revoked INSIDE one of its give-backs — the rest of that call answers as the rows stand (as 70efb5e10 does)');
 {
-  // A and B interleaved (each 26 000 — the walk gives the loop back once inside B's pass), C beside them; the asker reads B through
-  // B's account row and nothing in A or C; A's directory lists its groups (the asker «knows» A: its existence search awaits)
-  const nA = 26000;
-  const W6 = await world('walk-change', { interleave: true, accounts: [nA, nA, Array.from({ length: 10 }, (_, i) => ({ id: `k${String(i).padStart(4, '0')}`, title: `kilo ${i}`, kind: 'group' }))],
+  // A and B interleaved, C beside them; the asker reads B through B's account row and nothing in A or C; A's directory lists its
+  // groups (the asker «knows» A: its existence search awaits). B-dfa4 cut 1: a walk reads and counts its OWN account's rows —
+  // before, it gave the loop back every WALK_STEP rows of the whole map (A and B 26 000 each: B's pass at the map's 50 000th
+  // row); now at B's own WALK_STEP-th row, so B holds more than WALK_STEP rows and A few (about the same map, 53 010 rows)
+  const WALK = Number((/const WALK_STEP = (\d+);/.exec(fs.readFileSync(path.join(REPO, 'src/server/channels-access.js'), 'utf8')) || [])[1]);
+  const nA = 2000, nB = WALK + 1000;
+  const W6 = await world('walk-change', { interleave: true, accounts: [nA, nB, Array.from({ length: 10 }, (_, i) => ({ id: `k${String(i).padStart(4, '0')}`, title: `kilo ${i}`, kind: 'group' }))],
     rows: [{ resource: (r) => `account:${r[1].id}`, lists: { to: [{ kind: 'group', id: 'GB', name: 'Group B' }] } }] });
   const run = async (E) => {
     const [a, b, c] = E.recs.map((r) => r.id), calls = [];
@@ -315,7 +318,7 @@ console.log('— ⑤ a search that awaits: a row granted INSIDE one of its await
   const O6 = oracleOf(W6);
   const [ia, ib, ic] = W6.recs.map((r) => r.id);
   const order = Object.values(W6.ix.live());
-  const bBefore = order.slice(0, 50000 - 1).filter((en) => en.adapterId === ib).length;   // judged before B's first give-back (scanned 1 … 49 999)
+  const bBefore = Math.min(order.filter((en) => en.adapterId === ib).length, WALK - 1);   // judged before B's first give-back (B's own rows 1 … WALK − 1)
   const before = ACL.canSee(O6.eng.reachFor(agent('walker', ['GB']), O6.recs[1], O6.ix.live()[order.find((en) => en.adapterId === ib).key]).level);
   const n = await run(W6), o = await run(O6);
   if (O6.G.rowsFor('channel-reach', `account:${ib}`).length) O6.G.remove('channel-reach', `account:${ib}`, 'user');   // the rows after: B's row revoked there too
@@ -330,7 +333,7 @@ console.log('— ⑤ a search that awaits: a row granted INSIDE one of its await
   // rows stand — the old engine over the rows before reads B readable, over the rows after hidden; the call searched as readable
   // exactly B's conversations walked before the revoke
   const after = ACL.canSee(O6.eng.reachFor(walker(), O6.recs[1], O6.ix.live()[lastB.key]).level);
-  ok(n.revoked && before && !after && bVis(n) === bBefore && bBefore > 0 && bBefore < nA, `⑤ a row revoked INSIDE B's first give-back: ${bVis(n)} of B's ${nA} conversations searched as readable — exactly the ${bBefore} walked before it (70efb5e10's code over the rows before: readable; over the rows after: hidden)`, { bVisible: bVis(n), bBefore, before, after, tip: callsOf(n, ib) });
+  ok(n.revoked && before && !after && bVis(n) === bBefore && bBefore > 0 && bBefore < nB && WALK > 0, `⑤ a row revoked INSIDE B's first give-back: ${bVis(n)} of B's ${nB} conversations searched as readable — exactly the ${bBefore} walked before it (70efb5e10's code over the rows before: readable; over the rows after: hidden)`, { bVisible: bVis(n), bBefore, before, after, tip: callsOf(n, ib) });
 }
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass}${fail ? ' passed, ' + fail + ' failed' : ''})`);

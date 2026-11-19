@@ -2,7 +2,7 @@ import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, CHROME_STORE } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(new URL('../server.js', import.meta.url));
 const repo = process.cwd();
@@ -11,7 +11,7 @@ const [PORT, CDP_PORT] = await freePorts(2); // per-process (scripts/scratch.mjs
 const wt = scratch('syspanel-test'), fakeHome = scratch('syspanel-home');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failed = 0;
-const check = (n, c) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}`); } };
+const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + e : ''}`); } };   // + the detail (the EXCLUDED package: a red names what it saw)
 try { execSync(`git worktree remove --force ${wt}`, { stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
@@ -24,7 +24,7 @@ const now = Date.now(), fine = [];
 for (let i = 90 * 60; i >= 0; i -= 45) fine.push({ t: now - i * 1000, m: (0.5 + 0.3 * Math.sin(i / 600)) * 2 ** 30, l: 4 * 2 ** 30, c: 1.5 + Math.cos(i / 400) });
 fs.writeFileSync(path.join(wt, 'data', 'sysinfo-history.json'), JSON.stringify({ fine, coarse: fine.filter((_, i) => i % 20 === 0) }));
 const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1' }, stdio: 'ignore' });
-const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', `--user-data-dir=${scratch('syspanel-chrome')}`, 'about:blank'], { stdio: 'ignore' });
+const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', `--user-data-dir=${scratch('syspanel-chrome')}`, 'about:blank'], { stdio: 'ignore' });
 process.on('exit', () => { try { chrome.kill('SIGKILL'); } catch {}; try { srv.kill('SIGKILL'); } catch {}; try { execSync(`git worktree remove --force ${wt}`, { stdio: 'ignore' }); } catch {}; try { fs.rmSync(scratch('syspanel-chrome'), { recursive: true, force: true }); } catch {}; try { fs.rmSync(fakeHome, { recursive: true, force: true }); } catch {} });
 for (let i = 0; i < 40; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); break; } catch { await sleep(250); } }
 const WebSocket = require('ws');
@@ -44,12 +44,13 @@ await sleep(2500);
 const st1 = await evalJs(`(() => ({
   canvases: document.querySelectorAll('.sys-hist-chart').length,
   charts: (app.sidebar._railSysCharts || []).length,
-  chips: document.querySelectorAll('.sys-range-chip').length,
+  chips: document.querySelectorAll('.usage-section-title .sys-range .sys-range-chip').length,   // the History section's range chips (1h / 24h / 7d) — the process list's sort chips share the class (.prc-sorts) since it was built
+  allChips: document.querySelectorAll('.sys-range-chip').length,
   bars: document.querySelectorAll('.sys-bar').length,
 }))()`);
 check('hist markup built (3 canvases)', st1.canvases === 3); // mem/cpu/loop-lag (2.243.0)
 check('2 Chart instances live', st1.charts === 2);
-check('3 range chips', st1.chips === 3);
+check('3 range chips (1h / 24h / 7d — the History section\'s own; the process sort chips counted apart)', st1.chips === 3, JSON.stringify({ chips: st1.chips, allChips: st1.allChips }));
 check('live zone rendered (bars>0)', st1.bars > 0);
 // range chip click
 await evalJs(`(() => { document.querySelector('.sys-range-chip[data-r="1h"]').click(); return 1; })()`);
@@ -66,6 +67,8 @@ await evalJs(`(() => { document.querySelector('.rail-item[data-rail="system"]').
 await sleep(2500);
 check('re-entry renders charts again', await evalJs(`(app.sidebar._railSysCharts || []).length`) === 2);
 const shot = await cdp('Page.captureScreenshot', { format: 'png', clip: { x: 0, y: 0, width: 330, height: 700, scale: 2 } });
-fs.writeFileSync('/tmp/sys-panel.png', Buffer.from(shot.data, 'base64'));
+// a picture only when one is asked for (SP_SHOT=<path>) — a fixed /tmp name breaks test-ci-gate-tiers' «no gated suite claims a
+// fixed port or /tmp path» now that the suite is in a tier (the EXCLUDED package)
+if (process.env.SP_SHOT) fs.writeFileSync(path.resolve(process.env.SP_SHOT), Buffer.from(shot.data, 'base64'));
 console.log(failed === 0 ? 'ALL PASS' : `${failed} FAILED`);
 process.exit(failed ? 1 : 0);

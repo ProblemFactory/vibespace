@@ -18,7 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { scratch, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+import { scratch, ONBOARDED_SOURCE, vncEnv, CHROME_STORE } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 
@@ -65,7 +65,7 @@ fs.mkdirSync(cacheDir, { recursive: true });
 fs.writeFileSync(path.join(cacheDir, `${SID_CACHED}.jsonl`), transcript(SID_CACHED));
 
 const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1' }, stdio: 'ignore' });
-const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
+const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
   '--disable-background-timer-throttling', `--user-data-dir=/tmp/vs-attach-rescue-chrome-${process.pid}`, 'about:blank'], { stdio: 'ignore' });
 
 const cleanup = () => {

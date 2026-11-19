@@ -32,6 +32,9 @@ const CARD_TO_WINDOW = Object.freeze({
   'session.browserHandback': { na: 'a list-side helper beside the row that shows the person driving the browser' },
   'session.rescueTranscript': { na: 'for a stopped conversation, which has no window' },
   'session.properties': { window: 'session.properties' },
+  // unit what-it-may-use: «What it may use…» lands a person in Session properties at that section — the window's «Session
+  // properties…» opens the same window, the section in it
+  'session.mayUse': { window: 'session.properties' },
   'session.terminate': { window: 'window.terminateSession' },
   // rows by ID — a card row with no command (its own run / a submenu), here or registered from another file (Locate's adversarial read)
   'session-card/task-groups': { window: 'window/task-groups' },

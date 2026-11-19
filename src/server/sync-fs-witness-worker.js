@@ -363,7 +363,7 @@ function tell(h, named, why, unread) {
   for (const q of named) q.answer = textAnswer(q.text, NO_READ);
   // round 5 (law A): an ask the sampler withdrew is not a sample — with no real answer the hold is «not sampled (why)»
   const J = LH.judgeAsks((h.asks || []).map(askFacts), { beat0: h.beat0, holdEnd: h.toM, standDown: h.standDown, windowed: !!h.d });
-  const samples = J.samples.map((x) => ({ cls: x.cls, kind: x.cls === 'js' ? 'js' : 'none', words: x.words, key: x.key, keyWords: x.keyWords, ...(Number.isFinite(x.at) ? { at: x.at } : {}) }));
+  const samples = J.samples.map((x) => ({ cls: x.cls, kind: x.cls === 'js' ? 'js' : 'none', words: x.words, key: x.key, keyWords: x.keyWords, ...(x.noOurs === true ? { noOurs: true } : {}), ...(Number.isFinite(x.at) ? { at: x.at } : {}) }));   // noOurs: the fold's mark rides to the main thread
   const facts = { boot: h.boot, from: toWall(h.fromM), to: toWall(h.toM), fromM: h.fromM, toM: h.toM, ms: h.ms, msHi: h.msHi, samples, outside: J.outside,
     after: J.after ? J.after.words : null, afterKey: J.after ? J.after.key : null, afterKeyWords: J.after ? J.after.keyWords : null, afterModule: J.after && J.after.module ? J.after.module : null,
     unsampled: samples.length ? h.unsampled : (h.unsampled || h.standDown), standDown: samples.length ? h.standDown : null, ...(Number.isFinite(h.unseenLateMs) ? { unseenLateMs: h.unseenLateMs } : {}), d: h.d, starvedMs: h.starvedMs, lateMs: h.lateMs, ...(h.budgetSpent ? { budgetSpent: true } : {}), ...(unread.size ? { namesUnread: { n: unread.size, why: why || 'budget' } } : {}) };

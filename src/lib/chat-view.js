@@ -439,7 +439,7 @@ class ChatView {
       // agent browser P2 (§3.8 ③): the Browser chip's three actions
       onBrowserAction: (what, ev) => this._onBrowserAction(what, ev),
       // §26 (B-099e): the channels chip opens a touched conversation through the ONE door
-      onChannelOpen: (row) => openTouchRow(this.app, row, { filter: this._outboxFilter() }), // lane outbox-chip-door: a row inside this conversation opens THIS conversation's Outbox, the proposal it names in view
+      onChannelOpen: (row) => openTouchRow(this.app, row, { filter: this._outboxFilter(), conversation: this._connectConversation() }), // lane outbox-chip-door: a row inside this conversation opens THIS conversation's Outbox, the proposal it names in view
       channelRowWords: rowProposalWords, // lane outbox-chip-door: the chip's rows say their proposals' state in the card's words
       onOpenArtifact: (b) => this._openArtifact(b), // lane artifacts-model: the Artifacts chip's row → the file beside the chat
       app: this.app, // lane artifacts-list-scale: the list's ⋯ (show in Files, a helper's conversation, a service's job / Ports)
@@ -1117,6 +1117,7 @@ class ChatView {
       // (2.234.0, real report). Send = the button. chat.touchEnterSends
       // restores enter-to-send for those who prefer it.
       isTouch: () => !!this.app?.isTouch,
+      getBackend: () => (this._getSessionIds() || {}).backend || null,   // batch 20 cure: the picture door judges with THIS harness's limits
       getTouchEnterSends: () => !!this.app?.settings?.get('chat.touchEnterSends'),
       // chat.enterSends (desktop, default on): off ⇒ Enter inserts a newline and Ctrl/Cmd+Enter sends
       getEnterSends: () => this.app?.settings?.get('chat.enterSends') !== false,
@@ -4640,6 +4641,12 @@ class ChatView {
     const ids = this._getSessionIds?.() || {};
     return conversationKeys({ claudeId: ids.claudeId || null, backendSessionId: ids.backendSessionId || null, webuiId: this.sessionId });
   }
+  /** B-e630: the conversation a «Connect <type>» row is asked in (its may-use facts: the Connect form's browser-profile fold). */
+  _connectConversation() {
+    const s = (this.app.sidebar?._allSessions || []).find((x) => x && x.webuiId === this.sessionId);
+    const key = s && this.app.sidebar?._getSessionStateKey ? this.app.sidebar._getSessionStateKey(s) : null;
+    return key ? { sessionKey: key, webuiId: this.sessionId } : null;
+  }
   /** THE filter the chip opens the Outbox with: this conversation's keys + its name (the window's view state, never persisted).
    *  A subagent's viewer has none of its own (it drafts under its parent's id): null — the window shows the drafter of the row pressed. */
   _outboxFilter() {
@@ -4974,10 +4981,10 @@ class ChatView {
     if (!msg || !oldEl || msg.status !== 'streaming') return;
     const textDiv = oldEl.querySelector('.chat-text');
     if (textDiv && msg.content[0]?.type === 'text') {
-      textDiv.innerHTML = this._renderers.renderMarkdown(stripAnsi(msg.content[0].text));
+      textDiv.innerHTML = this._renderers.renderMarkdown(stripAnsi(msg.content[0].text), { vsLinks: true, streaming: true });   // the assistant text's streaming frame: the option on, as its block
       this._renderers.addDiagrams(textDiv); // lane chat-mermaid: a fence closed mid-stream draws (from the cache on every later frame)
     } else if (msg.content[0]?.type === 'thinking') {
-      const summaryEl = oldEl.querySelector('.chat-thinking summary');
+      const summaryEl = oldEl.querySelector('.chat-thinking-label') || oldEl.querySelector('.chat-thinking summary'); // the label alone: the summary also holds the Copy door (lane think-tools-phone)
       const preEl = oldEl.querySelector('.chat-thinking pre');
       const detailsEl = oldEl.querySelector('.chat-thinking');
       if (detailsEl) detailsEl.open = true;

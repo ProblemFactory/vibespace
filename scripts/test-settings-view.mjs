@@ -109,6 +109,10 @@ console.log('§3 the four rules on a fixture schema');
   ok(J.rule4(V), 'rule 4: switch OFF ⇒ A draws its everyday row and counts 2 advanced hidden; a category of only advanced rows (C) still draws — its "1 advanced setting hidden · Show" line');
   J.rule4on = (M) => { const m = vm(M, { showAdvanced: true }); const r = m.byCategory.A.rows.find((x) => x.path === 'a.adv2'); return paths(m.byCategory.A) === 'a.plain,a.adv1,a.adv2' && m.byCategory.A.hiddenAdvanced === 0 && r && r.chips.map((c) => c.kind).join(',') === 'advanced,reload'; };
   ok(J.rule4on(V), '…switch ON ⇒ the advanced rows draw, each with the `advanced` chip (+ `reload` where it applies), nothing counted');
+  // lane setting-doors l3 (主开发 2026-11-15): THE REVEAL — the ONE row a `vibespace://settings/<key>` link opened on draws past the advanced
+  // tier for that open, the switch still OFF; nothing else is drawn by it (a mutant with the reveal branch off was green in every fast leg)
+  J.reveal = (M) => { const off = vm(M), rv = vm(M, { reveal: 'a.adv1' }); return !off.byCategory.A.rows.some((r) => r.path === 'a.adv1') && rv.byCategory.A.rows.some((r) => r.path === 'a.adv1') && !rv.byCategory.A.rows.some((r) => r.path === 'a.adv2'); };
+  ok(J.reveal(V), 'lane setting-doors l3: reveal — the link\'s row (a.adv1, advanced) draws with the switch OFF, and only that row (a.adv2 stays hidden)');
   J.rule3 = (M) => { const m = vm(M, { showAdvanced: true }); return !m.byCategory.B.show && m.byCategory.B.hiddenAdvanced === 0 && !m.byCategory.A.rows.some((r) => r.path === 'a.dep') && m.sections.filter((s) => s.show).map((s) => s.category).join(',') === 'A,C'; };
   ok(J.rule3(V), 'rule 3: a false `when` hides the row; B (every row about an unlinked vendor) is not drawn at all — the nav lists A, C — and its advanced row is NOT counted as "advanced hidden"');
   J.rule1 = (M) => { const m = vm(M, { query: 'lark' }); const g = m.byCategory.B.rows.find((r) => r.path === 'b.gone'), a = m.byCategory.B.rows.find((r) => r.path === 'b.advgone'); return m.byCategory.B.show && g && a && g.chips.some((c) => c.kind === 'unused' && c.text === 'not in use here: no Lark account is linked') && a.chips.map((c) => c.kind).join(',') === 'advanced,unused' && m.hiddenAdvanced === 0; };
@@ -128,6 +132,11 @@ console.log('§4 the shipped schema');
   const none = { vnc: false, desktopApps: false, harnesses: new Set(['claude']), channels: new Set() };
   const all = { vnc: true, desktopApps: true, harnesses: new Set(['claude', 'codex', 'opencode', 'antigravity']), channels: new Set(['lark', 'gmail']) };
   const m0 = real(none), m1 = real(all, { showAdvanced: true }), mu = real({});
+  { // B-544d r2: a harness folded because its CLI is not found here carries the Re-check door on its chip; another fold does not
+    const found = real(none, { query: 'codex' }), cx = Object.values(found.byCategory).flatMap((s) => s.rows).filter((r) => r.why);
+    const dk = Object.values(real(none, { query: 'desktop' }).byCategory).flatMap((s) => s.rows).filter((r) => r.why && /display backend/.test(r.why));
+    ok(cx.length > 0 && cx.every((r) => r.chips.some((c) => c.kind === 'unused' && c.recheck === 'codex')) && dk.length > 0 && dk.every((r) => r.chips.every((c) => !c.recheck)), 'B-544d r2: a row folded because the codex CLI is not found here, found by a search, carries the Re-check door on its «not in use here» chip; a fold for another reason (no display backend) does not', { cx: cx.length, dk: dk.length });
+  }
   ok(!m0.byCategory.Codex.show && !m0.byCategory.OpenCode.show && m0.byCategory.Claude.show, 'a machine without the codex / opencode CLIs: the WHOLE Codex and OpenCode sections vanish (the table-level `when`), Claude stays');
   ok(m1.byCategory.Codex.show && m1.byCategory.Codex.rows.length === S.harnessSettingPaths('codex').length, '…with them installed, every derived Codex row draws');
   ok(!m0.byCategory['Desktop apps'].show && m1.byCategory['Desktop apps'].rows.length === 9 && mu.byCategory['Desktop apps'].show, 'Desktop apps: hidden without a display backend, its 9 rows with one (lane agent-window-no-steal: + Agent-opened windows come to the front; lane app-display-portal: + file dialogs in their own window; lane app-display-notify-sink: + notifications in their own window; lane app-display-secrets: + apps keep their logins), SHOWN while the fact is unknown');
@@ -146,7 +155,7 @@ console.log('§4 the shipped schema');
   const whens = Object.entries(SCHEMA).filter(([, r]) => r.when).length;
   console.log(`    tier census: ${adv.length} advanced of ${Object.keys(SCHEMA).length} rows; ${whens} rows carry a \`when\`; default view draws ${real(all).drawn} rows, ${real(all).hiddenAdvanced} advanced folded`);
   // ≤ 95 (lane antigravity-harness): every harness's extra-args row is advanced, and agy's is the fourth harness's
-  ok(adv.length >= 60 && adv.length <= 97, `the advanced tier holds ${adv.length} rows (the design's estimate ~75; ≤ 95 since lane dm-reply-infers' channels.replyInferHours made it 91; ≤ 96 since lane engine-plugin's browser.defaultEngine — the design's tier for it; ≤ 97 since lane job-logs-sweep's jobs.logsSweep — the clean-up's pause, beside its advanced siblings jobs.archive*)`);
+  ok(adv.length >= 60 && adv.length <= 99, `the advanced tier holds ${adv.length} rows (the design's estimate ~75; ≤ 95 since lane dm-reply-infers' channels.replyInferHours made it 91; ≤ 96 since lane engine-plugin's browser.defaultEngine — the design's tier for it; ≤ 97 since lane job-logs-sweep's jobs.logsSweep — the clean-up's pause, beside its advanced siblings jobs.archive*; ≤ 98 since lane bl-loop-b's agents.lowerCpuPriority (B-460d, 2.369.411) — what a conversation starts never outranks the server, an advanced switch beside its agents.* siblings; ≤ 99 since the exit check's browser.exitCheckUrl — the owner's check address, set once and also offered inside the «Check the exit…» dialog, beside the Agent browser's advanced rows)`);
   const nav = real(none).sections.filter((s) => s.show).map((s) => s.category);
   ok(nav.length === real(none).sections.filter((s) => s.rows.length || s.hiddenAdvanced).length && !nav.includes('Codex'), `V4: the categories drawn (= the nav items) are exactly those with a row or a hidden-count line (${nav.length})`);
   const moved = { 'desktop.idleTimeoutMin': 'Desktop apps', 'desktop.appScale': 'Desktop apps', 'desktop.seamless': 'Desktop apps', 'desktop.backendPrefs': 'Desktop apps', 'window.realDesktopTargets': 'Desktop apps', 'claude.autoResumeOnLimit': 'Spending', 'agentd.autoGraduate': 'Session', 'agentd.localPipeSessions': 'Session', 'agentd.localDiscovery': 'Session', 'agents.jobNotify': 'Background Work' };
@@ -566,10 +575,10 @@ console.log('§13 a typed number is saved on Enter / blur only, its row says «N
     Object.assign(globalThis, saved);
   }
   const ui = read('src/lib/settings-ui.js');
-  ok(/bindNumberField\(input, \{/.test(ui) && /onTyping: \(typed\) => this\._markTyped\(path, typed\)/.test(ui) && /if \(schema\.type === 'number' && !schema\.slider && !schema\.store\) controlWrap\.appendChild\(this\._saveMark\(path\)\);/.test(ui) && /saveMarkWords\(st, t, \{ inForce \}\)/.test(ui),
-    'R3 wiring: the Settings number field is bound by bindNumberField (its typing marks the row), and every number row carries the save mark');
+  ok(/bindNumberField\(input, \{/.test(ui) && /onTyping: \(typed\) => this\._markTyped\(path, typed\)/.test(ui) && /if \(\(schema\.type === 'number' && !schema\.slider && !schema\.store\) \|\| schema\.serverVerdict\) controlWrap\.appendChild\(this\._saveMark\(path\)\);/.test(ui) && /saveMarkWords\(st, t, \{ inForce, refused: /.test(ui),
+    'R3 wiring: the Settings number field is bound by bindNumberField (its typing marks the row), and every number row carries the save mark (+ a row the server may refuse — the exit check, 主开发 17:04Z: its refusal is said there)');
   const per = read('src/routes/persistence.js');
-  ok(/const spend = writeSettings\(data\);\n\s+res\.json\(\{ success: true, \.\.\.\(spend \? \{ spend \} : \{\}\) \}\);/.test(per) && /broadcast\(\{ type: 'settings-updated', settings: data, \.\.\.\(spend \? \{ spend \} : \{\}\) \}\);/.test(per)
+  ok(/const spend = writeSettings\(data\);\n\s+res\.json\(\{ success: true, \.\.\.\(spend \? \{ spend \} : \{\}\)(?:, \.\.\.\(refused \? \{ refused \} : \{\}\))? \}\);/.test(per) && /broadcast\(\{ type: 'settings-updated', settings: data, \.\.\.\(spend \? \{ spend \} : \{\}\) \}\);/.test(per)
     && /this\.settings\.applyRemote\(msg\.settings, \{ spend: msg\.spend \|\| null \}\);/.test(read('src/lib/app.js')),
     'r2 wiring: the ONE settings writer computes the in-force `spend` once — the POST echoes it AND the settings-updated broadcast carries it to every tab');
 }

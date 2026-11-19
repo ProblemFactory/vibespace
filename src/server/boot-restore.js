@@ -7,6 +7,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const SFW = require('../settings-file-words.js'); // B-8dcf item two (PURE): the kinds a governing file covers, for a restored session
 const { restoredTurnState } = require('../turn-state.js'); // PURE (lane parked-ask-stall): the ring's last turn-state record
 const pty = require('node-pty');
 const { createMessageManager } = require('../normalizers');
@@ -77,6 +78,29 @@ function resumeIdOf(meta) {
 /** Why a kept meta is stopped — the one producer (a dead socket found by a boot or its re-probe); the client words it
  *  «its process ended while the server was down». A `.json.stopped` written by 2.369.365 carries no reason: the same one. */
 const STOP_DEAD_SOCKET = 'dead-socket-at-boot';
+/** A session on a PAIRED machine (an ssh or dial session: spawn/ssh.js and spawn/dial.js set `host` to the machine's id; a dial
+ *  session also `_dialDeviceId`). A kept copy is THIS machine's dead socket and its address (backend:id) names no machine — such a
+ *  session consumes none, at a turn end or in the sweep. PURE. */
+const pairedSession = (s) => !!(s && ((s.host && s.host !== 'local') || s._dialDeviceId));
+/** a kept copy's unlink that failed for a reason other than «already gone» is SAID by name — the file stays, the next boot reads
+ *  it again; never with nobody told why (主开发's first should on 9efcf735c — every unlink of a kept copy, one sentence) */
+function saidUnlinkFailure(sockFile, err) {
+  if (err && err.code !== 'ENOENT') console.warn(`[kept] ${sockFile}: its stopped copy could not be removed (${err.code || err.message}) — it stays on disk and the next boot reads it again`);
+}
+/** B-a5a4 (2) — PURE: did a turn end WELL, so that it proves the resume loaded its conversation? Not a claude `result` that is an
+ *  error — a resume the CLI cannot load answers `{type:'result', subtype:'error_during_execution', is_error:true, errors:['No
+ *  conversation found with session ID: …']}` on stdout and exits 1 (scripts/test-resume-breaker.mjs's stub, the record the exit
+ *  classifier scans); a claude turn that ended capped or interrupted is not counted either (its subtype is no success) — an ACP
+ *  max_tokens / refusal end DID answer, so it ran — not an ACP prompt that ended in 'error' or
+ *  'cancelled' (acp-events stamps `session._promptStopReason`; a wrapper whose agent died mid-prompt ends it 'error', and agy can
+ *  end one 'cancelled' before its agent answered anything). An ACP end that names NO stop reason counts as ran, on purpose: only a
+ *  named failure proves the resume did not load. codex's one turn-end call is `task_complete` (codex-events; its record carries
+ *  no failure). Anything not proven keeps the copy for the sweep's road. */
+function turnRan(rec, session) {
+  if (rec && typeof rec === 'object' && (rec.is_error === true || (typeof rec.subtype === 'string' && rec.subtype !== 'success'))) return false;
+  const stop = session && session._promptStopReason;
+  return stop !== 'error' && stop !== 'cancelled';
+}
 /** tmp + rename (the atomic-persistence law): a crash mid-write leaves the old file or none, never a torn one. */
 function writeJsonAtomic(file, obj) {
   const tmp = `${file}.${process.pid}.tmp`;
@@ -139,6 +163,14 @@ function sessionFromMeta(meta, transportFacts) {
     _toolPick: meta.toolPick && typeof meta.toolPick === 'object' && !Array.isArray(meta.toolPick) ? meta.toolPick : null, // lane new-session-form: the 「可用工具」 pick the process was spawned with
     _vcs: meta.vcs && typeof meta.vcs === 'object' ? meta.vcs : null, _prLinks: Array.isArray(meta.prLinks) ? meta.prLinks : null, // design-unknown-records: the git chip + PR chips survive a restart
     _cliTitle: typeof meta.cliTitle === 'string' && meta.cliTitle ? meta.cliTitle : null, // lane session-title-record: the CLI's own title survives a restart
+    // B-460d: the CPU priority the process STARTED with (src/server/spawn-priority.js factOf, spelled inline: this body is
+    // compiled alone by test-oat-identity) — the running process keeps it across the hub's restart, so its properties do
+    _cpuNice: meta.cpuNice && typeof meta.cpuNice === 'object' && Number.isInteger(meta.cpuNice.by) && meta.cpuNice.by >= 0 && meta.cpuNice.by <= 19 && (meta.cpuNice.by > 0 || ['off', 'no-nice', 'remote'].includes(meta.cpuNice.why)) ? (meta.cpuNice.by > 0 ? { by: meta.cpuNice.by } : { by: 0, why: meta.cpuNice.why }) : null,
+    // lane auto-resume-bulk: WHY it stopped (a usage wall / an overloaded model) survives a restart — the card keeps its
+    // mark until the session runs again — and so does a per-session auto-resume choice (the bulk «turn it on for every
+    // session» was undone by every deploy before: the flag lived only in memory and in the client's resume config)
+    _stoppedBy: meta.stoppedBy && typeof meta.stoppedBy === 'object' ? meta.stoppedBy : null, // every reader re-validates it (src/stopped-by.js normalizeStoppedBy); this function is also evaluated stand-alone by suites, so it names nothing outside it
+    ...(typeof meta.autoResume === 'boolean' ? { _autoResume: meta.autoResume } : {}),
     // agent-browser P0 (§3.2.1): the CONVERSATION's browser identity and the
     // user-data-dir rung it spawned on. Restored so a later resume of this
     // conversation finds its key and the orphan sweep sees this session as
@@ -336,8 +368,8 @@ const newerStop = (a, b) => (msOf(a.stoppedAt) - msOf(b.stoppedAt) || msOf(a.cre
 function keepStopped(sockFile, meta, id) {
   const k = keptKey(sockFile, meta, id), was = keptStopped.get(k);
   if (was && was.sockFile !== sockFile) {
-    if (newerStop(was.meta, meta)) { fs.unlink(keptFile(sockFile), () => { }); return sockFile; }
-    fs.unlink(keptFile(was.sockFile), () => { });
+    if (newerStop(was.meta, meta)) { fs.unlink(keptFile(sockFile), (err) => saidUnlinkFailure(sockFile, err)); return sockFile; }
+    fs.unlink(keptFile(was.sockFile), (err) => saidUnlinkFailure(was.sockFile, err));
     keptStopped.set(k, { sockFile, meta, id });
     return was.sockFile;
   }
@@ -356,7 +388,7 @@ function loadKept() {
       try { m = JSON.parse(await fs.promises.readFile(path.join(META_DIR, f), 'utf-8')); } catch { continue; }
       // B-a5a4 (9): a PENDING FORK's copy an earlier boot kept is swept — its own id never arrived, so nothing can ever resume
       // it (its id is its parent's) and nothing consumed it (keyed by its socket): kept and listed for the boot that made it
-      if (restoredForkPending(m)) { fs.promises.unlink(path.join(META_DIR, f)).catch(() => { }); say(`kept copies: a pending fork's copy swept (nothing to resume: ${sockFile})`); continue; }
+      if (restoredForkPending(m)) { fs.promises.unlink(path.join(META_DIR, f)).catch((err) => saidUnlinkFailure(sockFile, err)); say(`kept copies: a pending fork's copy swept (nothing to resume: ${sockFile})`); continue; }
       const id = resumeIdOf(m);
       if (id) keepStopped(sockFile, m, id);
     }
@@ -368,16 +400,36 @@ function loadKept() {
 async function stoppedSessions() {
   await loadKept();
   const live = new Set(); // the conversations live sessions ADDRESS (addressableId: a pending fork addresses none — r2)
-  for (const s of activeSessions.values()) { const id = addressableId(s); if (id) live.add(`${(s && s.backend) || 'claude'}:${id}`); }
+  for (const s of activeSessions.values()) { const id = pairedSession(s) ? null : addressableId(s); if (id) live.add(`${(s && s.backend) || 'claude'}:${id}`); } // a paired machine's session addresses no copy of this machine's
   const rows = [];
   for (const [k, e] of [...keptStopped]) {
-    if (live.has(k)) { keptStopped.delete(k); fs.unlink(keptFile(e.sockFile), () => { }); continue; } // resumed: the live session is the record now
+    if (live.has(k)) { keptStopped.delete(k); fs.unlink(keptFile(e.sockFile), (err) => saidUnlinkFailure(e.sockFile, err)); continue; } // resumed: the live session is the record now
     const m = e.meta;
     rows.push({ backend: m.backend || 'claude', sessionId: e.id, backendSessionId: e.id, cwd: m.cwd || '', name: m.name || '', mode: m.mode || 'terminal', status: 'stopped',
       startedAt: m.stoppedAt || m.createdAt || 0, stoppedAt: m.stoppedAt || null, stopReason: m.stopReason || STOP_DEAD_SOCKET, accountId: m.accountId || (accountBoundOf(m.backend) ? 'subscription' : null), kept: e.sockFile,
       ...(k.startsWith('sock:') ? { forkPending: true } : {}) }); // a pending fork's copy: kept and listed here, but `id` is its PARENT's — no sidebar row (routes/sessions)
   }
   return rows;
+}
+/** B-a5a4 (2) — A RESUME THAT RAN CONSUMES ITS COPY AT ONCE: a live session that addresses a kept copy's conversation ended a turn
+ *  WELL (server.js's ONE turn-end entry — claude `result`, codex `task_complete`, ACP `prompt_end` — every chat harness's stdout
+ *  consumer) ⇒ the live session is the record, and its copy goes now, not at the next /api/sessions sweep. A resume that ran and
+ *  ended with no page asking in between left the copy: a «its process ended while the server was down» row with the old time, and
+ *  the old account its next resume went to. Never at registration, never on a turn that FAILED (`turnRan`): r1 of B-a5a4 consumed at
+ *  registration and lost a failed resume's copy. A pending fork addresses nothing (addressableId), so it consumes nothing.
+ *  `rec` = the turn-end record the entry was handed (claude's `result`, codex's `task_complete`, ACP's `prompt_end`). → the consumed
+ *  sockFile | null */
+async function consumeKeptOf(session, rec = null) {
+  if (!turnRan(rec, session)) return null;
+  if (pairedSession(session)) return null;   // a kept copy is THIS machine's socket; the address names no machine
+  const id = session ? addressableId(session) : null;
+  if (!id) return null;
+  await loadKept();
+  const k = `${session.backend || 'claude'}:${id}`, e = keptStopped.get(k);
+  if (!e) return null;
+  keptStopped.delete(k);
+  await new Promise((r) => fs.unlink(keptFile(e.sockFile), (err) => { saidUnlinkFailure(e.sockFile, err); r(); }));   // forgotten here; a refused unlink is said
+  return e.sockFile;
 }
 // THE FACTS LINE (the boot trace's notes, ⚙ Diagnostics): what the dead sockets of a restore / a re-probe pass became —
 // said once the pass's kept copies were looked for (r2: a copy its harness then answered «no transcript» for is said
@@ -407,7 +459,7 @@ function settleStopped(sockFile, file, meta, id) {
     if (found !== false) return found;
     const k = keptKey(sockFile, meta, id);
     if (keptStopped.get(k)?.sockFile === sockFile) keptStopped.delete(k);
-    await new Promise((r) => fs.unlink(file, () => r()));
+    await new Promise((r) => fs.unlink(file, (err) => { saidUnlinkFailure(sockFile, err); r(); }));
     console.log(`    ↳ ${sockFile}: no transcript — its stopped meta deleted`);
     return false;
   })();
@@ -698,7 +750,7 @@ function restoreSessions() {
       _lockedModel: meta.lockedModel || null,
       _lockedContext: require('../lock-context.js').lockContextOf(meta.lockedContext),   // B-6c55
       _spawnContext: require('../lock-context.js').lockContextOf(meta.spawnContext),     // B-6c55: what the spawn commanded
-      _settingsFileGoverns: Array.isArray(meta.settingsFileGoverns) ? meta.settingsFileGoverns.filter((k) => typeof k === 'string') : [],   // B-8dcf item two
+      _settingsFileGoverns: Array.isArray(meta.settingsFileGoverns) && meta.settingsFileGoverns.some((k) => typeof k === 'string') ? [...SFW.GOVERNED_KINDS] : [],   // B-8dcf item two — a governing file governs EVERY kind (batch 21's cure 3: a 2.369.410 meta holds only the kinds that stood down at its start)
       _initialGroupId: meta.taskId || null, // group spawned into; belonging is live-derived, this only covers the pre-bind window
       _initialGroupIds: spawnGroupIds(meta), // lane new-session-form: every group it was spawned into (meta `taskIds`; an older meta's one `taskId`)
       _heldPoolMember: typeof meta.heldPoolMember === 'string' ? meta.heldPoolMember : null, // the pool member the surviving (non-hot) process holds (design-reset-credits r2)
@@ -1003,7 +1055,7 @@ async function readoptOrphanKeeperSessions() {
       _lockedModel: meta.lockedModel || null,
       _lockedContext: require('../lock-context.js').lockContextOf(meta.lockedContext),   // B-6c55
       _spawnContext: require('../lock-context.js').lockContextOf(meta.spawnContext),     // B-6c55: what the spawn commanded
-      _settingsFileGoverns: Array.isArray(meta.settingsFileGoverns) ? meta.settingsFileGoverns.filter((k) => typeof k === 'string') : [],   // B-8dcf item two
+      _settingsFileGoverns: Array.isArray(meta.settingsFileGoverns) && meta.settingsFileGoverns.some((k) => typeof k === 'string') ? [...SFW.GOVERNED_KINDS] : [],   // B-8dcf item two — a governing file governs EVERY kind (batch 21's cure 3: a 2.369.410 meta holds only the kinds that stood down at its start)
       _initialGroupId: meta.taskId || null,
       _initialGroupIds: spawnGroupIds(meta),
       _remotePort: rport,
@@ -1035,6 +1087,7 @@ async function readoptOrphanKeeperSessions() {
   return { migrateLegacyHomeProjects, restoreSessions, restoreAgentdPipeSessions,
     readoptOrphanKeeperSessions, probeSockets, probeFacts, reprobePending, probePending: () => new Map([...pendingProbes].map(([f, p]) => [f, [...p.q]])),
     stoppedSettled: () => Promise.all([...settling]), // the kept metas' transcript answers (settleStopped) — a test's wait
-    stoppedSessions }; // THE READ-BACK: the kept metas as /api/sessions' stopped rows (routes/sessions, server.js)
+    stoppedSessions, // THE READ-BACK: the kept metas as /api/sessions' stopped rows (routes/sessions, server.js)
+    consumeKeptOf }; // B-a5a4 (2): a turn ended on a live session — its conversation's kept copy goes at once (server.js noteTurnEnd)
 }
-module.exports = { create, heldOriginOf, persistNoStart, resumeIdOf, STOP_DEAD_SOCKET }; // r5: the two held-origin helpers are PURE over a meta + store (test-codex-pool §R17b)
+module.exports = { create, heldOriginOf, persistNoStart, resumeIdOf, turnRan, pairedSession, STOP_DEAD_SOCKET }; // r5: the two held-origin helpers are PURE over a meta + store (test-codex-pool §R17b)

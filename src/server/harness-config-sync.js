@@ -28,8 +28,9 @@
 //                                adapter CAPABILITY, never by backend id)
 // Literal harness ids are FORBIDDEN in this tier (test-architecture's census):
 // every id here arrives from a session, an account or the registry.
-const { HARNESS_SETTINGS, settingPath, rowOf, rowsOfKind, coerce, refusedValue, buildConfigPlan } = require('../harness-settings');
+const { HARNESS_SETTINGS, settingPath, rowOf, rowsOfKind, coerce, readRow, refusedValue, buildConfigPlan } = require('../harness-settings');
 const { applyConfigPlan, readConfigPlan, encodePlan } = require('../harness-config');
+const SFW = require('../settings-file-words.js'); // B-8dcf item two (PURE): loaded with the module, never on a push's pass (batch 21's cure)
 
 /** Descriptor facts → plan specs for buildConfigPlan (ONE spelling: the
  *  server's plan AND the helper's embedded hooks-only DEFAULT_PLAN come from
@@ -66,7 +67,7 @@ function accessorsFor({ serverSetting, harnesses }) {
     const h = harnesses.get(id);
     const row = rowOf(h.settings, key);
     if (!row) throw new Error(`harness '${id}' declares no setting '${key}'`);
-    return coerce(row, serverSetting(settingPath(h.settings.prefix, key)));
+    return readRow(h.settings, row, serverSetting);   // coerce over the stored value; a row with no value that declares `unsetFollows` reads the followed answer
   }
   /** Every spawn row's typed value, keyed by row key — the `settings` field of
    *  buildSessionArgs. Rows with `via` are ALSO here (harmless; the adapter
@@ -89,6 +90,13 @@ function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hoo
   const refusalNow = () => (typeof ownerWriteRefusal === 'function' ? ownerWriteRefusal() : null)
     || (hookRegistrationSafe() ? null : { kind: 'unknown', why: 'this server never writes the owner\'s CLI config' });
   const { harnessSetting, harnessDeclares, harnessSpawnSettings } = accessorsFor({ serverSetting, harnesses });
+  // THE PREDICTION ADAPTERS ARE CHECKED ON THE HUB, at its boot (lane usage-predict; 主开发 2026-11-17: the device agent carries no
+  // code it never runs): a built-in descriptor NAMES its adapter, and every name must resolve to one that keeps its contract
+  // (src/harnesses/predict-adapters.js checkRegistry) — a mismatch is a bug, said by name instead of a hub that starts
+  if (harnesses && typeof harnesses.list === 'function' && typeof harnesses.isBuiltin === 'function') {
+    const predictErrs = require('../harnesses/predict-adapters.js').checkRegistry(harnesses.list().filter((h) => harnesses.isBuiltin(h.id)));
+    if (predictErrs.length) throw new Error(`prediction adapters: ${predictErrs.join('; ')}`);
+  }
   /** The persisted paths of every cli-config row of every registered harness. */
   function cliConfigKeys() {
     const out = [];
@@ -164,7 +172,7 @@ function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hoo
       const value = coerce(row, n[path]);
       for (const [sid, sess] of activeSessions) {
         if (sess.backend !== harness || sess.mode !== 'chat' || !sess.pty) continue;
-        { const k = require('../settings-file-words.js').KIND_OF_ROW[row.key]; if (k && require('../settings-file-words.js').fileGoverns(sess, k)) continue; }   // B-8dcf item two: a value the person's settings file governs is never pushed
+        { const k = SFW.KIND_OF_ROW[row.key]; if (k && SFW.fileGoverns(sess, k)) continue; }   // B-8dcf item two: a value the person's settings file governs is never pushed
         try {
           const ad = adapterRegistry.get(sess.backend);
           if (ad && typeof ad[row.apply.live] === 'function') sess.pty.write(ad[row.apply.live](value) + '\n');

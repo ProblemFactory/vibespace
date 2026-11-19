@@ -457,7 +457,7 @@ const KEY_N = 'bk-0000d001', KEY_D = 'bk-0000d002', KEY_W = 'bk-0000d003', KEY_C
   const recN = pN ? k.browserOf(pN.id) : null;
   let L = launches().filter((l) => l.sess === 'vs-' + KEY_N);
   ok(c.status === 0 && recN && recN.state === 'ready', 'rung N, NO DISPLAY: the first verb SUCCEEDS (it failed "The platform failed to initialize" before)', c.stderr);
-  ok(L.length === 1 && L[0].headed === false && L[0].args === '--no-sandbox,--disable-blink-features=AutomationControlled,--vibespace-keeper=' + KEY_N && !/ozone/.test(L[0].args), 'the launch ran HEADLESS with the Wayland pin dropped (the launch mark kept)', L);
+  ok(L.length === 1 && L[0].headed === false && L[0].args === '--no-sandbox,--disable-blink-features=AutomationControlled,--disable-logging,--log-level=3,--vibespace-keeper=' + KEY_N && !/ozone/.test(L[0].args), 'the launch ran HEADLESS with the Wayland pin dropped (its launch tail kept: B-1789 cure, the quiet log switches — the keeper\'s own file for a fresh launch — then the mark)', L);
   ok(L[0].config && L[0].config.startsWith(path.join(DATA, 'browser-env', 'display') + '/') && cfgOfLaunch(L[0]).headed === false, 'under the PLANNED file (data/browser-env/display/…), never the base', L[0]);
   ok(recN && recN.display && recN.display.kind === 'none' && recN.display.fallback.why === 'no-display' && recN.display.wanted.headed === true && recN.display.wanted.ozone === 'wayland', 'the fact rides the record (no display, a window was wanted, Wayland pinned)', recN && recN.display);
   ok(NOTE_HEADLESS.test(c.stderr) && (c.stderr.match(/\[browser_headless\]/g) || []).length === 1, 'the AGENT is told once, on the verb that launched it', c.stderr);

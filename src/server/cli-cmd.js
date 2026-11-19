@@ -387,7 +387,8 @@ function createCliCmds({ resolve = resolveCmdAsync, usable = executable, ask = n
       const e = entries.get(backend);
       if (!e) return true;
       if (missingOf(e)) return false;
-      return isAbs(e.current) || (!e.answer && !!unaskedBare);
+      // asked and NOT answered (the shell failed to start, timed out) is unknown, like not asked — only a real «none» says absent
+      return isAbs(e.current) || ((!e.answer || e.answer.kind === 'unanswered') && !!unaskedBare);
     },
     /** THE OBSERVED ROW (Manage agents' census line; /api/backend-status): where the CLI was found and by whom. */
     census(backend) {

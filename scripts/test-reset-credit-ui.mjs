@@ -74,11 +74,7 @@ console.log('\n§2 the roster chip');
   const dead = MA.resetChipHtml({ count: 1, useBySec: 2e9, canUse: false }, { key: 'sub-1', disabledWhy: 'Claude Code offers only the interactive /limit-reset — run it in a terminal session' });
   ok('resetChipHtml (claude): the button is DISABLED and its title says why (the interactive /limit-reset)', /<button class="agent-btn acct-reset-use" disabled title="Claude Code offers only the interactive \/limit-reset — run it in a terminal session"/.test(dead) && !/data-reset-key/.test(dead), dead);
   ok('no offer ⇒ empty (a row without credits says nothing)', MA.resetChipHtml(null, { key: 'k' }) === '');
-  const ma = read('src/lib/manage-agents.js');
-  ok('the claude roster passes the CAPABILITY (resetCreditCapable), and the reason only where it cannot spend — never a harness-id branch on the rows', /const claudeCanReset = resetCreditCapable\('claude'\);/.test(ma) && /disabledWhy: claudeCanReset \? '' : CLAUDE_RESET_WHY\(\)/.test(ma));
-  ok('the codex roster renders the slot only for local, logged-in, non-pool rows + the machine login, gated on resetCreditCapable', /const canReset = !selectedHost && resetCreditCapable\('codex'\);/.test(ma) && /\$\{!isPool && a\.loggedIn \? resetSlot\(a\.id\) : ''\}/.test(ma) && /resetSlot\('__global_codex__'\)/.test(ma));
-  ok('the 8 s poll repaints the chip from the same maps (_repaintRosterUsage second pass)', /document\.querySelectorAll\('\.acct-reset-slot\[data-reset-src\]'\)/.test(ma) && /resetChipHtml\(rosterResetOffer\(snap\.u, \{ capable: true \}\), \{ key: slot\.dataset\.resetKey \}\)/.test(ma));
-  ok('agent-meta reads the SERVER caps row (no client mirror to drift)', /export function resetCreditCapable\(backend\) \{\s*\n\s*return serverCapsOf\(backend\)\.resetCredit === true;/.test(read('src/lib/agent-meta.js')));
+  // (§2 the rosters' wiring pins — MOVED to the fast scripts/test-reset-credit-ui-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 
 console.log('\n§3 the route over the real engine');
@@ -459,7 +455,7 @@ console.log('\n§3 the route over the real engine');
       ok('helper belts: an env without CODEX_HOME ⇒ refused by name before the spawn', noHome.sent === false && /explicit CODEX_HOME/.test(noHome.error || ''), JSON.stringify(noHome.error));
       ok('helper belts: a caller that is not a person\'s press ⇒ refused by name before the spawn (the runtime belt under the static census)', noPerson.sent === false && /only a person/.test(noPerson.error || ''), JSON.stringify(noPerson.error));
       ok('helper belts: …none of the three spawned anything', rpcB().length === 0, JSON.stringify(rpcB()));
-      ok('helper belts WIRING: the engine passes the witness from the attempt\'s origin, never a constant', /pressedBy: t\.origin === 'user' \? 'person' : 'auto' \}\)\)/.test(read('src/server/usage-pool-engine.js')));
+      // (the helper belts' wiring pin — MOVED to the fast scripts/test-reset-credit-ui-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
     }
     // H6 an agent's token never reaches it (human-only route)
     const wa = world({ session: false, helper });
@@ -515,10 +511,7 @@ console.log('\n§3 the route over the real engine');
     ok('R3 rule: a reading that is NOT usable and before the reset answers nothing', RC.offerResolution({ available: 1, mode: 'off', accountKey: 'a', resetsAtSec: 100 }, 50e3, { kind: 'reading', at: 60e3, usable: false }) === null);
     ok('R3 rule: a fact OLDER than the card answers nothing; an already-resolved card is not resolved twice', RC.offerResolution({ available: 1 }, 70e3, { kind: 'used', at: 60e3 }) === null && RC.offerResolution({ available: 1, resolved: { how: 'used', at: 1 } }, 0, { kind: 'used', at: 60e3 }) === null);
     ok('R3 rule: offerOf keeps a valid resolution and the wall\'s reset, drops a forged one', JSON.stringify(RC.offerOf({ available: 2, mode: 'off', accountKey: 'k', resetsAtSec: 9, resolved: { how: 'used', at: 5, untilSec: 7 } })) === '{"available":2,"mode":"off","accountKey":"k","resetsAtSec":9,"resolved":{"how":"used","at":5,"untilSec":7}}' && RC.offerOf({ available: 2, mode: 'off', resolved: { how: '<img>', at: 5 } }).resolved === undefined);
-    // the CLIENT carrier: the renderer reads the PURE view, the edit op patches the card IN PLACE
-    const cr = read('src/lib/chat-renderers.js'), cv = read('src/lib/chat-view.js');
-    ok('R3 client: the card renders the PURE view — the outcome line (textContent) instead of the button', /const view = resetCreditCardView\(rc, \{ fmtTime: fmtInstant \}\);/.test(cr) && /line\.textContent = t\(view\.line\.key, view\.line\.params \|\| \{\}\);/.test(cr) && /if \(view\.button\) \{/.test(cr));
-    ok('R3 client: a `resetCredit` edit patches THAT card in place (patchResetCredit) before any re-render branch', /if \('resetCredit' in fields && !fields\.status\) \{\s*\n\s*const el = this\._elements\.get\(id\);\s*\n\s*if \(el\) this\._renderers\.patchResetCredit\(el, msg\);\s*\n\s*return;/.test(cv) && cv.indexOf("if ('resetCredit' in fields") < cv.indexOf("if (fields.status === 'complete' || fields.status === 'error'") && /patchResetCredit\(el, msg\) \{/.test(cr));
+    // (R3 the client carrier's source pins — MOVED to the fast scripts/test-reset-credit-ui-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
     // CONTROL: the engine without the resolution at the credit's answer reproduces the owner's card
     const esrc = read('src/server/usage-pool-engine.js');
     const fromR3 = "      resolveResetCreditCards(tKey, { kind: 'used', at: Date.now(), untilSec });";
@@ -618,13 +611,7 @@ console.log('\n§3 the route over the real engine');
     w5.s1.stubLimits = () => ({ type: 'rate_limits_updated', onDemand: true, rateLimits: { primary: { used_percent: 3, window_minutes: 10080, resets_at: w5.nowS + 7 * 86400 }, secondary: null } });
     await w5.quietly(() => w5.eng.refreshCodexForPerson({ key: w5.A }));
     ok('R4: …and the reading the ⟳ brought back re-judges the wall card (usable again ⇒ resolved, no button)', mm.messages.filter((m) => m.resetCredit).every((m) => m.resetCredit.resolved && m.resetCredit.resolved.how === 'open'), JSON.stringify(mm.messages.filter((m) => m.resetCredit).map((m) => m.resetCredit)));
-    // the CLIENT: the press posts the route, toasts the PURE sentence, repaints at the round trip
-    const um = read('src/lib/usage-meter.js');
-    const fn = um.slice(um.indexOf('async _refreshCodexQuota(btn) {'), um.indexOf('async _refreshQuotaOnDemand('));
-    const answered = (src) => /fetchJson\('\/api\/usage\/codex-refresh'/.test(src) && /codexRefreshToast\(r, /.test(src) && /showToast\(toast\.text/.test(src) && /if \(r\) \{ clearTimeout\(fallback\); this\.refreshUsage\?\.\(\); \}/.test(src);
-    ok('R4 client: the press POSTs the route, toasts the PURE sentence, repaints at the round trip (the 2.5 s refresh only as the fallback)', answered(fn) && !/this\.ws\.send\(\{ type: 'codex-read-limits'/.test(fn));
-    const preFix = "  _refreshCodexQuota(btn) {\n    const live = (this.sidebar?._allSessions || []).find((s) => backendFeatureCaps(s.backend || 'claude').quotaRefresh === 'session-rpc' && s.status === 'live' && s.webuiId && !s.host);\n    if (!live) { showToast(t('Needs a running Codex chat session (the read rides its own app-server)'), { type: 'error' }); return; }\n    try { this.ws.send({ type: 'codex-read-limits', sessionId: live.webuiId }); } catch { }\n    if (btn) { btn.classList.add('spin'); setTimeout(() => btn.classList.remove('spin'), 1500); }\n    setTimeout(() => this.refreshUsage?.(), 2500);\n  },";
-    ok('R4 CONTROL: the pre-fix press (the ws verb + a fixed 2.5 s timer, a toast only for the refusal) fails the same census — the owner\'s silent ⟳', !answered(preFix));
+    // (R4 the client press — source pins with its pre-fix control — MOVED to the fast scripts/test-reset-credit-ui-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   }
   // ── verify r1 (the MONEY class): THE UNKNOWN CONSUME. A consume that went out — or may have — and was never
   //    answered must never free a second key by the clock alone: after the floor it stays UNSETTLED until a
@@ -1419,7 +1406,7 @@ console.log('\n§4d a press that straddles a restart, the two clocks, two conver
     jl(() => w2.eng.recordCodexQuotaSignal(w2.s1, { type: 'reset_credit_result', skipped: true, why: 'no-verdict', idempotencyKey: key, attempts: 0, sent: false, error: 'no verdict on the read before the consume within 25000ms — nothing sent' }));
     const out = { rec: rec(w2.tries()), block: RC.attemptBlock(w2.tries(), { now: Date.now() }), notices: w2.notices.slice(), charged: w2.charged(), said: J.slice(), pv: w2.call('GET', w2.A).body }; w2.killTimers(); return out; };
   { const r = await legSkip(engMod);
-    ok('§4d ② the wrapper\'s keyed `skipped` (sent:false) for the revived press settles it SKIPPED: no floor (the dialog is free), the person told (the no-verdict words), the restart\'s charge said to stand', r.rec.outcome === 'skipped' && !r.rec.sent && r.block.code === null && !r.pv.code && r.notices.some((n) => /got no verdict in time; nothing was spent/.test(n)) && r.said.some((l) => /its word stands over the boot's guess; the restart's charge on the ledger stays/.test(l)) && r.charged === 1, JSON.stringify([r.rec, r.block.code, r.pv.code, r.notices]));
+    ok('§4d ② the wrapper\'s keyed `skipped` (sent:false) for the revived press settles it `skipped`: no floor (the dialog is free), the person told (the no-verdict words), the restart\'s charge said to stand', r.rec.outcome === 'skipped' && !r.rec.sent && r.block.code === null && !r.pv.code && r.notices.some((n) => /got no verdict in time; nothing was spent/.test(n)) && r.said.some((l) => /its word stands over the boot's guess; the restart's charge on the ledger stays/.test(l)) && r.charged === 1, JSON.stringify([r.rec, r.block.code, r.pv.code, r.notices]));
     const c = await legSkip(engNoAccept);
     ok('§4d ② CONTROL (the acceptance removed — the r8 engine, the incident shape): the press ends unknown on a 10-min cooldown, the person told NOTHING', c.rec.outcome === 'unknown' && c.block.code === 'cooldown' && c.notices.length === 0, JSON.stringify([c.rec.outcome, c.block.code, c.notices])); }
   // ① the two clocks: the wrapper gave up (no-verdict) before its push reached the engine (a stalled bridge) — the late push writes no go, re-opens nothing, charges nothing
@@ -1572,7 +1559,7 @@ console.log('\n§4e the revived press — two pushes, a SENT press revived, the 
       return { key, file, atBoot, fed, rec: rec(w2.tries()), block: block(w2).code, pv: pv.code || 'free', L: w2.charged(), notices: w2.notices.slice(), said: J.slice(), w: w2 }; };
     { const r = await legLost(engMod, (key) => ({ type: 'codex-reset-credit', idempotencyKey: key, readFirst: true }));
       ok('§4e ⑧ (A) the REAL wrapper, no server attached: its read-first push and its `skipped {no-verdict}` are in its buffer file, NO consume at the app-server; the boot revives the press unknown + charged on a cooldown, nothing said', JSON.stringify(r.file.inFile) === JSON.stringify(['rate_limits_updated:beforeReset', 'reset_credit_result:skipped']) && r.file.consumes === 0 && r.atBoot.rec.outcome === 'unknown' && r.atBoot.rec.guessed && r.atBoot.block === 'cooldown' && r.atBoot.notices === 0 && r.atBoot.L === 1, JSON.stringify([r.file, r.atBoot]));
-      ok('§4e ⑧ (A) the catch-up at the attach reads the file back: the push (answered before the restart) is NOT re-fed, the `skipped` settles the press SKIPPED — the floor gone, the dialog free, the person told, the restart\'s charge the one ledger line (said to stand)', !!r.fed && JSON.stringify(r.fed.fed) === JSON.stringify(['reset_credit_result:skipped']) && r.fed.dropped.length === 1 && /answered before the restart/.test(r.fed.dropped[0]) && r.rec.outcome === 'skipped' && !r.rec.sent && r.block === null && r.pv === 'free' && r.L === 1 && r.notices.some((n) => /got no verdict in time; nothing was spent/.test(n)) && r.said.some((l) => /read back from its buffer file at the attach/.test(l)), JSON.stringify([r.fed, r.rec, r.block, r.pv, r.L, r.notices]));
+      ok('§4e ⑧ (A) the catch-up at the attach reads the file back: the push (answered before the restart) is NOT re-fed, the `skipped` settles the press `skipped` — the floor gone, the dialog free, the person told, the restart\'s charge the one ledger line (said to stand)', !!r.fed && JSON.stringify(r.fed.fed) === JSON.stringify(['reset_credit_result:skipped']) && r.fed.dropped.length === 1 && /answered before the restart/.test(r.fed.dropped[0]) && r.rec.outcome === 'skipped' && !r.rec.sent && r.block === null && r.pv === 'free' && r.L === 1 && r.notices.some((n) => /got no verdict in time; nothing was spent/.test(n)) && r.said.some((l) => /read back from its buffer file at the attach/.test(l)), JSON.stringify([r.fed, r.rec, r.block, r.pv, r.L, r.notices]));
       r.w.killTimers(); }
     { const r = await legLost(engMod, (key) => ({ type: 'codex-reset-credit', idempotencyKey: key }));
       ok('§4e ⑧ (B) a consume that went out and was ANSWERED during the downtime (sent, the post-reset read, `reset` — all in the file): the catch-up feeds the three at their own instants — the send is now a fact (the guess gone), the press LANDED, said; one ledger line', JSON.stringify(r.file.inFile) === JSON.stringify(['reset_credit_sent', 'rate_limits_updated:afterReset', 'reset_credit_result:reset']) && r.file.consumes === 1 && r.atBoot.rec.guessed && !!r.fed && r.fed.fed.length === 3 && r.rec.outcome === 'reset' && !r.rec.guessed && r.rec.sent && r.L === 1 && r.notices.some((n) => /reset credit consumed|did land/.test(n)), JSON.stringify([r.file, r.fed, r.rec, r.L, r.notices]));
@@ -1580,79 +1567,16 @@ console.log('\n§4e the revived press — two pushes, a SENT press revived, the 
     { const c = await legLost(engNoCatchUp, (key) => ({ type: 'codex-reset-credit', idempotencyKey: key, readFirst: true }));
       ok('§4e ⑧ CONTROL (the catch-up removed — the r9 engine): the press stays unknown on a 10-min cooldown, the person told NOTHING — the incident shape for every restart longer than the wrapper\'s wait (the leg sees the rule)', c.fed === null && c.rec.outcome === 'unknown' && c.block === 'cooldown' && c.notices.length === 0, JSON.stringify([c.fed, c.rec.outcome, c.block, c.notices.length]));
       c.w.killTimers(); }
-    ok('§4e ⑧ the catch-up is BOUNDED and keyed: nothing is read when no attempt of the session is open (null), a remote session is never read, and a reading older than LATE_MS is dropped by name (source pins)', /if \(!open\.size\) return null;/.test(esrc10) && /if \(!session \|\| !id \|\| session\.host\) return null;/.test(esrc10) && /const RESET_CATCHUP_TAIL_BYTES = 512 \* 1024;/.test(esrc10) && /Date\.now\(\) - at > recordLateness\.LATE_MS\)\) \{ dropped\.push/.test(esrc10) && /recordCodexQuotaSignal\(session, p, null, \{ asOf: at \}\)/.test(esrc10));
+    // (§4e ⑧ the catch-up's source pins — MOVED to the fast scripts/test-reset-credit-ui-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
     { const w = world(); ok('§4e ⑧ a session with no open attempt costs no file read (null, no journal line)', jl(() => w.eng.catchUpResetCreditFromBuffer(w.s1, 'cx1')) === null && !J.some((l) => /buffer file/.test(l))); w.killTimers(); }
   }
 }
 
   for (const r of roots) fs.rmSync(r, { recursive: true, force: true });
-  const eng = read('src/server/usage-pool-engine.js');
-  ok('ONE writer: the auto rung and the manual use both call writeResetCredit with the CREDIT\'S identity (the verb is spelled once in the engine; verify r8 T0: only the manual use asks for the read first)', /const wr = writeResetCredit\(session, \{ resetsAtSec: R, lane, origin: 'auto', now, key \}\);/.test(eng) && /const wr = writeResetCredit\(session, \{ resetsAtSec: p\.resetsAtSec \|\| 0, lane: null, origin: 'user', now, key: p\.key, readFirst: !afterRead \}\);/.test(eng) && (eng.match(/type: 'codex-reset-credit', idempotencyKey: idemKey, \.\.\.\(rf \? \{ readFirst: true \} : \{\}\) \}\)/g) || []).length === 1 && (eng.match(/type: 'codex-reset-credit'[,'\s]/g) || []).length === 1);
-  ok('the carrier is picked by CAPABILITY (capsOf(s.backend).resetCredit), never a backend id', /capsOf\(s\.backend\)\.resetCredit === true && ids\.has\(liveQuotaKeyFor\(s\)\)/.test(eng) && !/function resetCreditCarriers[\s\S]{0,400}backend === 'codex'/.test(eng));
-  // lane mirror-263-reds: ORDER-FREE — the setupUsage engine object (the one that hands clearSealedOrders) must NAME both
-  // functions; oat-verify-fixes slotted establishedWindows in between and the old exact-sequence regex went red on a right wiring
-  const engineKeys = (src) => { const objs = [...src.matchAll(/engine: \{ ([\w, ]+) \}/g)].map((m) => ({ text: m[0], keys: m[1].split(', ') })).filter((o) => o.keys.includes('clearSealedOrders')); return objs.length === 1 ? objs[0] : null; };
-  const handsBoth = (src) => { const o = engineKeys(src); return !!o && o.keys.includes('resetCreditPreview') && o.keys.includes('consumeResetCreditFor'); };
-  const srv = read('server.js'), eo = engineKeys(srv);
-  ok('the route is wired where the accounts routes live, and server.js hands the engine both functions (by name, any order)', /require\('\.\.\/routes\/reset-credit\.js'\)\.registerResetCreditRoutes\(app, \{ engine \}\);/.test(read('src/server/account-usage-routes.js')) && handsBoth(srv), JSON.stringify(eo && eo.keys));
-  const dropped = !eo ? [] : ['resetCreditPreview', 'consumeResetCreditFor'].map((k) => handsBoth(srv.replace(eo.text, eo.text.replace(new RegExp(`\\b${k}, |, ${k}\\b`), ''))));
-  ok('MUTANT: server.js stops handing resetCreditPreview (or consumeResetCreditFor) ⇒ the wiring pin goes RED', eo && dropped.join() === 'false,false', JSON.stringify(dropped));
+  // (the ONE writer + server.js's wiring (with its mutant) — MOVED to the fast scripts/test-reset-credit-ui-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 
-console.log('\n§4 THE three entry points open ONE dialog');
-{
-  const dlg = read('src/lib/reset-credit-dialog.js');
-  ok('the dialog is ONE exported function, built on createModalShell, worded by the PURE dialogModel, POSTing the route', /export async function openResetCreditDialog\(app, \{ accountKey, sessionId = null, todoId = null \} = \{\}\)/.test(dlg) && /createModalShell\(\{ id: 'reset-credit-dialog'/.test(dlg) && /dialogModel\(p, \{/.test(dlg) && /\/api\/accounts\/\$\{encodeURIComponent\(p\.key\)\}\/reset-credit`, \{ method: 'POST'/.test(dlg));
-  ok('…draws every string with textContent (a peer/account name is data), and a failure reaches the user (toast)', /el\.textContent = words\(l\);/.test(dlg) && /showToast\(t\('Reset credit not used — \{reason\}'/.test(dlg) && !/innerHTML = [^U]/.test(dlg));
-  ok('…resolves the For-you item after the decision (Confirm ⇒ done, Not now ⇒ dismissed)', /await resolveTodo\('done'\);/.test(dlg) && /await resolveTodo\('dismissed'\);/.test(dlg));
-  const callers = {
-    'src/lib/manage-agents.js': /openResetCreditDialog\(this, \{ accountKey: useBtn\.dataset\.resetKey \}\)/g,
-    'src/lib/chat-renderers.js': /openResetCreditDialog\(this\.app, \{ accountKey: rc\.accountKey, sessionId: this\.sessionId \|\| null \}\)/g,
-    // §9 (2026-09-27): the For-you button's verb moved VERBATIM into THE client model (the popup and the For-you window both call it)
-    'src/lib/user-todos-actions.js': /openResetCreditDialog\(app, \{ accountKey: rec\.action\.accountKey, sessionId: rec\.action\.sessionId \|\| null, todoId: rec\.id \}\)/g,
-  };
-  for (const [f, re] of Object.entries(callers)) {
-    const s = read(f);
-    ok(`${f} imports the ONE dialog and calls it`, /import \{ openResetCreditDialog(, fmtInstant)? \} from '\.\/reset-credit-dialog\.js';/.test(s) && (s.match(re) || []).length >= 1);
-  }
-  ok('manage-agents: BOTH rosters route the button to it (codex live, claude disabled until it can)', (read('src/lib/manage-agents.js').match(/openResetCreditDialog\(this, \{ accountKey: useBtn\.dataset\.resetKey \}\)/g) || []).length === 2);
-  // lane reset-path R3: the rule moved into the PURE card view (a resolved card shows its outcome line instead)
-  ok('chat-renderers: the button rides a peer card only when the offer names an account (and no later fact answered it)', /if \(view\.button\) \{/.test(read('src/lib/chat-renderers.js')) && /return \{ button: !!\(o\.accountKey && Number\(o\.available\) > 0\), line: null \};/.test(read('src/reset-credit.js')));
-  // 2.369.169: the row markup moved to THE row renderer (src/lib/user-todos-row.js) the panel imports
-  ok('user-todos-panel: the button only on a reset-credit action item (drawn by THE row renderer the panel imports)', /i\.action\.type === 'reset-credit' && i\.action\.accountKey/.test(read('src/lib/user-todos-row.js')) && /from '\.\/user-todos-row\.js'/.test(read('src/lib/user-todos-panel.js')));
-  ok('…the popup\'s button and the For-you window\'s producer action both run THE model\'s verb (no second dialog call)', /model\.runAction\(todos\.open\.find\(\(i\) => i\.id === id\)\)/.test(read('src/lib/user-todos-panel.js')) && /if \(a === 'producer'\) \{ model\.runAction\(it\); return; \}/.test(read('src/lib/inbox-window.js'))
-    && !/openResetCreditDialog/.test(read('src/lib/user-todos-panel.js')) && !/openResetCreditDialog/.test(read('src/lib/inbox-window.js')));
-  const all = fs.readdirSync(path.join(REPO, 'src/lib')).filter((f) => f.endsWith('.js') && !/^i18n/.test(f)).map((f) => ['src/lib/' + f, read('src/lib/' + f)]);
-  const definers = all.filter(([, s]) => /function openResetCreditDialog\b/.test(s)).map(([f]) => f);
-  ok('exactly ONE client file defines the dialog', JSON.stringify(definers) === '["src/lib/reset-credit-dialog.js"]', JSON.stringify(definers));
-  const senders = all.filter(([, s]) => /type: 'codex-reset-credit'/.test(s)).map(([f]) => f);
-  ok('no client file sends the raw ws verb (every manual spend goes through the dialog → the route → the authorizer)', senders.length === 0, JSON.stringify(senders));
-  // THE VERB CENSUS BEYOND src/lib (r2, reproduced: ws-handler's
-  // `codex-reset-credit` case wrote the verb straight to the pty — no spend
-  // ceiling, no per-identity floor, no origin, and its failure then walked the
-  // switch/wait ladder as an AUTO attempt). Over EVERY tracked JS surface that
-  // can reach a wrapper's stdin (server.js, src/**, data/bin/*.js): the verb is
-  // WRITTEN in exactly one place (the engine's writer), no dispatcher spells it
-  // as a case label (a relay of `{ type: data.type }` hides the literal from
-  // the writer grep, which is exactly the shape the ws case had), and only the
-  // wrapper READS it.
-  {
-    const walk = (d, out = []) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const f = path.join(d, e.name); if (e.isDirectory()) { if (!/node_modules|\.git/.test(f)) walk(f, out); } else if (/\.js$/.test(e.name) && !/^i18n-/.test(e.name) && !/^\./.test(e.name)) out.push(f); } return out; };
-    const files = ['server.js', ...walk('src'), ...fs.readdirSync(path.join(REPO, 'data/bin')).filter((f) => /\.js$/.test(f)).map((f) => 'data/bin/' + f)];
-    const WRITE = /type:\s*['"]codex-reset-credit['"]/;
-    const CASE = /case\s*['"]codex-reset-credit['"]\s*:/;
-    const READ = /===\s*['"]codex-reset-credit['"]/;
-    const hits = (re) => files.filter((f) => re.test(read(f)));
-    ok(`the census is non-vacuous (${files.length} files incl. the engine, ws-handler and the codex wrapper)`, files.length > 100 && ['src/server/usage-pool-engine.js', 'src/ws-handler.js', 'data/bin/codex-chat-wrapper.js'].every((f) => files.includes(f)));
-    ok('the verb is WRITTEN by exactly one server-tier file: the engine (writeResetCredit)', JSON.stringify(hits(WRITE)) === '["src/server/usage-pool-engine.js"]', JSON.stringify(hits(WRITE)));
-    ok('no dispatcher relays it (no `case \'codex-reset-credit\':` anywhere — the ws bypass is gone)', hits(CASE).length === 0, JSON.stringify(hits(CASE)));
-    ok('only the codex wrapper READS it', JSON.stringify(hits(READ)) === '["data/bin/codex-chat-wrapper.js"]', JSON.stringify(hits(READ)));
-    const preFix = "        case 'codex-reset-credit':\n        case 'codex-read-limits': {\n          if (session?.pty && served) session.pty.write(JSON.stringify({ type: data.type }) + '\\n');";
-    ok('NEGATIVE CONTROL: the pre-r2 ws relay is what the case census reports, and the writer grep alone would have missed it', CASE.test(preFix) && !WRITE.test(preFix));
-  }
-  ok('NEGATIVE CONTROL: a caller that bypasses the dialog is what the census reports', /type: 'codex-reset-credit'/.test("app.ws.send({ type: 'codex-reset-credit', sessionId })") && !(/openResetCreditDialog\(app, \{ accountKey: rec\.action\.accountKey/.test('openResetCredit(app, rec)')));
-  ok('the wall card and the arm card carry the account the credits belong to (offer.accountKey)', /return n !== null && n > 0 \? \{ available: n, mode, accountKey: key \} : null;/.test(read('src/server/usage-pool-engine.js')) && /resetCredit: \{ available: n, mode, accountKey: key, \.\.\.\(R \? \{ resetsAtSec: R \} : \{\}\) \}/.test(read('src/server/usage-pool-engine.js')));
-}
+// (§4 the three entry points open ONE dialog + the verb census (with its controls) — MOVED to the fast scripts/test-reset-credit-ui-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 
 // ── verify r8 T0: THE SESSION PATH'S READ-FIRST ON THE REAL WRAPPER FILE (data/bin/codex-chat-wrapper.js) against the stub
 //    app-server (the measured 0.159.3 table): the read goes out BEFORE the consume (request ids), the consume waits for
@@ -1756,17 +1680,7 @@ console.log('\n§4b the session path reads first on the REAL wrapper (stub app-s
   try { endRootedProcesses(WDIR); } catch { } try { fs.rmSync(WDIR, { recursive: true, force: true }); } catch { }
 }
 
-console.log('\n§5 i18n');
-{
-  const zh = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default;
-  const ja = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
-  const re = /\b(?:t|i18nKey)\(\s*'((?:[^'\\]|\\.)*)'/g;
-  const keys = new Set();
-  for (const f of ['src/reset-credit.js', 'src/lib/reset-credit-dialog.js']) for (const m of read(f).matchAll(re)) keys.add(m[1].replace(/\\'/g, "'"));
-  for (const k of ['Claude Code offers only the interactive /limit-reset — run it in a terminal session', '{n} reset credits', '1 reset credit', 'Use…', 'Use a reset credit…', '{n} stored reset credits on this account — opens the confirmation']) keys.add(k);
-  const missing = [...keys].filter((k) => !(k in zh) || !(k in ja));
-  ok(`every new key has zh + ja (${keys.size} keys)`, keys.size > 25 && missing.length === 0, missing.join(' | '));
-}
+// (§5 the new keys' zh / ja — MOVED to the fast scripts/test-reset-credit-ui-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 ok('ci.mjs runs this suite', /'test-reset-credit-ui'/.test(read('scripts/ci.mjs')));
 
 

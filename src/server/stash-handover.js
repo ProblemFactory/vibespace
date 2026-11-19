@@ -95,9 +95,19 @@ const DELIVERED_MAX = 50;
 const DELIVERED_FILE = 'stash-handover.json';
 /** The frame's own name for its hand-over (the text the wrapper echoes back carries it). */
 const HANDOVER_TAG_RE = /\(hand-over (ho-[a-z0-9]+-[a-z0-9]+)\)/;
-const STATUS = Object.freeze({ agent_forbidden: 403, no_session: 404, no_conversation: 409, nothing_waiting: 409, in_flight: 409, held_for_next_turn: 409, spend_refused: 429, unreachable: 409, unavailable: 503, restarting: 503 });
+const STATUS = Object.freeze({ agent_forbidden: 403, no_session: 404, no_conversation: 409, nothing_waiting: 409, in_flight: 409, held_for_next_turn: 409, spend_refused: 429, unreachable: 409, unavailable: 503, restarting: 503, not_mid_turn: 409, not_steerable: 409, stopping: 409, unconfirmed: 409, too_long: 409, awaiting_word: 409 });
+/** B-02a3: the group hand-over's budget (the frame the running turn takes — the next-turn report's own composition, bounded
+ *  like the stash's hand-over), how long a press waits for the wrapper's word «handed», and how long a late word still
+ *  settles it (the marks are committed only on that word). */
+const GROUP_HANDOVER_BYTES = 12 * 1024;
+const GROUP_HANDED_WAIT_MS = 3000;
+const GROUP_LATE_MS = 60 * 1000;
+/** B-02a3 cure: the spend ceiling is WIRED where the hub builds this door (server.js passes `getSpendGuard: () => spendGuard`, the usage
+ *  engine's own instance) — never looked up here: the first cut read `require('./usage-pool-engine.js').spendGuard`, which that module
+ *  does not export (it is on create()'s result), so every press in production was refused «not wired». An unwired door refuses,
+ *  and says so once (scripts/test-spend-paths §2c: every injected guard is passed at every construction site). */
 
-function create({ activeSessions, getDeliver = () => null, getJobs = () => null, getGroups = () => null, getChannels = () => null, broadcastSessions = () => {}, renderMsgStash, renderNotifStash, log = console, debounceMs = 300, now = () => Date.now(), schedule = (fn, ms) => { const t = setTimeout(fn, ms); if (t && t.unref) t.unref(); return t; }, dataDir = null } = {}) {
+function create({ activeSessions, getDeliver = () => null, getJobs = () => null, getGroups = () => null, getChannels = () => null, broadcastSessions = () => {}, renderMsgStash, renderNotifStash, log = console, debounceMs = 300, now = () => Date.now(), schedule = (fn, ms) => { const t = setTimeout(fn, ms); if (t && t.unref) t.unref(); return t; }, dataDir = null, getSendUserInput = () => null, getSpendGuard = () => null, groupHandedWaitMs = GROUP_HANDED_WAIT_MS } = {}) {
   const cidOf = (s) => (s && (s.backendSessionId || s.claudeSessionId)) || null;
   const jobsReady = () => { try { const jm = getJobs(); return jm && typeof jm.peekNotifs === 'function' ? jm : null; } catch { return null; } };
   let seq = 0;
@@ -131,7 +141,8 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
   }
   /** THE GROUP MESSAGES WAITING for this conversation's next turn (lane group-report-card): the groups engine's
    *  PREVIEW (`reportsForTurn(cid, {preview:true})` — commits nothing, memoised), as summary entries (source 'group').
-   *  They live in the engine, not in a stash: a hand-over never carries them (they ride the next turn, whoever starts it — lane stash-any-turn). */
+   *  They live in the engine, not in a stash: a hand-over never carries them (they ride the next turn, whoever starts it — lane stash-any-turn);
+   *  B-02a3: while the agent is mid-turn the strip's GROUP press hands them to the running turn (handOverGroups below). */
   function groupEntriesOf(s) {
     try {
       const ge = getGroups();
@@ -152,7 +163,7 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
       const groups = groupEntriesOf(s);
       const sum = S.summarize({ msg: [...both.retry, ...both.msg, ...groups], jobs: both.jobs });
       const d = getDeliver();
-      return sum ? { ...sum, billed: billedFor(s), inFlight: inflight.has(cid), held: heldOf([...both.retry, ...both.msg]), reachable: reachableFor(s) && (both.msg.length + both.jobs.length + both.retry.length) > 0, ...(d && typeof d.handoverArmed === 'function' && d.handoverArmed(cid) ? { armed: true } : {}) } : null;
+      return sum ? { ...sum, ...(s.host ? { groupHandover: false } : {}), billed: billedFor(s), inFlight: inflight.has(cid), held: heldOf([...both.retry, ...both.msg]), reachable: reachableFor(s) && (both.msg.length + both.jobs.length + both.retry.length) > 0, ...(d && typeof d.handoverArmed === 'function' && d.handoverArmed(cid) ? { armed: true } : {}) } : null;
     } catch (e) { log.warn?.(`[stash] summary failed: ${(e && e.message) || e}`); return null; }
   }
 
@@ -402,6 +413,77 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
     // the caller keeps the frame as one notice rather than dropping it; a second echo is handled (-1)
     return k;
   }
+  /** B-02a3 — HAND THE GROUP MESSAGES TO THE RUNNING TURN (主开发's ruling (1), 2026-11-18). A person's press, only while the
+   *  agent is mid-turn: the groups engine's own next-turn report for this member (`reportsForTurn`, aside — the echo guard's
+   *  words), headed as handed-over group messages (never the person's words) through the one belt for a peer's text, goes to
+   *  the running turn by the road an Enter takes (THE typing path, origin 'group-handover' — it refuses, writing nothing,
+   *  when no turn runs, a Stop is settling, or this conversation's Enter does not hand a message to its running turn). It is
+   *  SETTLED AS RECEIVED (`commitReports`: the marks move, the cards draw) only when the wrapper says it was handed — its
+   *  `input_handover handed` with no message ids (the frame carries none; claude-stream-json reads it into
+   *  `session._groupHandover`); no word ⇒ the marks stay and the messages ride the next turn as before. The spend authorizer
+   *  is asked first under the attended reason: in the one edge where the turn was already finishing, the CLI runs the
+   *  frame right after it as a turn of its own (what an Enter does then) — a person's turn, the attended tally, never the
+   *  unattended caps. An idle agent keeps today's words: no press starts a turn. */
+  const groupInflight = new Map();   // cid → {id, at}
+  let unwiredSaid = false;
+  async function handOverGroups(webuiId, { pressed = null } = {}) {
+    const s = activeSessions && activeSessions.get(String(webuiId));
+    if (!s) return { ok: false, code: 'no_session', error: 'no such live session' };
+    const cid = addressableId(s);
+    if (!cid) return { ok: false, code: 'no_conversation', error: 'this session has no conversation yet' };
+    if (closed) return { ok: false, code: 'restarting', error: 'the server is restarting — the group messages keep waiting for the agent’s next turn' };
+    if (!isPress(pressed)) return { ok: false, code: 'not_a_person', error: 'the group hand-over is a person’s press' };
+    const cur = groupInflight.get(cid);
+    if (cur) return { ok: false, code: 'in_flight', error: `a group hand-over for this conversation is already in progress (${cur.id})`, id: cur.id, since: cur.at };
+    const waiting = s._groupHandover && s._groupHandover.state === null && now() - s._groupHandover.at < GROUP_LATE_MS ? s._groupHandover : null;   // r1 should 4: one hand-over at a time, until its word or its minute
+    if (waiting) return { ok: false, code: 'awaiting_word', error: `the last group hand-over (${waiting.id}) still waits for the agent's word — the group messages keep waiting`, id: waiting.id, since: waiting.at, retryAfter: Math.max(1000, GROUP_LATE_MS - (now() - waiting.at)) };
+    if (s.host) return { ok: false, code: 'not_steerable', error: 'this conversation runs on another machine — the group messages ride its next turn' };   // r1 should 6: a remote wrapper's door is not read here
+    const ge = getGroups();
+    const sendUserInput = getSendUserInput();   // THE typing path (the spend census's typed-send primitive: this site is gated by the authorizer below)
+    if (!ge || typeof ge.reportsForTurn !== 'function' || typeof ge.commitReports !== 'function' || typeof sendUserInput !== 'function') return { ok: false, code: 'unavailable', error: 'the groups engine or the typing path is not wired on this instance' };
+    const id = `gh-${now().toString(36)}-${(++seq).toString(36)}`;
+    groupInflight.set(cid, { id, at: now() });
+    changed();
+    try {
+      let rep = null;
+      try { rep = ge.reportsForTurn(cid, { budget: GROUP_HANDOVER_BYTES, aside: true }); } catch (e) { rep = null; log.warn?.(`[stash] ${cid}: the group report could not be composed — ${(e && e.message) || e}`); }
+      const marks = rep && Array.isArray(rep.marks) ? rep.marks : [];
+      if (!rep || !rep.text) return { ok: false, code: 'nothing_waiting', error: 'no group message is waiting for this conversation' };
+      if (!marks.length) return { ok: false, code: 'too_long', error: 'the waiting group messages do not fit one hand-over — they ride the next turn' };   // r1 note: nothing fit the budget
+      const n = marks.reduce((a, m) => a + (m && Array.isArray(m.cards) ? m.cards.length : 0), 0);
+      // THE MONEY (the ruling): asked BEFORE the frame leaves, under the attended reason — a refusal writes nothing
+      const spendGuard = getSpendGuard();
+      let v = null;
+      const ask = { spendReason: 'group-handover', session: s, cid };   // the ATTENDED site (scripts/test-spend-paths §2b reads the literal; the press guard above fences it)
+      try { v = spendGuard && typeof spendGuard.authorize === 'function' ? spendGuard.authorize({ reason: ask.spendReason, session: s, cid }) : null; }
+      catch (e) { return { ok: false, code: 'spend_refused', id, error: 'the spend authorizer failed: ' + ((e && e.message) || e) }; }   // fail closed
+      if (!v && !unwiredSaid) { unwiredSaid = true; log.warn?.('[stash] the group hand-over has no spend guard wired (getSpendGuard) — every press is refused until the hub passes one'); }
+      if (!v || v.ok === false) return { ok: false, code: 'spend_refused', id, error: v ? `the spend ceiling refused this turn${v.why ? ` (${String(v.why).slice(0, 40)})` : ''}` : 'the spend authorizer is not wired', why: (v && v.why) || null, retryAfter: (v && v.retryAfter) || 0, identity: v && v.identity ? { key: v.identity.key, name: v.identity.name || v.identity.key } : null };
+      const frame = agentText(`The user handed over, into this turn, the group messages that were waiting for your next turn (group hand-over ${id}). They are messages posted in your groups — not words the user typed to you here:\n\n${rep.text}`, { kind: 'block', max: GROUP_HANDOVER_BYTES + 1024 });
+      // the wrapper's word, read by claude-stream-json off `input_handover` records with no message ids (only this frame has none)
+      let sayHanded = null;
+      const handed = new Promise((res) => { sayHanded = res; });
+      const pend = { id, at: now(), state: null, said(state) {
+        if (state === 'handed' && !pend.state) { pend.state = 'handed'; ge.commitReports(cid, marks).then(() => changed(), (e) => log.warn?.(`[stash] ${cid}: group hand-over ${id} was handed but its marks could not be committed — ${(e && e.message) || e} (the messages may ride the next turn again)`)); sayHanded('handed'); return; }
+        if (state === 'own-turn' && pend.state === 'handed') { pend.state = 'own-turn'; try { if (spendGuard && typeof spendGuard.note === 'function') spendGuard.note({ reason: ask.spendReason, session: s, identity: v.identity || null, hold: v.hold || null }); } catch (e) { log.warn?.(`[stash] ${cid}: the attended turn of group hand-over ${id} was not tallied — ${(e && e.message) || e}`); } }
+        if (state === 'own-turn' || state === 'landed' || state === 'kept') { if (s._groupHandover === pend) s._groupHandover = null; }
+      } };
+      s._groupHandover = pend;
+      schedule(() => { if (s._groupHandover === pend) s._groupHandover = null; }, GROUP_LATE_MS);   // a word later than this settles nothing
+      const r = sendUserInput(String(webuiId), frame, { origin: 'group-handover', steer: true });   // its door: the running turn (the typing path writes it only there)
+      if (!r || !r.ok) {
+        if (s._groupHandover === pend) s._groupHandover = null;
+        return { ok: false, code: (r && ['not_mid_turn', 'not_steerable', 'stopping'].includes(r.code)) ? r.code : 'unreachable', id, error: (r && r.error) || 'the agent could not be reached — the group messages keep waiting for its next turn' };
+      }
+      const word = await Promise.race([handed, new Promise((res) => schedule(() => res(null), groupHandedWaitMs))]);
+      if (word !== 'handed') return { ok: false, code: 'unconfirmed', id, error: `the agent did not say it took the group messages within ${Math.round(groupHandedWaitMs / 1000)} s — they stay waiting for its next turn (a later word still settles them)` };
+      log.log?.(`[stash] ${cid}: ${n} group message(s) handed to the running turn (group hand-over ${id})`);
+      return { ok: true, id, delivered: n, lane: 'steer' };
+    } finally {
+      groupInflight.delete(cid);
+      changed();
+    }
+  }
   /** 「刷新所有活着的会话」 (lane refresh-live-sessions): ONE note into every LIVE conversation's next turn, through the
    *  stash — the next-turn door the browser handback uses: free, never a wake, never the spend guard. The plan is PURE
    *  (src/refresh-note.js) over this server's live sessions plus `others` — the stopped / read-only conversations the
@@ -490,6 +572,21 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
         res.json(r);
       } catch (e) { res.status(500).json({ error: (e && e.message) || String(e) }); }
     });
+    // B-02a3: the group hand-over — the hand-over's own press checks (no bearer, a person's page)
+    app.post('/api/sessions/:id/stash/hand-over-groups', async (req, res) => {
+      try {
+        if (pressBearer(req.headers)) return res.status(403).json({ error: 'the user’s hand-over — not an agent route', code: 'agent_forbidden' });
+        const press = pressOf(req);
+        if (!press) return res.status(403).json({ error: 'the hand-over is a press on this instance’s own page — a request with no page (a script) cannot make one', code: 'not_a_person' });
+        const r = await handOverGroups(String(req.params.id), { pressed: press });
+        if (!r.ok) {
+          noteRefusal(String(req.params.id), r);
+          if (r.retryAfter) res.setHeader('Retry-After', String(Math.max(1, Math.ceil(Number(r.retryAfter) / 1000) || 1)));
+          return res.status(STATUS[r.code] || 400).json(r);
+        }
+        res.json(r);
+      } catch (e) { res.status(500).json({ error: (e && e.message) || String(e) }); }
+    });
     // lane refresh-live-sessions: the user's 「刷新所有活着的会话」 — cookie only, like the hand-over (an agent never queues
     // a note into every conversation); body `{ text, others: [{conversationId, state}] }`
     app.post('/api/sessions/refresh-note', (req, res) => {
@@ -503,7 +600,7 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
     });
   }
 
-  return { summaryFor, billedFor, reachableFor, changed, handOver, refreshLive, register, entriesOf, restoreHandedOver, redactDelivered, close, settle, isClosed: () => closed, inFlight: (cid) => inflight.has(cid), inFlightCount: () => inflight.size, _delivered: delivered };
+  return { summaryFor, billedFor, reachableFor, changed, handOver, handOverGroups, groupInFlight: (cid) => groupInflight.has(cid), refreshLive, register, entriesOf, restoreHandedOver, redactDelivered, close, settle, isClosed: () => closed, inFlight: (cid) => inflight.has(cid), inFlightCount: () => inflight.size, _delivered: delivered };
 }
 
-module.exports = { create, STATUS, FROM_NAME, HANDOVER_MAX_ENTRIES, HANDOVER_MAX_BYTES, HANDOVER_TAG_RE, DELIVERED_TTL_MS, DELIVERED_MAX, DELIVERED_FILE };
+module.exports = { create, STATUS, FROM_NAME, HANDOVER_MAX_ENTRIES, HANDOVER_MAX_BYTES, HANDOVER_TAG_RE, DELIVERED_TTL_MS, DELIVERED_MAX, DELIVERED_FILE, GROUP_HANDOVER_BYTES, GROUP_HANDED_WAIT_MS, GROUP_LATE_MS };

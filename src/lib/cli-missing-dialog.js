@@ -61,8 +61,28 @@ export function cliWhereWords(info) {
   return null;
 }
 
+/** B-69ec: a paired machine's row — where ITS login shell found the CLI at the last create (`row` = the census of
+ *  /api/hosts/<id>/backend-status `cliWhere[backend]`) → { tone, text } | null (never asked yet). */
+export function remoteCliWhereWords(row, machine) {
+  if (!row || !row.answer) return null;
+  const shell = row.shell || 'sh', m = machine || t('that machine');
+  if (row.answer === 'path' && row.path) return { tone: 'dim', text: t('found by the {shell} of {machine} at {path}', { shell, machine: m, path: row.path }) };
+  if (row.answer === 'none' && row.prelude) return { tone: 'warn', text: t('not found by the {shell} of {machine} · the PATH VibeSpace adds there has {path}, which runs', { shell, machine: m, path: row.prelude }) };
+  if (row.answer === 'none') return { tone: 'warn', text: t('not found by the {shell} of {machine} (login shell)', { shell, machine: m }) };
+  if (row.answer === 'unanswered') return { tone: 'warn', text: t('the {shell} of {machine} could not be asked ({why}) · its own PATH decides', { shell, machine: m, why: whyWords(row.why) }) };
+  return null;
+}
+
 /** The refusal's sentences (the dialog's body, the failed window's text): { asked, what, hint }. */
 export function cliMissingWords(msg) {
+  if (msg && msg.remote && msg.machine) { // B-69ec: a paired machine's own login shell holds no program for it
+    const cli = String(msg.cli || msg.backend || 'CLI'), shell = msg.shell || 'sh', machine = String(msg.machine);
+    return { cli, asked: t('Asked: the {shell} of {machine}, as a login shell', { shell, machine }),
+      what: msg.notExecutable ? (msg.dangling === 'missing' ? t('Nothing was started. The alias for {cli} in the {shell} of {machine} names {path}, which is missing.', { shell, machine, cli, path: String(msg.notExecutable) }) : t('Nothing was started. The alias for {cli} in the {shell} of {machine} names {path}, which is not executable.', { shell, machine, cli, path: String(msg.notExecutable) }))
+        : msg.wrapper ? t('Nothing was started. The {shell} of {machine} wraps {cli} in an alias or a function, which VibeSpace does not run, and has no {cli} program on its PATH.', { shell, machine, cli })
+        : t('Nothing was started. The {shell} of {machine} has no {cli} program on its PATH.', { shell, machine, cli }),
+      hint: null };
+  }
   const cli = String(msg.cli || msg.backend || 'CLI');
   const shell = msg.shell || 'sh';
   const dirs = (Array.isArray(msg.looked) ? msg.looked : []).map(tildeHome).join(', ');

@@ -57,8 +57,14 @@ console.log('§2 history renders the same cards (the fall-back is a renderer, no
   ok(`no card for any handled (${MM.HANDLED_SYSTEM_SUBTYPES.size}) / known-ignored subtype (${MM.KNOWN_IGNORED_SYSTEM_SUBTYPES.size}) / known-ignored top-level type (${MM.KNOWN_IGNORED_RECORD_TYPES.size})`, cards(mm).length === 0, cards(mm).map((m) => m.content[0].name));
   const consumer = read('src/server/stdout/claude-stream-json.js');
   const consumerTypes = [...consumer.matchAll(/msg\.type === '([a-z_]+)'/g)].map((m) => m[1]).filter((t) => !['system', 'assistant', 'user', 'result', 'control_response', 'attachment'].includes(t));
-  const missing = consumerTypes.filter((t) => !MM.KNOWN_IGNORED_RECORD_TYPES.has(t));
-  ok(`every top-level type the SERVER consumer handles is on the normalizer's known-ignored list (${consumerTypes.length} checked)`, missing.length === 0, missing);
+  // THE LAW (the head of this file): a type the server consumer owns never becomes an «Unknown event» card — it is on the
+  // normalizer's DECLARED known-ignored list, or the normalizer HANDLES it itself (input_handover: the normalizer draws the hand-over
+  // order from it, and B-02a3's group press reads the wrapper's id-less word there too) — judged by feeding each one to a real normalizer
+  const handledHere = consumerTypes.filter((t) => !MM.KNOWN_IGNORED_RECORD_TYPES.has(t));
+  const carded = (t) => { const m = createMessageManager('claude', 'test-unknown-consumer-' + t); m.processLive({ type: t, anything: 1 }); return cards(m).length > 0; };
+  const missing = handledHere.filter(carded);
+  ok(`every top-level type the SERVER consumer handles draws no Unknown-event card (${consumerTypes.length} checked: ${consumerTypes.length - handledHere.length} on the known-ignored list, ${handledHere.length} handled by the normalizer — ${handledHere.join(', ') || 'none'})`, missing.length === 0, missing);
+  ok('…RED CONTROL: a consumer type the normalizer neither handles nor declares draws the card (the judge can go red)', carded('zz_consumer_only_type'));
   const transcriptTypes = ['queue-operation', 'last-prompt', 'custom-title', 'agent-name', 'permission-mode', 'mode', 'atis-latch', 'file-history-snapshot', 'file-history-delta', 'cost-state', 'summary', 'progress',
     // the request-replay rows + tools-used (lane claude-steer-inject r5: MEASURED in every 2.1.308 / 2.1.312 transcript — counted as
     // an unknown kind on every restart until declared)

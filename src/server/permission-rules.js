@@ -350,6 +350,8 @@ function create({ activeSessions, adapterRegistry, accounts, agentEnv, buffersDi
     const cmd = got.cmd;
     const env = { ...(agentEnv ? agentEnv() : process.env) };
     if (accountId) {
+      // an ACCOUNT's login only (as cli-usage-door / cli-models-door): a third-party provider's key reaches a conversation's CLI only
+      if (typeof accounts?.get === 'function' && !accounts.get(accountId)) return Promise.resolve({ ok: false, reason: 'account', detail: 'unknown account' });   // lane lg-providers U2 cure
       try { Object.assign(env, accounts?.resolveForSpawn?.(accountId, o.backend)?.localEnv || {}); }
       catch (e) { return Promise.resolve({ ok: false, reason: 'account', detail: e.message }); }
     }

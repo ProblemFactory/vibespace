@@ -320,7 +320,7 @@ export class DesktopManager {
   // ── The held records (userW inc-mun7qjmw-iksh; PURE rule in src/lib/desktop-record.js) ──
   // A desktop's held record (`_savedStates`) is a VIEW of the server's record plus what this page has built. The ONE
   // writer is _setRecord, and every call hands it either a record straight off the wire (boot, a remote record) or a
-  // mergeDesktopRecord result — never a list derived from the page alone (scripts/test-desktop-record.mjs census).
+  // mergeDesktopRecord result — never a list derived from the page alone (scripts/test-desktop-record-pins.mjs §5 census).
 
   /** THE ONE WRITER of a held desktop record. A desktop this page does not know (deleted meanwhile) has no held
    *  record (verify r2 ④: the switch off a remotely deleted desktop captured a record for it and broadcast it — an

@@ -316,10 +316,41 @@ console.log('④ THE SHAPE KEY — tool + flags + hosts + entries (decision ④)
   // (repro/r12 proves it on the base + the int361 tip; here the invariant is pinned over the shipped tables).
   {
     const OPQ = (o) => V.readSshOpt(o).opaque === true;
-    const prog = Object.keys(V.SSH_LOCAL_PROGRAM_KW);
-    const badProg = prog.filter((k) => !(OPQ(`${k} x`) && OPQ(`${k}=x`)));
-    ok(prog.includes('xauthlocation') && prog.includes('pkcs11provider') && badProg.length === 0, `every local-program/library keyword reads opaque — SSH_LOCAL_PROGRAM_KW drives the reader (${prog.length}: ${prog.join('/')}; round 12 M2 added xauthlocation)`, { badProg });
-    const aliasBad = Object.entries(V.SSH_KW_ALIAS).filter(([a, canon]) => !(OPQ(`${a} x`) && OPQ(`"${a}" x`) && OPQ(`${a}=x`)) || !(V.SSH_LOCAL_PROGRAM_KW[canon] || V.SSH_HOST_OPTS.has(canon) || false));
+    // B-be21 (r12 minor 3 — «the census cannot fail as a gate»: this leg read its members OFF the table it checked, so deleting
+    // the KnownHostsCommand and LocalCommand rows left it green): the members are named HERE, independently — a row dropped from
+    // the table (or one added without this list) is RED by NAME, and each member must read opaque in every spelling
+    const LOCAL_PROGRAM = ['proxycommand', 'localcommand', 'permitlocalcommand', 'knownhostscommand', 'xauthlocation', 'pkcs11provider', 'securitykeyprovider', 'match'];
+    const censusBad = (table, read) => [
+      ...LOCAL_PROGRAM.filter((k) => !table[k]).map((k) => `${k}: no row in SSH_LOCAL_PROGRAM_KW`),
+      ...LOCAL_PROGRAM.filter((k) => table[k] && !(read(`${k} x`) && read(`${k}=x`))).map((k) => `${k}: not opaque`),
+      ...Object.keys(table).filter((k) => !LOCAL_PROGRAM.includes(k)).map((k) => `${k}: a row this leg does not name`)];
+    const badProg = censusBad(V.SSH_LOCAL_PROGRAM_KW, OPQ);
+    ok(badProg.length === 0, `every local-program/library keyword has its row and reads opaque — the ${LOCAL_PROGRAM.length} members named by this leg, not read off the table (round 12 M2 added xauthlocation)`, { badProg });
+    const dropped = { ...V.SSH_LOCAL_PROGRAM_KW }; delete dropped.knownhostscommand; delete dropped.localcommand;
+    const redProg = censusBad(dropped, OPQ);
+    ok(redProg.join() === 'localcommand: no row in SSH_LOCAL_PROGRAM_KW,knownhostscommand: no row in SSH_LOCAL_PROGRAM_KW', 'RED control: the table without its KnownHostsCommand and LocalCommand rows (the r12 verdict\'s mutant) ⇒ RED, each by name', redProg);
+    // B-be21 (r12 minor 4 — «the alias predicate would turn RED on any correct future alias of a host or destination-rewrite
+    // keyword»): an alias must read EXACTLY as its canonical keyword, every spelling — judged only for a canonical keyword the
+    // reader treats specially (a local program, a host, an opaque rewrite); an alias of a plain keyword asks nothing
+    const SPELL = (k) => [`${k} x.example`, `"${k}" x.example`, `${k}=x.example`];
+    const special = (c) => !!(V.SSH_LOCAL_PROGRAM_KW[c] || V.SSH_HOST_OPTS.has(c) || OPQ(`${c} x`));
+    // (the adversarial read: an alias whose canonical is NOT a classed keyword — a typo — is RED too, as r12 had it)
+    const aliasBadOf = (table, read) => Object.entries(table).filter(([a, c]) => !special(c) || !SPELL(a).every((o, n) => JSON.stringify(read(o)) === JSON.stringify(read(SPELL(c)[n])))).map(([a]) => a);
+    const aliasBad = aliasBadOf(V.SSH_KW_ALIAS, V.readSshOpt).map((a) => [a]);
+    const hostAlias = { hostalias: 'hostname' }, readHA = (o) => V.readSshOpt(o.replace(/^("?)hostalias("?)/i, '$1hostname$2'));   // a CORRECT future alias of a host keyword (the reader canonicalizes it)
+    const oldBad = Object.entries(hostAlias).filter(([a, canon]) => !(readHA(`${a} x`).opaque === true && readHA(`"${a}" x`).opaque === true && readHA(`${a}=x`).opaque === true) || !(V.SSH_LOCAL_PROGRAM_KW[canon] || V.SSH_HOST_OPTS.has(canon) || false));
+    ok(oldBad.length === 1 && aliasBadOf(hostAlias, readHA).length === 0, 'a correct alias of a HOST keyword: the r12 predicate (every alias must read opaque) wrongly reds it, this one takes it (it reads exactly as hostname)', { oldBad: oldBad.map(([a]) => a) });
+    ok(aliasBadOf({ smartcard2: 'pkcs11provider' }, V.readSshOpt).join() === 'smartcard2', 'RED control: an alias the reader does NOT canonicalize (a forgotten table row) of a special keyword ⇒ RED by name');
+    ok(aliasBadOf({ smartcarddevice: 'pkcs11-provider' }, (o) => V.readSshOpt(o.replace(/^("?)smartcarddevice("?)/i, '$1pkcs11-provider$2'))).join() === 'smartcarddevice', 'RED control: an alias row whose canonical is a typo (no classed keyword — the reader would answer «no option») ⇒ RED by name');
+    // the census's «not opaque» branch over the READER itself: a copy of the model whose reader is not built from the table
+    // (xauthlocation dropped from SSH_LOCAL_O, the row kept) ⇒ RED by name
+    {
+      const { mutantCopies } = await import('./mutant-copy.mjs');
+      const MSRC = fs.readFileSync(path.join(REPO, 'src/vault-run.js'), 'utf8'), from = 'const SSH_LOCAL_O = new Set([...SSH_OPAQUE_O, ...Object.keys(SSH_LOCAL_PROGRAM_KW)]);';
+      const Vm = MSRC.split(from).length === 2 ? mutantCopies('vrm-be21', REPO).load('src/vault-run.js', MSRC.replace(from, "const SSH_LOCAL_O = new Set([...SSH_OPAQUE_O, ...Object.keys(SSH_LOCAL_PROGRAM_KW).filter((k) => k !== 'xauthlocation')]);"), 'notopaque') : null;
+      const bad = Vm ? censusBad(Vm.SSH_LOCAL_PROGRAM_KW, (o) => Vm.readSshOpt(o).opaque === true) : null;
+      ok(!!(bad && bad.join() === 'xauthlocation: not opaque'), 'RED control: a reader not built from the table (xauthlocation kept as a row, left out of the opaque set) ⇒ RED by name', bad);
+    }
     ok(V.SSH_KW_ALIAS.smartcarddevice === 'pkcs11provider' && aliasBad.length === 0, 'the ALIAS table maps every spelling to a CANONICAL keyword the reader classes — SmartcardDevice → pkcs11provider ⇒ opaque, plain / glued-quote / `=`-split alike, canonicalized BEFORE the opaque check (round 12 M1)', { aliasBad: aliasBad.map(([a]) => a) });
   }
   // round 9 (seam ruling C with vault-agent-own, 主开发): DESTINATION KNOWLEDGE (`shape.destKnown`) is decoupled from «always»
@@ -1474,7 +1505,7 @@ console.log('⑧ MUTANTS — patched copies of src/vault-run.js must go RED');
 {
   const dir = scratchDir('vault-run-model');
   fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
-  for (const f of ['vault-inventory.js', 'vault-kinds.js', 'vault-blocked.js']) fs.copyFileSync(path.join(REPO, 'src', f), path.join(dir, 'src', f));
+  for (const f of ['vault-inventory.js', 'vault-kinds.js', 'vault-blocked.js', 'foryou-actions.js']) fs.copyFileSync(path.join(REPO, 'src', f), path.join(dir, 'src', f));   // B-ef1b: vault-inventory reads the For-you registry (a band item's declared buttons)
   const real = fs.readFileSync(SRC, 'utf8');
   const mutant = (name, from, to) => { const n = real.split(from).length - 1; const f = path.join(dir, 'src', `vault-run-${name}.js`); fs.writeFileSync(f, real.replace(from, to)); return { hit: n === 1, M: require(f) }; };
   const argvLeg = (Vm) => ['curl', 'gh', 'terraform'].filter((t) => Vm.planOf({ argv: [t, `--token=${M1}`] }).code !== 'argv_refused');
@@ -1499,7 +1530,7 @@ console.log('⑧ MUTANTS — patched copies of src/vault-run.js must go RED');
     ['a view\'s held tail ignored', 'if (!final) { const len = r ? r.sk.length : end, ss = len - W;', 'if (false) { const len = r ? r.sk.length : end, ss = len - W;', (Vm) => (Vm === V ? once('chunk', () => chunkEscapes(V)).filter(([, n]) => READ_ROWS.some(([r]) => r === n)) : chunkEscapes(Vm, READ_ROWS))],
     // lane vault-agent-own: each rule of the own road, broken in a copy ⇒ its rows RED
     ['an own stored entry still asks', "  if (!why.length) return { ok: true, by: away0.length ? 'always' : 'own' };\n", '\n', ownRoad],
-    ['an own entry still needs the switch', 'if (e.open !== true && e.own !== true) return refuse(', 'if (e.open !== true) return refuse(', ownRoad],
+    ['an own entry still needs the switch', 'if (e.open !== true && e.own !== true) return e.ended', 'if (e.open !== true) return e.ended', ownRoad],   // (B-a14b moved the line: the refusal is entry_not_runnable or grant_expired)
     ['a minted value\'s own host never matches', '  if (!f || !h) return false;\n  if (h.startsWith', '  return false;\n  if (h.startsWith', ownRoad],
     ['a minted value goes anywhere', "const away0 = awayOf(plan.refs, facts, sh, passes, { shapePasses: mode === 'allow' }), away = away0.filter((x) => !(x.unknown && live));", 'const away0 = [], away = [];', ownRoad],
     ['another conversation owns it', '  return !!sc && callerIdsOf(caller).includes(sc);', '  return !!sc;', ownRoad],

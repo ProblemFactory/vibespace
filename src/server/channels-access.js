@@ -652,7 +652,7 @@ function create(engineCtx) {
       const visible = new Map(), kept = new Map();
       const counts = !msgAclAdapter(rec);
       let knows = false, scanned = 0;
-      for (const en of Object.values(store.index.live())) {
+      for (const en of store.index.rowsOf(rec.id)) {   // B-dfa4 cut 1: this account's rows (was every account's, once per account)
         if (++scanned % WALK_STEP === 0) await new Promise((r) => setImmediate(r));   // L3: the loop given back in bounded steps
         if (!en || en.adapterId !== rec.id) continue;
         const lv = reachOf(rec, en).level;
@@ -713,7 +713,7 @@ function create(engineCtx) {
       if (rec.enabled === false || (adapterId && rec.id !== adapterId) || !searchRowOf(registry.capsOf(rec.kind))) continue;
       const visible = new Map();
       let scanned = 0;
-      for (const en of Object.values(store.index.live())) {
+      for (const en of store.index.rowsOf(rec.id)) {   // B-dfa4 cut 1: this account's rows only
         if (++scanned % WALK_STEP === 0) await new Promise((r) => setImmediate(r));   // L3: the loop given back in bounded steps
         if (en && en.adapterId === rec.id && ACL.canSee(reachOf(rec, en).level)) visible.set(en.id, agentTitle(en, en.id));
       }
@@ -728,7 +728,7 @@ function create(engineCtx) {
     // from this search's row reads it there) and under 'all' when this agent sees every conversation of the account
     const scope = SR.memoScope(visible.keys());
     let total = 0;
-    for (const en of Object.values(store.index.live())) if (en && en.adapterId === rec.id) total++;
+    for (const en of store.index.rowsOf(rec.id)) if (en && en.adapterId === rec.id) total++;
     const r = await vendorSearch(rec, query, { by: 'agent', ctx, shows: (cid) => visible.has(String(cid)), scope, covers: visible.size >= total });
     if (!r.ok) return { ok: false, code: r.code === 'search-floor' ? 'refresh-floor' : r.code === 'search-minute' ? 'vendor-budget' : r.code, error: r.error, ...(r.retryAfterSec ? { retryAfterSec: r.retryAfterSec } : {}) };
     const results = [];
@@ -974,7 +974,7 @@ function create(engineCtx) {
     if (!ACL.canSee(acctReach.level) && !named) {
       // the account is named in nothing this agent sees ⇒ the uniform not-found; else it is told what it lacks
       const reachOf = reachWalkOf(ctx);
-      const seesSome = Object.values(store.index.live()).some((en) => en && en.adapterId === rec.id && ACL.canSee(reachOf(rec, en).level));   // B-f32b: a scan reads live(), never a copy of the index (composed at the 2.369.202 integration)
+      const seesSome = store.index.rowsOf(rec.id).some((en) => en && en.adapterId === rec.id && ACL.canSee(reachOf(rec, en).level));   // B-f32b: never a copy of the index; B-dfa4 cut 1: this account's rows only (rowsOf), never the whole map
       return seesSome ? { ok: false, code: 'no-access', error: `you do not have access to the whole account ${rec.id} — watch one conversation you can read (<adapter>/<conversation id>), or ask the user for the account` } : ACL.notFound();
     }
     return { ok: true, adapterId: rec.id, rec, en: null, key: null, title: rec.label || rec.id, grain: { kind: 'account' }, grainNow: () => grainReadAt(rec.id, { kind: 'account' }) || { access: [], watchers: [] }, raw: () => { const g = accountGrainOf(rec.id) || {}; return { access: g.access || [], watchers: g.watchers || [] }; } };
@@ -1199,6 +1199,11 @@ function create(engineCtx) {
     // r3: an ask past its end is over even before the sweep wrote it — expired now, never approved late
     if (askEndOf(req0) <= t) { await expireWatchRequests(t); return expiredRefusal(req0); }
     if (req0.kind === 'held') return decideHeld(req0, approve, by, { person });   // r6: a held digest — deliver / discard
+    deciding.set(requestId, t);   // lane bl-msg B-ae13 r2: the asker's withdraw waits out a decision in flight (its watcher write awaits below)
+    try { return await decideOpenWatch(requestId, req0, approve, by, person, t); } finally { deciding.delete(requestId); }   // the cure (主开发 09:24Z): the mark is released on EVERY exit (an early return held a withdraw off for 30 s)
+  }
+  async function decideOpenWatch(requestId, req0, approve, by, person, t) {
+    let undo = null;
     if (approve) {
       const pk = pkOf(req0.principal);
       const en1 = req0.grain && req0.grain.kind === 'conversation' ? store.index.peek(`${req0.adapterId}/${req0.grain.convId}`) : null;
@@ -1206,11 +1211,19 @@ function create(engineCtx) {
       const g = grainReadAt(req0.adapterId, req0.grain) || { watchers: [] };   // r5: the one reader
       const others = g.watchers.filter((w) => w && pkOf(w.principal) !== pk);
       const w = await setGrain(req0.adapterId, req0.grain, { watchers: [...others, { ...req0.watch }] }, { by });
-      if (!w || !w.ok) return w || { ok: false, code: 'error', error: 'the notification could not be written' };
+      if (!w || !w.ok) { deciding.delete(requestId); return w || { ok: false, code: 'error', error: 'the notification could not be written' }; }
+      undo = { pk, prev: g.watchers.find((x) => x && pkOf(x.principal) === pk) || null };
     }
     let applied = false;
     await store.index.update((ix) => { const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((r) => r && r.id === requestId); if (!r2 || r2.status !== 'open') return; applied = true; r2.status = approve ? 'approved' : 'denied'; r2.decidedAt = t; r2.decidedBy = person ? 'person' : by; }, { durable: true });
-    if (!applied) return { ok: false, code: 'bad-state', error: 'request already decided (in another window, a moment ago)' };
+    deciding.delete(requestId);
+    if (!applied) {
+      // the cure (主开发 09:24Z): the other order — the asker withdrew while this Allow wrote its watcher: the watch is taken back
+      // (a live watch never stands on a request whose card says withdrawn, or denied in another window)
+      const endedAs = ((store.index.table('watchRequests') || []).find((r) => r && r.id === requestId) || {}).status;
+      if (undo && endedAs !== 'approved') { try { const g2 = grainReadAt(req0.adapterId, req0.grain) || { watchers: [] }; const u = await setGrain(req0.adapterId, req0.grain, { watchers: [...g2.watchers.filter((x) => x && pkOf(x.principal) !== undo.pk), ...(undo.prev ? [undo.prev] : [])] }, { by }); if (!u || !u.ok) throw new Error((u && (u.error || u.code)) || 'refused'); } catch (e) { log.warn(`[channels] ${requestId}: the Allow's watch could not be taken back after the request ended ${endedAs} (${(e && e.message) || e}) — a live watch may stand on it`); } }   // the shoulds: a take-back that fails is said
+      return { ok: false, code: 'bad-state', error: 'request already decided (in another window, a moment ago)', ...(endedAs ? { state: endedAs } : {}) };
+    }
     try { store.audit({ kind: 'acl', op: approve ? 'watch-approve' : 'watch-deny', principal: req0.principal, scope: req0.scope, requestId, at: t, by }); } catch {}
     if (req0.todoId && userTodos && typeof userTodos.get === 'function') {
       try { const it = userTodos.get(req0.todoId); if (it && it.status === 'open' && it.sessionKey === INBOX_KEY) userTodos.resolveAnswered([req0.todoId], approve ? 'allowed' : 'denied', person ? { decidedBy: 'person', decidedAt: t } : null); } catch {}   // lane chat-needs-you-card: the card's record says which; r2: and whose (the person verdict's mark)
@@ -1275,8 +1288,12 @@ function create(engineCtx) {
     return { n: gone.reduce((x, c) => x + (Number(c.dropped.n) || 0), 0), k: gone.length, of: all.length, why: String(last.dropped.why), agent: heldWho({ principal: r2.principal || {} }) };
   };
   const heldDropLine = (d) => (d.why === 'not-covered' ? `the rule no longer covers ${d.k} of ${d.of} conversations — ${d.n} held messages dropped` : `${d.k} of ${d.of} conversations no longer wake ${d.agent} — ${d.n} held messages dropped`);
-  const heldLine = (n, who, day, drop = null) => `${n} messages for ${who} held since ${day} — deliver or discard${drop ? ` · ${heldDropLine(drop)}` : ''}`;
-  const heldKey = (n, who, day, drop = null) => (!drop ? { key: i18nKey('{n} messages for {agent} held since {date} — deliver or discard'), params: { n, agent: who, date: day } }
+  // lane bl-msg B-84b4 (ruled B): rows a stop cut off INSIDE the send (the press's stamp was written) may already have reached the
+  // agent — the card SAYS it, and the person decides: Deliver sends them knowingly, Discard drops them (the drop clause yields to it)
+  const heldDoubtOf = (req) => { const d = req && req.held && req.held.inDoubt; return d && Number(d.n) > 0 ? Number(d.n) : 0; };
+  const heldLine = (n, who, day, drop = null, doubt = 0) => (doubt ? `${n} messages for ${who} held since ${day} — ${doubt} of them may already have reached ${who}: VibeSpace restarted while delivering them — deliver again or discard`
+    : `${n} messages for ${who} held since ${day} — deliver or discard${drop ? ` · ${heldDropLine(drop)}` : ''}`);
+  const heldKey = (n, who, day, drop = null, doubt = 0) => (doubt ? { key: i18nKey('{n} messages for {agent} held since {date} — {d} of them may already have reached {agent}: VibeSpace restarted while delivering them — deliver again or discard'), params: { n, agent: who, date: day, d: doubt } } : !drop ? { key: i18nKey('{n} messages for {agent} held since {date} — deliver or discard'), params: { n, agent: who, date: day } }
     : { key: drop.why === 'not-covered' ? i18nKey('{n} messages for {agent} held since {date} — deliver or discard · the rule no longer covers {k} of {m} conversations — {d} held messages dropped') : i18nKey('{n} messages for {agent} held since {date} — deliver or discard · {k} of {m} conversations no longer wake {agent} — {d} held messages dropped'), params: { n, agent: who, date: day, k: drop.k, m: drop.of, d: drop.n } });
   /** THE HELD CARD, from its REQUEST ROW (r9 — the acceptance: a truncated user-todos.json started For you empty and the held
    *  decision lost its card, said nowhere): holdAside files it when it sets the hits aside; the boot reconcile files it AGAIN
@@ -1293,11 +1310,11 @@ function create(engineCtx) {
     const drop = heldDroppedOf(req);   // r12: a card filed again from its request row says what part was dropped
     const it = userTodos.add(INBOX_KEY, {
       origin: 'channels', by: 'system', sessionName: 'Channels', urgency: 'normal', openCap: HELD_OPEN_CAP,
-      text: heldLine(n, who, day, drop),
+      text: heldLine(n, who, day, drop, heldDoubtOf(req)),
       detail: `They were held for ${who} on ${where} while it could not be woken (a restart, its daily cap, nobody running) — the oldest from ${day}. A delivery that old is never sent by itself.\nDeliver sends them to ${who} now, as one block (a billed turn). Discard drops them — nothing is sent.\nUnanswered, it expires in ${ttlDays} days — they are discarded then.`,
       action: { type: 'channel-held-digest', id: req.id }, expiresAt: req.expiresAt,
       i18n: {
-        text: heldKey(n, who, day, drop),
+        text: heldKey(n, who, day, drop, heldDoubtOf(req)),
         detail: [
           { key: i18nKey('They were held for {agent} on {where} while it could not be woken (a restart, its daily cap, nobody running) — the oldest from {date}. A delivery that old is never sent by itself.'), params: { agent: who, where, date: day } },
           { key: i18nKey('Deliver sends them to {agent} now, as one block (a billed turn). Discard drops them — nothing is sent.'), params: { agent: who } },
@@ -1361,7 +1378,7 @@ function create(engineCtx) {
     }, { durable: true });
     // a second boot JOINED an open decision: its card says the new count (THE request's store — heldCountOf)
     if (open && open.todoId && userTodos && typeof userTodos.reshapeItems === 'function') {
-      const day2 = req.held.since ? OF.when(req.held.since) : 'an unknown date', drop = heldDroppedOf(req), line = heldLine(req.held.n, who, day2, drop), key = heldKey(req.held.n, who, day2, drop);
+      const day2 = req.held.since ? OF.when(req.held.since) : 'an unknown date', drop = heldDroppedOf(req), line = heldLine(req.held.n, who, day2, drop, heldDoubtOf(req)), key = heldKey(req.held.n, who, day2, drop, heldDoubtOf(req));   // bl-msg B-84b4 r2: the boot's hold reshapes LAST — it says the doubt too
       try { userTodos.reshapeItems((it) => { if (it.id !== open.todoId || it.status !== 'open' || it.text === line) return false; it.text = line; if (it.i18n) it.i18n = { ...it.i18n, text: key }; return true; }); } catch {}
     }
     try { store.audit({ kind: 'watch', op: 'held-aside', principal: w.principal, scope, requestId: req.id, n: moved, since, at: t, by: 'system' }); } catch {}
@@ -1442,7 +1459,7 @@ function create(engineCtx) {
     const plan = !approve ? null : rec ? deliverPlanOf(rec, req0) : { carry: heldConvsOf(req0).filter((c) => !heldSpent(c)), rest: [], via: null };
     const carryKeys = plan ? new Set(plan.carry.map((c) => c.key)) : null;
     const only = plan && plan.rest.length ? carryKeys : null;   // r15: a press that releases the WHOLE request releases it as before (releaseAside counts its unreadable entries then — test-channel-agent-watch ⑧ (c)); only a partial press narrows
-    let applied = false, touched = 0, skipped = 0, dropped = null, released = null;
+    let applied = false, touched = 0, skipped = 0, dropped = null, released = null, doubtWas = 0;
     await store.index.update((ix) => {
       const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((r) => r && r.id === req0.id);
       if (!r2 || r2.status !== 'open') return;
@@ -1451,6 +1468,7 @@ function create(engineCtx) {
       touched = releaseAside(r2, !!approve, only);
       if (approve) for (const c of heldConvsOf(r2)) if (carryKeys.has(c.key)) c.sent = { at: t };
       if (approve && touched) r2.held.inFlight = pressRecordOf(released, t);   // r16: the press in flight — a stop inside its block leaves it, the next boot reconciles by it
+      if (r2.held.inDoubt) doubtWas = heldDoubtOf(r2);   // lane bl-msg B-84b4 r2: read here, CLEARED only when a send starts (`sending`) — a press refused before its send keeps the card's doubt
       r2.held.n = touched;   // the record keeps what the decision touched (r15: a Deliver's, what went — below)
       skipped = Number(r2.held.skipped) || 0;
       dropped = heldDroppedOf(r2);   // r12: the part dropped before it (its conversations' watcher no longer woken there) — said with it
@@ -1476,6 +1494,7 @@ function create(engineCtx) {
         const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((r) => r && r.id === req0.id);
         if (!r2 || r2.status !== 'approved' || !r2.held) return;
         back = reholdLeft(r2, released, !(dl && (dl.ok || dl.stashed)));
+        if (dl && dl.ok && r2.held.inDoubt) delete r2.held.inDoubt;   // the cure of batch 10: the doubt leaves the record only when the delivery answered ok
         delete r2.held.inFlight;
         still = heldCountOf(r2);
         stillConvs = heldConvsOf(r2).filter((c) => !heldSpent(c) && heldCountOf({ held: { convs: [c] } }) > 0).length;
@@ -1484,15 +1503,23 @@ function create(engineCtx) {
       }, { durable: true });
       settled = true;
     };
+    // lane bl-msg B-84b4 (ruled B): THE STAMP, durable, BEFORE the send (the engine calls it right before its ladder): a stop inside
+    // the send leaves it, and the boot's re-hold says those rows may already have reached the agent
+    const sending = async () => {
+      await store.index.update((ix) => {
+        const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((r) => r && r.id === req0.id);
+        if (r2 && r2.held && r2.held.inFlight && !r2.held.inFlight.sendingAt) r2.held.inFlight.sendingAt = now();   // the cure of batch 10: the doubt stays until a delivery ANSWERED ok (the settle)
+      }, { durable: true });
+    };
     let delivery = null;
-    if (approve && touched && rec) { try { delivery = await deliverHeld(rec, req0, plan, settle); } catch (e) { delivery = { ok: false, why: (e && e.message) || String(e) }; } }
+    if (approve && touched && rec) { try { delivery = await deliverHeld(rec, req0, plan, settle, sending); } catch (e) { delivery = { ok: false, why: (e && e.message) || String(e) }; } }
     if (approve && !settled) { try { await settle(delivery); } catch (e) { log.warn(`[channels] ${req0.id}: the press's re-hold could not be written (${(e && e.message) || e}) — the next boot reconciles it`); } }
     const went = touched - back;
     if (approve) {
       try { store.audit({ kind: 'watch', op: 'held-deliver', principal: req0.principal, scope: req0.scope, requestId: req0.id, n: went, ...(reopened ? { stillHeld: still } : {}), at: t, by }); } catch {}
       if (!reopened) resolve({ n: went });
       else if (req0.todoId && userTodos && typeof userTodos.reshapeItems === 'function') {
-        const rq = reqNow(), who = heldWho({ principal: rq.principal || {} }), day = rq.held.since ? OF.when(rq.held.since) : 'an unknown date', drop = heldDroppedOf(rq), line = heldLine(still, who, day, drop), key = heldKey(still, who, day, drop);
+        const rq = reqNow(), who = heldWho({ principal: rq.principal || {} }), day = rq.held.since ? OF.when(rq.held.since) : 'an unknown date', drop = heldDroppedOf(rq), dbt = heldDoubtOf(rq), line = heldLine(still, who, day, drop, dbt), key = heldKey(still, who, day, drop, dbt);   // the cure of batch 10: a press refused before its send reopens the card WITH its doubt
         try { userTodos.reshapeItems((it) => { if (it.id !== rq.todoId || it.status !== 'open' || it.text === line) return false; it.text = line; if (it.i18n) it.i18n = { ...it.i18n, text: key }; return true; }); } catch {}
       }
     }
@@ -1504,7 +1531,8 @@ function create(engineCtx) {
     if (!touched && !reopened) return { ...out, delivered: false, n: 0, why: 'nothing-left', note: 'nothing was left to deliver — its conversations are gone' };
     const carried = delivery && delivery.ok && Number(delivery.n) > went ? { carried: Number(delivery.n) } : {};   // the same block took the watcher's newer hits too — said, never folded into «n»
     const refused = !delivery || delivery.ok ? {} : delivery.stashed ? { why: String(delivery.why || 'refused'), stashed: true, note: 'not delivered now — kept for its next turn' } : { why: String(delivery.why || 'refused'), note: 'not delivered now — the messages stay held on the card' };
-    return { ...out, delivered: !!(delivery && delivery.ok) && went > 0, n: went, ...carried, ...refused, ...(reopened ? { stillHeld: still, stillHeldConvs: stillConvs } : {}) };
+    const doubtSaid = doubtWas && delivery && delivery.ok ? { inDoubt: doubtWas, doubtNote: `${doubtWas} of them may already have reached ${heldWho({ principal: req0.principal || {} })} before VibeSpace restarted — sent again as you chose` } : {};   // lane bl-msg B-84b4
+    return { ...out, delivered: !!(delivery && delivery.ok) && went > 0, n: went, ...carried, ...refused, ...(reopened ? { stillHeld: still, stillHeldConvs: stillConvs } : {}), ...doubtSaid };
   }
   /** r16: THE PRESS IN FLIGHT, persisted on the request (`held.inFlight`) from the release until its re-hold is written under the
    *  block's hold — heldIdsOf's Map as rows (`{at, parts: [{key, ids, elided}]}`); `releasedOf` reads it back. A request 'approved'
@@ -1523,11 +1551,13 @@ function create(engineCtx) {
     const left = pressLeftOf(r2);
     const total = [...rel.values()].reduce((n, v) => n + v.ids.size + v.elided, 0);
     const back = reholdLeft(r2, rel, left);
+    const stampAt = Number(r2.held.inFlight.sendingAt) || 0;   // lane bl-msg B-84b4: the stop came INSIDE the send — what came back may have gone
     delete r2.held.inFlight;
     const still = heldCountOf(r2);
-    if (still > 0) { r2.status = 'open'; r2.decidedAt = null; delete r2.decidedBy; r2.held.n = still; }
+    const inDoubt = stampAt && back > 0 ? back : 0;
+    if (still > 0) { r2.status = 'open'; r2.decidedAt = null; delete r2.decidedBy; r2.held.n = still; if (inDoubt) r2.held.inDoubt = { n: inDoubt, at: stampAt }; }
     else r2.held.n = Math.max(0, total - back);
-    return { back, went: Math.max(0, total - back), still };
+    return { back, went: Math.max(0, total - back), still, ...(inDoubt && still > 0 ? { inDoubt } : {}) };
   }
   /** r15: the record ids (and elided counts) a press releases, per conversation key → `Map(key → {ids, elided})` — the request's
    *  own rows and its r6 in-place `aside` rows; read BEFORE releaseAside empties them. */
@@ -1588,11 +1618,11 @@ function create(engineCtx) {
     const k = items.findIndex(Boolean);   // r15: no scope road — ONE conversation per press, the rest stay on the card
     return k < 0 ? { carry: [], rest: convs, via: null } : { carry: [convs[k]], rest: convs.filter((_, i) => i !== k), via: null };
   }
-  async function deliverHeld(rec, r, plan, settle = null) {
+  async function deliverHeld(rec, r, plan, settle = null, sending = null) {
     const h = r.held || {};
     if (!plan || !plan.carry.length) return { ok: false, why: 'nothing-pending' };
-    if (plan.via) return flushScope(rec, plan.via.source, plan.via.patternId, h.pk, { also: new Set(plan.carry.map((c) => c.key)), settle });   // r15: the block holds every road it reads (the engine's billedWake `roads`); r16: `settle` runs under that hold
-    return flushPending(rec, plan.carry[0].id, { kind: 'boot', pk: h.pk, settle });
+    if (plan.via) return flushScope(rec, plan.via.source, plan.via.patternId, h.pk, { also: new Set(plan.carry.map((c) => c.key)), settle, sending });   // r15: the block holds every road it reads (the engine's billedWake `roads`); r16: `settle` runs under that hold; bl-msg B-84b4: `sending` = the stamp before its send
+    return flushPending(rec, plan.carry[0].id, { kind: 'boot', pk: h.pk, settle, sending });
   }
   // THE ITEM AND THE REQUEST ARE ONE STATE (lane wake-approve-card — exit-proxy verify-r2 ask-b's law, which the hub-act,
   // automation and vault asks keep). Acceptance round 2: a wake request's item is a DECISION ROW — the store lets it leave
@@ -1624,6 +1654,31 @@ function create(engineCtx) {
    *  The engine runs it at boot (reconcileAsks) and on its minute sweep; an ask filed before the lifetime (no `expiresAt`, its
    *  item lasting) ends here too. Either road (this, or the store's sweep of the item through the hook) ends in the same
    *  state. → the ids expired. */
+  /** lane bl-msg B-ae13 (fb-4d94c275a2): THE ASKER TAKES ITS OWN WAKE REQUEST BACK — only the agent that filed it (`watch`, the
+   *  principal is that agent), only while it is OPEN; the request ends `withdrawn` (decidedBy 'agent', audited `watch-withdraw`) and
+   *  its For-you item ends «withdrawn by the agent» (the row's own end — its approval stays the person's click). → {ok, request} | refusal. */
+  const deciding = new Map();   // request id → when the person's decision started (a decision is seconds, never more)
+  async function withdrawWatchRequest({ requestId, by = null, why = null } = {}) {
+    const id = String(requestId || '');
+    const busy = deciding.get(id);
+    if (busy && now() - busy < 30e3) return { ok: false, code: 'not-withdrawable', error: `wake request ${id} is being decided by the user right now — read it again in a moment` };
+    const mine = (r) => !!(r && r.kind === 'watch' && r.principal && r.principal.kind === 'agent' && by && by.kind === 'agent' && String(r.principal.id) === String(by.id));
+    const r0 = (store.index.table('watchRequests') || []).find((r) => r && r.id === id);
+    if (!mine(r0)) return { ok: false, code: 'not-found', error: `no wake request of yours with id ${id} — vibespace-channels watch --mode wake files one` };
+    if (r0.status !== 'open') return { ok: false, code: 'not-withdrawable', error: `wake request ${id} is ${r0.status} — only an open one can be withdrawn`, state: r0.status };
+    const t = now();
+    let applied = false;
+    await store.index.update((ix) => {
+      const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((r) => r && r.id === id);
+      if (!mine(r2) || r2.status !== 'open') return;
+      applied = true; r2.status = 'withdrawn'; r2.decidedAt = t; r2.decidedBy = 'agent';
+    }, { durable: true });
+    if (!applied) return { ok: false, code: 'not-withdrawable', error: `wake request ${id} was decided a moment ago (in another window)` };
+    try { store.audit({ kind: 'acl', op: 'watch-withdraw', principal: r0.principal, scope: r0.scope, requestId: id, at: t, by: 'agent', ...(typeof why === 'string' && why.trim() ? { why: why.trim().slice(0, 200) } : {}) }); } catch { }
+    if (r0.todoId && userTodos && typeof userTodos.resolveAnswered === 'function') { try { userTodos.resolveAnswered([r0.todoId], 'agent'); } catch { } }
+    notify([]);
+    return { ok: true, request: { id, status: 'withdrawn', decidedAt: t } };
+  }
   async function expireWatchRequests(t = now()) {
     const due = new Set((store.index.table('watchRequests') || []).filter((r) => r && r.status === 'open' && askEndOf(r) <= t).map((r) => r.id));
     if (!due.size) return [];
@@ -1642,6 +1697,12 @@ function create(engineCtx) {
    *  back to the tray. r16: ⓪ first, the held decisions' presses a stop cut short and their cards (reconcilePresses).
    *  → {expired, settled, resurfaced, refiled, presses}. */
   async function reconcileAsks(t = now()) {
+    // lane bl-msg B-ae13 r2: a WITHDRAWN wake request whose For-you card is still open (the stop came inside the tray's save) closes it
+    for (const r of store.index.table('watchRequests') || []) {
+      if (!r || r.status !== 'withdrawn' || !r.todoId || !userTodos || typeof userTodos.get !== 'function' || typeof userTodos.resolveAnswered !== 'function') continue;
+      let it = null; try { it = userTodos.get(r.todoId); } catch { it = null; }
+      if (it && it.status === 'open') { try { userTodos.resolveAnswered([r.todoId], 'agent'); } catch { } }
+    }
     const presses = await reconcilePresses(t);
     const expired = await expireWatchRequests(t);
     let settled = 0, resurfaced = 0, refiled = 0;
@@ -1684,14 +1745,15 @@ function create(engineCtx) {
       let it = null; try { it = o.todoId && userTodos && typeof userTodos.get === 'function' ? userTodos.get(o.todoId) : null; } catch { }
       if (o.res) {
         n++;
-        try { store.audit({ kind: 'watch', op: 'held-press-reconciled', requestId: o.id, n: o.res.went, ...(o.res.still ? { stillHeld: o.res.still } : {}), at: t, by: 'system' }); } catch { }
+        try { store.audit({ kind: 'watch', op: 'held-press-reconciled', requestId: o.id, n: o.res.went, ...(o.res.still ? { stillHeld: o.res.still } : {}), ...(o.res.inDoubt ? { inDoubt: o.res.inDoubt } : {}), at: t, by: 'system' }); } catch { }
+        if (o.res.inDoubt) log.log(`[channels] ${o.id}: the stop came inside the delivery's send — ${o.res.inDoubt} of the held message(s) may already have reached the agent; the card says so and the person decides`);   // lane bl-msg B-84b4
         log.log(`[channels] ${o.id}: a Deliver press was cut short by a stop — ${o.res.still ? `${o.res.still} held message(s) back on its card (open again)` : `its delivery was found done (${o.res.went})`}`);
       }
       if (!it || it.status !== 'open') continue;
       if (o.status === 'open') {
         const rq = (store.index.table('watchRequests') || []).find((r) => r && r.id === o.id);
         if (!rq || !rq.held || !userTodos || typeof userTodos.reshapeItems !== 'function') continue;
-        const who = heldWho({ principal: rq.principal || {} }), day = rq.held.since ? OF.when(rq.held.since) : 'an unknown date', drop = heldDroppedOf(rq), line = heldLine(rq.held.n, who, day, drop), key = heldKey(rq.held.n, who, day, drop);
+        const who = heldWho({ principal: rq.principal || {} }), day = rq.held.since ? OF.when(rq.held.since) : 'an unknown date', drop = heldDroppedOf(rq), dbt = heldDoubtOf(rq), line = heldLine(rq.held.n, who, day, drop, dbt), key = heldKey(rq.held.n, who, day, drop, dbt);
         try { userTodos.reshapeItems((x) => { if (x.id !== rq.todoId || x.status !== 'open' || x.text === line) return false; x.text = line; if (x.i18n) x.i18n = { ...x.i18n, text: key }; return true; }); } catch { }
         continue;
       }
@@ -1842,11 +1904,9 @@ function create(engineCtx) {
     const dead = adapterRecords().adapters.filter((r) => signinDead(r) && !msgAclAdapter(r));
     if (!dead.length) return [];
     const out = [];
-    const live = store.index.live();
     const reachOf = reachWalkOf(ctx);
     for (const rec of dead) {
-      for (const k in live) {
-        const en = live[k];
+      for (const en of store.index.rowsOf(rec.id)) {   // B-dfa4 cut 1: the dead account's own rows
         if (!en || en.adapterId !== rec.id || en.unlistedAt) continue;
         if (ACL.canSee(reachOf(rec, en).level)) { out.push(String(rec.label || rec.id).slice(0, 60)); break; }
       }
@@ -2069,7 +2129,7 @@ function create(engineCtx) {
     return { grain: kind, id, principal: pkOf(w.principal), who, where, inert: !!inert, words: `${who}'s wake on «${where}» ${state}`, agentWords: agentWakeWords(who, where, kind, state) };
   }
   /** The conversations of an account that store a notification row (a legacy assignment too) — the rows below its grains. */
-  const storingConvs = (adapterId) => Object.values(store.index.live()).filter((en) => en && en.adapterId === adapterId && ((Array.isArray(en.watchers) && en.watchers.length) || (en.assignment && en.assignment.principal)));
+  const storingConvs = (adapterId) => store.index.rowsOf(adapterId).filter((en) => en && en.adapterId === adapterId && ((Array.isArray(en.watchers) && en.watchers.length) || (en.assignment && en.assignment.principal)));
   /** EVERY DOOR THAT CAN RE-ACTIVATE AN INERT ROW IS A WAKE DOOR (lane wake-approve-card r6 — 主开发: the r5 promise held only at
    *  the room's reach door: a bare curl / vsst_ `PUT …/adapters/A/access` re-adding Worker made the inert room wake live, and so
    *  did a bare `POST …/patterns {title, access:[Worker]}`). The STORED wake rows BELOW a grain whose state that grain's ACCESS
@@ -2211,7 +2271,7 @@ function create(engineCtx) {
   function wakeNamesFilter(adapterId, fid) {
     const names = (g) => !!g && wakesIn(g.stored).some((w) => w.mode === 'filtered' && w.filterId === fid);
     if (names(grainReadAt(adapterId, { kind: 'account' })) || rawPatternsOf(adapterId).some((pa) => names(grainReadAt(adapterId, { kind: 'pattern', id: pa.id })))) return true;
-    for (const x of Object.values(store.index.live())) {
+    for (const x of store.index.rowsOf(adapterId)) {   // B-dfa4 cut 1: this account's rows only
       if (!x || x.adapterId !== adapterId) continue;
       const mentions = (Array.isArray(x.watchers) && x.watchers.some((w) => w && w.filterId === fid)) || (x.assignment && x.assignment.filterId === fid);
       if (mentions && names(readGrainHolder(adapterId, 'conversation', x))) return true;
@@ -2516,7 +2576,7 @@ function create(engineCtx) {
     const drop = heldDroppedOf(req), who = heldWho({ principal: req.principal || {} });
     try { store.audit({ kind: 'watch', op: 'held-discard', principal: r0.principal, scope: r0.scope, requestId: r0.id, n, at: t, by: 'system', why: drop.why, part: { convs: reach.out.map((o) => o.c.key), of: reach.of } }); } catch {}
     if (req.todoId && userTodos && typeof userTodos.reshapeItems === 'function') {
-      const day = req.held.since ? OF.when(req.held.since) : 'an unknown date', line = heldLine(req.held.n, who, day, drop), key = heldKey(req.held.n, who, day, drop);
+      const day = req.held.since ? OF.when(req.held.since) : 'an unknown date', line = heldLine(req.held.n, who, day, drop, heldDoubtOf(req)), key = heldKey(req.held.n, who, day, drop, heldDoubtOf(req));   // bl-msg B-84b4 r2
       try { userTodos.reshapeItems((it) => { if (it.id !== req.todoId || it.status !== 'open' || it.text === line) return false; it.text = line; if (it.i18n) it.i18n = { ...it.i18n, text: key }; return true; }); } catch {}
     }
     log.log(`[channels] ${r0.id}: ${who} is no longer woken by ${reach.out.length} of its ${reach.of} held conversation(s) (${reach.out.map((o) => `${o.c.key} ${o.rule}`).join(', ')}) — their ${n} held hit(s) dropped, the other ${req.held.n} stay held; the card says so`);
@@ -2540,7 +2600,7 @@ function create(engineCtx) {
   async function prunePending(adapterId, onlyKey = null) {
     await pruneHeld(adapterId);
     const drop = [];
-    for (const en of Object.values(store.index.live())) {
+    for (const en of store.index.rowsOf(adapterId)) {   // B-dfa4 cut 1: this account's rows only
       if (!en || en.adapterId !== adapterId || (onlyKey && en.key !== onlyKey)) continue;
       const hasTagged = Array.isArray(en.pending) && en.pending.some((x) => x && x.for);
       const hasElided = en.pendingElidedBy && Object.keys(en.pendingElidedBy).length;
@@ -2666,7 +2726,7 @@ function create(engineCtx) {
       const acct = accountGrainOf(rec.id);
       if (acct) push('account', heldRead(acct));
       for (const pa of patternsOf(rec.id)) push('pattern', heldRead(pa), { patternId: pa.id, rule: F.patternSummary(pa.pattern) });
-      for (const en of Object.values(store.index.live())) if (en && en.adapterId === rec.id) { const g = convGrainOf(en); if (g.access.length) push('conversation', g, { key: agentId(en.key), title: agentTitle(en, en.id) }); }   // verify r3 F6: the key as a line piece; verify r2 F4: the seventh title answer (`vibespace-channels status` prints it before the next row) through the belt
+      for (const en of store.index.rowsOf(rec.id)) if (en && en.adapterId === rec.id) { const g = convGrainOf(en); if (g.access.length) push('conversation', g, { key: agentId(en.key), title: agentTitle(en, en.id) }); }   // verify r3 F6: the key as a line piece; verify r2 F4: the seventh title answer (`vibespace-channels status` prints it before the next row) through the belt
     }
     return { ok: true, access: out };
   }
@@ -2695,7 +2755,7 @@ function create(engineCtx) {
       if (scope && scope.kind === 'account') return patternsOf(adapterId).some((pa) => heldRead(pa).watchers.some((w) => pkOf(w.principal) === pk) && F.matchConversation(pa.pattern, convFacts(en)).hit);
       return false;
     };
-    const convs = Object.values(store.index.live()).filter((en) => en && en.adapterId === adapterId && !en.unlistedAt && !finer(en) && (!pat || F.matchConversation(pat, convFacts(en)).hit))
+    const convs = store.index.rowsOf(adapterId).filter((en) => en && en.adapterId === adapterId && !en.unlistedAt && !finer(en) && (!pat || F.matchConversation(pat, convFacts(en)).hit))
       .sort((a, b) => (Number(b.lastAt) || 0) - (Number(a.lastAt) || 0));
     const PER_CONV = 400, MAX_CONVS = 200, TOTAL = 20000;
     const recs = [];
@@ -2876,7 +2936,7 @@ function create(engineCtx) {
       let pat = null;
       if (kind === 'pattern') { const pv = F.validatePattern(pattern); if (!pv.ok) return { ok: false, code: 'bad-pattern', error: pv.error, why: pv.code, rule: pv.kind || null }; pat = pv.pattern; }
       else if (kind !== 'account') return { ok: false, code: 'bad-request', error: 'scope.kind must be conversation|account|pattern' };
-      convIds = Object.values(store.index.live()).filter((en) => en && en.adapterId === adapterId && !en.unlistedAt && (!pat || F.matchConversation(pat, convFacts(en)).hit)).map((en) => String(en.id));
+      convIds = store.index.rowsOf(adapterId).filter((en) => en && en.adapterId === adapterId && !en.unlistedAt && (!pat || F.matchConversation(pat, convFacts(en)).hit)).map((en) => String(en.id));
     }
     const filter = { match: 'any', rules: [v.rule] };
     const own = ownRecordOf(rec);   // int229 (× channel-self-unread): the owner's own message never wakes a watcher — never a preview match
@@ -2910,14 +2970,119 @@ function create(engineCtx) {
     return { ok: true, estimate: e };
   }
 
+  /**
+   * «WHAT IT MAY USE» (Session Properties, unit what-it-may-use) — the channel doors for ONE conversation, read off the
+   * PREPARED rows (CG's per-door index, rebuilt only when a channel row changes) and the grains' own lists: never a walk of
+   * the channel conversations, never a rule evaluated per conversation (the owner's hub paid 420 s a day for that once — the
+   * cure of 2.369.406). THE DOOR'S OWN CHECKS, entry by entry (cure r1 — 主开发 MUST 1 + 2): an access list's rows as
+   * CG.accessOf hands them (each entry its own 「除了」) through channel-filter `rowNames`; a conversation's reach grants
+   * (its access, the owner's rows, approved requests — CG.conversationGrants, each with its LEVEL) through channel-acl
+   * `principalApplies`, a hit that may only REQUEST (`canRequest`) being its own answer (`request: true`), never «may see»;
+   * a notification through CG.watchAdmitsFor (the fan-out's `wakeAdmits`); the raw-API tier through `effectiveApi`. Nothing
+   * admits ⇒ CG.refusalOf says WHY (a 「除了」, unknown groups, a row this release cannot read) — it never admits.
+   * `facts` = { cid, groupIds, groupsUnreadable } (the channel door names a conversation by its own id).
+   * → { accounts: [new-session-model accountRows' row + `state` granted | own | none | excepted | unknown, `own`],
+   *     answers: [may-use-model answer rows under each account (`parent`)] }
+   */
+  function mayUseFor(facts = {}) {
+    const cid = facts.cid ? String(facts.cid) : '';
+    const groups = (facts.groupIds || []).map(String);
+    const ctx = { kind: 'agent', id: cid, groups };   // THE channel door's asker (channel-acl / channel-filter)
+    const RF = { conversationKey: cid, groupIds: groups, groupsUnreadable: !!facts.groupsUnreadable };
+    const VIA = { agent: 'conversation', group: 'group', everyone: 'everyone' };
+    const best = (ps) => ps.find((p) => p.kind === 'agent') || ps.find((p) => p.kind === 'group') || ps[0];
+    const okOf = (ps, extra = {}) => { const b = best(ps); return { ok: true, via: VIA[b.kind] || 'unknown', ...(b.kind === 'group' ? { groupId: String(b.id) } : {}), ...extra }; };
+    const refusal = (v) => (v.code === 'excepted' ? { ok: false, code: 'excepted', ...(v.entry ? { except: v.entry } : {}) } : { ok: false, code: v.code });
+    const listed = (v) => v.ok || v.code === 'excepted' || v.code === 'groups_unreadable' || v.code === 'unknown_shape';
+    /** an access list (account / rule / one conversation): its rows the door names this conversation by */
+    const accessNamed = (res) => (cid ? CG.accessOf(res).filter((r) => F.rowNames(r, ctx)) : []);
+    const authorityOf = (rows) => (rows.some((r) => r.authority === 'send') ? 'send' : 'draft');
+    const declOf = (a) => { try { return registry.get(a.kind); } catch { return null; } };   // the module's DECLARED facts (adapterView's)
+    const recs = (adapterRecords().adapters || []).filter((a) => a && a.id);
+    const recById = new Map(recs.map((a) => [String(a.id), a]));
+    const live = store.index.live();
+    const accounts = [];
+    for (const a of recs) {
+      const decl = declOf(a);
+      if ((decl && decl.listed === false) || ((decl && decl.reach) || 'grants') !== 'grants') continue;   // the form's own account list: listed, reach by grants (the declared facts — never a builtin branch, §88)
+      const res = CG.RES.account(a.id);
+      const named = accessNamed(res);
+      const ps = named.map((r) => r.principal);
+      const groupIds = ps.filter((p) => p.kind === 'group').map((p) => String(p.id));
+      const everyone = ps.some((p) => p.kind === 'everyone');
+      const own = ps.some((p) => p.kind === 'agent');
+      const granted = everyone || groupIds.length > 0;
+      const why = named.length ? null : CG.refusalOf(CG.DOORS.reach, res, RF);
+      accounts.push({ id: String(a.id), kind: a.kind || '', vendor: a.vendor || a.kind || '', label: a.label || a.id, enabled: a.enabled !== false,
+        granted, own, authority: named.length ? authorityOf(named) : null, everyone, groups: groupIds, except: granted ? CG.exceptBare(res) : [],
+        state: granted ? 'granted' : own ? 'own' : why.code === 'excepted' ? 'excepted' : why.code === 'groups_unreadable' || why.code === 'unknown_shape' ? 'unknown' : 'none',
+        ...(why && why.code === 'excepted' && why.entry ? { exceptedBy: why.entry } : {}) });
+    }
+    const answers = [];
+    const nameOfConv = (adapterId, convId) => { const rec = recById.get(String(adapterId)); const en = live[`${adapterId}/${convId}`]; try { return (rec && en && humanNameOf(rec, en)) || String(convId); } catch { return String(convId); } };
+    const grainOf = (res) => {   // a grain resource → { parent (its account), name }
+      let m = /^account:([^#]+)$/.exec(res);
+      if (m) { const rec = recById.get(m[1]); return { parent: `account:${m[1]}`, name: rec ? String(rec.label || rec.id) : m[1], kind: 'account' }; }
+      m = /^rule:(.+)$/.exec(res);
+      if (m) { const pa = patternById(m[1]); return { parent: pa ? `account:${pa.adapterId}` : '', name: String((pa && (pa.name || pa.label)) || m[1]), kind: 'rule' }; }
+      m = /^conversation:([^/#]+)\/([^#]+)(?:#(user|request))?$/.exec(res);
+      if (m) return { parent: `account:${m[1]}`, name: nameOfConv(m[1], m[2]), kind: 'conversation', key: `${m[1]}/${m[2]}` };
+      return null;
+    };
+    // the rules (their access lists) and the single conversations (their reach grants, each with its level)
+    const convKeys = new Map();
+    for (const res of CG.resourcesOf(CG.DOORS.reach)) {
+      const g = grainOf(res);
+      if (!g || g.kind === 'account') continue;
+      if (g.kind === 'conversation') { if (!convKeys.has(g.key)) convKeys.set(g.key, g); continue; }
+      const named = accessNamed(res);
+      const v = named.length ? okOf(named.map((r) => r.principal), { detail: { authority: authorityOf(named) } }) : refusal(CG.refusalOf(CG.DOORS.reach, res, RF));
+      if (listed(v)) answers.push({ door: 'channel-reach', resource: res, name: g.name, parent: g.parent, ...v });
+    }
+    for (const [key, g] of convKeys) {
+      const hits = cid ? CG.conversationGrants(key).filter((x) => ACL.principalApplies(ctx, x)) : [];
+      const sees = hits.filter((x) => ACL.canSee(x.level)), asks = hits.filter((x) => ACL.canRequest(x.level));
+      const named = accessNamed(CG.RES.conversation(key));
+      let v;
+      if (sees.length) v = okOf(sees.map((x) => x.principal), named.length ? { detail: { authority: authorityOf(named) } } : {});
+      else if (asks.length) v = okOf(asks.map((x) => x.principal), { request: true });   // MUST 2: it may only ASK — said as that, never «may see»
+      else {
+        const why = [CG.RES.conversation(key), CG.RES.user(key), CG.RES.request(key)].map((r) => CG.refusalOf(CG.DOORS.reach, r, RF));
+        v = refusal(why.find((x) => x.code === 'groups_unreadable') || why.find((x) => x.code === 'excepted') || why.find((x) => x.code === 'unknown_shape') || why[0]);
+      }
+      if (listed(v)) answers.push({ door: 'channel-reach', resource: `conversation:${key}`, name: g.name, parent: g.parent, ...v });
+    }
+    // the notifications that wake it (a grain's watch row — the fan-out's own question)
+    for (const res of CG.resourcesOf(CG.DOORS.watch)) {
+      const g = grainOf(res);
+      if (!g) continue;
+      const v0 = cid ? CG.watchAdmitsFor(res, { cid, groups, groupsUnreadable: RF.groupsUnreadable }) : { ok: false, code: 'not_granted' };
+      const v = v0.ok ? { ok: true, via: v0.via, ...(v0.groupId ? { groupId: v0.groupId } : {}) } : refusal(v0);
+      if (listed(v)) answers.push({ door: 'channel-watch', resource: res, name: g.name, parent: g.parent, ...v, detail: { grain: g.kind } });
+    }
+    // the raw-API tier (channel-acl effectiveApi: the widest tier a grant that admits it holds)
+    const api = CG.apiGrants();
+    for (const cred of [...new Set(api.map((x) => x && x.scope && x.scope.id).filter(Boolean))]) {
+      if (!cid) break;
+      const e = ACL.effectiveApi(ctx, cred, api);
+      if (!e || e.tier === 'none') continue;
+      const win = api.find((x) => x && ACL.grantId(x) === e.grantId);
+      const rec = recById.get(String(cred));
+      answers.push({ door: 'channel-api', resource: String(cred), name: rec ? String(rec.label || rec.id) : String(cred), parent: rec ? `account:${cred}` : '',
+        ...(win ? okOf([win.principal]) : { ok: false, code: 'unknown_shape' }), detail: { tier: e.tier, perDay: e.perDay } });
+    }
+    return { accounts, answers };
+  }
+
   return {
+    mayUseFor,   // unit what-it-may-use
     policyFor, policyRequiresReview, authorityCapsFor, healP2, rotationsOf, filterFor, assignmentView, pendingOf, clearCarried, elidedTotal,
     statsView, wakeLatencyFor, accountGrainOf, patternsOf, patternById, pkOf, legacyConvAssignment, convGrainOf, convFacts, effectiveFor, fanTargets,
     wakeEffOf, storedWatcherFor, itemIs, scopeKeyOf, watcherRef, accessRowView, watcherView, eligibleAboveView, grainView, reachFor, groupsOfSession,
     convFor, stillSees, effectiveForAccount, accountScopeGrants, searchFor, readAroundFor, setPolicy, setReach, reachView, request, decideRequest,
     directoryLists, setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, reachCountFor, signinExpiredFor, readFor, readThreadFor, statusFor, proposalsListFor, setGrain, setAccess, setWatchers,
     removePattern, setAssignment, setScopeAssignment, accessFor, estimateScope, migrateAggregated, migrateGrants, setFilter, estimateFilter,
-    previewRule, membersNow, wakeAdmitOf, expireWatchRequests, reconcileAsks, wakeHeldAt, grainReadAt, grainReadLive, heldRead, resurfacePointers, openAccessPointers, holdAside,
+    previewRule, membersNow, wakeAdmitOf, expireWatchRequests, withdrawWatchRequest, reconcileAsks, wakeHeldAt, grainReadAt, grainReadLive, heldRead, resurfacePointers, openAccessPointers, holdAside,
   };
 }
 

@@ -28,7 +28,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE } from './scratch.mjs';
 
 /** Boot ONE part of the xpra window family: everything above, up and checked ('worktree server boots'); returns the
  *  handles, the evidence deadlines, the shared measures and the part's end. `part` names the part in its verdict line. */
@@ -154,7 +154,7 @@ export async function bootXpraWindow(part) {
   const srvLog = [];
   const bootServer = () => { srv = spawnCopy('the worktree server', wt, srvEnv); srv.stdout.on('data', (d) => srvLog.push(String(d))); srv.stderr.on('data', (d) => srvLog.push(String(d))); return srv; };
   bootServer();
-  const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--disable-background-timer-throttling', '--window-size=1400,900', `--user-data-dir=${scratch('deskxpra-chrome')}`, 'about:blank'], { stdio: 'ignore' });
+  const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--disable-background-timer-throttling', '--window-size=1400,900', `--user-data-dir=${scratch('deskxpra-chrome')}`, 'about:blank'], { stdio: 'ignore' });
   const worktrees = [wt];
   const devProcs = [], devHomes = []; // §13 (lane C2): the paired scratch devices (their daemons + HOMEs) // + §5's pre-x5 CONTROL copy while it exists
   const ctlServers = [];

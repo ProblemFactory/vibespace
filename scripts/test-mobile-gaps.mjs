@@ -55,7 +55,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchDir, scratchHome, ONBOARDED_SOURCE, vncEnv, readRunRecord, runOwnerState, RUN_RECORD } from './scratch.mjs';
+import { freePorts, scratch, scratchDir, scratchHome, ONBOARDED_SOURCE, vncEnv, readRunRecord, runOwnerState, RUN_RECORD, CHROME_STORE } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 
@@ -205,7 +205,7 @@ process.stdin.on('end', () => process.exit(0));
 `, { mode: 0o755 });
 const startServer = () => spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
 let srv = startServer(); // `let`: the first-screen legs restart it on another For-you store (lane phone-first-screen)
-const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
+const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
   '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${wt}-chrome`, 'about:blank'], { stdio: 'ignore' });
 const cleanup = () => {
   try { chrome.kill('SIGKILL'); } catch {}
@@ -774,7 +774,7 @@ try {
   // ── #7 switcher: "+" desktop tab, tab long-press, window-row long-press ──
   console.log('#7 desktop management in the switcher');
   await evalJs(`document.getElementById('mobile-nav-title').click(); true`); await sleep(300);
-  const sw0 = await evalJs(`(() => { const p = document.querySelector('.mobile-win-switcher'); return { open: !!p, add: !!p?.querySelector('.mobile-desk-add'), tabs: [...(p?.querySelectorAll('.mobile-desk-tab:not(.mobile-desk-add)') || [])].map((t) => t.textContent.trim()), desks: app.desktopManager.desktops.length, rows: p?.querySelectorAll('.mobile-win-row').length, wins: [...app.wm.windows.values()].filter((w) => !w.isMinimized && !w._hiddenByDesktop).length, tabH: Math.round(p?.querySelector('.mobile-desk-add')?.getBoundingClientRect().height || 0), closeBtns: [...(p?.querySelectorAll('.mobile-win-row button:not(.mobile-win-more)') || [])].map((b) => { const r = b.getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height)]; }) }; })()`);
+  const sw0 = await evalJs(`(() => { const p = document.querySelector('.mobile-win-switcher'); return { open: !!p, add: !!p?.querySelector('.mobile-desk-add'), tabs: [...(p?.querySelectorAll('.mobile-desk-tab:not(.mobile-desk-add)') || [])].map((t) => t.textContent.trim()), desks: app.desktopManager.desktops.length, rows: p?.querySelectorAll('.mobile-win-row').length, wins: [...app.wm.windows.values()].filter((w) => !w.isMinimized && !w._hiddenByDesktop).length, tabH: Math.round(p?.querySelector('.mobile-desk-add')?.getBoundingClientRect().height || 0), closeBtns: [...(p?.querySelectorAll('.mobile-win-row button:not(.mobile-win-more):not(.mobile-win-split)') || [])].map((b) => { const r = b.getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height)]; }) }; })()`);
   check(`the switcher lists ${sw0.desks} desktop tab(s) + a "+" tab (≥ 36 px) and one row per window on this desktop (${sw0.rows} of ${sw0.wins})`, sw0.open && sw0.add && sw0.tabs.length === sw0.desks && sw0.tabH >= 36 && sw0.rows === sw0.wins && sw0.rows >= 3, sw0);
   check(`every window row's ✕ is ≥ 36×36 (r2; was 32×32: ${sw0.closeBtns.map((b) => b.join('×')).join(', ')})`, sw0.closeBtns.length === sw0.rows && sw0.closeBtns.every(([w, h]) => w >= 36 && h >= 36), sw0.closeBtns);
   await evalJs(`document.querySelector('.mobile-win-switcher .mobile-desk-add').click(); true`); await sleep(1200);

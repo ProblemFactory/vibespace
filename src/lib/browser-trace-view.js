@@ -60,6 +60,10 @@ import { rowLine, rowFold, rowMenu, gridNeed, orphanOrder, usageLine as usageCel
 import { createPasskeysSection, isPhoneWidth } from './browser-passkeys-view.js'; // lane passkey-ui: a profile's Passkeys table
 import { barLayout } from './live-bar-layout.js'; // design 015 §2b: a cell's line never wraps — what does not fit folds by width (the bar-fold rule) // lane headless-fallback: a browser that runs headless because the machine has no desktop session says so
 import { createTakeoverSection, takeoverWindowTitle } from './browser-takeover-queue.js'; // lane browser-takeover-queue: «Waiting for you» — the takeover requests, above Profiles
+import { openProxyDialog } from './browser-proxy-dialog.js'; // B-8b87: a profile's proxy and its login (kept in the vault)
+import { proxyWords, proxyDoor, PROXY_REFUSALS } from './browser-proxy-model.js'; // B-8b87 cure: a proxy refusal in the page's words
+import { showUnlock, showSetup } from './vault-unlock.js';
+import { openExitDialog } from './browser-exit-dialog.js'; // the exit check (the owner 2026-11-17)
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const STRIP_MAX = 12;
@@ -72,7 +76,7 @@ export function ephemeralStateText(e) {
   if (e.state === 'ready') return e.adopted ? t('running (adopted)') : t('running');
   if (e.state === 'starting') return t('starting');
   if (e.state === 'failed') return t('failed');
-  if (e.state === 'stopped') return e.stoppedBy === 'idle' ? t('idled out') : t('stopped');
+  if (e.state === 'stopped') return e.endedEarly ? t('found gone early') : e.stoppedBy === 'idle' ? t('idled out') : t('stopped'); // B-346d law 2: a daemon gone before its idle timeout never reads «idled out»
   return t('not started');
 }
 
@@ -743,11 +747,21 @@ export function usersOf(row) { return (Array.isArray(row && row.usedBy) ? row.us
  *  own words for a refusal by its code (B-53df: the restarts); '' ⇒ the server's sentence. */
 async function act(url, init, what, wordsOf = null) {
   const r = await fetchJson(url, init);
-  if (!r || r.error) { showToast(t('{what} — {reason}', { what, reason: (r && r.error && typeof wordsOf === 'function' && wordsOf(r)) || (r && r.error) || t('server unreachable') }), { type: 'error', duration: 9000 }); return null; }
+  if (!r || r.error) {
+    if (PROXY_REFUSALS.includes(r && r.code)) { sayRefusal(r, what, 'start'); return null; }   // B-8b87 cure: a proxy's refusal in the page's words, with the vault's press
+    showToast(t('{what} — {reason}', { what, reason: (r && r.error && typeof wordsOf === 'function' && wordsOf(r)) || (r && r.error) || t('server unreachable') }), { type: 'error', duration: 9000 }); return null;
+  }
   return r;
 }
 /** B-53df: a profile row's Restart refusal in the device's words (PURE restartRefusalWords by its code). */
 const restartWordsOf = (row) => (r) => restartRefusalWords(r, { label: String((row && (row.label || row.id)) || ''), human: humanRefusalText }, t);
+/** A refusal's toast — B-8b87 cure: a proxy's refusal (`act` = the act it refused) in the page's words, with the vault's press
+ *  (Unlock… / Set up the vault…) when it needs one; any other refusal as before. */
+function sayRefusal(r, what, act) {
+  const door = act ? proxyDoor(r && r.code, r && r.word) : null;
+  const reason = act ? proxyWords(r && r.code, t, '', { act, word: r && r.word }) : (r && r.error) || t('server unreachable');
+  showToast(t('{what} — {reason}', { what, reason }), { type: 'error', duration: 9000, ...(door ? { action: { label: door === 'setup' ? t('Set up the vault…') : t('Unlock…'), run: () => { try { (door === 'setup' ? showSetup : showUnlock)(); } catch { /* the vault's own window */ } } } } : {}) });
+}
 const jsonInit = (method, body) => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
 
 export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
@@ -764,7 +778,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
   // lane browser-admin: the row's AGE enters the signature as the words it prints (rowWhyText — minutes / hours), never the
   // raw `ageMs`, which moves every millisecond and rebuilt every row on every load (the keyed reuse never held: a click
   // across a load hit a detached node; the heavy UI suite caught it keeping the row a New profile… create must leave alone)
-  const rowSig = (r, v) => { const { use, ageMs, disk, ...rest } = r || {}; /* lane browser-disk-sample: `disk` is patched in place (patchDisk) */ return JSON.stringify([rest, rowWhyText(r), app.browserChipFor ? app.browserChipFor(r.id) : null, v?.limits?.recordingFloor || null, st.busy, pageStuckOf(r.id), autoDialogsOf(r), runningBuildOf(r.id)]); }; // lane browser-admin 2a: + the build its browser reports // lane browser-stuck: the page's state is part of what the row prints (+ verify r1 A6: its dialog mode)
+  const rowSig = (r, v) => { const { use, ageMs, disk, ...rest } = r || {}; /* lane browser-disk-sample: `disk` is patched in place (patchDisk) */ return JSON.stringify([rest, rowWhyText(r), r && r.egress && r.egress.checkedAt ? agoText(Date.now() - Number(r.egress.checkedAt)) : null, app.browserChipFor ? app.browserChipFor(r.id) : null, v?.limits?.recordingFloor || null, st.busy, pageStuckOf(r.id), autoDialogsOf(r), runningBuildOf(r.id)]); }; // lane browser-admin 2a: + the build its browser reports // lane browser-stuck: the page's state is part of what the row prints (+ verify r1 A6: its dialog mode)
   const root = el('div', 'bprof');
   const bar = el('div', 'bprof-bar');
   const summary = el('span', 'bprof-summary', t('Loading…'));
@@ -960,6 +974,17 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     // lane browser-admin 2a: Change build… — a Chromium profile's Chrome build (a running browser restarts; its
     // conversations are told; the dialog says so before the button)
     build: (r) => openBuildDialog(app, r.id, { label: String(r.label || r.id), onDone: () => load() }),
+    // B-8b87: Proxy… — the address alone and its login from the vault (applied at the next start); «Move the password to the
+    // vault» — an address saved WITH its password (never used): one press, the vault entry made and the profile rewritten
+    proxy: (r) => openProxyDialog(app, r, { onDone: () => load() }),
+    // the exit check (the owner 2026-11-17): a person's press, through this profile's own proxy; kept only on Keep
+    'exit-check': (r) => openExitDialog(app, r, { onDone: () => load() }),
+    'proxy-move': async (r) => {
+      const res = await fetchJson('/api/vault/proxy-logins/move', jsonInit('POST', { profileId: r.id }));
+      if (!res || res.error || res.ok === false) { sayRefusal(res, t('Could not move the password'), 'move'); load(); return; }   // B-8b87 cure: the move's own words + press
+      if (res) showToast(t('{label}\'s proxy password is in the vault now — the profile keeps the address alone', { label: String(r.label || r.id) }), { duration: 6000 });
+      load();
+    },
     // Rename… — validated like a new profile's name (unique, a human name, never a path)
     rename: async (r) => {
       const name = await showInputDialog({ title: t('Rename {label}', { label: String(r.label || r.id) }), label: t('Name'), value: String(r.label || ''), confirmText: t('Rename') });
@@ -1022,7 +1047,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     return row;
   }
   /** lane browser-resume (§3.9): why a kept browser stopped, in the device's words (the store's closed vocabulary). */
-  const keptWhyText = (w) => ({ 'turn-idle': t('released after its turn'), idle: t('idled out'), heal: t('its browser was restarted'), restart: t('VibeSpace restarted'), 'conversation-gone': t('its session ended'), user: t('stopped by you'), agent: t('closed by the agent') }[w] || '');
+  const keptWhyText = (w) => ({ 'turn-idle': t('released after its turn'), idle: t('idled out'), ended: t('it was found gone before its idle timeout'), heal: t('its browser was restarted'), restart: t('VibeSpace restarted'), 'conversation-gone': t('its session ended'), user: t('stopped by you'), agent: t('closed by the agent') }[w] || '');
   /** lane browser-resume (§3.9): ONE kept browser — a conversation's own browser's logins + tabs after it stopped. KEYED
    *  (by its browser key, rebuilt only when what it prints moved); Forget only on a stopped one (a running one says so). */
   const keptRows = new Map(); // browserKey → { row, sig }

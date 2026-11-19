@@ -25,7 +25,7 @@ import crypto from 'node:crypto';
 import { spawn, execSync, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { freePorts, scratch, scratchHome, endRootedProcesses, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, endRootedProcesses, ONBOARDED_SOURCE, vncEnv, CHROME_STORE } from './scratch.mjs';
 
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -99,7 +99,7 @@ async function api(p) {
 }
 
 const chromeDir = scratch('https-hub-chrome');
-const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage',
+const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage',
   '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, `--ignore-certificate-errors-spki-list=${LEAF.spki},${TS.spki}`, 'about:blank'], { stdio: 'ignore' });
 let cleaned = false;
 const cleanup = () => {

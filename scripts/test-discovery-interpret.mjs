@@ -328,7 +328,7 @@ if (fs.existsSync('/proc/self')) {
 
   for (const p of [realClaude, realCodex, readerTail, wrapper, keeper, keeper2]) { try { p.kill('SIGKILL'); } catch { } }
   fs.rmSync(home, { recursive: true, force: true });
-} else { console.log('  · /proc absent — skipping the process-identity twin'); }
+} else { console.log('  · SKIP the process-identity twin: /proc absent'); }
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

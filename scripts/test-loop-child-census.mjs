@@ -41,9 +41,10 @@ console.log('the loop-child census — every synchronous child / tree walk in sr
     ['src/safe-fs-worker.js', 'contextFiles > walk', 'walk', 1, DEBT, 'per act — a context listing; a WORKER thread, EXCEPT the inline road: while the safe-fs pool backs off after a worker timeout, SafeFs.call runs it on the MAIN thread (src/safe-fs.js — test-sync-fs-census rows the same site)'],
     ['src/safe-fs-worker.js', 'folderCensus > walk', 'walk', 1, DEBT, 'per act — a folder census; a WORKER thread, EXCEPT the inline road: while the safe-fs pool backs off after a worker timeout, SafeFs.call runs it on the MAIN thread (src/safe-fs.js)'],
     ['src/proc-identity.js', 'psOf', 'child:spawnSync', 1, FALLBACK, 'NO-/proc fallback only (macOS / BSD): /proc is the rung above it (test-architecture\'s process-table allowlist)'],
-    ['src/proc-identity.js', 'startToken', 'child:spawnSync', 1, DEBT, 'per spawn — opencode-serve\'s spawn tick — and per verdict on a RECORDED pid (tokenVerdict), whenever /proc/<pid>/stat cannot be read (macOS / BSD, and on Linux an exited pid): ps -o lstart= with NO timeout (named, not bounded here: data/bin/vibespace-remote-keeper carries this code byte for byte — a bound changes both, test-pid-identity)'],
+    ['src/proc-identity.js', 'startToken', 'child:spawnSync', 1, FALLBACK, 'B-f64b: NO-/proc fallback only (macOS / BSD) — where /proc exists an unreadable stat is gone, no ps (it had no timeout): per spawn on the device agent and opencode-serve\'s spawn tick / tokenVerdict only there'],
     ['src/discovery-facts.js', 'listOpenRolloutPathsViaLsof', 'child:spawnSync', 1, FALLBACK, 'NO-/proc fallback only (macOS / BSD codex liveness), ONE per scan'],
-    ['src/cli-identity.js', 'readPsIdentity', 'child-ref:execFileSync', 1, FALLBACK, 'the default of its `execImpl` (a suite injects one): `ps -p <pid> -o uid=,args=` whenever /proc has no answer — macOS / BSD, and on Linux an EXITED pid; no hub caller of procCmdline / procUid today (the acceptance panel read it), memoised 1 s'],
+    ['src/cli-identity.js', 'readPsIdentity', 'child-ref:execFileSync', 1, FALLBACK, 'the default of its `execImpl` (a suite injects one): `ps -p <pid> -o uid=,args=` only where there is NO /proc (macOS / BSD) — B-f64b: on Linux an exited pid is gone, no ps; its hub callers (opencode-serve\'s identity reads through procCmdline / procUid) get null where /proc exists, memoised 1 s'],
+    ['src/cli-identity.js', 'procArgv', 'child-ref:execFileSync', 1, FALLBACK, 'B-f64b: the default of its `execImpl` (a suite injects one): `ps -p <pid> -o args=` only where there is NO /proc (macOS / BSD) — on Linux a pid /proc cannot read is gone, no second program (the boot\'s walk held 33 s on one ps per exited pid)'],
     ['src/cli-identity.js', 'parentIndex', 'child-ref:execFileSync', 1, FALLBACK, 'the default of its `execImpl`: ONE `ps -eo pid=,ppid=` per sweep for the whole table — NO-/proc fallback only'],
     ['src/usage-routes.js', 'setupUsage > _readOAuthCreds', 'child:execFileSync', 1, FALLBACK, 'macOS only (the keychain\'s `security`): never runs on Linux'],
     ['src/routes/files.js', 'route:POST /api/paste-image', 'child:execFileSync', 1, FALLBACK, 'macOS only (osascript) — a person\'s paste'],
@@ -51,7 +52,6 @@ console.log('the loop-child census — every synchronous child / tree walk in sr
     ['src/usage-walker.js', 'walkSteps', 'walk', 1, DEBT, 'timer — the usage walk\'s poll on the hub\'s thread (usage-history runUsageWalk; the daemon runs it in its own process)'],
     ['src/task-groups.js', 'TaskGroupManager._listContextFiles > walk', 'walk', 1, DEBT, 'per prompt — for every belonged group (contextDirSignature, a 4 s cache) and per context listing'],
     ['src/server/stdout/claude-stream-json.js', 'create > attach > startSubagentWatcher', 'walk', 1, DEBT, 'per attach — each subagent tool use of a live session (its retries re-arm it)'],
-    ['src/cli-identity.js', 'procArgv', 'child:execFileSync', 1, DEBT, 'per walk — a machine-wide process walk, per pid whose /proc read failed (an exited pid on Linux too)'],
     ['src/usage-history.js', 'UsageHistory._loadSteps', 'walk', 1, DEBT, 'boot — stepped (it yields the loop each slice) + a shard rebuild; the usage-ledger-walk lane\'s ground'],
     ['src/node-runtime.js', 'reexecOnOwnRuntime', 'child:execFileSync', 1, DEBT, 'boot — server.js\'s first line: a node probe, 10 s timeout'],
     ['src/server/cli-env.js', 'create', 'child:execFileSync', 1, DEBT, 'boot — module load: `claude --help`, 5 s timeout'],
@@ -81,7 +81,7 @@ console.log('the loop-child census — every synchronous child / tree walk in sr
   // THE RATCHET: the debt rows only SHRINK — a conversion deletes its row and lowers this number in the same commit. Round 2: 22 → 28
   // — NOT six new holds: the census now SEES three walks it missed (the iterative shape: codex, the builds picker, usage) and its
   // rows tell the truth on every road (safe-fs's inline road ×2, startToken's unbounded ps on Linux for an exited pid)
-  const DEBT_MAX = 28;
+  const DEBT_MAX = 26;   // B-f64b: cli-identity procArgv's and proc-identity startToken's ps per exited pid are no-/proc fallbacks now (28 → 26)
   const key = (f, sc, k) => `${f}|${sc}|${k}`;
   const judge = (r) => {
     const by = new Map(); for (const st of r.sites) by.set(key(st.file, st.scope, st.kind), (by.get(key(st.file, st.scope, st.kind)) || 0) + 1);

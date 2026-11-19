@@ -96,13 +96,14 @@ export function createHandover({ app, hostId, machine, strip, before = null, pan
     if (raised) return;   // raised: the same subject's form, as it was
     const note = mk('p', 'machine-desktop-handover-note', t('It sees this display and uses its keyboard and pointer through this window’s stream. Any key, click or scroll of yours here pauses it; Take back ends it — closing this window ends it too.'));
     const why = mk('p', 'machine-desktop-handover-why'); why.hidden = true;
+    const whyDoor = mk('div', 'machine-desktop-handover-door'); // B-bd27 X1: the door's own slot
     const ok = button('btn-create', t('Hand over'), async () => {
       if (!chosen.length) return;
       ok.disabled = true;
       const cur = streamOf();
       const r = await post(BASE, { host: hostId, key: cur && cur.key, principal: chosen[0] }).catch((e) => ({ error: String((e && e.message) || e) }));
       ok.disabled = false;
-      if (!r || !r.ok) { why.textContent = giveRefusalText(r, machine); why.hidden = false; if (r && isAgentOld(r.code)) why.append(' ', agentUpdateDoor(hostId, { app, before: close })); return; } // B-bd27 X1: «too old for a hand-over» ⇒ its door
+      if (!r || !r.ok) { why.textContent = giveRefusalText(r, machine); why.hidden = false; whyDoor.replaceChildren(...(r && isAgentOld(r.code) ? [agentUpdateDoor(hostId, { app, before: close })] : [])); return; } // B-bd27 X1: «too old for a hand-over» ⇒ its door
       close();
       draw({ ...r.lease, state: r.lease.input });
       showToast(t('{name} drives {machine}’s desktop — any key or click of yours pauses it', { name: (r.lease.holder && r.lease.holder.name) || t('The agent'), machine }));
@@ -112,7 +113,7 @@ export function createHandover({ app, hostId, machine, strip, before = null, pan
       onChange: (keys) => { chosen = keys.slice(0, 1); ok.disabled = !chosen.length; why.hidden = true; } });
     const row = mk('div', 'desktop-install-actions');
     row.append(button('file-tool-btn', t('Cancel'), () => close()), ok);
-    body.append(note, picker.el, why, row);
+    body.append(note, picker.el, why, whyDoor, row);
   }
   return {
     facts: (f) => draw(f || null),

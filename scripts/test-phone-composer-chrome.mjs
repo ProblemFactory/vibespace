@@ -23,7 +23,7 @@ import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { freePort, scratch, ONBOARDED_SOURCE } from './scratch.mjs';
+import { freePort, scratch, ONBOARDED_SOURCE, CHROME_STORE } from './scratch.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
 
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -98,7 +98,7 @@ const CDP_PORT = await freePort();
 const chromeHome = path.join(root, 'chrome-home'), chromeRun = path.join(root, 'chrome-run');
 fs.mkdirSync(chromeHome, { recursive: true }); fs.mkdirSync(chromeRun, { recursive: true, mode: 0o700 });
 const cenv = { ...process.env, HOME: chromeHome, XDG_RUNTIME_DIR: chromeRun }; delete cenv.DISPLAY; delete cenv.WAYLAND_DISPLAY;
-chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', '--font-render-hinting=none', `--user-data-dir=${path.join(root, 'profile')}`, 'about:blank'], { env: cenv, stdio: 'ignore' });
+chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', '--font-render-hinting=none', `--user-data-dir=${path.join(root, 'profile')}`, 'about:blank'], { env: cenv, stdio: 'ignore' });
 const WebSocket = require(path.join(REPO, 'node_modules/ws'));
 for (let i = 0; i < 120; i++) { try { await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json(); break; } catch { await sleep(250); } }
 
@@ -306,8 +306,16 @@ console.log('② desk 1100 — the composer + bar untouched (DOM signature pinne
   // re-pinned by lane ui-language (43b4907f5e0b → 7eb3a7d04bc1, measured on the box at 8fde20d8b): the fixture's bar runs in
   // bypassPermissions, and the perm chip now carries .danger there (the walk's chat-status-bar-2: a mode that asks nothing is
   // drawn in the warning colour) — span.chat-status-perm.chat-status-clickable.danger
-  const DESK_SIG = process.env.PHONE_COMPOSER_DESK_SIG || '7eb3a7d04bc1';
+  // re-pinned .411 for lane bl-chat-c's B-02a3 (8a4b93e94, the coordinator's ruling (1): THE GROUP PRESS) by lane
+  // bl-tests-chrome (7eb3a7d04bc1 → 98f87f3662f7, by arithmetic: the .362 signature kept whole in the logs + .danger hashes
+  // to 7eb3a7d04bc1, and + exactly button.chat-stash-go.chat-stash-groups-go(span.chat-stash-go-label,span.chat-stash-cost)
+  // right after span.chat-stash-nobutton hashes to 98f87f3662f7, the hash the block's first checkpoint 8cef0006a printed) —
+  // the stash strip's hidden group press, drawn only mid-turn where Enter steers
+  const DESK_SIG = process.env.PHONE_COMPOSER_DESK_SIG || '98f87f3662f7';
   ok('desk: the composer + bar DOM signature is the pinned desk one (no + door, no in-field mic, no ⋯)', crypto.createHash('sha1').update(sig).digest('hex').slice(0, 12) === DESK_SIG && !/chat-plus-btn|chat-input-field|chat-status-more/.test(sig), sig);
+  // ALSO (lane bl-tests-chrome, .411): a missed pin prints the WHOLE signature, in pieces a log keeps whole (ok() cuts a detail at
+  // 700 chars and the signature is ~1650), so the next re-pin is placed by a diff against the last one, not by arithmetic
+  if (crypto.createHash('sha1').update(sig).digest('hex').slice(0, 12) !== DESK_SIG) for (let i = 0, n = Math.ceil(sig.length / 180); i < n; i++) console.log(`    desk sig whole [${i + 1}/${n}]: ${sig.slice(i * 180, (i + 1) * 180)}`);
   ok('desk: the PNG equals the render with the phone block stripped', real === stripped, { real, stripped });
   ok('desk: no camera input on the desk (lane phone-take-photo)', deskCam === 0, deskCam);
   ok('RED control: the phone block un-gated changes the desk PNG', leak !== real && leakSig === sig, { leak, real });

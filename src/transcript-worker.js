@@ -79,7 +79,9 @@ function runOp(op, payload = {}) {
     }
     case 'codexOpenThreads': {
       // the /proc (or lsof) open-rollout scan → thread ids (uncached here;
-      // the main thread keeps the 10s cache)
+      // the main thread keeps the 10s cache). B-f64b: on the MAIN thread (the pool down, no worker alive — SafeFs runs the
+      // op inline) it answers null = not known: never the whole process walk on the loop (locate's rule below)
+      if (isMainThread) return { result: null };
       const { listOpenCodexRolloutPaths, codexThreadIdOf } = require('./discovery-facts');
       const { CODEX_SESSIONS_DIR } = _codex();
       const ids = new Set();

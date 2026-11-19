@@ -204,9 +204,25 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
 
   const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-  /** Release the port (if held) and the timer — on EVERY exit. */
-  function release(st) {
-    if (st.server) { try { st.server.close(); } catch {} st.server = null; }
+  /** Release the port (if held) and the timer — on EVERY exit. B-cabe: `st.closing` is a promise of the server's own 'close'
+   *  event. server.close() stops the LISTENER at once (the port is not held by it after that); the close EVENT lands once the
+   *  connections it still holds have ended — so the promise is about connections, not the listener. `drop` (the shutdown road)
+   *  ends those connections first, so the promise cannot wait on a lingering one — TRUE ONLY for a flow still running at the
+   *  stop (cancel() releases it with the drop) and on a Node that has closeAllConnections (≥ 18.2; without it the drop is
+   *  skipped and the promise waits for the connections' own end). A flow that had ended before the stop released its server
+   *  without the drop: its promise is the close of whatever connection it still held — close() ends the IDLE ones itself
+   *  (Node ≥ 19), but keeps one whose response is not yet written (closeIdleConnections skips it on Node 22 and 24): a chain
+   *  page answers after its exchange and its report, so that connection ends when the page is written — on a flow cancelled
+   *  DURING its exchange, after the vendor answers (a later stopAll() cannot drop it: cancel() refuses an ended flow). The
+   *  promise is made by the release that closes a server and read only by stopAll(): a promise nobody awaits holds nothing —
+   *  harmless */
+  function release(st, { drop = false } = {}) {
+    if (st.server) {
+      const srv = st.server;
+      if (drop) { try { srv.closeAllConnections?.(); } catch {} }
+      st.closing = new Promise((r) => { try { srv.close(() => r()); } catch { r(); } });   // (an error = not listening: closed)
+      st.server = null;
+    }
     st.listening = false;
     if (st.timer) { clearTimeout(st.timer); st.timer = null; }
   }
@@ -587,7 +603,7 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
     if (!st) return false;
     if (st.done || st.cancelled) return false;
     st.cancelled = why;
-    release(st);
+    release(st, { drop: why === 'shutdown' });
     // verify r3: the closure goes with the flow — unless an exchange is in flight, which consults `cancelled()`
     // itself and drops the closure when it returns (⑥). verify r4: `onDone` goes WITH it (one scope, one context:
     // kept, it kept the secret); the machine's own ends report first (`endByItself`)
@@ -596,7 +612,14 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
     return true;
   }
 
-  function stopAll() { for (const id of [...flows.keys()]) cancel(id, 'shutdown'); }
+  /** Every running flow cancelled ('shutdown', its servers' connections dropped). → a promise of every server's own close event
+   *  (B-cabe) — the shutdown path may ignore it, as before; a caller that must know every connection has ended awaits it. A
+   *  listener still binding when stopAll runs is closed by its own bind's end (`bound`), outside this promise */
+  function stopAll() {
+    const sts = [...flows.values()];
+    for (const id of [...flows.keys()]) cancel(id, 'shutdown');
+    return Promise.all(sts.map((st) => st.closing || Promise.resolve())).then(() => undefined);
+  }
   const runningFor = (id) => (byId.has(id) ? status(byId.get(id)) : null);
 
   /** lane gmail-connect-wall r2 (law C): a FIXED flow that was refused its port (port-busy) binds it AGAIN — the caller ended

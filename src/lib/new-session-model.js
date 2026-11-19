@@ -8,7 +8,7 @@
 //   footerChips(facts) — the run's values as footer chips (each names the row it opens; a folded row's chip is dashed)
 //   createRefusal(facts) — why Create cannot run yet, as a key the form words (null = it can)
 //   toolStates / toolCycle / toolPickOf / codexPreset — the 「可用工具」 row over the harness's own toolAllowlist row
-//   accountRows(adapters, grains, taskIds, excepts) — 「频道」's ticks (lane new-session-layout-v3-build: the separate
+//   accountRows(adapters, grains, taskIds, excepts, names) — 「频道」's ticks (judged by THE channel door's rowNames, handed in) (lane new-session-layout-v3-build: the separate
 //       「账号 · 以你的身份」 card is merged into the 频道 row): the channel accounts, ONE list, with what the picked Task
 //       Groups already grant (a group or everyone row ⇒ granted, locked, its 「除了」 drawn); the rest are the ticks a
 //       create writes (one tick per account — the 无 | 已选 | 全部 switch is gone: one or two tickable accounts)
@@ -117,14 +117,20 @@ export function toolChipText(row, pick) {
 /** `adapters` = the channel accounts ({id, kind, label, vendor, builtin, enabled, listed, reach}), `grains` = id → its
  *  account grain's access rows, `taskIds` = the picked groups, `excepts` = id → the grain's 「除了」 (the members its
  *  group / everyone rows leave out — lane grants-unify). A row a picked group (or everyone) holds is GRANTED — shown
- *  ticked and locked, with the strongest authority, the groups it comes through and its 除了; the others are tickable. */
-export function accountRows(adapters = [], grains = {}, taskIds = [], excepts = {}) {
-  const mine = new Set((Array.isArray(taskIds) ? taskIds : []).map(String));
+ *  ticked and locked, with the strongest authority, the groups it comes through and its 除了; the others are tickable.
+ *  `names(row, ctx)` = THE channel door's verdict (channel-filter rowNames — unit what-it-may-use: «one rule», never a
+ *  membership test of this model's own), asked for each access row with the row's 「除了」 riding it and the asker = a
+ *  conversation NOT CREATED YET (on no list by itself — NEW_CONVERSATION) in the picked groups; none given ⇒ nothing is
+ *  granted (fail closed). */
+export const NEW_CONVERSATION = 'webui:new-session-form';
+export function accountRows(adapters = [], grains = {}, taskIds = [], excepts = {}, names = null) {
+  const ctx = { kind: 'agent', id: NEW_CONVERSATION, groups: (Array.isArray(taskIds) ? taskIds : []).map(String) };
   const out = [];
   for (const a of Array.isArray(adapters) ? adapters : []) {
     if (!a || !a.id || a.builtin || a.listed === false || (a.reach && a.reach !== 'grants')) continue;
     const access = Array.isArray(grains[a.id]) ? grains[a.id] : [];
-    const via = access.filter((r) => r && r.principal && (r.principal.kind === 'everyone' || (r.principal.kind === 'group' && mine.has(String(r.principal.id)))));
+    const exc = Array.isArray(excepts[a.id]) ? excepts[a.id] : [];
+    const via = typeof names === 'function' ? access.filter((r) => r && r.principal && names({ ...r, except: exc }, ctx)) : [];
     const authority = via.some((r) => (r.authorityStored || r.authority) === 'send') ? 'send' : via.length ? 'draft' : null;
     out.push({
       id: a.id, kind: a.kind || '', vendor: a.vendor || a.kind || '', label: a.label || a.id, enabled: a.enabled !== false,

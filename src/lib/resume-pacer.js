@@ -14,8 +14,24 @@
 import { showToast } from './utils.js';
 import { t } from './i18n.js';
 
+/** B-f64b cure (主开发 11:47Z, as if a must): a row whose LIVENESS is not known yet (codex: the liveness walk has not answered —
+ *  a codex the person runs in another terminal may be it) is NEVER started by anything automatic (the paced resume, the boot's
+ *  «resume all», a layout restore): only a person's own press on that one row, after «still checking» was said. */
+export const livenessUnknown = (s) => !!s && s.status === 'stopped' && s.liveness === 'unknown';
+export const unknownRowOf = (rows, backend, id) => (rows || []).find((s) => livenessUnknown(s) && (s.backend || 'claude') === (backend || 'claude') && (s.backendSessionId || s.sessionId) === id) || null;
+
 const FOREVER_MS = 24 * 3600e3;   // the progress line stays until the bulk ends (a toast's timer must stay under 2^31 ms)
 const LIST_MAX = 3;               // the names a failure line lists before «and N more» (S3: one phone screen)
+
+/** ONE LANE FOR EVERY BULK CREATE (B-864f): the pace's resumes and the resumes a conversation waiting for the vault starts by
+ *  itself at the unlock (src/lib/session-lifecycle.js) take their turns in ONE queue — `fn` starts when the previous turn's
+ *  create has ended (its promise settled), so two bulk roads never have two creates in flight. → fn's promise */
+let lane = Promise.resolve();
+export function inTurn(fn) {
+  const run = lane.then(() => fn());
+  lane = run.then(() => { }, () => { });
+  return run;
+}
 
 /** One resume through the app's ONE door, and its create's END → Promise<{how, msg, row}>. `how`: 'created' | 'refused' |
  *  'error' | 'lost' | 'closed' (createSession's onCreateEnd), 'none' (no create was sent: the conversation runs live and its
@@ -31,6 +47,7 @@ export function resumeAndWait(app, d, extra = {}) {
       r = app.resumeSession(d.sessionId, d.cwd, d.name, { ...opts, ...extra, onCreateEnd: (how, msg) => end(how, msg, r && r.row ? r.row : null) });
     } catch (e) { end('threw', { error: (e && e.message) || String(e) }); return; }
     const row = r && r.row ? r.row : null;
+    if (r && r.checking) { end('checking', null, row); return; }   // B-f64b cure 2: held by the backstop — not resumed, and named
     // a create in flight is the pending resume of THIS conversation (createSession's _resumeWins) — and not one we joined
     const sent = !(r && r.pending) && !!(app._pendingResumeWin && app._pendingResumeWin(backend, cid));
     if (!sent) end('none', null, row);
@@ -40,6 +57,9 @@ export function resumeAndWait(app, d, extra = {}) {
 /** WHY ONE WAS NOT RESUMED, in the person's words (M4 of 主开发's look, 19:11Z): the hub's own text when it sent one; else a sentence of
  *  ours for each end — never the pace's end word or a page's exception text */
 function whyNotResumed(r) {
+  // B-864f: a folder on a mount that waits — the page's words (the hub's sentence is long, and a person's tray is no log)
+  if (r.how === 'refused' && r.msg && r.msg.code === 'vault_locked' && r.msg.cwd) return t('its folder waits for the vault');
+  if (r.how === 'refused' && r.msg && r.msg.code === 'mount_down') return t('its folder is on a mount that is not up');
   const hub = r.how !== 'threw' && r.msg && (r.msg.error || r.msg.message);
   if (hub) return String(hub);
   switch (r.how) {
@@ -47,6 +67,7 @@ function whyNotResumed(r) {
     case 'error': return t('the server reported an error without a reason');
     case 'refused': return t('the server refused it without a reason');
     case 'threw': return t('it could not be started on this page');
+    case 'checking': return t('still checking whether it runs in another terminal');
     default: return t('it was not resumed');
   }
 }
@@ -59,7 +80,7 @@ const cut = (x, n) => { const v = String(x || ''); return v.length > n ? v.slice
  *  → {total, resumed, rows, failed: [{name, why}], closed, stopped} */
 export async function resumePaced(app, items, { extra = { stay: true }, later = null } = {}) {
   const list = (items || []).filter(Boolean), n = list.length;
-  const out = { total: n, resumed: 0, rows: 0, failed: [], closed: 0, stopped: false };
+  const out = { total: n, resumed: 0, rows: 0, failed: [], closed: 0, waiting: 0, stopped: false };
   if (!n) return out;
   let el = null, body = null, stopping = null, stop = false;
   const shown = (e) => !!e && e.isConnected !== false && !e.removed;   // a burst of toasts can push it out (showToast caps the stack): then a new one
@@ -82,23 +103,25 @@ export async function resumePaced(app, items, { extra = { stay: true }, later = 
     if (stop) { out.stopped = true; break; }
     say(i + 1);
     const d = list[i];
-    const r = await resumeAndWait(app, d, i > 0 && later ? later : extra);
+    const r = await inTurn(() => resumeAndWait(app, d, i > 0 && later ? later : extra));
     if (r.row) out.rows++;
     const code = r.msg && r.msg.code;
     if (r.how === 'created' || r.how === 'none' || (r.how === 'refused' && code === 'resume-already-live')) out.resumed++;
     else if (r.how === 'closed') out.closed++;   // the person closed its window while it started: theirs, not a failure
+    else if (r.how === 'refused' && r.msg && r.msg.resumesAtUnlock) out.waiting++;   // B-864f: its window resumes it at the unlock
     else out.failed.push({ name: cut(d.name || d.sessionId, NAME_MAX), why: cut(whyNotResumed(r), WHY_MAX) });
   }
-  if (stop && !out.stopped && out.resumed + out.failed.length + out.closed < n) out.stopped = true;
+  if (stop && !out.stopped && out.resumed + out.failed.length + out.closed + out.waiting < n) out.stopped = true;
   if (shown(el)) el.remove();
   if (shown(stopping)) stopping.remove();
   if (out.failed.length) {
     const names = out.failed.slice(0, LIST_MAX).map((f) => t('{name} ({why})', { name: f.name, why: f.why })).join(t(', ')) + (out.failed.length > LIST_MAX ? ' ' + t('and {n} more', { n: out.failed.length - LIST_MAX }) : '');   // each language its own brackets and separator
     showToast(t('{f} of {n} conversations could not be resumed: {list}', { f: out.failed.length, n, list: names }), { type: 'error', duration: 15000 });
   }
+  if (out.waiting) showToast(t('{w} of {n} conversations wait for the vault \u2014 while this page is open, each resumes by itself once you unlock it.', { w: out.waiting, n }), { type: 'info', duration: 15000 });
   if (out.stopped) {
     // S2: the three numbers add up to the total — resumed, not resumed (refused, failed, or closed by the person), not started
-    const notResumed = out.failed.length + out.closed, left = n - out.resumed - notResumed;
+    const notResumed = out.failed.length + out.closed + out.waiting, left = n - out.resumed - notResumed;
     showToast(t('Stopped: {r} of {n} resumed, {x} not resumed, {left} not started.', { r: out.resumed, n, x: notResumed, left }), { type: 'info', duration: 8000 });
   }
   return out;
@@ -109,8 +132,9 @@ export async function resumePaced(app, items, { extra = { stay: true }, later = 
  *  (its window raised, its row's desktop shown, as one press of one member would); every later one QUIET (`stay`: drawn, never
  *  focused, no desktop switch — it starts seconds or minutes after the press, while the person works elsewhere). → resumePaced's answer */
 export function resumeGroup(app, sessions, { nameOf = (s) => s.name } = {}) {
-  const stopped = [];
+  const stopped = [], checking = [];
   for (const s of sessions || []) {
+    if (livenessUnknown(s)) { checking.push(nameOf(s) || s.name); continue; }   // B-f64b cure: never started by a group press
     const agentOpts = {
       backend: s.backend || 'claude', backendSessionId: s.backendSessionId || s.sessionId,
       agentKind: s.agentKind || 'primary', agentRole: s.agentRole || '',
@@ -122,6 +146,7 @@ export function resumeGroup(app, sessions, { nameOf = (s) => s.name } = {}) {
     else if (s.status === 'live' && s.webuiId) app.attachSession(s.webuiId, s.webuiName || s.name, s.cwd, { mode: s.webuiMode, ...agentOpts });
     else if (s.status === 'tmux') app.attachTmuxSession(s.tmuxTarget, s.name, s.cwd);
   }
+  if (checking.length) showToast(t('{n} not resumed: still checking whether they run in another terminal — resume each one by itself', { n: checking.length }), { type: 'info', duration: 6000 });
   return resumePaced(app, stopped, { extra: {}, later: { stay: true } });
 }
 

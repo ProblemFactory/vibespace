@@ -508,9 +508,14 @@ const INDEX_HTML = { name: 'public/index.html', src: fs.readFileSync(path.join(R
 // searches read — held to a budget declared from src/lib at a base; how fast it ran is judged only RELATIVE to a
 // control measured in this same process (the bare parse + walk of ONE reference module, scaled to every node the
 // census parsed), on CPU time, so a slower or busier runner moves both sides. The milliseconds printed are information.
-const COST_BASE = { at: 'd419156bd', files: 226, bytes: 9305042, nodes: 932197, markupPerByte: 6.4 };
+// RE-DECLARED at the .411 checkpoint a68be1413: src/lib's growth since the d419156bd base (226 files / 9305042 B /
+// 932197 nodes / 6.4) crossed 1.5 × in bytes (14154772 > 13957563; files and nodes 1.44 ×). Files, bytes and nodes as
+// measured there in the BUILT tree the suite runs on (325 = 324 tracked + the build's gitignored src/lib/build-version.js,
+// 177 B), the ratio RE-MEASURED in the same run (3137 selector searches read 122740682 B over 14154772 B parsed = 8.67 B
+// per parsed byte), never copied.
+const COST_BASE = { at: 'a68be1413', files: 325, bytes: 14154772, nodes: 1341791, markupPerByte: 8.67 };
 const COST_GROWTH = 1.5;      // src/lib may grow by half past the base before it is re-declared (re-measure the ratio then)
-const COST_RATIO_MAX = 15;    // the census's CPU ≤ this × the reference parse scaled to its nodes (measured 4.6–5.5 × on node 24 and 22, idle or beside two busy loops)
+const COST_RATIO_MAX = 15;    // the census's CPU ≤ this × the reference parse scaled to its nodes (measured 4.6–5.5 × on node 24 and 22, idle or beside two busy loops; 3.59–4.55 × at a68be1413 on the test machine)
 const cpuMsOf = (u) => (u.user + u.system) / 1000;
 /** PURE: the cost law over one run's tally `{ files, bytes, nodes, markupBytes, cpuMs, refCpuMs, refNodes }`. */
 function costVerdict(c) {

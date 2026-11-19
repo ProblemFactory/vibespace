@@ -891,7 +891,7 @@ const LEGACY = Object.freeze({
 });
 
 module.exports = {
-  DOORS, PRINCIPAL_KINDS, REFUSALS, WRITE_REFUSALS, LIST_MAX, ENTRY_FIELDS, GROUP_ID_RE, CONVERSATION_KEY_RE, RESOURCE_SHAPES, resourceShapeOk, HOST_TOKEN_RE, HOSTS_MAX, hostListOf, COMMANDS_MAX, commandListOf, commandKeyOf, scopeListOf,
+  DOORS, PRINCIPAL_KINDS, REFUSALS, WRITE_REFUSALS, LIST_MAX, ENTRY_FIELDS, GROUP_ID_RE, CONVERSATION_KEY_RE, RESOURCE_SHAPES, resourceShapeOk, HOST_TOKEN_RE, HOSTS_MAX, hostListOf, PUBLIC_SUFFIXES, COMMANDS_MAX, commandListOf, commandKeyOf, scopeListOf,
   principalKey, bareOf, normEntry, normExcept, normRow, validateWrite, exceptUnnamed, EXCEPT_UNNAMED_WORDS, onlyCarried, ONLY_UNNAMED_WORDS, factsOf, admits, prepareRow, prepareFacts, hitsOf, sharesGroup, names, namesNow, specificityOf,
   publicRow, rowKey, conversationKeyOf, conversationKeysOf, keyFromSessionKey, keyFromSubject,
   fromSessionPrincipal, fromExitGrant, fromHostExit, browserKeyResolver, fromBrowserOwner, fromWindowRecord, fromSubject, fromAutomationGrant,

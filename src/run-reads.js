@@ -37,7 +37,8 @@
  *     another process's;
  *   - A LOOK-AGAIN READ — a check whose purpose is «look again before I write» (is the member still signed in before a
  *     billing link is written to it; is a row still not signed in before it is removed or handed to a sign-in) — calls
- *     forget(dir) first: it asks the mount itself, and its answer becomes the run's (src/accounts.js names each one);
+ *     forget(dir) first: it asks the mount itself, and its answer becomes the run's (src/accounts.js names each one; a folder
+ *     it cannot NAME drops the whole run instead — dropRun());
  *   - A WRITE NO WRAPPER SEES that this thread waits on (a worker's write behind a synchronous flush — the store writer's,
  *     when the readings move there) calls dropRun() at its hand-off: every copy's memo goes;
  *   - NOT SEEN, and no writer does any of them today: a write to a PARENT of a watched folder (data/ itself renamed or

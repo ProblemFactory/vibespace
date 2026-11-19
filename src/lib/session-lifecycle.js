@@ -4,10 +4,12 @@ import { namedModel } from '../model-providers.js'; // THE model door (lane fabl
 import { backendFeatureCaps, terminalOnly, worktreePick, uiRow, billingRow, accountUsageStore, viewIdFor, legacyIdFor, accountBound } from './agent-meta.js';
 import { track, metric } from './telemetry-client.js';
 import { t } from './i18n.js';
+import { unknownRowOf } from './resume-pacer.js'; // B-f64b cure: a row still being checked is never started unasked
 import { stampAt as when, durationMark } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { registerWindowType, replayOpenSpec as replayOpenSpecViaRegistry, svgIcon16 } from './window-types.js';
 import { TerminalSession } from './terminal.js';
 import { api, escHtml, estDisplayPair, fetchJson, hostStateChip, showConfirmDialog, showContextMenu, showToast, stripCwdHostLabel } from './utils.js';
+import { endNotice } from '../job-model.js'; // B-70f9 ② (PURE): a conversation's jobs that still run, named at its end
 import { bucketView, unconfirmedText } from './usage-source.js'; // a landed reset is shown reset, unconfirmed (lane reset-unproven)
 import * as quotaModel from '../quota-model.js'; // PURE: the display verdict (windowDisplay)
 // THE RESUME LADDER, the client's half (B-6b6d) — the same PURE rule the server
@@ -27,10 +29,13 @@ import { DIALOG_ROOTS } from './form-yield.js'; // PURE (lane dialog-yield r2): 
 import { SIGN_IN } from '../day-one.js'; // lane door-day-one-landing: a sign-in terminal is not a session row
 import { resumeAccountOf, keptAccountOf, i18nParams } from './stopped-why.js'; // lane dead-socket-keeps-chat-meta: a resume nobody gave an account goes to the one its row names
 import { resumeAccountVerdict } from '../resume-account.js'; // lane resume-account-door: the pinned account is asked FIRST at the Resume press
+import { onVaultFacts, vaultFacts } from './vault-unlock.js'; // B-864f: a conversation whose folder waits for the vault resumes once it is unlocked
+import { inTurn } from './resume-pacer.js'; // B-864f: ONE lane with the bulk resume — never two creates in flight
 import { openCliMissingDialog, cliMissingWords } from './cli-missing-dialog.js'; // lane cli-shell-truth: a CLI the person's login shell cannot find is refused by name — a dialog
 
 // lane mirror-green-228: a window's focus on the server's answer never takes the keys from an open app dialog (the Rename
 // dialog a double-click on its own sidebar row opened while the attach was in flight)
+const turnOf = (fn) => inTurn(fn); // B-864f: the conversations whose folder waited for the vault resume in the bulk resume's lane, one create in flight
 const lateFocus = (view) => { if (lateFocusVerdict(document.querySelectorAll(DIALOG_ROOTS), document.activeElement) === 'take') view.focus(); }; // lane dialog-yield r2: ONE predicate — an open decision, or a FORM the person works in (the focus inside it, its window the active one), keeps the keys (it is no overlay any more)
 
 export function installSessionLifecycle(App, ctx = {}) {
@@ -66,6 +71,7 @@ export function installSessionLifecycle(App, ctx = {}) {
   },
 
   createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, outputStyle, autoResume, worktree, fork, hostId, keeperSid, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, taskIds, tools, extraTaskBinds, accountId, modelLock, lockModel, lockContext, poolPin, ephemeral = false, purpose = null, winBounds, recreateCwd = false, ignoreNoConvo = false, opencodePty = false, onCreateResult, onCreateEnd, browserProfileId, browserProfileOrigin, quiet = false }) {
+    const createArgs = arguments[0] || {}; // B-864f: the create as it was asked — a window that waits for the vault replays it whole
     try { track('event', `session-create:${backend || 'claude'}:${mode || 'default'}`); } catch {}
     // FIRST USE of a harness whose history lives behind an opt-in background
     // service (opencode → the 'opencode-serve' plugin, default OFF since
@@ -253,6 +259,9 @@ export function installSessionLifecycle(App, ctx = {}) {
       // surface it — without this the window stayed BLANK forever with no
       // feedback and no openSpec (found reproducing the remote-blank report).
       if (msg.type === 'error' && msg.reqId === reqId) {
+        // B-864f: a refusal this window resumes BY ITSELF at the unlock (its folder waits for the vault: a local chat resume, not a
+        // fork) — said on the answer BEFORE its end is told, so a bulk resume counts it as waiting, never as failed
+        if (msg.code === 'vault_locked' && msg.cwd && !hostId && resumeId && !fork && sessionMode === 'chat') msg.resumesAtUnlock = true;
         pending.remove(); settled('refused', msg);
         if (resumeKey) this._markResume(winInfo.id); // the answer's own turn is the resume's too (r4 N5)
         try { onCreateResult?.(false, msg); } catch { }
@@ -270,8 +279,19 @@ export function installSessionLifecycle(App, ctx = {}) {
           }); }
           return true;
         }
-        if (msg.code === 'vault_locked') { try { window.dispatchEvent(new CustomEvent('vs-vault-door')); } catch { } }   // lane vault-e2e-password-fix-r2: a machine's session waits for the vault — its door
-        const text = (msg.code === 'cli-missing' && cliMissingWords(msg).what) || (msg.i18n && msg.i18n.key ? t(msg.i18n.key, i18nParams(msg.i18n)) : '') || (msg.message ? t(msg.message) : '') || t('Session create failed');   // B-a5a4 follow-up: a sentence with a name rides its key + params   // B-a5a4 r1: a server sentence in the reader's words (t() answers an unknown one as it is)
+        // B-864f: the hub's vault_locked over a LOCAL folder (src/server/cwd-wait.js) — the folder is on a storage mount or a
+        // pulled machine folder that waits for the vault: never «gone», said in the page's words; no door of its own (a resume-all
+        // meets many at once, after the person may have just said 「稍后」 — the strip's Unlock and the window's line carry it)
+        const folderWaits = (msg.code === 'vault_locked' && !!msg.cwd && !hostId) || msg.code === 'mount_down';
+        if (msg.code === 'vault_locked' && !folderWaits) { try { window.dispatchEvent(new CustomEvent('vs-vault-door')); } catch { } }   // lane vault-e2e-password-fix-r2: a machine's session waits for the vault — its door
+        const where = { name: msg.waitsFor || msg.cwd };
+        const folderWords = !folderWaits ? '' : msg.code === 'mount_down'
+          ? (resumeId ? t('This conversation\u2019s folder is on {name}, which is not mounted right now \u2014 nothing was started; resume it once the mount is back.', where) : t('The folder is on {name}, which is not mounted right now \u2014 start again once it is back.', where))
+          : msg.resumesAtUnlock ? (createArgs.initialMessage   // the cure's should: a resume carrying the person's waiting message sends it then — said
+            ? t('This conversation\u2019s folder is on {name}, which opens after the vault is unlocked \u2014 while this page is open it resumes by itself once you unlock, and then sends the message you wrote; nothing is lost.', where)
+            : t('This conversation\u2019s folder is on {name}, which opens after the vault is unlocked \u2014 while this page is open it resumes by itself once you unlock; nothing is lost.', where))
+            : t('The folder is on {name}, which opens after the vault is unlocked \u2014 unlock it, then start again.', where);
+        const text = (msg.code === 'cli-missing' && cliMissingWords(msg).what) || folderWords || (msg.i18n && msg.i18n.key ? t(msg.i18n.key, i18nParams(msg.i18n)) : '') || (msg.message ? t(msg.message) : '') || t('Session create failed');   // B-a5a4 follow-up: a sentence with a name rides its key + params   // B-a5a4 r1: a server sentence in the reader's words (t() answers an unknown one as it is)
         // Failed RESUME rescue (2.219.0, real window-loss class): resumeSession
         // CLOSES the old read-only window before creating, so a failed create
         // used to leave only a spec-less "Create failed" shell — which
@@ -339,6 +359,27 @@ export function installSessionLifecycle(App, ctx = {}) {
           const view = this.sessions.get(winInfo.id);
           view?._renderers?.appendSystem(t('No transcript turned up for this conversation. Nothing has been deleted; the history below is whatever could be loaded.'));
           view?._showRetryResumeBar?.(retryHere);
+          return true;
+        }
+        // B-864f: A FOLDER THAT WAITS — the window keeps its history and says so (no toast: a resume-all meets many at once),
+        // and resumes ITSELF once the vault is unlocked: the waits in turn, each after the previous one's create ENDED (the
+        // resume-all-paced law — never every window at the unlock's tick); the hub then waits for the mount to come back
+        if (msg.resumesAtUnlock) {
+          rescueViewOnly();
+          // B-864f cure 2 (主开发's ask): a conversation the person ARCHIVED WHILE IT WAITED was put away — never resumed by the
+          // unlock (archiving leaves its read-only window open; the create door reads no archive). «While it waited»: one already
+          // archived when its resume was asked (Send my message again, a boot resume-all) is the person's own resume — it goes on
+          const convOf = { sessionKey: `${backend}:${createArgs.backendSessionId || resumeId}`, backend, backendSessionId: createArgs.backendSessionId || resumeId, cwd, host: hostId || undefined };
+          const archivedAtAsk = !!this.sidebar?.isArchived?.(convOf);
+          const again = () => turnOf(() => new Promise((done) => {
+            if (!this._winIs(winInfo)) { done(); return; } // closed or re-made while it waited
+            if (!archivedAtAsk && this.sidebar?.isArchived?.(convOf)) { const typed = typeof createArgs.initialMessage === 'string' ? createArgs.initialMessage.trim() : ''; this.sessions.get(winInfo.id)?._renderers?.appendSystem(typed ? t('Not resumed \u2014 this conversation was archived while it waited for the vault. The message you wrote was not sent: «{text}»', { text: typed }) : t('Not resumed \u2014 this conversation was archived while it waited for the vault.')); done(); return; }   // the restack read: the window had promised to send it — its text comes back
+            const re = this._reopenWin(winInfo.id); // the row, re-opened (r2 N1)
+            const { onCreateResult: _r, onCreateEnd: _e, syncId: _s, winBounds: _w, recreateCwd: _c, ...asked } = createArgs;
+            this.createSession({ ...asked, winBounds: winBounds || re?.place, syncId: re?.id, onCreateEnd: () => done() });
+          }));
+          if (vaultFacts()?.state === 'unlocked') { again(); return true; } // unlocked between the refusal and now
+          const off = onVaultFacts((f) => { if (!f || f.state !== 'unlocked') return; off(); again(); });
           return true;
         }
         // Missing-cwd DANGER flow (B-7812, user-approved with the explicit
@@ -476,7 +517,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           chatView._applyLiveMeta?.(msg);
           winInfo.onClose = () => {
             const shouldKill = (this.settings.get('window.closeBehavior') ?? 'terminate') === 'terminate';
-            if (shouldKill) this.killSession(msg.sessionId);
+            if (shouldKill) this.endConversation(msg.sessionId, undefined, { endTree: this._personClose() });   // B-70f9 ②: a person's end — its running jobs are named · B-c134: a close IS their Terminate, never a resume's or a record's close
             // pending name/fork-title entries otherwise only clear on identity
             // adoption — a window closed before that leaked them forever
             this._pendingForkTitles?.delete(msg.sessionId);
@@ -560,7 +601,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       // otherwise honor the global close-behavior (default: detach — user
       // directive, no per-type exceptions; sessions stay re-attachable)
       const shouldKill = ephemeral || (killOnClose && this.settings.get('window.closeBehavior') === 'terminate');
-      if (shouldKill) this.killSession(sessionId);
+      if (shouldKill) this.endConversation(sessionId, undefined, { endTree: !ephemeral && this._personClose() });   // B-70f9 ② · B-c134: an automation helper's own terminal is no person's Terminate, nor a resume's or a record's close
       term.dispose(); this.sessions.delete(winInfo.id); this._checkWelcome();
     };
     winInfo._notifyChanged = () => this.updateTaskbar();
@@ -597,10 +638,67 @@ export function installSessionLifecycle(App, ctx = {}) {
   // asked for (requestedId), so a remapped kill still resolves the request.
   // The 3-minute watchdog DISARMS the request (ws.request's timer alone
   // leaves the handler live) — nothing chases a kill for the page's lifetime.
+  // B-c134 cure: `endTree` — the end ALSO ends what the conversation left running in the background (the hub reads its process tree
+  // before the kill and ends what survived): ONLY a person's Terminate and an archive ask it. A kill a resume follows (a restart in
+  // place, an account or permission switch, a pool's cold restart) and a setup flow's own terminal keep what runs, as before
+  // B-c134 cure: a window close is a person's Terminate only when a PERSON closed it — never a resume's own close (the fence:
+  // _reopenWin / _closeSecondView) nor a record's (a layout apply, a desktop's restore: layoutManager._applying / _restoring)
+  _personClose() { return !((this._fenceOpen || 0) > 0 || this.layoutManager?._restoring || this.layoutManager?._applying); },
+  // B-70f9 ② A PERSON ENDS A CONVERSATION: the kill, then ONE non-blocking notice when it owns jobs that still run — named, with
+  // «Stop these too» (one press stops them all; no press = they keep running, as before). A RESTART (kill → resume) is no end: it
+  // calls killSession alone
+  // the door's options ({ endTree }, B-c134) ride the kill
+  endConversation(webuiId, backendSessionId, opts = {}) {
+    if (!webuiId) return;
+    // a RESUME's own close (the fence: _reopenWin / _closeSecondView) is no person's end — the kill as before, no notice
+    if ((this._fenceOpen || 0) > 0) { this.killSession(webuiId, backendSessionId); return; }
+    const all = this.sidebar?._allSessions || [];
+    const s = all.find((x) => x.webuiId === webuiId);
+    this.killSession(webuiId, backendSessionId, opts);
+    this.noticeOwnedJobs([backendSessionId || (s && (s.sessionId || s.backendSessionId))]);
+  },
+  // A «Clear content…» is news here (the record-clear rule): a clear that lands while the list is on its way names its jobs by
+  // id, never by the words it cleared, and one that lands while the notice shows takes the notice down. The toast history keeps
+  // the head and the count alone — never the jobs' names; a failed press says how many, by count
+  noticeOwnedJobs(cids) {
+    const want = (cids || []).filter(Boolean);
+    if (!want.length) return;
+    // a tab group's ✕ closes each of its tabs at once: the ends of one moment gather into ONE notice and ONE read of the list
+    const q = this._ownedNoticeQ || (this._ownedNoticeQ = { cids: new Set(), t: null });
+    for (const c of want) q.cids.add(c);
+    if (q.t) return;
+    q.t = setTimeout(() => { const list = [...q.cids]; this._ownedNoticeQ = null; this._noticeOwnedNow(list).catch(() => { }); }, 250);
+  },
+  async _noticeOwnedNow(want) {
+    const clearedNow = new Set();
+    let shown = null, ids = null;
+    const off = this.ws?.onGlobal?.((m) => {
+      if (!m || m.type !== 'jobs-updated' || !Array.isArray(m.cleared)) return;
+      for (const id of m.cleared) clearedNow.add(id);
+      if (shown && ids && m.cleared.some((id) => ids.has(id))) { const st = shown.parentNode; shown.remove(); if (st && !st.children.length) st.remove(); }
+    });
+    const done = () => { try { off?.(); } catch { } };
+    let r = null;
+    try { r = await fetchJson('/api/jobs'); } catch { r = null; }
+    const jobs = r && !r.error && Array.isArray(r.jobs) ? r.jobs.map((j) => (j && clearedNow.has(j.id) && !j.clearedAt ? { ...j, clearedAt: Date.now() } : j)) : null;
+    const n = jobs ? endNotice(jobs, want) : null;
+    if (!n) { done(); return; }
+    const stopAll = async () => {
+      done();
+      const res = await Promise.all(n.jobs.map((j) => fetchJson(`/api/jobs/${encodeURIComponent(j.id)}/stop`, { method: 'POST' }).then((a) => ({ j, a }), () => ({ j, a: null }))));
+      const bad = res.filter((x) => !x.a || x.a.error);
+      if (bad.length) showToast(t('Could not stop {n} of these background jobs: {error}', { n: bad.length, error: (bad[0].a && bad[0].a.error) || t('no answer') }), { type: 'error' });
+      else showToast(res.length === 1 ? t('Stopping 1 background job') : t('Stopping {n} background jobs', { n: res.length }));   // a stop is asked: each ends within its grace
+    };
+    ids = new Set(n.jobs.map((j) => j.id));
+    shown = showToast(t(n.words.key, n.words.params), { duration: 12000, action: { label: t('Stop these too'), run: stopAll }, history: { m: t('Background jobs keep running: {n}', { n: n.jobs.length }) } });
+    setTimeout(done, 12500);
+  },
   killSession(webuiId, backendSessionId) {
     if (!webuiId) return;
-    if (backendSessionId) this.ws.send({ type: 'kill', sessionId: webuiId, backendSessionId });
-    const msg = { type: 'kill', sessionId: webuiId };
+    const tree = arguments[2] && arguments[2].endTree === true ? { endTree: true } : {};   // the door's { endTree } (the signature stays the seam's)
+    if (backendSessionId) this.ws.send({ type: 'kill', sessionId: webuiId, backendSessionId, ...tree });
+    const msg = { type: 'kill', sessionId: webuiId, ...tree };
     const cancel = this.ws.request(msg, (m) => (m.type === 'killed' || m.type === 'exited') && m.sessionId === webuiId,
       { resend: true, timeoutMs: 180000, onTimeout: () => cancel() });
   },
@@ -886,7 +984,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           if (msg.viewOnly) chatView._setReadOnly();
           winInfo.onClose = () => {
             const shouldKill = !msg.viewOnly && (this.settings.get('window.closeBehavior') ?? 'terminate') === 'terminate';
-            if (shouldKill) this.killSession(serverId);
+            if (shouldKill) this.endConversation(serverId, undefined, { endTree: this._personClose() });   // B-70f9 ② · B-c134: the person's setting — a close IS their Terminate
             chatView.dispose(); this.sessions.delete(winInfo.id); this._checkWelcome();
           };
           winInfo._notifyChanged = () => this.updateTaskbar();
@@ -1102,7 +1200,13 @@ export function installSessionLifecycle(App, ctx = {}) {
     return win;
   },
 
-  resumeSession(sessionId, cwd, sessionName, { mode, model, effort, permission, accountId, worktree, syncId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, hostId, keeperSid, winBounds, excludeWebuiId, onCreateResult, onCreateEnd, initialMessage, stay = false, fromWin = null, unattended = false } = {}) {
+  /** B-f64b cure: the person's press on a row whose liveness is not known yet asks first (a method: a suite answers it) */
+  async _askStillChecking(name) {
+    return showConfirmDialog({ title: t('Still checking «{name}»', { name: String(name || '').slice(0, 60) }),
+      message: t('VibeSpace has not finished checking whether this conversation is running in another terminal. Resuming it now could start a second agent on the same conversation.'),
+      confirmText: t('Resume anyway') });
+  },
+  resumeSession(sessionId, cwd, sessionName, { mode, model, effort, permission, accountId, worktree, syncId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, hostId, keeperSid, winBounds, excludeWebuiId, onCreateResult, onCreateEnd, initialMessage, stay = false, fromWin = null, unattended = false, unknownOk = false } = {}) {
     const shown = this.wm.activeWindowId; // the window the person is in, before anything here moves the focus (r4 N3)
     this._closeSidebarOnMobile();
     const targetBackendId = backendSessionId || sessionId;
@@ -1115,6 +1219,23 @@ export function installSessionLifecycle(App, ctx = {}) {
       this._markResume(pend.id);
       if (!stay && !unattended) { this.wm.revealWindow?.(pend.id, {}); showToast(t('Still resuming this conversation — its window is waiting for the session to start')); } // the join is SAID (r4 N2)
       return { row: pend.id, desk: pend._desktopId || null, pending: true };
+    }
+    // B-f64b cure (主开发 11:47Z, as if a must): A ROW WHOSE LIVENESS IS NOT KNOWN YET IS NEVER STARTED UNASKED — a codex the person
+    // runs in another terminal may be it (a second CLI on one transcript). Unattended or bulk (`stay`): nothing starts; a person's
+    // own press: «still checking» is said first, and only a yes starts it
+    // cure 2: a conversation THIS page just ended (excludeWebuiId — a pool's cold move, a billing switch) is ours, never another terminal's
+    if (!unknownOk && !excludeWebuiId && unknownRowOf(this.sidebar?._allSessions, backend, targetBackendId)) {
+      if (!stay && !unattended && typeof this._askStillChecking === 'function') {
+        const again = arguments[3] || {};
+        Promise.resolve(this._askStillChecking(sessionName)).then((yes) => {
+          if (!yes) return;
+          // cure 2: the answer may have come while the question was open — read the row again before the yes acts
+          const row = (this.sidebar?._allSessions || []).find((s) => (s.backend || 'claude') === backend && (s.backendSessionId || s.sessionId) === targetBackendId);
+          if (row && row.status === 'external') { showToast(t('«{name}» was not resumed: it is running in another terminal', { name: String(sessionName || '').slice(0, 60) }), { type: 'info', duration: 8000 }); return; }
+          this.resumeSession(sessionId, cwd, sessionName, { ...again, unknownOk: !!unknownRowOf(this.sidebar?._allSessions, backend, targetBackendId) });
+        }).catch(() => {});
+      } else if (unattended && !stay) showToast(t('«{name}» was not resumed: still checking whether it runs in another terminal — resume it by itself', { name: String(sessionName || '').slice(0, 60) }), { type: 'info', duration: 8000 }); // cure 2: an unattended restart held is SAID
+      return { row: null, desk: null, checking: true };
     }
     // THE WINDOW THE RESUME WAS PRESSED IN (r2 N1 — the Resume bar, the retry bar, the account bar, the terminal's exited overlay, a
     // permission restart, a placeholder tile): `fromWin` is the row it re-opens — closed HERE as its re-opening (_reopenWin), never by
@@ -1526,6 +1647,9 @@ export function installSessionLifecycle(App, ctx = {}) {
     // Manage-Agents visit to that machine; the server re-verifies at spawn.
     const hostSubHeld = (a) => { const v = vOf(a); if (v) return v.usable && v.how === 'host-held'; return bill.hostLogin && rHostId && (this._hostSubsKnown?.[rHostId] || []).includes(a.id); };
     const subBlock = (a) => {
+      // a THIRD-PARTY provider runs on this machine only — never offered to a session on another one (the switch would
+      // end the session first and the create refuse it — lane lg-providers U5 r1)
+      if (a.type === 'provider') return rHostId ? t('A third-party model runs on this machine only for now — start the conversation here') : null;
       const isSub = !bill.apiKeys || (a.type || 'api') === 'subscription';
       if (!isSub) return null; // API keys always ship
       const v = vOf(a);

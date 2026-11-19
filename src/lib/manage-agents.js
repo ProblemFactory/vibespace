@@ -24,11 +24,13 @@ import { t } from './i18n.js';
 import { dateOf, stampAt as when, durationMark } from './page-time.js';
 import { SETTINGS_SCHEMA } from './settings-schema.js';
 import { markLandedOnSave, carryUnsaved, agoText, api, copyText, createModalShell, escHtml, estDisplayPair, fetchJson, showConfirmDialog, showContextMenu, showInputDialog, showToast, uiScale } from './utils.js';
-import { cliWhereWords } from './cli-missing-dialog.js'; // lane cli-shell-truth: the census line (where the login shell found each CLI)
+import { cliWhereWords, remoteCliWhereWords } from './cli-missing-dialog.js'; // lane cli-shell-truth: the census line (where the login shell found each CLI)
 import { track } from './telemetry-client.js';
 import { openPermissionRulesDialog, runLocalOracle } from './permission-rules-view.js';
 import { permissionRulesCaps, resetCreditCapable, scopedCapsReadOnDemand, billingRow, getBackendMeta } from './agent-meta.js';
 import { rosterResetOffer } from '../reset-credit.js'; // PURE (design-reset-credits p2): what a row says about stored reset credits
+import { renderProviderRows, namedLiveRows } from './provider-roster.js'; // lane lg-providers U5 (B-d578): a third party's rows under the roster
+import { openProviderWizard } from './provider-wizard.js'; // lane lg-providers U5: Add a third-party model… (four screens)
 import { openAccountModelsDialog } from './account-models.js'; // lane provider-record (q-053 §3): ⋯ → 模型… — the account's provider and the models it may use
 import { openOatShapeDialog } from './oat-shape-dialog.js';
 import { shapeName } from '../plan-names.js'; // PURE (lane oat-add-door, acceptance r1): a plan by the table's CURRENT names on the row's line // lane oat-add-door: the guided door — sign in once, or choose the subscription type
@@ -615,6 +617,21 @@ export function onDemandUsageView(r) {
   return windows.length ? { windows, fetchedAt: r.fetchedAt || null } : null;
 }
 
+/** THE DAY'S READS OF AN ACCOUNT (lane usage-predict, 2026-11-15; law A3): how often its CLI was asked for its usage today —
+ *  a figure a person looks up, never one that asks for attention (no badge, no colour): VISIBLE text on the account's
+ *  identity line whenever it is above zero (`doorReadsNote`), the split by caller as its title (`doorReadsLine`). */
+export function doorReadsNote(r) {
+  const n = Math.max(0, Math.floor(Number(r && r.total) || 0));
+  return n ? t('usage read {n}× today', { n }) : '';
+}
+/** …its title: the split by caller (a person, a usage wall, the end of a stretch of work); '' when nothing was read today. */
+export function doorReadsLine(r) {
+  const n = Math.max(0, Math.floor(Number(r && r.total) || 0));
+  if (!n) return '';
+  const k = (x) => Math.max(0, Math.floor(Number(x) || 0));
+  return t('Usage read {n}× today: {person} by you · {wall} after a usage wall · {after} after a stretch of work', { n, person: k(r.person), wall: k(r.wall), after: k(r.afterTurn) });
+}
+
 // ── THE CREDITS CHIP (2.369.189, owner: "这啥玩意啊 不如显示个钱的图标") ────────────
 // An account billing paid overage (kind 'inUse') or whose org allows it past
 // 100 % (kind 'credits', B-ad05) wears ONE compact chip on its identity line —
@@ -696,6 +713,14 @@ export function installManageAgents(App, ctx = {}) {
       if (row && patchCreditsSlot(row.querySelector('.acct-credits-slot'), creditsChipFor(snap.u))) n++;
     }
     for (const list of lists) markSoonRows(list);
+    // an on-demand account's reads today (law A3): the identity line's note, patched from the same poll
+    try {
+      for (const el of document.querySelectorAll('.acct-reads[data-reads-key]')) {
+        const r = maps.home?.[el.dataset.readsKey]?.reads, note = doorReadsNote(r), text = note ? ' · ' + note : '', tl = doorReadsLine(r);
+        if (el.textContent !== text) { el.textContent = text; n++; }
+        if ((el.getAttribute('title') || '') !== tl) el.setAttribute('title', tl);
+      }
+    } catch { }
     // …and the RESET CHIP beside each capable row's name (p2): the count moves
     // when a credit is spent or the on-demand read lands, from the SAME maps
     try {
@@ -1821,7 +1846,7 @@ export function installManageAgents(App, ctx = {}) {
   // render inline on their row (静默失败零容忍 — never silent).
   async _refreshAllQuota(btn, bodyEl) {
     if ((this.settings.get('accounts.onDemandQuotaRefresh') || 'manual') === 'off') {
-      showToast(t('On-demand quota refresh is disabled in Settings'), { type: 'error' });
+      showToast(t('Claude usage refresh is Off in Settings'), { type: 'error' });
       return;
     }
     // Same one-time explainer + ack key as the usage popup's ⟳.
@@ -1946,7 +1971,7 @@ export function installManageAgents(App, ctx = {}) {
     const { body, selectedHost, done, run, refresh, st } = ctx;
     let accts;
     try { accts = await this.refreshAccounts(); } catch { return; }
-    const codexAccts = (accts.accounts || []).filter(a => a.backend === 'codex')
+    const codexAccts = (accts.accounts || []).filter(a => a.backend === 'codex' && a.type !== 'provider') // a third party's row is drawn by its own section (provider-roster.js)
       .sort(rosterSort); // type-order parity with the claude roster: pool → ChatGPT login
     // st is already machine-scoped: /api/hosts/<id>/backend-status on a host.
     const gLoggedIn = !!(st?.codex?.loggedIn);
@@ -2052,6 +2077,7 @@ export function installManageAgents(App, ctx = {}) {
     addBtn.title = t('Sign in another ChatGPT account — stored in VibeSpace (not on any one machine), switchable per session');
     addBtn.onclick = () => { done(); this._addCodexSubscription(); };
     head.append(title, addBtn);
+    if (!selectedHost) { const pvBtn = document.createElement('button'); pvBtn.className = 'agent-btn acct-add'; pvBtn.textContent = '+ ' + t('Add a third-party model…'); pvBtn.onclick = () => { done(); openProviderWizard({ backend: 'codex', onDone: refresh }); }; head.append(pvBtn); } // lane lg-providers U5
     // codex pool (P2, cold-switch): same pseudo-account model as claude's —
     // needs ≥1 logged-in ChatGPT subscription to point at
     if (!selectedHost && codexAccts.some((x) => x.type === 'subscription' && x.loggedIn)) {
@@ -2063,6 +2089,7 @@ export function installManageAgents(App, ctx = {}) {
     if (ctx.stale?.()) return; // a newer refresh took over mid-await
     row.append(head, left);
     body.appendChild(row);
+    if (!selectedHost) renderProviderRows(body, 'codex', { refresh, sessions: () => namedLiveRows(this) }).catch(() => { }); // lane lg-providers U5: this machine's third-party providers that serve Codex
     left.onclick = async (e) => {
       const keyRow = e.target.closest?.('.acct-key-row');
       if (!keyRow) return;
@@ -2182,11 +2209,13 @@ export function installManageAgents(App, ctx = {}) {
     const label = getBackendMeta(be).label;
     const login = t(bill.accountLogin || bill.globalLogin); // the ACCOUNT word (antigravity: 'Google'); the machine row says globalLogin
     const machineLogin = t(bill.globalLogin);
-    const list = (accts.accounts || []).filter((a) => a.backend === be).sort(rosterSort);
+    const list = (accts.accounts || []).filter((a) => a.backend === be && a.type !== 'provider').sort(rosterSort);   // lane lg-providers: a provider row is never an account row here
     const defId = accts[bill.defaultIdField] || null;
     const st = ctx.st?.[be] || {};
     const { CROWN, GLOBE, STAR_F, STAR_O, DOTS } = ROSTER_ICONS;
     const usageOf = (id) => { const v = onDemandUsageView(this._homeAccountUsage?.[id]); return v ? this._acctUsageHtml(v) : ''; };
+    // the day's reads as text on the identity line (law A3) — also for an account that has no reading yet
+    const readsNote = (id) => { const r = this._homeAccountUsage?.[id]?.reads, note = doorReadsNote(r); return `<span class="acct-reads" data-reads-key="${escHtml(id)}" title="${escHtml(doorReadsLine(r))}">${note ? ' · ' + escHtml(note) : ''}</span>`; };
     const row = document.createElement('div'); row.className = 'ob-backend acct-section acct-roster';
     const left = document.createElement('div'); left.style.flex = '1';
     const globalRow = `<div class="acct-key-row${!defId ? ' is-default' : ''}" data-id="__home_global__">
@@ -2199,7 +2228,7 @@ export function installManageAgents(App, ctx = {}) {
       const ident = a.loggedIn ? escHtml(a.email || t('logged in')) : `<span class="ob-warn">${t('not logged in')}</span>`;
       return `<div class="acct-key-row${isDef ? ' is-default' : ''}" data-id="${escHtml(a.id)}">
         <span class="acct-type-icon" title="${escHtml(t('{login} account — runs on this machine', { login }))}">${CROWN}</span>
-        <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name" title="${escHtml(a.name)}">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}</span></span></span>
+        <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name" title="${escHtml(a.name)}">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${readsNote(a.id)}</span></span></span>
         <span class="acct-usage-cell" data-usage-src="home" data-usage-key="${escHtml(a.id)}">${usageOf(a.id)}</span>
         <span class="acct-key-actions">
           <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
@@ -2418,7 +2447,7 @@ export function installManageAgents(App, ctx = {}) {
         // fresh OAuth login + a leftover helper = every session bills the
         // helper key while this row said just "logged in") \u2014 warn loudly.
         const helperWarn = (info.keyHelper && lm !== 'key-helper')
-          ? ` <span class="ob-warn" title="${escHtml(t('The CLI prefers a configured apiKeyHelper over the OAuth login \u2014 sessions using the machine\u2019s own login bill via the helper key. Sessions where you explicitly pick a subscription account bypass the helper automatically (2.236.0); to change the machine-wide default, remove apiKeyHelper from ~/.claude/settings.json.'))}">\u26a0 ${t('apiKeyHelper overrides this login')}</span>` : '';
+          ? ` <span class="ob-warn" title="${escHtml(t('The CLI prefers a configured apiKeyHelper over the OAuth login \u2014 sessions using the machine\u2019s own login bill via the helper key. Sessions that bill a subscription account you chose bypass the helper (from their next start); to change the machine-wide default, remove apiKeyHelper from ~/.claude/settings.json.'))}">\u26a0 ${t('apiKeyHelper overrides this login')}</span>` : '';
         left.innerHTML = `<b>${b.label}</b>${ver ? ` <span class="ob-ver">${escHtml(ver)}</span>` : ''} ${
           !info.installed ? `<span class="ob-bad">${t('not installed')}</span>`
           : info.loggedIn ? `<span class="ob-ok">\u2713 ${t('logged in')}</span>${lmLabel ? ` <span class="ob-ver">${escHtml(lmLabel)}</span>` : ''}${helperWarn}`
@@ -2435,8 +2464,9 @@ export function installManageAgents(App, ctx = {}) {
         // THE OBSERVED CENSUS (lane cli-shell-truth): ONE line under the version chip — where this machine's CLI was
         // found and by whom («found by your zsh at ~/.nvm/…/codex» / «not found by your zsh · the hub's PATH has …» /
         // «your zsh could not be asked (timed out) · using the hub's PATH»). A remote host's row is its probe's own.
-        if (!selectedHost) {
-          const where = cliWhereWords(info);
+        // B-69ec: a remote host's row says where THAT machine's login shell found it (its last create's answer)
+        {
+          const where = !selectedHost ? cliWhereWords(info) : remoteCliWhereWords(st.cliWhere && st.cliWhere[b.key], hostLabel);
           if (where) {
             const el = document.createElement('div');
             el.className = 'ob-cli-where' + (where.tone === 'warn' ? ' ob-cli-where-warn' : '');
@@ -3152,7 +3182,7 @@ export function installManageAgents(App, ctx = {}) {
     // (the umbrella identities you actually pick), then subscriptions, then
     // API keys; name-sorted within a type so the list stays predictable as
     // accounts come and go.
-    const claudeAccts = (accts.accounts || []).filter(x => (x.backend || 'claude') === 'claude').sort(rosterSort);
+    const claudeAccts = (accts.accounts || []).filter(x => (x.backend || 'claude') === 'claude' && x.type !== 'provider').sort(rosterSort); // a third party's row is drawn by its own section (provider-roster.js — lane lg-providers U5 r1)
     // §ban-safety: on a REMOTE host a subscription can't run unless the opt-in
     // is set (its creds would ship to the host's — likely datacenter — IP). Its
     // rows render disabled with guidance; API keys are unaffected.
@@ -3208,8 +3238,10 @@ export function installManageAgents(App, ctx = {}) {
       // configured apiKeyHelper OVER OAuth, so when both exist the row must
       // show the helper as the effective billing, not hide it behind
       // "logged in" (CW-H200: fresh OAuth + leftover helper = API billing).
+      // (unit «billing pick alive»: a subscription PICK sets the helper aside on every road since that unit, so this row says what
+      // the local row says — the machine's own login bills the helper, a pick does not; it said every session billed it)
       const helperNote = racct?.keyHelper && racct?.subscription?.loggedIn
-        ? ` <span class="ob-warn" title="${escHtml(t('The CLI prefers a configured apiKeyHelper over the OAuth login — sessions on this machine bill via the helper key. Remove apiKeyHelper from ~/.claude/settings.json to bill the subscription.'))}">⚠ ${t('apiKeyHelper overrides this login')}</span>` : '';
+        ? ` <span class="ob-warn" title="${escHtml(t('The CLI prefers a configured apiKeyHelper over the OAuth login \u2014 sessions using the machine\u2019s own login bill via the helper key. Sessions that bill a subscription account you chose bypass the helper (from their next start); to change the machine-wide default, remove apiKeyHelper from ~/.claude/settings.json.'))}">⚠ ${t('apiKeyHelper overrides this login')}</span>` : '';
       gIdent = racct && !racct.error
         ? (racct.subscription?.loggedIn
             ? `${hEmail}<span class="ob-ok">${t('logged in')}</span>${helperNote}${staleNote}`
@@ -3483,6 +3515,8 @@ export function installManageAgents(App, ctx = {}) {
       items.push(
         { label: t('Add Console account…'), action: () => { done(); this._addConsoleAccount(); } },
         { label: t('Add API key…'), action: addApiKey },
+        // lane lg-providers U5 (B-d578): a THIRD PARTY's model (DeepSeek, Kimi, GLM, MiniMax, OpenRouter, your own) — this machine only
+        ...(!selectedHost ? [{ label: t('Add a third-party model…'), action: () => { done(); openProviderWizard({ backend: 'claude', onDone: refresh }); } }] : []),
       );
       // Pooled pseudo-account (local only): one switchable identity over the
       // logged-in subscriptions. Needs at least one to point at.
@@ -3505,6 +3539,7 @@ export function installManageAgents(App, ctx = {}) {
     if (ctx.stale?.()) return; // a newer refresh took over mid-await
     row.append(head, left);
     body.appendChild(row);
+    if (!selectedHost) renderProviderRows(body, 'claude', { refresh, sessions: () => namedLiveRows(this) }).catch(() => { }); // lane lg-providers U5: this machine's third-party providers that serve Claude Code
     // Per-key row actions (event delegation on the section)
     // The login chip is role=button: Enter/Space must do what a click does.
     left.onkeydown = (e) => { const c = (e.key === 'Enter' || e.key === ' ') && e.target.closest?.('.acct-login-chip'); if (c) { e.preventDefault(); c.click(); } };

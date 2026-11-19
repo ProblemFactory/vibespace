@@ -25,7 +25,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { freePort, ONBOARDED_SOURCE } from './scratch.mjs';
+import { freePort, ONBOARDED_SOURCE, CHROME_STORE } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const R = (p) => require(path.join(REPO, p));
@@ -999,7 +999,7 @@ console.log('— §5 wiring');
     /const loginExpiryWatch = require\('\.\/src\/server\/login-expiry-watch\.js'\)/.test(srv)
     && /getLoginExpiryWatch: \(\) => \{ try \{ return loginExpiryWatch; \} catch \{ return null; \} \}/.test(srv));
   const aur = fs.readFileSync(path.join(REPO, 'src/server/account-usage-routes.js'), 'utf8');
-  ck('the routes destructure it (an unread dep is the 2.355.0 unstaged-wiring class)', /getTelemetry, getUsageHistory, getLoginExpiryWatch(?:, getCliCmds = \(\) => null)? \}\) \{/.test(aur) /* int332: lane antigravity-card-fixes appends getCliCmds */);
+  ck('the routes destructure it (an unread dep is the 2.355.0 unstaged-wiring class)', /getTelemetry, getUsageHistory, getLoginExpiryWatch(?:, getCliCmds = \(\) => null)?(?:, harnessSetting = null)? \}\) \{/.test(aur) /* int332: lane antigravity-card-fixes appends getCliCmds; 2.369.408: lane usage-predict appends harnessSetting (the vendor's own automatic-read row, one row per vendor) */);
   ck('every login FINALIZE route sweeps, gated on the login having actually succeeded', (() => {
     const calls = (aur.match(/sweepLoginExpiry\('[^']+'\)/g) || []).concat(aur.match(/sweepOnLoginTransition\([^)]*'[^']+'\)/g) || []);
     return calls.length === 4
@@ -1506,7 +1506,7 @@ console.log('— §7 the chip at 375x667 (headless chrome)');
     fs.writeFileSync(path.join(dir, 'fixture.html'), html);
     const CDP_PORT = await freePort(); // per-process (scripts/scratch.mjs)
     const profile = path.join(dir, 'chrome');
-    const chrome = spawn(CHROME, ['--headless=new', '--remote-debugging-port=' + CDP_PORT, '--no-first-run', '--disable-gpu', '--window-size=375,667', '--user-data-dir=' + profile, 'about:blank'], { stdio: 'ignore' });
+    const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', '--remote-debugging-port=' + CDP_PORT, '--no-first-run', '--disable-gpu', '--window-size=375,667', '--user-data-dir=' + profile, 'about:blank'], { stdio: 'ignore' });
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     try {
       const WS = require(path.join(REPO, 'node_modules/ws'));
@@ -1615,7 +1615,7 @@ console.log('— §8 the LAPSED chip at the owner\'s width (1000 px panel, zh, h
       + '<body><div id="panel" class="ob-backend acct-section acct-roster" style="width:1000px"><div style="flex:1; width:100%"><div id="mount" class="acct-list"></div></div></div>'
       + '<script src="./ma-' + k + '.js"></script><script>(' + pageMain + ')();<' + '/script></body></html>');
     const CDP_PORT = await freePort();
-    const chrome = spawn(CHROME, ['--headless=new', '--remote-debugging-port=' + CDP_PORT, '--no-first-run', '--disable-gpu', '--window-size=1100,760', '--user-data-dir=' + path.join(dir, 'chrome'), 'about:blank'], { stdio: 'ignore' });
+    const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', '--remote-debugging-port=' + CDP_PORT, '--no-first-run', '--disable-gpu', '--window-size=1100,760', '--user-data-dir=' + path.join(dir, 'chrome'), 'about:blank'], { stdio: 'ignore' });
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     try {
       const WS = require(path.join(REPO, 'node_modules/ws'));
@@ -1726,7 +1726,7 @@ console.log('— §9 the account rows at the owner\'s PHONE width (215 / 180 px,
       + '<body style="margin:0"><div class="rail-panel"><div id="panel" class="ob-backend acct-section acct-roster" style="width:max-content"><div style="flex:1; width:' + w + 'px"><div id="mount" class="acct-list"></div></div></div></div>'
       + '<script>Date.now = () => 1791860000000;</' + 'script><script src="./ma.js"></script><script>(' + pageMain + ')();</' + 'script></body></html>';
     const CDP_PORT = await freePort();
-    const chrome = spawn(CHROME, ['--headless=new', '--remote-debugging-port=' + CDP_PORT, '--no-first-run', '--disable-gpu', '--hide-scrollbars', '--user-data-dir=' + path.join(dir, 'chrome'), 'about:blank'], { stdio: 'ignore' });
+    const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', '--remote-debugging-port=' + CDP_PORT, '--no-first-run', '--disable-gpu', '--hide-scrollbars', '--user-data-dir=' + path.join(dir, 'chrome'), 'about:blank'], { stdio: 'ignore' });
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     try {
       const WS = require(path.join(REPO, 'node_modules/ws'));
@@ -1965,7 +1965,7 @@ console.log('— §10 login × long-lived token (oat-only)');
     await esbuild.build({ stdin: { contents: maSrc.replace(TWICE[0], TWICE[1]), resolveDir: path.join(REPO, 'src/lib'), sourcefile: 'manage-agents.js', loader: 'js' }, bundle: true, format: 'iife', globalName: 'MA', platform: 'browser', target: 'es2022', outfile: path.join(dir, 'ma-twice.js'), logLevel: 'silent', loader: { '.css': 'text' }, plugins: [stubBV] });
     fs.writeFileSync(path.join(dir, 'twice-en.html'), page('', './ma-twice.js'));
     const CDP_PORT = await freePort();
-    const chrome = spawn(CHROME, ['--headless=new', '--remote-debugging-port=' + CDP_PORT, '--no-first-run', '--disable-gpu', '--window-size=900,700', '--user-data-dir=' + path.join(dir, 'chrome'), 'about:blank'], { stdio: 'ignore' });
+    const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', '--remote-debugging-port=' + CDP_PORT, '--no-first-run', '--disable-gpu', '--window-size=900,700', '--user-data-dir=' + path.join(dir, 'chrome'), 'about:blank'], { stdio: 'ignore' });
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     try {
       const WS = require(path.join(REPO, 'node_modules/ws'));
@@ -2106,7 +2106,7 @@ console.log('— §11 the token-in-folder chip is one noun (desk + phone)');
     fs.writeFileSync(path.join(dir, 'base-en.html'), page('en', 'ma-base.js'));
     fs.writeFileSync(path.join(dir, 'words-en.html'), page('en', 'ma-words.js'));
     const CDP_PORT = await freePort();
-    const chrome = spawn(CHROME, ['--headless=new', '--remote-debugging-port=' + CDP_PORT, '--no-first-run', '--disable-gpu', '--window-size=900,700', '--user-data-dir=' + path.join(dir, 'chrome'), 'about:blank'], { stdio: 'ignore' });
+    const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', '--remote-debugging-port=' + CDP_PORT, '--no-first-run', '--disable-gpu', '--window-size=900,700', '--user-data-dir=' + path.join(dir, 'chrome'), 'about:blank'], { stdio: 'ignore' });
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     try {
       const WS = require(path.join(REPO, 'node_modules/ws'));
@@ -2234,7 +2234,7 @@ console.log('— §12 the row says why its reading ages: never probed / the last
     for (const lang of ['en', 'zh', 'ja']) fs.writeFileSync(path.join(dir, lang + '.html'), page(lang, 'ma.js'));
     fs.writeFileSync(path.join(dir, 'base-en.html'), page('en', 'ma-base.js'));
     const CDP_PORT = await freePort();
-    const chrome = spawn(CHROME, ['--headless=new', '--remote-debugging-port=' + CDP_PORT, '--no-first-run', '--disable-gpu', '--window-size=900,700', '--user-data-dir=' + path.join(dir, 'chrome'), 'about:blank'], { stdio: 'ignore' });
+    const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', '--remote-debugging-port=' + CDP_PORT, '--no-first-run', '--disable-gpu', '--window-size=900,700', '--user-data-dir=' + path.join(dir, 'chrome'), 'about:blank'], { stdio: 'ignore' });
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     try {
       const WS = require(path.join(REPO, 'node_modules/ws'));

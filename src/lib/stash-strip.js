@@ -19,7 +19,8 @@ import { fetchJson, showToast } from './utils.js';
 import { t, deviceLocale } from './i18n.js';
 import { maskedNoteOf } from './foryou-links.js'; // lane mask-value-shape: a link a belt masked inside says so (THE note, one rule with For you)
 import { UI_ICONS } from './icons.js';
-import { stashSummaryWords, summaryDigest, previewDigest, previewWords, handedOverWords, handOverRefusalWords } from '../stash-summary.js';
+import { spendRowOf } from '../spend-authorizer.js'; // lane setting-doors pick 1: the row a spend refusal names
+import { stashSummaryWords, summaryDigest, previewDigest, previewWords, handedOverWords, handOverRefusalWords, groupHandOverWords, groupHandedWords } from '../stash-summary.js';
 
 const span = (cls, text) => { const s = document.createElement('span'); s.className = cls; if (text != null) s.textContent = text; return s; };
 const setText = (el, v) => { if (el && el.textContent !== v) el.textContent = v; };
@@ -34,7 +35,8 @@ function showRefusal(r) {
   const w = handOverRefusalWords(r, t, { now: Date.now(), locale: deviceLocale() });
   const settings = globalThis.app && globalThis.app._settingsUI;
   const app = globalThis.app;
-  const action = w.door === 'spending' && settings && typeof settings.open === 'function' ? { label: t('Open Settings → Spending'), run: () => settings.open({ category: t('Spending') }) }
+  const row = spendRowOf({ why: r && r.why });   // lane setting-doors pick 1: the refused ceiling's row (the refusal's `why`) — the door opens THAT row
+  const action = w.door === 'spending' && settings && typeof settings.open === 'function' ? { label: t('Open Settings → Spending'), run: () => (row && app && typeof app.openSettingAt === 'function' ? app.openSettingAt(row) : settings.open({ category: t('Spending') })) }
     : w.door === 'usage' && app && typeof app.openUsage === 'function' ? { label: t('Open Usage'), run: () => app.openUsage() } : null;   // r2: a signed-out or unnamed account's door is the Usage window
   showToast(w.text, { type: r && r.code === 'nothing_waiting' ? 'info' : 'error', ...(action ? { action, duration: 12000 } : {}) });
 }
@@ -70,6 +72,27 @@ export function createStashStrip({ sessionId }) {
   const noBtn = span('chat-stash-nobutton', '');   // a harness with no live inbox: the sentence where the button would be
   noBtn.hidden = true;
   el.append(noBtn);
+  // B-02a3 (主开发's ruling (1)): THE GROUP PRESS — the group messages waiting for this agent handed to the turn it is
+  // running, by the road an Enter takes. Drawn only mid-turn on a conversation whose Enter hands a message to the running
+  // turn (`steers`, the composer's own door); its money word says the one edge. POSTs /api/sessions/:id/stash/hand-over-groups.
+  const groupGo = document.createElement('button');
+  groupGo.type = 'button';
+  groupGo.className = 'chat-stash-go chat-stash-groups-go';
+  const groupLabel = span('chat-stash-go-label', '');
+  const groupCost = span('chat-stash-cost', '');
+  groupGo.append(groupLabel, groupCost);
+  groupGo.hidden = true;
+  el.append(groupGo);
+  const gst = { busy: false };
+  groupGo.addEventListener('click', async (ev) => {
+    ev.stopPropagation();
+    if (gst.busy || groupGo.hidden) return;
+    gst.busy = true; groupGo.disabled = true;
+    const r = await fetchJson(`/api/sessions/${encodeURIComponent(sessionId)}/stash/hand-over-groups`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    gst.busy = false; groupGo.disabled = false;
+    if (!r || r.error || !r.ok) { showRefusal(r); return; }
+    showToast(groupHandedWords(r, t), { duration: 4000 });
+  });
   // THE DETAILS (the owner, 2026-09-28: the strip said "2 notices are waiting" and nothing could open them): a house
   // text button toggles a list under the strip — one row per waiting entry (its kind + the first line of its text,
   // textContent: a head is peer-written), oldest first, and a last row naming how many more are not previewed.
@@ -108,7 +131,7 @@ export function createStashStrip({ sessionId }) {
    *  harness folds a notification into the running turn — a claude inbox is charged mid-turn too); a fact without it
    *  (an older server) falls back to the turn. verify r2: `inFlight` (another client's click is on its way — the
    *  button waits), `held` (what one hand-over would leave — named), `reachable` (no button for a stash-only lane). */
-  function set(summary, { turn = null } = {}) {
+  function set(summary, { turn = null, steers = false } = {}) {
     const billed = summary && typeof summary.billed === 'boolean' ? summary.billed : turn !== 'running';
     const inFlight = !!(summary && summary.inFlight);
     const held = Number(summary && summary.held) || 0;
@@ -117,13 +140,16 @@ export function createStashStrip({ sessionId }) {
     // B-c198: "the next turn" is not the running one — the words say "after this one ends"; verify r1: `waiting` (paused
     // on the user — a permission, a question) is INSIDE the turn too: the answer continues it, no UserPromptSubmit
     const midTurn = turn === 'running' || turn === 'waiting';
-    const key = summary && summary.count ? summaryDigest(summary) + '|' + billed + '|' + inFlight + '|' + held + '|' + reachable + '|' + armed + '|' + midTurn + '|' + previewDigest(summary) : '';
+    // B-02a3: the group messages waiting, and whether the group press is drawn (mid-turn, the Enter door steers)
+    const rides = summary && Array.isArray(summary.items) ? summary.items.filter((i) => i && i.kind === 'group').reduce((a, i) => a + (Number(i.n) || 0), 0) : 0;
+    const groupPress = midTurn && steers === true && rides > 0 && !(summary && summary.groupHandover === false);   // a remote conversation: no press (its wrapper's door is not read on this machine)
+    const key = summary && summary.count ? summaryDigest(summary) + '|' + billed + '|' + inFlight + '|' + held + '|' + reachable + '|' + armed + '|' + midTurn + '|' + groupPress + '|' + rides + '|' + previewDigest(summary) : '';
     if (key === st.key) return;
     st.key = key;
     st.summary = key ? summary : null;
     if (!key) { el.hidden = true; return; }
     drawList(summary);
-    const w = stashSummaryWords(summary, t, { billed, inFlight, held, reachable, now: Date.now(), armed, midTurn });   // `now`: a retrying notice names its next attempt relative to this device's clock
+    const w = stashSummaryWords(summary, t, { billed, inFlight, held, reachable, now: Date.now(), armed, midTurn, groupPress });   // `now`: a retrying notice names its next attempt relative to this device's clock
     setText(head, w.head);
     setText(parts, ': ' + w.parts.join(', '));
     setText(goLabel, w.button);
@@ -134,7 +160,13 @@ export function createStashStrip({ sessionId }) {
     go.disabled = st.busy || inFlight || !reachable;
     go.hidden = !reachable;
     setText(noBtn, w.noButton || '');
-    noBtn.hidden = reachable;
+    noBtn.hidden = reachable || groupPress;   // B-02a3: the group press stands where the sentence would
+    const gw = groupHandOverWords(rides, t);
+    setText(groupLabel, gw.button);
+    setText(groupCost, ' · ' + gw.cost);
+    if (groupGo.title !== gw.title) groupGo.title = gw.title;
+    groupGo.hidden = !groupPress;
+    if (!gst.busy) groupGo.disabled = false;
     if (noBtn.title !== w.title) noBtn.title = w.title;
     if (el.title !== w.line) el.title = w.line;
     el.hidden = false;

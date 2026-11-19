@@ -475,6 +475,11 @@ const BACKEND_CAPS = {
     // account-pool-auto `cacheTtlSecFor` — answers the pool's warm-cache hold AND the session list's warmth fields.
     // Every other row says null: unknown ⇒ no hold and no colour (never a guess).
     promptCache: Object.freeze({ subscriptionTtlSec: 3600, creditsTtlSec: 300 }),
+    // THE PICTURES THIS HARNESS'S MODEL TAKES (bl-chat-b batch 20 cure — 主开发 2026-11-18 08:44Z: «a limit is a row of the
+    // harness, never one vendor's number applied to all»): the Claude API's STATED limits — one picture's base64 ≤ 5 MiB
+    // («image exceeds 5 MB maximum: N bytes > 5242880 bytes»), ≤ 8000 px a side, one request ≤ 32 MB. PURE
+    // src/image-attach-rule.js judges a picture with THIS row; a harness whose row is null states none and gets no numeric cap
+    imageLimits: Object.freeze({ b64PerPicture: 5 * 1024 * 1024, sidePx: 8000, requestB64: 32 * 1000 * 1000 }),
     terminalOnly: false, oauthUsage: true, globalUsageKey: '__global__', // lane dc-harness-tail: the rows' essay is at capsOf
     subagents: 'virtual', // lane agy-subagent-cards: a live virtual session per helper (essay at subagentView)
     autoResume: NO_AUTO_RESUME,
@@ -484,6 +489,7 @@ const BACKEND_CAPS = {
     hotSwitch: 'impossible',
     hotSwitchEvidence: null, // the 2026-08-24 P3 experiment (above) predates the record form; 'impossible' grants nothing
     promptCache: null,    // no stated prompt-cache TTL for this harness (its vendor caches on its own terms) — unknown, never a guess
+    imageLimits: null,    // no picture limit stated for this harness here — no numeric cap is applied (never another vendor's number)
     planC: false,
     sealedOrders: false,
     resetCredit: true,    // account/rateLimitResetCredit/consume (stored resets)
@@ -535,7 +541,7 @@ const BACKEND_CAPS = {
     autoResume: NO_AUTO_RESUME, // placeholder — the registry derives it
   },
   shell: {
-    pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, scopedCapsOnDemand: false, fork: false,
+    pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, imageLimits: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, scopedCapsOnDemand: false, fork: false,
     forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null,
     checkpoints: NO_CHECKPOINTS, // terminal-only: no conversation to rewind
     streamProtocol: null, // terminal-only: no chat parse pipeline
@@ -561,7 +567,7 @@ const BACKEND_CAPS = {
   // claude flag — so review/renameWriteback/forkAtMessage stay false until a
   // PROBE proves otherwise (setVerifiedCap is how `fork` flips), never guessed.
   opencode: {
-    pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, scopedCapsOnDemand: false, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null,
+    pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, imageLimits: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, scopedCapsOnDemand: false, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null,
     checkpoints: NO_CHECKPOINTS, // its revert puts the FILES back with the messages — no conversation-only rewind (essay at NO_CHECKPOINTS)
     streamProtocol: 'acp-events',
     modelFacts: false,          // its server states no model facts: the chip takes the model a LIVE init names (lane fable-52-cli-321 r5)
@@ -613,7 +619,7 @@ const BACKEND_CAPS = {
   // settle), never declared by hand. steerJoinsTurn:false — its steer is a stop + a new turn, so a notification for a
   // busy agy takes the 'queue' lane (its own billed turn after this one, charged when written), never 'steer' (free).
   antigravity: {
-    pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, scopedCapsOnDemand: false, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null,
+    pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, imageLimits: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, scopedCapsOnDemand: false, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null,
     checkpoints: NO_CHECKPOINTS, // no programmatic rewind door (essay at NO_CHECKPOINTS)
     streamProtocol: 'acp-events',
     modelFacts: false,          // its server states no model facts: the chip takes the model a LIVE init names (lane fable-52-cli-321 r5)
@@ -639,7 +645,7 @@ const BACKEND_CAPS = {
 // row whose `steer` disagrees with its `queueVerbs`.
 for (const row of Object.values(BACKEND_CAPS)) row.inputModes = deriveInputModes(row.inputModes);
 
-const NO_CAPS = Object.freeze({ modelFacts: false, terminalOnly: false, oauthUsage: false, globalUsageKey: null, subagents: 'none', pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, scopedCapsOnDemand: false, fork: false, forkAtMessage: false, checkpoints: NO_CHECKPOINTS, review: false, renameWriteback: false, titleRecord: null, streamProtocol: null, worktree: NO_WORKTREE, peerDelivery: 'stash-only', compactEnd: null, inputModes: deriveInputModes({ queue: false, queueVerbs: [] }), turnState: null, inProgressTools: false, permissionRules: Object.freeze({ source: null, session: false, instance: false, liveVerb: false }), responseStyle: Object.freeze({ live: false, closed: true, values: Object.freeze([]) }), autoResume: NO_AUTO_RESUME, toolAllowlist: null });
+const NO_CAPS = Object.freeze({ modelFacts: false, terminalOnly: false, oauthUsage: false, globalUsageKey: null, subagents: 'none', pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, imageLimits: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, scopedCapsOnDemand: false, fork: false, forkAtMessage: false, checkpoints: NO_CHECKPOINTS, review: false, renameWriteback: false, titleRecord: null, streamProtocol: null, worktree: NO_WORKTREE, peerDelivery: 'stash-only', compactEnd: null, inputModes: deriveInputModes({ queue: false, queueVerbs: [] }), turnState: null, inProgressTools: false, permissionRules: Object.freeze({ source: null, session: false, instance: false, liveVerb: false }), responseStyle: Object.freeze({ live: false, closed: true, values: Object.freeze([]) }), autoResume: NO_AUTO_RESUME, toolAllowlist: null });
 
 // A CONTRIBUTED harness's row (src/harnesses/index.js register(), lane
 // dc-ws-create): the shipped table above stays the built-in truth; a register()ed
@@ -658,10 +664,17 @@ function contributeCaps(id, row) {
   return merged;
 }
 
+/** THE ONE RULE (batch 20's cure 2, 主开发 10:30Z): a conversation record that names NO harness is claude's — as the release reads it
+ *  everywhere (capsOf below, the hub's sessionStatusKey, the page's rows). `harnessOfRecord(rec)` = its harness. */
+const LEGACY_HARNESS = 'claude';
+const harnessOfRecord = (rec) => (rec && typeof rec.backend === 'string' && rec.backend) || LEGACY_HARNESS;
 function capsOf(backend) {
-  const id = backend || 'claude';
+  const id = backend || LEGACY_HARNESS;
   return BACKEND_CAPS[id] || CONTRIBUTED_CAPS.get(id) || NO_CAPS;
 }
+/** the pictures a harness's model takes — its row's {b64PerPicture, sidePx, requestB64}, or null (it states none: no numeric
+ *  cap). No harness named is null too: a picture is never refused by a number nobody stated for it. */
+const imageLimitsOf = (backend) => (backend ? capsOf(backend).imageLimits || null : null);
 
 // THREE DECLARED ROWS the long tail used to spell as an id (lane dc-harness-tail, 2026-10-05):
 //   terminalOnly    the harness has NO agent (a plain login shell): no chat, no window reach, no browser pin, no
@@ -941,7 +954,7 @@ function doorCapsOf(inputModes, servedVerbs) {
   return { queue: !!row.queue, steer: verbs.includes('steer'), queueOps: verbs.length > 0, queueVerbs: verbs, ...(row.enterDoor === 'steer' ? { enterDoor: 'steer' } : {}) };
 }
 
-module.exports = { SEND_DOOR_TABLE, sendDoors, doorCapsOf, BACKEND_CAPS, capsOf, SUBAGENT_VIEWS, subagentView, globalUsageKeyOf, oauthUsageAccount, contributeCaps, setVerifiedCap, QUEUE_VERBS, LEGACY_QUEUE_VERBS, deriveInputModes, notificationDelivery,
+module.exports = { SEND_DOOR_TABLE, sendDoors, doorCapsOf, BACKEND_CAPS, capsOf, imageLimitsOf, harnessOfRecord, SUBAGENT_VIEWS, subagentView, globalUsageKeyOf, oauthUsageAccount, contributeCaps, setVerifiedCap, QUEUE_VERBS, LEGACY_QUEUE_VERBS, deriveInputModes, notificationDelivery,
   AUTO_RESUME_FORMS, NO_AUTO_RESUME, deriveAutoResume,
   NO_WORKTREE, worktreeCaps, worktreeRefusal, worktreeSpawnArgs, worktreePick, worktreeLatchWrite,
   NO_CHECKPOINTS, checkpointsRowOf, CLAUDE_CHECKPOINTS,

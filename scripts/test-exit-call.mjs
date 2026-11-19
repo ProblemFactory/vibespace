@@ -171,8 +171,8 @@ for (const c of CASES) {
 // the CLI's own lines are the ones this module knows (data/bin/vibespace-exit)
 const CLI = read('data/bin/vibespace-exit');
 ok(CLI.includes(`const WAY_OUT = '${XC.WAY_OUT_LINE}';`), 'the way-out line is the CLI\'s own');
-ok(XC.WAIT_NOTES.every((n) => CLI.includes(JSON.stringify(n))), 'both waiting notes are the CLI\'s own');
-ok(XC.WAIT_NOTES_BEFORE.length === 2 && XC.WAIT_NOTES_BEFORE.every((n) => !CLI.includes(JSON.stringify(n))) && /!WAIT_NOTES\.includes\(l\) && !WAIT_NOTES_BEFORE\.includes\(l\)/.test(fs.readFileSync(path.join(REPO, 'src/exit-call.js'), 'utf8')), 'lane chat-needs-you-card: the notes BEFORE they named the card are no longer printed and still filtered from a call card in history');
+ok(XC.WAIT_NOTES.length === 1 && XC.WAIT_NOTES.every((n) => CLI.includes(JSON.stringify(n))), 'the waiting note is the CLI\'s own (B-48a4 U3: run and pull / push say one note, asking the hub nothing)');
+ok(XC.WAIT_NOTES_BEFORE.length === 3 && XC.WAIT_NOTES_BEFORE.every((n) => !CLI.includes(JSON.stringify(n))) && /!WAIT_NOTES\.includes\(l\) && !WAIT_NOTES_BEFORE\.includes\(l\)/.test(fs.readFileSync(path.join(REPO, 'src/exit-call.js'), 'utf8')), 'lane chat-needs-you-card: the notes BEFORE they named the card are no longer printed and still filtered from a call card in history');
 
 // ── ② shapes that stay a Bash card ──
 console.log('② never guess');

@@ -163,8 +163,11 @@ console.log('— ① the pin ladder (§3.2.5): five rungs, stated origins, the t
 // ═══ ② the registry + lease model, PURE ══════════════════════════════════
 console.log('— ② the registry record, the lease and the keeper\'s verdicts (§3.3–§3.5)');
 {
-  const v = B.validateProfileInput({ label: '  Work  ', proxy: 'http://user:secret@proxy.example:3128' });
-  ok(v.ok && v.value.label === 'Work' && v.value.provider === 'chromium' && v.value.proxy === 'http://user:secret@proxy.example:3128', 'a valid create: label cleaned, chromium by default, the proxy kept whole server-side');
+  const v = B.validateProfileInput({ label: '  Work  ', proxy: 'http://proxy.example:3128' });
+  ok(v.ok && v.value.label === 'Work' && v.value.provider === 'chromium' && v.value.proxy === 'http://proxy.example:3128', 'a valid create: label cleaned, chromium by default, the proxy\'s address kept');
+  // B-8b87: a login inside the address is refused at the create — it goes in the vault (test-browser-proxy ①)
+  const vi = B.validateProfileInput({ label: 'Inline', proxy: 'http://user:secret@proxy.example:3128' });
+  ok(!vi.ok && vi.code === 'bad_proxy_inline_credential' && !String(vi.error).includes('secret'), 'a proxy address carrying its user:password is refused BY NAME (bad_proxy_inline_credential) — the login goes in the vault', vi);
   ok(B.validateProfileInput({}).code === 'label_required', 'no label ⇒ label_required');
   ok(B.validateProfileInput({ label: 'work' }, { existing: [{ id: 'bp-00000001', label: 'Work' }] }).code === 'label_taken', 'a label is unique case-insensitively ⇒ label_taken');
   ok(B.validateProfileInput({ label: 'x', provider: 'nope' }).code === 'provider_unknown', 'an unknown provider is refused by name');
@@ -179,7 +182,9 @@ console.log('— ② the registry record, the lease and the keeper\'s verdicts (
   ok(B.validateProfileInput({ label: 'x', allowedDomains: ['example.com'] }).code === 'fence_refused', 'a domain fence on a persistent profile is refused (§6.3)');
   ok(B.validateProfileInput({ label: 'x', proxy: 'not a url' }).code === 'bad_proxy', 'a malformed proxy is refused');
   const rec = withUse(B.newProfileRecord({ id: 'bp-00000001', ...v.value, dir: '/tmp/x', owner: { kind: 'session', id: KEY_A }, now: 5 }));
-  ok(B.publicProfileView(rec).proxy === 'http://***@proxy.example:3128', 'the public view masks the proxy\'s secret half');
+  // a record saved BEFORE the law with its password in the address (built directly, as stored then) — the public view masks it
+  const legacy = B.newProfileRecord({ id: 'bp-0000000f', label: 'Legacy', proxy: 'http://user:secret@proxy.example:3128', dir: '/tmp/y', owner: { kind: 'session', id: KEY_A }, now: 5 });
+  ok(B.publicProfileView(legacy).proxy === 'http://***@proxy.example:3128' && B.publicProfileView(legacy).proxyPasswordInProfile === true && B.publicProfileView(rec).proxy === 'http://proxy.example:3128', 'the public view masks the proxy\'s secret half (a record saved before the law: drawn without it, flagged for «Move the password to the vault»)');
   ok(B.mintProfileId('deadbeef') === 'bp-deadbeef' && B.isProfileId('bp-deadbeef') && !B.isProfileId('bp-xyz'), 'profile ids are minted bp-<8 hex>');
   ok(!B.profileDirName('bp-00000001').includes('Work'), 'the label never reaches a path (the dir name is the id)');
   const profiles = [rec, withUse({ id: 'bp-00000002', label: 'Team', owner: { kind: 'instance', id: null } }), withUse({ id: 'bp-00000003', label: 'team', owner: { kind: 'task', id: 'tg-1' } })];

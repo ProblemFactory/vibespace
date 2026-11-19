@@ -230,4 +230,37 @@ function stallWords(view, { t, now } = {}) {
   return { label: t('Stalled'), detail, unfinished };
 }
 
-module.exports = { STALL_MS, journalAttemptsFromText, parseRunDir, treeAlive, liveNoteKind, agoWords, stallWords };
+/** A run id's own form (the dir the CLI names `wf_…`; resumeFromRunId takes exactly it). Anything else is not a run id. */
+const RUN_ID_RE = /^wf_[A-Za-z0-9_-]{1,64}$/;
+/** How long AFTER the conversation's wall an agent's limit record may lie, and how long BEFORE it, for that limit to be
+ *  the run's cut (the agents die first, on their own records; the parent may work on for hours before its own wall). */
+const CUT_AFTER_MS = 30 * 60 * 1000, CUT_BEFORE_MS = 5 * 3600 * 1000;
+/** Snapshot statuses that END a run (a run the script completed, or one a person stopped) — never named. */
+const ENDED_STATUSES = Object.freeze(['completed', 'killed', 'cancelled', 'canceled', 'stopped', 'unknown']);
+/** PURE (lg-recovery U3, B-3437 — the owner's ruling 2026-11-18): DID THIS LIMIT CUT THIS RUN SHORT? Only what the run's own
+ *  record proves, asked near the FIRE (the Workflow tool returns at its launch — the run goes on after the parent's turn):
+ *    · its id in its own form;
+ *    · `limitProven`: an unfinished agent's LAST assistant record is the CLI's limit banner whose own stated reset is NOT
+ *      BEFORE the conversation's wall (THIS wall's limit, still standing when the conversation walled — U3 cure) and no
+ *      later than this continue's fire (the reader decides; a banner with no readable reset is no proof — a run another,
+ *      longer limit killed is not resumed into that limit again); `limitAt` = that record's own instant, within
+ *      CUT_BEFORE_MS before the conversation's wall and CUT_AFTER_MS after it;
+ *    · no terminal snapshot that ENDED it (ENDED_STATUSES — an unreadable one proves nothing);
+ *    · it has STOPPED: every unfinished agent ended on its limit record and nothing was written after (`endsOnLimit`), or
+ *      nothing in its folder was written for `stallMs`;
+ *    · agents that STARTED and have NO result (the journal's arithmetic above): 1 or more.
+ *  → {runId, unfinished} | null (null ⇒ the continue says today's words) */
+function cutShortRunOf({ runId = '', journalText = '', lastActivity = 0, limitAt = 0, wallAt = 0, now = 0, snapshotStatus = null, limitProven = false, endsOnLimit = false, stallMs = STALL_MS } = {}) {
+  if (typeof runId !== 'string' || !RUN_ID_RE.test(runId)) return null;
+  if ((snapshotStatus !== null && ENDED_STATUSES.includes(String(snapshotStatus).toLowerCase())) || limitProven !== true) return null;
+  const l = Number(lastActivity), t = Number(limitAt), w = Number(wallAt), n0 = Number(now);
+  if (!(l > 0) || !(t > 0) || !(w > 0) || !(n0 > 0) || t < w - CUT_BEFORE_MS || t > w + CUT_AFTER_MS) return null;
+  if (endsOnLimit !== true && n0 - l < stallMs) return null;
+  if (typeof journalText !== 'string' || !journalText) return null;
+  const { started, done, superseded } = journalAttemptsFromText(journalText);
+  let unfinished = 0;
+  for (const id of started) if (!done.has(id) && !superseded.has(id)) unfinished++;
+  return unfinished > 0 ? { runId, unfinished } : null;
+}
+
+module.exports = { STALL_MS, journalAttemptsFromText, parseRunDir, treeAlive, liveNoteKind, agoWords, stallWords, RUN_ID_RE, CUT_AFTER_MS, CUT_BEFORE_MS, ENDED_STATUSES, cutShortRunOf };

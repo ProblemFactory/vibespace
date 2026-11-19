@@ -89,7 +89,9 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-voice-oauth-'));
 function hub({ instance = 'https://hub.example.ts.net', rowValues = {}, presets = [], tokens = null, fileName = 'dropline-oauth.json', clientPath = null, sink = null, source = null, cluster = false, pluginOn = () => true } = {}) {
   const writes = [];
   const row = { ...rowValues };
-  const store = { resolveIntegration: () => ({ values: { ...row }, source: Object.keys(row).length ? 'user' : 'none' }), presetsFor: () => presets, setIntegration: (id, v) => { writes.push([id, v]); Object.assign(row, v); } };
+  // B-e0d1: as the REAL store answers — the user's values outrank the cluster's, the effective pick names its source, and
+  // presetsFor is the WIRE shape (key + label, never a value)
+  const store = { resolveIntegration: () => (Object.keys(row).length ? { values: { ...row }, source: 'user' } : presets.length ? { values: { ...presets[0].values }, source: 'cluster', clusterKey: presets[0].key } : { values: {}, source: 'none' }), presetsFor: () => presets.map((p) => ({ key: p.key, label: p.label || p.key })), setIntegration: (id, v) => { writes.push([id, v]); Object.assign(row, v); } };
   const tk = tokens || DO.tokenFile(path.join(dir, fileName));
   const client = (clientPath ? require(clientPath) : DC).create({ integrations: () => store, pluginOn, tokens: tk, base: FAKE, oauthBase: FAKE, authorizeUrl: `${FAKE}/oauth/authorize`, log: sink || { log() { }, warn() { } } });
   const oauth = DO.create({ client, flows: OL.createOAuthLoopback({ log: sink || { warn() { }, log() { } } }), integrations: () => store, instanceUrl: () => instance, instanceSource: () => source, clusterDeploy: () => cluster, tokens: tk, log: sink || { log() { }, warn() { } } });

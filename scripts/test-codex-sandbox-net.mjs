@@ -21,17 +21,7 @@ const SKIP = (n, why) => { skip++; console.log('  ~ SKIP ' + n + ' — ' + why);
 // `codex sandbox` makes no vendor call, and a key must not be why one could
 const run = (cmd, args, opts = {}) => new Promise((r) => execFile(cmd, args, { timeout: 30000, env: withoutVendorKeys(), ...opts }, (err, stdout, stderr) => r({ err, stdout: String(stdout || ''), stderr: String(stderr || '') })));
 
-// ── static pins ──
-const wrapper = fs.readFileSync(path.join(REPO, 'data/bin/codex-chat-wrapper.js'), 'utf8');
-ok(/const NET_OPEN = !!process\.env\.VIBESPACE_API;/.test(wrapper), 'wrapper opens the sandbox network only when the VibeSpace integration is on (VIBESPACE_API)');
-ok(/type: 'readOnly', networkAccess: NET_OPEN/.test(wrapper) && (wrapper.match(/type: 'workspaceWrite', networkAccess: NET_OPEN/g) || []).length === 2, 'readOnly + both workspaceWrite policies (default, safe-yolo) carry networkAccess');
-ok(!/type: 'dangerFullAccess', networkAccess/.test(wrapper), 'dangerFullAccess is untouched (no such field)');
-const adapter = fs.readFileSync(path.join(REPO, 'src/adapters/codex.js'), 'utf8');
-ok(/commonArgs\.push\('-c', 'sandbox_workspace_write\.network_access=true'\)/.test(adapter), "terminal path pushes the BARE TOML boolean override (a JSON-quoted 'true' is a string)");
-ok(/resolvedPermission\.sandbox === 'workspace-write'\) commonArgs\.push\('-c', 'sandbox_workspace_write/.test(adapter), '…only for workspace-write (danger-full-access needs none; read-only has no such config key)');
-const cliEnv = fs.readFileSync(path.join(REPO, 'src/server/cli-env.js'), 'utf8');
-ok(/execFile\(CODEX_CMD, \['sandbox', '--', 'true'\]/.test(cliEnv) && /probeCodexSandbox\(adapterRegistry\)/.test(cliEnv), 'sandbox support is probed FUNCTIONALLY (`codex sandbox -- true`, async) and written back to the adapter');
-ok(/const CODEX_SANDBOX_SUPPORTED = true;/.test(cliEnv), 'assume-supported until the probe answers (sandboxed is the safe default; the old PATH lookup ran terminals unsandboxed on every npm install)');
+// (the static pins — MOVED to the fast scripts/test-codex-sandbox-net-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 // the adapter still honours a false verdict (degraded path)
 const { CodexAdapter } = require(path.join(REPO, 'src/adapters/codex.js'));
 const degraded = new CodexAdapter({ codexCmd: 'codex', codexSandboxSupported: false, chatWrapper: '/x', ptyWrapper: '/y' }).buildSessionArgs({ cwd: '/tmp', permissionMode: 'default', mode: 'terminal' });
@@ -40,10 +30,11 @@ const sandboxed = new CodexAdapter({ codexCmd: 'codex', codexSandboxSupported: t
 ok(sandboxed.args.includes('workspace-write') && sandboxed.args.join(' ').includes('sandbox_workspace_write.network_access=true'), 'a supported sandbox keeps workspace-write AND opens loopback for the tools');
 
 // ── functional A/B (real codex sandbox) ──
-const which = await run('sh', ['-c', 'command -v codex']);
+const NO_REAL_CLI = process.env.VS_NO_REAL_CLI === '1';   // B-ddb9: under the flag the real codex is not started (not even for a lookup's sake)
+const which = NO_REAL_CLI ? { stdout: '' } : await run('sh', ['-c', 'command -v codex']);
 const codex = which.stdout.trim();
 if (!codex) {
-  SKIP('functional loopback A/B', 'codex binary not on PATH (CI runner)');
+  SKIP('functional loopback A/B', NO_REAL_CLI ? 'VS_NO_REAL_CLI=1 — the real codex is not started here' : 'codex binary not on PATH (CI runner)');
 } else {
   const ver = (await run(codex, ['--version'])).stdout.trim();
   const srv = net.createServer((s) => { s.on('error', () => {}); s.end('hi'); }); // the probe exits on connect → server-side ECONNRESET is expected

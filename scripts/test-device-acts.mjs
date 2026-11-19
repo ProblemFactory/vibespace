@@ -236,6 +236,7 @@ console.log('— ⑤ the hub\'s store (data/device-audit.jsonl)');
   let bc = [];
   const st = DAU.create({ dataDir: dir, maxBytes: 64 * 1024, onLine: (r) => bc.push(r) });
   for (let i = 0; i < 400; i++) st.append(DA.lineOf({ at: 1000 + i, hostId: i % 2 ? 'h1' : 'h2', payload: { op: 'run-cmd', cmd: 'echo', args: ['x'.repeat(200), String(i)] }, by: i % 3 ? 'system:x' : 'agent:claude:c1', ok: true, ms: 1 }));
+  ok(await st.whenWritten(), 'B-48a4: the 400 lines are on disk once the one appender says so (queued for the store writer\'s thread, never written on the main loop)');
   const size = fs.statSync(path.join(dir, DAU.AUDIT_FILE)).size, size1 = fs.statSync(path.join(dir, DAU.AUDIT_FILE + '.1')).size;
   ok(size <= 64 * 1024 && size1 <= 64 * 1024 && bc.length === 400 && bc.every((r) => /^[0-9a-f]{12}$/.test(r.id)), `a ring of two files at the bound (${size} + ${size1} B), every line broadcast with its own id`);
   const t1 = st.tail({ hostId: 'h1', limit: 10 });

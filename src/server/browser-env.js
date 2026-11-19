@@ -415,6 +415,10 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
       // lane browser-resume: its kept directory
       composed = B.generatedConfigParts({ userConfig: eff.user, projectConfig: eff.projectFile, pinnedDir: pin, keptDir, headed: headedSetting(), mark: key, holdDialogs: true, automationFlag: automationFlagOn() });
       const cfg = composed.config;
+      // B-1789 (a sub-agent's child browser stopped answering ~20–25 s after its start, fb-a0d05b52b6 / fb-9427a5f43a): lane
+      // browser-stderr-pipe's defence in depth (Chrome's logging off: QUIET_LOG_ARGS) never reached this spawn file. The
+      // composer above ends every launch's args with THE LAUNCH TAIL (B.launchTail: the switches — a user's own logging
+      // switch wins — then the mark, last), so this file carries them, and so does a helper's copy (childConfigFor)
       writeJson(p, cfg);
       const back = JSON.parse(fs.readFileSync(p, 'utf8'));
       if (!back || typeof back !== 'object') throw new Error('read-back was not an object');
@@ -795,7 +799,7 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
     const namesProfile = B.configNamesProfile(cfg);
     const out = { ...cfg };
     delete out.profile;
-    out.args = B.withKeeperMark(out.args, childKey); // lane H verify r4: the child's browser carries ITS OWN launch mark, never the parent's
+    out.args = B.launchTail(out.args, childKey); // lane H verify r4: the child's browser carries ITS OWN launch mark, never the parent's — B-1789: its launch tail (a parent's file written before the quiet switches still gives its helper a quiet Chrome)
     try {
       ensureDirs();
       const p = configPathFor(childKey);

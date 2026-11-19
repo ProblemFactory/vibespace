@@ -145,9 +145,9 @@ const DUR = (f) => { const got = [0, 12, 49, 50, 100, 1234, -5, NaN, undefined, 
 { const n = D.paintRow(document.createElement('details'), { at: 1, name: 'n', cmd: 'pull /a → /b', ms: 0, outcome: 'ok', transfer: { verb: 'pull', bytes: 2048, verified: 'sha256', local: '/b', remote: '/a' } }); const o = n.querySelector('.exit-runs-outcome'); const ms = o && o.querySelector('.exit-runs-ms'), v = o && o.querySelector('.exit-runs-verdict');
   ok(!!(ms && v && ms.textContent === '<0.1 s' && /2/.test(v.textContent)), `§1b a 0 ms transfer row: its size and "<0.1 s" in ONE outcome line (${v && v.textContent} · ${ms && ms.textContent})`); }
 
-{ const n = D.paintRow(document.createElement('details'), { at: 1, name: 'n', cmd: 'dir', ms: 0, outcome: 'refused', refusal: 'device_agent_outdated', hostId: 'win-a' }); const o = n.querySelector('.exit-runs-outcome'); const door = o && o.querySelector('.agent-update-door'); const v = o && o.querySelector('.exit-runs-verdict');
+{ const n = D.paintRow(document.createElement('details'), { at: 1, name: 'n', cmd: 'dir', ms: 0, outcome: 'refused', refusal: 'device_agent_outdated', hostId: 'win-a' }); const o = n.querySelector('.exit-runs-outcome'); const slot = n.querySelector('.exit-runs-door'); const door = slot && slot.querySelector('.agent-update-door'); const v = o && o.querySelector('.exit-runs-verdict');
   const ran = D.paintRow(document.createElement('details'), { at: 1, name: 'n', cmd: 'dir', ms: 0, outcome: 'ran', code: 0 });
-  ok(!!door && door.textContent === 'Update its agent…' && !!v && v.textContent === 'not run — the agent is too old to run commands on Windows; rerun the install command' && !ran.querySelector('.agent-update-door'), 'B-bd27 X1: a run refused for an old agent carries «Update its agent…» on its outcome line, beside its verdict (which keeps its words); a run that ran carries none', { door: door && door.textContent, verdict: v && v.textContent }); }
+  ok(!!door && door.textContent === 'Update its agent…' && !o.querySelector('.agent-update-door') && !!v && v.textContent === 'not run — the agent is too old to run commands on Windows; rerun the install command' && !ran.querySelector('.agent-update-door'), 'B-bd27 X1: a run refused for an old agent carries «Update its agent…» in its OWN slot under the outcome line (the line keeps its words); a run that ran carries none', { door: door && door.textContent, verdict: v && v.textContent }); }
 
 console.log('§2 the chat card: the output, then ONE closed 技术细节 fold — the command\'s length, the command whole (lane exit-card-margin)');
 const R = await bundle('src/lib/chat-renderers.js');
@@ -309,7 +309,7 @@ const mkRow = (withLast) => {
   const row = document.createElement('div'); row.className = 'mounts-row';
   const top = document.createElement('div'); top.className = 'mounts-row-top';
   const sub = document.createElement('div'); sub.className = 'mounts-path';
-  const ex = document.createElement('div'); ex.className = 'mounts-path mounts-exit-line'; ex.textContent = 'Exit: network — nobody';
+  const ex = document.createElement('button'); ex.className = 'mounts-exit-line mounts-exit-door'; ex.textContent = 'Exit: network — nobody';   // B-cb72: the summary IS the door
   row.append(top, sub, ex);
   if (withLast) { const lr = document.createElement('button'); lr.className = 'mounts-path mounts-exit-line mounts-exit-last'; lr.textContent = 'Last run: echo 1'; row.appendChild(lr); }
   const stuck = document.createElement('div'); stuck.className = 'mounts-path mounts-exit-line mounts-agent-stuck'; row.appendChild(stuck);
@@ -325,7 +325,7 @@ const patchCase = (M) => {
   return {
     did: [did1, did2, did3], kept,
     replaced: kept && r1.children[3].textContent === 'Last run: echo 2' && r1.querySelectorAll(':scope > .mounts-exit-last').length === 1,
-    inserted: !!r2.children[3] && r2.children[3].textContent === 'Last run: ls' && r2.children[2].className === 'mounts-path mounts-exit-line' && r2.children[4]._cls.includes('mounts-agent-stuck'),
+    inserted: !!r2.children[3] && r2.children[3].textContent === 'Last run: ls' && r2.children[2].className === 'mounts-exit-line mounts-exit-door' && r2.children[4]._cls.includes('mounts-agent-stuck'),
     removed: r3.querySelectorAll(':scope > .mounts-exit-last').length === 0 && r3.children.length === 4,
   };
 };

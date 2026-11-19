@@ -1062,17 +1062,73 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     const keys = new Set([...Object.keys(cur), ...Object.keys(nxt)].filter((k) => RE.test(k)));
     return [...keys].filter((k) => Object.hasOwn(cur, k) !== Object.hasOwn(nxt, k) || JSON.stringify(cur[k]) !== JSON.stringify(nxt[k]));
   };
-  const refuseEngineRows = (req, res, next) => { const hit = engineRowsTouched(req, next); if (!hit.length) return false; res.status(403).json({ error: `${hit.slice(0, 3).join(', ')}: the program a browser engine runs and the sites it may reach are the owner's to set (Settings, signed in) — a bearer token (an agent, a job, an automation key) cannot set, change or drop them; nothing was written`, code: 'engine_row_owner_only' }); return true; };
+  // the exit check (the owner 2026-11-17): the check address is written by a PERSON only, with its own rules (https only, no login,
+  // no private literal — src/browser-exit.js checkUrlVerdict); an agent's refused write says who sets it and where (the recipe)
+  const EXIT = require('../browser-exit.js');
+  // 主开发 17:04Z: a PERSON's address the verdict refuses is SET ASIDE (the stored one kept) and said in the answer (`refused`, by key) —
+  // the rest of the save lands: one refused row never blocks another row's save. An agent's write is refused whole (below).
+  const setAsideExitUrl = (req, next) => {
+    if (!next || typeof next !== 'object' || require('../write-origin.js').pressBearer(req.headers)) return null;
+    const cur = readSettings() || {}, was = cur[EXIT.EXIT_URL_KEY], now = next[EXIT.EXIT_URL_KEY];
+    if (JSON.stringify(was) === JSON.stringify(now)) return null;
+    const v = EXIT.checkUrlVerdict(now);
+    if (v.ok) return null;
+    if (was === undefined) delete next[EXIT.EXIT_URL_KEY]; else next[EXIT.EXIT_URL_KEY] = was;
+    return { [EXIT.EXIT_URL_KEY]: { code: v.code, error: v.error } };
+  };
+  const refuseExitUrl = (req, res, next) => {
+    const cur = readSettings() || {}, nxt = next && typeof next === 'object' ? next : {};
+    const was = cur[EXIT.EXIT_URL_KEY], now = nxt[EXIT.EXIT_URL_KEY];
+    if (JSON.stringify(was) === JSON.stringify(now)) return false;
+    if (require('../write-origin.js').pressBearer(req.headers)) { res.status(403).json({ error: `${EXIT.EXIT_URL_KEY}: the exit check address is set by a person — in «Check the exit…» on a browser profile, or in Settings › Agent browser; an agent's token cannot set, change or drop it — nothing was written`, code: 'exit_url_owner_only' }); return true; }
+    const v = EXIT.checkUrlVerdict(now);
+    if (!v.ok) { res.status(400).json({ error: `${EXIT.EXIT_URL_KEY}: ${v.error}`, code: v.code }); return true; }
+    return false;
+  };
+  const refuseEngineRows = (req, res, next) => { if (refuseExitUrl(req, res, next)) return true; const hit = engineRowsTouched(req, next); if (!hit.length) return false; res.status(403).json({ error: `${hit.slice(0, 3).join(', ')}: the program a browser engine runs and the sites it may reach are the owner's to set (Settings, signed in) — a bearer token (an agent, a job, an automation key) cannot set, change or drop them; nothing was written`, code: 'engine_row_owner_only' }); return true; };
+
+  // lane setting-doors pick 0 (主开发 2026-11-14; MEASURED on a scratch hub with sign-in OFF: a conversation's shell wrote the day ceiling
+  // by four roads — no header at all, forged browser headers, the whole-file POST, its own token). THE MODEL: the spending ceilings
+  // guard against a loop and against an agent that helps itself when it is blocked — accident and eagerness, not a determined
+  // adversary. So a spend.* row (the money gate's ceilings, its notice percent, overage turns) changes ONLY from the owner's page,
+  // on every write road (PATCH, the whole-file POST, a config import's settings section), sign-in on or off, judged over the file
+  // the write would LEAVE (an omitted row = dropped): (a) a request carrying a bearer (an agent, a job, an automation key) is
+  // refused by name; (b1) a write with NO browser mark (the strict page verdict: Sec-Fetch-Site same-origin, or an Origin that is
+  // this instance's own) is refused too — after it an agent changes a ceiling only by KNOWINGLY dressing its request as the owner's
+  // browser, and the refusal it met has told it whose press that is. Nothing is written when it refuses; the refusal names the
+  // rule, the row and the row's own link. (A program running as the hub's own user can still edit data/settings.json — it takes
+  // effect at the next restart; no route closes that: the box's boundary is the user.)
+  // f4 (主开发 11:10Z): every row Settings › Spending draws is the owner's press only — the judge's daily dollar cap joins as ONE row
+  const SPEND_OWNER_ROW_RE = /^spend\./, SPEND_OWNER_ROWS = Object.freeze(['plugin.llm.dailyBudgetUsd']);
+  const isSpendRow = (k) => SPEND_OWNER_ROW_RE.test(k) || SPEND_OWNER_ROWS.includes(k);
+  const spendWriteWhy = (req) => require('../write-origin.js').ownerPageWhy(req);   // null = the owner's page
+  const spendRowsTouched = (req, next) => {
+    if (!spendWriteWhy(req)) return [];
+    const cur = readSettings() || {}, nxt = next && typeof next === 'object' ? next : {};
+    const same = (k) => Object.hasOwn(cur, k) === Object.hasOwn(nxt, k) && JSON.stringify(cur[k]) === JSON.stringify(nxt[k]);
+    return [...new Set([...Object.keys(cur), ...Object.keys(nxt)])].filter((k) => isSpendRow(k) && !same(k));
+  };
+  const SPEND_REFUSED_BY = { bearer: 'a request carrying a bearer token (an agent, a job, an automation key)', 'no-browser': 'a request with no mark of the owner\'s page (neither Sec-Fetch-Site nor this instance\'s own Origin)' };
+  const refuseSpendRows = (req, res, next) => {
+    const hit = spendRowsTouched(req, next); if (!hit.length) return false;
+    // f2: the door is a REAL row — the first refused key that is one, else the key is said to be no setting and the limits' first row named
+    const rows = [...Object.values(require('../spend-authorizer.js').SPEND_ROW_KEYS), ...SPEND_OWNER_ROWS], row = hit.find((k) => rows.includes(k));
+    const why = spendWriteWhy(req), door = `vibespace://settings/${row || rows[0]}`, noRow = row ? '' : ` («${hit[0]}» is no setting)`;
+    res.status(403).json({ error: `${hit.slice(0, 3).join(', ')}: the limits on turns nobody typed and the judge's daily dollar cap change only by the owner's press on the owner's own page (Settings › Spending — ${door})${noRow}; ${SPEND_REFUSED_BY[why] || `a request whose page is not this instance's (${why})`} cannot set, change or drop them, sign-in on or off; nothing was written. Ask the owner with vibespace-ask and give that link`, code: 'spend_row_owner_only', why, rows: hit, door });
+    return true;
+  };
 
   router.post('/api/settings', (req, res) => {
     const data = req.body;
     if (!data || typeof data !== 'object') return res.status(400).json({ error: 'Expected object' });
+    const refused = setAsideExitUrl(req, data); // the exit check: a person's refused address set aside, said — the rest lands
     if (refuseEngineRows(req, res, data)) return; // lane engine-spi-egress L1b (V3) — r2: the whole file it would leave (an omitted row = dropped)
+    if (refuseSpendRows(req, res, data)) return; // lane setting-doors pick 0: the spending rows are the owner's press
     // lane owner-press-attended: the save ECHOES what the server now USES for the spend ceiling — the spend guard reads
     // `budgetLimits(serverSetting)` over this very cache on its next check (a clamp at CAP_MAX included), so the Settings
     // row says the live number, not the typed one; r2: the broadcast carries the same `spend` (writeSettings)
     const spend = writeSettings(data);
-    res.json({ success: true, ...(spend ? { spend } : {}) });
+    res.json({ success: true, ...(spend ? { spend } : {}), ...(refused ? { refused } : {}) });
   });
 
   router.patch('/api/settings', (req, res) => {
@@ -1081,9 +1137,11 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     if (!patch || typeof patch !== 'object') return res.status(400).json({ error: 'Expected object' });
     const merged = { ...current, ...patch };
     for (const [k, v] of Object.entries(merged)) { if (v === null) delete merged[k]; }
+    const refused = setAsideExitUrl(req, merged); // the exit check: a person's refused address set aside, said — the rest lands
     if (refuseEngineRows(req, res, merged)) return; // lane engine-spi-egress L1b (V3) — r2: the file the patch would leave
+    if (refuseSpendRows(req, res, merged)) return; // lane setting-doors pick 0: the spending rows are the owner's press
     writeSettings(merged);
-    res.json({ success: true });
+    res.json({ success: true, ...(refused ? { refused } : {}) });
   });
 
   // ── Config export / import (whole-instance transfer) ──
@@ -1239,6 +1297,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     // lane engine-spi-egress L1b r2 (V3): a bearer's import whose settings section would set, change or drop an engine's program / site
     // list row is refused WHOLE — all or nothing: no section of it is applied
     if (sections.includes('settings') && file.sections.settings && typeof file.sections.settings === 'object' && refuseEngineRows(req, res, file.sections.settings)) return;
+    if (sections.includes('settings') && file.sections.settings && typeof file.sections.settings === 'object' && refuseSpendRows(req, res, file.sections.settings)) return; // lane setting-doors pick 0: all or nothing, as the engine rows
     const applied = [];
     const apply = (name, fn) => {
       if (!sections.includes(name) || file.sections[name] === undefined) return;

@@ -21,7 +21,7 @@ function create({ app, rootDir, HOST, CLAUDE_CMD, cliCmds = null, NODE_CMD,
   CLAUDE_SUBSCRIPTION_LOGIN_HELPER, activeSessions, auth, engine,
   serverSetting, recordUsageAttribution, liveAccountIdSet, broadcastActiveSessions = () => { }, broadcastAll = () => { },
   buildClaudeSubscriptionLoginCommand, getAccounts, getHosts, getMounts, getModels = () => ({}), refreshModels = () => { }, getIntegrations = () => null,
-  getTelemetry, getUsageHistory, getLoginExpiryWatch, getCliCmds = () => null }) {
+  getTelemetry, getUsageHistory, getLoginExpiryWatch, getCliCmds = () => null, harnessSetting = null }) {
   const { clearSealedOrders } = engine;
   // r4: a conversation whose cold restart is already in flight is never handed to
   // a client again (a second request resumes it twice) — the engine's ONE rule
@@ -50,11 +50,19 @@ function create({ app, rootDir, HOST, CLAUDE_CMD, cliCmds = null, NODE_CMD,
   // section's two routes (src/routes/account-models.js); a built-in provider's rows are its harness's catalog NOW
   const providers = require('./provider-store.js').create({ dataDir: path.join(rootDir, 'data'), catalogOf: (h) => { const m = getModels(); return m && Array.isArray(m[h]) ? m[h] : null; } });
   if (typeof accounts.setProviderLookup === 'function') accounts.setProviderLookup((acct) => providers.forAccount(acct)); // SEAM (int329): wire P0a's provider store into P0b/latents' pool decisions when the account manager supports it (a usage-only route stub passes getAccounts:()=>({})) — accounts.memberProviderOf then reads each account's provider record (q-053 P0b / q-055 M1-M2)
+  // lane lg-providers U2: a `pv-<id>` account spawns through the provider's own road (its key from the vault, its own empty home)
+  if (typeof accounts.setProviderRows === 'function') accounts.setProviderRows(() => require('../model-providers.js').rosterRowsOf(providers.thirdParty(), { usable: ((open) => (p) => open && providers.hasKey(p.id))((() => { try { const v = require('../secret-box.js').vaultForDir(path.join(rootDir, 'data')); return !!v && v.state() === 'unlocked'; } catch { return false; } })()) }));   // lane lg-providers U5: the rows every page lists (U1 cure: usable = the vault open AND the record's entry in it, read off its names)
+  if (typeof accounts.setProviderSpawn === 'function') accounts.setProviderSpawn(require('./provider-spawn.js').create({ providers, dataDir: path.join(rootDir, 'data') }), (id, be, model) => require('./provider-spawn.js').modelFor(providers, id, model, be));
   require('../routes/account-models.js').registerAccountModelRoutes(app, { accounts, providers });
+  // THE THIRD-PARTY PROVIDERS (lane lg-providers, B-d578 U1): the wizard's doors — add from a shipped preset (the key sealed
+  // in the vault first), a new key, rename / address / default, remove; each write re-announces the account lists
+  // THE PROVIDER TEST (lane lg-providers U4): the harness's own CLI, once, at a person's press — empty homes, a third party only
+  const tester = require('./provider-test.js').create({ providers, cliFor: async (be) => { const c = getCliCmds(); if (c && typeof c.check === 'function') return c.check(be, { force: true }); return c && typeof c.current === 'function' ? c.current(be) : null; }, agentEnv: () => require('../ws-handler').agentEnv() });   // cliFor: the CLI the login shell finds now (as the usage door)
+  require('../routes/providers.js').registerProviderRoutes(app, { providers, tester, onChange: ({ what, id }) => { try { broadcastAll({ type: 'providers-changed', what, id }); } catch { } try { if (typeof accounts.providersChanged === 'function') accounts.providersChanged(); } catch { } } });
   // MODELS AT A SESSION (q-053 §3, lane models-at-session): a new / running conversation's menu = its account's provider's rows
   // (GET /api/available-models?session= | ?backend=&account=), and the listed-provider refresh — a person's press, the vault
   // open, once a minute, cached on the record (src/server/provider-models.js: THE one new vendor request)
-  const refresher = require('./provider-models.js').create({ providers, vaultState: () => { const v = require('../secret-box.js').vaultForDir(path.join(rootDir, 'data')); return v ? v.state() : 'not_set_up'; }, keyOf: require('./provider-models.js').vaultKeyOf({ getIntegrations }) });
+  const refresher = require('./provider-models.js').create({ providers, vaultState: () => { const v = require('../secret-box.js').vaultForDir(path.join(rootDir, 'data')); return v ? v.state() : 'not_set_up'; }, keyOf: require('./provider-models.js').vaultKeyOf({ getIntegrations, providers }) });
   // THE CLI'S OWN MODEL LIST (lane agy-models-report): `agy models` for ONE account on a person's act — a model menu OPENED or
   // «Refresh from Antigravity» — never a timer, never at boot, never per spawn (src/server/cli-models-door.js); its completion
   // re-reads every open menu once (available-models-dirty — that re-read carries no `list`, so it cannot list again)
@@ -989,7 +997,7 @@ const usageDoor = require('./cli-usage-door.js').createCliUsageDoor({
   accounts, harnessOf: (id) => { try { return require('../harnesses').get(id); } catch { return null; } },
   cliCmds: { check: (...a) => (getCliCmds() ? getCliCmds().check(...a) : Promise.resolve(null)) },
   cacheDir: path.join(rootDir, 'data', 'usage-cache'), agentEnv: () => require('../ws-handler').agentEnv(),
-  setting: (k) => serverSetting(k),
+  setting: (k) => serverSetting(k), harnessSetting,   // the vendor's own row (antigravity.autoUsageReads) — the typed per-harness read
 });
 // …and its SECOND caller (lane agy-wall-signal, the owner's ruling «A» 2026-11-02): a usage wall an account's conversation
 // names is written as a reading and fires ONE read of that account through this same door (src/server/stream-wall.js —
@@ -999,6 +1007,14 @@ require('./stream-wall.js').configure({ harnessOf: (id) => { try { return requir
   // the wrapper's own sidecar (server.js BUFFERS_DIR/<webui id>.json): its agy `init.model` — the wall's model for a wrapper
   // that does not stamp one, across a hub restart (r3)
   wrapperMetaOf: (s) => require('./stream-wall.js').readWrapperSidecar(path.join(rootDir, 'data', 'session-buffers'), s) }); // bounded + local-only (r4)
+// …and its THIRD caller (lane usage-predict, the owner's ruling «A» 2026-11-14): the end of a stretch of work — a turn of a
+// named account's conversation ended and 5 minutes passed with no new turn of it ⇒ ONE read through this same door, at most
+// once per account per 30 minutes counted from its last read on disk; only where the descriptor declares `onDemand.afterTurn`
+require('./after-turn-read.js').configure({ harnessOf: (id) => { try { return require('../harnesses').get(id); } catch { return null; } },
+  cacheDir: path.join(rootDir, 'data', 'usage-cache'), door: usageDoor,
+  // «a turn of the account runs» is read from the conversations themselves at the moment of the read — every one the hub
+  // holds, restored ones too (law A1)
+  conversationsOf: (key) => [...activeSessions.values()].filter((s) => s && String(s._accountId || '') === key) });
 app.post('/api/accounts/home-subscription/:id/usage', async (req, res) => {
   let r;
   try { r = await usageDoor.read(req.params.id, { person: !isAgentBearer(req) }); } catch (e) { r = { ok: false, status: 500, error: e.message }; }

@@ -210,6 +210,36 @@ function create({ grants = null, dataDir = null } = {}) {
     if (!own.length) return false;
     return GM.admits([{ door: DOORS.watch, resource: String(res), to: own, except: exceptFor(own[0], r.except) }], { conversationKey: String(cid), groupIds: groups }).ok;
   }
+  /** «WHAT IT MAY USE» (unit what-it-may-use, cure r1 — 主开发 MUST 1): WHY nothing of a grain admits one conversation, judged
+   *  ENTRY BY ENTRY exactly as the door gives them (each entry its OWN 「除了」 — exceptFor: a group's / everyone's carries the
+   *  row's, a conversation's own entry none), THE model over each one-entry row — used only to SAY why (the admission itself
+   *  is the door's own check in channels-access mayUseFor: rowNames / principalApplies / wakeAdmits). `facts` = {conversationKey,
+   *  groupIds, groupsUnreadable}. → {code: unknown_shape | groups_unreadable | excepted (+ entry, bare) | not_granted} */
+  function refusalOf(door, res, facts) {
+    const r = rowOf(door, res);
+    if (r.unknown || r.unreadable) return { ok: false, code: 'unknown_shape' };
+    let excepted = null, unreadable = false;
+    for (const e of r.to) {
+      const v = GM.admits([{ door, resource: String(res), to: [e], except: exceptFor(e, r.except) }], facts);
+      if (v.ok) continue;
+      if (v.code === 'groups_unreadable') unreadable = true;
+      else if (v.code === 'excepted' && !excepted) excepted = v.entry ? GM.bareOf(v.entry) : null;
+    }
+    if (unreadable) return { ok: false, code: 'groups_unreadable' };
+    if (excepted) return { ok: false, code: 'excepted', entry: excepted };
+    return { ok: false, code: 'not_granted' };
+  }
+  /** Does a grain's notification wake ONE conversation — the fan-out's own question (`wakeAdmits`) asked for each watching
+   *  principal of the row (unit what-it-may-use)? → {ok:true, via, groupId?} | the refusal (refusalOf). */
+  function watchAdmitsFor(res, { cid = '', groups = [], groupsUnreadable = false } = {}) {
+    for (const e of watchOf(res).to) {
+      const p = GM.toChannelPrincipal(e);
+      if (p && wakeAdmits(res, p, { cid, groups })) return { ok: true, via: e.kind, ...(e.kind === 'group' ? { groupId: String(e.id) } : {}) };
+    }
+    return refusalOf(DOORS.watch, res, { conversationKey: String(cid || ''), groupIds: groups, groupsUnreadable });
+  }
+  /** A grain's 「除了」 in bare principals (what the form draws under a granted account). */
+  function exceptBare(res) { return rowOf(DOORS.reach, res).except.map((e) => GM.bareOf(e)).filter(Boolean); }
   /** Any exception on the rows that decide one conversation's reach (the wake path re-asks reach only then). */
   function anyReachExcept(resList) { return resList.some((res) => rowOf(DOORS.reach, res).except.length > 0); }
   /** Does any channel row leave anybody out at all? (One flag per door index — without one, no wake path re-asks.) */
@@ -314,7 +344,7 @@ function create({ grants = null, dataDir = null } = {}) {
   }
 
   return {
-    DOORS, RES, grainResource, rowOf, resourcesOf, generation, plainGeneration, hasConversationRows, ruleIdsWithRows, ownConversationKeys, accessOf, exceptOf, conversationGrants, accountGrants, ruleGrants, apiGrants, watchOf,
+    DOORS, RES, grainResource, rowOf, resourcesOf, refusalOf, watchAdmitsFor, exceptBare, generation, plainGeneration, hasConversationRows, ruleIdsWithRows, ownConversationKeys, accessOf, exceptOf, conversationGrants, accountGrants, ruleGrants, apiGrants, watchOf,
     watchLists, wakeAdmits, anyReachExcept, hasAnyExcept, grainChanges, setGrainRows, setLevel, setApiRows, removeAccount, removeRule, store: S,
   };
 }

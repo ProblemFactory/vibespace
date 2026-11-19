@@ -46,9 +46,10 @@ console.log('① THE CENSUS — every producer a row (its origin, where it files
 // 'group' = a group key only (no conversation — no chat draws it) · 'mixed' = some sites of each
 const PRODUCERS = {
   'src/server/spend-guard.js': { origin: 'spend', scope: 'group', types: [] },
+  'src/server/setting-holds.js': { origin: 'spend', scope: 'group', types: [], why: 'lane setting-doors pick 2: ONE notice when a held ceiling\'s return could not be written, or the holds could not be read at boot — the Spending group, the row named with its link; no conversation (the return is the hub\'s act)' },
   'src/server/login-expiry-watch.js': { origin: 'login', scope: 'group', types: [] },
   'src/migration-runner.js': { origin: 'server', scope: 'group', types: [], why: 'int365 seam F (.365): a boot migration that failed files ONE notice per migration id in the hub\'s «Migrations» group (lane job-secrets-retire r3/r4 sayFailed) — it only informs (the retry is automatic at the next start), no action type' },
-  'src/server/migrations.js': { origin: ['vault', 'browser'], scope: 'group', types: [], why: 'int365 seam F (.365): the retired job-secrets store\'s ONE notice in the Vault group (lane job-secrets-retire r2) — its words name a MANUAL owner step (put each secret into the vault, delete the file; with two files, move one out and restart), but it files no action type and draws no button; int376 (.376): + the CloakBrowser-to-plugin notice (2026-11-cloak-to-plugin, lane engine-spi-egress L3) in the Agent browser group — origin \'browser\', its own notice, no action type — so this file files from TWO origins' },
+  'src/server/migrations.js': { origin: ['vault', 'browser'], scope: 'group', types: ['job-secrets-retired'], why: 'int365 seam F (.365): the retired job-secrets store\'s ONE notice in the Vault group (lane job-secrets-retire r2) — B-ef1b: its action job-secrets-retired draws its two buttons (Move into the vault / Delete the file — src/server/job-secrets-door.js); the «Two files» notice (move one out and restart) still files no action type; int376 (.376): + the CloakBrowser-to-plugin notice (2026-11-cloak-to-plugin, lane engine-spi-egress L3) in the Agent browser group — origin \'browser\', its own notice, no action type — so this file files from TWO origins' },
   'src/server/device-upgrade-watch.js': { origin: 'machines', scope: 'group', types: [] },
   'src/server/device-alerts.js': { origin: 'machines', scope: 'group', types: [] },
   'src/server/hub-act-ask.js': { origin: 'machines', scope: 'group', types: ['hub-act-ask', 'hub-act-standing'], why: 'the asker is named only in the act\'s `by` — OPEN: no `about` yet; lane ledger-dedup-law F3: + a background subject\'s ONE standing notice (no conversation asks it)' },
@@ -72,7 +73,7 @@ const PRODUCERS = {
   'src/server/browser-logins.js': { origin: 'browser', scope: 'group', types: ['save-login'], why: 'int360 seam (lane browser-login): the save-login / pending-confirm card + its notices, under the browser\'s group key' },
   'src/server/browser-dialogs.js': { origin: 'browser', scope: 'group', types: [], why: 'lane vault-login r22: live-fill ceiling notice under the browser\'s group key' },
   'src/server/browser-propose.js': { origin: 'browser', scope: 'conversation', types: ['browser-proposal'] },
-  'src/agent-routes/status.js': { origin: 'agent', scope: 'conversation', types: ['browser-grant'] },
+  'src/agent-routes/status.js': { origin: 'agent', scope: 'conversation', types: ['browser-grant', 'setting-change'] },   // lane setting-doors pick 2: + an ask that proposes one change of one setting (`--propose`)
   'src/server/helper-asks.js': { origin: 'agent', scope: 'conversation', types: ['helper-ask'] },
   'src/server/main-asks.js': { origin: 'agent', scope: 'conversation', types: ['main-ask'] },
   'src/server/unexpected-exit.js': { origin: 'agent', scope: 'conversation', types: [] },
@@ -88,6 +89,7 @@ const PRODUCERS = {
   'src/server/tls.js': { origin: 'server', scope: 'group', types: [] },
   'src/server/desktop-app-keeper.js': { origin: 'server', scope: 'group', types: ['desktop-app-notify'] },
   'src/server/mount-health-watch.js': { origin: 'server', scope: 'group', types: [] },
+  'src/server/mount-for-you.js': { origin: 'server', scope: 'group', types: ['mount-reconnect'] },   // B-5ce7: a parked mount's item carries its Reconnect
   'src/server/hooks-late.js': { origin: 'agent', scope: 'group', types: [] },
   'src/server/apps-engine.js': { origin: 'apps', scope: 'mixed', types: ['app-install'] },
   'src/server/oat-identity.js': { origin: 'login', scope: 'group', types: [] },
@@ -326,7 +328,7 @@ ok(/filed: CN\.filedLine\('vault-grant-ask', r\.todoId, OF\.tray\(\)\)/.test(SRC
   ok(calls.length === 6 && !off.length,   // lane vault-entry-description: + vault-words-ask
  `the ${calls.length} filedLine calls each name a registry row or pass the item (${calls.join(', ')})`, off);
 }
-ok((SRC.exit.match(/an approval card in this conversation and in the For-you tray|Filed for you: an approval — answer it on the card in this conversation or in the For-you tray/g) || []).length === 2, 'vibespace-exit (ask me each time): the 60 s wait line names the card in this conversation');
+ok((SRC.exit.match(/an approval card in this conversation and in the For-you tray|Filed for you: an approval — answer it on the card in this conversation or in the For-you tray/g) || []).length === 2, 'vibespace-exit (ask me each time): the 60 s wait line names the card in this conversation');   // stale-pins: kept — B-48a4 U3: run's note is the pull / push one now; the older words stay accepted
 
 // ── ⑦ THE STORE's `about` ────────────────────────────────────────────────────────────────────────────────────────────
 console.log('⑦ the store keeps `about` — the conversation an item filed under a group key addresses');

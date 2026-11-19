@@ -3,7 +3,7 @@
 // 2026-10-15: manual only). HEAVY: a scratch worktree server (private HOME, a fake claude that answers init with the
 // conversation it resumes, writes its pid and idles) + headless Chrome clients over raw CDP.
 //   desk 1100 (zh) · three conversations resumed live; the third's CLI dies (its window stays: "Session ended.") ⇒ the
-//     session list's ⋯ ⇒ the ONE entry ⇒ the confirm names 2 live + 1 open stopped, the note pre-filled in Chinese ⇒
+//     session list's ⋯ ⇒ its refresh entry (the first of its list-wide actions) ⇒ the confirm names 2 live + 1 open stopped, the note pre-filled in Chinese ⇒
 //     确定 ⇒ the toast 「已排给 2 个，跳过 1 个已停止的」; the strip above the composer shows the note on the 2 live
 //     windows (Details = its words), none on the stopped one; the stash file holds ONE note each under the 2 live
 //     conversations and nothing under the stopped one; no create / input / kill frame left the page, no ledger row
@@ -22,7 +22,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, stillPresser, stillLookSource } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, stillPresser, stillLookSource, CHROME_STORE } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WebSocket = require(path.join(repo, 'node_modules', 'ws'));
@@ -77,7 +77,7 @@ const srvEnv = { ...baseEnv, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, XDG
 const srvLog = [];
 const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: srvEnv, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
 srv.stdout.on('data', (d) => srvLog.push(String(d))); srv.stderr.on('data', (d) => srvLog.push(String(d)));
-const client = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--window-size=1100,800', `--user-data-dir=${scratch('rls-client')}`, 'about:blank'], { stdio: 'ignore', detached: true });
+const client = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--window-size=1100,800', `--user-data-dir=${scratch('rls-client')}`, 'about:blank'], { stdio: 'ignore', detached: true });
 let cleaned = false;
 const cleanup = () => {
   if (cleaned) return; cleaned = true;
@@ -160,7 +160,7 @@ try {
   const stopped = await until(() => D.ev(`(() => { const f = ${stripOf(SIDS[2])}; const ids = (app.sidebar._webuiSessions || []).map((s) => s.backendSessionId); return f.win && f.readOnly && !ids.includes(${JSON.stringify(SIDS[2])}) ? f : null; })()`), 30000, 250);
   check('desk: the third conversation\'s CLI died — its window stays, read-only ("Session ended."), gone from the live list', !!stopped, await D.ev(stripOf(SIDS[2])));
   await D.ev('(window.__frames.length = 0, window.__toasts.length = 0, true)');
-  // the door: the session list's ⋯ (its list-wide actions) — ONE entry; the list is folded on the rail after the
+  // the door: the session list's ⋯ (its list-wide actions) — the refresh entry first; the list is folded on the rail after the
   // windows opened, so its rail button (Folders) unfolds it first, as a person would
   await D.ev('(app.sidebar.toggle(true), true)');
   await until(() => D.ev("document.getElementById('session-list-menu')?.offsetParent ? true : null"), 5000, 100);
@@ -168,7 +168,8 @@ try {
   check(`desk: the ⋯ sits in the session list's own header row, an SVG icon, titled 「${btn?.title}」`, !!btn && btn.shown && btn.svg && btn.row === 'session-filter-row' && btn.title === '会话列表操作', btn);
   await press(D.S, D.ev, '#session-list-menu');
   const menu = await until(() => D.ev(`(() => { const m = [...document.querySelectorAll('.context-menu')].pop(); if (!m) return null; return [...m.querySelectorAll('.context-menu-item')].map((n) => ({ text: n.textContent.trim(), svg: !!n.querySelector('svg') })); })()`), 5000, 100);
-  check(`desk: the menu holds the ONE entry 「${menu?.[0]?.text}」 with its SVG icon`, !!menu && menu.length === 1 && menu[0].text === '刷新所有活着的会话…' && menu[0].svg, menu);
+  // lane auto-resume-bulk (.349): the ⋯ also holds the two bulk auto-resume acts now — the refresh entry stays FIRST
+  check(`desk: the menu's FIRST entry is 「${menu?.[0]?.text}」 with its SVG icon (the list-wide actions: refresh + the bulk auto-resume acts)`, !!menu && menu.length === 4 && menu[0].text === '刷新所有活着的会话…' && menu.every((x) => x.svg) && /^对所有会话开启自动继续$/.test(menu[1].text), menu);
   const sideRect = await D.ev(`(() => { const m = [...document.querySelectorAll('.context-menu')].pop(); const s = document.getElementById('sidebar').getBoundingClientRect(); const q = m.getBoundingClientRect(); return { x: 0, y: 0, width: Math.min(innerWidth, Math.max(s.right, q.right) + 12), height: Math.min(innerHeight, Math.max(q.bottom + 40, 260)) }; })()`);
   const pMenu = await shot(D.S, 'desk-menu.png', sideRect);
   await press(D.S, D.ev, MENU_ITEM);
@@ -218,6 +219,19 @@ try {
     await until(() => D.ev(`(() => { const it = ${MENU_ITEM.slice(3)}; if (!it) return null; it.click(); return true; })()`), 5000, 30);
     return until(() => D.ev(`(() => { const o = document.getElementById('refresh-live-dialog'); const mw = document.getElementById('main-wrapper'); return o && o.querySelector('.btn-create') ? { sliding: mw.getAnimations().map((x) => x.transitionProperty).join(',') } : null; })()`), 5000, 30);
   };
+  // EACH RED CONTROL LEAVES THE FORM AS IT FOUND IT (主开发 2026-11-18 20:38Z, B-2481 — the hosted shard s3c, red on BOTH tries at the
+  // release's bytes, run 44383892468): control ③'s ungated press can LAND on 确定 (its log names no miss, unlike ②'s) — a real
+  // confirm. On a slow runner its answer is still out when the real leg opens its form: the form disables 取消 while it posts, so
+  // slideOpen's cancel did nothing, the menu RAISED that same singleton form, and the still door waited on its disabled 确定 until the
+  // late answer removed it («gone after 5025 ms … found false») — the toast was the control's (try 2: after ④ cleared the list, so its
+  // leg passed by accident; try 1: before, so null). Each control's press is now waited OUT — the form gone with its answer, or
+  // standing with nothing in flight — and what it left is closed, a counted step
+  const leaveAsFound = async (label) => {
+    const out = await until(() => D.ev(`(() => { const o = document.getElementById('refresh-live-dialog'); if (!o) return { open: false }; const b = o.querySelector('.btn-create'), c = o.querySelector('.btn-cancel'); return b && c && !b.disabled && !c.disabled ? { open: true } : null; })()`), 15000, 100);
+    if (out && out.open) await D.ev("(document.querySelector('#refresh-live-dialog .btn-cancel')?.click(), true)");
+    const gone = await until(() => D.ev("document.getElementById('refresh-live-dialog') ? null : true"), 5000, 50);
+    check(`still: ${label} leaves the form as it found it — its press waited out (the form ${out && out.open ? 'standing, nothing in flight' : 'gone with its answer'}) and nothing of it left open`, !!out && gone === true, { out, gone });
+  };
   await D.S('Animation.enable'); await D.S('Animation.setPlaybackRate', { playbackRate: 0.1 });
   try {
     // ① the form opened mid-slide: 确定 rides the workspace
@@ -227,13 +241,17 @@ try {
     // ② RED CONTROL — a press aimed where 确定 WAS (it pressed once 确定 had slid ≥ 60 px past that point): a named miss
     const red1 = await DOOR(OK_SEL, { gate: false, aim: async (look) => { await until(() => D.ev(`(() => { const e = document.querySelector(${JSON.stringify(OK_SEL)}); if (!e) return null; const q = e.getBoundingClientRect(); return q.left + q.width / 2 - ${look.x} >= 60 ? true : null; })()`), 4000, 20); return { x: look.x, y: look.y }; } });
     check(`still: RED CONTROL — a press aimed where 确定 WAS (it slid ≥ 60 px since) is a named miss: «${DOOR.last?.landed?.why}»`, red1 === false && !!DOOR.last?.landed && !DOOR.last.landed.ok, DOOR.last);
+    await leaveAsFound('RED CONTROL ②');
     // ③ RED CONTROL — the door WITHOUT its still gate presses while the workspace still moves (the gate is what waits)
     await slideOpen();
     const red2 = await DOOR(OK_SEL, { gate: false });
     const red2Look = DOOR.last && DOOR.last.look;
     check(`still: RED CONTROL — the ungated door presses at once, while 确定 still moves (moving at its press: ${(red2Look?.movers || []).join(', ') || 'nothing'})`, !!red2Look && (red2Look.movers || []).length > 0, { red2, last: DOOR.last });
+    await leaveAsFound('RED CONTROL ③');
     // ④ THE STILL DOOR — it waits the slide out, then presses 确定 once; it lands; the dialog closes with the toast
-    await slideOpen();
+    const o4 = await slideOpen();
+    const stand4 = await D.ev(`(() => { const o = document.getElementById('refresh-live-dialog'); const b = o && o.querySelector('.btn-create'), c = o && o.querySelector('.btn-cancel'); return !!b && !b.disabled && !!c && !c.disabled; })()`);
+    check('still: the real leg\'s form is OPEN and STANDING before its press — a fresh form, 确定 and 取消 enabled (nothing of the controls in flight)', !!o4 && stand4 === true, { o4, stand4 });
     await D.ev('(window.__toasts.length = 0, true)');
     const good = await DOOR(OK_SEL);
     const g = DOOR.last || {};
@@ -264,7 +282,7 @@ try {
   await until(async () => { const x = await Ph.ev("Math.round(document.getElementById('session-list-menu').getBoundingClientRect().left)"); const still = x === lastX; lastX = x; return still; }, 5000, 120);
   await tap(Ph.S, Ph.ev, '#session-list-menu');
   const pmenu = await until(() => Ph.ev(`(() => { const m = [...document.querySelectorAll('.context-menu')].pop(); return m ? [...m.querySelectorAll('.context-menu-item')].map((n) => n.textContent.trim()) : null; })()`), 5000, 100);
-  check('phone: the same ONE entry', !!pmenu && pmenu.length === 1 && pmenu[0] === '刷新所有活着的会话…', { pmenu, clicks: await Ph.ev('window.__clicks.slice(-5)'), at: await Ph.ev(`(() => { const b = document.getElementById('session-list-menu').getBoundingClientRect(); const e = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return e ? (e.id || e.className || e.tagName) + '' : null; })()`) });
+  check('phone: the same entries, the refresh first', !!pmenu && pmenu.length === 4 && pmenu[0] === '刷新所有活着的会话…', { pmenu, clicks: await Ph.ev('window.__clicks.slice(-5)'), at: await Ph.ev(`(() => { const b = document.getElementById('session-list-menu').getBoundingClientRect(); const e = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return e ? (e.id || e.className || e.tagName) + '' : null; })()`) });
   const pPhoneMenu = await shot(Ph.S, 'phone-menu.png');
   await tap(Ph.S, Ph.ev, MENU_ITEM);
   const pdlg = await until(() => Ph.ev(dialogFacts), 5000, 100);

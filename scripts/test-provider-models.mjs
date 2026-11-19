@@ -59,11 +59,13 @@ put({ id: 'pv-or', kind: 'openrouter', label: 'OpenRouter', baseUrl: `${FAKE}/ap
 put({ id: 'pv-local', kind: 'self-hosted', label: 'Local vLLM', baseUrl: `${FAKE}/v1`, auth: 'x-api-key', keyRef: null, modelsSource: 'listed', listedBy: 'provider-api' });
 put({ id: 'pv-ds', kind: 'self-hosted', label: 'DeepSeek', baseUrl: `${FAKE}/v1`, modelsSource: 'configured', models: [{ id: 'deepseek-chat', label: 'DeepSeek Chat', context: '128k', caps: ['tools'] }, { id: 'deepseek-reasoner', caps: ['reasoning'] }], aliases: { fast: 'deepseek-chat' }, defaultModel: 'deepseek-reasoner' });
 put({ id: 'pv-empty', kind: 'self-hosted', label: 'Empty', modelsSource: 'none' });
+await store.durable();   // the seeds on disk (the store writer's thread writes them — lane lg-providers U1 cure (C))
 let vault = 'unlocked';
 let clock = 1792494000000;
 const keys = { 'integrations:openrouter#apiKey': 'sk-or-v1-lane' };
 let keyReads = 0;
-const keyOf = (ref) => { keyReads++; return keys[ref] ? { ok: true, value: keys[ref] } : { ok: false, code: 'key-unreadable' }; };
+const owners = [];   // the record each read was asked FOR (the owner check on the one real call — U1 cure)
+const keyOf = (ref, owner) => { keyReads++; owners.push(owner); return keys[ref] ? { ok: true, value: keys[ref] } : { ok: false, code: 'key-unreadable' }; };
 const refresher = PM.create({ providers: store, vaultState: () => vault, keyOf, now: () => clock, log: () => { } });
 const press = (id, by = 'human') => refresher.refreshListedModels(id, { by });
 const disk = () => JSON.parse(fs.readFileSync(store.file, 'utf-8')).providers.find((p) => p.id === 'pv-or');
@@ -86,6 +88,20 @@ ok(ku.code === 'key-unreadable' && hits.length === 0 && fs.readFileSync(store.fi
 clock += 61000; // that refused attempt counted toward the minute (an attempt is an attempt)
 const r1 = await press('pv-or');
 const d1 = disk();
+ok(owners.length >= 1 && owners.every((o) => o === 'pv-or'), 'THE OWNER CHECK ON THE ONE REAL CALL: the refresh reads a key only FOR its own record — every read names pv-or (vaultKeyOf then refuses a reference to another record\'s entry, test-model-providers ⑭)', owners);
+{
+  const PMF = path.join(ROOT, 'src/server/provider-models.js');
+  const src = fs.readFileSync(PMF, 'utf-8');
+  const ANCHOR = '    const keyOf = (ref) => readKey(ref, provider.id);';
+  if (!src.includes(ANCHOR)) throw new Error('the anchor of the control «the owner check» is not in the source');
+  const Module = require('node:module');
+  const m = new Module(PMF); m.filename = PMF; m.paths = Module._nodeModulePaths(path.dirname(PMF));
+  m._compile(src.replace(ANCHOR, '    const keyOf = (ref) => readKey(ref);'), PMF);
+  const seen = [];
+  const rx = m.exports.create({ providers: store, vaultState: () => 'unlocked', keyOf: (ref, o) => { seen.push(o); return { ok: false, code: 'key-unreadable' }; }, fetchImpl: async () => { throw new Error('never asked'); }, now: () => clock + 61000, log: () => { } });   // past the minute: the record's fetchedAt is this clock (r1 just listed it)
+  const x = await rx.refreshListedModels('pv-or', { by: 'human' });
+  ok(x.code === 'key-unreadable' && seen.length === 1 && seen[0] === undefined, 'CONTROL: a refresh that reads the key without its record\'s id (the first cut) skips the owner check ⇒ the owner leg goes RED', seen);
+}
 const mode1 = (fs.statSync(store.file).mode & 0o777).toString(8);
 ok(r1.ok && r1.listed === 3 && r1.skipped === 3 && hits.length === 1 && hits[0].url === '/api/v1/models' && hits[0].method === 'GET' && hits[0].auth === 'Bearer sk-or-v1-lane', 'a person\'s press, the vault open ⇒ ONE GET of <base>/models carrying the vault\'s key as its bearer; 3 rows listed, 3 refused rows skipped', { r1: { ...r1, provider: undefined }, hits });
 ok(d1.modelsSource === 'listed' && d1.listedBy === 'provider-api' && d1.fetchedAt === clock && eq(d1.models.map((m) => m.id), ['deepseek/deepseek-chat-v3.1', 'anthropic/claude-sonnet-4.5', 'qwen/qwen3-coder:free']) && eq(d1.models[1].caps, ['tools', 'vision', 'reasoning', '1m']) && mode1 === '600', 'THE CACHE: the rows (with context + caps) and fetchedAt kept in data/providers.json (0600) before the answer', { d1, mode1 });
@@ -114,6 +130,7 @@ put({ ...store.get('pv-or'), baseUrl: `${deadBase}/api/v1` });
 clock += 61000;
 const bDead = await press('pv-or');
 put({ ...store.get('pv-or'), baseUrl: `${FAKE}/api/v1` });
+await store.durable();
 ok(bDead.code === 'unreachable' && JSON.stringify(disk()) === JSON.stringify({ ...JSON.parse(kept), baseUrl: `${FAKE}/api/v1` }), 'nobody listening ⇒ unreachable; after every refusal above the kept rows and fetchedAt are exactly as before', bDead);
 ok(!fs.readFileSync(path.join(ROOT, 'src/server/provider-models.js'), 'utf-8').replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '').match(/\bset(?:Timeout|Interval|Immediate)\s*\(/), 'the refresh module holds no timer (its deadline is the request\'s own AbortSignal.timeout)');
 
@@ -196,6 +213,17 @@ try {
   const [d7s, d7, ra] = await post('pv-or', { 'Sec-Fetch-Site': 'same-origin' });
   const [d8s, d8] = await post('pv-ds', { Origin: base });
   ok(d5s === 423 && d5.code === 'vault_locked' && /Unlock the vault/.test(d5.error) && d6s === 200 && d6.ok && d6.listed === 3 && d7s === 429 && d7.code === 'cooldown' && ra === '60' && /try again in 60 s/.test(d7.error) && d8s === 409 && d8.code === 'not-listed' && hits.length === n0 + 1, 'a person on the page: the vault locked ⇒ 423; open ⇒ 200 (asked once); again at once ⇒ 429 Retry-After 60; a configured record ⇒ 409 not-listed', { d5, d6: { ...d6, provider: undefined }, d7, ra, d8 });
+  // THE CACHE'S WRITE FAILED (U1 cure): the refresh says write-failed by name (500 at the route, its own words) — never ok
+  {
+    const wdir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pmwf-'));
+    const wst = PS.create({ dataDir: wdir, catalogOf, writer: { dirty() { }, durable: async () => false }, log: () => { } });
+    wst.put({ id: 'pv-wf', kind: 'openrouter', label: 'WF', baseUrl: `${FAKE}/api/v1`, keyRef: 'integrations:openrouter#apiKey', modelsSource: 'listed', listedBy: 'provider-api', aliases: {} });
+    mode = 'openrouter';
+    const wr = PM.create({ providers: wst, vaultState: () => 'unlocked', keyOf, now: () => clock, log: () => { } });
+    const x = await wr.refreshListedModels('pv-wf', { by: 'human' });
+    ok(x.code === 'write-failed' && typeof M.REFRESH_WORDS['write-failed'] === 'string' && fs.readFileSync(path.join(ROOT, 'src/routes/provider-models.js'), 'utf-8').includes("'write-failed': 500"), 'the listed cache could not be written ⇒ write-failed by name (its own words, 500 at the door) — never an ok the disk never got', x);
+    fs.rmSync(wdir, { recursive: true, force: true });
+  }
 } finally { srv.close(); fake.close(); }
 
 fs.rmSync(dir, { recursive: true, force: true });

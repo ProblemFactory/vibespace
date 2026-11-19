@@ -40,7 +40,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, CHROME_STORE } from './scratch.mjs';
 import { compactEta } from '../src/lib/usage-eta.js';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
@@ -94,7 +94,7 @@ const bootServer = () => { srv = spawn(process.execPath, ['server.js'], { cwd: w
 // the hub answers the shape it was handed — read off /api/backend-status (the census row the roster draws)
 const cliShape = async () => { const s = await api('/api/backend-status'); const row = (k) => ({ installed: !!s?.[k]?.installed, path: s?.[k]?.cmdPath || null, provenance: s?.[k]?.provenance || null }); return { claude: row('claude'), codex: row('codex') }; };
 const shapeIs = (sh, want) => ['claude', 'codex'].every((k) => sh[k].installed === (want === 'installed') && (want !== 'installed' || (sh[k].provenance === 'shell' && String(sh[k].path).startsWith(CLI_BIN + path.sep))));
-const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--disable-background-timer-throttling', '--window-size=1200,800', `--user-data-dir=${scratch('roster-eta-chrome')}`, 'about:blank'], { stdio: 'ignore' });
+const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--disable-background-timer-throttling', '--window-size=1200,800', `--user-data-dir=${scratch('roster-eta-chrome')}`, 'about:blank'], { stdio: 'ignore' });
 const cleanup = () => {
   try { chrome.kill('SIGKILL'); } catch {}
   try { srv?.kill('SIGKILL'); } catch {}

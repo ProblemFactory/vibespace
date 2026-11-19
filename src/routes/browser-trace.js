@@ -96,6 +96,8 @@ function refuseHost(req, res) {
 }
 const STATUS = {
   'not-found': 404, 'bad-request': 400, 'unsupported-host': 400, unavailable: 503, internal: 500,
+  // B-8b87 round 3: an edit's proxy refusals by name (the creation's route has the same rows) — never a 500 for a refusal
+  proxy_cloud_browser: 400, proxy_off_machine: 400, bad_proxy: 400, bad_proxy_credential: 400, bad_proxy_inline_credential: 400,
   // the trace
   trace_off: 409, 'not-live': 409, ended: 409, refused: 409,
   // housekeeping (§7.1 / §8 / D8): the sweep's scope, the archive-before-remove rule
@@ -373,6 +375,7 @@ router.patch('/api/browser/profiles/:id', async (req, res) => {
   if (typeof k.updateProfile !== 'function') return res.status(503).json({ error: 'this keeper cannot edit a profile', code: 'unavailable' });
   const { host, ...patch } = req.body || {};
   if (patch.use !== undefined && isAgentBearer(req)) return res.status(403).json({ error: USE_IS_USERS, code: 'agent_forbidden' }); // verify r1 (F6)
+  if ((patch.proxy !== undefined || patch.proxyCredential !== undefined) && isAgentBearer(req)) return res.status(403).json({ error: 'an agent may give a proxy address when it creates a profile, but never edits an existing profile\'s proxy or its login — the person sets them on the profile\'s card (Proxy…) (B-8b87)', code: 'agent_forbidden' });
   try {
     // "Who can use it" (§6.2): shape → base → resolve the picked live sessions (the ONE resolver, routes/browser.js — one
     // refusal and NOTHING is written: a partial list is a list the user never saw) → the keeper validates the rows,

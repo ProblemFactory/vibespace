@@ -424,6 +424,9 @@ function validateCaps(kind, caps, { channelSettings } = {}) {
   if (c.policyDefault !== undefined && !(Array.isArray(c.policyModes) ? c.policyModes : POLICY_MODES).includes(c.policyDefault)) bad(`caps.policyDefault must be one of the declared policy modes (got ${JSON.stringify(c.policyDefault)})`);
   if (c.honestyLine !== undefined && !HONESTY_LINES.includes(c.honestyLine)) bad(`caps.honestyLine must be one of ${HONESTY_LINES.join('|')} (got ${JSON.stringify(c.honestyLine)})`);
   if (c.sendStartsTurn !== undefined && typeof c.sendStartsTurn !== 'boolean') bad('caps.sendStartsTurn must be a boolean (true = a send here is a billed agent turn)');
+  // B-e630: the vendor's OWN web app, signed in in a browser profile, can stand for a connected account (the Connect form then
+  // offers the profiles' door — never a guess of WHICH profile: the person recognises it by its own name)
+  if (c.browserSignIn !== undefined && typeof c.browserSignIn !== 'boolean') bad('caps.browserSignIn must be a boolean (true = the vendor\'s own web app, signed in in a browser profile, can stand for a connected account)');
   if (c.kind !== undefined && c.kind !== kind) bad(`caps.kind ${JSON.stringify(c.kind)} is not the adapter's own kind`);
   if (c.mentions !== undefined && !MENTION_CAPS.includes(c.mentions)) bad(`caps.mentions must be one of ${MENTION_CAPS.join('|')} (got ${JSON.stringify(c.mentions)})`);
   if (c.prepareSend !== undefined && typeof c.prepareSend !== 'boolean') bad('caps.prepareSend must be a boolean (true = prepareSend(convId, {text}) decides the mentions when a proposal is made)');

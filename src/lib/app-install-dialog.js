@@ -55,6 +55,7 @@ export function appRefusalText(code) {
     case 'install_failed': return t('The install failed — the log above says why.');
     case 'no_app_system': return t('This machine keeps no app system.'); // Layer 1 (design §3.2)
     case 'exists': return t('This machine already has an app system.');
+    case 'no_codename': return t("This machine's system does not name its release (VERSION_CODENAME in /etc/os-release), so no app system can be made for it."); // B-bd27 r2: an OS fact, not the agent's age
     case 'no_rung': return t('An app system cannot be created on this machine — its image carries neither a base system nor debootstrap.');
     case 'prev_exists': return t('Delete the previous app system first — it is kept until you do.');
     default: return '';

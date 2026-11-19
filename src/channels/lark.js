@@ -406,6 +406,7 @@ const caps = Object.freeze({
   pushAckBudgetMs: 3000,           // the vendor's: HTTP 200 within 3 s — we ack after DURABILITY (fence 11)
   pollInterval: { hot: 30, cold: 300, floor: 10 },
   scanSources: null,
+  browserSignIn: true,   // B-e630: its own web app works in a signed-in browser profile
   scanLatency: null,
   history: 'page',
   historyBySource: null,

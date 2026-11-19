@@ -209,6 +209,39 @@ console.log('— git source + the Plugin Git credential (lane engine-distributio
   const CLEAN_GIT_MS = 60000;
   const PL = require(path.join(REPO, 'src/server/plugin-loader.js')).create({ rootDir: GR, app: null, autoStart: false, log: quiet, integrations: () => store, gitBin: WRAP, gitTimeoutMs: CLEAN_GIT_MS });
   const URL_H = URL_HTTPS, URL_S = URL_SSH;
+  // B-3b8e (4b — the coordinator's ruling (B)): the Plugin Git credential's Test is OFFERED once a repository on its host is
+  // known — the loader's own answer (`waits`), asked before and after the first install from that host (the stub's repo.test)
+  {
+    const regs = {}, moved = [], storeW = { ...store, registerTest: (id, fn, o) => { regs[id] = { fn, o }; }, testWaitsMoved: (id) => { moved.push(id); } };
+    const mkW = (mod, sub) => { const r = path.join(G, sub); fs.mkdirSync(path.join(r, 'data', 'plugins'), { recursive: true }); return mod.create({ rootDir: r, app: null, autoStart: false, log: quiet, integrations: () => storeW, gitBin: WRAP, gitTimeoutMs: CLEAN_GIT_MS }); };
+    const waitsNow = () => { const o = regs['plugin-git'] && regs['plugin-git'].o; return o && typeof o.waits === 'function' ? o.waits({ values: { host: 'repo.test' } }) : 'no waits registered'; };
+    const PLW = mkW(require(path.join(REPO, 'src/server/plugin-loader.js')), 'root-waits');
+    const before = waitsNow();
+    await PLW.install({ source: 'git', value: URL_H, ref: 'v1' });
+    const after = waitsNow();
+    ok(before && before.code === 'repository-unknown' && before.params && before.params.host === 'repo.test' && after === null,
+      'B-3b8e 4b: the Plugin Git Test WAITS while no repository on its host is known (the card says when) — and is offered once one is (the first install from repo.test)', { before, after });
+    const movedInstall = moved.slice();
+    PLW.uninstall('acme.private');
+    const afterU = waitsNow();
+    ok(movedInstall.join() === 'plugin-git' && moved.join() === 'plugin-git,plugin-git' && afterU && afterU.code === 'repository-unknown',
+      'B-3b8e 4b (the read\'s should): the git install and the uninstall each push the Plugin Git card again (an open window follows without a reopen) — and with its only repository gone the Test waits again', { movedInstall, moved, afterU });
+    // RED CONTROL — its plant proven first: the loader's one answer, spelled once; a loader that always answers «can run»
+    const LSRCW = read('src/server/plugin-loader.js'), WA = "    const waits = ({ values }) => (knownRepoOn(hostOf(values)) ? null : { code: 'repository-unknown', params: { host: hostOf(values) } });\n";
+    ok(LSRCW.split(WA).length === 2, 'ANCHOR: the loader\'s waits answer, spelled once (the control below plants there)');
+    const MV = "    if (r.source === 'git' || (prevInst && prevInst.source === 'git')) gitTestWaitsMoved();\n";
+    ok(LSRCW.split(MV).length === 2, 'ANCHOR: the install\'s push of the Plugin Git card, spelled once (the control below plants there)');
+    if (LSRCW.split(WA).length === 2 && LSRCW.split(MV).length === 2) {
+      const Mw = mutantCopies('plugin-trust-waits', REPO);
+      delete regs['plugin-git'];   // the read's should: the mutant's own registration is what the control reads — never the real loader's left over
+      mkW(Mw.load('src/server/plugin-loader.js', LSRCW.replace(WA, '    const waits = () => null;\n'), 'waits-never'), 'root-waits-mutant');
+      ok(!!regs['plugin-git'] && waitsNow() === null, 'MUTANT RED: a loader whose Test never waits offers it with no repository known — a door that can only refuse (the mutant\'s own registration read)');
+      const n0 = moved.length;
+      const PLM = mkW(Mw.load('src/server/plugin-loader.js', LSRCW.replace(MV, ''), 'waits-unpushed'), 'root-waits-mutant2');
+      await PLM.install({ source: 'git', value: URL_H, ref: 'v1' });
+      ok(moved.length === n0 && waitsNow() === null, 'MUTANT RED: a loader whose git install does not push the card leaves an open window saying the Test waits after the install it waited for', { pushed: moved.length - n0 });
+    }
+  }
   const thr = async (p) => { try { await p; return null; } catch (e) { return e; } };
   const fetchOf = (cs) => cs.find((c) => c.argv.includes('fetch')) || null;
   /** THE LEAK CENSUS of one recorded call: the token / the key never on argv, in a URL, in any env value; the askpass names

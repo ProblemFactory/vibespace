@@ -92,7 +92,7 @@
 //      tier; a failed type quotes only xdotool's known stderr lines; a hanging `locale` is asked once (a time-scaled copy);
 //      each with a patched copy of the pre-fix code as its CONTROL.
 //   §6 WHERE A SCREENSHOT LANDS (2026-09-26, the owner's pixel-mode test: a PNG landed in the production checkout): the
-//      shipped CLI against a stub route from a cwd that must stay empty — no --out ⇒ <tmpdir>/vibespace-window/ (0700), a
+//      shipped CLI against a stub route from a cwd that must stay empty — no --out ⇒ <tmpdir>/vibespace-window-<uid>/ (0700), a
 //      relative --out ⇒ VIBESPACE_SESSION_CWD (else that temp dir), ~/.ssh / a home dot-entry / a symlinked `..` into one /
 //      a final-component link / VibeSpace's data dir refused by name BEFORE any request; CONTROL: the old default in a
 //      patched copy writes into the cwd.
@@ -1558,7 +1558,7 @@ console.log('§4 the engine over a fake keeper + the routes');
 // §6 WHERE A SCREENSHOT LANDS (2026-09-26, the owner's pixel-mode test): `vibespace-window screenshot <h>` with no
 // --out wrote `window-<h>-<ts>.png` into the SHELL's cwd — the session stood in the production checkout, so the PNG
 // landed in the repo. The shipped CLI against a stub screenshot route, run from a cwd that must stay EMPTY: no --out ⇒
-// <os.tmpdir()>/vibespace-window/ (0700); a relative --out ⇒ under VIBESPACE_SESSION_CWD when set, else that temp dir;
+// <os.tmpdir()>/vibespace-window-<uid>/ (0700); a relative --out ⇒ under VIBESPACE_SESSION_CWD when set, else that temp dir;
 // `~/.ssh/x.png`, a home dot-entry, a symlinked `..` into one, a final-component link and VibeSpace's own data dir are
 // refused BY NAME before any request (the stub counts them). CONTROL: a patched copy (scripts/mutant-copy.mjs) with the
 // old default writes into the cwd.
@@ -1590,12 +1590,12 @@ console.log('§4 the engine over a fake keeper + the routes');
   }, (e, stdout, stderr) => resolve({ status: e ? e.code : 0, stdout: String(stdout || ''), stderr: String(stderr || '') })));
   const ls = (d) => { try { return fs.readdirSync(d); } catch { return null; } };
   const isPng = (f) => { try { return fs.readFileSync(f).subarray(0, 8).toString('hex') === '89504e470d0a1a0a'; } catch { return false; } };
-  const shotDir6 = path.join(tmp6, 'vibespace-window');
+  const shotDir6 = path.join(tmp6, `vibespace-window-${process.getuid()}`);   // B-3767: this user's own folder
 
   const a = await cli6(CLI6, ['screenshot', 'da-shot']);
   const aPath = a.stdout.split(' (')[0].trim();
   const aMode = (() => { try { return fs.statSync(shotDir6).mode & 0o777; } catch { return null; } })();
-  ok(a.status === 0 && path.dirname(aPath) === shotDir6 && /^da-shot-\d+\.png$/.test(path.basename(aPath)) && isPng(aPath) && /the window's own pixels/.test(a.stdout), `no --out ⇒ the PNG lands under <tmpdir>/vibespace-window/ and its path is printed (${a.stdout.trim().slice(0, 140)})`, a.stderr);
+  ok(a.status === 0 && path.dirname(aPath) === shotDir6 && /^da-shot-\d+\.png$/.test(path.basename(aPath)) && isPng(aPath) && /the window's own pixels/.test(a.stdout), `no --out ⇒ the PNG lands under <tmpdir>/vibespace-window-<uid>/ and its path is printed (${a.stdout.trim().slice(0, 140)})`, a.stderr);
   ok(aMode === 0o700, `…the directory is made private (0700; got ${aMode == null ? 'none' : aMode.toString(8)})`);
   ok(JSON.stringify(ls(cwd6)) === '[]', `…and the shell's cwd gains NO file (${JSON.stringify(ls(cwd6))})`);
 

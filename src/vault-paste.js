@@ -479,7 +479,8 @@ function loginReceiptText(head, o, piece) {
   const origin = piece(t.origin, 300), user = l.allowed && l.user ? piece(l.user, 160) : '';
   const rc = o.receipt ? ` Receipt ${piece(o.receipt, 32)}.` : '';
   const on = `${origin}${user ? ` (user ${user})` : ''}`;
-  const what = l.updated ? `UPDATED — the website login for ${on} in the vault now has the password the user typed (the old one is kept one revision)` : `STORED — a website login for ${on} is in the vault`;
+  const what = l.joined ? `STORED — the user chose a website login already in the vault and ${l.already ? `${origin} was one of its sites already` : `added ${origin} to its sites`}; it signs in there${user ? ` as ${user}` : ''} with that login's one password`
+    : l.updated ? `UPDATED — the website login for ${on} in the vault now has the password the user typed (the old one is kept one revision)` : `STORED — a website login for ${on} is in the vault`;
   const use = LOGIN_USE.replace(/\{origin\}/g, () => origin).replace(/\{user\}/g, () => (user ? `#${user}` : ''));
   // r3 (law D): THREE outcomes, three sentences — granted · not ticked · ticked but the permission could not be written
   const may = l.allowed
@@ -521,6 +522,8 @@ function loginAnswerOf({ username, password, totpName } = {}) {
 }
 /** lane login-request-card: a stored login's user (its entry name's — lower-cased by the add door's rule) | ''. */
 const loginUserOf = (name) => { const p = BL.parseName(name); return p ? p.user : ''; };
+/** lane login-request-card: a stored login's FIRST site (its entry name's origin) | ''. */
+const loginOriginOf = (name) => { const p = BL.parseName(name); return p ? p.origin : ''; };
 
 /** A FREE ENTRY's facts (the paste box's, and 「其他密钥或密码…」's in the Vault window) → { ok, label, note, kind } | a
  *  refusal: its words by THE words rule (wordsOf — a name, a one-paragraph description; lane vault-entry-description: was
@@ -548,6 +551,6 @@ module.exports = {
   ACTION_TYPE, REQUEST_ID_RE, ENTRY_PREFIX, FREE_ENTRY_RE, ENTRY_FIELD, LIMITS, QUIET_MS, ENTRY_KINDS, KIND_WORDS, WORDS, hostsOf,
   requestVerdict, targetOf, targetOfAction, wordsOfItem, intoOf, cardOf, receiptText, entryMetaOf, valueOf,
   WORDS_TYPE, PROPOSAL_ID_RE, wordsOf, withNote, wordsCardOf, proposalOfItem, wordsReceiptText, agentEntryWords, pendingWords, sharedNoteOf, privateNoteOf,   // lane vault-entry-description
-  LOGIN_KIND, LOGIN_USE, siteWords, loginAnswerOf, loginUserOf,   // lane login-request-card
+  LOGIN_KIND, LOGIN_USE, siteWords, loginAnswerOf, loginUserOf, loginOriginOf,   // lane login-request-card
   TOTP_KIND, TOTP_USE,   // lane totp-request-card
 };

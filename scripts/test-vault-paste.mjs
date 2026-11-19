@@ -20,6 +20,18 @@
 //   ⑦ LOCKED — a lock ACT withdraws the open requests (decision ③: the asker told WITHDRAWN); an ask while locked is filed;
 //      the owner's store ⇒ 423 vault_locked, the item stays, nothing written; unlocked ⇒ stored
 //   ⑧ 「其他密钥或密码…」 — the Vault window's free entry: add (people only, unlocked only, named refusals), delete, delete again
+//   ⑧b B-3fb5 — an agent's OWN entry (mint / put) has its 删除: the person's DELETE /api/vault/agent-secrets/<the whole name>
+//      (doorsOf's door, confirm «agent-secret»); a bearer ⇒ 403 and the entry stays; delete ⇒ gone + one audit line (name + who,
+//      no value); again ⇒ 404; another kind's name never reaches the drop; a re-mint after it carries nothing over; a vault-use
+//      grant row on it goes FIRST (locked ⇒ vault_locked, entry and row kept); what the hub remembers by its id goes with it (the
+//      run door's host passes and late allows, an open words proposal). MUTANTS (⑫): the door without its name check, the route
+//      without person(), the delete without forgetEntry, without settling its words — each RED
+//   ⑧c B-ef1b — the retired job-secrets notice's two buttons (POST /api/vault/job-secrets/:answer, src/server/job-secrets-door.js):
+//      a bearer ⇒ 403; locked ⇒ 423, nothing moved; move ⇒ each text value sealed as a free entry (its name when safe to show,
+//      else «Job secret N»; a pasted value as a name never shown), read back, the file gone, the notice done, ONE audit line (a
+//      count); again ⇒ 404 gone; a refused value ⇒ nothing sealed, the file kept; delete ⇒ the file gone, nothing sealed; a
+//      directory by that name / no text value ⇒ refused by name. MUTANTS (⑫): no undo, every name shown, no undo when the
+//      file cannot be deleted — each RED
 //   ⑨ A RESTART — a NEW door over the same For-you store answers a request the old one filed (the item IS the record)
 //   ⑩ BOUNDS — 4 open per conversation (the 5th ⇒ 429 too_many_requests)
 //   ⑪ THE SWEEP — every answer, every broadcast frame (vault-state, integrations-updated, the For-you snapshots), every log
@@ -81,6 +93,7 @@ const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
 const GS = require(path.join(REPO, 'src/server/grants-store.js'));   // lane login-request-card: the ONE grants store (in memory)
 const BLS = require(path.join(REPO, 'src/server/browser-logins.js'));   // lane login-request-card: THE web-login door (its writer)
 const GM = require(path.join(REPO, 'src/grant-model.js'));
+const VUG = require(path.join(REPO, 'src/server/vault-use-grants.js'));   // B-3fb5: a vault-use grant row on an agent's entry goes with it
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
 const ROOT = scratch('vault-paste');
@@ -122,12 +135,14 @@ const wiredDepsOf = (src) => {
   return pieces.map((p) => (/^\s*([A-Za-z_$][\w$]*)\s*(?::|$)/.exec(p) || [])[1]).filter(Boolean);
 };
 const WIRED_DEPS = wiredDepsOf(WIRING) || [];
-const WORLD_OWN = ['vault', 'activeSessions', 'getJobs', 'contents', 'run', 'paste', 'totp', 'logins', 'callerOf'];
+const WORLD_OWN = ['vault', 'activeSessions', 'getJobs', 'contents', 'run', 'paste', 'totp', 'logins', 'callerOf', 'jobSecrets'];
 const STAND_INS = {
   who: (req) => Auth.signInHandle(req),   // the real one (src/auth.js — the cookie's handle)
   runOf: () => null, grantLive: () => true, subjects: () => ({ sessions: [], groups: [] }),   // no live run, every grant live, no subjects
   linkTokenFor: () => 'link-token-stand-in',   // a function, as the hub's (a road gated on it mounts); no world session has a link
   onVaultWait: () => {}, auditLink: () => {},
+  // B-8b87: a browser proxy's logins (names only here) and the keeper's «Move the password to the vault» — objects/functions as the hub's, so their person-only roads mount
+  proxyLogins: { names: () => [], save: () => ({ ok: false, code: 'vault_locked', error: 'the vault is locked' }), remove: () => ({ ok: true }) }, proxyMove: () => ({ ok: false, code: 'unavailable', error: 'no keeper in the world' }),
 };
 const EARS = ['log'];   // the world's ears only (the sweep reads its lines); the hub's default prints them — it gates no road
 /** → { missing: names the wiring passes that the world has no value for, extra: names the world passes that the wiring does not } */
@@ -159,7 +174,7 @@ const sweepRoads = async (w, s, token, who, roads, { onLast = async () => {} } =
   }
   return out;
 };
-function makeWorld(name, { door = null, routes = null, loginsMod = null } = {}) {
+function makeWorld(name, { door = null, routes = null, loginsMod = null, jsDoor = null } = {}) {
   const dataDir = path.join(ROOT, name); fs.mkdirSync(dataDir, { recursive: true });
   const auth = new Auth(dataDir, {});
   auth.setPassword('signin-' + name);
@@ -178,6 +193,7 @@ function makeWorld(name, { door = null, routes = null, loginsMod = null } = {}) 
   const totp = TOTPM.create({ dataDir, vault, log: (m) => LOGS.push(String(m)) });
   const runOf = (cid) => { for (const s of activeSessions.values()) if (s && s.claudeSessionId === cid) return TOTPM.runOfToken(s.agentToken); return null; };
   const paste = DOOR.create({ vault, integrations, userTodos, deliver, vaultRun, logins, totp, runOf, log: (m) => LOGS.push(String(m)) });
+  const jobSecrets = (jsDoor || require(path.join(REPO, 'src/server/job-secrets-door.js'))).create({ dataDir, vault, paste, userTodos, log: (m) => LOGS.push(String(m)) });   // B-ef1b: the retired job-secrets notice's buttons
   const SESSION_TOKEN = 'vsst_' + crypto.randomBytes(16).toString('hex');
   const OTHER_TOKEN = 'vsst_' + crypto.randomBytes(16).toString('hex');
   const activeSessions = new Map([
@@ -192,12 +208,12 @@ function makeWorld(name, { door = null, routes = null, loginsMod = null } = {}) 
   // (WIRED_DEPS — the two-step door, the web-login door, a caller resolver, … — the world's own, else a stand-in), so ⑩c's census
   // reads the hub's real set of agent roads, gated ones included
   const callerOf = (token) => { for (const [k, s] of activeSessions) if (s.agentToken === token) return { conversationId: s.claudeSessionId, conv: s.claudeSessionId, scope: k, name: s.name, groups: [], live: true }; return null; };
-  const own = { vault, activeSessions, getJobs: () => ({ jobByToken: () => null }), contents: VC.create({ vault, sources }), run: vaultRun, paste, totp, logins, callerOf };
+  const own = { vault, activeSessions, getJobs: () => ({ jobByToken: () => null }), contents: VC.create({ vault, sources }), run: vaultRun, paste, totp, logins, callerOf, jobSecrets };
   if (Object.keys(own).join() !== WORLD_OWN.join()) throw new Error('makeWorld: its own deps drifted from WORLD_OWN');
   const deps = Object.fromEntries([...WIRED_DEPS.map((k) => [k, k in own ? own[k] : STAND_INS[k]]), [EARS[0], (m) => LOGS.push(String(m))]]);
   catchRejections(app);
   (routes || require(path.join(REPO, 'src/routes/vault.js'))).registerVaultRoutes(app, deps);
-  return { dataDir, auth, vault, userTodos, integrations, deliver, vaultRun, paste, app, SESSION_TOKEN, OTHER_TOKEN, activeSessions, grants, logins, totp, TOTPM };
+  return { dataDir, auth, vault, userTodos, integrations, deliver, vaultRun, paste, jobSecrets, app, SESSION_TOKEN, OTHER_TOKEN, activeSessions, grants, logins, totp, TOTPM };
 }
 const ANSWERS = [];
 async function serve(w) {
@@ -406,6 +422,211 @@ console.log('⑧ 「其他密钥或密码…」 — a free entry the owner adds 
   ok((await S.hit('/api/vault/secrets/..%2Fhost%3Ax', { method: 'DELETE' })).status === 404 && (await S.hit(`/api/vault/secrets/${add.json.entry.slice(7)}`, { method: 'DELETE', headers: { ...S.PAGE, authorization: 'Bearer ' + W.SESSION_TOKEN } })).status === 403, 'another entry\'s name never reaches the drop; a bearer ⇒ 403');
 }
 
+console.log('⑧b B-3fb5 — an agent\'s OWN entry has its 删除 (the person\'s door; who may use it goes first)');
+async function agentDrop(w, s, name) {
+  const m = w.vault.agentMint(name, { length: 24 });
+  const row = VI.secretRowOf((w.vault.secretNames() || []).find((x) => x.name === name) || {});
+  const door = row && VI.doorsOf({ store: 'secrets', entry: name, field: row.field }).delete;
+  const viaBearer = await s.hit(door.path, { method: 'DELETE', headers: { ...s.PAGE, authorization: 'Bearer ' + w.SESSION_TOKEN } });
+  const kept = (w.vault.secretNames() || []).some((x) => x.name === name);
+  const del = await s.hit(door.path, { method: 'DELETE' });
+  return { m, row, door, viaBearer, kept, del, gone: !(w.vault.secretNames() || []).some((x) => x.name === name) };
+}
+{
+  const name = ['agent:cid-asker-1', 'deploy-key'].join('/');
+  const a = await agentDrop(W, S, name);
+  ok(a.m.ok && a.row && a.row.field === 'secret' && a.door && a.door.method === 'DELETE' && a.door.path === `/api/vault/agent-secrets/${encodeURIComponent(name)}` && a.door.confirm === 'agent-secret',
+    'an agent mints its own entry; its row\'s 删除 is DELETE /api/vault/agent-secrets/<the whole name, encoded> with the confirm «agent-secret»', { m: a.m, door: a.door });
+  ok(a.viaBearer.status === 403 && a.viaBearer.json.code === 'human_only' && a.kept, 'a BEARER (the conversation itself) ⇒ 403 human_only — the entry stays (an agent deletes nothing through this door)', a.viaBearer.json);
+  ok(a.del.status === 200 && a.del.json.entry === name && a.gone, 'the person\'s delete ⇒ 200, the entry is gone from the vault', a.del.json);
+  const lines = fs.readFileSync(path.join(W.dataDir, 'vault-audit.jsonl'), 'utf8').split('\n').filter((l) => l.includes('vault-agent-secret-deleted'));
+  ok(lines.length === 1 && lines[0].includes(name) && lines[0].includes('"by":"user"') && lines[0].includes('"who":') && !lines[0].includes('"who":"sign-in-off"') && lines[0].includes(`"why":"${name}"`), 'ONE audit line — the entry\'s name, who pressed and from where (never a value)', lines);
+  ok((await S.hit(a.door.path, { method: 'DELETE' })).status === 404, 'delete again ⇒ 404 entry_unknown_id');
+  const free = await S.hit('/api/vault/secrets', { body: { label: 'a free one', value: ['v', 'b3fb5'].join('-') } });
+  const notAgent = [await S.hit(`/api/vault/agent-secrets/${encodeURIComponent(free.json.entry)}`, { method: 'DELETE' }), await S.hit('/api/vault/agent-secrets/host%3Ax', { method: 'DELETE' }), await S.hit(`/api/vault/agent-secrets/${encodeURIComponent('agent:cid-asker-1/../x')}`, { method: 'DELETE' })];
+  ok(free.status === 200 && notAgent.every((r) => r.status === 404 && r.json.code === 'entry_unknown_id') && W.vault.secretNames().some((x) => x.name === free.json.entry),
+    'another kind\'s name (a free entry, a machine\'s link, a path) never reaches the drop through this door — 404 by name, the free entry stays', notAgent.map((r) => r.status));
+  // the read's should (r1): what the hub REMEMBERS by the entry's id goes with it — a host pass the owner gave the old value,
+  // a late «allow once» over a run that named it, an open proposal of its words — so a value minted later under the name
+  // meets its card again (another entry's pass stays)
+  const name2 = ['agent:cid-asker-1', 'passed-key'].join('/'), id2 = `secrets:${name2}#secret`, other = `cid-asker-1\nsecrets:agent:cid-asker-1/other#secret\nb.example.test`;
+  W.vault.agentMint(name2, { length: 24 });
+  W.vaultRun._hostPasses.set(`cid-asker-1\n${id2}\nb.example.test`, { scope: 'cid-asker-1', id: id2, host: 'b.example.test', at: Date.now() });
+  W.vaultRun._hostPasses.set(other, { scope: 'cid-asker-1', id: 'secrets:agent:cid-asker-1/other#secret', host: 'b.example.test', at: Date.now() });
+  W.vaultRun._lateOnce.set('pair-b3fb5', { until: Date.now() + 60e3, entries: [id2], askId: 'ask-b3fb5' });
+  const prop = W.paste.propose({ caller: { conversationId: 'cid-b3fb5', sessionKey: 'w1', name: 'Lane asker' }, entry: name2, ref: `vault://secrets/${name2}/secret`, seen: true, name: 'A better name' });
+  const del2 = await S.hit(`/api/vault/agent-secrets/${encodeURIComponent(name2)}`, { method: 'DELETE' });
+  ok(prop.ok && del2.status === 200 && ![...W.vaultRun._hostPasses.values()].some((p) => p.id === id2) && !W.vaultRun._lateOnce.has('pair-b3fb5') && W.vaultRun._hostPasses.has(other)
+    && !W.paste.proposalsOpen().some((p) => p.entry === name2) && W.paste.answerWords(prop.proposalId, { answer: 'allow' }).code === 'ask_settled',
+    'the delete FORGETS what the hub remembered by its id: the host pass and the late allow over it are gone (another entry\'s pass stays), its open words proposal is settled (an Allow now answers ask_settled)', { prop: prop.code || prop.ok, del: del2.status, open: W.paste.proposalsOpen() });
+  W.vaultRun._hostPasses.delete(other);
+  const again = W.vault.agentMint(name, { length: 24 });
+  ok(again.ok && !again.rotated, 'a re-mint of the same name after the delete is a NEW entry (not a rotation: no words kept)', again);
+  W.vault.secretDrop(name); W.vault.secretDrop(free.json.entry);
+}
+{
+  // who may use it goes FIRST (the free entry's rule): a grant row on the agent's entry, a LOCKED vault ⇒ refused by name, both kept
+  const dataDir = path.join(ROOT, 'b3fb5-grants'); fs.mkdirSync(dataDir, { recursive: true });
+  const vault = VE.create({ dataDir, kdf: { N: 1024, r: 8, p: 1 }, log, idleTimer: false, bcast: () => {} });
+  await vault.setup(PW);
+  const store = GS.create({ memory: true });
+  const useGrants = VUG.create({ grants: () => store, vault, dataDir, log: (m) => LOGS.push(String(m)) });
+  const paste = require(path.join(REPO, 'src/server/vault-paste-door.js')).create({ vault, useGrants, log: (m) => LOGS.push(String(m)) });
+  const name = ['agent:cid-asker-1', 'shared-key'].join('/'), id = `secrets:${name}#secret`;
+  vault.agentMint(name, { length: 24 });
+  const add = useGrants.addMember(id, { kind: 'conversation', key: 'cid-other-2' }, { hosts: ['192.168.1.1'] });
+  vault.lock('test');
+  const locked = paste.dropAgentEntry(name);
+  const keptLocked = { entry: (vault.secretNames() || []).some((x) => x.name === name), rows: useGrants.rowsOf(id).length };
+  await vault.unlock(PW);
+  const d = paste.dropAgentEntry(name);
+  ok(add && add.ok && !locked.ok && locked.code === 'vault_locked' && keptLocked.entry && keptLocked.rows === 1, 'a grant row on the agent\'s entry + a LOCKED vault ⇒ refused vault_locked by name — the entry AND its row stay (never an entry gone with its row dangling)', { add, locked, keptLocked });
+  ok(d.ok && !useGrants.rowsOf(id).length && !(vault.secretNames() || []).some((x) => x.name === name), 'unlocked ⇒ the row goes first, then the entry', { d, rows: useGrants.rowsOf(id).length });
+}
+
+console.log('⑧c B-ef1b — the retired job-secrets notice has its buttons: move into the vault / delete the file');
+const JS_FILE = 'job-secrets.retired.json', JS_ITEM = '2026-10-job-secrets-retired';
+const jsVals = ['gh', 'npm', 'pasted', 'long'].map((w) => `${w}-${crypto.randomBytes(12).toString('hex')}`);   // values built at runtime
+const JS_PASTED = 'sk-' + crypto.randomBytes(16).toString('hex');   // a VALUE pasted into the name field
+const plantJS = (w, doc) => { fs.writeFileSync(path.join(w.dataDir, JS_FILE), typeof doc === 'string' ? doc : JSON.stringify(doc), { mode: 0o600 }); return w.userTodos.add('vault', { origin: 'vault', kind: 'notice', urgency: 'high', by: 'system', sessionName: 'Vault', itemKey: JS_ITEM, action: { type: 'job-secrets-retired' }, text: 'A plain file kept secrets for background jobs outside the vault: data/job-secrets.retired.json — put each into the vault, then delete the file.' }); };
+const jsHere = (w) => fs.existsSync(path.join(w.dataDir, JS_FILE));
+const freeNames = (w) => (w.vault.secretNames() || []).filter((x) => /^secret:/.test(x.name));
+const itemOf = (w) => { const sn = w.userTodos.snapshot() || {}; return [...(sn.open || []), ...(sn.resolved || [])].find((i) => i.sessionKey === 'vault' && i.itemKey === JS_ITEM) || null; };   // open AND resolved (forSession lists the open ones only — the restack's tb run)
+{
+  const f0 = freeNames(W).length, before0 = new Set(freeNames(W).map((x) => x.name));   // the entries this move makes = the ones not there before (the list is sorted by name — never «the last ones»)
+  plantJS(W, { GH_TOKEN: jsVals[0], NPM_TOKEN: jsVals[1], [JS_PASTED]: jsVals[2], EMPTY: '', COUNT: 5 });
+  const viaBearer = await S.hit('/api/vault/job-secrets/move', { headers: { ...S.PAGE, authorization: 'Bearer ' + W.SESSION_TOKEN } });
+  ok(viaBearer.status === 403 && viaBearer.json.code === 'human_only' && jsHere(W) && freeNames(W).length === f0, 'a BEARER ⇒ 403 human_only — the file stays, nothing sealed', viaBearer.json);
+  ok((await S.hit('/api/vault/job-secrets/sideways')).json.code === 'job_secrets_answer', 'an answer other than move / delete ⇒ refused by name');
+  W.vault.lock('test');
+  const lockedR = await S.hit('/api/vault/job-secrets/move');
+  ok(lockedR.status === 423 && lockedR.json.code === 'vault_locked' && jsHere(W), 'LOCKED ⇒ 423 vault_locked — the file stays (the page asks the unlock first)', lockedR.json);
+  await W.vault.unlock(PW);
+  const a0 = fs.readFileSync(path.join(W.dataDir, 'vault-audit.jsonl'), 'utf8').length;
+  const mv = await S.hit('/api/vault/job-secrets/move');
+  const made = freeNames(W).filter((x) => !before0.has(x.name)), byLabel = new Map(made.map((x) => [x.label, x.name]));
+  const read = (label) => { const g = W.vault.secretGet(byLabel.get(label)); return g && g.ok && g.value ? Buffer.from(g.value).toString('utf8') : null; };
+  ok(mv.status === 200 && mv.json.moved.length === 4 && mv.json.skipped === 1 && read('GH_TOKEN') === jsVals[0] && read('NPM_TOKEN') === jsVals[1] && read('Job secret 3') === jsVals[2] && read('COUNT') === '5',
+    'move ⇒ every value the old engine handed a job sealed as a free entry and read back (GH_TOKEN, NPM_TOKEN by name; the pasted-value name as «Job secret 3»; the NUMBER as its text — the read, r1: it was skipped and lost); only the empty one left out, and said', { status: mv.status, moved: mv.json.moved && mv.json.moved.map((m) => m.label), skipped: mv.json.skipped });
+  const said = JSON.stringify(mv.json) + JSON.stringify(W.userTodos.forSession('vault')) + JSON.stringify(made) + fs.readFileSync(path.join(W.dataDir, 'vault-audit.jsonl'), 'utf8').slice(a0) + LOGS.join('\n');
+  ok(!jsHere(W) && itemOf(W) && itemOf(W).status === 'done' && ![...jsVals, JS_PASTED].some((v) => said.includes(v)) && mv.json.moved.every((m) => /^vault:\/\/secrets\/secret:[0-9a-f]{10}\/secret$/.test(m.ref)),
+    '…the file is GONE and the notice DONE; the answer names each entry\'s vault:// reference — no value, and no pasted-value name, in the answer, the item, the rows, the audit or the log', { here: jsHere(W), item: itemOf(W) && itemOf(W).status });
+  const aud = fs.readFileSync(path.join(W.dataDir, 'vault-audit.jsonl'), 'utf8').slice(a0).split('\n').filter((l) => l.includes('vault-job-secrets-moved'));
+  ok(aud.length === 1 && aud[0].includes('"n":4') && aud[0].includes('"who":') && !aud[0].includes('"who":null') && !aud[0].includes('"who":"sign-in-off"') && !aud[0].includes('GH_TOKEN'), 'ONE audit line: a count and who pressed (the door IS in the paste routes\' scope — the read, r1) — never a name or a value', aud);
+  const again = await S.hit('/api/vault/job-secrets/move');
+  ok(again.status === 404 && again.json.code === 'job_secrets_gone', 'again ⇒ 404 job_secrets_gone (the notice stays settled)', again.json);
+  for (const m of made) W.vault.secretDrop(m.name);
+  // a refused value seals NOTHING — the ones sealed before it go again, the file stays
+  const f1 = freeNames(W).length;
+  plantJS(W, { FIRST_ONE: jsVals[0], TOO_LONG: 'x'.repeat(P.LIMITS.value + 1) });
+  const tooLong = await S.hit('/api/vault/job-secrets/move');
+  ok(tooLong.status === 400 && tooLong.json.code === 'value_too_long' && tooLong.json.name === 'TOO_LONG' && freeNames(W).length === f1 && jsHere(W) && itemOf(W).status === 'open',
+    'a value the vault refuses (too long) ⇒ refused BY NAME, the one sealed before it dropped again — nothing half-moved, the file and the notice kept', { code: tooLong.json.code, n: freeNames(W).length - f1 });
+  const del = await S.hit('/api/vault/job-secrets/delete');
+  ok(del.status === 200 && !jsHere(W) && freeNames(W).length === f1 && itemOf(W).status === 'done', 'delete ⇒ the file is gone as it was (nothing sealed), the notice done', del.json);
+  fs.mkdirSync(path.join(W.dataDir, JS_FILE));
+  const dir = await S.hit('/api/vault/job-secrets/move');
+  ok(dir.status === 409 && dir.json.code === 'job_secrets_not_a_file' && fs.statSync(path.join(W.dataDir, JS_FILE)).isDirectory(), 'a DIRECTORY by that name ⇒ job_secrets_not_a_file — never followed, never read', dir.json);
+  fs.rmdirSync(path.join(W.dataDir, JS_FILE));
+  plantJS(W, { EMPTY: '', NONE: null });
+  const none = await S.hit('/api/vault/job-secrets/move');
+  ok(none.status === 409 && none.json.code === 'job_secrets_nothing' && jsHere(W), 'a file whose values are all empty ⇒ job_secrets_nothing — the file kept (its «Delete the file» deletes it)', none.json);
+  // the read (r1): a list, an object or text with spaces around it is never moved half — refused BY NAME, nothing sealed, the file kept
+  const f2 = freeNames(W).length, shapes = [];
+  for (const doc of [{ FIRST_ONE: jsVals[0], A_LIST: [1, 2] }, { FIRST_ONE: jsVals[0], AN_OBJECT: { k: 'v' } }, { FIRST_ONE: jsVals[0], SPACED: ' ' + jsVals[1] + ' ' }]) { plantJS(W, doc); const r = await S.hit('/api/vault/job-secrets/move'); shapes.push({ status: r.status, code: r.json.code, name: r.json.name, kept: jsHere(W), sealed: freeNames(W).length - f2 }); }
+  ok(shapes.every((x) => x.status === 422 && x.code === 'job_secrets_value_shape' && x.kept && x.sealed === 0) && shapes.map((x) => x.name).join() === 'A_LIST,AN_OBJECT,SPACED', 'a list / an object / text with spaces around it ⇒ job_secrets_value_shape BY NAME — nothing sealed (FIRST_ONE neither), the file kept', shapes);
+  // the read (r1): Delete removes a regular file of ONE name only — a symlink by that name is refused (the values would stay on disk)
+  const target = path.join(W.dataDir, 'elsewhere.json'); fs.renameSync(path.join(W.dataDir, JS_FILE), target); fs.symlinkSync(target, path.join(W.dataDir, JS_FILE));
+  const viaLink = await S.hit('/api/vault/job-secrets/delete');
+  ok(viaLink.status === 409 && viaLink.json.code === 'job_secrets_not_a_file' && fs.existsSync(target) && fs.lstatSync(path.join(W.dataDir, JS_FILE)).isSymbolicLink(), 'Delete over a SYMLINK by that name ⇒ job_secrets_not_a_file — neither the link nor its target touched', viaLink.json);
+  fs.unlinkSync(path.join(W.dataDir, JS_FILE)); fs.unlinkSync(target);
+  // the read (r1): the file the values came from is the file deleted — one edited while the move ran keeps every byte, nothing sealed
+  plantJS(W, { FIRST_ONE: jsVals[0], SECOND_ONE: jsVals[1] });
+  const f3 = freeNames(W).length, jsf = path.join(W.dataDir, JS_FILE);
+  const editing = require(path.join(REPO, 'src/server/job-secrets-door.js')).create({ dataDir: W.dataDir, vault: W.vault, userTodos: W.userTodos, paste: { addEntry: (o) => { fs.appendFileSync(jsf, ' '); return W.paste.addEntry(o); }, dropEntry: (id, o) => W.paste.dropEntry(id, o) } });
+  const changed = await editing.answer('move');
+  ok(changed.code === 'job_secrets_changed' && freeNames(W).length === f3 && jsHere(W), 'the file EDITED while the move ran (its size moved) ⇒ job_secrets_changed — the values sealed meanwhile dropped again, the file kept', { code: changed.code, sealed: freeNames(W).length - f3 });
+  fs.unlinkSync(jsf);
+  // r13 (three readers): «its change time» — a SAME-SIZE edit whose modification time is set back (the plant's mtime a whole second,
+  // so it is restored exactly) moves only the ctime: the door compares the ctime ⇒ job_secrets_changed, nothing sealed, the file kept
+  const sameSize = async (doorMod) => {
+    plantJS(W, { FIRST_ONE: jsVals[0], SECOND_ONE: jsVals[1] });
+    const T = Math.floor(Date.now() / 1000) - 60; fs.utimesSync(jsf, T, T);
+    await new Promise((r) => setTimeout(r, 30));   // the read: a kernel without fine-grained file times moves the ctime in 1–4 ms ticks — the edit lands in a later one
+    const before = new Set(freeNames(W).map((x) => x.name)); let edited = false, ctMoved = null;
+    const d = doorMod.create({ dataDir: W.dataDir, vault: W.vault, userTodos: W.userTodos, paste: { addEntry: (o) => { if (!edited) { edited = true; const c0 = fs.statSync(jsf).ctimeMs; fs.writeFileSync(jsf, fs.readFileSync(jsf, 'utf8').replace('FIRST_ONE', 'FIRST_TWO')); fs.utimesSync(jsf, T, T); const st = fs.statSync(jsf); ctMoved = st.ctimeMs !== c0 && st.mtimeMs === T * 1000; } return W.paste.addEntry(o); }, dropEntry: (id, o) => W.paste.dropEntry(id, o) } });
+    const r = await d.answer('move');
+    const fresh = freeNames(W).filter((x) => !before.has(x.name));   // secretNames comes sorted by name: the new ones by difference
+    const out = { code: r.code, sealed: fresh.length, kept: jsHere(W), ctMoved };
+    for (const x of fresh) { try { W.paste.dropEntry(x.name.slice('secret:'.length), { by: 'suite' }); } catch { } }   // the RED's sealed values go again
+    if (jsHere(W)) fs.unlinkSync(jsf);
+    return out;
+  };
+  const ss = await sameSize(require(path.join(REPO, 'src/server/job-secrets-door.js')));
+  ok(ss.ctMoved === true, 'r13: the plant is where it claims — the edit moved the ctime and left the mtime where it was', ss);
+  ok(ss.code === 'job_secrets_changed' && ss.sealed === 0 && ss.kept, 'r13: the file edited at the SAME size with its modification time set back ⇒ job_secrets_changed (the change time moved) — nothing sealed, the file kept', ss);
+  const jsdAbs = path.join(REPO, 'src/server/job-secrets-door.js'), jsdSrc = fs.readFileSync(jsdAbs, 'utf8'), ctPlant = 'now0.ctimeMs !== lst.ctimeMs';
+  ok(jsdSrc.split(ctPlant).length === 2, 'the RED control\'s plant is where it claims: the door\'s ctime comparison, once', jsdSrc.split(ctPlant).length - 1);
+  const mtCopy = new Module(jsdAbs, null); mtCopy.filename = jsdAbs; mtCopy.paths = Module._nodeModulePaths(path.dirname(jsdAbs));
+  mtCopy._compile(jsdSrc.replace(ctPlant, 'now0.mtimeMs !== lst.mtimeMs'), jsdAbs);   // stale-pins: kept — a RED control: the batch's mtime comparison restored on purpose
+  const ssRed = await sameSize(mtCopy.exports);
+  ok(ssRed.ctMoved === true && ssRed.code !== 'job_secrets_changed' && !ssRed.kept, 'RED control: the modification time compared (the batch\'s shape) ⇒ the edited file passes as the one read and is deleted', ssRed);
+  // r13 «also» (the readers of batch 53: these guards had no leg) — each over the REAL door and the suite's vault
+  const jsDoorOf = (mod, extra = {}) => mod.create({ dataDir: W.dataDir, vault: W.vault, userTodos: W.userTodos, paste: W.paste, ...extra });
+  const freshSince = (before) => freeNames(W).filter((x) => !before.has(x.name));
+  const dropFresh = (before) => { for (const x of freshSince(before)) { try { W.paste.dropEntry(x.name.slice('secret:'.length), { by: 'suite' }); } catch { } } };
+  const JSD_REAL = require(jsdAbs);
+  const jsdCopy = (from, to) => { const n = jsdSrc.split(from).length - 1; if (n !== 1) return { n, mod: null }; const m = new Module(jsdAbs, null); m.filename = jsdAbs; m.paths = Module._nodeModulePaths(path.dirname(jsdAbs)); m._compile(jsdSrc.replace(from, to), jsdAbs); return { n, mod: m.exports }; };
+  // (1) ONE press at a time: a second press while a move runs ⇒ job_secrets_busy (the move ends as it would alone)
+  const busyRoad = async (mod) => {
+    plantJS(W, { FIRST_ONE: jsVals[0] }); const before = new Set(freeNames(W).map((x) => x.name));
+    const d = jsDoorOf(mod), p1 = d.answer('move'), r2 = await d.answer('delete'), r1 = await p1;
+    const out = { first: r1.ok ? r1.answer : r1.code, second: r2.ok ? r2.answer : r2.code, sealed: freshSince(before).length };
+    dropFresh(before); if (jsHere(W)) fs.unlinkSync(jsf);
+    return out;
+  };
+  const bz = await busyRoad(JSD_REAL);
+  ok(bz.first === 'move' && bz.second === 'job_secrets_busy' && bz.sealed === 1, 'r13: a second press while the move runs ⇒ job_secrets_busy — the move itself ends whole (one value sealed, the file gone)', bz);
+  const bzc = jsdCopy("    if (busy) return named('job_secrets_busy');\n", '');
+  ok(bzc.n === 1, 'the RED control\'s plant is where it claims: the door\'s busy guard, once', bzc.n);
+  const bzr = bzc.mod ? await busyRoad(bzc.mod) : null;
+  ok(!!(bzr && bzr.second === 'delete'), 'RED control: the door without its busy guard ⇒ the second press RUNS beside the move (its delete answers)', bzr);
+  // (2) a HARD-LINKED name: the move reads nothing and seals nothing (deleting one name would leave the bytes under the other)
+  const hardRoad = async (mod) => {
+    plantJS(W, { FIRST_ONE: jsVals[0] }); const other = jsf + '.other'; fs.linkSync(jsf, other); const before = new Set(freeNames(W).map((x) => x.name));
+    const r = await jsDoorOf(mod).answer('move');
+    const out = { code: r.ok ? r.answer : r.code, sealed: freshSince(before).length, both: jsHere(W) && fs.existsSync(other), otherKept: fs.existsSync(other) };
+    dropFresh(before); for (const f of [jsf, other]) { try { fs.unlinkSync(f); } catch { } }
+    return out;
+  };
+  const hl = await hardRoad(JSD_REAL);
+  ok(hl.code === 'job_secrets_not_a_file' && hl.sealed === 0 && hl.both, 'r13: a hard-linked file by that name ⇒ job_secrets_not_a_file on MOVE — nothing sealed, both names kept', hl);
+  const hlc = jsdCopy("    if (!lst.isFile() || lst.nlink > 1) return named('job_secrets_not_a_file');   // a symlink", "    if (!lst.isFile()) return named('job_secrets_not_a_file');   // a symlink");
+  ok(hlc.n === 1, 'the RED control\'s plant is where it claims: the move\'s second-name check, once', hlc.n);
+  const hlr = hlc.mod ? await hardRoad(hlc.mod) : null;
+  ok(!!(hlr && hlr.code === 'move' && hlr.sealed === 1 && hlr.otherKept && !hlr.both), 'RED control: the move without the second-name check ⇒ it seals and deletes ONE name — the bytes stay under the other', hlr);
+  // (3) a SYMLINK by that name on MOVE (the delete's is legged above): nothing read, the link and its target kept
+  { plantJS(W, { FIRST_ONE: jsVals[0] }); const tgt = path.join(W.dataDir, 'elsewhere-move.json'); fs.renameSync(jsf, tgt); fs.symlinkSync(tgt, jsf); const before = new Set(freeNames(W).map((x) => x.name));
+    const r = await jsDoorOf(JSD_REAL).answer('move');
+    ok(r.code === 'job_secrets_not_a_file' && freshSince(before).length === 0 && fs.lstatSync(jsf).isSymbolicLink() && fs.existsSync(tgt), 'r13: MOVE over a symlink by that name ⇒ job_secrets_not_a_file — nothing sealed, the link and its target kept', r);
+    dropFresh(before); for (const f of [jsf, tgt]) { try { fs.unlinkSync(f); } catch { } } }
+  // (4) the vault never set up: the move refuses by name before reading anything
+  { plantJS(W, { FIRST_ONE: jsVals[0] });
+    const r = await JSD_REAL.create({ dataDir: W.dataDir, vault: { state: () => 'not_set_up', audit() { } }, userTodos: W.userTodos, paste: W.paste }).answer('move');
+    ok(r.code === 'vault_not_set_up' && jsHere(W), 'r13: no vault yet ⇒ vault_not_set_up on MOVE — the file kept', r);
+    try { fs.unlinkSync(jsf); } catch { } }
+  // (5) another file RENAMED over the name while the move ran (the same size, a new inode) ⇒ job_secrets_changed, nothing sealed
+  { plantJS(W, { FIRST_ONE: jsVals[0], SECOND_ONE: jsVals[1] }); const before = new Set(freeNames(W).map((x) => x.name)); let swapped = false;
+    const r = await jsDoorOf(JSD_REAL, { paste: { addEntry: (o) => { if (!swapped) { swapped = true; const nx = jsf + '.next'; fs.writeFileSync(nx, fs.readFileSync(jsf)); fs.renameSync(nx, jsf); } return W.paste.addEntry(o); }, dropEntry: (id, o) => W.paste.dropEntry(id, o) } }).answer('move');
+    ok(swapped && r.code === 'job_secrets_changed' && freshSince(before).length === 0 && jsHere(W), 'r13: another file renamed over the name mid-move (its inode moved) ⇒ job_secrets_changed — nothing sealed, the file kept', r);
+    dropFresh(before); if (jsHere(W)) fs.unlinkSync(jsf); }
+  // (6) the not-a-file refusal says where to act (the page's words — a person reads them in the toast)
+  ok(fs.readFileSync(path.join(REPO, 'src/lib/vault-paste-box.js'), 'utf8').includes("job_secrets_not_a_file: () => t('data/job-secrets.retired.json is a link, a folder or a file with a second name — nothing was read or deleted. A link: put the file it points to in its place. A second name: delete that other name. A folder: move it out of the way. Then press again'),"), 'r13: job_secrets_not_a_file names the file and the way on for each kind — a link: the file it points to put in its place (never «remove the link»: the next press would settle the notice with the values still on disk), a second name deleted, a folder moved away');
+  ok(fs.readFileSync(path.join(REPO, 'src/lib/vault-paste-box.js'), 'utf8').includes("— nothing was moved; the file is kept: correct that value in data/job-secrets.retired.json, then press again')"), 'r13: job_secrets_value_shape names the way on too (correct that value in the file, then press again) — Delete is not the only road left');
+  ok(require(path.join(REPO, 'src/server/job-secrets-door.js')).RETIRED === require(path.join(REPO, 'src/server/migrations.js')).JOB_SECRETS_RETIRED && require(path.join(REPO, 'src/server/job-secrets-door.js')).ITEM === require(path.join(REPO, 'src/server/migrations.js')).JOB_SECRETS_ITEM,
+    'the door\'s file and notice key ARE the migration\'s (one name each)');
+}
+
 console.log('⑨ A RESTART — the item is the record');
 {
   const a = await S.agent(W.OTHER_TOKEN, { words: 'the agentcore secret', purpose: 'a cloud browser', into: 'cloud:agentcore.secretAccessKey' });
@@ -518,6 +739,67 @@ SENTINELS.push(S_LOGIN, S_LOGIN2, S_NL);
   await S.hit(`/api/vault/secret-requests/${d.json.requestId}/answer`, { body: { answer: 'deny' } });
   const d2 = await S.agent(W.SESSION_TOKEN, { words: 'the bank login', purpose: 'p', kind: 'login', hosts: 'https://bank.example.test' });
   ok(d2.status === 429 && d2.json.code === 'request_quiet' && stashOf('cid-asker-1').some((e) => e.ref === d.json.requestId && /REFUSED/.test(e.text)), 'Refuse ⇒ the receipt says REFUSED; the same site again ⇒ 429 request_quiet', d2.json);
+  // ONE LOGIN, SEVERAL SITES — «Use a login you already saved…» (lane login-request-card, step F's last part): the person picks a saved
+  // login; the request's site is ADDED to it (no second login, no password on this road); the grant follows the LOGIN
+  {
+    const PICK = `web-login:${SITE}#owner@shop.example`, PAY = 'https://pay.example.test';
+    const u = await S.agent(W.OTHER_TOKEN, { words: 'the shop sign-in site', purpose: 'sign in to pay', kind: 'login', hosts: PAY });
+    const bearerU = await S.hit(`/api/vault/secret-requests/${u.json.requestId}/answer`, { headers: { ...S.PAGE, authorization: 'Bearer ' + W.OTHER_TOKEN }, body: { answer: 'store', useLogin: PICK, allow: true } });
+    const nope = await S.hit(`/api/vault/secret-requests/${u.json.requestId}/answer`, { body: { answer: 'store', useLogin: `web-login:${SITE}#nobody`, allow: true } });
+    const su = await S.hit(`/api/vault/secret-requests/${u.json.requestId}/answer`, { body: { answer: 'store', useLogin: PICK, allow: true } });
+    const g = W.vault.secretGet(PICK), rec = g && g.ok && g.value ? JSON.parse(g.value.toString('utf8')) : null;
+    const rcu = stashOf('cid-other-2').filter((e) => e.ref === u.json.requestId);
+    ok(bearerU.status === 403 && nope.status >= 400 && nope.json.ok === false && su.status === 200 && su.json.outcome === 'stored' && su.json.joined === true && su.json.entry === PICK && su.json.allowed === true
+      && rec && (rec.origins || []).includes(PAY) && rec.password === S_LOGIN2 && !W.vault.secretNames().some((x) => x.name === `web-login:${PAY}#owner@shop.example`)
+      && rcu.length === 1 && /chose a website login already in the vault and added https:\/\/pay\.example\.test to its sites/.test(rcu[0].text) && /as owner@shop\.example with that login's one password/.test(rcu[0].text) && !rcu[0].text.includes(S_LOGIN2),
+      'USE A LOGIN YOU ALREADY SAVED: a bearer ⇒ 403, a login that is not there ⇒ refused (the item open); the person\'s pick ADDS the request\'s site to that login — no second login, no password on this road; the receipt says so (the user named: granted), never the password', { su: su.json, nope: nope.json, rc: rcu[0] && rcu[0].text });
+    // THE GRANT FOLLOWS THE LOGIN: the asking conversation fills it on the new site AND on its first site (the card said so)
+    const fill = (tab, spec) => W.logins.resolveFill({ tabOrigin: tab, spec, conv: 'cid-other-2', actor: 'cid-other-2', facts: { conversationKeys: ['cid-other-2'] } });
+    const onPay = fill(PAY, 'pay.example.test#owner@shop.example/password'), onShop = fill(SITE, `${SITE.replace('https://', '')}#owner@shop.example/password`);
+    ok(onPay.ok && onPay.value === S_LOGIN2 && onShop.ok && onShop.value === S_LOGIN2 && W.grants.rowsFor('browser-login', `${SITE}#owner@shop.example`).some((r) => GM.publicRow(r).to.some((x) => x.key === 'cid-other-2')),
+      '«Let it sign in» ⇒ the asking conversation on the picked LOGIN\'s own row — it fills on the added site and on every site of that login (the grant follows the login)', { onPay: onPay.ok || onPay.code, onShop: onShop.ok || onShop.code });
+    // a site another login holds under the same user ⇒ refused by name (one pair, one login), the item open
+    const v = await S.agent(W.SESSION_TOKEN, { words: 'the forum again', purpose: 'p', kind: 'login', hosts: 'https://forum.example.test' });
+    const clash = await S.hit(`/api/vault/secret-requests/${v.json.requestId}/answer`, { body: { answer: 'store', useLogin: PICK, username: 'second-user', allow: false } });
+    ok(clash.status >= 400 && clash.json.code === 'login_exists' && openReqs(W).some((i) => i.action.requestId === v.json.requestId), 'a site whose user is ANOTHER login\'s there ⇒ login_exists by name (merge them instead), the item stays open', clash.json);
+    await S.hit(`/api/vault/secret-requests/${v.json.requestId}/answer`, { body: { answer: 'deny' } });
+    // (主开发 12:17Z, small) A SITE THE LOGIN HOLDS ALREADY: the login as it stands — a DIFFERENT name typed on the card is refused by
+    // name (never ignored without a word), the item open; the same name ⇒ stored, and the receipt names the user it signs in with THERE
+    const DESK = 'https://desk.example.test';
+    W.logins.addSite(PICK, { site: DESK, user: 'desk-owner' }, { who: 'owner' });
+    const k = await S.agent(W.OTHER_TOKEN, { words: 'the shop desk', purpose: 'p', kind: 'login', hosts: DESK });
+    const kEdited = await S.hit(`/api/vault/secret-requests/${k.json.requestId}/answer`, { body: { answer: 'store', useLogin: PICK, username: 'someone-else', allow: true } });
+    const kOpen = openReqs(W).some((i) => i.action.requestId === k.json.requestId);
+    const kSame = await S.hit(`/api/vault/secret-requests/${k.json.requestId}/answer`, { body: { answer: 'store', useLogin: PICK, username: 'desk-owner', allow: true } });
+    const rck = stashOf('cid-other-2').filter((e) => e.ref === k.json.requestId);
+    ok(k.status === 200 && kEdited.status >= 400 && kEdited.json.code === 'login_site_exists' && kEdited.json.there === 'desk-owner' && kOpen && kSame.status === 200 && kSame.json.already === true && kSame.json.joined === true
+      && rck.length === 1 && /https:\/\/desk\.example\.test was one of its sites already; it signs in there as desk-owner/.test(rck[0].text),
+      'A SITE THE LOGIN HOLDS ALREADY: a different name typed on the card ⇒ refused by name (login_site_exists, the name it keeps there said), the item open; the same name ⇒ the login as it stands, the receipt naming the user it signs in with THERE', { kEdited: kEdited.json, kSame: kSame.json, rc: rck[0] && rck[0].text });
+    // (主开发 13:02Z (3)) THE LOGIN'S FIRST SITE cannot be removed from it (login_site_first): a different name there is refused with
+    // the ONE door that works — a new login — never «remove that site»
+    const fs1 = await S.agent(W.OTHER_TOKEN, { words: 'the shop itself', purpose: 'p', kind: 'login', hosts: SITE });
+    const fsE = await S.hit(`/api/vault/secret-requests/${fs1.json.requestId}/answer`, { body: { answer: 'store', useLogin: PICK, username: 'someone-else', allow: true } });
+    const fsW = String((fsE.json && fsE.json.words) || '');
+    ok(fs1.status === 200 && fsE.status >= 400 && fsE.json.code === 'login_site_exists' && fsE.json.first === true && fsE.json.there === 'owner@shop.example' && !/remove that site/.test(fsW) && /type a new login/.test(fsW) && openReqs(W).some((i) => i.action.requestId === fs1.json.requestId),
+      'THE LOGIN\'S FIRST SITE under another name ⇒ refused with the one door that works there (a new login), never «remove that site» — the item open', fsE.json);
+    await S.hit(`/api/vault/secret-requests/${fs1.json.requestId}/answer`, { body: { answer: 'deny' } });
+    // A PICKED LOGIN ON A LOCKED VAULT ⇒ vault_locked by name, before the use road; the item stays
+    W.vault.lock('test');
+    const lk = await S.agent(W.OTHER_TOKEN, { words: 'the shop, locked', purpose: 'p', kind: 'login', hosts: 'https://locked.example.test' });
+    const lka = await S.hit(`/api/vault/secret-requests/${lk.json.requestId}/answer`, { body: { answer: 'store', useLogin: PICK, allow: true } });
+    const lkOpen = openReqs(W).some((i) => i.action.requestId === lk.json.requestId);
+    const unl = await W.vault.unlock(PW);
+    ok(unl.ok && lk.status === 200 && lka.status === 423 && lka.json.code === 'vault_locked' && lkOpen, 'A PICKED LOGIN ON A LOCKED VAULT ⇒ 423 vault_locked by name (before the use road), the item stays', { lk: lk.status, lka: lka.json });
+    await S.hit(`/api/vault/secret-requests/${lk.json.requestId}/answer`, { body: { answer: 'deny' } });
+    // RED CONTROL: a door without the use road treats the pick as a new login with no password — refused, the site never joins
+    const MUT = mutant('src/server/vault-paste-door.js', "    if (typeof l.useLogin === 'string' && l.useLogin) return answerUseLogin(q, id, l, { by, mark });   // one login, several sites\n", '');
+    const md = MUT.create({ vault: W.vault, integrations: W.integrations, userTodos: W.userTodos, deliver: W.deliver, vaultRun: W.vaultRun, logins: W.logins });
+    const mq = md.request({ caller: { conversationId: 'cid-mut-7', scope: 'w7', name: 'Mut lane' }, words: 'w', purpose: 'p', kind: 'login', hosts: 'https://mut.example.test' });
+    const ma = mq.ok ? md.answer(mq.requestId, { answer: 'store', by: 'user', person: true, login: { useLogin: PICK, allow: true } }) : mq;
+    const rec2 = (() => { const x = W.vault.secretGet(PICK); return x && x.ok && x.value ? JSON.parse(x.value.toString('utf8')) : null; })();
+    ok(mq.ok === true && ma.ok === false && ma.code === 'value_required' && !!rec2 && !(rec2.origins || []).includes('https://mut.example.test'), 'RED CONTROL: a door with no use road reads the pick as a typed login with NO password (value_required) and the site never joins the login — the legs above would read it', { asked: mq.ok || mq.code, answered: ma });
+    if (mq.ok) md.answer(mq.requestId, { answer: 'deny' });
+  }
   // LOCKED: a lock act withdraws; an ask while locked is filed; the owner's answer ⇒ 423, the item stays; unlocked ⇒ stored
   W.vault.lock('test');
   const e = await S.agent(W.SESSION_TOKEN, { words: 'the mail login', purpose: 'p', kind: 'login', hosts: 'https://mail.example.test' });
@@ -790,7 +1072,7 @@ console.log('⑬b LAW B(3) — ONE submittable card: the surface a card left red
   };
   const STUBS = {
     'i18n.js': `export const t = (s, p) => (p ? String(s).replace(/\\{(\\w+)\\}/g, (m, k) => (p[k] !== undefined ? String(p[k]) : m)) : s);`,
-    'utils.js': `export const createModalShell = (o) => globalThis.__b3.shell(o); export const fetchJson = async () => ({ ok: false, code: 'b3_stub' }); export const showToast = () => {}; export const escHtml = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => '&#' + c.charCodeAt(0) + ';');`,
+    'utils.js': `export const createModalShell = (o) => globalThis.__b3.shell(o); export const fetchJson = async (u, o) => (globalThis.__b3 && globalThis.__b3.fetch ? globalThis.__b3.fetch(u, o) : ({ ok: false, code: 'b3_stub' })); export const showToast = (m, o) => { if (globalThis.__b3 && globalThis.__b3.toast) globalThis.__b3.toast(m, o); }; export const latestRender = (c, build) => { let gen = 0; return async () => { const mine = ++gen; const out = document.createElement('div'); await build(out); if (mine !== gen) return false; const kids = [...out.childNodes]; while (c.firstChild) c.removeChild(c.firstChild); for (const n of kids) c.appendChild(n); return true; }; }; export const escHtml = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => '&#' + c.charCodeAt(0) + ';');`,
     'vault-unlock.js': `export const vaultFacts = () => ({ state: 'unlocked', setup: true }); export const showUnlock = () => {}; export const showSetup = () => {};`,
     'vault-totp-row.js': `export const showTotpAddDialog = (o) => globalThis.__b3.totp(o); export const loadTotp = () => Promise.resolve({ entries: [] }); export const totpFields = () => ({ nodes: [], wipe() {}, doSave: async () => false });`,   // totpFields: lane totp-request-card (the two-step field set — a two-step card's, unused by a login scene)
   };
@@ -803,7 +1085,7 @@ console.log('⑬b LAW B(3) — ONE submittable card: the surface a card left red
         if (mutate) b.onLoad({ filter: /vault-paste-box\.js$/ }, (a) => { const s = fs.readFileSync(a.path, 'utf8'), m = mutate(s); if (m === s) throw new Error('the mutant changed nothing'); return { contents: m, loader: 'js', resolveDir: path.dirname(a.path) }; });
       } }],
     });
-    const f = path.join(B3DIR, `box-${mutate ? 'mutant' : 'real'}.cjs`);
+    const f = path.join(B3DIR, `box-${mutate ? `mutant-${crypto.randomBytes(4).toString('hex')}` : 'real'}.cjs`);   // each mutant its own file: require caches a path
     fs.writeFileSync(f, out.outputFiles[0].text);
     return require(f);
   };
@@ -886,6 +1168,91 @@ console.log('⑬b LAW B(3) — ONE submittable card: the surface a card left red
   try { mut = scene(await bundleBox((s) => s.replace('  if (!moved()) return null;\n', '  return null;\n'))); } catch (e) { mut = { threw: String((e && e.message) || e) }; }
   const red = b3Checks(mut).filter(([, c]) => !c).map(([n]) => n);
   ok(!mut.threw && red.includes(B3_REDRAW) && mut.afterRedraw === 2, `MUTANT the away line returns nothing (awayBoxEl ⇒ null) ⇒ the surface's redraw draws a SECOND, empty, submittable box (${mut.afterRedraw} submittable, the redraw drew ${mut.drawn}) — RED by name: «${red[0] || 'none'}»${red.length > 1 ? ` + ${red.length - 1} more` : ''}`, { red, mut });
+
+  // ⑬c THE USE ROAD ON THE CARD — the REAL box module over the fake DOM (the readers, 2026-11-18: the card's client half had no leg):
+  // a pick HIDES the typed fields and sends useLogin with NO password, the name it signs in under THERE preset; the words ask for the
+  // typed name and say the Task Group by name; «Type a new login instead» restores the card; an empty list is said for what it is (a
+  // LOCKED vault with its unlock door, a read that failed); a tick whose grant could not be written is an ERROR toast
+  const U_NAME = 'web-login:https://lms.b3.test#b3-own';
+  const U_LIST = { ok: true, state: 'unlocked', entries: [{ name: U_NAME, origin: 'https://lms.b3.test', user: 'b3-own', sites: [{ origin: 'https://b3.example.test', user: 'b3-there' }] }] };
+  const useScene = async (M, list, { typing = false } = {}) => {
+    const D = fakeDom(), prev = globalThis.document, r = { toasts: [], asked: [] };
+    globalThis.document = D.document;
+    globalThis.__b3 = {
+      shell: () => { const d = D.el('div'), b = D.el('div'); d.append(b); D.body.append(d); return { dialog: d, body: b, close: () => d.remove(), raised: false }; },
+      totp: () => {},
+      fetch: async (u) => {
+        const q = String(u); r.asked.push(q);
+        if (q.startsWith('/api/vault/web-logins/site-words')) return { ok: true, user: 'b3-there', there: 'b3-there', widens: { login: [{ kind: 'group', id: 'g-b3', name: 'B3 crew' }] } };
+        if (q === '/api/vault/web-logins') return list;
+        if (q.startsWith('/api/vault/secret-requests/')) return r.refuse ? { ok: false, code: 'login_site_exists', site: 'https://b3.example.test', there: 'b3-there', first: true, error: 'that site is on this login already' }   // the hub's own English word in `error`
+          : { ok: true, outcome: 'stored', joined: true, allowed: false, already: false };   // the tick's grant NOT written
+        return { ok: false, code: 'b3_stub' };
+      },
+      toast: (m, o) => { r.toasts.push({ m: String(m), type: (o && o.type) || null }); },
+    };
+    const settle = async () => { for (let i = 0; i < 8; i++) await new Promise((res) => setImmediate(res)); };
+    const field = (inp) => { for (let n = inp; n; n = n.parentNode) if (n.classList && n.classList.contains('vault-secret-field')) return n; return null; };
+    try {
+      const id = 'sr-' + crypto.randomBytes(6).toString('hex');
+      const item = { id: 'ut-b3u', text: 'Odd jobs asks you for a website login on b3.example.test — it is typed only on that site', detail: '', action: { type: 'secret-request', requestId: id, kind: 'login', hosts: 'https://b3.example.test', grant: false }, i18n: { text: { params: { who: 'Odd jobs', site: 'b3.example.test' } } } };
+      const host = D.el('div', 'ut-popup'); D.body.append(host);
+      const box = M.secretBoxEl(item); host.append(box);
+      const user = box.querySelector('input.vault-login-user'), pass = box.querySelector('input.vault-login-pass');
+      user.value = 'typed-name'; pass.value = 'typed-pw';
+      box.querySelector('.ut-login-use').click(); await settle();
+      const pick = box.querySelector('.ut-login-use-pick'), says = box.querySelector('.ut-login-use-says'), unlock = box.querySelector('.ut-login-use-unlock');
+      r.empty = says.textContent; r.unlock = !!unlock && !unlock.hidden;
+      if (list.ok && (list.entries || []).length) {
+        pick.value = list.entries[0].name;
+        for (const fn of pick.listeners.change || []) await fn({ type: 'change', target: pick });
+        await settle();
+        r.use = box.dataset.use || null; r.userNow = user.value; r.words = says.textContent;
+        r.passHidden = !!field(pass) && field(pass).hidden === true;
+        r.otpHidden = !!box.querySelector('.ut-login-otp') && box.querySelector('.ut-login-otp').hidden === true;
+        r.wordsAsked = r.asked.find((u) => u.startsWith('/api/vault/web-logins/site-words')) || '';
+        if (typing) {   // (主开发 13:02Z (4)) the words are drawn again as the name is TYPED — not only when the field is left
+          user.value = 'b3-typed';
+          for (const fn of user.listeners.input || []) fn({ type: 'input', target: user });
+          await new Promise((res) => setTimeout(res, 320)); await settle();
+          r.typedAsked = r.asked.some((u) => u.startsWith('/api/vault/web-logins/site-words') && u.includes('&user=b3-typed'));
+          user.value = 'b3-there';   // the preset again, for the press below
+        }
+        await M.submitSecretBox({ runAction: async (it, ans, o) => { r.sent = o && o.login; return true; } }, item, box, 'store');
+        box.querySelector('.ut-login-use-back').click(); await settle();
+        r.backUse = box.dataset.use || null; r.backUser = user.value; r.backPass = field(pass) ? field(pass).hidden : null;
+        await M.postSecretAnswer(item, 'store', { login: { useLogin: list.entries[0].name, username: 'b3-there', allow: true } });
+        r.refuse = true;   // a refused login answer: its toast says the box's own sentence
+        await M.postSecretAnswer(item, 'store', { login: { useLogin: list.entries[0].name, username: 'someone-else', allow: true } });
+      }
+    } catch (e) { r.threw = String((e && e.stack) || e).slice(0, 400); }
+    finally { if (prev === undefined) delete globalThis.document; else globalThis.document = prev; delete globalThis.__b3; }
+    return r;
+  };
+  const U_HIDES = 'a picked login HIDES the typed fields (password, two-step code) and the press sends useLogin with NO password — the name it signs in under THERE preset (b3-there, not the typed one)';
+  const U_ERROR = 'a tick whose grant could not be written is an ERROR toast (as on the typed road) — never the toast of a box left unticked';
+  const U_TOAST = 'a refused login answer\'s toast says the box\'s own sentence (the first site\'s one door, in the page\'s words) — never the hub\'s English word for the code';
+  const useChecks = (a, lk, bad) => [
+    ['⑬c the use road\'s scene runs over the real box module (a list, a locked vault, a failed read)', !a.threw && !lk.threw && !bad.threw],
+    [U_HIDES, a.use === U_NAME && a.passHidden && a.otpHidden && a.userNow === 'b3-there' && !!a.sent && a.sent.useLogin === U_NAME && !('loginPassword' in a.sent) && a.sent.username === 'b3-there'],
+    ['the words before the press are asked for the name on the card (&user=b3-there) and say the site held already, its name there, and the Task Group BY NAME', /&user=b3-there/.test(a.wordsAsked || '') && /signs in there as b3-there/.test(a.words || '') && /B3 crew/.test(a.words || '')],
+    ['«Type a new login instead» puts the card back as it was: the typed name back, the password field shown, no login picked', a.backUse === null && a.backUser === 'typed-name' && a.backPass === false],
+    [U_ERROR, (a.toasts || []).some((x) => x.type === 'error' && /permission could not be written/.test(x.m))],
+    [U_TOAST, (a.toasts || []).some((x) => x.type === 'error' && /own first site and signs in there as b3-there/.test(x.m)) && !(a.toasts || []).some((x) => /that site is on this login already/.test(x.m))],
+    ['an empty list is said for what it is: a LOCKED vault (its unlock door on the card) — never «none saved» — and a read that failed', /vault is locked/.test(lk.empty || '') && lk.unlock && /could not be read/.test(bad.empty || '') && !bad.unlock],
+  ];
+  const useRun = async (mutate) => { try { const M = mutate ? await bundleBox(mutate) : require(path.join(B3DIR, 'box-real.cjs')); return [await useScene(M, U_LIST), await useScene(M, { ok: true, state: 'locked', entries: [] }), await useScene(M, { ok: false, code: 'unreadable' })]; } catch (e) { const t = { threw: String((e && e.message) || e) }; return [t, t, t]; } };
+  const uReal = await useRun(null);
+  for (const [n, c] of useChecks(...uReal)) ok(c, n, uReal[0]);
+  const uHide = await useRun((s) => s.replace('    for (const n of typed) if (n) n.hidden = !!entry;\n', ''));
+  const uErr = await useRun((s) => s.replace('    if (login.allow && !r.allowed) showToast(', '    if (false) showToast('));
+  const redOf = (run) => useChecks(...run).filter(([, c]) => !c).map(([n]) => n);
+  const typeRun = async (mutate) => { try { return await useScene(mutate ? await bundleBox(mutate) : require(path.join(B3DIR, 'box-real.cjs')), U_LIST, { typing: true }); } catch (e) { return { threw: String((e && e.message) || e) }; } };
+  const uType = await typeRun(null), uTypeR = await typeRun((s) => s.replace("  user.addEventListener('input', () => { clearTimeout(typing); typing = setTimeout(redraw, USE_TYPING_MS); });\n", ''));
+  ok(!uType.threw && uType.typedAsked === true && !uTypeR.threw && uTypeR.typedAsked === false, 'THE WORDS ARE DRAWN AGAIN AS THE NAME IS TYPED (after a short pause — not only when the field is left) — RED CONTROL: without the input listener they are not', { typed: uType.typedAsked, red: uTypeR.typedAsked, threw: uType.threw || uTypeR.threw });
+  const uToast = await useRun((s) => s.replace("  showToast(login ? loginSay(code, r) : refusalSay(code, r), { type: 'error' });", "  showToast(refusalSay(code, r), { type: 'error' });"));   // stale-pins: kept — a mutant that rebuilds the old toast line on purpose
+  ok(!uHide[0].threw && redOf(uHide).includes(U_HIDES) && !uErr[0].threw && redOf(uErr).includes(U_ERROR) && !uToast[0].threw && redOf(uToast).includes(U_TOAST),
+    'MUTANTS ⑬c: the hide line gone ⇒ the password field stays (RED by name); the not-written tick toasted as a plain one ⇒ RED by name; the refusal toasted in the hub\'s word ⇒ RED by name', { hide: redOf(uHide), err: redOf(uErr), toast: redOf(uToast) });
   fs.rmSync(B3DIR, { recursive: true, force: true });
 }
 
@@ -910,13 +1277,14 @@ function sweep(texts, values = SENTINELS) {
 S.srv.close();
 
 console.log('⑫ MUTANTS — each RED');
-const mutant = (rel, from, to) => {
+function mutant(rel, from, to) {   // a declaration (hoisted): section ⑩b's use-a-login red control calls it before this section runs
   const abs = path.join(REPO, rel), src = fs.readFileSync(abs, 'utf8');
-  if (!src.includes(from)) throw new Error(`mutant anchor missing in ${rel}: ${from.slice(0, 80)}`);
+  const n = src.split(from).length - 1;   // r13 (rule (b)): the plant where it claims — EXACTLY once, never the first of two
+  if (n !== 1) throw new Error(`mutant anchor ${n ? 'not unique' : 'missing'} in ${rel} (${n}×): ${from.slice(0, 80)}`);
   const m = new Module(abs, null); m.filename = abs; m.paths = Module._nodeModulePaths(path.dirname(abs));
   m._compile(src.replace(from, to), abs);
   return m.exports;
-};
+}
 async function runRoad(name, { door, routes } = {}) {
   STASH.length = 0; const a0 = ANSWERS.length, f0 = FRAMES.length, l0 = LOGS.length;
   const w = makeWorld(name, { door, routes });
@@ -948,6 +1316,60 @@ async function runRoad(name, { door, routes } = {}) {
   ok(m3.hits.length > 0 && m3.hits.some((h) => /answer/.test(h)), 'MUTANT the route keeps the value on the body and echoes it ⇒ the sweep is RED (an answer)', m3.hits.slice(0, 2));
   const m4 = await runRoad('m-bearer', { routes: mutant('src/routes/vault.js', "app.post('/api/vault/secret-requests/:id/answer', person((req) => {", "app.post('/api/vault/secret-requests/:id/answer', ((fn) => async (req, res) => res.json(await fn(req)))((req) => {") });
   ok(m4.bearerStored, 'MUTANT the answer door without person() ⇒ a BEARER stores (RED — the real door refuses it human_only)', m4);
+  // B-3fb5: the agent entry's delete door, each guard taken away
+  async function agentRoad(name, { door, routes } = {}) {
+    const w = makeWorld(name, { door, routes });
+    await w.vault.setup(PW);
+    const s = await serve(w);
+    const own = ['agent:cid-asker-1', 'mutant-key'].join('/');
+    w.vault.agentMint(own, { length: 24 });
+    const free = await s.hit('/api/vault/secrets', { body: { label: 'a free one', value: ['v', 'mutant'].join('-') } });
+    await s.hit(`/api/vault/agent-secrets/${encodeURIComponent(own)}`, { method: 'DELETE', headers: { ...s.PAGE, authorization: 'Bearer ' + w.SESSION_TOKEN } });
+    const bearerDropped = !w.vault.secretNames().some((x) => x.name === own);
+    await s.hit(`/api/vault/agent-secrets/${encodeURIComponent(free.json.entry)}`, { method: 'DELETE' });
+    const freeDropped = !w.vault.secretNames().some((x) => x.name === free.json.entry);
+    const kept = ['agent:cid-asker-1', 'kept-key'].join('/'), kid = `secrets:${kept}#secret`;
+    w.vault.agentMint(kept, { length: 24 });
+    w.vaultRun._hostPasses.set(`cid-asker-1\n${kid}\nb.example.test`, { scope: 'cid-asker-1', id: kid, host: 'b.example.test', at: Date.now() });
+    const prop = w.paste.propose({ caller: { conversationId: 'cid-b3fb5', sessionKey: 'w1', name: 'Lane asker' }, entry: kept, ref: `vault://secrets/${kept}/secret`, seen: true, name: 'A better name' });
+    await s.hit(`/api/vault/agent-secrets/${encodeURIComponent(kept)}`, { method: 'DELETE' });
+    const passKept = [...w.vaultRun._hostPasses.values()].some((p) => p.id === kid), wordsOpen = !!prop.ok && w.paste.proposalsOpen().some((p) => p.entry === kept);
+    s.srv.close();
+    return { bearerDropped, freeDropped, passKept, wordsOpen };
+  }
+  const aBase = await agentRoad('m-agent-base');
+  ok(!aBase.bearerDropped && !aBase.freeDropped && !aBase.passKept && !aBase.wordsOpen, 'B-3fb5 the real door: a bearer drops nothing, a free entry\'s name never drops through the agent door, a delete leaves no host pass and no open words card (the mutants\' baseline)', aBase);
+  const aName = await agentRoad('m-agent-name', { door: mutant('src/server/vault-paste-door.js', "    if (!V.AGENT_NS_RE.test(e)) return named('entry_unknown_id');\n", '') });
+  ok(aName.freeDropped, 'MUTANT B-3fb5 the agent door without its name check ⇒ a FREE entry dropped through it (RED — the real door refuses any name but agent:<scope>/<name>)', aName);
+  const aBearer = await agentRoad('m-agent-bearer', { routes: mutant('src/routes/vault.js', "app.delete('/api/vault/agent-secrets/:entry', person((req) =>", "app.delete('/api/vault/agent-secrets/:entry', ((fn) => async (req, res) => res.json(await fn(req)))((req) =>") });
+  ok(aBearer.bearerDropped, 'MUTANT B-3fb5 the agent door without person() ⇒ a BEARER drops its own entry (RED — the real door refuses it human_only)', aBearer);
+  const aForget = await agentRoad('m-agent-forget', { door: mutant('src/server/vault-paste-door.js', "    if (vaultRun && typeof vaultRun.forgetEntry === 'function') {", "    if (false) {") });
+  ok(aForget.passKept && !aForget.wordsOpen, 'MUTANT B-3fb5 the delete without the run door\'s forgetEntry ⇒ the owner\'s host pass outlives the entry (RED — a value minted later under the name would go there with no card)', aForget);
+  const aWords = await agentRoad('m-agent-words', { door: mutant('src/server/vault-paste-door.js', "    index(); for (const w of [...wopen.values()]) if (w.entry === e) wsettle(w, 'gone');", "    index();") });
+  ok(aWords.wordsOpen && !aWords.passKept, 'MUTANT B-3fb5 the delete without settling its words proposal ⇒ the card stays open over a gone entry (RED)', aWords);
+  // B-ef1b: the job-secrets door, each guard taken away
+  async function jsRoad(name, { jsDoor, doc } = {}) {
+    const w = makeWorld(name, { jsDoor });
+    await w.vault.setup(PW);
+    const s = await serve(w);
+    plantJS(w, doc);
+    const r = await s.hit('/api/vault/job-secrets/move');
+    const labels = freeNames(w).map((x) => x.label);
+    s.srv.close();
+    return { status: r.status, code: r.json.code, sealed: freeNames(w).length, labels, here: jsHere(w) };
+  }
+  const JSD = 'src/server/job-secrets-door.js';
+  const jBase = await jsRoad('m-js-base', { doc: { FIRST_ONE: jsVals[0], TOO_LONG: 'x'.repeat(P.LIMITS.value + 1) } });
+  ok(jBase.code === 'value_too_long' && jBase.sealed === 0 && jBase.here, 'B-ef1b the real door: a refused value seals nothing and keeps the file (the mutants\' baseline)', jBase);
+  const jUndo = await jsRoad('m-js-undo', { jsDoor: mutant(JSD, '        undo();\n        return named(', '        return named('), doc: { FIRST_ONE: jsVals[0], TOO_LONG: 'x'.repeat(P.LIMITS.value + 1) } });
+  ok(jUndo.code === 'value_too_long' && jUndo.sealed === 1, 'MUTANT B-ef1b no undo on a refused value ⇒ the one sealed before it stays — HALF-MOVED (RED)', jUndo);
+  const JS_HEXNAME = ['x9QzA', '7pLm'].join('-') + '.tok';   // a value-looking string pasted as a NAME that the free entry's words rule takes but the door's safeName hides (no variable's shape) — the restack's tb runs showed an sk- name AND a hex run refused by the words rule itself (name_secret), so the mutant could not show either
+  const jShow = await jsRoad('m-js-show', { jsDoor: mutant(JSD, '      const shown = safeName(name);\n      const r = paste.addEntry(', '      const shown = name;\n      const r = paste.addEntry('), doc: { [JS_HEXNAME]: jsVals[2] } });
+  ok(jShow.labels.includes(JS_HEXNAME), 'MUTANT B-ef1b every name shown ⇒ a pasted VALUE in the name field becomes an entry\'s name in the Vault window (RED — the real door names it «Job secret N»)', jShow.labels.length);
+  const jKept = await jsRoad('m-js-kept', { jsDoor: mutant(JSD, "    try { await fsp.unlink(file); } catch (e) {\n      if (!(e && e.code === 'ENOENT')) { undo();", "    try { throw Object.assign(new Error('EACCES'), { code: 'EACCES' }); } catch (e) {\n      if (!(e && e.code === 'ENOENT')) { undo();"), doc: { FIRST_ONE: jsVals[0] } });
+  ok(jKept.code === 'job_secrets_undeletable' && jKept.sealed === 0 && jKept.here, 'B-ef1b a file that cannot be deleted (a copy whose unlink fails) ⇒ job_secrets_undeletable, NOTHING sealed (undone), the file kept — a second press is the same press', jKept);
+  const jKeptNoUndo = await jsRoad('m-js-kept-noundo', { jsDoor: mutant(JSD, "    try { await fsp.unlink(file); } catch (e) {\n      if (!(e && e.code === 'ENOENT')) { undo();", "    try { throw Object.assign(new Error('EACCES'), { code: 'EACCES' }); } catch (e) {\n      if (!(e && e.code === 'ENOENT')) {"), doc: { FIRST_ONE: jsVals[0] } });
+  ok(jKeptNoUndo.code === 'job_secrets_undeletable' && jKeptNoUndo.sealed === 1, 'MUTANT B-ef1b no undo when the file cannot be deleted ⇒ the value sealed AND the file kept — a second press would seal it twice (RED)', jKeptNoUndo);
   // lane login-request-card: the login road's own mutants
   const MPW = ['mutant', 'road', 'pw'].join('-');   // built, never a literal the secret scan reads as an assignment
   async function loginRoad(name, { door, loginsMod } = {}) {

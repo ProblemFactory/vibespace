@@ -29,6 +29,7 @@
  */
 const fs = require('fs');
 const { spawnSync } = require('child_process');
+const i18nKey = (k) => k; // the extraction marker scripts/i18n-extract.mjs reads (zh/ja: src/lib/i18n-zh.js / i18n-ja.js)
 
 const PROC_ROOT = '/proc';
 const UNPROVABLE = 'a process this build cannot prove is ours — restart it to re-record';
@@ -211,18 +212,133 @@ function membersOf({ pgid = 0, since = 0, mark = '', first = [], maxRows = MEMBE
   return out;
 }
 
+// ── SHIPPED TWIN (B-c134) BEGIN — data/bin/job-wrapper.js carries these lines byte-for-byte (a wrapper copied into a scratch data
+// folder cannot require src/); scripts/test-stop-tree.mjs pins the copy to this source ──
+/** THE TREE A STOP STARTED (B-c134, lane bl-jobs 2026-11-18): every process under `root` by the PARENT CHAIN — each one's main-thread
+ *  children list (/proc/<pid>/task/<pid>/children: the file the release's member walk reads; no directory is listed), breadth first —
+ *  read BEFORE the first signal. A child that made its own group (setsid, the timeout program) or dropped the job's environ (env -i, a
+ *  `systemd-run --scope … env -i`) is outside the group walk and the environ mark, but it is its parent's child until that parent
+ *  dies; after the first signal it is re-parented and the chain is gone. SYNCHRONOUS on purpose, as the release's member walk: procfs is
+ *  memory (never a mount), it costs THE TREE (a list and a stat a member) — never all of /proc — no thread pool stands between a stop
+ *  and its first signal, and the stop's signal stays synchronous; bounded by `maxRows` and `maxMs` all the same. A zombie is no member (its children are re-parented already); nothing that started before `since`.
+ *  → {rows: [[pid, starttime, pgid, comm]], cut, pruned} — a CUT walk proves nothing (the caller says so). THE MODEL: it ends what a
+ *  MISTAKE left behind; a child that hides ON PURPOSE (a double fork that re-parents before the stop) is outside it, not chased.
+ *  WHAT THE STOP DOES NOT OWN (cure, MUST A): `exclude` = identities [[pid, starttime]] (starttime 0: that pid, whatever its start)
+ *  that are PRUNED — never added AND never walked into: what lives under the hub, another conversation's holder or another job's
+ *  wrapper is theirs, however it came to sit under this root (a hub restarted from inside a conversation or a job) */
+function childTreeOf(root, { since = 0, maxRows = 512, maxMs = 50, procRoot = '/proc', exclude = [] } = {}) {
+  const rows = [], seen = new Set([Number(root)]), queue = [Number(root)], t0 = Date.now(), keep = new Map();
+  for (const x of exclude || []) { const p = Number(Array.isArray(x) ? x[0] : x); if (p > 1 && p !== Number(root)) keep.set(p, Number(Array.isArray(x) ? x[1] : 0) || 0); }
+  let cut = false, pruned = 0;
+  walk: while (queue.length) {
+    const p = queue.shift();
+    let kids = '';
+    try { kids = fs.readFileSync(`${procRoot}/${p}/task/${p}/children`, 'utf8'); } catch { continue; }
+    for (const w of kids.split(/\s+/)) {
+      const c = Number(w);
+      if (!(c > 1) || seen.has(c)) continue;
+      if (rows.length >= maxRows || Date.now() - t0 > maxMs) { cut = true; break walk; }
+      seen.add(c);
+      let st = '';
+      try { st = fs.readFileSync(`${procRoot}/${c}/stat`, 'utf8'); } catch { continue; }
+      const o = st.indexOf('('), e = st.lastIndexOf(')');
+      if (o < 0 || e < o) continue;
+      const r = st.slice(e + 2).split(' ');
+      if (keep.has(c) && (!keep.get(c) || keep.get(c) === Number(r[19]))) { pruned++; continue; }   // not the stop's: never added, never walked into
+      if (r[0] === 'Z' || !(Number(r[19]) >= since)) continue;
+      rows.push([c, Number(r[19]), Number(r[2]), st.slice(o + 1, e).slice(0, 32)]);
+      queue.push(c);
+    }
+  }
+  return { rows, cut, pruned };
+}
+// ── SHIPPED TWIN (B-c134) END ──
+/** WHAT NO STOP OWNS (B-c134 cure, MUST A — the kill law: a stop never reaches the hub's own subtree). Each road that HOLDS a
+ *  process names it here by the identity it already holds — the conversations' holders (ws-handler), the jobs' wrappers (the jobs
+ *  engine) — `fn` → [[pid, starttime]] (starttime 0: the road holds the pid alone; a recycled pid only makes a stop end LESS).
+ *  The hub's own identity is always in it. A root the stop itself names is never kept out of its own walk. */
+const KEEP_OUT = new Map();
+function keepOut(name, fn) { const k = String(name); KEEP_OUT.set(k, fn); return () => { if (KEEP_OUT.get(k) === fn) KEEP_OUT.delete(k); }; }   // → its off (only while it is still the one named)
+function keptOut(roots, popts) {
+  const own = new Set(roots.map(Number)), out = [[process.pid, Number(starttimeOf(process.pid, popts)) || 0]];
+  for (const [name, fn] of KEEP_OUT) {
+    let l = [];
+    try { l = fn() || []; } catch (e) { console.warn(`[proc] what ${name} holds could not be read — its processes are not kept out of this stop's walk: ${(e && e.message) || e}`); }
+    for (const x of l) { const p = Number(Array.isArray(x) ? x[0] : x); if (pidOk(p) && !own.has(p)) out.push([p, Number(Array.isArray(x) ? x[1] : 0) || 0]); }
+  }
+  return out;
+}
+/** the hub's form: the tree as identities ({pid, starttime, bootId, comm, pgid}), `.cut` on the list; WHAT NO STOP OWNS pruned
+ *  (keptOut + `opts.exclude`), `.pruned` = how many such processes the walk met and did not enter */
+function treeOf(roots, opts = {}, popts) {
+  const out = [], bootId = bootIdOf(popts), list = (Array.isArray(roots) ? roots : [roots]).map(Number).filter(pidOk);
+  const exclude = [...keptOut(list, popts), ...(Array.isArray(opts.exclude) ? opts.exclude : [])];
+  let cut = false, pruned = 0;
+  for (const r of list) {
+    const t = childTreeOf(r, { ...opts, exclude, procRoot: rootOf(popts) });
+    cut = cut || t.cut; pruned += t.pruned;
+    for (const [pid, starttime, pgid, comm] of t.rows) if (pid !== process.pid && !out.some((m) => m.pid === pid)) out.push({ pid, starttime, bootId, comm, pgid });
+  }
+  out.cut = cut; out.pruned = pruned; out.keptOut = exclude;
+  return out;
+}
+/** END A TREE (B-c134): `signal` to each member THROUGH signalIdentity (a refused one — EPERM — is said, never «ended») (its pid and start time judged at the act — a recycled
+ *  pid is never signalled), `graceMs` for them to end, `hard` for what is left, 1 s more to see it go. → {ended, left, stale}:
+ *  `ended` = what was ours and is gone (comm names), `left` = what is still there after the hard signal, `stale` = members
+ *  no longer ours at the act (gone before, or another process now). opts.kill: injectable (signalIdentity's). */
+async function endTree(members, { graceMs = 5000, signal = 'SIGTERM', hard = 'SIGKILL', pollMs = 50 } = {}, opts = {}) {
+  const sent = [], refused = [];
+  let stale = 0;
+  for (const m of members || []) { const r = signalIdentity(m, signal, opts); if (r.ok) sent.push(m); else if (r.why === 'not-ours') refused.push(m); else stale++; }
+  const alive = (m) => aliveIdentity(m, opts) === true;
+  const wait = async (ms, list) => { const t = Date.now(); let l = list.filter(alive); while (l.length && Date.now() - t < ms) { await new Promise((r) => setTimeout(r, pollMs)); l = l.filter(alive); } return l; };
+  let live = await wait(graceMs, sent);
+  if (live.length) { for (const m of live) signalIdentity(m, hard, opts); live = await wait(1000, live); }
+  const left = new Set(live.map((m) => m.pid)), name = (m) => m.comm || String(m.pid);
+  return { ended: sent.filter((m) => !left.has(m.pid)).map(name), left: [...live.map(name), ...refused.map((m) => `${name(m)} (not ours to signal)`)], stale };
+}
+/** THE ONE LINE a stop says of its tree: the count and the names of what it ended and of what it could not; a cut or blind read said */
+const countNames = (l) => { const c = new Map(); for (const n of l) c.set(n, (c.get(n) || 0) + 1); return [...c].map(([n, k]) => (k > 1 ? `${n} ×${k}` : n)).join(', '); };
+function treeLine(r, scan) {
+  const names = countNames;
+  const parts = [];
+  if (r && r.ended.length) parts.push(`ended ${r.ended.length} process${r.ended.length === 1 ? '' : 'es'} it started (${names(r.ended)})`);
+  if (r && r.left.length) parts.push(`could not end ${r.left.length} (${names(r.left)})`);
+  if (scan && scan.cut) parts.push('its process tree was read only in part (past its bound): what it started may be left');
+  return parts.join('; ');
+}
+/** B-c134 cure (MUST B): WHAT A STOP TELLS THE PERSON when it could not end everything — a member left (it did not end by force, or
+ *  was not ours to signal) or a walk CUT (what it did not read may run). PURE → {key, params, text} for the person's notice (the
+ *  client words `key` with `params`; `text` the English for the journal and an older client) | null: all ended, the journal's
+ *  line alone. The process names are the kernel's (comm), never a person's words */
+const TREE_NOTICE = {
+  left: i18nKey('"{name}" ended, but {n} of the processes it started could not be stopped ({names}) — they may still be running.'),
+  leftCut: i18nKey('"{name}" ended, but {n} of the processes it started could not be stopped ({names}) and its process list was read only in part — more of them may still be running.'),
+  cut: i18nKey('"{name}" ended, but its process list was read only in part — some processes it started may still be running.'),
+};
+function treeNotice(r, scan, name) {
+  const left = ((r && r.left) || []).map((n) => String(n).replace(/ \(not ours to signal\)$/, '')), cut = !!(scan && scan.cut);
+  if (!left.length && !cut) return null;
+  const key = left.length ? (cut ? TREE_NOTICE.leftCut : TREE_NOTICE.left) : TREE_NOTICE.cut;
+  const params = { name: String(name || '').slice(0, 120), n: left.length, names: countNames(left) };
+  return { key, params, text: key.replace(/\{(\w+)\}/g, (_, k) => String(params[k])) };
+}
+
 // ── SHIPPED TWIN BEGIN — data/bin/vibespace-remote-keeper carries these lines byte-for-byte: it ships to a host as ONE
 // file and cannot require src/ (the vibespace-usage-scan precedent). test-pid-identity pins the copy to this source. ──
 /** agentd's spawn-proof token (moved verbatim from src/agentd/agentd.js pidStartTime): 'l' + field 22 on a
  *  procfs, else 'p' + the `ps -o lstart=` string, else ''. Kept because session metas persist it as `startTime`. */
+let _procfs = null;   // B-f64b: Linux's procfs, read once (a platform fact)
 function startToken(pid) {
   try {
     const st = fs.readFileSync('/proc/' + pid + '/stat', 'utf-8');
     const rest = st.slice(st.lastIndexOf(')') + 2).split(' ');
     if (rest[19]) return 'l' + rest[19];
   } catch { }
+  if (_procfs === null) { try { _procfs = process.platform === 'linux' && fs.statSync('/proc/self').isDirectory(); } catch { _procfs = false; } }
+  if (_procfs) return '';   // B-f64b: on Linux's procfs its silence is the answer (gone) — ps reads the same /proc
   try {
-    const r = spawnSync('ps', ['-p', String(pid), '-o', 'lstart='], { encoding: 'utf-8' });
+    const r = spawnSync('ps', ['-p', String(pid), '-o', 'lstart='], { encoding: 'utf-8', timeout: 3000 });   // B-f64b cure: never unbounded (macOS / BSD)
     const s = String(r.stdout || '').trim();
     if (s) return 'p' + s;
   } catch { }
@@ -285,7 +401,6 @@ function procIdentityShellFns() {
 
 /** The words a WITHHELD signal reaches the user with (the no-silent-failures law): the kill answer / exit record / notice
  *  where the stop was asked. i18n = {key, params} for serverNotice; `text` = the English (journal, older clients). */
-const i18nKey = (k) => k; // the extraction marker scripts/i18n-extract.mjs reads (zh/ja: src/lib/i18n-zh.js / i18n-ja.js)
 const WITHHELD_KEY = i18nKey("{name}'s process was not stopped: pid {pid} now belongs to another process (recorded {when}) — nothing of VibeSpace's is running");
 function withheldWords(name, pid, when) {
   const params = { name: String(name || 'VibeSpace'), pid: String(pid), when: String(when || 'earlier') };
@@ -304,6 +419,7 @@ function legacyOnce(door, pid, say) {
 }
 
 module.exports = {
+  childTreeOf, treeOf, endTree, treeLine, treeNotice, TREE_NOTICE, keepOut, keptOut,
   PROC_ROOT, UNPROVABLE, WITHHELD_KEY, LEGACY_LINE,
   hasProc, bootIdOf, starttimeOf, stateOf, identityOf, judge, sameProcess, aliveIdentity, signalIdentity, membersOf, reportOnce, startToken,
   bootToken, tokenVerdict, identityFromToken, procIdentityShellFns, withheldWords, legacyOnce,

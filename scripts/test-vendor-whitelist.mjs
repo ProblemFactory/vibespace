@@ -547,39 +547,82 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
     'B-9b40: the probe spawns exactly PANEL_PROBE_ARGS — no second spelling of the argv');
 }
 
-// ── 5c: THE ON-DEMAND USAGE DOOR'S CALLERS (lane agy-wall-signal; the owner's ruling «A» 2026-11-02) ──
+// ── 5c: THE ON-DEMAND USAGE DOOR'S CALLERS (lane agy-wall-signal; the owner's ruling «A» 2026-11-02 · the third: lane usage-predict, the owner's ruling «A» 2026-11-14) ──
 // src/server/cli-usage-door.js spawns a harness CLI's own usage command (antigravity: `agy -p /usage` — answered without a
 // turn; a local spawn, not an HTTP construction, so the census above never sees it). It had ONE caller: a PERSON's
 // Re-check. The owner's ruling adds exactly ONE more, deliberately, with its gates: a usage WALL the account's own
 // conversation named (src/server/stream-wall.js) fires ONE read of that account — event = the wall (never a timer, a
-// cadence, a session start / stop / idle), once per account per reset (the ledger), only for a LIVE wall record, only
-// where the descriptor declares `onDemand.onWallSignal` (gated in the door itself), judge-gated (a 'turn-started'
-// verdict disarms it until the hub restarts). A third caller, a caller without its gates, or a timer in either file is RED.
+// cadence, a session start / stop / idle), once per account per reset (the ledger — and, across a restart, the account's
+// last read on disk), only for a LIVE wall record, only where the descriptor declares `onDemand.onWallSignal` (gated in the
+// door itself), judge-gated (a 'turn-started' verdict disarms it until the hub restarts).
+// THE THIRD (the owner's A, 2026-11-14: «一个 agy 账号上的对话结束一轮、且该账号 5 分钟内没有新一轮时，读一次 agy 的 /usage；每账号
+// 每 30 分钟最多一次；轮次进行中不读；闲置账号不读»): the end of a stretch of work (src/server/after-turn-read.js) — armed ONLY at a
+// turn's END (the ACP consumer's prompt_end branch: the ONE arming site), its ONE timer the 5-minute quiet wait set there and
+// nowhere else; at most once per account per 30 minutes counted from its last read on disk; never while a turn of the
+// account runs; never for an account with no turn since its last read; a record older than the hub arms nothing (no
+// catch-up); only where the descriptor declares `onDemand.afterTurn`. A fourth caller, a caller without its gates, a timer
+// elsewhere, or an arming site beside the turn's end is RED.
 {
   const CALLERS = {
     'src/server/account-usage-routes.js': { n: 1, gates: [/usageDoor\.read\(req\.params\.id, \{ person: !isAgentBearer\(req\) \}\)/] },
     'src/server/stream-wall.js': { n: 1, gates: [/door\.read\(key, \{ wall: true \}\)/, /od\.onWallSignal === true/, /Math\.abs\(t - sig\.measuredAt\) <= LIVE_MS/,
-      /fired\.some\(\(f\) => f\.key === key && f\.limitId === sig\.limitId && Math\.abs\(f\.resetsAt - sig\.resetsAt\) <= SAME_RESET_S\)/, /disarmed\.set\(key,/, /if \(disarmed\.has\(key\)\)/] },
+      /fired\.some\(\(f\) => f\.key === key && f\.limitId === sig\.limitId && Math\.abs\(f\.resetsAt - sig\.resetsAt\) <= SAME_RESET_S\)/, /disarmed\.set\(key,/, /if \(disarmed\.has\(key\)\)/,
+      /if \(doorReads\.lastReadAt\(cacheDir, key, usageWrite\) >= sig\.measuredAt\) return null;/] },
+    'src/server/after-turn-read.js': { n: 1, gates: [/door\.read\(key, \{ afterTurn: true \}\)/, /return od && od\.afterTurn === true \? String\(session\._accountId\) : null;/,
+      /const QUIET_MS = 5 \* 60 \* 1000;/, /const PACE_MS = 30 \* 60 \* 1000;/, /if \(!\(endAt >= born\)\) return null;/, /if \(last >= endAt\) return null;/,
+      /if \(now\(\) - last < paceMs\)/, /const last = doorReads\.lastReadAt\(cacheDir, key, usageWrite\);/, /if \(busy\(key\)\) return null;/,
+      // law A (the look of 2026-11-15 06:16Z): «a turn runs» from the conversations themselves; the steady clock; the door's stop;
+      // the paired machine's fence; a wait whose conversation is gone
+      /return l === null \? true : l\.some\(\(s\) => s && s\._isStreaming === true\);/, /if \(steady < paceMs\)/, /door\.stoppedWhy\(key\)/, /if \(session\.host\) return null;/, /if \(!l\.includes\(w\.session\)\) return null;/] },
   };
   const srcFiles = (dir) => fs.readdirSync(path.join(REPO, dir), { withFileTypes: true }).flatMap((d) => d.isDirectory() ? (d.name === 'public' ? [] : srcFiles(path.join(dir, d.name))) : /\.js$/.test(d.name) ? [path.join(dir, d.name)] : []);
-  const callsIn = (t) => (t.replace(/^\s*(\/\/|\*).*$/gm, '').match(/\b(?:usageDoor|door)\.read\(/g) || []).length;
+  const strip = (t) => t.replace(/^\s*(\/\/|\*).*$/gm, '');
+  const callsIn = (t) => (strip(t).match(/\b(?:usageDoor|door)\.read\(/g) || []).length;
   const found = {};
   for (const f of [...srcFiles('src'), 'server.js']) { const t = fs.readFileSync(path.join(REPO, f), 'utf-8'); if (/cli-usage-door|createCliUsageDoor|door: usageDoor|\bdoor\.read\(/.test(t) && callsIn(t)) found[f] = callsIn(t); }
   ok(JSON.stringify(Object.keys(found).sort()) === JSON.stringify(Object.keys(CALLERS).sort()) && Object.entries(CALLERS).every(([f, c]) => found[f] === c.n),
-    '5c: the usage door has exactly TWO callers — a person\'s press (account-usage-routes) and the wall one-shot (stream-wall) — one call each', JSON.stringify(found));
+    '5c: the usage door has exactly THREE callers — a person\'s press (account-usage-routes), the wall one-shot (stream-wall) and the read after a stretch of work (after-turn-read) — one call each', JSON.stringify(found));
   for (const [f, c] of Object.entries(CALLERS)) {
     const t = fs.readFileSync(path.join(REPO, f), 'utf-8');
     const missing = c.gates.filter((g) => !g.test(t)).map(String);
     ok(!missing.length, `5c: ${f} keeps its gates (${c.gates.length})`, missing.join(' · '));
   }
   const door = fs.readFileSync(path.join(REPO, 'src/server/cli-usage-door.js'), 'utf-8'), wall = fs.readFileSync(path.join(REPO, 'src/server/stream-wall.js'), 'utf-8');
-  ok(/if \(!person && !wall\) return \{ ok: false, status: 403/.test(door) && /if \(!person && od\.onWallSignal !== true\) return \{ ok: false, status: 400, code: 'no-wall-read'/.test(door) && /if \(j\.verdict === 'turn-started'\) \{/.test(door),
-    '5c: the DOOR refuses any other caller (403), a wall read the descriptor does not declare (400), and keeps the judge\'s STOP');
-  ok(!/setInterval|setTimeout/.test(wall) && !/setInterval/.test(door) && (door.match(/setTimeout\(/g) || []).length === 1,
-    '5c: never a timer — the wall road holds none, the door only its own child\'s 30 s kill');
-  // CONTROLS: a third caller and a timer-driven re-check, planted, are RED by the same reads
+  const atr = fs.readFileSync(path.join(REPO, 'src/server/after-turn-read.js'), 'utf-8'), acp = fs.readFileSync(path.join(REPO, 'src/server/stdout/acp-events.js'), 'utf-8');
+  ok(/const caller = person \? 'person' : wall === true \? 'wall' : afterTurn === true \? 'afterTurn' : null;/.test(door) && /if \(!caller\) return \{ ok: false, status: 403/.test(door)
+    && /if \(caller === 'wall' && od\.onWallSignal !== true\) return \{ ok: false, status: 400, code: 'no-wall-read'/.test(door)
+    && /if \(caller === 'afterTurn' && od\.afterTurn !== true\) return \{ ok: false, status: 400, code: 'no-after-turn-read'/.test(door) && /if \(j\.verdict === 'turn-started'\) \{\n\s*stopped\.set\(id, j\.why\);/.test(door)
+    && /if \(caller !== 'person' && stopped\.has\(id\)\) return \{ ok: false, status: 409, code: 'stopped'/.test(door) && /if \(!counted\) \{[^\n]*return \{ ok: false, status: 503, code: 'count-failed'/.test(door)
+    && /if \(today\.afterTurn >= AFTER_TURN_DAY_MAX\)/.test(door),
+    '5c: the DOOR refuses any other caller (403), a wall read or an after-turn read the descriptor does not declare (400), keeps the judge\'s STOP as ONE stop for every automatic caller (409), counts first and refuses an uncounted read (503), and refuses a day past the ruling\'s arithmetic');
+  // THE ONE TIMER of the after-turn road: the quiet wait, set in onTurnEnd alone; fire() runs only from it
+  const bodyOf = (t, head) => { const i = t.indexOf(head); if (i < 0) return ''; let j = t.indexOf('{', i + head.length), d = 0; for (let k = j; k < t.length; k++) { if (t[k] === '{') d++; else if (t[k] === '}' && --d === 0) return t.slice(j, k + 1); } return ''; };
+  const timerLaw = (t) => { const c = strip(t); const inEnd = bodyOf(c, 'function onTurnEnd(session, rec)');
+    return !/setInterval/.test(c) && (c.match(/\bsetTimeout\(/g) || []).length === 1 && /setTimer = \(fn, ms\) => \{ const t = setTimeout\(fn, ms\);/.test(c)
+      && (c.match(/\bsetTimer\(/g) || []).length === 1 && /const timer = setTimer\(\(\) => fire\(key, endAt\), quietMs\);/.test(inEnd)
+      && (c.match(/\bfire\(/g) || []).length === 2 && (c.match(/\bonTurnEnd\(/g) || []).length === 3; };
+  ok(!/setInterval|setTimeout/.test(wall) && !/setInterval/.test(door) && (door.match(/setTimeout\(/g) || []).length === 1 && timerLaw(atr),
+    '5c: never a cadence — the wall road holds no timer, the door only its own child\'s 30 s kill, the after-turn road ONE: the quiet wait set in onTurnEnd alone (fire() only from it; no interval)');
+  // THE ONE ARMING SITE: the ACP consumer's prompt_end branch calls onTurnEnd, its prompt_start branch onTurnStart — once each,
+  // nowhere else in the tree; the road is configured once, beside the door
+  const branch = (t, kind) => { const i = t.indexOf(`} else if (msg.kind === '${kind}') {`); const j = i < 0 ? -1 : t.indexOf('} else if (msg.kind ===', i + 10); return i < 0 ? '' : t.slice(i, j < 0 ? undefined : j); };
+  const armLaw = (a) => { const c = strip(a);
+    return (c.match(/after-turn-read\.js'\)\.onTurnEnd\(session, msg\)/g) || []).length === 1 && /after-turn-read\.js'\)\.onTurnEnd\(session, msg\)/.test(branch(c, 'prompt_end'))
+      && (c.match(/\bonTurnEnd\(/g) || []).length === 1 && (c.match(/after-turn-read\.js'\)\.onTurnStart\(session, msg\)/g) || []).length === 1 && /after-turn-read\.js'\)\.onTurnStart\(session, msg\)/.test(branch(c, 'prompt_start')); };
+  const users = [...srcFiles('src'), 'server.js'].filter((f) => f !== 'src/server/after-turn-read.js' && /after-turn-read\.js/.test(strip(fs.readFileSync(path.join(REPO, f), 'utf-8')))).sort();
+  ok(armLaw(acp) && JSON.stringify(users) === JSON.stringify(['src/server/account-usage-routes.js', 'src/server/stdout/acp-events.js']),
+    '5c: the after-turn read is ARMED at a turn\'s end alone — the consumer\'s prompt_end branch (and cancelled by prompt_start); no other file reaches the road but the hub\'s configure', JSON.stringify({ arm: armLaw(acp), users }));
+  // CONTROLS: a third caller, a timer, a session start, an idle tick and a restart catch-up, planted, are RED by the same reads
   const planted = wall.replace('function readOnce(', "setInterval(() => door.read('x', { wall: true }), 3600e3);\n  function readOnce(");
   ok(planted !== wall && callsIn(planted) === 2 && /setInterval/.test(planted), 'CONTROL 5c: a timer-driven re-check planted in the wall road is a second call AND a timer (RED by both rows)', String(callsIn(planted)));
+  const CONTROLS = [
+    ['a timer (an hourly read planted in the road)', () => !timerLaw(atr.replace('  function fire(key, endAt) {', "  setInterval(() => fire('x', 0), 3600e3);\n  function fire(key, endAt) {"))],
+    ['a session start (the consumer\'s `session` record arms the wait)', () => !armLaw(acp.replace("if (msg.kind === 'session') {", "if (msg.kind === 'session') {\n            require('../after-turn-read.js').onTurnEnd(session, msg);"))],
+    ['an idle tick (fire() re-arms itself)', () => !timerLaw(atr.replace('    waits.delete(key);\n    const l = convs(key);', '    waits.delete(key);\n    waits.set(key, { timer: setTimer(() => fire(key, endAt), quietMs), endAt });\n    const l = convs(key);'))],
+    ['a restart catch-up (configure arms the accounts it finds)', () => !timerLaw(atr.replace('function configure(deps) { road = createAfterTurnRead(deps); return road; }', "function configure(deps) { road = createAfterTurnRead(deps); for (const s of deps.sessions || []) road.onTurnEnd(s, { ts: new Date().toISOString() }); return road; }"))],
+    ['the replay guard dropped (a record older than the hub arms)', () => !CALLERS['src/server/after-turn-read.js'].gates.every((g) => g.test(atr.replace('    if (!(endAt >= born)) return null;\n', '')))],
+  ];
+  for (const [what, red] of CONTROLS) ok(red(), `CONTROL 5c: ${what} — RED by the reads above`);
 }
 
 // ── 5d: THE CLI MODELS DOOR'S CALLERS (lane agy-models-report; the owner 2026-11-10, rulings R1 / E1, round 2 law A) ──
@@ -736,7 +779,9 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
   const has = (bin) => { try { execFileSync('sh', ['-c', `command -v ${bin}`], { stdio: 'pipe' }); return true; } catch { return false; } };
   const cmdPath = (bin) => { try { return execFileSync('sh', ['-c', `command -v ${bin}`], { encoding: 'utf-8' }).trim(); } catch { return ''; } };
   const straceOk = has('strace');
-  if (!straceOk) {
+  if (process.env.VS_NO_REAL_CLI === '1') {
+    ok(true, 'SKIP live re-measurement: VS_NO_REAL_CLI=1 — the real oracles are not started here (B-ddb9); the recorded proofs above stand alone');
+  } else if (!straceOk) {
     ok(true, 'SKIP live re-measurement: strace is not on PATH (`command -v strace` found nothing) — the recorded proofs above stand alone');
   } else {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-oracle-'));
@@ -1454,7 +1499,7 @@ console.log('§FS-G design 010 S6: Gmail\'s search requests live in its search /
   for (const [name, pass_, detail] of census(slackSrc, serverTexts)) ok(pass_, '§12 ' + name, detail);
   const MUT = mutantCopies('vendor-whitelist-slack', REPO);
   const reds = (rows) => rows.filter((r) => !r[1]).map((r) => r[0]);
-  const mut = (tag, from, to) => { if (!slackSrc.includes(from)) return null; const f = MUT.write(slackRel, slackSrc.replace(from, to), tag); return fs.readFileSync(f, 'utf-8'); };
+  const mut = (tag, from, to) => { if (!slackSrc.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); const f = MUT.write(slackRel, slackSrc.replace(from, to), tag); return fs.readFileSync(f, 'utf-8'); };
   const keeps = mut('keeps-credentials', '    const appId = typeof a.app_id', '    const kept = a.credentials && a.credentials.client_secret; void kept;\n    const appId = typeof a.app_id');
   ok(keeps && reds(census(keeps, { ...serverTexts, [slackRel]: keeps })).some((n) => /KEPT/.test(n)), '§12 CONTROL: a copy that reads the create\'s credentials is RED');
   const twice = mut('second-caller', '    async listConversations({ cursor = null, limit = 100 } = {}) {\n', '    async listConversations({ cursor = null, limit = 100 } = {}) {\n      if (cursor === \'x\') await createApp(\'\', \'\');\n');
@@ -1718,6 +1763,77 @@ console.log('§15 the listed-provider refresh: a person\'s press · the vault ·
     ['a template-literal path to the binary', "\nfunction peek10() { return execFileSync(`${os.homedir()}/.local/bin/claude`, ['--version']); }\n"],
     ['a dynamic import of child_process', "\nasync function peek11() { const m = await import('node:child_process'); return m.execFileSync('true'); }\n"],
   ]) { const mj = judge13(PROBE_SRC + plant); ok(!mj.oneRun && mj.launchRuns.bad.length >= 1, `RED CONTROL: ${what} is a second way to run the binary — caught`, JSON.stringify(mj.launchRuns)); }
+}
+
+// ── B-ddb9 (lane bl-scratch, 2026-11-17): A SUITE THAT RUNS THE REAL AGENT CLI HONOURS VS_NO_REAL_CLI ──
+// The midturn-order acceptance (2026-11-07) found three heavy suites starting the REAL claude / codex whenever one was on
+// PATH, under VS_NO_REAL_CLI=1 too (a scratch HOME, a fake key, a loopback base URL — nothing reached a vendor, but nothing
+// stopped it either). THE UNIVERSE (derived, printed): every scripts/test-*.mjs that resolves a real agent CLI — test-
+// architecture §50's REAL_CLI shape, READ FROM THAT FILE (one shape: a bare spawn / exec / `command -v` of the name, the
+// OPENCODE_CMD / ANTIGRAVITY_CMD fallbacks) — plus a walk of the caller's PATH for it and a VS_<CLI>_BIN pin. Each is a ROW:
+// RUN (it starts it — the file tests `process.env.VS_NO_REAL_CLI === '1'` and skips by name), READ (its bytes as an oracle) or
+// HIDE (it drops the directories holding it from a child's PATH) — neither of those two may start it by name — or DEBT (it
+// starts it and does not skip yet: named, a list that only shrinks; a debt row that now tests the flag is red until it is a
+// run row). A suite the universe finds without a row is red, and so is a row it no longer finds.
+console.log('— B-ddb9 a suite that runs the real agent CLI honours VS_NO_REAL_CLI');
+// real-cli-env: the (b) live re-measurement starts the shipped oracles with a child env built from nothing (ENVBASE: HOME, PATH, TERM) and skips under VS_NO_REAL_CLI; this census's controls spell the lookup shapes in strings (test-architecture §50)
+{
+  const archLine = fs.readFileSync(path.join(REPO, 'scripts/test-architecture.mjs'), 'utf8').split('\n').find((l) => l.trim().startsWith('const REAL_CLI = /'));
+  const REAL_CLI = archLine ? new Function(`return ${archLine.trim().replace(/^const REAL_CLI = /, '').replace(/;$/, '')};`)() : null;
+  ok(REAL_CLI instanceof RegExp && REAL_CLI.test("spawnSync('codex', ['--version'])"), 'the universe reads test-architecture §50\'s REAL_CLI shape (one shape, not a copy)');
+  // the PROGRAM names come from §50's own `command -v (…)` alternative — one list, read, never retyped (a typed list here would be a
+  // harness-keyed table to test-harness-add-census, and it would drift from §50's)
+  const LOOKUP = REAL_CLI ? /^command -v \(([^()]*)\)\\b\|/.exec(REAL_CLI.source) : null;
+  const PROGS = LOOKUP ? LOOKUP[1].split('|') : [];
+  ok(PROGS.length >= 2 && PROGS.every((p) => /^[a-z]+$/.test(p)), `the program names are §50's lookup's own (${PROGS.join(', ')})`);
+  const WALK = [
+    new RegExp(String.raw`\bsplit\(\s*['"]:['"]\s*\)[^;\n]*path\.join\(\s*[\w$]+\s*,\s*['"](?:${PROGS.join('|')})['"]\s*\)`),
+    new RegExp(String.raw`\bprocess\.env\.VS_(?:${PROGS.map((p) => p.toUpperCase()).join('|')})_BIN\b`),
+  ];
+  const code = (src) => src.split('\n').filter((l) => !/^\s*(?:\/\/|\*)/.test(l));
+  const byName = (src) => !!REAL_CLI && code(src).some((l) => REAL_CLI.test(l));
+  const looksUp = (src) => byName(src) || code(src).some((l) => WALK.some((r) => r.test(l)));
+  // what STARTS it by name: §50's shape without its `command -v` lookup alternative (derived from the same source, never retyped)
+  const START = LOOKUP ? new RegExp(REAL_CLI.source.slice(LOOKUP[0].length)) : null;
+  ok(!!START && START.source !== REAL_CLI.source && !START.test('command -v claude') && START.test("execSync('codex --version')"), 'START is §50\'s shape without its command -v lookup');
+  const starts = (src) => !!START && code(src).some((l) => START.test(l));
+  const HONOURS = /process\.env\.VS_NO_REAL_CLI\s*===\s*'1'/;
+  const CLI_ROWS = {
+    'test-chat-e2e.mjs': ['run', 'the ONE real haiku turn: its switch above the token read'],
+    'test-claude-wrapper-queue.mjs': ['run', '§A: the real claude behind the real wrapper, against a loopback mock of the messages API'],
+    'test-claude-steer-chrome.mjs': ['run', '§A: the same shape, the R0 recording as a regression'],
+    'test-queue-steer.mjs': ['run', '⑥ / ⑩: the real `codex app-server` (its --version included; no turn started)'],
+    'test-stdout-registry.mjs': ['run', 'the wire leg ⓕ, and ⓒ\'s --version of the binary it greps'],
+    'test-record-shape.mjs': ['read', 'the installed binary\'s shapes and its version are READ off the binary (B-5e52, 2.369.410: never --version) — nothing is started'],
+    'test-vendor-whitelist.mjs': ['run', '(b) the live re-measurement of the shipped oracles under strace'],
+    'test-pricing-tiers.mjs': ['read', '§3: the installed binary\'s model catalog as an oracle'],
+    'test-claude-update-needs-nothing-hub.mjs': ['read', '§L: the installed claude\'s catalog read for real'],
+    'test-record-clear-walk.mjs': ['hide', 'PATH_NO_CLAUDE for its hub (a system-wide install is still the hub resolver\'s to find)'],
+    'test-toolbar-fold-ui.mjs': ['hide', 'its hub\'s PATH drops the directories holding claude or codex (same caveat)'],
+    'test-codex-sandbox-net.mjs': ['run', 'the functional loopback A/B over the real `codex sandbox`'],
+    'test-harness-honesty.mjs': ['run', 'the fixture-vs-live schema diff (`codex app-server generate-json-schema`)'],
+    'test-harness-settings.mjs': ['run', 'the codex load leg (--version, `features list`)'],
+    'test-init-frame.mjs': ['read', 'the init schema read off the installed binary (its `command -v` is a lookup, nothing is started)'],
+    'test-opencode-s9.mjs': ['run', 'a real `opencode serve` (a command the caller names in OPENCODE_CMD is its own)'],
+    'test-permission-rules.mjs': ['run', 'the live oracle run (codex `login status`, `mcp list`)'],
+  };
+  const SELF = new Set(['test-architecture.mjs']);   // its §50 controls spell the shapes in strings
+  const dir = path.join(REPO, 'scripts');
+  const src = (f) => fs.readFileSync(path.join(dir, f), 'utf8');
+  const found = fs.readdirSync(dir).filter((f) => /^test-.*\.mjs$/.test(f) && !SELF.has(f) && looksUp(src(f))).sort();
+  const kinds = (k) => found.filter((f) => CLI_ROWS[f]?.[0] === k);
+  console.log(`  · the universe finds ${found.length} suites — run ${kinds('run').length}, read ${kinds('read').length}, hide ${kinds('hide').length}, DEBT ${kinds('debt').length} (${kinds('debt').map((f) => f.replace(/\.mjs$/, '')).join(', ')})`);
+  const noRow = found.filter((f) => !CLI_ROWS[f]), stale = Object.keys(CLI_ROWS).filter((f) => !found.includes(f));
+  ok(!noRow.length && !stale.length, 'every suite that resolves a real agent CLI is a row with its kind and reason, and every row still resolves one', JSON.stringify({ noRow, stale }));
+  const judgeRow = (f, s) => { const k = CLI_ROWS[f]?.[0]; if (k === 'run') return HONOURS.test(s) ? null : 'a RUN row that never tests VS_NO_REAL_CLI'; if (k === 'debt') return HONOURS.test(s) ? 'a DEBT row that now tests the flag — make it a run row' : null; if (k === 'read' || k === 'hide') return starts(s) ? `a ${k.toUpperCase()} row that starts the CLI by name` : null; return null; };
+  const bad = found.map((f) => [f, judgeRow(f, src(f))]).filter(([, w]) => w);
+  ok(!bad.length, 'each row is what it says: a run row skips under VS_NO_REAL_CLI=1, a read / hide row never starts the CLI by name, a debt row is still owed', bad.map(([f, w]) => `${f}: ${w}`).join('; '));
+  ok(judgeRow('test-queue-steer.mjs', "  const which = spawnSync('codex', ['--version'], { encoding: 'utf8' });") !== null,
+    "RED CONTROL: test-queue-steer's ⑥ lookup as the release shipped it (a bare spawnSync('codex') with no flag test) fails its run row");
+  ok(judgeRow('test-pricing-tiers.mjs', "spawnSync('claude', ['--version'])") !== null && (() => { const d = CLI_ROWS['test-x-debt.mjs'] = ['debt', 'a planted debt row']; const r = judgeRow('test-x-debt.mjs', "if (process.env.VS_NO_REAL_CLI === '1') skip();"); delete CLI_ROWS['test-x-debt.mjs']; return d && r !== null; })(),
+    'RED CONTROL: a read row that starts the CLI by name, and a debt row that has learned the flag, are both red');
+  ok(looksUp("const cands = String(process.env.PATH || '').split(':').map((d) => path.join(d, 'claude'));") && looksUp("execSync('codex --version')") && !looksUp("// spawnSync('claude', ['-p'])") && !looksUp("const f = path.join(tmp, 'claude'); fs.writeFileSync(f, STUB);"),
+    'RED CONTROL: a PATH walk and an execSync string are lookups; a comment and a stand-in written into a scratch dir are not');
 }
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);

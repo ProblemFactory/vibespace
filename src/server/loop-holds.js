@@ -111,8 +111,8 @@ function create({ log = console, record = () => {}, now = mono, wallNow = () => 
     counts.holds++; if (h.fold.inside) counts.sampled++; if (h.boot) counts.boot++;
     if (!h.boot) { holdTimes.push(now()); if (holdTimes.length > 1000) holdTimes.shift(); }   // commit 3: the trigger's hold rate
     try { log.warn?.(h.line); } catch { }
-    try { record({ kind: 'metric', name: 'srv-loop-hold-ms', value: Math.round(h.ms), detail: `${h.fold.verdict} · ${h.fold.frame}${h.boot ? ' · (the boot)' : ''}` }); } catch { }   // loop-day-report R5: the boot's own hold marked — apart in the day and in its hours
-    for (const f of each) { try { f({ ms: h.ms, verdict: h.fold.verdict, frame: h.fold.frame, boot: !!h.boot }); } catch { } }   // loop-day-report: the hour's tally
+    try { record({ kind: 'metric', name: 'srv-loop-hold-ms', value: Math.round(h.ms), detail: `${h.fold.verdict} · ${h.fold.frame}${h.fold.noOurs ? ' · (no frame of ours)' : ''}${h.boot ? ' · (the boot)' : ''}` }); } catch { }   // loop-day-report R5: the boot's own hold marked — apart in the day and in its hours
+    for (const f of each) { try { f({ ms: h.ms, verdict: h.fold.verdict, frame: h.fold.frame, boot: !!h.boot, noOurs: !!h.fold.noOurs }); } catch { } }   // loop-day-report: the hour's tally
     return pub;
   }
 

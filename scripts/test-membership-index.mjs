@@ -19,9 +19,20 @@
 //   ⑦ THE RESOLVER'S CACHE HOLDS WHAT THE STORE HAS: at 260 and 600 groups (each its own discover + notes row) a warm ask
 //     stats nothing (a fixed 256 cleared whole: ~780 / ~1 800 stats an ask);
 //   ⑧ THE BENCH at the owner's shape (7 Task Groups of ~200 conversations, 6 discover rows, 36 live): µs per ask.
+//   ⑨ B-df5f (a folder is resolved on the machine it belongs to, or not at all): a conversation of ANOTHER machine (hostId)
+//     whose cwd exists on the hub as a symlink into a discover folder is not that group's by the hub's real path; the same
+//     cwd of this machine is; another machine's cwd written inside the folder, or a real path that machine resolved, is —
+//     index ≡ walk; ⑨b every caller handing a conversation's cwd hands its machine (a census of src/ + server.js; an
+//     argument handed as a VARIABLE is read at its nearest declaration before the call; one it cannot read — a spread, a
+//     parameter — is a red); ⑨c THE BOARD AND THE SERVER ANSWER THE SAME MEMBERSHIP: over rows built as the page's merge
+//     (sidebar _merge) builds them — a shared home's hub row of a remote live conversation + its host — task-membership
+//     membershipCwds (the page's cwds) agrees with the REAL groupsForSession (RED control: the hub's real path kept for every
+//     row); the row builder's guard (no hub real path on a row that names another machine; no producer makes one today).
 // Red controls: PATCHES THIS SUITE CARRIES on this tree's src/task-groups.js (master has no index to be red on) — the
 // signature check out (a rev change keeps a stale index), the identity check out, the 4 s bound out, the cap out, the
-// doubt's fallback out — each RED at its own leg; an anchor no longer in the file is a RED, never a skip.
+// doubt's fallback out, another machine's path through the hub's realpath (B-df5f) — each RED at its own leg; ⑨c carries two more
+// through mutant copies: task-membership's membershipCwds keeping the hub's real path for every row, the row builder without
+// its guard; an anchor no longer in the file is a RED, never a skip.
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -155,19 +166,20 @@ const LEGS = {
     // «later» does not exist the row points nowhere; once it is made, the row is a folder — at _res's 4 s bound
     tg._state.tasks = { 'T-fb': { id: 'T-fb', title: 'fb', kind: 'task', createdAt: 1, sessions: [], ctx: [{ path: base, tags: ['notes'] }, { path: 'later', tags: ['discover'] }], progress: [] } }; tg._save();
     const ask = { sessionKey: 'claude:fb', cwd: path.join(later, 'work') };
-    const at = (label) => { const i = tg.groupsForSession(ask), w = tg._groupsForSessionWalk(ask); return { label, i: ids(i), w: ids(w), same: same(i, w) }; };
-    const s0 = at('before');
+    // B-55dc: membership's file facts are OFF-LOOP reads — an ask starts the (re)read, the next ask after it landed sees it
+    const at = async (label) => { tg.groupsForSession(ask); for (let k = 0; k < 12; k++) { await tg._mfacts.settled(); await new Promise((r) => setImmediate(() => setImmediate(r))); if (!tg._mfacts.busy()) break; } const i = tg.groupsForSession(ask), w = tg._groupsForSessionWalk(ask); return { label, i: ids(i), w: ids(w), same: same(i, w) }; };
+    const s0 = await at('before');
     fs.mkdirSync(later);
-    skew = 1500; const s1 = at('+1.5 s');
-    skew = 4100; const s2 = at('+4.1 s');
-    // a cleared _res cache is read at once (test-seen-marks clears it to make every turn read)
+    skew = 1500; const s1 = await at('+1.5 s');
+    skew = 4100; const s2 = await at('+4.1 s');
+    // cleared facts are read again at once (the next ask starts the read)
     fs.rmSync(later, { recursive: true });
-    tg._resCache && tg._resCache.clear();
-    const s3 = at('removed, cache cleared');
+    tg._mfacts.clear();
+    const s3 = await at('removed, facts cleared');
     skew = 0;
     const steps = [s0, s1, s2, s3];
     const okv = steps.every((x) => x.same) && s0.i === '' && s1.i === '' && s2.i === 'T-fb' && s3.i === '';
-    return { ok: okv, detail: steps.map((x) => `${x.label}: index [${x.i}] walk [${x.w}]`).join(' · ') + ' (a folder created on disk is seen within the 4 s bound, at the same ask as the walk)' };
+    return { ok: okv, detail: steps.map((x) => `${x.label}: index [${x.i}] walk [${x.w}]`).join(' · ') + ' (a folder created on disk is seen within ONE REFRESH — the 4 s bound, then its off-loop read — the index ≡ the walk at every step)' };
   },
   async 'result-bound'(T) {
     const s = seeded(T, 202), tg = s.tg;
@@ -224,18 +236,40 @@ const LEGS = {
     fs.symlinkSync(path.join(D, 'sub'), path.join(base, 'via'));   // base/via → folder/sub: a cwd outside the folder by its path
     const tasks = () => ({ 'T-rp': { id: 'T-rp', title: 'rp', kind: 'task', createdAt: 1, sessions: [], ctx: [{ path: D, tags: ['discover'] }], progress: [] } });
     const said = [];
-    const ask = (tg, a) => { const i = tg.groupsForSession(a), w = tg._groupsForSessionWalk(a); said.push(`${JSON.stringify(a.realCwd ? { cwd: a.cwd, realCwd: a.realCwd } : a.cwd)} → index [${ids(i)}] walk [${ids(w)}]`); return same(i, w) ? ids(i) : 'DIFFERS'; };
+    const ask = async (tg, a) => { tg.groupsForSession(a); for (let k = 0; k < 12; k++) { await tg._mfacts.settled(); await new Promise((r) => setImmediate(() => setImmediate(r))); if (!tg._mfacts.busy()) break; } const i = tg.groupsForSession(a), w = tg._groupsForSessionWalk(a); said.push(`${JSON.stringify(a.realCwd ? { cwd: a.cwd, realCwd: a.realCwd } : a.cwd)} → index [${ids(i)}] walk [${ids(w)}]`); return same(i, w) ? ids(i) : 'DIFFERS'; };
     // (i) a cwd that exists THROUGH a symlink: it belongs by its real path only
     const t1 = manager(T).tg; t1._state.tasks = tasks(); t1._save();
     const viaCwd = path.join(base, 'via', 'w');
-    const i1 = ask(t1, { sessionKey: 'claude:rp', cwd: viaCwd });
+    const i1 = await ask(t1, { sessionKey: 'claude:rp', cwd: viaCwd });
     // (ii) the remote shape: one cwd, two given real paths — inside, then outside; and outside, then inside
     const remote = '/remote-host/home/proj';
     const t2 = manager(T).tg; t2._state.tasks = tasks(); t2._save();
-    const a1 = ask(t2, { sessionKey: 'claude:rp', cwd: remote, realCwd: path.join(D, 'x') }), a2 = ask(t2, { sessionKey: 'claude:rp', cwd: remote, realCwd: out });
+    const a1 = await ask(t2, { sessionKey: 'claude:rp', cwd: remote, realCwd: path.join(D, 'x') }), a2 = await ask(t2, { sessionKey: 'claude:rp', cwd: remote, realCwd: out });
     const t3 = manager(T).tg; t3._state.tasks = tasks(); t3._save();
-    const b1 = ask(t3, { sessionKey: 'claude:rp', cwd: remote, realCwd: out }), b2 = ask(t3, { sessionKey: 'claude:rp', cwd: remote, realCwd: path.join(D, 'x') });
+    const b1 = await ask(t3, { sessionKey: 'claude:rp', cwd: remote, realCwd: out }), b2 = await ask(t3, { sessionKey: 'claude:rp', cwd: remote, realCwd: path.join(D, 'x') });
     const okv = i1 === 'T-rp' && a1 === 'T-rp' && a2 === '' && b1 === '' && b2 === 'T-rp';
+    return { ok: okv, detail: said.join(' · ') };
+  },
+  // ⑨ B-df5f — A FOLDER IS RESOLVED ON THE MACHINE IT BELONGS TO, OR NOT AT ALL: a conversation of another machine (hostId)
+  // whose cwd EXISTS ON THE HUB as a symlink into a group's discover folder is NOT that group's by the hub's real path; the
+  // same cwd of a conversation of this machine is (its realpath); another machine's cwd written inside the folder, or a real
+  // path that machine resolved itself (realCwd), still belongs — index ≡ walk, both orders
+  async 'other-machine'(T) {
+    const base = path.join(ROOT, 'om' + (++mn)), D = path.join(base, 'folder');
+    fs.mkdirSync(path.join(D, 'sub', 'w'), { recursive: true });
+    fs.symlinkSync(path.join(D, 'sub'), path.join(base, 'link'));   // base/link → folder/sub ON THE HUB
+    const tasks = () => ({ 'T-om': { id: 'T-om', title: 'om', kind: 'task', createdAt: 1, sessions: [], ctx: [{ path: D, tags: ['discover'] }], progress: [] } });
+    const said = [];
+    // B-55dc: the hub's realpath is an OFF-LOOP fact — the first ask starts its read; the answer compared is the one once read
+    const ask = async (tg, a) => { tg.groupsForSession(a); for (let k = 0; k < 12; k++) { await tg._mfacts.settled(); await new Promise((r) => setImmediate(() => setImmediate(r))); if (!tg._mfacts.busy() && !tg._mmTimer) break; } const i = tg.groupsForSession(a), w = tg._groupsForSessionWalk(a); said.push(`${a.hostId ? a.hostId + ':' : 'here:'}${a.cwd}${a.realCwd ? ' (real ' + a.realCwd + ')' : ''} → index [${ids(i)}] walk [${ids(w)}]`); return same(i, w) ? ids(i) : `index ${ids(i)} ≠ walk ${ids(w)}`; };
+    const linked = path.join(base, 'link', 'w');
+    const t1 = manager(T).tg; t1._state.tasks = tasks(); t1._save();
+    const remote1 = await ask(t1, { sessionKey: 'claude:om1', cwd: linked, hostId: 'host-dial-far' }), local1 = await ask(t1, { sessionKey: 'claude:om2', cwd: linked });
+    const t2 = manager(T).tg; t2._state.tasks = tasks(); t2._save();   // the other order (the result map keyed per ask)
+    const local2 = await ask(t2, { sessionKey: 'claude:om2', cwd: linked }), remote2 = await ask(t2, { sessionKey: 'claude:om1', cwd: linked, hostId: 'host-dial-far' });
+    const written = await ask(t2, { sessionKey: 'claude:om3', cwd: path.join(D, 'sub', 'w'), hostId: 'host-dial-far' });
+    const ownReal = await ask(t2, { sessionKey: 'claude:om4', cwd: '/far/home/proj', realCwd: path.join(D, 'sub'), hostId: 'host-dial-far' });
+    const okv = remote1 === '' && remote2 === '' && local1 === 'T-om' && local2 === 'T-om' && written === 'T-om' && ownReal === 'T-om';
     return { ok: okv, detail: said.join(' · ') };
   },
   async 'cache-cliff'(T) {
@@ -247,7 +281,10 @@ const LEGS = {
       const tasks = {};
       for (let i = 0; i < N; i++) { const d = path.join(base, 'g' + i); fs.mkdirSync(d, { recursive: true }); tasks['T-c' + i] = { id: 'T-c' + i, title: 'g' + i, kind: 'task', createdAt: i + 1, sessions: [], ctx: [{ path: d, tags: ['discover'] }, { path: d, tags: ['notes'] }], progress: [] }; }
       tg._state.tasks = tasks; tg._save();
-      let stats = 0; const kindOf = tg._kindOf.bind(tg); tg._kindOf = (a) => { stats++; return kindOf(a); };
+      // B-55dc: membership asks no stat for these rooted rows at all — what the cliff costs now is its resolver RE-DERIVING
+      // every group: the table resolutions per warm ask (the tree's own task-context module, the one task-groups calls)
+      const TCm = createRequire(path.join(T, 'package.json'))('./src/task-context.js');
+      let stats = 0; const resolveRows0 = TCm.resolveRows; TCm.resolveRows = (...a) => { stats++; return resolveRows0(...a); };
       const asks = Array.from({ length: 40 }, (_, i) => ({ sessionKey: 'claude:c' + i, cwd: path.join(base, 'g' + ((i * 7) % N), 'w') }));
       tg.groupsForSession(asks[0]);   // warm
       stats = 0;
@@ -255,7 +292,8 @@ const LEGS = {
       for (const a of asks) { const i = tg.groupsForSession(a); if (i.length !== 1) bad++; }
       const per = stats / asks.length;
       if (!(per === 0 && bad === 0)) okAll = false;
-      out.push(`${N} groups: ${per.toFixed(0)} stats per warm ask${bad ? `, ${bad} wrong` : ''}`);
+      TCm.resolveRows = resolveRows0;
+      out.push(`${N} groups: ${per.toFixed(0)} tables re-derived per warm ask${bad ? `, ${bad} wrong` : ''}`);
     }
     return { ok: okAll, detail: out.join(' · ') + ' (each group its own discover + notes row)' };
   },
@@ -288,11 +326,12 @@ const TG = fs.readFileSync(path.join(REPO, 'src/task-groups.js'), 'utf8');
 const PATCHES = {
   'no-signature': ["memberSig(tasks) === ix.sig && ", '', 'writers', 'a rev change keeps the index whatever moved (the signature check out)'],
   'no-identity': [" && ix.groups.every((g) => tasks[g.key] === g.t)", '', 'writers', 'an equal copy keeps the old record (the identity check out)'],
-  'no-bound': ["      if (e !== undefined && e === g.resEntry && now - e.at < 4000) continue;\n", "      if (g.resKey !== null) continue;\n", 'folder-bound', 'the folders never re-derived (the 4 s bound out)'],
+  'no-bound': ["      if (e !== undefined && e === g.resEntry && e.gen === this._mfacts.gen() && now - e.at < 4000) continue;\n", "      if (g.resKey !== null) continue;\n", 'folder-bound', 'the folders never re-derived (the 4 s bound out)'],
   'no-cap': ["if (ix.results.size >= MEMBER_RESULTS_MAX) {", 'if (false) {', 'result-bound', 'the result map unbounded (the cap out)'],
-  'no-real-path': ["    const real = this._realOf(cwd, realCwd);\n    const cwds = [cwd, real && real !== cwd ? real : null].filter(Boolean);\n    const key = ", "    const real = this._realOf(cwd, realCwd);\n    const cwds = [cwd].filter(Boolean);\n    const key = ", 'real-path', 'the cwds reduced to the cwd alone (主开发\'s mutant a)'],
+  'no-real-path': ["    const real = this._realHere(cwd, realCwd, hostId);\n    const cwds = [cwd, real && real !== cwd ? real : null].filter(Boolean);\n    const key = ", "    const real = this._realHere(cwd, realCwd, hostId);\n    const cwds = [cwd].filter(Boolean);\n    const key = ", 'real-path', 'the cwds reduced to the cwd alone (主开发\'s mutant a)'],
   'no-real-in-key': ["const key = JSON.stringify([sessionKey || '', cwds, spawned]);", "const key = JSON.stringify([sessionKey || '', [cwd || ''], spawned]);", 'real-path', 'the result key built without the real path (主开发\'s mutant b)'],
-  'cache-256': ["if (this._resCache.size > Math.max(256, 2 * Object.keys(this._state.tasks || {}).length + 64)) this._resCache.clear();", "if (this._resCache.size > 256) this._resCache.clear();", 'cache-cliff', 'the resolver\'s cache back at a fixed 256 cleared whole'],
+  'cache-256': ["if (this._mresCache.size > Math.max(256, 2 * Object.keys(this._state.tasks || {}).length + 64)) this._mresCache.clear();", "if (this._mresCache.size > 256) this._mresCache.clear();", 'cache-cliff', 'the resolver\'s cache back at a fixed 256 cleared whole'],
+  'hub-real-for-remote': ["    return onOtherMachine(hostId) ? (realCwd || null) : this._realOf(cwd, realCwd);", "    return this._realOf(cwd, realCwd);", 'other-machine', 'another machine\'s path resolved by the hub\'s realpath (the checkpoint as it was, B-df5f)'],
   'no-fallback': ["try { ans = this._memberAnswer(args || {}); } catch { ans = null; }", 'ans = this._memberAnswer(args || {});', 'doubts', 'a throw of the index reaches the caller (the fallback out)'],
 };
 function patched(tag) {
@@ -313,6 +352,137 @@ for (const [tag, [, , leg, what]] of Object.entries(PATCHES)) {
   const M = patched(tag);
   if (!ok(!!M, `the patch «${tag}» applies to this tree's task-groups.js (its anchor is there once)`)) continue;
   const r = await run(leg, M); ok(!r.ok, `${what} ⇒ RED at ${leg}: ${r.detail}`);
+}
+// ⑨b B-df5f THE CALLERS: every call that hands a conversation's cwd to the store — groupsForSession, and the create's
+// Task-Group facts (taskGroupDefaultFor / taskGroupCapFor / stampGroupCap) — hands its machine too (src/ + server.js). Each call's
+// OWN argument is cut by bracket matching (multi-line calls included; a hostId of a later call on the same line never counts).
+{
+  // the restack for 2.369.411 (the meeting with B-55dc): B-55dc's DECIDING doors hand a conversation's cwd too — membershipRead,
+  // groupsForSessionDecided, memberIds (the drawing door's ids, its flag kept) and the keeper's taskGroupReadFor (the create's)
+  const CALLS = /\b(groupsForSession|groupsForSessionDecided|membershipRead|memberIds|taskGroupDefaultFor|taskGroupCapFor|stampGroupCap|taskGroupReadFor)\(/g;
+  const inside = (t, open, o, c) => { let d = 0, q = null; for (let k = open; k < t.length; k++) { const ch = t[k];
+    if (q) { if (ch === '\\') { k++; continue; } if (ch === q) q = null; continue; }
+    if (ch === "'" || ch === '"' || ch === '`') { q = ch; continue; }
+    if (ch === o) d++; else if (ch === c) { d--; if (d === 0) return t.slice(open + 1, k); } } return null; };
+  const argOf = (t, open) => inside(t, open, '(', ')');
+  // the call's arguments split at its top-level commas; the FACTS are the first (stampGroupCap: the second, after the key)
+  const argsOf = (a) => { const out = []; let d = 0, q = null, from = 0; for (let k = 0; k < a.length; k++) { const ch = a[k];
+    if (q) { if (ch === '\\') { k++; continue; } if (ch === q) q = null; continue; }
+    if (ch === "'" || ch === '"' || ch === '`') { q = ch; continue; }
+    if ('([{'.includes(ch)) d++; else if (')]}'.includes(ch)) d--; else if (ch === ',' && d === 0) { out.push(a.slice(from, k).trim()); from = k + 1; } }
+    out.push(a.slice(from).trim()); return out; };
+  // the facts a call hands: its own object literal, or (cure, 主开发 09:43Z) a VARIABLE read at its object literal — its NEAREST
+  // declaration before the call in the same file (`const groupFacts = { cwd: …, hostId: … }` — the browser key's). A name with
+  // no declaration before the call, a literal holding a spread (`{ ...facts }`), or any other expression in the facts' place
+  // is UNSEEN — a red, never a pass; a default parameter (`facts = {}`) is a definition.
+  // → { facts } (text holding a cwd) · { unseen } · null (no cwd handed: a key-only ask, a definition)
+  const litOf = (x, via) => (/\.\.\./.test(x) ? { unseen: `${via || 'a literal'} holds a spread` } : /\bcwd\b/.test(x) ? { facts: x, via } : null);
+  const factsOf = (t, name, a, at = t.length) => {
+    const x = argsOf(a)[name === 'stampGroupCap' ? 1 : 0] || '';
+    if (x.startsWith('{')) return litOf(x);
+    if (/^[A-Za-z_$][\w$]*\s*=/.test(x) || x === '') return null;
+    if (!/^[A-Za-z_$][\w$]*$/.test(x)) return { unseen: x };
+    const re = new RegExp('\\b(?:const|let|var)\\s+' + x.replace(/\$/g, '\\$') + '\\s*=\\s*\\{', 'g');
+    let d = null, e; while ((e = re.exec(t)) && e.index < at) d = e;
+    if (!d) return { unseen: x };
+    const o = inside(t, d.index + d[0].length - 1, '{', '}');
+    return o == null ? { unseen: x } : litOf(o, x); };
+  // a machine HANDED: a hostId key whose value is not a literal null / undefined
+  const handsMachine = (f) => /\bhostId\b/.test(f) && !/\bhostId\s*:\s*(?:null|undefined)\s*[,}]/.test(f + '}');
+  // THE STORE'S OWN RE-ENTRY (B-55dc): inside src/task-groups.js a door that calls another door with its own facts parameter
+  // (`this.groupsForSession(args)`) hands what ITS caller handed — that caller is a row of this census; only there, only `this.`
+  // with a bare name: anywhere else the same shape is UNSEEN (a red — the control below)
+  let reentries = 0;
+  const reentry = (t, file, m, a) => file === 'src/task-groups.js' && t.slice(Math.max(0, m.index - 5), m.index) === 'this.' && /^[A-Za-z_$][\w$]*$/.test(argsOf(a)[0] || '');
+  const missing = (t, file = '') => { const out = []; let m; CALLS.lastIndex = 0;
+    while ((m = CALLS.exec(t))) { const a = argOf(t, m.index + m[0].length - 1); if (a != null && reentry(t, file, m, a)) { reentries++; continue; } const f = a != null && factsOf(t, m[1], a, m.index); if (!f) continue;
+      if (f.unseen) out.push(`${m[1]}(${a.replace(/\s+/g, ' ').slice(0, 80)}) — «${f.unseen}» UNSEEN (no object literal of it in this file)`);
+      else if (!handsMachine(f.facts)) out.push(`${m[1]}(${(f.via ? f.via + ' = ' : '') + f.facts.replace(/\s+/g, ' ').slice(0, 100)})`); }
+    return out; };
+  const files = ['server.js'], walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const r = path.join(d, e.name); if (e.isDirectory()) walk(r); else if (e.name.endsWith('.js')) files.push(r); } };
+  walk('src');
+  const bad = [];
+  let calls = 0, viaVar = 0;
+  for (const f of files) { const t = fs.readFileSync(path.join(REPO, f), 'utf8'); let m; CALLS.lastIndex = 0; while ((m = CALLS.exec(t))) { const a = argOf(t, m.index + m[0].length - 1); const x = a != null && factsOf(t, m[1], a, m.index); if (x && x.facts) { calls++; if (x.via) viaVar++; } } for (const x of missing(t, f)) bad.push(`${f}: ${x}`); }
+  ok(calls >= 26 && viaVar >= 2 && bad.length === 0 && reentries === 3, `B-df5f: every call handing the store a conversation's cwd hands its machine (hostId) — ${calls} calls in src/ + server.js (groupsForSession, B-55dc's deciding doors and the create's Task-Group facts; the store's own ${reentries} re-entries pass their caller's facts), ${viaVar} of them through a variable read at its object literal${bad.length ? ' · MISSING: ' + bad.join(' | ') : ''}`);
+  ok(missing("x = tasks.groupsForSession({\n  sessionKey: k,\n  cwd: s.cwd,\n  initialGroupId: s._initialGroupId,\n});").length === 1, 'CONTROL: a planted MULTI-LINE call that hands a cwd without its machine is caught');
+  ok(missing("a = kc.taskGroupCapFor({ cwd, initialGroupId: g }); b = tasks.groupsForSession({ cwd: s.cwd, hostId: s.host || null });").length === 1, 'CONTROL: a hostId of a LATER call on the same line does not cover an earlier one');
+  ok(missing("const facts = { cwd: s.cwd, initialGroupId: g };\nconst d = kc.taskGroupDefaultFor(facts); kc.stampGroupCap(k, facts, {});").length === 2, 'CONTROL: a planted VARIABLE whose object literal hands a cwd without its machine is caught at each call that hands it');
+  ok(/UNSEEN/.test(missing("function f(a) { return tasks.groupsForSession(a); }").join('')), 'CONTROL: a variable the census cannot read at an object literal (a parameter) is UNSEEN — a red');
+  { const before = reentries;
+    ok(/UNSEEN/.test(missing("function f(a) { return this.membershipRead(a); }", 'src/server/other.js').join('')) && missing("x = tasks.membershipRead({ sessionKey: k, cwd: s.cwd });").length === 1 && missing("function f(a) { return this.groupsForSession(a); }", 'src/task-groups.js').length === 0,
+      'CONTROL: a `this.` re-entry with a bare parameter passes ONLY in the store itself (another file: UNSEEN, a red); a deciding door handed a cwd without its machine is caught');
+    reentries = before; }
+  ok(missing("function g() { const facts = { cwd, hostId: h }; } function f(s) { const facts = { cwd: s.cwd }; return kc.taskGroupDefaultFor(facts); }").length === 1, 'CONTROL: the NEAREST declaration before the call judges it (another function\'s literal of the same name does not cover it)');
+  ok(/spread/.test(missing("x = tasks.groupsForSession({ ...facts, sessionKey: k });").join('')) && missing("x = tasks.groupsForSession({ sessionKey: k, cwd: s.cwd, hostId: null });").length === 1, 'CONTROL: a spread in the facts is UNSEEN; a literal `hostId: null` hands no machine');
+}
+
+// ⑨c B-df5f cure — THE BOARD AND THE SERVER ANSWER THE SAME MEMBERSHIP (主开发 09:43Z; its reader's must): the page's own copy
+// of the folder rule (src/lib/sidebar-tasks.js _sessionFolderMatch) matches a row's cwd and the realCwd the HUB stamped on
+// /api/sessions rows. The road where they disagreed is the page's own merge (src/lib/sidebar.js _merge): a shared home makes
+// the hub's discovery row of a REMOTE live conversation (no host, the hub's realCwd), and the merge lays the live session's
+// `host` over it. ONE rule now — task-membership membershipCwds (the page's cwds: a hub real path only for the hub's own) and
+// onOtherMachine (the server's _realHere, the row builder) — driven here over rows built as the merge builds them, against
+// the REAL groupsForSession; the page's code is held to calling it (text). RED control: a membershipCwds that keeps the hub's
+// real path for every row (the page before) — board member, server not. The row builder's guard (no hub real path on a row
+// that names another machine — no producer makes such a row today) with its own red control.
+{
+  const req = createRequire(import.meta.url);
+  const TM = req(path.join(REPO, 'src/task-membership.js'));
+  const SRC = fs.readFileSync(path.join(REPO, 'src/routes/sessions.js'), 'utf8');
+  const PAGE = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-tasks.js'), 'utf8'), MERGE = fs.readFileSync(path.join(REPO, 'src/lib/sidebar.js'), 'utf8'), APP = fs.readFileSync(path.join(REPO, 'src/lib/app.js'), 'utf8');
+  const base = path.join(ROOT, 'board'), D = path.join(base, 'folder');
+  fs.mkdirSync(path.join(D, 'sub', 'w'), { recursive: true });
+  fs.symlinkSync(path.join(D, 'sub'), path.join(base, 'link'));   // base/link → folder/sub ON THE HUB (a shared home's link)
+  const linked = path.join(base, 'link', 'w'), rec = TM.folderOf(D), realW = fs.realpathSync(path.join(D, 'sub', 'w'));
+  const { tg } = manager(REPO); tg._state.tasks = { 'T-bd': { id: 'T-bd', title: 'bd', kind: 'task', createdAt: 1, sessions: [], ctx: [{ path: D, tags: ['discover'] }], progress: [] } }; tg._save();
+  const serverSays = (row) => tg.groupsForSession({ sessionKey: row.sessionKey, cwd: row.cwd, hostId: row.host || null }).some((t) => t.id === 'T-bd');   // as every caller asks (no caller hands a realCwd)
+  const boardBy = (cwdsOf) => (row) => cwdsOf({ cwd: row.cwd, realCwd: row.realCwd, host: row.host }).some((c) => TM.insideFolder(c, rec));
+  ok(typeof TM.membershipCwds === 'function' && typeof TM.onOtherMachine === 'function', 'task-membership carries the ONE rule: membershipCwds (the page\'s cwds) and onOtherMachine (none and \'local\' are the hub)');
+  ok(/const cwds = membershipCwds\(\{ cwd: stripCwdHostLabel\(s\.cwd\), realCwd: s\.realCwd, host: s\.host \}\);/.test(PAGE) && !/\[stripCwdHostLabel\(s\.cwd\), s\.realCwd\]/.test(PAGE) && /host: wm\?\.host \|\| null,/.test(MERGE),   // stale-pins: kept — the deliberate absence check: the old cwds line is gone
+    'the page\'s folder match (sidebar-tasks _sessionFolderMatch) takes its cwds from membershipCwds with the row\'s host — the host the merge (sidebar _merge) lays over a hub row');
+  ok(/const under = membershipCwds\(\{ cwd: s\.cwd, realCwd: s\.realCwd, host: s\.host \}\)\.some\(\(c\) => insideFolder\(c, rec\)\);/.test(APP) && !/insideFolder\(s\.cwd, rec\) \|\| \(s\.realCwd && insideFolder\(s\.realCwd, rec\)\)/.test(APP),   // stale-pins: kept — the deliberate absence check: the chips' own copy is gone
+    'cure 2: the New Session folder chips (app.js _taskCwdSuggestions) take their cwds from the same membershipCwds — the page holds ONE copy of the rule');
+  {   // (on a tree without membershipCwds the page's rule before is judged — the scene goes red BY NAME, never skipped)
+    const cwdsOf = typeof TM.membershipCwds === 'function' ? TM.membershipCwds : ({ cwd, realCwd }) => [cwd, realCwd].filter(Boolean);
+    // the hub's discovery row of the conversation (the route stamps the hub's real path), then the page's merge
+    const hubRow = { backend: 'claude', sessionId: 'bd-1', sessionKey: 'claude:bd-1', cwd: linked, realCwd: realW };
+    const mergedFar = { ...hubRow, host: 'host-dial-far', hostName: 'far' }, mergedHere = { ...hubRow, host: null }, mergedLocalWord = { ...hubRow, host: 'local' };
+    // B-55dc: the server's answer is read OFF the loop (the hub's realpath of the link): each row asked once, the reads landed
+    for (const r of [mergedFar, mergedHere, mergedLocalWord]) serverSays(r);
+    for (let k = 0; k < 12; k++) { await tg._mfacts.settled(); await new Promise((r) => setImmediate(() => setImmediate(r))); if (!tg._mfacts.busy() && !tg._mmTimer) break; }
+    const board = boardBy(cwdsOf);
+    const seen = [mergedFar, mergedHere, mergedLocalWord].map((r) => `${r.host || 'none'}: board ${board(r)} / server ${serverSays(r)}`);
+    ok(board(mergedFar) === false && serverSays(mergedFar) === false && board(mergedHere) === true && serverSays(mergedHere) === true && board(mergedLocalWord) === true && serverSays(mergedLocalWord) === true,
+      `B-df5f cure: over rows built as the page's merge builds them, the board ≡ the server — another machine's conversation through the hub's link is a member of NEITHER, the hub's own of BOTH ('local' is the hub) — ${seen.join(' · ')}`);
+    // RED CONTROL: the page's rule before (the hub's real path for every row)
+    const TMS = fs.readFileSync(path.join(REPO, 'src/task-membership.js'), 'utf8');
+    const A = '  for (const c of [cwd, onOtherMachine(host) ? null : realCwd]) ';
+    let red = null;
+    if (ok(TMS.split(A).length === 2, 'the anchor of the control «hub-real-for-every-row» is in src/task-membership.js once')) {
+      const { mutantCopies } = await import('./mutant-copy.mjs');
+      const MUT = mutantCopies('member-index-board', REPO);
+      const TMr = req(MUT.write('src/task-membership.js', TMS.replace(A, '  for (const c of [cwd, realCwd]) '), 'hub-real-for-every-row'));
+      red = { board: boardBy(TMr.membershipCwds)(mergedFar), server: serverSays(mergedFar) };
+    }
+    ok(!!red && red.board === true && red.server === false, `RED CONTROL: the page's rule keeping the hub's real path for every row (the page before) — another machine's conversation: the board says member, the server not — ${JSON.stringify(red)}`);
+  }
+  // the row builder's guard: a row that names another machine is never stamped with the hub's real path
+  const { withSessionKey } = req(path.join(REPO, 'src/routes/sessions.js'));
+  if (ok(typeof withSessionKey === 'function', 'src/routes/sessions.js exports its row builder (withSessionKey)')) {
+    const rowsOf = (W) => [W({ backend: 'claude', sessionId: 'bd-far', cwd: linked, host: 'host-dial-far' }), W({ backend: 'claude', sessionId: 'bd-here', cwd: linked })];
+    const [far, here] = rowsOf(withSessionKey);
+    ok(!far.realCwd && here.realCwd === realW, `B-df5f cure: the row builder stamps no hub real path on a row that names another machine (${JSON.stringify(far.realCwd || null)}), a row of the hub keeps its own (${JSON.stringify(here.realCwd || null)}) — a guard: no producer of the route makes such a row today`);
+    const A = "const rc = namesOtherMachine(session) ? null : realCwdOf(session.cwd);";
+    let red = null;
+    if (ok(SRC.split(A).length === 2, 'the anchor of the control «hub-real-on-remote-row» is in src/routes/sessions.js once')) {
+      const { mutantCopies } = await import('./mutant-copy.mjs');
+      const MUT = mutantCopies('member-index-rows', REPO);
+      const copy = MUT.write('src/routes/sessions.js', SRC.replace(A, 'const rc = realCwdOf(session.cwd);'), 'hub-real-on-remote-row');   // the checkpoint's line, on purpose — stale-pins: kept
+      red = rowsOf(req(copy).withSessionKey)[0].realCwd || null;
+    }
+    ok(red === realW, `RED CONTROL: the row builder without the guard (the checkpoint) stamps the hub's real path on another machine's row — ${JSON.stringify(red)}`);
+  }
 }
 const b = bench(REPO);
 say(`THE BENCH at the owner's shape (7 Task Groups × 200 bound conversations, 6 discover rows, 36 live, ${36 * 300} asks): the walk ${b.walk.toFixed(2)} µs per ask, the index ${b.index.toFixed(2)} µs; a store write that moves nothing membership reads costs the next ask ${b.sigUs.toFixed(0)} µs (the signature)`);

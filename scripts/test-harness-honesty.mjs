@@ -41,7 +41,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, execSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { freePorts, ONBOARDED_SOURCE, withoutVendorKeys, vncEnv } from './scratch.mjs';
+import { freePorts, ONBOARDED_SOURCE, withoutVendorKeys, vncEnv, CHROME_STORE } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -358,9 +358,9 @@ ok(events().some((e) => e.type === 'server_request_resolved' && e.payload.id ===
 // instead of rotting in the fixture. No binary = an explicit SKIP with evidence.
 {
   let cx = '';
-  try { cx = execSync('command -v codex', { encoding: 'utf8' }).trim(); } catch { }
+  if (!(process.env.VS_NO_REAL_CLI === '1')) try { cx = execSync('command -v codex', { encoding: 'utf8' }).trim(); } catch { }   // B-ddb9: not under the flag
   if (!cx) {
-    console.log('  SKIP: no `codex` on PATH — the fixture-vs-live schema diff did not run (the fixture still gates every reply)');
+    console.log(process.env.VS_NO_REAL_CLI === '1' ? '  SKIP: VS_NO_REAL_CLI=1 — the real codex is not started here — the fixture-vs-live schema diff did not run (the fixture still gates every reply)' : '  SKIP: no `codex` on PATH — the fixture-vs-live schema diff did not run (the fixture still gates every reply)');
   } else {
     const dumpDir = path.join(dir, 'schema-dump');
     fs.mkdirSync(dumpDir, { recursive: true });
@@ -565,7 +565,7 @@ if (!CHROME) {
   fs.symlinkSync(path.join(REPO, 'node_modules'), path.join(wt, 'node_modules'));
   fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
   const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CODEX_HOME: path.join(fakeHome, '.codex'), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
-  const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--window-size=1400,1000',
+  const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--window-size=1400,1000',
     '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${wt}-chrome`, 'about:blank'], { stdio: 'ignore' });
   const cleanup = () => {
     try { chrome.kill('SIGKILL'); } catch { }

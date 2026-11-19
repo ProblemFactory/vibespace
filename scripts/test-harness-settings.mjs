@@ -380,10 +380,10 @@ console.log('§5c the TOML shapes codex refuses (root scalar / dotted root + hea
   x = apply();
   ok('dotted keys AND a [history] header (already invalid TOML) are refused by name, never reported applied', x.state === 'refused' && /defined both/.test(x.reason) && HC.readConfigPlan(fullPlan(0), { home })[0].state === 'unreadable', x);
   // the real binary: every shape the writer produces must LOAD; two hand-made broken shapes are the controls
-  const which = spawnSync('sh', ['-c', 'command -v codex'], { encoding: 'utf8' }).stdout.trim();
+  const which = process.env.VS_NO_REAL_CLI === '1' ? '' : spawnSync('sh', ['-c', 'command -v codex'], { encoding: 'utf8' }).stdout.trim();   // B-ddb9: not under the flag
   const ver = which ? (spawnSync(which, ['--version'], { encoding: 'utf8', timeout: 15000 }).stdout || '').trim() : '';
   if (!which || !ver) {
-    console.log(`  – SKIP the codex load leg: ${!which ? 'no codex binary on PATH' : 'codex --version printed nothing'} (CI runners have none)`);
+    console.log(`  – SKIP the codex load leg: ${!which ? (process.env.VS_NO_REAL_CLI === '1' ? 'VS_NO_REAL_CLI=1 — the real codex is not started here' : 'no codex binary on PATH') : 'codex --version printed nothing'} (CI runners have none)`);
   } else {
     const load = (text) => {
       fs.writeFileSync(cf, text);

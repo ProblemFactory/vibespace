@@ -284,7 +284,7 @@ const IMAGEVIEW_0153_JSONL = `
   // (Extension web.search / image_gen and SubAgentActivity completed are the
   // OTHER routed carriers of the same allowlist — they DO render, by design,
   // and test-codex-history owns them; they have no place in a no-card control.)
-  ok('other item types (Reasoning/UserMessage/AgentMessage/CommandExecution, started+completed) stay SKIPPED — no cards (SubAgentActivity renders collab activity rows since B-7473 and is owned by test-codex-subagents)', noneMsgs.length === 0, noneMsgs.map((m) => m.role));
+  ok('other item types (Reasoning/UserMessage/AgentMessage/CommandExecution, started+completed) stay skipped — no cards (SubAgentActivity renders collab activity rows since B-7473 and is owned by test-codex-subagents)', noneMsgs.length === 0, noneMsgs.map((m) => m.role));
   ok('…and none of them is reported as an unknown record', !seenEv.some((e) => /codex-unknown-record/.test(e)), seenEv);
   const cmm = read('src/codex-message-manager.js');
   // ONE ROUTER: item_completed goes through _processItemCompleted (the explicit

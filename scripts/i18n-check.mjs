@@ -31,7 +31,7 @@ import { dictEntries } from './i18n-extract.mjs';
 const lib = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'lib');
 const DICTS = ['i18n-zh.js', 'i18n-ja.js'].map((f) => path.join(lib, f));
 // the server surfaces whose literal notice keys are FOR the owner (widen as other surfaces adopt the i18n-notice shape)
-const NOTICE_SRC = ['src/server/vault-run-door.js', 'src/server/jobs-wiring.js', 'src/jobs.js', 'src/server/browser-dialogs.js', 'src/server/browser-logins.js', 'src/browser-login.js'].map((p) => path.join(path.dirname(fileURLToPath(import.meta.url)), '..', p));
+const NOTICE_SRC = ['src/server/vault-run-door.js', 'src/server/jobs-wiring.js', 'src/jobs.js', 'src/server/browser-dialogs.js', 'src/server/browser-logins.js', 'src/browser-login.js', 'src/server/setting-holds.js' /* lane setting-doors pick 2: the hold store's notices and its return toast */].map((p) => path.join(path.dirname(fileURLToPath(import.meta.url)), '..', p));
 // …and the server's key TABLES (each value a key the client words with t()): the jobs engine's For-you templates
 export const noticeKeyTables = () => {
   const req = createRequire(import.meta.url), RT = req('../src/relay-token.js'), BL = req('../src/browser-login.js');
@@ -51,8 +51,15 @@ export const noticeKeyTables = () => {
     { name: 'src/loop-hold.js PROFILE_STOPPED / PROFILE_UNSAMPLED', keys: (() => { const LH = req('../src/loop-hold.js'); return [...Object.values(LH.PROFILE_STOPPED), LH.PROFILE_STOPPED_ANY, ...Object.values(LH.PROFILE_UNSAMPLED), LH.PROFILE_UNSAMPLED_ANY, ...Object.values(LH.PROFILE_REFUSED), LH.PROFILE_REFUSED_ANY]; })() },
     // B-8dcf item two: what a person's own settings file met at a claude start — the hub's notices, worded by t() on the page
     { name: 'src/settings-file-words.js SETTINGS_FILE_WORDS', keys: Object.values(req('../src/settings-file-words.js').SETTINGS_FILE_WORDS) },
+    { name: 'src/settings-file-words.js PROVIDER_BILLING_WORDS', keys: Object.values(req('../src/settings-file-words.js').PROVIDER_BILLING_WORDS) },   // lane lg-providers: a provider start's two billing kinds
     // B-6c55: a locked conversation's resume that cannot keep its 1M ask — the hub's notice, worded by t() on the page
     { name: 'src/lock-context.js NO_LONG_CONTEXT', keys: [req('../src/lock-context.js').NO_LONG_CONTEXT] },
+    // B-c9ed: THE picture rule's refusal words — a table of keys, worded by t() at the picture door (src/lib/image-attach.js)
+    { name: 'src/image-attach-rule.js REFUSAL_WORDS', keys: Object.values(req('../src/image-attach-rule.js').REFUSAL_WORDS) },
+    // batch 20 cure: the reopen road's frame the just-started conversation cannot take yet — the route hands the key, the page words it
+    { name: 'src/image-attach-rule.js REPLY_WORDS', keys: Object.values(req('../src/image-attach-rule.js').REPLY_WORDS) },
+    // unit «billing pick alive»: a subscription pick set the machine's key helper aside — the hub's notice, worded by t() on the page
+    { name: 'src/billing-pick.js HELPER_SET_ASIDE', keys: Object.values(req('../src/billing-pick.js').HELPER_SET_ASIDE) },
     // lane browser-login r23 (M2): every For-you notice template in src/browser-login.js NOTICE
     { name: 'src/browser-login.js NOTICE', keys: Object.values(BL.NOTICE || {}).flatMap((v) => [v.text, v.detail]) },
   ];

@@ -22,7 +22,7 @@ import { t } from './i18n.js';
 import { createModalShell, showToast } from './utils.js';
 import { principalPicker, rosterFromApp } from './principal-picker.js';
 import { agoText } from './user-todos-row.js';
-import { accessOfView, summaryOf, spawnFailureText } from '../exit-reach.js';
+import { accessOfView, summaryOf, grantedOf, spawnFailureText } from '../exit-reach.js';
 import { rowToPick, exceptRemoved } from './principal-picker-model.js';
 import { openExitRunsDialog } from './exit-runs-dialog.js'; // lane-exit-run-output E4: the machine's command list
 
@@ -52,6 +52,9 @@ export function exitSummaryText(exit) {
   const s = summaryOf(accessOfView(exit));
   return t('Exit: network — {a} · commands — {b}', { a: grantWords(s.use), b: grantWords(s.run, { ask: s.run.ask }) });
 }
+/** B-cb72: either grant is open to someone (not nobody, not unreadable) — the row door's accent, read through the SAME reader
+ *  as the row's words (exitSummaryText), so an unreadable list never wears the accent beside «unreadable». */
+export function exitGranted(exit) { return grantedOf(exit); }   // PURE src/exit-reach.js (test-exit-reach holds it)
 /** `Last run: ping -c1 … — 运维管理, 3 min ago, exit 0` (the whole command rides the title). */
 export function lastRunText(lr) {
   if (!lr) return t('No command has run here yet');

@@ -35,7 +35,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import * as FX from './fixtures/browser-switcher-views.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop names for the server this suite boots (test-architecture §57)
@@ -225,7 +225,7 @@ else await (async () => {
   const FIXTURES = Object.fromEntries(Object.entries(V).map(([k, v]) => [k, v]));
 
   // ── headless chrome ──
-  const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--force-device-scale-factor=1', `--user-data-dir=${path.join(ROOT, 'chrome')}`, '--window-size=1280,800', 'about:blank'], { stdio: 'ignore' });
+  const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--force-device-scale-factor=1', `--user-data-dir=${path.join(ROOT, 'chrome')}`, '--window-size=1280,800', 'about:blank'], { stdio: 'ignore' });
   procs.add(chrome);
   let target = null;
   for (let i = 0; i < 120 && !target; i++) { try { target = (await (await fetch(`http://127.0.0.1:${CDP}/json`)).json()).find((x) => x.type === 'page'); } catch { } if (!target) await sleep(250); }

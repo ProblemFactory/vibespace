@@ -34,12 +34,16 @@
 //      owner's language, the input that is off), nothing dialled — and the door closes AFTER it; a GET whose client leaves
 //      after the dial ends its upstream and is never the device's failure (the words keep the browser's own code; the shared
 //      proxy counts no error); the road-off words are plain («reaching Tailscale devices from browsers is off»);
+//   B-05e8: a SIBLING whose name is still looked up when another request's refusal closes the door is never cut — it reads its
+//      own 403 and nothing is dialled; under a SYSTEM tailscaled the refusal says so (never «start the plugin»: its start
+//      refuses there); the row's description says the in-page browser follows «at its next connection» (pooled sockets);
 //   ⑤ MUTANTS (copies outside the tree): the system resolver · every host through the HTTP proxy · THE r1 GATE · keep-alive
 //      off · the refusing door · a console line per request · the keeper's calls without the stamp · the env proxy ignored ·
 //      r3: no vet · a boot blind to the road · a door that never closes · a guessable PAC path · a second wait · Node's raw
 //      detail · r4: the PAC reset by the door's own cut · a dial for a client that is gone · r3's «node» filter · the token in
 //      a keeper view · r5: the cut before the refusal · no re-read after the lookup · a cancelled request booked as the
-//      device's failure · the upstream left when its client goes — each turns its leg RED.
+//      device's failure · the upstream left when its client goes · B-05e8: the cut of a sibling still asked — each turns its
+//      leg RED.
 // Run: node scripts/test-tailnet-browsers.mjs   (in-process; the shared fake agent-browser; no real browser)
 import fs from 'node:fs';
 import path from 'node:path';
@@ -263,6 +267,42 @@ async function driveMidLookup(D) {
   }
   return out;
 }
+/** B-05e8 ①: the road off without a word; a SIBLING's name is being looked up when another request is refused at once (its
+ *  answered() closes the door with a cut) → what each client reads + the dials + the door after it (the cut-all mutant reuses it) */
+async function driveSibling(D, { fail = false } = {}) {
+  let release = null, asked = 0;
+  const dials = [], slow = `sib.${SUF}`;
+  const d = mkDoor(null, { lang: () => 'en', dial: (to) => { dials.push(to); return '127.0.0.1'; }, lookup: (h, o, cb) => { if (String(h) === slow) { asked++; release = () => (fail ? cb(Object.assign(new Error(`getaddrinfo ENOTFOUND ${slow}`), { code: 'ENOTFOUND' })) : cb(null, [{ address: '203.0.113.15', family: 4 }])); return undefined; } return lookup(h, o, cb); } }, D);
+  reachNow = { ...KERNEL };
+  await d.ensure();
+  const client = (host) => { const c = { b: '', closed: false }; c.s = net.connect(d.port(), '127.0.0.1', () => c.s.write(`GET http://${host}:${UP_PORT}/ HTTP/1.1\r\nHost: ${host}:${UP_PORT}\r\n\r\n`)); c.s.on('data', (x) => { c.b += x; }); c.s.on('error', () => { }); c.s.on('close', () => { c.closed = true; }); return c; };
+  const B = client(slow);
+  await until(() => asked > 0); // the sibling's name is being looked up (held)
+  reachNow = { ...STOPPED }; // no sync(): nothing said it
+  const A = client(`now.${SUF}`); // refused at once — its answered() closes the door
+  await until(() => A.closed);
+  await until(() => !d.port() || B.closed, 100);
+  const cutBefore = B.closed && !B.b;
+  if (release) release();
+  await until(() => B.closed || dials.length > 0);
+  const st = (c) => c.b.split('\r\n')[0] || '(nothing)', body = (c) => c.b.split('\r\n\r\n').slice(1).join('');
+  const out = { a: { status: st(A), body: body(A) }, b: { asked, status: st(B), body: body(B), cutBefore }, dials: dials.length, after: d.port() };
+  for (const c of [A, B]) { try { c.s.destroy(); } catch { } }
+  reachNow = { ...R };
+  await Promise.race([d.close(), new Promise((r) => setTimeout(r, 300))]);
+  return out;
+}
+/** B-05e8 ②: one request through an open door while the reach says a SYSTEM tailscaled → what the client reads */
+async function driveSystem(D) {
+  const d = mkDoor(null, { lang: () => 'en' }, D);
+  reachNow = { ...KERNEL };
+  await d.ensure();
+  reachNow = { ...R, mode: 'system' };
+  const got = await new Promise((res) => { let b = ''; const s = net.connect(d.port(), '127.0.0.1', () => s.write(`GET http://sys.${SUF}:${UP_PORT}/ HTTP/1.1\r\nHost: sys.${SUF}:${UP_PORT}\r\n\r\n`)); s.on('data', (x) => { b += x; }); s.on('error', () => { }); s.on('close', () => res({ status: b.split('\r\n')[0] || '(nothing)', body: b.split('\r\n\r\n').slice(1).join('') })); });
+  reachNow = { ...R };
+  await Promise.race([d.close(), new Promise((r) => setTimeout(r, 300))]);
+  return got;
+}
 // r5 m1: a device that holds every request (never answers); '/drop' ends it unanswered — the device's own failure (the control)
 const held = new Set();
 let heldGot = 0;
@@ -373,6 +413,19 @@ let ARG = null;
   ok('r5 m2 — THE REFUSAL REACHES THE CLIENT: the road off without a word while a name the PAC listed is looked up ⇒ the client READS the 403 in the person\'s words, in the owner\'s language, by the input that is off (absolute GET, the plugin stopped, en: «left.… is a Tailscale name — the Tailscale plugin is off: start it…»; CONNECT, the row off, zh: «…从浏览器访问 Tailscale 设备已关闭：…打开「从浏览器访问 tailnet 里的机器」») — nothing dialled — and the door closes AFTER it',
     mid.get && mid.get.asked === 1 && mid.get.status === 'HTTP/1.1 403 Forbidden' && mid.get.body === `left.${SUF} is a Tailscale name — the Tailscale plugin is off: start it in ⚙ → Plugins → Tailscale\n` && mid.get.dials === 0 && mid.get.after === null
       && mid.connect.asked === 1 && mid.connect.status === 'HTTP/1.1 403 Forbidden' && mid.connect.body === `left.${SUF} 是 Tailscale 里的名字 — 从浏览器访问 Tailscale 设备已关闭：在 ⚙ → 插件 → Tailscale 打开「从浏览器访问 tailnet 里的机器」\n` && mid.connect.dials === 0 && mid.connect.after === null, mid);
+  const sib = await driveSibling(DOOR);
+  ok('B-05e8 ① A SIBLING STILL LOOKED UP IS NEVER CUT: the road off without a word, one request refused at once closes the door while another\'s name is being looked up ⇒ that one is not cut — it READS its own 403 in the person\'s words, nothing is dialled, and the door is closed after',
+    sib.a.status === 'HTTP/1.1 403 Forbidden' && sib.b.asked === 1 && sib.b.cutBefore === false && sib.b.status === 'HTTP/1.1 403 Forbidden' && sib.b.body === `sib.${SUF} is a Tailscale name — the Tailscale plugin is off: start it in ⚙ → Plugins → Tailscale\n` && sib.dials === 0 && sib.after === null, sib);
+  const sibF = await driveSibling(DOOR, { fail: true });
+  ok('B-05e8 ① …and when the sibling\'s lookup FAILS (a name the resolver no longer knows) it re-reads the road and READS its 403 — never cut, never a 502 of a road that is gone',
+    sibF.b.asked === 1 && sibF.b.cutBefore === false && sibF.b.status === 'HTTP/1.1 403 Forbidden' && sibF.b.body === `sib.${SUF} is a Tailscale name — the Tailscale plugin is off: start it in ⚙ → Plugins → Tailscale\n` && sibF.dials === 0 && sibF.after === null, sibF);
+  const sys = await driveSystem(DOOR);
+  const sysW = ['en', 'zh', 'ja'].map((l) => TR.WORDS[l] && TR.WORDS[l].system);
+  ok('B-05e8 ② UNDER A SYSTEM TAILSCALED the refusal says so — this machine\'s own Tailscale, the door off, the plugin unable to start — never «start it in ⚙ → Plugins» (that start refuses there); in en, zh and ja',
+    sys.status === 'HTTP/1.1 403 Forbidden' && sys.body === `sys.${SUF} is a Tailscale name — this machine runs its own Tailscale (managed outside VibeSpace), so VibeSpace's door stays off and the plugin cannot start here: the name opens only through that Tailscale\n`
+      && sysW.every((w) => typeof w === 'string' && w.includes('{host}') && w.includes('{what}')) && !/start it in|里启动它|で起動してください/.test(sysW.join(' ')), { sys, sysW });
+  const psrc = read('src/plugin-settings.js');
+  ok('B-05e8 ③ the row «Reach tailnet hosts from browsers» says the in-page browser follows AT ITS NEXT CONNECTION (its pooled keep-alive sockets keep the old route), never «at once»', psrc.includes('the in-page browser follows at its next connection.') && !psrc.includes('the in-page browser always follows at once')); // stale-pins: kept — the deliberate absence check: the old «always follows at once» words are GONE
   const EP0 = require('../src/server/egress-proxy.js');
   const cn = await driveCancel(DOOR, EP0);
   ok('r5 m1 — A CLIENT THAT LEAVES IS NOT A DEVICE FAILURE: a GET dialled to a device, its client gone before the device answered (a cancelled request) ⇒ its upstream ends (none left), the door\'s words for that device keep the browser\'s own code («…failed (ERR_TUNNEL_CONNECTION_FAILED)…», never ECONNRESET), the shared proxy (the engine\'s egress) counts no error; CONTROL: the device itself dropping the request ⇒ a 502, its ECONNRESET remembered',
@@ -624,7 +677,9 @@ console.log('⑤ MUTANTS (copies outside the tree)');
   ok('MUTANT r4 N2: the CONNECT dialled after its client is gone (r3) ⇒ ①\'s client-gone leg RED (a dial after the verdict, a live upstream left)', !!m14 && m14['connect-reset'].dials > 0 && m14['connect-reset'].live > 0, m14);
   const D16 = dm([['    return { ...refusal(TR.wordsFor(', '    sync(); return { ...refusal(TR.wordsFor(']], 'refusal-cut');
   const m16 = D16 ? await driveMidLookup(D16) : null;
-  ok('MUTANT r5 m2: r4\'s order (the door cut BEFORE the refusal is written) ⇒ ①\'s mid-lookup leg RED (the client reads nothing)', !!m16 && m16.get.status === '(nothing)' && m16.connect.status === '(nothing)', m16);
+  // B-05e8 ① added a second guard: the proxy never cuts a socket still asked (it answers, then ends) — r4's order ALONE is now held
+  // by it (the client still reads its refusal); the control that goes red removes BOTH (below, after the proxy's mutants)
+  ok('r5 m2 restated (B-05e8 ①): r4\'s order ALONE (the door cut before the refusal is written) is held by the proxy\'s asked-socket guard — the client still reads its 403', !!m16 && /403/.test(String(m16.get.status)) && /403/.test(String(m16.connect.status)), m16 && { get: m16.get.status, connect: m16.connect.status });
   const D17 = dm([['      const r2 = reachNow({ now: true });\n      if (!TR.roadOn(r2)) return offRoad(r2, h);', '      const r2 = null;\n      if (false) return offRoad(r2, h);']], 'no-reread');
   const m17 = D17 ? await driveMidLookup(D17) : null;
   ok('MUTANT r5 m2: no re-read of the road after the lookup (r3) ⇒ ①\'s mid-lookup leg RED (dialled on a road that is off)', !!m17 && m17.get.dials > 0 && m17.connect.dials > 0, m17 && { get: m17.get.dials, connect: m17.connect.dials });
@@ -637,6 +692,15 @@ console.log('⑤ MUTANTS (copies outside the tree)');
   const G19 = esrc.includes(eA3) ? viaProxy(esrc.replace(eA3, ''), 'get-upstream') : null;
   const m19 = G19 ? await driveCancel(G19.D, G19.EP, 20) : null;
   ok('MUTANT r4 N2 / r5: the GET\'s upstream left when its client goes (r3) ⇒ ①\'s client-leaves leg RED (an upstream still open at the device)', !!m19 && m19.leave.live > 0 && m19.engine.live > 0, m19 && { door: m19.leave.live, engine: m19.engine.live });
+  const eA4 = "      for (const c of socks) { if (asking.has(c)) { cutAfter.add(c); marked.push(c); continue; } try { c.destroy(); } catch { /* gone */ } } // B-05e8 ①: one still asked answers first";
+  ok('the B-05e8 cut mutant\'s anchor is in egress-proxy.js', esrc.split(eA4).length === 2);
+  const G20 = esrc.includes(eA4) ? viaProxy(esrc.replace(eA4, '      for (const c of socks) { try { c.destroy(); } catch { /* gone */ } }'), 'cut-all') : null;
+  const m20 = G20 ? await driveSibling(G20.D) : null;
+  ok('MUTANT B-05e8 ①: the cut takes every socket (the .382 door) ⇒ ①\'s sibling leg RED (the sibling still looked up reads nothing)', !!m20 && m20.b.cutBefore === true && m20.b.status === '(nothing)', m20 && m20.b);
+  // MUTANT r5 m2 (both guards gone): r4's order in the door AND the .382 cut-all proxy ⇒ ①'s mid-lookup leg RED (the client reads nothing)
+  const G21 = esrc.includes(eA4) ? (() => { const em = MC.load('src/server/egress-proxy.js', esrc.replace(eA4, '      for (const c of socks) { try { c.destroy(); } catch { /* gone */ } }'), 'order-cut-all-proxy'); const dd = dm([['    return { ...refusal(TR.wordsFor(', '    sync(); return { ...refusal(TR.wordsFor('], ["const EgressProxy = require('./egress-proxy.js');", `const EgressProxy = require(${JSON.stringify(MC.files[MC.files.length - 1])});`]], 'order-cut-all'); return dd ? { D: dd, EP: em } : null; })() : null;
+  const m21 = G21 ? await driveMidLookup(G21.D) : null;
+  ok('MUTANT r5 m2 (both guards gone: r4\'s order in the door + the .382 cut-all proxy) ⇒ ①\'s mid-lookup leg RED (the client reads nothing)', !!m21 && m21.get.status === '(nothing)' && m21.connect.status === '(nothing)', m21 && { get: m21.get.status, connect: m21.connect.status });
   const D15 = dm([["  const said = NODE_HINTS.reduce((t, re) => t.replace(re, ''), String(err.message || '')).replace(/[;\\s]+$/, '').trim();", "  const said = String(err.message || '').split(/;\\s*/).filter((c) => c.trim() && !/\\bnode(\\.js)?\\b|--[a-z]/i.test(c)).join('; ').trim();"]], 'hint-filter');
   const m15 = D15 ? detailsOf(D15) : null;
   ok('MUTANT r4 N5: r3\'s clause filter (any clause with «node» or «--») ⇒ ①\'s detail leg RED (pve-node-2 / node-3 / xn--… lose their text)', !!m15 && !m15[0].includes('pve-node-2') && m15[1] === 'ENOTFOUND', m15);
@@ -650,18 +714,18 @@ console.log('⑤ MUTANTS (copies outside the tree)');
   const mt = kt ? await driveProfile(kt, { label: 'Token mutant' }, { stop: false }) : null;
   const mtv = mt ? tokenViews(kt, mt.p.id, mt.stamp.arg) : null;
   ok('MUTANT r4 N4: the keeper\'s view spreading the whole stamp (r3) ⇒ ②\'s token leg RED (the PAC token in list())', !!mtv && mtv.list === true, mtv);
-  const kA1 = 'const eff = rec && rec.tailnet && rec.tailnet.arg ? displays.tailnetFileFor(eff1, rec.tailnet) : eff1;', kA2 = ' || !!require(\'../tailnet-reach.js\').envProxyOf(env)';
+  const kA1 = 'const eff2 = rec && rec.tailnet && rec.tailnet.arg ? displays.tailnetFileFor(eff1, rec.tailnet) : eff1;', kA2 = 'envProxy: !!require(\'../tailnet-reach.js\').envProxyOf(env), tailnet: true';   // B-8b87: the env term now rides THE ONE ranking (proxyRoadOf)
   ok('the keeper mutants\' anchors are in browser-keeper.js', ksrc.includes(kA1) && ksrc.includes(kA2));
   reachNow = { ...R };
   const D3 = path.join(ROOT, 'data-km'); fs.mkdirSync(D3, { recursive: true });
-  const KM = ksrc.includes(kA1) ? MC.load('src/server/browser-keeper.js', ksrc.replace(kA1, 'const eff = eff1;'), 'no-stamp-calls') : null;
+  const KM = ksrc.includes(kA1) ? MC.load('src/server/browser-keeper.js', ksrc.replace(kA1, 'const eff2 = eff1;'), 'no-stamp-calls') : null;
   const mw = KM ? await driveProfile(mkKeeper(KM, D3), { label: 'Mutant' }) : null;
   ok('MUTANT the keeper\'s calls without the stamp\'s file ⇒ ②\'s every-call leg RED (a call names a file without the switch — Chrome would be relaunched)', !!mw && !(mw.files.length === 1 && mw.fileArgs[0] && mw.fileArgs[0].some((a) => /proxy-pac-url/.test(a))), mw && { files: mw.files, la: mw.la && mw.la.config });
   const D5k = path.join(ROOT, 'data-kenv'); fs.mkdirSync(D5k, { recursive: true });
-  const KE = ksrc.includes(kA2) ? MC.load('src/server/browser-keeper.js', ksrc.replace(kA2, ''), 'env-ignored') : null;
+  const KE = ksrc.includes(kA2) ? MC.load('src/server/browser-keeper.js', ksrc.replace(kA2, 'envProxy: false, tailnet: true'), 'env-ignored') : null;
   const me = KE ? await driveProfile(mkKeeper(KE, D5k, { HTTPS_PROXY: 'http://127.0.0.1:9' }), { label: 'Env mutant' }, { stop: false }) : null;
   ok('MUTANT the env proxy ignored ⇒ ②\'s N6 j leg RED (the PAC rides beside the person\'s proxy)', !!me && hasPac(me), me && me.stamp);
-  ok('the copies live outside the tree', MC.files.length === 25 && MC.files.every((f) => !f.startsWith(path.join(REPO, 'src'))), MC.files);
+  ok('the copies live outside the tree', MC.files.length === 29 && MC.files.every((f) => !f.startsWith(path.join(REPO, 'src'))), MC.files);
 }
 await kdoor.close(); await ed.close();
 done();

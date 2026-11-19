@@ -28,6 +28,7 @@ import { appRefusalText } from './app-install-dialog.js'; // a refusal code → 
 import { shownDigest, openRowOf } from './app-card-model.js'; // design 009: the digest of the card pressed; the row an Installed card opens // Layer 0 apps: THE install dialog an agent's install proposal opens (the same component as "Install xpra on {machine}…")
 import { openResetCreditDialog } from './reset-credit-dialog.js'; // THE one reset-credit confirm dialog (design-reset-credits p2): the ask-mode item's button
 import { showReauthAccountDialog } from './channel-account-dialogs.js'; // lane channel-names-readable: a `channel-reauth` item's verb = THE account's Re-authorize dialog
+import { pressInternalLink } from './internal-link-door.js'; // lane login-request-card piece 1: THE press of a link of the scheme (the page's door)
 import { askArtifactRow, askArtifactProbe, linkTarget } from './foryou-links.js'; // PURE (lane foryou-attachments): an ask's chip → its artifact row + the open-time probe; a link in the words → its target
 import { clearRecords, isCleared, clearedText } from './record-clear-ui.js'; // "Clear content…" (2026-09-28): THE confirm dialog + request path; a cleared item's words
 import { revealLeftMs, revealHeaders, askRevealPassword, forgetReveal } from './vault-reveal.js'; // lane vault-run-door: a held run's «always» asks 验证是你 FIRST, in the press's own task
@@ -38,9 +39,13 @@ import { refusalWords as whoRefusalWords } from './browser-who-model.js'; // «W
 import { restartRefusalWords } from './browser-build-model.js'; // B-53df: the browser-restart item's refusal by its code (PURE words)
 import { humanRefusalText } from '../browser-human.js'; // B-53df: … the person's own browsing words first (PURE)
 import { titleWords } from '../channel-api-card.js'; // PURE (lane card-grammar-exceptions): a raw-API proposal's item says its card's title
-import { postSecretAnswer } from './vault-paste-box.js'; // lane vault-paste-request: a paste request's answer (the value rides ONE body, never a toast)
-import { noteHubClock } from './user-todos-row.js'; // lane wake-approve-card r8: THE hub clock a card's countdown counts by (every snapshot — the broadcast, the GETs — carries the server's `now`; setTodos notes it)
+import { postSecretAnswer, answerJobSecrets } from './vault-paste-box.js'; // lane vault-paste-request: a paste request's answer (the value rides ONE body, never a toast)
+import { refusalText as pictureRefusalText } from './image-attach.js'; // B-51dd: a picture the route refused — the picture door's own words
+import { dropSentPictures } from './reply-pictures.js'; // B-51dd: a sent reply removes exactly the pictures it carried, and every box showing the item redraws
+import { noteHubClock, settingCardOf, noteSettingPresent, untilClock } from './user-todos-row.js'; // lane wake-approve-card r8: THE hub clock a card's countdown counts by (every snapshot — the broadcast, the GETs — carries the server's `now`; setTodos notes it)
 import { isPointer, clockWords, headWordOf, arrivalWords } from '../foryou-actions.js'; // PURE (lane wake-approve-card r3): a pointer hides — its ✕ is «Hide», no Undo; r4: an expired ask's end in words
+import { PROPOSABLE, isSettingChange } from '../ask-setting.js';
+import { clockOf } from './page-time.js'; // lane ui-language: THE one formatter of a time a person reads — the agent's reply says the owner's clock through it (lane setting-doors pick 2) // PURE (CJS, lane setting-doors pick 2): a held row's default (a hold's `before` null)
 import { askOptions } from '../ask-options.js'; // PURE (lane foryou-honest): an ask's chips — the explicit options, else its detail's «A …；B …» / «是 / 否» parsed
 
 /** The badge's tiers — ONE spelling shared by the taskbar / nav button, the
@@ -56,6 +61,17 @@ export function tierCounts(action) {
  *  a loud one adds «· 18 more, none pressing». */
 export function actionWords(action, total = action.length) { return badgeWords(action, total, t); } // the sentence is PURE (user-todos-layout.js badgeWords)
 
+/** THE SIDEBAR ROW a conversation key names — exported ONCE (lane login-request-card piece 1: a link of the scheme names its
+ *  conversation by the same key): the sidebar's OWN canonical key derivation (the one the status chips use) — an ad-hoc
+ *  reimplementation would drift from it. webui:<serverId> covers items filed before the backend id existed. */
+export function sessionRowOf(app, key) {
+  return (app?.sidebar?._allSessions || []).find((s) => {
+    if (s.webuiId && `webui:${s.webuiId}` === key) return true;
+    try { return app.sidebar._getSessionStateKey(s) === key; }
+    catch { return `${s.backend || 'claude'}:${s.sessionId}` === key; }
+  }) || null;
+}
+
 export function inboxModel(app) {
   if (app._inboxModel) return app._inboxModel;
   let todos = { open: [], resolved: [] };
@@ -63,15 +79,7 @@ export function inboxModel(app) {
   const listeners = { todos: new Set(), live: new Set(), status: new Set() };
   const emit = (kind, arg) => { for (const fn of [...listeners[kind]]) { try { fn(arg); } catch (e) { console.warn('[inbox] listener failed:', e); } } };
 
-  // Match items to sidebar sessions with the sidebar's OWN canonical key
-  // derivation (same one the status chips use) — an ad-hoc reimplementation
-  // here would drift from it. webui:<serverId> covers items filed before the
-  // backend id existed.
-  const sessionFor = (key) => (app.sidebar?._allSessions || []).find((s) => {
-    if (s.webuiId && `webui:${s.webuiId}` === key) return true;
-    try { return app.sidebar._getSessionStateKey(s) === key; }
-    catch { return `${s.backend || 'claude'}:${s.sessionId}` === key; }
-  });
+  const sessionFor = (key) => sessionRowOf(app, key);
   const displayName = (s) => {
     try { return app.sidebar?.getCustomName?.(s) || s.name; } catch { return s.name; }
   };
@@ -213,11 +221,13 @@ export function inboxModel(app) {
   /** A link in the words (src/lib/foryou-links.js): a URL / mail address / page per the chat's link convention (a new
    *  tab); a path probed on the ASKER's host against its cwd (the chat's candidates) — a folder opens the explorer there,
    *  nothing found ⇒ a toast that says so. */
-  const openLink = async (item, kind, ref) => {
+  const openLink = async (item, kind, ref, at = {}) => {   // `at` = the press's point (an ENDED conversation's two-item menu opens there)
     const tg = linkTarget(kind, ref, { cwd: (item && item.cwd) || '', host: (item && item.hostId) || '' });
     if (!tg) return false;
     if (tg.open === 'url' || tg.open === 'mail') { window.open(tg.href, '_blank', 'noopener'); return true; }
     if (tg.open === 'page') { window.open(new URL(tg.path, location.origin).href, '_blank', 'noopener'); return true; }
+    if (tg.open === 'setting') { app.openSettingAt?.(tg.key); return true; }   // lane setting-doors pick 1: THE door — Settings on that row; it opens, never writes
+    if (tg.open === 'conversation' || tg.open === 'desktop') { pressInternalLink(tg.open, tg.key || tg.id, at); return true; }   // lane login-request-card piece 1: the page's door — it only navigates
     const host = tg.host || undefined;
     for (const c of tg.cands) {
       const info = await fetchJson(`/api/file/info?path=${encodeURIComponent(c)}${host ? '&host=' + encodeURIComponent(host) : ''}`);
@@ -297,20 +307,23 @@ export function inboxModel(app) {
    *  the typing path, quoted. Both outcomes reach the user as a toast; resolves
    *  true when the reply was sent (the caller then clears its box + draft). A
    *  reply to a conversation that ENDED reopens it (`reopened` — its window opens here). */
-  const postReply = async (id, text, { sentToast = null } = {}) => {   // `sentToast` (lane controls-that-lie): a grant's own words replace «Reply sent»
+  const postReply = async (id, text, { sentToast = null, failWords = null, pictures: pics = null } = {}) => {   // `failWords(why)` (lane setting-doors pick 2): a press that changed something says it beside the failure   // `sentToast` (lane controls-that-lie): a grant's own words replace «Reply sent»; `pictures` (B-51dd): the box's pictures ride the reply
     // fetchJson never throws — a null (network) or an {error, code} body is a
-    // FAILURE the user must see (no silent failures); the box keeps its text
-    const r = await fetchJson(`/api/user-todos/${encodeURIComponent(id)}/reply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+    // FAILURE the user must see (no silent failures); the box keeps its text (and its pictures)
+    const images = Array.isArray(pics) && pics.length ? pics.map((p) => ({ mediaType: p.mediaType, base64: p.base64, name: p.name })) : null;
+    const r = await fetchJson(`/api/user-todos/${encodeURIComponent(id)}/reply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(images ? { text, images } : { text }) });
     if (r && r.ok) {
-      replyFailures.delete(id); drafts.delete(id);
+      replyFailures.delete(id); drafts.delete(id); if (images) dropSentPictures(pictures, id, pics);
       if (r.reopened) { showToast(t('Reopened the conversation and sent your reply')); openReopened(r); }
       else showToast(sentToast || t('Reply sent'));
       return true;
     }
-    const why = r && r.i18n && r.i18n.key ? t(r.i18n.key, i18nParams(r.i18n)) : r && r.error ? t(r.error) : t('server unreachable');   // B-a5a4 follow-up r2: a refusal naming an account
+    // a refused picture is worded with the limits the route judged it by (its `picture.limits`: THAT harness's numbers); a reply the
+    // just-reopened conversation cannot take yet carries its words as a key (`words`) — said in the page's language (batch 20 cure)
+    const why = r && r.code === 'bad_image' && r.picture ? pictureRefusalText([r.picture], t) : r && r.words && r.words.key ? t(r.words.key, r.words.params || {}) : r && r.i18n && r.i18n.key ? t(r.i18n.key, i18nParams(r.i18n)) : r && r.error ? t(r.error) : t('server unreachable');   // B-a5a4 follow-up r2: a refusal naming an account (its i18n); batch 20's: a picture by its harness's numbers, a reopen's words
     replyFailures.set(id, { code: (r && r.code) || 'unreachable', why });
     if (r && r.reopened && r.sessionId) openReopened(r); // reopened, but the reply did not go: the conversation is open — show it
-    showToast(r && r.code === 'resume_failed' ? t('Could not reopen the conversation: {why}', { why }) : t('Could not reply: {why}', { why }), { type: 'error' });
+    showToast(r && r.code === 'resume_failed' ? t('Could not reopen the conversation: {why}', { why }) : failWords ? failWords(why) : t('Could not reply: {why}', { why }), { type: 'error' });
     return false;
   };
   /** "CLEAR CONTENT…" (2026-09-28): THE verb both surfaces offer on an item's menu —
@@ -351,10 +364,58 @@ export function inboxModel(app) {
       sentToast: plan.already ? t('{label} was already open to this conversation — the agent was told', { label }) : t('{label}: this conversation may use it now — the agent was told', { label }),
     });
   };
+  /** lane setting-doors pick 2 — A PROPOSED CHANGE, TAKEN IN ONE PRESS: the owner's page POSTs the change the item carries (its key,
+   *  value and «until» — the hub built them from the schema; never re-typed) with the value the card SHOWED as now (`shown`, the
+   *  button's own, else the card's reading now); the hub judges it again and makes it ONE act (src/server/setting-holds.js press:
+   *  the hold on disk before the value). 409 moved ⇒ said, the card redrawn on the hub's present value — nothing is pressed again
+   *  by itself; any other refusal ⇒ the hub's words, the item stays open; 200 ⇒ the agent is answered on the reply road with what
+   *  was done (the item resolves «by your reply»). A press of the owner's page (fetchJson from the page — its own marks, never a
+   *  bearer). Resolves true when both ran. */
+  const pressSetting = async (rec, { shown } = {}) => {
+    const card = settingCardOf(rec, t);
+    if (!card) return false;
+    const num = (v) => (v === null || v === undefined || v === '' || typeof v === 'boolean' ? NaN : Number(v));   // ask-setting's NUM: an absent field is NO number (Number(null) is 0)
+    const a = rec.action, key = card.key;
+    const showed = Number.isFinite(num(shown)) ? num(shown) : card.now;
+    const body = { key, value: card.value, shown: showed, ...(Number.isFinite(num(a.untilRel)) ? { untilRel: num(a.untilRel) } : Number.isFinite(num(a.untilAt)) ? { untilAt: num(a.untilAt) } : {}) };
+    const r = await fetchJson('/api/setting-holds/press', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!(r && r.ok)) {
+      if (r && Number.isFinite(num(r.present))) noteSettingPresent(key, num(r.present));   // the card follows the hub's present value
+      if (r && r.code === 'moved') { showToast(t('It changed meanwhile — look again'), { duration: 9000 }); return false; }
+      // worded BY ITS CODE in the page's language (the check's words-6: never the hub's English sentence inside zh / ja)
+      const said = {
+        same: () => t('It is already {value} — nothing to change', { value: num(r.present) }),
+        passed: () => t('That moment ({time}) has passed — change it on the row', { time: Number.isFinite(num(a.untilAt)) ? untilClock(num(a.untilAt), t) : '' }),
+        'raise-needs-until': () => t('A raise needs its «until» — change it on the row'),
+        'raise-over-hold': () => t('{value} would stay above {back}, the value before the hold — a raise needs its «until»; change it on the row', { value: card.value, back: num(r.lasting) }),
+        'not-durable': () => t('the hold could not be written to disk, so nothing changed'),
+        'write-failed': () => t('the setting could not be written, so nothing changed'),
+        spend_row_owner_only: () => t('only your own page can change it — nothing changed'),
+      };
+      const why = !r ? t('server unreachable') : said[r.code] ? said[r.code]() : t('this change cannot be pressed here — change it on the row');
+      showToast(t('Could not change it: {why}', { why }) + ` — vibespace://settings/${key}`, { type: 'error', duration: 9000 });   // the row's door (a toast draws the link as one)
+      return false;
+    }
+    const value = num(r.value), untilAt = Number.isFinite(num(r.untilAt)) ? num(r.untilAt) : null;
+    const back = Number.isFinite(num(r.before)) ? num(r.before) : PROPOSABLE[key] ? PROPOSABLE[key].def : null;   // `before` null = the row's default
+    // the agent's words (the reply road — plain English, like a grant's): what the row holds now and, when timed, the moment (the
+    // owner's clock, and the instant itself) and what it returns to by itself
+    const text = untilAt != null
+      ? `${value > showed ? 'Set' : 'Lowered'} ${key} to ${value} until ${clockOf(untilAt)} (then ${back}; ${new Date(untilAt).toISOString().slice(0, 16)}Z)`
+      : `${value > showed ? 'Set' : 'Lowered'} ${key} to ${value}`;
+    return postReply(rec.id, text, {
+      sentToast: untilAt != null ? t('{label}: {value} until {time}, then {back} — the agent was told', { label: card.label, value, time: untilClock(untilAt, t), back })
+        : t('{label}: {value} from now on — the agent was told', { label: card.label, value }),
+      // the row DID change: a reply that failed says both (the check's words-8), never a plain failure
+      failWords: (why) => (untilAt != null ? t('{label}: changed to {value} until {time} — but the agent could not be told: {why}', { label: card.label, value, time: untilClock(untilAt, t), why })
+        : t('{label}: changed to {value} — but the agent could not be told: {why}', { label: card.label, value, why })),
+    });
+  };
   /** A PRODUCER'S ACTION (design-reset-credits p2): the client maps the item's
    *  `action.type` to a verb it owns. Today: the reset-credit confirm dialog. */
   const runAction = async (rec, answer = null, extra = {}) => {   // `extra.reach` (lane key-instance-scope): an automation card's picked reach
     if (rec && rec.action && rec.action.type === 'browser-grant') return grantBrowser(rec);
+    if (rec && isSettingChange(rec.action)) return pressSetting(rec, extra);   // lane setting-doors pick 2: the change an ask proposes, in ONE press (`extra.shown` = the value the pressed button drew)
     if (rec && rec.action && rec.action.type === 'browser-takeover') {
       // lane browser-takeover-queue: ONE record — the item IS the request: its live view, the input side offered (the view's
       // Take over; the agent's words in its bar); the request as the app's queue holds it (else the item's own facts)
@@ -390,7 +451,9 @@ export function inboxModel(app) {
     // model reads the row and never branches on its type; the item resolves itself while it runs and comes back only on a FAIL
     const checkRow = rec && rec.action ? FORYOU_ROW_OF[rec.action.type] : null;
     if (checkRow && typeof checkRow.checkRoute === 'string') {
-      const r = await fetchJson(checkRow.checkRoute, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      // B-5ce7: a route naming the item's own field ({mountId}) is filled from its action — a row for one thing among many
+      const route = checkRow.checkRoute.replace(/\{(\w+)\}/g, (_, k) => encodeURIComponent(String((rec.action && rec.action[k]) || '')));
+      const r = await fetchJson(route, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
       const said = checkRow.checkSaid || {};
       // what the press did, said as it is (small 1): a check already running is NOT restarted — it says how long is left
       if (r && r.ok && r.already) { showToast(t(said.already, { n: String(Number(r.leftMin) || 1) })); return true; }
@@ -410,6 +473,7 @@ export function inboxModel(app) {
     // conversation, its only door
     { const btn = rec && rec.action ? (buttonsOf(rec.action.type) || []).find((b) => b.answer === answer) : null;
       if (btn && btn.door === 'jump') { jump(rec.sessionKey || null, rec); return true; }
+      if (btn && btn.door === 'job-secrets') return answerJobSecrets(answer);   // B-ef1b: the retired job-secrets notice's two buttons (move into the vault / delete the file)
       if (btn && btn.door === 'connect') return !!(await app.openChannelConnect(String(rec.action.kind || ''), { flowId: typeof rec.action.flowId === 'string' ? rec.action.flowId : null }));   // B-8edd: the Connect dialog on the item's type, showing ITS sign-in
     }
     if (rec && rec.action && rec.action.type === 'exit-run-ask') {
@@ -679,6 +743,7 @@ export function inboxModel(app) {
   const boardOf = (key) => { const rec = statusFor(key); return rec ? { rec, word: boardWord(rec.state), why: typeof rec.reason === 'string' ? (isCleared(rec) ? clearedText() : rec.reason) : '' } : null; };
   const byId = (id) => todos.open.find((i) => i.id === id) || todos.resolved.find((i) => i.id === id) || null;
   const drafts = new Map(); // item id → the text of a FOLDED / unsent reply box (the popup's, the mini inbox's and the window's — one draft per item)
+  const pictures = new Map(); // B-51dd: item id → the pictures its reply box holds (src/lib/reply-pictures.js) — kept beside the draft, cleared by a sent reply
 
   // THE WHOLE DETAIL (2026-09-27): a snapshot carries a RESOLVED item's detail as a
   // 300-char preview (`detailTruncated`, the store's previewOf — history never grows the
@@ -734,7 +799,10 @@ export function inboxModel(app) {
     get todos() { return todos; },
     get loaded() { return loaded; },
     byId, sessionFor, displayName, wordsOf, detailOf, recordOf, detailLinesOf, nameFor, jump, isDoor, setStatus, resolveOne, optionsFor, readNotices, postReply, runAction, ensureDetail, clearContent, menuFor, isCleared, openArtifact, openLink,
-    ingestLive, factFor, keyForWebui, webuiIdsFor, keysFor, replyState, replyBox, patchDot, boardOf, drafts,
+    ingestLive, factFor, keyForWebui, webuiIdsFor, keysFor, replyState, replyBox, patchDot, boardOf, drafts, pictures,
+    /** lane setting-doors pick 2: every surface draws its rows again on the snapshot it holds — a fact a row reads that is no item's
+     *  changed (a proposed change's value NOW, a hold): the app calls it on the settings store's change and the holds' broadcast */
+    redraw() { if (loaded) emit('todos', todos); },
     /** THE row renderer's context (src/lib/user-todos-row.js) — the words,
      *  names and the live verdict; a surface passes it (or a copy with its flags) */
     rowCtx: { t, nameFor, wordsOf, detailOf, replyState, optionsOf: optionsFor, lang: resolveLang },

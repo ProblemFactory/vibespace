@@ -720,6 +720,7 @@ await (async () => {
     // the estimator's burn, injected on the engine's OWN instance (the ledger is
     // a stub here): member A burns its 5h at 1.2 %/min, B is idle
     eng.usageEstimator.burnFor = (id) => (id === A && burnA ? { fiveHour: burnA } : {});
+    eng.usageEstimator.predictVerdict = () => ({ state: 'on', n: 99 });   // usage-predict law B3: this world's lanes are stated ON (the pool reads a burn only on an ON lane)
     const mk = (sid, lastAgoMs) => {
       const s = { backend: 'claude', mode: 'chat', host: null, _webuiId: sid, claudeSessionId: 'cid-' + sid, _accountId: P, name: sid, cwd: root, sockName: 'cw-' + sid, buffer: '', createdAt: Date.now(), pty: { write() { } },
         _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: Date.now() - lastAgoMs, _lastRequestAt: Date.now() - lastAgoMs, _isStreaming: false, _turnState: 'idle' }; // the request stamp the stream's record writes (r1a′)
@@ -1078,6 +1079,7 @@ await (async () => {
           && lL.some((l) => /^\[pool\] hold l1-idle: warm cache \(a request in flight since (59|60|61)s\) — proactive move to Member B deferred$/.test(l)),
           JSON.stringify({ r: rI, f: seen['l1-idle'], link: at(wL, 'l1-idle'), l: lineOf('l1-idle') }));
         console.log = console.warn = () => { }; try { await new Promise((r) => setImmediate(r)); } finally { console.log = o0; console.warn = o1; } // the usage record's kicked pass
+        if (wL && wL.eng && wL.eng._poolKickTrail) { for (const t of wL.eng._poolKickTrail.values()) clearTimeout(t); wL.eng._poolKickTrail.clear(); }   // B-37f9: a held kick's re-run is not this leg's to run
       }
     }
     // ── LANE CACHE-WARMTH-COMPACT (2026-11-03 — userW inc-mw1aanqt-994q, B-9769; amendment 1, the owner: «缓存时间这个你没有个
@@ -1089,6 +1091,8 @@ await (async () => {
     {
       const metasM = new Map();
       const metaM = { readSessionMeta: (k) => metasM.get(k) || {}, writeSessionMeta: (k, m) => { metasM.set(k, m); } };
+      const engsM = [];   // B-37f9: every world's engine — a held kick's ONE re-run (10 s on) is not these legs' to run
+      const unTrail = () => { for (const e of engsM) if (e && e._poolKickTrail) { for (const t of e._poolKickTrail.values()) clearTimeout(t); e._poolKickTrail.clear(); } };
       const shapeM = (kind, extra, mod = engMod) => {
         const x = world(mod, { burnA: 0, extra, metaStore: metaM });
         if (!x) return null;
@@ -1101,6 +1105,7 @@ await (async () => {
           rw(x.Bm, (c) => ({ ...c, sevenDay: { utilization: 0.3, resetsAt: nowS + 86400 }, scopedWeekly: [{ name: 'Fable', utilization: 0.2, resetsAt: nowS + 86400 }] }));
         }
         x.credits = (inUse) => rw(x.A, (c) => ({ ...c, overage: { inUse, status: 'allowed', asOf: Date.now() } }));
+        engsM.push(x.eng);
         return x;
       };
       const recM = (id, { read = 0, h1 = 0, m5 = 0, sub = false } = {}) => ({ type: 'assistant', message: { id, role: 'assistant', model: 'claude-fable-5-1', content: [{ type: 'text', text: 'ok' }], usage: { input_tokens: 3, output_tokens: 40, cache_read_input_tokens: read, cache_creation_input_tokens: h1 + m5, cache_creation: { ephemeral_1h_input_tokens: h1, ephemeral_5m_input_tokens: m5 } } }, parent_tool_use_id: sub ? 'toolu_sub' : null, uuid: 'u-' + id });
@@ -1244,7 +1249,7 @@ await (async () => {
         console.log = (...a) => lines.push(a.join(' ')); console.warn = (...a) => lines.push(a.join(' '));
         Date.now = () => realNowR() + skew;
         try { fn((ms) => { skew = ms; }); } finally { Date.now = realNowR; }
-        try { await drain(); await drain(); } finally { console.log = o0; console.warn = o1; }
+        try { await drain(); await drain(); } finally { console.log = o0; console.warn = o1; unTrail(); }
         return lines;
       };
       const st = (state, n) => ({ type: 'system', subtype: 'session_state_changed', state, uuid: 'u-st-' + state + n });
@@ -1592,6 +1597,7 @@ await (async () => {
       getQuotaProbe: () => null, getSessionMetaStore: () => null,
     });
     eng.usageEstimator.burnFor = () => ({});
+    eng.usageEstimator.predictVerdict = () => ({ state: 'on', n: 99 });   // usage-predict law B3: this world's lanes are stated ON (the pool reads a burn only on an ON lane)
     const mk = (sid, on, { warm = false, inTurn = false } = {}) => {
       const s = { backend: 'claude', mode: 'chat', host: null, _webuiId: sid, claudeSessionId: 'cid-' + sid, _accountId: P, name: 'conv ' + sid, cwd: root, sockName: 'cw-' + sid, buffer: '', createdAt: Date.now(), pty: { write() { } },
         _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: Date.now() - (warm ? 20e3 : 70 * 60e3), _lastRequestAt: Date.now() - (warm ? 20e3 : 70 * 60e3), _isStreaming: inTurn, _turnState: inTurn ? 'running' : 'idle' };
@@ -1741,7 +1747,7 @@ await (async () => {
   }
   // (8) CONTROLS — one patched copy per rule
   const src = fs.readFileSync(path.resolve('src/account-pool-auto.js'), 'utf8');
-  const ctl = (tag, from, to) => { if (!src.includes(from)) return null; return M.load('src/account-pool-auto.js', src.replace(from, to), tag); };
+  const ctl = (tag, from, to) => { if (!src.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); return M.load('src/account-pool-auto.js', src.replace(from, to), tag); };
   const noRet = ctl('noreturn', 'if (prioRank && bestSettle && prioRank(bestSettle.id) < prioRank(currentId)) {', 'if (false) { // PATCHED: no priority return');
   ck('priority CONTROL: without the return rule the conversation stays on #2 when #1 can serve again', noRet && noRet.decidePoolSwitch({ currentId: 'b', members: mem, readCache: (id) => good[id], nowSec: NOW, explain: true, proactive: true, hot: true, priority: P }).to === null);
   const noHold = ctl('nohold', "if (warm && warm.inTurn) return none('priority-hold',", "if (false) return none('priority-hold',");
@@ -1776,7 +1782,7 @@ await (async () => {
   const run2 = (mod, caches, fam, opts = {}) => mod.decidePoolSwitch({ currentId: 'a', members: mem, readCache: view(fam, caches), nowSec: NOW, explain: true, hot: true, ...opts });
   const d = (caches, fam, opts) => run2({ decidePoolSwitch }, caches, fam, opts);
   const src = fs.readFileSync(path.resolve('src/account-pool-auto.js'), 'utf8');
-  const ctl = (tag, from, to) => (src.includes(from) ? M.load('src/account-pool-auto.js', src.replace(from, to), tag) : null);
+  const ctl = (tag, from, to) => (src.includes(from) ? M.load('src/account-pool-auto.js', src.replace(from, to), tag) : (() => { throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); })());
   const noKey = ctl('nokey', '  const spare = (a.spare ?? 100) - (b.spare ?? 100);\n  if (spare) return spare;\n', '  // PATCHED: no spare key\n');
   ck('spare CONTROL setup: the no-key copy (today\'s order) loaded', !!noKey);
 
@@ -2023,6 +2029,7 @@ await (async () => {
       getQuotaProbe: () => null, getSessionMetaStore: () => null,
     });
     eng.usageEstimator.burnFor = () => ({});
+    eng.usageEstimator.predictVerdict = () => ({ state: 'on', n: 99 });   // usage-predict law B3: this world's lanes are stated ON (the pool reads a burn only on an ON lane)
     const mk = (sid, on, { warm = false, inTurn = false } = {}) => {
       const s = { backend: 'claude', mode: 'chat', host: null, _webuiId: sid, claudeSessionId: 'cid-' + sid, _accountId: P, name: 'conv ' + sid, cwd: root, sockName: 'cw-' + sid, buffer: '', createdAt: Date.now(), pty: { write() { } },
         _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: Date.now() - (warm ? 20e3 : 70 * 60e3), _lastRequestAt: Date.now() - (warm ? 20e3 : 70 * 60e3), _isStreaming: inTurn, _turnState: inTurn ? 'running' : 'idle' };
@@ -2171,7 +2178,7 @@ await (async () => {
   }
   // CONTROLS — one patched copy per rule
   const src = fs.readFileSync(path.resolve('src/account-pool-auto.js'), 'utf8');
-  const ctl = (tag, from, to) => (src.includes(from) ? M.load('src/account-pool-auto.js', src.replace(from, to), tag) : null);
+  const ctl = (tag, from, to) => (src.includes(from) ? M.load('src/account-pool-auto.js', src.replace(from, to), tag) : (() => { throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); })());
   const noStay = ctl('nostay', "if (currentId === pinId) return { to: null, reason: 'pin', held: true, ...base };", 'if (currentId === pinId) return decidePoolSwitch({ ...opts, explain: true }); // PATCHED: the pin has no authority on its own member');
   ck('pin CONTROL: without the stay rule (the automatic rules decide a conversation on its pin) EDF drags it away', noStay && noStay.decidePinnedPlacement({ pin: 'a', currentId: 'a', members: mem, readCache: (id) => good[id], nowSec: NOW, proactive: true, hot: true }).to === 'b');
   const noSettle = ctl('nosettle', 'const settled = r.known && br.length > 0 && br.every((b) => b.remaining >= THRESH[b.kind].hot + MIN_GAIN_PCT) && (!readLogin || loginSwitchTarget(li));', 'const settled = true; // PATCHED: no settle bar');
@@ -2217,6 +2224,7 @@ await (async () => {
       getSessionMetaStore: () => ({ readSessionMeta: (k) => metas.get(k) || {}, writeSessionMeta: (k, v) => metas.set(k, v) }),
     });
     eng.usageEstimator.burnFor = () => ({});
+    eng.usageEstimator.predictVerdict = () => ({ state: 'on', n: 99 });   // usage-predict law B3: this world's lanes are stated ON (the pool reads a burn only on an ON lane)
     const mk = (sid, on, { warm = false, inTurn = false, host = null } = {}) => {
       const s = { backend: 'claude', mode: 'chat', host, _webuiId: sid, claudeSessionId: 'cid-' + sid, _accountId: P, name: 'conv ' + sid, cwd: root, sockName: 'cw-' + sid, buffer: '', createdAt: Date.now(), pty: { write() { } },
         _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: Date.now() - (warm ? 20e3 : 70 * 60e3), _lastRequestAt: Date.now() - (warm ? 20e3 : 70 * 60e3), _isStreaming: inTurn, _turnState: inTurn ? 'running' : 'idle' };
@@ -3047,7 +3055,7 @@ await (async () => {
     const { mutantCopies: mcP, copiesCensus: ccP } = await import('./mutant-copy.mjs');
     const MPC = mcP('proving', path.resolve('.'));
     const psrc = fs.readFileSync(path.resolve('src/account-pool-auto.js'), 'utf8');
-    const pctl = (tag, from, to) => (psrc.split(from).length === 2 ? MPC.load('src/account-pool-auto.js', psrc.replace(from, to), tag) : null);
+    const pctl = (tag, from, to) => (psrc.split(from).length === 2 ? MPC.load('src/account-pool-auto.js', psrc.replace(from, to), tag) : (() => { throw new Error(`ANCHOR GONE OR NOT UNIQUE (${psrc.split(from).length - 1} times): ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); })());
     const noHeld = pctl('noheld', '      if (held(r.id)) continue;\n', '');
     ck('proving RED: without the in-flight mark three spawns in a row pile onto one guess (C, C, C)', !!noHeld && noHeld.decidePoolSwitch({ ...base, proving: held('c') }).to === 'c');
     const onMoves = pctl('onmoves', 'const provingOn = !!placing && !pinned && proving != null;', 'const provingOn = !pinned && proving != null; // PATCHED');
@@ -3175,6 +3183,147 @@ await (async () => {
       ck('r3 4a RED: a proving decision handed the member\'s OWN FILE only (no identity group) places a spawn on UCI to confirm a reset its identity already read', !!gwRed && gwRed.proving === true, JSON.stringify(gwRed));
       for (const r of ccE(MPE.files, MPE.dir, path.resolve('.'), { minCopies: 3, label: 'proving engine: ' })) ck(r.name, r.pass);
     } else ck('proving engine SKIP — pools unsupported', true);
+    fs.rmSync(scr, { recursive: true, force: true });
+  }
+  // B-37f9: THE TEN-SECOND GATE HOLDS EVERY PER-RECORD KICK — a kick waits 10 s after the pool's last EVALUATION (the release
+  // stamped only at a switch: a kick was held only within 10 s of one). Only kicks: an un-forced pass that OWES its decision (the
+  // tick, a walled turn's end, the cold wall, the pre-fire first decision) is never held by it. A held kick arms ONE re-run.
+  {
+    const PA = require(path.resolve('src/account-pool-auto.js'));
+    ck('B-37f9 PURE: the kicks\' gate is closed 9 s after the last evaluation, open at 10 s, open when forced, open with no evaluation yet, OPEN when the clock stepped back',
+      typeof PA.evalGateOpen === 'function' && PA.evalGateOpen({ now: 10000, last: 1000 }) === false && PA.evalGateOpen({ now: 11000, last: 1000 }) === true && PA.evalGateOpen({ now: 2000, last: 1000, force: true }) === true
+      && PA.evalGateOpen({ now: 5 }) === true && PA.evalGateOpen({ now: 5, last: 0 }) === true && PA.evalGateOpen({ now: Date.now(), last: Date.now() - 3000 }) === false && PA.evalGateOpen({ now: 1000, last: 600000 }) === true && PA.EVAL_GATE_MS === 10000);
+    fs.mkdirSync(scr, { recursive: true });
+    const kicks = (engine) => {
+      const g = world({ engine });
+      if (!g) return null;
+      const E = g.eng, held = () => (E._poolGateHeld && E._poolGateHeld.get(g.P)) || 0, at = () => (E._poolEvalAt && E._poolEvalAt.get(g.P)) || 0;
+      const fresh = () => at() > Date.now() - 2000, trails = () => (E._poolKickTrail ? E._poolKickTrail.size : 0);
+      E._poolSwitchAt.clear(); E._poolAutoLast.clear(); if (E._poolEvalAt) E._poolEvalAt.clear(); if (E._poolGateHeld) E._poolGateHeld.clear();
+      quietly(() => E.maybePoolAutoSwitchForPool(g.P, { kick: true }));
+      const r = { s1: at(), back: Date.now() - 3000 };
+      if (E._poolEvalAt && r.s1 > 0) E._poolEvalAt.set(g.P, r.back);   // that evaluation (when it stamped), wound to 3 s ago: a held kick must leave it there
+      for (let i = 0; i < 4; i++) quietly(() => E.maybePoolAutoSwitchForPool(g.P, { kick: true }));   // five records in one moment
+      Object.assign(r, { held: held(), s2: at(), trails: trails() });
+      // the ONE armed re-run, fired with the gate wound open (ten seconds on): it EVALUATES — no record's decision is lost
+      const tm = E._poolKickTrail ? [...E._poolKickTrail.values()][0] : null;
+      if (E._poolEvalAt) E._poolEvalAt.set(g.P, Date.now() - 11000);
+      r.trailFired = !!tm && typeof E.poolKickRerun === 'function';   // the engine's own seam (never a Node internal of the timer)
+      if (r.trailFired) { clearTimeout(tm); quietly(() => E.poolKickRerun(g.P)); }
+      Object.assign(r, { trailEvaluated: fresh(), trailsAfter: trails() });
+      // an un-forced pass that OWES its decision (the tick's form; a walled turn's end, the cold wall, the pre-fire first decision
+      // are the same call): an evaluation 3 s ago shuts the kicks' gate, never this pass
+      E._poolAutoLast.clear(); if (E._poolEvalAt) E._poolEvalAt.set(g.P, Date.now() - 3000);
+      let h0 = held();
+      quietly(() => E.maybePoolAutoSwitchForPool(g.P));
+      Object.assign(r, { tickHeld: held() - h0, tickEvaluated: fresh() });
+      E._poolAutoLast.clear(); if (E._poolEvalAt) E._poolEvalAt.set(g.P, Date.now() - 3000);
+      h0 = held();
+      quietly(() => E.maybePoolAutoSwitchForPool(g.P, { force: true, kick: true }));   // forced: never held
+      Object.assign(r, { forcedHeld: held() - h0, forcedEvaluated: fresh() });
+      if (E._poolKickTrail) { for (const t of E._poolKickTrail.values()) clearTimeout(t); E._poolKickTrail.clear(); }   // a re-run armed above: not this leg's to wait for
+      return r;
+    };
+    const K = kicks(engMod);
+    if (!K) ck('B-37f9 engine SKIP — pools unsupported', true);
+    else {
+      console.log(`    B-37f9: five kicks in one moment ⇒ held ${K.held}, re-runs armed ${K.trails} (fired: evaluated ${K.trailEvaluated}); a tick-form pass 3 s after an evaluation ⇒ held ${K.tickHeld}, evaluated ${K.tickEvaluated}; forced ⇒ held ${K.forcedHeld}`);
+      ck('B-37f9: five per-record kicks in one moment ⇒ ONE evaluation and FOUR held (a held kick stamps nothing, decides nothing), ONE re-run armed',
+        K.s1 > 0 && K.s2 === K.back && K.held === 4 && K.trails === 1);
+      ck('B-37f9: the armed re-run, ten seconds on, EVALUATES the pool and arms no other (no record\'s decision is lost)', K.trailFired && K.trailEvaluated && K.trailsAfter === 0);
+      ck('B-37f9: an un-forced pass that OWES its decision (not a kick) is NEVER held by the kicks\' gate, 3 s after an evaluation; a forced pass is never held',
+        K.tickHeld === 0 && K.tickEvaluated && K.forcedHeld === 0 && K.forcedEvaluated);
+      const { mutantCopies } = await import('./mutant-copy.mjs');
+      const M37 = mutantCopies('pool-gate-37f9', path.resolve('.'));
+      const ENG = fs.readFileSync(path.resolve('src/server/usage-pool-engine.js'), 'utf8');
+      const STAMP = "    _poolEvalAt.set(poolId, now);   // B-37f9: THE KICKS' STAMP — this pass evaluates the pool (forced or not)\n";
+      const GATE = "    if (kick && !evalGateOpen({ now, last: _poolEvalAt.get(poolId), force })) {\n";
+      const okAnchor = ENG.split(STAMP).length === 2 && ENG.split(GATE).length === 2;
+      ck('ANCHOR: the kicks\' stamp and the kicks\' gate, each spelled once (a missing anchor builds no control: RED by name)', okAnchor);
+      // A COMPACTION'S END owes its ask (the free move window closes at the next request-out): never held by the kicks' gate
+      const compactAsk = async (engine) => {
+        const g = world({ engine });
+        if (!g || typeof g.eng.noteCompacted !== 'function') return null;
+        const E = g.eng, s = g.mk('s-cb', 'uci');
+        E._poolSwitchAt.clear(); E._poolAutoLast.clear(); if (E._poolGateHeld) E._poolGateHeld.clear();
+        const back = Date.now() - 3000;
+        if (E._poolEvalAt) E._poolEvalAt.set(g.P, back);   // the tick evaluated 3 s ago: the kicks' gate is shut
+        const o = console.log, w2 = console.warn; console.log = console.warn = () => { };
+        try { E.noteCompacted(s, { type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'auto' }, uuid: 'u-cb-37f9' }); await new Promise((r) => setImmediate(r)); }
+        finally { console.log = o; console.warn = w2; }
+        const r = { compacted: !!s._compactedAt, held: (E._poolGateHeld && E._poolGateHeld.get(g.P)) || 0, at: (E._poolEvalAt && E._poolEvalAt.get(g.P)) || 0, back };
+        if (E._poolKickTrail) { for (const t of E._poolKickTrail.values()) clearTimeout(t); E._poolKickTrail.clear(); }
+        return r;
+      };
+      const C = await compactAsk(engMod);
+      ck('B-37f9: a compaction\'s end, 3 s after the tick evaluated, ASKS the pool at once — not held (the release\'s road)', !!C && C.compacted && C.held === 0 && C.at > C.back, C);
+      ck('WIRING: the armed timer runs the engine\'s re-run seam (poolKickRerun), the one the leg above runs', ENG.includes('        const tm = setTimeout(() => poolKickRerun(poolId), wait + 50);\n'));
+      const GUARD = '    if (resetCreditPendingFor(currentId, now)) return;\n';
+      ck('ANCHOR (主开发\'s reading of 2438a6df7): the kicks\' stamp sits right AFTER the pool\'s last guard, and it is the ONLY stamp — no stamp before the guards', ENG.includes(GUARD + STAMP) && ENG.split('_poolEvalAt.set(').length === 2);
+      ck('WIRING: a person\'s reset-credit press asks the pool as an OWED ask — both after the credit landed and after its re-read probe',
+        ENG.includes('    else kickPoolEval(userAttempt ? { kick: false } : undefined);') && ENG.includes('const ask = userAttempt ? { kick: false } : undefined; Promise.resolve(probeQuotaForKey(tKey, { session })).then(() => kickPoolEval(ask), () => kickPoolEval(ask));'));
+      // THE FOLLOW-UP: the owed ask is never DROPPED by the hub-wide 5 s throttle — it passes it, and a pass already scheduled
+      // (a usage record in the same chunk) runs un-kicked
+      const throttled = async (engine, sameChunk) => {
+        const g = world({ engine });
+        if (!g || typeof g.eng.noteCompacted !== 'function' || typeof g.eng.kickPoolEval !== 'function') return null;
+        const E = g.eng, s = g.mk('s-ct', 'uci');
+        E._poolSwitchAt.clear(); E._poolAutoLast.clear(); if (E._poolGateHeld) E._poolGateHeld.clear();
+        const o = console.log, w2 = console.warn; console.log = console.warn = () => { };
+        let back = 0;
+        try {
+          if (!sameChunk) { E.kickPoolEval(); await new Promise((r) => setImmediate(r)); }   // a usage record's kick a moment ago: the 5 s throttle is shut
+          back = Date.now() - 3000;
+          if (E._poolEvalAt) E._poolEvalAt.set(g.P, back);   // and the pool's last evaluation 3 s ago: the kicks' gate is shut
+          if (sameChunk) E.kickPoolEval();   // a usage record in the SAME chunk: its pass is scheduled, not run yet
+          E.noteCompacted(s, { type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'auto' }, uuid: 'u-ct-' + (sameChunk ? 'b' : 'a') });
+          await new Promise((r) => setImmediate(r));
+        } finally { console.log = o; console.warn = w2; }
+        const r = { held: (E._poolGateHeld && E._poolGateHeld.get(g.P)) || 0, at: (E._poolEvalAt && E._poolEvalAt.get(g.P)) || 0, back };
+        if (E._poolKickTrail) { for (const t of E._poolKickTrail.values()) clearTimeout(t); E._poolKickTrail.clear(); }
+        return r;
+      };
+      const TA = await throttled(engMod, false), TB = await throttled(engMod, true);
+      const afterOwed = async (engine) => {
+        const g = world({ engine });
+        if (!g || typeof g.eng.kickPoolEval !== 'function') return null;
+        const E = g.eng;
+        E._poolSwitchAt.clear(); E._poolAutoLast.clear(); if (E._poolGateHeld) E._poolGateHeld.clear();
+        const o = console.log, w2 = console.warn; console.log = console.warn = () => { };
+        try {
+          E.kickPoolEval({ kick: false }); await new Promise((r) => setImmediate(r));   // an owed ask evaluates the pool
+          E.kickPoolEval(); await new Promise((r) => setImmediate(r));   // a usage record's kick a moment later
+        } finally { console.log = o; console.warn = w2; }
+        const r = { held: (E._poolGateHeld && E._poolGateHeld.get(g.P)) || 0, trails: E._poolKickTrail ? E._poolKickTrail.size : 0 };
+        if (E._poolKickTrail) { for (const t of E._poolKickTrail.values()) clearTimeout(t); E._poolKickTrail.clear(); }
+        return r;
+      };
+      const AO = await afterOwed(engMod);
+      ck('B-37f9 follow-up: a kick a moment after an owed ask is NOT dropped by the throttle (an owed ask never stamps it) — the kicks\' gate holds it and arms its re-run', !!AO && AO.held === 1 && AO.trails === 1, AO);
+      ck('B-37f9 follow-up: a compaction\'s end 1 ms after a usage record\'s kick (the 5 s throttle shut) still ASKS the pool — the owed ask passes the throttle', !!TA && TA.held === 0 && TA.at > TA.back, TA);
+      ck('B-37f9 follow-up: a compaction\'s end in the SAME chunk as a usage record (its pass scheduled, not run) makes that pass UN-KICKED — evaluated, not held', !!TB && TB.held === 0 && TB.at > TB.back, TB);
+      const THR = '  if (kick && now - _poolEvalKickAt < 5000) return;   // the hub-wide 5 s throttle holds KICKS only\n';
+      const PEND = '  if (_poolEvalPending) { if (!kick) _poolEvalPending.kick = false; return; }   // one pass already scheduled: this ask rides it\n';
+      ck('ANCHOR: the throttle\'s kicks-only test and the pending pass\'s un-kick, each spelled once', ENG.split(THR).length === 2 && ENG.split(PEND).length === 2);
+      if (ENG.split(THR).length === 2 && ENG.split(PEND).length === 2) {
+        const MT = await throttled(M37.load('src/server/usage-pool-engine.js', ENG.replace(THR, '  if (now - _poolEvalKickAt < 5000) return;\n'), 'throttle-all'), false);   // stale-pins: kept (the release's throttle line, restored on purpose by this mutant)
+        ck('MUTANT RED: the throttle for every ask (the release\'s) ⇒ the compaction\'s ask 1 ms after a kick is DROPPED', !!MT && MT.at === MT.back, MT);
+        const MP = await throttled(M37.load('src/server/usage-pool-engine.js', ENG.replace(PEND, '  if (_poolEvalPending) return;\n'), 'pending-kicked'), true);
+        ck('MUTANT RED: a pending pass left KICKED ⇒ the same-chunk compaction rides a kick and the gate holds it', !!MP && MP.held === 1 && MP.at === MP.back, MP);
+      }
+      const ASK = "  kickPoolEval({ kick: false });   // B-37f9: OWED — the free move window closes at the next request-out; never held by the kicks' gate (the release's road)\n";
+      ck('ANCHOR: the compaction\'s owed ask, spelled once', ENG.split(ASK).length === 2);
+      if (ENG.split(ASK).length === 2) {
+        const CM = await compactAsk(M37.load('src/server/usage-pool-engine.js', ENG.replace(ASK, '  kickPoolEval();\n'), 'compaction-kicks'));
+        ck('MUTANT RED: the compaction\'s ask as a KICK ⇒ the tick\'s evaluation 3 s earlier holds it — the free window can close unasked', !!CM && CM.compacted && CM.held === 1 && CM.at === CM.back, CM);
+      }
+      if (okAnchor) {
+        const KO = kicks(M37.load('src/server/usage-pool-engine.js', ENG.replace(STAMP, ''), 'stamp-gone'));
+        ck('MUTANT RED: no evaluation stamp (the release\'s gate for kicks) ⇒ no kick is held — five records, five evaluations', !!KO && KO.held === 0);
+        const KG = kicks(M37.load('src/server/usage-pool-engine.js', ENG.replace(GATE, "    if (!evalGateOpen({ now, last: _poolEvalAt.get(poolId), force })) {\n"), 'gate-every-pass'));
+        ck('MUTANT RED: the gate on EVERY un-forced pass (not only kicks) ⇒ the pass that owes its decision is held, nothing evaluated', !!KG && KG.tickHeld === 1 && !KG.tickEvaluated);
+      }
+    }
     fs.rmSync(scr, { recursive: true, force: true });
   }
 })();
@@ -3400,6 +3549,7 @@ await (async () => {
       getQuotaProbe: () => null, getSessionMetaStore: () => null, getUserTodos: () => todos,
     });
     eng.usageEstimator.burnFor = () => ({});
+    eng.usageEstimator.predictVerdict = () => ({ state: 'on', n: 99 });   // usage-predict law B3: this world's lanes are stated ON (the pool reads a burn only on an ON lane)
     const mk = (sid, cid = 'cid-' + sid) => {
       const s = { backend: 'claude', mode: 'chat', host: null, _webuiId: sid, claudeSessionId: cid, _accountId: Pl, name: sid, cwd: root, sockName: 'cw-' + sid, buffer: '', createdAt: Date.now(), pty: { write() { } },
         _spawnModel: 'sonnet', _pickedModel: 'sonnet', _pickedModelAt: Date.now(), _lastPtyDataAt: Date.now() - 20 * 60e3, _isStreaming: false, _turnState: 'idle' };
@@ -3546,6 +3696,7 @@ await (async () => {
         getQuotaProbe: () => null, getSessionMetaStore: () => null, getUserTodos: () => todos,
       });
       eng.usageEstimator.burnFor = () => ({});
+      eng.usageEstimator.predictVerdict = () => ({ state: 'on', n: 99 });   // usage-predict law B3: this world's lanes are stated ON (the pool reads a burn only on an ON lane)
       const mk = (sid, member, model = 'sonnet') => {
         const s = { backend: 'claude', mode: 'chat', host: null, _webuiId: sid, claudeSessionId: 'cid-' + sid, _accountId: Pl, name: sid, cwd: root, sockName: 'cw-' + sid, buffer: '', createdAt: Date.now(), pty: { write() { } },
           _spawnModel: model, _pickedModel: model, _pickedModelAt: Date.now(), _lastPtyDataAt: Date.now() - 20 * 60e3, _isStreaming: false, _turnState: 'idle' };

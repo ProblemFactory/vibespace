@@ -95,7 +95,7 @@ console.log('§4 RED controls');
 const dir = scratchDir('tqp');
 const mutant = (name, from, to) => {
   const src = fs.readFileSync(path.join(REPO, 'src/desktop-quality.js'), 'utf8');
-  if (src.split(from).length !== 2) return null;
+  if (src.split(from).length !== 2) throw new Error(`ANCHOR GONE OR NOT UNIQUE (${src.split(from).length - 1} times): ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`);
   const f = path.join(dir, `${name}.js`);
   fs.writeFileSync(f, src.replace(from, to));
   return require(f);

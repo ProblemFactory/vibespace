@@ -34,10 +34,20 @@
 //   ⑦ MUTANTS: fail-closed removed ⇒ the refusal legs RED; the sentinel parse removed ⇒ the banner becomes the answer
 //      (RED); the env unsanitized ⇒ the token leg RED; the bound removed ⇒ the timeout leg RED; the filter reading the
 //      boot path only (the shell's verdict ignored, B-544d) ⇒ ⑥b's after-none leg RED.
+//   ⑪ (batch 63 cure) THE VIBESPACE TOOLS STAY FIRST: after the spawn's real prelude the program line of a CLI installed beside
+//     the real browser driver reaches the SHIM (RED: the CLI's directory first); ONE PRELUDE FOR THE ASK AND THE SPAWN: the
+//     ask's fallback rung is the spawn's own composition (RED: the base prelude only — a create the spawn would run is refused);
+//     a look that never said VS_X_ASKED could not look.
+//   ⑪ THE REMOTE TWIN (B-69ec): a paired machine's OWN login shell says where its CLI is — PARITY: the remote ask (src/login-shell.js
+//      remoteAskScript run under sh, as a machine runs it) over ⑧'s planted homes in REAL zsh + REAL bash reaches the SAME program
+//      or the same refusal as the local road; the module (src/server/remote-cli.js) over a stubbed remote exec: path ⇒ that
+//      program (kept), none ⇒ refused by name (the machine and its shell), unanswered ⇒ the prelude's name (kept, named once);
+//      wiring pins (ws-create's two remote branches, both ladders, the host status census); the words; MUTANT the answer
+//      ignored ⇒ the parity and path legs RED.
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { execFileSync, execFile, spawn } from 'node:child_process';
+import { execFileSync, execFile, spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
@@ -228,15 +238,32 @@ const REAL8 = await (async () => {
   const fake = (file, tag) => fs.writeFileSync(file, `#!/bin/sh\nprintf '{"tag":"${tag}","args":"%s"}\\n' "$*" >> "$VS_MARK"\nexit 0\n`, { mode: 0o755 });
   const PROG = path.join(RB, RN); fake(PROG, 'path-program');
   fake(path.join(RB, 'fakenpx'), 'npx');
-  const home = (shape, rc, { target = 'none' } = {}) => {
+  const home = (shape, rc, { target = 'none', reset = false, rcPath = true } = {}) => {
     const h = path.join(DIR, 'homes', shape); fs.mkdirSync(h, { recursive: true });
     fs.writeFileSync(path.join(h, '.zshenv'), 'skip_global_compinit=1\n');
-    for (const f of ['.zshrc', '.bash_profile']) fs.writeFileSync(path.join(h, f), rc + '\n');
+    // B-7f97 (lane bl-tests-e): the program's folder reaches the shell as a PERSON's does — the person's rc puts it on PATH. A login
+    // bash on Debian sources /etc/profile, which RESETS PATH (the second test machine: every «on PATH» shape read «bash refused»);
+    // the inherited PATH alone judged the machine's profile, not the product. The rc line reads its folder from ~/.vs-on-path
+    // (written by envOf for an «on PATH» shape only): the shell is asked under serviceEnv's ALLOWLIST (src/server/cli-cmd.js),
+    // which keeps HOME and drops any other name. `reset` = a profile that resets PATH before the rc (Debian's /etc/profile);
+    // `rcPath: false` = no such rc line (the leg as it was — the CONTROL shape). ~/.profile carries the same head (the checkpoint's
+    // meeting with B-69ec ⑪, 2026-11-18): the remote twin's fallback rung asks a LOGIN sh (src/server/remote-cli.js `sh -lc`, the
+    // spawn's own road), which reads /etc/profile and ~/.profile — Debian's profile resets PATH for that shell too, so the planted
+    // reset is in ~/.profile as well and the remote road judges the same home on every machine (else a machine whose /etc/profile
+    // keeps PATH lets the fallback reach the program the person's shell no longer holds — the fallback rung's own law, pinned by
+    // ⑪'s «THE FALLBACK RUNG» leg (the module's law, on every machine) and the batch 63 cure's «a CLI only ~/.profile puts on
+    // PATH» leg (a real login sh, judged where the machine allows))
+    const head = (reset ? 'PATH=/usr/bin:/bin\n' : '') + (rcPath ? '[ -r "$HOME/.vs-on-path" ] && PATH="$(cat "$HOME/.vs-on-path"):$PATH" && export PATH\n' : '');
+    for (const f of ['.zshrc', '.bash_profile']) fs.writeFileSync(path.join(h, f), head + rc + '\n');
+    fs.writeFileSync(path.join(h, '.profile'), head);   // the login sh's own profile: the reset and the rc line, never the person's aliases
     if (target !== 'none') { fs.mkdirSync(path.join(h, '.local-cli'), { recursive: true }); if (target === 'exec') fake(path.join(h, '.local-cli', RN), 'alias-target'); else fs.writeFileSync(path.join(h, '.local-cli', RN), 'not a program\n', { mode: 0o644 }); }
     return h;
   };
   const SHELLS = [['zsh', ['/usr/bin/zsh', '/bin/zsh'].find((p) => fs.existsSync(p))], ['bash', ['/bin/bash', '/usr/bin/bash'].find((p) => fs.existsSync(p))]].filter(([, p]) => p);
-  const envOf = (h, onPath) => ({ HOME: h, PATH: `${onPath ? RB + ':' : ''}/usr/bin:/bin`, USER: process.env.USER || 'u', LOGNAME: process.env.LOGNAME || 'u', LANG: 'C.UTF-8' });
+  const envOf = (h, onPath) => {
+    if (onPath) fs.writeFileSync(path.join(h, '.vs-on-path'), RB);   // B-7f97: the folder the person's rc line puts on PATH (HOME survives the allowlist)
+    return { HOME: h, PATH: `${onPath ? RB + ':' : ''}/usr/bin:/bin`, USER: process.env.USER || 'u', LOGNAME: process.env.LOGNAME || 'u', LANG: 'C.UTF-8' };
+  };
   const INST = `alias ${RN}="~/.local-cli/${RN}"`;
   // [label, home, PATH has the program dir, the want: { target | prog | refused: 'wrapper' | 'missing' | 'not-executable' | 'none' }]
   const SHAPES = [
@@ -251,6 +278,8 @@ const REAL8 = await (async () => {
     ['the installer alias naming a file that is NOT executable ⇒ refused by its cause', home('noexec', INST, { target: 'noexec' }), false, { refused: 'not-executable' }],
     ['r3 C: the person aliases the lookup words (alias type=\'type -a\', whence, command, unalias), no program ⇒ none — never «could not be asked»', home('builtin-alias', "alias type='type -a'\nalias whence='whence -a'\nalias command='command -p'\nalias unalias='echo'"), false, { refused: 'none' }],
     ['a plain program, no wrapper ⇒ that program', home('plain', ''), true, { prog: null }],
+    ['B-7f97: a plain program on PATH under a profile that RESETS PATH first (Debian\'s /etc/profile in a login bash) ⇒ that program — the person\'s rc line puts its folder back', home('reset', '', { reset: true }), true, { prog: null }],
+    ['B-7f97 CONTROL: the same reset with NO rc line (the leg as it was: the inherited PATH alone) ⇒ refused, none — the machine\'s profile decided it (red)', home('reset-as-was', '', { reset: true, rcPath: false }), true, { refused: 'none' }],
   ];
   const runCli = (cmd, mark) => new Promise((res) => {
     const c = spawn(cmd, ['--stream', 'a b'], { env: { PATH: '/usr/bin:/bin', VS_MARK: mark }, stdio: 'ignore' });
@@ -270,6 +299,20 @@ const REAL8 = await (async () => {
     return { label, sn, sp, h, want, got, cs, marks };
   })));
   return { RN, RB, PROG, SHAPES, SHELLS, envOf, runs };
+})();
+// B-69ec ⑪: the remote twin's runs, started here beside ⑧ (the same planted homes, the machine's road: `sh -c <the script>`)
+const REM11 = (() => {
+  let RC = null, LSM = null;
+  try { RC = require(path.join(REPO, 'src/server/remote-cli.js')); LSM = require(path.join(REPO, 'src/login-shell.js')); } catch { RC = null; }
+  if (!RC || !LSM || typeof LSM.remoteAskScript !== 'function') return null;
+  const shOf = (env, outer = '/bin/sh') => (h, script) => new Promise((res, rej) => execFile(outer, ['-c', script], { env, encoding: 'utf8', timeout: 10000 }, (err, out) => (err && !out ? rej(err) : res(String(out || '')))));
+  const runsOf = (mod, outerOf = () => '/bin/sh') => Promise.all(REAL8.SHAPES.flatMap(([label, h, onPath]) => REAL8.SHELLS.map(async ([sn, sp]) => {
+    const rc = mod.createRemoteCli({ hostShell: shOf({ ...REAL8.envOf(h, onPath), SHELL: sp }, outerOf(sp)), log: () => { } });
+    const got = await rc.forSpawn({ id: 'dev-11', name: 'DEV-11' }, 'claude', REAL8.RN).then((c) => ({ cmd: c }), (e) => ({ err: e }));
+    return { label, sn, got };
+  })));
+  const zsh = (REAL8.SHELLS.find(([n]) => n === 'zsh') || [])[1] || null;
+  return { RC, LSM, runsOf, runs: runsOf(RC), zshRuns: zsh ? runsOf(RC, () => zsh) : Promise.resolve([]), zsh };
 })();
 
 // ⑨'s version-gate leg (round 2) starts with the early batch too
@@ -322,7 +365,7 @@ console.log('③ wiring');
   ok('the dial road\'s shell terminal reads THE ladder (src/login-shell.js S0_SH)', /const \{ S0_SH \} = require\('\.\.\/login-shell'\)/.test(dl) && /const shellResolve = SP\.loginShell \? S0_SH : '';/.test(dl));
   ok('the client draws a cli-missing refusal as a DIALOG (never a toast alone); the failed-RESUME rescue stays', /if \(msg\.code === 'cli-missing'\) \{ try \{ openCliMissingDialog\(this, msg\); \} catch \{ showToast\(text, \{ type: 'error' \}\); \} \}\n\s*else showToast\(text, \{ type: 'error' \}\);/.test(sl) && /const rescueViewOnly = \(\) => \{/.test(sl));
   ok('the route overlays the census on every registered CLI and says a shell-missing CLI is not installed', /const c = cliCmds\.census\(id\);/.test(rt) && /if \(missing && live\[id\] == null\) \{ out\[id\]\.installed = false; out\[id\]\.cmdPath = null; out\[id\]\.version = null; \}/.test(rt));
-  ok('Manage agents: the census line under the version chip (this machine only, textContent) and Re-check on an installed row', /const where = cliWhereWords\(info\);/.test(ma) && /el\.textContent = where\.text;/.test(ma) && /if \(!selectedHost && \(!info\.installed && b\.installCmd \|\| info\.answer\)\) \{/.test(ma));
+  ok('Manage agents: the census line under the version chip (this machine\'s census; a paired machine\'s row its OWN shell\'s answer — B-69ec; textContent) and Re-check on an installed row', /const where = !selectedHost \? cliWhereWords\(info\) : remoteCliWhereWords\(st\.cliWhere && st\.cliWhere\[b\.key\], hostLabel\);/.test(ma) && /el\.textContent = where\.text;/.test(ma) && /if \(!selectedHost && \(!info\.installed && b\.installCmd \|\| info\.answer\)\) \{/.test(ma));
   ok('the shell ask is ONE row of the spawn-env census (held to serviceEnv, its env named)', /\['src\/server\/cli-cmd\.js', 'shell', "the person's LOGIN SHELL asked where an agent CLI is/.test(census) && (cc.match(/env: serviceEnv\(env, \{ keep: \['USER', 'LOGNAME'\], add: \{ SHELL: shell, TERM: 'dumb', VIBESPACE_SHELL_PROBE: '1' \} \}\)/g) || []).length === 1);
 }
 
@@ -542,6 +585,11 @@ async function filterLegs(mod) {
   try { await c.forSpawn('opencode', 'opencode'); } catch { /* refused: the shell holds none */ }
   const acpAfter = typeof c.resolvedHere === 'function' ? c.resolvedHere('opencode', { unaskedBare: true }) : 'no resolvedHere';
   leg('…and once ITS shell found no program, the ACP harness is not here either (unaskedBare applies only before the ask)', acpAfter === false && c.census('opencode').missing === true, String(acpAfter));
+  const cu = mod.createCliCmds({ ask: async () => ({ kind: 'unanswered', why: 'timeout', shell: '/bin/zsh' }), resolve: async () => null, usable: async () => false, log: () => {} });
+  cu.register('opencode', { name: 'opencode', current: 'opencode' });
+  try { await cu.forSpawn('opencode', 'opencode'); } catch { /* refused: neither the shell nor the hub has it */ }
+  const un = typeof cu.resolvedHere === 'function' ? cu.resolvedHere('opencode', { unaskedBare: true }) : 'no resolvedHere';
+  leg('…ASKED AND NOT ANSWERED (the shell timed out, failed to start) is unknown like not asked: the ACP harness stays here — only a real «none» says absent', un === true && cu.census('opencode').missing === false && cu.census('opencode').answer === 'unanswered', String(un));
   const c2 = mod.createCliCmds({ ask: async () => ({ kind: 'path', path: NVMP, via: 'program', shell: '/bin/zsh', shellPath: '/u/.nvm/bin' }), resolve: async () => null, usable: async () => true, log: () => {} });
   c2.register('opencode', { name: 'opencode', current: 'opencode' });
   const got = await c2.forSpawn('opencode', 'opencode');
@@ -551,6 +599,127 @@ async function filterLegs(mod) {
 console.log('⑥b the harness filter\'s fact (B-544d): the shell\'s verdict, read, never asked');
 for (const r of await filterLegs(CLI)) ok(r.name, r.pass, r.detail);
 
+/** ⑪ B-69ec: the remote module over a STUBBED remote exec — rows over a module (the real one or a mutant copy). */
+async function remoteLegs(RC, LSM) {
+  const out = [];
+  const leg = (name, pass, detail) => out.push({ name, pass: !!pass, detail });
+  const say = (body, rc = 0) => `\n__VS_RSHELL__=/bin/zsh\n__VS_RHOME__=/home/u\n${body}\n__VS_RRC__=${rc}\n`;
+  const line = (cv, al = '', ctl = '/usr/bin/printenv') => ['', LSM.BEGIN, cv, LSM.END, '', LSM.AL_BEGIN, al, LSM.AL_END, '', LSM.CTL_BEGIN, ctl, LSM.CTL_END, '/usr/bin:/bin', LSM.PATH_END].join('\n');
+  let asks = 0, clock = 1000, reply = () => say(line('/home/u/.nvm/v24/bin/codex'));
+  const logs = [], H = { id: 'dev-1', name: 'MAC-1' }, seen = [];
+  const rc = RC.createRemoteCli({ hostShell: async (h, sc, o) => { asks++; seen.push({ sc, o }); return reply(); }, log: (l) => logs.push(l), now: () => clock });
+  const p1 = await rc.forSpawn(H, 'codex', 'codex');
+  leg('THE REMOTE TWIN: the machine\'s login shell found it ⇒ the create runs THAT program — one sh word, its own directory ahead of the rest of PATH (a node CLI runs on the node beside it; the tools dir in front when integrated); ONE journal line names the machine\'s shell and the path', p1 === 'env PATH=/home/u/.nvm/v24/bin:"$PATH" /home/u/.nvm/v24/bin/codex' && asks === 1 && logs.length === 1 && /MAC-1's zsh \(login shell\) found 'codex' at '\/home\/u\/\.nvm\/v24\/bin\/codex'/.test(logs[0]), { p1, logs });
+  leg('…the ask is ONE `sh -c` word (an ssh login shell — zsh, fish — runs it as written), carries the person\'s create as its consent (never a held Hub-automation ask) and its bound', !!seen[0] && /^sh -c '/.test(seen[0].sc) && seen[0].o && seen[0].o.consent === true && seen[0].o.timeoutMs === RC.ASK_MS, seen[0] && { head: seen[0].sc.slice(0, 20), o: seen[0].o });
+  leg('…a path with a space or a quote stays ONE word', RC.programLine('/opt/my tools/it\'s/codex') === `env PATH='/opt/my tools/it'\\''s':"$PATH" '/opt/my tools/it'\\''s/codex'` && RC.programLine('/opt/x/codex', { tools: true }) === 'env PATH="$HOME/.vibespace/bin":/opt/x:"$PATH" /opt/x/codex', RC.programLine('/opt/my tools/it\'s/codex'));
+  const p2 = await rc.forSpawn(H, 'codex', 'codex');
+  clock += RC.PATH_KEEP_MS + 1;
+  const p3 = await rc.forSpawn(H, 'codex', 'codex');
+  leg('…the path is KEPT (the next create asks nothing) until PATH_KEEP_MS, then asked again; the census row says where', p2 === p1 && p3 === p1 && asks === 2 && logs.length === 1 && rc.census('dev-1').codex && rc.census('dev-1').codex.answer === 'path' && rc.census('dev-1').codex.shell === 'zsh', { asks, census: rc.census('dev-1') });
+  reply = () => say(line(''));
+  let e1 = null; try { await rc.forSpawn({ ...H }, 'claude', 'claude'); } catch (e) { e1 = e; }
+  const w = e1 && RC.remoteRefusal(e1, 'r-1');
+  leg('…its shell holds NO program ⇒ the create is REFUSED by name before anything starts (cli-missing, the machine and its shell named, remote)', !!e1 && e1.code === 'cli-missing' && e1.remote === true && e1.machine === 'MAC-1' && e1.shell === 'zsh' && /not found as a program by the zsh of MAC-1/.test(e1.message) && w.type === 'error' && w.code === 'cli-missing' && w.reqId === 'r-1' && w.remote === true && w.machine === 'MAC-1', w);
+  reply = () => say(line('')) + '\n__VS_RPRE__=/home/u/.local/bin/claude\n';
+  const pr = await rc.forSpawn({ id: 'dev-2', name: 'MAC-2' }, 'claude', 'claude');
+  leg('THE FALLBACK RUNG: its shell holds none but the remote prelude\'s PATH has it ⇒ the name runs as before (said once, the census names the prelude\'s path)', pr === 'claude' && logs.some((l) => /MAC-2's zsh \(login shell\) holds no program for 'claude' — the remote prelude's PATH has '\/home\/u\/\.local\/bin\/claude', which runs as before/.test(l)) && rc.census('dev-2').claude.prelude === '/home/u/.local/bin/claude', rc.census('dev-2').claude);
+  reply = () => say(line(''));
+  const a0 = asks; let e2 = null; try { await rc.forSpawn(H, 'claude', 'claude'); } catch (e) { e2 = e; }
+  leg('…a «none» is never kept: the next create asks again (an install in between is seen)', !!e2 && asks === a0 + 1, { asks, a0 });
+  reply = () => { throw Object.assign(new Error('link down'), { code: 'host_unavailable' }); };
+  const u1 = await rc.forSpawn(H, 'agy', 'agy'), a1 = asks, u2 = await rc.forSpawn(H, 'agy', 'agy');
+  leg('…it could not be ASKED ⇒ the prelude decides (the configured name, as before), named once, and KEPT for RECHECK_MS (a hung shell never taxes every create)', u1 === 'agy' && u2 === 'agy' && asks === a1 && logs.some((l) => /could not be asked where 'agy' is \(exec:host_unavailable\) — the remote PATH decides/.test(l)) && rc.census('dev-1').agy.why === 'exec:host_unavailable', { logs: logs.slice(-2), census: rc.census('dev-1').agy });
+  reply = () => say(line('', `alias codex='~/.local/bin/codex'`));
+  const rd = RC.createRemoteCli({ hostShell: async (h, sc) => (sc.includes('VS_X_RUNS') ? 'VS_X_ASKED\n' : reply()), log: () => { } });
+  let e3 = null; try { await rd.forSpawn(H, 'codex', 'codex'); } catch (e) { e3 = e; }
+  // batch 63 cure: a look that came back EMPTY (no VS_X_ASKED — a dial run that timed out on a hung mount) could not look: as answered
+  const re = RC.createRemoteCli({ hostShell: async (h, sc) => (sc.includes('VS_X_RUNS') ? '' : reply()), log: () => { } });
+  const pe = await re.forSpawn(H, 'codex', 'codex').then((c) => c, (e) => e && e.code);
+  leg('…a look that came back EMPTY (it never said VS_X_ASKED) could not look — as answered: the alias\'s path runs, never «missing»', typeof pe === 'string' && pe.endsWith(' /home/u/.local/bin/codex'), pe);
+  leg('…the installer alias\'s one word is checked THERE (the one path no PATH lookup vetted): missing ⇒ refused by its cause', !!e3 && e3.code === 'cli-missing' && e3.dangling === 'missing' && e3.notExecutable === '/home/u/.local/bin/codex', e3 && { d: e3.dangling, n: e3.notExecutable });
+  leg('…an operator\'s absolute command and a machine with no remote exec are as configured (null — nothing asked)', (await RC.remoteCmdFor({ hosts: { _hostShell: async () => { asks++; return ''; } }, h: H, backend: 'claude', name: '/opt/claude' })) === null && (await RC.remoteCmdFor({ hosts: null, h: H, backend: 'claude', name: 'claude' })) === null);
+  return out;
+}
+console.log('⑪ THE REMOTE TWIN (B-69ec): a paired machine\'s own login shell says where its CLI is');
+if (!REM11) ok('the remote twin exists (src/server/remote-cli.js + src/login-shell.js remoteAskScript / remoteAnswer)', false);
+else {
+  for (const r of await remoteLegs(REM11.RC, REM11.LSM)) ok(r.name, r.pass, r.detail);
+  const [loc, rem] = await Promise.all([REAL8.runs, REM11.runs]);
+  const same = (l, m, RCm = REM11.RC) => (l.got.cmd ? m.got.cmd === RCm.programLine(l.got.cmd)
+    : !!m.got.err && m.got.err.code === 'cli-missing' && m.got.err.remote === true && !!l.got.err && (l.got.err.wrapper ? !!m.got.err.wrapper && m.got.err.wrapper.kind === l.got.err.wrapper.kind : !m.got.err.wrapper) && (l.got.err.dangling || null) === (m.got.err.dangling || null));
+  for (const [label] of REAL8.SHAPES) {
+    const ls = loc.filter((r) => r.label === label), ms = rem.filter((r) => r.label === label);
+    ok(`PARITY: ${label} — the remote ask reaches what the local road reaches (${ms.map((m) => `${m.sn} ${m.got.cmd ? 'the program' : `refused${m.got.err && m.got.err.dangling ? ` (${m.got.err.dangling})` : ''}`}`).join(' · ')})`, ls.length === REAL8.SHELLS.length && ms.length === ls.length && ls.every((l) => { const m = ms.find((x) => x.sn === l.sn); return !!m && same(l, m); }),
+      JSON.stringify(ms.map((m) => ({ sh: m.sn, cmd: m.got.cmd, err: m.got.err && m.got.err.message, local: (ls.find((l) => l.sn === m.sn) || { got: {} }).got.cmd || 'refused' }))).slice(0, 900));
+  }
+  const zr = await REM11.zshRuns;
+  ok(`THE SSH ROAD's login shell: the same ask handed to REAL zsh -c (as an ssh login shell runs it) reaches the same answers (${zr.length} runs)`, !REM11.zsh || (zr.length === loc.length && zr.every((m) => { const l = loc.find((x) => x.label === m.label && x.sn === m.sn); return !!l && same(l, m); })), zr.filter((m) => { const l = loc.find((x) => x.label === m.label && x.sn === m.sn); return !l || !same(l, m); }).map((m) => ({ shape: m.label.slice(0, 40), sh: m.sn, cmd: m.got.cmd, err: m.got.err && m.got.err.message })).slice(0, 4));
+  const wc = read('src/ws-create.js'), ssh = read('src/spawn/ssh.js'), dial = read('src/spawn/dial.js'), xr = read('src/server/exit-routes.js');
+  ok('wiring: ws-create\'s remote terminal AND chat branches ask through remoteCmdFor for a registered CLI only (the shell harness never), refuse by name, and hand the answer to the ladder as `rcmd`', (wc.match(/remoteCmdFor\(\{ hosts, h, backend, /g) || []).length === 2 && (wc.match(/if \(cliCmds\?\.current\?\.\(backend\) != null\) \{/g) || []).length === 2 && (wc.match(/ws\.send\(JSON\.stringify\(remoteRefusal\(e, data\.reqId\)\)\); return;/g) || []).length === 2 && wc.includes('ladderCtx({ h, shq, rcmd: rcmdR, rargs })') && wc.includes('ladderCtx({ h, shq, ...(rcmdT ? { rcmd: rcmdT } : {}) })')
+    && (wc.match(/remoteCmdFor\(\{ hosts, h, backend, name: [^\n]*, integrationOn \}\)/g) || []).length === 2);   // the ask's prelude flavor = the spawn's (batch 63 cure)
+  ok('wiring: the ssh ladder\'s terminal and the dial ladder run that program (else the configured name); the host status carries the census', ssh.includes('const rcmdT = c.rcmd || rcmd;') && ssh.includes('...spawnEnvPairs.map(shq), rcmdT, ...spawnArgs.map(shq)]') && dial.includes('const rcmd1 = SP.loginShell ? rcmd0 : (rcmd || rcmd0);') && dial.includes('...spawnEnvPairs.map(shq), rcmd1, ') && xr.includes('cliWhere: rc.census(req.params.id)'));
+  const rsrc = read('src/server/remote-cli.js'), RA = "    if (a.kind === 'path') return programLine(a.path, { tools: integration });\n";
+  ok('the remote mutant\'s anchor is in remote-cli.js', rsrc.split(RA).length === 2);
+  const RM = rsrc.includes(RA) ? M.load('src/server/remote-cli.js', rsrc.replace(RA, "    if (a.kind === 'path') return name;\n"), 'remote-name') : null;
+  const redR = RM ? (await remoteLegs(RM, REM11.LSM)).filter((r) => !r.pass).map((r) => r.name) : [];
+  const parR = RM ? (await REM11.runsOf(RM)).filter((m) => { const l = loc.find((x) => x.label === m.label && x.sn === m.sn); return l && !same(l, m); }).length : 0;
+  ok(`MUTANT the answer ignored (the configured name, the pre-twin road) ⇒ the path leg RED (${redR.length}) and the parity RED on ${parR} runs`, redR.some((n) => /^THE REMOTE TWIN/.test(n)) && parR > 0, redR.join(' | ').slice(0, 300));
+  // batch 63's cure — the program line and the ask's prelude, run in a REAL sh over a planted home: a CLI and the real browser
+  // driver installed under ONE prefix (an nvm node's bin, no default alias, no nvm.sh), the VibeSpace shim in ~/.vibespace/bin,
+  // a PATH of plain tools only (no node: the spawn's node finder is what reaches the nvm bin). The machine's LOGIN shell is a
+  // planted one that drops -l (it never reads this test machine's /etc/profile); the fallback rung and the spawn are login
+  // sh's, as on a paired machine — so a test machine whose login sh already reaches a node or a CLI cannot judge them (said).
+  const RS = require(path.join(REPO, 'src/remote-shell.js'));
+  const PH = path.join(DIR, 'b63-home'), PB = path.join(PH, '.nvm', 'versions', 'node', 'v22.1.0', 'bin'), PT = path.join(PH, '.vibespace', 'bin'), PP = path.join(DIR, 'b63-tools');
+  for (const d of [PB, PT, PP, path.join(PH, 'bin')]) fs.mkdirSync(d, { recursive: true });
+  fs.writeFileSync(path.join(PB, 'node'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  fs.writeFileSync(path.join(PB, 'agent-browser'), '#!/bin/sh\necho DRIVER-REAL\n', { mode: 0o755 });
+  fs.writeFileSync(path.join(PT, 'agent-browser'), '#!/bin/sh\necho DRIVER-SHIM\n', { mode: 0o755 });
+  fs.writeFileSync(path.join(PB, 'b63cli'), '#!/bin/sh\nexec agent-browser\n', { mode: 0o755 });   // the planted CLI's name is no real program's (the tier rule reads a `command -v` of one as a run of it)
+  fs.writeFileSync(path.join(PH, 'bin', 'mycli'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  fs.writeFileSync(path.join(PH, '.profile'), 'PATH="$HOME/bin:$PATH"; export PATH\n');   // only a LOGIN sh reads it (Debian's stock ~/.profile shape)
+  const NLSH = path.join(DIR, 'b63-nlsh'); fs.writeFileSync(NLSH, '#!/bin/sh\n[ "$1" = -l ] && shift\n[ "$1" = -i ] && shift\nexec /bin/sh "$@"\n', { mode: 0o755 });
+  for (const t of ['sh', 'printenv', 'ls', 'sort', 'tail', 'head', 'dirname', 'cat', 'env', 'id', 'awk', 'cut', 'getent', 'timeout']) {
+    const at = spawnSync('/bin/sh', ['-c', `command -v ${t}`], { encoding: 'utf8' }).stdout.trim();
+    if (at.startsWith('/')) { try { fs.symlinkSync(at, path.join(PP, t)); } catch { } }
+  }
+  const PENV = { HOME: PH, PATH: PP, SHELL: NLSH, USER: 'u', LOGNAME: 'u' };
+  const q1 = (x) => `'${String(x).replace(/'/g, `'\\''`)}'`;
+  const shRun = (script, env = PENV) => spawnSync('/bin/sh', ['-c', script], { env, encoding: 'utf8', timeout: 10000 });
+  const loginReach = shRun(`sh -lc ${q1('command -v node; command -v b63cli; command -v mycli')} </dev/null`).stdout.trim().split('\n').filter((l) => l.startsWith('/') && !l.startsWith(PH));
+  // MUST 1 — THE VIBESPACE TOOLS STAY FIRST: the spawn's prelude, then the program line; which driver answers
+  const driverBy = (RCm, integ, env = PENV) => shRun(`${RS.buildRemoteShellPrelude({ toolsOnPath: integ, withNodeFinder: integ })}exec ${RCm.programLine(path.join(PB, 'b63cli'), { tools: integ })}`, env).stdout.trim();
+  const d1 = driverBy(REM11.RC, true), d0 = driverBy(REM11.RC, false), dLeft = driverBy(REM11.RC, false, { ...PENV, PATH: `${PT}:${PP}` });
+  ok(`THE VIBESPACE TOOLS STAY FIRST: after the spawn's integrated prelude, the program line of a CLI installed beside the real browser driver reaches the SHIM (${d1}); a pristine spawn gets no tools dir from the line (${d0}), even when the machine's own PATH holds it (${dLeft})`, d1 === 'DRIVER-SHIM' && d0 === 'DRIVER-REAL' && dLeft === 'DRIVER-REAL', { d1, d0, dLeft });
+  const PLA = "const programLine = (p, { tools = false } = {}) => `env PATH=${tools ? '\"$HOME/.vibespace/bin\":' : ''}${shWord(p.replace(/\\/[^/]*$/, '') || '/')}:\"$PATH\" ${shWord(p)}`;";
+  ok('the anchor of the control «the CLI\'s dir first» is in remote-cli.js once', rsrc.split(PLA).length === 2);
+  const RP = rsrc.includes(PLA) ? M.load('src/server/remote-cli.js', rsrc.replace(PLA, "const programLine = (p, { tools = false } = {}) => `env PATH=${shWord(p.replace(/\\/[^/]*$/, '') || '/')}:\"$PATH\" ${shWord(p)}`;"), 'cli-dir-first') : null;   // the tip before this, on purpose — stale-pins: kept
+  const dR = RP ? driverBy(RP, true) : null;
+  ok(`RED CONTROL: the line with the CLI's directory first (the tip before this) — the REAL driver answers, the mediation bypassed without a sign (${dR})`, dR === 'DRIVER-REAL', dR);
+  // MUST 2 — ONE PRELUDE FOR THE ASK AND THE SPAWN, and the fallback rung is a LOGIN sh as the spawn's: the machine's login
+  // shell holds neither CLI; the spawn's prelude (the node finder) reaches the planted CLI, its login sh reaches mycli (~/.profile)
+  const spawnFinds = (name, integ) => shRun(`sh -lc ${q1(`${RS.buildRemoteShellPrelude({ toolsOnPath: integ, withNodeFinder: integ })}command -v ${name}`)} </dev/null`).stdout.trim();
+  const askBy = (RCm, name, integ) => RCm.createRemoteCli({ hostShell: async (h, sc) => String(shRun(sc).stdout || ''), log: () => { } })
+    .forSpawn({ id: 'dev-63', name: 'DEV-63' }, name, name, { integration: integ }).then((c) => ({ cmd: c }), (e) => ({ err: e && e.code }));
+  const PAA = "const preludeAsk = (name, integration) => `sh -lc ${sq(`${askPrelude(integration)}printf '\\\\n${R_PRE}%s\\\\n' \"$(command -v ${name} 2>/dev/null | head -n 1)\"`)} </dev/null 2>/dev/null`;";
+  ok('the anchor of the controls «a shorter ask prelude» and «a non-login fallback» is in remote-cli.js once', rsrc.split(PAA).length === 2);
+  if (loginReach.length) console.log(`  · NOT JUDGED HERE (by name): this machine's login sh already reaches ${loginReach.join(', ')} — the one-prelude legs need a login sh that reaches no node and no CLI`);
+  else {
+    const [a1, a0, am] = await Promise.all([askBy(REM11.RC, 'b63cli', true), askBy(REM11.RC, 'b63cli', false), askBy(REM11.RC, 'mycli', false)]);
+    const s1 = spawnFinds('b63cli', true), s0 = spawnFinds('b63cli', false), sm = spawnFinds('mycli', false);
+    ok(`ONE PRELUDE FOR THE ASK AND THE SPAWN: with integration on the spawn's prelude reaches the CLI (${s1 ? 'found' : 'none'}) and the ask agrees — the name runs (${JSON.stringify(a1)}); with it off neither has it — refused (${JSON.stringify(a0)})`,
+      s1 === path.join(PB, 'b63cli') && a1.cmd === 'b63cli' && s0 === '' && a0.err === 'cli-missing', { s1, s0, a1, a0 });
+    ok(`…and the fallback rung is a LOGIN sh as the spawn's: a CLI only ~/.profile puts on PATH — the spawn's login sh reaches it (${sm ? 'found' : 'none'}), the ask agrees, the name runs (${JSON.stringify(am)})`, sm === path.join(PH, 'bin', 'mycli') && am.cmd === 'mycli', { sm, am });
+    const RA2 = rsrc.includes(PAA) ? M.load('src/server/remote-cli.js', rsrc.replace(PAA, "const preludeAsk = (name, integration) => `sh -lc ${sq(`${buildRemoteShellPrelude({})}printf '\\\\n${R_PRE}%s\\\\n' \"$(command -v ${name} 2>/dev/null | head -n 1)\"`)} </dev/null 2>/dev/null`;"), 'short-ask-prelude') : null;
+    const aR = RA2 ? await askBy(RA2, 'b63cli', true) : null;
+    ok(`RED CONTROL: the ask with the base prelude only (the first tip: no node finder) — a create the spawn would run is REFUSED (${JSON.stringify(aR)})`, !!aR && aR.err === 'cli-missing', aR);
+    const RA3 = rsrc.includes(PAA) ? M.load('src/server/remote-cli.js', rsrc.replace(PAA, "const preludeAsk = (name, integration) => `printf '\\\\n${R_PRE}%s\\\\n' \"$( ${askPrelude(integration)} command -v ${name} 2>/dev/null | head -n 1 )\"`;"), 'non-login-fallback') : null;   // the cure's first cut, on purpose — stale-pins: kept
+    const aN = RA3 ? await askBy(RA3, 'mycli', false) : null;
+    ok(`RED CONTROL: a non-login fallback (the cure's first cut) — the CLI only ~/.profile reaches is REFUSED though the spawn would run it (${JSON.stringify(aN)})`, !!aN && aN.err === 'cli-missing', aN);
+  }
+  ok('wiring: the ssh ladder\'s prelude flavor follows the integration switch whatever the ship\'s outcome (the ask asks the same composition)', ssh.includes('let prelude = integrationOn ? buildRemoteShellPrelude({ toolsOnPath: true, withNodeFinder: true }) : REMOTE_PRELUDE;'));
+}
+
 // ⑦'s mutants START here and run beside ⑧–⑩ (disjoint scratch state); their rows print after ⑩
 const SEVEN = (() => {
   const cc = read('src/server/cli-cmd.js');
@@ -558,7 +727,7 @@ const SEVEN = (() => {
     ['fail-closed removed (found nothing ⇒ spawn the old path)', '      if (p) return p;\n      const r = refusal(backend, e);', '      if (p || true) return p || cmd;\n      const r = refusal(backend, e);', (m) => registryLegs(m, { slow: false }), /FAIL CLOSED|REFUSED by that word|refused too/],
     ['sentinel parse removed (the first printed line is the answer)', '      const p = LS.parseShellAnswer(out);', "      const p = { complete: true, pathDone: true, cv: out.split('\\n').map((l) => l.trim()).filter(Boolean)[0] || '', path: null };", (m) => rungLegs(m, { groups: ['noisy'] }), /LAST pair wins|kind:none/],
     ['env unsanitized (the hub\'s process.env handed to the shell)', "env: serviceEnv(env, { keep: ['USER', 'LOGNAME'], add: { SHELL: shell, TERM: 'dumb', VIBESPACE_SHELL_PROBE: '1' } })", "env: { ...env, SHELL: shell }", (m) => rungLegs(m, { groups: ['env'] }), /SANITIZED ENV/],
-    ['filter boot-only (B-544d: the shell\'s verdict ignored — the pre-fix /api/home)', '      if (missingOf(e)) return false;\n      return isAbs(e.current) || (!e.answer && !!unaskedBare);', '      return isAbs(e.current) || !!unaskedBare;', (m) => filterLegs(m), /^THE FILTER after the login shell found NO program/],
+    ['filter boot-only (B-544d: the shell\'s verdict ignored — the pre-fix /api/home)', '      if (missingOf(e)) return false;\n      // asked and NOT answered (the shell failed to start, timed out) is unknown, like not asked — only a real «none» says absent\n      return isAbs(e.current) || ((!e.answer || e.answer.kind === \'unanswered\') && !!unaskedBare);', '      return isAbs(e.current) || !!unaskedBare;', (m) => filterLegs(m), /^THE FILTER after the login shell found NO program/],
     ['the bound removed (its timer ends nothing)', "    timer = setTimeout(() => done({ kind: 'unanswered', why: 'timeout' }), timeoutMs);", '    timer = setTimeout(() => { }, timeoutMs);', (m) => rungLegs(m, { groups: ['sleepy'], boundGuardMs: 40 }), /unanswered:timeout/],
   ];
   const runs = MUT.map(([label, from, to, legs]) => cc.includes(from)
@@ -621,6 +790,12 @@ console.log('⑧ round 5 (final) — THE SHELL SAYS WHERE; THE SPAWN IS ALWAYS A
   ok(`A: a wrapper with no program is refused in honest words with the two doors («${nnDom.slice(0, 160)}…»)`, /wraps vsreal\d+ in an alias \(alias .*\), which VibeSpace does not run, and has no vsreal\d+ program on its PATH\. Set CLAUDE_CMD to the program the alias runs, or put the program on your PATH\./.test(nnDom) && !/add that directory/.test(nnDom), nnDom);
   const dgDom = dom(dg), dgLine = line(dg, { installed: false });
   ok(`A: a dangling target is said by its CAUSE — the dialog's DOM and the Manage agents line («${dgLine.slice(0, 120)}»)`, /alias for vsreal\d+ names .*, which is missing\./.test(dgDom) && /^your bash’s alias names .*, which is missing$/.test(dgLine), JSON.stringify({ dgDom, dgLine }));
+  if (mod && typeof mod.remoteCliWhereWords === 'function') {
+    const rw = mod.cliMissingWords({ remote: true, machine: 'MAC-1', cli: 'codex', shell: 'zsh', answer: 'none' }), rwr = mod.cliMissingWords({ remote: true, machine: 'MAC-1', cli: 'codex', shell: 'zsh', answer: 'none', wrapper: { kind: 'function', text: 'codex' } }), rwd = mod.cliMissingWords({ remote: true, machine: 'MAC-1', cli: 'codex', shell: 'zsh', answer: 'none', notExecutable: '/home/u/.local/bin/codex', dangling: 'missing' });
+    ok('B-69ec: a remote refusal names THAT machine\'s shell — never «your shell» nor the hub\'s PATH', rw.asked === 'Asked: the zsh of MAC-1, as a login shell' && rw.what === 'Nothing was started. The zsh of MAC-1 has no codex program on its PATH.' && rw.hint === null && /wraps codex in an alias or a function, which VibeSpace does not run/.test(rwr.what) && rwd.what === 'Nothing was started. The alias for codex in the zsh of MAC-1 names /home/u/.local/bin/codex, which is missing.' && ![rw, rwr, rwd].some((x) => /your |hub’s/.test(x.what + x.asked)), { rw, rwr, rwd });
+    const W1 = mod.remoteCliWhereWords({ answer: 'path', path: '/home/u/.nvm/v24/bin/codex', shell: 'zsh' }, 'MAC-1'), W2 = mod.remoteCliWhereWords({ answer: 'none', shell: 'bash' }, 'MAC-1'), W3 = mod.remoteCliWhereWords({ answer: 'unanswered', shell: 'zsh', why: 'timeout' }, 'MAC-1');
+    ok('B-69ec: a remote host\'s Manage agents line says where THAT machine\'s shell found it (or not, or could not be asked); never asked yet ⇒ no line', W1.text === 'found by the zsh of MAC-1 at /home/u/.nvm/v24/bin/codex' && W1.tone === 'dim' && W2.text === 'not found by the bash of MAC-1 (login shell)' && W2.tone === 'warn' && /^the zsh of MAC-1 could not be asked \(.+\) · its own PATH decides$/.test(W3.text) && mod.remoteCliWhereWords(null, 'MAC-1') === null, { W1, W2, W3 });
+  } else ok('B-69ec: the dialog module carries the remote words (remoteCliWhereWords)', false);
   delete globalThis.document;
 }
 {
@@ -738,7 +913,7 @@ console.log('⑩ round 2 — THE SHELL RUNS FOR A PERSON\'S PRESS ONLY: the usag
   const DOOR = require(path.join(REPO, 'src/server/cli-usage-door.js'));
   const door = DOOR.createCliUsageDoor({
     accounts: { get: (id) => ({ id, backend: 'antigravity' }), resolveForSpawn: () => { throw new Error('stub: no login in this leg'); } },
-    harnessOf: () => ({ label: 'Antigravity', quota: { onDemand: { judge: () => ({ verdict: 'reading' }), argv: ['-p', '/usage'], onWallSignal: true, cwdOf: () => DIR } } }),
+    harnessOf: () => ({ label: 'Antigravity', quota: { onDemand: { judge: () => ({ verdict: 'reading' }), argv: ['-p', '/usage'], onWallSignal: true, cwdOf: () => DIR } }, settings: { prefix: 'antigravity', rows: [{ key: 'autoUsageReads', default: 'on' }] } }),   // its own row for automatic reads (a harness without one is refused by name)
     cliCmds: reg, cacheDir: DIR, setting: () => 'manual', log: () => { }, paceMs: 0,
   });
   const w0 = await door.read('acct-wall', { wall: true });
@@ -762,7 +937,7 @@ console.log('⑦ mutants of the shell rung (patched copies outside the tree, jud
     const red = reds[i];
     ok(`mutant «${label}» ⇒ RED (${red.length} red: ${red.slice(0, 2).join(' | ').slice(0, 160)})`, red.some((n) => want.test(n)), red.join(' | ').slice(0, 300));
   });
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 8 })) ok(r.name, r.pass, r.detail); // ④'s 3 + ⑦'s 5
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 11 })) ok(r.name, r.pass, r.detail); // ④'s 3 + ⑦'s 5 + ⑪'s 3 (batch 63 cure: + the CLI's dir first, + a shorter ask prelude)
 }
 
 console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed)' : 'ALL PASS (' + pass + ')'}`);

@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // PURE model gate for Background Work (docs/design-background-work.md M1).
 import { createRequire } from 'node:module';
+import { spawnSync } from 'node:child_process';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -46,22 +48,27 @@ ok(!M.isOwner(mk(9), { conversationId: 'zzz', sessionId: 'sess-A', sessionCreate
   // user's (none); a cron's child carries its parent's owner whole. A writer anywhere else (a refresh on a mutation or a sweep)
   // is a new site here. Over src/ and the agent CLIs (data/bin).
   const SNAP = /groupsSnapshot\s*(?::(?!\s*\[\])|=(?!=))|groupsSnapshot\s*:\s*\[\]/;
-  const files = [], walk = (d) => { for (const e of fs.readdirSync(path.join(__dirname_jm, '..', d), { withFileTypes: true })) { const r = d + '/' + e.name; if (e.isDirectory()) walk(r); else if (/\.(m?js|cjs)$/.test(e.name) || d === 'data/bin') files.push(r); } };
-  walk('src'); walk('data/bin');
+  // the TRACKED tree (git ls-files), so a scratch file a developer leaves under src/ is not a site; no git ⇒ the walk of the dirs
+  const root = path.join(__dirname_jm, '..');
+  const ls = spawnSync('git', ['ls-files', '-z', '--', 'src', 'data/bin'], { cwd: root, encoding: 'utf8' });
+  const files = ls.status === 0 ? ls.stdout.split('\0').filter((f) => f && (/\.(m?js|cjs)$/.test(f) || f.startsWith('data/bin/'))) : [];
+  if (ls.status !== 0) { const walk = (d) => { for (const e of fs.readdirSync(path.join(root, d), { withFileTypes: true })) { const r = d + '/' + e.name; if (e.isDirectory()) walk(r); else if (/\.(m?js|cjs)$/.test(e.name) || d === 'data/bin') files.push(r); } }; walk('src'); walk('data/bin'); }
   const sites = files.flatMap((f) => fs.readFileSync(path.join(__dirname_jm, '..', f), 'utf8').split('\n').map((l, i) => [f, i + 1, l]).filter(([, , l]) => SNAP.test(l) && !/^\s*(\/\/|\*)/.test(l)));
   const shape = sites.map(([f, , l]) => f + ': ' + (l.match(/groupsSnapshot\s*[:=][^,}\n]*/) || [''])[0].trim());
   ok(shape.length === 2 && shape.includes('src/agent-routes.js: groupsSnapshot: [...a.caller.groups]') && shape.includes('src/server/jobs-wiring.js: groupsSnapshot: []')
     && SNAP.test('    job.owner.groupsSnapshot = [...caller.groups];') && SNAP.test("  owner: { createdBy: 'agent', groupsSnapshot: groupsNow() },") && !SNAP.test('(job.owner && job.owner.groupsSnapshot || [])'),
     `B-b461: owner.groupsSnapshot is written only at creation — ${shape.join(' · ')} (CONTROL: a planted refresh assignment and a recomputed create are caught, a read is not)`);
   const doc = fs.readFileSync(path.join(__dirname_jm, '..', 'docs/design-background-work.md'), 'utf8');
+  // the same words are read by agents (the manual is served at runtime) and by engineers (kb-features): neither promises them
+  const others = ['docs/agent/background-work-manual.md', 'docs/kb-features.md'].map((f) => [f, fs.readFileSync(path.join(__dirname_jm, '..', f), 'utf8')]);
   // a promise may wrap across `//` comment lines inside the doc's code block: read it with the continuation markers folded
   const promises = (t) => /fallback\s+`?all`?\s+when\s+ungrouped|refreshed eagerly|surfaced for re-owning/i.test(t.replace(/\n\s*(?:\/\/)?\s*/g, ' '));
-  ok(!promises(doc)
+  ok(!promises(doc) && others.every(([, txt]) => !promises(txt))
     && promises('    "groupsSnapshot": ["T-…"]        // refreshed eagerly on every mutation + periodic sweep')
     && promises('                                     // agent defaults: view=group (fallback all when\n                                     // ungrouped), control=session; user locks stick (§7)')
     && promises('- `view`/`control` ∈ session|group|all; agent defaults view=group (fallback\n  `all` when ungrouped), control=session. Owner = conversation-lineage match,')
     && promises('  verified on the fast path; mismatch ⇒ surfaced for re-owning in the panel.'),
-    'B-b461: docs/design-background-work.md promises no eager groupsSnapshot refresh, no fallback to all and no re-own in the panel (CONTROL: each of the four removed lines is caught)');
+    'B-b461: docs/design-background-work.md, the agent manual and kb-features promise no eager groupsSnapshot refresh, no fallback to all and no re-own in the panel (CONTROL: each of the four removed lines is caught)');
 }
 
 // ── vendor vet (negative controls) ──
@@ -738,5 +745,155 @@ console.log('B-70f9 ② ownedJobsView — the jobs a conversation OWNS, attentio
   ok(plants.every(([, src]) => src && src !== wrap && !removed(src)), `CONTROL: each patched copy is RED — ${plants.map(([n, src]) => `${n}: ${!src ? 'ANCHOR GONE' : removed(src) ? 'GREEN (WRONG)' : 'red'}`).join('; ')}`);
 }
 
+// ── B-70f9 ① (the owner's option A, 2026-11-18): A JOB RUNS ON THE HUB'S MACHINE — where, said; a wrong machine's folder refused by name ──
+console.log('B-70f9 ① a job says where it runs; a folder the hub\'s machine does not have is refused at once');
+{
+  const V = (o) => M.jobWhereVerdict({ hubMachine: 'hub-box', ...o });
+  const here = V({ cwd: '/work/x' }), remoteOk = V({ sessionMachine: 'laptop', cwd: '/srv/shared', cwdExists: true }), missing = V({ sessionMachine: 'laptop', cwd: '/home/u/proj', cwdExists: false }), blocked = V({ sessionMachine: 'laptop', cwd: '/mnt/dav/x', cwdBlocked: true });
+  ok(here.ok && here.words === 'runs on hub-box in /work/x', 'a conversation ON the hub\'s machine: the job runs there, said with its path', here);
+  ok(remoteOk.ok && /^runs on hub-box in \/srv\/shared — not on laptop, where your conversation runs \(the path is used as it is on hub-box\)$/.test(remoteOk.words), 'a conversation on ANOTHER machine, a folder the hub has too (a shared mount): it runs — on hub-box, said; never a guess that the two folders are one', remoteOk);
+  ok(!missing.ok && missing.code === 'wrong-machine' && /^jobs run on hub-box, not on laptop where your conversation runs; this folder is not there: \/home\/u\/proj — nothing was created/.test(missing.error), 'a folder the hub\'s machine does NOT have: refused at once, by name — never a job that fails later', missing);
+  ok(!blocked.ok && blocked.code === 'folder-blocked' && /on a mount of hub-box that does not answer right now — nothing was created/.test(blocked.error), 'a folder on a mount that does not answer: refused by name, never read', blocked);
+  ok(V({ sessionMachine: 'laptop' }).ok && M.jobWhereVerdict({}).words === "runs on the hub's machine", 'no folder asked (a notify cron): nothing to refuse; no machine name: «the hub\'s machine»');
+  // WIRING: the agent create route asks the verdict BEFORE it creates; the folder is asked only for a REMOTE conversation, through the
+  // blocked-path door first, off the loop; the create and the show answers name the machine; the CLI prints both
+  const ar = fs.readFileSync(path.join(__dirname_jm, '..', 'src/agent-routes.js'), 'utf8'), cli = fs.readFileSync(path.join(__dirname_jm, '..', 'data/bin/vibespace-job'), 'utf8');
+  const iV = ar.indexOf('try { where = await jobWhere({ body: b, session: a.session, hubMachine }); }'), iC = ar.indexOf('const r = a.jm.create(spec, a.caller);', iV);
+  ok(iV > 0 && iC > iV && /catch \(e\) \{ return res\.status\(500\)\.json\(\{ error: `the folder check failed: /.test(ar) && /if \(!where\.ok\) return res\.status\(where\.code === 'folder-blocked' \? 503 : 400\)\.json\(\{ error: where\.error, code: where\.code, machine: hubMachine \}\);/.test(ar), 'WIRING: the route awaits src/server/job-where.js BEFORE it creates; a refusal answers 400 (a mount that does not answer 503) with its code; a check that throws is said (500) — never a request left open');
+  ok(/res\.json\(\{ machine: hubMachine, where: where\.words,/.test(ar) && /machine: os\.hostname\(\),   \/\/ B-70f9/.test(ar) && /if \(r\.where\) console\.log\(`where: \$\{r\.where\}`\);/.test(cli) && /if \(r\.machine\) console\.log\(`machine: \$\{r\.machine\} \(a job runs on the hub's machine\)`\);/.test(cli), 'WIRING: the create and the show answers name the machine; the CLI prints «where:» at a run and «machine:» at a show');
+  ok(/cwd: typeof flags\.cwd === 'string' && flags\.cwd \? require\('node:path'\)\.resolve\(flags\.cwd\) : process\.cwd\(\) \}/.test(cli) && /if \(unknown\.includes\('stop-with-owner'\)\) \{ console\.error\('--stop-with-owner was retired: /.test(cli), 'the CLI resolves --cwd WHERE THE CONVERSATION RUNS (a relative folder would name the hub\'s own), and refuses the retired flag by its own sentence');
+}
+// ── B-70f9 ① cure (its adversarial read r1: F1 F2 F4 F5 F15): THE CHECK, DRIVEN — src/server/job-where.js
+console.log('B-70f9 ① cure: the folder check driven (the door, a schedule\'s folder, a bounded stat, a relative folder)');
+{
+  const JW = require('../src/server/job-where.js'), MD = require('../src/mount-door.js');
+  const remote = { host: 'h-lap', hostName: 'laptop' }, task = (cwd) => ({ cmd: { argv: ['true'], ...(cwd !== undefined ? { cwd } : {}) } }), sched = (cwd) => ({ action: { type: 'spawn-task', task: { cmd: { argv: ['true'], cwd } } } });
+  const calls = [], st = (ans) => (p) => { calls.push(p); return typeof ans === 'function' ? ans(p) : ans; };
+  const dir = { isDirectory: () => true }, file = { isDirectory: () => false }, err = (code) => () => Promise.reject(Object.assign(new Error(code), { code }));
+  const W = (o) => JW.jobWhere({ hubMachine: 'hub-box', blocked: () => false, statMs: 40, mountinfo: '', ...o });   // an empty mount table: each folder its own key (one leg's stuck stat never meets the next)
+  const keepAll = setInterval(() => { }, 1000);   // stats that never settle: the suite's loop kept alive for the whole block (the hub's always is)
+  const local = await W({ body: task('/work/x'), session: {}, stat: st(Promise.resolve(dir)) });
+  ok(local.ok && local.words === 'runs on hub-box in /work/x' && !calls.length, 'a conversation on the hub\'s machine: never asked (its folder is the hub\'s)', local);
+  const there = await W({ body: task('/srv/shared'), session: remote, stat: st(Promise.resolve(dir)) });
+  const gone = await W({ body: task('/home/u/proj'), session: remote, stat: st(err('ENOENT')) });
+  const aFile = await W({ body: task('/home/u/f.txt'), session: remote, stat: st(Promise.resolve(file)) });
+  ok(there.ok && /not on laptop/.test(there.words) && !gone.ok && gone.code === 'wrong-machine' && !aFile.ok && aFile.code === 'wrong-machine', 'remote: a folder the hub has runs (said where); one it lacks — or a FILE where a folder is asked — is refused `wrong-machine`', { there, gone: gone.code, aFile: aFile.code });
+  const schedGone = await W({ body: sched('/home/u/proj'), session: remote, stat: st(err('ENOENT')) });
+  ok(!schedGone.ok && schedGone.code === 'wrong-machine' && JW.cwdOfBody(sched('/a')) === '/a', 'a SCHEDULE\'s task (--every / --cron / --at: the folder inside action.task) is asked too — the first cut never looked (F2)', schedGone);
+  const hung = await W({ body: task('/mnt/nfs/x'), session: remote, stat: st(() => new Promise(() => { })) });   // bounded = it ANSWERS at all (the stat never settles)
+  ok(!hung.ok && hung.code === 'folder-blocked', 'a stat that never answers (a mount wedged before its first strike) is BOUNDED: «does not answer right now» — never a request left open (F4)', hung);
+  let asked = 0; const struck = await W({ body: task('/mnt/dav/x'), session: remote, blocked: () => '/mnt/dav', stat: () => { asked++; return Promise.resolve(dir); } });
+  ok(!struck.ok && struck.code === 'folder-blocked' && asked === 0, 'a folder under a mount the door has struck: refused, NEVER asked', struck);
+  const denied = await W({ body: task('/root/x'), session: remote, stat: st(err('EACCES')) });
+  ok(denied.ok, 'EACCES decides nothing (the folder may be there): the job is created as before and its start says what it meets (F15)', denied);
+  const rel = await W({ body: task('build'), session: remote, stat: st(Promise.resolve(dir)) }), none = await W({ body: task(), session: remote, stat: st(Promise.resolve(dir)) }), notify = await W({ body: { action: { type: 'notify', text: 'x' } }, session: remote, stat: st(Promise.resolve(dir)) });
+  ok(!rel.ok && rel.code === 'relative-cwd' && /«build» is a relative folder/.test(rel.error) && !none.ok && none.code === 'relative-cwd' && notify.ok, 'remote: a RELATIVE folder or none would name the hub\'s own process folder — refused `relative-cwd`; a pure notify cron starts no process, nothing to ask (F5)', { rel: rel.code, none: none.code, notify: notify.ok });
+  // THE DOOR ITSELF (F1): the defaults are the real door and the real stat — driven with no override
+  const real = await JW.jobWhere({ body: task(path.join(__dirname_jm, 'no-such-folder-' + process.pid)), session: remote, hubMachine: 'hub-box' });
+  ok(typeof MD.blocked === 'function' && !real.ok && real.code === 'wrong-machine', 'the DEFAULT door is mount-door\'s `blocked` (an export) and the default stat is fs.promises — driven with no override, a missing folder is refused', real);
+  let thrown = null; try { await JW.jobWhere({ body: task('/x'), session: remote, hubMachine: 'hub-box', blocked: (p) => MD.pathBlocked(p) }); } catch (e) { thrown = e; }   // the first cut's very call
+  ok(MD.pathBlocked === undefined && thrown instanceof TypeError, 'CONTROL (the first cut\'s door, mountDoor.pathBlocked — no such export): the check THROWS — what hung every remote create (the route now answers it 500 by name)');
+  const all = ['src/agent-routes.js', 'src/server/job-where.js'].map((f) => fs.readFileSync(path.join(__dirname_jm, '..', f), 'utf8')).join('\n');
+  ok(!/pathBlocked/.test(all), 'no caller names a door export that does not exist');
+  // ── B-70f9 cure 2 (主开发 10:30Z, two «as if a must»): every throw of the create door answered; ONE stuck stat a mount
+  const keep2 = setInterval(() => { }, 1000);   // stats that never settle: the suite's loop kept alive (the hub's always is)
+  try {
+    const answered = [], resOf = () => { const r = { headersSent: false, status(c) { r.code = c; return r; }, json(b) { r.headersSent = true; answered.push([r.code || 200, b]); return r; } }; return r; };
+    const late = async (req, res) => { await Promise.resolve(); throw new Error('the engine threw after the await'); };
+    const r1 = resOf(); await JW.answersEveryThrow(late, { warn() { } })({}, r1);
+    const r2 = resOf(); await JW.answersEveryThrow(async (req, res) => { res.json({ success: true }); throw new Error('after the answer'); }, { warn() { } })({}, r2);
+    ok(answered.length === 2 && answered[0][0] === 500 && answered[0][1].code === 'create-failed' && /the job create failed on the hub: the engine threw after the await — `vibespace-job list --mine` says whether a job was made/.test(answered[0][1].error) && answered[1][0] === 200, 'cure 2: the create door ANSWERS a throw after its await by name (500 create-failed, what to check) — never twice once it answered', answered);
+    const r3 = resOf(); let lost = null; await late({}, r3).catch((e) => { lost = e; });
+    ok(lost && !r3.headersSent, 'CONTROL (the bare async handler, Express 4): the throw is a rejection nobody answers — the agent\'s command waits');
+    ok(/app\.post\('\/api\/agent\/jobs', answersEveryThrow\(async function jobsCreateRoute\(req, res\) \{/.test(all) && /readMembership\(req, res, answersEveryThrow\(jobsCreateRoute\), /.test(all), 'WIRING: the agent create route IS that door — and B-55dc\'s membership read enters the named handler again THROUGH that door (a throw on the second entry is answered too)');
+    const MI = '22 1 0:20 / / rw - ext4 /dev/root rw\n30 22 0:40 / /mnt/nfs rw - nfs4 srv:/x rw\n';
+    let calls = []; const hung = (p) => { calls.push(p); return new Promise(() => { }); };
+    const ask = (Mod, cwd, st) => Mod.jobWhere({ body: task(cwd), session: remote, hubMachine: 'hub-box', blocked: () => false, stat: st, statMs: 40, mountinfo: MI });
+    const a1 = await ask(JW, '/mnt/nfs/c2-a-' + process.pid, hung), a2 = await ask(JW, '/mnt/nfs/c2-b-' + process.pid, hung), a3 = await ask(JW, '/mnt/nfs/c2-a-' + process.pid, hung);
+    const onNfs = calls.length;
+    const other = await ask(JW, '/srv/c2-' + process.pid, (p) => { calls.push(p); return Promise.resolve({ isDirectory: () => true }); });
+    ok([a1, a2, a3].every((v) => !v.ok && v.code === 'folder-blocked') && onNfs === 1 && other.ok && calls.length === 2, 'cure 2: ONE stuck stat a mount — while a stat on /mnt/nfs is out, asks for other folders of that mount and the same folder again answer «does not answer right now» WITHOUT a second stat; another mount is asked as before', { onNfs, calls: calls.length });
+    const MJ = mutantCopies('job-where-70f9', path.join(__dirname_jm, '..'));
+    // RED CONTROL from the source itself (never a sha off this branch — test-ci-gate's sha law): cure 1's ask, ONE stat per ask
+    const JWSRC = fs.readFileSync(path.join(__dirname_jm, '..', 'src/server/job-where.js'), 'utf8'), ONE_A = '      const r = await statOnce(key, cwd, stat, statMs);';
+    ok(JWSRC.split(ONE_A).length === 2, 'control setup: the one-stat-a-mount call is in job-where.js once (the plant the control swaps)');
+    const JO = MJ.load('src/server/job-where.js', JWSRC.replace(ONE_A, '      const r = await within(Promise.resolve().then(() => stat(cwd)).then(classify, classifyErr), statMs);   /* MUTANT: cure 1 — a stat per ask */'), 'cure1');
+    calls = [];
+    await ask(JO, '/mnt/nfs/c2-ca-' + process.pid, hung); await ask(JO, '/mnt/nfs/c2-cb-' + process.pid, hung); await ask(JO, '/mnt/nfs/c2-ca-' + process.pid, hung);
+    ok(calls.length === 3, 'CONTROL (cure 1, its 3 s race alone, in a copy): every ask parks ONE MORE stat on the wedged mount (3 asks, 3 threads of the pool)', calls.length);
+    for (const r of copiesCensus(MJ.files, MJ.dir, path.join(__dirname_jm, '..'), { minCopies: 0, label: 'B-70f9 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+  } finally { clearInterval(keep2); }
+  ok(M.jobWhereVerdict({ hubMachine: 'hub-box', sessionMachine: 'laptop' }).words === 'runs on hub-box — not on laptop, where your conversation runs', 'cure 2: a notify-only schedule from a remote conversation has no folder — its line says no «the path is used as it is»');
+  clearInterval(keepAll);
+}
+
+// ── B-70f9 ② ENDING A CONVERSATION THAT OWNS RUNNING JOBS: one non-blocking notice, «Stop these too»; the stored flag retired ──
+console.log('B-70f9 ② the notice at a person\'s end / archive; the stop-with-conversation flag retired');
+{
+  const own = (id, name, state, cid = 'conv-a', kind = 'task') => ({ id, name, state, kind, owner: { conversation: { id: cid } } });
+  const jobs = [own('jb-1', 'build', 'up'), own('jb-2', 'nightly', 'scheduled', 'conv-a', 'cron'), own('jb-3', 'old', 'done'), own('jb-4', 'theirs', 'up', 'conv-b'), own('jb-5', 'asks', 'awaiting-user')];
+  const one = M.endNotice(jobs, ['conv-a']), two = M.endNotice(jobs, ['conv-a', 'conv-b']), none = M.endNotice(jobs, ['conv-z']), many = M.endNotice([1, 2, 3, 4, 5, 6].map((k) => own('jb-m' + k, 'w' + k, 'up')), 'conv-a');
+  ok(one && one.jobs.map((j) => j.id).join() === 'jb-5,jb-1,jb-2' && one.words.key === 'Background jobs of this conversation keep running: {names}' && one.words.params.names === 'asks, build, nightly', 'endNotice: the jobs a conversation OWNS that still run (waiting for you first, a cron that will fire too) — never a finished one, never another conversation\'s', one);
+  ok(two && two.jobs.length === 4 && /these conversations/.test(two.words.key) && none === null && M.endNotice(jobs, []) === null, 'several conversations (an archive of many): one notice; none running: NO notice');
+  ok(many.words.params.names === 'w1, w2, w3, w4 +2' && many.jobs.length === 6, 'many jobs: four named, the rest counted — the press stops them ALL');
+  const bo = M.endNotice([{ ...own('jb-b', 'svc', 'down', 'conv-a', 'service'), desiredUp: true }, { ...own('jb-s', 'stopped', 'down', 'conv-a', 'service'), desiredUp: false }], ['conv-a']);
+  ok(bo && bo.jobs.map((j) => j.id).join() === 'jb-b', 'a service in its restart BACKOFF (down, still wanted up) will start again — named; one the person stopped is not (F13)', bo);
+  const L = fs.readFileSync(path.join(__dirname_jm, '..', 'src/lib/session-lifecycle.js'), 'utf8'), tb = fs.readFileSync(path.join(__dirname_jm, '..', 'src/lib/taskbar.js'), 'utf8'), sw = fs.readFileSync(path.join(__dirname_jm, '..', 'src/lib/sidebar-workbench.js'), 'utf8'), ss = fs.readFileSync(path.join(__dirname_jm, '..', 'src/lib/sidebar-state.js'), 'utf8');
+  ok((L.match(/if \(shouldKill\) this\.endConversation\(/g) || []).length === 3 && /registerCommand\(\{ id: 'window\.terminateSession', title: \(\) => t\('Terminate session'\), run: \(c\) => c\.app\.endConversation\(c\.s\.webuiId, undefined, \{ endTree: true \}\) \}\)/.test(tb) && /const ended = termList\.map\(\(s\) => s\.sessionId \|\| s\.backendSessionId\);/.test(sw) && /ended\.push\(s\.sessionId \|\| s\.backendSessionId\);\s*\}\s*\}\s*this\.app\.noticeOwnedJobs\?\.\(ended\);/.test(sw) && (ss.match(/this\.app\.noticeOwnedJobs\?\.\(/g) || []).length === 3, 'WIRING: every door where a PERSON ends a conversation (three window closes, the taskbar\'s Terminate, the batch bar\'s terminate-and-archive with its archive list — ONE notice) and the archive doors (the card\'s Archive, Archive project, the stopped sessions\' archive) notice its running jobs');
+  const sc = fs.readFileSync(path.join(__dirname_jm, '..', 'src/lib/session-card.js'), 'utf8');
+  ok((sc.match(/if \(s\.webuiId\) (c\.)?app\.endConversation\(s\.webuiId, undefined, \{ endTree: true \}\);/g) || []).length === 2 && (sc.match(/killPid\(s\.pid, s\.host\); (c\.)?app\.noticeOwnedJobs\?\.\(\[s\.sessionId\]\);/g) || []).length === 2 && !/\bkillSession\(s\.webuiId\)/.test(sc), 'WIRING (the read F3): the card menu\'s and the card detail\'s Terminate end through endConversation — the two doors a person uses most');   // stale-pins: kept — the old bare kill must be GONE from the card
+  ok(/if \(\(this\._fenceOpen \|\| 0\) > 0\) \{ this\.killSession\(webuiId, backendSessionId\); return; \}/.test(L) && /q\.t = setTimeout\(\(\) => \{ const list = \[\.\.\.q\.cids\]; this\._ownedNoticeQ = null; this\._noticeOwnedNow\(list\)/.test(L), 'a RESUME\'s own close (the fence) notices nothing (F6); the ends of one moment (a tab group\'s ✕) gather into ONE notice and ONE read (F7)');
+  ok(/this\.killSession\(webuiId, cid\);/.test(L) && /this\.killSession\(live\.webuiId, backendSessionId\);/.test(L) && /action: \{ label: t\('Stop these too'\), run: stopAll \}/.test(L) && /fetchJson\(`\/api\/jobs\/\$\{encodeURIComponent\(j\.id\)\}\/stop`, \{ method: 'POST' \}\)/.test(L), 'WIRING: a RESTART (kill → resume) stays killSession — no notice; the one press stops every named job through the user route, a failure said by count');
+  // the record-clear rule (test-record-clear-census H7 + I): a clear is news to the notice
+  const clearPin = (src) => /const jobs = [^\n]*clearedNow\.has\(j\.id\) && !j\.clearedAt \? \{ \.\.\.j, clearedAt: Date\.now\(\) \}/.test(src) && /if \(shown && ids && m\.cleared\.some\(\(id\) => ids\.has\(id\)\)\) \{ const st = shown\.parentNode; shown\.remove\(\);/.test(src) && /history: \{ m: t\('Background jobs keep running: \{n\}', \{ n: n\.jobs\.length \}\) \}/.test(src) && /res\.length === 1 \? t\('Stopping 1 background job'\) : t\('Stopping \{n\} background jobs', \{ n: res\.length \}\)/.test(src) && !/x\.j\.name/.test(src);
+  const cl = M.endNotice([{ ...own('jb-c', 'the cleared words', 'up'), clearedAt: 1 }, own('jb-d', 'kept', 'up')], ['conv-a']);
+  ok(clearPin(L) && cl && cl.words.params.names.split(', ').sort().join() === 'jb-c,kept' && !JSON.stringify(cl).includes('the cleared words'), 'THE CLEAR IS NEWS: a clear landing during the GET marks its jobs cleared before the notice (a cleared job is named by its id, never by the words cleared), one landing while it shows takes it down, the toast history keeps the head + count, a failed press is a count');
+  const GUARD = "clearedNow.has(j.id) && !j.clearedAt ? { ...j, clearedAt: Date.now() } : j";
+  if (!L.includes(GUARD)) ok(false, 'the anchor of the control «clear guard cut» is not in the source');
+  else ok(!clearPin(L.replace(GUARD, 'j')), 'CONTROL: the clear guard cut (the answer used as it came) fails the pin');
+  const js = fs.readFileSync(path.join(__dirname_jm, '..', 'src/jobs.js'), 'utf8'), ar = fs.readFileSync(path.join(__dirname_jm, '..', 'src/agent-routes.js'), 'utf8'), cli = fs.readFileSync(path.join(__dirname_jm, '..', 'data/bin/vibespace-job'), 'utf8');
+  ok(!/stopWithOwner/.test(js) && !/stopWithOwner/.test(cli) && (cli.match(/stop-with-owner/g) || []).length === 2 && /if \(unknown\.includes\('stop-with-owner'\)\) \{ console\.error\('--stop-with-owner was retired: /.test(cli) && /if \(b\.stopWithOwner === true\) return res\.status\(400\)\.json\(\{ error: '--stop-with-owner was retired:[^']*', code: 'retired-flag' \}\);/.test(ar) && /'notifyOk', 'stopWithOwner'\]\);/.test(ar), 'THE FLAG RETIRED (0 of 2 950 stored jobs carried it): no engine line stores or shows it, the CLI has no such flag, an older CLI\'s false passes, true is refused by name with its door');
+}
+
+// ── B-c488 (batch 8): the announce route's comment says what its code requires — control, never «any viewer» ──
+{
+  const ar = fs.readFileSync(path.join(__dirname_jm, '..', 'src/agent-routes.js'), 'utf8');
+  const says = (t) => /else if \(act === 'announce'\) r = a\.jm\.announce\(job, req\.body\?\.text\); \/\/ in-job \(jbt_\) or a holder of CONTROL/.test(t) && /const needsControl = \[[^\]]*'announce'[^\]]*\];/.test(t) && !/announce[^\n]*any viewer/.test(t);
+  ok(says(ar), 'B-c488: the announce verb\'s comment names CONTROL, as its gate (needsControl) requires — never «any viewer»');
+  const STALE = "// in-job (jbt_) or any viewer";   // stale-pins: kept — the control writes the stale comment back into a copy
+  ok(!says(ar.replace(/\/\/ in-job \(jbt_\) or a holder of CONTROL[^\n]*/, STALE + ' — the watch-job "found something" verb')), 'CONTROL: the stale comment («any viewer») fails the check');
+}
+// ── B-0bda (batch 8): `vibespace-job run --name x bash /path/gate.sh` ran `sh -c bash` alone — refused by name, the quoted form given ──
+{
+  const ROOT0 = path.join(__dirname_jm, '..'), CLI0 = path.join(ROOT0, 'data/bin/vibespace-job');
+  const env0 = { PATH: process.env.PATH, VIBESPACE_API: 'http://127.0.0.1:9', VIBESPACE_SESSION_TOKEN: 'stand-in' };   // present, never used: the refusal comes before any call
+  const run0 = (file, args) => spawnSync(process.execPath, [file, ...args], { env: env0, encoding: 'utf8' });
+  const r1 = run0(CLI0, ['run', '--name', 'gate', 'bash', '/srv/lane/gate.sh']);
+  ok(r1.status === 2 && /the command must be ONE quoted string — 2 words were given \("bash" "\/srv\/lane\/gate\.sh"\) and only the first would run\. Type: vibespace-job run 'bash \/srv\/lane\/gate\.sh' \[flags\] — nothing was sent/.test(r1.stderr), 'B-0bda: an unquoted multi-word command is REFUSED by name (exit 2, nothing sent) with the quoted form to type — never a 0-second «ok» of its first word', r1.stderr);
+  // the form to type is PROVEN by a shell (the adversarial read r1: a bare join of `bash -c 'cd /x && npm test'` suggested a line that
+  // runs `bash -c cd`): the outer shell reads it as ONE word, and sh -c reads that word back into exactly the words given
+  const formOf = (stderr) => { const m = /Type: vibespace-job run (.*) \[flags\] — nothing was sent/.exec(stderr || ''); return m ? m[1] : null; };
+  const shWords = (text) => { const r = spawnSync('sh', ['-c', 'eval "set -- $1"; for w in "$@"; do printf "%s\\0" "$w"; done', 'sh', text], { encoding: 'utf8' }); return r.status === 0 ? r.stdout.split('\0').slice(0, -1) : null; };
+  const roundTrip = (stderr) => { const f = formOf(stderr), outer = f && shWords(f); return outer && outer.length === 1 ? shWords(outer[0]) : null; };
+  const r2 = run0(CLI0, ['run', '--name', 'q', "it's", 'here']);
+  ok(r2.status === 2 && JSON.stringify(roundTrip(r2.stderr)) === JSON.stringify(["it's", 'here']), 'B-0bda: the form to type quotes a quote as a shell needs it — read back by sh, the same two words', { stderr: r2.stderr, back: roundTrip(r2.stderr) });
+  const r2b = run0(CLI0, ['run', '--name', 'g', 'bash', '-c', 'cd /x && npm test']);
+  ok(r2b.status === 2 && JSON.stringify(roundTrip(r2b.stderr)) === JSON.stringify(['bash', '-c', 'cd /x && npm test']), 'B-0bda: `bash -c \'cd /x && npm test\'` unquoted — the form quotes EACH word, then the line: sh reads back bash, -c and the one script (never `bash -c cd`)', { stderr: r2b.stderr, back: roundTrip(r2b.stderr) });
+  const r2c = run0(CLI0, ['run', '--name', 'g', '--notify-ok', 'bash', '/srv/gate.sh']);
+  ok(r2c.status === 2 && JSON.stringify(roundTrip(r2c.stderr)) === JSON.stringify(['bash', '/srv/gate.sh']), 'B-0bda: a flag that takes no value (--notify-ok) never eats the next word — the two words are refused, with their form', r2c.stderr);
+  const CSRC = fs.readFileSync(CLI0, 'utf8'), REF = '      if (!isNotify && pos.length > 2) {';
+  ok(CSRC.split(REF).length === 2, 'B-0bda control setup: the refusal is one line in the CLI (the plant the control cuts)');
+  const MJ0 = mutantCopies('cli-multiword-0bda', ROOT0);
+  const copy = MJ0.write('data/bin/vibespace-job', CSRC.replace(REF, '      if (false /* MUTANT: the release — no refusal */) {'), 'release');
+  const r3 = run0(copy, ['run', '--name', 'gate', 'bash', '/srv/lane/gate.sh']);
+  // the boolean flags' control: the line that keeps them valueless cut — `--notify-ok bash /srv/gate.sh` sends /srv/gate.sh alone
+  const BOOL = "    else if (BOOL_FLAGS.has(k)) flags[k] = true;\n";
+  ok(CSRC.split(BOOL).length === 2, 'B-0bda control setup: the anchor of the control «a valueless flag» is in the source');
+  const copyB = MJ0.write('data/bin/vibespace-job', CSRC.replace(BOOL, '    /* MUTANT: a valueless flag eats the next word */\n'), 'bool-eats');
+  const r3b = run0(copyB, ['run', '--name', 'g', '--notify-ok', 'bash', '/srv/gate.sh']);
+  ok(!/the command must be ONE quoted string/.test(r3b.stderr) && /server unreachable|ECONNREFUSED|unreachable/.test(r3b.stderr), 'B-0bda CONTROL (valueless flags cut, in a copy): --notify-ok takes «bash» and the line goes on to SEND /srv/gate.sh alone (here it meets no hub)', r3b.stderr.slice(0, 200));
+  ok(!/the command must be ONE quoted string/.test(r3.stderr) && /server unreachable|ECONNREFUSED|unreachable/.test(r3.stderr), 'B-0bda CONTROL (the release\'s CLI, in a copy): the same line goes on to SEND «bash» alone (here it meets no hub)', r3.stderr.slice(0, 200));
+  for (const r of copiesCensus(MJ0.files, MJ0.dir, ROOT0, { minCopies: 2, label: 'B-0bda ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+}
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

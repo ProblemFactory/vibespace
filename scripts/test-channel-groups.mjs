@@ -416,10 +416,15 @@ console.log('§2c a set-aside store is on the FIRST SCREEN, and a blocked one is
     ok(it && !/set aside as adapters\.json/.test(it.text) && /could NOT be set aside/.test(it.text) && it.i18n && /could NOT be set aside/.test(it.i18n.text.key) && !('where' in (it.i18n.text.params || {})),
       'a BLOCKED file\'s headline says it could NOT be set aside (never "set aside as adapters.json") — its own i18n key', JSON.stringify(it && { text: it.text, key: it.i18n && it.i18n.text.key }));
     ok(ce2 && (ce2.digest().quarantined || []).some((q) => q.file === 'adapters.json' && q.blocked === true && q.to === null), '…and the digest says `blocked: true`', JSON.stringify(ce2 && ce2.digest().quarantined));
+    // the store's open closes its root to the owning account by its own async stat + chmod (bits only taken away: this
+    // read-only 0555 root becomes 0500) — its event is awaited here, or that chmod lands AFTER the 0755 below and the
+    // scratch folder stays locked (the exit cleanup's rmSync refused with EACCES, swallowed)
+    try { ce2 && await ce2.store.rootClosed; } catch {}
     try { ce2 && ce2.stop(); } catch {}
     try { ce2 && ce2.store.close(); } catch {}
   }
   fs.chmodSync(cdir, 0o755);
+  ok((fs.statSync(cdir).mode & 0o777) === 0o755, 'the scratch store folder is given back 0755 (fs.statSync after the restore: the store\'s own root close had landed before it)', (fs.statSync(cdir).mode & 0o777).toString(8));
   const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf-8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf-8');
   const KEY = 'Channels: {file} could not be read and could NOT be set aside — writes to it are refused until it is fixed or moved';
   ok(zh.includes(JSON.stringify(KEY)) && ja.includes(JSON.stringify(KEY)), 'the blocked headline has zh + ja rows');
@@ -832,13 +837,13 @@ console.log('§3g2 B-b17f the boot warm-up reads each group\'s log ONCE, off the
   f.close();
   const truth = (st, gid, who, since) => st.readTail('groups', gid, { limit: 5000 }).filter((r) => r.at > since && ((r.raw && r.raw.kind) || 'message') === 'message' && !(r.author && r.author.id === who)).length;
   const sinceOf = (st, gid, who) => { const m = st.groups.live().groups[gid].members.find((x) => x.member === who); return Number.isFinite(m.reportedUpTo) ? m.reportedUpTo : m.joinedAt - 1; };
-  const boot = (ge, midRead = null) => {
+  const boot = (ge, midRead = null, onSay = null) => {
     const st = createChannelStore({ dir: path.join(dataDir, 'channels') });
     const seen = { sync: 0, async: [], done: 0 }, rt = st.readTail, rta = st.readTailAsync;
     const b = { st, seen, eng: null, spyOff: () => { st.readTail = rt; } };
     st.readTail = (...a) => { seen.sync++; return rt.apply(st, a); };
     st.readTailAsync = async (ad, gid, o) => { seen.async.push({ gid, windowBytes: o && o.windowBytes }); try { const r = await rta.call(st, ad, gid, o); if (midRead) await midRead(b, gid); return r; } finally { seen.done++; } };
-    b.eng = ge.create({ store: st, deliver: null, broadcast() {}, now: () => Date.now(), roster: () => roster, groupSetting: () => 'none', log: { info() {}, warn() {}, log() {} } });
+    b.eng = ge.create({ store: st, deliver: null, broadcast: (m) => { if (onSay) onSay(m); }, now: () => Date.now(), roster: () => roster, groupSetting: () => 'none', log: { info() {}, warn() {}, log() {} } });
     return b;
   };
   // the warm-up has ENDED its reads: every async read FINISHED (its spy's finally), or the sync reads counted — then turns for its last count
@@ -858,6 +863,32 @@ console.log('§3g2 B-b17f the boot warm-up reads each group\'s log ONCE, off the
   ok(reads === 0 && bad.length === 0 && lst.length === NG && lst.every((g) => g.unread > 0),
     `§3g2 then list() + listFor() read ${reads} log(s); every count (the owner's and a member's) = the from-scratch count`, bad.slice(0, 4).join(' '));
   b1.st.close();
+  // (e) B-b17f's remainder (2.369.411): A READER DURING THE WARM-UP — a page asking in the start's own turn, before the
+  // warm-up's first — reads NO log on the loop: every owed count the warm-up has not passed is null («not counted yet»),
+  // never a synchronous read of every cold group in that turn; the warm-up's end says the list ONCE, every count in it
+  const MUTWU = mutantCopies('chan-groups-warm', REPO);
+  const geSrc = fs.readFileSync(path.join(REPO, 'src/server/groups-engine.js'), 'utf8');
+  const COLD = "    if (!log && coldIds && coldIds.has(g.id)) { if (!(lastAt > since)) return 0; coldAsked.add(g.id); return null; }\n";
+  const early = async (ge) => {
+    const said = [];
+    const b = boot(ge, null, (m) => { if (m && m.type === 'channel-groups-updated') said.push(m); });
+    const l0 = b.eng.list(), f0 = b.eng.listFor(B), sync0 = b.seen.sync;   // the start's own turn
+    await settle(b, NG);
+    for (let k = 0; k < 50 && !said.length; k++) await new Promise((r) => setImmediate(r));   // the warm-up's end (a turn or two after its last read)
+    const last = said[said.length - 1], bad = [];
+    for (const g of (last ? last.groups : [])) { const want = truth(b.st, g.id, G.OWNER, 0); if (g.unread !== want) bad.push(`${g.id}:${g.unread}≠${want}`); }
+    const s1 = b.seen.sync, l1 = b.eng.list(), syncAfter = b.seen.sync - s1;
+    b.st.close();
+    const nulls = [...l0, ...f0].filter((g) => g.unread === null).length;
+    return { sync0, nulls, n: l0.length + f0.length, said: said.length, changed: last && Array.isArray(last.changed) ? last.changed.length : 0, groups: last ? last.groups.length : 0, bad, syncAfter, numbers: l1.every((g) => Number.isInteger(g.unread)) };
+  };
+  const e1 = await early(GE);
+  ok(e1.sync0 === 0 && e1.n === NG * 2 && e1.nulls === e1.n && e1.said === 1 && e1.changed === NG && e1.groups === NG && e1.bad.length === 0 && e1.syncAfter === 0 && e1.numbers,
+    `§3g2 a reader in the start's own turn (list() + listFor()): ${e1.sync0} log(s) read on the loop, ${e1.nulls} of ${e1.n} counts «not counted yet» (null); the warm-up's end said the list ${e1.said}× (${e1.changed} groups named), every count = the from-scratch count; then list() reads ${e1.syncAfter} log(s)`, e1.bad.slice(0, 4).join(' '));
+  const relReader = geSrc.replace(COLD, '');
+  ok(geSrc.split(COLD).length === 2 && relReader !== geSrc, 'CONTROL (the release\'s reader): its plant — the cold-group line — is spelled exactly once');
+  const e2 = await early(MUTWU.load('src/server/groups-engine.js', relReader, 'release-reader'));
+  ok(e2.sync0 === NG * 2 && e2.nulls === 0, `CONTROL (the release's reader): ${e2.sync0} SYNC log reads in the start's own turn (every cold group, the owner's list and a member's) ⇒ RED`);
   // (c) A RECORD LANDS WHILE A GROUP'S LOG IS READ (after its bytes were read): that group is not counted from the read. The
   // post's own broadcast recounts the OWNER's count; a MEMBER's is recounted by nobody — the warm-up would keep it stale
   const late = ids[3];
@@ -871,8 +902,6 @@ console.log('§3g2 B-b17f the boot warm-up reads each group\'s log ONCE, off the
     `§3g2 a post that lands during the group's read (posted: ${posted[0] && posted[0].ok}): the members' counts ${c2.got} / ${c2c.got} = the from-scratch ${c2.want} / ${c2c.want}`);
   b2.st.close();
   // CONTROLS (patched copies): the old warm-up; the new one without the «nothing landed» check
-  const MUTWU = mutantCopies('chan-groups-warm', REPO);
-  const geSrc = fs.readFileSync(path.join(REPO, 'src/server/groups-engine.js'), 'utf8');
   const start = geSrc.indexOf('  // warm the unread memo off the boot path'), end = geSrc.indexOf('  })();\n', start) + '  })();\n'.length;
   const b3 = boot(MUTWU.load('src/server/groups-engine.js', geSrc.slice(0, start) + OLD_WARM_B17F + geSrc.slice(end), 'oldwarm'));
   await settle(b3, NG * 2);
@@ -891,24 +920,31 @@ console.log('§3g2 B-b17f the boot warm-up reads each group\'s log ONCE, off the
   const modeTo = async (mode) => { const st = createChannelStore({ dir: path.join(dataDir, 'channels') }); await st.groups.update((gr) => { gr.groups[g5].members.find((x) => x.member === B).notify = mode; }); st.close(); };
   const modeScene = async (ge) => {
     await modeTo('mention');
-    const b5 = boot(ge);
-    b5.eng.list(); for (const who of [A, B, C]) b5.eng.listFor(who);   // every count memoised before the warm-up's first turn
+    const said5 = [];
+    const b5 = boot(ge, null, (m) => { if (m && m.type === 'channel-groups-updated') said5.push(m); });
+    b5.eng.list(); for (const who of [A, B, C]) b5.eng.listFor(who);   // the readers before the warm-up's first turn (the release's memoised every count)
+    const pre = (b5.eng.listFor(B).find((x) => x.id === g5) || {}).unread;   // B-b17f's remainder: null — a cold count is never memoised by a reader
     // the state setNotify leaves (a mode moved, no record), set in the same turn — before the warm-up's first turn, so it
     // meets every group with the change in place (an awaited setNotify would race the warm-up's turns)
     const mB = b5.st.groups.live().groups[g5].members.find((x) => x.member === B);
     const was = mB.notify; mB.notify = 'next-turn';
     await settle(b5, 0);
     for (let k = 0; k < NG * 3; k++) await new Promise((r) => setImmediate(r));   // the warm-up's turns, one per group
+    // B-b17f's remainder: a reader answered null memoised nothing — the warm-up then READS every group (async) and says its
+    // end (one broadcast); the release's reader memoised every count — its warm-up reads only the changed group
+    for (let k = 0; k < 400 && (pre === null ? !said5.length : b5.seen.async.length > b5.seen.done); k++) await new Promise((r) => setTimeout(r, 5));
     const got = (b5.eng.listFor(B).find((x) => x.id === g5) || {}).unread, want = truth(b5.st, g5, B, sinceOf(b5.st, g5, B));
     b5.st.close();
-    return { ok: was === 'mention', got, want };
+    return { ok: was === 'mention', got, want, pre };
   };
   const d1 = await modeScene(GE);
-  ok(d1.ok && d1.want > 0 && d1.got === d1.want, `§3g2 a member's mode moved (mention → next-turn, no record) after its count was memoised, before the warm-up reached the group: its count ${d1.got} = the from-scratch ${d1.want}`);
+  ok(d1.ok && d1.pre === null && d1.want > 0 && d1.got === d1.want, `§3g2 a member's mode moved (mention → next-turn, no record) before the warm-up reached the group (its reader was answered ${d1.pre}: nothing memoised): its count ${d1.got} = the from-scratch ${d1.want}`);
   const firstCure = geSrc.replace("          if (!whos(g).some(([who, since]) => unreadOwed(g, who, since))) continue;   // every count known: nothing to read\n",
     "          if (!whos(g).some(([who, since]) => { const m = unreadMemo.get(g.id + '|' + who); return lastAt > since && !(m && m.since === since && m.lastAt === lastAt); })) { for (const [who, since] of whos(g)) unreadFor(g, who, since, []); continue; }\n");
-  const d2 = await modeScene(MUTWU.load('src/server/groups-engine.js', firstCure, 'firstcure'));
-  ok(firstCure !== geSrc && d2.ok && d2.got === 0 && d2.want > 0, `CONTROL (the first cure: fresh by since + lastAt, an empty log handed in): the count ${d2.got} ≠ the from-scratch ${d2.want} — a zero memoised ⇒ RED`);
+  // the first cure's hazard needs a count memoised before the warm-up — the release's reader made one (the cure's makes none)
+  const firstCureRel = firstCure.replace(COLD, '');
+  const d2 = await modeScene(MUTWU.load('src/server/groups-engine.js', firstCureRel, 'firstcure'));
+  ok(firstCure !== geSrc && firstCureRel !== firstCure && d2.ok && Number.isInteger(d2.pre) && d2.got === 0 && d2.want > 0, `CONTROL (the first cure: fresh by since + lastAt, an empty log handed in — over the release's reader, which memoised ${d2.pre} first): the count ${d2.got} ≠ the from-scratch ${d2.want} — a zero memoised ⇒ RED`);
 }
 
 console.log('§3h the owner routes: a consent echo, and paced when auth is OFF (r2 finding 2)');
@@ -2509,6 +2545,60 @@ console.log('§R2 the claims on the REAL ladder and jobs engine — a claim belo
     ok(/an unconfirmed answer's claim \(carry\) and a hand-over \(ho-dead-8\) were in flight .* their entries wait again .*"hand-over ho-dead-8"/.test(lb) && !/hand-over carry/.test(lb), 'BOOT …both on one conversation are named apart (never «hand-over carry»)', lb);
   }
   f.close();
+}
+
+// lane bl-msg B-3e61 (seven sightings): the belt cut the REST of a lane's brief after «session:…», «data-key=…», a flag. The group
+// log belts a message in its MESSAGE mode — the value only, the rest arrives — BEFORE the @-scan (a mention's place is read on the
+// words the log keeps), and the sender's answer names what was masked (`masked`) instead of a shorter count read as a cut.
+console.log('§bl-msg B-3e61 a message arrives whole — the value masked, the rest kept, the sender told, the @ places on the kept words');
+{
+  const src = fs.readFileSync(path.join(REPO, 'src/server/groups-engine.js'), 'utf-8');
+  const V = ['q7', 'x9z3', 'w5k2', 'm4'].join('');   // a value, joined at runtime
+  const TEXT = `NO grant line for session:${V} must appear — @beta the rest of the brief arrives`;
+  const t2 = `token=${V} then @beta can you?`, at2 = t2.indexOf('@beta');
+  const drive = async (name, ge) => {
+    const f = fixture(name, ge ? { ge } : {});
+    const made = await f.eng.create({ by: G.OWNER, name: 'whole', members: [A, B, C], quiet: true });
+    const gid = made.group.id;
+    const p = await f.eng.post({ group: gid, from: A, text: TEXT });
+    const stored = p.ok && f.store.readTail(G.GROUP_ADAPTER_ID, gid, { limit: 1000 }).find((r) => r.vendorId === p.message.vendorId);
+    const pk = await f.eng.post({ group: gid, from: G.OWNER, text: t2, mentions: [{ id: C, start: at2, end: at2 + 5 }] });
+    const plain = await f.eng.post({ group: gid, from: A, text: 'all green, nothing secret' });
+    f.close();
+    const placeOf = (q, id) => { const m = q && q.ok && q.message.mentions.find((x) => x.id === id); return m && m.pos && m.pos[0] ? q.message.text.slice(m.pos[0][0], m.pos[0][1]) : null; };
+    return { p, stored, pk, plain, atB: placeOf(p, B), atPick: placeOf(pk, C) };
+  };
+  const live = await drive('blmsg');
+  ok(live.p.ok && !live.p.message.text.includes(V) && live.p.message.text.endsWith('@beta the rest of the brief arrives') && live.stored && live.stored.text === live.p.message.text,
+    'SEND: the value is masked and the REST of the message is in the log (the 1st sighting\'s shape)', JSON.stringify(live.p.message && live.p.message.text));
+  ok(JSON.stringify(live.p.masked) === '["session:"]' && Array.isArray(live.plain.masked) && live.plain.masked.length === 0, '…the answer names what was masked, as the sender wrote it (a message with nothing secret: none)', JSON.stringify(live.p.masked));
+  ok(live.atB === '@beta' && live.atPick === '@beta' && live.pk.ok && live.pk.message.mentions.length === 1 && live.pk.message.mentions[0].id === C && !live.pk.message.text.includes(V),
+    '…the @ places sit on the KEPT words: a scanned @ after a mask, and the owner\'s picked place moved by the mask before it', JSON.stringify([live.atB, live.atPick]));
+  // cure 2 (主开发 08:42Z, MUST 1): a value that opens on a CJK letter is ONE value (it ends at its blank), never the line rule — the
+  // owner's picked @ after it lands on its place, the message is sent and the member woken; an agent's typed @ the same (its own fixture:
+  // a wake floors its target for 30 s)
+  {
+    const f2 = fixture('blmsg-cjk');
+    const g2 = (await f2.eng.create({ by: G.OWNER, name: 'cjk', members: [A, B, C], quiet: true })).group.id;
+    const CJK = 'session: 已修好 @beta 请验收', atc = CJK.indexOf('@beta');
+    const pc = await f2.eng.post({ group: g2, from: G.OWNER, text: CJK, mentions: [{ id: B, start: atc, end: atc + 5 }] });
+    const pt = await f2.eng.post({ group: g2, from: A, text: 'session: 已修好 @gamma 请验收' });
+    f2.close();
+    const placeIn = (q, id) => { const m = q && q.ok && q.message.mentions.find((x) => x.id === id); return m && m.pos && m.pos[0] ? q.message.text.slice(m.pos[0][0], m.pos[0][1]) : null; };
+    const shown = (q) => JSON.stringify(q && q.ok ? { text: q.message.text, woke: (q.woke || []).map((x) => x.member), masked: q.masked } : q);
+    ok(pc.ok && placeIn(pc, B) === '@beta' && (pc.woke || []).concat(pc.queued || []).some((x) => x.member === B) && pc.message.text === 'session: «redacted» @beta 请验收' && JSON.stringify(pc.masked) === '["session:"]',
+      'SEND (cure 2): «session: 已修好 @beta 请验收» with the owner\'s picked @beta — the CJK value alone is masked, the message is sent, beta is woken', shown(pc));
+    ok(pt.ok && placeIn(pt, C) === '@gamma' && (pt.woke || []).concat(pt.queued || []).some((x) => x.member === C) && pt.message.text.endsWith(' @gamma 请验收'),
+      '…and an agent\'s typed @gamma after a CJK value is scanned on the kept words and wakes gamma', shown(pt));
+  }
+  // RED CONTROLS (patched copies of the engine through the SAME drive)
+  const M = mutantCopies('blmsg-ge', REPO);
+  const LATE = 'const body = belt.maskForSink(given, { dataDir, message: true, said: masked, mentions: mw });';
+  ok(src.split(LATE).length === 2 && src.split('message: true').length === 4, 'the controls find their lines (the post\'s mask, the three MESSAGE-mode asks)');
+  const late = await drive('blmsg-late', M.load('src/server/groups-engine.js', src.replace(LATE, 'const body = given;'), 'late-mask'));
+  ok(late.p.ok && late.atB !== '@beta' && !(late.p.masked || []).length, 'RED CONTROL (the mask only at the append, after the @-scan): the @ place misses its @ and the answer names nothing — the SEND legs go red', JSON.stringify(late.atB));
+  const lineMode = await drive('blmsg-line', M.load('src/server/groups-engine.js', src.split('message: true').join('message: false'), 'line-mode'));
+  ok(lineMode.p.ok && !lineMode.p.message.text.includes('the rest of the brief arrives'), 'RED CONTROL (the line mode in the group log): the rest of the message is lost again — the SEND leg goes red', JSON.stringify(lineMode.p.message && lineMode.p.message.text));
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

@@ -86,7 +86,7 @@ const cr = fs.readFileSync(path.join(ROOT, 'src/lib/chat-renderers.js'), 'utf8')
 ok(/from '\.\.\/path-linkify\.js'/.test(cr), 'chat-renderers imports src/path-linkify.js');
 ok(/const pathRe = sharedPathRe\(\)/.test(cr) && /cleanPath\(p\) \{ return sharedCleanPath\(p\); \}/.test(cr), 'both the path regex and cleanPath delegate to it');
 ok(!/\[\^\\0<>\?\\s!`&\*\(\)'":;\\\\\]/.test(cr), 'no inline copy of the old character class survives in the renderer');
-ok(/linkifyPathsTagSafe\(this\.linkifyPagePaths\(this\.linkifyFileUrls\(this\.linkifyUrls\(text\)\)\)/.test(cr), 'ORDER pin: URLs, file: URLs and /p/<id> pages are linkified BEFORE paths (the path rule would match their path part)');
+ok(/linkifyPathsTagSafe\(this\.linkifySchemeLinks\(this\.linkifyPagePaths\(this\.linkifyFileUrls\(this\.linkifyUrls\(text\)\)\), opts\)/.test(cr), 'ORDER pin: URLs, file: URLs, /p/<id> pages and (lane setting-doors pick 1) vibespace:// links (every target of the scheme) are linkified BEFORE paths (the path rule would match their path part); the scheme\'s pass is given the renderer\'s option');
 ok(/linkifyPagePaths\(text\) \{\n    return this\._linkifyBareText\(text,/.test(cr) && /linkifyFileUrls\(text\) \{\n    return this\._linkifyBareText\(text,/.test(cr) && /return this\._linkifyBareText\(html, \(txt\) => txt\.replace\(pathRe,/.test(cr),
   'SKIP pin (B-2dbc): the page, file: URL and path passes all run through _linkifyBareText, so none touches a tag or a link span an earlier pass made');
 
@@ -356,7 +356,7 @@ const FURL = [
   ['file://localhost/home/u/a.js:12', '/home/u/a.js:12', 'a host part (localhost) dropped, the :line kept'],
   ['file://box/home/u/a.js', '/home/u/a.js', 'any host name dropped'],
   ['file:/home/u/a.md', '/home/u/a.md', 'one slash'],
-  ['FILE:///x/y.md', '/x/y.md', 'the scheme in any case'],
+  ['FILE:///x/y.md', '/x/y.md', 'the scheme in any case'],   // stale-pins: kept — a leg's own name (its words moved into chat-renderers' comment) — not a pin
   ['file:///a/b.py#L12-L20', '/a/b.py:12-20', 'a #L12-L20 fragment ⇒ the :12-20 a bare path carries'],
   ['file:///a/b.py#L7', '/a/b.py:7', '#L7 ⇒ :7'],
   ['file:///a/b.md#intro', '/a/b.md', 'any other fragment dropped'],

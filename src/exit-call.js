@@ -22,8 +22,9 @@ const BIN = /^(?:[A-Za-z0-9_.\-/]*\/)?vibespace-exit$/;
 const ENV_WORD = /^[A-Za-z_][A-Za-z0-9_]*=/;
 // the CLI's own lines (data/bin/vibespace-exit — test-exit-call pins each against the file); lane chat-needs-you-card: they name
 // the card in the conversation now — the words before it stay in history (a re-read call card filters both)
-const WAIT_NOTES = Object.freeze(["# waiting for the user's approval (up to 60 s)… Filed for you: an approval — answer it on the card in this conversation or in the For-you tray", "# waiting for the user's approval (up to 60 s) if the machine asks… — an approval card in this conversation and in the For-you tray"]);
-const WAIT_NOTES_BEFORE = Object.freeze(["# waiting for the user's approval (up to 60 s)…", "# waiting for the user's approval (up to 60 s) if the machine asks…"]);
+// B-48a4 U3: `run`'s note asks the hub nothing now, so it is the pull / push note; its former words stay known for history
+const WAIT_NOTES = Object.freeze(["# waiting for the user's approval (up to 60 s) if the machine asks… — an approval card in this conversation and in the For-you tray"]);
+const WAIT_NOTES_BEFORE = Object.freeze(["# waiting for the user's approval (up to 60 s)…", "# waiting for the user's approval (up to 60 s) if the machine asks…", "# waiting for the user's approval (up to 60 s)… Filed for you: an approval — answer it on the card in this conversation or in the For-you tray"]);
 const WAY_OUT_LINE = '  way out: ask the user to allow this conversation under "Who can use it" on the machine row (Remote tab)';
 const REFUSAL = /^vibespace-exit(?: push)?: (.+)$/;
 const RAN = /^# ran on (.+) — (?:exit (-?\d+)|timed out after \d+ s), (\d+\.\d) s(?: — OUTPUT CUT \(.*\))? \(recorded\)$/;

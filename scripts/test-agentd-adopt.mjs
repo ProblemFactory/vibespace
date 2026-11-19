@@ -121,12 +121,7 @@ console.log('— legacy meta (no startTime) still adopts via the CLI-name fallba
   dm.stop();
   dm = mkDm();
   await dm.connect();
-  // 'sleep' matches neither argv0 'sh' nor claude|codex — the honest outcome
-  // for an UNKNOWN legacy child is refusing to claim it (synthesize), but a
-  // claude/codex cmdline (the only real remote-chat children) must adopt.
-  // Emulate by checking the regex directly against a claude-style cmdline:
-  const src = fs.readFileSync(path.join(repo, 'src/agentd/agentd.js'), 'utf8');
-  check('legacy fallback recognizes claude/codex cmdlines', /\(\^\|\[\/\\s\]\)\(claude\|codex\)/.test(src), '');
+  // (the legacy fallback's cmdline pin — MOVED to the fast scripts/test-agentd-adopt-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   try { process.kill(pid, 'SIGKILL'); } catch { }
 }
 

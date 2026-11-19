@@ -64,7 +64,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, realClicker, runnerFontEnv } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, realClicker, runnerFontEnv, CHROME_STORE } from './scratch.mjs';
+import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
@@ -72,7 +73,8 @@ if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 const VNC_ENV = await vncEnv();
 const [PORT, CDP_PORT] = await freePorts(2);
 const BASE = `http://127.0.0.1:${PORT}`;
-const wt = scratch('ak-chrome-wt'), stubDir = scratch('ak-chrome-stub'), fakeHome = scratch('ak-chrome-home'), CWD = scratch('ak-chrome-cwd');
+const root = mintRoot('ak-chrome-wt'), wt = path.join(root, 't'), stubDir = path.join(root, 'stub'), fakeHome = path.join(root, 'home'), CWD = path.join(root, 'cwd');
+const chromeHome = path.join(root, 'chrome-home'); fs.mkdirSync(chromeHome, { recursive: true });   // rule nine (hub-boot.mjs): the suite's own browser carries a HOME in the root, so the helper ends it before the root goes
 // lane key-grant-everyone: AK_FONT=dejavu ⇒ Chrome under the hosted runner's fontconfig (scratch.mjs runnerFontEnv)
 const fontDir = process.env.AK_FONT === 'dejavu' ? scratch('ak-chrome-font') : null;
 const SHOTS = process.env.AK_SHOTS ? path.resolve(process.env.AK_SHOTS) : '';
@@ -84,7 +86,6 @@ const SECOND = 'automation leg second password';
 const LIVE_SID = crypto.randomUUID();
 
 // ── a throwaway hub: the committed tree + this tree's src / public / data/bin (the CLI ships there) ──
-try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js', 'package.json']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 execSync(`rm -rf ${wt}/data/bin && mkdir -p ${wt}/data && cp -r ${repo}/data/bin ${wt}/data/bin`);
@@ -101,20 +102,16 @@ process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_i
 process.stdin.on('data', () => {});
 process.stdin.on('end', () => process.exit(0));
 `, { mode: 0o755 });
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
-const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${wt}-chrome`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, ...(fontDir ? (fs.mkdirSync(fontDir, { recursive: true }), runnerFontEnv(fontDir)) : {}) } });
+const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' } });
+const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${wt}-chrome`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, ...(fontDir ? (fs.mkdirSync(fontDir, { recursive: true }), runnerFontEnv(fontDir)) : {}), HOME: chromeHome } });
 let cleaned = false;
 const cleanup = () => {
   if (cleaned) return; cleaned = true;
   try { chrome.kill('SIGKILL'); } catch {}
-  try { srv.kill('SIGKILL'); } catch {}
-  for (const root of [wt, fakeHome, stubDir]) { try { endRootedProcesses(root); } catch {} }
-  try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
-  for (const d of [wt, `${wt}-chrome`, fakeHome, stubDir, CWD, ...(fontDir ? [fontDir] : [])]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
+  for (const d of [...(fontDir ? [fontDir] : [])]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }   // the tree, its Chrome profile, the home, the stub and the cwd go with hub-boot.mjs's root
 };
 process.on('exit', cleanup);
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
-for (let i = 0; i < 80; i++) { try { await fetch(`${BASE}/api/home`); break; } catch { await sleep(250); } }
+await hub.ready();
 
 // ── raw CDP ──
 const WebSocket = require('ws');
@@ -152,7 +149,7 @@ const openWindow = async () => { await evalJs(`app.replayOpenSpec({ action: 'ope
 // closing window's rail answered the click and its rows the next read: the new window had not drawn yet)
 const closeWindows = async () => { await evalJs(`(() => { for (const [id, w] of app.wm.windows) if (w && w.type === 'vault') app.wm.closeWindow(id); return true; })()`); return until(`!document.querySelector('.vw')`, 5000); };
 const cli = (args, { token }) => new Promise((resolve) => {
-  const p = spawn(process.execPath, [path.join(wt, 'data/bin/vibespace-api'), ...args], { env: { PATH: process.env.PATH, VIBESPACE_API: BASE, VIBESPACE_SESSION_TOKEN: token }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const p = spawn(process.execPath, [path.join(wt, 'data/bin/vibespace-api'), ...args], { env: { PATH: process.env.PATH, HOME: fakeHome, VIBESPACE_API: BASE, VIBESPACE_SESSION_TOKEN: token }, stdio: ['ignore', 'pipe', 'pipe'] });   // rule nine: the root's HOME
   let out = '', err = '';
   p.stdout.on('data', (d) => { out += d; }); p.stderr.on('data', (d) => { err += d; });
   p.on('close', (code) => resolve({ code, out, err }));

@@ -54,10 +54,17 @@ const ROWS = {
   ],
   'src/server/browser-logins.js': [['the vault is locked — the owner has already been told; a person unlocks it on this instance\'s page; no account was registered', 'agent', 'lane browser-login: a signup the vault could not seal before the fill (vault_locked) — nothing filled, no account made'],
     ['the vault is locked — unlock it, then save', 'label', 'the owner\'s own save doors (网站登录… in the Vault window, the save-login card\'s Save, a login\'s two-step binding — the owner 2026-11-17) answer it as a field verdict while the person is at the door — not a background refusal', { count: 3 }],
-    ['the vault is locked — unlock it, then ', 'label', 'the owner\'s own pending-password Confirm / Discard doors (in the Vault window and on the pending-login For-you card) answer as a field verdict while the person is at the door — not a background refusal', { count: 4 }]],
+    ['the vault is locked — unlock it, then ', 'label', 'the owner\'s own pending-password Confirm / Discard doors (in the Vault window and on the pending-login For-you card) answer as a field verdict while the person is at the door — not a background refusal; + (lane login-request-card, one login, several sites) the person\'s own site add (and the words before it) / remove / merge doors and the login\'s own remove (a locked vault cannot read its sites) at the login\'s row, the same field verdict', { count: 9 }]],
   'src/lib/vault-login-grants.js': [['The vault is locked — press Unlock…, then save again.', 'label', 'the web-login grant dialogs\' and the two-step dialog\'s save-time refusal line, its Unlock… press beside it (the door) — a field verdict while the person is in the dialog, not a background refusal (the owner 2026-11-17)']],
+  'src/server/browser-proxy-logins.js': [['the vault is locked — the owner has already been told; a person unlocks it on this instance\'s page (Unlock…), then starts the browser again', 'both', 'B-8b87: a browser profile whose proxy login the locked vault holds — the launch refused by name (proxy_credential_unreadable; an agent\'s start reads it as the CLI\'s error) and the forwarder\'s 502 page'],
+    ['the vault is locked — unlock it in the Vault window, then save', 'label', 'B-8b87: the person\'s own Save of a proxy login (New login… in the profile\'s proxy field) answers it as a field verdict while the person is at the door — not a background refusal'],
+    ['the vault is locked — unlock it in the Vault window, then remove', 'label', 'B-8b87: the person\'s own Delete of a proxy login in the Vault window answers it as a field verdict while the person is at the door — not a background refusal']],
+  'src/lib/browser-proxy-model.js': [['The vault is locked — press Unlock…, then save.', 'label', 'B-8b87 cure: the proxy dialog\'s save-time verdict line — the Unlock… press (proxyDoor) beside the words is the door; a field verdict while the person is in the dialog, not a background refusal'],
+    ['The vault is locked — press Unlock…, then move the password again.', 'label', 'B-8b87 cure: the answer to the person\'s own «Move the password to the vault» press, in its toast WITH the Unlock… press — a verdict at the door, not a background refusal'],
+    ['The vault is locked — press Unlock…, then start the browser again.', 'label', 'B-8b87 cure: the answer to the person\'s own start press (Browse / Restart) on a profile whose proxy login the vault holds, in its toast WITH the Unlock… press — a verdict at the door; the background road (an agent\'s start, the forwarder\'s page) is browser-proxy-logins.js\'s `both` row']],
   'src/lib/vault-login-row.js': [['The vault is locked (vault_locked) — unlock it, then save', 'label', 'the 网站登录… dialog\'s save-time verdict line (the same words as the paste box\'s) — a field verdict while the person is in the dialog, not a background refusal']],
   'src/lib/vault-totp-row.js': [['The vault is locked — unlock it first, then preview again', 'label', '添加… ▸ 两步验证…\'s preview-time verdict line (lane vault-totp-add) — 「解锁…」 beside the words is the door; a field verdict while the person is in the dialog, not a background refusal']],
+  'src/lib/may-use-section.js': [['The vault is locked — unlock it in the Vault window to see what it may use there', 'label', 'Session Properties\' «What it may use» (unit what-it-may-use): while the vault is locked its grants cannot be verified — a read-only note in the owner\'s own section, the 保险库 door beside the words opens the Vault window to unlock it']],
   'src/lib/vault-use-row.js': [['Unverified until you unlock the vault — not in use until then', 'label', 'the «谁可以用…» row\'s locked-read note (lane vault-use-grants r6) — while the vault is locked the chips are greyed and the members listed «unverified», shown as a field-side note while the person is at the Vault window (the run door still refuses with vault_locked and its own words); not a background refusal the two-facts rule governs']],
   // int331 seam — sites from lanes that landed after this census's base (.326): relay status words, the provider-config save verdict,
   // and the 使用失败 For-you card's count/hint detail — all LABELS/status, not the tool-refusal sentences the two-facts rule (decision 5) targets
@@ -68,6 +75,15 @@ const ROWS = {
   ],
   'src/lib/user-todos-row.js': [
     ['the vault locked before it was answered', 'label', 'the same outcome words on the tray row / the For-you window (resolvedByText) — a record\'s end, the lock told by its own item'],
+  ],
+  'src/routes/providers.js': [
+    ['the vault first — the provider’s key is kept there', 'label', 'the provider wizard\'s own save / new-key verdict while the person is in the dialog (lane lg-providers U1) — a field verdict on a press, not a background tool refusal'],
+  ],
+  'src/server/provider-spawn.js': [
+    ['the vault is locked — unlock it to start a conversation on', 'carried', 'the provider spawn road\'s refusal in the create\'s own error (lane lg-providers U2): the key read went through the vault, whose blocked() puts it on THE STRIP, which says both', { via: 'src/lib/vault-unlock.js' }],
+  ],
+  'src/provider-test-model.js': [
+    ['Unlock the vault first — the provider’s key is kept there', 'label', 'the provider Test\'s refusal words on a person\'s press in the wizard or the roster (lane lg-providers U4) — a verdict shown where the person pressed, not a background tool refusal'],
   ],
   'src/model-providers.js': [
     ['Unlock the vault first', 'label', 'the provider-config dialog\'s own save-time verdict shown while the person is in the dialog (lane provider-record) — a field verdict, not a background tool refusal (the two-facts rule is for refusals)'],
@@ -88,7 +104,10 @@ const ROWS = {
   ],
   // lane vault-paste-request: the paste box's own state line INSIDE its For-you item (and the ⑥ dialog's verdict) — a field verdict
   // while the person is at the box, its 解锁… button beside it (the box IS the For-you item: the telling and the door in one place)
-  'src/lib/vault-paste-box.js': [['The vault is locked (vault_locked) — unlock it, then save', 'label', 'the paste box\'s state line inside its For-you item (its 解锁… button beside the words — the door), the refusal said in the same line, and 「其他密钥或密码…」\'s save-time verdict — a field verdict while the person is in the box, not a background refusal (lane vault-entry-description: + the words rule\'s refusals — the box and the Vault window\'s Edit…)', { count: 4 }]],
+  'src/lib/vault-paste-box.js': [['The vault is locked (vault_locked) — unlock it, then save', 'label', 'the paste box\'s state line inside its For-you item (its 解锁… button beside the words — the door), the refusal said in the same line, and 「其他密钥或密码…」\'s save-time verdict — a field verdict while the person is in the box, not a background refusal (lane vault-entry-description: + the words rule\'s refusals — the box and the Vault window\'s Edit…)', { count: 4 }],
+    // lane login-request-card, the use door's cure (主开发 12:17Z): «Use a login you already saved…» on a LOCKED vault says so — never «none saved»
+    ['The vault is locked — unlock it to pick one of its saved logins.', 'label', 'the use-a-login pick\'s empty list said for what it is: a field verdict in the card while the person is in it, its «Unlock the vault» button beside the words — the door'],
+    ['Unlock the vault', 'label', 'that button itself — the unlock door on the card (THE unlock dialog, showUnlock), its words the door\'s name']],
   'src/server/vault-hooks.js': [
     ['The vault locked after a restart', 'foryou', 'THE FOR-YOU ITEM after a restart (place 2) — the item IS the telling'],
     ['The vault is locked — agents that need a credential will be refused until you unlock it', 'foryou', 'THE FOR-YOU ITEM the moment it locks (lane vault-locked-loud, int332) — the item IS the telling; the door sentence follows'],
@@ -159,6 +178,10 @@ const ROWS = {
     ['frpc starts without the shared relay token (the vault is locked)', 'log', 'the journal line when the lock starts frpc without the shared token (lane frp-token-proof) — the status (relay.restartAtUnlock) and, if the relay drops it, the For-you item say it to the owner'],
   ],
   'src/relay-token.js': [['because the vault was locked when it started', 'foryou', 'THE DROPPED-LOGIN For-you item\'s detail (lane frp-token-proof): the frp plugin\'s item IS the telling; the door — the second password, or the relay token again']],
+  // B-864f: a session folder on a mount that waits for the vault — the hub's refusal text, the pace's reason clause, the boot offer
+  'src/server/cwd-wait.js': [['the vault is locked — the folder ', 'log', 'B-864f: the hub\'s refusal message for a folder on a mount that waits for the vault (its console line, telemetry, what an older page prints); the page words it itself (session-lifecycle folderWords) and never shows this text']],
+  'src/lib/resume-pacer.js': [['its folder waits for the vault', 'label', 'B-864f: one reason clause inside the bulk resume\'s failure line, for a conversation that is not a local chat resume; the strip at the top of the page says where to unlock and For you names what waits on it']],
+  'src/lib/layout.js': [['The vault is locked: a conversation whose folder is on a machine or a storage mount waits for it', 'label', 'B-864f: the boot resume-all offer while locked — its own confirm «Unlock and resume all n» is the door beside these words (the unlock dialog opens first, the resumes follow its close)']],
   'src/key-file.js': [['the vault is locked — ', 'carried', 'the key-file law\'s refusal in a store\'s own error (key-unreadable:vault_locked)', { via: 'src/lib/key-file-words.js' }]],
   'src/secret-box.js': [['the vault is locked — ', 'carried', 'the at-rest cipher\'s refusal (key-unreadable:vault_locked)', { via: 'src/lib/key-file-words.js' }]],
   'src/server/sealed-json.js': [['the vault is locked — ', 'carried', 'a sealed JSON file (the voice pair) read while locked', { via: 'src/voice-model.js' }]],

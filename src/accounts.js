@@ -18,6 +18,7 @@ const fs = require('fs');
 const RR = require('./run-reads.js'); // B-403e: one ask per file of the mount per synchronous run
 const { get: harnessOf, list: listHarnesses } = require('./harnesses'); // S2: per-harness credential mechanics live on the descriptor (creds)
 const path = require('path');
+const { presetOf: builtInProviderOf } = require('./model-providers.js'); // PURE: a built-in record's id (pv-anthropic-…) is never a third-party account (lane lg-providers U2)
 const os = require('os');
 const crypto = require('crypto');
 const { capsOf } = require('./backend-caps.js'); // PURE registry: per-backend hot-switch verdict rides list() so the UI never offers a dead toggle
@@ -350,7 +351,10 @@ class AccountManager {
   // read-only identity probe (email/plan/loggedIn) from their creds dir.
   list() {
     let offerOnce = null;   // the guided door's offer, read once per roster (lane oat-add-door: oatShapeOffer)
+    let providerRows = [];
+    try { providerRows = this._providerRows ? this._providerRows() || [] : []; } catch { providerRows = []; }
     return {
+      providerRows,   // lane lg-providers U5: BESIDE `accounts`, never in it (the hub's account readers see records only)
       ...Object.fromEntries(this._defaultIdFields().map((f) => [f, this._state[f] || null])), // defaultAccountId, defaultCodexAccountId, defaultAntigravityAccountId …
       accounts: this._state.accounts.map((a) => {
         const type = this._acctType(a);
@@ -466,7 +470,8 @@ class AccountManager {
    *  answer (src/run-reads.js) — for a check whose purpose is «look again before I write»; its answer is the run's from then on.
    *  The callers, each before a write: pendingSignin and discardPendingSignin (a row handed to a sign-in or removed),
    *  reloginResolve (the login moved out of a row); the two slot writers (ensureSessionPoolLink, setPoolTarget) look again
-   *  through LOOK_AGAIN_SLOT_WRITERS below, outside their text (THE SLOT LAW keeps them byte-identical). */
+   *  through LOOK_AGAIN_SLOT_WRITERS below, outside their text (THE SLOT LAW keeps them byte-identical) — each folder named in its
+   *  own try, and a folder that cannot be named drops the whole run's memo (dropRun). */
   _lookAgain(id) { RR.forget(this.subDir(id)); return this.readSubCreds(id); }
 
   _subscriptionLoginStatus(id) {
@@ -1716,6 +1721,19 @@ class AccountManager {
   }
   /** The provider store's lookup (P0a): `(account) → record | null`. Unset ⇒ every account answers its harness's own subscription. */
   setProviderLookup(fn) { this._providerLookup = typeof fn === 'function' ? fn : null; }
+  /** (lane lg-providers) a third-party provider was added / changed / removed: every page re-reads the account lists */
+  providersChanged() { this._notify(); }
+  /** (lane lg-providers U5) the third-party providers' roster rows (model-providers rosterRowsOf) — list().providerRows */
+  setProviderRows(fn) { this._providerRows = typeof fn === 'function' ? fn : null; }
+  /** (lane lg-providers U2) the third-party provider spawn road: `(id, backend, opts) → spawn account | throws by name` */
+  setProviderSpawn(fn, modelFor = null) { this._providerSpawn = typeof fn === 'function' ? fn : null; this._providerModel = typeof modelFor === 'function' ? modelFor : null; }
+  /** (lane lg-providers U2 r1) a provider record by its id (the badge's name and tail) — null for anything else */
+  providerRecordOf(id) { try { return /^pv-/.test(String(id || '')) && !builtInProviderOf(String(id)) && this._providerLookup ? this._providerLookup({ id: String(id) }) : null; } catch { return null; } }
+  /** (lane lg-providers U2 r1) the model a `pv-` account's session starts with — null when the id is no provider's */
+  providerModelFor(id, backend, model) {
+    if (!/^pv-[a-z0-9][a-z0-9-]{0,63}$/.test(String(id || '')) || builtInProviderOf(String(id)) || !this._providerModel) return null;
+    return this._providerModel(String(id), backend, model);
+  }
   _providerKeyOf(p) { return p && typeof p === 'object' ? (String(p.id || p.kind || '') || null) : (typeof p === 'string' && p ? p : null); }
   /** (lane pool-provider-latents, q-055 M2) THE PROVIDER OF A DELETED ACCOUNT — what it served when it was removed (this
    *  process remembers it; an UNPLACED mark carries it across a restart). null = never known here. */
@@ -2296,6 +2314,13 @@ class AccountManager {
   }
 
   resolveForSpawn(requested, backend = 'claude', opts = {}) {
+    // A THIRD-PARTY PROVIDER (lane lg-providers, B-d578 U2): `pv-<id>` — asked for, or this harness's default — names a provider
+    // RECORD, not an account: its own road (src/server/provider-spawn.js through setProviderSpawn), refused by name when unwired
+    const pvWant = requested === 'subscription' ? null : (requested || this._state[(this._credsOf(backend) || {}).defaultIdField] || null);
+    if (pvWant && /^pv-[a-z0-9][a-z0-9-]{0,63}$/.test(String(pvWant)) && !builtInProviderOf(String(pvWant))) {
+      if (!this._providerSpawn) throw Object.assign(new Error('third-party model providers are not available on this hub'), { code: 'provider-unwired' });
+      return this._providerSpawn(String(pvWant), backend, opts);
+    }
     if (this._credsOf(backend)?.spawnForm === 'isolated-home') return this._resolveHomeSpawn(backend, requested, opts); // the descriptor's creds row picks the form (rv-harnesses H3)
     if (requested === 'subscription') return null; // the CLI's own global login
     const id = requested || this._state.defaultAccountId;
@@ -2630,13 +2655,23 @@ class AccountManager {
 // mount itself — never an earlier answer of the run another process may have changed since
 const LOOK_AGAIN_SLOT_WRITERS = [
   // the member's folder, the conversation's own link, and the pool's default link (a conversation with no link of its own
-  // reads its «from» through it)
-  ['ensureSessionPoolLink', function (poolId, sessKey, memberId) { const a = this.get(poolId); return [this.subDir(memberId), this.sessionPoolLinkPath(poolId, sessKey), this._poolLinkDir(a || { id: poolId })]; }],
-  ['setPoolTarget', function (id, subId) { const a = this.get(id); const be = (a && this._acctBackend(a)) || 'claude'; return [this._acctDir(be, subId), a ? this._poolLinkDir(a) : null, this.poolLinksDir(id)]; }],
+  // reads its «from» through it) — EACH NAMED BY ITS OWN FUNCTION (B-403e follow-up): one that cannot be named never skips the others
+  ['ensureSessionPoolLink', [
+    function (poolId, sessKey, memberId) { return this.subDir(memberId); },
+    function (poolId, sessKey) { return this.sessionPoolLinkPath(poolId, sessKey); },
+    function (poolId) { return this._poolLinkDir(this.get(poolId) || { id: poolId }); },
+  ]],
+  ['setPoolTarget', [
+    function (id, subId) { const a = this.get(id); return this._acctDir((a && this._acctBackend(a)) || 'claude', subId); },
+    function (id) { const a = this.get(id); return a ? this._poolLinkDir(a) : null; },
+    function (id) { return this.poolLinksDir(id); },
+  ]],
 ];
-for (const [name, foldersOf] of LOOK_AGAIN_SLOT_WRITERS) {
+// each folder is named in its OWN try, and a folder that cannot be NAMED drops the run's memo (RR.dropRun; forget itself never throws): the
+// writer's check then asks the mount for everything — never an earlier answer the look-again could not forget by name
+for (const [name, namers] of LOOK_AGAIN_SLOT_WRITERS) {
   const writer = AccountManager.prototype[name];
-  AccountManager.prototype[name] = { [name](...args) { let dirs = []; try { dirs = foldersOf.apply(this, args); } catch { } for (const d of dirs) { try { if (d) RR.forget(d); } catch { } } return writer.apply(this, args); } }[name];   // each folder in its own try: one that cannot be named never skips the others
+  AccountManager.prototype[name] = { [name](...args) { for (const nameOf of namers) { let d = null; try { d = nameOf.apply(this, args); } catch { RR.dropRun(); continue; } if (d) RR.forget(d); } return writer.apply(this, args); } }[name];
 }
 
 module.exports = { AccountManager };

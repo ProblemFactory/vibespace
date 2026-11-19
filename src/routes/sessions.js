@@ -25,6 +25,7 @@ const { parseRunDir, journalAttemptsFromText, treeAlive } = require('../workflow
 // store.discover lists its own sessions (claude lock-first sweep in
 // session-store, codex worker-side rollout walk); no backend ternary here.
 const { list: listHarnesses } = require('../harnesses');
+const { onOtherMachine } = require('../task-membership.js'); // B-df5f: the ONE «another machine» predicate (withSessionKey)
 const { findSessionJsonlPath } = require('../session-store');
 const { collectCodexThreadMetasAsync } = require('../codex-session-store');
 const { findCodexSessionJsonlPath, jsonlGapInfo, jsonlGapInfoAsync, readJsonlLineRange, readJsonlLineRangeAsync, scanJsonlUserTurns, scanJsonlUserTurnsAsync, searchJsonlFull, searchJsonlFullStream } = require('../adapters/codex');
@@ -50,8 +51,13 @@ function realCwdOf(cwd) {
   if (_realCwdCache.size > 4096) _realCwdCache.delete(_realCwdCache.keys().next().value);
   return rp;
 }
+// B-df5f cure (THE BOARD AND THE SERVER ANSWER THE SAME MEMBERSHIP): the HUB's real path is a fact of the hub's own folders,
+// so a row that names another machine is never stamped with it. A GUARD: no producer of this route hands such a row today
+// (discovery rows are local, kept-stopped rows are local metas); the road where the page met another machine's conversation
+// with the hub's real path is its own merge, closed by task-membership membershipCwds
+const namesOtherMachine = (s) => [s.host, s.hostId].some(onOtherMachine);
 function withSessionKey(session = {}) {
-  const rc = realCwdOf(session.cwd);
+  const rc = namesOtherMachine(session) ? null : realCwdOf(session.cwd);
   return {
     ...session,
     sessionKey: session.sessionKey || getSessionKey(session),
@@ -676,6 +682,7 @@ function setup(ctx) {
   // the boot phase's `sessions-index` step (src/server/boot-phase.js): the FIRST sweep runs at boot, not on the first
   // page's request — a page that reloads into a fresh server finds it cached (or joins it in flight)
   const discoveryPaused = () => { try { return !!(ctx.paused && ctx.paused('discovery')); } catch { return false; } };
+  _keptRead = () => ({ rows: _sessionsCache ? _sessionsCache.sessions : null, paused: discoveryPaused() });
   _warmSweep = () => {
     if (!_sweepInFlight) _sweepInFlight = _runSessionsSweep().finally(() => { _sweepInFlight = null; });
     return _sweepInFlight;
@@ -734,8 +741,8 @@ function setup(ctx) {
         agentNickname: s.agentNickname || '',
         parentThreadId: s.parentThreadId || null,
         accountId: s._accountId || null,
-        accountName: s._accountId ? (ctx.accounts?.get(s._accountId)?.name || 'API key') : null,
-        accountTail: s._accountId ? (ctx.accounts?.get(s._accountId)?.tail || null) : null,
+        accountName: s._accountId ? (ctx.accounts?.get(s._accountId)?.name || ctx.accounts?.providerRecordOf?.(s._accountId)?.label || 'API key') : null,   // a third-party provider's conversation: its record's name (lane lg-providers U2 cure — as its badge)
+        accountTail: s._accountId ? (ctx.accounts?.get(s._accountId)?.tail || ctx.accounts?.providerRecordOf?.(s._accountId)?.tail || null) : null,
         todo: s._todos || null,
         auth: ctx.sessionAuth ? ctx.sessionAuth(s) : null,
         mode: s.mode || 'terminal',
@@ -777,6 +784,7 @@ function warmthDiff(activeSessions, factsOf, now = Date.now()) {
 }
 
 let _warmSweep = null;
+let _keptRead = null;   // unit what-it-may-use (cure r1, SHOULD a): the rows the last sweep KEPT, and whether discovery is paused — read, never a new sweep
 let _heldRows = null;
 let _sweptStopped = null;   // B-a5a4 follow-up r2: the last sweep's stopped rows AS DISCOVERED (heldAccountOfNow merges the kept copies into them)
 /** B-a5a4 follow-up r3: the sweep's merge AND what it hands the seam — the stopped rows AS DISCOVERED (copies), then the kept
@@ -859,4 +867,4 @@ async function boundElsewhereOf(backend, id, accountId, opts = {}) {
 /** B-a5a4 (1): a resume whose stored account is gone → {refuse} for an account-bound harness, else null (degrade, said). */
 const acctGoneOf = (backend) => (accountBoundOf(backend) ? { refuse: ACCT_GONE_BOUND } : null);
 
-module.exports = { router, setup, mergeKeptStopped, sweepMerge, heldAccountOf, heldAccountOfNow, acctGoneOf, boundElsewhereOf, ACCT_GONE_BOUND, BOUND_ELSEWHERE, warmthDiff, _noteSweptRows: (rows) => { _heldRows = rows; _sweptStopped = rows; }, warmSessions: () => (_warmSweep ? _warmSweep() : Promise.resolve()) };
+module.exports = { router, setup, mergeKeptStopped, sweepMerge, withSessionKey, heldAccountOf, heldAccountOfNow, acctGoneOf, boundElsewhereOf, ACCT_GONE_BOUND, BOUND_ELSEWHERE, warmthDiff, _noteSweptRows: (rows) => { _heldRows = rows; _sweptStopped = rows; }, keptSessions: () => (_keptRead ? _keptRead() : { rows: null, paused: false }), warmSessions: () => (_warmSweep ? _warmSweep() : Promise.resolve()) };

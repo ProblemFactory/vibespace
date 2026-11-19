@@ -33,7 +33,7 @@
 | verb（IPC 路径） | 答 | 建成的裁决 |
 |---|---|---|
 | `probe`（`GET /probe`，query `{binaryPath, platform}`） | `{id, installed, executable, binaryPath, version: string\|null, protocol: 1, kinds[20], features[]}` | `version: null` 是**事实**不是错误；`protocol !== 1`、`features` 无 `surfaces`、形状不对、非 200 ⇒ `browser_engine_protocol`。注册表还要求答的 `binaryPath` **等于它递过去的路径**——插件判断别的程序（读自己的 env / 自己的布局）⇒ `browser_engine_protocol` **（与原文不同：新增）** |
-| `launchOptions`（`POST /resolve-launch`，body `{profileId, platform, binaryPath, userDataDir?}`） | `{executablePath, binaryPath, args[], env: {}, persona}` | HTTP 409 `{code:'no_binary'}` ⇒ `browser_engine_kernel_missing`；`env` 的键只收 `ENGINE_ENV_KEYS`（今天空集），之外 ⇒ `browser_engine_env`（报键名，值从不读）；`executablePath` 非绝对、`args` 超过 64 条 / 多行 / 含 `--remote-debugging-*` 或 `--user-data-dir`（这两样是 VibeSpace 的）⇒ `browser_engine_protocol` **（与原文不同：参数检查是新增的）** |
+| `launchOptions`（`POST /resolve-launch`，body `{profileId, platform, binaryPath, userDataDir?, egress?}` — `egress` 可选：人在「检查出口…」里保留的出口 `{publicIp, country, timezone, checkedAt, source}`（`source` = `measured` / `typed`），只在保留了才带；代理一改即被忘掉） | `{executablePath, binaryPath, args[], env: {}, persona}` | HTTP 409 `{code:'no_binary'}` ⇒ `browser_engine_kernel_missing`；`env` 的键只收 `ENGINE_ENV_KEYS`（今天空集），之外 ⇒ `browser_engine_env`（报键名，值从不读）；`executablePath` 非绝对、`args` 超过 64 条 / 多行 / 含 `--remote-debugging-*` 或 `--user-data-dir`（这两样是 VibeSpace 的）⇒ `browser_engine_protocol` **（与原文不同：参数检查是新增的）** |
 | `version()` | 未建为 verb | 活的那份是 CDP `VibeSpace.getVersion`（heavy 腿已在自己的 socket 上读到）；两份不一致的 journal 留给 P1 |
 | `attachTarget(cdp)` | 不采用 | 内核方 Q8 已确认：VibeSpace 只走 `server.js`（IPC v1）+ CDP，主进程不 require 插件 |
 

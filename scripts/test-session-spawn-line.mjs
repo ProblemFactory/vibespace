@@ -14,6 +14,13 @@
 //     the spawn's env.
 //   ③ MUTANTS (ws-create copies): the pre-fix line (`env` + the pairs inside the wrapper's argv), and the pairs left
 //     off the env ⇒ each leg goes RED.
+//   ④ B-460d — WHAT A CONVERSATION STARTS NEVER OUTRANKS THE HUB (src/server/spawn-priority.js): the line's priority words
+//     (PURE), the verdict (the setting, a remote conversation, a machine with no nice program — said once), BOTH local roads
+//     of the real ws-create (dtach and the daemon pipe) and the real JobManager's wrapper spawn carry `nice -n 5`; the
+//     setting off = the release's spawn byte for byte (the RED control: a copy with the priority cut); REAL processes —
+//     the line started, its child and the child's child report the suite's niceness + 5; the fact rides the session and
+//     its meta, and its words are Session Properties' row; the job wrapper's 'error' listener runs (a late exec failure is
+//     ONE journal line, never a throw — RED: a copy without the listener throws).
 // Run: node scripts/test-session-spawn-line.mjs
 import fs from 'node:fs';
 import os from 'node:os';
@@ -61,15 +68,15 @@ console.log('— ① PURE: the builder table, one row per harness (each producti
 
 console.log('— ② the REAL ws-create: a chat create per harness, down to the (stub) pty spawn');
 const SOCK = scratchDir('sline-sock'), BUF = scratchDir('sline-buf'), CWD = scratchDir('sline-cwd');
-async function drive(mod, data) {
-  const sent = [], spawned = [], active = new Map(), noop = () => undefined;
+async function drive(mod, data, { setting = () => undefined, hosts = null } = {}) {
+  const sent = [], spawned = [], metas = [], active = new Map(), noop = () => undefined;
   const ctx = new Proxy({
-    activeSessions: active, WS_OPEN: 1, sessionCounterRef: { value: 0 }, adapterRegistry: registry(), hosts: null, accounts: null, os, fs, path,
+    activeSessions: active, WS_OPEN: 1, sessionCounterRef: { value: 0 }, adapterRegistry: registry(), hosts, accounts: null, os, fs, path, writeSessionMeta: (sock, m) => { metas.push(m); },
     execFileSync: require('child_process').execFileSync, ensureDir: (d) => fs.mkdirSync(d, { recursive: true }),
     SOCKETS_DIR: SOCK, BUFFERS_DIR: BUF, PTY_WRAPPER: W('pty-wrapper.js'), CHAT_WRAPPER: W('chat-wrapper.js'),
     NODE_CMD: '/n/node', DTACH_CMD: '/stub/dtach', ENV_CMD: '/usr/bin/env', CLAUDE_CMD: EXE.claude, EDITOR_CMD: '/stub/editor/code', AGENT_BIN_DIR: '/stub/bin', PORT: 1, X_ENV: {},
     cliCmds: { forSpawn: async (b, c) => c }, USAGE_STATUSLINE_CMD: '/stub/vibespace-usage', userStatuslineCmd: () => '',
-    serverSetting: noop, harnessSetting: noop, harnessDeclares: () => false, harnessSpawnSettings: () => ({}),
+    serverSetting: setting, harnessSetting: noop, harnessDeclares: () => false, harnessSpawnSettings: () => ({}),
     integrationEnabled: () => true, readSessionMeta: () => null, readLayouts: () => ({}), getSyncStore: () => null,
     pty: { spawn: (cmd, args, opts) => { spawned.push({ cmd, args, env: opts.env }); return { pid: 4242, onData() { }, onExit() { }, write() { }, resize() { }, kill() { } }; } },
     setupSessionPty: (s, id, p) => { s.pty = p; },
@@ -81,7 +88,7 @@ async function drive(mod, data) {
   });
   await handler({ readyState: 1, send: (t) => sent.push(JSON.parse(t)) }, { type: 'create', mode: 'chat', cwd: CWD, reqId: 'r1', ...data }, new Set());
   const [id, session] = [...active.entries()][0] || [];
-  return { sent, spawned, id, session };
+  return { sent, spawned, metas, id, session };
 }
 /** the judge of ONE chat create: dtach → <wrapper> <buf> <meta> <the absolute executable> …, names in the env */
 function judge(x, backend) {
@@ -134,6 +141,133 @@ console.log('— ③ MUTANTS: each restores a pre-fix shape in a ws-create copy 
     for (const backend of Object.keys(EXE)) verdicts.push(judge(await drive(mod, { backend, extraArgs: ['--extra'] }), backend));
     ok(verdicts.every((v) => want.test(v)), `MUTANT ${name} ⇒ RED on every harness`, verdicts);
   }
+}
+console.log('— ④ B-460d: what a conversation starts never outranks the hub — nice -n 5 on the spawn itself');
+{
+  const SPRI = require(path.join(REPO, 'src/server/spawn-priority.js'));
+  const NICE = SPRI.niceProgram();
+  ok(typeof NICE === 'string' && NICE.startsWith('/') && SPRI.NICE_DIRS.includes(path.dirname(NICE)), `setup: this machine's nice program is found in a fixed system directory (${NICE})`);
+  // PURE: the words
+  let bad = []; for (const p of [{ nice: 'nice', by: 5 }, { nice: '/usr/bin/nice', by: 0 }, { nice: '/usr/bin/nice', by: 20 }, { nice: '/usr/bin/ni ce', by: 5 }]) { try { L.priorityArgv(p); } catch (e) { bad.push(e.message); } }
+  ok(JSON.stringify(L.priorityArgv({ nice: '/usr/bin/nice', by: 5 })) === '["/usr/bin/nice","-n","5"]' && L.priorityArgv(null).length === 0 && bad.length === 4 && L.PRIORITY_BY === 5,
+    'the words of a start\'s priority: `<absolute nice> -n 5`, none for null; a bare name, a step of 0 or 20, a path with a space refused by name', bad);
+  const base = { node: '/n/node', wrapper: '/w/chat-wrapper.js', bufFile: '/b/s.buf', metaFile: '/b/s.json', exe: '/opt/bin/claude', args: ['--x'], env: { A: '1' }, pairs: ['B=2'] };
+  const plain = L.sessionSpawnLine(base), low = L.sessionSpawnLine({ ...base, priority: { nice: NICE, by: 5 } });
+  ok(JSON.stringify(low.argv) === JSON.stringify([NICE, '-n', '5', ...plain.argv]) && JSON.stringify(plain.argv) === '["/n/node","/w/chat-wrapper.js","/b/s.buf","/b/s.json","/opt/bin/claude","--x"]' && JSON.stringify(low.env) === JSON.stringify(plain.env),
+    'the line with a priority = `nice -n 5` + the line without it, word for word; with none it is the release\'s line (node first); the env never changes', low.argv);
+  // the verdict
+  const said = [], quiet = { warn: (l) => said.push(l) };
+  const on = SPRI.priorityFor({ log: quiet }), off = SPRI.priorityFor({ serverSetting: (k) => (k === SPRI.SETTING ? false : undefined), log: quiet }), remote = SPRI.priorityFor({ local: false, log: quiet });
+  const none1 = SPRI.priorityFor({ nice: () => null, log: quiet }), none2 = SPRI.priorityFor({ nice: () => null, log: quiet });
+  ok(on.priority && on.priority.nice === NICE && on.priority.by === 5 && on.fact.by === 5 && off.priority === null && off.fact.why === 'off' && remote.priority === null && remote.fact.why === 'remote'
+    && none1.priority === null && none1.fact.why === 'no-nice' && none2.fact.why === 'no-nice' && said.length === 1 && /no nice program/.test(said[0]) && SPRI.SETTING === 'agents.lowerCpuPriority',
+    'the verdict: on (unset) ⇒ nice +5; the setting off ⇒ none; a remote conversation ⇒ none (its machine\'s own); a machine with NO nice program ⇒ it still starts, at the hub\'s priority, and the journal says so ONCE', { on, off, remote, none1, said });
+  const throwing = SPRI.priorityFor({ serverSetting: () => { throw new Error('settings not ready'); }, log: quiet });
+  ok(throwing.priority && throwing.priority.by === 5, 'a setting that cannot be read is the default (on) — never a start refused');
+  ok(SPRI.factOf({ by: 5 }).by === 5 && SPRI.factOf({ by: 0, why: 'off' }).why === 'off' && SPRI.factOf({ by: 0, why: 'other' }) === null && SPRI.factOf({ by: 30 }) === null && SPRI.factOf('5') === null,
+    'a stored fact reads back only in its own shapes');
+  // THE REAL ws-create: BOTH local roads
+  const X = await drive(wsCreate, { backend: 'claude' });
+  const dt = X.spawned[0] ? X.spawned[0].args : [];
+  // the dtach road's judgement, ONE function (the red control below re-runs it on the release's copy)
+  const dtachNice = (x) => { const a = x && x.spawned[0] ? x.spawned[0].args : []; return a[0] === '-c' && a.indexOf('/n/node') === 8 && JSON.stringify(a.slice(5, 8)) === JSON.stringify([NICE, '-n', '5']); };
+  ok(dtachNice(X) && X.session && X.session._cpuNice && X.session._cpuNice.by === 5 && X.metas.some((m) => m.cpuNice && m.cpuNice.by === 5),
+    `the dtach road: dtach -c <sock> -E -r none ${NICE} -n 5 /n/node <wrapper> …; the session's fact {by: 5} and its meta's cpuNice (a restart keeps it)`, dt.slice(0, 10));
+  const pipes = [];
+  const hosts = { device: async () => ({ openPipeSession: async (o) => { pipes.push(o); return { pid: 77, ready: Promise.resolve({ pid: 77 }), write() { }, kill() { }, resize() { }, onData: null, onExit: null }; } }) };
+  const P = await drive(wsCreate, { backend: 'claude' }, { hosts, setting: (k) => (k === 'agentd.localPipeSessions' ? true : undefined) });
+  ok(pipes.length === 1 && pipes[0].cmd === NICE && JSON.stringify(pipes[0].args.slice(0, 3)) === '["-n","5","/n/node"]' && !P.spawned.length,
+    'the daemon pipe road (agentd.localPipeSessions on): the pipe opens `nice -n 5 /n/node <wrapper> …` — the same line, nothing spawned by dtach', pipes[0] && [pipes[0].cmd, ...pipes[0].args.slice(0, 4)]);
+  const OFF = (k) => (k === SPRI.SETTING ? false : undefined);
+  const XO = await drive(wsCreate, { backend: 'claude' }, { setting: OFF });
+  // THE RED CONTROL: the release's spawn = a ws-create copy with the priority cut out of the line
+  const src = read('src/ws-create.js'), M = mutantCopies('session-spawn-line-nice', REPO);
+  const CUTP = '              exe: spawnCmd, args: spawnArgs, priority: r6Pri.priority,\n';
+  const rel = src.split(CUTP).length === 2 ? M.load('src/ws-create.js', src.replace(CUTP, '              exe: spawnCmd, args: spawnArgs,\n'), 'no-priority') : null;   // stale-pins: kept (the red control rebuilds the release's line)
+  const XR = rel ? await drive(rel, { backend: 'claude' }) : null;
+  const scrub = (x) => JSON.stringify(x.spawned[0] && x.spawned[0].args.map((w) => String(w).replace(/sess-\d+-\d+|cw-\d+-\d+/g, 'ID')));
+  ok(XO.spawned[0] && XR && XR.spawned[0] && scrub(XO) === scrub(XR) && !XO.spawned[0].args.includes(NICE) && XO.session._cpuNice.why === 'off',
+    'the setting OFF = the release\'s spawn, word for word (a copy with the priority cut out of the line) — and the fact says why', { off: scrub(XO), release: XR && scrub(XR) });
+  ok(XR && XR.spawned[0] && !XR.spawned[0].args.includes(NICE) && !dtachNice(XR), 'RED CONTROL: that copy (the release) starts the conversation at the hub\'s priority — the dtach-road judgement above, re-run on it, is red', XR && XR.spawned[0] && XR.spawned[0].args.slice(0, 8));
+  SPRI._reset(); SPRI.niceProgram({ dirs: [path.join(os.tmpdir(), 'vs-no-nice-here')] });   // this process: a machine with no nice program
+  const XN = await drive(wsCreate, { backend: 'claude' });
+  ok(XN.spawned[0] && XN.spawned[0].args[5] === '/n/node' && XN.session._cpuNice.why === 'no-nice', 'a machine without the nice program still starts the conversation — at the hub\'s priority, the fact says why', XN.spawned[0] && XN.spawned[0].args.slice(0, 7));
+  SPRI._reset();
+  // THE REAL JobManager (a copy whose child_process.spawn records — nothing executes): the wrapper's spawn carries it
+  const JSRC = read('src/jobs.js'), SP0 = "const { spawn, execFile } = require('child_process');";
+  const jobsMod = JSRC.split(SP0).length === 2 ? M.load('src/jobs.js', JSRC.replace(SP0, "const { execFile } = require('child_process'); const spawn = (...a) => globalThis.__vsJobSpawn(...a);"), 'jobs-spawn-seam') : null;
+  const jobArgv = async (setting) => {
+    const got = [];
+    globalThis.__vsJobSpawn = (cmd, args) => { got.push([cmd, ...args]); return { pid: 4343, unref() { }, on() { }, once() { }, stdio: [], kill() { } }; };
+    const dir = scratchDir('sline-jobs');
+    const jm = new jobsMod.JobManager({ dataDir: dir, broadcast() { }, notifyUser() { return { ok: true }; }, log() { }, spawnPriority: () => SPRI.priorityFor({ serverSetting: setting, log: quiet }) });
+    jm.init(); for (const t of jm._timers || []) clearInterval(t); jm._timers = [];
+    const r = jm.create({ kind: 'task', name: 'nice-check', cmd: { argv: ['sh', '-c', 'true'], cwd: dir }, owner: { conversation: null, sessionId: 's-N', sessionCreatedAt: 1, groupsSnapshot: [] } }, { isUser: true, groups: new Set() });
+    try { for (const j of jm.jobs.values()) j.desiredUp = false; jm.shutdown(); } catch { }
+    return { argv: got[0] || null, err: r && r.error };
+  };
+  const JON = jobsMod ? await jobArgv(() => undefined) : null, JOFF = jobsMod ? await jobArgv(OFF) : null;
+  ok(JON && JON.argv && JSON.stringify(JON.argv.slice(0, 4)) === JSON.stringify([NICE, '-n', '5', process.execPath]) && /job-wrapper\.js$/.test(JON.argv[4])
+    && JOFF && JOFF.argv && JOFF.argv[0] === process.execPath && JSON.stringify(JOFF.argv.slice(1).map((w) => w.replace(/\/[^ ]*sline-jobs[^/]*/, 'D').replace(/jb-[0-9a-f]+/g, 'J').replace(/\d{10,}/g, 'T'))) === JSON.stringify(JON.argv.slice(4).map((w) => w.replace(/\/[^ ]*sline-jobs[^/]*/, 'D').replace(/jb-[0-9a-f]+/g, 'J').replace(/\d{10,}/g, 'T'))),
+    'the jobs road (the real JobManager): its wrapper starts as `nice -n 5 node job-wrapper.js …`; the setting off = `node job-wrapper.js …`, the same words after it', { on: JON && (JON.argv || JON.err), off: JOFF && (JOFF.argv || JOFF.err) });
+  // (its verdict's LENS THREE should) THE WRAPPER'S 'error' LISTENER RUNS: the stub child is a real EventEmitter; an exec that
+  // fails late (the nice program gone since the one look) is ONE journal line, never a throw out of the child's emitter
+  const { EventEmitter } = require('events');
+  const errRun = async (mod, tag) => {
+    const logs = []; let kid = null;
+    globalThis.__vsJobSpawn = () => { kid = Object.assign(new EventEmitter(), { pid: 4344, unref() { }, stdio: [], kill() { } }); return kid; };
+    const dir = scratchDir(`sline-jobs-${tag}`);
+    const jm = new mod.JobManager({ dataDir: dir, broadcast() { }, notifyUser() { return { ok: true }; }, log: (l) => logs.push(String(l)), spawnPriority: () => SPRI.priorityFor({ serverSetting: () => undefined, log: quiet }) });
+    jm.init(); for (const t of jm._timers || []) clearInterval(t); jm._timers = [];
+    jm.create({ kind: 'task', name: 'nice-err', cmd: { argv: ['sh', '-c', 'true'], cwd: dir }, owner: { conversation: null, sessionId: 's-E', sessionCreatedAt: 1, groupsSnapshot: [] } }, { isUser: true, groups: new Set() });
+    let threw = null;
+    try { if (kid) kid.emit('error', Object.assign(new Error(`spawn ${NICE} ENOENT`), { code: 'ENOENT' })); } catch (e) { threw = e; }
+    try { for (const j of jm.jobs.values()) j.desiredUp = false; jm.shutdown(); } catch { }
+    return { spawned: !!kid, threw: threw ? (threw.code || threw.message) : null, said: logs.filter((l) => l.includes(`its wrapper did not start (${NICE}): spawn ${NICE} ENOENT`)).length };
+  };
+  const ERR = jobsMod ? await errRun(jobsMod, 'err') : null;
+  const LIS = "      child.once('error', (e) => {";
+  const SEAM = JSRC.split(SP0).length === 2 ? JSRC.replace(SP0, "const { execFile } = require('child_process'); const spawn = (...a) => globalThis.__vsJobSpawn(...a);").split('\n') : [];
+  const noLis = SEAM.filter((l) => !l.startsWith(LIS));
+  const jobsNoLis = SEAM.length && noLis.length === SEAM.length - 1 ? M.load('src/jobs.js', noLis.join('\n'), 'jobs-no-error-listener') : null;
+  const NOL = jobsNoLis ? await errRun(jobsNoLis, 'err-red') : null;
+  ok(ERR && ERR.spawned && ERR.threw === null && ERR.said === 1 && NOL && NOL.spawned && NOL.threw === 'ENOENT' && NOL.said === 0,
+    `a job wrapper whose exec fails late is ONE journal line («its wrapper did not start (${NICE}): …»), never a throw out of the child; RED CONTROL: without the listener the same 'error' throws (${NOL && NOL.threw})`, { ERR, NOL });
+  delete globalThis.__vsJobSpawn;
+  // REAL PROCESSES: the line started as the roads start it — the wrapper, its child and the child's child each report their niceness
+  const { spawnSync } = require('child_process');
+  const stand = path.join(scratchDir('sline-nice'), 'stand-in.cjs');
+  fs.writeFileSync(stand, "const os = require('os'), { spawnSync } = require('child_process');\n"
+    + "if (process.argv[2] === 'child') { const g = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(require(\"os\").getPriority()))'], { encoding: 'utf8' }); process.stdout.write(os.getPriority() + ' ' + g.stdout); }\n"
+    + "else { const c = spawnSync(process.execPath, [__filename, 'child'], { encoding: 'utf8' }); process.stdout.write(os.getPriority() + ' ' + c.stdout); }\n");
+  const mine = os.getPriority(), want = Math.min(19, mine + 5);
+  const run = (priority) => { const l = L.sessionSpawnLine({ node: process.execPath, wrapper: stand, bufFile: 'b', metaFile: 'm', exe: '/bin/true', priority }); const r = spawnSync(l.argv[0], l.argv.slice(1), { encoding: 'utf8', timeout: 20000 }); return String(r.stdout || '').trim().split(/\s+/).map(Number); };
+  const lowered = run(SPRI.priorityFor({ log: quiet }).priority), plainRun = run(SPRI.priorityFor({ serverSetting: OFF, log: quiet }).priority);
+  ok(mine <= 14 && lowered.length === 3 && lowered.every((n) => n === want) && plainRun.length === 3 && plainRun.every((n) => n === mine),
+    `REAL processes: the line's first process, its child and the child's child run at niceness ${want} (this suite's ${mine} + 5) — born with it, inherited; the setting off ⇒ all three at ${mine}`, { lowered, plainRun });
+  // THE SPAWN CENSUS reads each road's ONE place (scripts/spawn-env-census.mjs PRIORITY_ROADS — test-architecture §94b)
+  const C = await import(path.join(REPO, 'scripts/spawn-env-census.mjs'));
+  const FILES = C.filesOf(REPO), rd = (patch) => (f) => (f in patch ? patch[f] : (() => { try { return read(f); } catch { return ''; } })());
+  const clean = C.priorityJudge(rd({}), FILES);
+  const cutWs = C.priorityJudge(rd({ 'src/ws-create.js': src.replace(CUTP, '              exe: spawnCmd, args: spawnArgs,\n') }), FILES);   // stale-pins: kept (the red control rebuilds the release's line)
+  const cutJob = C.priorityJudge(rd({ 'src/jobs.js': JSRC.replace('const argv = [...priorityArgv(pri && pri.priority), process.execPath,', 'const argv = [process.execPath,') }), FILES);
+  const BRS = read('src/server/boot-restore.js'), RA = "exe: 'ssh', args: sshArgs });";
+  const twoInBr = C.priorityJudge(rd({ 'src/server/boot-restore.js': BRS.replace(RA, RA + "\n      sessionSpawnLine({ node: NODE_CMD, wrapper: CHAT_WRAPPER, bufFile, metaFile: metaFileW, exe: 'claude' });") }), FILES);
+  const newRoad = C.priorityJudge(rd({ 'src/server/new-road.js': "const { sessionSpawnLine } = require('../spawn/line.js');\nsessionSpawnLine({ node: 'n', wrapper: 'w', bufFile: 'b', metaFile: 'm', exe: 'x' });\n" }), [...FILES, 'src/server/new-road.js']);
+  ok(!clean.length && cutWs.some((r) => /PRIORITY ROAD src\/ws-create\.js/.test(r)) && cutJob.some((r) => /PRIORITY ROAD src\/jobs\.js/.test(r)) && newRoad.some((r) => /UNLISTED session line src\/server\/new-road\.js/.test(r))
+    && twoInBr.some((r) => /PRIORITY EXCEPTION src\/server\/boot-restore\.js: 2 session line/.test(r)),
+    `THE SPAWN CENSUS: the ${C.PRIORITY_ROADS.length} places read clean; RED for the ws-create line with its priority cut, the job spawn without it, a NEW caller of the session line with no row, and a SECOND (local) line in the excepted file`, { clean, cutWs, cutJob, newRoad, twoInBr });
+  ok(/session\._cpuNice = ocPty \? null : r6Pri\.fact;/.test(src) && /child\.once\('error', /.test(JSRC),
+    'an OpenCode serve terminal (its pty is the serve\'s, never this line) gets no fact — no row claims it lowered; a job wrapper whose exec fails late is an error event the engine catches, never the hub\'s crash');
+  // the words a person reads (Session Properties' row, src/lib/cpu-priority-words.js)
+  const { cpuPriorityWords } = await import(path.join(REPO, 'src/lib/cpu-priority-words.js'));
+  const tt = (k, p) => String(k).replace(/\{(\w+)\}/g, (m, n) => (p && p[n] !== undefined ? p[n] : m));
+  const words = [{ by: 5 }, { by: 0, why: 'off' }, { by: 0, why: 'no-nice' }, { by: 0, why: 'remote' }, null, { by: 0, why: 'x' }].map((f) => cpuPriorityWords(f, tt));
+  ok(words[0] === 'Below the server (nice +5) — and everything it starts' && /off in Settings/.test(words[1]) && /no nice program/.test(words[2]) && /its own machine/.test(words[3]) && words[4] === null && words[5] === null,
+    'Session Properties\' «CPU priority» row: below the server (nice +5), the server\'s own with its reason, a remote machine\'s own — no row for a start that predates the fact', words);
+  const SPROPS = read('src/lib/session-props.js'), SV = read('server.js'), BR = read('src/server/boot-restore.js'), SB = read('src/lib/sidebar.js');
+  ok(/const cpuWords = cpuPriorityWords\(s\.cpuNice, t\);\n    if \(cpuWords\) row\(idSec, t\('CPU priority'\), escHtml\(cpuWords\)\);/.test(SPROPS) && /cpuNice: s\._cpuNice \|\| null/.test(SV) && /\n  cpuNice: \{ digest: null \},/.test(SB) && /\n    _cpuNice: meta\.cpuNice && /.test(BR),
+    'the fact\'s road to the row: the session list carries `cpuNice` (a carried-only live fact), the restore reads the meta back, the identity section draws the row');
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

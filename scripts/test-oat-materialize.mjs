@@ -71,7 +71,7 @@ const mutantStore = ({ acc = [], mat = [], le = [] } = {}) => {
 const compileWith = (rel, from, to) => {
   const file = path.join(REPO, rel);
   const src = fs.readFileSync(file, 'utf8');
-  if (!src.includes(from)) return null;
+  if (!src.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`);
   const m = new Module(file, null); m.filename = file; m.paths = Module._nodeModulePaths(path.dirname(file));
   m._compile(src.replace(from, to), file); return m.exports;
 };

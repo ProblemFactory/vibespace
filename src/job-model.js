@@ -1082,7 +1082,39 @@ function ownedJobsView(jobs, cid) {
     .sort((a, b) => ((ORDER[a.state] ?? 9) - (ORDER[b.state] ?? 9)) || a.name.localeCompare(b.name));
 }
 
-module.exports = { FOR_YOU_WORDS_LEGACY, RECORDS_ERROR_WORDS, RECORDS_ERROR_OTHER, RECORDS_WHEN_UNKNOWN,
+/** B-70f9 ② (the owner's option A, 2026-11-18): ENDING A CONVERSATION THAT OWNS RUNNING JOBS — one NON-BLOCKING notice where a
+ *  person ends or archives it: the jobs it owns that still run (a task or service up, a cron that will fire) named, and ONE press
+ *  stops them all; no press = they keep running, as before. → {jobs: [{id, name}], words: {key, params}} | null — PURE */
+const OWNED_LIVE = new Set(['up', 'starting', 'awaiting-user', 'waiting', 'scheduled']);
+const i18nKey = (s) => s; // the extraction marker (scripts/i18n-extract.mjs) — the client words the notice through t()
+const END_NOTICE_KEYS = { one: i18nKey('Background jobs of this conversation keep running: {names}'), many: i18nKey('Background jobs of these conversations keep running: {names}') };
+function endNotice(jobs, cids) {
+  const want = new Set((Array.isArray(cids) ? cids : [cids]).filter(Boolean).map(String));
+  if (!want.size) return null;
+  const seen = new Set(), out = [];
+  // a service in its restart backoff (down, still wanted up) will start again — it is running for the person (the read F13)
+  const backoff = new Set((Array.isArray(jobs) ? jobs : []).filter((j) => j && j.state === 'down' && j.desiredUp === true).map((j) => j.id));
+  for (const c of want) for (const j of ownedJobsView(jobs, c)) if ((OWNED_LIVE.has(j.state) || backoff.has(j.id)) && !seen.has(j.id)) { seen.add(j.id); out.push({ id: j.id, name: j.clearedAt ? j.id : j.name }); }
+  if (!out.length) return null;
+  const names = out.slice(0, 4).map((j) => j.name).join(', ') + (out.length > 4 ? ` +${out.length - 4}` : '');
+  return { jobs: out, words: { key: want.size > 1 ? END_NOTICE_KEYS.many : END_NOTICE_KEYS.one, params: { names } } };
+}
+/** B-70f9 (the owner's option A, 2026-11-18): A JOB RUNS ON THE HUB'S MACHINE — never on another. A conversation that runs on
+ *  ANOTHER machine asking for a job in a folder the hub's machine does not have is refused AT ONCE, by name (it would only fail
+ *  later); a folder that exists there (a shared mount, the same path on both) runs, and the answer says on which machine. Two
+ *  same-named folders are never told apart: the machine and the path are said, that is the honest part.
+ *  → {ok: true, words} | {ok: false, code: 'wrong-machine' | 'folder-blocked', error} — PURE (the caller asks the disk) */
+function jobWhereVerdict({ hubMachine = null, sessionMachine = null, cwd = null, cwdExists = null, cwdBlocked = false, relative = false } = {}) {
+  const hub = String(hubMachine || "the hub's machine").slice(0, 80), at = cwd ? String(cwd).slice(0, 400) : '';
+  if (!sessionMachine) return { ok: true, words: `runs on ${hub}${at ? ` in ${at}` : ''}` };   // ui-words: the agent's and the CLI's line (the create answer's «where:»), never drawn in a page
+  const there = String(sessionMachine).slice(0, 80);
+  // cure (the adversarial read F5): a relative folder — or none — would name the hub's OWN process folder (its checkout)
+  if (relative) return { ok: false, code: 'relative-cwd', error: `jobs run on ${hub}, not on ${there} where your conversation runs; ${at ? `«${at}» is a relative folder` : 'no folder was given'} — give --cwd an absolute path that ${hub} has. Nothing was created` };
+  if (at && cwdBlocked) return { ok: false, code: 'folder-blocked', error: `jobs run on ${hub}, not on ${there} where your conversation runs; ${at} is on a mount of ${hub} that does not answer right now — nothing was created` };
+  if (at && cwdExists === false) return { ok: false, code: 'wrong-machine', error: `jobs run on ${hub}, not on ${there} where your conversation runs; this folder is not there: ${at} — nothing was created. Give --cwd a folder ${hub} has, or run the command on ${there} yourself` };
+  return { ok: true, words: `runs on ${hub}${at ? ` in ${at}` : ''} — not on ${there}, where your conversation runs${at ? ` (the path is used as it is on ${hub})` : ''}` };   // ui-words: the agent's and the CLI's line (the create answer's «where:»), never drawn in a page
+}
+module.exports = { jobWhereVerdict, endNotice, OWNED_LIVE, FOR_YOU_WORDS_LEGACY, RECORDS_ERROR_WORDS, RECORDS_ERROR_OTHER, RECORDS_WHEN_UNKNOWN,
   addressedTo, ownerLineage, ownerConversationOf, NOT_ADDRESSED, SUB_MARK, inertMarks,
   ownedJobsView, STATE_WORDS,
   isTerminal, isOwner, canView, canControl, canEdit, visibleJobs,

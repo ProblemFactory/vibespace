@@ -69,7 +69,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import vm from 'node:vm';
-import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, takeCspReports } from './scratch.mjs';
+import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, takeCspReports, CHROME_STORE } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 
@@ -163,7 +163,7 @@ const bootServer = () => spawn(process.execPath, ['server.js'], {
   env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_CHANNELS_FAKE: '1', VIBESPACE_CHANNELS_FAKE_CONVS: '3', VIBESPACE_CHANNELS_FAKE_SEARCH: '1', VIBESPACE_CHANNELS_FAKE_MAIL: String(MAIL_N), VIBESPACE_CHANNELS_FAKE_BEACON: BEACON, VIBESPACE_CHANNELS_FAKE_MAIL_DIR: corpusDir },
 });
 srv = bootServer();
-const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
+const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
   '--no-sandbox', '--disable-dev-shm-usage', '--window-size=1400,1000', '--disable-background-timer-throttling', '--ignore-certificate-errors',
   `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore' });
 const cleanup = () => {
@@ -1198,11 +1198,7 @@ ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.start
 // and the phone width; a bot's line wears the bot mark.
 {
   const MF = require(path.join(repo, 'src/mail-frame.js'));
-  // WIRING PIN (lane-mirror-197, 2026-09-29): the DOM half re-judges the live set after every APPLIED height — a row that
-  // slides into the visible band because a frame above shrank crosses no observer threshold and fires no scroll, the two
-  // triggers the reconcile had; the runner saw the 7th of 7 short mails on screen as a blank box
-  { const cmf = fs.readFileSync(path.join(repo, 'src/lib/channel-mail-frame.js'), 'utf8'); const APPLY = "s.h = hv.h; s.frame.style.height = hv.h + 'px'; s.box.dataset.h = String(hv.h);"; const at = cmf.indexOf(APPLY); const fnEnd = cmf.indexOf('\n  }\n', at); const nextLater = cmf.indexOf('later();', at);
-    ok(at > 0 && cmf.split(APPLY).length === 2 && nextLater > at && nextLater < fnEnd, 'WIRING PIN: an APPLIED height re-judges the live set — `later()` follows the apply inside applyHeight (channel-mail-frame.js)'); }
+  // (the mail frame's applied-height wiring pin — MOVED to the fast scripts/test-channels-aggregate-ui-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   const MAIL = 'fake-push-mail';
   let n = 0;
   for (let i = 0; i < 160; i++) { const d = await api('GET', `/api/channels/fake-push/${MAIL}/messages?limit=60`); n = (d.json.records || []).length; if (n >= MAIL_N + 6) break; await sleep(250); }

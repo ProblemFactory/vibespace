@@ -45,7 +45,7 @@ progress use `vibespace-task progress` (every member sees it passively).
 
 ```
 vibespace-msg list                              # who you can see/message
-vibespace-msg group list                        # the groups you are in (id · members · unread · your notify mode); `groups` = the same
+vibespace-msg group list                        # the groups you are in (id · members · unread · your notify mode; «unread not counted yet» just after the hub starts); `groups` = the same
 vibespace-msg send <name|id|group> "text" [--at <member>]… [--wake] [--yes]
 vibespace-msg dispatch <agent> --file brief.md | "text"   # = send <agent> --wake --compact-first "text"
 vibespace-msg read <group> [--before <ts>] [--limit N]

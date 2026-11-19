@@ -52,11 +52,28 @@ function sweepTemps(fs, file) {
  *  fsync, close — a failure truncates back to the size before it (no torn line is left for a promise that resolved). */
 function writeJob(m, fs = FS) {
   if (m.append) {
-    const fd = fs.openSync(m.file, 'a', m.mode == null ? 0o666 : m.mode);
+    // the ONE open of an append (made again after a ring's rotation); a missing parent directory is made here, on the writer's
+    // thread, ONLY for a store that asks (`m.makeDir` — B-48a4: the hub's audit rings, whose old main-thread code made it per line)
+    const openA = () => {
+      try { return fs.openSync(m.file, 'a', m.mode == null ? 0o666 : m.mode); }
+      catch (e) { if (!e || e.code !== 'ENOENT' || !m.makeDir) throw e; fs.mkdirSync(path.dirname(m.file), { recursive: true, mode: 0o700 }); return fs.openSync(m.file, 'a', m.mode == null ? 0o666 : m.mode); }
+    };
+    let fd = openA();
     let err = null, size0 = null;
-    try { size0 = fs.fstatSync(fd).size; writeAll(fs, fd, m.parts); fs.fsyncSync(fd); } catch (e) { err = e; }
-    if (err && size0 != null) { try { fs.ftruncateSync(fd, size0); } catch { } }
-    try { fs.closeSync(fd); } catch (e) { if (!err) err = e; }
+    try {
+      size0 = fs.fstatSync(fd).size;
+      // B-48a4: A RING (the hub's two audits): past `rotateAt` the live file moves to `.1` HERE — on the writer's thread, in
+      // order with every append of the file, before these bytes — never on the main loop or the fs threadpool; the old `.1` goes
+      if (m.rotateAt > 0 && size0 > 0 && size0 + (m.parts || []).reduce((n, b) => n + (typeof b === 'string' ? Buffer.byteLength(b) : (b && b.byteLength) || 0), 0) > m.rotateAt) {
+        const was = fd; fd = null; fs.closeSync(was);
+        try { fs.renameSync(m.file, m.file + '.1'); } catch { /* a rename the storage refuses (a hand-placed .1, EACCES): the ring keeps RECORDING past its bound, as the release's main-thread code did — a line is worth more than the bound */ }
+        fd = openA();
+        size0 = fs.fstatSync(fd).size;
+      }
+      writeAll(fs, fd, m.parts); fs.fsyncSync(fd);
+    } catch (e) { err = e; }
+    if (err && size0 != null && fd != null) { try { fs.ftruncateSync(fd, size0); } catch { } }
+    if (fd != null) { try { fs.closeSync(fd); } catch (e) { if (!err) err = e; } }
     if (err) throw err;
     return;
   }
