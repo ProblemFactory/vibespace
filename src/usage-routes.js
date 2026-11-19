@@ -990,7 +990,9 @@ app.post('/api/usage/refresh', async (req, res) => {
       // failures fall through to the legacy token-peek path unchanged.
       const deviceLeg = async () => {
         const dm = await hosts.device(hid);
-        const r = await dm.quotaRefresh({ subDir: aid, humanGated: true });
+        // B-5e0d: an agent older than THE USAGE BEARER LAW would send a long-lived token itself — `lawFirst` (the hub's own peek
+        // of the same login file: refused by name, its token unused) runs before such an agent is asked (src/agentd/client.js)
+        const r = await dm.quotaRefresh({ subDir: aid, humanGated: true, lawFirst: () => hosts.readRemoteSubOAuth(hid, aid) });
         const u = _consumeDeviceQuota(r);
         if (!u) throw new Error('device refresh returned no usable reading');
         return u;
@@ -1035,7 +1037,7 @@ app.post('/api/usage/refresh', async (req, res) => {
     let hMeta; try { hMeta = hosts.get(hid); } catch { return res.status(404).json({ error: 'unknown host' }); }
     const deviceLegG = async () => {
       const dm = await hosts.device(hid);
-      const r = await dm.quotaRefresh({ humanGated: true });
+      const r = await dm.quotaRefresh({ humanGated: true, lawFirst: () => hosts.readRemoteOAuth(hid) });   // B-5e0d: as the held account's leg above
       // B-0f13 read path: the reply carries the host's PASSIVE statusline
       // cache (files the remote vibespace-usage hook wrote — zero vendor
       // calls). Merge fetchedAt-GUARDED into the server-side per-host cache:

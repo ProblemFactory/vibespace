@@ -15,6 +15,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { anchored } from './scratch.mjs';   // B-5e0d: the host rungs' RED control
+import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -365,6 +367,86 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
       ok('§5 ④i (acceptance r3): an oat-shaped token in the folder without our mark ⇒ never sent as a usage bearer — «not refreshed — the account\'s folder holds a long-lived token …», 0 vendor requests, usageToken() null',
         /^not refreshed — the account's folder holds a long-lived token, and a long-lived token is never sent as a usage bearer/.test(j5.error) && calls.length === n5 && !calls.some((c) => c.bearer === PLANTED) && am.usageToken(id5) === null && am.usageTokenRefusal(id5) === 'long-lived', JSON.stringify({ j5, fetches: calls.length - n5 }));
     } finally { https.request = realReq; process.env.HOME = realHome; am.list = realList; }
+  }
+  // ④j B-5e0d: THE HOST RUNGS FOLLOW THE USAGE BEARER LAW (kb-design-lessons §9) — ⟳ for a paired machine's own login and for an
+  // account the machine HOLDS: the device leg fails (an older daemon: no quota-refresh), the REAL token peeks (HostManager's
+  // readRemoteOAuth / readRemoteSubOAuth over a stand-in shell answering a made-up login file) — a long-lived token there is
+  // refused BY NAME and nothing is sent; the CLI's own login (a refresh token beside it) is the one Bearer. The vendor is
+  // answered IN-PROCESS (https.request stubbed: no socket, no vendor request).
+  {
+    const https = require('node:https'); const { EventEmitter } = require('node:events');
+    const HSRC = fs.readFileSync(path.join(REPO, 'src/hosts.js'), 'utf8');
+    const M = mutantCopies('probelog-hosts', REPO);
+    const LONG = ['sk', '-ant-oat01-'].join('') + 'HOSTLONGfake_' + 'h5'.repeat(20);
+    const LOGIN = ['sk', 'ant', 'oat01'].join('-') + '-HOSTLOGIN-fake', LOGIN_REF = ['sk', 'ant', 'ort01'].join('-') + '-HOSTLOGIN-fake-ref';
+    const credsOf = (o) => JSON.stringify({ claudeAiOauth: { expiresAt: Date.now() + 3600e3, subscriptionType: 'max', ...o } });
+    const world = (HM, tag, device = null) => {
+      let file = '';
+      const proto = HM.HostManager.prototype;
+      const hosts = { get: (id) => ({ id, name: 'Box ' + tag }), device: async () => { if (device) return device; throw new Error('daemon lacks quota-refresh (capabilities gate)'); }, _hostShell: async () => file };
+      hosts.readRemoteOAuth = proto.readRemoteOAuth.bind(hosts); hosts.readRemoteSubOAuth = proto.readRemoteSubOAuth.bind(hosts);
+      const routes = {};
+      usageMod.setupUsage({
+        app: { get() { }, post(p, fn) { routes[p] = fn; }, put() { }, delete() { }, use() { }, locals: {} },
+        accounts: am, hosts, usageHistory: null, activeSessions: new Map(),
+        serverSetting: () => undefined, ensureDir: (d) => fs.mkdirSync(d, { recursive: true }),
+        USAGE_CACHE_FILE: path.join(dataDir, 'usage-cache.json'), USAGE_CACHE_DIR: cacheDir,
+        CODEX_SESSIONS_DIR: path.join(root, 'codex-sessions'), META_DIR: path.join(dataDir, 'session-meta'),
+        AVAILABLE_MODELS: [], BUFFERS_DIR: path.join(dataDir, 'session-buffers'),
+        probeUsageForAccountKey: async () => false, onMemberReadingFresh: () => ({}), CLAUDE_CMD: bin,
+      });
+      const call = (body) => new Promise((resolve) => routes['/api/usage/refresh']({ body, headers: {} }, { status() { return this; }, json: (j) => resolve(j) }));
+      return { setFile: (t) => { file = t; }, call };
+    };
+    const held = am.createSubscription({ name: 'Held Six' }).id;
+    const calls = [], realReq = https.request;
+    https.request = (url, opts, cb) => {
+      calls.push({ url: String(url), bearer: String((opts && opts.headers && opts.headers.authorization) || '').replace(/^Bearer /, '') });
+      const res = new EventEmitter(); res.statusCode = 200; res.headers = {};
+      const req = new EventEmitter(); req.setTimeout = () => req; req.destroy = () => { };
+      req.end = () => setImmediate(() => { cb(res); res.emit('data', JSON.stringify({ five_hour: { utilization: 12, resets_at: new Date(Date.now() + 3 * 3600e3).toISOString() }, seven_day: { utilization: 40, resets_at: new Date(Date.now() + 3 * 86400e3).toISOString() } })); res.emit('end'); });
+      return req;
+    };
+    try {
+      const HMreal = require(path.join(REPO, 'src/hosts.js'));
+      const w = world(HMreal, 'one');
+      w.setFile(credsOf({ accessToken: LONG }));
+      const n0 = calls.length;
+      const jm = await w.call({ host: 'box-one' }), jh = await w.call({ host: 'box-one', account: held });
+      ok('§5 ④j B-5e0d: ⟳ on a paired machine whose login file (the machine\'s own, and the account it holds) carries a LONG-LIVED token ⇒ refused BY NAME — «not refreshed — … holds a long-lived token, never sent as a usage bearer …» — 0 vendor requests (the token peek handed it to the usage read)',
+        /^not refreshed — the host's login holds a long-lived token, never sent as a usage bearer/.test(String(jm.error)) && /^not refreshed — the account's folder on the host holds a long-lived token/.test(String(jh.error)) && calls.length === n0, JSON.stringify({ jm, jh, sent: calls.length - n0 }));
+      const w2 = world(HMreal, 'two');
+      w2.setFile(credsOf({ accessToken: LOGIN, refreshToken: LOGIN_REF }));
+      const n1 = calls.length;
+      const jg = await w2.call({ host: 'box-two', account: held });
+      ok('§5 ④j B-5e0d: …the CLI\'s own login (a refresh token beside it) is read as before — the one Bearer, the refresh token never sent',
+        jg && jg.success === true && calls.length > n1 && calls.slice(n1).every((c) => c.bearer === LOGIN), JSON.stringify({ jg, bearers: calls.slice(n1).map((c) => c.bearer.slice(0, 12)) }));
+      const blind = M.load('src/hosts.js', anchored(HSRC, "  if (!usageBearerOk(o)) throw Object.assign(", "  if (false) throw Object.assign(", 'B-5e0d: the host rungs without the bearer law'), 'hosts-blind');
+      const w3 = world(blind, 'three');
+      w3.setFile(credsOf({ accessToken: LONG }));
+      const n2 = calls.length;
+      await w3.call({ host: 'box-three' });
+      ok('RED control: the host rung without the law hands the long-lived token to the usage read — it is the Bearer of a vendor request (the parent)', calls.slice(n2).some((c) => c.bearer === LONG), JSON.stringify({ sent: calls.length - n2 }));
+      // the device leg (the first rung): an agent OLDER than the law (its hello lacks 'quota-refresh-bearer-law') would send the
+      // long-lived token itself — the REAL agent client (src/agentd/client.js DeviceManager.quotaRefresh over a stand-in
+      // connection) runs the route's lawFirst (the hub's own peek) before asking it: refused by name, the agent never asked; an
+      // agent WITH the law is asked directly (it refuses on its own and returns its passive cache)
+      const CSRC = fs.readFileSync(path.join(REPO, 'src/agentd/client.js'), 'utf8');
+      const agentOf = (CL, caps, asked) => { const dm = Object.create(CL.DeviceManager.prototype); dm.connect = async () => ({ info: { capabilities: caps } }); dm._request = async (m) => { asked.push(m.op); return { usage: null, roles: null, passive: {} }; }; return dm; };
+      const viaAgent = async (CL, caps, tag) => {
+        const asked = [], wa = world(HMreal, tag, agentOf(CL, caps, asked));
+        wa.setFile(credsOf({ accessToken: LONG }));
+        const n = calls.length, j = await wa.call({ host: 'box-' + tag });
+        return { asked: asked.length, error: String(j.error || ''), sent: calls.length - n };
+      };
+      const CLreal = require(path.join(REPO, 'src/agentd/client.js'));
+      const older = await viaAgent(CLreal, ['quota-refresh'], 'older'), lawful = await viaAgent(CLreal, ['quota-refresh', 'quota-refresh-bearer-law'], 'lawful');
+      ok('§5 ④j B-5e0d: an agent OLDER than the law is never asked — the hub\'s own peek refuses the long-lived token by name first; an agent WITH the law is asked (it makes no vendor request itself); 0 requests either way',
+        older.asked === 0 && /^not refreshed — the host's login holds a long-lived token/.test(older.error) && older.sent === 0 && lawful.asked === 1 && /long-lived token/.test(lawful.error) && lawful.sent === 0, JSON.stringify({ older, lawful }));
+      const blindAgent = M.load('src/agentd/client.js', anchored(CSRC, "    if (!conn.info.capabilities.includes('quota-refresh-bearer-law') && typeof lawFirst === 'function') await lawFirst();\n", '', 'B-5e0d: an older agent asked without the law'), 'client-blind');
+      const olderR = await viaAgent(blindAgent, ['quota-refresh'], 'older-red');
+      ok('RED control: without the client\'s gate an older agent IS asked — it would send the long-lived token as the Bearer itself', olderR.asked === 1, JSON.stringify(olderR));
+    } finally { https.request = realReq; }
   }
   // RED CONTROLS at the door: the same door over the verdict with ONE check cut — the profile-less token / the unmeasured
   // CLI (the boot shape: no version known yet, the folder door still «written») is SPAWNED

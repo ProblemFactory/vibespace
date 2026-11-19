@@ -3860,14 +3860,15 @@ console.log('── pool-silent-members r2: the roster is read ONCE per evaluati
     for (const id of ids) fs.writeFileSync(path.join(cacheDir, id + '.json'), JSON.stringify({ fetchedAt: Date.now() - 60000, source: 'on-demand', fiveHour: { utilization: 0.99, resetsAt: nowS + 7200 }, sevenDay: { utilization: 0.3, resetsAt: nowS + 3 * 86400 } }));
     const sess = new Map(), notices = [];
     const todos = withTodos ? new UserTodoManager({ dataDir, onChange: () => { } }) : null; // (r3 ⑦) the For-you store the engine files into
-    const eng = engMod.create({
+    const mkEng = (mod, t) => mod.create({
       app: { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} }, rootDir: root, USAGE_CACHE_DIR: cacheDir, activeSessions: sess,
       wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice: (k, t) => { notices.push(t); return 1; }, serverSetting: () => undefined, getAccounts: () => am,
       getHosts: () => ({ device: async () => ({ poolOrders: async () => { }, ackPoolOrdersLog() { } }) }),
       getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), recordUsageAttribution() { }, adapterRegistry: { get: () => ClaudeCodeAdapter },
       getAutoResume: () => ({ armIfEnabled() { }, noteFireOutcome() { }, noteRecovered() { }, noteNoPoolTarget() { }, statusFor: () => null, enabledFor: () => false, fireNow() { } }),
-      getQuotaProbe: () => null, getSessionMetaStore: () => null, ...(todos ? { getUserTodos: () => todos } : {}),
+      getQuotaProbe: () => null, getSessionMetaStore: () => null, ...(t ? { getUserTodos: () => t } : {}),
     });
+    const eng = mkEng(engMod, todos);
     const convs = [];
     for (let i = 0; i < sessions; i++) {
       const sid = 'r2-sess-' + i;
@@ -3884,7 +3885,17 @@ console.log('── pool-silent-members r2: the roster is read ONCE per evaluati
       try { eng.maybePoolAutoSwitchForPool(P, { force: true }); } finally { console.log = o; console.warn = w; fs.readFileSync = realRead; am.poolRoster = realRoster; }
       return { calls, reads, lines };
     };
-    return { eng, am, P, ids, convs, notices, evaluate, todos };
+    // B-5e0d: A RESTART — this run's engine and its For-you store end (the store flushed to disk), a new pair is made over the
+    // SAME data (the accounts, the caches, data/user-todos.json): what the engine kept in memory is gone, what the item says is not
+    let curTodos = todos;
+    const restart = (mod = engMod) => {
+      if (curTodos) curTodos.stop();
+      curTodos = withTodos ? new UserTodoManager({ dataDir, onChange: () => { } }) : null;
+      const e2 = mkEng(mod, curTodos);
+      const evaluate2 = () => { const o = console.log, ww = console.warn; console.log = () => { }; console.warn = () => { }; try { e2.maybePoolAutoSwitchForPool(P, { force: true }); } finally { console.log = o; console.warn = ww; } };
+      return { eng: e2, todos: curTodos, evaluate: evaluate2, stop: () => { if (curTodos) curTodos.stop(); } };
+    };
+    return { eng, am, P, ids, convs, notices, evaluate, todos, restart };
   };
   const engMod = require(path.resolve('src/server/usage-pool-engine.js'));
   // B-403e: the run's memo (src/run-reads.js) answers a file asked twice in ONE synchronous run from its first ask — a count of
@@ -3943,6 +3954,130 @@ console.log('── pool-silent-members r2: the roster is read ONCE per evaluati
       fs.writeFileSync(path.join(w.am.subDir(w.ids[1]), '..', '..', 'usage-cache', w.ids[1] + '.json'), JSON.stringify({ fetchedAt: Date.now(), source: 'on-demand', fiveHour: { utilization: 0.1, resetsAt: Math.floor(Date.now() / 1000) + 7200 }, sevenDay: { utilization: 0.1, resetsAt: Math.floor(Date.now() / 1000) + 3 * 86400 } }));
       w.evaluate();
       ck('r3 ⑦ …and when a member can serve again the episode\'s item is over — done by the agent, nothing new filed', items[0] && w.todos.get(items[0].id).status === 'done' && w.todos.get(items[0].id).resolvedBy === 'agent' && w.todos.idsWhere((i) => i.sessionKey === 'pool:blocked:' + w.P).length === 1); }
+    // ⑦b B-5e0d: THE EPISODE RIDES THE ITEM ACROSS A RESTART (the episode memory was this run's alone: a restart re-opened an
+    // item the owner dismissed, and never closed an open one once the pool recovered). (A) an item the owner dismissed stays
+    // dismissed when the hub restarts with the pool still blocked; the pool's recovery ENDS the episode ON the item, so after
+    // another restart the next block is a NEW item. (B) an item an earlier run left open is closed by the first evaluation of a
+    // run that finds the pool serving (the boot's tick settles it). A restart = this run's engine and For-you store end (the
+    // store flushed), a new pair over the same data.
+    {
+      const { anchored } = await import('./scratch.mjs');
+      const ENG_SRC = fs.readFileSync(path.resolve('src/server/usage-pool-engine.js'), 'utf8');
+      // ONE copy of the tree for every control below; each control's engine is the anchored() output written as it is (never
+      // through String.replace: its $-patterns) as a SIBLING file of the engine, so its relative requires resolve the same
+      let mutRoot = null;
+      const engOf = (tag, patched) => {
+        if (!mutRoot) {
+          mutRoot = path.join(scr, 'mut-b5e0d');
+          fs.cpSync(path.resolve('src'), path.join(mutRoot, 'src'), { recursive: true });
+          fs.copyFileSync(path.resolve('package.json'), path.join(mutRoot, 'package.json'));
+          try { fs.symlinkSync(path.resolve('node_modules'), path.join(mutRoot, 'node_modules')); } catch { }
+        }
+        const fp = path.join(mutRoot, 'src/server', `usage-pool-engine.${tag}.js`);
+        fs.writeFileSync(fp, patched);
+        return require(fp);
+      };
+      const cacheOf = (w, i) => path.join(w.am.subDir(w.ids[i]), '..', '..', 'usage-cache', w.ids[i] + '.json');
+      const nowS = () => Math.floor(Date.now() / 1000);
+      const put = (w, u5) => fs.writeFileSync(cacheOf(w, 1), JSON.stringify({ fetchedAt: Date.now(), source: 'on-demand', fiveHour: { utilization: u5, resetsAt: nowS() + 7200 }, sevenDay: { utilization: u5 > 0.5 ? 0.3 : 0.1, resetsAt: nowS() + 3 * 86400 } }));
+      const itemsOf = (w, t) => t.idsWhere((i) => i.sessionKey === 'pool:blocked:' + w.P).map((id) => t.get(id));
+      const dismissedRun = async (mod) => {
+        const w = await world(mod, { sessions: 1, withTodos: true });
+        w.evaluate(); w.evaluate();   // blocked: the episode's ONE item
+        const first = itemsOf(w, w.todos)[0] || null;
+        if (first) w.todos.setStatus(first.id, 'dismissed', 'user');   // the owner sets it aside
+        const r1 = w.restart(mod); r1.evaluate();   // a restart, the pool still blocked
+        const afterRestart = itemsOf(w, r1.todos).map((i) => i.status);
+        put(w, 0.1); r1.evaluate();   // acct-2 renewed: the pool serves again — the episode is over
+        const ended = itemsOf(w, r1.todos).map((i) => !!(i.resolvedFact && i.resolvedFact.endedAt));
+        const r2 = w.restart(mod); put(w, 0.99); r2.evaluate();   // a restart, then a NEW block: the store RE-FILES the same item (reopened, a new createdAt)
+        const end = itemsOf(w, r2.todos).map((i) => i.status);
+        const again = itemsOf(w, r2.todos).slice(-1)[0];
+        if (again && again.status === 'open') r2.todos.setStatus(again.id, 'dismissed', 'user');   // the owner sets the NEW episode's item aside too
+        const r3 = w.restart(mod); r3.evaluate();   // a restart, the pool still blocked: the old end (older than this filing) is not this episode's
+        const second = itemsOf(w, r3.todos).map((i) => i.status);
+        r3.stop();
+        return { first: !!first, afterRestart, ended, end, second };
+      };
+      const leftOpenRun = async (mod) => {
+        const w = await world(mod, { sessions: 1, withTodos: true });
+        w.evaluate(); w.evaluate();   // blocked: the item, open
+        put(w, 0.1);   // the pool recovers while the hub is down
+        const r1 = w.restart(mod); r1.evaluate();   // the new run's first evaluation finds it serving
+        const st = itemsOf(w, r1.todos).map((i) => ({ status: i.status, by: i.resolvedBy, ended: !!(i.resolvedFact && i.resolvedFact.endedAt) }));
+        r1.stop();
+        return st;
+      };
+      // (D) THE NEWEST FILING is the episode's, by createdAt — never the list's last: add() re-files the FIRST same-words match in
+      // place (a new createdAt, its place kept), so an older item of the key can sit AFTER it (the engine patches an open item's
+      // words in place, so two items of one key happen): X, the newest filing, the owner dismissed; Y, older, later in the list,
+      // closed by the agent with its end ⇒ after a restart X stays dismissed
+      const twoRun = async (mod) => {
+        const w = await world(mod, { sessions: 1, withTodos: true });
+        w.evaluate(); w.evaluate();
+        const X = itemsOf(w, w.todos)[0] || null;
+        if (X) {
+          w.todos.setStatus(X.id, 'dismissed', 'user');
+          const t0 = Number(X.createdAt) - 60000;   // Y: an older filing of the key, placed after X (the file as the store holds it)
+          w.todos._state.items.push({ ...JSON.parse(JSON.stringify(w.todos.get(X.id))), id: X.id + '-older', text: 'Pool "Pool": an older roster\'s words', status: 'done', resolvedBy: 'agent', resolvedAt: t0 + 30000, createdAt: t0, resolvedFact: { endedAt: t0 + 30000, endedBy: 'pool-serves', endedFor: t0 } });
+        }
+        const r1 = w.restart(mod); r1.evaluate();   // a restart, the pool still blocked
+        const x = X ? r1.todos.get(X.id) : null;
+        r1.stop();
+        return { x: x ? x.status : null, n: itemsOf(w, r1.todos).length };
+      };
+      // (C) the read's finds: an item its EXPIRY closed (the hub down past the item's expiry, 1 to 2 h ahead — the store's boot sweep closes it before the
+      // first tick) and an item the AGENT closed with no end on it (the parent's recovery close) are no live episode — the block
+      // after the restart files again (the parent did), never a silent episode
+      const closedRun = async (mod, how) => {
+        const w = await world(mod, { sessions: 1, withTodos: true });
+        w.evaluate(); w.evaluate();
+        const it = itemsOf(w, w.todos)[0] || null;
+        if (it && how === 'expired') w.todos.reshapeItems((x) => { if (x.id !== it.id) return false; x.expiresAt = Date.now() - 1000; return true; });
+        if (it && how === 'agent') w.todos.setStatus(it.id, 'done', 'agent');
+        const r1 = w.restart(mod);
+        const atBoot = itemsOf(w, r1.todos).map((i) => `${i.status}:${i.resolvedBy || '-'}`);
+        r1.evaluate();   // the pool still blocked
+        const after = itemsOf(w, r1.todos).map((i) => i.status);
+        r1.stop();
+        return { atBoot, after };
+      };
+      const dA = await dismissedRun(engMod), oB = await leftOpenRun(engMod), cE = await closedRun(engMod, 'expired'), cG = await closedRun(engMod, 'agent'), tD = await twoRun(engMod);
+      ck(`r3 ⑦b B-5e0d (A): an item the owner DISMISSED stays dismissed across a restart while the pool is still blocked (${JSON.stringify(dA.afterRestart)}); the recovery ENDS the episode on the item (${JSON.stringify(dA.ended)}), so after another restart the next block is filed again — the store re-files the same item, open (${JSON.stringify(dA.end)}); and that NEW episode's item, dismissed, stays dismissed across the next restart (${JSON.stringify(dA.second)}: the old end is older than its filing)`,
+        dA.first && JSON.stringify(dA.afterRestart) === '["dismissed"]' && JSON.stringify(dA.ended) === '[true]' && JSON.stringify(dA.end) === '["open"]' && JSON.stringify(dA.second) === '["dismissed"]');
+      ck(`r3 ⑦b B-5e0d (B): an item an EARLIER run left open is closed by the first evaluation of a run that finds the pool serving — done by the agent, the episode's end on it (${JSON.stringify(oB)})`,
+        oB.length === 1 && oB[0].status === 'done' && oB[0].by === 'agent' && oB[0].ended === true);
+      ck(`r3 ⑦b B-5e0d (C): an item its EXPIRY closed while the hub was down (${JSON.stringify(cE.atBoot)} at boot) and one the AGENT closed with no end on it (${JSON.stringify(cG.atBoot)}) are no live episode — the block after the restart files again (${JSON.stringify(cE.after)} · ${JSON.stringify(cG.after)})`,
+        JSON.stringify(cE.atBoot) === '["done:expired"]' && JSON.stringify(cE.after) === '["open"]' && JSON.stringify(cG.atBoot) === '["done:agent"]' && JSON.stringify(cG.after) === '["open"]');
+      ck(`r3 ⑦b B-5e0d (D): two items of the key — the NEWEST filing (by createdAt) the owner dismissed, an older one AFTER it in the list closed by the agent with its end — after a restart the newest stays dismissed (${tD.x}, ${tD.n} items)`,
+        tD.x === 'dismissed' && tD.n === 2);
+      const noReadBack = engOf('b5e0d-noreadback', anchored(ENG_SRC, "  if (!_poolBlockedTodo.has(poolId) && !_poolBlockedLooked.has(poolId)) {", "  if (false) {", 'B-5e0d: the episode not read back after a restart'));
+      {
+        const rA = await dismissedRun(noReadBack), rB = await leftOpenRun(noReadBack);
+        ck(`RED CONTROL (⑦b): the episode kept in this run's memory alone (the parent) — the restart re-files the dismissed item, reopening it (${JSON.stringify(rA.afterRestart)}), and leaves the earlier run's open item open (${JSON.stringify(rB.map((x) => x.status))})`,
+          JSON.stringify(rA.afterRestart) !== '["dismissed"]' && !(rB.length === 1 && rB[0].status === 'done'));
+      }
+      const noEnd = engOf('b5e0d-noend', anchored(ENG_SRC, "      x.resolvedFact = { ...(x.resolvedFact && typeof x.resolvedFact === 'object' ? x.resolvedFact : {}), endedAt: now, endedBy: 'pool-serves', endedFor: Number(x.createdAt || 0) };\n      return true;\n", "      return false;\n", 'B-5e0d: the episode\'s end not written on its item'));
+      {
+        const rE = await dismissedRun(noEnd);
+        ck(`RED CONTROL (⑦b): without the episode's end on its item, a block after the recovery and a restart is read as the dismissed episode — nothing is filed (${JSON.stringify(rE.end)})`, JSON.stringify(rE.end) === '["dismissed"]');
+      }
+      const anyEnd = engOf('b5e0d-anyend', anchored(ENG_SRC, " && Number(x.resolvedFact.endedFor) === Number(x.createdAt || 0);", ";", 'B-5e0d: any end counts, whichever filing it ended'));
+      {
+        const rN = await dismissedRun(anyEnd);
+        ck(`RED CONTROL (⑦b): an end that counts whichever filing it ended — the re-filed item's earlier end — reopens the NEW episode's dismissed item at the next restart (${JSON.stringify(rN.second)})`, JSON.stringify(rN.second) !== '["dismissed"]');
+      }
+      const anyClose = engOf('b5e0d-anyclose', anchored(ENG_SRC, "    const byPerson = (x) => x.resolvedBy === 'user' || x.resolvedBy === 'reply' || x.resolvedBy === 'hidden';\n", "    const byPerson = (x) => true;\n", 'B-5e0d: any close read as the owner\'s word'));
+      {
+        const rX = await closedRun(anyClose, 'expired'), rG = await closedRun(anyClose, 'agent');
+        ck(`RED CONTROL (⑦b): any close read as the owner's word — an item its expiry closed leaves the blocked pool with no item after a long downtime (${JSON.stringify(rX.after)}), one the agent closed with no end files nothing (${JSON.stringify(rG.after)})`, JSON.stringify(rX.after) === '["done"]' && JSON.stringify(rG.after) === '["done"]');
+      }
+      const listLast = engOf('b5e0d-listlast', anchored(ENG_SRC, "    const last = items.reduce((a, x) => (!a || Number(x.createdAt || 0) >= Number(a.createdAt || 0) ? x : a), null);\n", "    const last = items[items.length - 1] || null;\n", 'B-5e0d: the list\'s last, not the newest filing'));
+      {
+        const rL = await twoRun(listLast);
+        ck(`RED CONTROL (⑦b): the list's LAST item taken for the episode (10ab66486) — the older, agent-closed one — re-files and reopens the newest filing the owner dismissed (${rL.x})`, rL.x === 'open');
+      }
+    }
     // ⑧ ONE ROSTER PER TICK: the stale-link sweep decides every conversation on a narrowed-out member through
     // removalVerdict — b552c972 read a roster per conversation (20 for 20) before the evaluation read its own
     { const w = await world(engMod, { sessions: 20 });

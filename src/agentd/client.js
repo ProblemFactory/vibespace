@@ -1593,9 +1593,13 @@ class DeviceManager {
     return rest;
   }
 
-  async quotaRefresh({ subDir = null, humanGated = false } = {}) {
+  async quotaRefresh({ subDir = null, humanGated = false, lawFirst = null } = {}) {
     const conn = await this.connect();
     if (!conn.info?.capabilities?.includes?.('quota-refresh')) throw new Error('daemon lacks quota-refresh (capabilities gate)');
+    // B-5e0d: THE USAGE BEARER LAW — an agent that does not advertise it would send a long-lived token as the Bearer itself:
+    // the caller's own check of the same login file (`lawFirst`, refusing by name) runs before such an agent is asked; an agent
+    // WITH the law refuses on its own, makes no request, and still returns its passive cache
+    if (!conn.info.capabilities.includes('quota-refresh-bearer-law') && typeof lawFirst === 'function') await lawFirst();
     const r = await this._request({ op: 'quota-refresh', subDir, humanGated, timeoutMs: 40000 });
     if (r.error) throw new Error(r.error);
     return { usage: r.usage, roles: r.roles, passive: r.passive || null };

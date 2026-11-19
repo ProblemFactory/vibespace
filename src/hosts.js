@@ -19,6 +19,7 @@ const crypto = require('crypto');
 const SOCK = require('./sock-path.js');   // B-3767 unit 2: THE folder verdict (ensureSocketDir) for the ssh control folder
 const { REMOTE_PRELUDE, nodeFinder } = require('./remote-shell.js');
 const { parseReceiptLines } = require('./harness-config'); // CFG| receipt lines from the shipped helper (design-harness-settings §6)
+const { usageBearerOk } = require('./login-expiry.js'); // PURE: THE USAGE BEARER LAW (B-5e0d — the host rungs follow the local ladder's rule)
 const { execFile } = require('child_process');
 const { serviceEnv, SSH_ENV_KEEP } = require('./agent-env.js');
 const { claimJsonls, cwdToProjectDir } = require('./session-store');
@@ -29,6 +30,16 @@ const { fdScanShellFns, cliIdentityShellFns } = require('./writer-sweep');
 // sysinfo-wiring's signalProc embeds the same text, so there is no per-site
 // reason left to get wrong.
 const { pidAliveShellFn } = require('./cli-identity');
+
+/** B-5e0d: THE USAGE BEARER LAW at the host rungs (kb-design-lessons §9 addendum 2.369.361; the local ladder's usageBearerOk):
+ *  only the CLI's own login token — a refresh token beside it — is handed to the usage read. A long-lived token (none beside it,
+ *  known by its SHAPE, never its prefix) is refused BY NAME (code 'long-lived': nothing is read); an expired login → null (never
+ *  refreshed here — the host's own CLI refreshes it). Nothing is sent anywhere by this: it only answers what may be. */
+function remoteUsageBearer(o, whose) {
+  if (!o || typeof o !== 'object' || typeof o.accessToken !== 'string' || !o.accessToken) return null;
+  if (!usageBearerOk(o)) throw Object.assign(new Error(`not refreshed — ${whose} holds a long-lived token, never sent as a usage bearer — its usage refreshes when a session uses it`), { code: 'long-lived' });
+  return !o.expiresAt || o.expiresAt > Date.now() + 60000 ? o.accessToken : null;
+}
 
 // THE SSH HARVEST'S LIMITS (B-6ded, list 1) — what the hub takes from one run of the shipped scanner, and the bound that
 // run is held to (usageScanBound: half the bytes, a third of the seconds), passed down in the command. The scanner keeps
@@ -2678,11 +2689,9 @@ class HostManager {
     // renders "host unreachable" and skips stamping its throttle.
     try { raw = await this._hostShell(h, 'cat "$HOME/.claude/.credentials.json" 2>/dev/null || true', { timeoutMs: 10000 }); }
     catch (e) { const err = new Error('host unreachable: ' + (e?.message || e)); err.code = 'host-unreachable'; throw err; }
-    try {
-      const o = JSON.parse(raw).claudeAiOauth;
-      if (o?.accessToken && (!o.expiresAt || o.expiresAt > Date.now() + 60000)) return o.accessToken;
-    } catch { }
-    return null;
+    let o = null;
+    try { o = JSON.parse(raw).claudeAiOauth || null; } catch { o = null; }
+    return remoteUsageBearer(o, 'the host\'s login');   // B-5e0d: the bearer law (a long-lived token refused by name)
   }
 
   /** READ-ONLY peek at a host-HELD account's login token (2.245.0): the
@@ -2697,11 +2706,9 @@ class HostManager {
     // same unreachable-vs-absent split as readRemoteOAuth (2.271.0 T2-12)
     try { raw = await this._hostShell(h, `cat "$HOME/.vibespace/subs/${subId}/.credentials.json" 2>/dev/null || true`, { timeoutMs: 10000 }); }
     catch (e) { const err = new Error('host unreachable: ' + (e?.message || e)); err.code = 'host-unreachable'; throw err; }
-    try {
-      const o = JSON.parse(raw).claudeAiOauth;
-      if (o?.accessToken && (!o.expiresAt || o.expiresAt > Date.now() + 60000)) return o.accessToken;
-    } catch { }
-    return null;
+    let o = null;
+    try { o = JSON.parse(raw).claudeAiOauth || null; } catch { o = null; }
+    return remoteUsageBearer(o, 'the account\'s folder on the host');   // B-5e0d: the bearer law (a long-lived token refused by name)
   }
 
   // ── Remote session discovery (lock-first, same algorithm as local) ──

@@ -1913,7 +1913,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'transcript-picture', 'pipe-detach' /* B-beaf: a CLOSE on a pipe session's channel ends its tail */, 'usage-scan', 'usage-scan-hub-cursor', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input', 'stream-mic', 'stream-audio'],
+          capabilities: ['probe', 'transcript-op', 'transcript-picture', 'pipe-detach' /* B-beaf: a CLOSE on a pipe session's channel ends its tail */, 'usage-scan', 'usage-scan-hub-cursor', 'discovery-claims', 'place-secret', 'quota-refresh', 'quota-refresh-bearer-law' /* B-5e0d: this agent's quota-refresh never sends a long-lived token */, 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input', 'stream-mic', 'stream-audio'],
         }));
         return;
       }
@@ -2634,26 +2634,34 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
             const oauth = creds?.claudeAiOauth;
             const token = oauth?.accessToken;
             if (!token || (oauth.expiresAt && oauth.expiresAt < Date.now() + 60000)) throw new Error('no valid token (expired tokens are never refreshed here)');
-            // stamp only when a vendor call is actually about to happen (the
-            // 2.271.0 lesson: a failed precondition must not burn the slot)
-            this._quotaAt.set(credsPath, Date.now());
-            const get = (p2) => new Promise((resolve, reject) => {
-              const req = require('https').request({
-                host: 'api.anthropic.com', path: p2, method: 'GET',
-                headers: { Authorization: 'Bearer ' + token, 'anthropic-beta': 'oauth-2025-04-20' },
-                timeout: 15000,
-              }, (res) => {
-                let body = '';
-                res.on('data', (c) => { if (body.length < 262144) body += c; });
-                res.on('end', () => resolve({ status: res.statusCode, body }));
+            // B-5e0d: THE USAGE BEARER LAW (kb-design-lessons §9; login-expiry usageBearerOk's rule, by SHAPE): only the CLI's own
+            // login token — a refresh token beside it — is ever this request's Bearer; a long-lived one makes NO vendor request
+            // (asked after the expiry: an expired token stays «no valid token», as test-device-secret-quota pins it). The passive
+            // cache below still rides the reply (pure file reads — the hub's only road for it), with no reading; the hub asks the
+            // law itself before it calls this op (its own peek of the same file refuses the long-lived token by name)
+            const bearerOk = !!oauth.refreshToken;
+            let usage = null, roles = null;
+            if (bearerOk) {
+              // stamp only when a vendor call is actually about to happen (the
+              // 2.271.0 lesson: a failed precondition must not burn the slot)
+              this._quotaAt.set(credsPath, Date.now());
+              const get = (p2) => new Promise((resolve, reject) => {
+                const req = require('https').request({
+                  host: 'api.anthropic.com', path: p2, method: 'GET',
+                  headers: { Authorization: 'Bearer ' + token, 'anthropic-beta': 'oauth-2025-04-20' },
+                  timeout: 15000,
+                }, (res) => {
+                  let body = '';
+                  res.on('data', (c) => { if (body.length < 262144) body += c; });
+                  res.on('end', () => resolve({ status: res.statusCode, body }));
+                });
+                req.on('timeout', () => { req.destroy(new Error('vendor timeout')); });
+                req.on('error', reject);
+                req.end();
               });
-              req.on('timeout', () => { req.destroy(new Error('vendor timeout')); });
-              req.on('error', reject);
-              req.end();
-            });
-            const usage = await get('/api/oauth/usage');
-            let roles = null;
-            if (usage.status === 200) { try { roles = await get('/api/oauth/claude_cli/roles'); } catch { } }
+              usage = await get('/api/oauth/usage');
+              if (usage.status === 200) { try { roles = await get('/api/oauth/claude_cli/roles'); } catch { } }
+            }
             // B-0f13 read path: ship the PASSIVE statusline cache alongside —
             // pure file reads (the remote vibespace-usage hook writes them),
             // zero extra vendor calls. The server merges fetchedAt-guarded.

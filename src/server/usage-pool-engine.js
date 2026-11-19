@@ -6756,9 +6756,40 @@ function journalPoolDetail(key, poolName, d, currentName, now) {
 // patched in place while the episode lasts (one save + one broadcast, only when the words changed), never re-filed in it
 // once the owner resolved it, closed by the agent when the pool can serve again, and kept alive by an expiry the next
 // blocked evaluation pushes on (a pool no evaluation reaches — not automatic — lets it lapse within two hours)
+// B-5e0d: THE EPISODE RIDES THE ITEM, ON DISK — one item an episode across a restart: the memory below is a cache of what the
+// For-you store says; after a restart the pool's newest item (any status) is read back ONCE (poolBlockedEpisode), so an item the
+// owner resolved stays resolved, and an item an earlier run left open is closed by this run's first evaluation that finds the
+// pool serving (the 30 s tick — the boot settles it, not a later event); the pool's recovery ENDS the episode as a fact on its
+// item (resolvedFact.endedAt — the item resolved first), so the next block after a restart is a new episode, never a quiet one.
+// The store RE-FILES a resolved item of the same words by reopening it (a new createdAt, its old facts kept): an end names the
+// filing it ended (endedFor = that createdAt) and counts only for it; each recovery writes its own end (never «the first end stands»)
 const POOL_BLOCKED_TODO_TTL_MS = 2 * 3600e3;
 const POOL_BLOCKED_DETAIL_LINES = 120; // a bigger roster is cut with its count named (the journal keeps every line)
 const _poolBlockedTodo = new Map(); // poolId → the For-you item id of THIS blocked episode
+const _poolBlockedLooked = new Set(); // B-5e0d: the pools whose item this run has read back from the store (once each)
+/** B-5e0d: this blocked episode's item → { known, it }: known = the episode has an item — in this run's memory, or (read back
+ *  ONCE a run) the pool's newest filing (by createdAt: a re-filed item keeps its place in the list) when it is OPEN, or was
+ *  closed by a PERSON (resolvedBy 'user' / 'reply' / 'hidden' — an allow-list: a new automatic closer is no person) in an
+ *  episode no recovery ended (its end names an earlier filing, or none). An item its expiry closed (a hub down past the item's
+ *  expiry — 1 to 2 h ahead: the store's boot sweep closes it before the first tick) or the agent closed (a recovery) is no
+ *  live episode: the block files again, as the parent did */
+function poolBlockedEpisode(todos, poolId) {
+  if (!_poolBlockedTodo.has(poolId) && !_poolBlockedLooked.has(poolId)) {
+    _poolBlockedLooked.add(poolId);
+    let items = [];
+    try { items = typeof todos.idsWhere === 'function' ? todos.idsWhere((x) => x.sessionKey === `pool:blocked:${poolId}`).map((id) => todos.get(id)).filter(Boolean) : []; } catch { items = []; }
+    const last = items.reduce((a, x) => (!a || Number(x.createdAt || 0) >= Number(a.createdAt || 0) ? x : a), null);
+    const endedHere = (x) => !!x.resolvedFact && Number(x.resolvedFact.endedAt) > 0 && Number(x.resolvedFact.endedFor) === Number(x.createdAt || 0);   // the end of THIS filing
+    const byPerson = (x) => x.resolvedBy === 'user' || x.resolvedBy === 'reply' || x.resolvedBy === 'hidden';
+    const live = (x) => x.status === 'open' || (byPerson(x) && !endedHere(x));
+    if (last && live(last)) _poolBlockedTodo.set(poolId, last.id);
+  }
+  if (!_poolBlockedTodo.has(poolId)) return { known: false, it: null };
+  const id = _poolBlockedTodo.get(poolId);
+  let it = null;
+  try { it = id ? todos.get(id) : null; } catch { it = null; }
+  return { known: true, it };
+}
 function poolBlockedTodo(poolId, poolName, d, currentName, now) {
   let todos = null;
   try { todos = getUserTodos(); } catch { todos = null; }
@@ -6768,11 +6799,8 @@ function poolBlockedTodo(poolId, poolName, d, currentName, now) {
     const lines = all.length > POOL_BLOCKED_DETAIL_LINES ? [...all.slice(0, POOL_BLOCKED_DETAIL_LINES), `… and ${all.length - POOL_BLOCKED_DETAIL_LINES} more (the journal has every line)`] : all;
     const text = `Pool "${poolName}": no member can serve it — ${all.length} account${all.length === 1 ? '' : 's'}, each with what holds it back and its remedy below`;
     const detail = lines.join('\n');
-    const known = _poolBlockedTodo.get(poolId);
-    let it = null;
-    if (known) { try { it = todos.get(known); } catch { it = null; } }
-    if (known && (!it || it.status !== 'open')) return null; // this episode's item was resolved (the owner's word): said once
-    if (!it && typeof todos.forSession === 'function') { try { it = (todos.forSession([`pool:blocked:${poolId}`]) || [])[0] || null; } catch { it = null; } } // (after a restart)
+    const { known, it } = poolBlockedEpisode(todos, poolId);   // B-5e0d: after a restart too (read back from the store)
+    if (known && (!it || it.status !== 'open')) return null; // this episode's item was resolved (the owner's word): said once — a restart included
     if (!it && !poolNoticeCut(d)) return null; // the toast named every member: it IS the whole copy (a small pool files nothing new)
     if (it) {
       _poolBlockedTodo.set(poolId, it.id);
@@ -6791,12 +6819,25 @@ function poolBlockedTodo(poolId, poolName, d, currentName, now) {
     return (item && item.id) || null;
   } catch (e) { console.warn('[pool] blocked: could not file the For-you item:', e.message); return null; }
 }
-/** the pool can serve again: this episode's item (still open) is over — closed by the agent, and the next block is a new one */
-function poolBlockedTodoEnd(poolId) {
-  if (!_poolBlockedTodo.has(poolId)) return;
-  const id = _poolBlockedTodo.get(poolId);
-  _poolBlockedTodo.delete(poolId);
-  try { const todos = getUserTodos(); const it = id && todos && typeof todos.get === 'function' ? todos.get(id) : null; if (it && it.status === 'open' && typeof todos.setStatus === 'function') todos.setStatus(id, 'done', 'agent'); } catch { }
+/** the pool can serve again: this episode's item (still open) is over — closed by the agent, and the next block is a new one.
+ *  B-5e0d: an item an EARLIER run left is found too (read back once a run), and the episode's end is written ON the item
+ *  (resolvedFact.endedAt, this recovery's — a re-filed item's older end is replaced), so a restart after the recovery files the
+ *  next block's item instead of reading it as resolved */
+function poolBlockedTodoEnd(poolId, now = Date.now()) {
+  let todos = null;
+  try { todos = getUserTodos(); } catch { todos = null; }
+  if (!todos || typeof todos.get !== 'function') return;
+  try {
+    const { known, it } = poolBlockedEpisode(todos, poolId);
+    if (!known) return;
+    _poolBlockedTodo.delete(poolId);
+    if (it && it.status === 'open' && typeof todos.setStatus === 'function') todos.setStatus(it.id, 'done', 'agent');
+    if (it && typeof todos.reshapeItems === 'function') todos.reshapeItems((x) => {
+      if (x.id !== it.id || x.status === 'open') return false;
+      x.resolvedFact = { ...(x.resolvedFact && typeof x.resolvedFact === 'object' ? x.resolvedFact : {}), endedAt: now, endedBy: 'pool-serves', endedFor: Number(x.createdAt || 0) };
+      return true;
+    });
+  } catch { }
 }
 function evaluationRoster(poolId, rosters = null) {
   if (rosters instanceof Map) { let t = rosters.get(poolId); if (!t) { t = evaluationRoster(poolId); rosters.set(poolId, t); } return t; }
@@ -8063,7 +8104,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
     { const t = _poolDecisions.get(poolId) || { session: 0, pool: 0 }; t.pool++; _poolDecisions.set(poolId, t); }   // B-f4a1: counted
     const defaultByClaim = d && d.to && d.to !== currentId ? claimDecided(d.to, () => { const b = decideDefault(); return (b && b.to) || currentId; }) : null; // MUST 8: the pool's own move, said when the claim decided it
     if (!d) return;
-    if (d.to || !['stuck', 'no-members', 'no-settleable', 'all-lapsed', 'all-logins-expired'].includes(d.reason)) poolBlockedTodoEnd(poolId); // the pool can serve again (r3)
+    if (d.to || !['stuck', 'no-members', 'no-settleable', 'all-lapsed', 'all-logins-expired'].includes(d.reason)) poolBlockedTodoEnd(poolId, now); // the pool can serve again (r3); B-5e0d: on the evaluation's own clock
     if (!d.to) {
       if (d.reason === 'removed-hold') {
         // 全B: the DEFAULT never keeps a removed member either — parked on the member usable soonest (its followers,

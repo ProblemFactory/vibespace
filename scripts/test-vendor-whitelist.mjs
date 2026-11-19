@@ -29,6 +29,7 @@ import { execFileSync } from 'node:child_process';
 import { trackedFiles } from './tracked-files.mjs';   // B-1561: the census lists data/bin via git, never a working-tree readdir
 import { createRequire } from 'node:module';
 import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
+import { anchored } from './scratch.mjs';   // B-5e0d: §3's order controls
 const require = createRequire(import.meta.url);
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -501,10 +502,22 @@ for (const [rel, a] of Object.entries(ALLOW)) {
   const text = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf-8');
   const hits = (text.match(/api\.anthropic\.com/g) || []).length;
   ok(hits === 1, `src/agentd/agentd.js: exactly ONE vendor host literal (the quota-refresh op; found ${hits})`);
-  for (const g of ["humanGated !== true", '_quotaAt', 'never refreshes']) {
+  for (const g of ["humanGated !== true", '_quotaAt', 'never refreshes', 'const bearerOk = !!oauth.refreshToken;', 'if (bearerOk) {' /* B-5e0d: THE USAGE BEARER LAW — a long-lived token is never this op's Bearer: no request */]) {
     ok(text.includes(g), `agentd quota-refresh keeps gate marker '${g}'`);
   }
   ok(!/oauth\/token|platform\.claude\.com/.test(text), 'agentd never touches the token-refresh endpoint (read-only peek only)');
+  // B-5e0d: THE ORDER of the op's usage bearer law — the shape decided first; the throttle stamp and the vendor host only INSIDE
+  // `if (bearerOk) {`; nothing thrown between the law and the passive cache (a refusal by throw dropped the hub's only road for it)
+  const bearerOrder = (t) => {
+    const b = t.slice(t.indexOf("msg.op === 'quota-refresh'"), t.indexOf("msg.op === 'probe-cli'"));
+    const law = b.indexOf('const bearerOk = !!oauth.refreshToken;'), gate = b.indexOf('if (bearerOk) {'), stamp = b.indexOf('_quotaAt.set(credsPath, Date.now())'), host = b.indexOf('api.anthropic.com'), pass = b.indexOf('const passive = {};');
+    return law > 0 && law < gate && gate < stamp && stamp < host && host < pass && !/\bthrow\b/.test(b.slice(law, pass));
+  };
+  ok(bearerOrder(text), 'agentd quota-refresh (B-5e0d): the bearer law decided before the throttle stamp and the vendor host, both inside `if (bearerOk) {`, nothing thrown between the law and the passive cache');
+  ok(!bearerOrder(anchored(text, "            const bearerOk = !!oauth.refreshToken;\n", "            const bearerOk = !!oauth.refreshToken;\n            if (!bearerOk) throw new Error('long-lived');\n", 'B-5e0d: the refusal by throw')),
+    'RED control (B-5e0d): a refusal by THROW after the law (the passive cache dropped — 10ab66486\'s shape) is red');
+  ok(!bearerOrder(anchored(text, "            if (bearerOk) {\n", "            if (true) {\n", 'B-5e0d: the request whatever the shape')),
+    'RED control (B-5e0d): the request made whatever the token\'s shape (outside the law) is red');
 }
 for (const rel of ['src/agentd/client.js', 'src/agentd/ws-min.js', 'src/agentd/mux.js']) {
   const text = fs.readFileSync(path.join(REPO, rel), 'utf-8');
