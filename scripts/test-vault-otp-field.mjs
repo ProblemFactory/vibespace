@@ -14,7 +14,8 @@
 //      nothing; the keys heard at the window's capture (before the tray's and the form's Escape); a press on a row keeps the
 //      focus; the three places draw the list (the Vault's add dialog, the card in the tray and in its own window); the voice
 //      mark keeps clear of an open list
-//   ⑦ RED: a model whose typing empties the list, and one whose Escape is not taken, are each caught
+//   ⑦ RED: a model whose typing empties the list, one whose Escape is not taken, and one whose landing read never settles a
+//      typed name, are each caught
 // Run: node scripts/test-vault-otp-field.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -72,6 +73,9 @@ function legs(X, say = ok) {
     '⑤ keys: ↓ opens on the first row and wraps, ↑ opens on the last; Enter picks ONLY a highlighted row (none ⇒ the key is the form\'s); Escape closes an OPEN list and is taken, a closed list\'s Escape is the form\'s; Tab leaves', { d1, d2, u1, e1, e0, x1, x0, tb });
   leg(X.typedSettled(E, 'wiki-two-step') && !X.typedSettled(['shop', 'shop-2'], 'shop') && X.typedSettled(['shop', 'shop-2'], 'shop-2') && !X.typedSettled(E, 'no-such') && !X.typedSettled(E, '') && X.typedSettled(E, ' bank-login '),
     '⑤b a listed name typed in FULL that begins no other SETTLES the choice (the list closes — the usual road never has it open over Save); a name that begins a longer one, or none, keeps it open');
+  leg(X.closesOnRead({ open: true, typed: true }, E, 'wiki-two-step') && !X.closesOnRead({ open: true, typed: false }, E, 'wiki-two-step') && !X.closesOnRead({ open: true, typed: true }, E, 'wiki-two')
+    && !X.closesOnRead({ open: false, typed: true }, E, 'wiki-two-step') && !X.closesOnRead({ open: true, typed: true }, [], 'wiki-two-step'),
+    '⑤c a read that LANDS on a list the TYPING opened closes it when the typed name now settles the choice (a full name typed before the names were read — a fresh dialog); a list a press, the mark or a key opened stays open');
   return bad;
 }
 
@@ -136,6 +140,11 @@ ok(/if \(v === 'unknown' && facts\.reading && !note\.hidden\) \{ note\.style\.vi
   'follow-up: a read in flight keeps a shown note\'s BOX (its words hidden until the read lands) — nothing under the note moves');
 ok(/if \(!loading\) load\(true\);/.test(fld) && /facts\.reading = true;/.test(fld) && /if \(facts\.loaded && typedSettled\(facts\.names, input\.value\)\) \{ if \(open\) close\(\);/.test(fld),
   'cure round 2: every opening reads the names again (a code added elsewhere, an unlock); a listed name typed in full settles the choice and closes the list');
+ok(/if \(open && closesOnRead\(\{ open, typed: typedOpen \}, facts\.names, input\.value\)\) close\(\); else if \(open\) paint\(\);/.test(fld) && /if \(!open\) show\(\); else paint\(\);\n    typedOpen = true;/.test(fld)
+  && /const show = \(\) => \{\n    typedOpen = false;/.test(fld) && /open = false; active = -1; panel\.remove\(\); typedOpen = false;/.test(fld) && /if \(st\.taken\) typedOpen = false;/.test(fld),
+  'the box red (2.369.411\'s owed rows, b75546381): a read that LANDS on a list the typing opened settles a listed name typed in full (the model\'s closesOnRead) — a fresh dialog\'s known name never leaves the list open over Save; a press, the mark or a list key clears the mark');
+ok(/code === 'login_totp_unknown' \|\| code === 'bad_totp' \? t\('No two-step code of that name is in this vault — pick one from its list, or add it with «Two-step code…»'\)/.test(row) && !/as it is listed in this vault/.test(row),   // stale-pins: kept — a deliberate absence check: the old field-description sentence is gone
+  'the add door\'s «no such two-step code» is said in the dialog\'s own line by name: addOwn\'s bad_totp (an unknown name, or a malformed one — neither can be in the vault) takes the card door\'s login_totp_unknown sentence (the box red: the dialog said a field description)');
 ok(/const clipBoxOf = /.test(fld) && /panel\.style\.maxHeight = `\$\{Math\.round\(Math\.max\(72, Math\.min\(220, up \? above : below\)\)\)\}px`;/.test(fld) && /\/paint\|strict\|content\/\.test\(cs\.contain/.test(fld),
   'cure round 2: the open list is capped to the room under the field inside the box that clips it (the chat\'s message contains its paint) — never cut off, never a scrollbar that narrows the dialog');
 ok(/if \(e\.key === 'Tab' && !e\.shiftKey && open\) \{/.test(fld) && /KEYED\.set\(door, doorKeys\);/.test(fld) && /panel\.addEventListener\('pointerdown', \(e\) => e\.preventDefault\(\)\);/.test(fld) && /otp\.setAttribute\('aria-labelledby', otpWords\.id\)/.test(fieldsFn + row),
@@ -162,6 +171,9 @@ ok(redC.length === 1 && redC[0].startsWith('③'), 'RED: a «locked» that takes
 const noEsc = await mutant("if (open) return { open: false, active: -1, pick: null, taken: true };   // the list closes", "if (open) return { open: false, active: -1, pick: null, taken: false };   // the list closes", 'esc-untaken');
 const redB = legs(noEsc, quiet);
 ok(redB.length === 1 && redB[0].startsWith('⑤'), 'RED: an Escape the open list does not take (the form would close under it) — caught by ⑤', redB);
+const noLand = await mutant("  return !!open && !!typed && typedSettled(names, text);", "  return false;", 'no-settle-on-read');
+const redD = legs(noLand, quiet);
+ok(redD.length === 1 && redD[0].startsWith('⑤c'), 'RED: a landing read that never settles a typed name (the box red: a fresh dialog\'s known name left the list open) — caught by ⑤c', redD);
 
 console.log(failed ? `\nFAILED (${passed} passed, ${failed} failed)` : `\nALL PASS (${passed})`);
 process.exit(failed ? 1 : 0);

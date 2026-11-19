@@ -11820,7 +11820,6 @@ export default {
   "Give the site's address over https (http only for this machine's localhost)": "请填写 https 的网站地址（http 只限本机 localhost）",
   "Give the user name (no spaces, no #)": "请填写用户名（不含空格和 #）",
   "Type its password": "请输入它的密码",
-  "The two-step code's name, as it is listed in this vault": "两步验证码的名称，与保险库里列出的一致",
   "Delete the login \"{name}\"?": "删除登录「{name}」？",
   "Its password leaves the vault and this account's own grant goes with it. Agents can no longer be signed in there with it.": "它的密码将离开保险库，这个账号自己的授权也一并删除。agent 之后不能再用它在那里登录。",
   "Website login…": "网站登录…",

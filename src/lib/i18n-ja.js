@@ -11819,7 +11819,6 @@ export default {
   "Give the site's address over https (http only for this machine's localhost)": "https のサイトアドレスを入力してください（http はこのマシンの localhost のみ）",
   "Give the user name (no spaces, no #)": "ユーザー名を入力してください（空白と # は不可）",
   "Type its password": "そのパスワードを入力してください",
-  "The two-step code's name, as it is listed in this vault": "このボールトに表示されている 2 段階コードの名前",
   "Delete the login \"{name}\"?": "ログイン「{name}」を削除しますか？",
   "Its password leaves the vault and this account's own grant goes with it. Agents can no longer be signed in there with it.": "パスワードはボールトから消え、このアカウント自身の許可も一緒に消えます。エージェントはもうこれでそこにサインインできません。",
   "Website login…": "ウェブサイトのログイン…",

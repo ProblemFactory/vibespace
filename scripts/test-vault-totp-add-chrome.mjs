@@ -344,31 +344,40 @@ const listFlow = async (tag, { inFlow = false, name = 'github-own', expectSave =
   await typeInto('.vault-login-add-dialog .vault-login-site', `https://${tag}.example.test`);
   await typeInto('.vault-login-add-dialog .vault-login-user', `${tag}-person@example.test`);
   await typeInto('.vault-login-add-dialog .vault-login-pass', ['pw', tag, Date.now()].join('-'));
-  const hintTop = () => evalJs(`(() => { const h = document.querySelector('.vault-login-add-dialog .vw-ak-hint'); return h ? Math.round(h.getBoundingClientRect().top) : null; })()`);
+  // the line after the field IN THE DIALOG'S OWN FLOW — free of the dialog body's scroll (the box runs' viewport top stood at 501 even
+  // with the note shown above it): the field's row height (`rowH`) and the line's offset from the row's top less the note's box
+  // between them (`flowHint` — the note under the field takes its room by design); `pos` = the open list's computed placement
+  const flowFacts = () => evalJs(`(() => { const d = document.querySelector('.vault-login-add-dialog'); const h = d && d.querySelector('.vw-ak-hint'); const i = document.querySelector(${JSON.stringify(OTP)}); const row = i && i.closest('label'); const nb = d && d.querySelector('.vault-otp-box'); const b = d && d.querySelector('.dialog-body'); const l = document.querySelector(${JSON.stringify(OTPL)});
+    if (!h || !row || !nb) return null; const hr = h.getBoundingClientRect(), rr = row.getBoundingClientRect(), bh = nb.getBoundingClientRect().height;
+    return { hintTop: Math.round(hr.top), rowH: Math.round(rr.height), boxH: Math.round(bh), flowHint: Math.round(hr.top - rr.top - bh), scroll: b ? Math.round(b.scrollTop) : null, pos: l ? getComputedStyle(l).position : null, listH: l ? Math.round(l.getBoundingClientRect().height) : 0 }; })()`);
   await evalJs(`(() => { const i = document.querySelector(${JSON.stringify(OTP)}); i.blur(); return true; })()`);
   await until(`!document.querySelector(${JSON.stringify(OTPL)})`, { timeout: 2000 });
-  const closedTop = await hintTop();
+  const closed = await flowFacts();
   await evalJs(`(() => { const i = document.querySelector(${JSON.stringify(OTP)}); i.focus(); i.value = ''; return true; })()`);
   await cdp('Input.insertText', { text: name });
-  await new Promise((r) => setTimeout(r, 400));
+  // the read of the names LANDS (every opening reads them again): its rows drawn, or the list closed by the settled name
+  await until(`(() => { const l = document.querySelector(${JSON.stringify(OTPL)}); return !l || l.querySelectorAll('.vault-otp-row').length > 0; })()`, { timeout: 5000 });
+  await sleep(150);
   const listOpen = await evalJs(`(() => { const l = document.querySelector(${JSON.stringify(OTPL)}); return !!l && l.querySelectorAll('.vault-otp-row').length > 0; })()`);
-  const openTop = await hintTop();
+  const opened = await flowFacts();
   const pressed = await otpPress('.vault-login-add-dialog .btn-create', { hold: 120 });
   const saved = expectSave ? !!(await until(`fetch('/api/vault/web-logins').then((r) => r.json()).then((j) => JSON.stringify(j.entries || []).includes(${JSON.stringify(tag + '.example.test')}))`, { timeout: 8000 })) : false;
   const refused = expectSave ? '' : String(await until(`(() => { const e = document.querySelector('.vault-login-add-dialog .vault-secret-error'); return e && e.textContent ? e.textContent : null; })()`, { timeout: 5000 }) || '');
-  const out = { listOpen, closedTop, openTop, pressed, saved, refused, landed: otpPress.last && otpPress.last.landed, dialog: await evalJs(`!!document.querySelector('.vault-login-add-dialog')`) };
+  const out = { listOpen, closed, opened, pressed, saved, refused, landed: otpPress.last && otpPress.last.landed, dialog: await evalJs(`!!document.querySelector('.vault-login-add-dialog')`) };
   if (inFlow) await evalJs(`(() => { document.getElementById('vs-otp-in-flow')?.remove(); return true; })()`);
   if (out.dialog) await click('.vault-login-add-dialog .btn-cancel');
   await until(`!document.querySelector('.vault-login-add-dialog')`, { timeout: 3000 });
   return out;
 };
 const cureOpen = await listFlow('otp-list-open');
-check('THE CURE (a): a prefix typed opens the list, and the line after the field stands where it stood with the list closed (the open list takes NO room in the flow)', cureOpen.listOpen && cureOpen.closedTop !== null && cureOpen.openTop === cureOpen.closedTop, cureOpen);
+const sameFlow = (r) => !!(r.closed && r.opened) && Math.abs(r.opened.flowHint - r.closed.flowHint) <= 1 && Math.abs(r.opened.rowH - r.closed.rowH) <= 1;
+check('THE CURE (a): a prefix typed opens the list, and the line after the field stands where it stood with the list closed (the open list takes NO room in the flow: the field\'s row and the line after it, in the dialog\'s own flow)', cureOpen.listOpen && !!cureOpen.opened && cureOpen.opened.pos === 'absolute' && sameFlow(cureOpen), cureOpen);
 check('THE CURE (b): with the list OPEN, ONE held press on Save lands — the add door ran and refused the unfinished name by name in the dialog\'s own line', cureOpen.pressed && /No two-step code of that name/.test(cureOpen.refused) && cureOpen.dialog, cureOpen);
 const cureSave = await listFlow('otp-list-settled', { name: 'github-owner', expectSave: true });
 check('THE CURE (c): the full listed name typed SETTLES the choice (the list closes) and Save saves the login', !cureSave.listOpen && cureSave.pressed && cureSave.saved && !cureSave.dialog, cureSave);
 const redFlow = await listFlow('otp-list-flow', { inFlow: true });
-check('RED: the list drawn back IN THE FLOW takes room — the line after the field moves down when it opens', redFlow.listOpen && redFlow.openTop > redFlow.closedTop, redFlow);
+check('RED control, its plant first: the injected style draws the OPEN list in the flow (its computed position static)', redFlow.listOpen && !!redFlow.opened && redFlow.opened.pos === 'static' && redFlow.opened.listH > 0, redFlow);
+check('RED: the list drawn back IN THE FLOW takes room — the field\'s row grows and the line after it moves down when it opens', !!(redFlow.closed && redFlow.opened) && redFlow.opened.rowH - redFlow.closed.rowH > 10 && redFlow.opened.flowHint - redFlow.closed.flowHint > 10, redFlow);
 
 console.log('⑥b a phone (375 × 812): the dialog fits the screen, its press targets ≥ 36 px');
 await cdp('Emulation.setDeviceMetricsOverride', { width: 375, height: 812, deviceScaleFactor: 2, mobile: true });

@@ -24,7 +24,7 @@ import { t } from './i18n.js';
 import { fetchJson } from './utils.js';
 import { afterPointerUp } from './blur-commit.js';   // THE press witness (document capture): a blur a press causes acts after its release
 import { showUnlock } from './vault-unlock.js';   // a LOCKED vault: the list says so with THE unlock dialog's door
-import { entriesOf, listState, rowsOf, typedVerdict, keyStep, typedSettled } from './vault-otp-field-model.js';
+import { entriesOf, listState, rowsOf, typedVerdict, keyStep, typedSettled, closesOnRead } from './vault-otp-field-model.js';
 
 const mk = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 /** the field's mark: THE icon set's chevronDown (src/lib/icons.js), built as SVG nodes — the UI draws icons as SVG, never a glyph */
@@ -88,6 +88,7 @@ export function otpField(input, { addCode = null } = {}) {
 
   const facts = { loaded: false, failed: false, locked: false, state: null, names: [], reading: false };
   let loading = null, gen = 0, open = false, active = -1, rows = [], picking = false;
+  let typedOpen = false;   // the TYPING opened (or last drew) the open list: a read that lands may find the typed name settled
   /** ONE read of the vault's names. `fresh` = a read the caller cannot trust an earlier one for (a code was just saved): the
    *  generation moves, and an answer that was already in flight is dropped when it lands (never said as «no such name»). */
   const load = (fresh = false) => {
@@ -99,7 +100,13 @@ export function otpField(input, { addCode = null } = {}) {
       const locked = !!(r && !r.ok && /vault_locked/.test(String(r.code || '')));
       Object.assign(facts, { loaded: true, failed: !(r && r.ok) && !locked, locked, state: r && r.ok ? r.state || null : locked ? 'locked' : null, names: r && r.ok ? entriesOf(r) : [] });
     }).catch(() => { if (my === gen) Object.assign(facts, { loaded: true, failed: true, locked: false, state: null, names: [] }); })
-      .then(() => { if (my !== gen) return; loading = null; facts.reading = false; if (open) paint(); say(); });
+      .then(() => {
+        if (my !== gen) return;
+        loading = null; facts.reading = false;
+        // a full listed name typed before the names were read (a fresh dialog) settles NOW — never a list left open over Save
+        if (open && closesOnRead({ open, typed: typedOpen }, facts.names, input.value)) close(); else if (open) paint();
+        say();
+      });
     return loading;
   };
   const say = () => {
@@ -162,6 +169,7 @@ export function otpField(input, { addCode = null } = {}) {
     highlight();
   };
   const show = () => {
+    typedOpen = false;   // a press, the mark or a key opened it (the typing marks it after)
     if (!loading) load(true);   // every opening reads the vault's names again (a code added elsewhere, an unlock) — cure round 2
     open = true; input.setAttribute('aria-expanded', 'true');
     paint();
@@ -177,7 +185,7 @@ export function otpField(input, { addCode = null } = {}) {
     panel.style.maxHeight = `${Math.round(Math.max(72, Math.min(220, up ? above : below)))}px`;
   };
   const close = () => {
-    open = false; active = -1; panel.remove(); input.setAttribute('aria-expanded', 'false'); input.removeAttribute('aria-activedescendant');
+    open = false; active = -1; panel.remove(); typedOpen = false; input.setAttribute('aria-expanded', 'false'); input.removeAttribute('aria-activedescendant');
   };
   const pick = (name) => {
     picking = true;
@@ -191,6 +199,7 @@ export function otpField(input, { addCode = null } = {}) {
     active = -1;
     if (facts.loaded && typedSettled(facts.names, input.value)) { if (open) close(); say(); return; }   // a listed name typed in full: the choice is made
     if (!open) show(); else paint();
+    typedOpen = true;
     say();
   });
   const away = () => document.activeElement !== input && !panel.contains(document.activeElement);
@@ -217,6 +226,7 @@ export function otpField(input, { addCode = null } = {}) {
     if (open) { active = st.active; highlight(); }
     if (st.pick != null && rows[st.pick]) pick(rows[st.pick].name);
     // (a window-capture listener registered BEFORE this one — customize mode's — still hears the key first; none takes these today)
+    if (st.taken) typedOpen = false;   // a list key: the person is choosing — a read that lands keeps the list open
     if (st.taken) { e.preventDefault(); e.stopPropagation(); }
   });
   mark.addEventListener('pointerdown', (e) => e.preventDefault());
