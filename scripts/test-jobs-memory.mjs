@@ -198,6 +198,28 @@ console.log('§1 PURE — THE LADDER, the size verdict, the rung record, the nam
 
 console.log('§1b PURE — the wrapper\'s judges: a refused allocation (the CODE first, then every node\'s words), the manager\'s version, a scope\'s end');
 {
+  { // B-f494: the wrapper's scope property for a lowered job — only a weight the server asked AND cpu ENABLED among the scope's
+    // siblings (its parent's cgroup.subtree_control): THE LAW (主开发 04:23Z) — never switched ON where it was off
+    const cw = WF('cpuWeightArgs');
+    const rows = [[33, 'cpuset cpu io memory pids', ['-p', 'CPUWeight=33']], [33, 'cpuset io memory pids', []], [undefined, 'cpu memory', []], [0, 'cpu memory', []], [20000, 'cpu memory', []], [33.5, 'cpu memory', []], [1, 'cpu', ['-p', 'CPUWeight=1']], [10000, 'cpu', ['-p', 'CPUWeight=10000']], [10001, 'cpu', []], ['33', 'cpu', []],   // the range's two edges and one past it; a string is no weight
+      [33, 'memory pids', []],   // AVAILABLE only (the manager's cgroup.controllers holds cpu, its siblings' subtree does not): none — never turned on
+      [33, '', []], [33, null, []]];   // unreadable: none
+    const bad = rows.filter(([w, c, want]) => JSON.stringify(cw(w, c)) !== JSON.stringify(want));
+    ok(typeof JW.cpuWeightArgs === 'function' && !bad.length && /'-p', 'MemorySwapMax=0', \.\.\.cpuWeightArgs\(spec\.cpuWeight, siblingsSubtree\)/.test(WRAPPER_SRC)
+      && /if \(cg && spec\.cpuWeight\) siblingsSubtree = siblingsSubtreeOf\('\/sys\/fs\/cgroup', cg\);/.test(WRAPPER_SRC),
+      'B-f494: the cgroup rung asks `-p CPUWeight=<w>` only for a weight the server sent (1–10000) and cpu ENABLED among the scope\'s siblings — available only, or unreadable, asks none; the rung\'s argv spreads it, the read made for a lowered job only', bad);
+    // THE PARENT: app.slice under the manager where it exists, else the manager's own group; '' when unreadable (a fake tree)
+    const ss = WF('siblingsSubtreeOf'), T = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cpu-siblings-'));
+    try {
+      const mk = (rel, sub) => { fs.mkdirSync(path.join(T, rel), { recursive: true }); if (sub !== null) fs.writeFileSync(path.join(T, rel, 'cgroup.subtree_control'), sub); };
+      mk('withapp/u', 'memory pids\n'); mk('withapp/u/app.slice', 'cpu memory pids\n');   // the manager's own group lacks cpu; app.slice has it: app.slice is read
+      mk('noapp/u', 'cpu memory\n');                                                       // no app.slice: the manager's own group
+      mk('gone/u', null);                                                                  // no file
+      const got = [ss(path.join(T, 'withapp'), '/u'), ss(path.join(T, 'noapp'), '/u'), ss(path.join(T, 'gone'), '/u'), ss(path.join(T, 'nowhere'), '/u')];
+      ok(JSON.stringify(got) === JSON.stringify(['cpu memory pids\n', 'cpu memory\n', '', '']),
+        'B-f494: the siblings\' subtree is app.slice\'s where the manager has one, the manager\'s own group\'s where it has none, and empty where it cannot be read', got);
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  }
   const refused = WF('allocationRefused');
   // the job's last words under RLIMIT_DATA, MEASURED 2026-10-27 (Buffer.allocUnsafe past a 1 GB bound, uncaught) — one per
   // wording of every node the hub runs (/usr/bin/node 22.22.1, the nvm 24.12.0 and 24.22.1)

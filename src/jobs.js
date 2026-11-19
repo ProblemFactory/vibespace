@@ -123,6 +123,7 @@ function wrapperEnv(jobId, base = process.env) {
 // A wrapper that does not speak it never starts the job and says so (exit.json reason update_window) — _finalizeRun.
 // 3 (lane vault-job-road): a job's vault values ride the wrapper's fd 3 as ONE frame (src/vault-job.js) — the spec names them
 const WRAPPER_PROTO = 3;
+const JOB_CPU_WEIGHT = 33;   // B-f494: a lowered job's scope CPUWeight — nice +5's share of nice 0's (335 / 1024 × systemd's default 100)
 // how long after the wrapper changed on disk a mismatch is still the update's window (its restart is on the way: 45 s
 // measured on the owner's hub; an install + build bounded at minutes) — past it, the install itself is broken: a fault
 const UPDATE_WINDOW_MS = 15 * 60 * 1000;
@@ -2143,18 +2144,22 @@ class JobManager {
     // file: 0600, O_EXCL (never written through a name already there), a fresh name per start; the wrapper reads it
     // ONCE and unlinks it. Nothing re-reads it: a job back after a restart is adopted by its stamp or re-spawned HERE.
     const specPath = path.join(ctl, `spec.${runTs}.json`);
+    // B-460d: WHAT A JOB STARTS NEVER OUTRANKS THE HUB — the start's priority, read ONCE here, BEFORE the spec's file is opened (the
+    // wiring's spawnPriority: the setting read at THIS start; a verdict that throws = not lowered, never a start lost or an fd left open)
+    let pri = null; try { pri = typeof this.d.spawnPriority === 'function' ? this.d.spawnPriority() : null; } catch { pri = null; }
     const fd = fs.openSync(specPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600); // EEXIST ⇒ no start (that name is not ours to remove)
     const wrapper = path.join(this.d.dataDir, 'bin', 'job-wrapper.js');
     let child, frame = null;
     try {
+      // B-f494: a job started LOWERED also carries that step's share for its cgroup — the wrapper's systemd-run --scope is a cgroup
+      // BESIDE the hub's service, where only cpu weights compete (nice +5 weighs 335 of nice 0's 1024 ⇒ 33 of 100)
+      if (pri && pri.priority) spec.cpuWeight = JOB_CPU_WEIGHT;
       try { fs.writeFileSync(fd, JSON.stringify(spec)); } finally { fs.closeSync(fd); }
       // lane vault-job-road: the values' frame is built LAST — nothing that can throw stands between it and its hand-off but the spawn
       if (vj) { const p = vj.door.payload(vj); if (!p.ok) throw new Error(p.words || 'the vault values could not be read'); frame = p.frame; }
-      // B-460d: WHAT A JOB STARTS NEVER OUTRANKS THE HUB — its wrapper is born at `nice -n 5` (the wiring's spawnPriority:
-      // the setting read at THIS start). The wrapper's systemd-run --scope runs in its own process, so the job keeps the
-      // VALUE — but that scope is a cgroup beside the hub's service, where only cpu weights compete (the remainder, named).
-      // The wrapper's own words stay ONE array (suites cut it as a whole: test-vault-job, test-jobs-engine).
-      const pri = typeof this.d.spawnPriority === 'function' ? this.d.spawnPriority() : null;
+      // B-460d: its wrapper is born at `nice -n 5` (the priority read above); the wrapper's systemd-run --scope runs in its own process,
+      // so the job keeps the VALUE — and its scope takes spec.cpuWeight (B-f494). The wrapper's own words stay ONE array (suites cut
+      // it as a whole: test-vault-job, test-jobs-engine).
       const argv = [...priorityArgv(pri && pri.priority), process.execPath, ...[wrapper, ctl, specPath, '--proto=' + WRAPPER_PROTO]];
       child = spawn(argv[0], argv.slice(1), { detached: true, stdio: vj ? ['ignore', 'ignore', 'ignore', 'pipe'] : 'ignore', env: wrapperEnv(job.id) });
       // an exec that fails late (the nice program gone since the one look) is an 'error' event: never the hub's crash —

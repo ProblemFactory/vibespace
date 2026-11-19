@@ -199,6 +199,37 @@ leg('§3 REAL ① the cgroup rung — proven before the job runs, the bound enfo
   stopEngine(A);
 });
 
+leg('§3 REAL ①b B-f494 — a LOWERED job\'s REAL scope carries CPUWeight=33 where weights decide among its siblings', async (ok) => {
+  // ONE lowered job on the cgroup rung (the real priority verdict, the setting at its default) and ONE unlowered beside it; the
+  // weight read back off the REAL user manager (the unit's CPUWeight) and off the kernel (the scope's own cpu.weight). Where cpu is
+  // NOT enabled among the scope's siblings (the parent's cgroup.subtree_control: app.slice, or the manager's own group without
+  // one) the unit asks none by its law — that case is SKIPPED BY NAME here (test-jobs-memory pins its rows)
+  if (!userSystemd) { skip++; ok.say('  - SKIP the weighted scope: no user systemd with a memory controller answers here'); return; }
+  const um = String(spawnSync(CTL, ['--user', 'show', '-p', 'ControlGroup', '--value'], { encoding: 'utf8', timeout: 3000 }).stdout || '').trim();
+  const JWM = (() => { const argv = process.argv.splice(2); try { return require('../data/bin/job-wrapper.js'); } finally { process.argv.push(...argv); } })();   // the wrapper as a module (no argv: it exports its helpers)
+  if (typeof JWM.siblingsSubtreeOf !== 'function') { ok(false, 'B-f494: the wrapper exports siblingsSubtreeOf (the read this leg judges by)'); return; }
+  const sub = JWM.siblingsSubtreeOf('/sys/fs/cgroup', um);
+  if (!/\bcpu\b/.test(sub)) { skip++; ok.say(`  - SKIP the weighted scope: cpu is not enabled among the scope's siblings here (their subtree: «${sub.trim()}») — the unit asks no weight there, by its law`); return; }
+  const SP = require('../src/server/spawn-priority.js');
+  const pri = SP.priorityFor({ serverSetting: () => undefined, log: { warn() { } } });
+  if (!pri.priority) { skip++; ok.say(`  - SKIP the weighted scope: no start is lowered here (${pri.fact && pri.fact.why}) — no weight is asked`); return; }
+  const L = engineIn(scratch())({ spawnPriority: () => pri }), U = engineIn(scratch())();
+  const jl = L.jobs.get((L.create({ kind: 'task', name: 'weighed', cmd: { argv: ['sleep', '30'] }, memoryMb: 256, owner }, caller).job || {}).id);
+  const ju = U.jobs.get((U.create({ kind: 'task', name: 'unweighed', cmd: { argv: ['sleep', '30'] }, memoryMb: 256, owner }, caller).job || {}).id);
+  const upL = await running(L, jl), upU = await running(U, ju);
+  const bl = readJson(path.join(ctlOf(jl), 'bound.json')) || {}, bu = readJson(path.join(ctlOf(ju), 'bound.json')) || {};
+  const prop = (u) => (u ? String(spawnSync(CTL, ['--user', 'show', '-p', 'CPUWeight', '--value', u], { encoding: 'utf8', timeout: 3000 }).stdout || '').trim() : null);
+  const kernel = (u) => { if (!u) return null; const cg = String(spawnSync(CTL, ['--user', 'show', '-p', 'ControlGroup', '--value', u], { encoding: 'utf8', timeout: 3000 }).stdout || '').trim(); try { return cg ? fs.readFileSync(`/sys/fs/cgroup${cg}/cpu.weight`, 'utf8').trim() : null; } catch { return null; } };
+  const got = { lowered: { unit: bl.unit, prop: prop(bl.unit), kernel: kernel(bl.unit) }, unlowered: { unit: bu.unit, prop: prop(bu.unit), kernel: kernel(bu.unit) } };
+  ok(upL && upU && got.lowered.prop === '33' && got.lowered.kernel === '33',
+    `B-f494: the lowered job's REAL scope carries CPUWeight=${got.lowered.prop} (the manager) and cpu.weight ${got.lowered.kernel} (the kernel) — nice +5's share of 100`, got);
+  ok(upU && got.unlowered.prop !== '33' && got.unlowered.kernel !== '33',
+    `B-f494 CONTROL: an unlowered job's scope beside it asks none (CPUWeight «${got.unlowered.prop}», cpu.weight ${got.unlowered.kernel}) — the weight is the lowered start's alone`, got);
+  L.stop(jl); U.stop(ju);
+  await settle(L, jl); await settle(U, ju);
+  stopEngine(L); stopEngine(U);
+});
+
 leg(`§3 REAL ② the rlimit rung (forced — the pod's: no user systemd there) under THIS node (${process.version})`, async (ok) => {
   const B = engineIn(scratch())({ memoryRungs: ['rlimit-data'] });
   const r = B.create({ kind: 'task', name: 'reserve', cmd: { argv: [NODE, '-e', RESERVE] }, memoryMb: 1024, owner }, caller);

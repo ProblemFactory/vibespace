@@ -26,7 +26,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { scratchDir } from './scratch.mjs';
+import { scratchDir, anchored } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
 
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -204,12 +204,30 @@ console.log('— ④ B-460d: what a conversation starts never outranks the hub �
     jm.init(); for (const t of jm._timers || []) clearInterval(t); jm._timers = [];
     const r = jm.create({ kind: 'task', name: 'nice-check', cmd: { argv: ['sh', '-c', 'true'], cwd: dir }, owner: { conversation: null, sessionId: 's-N', sessionCreatedAt: 1, groupsSnapshot: [] } }, { isUser: true, groups: new Set() });
     try { for (const j of jm.jobs.values()) j.desiredUp = false; jm.shutdown(); } catch { }
-    return { argv: got[0] || null, err: r && r.error };
+    const sp = (got[0] || []).find((w) => /\/spec\.\d+\.json$/.test(String(w)));   // B-f494: the spec the wrapper would read (nothing ran: still on disk)
+    let spec = null; try { spec = sp ? JSON.parse(fs.readFileSync(sp, 'utf8')) : null; } catch { spec = null; }
+    return { argv: got[0] || null, err: r && r.error, spec };
   };
   const JON = jobsMod ? await jobArgv(() => undefined) : null, JOFF = jobsMod ? await jobArgv(OFF) : null;
   ok(JON && JON.argv && JSON.stringify(JON.argv.slice(0, 4)) === JSON.stringify([NICE, '-n', '5', process.execPath]) && /job-wrapper\.js$/.test(JON.argv[4])
     && JOFF && JOFF.argv && JOFF.argv[0] === process.execPath && JSON.stringify(JOFF.argv.slice(1).map((w) => w.replace(/\/[^ ]*sline-jobs[^/]*/, 'D').replace(/jb-[0-9a-f]+/g, 'J').replace(/\d{10,}/g, 'T'))) === JSON.stringify(JON.argv.slice(4).map((w) => w.replace(/\/[^ ]*sline-jobs[^/]*/, 'D').replace(/jb-[0-9a-f]+/g, 'J').replace(/\d{10,}/g, 'T'))),
     'the jobs road (the real JobManager): its wrapper starts as `nice -n 5 node job-wrapper.js …`; the setting off = `node job-wrapper.js …`, the same words after it', { on: JON && (JON.argv || JON.err), off: JOFF && (JOFF.argv || JOFF.err) });
+  // B-f494: A LOWERED JOB'S SCOPE WEIGHS LESS — the spec carries cpuWeight 33 when the start is lowered, none when it is not; RED CONTROL
+  // (in memory): the engine without that line writes no weight under the same priority
+  const CW = '      if (pri && pri.priority) spec.cpuWeight = JOB_CPU_WEIGHT;\n';
+  let jobsNoW = null, noW = null;   // both edits through scratch.mjs anchored() (test-suite-files-parse §3): a moved line fails by name
+  try { jobsNoW = M.load('src/jobs.js', anchored(anchored(JSRC, SP0, "const { execFile } = require('child_process'); const spawn = (...a) => globalThis.__vsJobSpawn(...a);", 'B-f494 the jobs spawn seam'), CW, '', 'B-f494 the engine without the job\'s cpu weight'), 'jobs-no-cpu-weight'); } catch (e) { noW = String((e && e.message) || e).slice(0, 200); }
+  if (!jobsNoW) ok(false, `the control «the engine without the job's cpu weight» built nothing — ${noW}`);
+  else {
+    const ctl = await (async () => { const got = []; globalThis.__vsJobSpawn = (cmd, args) => { got.push([cmd, ...args]); return { pid: 4345, unref() { }, on() { }, once() { }, stdio: [], kill() { } }; };
+      const dir = scratchDir('sline-jobs-nw'); const jm = new jobsNoW.JobManager({ dataDir: dir, broadcast() { }, notifyUser() { return { ok: true }; }, log() { }, spawnPriority: () => SPRI.priorityFor({ serverSetting: () => undefined, log: quiet }) });
+      jm.init(); for (const t of jm._timers || []) clearInterval(t); jm._timers = [];
+      jm.create({ kind: 'task', name: 'nice-cw', cmd: { argv: ['sh', '-c', 'true'], cwd: dir }, owner: { conversation: null, sessionId: 's-W', sessionCreatedAt: 1, groupsSnapshot: [] } }, { isUser: true, groups: new Set() });
+      try { for (const j of jm.jobs.values()) j.desiredUp = false; jm.shutdown(); } catch { }
+      const sp = (got[0] || []).find((w) => /\/spec\.\d+\.json$/.test(String(w))); try { return sp ? JSON.parse(fs.readFileSync(sp, 'utf8')) : null; } catch { return null; } })();
+    ok(!!JON && !!JON.spec && JON.spec.cpuWeight === 33 && !!JOFF && !!JOFF.spec && JOFF.spec.cpuWeight === undefined && !!ctl && ctl.cpuWeight === undefined,
+      `B-f494: a lowered job's spec asks its scope for CPUWeight ${JON && JON.spec && JON.spec.cpuWeight} (nice +5's share of 100); the setting off asks none; RED CONTROL: the engine without that line asks none under the same priority`, { on: JON && JON.spec && JON.spec.cpuWeight, off: JOFF && JOFF.spec && JOFF.spec.cpuWeight, ctl: ctl && ctl.cpuWeight });
+  }
   // (its verdict's LENS THREE should) THE WRAPPER'S 'error' LISTENER RUNS: the stub child is a real EventEmitter; an exec that
   // fails late (the nice program gone since the one look) is ONE journal line, never a throw out of the child's emitter
   const { EventEmitter } = require('events');

@@ -89,7 +89,20 @@ function leftWords(l) {
   if (!n) return `${esc}; run it as a service job`;
   return `the job left ${n} process${es(n)} running — ${n === 1 ? 'it was' : 'they were'} stopped${l.force ? ' by force' : ''}${sh}${esc ? `; ${esc}; run it as a service job` : '; to keep a daemon, run it as a service job'}`;
 }
-if (!process.argv[2] && require.main !== module) { module.exports = { allocationRefused, systemdMajor, scopeResultEnd, scopeEventsEnd, capOf, sharedAncestors, leftWords }; return; }
+/** PURE (B-f494): a LOWERED job's scope property — `-p CPUWeight=<w>` when the server asked one (1–10000) AND cpu is ENABLED
+ *  among the scope's siblings (the cgroup.subtree_control of its parent: app.slice under the user systemd, or the manager's own
+ *  group where there is none). THE LAW (主开发 04:23Z): the unit never switches per-unit CPU scheduling ON where it was off — a
+ *  controller only AVAILABLE (the manager's cgroup.controllers) leaves the siblings in ONE group, where the job's nice already
+ *  competes with the hub, and the first weight asked would make systemd split them all; unreadable ⇒ none. */
+function cpuWeightArgs(weight, siblingsSubtree) { return Number.isInteger(weight) && weight >= 1 && weight <= 10000 && /\bcpu\b/.test(String(siblingsSubtree || '')) ? ['-p', `CPUWeight=${weight}`] : []; }
+/** B-f494: the cgroup.subtree_control of the scope's parent — `<root>/<manager>/app.slice` where that slice exists, else the
+ *  manager's own group; '' when it cannot be read */
+function siblingsSubtreeOf(root, cg) {
+  const own = path.join(root, cg), app = path.join(own, 'app.slice');
+  let parent = own; try { if (fs.statSync(app).isDirectory()) parent = app; } catch { }
+  try { return fs.readFileSync(path.join(parent, 'cgroup.subtree_control'), 'utf8'); } catch { return ''; }
+}
+if (!process.argv[2] && require.main !== module) { module.exports = { allocationRefused, systemdMajor, scopeResultEnd, scopeEventsEnd, capOf, sharedAncestors, leftWords, cpuWeightArgs, siblingsSubtreeOf }; return; }
 
 const ctlDir = process.argv[2];
 const specPath = process.argv[3];
@@ -310,8 +323,9 @@ function rungPlan() {
     if (rung === 'cgroup') {
       const run = onPath('systemd-run'), ctl = onPath('systemctl');
       const cg = run && ctl && sh ? ask(ctl, ['--user', 'show', '-p', 'ControlGroup', '--value']) : null;
-      let controllers = '';
+      let controllers = '', siblingsSubtree = '';
       if (cg) { try { controllers = fs.readFileSync(path.join('/sys/fs/cgroup', cg, 'cgroup.controllers'), 'utf8'); } catch { } }
+      if (cg && spec.cpuWeight) siblingsSubtree = siblingsSubtreeOf('/sys/fs/cgroup', cg);   // B-f494: weights decide among the siblings? (read only for a lowered job)
       if (!run || !ctl) misses.push('no systemd-run here');
       else if (!sh) misses.push('no sh here to hold the job until its bound is read back');
       else if (!cg) misses.push('no user systemd answered');
@@ -320,7 +334,7 @@ function rungPlan() {
         const version = systemdMajor(ask(ctl, ['--user', 'show', '-p', 'Version', '--value'])) || systemdMajor(ask(ctl, ['--version']));
         const policy = version >= 253;
         // the scope starts at the ASKED bound (unbounded: infinity); what contains it is read once it exists (settleCap)
-        plan.push({ by: 'cgroup', ctl, version, policy, mb: askedMb, argv: [run, '--user', '--scope', '--quiet', `--unit=${unit}`, '-p', `MemoryMax=${askedMb ? askedMb + 'M' : 'infinity'}`, '-p', 'MemorySwapMax=0', ...(policy ? ['-p', 'OOMPolicy=stop'] : []), '--', sh, '-c', policy ? GATE_EXEC : GATE_KEEP, 'sh', ...spec.argv] });
+        plan.push({ by: 'cgroup', ctl, version, policy, mb: askedMb, argv: [run, '--user', '--scope', '--quiet', `--unit=${unit}`, '-p', `MemoryMax=${askedMb ? askedMb + 'M' : 'infinity'}`, '-p', 'MemorySwapMax=0', ...cpuWeightArgs(spec.cpuWeight, siblingsSubtree), ...(policy ? ['-p', 'OOMPolicy=stop'] : []), '--', sh, '-c', policy ? GATE_EXEC : GATE_KEEP, 'sh', ...spec.argv] });
       }
     } else if (rung === 'rlimit-data') {
       const pl = onPath('prlimit');
