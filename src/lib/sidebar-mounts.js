@@ -1,7 +1,7 @@
 // Sidebar "Mounts" tab — rclone S3 mounts + share minting (collaboration P1).
 // Third tab next to Folders | Groups: my-storage card (env-provisioned),
 // mount list with live status, share-a-folder minting, import-a-link.
-import { createModalShell, showToast, showConfirmDialog, showContextMenu, copyText, escHtml, hostStateChip, getInstanceUrl, fetchJson } from './utils.js';
+import { createModalShell, showToast, showConfirmDialog, showContextMenu, copyText, escHtml, hostStateChip, getInstanceUrl, fetchJson, hostsHeldWords } from './utils.js';
 import { protoChip } from './sidebar-rail.js'; // http/https/tcp chip (override menu = this._portProtoMenu, same prototype)
 import { pluginProvides } from './plugins-ui.js'; // the ONE relay probe (declared capability)
 import { t as tr, tc, deviceLocale, resolveLang } from './i18n.js'; // sidebar cluster convention: local `t` is pervasively a task var (verify-r5 A1: + the device's locale for a time)
@@ -1239,7 +1239,7 @@ export function installSidebarMounts(Sidebar) {
           // verify-r6 U1: a refused / failed removal is SAID (the api() throw was unguarded — the click did nothing, silently)
           if (ok) {
             try { await api(`/api/hosts/${h.id}`, { method: 'DELETE' }); if (isDial) showToast(tr('Unpaired')); }
-            catch (e) { showToast(tr('Could not remove "{name}" — {why}', { name: h.name, why: (e && e.message) || tr('server unreachable') }), { type: 'error' }); }
+            catch (e) { showToast(tr('Could not remove "{name}" — {why}', { name: h.name, why: e && e.code === 'hosts-unread' ? hostsHeldWords() : (e && e.message) || tr('server unreachable') }), { type: 'error' }); }   // 主开发 01:20Z (5)
           }
         }, 'mounts-icon-danger'),
       );

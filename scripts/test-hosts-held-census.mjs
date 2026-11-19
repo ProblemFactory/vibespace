@@ -65,7 +65,9 @@ const walk = (dir, out = []) => {
 };
 const serverFiles = () => new Map(['server.js', ...walk('src')].map((f) => [f, fs.readFileSync(path.join(ROOT, f), 'utf8')]));
 // the column of every lookup on a line (the server census's own pattern; the page's half judges no catch)
-const LOOKUP = /\b(?:hosts|_hosts|getHosts)(?:\?\.)?(?:\(\))?\??\.(?:get|list|findByDeviceId)\??\.?\(|\bthis\.(?:get|list|findByDeviceId)\(/g;
+// 主开发 01:20Z (1): + the hosts methods that call get INSIDE (device, deviceBounded, homeDir, the transcript fetches) — a held list
+// throws through them the same way, so a new caller of those is a row too (the is-it-paired lookup, findByDeviceId, was counted already)
+const LOOKUP = /\b(?:hosts|_hosts|getHosts)(?:\?\.)?(?:\(\))?\??\.(?:get|list|findByDeviceId|device|deviceBounded|homeDir|fetchTranscript|fetchSessionJsonl|fetchCodexJsonl|fetchAgentJsonl)\??\.?\(|\bthis\.(?:get|list|findByDeviceId)\(/g;
 const lookupCols = (file, ln) => [...ln.matchAll(LOOKUP)].filter((m) => file === 'src/hosts.js' || !m[0].startsWith('this.')).map((m) => m.index);
 function census(files, rows, { siteOf, bareRule = true }) {
   const sites = [], unparsed = [];
@@ -103,7 +105,7 @@ function census(files, rows, { siteOf, bareRule = true }) {
 const CLASSES = ['waits', 'refuses', 'harmless', 'not-hosts'];
 
 // ── §1 every caller of a lookup in the server is a row ──────────────────────────────────────────────────────────────────────────
-console.log('§1 every caller of a lookup (get / list / findByDeviceId) in the server is a row');
+console.log('§1 every caller of a lookup (get / list / findByDeviceId, and the methods that call get inside: device / deviceBounded / homeDir / the transcript fetches) in the server is a row');
 {
   const ROWS = [
     {"file": "server.js", "at": "const hostTokens = require('./src/server/host-tokens.js').create({ dataDir: path.join(__dirname,", "n": 2, "cls": "harmless", "why": "hostTokens.create({nameOf}) (findByDeviceId / get) — Bare catch (host-tokens) hides the hold, harmlessly (a display name). findByDeviceId learn held: no"},
@@ -194,7 +196,7 @@ console.log('§1 every caller of a lookup (get / list / findByDeviceId) in the s
     {"file": "src/server/sysinfo-wiring.js", "at": "const h = hosts.get(hostId);", "n": 3, "cls": "refuses", "why": "remoteSysinfo: get throws hosts-unread by name — the System panel's machine row says it"},
     {"file": "src/server/task-groups-wiring.js", "at": "let h; try { h = hosts().get(session.host); } catch { return; }", "n": 1, "cls": "waits", "why": "the context sync of a remote session — skipped this time, the 60 s timer asks again", "bare": "it tries again on its timer"},
     {"file": "src/server/task-groups-wiring.js", "at": "let h; try { h = hosts().get(s.host); } catch { continue; }", "n": 1, "cls": "waits", "why": "the 60 s context timer — skips the machine this round", "bare": "it tries again on its timer"},
-    {"file": "src/server/task-groups-wiring.js", "at": "if (!home) { try { hosts().homeDir(hosts().get(session.host)); } catch { } return null; } // war", "n": 1, "cls": "harmless", "why": "the remote context base warm-up — warmed later", "bare": "a cache warm-up only"},
+    {"file": "src/server/task-groups-wiring.js", "at": "if (!home) { try { hosts().homeDir(hosts().get(session.host)); } catch { } return null; } // war", "n": 2, "cls": "harmless", "why": "the remote context base warm-up — warmed later", "bare": "a cache warm-up only"},
     {"file": "src/spawn/ssh.js", "at": "const h2 = hosts.get(data.hostId);", "n": 1, "cls": "harmless", "why": "the tools' ship for a create already past its own lookup (which refuses by name)"},
     {"file": "src/usage-routes.js", "at": "const want = req.body?.host ? [req.body.host] : hosts.list().map((h) => h.id);", "n": 1, "cls": "waits", "why": "an empty list harvests nothing this round; asked again later — nothing is judged on an absence"},
     {"file": "src/usage-routes.js", "at": "let hMeta2; try { hMeta2 = hosts.get(hid); } catch (e) { return e && e.code === 'hosts-unread' ?", "n": 1, "cls": "refuses", "why": "the per-machine usage ⟳: 503 hosts-unread by name — never «unknown host» (H20)"},
@@ -202,7 +204,7 @@ console.log('§1 every caller of a lookup (get / list / findByDeviceId) in the s
     {"file": "src/usage-routes.js", "at": "for (const h of hosts?.list() || []) out[h.id] = { ...(_hostUsage[h.id] || {}), name: h.name };", "n": 1, "cls": "harmless", "why": "a usage snapshot for display — no machine rows meanwhile"},
     {"file": "src/writer-sweep.js", "at": "const h = hosts.get(hostId);", "n": 1, "cls": "refuses", "why": "the writer sweep's ssh fallback: get throws hosts-unread by name (the resume refuses first)"},
     {"file": "src/ws-create.js", "at": "if (hosts.get(hd) && fs.existsSync(path.join(cacheRoot, hd, cacheRel))) owners.push(hd);", "n": 1, "cls": "refuses", "why": "the host-less resume: refused by name while held BEFORE the cache scan — never resumed on this machine (H4)", "bare": "the held check refuses the resume by name BEFORE this scan (H4); after it, a removed machine owns nothing"},
-    {"file": "src/ws-create.js", "at": "try { const hh = hosts.get(data.hostId); cwd = (hh && await hosts.homeDir(hh)) || ''; } catch { ", "n": 1, "cls": "harmless", "why": "a remote create's default folder — the create meets the hold by name next", "bare": "the create refuses right after it"},
+    {"file": "src/ws-create.js", "at": "try { const hh = hosts.get(data.hostId); cwd = (hh && await hosts.homeDir(hh)) || ''; } catch { ", "n": 2, "cls": "harmless", "why": "a remote create's default folder — the create meets the hold by name next", "bare": "the create refuses right after it"},
     {"file": "src/ws-create.js", "at": "const hh = hosts.get(data.hostId);", "n": 3, "cls": "harmless", "why": "the cwd preflight never blocks a create; the create meets the hold by name next (its own lookup)", "bare": "the cwd preflight never blocks a create; the create meets the hold by name next (its own lookup, H16)"},
     {"file": "src/ws-create.js", "at": "const facts = { ...rs, hostId: data.hostId, transport: spawnFor(hosts.get(data.hostId) || {}).id", "n": 2, "cls": "harmless", "why": "account facts for a create already past its lookup (which refuses by name)", "bare": "account facts for a create already past its lookup (which refuses the hold by name)"},
     {"file": "src/ws-create.js", "at": "try { h = hosts.get(data.hostId); }", "n": 2, "cls": "refuses", "why": "a remote create / resume: the hold's code and translated words — never «Unknown host» (H16)"},
@@ -211,8 +213,49 @@ console.log('§1 every caller of a lookup (get / list / findByDeviceId) in the s
     // the move onto 418bc7210: the train's new callers since the cure's base (the meeting commit)
     {"file": "src/machine-mounts.js", "at": "try { h = this.hosts.get(m.hostId); } catch (e) { h = e && e.code === 'hosts-unread'", "n": 1, "cls": "refuses", "why": "shadowedBy (B-fcc7, the train): a held list is unknown, never «removed» — the record still shadows its bare folder (named by its id), so a write there is refused as for an offline machine; a reader sees the shadow when probed empty"},
     {"file": "src/server/exit-routes.js", "at": "if (b.replaces) { try { old = hosts.get(String(b.replaces)); } catch { old = null; } }", "n": 1, "cls": "refuses", "why": "POST /api/hosts «Add it again with a key» (the train): the add itself refuses by name on the next line (hosts.add's first line) — nothing is replaced or removed", "bare": "the swallowed hold changes nothing: hosts.add refuses hosts-unread before any record is written, so no machine is replaced"},
+    // 主开发 01:20Z (1): the callers of the methods that call get inside (device / deviceBounded / homeDir / the transcript fetches) — audit adv/hosts-callers-2.md
+    {"file": "src/ctx-sync.js", "at": "const dm = await hosts.deviceBounded(hostId, connectMs);", "n": 1, "cls": "harmless", "why": "Cannot run while held: its only callers (task-groups-wiring scheduleCtxSync :165, the 60 s timer :175) take the host from hosts().get(), which throws, and skip. Nothing synced or written."},
+    {"file": "src/exit-proxy.js", "at": "const dm = await this.hosts.deviceBounded(h.id, 8000); // throws if offline", "n": 1, "cls": "harmless", "why": "Cannot run while held: _forward is reached only from use(), whose _judge (:530) returns hosts-unread first; the agent hears that refusal by name before any device call."},
+    {"file": "src/exit-proxy.js", "at": "const d = await this.hosts.deviceBounded(h.id, 8000);", "n": 1, "cls": "harmless", "why": "Per connection on a forward's own SOCKS listener, which exists only after _forward reached the device; no device connects while held (the hold starts at construction)."},
+    {"file": "src/exit-proxy.js", "at": "const dm = await this.hosts.deviceBounded(h.id, 8000);", "n": 1, "cls": "harmless", "why": "Cannot run while held: run() refuses at _judge (:694-695) with hosts-unread by name before the device is asked. Its catch rethrows a named offline/run_failed refusal."},
+    {"file": "src/exit-proxy.js", "at": "dm = await this.hosts.deviceBounded(h.id, 8000);", "n": 1, "cls": "harmless", "why": "Cannot run while held: the pull/push transfer refuses at _judge (:876-877) with hosts-unread by name first. Its catch rethrows offline/transfer_failed."},
+    {"file": "src/exit-proxy.js", "at": "try { const dm = await this.hosts.deviceBounded(hostId); await dm.unserveSocks(l.deviceSocksPort", "n": 1, "cls": "harmless", "why": "stop() returns at `if (!l)`: no live exit forward can exist while held (opening one needs the device link). If reached, the local forward is already closed first.", "bare": "empty catch: best-effort remote SOCKS stop after the local forward is gone; no record changes; never reached while held"},
+    {"file": "src/machine-mounts.js", "at": "const dm = await this.hosts.deviceBounded(hostId, 10000);", "n": 3, "cls": "refuses", "why": "(1) mountPush (remount refuses at :623 first): dial reads false, the catch falls to the public base; then detectOS->_run's get throws hosts-unread, the token is revoked, the route answers 503. · (2) Cannot run while held: _run's own hosts.get (:238) throws hosts-unread before this line; the error goes up to mountPush/mountPull and the route answers 503 by name. · (3) Cannot run while held: _ensureRclone's first step _remoteHome->_run throws hosts-unread at :238 (its own get at :300 would too) before this line."},
+    {"file": "src/machine-mounts.js", "at": "try { const dm = await this.hosts.deviceBounded(rec.hostId); await dm.reverseUnforward(rec.tunne", "n": 1, "cls": "harmless", "why": "Cannot run while held: _unmountPush is reached only from unmount() (remount, unpair go through it), which refuses a push mount by name while held (:650) before any revoke or drop.", "bare": "empty catch: best-effort device listener release after the revoke; never reached while held (:650 refuses first)"},
+    {"file": "src/machine-mounts.js", "at": "const dm = await this.hosts.deviceBounded(hostId, 8000);", "n": 1, "cls": "harmless", "why": "Cannot run while held: _mountPullInner's hosts.get (:525) throws hosts-unread first; no record is pushed; the route answers 503 with the words."},
+    {"file": "src/machine-mounts.js", "at": "const device = await this.hosts.deviceBounded(rec.hostId, 10000); // ssh: daemon over --stdio; d", "n": 1, "cls": "harmless", "why": "Cannot run while held: _up comes from mountPull (get :525), remount (:623 refuses), onMachineLinked (no link while held) or the 90 s sweep (skips !_online). If reached: rethrows, record kept."},
+    {"file": "src/machine-mounts.js", "at": "this.hosts.deviceBounded(hostId, 8000)", "n": 1, "cls": "harmless", "why": "Reached only on a machine link (a dial-in is refused while held; server.js :1482 findByDeviceId throws, caught) or restore's linked list (empty: _online() is false while held)."},
+    {"file": "src/machine-mounts.js", "at": "try { dm = await this.hosts.deviceBounded(rec.hostId); } catch { continue; }", "n": 1, "cls": "harmless", "why": "Not reached while held: the push loop skips the record when _online() is false (it is, while held). If reached, no verdict this sweep; the next 90 s sweep asks again.", "bare": "catch -> continue: no verdict, _pushDown untouched, nothing marked; the next sweep asks again"},
+    {"file": "src/port-forward.js", "at": "const dm = await this.hosts.deviceBounded(hostId);", "n": 2, "cls": "refuses", "why": "(1) Reached only through probes that run after a device step succeeded (_start / detect), so not while held. A failed probe keeps the last protocol (probeHostPort) or marks it pending. · (2) GET machine ports -> detect() rejects with the hold's words; server.js :1161 answers 400 with those words. The 30 s watch sweep asks no remote while held (hosts.list() is [])."},
+    {"file": "src/port-forward.js", "at": "await this.hosts.deviceBounded(rec.hostId, 8000); // remote: fail loud so the UI can say \"device", "n": 1, "cls": "waits", "why": "Boot restore/heal/link: record kept, rec.error = the words, relay proxy down; the 30 s heal sweep (5-min backoff) restarts it and republishes the kept name after the read. Routes: 400 + words."},
+    {"file": "src/port-forward.js", "at": "openUpstream = async () => { const dm = await this.hosts.deviceBounded(rec.hostId, 8000); return", "n": 1, "cls": "harmless", "why": "Per-connection upstream of a live forward; the listener exists only after :533 reached the device, which cannot happen while held."},
+    {"file": "src/remote-fs.js", "at": "try { return await this.hosts.deviceBounded(id, 5000); } catch { return null; }", "n": 1, "cls": "refuses", "why": "_dev() -> null sends each Files op to its ssh/sh rung, which calls _host(id) = hosts.get -> hosts-unread reaches the Files route by name. With dataPlaneOn off it is not even asked.", "bare": "catch -> null is safe: every null-taker falls to _run/_spawn/_host, whose hosts.get throws hosts-unread by name"},
+    {"file": "src/routes/sessions.js", "at": "const dm = await hosts.device(null);", "n": 1, "cls": "harmless", "why": "device(null) is the local daemon: isLocal(null) returns before the store, so the hold cannot reach it."},
+    {"file": "src/server/boot-restore.js", "at": "hosts.device(null).then(async (dm) => {", "n": 1, "cls": "harmless", "why": "device(null) is the local daemon (re-opening a local pipe session); the hold cannot reach it."},
+    {"file": "src/server/browser-access.js", "at": "try { dm = await hosts.deviceBounded(hostId, connectMs); }", "n": 1, "cls": "harmless", "why": "Cannot run while held: deviceOf() refuses at :73 with host_unavailable carrying the hold's words (never 'not paired') before the device is asked. Its catch rethrows named."},
+    {"file": "src/server/conversation-deliver.js", "at": "const dm = await (hosts.deviceBounded ? hosts.deviceBounded(hid, 6000) : hosts.device(hid));", "n": 2, "cls": "harmless", "why": "Dead branch with the real store: HostManager always has deviceBounded, so hosts.device(hid) is never taken; if it were, the same catch and stash apply."},
+    {"file": "src/server/desktop-access.js", "at": "try { dm = await hosts.deviceBounded(hostId, connectMs); }", "n": 1, "cls": "harmless", "why": "Cannot run while held: deviceOf's notHeld() (:126) refuses with host_unavailable + the hold's words first, never unsupported-host (the app keeper's 'removed' code)."},
+    {"file": "src/server/desktop-access.js", "at": "try { const dm = await hosts.deviceBounded(h.id, Math.min(connectMs, 3000)); return dm && dm.sta", "n": 1, "cls": "harmless", "why": "Not reached while held: handleIfConnected gets its host only from hosts.list() rows (empty while held), so no probe runs and no machine row is written.", "bare": "catch -> null: the picker row reads not connected for this probe only and is re-probed; never reached while held"},
+    {"file": "src/server/goal-sync.js", "at": "hosts.fetchSessionJsonl(session.host, session.claudeSessionId).catch(() => {});", "n": 1, "cls": "harmless", "why": "Throttled background cache refresh: the hold rejects at get before the cache is touched; this pass tail-reads the cached file; the next turn (after 30 s) asks again."},
+    {"file": "src/server/sysinfo-wiring.js", "at": "const dm = await hosts.deviceBounded(hostId, 6000);", "n": 2, "cls": "harmless", "why": "(1) Cannot run while held: remoteSysinfo's hosts.get (:90) throws hosts-unread first; the error propagates to the caller. · (2) Cannot run while held: remoteProcs' hosts.get (:121) throws hosts-unread first; the error propagates to the caller.", "bare": "catch -> ssh rung; never reached while held (:90 throws first) · catch -> ssh rung; never reached while held (:121 throws first)"},
+    {"file": "src/server/sysinfo-wiring.js", "at": "try { dm = await hosts.deviceBounded(hostId, 6000); } catch { }", "n": 1, "cls": "harmless", "why": "Cannot run while held: signalProc's hosts.get (:157) throws hosts-unread first; no signal is sent.", "bare": "empty catch -> dm null -> ssh rung; never reached while held (:157 throws first)"},
+    {"file": "src/server/task-groups-wiring.js", "at": "const home = await hosts().homeDir(h);", "n": 1, "cls": "harmless", "why": "Cannot run while held: syncRemoteGroupCtx gets its host only from hosts().get() (:165, :175), which throws and is skipped. homeDir itself never throws (null -> return)."},
+    {"file": "src/server/usage-pool-engine.js", "at": "const dm = await hosts.device(null);", "n": 1, "cls": "harmless", "why": "device(null) is the local daemon (pools are local-only); the hold cannot reach it.", "bare": "empty catch: local-daemon failures only; the hold cannot reach device(null)"},
+    {"file": "src/server/usage-pool-engine.js", "at": "const dm = await hosts.device(null); // device #0 — pools are local-only", "n": 1, "cls": "harmless", "why": "device(null) is the local daemon (pools are local-only); the hold cannot reach it."},
+    {"file": "src/spawn/dial.js", "at": "const dm = await hosts.device(h.id); // dial → deviceForDial", "n": 1, "cls": "harmless", "why": "Cannot run while held: the dial ladder's host comes from ws-create :1468/:1439 hosts.get, which ends the create with hosts-unread by name before the ladder runs."},
+    {"file": "src/transcript-service.js", "at": "const dm = await hosts.deviceBounded(r.host, 6000);", "n": 2, "cls": "refuses", "why": "(1) catch -> undefined: the read falls to the cached copy (read-only), where refreshRemote meets the hold too. Nothing written; logged once a minute; the next read asks again. · (2) picture() answers {unavailable: true, why: the words}: a transient answer, never {gone} or {unknown}; the page can ask again."},
+    {"file": "src/transcript-service.js", "at": "await hosts.fetchTranscript(r.host, r.backend || 'claude', r.sessionId); // descriptor store.rem", "n": 1, "cls": "harmless", "why": "Returns the hold's words, never throws: gapInfo passes the words to the route as hostFetchError; view/taskState drop the words and read the cache. The cache is untouched (get throws first)."},
+    {"file": "src/usage-routes.js", "at": "const dm = await hosts.device(hid);", "n": 2, "cls": "harmless", "why": "(1) Cannot run while held: the route's hosts.get (:977) answers 503 hosts-unread first, before the device leg. · (2) Cannot run while held: the route's hosts.get (:1031) answers 503 hosts-unread first, before the device leg."},
+    {"file": "src/writer-sweep.js", "at": "const dm = await hosts.deviceBounded(hostId, connectMs);", "n": 1, "cls": "harmless", "why": "Remote callers (spawn/ssh.js :302, spawn/dial.js :286) run only after ws-create's get refused the create; spawn/local.js passes null (local). If reached it rethrows hosts-unread."},
+    {"file": "src/ws-create.js", "at": "const dm = await hosts.device(null);", "n": 1, "cls": "harmless", "why": "device(null) is the local daemon (the R6 local pipe session); the hold cannot reach it."},
+    {"file": "src/ws-handler.js", "at": "{ const ks = activeSessions.get(data.sessionId); if (ks && ks._bridgePort) { try { dialBridge?.c", "n": 1, "cls": "harmless", "why": "Kill of a restored dial pty session (_dialReversePort from meta): the kill proceeds; only the best-effort release of the device-side back-tunnel port is skipped, as for an offline device.", "bare": ".catch(() => {}) safe: best-effort cleanup only; no record, link or session state is dropped by it"},
+    {"file": "src/ws-handler.js", "at": "hosts.deviceBounded(session.host, 8000).then(async (dm) => {", "n": 1, "cls": "waits", "why": "remoteStop does not run while held: notifyKillHeld says so by name and hosts.whenRead runs it once the machines read (in memory: a restart before then forgets it, said in the log).", "bare": "the enclosing try's empty catch would eat get's hosts-unread, but remoteStop never runs while held (whenRead defers it)"},
+    {"file": "src/ws-handler.js", "at": "try { hosts.device(null).then((dm) => dm.killPipeSession(session.keeperSid)).catch(() => { }); }", "n": 1, "cls": "harmless", "why": "device(null) is the local daemon (kill of a local pipe session); the hold cannot reach it.", "bare": ".catch(() => {}) + catch {}: local-daemon failures only; the hold cannot reach device(null)"},
+    {"file": "src/ws-handler.js", "at": "const p = await hosts.fetchAgentJsonl(String(subHost), agentId, { claudeSessionId: claudeId });", "n": 1, "cls": "refuses", "why": "catch keeps the words as subFetchErr; an empty log is sent with loadError 'Couldn't load this agent's log from the machine: <words>'; a local cached copy shows if present."},
+    {"file": "src/ws-handler.js", "at": "await hosts.fetchTranscript(session.host, session.backend || 'claude', rid); // the harness's st", "n": 1, "cls": "harmless", "why": "catch logs; the attach builds history from the cached copy + buffer; nothing written. Caveat: rebuildHistory then sets _historyLoaded, so this live session is not re-fetched until a restart."},
+    {"file": "src/ws-handler.js", "at": "await hosts.fetchTranscript(data.host, data.backend || 'claude', backendSessionId); // the harne", "n": 1, "cls": "harmless", "why": "View-only open: catch logs and the stale cache is read (stale beats none); read-only, nothing written; the next open asks again."},
   ];
-  const SITE = /\b(?:hosts|_hosts|getHosts)(?:\?\.)?(?:\(\))?\??\.(?:get|list|findByDeviceId)\??\.?\(/g, SELF = /\bthis\.(?:get|list|findByDeviceId)\(/g;
+  const SITE = /\b(?:hosts|_hosts|getHosts)(?:\?\.)?(?:\(\))?\??\.(?:get|list|findByDeviceId|device|deviceBounded|homeDir|fetchTranscript|fetchSessionJsonl|fetchCodexJsonl|fetchAgentJsonl)\??\.?\(/g, SELF = /\bthis\.(?:get|list|findByDeviceId)\(/g;
   const siteOf = (file, ln) => (ln.match(SITE) || []).length + (file === 'src/hosts.js' ? (ln.match(SELF) || []).length : 0);
   const SF = serverFiles();
   const c = census(SF, ROWS, { siteOf });
@@ -227,6 +270,8 @@ console.log('§1 every caller of a lookup (get / list / findByDeviceId) in the s
   // CONTROLS — a new caller, a row cut, a swallowing catch planted on a known line
   const P1 = new Map(SF); P1.set('src/server/a-new-reader.js', "const h = hosts.get(id);\n");
   ok(census(P1, ROWS, { siteOf }).unrowed.length === 1, 'CONTROL: a new caller with no row is RED');
+  const P1d = new Map(SF); P1d.set('src/server/a-new-device-reader.js', "const dm = await hosts.deviceBounded(id).catch(() => null);\n");
+  ok(census(P1d, ROWS, { siteOf }).unrowed.length === 1, 'CONTROL (主开发 01:20Z (1)): a new caller of a method that calls get inside (deviceBounded) with no row is RED');
   ok(census(SF, ROWS.filter((r) => r.file !== 'src/server/exit-routes.js'), { siteOf }).unrowed.length >= 5, 'CONTROL: the exit routes\' rows cut — their callers are unrowed (RED)');
   const plain = ROWS.find((r) => !r.bare && r.n === 1 && c.sites.some((x) => x.row === r && !x.bare));   // a row judged clean today
   const P3 = new Map(SF); P3.set(plain.file, SF.get(plain.file).replace(plain.at, plain.at + ' try { hosts.list(); } catch { }'));
@@ -267,7 +312,7 @@ console.log('§2 the page reads the hold — a list that arrives with the hold\'
 {
   const WB = fs.readFileSync(path.join(ROOT, 'src/lib/sidebar-workbench.js'), 'utf8');
   const slice = (src, head) => { const i = src.indexOf(head); if (i < 0) return null; const j = src.indexOf('\n    },\n', i); return j < 0 ? null : src.slice(i, j + 7); };   // through the method's comma
-  const HELDLINE = "        if (d.unread) { this._hostsHeld = true; this._hostsDataFailAt = Date.now(); return; }\n";
+  const HELDLINE = "        if (d.unread) { const first = !this._hostsHeld; this._hostsHeld = true; this._hostsDataFailAt = Date.now(); if (first) this._render(); return; }";
   ok(WB.split(HELDLINE).length === 2, 'control setup: the anchor of the control «a held list is no roster» is in sidebar-workbench.js');
   const sidebarOf = (src) => {
     const a = slice(src, '    _ensureHostsData() {'), b = slice(src, '    _wbValidHost(id, storageKey, memKey) {');
@@ -277,7 +322,7 @@ console.log('§2 the page reads the hold — a list that arrives with the hold\'
     const fetchStub = async () => ({ json: async () => reply });
     const ls = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)) };
     // eslint-disable-next-line no-new-func
-    const obj = new Function('fetch', 'localStorage', 'showToast', 'tr', `return {\n${a}\n${b}\n  _render() { }\n};`)(fetchStub, ls, (m) => toasts.push(m), (s) => s);
+    const obj = new Function('fetch', 'localStorage', 'showToast', 'tr', `return {\n${a}\n${b}\n  _render() { this._renders = (this._renders || 0) + 1; }\n};`)(fetchStub, ls, (m) => toasts.push(m), (s) => s);
     return { obj, store, toasts, answer: (r) => { reply = r; } };
   };
   const scene = async (src, rep) => {
@@ -287,16 +332,37 @@ console.log('§2 the page reads the hold — a list that arrives with the hold\'
     S.obj._ensureHostsData();
     for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
     const kept = S.obj._wbValidHost('h-0001', 'wbRecentHost', '_wbRecentHost');
-    return { cached: Array.isArray(S.obj._hostsData && S.obj._hostsData.hosts), held: !!S.obj._hostsHeld, kept, stored: S.store.get('wbRecentHost'), toasts: S.toasts.length };
+    return { cached: Array.isArray(S.obj._hostsData && S.obj._hostsData.hosts), held: !!S.obj._hostsHeld, kept, stored: S.store.get('wbRecentHost'), toasts: S.toasts.length, renders: S.obj._renders || 0 };
   };
   const HELD = { hosts: [], key: { exists: false }, unread: 'hosts.json in VibeSpace\'s data folder could not be read (EACCES)' };
   const GONE = { hosts: [], key: { exists: false } };
   const h = await scene(WB, HELD), g = await scene(WB, GONE);
-  const hx = await scene(WB.replace(HELDLINE, '        /* MUTANT: a held list cached as the roster */\n'), HELD);
+  const hx = await scene(WB.replace(HELDLINE, '        /* MUTANT: a held list cached as the roster */'), HELD);
   ok(h && !h.cached && h.held && h.kept === 'h-0001' && h.stored === 'h-0001' && h.toasts === 0,
     'a HELD machines list is not cached: the person\'s Recent machine pick is KEPT (in memory and stored), no «no longer exists» toast', h);
   ok(g && g.cached && g.kept === '' && g.stored === '' && g.toasts === 1, 'the plant: a list READ empty (the machine really removed) still heals the pick back to Local, once, said', g);
   ok(hx && hx.cached && hx.kept === '' && hx.stored === '' && hx.toasts === 1, 'CONTROL (the held check cut, in the source): the held list is cached — the pick is wiped and «no longer exists» is toasted', hx);
+  // 主开发 01:20Z (2): the Recent / History switcher SAYS the hold (it used to just vanish): the first held answer draws once (the
+  // row under Recent's head says it), a second draws nothing new, and the list read at last draws again (the row goes)
+  const settle = async () => { for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r)); };
+  const lift = async (src) => {
+    const S = sidebarOf(src); if (!S) return null;
+    S.answer(HELD); S.obj._ensureHostsData(); await settle();
+    const r1 = S.obj._renders || 0; S.obj._hostsDataFailAt = 0;
+    S.obj._ensureHostsData(); await settle();
+    const r2 = S.obj._renders || 0; S.obj._hostsDataFailAt = 0;
+    S.answer(GONE); S.obj._ensureHostsData(); await settle();
+    return { r1, r2, r3: S.obj._renders || 0, held: !!S.obj._hostsHeld };
+  };
+  const DRAW = ' if (first) this._render();', LIFTED = ' || wasHeld) this._render();';
+  ok(HELDLINE.includes(DRAW) && WB.split(LIFTED).length === 2, 'control setup: the two draws (the hold seen, the hold lifted) are found once');
+  const L = await lift(WB), LA = await lift(WB.replace(HELDLINE, HELDLINE.replace(DRAW, ''))), LB = await lift(WB.replace(LIFTED, ') this._render();'));
+  ok(L && L.r1 === 1 && L.r2 === 1 && L.r3 === 2 && !L.held, 'the switcher SAYS the hold: drawn once when the held list arrives (not again for a second one), drawn again when the list reads (the row goes)', L);
+  ok(LA && LA.r1 === 0 && LB && LB.r3 === LB.r2, 'CONTROLS: without the first draw the held page shows nothing until something else draws; without the lifted draw the row stays after the list reads (no pick to draw for) — each RED', { LA, LB });
+  const ROWLINE = "      if (this._hostsHeld && !(this._hostsData?.hosts || []).length) { const e = document.createElement('div'); e.className = 'wb-empty wb-hosts-held'; e.textContent = tr('Your paired machines cannot be read right now — nothing is lost; they come back here when they read.'); this.listEl.appendChild(e); }";
+  const HEADLINE = 'this.listEl.appendChild(this._buildRecentHead(recentHost, recent.length, zoneHead));';
+  ok(WB.split(ROWLINE).length === 2 && WB.indexOf(ROWLINE) > WB.indexOf(HEADLINE) && WB.indexOf(ROWLINE) - WB.indexOf(HEADLINE) < 400,
+    'the Recent zone draws ONE row saying the hold, right under its head, in the words the toolbar\'s machine menu says it (zh / ja rows)');
 }
 
 // ── §3 a conversation on a paired machine while the list is held: its owner claim stands («unknown», never «gone») ─────────────
@@ -353,7 +419,7 @@ console.log('§4 every page reader of the machines list is a row');
     { file: 'src/lib/sidebar-rail.js', at: "fetchJson('/api/port-forwards'), fetchJson('/api/hosts')", n: 1, cls: 'harmless', pin: "this._railSetBadge('mounts', off ? off + '⏻' : '');", why: 'a badge count of offline devices — no badge while held; nothing is changed' },
     { file: 'src/lib/sidebar-rail.js', at: "hostsList = (await fetchJson('/api/hosts'))?.hosts || [];", n: 1, cls: 'harmless', pin: "if (!c.isConnected) return;", why: 'the System panel\'s machine chooser lists this machine only until it is opened again' },
     { file: 'src/lib/sidebar-rail.js', at: "hosts = ((await api('/api/hosts')) || {}).hosts || [];", n: 1, cls: 'harmless', pin: "const machines = [{ id: '__local__', name: tr('This machine'), online: true },", why: 'the publish dialog offers This machine only; nothing on a machine it does not list is changed' },
-    { file: 'src/lib/sidebar-workbench.js', at: "fetch('/api/hosts').then(r => r.json()).then(d => {", n: 1, cls: 'waits', pin: 'if (d.unread) { this._hostsHeld = true; this._hostsDataFailAt = Date.now(); return; }', why: 'Recent / History machine picks: a held list is never the roster (kept, no «no longer exists»); asked again after the backoff (§2 drives it)' },
+    { file: 'src/lib/sidebar-workbench.js', at: "fetch('/api/hosts').then(r => r.json()).then(d => {", n: 1, cls: 'waits', pin: 'if (d.unread) { const first = !this._hostsHeld; this._hostsHeld = true; this._hostsDataFailAt = Date.now(); if (first) this._render(); return; }', why: 'Recent / History machine picks: a held list is never the roster (kept, no «no longer exists»); asked again after the backoff (§2 drives it)' },
     { file: 'src/lib/toolbar-fold.js', at: "const d = await fetchJson('/api/hosts'); hostsList = d?.hosts || []; held = (d && d.unread) || null;", n: 1, cls: 'refuses', pin: '...(held ? [{ caption: t(\'Your paired machines cannot be read right now', why: 'the terminal button opens its menu with the hold\'s words — never a local shell in place of the machine meant' },
   ];
   // its read N4: every quote — single, double, a template
@@ -413,6 +479,12 @@ console.log('§5 the readers that named an absence now say the hold');
   const mm = await mountScene(require(path.join(ROOT, 'src/machine-mounts.js')), 'real');
   const mmx = await mountScene(MJ.load('src/machine-mounts.js', MSRC.replace(UH, ''), 'mm-no-held'), 'mut');
   ok(mm.code === 'hosts-unread' && mm.kept === 1 && mm.revoked === 0, 'a push mount\'s removal while held is refused by name — its record and its token stay (its unmount runs ON the machine)', mm);
+  // 主开发 01:20Z (1), its audit: a push mount's way back to this instance while held — no tunnel, no public address: the hold by name
+  const NOPATH = "    if (this.hosts && typeof this.hosts.held === 'function' && this.hosts.held()) throw Object.assign(new Error(`reaching this instance from a machine: ${this.hosts.unreadWords()}`), { code: 'hosts-unread', status: 503 });\n";
+  ok(MSRC.split(NOPATH).length === 2, 'control setup: the dav path\'s held check is found once');
+  const davScene = async (Mod) => { const M = Object.create(Mod.MachineMounts.prototype); Object.assign(M, { hosts: heldHosts, localPort: () => 0, publicUrl: () => '' }); try { await M._davBase('h-0001'); return 'answered'; } catch (e) { return e.code || (/no path/.test(String(e.message)) ? 'no-path' : 'threw'); } };
+  const dv = await davScene(require(path.join(ROOT, 'src/machine-mounts.js'))), dvx = await davScene(MJ.load('src/machine-mounts.js', MSRC.replace(NOPATH, ''), 'mm-dav-no-held'));
+  ok(dv === 'hosts-unread' && dvx === 'no-path', 'a push mount with no way back while held is refused by the hold\'s name; CONTROL (the check cut, in a copy): «no path for the remote to reach this instance» — RED', { dv, dvx });
   ok(mmx.code === 'answered' && mmx.kept === 0 && mmx.revoked === 1, 'CONTROL (the held check cut, in a copy): the record is dropped and the token revoked while the machine\'s unmount was swallowed', mmx);
   // (d) machine-mounts' one-time legacy ingest on a HELD boot (H10, its read S1): no device is looked up — the keys are derived as the
   //     pairing minted them, the legacy file is migrated (renamed), nothing is lost for good
@@ -453,6 +525,56 @@ console.log('§6 wiring: the re-adoption waits at its caller; the installers say
   const i16 = SH.indexOf('if [ "$CHECK_RC" -eq 16 ]; then'), ine = SH.indexOf('if [ "$CHECK_RC" -ne 0 ]; then'), p16 = PS.indexOf('if ($checkRc -eq 16) {'), pne = PS.indexOf('if ($checkRc -ne 0) {');
   ok(i16 > 0 && ine > i16 && /run this same command again in a few minutes/.test(SH.slice(i16, ine)) && p16 > 0 && pne > p16 && /run this same command again in a few minutes/.test(PS.slice(p16, pne)),
     'both installers word the check\'s exit 16 (the hub holds its machines) as a wait BEFORE the generic «the device cannot dial» line', { i16, ine, p16, pne });
+}
+
+// ── §7 主开发 01:20Z (3): the page's and the agent's browser-providers routes give ONE answer for a paired machine while held ────
+console.log('§7 the browser-providers routes (the page\'s and the agent\'s) answer a held machines list the same: unknown, with the hold\'s words');
+{
+  const RB = fs.readFileSync(path.join(ROOT, 'src/routes/browser.js'), 'utf8');
+  const viewOf = (src) => { const i = src.indexOf('function hostKnownView(k, h) {'); if (i < 0) return null; const j = src.indexOf('\n}\n', i); return j < 0 ? null : new Function(`${src.slice(i, j + 2)}\nreturn hostKnownView;`)(); };   // eslint-disable-line no-new-func
+  const routeOf = (src, head) => { const i = src.indexOf(head); if (i < 0) return ''; const j = src.indexOf('\n});\n', i); return j < 0 ? '' : src.slice(i, j); };
+  const PAGE = "router.get('/api/browser/providers', (req, res) => {", AGENT = "router.get('/api/agent/browser/providers', async (req, res) => {";
+  const judge = (src) => {
+    const V = viewOf(src); const pr = routeOf(src, PAGE), ar = routeOf(src, AGENT);
+    const keeper = (held) => ({ machinesHeld: () => (held ? 'hosts.json in VibeSpace\'s data folder could not be read (EACCES)' : null), hostKnown: (id) => id === 'host-0001' });
+    return {
+      held: V ? V(keeper(true), 'host-0001') : null, known: V ? V(keeper(false), 'host-0001') : null, local: V ? V(keeper(true), null) : null,
+      both: pr.includes('...hostKnownView(k, h)') && ar.includes('...hostKnownView(k, h)'),
+      raw: [pr, ar].some((r) => r.includes('k.hostKnown(')),
+    };
+  };
+  const J = judge(RB);
+  ok(J.held && J.held.hostKnown === null && /could not be read/.test(J.held.held) && J.known && J.known.hostKnown === true && !('held' in J.known) && J.local && J.local.hostKnown === true,
+    'hostKnownView: a paired machine while held is «unknown» with the hold\'s words (never «not paired»); read, it is the keeper\'s answer; this machine is always known', J);
+  ok(J.both && !J.raw, 'both providers routes (the page\'s GET /api/browser/providers and the agent\'s) answer through hostKnownView — neither asks hostKnown raw', J);
+  const RAWLINE = 'res.json({ providers: rows, host: h, ...hostKnownView(k, h), forwards:';
+  ok(RB.split(RAWLINE).length === 2, 'control setup: the page route\'s answer is found once');
+  const JX = judge(RB.replace(RAWLINE, 'res.json({ providers: rows, host: h, hostKnown: h ? k.hostKnown(h) : true, forwards:'));   // stale-pins: kept (the control plants the page route's old answer in the source)
+  ok(!JX.both && JX.raw, 'CONTROL (the page route\'s answer as it was, in the source): it asks hostKnown raw — «not paired» for a held list — RED', JX);
+}
+
+// ── §8 主开发 01:20Z (5): the hold's 503 is worded ON THE PAGE by its code (zh / ja) — never the server's English ──────────────────
+console.log('§8 the page words `hosts-unread` itself: a usage refresh, the dial status (fetchJson), the exit dialog, a machine\'s removal');
+{
+  const U = fs.readFileSync(path.join(ROOT, 'src/lib/utils.js'), 'utf8'), EX = fs.readFileSync(path.join(ROOT, 'src/lib/exit-access-dialog.js'), 'utf8'), SM = fs.readFileSync(path.join(ROOT, 'src/lib/sidebar-mounts.js'), 'utf8');
+  const SENT = 'VibeSpace cannot read its paired machines right now — nothing was paired or changed. Try again in a few minutes (it reads them again by itself).';
+  const wordsOf = (src) => {
+    const i = src.indexOf('export function hostsHeldWords() {'), j = src.indexOf('\n}\n', src.indexOf('function refusalWords(body) {'));
+    if (i < 0 || j < 0) return null;
+    return new Function('t', `${src.slice(i, j + 2).replace('export function', 'function')}\nreturn refusalWords;`)((k) => `«${k}»`);   // eslint-disable-line no-new-func
+  };
+  const HELD = { error: 'removing a machine: hosts.json in VibeSpace\'s data folder could not be read (EACCES); …', code: 'hosts-unread' };
+  const RW = wordsOf(U), w = RW && RW(HELD), other = RW && RW({ error: 'no such machine', code: 'not-found' });
+  ok(w && w.error === `«${SENT}»` && w.said === HELD.error && w.code === 'hosts-unread' && other && other.error === 'no such machine',
+    'fetchJson\'s refusalWords words `hosts-unread` by its code (the server\'s words kept as `said`); another refusal passes as it came', { w, other });
+  const ROWU = "  if (body && typeof body === 'object' && body.code === 'hosts-unread') return { ...body, said: body.error, error: hostsHeldWords() };";
+  ok(U.split(ROWU).length === 2, 'control setup: the row is found once');
+  const wx = wordsOf(U.replace(ROWU, '')); const wxx = wx && wx(HELD);
+  ok(wxx && wxx.error === HELD.error, 'CONTROL (the row cut, in the source): the server\'s English reaches the page — RED', wxx);
+  ok(EX.includes("    case 'hosts-unread': return hostsHeldWords();") && EX.includes("body.textContent = codeWords(e.code, { error: e.message });") && EX.includes("import { createModalShell, showToast, hostsHeldWords } from './utils.js';"),
+    'the exit dialog (opened and saved, and the dial status through exitCodeWords) words `hosts-unread` by its code');
+  ok(SM.includes("why: e && e.code === 'hosts-unread' ? hostsHeldWords() : (e && e.message) || tr('server unreachable')"), 'a machine\'s removal words `hosts-unread` by its code');
+  for (const lang of ['zh', 'ja']) ok(fs.readFileSync(path.join(ROOT, `src/lib/i18n-${lang}.js`), 'utf8').includes(JSON.stringify(SENT) + ':'), `the sentence has its ${lang} row`);
 }
 
 for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 1, label: 'hosts-held-census ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));

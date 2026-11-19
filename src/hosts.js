@@ -16,6 +16,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const SR = require('./store-read.js'); // remainder of B-f276 (bl-jobs): a read that FAILED is no answer — held, never written over
+const READ_WAITS_MAX = 256;   // 主开发 01:20Z (4): the waits for a held hosts.json's read are BOUNDED (keyed ones replace: one a key)
 const READ_MS = 60_000;   // the B-f276 remainder's cure: a read again that does not answer in this long is let go (the next try reads afresh)
 const crypto = require('crypto');
 const SOCK = require('./sock-path.js');   // B-3767 unit 2: THE folder verdict (ensureSocketDir) for the ssh control folder
@@ -423,15 +424,20 @@ class HostManager {
     console.warn(`[hosts] hosts.json read again (held since ${new Date(was.at).toISOString()}, ${was.code}): ${a.state === 'data' ? `${this._state.hosts.length} machine(s)` : a.setAside ? `torn bytes, kept aside as ${a.setAside} — the machines list starts empty` : 'the file is GONE — the machines list starts empty'}`);
     try { this.onDiscoveryDirty?.(null); } catch { }
     try { this.onReadAgain?.(); } catch { }   // its read r1 (S1): every page's machines list is drawn again (exit-routes wires hosts-updated)
-    const waits = this._readWaits || []; this._readWaits = null;   // its read r1 (S5): what waited for the machines runs now
+    const waits = this._readWaits ? [...this._readWaits.values()] : []; this._readWaits = null;   // its read r1 (S5): what waited for the machines runs now
     for (const fn of waits) { try { fn(); } catch (e) { console.warn('[hosts] a wait for the machines failed:', e && e.message); } }
   }
   /** run `fn` over the machines as soon as they are KNOWN — now, or once a held hosts.json reads (its read r1, S5: a sweep over
    *  the held, empty list ran over nothing and never again) */
-  whenRead(fn, what = 'a sweep over the machines') {
+  //  主开发 01:20Z (4): the list of waits has a BOUND and a KEY — a wait given a `key` (a conversation's remote stop) REPLACES the
+  //  one waiting under it (asked again, ONE runs at the read), and past READ_WAITS_MAX the oldest is let go, said
+  whenRead(fn, what = 'a sweep over the machines', key = null) {
     if (!this._unread) return fn();
-    (this._readWaits = this._readWaits || []).push(fn);
-    console.warn(`[hosts] ${what} waits for hosts.json to read (${this._unread.code}) — it runs then; a restart before that forgets it`);   // its read r2 (X4): said
+    const W = this._readWaits = this._readWaits || new Map();
+    const k = key == null ? Symbol(what) : String(key), again = W.has(k);
+    W.delete(k); W.set(k, fn);
+    if (W.size > READ_WAITS_MAX) { const [k0] = W.keys(); W.delete(k0); console.warn(`[hosts] ${READ_WAITS_MAX} waits for hosts.json to read — the oldest is let go (it will not run at the read)`); }
+    if (!again) console.warn(`[hosts] ${what} waits for hosts.json to read (${this._unread.code}) — it runs then; a restart before that forgets it`);   // its read r2 (X4): said
   }
 
   /** B-48a4 (the exit door's cost; the coordinator's word (e), 2026-11-18): EVERY write of hosts.json goes through THE STORE
@@ -798,6 +804,9 @@ class HostManager {
    *  in hosts.json (a crash mid-way just re-runs it). */
   migrateDialTokenFile(file) {
     if (!fs.existsSync(file)) return false;
+    // 主开发 01:20Z (6): a HELD hosts.json — the migration WAITS for the read and its boot line says so (it was «failed»: its first
+    // lookup threw the hold); the legacy file stays where it is until then
+    if (this._unread) { this.whenRead(() => { try { this.migrateDialTokenFile(file); } catch (e) { console.warn('[hosts] dial-token migration failed:', e && e.message); } }, `the dial-token migration (${path.basename(file)} into hosts.json)`, 'migrate:dial-tokens'); return false; }
     const all = JSON.parse(fs.readFileSync(file, 'utf-8'));
     for (const [devId, hash] of Object.entries(all)) {
       if (hash && !this.dialTokenHash(devId)) this.setDialToken(devId, hash);

@@ -1896,7 +1896,11 @@ export function anchorFixedPopup(popup, anchor, { gap = 6 } = {}) {
 
 /** The auth layer's same-origin refusal (403 {error:'cross-site'}, lane owner-write-origin) said in words: VibeSpace's
  *  own page never meets it — a page that ever does shows the sentence, not the code (`code` keeps the code). */
+/** The hub HOLDS its paired machines (hosts.json could not be read — 503 `hosts-unread`): ONE sentence the page words by code
+ *  (主开发 01:20Z (5): the server's own words are English) — the exit dialog, a usage refresh, the dial status, a machine's removal. */
+export function hostsHeldWords() { return t('VibeSpace cannot read its paired machines right now — nothing was paired or changed. Try again in a few minutes (it reads them again by itself).'); }
 function refusalWords(body) {
+  if (body && typeof body === 'object' && body.code === 'hosts-unread') return { ...body, said: body.error, error: hostsHeldWords() };   // the server's words kept as `said`
   return body && typeof body === 'object' && body.error === 'cross-site' ? { ...body, code: 'cross-site', error: t('This action came from another site and was refused') } : body;
 }
 

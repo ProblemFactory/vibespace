@@ -378,6 +378,12 @@ function stampActive(f, profileId) {
   try { ctx.onLiveFactsChanged?.(f.sessionId, f.session); } catch { /* optional */ }
 }
 const ID_RE = /^bp-[0-9a-f]{8}$/;
+/** Is a paired machine KNOWN — ONE answer for the page's and the agent's providers routes (主开发 01:20Z (3)): while the machines
+ *  list is held, «unknown» with the hold's words (`hostKnown: null`, `held`), never «not paired». */
+function hostKnownView(k, h) {
+  const held = h && typeof k.machinesHeld === 'function' ? k.machinesHeld() : null;
+  return held ? { hostKnown: null, held } : { hostKnown: h ? k.hostKnown(h) : true };
+}
 function keeperOr503(res) {
   const k = ctx?.keeper || null;
   if (!k) res.status(503).json({ error: 'browser profiles are not available on this server', code: 'unavailable' });
@@ -647,7 +653,7 @@ router.get('/api/browser/providers', (req, res) => {
   const h = LOCAL.has(host) ? null : host;
   try {
     const rows = B.providerRows({ host: h, desktopConsent: typeof k.desktopConsent === 'function' ? k.desktopConsent() : undefined });
-    res.json({ providers: rows, host: h, hostKnown: h ? k.hostKnown(h) : true, forwards: typeof ctx.forwards === 'function' ? ctx.forwards() : [], road: typeof k.agentRoadFor === 'function' ? k.agentRoadFor(null, { host: h }).why : null });   // (lane chrome-157: the road a new profile here would take)
+    res.json({ providers: rows, host: h, ...hostKnownView(k, h), forwards: typeof ctx.forwards === 'function' ? ctx.forwards() : [], road: typeof k.agentRoadFor === 'function' ? k.agentRoadFor(null, { host: h }).why : null });   // (lane chrome-157: the road a new profile here would take)
   } catch (e) { fail(res, e); }
 });
 router.get('/api/browser/profiles/:id', (req, res) => {
@@ -2651,7 +2657,7 @@ router.get('/api/agent/browser/providers', async (req, res) => {
   try { builds = typeof k.buildsFor === 'function' ? B0.buildsView(await k.buildsFor(h)) : null; } catch { builds = null; }
   if (builds && builds.ok) builds = { ok: true, missing: builds.missing, cut: builds.cut, builds: builds.builds }; // no root path for an agent
   try { const c = typeof k.cliFacts === 'function' ? await k.cliFacts() : null; cli = c ? { table: c.table, mode: c.choice.mode, chosen: c.choice.version || null, inUse: c.inUse.version || null, inUsePinned: !!c.inUse.pinned, onPath: c.onPath.version || null, pinnedInstalled: c.pinned ? !!c.pinned.installed : null, drift: c.drift || null } : null; } catch { cli = null; }
-  res.json({ providers: B.providerRows({ host: h, desktopConsent: typeof k.desktopConsent === 'function' ? k.desktopConsent() : undefined }), host: h, ...(h && typeof k.machinesHeld === 'function' && k.machinesHeld() ? { hostKnown: null, held: k.machinesHeld() } : { hostKnown: h ? k.hostKnown(h) : true }), builds, cli });   // the B-f276 remainder (H25): held = unknown, never «not paired»
+  res.json({ providers: B.providerRows({ host: h, desktopConsent: typeof k.desktopConsent === 'function' ? k.desktopConsent() : undefined }), host: h, ...hostKnownView(k, h), builds, cli });   // the B-f276 remainder (H25): held = unknown, never «not paired»
 });
 router.post('/api/agent/browser/new', (req, res) => {
   const k = keeperOr503(res); if (!k) return;

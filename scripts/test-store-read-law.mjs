@@ -57,6 +57,53 @@ console.log('§1 hosts.json (src/hosts.js) — every paired machine and its dial
     'its read r1: while held the boot\'s cache sweep deletes NO machine\'s transcript cache (M1), a sweep that needs the machines waits and runs once they read (S5), the lift redraws every page\'s list (S1), an import skips the machines with its words — never a throw (S3)', r);
   const rx = await scene(RELEASE, 'hosts-release');
   ok(!rx.held && rx.listedWhileHeld === 0 && !(rx.refused && rx.refused.code === 'hosts-unread') && (asRoot || !rx.kept) && !rx.cacheKept, 'CONTROL (the release\'s load, in a copy): a failed read starts EMPTY — the cache sweep DELETES the machine\'s transcripts, nothing is refused, and the next save WRITES OVER hosts.json — every paired machine gone (under root the stand-in is a folder no save can replace)', rx);
+  // 主开发 01:20Z (4): the waits for the read are BOUNDED and KEYED — a conversation's remote stop asked twice waits ONCE (the latest),
+  // past the bound the oldest is let go (said); CONTROLS: a copy whose waits take no key, a copy with no bound
+  {
+    const BOUND = "    if (W.size > READ_WAITS_MAX) {", KEYED = "const k = key == null ? Symbol(what) : String(key), again = W.has(k);";
+    ok(HSRC.split(BOUND).length === 2 && HSRC.split(KEYED).length === 2, 'control setup: the waits\' bound and key are found once');
+    const waitsScene = async (Mod, name) => {
+      const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
+      const F = path.join(d, 'hosts.json'); plant(F, body);
+      const H = new Mod.HostManager({ dataDir: d });
+      const ran = [], warn = console.warn; let said = 0; console.warn = (m, ...a) => { if (/the oldest is let go/.test(String(m))) said++; };
+      try {
+        for (let i = 0; i < 300; i++) H.whenRead(() => ran.push('sweep-' + i), 'a sweep');
+        H.whenRead(() => ran.push('stop-a1'), 'the remote stop of conversation a', 'stop:a');
+        H.whenRead(() => ran.push('stop-a2'), 'the remote stop of conversation a', 'stop:a');
+      } finally { console.warn = warn; }
+      unplant(F, body);
+      if (H._unreadRetry) await H._unreadRetry();
+      return { ran: ran.length, stops: ran.filter((x) => x.startsWith('stop-')).join(), first: ran[0], said };
+    };
+    const w = await waitsScene({ HostManager: require(path.join(ROOT, 'src/hosts.js')).HostManager }, 'hosts-waits');
+    ok(w.ran === 256 && w.stops === 'stop-a2' && w.first === 'sweep-45' && w.said === 45, 'the waits for the read: a conversation\'s stop asked twice runs ONCE (the latest); 301 distinct waits keep the newest 256, the 45 let go said each', w);
+    const wk = await waitsScene({ HostManager: MJ.load('src/hosts.js', HSRC.replace(KEYED, 'const k = Symbol(what), again = false;   /* MUTANT: no key */'), 'waits-unkeyed').HostManager }, 'hosts-waits-unkeyed');
+    const wb = await waitsScene({ HostManager: MJ.load('src/hosts.js', HSRC.replace(BOUND, '    if (false) {   /* MUTANT: no bound */'), 'waits-unbound').HostManager }, 'hosts-waits-unbound');
+    ok(wk.stops === 'stop-a1,stop-a2' && wb.ran === 301 && wb.said === 0, 'CONTROLS: waits with no key run a conversation\'s stop twice; waits with no bound keep every one — each RED', { wk, wb });
+  }
+  // 主开发 01:20Z (6): the boot's legacy dial-token migration while held WAITS for the read (said so — never «failed»), the legacy file
+  // kept; at the read it runs; CONTROL: a copy with no held branch throws the hold at the boot (its line: «failed»)
+  {
+    const MIG = "    if (this._unread) { this.whenRead(() => { try { this.migrateDialTokenFile(file); }";
+    ok(HSRC.split(MIG).length === 2, 'control setup: the migration\'s held branch is found once');
+    const migScene = async (Mod, name) => {
+      const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
+      const F = path.join(d, 'hosts.json'), L = path.join(d, 'dial-tokens.json'); plant(F, body);
+      fs.writeFileSync(L, JSON.stringify({ 'dev-0001': 'a'.repeat(64) }));
+      const H = new Mod.HostManager({ dataDir: d });
+      const lines = [], warn = console.warn; console.warn = (...a) => lines.push(a.join(' '));
+      let r = null, threw = null; try { r = H.migrateDialTokenFile(L); } catch (e) { threw = e.code || String(e.message); } finally { console.warn = warn; }
+      const keptWhileHeld = fs.existsSync(L);
+      unplant(F, body);
+      if (H._unreadRetry) await H._unreadRetry();
+      return { r, threw, said: lines.some((l) => /the dial-token migration \(dial-tokens\.json into hosts\.json\) waits for hosts\.json to read/.test(l)), keptWhileHeld, hash: H.dialTokenHash ? H.dialTokenHash('dev-0001') : null };
+    };
+    const m = await migScene({ HostManager: require(path.join(ROOT, 'src/hosts.js')).HostManager }, 'hosts-mig');
+    ok(m.r === false && !m.threw && m.said && m.keptWhileHeld && m.hash === 'a'.repeat(64), 'the legacy dial-token migration while held waits for the read (its line says so), the legacy file kept; at the read the hash is in hosts.json', m);
+    const mx = await migScene({ HostManager: MJ.load('src/hosts.js', HSRC.replace(MIG, '    if (false) { this.whenRead(() => { try { this.migrateDialTokenFile(file); }'), 'mig-unheld').HostManager }, 'hosts-mig-unheld');
+    ok(mx.threw === 'hosts-unread' && !mx.said, 'CONTROL (no held branch, in a copy): the migration throws the hold at the boot — its line was «failed» — RED', mx);
+  }
   // torn bytes: kept aside (a copy), the list starts empty — as the release did, now through the law
   {
     const d = path.join(D, 'hosts-torn'); fs.mkdirSync(d, { recursive: true });

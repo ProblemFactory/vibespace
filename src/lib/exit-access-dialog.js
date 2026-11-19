@@ -19,7 +19,7 @@
 // store, the view arrives in the model's spelling (`{kind:'conversation', key}` / `{kind:'group', id}`), drawn and
 // saved through the picker model's `rowToPick` / the live-session resolution below.
 import { t } from './i18n.js';
-import { createModalShell, showToast } from './utils.js';
+import { createModalShell, showToast, hostsHeldWords } from './utils.js';
 import { principalPicker, rosterFromApp } from './principal-picker.js';
 import { agoText } from './user-todos-row.js';
 import { accessOfView, summaryOf, grantedOf, spawnFailureText } from '../exit-reach.js';
@@ -92,6 +92,7 @@ function codeWords(code, extra = {}) {
     case 'ask_unknown': return t('That request is gone');
     case 'host_needs_daemon': return t('Update the agent on this machine first');
     case 'except_unnamed': return t('This grant changed while the dialog was open — close it and open it again');   // lane held-except-doors
+    case 'hosts-unread': return hostsHeldWords();   // 主开发 01:20Z (5): the hub holds its machines — worded here, never the server's English
     default: return extra.error || t('Could not change who can use it');
   }
 }
@@ -117,7 +118,7 @@ export async function openExitAccessDialog(app, { hostId, name = '' } = {}) {
   body.textContent = t('Loading…');
   let data;
   try { data = await fetchView(hostId); }
-  catch (e) { body.textContent = e.message || t('Could not change who can use it'); showToast(codeWords(e.code, { error: e.message }), { type: 'error' }); return; }
+  catch (e) { body.textContent = codeWords(e.code, { error: e.message }); showToast(codeWords(e.code, { error: e.message }), { type: 'error' }); return; }
   if (!(await ready)) return null;   // r4: queued behind another machine's open form (its ask) — drawn when it opens; null: the person kept that one
   const machine = (data.machine && data.machine.name) || name || hostId;
   const hdr = dialog.querySelector('.dialog-header h3'); if (hdr) hdr.textContent = t('Who can use {machine}?', { machine });

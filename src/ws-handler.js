@@ -600,7 +600,7 @@ function registerWsHandler(wss, ctx) {
       } };
       if (session.host && hosts && typeof hosts.held === 'function' && hosts.held()) {
         notifyKillHeld(session.hostName || session.host);
-        if (typeof hosts.whenRead === 'function') hosts.whenRead(remoteStop, `the remote stop of conversation ${data.sessionId}`);
+        if (typeof hosts.whenRead === 'function') hosts.whenRead(remoteStop, `the remote stop of conversation ${data.sessionId}`, `stop:${data.sessionId}`);   // keyed: a Terminate pressed again waits ONCE
       } else remoteStop();
       // 'exited' silently broke terminate-from-sidebar.
       broadcastToSession(session, data.sessionId, { type: 'exited', sessionId: data.sessionId, reason: 'terminated' });

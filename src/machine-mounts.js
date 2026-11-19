@@ -286,6 +286,8 @@ class MachineMounts {
     }
     const pub = this.publicUrl() || publicUrlFallback;
     if (pub) return { base: String(pub).replace(/\/$/, ''), tunnelPort: null };
+    // the B-f276 remainder (its census's audit, 主开发 01:20Z (1)): a HELD machines list is why no tunnel came — said by name, never «no path»
+    if (this.hosts && typeof this.hosts.held === 'function' && this.hosts.held()) throw Object.assign(new Error(`reaching this instance from a machine: ${this.hosts.unreadWords()}`), { code: 'hosts-unread', status: 503 });
     throw MW.refusal('no_dav_path');
   }
 

@@ -149,13 +149,14 @@ export function installSidebarWorkbench(Sidebar) {
         if (!Array.isArray(d?.hosts)) throw new Error(d?.error || 'bad /api/hosts response');
         // the B-f276 remainder's cure (主开发 23:20Z): a list that arrives with the HOLD's mark (`unread`: hosts.json cannot be read) is
         // no roster — never cached (the person's machine picks are kept, no «no longer exists» toast); asked again after the backoff
-        if (d.unread) { this._hostsHeld = true; this._hostsDataFailAt = Date.now(); return; }
+        if (d.unread) { const first = !this._hostsHeld; this._hostsHeld = true; this._hostsDataFailAt = Date.now(); if (first) this._render(); return; }   // 主开发 01:20Z (2): drawn once, so the row below SAYS it
+        const wasHeld = !!this._hostsHeld;
         this._hostsHeld = false;
         this._hostsData = d;
         this._hostsDataFailAt = 0;
         // re-render when hosts are known OR a remote selection is pending —
         // with ZERO remaining hosts the heal above still needs a render pass
-        if (d.hosts.length || this._wbRecentHost || this._wbHistoryHost) this._render();
+        if (d.hosts.length || this._wbRecentHost || this._wbHistoryHost || wasHeld) this._render();   // a lifted hold takes its row away
       }).catch(() => { this._hostsDataFailAt = Date.now(); })
         .finally(() => { this._hostsDataLoading = false; });
     },
@@ -758,6 +759,9 @@ export function installSidebarWorkbench(Sidebar) {
       // while the zone shows Local.
       const recentHost = this._wbValidHost(this._wbRecentHost ?? (this._wbRecentHost = localStorage.getItem('wbRecentHost') || ''), 'wbRecentHost', '_wbRecentHost');
       this.listEl.appendChild(this._buildRecentHead(recentHost, recent.length, zoneHead));
+      // 主开发 01:20Z (2): a HELD machines list SAYS so — the Recent and History switchers read the one list (a held one is never
+      // cached), so their machine picks would just vanish: ONE row under Recent's head says why, until the list reads
+      if (this._hostsHeld && !(this._hostsData?.hosts || []).length) { const e = document.createElement('div'); e.className = 'wb-empty wb-hosts-held'; e.textContent = tr('Your paired machines cannot be read right now — nothing is lost; they come back here when they read.'); this.listEl.appendChild(e); }
       // With an active search query, sidebar search covers EVERY configured
       // remote host (not just the one selected in the switcher). Loads them on
       // demand and renders cross-host matches (the selected host is skipped —
