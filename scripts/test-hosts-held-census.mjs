@@ -607,6 +607,21 @@ console.log('§9 a REAL held HostManager behind a pull mount\'s shadow and the f
   const s9x = shadow(MJ.load('src/machine-mounts.js', anchored(MSRC9, HELDRET, '    if (false) return { id: best.m.id, hostId: best.m.hostId, machine, name: machine, mountpoint: best.mp, hostsHeld: true,', 'shadow-held-cut'), 'shadow-held-cut'));
   const b9x = bodyOf(anchored(MSRC9, BODYHELD, '', 'files-held-cut'))({ ...s9 });
   ok(!!s9x && s9x.offline === true && !s9x.hostsHeld && bodyOf(MSRC9)(s9x).code === 'machine_offline' && b9x.code !== 'hosts-unread', 'CONTROLS (each cut alone, in a copy): the shadow drops the mark — the online check says «offline» for a machine that may be connected; the route without its held branch never names the hold — each RED', { s9x, b9x });
+  // (a3) 主开发 19:21Z (the move's range check, wkazpjzcs): a PAIR-held record (two records on one folder — its holder answers) TOGETHER
+  // with the held machines list — two meanings kept apart: the pair-held record is passed over though its machine cannot be read, and the
+  // holder's row answers by the LIST's hold, under its own machine's name
+  const PAIRSKIP = "      if (!h || this._held.has(m.id) || (!writer && this._bare?.get(m.id) !== 'empty')) continue;";
+  ok(MSRC9.split(PAIRSKIP).length === 2, 'control setup: the shadow\'s pair-held skip is found once');
+  const pairShadow = (Mod) => {
+    const M = Object.create(Mod.MachineMounts.prototype);
+    Object.assign(M, { hosts: H, _state: { mounts: [{ id: 'mm-pb', dir: 'pull', hostId: 'h-0002', mountpoint: MP9 }, { id: 'mm-pa', dir: 'pull', hostId: 'h-0001', mountpoint: MP9 }] }, _live: new Map(), _held: new Map([['mm-pb', { kind: 'same', otherId: 'mm-pa', words: 'held' }]]), _bare: new Map() });
+    return M.shadowedBy(path.join(MP9, 'notes.md'), { writer: true });
+  };
+  const ps = pairShadow(require(path.join(ROOT, 'src/machine-mounts.js')));
+  const psx = pairShadow(MJ.load('src/machine-mounts.js', anchored(MSRC9, PAIRSKIP, PAIRSKIP.replace('this._held.has(m.id) || ', ''), 'shadow-pairskip-cut'), 'shadow-pairskip-cut'));
+  const pb = ps ? bodyOf(MSRC9)(ps) : {};
+  ok(!!ps && ps.id === 'mm-pa' && ps.hostsHeld === true && !ps.offline && pb.code === 'hosts-unread' && pb.error.startsWith('“h-0001”’s folder: '), 'a pair-held record beside the held machines list: the pair-held record is passed over (its holder answers) and the holder\'s row is refused by the LIST\'s hold, under its own machine — the two holds never mix', { ps, pb });
+  ok(!!psx && psx.id === 'mm-pb', 'CONTROL (the pair-held skip cut, in a copy): the pair-held record answers for its holder\'s folder (another machine named) — RED', psx);
   // (a2) the restack meets line 244: the PAIR check (two records on one folder) WAITS while the machines list is held — every record read
   // «gone» there and every pair hold was dropped; the current holds stand, judged once the list reads (keyed whenRead)
   const PAIRW = "    if (this.hosts && typeof this.hosts.held === 'function' && this.hosts.held()) {";
@@ -622,6 +637,34 @@ console.log('§9 a REAL held HostManager behind a pull mount\'s shadow and the f
   const pw = await pairs(require(path.join(ROOT, 'src/machine-mounts.js'))), pwx = await pairs(MJ.load('src/machine-mounts.js', anchored(MSRC9, PAIRW, '    if (false) {', 'pairs-held-cut'), 'pairs-held-cut'));
   ok(pw.kept && pw.waited === 'mounts:pairs', 'the pair check while the machines are held: the current pair hold STANDS and the check waits for the read (keyed) — never «gone» for a machine nobody could read', pw);
   ok(!pwx.kept && pwx.waited === '', 'CONTROL (the wait cut, in a copy): every record reads «gone» — the pair hold is DROPPED (two records on one folder may both mount) — RED', pwx);
+  // (a4) 主开发 19:21Z: WEBDAV's door (src/webdav.js — a PUT / a MKCOL into a machine's pull folder that is not mounted) over the same held
+  // list: the REAL handler, the REAL pull door (registerPullDoor) — 503 in the HOLD's words, nothing lands; CONTROL (the door's line cut,
+  // in a copy of src/webdav.js): the MKCOL lands in the bare folder
+  const WSRC9 = fs.readFileSync(path.join(ROOT, 'src/webdav.js'), 'utf8');
+  const DAVDOOR = "    if (req.method === 'PUT' || req.method === 'MKCOL') { const w = pullRefusal(target); if (w) return res.status(503).type('text/plain').send(w); }\n";
+  ok(WSRC9.split(DAVDOOR).length === 2, 'control setup: WebDAV\'s pull door is found once');
+  fs.mkdirSync(MP9, { recursive: true });   // the bare folder (the pull is not mounted)
+  const DR9 = fs.realpathSync(path.dirname(MP9)), DMP9 = path.join(DR9, 'box');   // the share's root as WebDAV's chroot sees it (a scratch dir under a link)
+  const MM9 = require(path.join(ROOT, 'src/machine-mounts.js'));
+  const davM = Object.create(MM9.MachineMounts.prototype);
+  Object.assign(davM, { hosts: H, _state: { mounts: [{ id: 'mm-p1', dir: 'pull', hostId: 'h-0001', mountpoint: DMP9 }] }, _live: new Map(), _held: new Map(), _bare: new Map() });
+  const dav = async (Mod, method, rel) => {
+    let h = null; Mod.registerWebdav({ use: (at, fn) => { if (at === '/dav') h = fn; } }, { tokens: { resolve: () => ({ root: DR9, mode: 'rw' }) } });
+    const res = { code: 0, body: '', set() { return this; }, type() { return this; }, status(c) { this.code = c; return this; }, send(b) { this.body = String(b); return this; }, json(b) { this.body = JSON.stringify(b); return this; }, end() { return this; } };
+    await h({ method, path: rel, headers: { authorization: 'Bearer vsmt_x' } }, res);
+    return { code: res.code, body: res.body };
+  };
+  MM9.registerPullDoor(() => davM);
+  let dv = null, dvx = null;
+  try {
+    const W0 = require(path.join(ROOT, 'src/webdav.js'));
+    dv = { put: await dav(W0, 'PUT', '/box/notes.md'), mk: await dav(W0, 'MKCOL', '/box/newdir') };
+    dv.landed = fs.existsSync(path.join(DMP9, 'notes.md')) || fs.existsSync(path.join(DMP9, 'newdir'));
+    dvx = await dav(MJ.load('src/webdav.js', anchored(WSRC9, DAVDOOR, '', 'dav-door-cut'), 'dav-door-cut'), 'MKCOL', '/box/newdir');
+    dvx.landed = fs.existsSync(path.join(DMP9, 'newdir'));
+  } finally { MM9.registerPullDoor(null); try { fs.rmSync(path.join(DMP9, 'newdir'), { recursive: true, force: true }); } catch { } }
+  ok(dv.put.code === 503 && dv.mk.code === 503 && dv.put.body.startsWith('“h-0001”’s folder: ') && /could not be read/.test(dv.put.body) && dv.mk.body === dv.put.body && !dv.landed, 'WebDAV\'s door while the machines are held: a PUT and a MKCOL into the pull folder are refused 503 in the HOLD\'s words (the files route\'s one spelling) — nothing lands', dv);
+  ok(dvx.code === 201 && dvx.landed, 'CONTROL (WebDAV\'s door line cut, in a copy): the MKCOL lands in the bare folder — stranded under the next mount — RED', dvx);
   // (b) GET /api/hosts/:id/public-key while held: the route's own handler over the REAL held HostManager
   const ESRC9 = fs.readFileSync(path.join(ROOT, 'src/server/exit-routes.js'), 'utf8');
   const PKCATCH = "  catch (e) { res.status(e && e.status === 503 ? 503 : 400).json({ error: e.message, ...(e && e.code === 'hosts-unread' ? { code: e.code } : {}) }); }";

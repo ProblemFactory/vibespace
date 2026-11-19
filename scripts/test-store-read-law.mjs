@@ -950,6 +950,38 @@ console.log('§5 job-notifications.json (src/jobs.js) — every job notice still
     const ab = await archBoot(J0, 'notifs-arch-boot'), abx = await archBoot(MJ.load('src/jobs.js', anchored(JSRC, PRE, '', 'arch-preload-cut'), 'arch-preload-cut'), 'notifs-arch-boot-mut');
     ok(ab.archHeld && ab.peek === '' && ab.waiting === 1, 'the archive unreadable at the boot (jobs.json whole): the FIRST conversation\'s notice of an archived job WAITS for the records (peek empty, kept)', ab);
     ok(abx.peek === 'done exit=0 ok (1m)', 'CONTROL (the archive load before the held check cut, in a copy): the judge never knows the archive is held — the first list\'s notice goes out with the cleared job\'s old words — RED', abx);
+    // 主开发 19:21Z (the move's range check, wkazpjzcs): peekNotifs JOINS TWO HOLDS — the release's (the Task Groups store held: an undecided
+    // line stays queued) and this chain's (what the held job records cannot judge waits) — driven AT ONCE over the real engine (who may read
+    // a job's notice is a privacy question): the records held AND the viewer held; A the file's (an owner's, judged at the boot while the
+    // records are held: it WAITS), B a subscriber's with no record (undecided while the groups are held), C a subscriber's too, but CLAIMED
+    // (a hand-over owns it: only its claim lets it past the held groups). The peek is the INTERSECTION (C); the drain of the peeked set
+    // takes exactly it (its claim gone) and keeps A and B. Three controls, each anchor first
+    const PEEK_REC = "    const q = (this.pendingNotifs.get(cid) || []).filter((n) => !this._waitsForRecords(n));\n";
+    const PEEK_VIEW = "    return v && v.held ? q.filter((n) => n && (n.ho || this.printableNow(cid, n.jobId, v, { sub: n.sub === true }))) : q;";
+    ok(JSRC.split(PEEK_REC).length === 2 && JSRC.split(PEEK_VIEW).length === 2, 'control setup: the peek\'s two filters are each found once');
+    const twoHolds = async (Mod, name) => {
+      const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
+      const JF = path.join(d, 'jobs.json'), jbody = '[]'; plant(JF, jbody);   // the job records HELD
+      fs.writeFileSync(path.join(d, 'job-notifications.json'), JSON.stringify({ 'conv-2h': [{ ts: 1, jobId: 'jb-2h00000a', text: 'done exit=0 (1m)' }] }));
+      const J = new Mod.JobManager({ dataDir: d, broadcast() { }, notifyUser() { return { ok: true }; }, resolveNotice() { }, log: () => { }, logsSweep: { bootDelayMs: 3600e3 }, viewerOf: () => ({ held: true }) });   // the Task Groups store HELD
+      J.init();
+      const q = J.pendingNotifs.get('conv-2h') || [];
+      const C = { ts: 3, jobId: 'jb-2h00000c', text: 'done exit=0 (3m)', sub: true };
+      q.push({ ts: 2, jobId: 'jb-2h00000b', text: 'failed exit=1 (2m)', sub: true }, C);
+      J.pendingNotifs.set('conv-2h', q);
+      J.claimNotifs('conv-2h', [C], 'ho-2h');   // the claimed one: a hand-over in flight owns it (its own claim door)
+      const tag = (l) => (l || []).map((n) => n.jobId.slice(-1)).join('');
+      const peek = J.peekNotifs('conv-2h'), drained = J.drainNotifs('conv-2h', new Set(peek));
+      const out = { held: !!J._unread.store, peek: tag(peek), drained: tag(drained), kept: tag(J.pendingNotifs.get('conv-2h')), claimLeft: drained.some((n) => n && n.ho) };
+      J._unreadStopped = true; J.shutdown(); unplant(JF, jbody); return out;
+    };
+    const th = await twoHolds(J0, 'notifs-two-holds');
+    const thR = await twoHolds(MJ.load('src/jobs.js', anchored(JSRC, PEEK_REC, "    const q = (this.pendingNotifs.get(cid) || []).slice();\n", 'peek-records-cut'), 'peek-records-cut'), 'notifs-two-holds-rec');
+    const thV = await twoHolds(MJ.load('src/jobs.js', anchored(JSRC, PEEK_VIEW, '    return q;', 'peek-viewer-cut'), 'peek-viewer-cut'), 'notifs-two-holds-view');
+    const thC = await twoHolds(MJ.load('src/jobs.js', anchored(JSRC, PEEK_VIEW, PEEK_VIEW.replace('(n.ho || this.printableNow(', '(this.printableNow('), 'peek-claim-cut'), 'peek-claim-cut'), 'notifs-two-holds-claim');
+    ok(th.held && th.peek === 'c' && th.drained === 'c' && th.kept === 'ab' && !th.claimLeft, 'the records AND the Task Groups held at once: the peek is the intersection of the two holds (only the claimed line), the drain of the peeked set takes exactly it — the file\'s waiting line and the undecided subscriber\'s stay queued', th);
+    ok(thR.peek === 'ac' && thV.peek === 'bc' && thC.peek === '', 'CONTROLS (each in a copy): the records filter cut — the file\'s line the held records cannot judge is peeked; the viewer\'s held branch cut — the undecided subscriber\'s line is peeked; the claim\'s pass cut — the claimed line waits with the undecided — each RED', { thR, thV, thC });
+    ok(thR.drained === 'c' && thR.kept === 'ab', 'and the DRAIN keeps its own guard: a peek that offers the file\'s waiting line (the records filter cut) still drains only the claimed one — the waiting line stays', thR);
     // 主开发 04:33Z (2c): the LADDER's retry judge over a subscriber's parked copy it cannot judge (the records held: «unknown») — the ladder
     // drops its copy on this answer and writes its file at once: the stash is ON DISK at once too, never only in memory until a tick
     const SAVE_R = "      this._saveNotifs();\n    }\n    return false;\n";
