@@ -67,7 +67,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { scratch, freePort } from './scratch.mjs';
+import { scratch, freePort, anchored } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -1274,6 +1274,9 @@ function producerCensus(src) {
     else if (arg === 'rescueLine') cls = /rescueReserve\(\)/.test(body) ? 'reserved' : 'UNDECIDED';
     else if (arg === 't' && /for \(const t of noticeTexts\)/.test(body.slice(m.index - 60, m.index))) cls = /return need <= INLINE_CAP - INLINE_TAIL_MARGIN - committed\(\); \}/.test(body) ? 'decided' : 'UNDECIDED';
     else if (arg === 'extraBlock') cls = /\(extraBlock \? B\(extraBlock\) \+ 2 : 0\)/.test(body) ? 'counted' : 'UNDECIDED';   // in committed() — the per-turn extra at the very top
+    // lane bl-windows (the Task Groups store held unread): a line that stands FIRST (an unshift) with its room HELD in tailHeld from the
+    // start — every fit test counts it — proven by the code's own two lines; a held line WITHOUT its room held is undecided
+    else if (arg === 'heldLine') cls = m[2] === 'unshift' && /\bif \(heldLine\) tailHeld \+= B\(heldLine\) \+ 2;/.test(body) && /\bif \(heldLine\) outParts\.unshift\(heldLine\);/.test(body) ? 'held first' : 'UNDECIDED';
     else if (decided.has(arg)) cls = 'decided';
     else if (arg === 'rep.text') cls = 'last';                                                // the group reports budget from what is left, commit only when whole
     else if (/^`<vibespace-reminder>\$\{body\}<\/vibespace-reminder>`$/.test(arg)) cls = 'alone';   // rides only when NOTHING else does
@@ -1287,8 +1290,11 @@ function producerCensus(src) {
   const ar = read('src/agent-routes.js');
   const c = producerCensus(ar);
   ok(c.sites.length >= 14 && c.undecided.length === 0 && c.sites.filter((x) => x.cls === 'head').length >= 5 && c.sites.filter((x) => x.cls === 'drain').length === 2
-    && ['intro', 'MANAGER_INTRO', 'u.text', 'nudgeBlock'].every((d) => c.decided.includes(d)) && c.sites.some((x) => x.cls === 'reserved') && c.sites.filter((x) => x.cls === 'decided').length >= 3 && c.sites.some((x) => x.cls === 'counted') && c.sites.some((x) => x.cls === 'last') && c.sites.some((x) => x.cls === 'alone'),
-    `CENSUS prompt-context: ${c.sites.length} append sites — every one is head (counted by parts.join), a drain, decided by fits()/the notice prefix rule before the drains, the counted per-turn extra, the reserved rescue line, the last section or the alone reminder; none undecided`, c.sites);
+    && ['intro', 'MANAGER_INTRO', 'u.text', 'nudgeBlock'].every((d) => c.decided.includes(d)) && c.sites.some((x) => x.cls === 'reserved') && c.sites.filter((x) => x.cls === 'decided').length >= 3 && c.sites.some((x) => x.cls === 'counted') && c.sites.some((x) => x.cls === 'last') && c.sites.some((x) => x.cls === 'alone') && c.sites.some((x) => x.cls === 'held first'),
+    `CENSUS prompt-context: ${c.sites.length} append sites — every one is head (counted by parts.join), a drain, decided by fits()/the notice prefix rule before the drains, the counted per-turn extra, the reserved rescue line, the last section, the alone reminder or the held line (first, its room held); none undecided`, c.sites);
+  // RED CONTROL (lane bl-windows): the held line WITHOUT its room held (the tailHeld sum taken out, through anchored) — the census names it UNDECIDED
+  const noRoom = producerCensus(anchored(ar, '    if (heldLine) tailHeld += B(heldLine) + 2;\n', '', 'the held line\'s room'));
+  ok(noRoom.undecided.length === 1 && noRoom.undecided[0].arg === 'heldLine', 'CONTROL a held line whose room is not held: the census names it UNDECIDED (the «held first» class is proven by the code, never by the name)', noRoom.undecided);
   // the consumers: each stamp / consume sits INSIDE its fit decision (source), on both routes
   const pc = ar.slice(ar.indexOf("app.get('/api/agent/prompt-context'"), ar.indexOf("app.get('/api/agent/stop-check'"));
   const tc = ar.slice(ar.indexOf("app.get('/api/agent/task-context'"), ar.indexOf("app.get('/api/agent/prompt-context'"));
@@ -1302,8 +1308,8 @@ function producerCensus(src) {
     'THE DOORS: task-context answers empty for a harness that ignores SessionStart output; prompt-context answers empty to a hook-originated call on a session the wrapper delivers to — before the master switch (which consumes-and-drops)');
   // the task-context route's own appends: the intro / manager (fitsHere), the preamble (first), the drains (fit-or-wait), the digest (fitDigest)
   const tcSites = [...tc.matchAll(/context = context \? context \+ '\\n\\n' \+ (\w+) : (\w+);/g)].map((m) => m[1]);
-  ok(JSON.stringify(tcSites) === JSON.stringify(['MANAGER_INTRO', 'missed', 'dig', 'pmText']) && /context = withPre\.length \? withPre\.join\('\\n\\n'\) : context;/.test(tc) && /drainNotifsUnderCap\(jm, deliver, caller\.conversationId, Buffer\.byteLength\(context \|\| '', 'utf-8'\) \+ carry\.againBytes, console\.log, carry\)/.test(tc) && /jm\.digestFor\(caller, Buffer\.byteLength\(context \|\| '', 'utf-8'\) \+ carry\.againBytes\)/.test(tc) && /drainStashUnderCap\(deliver, caller2\.conversationId, Buffer\.byteLength\(context \|\| '', 'utf-8'\) \+ carry\.againBytes, console\.log, carry\)/.test(tc),
-    `CENSUS task-context: the appends are the manager intro (fitsHere), the two drains (fit-or-wait) and the digest (fitDigest yields) — each against the context so far; the preamble is prepended first`, tcSites);
+  ok(JSON.stringify(tcSites) === JSON.stringify(['intro', 'MANAGER_INTRO', 'missed', 'dig', 'pmText']) && /let context = \(typeof tasks\.unreadHookLine === 'function' && tasks\.unreadHookLine\(\)\) \|\| '';/.test(tc) && /context = withPre\.length \? withPre\.join\('\\n\\n'\) : context;/.test(tc) && /drainNotifsUnderCap\(jm, deliver, caller\.conversationId, Buffer\.byteLength\(context \|\| '', 'utf-8'\) \+ carry\.againBytes, console\.log, carry\)/.test(tc) && /jm\.digestFor\(caller, Buffer\.byteLength\(context \|\| '', 'utf-8'\) \+ carry\.againBytes\)/.test(tc) && /drainStashUnderCap\(deliver, caller2\.conversationId, Buffer\.byteLength\(context \|\| '', 'utf-8'\) \+ carry\.againBytes, console\.log, carry\)/.test(tc),
+    `CENSUS task-context: the context begins with the held line (lane bl-windows: the Task Groups store held unread — so every fit test counts it); the appends are the tools intro and the manager intro (fitsHere), the two drains (fit-or-wait) and the digest (fitDigest yields) — each against the context so far; the preamble is prepended first`, tcSites);
 }
 {
   // ── 2. CONSUME-THEN-CUT FROM THE HEAD (the REAL routes) ──
