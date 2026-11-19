@@ -3267,7 +3267,7 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
       // persistence.js keeps ONE module-level router: a second setup() of the same module adds handlers that never answer — every
       // page run takes its OWN copy of the module (byte-identical: `same`), as the mutant copies are
       const freshPR = (tag = 'page-real') => require(MUT.write('src/routes/persistence.js', read('src/routes/persistence.js'), tag, { same: true }));
-      const pageRun = async (pmod, { file = null, shmod = null, wireNote = false } = {}) => {
+      const pageRun = async (pmod, { file = null, shmod = null, wireNote = false, holds = null } = {}) => {
         const express = require(path.join(REPO, 'node_modules/express')), http = require('node:http');
         const dir = tmpdir('vs-spend-5g-page-');
         if (file) fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify(file));
@@ -3277,6 +3277,7 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
         const srv = await new Promise((res) => { const sv = app.listen(0, '127.0.0.1', () => res(sv)); });
         const send = (method, body, headers = { 'sec-fetch-site': 'same-origin' }, at = '/api/settings') => new Promise((res) => { const rq = http.request({ host: '127.0.0.1', port: srv.address().port, path: at, method, headers: { 'content-type': 'application/json', ...headers } }, (r) => { r.resume(); r.on('end', () => res(r.statusCode)); }); rq.end(JSON.stringify(body)); });
         const disk = () => JSON.parse(fs.readFileSync(path.join(dir, 'settings.json'), 'utf8'));
+        if (holds) fs.writeFileSync(path.join(dir, 'setting-holds.json'), JSON.stringify({ v: 1, holds }));   // a store a previous run left
         const SHm = shmod || require(path.join(REPO, 'src/server/setting-holds.js'));
         const H = SHm.create({ dataDir: dir, readSettings: () => router.readSettings(), patchSettings: (q) => router.patchSettings(q), broadcast: (m) => notices.push(m), log: (m) => logs.push(String(m)), now: () => 1_900_000_000_000, writer: { dirty: () => { }, durable: async () => true }, setTimer: () => ({}), clearTimer: () => { } });
         late.H = H;
@@ -3346,6 +3347,37 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
         ok('§5g (3) setup: the return\'s raw liveness is in setting-holds once', SHSRC.split(LIVE).length === 2);
         const mr2 = mutantModule('src/server/setting-holds.js', [[LIVE, "    if (!AS.holdIsLive(h, cur)) { endChangedByHand(key, said(raw)"]]);
         if (!mr2.err) { const c = await lawRun({ shmod: mr2.mod, wireNote: false }); ok('§5g (3) CONTROL: with liveness read through valueIn (a blank reads 0 = the hold\'s value), the return writes «before» back — the cap is absent, the default 30 runs again in silence — RED', !(HOURK in c.d) && A.budgetLimits((k) => c.d[k]).perIdentityHour === 30, JSON.stringify(c.d)); } else ok('§5g (3) CONTROL: the setting-holds copy loads', false, mr2.err);
+      }
+      // OWED (主开发 08:03Z, round w82yatchx — on the next line of these files): red copies for the two OTHER raw-liveness sites, and a
+      // credentialed whole-file write that really CHANGES a cap is still refused
+      {
+        const noteRun = async (shmod = null) => {
+          const pg = await pageRun(freshPR('page-note'), { shmod, wireNote: true });
+          await pg.H.take({ key: HOURK, value: 0, untilRel: 3600e3, shown: 30 });
+          await pg.send('POST', { ...pg.disk(), [HOURK]: null });   // the person clears the field by hand
+          const listed = pg.H.list().length; await pg.close(); return { listed, logs: pg.logs };
+        };
+        const nr = await noteRun();
+        ok('§5g (3) OWED: the settings-write note reads the RAW value — the cleared field ends the hold at 0 at once, «changed by hand (none)»', nr.listed === 0 && nr.logs.some((l) => /changed by hand \(none\)/.test(l)), JSON.stringify(nr));
+        const SH3 = read('src/server/setting-holds.js'), NOTE = 'const raw = rawOf(next || {}, key); if (!AS.holdIsLive(holds[key], raw))';
+        ok('§5g (3) setup: the write note\'s raw liveness is in setting-holds once', SH3.split(NOTE).length === 2);
+        const mn = mutantModule('src/server/setting-holds.js', [[NOTE, 'const raw = valueIn(next || {}, key); if (!AS.holdIsLive(holds[key], raw))']]);
+        if (!mn.err) { const c = await noteRun(mn.mod); ok('§5g (3) CONTROL: the write note through valueIn reads the blank as 0 = the hold\'s value — the hold stays live under the person\'s «nothing» — RED', c.listed === 1, JSON.stringify(c)); } else ok('§5g (3) CONTROL: the note copy loads', false, mn.err);
+        const bootRun = async (shmod = null) => {
+          const pg = await pageRun(freshPR('page-boot'), { shmod, file: { [HOURK]: '' }, holds: { [HOURK]: { key: HOURK, value: 0, before: 30, untilAt: 1_900_000_000_000 + 3600e3, at: 1_900_000_000_000 - 60e3 } } });
+          await pg.H.start();
+          const listed = pg.H.list().length, d = pg.disk(); await pg.close(); return { listed, d };
+        };
+        const br = await bootRun();
+        ok('§5g (3) OWED: the BOOT reads the RAW value — a blank row under a hold at 0 (cleared while the hub was down) ends the hold; nothing is written over the blank', br.listed === 0 && br.d[HOURK] === '' && refusedSaid(br.d), JSON.stringify(br));
+        const START = '      const cur = rawOf(readSettings() || {}, k);';
+        ok('§5g (3) setup: the boot\'s raw liveness is in setting-holds once', SH3.split(START).length === 2);
+        const mb = mutantModule('src/server/setting-holds.js', [[START, '      const cur = presentOf(k);']]);
+        if (!mb.err) { const c = await bootRun(mb.mod); ok('§5g (3) CONTROL: the boot through presentOf reads the blank as 0 = the hold\'s value — the hold is re-armed and would write 30 back at its moment — RED', c.listed === 1, JSON.stringify(c)); } else ok('§5g (3) CONTROL: the boot copy loads', false, mb.err);
+        const c1 = await pageRun(freshPR('page-cred3'), { file: { [HOURK]: 30, 'ui.someRow': 1 } }); const s1 = await c1.send('POST', { [HOURK]: null, 'ui.someRow': 1 }, { authorization: 'Bearer agent-key' }); const d1 = c1.disk(); await c1.close();
+        const c2 = await pageRun(freshPR('page-cred4'), { file: { [HOURK]: '', 'ui.someRow': 1 } }); const s2 = await c2.send('POST', { [HOURK]: 50, 'ui.someRow': 1 }, { authorization: 'Bearer agent-key' }); const d2 = c2.disk(); await c2.close();
+        ok('§5g (3) OWED: a credentialed whole-file write that really CHANGES a cap is still the owner\'s only — a number cleared (30 → nothing) and a blank set to a number (nothing → 50) are each refused 403, the file untouched',
+          s1 === 403 && d1[HOURK] === 30 && s2 === 403 && d2[HOURK] === '', JSON.stringify({ s1, d1, s2, d2 }));
       }
       // CURE 2 (with it): the config import's blank rule (its RED copy), and a credentialed whole-file POST that re-sends an OLD stored null
       {

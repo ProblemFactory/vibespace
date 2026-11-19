@@ -391,7 +391,7 @@ export function inboxModel(app) {
     const body = { key, value: card.value, shown: showed, ...(Number.isFinite(num(a.untilRel)) ? { untilRel: num(a.untilRel) } : Number.isFinite(num(a.untilAt)) ? { untilAt: num(a.untilAt) } : {}) };
     const r = await fetchJson('/api/setting-holds/press', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (!(r && r.ok)) {
-      if (r && Number.isFinite(num(r.present))) noteSettingPresent(key, num(r.present));   // the card follows the hub's present value
+      if (r && !r.presentNone && Number.isFinite(num(r.present))) noteSettingPresent(key, num(r.present));   // the card follows the hub's present value — never a 0 the hub said for a row holding no number (B-0a33, owed 08:03Z: the card keeps «none»)
       if (r && r.code === 'moved') { showToast(t('It changed meanwhile — look again'), { duration: 9000 }); return false; }
       // worded BY ITS CODE in the page's language (the check's words-6: never the hub's English sentence inside zh / ja)
       const said = {

@@ -436,6 +436,9 @@ console.log('⑧ THE CARD\'S WORDS against what the press sends — the REAL row
   }
   // the press posts exactly what the card names: the action's value and its «until» AS IS (never re-derived from the ask's instant)
   const acts = read('src/lib/user-todos-actions.js');
+  // B-0a33 (owed 08:03Z): a same-value press over a row holding no number — the hub answers presentNone; the press hands the card NO said 0
+  // (the page kept it a moment as the row's present value: «Now: 0» where the row says «none»)
+  ok(/if \(r && !r\.presentNone && Number\.isFinite\(num\(r\.present\)\)\) noteSettingPresent\(key, num\(r\.present\)\);/.test(acts), 'a press the hub answers over a row holding no number (presentNone) never hands the card a said 0 — the card keeps «none»');
   ok(/const body = \{ key, value: card\.value, shown: showed, \.\.\.\(Number\.isFinite\(num\(a\.untilRel\)\) \? \{ untilRel: num\(a\.untilRel\) \} : Number\.isFinite\(num\(a\.untilAt\)\) \? \{ untilAt: num\(a\.untilAt\) \} : \{\}\) \};/.test(acts) && /const p = \{ value, time: at != null \? untilClock\(at, t, \{ now \}\) : '', span: rel != null \? spanWords\(rel, t\) : '' \};/.test(read('src/lib/user-todos-row.js')),
     'the press\'s body is the card\'s value and the action\'s untilRel / untilAt as is; the button\'s words fill from the SAME value and stretch');
   // words-10: each button key says its verb in zh and ja (a «Lower» that said 提高 was green before)
