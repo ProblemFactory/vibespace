@@ -2723,7 +2723,11 @@ class TaskGroupManager {
    *  `{ ids, inherited }` = its own group ids and their ancestors (grant-model `groupIds` / `inheritedGroupIds`). */
   grantGroupsOf(groups) {
     const ids = [...new Set((Array.isArray(groups) ? groups : []).map((g) => String(g && typeof g === 'object' ? g.id : g)).filter((x) => x && x !== 'undefined' && x !== 'null'))];
-    return { ids, inherited: this.ancestorsOf(ids) };
+    const out = { ids, inherited: this.ancestorsOf(ids) };
+    // B-55dc meets B-91a7 (the restack): a membership still being READ under-includes its ancestors too — the drawing door's
+    // non-enumerable `unread` rides on BOTH lists (a door that keeps on it sees it on the lineage), never dropped by the walk
+    if (groups && groups.unread) for (const a of [out.ids, out.inherited]) Object.defineProperty(a, 'unread', { value: true, enumerable: false });
+    return out;
   }
   /** The heal (the boot's load and importBundle): every group's parents re-read as the writer would take them — gone ids,
    *  built-in names, itself and duplicates dropped, the cap kept AFTER that, and an edge that would close a cycle dropped. The

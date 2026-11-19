@@ -553,6 +553,14 @@ console.log('⑥ lane lg-group-parents: THE LINEAGE — parents[] by the ONE wri
     const sb12 = read('src/lib/sidebar-tasks.js'), td12 = read('src/lib/task-detail.js');
     ok(!!e12 && e12.code === 'parents_stale' && same(e12.parents, [Q12.id]) && same(s12.get(C12.id).parents, [Q12.id]) && /\.\.\.\(e\.code === 'parents_stale' && Array\.isArray\(e\.parents\) \? \{ parents: e\.parents \} : \{\}\) \}\); \}/.test(read('src/server/task-groups-wiring.js')) && /if \(typeof onRefused === 'function'\) \{ try \{ onRefused\(data, res\.status\); \} catch \{ \} \}/.test(sb12) && /patch, \(d\) => \{ if \(d && d\.code === 'parents_stale' && Array\.isArray\(d\.parents\) && \(this\._tasks \|\| \[\]\)\.some\(\(x\) => x && x\.id === id\)\) this\._upsertTaskLocal\(\{ id, parents: d\.parents\.map\(String\) \}\); \}\);/.test(sb12) && /if \(!r\) render\(\); \} finally \{ parentsBusy = false;/.test(td12), 'cure 3 (a): a stale parents write is refused WITH the store\'s list (the 409 carries it); the page\'s copy adopts it and the tab redraws from it', { code: e12 && e12.code, parents: e12 && e12.parents });
   }
+  // the restack's carry (B-55dc meets B-91a7): the lineage of an UNREAD membership is unread — grantGroupsOf keeps the drawing door's flag
+  {
+    const s13 = freshStore();
+    const P13 = s13.create({ title: 'P13' }), C13 = s13.create({ title: 'C13', parents: [P13.id] });
+    const unreadIds = [C13.id]; Object.defineProperty(unreadIds, 'unread', { value: true, enumerable: false });
+    const g13 = s13.grantGroupsOf(unreadIds), plain13 = s13.grantGroupsOf([C13.id]);
+    ok(g13.ids.unread === true && g13.inherited.unread === true && same(g13.inherited, [P13.id]) && Object.keys(g13.inherited).length === 1 && !plain13.ids.unread && !plain13.inherited.unread && same(plain13.inherited, [P13.id]), 'the restack\'s carry: a membership still being read hands an UNREAD lineage (the flag on both lists, never enumerable); a read one hands none', { ids: g13.ids.unread, inherited: g13.inherited.unread });
+  }
   // CONTROL: the writer without its cycle check writes the cycle
   const MZ = mutantCopies('task-groups-parents', ROOT);
   try {
