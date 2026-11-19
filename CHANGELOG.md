@@ -28,7 +28,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The session list can show only the sessions a usage limit or an overloaded model stopped.
 - One button (Settings → Spending, and the session list's ⋯ menu) turns auto-continue on, or off, for every session.
 - A running resume of stopped sessions can be stopped from its window, or by turning auto-continue off for every session.
-- Before it runs, it says what the batch is likely to cost: the dollars, and each account's 5-hour share when it can be measured.
+- Before resuming every stopped session, VibeSpace says what the batch is likely to cost: the dollars, and each account's 5-hour share when it can be measured.
 - One button resumes every session a usage limit or an overloaded model stopped; it is your own press, so the limits on turns nobody typed do not count it.
 - An agent's own vault secret can now be deleted from its row in the Vault window; the conversation that kept it may store a new one.
 - A secret an agent stored itself can now be shared from its row's «Who may use it…» with another conversation or a Task Group, for the hosts you name.
@@ -41,7 +41,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A profile’s ⋯ › Check the exit… reads its proxy’s public address, country and time zone from a check address you set; nothing is kept until you press Keep.
 - The kept exit is handed to an engine plugin when the browser starts; you can also type it by hand.
 - The Agent browser's notice that a page keeps reloading now has Stop loading and Close this tab buttons.
-- A machine VibeSpace cannot reach now says why, with Copy the public key to add and Try again on the same line.
+- A machine VibeSpace cannot reach now says why, with Try again on the same line; when it refused VibeSpace's key, also Copy the public key to add.
 - A setting that takes effect after a reload now shows Reload now on its row once you change it.
 - The LLM plugin, turned on without a key, now shows Add the API key…, which opens its key card.
 - A built-in app that is not installed now has Install…, which searches the package sources for it.
@@ -63,11 +63,11 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Ending or archiving a conversation that still runs background jobs shows a notice naming them, with Stop these too.
 - Settings: Claude’s usage refresh row now covers Claude only; Antigravity’s automatic usage reads have their own row, Off if Claude’s was Off.
 - Re-check on an Antigravity account now reads its usage even while Claude usage refresh is Off (that press was refused before).
-- The usage popup draws an estimate between readings only where this hub’s own record shows it lands closer than the last reading, as “about Y%”.
+- The usage popup shows an estimate, “about Y%”, only where this hub’s record shows it lands closer; while learning it says “from N readings on this hub”.
 - Elsewhere the popup shows the reading and how many requests ran here since, and the account pool reads an estimate only where it has proven itself.
 - Codex and Antigravity usage estimates learn only from their own readings, never from Claude’s quota sizes.
 - Gmail: when the company switches its sign-in client, For you says how many accounts still use the old one, with Re-authorize for each in turn.
-- Settings, Task Groups, machines and requests now start with one or two plain sentences; commands, paths and mechanics sit under «Technical details».
+- Settings, Task Groups, machines and requests start with one or two plain sentences; commands, paths and mechanics fold under «Details» or «Technical details».
 - Windows, machines, jobs and the activity list now show names and plain words instead of internal ids, kinds and op codes.
 - Agents, browsers, designs, apps and plugins now say what happened in a sentence; commands, paths and probe results sit under «Technical details».
 - Storage, usage, settings, the vault, machines and channel accounts say it in a sentence too; commands, file paths and permission names are folded away.
@@ -100,6 +100,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Every remaining note that said where to change a setting now has the button that opens it, from the action trace to the background-job notifications.
 - A pooled account whose subscription stopped now opens Manage Agents from For you, where its Re-check or its setting is.
 - Once Spending allows automatic turns, the Credits chip's tip in the usage popup says they still run while the account bills paid overage.
+- While an account bills paid overage and automatic turns are not allowed, an «Allow automatic turns…» button sits beside its Credits chip.
 - For you items filed before this update keep their earlier words, in Chinese and Japanese too; the new words and buttons come when an item is filed again.
 
 ### Fixed
@@ -123,7 +124,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - VibeSpace's own memory no longer grows when a terminal or chat attached to a machine that dials in stops reading its output.
 - A storage whose listing keeps hanging while its provider answers stays disconnected, with Reconnect in For you, instead of reconnecting and hanging again.
 - The hub no longer pauses at every storage check on a machine running many processes.
-- A machine's conversation or terminal that writes faster than its window reads now waits instead of filling the machine's memory (after its agent updates).
+- When its window falls behind, a machine's terminal now pauses and a conversation's output waits in a file there, not in memory (after the agent updates).
 - Chinese or Japanese typed or pasted into a terminal on a machine that dials in no longer turns into replacement marks now and then (after its agent updates).
 - Diagnostics → Main loop held says «no frame of ours» with Node's own frames when a stack holds no VibeSpace code, never VibeSpace's own measuring.
 - An agent browser found stopped soon after it started no longer says it «idled out»: it says it was found gone before its idle timeout.
@@ -176,7 +177,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - In a chat, a code block's Copy and Wrap buttons sit in their own row above it and never cover its words; on a phone they are big enough for a finger.
 - A Thinking block has no Wrap button; its one Copy button sits beside its title.
 - On a computer, moving to a code block's buttons with the Tab key shows them.
-- A job's stop, or terminating or archiving a conversation, also ends what its commands started apart; a restart keeps it; a notice names what would not stop.
+- Stopping a job, or ending or archiving a conversation on this computer, also stops the programs it started in the background, and names any that won't stop.
+- A restart or an account switch leaves those programs running; conversations on a paired machine and plain terminals are not covered yet.
 - A message or note from an agent that holds a secret-looking value no longer loses the rest of its line: only that value is hidden, and the sender is told where.
 - A secret written as NAME=value in the middle of a sentence, after a word and a colon, is now hidden like the same secret on its own line.
 - If VibeSpace restarts while delivering held channel messages, their card now says some may already have reached the agent; you choose to resend or discard.
@@ -186,10 +188,11 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Stopping the server no longer leaves a stray «Waiting for the debugger to disconnect…» line in its log.
 - Dialogs for automation keys now fit a narrow phone screen.
 - A quota read for an account another machine holds is no longer labelled «own /usage panel»: the usage popup says it was read through that machine.
-- On a paired machine whose Claude settings can't be read, a subscription you picked now sets your own settings file aside for that start and says so, as here.
+- On a paired machine with unreadable Claude settings, your chosen subscription sets your settings file aside for that start and tells you, as on this computer.
 - A Gmail or Google Drive storage folder keeps working when the OAuth client under its preset name is replaced — it keeps the client it signed in with.
 - A channel search no longer says «No message matches.» above the results its accounts found.
-- A message between agents keeps more words beside a hidden secret: a word right after a short value or a Chinese word, and the colon after a member's name.
+- A message between agents keeps more words beside a hidden value: after a session label, a word right after a short value or a Chinese word stays readable.
+- The colon after a member's name stays readable too; after a sign-in word or an access code, the words that follow are still hidden.
 - When the record of your browser profiles cannot be read, they are kept and read again; they used to be lost at the next start, with their logins.
 - In the For you window, a link an agent ended with «…» at a line's end now opens, as in the tray; a long desktop-app notification says where it was cut.
 - In Properties, a running conversation's Agent steps now match its chat: Codex shows its plan (always empty before), Claude its current steps.
@@ -209,9 +212,10 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - New Session: a channel account whose Except list leaves out a Task Group you picked is no longer shown as granted.
 - An open New Session form now updates what the conversation may use when a grant, a Task Group or a channel account changes elsewhere.
 - A resumed conversation that ran a turn, then ended with no page open, no longer comes back as ended while the server was down, with its old account.
-- A browser profile’s proxy now applies: http, https or socks5, on every start, and site names go through it too. It was saved but never used.
+- A browser profile's proxy (http, https or socks5) now applies on every start for browsers on this machine, site names too; it was saved but never used.
+- A browser profile on another machine cannot take a proxy yet.
 - In a profile with a proxy, a page’s calls (WebRTC) also go only through the proxy; a call that needs UDP does not connect.
-- A locked vault stops a proxied browser from starting; it never falls back to a direct connection.
+- When a browser's proxy needs a sign-in kept in the vault and the vault is locked, the browser does not start; it never falls back to a direct connection.
 - A cloud browser’s profile does not take a proxy: that browser runs at its vendor, where the proxy cannot reach it.
 - With many past conversations, VibeSpace no longer freezes for about a second every few seconds while a window lists them.
 - When the session list cannot be rebuilt, the sidebar now says it is out of date and offers Retry, instead of quietly showing an old list.
