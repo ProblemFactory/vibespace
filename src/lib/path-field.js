@@ -38,7 +38,7 @@ import { folderChips } from '../day-one.js';
 import { loadHomeFolders, paintFolderChips } from './folder-chips.js';
 // B-08d5 (the coordinator's ruling 2026-11-19 22:19Z): the field's ask-and-answer logic is a PURE MODEL — this file turns what happens into
 // its events and performs its effects; no verdict is decided here
-import { init as pfInit, step as pfStep, view as pfView, keyOf, textOf as keyText, homeReader, replyKind, askedOf } from '../path-field-model.js';
+import { init as pfInit, step as pfStep, view as pfView, keyOf, textOf as keyText, homeReader, askedOf } from '../path-field-model.js';
 import { rankCandidates, groupOn, mergeListing, missingVerdict, isExcludedPath, toTilde, fromTilde, parentOf, baseName, HOST_ROW, nameChips } from '../path-candidates.js';
 
 const DEBOUNCE_MS = 110;
@@ -360,8 +360,8 @@ export function pathField(input, opts = {}) {
     if (m.missing) probe.add(m.missing.path);
     const fuzzy = m.mode === 'fuzzy' ? text : '';
     const sent = [...probe].slice(0, 40);   // the probes SENT (only these may be marked asked)
-    const qs = `?path=${encodeURIComponent(text)}&bases=${encodeURIComponent(JSON.stringify(inp.bases.map((b) => b.path)))}&probe=${encodeURIComponent(JSON.stringify(sent))}&q=${encodeURIComponent(fuzzy)}&kind=${kind}`;
-    return { url: (h ? `/api/hosts/${encodeURIComponent(h)}/dir-complete` : '/api/dir-complete') + qs, probe: sent, own: m.missing ? m.missing.path : '' };
+    const qs = `?path=${encodeURIComponent(text)}&bases=${encodeURIComponent(JSON.stringify(inp.bases.map((b) => b.path)))}&probe=${encodeURIComponent(JSON.stringify(sent))}${m.missing ? `&own=${encodeURIComponent(m.missing.path)}` : ''}&q=${encodeURIComponent(fuzzy)}&kind=${kind}`;   // B-0f3d: the text's OWN path, decided inside the listing's race
+    return { url: (h ? `/api/hosts/${encodeURIComponent(h)}/dir-complete` : '/api/dir-complete') + qs, probe: sent };
   }
   function mergeReply(W, h, d, probe) {
     if (d && d.listing) {
@@ -381,7 +381,7 @@ export function pathField(input, opts = {}) {
     const text = keyText(key), h = hk(), W = world(h);
     const go = () => {
       if (st.destroyed) return;
-      const { url, probe, own } = sliceUrl(text, h);
+      const { url, probe } = sliceUrl(text, h);
       st.ctl?.abort?.(); st.ctl = new AbortController();
       const my = ++st.seq;
       wrap.dataset.pending = '1';
@@ -389,7 +389,7 @@ export function pathField(input, opts = {}) {
         if (my !== st.seq || st.destroyed) return;
         delete wrap.dataset.pending;
         mergeReply(W, h, d, probe);
-        fire({ type: 'reply', key, kind: replyKind(d, own), err: (d && d.error) || '' });   // the model's: the text's own probe late ⇒ partial
+        fire({ type: 'reply', key, kind: d && d.listing && !d.partial ? 'listing' : d && d.partial ? 'partial' : 'failed', err: (d && d.error) || '' });
       });
     };
     return !h && !LOCAL.home ? localHome().then(go) : go();
@@ -555,7 +555,7 @@ export function pathField(input, opts = {}) {
     const L = W.L; if (L.dirs[p]) return false;
     if (W.asked && W.asked.has(p)) return true;   // asked, and not answered as a folder
     const up = L.dirs[parentOf(p)];
-    return !!(up && Array.isArray(up.kids) && !up.kids.includes(baseName(p)));
+    return !!(up && Array.isArray(up.kids) && !up.more && !up.kids.includes(baseName(p)));   // (B-0f3d: a listing cut at its 400 entries decides no absence)
   };
   function paintChips(force = false) {
     if (!chipsEl || st.destroyed) return;

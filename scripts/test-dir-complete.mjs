@@ -150,49 +150,59 @@ console.log('\n── ③ the 500 ms budget (a stalled walk) ──');
 console.log('\n── ③b a hung PROBE (B-0f3d) ──');
 {
   const DS = require('../src/server/dir-slice.js');
-  // the probe op HANGS for the paths in `hung` (a stale mount's stat), FAILS at once while `failing`, else answers: the slice's own
-  // budget, not the probe, decides
+  // the probe op HANGS for a path in `hung` until the section releases it (a stale mount's stat — no clock decides it), waits on `slow`
+  // while that gate is shut, FAILS at once while `failing`; the slice's own budget, not the probe, decides
+  let release = null; const held = new Promise((r) => { release = r; });
+  let slowOpen = null; let slow = null;
   const hung = new Set(), seen = []; let failing = false;
   const mk = (D) => D.create({ home: HOME, repoDir: REPO, call: async (op, p) => {
     if (op === 'dirSlice' && p.probes && p.probes.length) {
       seen.push(...p.probes);
-      if (failing) throw new Error('the worker was ended');
-      if (p.probes.some((x) => hung.has(x))) await sleep(300);   // twice the leg's budget
+      if (failing && !p.probes.every((x) => x === path.join(HOME, 'work', 'payments'))) throw new Error('the worker was ended');
+      if (p.probes.some((x) => hung.has(x))) await held;
+      if (slow && p.probes.some((x) => slow.has(x))) await new Promise((r) => { slowOpen = r; });
     }
     return (await runOp(op, p)).result;
   } });
-  const IR = path.join(HOME, 'work', 'investor-relations');
+  const IR = path.join(HOME, 'work', 'investor-relations'), PAY = path.join(HOME, 'work', 'payments');
   hung.add(IR);
   const ds = mk(DS);
-  const ASK = { text: '~/work/payments', bases: ['~'], probe: ['~/work/investor-relations', '~/work/payments'], budgetMs: 150 };
+  const ASK = { text: '~/work/payments', own: '~/work/payments', bases: ['~'], probe: ['~/work/investor-relations', '~/work/payments'], budgetMs: 150 };
+  const seenOwn = () => seen.includes(PAY);
   const a = await ds.slice(ASK);
-  ok('③b a probe hangs (a stale mount): the reply still LISTS what was typed — not partial, ~/work listed — and names its late probes in the field\'s own words (the text\'s own probe batched with it included)', a.partial === false && !!a.listing.dirs['~/work'] && Array.isArray(a.probesLate) && a.probesLate.includes('~/work/investor-relations') && a.probesLate.includes('~/work/payments'), { partial: a.partial, probesLate: a.probesLate });
+  ok('③b a probe hangs (a stale mount): the reply still LISTS what was typed (not partial), asks the text\'s OWN path inside its race (never named late), and names only the auxiliary probe late', a.partial === false && !!a.listing.dirs['~/work'] && seenOwn() && JSON.stringify(a.probesLate) === JSON.stringify(['~/work/investor-relations']), { partial: a.partial, probesLate: a.probesLate });
   seen.length = 0;
-  const b = await ds.slice({ ...ASK, text: '~/work/pay', probe: ['~/work/investor-relations', '~/work/investor-relations/测试'] });
+  const b = await ds.slice({ ...ASK, text: '~/work/pay', own: '', probe: ['~/work/investor-relations', '~/work/investor-relations/测试'] });
   ok('③b …the next ask skips the late probe AND a path under it (a name row under the hung folder) — no worker held per keystroke — and names both late', !seen.some((x) => x.startsWith(IR)) && b.partial === false && ['~/work/investor-relations', '~/work/investor-relations/测试'].every((x) => (b.probesLate || []).includes(x)), { seen: [...seen], probesLate: b.probesLate });
-  // slow, not hung: a probe that answers after the budget is UNMARKED the moment it answers — the next ask probes it again
-  hung.clear(); hung.add(path.join(HOME, 'work', 'weekly-admin'));
-  const ds2 = mk(DS);
-  const c1 = await ds2.slice({ ...ASK, probe: ['~/work/weekly-admin'] });
-  await sleep(350);   // the slow probe answers (300 ms) after the budget
-  hung.clear(); seen.length = 0;
-  const c2 = await ds2.slice({ ...ASK, probe: ['~/work/weekly-admin'] });
-  ok('③b a SLOW probe (late, then answered): unmarked when it answers — the next ask probes it again and gets it in time', (c1.probesLate || []).includes('~/work/weekly-admin') && seen.includes(path.join(HOME, 'work', 'weekly-admin')) && !c2.probesLate, { c1: c1.probesLate, seen: [...seen], c2: c2.probesLate });
-  // a probe call that FAILS at once (the worker ended under it): late — the listing still answers
-  failing = true;
-  const d1 = await mk(DS).slice({ ...ASK, probe: ['~/work/contracts'] });
-  failing = false;
-  ok('③b a probe call that FAILS at once: the listing still answers (not partial) and the probe is named late — never the reply\'s end', d1.partial === false && !!d1.listing.dirs['~/work'] && (d1.probesLate || []).includes('~/work/contracts'), { partial: d1.partial, probesLate: d1.probesLate, error: d1.error });
-  // RED CONTROL: the old shape — the probes inside the listing's race — a hung probe throws the finished listing away
-  hung.clear(); hung.add(IR);
+  // the text's own path in the auxiliary batch (the shape before): named late with the hung probe — the field could not decide the text
   const M = mutantCopies('dir-complete-probe-old', REPO);
-  const OLD = M.load('src/server/dir-slice.js', anchored(read('src/server/dir-slice.js'), '      return { me, listed, idx };\n    })();', "      const pr = probes.length ? (await call('dirSlice', { dirs: [], probes })).probes : [];\n      return { me, listed, idx, pr };\n    })();", 'the old shape: the probes in the listing\'s race'), 'oldprobe');
+  const OWNIN = M.load('src/server/dir-slice.js', anchored(anchored(read('src/server/dir-slice.js'), '.filter((a) => a !== ownAbs)', '', 'the own path back in the batch'), "const ownPr = ownAbs ? (((await call('dirSlice', { dirs: [], probes: [ownAbs] })) || {}).probes || []) : [];", 'const ownPr = [];', 'no own probe in the race'), 'ownin');
+  const a2 = await mk(OWNIN).slice(ASK);
+  ok('③b CONTROL: the text\'s own path batched with the hung probe (no own probe in the race) — named LATE with it (the field could not decide its text)', (a2.probesLate || []).includes('~/work/payments'), { probesLate: a2.probesLate });
+  // slow, not hung: a probe that answers after the budget is UNMARKED the moment it answers — the next ask probes it again
+  slow = new Set([path.join(HOME, 'work', 'weekly-admin')]);
+  const ds2 = mk(DS);
+  const c1 = await ds2.slice({ ...ASK, own: '', probe: ['~/work/weekly-admin'] });
+  slowOpen && slowOpen(); slow = null;
+  await sleep(100);   // the slow probe's answer lands (no budget waits on it)
+  seen.length = 0;
+  const c2 = await ds2.slice({ ...ASK, own: '', probe: ['~/work/weekly-admin'] });
+  ok('③b a SLOW probe (late, then answered): unmarked when it answers — the next ask probes it again and gets it in time', (c1.probesLate || []).includes('~/work/weekly-admin') && seen.includes(path.join(HOME, 'work', 'weekly-admin')) && !c2.probesLate, { c1: c1.probesLate, seen: [...seen], c2: c2.probesLate });
+  // a probe call that FAILS at once (the worker ended under it): late for this reply only — the listing answers, nothing is marked
+  failing = true;
+  const ds3 = mk(DS);
+  const d1 = await ds3.slice({ ...ASK, probe: ['~/work/contracts', '~/work/payments'] });
+  failing = false; seen.length = 0;
+  const d2 = await ds3.slice({ ...ASK, probe: ['~/work/contracts', '~/work/payments'] });
+  ok('③b a probe call that FAILS at once: the listing answers (not partial), the probe is late for that reply only — the next ask asks it again', d1.partial === false && !!d1.listing.dirs['~/work'] && (d1.probesLate || []).includes('~/work/contracts') && seen.includes(path.join(HOME, 'work', 'contracts')) && !d2.probesLate, { d1: { partial: d1.partial, probesLate: d1.probesLate }, seen: [...seen], d2: d2.probesLate });
+  // RED CONTROL: the old shape — the probes inside the listing's race — a hung probe throws the finished listing away
+  const OLD = M.load('src/server/dir-slice.js', anchored(read('src/server/dir-slice.js'), '      return { me, listed, idx, ownPr };\n    })();', "      const pr = probes.length ? (await call('dirSlice', { dirs: [], probes })).probes : [];\n      return { me, listed, idx, ownPr, pr };\n    })();", 'the old shape: the probes in the listing\'s race'), 'oldprobe');
   const c = await mk(OLD).slice(ASK);
   ok('③b CONTROL: the old shape (the probes inside the listing\'s race) — the hung probe makes the reply partial with NOTHING listed', c.partial === true && !c.listing.dirs['~/work'], { partial: c.partial, dirs: Object.keys(c.listing.dirs) });
-  hung.clear();
-  // THE FIELD'S SIDE: probes the machine answered late are never marked asked (knownAbsent would call a healthy folder 新建) — the ONE
-  // helper askedOf (PURE src/path-field-model.js) at BOTH sites (the field's ask, the 由名字 chips' probe)
-  const PFM = require('../src/path-field-model.js');
+  release(); hung.clear();
+  // THE FIELD'S SIDE: only probes SENT and answered in time are marked asked (askedOf, PURE src/path-field-model.js, at BOTH sites), and a
+  // listing cut at its 400 entries (`more`) decides no absence — knownAbsent would call a healthy folder 新建
+  const PFM = require('../src/path-field-model.js'), PCm = require('../src/path-candidates.js');
   const PF = read('src/lib/path-field.js');
   const mergeOf = (src) => { const i = src.indexOf('  function mergeReply(W, h, d, probe) {'), j = src.indexOf('\n  }\n', i); if (i < 0 || j < i) throw new Error('mergeReply moved'); return new Function('mergeListing', 't', 'askedOf', `${src.slice(i, j + 4)}\nreturn mergeReply;`)(() => {}, (x) => x, PFM.askedOf); };
   const askedAfter = (src, d) => { const W = { L: {} }; mergeOf(src)(W, null, d, ['~/x', '~/y']); return [...((W.asked && W.asked.keys()) || [])].join(); };
@@ -201,6 +211,11 @@ console.log('\n── ③b a hung PROBE (B-0f3d) ──');
   const sites = (src) => ({ sets: (src.match(/W\.asked\.set\(/g) || []).length, through: (src.match(/for \(const p of askedOf\(/g) || []).length });
   const sNow = sites(PF), sBad = sites(anchored(PF, 'for (const p of askedOf(want, d)) W.asked.set(', 'for (const p of want) W.asked.set(', 'the chips\' probe marking by itself'));
   ok(`③b every site that marks a probe asked goes through askedOf (${sNow.through} of ${sNow.sets}) — CONTROL: the 由名字 chips' probe marking by itself is seen`, sNow.sets >= 2 && sNow.through === sNow.sets && sBad.through === sBad.sets - 1, { sNow, sBad });
+  const absentOf = (src) => { const i = src.indexOf('  const knownAbsent = (W, p) => {'), j = src.indexOf('\n  };\n', i); if (i < 0 || j < i) throw new Error('knownAbsent moved'); return new Function('parentOf', 'baseName', `${src.slice(i, j + 5)}\nreturn knownAbsent;`)(PCm.parentOf, PCm.baseName); };
+  const W5 = (more) => ({ L: { dirs: { '~/g': { kids: ['a'], more } } } });
+  ok('③b knownAbsent: a parent listed IN FULL decides absence (~/g/b absent); a listing cut at its 400 entries decides none', absentOf(PF)(W5(false), '~/g/b') === true && absentOf(PF)(W5(true), '~/g/b') === false);
+  ok('③b CONTROL: knownAbsent trusting a cut listing calls ~/g/b absent (a 新建 chip for a folder past the 400)', absentOf(anchored(PF, ' && !up.more && ', ' && ', 'knownAbsent trusting a cut listing'))(W5(true), '~/g/b') === true);
+  ok('③b the field sends its text\'s OWN path (`own`) beside the probes — decided inside the listing\'s race, whatever the 40 probes hold', /&own=\$\{encodeURIComponent\(m\.missing\.path\)\}/.test(PF) && /own: String\(req\.query\.own \|\| ''\)/.test(read('src/routes/files.js')));
 }
 
 console.log('\n── ④ the listing cache per folder, mtime invalidation ──');

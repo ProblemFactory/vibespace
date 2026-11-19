@@ -278,7 +278,7 @@ router.get('/api/dir-complete', async (req, res) => {
   }
   if (!R && sliced) {
     try {
-      const ans = await dirSliceOf(req).slice({ text: String(req.query.path || ''), bases: jsonList(req.query.bases), probe: jsonList(req.query.probe), q: String(req.query.q || ''), kind: String(req.query.kind || 'folder'), budgetMs: 450 });
+      const ans = await dirSliceOf(req).slice({ text: String(req.query.path || ''), bases: jsonList(req.query.bases), probe: jsonList(req.query.probe), own: String(req.query.own || ''), q: String(req.query.q || ''), kind: String(req.query.kind || 'folder'), budgetMs: 450 });
       return res.json({ suggestions: require('../path-candidates.js').legacySuggestions(ans.listing, String(req.query.path || '')), ...ans });
     } catch (e) { return res.json({ suggestions: [], error: String((e && e.message) || e).slice(0, 120) }); }
   }
