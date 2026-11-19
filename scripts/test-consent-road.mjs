@@ -1280,7 +1280,8 @@ console.log('⑬ a company preset never rides an address its app does not list; 
 // opened after its dialog closed. Two worlds: a silent company Google preset from another computer (the owner's: a loopback
 // that needs the dialog's paste box, its other road the fixed address) and a listed one (the route — it comes back by itself;
 // its other road a loopback). A failing seed prints its whole sequence. RED: the two r4 guards removed (mutant bundles), and
-// the leg itself run on e4cc4acee (the report).
+// the leg itself run on e4cc4acee (the report). B-54a9: the fast row walks the law at 50 seeds a world with ONE seeded control
+// (the close); the HEAVY twin test-consent-road-law (CR_LAW=full) walks it at 100 and runs all four.
 console.log('\n⑭ THE LAW (r4): the live Connect dialog over the real engine — seeded interleavings of press / other road / Cancel / close / reopen');
 // «FROM A SWEEP» IS A FRAME'S FUNCTION NAME, NEVER ITS LINE (B-c35f — a checkout path holding the word, e.g. a worktree named
 // wt-groups-sweep-on-change, matched EVERY frame: the driver never found its race and the control was red there). Real V8
@@ -1604,8 +1605,12 @@ const stackHasFrame = (stack, re) => frameNames(stack).some((n) => re.test(n));
     // a FRESH hub every 100 seeds: one hub over thousands of seeds keeps every ended sign-in it ever had (each start scans them —
     // the sweep went quadratic); a new world of the same shape keeps a seed's cost flat
     const fresh = async (wo) => { try { await wo.w.close(); } catch { /* gone */ } wo.w = await world(`ilv-${worlds.indexOf(wo)}-${++wo.gen}`, { serverSetting: NO_RELAY, fixedPath: 'gmail/cb', drive: wo.drive, larkPreset: { appId: 'cli_road0001', appSecret: 'dummy-road-secret-01', brand: 'lark' } }); P.base = wo.w.origin; RT.setup({ getEngine: () => wo.w.e }); };
-    // CR_SEEDS = seeds per world (default 100 — the fast tier's time), CR_SEED0 = an offset (another reader's own seeds)
-    const SEEDS = Number(process.env.CR_SEEDS || 100), SEED0 = Number(process.env.CR_SEED0 || 0);
+    // CR_SEEDS = seeds per world, CR_SEED0 = an offset (another reader's own seeds). B-54a9 (lane bl-tests-a, 2026-11-19): the FAST
+    // row walks the law at 50 seeds a world (its time under the fast bound); the HEAVY twin test-consent-road-law (CR_LAW=full)
+    // walks it at 100 and runs its four seeded RED controls — each searches until the driver finds its race (159 / 3 / 59 / 46 seeds
+    // at ac70cf7ee, up to three times the law's seeds): 8 of the fast row's 19 s
+    const LAW_FULL = process.env.CR_LAW === 'full';
+    const SEEDS = Number(process.env.CR_SEEDS || (LAW_FULL ? 100 : 50)), SEED0 = Number(process.env.CR_SEED0 || 0);
     // the routes module holds ONE engine (RT.setup) — a world in use is the one the routes ask
     const useWorld = (wo) => { P.base = wo.w.origin; RT.setup({ getEngine: () => wo.w.e }); };
     try {
@@ -1619,11 +1624,16 @@ const stackHasFrame = (stack, re) => frameNames(stack).some((n) => re.test(n));
       const first = await runOne(worlds[0]);
       ok(first.log.length > 0, '⑭ the driver drives the dialog (a seed acts, its requests and answers are released)', first.log.join(' '));
       // every control's bundle builds WHILE the law walks (esbuild works in its own process) — the fast tier's time
-      const muts = MUTS();
-      const mutBuilt = muts.map(([, , edits], i) => bundle(`mut${i}`, (x) => edits.reduce((acc, [from, to]) => acc.replace(from, to), x)));
+      // B-54a9: every control's anchors are checked in BOTH modes (a moved anchor is red before the push); the fast row builds and runs
+      // ONE seeded control — «a close is not an act», found within a few seeds — the twin (CR_LAW=full) runs all four
+      // the fast row's control is named, never placed: a control added or moved in MUTS() cannot swap it (exactly one must carry the name)
+      const muts = MUTS(), FAST_CONTROL = 'a close is not an act', fastAt = muts.map(([what], i) => (what.startsWith(FAST_CONTROL) ? i : -1)).filter((i) => i >= 0);
+      ok(fastAt.length === 1, `⑭ the fast row's control «${FAST_CONTROL}» is exactly one of the controls`, fastAt);
+      const runsControl = (i) => LAW_FULL || i === fastAt[0];
+      const mutBuilt = muts.map(([, , edits], i) => (runsControl(i) ? bundle(`mut${i}`, (x) => edits.reduce((acc, [from, to]) => acc.replace(from, to), x)) : null));
       const RB_FROM = "      if (live) busy(false);   // r4 (the tidy): every exit of a press ends its busy for every control it took (the other road too)\n";
       const rbBuilt = bundle('mut-rb', (x) => x.replace(RB_FROM, ''));
-      mutBuilt.forEach((pr) => pr.catch(() => {})); rbBuilt.catch(() => {});
+      mutBuilt.forEach((pr) => pr && pr.catch(() => {})); rbBuilt.catch(() => {});
       const bad = [], tLaw = Date.now();
       for (const wo of worlds) { useWorld(wo); for (let s = 1; s <= SEEDS; s++) { if (s % 100 === 0) await fresh(wo); const seed = SEED0 + s * 7919 + worlds.indexOf(wo); const r = await runSeed(wo.w, wo.kinds, seed); if (!r.ok) bad.push({ world: wo.name, seed, why: r.why, seq: r.log.join(' ') }); } }
       // a red run names every shape it found (how many seeds each), then the first seed of each with its whole sequence
@@ -1651,10 +1661,12 @@ const stackHasFrame = (stack, re) => frameNames(stack).some((n) => re.test(n));
         ['a Cancel whose own request failed leaves the presses busy (no busy(false) on its failure)', { ...FULL, tabs: 0, fail: 0.6, failSeeds: 1 }, [
           ["if (mine === gen && !closed) { busy(false); watchShown(prov); } throw e; }", "if (mine === gen && !closed) { watchShown(prov); } throw e; }"]]],
       ]; }
+      if (!LAW_FULL) console.log('      (⑭\'s other three seeded RED controls run in the heavy twin test-consent-road-law — CR_LAW=full, the law at 100 seeds a world)');
       for (const [i, [what, ccfg, edits]] of (process.env.CR_LAW_ONLY ? [] : muts.entries())) {   // CR_LAW_ONLY=1: a seed sweep, the law alone
         const t0 = Date.now();
         const src = fs.readFileSync(path.join(REPO, 'src/lib/mounts-dialog.js'), 'utf8');
         const changed = edits.every(([from]) => src.split(from).length === 2);
+        if (!runsControl(i)) { ok(changed, `⑭ RED CONTROL\'s anchors: ${what} — every edit's anchor is in mounts-dialog.js once (its seeded search runs in the heavy twin)`); continue; }
         const Dm = await mutBuilt[i];
         const keep = D; D = Dm;
         const found = [];
