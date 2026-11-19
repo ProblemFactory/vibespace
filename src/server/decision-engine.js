@@ -95,15 +95,47 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
   // counter's landing — the write in flight, at most one paced write (the writer alternates acts and paced stores;
   // 2K + 1 writes for K acts owed), then its own: ms on a local disk; on the measured slow mount about 1.5 s with the
   // writer idle and up to about 5 s behind the channels index's write (renames there took 1.3–2.6 s) — forgets that one
-  // call, and nothing rebuilds the counter after a kill (backlog B-a85f: rebuild a day's counter from the journal at
-  // boot); the release's synchronous write had a window of the same kind. The journal stays a named row.
+  // call — B-a85f: THE BOOT REBUILDS IT (below: each use raised to at least today's journal sum; the journal line is appended
+  // in the call's own run, so it holds every billed call). The journal stays a named row.
   const W = () => writer || require('../store-writer.js').storeWriter();
+  /** the journal's rows from a BOUNDED tail (≤ 2 MB: the journal itself is cut at 5 000 lines / 30 days) — the month's readout and
+   *  the boot's rebuild of the day's counter (B-a85f) */
+  function journalTail() {
+    try {
+      const fd = fs.openSync(F.journal, 'r');
+      try {
+        const size = fs.fstatSync(fd).size, n = Math.min(size, 2 * 1024 * 1024), buf = Buffer.alloc(n);
+        fs.readSync(fd, buf, 0, n, size - n);
+        return buf.toString('utf8').split('\n').slice(n < size ? 1 : 0).map((l) => { try { return JSON.parse(l); } catch { return null; } });
+      } finally { fs.closeSync(fd); }
+    } catch { return []; }
+  }
+  let rebuiltAtBoot = false;   // B-a85f: the boot raised the day's counter from the journal — written once saveUsage exists
   // A LOAD READS WHAT THIS PROCESS STILL OWES: an engine made again in the same process (a suite's restart) lands the
   // write the last one handed the writer BEFORE it reads the files — a hub's boot owes nothing (no wait)
   { const owed = [F.memo, F.usage].filter((f) => W().pending(f)); if (owed.length) W().flushSync(owed); }
   let plugin = null;                                   // {peek} — the plugin row's own record (enabled + config)
   const memo = new Map((readJson(F.memo, {}).entries || []).filter((e) => Array.isArray(e) && e.length === 2).slice(-M.MEMO_MAX));
   let usage = readJson(F.usage, null) || { day: null, byUse: {} };
+  // B-a85f — THE DAY'S COUNTER IS REBUILT FROM THE JOURNAL AT BOOT (the money crash window of B-0248 U1): a kill between a billed
+  // call's journal line (appended synchronously in its own run) and its counter's landing left the counter short — the next
+  // calls would spend past the daily budget by that much. Each use is raised to AT LEAST the journal's sum for today, never
+  // lowered (a counter ahead of its journal — a trimmed journal — keeps its own); a raise is written (an act) and said once.
+  {
+    const day0 = M.dayOf(now(), tzOffset(now()));
+    const j = M.daySpendByUse(journalTail(), day0, tzOffset);
+    if (usage.day !== day0) usage = { day: day0, byUse: {}, rate: usage.rate || {} };
+    const raised = [];
+    for (const [use, js] of Object.entries(j.byUse)) {
+      const x = usage.byUse[use] || (usage.byUse[use] = { calls: 0, inputTokens: 0, outputTokens: 0, usd: 0 });
+      if (js.usd > (Number(x.usd) || 0) + 1e-9 || js.calls > (Number(x.calls) || 0)) {
+        raised.push(`${use} ${(Number(x.usd) || 0).toFixed(4)} → ${js.usd.toFixed(4)} USD`);
+        x.usd = Math.max(Number(x.usd) || 0, js.usd); x.calls = Math.max(Number(x.calls) || 0, js.calls);
+        x.inputTokens = Math.max(Number(x.inputTokens) || 0, js.inputTokens); x.outputTokens = Math.max(Number(x.outputTokens) || 0, js.outputTokens);
+      }
+    }
+    if (raised.length) { log.warn?.(`[decision] the day's counter was behind its journal (a stop before its write landed) — raised to the journal's sum: ${raised.join('; ')}`); rebuiltAtBoot = true; }
+  }
   let backoff = { step: 0, until: 0 };
   const open = new Map();                              // reservation id → {use, usd}: estimates of the calls in flight
   let openSeq = 0;
@@ -359,15 +391,7 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
   let monthMemo = { at: -Infinity, v: null };
   function monthSoFar() {
     if (now() - monthMemo.at < 60000) return monthMemo.v;
-    let rows = [];
-    try {
-      const fd = fs.openSync(F.journal, 'r');
-      try {
-        const size = fs.fstatSync(fd).size, n = Math.min(size, 2 * 1024 * 1024), buf = Buffer.alloc(n);
-        fs.readSync(fd, buf, 0, n, size - n);
-        rows = buf.toString('utf8').split('\n').slice(n < size ? 1 : 0).map((l) => { try { return JSON.parse(l); } catch { return null; } });
-      } finally { fs.closeSync(fd); }
-    } catch { rows = []; }
+    const rows = journalTail();
     const v = M.monthSpend(rows, today().day.slice(0, 7), tzOffset);
     monthMemo = { at: now(), v };
     return v;
@@ -513,6 +537,7 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
   });
   const textModel = require('./text-model-client.js').create({ integrations, ledger, fetchImpl, now, log, baseUrl: baseUrlFor && baseUrlFor.openrouter ? baseUrlFor.openrouter : null });
 
+  if (rebuiltAtBoot) saveUsage();   // B-a85f: the raised counter is written (an act, rank 0)
   return { judge, testRunner, status, attachPlugin, settings, memoSize: () => memo.size, files: F, ROW_ID, attachInbox, inboxPass, inboxSwitched, grouping, ledger, textModel, roadFacts, notePaused };
 }
 

@@ -335,5 +335,34 @@ console.log('⑩ the loop never waits on the decision files — the memo PACED, 
   ok(rb.ok && bDisk.length === 2 && b.rec.dirties.length === 0, `CONTROL: the writes made on the main thread at the change ⇒ both files are on disk when the call returns (${bDisk.join(', ')}), the writer never asked — the leg's first checks would be red`);
 }
 
+// ── B-a85f: THE DAY'S COUNTER IS REBUILT FROM THE JOURNAL AT BOOT (the money crash window of B-0248 U1) ────────────────────
+// A billed call's journal line is appended in its own run; its counter goes through the store writer. A stop before that write
+// lands (here: a writer that never writes) left the counter short — the next calls could spend past the daily budget by that
+// much. The next engine raises each use to at least the journal's sum for today (never lowers it). RED (anchored): a copy
+// without the rebuild starts the day at 0.
+console.log('B-a85f — a stop before the counter landed: the next boot raises the day\'s counter to the journal\'s sum');
+{
+  const { anchored } = await import('./scratch.mjs');
+  const never = { dirty() { }, durable: () => Promise.resolve(false), pending: () => false, flushSync: () => ({ written: [], left: [], ms: 0 }), stats: () => [] };
+  const scene = async (Engine, name) => {
+    const w = world(name, { writer: never, answer: () => ({ status: 200, body: okBody({ input_tokens: 9 }) }) });
+    const r1 = await w.judge(); const r2 = await w.judge({ memo: false });
+    const billed = w.journal().filter((x) => (Number(x.usd) || 0) > 0).reduce((a, x) => a + Number(x.usd), 0);
+    const onDisk = fs.existsSync(w.eng.files.usage);
+    const eng2 = Engine.create({ dataDir: path.dirname(w.eng.files.usage), fetchImpl: async () => { throw new Error('no call'); }, now: () => w.T, tzOffset: () => 0, log: quiet, writer: never,
+      integrations: { resolveIntegration: () => ({ values: { provider: 'openai', apiKey: w.key, model: '' }, source: 'user' }) } });
+    const t = eng2.status().today.total;
+    return { ok1: !!(r1 && r1.ok), ok2: !!(r2 && r2.ok), billed: Math.round(billed * 1e8) / 1e8, onDisk, usd: Math.round(t.usd * 1e8) / 1e8, calls: t.calls };
+  };
+  const a = await scene(DE, 'a85f-rebuild');
+  ok(a.ok1 && a.billed > 0 && !a.onDisk && a.usd === a.billed && a.calls >= 1,
+    'B-a85f: two billed calls whose counter NEVER reached the disk (a stop first) — the next boot\'s counter holds the journal\'s sum for today (never 0)', a);
+  const deSrc = fs.readFileSync(path.join(REPO, 'src/server/decision-engine.js'), 'utf8');
+  const A = '    const j = M.daySpendByUse(journalTail(), day0, tzOffset);';
+  const DEno = mutantCopies('decision-budget-a85f', REPO).load('src/server/decision-engine.js', anchored(deSrc, A, '    const j = { byUse: {} };   // MUTANT: the journal is never read at boot', 'the boot reads the journal'), 'no-rebuild');
+  const ax = await scene(DEno, 'a85f-rebuild-red');
+  ok(ax.billed > 0 && ax.usd === 0, 'CONTROL (a copy that never reads the journal at boot): the day restarts at 0 USD while the journal says money was spent — red', ax);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

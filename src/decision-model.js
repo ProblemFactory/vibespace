@@ -1057,6 +1057,22 @@ function decisionTodayLine(usage, capUsd, { on = true, t = fillWords, monthUsd =
 }
 /** The month so far from journal rows (data/decision-journal.jsonl, the caller's bounded tail): Σ usd of the rows whose
  *  local day starts with `month` ('YYYY-MM'). Malformed rows are skipped. → {usd, calls, days}. */
+/** B-a85f — A DAY'S SPEND BY USE FROM THE JOURNAL (PURE): the rows of `day` (local, by each row's own offset) that SPENT — the
+ *  counter's own rule (settle counts a call that cost money or used tokens): {byUse: {use: {calls, inputTokens, outputTokens, usd}}}.
+ *  The engine's boot raises each use's counter to at least these sums: a kill between a billed call's journal line (appended in
+ *  the call's own run) and its counter's landing never loses that money. */
+function daySpendByUse(rows, day, offsetMinOf = () => 0) {
+  const byUse = {};
+  for (const r of Array.isArray(rows) ? rows : []) {
+    if (!r || typeof r !== 'object' || !Number.isFinite(Number(r.at)) || typeof r.use !== 'string' || !r.use) continue;
+    if (dayOf(r.at, offsetMinOf(Number(r.at))) !== day) continue;
+    const usd = num0(r.usd), inT = num0(r.inputTokens);
+    if (!(usd > 0) && !(inT > 0)) continue;
+    const x = byUse[r.use] || (byUse[r.use] = { calls: 0, inputTokens: 0, outputTokens: 0, usd: 0 });
+    x.calls += 1; x.inputTokens += inT || num0(r.est); x.outputTokens += num0(r.outputTokens); x.usd = Math.round((x.usd + usd) * 1e8) / 1e8;
+  }
+  return { byUse };
+}
 function monthSpend(rows, month, offsetMinOf = () => 0) {
   const days = new Set();
   let usd = 0, calls = 0;
@@ -1081,7 +1097,7 @@ module.exports = {
   BACKOFF_MS, RETRY_AFTER_MAX_MS, RATE_MIN_CALLS, MEMO_MAX, FEATURES, WHY, DIALECTS, USES, PLANS, NEVER, JOURNAL_FIELDS, RUBRIC, GOLDEN, CRITERIA_CATALOGUE,
   dialectOf, urlOf, questionError, buildRequest, normalizeAnswers, usageOf, estimateUsd, usdOf, estTokens, questionTokens,
   cutHeadTail, fitTokens, maskAddresses, eraseSecrets, scrub, cleanPart, scrubQuestions, inputPlan, buildInput, memoMaterial, memoKey, batchQuestions, unbatchAnswers,
-  READOUT_WARN_AT, READOUT_USES, moneyText, decisionTodayLine, monthSpend,   // lane decision-spend-readout
+  READOUT_WARN_AT, READOUT_USES, moneyText, decisionTodayLine, monthSpend, daySpendByUse,   // lane decision-spend-readout
   ROAD_WHY, ROAD_GATE_WHY, ROAD_WORDS, judgedRoadState, roadWhyOf, judgedRoadLine, judgedSkipLine,   // lane judged-watch-state (B-f42e): THE judged road
   dayOf, rateOf, budgetVerdict, settleUsd, fetchFailOf, oneShotBody, retryAfterMs, nextBackoff, isWall, isKeyRefused, ROW_STOPS, rowStopOf, journalRow, rubricQuestions, rubricText, attentionVerdict, criteriaProposal,
 };
