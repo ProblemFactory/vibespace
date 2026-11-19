@@ -232,7 +232,7 @@ export const ROWS = [
   ['src/weekly-lanes-unfold.js', 'own-tree', 8, null, CLI], // lane oat-identity-fix-r3 −1: the `.window-` sidecar read moved to its ONE reader (src/window-stamp.js)
   ['src/window-stamp.js', 'own-tree', 1, null, DATA], // lane oat-identity-fix-r3: the `.window-` sidecar's ONE reader (data/usage-cache)
   ['src/window-targets.js', 'own-tree', 2, null, PROC],
-  ['src/watch-door.js', 'exempt', 2, null, 'the watch door (the 2026-11-19 hotfix): the container probe — /.dockerenv and /run/.containerenv, fixed system paths read once at a notice; its poll stats only a path its CALLER already follows (a helper\'s transcript under ~/.claude, the presets folder, a workflow run\'s folder), async, through the fs handed to it'],
+  ['src/watch-door.js', 'exempt', 3, null, 'the watch door (the 2026-11-19 hotfix): the container probe — /.dockerenv and /run/.containerenv, fixed system paths read once at a notice; procfs /proc/sys/fs/inotify/max_user_watches read at a notice (the command offers double it, S2); its poll stats only a path its CALLER already follows (a helper\'s transcript under ~/.claude, the presets folder, a workflow run\'s folder), async, through the fs handed to it'],
   ['src/workflow-usage-tailer.js', 'own-tree', 4, null, CLI],
   ['src/ws-create.js', 'own-tree', 4, null, CLI],
   ['src/ws-handler.js', 'own-tree', 8, null, CLI],

@@ -38,7 +38,11 @@ const POLL_ENTRIES = 32;    // a folder's poll reads at most this many entries a
 const LIMITS = { running: 32, inflight: 4, liftArms: 3, liftQuietMs: 10 * 60e3, probeMs: 5 * 60e3, fileGapMs: 60 * 60e3 };   // read at call time (the suite's controls move them)
 const NOTICE_KEY = 'watch-limit';
 const LIMIT_NAME = 'fs.inotify.max_user_watches';
-const RAISE_CMD = `sudo sysctl -w ${LIMIT_NAME}=524288`;
+const LIMIT_FILE = '/proc/sys/fs/inotify/max_user_watches';
+/** PURE (主开发 01:57Z, its reader's S2): the one command that RAISES the limit — double what the machine has now, never under
+ *  524 288. A fixed 524 288 would LOWER a large machine's limit (kernels since 5.11 scale it with RAM, up to 1 048 576; this owner's
+ *  machine stands at 1 048 576). */
+const raiseCmd = (current) => `sudo sysctl -w ${LIMIT_NAME}=${Math.max(524288, 2 * (Number(current) > 0 ? Math.floor(Number(current)) : 0))}`;
 const i18nKey = (s) => s;   // marks a dictionary key (src/lib/i18n-zh.js, i18n-ja.js)
 
 let todosOf = () => null;
@@ -46,6 +50,8 @@ let log = (line) => { try { console.warn(line); } catch { } };
 let now = () => Date.now();
 let probeFs = fs;
 let containerOverride = null;   // the suite's seam; else read once at the notice
+const readLimit = () => { try { return Number(fs.readFileSync(LIMIT_FILE, 'utf8').trim()) || null; } catch { return null; } };   // procfs, read at a notice only
+let limitNow = readLimit;
 const fresh = () => ({ limited: false, code: null, itemId: null, pollers: 0, refusals: 0, listenerSaid: false, saidOther: false,
   lastRefusalAt: 0, armsInRow: 0, lastFiledAt: -Infinity, filesDue: false, gapSaid: false, filed: 0, lifted: 0, probe: null, running: 0, inflight: 0, maxInflight: 0, maxRunning: 0 });
 const state = fresh();
@@ -55,13 +61,13 @@ const runWait = [], slotWait = [];
 const inContainer = () => { if (containerOverride != null) return !!containerOverride; try { return fs.existsSync('/.dockerenv') || fs.existsSync('/run/.containerenv') || !!process.env.KUBERNETES_SERVICE_HOST; } catch { return false; } };
 /** The words of the one notice (PURE but for `container`): only what is true (主开发 01:35Z, 4) — nobody measured who holds the
  *  watches, the poll checks every few seconds at most, and a container's limit is raised on its host. */
-function noticeItem({ container = inContainer() } = {}) {
+function noticeItem({ container = inContainer(), current = limitNow() } = {}) {
   const rows = [
     { key: i18nKey('Linux gives each user a fixed number of file watches ({limit}), and all of them are in use.'), params: { limit: LIMIT_NAME } },
     { key: i18nKey('VibeSpace keeps working: it checks the files it follows every few seconds at most, instead of being told at once.') },
     container
       ? { key: i18nKey('This machine runs in a container: the limit belongs to its host and is raised there ({limit}).'), params: { limit: LIMIT_NAME } }
-      : { key: i18nKey('To raise the limit: {cmd} (to keep it after a restart, put the same setting in /etc/sysctl.d/).'), params: { cmd: RAISE_CMD } },
+      : { key: i18nKey('To raise the limit: {cmd} (to keep it after a restart, put the same setting in /etc/sysctl.d/).'), params: { cmd: raiseCmd(current) } },
     { key: i18nKey('This item resolves itself once watches can be set again for a while.') },
   ];
   const fill = (r) => r.key.replace(/\{(\w+)\}/g, (m, k) => (r.params && r.params[k] != null ? r.params[k] : m));
@@ -114,7 +120,7 @@ function noteRefused(e) {
   state.lastRefusalAt = now(); state.armsInRow = 0;
   if (!state.limited) {
     state.limited = true; state.code = code;
-    log(`[watch] the system's limit of file watches is reached (${LIMIT_NAME}, ENOSPC) — files are followed by polling until a watch can be set again${inContainer() ? ' (a container: the limit is raised on its host)' : `; to raise it: ${RAISE_CMD}`}`);
+    log(`[watch] the system's limit of file watches is reached (${LIMIT_NAME}, ENOSPC) — files are followed by polling until a watch can be set again${inContainer() ? ' (a container: the limit is raised on its host)' : `; to raise it: ${raiseCmd(limitNow())}`}`);
   }
   if (!state.itemId) fileNotice();
   armProbe();
@@ -130,8 +136,9 @@ function noteArmed() {
   liftNotice();
 }
 /** Hand the door the For-you store (the system-resource notices' module, at boot). A limit already met files its notice now. */
-function configure({ getUserTodos = null, log: lg = null, clock = null, probeFs: pf = null, container = undefined } = {}) {
+function configure({ getUserTodos = null, log: lg = null, clock = null, probeFs: pf = null, container = undefined, limitNow: ln = null } = {}) {
   if (container !== undefined) containerOverride = container;   // the suite's seam
+  if (typeof ln === 'function') limitNow = ln;   // the suite's seam: the machine's current limit
   if (typeof getUserTodos === 'function') todosOf = () => { try { return getUserTodos(); } catch { return null; } };
   if (typeof lg === 'function') log = lg;
   if (typeof clock === 'function') now = clock;   // the suite's clock (the flap legs)
@@ -218,7 +225,7 @@ function resetForTest() {
   if (state.probe) clearTimeout(state.probe);
   Object.assign(state, fresh()); runWait.length = 0; slotWait.length = 0;
   Object.assign(LIMITS, { running: 32, inflight: 4, liftArms: 3, liftQuietMs: 10 * 60e3, probeMs: 5 * 60e3, fileGapMs: 60 * 60e3 });
-  todosOf = () => null; log = (line) => { try { console.warn(line); } catch { } }; now = () => Date.now(); probeFs = fs; containerOverride = null;
+  todosOf = () => null; log = (line) => { try { console.warn(line); } catch { } }; now = () => Date.now(); probeFs = fs; containerOverride = null; limitNow = readLimit;
 }
 
-module.exports = { watch, configure, status, noticeItem, cadenceFor, resetForTest, LIMITS, ACTIVE_MS, QUIET_MS, POLLERS_PER_STEP, POLL_ENTRIES, NOTICE_KEY, LIMIT_NAME, RAISE_CMD };
+module.exports = { watch, configure, status, noticeItem, cadenceFor, resetForTest, LIMITS, ACTIVE_MS, QUIET_MS, POLLERS_PER_STEP, POLL_ENTRIES, NOTICE_KEY, LIMIT_NAME, raiseCmd };

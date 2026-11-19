@@ -41,7 +41,7 @@ console.log('§1 the door — a refused watch is a poll; the limit said once, ne
   WD.resetForTest();
   let T0 = 1e12; const clock = () => T0;
   const T = todosStub(), said = [];
-  WD.configure({ getUserTodos: () => T, log: (l) => said.push(l), clock, container: false });
+  WD.configure({ getUserTodos: () => T, log: (l) => said.push(l), clock, container: false, limitNow: () => 65536 });
   const refusing = { ...fs, watch() { throw enospc(); } };
   const f = path.join(TMP, 'a.jsonl'); fs.writeFileSync(f, 'one\n');
   const heard = [];
@@ -52,12 +52,27 @@ console.log('§1 the door — a refused watch is a poll; the limit said once, ne
   const got = await until(() => heard.length >= 1);
   ok(w1.polled && w2.polled && got && typeof w1.close === 'function' && WD.status().limited === true,
     `a watch the system refuses (ENOSPC) is a bounded POLL standing in — its listener heard the file grow (${heard.length}), nothing thrown`, { st: WD.status(), heard });
-  ok(T.adds.length === 1 && T.adds[0].key === WD.NOTICE_KEY && /limit of file watches is reached/.test(T.adds[0].text) && T.adds[0].detail.includes(WD.LIMIT_NAME) && T.adds[0].detail.includes(WD.RAISE_CMD) && said.filter((l) => /limit of file watches is reached \(/.test(l)).length === 1,
+  ok(T.adds.length === 1 && T.adds[0].key === WD.NOTICE_KEY && /limit of file watches is reached/.test(T.adds[0].text) && T.adds[0].detail.includes(WD.LIMIT_NAME) && T.adds[0].detail.includes(WD.raiseCmd(65536)) && WD.raiseCmd(65536).endsWith('=524288') && said.filter((l) => /limit of file watches is reached \(/.test(l)).length === 1,
     `two refusals: ONE For-you notice (the limit's name, the one command that raises it) and ONE journal line`, { adds: T.adds.map((a) => a.text), said });
   { // (its readers' 4) THE WORDS SAY ONLY WHAT IS TRUE: no claim of who holds the watches; every few seconds at most; a container's limit is its host's
-    const host = WD.noticeItem({ container: false }), pod = WD.noticeItem({ container: true });
-    ok(!/other program/i.test(host.detail + pod.detail) && /every few seconds at most/.test(host.detail) && host.detail.includes(WD.RAISE_CMD) && !pod.detail.includes(WD.RAISE_CMD) && /in a container: the limit belongs to its host and is raised there/.test(pod.detail) && pod.detail.includes(WD.LIMIT_NAME),
+    const host = WD.noticeItem({ container: false, current: 65536 }), pod = WD.noticeItem({ container: true, current: 65536 });
+    ok(!/other program/i.test(host.detail + pod.detail) && /every few seconds at most/.test(host.detail) && host.detail.includes(WD.raiseCmd(65536)) && !/sysctl/.test(pod.detail) && /in a container: the limit belongs to its host and is raised there/.test(pod.detail) && pod.detail.includes(WD.LIMIT_NAME),
       'the words: no claim about who holds the watches, «every few seconds at most»; the command offered on a machine, NEVER in a container (its host raises it)', { host: host.detail, pod: pod.detail }); }
+  { // (主开发 01:57Z, its reader's S2) THE COMMAND NEVER LOWERS THE LIMIT: double the machine's current value, never under 524 288
+    const big = WD.noticeItem({ container: false, current: 1048576 }), unread = WD.noticeItem({ container: false, current: null });
+    const FIXED = 'fs.inotify.max_user_watches=524288';
+    ok(big.detail.includes('fs.inotify.max_user_watches=2097152') && !big.detail.includes(FIXED) && unread.detail.includes(FIXED) && WD.raiseCmd(300000).endsWith('=600000'),
+      `a machine at 1 048 576 (this owner's since today) is offered ${WD.raiseCmd(1048576).split(' ').pop()} — never the fixed 524 288 that would halve it; an unread limit falls back to 524 288`, { big: big.detail, unread: unread.detail });
+    // CONTROL (in memory, never a file in src/): the hotfix's fixed number put back into the door — the same machine is offered 524 288
+    const DSRC = fs.readFileSync(path.join(REPO, 'src/watch-door.js'), 'utf8'), RC = "const raiseCmd = (current) => `sudo sysctl -w ${LIMIT_NAME}=${Math.max(524288, 2 * (Number(current) > 0 ? Math.floor(Number(current)) : 0))}`;";
+    if (DSRC.split(RC).length !== 2) ok(false, 'the anchor of the control «the fixed command» is not in src/watch-door.js (once)');
+    else {
+      const Module = require('node:module'), fake = path.join(REPO, 'src/watch-door.fixed-mutant.js'), m = new Module(fake, null);
+      m.filename = fake; m.paths = Module._nodeModulePaths(path.dirname(fake)); m._compile(DSRC.replace(RC, () => 'const raiseCmd = () => `sudo sysctl -w ${LIMIT_NAME}=524288`;'), fake);
+      const mb = m.exports.noticeItem({ container: false, current: 1048576 });
+      ok(mb.detail.includes(FIXED) && !mb.detail.includes('=2097152'), 'CONTROL (the hotfix\'s fixed number put back): a machine at 1 048 576 is offered 524 288 — the leg above is red on it', mb.detail);
+    }
+  }
   // (主开发 01:30Z, 1) THE NOTICE NEVER FLAPS: at the limit's edge watches arm and are refused in turn
   let fake = null;
   const arming = { ...fs, watch() { fake = new EventEmitter(); fake.close = () => {}; return fake; } };
