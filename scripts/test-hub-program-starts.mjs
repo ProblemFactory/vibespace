@@ -24,6 +24,7 @@
 //  ⑥ THE SHARED MODULE'S PARITY: desktop-display's belt runner answers the same through the hub's starter as on its own (the
 //     daemon's road); a call that is not the belt's (an unmount) starts as before
 import fs from 'node:fs';
+import { anchored } from './scratch.mjs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -200,8 +201,8 @@ try {
     return { first: r1.health, pid0, start, own, again: `${r2.health}${r2.held ? '/held' : ''}` };
   };
   const NULL_START = "start: pid ? ((procStat(pid) || [])[1] || null) : null";   // the move's own break, verbatim (B-e783's async procStat)
-  const nullSrc = msrc.replace(REC, () => NULL_START);
-  ok(msrc.split(REC).length === 2 && nullSrc !== msrc && /const procStat = async \(root, pid\)/.test(msrc), 'CONTROL (the null start): its plant — the recorded-start line — is spelled exactly once, and the async procStat it would call is the module\'s');
+  const nullSrc = anchored(msrc, REC, NULL_START, 'red-null-start');   // B-0d3e's one door: the recorded-start line spelled once, else a red by name
+  ok(nullSrc !== msrc && /const procStat = async \(root, pid\)/.test(msrc), 'CONTROL (the null start): its plant built through anchored() — the recorded-start line spelled once — and the async procStat it would call is the module\'s');
   const v1 = await recycle({ MountManager }), v1r = await recycle(MC.load('src/mounts.js', nullSrc, 'red-null-start'));
   ok(v1.first === 'hung' && v1.pid0 > 1 && v1.own != null && v1.start === v1.own && v1.again === 'ok',
     `the held mark records its child's OWN start (${v1.start} = /proc's ${v1.own}, pid ${v1.pid0}); its pid then naming another process (another start): asked again — gone, the mount probed again («${v1.again}»)`, v1);
