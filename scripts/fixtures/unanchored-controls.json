@@ -227,7 +227,7 @@
   "test-jobs-addressed.mjs": 1,
   "test-jobs-browser.mjs": 2,
   "test-jobs-engine.mjs": 1,
-  "test-jobs-triage.mjs": 27,
+  "test-jobs-triage.mjs": 28,
   "test-keeper-sweep-yields.mjs": 7,
   "test-kept-copies.mjs": 8,
   "test-layout-dup-storm-loop.mjs": 39,
