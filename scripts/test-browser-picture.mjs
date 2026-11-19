@@ -551,7 +551,7 @@ console.log('§9 the wiring (source pins)');
   ok(/if \(type === 'http-auth' && xRoad\(w\.profileId\)\) \{ rec\.native = true; call\(w, 'Fetch\.continueWithAuth', \{ requestId: String\(p\.requestId \|\| ''\), authChallengeResponse: \{ response: 'Default' \} \}/.test(d) && /const NATIVE_SHEET_PAGE_RE = \/\^chrome-error:/.test(d), "the watch hands the X road's sign-in to Chrome's own sheet (Default) and settles it only on a commit that is not chrome-error://");
   ok(/browserStream, groupsOf:/.test(read('server.js')), 'server.js hands the live-view relay to the window-live wiring (one existing line)');
   const live = read('src/lib/browser-live-window.js');
-  ok(/import \{ pictureSourceOf \} from '\.\.\/browser-picture\.js';/.test(live) && /send\(\{ type: 'x-ticket' \}\)/.test(live) && /case 'x-seat':/.test(live) && /canvas\.style\.display = 'none'; xHost\.style\.display = '';/.test(live), 'the live view asks the source, the ticket and its seat, and swaps the canvas for the X picture');
+  ok(/import \{ pictureSourceOf, pictureForView, BG_SETTLE_MS \} from '\.\.\/browser-picture\.js';/.test(live) && /send\(\{ type: 'x-ticket' \}\)/.test(live) && /case 'x-seat':/.test(live) && /canvas\.style\.display = 'none'; xHost\.style\.display = '';/.test(live), 'the live view asks the source, the ticket and its seat, and swaps the canvas for the X picture');
   ok(/if \(H\) \{ if \(xp\.view\) unmountX\(\); return; \}/.test(live) && /if \(H\) return ''; \/\/ BROWSE YOURSELF/.test(live), 'BROWSE YOURSELF keeps the page\'s picture in this lane (his window is built on it — a follow-up), and its own badge words');
 }
 
