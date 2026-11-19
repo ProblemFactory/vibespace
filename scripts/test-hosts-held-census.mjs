@@ -308,7 +308,7 @@ console.log('§0 get / findByDeviceId / list while held: «unknown, by name», n
     'get, findByDeviceId («is it paired») and dialTokenHash throw hosts-unread (503, the hold\'s words) while held');
   ok(Array.isArray(l) && l.length === 0 && typeof l.held === 'string' && /could not be read/.test(l.held) && JSON.stringify(l) === '[]' && H.held() === true,
     'list() while held is empty AND carries the hold\'s words (`held`, not enumerated: the JSON is unchanged); held() says so', { held: l.held });
-  const HX = held(MJ.load('src/hosts.js', HSRC.replace(FIND, '    // Pure-dial first'), 'find-no-held'));
+  const HX = held(MJ.load('src/hosts.js', anchored(HSRC, FIND, '    // Pure-dial first', 'hhc-311a'), 'find-no-held'));
   ok(codeOf(() => HX.findByDeviceId('dev-0001')) === 'absent', 'CONTROL (findByDeviceId\'s held line cut, in a copy): «is it paired» answers ABSENT on a held list');
 }
 
@@ -390,7 +390,7 @@ console.log('§3 a message to a conversation on a paired machine is never told �
   const one = { ownerHost(sid, isReg) { return isReg('h-0001') ? 'h-0001' : null; } };
   const heldOwner = (Mod) => { const H = Object.create(Mod.HostManager.prototype); H._state = { hosts: [] }; H._unread = { code: 'EACCES' }; H.convIndex = one; return H.conversationOwner('conv-1'); };
   const h = heldOwner(require(path.join(ROOT, 'src/hosts.js')));
-  const hx = heldOwner(MJ.load('src/hosts.js', HSRC.replace(KEEP, '(hid) => !!this.get(hid)'), 'owner-no-held'));   // stale-pins: kept (the control plants the release's text in a copy)
+  const hx = heldOwner(MJ.load('src/hosts.js', anchored(HSRC, KEEP, '(hid) => !!this.get(hid)', 'hhc-393a'), 'owner-no-held'));   // stale-pins: kept (the control plants the release's text in a copy)
   ok(h === 'h-0001' && hx === null, 'hosts.conversationOwner on a HELD list keeps the conversation\'s claim; CONTROL (the release\'s filter, in a copy): null — the conversation reads as on no machine', { h, hx });
 
   const CD = fs.readFileSync(path.join(ROOT, 'src/server/conversation-deliver.js'), 'utf8');
@@ -463,7 +463,7 @@ console.log('§5 the readers that named an absence now say the hold');
   const ex = await exitScene(require(path.join(ROOT, 'src/exit-proxy.js')));
   const PB = "      if (this.hosts && typeof this.hosts.held === 'function' && this.hosts.held()) return 0;   // the B-f276 remainder's belt: a HELD list removed no machine\n";
   ok(XSRC.split(PB).length === 2, 'control setup: the anchor of the pruneLists belt is in exit-proxy.js');
-  const exx = await exitScene(MJ.load('src/exit-proxy.js', XSRC.replace(RH, '  _refuseIfHeld() { }').replace(JH, '').replace(PB, ''), 'exit-no-held'));
+  const exx = await exitScene(MJ.load('src/exit-proxy.js', anchored(anchored(anchored(XSRC, RH, '  _refuseIfHeld() { }', 'hhc-466a'), JH, '', 'hhc-466b'), PB, '', 'hhc-466c'), 'exit-no-held'));
   ok(ex.view === 'hosts-unread' && ex.set === 'hosts-unread' && ex.list === 'hosts-unread' && ex.judge === 'hosts-unread' && ex.pruned === 0,
     'exit access while held: the dialog, the «Always» and the agent\'s list / use / run are refused hosts-unread (503) — never «no such machine» / no_machine', ex);
   ok(exx.view === 'not-found' && exx.judge !== 'hosts-unread' && exx.pruned === 1, 'CONTROL (the held checks and the prune\'s belt cut, in a copy): «no such machine» and the agent\'s no_machine come back, and the prune clears the machine\'s exit list', exx);
@@ -482,13 +482,13 @@ console.log('§5 the readers that named an absence now say the hold');
     return { code, kept: M._state.mounts.length, revoked: revoked.length };
   };
   const mm = await mountScene(require(path.join(ROOT, 'src/machine-mounts.js')), 'real');
-  const mmx = await mountScene(MJ.load('src/machine-mounts.js', MSRC.replace(UH, ''), 'mm-no-held'), 'mut');
+  const mmx = await mountScene(MJ.load('src/machine-mounts.js', anchored(MSRC, UH, '', 'hhc-485a'), 'mm-no-held'), 'mut');
   ok(mm.code === 'hosts-unread' && mm.kept === 1 && mm.revoked === 0, 'a push mount\'s removal while held is refused by name — its record and its token stay (its unmount runs ON the machine)', mm);
   // 主开发 01:20Z (1), its audit: a push mount's way back to this instance while held — no tunnel, no public address: the hold by name
   const NOPATH = "    if (this.hosts && typeof this.hosts.held === 'function' && this.hosts.held()) throw Object.assign(new Error(`reaching this instance from a machine: ${this.hosts.unreadWords()}`), { code: 'hosts-unread', status: 503 });\n";
   ok(MSRC.split(NOPATH).length === 2, 'control setup: the dav path\'s held check is found once');
   const davScene = async (Mod) => { const M = Object.create(Mod.MachineMounts.prototype); Object.assign(M, { hosts: heldHosts, localPort: () => 0, publicUrl: () => '' }); try { await M._davBase('h-0001'); return 'answered'; } catch (e) { return e.code || (/no path/.test(String(e.message)) ? 'no-path' : 'threw'); } };
-  const dv = await davScene(require(path.join(ROOT, 'src/machine-mounts.js'))), dvx = await davScene(MJ.load('src/machine-mounts.js', MSRC.replace(NOPATH, ''), 'mm-dav-no-held'));
+  const dv = await davScene(require(path.join(ROOT, 'src/machine-mounts.js'))), dvx = await davScene(MJ.load('src/machine-mounts.js', anchored(MSRC, NOPATH, '', 'hhc-491a'), 'mm-dav-no-held'));
   ok(dv === 'hosts-unread' && dvx === 'no-path', 'a push mount with no way back while held is refused by the hold\'s name; CONTROL (the check cut, in a copy): «no path for the remote to reach this instance» — RED', { dv, dvx });
   ok(mmx.code === 'answered' && mmx.kept === 0 && mmx.revoked === 1, 'CONTROL (the held check cut, in a copy): the record is dropped and the token revoked while the machine\'s unmount was swallowed', mmx);
   // (d) machine-mounts' one-time legacy ingest on a HELD boot (H10, its read S1): no device is looked up — the keys are derived as the
@@ -506,7 +506,7 @@ console.log('§5 the readers that named an absence now say the hold');
       return { keys, migrated: fs.existsSync(path.join(d, 'device-mounts.json.migrated')), left: fs.existsSync(path.join(d, 'device-mounts.json')) };
     };
     const lg = legacy(require(path.join(ROOT, 'src/machine-mounts.js')), 'legacy-held');
-    const lgx = legacy(MJ.load('src/machine-mounts.js', MM.replace(KEY, '      hostId: this.hosts.findByDeviceId?.(m.deviceId)?.id || '), 'legacy-lookup'), 'legacy-held-mut');   // stale-pins: kept (the control plants the release's text in a copy)
+    const lgx = legacy(MJ.load('src/machine-mounts.js', anchored(MM, KEY, '      hostId: this.hosts.findByDeviceId?.(m.deviceId)?.id || ', 'hhc-509a'), 'legacy-lookup'), 'legacy-held-mut');   // stale-pins: kept (the control plants the release's text in a copy)
     ok(lg.keys === 'host-dial-mac-1,host-1234' && lg.migrated && !lg.left, 'a HELD boot migrates the legacy pull mounts under the keys the pairing minted (host-dial-<id>, a graduated machine\'s own id) — never a wait that machine-mounts.json then ends for good', lg);
     ok(lgx.keys === '' && lgx.left, 'CONTROL (the lookup asked while held, in a copy): it throws, the pull mounts are not ingested and the legacy file stays — while machine-mounts.json is written (the one-time ingest never runs again)', lgx);
   }
@@ -516,7 +516,7 @@ console.log('§5 the readers that named an absence now say the hold');
   ok(HSRC.split(LH).length === 2, 'control setup: the anchor of the linkState control is in hosts.js');
   const linkOf = (Mod) => { const H = Object.create(Mod.HostManager.prototype); H._state = { hosts: [] }; H._unread = { code: 'EACCES' }; try { return H.linkState('h-0001'); } catch (e) { return 'threw:' + (e && e.code); } };
   const lk = linkOf(require(path.join(ROOT, 'src/hosts.js')));
-  const lkx = linkOf(MJ.load('src/hosts.js', HSRC.replace(LH, '    const h = this.get(id);'), 'link-no-held'));
+  const lkx = linkOf(MJ.load('src/hosts.js', anchored(HSRC, LH, '    const h = this.get(id);', 'hhc-519a'), 'link-no-held'));
   ok(lk === 'offline' && lkx === 'threw:hosts-unread', 'linkState while held answers «offline» (a dark source); CONTROL (the release\'s first line, in a copy): it throws — usage-pool-engine\'s darkSources swallowed it into an EMPTY list', { lk, lkx });
 }
 

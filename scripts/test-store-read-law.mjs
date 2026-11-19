@@ -34,7 +34,7 @@ console.log('§1 hosts.json (src/hosts.js) — every paired machine and its dial
   const HSRC = fs.readFileSync(path.join(ROOT, 'src/hosts.js'), 'utf8');
   const LOAD = "    this._loadAnswer(SR.storeAnswer(read, { valid: (v) => !!v && typeof v === 'object' && !Array.isArray(v) }));\n";
   ok(HSRC.split(LOAD).length === 2, 'control setup: hosts.js loads through storeAnswer once (the plant the control swaps)');
-  const RELEASE = MJ.load('src/hosts.js', HSRC.replace(LOAD, "    try { this._state = JSON.parse(read.text); } catch { } if (!Array.isArray(this._state.hosts)) this._state.hosts = [];   /* MUTANT: the release — any failure starts EMPTY */\n"), 'release-load');
+  const RELEASE = MJ.load('src/hosts.js', anchored(HSRC, LOAD, "    try { this._state = JSON.parse(read.text); } catch { } if (!Array.isArray(this._state.hosts)) this._state.hosts = [];   /* MUTANT: the release — any failure starts EMPTY */\n", 'srl-37a'), 'release-load');
   const body = JSON.stringify({ hosts: [{ id: 'h-0001', name: 'build box', transport: 'dial', deviceId: 'dev-0001' }] });
   const scene = async (Mod, name) => {
     const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
@@ -84,8 +84,8 @@ console.log('§1 hosts.json (src/hosts.js) — every paired machine and its dial
     };
     const w = await waitsScene({ HostManager: require(path.join(ROOT, 'src/hosts.js')).HostManager }, 'hosts-waits');
     ok(w.ran === 256 && w.stops === 'stop-a2' && w.first === 'sweep-45' && w.said === 45, 'the waits for the read: a conversation\'s stop asked twice runs ONCE (the latest); 301 distinct waits keep the newest 256, the 45 let go said each', w);
-    const wk = await waitsScene({ HostManager: MJ.load('src/hosts.js', HSRC.replace(KEYED, 'const k = Symbol(what), again = false;   /* MUTANT: no key */'), 'waits-unkeyed').HostManager }, 'hosts-waits-unkeyed');
-    const wb = await waitsScene({ HostManager: MJ.load('src/hosts.js', HSRC.replace(BOUND, '    if (false) {   /* MUTANT: no bound */'), 'waits-unbound').HostManager }, 'hosts-waits-unbound');
+    const wk = await waitsScene({ HostManager: MJ.load('src/hosts.js', anchored(HSRC, KEYED, 'const k = Symbol(what), again = false;   /* MUTANT: no key */', 'srl-87a'), 'waits-unkeyed').HostManager }, 'hosts-waits-unkeyed');
+    const wb = await waitsScene({ HostManager: MJ.load('src/hosts.js', anchored(HSRC, BOUND, '    if (false) {   /* MUTANT: no bound */', 'srl-88a'), 'waits-unbound').HostManager }, 'hosts-waits-unbound');
     ok(wk.stops === 'stop-a1,stop-a2' && wb.ran === 301 && wb.said === 0, 'CONTROLS: waits with no key run a conversation\'s stop twice; waits with no bound keep every one — each RED', { wk, wb });
     // 主开发 04:33Z (3): a wait LET GO is named in the line, and a remote stop's is TOLD (its onLetGo: a server notice naming the
     // conversation the person was told «stops as soon as they read»); CONTROL: the onLetGo call cut
@@ -143,7 +143,7 @@ console.log('§1 hosts.json (src/hosts.js) — every paired machine and its dial
     ok(m.r === false && !m.threw && m.said && m.keptWhileHeld && m.hash === 'a'.repeat(64) && m.syncReads === 0, 'the legacy dial-token migration while held waits for the read (its line says so), the legacy file kept; at the read the hash is in hosts.json — read OFF the main loop (no sync read of the legacy file)', m);
     const ms = await migScene({ HostManager: MJ.load('src/hosts.js', anchored(HSRC, MIG, "\n    if (this._unread) { this.whenRead(() => { try { this.migrateDialTokenFile(file); } catch { } }", 'mig-sync-at-read'), 'mig-sync-at-read').HostManager }, 'hosts-mig-sync');
     ok(ms.hash === 'a'.repeat(64) && ms.syncReads >= 2, 'CONTROL (the wait runs the boot\'s synchronous migration, in a copy): at the read the legacy file is stat\'d and read ON the main loop, in the folder that was failing — RED', ms);
-    const mx = await migScene({ HostManager: MJ.load('src/hosts.js', HSRC.replace(MIG, '\n    if (false) { this.whenRead(() => { this._migrateDialTokensAtRead(file); }'), 'mig-unheld').HostManager }, 'hosts-mig-unheld');
+    const mx = await migScene({ HostManager: MJ.load('src/hosts.js', anchored(HSRC, MIG, '\n    if (false) { this.whenRead(() => { this._migrateDialTokensAtRead(file); }', 'srl-146a'), 'mig-unheld').HostManager }, 'hosts-mig-unheld');
     ok(mx.threw === 'hosts-unread' && !mx.said, 'CONTROL (no held branch, in a copy): the migration throws the hold at the boot — its line was «failed» — RED', mx);
   }
   // torn bytes: kept aside (a copy), the list starts empty — as the release did, now through the law
@@ -193,9 +193,9 @@ console.log('§1 hosts.json (src/hosts.js) — every paired machine and its dial
   ok(ar.held && ar.armedMeeting && ar.armedAfter && ar.armedAfterFail, 'its read r1 (M2) / r2 (X5): a try that meets a read in flight arms the next, so does the read that then fails, and so does a try whose own read fails at once — the tries never end while held', ar);
   const ARM = '    this._unreadRetrySoon();   // its read r1 (M2): the next try is armed FIRST (jobs.js\'s order) — a try that meets one in flight, or a read that fails, never ends the tries\n    if (this._unreadP) return;\n';
   ok(HSRC.split(ARM).length === 2, 'control setup: the anchor of the control «the next try armed first» is in hosts.js');
-  const arx = await armScene(MJ.load('src/hosts.js', HSRC.replace(ARM, '    if (this._unreadP) return;   /* MUTANT: the first cut\'s order */\n    this._unreadRetrySoon();\n'), 'arm-order'), 'hosts-arm-mut');
+  const arx = await armScene(MJ.load('src/hosts.js', anchored(HSRC, ARM, '    if (this._unreadP) return;   /* MUTANT: the first cut\'s order */\n    this._unreadRetrySoon();\n', 'srl-196a'), 'arm-order'), 'hosts-arm-mut');
   ok(arx.held && !arx.armedMeeting, 'CONTROL (the first cut\'s order, in a copy): the try that meets a read in flight arms NOTHING', arx);
-  const ary = await armScene(MJ.load('src/hosts.js', HSRC.replace(ARM, '    if (this._unreadP) { this._unreadRetrySoon(); return; }   /* MUTANT: armed only on a meeting */\n'), 'arm-meeting-only'), 'hosts-arm-mut2');
+  const ary = await armScene(MJ.load('src/hosts.js', anchored(HSRC, ARM, '    if (this._unreadP) { this._unreadRetrySoon(); return; }   /* MUTANT: armed only on a meeting */\n', 'srl-198a'), 'arm-meeting-only'), 'hosts-arm-mut2');
   ok(ary.held && ary.armedMeeting && !ary.armedAfterFail, 'CONTROL (r2 X5 — armed only on a meeting, in a copy): a try whose own read fails arms NOTHING (the half-vacuous leg r2 named)', ary);
   // its read r2 (X2): an OLDER try whose torn-bytes copy lands after a NEWER try lifted the hold never lifts it again as empty
   const raceScene = async (Mod, name) => {
@@ -236,13 +236,13 @@ console.log('§1 hosts.json (src/hosts.js) — every paired machine and its dial
   };
   const rh = await raceHeld({ HostManager: require(path.join(ROOT, 'src/hosts.js')).HostManager }, 'hosts-race-held');
   const SEQ = '      if (!this._unread || mine !== this._unreadSeq) return;';
-  const rhx = await raceHeld(MJ.load('src/hosts.js', HSRC.replace(SEQ, '      if (!this._unread) return;   /* MUTANT: the seq half cut */'), 'race-seq-half'), 'hosts-race-held-mut');
+  const rhx = await raceHeld(MJ.load('src/hosts.js', anchored(HSRC, SEQ, '      if (!this._unread) return;   /* MUTANT: the seq half cut */', 'srl-239a'), 'race-seq-half'), 'hosts-race-held-mut');
   ok(!!rh && rh.held && !!rhx && !rhx.held, 'its read r3 (Y4): the newer try read EIO (the hold stands) and the older try\'s copy lands — the hold STANDS; CONTROL (the seq half cut, in a copy): the older try lifts it as EMPTY', { rh, rhx });
   const rc = await raceScene({ HostManager: require(path.join(ROOT, 'src/hosts.js')).HostManager }, 'hosts-race');
   ok(!!rc && rc.lifted === 'h-0001' && rc.list === 'h-0001' && !rc.held && !rc.olderErr, 'its read r2 (X2): an older try whose copy of torn bytes lands AFTER a newer try lifted the hold changes nothing — the machines stay loaded', rc);
   const RACE = '      if (!this._unread || mine !== this._unreadSeq) return;   // its read r2 (X2): a newer try read meanwhile (and may have lifted) — its answer stands\n';
   ok(HSRC.split(RACE).length === 2, 'control setup: the anchor of the control «only the newest try lifts» is in hosts.js');
-  const rcx = await raceScene(MJ.load('src/hosts.js', HSRC.replace(RACE, '      /* MUTANT: no re-check after the copy */\n'), 'no-race-check'), 'hosts-race-mut');
+  const rcx = await raceScene(MJ.load('src/hosts.js', anchored(HSRC, RACE, '      /* MUTANT: no re-check after the copy */\n', 'srl-245a'), 'no-race-check'), 'hosts-race-mut');
   ok(!!rcx && (rcx.list === '' || !!rcx.olderErr), 'CONTROL (no re-check after the copy, in a copy): the older try loads the machines list EMPTY over the lifted one (or throws on a hold already gone)', rcx);
   // the cure (主开发 23:20Z): the SAVE's own guard has its red control (it covers the timers' saves and the stop's flush — removing
   // only it left every leg green)
@@ -264,8 +264,8 @@ console.log('§1 hosts.json (src/hosts.js) — every paired machine and its dial
     // the held, empty list) — so the control removes BOTH guards, and a second one shows the producer's alone still keeps the file
     const PRODH = "produce: () => { if (this._unread) throw Object.assign(";
     ok(HSRC.split(PRODH).length === 2, 'control setup: the anchor of the control «the producer\'s guard» is in hosts.js');
-    const k1 = saveH(MJ.load('src/hosts.js', HSRC.replace(SAVEH, '    /* MUTANT: no save guard */\n'), 'hosts-no-save-guard'), 'hosts-save-guard-first');
-    const kx = saveH(MJ.load('src/hosts.js', HSRC.replace(SAVEH, '    /* MUTANT: no save guard */\n').replace(PRODH, 'produce: () => { if (false) throw Object.assign('), 'hosts-no-guards'), 'hosts-save-guard-mut');
+    const k1 = saveH(MJ.load('src/hosts.js', anchored(HSRC, SAVEH, '    /* MUTANT: no save guard */\n', 'srl-267a'), 'hosts-no-save-guard'), 'hosts-save-guard-first');
+    const kx = saveH(MJ.load('src/hosts.js', anchored(anchored(HSRC, SAVEH, '    /* MUTANT: no save guard */\n', 'srl-268a'), PRODH, 'produce: () => { if (false) throw Object.assign(', 'srl-268b'), 'hosts-no-guards'), 'hosts-save-guard-mut');
     if (asRoot) rootSkip('CONTROL hosts.json: both save guards removed, the save writes over the held file');
     ok(k && k1, 'the save itself refuses while held (a timer\'s save, the stop\'s flush), and the queued write\'s producer refuses too (the first guard removed: still kept)', { k, k1 });
     if (!asRoot) ok(!kx, 'CONTROL (both guards removed, in a copy): the save WRITES OVER the held file', { kx });
@@ -284,7 +284,7 @@ console.log('§1 hosts.json (src/hosts.js) — every paired machine and its dial
     ok(HSRC.split(RJ).length === 2, 'control setup: the anchor of the control «reach only for what was read» is in hosts.js');
     const withData = await reach({ HostManager: require(path.join(ROOT, 'src/hosts.js')).HostManager }, 'hosts-reach-data', false);
     const empty = await reach({ HostManager: require(path.join(ROOT, 'src/hosts.js')).HostManager }, 'hosts-reach-empty', true);
-    const emptyX = await reach(MJ.load('src/hosts.js', HSRC.replace(RJ, "    this._reachChanged('hosts.json read');   /* MUTANT: every lift re-judges */"), 'hosts-reach-every'), 'hosts-reach-empty-mut', true);
+    const emptyX = await reach(MJ.load('src/hosts.js', anchored(HSRC, RJ, "    this._reachChanged('hosts.json read');   /* MUTANT: every lift re-judges */", 'srl-287a'), 'hosts-reach-every'), 'hosts-reach-empty-mut', true);
     ok(withData.lifted && withData.n === 1 && empty.lifted && empty.n === 0 && emptyX.lifted && emptyX.n === 1, 'the lift re-judges reach for the machines it READ (once) and never for an empty lift (a prune over it cleared every exit list); CONTROL (every lift re-judges, in a copy): the empty lift re-judges', { withData, empty, emptyX });
   }
   // the cure: the read again has a DEADLINE — a read that has not answered is said and let go as the try's own; ONE read at most
@@ -316,10 +316,10 @@ console.log('§1 hosts.json (src/hosts.js) — every paired machine and its dial
       'a read again that hangs is said and let go at its deadline (the words say a read waits), no second read starts while it hangs (one thread of the pool), and its LATE answer lifts the hold the moment it comes', back);
     const LATE = "if (this._unread && !this._unreadStopped && mine === this._unreadSeq) this._unreadJudge(late, mine)", CAP = "    if (this._hungP) { if (!this._hungSaid) {";
     ok(HSRC.split(LATE).length === 2 && HSRC.split(CAP).length === 2, 'control setup: the anchors of the controls «the late answer judged» and «one read at most» are in hosts.js');
-    const backL = await deadlineScene(MJ.load('src/hosts.js', HSRC.replace(LATE, 'if (false) this._unreadJudge(late, mine)'), 'hosts-late-dropped'), 'hosts-deadline-late');
+    const backL = await deadlineScene(MJ.load('src/hosts.js', anchored(HSRC, LATE, 'if (false) this._unreadJudge(late, mine)', 'srl-319a'), 'hosts-late-dropped'), 'hosts-deadline-late');
     ok(!!backL && !backL.lifted && backL.calls === 1, 'CONTROL (the late answer dropped, in a copy): the storage answered, and the hold stands — slow storage is held for ever', backL);
     const capLine = HSRC.split('\n').find((l) => l.startsWith(CAP));
-    const backC = await deadlineScene(MJ.load('src/hosts.js', HSRC.replace(capLine + '\n', ''), 'hosts-no-cap'), 'hosts-deadline-cap');
+    const backC = await deadlineScene(MJ.load('src/hosts.js', anchored(HSRC, capLine + '\n', '', 'srl-322a'), 'hosts-no-cap'), 'hosts-deadline-cap');
     ok(!!backC && backC.whileHung === 2, 'CONTROL (the one-read cap cut, in a copy): each try while the first read hangs starts ANOTHER read (a thread of the pool each)', backC);
   }
   // the cure (主开发 23:20Z): the device-upgrade watch files no «rerun its install command» while the machines are held — the
@@ -338,7 +338,7 @@ console.log('§1 hosts.json (src/hosts.js) — every paired machine and its dial
     };
     const MW = require(path.join(ROOT, 'src/server/device-upgrade-watch.js'));
     const h = watch(MW, 'upw-held', true), f = watch(MW, 'upw-free', false);
-    const hx = watch(MJ.load('src/server/device-upgrade-watch.js', UW.replace(HG, '    /* MUTANT: judged while held */\n'), 'upw-no-held'), 'upw-held-mut', true);
+    const hx = watch(MJ.load('src/server/device-upgrade-watch.js', anchored(UW, HG, '    /* MUTANT: judged while held */\n', 'srl-341a'), 'upw-no-held'), 'upw-held-mut', true);
     ok(h.filed === 0 && f.filed === 1 && hx.filed === 1, 'the device-upgrade watch files NOTHING while the machines are held (a silent device after its upgrade began is judged after the read) and files as before otherwise; CONTROL (judged while held, in a copy): «rerun its install command» filed', { h, f, hx });
     // its read S2: the silence is counted from the hold's END — the first sweep after the read (the device has not re-dialled yet)
     // files nothing; a device still silent a full window after the read is told
@@ -355,7 +355,7 @@ console.log('§1 hosts.json (src/hosts.js) — every paired machine and its dial
     };
     const MAXH = 'now() - Math.max(Number(g.at || 0), heldUntil) < goneAfterMs';
     ok(UW.split(MAXH).length === 2, 'control setup: the anchor of the control «silence from the hold\'s end» is in device-upgrade-watch.js');
-    const l = lift(MW, 'upw-lift'), lx = lift(MJ.load('src/server/device-upgrade-watch.js', UW.replace(MAXH, 'now() - Number(g.at || 0) < goneAfterMs'), 'upw-from-begin'), 'upw-lift-mut');   // stale-pins: kept (the control plants the release's text in a copy)
+    const l = lift(MW, 'upw-lift'), lx = lift(MJ.load('src/server/device-upgrade-watch.js', anchored(UW, MAXH, 'now() - Number(g.at || 0) < goneAfterMs', 'srl-358a'), 'upw-from-begin'), 'upw-lift-mut');   // stale-pins: kept (the control plants the release's text in a copy)
     ok(l.atLift === 0 && l.later === 1 && lx.atLift === 1, 'its read S2: the first sweep after the read files nothing (the silence is counted from the hold\'s end) and a device silent a full window after it is told; CONTROL (counted from the upgrade\'s start, in a copy): the healthy device is told at the lift', { l, lx });
   }
   // its read r3 (Y1): the hub-act asker's re-judgement (boot + every sweep) on a HELD list ends NOTHING — a stored standing Deny is
@@ -374,7 +374,7 @@ console.log('§1 hosts.json (src/hosts.js) — every paired machine and its dial
       return { standing: A.standingList().length, calls: calls.map((c) => c[0]) };
     };
     const got = run(require(path.join(ROOT, 'src/server/hub-act-ask.js')));
-    const gotx = run(MJ.load('src/server/hub-act-ask.js', HSA.replace(GUARD, '    /* MUTANT: no hold check */\n'), 'hub-act-no-held'));
+    const gotx = run(MJ.load('src/server/hub-act-ask.js', anchored(HSA, GUARD, '    /* MUTANT: no hold check */\n', 'srl-377a'), 'hub-act-no-held'));
     ok(got.standing === 1 && gotx.standing === 0, 'its read r3 (Y1): on a HELD hosts list the asker\'s boot re-judgement keeps the stored standing subject (its Deny with it); CONTROL (no hold check, in a copy): it is ENDED as «its machine is gone»', { got, gotx });
   }
   // its read r2 (X1): desktop-access answers a HELD list «unavailable» (the keeper marks offline) — never «not a paired machine»
@@ -386,7 +386,7 @@ console.log('§1 hosts.json (src/hosts.js) — every paired machine and its dial
     const got = await codeOf(ACC);
     const DSRC = fs.readFileSync(path.join(ROOT, 'src/server/desktop-access.js'), 'utf8'), NH = '    notHeld();\n    if (!hostKnown(hostId)) throw named(';
     ok(DSRC.split(NH).length === 2, 'control setup: the anchor of the control «a held list is unavailable» is in desktop-access.js');
-    const gotx = await codeOf(MJ.load('src/server/desktop-access.js', DSRC.replace(NH, '    /* MUTANT: no hold check */\n    if (!hostKnown(hostId)) throw named('), 'no-held-check'));
+    const gotx = await codeOf(MJ.load('src/server/desktop-access.js', anchored(DSRC, NH, '    /* MUTANT: no hold check */\n    if (!hostKnown(hostId)) throw named(', 'srl-389a'), 'no-held-check'));
     ok(got === 'host_unavailable' && gotx === 'unsupported-host', 'its read r2 (X1): a desktop call on a machine while hosts.json is HELD answers host_unavailable (the keeper marks it offline); CONTROL (no hold check, in a copy): «unsupported-host» — the code on which the keeper DELETES every machine\'s desktop-app records', { got, gotx });
   }
   const ER = fs.readFileSync(path.join(ROOT, 'src/server/exit-routes.js'), 'utf8');
@@ -477,7 +477,7 @@ console.log('§2 machine-mounts.json (src/machine-mounts.js) — every mount of 
   const MSRC = fs.readFileSync(path.join(ROOT, 'src/machine-mounts.js'), 'utf8');
   const LOAD = '    this._loadAnswer(SR.storeAnswer(read, { valid: STORE_SHAPE }));\n';
   ok(MSRC.split(LOAD).length === 2, 'control setup: the anchor of the control «the release\'s load» is in machine-mounts.js (one storeAnswer call in the constructor)');
-  const RELEASE = MJ.load('src/machine-mounts.js', MSRC.replace(LOAD, "    try { this._state = JSON.parse(read.text); } catch { try { if (fs.existsSync(this._file)) fs.copyFileSync(this._file, this._file + '.corrupt-' + Date.now()); } catch { } this._state = { mounts: [] }; this._migrateLegacy(); }   /* MUTANT: the release — any failure starts EMPTY and ingests the legacy stores */\n"), 'release-mounts');
+  const RELEASE = MJ.load('src/machine-mounts.js', anchored(MSRC, LOAD, "    try { this._state = JSON.parse(read.text); } catch { try { if (fs.existsSync(this._file)) fs.copyFileSync(this._file, this._file + '.corrupt-' + Date.now()); } catch { } this._state = { mounts: [] }; this._migrateLegacy(); }   /* MUTANT: the release — any failure starts EMPTY and ingests the legacy stores */\n", 'srl-480a'), 'release-mounts');
   // ONE push record (a push mount is only re-owned at restore, never released on this machine — the scene runs nothing outside)
   const rec = { id: 'mm-0001', dir: 'push', hostId: 'h-0001', folder: '/srv/share', mode: 'ro', mountpoint: '/mnt/share', tokenId: 'tok-0001', createdAt: 1 };
   const body = JSON.stringify({ mounts: [rec] }), legacy = JSON.stringify({ mounts: [{ id: 'old-0001', hostId: 'h-0002', folder: '/x', mountpoint: '/y' }] });
@@ -543,7 +543,7 @@ console.log('§2 machine-mounts.json (src/machine-mounts.js) — every mount of 
   const li = await liftIngest(require(path.join(ROOT, 'src/machine-mounts.js')), 'mounts-lift-ingest');
   const LIFTA = '    this._loadAnswer(a, { atLift: true });\n';
   ok(MSRC.split(LIFTA).length === 2, 'control setup: the anchor of the control «the lift ingests nothing» is in machine-mounts.js');
-  const lix = await liftIngest(MJ.load('src/machine-mounts.js', MSRC.replace(LIFTA, '    this._loadAnswer(a);   /* MUTANT: the lift ingests */\n'), 'lift-ingests'), 'mounts-lift-ingest-mut');
+  const lix = await liftIngest(MJ.load('src/machine-mounts.js', anchored(MSRC, LIFTA, '    this._loadAnswer(a);   /* MUTANT: the lift ingests */\n', 'srl-546a'), 'lift-ingests'), 'mounts-lift-ingest-mut');
   ok(li.lifted && li.legacyKept && li.listed === 0 && lix.lifted && !lix.legacyKept, 'a lift with no mounts leaves the legacy stores for the next start (no synchronous read of the data folder on the loop); CONTROL (the lift ingests, in a copy): it reads and renames them there', { li, lix });
   // the SAVE's guard has its own red control (it is what covers the timers' saves and every road that reaches _save)
   const saveScene = async (Mod, name) => {
@@ -559,7 +559,7 @@ console.log('§2 machine-mounts.json (src/machine-mounts.js) — every mount of 
   const SAVEG = "    if (this._unread) { if (!this._unreadSaveSaid) { this._unreadSaveSaid = true; this.log('a machine-mounts.json write was refused: the file could not be read, and nothing is written over it until it reads'); } return; }\n";
   ok(MSRC.split(SAVEG).length === 2, 'control setup: the anchor of the control «the save\'s guard» is in machine-mounts.js');
   const sv = await saveScene(require(path.join(ROOT, 'src/machine-mounts.js')), 'mounts-save-guard');
-  const svx = await saveScene(MJ.load('src/machine-mounts.js', MSRC.replace(SAVEG, '    /* MUTANT: no save guard */\n'), 'no-save-guard'), 'mounts-save-guard-mut');
+  const svx = await saveScene(MJ.load('src/machine-mounts.js', anchored(MSRC, SAVEG, '    /* MUTANT: no save guard */\n', 'srl-562a'), 'no-save-guard'), 'mounts-save-guard-mut');
   if (asRoot) rootSkip('CONTROL machine-mounts.json: the save\'s guard removed, the save writes over the held file');
   ok(sv.kept, 'the save itself refuses while held (a timer\'s save, any road)', { sv });
   if (!asRoot) ok(!svx.kept, 'CONTROL (only that guard removed, in a copy): the save WRITES OVER the held file', { svx });
@@ -580,7 +580,7 @@ console.log('§2 machine-mounts.json (src/machine-mounts.js) — every mount of 
     const cut = [];
     for (const [k, g] of GUARDS.entries()) {
       ok(MSRC.split(g).length === 2, `control setup: the guard «${g.trim()}» stands once in machine-mounts.js`);
-      cut.push((await three(MJ.load('src/machine-mounts.js', MSRC.replace(g, '    /* MUTANT: this guard cut */'), `refusal-cut-${k}`)))[k]);
+      cut.push((await three(MJ.load('src/machine-mounts.js', anchored(MSRC, g, '    /* MUTANT: this guard cut */', 'srl-583a'), `refusal-cut-${k}`)))[k]);
     }
     if (!asRoot) { try { fs.chmodSync(F, 0o644); } catch { } }
     ok(got.every((c) => c === 'mounts-unread'), 'a push mount, a pull mount and a remount are each refused BY NAME while held (mounts-unread)', got);
@@ -612,9 +612,9 @@ console.log('§2 machine-mounts.json (src/machine-mounts.js) — every mount of 
   ok(am.held && am.armedMeeting && am.armedAfter && am.armedAfterFail, 'its read r1 (M2) / r2 (X5): a try that meets a read in flight arms the next, so does the read that then fails, and so does a try whose own read fails at once — the tries never end while held', am);
   const ARMM = '    this._unreadRetrySoon();   // its read r1 (M2): the next try is armed FIRST (jobs.js\'s order) — a try that meets one in flight, or a read that fails, never ends the tries\n    if (this._unreadP) return;\n';
   ok(MSRC.split(ARMM).length === 2, 'control setup: the anchor of the control «the next try armed first» is in machine-mounts.js');
-  const amx = await armM(MJ.load('src/machine-mounts.js', MSRC.replace(ARMM, '    if (this._unreadP) return;   /* MUTANT: the first cut\'s order */\n    this._unreadRetrySoon();\n'), 'arm-order-mounts'), 'mounts-arm-mut');
+  const amx = await armM(MJ.load('src/machine-mounts.js', anchored(MSRC, ARMM, '    if (this._unreadP) return;   /* MUTANT: the first cut\'s order */\n    this._unreadRetrySoon();\n', 'srl-615a'), 'arm-order-mounts'), 'mounts-arm-mut');
   ok(amx.held && !amx.armedMeeting, 'CONTROL (the first cut\'s order, in a copy): the try that meets a read in flight arms NOTHING', amx);
-  const amy = await armM(MJ.load('src/machine-mounts.js', MSRC.replace(ARMM, '    if (this._unreadP) { this._unreadRetrySoon(); return; }   /* MUTANT: armed only on a meeting */\n'), 'arm-meeting-only-mounts'), 'mounts-arm-mut2');
+  const amy = await armM(MJ.load('src/machine-mounts.js', anchored(MSRC, ARMM, '    if (this._unreadP) { this._unreadRetrySoon(); return; }   /* MUTANT: armed only on a meeting */\n', 'srl-617a'), 'arm-meeting-only-mounts'), 'mounts-arm-mut2');
   ok(amy.held && amy.armedMeeting && !amy.armedAfterFail, 'CONTROL (r2 X5 — armed only on a meeting, in a copy): a try whose own read fails arms NOTHING', amy);
   // its read r2 (X2): an OLDER try whose torn-bytes copy lands after a NEWER try lifted the hold never loads the mounts EMPTY
   const raceM = async (Mod, name) => {
@@ -654,13 +654,13 @@ console.log('§2 machine-mounts.json (src/machine-mounts.js) — every mount of 
   };
   const rmh = await raceMHeld(require(path.join(ROOT, 'src/machine-mounts.js')), 'mounts-race-held');
   const SEQM = '      if (!this._unread || mine !== this._unreadSeq) return;';
-  const rmhx = await raceMHeld(MJ.load('src/machine-mounts.js', MSRC.replace(SEQM, '      if (!this._unread) return;   /* MUTANT: the seq half cut */'), 'race-seq-half-mounts'), 'mounts-race-held-mut');
+  const rmhx = await raceMHeld(MJ.load('src/machine-mounts.js', anchored(MSRC, SEQM, '      if (!this._unread) return;   /* MUTANT: the seq half cut */', 'srl-657a'), 'race-seq-half-mounts'), 'mounts-race-held-mut');
   ok(!!rmh && rmh.held && !!rmhx && !rmhx.held, 'its read r3 (Y4): the newer try read EIO (the hold stands) and the older try\'s copy lands — the hold STANDS; CONTROL (the seq half cut, in a copy): the older try lifts it as EMPTY', { rmh, rmhx });
   const rm2 = await raceM(require(path.join(ROOT, 'src/machine-mounts.js')), 'mounts-race');
   ok(!!rm2 && rm2.lifted === 'mm-0001' && rm2.list === 'mm-0001' && !rm2.held && !rm2.olderErr, 'its read r2 (X2): an older try whose copy of torn bytes lands AFTER a newer try lifted the hold changes nothing — the mount stays loaded', rm2);
   const RACEM = '      if (!this._unread || mine !== this._unreadSeq) return;   // its read r2 (X2): a newer try read meanwhile (and may have lifted) — its answer stands\n';
   ok(MSRC.split(RACEM).length === 2, 'control setup: the anchor of the control «only the newest try lifts» is in machine-mounts.js');
-  const rmx = await raceM(MJ.load('src/machine-mounts.js', MSRC.replace(RACEM, '      /* MUTANT: no re-check after the copy */\n'), 'no-race-check-mounts'), 'mounts-race-mut');
+  const rmx = await raceM(MJ.load('src/machine-mounts.js', anchored(MSRC, RACEM, '      /* MUTANT: no re-check after the copy */\n', 'srl-663a'), 'no-race-check-mounts'), 'mounts-race-mut');
   ok(!!rmx && (rmx.list === '' || !!rmx.olderErr), 'CONTROL (no re-check after the copy, in a copy): the older try loads the mounts EMPTY over the lifted list (or throws on a hold already gone)', rmx);
   const DPM = fs.readFileSync(path.join(ROOT, 'src/server/dial-pairing.js'), 'utf8'), ERM = fs.readFileSync(path.join(ROOT, 'src/server/exit-routes.js'), 'utf8');
   ok(/async function unpairDialDevice\(deviceId\) \{\n(?:  if \(hosts\.held && hosts\.held\(\)\) throw [^\n]*\n)?(?:  \/\/[^\n]*\n)*  if \(machineMounts\.unreadWords && machineMounts\.unreadWords\(\)\) throw /.test(DPM) && /res\.status\(e && e\.status === 503 \? 503 : 400\)/.test(ERM),
@@ -674,7 +674,7 @@ console.log('§5 job-notifications.json (src/jobs.js) — every job notice still
   const JSRC = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8');
   const LOADN = '    this._notifsAnswer(SR.storeAnswer(read, { valid: NOTIFS_SHAPE }));\n';
   ok(JSRC.split(LOADN).length === 2, 'control setup: the anchor of the control «the release\'s load» is in jobs.js (the notifications\' one storeAnswer call)');
-  const RELEASE = MJ.load('src/jobs.js', JSRC.replace(LOADN, '    try { this.releasedAtBoot = []; this._notifsFrom(JSON.parse(read.text)); } catch { }   /* MUTANT: the release — any failure is an empty map */\n'), 'release-notifs');
+  const RELEASE = MJ.load('src/jobs.js', anchored(JSRC, LOADN, '    try { this.releasedAtBoot = []; this._notifsFrom(JSON.parse(read.text)); } catch { }   /* MUTANT: the release — any failure is an empty map */\n', 'srl-677a'), 'release-notifs');
   const body = JSON.stringify({ 'conv-old': [{ ts: 1, jobId: 'jb-0n000001', text: 'done exit=0 ok (1m)' }] });
   const onDisk = (F) => { try { return Object.keys(JSON.parse(fs.readFileSync(F, 'utf8'))).sort().join(); } catch (e) { return '(' + (e.code || 'unparsed') + ')'; } };
   const scene = async (Mod, name) => {
@@ -711,13 +711,13 @@ console.log('§5 job-notifications.json (src/jobs.js) — every job notice still
   const MERGE = '        const mine = merge ? (this.pendingNotifs.get(cid) || []).filter((n) => !list.includes(n)) : [];\n';
   const CLEAR = "        this._judgeNotifsIn(list, { boot: !merge });   // its read r2 (M1) / r4 (S1): ONE judge — the boot, the merge, a record's read again\n";
   ok(JSRC.split(MERGE).length === 2 && JSRC.split(CLEAR).length === 2, 'control setup: the anchors of the controls «the merge» and «the clear at the merge» are in jobs.js');
-  const rm = await scene(MJ.load('src/jobs.js', JSRC.replace(MERGE, '        const mine = [];   /* MUTANT: no merge */\n'), 'no-merge'), 'notifs-no-merge');
+  const rm = await scene(MJ.load('src/jobs.js', anchored(JSRC, MERGE, '        const mine = [];   /* MUTANT: no merge */\n', 'srl-714a'), 'no-merge'), 'notifs-no-merge');
   ok(rm.old.length === 1, 'CONTROL (no merge, in a copy): the notice filed for conv-old while held is LOST at the read (the file\'s list replaced it)', rm.old);
   const RMH = "    if (this._notifsUnread && job && job.clearedAt) return { error: this._notifsClearedWords(job.id), code: 'notifs-unread' };   // the B-f276 remainder (5), its read r2 (M2)\n";
   ok(JSRC.split(RMH).length === 2, 'control setup: the anchor of the control «a cleared job\'s removal waits» is in jobs.js');
-  const rr = await scene(MJ.load('src/jobs.js', JSRC.replace(RMH, ''), 'rm-no-held'), 'notifs-rm-no-held');
+  const rr = await scene(MJ.load('src/jobs.js', anchored(JSRC, RMH, '', 'srl-718a'), 'rm-no-held'), 'notifs-rm-no-held');
   ok(!rr.rmKept && rr.old.some((x) => x === 'jb-0n000001:done exit=0 ok (1m)'), 'CONTROL (the removal\'s held check cut, in a copy): the cleared job is removed and its notice comes back from the file with its OLD words', { rmKept: rr.rmKept, old: rr.old });
-  const rc = await scene(MJ.load('src/jobs.js', JSRC.replace(CLEAR, '        /* MUTANT: no clear at the merge */\n'), 'no-clear-merge'), 'notifs-no-clear');
+  const rc = await scene(MJ.load('src/jobs.js', anchored(JSRC, CLEAR, '        /* MUTANT: no clear at the merge */\n', 'srl-720a'), 'no-clear-merge'), 'notifs-no-clear');
   ok(rc.old.some((x) => x === 'jb-0n000001:done exit=0 ok (1m)'), 'CONTROL (no clear at the merge, in a copy): the cleared job\'s old words come back with the file', rc.old);
   const rx = await scene(RELEASE, 'notifs-release');
   ok(!rx.held, 'CONTROL (the release\'s load, in a copy): a failed read is not held (an EMPTY map)', rx);
@@ -775,9 +775,9 @@ console.log('§5 job-notifications.json (src/jobs.js) — every job notice still
     };
     const g = await r3(require(path.join(ROOT, 'src/jobs.js')), 'notifs-r3');
     ok(g.whileHung === 1 && g.waitedForRecords === true && g.gcKept, 'its read r3: a hung read keeps its one slot (no second read per try — M1), the read waits while the job records are held (S1), the gc keeps a cleared record while the notices are held (S2)', g);
-    const gx = await r3(MJ.load('src/jobs.js', JSRC.replace(SLOT, '    this._notifsP = null; const read = await p; clearTimeout(tm);   /* MUTANT: the slot freed at once */\n'), 'r3-slot'), 'notifs-r3-slot');
-    const gj = await r3(MJ.load('src/jobs.js', JSRC.replace(JUDGE, '    if (false) { done();'), 'r3-judge'), 'notifs-r3-judge');
-    const gg = await r3(MJ.load('src/jobs.js', JSRC.replace(GCK, '          /* MUTANT: gc as before */'), 'r3-gc'), 'notifs-r3-gc');
+    const gx = await r3(MJ.load('src/jobs.js', anchored(JSRC, SLOT, '    this._notifsP = null; const read = await p; clearTimeout(tm);   /* MUTANT: the slot freed at once */\n', 'srl-778a'), 'r3-slot'), 'notifs-r3-slot');
+    const gj = await r3(MJ.load('src/jobs.js', anchored(JSRC, JUDGE, '    if (false) { done();', 'srl-779a'), 'r3-judge'), 'notifs-r3-judge');
+    const gg = await r3(MJ.load('src/jobs.js', anchored(JSRC, GCK, '          /* MUTANT: gc as before */', 'srl-780a'), 'r3-gc'), 'notifs-r3-gc');
     ok(gx.whileHung === 2 && gj.waitedForRecords === false && !gg.gcKept, 'CONTROLS (each cure cut alone, in a copy): a second read starts while the first hangs; the notices are merged while their records are held; the gc removes the cleared record', { gx, gj, gg });
   }
   // its read r4 (S1): the boot found the JOB RECORDS held (jobs.json unreadable) and read the notices UNJUDGED — when the records read
@@ -799,7 +799,7 @@ console.log('§5 job-notifications.json (src/jobs.js) — every job notice still
       J.shutdown(); return { storeHeldAtBoot: atBoot.includes('secret words'), after };
     };
     const rr = await recScene(require(path.join(ROOT, 'src/jobs.js')), 'notifs-rec-held');
-    const rrx = await recScene(MJ.load('src/jobs.js', JSRC.replace(RJ, '      /* MUTANT: no judge at the records\' read */'), 'no-judge-at-records'), 'notifs-rec-held-mut');
+    const rrx = await recScene(MJ.load('src/jobs.js', anchored(JSRC, RJ, '      /* MUTANT: no judge at the records\' read */', 'srl-802a'), 'no-judge-at-records'), 'notifs-rec-held-mut');
     ok(rr.storeHeldAtBoot && !rr.after.includes('secret words') && rrx.after.includes('secret words'), 'its read r4 (S1): once the held job records read again, the waiting notice of a cleared job takes the clear\'s words; CONTROL (no judge at the records\' read, in a copy): the old words stay and reach the conversation', { rr, rrx });
   }
   // its read r2 (M1): a clear made while the file was HELD, then a restart — the NEXT boot reads the file whole and judges it by the
@@ -815,7 +815,7 @@ console.log('§5 job-notifications.json (src/jobs.js) — every job notice still
       J.shutdown(); return t;
     };
     const b = await bootScene(require(path.join(ROOT, 'src/jobs.js')), 'notifs-boot-clear');
-    const bx = await bootScene(MJ.load('src/jobs.js', JSRC.replace(CLEAR, '        /* MUTANT: no clear at the read */\n'), 'no-clear-boot'), 'notifs-boot-clear-mut');
+    const bx = await bootScene(MJ.load('src/jobs.js', anchored(JSRC, CLEAR, '        /* MUTANT: no clear at the read */\n', 'srl-818a'), 'no-clear-boot'), 'notifs-boot-clear-mut');
     ok(b && !b.includes('secret words') && bx.includes('secret words'), 'its read r2 (M1): a BOOT that reads the file judges each notice by its job\'s clear (the old words never come back after a restart); CONTROL (no judge at the read, in a copy): the cleared words are back', { b, bx });
   }
   // ── store (5)'s cure (主开发 02:33Z, round wzt514l6z) ─────────────────────────────────────────────────────────────────────────────
@@ -843,7 +843,7 @@ console.log('§5 job-notifications.json (src/jobs.js) — every job notice still
       unplant(x.JF, x.jbody); x.J.shutdown(); return out;
     };
     const s1 = await subScene(require(path.join(ROOT, 'src/jobs.js')), 'notifs-cure-sub');
-    const s1x = await subScene(MJ.load('src/jobs.js', JSRC.replace(GONE, "    if (!rec) return sub ? 'gone' : 'owner';   /* MUTANT: the release's verdict */\n"), 'cure-sub-gone'), 'notifs-cure-sub-mut');
+    const s1x = await subScene(MJ.load('src/jobs.js', anchored(JSRC, GONE, "    if (!rec) return sub ? 'gone' : 'owner';   /* MUTANT: the release's verdict */\n", 'srl-846a'), 'cure-sub-gone'), 'notifs-cure-sub-mut');
     ok(s1.held && s1.waiting === 1 && s1.file === 1, 'cure (1): a SUBSCRIBER\'s notice of a job whose record is missing while jobs.json is HELD waits — kept in memory and on disk (the drain neither prints nor drops it)', s1);
     ok(s1x.waiting === 0 && s1x.file === 0, 'CONTROL (the release\'s verdict, in a copy): «gone» — the drain drops it and SAVES: lost for good — RED', s1x);
     // (2)
@@ -859,7 +859,7 @@ console.log('§5 job-notifications.json (src/jobs.js) — every job notice still
       x.J.shutdown(); return { peekHeld, drained, keptHeld, after };
     };
     const c2 = await clearScene(require(path.join(ROOT, 'src/jobs.js')), 'notifs-cure-clear');
-    const c2x = await clearScene(MJ.load('src/jobs.js', JSRC.replace(WAITS, '  _waitsForRecords(n) { return false; }   /* MUTANT: no wait */\n'), 'cure-clear-nowait'), 'notifs-cure-clear-mut');
+    const c2x = await clearScene(MJ.load('src/jobs.js', anchored(JSRC, WAITS, '  _waitsForRecords(n) { return false; }   /* MUTANT: no wait */\n', 'srl-862a'), 'cure-clear-nowait'), 'notifs-cure-clear-mut');
     ok(c2.peekHeld === '' && c2.drained === '' && c2.keptHeld === 1 && c2.after && !c2.after.includes('secret words'), 'cure (2): while the job records are held the file\'s notice is neither peeked nor drained (it waits); once they read WHOLE it is judged — the cleared job\'s words, never its old ones', c2);
     ok(c2x.peekHeld.includes('secret words') || c2x.drained.includes('secret words'), 'CONTROL (no wait, in a copy): the cleared job\'s OLD words are delivered while its record is unread — RED', c2x);
     // (3) each held-save guard alone — the notices' own save, the store's save of the notices, the records' save — on the shutdown's
@@ -888,9 +888,9 @@ console.log('§5 job-notifications.json (src/jobs.js) — every job notice still
     ok(gN.notifsKept && gS.notifsKept && gS.recordsKept && gC.notifsKept && gC.recordsKept, 'the notices\' own save, the shutdown\'s save and a clear-all while BOTH files are held write over neither', { gN, gS, gC });
     if (asRoot) rootSkip('CONTROLS job-notifications.json / jobs.json: each held-save guard alone cut, its save writes over the held file');
     else {
-      const xN = await guardScene(MJ.load('src/jobs.js', JSRC.replace(G_NOTIFS, '    if (false) { if (!this._notifsSaveSaid) {'), 'g-notifs-cut'), 'notifs-g-save-mut', 'saveNotifs');
-      const xS = await guardScene(MJ.load('src/jobs.js', JSRC.replace(G_STORE_N, "      if (true) timedSync('jobs-notifs.write',"), 'g-store-notifs-cut'), 'notifs-g-shutdown-mut', 'shutdown');
-      const xR = await guardScene(MJ.load('src/jobs.js', JSRC.replace(G_RECORDS, "      if (true) timedSync('jobs.write',"), 'g-records-cut'), 'notifs-g-clear-mut', 'clearAll');
+      const xN = await guardScene(MJ.load('src/jobs.js', anchored(JSRC, G_NOTIFS, '    if (false) { if (!this._notifsSaveSaid) {', 'srl-891a'), 'g-notifs-cut'), 'notifs-g-save-mut', 'saveNotifs');
+      const xS = await guardScene(MJ.load('src/jobs.js', anchored(JSRC, G_STORE_N, "      if (true) timedSync('jobs-notifs.write',", 'srl-892a'), 'g-store-notifs-cut'), 'notifs-g-shutdown-mut', 'shutdown');
+      const xR = await guardScene(MJ.load('src/jobs.js', anchored(JSRC, G_RECORDS, "      if (true) timedSync('jobs.write',", 'srl-893a'), 'g-records-cut'), 'notifs-g-clear-mut', 'clearAll');
       ok(!xN.notifsKept && !xS.notifsKept && xS.recordsKept && !xR.recordsKept && xR.notifsKept, 'CONTROLS (each guard cut ALONE, in a copy): the notices\' own save writes over the held notices; the shutdown\'s save writes over them through the store\'s save; a clear-all writes over the held job records — each RED, the other file kept', { xN, xS, xR });
     }
     // (3) the refused removal of a cleared ARCHIVED job while the notices are held
@@ -906,7 +906,7 @@ console.log('§5 job-notifications.json (src/jobs.js) — every job notice still
       const out = { code: r && r.code, kept: (J.archive || []).some((x) => x && x.id === 'jb-0a000001') };
       unplant(NF, nbody); J.shutdown(); return out;
     };
-    const a3 = await archScene(J0, 'notifs-rm-arch'), a3x = await archScene(MJ.load('src/jobs.js', JSRC.replace(RMA, '    /* MUTANT: no held check */'), 'rm-arch-cut'), 'notifs-rm-arch-mut');
+    const a3 = await archScene(J0, 'notifs-rm-arch'), a3x = await archScene(MJ.load('src/jobs.js', anchored(JSRC, RMA, '    /* MUTANT: no held check */', 'srl-909a'), 'rm-arch-cut'), 'notifs-rm-arch-mut');
     ok(a3.code === 'notifs-unread' && a3.kept && a3x.code !== 'notifs-unread' && !a3x.kept, 'removing a cleared ARCHIVED job while the notices are held is refused by name (its record judges them at the read); CONTROL (the check cut, in a copy): the record goes — RED', { a3, a3x });
     // (3) the For-you ask again while a read HANGS: the boot's filing the store refused is asked again at the next try, though the one
     //     read slot is taken (r4 N4) — CONTROL: the ask below the slot check (as r3 had it) is never asked again while the read hangs
@@ -931,7 +931,7 @@ console.log('§5 job-notifications.json (src/jobs.js) — every job notice still
       unplant(NF, nbody); J.shutdown(); return out;
     };
     const h3 = await hangScene(J0, 'notifs-hang-reask');
-    const h3x = await hangScene(MJ.load('src/jobs.js', JSRC.replace(REASK, "    if (this._notifsP) return;\n    if (!this._notifsItem) { const v = this._forYou(null, M.forYouCopy(null, 'notifs-unread', { error: this._notifsUnread.code })); if (v && v.id) this._notifsItem = v.id; }   /* MUTANT: below the slot */\n"), 'reask-below-slot'), 'notifs-hang-reask-mut');
+    const h3x = await hangScene(MJ.load('src/jobs.js', anchored(JSRC, REASK, "    if (this._notifsP) return;\n    if (!this._notifsItem) { const v = this._forYou(null, M.forYouCopy(null, 'notifs-unread', { error: this._notifsUnread.code })); if (v && v.id) this._notifsItem = v.id; }   /* MUTANT: below the slot */\n", 'srl-934a'), 'reask-below-slot'), 'notifs-hang-reask-mut');
     ok(h3.held && h3.slot && h3.filed === 1 && h3x.slot && h3x.filed === 0, 'a refused For-you filing is asked again while the read HANGS (the slot taken) — filed once the store has room; CONTROL (the ask below the slot check, in a copy): never asked again while the read hangs — RED', { h3, h3x });
     // 主开发 04:33Z (1): the ARCHIVE's hold begins INSIDE the boot's judge — jobs.json read whole, the archive unreadable, loaded lazily by
     // the first notice of an archived job: that FIRST conversation's list waits too (peek empty), never out with a cleared job's old words
