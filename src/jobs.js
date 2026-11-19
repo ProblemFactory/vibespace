@@ -142,7 +142,7 @@ const ARCHIVE_SWEEP_MS = 5 * 60 * 1000;
 // a judgment — the reap is retried by a later tick). Round 6: A REAP THAT DID NOT FINISH IS ALWAYS RETRIED — whoever started it
 // (the boot, the sweep, a start), by every tick whatever its job's state, REAP_TRIES times; then said once and dropped
 const STOP_GRACE_MS = 10_000;
-const URL_GRACE_MS = 2 * 60 * 1000, URL_CHECK_TRIES = 3, URL_CHECK_EVERY_MS = 30_000, URL_LOOK_MS = 5000, URL_RELOOK_MS = 15_000, URL_ROUNDS = 3; // B-74f5: a URL change is judged after a restart's grace (the hub's, the job's own, the vault unlock's re-publish) by looks at both addresses (≤ 3, 30 s apart, 5 s each); «the old one failed» needs two looks 15 s apart; an inconclusive change is looked at again at the next publish read, ≤ 3 rounds, then dropped from the record
+const URL_GRACE_MS = 2 * 60 * 1000, URL_CHECK_TRIES = 3, URL_CHECK_EVERY_MS = 30_000, URL_LOOK_MS = 5000, URL_RELOOK_MS = 15_000, URL_ROUNDS = 3; // B-74f5: a URL change is judged after a restart's grace (the hub's, the job's own, the vault unlock's re-publish) by looks at both addresses (≤ 3, 30 s apart, 5 s each); «the old one failed» needs two looks 15 s apart; a change not said is looked at again at the next publish read — ≤ 3 checks of one pair in a run (conclusive or not), then it leaves the record
 const REAP_READ_MS = 2000;
 const REAP_TRIES = 12;
 // THE LADDER's last rung (round 7): a wrapper still there WEDGE_MS after its scope was killed is killed with its group
@@ -2304,15 +2304,20 @@ class JobManager {
     if (!keep) job.lastPublicUrl = url;
     const pend = job.urlPending || null;
     if (!before || before === url) {
-      if (pend && pend.to === url && pend.from !== url) { if (!job._urlCheck && job._urlGaveUp !== `${pend.from} ${url}`) this._checkUrlChange(job, pend.from, url, { named: !!pend.named, rounds: Number(pend.rounds) || 0 }); } // a hub restart inside the grace, or an inconclusive change looked at again
-      else if (pend || job._urlCheck) { job._urlCheck = null; delete job.urlPending; } // the web address came back: its tcp read is forgotten
+      if (pend && pend.to === url && pend.from !== url) { if (!job._urlCheck && !this._urlGaveUp(job, pend.from, url)) this._checkUrlChange(job, pend.from, url, { named: !!pend.named, rounds: Number(pend.rounds) || 0 }); } // a hub restart inside the grace, a respawn, or a change not said looked at again
+      else if (pend || job._urlCheck) { this._endUrlCheck(job); delete job.urlPending; } // the web address came back: its tcp read is forgotten
       return;
     }
     if (job._urlCheck && job._urlCheck.from === before && job._urlCheck.to === url) { if (named && !job._urlCheck.named) { job._urlCheck.named = true; if (job.urlPending) job.urlPending.named = true; } return; } // one check per change
-    if (job._urlGaveUp === `${before} ${url}`) return; // looked at URL_ROUNDS times: dropped, the journal said why
+    if (this._urlGaveUp(job, before, url)) return; // looked at URL_ROUNDS times in this run: dropped, the journal said why
     const same = pend && pend.from === before && pend.to === url;
     this._checkUrlChange(job, before, url, { named: named || !!(same && pend.named), rounds: same ? Number(pend.rounds) || 0 : 0 });
   }
+  /** B-74f5 follow-up: a pair given up in THIS run (the mark ends with the teardown and with a new run — a later real move to that
+   *  address is checked again). */
+  _urlGaveUp(job, from, to) { const g = job._urlGaveUp; return !!(g && g.key === `${from} ${to}` && g.run === this._runStartOf(job)); }
+  /** B-74f5 follow-up: a check superseded (a later pair, the web address back, a teardown) — its timer goes with it. */
+  _endUrlCheck(job) { const c = job._urlCheck; job._urlCheck = null; if (c && c.t) { clearTimeout(c.t); if (this._urlTimers) this._urlTimers.delete(c.t); } }
   /** The start of the job's current run (ms) — a service's own restart opens the same grace a hub restart does (B-74f5 r2). */
   _runStartOf(job) { const r = (job.runs || [])[(job.runs || []).length - 1]; return (r && Number(r.startedAt)) || 0; }
   /** B-74f5: the looks at both addresses after the restart's grace — the hub's start, the job's own run start, or the vault unlock's
@@ -2321,6 +2326,7 @@ class JobManager {
    *  old address URL_RELOOK_MS later. A later change, a teardown, the old address coming back, the job's end or the engine's stop
    *  ends the check, in silence. */
   _checkUrlChange(job, from, to, { named = false, rounds = 0, tries = URL_CHECK_TRIES, confirm = false } = {}) {
+    if (job._urlCheck && job._urlCheck.t) this._endUrlCheck(job); // a later pair replaces the check — and its timer
     const tok = job._urlCheck = { from, to, named };
     job.urlPending = { from, to, rounds, ...(named ? { named: true } : {}) };
     const start = Math.max(this._bootAt || 0, this._relayAt || 0, this._runStartOf(job));
@@ -2330,7 +2336,11 @@ class JobManager {
     const t = setTimeout(async () => {
       timers.delete(t);
       if (job._urlCheck !== tok || this.jobs.get(job.id) !== job) return;
-      if (!['up', 'starting'].includes(job.state)) { job._urlCheck = null; delete job.urlPending; return; } // r3: the job ended — nothing is said about a service no longer there
+      if (!['up', 'starting'].includes(job.state)) { // follow-up: a keep-up service between a crash and its respawn keeps its pending change (the respawn's publish read looks again); a job no longer wanted up says nothing
+        job._urlCheck = null;
+        if (job.desiredUp) { this.d.log(`[jobs] ${job.id}: a public URL check waits for the service to run again (its pending change is kept)`); return; }
+        delete job.urlPending; this._touch(job); this.d.log(`[jobs] ${job.id}: a public URL check ended with the job`); return;
+      }
       let toOk = false, fromOk = true;
       try { [toOk, fromOk] = await Promise.all([this._urlAnswers(to), this._urlAnswers(from)]); } catch { toOk = false; fromOk = true; } // a look that threw proves nothing
       if (job._urlCheck !== tok) return;
@@ -2339,19 +2349,19 @@ class JobManager {
       if (v.say && !confirm) { this._checkUrlChange(job, from, to, { ...next, confirm: true }); return; } // «the old one failed» is seen twice
       if (v.again && tries > 1) { this._checkUrlChange(job, from, to, { ...next, tries: tries - 1 }); return; }
       job._urlCheck = null;
-      if (v.again) {
+      if (!v.say) { // follow-up: EVERY check that says nothing counts a round (the misread's later tcp reads started fresh looks for ever)
         if (rounds + 1 < URL_ROUNDS) { job.urlPending = { from, to, rounds: rounds + 1, ...(tok.named ? { named: true } : {}) }; this._touch(job); this.d.log(`[jobs] ${job.id}: a new public URL was not said — ${v.why} (looked at again at the next publish read)`); return; }
-        delete job.urlPending; job._urlGaveUp = `${from} ${to}`; this._touch(job); this.d.log(`[jobs] ${job.id}: a new public URL was not said — ${v.why} after ${URL_ROUNDS} rounds (dropped)`); return; // r3: an exhausted pair leaves the record
+        delete job.urlPending; job._urlGaveUp = { key: `${from} ${to}`, run: this._runStartOf(job) }; this._touch(job); this.d.log(`[jobs] ${job.id}: a new public URL was not said — ${v.why} after ${URL_ROUNDS} rounds (dropped)`); return; // an exhausted pair leaves the record
       }
       delete job.urlPending;
       if (v.say && job.lastPublicUrl !== to) { job.lastPublicUrl = to; job.publishedUrl = to; } // a web address read as tcp://, now proven
       this._touch(job);
       const words = JN.urlChangeWords({ from, to, verdict: v, named: tok.named });
-      if (!words) { this.d.log(`[jobs] ${job.id}: a new public URL was not said — ${v.say ? 'confirmed: the recovery already named both addresses' : v.why}`); return; }
+      if (!words) { this.d.log(`[jobs] ${job.id}: a new public URL was not said — confirmed: the recovery already named both addresses`); return; }
       this.d.log(`[jobs] ${job.id} public URL changed`);
       this._notifyOwner(job, { what: words });
     }, wait);
-    timers.add(t);
+    tok.t = t; timers.add(t);
     t.unref?.();
   }
   /** B-74f5: does a public address answer? tcp:// = a TCP connect; http(s):// = one GET / answered below 500 and not the relay's own
@@ -2388,7 +2398,7 @@ class JobManager {
   async _teardownPublish(job, { forget = false } = {}) {
     try {
       const pf = this.d.getPorts && this.d.getPorts();
-      job._pubGen = (job._pubGen || 0) + 1; job._publish = null; job._urlCheck = null; delete job.urlPending; // B-74f5: a pending URL check ends with the publish
+      job._pubGen = (job._pubGen || 0) + 1; job._publish = null; this._endUrlCheck(job); delete job.urlPending; delete job._urlGaveUp; // B-74f5: a pending URL check (its timer, its give-up mark) ends with the publish
       delete job.publishDown; // the down episode ends with a deliberate stop / park / refusal (never at a restart: that is when it repeated)
       if (!pf || !job._pfId) return;
       try { await pf.unpublish(job._pfId, { keepName: !forget }); } catch { }
