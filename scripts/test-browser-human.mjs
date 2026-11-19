@@ -37,7 +37,7 @@ import http from 'node:http';
 import net from 'node:net';
 import { execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, deadPort } from './scratch.mjs';
+import { scratch, deadPort, anchored } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const DEAD_CDP = await deadPort(); // the fake's cdp-url: a port the kernel just released, never a fixed one (§81)
 const require = createRequire(import.meta.url);
@@ -1350,6 +1350,10 @@ ok(hs && hs.browserKey === HL && hs.open && hs.recorded === true && hs.count >= 
       // lane owner-press-attended: the Hand back of a conversation's browser is an ATTENDED press — every bearer refused (r1 put
       // `refuseAgentBearer` on it, which this census derives; r2 walks it — r1 left this heavy suite red)
       ['POST', '/api/browser/handback', '/api/browser/handback', { sessionId: 'sess-any' }],
+      // lane cli-update-needs-nothing (B-8b87, the exit check — the owner 2026-11-17 «A就行»): «Check the exit…» reads a profile's
+      // proxy exit through its own forwarder, and keeping an exit writes it on the profile — the PERSON's presses (EXIT_IS_USERS)
+      ['POST', '/api/browser/profiles/:id/exit-check', `/api/browser/profiles/${liveP.id}/exit-check`, {}],
+      ['POST', '/api/browser/profiles/:id/egress', `/api/browser/profiles/${liveP.id}/egress`, { publicIp: '203.0.113.9', country: 'JP', timezone: 'Asia/Tokyo' }],
     ];
     const table = WALK_H.map(([m, p]) => m + ' ' + p).sort();
     ok(J(derived) === J(table), `the human-route census: the routes that serve HIS browsing, derived from the routers (${derived.length}), are exactly the walk's table — a new one is RED until it is walked`, { derived, table });
@@ -1364,6 +1368,36 @@ ok(hs && hs.browserKey === HL && hs.open && hs.recorded === true && hs.count >= 
     for (const tokn of ['vsst_' + 'w'.repeat(24), 'jbt_' + 'w'.repeat(24)]) for (const [m, , p, body] of WALK_H) { const x = await hit(W, m, p, body, tokn); rows.push([tokn.slice(0, 5), m + ' ' + p.replace(HL, 'hu-…').replace(clickE.id, ':id'), x.status, x.code]); }
     const bad = rows.filter(([, , st, c]) => !(st === 403 && c === 'agent_forbidden'));
     ok(!bad.length && stateNow() === s0, `every human route × {vsst_, jbt_} (${rows.length}) refused 403 agent_forbidden over his REAL recorded entries — nothing started, drove, ended or answered`, bad);
+    // THE EXIT CHECK's two rows (lane cli-update-needs-nothing, B-8b87 — the box red of 2.369.411's prep: both routes derived, none
+    // walked). The walk above refused both to either token; here: a token kept nothing, the PERSON's press (the cookie path) reaches
+    // the keeper's own verdicts, a profile the person does not have answers 404 like no profile, and a copy of the routes without the
+    // exit check's guard lets a token through — the walk can go red on it
+    ok(!kb.profile(liveP.id).egress, 'the exit check\'s two routes × {vsst_, jbt_}: no exit was kept on the profile by a token (the body a token sent is a whole typed exit)');
+    const exP = await hit(W, 'POST', `/api/browser/profiles/${liveP.id}/exit-check`, {});
+    ok(exP.status === 409 && exP.code === 'exit_no_proxy', '…the PERSON\'s press (no bearer) on «Check the exit…» reaches the keeper\'s own verdict: a profile with no proxy of its own answers 409 exit_no_proxy (no check address asked, nothing kept)', exP);
+    const keptP = await hit(W, 'POST', `/api/browser/profiles/${liveP.id}/egress`, { publicIp: '203.0.113.9', country: 'JP', timezone: 'Asia/Tokyo' });
+    const kpe = kb.profile(liveP.id).egress ? { ...kb.profile(liveP.id).egress } : null;
+    const clearedP = await hit(W, 'POST', `/api/browser/profiles/${liveP.id}/egress`, { clear: true });
+    ok(keptP.status === 200 && !!kpe && kpe.publicIp === '203.0.113.9' && kpe.country === 'JP' && kpe.timezone === 'Asia/Tokyo' && kpe.source === 'typed' && clearedP.status === 200 && !kb.profile(liveP.id).egress,
+      '…the PERSON keeps an exit typed by hand (200, on the profile, «typed») with the very body a token was refused, and forgets it again (clear: the profile as the walk found it)', { kept: keptP, kpe, cleared: clearedP });
+    const noP = await hit(W, 'POST', '/api/browser/profiles/bp-0000dead/exit-check', {}), noK = await hit(W, 'POST', '/api/browser/profiles/bp-0000dead/egress', { clear: true });
+    ok(noP.status === 404 && noP.code === 'not-found' && noK.status === 404 && noK.code === 'not-found', '…a profile the person does not have answers 404 not-found on both, nothing written', { noP, noK });
+    // a CONVERSATION's own browser record (isEph) answers both exactly like no profile, before the check address, the vault or a write —
+    // pinned, not driven: an ephemeral record exists only through a launch (ensureEphemeral), and a launch inside the walk's world
+    // moves what the later legs read
+    const ksrcE = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8'), EPH = "const p = profile(profileId);\n      if (!p || isEph(p)) return { ok: false, code: 'not-found', error: `no profile ${profileId}` };";
+    ok(/async function exitCheck\(profileId[\s\S]{0,220}if \(!p \|\| isEph\(p\)\) return \{ ok: false, code: 'not-found'/.test(ksrcE) && /function keepEgress\(profileId[\s\S]{0,220}if \(!p \|\| isEph\(p\)\) return \{ ok: false, code: 'not-found'/.test(ksrcE) && ksrcE.includes(EPH),
+      'PIN: a conversation\'s own browser record answers «Check the exit…» and the keep exactly like no profile (not-found, first)');
+    // RED CONTROL — it proves its plant first: the edit goes through THE one door, anchored() (the guard line found exactly ONCE in the
+    // exit check's route, else it throws «ANCHOR GONE» by this control's name), and the copy is exactly that line shorter
+    const EXN = "router.post('/api/browser/profiles/:id/exit-check', async (req, res) => {\n  if (refuseHost(req, res)) return;\n  if (refuseAgentBearer(req, res, EXIT_IS_USERS)) return;\n";
+    const EXG = '  if (refuseAgentBearer(req, res, EXIT_IS_USERS)) return;\n';
+    const exMut = anchored(rb, EXN, EXN.replace(EXG, ''), 'exit-check guard gone');
+    ok(!exMut.includes(EXN) && exMut.length === rb.length - EXG.length, 'CONTROL setup: the exit check route\'s guard is found once (anchored), and the copy is exactly that line shorter');
+    const Rex = M.load('src/routes/browser.js', exMut, 'exit-guard-gone'); Rex.setup({ keeper: kb, activeSessions: activeB, notice: () => { }, tasksForSession: () => [] });
+    const Xex = await serveW([Rex.router]);
+    const tEx = await hit(Xex, 'POST', `/api/browser/profiles/${liveP.id}/exit-check`, {}, 'vsst_' + 'w'.repeat(24));
+    ok(tEx.status === 409 && tEx.code === 'exit_no_proxy', 'CONTROL: the routes without the exit check\'s guard hand an agent\'s token to the keeper (409 exit_no_proxy, not 403) — the walk above is red on it', tEx);
     const mine = await hit(W, 'GET', `/api/browser/actions/${clickE.id}`), frame = await fetch(`${W}/api/browser/actions/${clickE.id}/frame/before`);
     ok(mine.status === 200 && frame.status === 200 && /image\/jpeg/.test(frame.headers.get('content-type') || ''), '…the cookie path (no bearer) reads his entry and its frame as before', { entry: mine.status, frame: frame.status });
     // CONTROLS: a trace-routes copy whose guard is blind (the pre-r1 routes) answers his entry + frame to an agent token; a
