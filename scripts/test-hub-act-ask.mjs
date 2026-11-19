@@ -546,6 +546,69 @@ console.log('  · the agent update at hello');
   } finally { DeviceManager.prototype._policyFoldEnd = keepE; }
   ok(askedG >= 10 && rg >= 10, `control (the allowed check without its «op-not-allowed» filter; the plant asked ${askedG}×): 10 standing refusals ⇒ ${rg} lines (the gate's fold ended at every check) ⇒ RED`, rg);
 }
+{
+  // B-0194 (lane bl-machines-b): THE UPDATE REFUSED AT EACH HELLO folds PER DEVICE. A remote machine gets ONE hello per
+  // DeviceManager and every re-dial / ssh reconnect builds a fresh one, so the fold lives in the device's store (client.js
+  // HELLO_FOLDS, by the `helloKey` the construction site hands in) — B-c632's rules across the instances
+  const sinkOf = () => ({ lines: [], logs: [] });
+  const freshDm = (w, key, sink) => { const dm = new DeviceManager({ dataDir: tmp, bundlePath: path.join(tmp, 'no-bundle.js'), version: '0', log: (...a) => sink.logs.push(a.join(' ')), onAct: (l) => sink.lines.push(l), actGate: w.hosts.actGateFor(w.hid), helloKey: key }); dm.connect = async () => w.conn; dm._conn = w.conn; if (!w.conn.mux.destroy) w.conn.mux.destroy = () => { }; return dm; };   // (the fake link's mux: stop() destroys it)
+  const hello = (w, key, sink, tune = null) => { const dm = freshDm(w, key, sink); if (tune) tune(dm); const held = dm._upgradeHeld('2.369.100'); if (held === 'ask') dm._askUpgrade('2.369.100', { mux: w.conn.mux, sock: { destroy: () => { } } }); return { dm, held }; };
+  const reqOf = (dm) => ({ op: 'upgrade', version: dm._expectedVersion(), from: '2.369.100', by: 'system:device-upgrade' });
+  const wn = world({ hub: 'nobody' }), kn = sinkOf();
+  for (let k = 0; k < 5; k++) hello(wn, 'dev:t-never', kn).dm.stop();
+  ok(kn.lines.length === 1 && kn.lines[0].ask === 'never' && kn.logs.filter((m) => m.includes('the update is not allowed on this machine')).length === 1,
+    'B-0194: the hub\'s list says Never — five reconnects (five fresh clients, one hello each, each stopped): ONE code line, ONE journal line; the 4 repeats counted in the DEVICE\'s store', kn);
+  const goes = freshDm(wn, 'dev:t-never', kn); goes._helloFoldEnd(reqOf(goes));
+  ok(kn.lines.length === 2 && kn.lines[1].repeats === 4 && kn.lines[1].ask === 'never' && DeviceManager.helloFoldsOf('dev:t-never').size === 0, 'the update then goes: its refusals\' count said FIRST (ONE line, 4 repeats) and the record closed', kn.lines.map((l) => l.repeats || 0));
+  ok(read('src/agentd/client.js').includes("              this._helloFoldEnd({ op: 'upgrade', version: expected, from: msg.daemonVersion || undefined, by: BY_UPGRADE });")
+    && read('src/agentd/client.js').includes("      this._helloFoldEnd(req);   // B-0194: allowed")
+    && read('src/server/dial-pairing.js').includes("      helloKey: 'dev:' + deviceId,") && read('src/hosts.js').includes("      helloKey: 'dev:' + (h.deviceId || id),"),
+    'the push at the hello and the owner\'s Allow say the count first (the same key); BOTH construction sites key the store by the DEVICE (a graduated ssh host shares the dial road\'s)');
+  // THE RECORD'S OWN TIMER: the hellos stop — the count is said all the same (no hello, no exit needed)
+  const wt = world({ hub: 'nobody' }), kt = sinkOf();
+  for (let k = 0; k < 3; k++) hello(wt, 'dev:t-timer', kt, (dm) => { dm._foldSayMs = 40; }).dm.stop();
+  for (let k = 0; k < 300 && !kt.lines.some((l) => l.repeats); k++) await new Promise((r) => setTimeout(r, 10));   // (a count: until the timer says it)
+  ok(kt.lines.length === 2 && kt.lines[1].repeats === 2, 'the hellos stop after three: the record\'s own timer says the 2 repeats (every client already stopped)', kt.lines.map((l) => l.repeats || 0));
+  const keepArm = DeviceManager.prototype._helloArm; let armed = 0;
+  DeviceManager.prototype._helloArm = () => { armed++; };
+  const wt2 = world({ hub: 'nobody' }), kt2 = sinkOf();
+  try { for (let k = 0; k < 3; k++) hello(wt2, 'dev:t-timer2', kt2, (dm) => { dm._foldSayMs = 40; }).dm.stop(); for (let k = 0; k < 20; k++) await new Promise((r) => setTimeout(r, 10)); } finally { DeviceManager.prototype._helloArm = keepArm; }
+  ok(armed >= 1 && kt2.lines.length === 1, `CONTROL (no timer of the record's own; the plant asked ${armed}×): the count waits for a hello that never comes ⇒ RED`, kt2.lines.length);
+  DeviceManager.dropHelloFolds('dev:t-timer2');
+  // the hour: a hello past it says the count with itself
+  const wh = world({ hub: 'nobody' }), kh = sinkOf(), T0 = Date.parse('2026-11-19T00:00:00Z'); let now = T0;
+  for (let k = 0; k < 3; k++) { hello(wh, 'dev:t-hour', kh, (dm) => { dm._clock = () => now; }).dm.stop(); now += 60000; }
+  now = T0 + 3600000 + 5000; hello(wh, 'dev:t-hour', kh, (dm) => { dm._clock = () => now; });
+  ok(kh.lines.length === 2 && kh.lines[1].repeats === 3 && kh.lines[1].since === T0, 'a hello past the hour says the count with itself (3 repeats since the first line; an injected clock)', kh.lines.map((l) => l.repeats || 0));
+  // the ask road in the real hello order: the 60 s pass, the quiet window, then — past it — the standing item
+  const wa = world(), ka = sinkOf();
+  for (let k = 0; k < 6; k++) { const h = hello(wa, 'dev:t-ask', ka); await settle(); wa.clock.t += 60000; wa.fire(); await settle(); h.dm.stop(); }
+  const waits = () => ka.logs.filter((m) => m.includes('the update waits for the owner')).length;
+  ok(ka.lines.length === 2 && ka.lines[0].ask === 'expired' && ka.lines[1].ask === 'quiet' && waits() === 1 && ka.logs.filter((m) => m.includes('the update is not allowed on this machine')).length === 1,
+    'the ask road over six reconnects (the verdict, then the ask): «waits» once, the 60 s pass (one line), the quiet window\'s first refusal (one line), the 4 repeats counted', { asks: ka.lines.map((l) => l.ask), logs: ka.logs });
+  wa.clock.t += 11 * 60000;   // past the quiet window (10 min): the hello asks again and the standing item answers at once
+  for (let k = 0; k < 3; k++) { const h = hello(wa, 'dev:t-ask', ka); await settle(); wa.clock.t += 60000; h.dm.stop(); }
+  ok(ka.lines.length === 4 && ka.lines[2].repeats === 4 && ka.lines[2].ask === 'quiet' && ka.lines[3].ask === 'standing' && !ka.lines[3].repeats && waits() === 2,
+    'past the quiet window: the quiet count said (4) as the verdict changes, the standing refusal\'s first line; then «waits» is NOT said again and the next standing refusals are counted', { asks: ka.lines.map((l) => [l.ask, l.repeats || 0]), waits: waits() });
+  DeviceManager.dropHelloFolds('dev:t-ask');
+  ok(ka.lines.length === 5 && ka.lines[4].repeats === 2 && ka.lines[4].ask === 'standing' && !DeviceManager.helloFoldsOf('dev:t-ask'), 'the device unpaired: what its store owed said (2), then the store gone', ka.lines.map((l) => l.repeats || 0));
+  // the device's OWN list leaves the update off: the hello's own branch folds per device too (its journal line rides the answer)
+  const wo = world(), ko = sinkOf(), up = { op: 'upgrade', version: '2.369.200', from: '2.369.100', by: 'system:device-upgrade' }, vo = { ok: false, code: 'op-not-allowed', op: 'upgrade', flag: 'upgrade', remedy: 'allow it' };
+  const saidO = []; for (let k = 0; k < 4; k++) { const dm = freshDm(wo, 'dev:t-own', ko); saidO.push(dm._refusedLine(up, vo, null, { hello: true })); dm.stop(); }
+  ok(saidO.join() === 'true,false,false,false' && ko.lines.length === 1, 'the device\'s own list leaves the update off, four reconnects: said once (→ true), then counted per device (→ false)', saidO);
+  ok(read('src/agentd/client.js').includes("platform: msg.platform }), null, { hello: true })) this._log(`[agentd] daemon ${msg.daemonVersion} ≠ ${expected} — its allow list leaves \"upgrade\" off;"),
+    'the hello\'s own-list branch folds per device and its journal line («its allow list leaves "upgrade" off») rides the refusal\'s answer');
+  DeviceManager.dropHelloFolds('dev:t-own');
+  // the store is capped: a device reporting a new version at each hello never grows it past HELLO_FOLDS_MAX
+  const wcap = world({ hub: 'nobody' }), kcap = sinkOf();
+  for (let k = 0; k < 20; k++) { const dm = freshDm(wcap, 'dev:t-cap', kcap); dm._upgradeHeld(`2.369.${100 + k}`); dm.stop(); }
+  ok(DeviceManager.helloFoldsOf('dev:t-cap').size === 16, 'twenty versions reported: the device\'s store holds 16 records (the oldest said, then evicted)', DeviceManager.helloFoldsOf('dev:t-cap').size);
+  DeviceManager.dropHelloFolds('dev:t-cap'); DeviceManager.dropHelloFolds('dev:t-never'); DeviceManager.dropHelloFolds('dev:t-timer'); DeviceManager.dropHelloFolds('dev:t-hour');
+  // RED CONTROL: no device key (the fold on the instance, as the unit's first cut) — every reconnect says it again
+  const wc = world({ hub: 'nobody' }), kc = sinkOf();
+  for (let k = 0; k < 5; k++) hello(wc, null, kc).dm.stop();
+  ok(kc.lines.filter((l) => !l.repeats).length === 5, 'CONTROL (no device store — the fold on the instance): five reconnects ⇒ five lines ⇒ RED', kc.lines.length);
+}
 console.log('— ⑤ the routes');
 {
   const express = require('express');

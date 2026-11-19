@@ -635,6 +635,7 @@ class HostManager {
     }
     this._state.hosts = this._state.hosts.filter(x => x.id !== id);
     this._discoveryCache.delete(id);
+    try { require('./agentd/client.js').DeviceManager.dropHelloFolds('dev:' + (h.deviceId || id)); } catch {}   // B-0194: what its hello folds owe said, then they go
     // The host's remote-transcript cache is dead weight once the host is gone
     // (files up to 64MB each accumulated forever — audit round-3).
     try { fs.rmSync(path.join(this.dataDir, 'remote-jsonl', id), { recursive: true, force: true }); } catch {}
@@ -1469,6 +1470,7 @@ class HostManager {
       log: () => {},
       // lane device-upgrade-stuck: the same door as a dial device (src/server/device-upgrade-watch.js)
       onUpgradeStuck: (from, to, info) => this.onAgentUpgrade?.('stuck', { ...(info || {}), hostKey: id, machine: h.name || id, from, to }),
+      helloKey: 'dev:' + (h.deviceId || id),   // B-0194: the update refused at each reconnect folds across these instances — ONE store with the dial road for a graduated host
       onVersionMatch: (v) => this.onAgentUpgrade?.('matched', { hostKey: id, version: v }),
       onUpgradeBegin: (from, to) => this.onAgentUpgrade?.('begun', { hostKey: id, machine: h.name || id, from, to }), // lane win-upgrade-pipe
       onAnswer: (v) => this.onAgentUpgrade?.('answered', { hostKey: id, version: v }),

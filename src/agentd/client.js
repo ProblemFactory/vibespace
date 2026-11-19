@@ -24,6 +24,21 @@ const FOLD_SAY_MS = 60 * 60e3, FOLDS_MAX = 256;   // B-c632: a fold of repeated 
 // B-c632 (r1): the clients holding an open fold — said at the process's exit (a restart inside the hour keeps its count)
 const _OPEN_FOLDS = new Set();
 process.on('exit', () => { for (const dm of [..._OPEN_FOLDS]) { try { dm._foldEndAll(); } catch { } } });
+// B-0194: THE UPDATE'S REFUSALS AT THE HELLO, per DEVICE — `helloKey` (the dial road `dev:<deviceId>`, the ssh road the same for a
+// graduated host, else its host id) → its records; they outlive every DeviceManager of that device (a re-dial / reconnect builds
+// a fresh one). Each record says through the writers of the last client that counted it (never the client itself); at most
+// HELLO_FOLDS_MAX a device (the oldest said, then evicted); owed counts said at exit.
+const HELLO_FOLDS = new Map(), HELLO_FOLDS_MAX = 16;
+function sayHello(f) {
+  if (f.timer) { clearTimeout(f.timer); f.timer = null; }
+  if (f.more > 0 && f.out) {
+    const l = f.last;
+    try { f.out.log(`[agentd] the update ${l.summary} — ${f.code}: ${f.more} more hello(s) since ${new Date(f.saidAt).toISOString()} (the last ${new Date(f.lastAt).toISOString()}) — one line for the repeats`); } catch { }
+    if (f.out.onAct) { try { f.out.onAct({ ...l, at: f.lastAt, repeats: f.more, since: f.saidAt }); } catch { } }
+  }
+  f.more = 0; f.saidAt = f.out ? f.out.clock() : Date.now();
+}
+process.on('exit', () => { for (const s of HELLO_FOLDS.values()) for (const f of s.values()) { try { sayHello(f); } catch { } } });
 /** lane hub-act-ask: the ask's facts an act's audit line carries (`ask`, `answeredBy`) — none when nothing was asked. */
 const askFacts = (g) => (g && g.ask ? { ask: g.ask, ...(g.answeredBy ? { answeredBy: g.answeredBy } : {}) } : {});
 const BY_UPGRADE = 'system:device-upgrade'; // the hub's version-drift rule pushes a new agent (no person, no agent asked)
@@ -82,7 +97,7 @@ class DeviceManager {
    *  version      release version (= daemonVersion expected)
    *  log          logger fn
    */
-  constructor({ dataDir, bundlePath, version, nodeModules, transport, log = console.log, upgradeLedger = null, onUpgradeStuck = null, onVersionMatch = null, onUpgradeBegin = null, onAnswer = null, onAct = null, onUpgradeRefused = null, onUpgradeTrusted = null, onPolicy = null, onElevated = null, onRuntime = null, machine = null, actGate = null, hub = '' } = {}) {
+  constructor({ dataDir, bundlePath, version, nodeModules, transport, log = console.log, upgradeLedger = null, helloKey = null, onUpgradeStuck = null, onVersionMatch = null, onUpgradeBegin = null, onAnswer = null, onAct = null, onUpgradeRefused = null, onUpgradeTrusted = null, onPolicy = null, onElevated = null, onRuntime = null, machine = null, actGate = null, hub = '' } = {}) {
     this._tokFile = path.join(dataDir, 'agentd-tokens.json');
     this._bundlePath = bundlePath;
     this._version = version;
@@ -96,6 +111,7 @@ class DeviceManager {
     // on every dial-in. A ledger OUTLIVES the instance (dial-pairing.js keeps one per device); `get(expected)` →
     // `{tries, gaveUp}` for THIS bundle version, `set(expected, {tries, gaveUp})` after every change.
     this._upgradeLedger = upgradeLedger;
+    this._helloKey = typeof helloKey === 'string' && helloKey ? helloKey : null;   // B-0194: the update's refusals at the hello, per DEVICE (HELLO_FOLDS)
     // lane device-upgrade-stuck: THE door of a stuck / healed upgrade (the construction site binds the machine —
     // hosts.onAgentUpgrade → src/server/device-upgrade-watch.js). Pre-fix nothing ever assigned `_onUpgradeStuck`.
     this._onUpgradeStuck = typeof onUpgradeStuck === 'function' ? onUpgradeStuck : null;
@@ -446,10 +462,11 @@ class DeviceManager {
             } else if (msg.daemonVersion !== expected && !DP.allows(pol, 'upgrade')) {
               // lane device-allow-flags: THIS machine's own list leaves `upgrade` off — no push (the device would refuse it
               // anyway); the link is kept as-is (capability-gated), said once per link, one refused line in the audit
-              this._log(`[agentd] daemon ${msg.daemonVersion} ≠ ${expected} — its allow list leaves "upgrade" off; using it as-is (${DP.remedyOf({ machine: this._machineName(), allow: pol.allow, flag: 'upgrade', platform: msg.platform })})`);
-              this._refusedLine({ op: 'upgrade', version: expected, from: msg.daemonVersion, by: BY_UPGRADE }, DP.verdict(pol, { op: 'upgrade' }, { machine: this._machineName(), platform: msg.platform }), null, { fold: false });   // (the hello's own road: B-0194)
+              // B-0194: at every hello — said at once, then counted with the refusal's per-device fold (its journal line rides it)
+              if (this._refusedLine({ op: 'upgrade', version: expected, from: msg.daemonVersion || undefined, by: BY_UPGRADE }, DP.verdict(pol, { op: 'upgrade' }, { machine: this._machineName(), platform: msg.platform }), null, { hello: true })) this._log(`[agentd] daemon ${msg.daemonVersion} ≠ ${expected} — its allow list leaves "upgrade" off; using it as-is (${DP.remedyOf({ machine: this._machineName(), allow: pol.allow, flag: 'upgrade', platform: msg.platform })})`);
             } else if (msg.daemonVersion !== expected && fs.existsSync(this._bundlePath) && this._mayPush(msg.daemonVersion, expected) && !held) {
               led.tries += 1; this._ledgerWrite(expected, led);
+              this._helloFoldEnd({ op: 'upgrade', version: expected, from: msg.daemonVersion || undefined, by: BY_UPGRADE });   // B-0194: the update goes — its refusals' count said first
               // version drift → stream the new bundle (self-upgrade), then reconnect
               this._log(`[agentd] daemon ${msg.daemonVersion} ≠ ${expected} — upgrading (attempt ${led.tries}/3)`);
               try { this._onUpgradeBegin?.(msg.daemonVersion, expected, { platform: msg.platform }); } catch { }
@@ -747,9 +764,9 @@ class DeviceManager {
   }
   /** One refused request: the journal line + ONE audit line (`op-not-allowed`, the re-run sentence as its head). B-2fa8: a repeat
    *  of the open fold's refusal (the same act, the same verdict — B-c632's key and say rules) is counted, not said. → true when said */
-  _refusedLine(payload, v, sentence = null, { fold = true } = {}) {
+  _refusedLine(payload, v, sentence = null, { fold = true, hello = false } = {}) {
     let l = null;
-    try { l = DA.lineOf({ at: this._clock(), payload, by: payload.by, ok: false, code: v.code, outHead: v.remedy || '' }); if (fold) { this._policyOps.add(l.op); if (this._foldCount(l, { code: v.code }, argvIdOf(payload))) return false; } } catch { }
+    try { l = DA.lineOf({ at: this._clock(), payload, by: payload.by, ok: false, code: v.code, outHead: v.remedy || '' }); if (hello) { if (this._helloFold(l, { code: v.code })) return false; } else if (fold) { this._policyOps.add(l.op); if (this._foldCount(l, { code: v.code }, argvIdOf(payload))) return false; } } catch { }
     try { this._log(`[device-policy] REFUSED ${DA.keyOf(payload)} — ${sentence || DP.sentenceOf(v, { machine: this._machineName() })}`); } catch { }
     if (this._onAct && l) { try { this._onAct(l); } catch { } }
     return true;
@@ -830,6 +847,39 @@ class DeviceManager {
     if (![...this._folds.values()].some((x) => x.more > 0)) _OPEN_FOLDS.delete(this);
   }
   _foldEnd(k) { if (!this._folds.has(k)) return; this._foldSay(k); this._folds.delete(k); }
+  /** B-0194: THE UPDATE REFUSED AT EACH HELLO. A remote machine gets ONE hello per DeviceManager and every re-dial / reconnect
+   *  builds a fresh one, so these refusals fold in the device's store (HELLO_FOLDS, by `helloKey`) — B-c632's rules: the first
+   *  said at once, the repeats counted, said on a change of verdict, when the update goes, hourly (a timer of the record's own,
+   *  unref'd — the count is said even when the hellos stop), at unpair and at exit. No key ⇒ this instance's own folds. → true
+   *  when a repeat */
+  _helloStore() { if (!this._helloKey) return null; let s = HELLO_FOLDS.get(this._helloKey); if (!s) HELLO_FOLDS.set(this._helloKey, (s = new Map())); return s; }
+  _helloFold(l, g) {
+    const s = this._helloStore();
+    if (!s) return this._foldCount(l, g);
+    const k = this._foldKey(l.op, l.by, l.summary), v = `${g.code}\0${g.ask || ''}\0${g.answeredBy || ''}`, f = s.get(k);
+    const out = { log: this._log, onAct: this._onAct, clock: this._clock };   // the writers, never the client (a stopped one is not kept alive)
+    if (f && f.v === v && !(f.more === 0 && l.at - f.lastAt >= this._foldSayMs)) {
+      f.more++; f.lastAt = l.at; f.last = l; f.out = out;
+      if (l.at - f.saidAt >= this._foldSayMs) sayHello(f); else this._helloArm(f, this._foldSayMs - (l.at - f.saidAt));
+      return true;
+    }
+    if (f) sayHello(f);   // the verdict changed: what the old one counted is said first
+    s.delete(k); s.set(k, { v, code: g.code, last: l, more: 0, saidAt: l.at, lastAt: l.at, out, timer: null });
+    if (s.size > HELLO_FOLDS_MAX) { const [ok, of] = s.entries().next().value; sayHello(of); s.delete(ok); }   // the oldest said, then evicted
+    return false;
+  }
+  /** the record's own hourly say (unref'd): the count is said even when no hello comes again */
+  _helloArm(f, ms) { if (f.timer) return; f.timer = setTimeout(() => { f.timer = null; sayHello(f); }, Math.max(0, ms)); if (f.timer.unref) f.timer.unref(); }
+  /** B-0194: the update goes (pushed at the hello, or allowed by the owner) — its refusals' count said first, the record closed */
+  _helloFoldEnd(req) {
+    const k = this._foldKey(DA.keyOf(req), req.by, DA.summaryOf(req)), s = this._helloStore();
+    if (!s) { this._foldEnd(k); return; }
+    const f = s.get(k); if (f) { sayHello(f); s.delete(k); }
+  }
+  /** B-0194: a device unpaired — what its store owes is said, then the store goes */
+  static dropHelloFolds(key) { const s = HELLO_FOLDS.get(key); if (!s) return; for (const f of s.values()) { try { sayHello(f); } catch { } } HELLO_FOLDS.delete(key); }
+  /** (a suite's look at a device's store) */
+  static helloFoldsOf(key) { return HELLO_FOLDS.get(key) || null; }
   _foldEndAll() { for (const k of [...this._folds.keys()]) this._foldEnd(k); }
   /** lane hub-act-ask: the hello's update verdict (sync) → null (push it now) | 'ask' | 'deny' (said once, the agent kept). */
   _upgradeHeld(from) {
@@ -839,8 +889,11 @@ class DeviceManager {
     try { v = this._actGate.verdict(req); } catch { v = { verdict: 'deny', code: 'hub_act_denied', reason: 'error' }; }
     if (!v || v.verdict === 'allow') return null;
     if (v.verdict === 'ask') return 'ask';
-    this._act(req, { ok: false, code: v.code || 'hub_act_denied', ask: v.reason === 'nobody' ? 'never' : v.reason === 'quiet' ? 'quiet' : 'denied' });
-    this._log(`[agentd] daemon ${from} ≠ ${req.version} — the update is not allowed on this machine (${v.code || 'hub_act_denied'}); using it as-is`);
+    const code = v.code || 'hub_act_denied', ask = v.reason === 'nobody' ? 'never' : v.reason === 'quiet' ? 'quiet' : 'denied';
+    let l = null;
+    try { l = DA.lineOf({ at: this._clock(), payload: req, by: req.by, ok: false, code, ask }); if (this._helloFold(l, { code, ask })) return 'deny'; } catch { }   // B-0194: a repeat at a later hello — counted (per device), nothing said
+    if (this._onAct && l) { try { this._onAct(l); } catch { } }
+    this._log(`[agentd] daemon ${from} ≠ ${req.version} — the update is not allowed on this machine (${code}); using it as-is`);
     return 'deny';
   }
   /** lane hub-act-ask: the owner is asked about the update while the link runs on the agent as it is; an Allow pushes it over
@@ -848,9 +901,17 @@ class DeviceManager {
   _askUpgrade(from, { mux, sock, platform } = {}) {
     const expected = this._expectedVersion();
     const req = { op: 'upgrade', version: expected, from: from || undefined, by: BY_UPGRADE };
-    this._log(`[agentd] daemon ${from} ≠ ${expected} — the update waits for the owner's answer (For you)`);
+    // B-0194: while the standing item refuses this update (its fold open, not stale) a hello's ask is a repeat — no «waits» line
+    const k = this._foldKey(DA.keyOf(req), req.by, DA.summaryOf(req)), hs = this._helloStore(), open = hs ? hs.get(k) : this._folds.get(k);
+    if (!(open && open.code === 'ask_standing' && this._clock() - open.lastAt < this._foldSayMs)) this._log(`[agentd] daemon ${from} ≠ ${expected} — the update waits for the owner's answer (For you)`);
     Promise.resolve(this._actGate.check(req)).then((g) => {
-      if (g && !g.ok) { this._act(req, { ok: false, code: g.code, ask: g.ask, ...(g.answeredBy ? { answeredBy: g.answeredBy } : {}) }); this._log(`[agentd] the update to ${expected} was not allowed (${g.code}) — the agent stays at ${from}`); return; }
+      if (g && !g.ok) {
+        let l = null;
+        try { l = DA.lineOf({ at: this._clock(), payload: req, by: req.by, ok: false, code: g.code, ask: g.ask, answeredBy: g.answeredBy }); if (this._helloFold(l, g)) return; } catch { }   // B-0194: refused again at a later hello — counted (per device)
+        if (this._onAct && l) { try { this._onAct(l); } catch { } }
+        this._log(`[agentd] the update to ${expected} was not allowed (${g.code}) — the agent stays at ${from}`); return;
+      }
+      this._helloFoldEnd(req);   // B-0194: allowed — its refusals' count said first
       if (!this._conn || this._conn.mux !== mux) { this._log('[agentd] the update was allowed but its link is gone — the next hello asks again'); return; }
       const led = this._ledgerRead(expected); led.tries += 1; this._ledgerWrite(expected, led);
       try { this._onUpgradeBegin?.(from, expected, { platform }); } catch { }

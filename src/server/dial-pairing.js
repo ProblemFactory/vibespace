@@ -238,6 +238,7 @@ async function unpairDialDevice(deviceId) {
   const live = agentdDials.get(deviceId);
   if (live) { try { live.destroy(); } catch { } agentdDials.delete(deviceId); }
   agentdDialDevices.delete(deviceId);
+  try { require('../agentd/client.js').DeviceManager.dropHelloFolds('dev:' + deviceId); } catch { }   // B-0194: what its hello folds owe said, then they go
 }
 // A DeviceManager over a DIALED-IN device (Transport B consumption): the
 // device's daemon holds the mux-server end; we drive it (fs/serve-folder/
@@ -309,6 +310,7 @@ async function deviceForDial(deviceId, _retried = false) {
       // lane device-upgrade-stuck: the line NAMES the device — two devices' upgrade lines read as one machine's "two versions"
       log: (...a) => console.log('[device-dial]', JSON.stringify(String(deviceId)), ...a),
       upgradeLedger: upgradeLedgerFor(deviceId), // the loop breaker's count outlives this instance (verify-r1 C1)
+      helloKey: 'dev:' + deviceId, // B-0194: the update refused at each re-dial folds across these instances (client.js HELLO_FOLDS)
       // lane device-upgrade-stuck: THE door (hosts.onAgentUpgrade → src/server/device-upgrade-watch.js)
       onUpgradeStuck: (from, to, info) => { const h = hosts.findByDeviceId(deviceId); hosts.onAgentUpgrade?.('stuck', { ...(info || {}), hostKey: h ? h.id : 'host-dial-' + deviceId, machine: (h && h.name) || deviceId, from, to }); },
       onVersionMatch: (v) => { const h = hosts.findByDeviceId(deviceId); hosts.onAgentUpgrade?.('matched', { hostKey: h ? h.id : 'host-dial-' + deviceId, version: v }); },
