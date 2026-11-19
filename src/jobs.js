@@ -1326,7 +1326,13 @@ class JobManager {
     };
   }
   /** The notifications waiting for a conversation (the SAME objects — `drainNotifs(cid, new Set(these))` takes them). */
-  peekNotifs(cid) { if (!cid) return []; this._judgeHeldView(cid); return (this.pendingNotifs.get(cid) || []).slice(); }
+  peekNotifs(cid) {
+    if (!cid) return [];
+    this._judgeHeldView(cid);
+    const q = (this.pendingNotifs.get(cid) || []).slice();
+    const v = typeof this.d.viewerOf === 'function' ? this.d.viewerOf(cid) : undefined;
+    return v && v.held ? q.filter((n) => n && (n.ho || this.printableNow(cid, n.jobId, v, { sub: n.sub === true }))) : q;   // THE STORE HELD UNREAD: an undecided line stays queued
+  }
   /** r3 (law C at the DRAIN): a held line is judged at the turn that would print it — every drain (the prompt's, the session
    *  start's, the user's hand-over) reads through peekNotifs. With a LIVE record of the conversation (the drain runs for one),
    *  an item of a job it can no longer view (THE predicate) is dropped, never printed; a claimed item (a hand-over in flight) and
@@ -1368,6 +1374,14 @@ class JobManager {
     const role = M.addressedTo(rec, v, parent !== undefined ? parent : this._cronParentOf(rec));
     if (role) return role;
     return v.live ? 'refused' : 'unknown';
+  }
+  /** THE STORE HELD UNREAD (lane bl-windows): may the drain PRINT this line now — owed, or undecided with no record of the
+   *  conversation (as before); while the Task Groups store is held (`viewer.held`, the wiring's viewerOf) an undecided line is
+   *  KEPT, never printed: only a group could prove it, and the groups are unknown until the lift judges it */
+  printableNow(cid, jobId, viewer = undefined, { sub = false } = {}) {
+    const v = viewer !== undefined ? viewer : typeof this.d.viewerOf === 'function' ? this.d.viewerOf(cid) : undefined;
+    const r = this.viewVerdict(cid, jobId, { viewer: v, sub });
+    return r === 'unknown' ? !(v && v.held) : r !== 'refused' && r !== 'gone';
   }
   /** an owed verdict (either role) */
   static owed(verdict) { return verdict === 'owner' || verdict === 'subscriber'; }

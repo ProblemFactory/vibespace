@@ -66,6 +66,8 @@ export function whoChips(use, { t = (s) => s, nameOfConversation = () => '', tas
     const deleted = w.deleted === true || (w.deleted === undefined && !mine && !w.title);
     const archived = !deleted && (w.archived === true || !!(mine && mine.archived));
     // the tooltip says what the chip MEANS (2026-09-28: it repeated the name — "a deleted Task Group — a deleted Task Group")
+    // THE STORE HELD UNREAD (lane bl-windows): the hub could not read its Task Groups — the group is UNKNOWN, never «deleted»
+    if (w.unreadable === true && !title) return { key: chipKeyOf(w), kind: 'task', name: t("a Task Group (the list cannot be read right now)"), live: false, dead: false, amber: true, tooltip: t("Task Groups cannot be read right now — For you says why") };
     if (deleted) return { key: chipKeyOf(w), kind: 'task', name: t('a deleted Task Group'), live: false, dead: true, deleted: true, amber: true, tooltip: t('Nobody gets access through it any more — remove it with Change…') };
     return { key: chipKeyOf(w), kind: 'task', name: title || String(w.id), live: false, dead: archived, archived, amber: archived,
       tooltip: archived ? t('Task Group — archived: its conversations can’t use this now') : t('Task Group — every conversation in it, now or later') };
@@ -134,8 +136,9 @@ export function pickerRows(view, { sessions = [], groups = [], groupsOfSession =
     if (w.kind === 'task') {
       const key = `task:${w.id}`;
       if (!wire.has(key)) {
-        const dead = w.deleted || !w.title;
-        rows.push({ key, kind: 'group', id: w.id, name: dead ? t('a deleted Task Group') : String(w.title), hint: dead ? t('nobody gets access through it any more') : (w.archived ? t('archived') : ''), groupIds: [], groupNames: [] });
+        const held = w.unreadable === true && !w.title;   // THE STORE HELD UNREAD: unknown, never «deleted»
+        const dead = !held && (w.deleted || !w.title);
+        rows.push({ key, kind: 'group', id: w.id, name: held ? t("a Task Group (the list cannot be read right now)") : dead ? t('a deleted Task Group') : String(w.title), hint: held ? t("Task Groups cannot be read right now — For you says why") : dead ? t('nobody gets access through it any more') : (w.archived ? t('archived') : ''), groupIds: [], groupNames: [] });
         wire.set(key, { kind: 'task', id: w.id });
       }
       selected.push(key);
@@ -252,6 +255,7 @@ export function refusalWords(r, t = (s) => s, { max = 64 } = {}) {
     case 'too_many': return t('At most {n} conversations and Task Groups', { n: max });
     case 'list-changed': return t('The list changed while this dialog was open (another window, or an agent) — here it is as it is now; nothing was saved');
     case 'except_unnamed': return t('This grant changed while the dialog was open — close it and open it again');   // lane held-except-doors
+    case 'TASK_GROUPS_UNREAD': return t("Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.");   // THE STORE HELD UNREAD (lane bl-windows): the page's own words, never the server's English
     default: return null;
   }
 }

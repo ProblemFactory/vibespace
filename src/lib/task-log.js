@@ -8,7 +8,7 @@ import { registerOpenAction } from './window-types.js';
 import { PRIORITIES, normalizePriority, priorityMarker, sortBacklog } from '../backlog-select.js';
 // "Clear content…" (2026-09-28): the ONE confirm dialog + request path, and the cleared sentence's words
 import { clearRecords, isCleared, clearedText } from './record-clear-ui.js';
-import { touches } from '../task-delta.js'; // PURE (lane task-group-fanout): does a tasks-updated delta concern this group
+import { touches, windowVerdict } from '../task-delta.js'; // PURE (lane task-group-fanout): does a tasks-updated delta concern this group
 import { matchSnippet } from '../record-clear.js'; // PURE: why a Find matched a row whose note does not say it (the dialog's line)
 import { enterSubmits } from './chat-enter-keys.js';
 import { afterPointerUp, blurCommits } from './blur-commit.js'; // lane task-group-context: the add boxes save when left (after the release)
@@ -117,7 +117,8 @@ export function mountTaskLog(app, taskId, root, { tab, embedded = false, signal 
   const render = () => {
     task = sidebar._taskById(taskId);
     if (!task) {
-      if (!sidebar._tasksLoaded) { root.innerHTML = `<div class="empty-hint">${escHtml(t('Loading task…'))}</div>`; return; }
+      const v = windowVerdict(task, { loaded: sidebar._tasksLoaded, unread: sidebar._tasksUnread });   // THE STORE HELD UNREAD: a held mirror keeps the window
+      if (v !== 'gone') { root.innerHTML = `<div class="empty-hint">${escHtml(v === 'held' ? t("Task Groups cannot be read right now — this window stays and fills in when they read again") : t('Loading task…'))}</div>`; return; }
       onGone?.();
       return;
     }

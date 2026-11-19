@@ -1196,7 +1196,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
           groups: Object.keys(state?.sessionGroups || {}).length,
         },
         bookmarks: { count: (bookmarks || []).length },
-        tasks: { count: (getTasks?.()?.list?.() || []).length },
+        tasks: { count: (getTasks?.()?.list?.() || []).length, ...(getTasks?.()?.unreadState?.() ? { unread: true } : {}) },   // THE STORE HELD UNREAD (lane bl-windows): never «0 groups» for a store that cannot be read
         pricing: (() => {
           const p = getUsageHistory?.()?.pricingTable?.() || {};
           return { count: Object.keys(p.tiers || {}).length + Object.keys(p.accounts || {}).length };
@@ -1216,6 +1216,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
 
   router.post('/api/config/export', (req, res) => (async () => {   // async (lane vault-contents-window r2: the second password's derive) — a throw still answers 500
     const { sections = [], includeSensitive = [], passphrase, clientPrefs } = req.body || {};
+    { const held = Array.isArray(sections) && sections.includes('tasks') ? getTasks?.()?.unreadRefusal?.('a backup of Task Groups') : null; if (held) return res.status(503).json({ error: held, code: 'TASK_GROUPS_UNREAD' }); }   // THE STORE HELD UNREAD (lane bl-windows): never a backup that silently holds no groups
     const secondPassword = req.body ? req.body.secondPassword : undefined;   // lane vault-contents-window r2: taken off the request at once
     if (req.body) delete req.body.secondPassword;
     const file = {
@@ -1298,6 +1299,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     // list row is refused WHOLE — all or nothing: no section of it is applied
     if (sections.includes('settings') && file.sections.settings && typeof file.sections.settings === 'object' && refuseEngineRows(req, res, file.sections.settings)) return;
     if (sections.includes('settings') && file.sections.settings && typeof file.sections.settings === 'object' && refuseSpendRows(req, res, file.sections.settings)) return; // lane setting-doors pick 0: all or nothing, as the engine rows
+    { const held = sections.includes('tasks') && file.sections.tasks !== undefined ? getTasks?.()?.unreadRefusal?.('an import of Task Groups') : null; if (held) return res.status(503).json({ error: held, code: 'TASK_GROUPS_UNREAD' }); }   // THE STORE HELD UNREAD: refused WHOLE before any section is applied
     const applied = [];
     const apply = (name, fn) => {
       if (!sections.includes(name) || file.sections[name] === undefined) return;

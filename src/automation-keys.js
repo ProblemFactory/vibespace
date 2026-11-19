@@ -315,6 +315,7 @@ function reachVerdict({ keyId = '', caller = '', target = {}, opened = [], reach
   // THE ONE ADMISSION (lane grants-unify — src/grant-model.js admits): the target as the caller the grant's REACH would name
   // (B-3190: no grant row is a reach of its own — the `grants` a caller passes are not read)
   const facts = { conversationKeys: cid ? [cid] : [`webui:${wid}`], groupIds: (Array.isArray(t.groups) ? t.groups : []).filter(Boolean).map(String) };
+  if (t.groupsUnreadable === true || GM.groupsHeld()) facts.groupsUnreadable = true;   // THE STORE HELD UNREAD (lane bl-windows): a reach «…, except G» never admits a target whose groups are unknown
   const r = reachOf(reach) || 'opened';   // an unknown reach reads as the narrowest
   // the reach this use rides (`reachRows`, the riding grants' rows — useVerdict's), else the summary mapped
   const rrows = (Array.isArray(reachRows) ? reachRows : [reachRowOf({ reach: r })]).filter(Boolean);
@@ -350,6 +351,7 @@ function useVerdict({ key = null, grants = [], subject = '', subjectGroups = [],
   // an outside caller is judged by `external` grants ONLY; a conversation by THE ONE ADMISSION over each grant's use row
   // (lane grants-unify: its own conversation, one of its Task Groups, All agents — minus the members the owner left out) — never the other's
   const facts = { conversationKeys: [str(subject).slice('session:'.length)], groupIds: Array.isArray(subjectGroups) ? subjectGroups : [], groupsUnreadable: !!subjectGroupsUnreadable };
+  if (GM.groupsHeld()) facts.groupsUnreadable = true;   // THE STORE HELD UNREAD (lane bl-windows): a held store's groups UNKNOWN
   const cands = [];
   let excepted = false, could = null;
   for (const g of (Array.isArray(grants) ? grants : []).map(grantOf)) {

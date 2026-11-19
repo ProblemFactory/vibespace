@@ -26,6 +26,7 @@
  * caller's onRecord.
  */
 const fs = require('fs');
+const WD = require('./watch-door.js');   // the one door for a file watch (2026-11-19)
 const path = require('path');
 
 const MAX_READ = 8 * 1024 * 1024;
@@ -91,7 +92,7 @@ function createWorkflowTailer({
     if (st.stopped) return;
     st.armed = true;
     try {
-      st.watcher = fs.watch(dir, { persistent: false }, () => {
+      st.watcher = WD.watch(dir, { persistent: false }, () => {   // the door: a refused watch / a watcher's error is a poll, never a throw
         if (st.debounce || st.stopped) return;
         st.debounce = setTimeout(() => { st.debounce = null; drain(); }, debounceMs);
       });

@@ -738,7 +738,7 @@ export function openSessionProps(app, sessionRef, { syncId, section = null } = {
       }
       tgSec.appendChild(lbl);
     }
-    if (!(sidebar._tasks || []).filter(t => !t.archived).length) tgSec.insertAdjacentHTML('beforeend', `<div class="empty-hint">${escHtml(t('No Task Groups yet'))}</div>`);
+    if (!(sidebar._tasks || []).filter(t => !t.archived).length) tgSec.insertAdjacentHTML('beforeend', `<div class="empty-hint">${escHtml(sidebar._tasksUnread ? t("Task Groups cannot be read right now — For you says why") : t('No Task Groups yet'))}</div>`);
 
     // ── What it may use (unit what-it-may-use — the owner, 2026-11-17) — every door, by what, read from the hub; MOUNTED ONCE
     // per window: its element rides every render (a broadcast repaints this body; the section refetches on its own events only)

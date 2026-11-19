@@ -1040,7 +1040,7 @@ class App {
       mkRow('layouts', t('Layouts & desktops'), t('{count} layout(s), {desktops} desktop(s), custom grids', { count: s.layouts.count, desktops: s.layouts.desktops })),
       mkRow('userState', t('Session metadata'), t('stars, renames, {groups} group(s), per-session configs', { groups: s.userState.groups })),
       mkRow('bookmarks', t('File bookmarks'), t('{count} bookmark(s)', { count: s.bookmarks.count })),
-      mkRow('tasks', t('Task Groups'), t('{count} group(s) incl. backlogs & activity logs', { count: s.tasks?.count || 0 })),
+      s.tasks?.unread ? mkRow('tasks', t('Task Groups'), t("Task Groups cannot be read right now — For you says why"), { disabled: true }) : mkRow('tasks', t('Task Groups'), t('{count} group(s) incl. backlogs & activity logs', { count: s.tasks?.count || 0 })),   // THE STORE HELD UNREAD: the hold, not «0 groups»; never ticked
       mkRow('pricing', t('Usage pricing table'), t('{count} model rate(s) / account discount(s)', { count: s.pricing?.count || 0 })),
       mkRow('clientPrefs', t('This browser’s preferences'), t('theme, font, language, usage-view choices')),
     );
@@ -1095,7 +1095,7 @@ class App {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ sections, includeSensitive, passphrase, clientPrefs, ...(includeSensitive.length && info.sensitive.secondPassword ? { secondPassword: passRow.querySelector('#cfg-exp-second')?.value || '' } : {}) }),
         });
-        if (!res.ok) { err.textContent = (await res.json().catch(() => ({}))).error || t('Export failed'); return; }
+        if (!res.ok) { const d = await res.json().catch(() => ({})); err.textContent = d.code === 'TASK_GROUPS_UNREAD' ? t("Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.") : (d.error || t('Export failed')); return; }   // THE STORE HELD UNREAD: the page's own words
         const blob = await res.blob();
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
@@ -1197,7 +1197,7 @@ class App {
             body: JSON.stringify({ file, sections, includeSensitive, passphrase }),
           });
           const d = await res.json().catch(() => ({}));
-          if (!res.ok) { err.textContent = d.error || t('Import failed'); return; }
+          if (!res.ok) { err.textContent = d.code === 'TASK_GROUPS_UNREAD' ? t("Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.") : (d.error || t('Import failed')); return; }
           if (d.clientPrefs) {
             for (const [k, v] of Object.entries(d.clientPrefs)) {
               if (CLIENT_PREF_KEYS.includes(k)) localStorage.setItem(k, v);

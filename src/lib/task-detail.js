@@ -2,7 +2,7 @@ import { escHtml, showConfirmDialog, showToast, autoTaskColor, showContextMenu, 
 import { t, tc } from './i18n.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { mountTaskLog } from './task-log.js'; // the Backlog / 活动记录 tabs ARE the log viewer
-import { touches, metaChanged } from '../task-delta.js'; // PURE (lane task-group-fanout): what a tasks-updated delta moved
+import { touches, metaChanged, windowVerdict } from '../task-delta.js'; // PURE (lane task-group-fanout): what a tasks-updated delta moved
 import { blurCommits, afterPointerUp } from './blur-commit.js'; // a box saves when left, after the release
 import { pathField } from './path-field.js'; // lane path-field's component — the Context table's path cells, the export file
 import { KEY_FILES } from '../task-context.js'; // PURE: the Context table's default key files (the store's rules)
@@ -704,7 +704,7 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
       try {
         const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/export`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: p }) });
         const d = await res.json().catch(() => ({}));
-        if (res.ok) showToast(t('Exported to {path}', { path: d.path })); else showToast(d.error || t('Export failed'), { type: 'error' });
+        if (res.ok) showToast(t('Exported to {path}', { path: d.path })); else showToast(d.code === 'TASK_GROUPS_UNREAD' ? t("Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.") : (d.error || t('Export failed')), { type: 'error' });   // THE STORE HELD UNREAD: the page's own words
       } catch { showToast(t('Export failed — server unreachable'), { type: 'error' }); }
     };
     const importBtn = document.createElement('button'); importBtn.className = 'task-detail-btn'; importBtn.textContent = t('Import');
@@ -715,7 +715,7 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
       try {
         const res = await fetch('/api/tasks/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: p }) });
         const d = await res.json().catch(() => ({}));
-        if (res.ok) showToast(t('Imported {id}', { id: d.task?.id || '' })); else showToast(d.error || t('Import failed'), { type: 'error' });
+        if (res.ok) showToast(t('Imported {id}', { id: d.task?.id || '' })); else showToast(d.code === 'TASK_GROUPS_UNREAD' ? t("Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.") : (d.error || t('Import failed')), { type: 'error' });
       } catch { showToast(t('Import failed — server unreachable'), { type: 'error' }); }
     };
     repoWrap.append(repoPf.el, exportBtn, importBtn);
@@ -819,7 +819,8 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     if (!task) {
       // Layout restore can replay this window before the initial /api/tasks
       // fetch lands — show a placeholder and let tasks-updated re-render.
-      if (!sidebar._tasksLoaded) { body.innerHTML = `<div class="empty-hint">${escHtml(t('Loading task…'))}</div>`; return; }
+      const v = windowVerdict(task, { loaded: sidebar._tasksLoaded, unread: sidebar._tasksUnread });   // THE STORE HELD UNREAD: a held mirror keeps the window (never closed as «deleted elsewhere»)
+      if (v !== 'gone') { body.innerHTML = `<div class="empty-hint">${escHtml(v === 'held' ? t("Task Groups cannot be read right now — this window stays and fills in when they read again") : t('Loading task…'))}</div>`; return; }
       app.wm.closeWindow(winInfo.id); // deleted elsewhere
       return;
     }

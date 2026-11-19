@@ -1620,7 +1620,8 @@ function namedRowOf(p, x) {
 const _namedFacts = new WeakMap();  // ctx → its facts as the model last prepared them (the model answers them again while they are the same)
 const NO_GROUPS = Object.freeze([]);
 function namedFactsOf(ctx) {
-  const F = GM.prepareFacts({ conversationKey: str(ctx.id), groupIds: Array.isArray(ctx.groups) ? ctx.groups : NO_GROUPS }, _namedFacts.get(ctx));
+  const held = ctx.groupsUnreadable === true || GM.groupsHeld();   // THE STORE HELD UNREAD (lane bl-windows): the groups UNKNOWN, never «in none» (a row's except)
+  const F = GM.prepareFacts({ conversationKey: str(ctx.id), groupIds: Array.isArray(ctx.groups) ? ctx.groups : NO_GROUPS, ...(held ? { groupsUnreadable: true } : {}) }, _namedFacts.get(ctx));
   _namedFacts.set(ctx, F);
   return F;
 }

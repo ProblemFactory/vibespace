@@ -890,7 +890,17 @@ const LEGACY = Object.freeze({
   groupVisibility(level, gid, targetGroups = []) { return (level === 'visible' || level === 'messageable') && (targetGroups || []).includes(gid); },
 });
 
+/** THE TASK GROUPS STORE HELD UNREAD (lane bl-windows): while the hub cannot read task-groups.json every LIVE agent's Task Groups
+ *  are UNKNOWN — never «in no group» (a row «…, except Task Group G» would admit G's members). The hub hands this ONE predicate
+ *  at boot (task-groups-wiring createStore); the doors that judge a live agent from the roster's groups ask it (channel-acl,
+ *  channel-filter, channels-grants, automation-keys) — never a caller that supplies its own groups (the grants migration's
+ *  probes). A copy without it (the page) keeps the default; a predicate that throws reads as held (fail closed). */
+let groupsHeldFn = () => false;
+function setGroupsHeld(fn) { groupsHeldFn = typeof fn === 'function' ? fn : () => false; }
+function groupsHeld() { try { return groupsHeldFn() === true; } catch { return true; } }
+
 module.exports = {
+  setGroupsHeld, groupsHeld,
   DOORS, PRINCIPAL_KINDS, REFUSALS, WRITE_REFUSALS, LIST_MAX, ENTRY_FIELDS, GROUP_ID_RE, CONVERSATION_KEY_RE, RESOURCE_SHAPES, resourceShapeOk, HOST_TOKEN_RE, HOSTS_MAX, hostListOf, PUBLIC_SUFFIXES, COMMANDS_MAX, commandListOf, commandKeyOf, scopeListOf,
   principalKey, bareOf, normEntry, normExcept, normRow, validateWrite, exceptUnnamed, EXCEPT_UNNAMED_WORDS, onlyCarried, ONLY_UNNAMED_WORDS, factsOf, admits, prepareRow, prepareFacts, hitsOf, sharesGroup, names, namesNow, specificityOf,
   publicRow, rowKey, conversationKeyOf, conversationKeysOf, keyFromSessionKey, keyFromSubject,

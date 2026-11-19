@@ -208,7 +208,7 @@ function create({ grants = null, dataDir = null } = {}) {
     const k = GM.principalKey(e);
     const own = r.to.filter((x) => GM.principalKey(x) === k);
     if (!own.length) return false;
-    return GM.admits([{ door: DOORS.watch, resource: String(res), to: own, except: exceptFor(own[0], r.except) }], { conversationKey: String(cid), groupIds: groups }).ok;
+    return GM.admits([{ door: DOORS.watch, resource: String(res), to: own, except: exceptFor(own[0], r.except) }], { conversationKey: String(cid), groupIds: groups, ...(GM.groupsHeld() ? { groupsUnreadable: true } : {}) }).ok;   // THE STORE HELD UNREAD (lane bl-windows): a held store's groups UNKNOWN
   }
   /** «WHAT IT MAY USE» (unit what-it-may-use, cure r1 — 主开发 MUST 1): WHY nothing of a grain admits one conversation, judged
    *  ENTRY BY ENTRY exactly as the door gives them (each entry its OWN 「除了」 — exceptFor: a group's / everyone's carries the

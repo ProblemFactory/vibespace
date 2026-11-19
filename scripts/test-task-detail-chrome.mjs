@@ -19,6 +19,11 @@
 //            ≥ 8 px between sections, one 72 px label column; a broadcast re-render keeps the reader's place; a control
 //            with the body class off (the 2.369.348 shape) fails the same measures
 //   phone 390 (zh) · the same window: one card per Context row, nothing wider than the viewport
+//   held (lane bl-windows, 主开发's MUST 3) · a restart over DAMAGED task-groups.json bytes: the store is HELD — the open
+//            Task Group window STAYS and says the hold (never closed as «deleted elsewhere»), a reload RESTORES it from the
+//            layout with the same words, the board says the hold and offers no create, the person's open is not refused
+//            «未找到任务组», the routes answer 503 by code; the good bytes put back (the backup door) ⇒ the lift's broadcast
+//            fetches again and the window shows its group
 // PNGs: $VIBESPACE_TGC_PNG_DIR/{desk-settings,desk-stepped,desk-ref,desk-backlog,desk-members,desk-session-props,phone}.png
 import { spawn, execSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -69,8 +74,8 @@ fs.writeFileSync(path.join(wt, 'data', 'task-groups.json'), JSON.stringify({ ver
 const baseEnv = { ...process.env }; delete baseEnv.DISPLAY; delete baseEnv.WAYLAND_DISPLAY; delete baseEnv.DBUS_SESSION_BUS_ADDRESS; delete baseEnv.ANTHROPIC_API_KEY;
 const srvEnv = { ...baseEnv, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, XDG_RUNTIME_DIR: RUNTIME, VIBESPACE_SKIP_AGENT_HOOKS: '1', CLAUDE_CMD: '/bin/false' };
 const srvLog = [];
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: srvEnv, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
-srv.stdout.on('data', (d) => srvLog.push(String(d))); srv.stderr.on('data', (d) => srvLog.push(String(d)));
+const bootServer = () => { const p = spawn(process.execPath, ['server.js'], { cwd: wt, env: srvEnv, stdio: ['ignore', 'pipe', 'pipe'], detached: true }); p.stdout.on('data', (d) => srvLog.push(String(d))); p.stderr.on('data', (d) => srvLog.push(String(d))); return p; };
+let srv = bootServer();   // `let`: the held scene restarts it (cleanup ends the one running)
 const client = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--password-store=basic', '--window-size=1100,900', `--user-data-dir=${scratch('tgc-client')}`, 'about:blank'], { stdio: 'ignore', detached: true, env: baseEnv });
 let cleaned = false;
 const cleanup = () => {
@@ -363,6 +368,47 @@ try {
     return { narrow: el.classList.contains('narrow'), head: getComputedStyle(el.querySelector('.ctx-headrow')).display, cols: getComputedStyle(rows[0]).gridTemplateColumns.split(' ').length, over, vw: innerWidth }; })()`), 20000);
   check('phone: one card per Context row (the narrow layout, no column header), nothing wider than the viewport', !!phone && phone.narrow && phone.head === 'none' && phone.cols === 2 && phone.over === 0, phone);
   await shot(P.S, 'phone.png');
+
+  // ════ THE STORE HELD UNREAD (lane bl-windows, 主开发's MUST 3) ════
+  console.log('── the store held unread (zh) ──');
+  {
+    const TGF = path.join(wt, 'data', 'task-groups.json');
+    await D.ev(`(app.openTaskDetail(${JSON.stringify(ir.id)}), true)`);
+    const kept = await until(() => { try { const t = fs.readFileSync(path.join(wt, 'data', 'layouts.json'), 'utf8'); return t.includes('openTaskDetail') && t.includes(ir.id); } catch { return false; } }, 20000, 250);
+    check('held: the desk\'s saved layout names the IR group\'s window (read from data/layouts.json)', !!kept);
+    const good = fs.readFileSync(TGF);
+    try { process.kill(-srv.pid, 'SIGKILL'); } catch { }
+    await until(() => srv.exitCode !== null || srv.signalCode !== null, 15000, 100);
+    fs.writeFileSync(TGF, '{"version":1,"tasks":{"T-');   // bytes that do not parse: a torn write
+    srv = bootServer();
+    const up2 = await until(async () => { if (srv.exitCode !== null) return 'dead'; await fetch(`http://127.0.0.1:${PORT}/api/home`); return 'up'; }, 120000, 250);
+    check('held: the server starts over the damaged file', up2 === 'up', srvLog.join('').slice(-800));
+    const list = await api('GET', '/api/tasks');
+    const made = await fetch(`http://127.0.0.1:${PORT}/api/tasks`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: 'x' }) });
+    const madeBody = await made.json().catch(() => ({}));
+    check('held: the list says `unread` (damaged, the file named) with no groups; a create answers 503 TASK_GROUPS_UNREAD; the bytes are untouched', Array.isArray(list.tasks) && list.tasks.length === 0 && !!list.unread && list.unread.damaged === true && list.unread.file === 'task-groups.json' && made.status === 503 && madeBody.code === 'TASK_GROUPS_UNREAD' && fs.readFileSync(TGF, 'utf8') === '{"version":1,"tasks":{"T-', { unread: list.unread, status: made.status, code: madeBody.code });
+    const HOLD = '任务组暂时无法读取——这个窗口保留，读取恢复后会自动填充';
+    const winText = (P) => P.ev(`(() => { const w = ${W(ir.id)}; return w ? w.element.textContent : null; })()`);
+    // the RECONNECT road: the open window stays, its body says the hold
+    const stayed = await until(async () => { const held = await D.ev('!!(app.sidebar._tasksUnread && app.sidebar._tasksLoaded === false)'); const t = await winText(D); return held === true && typeof t === 'string' && t.includes(HOLD) ? t : null; }, 30000, 300);
+    check('held · reconnect: the mirror is HELD (not loaded-and-empty) and the open Task Group window STAYS, saying the hold', !!stayed, await winText(D));
+    // the RESTORE road: a reload restores the window from the saved layout, with the same words
+    await D.S('Page.reload', {});
+    const restored = await until(async () => { const t = await winText(D); return typeof t === 'string' && t.includes(HOLD) ? t : null; }, 60000, 300);
+    check('held · restore: a reload RESTORES the window from the layout and it says the hold (never closed as «deleted elsewhere»)', !!restored, await winText(D));
+    const board = await until(() => D.ev(`(() => { const sb = app.sidebar; sb._tabTouched = true; sb._activeTab = 'tasks'; sb._boardView = 'groups'; sb._updateTabs(); sb._render(); const h = document.querySelector('.task-board-unread'); return h ? { hold: h.textContent, add: !!document.querySelector('.task-board-addrow'), none: document.body.textContent.includes('暂无任务组') } : null; })()`), 15000, 300);
+    check('held · board: the Tasks board says the hold where it said no groups, and offers no create / import over it', !!board && board.hold === '任务组暂时无法读取——原因见「待你处理」' && board.add === false && board.none === false, board);   // «暂无任务组» = «No Task Groups yet»
+    await D.ev('(window.__toasts = [], true)');
+    await D.ev(`(app.openTaskDetail(${JSON.stringify(ir.id)}), true)`);
+    await sleep(600);
+    const toasts = await D.ev('window.__toastTexts()');
+    check('held · open: the person\'s open of the group is not refused «未找到任务组»', Array.isArray(toasts) && !toasts.some((x) => x.includes('未找到任务组')), toasts);
+    await shot(D.S, 'desk-held.png');
+    // the backup door: the good bytes in place ⇒ the read tried again lifts the hold; its broadcast fetches the list again
+    fs.writeFileSync(TGF, good);
+    const lifted = await until(async () => { const ok = await D.ev(`!!(app.sidebar._tasksLoaded && !app.sidebar._tasksUnread && app.sidebar._taskById(${JSON.stringify(ir.id)}))`); const t = await winText(D); return ok === true && typeof t === 'string' && !t.includes(HOLD) && t.includes('设置') ? true : null; }, 240000, 500);   // the read again runs 30 s after the hold, then 60 s, 120 s later (store-read retryDelay): bound to the third try
+    check('held · lift: the good bytes back ⇒ the hold lifts within the read-again delay, the page fetches again and the window shows its group', !!lifted, await winText(D));
+  }
 
   check('no page error on either client', pageErrors.length === 0, pageErrors.slice(0, 3));
 } catch (e) {

@@ -1250,6 +1250,8 @@ const FORYOU_HEADS = Object.freeze({
   'For you': i18nKey('For you'),
   'Apps': i18nKey('Apps'),
   'Agent feedback': i18nKey('Agent feedback'),
+  'Task Groups': i18nKey('Task Groups'), // lane bl-windows: the store held unread (src/server/task-groups-wiring.js)
+  'File watches': i18nKey('File watches'), // lane bl-loop-b (the 2026-11-19 hotfix): the machine's limit of file watches reached (src/watch-door.js)
 });
 /** The words of a filed head, in the reader's language (an unknown head = itself). */
 function headWordOf(name, t) { return typeof name === 'string' && Object.prototype.hasOwnProperty.call(FORYOU_HEADS, name) ? t(FORYOU_HEADS[name]) : name; }
