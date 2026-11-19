@@ -966,7 +966,8 @@ export class ChatInput {
     if (keptAttachments.length) { this._attachments = []; this._renderAttachments(); }
     this._textarea.value = String(text || '');
     const sent = this._send() !== false;
-    if (sent && !carriesUserText && this._sentAwaiting) this._sentAwaiting.delete(this._lastSentId);   // B-437e: an action's text is never given back as the person's
+    // B-437e: an ACTION's kept entry has EMPTY words — its text is never given back as the person's, but its refusal is said
+    if (sent && !carriesUserText && this._sentAwaiting && this._sentAwaiting.has(this._lastSentId)) this._sentAwaiting.set(this._lastSentId, { text: '', attachments: [], action: true });
     if (keptAttachments.length) { this._attachments = keptAttachments; this._renderAttachments(); }
     // THE BOX COMES BACK UNCONDITIONALLY (round-6 verifier). Gating the
     // restore on `keptText.trim()` covered only the case where there was
@@ -1169,6 +1170,7 @@ export class ChatInput {
     if (!p) return null;                       // this box did not send it (another view of the conversation): nothing to say
     this._sentAwaiting.delete(msgId);
     if (this._pendingSend && this._pendingSend.msgId === msgId) this._pendingSend = null;
+    if (p.action) return 'action';            // an action (Compact now): nothing goes back into the box; the view says it
     const put = this.putBack(p ? p.text : '');
     // the pictures come back WITH the words (never beside someone else's new text — the next Enter would send them)
     const pics = put !== 'kept' && !!(p && p.attachments && p.attachments.length && !(this._attachments && this._attachments.length));

@@ -2260,6 +2260,11 @@ class ChatView {
         : t('A rewind is on its way — your message was not sent. Send it after the rewind answers (in {s} s at the latest), or stop the conversation.', { s }), { type: 'error' });
   }
 
+  /** A refused ACTION (Compact now) gives its button back: it disabled itself for a send the hub did not take (B-437e). */
+  _giveActionsBack() {
+    this._messageList?.querySelectorAll?.('.chat-ctx-compact-btn').forEach((b) => { b.disabled = false; });
+  }
+
   /** The press's binding in THIS TAB's sessionStorage (B-437e): a page reloaded before the CLI's answer binds it again —
    *  the success said, the words back. IDS ONLY (the target message's id, the row's granularity, when — never words: the
    *  words come from the CLI's answer or the message itself). An entry no answer ever met leaves after a day. */
@@ -7189,7 +7194,7 @@ class ChatView {
     if (isScopedRefusal(msg)) {
       this._hideTyping();
       // B-437e: a send the hub refused while a rewind is out — the words back in the box, said once (no ✗ line)
-      if (msg.code === 'rewind-out') { const put = this._chatInput?.refusedSend?.(msg.msgId); if (put) this._sayRefusedSend(put, msg.left); return; }
+      if (msg.code === 'rewind-out') { const put = this._chatInput?.refusedSend?.(msg.msgId); if (put) this._sayRefusedSend(put, msg.left); if (put === 'action') this._giveActionsBack(); return; }
       // A refused LIVE style switch can be a FACT about this session: only
       // 'style-wrapper-old' means THIS wrapper will never serve the verb, so
       // only it flips the flag — the chip's menu then offers the restart row

@@ -685,7 +685,7 @@ say('— §8 red controls (U2)');
     fs.symlinkSync(path.join(REPO, 'node_modules'), path.join(T, 'old/node_modules'));
     const bad = await wrapperLaws(path.join(T, 'old/data/bin/chat-wrapper.js'), { absent: 400 });   // its source says none of them (proven below): no full wait
     // the control proves its plant first: the release's wrapper says no rewind_out
-    if (/record\('rewind_out'/.test(g.stdout)) bad.length = 0;
+    if (/record\('rewind_out'/.test(g.stdout) || /record\('frame_stamp'/.test(g.stdout)) bad.length = 0;   // BOTH absent, or the brief waits prove nothing
     ok(bad.some((b) => b.startsWith('wrapper:idle-frame-stamped')) && bad.some((b) => b.startsWith('wrapper:frame_stamp-says-it')) && bad.some((b) => b.startsWith('wrapper:a-held-frame')) && bad.some((b) => b.startsWith('wrapper:rewind-out-said')), `RED CONTROL the release ${BASE}'s wrapper sends an idle frame unstamped, says no stamp and no rewind_out`, bad.join(' | ') || 'all green');
   } else { skipped++; say(`  - SKIP the release ${BASE} wrapper control: not in this clone`); }
   // normalizer mutants: a scratch copy of src/ with one line changed
@@ -1009,6 +1009,20 @@ say('— §9 the page\'s door');
   view._sayRefusedSend(box.refusedSend('mQ'), 9);
   if (box._attachments.length !== 0 || box._textarea.value !== 'new typing') bad.push('view:a-refused-send-pictures-never-join-new-typing');
   box._attachments = []; box._textarea.value = '';
+  // A REFUSED ACTION (Compact now) IS SAID AND GIVES ITS BUTTON BACK: its entry keeps EMPTY words (nothing into the box)
+  const actionLaw = (entry) => {
+    const out = [], cbtn = { disabled: true };
+    view._messageList = { querySelectorAll: (sel) => (sel === '.chat-ctx-compact-btn' ? [cbtn] : []) };
+    box._textarea.value = ''; box._sentAwaiting = new Map(entry ? [['mC', entry]] : []); said.length = 0;
+    const put = box.refusedSend('mC');
+    if (put) view._sayRefusedSend(put, 30);
+    if (put === 'action') view._giveActionsBack();
+    if (put !== 'action' || box._textarea.value !== '' || cbtn.disabled || !said.some((x) => /^A rewind is on its way — your message was not sent\. Send it after the rewind answers \(in 30 s at the latest\)/.test(x[0]))) out.push('view:a-refused-action-is-said-and-gives-its-button-back');
+    view._messageList = undefined;
+    return out;
+  };
+  bad.push(...actionLaw({ text: '', attachments: [], action: true }));
+  if (!actionLaw(null).includes('view:a-refused-action-is-said-and-gives-its-button-back')) bad.push('view:RED CONTROL the cure\'s deleted action entry left the refusal said (the leg proves nothing)');
   // the tab prunes EVERY session's day-old entries on a write — never this session's, never a fresh one
   store.setItem('vs-rewind:sess-old', JSON.stringify({ 'vsr-o': { msgId: 'x', granularity: 'message', at: Date.now() - 2 * 86400000 } }));
   store.setItem('vs-rewind:sess-new', JSON.stringify({ 'vsr-n': { msgId: 'y', granularity: 'message', at: Date.now() } }));
@@ -1038,10 +1052,10 @@ say('— §9 the page\'s door');
   const wires = [
     ['the renderer draws the door with the other message buttons', /this\.addForkBtn\(el, msg\);\n    this\.addRewindBtn\(el, msg\);/.test(cr)],
     ['the view hands the renderer its click and its live gate', /onRewind: \(msg\) => this\._rewindFromMessage\(msg\)/.test(cv) && /canRewind: \(\) => !this\._readOnly/.test(cv)],
-    ['a send the hub refused while a rewind is out comes back to the box (ITS words, by its msgId) with the seconds left — said only by the box that sent it', /if \(msg\.code === 'rewind-out'\) \{ const put = this\._chatInput\?\.refusedSend\?\.\(msg\.msgId\); if \(put\) this\._sayRefusedSend\(put, msg\.left\); return; \}/.test(cv)],
+    ['a send the hub refused while a rewind is out comes back to the box (ITS words, by its msgId) with the seconds left — said only by the box that sent it', /if \(msg\.code === 'rewind-out'\) \{ const put = this\._chatInput\?\.refusedSend\?\.\(msg\.msgId\); if \(put\) this\._sayRefusedSend\(put, msg\.left\); if \(put === 'action'\) this\._giveActionsBack\(\); return; \}/.test(cv)],
     ['the composer keeps each send\'s words and pictures by its id until the hub draws THAT message', /this\._sentAwaiting\.set\(msgId, \{ text, attachments: this\._attachments\.slice\(\) \}\);/.test(read('src/lib/chat-input.js')) && /if \(msg\.op === 'create' && msg\.message && msg\.message\.webuiMsgId\) this\._chatInput\?\.sentLanded\?\.\(msg\.message\.webuiMsgId\);/.test(cv)],
     ['a conversation that EXITED drops the tab\'s waiting presses (a re-attach timeout or a sign-in wall keeps them)', /\} else if \(msg\.type === 'exited' && msg\.sessionId === sessionId\) \{\n        this\._hideTyping\(\);\n        try \{ sessionStorage\.removeItem\('vs-rewind:' \+ sessionId\); \} catch \{ \}/.test(cv) && !/_setReadOnly\(\) \{[^}]*sessionStorage/.test(cv)],
-    ['an ACTION\'s own text (Compact now) is never given back as the person\'s words', /const sent = this\._send\(\) !== false;\n    if \(sent && !carriesUserText && this\._sentAwaiting\) this\._sentAwaiting\.delete\(this\._lastSentId\);/.test(read('src/lib/chat-input.js')) && /this\._lastSentId = msgId; this\._pendingSend\.msgId = msgId;/.test(read('src/lib/chat-input.js'))],
+    ['an ACTION\'s own text (Compact now) is kept with EMPTY words — never given back, its refusal said, its button given back', /if \(sent && !carriesUserText && this\._sentAwaiting && this\._sentAwaiting\.has\(this\._lastSentId\)\) this\._sentAwaiting\.set\(this\._lastSentId, \{ text: '', attachments: \[\], action: true \}\);/.test(read('src/lib/chat-input.js')) && /this\._lastSentId = msgId; this\._pendingSend\.msgId = msgId;/.test(read('src/lib/chat-input.js')) && /if \(put === 'action'\) this\._giveActionsBack\(\);/.test(cv)],
     ['the design and doc comments say a refusal in the reader\'s language (engines, routes, clients)', /r && r\.i18n \? \{ i18n: r\.i18n \} : \{\}\);/.test(read('src/server/design-engine.js')) && /\.\.\.\(r && r\.i18n \? \{ i18n: r\.i18n \} : \{\}\) \}\);/.test(read('src/server/doc-engine.js'))
       && /\.\.\.\(r && r\.i18n \? \{ i18n: r\.i18n \} : \{\}\) \}\)\);/.test(read('src/routes/design.js')) && /\.\.\.\(r && r\.i18n \? \{ i18n: r\.i18n \} : \{\}\) \}\)\);/.test(read('src/routes/doc.js'))
       && /if \(r\.i18n && r\.i18n\.key\) return t\(r\.i18n\.key, r\.i18n\.params \|\| \{\}\);/.test(read('src/lib/design-window.js')) && /if \(r && r\.i18n && r\.i18n\.key\) return \{ words: t\(r\.i18n\.key, r\.i18n\.params \|\| \{\}\), kind: 'failed' \};/.test(read('src/lib/doc-window-model.js'))],
