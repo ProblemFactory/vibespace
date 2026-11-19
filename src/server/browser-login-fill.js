@@ -1878,7 +1878,14 @@ async function fillVaultElement({
 
     if (secret && typeof onBeforeInsert === 'function') {
       const biRaw = onBeforeInsert({ targetId: iso.targetId, origin: iso.origin, url: iso.url, contextId: ctxId });
-      if (biRaw && typeof biRaw.then === 'function') await biRaw;
+      const bi = biRaw && typeof biRaw.then === 'function' ? await biRaw : biRaw;
+      // lane lg-store-writes (the moved2 cure 2's hunt (5)): the hook may REFUSE — its crash-guard record (the tab's fence) is not on
+      // disk inside its bound: nothing is typed
+      if (bi && bi.ok === false) {
+        val = '';
+        await evalInWorld(send, ctxId, WIPE_FAILED_FILL_EXPR);
+        return { code: bi.code || 'fill_refused', error: bi.error || 'nothing was typed', attemptedInsert: false, contextId: ctxId };
+      }
     }
 
     if (typeof guardBeforeInsert === 'function') {

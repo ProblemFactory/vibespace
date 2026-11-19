@@ -692,7 +692,7 @@ const hookCensus = (src) => {
     && (eng.match(/noteApiDerivedWindow\((slotKey|writeKey), witnessEv, session, \{ outcome: '\w+', producer: producer\(\) \}\)/g) || []).length === 3,
   'F6 / fix r2 F-A: both re-anchor doors (the K-run\'s "window moved", the renewal panel) tell the check whether the move was the row\'s LOGIN; every witness candidate names who produced it (login · oat:<gen>)');
   const ur = read('src/usage-routes.js');
-  ok(/windowStamp\.writeWindowStamp\(USAGE_CACHE_DIR, key, stamp, runProducer\);/.test(eng) && /if \(!windowStamp\.writeWindowStamp\(USAGE_CACHE_DIR, key, stamp, producer\)\) return false;/.test(eng)
+  ok(/windowStamp\.writeWindowStamp\(USAGE_CACHE_DIR, key, stamp, runProducer\);/.test(eng) && /if \(!\(await windowStamp\.writeWindowStamp\(USAGE_CACHE_DIR, key, stamp, producer, \{ offLoop: true \}\)\)\) return false;/.test(eng)
     && (ur.match(/windowStamp\.writeWindowStamp\(USAGE_CACHE_DIR, key, [^\n]*, producer\);/g) || []).length === 2 && !/producer: runProducer \}|verifiedBy: 'renewal-panel', n: 1, sessionId: null, \.\.\.\(producer|provisional: true, \.\.\.\(producer|'api-phase', \.\.\.\(producer/.test(eng + ur),
   'fix r2 F-A / r3: EVERY live `.window-` writer hands the ONE writer its producer — the witness ring (the writer carries the login identity), the renewal panel, the verified and the isolated ⟳ panel; no stamp spells its own producer (the census of WHO writes is §9a, derived from the source)');
   const wc = read('src/ws-create.js');

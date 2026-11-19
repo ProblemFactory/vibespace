@@ -13465,6 +13465,8 @@ export default {
   "Checking Claude Code on this machine again — about five minutes": "正在本机再次确认 Claude Code——约五分钟",
   "Could not start the check": "无法开始确认",
   "Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.": "已保存，但还没写到磁盘——存储还没写入它（存储很慢或出错）。它留在内存里，存储可以写时就会写入；在那之前重启会丢失它。",
+  "Saved here — it finishes by itself when the storage answers (it is slow or failing). A restart before then undoes it.": "已在这里保存——存储恢复响应后会自行完成（存储很慢或出错）。在那之前重启会撤销它。",
+  "Not started: its run could not be saved first (the storage is slow or failing) — nothing was started. Start it again once the storage answers.": "未启动：它的运行记录没能先保存（存储很慢或出错）——什么都没有启动。存储恢复后请再启动一次。",
   // lane account-reset-door: the reset claim, the reset a reading shows, the pool's causes in a person's words (one per cause)
   "Could not mark it as reset": "没能标记为已重置",
   "Did you reset {name} on Anthropic’s site?": "你已在 Anthropic 官网重置了 {name} 吗？",

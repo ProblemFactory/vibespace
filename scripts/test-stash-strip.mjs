@@ -957,9 +957,8 @@ const ends = (ctx) => Array.from({ length: 6 }, (_, i) => ctx.includes(`END-${i}
   ok(/context trimmed to stay inline/.test(tc) && ends(tc) < 6 && H.deliver.stashCount(H.cid) === 0 && H.cards.length === 1 && !H.get('/api/agent/prompt-context').includes('END-'),
     `CONTROL the fit check removed: the resume drains the frame, capInline cuts it (${ends(tc)} of 6 notices reach the agent), the card shows all six and the next prompt carries nothing (②f can go red)`, { ends: ends(tc) });
   const sh = read('src/server/stash-handover.js');
-  const a2 = '    if (delivered.size > DELIVERED_MAX) for (const [id, rec] of delivered) { if (delivered.size <= DELIVERED_MAX) break; if (rec.restored) { delivered.delete(id); n++; } }\n';
-  if (!sh.includes(a2)) throw new Error('mutation anchor missing: spent-first');
-  const Fifo = MUT5.load('src/server/stash-handover.js', sh.replace(a2, ''), 'fifo');
+  const a2 = '    if (delivered.size > DELIVERED_MAX) for (const [id, rec] of delivered) { if (delivered.size <= DELIVERED_MAX) break; if (rec.restored && !held(rec)) { delivered.delete(id); n++; } }\n';   // the moved2 cure 2: a record still holding a put-back's copy is never the spent one
+  const Fifo = MUT5.load('src/server/stash-handover.js', anchored(sh, a2, '', 'spent-first'), 'fifo');
   const dir = scratch('stash-strip-r5-ctl-' + Math.random().toString(36).slice(2, 7)); fs.mkdirSync(dir, { recursive: true });
   const obj = {}; for (let i = 0; i < 50; i++) obj['ho-live-' + i] = { cid: 'c', text: 't' + i, msg: [{ text: 'x' }], jobs: [], at: Date.now() - 50 + i }; for (let i = 0; i < 5; i++) obj['ho-spent-' + i] = { cid: 'c', text: 's' + i, msg: [], jobs: [], at: Date.now(), restored: 2 }; obj['ho-new'] = { cid: 'c', text: 'n', msg: [], jobs: [], at: Date.now() };
   fs.writeFileSync(path.join(dir, SH.DELIVERED_FILE), JSON.stringify(obj));
@@ -1821,9 +1820,9 @@ console.log('⑤ negative controls (patched scratch copies)');
   }
   // …and the jobs store's
   const jbsrc = read('src/jobs.js');
-  const anchor8 = "    } else this.pendingNotifs.delete(cid);\n    this._saveNotifs();\n";
-  if (!jbsrc.includes(anchor8)) throw new Error('mutation anchor missing: lazy-notifs');
-  const LazyNotifs = MUT.load('src/jobs.js', jbsrc.replace(anchor8, "    } else this.pendingNotifs.delete(cid);\n"), 'lazy-notifs');
+  // lane lg-store-writes (the moved2 cure 2): the drain's own write — the lazy copy writes nothing there (through anchored(): its plant first)
+  const anchor8 = "    // stays, a write that does not land is the writer's to retry (_onDisk says it)\n    this._saveNotifs();\n";
+  const LazyNotifs = MUT.load('src/jobs.js', anchored(jbsrc, anchor8, "    // MUTANT: the drain persists lazily\n", 'the drain persists at once'), 'lazy-notifs');
   {
     const R8 = rig2({ jobsModule: LazyNotifs });
     R8.jm._stashNotif(R8.CID, job('j1', 'nightly'), { what: 'ctl-lazy-job' }, 'not reachable'); R8.jm._save();
@@ -2013,7 +2012,7 @@ console.log('⑥ wiring pins');
     'verify: every store exposes the claim door and the hand-over claims through each, BY ID (released in its finally) — the ladder\'s stash, its retry park (lane notify-retry) and the jobs stash');
   // the .195 merge: the claim's write is judged (a failed one is logged by name — withdraw's checklist ⑧) and a by-id
   // drain also emits withdraw's `drained` with what it TOOK; both still write through at once
-  ok(/for \(const e of mine\) e\.ho = tag;\n(?:\s*\/\/[^\n]*\n)*\s*if \(mine\.length && !writeStashNow\(\)\) log\(/.test(cd) && /for \(const n of mine\) n\.ho = tag;\n    if \(mine\.length\) this\._saveNotifs\(\);/.test(jb) && /if \(took\.length\) \{ writeStashNow\(\); stashChanged\(cid\); emitStash\('drained', cid, took\); \}/.test(cd) && /delete stash\[cid\]; writeStashNow\(\); stashChanged\(cid\);/.test(cd) && /\} else this\.pendingNotifs\.delete\(cid\);\n    this\._saveNotifs\(\);/.test(jb),
+  ok(/for \(const e of mine\) e\.ho = tag;\n(?:\s*\/\/[^\n]*\n)*\s*if \(mine\.length && !writeStashNow\(\)\) log\(/.test(cd) && /for \(const n of mine\) n\.ho = tag;\n    if \(mine\.length\) this\._saveNotifs\(\);/.test(jb) && /if \(took\.length\) \{ writeStashNow\(\); stashChanged\(cid\); emitStash\('drained', cid, took\); \}/.test(cd) && /delete stash\[cid\]; writeStashNow\(\); stashChanged\(cid\);/.test(cd) && /\} else this\.pendingNotifs\.delete\(cid\);\n(?:\s*\/\/[^\n]*\n)*\s*const w = this\._saveNotifs\(\);/.test(jb),
     'verify r2: the claim is the entry\'s own `ho` stamp written to disk at once in BOTH stores, and every drain persists at once (the ladder\'s store and the jobs store)');
   ok(/deliver\.registerFrameRestorer\(\(cid, text, meta\) => stashView\.restoreHandedOver\(cid, text, meta\)\)/.test(sv) && /stashView\.settle\(maxMs\)/.test(read('src/server/exit-settle.js')) && /settleInFlight\(\{ stashView, deliver, n, m \}\)\.finally\(shutdownNow\)/.test(sv) && /function shutdown\(\)[\s\S]{0,700}stashView\.inFlightCount\(\)/.test(sv) && /renderNotifStash: require\('\.\/src\/job-model\.js'\)\.renderNotifStash, dataDir: path\.join\(__dirname, 'data'\) \}\); stashView\.register\(app\);/.test(sv),
     'verify r2: server.js registers the hand-over restorer on the ladder (r4: with the echo\'s kind) and the shutdown waits for a hand-over in flight before it exits; r4: the view gets the data dir (the delivered memory on disk)');

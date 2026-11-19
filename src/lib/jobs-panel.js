@@ -152,6 +152,7 @@ async function jobAction(app, j, act, refresh) {
   if (act === 'rm' && r?.logsKept === 'running') showToast(t('Removed. One of its runs is still running; its log files are deleted 14 days after it ends.')); // round 2: the ✕'s promise is true or not made
   if (act === 'rm' && r?.logsKept === 'unjudgeable') showToast(t('Removed. One of its runs could not be checked; its log files are deleted once VibeSpace can tell it has ended.'));
   if (r?.code === 'hub-is-main') r.error = t('This job is the running VibeSpace: it is not stopped here');   // B-2c5c: the job IS this VibeSpace — its stop refused by name, in the reader's language
+  if (r?.error && r.code === 'not-on-disk') r.error = t('Not started: its run could not be saved first (the storage is slow or failing) — nothing was started. Start it again once the storage answers.');   // by its code (lane lg-store-writes, the moved2 cure 2): a start refused because its run could not be saved first
   if (r?.error) showToast(r.error, { type: 'error' });
   refresh?.();
 }

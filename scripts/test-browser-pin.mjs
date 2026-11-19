@@ -41,7 +41,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync, spawn, execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, deadPort } from './scratch.mjs';
+import { scratch, deadPort, anchored } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { withUse } from './grant-fixtures.mjs';   // lane grants-unify: a hand-built record's list mirrored as the keeper mirrors the store's row
 const DEAD_CDP = await deadPort(); // the fake's cdp-url: a port the kernel just released, never a fixed one (§81)
@@ -434,6 +434,7 @@ console.log('— ③b adoption across a keeper death (§3.5 boot order: drop →
   const workPid = before.browsers[workId].pid, teamPid = before.browsers[teamId].pid;
   ok(alive(workPid) && alive(teamPid), 'both daemons are alive with nobody keeping them (the keeper is "dead")');
   lines.length = 0;
+  kA.detachGrants();   // the «SIGKILL»: a dead process answers nothing — here keeper A shares the process, so its grant hook goes (the moved2 cure 2: a removal's grant row goes at the landing, after keeper B's commit)
   const kB = mkKeeper(new Set([KEY_A])); // KEY_B did not survive the "restart"
   const r = await kB.boot();
   ok(r.droppedLeases === 1 && r.browsers === 2, `boot: ${r.droppedLeases} orphaned lease dropped, ${r.browsers} browsers adopted`);
@@ -583,7 +584,7 @@ console.log('— ⑤ the routes (in-process express) and the shipped vibespace-b
   r = await j('POST', '/api/browser/profiles', { label: 'squad' });
   ok(r.status === 409 && r.json.code === 'label_taken' && r.json.error, 'every failure answers {error, code} with a status by code');
   r = await j('POST', '/api/browser/attach', { sessionId: 'sess-1', profile: 'Squad' });
-  ok(r.status === 200 && r.json.lease.browserKey === KEY_A && !('cdpUrl' in r.json) && r.json.env.some((kv) => kv.startsWith('AGENT_BROWSER_NAMESPACE=vs-' + teamId2)), 'POST /attach: a live session\'s conversation leases the profile — the UI answer carries NO cdp url');
+  ok(r.status === 200 && r.json.lease.browserKey === KEY_A && !('cdpUrl' in r.json) && r.json.env.some((kv) => kv.startsWith('AGENT_BROWSER_NAMESPACE=vs-' + teamId2)), 'POST /attach: a live session\'s conversation leases the profile — the UI answer carries NO cdp url') || console.error('    ' + JSON.stringify({ status: r.status, json: r.json, mem: Object.values(reg(kR).browsers).map((b) => [b.profileId, b.state, b.pid, b.closed || null]), file: (() => { try { return Object.values(JSON.parse(fs.readFileSync(path.join(DATA, K.STORE_FILE), 'utf8')).browsers || {}).map((b) => [b.profileId, b.state, b.pid]); } catch (e) { return String(e.message); } })() }).slice(0, 2500));
   ok(r.json.pinTab === true && kR._facts.lastVersion() === '0.38.0', 'the attach path probed the floor ITSELF, so pinTab is answered on the first attach (the wrapper form then passes --pin-tab)');
   r = await j('POST', '/api/browser/attach', { sessionId: 'sess-nokey', profile: 'Squad' });
   // B-f7ab: a keyless live session now gets its key on first use (routes → ctx.ensureBrowserKey, test-browser-share-model ③);
@@ -742,8 +743,7 @@ console.log('— ⑤ the routes (in-process express) and the shipped vibespace-b
   // RED CONTROL: the change removed — the old synchronous save (the writer bypassed, a mutant copy)
   const kSrc = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src/server/browser-keeper.js'), 'utf8');
   const aK = "  const writerOf = () => require('../store-writer.js').storeWriter();";
-  ok(kSrc.split(aK).length === 2, 'U5b ANCHOR: the keeper\'s one writer line');
-  const SyncK = mutantCopies('browser-pin-u5b', path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')).load('src/server/browser-keeper.js', kSrc.replace(aK, "  const writerOf = () => ({ dirty: (f, o) => fs.writeFileSync(f, o.produce(), { mode: o.mode }), durable: async () => true, pending: () => false, flushSync: () => ({ written: [], left: [] }) });"), 'sync-save');
+  const SyncK = mutantCopies('browser-pin-u5b', path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')).load('src/server/browser-keeper.js', anchored(kSrc, aK, "  const writerOf = () => ({ dirty: (f, o) => fs.writeFileSync(f, o.produce(), { mode: o.mode }), durable: async () => true, pending: () => false, flushSync: () => ({ written: [], left: [] }) });", 'the keeper\'s one writer line'), 'sync-save');   // ALSO CURED (the moved2 cure 2): through anchored()
   const r = await scene(SyncK, 'red');
   ok(r.writtenAtChange && !r.owed, 'U5b CONTROL: the old synchronous save ⇒ browser-profiles.json is written on the main thread at the change — the first check above would be red', { written: r.writtenAtChange });
   try { a.k5.shutdown(); r.k5.shutdown(); } catch { }
@@ -765,10 +765,38 @@ console.log('— ⑤ the routes (in-process express) and the shipped vibespace-b
   const mvOk = await moveLeg(K, 'moved');
   ok(mvOk.mv && mvOk.mv.ok && mvOk.mv.moved && !mvOk.owed && mvOk.onDiskNew && !mvOk.onDiskOld, 'U5b «written before the move», behaviourally: moveDirLineage returns with the lineage ON DISK under the new key (nothing owed for the registry)', mvOk);
   const aMv = 'if (!saveNow()) { reg.dirHosts = before;';
-  ok(kSrc.split(aMv).length === 2, 'U5b ANCHOR: the move waits on saveNow()');
-  const NoWaitK = mutantCopies('browser-pin-u5b-mv', path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')).load('src/server/browser-keeper.js', kSrc.replace(aMv, 'if (!save()) { reg.dirHosts = before;'), 'move-no-wait');   // stale-pins: kept — the mutant's PLANTED text (save() for saveNow()), absent from the product on purpose
+  const NoWaitK = mutantCopies('browser-pin-u5b-mv', path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')).load('src/server/browser-keeper.js', anchored(kSrc, aMv, 'if (!save()) { reg.dirHosts = before;', 'the move waits on saveNow()'), 'move-no-wait');   // stale-pins: kept — the mutant's PLANTED text (save() for saveNow()), absent from the product on purpose
   const mvRed = await moveLeg(NoWaitK, 'red');
   ok(mvRed.mv && mvRed.mv.moved && mvRed.owed && !mvRed.onDiskNew, 'U5b CONTROL: the move\'s saveNow() back to save() ⇒ the lineage is owed, NOT on disk when the move returns — the check above would be red', mvRed);
+  // THE MOVED2 CURE 2 (主开发's ruling — THE STEP THAT CANNOT BE UNDONE RIDES THE LANDING; its must 2: no half-taken removal): a
+  // profile's removal is TAKEN at once (out of the registry in memory, its store marked); its passkeys, grant row, marked config,
+  // drop listeners and the machine's folder go only once the registry has LANDED — the reply waits its bound and says «not yet»,
+  // the rest follows BY ITSELF when the storage answers; a kill first leaves the record whole on disk. The REAL shared writer
+  // and the REAL helper: the registry's write FAILS while a directory stands at its temp path (the writer retries), then lands.
+  // RED: a copy whose step runs at the act (its plant asserted by anchored())
+  const rmLeg = async (Kmod, tag) => {
+    const { k5 } = await scene(Kmod, 'rm-' + tag);
+    const key = path.resolve(k5.storeFile), W = SWb.storeWriter(); W.flushSync([key]);
+    const id = k5._reg().profiles.find((x) => x.label === 'U5b Team').id;
+    const dropped = []; k5.setPasskeyDrop((pid) => { dropped.push(pid); return 2; });
+    const tmps = [`${key}.tmp-${process.pid}-w`, `${key}.tmp-${process.pid}`]; for (const t of tmps) fs.mkdirSync(t, { recursive: true });   // the storage refuses: its write FAILS (EISDIR), stays owed
+    const r = k5.removeProfile(id, { replyMs: 300 });
+    const L = await r.landing;
+    const before = { landed: L.landed, dropped: dropped.length, listed: !!k5.profile(id), onDisk: JSON.parse(fs.readFileSync(key, 'utf8')).profiles.some((x) => x.id === id) };
+    for (const t of tmps) fs.rmSync(t, { recursive: true, force: true });   // the storage answers: the writer's retry lands it
+    for (let n = 0; n < 80 && !dropped.length; n++) await sleep(50);
+    const after = { dropped: dropped.length, onDisk: JSON.parse(fs.readFileSync(key, 'utf8')).profiles.some((x) => x.id === id) };
+    try { k5.shutdown(); } catch { }
+    return { before, after };
+  };
+  const rmOk = await rmLeg(K, 'real');
+  ok(rmOk.before.landed === false && rmOk.before.dropped === 0 && !rmOk.before.listed && rmOk.before.onDisk,
+    'THE STEP RIDES THE LANDING: a profile\'s removal not landed is TAKEN (gone from the list, never rolled back) and its passkeys are KEPT — the disk still holds the record whole (a start would find it with them); the reply says not yet', rmOk.before);
+  ok(rmOk.after.dropped === 1 && !rmOk.after.onDisk, '…and once the storage answers the record lands and the passkeys (grant row, marked config, the machine\'s folder) go BY THEMSELVES — once, nothing half taken', rmOk.after);
+  const RM_RIDE = "rideLanding(() => (ran = step()), { what: `profile ${id}'s removal`, timeoutMs: replyMs })";
+  const RmK = mutantCopies('browser-pin-ride', path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')).load('src/server/browser-keeper.js', anchored(kSrc, RM_RIDE, 'Promise.resolve({ landed: true, value: (ran = step()) })   /* MUTANT: the step runs at the act */', 'the removal rides the landing'), 'ride-ignored');
+  const rmX = await rmLeg(RmK, 'red');
+  ok(rmX.before.dropped === 1 && rmX.before.onDisk, 'CONTROL (a copy whose step runs at the act): the passkeys are DROPPED while the disk still holds the record — a kill now leaves a profile without them (red)', rmX.before);
   SWb.storeWriter().flushSync();
 }
 

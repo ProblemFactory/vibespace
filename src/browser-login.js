@@ -60,6 +60,7 @@ const REFUSALS = Object.freeze([
   'login_no_otp',
   'login_pending_exists',
   'login_fence_unavailable',
+  'login_fence_not_on_disk',   // lane lg-store-writes, the moved2 cure 2: the tab's fence record not on disk inside its bound — nothing typed
   'login_channel_unmediated',
   'login_check_failed',
   'code_paced',

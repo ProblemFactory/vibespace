@@ -240,6 +240,8 @@ let workId, persId;
   // adoptScratch
   const scratchDir = path.join(DATA, 'browser-profiles', 'vs-' + KEY_B); fs.mkdirSync(scratchDir, { recursive: true }); fs.writeFileSync(path.join(scratchDir, 'Cookies'), 'jar');
   const ad = k.adoptScratch({ label: 'Adopted', scratchDir, owner: { kind: 'session', id: KEY_B } });
+  const adL = await ad.landing;   // lane lg-store-writes (the moved2 cure 2): the folder moves once the new record LANDED (the keeper's step)
+  ok(adL && adL.landed && adL.value && adL.value.moved === true, 'adoptScratch: the folder moved by the step that rides the new record\'s landing', adL);
   ok(ad.dir === path.join(HOME, '.agent-browser', 'vs-' + ad.id) && fs.existsSync(path.join(ad.dir, 'Cookies')) && !fs.existsSync(scratchDir) && ad.owner.kind === 'only' && ad.owner.who[0].id === KEY_B, 'adoptScratch MOVES the scratch dir under ~/.agent-browser/ (the login kept) and registers it (a pre-list single owner stored as a one-row list, 2026-09-27)');
   ok((await threw(() => k.adoptScratch({ label: 'Adopted', scratchDir: path.join(DATA, 'nope') }))).code === 'label_taken' && (await threw(() => k.adoptScratch({ label: 'Gone', scratchDir: path.join(DATA, 'nope') }))).code === 'adopt_failed', 'adopt refuses a taken label and a missing directory by name');
   // the Task-Group rung's dep
@@ -256,6 +258,7 @@ console.log('— ③ the routes, the shipped CLI and the per-session config: a m
 {
   const express = require('express');
   const R = require('../src/routes/browser.js');
+  try { require('../src/store-writer.js').storeWriter().flushSync(); } catch { }   // lane lg-store-writes U5b: the shut keepers' registry writes are the store writer's — landed BEFORE the folder is wiped (else the next keeper's load lands them into the fresh one)
   fs.rmSync(DATA, { recursive: true, force: true }); fs.mkdirSync(DATA, { recursive: true });
   fs.rmSync(AB_STATE, { recursive: true, force: true }); fs.mkdirSync(AB_STATE, { recursive: true });
   const live = new Set([KEY_A, KEY_B]);

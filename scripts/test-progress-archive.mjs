@@ -83,9 +83,9 @@ const ruleClear = (M) => { const w = mk(M); seed(w, 560, Date.UTC(2026, 8, 30, 2
 { const M = patched('if (!hits.length) { hits = this._archiveFind(id, ref); live = false; }', '', 'live-only'); const r = ruleClear(M); check('CONTROL: a clear that looks in the live list only misses the planted archive line (unknown) — red', !r.gone && r.r.unknown.length === 1, r.r); }
 
 console.log('⑤ a Task Group delete takes its archive; Backup & migrate carries it');
-const ruleDelete = (M) => { const w = mk(M); seed(w, 505); w.tg._state.tasks[w.id].progress = w.tg._keepLive(w.id, w.tg._state.tasks[w.id].progress); const had = fs.existsSync(archDir(w)); w.tg.remove(w.id); return { had, after: fs.existsSync(archDir(w)) }; };
+const ruleDelete = (M) => { const w = mk(M); seed(w, 505); w.tg._state.tasks[w.id].progress = w.tg._keepLive(w.id, w.tg._state.tasks[w.id].progress); const had = fs.existsSync(archDir(w)); w.tg.remove(w.id); try { w.tg._writer().flushSync(); } catch { }   /* lane lg-store-writes (the moved2 cure 2): the folder goes once the removal LANDS — its own writer lands it here */ return { had, after: fs.existsSync(archDir(w)) }; };
 { const r = ruleDelete(REAL); check('delete ⇒ data/task-groups-archive/<id>/ is gone', r.had && !r.after, r); }
-{ const M = patched('if (archivableId(id)) fs.rmSync(path.join(this._archiveRoot, id), { recursive: true, force: true });', '', 'keep-dir'); const r = ruleDelete(M); check('CONTROL: without the rmSync the archived words outlive the group — red', r.had && r.after, r); }
+{ const M = patched('try { fs.rmSync(path.join(this._archiveRoot, id), { recursive: true, force: true }); }', 'try { }', 'keep-dir')   /* lane lg-store-writes (the move's hunt): the rmSync now runs after the removal lands, inside its own try */; const r = ruleDelete(M); check('CONTROL: without the rmSync the archived words outlive the group — red', r.had && r.after, r); }
 { const a = mk(); seed(a, 530); const t = a.tg._state.tasks[a.id]; t.progress = a.tg._keepLive(a.id, t.progress); a.tg.clearProgress(a.id, ['P-100002']);
   const bundle = JSON.parse(JSON.stringify(a.tg.exportBundle()));
   const b = { tg: new REAL.TaskGroupManager({ dataDir: freshDir(), onChange: () => {} }) }; b.id = a.id; b.dir = b.tg._file.replace(/\/task-groups\.json$/, '');

@@ -1923,6 +1923,9 @@ function refusalWords(body) {
  *  import button) asks it too. → whether it was said */
 export function sayNotOnDisk(body) {
   if (!body || typeof body !== 'object' || body.notOnDisk !== true) return false;
+  // by its CODE (lane lg-store-writes, the moved2 cure 2): an act whose step that cannot be undone RIDES the landing (a removal's
+  // files, an answer the job hears) — saved here, it finishes by itself when the storage answers
+  if (body.code === 'finishes-on-landing') { try { showToast(t('Saved here — it finishes by itself when the storage answers (it is slow or failing). A restart before then undoes it.'), { type: 'error', duration: 12000 }); } catch { } return true; }
   try { showToast(t('Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.'), { type: 'error', duration: 12000 }); } catch { }
   return true;
 }

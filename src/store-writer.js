@@ -244,10 +244,21 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
   function settled(s, v) {
     if (v > s.writtenVersion) s.writtenVersion = v;
     s.notDurable = null;   // landed: nothing owed to a waiter's caller
-    if (!s.waiters.length) return;
-    const keep = [];
-    for (const w of s.waiters) { if (w.version <= s.writtenVersion) { try { w.resolve(true); } catch { } } else keep.push(w); }
-    s.waiters = keep;
+    if (s.waiters.length) {
+      const keep = [];
+      for (const w of s.waiters) { if (w.version <= s.writtenVersion) { try { w.resolve(true); } catch { } } else keep.push(w); }
+      s.waiters = keep;
+    }
+    runLanded(s);
+  }
+  /** the steps riding a version now on disk run (afterLanding) — taken off the store first, so a step that dirties the store
+   *  again rides the NEXT landing, never this one */
+  function runLanded(s, all = false) {
+    if (!s.afterLanded || !s.afterLanded.length) return;
+    const due = all ? s.afterLanded : s.afterLanded.filter((x) => x.version <= s.writtenVersion);
+    if (!due.length) return;
+    s.afterLanded = all ? [] : s.afterLanded.filter((x) => x.version > s.writtenVersion);
+    for (const x of due) x.go();
   }
   /** A PERSON'S ACT IS DURABLE BEFORE THE ANSWER — without holding the loop: the store's current state is the NEXT write
    *  after the one in flight (its pace set aside — never its failure backoff), and the promise resolves when it is on
@@ -287,6 +298,49 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
       const one = (ok) => { if (!ok) all = false; if (--n === 0) end(); };
       for (const f of list) { let asked = false; try { durable(f, { timeoutMs, answer: (ok) => { asked = true; one(ok); } }); } catch { if (!asked) one(false); } }   // a durable() that THREW counts as not on disk — the answer is never lost
     });
+  }
+  /** THE STEP THAT CANNOT BE UNDONE RIDES THE LANDING (lane lg-store-writes, the moved2 cure 2 — 主开发's ruling: ONE law, built
+   *  once beside the writer and used at every such site; NO ROLL BACK ANYWHERE). An act changes memory and marks its store
+   *  (dirty) as it always did; its IRREVERSIBLE part — a folder deleted, a job woken, an item resolved, a kept copy dropped, a
+   *  machine asked to remove — is handed here as `step` and runs when, and ONLY when, the store's state owed at this call has
+   *  LANDED (that version written, by whichever write lands it). A process that dies first leaves the old record on disk and
+   *  the step never ran: the act simply did not happen. The step runs ONCE, on the main thread, inside the writer's own settle
+   *  (never a microtask later — at a stop, inside the exit's flush); a step that throws is said, once a store.
+   *  A HELD WRITE AT A BOUND IS NOT A FAILED ONE (its bytes may be in flight) — and under this law that case needs no road of
+   *  its own: nothing is undone at a bound, the step waits for its version to land, whichever write lands it; a FAILED write
+   *  keeps it waiting too (the store stays owed, the writer retries). Only the exit's last pass ends the wait: a store still
+   *  owed then is not on disk, its step never runs (the old record is what the next start reads).
+   *  `answer(landed, value)` — the reply's road, called ONCE: at the landing (after the step, with what it returned), at
+   *  `timeoutMs` (false: «saved here, it finishes by itself when the storage answers» — the step stays registered), or at the
+   *  exit's last pass (false). `timeoutMs: null` — no bound (nobody waits on the reply). A store with nothing owed runs the
+   *  step NOW. → a promise of {landed, value, error?} (the same as the answer) */
+  function afterLanding(file, step, { what = null, timeoutMs = durableMs, answer = null } = {}) {
+    const s = stores.get(file), name = s ? s.name : path.basename(file);
+    let replied = false, t = null, resolveP = null;
+    const p = new Promise((r) => { resolveP = r; });
+    const reply = (landed, value, error) => {
+      if (replied) return; replied = true;
+      if (t) { clearTimeout(t); t = null; }
+      resolveP({ landed, value, ...(error ? { error } : {}) });
+      if (answer) { try { answer(landed, value); } catch (e) { answerThrew(name, e); } }
+    };
+    let ran = false;
+    const go = () => { if (ran) return; ran = true; let v, err = null; try { v = step(); } catch (e) { err = e; stepThrew(name, what, e); } reply(true, v, err); };
+    if (!s || (!s.dirty && !(inflight && inflight.name === file) && s.writtenVersion >= s.version)) { go(); return p; }
+    if (exitAnswered) { reply(false); return p; }   // the exit's last pass is over: owed now is not on disk and nothing writes it
+    (s.afterLanded || (s.afterLanded = [])).push({ version: s.version, go, end: () => reply(false) });
+    if (s.dirty) { s.urgent = true; s.rank = 0; }   // as durable(): the writer's next writes, its pace set aside
+    if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+      // NOT unref'd (as durable()'s): a reply waiting on the disk keeps the process up until the landing or the bound
+      t = setTimeout(() => { t = null; if (!replied) s.notDurable = { why: 'queued', ahead: aheadOf(s), lastMs: s.lastMs || null }; reply(false); }, timeoutMs);
+    }
+    schedule();
+    return p;
+  }
+  const stepThrewSaid = new Set();
+  function stepThrew(name, what, e) {
+    if (stepThrewSaid.has(name)) return; stepThrewSaid.add(name);
+    try { say(`[store-write] a step riding ${name}'s landing${what ? ` (${what})` : ''} threw (${(e && (e.code || e.message)) || e})`); } catch { }
   }
   /** an answer that THREW is SAID — once a store (a route's res.json that failed: its caller sees no answer, so the hub's
    *  log names it) */
@@ -492,6 +546,9 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
       // version reached the disk, false when it did not (its write failed, or it changed again past the last pass)
       exitAnswered = true;
       for (const s of stores.values()) if (s.waiters.length) { const ws = s.waiters; s.waiters = []; for (const w of ws) { try { w.resolve(w.version <= s.writtenVersion); } catch { } } }
+      // the steps riding a landing (afterLanding): a version on disk ran its step inside settle; one still owed NEVER runs — its
+      // reply says not landed, the old record is what the next start reads
+      for (const s of stores.values()) if (s.afterLanded && s.afterLanded.length) { const xs = s.afterLanded; s.afterLanded = []; for (const x of xs) { try { x.end(); } catch { } } }
     }
     const from = crashAt != null ? crashAt : exitFrom;   // the crash road says its time from the crash (a crash after a stop too)
     r.fromStartMs = now() - from; r.debtMs = debtMs; r.part = rank0 ? 'rank0' : 'rest';
@@ -512,8 +569,23 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     if (!s) return;
     s.dirty = false; s.dirtySince = null; s.produce = null; s.urgent = false;
     if (s.waiters.length) { const ws = s.waiters; s.waiters = []; for (const w of ws) { try { w.resolve(true); } catch { } } }   // the file is gone by its owner's word
+    runLanded(s, true);   // …and so are the steps riding it (afterLanding): the record they waited for is its owner's removal
     if (inflight && inflight.name === file) { s.forgotten = true; return; }
     stores.delete(file);
+  }
+  /** the bytes this writer still OWES `file` — its newest state, made now by its store's producer (lane lg-store-writes, the moved2
+   *  cure 2: a load right after another owner's write that is still held reads THESE, never the older file); null when nothing
+   *  is owed or the bytes are not a whole text (an append) */
+  function owed(file) {
+    const s = stores.get(file);
+    if (!s || !s.produce || (!s.dirty && s.writtenVersion >= s.version)) return null;
+    try {
+      const b = s.produce();
+      if (typeof b === 'string') return b;
+      if (Buffer.isBuffer(b)) return b.toString('utf8');
+      if (Array.isArray(b) && b.every((x) => typeof x === 'string' || Buffer.isBuffer(x))) return b.map((x) => (typeof x === 'string' ? x : x.toString('utf8'))).join('');
+      return null;
+    } catch { return null; }
   }
   const pending = (file) => { const s = stores.get(file); return !!(s && (s.dirty || (inflight && inflight.name === file && !inflight.unlink))); };
   function stats() {
@@ -529,7 +601,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
   function stop() { stopped = true; if (timer) clearTimeout(timer); timer = null; const w = worker; worker = null; try { w && w.terminate(); } catch { } const k = keeperT; keeperT = null; try { k && k.terminate(); } catch { } }
   if (keeperOn) startKeeper();   // a suite's own writer may ask for one; the server's is started by bootKeeper() at its boot
   const waits = () => ({ timedOut: waitsTimedOut });   // round 6's amend: waits that ended by their poll, not the write's end
-  return { dirty, durable, whenDurable, whyNotDurable, flushSync, noteSignal, beginExit, exitFlush, exitStartedAt, startKeeper, forget, pending, stats, waits, mode, stop, graceMs, _now: now };
+  return { dirty, durable, whenDurable, afterLanding, owed, whyNotDurable, flushSync, noteSignal, beginExit, exitFlush, exitStartedAt, startKeeper, forget, pending, stats, waits, mode, stop, graceMs, _now: now };
 }
 
 /** THE process's writer (one thread, one queue for every store) */
@@ -563,4 +635,16 @@ function identityAtExit(res) {
   try { if (shared && shared.exitStartedAt() != null && res && !res.headersSent && typeof res.setHeader === 'function') res.setHeader('Cache-Control', 'no-transform'); } catch { }
 }
 
-module.exports = { create, storeWriter, bootKeeper, partsOf, identityAtExit, GRACE, SLOW_MS, RESTARTS_MAX };
+/** THE LARGE FINITE BOUND (主开发, the moved2 cure 2: «the two waits without any bound get a large finite one») — a wait that
+ *  must hold its caller until a store lands (a release's synchronous save kept) gives up here, said, never for ever */
+const LANDING_BOUND_MS = 10 * 60 * 1000;
+/** THE LAW for a module handed its writer by its caller (a suite's stand-in may be one): the writer's afterLanding; a writer
+ *  without it (a stand-in that writes in place) or none runs the step now, answered as landed. → the same promise */
+function ride(W, file, step, opts = {}) {
+  if (W && typeof W.afterLanding === 'function') return W.afterLanding(file, step, opts);
+  let v, error = null; try { v = step(); } catch (e) { error = e; }
+  if (opts.answer) { try { opts.answer(true, v); } catch { } }
+  return Promise.resolve({ landed: true, value: v, ...(error ? { error } : {}) });
+}
+
+module.exports = { create, storeWriter, bootKeeper, partsOf, identityAtExit, ride, LANDING_BOUND_MS, GRACE, SLOW_MS, RESTARTS_MAX };

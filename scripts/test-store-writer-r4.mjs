@@ -13,6 +13,9 @@
 //   ⑨ lane lg-store-writes, the U4/U5 cure — durable()'s `answer` is called inside the writer's settle (the exit's flush too):
 //      an answer waiting on its write goes out before the process leaves (in process, and a real HTTP child); every waiter
 //      left by the exit's last pass is answered (false); whenDurable answers once for several files; RED: the microtask copy
+//   ⑩ lane lg-store-writes, the moved2 cure 2 — afterLanding (THE STEP THAT CANNOT BE UNDONE RIDES THE LANDING): a landing held past
+//      the reply's bound, then landed ⇒ the step runs once, after it; a REAL kill before the landing ⇒ no step, a start reads the old
+//      record; RED: the step at the act, the bound dropping the step
 // Run: node scripts/test-store-writer-r4.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -416,6 +419,109 @@ srv.listen(0, '127.0.0.1', () => process.stdout.write(srv.address().port + '\\n'
   const f2 = await ask('gzip-red');
   ok(!full(f2), '⑨ (f) CONTROL: the same answer without identityAtExit ⇒ compression\'s asynchronous zlib loses it when the process leaves', { status: f2.status, enc: f2.enc, len: (f2.body || '').length, error: f2.error });
   fs.rmSync(T9, { recursive: true, force: true });
+})();
+
+// ── ⑩ THE MOVED2 CURE 2 (lane lg-store-writes, 主开发's ruling): THE STEP THAT CANNOT BE UNDONE RIDES THE LANDING ──────────────
+// ONE helper beside the writer (afterLanding): the act changes memory and marks its store; its irreversible part runs when, and
+// only when, the store's state owed at the call has LANDED; a process that dies first leaves the old record and the step never
+// ran. (a) a landing HELD past the reply's bound, then landed: the reply says not yet at the bound, the step runs ONCE, after
+// the landing (the disk holds the act when it runs) — a held write is not a failed one, nothing is undone; (b) a REAL kill
+// (SIGKILL) before the landing: the step never ran and a start finds the old record. RED (each plant asserted by anchored()):
+// a copy that runs the step at the act; a copy whose bound drops the step (a held write treated as a failed one).
+console.log('⑩ the moved2 cure 2 — afterLanding: a held landing runs its step once, after it lands; a kill before it leaves the old record and no step');
+await (async () => {
+  const Module = require('module'), { spawn } = require('child_process');
+  const { anchored } = await import('./scratch.mjs');
+  const SWF = path.join(REPO, 'src/store-writer.js');
+  const real = fs.readFileSync(SWF, 'utf8');
+  const loadAs = (src) => { const m = new Module(SWF, null); m.filename = SWF; m.paths = Module._nodeModulePaths(path.dirname(SWF)); m._compile(src, SWF); return m.exports; };
+  const T10 = fs.mkdtempSync(path.join(os.tmpdir(), 'store-r4-ride-'));
+  const quiet = { warn: () => { }, log: () => { } };
+  const sl = (ms) => new Promise((r) => setTimeout(r, ms));
+  // the stand-in storage: a write is HELD while a `hold` marker stands in its folder (the real writeJob once it goes)
+  const HOLD = path.join(T10, 'hold-worker.cjs');
+  fs.writeFileSync(HOLD, `'use strict';
+const { parentPort, workerData } = require('worker_threads'); const fs = require('fs'); const P = require('path');
+const { writeJob } = require(${JSON.stringify(path.join(REPO, 'src/store-writer-worker.js'))});
+const S = new Int32Array(workerData.sab), Z = new Int32Array(new SharedArrayBuffer(4));
+parentPort.on('message', (m) => {
+  if (!m || (m.ev !== 'write' && m.ev !== 'unlink')) return;
+  Atomics.store(S, 0, m.id); const t0 = process.hrtime.bigint(); let err = null;
+  const hold = P.join(P.dirname(m.file), 'hold');
+  while (fs.existsSync(hold)) Atomics.wait(Z, 0, 0, 10);
+  if (m.ev === 'unlink') { try { fs.unlinkSync(m.file); } catch { } } else { try { writeJob(m); } catch (e) { err = { code: e.code || null, message: e.message }; } }
+  const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+  Atomics.store(S, 2, err ? 2 : 1); Atomics.store(S, 1, S[1] + 1); Atomics.store(S, 0, 0); Atomics.notify(S, 0);
+  parentPort.postMessage({ ev: m.ev === 'unlink' ? 'unlinked' : 'written', id: m.id, ms, err });
+});
+`);
+  const AT_ONCE = '(s.afterLanded || (s.afterLanded = [])).push({ version: s.version, go, end: () => reply(false) });';
+  const BOUND = "t = setTimeout(() => { t = null; if (!replied) s.notDurable = { why: 'queued', ahead: aheadOf(s), lastMs: s.lastMs || null }; reply(false); }, timeoutMs);";
+  const atOnce = anchored(real, AT_ONCE, 'go(); return p;   // MUTANT: the step runs at the act, before its record lands', 'the step rides the landing');
+  const dropAtBound = anchored(real, BOUND, BOUND.replace('reply(false); }', 'reply(false); s.afterLanded = (s.afterLanded || []).filter((x) => x.go !== go); }') + '   // MUTANT: a held write at the bound treated as a failed one — its step dropped', 'the bound ends only the reply');
+  // (a) HELD, THEN LANDED
+  const held = async (SW, tag) => {
+    const d = path.join(T10, 'a-' + tag); fs.mkdirSync(d, { recursive: true });
+    const f = path.join(d, 'rec.json'); fs.writeFileSync(f, '{"v":0}');
+    fs.writeFileSync(path.join(d, 'hold'), '1');
+    const w = SW.create({ log: quiet, workerPath: HOLD });
+    let v = 1; w.dirty(f, { name: 'rec.write', produce: () => `{"v":${v}}` });
+    const seen = [], answered = [];
+    const p = w.afterLanding(f, () => { seen.push(fs.readFileSync(f, 'utf8')); return 'stepped'; }, { timeoutMs: 150, answer: (landed, val) => answered.push([landed, val === undefined ? null : val]) });
+    await sl(300);   // past the reply's bound — the write still held
+    const atBound = { seen: seen.slice(), answered: answered.slice(), r: await p };
+    v = 2; w.dirty(f, { produce: () => `{"v":${v}}` });   // a later change while it is held
+    fs.unlinkSync(path.join(d, 'hold'));   // the storage answers
+    for (let k = 0; k < 80 && w.pending(f); k++) await sl(25);
+    await sl(50);
+    w.stop();
+    return { atBound, seen, answered, disk: fs.readFileSync(f, 'utf8') };
+  };
+  const a = await held(require(SWF), 'live');
+  ok(a.atBound.seen.length === 0 && a.atBound.answered.length === 1 && a.atBound.answered[0][0] === false && a.atBound.r.landed === false,
+    '⑩ (a) a landing HELD past the reply\'s bound: the reply says NOT YET (false) at the bound — the step has not run, nothing was undone', a.atBound);
+  ok(a.seen.length === 1 && a.seen[0] === '{"v":1}' && a.answered.length === 1 && a.disk === '{"v":2}',
+    '⑩ (a) …then the storage answers: the step runs ONCE, after the act\'s record LANDED (the disk held it when the step ran); a later write runs nothing again', a);
+  const a1 = await held(loadAs(atOnce), 'at-once');
+  ok(a1.atBound.seen.length === 1 && a1.atBound.seen[0] === '{"v":0}', '⑩ (a) CONTROL (a copy running the step at the act): the step ran while the disk still held the OLD record — red', a1.atBound);
+  const a2 = await held(loadAs(dropAtBound), 'dropped');
+  ok(a2.seen.length === 0, '⑩ (a) CONTROL (a copy whose bound drops the step — a held write treated as a failed one): the record landed and the step NEVER ran — red', { seen: a2.seen, disk: a2.disk });
+  // (b) A REAL KILL BEFORE THE LANDING
+  const CHILD = path.join(T10, 'ride-child.cjs');
+  fs.writeFileSync(CHILD, `'use strict';   // stale-pins: kept — the child program this leg writes (its own writer calls), no pin on a product file
+const Module = require('module'), path = require('path'), fs = require('fs');
+const [SWF, srcFile, dir, HOLD] = process.argv.slice(2);
+const m = new Module(SWF, null); m.filename = SWF; m.paths = Module._nodeModulePaths(path.dirname(SWF)); m._compile(fs.readFileSync(srcFile, 'utf8'), SWF);
+const w = m.exports.create({ log: { warn() {}, log() {} }, workerPath: HOLD });
+const f = path.join(dir, 'rec.json');
+w.dirty(f, { name: 'rec.write', produce: () => '{"v":"new"}' });
+w.afterLanding(f, () => fs.writeFileSync(path.join(dir, 'stepped'), '1'), { timeoutMs: null });
+process.stdout.write('armed\\n');
+setInterval(() => { }, 1000);
+`);
+  const killed = (src, tag) => new Promise((resolve) => {
+    const d = path.join(T10, 'b-' + tag); fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, 'rec.json'), '{"v":"old"}'); fs.writeFileSync(path.join(d, 'hold'), '1');
+    const sf = path.join(T10, 'src-' + tag + '.js'); fs.writeFileSync(sf, src);
+    const ch = spawn(process.execPath, [CHILD, SWF, sf, d, HOLD], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '', err = '';
+    ch.stderr.on('data', (x) => { err += x; });
+    const safety = setTimeout(() => { try { ch.kill('SIGKILL'); } catch { } }, 10000);
+    ch.stdout.on('data', (x) => { out += x; if (out.includes('armed')) setTimeout(() => { try { ch.kill('SIGKILL'); } catch { } }, 150); });
+    ch.on('exit', (code, sig) => {
+      clearTimeout(safety);
+      try { fs.unlinkSync(path.join(d, 'hold')); } catch { }
+      const w2 = require(SWF).create({ log: quiet });   // A START: a new process's writer reads what the disk holds
+      const disk = fs.readFileSync(path.join(d, 'rec.json'), 'utf8'), owed = w2.pending(path.join(d, 'rec.json')); w2.stop();
+      resolve({ sig, disk, owed, stepped: fs.existsSync(path.join(d, 'stepped')), ...(err ? { stderr: err.slice(0, 300) } : {}) });
+    });
+  });
+  const b = await killed(real, 'live');
+  ok(b.sig === 'SIGKILL' && b.disk === '{"v":"old"}' && !b.stepped && !b.owed,
+    '⑩ (b) a REAL kill (SIGKILL) before the landing: the step NEVER ran and a start finds the OLD record — the act simply did not happen', b);
+  const b1 = await killed(atOnce, 'at-once');
+  ok(b1.sig === 'SIGKILL' && b1.disk === '{"v":"old"}' && b1.stepped, '⑩ (b) CONTROL (a copy running the step at the act): after the same kill the step HAD run over the old record — red', b1);
+  fs.rmSync(T10, { recursive: true, force: true });
 })();
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

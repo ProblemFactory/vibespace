@@ -708,12 +708,12 @@ await (async () => {
       const r = await walk(loadAs(text), { stopAtFirst: true });
       ok(r.found.length > 0, `⑪ WALK CONTROL: ${name} — planted back, the walk finds it: «${r.found[0] ? r.found[0].seq + ' ⇒ ' + r.found[0].why : 'NOT FOUND'}»`, JSON.stringify({ sequences: r.sequences }));
     }
-    // (4) a SIDECAR (the `.window-` stamp) is handed whole; its one reader sees it before it lands
+    // (4) a SIDECAR (the `.window-` stamp) is written at once at the hub (the move's hunt, LAW II); its readers read the file
     const w4 = standIn(); HUB.useStoreWriter(w4, { dropRun: () => { } });
     UW.writeSidecar(d11, '.window-sub-B', { sevenDay: { resetsAt: 1787500000 }, at: 5000 });
     const stamp = require(path.join(REPO, 'src/window-stamp.js')).readWindowStamp(d11, 'sub-B');
-    ok(!fs.existsSync(path.join(d11, '.window-sub-B')) && stamp && stamp.at === 5000 && w4.dirties.some((x) => x.f === '.window-sub-B' && x.name === 'usage-cache.write'),
-      '⑪ a SIDECAR is handed to the writer whole (nothing on the main thread); the window stamp\'s one reader sees it before it lands', JSON.stringify({ stamp, dirties: w4.dirties }));
+    ok(fs.existsSync(path.join(d11, '.window-sub-B')) && stamp && stamp.at === 5000 && !w4.dirties.some((x) => x.f === '.window-sub-B'),
+      '⑪ a SIDECAR is written AT ONCE at the hub too (the move\'s hunt, LAW II: the statusline — another process — reads it raw): on disk when writeSidecar returns, nothing handed to the writer', JSON.stringify({ stamp, dirties: w4.dirties }));
     w4.land();
     // (5) NOT INJECTED (the device agent, a script): the write stays synchronous, as before
     HUB.useStoreWriter(null);

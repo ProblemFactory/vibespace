@@ -23,7 +23,7 @@ const quotaModel = require('../quota-model.js');
 const UW = require('../usage-cache-write.js');
 
 let _W = null, _dropRun = null;
-const HUB = { pendingText: (f) => pendingText(f), pendingIn: (d) => pendingIn(d), handOff: (...a) => handOff(...a) };   // what the cache module's hook calls
+const HUB = { pendingText: (f) => pendingText(f), pendingIn: (d) => pendingIn(d), handOff: (...a) => handOff(...a), ride: (f, step, o) => ride(f, step, o) };   // what the cache module's hook calls
 const _pending = new Map();   // file → { bytes, gen, v, bytesV, calls: [{v, at, args}] | null (a sidecar), reading, again, producedGen, producedV, landedGen, epoch }
 const REPLAY_CAP = 16;        // the cure 2: a re-merge replays at most this many calls — past it the pending bytes (which hold every call's effect) stand alone until the NEWEST bytes land (up to 60 s per write cycle, longer while events keep arriving during writes in flight — another process's write landing meanwhile is overwritten; the statusline's next tick writes again). 16 is ARBITRARY: a burst a few times the ordinary one (an account's events come a few a minute; a write lands in seconds), small enough that one re-merge stays a few ms of merges
 const PACED_MS = 60000;       // the R1 hand-off's pace: only the exit's net (the exit writes whatever is dirty) and a re-merge that never came — R2's urgent bytes come first
@@ -111,7 +111,10 @@ function remerge(file, p) {
   }).catch(() => { p.reading = false; try { next(); } catch { } });   // a body that threw strands neither the copy nor a queued «again»
 }
 
+/** THE STEP RIDES THE LANDING (the moved2 cure 2 — store-writer afterLanding, the ONE helper): `step` once the writer's owed write
+ *  of `file` is on disk (no writer ⇒ now). usage-routes: a verified panel clears a lapse; writeSidecar's offLoop road awaits it */
+function ride(file, step, opts = {}) { return require('../store-writer.js').ride(_W, file, step, { what: 'a usage reading', ...opts }); }
 /** a suite's view of one pending copy (never the bytes): {calls, reading, again, noReplay} | null */
 function pendingInfo(file) { const p = _pending.get(file); return p ? { calls: p.calls ? p.calls.length : null, reading: p.reading, again: p.again, noReplay: !!p.noReplay } : null; }
 
-module.exports = { useStoreWriter, pendingText, pendingIn, pendingInfo, REPLAY_CAP };
+module.exports = { useStoreWriter, pendingText, pendingIn, pendingInfo, ride, REPLAY_CAP };

@@ -14,7 +14,7 @@ import http from 'node:http';
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { scratch, freePorts } from './scratch.mjs';
+import { scratch, freePorts, anchored } from './scratch.mjs';
 import { spawn } from 'node:child_process';
 import { makeFixture, SESSIONS, writeAliveStamp } from './jobs-triage-fixture.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs'; // r6 D-F5: the pre-fix panel identity as a negative control
@@ -35,7 +35,7 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { clean
 const strip = (o) => JSON.parse(JSON.stringify(o, (k, v) => (k.startsWith('_') ? undefined : v)));
 // lane lg-store-writes (B-0248 U4): jobs.json is the STORE WRITER's — a read of the FILE first lands what the process's writer owes
 const SWu4 = require(path.join(ROOT, 'src/store-writer.js'));
-const landedU4 = () => { try { SWu4.storeWriter().flushSync(); } catch { } };
+const landedU4 = () => { const r = SWu4.storeWriter().flushSync(); if (r.deferred || (r.left && r.left.length)) throw new Error(`the store writer left owed writes (a disk check after it would prove nothing): ${JSON.stringify(r.deferred ? 'deferred' : r.left).slice(0, 300)}`); };   // lane lg-store-writes U4 (the move's read): LOUD — a landing that did not happen never leaves a disk check vacuous in silence
 const readStore = (d) => { landedU4(); return JSON.parse(fs.readFileSync(path.join(d, 'jobs.json'), 'utf-8')); };
 const readArchive = (d) => { try { return JSON.parse(fs.readFileSync(path.join(d, 'jobs-archive.json'), 'utf-8')); } catch { return null; } };
 
@@ -987,6 +987,72 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   const on = await onceScene({ JobManager }, 'jobs-triage-reread-once'), onx = await onceScene(JO, 'jobs-triage-reread-once-mut');
   ok(on.heldAfterOne && !on.wroteOver && on.back && on.said, 'cure 3: a store that answers «missing» right after an unreadable answer is READ ONCE MORE — the hold stands, the next save writes nothing at its path, and the file that was there all along is read back whole', on);
   ok(!onx.heldAfterOne && onx.wroteOver && !onx.back, 'cure 3 CONTROL (cure 2: «missing» believed at once, in a copy): the hold ends and the next save WRITES OVER the path — the records that were there are lost', onx);
+  // the U4 move's read (small 3): a LOAD that finds the last engine's write of jobs.json STILL OWED (the writer could not land it)
+  // never reads past it — the store starts UNREAD (code EOWED: B-f276's hold, never written over, read again off the loop), so the
+  // earlier engine's write cannot land later over a store this one read older. RED: a copy that reads anyway (its plant first)
+  const owedScene = (Mod, name) => {
+    const d = mkDir(name), F = path.join(d, 'jobs.json'); fs.writeFileSync(F, JSON.stringify([rec('jb-f2760w01')]));
+    const stuck = { pending: (f) => f === F, dirty() { }, durable: () => Promise.resolve(false), whenDurable: () => Promise.resolve(false), exitStartedAt: () => null, stats: () => [],
+      flushSync: (files) => ({ written: [], left: (files || [F]).filter((f) => f === F).map((f) => ({ file: f, name: 'jobs.write', why: 'held by the storage at the bound (a stand-in)' })), ms: 0 }) };
+    const J = engine(Mod, d, [], { writer: stuck, unreadRetry: { firstMs: 3600e3, maxMs: 3600e3 } });
+    J._unreadStopped = true;
+    const out = { held: !!J._unread.store, code: J._unread.store ? J._unread.store.code : null, read: J.jobs.has('jb-f2760w01') };
+    try { J.shutdown(); } catch { }
+    return out;
+  };
+  const OWED_A = "    if (owedStill) read = { error: Object.assign(new Error(`the last engine's write of jobs.json is still owed (${owedStill}) — read again once it lands`), { code: 'EOWED' }) };";
+  const ow = owedScene({ JobManager }, 'jobs-triage-owed-load'), owx = owedScene(MJ.load('src/jobs.js', anchored(jsrc, OWED_A, '    if (false /* MUTANT: reads past a write still owed */) read = null;', 'still owed ⇒ never read past'), 'owed-read-anyway'), 'jobs-triage-owed-load-mut');
+  ok(ow.held && ow.code === 'EOWED' && !ow.read, 'the U4 move (small 3): a load whose earlier write of jobs.json is still owed holds the store UNREAD (EOWED) — never a read past it', ow);
+  ok(!owx.held && owx.code === null, 'CONTROL (a copy that reads past the owed write): the store is READ (not held) — the earlier engine\'s write could land over it later', owx);
+  // ── THE MOVED2 CURE 2 (主开发's ruling): THE STEP THAT CANNOT BE UNDONE RIDES THE LANDING — no roll back anywhere. The act changes
+  // memory and marks the store; what cannot be undone (the job hears its answer, a For-you item resolved, a kept process ended) runs
+  // when, and only when, jobs.json has LANDED. A writer stand-in whose landing is HELD once armed (its afterLanding keeps the steps;
+  // `land()` = the storage answers; never landing = a kill first): nothing irreversible before, everything once at the landing
+  const PANEL = { title: 't', blocks: [{ type: 'input', id: 'code', pattern: '\\d{6}' }, { type: 'buttons', options: [{ id: 'submit', label: 'OK' }] }] };
+  const lawScene = (Mod, name) => {
+    const d = mkDir(name), asked = [], st = { armed: false, steps: [] };
+    const W = { pending: () => st.armed, dirty() { }, durable: () => Promise.resolve(!st.armed), whenDurable: () => Promise.resolve(!st.armed), exitStartedAt: () => null, stats: () => [],
+      flushSync: (names) => ({ written: [], left: st.armed ? (names || []).map((f) => ({ file: f, name: 'a store', why: 'held by the storage at the bound (a stand-in)' })) : [], ms: 0 }),
+      afterLanding: (file, step) => { if (!st.armed) { const value = step(); return Promise.resolve({ landed: true, value }); } st.steps.push({ file, step }); return new Promise(() => { }); } };
+    const J = engine(Mod, d, [], { writer: W, resolveJobAsk: (id) => asked.push(id), unreadRetry: { firstMs: 3600e3, maxMs: 3600e3 } });
+    J._unreadStopped = true;
+    const job = rec('jb-f2760l01', { state: 'awaiting-user', interaction: { pending: { version: 1, panel: PANEL, at: Date.now() }, answers: [] } });
+    J.jobs.set(job.id, job);
+    J.pendingNotifs.set('cid-law', [{ jobId: job.id, ts: 1, text: 'its result' }]);
+    st.armed = true;
+    const land = () => { st.armed = false; const xs = st.steps; st.steps = []; for (const x of xs) x.step(); };
+    return { J, job, asked, land, st };
+  };
+  const lawRun = (Mod, tag) => {
+    const a = lawScene(Mod, 'jobs-triage-law-ans-' + tag); const ans = a.J.answerPanel(a.job, { version: 1, button: 'submit', code: '123456' });
+    const outA = { ok: !!ans.ok, code: ans.code || null, pending: !!a.job.interaction.pending, state: a.job.state, askedBefore: a.asked.length };
+    a.land(); outA.askedAfter = a.asked.length;
+    const r = lawScene(Mod, 'jobs-triage-law-rm-' + tag); const rm = r.J.rm(r.job);
+    const outR = { ok: !!rm.ok, code: rm.code || null, kept: r.J.jobs.has(r.job.id), askedBefore: r.asked.length };
+    r.land(); outR.askedAfter = r.asked.length;
+    const c = lawScene(Mod, 'jobs-triage-law-clear-' + tag); const cl = c.J.clearJobs([c.job.id], { allow: () => ({ ok: true }) });
+    const outC = { cleared: (cl.cleared || []).length, notOnDisk: !!cl.notOnDisk, state: c.job.state, askedBefore: c.asked.length };
+    const again = c.J.clearJobs([c.job.id], { allow: () => ({ ok: true }) });   // a second press before the landing changes nothing — the first one's step is the one owed
+    c.land(); outC.askedAfter = c.asked.length; outC.again = (again.already || []).length;
+    const n = lawScene(Mod, 'jobs-triage-law-drain-' + tag); const got = n.J.drainNotifs('cid-law');
+    const outD = { got: got.length, back: (n.J.pendingNotifs.get('cid-law') || []).length };
+    const k = lawScene(Mod, 'jobs-triage-law-kill-' + tag); k.J.answerPanel(k.job, { version: 1, button: 'submit', code: '123456' });   // never landed: a kill first
+    const outK = { asked: k.asked.length, owed: k.st.steps.length };
+    for (const x of [a, r, c, n, k]) { try { x.J.shutdown(); } catch { } }
+    return { ans: outA, rm: outR, clear: outC, drain: outD, kill: outK };
+  };
+  const law = lawRun({ JobManager }, 'real');
+  ok(law.ans.ok && !law.ans.pending && law.ans.state === 'up' && law.ans.askedBefore === 0 && law.ans.askedAfter === 1,
+    'THE STEP RIDES THE LANDING: a panel\'s answer not landed yet is TAKEN (memory and its store, never rolled back) — the job hears it and its For-you item closes only AT the landing, once', law.ans);
+  ok(law.rm.ok && !law.rm.kept && law.rm.askedBefore === 0 && law.rm.askedAfter === 1, '…a removal: the job is out of memory, its asks resolved only at the landing', law.rm);
+  ok(law.clear.cleared === 1 && !law.clear.notOnDisk && law.clear.state === 'up' && law.clear.askedBefore === 0 && law.clear.askedAfter === 1,
+    '…a clear (must 3): the asked job\'s For-you item is resolved AT the landing — by itself, never left open for good', law.clear);
+  ok(law.drain.got === 1 && law.drain.back === 0, '…a drain (must 4): nothing is PUT BACK — the text went out, the removal stays and the writer retries', law.drain);
+  ok(law.kill.asked === 0 && law.kill.owed === 1, '…and a landing that never comes (a kill first): the job never heard the answer — its step was still owed, never run', law.kill);
+  const RIDE_A = "    this._ride(this.file, 'the panel\\'s answer', () => {";
+  const JLAW = MJ.load('src/jobs.js', anchored(jsrc, RIDE_A, "    ((f, w, step) => step())(this.file, 'the panel\\'s answer', () => {   // MUTANT: the step runs at the act", 'the answer rides the landing'), 'law-ride-ignored');
+  const lawx = lawRun(JLAW, 'mut');
+  ok(lawx.ans.askedBefore === 1, 'CONTROL (a copy whose answer runs its step at the act): the job hears the answer and its For-you item closes while NOTHING is on disk — red', lawx.ans);
   // CURE 3: no «unread» item after «gone» was said for the same failure (its note, still being written, lands after)
   {
     const d = mkDir('jobs-triage-gone-owed'), F = path.join(d, 'jobs.json');
@@ -1242,8 +1308,7 @@ console.log('§U4 lane lg-store-writes (B-0248): THE STORE\'S SAVE GOES THROUGH 
   }
   const jsrcSp = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8');
   const aSp = '    if (!intent.ok) {';
-  ok(jsrcSp.split(aSp).length === 2, 'U4 cure ANCHOR: the run\'s intent check (_spawn)');
-  const NoCheck = mutantCopies('jobs-triage-u4-spawn', ROOT).load('src/jobs.js', jsrcSp.replace(aSp, '    if (false) {'), 'no-intent-check');
+  const NoCheck = mutantCopies('jobs-triage-u4-spawn', ROOT).load('src/jobs.js', anchored(jsrcSp, aSp, '    if (false) {', 'the run\'s intent check (_spawn)'), 'no-intent-check');   // ALSO CURED (the moved2 cure 2): through anchored()
   const s2 = spawnScene(NoCheck, 'red', stalled('held'));
   ok(!s2.threw && !!s2.proc, 'U4 cure (1) CONTROL: the check removed (a mutant copy) ⇒ a child IS started while its run is not on disk — the check above would be red', { threw: s2.threw, proc: s2.proc });
   try { if (s2.proc && s2.proc.pid) process.kill(s2.proc.pid, 'SIGKILL'); } catch { }
@@ -1305,8 +1370,7 @@ console.log('§U4 lane lg-store-writes (B-0248): THE STORE\'S SAVE GOES THROUGH 
   b1.J.shutdown();
   const jsrcBk = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8');
   const aBk = "    if (this._refusedForDisk && this._refusedForDisk.size && !this._retryArmed) {";
-  ok(jsrcBk.split(aBk).length === 2, 'U4/U5 cure 2 ANCHOR: the retry armed when the store lands (_storeWritten)');
-  const NoBack = mutantCopies('jobs-triage-u4-back', ROOT).load('src/jobs.js', jsrcBk.replace(aBk, '    if (false) {'), 'no-retry');
+  const NoBack = mutantCopies('jobs-triage-u4-back', ROOT).load('src/jobs.js', anchored(jsrcBk, aBk, '    if (false) {', 'the retry armed when the store lands (_storeWritten)'), 'no-retry');
   const b2 = await backScene(NoBack, 'red');
   ok(b2.state === 'down' && !b2.proc, 'U4/U5 cure 2 CONTROL: without the retry (a mutant copy) the refused service stays DOWN after the store lands', { state: b2.state, proc: b2.proc });
   b2.J.shutdown();
@@ -1324,8 +1388,7 @@ console.log('§U4 lane lg-store-writes (B-0248): THE STORE\'S SAVE GOES THROUGH 
   // RED CONTROL: the change removed — the old synchronous save (the writer bypassed)
   const jsrcU4 = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8');
   const aU4 = "  _writer() { return this.d.writer || require('./store-writer.js').storeWriter(); }";
-  ok(jsrcU4.split(aU4).length === 2, 'U4 ANCHOR: the store\'s one writer line');
-  const SyncJ = mutantCopies('jobs-triage-u4', ROOT).load('src/jobs.js', jsrcU4.replace(aU4, "  _writer() { return { dirty: (f, o) => fs.writeFileSync(f, o.produce()), durable: async () => true, pending: () => false, flushSync: () => ({ written: [], left: [] }), exitStartedAt: () => null }; }"), 'sync-save');
+  const SyncJ = mutantCopies('jobs-triage-u4', ROOT).load('src/jobs.js', anchored(jsrcU4, aU4, "  _writer() { return { dirty: (f, o) => fs.writeFileSync(f, o.produce()), durable: async () => true, pending: () => false, flushSync: () => ({ written: [], left: [] }), exitStartedAt: () => null }; }"), 'sync-save');
   const r = scene(SyncJ, 'red');
   ok(!r.unchanged, 'U4 CONTROL: the old synchronous save (the writer bypassed, a mutant copy) ⇒ jobs.json is written on the main thread at the change — the first check above would be red');
   r.J.shutdown();

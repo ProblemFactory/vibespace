@@ -34,6 +34,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { anchored } from './scratch.mjs';
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -185,6 +186,31 @@ console.log('§0 the incident: two conversations, one Task Group, A\'s notify cr
   const xr = await new Promise((resolve) => { let code = 200; const R = { status(c) { code = c; return R; }, json(o) { resolve({ code, o }); return R; } }; Promise.resolve(routesX['POST /api/agent/jobs/:ref/:act']({ headers: { authorization: 'Bearer vsst_B' }, body: {}, query: {}, params: { ref: job.id, act: 'withdraw' } }, R)).catch((e) => resolve({ code: 500, o: { error: e.message } })); });
   ok(xr.code === 200 && !(job.interaction && job.interaction.pending), 'B-8bd5 CONTROL (the gate by control, in a copy): the groupmate holding control WITHDRAWS the person\'s question', xr);
   for (const r of copiesCensus(MJW.files, MJW.dir, REPO, { minCopies: 1, label: 'B-8bd5 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+  // ── THE U4 MOVE'S MUST (主开发 23:00Z — B-70f9's law after the move): the create's reply is built INSIDE the store's callback
+  // (it waits for jobs.json); a throw while it is built — here its serialising (res.json throws once) — is still ANSWERED by
+  // name, 500 create-failed, through the wrapper's ONE helper (src/server/job-where.js answerCreateFailed): never a request left
+  // open (the agent's command would wait out its 30 s and a retry would make a second job). The REAL CLI through the REAL route.
+  {
+    const realCreate = routes['POST /api/agent/jobs']; let seenBody = null;
+    const throwOnce = (res) => { let first = true; return new Proxy(res, { get(t, k) { if (k === 'json') return (o) => { if (first) { first = false; throw new Error('the reply could not be serialised (a stand-in)'); } return t.json(o); }; const v = t[k]; return typeof v === 'function' ? v.bind(t) : v; } }); };
+    routes['POST /api/agent/jobs'] = (req, res) => { if (req.body && req.body.name === 'reply-throws') { seenBody = { ...req.body }; return realCreate(req, throwOnce(res)); } return realCreate(req, res); };
+    const thr = await cli('A', ['notify-cron', '--name', 'reply-throws', '--every', '15m', '--text', 'ping']);
+    routes['POST /api/agent/jobs'] = realCreate;
+    const made = [...jm.jobs.values()].some((j) => j.name === 'reply-throws');
+    ok(thr.code !== 0 && /the job create failed on the hub: the reply could not be serialised \(a stand-in\)/.test(thr.err + thr.out) && made && seenBody,
+      'the U4 move (B-70f9 kept): a throw while the create\'s reply is built inside the store\'s callback is ANSWERED 500 create-failed by name — the CLI is told at once (the job exists; «vibespace-job list --mine» says so)', { code: thr.code, err: thr.err.slice(0, 300), out: thr.out.slice(0, 200), made });
+    // RED: a copy with the moved tip's EMPTY catch — the same throw gets NO reply inside the bound (its plant asserted first)
+    const AR_SRC = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8');
+    const CATCH = "} catch (e) { answerCreateFailed(res, e); } });   // lane lg-store-writes U4";
+    const ARx = mutantCopies('jobs-addressed-reply', REPO).load('src/agent-routes.js', anchored(AR_SRC, CATCH, "} catch { } });   // lane lg-store-writes U4", 'the create reply\'s catch is one place'), 'reply-throw-dropped');
+    const routesX = {};
+    ARx.setupAgentRoutes({ ...AR_DEPS, app: { get: (p, h) => { routesX[`GET ${p}`] = h; }, post: (p, h) => { routesX[`POST ${p}`] = h; }, put() { }, patch() { }, delete() { }, use() { } } });
+    let got = null; const resX = { headersSent: false, status() { return resX; }, json(o) { got = o; resX.headersSent = true; return resX; } };
+    await routesX['POST /api/agent/jobs']({ headers: { authorization: 'Bearer vsst_A' }, body: { ...(seenBody || {}), name: 'reply-throws-x' }, query: {}, params: {} }, throwOnce(resX));
+    try { require('../src/store-writer.js').storeWriter().flushSync(); } catch { }
+    for (let i = 0; i < 50 && got === null; i++) await tick(20);   // the bound: one second for any reply
+    ok(got === null && [...jm.jobs.values()].some((j) => j.name === 'reply-throws-x'), 'CONTROL (the moved tip\'s empty catch, in a copy): the same throw gets NO reply inside the bound — the job exists and the agent\'s command would wait out its 30 s', { got });
+  }
   server.close();
 }
 
@@ -246,6 +272,9 @@ const CLASS = {
   '_startAskedAtStop#1': 'alarm',   // B-cac2 (cure r1): a start asked during a stop that cannot be done — said in its events and to its owner
   'setWakeGrant#1': 'event',   // the manager design's piece 7: the grant set / cleared (by the person or a key) — a fact on the job's own journal
   '_hubMainRefusal#1': 'event',   // B-2c5c (THE MAIN DOOR): a stop, a time limit or an until-marker REFUSED because the job's main is this hub — said on the row, once a run and a road
+  // lane lg-store-writes (the U4/U5 cure and cure 2, met at the move): a start REFUSED because its run could not be recorded on disk
+  // (the alarm the refusal raises), and a one-shot schedule whose fire was refused for that (parked failed, said)
+  '_spawn#1': 'alarm', '_cronTick#2': 'alarm',
 };
 for (const s of SITES) ok(CLASS[s.key], `census row: ${s.key} (src/jobs.js:${s.line}) has a class`, s.src);
 ok(Object.keys(CLASS).every((k) => SITES.some((s) => s.key === k)), 'every class row names a site that exists (a removed producer leaves no stale row)', Object.keys(CLASS).filter((k) => !SITES.some((s) => s.key === k)));
@@ -315,6 +344,8 @@ const DRIVERS = {
   '_fireCron#1': async () => { const j = mkJob(jm, { kind: 'cron', name: 'drv-fire', schedule: { everyMs: 3600e3 }, action: { type: 'notify', text: 'post the digest' } }); jm._fireCron(j, 'cron'); return j; },
   'setMemory#1': async () => { const j = task('drv-memory'); jm.setMemory(j, '2G', { byUser: true }); return j; },
   'setWakeGrant#1': async () => { const j = task('drv-wake-grant'); jm.setWakeGrant(j, true, { by: { kind: 'person', by: 'person' } }); return j; },
+  '_spawn#1': async () => { const j = task('drv-start-not-on-disk'); const un = stub(jm, { _onDisk: (f, what) => (/intent/.test(String(what)) ? { ok: false, why: 'held by the storage at the bound (a stand-in)' } : { ok: true }) }); try { JobManager.prototype._spawn.call(jm, j, 'manual'); } catch { } un(); return j; },   // the REAL _spawn (the engine's is a stand-in that never spawns); the refused intent throws before any process
+  '_cronTick#2': async () => { const j = mkJob(jm, { kind: 'cron', name: 'drv-fire-refused', schedule: { at: Date.now() + 3600e3 }, action: { type: 'notify', text: 'drv' } }); j.nextFireAt = Date.now() - 1000; const keep = new Map(jm.jobs); jm.jobs.clear(); jm.jobs.set(j.id, j); const un = stub(jm, { _fireCron: () => { throw Object.assign(new Error('not started (cron): its run could not be recorded on disk first (a stand-in)'), { code: 'EVSNOTONDISK' }); } }); try { await jm._cronTick(); } catch { } un(); for (const [k, v] of keep) jm.jobs.set(k, v); return j; },
   'ask#1': async () => { const j = task('drv-ask'); j.state = 'up'; jm.ask(j, PANEL); return j; },
   'answerPanel#1': async () => { const j = task('drv-answer'); j.state = 'up'; const r = jm.ask(j, PANEL); jm.answerPanel(j, { version: r.version, c: 'a', button: 'OK' }); return j; },
   'withdrawAsk#1': async () => { const j = task('drv-withdraw'); j.state = 'up'; jm.ask(j, PANEL); jm.withdrawAsk(j); return j; },   // B-8bd5

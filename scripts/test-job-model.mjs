@@ -282,7 +282,8 @@ const d = new Date(nf); ok(d.getHours() === 3 && d.getMinutes() === 0 && d.getDa
   // the legacy recompute (a record with no nextFireAt) says nothing (first pass only)
   const jsrc = fs.readFileSync(path.join(__dirname_jm, '..', 'src', 'jobs.js'), 'utf-8');
   const calls = (jsrc.match(/M\.nextFire\([^;]*?\)(?=;| :)/g) || []).map((c) => c.replace(/\s+/g, ' '));
-  const want = { 'M.nextFire(job.schedule, now(), undefined, job.nextFireAt)': 1, 'M.nextFire(job.schedule, now(), undefined, null)': 2, 'M.nextFire(job.schedule, now())': 1 };
+  // lane lg-store-writes (the U4/U5 cure 2, met at the move): a REFUSED recurring fire (its run not on disk) moves to the slot after the one it was due for — a second «the slot it fired for» call
+  const want = { 'M.nextFire(job.schedule, now(), undefined, job.nextFireAt)': 2, 'M.nextFire(job.schedule, now(), undefined, null)': 2, 'M.nextFire(job.schedule, now())': 1 };
   const got = {}; for (const c of calls) got[c] = (got[c] || 0) + 1;
   const norm = (o) => JSON.stringify(Object.entries(o).sort());
   ok(norm(got) === norm(want),

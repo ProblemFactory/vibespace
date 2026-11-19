@@ -93,6 +93,7 @@
  */
 const ST = require('../browser-stuck.js');
 const PK = require('../browser-passkey.js');
+const FENCE_LAND_MS = 10000;   // lane lg-store-writes, the moved2 cure 2: a login fill waits this long for its tab's fence record to land, else types nothing
 const PS = require('../browser-passkey-store.js'); // lane passkey-store-core: the sealed per-profile table + THE GATE (this file is its one writer)
 const crypto = require('crypto');
 let WS = null; try { WS = require('ws').WebSocket; } catch { WS = null; }
@@ -5255,6 +5256,12 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
           holdReason: keepHold,
         }, { persist: true });
         noteActiveTarget(pid, target && target.browserKey, e.targetId);
+        // lane lg-store-writes (the moved2 cure 2's hunt (5) — THE STEP THAT CANNOT BE UNDONE RIDES THE LANDING): the vault value is
+        // typed into a page that outlives a hub restart ONLY once the tab's fence record is on disk (a kill in between left the tab
+        // unheld and its reads unscrubbed after the restart); not on disk inside the bound ⇒ nothing is typed, said by its code
+        if (keeper && typeof keeper.whenLanded === 'function') {
+          return keeper.whenLanded({ timeoutMs: FENCE_LAND_MS }).then((L) => (L && L.landed ? null : { ok: false, code: 'login_fence_not_on_disk', error: 'nothing was typed: this tab\'s login fence is not on disk yet (the storage is slow or failing) — fill again once it answers' }));
+        }
       },
     });
 

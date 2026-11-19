@@ -235,7 +235,7 @@ const owner = { owner: { kind: 'instance', id: null } };
   ok(bw.json.ready && bw.json.ready.step.code === 'browser_cli_missing' && bm.json.ready && bm.json.ready.step === null && bl.json.ready === null, 'GET /api/browser/builds?host=: the machine\'s `ready` (dev-win: the step; dev-mac: none); this computer: null', { bw: bw.json.ready, bm: bm.json.ready, bl: bl.json.ready });
   // 4 · DELETE WITH ITS FOLDER THERE (the DELETE route and the panel's Delete… / forget)
   fs.mkdirSync(path.join(mac.home, '.agent-browser', 'vs-' + p.id, 'Default'), { recursive: true });
-  const Rd = mutant('src/routes/browser.js', "    const m = typeof k.removeOnMachine === 'function' ? await k.removeOnMachine(req.params.id, { profile: snap }) : null;", '    const m = null;');
+  const Rd = mutant('src/routes/browser.js', "    const r = k.removeProfile(req.params.id, { unpin, machine: snap, replyMs: REPLY_LAND_MS });", "    const r = k.removeProfile(req.params.id, { unpin, replyMs: REPLY_LAND_MS });");   // the moved2 cure 2: the machine is asked by the keeper's own step (the snapshot handed to it) — the control hands none   // lane lg-store-writes (the move's hunt, C): the machine's call is the ternary's second road (the first: a removal not on disk asks nothing)
   const APId = await serve(Rd);
   const p2 = k.createProfile({ label: 'Control twin', host: 'dev-mac' }, owner);
   fs.mkdirSync(path.join(mac.home, '.agent-browser', 'vs-' + p2.id), { recursive: true });
@@ -301,9 +301,15 @@ console.log('— ⑤ verify r1');
     return res;
   };
   const Rr = mutant('src/routes/browser.js', `    const snap = typeof k.profile === 'function' ? k.profile(req.params.id) : null;
-    const r = k.removeProfile(req.params.id, { unpin });
-    const m = typeof k.removeOnMachine === 'function' ? await k.removeOnMachine(req.params.id, { profile: snap }) : null;
-    res.json({ ...r, unpinned: u.cleared, ...(m ? { machine: m } : {}) });`, `    const m = typeof k.removeOnMachine === 'function' ? await k.removeOnMachine(req.params.id) : null;
+    // lane lg-store-writes (the moved2 cure 2 — THE STEP RIDES THE LANDING): the machine deletes the folder — with the passkeys, the
+    // grant row, the marked config — once the record's removal is ON DISK (the keeper's step); the answer waits a bounded time:
+    // landed = done, not yet = said by its code (\`finishes-on-landing\`: saved here, it finishes by itself), never half taken
+    const r = k.removeProfile(req.params.id, { unpin, machine: snap, replyMs: REPLY_LAND_MS });
+    const L = r && r.landing ? await r.landing : null;
+    const v = L && L.landed ? L.value || null : null;
+    const m = L ? (L.landed ? (v && v.onMachine ? await v.onMachine : null) : (snap && snap.host ? { host: snap.host, left: 'asked by itself once the removal is on disk' } : null))
+      : typeof k.removeOnMachine === 'function' ? await k.removeOnMachine(req.params.id, { profile: snap }) : null;   // a keeper without the law (a suite's stand-in)
+    res.json({ ...r, ...(v ? { passkeys: v.passkeys } : {}), unpinned: u.cleared, ...(m ? { machine: m } : {}), ...(L && !L.landed ? FINISHES : {}) });`, `    const m = typeof k.removeOnMachine === 'function' ? await k.removeOnMachine(req.params.id) : null;
     res.json({ ...k.removeProfile(req.params.id, { unpin }), unpinned: u.cleared, ...(m ? { machine: m } : {}) });`);
   const APIr = await serve(Rr);
   const rc = await raceOnce(APIr);

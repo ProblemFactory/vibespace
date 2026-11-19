@@ -8,7 +8,7 @@
  * CLAUDE.md notes on renderContext/persisted-output before touching payloads.
  */
 const os = require('os');
-const { jobWhere, answersEveryThrow } = require('./server/job-where.js'); // B-70f9: where a job runs — a remote conversation's folder asked through the blocked-path door, bounded
+const { jobWhere, answersEveryThrow, answerCreateFailed } = require('./server/job-where.js'); // B-70f9: where a job runs — a remote conversation's folder asked through the blocked-path door, bounded
 const path = require('path');
 const crypto = require('crypto');
 const OF = require('./server/owner-facts.js'); // lane agent-context-owner-facts (B-7960): the owner's clock + tray words — every time and tray sentence an agent reads here
@@ -2849,7 +2849,7 @@ app.post('/api/agent/jobs', answersEveryThrow(async function jobsCreateRoute(req
   // piece 7: --propose-wake "why" files the grant's proposal for the NEW job (its answer rides this one; the job exists either way)
   // lane lg-store-writes U4: the answer waits for the store, never the loop (a write not landed is said: notOnDisk)
   Promise.resolve(b.proposeWake !== undefined ? proposeWake(a, a.jm.jobs.get(r.job.id), b.proposeWake) : null).catch((e) => ({ body: { error: (e && e.message) || String(e), code: 'failed' } })).then((pw) =>
-    a.jm.persisted((saved) => { try { require('./store-writer.js').identityAtExit(res); res.json({ machine: hubMachine, where: where.words,  success: true, job: jobWhen(r.job), renamed: r.renamed, notify, ...(r.vaultWait ? { vaultWait: r.vaultWait } : {}), ...(pw ? { wakeProposal: pw.body } : {}), ...(saved ? {} : { notOnDisk: true }) }); } catch { } }));
+    a.jm.persisted((saved) => { try { require('./store-writer.js').identityAtExit(res); res.json({ machine: hubMachine, where: where.words,  success: true, job: jobWhen(r.job), renamed: r.renamed, notify, ...(r.vaultWait ? { vaultWait: r.vaultWait } : {}), ...(pw ? { wakeProposal: pw.body } : {}), ...(saved ? {} : { notOnDisk: true }) }); } catch (e) { answerCreateFailed(res, e); } }));   // a throw while it is built is answered 500 create-failed by the wrapper's own helper (B-70f9: every throw answered)
 }));
 app.get('/api/agent/jobs', (req, res) => {
   const a = jobAuth(req, res); if (!a) return;
@@ -2965,8 +2965,11 @@ app.post('/api/agent/jobs/:ref/:act', (req, res) => {
     else if (act === 'memory') r = a.jm.setMemory(job, req.body?.value ?? null, { byUser: false }); // lane jobs-memory-bound: owner conversation only (canEdit above)
     else return res.status(400).json({ error: `unknown action "${act}"` });
     if (r.error) return res.status(400).json({ error: r.error });
-    if (act === 'progress' || act === 'announce') return res.json({ success: true, ...r });   // a job's own frequent verbs: paced, answered at once
-    a.jm.persisted((saved) => { try { require('./store-writer.js').identityAtExit(res); res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true }) }); } catch { } });   // lane lg-store-writes U4: the act's answer waits for the store (the loop never does); a write not landed is SAID in the answer, the act stays applied in memory and the writer retries
+    // a job's own frequent verbs: paced, answered at once — an announce whose owner's copy was only STASHED (`landing`: the rate
+    // floor) waits for it like an act (lane lg-store-writes, the moved2 cure 2's hunt (1): told ok, the job never says it again)
+    if (act === 'progress' || (act === 'announce' && !r.landing)) return res.json({ success: true, ...r });
+    if (r.landing) delete r.landing;
+    a.jm.persisted((saved) => { try { require('./store-writer.js').identityAtExit(res); res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true, ...(act === 'rm' ? { code: 'finishes-on-landing' } : {}) }) }); } catch { } });   // lane lg-store-writes U4: the act's answer waits for the store (the loop never does); a write not landed is SAID in the answer, the act stays applied in memory and the writer retries
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 }

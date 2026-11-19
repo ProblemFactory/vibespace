@@ -399,16 +399,46 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
   function forget() {
     const cut = now() - DELIVERED_TTL_MS;
     let n = 0;
-    for (const [id, rec] of delivered) if (rec.at < cut) { delivered.delete(id); n++; }
-    if (delivered.size > DELIVERED_MAX) for (const [id, rec] of delivered) { if (delivered.size <= DELIVERED_MAX) break; if (rec.restored) { delivered.delete(id); n++; } }
+    // a record still HOLDING a put-back's copy (jobsOwed — the moved2 cure 2) is never forgotten: it is the copy's only home
+    const held = (rec) => !!(rec && rec.jobsOwed && rec.jobs && rec.jobs.length);
+    for (const [id, rec] of delivered) if (rec.at < cut && !held(rec)) { delivered.delete(id); n++; }
+    if (delivered.size > DELIVERED_MAX) for (const [id, rec] of delivered) { if (delivered.size <= DELIVERED_MAX) break; if (rec.restored && !held(rec)) { delivered.delete(id); n++; } }
     while (delivered.size > DELIVERED_MAX) {
-      const id = delivered.keys().next().value; const rec = delivered.get(id);
+      let id = null; for (const [k, r] of delivered) if (!held(r)) { id = k; break; }
+      if (id == null) break;
+      const rec = delivered.get(id);
       delivered.delete(id); n++;
       log.warn?.(`[stash] hand-over ${id} (${rec && rec.cid}, ${(rec && (rec.msg.length + rec.jobs.length)) || 0} originals) forgotten by the ${DELIVERED_MAX}-record bound — a frame handed back for it is kept as one notice`);
     }
     return n;
   }
   if (forget()) persistDelivered();
+  /** THE KEPT COPY IS DROPPED ONLY ON THE LANDING (lane lg-store-writes, the moved2 cure 2 — its must 1): the job notifications put
+   *  back go through the jobs store's writer, so this memory keeps its copy (`jobsOwed`, on disk here) until the store holding
+   *  them LANDS (jm.afterNotifsLanded — the step that cannot be undone rides the landing); a kill first ⇒ the next start puts
+   *  the copy back (putBackHeld), never lost and never twice (restoreNotifs skips the same job at the same instant) */
+  function keepUntilLanded(rec, jm) {
+    if (!rec.jobs.length) { delete rec.jobsOwed; return; }
+    rec.jobsOwed = true;
+    if (!jm || typeof jm.afterNotifsLanded !== 'function') return;   // the jobs store not up yet: the start's pass puts it back
+    const copy = rec.jobs;
+    try { jm.afterNotifsLanded(() => { if (rec.jobs !== copy) return; rec.jobs = []; delete rec.jobsOwed; persistDelivered(); changed(); }); }
+    catch (e) { log.warn?.(`[stash] the kept job notifications wait for the next start: ${(e && e.message) || e}`); }
+  }
+  /** A START PUTS BACK EVERY COPY STILL HELD (the moved2 cure 2): a record whose put-back had not landed when the last process
+   *  stopped — its job notifications go back into the jobs store (by job and instant, no duplicate) and ride that landing again.
+   *  The jobs store comes up after this module: asked again each second, a minute at most, said when it never came. */
+  function putBackHeld(tries = 0) {
+    const held = [...delivered.values()].filter((r) => r && r.jobsOwed && r.jobs.length);
+    if (!held.length) return;
+    const jm = jobsReady();
+    if (!jm || typeof jm.restoreNotifs !== 'function') { if (tries < 60) schedule(() => putBackHeld(tries + 1), 1000); else log.warn?.(`[stash] ${held.length} hand-over cop${held.length === 1 ? 'y' : 'ies'} of job notifications still held — the jobs store never came up; kept for the next start`); return; }
+    let n = 0;
+    for (const rec of held) { n += jm.restoreNotifs(rec.cid, rec.jobs); keepUntilLanded(rec, jm); }
+    log.log?.(`[stash] the last process stopped before ${held.length} hand-over put-back(s) landed — ${n} job notification(s) put back (none twice)`);
+    changed();
+  }
+  if (delivered.size) schedule(() => putBackHeld(0), 0);
   /** Hand the whole stash over now — ONE message through the ladder, reason `stash-handover`. */
   async function handOver(webuiId, { auto = false, pressed = null } = {}) {
     const s = activeSessions && activeSessions.get(String(webuiId));
@@ -612,7 +642,8 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
     if (rec.msg.length && d && typeof d.restoreStash === 'function') k += d.restoreStash(cid, rec.msg);
     const jm = jobsReady();
     if (rec.jobs.length && jm && typeof jm.restoreNotifs === 'function') k += jm.restoreNotifs(cid, rec.jobs);
-    rec.restored = k || -1; rec.msg = []; rec.jobs = [];   // spent: the originals are back in their stores
+    rec.restored = k || -1; rec.msg = [];   // spent: the ladder's originals are back in its store (written at once)
+    keepUntilLanded(rec, jm);
     persistDelivered();
     log.log?.(`[stash] ${cid}: hand-over ${m[1]} came back undelivered — ${k} entr${k === 1 ? 'y' : 'ies'} restored, each as itself`);
     changed();

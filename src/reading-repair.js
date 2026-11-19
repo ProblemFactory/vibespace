@@ -960,10 +960,10 @@ function identityCacheKeys(cacheDir, windows, { accounts = null } = {}) {
   }
   let names = [];
   // the predicate is `usageIdentityGroups`', verbatim
-  try { names = fs.readdirSync(cacheDir).filter((f) => f.endsWith('.json') && !f.startsWith('__models__') && !f.startsWith('host-') && f !== 'rates.json'); } catch { return out; }
+  try { names = _usageWrite.listCacheDir(cacheDir).filter((f) => f.endsWith('.json') && !f.startsWith('__models__') && !f.startsWith('host-') && f !== 'rates.json'); } catch { return out; }   // lane lg-store-writes (the move's hunt, B2 — LAW II): the folder through the cache module, the pending copies first (a repair earlier in this pass may still be pending)
   for (const fn of names.sort()) {
     const key = fn.slice(0, -5);
-    const cache = _readJson(path.join(cacheDir, fn));
+    const cache = _readCacheJson(path.join(cacheDir, fn));   // the pending copy first (the move's hunt, B2)
     if (!cache) { out.push({ key, file: fn, cache: null, ident: null, why: 'unreadable' }); continue; }
     const accountId = (key === '__global__' || key === '__global_codex__') ? null : key;
     const rec = accountId && accounts ? accounts.find((a) => a && a.id === accountId) : null;

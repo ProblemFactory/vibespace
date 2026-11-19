@@ -131,6 +131,10 @@ let ctx = null;
 const vaultFillTickets = new Map();
 const VAULT_FILL_TICKET_TTL_MS = 30_000;
 const VAULT_FILL_TICKET_MAX = 256;
+// lane lg-store-writes (the moved2 cure 2): a reply waits this long for a registry write to LAND (under the CLI's 30 s call budget);
+// not yet ⇒ said by its code — the step that cannot be undone follows by itself at the landing (src/lib/utils.js sayNotOnDisk)
+const REPLY_LAND_MS = 20000;
+const FINISHES = Object.freeze({ notOnDisk: true, code: 'finishes-on-landing' });
 function setup(deps) {
   ctx = deps;
   vaultFillTickets.clear();
@@ -267,7 +271,7 @@ const STATUS = { // lane browser-profile-clone: the copy's refusals by name
   // password rules a strong password cannot meet, no such login, an account already kept, a bad origin / user name, the kernel's
   // refusal; the owner's save card answered on a changed / gone card
   login_fill_withdrawn: 409, login_retired: 409, login_no_form: 409, login_in_frame: 409, login_form_changed: 409, login_phishing: 403, login_ambiguous: 409, login_not_granted: 403, vault_locked: 423, password_rules_unsupported: 422, login_no_entry: 404, login_exists: 409,
-  login_bad_origin: 400, login_bad_user: 400, login_bad_field: 400, bad_request: 400, login_fill_live: 409, login_fence_unavailable: 409, login_channel_unmediated: 409, login_check_failed: 409, login_not_pending: 409, login_pending_exists: 409, login_no_previous: 409, login_no_otp: 409, code_paced: 429, target_not_found: 409, login_failed: 502, not_written: 503, card_changed: 409, card_gone: 410,
+  login_bad_origin: 400, login_bad_user: 400, login_bad_field: 400, bad_request: 400, login_fill_live: 409, login_fence_unavailable: 409, login_fence_not_on_disk: 503, login_channel_unmediated: 409, login_check_failed: 409, login_not_pending: 409, login_pending_exists: 409, login_no_previous: 409, login_no_otp: 409, code_paced: 429, target_not_found: 409, login_failed: 502, not_written: 503, card_changed: 409, card_gone: 410,
   // lane browser-admin 2a: which Chrome build a profile runs (src/browser-builds.js BUILD_CODES) + Change build…'s own
   browser_choice_invalid: 400, browser_choice_user_only: 403, browser_choice_provider: 400, builds_unsupported: 409, builds_unreadable: 503,
   browser_build_missing: 409, browser_build_not_executable: 409, browser_path_missing: 409, browser_path_not_executable: 409, build_noop: 409, browsing_yourself: 409,
@@ -679,9 +683,15 @@ router.delete('/api/browser/profiles/:id', async (req, res) => {
     // verify r1: the record goes FIRST (sync — its verdict judged again), the machine is asked AFTER with the snapshot: a
     // start can no longer land between the folder's removal and a refused record (logins gone, the profile still listed)
     const snap = typeof k.profile === 'function' ? k.profile(req.params.id) : null;
-    const r = k.removeProfile(req.params.id, { unpin });
-    const m = typeof k.removeOnMachine === 'function' ? await k.removeOnMachine(req.params.id, { profile: snap }) : null;
-    res.json({ ...r, unpinned: u.cleared, ...(m ? { machine: m } : {}) });
+    // lane lg-store-writes (the moved2 cure 2 — THE STEP RIDES THE LANDING): the machine deletes the folder — with the passkeys, the
+    // grant row, the marked config — once the record's removal is ON DISK (the keeper's step); the answer waits a bounded time:
+    // landed = done, not yet = said by its code (`finishes-on-landing`: saved here, it finishes by itself), never half taken
+    const r = k.removeProfile(req.params.id, { unpin, machine: snap, replyMs: REPLY_LAND_MS });
+    const L = r && r.landing ? await r.landing : null;
+    const v = L && L.landed ? L.value || null : null;
+    const m = L ? (L.landed ? (v && v.onMachine ? await v.onMachine : null) : (snap && snap.host ? { host: snap.host, left: 'asked by itself once the removal is on disk' } : null))
+      : typeof k.removeOnMachine === 'function' ? await k.removeOnMachine(req.params.id, { profile: snap }) : null;   // a keeper without the law (a suite's stand-in)
+    res.json({ ...r, ...(v ? { passkeys: v.passkeys } : {}), unpinned: u.cleared, ...(m ? { machine: m } : {}), ...(L && !L.landed ? FINISHES : {}) });
   } catch (e) { fail(res, e); }
 });
 router.post('/api/browser/profiles/:id/stop', async (req, res) => {
@@ -954,9 +964,10 @@ router.post('/api/browser/adopt', async (req, res) => {
       const dir = keptOwn || be.resolvedProfileDir(f.browserKey);
       if (!dir) throw Object.assign(new Error('this session\'s browser directory could not be read back off its indirection'), { code: 'adopt_failed' });
       if (typeof k.stopEphemeralOf === 'function') { try { await k.stopEphemeralOf(f.browserKey); } catch (e) { console.warn(`[browser] ${f.browserKey}: its own browser did not stop before the adopt — ${e && e.message}`); } }
-      profile = k.adoptScratch({ label: req.body?.label, scratchDir: dir, ...all, ...useOpts });
+      // lane lg-store-writes (the moved2 cure 2's hunt (4)): the folder moves and the kept entry ends once the new record is ON DISK
+      // (the keeper's step, `onMoved`) — never before; the answer below waits for it a bounded time
+      profile = k.adoptScratch({ label: req.body?.label, scratchDir: dir, ...all, ...useOpts, onMoved: () => { try { k.keptStore?.()?.adopted?.(f.browserKey); } catch (e) { console.warn(`[browser] ${f.browserKey}: its kept entry was not ended after the adopt — ${e && e.message}`); } } }); // lane browser-resume: its directory is the profile's now
       adopted = true;
-      try { k.keptStore?.()?.adopted?.(f.browserKey); } catch (e) { console.warn(`[browser] ${f.browserKey}: its kept entry was not ended after the adopt — ${e && e.message}`); } // lane browser-resume: its directory is the profile's now
       note = 'the login that exists in this browser right now is kept: its directory was moved under ~/.agent-browser/ and registered — every conversation of yours can use it';
     } else {
       // rung D with keeping off / a fenced one (no directory of its own), N, none, H:
@@ -966,7 +977,11 @@ router.post('/api/browser/adopt', async (req, res) => {
       note = 'this session\'s browser had no directory of its own to adopt (rung ' + (variant || 'none') + '), so an EMPTY persistent profile was created — the login you just completed was NOT saved; the next browser command opens the new profile and you log in once more';
     }
     const pin = pinAnswer(k, f, profile.id, { by: 'user' });
-    res.json({ profile, adopted, note, ...pin });
+    // the answer waits a bounded time for the record and its pin to LAND (never «registered» for what is only queued): landed =
+    // done (an adopt whose move failed at the landing is refused by name); not yet = said by its code — it finishes by itself
+    const L = typeof k.whenLanded === 'function' ? await k.whenLanded({ timeoutMs: REPLY_LAND_MS }) : { landed: true };
+    if (L.landed && profile.landing) { const a = await profile.landing; if (a && a.value && a.value.moved === false) return res.status(409).json({ code: 'adopt_failed', error: a.value.error }); }
+    res.json({ profile, adopted, note, ...pin, ...(L.landed ? {} : FINISHES) });
   } catch (e) { fail(res, e); }
 });
 /** §3.8 layer ③'s one-click nudge: the USER asks that the agent be reminded

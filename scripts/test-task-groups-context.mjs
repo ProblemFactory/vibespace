@@ -9,6 +9,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath as fileURLToPathU5 } from 'node:url';
 import fs from 'node:fs';
 import { mutantCopies } from './mutant-copy.mjs';
+import { anchored } from './scratch.mjs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -435,6 +436,38 @@ console.log('— the bundle and the export —');
   const SyncTG = mutantCopies('task-groups-u5', path.resolve(path.dirname(fileURLToPathU5(import.meta.url)), '..')).load('src/task-groups.js', tgSrc.replace(aW, "  _writer() { return { dirty: (f, o) => fs.writeFileSync(f, o.produce()), durable: async () => true, pending: () => false, flushSync: () => ({ written: [], left: [] }) }; }"), 'sync-save');
   const r = scene(SyncTG.TaskGroupManager, 'red');
   ok('U5 CONTROL: the old synchronous save (the writer bypassed) ⇒ task-groups.json is written on the main thread at the change — the first check above would be red', !r.unchanged);
+  // THE MOVED2 CURE 2 (主开发's ruling — THE STEP THAT CANNOT BE UNDONE RIDES THE LANDING, no roll back): a group's removal is TAKEN
+  // (out of memory, its store marked); its archived Activity log and its grant go only once task-groups.json has LANDED — by
+  // themselves when the storage answers late; a kill first leaves the old record (the group back, with its log). A writer
+  // stand-in whose landing is HELD once armed (afterLanding keeps the steps; `land()` = the storage answers). RED: a copy whose
+  // step runs at the act (its plant asserted by anchored())
+  const rmScene = (Mgr, tag) => {
+    const d = path.join(root, 'u5-rm-' + tag); fs.mkdirSync(d, { recursive: true });
+    const st = { armed: false, steps: [] }, owed = new Map();
+    const W = { dirty: (f, o) => owed.set(f, o), durable: () => Promise.resolve(!st.armed), pending: (f) => owed.has(f),
+      flushSync: (files) => { const left = []; for (const f of files || [...owed.keys()]) { const o = owed.get(f); if (!o) continue; if (st.armed) { left.push({ file: f, name: o.name, why: 'held by the storage at the bound (a stand-in)' }); continue; } fs.writeFileSync(f, o.produce()); owed.delete(f); } return { written: [], left, ms: 0 }; },
+      afterLanding: (file, step) => { if (!st.armed && !owed.has(file)) { const value = step(); return Promise.resolve({ landed: true, value }); } st.steps.push(step); return new Promise(() => { }); } };
+    const m = new Mgr({ dataDir: d, homeDir: home, writer: W });
+    const t = m.create({ title: 'u5 removal' });
+    W.flushSync();   // the group on disk
+    const arch = path.join(m._archiveRoot, t.id); fs.mkdirSync(arch, { recursive: true }); fs.writeFileSync(path.join(arch, 'log.jsonl'), '{"note":"kept words"}\n');
+    st.armed = true;
+    let err = null; try { m.remove(t.id); } catch (e) { err = e; }
+    let inMemory = false; try { m.get(t.id); inMemory = true; } catch { inMemory = false; }
+    const before = { err: err ? err.code || err.message : null, inMemory, archive: fs.existsSync(arch) };
+    // A START before the landing (a kill first): the disk still holds the group — and its Activity log is still there
+    const m2 = new Mgr({ dataDir: d, homeDir: home, writer: { dirty() { }, durable: () => Promise.resolve(true), pending: () => false, flushSync: () => ({ written: [], left: [], ms: 0 }) } });
+    let atStart = false; try { m2.get(t.id); atStart = true; } catch { atStart = false; }
+    st.armed = false; W.flushSync(); const xs = st.steps; st.steps = []; for (const x of xs) x();   // the storage answers
+    return { ...before, atStart, archiveAfter: fs.existsSync(arch) };
+  };
+  const rmOk = rmScene(TaskGroupManager, 'real');
+  ok('THE STEP RIDES THE LANDING: a group\'s removal not landed yet is TAKEN (never refused, never rolled back) and its archived Activity log is still on disk — a start before the landing finds the group, WITH its log', !rmOk.err && !rmOk.inMemory && rmOk.archive && rmOk.atStart, rmOk);
+  ok('…and when the storage answers, the archived Activity log goes by itself (the step, once, at the landing)', !rmOk.archiveAfter, rmOk);
+  const RIDE_TG = "    require('./store-writer.js').ride(this._writer(), this._file, () => {";
+  const RmTG = mutantCopies('task-groups-ride', path.resolve(path.dirname(fileURLToPathU5(import.meta.url)), '..')).load('src/task-groups.js', anchored(tgSrc, RIDE_TG, "    ((w, f, step) => step())(this._writer(), this._file, () => {   // MUTANT: the step runs at the act", 'the group removal rides the landing'), 'ride-ignored');
+  const rmX = rmScene(RmTG.TaskGroupManager, 'red');
+  ok('CONTROL (a copy whose step runs at the act): the archived Activity log is DELETED while nothing is on disk — a start finds the group without its log (red)', rmX.atStart && !rmX.archive, rmX);
 }
 
 { const rEnd = require('../src/store-writer.js').storeWriter().flushSync(); if (rEnd.left && rEnd.left.length) ok('the store writer\'s owed writes land before the scratch root goes', false, rEnd.left); }   // lane lg-store-writes U5 (loud: the U4/U5 cure, should 6)

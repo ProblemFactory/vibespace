@@ -831,15 +831,20 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     // lane remote-profile-start: a PAIRED machine's profile has no folder here — its folder THERE is removed by the machine's
     // own op (never a path from here), or the ledger + the answer say what was left
     // verify r1: the record goes FIRST (sync), the machine is asked after with the snapshot (a start never lands between)
-    const r0 = p.host && typeof keeper.removeOnMachine === 'function' ? keeper.removeProfile(id, { unpin }) : null;
-    const m = r0 ? await keeper.removeOnMachine(id, { profile: p }) : null;
+    // lane lg-store-writes (the moved2 cure 2 — THE STEP RIDES THE LANDING): the machine is asked by the keeper's own step, once the
+    // record's removal is ON DISK; this answer waits a bounded time (not yet ⇒ said by its code, the folder there follows by itself)
+    const r0 = p.host && typeof keeper.removeOnMachine === 'function' ? keeper.removeProfile(id, { unpin, machine: p, replyMs: 20000 }) : null;
+    const L0 = r0 && r0.landing ? await r0.landing : null;
+    const m = !r0 ? null : L0 ? (L0.landed ? (L0.value && L0.value.onMachine ? await L0.value.onMachine : null) : { host: p.host, left: 'asked by itself once the removal is on disk' })
+      : await keeper.removeOnMachine(id, { profile: p });   // a keeper without the law (a suite's stand-in)
     const why = m ? (m.removed ? `deleted by the user (its folder ${m.dir} on ${m.host} deleted there)` : m.left ? `deleted by the user — ${m.left}` : `deleted by the user (its folder on ${m.host} was already gone)`)
       : exists ? 'forgotten by the user (directory moved aside, never deleted by itself)' : 'forgotten by the user (its directory was already gone)';
     const row = fileForgotten({ profileId: id, label: p.label, dir: p.dir, to, bytes, why });
-    const r = r0 || keeper.removeProfile(id, { unpin });
+    const r = r0 || keeper.removeProfile(id, { unpin, replyMs: 20000 });
+    const L = L0 || (r && r.landing ? await r.landing : null);
     log.log?.(`[browser-trace] profile ${id} "${p.label}" forgotten: ${p.dir} → ${to || '(no directory)'} (ledger ${row.id})`);
     bc({ type: 'browser-housekeeping-updated', forgotten: row });
-    return { ok: true, removed: r.removed, from: p.dir, to, ledger: row, ...(m ? { machine: m } : {}) };
+    return { ok: true, removed: r.removed, from: p.dir, to, ledger: row, ...(m ? { machine: m } : {}), ...(L && !L.landed ? { notOnDisk: true, code: 'finishes-on-landing' } : {}) };   // never «done» said for a removal still queued (the move's hunt, C)
   }
   /** the B-f276 remainder (bl-jobs): while the profile registry is HELD (unread) nothing here may read its emptiness as «no profile
    *  names this folder» — Housekeeping listed EVERY named profile's folder as an orphan, Forget moved it aside, Delete removed it */

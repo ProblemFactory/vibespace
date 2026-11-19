@@ -73,7 +73,7 @@ function mountRoutes({ app, tasks, taskFanout, activeSessions, sameToken, server
   // lane lg-store-writes U5 (B-0248): an act's answer follows the STORE write (task-groups.json through the store writer — the
   // loop never waits); a write not landed is SAID in the answer (notOnDisk: the act stays applied in memory, the writer retries)
   // (the U4/U5 cure: on the writer's SYNCHRONOUS road — an answer still waiting when the hub stops goes out inside its exit flush)
-  const onDisk = (res, body) => { if (typeof tasks.persisted !== 'function') { res.json(body); return; } tasks.persisted((saved) => { try { require('../store-writer.js').identityAtExit(res); res.json(saved ? body : { ...body, notOnDisk: true }); } catch { } }); };
+  const onDisk = (res, body, notYet = null) => { if (typeof tasks.persisted !== 'function') { res.json(body); return; } tasks.persisted((saved) => { try { require('../store-writer.js').identityAtExit(res); res.json(saved ? body : { ...body, notOnDisk: true, ...(notYet || {}) }); } catch { } }); };
   app.post('/api/tasks', (req, res) => {
     try { onDisk(res, { success: true, task: tasks.create(req.body || {}) }); }
     catch (e) { res.status(400).json({ error: e.message }); }
@@ -83,7 +83,7 @@ function mountRoutes({ app, tasks, taskFanout, activeSessions, sameToken, server
     catch (e) { res.status(e.message === 'task not found' ? 404 : e.code === 'except_unnamed' ? 409 : 400).json({ error: e.message, ...(e.code === 'except_unnamed' ? { code: e.code } : {}) }); }   // lane held-except-doors: a 除了 left out unnamed
   });
   app.delete('/api/tasks/:id', (req, res) => {
-    try { tasks.remove(req.params.id); onDisk(res, { success: true }); }
+    try { tasks.remove(req.params.id); onDisk(res, { success: true }, { code: 'finishes-on-landing' }); }   // the moved2 cure 2: its Activity log and grant follow by themselves at the landing
     catch (e) { res.status(404).json({ error: e.message }); }
   });
   // Granular tag ops (atomic server-side — concurrent clients can't clobber

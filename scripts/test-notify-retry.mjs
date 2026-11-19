@@ -924,6 +924,72 @@ const tEn = (k, p = {}) => String(k).replace(/\{(\w+)\}/g, (m, n) => (p[n] !== u
   ok(r2.ok === false && r2.code === 'spend_refused' && R2.deliver.retryCount(R2.cid) === 1 && !R2.deliver.retryPeek(R2.cid)[0].ho, 'a refused hand-over leaves the entry parked, unclaimed', JSON.stringify(r2));
 }
 
+// ── THE MOVED2 CURE 2 (lane lg-store-writes — THE STEP THAT CANNOT BE UNDONE RIDES THE LANDING) ─────────────────────────────
+// The jobs store writes through the store writer; a writer stand-in whose landing is HELD (afterLanding keeps the steps; `land()`
+// = the storage answers; a new engine on the same folder = a start after a kill). (1) the hunt's (2): a jobs entry that FALLS from
+// the retry park leaves msg-retry.json only once the jobs notifications holding it have landed. (2) must 1: a hand-over's frame
+// that comes back puts its job notifications back and the hand-over memory KEEPS its copy until their landing; a start puts a
+// copy still held back, never twice. RED (anchored): the jobs listener answering a plain `true` (no landing to ride).
+console.log('\n§4b the moved2 cure 2 — a fallen jobs entry leaves the park only on the jobs landing; a hand-over keeps its copy until the put-back lands');
+await (async () => {
+  const JSRC_R = fs.readFileSync(path.join(REPO, 'src/jobs.js'), 'utf-8');
+  const heldWriter = () => {
+    const st = { steps: [] };
+    const W = { pending: () => true, dirty() { }, durable: () => Promise.resolve(false), whenDurable: () => Promise.resolve(false), exitStartedAt: () => null, stats: () => [],
+      flushSync: (names) => ({ written: [], left: (names || []).map((f) => ({ file: f, name: 'a store', why: 'held by the storage (a stand-in)' })), ms: 0 }),
+      afterLanding: (file, step) => { st.steps.push(step); return new Promise(() => { }); } };
+    return { W, land: () => { const xs = st.steps; st.steps = []; for (const x of xs) x(); }, st };
+  };
+  const mkJm = (Mod, R, W) => {
+    const jm = new Mod.JobManager({ dataDir: R.dir, writer: W, log: (...a) => R.logs.push(a.join(' ')), broadcast: () => { }, notifyUser: () => { }, onStash: () => { },
+      deliverToConversation: (cid, text, opts) => R.deliver.deliverToConversation(cid, text, opts), onRetry: (fn) => R.deliver.onRetry(fn), peerReachable: (cid) => R.deliver.peerReachable(cid) });
+    const job = { id: 'jb-aaaa2222', kind: 'task', name: 'dc-ride-watch', state: 'done', owner: { conversation: { id: R.cid } }, access: { view: 'all', control: 'session' }, runs: [] };
+    jm.jobs.set(job.id, job);
+    return { jm, job };
+  };
+  const parkFile = (R) => { try { return fs.readFileSync(path.join(R.dir, 'msg-retry.json'), 'utf-8'); } catch { return ''; } };
+  const fallScene = async (Mod, name) => {
+    const R = rig(name), H = heldWriter(), { jm, job } = mkJm(Mod, R, H.W);
+    jm._notifyOwner(job, { what: 'finished: a ride check' });
+    await sleep(10);
+    const parked = R.deliver.retryCount(R.cid) === 1 && /a ride check/.test(parkFile(R));
+    R.setThrow(true); await R.advance(4 * 60 * 1000);   // the re-judge fails closed: the entry FALLS — the jobs store takes it
+    const before = { parked, park: R.deliver.retryCount(R.cid), inFile: /a ride check/.test(parkFile(R)), stashed: jm.peekNotifs(R.cid).length };
+    H.land();
+    return { before, afterInFile: /a ride check/.test(parkFile(R)) };
+  };
+  const f1 = await fallScene({ JobManager }, 'ride-fall');
+  ok(f1.before.parked && f1.before.park === 0 && f1.before.stashed === 1 && f1.before.inFile, '(hunt 2) a fallen jobs entry is the jobs store\'s now — gone from the park in memory, but STILL in msg-retry.json while the jobs notifications holding it are not on disk (a kill keeps it parked, never lost)', f1.before);
+  ok(!f1.afterInFile, '…and it leaves msg-retry.json when they LAND (the park\'s write rides the jobs landing)', f1);
+  const TAKEN_A = "      try { this.d.broadcast('jobs-updated', { id: meta.jobId }); } catch { }\n      return this._taken();";
+  const JR = mutantCopies('ntr-ride', REPO).load('src/jobs.js', anchored(JSRC_R, TAKEN_A, "      try { this.d.broadcast('jobs-updated', { id: meta.jobId }); } catch { }\n      return true;   // MUTANT: taken, no landing to ride", 'a fall rides the jobs landing'), 'fell-no-ride');
+  const f2 = await fallScene(JR, 'ride-fall-red');
+  ok(f2.before.stashed === 1 && !f2.before.inFile, 'CONTROL (a copy answering a plain «taken»): the park\'s copy is written OFF msg-retry.json while the jobs store holding it is not on disk — a kill now loses it (red)', f2.before);
+  // (2) must 1 — the hand-over's kept copy
+  const R = rig('ride-handover'), H = heldWriter(), { jm, job } = mkJm({ JobManager }, R, H.W);
+  const view = SH.create({ activeSessions: R.sessions, getDeliver: () => R.deliver, getJobs: () => jm, broadcastSessions: () => { }, renderMsgStash, renderNotifStash: JM_MODEL.renderNotifStash, debounceMs: 5, dataDir: R.dir, log: { log: (...a) => R.logs.push(a.join(' ')), warn: (...a) => R.logs.push(a.join(' ')) } });
+  jm._stashNotif(R.cid, job, { what: 'a kept result' }, 'not reachable', { held: { kind: 'not-reachable' } });
+  R.setAnswer(async () => ({ ok: true, phase: 'written' }));
+  const ho = await view.handOver('w1', { pressed: PRESS });
+  const memFile = path.join(R.dir, 'stash-handover.json');
+  const mem = () => { try { return JSON.parse(fs.readFileSync(memFile, 'utf-8')); } catch { return {}; } };
+  const back = view.restoreHandedOver(R.cid, R.posts[R.posts.length - 1], { kind: 'notification' });
+  const rec0 = Object.values(mem())[0] || {};
+  ok(ho.ok && back === 1 && jm.peekNotifs(R.cid).length === 1 && rec0.jobsOwed === true && (rec0.jobs || []).length === 1,
+    '(must 1) a hand-over\'s frame that comes back: its job notification is back in the jobs store AND the hand-over memory keeps its copy (jobsOwed, on disk) while the put-back is not on disk', { ho, back, rec0 });
+  // A START after a kill (the put-back never landed): a new jobs engine on the same folder, a new hand-over view — the copy goes back
+  const jm2 = mkJm({ JobManager }, R, heldWriter().W).jm;
+  SH.create({ activeSessions: R.sessions, getDeliver: () => R.deliver, getJobs: () => jm2, broadcastSessions: () => { }, renderMsgStash, renderNotifStash: JM_MODEL.renderNotifStash, debounceMs: 5, dataDir: R.dir, log: { log() { }, warn() { } } });
+  await sleep(30);
+  const atStart = jm2.peekNotifs(R.cid).length;
+  SH.create({ activeSessions: R.sessions, getDeliver: () => R.deliver, getJobs: () => jm2, broadcastSessions: () => { }, renderMsgStash, renderNotifStash: JM_MODEL.renderNotifStash, debounceMs: 5, dataDir: R.dir, log: { log() { }, warn() { } } });
+  await sleep(30);
+  ok(atStart === 1 && jm2.peekNotifs(R.cid).length === 1, '(must 1) a START puts the copy still held back into the jobs store — and a second start never twice (the same job at the same instant)', { atStart, again: jm2.peekNotifs(R.cid).length });
+  H.land();
+  const rec1 = Object.values(mem())[0] || {};
+  ok(!rec1.jobsOwed && (rec1.jobs || []).length === 0, '(must 1) …and the copy is dropped only when the put-back LANDS', rec1);
+})();
+
 // ── §5 R3: THE PROMPT CARRIES A PARKED ENTRY WHEN IT FITS; WHEN IT CANNOT, THE TURN END POSTS THE STASH ────────────
 console.log('\n§5 the REAL drains + the REAL hand-over: a parked entry rides a fitting prompt; a starved prompt arms a post at the turn end');
 const AR = require(path.join(REPO, 'src/agent-routes.js'));
@@ -1829,7 +1895,7 @@ console.log('\n§W wiring pins');
   ok(optIns.length === 1 && optIns[0].startsWith('src/jobs.js:') && /spendReason: 'job-notification', retry \}\)/.test(optIns[0]), 'the ONE retry opt-in site is the jobs engine\'s first attempt (grep census)', optIns.join(' | '));
   const sh = fs.readFileSync(path.join(REPO, 'src/server/stash-handover.js'), 'utf-8');
   ok((sh.match(/d\.deliverToConversation\(cid, frame, \{ kind: 'notification', spendReason: 'stash-(retry|handover)', fromName: FROM_NAME, cardText \}\)/g) || []).length === 2 && !/deliverToConversation\([^)]*[{,] *retry *[:}]/.test(sh), 'the hand-over\'s two posts (auto + pressed) carry no retry: a miss re-stashes, never parks');
-  const fellBody = jobs.slice(jobs.indexOf("if (ev === 'fell') {"), jobs.indexOf("return true;", jobs.indexOf("if (ev === 'fell') {")));
+  const fellBody = jobs.slice(jobs.indexOf("if (ev === 'fell') {"), jobs.indexOf("return this._taken();", jobs.indexOf("if (ev === 'fell') {")));   // lane lg-store-writes (the moved2 cure 2): it answers «taken» with the jobs landing to ride
   ok(/this\._stashNotif\(cid, target/.test(fellBody) && !/deliverToConversation|_notifyOwner\(/.test(fellBody), 'the jobs engine\'s fell listener stashes in its own store and posts nothing');
 }
 

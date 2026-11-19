@@ -572,9 +572,15 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   const unready = (e) => isOwed(e) && !owedProducers.has(e.producer);
   let retryClosed = false;           // shutdown: no new post leaves (closeRetries)
   const retryInFlight = new Set();   // the attempt promises in flight (settleRetries waits for them)
+  // THE ENTRIES A PRODUCER TOOK INTO ITS OWN STORE whose store has not LANDED yet (lane lg-store-writes, the moved2 cure 2 — the
+  // jobs store writes through the store writer): gone from the park in memory (no taker here sees them), STILL in its file until
+  // the producer's landing — a kill first finds the park's copy, never neither (the step that cannot be undone rides the landing)
+  const handing = new Set();
   const writeRetryNow = () => {
     for (const [cid, q] of Object.entries(retry)) if (!Array.isArray(q) || !q.length) delete retry[cid];
-    try { fs.writeFileSync(retryFile + '.tmp', JSON.stringify(retry)); fs.renameSync(retryFile + '.tmp', retryFile); return true; }
+    let out = retry;
+    if (handing.size) { out = { ...retry }; for (const e of handing) out[e.cid] = [...(out[e.cid] || []), e]; }
+    try { fs.writeFileSync(retryFile + '.tmp', JSON.stringify(out)); fs.renameSync(retryFile + '.tmp', retryFile); return true; }
     catch (e) { log('[deliver] retry park persist failed:', e.message); return false; }
   };
   // THE MERGES ARE COALESCED (the manager design's piece 7, 主开发 12:46Z: a storm of thirty results did thirty whole-file writes
@@ -624,11 +630,26 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   function onRetry(fn) { if (typeof fn !== 'function') return () => { }; retryListeners.add(fn); return () => retryListeners.delete(fn); }
   /** `fn(ev, cid, entry, extra)` — parked | attempt | delivered | fell; for `fell` a listener answering `true` TOOK
    *  the entry (the producer stashed it in its own store); nobody ⇒ this ladder's stash. Synchronous, never throws
-   *  into the park. */
-  function emitRetry(ev, cid, entry, extra = {}) {
+   *  into the park. A taker whose store lands LATER answers `{taken: true, ride(step)}` (fell, and dropped by its judge
+   *  with a held line): the park's copy stays in msg-retry.json until `ride` runs the step (the moved2 cure 2). */
+  function emitRetry(ev, cid, entry, extra = {}, riders = null) {
     let taken = false;
-    for (const fn of retryListeners) { try { if (fn(ev, cid, entry, extra) === true) taken = true; } catch (e) { log('[deliver] a retry listener threw:', e && e.message); } }
+    for (const fn of retryListeners) {
+      try {
+        const r = fn(ev, cid, entry, extra);
+        if (r === true) taken = true;
+        else if (r && typeof r === 'object' && r.taken) { taken = true; if (riders && typeof r.ride === 'function') riders.push(r.ride); }   // the moved2 cure 2: a store that lands later
+      } catch (e) { log('[deliver] a retry listener threw:', e && e.message); }
+    }
     return taken;
+  }
+  /** the park's copy of entries a producer took leaves the FILE once every taker's store landed (`riders` — each `ride(step)`
+   *  runs step at its landing); none ⇒ now */
+  function leaveParkWhenLanded(entries, riders) {
+    if (!riders.length) { for (const e of entries) handing.delete(e); writeRetryNow(); return; }
+    let left = riders.length;
+    const one = () => { if (--left > 0) return; for (const e of entries) handing.delete(e); writeRetryNow(); };
+    for (const r of riders) { try { r(one); } catch (err) { log('[deliver] a landing ride threw — the park\'s copy leaves now:', err && err.message); one(); } }
   }
   function onTurnEnd(fn) { if (typeof fn !== 'function') return () => { }; turnEndListeners.add(fn); return () => turnEndListeners.delete(fn); }
   /** The target's turn state as this server knows it: a chat session's authoritative streaming flag; a terminal
@@ -682,12 +703,15 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
       let owed = false, threw = false;
       try { owed = fn(cid, e) !== false; } catch (err) { log(`[deliver] ${cid}: the ${e.producer} retry judge threw — ${e.id} is withheld:`, err && err.message); owed = false; threw = true; }
       if (owed) continue;
-      releaseHoldOf(e); removeRetry(e); dropped.push(threw ? Object.assign(e, { _judgeThrew: true }) : e);
+      releaseHoldOf(e); removeRetry(e); handing.add(e); dropped.push(threw ? Object.assign(e, { _judgeThrew: true }) : e);
     }
     if (!dropped.length) return;
-    writeRetryNow();
     log(`[deliver] ${cid}: ${dropped.length} parked entr${dropped.length === 1 ? 'y is' : 'ies are'} no longer owed (its producer's judge) — dropped: no post, no wake, no stash (${dropped.map((e) => `${e.producer} ${e.id}`).join('; ')})`);
-    for (const e of dropped) { const threw = !!e._judgeThrew; delete e._judgeThrew; emitRetry('dropped', cid, e, { attempts: e.attempts.length, ...(threw ? { threw: true } : {}) }); }   // r5: a judge that threw is said as such
+    // the moved2 cure 2's hunt (3): a judge that HELD a copy as a line of its own store (the jobs store's `unknown`) — the park's
+    // copy leaves the file only on that store's landing; the others leave now
+    const riders = [];
+    for (const e of dropped) { const threw = !!e._judgeThrew; delete e._judgeThrew; emitRetry('dropped', cid, e, { attempts: e.attempts.length, ...(threw ? { threw: true } : {}) }, riders); }   // r5: a judge that threw is said as such
+    leaveParkWhenLanded(dropped, riders);
     stashChanged(cid);
   }
   /** how many parked notices a conversation's next hand-over would carry — a COUNT, never judged (the ended row's fact reads it on a GET) */
@@ -1092,13 +1116,14 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     if (state) { kind = state.cause; reason = state.why; }
     if (isOwed(e) && detail.expired) { reason = `paced-out — ${reason}`; detail = { ...detail, why: 'paced-out' }; }   // law 3: the schedule ran out on a wake the pace held
     releaseHoldOf(e);
-    removeRetry(e);
-    writeRetryNow();
+    removeRetry(e); handing.add(e);   // the moved2 cure 2's hunt (2): its file copy leaves once its taker's store landed (below)
     const extra = { kind, reason, attempts: e.attempts.length, phase: (e.attempts[e.attempts.length - 1] || {}).phase || null, busy: (e.attempts[e.attempts.length - 1] || {}).busy ?? null, ...detail };
     log(`[deliver] ${e.cid}: ${e.id} falls to the stash after ${e.attempts.length} attempt${e.attempts.length === 1 ? '' : 's'} — ${kind}: ${reason}`);
-    let taken = emitRetry('fell', e.cid, e, extra);
+    const riders = [];
+    let taken = emitRetry('fell', e.cid, e, extra, riders);
     if (isOwed(e) && sayOwedFall(e, extra)) taken = true;
     if (!taken) { try { stashFor(e.cid, { source: 'agent', kind: e.kind, fromName: e.fromName || null, text: e.text, ts: e.firstAt, held: { kind: LIVE_FALLS.includes(kind) ? 'not-reachable' : kind, ...detail } }); } catch (err) { log('[deliver] the fallen entry could not be stashed:', err && err.message); } }
+    leaveParkWhenLanded([e], riders);
     stashChanged(e.cid);
   }
   /** WHAT A FALL OF AN OWED WAKE SAYS, to whom (law 3): the producer's own store keeps the words (`taken`); each SENDER hears

@@ -773,7 +773,7 @@ async function refreshViaCliPanel(key) {
   } catch (e) { console.warn('[usage] panel identity check failed (writing as asked, unverified):', e.message); idv = { refused: false, verified: false, why: 'identity check failed: ' + e.message, panel: null, expected: expected || null, matched: [] }; }
   // A RENEWED SUBSCRIPTION (verify r1 ③): a lapsed member's panel refused on its PRE-LAPSE window alone (no other account
   // holds the panel's window, the org does not differ) re-anchors the window on this answer and is written as verified
-  if (idv && idv.refused && !isGlobal && typeof app.locals.reanchorLapsedMember === 'function' && app.locals.reanchorLapsedMember(key, idv)) {
+  if (idv && idv.refused && !isGlobal && typeof app.locals.reanchorLapsedMember === 'function' && (await app.locals.reanchorLapsedMember(key, idv))) {
     idv = { ...idv, refused: false, verified: true, why: `${acctNameOf(key)} was lapsed and answered with a new weekly window no other account holds — re-anchored (a renewal)` };
   }
   probeRec.identity = { org: idv.org || null, phase: idv.phase || null, expected: idv.expected, panel: idv.panel, matched: idv.matched, shared: !!idv.shared, movedLikely: !!idv.movedLikely, apiWindow: idv.apiWindow || null };
@@ -926,7 +926,10 @@ async function refreshViaCliPanel(key) {
     if (isGlobal) { _rateLimitCache = merged; writeUsageCache(); }
     else _accountUsage[key] = { ...merged, name: acctMeta.name, email: acctMeta.email };
     // a VERIFIED panel answer for a lapsed member IS the evidence that re-admits it (verify r1 ②)
-    if (wrote.ok && idv && idv.verified && !isGlobal) { try { app.locals.memberServeLapsed?.(key, { verified: true }); } catch { } }
+    // lane lg-store-writes (the move's hunt, B3; the moved2 cure 2 — THE STEP RIDES THE LANDING): the lapse is cleared in the accounts
+    // store once the reading that re-admits the member is ON DISK — never before (a kill would leave it re-admitted on a reading the
+    // file never held), and by itself when the storage answers late
+    if (wrote.ok && idv && idv.verified && !isGlobal) usageWrite.afterLanded(usageWrite.cacheFileFor(USAGE_CACHE_DIR, key), () => { try { app.locals.memberServeLapsed?.(key, { verified: true }); } catch { } });
     try { ingestPassiveUsage(); } catch { }
   } catch (e) {
     if (!wroteOk) { panelSays(key, { at: Date.now(), outcome: 'write-refused', code: 'write', identityVerified: false, why: 'cache write failed: ' + (e && e.message), rung: 'panel' }); try { logProbe('write-refused', { why: 'cache write failed: ' + (e && e.message) }); } catch { } }

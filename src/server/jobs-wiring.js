@@ -330,8 +330,8 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
       }
       else return res.status(400).json({ error: `unknown action "${act}"` });
       if (r.error) return res.status(r.code === 'stale-panel' ? 409 : 400).json({ error: r.error, ...(r.code ? { code: r.code } : {}), ...(Number.isInteger(r.version) ? { version: r.version } : {}) }); // r6 D-F5: a refused answer is named (stale-panel / version-required)
-      jm.persisted((saved) => { try { require('../store-writer.js').identityAtExit(res); res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true }) }); } catch { } });   // lane lg-store-writes U4: the act's answer waits for the store (the loop never does); a write not landed is SAID
-    } catch (e) { res.status(400).json({ error: e.message }); }
+      jm.persisted((saved) => { try { require('../store-writer.js').identityAtExit(res); res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true, ...(act === 'rm' || act === 'answer' ? { code: 'finishes-on-landing' } : {}) }) }); } catch { } });   // the moved2 cure 2: a removal / an answer not landed finishes by itself at the landing (said by its code)   // lane lg-store-writes U4: the act's answer waits for the store (the loop never does); a write not landed is SAID
+    } catch (e) { res.status(e && e.code === 'EVSNOTONDISK' ? 503 : 400).json({ error: e.message, ...(e && e.code === 'EVSNOTONDISK' ? { code: 'not-on-disk' } : {}) }); }   // a person's start refused because its run could not be saved first: worded on the page by its code (the moved2 cure 2)
   });
   // B-e3fe follow-up (主开发 04:02Z: THE HOLD IS NOT SILENT): an unreadable data/msg-queued.json is said in For you, with the person's
   // «Set it aside» — the ladder (deliver) holds the record, this wiring holds the For-you store and the app (server.js gains no line)

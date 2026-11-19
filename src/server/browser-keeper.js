@@ -408,9 +408,14 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   }
   // A profile's list written by ANY other writer (the permissions window, a script through the store) takes effect NOW:
   // the mirror refreshed, every lease it no longer admits detached (a narrowing — revoke now), the panel redrawn
+  // lane lg-store-writes (the moved2 cure 2): the hook is DETACHED when this keeper ends (shutdown, a migration's private keeper,
+  // a suite's «dead» keeper) — a keeper that no longer owns the registry never answers another's grant change with a commit of
+  // its own stale state (a removal's grant row now goes at the landing, after the live keeper's commit)
+  let offGrants = null;
+  function detachGrants() { if (offGrants) { try { offGrants(); } catch { /* gone */ } offGrants = null; } }
   try {
     const g0 = grantsOf();
-    if (g0 && typeof g0.onChange === 'function') g0.onChange(({ door, resource }) => {
+    if (g0 && typeof g0.onChange === 'function') offGrants = g0.onChange(({ door, resource }) => {
       if (door !== 'browser-profile' || ownUseWrite || !loaded) return;
       const p = reg.profiles.find((x) => x && x.id === resource);
       if (!p || B.isEphemeralProfile(p)) return;
@@ -701,10 +706,19 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
    *  empty, writable registry: an empty registry here DELETES folders — the kept sweep, Housekeeping, a build's removal) */
   function loadFrom(read) {
     let rawDoc = null;
-    try { const W = writerOf(); if (W.pending(storeKey)) W.flushSync([storeKey]); } catch { }   // lane lg-store-writes U5b: a keeper made AGAIN in the same process (a suite's) lands what the last one still owed before it reads (a hub's boot owes nothing)
-    const a = SR.storeAnswer(read, { valid: REG_VALID });
-    if (a.state === 'data') { rawDoc = a.value; reg = B.normalizeRegistry(rawDoc); }
-    else { reg = B.normalizeRegistry(null); if (a.state !== 'missing') holdRegistry(a); }
+    // lane lg-store-writes U5b: a keeper made AGAIN in the same process (a suite's; the boot's legacy-adopt migration's private
+    // keeper) lands what the last one still owed before it reads (a hub's boot owes nothing)… and a write still HELD past the
+    // bound is read from the WRITER, never past (the moved2 cure 2's hunt (6): the file without the adopted record, then this
+    // keeper's first save over it) — the owed bytes are the newest state of this file
+    let owedText = null;
+    try { const W = writerOf(); if (W.pending(storeKey)) { const r = W.flushSync([storeKey]); if ((r && r.deferred) || (r && (r.left || []).some((x) => x.file === storeKey))) owedText = typeof W.owed === 'function' ? W.owed(storeKey) : null; } } catch { }
+    if (owedText != null) log.warn?.(`[browser] ${STORE_FILE}: the last keeper's write is still held by the storage — this load reads the writer's owed copy (the newest state), never the older file`);
+    if (owedText != null) { rawDoc = JSON.parse(owedText); reg = B.normalizeRegistry(rawDoc); }   // the writer's own bytes: whole by construction
+    else {
+      const a = SR.storeAnswer(read, { valid: REG_VALID });
+      if (a.state === 'data') { rawDoc = a.value; reg = B.normalizeRegistry(rawDoc); }
+      else { reg = B.normalizeRegistry(null); if (a.state !== 'missing') holdRegistry(a); }
+    }
     // verify r7 (T1): one token ⇒ one entry — what the load's dedupe dropped is said (once) and in the ledger (each)
     { const dd = rawDoc && rawDoc.dirHosts ? B.dirHostsDeduped(rawDoc.dirHosts) : []; if (dd.length) { dirty = true; for (const x of dd) lineageLedger('deduped-at-load', { dir: x.key, keptAs: x.keptAs }); log.warn?.(`[browser] the launch-host lineage of ${dd.length === 1 ? dd[0].key : dd.length + ' directories'} dropped at load — the same marker token under another path (kept under ${dd.length === 1 ? dd[0].keptAs : 'the newest'})${dd.length === 1 ? '' : ' — each of: ' + dd.slice(0, 3).map((x) => x.key).join(', ') + (dd.length > 3 ? `, … +${dd.length - 3} more` : '')}`); } }
     // lane profile-lock-roll (L1): the hostname that WROTE the file (its last save, by whichever pod) — captured BEFORE this
@@ -794,17 +808,22 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   }
   /** the registry ON DISK before what follows (lane lg-store-writes U5b: a directory's lineage is written before the directory
    *  moves) — handed to the writer, then that one file's write waited for (a named wait); false: it did not land */
-  function saveNow() { return save() && landNow(); }
+  function saveNow() { return save() && landNow({ long: true }); }   // the lineage move (its one caller): under the LARGE FINITE bound (store-writer LANDING_BOUND_MS — the moved2 cure 2: never for ever), as the release's synchronous write — a short bound's refusal could leave its bytes in flight to land after the refusal named the old path
   /** the registry's owed write waited for (a named wait): saveNow's, and a MIGRATION's reshape — the boot's next migration may
    *  read the FILE (2026-10-grants-unify reads browser-profiles.json from disk), so a reshape is on disk before it returns.
    *  false: it did not land — held past the writer's bound, failed, or DEFERRED by the exit (the exit's flush writes it; until
    *  then it is not on disk, so a move waiting on it is refused) */
   let landDeferred = false;   // the last landNow() was refused because the hub is STOPPING (the exit's flush writes it) — a refusal's words
-  function landNow() { landDeferred = false; try { const W = writerOf(); if (!W.pending(storeKey)) return true; const r = W.flushSync([storeKey]); landDeferred = !!r.deferred; return !r.deferred && !r.left.some((x) => x.file === storeKey); } catch { return false; } }
+  function landNow({ long = false } = {}) { landDeferred = false; try { const W = writerOf(); if (!W.pending(storeKey)) return true; const r = W.flushSync([storeKey], long ? { budgetMs: require('../store-writer.js').LANDING_BOUND_MS } : undefined); landDeferred = !!r.deferred; return !r.deferred && !r.left.some((x) => x.file === storeKey); } catch { return false; } }
   /** a MIGRATION's reshape that did not land fails that migration BY NAME (not recorded: it runs again next boot — the bytes stay
    *  in memory and the writer retries), and the runner HOLDS the migrations after it to the next boot (EVSNOTONDISK: a later one
    *  may read this file) — src/migration-runner.js, the order law */
   const landedOrThrow = () => { if (!landNow()) throw Object.assign(new Error(`${STORE_FILE}: the reshape is in memory and not on disk yet (the storage still holds the write) — not recorded, it runs again at the next boot`), { code: 'EVSNOTONDISK' }); };
+  /** THE STEP THAT CANNOT BE UNDONE RIDES THE LANDING (lane lg-store-writes, the moved2 cure 2 — store-writer afterLanding, the ONE
+   *  helper): `step` runs once the registry as it is NOW is on disk; `timeoutMs` bounds only the reply's wait. → {landed, value} */
+  function rideLanding(step, { what = null, timeoutMs = null } = {}) { return require('../store-writer.js').ride(writerOf(), storeKey, step, { what, timeoutMs }); }
+  /** the registry as it is now on disk, waited for up to `timeoutMs` (a reply's bound; a login fill's fence) → {landed} */
+  function whenLanded({ timeoutMs = 20000 } = {}) { ensureLoaded(); return rideLanding(() => true, { what: 'a reply waiting on the registry', timeoutMs }); }
   function notify() {
     try { broadcast?.({ type: 'browser-profiles-updated', ...list() }); } catch (e) { log.warn?.(`[browser] broadcast failed: ${e.message}`); }
     // lane S2: every registry change (a start, a failure, a pin, a removal, a label) may move a conversation's
@@ -1636,7 +1655,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   }
   /** Removal is refused while anything holds or runs it — a cookie jar is
    *  somebody's login; the directory itself is NEVER deleted by this (D8). */
-  function removeProfile(id, { unpin = false } = {}) {
+  function removeProfile(id, { unpin = false, machine = null, replyMs = null } = {}) {
     ensureLoaded();
     const p = profile(id);
     if (!p) throw namedError('not-found', `no profile ${id}`);
@@ -1655,21 +1674,39 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const goneRec = reg.profiles.find((x) => x.id === id) || null;
     reg.profiles = reg.profiles.filter((x) => x.id !== id);
     if (goneRec && goneRec.kernelLive) markCleared(goneRec.kernelLive, goneRec);   // B-cf42 cure: a removed profile's mark goes with it
-    if (!isEph(p)) { try { const g = grantsOf(); if (g) g.remove('browser-profile', id, 'user'); } catch (e) { log.warn?.(`[browser] the grant row of ${id} was not removed — ${e && e.message}`); } }   // lane grants-unify: its list goes with it (a record re-made under its id starts at its own default)
     delete reg.browsers[id];
     for (const [k, v] of Object.entries(reg.pins)) if (v && v.profileId === id) reg.pins[k] = { profileId: null, origin: 'harness', at: now(), cleared: { id, label: p.label, at: now() } }; // lane S2: the cleared MARK (read by the browser fact)
     ephPairs.delete(id); ephSessions.delete(id); humans.delete(id); rung2Refusals.delete(String(id)); delete reg.leftTabs[id]; if (reg.loginFences) delete reg.loginFences[id]; // BROWSE YOURSELF: never outlives its record; verify r5 ②: nor the refusals told at a drive's end; vault-login Shape S: nor its persisted fences
     displays.dropEngineWrapper(id); // lane engine-args-string r2: its engine wrapper goes with it (removal needs a stopped browser)
     dropEgress(id); // lane engine-spi-egress: its egress proxy never outlives its record (a conversation's browser on a wrapped engine had one each)
-    // r4: the keeper's own marked config for this record goes with it (nothing runs on it — removal needs a stopped browser)
-    { const mk = markOf(p); if (mk && MARK_RE.test(String(mk))) { try { fs.rmSync(path.join(CONFIG_DIR, markFileName(isEph(p) ? 'ephemeral' : 'machine', mk)), { force: true }); } catch { /* best effort */ } configMemo.delete((isEph(p) ? 'ephemeral' : 'machine') + '|' + mk); } }
+    const sweep = sweepIds.has(id);   // read before the commit below (its piece's own id set)
     if (sweepIds.has(id)) sweepDirty = true; else commit(); // keeper-sweep-yields F5: the walk's own removal is written and broadcast with its PIECE (retireInSteps)
+    // lane lg-store-writes (the moved2 cure 2 — THE STEP THAT CANNOT BE UNDONE RIDES THE LANDING, no roll back and no half state): the
+    // record is out of memory and marked for the writer as always; what cannot be undone — its grant row, the keeper's marked config,
+    // its passkeys, the drop listeners, and (`machine`: the record's snapshot) the paired machine's folder — runs once the removal is
+    // ON DISK; a kill first brings the profile back WHOLE. The reply waits `replyMs` (landed = done; not yet = said, and the rest
+    // follows by itself at the landing — a second press finds it gone and nothing left half taken). The sweep's ephemeral retire
+    // keeps its piece (its removal is written with the walk's piece; an ephemeral record retires again at the next boot's sweep)
+    const step = () => {
+      // lane grants-unify: its list goes with it (a record re-made under its id starts at its own default)
+      if (!isEph(p)) { try { const g = grantsOf(); if (g) g.remove('browser-profile', id, 'user'); } catch (e) { log.warn?.(`[browser] the grant row of ${id} was not removed — ${e && e.message}`); } }
+      // r4: the keeper's own marked config for this record goes with it (nothing runs on it — removal needs a stopped browser)
+      { const mk = markOf(p); if (mk && MARK_RE.test(String(mk))) { try { fs.rmSync(path.join(CONFIG_DIR, markFileName(isEph(p) ? 'ephemeral' : 'machine', mk)), { force: true }); } catch { /* best effort */ } configMemo.delete((isEph(p) ? 'ephemeral' : 'machine') + '|' + mk); } }
+      let passkeys = 0; try { passkeys = passkeyDrop ? Number(passkeyDrop(id)) || 0 : 0; } catch (e) { log.warn?.(`[browser] the passkeys of ${id} were not removed — ${e && e.message}`); }
+      for (const fn of [...profileDropListeners]) { try { fn(id); } catch { /* best effort */ } }
+      if (passkeys) log.log?.(`[browser] profile ${id}: its ${passkeys} passkey(s) removed with it`);
+      const onMachine = machine ? removeOnMachine(id, { profile: machine }) : null;   // a promise: the machine's own op, asked only now
+      return { passkeys, onMachine };
+    };
     if (isEph(p)) log.log?.(`[browser] ephemeral browser record ${id} "${p.label}" removed with its conversation ${p.owner.id}${p.dir ? ' (its scratch directory ' + p.dir + ' is browser-env\'s sweep to reclaim)' : ''}`);
     else log.log?.(`[browser] profile ${id} "${p.label}" removed from the registry (its directory ${p.dir} is kept — deletion is a human act)`);
-    let passkeys = 0; try { passkeys = passkeyDrop ? Number(passkeyDrop(id)) || 0 : 0; } catch (e) { log.warn?.(`[browser] the passkeys of ${id} were not removed — ${e && e.message}`); }
-    for (const fn of [...profileDropListeners]) { try { fn(id); } catch { /* best effort */ } }
-    if (passkeys) log.log?.(`[browser] profile ${id}: its ${passkeys} passkey(s) removed with it`);
-    return { removed: id, dir: p.dir, passkeys };
+    let ran = null;
+    const landing = sweep ? Promise.resolve({ landed: true, value: (ran = step()) }) : rideLanding(() => (ran = step()), { what: `profile ${id}'s removal`, timeoutMs: replyMs });
+    // the answer: `passkeys` once the step ran here (a store with nothing owed runs it at once); `landing` (not a field of the
+    // answer — a caller awaits it) resolves {landed, value: {passkeys, onMachine}} at the landing or at `replyMs`
+    const out = { removed: id, dir: p.dir, ...(ran ? { passkeys: ran.passkeys } : {}) };
+    Object.defineProperty(out, 'landing', { value: landing, enumerable: false });
+    return out;
   }
   /** LANE REMOTE-PROFILE-START (design 014 lane 3b): a PAIRED machine's profile goes WITH its folder there — the machine's
    *  `remove` op (it composes ~/.agent-browser/vs-bp-<id> from the id itself; the hub never names a path), asked BEFORE the
@@ -6805,7 +6842,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
    * caller re-points the session's indirection afterwards (that is the pin
    * path, borrowed). Refused with the reason when the move cannot happen.
    */
-  function adoptScratch({ label, scratchDir, owner = null, createdBy = null, use = null, knownKeys = null } = {}) {
+  function adoptScratch({ label, scratchDir, owner = null, createdBy = null, use = null, knownKeys = null, onMoved = null } = {}) {
     refuseIfHeld('adopting a browser folder');   // the B-f276 remainder: refused by name while the registry is held (nothing minted, nothing written)
     ensureLoaded();
     const v = B.validateProfileInput({ label }, { existing: named() });
@@ -6816,15 +6853,34 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     if (!st || !st.isDirectory()) throw namedError('adopt_failed', `this session's browser directory ${scratchDir} does not exist — nothing to adopt (the browser never launched, or it is on the ephemeral rung)`);
     const id = mintId();
     const target = path.join(homeDir, '.agent-browser', B.profileDirName(id));
-    try { fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 }); fs.renameSync(scratchDir, target); }
+    // the move cannot happen ⇒ refused NOW, nothing recorded (a folder on another filesystem is judged before the record is made)
+    try { fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 }); if (fs.statSync(path.dirname(target)).dev !== fs.statSync(path.dirname(scratchDir)).dev) throw Object.assign(new Error('different filesystems'), { code: 'EXDEV' }); }
     catch (e) { throw namedError('adopt_failed', `could not move ${scratchDir} to ${target}: ${e.message}${e.code === 'EXDEV' ? ' (different filesystems — create a new profile and log in again instead)' : ''}`); }
-    try { fs.chmodSync(target, 0o700); } catch { /* best effort */ }
     const rec = B.newProfileRecord({ id, ...v.value, dir: target, owner, legacy: false, now: now(), createdBy });
     reg.profiles.push(rec);
     bornWithRow(rec, useRow, 'user');   // lane grants-unify
     commit();
-    log.log?.(`[browser] profile ${id} "${rec.label}" ADOPTED from ${scratchDir} → ${target} (usable by ${whoWords(rec)}${rec.createdBy ? ', created by ' + rec.createdBy : ''})`);
-    return B.publicProfileView(rec);
+    // lane lg-store-writes (the moved2 cure 2's hunt (4) — THE STEP THAT CANNOT BE UNDONE RIDES THE LANDING): the folder MOVES and the
+    // conversation's kept entry ends (`onMoved`) only once the new record is ON DISK — a kill first leaves the old record, the folder
+    // where it was and its kept entry: the adopt simply did not happen, and can be asked again. A move that fails at the landing
+    // takes the record out again (it never had its folder) and says so
+    const landing = rideLanding(() => {
+      try { fs.renameSync(scratchDir, target); }
+      catch (e) {
+        log.warn?.(`[browser] profile ${id} "${rec.label}": its folder could not be moved from ${scratchDir} (${e.message}) — the record goes again; the conversation's browser keeps its folder`);
+        reg.profiles = reg.profiles.filter((x) => x.id !== id);
+        try { const g = grantsOf(); if (g) g.remove('browser-profile', id, 'user'); } catch { /* the row of a gone record admits nobody */ }
+        commit();
+        return { moved: false, error: `could not move ${scratchDir} to ${target}: ${e.message}` };
+      }
+      try { fs.chmodSync(target, 0o700); } catch { /* best effort */ }
+      log.log?.(`[browser] profile ${id} "${rec.label}" ADOPTED from ${scratchDir} → ${target} (usable by ${whoWords(rec)}${rec.createdBy ? ', created by ' + rec.createdBy : ''})`);
+      if (typeof onMoved === 'function') { try { onMoved(); } catch (e) { log.warn?.(`[browser] profile ${id}: the adopt's follow-up failed — ${e && e.message}`); } }
+      return { moved: true };
+    }, { what: `profile ${id}'s adopt` });
+    const view = B.publicProfileView(rec);
+    Object.defineProperty(view, 'landing', { value: landing, enumerable: false });   // a caller awaits it (not a field of the answer)
+    return view;
   }
 
   // ── P4 second half (§7.4): the live backend switch, the agent's `blocked` claim, per-site memory ──
@@ -8185,7 +8241,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   }
   function stopTimer() { if (timer) clearInterval(timer); timer = null; }
   /** Timers only — the browsers SURVIVE a VibeSpace exit by design (adopted next boot). */
-  function shutdown() { try { offCapLift(); } catch { } if (heldReg && owedPins.size) log.warn?.(`[browser] ${owedPins.size} conversation pin(s) owed to ${STORE_FILE}'s read are not judged in this process (${[...owedPins.keys()].slice(0, 8).join(', ')}) — a conversation restored at the next start owes its pin again; one that is not restored then starts from its own pin or the defaults`); heldStopped = true; if (heldT) { clearTimeout(heldT); heldT = null; } stopTimer(); if (cliTimer) { clearInterval(cliTimer); cliTimer = null; } if (cliNoteTimer) { clearTimeout(cliNoteTimer); cliNoteTimer = null; } disk.stop(); try { bf.stop?.(); } catch { /* B-0b8c: the version ladder's rung is this keeper's to end */ } if (dirty || sweepDirty) { sweepDirty = false; save(); } installs.shutdown(); /* keeper-sweep-yields K1: what the walk deferred (sweepDirty) is written at the stop too */ /* lane chrome-builds-download: an in-process download ends with its keeper (the marker stays: the next keeper judges it) — lane dc-browser-installs: the running row's own shutdown */ try { keptStore()?.shutdown?.(); } catch { /* lane browser-resume: the kept store's throttled tab list is flushed with its feeder */ } try { mediator?.shutdown?.(); } catch { /* P6: the proxy is this keeper's to end */ } try { const ents = [...egressProxies.values()]; egressProxies.clear(); for (const e of ents) e.px.close().catch(() => {}); } catch { /* the egress proxies are this keeper's to end (r2: a surviving browser's port is re-bound by the next keeper's adoption) */ } }
+  function shutdown() { detachGrants(); try { offCapLift(); } catch { } if (heldReg && owedPins.size) log.warn?.(`[browser] ${owedPins.size} conversation pin(s) owed to ${STORE_FILE}'s read are not judged in this process (${[...owedPins.keys()].slice(0, 8).join(', ')}) — a conversation restored at the next start owes its pin again; one that is not restored then starts from its own pin or the defaults`); heldStopped = true; if (heldT) { clearTimeout(heldT); heldT = null; } stopTimer(); if (cliTimer) { clearInterval(cliTimer); cliTimer = null; } if (cliNoteTimer) { clearTimeout(cliNoteTimer); cliNoteTimer = null; } disk.stop(); try { bf.stop?.(); } catch { /* B-0b8c: the version ladder's rung is this keeper's to end */ } if (dirty || sweepDirty) { sweepDirty = false; save(); } installs.shutdown(); /* keeper-sweep-yields K1: what the walk deferred (sweepDirty) is written at the stop too */ /* lane chrome-builds-download: an in-process download ends with its keeper (the marker stays: the next keeper judges it) — lane dc-browser-installs: the running row's own shutdown */ try { keptStore()?.shutdown?.(); } catch { /* lane browser-resume: the kept store's throttled tab list is flushed with its feeder */ } try { mediator?.shutdown?.(); } catch { /* P6: the proxy is this keeper's to end */ } try { const ents = [...egressProxies.values()]; egressProxies.clear(); for (const e of ents) e.px.close().catch(() => {}); } catch { /* the egress proxies are this keeper's to end (r2: a surviving browser's port is re-bound by the next keeper's adoption) */ } }
   const ensureTimer = () => { if (Object.values(reg.browsers).some(B.isLiveBrowser) || reg.leases.length || inputs.size || pending.size || humans.size) startTimer(); };
   const attachTimed = async (a) => { const r = await attach(a); ensureTimer(); return r; };
 
@@ -8617,6 +8673,8 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     mediationOn, isMediated, mediator: () => (mediationOn() ? mediator : null),
     storeFile, STORE_FILE, uid, _reg: () => reg, _proxyCredHeld: (id) => proxyCreds.has(String(id || '')), /* a suite's seam: whether the forwarders' login entry holds this profile (a yes/no — no secret crosses) */ _forwardersClose: () => Promise.all([...egressProxies.values()].map((e) => e.px.close({ cut: true }).catch(() => { }))).then(() => { egressProxies.clear(); }), /* B-8b87 cure: a suite's stand-in for this process's end (its forwarders' ports free for the next keeper's re-bind) */ _facts: bf, _runtime: rt,
     floorFacts, checkFloorNow, // B-0b8c (lane browser-probe-transient): the facts API + the For-you notice's Check again
+    detachGrants, // lane lg-store-writes, the moved2 cure 2: a keeper that ends (a migration's private one) answers no grant change
+    whenLanded, // lane lg-store-writes, the moved2 cure 2: a reply / a login fill waits (bounded) for the registry as it is now
     landNow, // lane lg-store-writes U5b: a migration's PRIVATE keeper (the legacy adopt) lands its write before the next migration reads the file
     lineageKeyOf, moveDirLineage, // verify r8 (T2 ②): the product's own move of a directory (a Forget) carries its lineage
 

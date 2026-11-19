@@ -70,11 +70,15 @@ async function jobWhere({ body, session, hubMachine, hostName = null, stat = (p)
  *  catches no rejection: a throw after its await (the create, its answer) would only be logged while the agent's command waits with
  *  no answer. → an Express handler that answers it by name (500 create-failed), never twice */
 function answersEveryThrow(handler, log = console) {
-  return (req, res) => Promise.resolve().then(() => handler(req, res)).catch((e) => {
-    try { log.warn && log.warn('[jobs] the agent create route failed:', (e && e.message) || e); } catch { }
-    if (res.headersSent) return;
-    try { res.status(500).json({ error: `the job create failed on the hub: ${String((e && e.message) || e).slice(0, 200)} — \`vibespace-job list --mine\` says whether a job was made`, code: 'create-failed' }); } catch { }
-  });
+  return (req, res) => Promise.resolve().then(() => handler(req, res)).catch((e) => answerCreateFailed(res, e, log));
+}
+/** the create door's ONE answer to a throw (its words stand once): said in the log, then 500 create-failed by name — only when no
+ *  answer went out. The wrapper's, and the reply's own catch when the reply is built later (lane lg-store-writes U4: inside the
+ *  store's callback, once jobs.json holds the job — a throw there reaches no wrapper) */
+function answerCreateFailed(res, e, log = console) {
+  try { log.warn && log.warn('[jobs] the agent create route failed:', (e && e.message) || e); } catch { }
+  if (res.headersSent) return;
+  try { res.status(500).json({ error: `the job create failed on the hub: ${String((e && e.message) || e).slice(0, 200)} — \`vibespace-job list --mine\` says whether a job was made`, code: 'create-failed' }); } catch { }
 }
 
-module.exports = { jobWhere, cwdOfBody, startsProcess, answersEveryThrow, STAT_MS, _inFlight: inFlight };
+module.exports = { jobWhere, cwdOfBody, startsProcess, answersEveryThrow, answerCreateFailed, STAT_MS, _inFlight: inFlight };

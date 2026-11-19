@@ -287,8 +287,10 @@ class JobManager {
     if (this._keepOutOff) { this._keepOutOff(); this._keepOutOff = null; } this._unreadStopped = true; for (const w of ['store', 'archive']) { if (this._unreadT[w]) clearTimeout(this._unreadT[w]); this._unreadT[w] = null; } if (this._notifsT) { clearTimeout(this._notifsT); this._notifsT = null; } this._logsNoteAtExit(); try { if (this._dirty) this._save({ paced: true }); } catch { } this._unlockAfterStore(); this._logsStop(); }
   /** THE LOCK GOES AFTER THE STORE LANDS (lane lg-store-writes U4): the exit's store bytes are the writer's (its exit flush, after
    *  this) — the lock file is removed once jobs.json holds them, never before (an engine taking the lock in between would read
-   *  the older store). A store with nothing owed releases now; a write that FAILS keeps the lock — the next engine sees its pid
-   *  dead and takes it (_takeLock's liveness). */
+   *  the older store). A store with nothing owed releases now. AT THE HUB'S EXIT a write that FAILS keeps the lock — the next
+   *  engine sees its pid dead and takes it (_takeLock's liveness). OUTSIDE an exit (an engine shut down in a process that lives
+   *  on: a suite's) the landings are asked and a failed one is said (_onDisk), then the lock goes: this process's own pid stays
+   *  alive, so a kept lock would only make its next engine read-only. */
   _unlockAfterStore() {
     if (this.readOnly) return;
     let W = null, owed = false, exiting = false;
@@ -333,6 +335,10 @@ class JobManager {
       return { ok: true, why: null };
     } catch (e) { this.d.log(`[jobs] ${what}: ${e.message}`); return { ok: false, why: e.message }; }
   }
+  /** THE STEP THAT CANNOT BE UNDONE RIDES THE LANDING (lane lg-store-writes, the moved2 cure 2 — src/store-writer.js afterLanding,
+   *  the ONE helper): `step` runs once `file`'s state owed now is on disk, never before; a kill first leaves the old record and
+   *  the step never ran. Nothing is rolled back; the route's reply waits its own bound (persisted). → the writer's promise */
+  _ride(file, what, step, opts = {}) { return require('./store-writer.js').ride(this._writer(), file, step, { what, timeoutMs: null, ...opts }); }
   /** THE ANSWER OF A PERSON'S ACT WAITS FOR THE STORE (lane lg-store-writes U4): true once jobs.json and job-notifications.json
    *  hold every change made so far (false: a write failed, is still queued at the bound, or the exit left it — said by the
    *  writer); the loop never waits — only the route's answer. `answer(saved)` — the route's answer, on the writer's
@@ -370,8 +376,14 @@ class JobManager {
     // The release set the LIVE jobs.json aside on ANY failed read (a storage hiccup: the records became skeletons, then gone)
     // lane lg-store-writes U4: A LOAD READS WHAT THIS PROCESS STILL OWES — an engine made again in the same process (a suite's
     // restart) lands the writes the last one handed the writer before it reads (a hub's boot owes nothing: no wait)
-    try { const W = this._writer(), owed = [this.file, this.notifsFile].filter((f) => W.pending(f)); if (owed.length) W.flushSync(owed); } catch { }
-    let read; try { read = { text: timedSync('jobs.read', () => fs.readFileSync(this.file, 'utf-8')) }; } catch (error) { read = { error }; }
+    // …and one that did NOT land (held past the bound, failed, deferred by the exit) is never read past: the store starts UNREAD
+    // (B-f276's hold — never written over, read again off the loop), so the earlier engine's write cannot land later over a store
+    // this one read older (the move's read, small 3)
+    let owedStill = null;
+    try { const W = this._writer(), owed = [this.file, this.notifsFile].filter((f) => W.pending(f)); if (owed.length) { const r = W.flushSync(owed); if (r.deferred) owedStill = 'the hub is exiting'; else { const m = (r.left || []).find((x) => x.file === this.file); if (m) owedStill = m.why || 'not landed'; } } } catch { }
+    let read;
+    if (owedStill) read = { error: Object.assign(new Error(`the last engine's write of jobs.json is still owed (${owedStill}) — read again once it lands`), { code: 'EOWED' }) };
+    else { try { read = { text: timedSync('jobs.read', () => fs.readFileSync(this.file, 'utf-8')) }; } catch (error) { read = { error }; } }
     this._loadAnswer(SR.storeAnswer(read, { valid: STORE_SHAPE }));
   }
   /** the store's answer → memory (the boot's read and every read again of an unreadable store) */
@@ -1062,6 +1074,7 @@ class JobManager {
     }
     // 3) the registry, in place (a live record keeps its runtime-only fields)
     let liveChanged = false;
+    const askGone = [];   // lane lg-store-writes (the moved2 cure 2): an ask closed by the clear — its wait woken and its For-you item resolved RIDE jobs.json's landing
     for (const j of liveHits) {
       if (!go(j)) continue;
       if (j.clearedAt) { j.reclearedAt = at; liveChanged = true; }   // cleared before this call (see step 2)
@@ -1070,7 +1083,7 @@ class JobManager {
         // the ASK went with the words (verify r3): a job parked on a question the owner cleared is
         // no longer waiting on it — back to `up`, and the question's For-you item is resolved (the
         // cascade in src/server/record-clear.js then clears that item's words like every other)
-        if (j.state === 'awaiting-user' && !(j.interaction && j.interaction.pending)) { j.state = 'up'; this._resolveAns(j); try { this.d.resolveJobAsk && this.d.resolveJobAsk(j.id); } catch { } }
+        if (j.state === 'awaiting-user' && !(j.interaction && j.interaction.pending)) { j.state = 'up'; askGone.push(j); }   // its wait and For-you item ride the record's landing (below)
       }
     }
     for (const j of [...liveHits, ...archHits]) {
@@ -1131,6 +1144,10 @@ class JobManager {
     }
     if (liveChanged) this._dirty = true;
     this._save();
+    // THE STEP RIDES THE LANDING (no roll back): the cleared asks' waits and For-you items close once jobs.json holds the clear — by
+    // themselves when the storage answers late (the route's reply says «not on disk yet»: record-clear's persisted); a kill first
+    // leaves the old record, the question still asked
+    if (askGone.length) this._ride(this.file, 'the cleared asks', () => { for (const j of askGone) { this._resolveAns(j); try { this.d.resolveJobAsk && this.d.resolveJobAsk(j.id); } catch { } } });
     if (out.cleared.length) { try { this.d.broadcast('jobs-updated', { cleared: out.cleared }); } catch { } }
     return out;
   }
@@ -1430,6 +1447,9 @@ class JobManager {
           : verdict === 'gone' ? 'nothing of the job remains — not delivered'
             : 'the subscriber can no longer view the job — not delivered';
       if (job) { const line = [...(job.notifyLog || [])].reverse().find((l) => l && l.parked && l.id === entry.id); if (line) { line.retries = retries; line.nextAt = null; line.dropped = true; line.reason = why; } this._dirty = true; }
+      // the judge's HELD line (verdict unknown — retryOwed stashed it): the park's copy leaves its file only once the line it became
+      // is on disk here (the moved2 cure 2's hunt (3) — the ladder rides this landing)
+      if (verdict === 'unknown') { this._save(); return this._taken(); }
       return true;
     }
     if (ev === 'fell') {
@@ -1441,12 +1461,15 @@ class JobManager {
       if (job) { const line = [...(job.notifyLog || [])].reverse().find((l) => l && l.parked && l.id === entry.id); if (line) { line.retries = retries; line.nextAt = null; } }
       const target = job || { id: meta.jobId, name: meta.jobName || meta.jobId };   // the record is gone: the stash still names it
       this._stashNotif(cid, target, { what: (meta.ev && meta.ev.what) || meta.jobName, at: (meta.ev && meta.ev.at) || entry.firstAt }, extra.reason || held.kind, { stampLast: !subscriber && !!job, held, mark: !!meta.sub });
-      this._dirty = true;
+      this._save();   // the fallen entry's ONE copy is now this store's: an act, urgent (the 2 s tick was the only save — the hunt (2))
       try { this.d.broadcast('jobs-updated', { id: meta.jobId }); } catch { }
-      return true;
+      return this._taken();
     }
     return false;
   }
+  /** A PARKED ENTRY THIS STORE TOOK (a fall, the judge's held line): the ladder (src/server/conversation-deliver.js) removes its
+   *  park copy from msg-retry.json only once the notifications holding it are on disk — `ride(step)` (the moved2 cure 2) */
+  _taken() { return { taken: true, ride: (step) => this._ride(this.notifsFile, 'a parked notification the jobs store took', step) }; }
   /** bounded per-job delivery journal (2.361.5, owner ask: "投递细节我好监控")
    *  — one entry per delivery ATTEMPT outcome, any lane. Rides the registry
    *  record; the panel renders it under the Auto-notify row. */
@@ -1485,6 +1508,7 @@ class JobManager {
     if (n) this._sayDropped(cid, n, dropped);
     this.pendingNotifs.set(cid, q);
     if ((held || heldOf(null, reason) || {}).kind === 'not-running') (this._stoppedThisRun || (this._stoppedThisRun = new Set())).add(cid);   // B-6721: the EVENT For you is told of (the notice just stashed — never the queue's tail after the cap)
+    this._stashes = (this._stashes || 0) + 1;   // a count the acts read (announce: was its copy only stashed?)
     if (stampLast) job.lastNotify = { ts: now(), lane: 'stash', ok: true, reason: reason || null };
     this._notifyLogPush(job, { lane: 'stash', ok: false, reason: reason || 'not reachable', to: String(cid).slice(0, 8) });
     this.d.log(`[jobs] notify → stashed for ${cid} (${reason || 'not reachable'})`);
@@ -1548,9 +1572,14 @@ class JobManager {
     const t = String(text || '').trim().slice(0, 500);
     if (!t) return { error: 'text required: vibespace-job announce "what happened"' };
     this._touch(job, { what: `announced: ${t}`, verb: 'poll' });
+    const n0 = this._stashes || 0;
     this._notifyOwner(job, { what: `announced: ${t}` });
-    this._save({ paced: true });   // lane lg-store-writes U4: a job's own frequent verb (a watch job announces in a loop) — paced, never urgent
-    return { ok: true };
+    // lane lg-store-writes U4: a job's own frequent verb (a watch job announces in a loop) — paced, never urgent… UNLESS the owner's
+    // copy was only STASHED (the rate floor): then the stash is the announce's one copy, an act — urgent, and the job's reply waits
+    // for it (`landing`: the route answers through persisted(), not at once — the moved2 cure 2's hunt (1))
+    const stashed = (this._stashes || 0) !== n0;
+    this._save(stashed ? {} : { paced: true });
+    return { ok: true, ...(stashed ? { landing: true } : {}) };
   }
   /** append the FULL drained notification history to a per-conversation file
    *  so a truncated injection can point the agent at the untruncated record.
@@ -1722,12 +1751,18 @@ class JobManager {
     // leaves; a drained entry is never delivered twice after a kill) — _onDisk waits for this one file's write
     try { const W = this._writer(); W.dirty(this.notifsFile, { name: 'jobs-notifs.write', rank: 0, produce: () => storeBytes(Object.fromEntries(this.pendingNotifs)) }); this._onDisk(this.notifsFile, 'the notifications (a claim, a drain)'); } catch (e) { this.d.log('[jobs] notifs save failed:', e.message); }
   }
-  /** Put drained notifications BACK as themselves (a hand-over's frame came back undelivered — verify r2). */
+  /** `step` once the notifications as they are NOW are on disk (lane lg-store-writes, the moved2 cure 2: a stash hand-over drops
+   *  its kept copy of the originals only on their put-back's landing — _ride) */
+  afterNotifsLanded(step) { return this._ride(this.notifsFile, 'the notifications put back', step); }
+  /** Put drained notifications BACK as themselves (a hand-over's frame came back undelivered — verify r2). An entry already
+   *  here — the same object, or the same job at the same instant (a boot putting back a kept copy whose first put-back landed:
+   *  the moved2 cure 2) — is never added twice. */
   restoreNotifs(cid, items) {
     const mine = (Array.isArray(items) ? items : []).filter((n) => n && typeof n === 'object');
     if (!cid || !mine.length) return 0;
     const q = this.pendingNotifs.get(cid) || [];
-    for (const n of mine) { delete n.ho; if (!q.includes(n)) q.push(n); }
+    const had = new Set(q.map((n) => n && `${n.jobId}\u0000${n.ts}`));
+    for (const n of mine) { delete n.ho; if (!q.includes(n) && !had.has(`${n.jobId}\u0000${n.ts}`)) q.push(n); }
     q.sort((a, b) => (Number(a.ts) || 0) - (Number(b.ts) || 0));
     // no cap on a restore (verify r4): the restored are the oldest — trimming here would evict exactly what came back
     this.pendingNotifs.set(cid, q);
@@ -1752,6 +1787,8 @@ class JobManager {
       if (keep.length) this.pendingNotifs.set(cid, keep); else this.pendingNotifs.delete(cid);
       for (const n of q) if (n && n.ho) delete n.ho;
     } else this.pendingNotifs.delete(cid);
+    // NOTHING IS PUT BACK (the moved2 cure 2, its must 4): two of the drain's callers drain AFTER the text has gone out — the removal
+    // stays, a write that does not land is the writer's to retry (_onDisk says it)
     this._saveNotifs();
     this._dirty = true;
     // A stash DRAINED into a resume has been read (triage §13 rule 1a): the
@@ -2571,6 +2608,7 @@ class JobManager {
     // the wrapper measures the rung that enforces it and says so (bound.json while it runs, exit.json `memory` at its end)
     const mem = M.memoryMbOf(job, this._memoryCtx()); // the record's, until the wrapper says the bound it proved (_adoptBound)
     const hub = M.memoryMbOf(job, this._memoryCtx({ hub: true })); // the spec's: the rlimit / none rungs live inside the hub's own cgroup
+    this._jobToken(job);   // lane lg-store-writes U4 (the move's hunt, F): the call credential minted BEFORE the intent's save, so its hash rides the write the spawn waits for
     job.runs.push({ startedAt: runTs, trigger, log: path.join(ctl, 'current.log'), memoryMb: mem.mb, memoryAskedMb: mem.askedMb !== undefined ? mem.askedMb : mem.mb, ...(mem.cap ? { memoryCap: mem.cap } : {}) }); // round 3: both numbers (asked, effective), and the instance's cap when it lowered the bound
     this._save();
     // A CHILD THE DISK DOES NOT HOLD IS NEVER STARTED (lane lg-store-writes, the U4/U5 cure — 主开发's as-if-must): the run's
@@ -3504,7 +3542,7 @@ class JobManager {
   }
   async _gc({ now: at = now() } = {}) {
     if (this.readOnly) return;
-    const cutoff = at - 14 * 86400e3, whole = [];
+    const cutoff = at - 14 * 86400e3, whole = [], gone = [];
     try { // spill files: age-swept alongside the records they narrate
       const dir = path.join(this.d.dataDir, 'job-notifications-read');
       for (const f of fs.readdirSync(dir)) {
@@ -3522,7 +3560,7 @@ class JobManager {
         if (run && run.endedAt && run.endedAt < cutoff) {
           if (this._notifsUnread && job.clearedAt) continue;   // the B-f276 remainder (5), its read r3 (S2): its record judges the held notices
           this.jobs.delete(id); this._dirty = true;
-          whole.push(id);
+          whole.push(id); gone.push(id);
         }
       }
     }
@@ -3533,8 +3571,12 @@ class JobManager {
         if ((rec.runs == null || Array.isArray(rec.runs)) && M.terminalAt(rec) < cutoff) whole.push(rec.id);   // round 3 §3: a record whose runs cannot be read has no end to age by — kept
       }
     } catch { }
+    // lane lg-store-writes (the moved2 cure 2 — THE STEP RIDES THE LANDING): the log folders of records removed above go only once
+    // jobs.json holds the removal (a kill first brings the record back WITH its logs); the archive's own ages go now
     // lane job-logs-sweep: the two legs' verdicts stay theirs; their removals and THE LAW's pass run in the remover's worker
-    if (whole.length) this._logsWhole(whole);
+    const goneSet = new Set(gone), sweepLogs = (ids) => { if (ids.length) this._logsWhole(ids); };   // ONE site of the remover's whole-dir verdicts (test-job-logs-sweep counts them)
+    sweepLogs(whole.filter((id) => !goneSet.has(id)));
+    if (gone.length) { this._save(); this._ride(this.file, 'the gc\'s removals', () => sweepLogs(gone)); }
     // an open catch-up keeps its own pace (its timer armed); a stalled one is picked up here. Round 3 §3: a pass that throws never
     // fails the gc (its other work is done above)
     if (!this._logsGapT) { try { await this.sweepLogs({ now: at, why: 'gc' }); } catch (e) { this.d.log('[jobs] job-logs pass (gc) threw:', e && e.message); } }
@@ -4011,10 +4053,15 @@ class JobManager {
     if (alive && stop) { const s = this.stop(job, { force: false }); if (s && s.code === 'hub-is-main') return s; }   // B-2c5c: never removed while it runs as this hub
     if (alive && orphan) this.d.log(`[jobs] ${job.id} ORPHANED by request — live pid abandoned`);
     const last = job.runs && job.runs[job.runs.length - 1];
-    if (last && last.endedAt) this._clearKept(job, last).catch(() => { }); // round 5: a removed service keeps nothing running
     if (job.kind === 'cron') for (const k of this.jobs.values()) if (k.cronParent === job.id) this._settleWait(k, 'its schedule was removed'); // lane vault-job-road: a removed cron's waiting run never starts
     this.jobs.delete(job.id); this._dirty = true; this._save();
-    try { this.d.resolveJobAsk && this.d.resolveJobAsk(job.id, { onlyAsk: false }); } catch { } // removed job leaves no orphan inbox items
+    // lane lg-store-writes (the moved2 cure 2 — THE STEP RIDES THE LANDING, no roll back): what cannot be undone — its kept processes
+    // ended, its For-you items resolved — runs once jobs.json holds the removal; a kill first brings the job back whole. The
+    // route's reply waits its bound (persisted): not landed yet ⇒ said, and the rest follows by itself at the landing
+    this._ride(this.file, 'the removal', () => {
+      if (last && last.endedAt) this._clearKept(job, last).catch(() => { }); // round 5: a removed service keeps nothing running
+      try { this.d.resolveJobAsk && this.d.resolveJobAsk(job.id, { onlyAsk: false }); } catch { } // removed job leaves no orphan inbox items
+    });
     try { this.d.broadcast('jobs-updated', { id: job.id, removed: true }); } catch { }
     return { ok: true };
   }
@@ -4071,15 +4118,21 @@ class JobManager {
     if (job.interaction.answers.length > 50) job.interaction.answers.splice(0, job.interaction.answers.length - 50);
     job.interaction.pending = null;
     if (job.state === 'awaiting-user') job.state = 'up';
-    if (job.stdinOpen) { // mirror to the wrapper's answers tail file
-      const run = job.runs && job.runs[job.runs.length - 1];
-      if (run) { try { fs.appendFileSync(path.join(this._ctlDir(job, run.startedAt), 'answers.jsonl'), JSON.stringify(rec) + '\n'); } catch { } }
-    }
-    this._resolveAns(job);
-    try { this.d.resolveJobAsk && this.d.resolveJobAsk(job.id); } catch { } // clear the needs-your-input inbox entry (owner report: it lingered after submit)
     this._touch(job, { what: 'the user answered its panel', verb: 'answers' });
-    this._notifyOwner(job, { what: 'the user answered its interaction panel — vibespace-job answers ' + job.id });
     this._save();
+    // lane lg-store-writes (the moved2 cure 2 — THE STEP RIDES THE LANDING, no roll back): THE JOB HEARS THE ANSWER only once
+    // jobs.json holds it — its wrapper's answers file (another process reads it at once), its wait woken, the For-you item closed,
+    // its owner told; a kill first leaves the question open and the job never heard it. The route's reply waits its bound
+    // (persisted): not landed yet ⇒ said, and the job hears it by itself at the landing
+    const run = job.stdinOpen && job.runs && job.runs[job.runs.length - 1];
+    const ctl = run ? this._ctlDir(job, run.startedAt) : null;
+    this._ride(this.file, 'the panel\'s answer', () => {
+      if (ctl) { try { fs.appendFileSync(path.join(ctl, 'answers.jsonl'), JSON.stringify(rec) + '\n'); } catch { } } // mirror to the wrapper's answers tail file
+      this._resolveAns(job);
+      try { this.d.resolveJobAsk && this.d.resolveJobAsk(job.id); } catch { } // clear the needs-your-input inbox entry (owner report: it lingered after submit)
+      this._notifyOwner(job, { what: 'the user answered its interaction panel — vibespace-job answers ' + job.id });
+      this._save();
+    });
     return { ok: true };
   }
   _resolveAns(job) {

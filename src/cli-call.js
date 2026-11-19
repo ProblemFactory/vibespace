@@ -234,6 +234,7 @@ function notOnDiskLine(buf, tool) {
   if (!buf || !Buffer.isBuffer(buf) || !buf.includes(NOT_ON_DISK)) return '';
   let o = null; try { o = JSON.parse(buf.toString('utf8')); } catch { return ''; }
   if (!o || typeof o !== 'object' || o.notOnDisk !== true) return '';
+  if (o.code === 'finishes-on-landing') return `${tool || CONF.tool || 'vibespace'}: saved, not on disk yet — what cannot be undone (a removal's files, an answer the job hears) follows by itself once the hub's storage answers; a restart of the hub before then undoes it`;   // the moved2 cure 2
   return `${tool || CONF.tool || 'vibespace'}: done, but not on disk yet — the hub keeps the change in memory and writes it when its storage answers; a restart of the hub before then loses it`;
 }
 

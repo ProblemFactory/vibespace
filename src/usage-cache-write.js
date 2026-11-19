@@ -659,9 +659,21 @@ function writeReading({ cacheDir, key, set, extras = null, source = null, family
  *  same atomicity, and the write-path census would otherwise have to allow
  *  arbitrary writers into the directory to serve them. Never `.json` — every
  *  usage-cache scanner filters on that suffix. */
-function writeSidecar(cacheDir, name, payload) {
+function writeSidecar(cacheDir, name, payload, { offLoop = false } = {}) {
   if (/\.json$/.test(String(name))) throw new Error('a usage-cache sidecar must not end in .json — every scanner would pick it up');
-  if (_hub) { _hub.handOff(path.join(cacheDir, name), null, typeof payload === 'string' ? payload : JSON.stringify(payload), { sidecar: true }); return true; }   // the hub (U6.5): the writer's thread
+  // lane lg-store-writes (the move's hunt, B1 — LAW II): a sidecar is NEVER DEFERRED — another process reads it raw (the statusline,
+  // data/bin/vibespace-usage: a reading judged against the window it names). The moved2 cure 2: not deferred is not «synchronous on
+  // the main loop» — a caller that CAN wait asks `offLoop`: at the hub the bytes go to the store writer's thread and the PROMISE
+  // resolves at their landing (true) or at its bound (false), and the caller AWAITS it before it tells anything else (the renewal
+  // re-anchor: before the reading that names the window is written). Every other caller writes AT ONCE on this thread — they
+  // cannot wait, named: a rate-limit event's handler (usage-pool-engine noteApiDerivedWindow), the synchronous repairs
+  // (reading-repair repairCachesByWindow / repairSidecarsByApiPhase), a process with no writer (the device agent, a script)
+  if (offLoop && _hub && typeof _hub.ride === 'function') {
+    const file = path.join(cacheDir, name);
+    _hub.handOff(file, null, typeof payload === 'string' ? payload : JSON.stringify(payload), { sidecar: true });
+    return _hub.ride(file, () => true, { timeoutMs: SIDECAR_LAND_MS }).then((r) => !!(r && r.landed), () => false);
+  }
+  if (offLoop) return Promise.resolve(writeSidecar(cacheDir, name, payload));
   try {
     fs.mkdirSync(cacheDir, { recursive: true });
     atomicWrite(path.join(cacheDir, name), typeof payload === 'string' ? payload : JSON.stringify(payload));
@@ -669,7 +681,18 @@ function writeSidecar(cacheDir, name, payload) {
   } catch { return false; }
 }
 
+const SIDECAR_LAND_MS = 20000;   // an offLoop sidecar's wait for its landing (the moved2 cure 2) — under the CLI's 30 s call budget
+/** THE STEP THAT CANNOT BE UNDONE RIDES THE READING'S LANDING (lane lg-store-writes, the moved2 cure 2 — store-writer afterLanding,
+ *  the ONE helper): `step` runs once the hub's pending copy of `file` is on disk; no hub ⇒ the reading was written at once, the step
+ *  runs now (the move's hunt, B3: a verified panel clears a member's lapse in the accounts store only on its reading's landing) */
+function afterLanded(file, step) {
+  if (_hub && typeof _hub.ride === 'function') return _hub.ride(file, step, { timeoutMs: null });
+  let v = null; try { v = step(); } catch { }
+  return Promise.resolve({ landed: true, value: v });
+}
+
 module.exports = {
+  afterLanded,
   cacheFileFor, isCacheFileName, readCacheObject, readCacheJson, listCacheDir, useHub, mergeCacheObject,
   backendOfCacheObject, liftCacheObject, limitsOfCache,
   writeCacheObject, writeReading, writeSidecar,

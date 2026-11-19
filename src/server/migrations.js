@@ -397,6 +397,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         // lane lg-store-writes U5b: the registry is the store writer's — on disk before this migration is recorded (only when the
         // writer owes it); one that did not land throws EVSNOTONDISK and the runner HOLDS the migrations after it to the next boot
         if (typeof k.landNow === 'function' && !k.landNow()) throw Object.assign(new Error('browser-profiles.json: the adopted record is in memory and not on disk yet (the storage still holds the write) — not recorded, it runs again at the next boot'), { code: 'EVSNOTONDISK' });
+        if (typeof k.detachGrants === 'function') k.detachGrants();   // lane lg-store-writes (the moved2 cure 2): this private keeper ends here — it answers no later grant change
         console.log('[migrate] legacy browser profile:', JSON.stringify({ dir, created: r.created, id: r.profile ? r.profile.id : null, why: r.why || null }));
       },
     },
