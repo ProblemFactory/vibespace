@@ -12740,6 +12740,7 @@ export default {
   "How to install": "インストール方法",
   "Open Manage agents": "「エージェントを管理」を開く",
   "Re-check there asks your shell again once {cli} is installed": "{cli} をインストールしたら、そこで「再チェック」するとシェルにもう一度問い合わせます",
+  "Opens {machine} in Manage agents › Machines — the next create asks the {shell} of {machine} again once {cli} is installed there": "「エージェントを管理 › マシン」で {machine} を開きます——そこに {cli} をインストールしたら、次の作成で {machine} の {shell} にもう一度問い合わせます",
   // lane outbox-session-chip: a conversation's Outbox chip, the «drafted by» filter, a card's «edited by you» / «replaced»
   "Outbox · {n}": "送信箱 · {n}",
   "{n} edited by you": "{n} 件をあなたが編集",

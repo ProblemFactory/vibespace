@@ -210,6 +210,8 @@ const DOORS = {
     names: { 'src/lib/settings-ui.js': ["'btn-cancel settings-chip-recheck'", 'a._cliRecheckDue = true'] }, reach: [/settings-chip-recheck/] },
   agentold: { door: 'the old agent\'s «Update its agent…» on a machine with no pairing sheet (B-bd27: Manage agents on its Machines tab)', at: ['src/lib/agent-update-door.js'],
     names: { 'src/lib/agent-update-door.js': ["agentDoorTarget(row) === 'pairing'", "'vibespace.agentsTab', 'machines'", "t('Update its agent…')"] }, reach: [/agent-update-door|agentUpdateDoor|Update its agent/] },
+  agentsfor: { door: 'the «{cli} was not found» dialog opens Manage agents FOR a machine (B-3d6a: _showAgentsFor — a paired machine\'s card on Machines, this machine\'s Accounts)', at: [RENDERER],
+    names: { [RENDERER]: ['_showAgentsFor(hostId = null, opts = {})', 'this._agentsFocusHost = String(hostId);'], 'src/lib/cli-missing-dialog.js': ['app._showAgentsFor(remote ? String(msg.hostId) : null)'] }, reach: [/_showAgentsFor/] },
   loginwatch: { door: 'a machine login the watch noticed re-opens the manager', at: [RENDERER],
     names: { [RENDERER]: ['_watchHostLogin(hostId'] }, reach: [/_watchHostLogin|_hostLoginWatch/] },
 };

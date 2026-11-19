@@ -12741,6 +12741,7 @@ export default {
   "How to install": "如何安装",
   "Open Manage agents": "打开「管理 agent」",
   "Re-check there asks your shell again once {cli} is installed": "装好 {cli} 后，在那里点「重新检查」会再问一次你的 shell",
+  "Opens {machine} in Manage agents › Machines — the next create asks the {shell} of {machine} again once {cli} is installed there": "在「管理 agent › 机器」中打开 {machine}——在那里装好 {cli} 后，下次新建会再问一次 {machine} 的 {shell}",
   // lane outbox-session-chip: a conversation's Outbox chip, the «drafted by» filter, a card's «edited by you» / «replaced»
   "Outbox · {n}": "发件箱 · {n}",
   "{n} edited by you": "{n} 条你改过",

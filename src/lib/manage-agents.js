@@ -2305,6 +2305,22 @@ export function installManageAgents(App, ctx = {}) {
   },
 
 
+  /** B-3d6a: Manage agents opened FOR a machine (the «not found» dialog's door): a paired machine's id ⇒ Machines › THAT machine (its
+   *  card open — the remembered open set, so its probe runs as a remembered card's — and scrolled into view once drawn); none ⇒
+   *  this machine: the Accounts tab, where its Re-check lives. */
+  _showAgentsFor(hostId = null, opts = {}) {
+    try { localStorage.setItem('vibespace.agentsTab', hostId ? 'machines' : 'accounts'); } catch { /* the tab falls back to Accounts */ }
+    if (hostId) {
+      try { const open = new Set(JSON.parse(localStorage.getItem('vibespace.agentsMachOpen') || '[]')); open.add(String(hostId)); localStorage.setItem('vibespace.agentsMachOpen', JSON.stringify([...open])); } catch { /* a closed card, as before */ }
+      this._agentsFocusHost = String(hostId);
+    }
+    // its read: the rail's Agents panel ALREADY showing (left on Accounts, brought back after a reload) is not redrawn by the open
+    // below — repaint it so the Machines tab and the machine's card appear
+    const shown = !opts.container && !opts.forceModal && !this.isMobile && !!this.sidebar?._railEl && this.sidebar?._activeTab === 'agents';
+    const r = this._showAgentsDialog(opts);
+    if (shown) { try { this._agentsRefreshHook?.(); } catch { } }
+    return r;
+  },
   _showAgentsDialog({ container, forceModal, onClose, opener = 'person' } = {}) {
     // rail mode: render into the sidebar panel instead of a modal (one source).
     // Skip _railGo when the agents panel is ALREADY active — its re-click
@@ -2913,6 +2929,7 @@ export function installManageAgents(App, ctx = {}) {
           det.className = 'agents-mach-acc';
           det.dataset.host = h.id;
           if (openSet.has(h.id) || hostsList.length === 1) det.open = true;
+          if (this._agentsFocusHost === h.id) { this._agentsFocusHost = null; det.open = true; setTimeout(() => { try { det.scrollIntoView({ block: 'nearest' }); } catch { } }, 0); }   // B-3d6a: the machine a door named
           const sum = document.createElement('summary');
           sum.className = 'agents-mach-sum';
           // lane-pairing ③: the dot + its words read THE one dial state (a refused dial is never just "not dialed in")

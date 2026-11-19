@@ -117,8 +117,20 @@ export function openCliMissingDialog(app, msg) {
   const docs = document.createElement('button'); docs.className = 'btn-cancel cli-missing-docs'; docs.textContent = t('How to install');
   docs.onclick = () => { try { window.open(INSTALL_DOCS_URL, '_blank', 'noopener'); } catch { } };
   const manage = document.createElement('button'); manage.className = 'btn-create cli-missing-manage'; manage.textContent = t('Open Manage agents');
-  manage.title = t('Re-check there asks your shell again once {cli} is installed', { cli: w.cli });
-  manage.onclick = () => { close(); try { app?._showAgentsDialog?.(); } catch { } };
+  // B-3d6a: a PAIRED machine's refusal opens Manage agents › Machines › THAT machine (its card open and in view), and the title
+  // names it — its own login shell is the one asked again at the next create; this machine's opens Manage agents as before
+  const remote = !!(msg && msg.remote && msg.machine && msg.hostId);
+  manage.title = remote ? t('Opens {machine} in Manage agents › Machines — the next create asks the {shell} of {machine} again once {cli} is installed there', { machine: String(msg.machine), shell: msg.shell || 'sh', cli: w.cli })
+    : t('Re-check there asks your shell again once {cli} is installed', { cli: w.cli });
+  manage.onclick = () => {
+    close();
+    try {
+      // a paired machine: Manage agents › Machines › THAT machine; this machine: Manage agents on Accounts, where its Re-check lives
+      // (its read: a remote door left the tab on Machines)
+      if (typeof app?._showAgentsFor === 'function') app._showAgentsFor(remote ? String(msg.hostId) : null);
+      else app?._showAgentsDialog?.();
+    } catch { }
+  };
   footer.append(docs, manage);
   dialog.appendChild(footer);
   return { close, dialog, body };

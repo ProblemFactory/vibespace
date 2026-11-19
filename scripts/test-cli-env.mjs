@@ -796,6 +796,42 @@ console.log('⑧ round 5 (final) — THE SHELL SAYS WHERE; THE SPAWN IS ALWAYS A
     const W1 = mod.remoteCliWhereWords({ answer: 'path', path: '/home/u/.nvm/v24/bin/codex', shell: 'zsh' }, 'MAC-1'), W2 = mod.remoteCliWhereWords({ answer: 'none', shell: 'bash' }, 'MAC-1'), W3 = mod.remoteCliWhereWords({ answer: 'unanswered', shell: 'zsh', why: 'timeout' }, 'MAC-1');
     ok('B-69ec: a remote host\'s Manage agents line says where THAT machine\'s shell found it (or not, or could not be asked); never asked yet ⇒ no line', W1.text === 'found by the zsh of MAC-1 at /home/u/.nvm/v24/bin/codex' && W1.tone === 'dim' && W2.text === 'not found by the bash of MAC-1 (login shell)' && W2.tone === 'warn' && /^the zsh of MAC-1 could not be asked \(.+\) · its own PATH decides$/.test(W3.text) && mod.remoteCliWhereWords(null, 'MAC-1') === null, { W1, W2, W3 });
   } else ok('B-69ec: the dialog module carries the remote words (remoteCliWhereWords)', false);
+  // B-3d6a: a PAIRED machine's refusal — «Open Manage agents» opens Machines › THAT machine (by its id), its title naming the machine
+  // and its shell; this machine's refusal opens Manage agents as before. RED CONTROL: the dialog with the release's two lines back
+  const opened = [];
+  const appStub = { _showAgentsDialog(o) { opened.push(['dialog', o || null]); }, _showAgentsFor(id) { opened.push(['for', id]); } };
+  const doorOf = (m, msg) => {
+    opened.length = 0; if (!m) return { title: '', opened: [] };
+    m.openCliMissingDialog(appStub, msg);
+    const foot = ((globalThis.__shell && globalThis.__shell.dialog && globalThis.__shell.dialog.children) || []).find((c) => /dialog-footer/.test(c.className || ''));
+    const b = foot && (foot.children || []).find((c) => /cli-missing-manage/.test(c.className || ''));
+    if (b && typeof b.onclick === 'function') b.onclick();
+    return { title: b ? String(b.title || '') : '', opened: opened.slice() };
+  };
+  const REMOTE = { code: 'cli-missing', remote: true, machine: 'MAC-1', hostId: 'h-mac1', cli: 'codex', shell: 'zsh', answer: 'none' }, LOCAL = { code: 'cli-missing', cli: 'claude', shell: 'bash', answer: 'none' };
+  const rd = doorOf(mod, REMOTE), ld = doorOf(mod, LOCAL);
+  ok('B-3d6a: a REMOTE refusal\'s «Open Manage agents» calls the Manage agents door FOR that machine (_showAgentsFor by its id) — its title names the machine and its shell; this machine\'s calls it with none (the Accounts tab)',
+    rd.opened.length === 1 && rd.opened[0][0] === 'for' && rd.opened[0][1] === 'h-mac1' && rd.title === 'Opens MAC-1 in Manage agents › Machines — the next create asks the zsh of MAC-1 again once codex is installed there'
+    && ld.opened.length === 1 && ld.opened[0][0] === 'for' && ld.opened[0][1] === null && ld.title === 'Re-check there asks your shell again once claude is installed', JSON.stringify({ rd, ld }));
+  const NEW_DOOR = /  \/\/ B-3d6a: a PAIRED machine's refusal[\s\S]*?\n  \};\n/;
+  const RELEASE_DOOR = "  manage.title = t('Re-check there asks your shell again once {cli} is installed', { cli: w.cli });\n  manage.onclick = () => { close(); try { app?._showAgentsDialog?.(); } catch { } };\n";   // stale-pins: kept — the control's copy of the release's door
+  const dsrc = fs.readFileSync(path.join(REPO, 'src/lib/cli-missing-dialog.js'), 'utf8');
+  let ctl = null;
+  if (NEW_DOOR.test(dsrc)) {
+    try {
+      const out = await esbuild.build({ stdin: { contents: dsrc.replace(NEW_DOOR, RELEASE_DOOR), resolveDir: path.join(REPO, 'src/lib'), sourcefile: 'cli-missing-dialog.release.js', loader: 'js' }, bundle: true, format: 'cjs', platform: 'node', write: false, logLevel: 'silent',
+        plugins: [{ name: 'stubs', setup(b) { b.onResolve({ filter: /^\.\/(utils|i18n)\.js$/ }, (a) => ({ path: path.basename(a.path), namespace: 'stub' })); b.onLoad({ filter: /.*/, namespace: 'stub' }, (a) => ({ contents: stubs[a.path], loader: 'js' })); } }] });
+      const f = path.join(DIR, 'cli-missing-dialog.release.cjs'); fs.writeFileSync(f, out.outputFiles[0].text); ctl = require(f);
+    } catch { ctl = null; }
+  }
+  const rc = doorOf(ctl, REMOTE);
+  ok('CONTROL B-3d6a proves its plant first: the copy carries the release\'s door (its title is this machine\'s «asks your shell again»)', !!ctl && rc.title === 'Re-check there asks your shell again once codex is installed', rc.title);
+  ok('CONTROL B-3d6a (the release\'s door): a REMOTE refusal opens Manage agents on its last tab — no machine (red)', !!ctl && rc.opened.length === 1 && rc.opened[0][0] === 'dialog', JSON.stringify(rc.opened));
+  const MA = fs.readFileSync(path.join(REPO, 'src/lib/manage-agents.js'), 'utf8');
+  ok('B-3d6a: Manage agents\' door to a machine — the Machines tab, the machine\'s card in the remembered open set, focused once drawn (open + scrolled into view)',
+    /_showAgentsFor\(hostId = null, opts = \{\}\) \{[\s\S]{0,200}setItem\('vibespace\.agentsTab', hostId \? 'machines' : 'accounts'\)[\s\S]{0,400}open\.add\(String\(hostId\)\)[\s\S]{0,200}this\._agentsFocusHost = String\(hostId\);/.test(MA)
+    && /if \(this\._agentsFocusHost === h\.id\) \{ this\._agentsFocusHost = null; det\.open = true; setTimeout\(\(\) => \{ try \{ det\.scrollIntoView\(\{ block: 'nearest' \}\); \} catch \{ \} \}, 0\); \}/.test(MA)
+    && /const shown = [^\n]*this\.sidebar\?\._activeTab === 'agents';\n\s*const r = this\._showAgentsDialog\(opts\);\n\s*if \(shown\) \{ try \{ this\._agentsRefreshHook\?\.\(\); \} catch \{ \} \}/.test(MA));
   delete globalThis.document;
 }
 {
