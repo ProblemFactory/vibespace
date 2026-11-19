@@ -843,7 +843,7 @@ app.get('/api/mounts', async (req, res) => {
 });
 app.post('/api/mounts', (req, res) => {
   try { res.json({ success: true, id: mounts.add(req.body || {}) }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { res.status(400).json(require('../mount-error-words.js').errorBody(e)); }
 });
 app.post('/api/mounts/import', (req, res) => {
   try {
@@ -882,12 +882,12 @@ app.post('/api/mounts/import', (req, res) => {
       customPath: req.body?.customPath || null,
     });
     res.json({ success: true, id });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { res.status(400).json(require('../mount-error-words.js').errorBody(e)); }
 });
 // Direct CephFS subtree share — mint a path-scoped key (ceph-mint service).
 app.post('/api/mounts/:id/ceph-share', async (req, res) => {
   try { res.json(await mounts.mintCephShare(req.params.id, req.body || {})); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { res.status(400).json(require('../mount-error-words.js').errorBody(e)); }
 });
 
 // Mount tokens (WebDAV bridge): mint returns the link ONCE; stored hashed
@@ -898,11 +898,11 @@ app.post('/api/mount-tokens', (req, res) => {
     const { raw, rec } = mountTokens.mint({ name, root, mode });
     const url = require('../write-origin.js').ownOriginOf(req.headers, { encrypted: !!(req.socket && req.socket.encrypted) }); // the request's own origin (forwarded proto / host first — behind an https ingress the link is https): THE one rule
     res.json({ success: true, token: raw, davUrl: `${url}/dav`, link: mountTokens.buildLink({ url, raw, rec }), id: rec.id, rec: { id: rec.id, name: rec.name, root: rec.root, mode: rec.mode } });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { res.status(400).json(require('../mount-error-words.js').errorBody(e)); }
 });
 app.delete('/api/mount-tokens/:id', (req, res) => {
   try { mountTokens.revoke(req.params.id); res.json({ success: true }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { res.status(400).json(require('../mount-error-words.js').errorBody(e)); }
 });
 
 // Import an rclone.conf: parse to a preview list, then import selected remotes
@@ -911,7 +911,7 @@ app.post('/api/mounts/rclone-conf/parse', (req, res) => {
     const remotes = MountManager.parseRcloneConf(req.body?.text || '');
     // never echo secret values back — just names/types/param-keys + wraps flag
     res.json({ remotes: remotes.map(r => ({ name: r.name, type: r.type, paramKeys: Object.keys(r.params), wraps: r.wraps })) });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { res.status(400).json(require('../mount-error-words.js').errorBody(e)); }
 });
 app.post('/api/mounts/rclone-conf/import', async (req, res) => {
   try {
@@ -930,14 +930,14 @@ app.post('/api/mounts/rclone-conf/import', async (req, res) => {
       } catch (e) { /* skip dupes/invalid, continue */ }
     }
     res.json({ success: true, added });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { res.status(400).json(require('../mount-error-words.js').errorBody(e)); }
 });
 
 // rclone availability + one-click install (data/bin, pinned verified version)
 app.get('/api/mounts/rclone', async (req, res) => res.json({ available: await mounts.rcloneAvailable(), bin: mounts.rcloneBin() }));
 app.post('/api/mounts/rclone/install', async (req, res) => {
   try { res.json({ success: true, ...(await mounts.installRclone()) }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { res.status(400).json(require('../mount-error-words.js').errorBody(e)); }
 });
 
 // A STORAGE MOUNT'S OAUTH CLIENT AND ITS CONSENT ARE THE OWNER'S (client-from-mount
@@ -962,7 +962,7 @@ app.post('/api/mounts/gdrive-auth/start', async (req, res) => {
   try {
     const { mountId, ...opts } = req.body || {};
     res.json(mountId ? await mounts.startDriveAuthForMount(mountId) : await mounts.startDriveAuth(opts));
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { res.status(400).json(require('../mount-error-words.js').errorBody(e)); }
 });
 // Write a minted token back into an existing Drive record + bounce its mounts.
 // `client` = the OAuth client it was minted under (D2: a client switch lands
@@ -970,20 +970,20 @@ app.post('/api/mounts/gdrive-auth/start', async (req, res) => {
 app.post('/api/mounts/:id/drive-token', async (req, res) => {
   if (refuseAgentBearer(req, res)) return;
   try { await mounts.applyDriveToken(req.params.id, req.body?.token, req.body?.client); res.json({ success: true, mounts: mounts.list() }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { res.status(400).json(require('../mount-error-words.js').errorBody(e)); }
 });
 app.get('/api/mounts/gdrive-auth/status', (req, res) => { if (refuseAgentBearer(req, res)) return; res.json(mounts.driveAuthStatus()); });
 app.post('/api/mounts/gdrive-auth/callback', async (req, res) => {
   if (refuseAgentBearer(req, res)) return;
   try { res.json(await mounts.forwardDriveCallback(req.body?.url)); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { res.status(400).json(require('../mount-error-words.js').errorBody(e)); }
 });
 app.post('/api/mounts/gdrive-auth/cancel', (req, res) => { if (refuseAgentBearer(req, res)) return; mounts.cancelDriveAuth(); res.json({ success: true }); });
 // Shared Drive picker (2.131.0): list the Shared Drives a drive credential can
 // see — by existing record id, or transiently by pasted token (add dialog).
 app.post('/api/mounts/shared-drives', async (req, res) => {
   try { res.json({ drives: await mounts.listSharedDrives(req.body || {}) }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { res.status(400).json(require('../mount-error-words.js').errorBody(e)); }
 });
 // Gmail guided OAuth (2.134.0) — mirrors the gdrive-auth UX: start returns the
 // consent URL; same-machine completes hands-free via the local listener;
@@ -991,19 +991,19 @@ app.post('/api/mounts/shared-drives', async (req, res) => {
 app.post('/api/mounts/gmail-auth/start', async (req, res) => {
   if (refuseAgentBearer(req, res)) return;
   try { res.json(await mounts.gmail.startAuth(req.body || {})); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { res.status(400).json(require('../mount-error-words.js').errorBody(e)); }
 });
 app.get('/api/mounts/gmail-auth/status', (req, res) => { if (refuseAgentBearer(req, res)) return; res.json(mounts.gmail.authStatus()); });
 app.post('/api/mounts/gmail-auth/callback', async (req, res) => {
   if (refuseAgentBearer(req, res)) return;
   try { res.json(await mounts.gmail.forwardCallback(req.body?.url)); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { res.status(400).json(require('../mount-error-words.js').errorBody(e)); }
 });
 app.post('/api/mounts/gmail-auth/cancel', (req, res) => { if (refuseAgentBearer(req, res)) return; mounts.gmail.cancelAuth(); res.json({ success: true }); });
 // Labels picker (2.135.0): the account's real labels for the sync filter.
 app.post('/api/mounts/gmail-labels', async (req, res) => {
   try { res.json({ labels: await mounts.listGmailLabels(req.body || {}) }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { res.status(400).json(require('../mount-error-words.js').errorBody(e)); }
 });
 // Instance-preset Google clients for the UI picker: keys+labels ONLY, never secrets.
 app.get('/api/mounts/drive-defaults', (req, res) => {
@@ -1016,11 +1016,11 @@ app.post('/api/mounts/:id/share', async (req, res) => {
     const { folder, mode, name, expiryDays } = req.body || {};
     const out = await mounts.mintShareFromMount(req.params.id, { folder, mode, name, expiryDays });
     res.json({ success: true, ...out });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { res.status(400).json(require('../mount-error-words.js').errorBody(e)); }
 });
 app.delete('/api/mounts/shares/:id', async (req, res) => {
   try { await mounts.revokeShare(req.params.id); res.json({ success: true }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { res.status(400).json(require('../mount-error-words.js').errorBody(e)); }
 });
 app.post('/api/mounts/:id/mount', async (req, res) => {
   try {
@@ -1036,7 +1036,7 @@ app.post('/api/mounts/:id/reconnect', async (req, res) => {
 });
 app.post('/api/mounts/:id/unmount', async (req, res) => {
   try { res.json({ success: await mounts.unmount(req.params.id) }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { res.status(400).json(require('../mount-error-words.js').errorBody(e)); }
 });
 // Decrypted connection config for the edit dialog (prefill REAL values —
 // user directive; cookie-authed, single-user instance model)
@@ -1051,27 +1051,27 @@ app.get('/api/mounts/:id/config', (req, res) => {
   let needs = true; try { needs = mounts.revealNeeded(req.params.id); } catch { /* an unknown id: config() answers it below */ }
   if (needs && gate && gate.state() !== 'not_set_up') { const g = gate.revealRecord(req, 'mounts', req.params.id); masked = !g.ok; if (g.code === 'human_only' || g.code === 'cross_site') return res.status(403).json({ error: gate.refusalOf(g.code), code: g.code }); }
   try { res.json(mounts.config(req.params.id, { masked })); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { res.status(400).json(require('../mount-error-words.js').errorBody(e)); }
 });
 // D2: a bare client switch beside a held token is refused 409 by name
 // (`client-change-needs-reauth`) — the client lands WITH its token through
 // drive-token {token, client} or a PATCH that carries `token`
 app.patch('/api/mounts/:id', async (req, res) => {
   try { await mounts.update(req.params.id, req.body || {}); res.json({ success: true, mounts: mounts.list() }); }
-  catch (e) { res.status(e.code === 'client-change-needs-reauth' ? 409 : 400).json({ error: e.message, ...(e.code ? { code: e.code } : {}), mounts: mounts.list() }); }
+  catch (e) { res.status(e.code === 'client-change-needs-reauth' ? 409 : 400).json({ ...require('../mount-error-words.js').errorBody(e), ...(e.code ? { code: e.code } : {}), mounts: mounts.list() }); }
 });
 // Credentials (2.108.0): mount points under a credential + manual convert
 app.post('/api/mounts/:id/children', (req, res) => {
   try { const id = mounts.addChild(req.params.id, req.body || {}); res.json({ success: true, id, mounts: mounts.list() }); }
-  catch (e) { res.status(400).json({ error: e.message, mounts: mounts.list() }); }
+  catch (e) { res.status(400).json({ ...require('../mount-error-words.js').errorBody(e), mounts: mounts.list() }); }
 });
 app.post('/api/mounts/:id/convert', async (req, res) => {
   try { await mounts.convert(req.params.id, req.body?.to === 'credential' ? 'credential' : 'mount'); res.json({ success: true, mounts: mounts.list() }); }
-  catch (e) { res.status(400).json({ error: e.message, mounts: mounts.list() }); }
+  catch (e) { res.status(400).json({ ...require('../mount-error-words.js').errorBody(e), mounts: mounts.list() }); }
 });
 app.delete('/api/mounts/:id', async (req, res) => {
   try { await mounts.remove(req.params.id); res.json({ success: true }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { res.status(400).json(require('../mount-error-words.js').errorBody(e)); }
 });
 const { readLayouts, writeLayouts, flushLayouts } = persistenceRouter;
 

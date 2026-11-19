@@ -10,7 +10,6 @@
     "\"{name}\" exited unexpectedly at {time}; no VibeSpace window was ",
     "\"{name}\" exited unexpectedly at {time}; restarting it did not wo",
     "A Terminal has no agent: channels, browser profiles and the vaul",
-    "A custom OAuth client needs its client secret too",
     "A data migration failed at startup: {id}",
     "A failed, missed, interrupted or unverified one-shot leaves the ",
     "A group needs a name (1–80 characters)",

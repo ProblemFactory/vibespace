@@ -37,7 +37,8 @@
 //    re-authorization).
 import { createModalShell, showToast, copyText } from './utils.js';
 import { pathField } from './path-field.js'; // lane path-field: THE path field
-import { t as tr } from './i18n.js';
+import { t as tr, resolveLang } from './i18n.js';
+import { wordsFor as mountWords } from '../mount-error-words.js'; // B-af94 (2 of 2): a mounts route's refusal BY CODE, in the reader's language
 import { needDoorButton } from './need-line.js'; // lane ui-needs-a-button (machines-12): an error with its door on the line
 
 // the storage consent routes (rclone authorize over the server) — the default
@@ -53,7 +54,9 @@ export async function api(url, opts = {}) {
   const d = await res.json().catch(() => ({}));
   // carry the server's machine-readable `code` (the key-import flow maps it to
   // localized text — a bare message string can't be translated)
-  if (!res.ok || d.error) { const e = new Error(d.error || `HTTP ${res.status}`); e.code = d.code; e.body = d; throw e; } // verify-r5 A1: + the whole answer (a 409's facts)
+  // B-af94 (2 of 2): a MOUNTS route's coded refusal is worded here, once, for every dialog door (another route's code names its own thing)
+  const worded = d.code && /^\/api\/(machine-mounts|mounts|mount-tokens)(\/|$|\?)/.test(String(url)) ? mountWords(d.code, d.params || {}, { t: tr, lang: resolveLang() }) : null;
+  if (!res.ok || d.error) { const e = new Error(worded || d.error || `HTTP ${res.status}`); e.code = d.code; e.body = d; throw e; } // verify-r5 A1: + the whole answer (a 409's facts)
   return d;
 }
 

@@ -116,6 +116,8 @@ console.log('③ the producers carry code + params');
   ok(bad.length === 0 && cm._errors.get('c1') === 'EACCES: permission denied', `③ MountManager: a row's code only while ITS words are the row's — ${rows.map((r) => r[0]).join(' · ')}`, bad);
   ok(cm._parkedWords(rec) === LIVENESS.wordsFor('wedged', 'en', { N: 3 }), '③ the parked words are the verdict table\'s English, unchanged');
   const MSx = read('src/mounts.js');
+  ok(MSx.includes("detail: String(stderr || err?.message || 'unknown').slice(0, 200 - 'CephFS mount failed: '.length)") && ['cephfs', 's3', 'sftp', 'vibespace', 'webdav'].every((n) => read(`src/mount-providers/${n}.js`).includes('throw new Error(`${k} required`)')),
+    '③ its read 3: the producers\' own pieces — CephFS cuts its detail so the words are the release\'s 200 characters; the providers\' `${k} required` loops are what `{field} required` finds');   // stale-pins: kept — the producers' runtime spelling
   ok(MSx.includes('this._errors.set(id, coded ? this._sayCoded(id, msg, coded[0], coded[1]) : msg);') && MSx.includes('this._errors.delete(id); this._errorCodes?.delete(id);')
     && (MSx.match(/\.\.\.coded\(row\)/g) || []).length === 2 && MSx.includes("code: 'storage_not_connected'") && read('src/mount-providers/onedrive.js').includes('x._errors.set(id, x._sayE(id, e))')
     && read('src/lib/user-todos-actions.js').includes("String(checkRow.checkRoute).startsWith('/api/mounts/') && mountWords(r.code, r.params, { t, lang: resolveLang() })") && read('src/server/mounts-plugins-wiring.js').includes("catch (e) { res.status(400).json(require('../mount-error-words.js').errorBody(e)); }   // B-af94: a coded refusal keeps its code"),
@@ -152,7 +154,8 @@ ok((SB.match(/mmApi\(`\/api\/(machine-mounts|mounts)\//g) || []).length === 10 &
   '⑤ the page: every machine-mount door and every cloud connect goes through mmApi (a refusal comes back worded)', (SB.match(/mmApi\(`\/api\/(machine-mounts|mounts)\//g) || []).length);
 ok(SB.includes("(m.error ? mountErrorText(m) : tr('Not mounted'))") && SB.includes("tr('Couldn’t connect:') + ' ' + mountErrorText(m).slice(0, 300)") && SB.includes('err.title = mountErrorText(m);') && /m\.error \? escHtml\(pullErrorText\(m\)\)/.test(SB),
   '⑤ the page: the cloud row\'s dot and «Couldn\'t connect» line, and the pull row\'s dot, read the words functions');
-const typed = Object.entries(MW.WORDS).filter(([, s]) => !/\{\w+\}/.test(s));
+const DIALOG_BY_WORDS = new Set(["token_json_authorize", "token_required_drive", "token_json_gmail", "token_required_connect", "rclone_type_required", "one_param_required", "remote_path_required", "not_oauth", "bucket_required", "key_or_pass_required", "keypath_absolute", "self_mount_link", "user_or_bearer_required", "s3_fields_required", "secret_key_required", "rclone_binary_failed", "name_required", "name_taken", "custom_path_absolute", "submount_no_nest", "child_no_convert", "provisioned_no_convert", "remove_children_first", "provisioned_no_delete", "credential_has_children", "share_blocks_rename", "provisioned_no_edit", "mount_not_found", "not_share_link", "not_drive_record", "token_required", "not_gmail_record", "client_preset_or_custom", "client_switch_drive_only", "custom_client_secret", "no_auth_in_progress", "paste_full_url", "url_no_code", "no_share_links", "no_ceph_share", "bad_ceph_link", "share_not_found", "sts_no_credentials", "field_required", "unknown_cloud", "unknown_mount_type", "type_no_children", "share_link_missing", "mc_no_credential", "sts_failed", "gmail_needs_client", "auth_state_mismatch", "auth_no_code", "token_refresh_failed_gmail", "token_refresh_failed", "rclone_download_failed", "rclone_unzip_failed", "rclone_unexpected_output", "auth_forward_failed", "rclone_no_token", "mint_service_failed", "share_root_absolute", "share_root_missing", "share_root_not_dir"]);   // ⑥'s: found by their words — their producers keep them (its read 3: a comment quoting one is no «still typed»)
+const typed = Object.entries(MW.WORDS).filter(([c, s]) => !/\{\w+\}/.test(s) && !DIALOG_BY_WORDS.has(c));
 const stillTyped = typed.filter(([c, s]) => [MMS, read('src/device-mount.js')].some((src) => src.includes(`'${s.replace(/'/g, "\\'")}'`)));
 const byWords = ['share_expired', 'share_revoked', 'oauth_dead', 'list_failed', 'reads_rejected', 'mount_cant_tell', 's3_sts_proxy', 'start_exited', 'credential_expired', 'onedrive_token_unreadable', 'onedrive_token_expired', 'onedrive_no_drive', 'self_mount', 'host_not_found'];
 const PRODUCERS = [MS, read('src/mount-providers/vibespace.js'), read('src/hosts.js')].join('\n');
@@ -160,6 +163,28 @@ const lost = byWords.filter((c) => !PRODUCERS.includes(MW.WORDS[c]));
 const slowPieces = MW.WORDS.device_link_slow.split(/\{\w+\}/).filter(Boolean);   // its read 2: hosts.js's slow-link sentence is found by its words — its literal pieces must stay hosts.js's
 if (!slowPieces.every((x) => read('src/hosts.js').includes(x))) lost.push('device_link_slow');
 ok(stillTyped.length === 0 && lost.length === 0, `⑤ no machine-mount sentence is still typed beside the table; the ${byWords.length} cloud sentences worded BY THEIR WORDS are still mounts.js's own (else the page could not find them)`, { stillTyped: stillTyped.map((x) => x[0]), lost });
+
+// ═══ ⑥ the cloud mount DIALOG's refusals (commit 2 of the row) — found by their words ═══
+console.log('⑥ the dialog\'s refusals');
+{
+  const DIALOG = [...DIALOG_BY_WORDS];
+  const PROD = ['src/mounts.js', 'src/gmail-sync.js', 'src/webdav.js', ...['cephfs', 'cloud', 'drive', 'gmail', 'onedrive', 'rclone', 's3', 'sftp', 'vibespace', 'webdav'].map((n) => `src/mount-providers/${n}.js`)].map(read).join('\n');
+  const inProd = (piece) => PROD.includes(piece) || PROD.includes(piece.replace(/'/g, "\\'"));   // its read: a producer may write can\'t in its source
+  const sample = { provider: 'Dropbox', field: 'sshHost', backend: 'x9', type: 'zz', detail: 'boom', status: 503 };
+  const notFound = DIALOG.filter((c) => { const tpl = MW.WORDS[c]; if (!tpl) return true; const filled = MW.wordsFor(c, sample); const k = MW.codeOfWords(filled); return !k || k.code !== c; });
+  const notProduced = DIALOG.filter((c) => !MW.WORDS[c].split(/\{\w+\}/).filter(Boolean).every(inProd));
+  ok(DIALOG.length === 64 && notFound.length === 0 && notProduced.length === 0, `⑥ ${DIALOG.length} refusals of the add / import / edit / children / remove / share roads and the providers' create(): each is found BY ITS WORDS as its own code (no template shadows another), and each producer still writes it (its literal pieces are src/mounts.js's or a provider's)`, { notFound, notProduced });
+  ok(MW.codeOfWords('rclone: Failed to configure: password required') === null && MW.codeOfWords('mint service soon') === null && same(MW.codeOfWords('mint service 502'), { code: 'mint_service_failed', params: { status: '502' } }),
+    '⑥ its read: a hole is read back by its name\'s shape — `{field} required` never swallows a tool\'s «…: password required» tail, a status is digits');
+  ok(MW.codeOfWords('bucket required').code === 'bucket_required' && same(MW.codeOfWords('sshHost required'), { code: 'field_required', params: { field: 'sshHost' } }) && same(MW.codeOfWords('token required — use "Connect OneDrive" (guided sign-in)'), { code: 'token_required_connect', params: { provider: 'OneDrive' } }),
+    '⑥ an exact sentence wins over a shape («bucket required» is its own; another field\'s «… required» is the shape, its field read back); a provider\'s guided sign-in by its name');
+  const PWs = read('src/server/mounts-plugins-wiring.js');
+  const blk = PWs.slice(PWs.indexOf("app.post('/api/mounts', "), PWs.indexOf('\n', PWs.indexOf("app.delete('/api/mounts/:id', ") + 40) + 200);
+  ok(!blk.includes('.json({ error: e.message })') && !blk.includes('json({ error: e.message, mounts') && (blk.match(/errorBody\(e\)/g) || []).length >= 25, '⑥ every /api/mounts route answers errorBody (a sentence of ours carries its code + params)', (blk.match(/errorBody\(e\)/g) || []).length);
+  const MD = read('src/lib/mounts-dialog.js');
+  ok(MD.includes("const worded = d.code && /^\\/api\\/(machine-mounts|mounts|mount-tokens)(\\/|$|\\?)/.test(String(url)) ? mountWords(d.code, d.params || {}, { t: tr, lang: resolveLang() }) : null;") && MD.includes('const e = new Error(worded || d.error ||'),
+    '⑥ the dialogs\' one fetch wrapper (mounts-dialog api()) words a MOUNTS route\'s code for every door — another route\'s code is left as its own');
+}
 
 // ═══ RED CONTROLS ═══
 console.log('RED CONTROLS');
