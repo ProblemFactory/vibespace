@@ -37,10 +37,15 @@ function create({ rootDir, switched = { state: 'none' }, version = process.versi
     let child;
     try { child = spawnFn(execPath, [path.join(rootDir, 'scripts', 'runtime-check.mjs'), '--provision', '--json', '--root', root], { cwd: rootDir, env, stdio: ['ignore', 'pipe', 'pipe'] }); }
     catch (e) { check = { state: 'done', at: Date.now(), ok: false, code: 'spawn', error: String(e && e.message) }; log(`[runtime] the boot check could not start: ${check.error}`); return check; }
-    let out = '';
-    child.stdout.on('data', (d) => { if (out.length < 65536) out += d; });
-    child.stderr.on('data', (d) => { if (out.length < 65536) out += d; });
+    let out = '', failed = false;
+    // ckpt61 cure 2: the error listener at once — this child starts on a timer after listen; a start that fails (a full file table,
+    // EAGAIN, a missing node) queues an 'error' that, unheard, ended the hub at every restart. Said in the check's own words; the
+    // 'close' that follows it (node's maybeClose) changes nothing
+    child.on('error', (e) => { failed = true; check = { state: 'done', at: Date.now(), wanted: v.wanted, ok: false, code: 'spawn', error: String((e && e.code) || e) }; log(`[runtime] the boot check could not start: ${check.error}`); });
+    if (child.stdout) child.stdout.on('data', (d) => { if (out.length < 65536) out += d; });
+    if (child.stderr) child.stderr.on('data', (d) => { if (out.length < 65536) out += d; });
     child.on('close', (code) => {
+      if (failed) return;
       let r = null;
       for (const l of out.split('\n').reverse()) { try { r = JSON.parse(l); break; } catch { } }
       const p = r && r.provisioned;

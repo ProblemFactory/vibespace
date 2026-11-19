@@ -18,8 +18,12 @@
 //  ④i A START THAT FAILS AT ONCE NEVER ENDS THE HUB (ckpt61's hosted red): a REAL full file table in a child node ⇒ the
 //     starter's start answered «unknown» (the fault counted), the old road's «not started», the process alive; RED the tip's
 //     order (a pipe touched before the error listener) ⇒ the uncaught «spawn … EMFILE», exit 1 — at the starter, at the old road
-//  ④j THE CLASS: every async spawn / fork start under src/server and server.js has its error listener before its first
-//     unguarded pipe touch; RED each planted break (two orders, three listeners taken out) named
+//  ④k THE SELF-UPDATE'S FAILED START IS SAID: the dialog's log carries the failure and its end mark, a second press tries
+//     again; RED (not written, not kept): no mark, the press refused as in flight
+//  ④j THE CLASS, over every module the HUB loads (the require graph from server.js) and every form of a start (bare, an alias
+//     of one, namespaced, inline, fork, an execFile with a pipe touched): the error listener before the first unguarded pipe
+//     touch; the named debt (scripts/fixtures/spawn-listener-debt.json) only falls; RED each form planted broken + five real
+//     sites put back; three shapes never flagged
 //  ⑤ HYGIENE: the starter is born with the service env (a secret of the hub's env is not in it, nor in what it starts,
 //     nor on any request line); a request's secret-shaped name is dropped; the X tool gets its site's DISPLAY and PATH
 //  ⓪ THE HUB INJECTS IT: loading src/server/desktop-app-keeper.js hands desktop-display the hub's starter (a belt call then starts
@@ -303,7 +307,8 @@ try {
     // — ⇒ unknown, the fault counted, the starter to be replaced; ⇒ the old road, whose start fails the same way ⇒ «not started»
     // (EMFILE) — then frees its table and says it is alive. RED CONTROLS, the tip's order: the starter's pipe touched before its
     // listener ⇒ the child dies before its first answer (exit 1, the uncaught «spawn … EMFILE»); the old road's capture pipes
-    // touched before its listener ⇒ it dies after the first, before the second
+    // touched before its listener ⇒ it dies before its answer line (its rejected ask is caught in the same microtask drain, the
+    // queued error's tick comes after it)
     const FULL = path.join(T, 'full-table.cjs');
     fs.writeFileSync(FULL, [
       "const fs = require('fs'); const CS = require(process.argv[2]); const S = CS.createChildStarter({ log: { warn: () => { } } });",
@@ -332,44 +337,140 @@ try {
     const redStartSrc = anchored(anchored(csE, LIS, '', 'emfile-start-off'), PIPE_IN, PIPE_IN + LIS, 'emfile-start-late');
     const redDirectSrc = anchored(anchored(anchored(csE, DLIS, '', 'emfile-direct-off'), CAPG, '      if (o.capture) {', 'emfile-direct-unguarded'), CLOSE, DLIS + CLOSE, 'emfile-direct-late');
     const g = await fullRun(path.join(REPO, 'src/server/child-starter.js'));
+    const rU = await fullRun(MC.write('src/server/child-starter.js', anchored(csE, 'stats.unknown++; return Promise.resolve', 'return Promise.resolve', 'emfile-unknown-uncounted'), 'red-emfile-unknown'));
     const rA = await fullRun(MC.write('src/server/child-starter.js', redStartSrc, 'red-emfile-start'));
     const rB = await fullRun(MC.write('src/server/child-starter.js', redDirectSrc, 'red-emfile-direct'));
     const j = g.j || {};
     ok(g.code === 0 && j.full === 'EMFILE' && j.r1 && j.r1.unknown === true && j.st1.faults === 1 && j.st1.restarted && !j.st1.direct && j.st1.unknown === 1
       && j.r2 && j.r2.started === false && /EMFILE|ENFILE/.test(String(j.r2.error)) && j.st2.faults === 2 && j.st2.direct && j.st2.starts === 2
-      && rA.code === 1 && rA.emfile && rA.asked === 0 && rB.code === 1 && rB.emfile && rB.asked === 1,
-      `a FULL file table (${j.held} handles held, the next open «${j.full}»): the starter's start fails at once ⇒ answered «unknown», ${j.st1 && j.st1.faults} fault counted, ${j.st1 && j.st1.unknown} unknown; the second ⇒ the old road, its start failing the same way ⇒ «not started» (${j.r2 && j.r2.error}), ${j.st2 && j.st2.faults} faults — the process ALIVE after (exit ${g.code}); RED the tip's order: the starter's pipe first ⇒ exit ${rA.code} before any answer (the uncaught spawn EMFILE: ${rA.emfile}), the old road's pipes first ⇒ exit ${rB.code} after ${rB.asked} answer`,
-      { g: { code: g.code, j: g.j, err: g.err }, rA: { code: rA.code, asked: rA.asked, err: rA.err }, rB: { code: rB.code, asked: rB.asked, err: rB.err } });
+      && rA.code === 1 && rA.emfile && rA.asked === 0 && !rA.j && rB.code === 1 && rB.emfile && rB.asked === 2 && !rB.j
+      && rU.code === 0 && rU.j && rU.j.r1 && rU.j.r1.unknown === true && rU.j.st1.unknown === 0,
+      `a FULL file table (${j.held} handles held, the next open «${j.full}»): the starter's start fails at once ⇒ answered «unknown», ${j.st1 && j.st1.faults} fault counted, ${j.st1 && j.st1.unknown} unknown; the second ⇒ the old road, its start failing the same way ⇒ «not started» (${j.r2 && j.r2.error}), ${j.st2 && j.st2.faults} faults — the process ALIVE after (exit ${g.code}); RED the tip's order: the starter's pipe first ⇒ exit ${rA.code} before any answer (the uncaught spawn EMFILE: ${rA.emfile}), the old road's pipes first ⇒ exit ${rB.code} after its ${rB.asked} asks (the rejection's turn runs before the queued error's tick), no answer line; RED the unknown not counted ⇒ ${rU.j && rU.j.st1 ? rU.j.st1.unknown : '?'} counted for the same answer`,
+      { g: { code: g.code, j: g.j, err: g.err }, rA: { code: rA.code, asked: rA.asked, err: rA.err }, rB: { code: rB.code, asked: rB.asked, err: rB.err }, rU: { code: rU.code, st1: rU.j && rU.j.st1 } });
 
-    // ④j THE CLASS: every async spawn / fork start under src/server and server.js attaches its 'error' listener BEFORE its first
-    // unguarded pipe touch — and has one (a start that fails at once queues its error; with no listener the hub ends:
-    // process.on('uncaughtException') exits 1). node-pty's spawn (claude-signin, oat-mint) throws instead: not this class; an
-    // execFile holds its own listener. RED: the two orders above, and the listener taken out of the three other sites cured here
-    const NODE_PTY = new Set(['src/server/claude-signin.js', 'src/server/oat-mint.js']);
-    const sitesOf = (rel, src) => {
-      const out = [], re = /\b([A-Za-z_$][\w$]*)\s*=\s*(?:[^;]{0,300}?[?:]\s*)?(?<![.\w$])(spawn|fork)\(/g; let m;
-      while ((m = re.exec(src))) {
-        const v = m[1], win = src.slice(m.index, m.index + 2500), line = src.slice(0, m.index).split('\n').length;
-        const lis = win.search(new RegExp(`\\b${v}\\.(?:on|once|addListener)\\('error'`));
-        const touch = new RegExp(`\\b${v}\\.(stdout|stdin|stderr)\\.`, 'g'), guard = new RegExp(`if \\(!?${v}\\.std|${v}\\.std\\w+ &&`); let t, first = -1;
-        while ((t = touch.exec(win))) { if (guard.test(win.slice(Math.max(0, t.index - 80), t.index).split('\n').pop())) continue; first = t.index; break; }
-        out.push({ site: `${rel}:${line}`, bad: lis < 0 || (first >= 0 && first < lis) });
+    // ④k THE SELF-UPDATE'S FAILED START IS SAID (cure 2): the route answers «started» before the queued 'error' arrives; the dialog
+    // reads the update's log for its end mark (src/lib/app.js: «Update failed (exit N) — see the log below») — without it, it
+    // spun to its ten-minute timeout, and a second press was refused as a run «already» in flight. A REAL full table with ONE
+    // handle free (the route opens its log; the start's pipes cannot be made): the status's log says it and carries the mark, the
+    // process alive, a second press tries again. RED (the failure not written, not kept): no mark, and the press refused
+    const OPSF = path.join(T, 'ops-full.cjs'), ROOT = path.join(T, 'ops-root');
+    fs.mkdirSync(path.join(ROOT, 'scripts'), { recursive: true }); fs.mkdirSync(path.join(ROOT, 'data'), { recursive: true });
+    fs.writeFileSync(path.join(ROOT, 'scripts', 'update.sh'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    fs.writeFileSync(OPSF, [
+      "const fs = require('fs'); const [opsPath, root] = process.argv.slice(2); const routes = {};",
+      "const app = new Proxy({}, { get: (t, k) => (p, ...h) => { if (typeof p === 'string' && h.length) routes[String(k).toUpperCase() + ' ' + p] = h[h.length - 1]; } });",
+      "require(opsPath).create({ app, rootDir: root, wss: { clients: new Set() }, WS_OPEN: 1 });",
+      "const call = (k) => new Promise((r) => { const res = { statusCode: 200, status(c) { this.statusCode = c; return this; }, json(o) { r({ code: this.statusCode, body: o }); return this; }, end() { r({ code: this.statusCode }); }, set() { return this; }, setHeader() { } }; routes[k]({ body: {}, query: {}, headers: {} }, res); });",
+      "const held = []; let full = null; try { for (let i = 0; i < 100000; i++) held.push(fs.openSync('/dev/null', 'r')); } catch (e) { full = e.code; }",
+      "fs.closeSync(held.pop());   // ONE handle free: the route opens its log, the start (its pipes) cannot",
+      "(async () => {",
+      "  const post = await call('POST /api/self-update'); await new Promise((r) => setTimeout(r, 300));",
+      "  const st = await call('GET /api/self-update/status');",
+      "  const again = await call('POST /api/self-update'); await new Promise((r) => setTimeout(r, 300));",
+      "  for (const fd of held) fs.closeSync(fd);",
+      "  process.stdout.write(JSON.stringify({ full, post, st, again }) + '\\n'); process.exit(0);",
+      "})();",
+    ].join('\n'));
+    const opsRun = (opsPath) => new Promise((resolve) => {
+      let out = '', err = '', c;
+      try { c = CP.spawn('sh', ['-c', 'ulimit -n 128 && exec "$0" "$@"', process.execPath, OPSF, opsPath, ROOT], { stdio: ['ignore', 'pipe', 'pipe'] }); } catch (e) { resolve({ code: null, err: String(e) }); return; }
+      c.on('error', (e) => { err += String(e); });
+      if (c.stdout) c.stdout.on('data', (d) => { out += d; });
+      if (c.stderr) c.stderr.on('data', (d) => { err += d; });
+      const t = setTimeout(() => { try { c.kill('SIGKILL'); } catch { } }, 20000);
+      c.on('close', (code) => { clearTimeout(t); let j = null; try { j = JSON.parse(out.trim().split('\n').pop()); } catch { } resolve({ code, j, err: err.slice(-400) }); });
+    });
+    const opsSrc = fs.readFileSync(path.join(REPO, 'src/server/ops-routes.js'), 'utf8');
+    const k1 = await opsRun(path.join(REPO, 'src/server/ops-routes.js'));
+    const kr = await opsRun(MC.write('src/server/ops-routes.js', anchored(anchored(opsSrc, "      _selfUpdateFailed = { why };\n", '', 'update-failed-kept'), /\n {6}try \{ fs\.appendFileSync\(_updateLogPath, failedStart\(why\)\); \} catch \{ \}[^\n]*/, '', 'update-failed-written'), 'red-update-silent'));
+    const kj = k1.j || {}, kl = String((kj.st && kj.st.body && kj.st.body.log) || ''), rj = kr.j || {}, rl = String((rj.st && rj.st.body && rj.st.body.log) || '');
+    ok(k1.code === 0 && kj.full === 'EMFILE' && kj.post && kj.post.body && kj.post.body.success === true && /could not be started \(EMFILE\)/.test(kl) && /__UPDATE_EXIT:127\s*$/.test(kl) && kj.st.body.running === false && kj.again && kj.again.body && !kj.again.body.already
+      && kr.code === 0 && !/__UPDATE_EXIT:/.test(rl) && rj.again && rj.again.body && rj.again.body.already === true,
+      `the self-update's start failing at once (a full table): the dialog's log says «${(kl.match(/could not be started \([^)]*\)/) || ['—'])[0]}» and ends with its mark (${(kl.match(/__UPDATE_EXIT:\d+/) || ['none'])[0]} ⇒ «Update failed»), nothing running, a second press tries again (already: ${kj.again && kj.again.body ? !!kj.again.body.already : '?'}); the process alive (exit ${k1.code}); RED (the failure neither written nor kept): no mark, the press refused as in flight (already: ${rj.again && rj.again.body ? rj.again.body.already : '?'})`,
+      { k1: { code: k1.code, j: k1.j, err: k1.err }, kr: { code: kr.code, j: kr.j, err: kr.err } });
+
+    // ④j THE CLASS (cure 2: every module the HUB loads, every form of a start): the hub's module set is DERIVED — the require graph
+    // from server.js, never a typed list — and in each, every start is read: a bare spawn / fork / execFile destructured from
+    // child_process, a namespaced one (cp.spawn), an inline require('child_process').spawn. A spawn / fork attaches its 'error'
+    // listener BEFORE its first unguarded pipe touch, and has one (a start that fails at once queues its error; unheard, the hub
+    // ends: process.on('uncaughtException') exits 1); an execFile holds its own listener — its child's pipe is never touched
+    // unguarded (a rejection instead of the road's own refusal). A start handed straight on (an argument, a return) is judged
+    // where it lands, counted here. Comments are blanked first. node-pty's spawn (claude-signin, oat-mint: a local `spawn`) throws
+    // instead: not this class. RED: each form planted broken, the five sites cured here put back, and three shapes it must NOT flag
+    const blank = (src) => src.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/(^|[^:'"`\\/])(\/\/[^\n]*)/g, (m, a, b) => a + ' '.repeat(b.length));
+    const CPQ = `require\\(\\s*['"](?:node:)?child_process['"]\\s*\\)`;
+    const sitesOf = (rel, raw) => {
+      const src = blank(raw), out = [];
+      const ns = [...src.matchAll(new RegExp(`(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*${CPQ}`, 'g'))].map((m) => m[1]);
+      const bare = new Map();
+      for (const m of src.matchAll(new RegExp(`(?:const|let|var)\\s*\\{([^}]*)\\}\\s*=\\s*${CPQ}`, 'g'))) for (const part of m[1].split(',')) { const [k, v] = part.split(':').map((x) => x.trim()); if (['spawn', 'fork', 'execFile'].includes(k)) bare.set(v || k, k); }
+      // an alias is the form it names: a default `spawnImpl = spawn`, `x = opts.spawn || spawn`, `x = cp.spawn` (the injected doors)
+      const forms = new Map(bare); for (const n of ns) for (const f of ['spawn', 'fork', 'execFile']) forms.set(n + '.' + f, f);
+      for (const [name, form] of [...forms]) for (const m of src.matchAll(new RegExp(`([A-Za-z_$][\\w$]*)\\s*=\\s*(?:[^;,()\\n]*?(?:\\|\\||\\?\\?)\\s*)?${name.replace(/[$.]/g, (ch) => '\\' + ch)}\\b(?!\\s*\\()`, 'g'))) if (!forms.has(m[1]) && m[1] !== name) { bare.set(m[1], form); forms.set(m[1], form); }
+      const calls = [];
+      for (const m of src.matchAll(new RegExp(`${CPQ}\\.(spawn|fork|execFile)\\(`, 'g'))) calls.push({ at: m.index, form: m[1] });
+      for (const n of ns) for (const m of src.matchAll(new RegExp(`\\b${n.replace(/\$/g, '\\$')}\\.(spawn|fork|execFile)\\(`, 'g'))) calls.push({ at: m.index, form: m[1] });
+      for (const [name, form] of bare) for (const m of src.matchAll(new RegExp(`(?<![.\\w$])${name.replace(/\$/g, '\\$')}\\(`, 'g'))) if (!/\bfunction\s*$/.test(src.slice(Math.max(0, m.index - 12), m.index))) calls.push({ at: m.index, form });
+      for (const c of calls) {
+        const back = src.slice(Math.max(0, c.at - 300), c.at).split(';').pop(), line = src.slice(0, c.at).split('\n').length, site = `${rel}:${line}`;
+        if (/(?:\breturn|=>)\s*$/.test(back) || /[(,]\s*$/.test(back)) { out.push({ site, form: c.form, handed: true, bad: false }); continue; }
+        const a = /([A-Za-z_$][\w$]*)\s*=\s*(?:[^;=]*?[?:]\s*)?$/.exec(back), v = a ? a[1] : null, win = src.slice(c.at, c.at + 4000);
+        let lis = -1, first = -1;
+        if (v) {
+          lis = win.search(new RegExp(`\\b${v}\\.(?:on|once|addListener)\\('error'`));
+          const touch = new RegExp(`\\b${v}\\.(stdout|stdin|stderr)\\.`, 'g'), guard = new RegExp(`if \\((?:[^)\\n]*&&\\s*)?!?${v}\\.std|${v}\\.std\\w+ &&|\\btry \\{\\s*$`); let t;
+          while ((t = touch.exec(win))) { const pre = win.slice(Math.max(0, t.index - 160), t.index).split('\n').pop(), post = win.slice(t.index, t.index + 240).split('\n')[0]; if (guard.test(pre) || (/\btry \{/.test(pre) && /\}\s*catch\b/.test(post))) continue; first = t.index; break; }
+        }
+        out.push({ site, form: c.form, v, bad: c.form === 'execFile' ? first >= 0 : (!v || lis < 0 || (first >= 0 && first < lis)) });
       }
       return out;
     };
-    const walk = (d) => fs.readdirSync(path.join(REPO, d), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(`${d}/${e.name}`) : e.name.endsWith('.js') ? [`${d}/${e.name}`] : []));
-    const rels = ['server.js', ...walk('src/server')].filter((r) => !NODE_PTY.has(r));
-    const sites = rels.flatMap((r) => sitesOf(r, fs.readFileSync(path.join(REPO, r), 'utf8'))), bad = sites.filter((x) => x.bad);
+    const hubModules = () => {
+      const seen = new Set(), todo = ['server.js'];
+      while (todo.length) {
+        const rel = todo.pop(); if (seen.has(rel)) continue; let src; try { src = fs.readFileSync(path.join(REPO, rel), 'utf8'); } catch { continue; } seen.add(rel);
+        for (const m of blank(src).matchAll(/require\(\s*['"](\.{1,2}\/[^'"]+)['"]\s*\)/g)) {
+          const base = path.posix.normalize(path.posix.join(path.posix.dirname(rel), m[1]));
+          const hit = [base, base + '.js', base + '/index.js'].find((c) => /\.c?js$/.test(c) && fs.existsSync(path.join(REPO, c)) && fs.statSync(path.join(REPO, c)).isFile());
+          if (hit) todo.push(hit);
+        }
+      }
+      return [...seen].sort();
+    };
+    const mods = hubModules(), sites = mods.flatMap((r) => sitesOf(r, fs.readFileSync(path.join(REPO, r), 'utf8')));
     const rd = (r) => fs.readFileSync(path.join(REPO, r), 'utf8');
-    const OPS_LIS = /\n {4}child\.on\('error', \(e\) => \{ console\.warn\(`\[update\] the update could not be started[^\n]*/, DA_LIS = /\n {10}child\.on\('error', \(e\) => \{ relay\([^\n]*/, PROC_LIS = /\n {2}c\.on\('error', \(e\) => end\([^\n]*/;
+    // THE NAMED DEBT (主开发 20:53Z, road (b)): scripts/fixtures/spawn-listener-debt.json — the sites whose listener comes after a pipe
+    // touch, a count a file that only FALLS (the founding sums below are this commit's: raising one is an edit here too), and the
+    // starts that only SURVIVE (one listener, the journal line: «the hub survives; the road's own failure words owed») — each
+    // file's survival lines counted and each still holding its listener on its line
+    const FIX = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/spawn-listener-debt.json'), 'utf8')), DEBT = FIX.pipeFirst, SURV = FIX.survives;
+    const FOUNDING = { pipeFirst: 9, survives: 13 }, SURV_MARK = 'ckpt61 cure 2: the hub survives a start that fails';
+    const bad = sites.filter((x) => x.bad).map((x) => x.site);
+    const newBad = bad.filter((x) => !DEBT.some((d) => x.startsWith(d.file + ':') && d.n > 0)), debtNow = Object.fromEntries(DEBT.map((d) => [d.file, bad.filter((x) => x.startsWith(d.file + ':')).length]));
+    const survNow = SURV.map((r) => { const lines = rd(r.file).split('\n').filter((l) => l.includes(SURV_MARK)); return { file: r.file, n: r.n, now: lines.length, held: lines.filter((l) => /\.on\('error', \(e\) => console\.warn\(/.test(l)).length }; });
+    const sumOf = (rows) => rows.reduce((a, r) => a + r.n, 0);
+    const survOk = survNow.every((r) => r.now === r.n && r.held === r.n) && sumOf(SURV) <= FOUNDING.survives && sumOf(DEBT) <= FOUNDING.pipeFirst;
+    const planted = {
+      'a namespaced spawn, its pipe first': "const cp = require('child_process');\nfunction f() { const c = cp.spawn('x', [], { stdio: 'pipe' }); c.stdout.on('data', () => {}); c.on('error', () => {}); }",
+      'an inline spawn, no listener': "function f() { const c = require('child_process').spawn('x', [], { stdio: 'ignore' }); c.unref(); }",
+      'a fork, its pipe first': "const { fork } = require('child_process');\nfunction f() { const w = fork('w.js', [], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] }); w.stdout.on('data', () => {}); w.on('error', () => {}); }",
+      'an execFile, its stdin unguarded': "const { execFile } = require('child_process');\nfunction f() { const c = execFile('x', [], () => {}); c.stdin.end('y'); }",
+    };
+    const keep = {
+      'a start in a comment': "const { spawn } = require('child_process');\n// spawn(cmd) — its child.stdout.on(...) before c.on('error') would be the fault\nfunction f() { const c = spawn('x', [], { stdio: 'pipe' }); c.on('error', () => {}); if (c.stdout) c.stdout.on('data', () => {}); }",
+      'a child handed on': "const { spawn } = require('child_process');\nfunction f(ran) { return new Promise((r) => { ran(spawn('x', [], { stdio: 'ignore' }), r); }); }",
+      'a try-guarded pipe': "const cp = require('child_process');\nfunction f() { const c = cp.execFile('x', [], () => {}); if (c.stdin) c.stdin.on('error', () => {}); try { c.stdin.end('y'); } catch { } }",
+    };
     const reds = [
-      ['the starter (its pipe first)', 'src/server/child-starter.js', redStartSrc], ['the old road (its pipes first)', 'src/server/child-starter.js', redDirectSrc],
-      ['the self-update (no listener)', 'src/server/ops-routes.js', anchored(rd('src/server/ops-routes.js'), OPS_LIS, '', 'class-ops')],
-      ['the desktop launch (no listener)', 'src/server/desktop-access.js', anchored(rd('src/server/desktop-access.js'), DA_LIS, '', 'class-desktop')],
-      ['the starter process (no listener)', 'src/server/child-starter-proc.js', anchored(rd('src/server/child-starter-proc.js'), PROC_LIS, '', 'class-proc')],
-    ].map(([what, r, src]) => [what, sitesOf(r, src).filter((x) => x.bad).length]);
-    ok(sites.length >= 12 && !bad.length && reds.every(([, n]) => n === 1),
-      `every async spawn / fork start under src/server and server.js has its error listener before its first unguarded pipe touch (${sites.length} sites read${bad.length ? '; NOT: ' + bad.map((x) => x.site).join(', ') : ''}); RED each planted break is named: ${reds.map(([w, n]) => `${w} ${n}`).join(' · ')}`, { bad, reds });
+      ...Object.entries(planted).map(([w, src]) => [w, sitesOf('planted.js', src).filter((x) => x.bad).length]),
+      ['the starter (its pipe first)', sitesOf('src/server/child-starter.js', redStartSrc).filter((x) => x.bad).length], ['the old road (its pipes first)', sitesOf('src/server/child-starter.js', redDirectSrc).filter((x) => x.bad).length],
+      ['the self-update (no listener)', sitesOf('src/server/ops-routes.js', anchored(rd('src/server/ops-routes.js'), /\n {4}child\.on\('error', \(e\) => \{\n/, '\n    child.on(\'exit\', (e) => {\n', 'class-ops')).filter((x) => x.bad).length],
+      ['the local daemon start (no listener)', sitesOf('src/agentd/client.js', anchored(rd('src/agentd/client.js'), /\n {4}child\.on\('error', \(e\) => \{ this\._log\([^\n]*/, '', 'class-daemon')).filter((x) => x.bad).length],
+      ['the cache count (its pipe first)', sitesOf('src/mounts.js', anchored(rd('src/mounts.js'), "      c.on('error', end); c.on('close', end);\n      if (c.stdout) c.stdout.on(", "      c.stdout.on(", 'class-cache-count')).filter((x) => x.bad).length],
+    ];
+    const kept = Object.entries(keep).map(([w, src]) => [w, sitesOf('kept.js', src).filter((x) => x.bad).length]);
+    ok(mods.length > 100 && mods.includes('src/agentd/client.js') && mods.includes('src/mounts.js') && sites.length > 100 && !newBad.length && DEBT.every((d) => debtNow[d.file] <= d.n) && survOk && reds.every(([, n]) => n === 1) && kept.every(([, n]) => n === 0),
+      `the hub's ${mods.length} modules (the require graph from server.js) hold ${sites.length} starts (${sites.filter((x) => x.handed).length} handed on): every spawn / fork has its error listener before its first unguarded pipe touch, every execFile's pipes guarded${newBad.length ? '; NOT: ' + newBad.join(', ') : ''}; the named debt (a count a file only falls): ${DEBT.map((d) => `${d.file} ${debtNow[d.file]}/${d.n}`).join(', ')}; the starts that only survive (words owed): ${survNow.map((r) => `${r.file} ${r.held}/${r.n}`).join(', ')}; RED each planted break named once: ${reds.map(([w, n]) => `${w} ${n}`).join(' · ')}; never flagged: ${kept.map(([w, n]) => `${w} ${n}`).join(' · ')}`, { newBad, debtNow, survNow, reds, kept });
   }
 
   console.log('⑤ hygiene: the service env, no secret on a request line, the site\'s own names');

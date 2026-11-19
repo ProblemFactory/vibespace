@@ -51,11 +51,14 @@ function runOnce(spawnImpl, cmd, argv, { env, cwd, timeoutMs = TIMEOUT_MS }) {
     let child;
     try { child = spawnImpl(cmd, argv, { env, cwd, stdio: ['pipe', 'pipe', 'pipe'] }); } catch (e) { resolve({ code: null, stdout: '', stderr: '', error: e }); return; }
     let stdout = '', stderr = '', error = null, done = false;
+    // ckpt61 cure 2: the error listener before any pipe — a start that fails at once (a full file table) has no pipes and its
+    // 'error' queued; a pipe read first threw and the error then found no listener (the hub ended). Its 'close' follows (node's
+    // maybeClose), and answers it with the error, as a failed start always did
+    child.on('error', (e) => { error = e; });
     const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch { } }, timeoutMs);
     try { child.stdin.end(); } catch { }
-    child.stdout.on('data', (d) => { if (stdout.length < STDOUT_CAP) stdout += d; });
-    child.stderr.on('data', (d) => { if (stderr.length < 65536) stderr += d; });
-    child.on('error', (e) => { error = e; });
+    if (child.stdout) child.stdout.on('data', (d) => { if (stdout.length < STDOUT_CAP) stdout += d; });
+    if (child.stderr) child.stderr.on('data', (d) => { if (stderr.length < 65536) stderr += d; });
     child.on('close', (code, sig) => { if (done) return; done = true; clearTimeout(timer); resolve({ code: sig ? `signal ${sig}` : code, stdout, stderr, error }); });
   });
 }

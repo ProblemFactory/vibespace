@@ -57,6 +57,11 @@ async function canonicalFile(name, timeoutMs) {
 // Replaced the "suddenly opens a terminal that just sits there" flow.
 let _selfUpdate = null; // { pid, startedAt, child }
 const _updateLogPath = path.join(rootDir, 'data', 'update.log');
+// ckpt61 cure 2: A START THAT FAILED AT ONCE ENDS THE RUN, SAID. The route answered «started» before the queued 'error' arrived; the
+// dialog reads the log for its end mark (src/lib/app.js: «Update failed (exit N)») — without it, it spun to its ten-minute timeout.
+// The failure and the mark are written into the log, and answered from here when even that write was refused (a full table)
+let _selfUpdateFailed = null; // { why }
+const failedStart = (why) => `\nthe update could not be started (${why})\n__UPDATE_EXIT:127\n`;
 app.post('/api/self-update', (req, res) => {
   try {
     if (!fs.existsSync(path.join(rootDir, 'scripts', 'update.sh'))) return res.status(400).json({ error: 'update script not found' });
@@ -75,11 +80,12 @@ app.post('/api/self-update', (req, res) => {
         const buf = Buffer.alloc(len);
         fs.readSync(fd, buf, 0, len, st.size - len);
         fs.closeSync(fd);
-        if (!buf.toString('utf8').includes('__UPDATE_EXIT:')) return res.json({ success: true, already: true });
+        if (!buf.toString('utf8').includes('__UPDATE_EXIT:') && !_selfUpdateFailed) return res.json({ success: true, already: true });   // a run that failed at once is not in flight
       }
     } catch {}
     try { fs.unlinkSync(_updateLogPath); } catch {}
     const fd = fs.openSync(_updateLogPath, 'a');
+    _selfUpdateFailed = null;
     // Run the LATEST update script, not the checkout's (2.368.11, the history-
     // rewrite stranding): a fix to update logic rides the very update that is
     // broken — the old script could never pull it (chicken-and-egg; the miku
@@ -95,7 +101,13 @@ app.post('/api/self-update', (req, res) => {
     });
     // ckpt61: its error listener at once — a start that fails (a full file table, no bash) queues an 'error' for the next tick, and
     // with no listener that is an uncaught exception: the hub ended. The update did not start: said in the journal, its mark cleared
-    child.on('error', (e) => { console.warn(`[update] the update could not be started: ${(e && e.code) || e}`); if (_selfUpdate && _selfUpdate.child === child) _selfUpdate = null; });
+    child.on('error', (e) => {
+      const why = (e && e.code) || String(e);
+      console.warn(`[update] the update could not be started: ${why}`);
+      if (_selfUpdate && _selfUpdate.child === child) _selfUpdate = null;
+      _selfUpdateFailed = { why };
+      try { fs.appendFileSync(_updateLogPath, failedStart(why)); } catch { }   // the dialog reads it; refused ⇒ the status answers it
+    });
     fs.closeSync(fd);
     child.unref();
     _selfUpdate = { pid: child.pid, startedAt: Date.now(), child };
@@ -113,6 +125,7 @@ app.get('/api/self-update/status', (req, res) => {
     fs.closeSync(fd);
     log = buf.toString('utf8');
   } catch {}
+  if (_selfUpdateFailed && !log.includes('__UPDATE_EXIT:')) log += failedStart(_selfUpdateFailed.why);   // cure 2: the dialog is told
   let running = false;
   if (_selfUpdate) { try { process.kill(_selfUpdate.pid, 0); running = true; } catch {} }
   res.json({ running, log });

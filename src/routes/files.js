@@ -780,6 +780,7 @@ router.post('/api/paste-image', async (req, res) => {
           const cp = spawn('bash', ['-c', `cat "${tmpPath}" | xclip -selection clipboard -t ${mimeType}`], {
             env: clipEnv, detached: true, stdio: 'ignore',
           });
+          cp.on('error', (e) => console.warn(`[files] the clipboard helper could not be started: ${(e && e.code) || e}`));   // ckpt61 cure 2: the hub survives a start that fails (the road's own failure words owed: the next unit)
           cp.unref();
           const pollStart = Date.now();
           const poll = () => {
@@ -1005,6 +1006,7 @@ router.post('/api/archive/extract-entry', (req, res) => {
   // spawn (not execFile): execFile buffers stdout internally and maxBuffer
   // kills the child — for streaming, pipe from a spawned process instead
   const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'ignore'] });
+  child.on('error', (e) => console.warn(`[files] an archive entry's reader could not be started: ${(e && e.code) || e}`));   // ckpt61 cure 2: the hub survives a start that fails (the road's own failure words owed: the next unit)
   child.stdout.pipe(outStream);
   let written = 0, killed = false;
   const CAP = 200 * 1024 * 1024;
@@ -1261,6 +1263,7 @@ async function crossHostTransfer(req, res, { move }) {
     let srcChild;
     if (srcHost) srcChild = inst._spawn(srcHost, `cd ${shq(srcParent)} && tar -cf - ${shq(base)}`);
     else { const sp = safePath(src); srcChild = spawn('tar', ['-cf', '-', path.basename(sp)], { cwd: path.dirname(sp) }); }
+    srcChild.on('error', (e) => console.warn(`[files] a copy's reader could not be started: ${(e && e.code) || e}`));   // ckpt61 cure 2: the hub survives a start that fails (the road's own failure words owed: the next unit)
     let stageLocal = null;
     try {
       let destChild, localRename = null;
@@ -1296,6 +1299,7 @@ async function crossHostTransfer(req, res, { move }) {
           localRename = { from: path.join(stageLocal, base), to: dp };
         }
       }
+      destChild.on('error', (e) => console.warn(`[files] a copy's writer could not be started: ${(e && e.code) || e}`));   // ckpt61 cure 2: the hub survives a start that fails (the road's own failure words owed: the next unit)
       count(srcChild.stdout);
       if (op) op.cancel = () => { try { srcChild.kill('SIGTERM'); } catch {} try { destChild.kill('SIGTERM'); } catch {} };
       srcChild.stdout.pipe(destChild.stdin);

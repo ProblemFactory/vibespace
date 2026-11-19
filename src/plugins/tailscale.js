@@ -258,6 +258,7 @@ module.exports = {
         // tailscaled's env is BUILT (lane spawn-env-debts): its state + socket ride argv (--statedir / --socket); it dials
         // the tailnet's control plane, so the egress door (the operator's proxy + trust roots) — never the hub's tokens
         const child = spawn(cmd, argv, { env: serviceEnv(process.env, { egress: true }), detached: true, stdio: ['ignore', logFd, logFd] });
+        child.on('error', (e) => console.warn(`[plugins] tailscale: tailscaled could not be started: ${(e && e.code) || e}`));   // ckpt61 cure 2: the hub survives a start that fails (the road's own failure words owed: the next unit)
         child.unref();
         fs.writeFileSync(tsPidFile(), String(child.pid));
         const rec = h.rec();
@@ -413,6 +414,7 @@ module.exports = {
         // hostname, ssh, …). Stored per-plugin; validated to look like flags.
         const argv = [`--socket=${tsSock()}`, 'up', '--accept-routes', DNS.acceptDnsArg(dnsVerdict()), ...upFlags()];
         const proc = spawn(useSudo ? 'sudo' : cli, useSudo ? ['-n', cli, ...argv] : argv, { stdio: ['ignore', 'pipe', 'pipe'] });
+        proc.on('error', (e) => console.warn(`[plugins] tailscale: the sign-in could not be started: ${(e && e.code) || e}`));   // ckpt61 cure 2: the hub survives a start that fails (the road's own failure words owed: the next unit)
         const entry = { proc, authUrl: null };
         loginProcs.set(id, entry);
         return new Promise((resolve, reject) => {

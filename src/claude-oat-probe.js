@@ -686,6 +686,7 @@ async function measure(o = {}) {
     assertEnv(env, { base: BASE, root: ROOT, oat: OAT, proxied: !NETNS || env.HTTPS_PROXY !== undefined }); // law 3 G3: the allowlist, or no spawn
     const child = spawn('setpriv', ['--pdeathsig', 'KILL', '--', STRACE, '--kill-on-exit', '--always-show-pid', '-f', '-tt', '-q', '-y', '-s', '256', '-e', `trace=${TRACE_SET}`, '-e', 'inject=io_uring_setup:error=ENOSYS', '-e', `inject=${DENIED_DOORS.join(',')}:error=EPERM`, process.execPath, '--no-warnings', TRAMP, errFile, ...(pty ? ['--pty'] : []), CLAUDE, ...args],
     { cwd, env, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
+    child.on('error', (e) => console.warn(`[oat-probe] the probe's tracer could not be started: ${(e && e.code) || e}`));   // ckpt61 cure 2: the hub survives a start that fails (the road's own failure words owed: the next unit)
     LIVE.add(child); child.on('exit', () => LIVE.delete(child));
     const rec = { text: '', ended: false, killed: false, oversize: false };
     let carry = '';

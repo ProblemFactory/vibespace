@@ -98,7 +98,7 @@ function runOnce(spawnImpl, cmd, argv, { env, cwd, timeoutMs, drainMs = DRAIN_MS
     const timer = setTimeout(() => { timedOut = true; finish(null, 'timeout'); }, timeoutMs);
     try { child.stdin.on('error', () => { }); child.stdin.end(); } catch { } // a child gone at once: its closed pipe is no crash
     try { child.stdout.setEncoding('utf8'); child.stdout.on('error', () => { }); } catch { }
-    child.stdout.on('data', (d) => {
+    if (child.stdout) child.stdout.on('data', (d) => {   // ckpt61 cure 2: no pipe after a start that failed at once — read unguarded it threw before the error listener below was attached (the hub ended)
       if (over || done) return;
       stdout += String(d).slice(0, STDOUT_CAP - stdout.length);
       if (stdout.length >= STDOUT_CAP) { over = true; finish(0, 'cap'); }

@@ -1,0 +1,21 @@
+{
+  "law": "ckpt61 (test-hub-program-starts ④j): starting a helper never ends the hub — every spawn / fork start in a module the hub loads attaches its 'error' listener before its first unguarded pipe touch. A count a file only FALLS; a site in a file not named here is red.",
+  "pipeFirst": [
+    { "file": "src/routes/files.js", "n": 3, "sites": "the whole-archive extract and its entry counter (startExtract, lister), the folder zip download", "owner": "bl-loop-a, the next unit (2.369.413)" },
+    { "file": "src/machine-mounts.js", "n": 2, "sites": "the mount point's ls probe, the realpath ask", "owner": "bl-loop-a, the next unit (2.369.413)" },
+    { "file": "src/remote-fs.js", "n": 1, "sites": "the ssh write (writeFile)", "owner": "bl-loop-a, the next unit (2.369.413)" },
+    { "file": "src/desktop-display.js", "n": 2, "sites": "the X tool runner, the xrdb merge (an execFile whose stdin is touched)", "owner": "B-147f (the device agent's signed bundle carries it)" },
+    { "file": "src/node-runtime.js", "n": 1, "sites": "the runtime probe", "owner": "B-147f (the device agent's signed bundle carries it)" }
+  ],
+  "survives": [
+    { "file": "src/mounts.js", "n": 2, "sites": "the rclone mount start, the drive sign-in's rclone" },
+    { "file": "src/plugins/frp.js", "n": 1, "sites": "the frpc start" },
+    { "file": "src/plugins/tailscale.js", "n": 2, "sites": "the tailscaled start, the sign-in" },
+    { "file": "src/vnc.js", "n": 1, "sites": "the desktop session's start" },
+    { "file": "src/routes/files.js", "n": 4, "sites": "the clipboard helper, a copy's reader and writer, an archive entry's reader" },
+    { "file": "src/remote-fs.js", "n": 1, "sites": "the ssh child its callers land with no listener (_spawn)" },
+    { "file": "src/claude-oat-probe.js", "n": 1, "sites": "the probe's tracer" },
+    { "file": "src/device-mount.js", "n": 1, "sites": "the pull mount's rclone" }
+  ],
+  "survivesWhy": "the hub survives a start that fails (one error listener, the journal line); the road's own failure words are owed: bl-loop-a, the next unit (2.369.413)"
+}

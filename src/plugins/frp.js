@@ -593,6 +593,7 @@ module.exports = {
         // shared token, cloud keys never reach frpc): the kept names + this instance's token + the knock (lane frp-spawn-env-allowlist)
         const env = RT.relayEnv(process.env, { token: cfg.ident.token || '', knock });
         const child = spawn(bin, ['-c', frpConf()], { detached: true, stdio: ['ignore', logFd, logFd], env });
+        child.on('error', (e) => console.warn(`[plugins] frp: frpc could not be started: ${(e && e.code) || e}`));   // ckpt61 cure 2: the hub survives a start that fails (the road's own failure words owed: the next unit)
         child.unref();
         fs.writeFileSync(frpPidFile(), String(child.pid));
         const rec = h.rec();

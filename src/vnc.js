@@ -220,6 +220,7 @@ class VncManager {
         ? [dbusLaunch, ['--exit-with-session', bin, ...args]]
         : [bin, args];
       const p = spawn(c, a, { detached: true, stdio: 'ignore', env });
+      p.on('error', (e) => console.warn(`[vnc] the desktop session's ${cmd} could not be started: ${(e && e.code) || e}`));   // ckpt61 cure 2: the hub survives a start that fails (the road's own failure words owed: the next unit)
       p.unref();
       return cmd;
     }

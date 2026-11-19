@@ -1350,6 +1350,7 @@ class MountManager {
     // detached: mounts survive server restarts (adopted on boot)
     const log = this._openMountLog(m.id);
     const child = spawn(this.rcloneBin(), args, { env, detached: true, stdio: ['ignore', log, log] });
+    child.on('error', (e) => console.warn(`[mounts] mount ${id}: the rclone daemon could not be started: ${(e && e.code) || e}`));   // ckpt61 cure 2: the hub survives a start that fails (the road's own failure words owed: the next unit)
     child.unref();
     this._seedDaemonId(mp, child.pid);   // B-e783: known from its first moment — judged by its stat line, killed without a walk
     fs.closeSync(log);
@@ -1440,8 +1441,10 @@ class MountManager {
       let n = 0, done = false;
       const end = () => { if (!done) { done = true; resolve({ n: Math.min(n, cap), capped: n >= cap }); } };
       const c = spawn('find', [dir, '-type', 'f', '-printf', '.'], { stdio: ['ignore', 'pipe', 'ignore'] });
-      c.stdout.on('data', (b) => { n += b.length; if (n >= cap) { try { c.kill('SIGKILL'); } catch {} end(); } });
-      c.on('close', end); c.on('error', end);
+      // ckpt61 cure 2: the error listener first — a start that fails at once (a full file table) has no pipe and its 'error' queued:
+      // a pipe touched first threw, and the error then found no listener (the hub ended). It answers as a failed count does today
+      c.on('error', end); c.on('close', end);
+      if (c.stdout) c.stdout.on('data', (b) => { n += b.length; if (n >= cap) { try { c.kill('SIGKILL'); } catch {} end(); } });
     });
   }
 
@@ -3008,6 +3011,7 @@ class MountManager {
     if (clientId && clientSecret) authArgs.push(String(clientId), String(clientSecret));
     authArgs.push('--auth-no-open-browser');
     const child = spawn(this.rcloneBin(), authArgs, { env: rcloneEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
+    child.on('error', (e) => console.warn(`[mounts] the drive sign-in's rclone could not be started: ${(e && e.code) || e}`));   // ckpt61 cure 2: the hub survives a start that fails (the road's own failure words owed: the next unit)
     // B-e40d: the client this sign-in mints under — a token saved from it names THAT client (MountManager.mintClientOf)
     const st = { child, url: null, token: null, error: null, buf: '', startedAt: Date.now(), client: clientId && clientSecret ? { clientId: String(clientId), clientSecret: String(clientSecret) } : null };
     this._driveAuth = st;

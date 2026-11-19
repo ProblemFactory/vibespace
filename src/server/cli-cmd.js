@@ -168,10 +168,10 @@ function runShell({ shell, line, env = process.env, timeoutMs = SHELL_ASK_MS, no
       child = spawn(shell, ['-l', '-i', '-c', line], { stdio: ['ignore', 'pipe', 'pipe'], env: serviceEnv(env, { keep: ['USER', 'LOGNAME'], add: { SHELL: shell, TERM: 'dumb', VIBESPACE_SHELL_PROBE: '1' } }), cwd: home, detached: true });
     } catch (e) { return done({ kind: 'unanswered', why: `spawn:${(e && e.code) || 'error'}` }); }
     child.on('error', (e) => done({ kind: 'unanswered', why: `spawn:${(e && e.code) || 'error'}` }));
-    child.stdout.setEncoding('utf8');
-    child.stdout.on('data', (d) => { out += d; if (out.length > OUT_CAP) out = out.slice(-OUT_CAP); });
-    child.stderr.setEncoding('utf8');
-    child.stderr.on('data', (d) => { err += d; if (err.length > 8192) err = err.slice(-8192); }); // the tail a refusal quotes
+    // ckpt61 cure 2: a start that failed at once has no pipes — the listener above answers it in this function's own words; a pipe
+    // read unguarded threw first and the caller got a rejection instead
+    if (child.stdout) { child.stdout.setEncoding('utf8'); child.stdout.on('data', (d) => { out += d; if (out.length > OUT_CAP) out = out.slice(-OUT_CAP); }); }
+    if (child.stderr) { child.stderr.setEncoding('utf8'); child.stderr.on('data', (d) => { err += d; if (err.length > 8192) err = err.slice(-8192); }); } // the tail a refusal quotes
     let exitWhy = null;
     child.on('exit', (code, sig) => {
       exitWhy = sig ? `exit:${sig}` : `exit:${code}`;

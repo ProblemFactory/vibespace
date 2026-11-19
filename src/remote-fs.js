@@ -222,7 +222,9 @@ class RemoteFs {
   // Spawn a remote command and pipe its stdout to a stream (downloads).
   _spawn(id, cmd) {
     const h = this._host(id);
-    return spawn('ssh', [...this.hosts.sshArgs(h, { multiplex: true }), '--', cmd], { env: this.hosts.sshEnv() });
+    const c = spawn('ssh', [...this.hosts.sshArgs(h, { multiplex: true }), '--', cmd], { env: this.hosts.sshEnv() });
+    c.on('error', (e) => console.warn(`[remote-fs] an ssh child could not be started: ${(e && e.code) || e}`));   // ckpt61 cure 2: the hub survives a start that fails (the road's own failure words owed: the next unit) (its callers attach none)
+    return c;
   }
 
   async home(id) {

@@ -340,8 +340,12 @@ class DeviceManager {
       // the daemon's OWN, so a name the server deleted would come back from here (src/harness-env.js).
       env: { ...daemonEnv(process.env, { drop: require('../harness-env.js').agentCredentialEnvNames(require('../harnesses').list()) }), ...(this._nodeModules ? { VIBESPACE_NODE_MODULES: this._nodeModules } : {}) },
     });
+    // ckpt61 cure 2: its error listener at once — a start that fails (a full file table: EMFILE / ENFILE) returns with no pid and
+    // its 'error' queued for the next tick; unheard, that is an uncaught exception and the hub ends. The failed start is said; the
+    // connect loop's next try fails as a try and backs off as it does when the daemon is late
+    child.on('error', (e) => { this._log(`[agentd] the local daemon could not be started: ${(e && e.code) || e}`); });
     child.unref();
-    this._log(`[agentd] spawned local daemon pid=${child.pid}`);
+    if (child.pid) this._log(`[agentd] spawned local daemon pid=${child.pid}`);
   }
 
   /** connect (spawning if needed) — resolves with {mux, info}; retries internally. Lane apple-signing r10: what it throws is marked
@@ -403,14 +407,18 @@ class DeviceManager {
       // UNCAUGHT exception that took the whole server down (2.241.1, userN's
       // 10:34 exit-code-1: crashed 28s after boot during the reattach storm).
       // Swallow here; the 'close' event drives mux teardown + reconnect.
-      child.stdin.on('error', () => {});
-      child.stdout.on('error', () => {});
+      // ckpt61 cure 2: an error listener BEFORE any pipe — a start that fails at once (a full file table) returns with no pipes and
+      // its 'error' queued for the next tick; the try's own listener (`on('error')` below, attached by _tryOnce in this same turn)
+      // answers it as a failed try (the loop backs off), and this one keeps it from ever being unheard. Every pipe read guarded
+      child.on('error', () => {});
+      child.stdin?.on('error', () => {});
+      child.stdout?.on('error', () => {});
       // present the child as a duplex stream for the Mux (write→stdin, data←stdout)
       return {
-        write: (d) => { try { return child.stdin.write(d); } catch { return false; } },
+        write: (d) => { try { return child.stdin ? child.stdin.write(d) : false; } catch { return false; } },
         on: (ev, fn) => {
-          if (ev === 'data') child.stdout.on('data', fn);
-          else if (ev === 'close') { child.on('close', fn); child.stdout.on('close', fn); }
+          if (ev === 'data') child.stdout?.on('data', fn);
+          else if (ev === 'close') { child.on('close', fn); child.stdout?.on('close', fn); }
           else if (ev === 'error') child.on('error', fn);
         },
         destroy: () => { try { child.kill(); } catch {} },

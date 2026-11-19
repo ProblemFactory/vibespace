@@ -383,6 +383,7 @@ async function deviceFolderMount({ device, remotePath, mountpoint, rcloneBin, vf
   if (cv.why === 'network') log(`device mount: its vfs cache ${cv.dir} sits on a network filesystem — kept there (minimal mode holds only files being written)`);
   const args = pullMountArgs(mountpoint, cv.dir);
   const rc = spawn(rcloneBin, args, { env, detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
+  rc.on('error', (e) => console.warn(`[device-mount] the pull mount's rclone could not be started: ${(e && e.code) || e}`));   // ckpt61 cure 2: the hub survives a start that fails (the road's own failure words owed: the next unit)
   let stderr = '';
   rc.stderr.on('data', (d) => { stderr += d.toString().slice(0, 2000); });
   rc.unref();

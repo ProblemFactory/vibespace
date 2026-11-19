@@ -393,8 +393,7 @@ async function graduateHostToDial(h, { serverUrl, viaRelay, by = 'system:graduat
       const { execFile } = require('child_process');
       const child = execFile('ssh', [...hosts.sshArgs(h, { multiplex: true }), '--', inv.remote],
         { env: hosts.sshEnv(), timeout: 300000, maxBuffer: 8 * 1024 * 1024 }, (err, so, se) => resolve({ ok: !err, out: String(so || '').slice(-3000), err: String(se || err?.message || '').slice(-1500) }));
-      child.stdin.on('error', () => { });
-      child.stdin.end(inv.stdin);
+      if (child.stdin) { child.stdin.on('error', () => { }); child.stdin.end(inv.stdin); }   // ckpt61 cure 2: no stdin after a start that failed at once (execFile answers it)
     });
     if (!inst.ok) { hosts.ungraduateDial(h.id); bcastAll({ type: 'hosts-updated' }); throw new Error('installer failed on the host — rolled back: ' + (inst.err || inst.out).slice(-600)); }
     // wait for the dial-in (installer verifies the daemon started; the dial
@@ -413,7 +412,7 @@ app.post('/api/hosts/:id/graduate-dial', async (req, res) => {
       const { execFile } = require('child_process');
       const child = execFile('ssh', [...hosts.sshArgs(h, { multiplex: true }), '--', script],
         { env: hosts.sshEnv(), timeout, maxBuffer: 4 * 1024 * 1024 }, (err, so, se) => resolve({ ok: !err, out: String(so || ''), err: String(se || err?.message || '') }));
-      if (input != null) { child.stdin.on('error', () => { }); child.stdin.end(input); }   // B-8475: a script on stdin (`bash -s`)
+      if (input != null && child.stdin) { child.stdin.on('error', () => { }); child.stdin.end(input); }   // B-8475: a script on stdin (`bash -s`); ckpt61 cure 2: none after a start that failed at once (execFile answers it)
       });
     if (req.body?.remove) {
       // best-effort remote teardown, ALWAYS clear the record (dead host must

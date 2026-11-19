@@ -371,8 +371,8 @@ function create({ activeSessions, adapterRegistry, accounts, agentEnv, buffersDi
       try { child = spawn(cmd, o.argv.slice(), { stdio: ['ignore', 'pipe', 'pipe'], env }); }
       catch (e) { return finish({ ok: false, reason: 'spawn', detail: e.message, id, argv: o.argv }); }
       child.on('error', (e) => finish({ ok: false, reason: 'spawn', detail: e.message, id, argv: o.argv }));
-      child.stdout.on('data', (c) => { out = cap(out, c); });
-      child.stderr.on('data', (c) => { err = cap(err, c); });
+      if (child.stdout) child.stdout.on('data', (c) => { out = cap(out, c); });   // ckpt61 cure 2: no pipes after a start that failed at once —
+      if (child.stderr) child.stderr.on('data', (c) => { err = cap(err, c); });   // the listener above answers it as `spawn`, never a rejection
       child.on('close', (code) => {
         let json = null, jsonError = null;
         if (o.json) {
