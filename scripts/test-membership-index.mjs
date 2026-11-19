@@ -402,8 +402,17 @@ for (const [tag, [, , leg, what]] of Object.entries(PATCHES)) {
   let passes = 0;
   const lineOf = (t, at) => t.slice(t.lastIndexOf('\n', at) + 1, (t.indexOf('\n', at) + 1 || t.length + 1) - 1);
   const helperPass = (t, file, m, a) => file === path.join('src', 'server', 'mounts-plugins-wiring.js') && m[1] === 'memberIds' && /^const grantMemberIds = \(tasks, a(?:, [A-Za-z_$][\w$]*)?\) => /.test(lineOf(t, m.index)) && argsOf(a)[0] === 'a';
+  // THE OWED PIN'S GROUP FACTS (lane bl-jobs, the browser registry unit — block line 236; checkpoint 60's red): a create the HELD profile
+  // registry could not judge OWES its pin, and its Task-Group facts travel WITH the owe — built ONCE where the create is held
+  // (src/ws-create.js `const gf = { cwd, hostId: data.hostId || null, … }`, carried as `groupFacts: gf`), persisted WHOLE in the
+  // conversation's record (`browserPinOwed`) and re-owed whole at the boot; at the read they are handed on as they are. Two declared
+  // hand-ons — only these two calls, only this argument, and only while that builder hands the machine (the controls below)
+  const WSC = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8'), builtIn = (w) => /const gf = \{ cwd, hostId: data\.hostId \|\| null, /.test(w) && /, groupFacts: gf, /.test(w), OWED_BUILT = builtIn(WSC);
+  const OWED_PASS = [['src/server/browser-keeper.js', 'stampGroupCap', 1, 'owed.groupFacts'], ['src/server/browser-key.js', 'taskGroupCapFor', 0, 'o.groupFacts || {}']];
+  let owedPasses = 0;
+  const owedPass = (t, file, m, a, built = OWED_BUILT) => built && OWED_PASS.some(([f, n, i, arg]) => file === f && m[1] === n && (argsOf(a)[i] || '').trim() === arg);
   const missing = (t, file = '') => { const out = []; let m; CALLS.lastIndex = 0;
-    while ((m = CALLS.exec(t))) { const a = argOf(t, m.index + m[0].length - 1); if (a != null && reentry(t, file, m, a)) { reentries++; continue; } if (a != null && helperPass(t, file, m, a)) { passes++; continue; } const f = a != null && factsOf(t, m[1], a, m.index); if (!f) continue;
+    while ((m = CALLS.exec(t))) { const a = argOf(t, m.index + m[0].length - 1); if (a != null && reentry(t, file, m, a)) { reentries++; continue; } if (a != null && helperPass(t, file, m, a)) { passes++; continue; } if (a != null && owedPass(t, file, m, a)) { owedPasses++; continue; } const f = a != null && factsOf(t, m[1], a, m.index); if (!f) continue;
       if (f.unseen) out.push(`${m[1]}(${a.replace(/\s+/g, ' ').slice(0, 80)}) — «${f.unseen}» UNSEEN (no object literal of it in this file)`);
       else if (!handsMachine(f.facts)) out.push(`${m[1]}(${(f.via ? f.via + ' = ' : '') + f.facts.replace(/\s+/g, ' ').slice(0, 100)})`); }
     return out; };
@@ -420,6 +429,13 @@ for (const [tag, [, , leg, what]] of Object.entries(PATCHES)) {
       && missing("x = grantMemberIds(tasks, { sessionKey: k, cwd: s.cwd });", MPF).length === 1 && missing("x = grantMemberIds(tasks, { sessionKey: k, cwd: s.cwd, hostId: s.host || null });", MPF).length === 0,
       'CONTROL (the seam\'s helper): its memberIds(a) passes ONLY on its own line in the wiring (the same line in another file, another name: UNSEEN, a red); a CALLER of it that hands a cwd without its machine is caught, one with it passes');
     passes = before; }
+  ok(OWED_BUILT && owedPasses === 2, `the owed pin's group facts: built ONCE with the machine (src/ws-create.js: gf = { cwd, hostId: data.hostId || null, … } → groupFacts: gf) and handed on as they are at the read — ${owedPasses} declared hand-ons (the keeper's stampGroupCap, the key module's taskGroupCapFor)`);
+  { const before = owedPasses;
+    ok(/UNSEEN/.test(missing("function f(owed) { return kc.stampGroupCap(k, owed.groupFacts, {}); }", 'src/server/other.js').join('')) && /UNSEEN/.test(missing("function f(o) { return kc.taskGroupCapFor(o.facts || {}); }", 'src/server/browser-key.js').join(''))
+      && OWED_PASS.every(([f, n, i, arg]) => owedPass('', f, [null, n], i ? `k, ${arg}, {}` : arg) && !owedPass('', f, [null, n], i ? `k, ${arg}, {}` : arg, builtIn(WSC.replace('const gf = { cwd, hostId: data.hostId || null, ', 'const gf = { cwd, ')))),
+    'CONTROLS: the same hand-on in ANOTHER file, or another argument in the key module, is UNSEEN (a red); each declared hand-on passes only while its builder hands the machine — a builder copy without hostId fails both (a red)');
+    owedPasses = before; }
+
   ok(missing("a = kc.taskGroupCapFor({ cwd, initialGroupId: g }); b = tasks.groupsForSession({ cwd: s.cwd, hostId: s.host || null });").length === 1, 'CONTROL: a hostId of a LATER call on the same line does not cover an earlier one');
   ok(missing("const facts = { cwd: s.cwd, initialGroupId: g };\nconst d = kc.taskGroupDefaultFor(facts); kc.stampGroupCap(k, facts, {});").length === 2, 'CONTROL: a planted VARIABLE whose object literal hands a cwd without its machine is caught at each call that hands it');
   ok(/UNSEEN/.test(missing("function f(a) { return tasks.groupsForSession(a); }").join('')), 'CONTROL: a variable the census cannot read at an object literal (a parameter) is UNSEEN — a red');
