@@ -446,6 +446,18 @@ function mapPoint(plan, at, { rootW = null, rootH = null } = {}) {
   return { ok: true, x: ax, y: ay };
 }
 
+/** A DISPLAY THAT CANNOT TAKE INPUT (fb-bc200800e0, lane bl-windows — an agent's feedback: a click answered «the display is 2x2
+ *  since a viewer attached», and 22 characters typed as keys answered success while the field stayed empty). The POLICY, the click's
+ *  own reason for the verbs with no point of their own: the window's point those verbs aim at (`point`, a display point — the main
+ *  frame's corner + 20 px, a dialog's top-left, a scroll's centre) must be ON the display a viewer sized; else outside_window, and
+ *  nothing is sent. `act` names what is not sent. No geometry ⇒ no claim. */
+function pointOnDisplay(point, { rootW = null, rootH = null } = {}, { act = 'keys are' } = {}) {
+  if (!point) return { ok: true };
+  const x = Number(point.x), y = Number(point.y);
+  if (x < 0 || y < 0 || (Number(rootW) > 0 && x >= Number(rootW)) || (Number(rootH) > 0 && y >= Number(rootH))) return refuse('outside_window', `the display is ${rootW}x${rootH} since a viewer attached — smaller than the window: ${act} not sent; ask the user to resize the window (or pin its size)`);
+  return { ok: true };
+}
+
 // ── what the user's request says to the agent (D3) ──────────────────────────
 const NOTE_MAX = 1000;
 /** The agent-facing message of "Ask <agent> to take control" — English, no markup; the user's line quoted as a note. */
@@ -613,6 +625,7 @@ function normShare(share) {
 }
 
 module.exports = {
+  pointOnDisplay,
   unshownFrames, windowOfNode, // lane window-dialog-member
   LEVELS, RANK, PRINCIPAL_KINDS, EVERYONE_ID, GRANT_ORIGINS, MODES, RESOLVED_MODES, REFUSALS, refuse, PIXELS_SENTENCE, NOT_EXPOSED_SENTENCE, REACH_UNREADABLE_SENTENCE, EXCEPTED_SENTENCE, NOTE_MAX, CONTAINER_ROLES, TREE_VERBS,
   sessionKeyOf, callerKeys, normPrincipal, principalKey, sessionKeyNow,

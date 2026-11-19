@@ -283,6 +283,11 @@ console.log('§6 THE PIXEL ROAD — plan, visibility, points (fixtures from the 
   const off = R.mapPoint(pc, { x: 100, y: 2000 }, { rootW: 1920, rootH: 1200 });
   ok(!off.ok && off.code === 'outside_window' && /off its display/.test(off.why), 'a point of the window below the display (the root shrank to the viewer\'s 1920x1200) is refused by name, never clamped to the edge');
   ok(R.mapPoint(pc, { x: 5000, y: 1 }).code === 'outside_window' && R.mapPoint(null, { x: 1, y: 1 }).code === 'outside_window', 'a point outside the image (or no plan) ⇒ outside_window');
+  // fb-bc200800e0 (lane bl-windows): a verb with no point of its own on a display a viewer sized smaller than the window ⇒ the click's reason
+  const k2 = R.pointOnDisplay({ x: 5, y: 5 }, { rootW: 2, rootH: 2 }), kOn = R.pointOnDisplay({ x: 40, y: 40 }, { rootW: 1920, rootH: 1200 }), kNeg = R.pointOnDisplay({ x: -3, y: 4 }, { rootW: 1920, rootH: 1200 });
+  const kW = R.pointOnDisplay({ x: 5, y: 5 }, { rootW: 2, rootH: 2 }, { act: 'the wheel is' });
+  ok(!k2.ok && k2.code === 'outside_window' && /the display is 2x2 since a viewer attached — smaller than the window: keys are not sent/.test(k2.why) && /the wheel is not sent/.test(kW.why) && kOn.ok && !kNeg.ok && R.pointOnDisplay({ x: 5, y: 5 }).ok && R.pointOnDisplay(null, { rootW: 2, rootH: 2 }).ok,
+    'pointOnDisplay: a point off a 2x2 display (or left of / above it) ⇒ outside_window (the click\'s own «since a viewer attached», what is not sent named); on the display, no geometry, no point ⇒ no claim', k2);
   const popup = R.pixelPlan([{ ...chrome[0] }, { id: 7, cls: 'Google-chrome', x: 1900, y: 2200, w: 400, h: 300, mapped: true }, { id: 8, cls: 'Google-chrome', x: 0, y: 0, w: 15, h: 15, mapped: true }]);
   ok(popup.origin.x === 20 && popup.w === 2280 && popup.h === 2480 && popup.members.some((m) => m.id === 7), 'a popup below-right extends the image; the ORIGIN stays the main window\'s top-left (a popup never shifts the coordinates)');
   ok(!R.pixelPlan([]).ok && R.visibilityVerdict({ perWindow: true, plan: R.pixelPlan([]) }).code === 'window_not_visible', 'no window yet ⇒ nothing to read or act on in pixels');
@@ -549,6 +554,70 @@ console.log('lane e2c: launchModeVerdict beside the mode set');
   ok(seen.every((x) => x.ok), 'every verdict is a mode of the closed set (written by setMode as is); pixels carries defaultPinFor(\'pixels\'), the rest no pin', seen.filter((x) => !x.ok));
   const bad = R.launchModeVerdict({ browserKind: 'chromium', a11y: true, asked: 'sideways' });
   ok(!bad.ok && bad.code === 'bad_mode' && R.REFUSALS.includes(bad.code), 'a mode outside the set ⇒ bad_mode (one of REFUSALS)', bad);
+}
+
+// ── fb-bc200800e0 (lane bl-windows): TYPED KEYS ON A DISPLAY THAT CANNOT TAKE THEM — the agent's feedback: a desktop-app window
+// in tree mode, the person's viewer attached and the display read 2x2; a click answered outside_window; `type` with a ref and the
+// keys flag answered success («typed 22 characters as keys into the ref, focused through the tree») while the field stayed empty.
+// The REAL engine over a fake keeper (an xpra rung: geometry) and a fake pixel road (injections recorded); the display's size is
+// the stand-in. CONTROL: the release's road (the check taken out, anchored) types into the 2x2 display and answers ok.
+{
+  const { scratch } = await import('./scratch.mjs');
+  const { anchored } = await import('./scratch.mjs');
+  const ENGINE = require(path.join(REPO, 'src/server/window-targets-engine.js'));
+  const WT = require(path.join(REPO, 'src/window-targets.js'));
+  const dir = scratch('wreach-keys'); fs.mkdirSync(dir, { recursive: true });
+  process.on('exit', () => { try { fs.rmSync(dir, { recursive: true }); } catch {} });
+  const CIDK = 'aaaaaaaa-1111-4000-8000-0000000000c7';
+  const rec = { id: 'da-keys', label: 'Sign-in', exec: 'x', state: 'ready', display: ':78', pids: { app: 4343, x: null, server: null, wm: null }, starts: {}, backend: 'xpra', startedAt: 1 };
+  const records = new Map([[rec.id, rec]]);
+  const sessions = new Map([['w-K', { agentToken: 'vsst_K', claudeSessionId: CIDK, backendSessionId: CIDK, backend: 'claude', name: 'signer', mode: 'chat' }]]);
+  const acts = [];
+  let geo = { ok: true, w: 2, h: 2 };
+  const snap = { apps: [], nodes: [{ ref: '@e1', pid: 4343, path: [0], role: 'entry', name: 'Email', actions: [], editable: false, states: ['editable', 'focusable'], bounds: { x: 1, y: 1, w: 8, h: 4 } }], census: { nodes: 1 }, unreadable: [], truncated: false, budget: 400, callTimeoutMs: 1, ms: 1, nodesPerSec: 1 };   // editable by STATE, no EditableText (a web page's field): focused through the tree, then KEYS
+  const wt = { ...WT,
+    probeInputBackends: async () => ({ rows: [], injection: { backend: 'xtest' }, ours: true }),
+    displayGeometry: async () => geo,
+    snapshotTarget: async () => ({ ok: true, snapshot: snap, refs: WT.refTableOf(snap) }),
+    probeA11y: async () => ({ ok: true, apps: 1 }),
+    runHelper: async () => ({ ok: true, apps: [{ pid: 4343, name: 'Sign-in', children: 1 }] }),
+    focusNode: async () => { acts.push('focus'); return { ok: true, did: {} }; },
+    injectType: async () => { acts.push('type-keys'); return { ok: true, did: { verb: 'type', backend: 'xtest' } }; },
+    injectKey: async () => { acts.push('key'); return { ok: true, did: { verb: 'key', backend: 'xtest' } }; },
+    injectScroll: async () => { acts.push('scroll'); return { ok: true, did: { verb: 'scroll', direction: 'down', by: 3, backend: 'xtest' } }; },
+  };
+  const keeperK = { listApps: () => [...records.values()], get: (id) => records.get(id) || null, sessionPids: () => [4343], x11EnvFor: () => ({ DISPLAY: ':78' }),
+    windows: async () => ({ ok: true, windows: [{ id: 9, title: 'Sign-in', cls: 'app', x: 0, y: 0, w: 10, h: 10, mapped: true }] }) };
+  const mk = (M, sub) => M.create({ keeper: keeperK, dataDir: path.join(dir, sub), env: () => ({}), activeSessions: sessions, wt, bins: { xdotool: '/bin/true', gdbus: null }, log: { warn() {}, log() {} }, procExe: () => null });
+  const tryAct = async (E, f, body) => { try { return await E.act(rec.id, f, body); } catch (e) { return { code: e.code, why: String(e.message) }; } };
+  async function scene(M, sub) {
+    const E = mk(M, sub);
+    const f = E.factsForToken('vsst_K');
+    E.grantReach(rec.id, { kind: 'session', id: 'w-K', name: 'signer' });
+    E.setShareMode(rec.id, 'tree');
+    E.attach(rec.id, f);
+    await E.snapshot(rec.id, f);
+    const out = {};
+    geo = { ok: true, w: 2, h: 2 }; acts.length = 0;
+    out.refKeys = await tryAct(E, f, { verb: 'type', ref: '@e1', text: 'person@example.invalid', keys: true }); out.refOk = !!(out.refKeys && out.refKeys.ok); out.refActs = acts.slice();
+    E.setShareMode(rec.id, 'pixels'); E.attach(rec.id, f); acts.length = 0;
+    out.keys = await tryAct(E, f, { verb: 'type', text: 'abc' }); out.chord = await tryAct(E, f, { verb: 'key', chord: 'Return' }); out.wheel = await tryAct(E, f, { verb: 'scroll', direction: 'down' }); out.pxActs = acts.slice();
+    geo = { ok: true, w: 1920, h: 1200 }; acts.length = 0;
+    out.wide = await tryAct(E, f, { verb: 'type', text: 'abc' }); out.wideActs = acts.slice();
+    E.shutdown();
+    return out;
+  }
+  const cur = await scene(ENGINE, 'cure');
+  ok(cur.keys.code === 'outside_window' && /the display is 2x2 since a viewer attached/.test(cur.keys.why) && cur.chord.code === 'outside_window' && JSON.stringify(cur.pxActs) === '[]',
+    'fb-bc200800e0: on a display a viewer sized to 2x2, `type` (keys) and `key` are REFUSED by the click\'s own reason (outside_window, «since a viewer attached») — no key injected', { keys: cur.keys, chord: cur.chord.code, acts: cur.pxActs });
+  ok(cur.wheel.code === 'outside_window' && /the wheel is not sent/.test(cur.wheel.why), '…and a scroll without --at (its point the window\'s centre) the same — no wheel sent (found beside the row)', cur.wheel);
+  ok(cur.refKeys.code === 'outside_window' && JSON.stringify(cur.refActs) === '[]', '…`type` with a ref and the keys flag (the feedback\'s own call: focused through the tree, then keys) is refused the same way — never «typed N characters»', { refKeys: cur.refKeys, acts: cur.refActs });
+  ok(cur.wide && cur.wide.ok === true && JSON.stringify(cur.wideActs) === '["type-keys"]', '…on a display that holds the window (1920x1200) the keys are typed as before', { wide: cur.wide, acts: cur.wideActs });
+  const esrc = fs.readFileSync(path.join(REPO, 'src/server/window-targets-engine.js'), 'utf8');
+  const relSrc = anchored(esrc, /\n *(?:if \(pt && pt\.coords === 'window-centre'\) )?await displayHolds\(rec, px, [^\n]*/g, '', 'the display checks', { count: 3 });
+  const rel = await scene(MUT.load('src/server/window-targets-engine.js', relSrc, 'nokeyscheck'), 'release');
+  ok(rel.keys && rel.keys.ok === true && rel.pxActs.includes('type-keys') && rel.chord && rel.chord.ok === true && rel.refOk === true && JSON.stringify(rel.refActs) === '["focus","type-keys"]', 'CONTROL — the release\'s road (the checks taken out): `type @ref` focuses the field and «types» (the feedback\'s own call), `type` and `key` answer ok — into a 2x2 display', { keys: rel.keys && (rel.keys.ok || rel.keys.code), refActs: rel.refActs, acts: rel.pxActs });
+  for (const r0 of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 9 })) ok(r0.pass, '§11 tree: ' + r0.name, r0.pass ? undefined : r0.detail);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

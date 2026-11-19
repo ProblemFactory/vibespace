@@ -312,7 +312,12 @@ reports some in device-independent pixels). Find the point in the screenshot.
 
 A point outside the image — or off the display (a window taller than the
 screen of the person viewing it) — is refused **`outside_window`**, never
-clamped to the edge.
+clamped to the edge. **`type`, `key` and a `scroll` without `--at` the
+same:** when a viewer's attach sized the display smaller than the window (a
+display read as 2x2), they are refused **`outside_window`** — «the display is
+WxH since a viewer attached» — and nothing is sent: never answered as typed
+while nothing reaches the field. Ask the person to resize the window (or pin
+its size), then try again.
 
 **Where the PNG lands.** Without `--out` it goes to
 `<temp dir>/vibespace-window-<your uid>/<handle>-<time>.png` (a private directory, made

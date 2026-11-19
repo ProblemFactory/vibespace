@@ -471,6 +471,17 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     if (!vis.ok) { audit({ ...who, verb, by: 'pixels', ok: false, code: vis.code }); throw namedError(vis.code, vis.why.replace('<handle>', rec.id), { handle: rec.id }); }
     return { backends, xenv, bins: b, plan };
   }
+  /** fb-bc200800e0 (lane bl-windows): a verb with no point of its own (type, key, a scroll without --at) on a display a viewer
+   *  sized smaller than the window — refused by the click's own reason (pointOf's outside_window) before anything is sent, never
+   *  answered «typed». The point: a showing dialog's top-left (it is focused by its X window), else the main frame's corner + 20 px */
+  async function displayHolds(rec, px, point, who, verb, act) {
+    if (!px.plan || !point || !capsOf(rec).geometry) return;
+    const geo = await wt.displayGeometry({ bins: px.bins, xenv: px.xenv });
+    if (!geo || !geo.ok) return;
+    const v = R.pointOnDisplay(point, { rootW: geo.w, rootH: geo.h }, { act });
+    if (!v.ok) { audit({ ...who, verb, by: 'inject', ok: false, code: v.code }); throw namedError(v.code, v.why, { display: { w: geo.w, h: geo.h } }); }
+  }
+  const keysPointOf = (px, lease) => { const dw = dialogWindow(px, lease); return dw ? { x: dw.x, y: dw.y } : mainFocus(px, lease); };
   /** A pixel of the screenshot (window coordinates) → the display point, through the plan (no plan ⇒ the point as given). */
   async function pointOf(rec, px, at, who, verb) {
     if (!px.plan) return { x: at.x, y: at.y, coords: 'display' };
@@ -1294,6 +1305,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
         if (!at) throw namedError('bad-request', '--at needs `x,y` (integers: a pixel of `vibespace-window screenshot`)');
         pt = await pointOf(rec, px, at, who, 'scroll');
       } else if (px.plan && px.plan.main) pt = { x: px.plan.main.x + Math.floor(px.plan.main.w / 2), y: px.plan.main.y + Math.floor(px.plan.main.h / 2), coords: 'window-centre' };
+      if (pt && pt.coords === 'window-centre') await displayHolds(rec, px, pt, who, 'scroll', 'the wheel is');   // fb-bc200800e0 (found beside it): a scroll at the centre of a window its display cannot hold
       held();
       const r = await injecting((signal) => wt.injectScroll({ bins: px.bins, xenv: px.xenv, x: pt ? pt.x : null, y: pt ? pt.y : null, direction: body.direction, by: body.by == null ? 3 : Number(body.by), signal, python }));
       fromHelper(r, { verb: 'scroll', by: 'inject', direction: r.did ? r.did.direction : String(body.direction || ''), notches: r.did ? r.did.by : null, ...(pt ? { display: { x: pt.x, y: pt.y } } : {}), backend: px.backends.injection.backend });
@@ -1313,6 +1325,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       /** Lane E: text as KEYS into whatever holds focus on the app's own display (pixel mode, Chrome's entries). */
       const injected = async (e, line) => {
         const px = await pixelsFor(rec, who, 'type');
+        await displayHolds(rec, px, keysPointOf(px, lease), who, 'type', 'keys are');   // fb-bc200800e0: keys on a display that cannot take them are refused, never «typed»
         if (e) { held(); const f = await wt.focusNode({ entry: e, env: base, ...helperOpts() }); fromHelper(f, { verb: 'focus', by: 'node', node: nodeLine(e) }); await sleep(120); }
         held();
         const dw = e ? null : dialogWindow(px, lease);
@@ -1349,6 +1362,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       const chord = wt.parseChord(body.chord);
       if (!chord.ok) throw namedError(chord.code, chord.why);
       const px = await pixelsFor(rec, who, 'key');
+      await displayHolds(rec, px, keysPointOf(px, lease), who, 'key', 'keys are');   // fb-bc200800e0: the same for a chord
       // where the pointer rests before a chord (a bare display has PointerRoot focus): inside the MAIN window when the
       // keeper names it (lane E — tree bounds are toolkit coordinates), else the last snapshot's frame
       held();

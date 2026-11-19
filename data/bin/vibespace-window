@@ -150,6 +150,7 @@ function printRefusal(r, status) {
   else if (r.code === 'not_exposed') console.error('  the user has not shared this window with you — ask them (they can share it from the window\'s ⋯ menu); do not look for another road to it');
   else if (r.code === 'mode_pixels') console.error('  the user shared this window in pixel mode — read it with screenshot, act with click --at x,y / type / key / scroll');
   else if (r.code === 'window_not_visible') console.error('  nobody has this window open, so it has no pixels — ask the user to open it (`vibespace-window watch <handle>` says where), or use the tree');
+  else if (r.code === 'outside_window' && r.display) console.error(`  the window's display is ${r.display.w}x${r.display.h} since a viewer attached, smaller than the window — ask the user to resize it (or to pin its size), then try again`)   // fb-bc200800e0 (lane bl-windows): a verb with no point of its own
   else if (r.code === 'outside_window') console.error('  --at is a pixel of `vibespace-window screenshot <handle>` (x from the left, y from the top of that image) — take one and pick the point there');
   else if (r.code === 'reach_unreadable') console.error('  the Task Group store could not be read — try again in a moment; nothing was done and your lease (if you hold one) is kept');
   else if (r.code === 'write_path_refused' || r.code === 'out_unusable' || r.code === 'shot_dir_unsafe') console.error('  ' + (r.remedy || 'leave --out off: the image goes to the temp directory and its path is printed'));
