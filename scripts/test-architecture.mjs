@@ -7937,6 +7937,7 @@ await section(async () => {
     ["src/harness-settings.js", "VibeSpace's own agent tools", "words", "a setting description"],
     ["src/install-slot.js", "T=/tmp/vibespace-$u;", "per-user", "the install slot: $XDG_RUNTIME_DIR, else /tmp/vibespace-<uid> checked -O (owned)"],
     ["src/install-slot.js", "an old lock file in an aged /tmp", "words", "a comment beside code"],
+    ["src/watch-door.js", "probeFs.watch(os.tmpdir(),", "read", "the watch door's probe (the 2.369.411 hotfix, lane bl-loop-b): one watch armed on the temp folder and closed at once, to learn whether the machine still grants watches — nothing is made there"],
     ["src/lib/chat-renderers.js", "const TEMP_PATH_RE = /^", "read", "which path is temporary (a judgment)"],
     ["src/lib/i18n-ja.js", "\"Where files dropped or attached in chat are saved.", "words", "the setting's description, translated"],
     ["src/lib/i18n-ja.js", "\"VibeSpace's own agent tools", "words", "the same"],
