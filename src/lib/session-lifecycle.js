@@ -150,12 +150,12 @@ export function installSessionLifecycle(App, ctx = {}) {
     // THE CREATE'S END, ONCE (lane resume-all-paced, L1): `onCreateEnd(how, msg)` — 'created' / 'refused' (the hub's answer), 'error'
     // (an error naming no request), 'lost' (a socket that will not re-send it), 'closed' (its window) — never the 15 s watchdog: a
     // create still in the hub's hands has not ended, and a bulk resume (src/lib/resume-pacer.js) waits for it before the next one
-    let endSaid = false;
+    let endSaid = false, endHow = null;   // B-ce65: HOW it ended (the moved watchdog is silent only after the hub's answer or a closed window)
     // M1 (主开发's look at L1, 19:11Z): the watchdog releases the join-wait ONLY — the lost-socket watch stays armed after it, because for
     // a harness whose resume is not re-sent on reconnect (resumeResend false) that watch is the ONLY thing that can say «lost»
     const settled = (how = null, msg = null) => {
       if (lostWatch && how !== 'watchdog') { this.ws.offStateChange?.(lostWatch); lostWatch = null; } if (resumeKey && this._resumeWins?.get(resumeKey) === winInfo) this._resumeWins.delete(resumeKey);
-      if (how && how !== 'watchdog' && !endSaid) { endSaid = true; try { onCreateEnd?.(how, msg); } catch { } }
+      if (how && how !== 'watchdog' && !endSaid) { endSaid = true; endHow = how; try { onCreateEnd?.(how, msg); } catch { } }
     };
     this._placeCarried(winInfo, winBounds); // the place the window takes from the one it replaces (box, z, maximize, desktop)
     // Correlation id: concurrent creates (e.g. group resume-all) must each
@@ -255,7 +255,16 @@ export function installSessionLifecycle(App, ctx = {}) {
       lostWatch = (up) => { if (!up) { if (out) lost = true; } else if (lost) settled('lost'); else out = true; };
       this.ws.onStateChange(lostWatch);
     }
+    // B-ce65: the hub said it waits (bounded) for this folder's mount to come up (`create-waiting`) — until when, and said once
+    let waitsUntil = 0, waitSaid = false;
     const cancelReq = this.ws.request(createMsg, (msg) => {
+      if (msg.type === 'create-waiting' && msg.reqId === reqId) {
+        waitsUntil = Date.now() + (Number(msg.ms) > 0 ? Number(msg.ms) : 45000);   // EVERY frame moves it (a re-sent create waits again)
+        const words = t('Waiting for {name} to come up before starting — this can take up to {s} s.', { name: msg.waitsFor || msg.cwd || '', s: Math.max(1, Math.round((waitsUntil - Date.now()) / 1000)) });
+        try { pending.set(words); } catch { }   // the window's own line says it for the whole wait (a toast is gone in seconds)
+        if (!waitSaid) { waitSaid = true; showToast(words, { type: 'info' }); }
+        return false;
+      }
       // an error that names NO request (ws-create's «Failed to spawn session» / «Unknown host»): it may be this create's end — the
       // pending resume is released (r4 N2; a press after it creates again), the request stays armed for a late answer
       if (msg.type === 'error' && !msg.reqId && !msg.sessionId) settled('error', msg);
@@ -581,6 +590,23 @@ export function installSessionLifecycle(App, ctx = {}) {
       isAlive: () => this._winIs(winInfo) || (settled('closed'), false), // the window INSTANCE (r3 N2): one re-made under the same id is another window — its end releases the wait's watches (r5 N1)
       timeoutMs: 15000,
       onTimeout: () => {
+        // B-ce65: inside the wait the hub said it makes (create-waiting), the create is not «unusually long» — the watchdog waits that
+        // bound (+2 s), once; the hub's own answer (created, or its mount_down at the bound) ends the create first and nothing is said
+        if (waitsUntil && Date.now() < waitsUntil + 2000) { movedWatchdog(); return; }
+        watchdogSays();
+      },
+      resend: uiRow(backend).resumeResend && !!resumeId && !fork,
+    });
+    // the moved watchdog: re-checks the LATEST deadline (a re-sent create's frame moves it again); silent only after the hub's answer
+    // or a closed window — a create lost with its socket (or ended by an error naming no request) still gets the watchdog's words
+    function movedWatchdog() {
+      setTimeout(() => {
+        if (endSaid && (endHow === 'created' || endHow === 'refused' || endHow === 'closed')) return;
+        if (Date.now() < waitsUntil + 2000) { movedWatchdog(); return; }
+        watchdogSays();
+      }, Math.max(50, waitsUntil + 2000 - Date.now()));
+    }
+    function watchdogSays() {
         settled('watchdog'); // the watchdog ends the WAIT (r4 N2): a press after it creates again — a late answer still binds in this window
         try { track('event', 'ws-reply-timeout:create', backend + ':' + sessionMode); } catch { }
         // A slow REMOTE create is not a broken connection — the old wording
@@ -589,9 +615,7 @@ export function installSessionLifecycle(App, ctx = {}) {
         showToast(createHostName
           ? t('Still starting the session on {host} — this can take a minute on a slow machine. Leave the window open.', { host: createHostName })
           : t('Creating the session is taking unusually long — it may still be in progress; reloading the tab abandons it'), { type: 'error' });
-      },
-      resend: uiRow(backend).resumeResend && !!resumeId && !fork,
-    });
+    }
     // THE WATCHES DIE WITH THEIR WINDOW (r5 N1 — the r4 acceptance: closed before its answer, the window's lostWatch stayed registered
     // until the next reconnect, holding the closed window, and removed itself there mid-notify — the listener after it was skipped):
     // the window's close releases the wait, the reconnect watch and the request's own handlers at once (a re-made window: isAlive above)

@@ -2866,6 +2866,7 @@ export default {
   "Couldn’t load the steps from {host} — {reason}": "无法从 {host} 加载步骤 — {reason}",
   "Couldn’t load the steps — {reason}": "无法加载步骤 — {reason}",
   "Couldn’t reach this session’s machine to check which accounts it can use — this row is a guess from cached data.": "无法连上此会话所在的机器以检查它能使用哪些账号——此行是根据缓存数据的猜测。",
+  "Waiting for {name} to come up before starting — this can take up to {s} s.": "正在等待 {name} 就绪后再启动 — 最多可能需要 {s} 秒。",
   "Creating the session is taking unusually long — it may still be in progress; reloading the tab abandons it": "创建会话耗时异常——它可能仍在进行中；刷新此标签页会放弃它",
   "Custom OAuth client id (optional)": "自定义 OAuth client id(可选)",
   "Dial-out removed — \"{name}\" is a plain ssh machine again": "已移除拨出连接——“{name}”恢复为普通 ssh 机器",

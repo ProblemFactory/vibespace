@@ -477,6 +477,9 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               const CW = require('./server/cwd-wait.js');
               let w = CW.verdict(cwd, { missing });
               if (w && w.why === 'mount_starting') {
+                // B-ce65: SAID before the bounded wait — the page tells the person what the create waits for (the mount's name) and its
+                // reply watchdog waits that long too, instead of «taking unusually long» at 15 s while the hub waits up to BACK_MS
+                ws.send(JSON.stringify({ type: 'create-waiting', reqId: data.reqId, cwd, waitsFor: w.name, ms: CW.BACK_MS }));
                 if (await CW.whenBack(cwd)) missing = await dirMissing();
                 w = CW.verdict(cwd, { missing });
                 if (w && w.why === 'mount_starting') w = { ...w, why: 'mount_down' };   // it waited its bound: still not up
