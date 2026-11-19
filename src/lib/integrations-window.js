@@ -50,6 +50,7 @@
 // layout restore.
 import { fetchJson, showToast, showConfirmDialog, copyText } from './utils.js';
 import { t } from './i18n.js';
+import { pluginsDoor, needDoorButton } from './need-line.js'; // B-d073: the Test's wait says its door on the line
 import { keyFileWords } from './key-file-words.js'; // key-file-law-fix (verify r1 L3): a key-file law refusal in its own translated words
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
@@ -79,8 +80,10 @@ const ago = (ms) => {
 
 /** B-3b8e (4b): when a Test the card does not offer yet will be there — ONE sentence, in the reader's language. */
 const testWaitsLine = (w) => (w && w.code === 'repository-unknown'
-  ? (w.params && w.params.host ? t('The Test is offered after the first install from {host} (⚙ → Plugins → Install plugin…)', { host: w.params.host }) : t('The Test is offered after the first install from its host (⚙ → Plugins → Install plugin…)'))
+  ? (w.params && w.params.host ? t('The Test is offered after the first install from {host}.', { host: w.params.host }) : t('The Test is offered after the first install from its host.'))
   : t('The Test is not offered yet'));
+/** B-d073: the line, and — when the Test waits for a first install — the door to the Plugins list (its Install plugin…) ON it, never a menu path. */
+const testWaitsRow = (app, w) => { const d = el('div', 'plugin-detail integ-test-waits', testWaitsLine(w)); if (w && w.code === 'repository-unknown') { const door = pluginsDoor(app, { label: t('Plugins…'), kind: 'secondary' }); if (door) d.append(' ', needDoorButton(door)); } return d; };
 /** The Test button's words follow `testKind` (design §14.2's closed set). */
 const TEST_LABEL = {
   'credential-exchange': () => t('Test connection'),
@@ -364,7 +367,7 @@ function renderCard(app, v, { refresh, focus, setupBase = '' }) {
       const r = await fetchJson(`/api/integrations/${encodeURIComponent(v.id)}/test`, { method: 'POST' });
       // B-3b8e (4b): a Test pressed on a card drawn before what it waits for went (a repository uninstalled) — the one sentence
       // says when it will be there, and the card is drawn again from the server's view (no Test button)
-      if (r && r.code === 'test-waits') { result.textContent = ''; result.appendChild(el('div', 'plugin-detail integ-test-waits', testWaitsLine(r.detail))); refresh(v.id); return; }
+      if (r && r.code === 'test-waits') { result.textContent = ''; result.appendChild(testWaitsRow(app, r.detail)); refresh(v.id); return; }
       if (!r || (r.error && r.ok !== false && !('testedAt' in r))) {
         // a REFUSAL (not-wired / no runner / 503): it is a line on the card, not a verdict
         result.textContent = '';
@@ -378,7 +381,7 @@ function renderCard(app, v, { refresh, focus, setupBase = '' }) {
   };
   // B-3b8e (4b — the coordinator's ruling: no door that can only refuse): a Test its consumer says cannot run yet is not drawn;
   // the card says, in one sentence, when it will be there
-  if (v.testWaits) actions.appendChild(el('div', 'plugin-detail integ-test-waits', testWaitsLine(v.testWaits)));
+  if (v.testWaits) actions.appendChild(testWaitsRow(app, v.testWaits));
   else actions.appendChild(testBtn);
   if (v.hasOwnValues) {
     const clear = el('button', 'mounts-btn mounts-btn-danger integ-clear', t('Clear my keys'));

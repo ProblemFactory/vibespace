@@ -91,7 +91,7 @@ for (const c of C) {
     console.log(`  · [${c.scope}] ${e.row.id} — ${e.row.need} — ${e.sentences.length} sentence(s) — ${door}`);
   }
   console.log(`  · [${c.scope}] not needs: ${c.non.length} (${[...new Set(c.non.map((x) => x.why))].length} reasons)`);
-  if (c.T.DOORS_OWED) console.log(`  · [${c.scope}] DOORS OWED (B-d073, words unchanged by ruling): ${c.owed.length} sentence(s) in ${c.T.DOORS_OWED.length} row(s) — ${c.owed.map((x) => '«' + x.s.slice(0, 48) + '»').join(' · ')}`);
+  if (c.T.DOORS_OWED) console.log(`  · [${c.scope}] DOORS OWED (family B-d073 — none left since its doors were built): ${c.owed.length} sentence(s) in ${c.T.DOORS_OWED.length} row(s) — ${c.owed.map((x) => '«' + x.s.slice(0, 48) + '»').join(' · ')}`);
   ok(c.unclaimed.length === 0, `[${c.scope}] every sentence its net catches is claimed — by a row or a non-need with its reason (${caught})`, c.unclaimed.slice(0, 12));
   ok([...c.rows.values()].every((e) => e.sentences.length > 0), `[${c.scope}] every row claims at least one sentence of the tree (no dead row)`, [...c.rows.values()].filter((e) => !e.sentences.length).map((e) => e.row.id));
   ok(c.T.NEEDS.every((r) => (!!r.door.present + !!r.door.none + !!r.door.deferred) === 1), `[${c.scope}] every row has exactly one door verdict (present / none / deferred)`);
@@ -105,7 +105,7 @@ for (const c of C) {
     const PLANT = { why: 'PLANTED — a reason whose sentence is gone', match: /^A sentence no file says any more$/ };
     const planted = { ...c.T, NOT_NEEDS: [...c.T.NOT_NEEDS, PLANT] };
     ok(planted.NOT_NEEDS.includes(PLANT) && deadNon(planted).length === deadNon(c.T).length + 1 && deadNon(planted).some((w) => w.startsWith('PLANTED')), 'CONTROL: a planted non-need row whose sentence is gone is RED by its reason (the plant is in the table first)');
-    const OWED_CEILING = 4;   // 主开发's ruling (a), 2026-11-18 23:33Z — bulk-resume's Close hint and toast, the Integrations window's two Test lines; it only falls
+    const OWED_CEILING = 0;   // 主开发's ruling (a), 2026-11-18 23:33Z, was 4 (bulk-resume's Close hint and toast, the Integrations window's two Test lines) — B-d073 built their doors; it only falls
     ok(Array.isArray(c.T.DOORS_OWED) && c.T.DOORS_OWED.length <= OWED_CEILING && c.T.DOORS_OWED.every((r) => r.family === 'B-d073' && c.owed.some((x) => x.row === r)), `[ui] the doors owed are a count of debts apart from the non-needs: ${c.T.DOORS_OWED ? c.T.DOORS_OWED.length : 0} ≤ ${OWED_CEILING}, each of family B-d073, each claiming a live sentence`, (c.T.DOORS_OWED || []).filter((r) => !c.owed.some((x) => x.row === r)).map((r) => r.why.slice(0, 60)));
   }
   // lane ui-needs-a-button pick 5: THE UI TABLE ENDS WITH NO DEFERRED ROW — every caught sentence a door, a none with its reason, or a non-need

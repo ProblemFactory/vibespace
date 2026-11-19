@@ -615,7 +615,7 @@ fetch(api + '/api/agent/plugin-tool/${rec.id}/${t.name}', { method: 'POST', head
     if (store && typeof store.registerTest === 'function') store.registerTest('plugin-git', async ({ resolved }) => {
       const host = hostOf(resolved && resolved.values);
       const url = knownRepoOn(host);
-      if (!url) return { ok: false, error: `no repository on ${host || 'that host'} is known here yet — install one from it first (⚙ → Plugins → Install plugin…); the Test reaches it with git ls-remote` };
+      if (!url) return { ok: false, error: `no repository on ${host || 'that host'} is known here yet — install one from it first; the Test reaches it with git ls-remote` };   // B-d073: no menu path — the card that runs it draws the Plugins door on its wait line
       try { const r = await installer.testCredential(url); return { ok: true, detail: `${r.host} answered git ls-remote with this credential${r.head ? ` (HEAD ${r.head.slice(0, 12)})` : ''}` }; }
       catch (e) { return { ok: false, error: `${e.message}${e.code ? ` [${e.code}]` : ''}` }; }
     }, { waits });

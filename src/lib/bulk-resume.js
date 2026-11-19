@@ -74,7 +74,7 @@ function answerWords(r) {
 function capDoorWords(why) {
   const setting = why === 'hour-cap' ? t('Unattended turns per account per hour') : why === 'day-cap' ? t('Unattended turns per account per day') : why === 'instance-cap' ? t('Unattended turns for this instance per day')
     : why === 'overage-in-use' ? t('\u26a0 Allow unattended turns while an account bills paid overage') : null;   // form two: the door where the person changes it
-  if (setting) return ' ' + t('Change it in Settings → Spending → «{setting}»: {link}', { setting, link: spendRowLink({ why }) });   // the ROW it names carries its link (lane setting-doors' census) — the meeting: the checkpoint cure's link, the follow-up's doors below
+  if (setting) return ' ' + t('Change «{setting}»: {link}', { setting, link: spendRowLink({ why }) });   // the ROW it names carries its link (lane setting-doors' census) — the meeting: the checkpoint cure's link, the follow-up's doors below
   // (e) the two other account refusals have their door too (主开发 21:04Z): sign it in again; its spend control is the vendor's
   if (why === 'identity-cannot-serve') return ' ' + t('Sign the account in again (Accounts).');
   if (why === 'spend-control-reached') return ' ' + t('Its spend control is set with its vendor — raise it there.');
@@ -100,7 +100,7 @@ export async function openResumeStoppedDialog(app, { plan = null, onDone = null 
   let runningId = null;                      // a batch this dialog follows that has not ended (U2 cure, law 3: Close SAYS it keeps running)
   const shell = createModalShell({ id: 'resume-stopped-dialog', title: t('Resume sessions a limit or overload stopped'), dialogClass: 'resume-stopped-dialog', escapeToClose: true, kind: 'decision', onClose: () => {
     closed = true;
-    if (runningId) showToast(t('The resume keeps running — reopen it from the session list’s ⋯ menu or Settings → Spending to stop it.'));
+    if (runningId) showToast(t('The resume keeps running.'), { action: { label: t('Open it…'), run: () => { if (document.getElementById('resume-stopped-dialog')) return; openResumeStoppedDialog(app, { plan: null, onDone }).catch(() => { }); } }, duration: 12000 });   // B-d073: the door on the toast reopens this dialog, where «Stop the rest» is — never a menu path; never a second one over a dialog already open (a same-id shell would drop it without its onClose, its poll still running); the caller's onDone rides the reopened one
     try { resolveOuter && resolveOuter(null); } catch { }
   } }); // decision: a consent — N billed turns go out when the person presses (their own act, the owner's ruling 2026-11-18), after the cost is shown
   const { body, dialog, close } = shell;
@@ -144,7 +144,7 @@ export async function openResumeStoppedDialog(app, { plan = null, onDone = null 
   const overAllowed = !!(p.overage && p.overage.allowed);
   // (c) the quiet preview missing (nothing read): «not known now» — never «still refused» on an instance that may allow it
   const overKnown = !!p.overage;
-  if (n) body.appendChild(el('p', 'resume-stopped-lead', !overKnown ? t('{n} sessions will be continued, earliest stopped first — each one is a billed turn. This press is your own: it is not counted against the limits on turns nobody typed. Whether an account in paid overage would be refused could not be read now; you can stop the rest at any time.', { n }) : overAllowed ? t('{n} sessions will be continued, earliest stopped first — each one is a billed turn. This press is your own: it is not counted against the limits on turns nobody typed. This instance allows turns in paid overage (Settings → Spending), so a continue on an account in paid overage bills it; you can stop the rest at any time.', { n }) : t('{n} sessions will be continued, earliest stopped first — each one is a billed turn. This press is your own: it is not counted against the limits on turns nobody typed; an account in paid overage is still refused, and you can stop the rest at any time.', { n })));
+  if (n) { const lead = body.appendChild(el('p', 'resume-stopped-lead', !overKnown ? t('{n} sessions will be continued, earliest stopped first — each one is a billed turn. This press is your own: it is not counted against the limits on turns nobody typed. Whether an account in paid overage would be refused could not be read now; you can stop the rest at any time.', { n }) : overAllowed ? t('{n} sessions will be continued, earliest stopped first — each one is a billed turn. This press is your own: it is not counted against the limits on turns nobody typed. This instance allows turns in paid overage ({link}), so a continue on an account in paid overage bills it; you can stop the rest at any time.', { n, link: spendRowLink({ why: 'overage-in-use' }) }) : t('{n} sessions will be continued, earliest stopped first — each one is a billed turn. This press is your own: it is not counted against the limits on turns nobody typed; an account in paid overage is still refused, and you can stop the rest at any time.', { n }))); if (overKnown && overAllowed) toastWordsInto(lead, lead.textContent); }   // B-d073: the overage row's LINK is its door, on the lead
   const cw = costWords(p.estimate, t);
   if (cw) {
     const cost = el('div', 'resume-stopped-cost');
@@ -168,7 +168,7 @@ export async function openResumeStoppedDialog(app, { plan = null, onDone = null 
   body.appendChild(status);
   // WHILE A BATCH RUNS (U2 cure, law 3): a Stop door, and Close says in words that it keeps running and where to stop it
   const stopBtn = el('button', 'btn-create resume-stopped-stop', t('Stop the rest'));
-  const keepHint = el('p', 'dialog-hint resume-stopped-keep', t('Closing leaves the resume running — reopen this from the session list’s ⋯ menu or Settings → Spending to stop it.'));
+  const keepHint = el('p', 'dialog-hint resume-stopped-keep', t('Closing leaves the resume running.')   /* B-d073: its door is this dialog's own «Stop the rest»; closing, the toast reopens it */);
   let stopping = false;
   const showRunning = (batchId) => {
     runningId = batchId;

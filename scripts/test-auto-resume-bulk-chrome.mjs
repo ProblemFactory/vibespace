@@ -338,7 +338,7 @@ try {
   }
   // FORM TWO ON THE PAGE (the cure, 主开发 2026-11-18 20:16Z): the machine's login reports PAID OVERAGE (its usage cache), the
   // fourth conversation stops on an overload ⇒ the dialog names the account BEFORE the press — «留在停止状态（本机自己的登录 正在使用
-  // 付费超额）» — with the door (设置 → 花费), and offers nothing to start
+  // 付费超额）» — with the row's door (B-d073: «修改「…」：» and the row's link drawn as its button, never a menu path), and offers nothing to start
   {
     const cacheDir = path.join(wt, 'data', 'usage-cache');
     fs.mkdirSync(cacheDir, { recursive: true });
@@ -348,8 +348,8 @@ try {
     check('desk: FORM TWO — CONTROL FIRST: the fourth conversation is stopped (overload) and the login reports paid overage (the plant)', st4 === 'overload' && fs.existsSync(path.join(cacheDir, '__global__.json')), String(st4));
     await D.ev(`(document.getElementById('resume-stopped-dialog')?.remove(), true)`);
     await press(D.S, D.ev, '.auto-resume-bulk .resume-stopped-open');
-    const ov = await until(() => D.ev(`(() => { const o = document.getElementById('resume-stopped-dialog'); if (!o) return null; const heads = [...o.querySelectorAll('.resume-stopped-group-head')].map((n) => n.textContent); if (!heads.length) return null; return { heads, hints: [...o.querySelectorAll('.resume-stopped-group .dialog-hint')].map((n) => n.textContent), btns: [...o.querySelectorAll('.dialog-footer button')].map((b) => b.textContent) }; })()`), 10000, 200);
-    check('desk: FORM TWO on the page — the account NAMED in words before the press, its door under it, and no «全部恢复»', !!ov && ov.heads.some((h) => /留在停止状态（本机自己的登录 正在使用付费超额）/.test(h)) && ov.hints.some((h) => /设置 → 花费/.test(h)) && !ov.btns.some((b) => /全部恢复/.test(b)), JSON.stringify(ov));
+    const ov = await until(() => D.ev(`(() => { const o = document.getElementById('resume-stopped-dialog'); if (!o) return null; const heads = [...o.querySelectorAll('.resume-stopped-group-head')].map((n) => n.textContent); if (!heads.length) return null; return { heads, hints: [...o.querySelectorAll('.resume-stopped-group .dialog-hint')].map((n) => n.textContent), links: o.querySelectorAll('.resume-stopped-group .dialog-hint .global-toast-setting').length, btns: [...o.querySelectorAll('.dialog-footer button')].map((b) => b.textContent) }; })()`), 10000, 200);
+    check('desk: FORM TWO on the page — the account NAMED in words before the press, its door under it, and no «全部恢复»', !!ov && ov.heads.some((h) => /留在停止状态（本机自己的登录 正在使用付费超额）/.test(h)) && ov.hints.some((h) => /修改「[^」]+」：/.test(h) && !/设置 → 花费/.test(h)) && ov.links > 0 && !ov.btns.some((b) => /全部恢复/.test(b)), JSON.stringify(ov));
     await shot(D.S, 'desk-overage.png');
     await D.ev(`(document.getElementById('resume-stopped-dialog')?.remove(), true)`);
     fs.rmSync(path.join(cacheDir, '__global__.json'), { force: true });

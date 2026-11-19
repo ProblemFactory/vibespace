@@ -277,11 +277,11 @@ const NEEDS = Object.freeze([
   // ── the restack for 2.369.411 (lane bl-accounts' hand): the release's own sentences this net met on 2.369.410 ──
   { id: 'mounts-rclone', need: 'the storage helper (rclone) missing on the hub — «Install rclone» on the same card (ui-phone-and-fit put the card\'s words in the person\'s language on 2.369.410)',
     match: /^One-time setup needed$|^Connecting storage needs a small helper tool\. Install it here — no terminal required\.$/, door: { present: { marker: /api\('\/api\/mounts\/rclone\/install'/, surfaces: ['src/lib/sidebar-mounts.js'], shape: 'element' } } },
-  { id: 'handover-cap-unset', need: 'B-0a33 (2.369.410): a hand-over refused because no limit is set for turns nobody typed — «Open Settings → Spending» on the refusal\'s toast (the Spending section selected). Its words still name the path as the release ships them (主开发\'s ruling (a) at the restack for 2.369.411): the path leaving the words is a row of its own',
-    match: /^Not handed over — no limit is set for turns nobody typed on (?:\{account\}|this instance): set a number in its row of Settings → Spending: \{link\}\. The notices keep waiting\.$/, door: { present: { marker: /w\.door === 'spending' && settings && typeof settings\.open === 'function' \? \{ label: t\('Open Settings → Spending'\)/, surfaces: ['src/lib/stash-strip.js'], shape: { toast: true, words: 'w.text' } }, via: { 'src/stash-summary.js': 'src/lib/stash-strip.js' } } },
+  { id: 'handover-cap-unset', need: 'B-0a33 (2.369.410): a hand-over refused because no limit is set for turns nobody typed — «Open Settings → Spending» on the refusal\'s toast (the Spending section selected). Its words named the path as the release shipped them (主开发\'s ruling (a) at the restack for 2.369.411); B-d073 took the path out — the row\'s link in the words, the toast\'s door beside them',
+    match: /^Not handed over — no limit is set for turns nobody typed on (?:\{account\}|this instance): set a number in its row: \{link\}\. The notices keep waiting\.$/, door: { present: { marker: /w\.door === 'spending' && settings && typeof settings\.open === 'function' \? \{ label: t\('Open Settings → Spending'\)/, surfaces: ['src/lib/stash-strip.js'], shape: { toast: true, words: 'w.text' } }, via: { 'src/stash-summary.js': 'src/lib/stash-strip.js' } } },
   // ── the move onto 2.369.411's checkpoint (主开发 2026-11-19 00:44Z): a need WITH its door present — the row's LINK in the words ──
-  { id: 'resume-batch-cap', need: 'a resume of stopped sessions refused by a spend ceiling — the row it names, as its LINK on the refusal\'s own line (lane auto-resume-bulk / lg-recovery: a refusal names where its value changes; the path inside the words is B-d073\'s)',
-    match: /^Change it in Settings → Spending → «\{setting\}»: \{link\}$|^\{member\} can take \{left\} more turns nobody typed (?:this hour|today); this batch needs \{need\}\.$|^This VibeSpace can take \{left\} more turns nobody typed today; this batch needs \{need\}\.$/,
+  { id: 'resume-batch-cap', need: 'a resume of stopped sessions refused by a spend ceiling — the row it names, as its LINK on the refusal\'s own line (lane auto-resume-bulk / lg-recovery: a refusal names where its value changes; B-d073 took the menu path out of the words — the link is the whole door)',
+    match: /^Change «\{setting\}»: \{link\}$|^\{member\} can take \{left\} more turns nobody typed (?:this hour|today); this batch needs \{need\}\.$|^This VibeSpace can take \{left\} more turns nobody typed today; this batch needs \{need\}\.$/,
     door: { present: { marker: /link: spendRowLink\(\{ why \}\)/, surfaces: ['src/lib/bulk-resume.js'], shape: { link: 'toastWordsInto', words: 'batchRefusalWords(' } } } },
 ]);
 /** The net's catches that state no need with a missing door — each with its reason. */
@@ -311,7 +311,6 @@ const NOT_NEEDS = Object.freeze([
   { why: 'inside Settings: Claude\'s usage-refresh row\'s own description (usage-predict) — a sentence per choice, no door owed', match: /^Reads each Claude account’s limits from Anthropic — the only source of model-scoped weekly limits like Fable/ },
   { why: 'the sign-in-off row\'s own words: its door «Set password…» is the control of the same row (settings-ui _renderSpendSignInOff)', match: /^Sign-in is off: anything that can reach VibeSpace can change these limits\. Set a password so only you can\.$/ },
   { why: 'provenance: Session Properties\' CPU-priority fact line says where its value comes from (B-460d) — a fact, not a need', match: /^The server’s own — lowering it is off in Settings$/ },
-  { why: 'provenance inside a consent: the overage permission the count is read from, named beside the cost (the press is the person\'s own act) — a fact, not a need', match: /^\{n\} sessions will be continued, earliest stopped first — each one is a billed turn\./ },
   { why: 'a direction true on its surface: the field it names is drawn right below it, in the same box', match: /^No website login is saved yet — type this one below\.$/ },
   { why: 'a direction true on its surface: the field it names is drawn right below it, in the same box', match: /^The saved logins could not be read — try again, or type this one below\.$/ },
   { why: 'a confirm dialog\'s consequence: its own button is the act', match: /^The value leaves the vault\. The conversation that stored it can no longer use it/ },
@@ -331,14 +330,9 @@ const NOT_NEEDS = Object.freeze([
   { why: 'B-8b87 (the profile proxy) on 2.369.411\'s checkpoint d87ad011f: a direction true on its surface: the field and Check are the exit row\'s own, above the line', match: /^Type the exit by hand, or give another check address in the field above and press Check\.$/ },
 ]);
 /** THE DOORS OWED (主开发's ruling (a), 2026-11-18 23:33Z; their own heading at 2026-11-19 00:44Z): a sentence that sends a person down
- *  a menu path where a door ON ITS LINE is owed — each its own lane's, its words unchanged, a member of the family row B-d073. They
- *  are NOT non-needs: test-needs-doors counts them apart, and the count only falls (a door built takes its row out). */
-const DOORS_OWED = Object.freeze([
-  { family: 'B-d073', why: 'lane auto-resume-bulk\'s own law (U2 cure, law 3: Close SAYS the resume keeps running and where it is reopened) — WORDS UNCHANGED (主开发\'s ruling (a), 2026-11-18 23:33Z)', match: /^The resume keeps running — reopen it from the session list’s ⋯ menu or Settings → Spending to stop it\.$/ },
-  { family: 'B-d073', why: 'lane auto-resume-bulk\'s own law (U2 cure, law 3: Close SAYS the resume keeps running and where it is reopened) — WORDS UNCHANGED (主开发\'s ruling (a), 2026-11-18 23:33Z)', match: /^Closing leaves the resume running — reopen this from the session list’s ⋯ menu or Settings → Spending to stop it\.$/ },
-  { family: 'B-d073', why: 'the Integrations window\'s own law (the Test waits for a first install, named by its menu item) — WORDS UNCHANGED (主开发\'s ruling (a), 2026-11-18 23:33Z)', match: /^The Test is offered after the first install from \{host\} \(⚙ → Plugins → Install plugin…\)$/ },
-  { family: 'B-d073', why: 'the Integrations window\'s own law (the Test waits for a first install, named by its menu item) — WORDS UNCHANGED (主开发\'s ruling (a), 2026-11-18 23:33Z)', match: /^The Test is offered after the first install from its host \(⚙ → Plugins → Install plugin…\)$/ },
-]);
+ *  a menu path where a door ON ITS LINE is owed. B-d073 built the four its family held (bulk-resume's Close toast and hint, the
+ *  Integrations window's two Test lines): the table stays, EMPTY — test-needs-doors' ceiling is 0, so an owed door is red, never listed. */
+const DOORS_OWED = Object.freeze([]);
 const owedOf = (sentence) => DOORS_OWED.find((r) => r.match.test(String(sentence))) || null;
 const needOf = (sentence) => NEEDS.find((r) => r.match.test(String(sentence))) || null;
 const notNeedOf = (sentence) => NOT_NEEDS.find((r) => r.match.test(String(sentence))) || null;

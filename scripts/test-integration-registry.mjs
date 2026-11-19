@@ -1132,10 +1132,11 @@ console.log('\nB-3b8e 4b: a Test that cannot run yet is not offered — the card
   // the card: no Test button while testWaits stands; the one sentence instead, in zh and ja
   const IW = fs.readFileSync(path.join(REPO, 'src/lib/integrations-window.js'), 'utf-8');
   const ZH = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf-8'), JA = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf-8');
-  const WORDS = ['The Test is offered after the first install from {host} (⚙ → Plugins → Install plugin…)', 'The Test is offered after the first install from its host (⚙ → Plugins → Install plugin…)', 'The Test is not offered yet'];
-  ok(IW.includes("if (v.testWaits) actions.appendChild(el('div', 'plugin-detail integ-test-waits', testWaitsLine(v.testWaits)));\n  else actions.appendChild(testBtn);")
-      && IW.includes("if (r && r.code === 'test-waits') { result.textContent = ''; result.appendChild(el('div', 'plugin-detail integ-test-waits', testWaitsLine(r.detail))); refresh(v.id); return; }") && WORDS.every((w) => IW.includes(`t('${w}'`) && ZH.includes(`  "${w}": "`) && JA.includes(`  "${w}": "`)),
-    'B-3b8e 4b WIRING: the card draws NO Test button while testWaits stands — one sentence says when it will be there (zh / ja rows); a Test pressed on a card drawn before its repository went says that sentence and draws the card again');
+  const WORDS = ['The Test is offered after the first install from {host}.', 'The Test is offered after the first install from its host.', 'The Test is not offered yet'];
+  ok(IW.includes("if (v.testWaits) actions.appendChild(testWaitsRow(app, v.testWaits));\n  else actions.appendChild(testBtn);")
+      && IW.includes("if (r && r.code === 'test-waits') { result.textContent = ''; result.appendChild(testWaitsRow(app, r.detail)); refresh(v.id); return; }")
+      && IW.includes("const testWaitsRow = (app, w) => { const d = el('div', 'plugin-detail integ-test-waits', testWaitsLine(w)); if (w && w.code === 'repository-unknown') { const door = pluginsDoor(app, { label: t('Plugins…'), kind: 'secondary' }); if (door) d.append(' ', needDoorButton(door)); } return d; };") && WORDS.every((w) => IW.includes(`t('${w}'`) && ZH.includes(`  "${w}": "`) && JA.includes(`  "${w}": "`)),
+    'B-3b8e 4b WIRING: the card draws NO Test button while testWaits stands — one sentence says when it will be there (zh / ja rows), with the Plugins door ON its line when it waits for a first install (B-d073: never a menu path); a Test pressed on a card drawn before its repository went says that sentence and draws the card again');
 }
 
 // ── tree: THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
