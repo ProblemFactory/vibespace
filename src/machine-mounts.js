@@ -191,8 +191,10 @@ class MachineMounts {
     const error = (this._pullErrors && this._pullErrors.get(m.id)) || null, pc = error && this._pullErrorCodes && this._pullErrorCodes.get(m.id);
     // r5/r6 (reads 4 #8, 5 #2): a HOLDER says it shares its folder — EVERY waiting row, which way it nests, and whether its machine is gone
     const shares = [...this._held].filter(([, h]) => h.otherId === m.id).map(([id, h]) => { const o = this._state.mounts.find((x) => x.id === id) || {}; let name = null; try { name = this.hosts.get(o.hostId).name || o.hostId; } catch { name = null; } return { machine: name == null ? '' : String(name), removed: name == null, remotePath: String(o.remotePath || ''), kind: h.kind }; });
+    // 主开发 09:24Z: a pull row's words with no code recorded beside them are found BY THEIR WORDS, as a cloud row's are (codeOfWords)
+    const byWords = !(pc && pc.words === error) && error ? MW.codeOfWords(error) : null;
     return { id: m.id, dir: 'pull', hostId: m.hostId, remotePath: m.remotePath, mountpoint: m.mountpoint, live: this._live.has(m.id), online: this._online(m.hostId), createdAt: m.createdAt, error, ...(shares.length ? { shares } : {}),
-      ...(pc && pc.words === error ? { errorCode: pc.code, errorParams: pc.params || {} } : {}) };
+      ...(pc && pc.words === error ? { errorCode: pc.code, errorParams: pc.params || {} } : byWords ? { errorCode: byWords.code, errorParams: byWords.params } : {}) };
   }
 
   // ═══ PUSH direction (this instance's folder → the machine) ═══

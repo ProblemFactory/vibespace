@@ -2699,7 +2699,7 @@ export default {
   "the storage did not connect": "存储没有连上",
   "No permission to create the mount point {mp} — pick a writable location, or create it yourself first: sudo mkdir -p '{mp}' && sudo chown {owner} '{mp}'": "没有权限创建挂载位置 {mp}——请选一个可写的位置，或先自己创建：sudo mkdir -p '{mp}' && sudo chown {owner} '{mp}'",
   "The mount point {mp} exists but is not writable by VibeSpace — fix ownership: sudo chown {owner} '{mp}'": "挂载位置 {mp} 已存在，但 VibeSpace 无法写入——请修正所有者：sudo chown {owner} '{mp}'",
-  "The mount point {mp} is not empty — it holds {names}; these were written while the storage was disconnected — move them away, then reconnect": "挂载位置 {mp} 不是空的——里面有 {names}；这些是在存储断开期间写入的——请先移走它们，再重新连接",
+  "The mount point {mp} is not empty ({names}) — these were written while the storage was disconnected; move them away, then reconnect": "挂载位置 {mp} 不是空的（{names}）——这些是在存储断开期间写入的；请先移走它们，再重新连接",
   "Moved stranded files to {dest} but could not recreate the mount point {mp}: {detail}": "已把滞留的文件移到 {dest}，但无法重新创建挂载位置 {mp}：{detail}",
   "this share was minted by this same VibeSpace (self-mount deadlocks the server) — open the shared folder directly instead": "这个共享是由同一个 VibeSpace 生成的（挂载自己会让服务器死锁）——请直接打开那个共享文件夹",
   "OneDrive token unreadable — re-run the sign-in": "OneDrive 令牌无法读取——请重新登录",

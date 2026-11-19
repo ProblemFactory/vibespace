@@ -20,7 +20,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Module, { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
 import { checker } from './lib/check.mjs';
 import { dictEntries } from './i18n-extract.mjs';
 
@@ -66,6 +66,8 @@ const RELEASE = [   // the release's sentences, as src/machine-mounts.js / devic
   ['mount_point_in_use', { removed: true, remotePath: '/srv', held: false }, 'this folder is already the mount point of a removed machine’s /srv — remove that row in Mounts, or pick another folder'],
   ['mount_point_nested', { machine: 'Box', remotePath: '/srv', mountpoint: '/m', kind: 'inside', held: false }, 'this folder is inside /m, the mount point of “Box”’s /srv — unmounting one would take the other with it; pick a folder outside it'],
   ['mount_point_nested', { removed: true, remotePath: '/srv', mountpoint: '/m', kind: 'over', held: true }, 'this folder holds /m, the mount point of a removed machine’s /srv — unmounting one would take the other with it; remove one of the two rows'],
+  // 主开发 09:24Z: the release's words came back (test-bundle-globals taught that «empty (» in a string is prose, not a call)
+  ['mp_not_empty', { mp: '/m', names: 'a, b' }, 'The mount point /m is not empty (a, b) — these were written while the storage was disconnected; move them away, then reconnect'],
 ];
 const moved = RELEASE.filter(([c, p, en]) => MW.wordsFor(c, p) !== en);
 ok(moved.length === 0, `② ${RELEASE.length} sentences: the hub's English for each code is the release's, byte for byte`, moved.map(([c, p]) => [c, MW.wordsFor(c, p)]));
@@ -88,6 +90,12 @@ console.log('③ the producers carry code + params');
   online = true;
   const e3 = await caught(mm.mountPull('h1', { remotePath: 'not/absolute' }));
   ok(!!e3 && e3.code === 'remote_path_relative' && same(e3.params, {}) && e3.message === MW.wordsFor('remote_path_relative'), '③ mountPull: a relative folder refuses remote_path_relative', e3 && [e3.code, e3.message]);
+  // 主开发 09:24Z: a pull row whose words carry no recorded code is found BY ITS WORDS, as a cloud row is (codeOfWords)
+  (mm._pullErrors = mm._pullErrors || new Map()).set('p1', 'machine is offline — start its daemon first'); mm._pullErrorCodes?.delete('p1');
+  const pr = mm._pullRow(mm._state.mounts.find((m) => m.id === 'p1'));
+  mm._pullErrors.set('p1', 'an rclone tail of its own'); const pt = mm._pullRow(mm._state.mounts.find((m) => m.id === 'p1')); mm._pullErrors.delete('p1');
+  ok(pr.errorCode === 'machine_offline_start' && same(pr.errorParams, {}) && pt.errorCode === undefined,
+    '③ 主开发 09:24Z: a pull row\'s words with no code recorded beside them are found by their words (as a cloud row\'s); a tool\'s own text gets no code', { pr: [pr.errorCode, pr.errorParams], pt: pt.errorCode });
   ok(same(MW.errorBody(e2), { error: e2.message, code: 'machine_offline_start', params: {} }) && same(MW.errorBody(Object.assign(new Error('boom'), { code: 'ENOENT' })), { error: 'boom' }) && same(MW.errorBody(new Error('raw')), { error: 'raw' }),
     '③ errorBody: a worded refusal answers {error, code, params}; a system code (ENOENT) or none answers the words only');
   const slowW = MW.wordsFor('device_link_slow', { s: 10 });
@@ -123,6 +131,9 @@ console.log('③ the producers carry code + params');
     && read('src/lib/user-todos-actions.js').includes("String(checkRow.checkRoute).startsWith('/api/mounts/') && mountWords(r.code, r.params, { t, lang: resolveLang() })") && read('src/server/mounts-plugins-wiring.js').includes("catch (e) { res.status(400).json(require('../mount-error-words.js').errorBody(e)); }   // B-af94: a coded refusal keeps its code"),
     '③ the read\'s cures wired: a stopped start records its code WITH its words (after the kill\'s await); a removed record\'s code goes with it; the For-you Reconnect answers the row\'s code (route errorBody, the page words it); OneDrive\'s pre-flight keeps a coded refusal\'s code');
 }
+
+// 主开发 09:24Z: a missing machine name keeps the release's «?»
+ok(MW.wordsFor('mount_point_in_use', { remotePath: '/srv', held: false }).includes('“?”’s /srv'), '② a missing machine name keeps the release\'s «?» («“?”’s /srv»), never an empty pair of quotes', MW.wordsFor('mount_point_in_use', { remotePath: '/srv', held: false }));
 
 // ═══ ④ the page ═══
 console.log('④ the page words a code in the reader\'s language');
@@ -189,10 +200,25 @@ console.log('⑥ the dialog\'s refusals');
 // ═══ RED CONTROLS ═══
 console.log('RED CONTROLS');
 {
-  const e = MW.refusal('machine_offline_start');
+  // 主开发 09:24Z: the first control PLANTS IN THE REAL ROUTE — server.js's remount handler, lifted by its text and run with a stand-in
+  // manager whose remount refuses; the release's answer ({ error } only), planted in that same handler, leaves a zh reader with English
   const page = (body) => MW.wordsFor(body.code, body.params || {}, { t: tZh, lang: 'zh' }) || body.error;   // thrownText's rule (④ pins its shape)
-  const release = { error: e.message };
-  ok(page(release) === 'machine is offline — start its daemon first' && page(MW.errorBody(e)) === '机器离线——先启动它的守护进程', 'CONTROL (the shape, not the route — ⑤ pins the routes): an answer shaped as the release\'s routes answered ({ error } only — ⑤ pins that no machine-mount route still does) leaves a zh reader with the English; errorBody\'s answer is worded');
+  const at = SJ.indexOf("app.post('/api/machine-mounts/:id/remount'"), end = at < 0 ? -1 : SJ.indexOf('\n});', at) + 4;
+  const route = at >= 0 && end > at ? SJ.slice(at, end) : '';
+  const answer = async (src) => {
+    let handler = null, got = null;
+    new Function('app', 'machineMounts', 'require', src)({ post: (p, h) => { handler = h; } }, { remount: async () => { throw MW.refusal('machine_offline_start'); } }, (m) => (m === './src/mount-error-words.js' ? MW : require(m)));
+    const res = { status() { return res; }, json(b) { got = b; return res; } };
+    if (typeof handler !== 'function') return { lifted: false };   // its read: a route that never registers is a red by name, never a crash
+    await handler({ params: { id: 'mm-x' } }, res);
+    return got;
+  };
+  if (!route.includes("require('./src/mount-error-words.js').errorBody(e)")) ok(false, 'CONTROL: the remount route moved in server.js — update this suite');
+  else {
+    const real = await answer(route), released = await answer(route.replace("require('./src/mount-error-words.js').errorBody(e)", '{ error: e.message }'));
+    ok(page(real) === '机器离线——先启动它的守护进程' && page(released) === 'machine is offline — start its daemon first',
+      'CONTROL (RED), planted in the REAL route (server.js\'s remount handler, lifted by its text): its errorBody answer reaches a zh reader worded; the release\'s answer ({ error } only) in the same handler leaves the English', { real, released });
+  }
   const cut = ZH.split('\n').filter((l) => !l.startsWith('  "machine is offline — start its daemon first":')).join('\n');
   ok(cut.length < ZH.length && same(missingIn(cut), ['machine is offline — start its daemon first']), 'CONTROL (RED): a zh dictionary missing one row — ① names it');
   const from = 'if (c && c.words === words) return { errorCode: c.code, errorParams: c.params };';
@@ -200,7 +226,7 @@ console.log('RED CONTROLS');
   if (src.split(from).length !== 2) ok(false, 'CONTROL: the words-check anchor moved in src/mounts.js — update this suite');
   else {
     const file = path.join(REPO, 'src/mounts.js'), m = new Module(file, null); m.filename = file; m.paths = Module._nodeModulePaths(path.dirname(file));
-    m._compile(src.replace(from, 'if (c) return { errorCode: c.code, errorParams: c.params };'), file);
+    m._compile(anchored(src, from, 'if (c) return { errorCode: c.code, errorParams: c.params };', 'the words check'), file);
     const md = path.join(SCR, 'cm-ctl'); fs.mkdirSync(md, { recursive: true });
     const cc = new m.exports.MountManager({ dataDir: md, broadcast: () => { } }); cc._save = () => { };
     cc._errors.set('c1', cc._sayW('c1', 'reconnecting', { n: 2 }));

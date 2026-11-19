@@ -2699,7 +2699,7 @@ export default {
   "the storage did not connect": "ストレージに接続できませんでした",
   "No permission to create the mount point {mp} — pick a writable location, or create it yourself first: sudo mkdir -p '{mp}' && sudo chown {owner} '{mp}'": "マウント先 {mp} を作成する権限がありません — 書き込める場所を選ぶか、先に自分で作成してください: sudo mkdir -p '{mp}' && sudo chown {owner} '{mp}'",
   "The mount point {mp} exists but is not writable by VibeSpace — fix ownership: sudo chown {owner} '{mp}'": "マウント先 {mp} はありますが VibeSpace から書き込めません — 所有者を直してください: sudo chown {owner} '{mp}'",
-  "The mount point {mp} is not empty — it holds {names}; these were written while the storage was disconnected — move them away, then reconnect": "マウント先 {mp} は空ではありません — {names} があります。ストレージが切断されている間に書き込まれたものです — 移動してから再接続してください",
+  "The mount point {mp} is not empty ({names}) — these were written while the storage was disconnected; move them away, then reconnect": "マウント先 {mp} は空ではありません（{names}）— ストレージが切断されている間に書き込まれたものです。移動してから再接続してください",
   "Moved stranded files to {dest} but could not recreate the mount point {mp}: {detail}": "取り残されたファイルを {dest} に移動しましたが、マウント先 {mp} を作り直せませんでした: {detail}",
   "this share was minted by this same VibeSpace (self-mount deadlocks the server) — open the shared folder directly instead": "この共有は同じ VibeSpace で作成されたものです（自分自身をマウントするとサーバーがデッドロックします）— 共有フォルダーを直接開いてください",
   "OneDrive token unreadable — re-run the sign-in": "OneDrive のトークンを読み取れません — サインインし直してください",

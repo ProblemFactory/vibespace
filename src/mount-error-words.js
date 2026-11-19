@@ -67,7 +67,7 @@ const WORDS = Object.freeze({
   storage_not_connected: i18nKey('the storage did not connect'),
   mp_no_permission: i18nKey('No permission to create the mount point {mp} — pick a writable location, or create it yourself first: sudo mkdir -p \'{mp}\' && sudo chown {owner} \'{mp}\''),
   mp_not_writable: i18nKey('The mount point {mp} exists but is not writable by VibeSpace — fix ownership: sudo chown {owner} \'{mp}\''),
-  mp_not_empty: i18nKey('The mount point {mp} is not empty — it holds {names}; these were written while the storage was disconnected — move them away, then reconnect'),   // its gate: «empty (» read as a call by test-bundle-globals — the words say the same without it
+  mp_not_empty: i18nKey('The mount point {mp} is not empty ({names}) — these were written while the storage was disconnected; move them away, then reconnect'),   // the release's words, byte for byte (主开发 09:24Z: a sentence a person reads is not changed for a test — test-bundle-globals is taught instead)
   mp_not_recreated: i18nKey('Moved stranded files to {dest} but could not recreate the mount point {mp}: {detail}'),
   self_mount: i18nKey('this share was minted by this same VibeSpace (self-mount deadlocks the server) — open the shared folder directly instead'),
   // ── a provider's own pre-flight (src/mounts.js _resolveOneDriveDrive) ──
@@ -179,7 +179,7 @@ function wordsFor(code, params, { t = EN, lang = 'en' } = {}) {
   const p = params && typeof params === 'object' ? params : {};
   if (code.startsWith(LIVE) && !Object.prototype.hasOwnProperty.call(WORDS, code)) return LIVENESS.wordsFor(code.slice(LIVE.length), lang || 'en', p);
   if (code === 'mount_point_in_use' || code === 'mount_point_nested') {
-    const who = p.removed ? t(PARTS.who_removed, { remotePath: p.remotePath || '' }) : t(PARTS.who_machine, { machine: p.machine || '', remotePath: p.remotePath || '' });
+    const who = p.removed ? t(PARTS.who_removed, { remotePath: p.remotePath || '' }) : t(PARTS.who_machine, { machine: p.machine || '?', remotePath: p.remotePath || '' });   // 主开发 09:24Z: a missing machine name keeps the release's «?»
     const part = code === 'mount_point_in_use' ? (p.held ? 'same_held' : p.removed ? 'same_removed' : 'same') : (p.kind === 'over' ? 'over' : 'inside') + (p.held ? '_held' : '');
     return t(PARTS[part], { who, mountpoint: p.mountpoint || '' });
   }

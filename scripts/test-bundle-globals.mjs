@@ -84,7 +84,11 @@ function isCallAt(src, openIdx) {
 // which that regex never escaped and so never matched) — and only
 // the names that are OURS are judged by isCallAt. It used to build one RegExp per symbol (thousands) and scan the whole bundle
 // with each: 15.8 s of every build at two cores (the parity of the two forms over the real bundles is proved in the unit's line).
-const IDENT_CALL = /(?<![.\w$])([\w$]+)\s*\(/g;
+// B-af94 (主开发 09:24Z — a sentence a person reads is not changed for a test; the census is taught): every bundle this reads is built
+// by esbuild (package.json's build), and esbuild's printer never puts anything between a callee and its «(» (a /* @__PURE__ */
+// note goes BEFORE the callee) — so a name, a space and «(» is PROSE inside a string («The mount point … is not empty (a, b)»),
+// never a call
+const IDENT_CALL = /(?<![.\w$])([\w$]+)\(/g;
 function freeCalls(bundleSrc) {
   const found = new Map();
   for (const m of bundleSrc.matchAll(IDENT_CALL)) {
@@ -127,6 +131,9 @@ if (bundle) {
     'NEGATIVE CONTROL: both incident symbols are detected in a synthetic broken bundle');
   const healthy = 'var a=1,e=2;function b(){a++}b();e();';
   ok(freeCalls(healthy).size === 0, 'NEGATIVE CONTROL: a properly minified bundle is clean');
+  const prose = 'var t="The mount point /x is not empty (a, b) — reportBootTime (it runs at boot)";';
+  ok(freeCalls(prose).size === 0 && freeCalls('var t=1;reportBootTime();').has('reportBootTime'),
+    'B-af94: one of our names, a SPACE and «(» inside a string is prose, never a call (minified output never spaces a callee from its «(»); the same name called is still caught');
 }
 
 // NOTE: a source-side twin was tried and REMOVED — correctly deciding

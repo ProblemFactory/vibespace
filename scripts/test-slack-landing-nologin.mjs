@@ -137,7 +137,8 @@ console.log('④ the owner\'s finish line names who landed (DOM-free)');
   const STUBS = {
     'utils.js': 'export const createModalShell = () => null, showToast = () => {}, copyText = () => {}, escHtml = (s) => String(s);',
     'path-field.js': 'export const pathField = (el) => ({ el, input: el });',   // lane path-field: THE path field (was autocomplete.js)
-    'i18n.js': 'export const t = (s, p) => { const v = (globalThis.__I18N && globalThis.__I18N[s]) || s; return p ? v.replace(/\\{(\\w+)\\}/g, (m, k) => (k in p ? String(p[k]) : m)) : v; };',
+    // B-af94: mounts-dialog.js words a mounts route's refusal in the reader's language (resolveLang beside t)
+    'i18n.js': 'export const resolveLang = () => \'en\'; export const t = (s, p) => { const v = (globalThis.__I18N && globalThis.__I18N[s]) || s; return p ? v.replace(/\\{(\\w+)\\}/g, (m, k) => (k in p ? String(p[k]) : m)) : v; };',
   };
   const stub = { name: 'stub-dom', setup(b) {
     b.onResolve({ filter: /^\.\/(utils|path-field|i18n)\.js$/ }, (a) => (/mounts-dialog\.js$/.test(a.importer) ? { path: path.basename(a.path), namespace: 'stub' } : undefined));
