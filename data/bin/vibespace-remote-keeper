@@ -72,6 +72,7 @@ const P = {
   in: path.join(RUN_DIR, sid + '.in'), // fifo (2.138.0 fifo mode)
   meta: path.join(RUN_DIR, sid + '.json'),
   err: path.join(RUN_DIR, sid + '.err'),
+  attach: path.join(RUN_DIR, sid + '.attach'), // B-69a7: THIS attach client's pid + birth — a record the device agent's left-behind read knows the conversation's chain by (never *.json: the run dir's scans read those as session metas)
 };
 const readMeta = () => { try { return JSON.parse(fs.readFileSync(P.meta, 'utf-8')); } catch { return null; } };
 const writeMeta = (m) => { try { fs.writeFileSync(P.meta, JSON.stringify(m)); } catch { } };
@@ -270,6 +271,7 @@ if (mode === 'run') {
   const sep = process.argv.indexOf('--');
   const cmd = sep >= 0 ? process.argv.slice(sep + 1) : [];
   try { fs.mkdirSync(RUN_DIR, { recursive: true, mode: 0o700 }); } catch { }
+  try { fs.writeFileSync(P.attach, JSON.stringify({ pid: process.pid, pidStart: startToken(process.pid) }), { mode: 0o600 }); } catch { }   // B-69a7: the attach client by record (a reconnect writes its own)
   sweepOld();
   const m = rerecord(readMeta());
   const bufExists = fs.existsSync(P.out);

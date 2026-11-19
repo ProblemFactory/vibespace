@@ -7099,11 +7099,12 @@ class ChatView {
   /** B-69a7: the line a settled Stop's read says (src/server/left-behind-door.js) — what this turn's command tool left running, what
    *  the CLI keeps on purpose (named, never offered for ending), or that it could not be read; «End them» only on THIS machine */
   _sayLeftBehind(d) {
-    const left = Array.isArray(d.left) ? d.left : [], kept = Array.isArray(d.kept) ? d.kept : [];
+    const left = Array.isArray(d.left) ? d.left : [], kept = Array.isArray(d.kept) ? d.kept : [], jobs = Array.isArray(d.jobs) ? d.jobs : [];
     const names = (l) => [...new Set(l.map((x) => String((x && x.comm) || '?')))].slice(0, 6).join(', ');
     const parts = [];
     if (left.length) parts.push(d.machine ? t('Its command tool left {n} process(es) running on {machine}: {names}', { n: left.length, machine: d.machine, names: names(left) }) : t('Its command tool left {n} process(es) running: {names}', { n: left.length, names: names(left) }));
     if (kept.length) parts.push(t('kept running by the CLI on purpose: {names}', { names: names(kept) }));
+    if (jobs.length) parts.push(t('running for a background job: {names}', { names: names(jobs) }));
     if (d.unreadable > 0) parts.push(t('{n} process(es) of this user started during the turn could not be read', { n: d.unreadable }));
     if (d.unread) parts.push(t('what its command tool left could not be read'));
     if (!parts.length) return;
@@ -7134,16 +7135,19 @@ class ChatView {
   _endLeftBehind(btn, words, at) {
     btn.disabled = true;
     const reqId = 'lb-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-    const why = { 'not-the-person': t('Only a press on this page can end them'), 'paired-machine': t('Ending them on a paired machine is not offered yet'), 'nothing-listed': t('Nothing is listed to end any more'), stopped: t('Nothing is listed to end any more') };
+    const why = { 'not-the-person': t('Only a press on this page can end them'), 'paired-machine': t('Ending them on a paired machine is not offered yet'), 'nothing-listed': t('Nothing is listed to end any more'), stopped: t('Nothing is listed to end any more'), 'press-failed': t('Ending them did not finish — press again to check what still runs'), 'already-pressed': t('Already ending them') };
     this.ws.request({ type: 'end-left-behind', sessionId: this.sessionId, reqId, at }, (m) => {
       if (!m || m.type !== 'end-left-behind-result' || m.sessionId !== this.sessionId || m.reqId !== reqId) return false;
-      btn.remove();
+      const again = (m.ok && m.unread > 0) || (!m.ok && (m.reason === 'press-failed' || m.reason === 'already-pressed'));   // the list is still there
+      if (again) btn.disabled = false; else btn.remove();
       const said = [];
       if (!m.ok) said.push(why[m.reason] || t('Nothing is listed to end any more'));
       else {
         if (Array.isArray(m.ended) && m.ended.length) said.push(t('Ended: {names}', { names: [...new Set(m.ended)].join(', ') }));
         if (Array.isArray(m.still) && m.still.length) said.push(t('Still running: {names}', { names: [...new Set(m.still)].join(', ') }));
         if (m.gone > 0) said.push(t('{n} had already ended', { n: m.gone }));
+        if (m.held > 0) said.push(t('{n} not ended: VibeSpace or a background job holds it now', { n: m.held }));
+        if (m.unread > 0) said.push(t('{n} could not be checked again — not ended; press again', { n: m.unread }));
       }
       if (said.length) words.textContent += ' — ' + said.join(' · ');
       return true;

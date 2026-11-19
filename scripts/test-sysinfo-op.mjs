@@ -97,6 +97,30 @@ const pl2 = await dm.procList();
 ok(pl2.sampled === true && pl2.procs.some((p) => p.pcpuNow != null), 'second call carries live-sampled CPU% (linux delta)');
 ok(/daemon lacks proc-list \(capabilities gate\)/.test(cli), 'proc-list client method is capability-gated');
 
+// 4b. B-69a7 (round wz421di05, MUST 1): the left-behind op's reply is ROUTED back to its request — the client's id-routed reply
+// list must name left-behind-result, or every read on a paired machine times out after 15 s. Driven through the hub's own
+// DeviceManager against the REAL daemon; the conversation's chain known by the keeper's record in the daemon's own HOME
+{
+  ok(conn.info?.capabilities?.includes?.('left-behind'), 'daemon advertises the left-behind capability');
+  const lbSid = `lb-op-${process.pid}`, lbMark = `CLAUDE_WEBUI_SESSION_ID=${lbSid}`;
+  const { execFileSync } = await import('node:child_process');
+  const detachedMarked = () => Number(String(execFileSync(process.execPath, ['-e', "const c = require('child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { detached: true, stdio: 'ignore', env: process.env }); c.unref(); console.log(c.pid);"], { env: { PATH: process.env.PATH, CLAUDE_WEBUI_SESSION_ID: lbSid } })).trim());
+  const lbLive = [];
+  try {
+    const keeper = detachedMarked(); lbLive.push(keeper);
+    const leftover = detachedMarked(); lbLive.push(leftover);
+    const attach = detachedMarked(); lbLive.push(attach);   // a reconnect's attach client: known by the keeper's `.attach` record only
+    fs.mkdirSync(path.join(home, '.vibespace', 'run'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.vibespace', 'run', lbSid + '.json'), JSON.stringify({ keeperPid: keeper }));
+    fs.writeFileSync(path.join(home, '.vibespace', 'run', lbSid + '.attach'), JSON.stringify({ pid: attach }));
+    const t = await dm.leftBehind({ mark: lbMark, ageMs: 5000, sid: lbSid });
+    ok(Array.isArray(t.left) && t.left.some((x) => x.pid === leftover) && !t.left.some((x) => x.pid === keeper || x.pid === attach) && !t.unread, `left-behind answers through the hub's DeviceManager (its reply routed by id, never a 15 s time-out): the leftover named, the keeper's recorded processes (its meta, its attach client's record) not (${JSON.stringify(t.left.map((x) => x.pid))} · ${t.unread || 'read'})`);
+    ok(t.left.every((x) => JSON.stringify(Object.keys(x).sort()) === '["comm","pid","start","startedAt"]'), 'the op\'s rows carry pid, command name and start time only');
+    const u = await dm.leftBehind({ mark: lbMark, ageMs: 5000 });
+    ok(u.unread === 'own-unknown' && Array.isArray(u.left) && u.left.length === 0, 'with no keeper sid the device knows no chain of the conversation: own-unknown, nothing named');
+  } finally { for (const p of lbLive) { try { if (fs.readFileSync(`/proc/${p}/cmdline`, 'utf8').includes('setTimeout')) process.kill(p, 'SIGKILL'); } catch { } } }
+}
+
 // 5. the shared parser + cap (the ssh fallback rung's interpretation)
 // the probe must never list ITSELF (owner report: a 200% `ps` topped the CPU
 // sort forever — ps computes %CPU over its own ~10ms lifetime and its pid is

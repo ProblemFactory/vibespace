@@ -2592,8 +2592,11 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
           .then((r) => { if (r && r.ok) rec.pinned = !!r.pinned; mux.control({ op: 'window-pin-result', id: msg.id, result: r }); }, (e) => mux.control({ op: 'window-pin-result', id: msg.id, error: String((e && e.message) || e) }));
         return;
       }
-      if (msg.op === 'left-behind') {   // B-69a7: READ-ONLY — the same read as the hub's (src/left-behind.js), this agent's own tree and its desktop apps held out
-        require('./../left-behind.js').leftBehindOp(msg, { keep: dsKeeper && typeof dsKeeper.liveRecords === 'function' ? dsKeeper.liveRecords().flatMap((r) => Object.values(r.pids || {})) : [] }).then((r) => mux.control({ op: 'left-behind-result', id: msg.id, ...r }), (e) => mux.control({ op: 'left-behind-result', id: msg.id, error: String((e && e.message) || e) }));
+      if (msg.op === 'left-behind') {   // B-69a7: READ-ONLY — the same read as the hub's (src/left-behind.js), this agent's own tree and its desktop apps held out, the chain known by its records
+        const lbSid = typeof msg.sid === 'string' && /^[\w-]+$/.test(msg.sid) ? msg.sid : '';   // the conversation's records here: its pipe session's meta, its keeper's meta
+        const lbKeep = process.env.VIBESPACE_KEEPER_DIR || path.join(os.homedir(), '.vibespace', 'run');
+        const lbRecords = lbSid ? [path.join(SESS_DIR, lbSid + '.json'), path.join(lbKeep, lbSid + '.json'), path.join(lbKeep, lbSid + '.attach')] : [];   // + the keeper's attach client (a reconnect's)
+        require('./../left-behind.js').leftBehindOp(msg, { records: lbRecords, keep: dsKeeper && typeof dsKeeper.liveRecords === 'function' ? dsKeeper.liveRecords().flatMap((r) => Object.values(r.pids || {})) : [] }).then((r) => mux.control({ op: 'left-behind-result', id: msg.id, ...r }), (e) => mux.control({ op: 'left-behind-result', id: msg.id, error: String((e && e.message) || e) }));
         return;
       }
       if (msg.op === 'proc-list') {
