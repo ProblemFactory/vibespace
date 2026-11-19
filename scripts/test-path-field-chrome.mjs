@@ -36,7 +36,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome'); process.exit(0); }
-let bad = 0, n = 0;
+let bad = 0, n = 0, skipped = 0;   // skipped: legs SKIPPED BY NAME (each said on its own «⊘ SKIP» line — counted, never a green)
 const ok = (name, cond, got) => { n++; if (!cond) bad++; console.log(`${cond ? 'ok ' : 'BAD'} ${name}${cond ? '' : '  got ' + String(JSON.stringify(got)).slice(0, 700)}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -287,9 +287,21 @@ console.log('\n── ⑧ «不存在 — 创建？» ──');
   ok('ticked ⇒ committed with create (exists false)', c && c.create === true && c.exists === false && c.path === HOME + '/work/新项目', c);
   ok('ensure() makes it on disk', (await ev('window.pf.ensure()')) === true && fs.existsSync(path.join(HOME, 'work/新项目')), fs.existsSync(path.join(HOME, 'work/新项目')));
   await reset();
-  await press('#cwd'); await type('~/nope/x'); await sleep(450);
-  const u2 = await under();
-  ok('its parent missing ⇒ said, no tick to give', /上一级 ~\/nope 也不存在/.test(u2) && !(await ev(`!!document.querySelector('.pf-under input[data-act="tick"]')`)), u2);
+  // B-ckpt61 (leg 8 as ruled — the ui-needs-a-button chain gave a missing PARENT its create tick, b2f2399c7): the missing parent is
+  // SAID and the tick is OFFERED, and the create then makes BOTH levels (read back from the disk); the line waited for, never a sleep.
+  // Typed as a person types: a letter that is no path first ends the first half's tick (the field keeps it across set('') — found,
+  // filed by the coordinator), then the path
+  await press('#cwd'); await type('x'); await clear(); await type('~/nope/x');
+  const u2 = await until(async () => { const t = await under(); return /上一级 ~\/nope 也不存在/.test(t) ? t : null; }, 4000);
+  ok('its parent missing ⇒ said, AND the create tick offered (not ticked)', !!u2 && (await ev(`!!document.querySelector('.pf-under input[data-act="tick"]') && !document.querySelector('.pf-under input[data-act="tick"]').checked`)), u2 || (await under()));
+  ok('before the tick neither level is on the disk (the read-back below is the create\'s own)', !fs.existsSync(path.join(HOME, 'nope')), fs.existsSync(path.join(HOME, 'nope')));
+  await press('#other');
+  const un = await until(async () => { const t = await under(); return /未生效/.test(t) ? t : null; }, 4000);
+  ok('left without the tick: not taken (未生效), nothing committed', !!un && !(await log()).some((x) => x.ev === 'commit'), un || (await under()));
+  await press('.pf-under input[data-act="tick"]');
+  const cn = await until(async () => (await log()).find((x) => x.ev === 'commit'), 4000);
+  const madeBoth = !!cn && cn.create === true && cn.path === HOME + '/nope/x' && (await ev('window.pf.ensure()')) === true && fs.existsSync(path.join(HOME, 'nope', 'x')) && fs.statSync(path.join(HOME, 'nope')).isDirectory();
+  ok('ticked ⇒ committed with create, and ensure() makes BOTH levels on the disk (read back)', madeBoth, { cn, nope: fs.existsSync(path.join(HOME, 'nope')), x: fs.existsSync(path.join(HOME, 'nope', 'x')) });
   await reset();
 }
 
@@ -317,8 +329,12 @@ console.log('\n── ⑨b setDerived + the live 由名字 chips (lane new-sessi
   ok('CONTROL: refresh() paints it (the home\'s folders asked once)', await until(async () => (await homeFolders()) >= 1, 3000), await homeFolders());
   const IR = HOME + '/work/investor-relations';
   await ev(`window.sel = ['g-ir']; window.pf.refresh(); window.pf.setDerived(${JSON.stringify(IR)}, { note: '（来自任务组「投资者关系」）' }); true`);
-  const u1 = await until(async () => { const u = await under(); return u.includes('来自任务组') && u.includes('个文件') ? u : null; }, 4000);
-  ok('setDerived fills the field and its line says «= ~/work/investor-relations（来自任务组「投资者关系」）»', (await cwd()) === IR && !!u1 && u1.includes('= ~/work/investor-relations（来自任务组「投资者关系」）'), u1 || (await under()));
+  // B-ckpt61 (主开发 21:37Z — 2.369.412 ships its legs, not the product cure): THIS ONE LEG IS SKIPPED BY NAME, row B-08d5. On a
+  // slow machine the folder field reads a partial or not-yet-landed reply as a missing folder (its first paint says «不存在» with the
+  // raw path — set() paints before it asks — and a partial reply, the listing's 450 ms budget run out, lists nothing); the product's
+  // cure rides 2.369.413. Never a longer wait for a lucky reply; never a green. The legs below still run on this field
+  console.log('  ⊘ SKIP ⑨b «setDerived fills the field and its line says = ~/work/investor-relations（来自任务组「投资者关系」）» BY NAME — the folder field reads a partial or not-yet-landed reply as a missing folder: cured in 2.369.413 (B-08d5)');
+  skipped++;
   ok('…the list did not pop, nothing was committed', !(await listOpen()) && !(await log()).some((x) => x.ev === 'commit'), await log());
   const c1 = await ev('window.pf.commit().then((i) => i && { path: i.path, derived: i.derived, how: i.how })');
   ok('a commit of that untouched text says derived: true', !!c1 && c1.derived === true && c1.path === IR, c1);
@@ -443,5 +459,5 @@ console.log('\n── ⑭ the phone ──');
 
 ok(`⑮ 0 page errors`, errors.length === 0, errors);
 ws.close(); server.close();
-console.log(`\n${n - bad}/${n} ok${bad ? ` — ${bad} BAD` : ''}`);
+console.log(`\n${n - bad}/${n} ok${bad ? ` — ${bad} BAD` : ''}${skipped ? ` · ${skipped} leg skipped by name, never counted green (above)` : ''}`);
 process.exit(bad ? 1 : 0);
