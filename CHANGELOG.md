@@ -59,6 +59,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The usage popup draws an estimate between readings only where this hub’s own record shows it lands closer than the last reading, as “about Y%”.
 - Elsewhere the popup shows the reading and how many requests ran here since, and the account pool reads an estimate only where it has proven itself.
 - Codex and Antigravity usage estimates learn only from their own readings, never from Claude’s quota sizes.
+- Gmail: when the company switches its sign-in client, For you says how many accounts still use the old one, with Re-authorize for each in turn.
 - When a usage limit cuts a Workflow run short, the automatic continue tells the agent to resume that run instead of starting it again.
 - A paired machine now runs an agent's CLI from where that machine's own login shell finds it, and a new conversation says so when it finds none.
 - In Remote, a machine's «Exit: network — … · commands — …» line is now a button that opens «Who can use it…»; the separate exit icon is gone.
