@@ -48,6 +48,7 @@ import { createRequire } from 'node:module';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import os from 'node:os';
 import { execFileSync } from 'node:child_process';
+import { anchored } from './scratch.mjs';   // B-75ba's control: B-0d3e's one door
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const require = createRequire(import.meta.url);
@@ -626,6 +627,44 @@ console.log('§9 A VIEW IS CLASSED BY WHAT IT SHOWS (lane mount-class-by-source)
     const hc = await viaRoute(DDb, 'ds10hc');
     ok(w.counts.refused > refC && hc.type === 'application/json' && !(hc.status === 200 && hc.row && hc.row.available === true),
       `CONTROL (the refusal leaves the walk; the guard refused ${w.counts.refused - refC}): the route answers ${hc.status} ${hc.type}${hc.body && hc.body.code ? ` «${hc.body.code}»` : ''} — no program listed ⇒ RED (and still JSON: every desktop route ends in fail()'s JSON)`);
+    // B-75ba (the B-1425 read's neighbour): app-serve's resolveExec fallback — when binOnPath has no answer — reads only PATH dirs
+    // under NO mount root; a storage dir that never answers holds nothing. The stand-in: every async access/stat into the rclone
+    // (the storage root) never settles; a program only in the LOCAL dir, after it on PATH, binOnPath silent (null)
+    const AS75 = require(path.join(REPO, 'src/app-serve.js'));
+    const P75 = 'tool-b75ba';
+    await fs.promises.writeFile(path.join(LB10, P75), '#!/bin/sh\n'); await fs.promises.chmod(path.join(LB10, P75), 0o755);
+    const P75N = 'tool-b75ba-nfs';   // a program only on the NFS view's dir (a rooted dir that answers)
+    await fs.promises.writeFile(path.join(NB, P75N), '#!/bin/sh\n'); await fs.promises.chmod(path.join(NB, P75N), 0o755);
+    const asked75 = [], askedNfs = [], fa = fs.promises.access, fsx = fs.promises.stat;
+    const hold = (p) => String(p).startsWith(R + '/');
+    const nfs = (p) => String(p).startsWith(NB + '/');
+    // as desktop-serve hands it: the storage roots (rootOf); binOnPath silent unless a road is given; landOnPath as given
+    const resolveWith = async (AS, sub, name = P75, roads = {}) => {
+      const apps = AS.create({ home: path.join(S, sub, 'home'), stateDir: path.join(S, sub), env: env10, log: quiet10, binOnPath: () => null, rootOf: (d) => SP.rootOf(d), ...roads });
+      fs.promises.access = function (p, ...a) { if (nfs(p)) askedNfs.push(String(p)); if (hold(p)) { asked75.push(String(p)); return new Promise(() => { }); } return fa.call(this, p, ...a); };
+      fs.promises.stat = function (p, ...a) { if (nfs(p)) askedNfs.push(String(p)); if (hold(p)) { asked75.push(String(p)); return new Promise(() => { }); } return fsx.call(this, p, ...a); };
+      try { return await Promise.race([apps.resolveExec(name), new Promise((r) => setTimeout(() => r('NO ANSWER'), 400))]); }
+      finally { fs.promises.access = fa; fs.promises.stat = fsx; }
+    };
+    asked75.length = 0;
+    const r75 = await resolveWith(AS75, 'as75'), asked1 = asked75.length;
+    ok(r75 === path.join(LB10, P75) && asked1 === 0,
+      `§10 B-75ba: app-serve's PATH fallback (binOnPath silent) finds the program in the local dir behind a storage dir that never answers (${r75 === 'NO ANSWER' ? r75 : r75 && r75.slice(S.length)}) — the storage dir asked ${asked1} time(s)`);
+    // its read's S2: a ROOTED dir that answers (the NFS view) is never read by the fallback either — it is binOnPath's (no landing
+    // handed here: not found, 0 reads into it); S1: with desktop-display's own roads (binOnPath + its bounded landing, as
+    // desktop-serve hands them) the program on the NFS view IS found — the landing, never the fallback; the storage dir still unasked
+    asked75.length = 0; askedNfs.length = 0;
+    const r75n = await resolveWith(AS75, 'as75n', P75N), nfs0 = askedNfs.length;
+    DD.resetBinMemo(); asked75.length = 0; askedNfs.length = 0;
+    const r75l = await resolveWith(AS75, 'as75l', P75N, { binOnPath: (n, o) => DD.binOnPath(n, o), landOnPath: (n, o) => DD.landMounts(n, o) });
+    ok(r75n === null && nfs0 === 0 && r75l === path.join(NB, P75N) && asked75.length === 0,
+      `§10 B-75ba: a program only on the NFS view (a rooted dir): the fallback alone does not read it (${r75n}, ${nfs0} read(s) into it); with binOnPath + its bounded landing it is found (${r75l === 'NO ANSWER' ? r75l : r75l && r75l.slice(S.length)} — the landing's own bounded read: ${askedNfs.length}), the storage dir never asked (${asked75.length})`);
+    // CONTROL (its plant through anchored(): the mount test spelled once): the fallback that reads every PATH dir — held for good
+    const asSrc = fs.readFileSync(path.join(REPO, 'src/app-serve.js'), 'utf8');
+    const everyDir = anchored(asSrc, " && !underMount(d)).slice(0, 40)", ").slice(0, 40)", 'b75ba-every-dir');
+    asked75.length = 0;
+    const r75c = await resolveWith(M.load('src/app-serve.js', everyDir, 'b75ba-every-dir'), 'as75c');
+    ok(r75c === 'NO ANSWER' && asked75.length >= 1, `CONTROL (the fallback reads every PATH dir — the release's): ${r75c} within the bound, the storage dir asked ${asked75.length} time(s) and never answered ⇒ RED`);
   }
   w.stop();
   SP.setRoots([]);

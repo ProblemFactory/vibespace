@@ -203,7 +203,7 @@ function fetchHttps(url, { max = KEY_MAX, timeout = 20000, redirects = 3 } = {})
  *                    loopback "vendor" by a RESERVED `.test` name (never a real site); production passes nothing
  * @param sysTarball  SUITES ONLY: a stand-in path for the image's minbase tarball (undefined = the image's own; production passes nothing)
  */
-function create({ home = os.homedir(), stateDir, env = () => process.env, log = console, now = Date.now, binOnPath = null, installState = null,
+function create({ home = os.homedir(), stateDir, env = () => process.env, log = console, now = Date.now, binOnPath = null, rootOf = null, landOnPath = null, installState = null,
   dpkgStatus = '/var/lib/dpkg/status', markerDir = A.MARKER_DIR, systemLists = '/var/lib/apt/lists', osRelease = '/etc/os-release', isRoot = null, runner = run, fetchSeam = null, rootUid = 0, witnessDirs = null, engineIds = null, sysTarball = undefined } = {}) {
   if (!stateDir) throw new Error('app-serve: stateDir is required');
   if (typeof env !== 'function') { const e0 = env; env = () => e0; }
@@ -1164,13 +1164,21 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
   // ── lane app-register-model: the flatpak door + registered declarations ──
   async function realOf(p) { if (!p) return null; try { return await fsp.realpath(p); } catch { return null; } }
   /** The absolute path the USER would run for `x` (an absolute path: executable file; a bare name: on the user's PATH). */
+  // B-75ba: desktop-serve hands the storage roots (rootOf) and desktop-display's bounded landing (landOnPath); without them
+  // (a caller that hands neither) the fallback reads as before
+  const underMount = (d) => { try { return typeof rootOf === 'function' && !!rootOf(d); } catch { return false; } };
   async function resolveExec(x) {
     const s0 = String(x || '').trim();
     if (s0.startsWith('/')) { try { await fsp.access(s0, fs.constants.X_OK); return (await fsp.stat(s0)).isFile() ? s0 : null; } catch { return null; } }
     if (!/^[A-Za-z0-9._+-]{1,128}$/.test(s0)) return null;
-    const w = which(s0);
+    let w = which(s0);
+    // B-75ba (its read's S1): a PATH dir under a mount root answers through binOnPath's landing — bounded per root, a
+    // storage root never read — so await it once and ask again: a program on an NFS / home view is found, as before
+    if (!w && typeof landOnPath === 'function') { try { await landOnPath(s0, { env: env() }); } catch { } w = which(s0); }
     if (w) return w;
-    for (const d of String((env() || {}).PATH || '').split(':').filter((d) => d.startsWith('/')).slice(0, 40)) { const r = await resolveExec(path.join(d, s0)); if (r) return r; }
+    // B-75ba: a PATH dir under a mount root is binOnPath's business (its bounded landing; a storage root never read) — this
+    // unbounded async fallback never asks one: a storage mount that stopped answering held every catalog read behind it
+    for (const d of String((env() || {}).PATH || '').split(':').filter((d) => d.startsWith('/') && !underMount(d)).slice(0, 40)) { const r = await resolveExec(path.join(d, s0)); if (r) return r; }
     return null;
   }
   /** A declaration → THE validation (src/app-kinds/registered.js) with this machine's facts (execs resolved, icon size). */

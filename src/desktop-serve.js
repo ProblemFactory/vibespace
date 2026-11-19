@@ -342,7 +342,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
   if (!apps) {
     let home = appsHome;
     if (!home) { try { home = (env() || {}).HOME || null; } catch { home = null; } }
-    apps = AS.create({ home: home || os.homedir(), stateDir: dataDir, env, log, now, engineIds: () => registryRows.map((r) => r.id), binOnPath: display.binOnPath ? (n, o) => display.binOnPath(n, o) : null, installState: display.installState ? (d) => display.installState(d) : null });
+    apps = AS.create({ home: home || os.homedir(), stateDir: dataDir, env, log, now, engineIds: () => registryRows.map((r) => r.id), binOnPath: display.binOnPath ? (n, o) => display.binOnPath(n, o) : null, rootOf: (d) => SP.rootOf(d) /* B-75ba: app-serve's fallback never reads a dir under a mount root */, landOnPath: display.landMounts ? (n, o) => display.landMounts(n, o) : null /* B-75ba: …those land through binOnPath, bounded */, installState: display.installState ? (d) => display.installState(d) : null });
   }
   display.assertLocal(hostId, 'keeper');
   const storeFile = path.join(dataDir, STORE_FILE);
