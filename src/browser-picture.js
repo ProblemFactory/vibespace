@@ -47,6 +47,7 @@ const SOURCE_WORDS = Object.freeze({
   driver: "the page's picture — this browser was not started on VibeSpace's display",
   'no-display-session': "the page's picture — the browser's display session is gone",
   'not-running': "the page's picture",
+  'background-tab': "the tab's own picture, a new one every half second — its window shows another tab in front",
 });
 const RUNNING = new Set(['ready']);
 
@@ -64,6 +65,16 @@ function pictureSourceOf(rec, { remote = false } = {}) {
   return v(PICTURE_SCREENCAST, 'driver');
 }
 const isX = (v) => !!v && v.source === PICTURE_X;
+/** THE PICTURE THE VIEW SAYS IT SHOWS, IN ONE WINDOW (the owner's report 2026-11-19, the second of its kind): the X picture is a
+ *  WINDOW, so it can only show that window's FRONT tab. While the hub says the tab on show is a hidden background tab of its
+ *  window (`tab-background`, state hidden: its own picture polled every half second) and this view does not drive a takeover,
+ *  the view draws THAT tab's own picture (the page's) and says so — never the front tab under the shown tab's name and address.
+ *  A takeover keeps the window: that is where the person brings the tab forward. A tab that never answers (`unresponsive`)
+ *  keeps the window too: nothing is polled for it. */
+function pictureForView(v, { bg = null, driving = false } = {}) {
+  if (!isX(v) || driving || !bg || bg.state !== 'hidden' || !bg.targetId) return v;
+  return { source: PICTURE_SCREENCAST, why: 'background-tab', words: SOURCE_WORDS['background-tab'], displaySession: null };
+}
 
 // ── the display's rows (the desktop keeper's `windows(id)`: {id, title, instance, cls, x, y, w, h, frame}) ──
 const num = (n) => (Number.isFinite(Number(n)) ? Number(n) : NaN);
@@ -257,6 +268,6 @@ function deskDoorOf({ source = null, xShown = false, stuck = null, human = false
 
 module.exports = {
   PICTURE_X, PICTURE_SCREENCAST, NO_XPRA_WHY_HEAD, SOURCE_WORDS, DIALOG_MIN_W, DIALOG_MIN_H, X_TICKET_RE, DESK_DOOR_WORDS,
-  pictureSourceOf, isX, isBrowserRow, xWindowOf, nativeDialogsOf, nativeDialogOwner, dialogsOver, nativeDialogFact, nativeDialogText, deskSeat, deskSeatWhy, xSeatRootOf, xScopeOf, deskDoorAct, deskDoorOf, deskDoorStuck,
+  pictureSourceOf, pictureForView, isX, isBrowserRow, xWindowOf, nativeDialogsOf, nativeDialogOwner, dialogsOver, nativeDialogFact, nativeDialogText, deskSeat, deskSeatWhy, xSeatRootOf, xScopeOf, deskDoorAct, deskDoorOf, deskDoorStuck,
   xShownTarget, xWindowLookups, xTicketMoved, xFollowVerdict, // hotfix 2026-11-17: the picture shows the tab the view says it shows (+ cure r2: moved by the CDP window)
 };
