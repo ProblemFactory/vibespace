@@ -242,8 +242,18 @@ console.log('— wiring + docs pins');
     && !/this\._pendingSend && this\._pendingSend !== prevPendingSend/.test(cinput));
   ok('round-6: the delivery echo only clears what THAT send put in the store (a restored prompt is not its to delete)',
     /const stored = loadDraft\('chat', this\._sessionId\);\n\s*if \(stored && stored !== pending\.text && !\(pending\.text === '' && stored === pending\.storeBefore\)\) return;\n\s*clearDraft\('chat', this\._sessionId\);/.test(cinput));
-  ok('round-6: sendText puts the box back UNCONDITIONALLY (an empty box must not keep the action\'s own text after a bail-out)',
-    /const sent = this\._send\(\) !== false;[\s\S]{0,900}?\n    this\._textarea\.value = keptText;\n/.test(cinput));
+  // THE LAW, not a distance (lg-rewind 2026-11-19, the checkpoint's red: the one-life cure added lines inside the old 900-character
+  // span): between the send and the box's put-back NOTHING may leave early — no return, no throw, no await / yield, no break /
+  // continue — so the put-back runs on every road out of the send. The span may grow; the law holds or the pin is red (a planted
+  // early exit proves it can be).
+  const putBackLaw = (src) => {
+    const m = /const sent = this\._send\(\) !== false;([\s\S]{0,2000}?)\n    this\._textarea\.value = keptText;\n/.exec(src);
+    const code = m ? m[1].replace(/\/\/[^\n]*/g, '') : null;
+    return !!m && !/\b(return|throw|await|yield|break|continue)\b/.test(code);
+  };
+  const plantedExit = cinput.replace('const sent = this._send() !== false;\n', 'const sent = this._send() !== false;\n    if (!sent) return false;\n');
+  ok('round-6: sendText puts the box back UNCONDITIONALLY (an empty box must not keep the action\'s own text after a bail-out) — nothing between the send and the put-back can leave early (no return, throw, await, yield, break, continue); a planted early exit is red',
+    putBackLaw(cinput) && plantedExit !== cinput && !putBackLaw(plantedExit));
   ok('round-6: the LATE writer (uploaded paths) lands on the edit\'s stash, never on the editor\'s box',
     /if \(this\._pendingEdit \|\| this\._editingQueueId\) \{ this\._stashUploadedPaths\(text\); return; \}/.test(cinput)
     && /_stashUploadedPaths\(text\) \{/.test(cinput)
