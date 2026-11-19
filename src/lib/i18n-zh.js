@@ -9212,6 +9212,7 @@ export default {
   "Your Dropline sign-in has expired — connect again": "Dropline 登录已过期，重新连接",
   "Connecting needs an https address: turn on Tailscale HTTPS, or paste a Dropline key": "连接需要 https 地址：开启 Tailscale HTTPS，或直接粘贴 Dropline key",
   "This instance has no https address — ask the person who runs it to set VIBESPACE_PUBLIC_URL (an https address), or paste a Dropline key": "这个实例没有 https 地址——请运行它的人设置 VIBESPACE_PUBLIC_URL（一个 https 地址），或直接粘贴 Dropline key",
+  "The cluster's Fish Audio client has no sign-in relay page — ask the person who runs this instance to give the cluster's Dropline preset a relayUrl (or the fleet a relay page), or paste a Dropline key": "集群提供的 Fish Audio 客户端没有登录中转页——请运行这个实例的人为集群的 Dropline 预设设置 relayUrl（或为整个集群设置中转页），或直接粘贴 Dropline key",
   "Finish the sign-in in the new tab (Fish Audio mails you a code)…": "在新标签页里完成登录（Fish Audio 会给你发一封带验证码的邮件）…",
   "Dropline connected": "Dropline 已连接",
   "Teach Dropline": "教 Dropline",

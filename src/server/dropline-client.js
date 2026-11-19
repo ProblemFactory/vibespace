@@ -68,7 +68,7 @@ function create({ integrations = null, pluginOn = () => true, base = DROPLINE_BA
   function pairOf(j, clientId, prev = null) {
     const t = now();
     const s = Number(j && j.expires_in);
-    return { access: String(j.access_token || ''), accessExp: t + (Number.isFinite(s) && s > 0 ? s : DEFAULT_ACCESS_S) * 1000, refresh: j.refresh_token ? String(j.refresh_token) : null, refreshExp: t + REFRESH_LIFE_MS, clientId, name: prev ? prev.name || '' : '', team: prev ? prev.team || '' : '', state: 'connected', at: t, ...(prev && prev.registeredFor ? { registeredFor: prev.registeredFor } : {}) };
+    return { access: String(j.access_token || ''), accessExp: t + (Number.isFinite(s) && s > 0 ? s : DEFAULT_ACCESS_S) * 1000, refresh: j.refresh_token ? String(j.refresh_token) : null, refreshExp: t + REFRESH_LIFE_MS, clientId, name: prev ? prev.name || '' : '', team: prev ? prev.team || '' : '', state: 'connected', at: t, ...(prev && prev.registeredClientId ? { registeredClientId: prev.registeredClientId } : {}), ...(prev && prev.registeredFor ? { registeredFor: prev.registeredFor } : {}) };
   }
   const form = (o) => ({ method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(o).toString() });
   async function markReconnect(why) {
@@ -210,7 +210,7 @@ function create({ integrations = null, pluginOn = () => true, base = DROPLINE_BA
     // POST https://api.fish.audio/oauth/token (grant_type=authorization_code + the PKCE verifier; no secret)
     try { res = await fetch(`${oauthBase}/oauth/token`, form({ grant_type: 'authorization_code', code, client_id: clientId, redirect_uri: redirectUri, code_verifier: verifier })); } catch (e) { throw new DroplineError('failed', `Fish Audio unreachable: ${e && e.message}`, { status: 502 }); }
     if (!res.ok) throw await vendorError(res);
-    const pair = pairOf(await res.json(), clientId, { registeredFor: (pairNow() || {}).registeredFor || null });
+    const pair = pairOf(await res.json(), clientId, { registeredFor: (pairNow() || {}).registeredFor || null, registeredClientId: (pairNow() || {}).registeredClientId || null });   // B-1e9a: the hub's own client over a preset survives the sign-in
     if (!pair.access) throw new DroplineError('failed', 'Fish Audio answered no access token', { status: 502 });
     tokens.write(pair);
     let who = { name: '', team: '' };
@@ -219,7 +219,9 @@ function create({ integrations = null, pluginOn = () => true, base = DROPLINE_BA
     return { user: who };
   }
   /** Disconnect: the pair is forgotten HERE (Fish Audio keeps the grant until the person removes it at fish.audio) */
-  function disconnect() { if (tokens) tokens.clear(); return { ok: true }; }
+  // B-1e9a (the read): the sign-in goes; a client this hub REGISTERED over a cluster preset stays (a public client, no secret) —
+  // «one client per deployment»: the next Connect reuses it instead of registering another at the vendor
+  function disconnect() { if (tokens) { const p = pairNow() || {}; if (p.registeredClientId) tokens.write({ registeredFor: p.registeredFor || null, registeredClientId: p.registeredClientId }); else tokens.clear(); } return { ok: true }; }
   function account() {
     if (credentialOf().key) return { tier: 'key', state: 'connected', name: null, team: null };
     const p = pairNow();

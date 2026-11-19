@@ -84,9 +84,11 @@ function landingHtml(r) {
 /** WHY there is no Connect here (lane dropline-connect-door, a fleet user's report 2026-10-18) — the status answer's
  *  `connectWhy`, by WHO can give this instance an https address: null = Connect runs; `operator` = the address is the
  *  operator's (VIBESPACE_PUBLIC_URL set, not https) or a cluster deploy has none (its person cannot run Tailscale on a
- *  pod) ⇒ ask the person who runs it; `self-hosted` = the person runs the hub ⇒ Tailscale HTTPS. The words: the
- *  registry row's `connect.whys`. */
-function connectWhyOf({ via = null, source = null, cluster = false } = {}) {
+ *  pod) ⇒ ask the person who runs it; `self-hosted` = the person runs the hub ⇒ Tailscale HTTPS; `preset-no-relay` (B-1e9a)
+ *  = the fleet's client has no relay page ⇒ the operator gives its preset a relayUrl (or the fleet a relay page). The words:
+ *  the registry row's `connect.whys`. (The refusal keeps its `why: 'needs-https'` — the card keys on it.) */
+function connectWhyOf({ via = null, source = null, cluster = false, presetNoRelay = false } = {}) {
+  if (presetNoRelay) return 'preset-no-relay';   // B-1e9a: the fleet's client has no relay page (neither its preset's relayUrl nor the fleet's) — the operator's to mend: a fleet client cannot carry every pod's own callback
   if (via) return null;
   return source === 'env' || cluster ? 'operator' : 'self-hosted';
 }
@@ -97,6 +99,8 @@ function create({ client, flows, integrations = () => null, instanceUrl = () => 
   const key = crypto.randomBytes(32);   // this boot's state key: a state from another boot (or another kind) is refused
   const sign = (clear) => crypto.createHmac('sha256', key).update(clear).digest('base64url');
   const store = () => { try { return integrations() || null; } catch { return null; } };
+  const safeCall = (fn, dflt) => { try { return fn(); } catch { return dflt; } };
+  const safeRead = () => { try { return tokens && typeof tokens.read === 'function' ? tokens.read() : null; } catch { return null; } };
   /** the deployment's client: the row's own clientId/relayUrl, else the cluster preset's. B-e0d1: presetsFor answers the
    *  WIRE shape (key + label, never a value), so `presetsFor(KIND)[0].values` was always {}, and «own» was the EFFECTIVE values
    *  (the preset folded in) — `preset` never said true. Now the store's OWN resolution is read by its source: its pick (a
@@ -104,28 +108,39 @@ function create({ client, flows, integrations = () => null, instanceUrl = () => 
    *  when it came from the cluster, `own` when it is the user's. */
   function clientCfg() {
     const st = store();
-    let own = {}, preset = {};
+    let own = {}, preset = {}, source = null;
     try {
       const r = st && st.resolveIntegration(KIND);
+      source = (r && r.source) || null;
       if (r && r.source === 'cluster') preset = r.values || {};
       else if (r && r.source === 'user') own = r.values || {};
     } catch { }
-    const clientId = String(own.clientId || preset.clientId || '').trim();
-    const relayUrl = String(own.relayUrl || preset.relayUrl || '').trim();
-    return { clientId, relayUrl, preset: !!preset.clientId && !own.clientId };
+    // B-1e9a: a cluster preset carrying no client (an apiKey-only one) keeps the hub's OWN registration beside its tokens,
+    // never as the person's row (that row would outrank the WHOLE preset — its apiKey lost after the first Connect)
+    const kept = source === 'cluster' && !preset.clientId ? String((safeRead() || {}).registeredClientId || '').trim() : '';
+    const clientId = String(own.clientId || preset.clientId || kept || '').trim();
+    // B-1e9a (the read): a fleet client whose preset names no relay page takes THE FLEET's sign-in relay page (fleet.json
+    // relayUrl — the one road every other integration reads; a preset row's own relayUrl outranks it, as consent-road relayPick)
+    const fleet = preset.clientId && !own.clientId && !preset.relayUrl ? String(safeCall(() => (st && typeof st.fleetRelayUrl === 'function' ? st.fleetRelayUrl() : ''), '') || '').trim() : '';
+    const relayUrl = String(own.relayUrl || preset.relayUrl || fleet || '').trim();
+    return { clientId, relayUrl, preset: !!preset.clientId && !own.clientId, source };
   }
   const httpsBase = () => { const u = String((typeof instanceUrl === 'function' ? instanceUrl() : '') || '').replace(/\/+$/, ''); return /^https:\/\/[^/]+$/.test(u) ? u : ''; };
-  /** where the vendor sends the browser back: a preset's relay › the hub's own https › the row's relay › none */
+  /** where the vendor sends the browser back: a preset's relay (its own, else the fleet's) › none for a preset with neither
+   *  (B-1e9a) › the hub's own https › the row's relay › none */
   function callbackPlan() {
     const c = clientCfg();
     if (c.preset && c.relayUrl) return { redirectUri: c.relayUrl, via: 'relay', ...c };
+    // B-1e9a: a fleet client with NO relay page (neither its preset's nor the fleet's) would send the vendor to this pod's own https —
+    // a callback that client was never registered for (the vendor refuses it): no Connect, and the card names why (said once)
+    if (c.preset && !c.relayUrl) return { redirectUri: null, via: null, presetNoRelay: true, ...c };
     const own = httpsBase();
     if (own) return { redirectUri: own + CALLBACK_PATH, via: 'own-https', ...c };
     if (/^https:\/\//.test(c.relayUrl)) return { redirectUri: c.relayUrl, via: 'relay', ...c };
     return { redirectUri: null, via: null, ...c };
   }
   const safe = (fn, dflt) => { try { return fn(); } catch { return dflt; } };
-  const connectWhy = () => connectWhyOf({ via: callbackPlan().via, source: safe(instanceSource, null), cluster: !!safe(clusterDeploy, false) });
+  const connectWhy = () => { const p = callbackPlan(); return connectWhyOf({ via: p.via, presetNoRelay: !!p.presetNoRelay, source: safe(instanceSource, null), cluster: !!safe(clusterDeploy, false) }); };
   async function start({ origin = '' } = {}) {
     const plan = callbackPlan();
     if (!plan.redirectUri) { const cw = connectWhy(); return { ok: false, why: 'needs-https', connectWhy: cw, message: CONNECT_WHYS[cw] }; }
@@ -134,8 +149,11 @@ function create({ client, flows, integrations = () => null, instanceUrl = () => 
     if (!clientId || (!plan.preset && reg && reg !== plan.redirectUri)) {
       clientId = (await client.register({ redirectUri: plan.redirectUri })).clientId;
       const st = store();
-      if (st && typeof st.setIntegration === 'function') st.setIntegration(KIND, { clientId });
-      tokens.write({ ...(tokens.read() || {}), registeredFor: plan.redirectUri });
+      if (plan.source === 'cluster') tokens.write({ ...(tokens.read() || {}), registeredFor: plan.redirectUri, registeredClientId: clientId });   // B-1e9a: over a preset, beside the tokens — never the person's row
+      else {
+        if (st && typeof st.setIntegration === 'function') st.setIntegration(KIND, { clientId });
+        tokens.write({ ...(tokens.read() || {}), registeredFor: plan.redirectUri });
+      }
       log.log?.(`[voice] registered this deployment's Dropline client (callback via ${plan.via})`);
     }
     const { verifier, challenge } = pkcePair();

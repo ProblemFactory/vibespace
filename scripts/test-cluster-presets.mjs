@@ -53,7 +53,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -808,6 +808,79 @@ console.log('§7 fleet.json browserEngine — the cluster layer, the override, b
   const m = planOf(mixedStore);
   ok(onePair(m), 'B-e0d1: ONE PAIR, NEVER MIXED — the person\'s own relay page beside a preset gives the person\'s values alone: no preset client id, preset false', JSON.stringify(m));
   ok(!onePair({ ...m, clientId: CID, preset: true }), 'CONTROL: a mixed answer (the preset\'s client id beside the person\'s page — a per-field merge) fails that leg');
+  // B-1e9a (1): AN apiKey-ONLY PRESET KEEPS ITS KEY THROUGH CONNECT — the first Connect self-registers a client; written as the
+  // person's row it outranked the WHOLE preset (resolvePrecedence: one pair, never merged) and the cluster's key stopped resolving.
+  // The hub's own client now sits beside the tokens; a second Connect reuses it (no second registration)
+  const KEY = ['dl', 'clusterKey' + 'Abc123'].join('_');
+  const startWorld = (mod, st) => {
+    let regs = 0, tok = null;
+    const tokens = { read: () => tok, write: (v) => { tok = v; }, clear: () => { tok = null; } };
+    const door = mod.create({ client: { register: async () => ({ clientId: 'selfreg' + 'Client' + String(++regs).padStart(2, '0') }), authorizeUrl: () => 'https://consent.example.test/' }, flows: { begin: async () => ({ flowId: 'f1', consentUrl: 'https://consent.example.test/' }) }, integrations: () => st, instanceUrl: () => 'https://hub.example.ts.net', tokens });
+    return { door, regs: () => regs, tok: () => tok };
+  };
+  const keyAfter = async (mod, tag) => {
+    const st = mk({ VIBESPACE_INTEGRATION_DROPLINE_APIKEY: KEY }, tag), w = startWorld(mod, st);
+    const before = st.resolveIntegration('dropline');
+    const s1 = await w.door.start({}), s2 = await w.door.start({});
+    const after = st.resolveIntegration('dropline');
+    return { started: s1.ok && s2.ok, regs: w.regs(), kept: (w.tok() || {}).registeredClientId || null, before: before.source + ':' + !!(before.values || {}).apiKey, after: after.source + ':' + ((after.values || {}).apiKey === KEY) };
+  };
+  const ka = await keyAfter(DO, 'keyonly');
+  ok(ka.started && ka.before === 'cluster:true' && ka.after === 'cluster:true' && ka.regs === 1 && /^selfregClient01$/.test(ka.kept || ''),
+    'B-1e9a: an apiKey-only cluster preset — two Connects: ONE registration, the hub\'s client kept beside the tokens, and the cluster\'s key STILL resolves (never the person\'s row over the preset)', ka);
+  const DOSRC = fs.readFileSync(path.join(REPO, 'src/server/dropline-oauth.js'), 'utf8');
+  const oldWrite = M.load('src/server/dropline-oauth.js', anchored(DOSRC, "      if (plan.source === 'cluster') tokens.write(", "      if (false) tokens.write(", 'B-1e9a: the person\'s row written over a preset'), 'dl-oldwrite');
+  const kr = await keyAfter(oldWrite, 'keyonly-red');
+  ok(kr.after !== 'cluster:true', 'RED control: the registration written as the person\'s row (the old road) ⇒ the cluster\'s key no longer resolves after the first Connect', kr);
+  // B-1e9a (2): A FLEET CLIENT WITH NO RELAY PAGE — the plan sent the vendor to this pod's own https (a callback the fleet's client
+  // was never registered for): no Connect now, nothing registered, and the card's reason names the operator's mistake
+  const relayLess = async (mod, tag) => {
+    const st = mk({ VIBESPACE_INTEGRATION_DROPLINE_CLIENTID: CID }, tag), w = startWorld(mod, st);
+    const plan = w.door.callbackPlan(), why = w.door.connectWhy(), r = await w.door.start({});
+    return { via: plan.via, redirectUri: plan.redirectUri, why, ok: r.ok, code: r.connectWhy || null, message: r.message || '', regs: w.regs() };
+  };
+  const rl = await relayLess(DO, 'norelay');
+  ok(rl.via === null && rl.redirectUri === null && rl.why === 'preset-no-relay' && rl.ok === false && rl.code === 'preset-no-relay' && /Dropline preset a relayUrl \(or the fleet a relay page\)/.test(rl.message) && rl.regs === 0,
+    'B-1e9a: a fleet preset with a client id and NO relay page (none of its own, none of the fleet\'s) ⇒ no Connect (never the pod\'s own https for the fleet\'s client), nothing registered, the reason «preset-no-relay» names the preset\'s relayUrl (or the fleet\'s page) — words true on every deploy road', rl);
+  // …the FLEET's sign-in relay page (fleet.json relayUrl; here the chart's last-release env form) serves a preset that names none
+  const FR = 'https://fleet-relay.example.test/relay/';
+  const fleetRelay = async (mod, tag) => {
+    const st = mk({ VIBESPACE_INTEGRATION_DROPLINE_CLIENTID: CID, VIBESPACE_OAUTH_RELAY_URL: FR }, tag), w = startWorld(mod, st);
+    const plan = w.door.callbackPlan(), r = await w.door.start({});
+    return { via: plan.via, redirectUri: plan.redirectUri, ok: r.ok, regs: w.regs() };
+  };
+  const fr = await fleetRelay(DO, 'fleetrelay');
+  ok(fr.via === 'relay' && fr.redirectUri === FR && fr.ok === true && fr.regs === 0, 'B-1e9a: a preset client with no relay page of its own takes the FLEET\'s sign-in relay page (the one road every integration reads) — Connect runs there, nothing registered', fr);
+  const noFleet = M.load('src/server/dropline-oauth.js', anchored(DOSRC, "preset.relayUrl || fleet || ''", "preset.relayUrl || ''", 'B-1e9a: the fleet relay page not read'), 'dl-nofleet');   // stale-pins: kept — a RED control: the pre-B-1e9a relay pick restored on purpose
+  const frr = await fleetRelay(noFleet, 'fleetrelay-red');
+  ok(frr.via === null && frr.ok === false, 'RED control: without the fleet\'s page that preset is refused although the fleet has a relay page', frr);
+  const noBranch = M.load('src/server/dropline-oauth.js', anchored(DOSRC, "    if (c.preset && !c.relayUrl) return { redirectUri: null, via: null, presetNoRelay: true, ...c };\n", '', 'B-1e9a: the relay-less preset branch removed'), 'dl-nobranch');
+  const rr = await relayLess(noBranch, 'norelay-red');
+  ok(rr.via === 'own-https' && rr.ok === true, 'RED control: without the branch the fleet\'s client is sent to the pod\'s own https (the vendor would refuse the callback)', rr);
+  // B-1e9a (the read): the hub's own client kept beside the tokens SURVIVES THE SIGN-IN and a DISCONNECT — the REAL Dropline client
+  // (src/server/dropline-client.js) over an in-memory token store and a stand-in vendor: connectWith writes the pair with the kept
+  // registration; Disconnect forgets the sign-in, keeps the registration (one client per deployment)
+  const DC = require(path.join(REPO, 'src/server/dropline-client.js'));
+  const carry = async (mod) => {
+    let tok = { registeredFor: 'https://hub.example.ts.net/api/channels/oauth/cb/dropline', registeredClientId: 'selfregClient01' };
+    const tokens = { read: () => tok, write: (v) => { tok = v; }, clear: () => { tok = null; } };
+    const fetchImpl = async (url) => ({ ok: true, status: 200, json: async () => (/\/oauth\/token$/.test(String(url)) ? { access_token: 'acc-1', refresh_token: 'ref-1', expires_in: 3600 } : { name: 'Ada', team: 'T' }), text: async () => '' });
+    const c = mod.create({ tokens, fetchImpl, oauthBase: 'https://oauth.example.test', base: 'https://api.example.test', log: quiet.log });
+    await c.connectWith({ clientId: 'selfregClient01', code: 'c1', verifier: 'v1', redirectUri: tok.registeredFor });
+    const afterSignIn = { access: !!(tok && tok.access), kept: tok && tok.registeredClientId };
+    c.disconnect();
+    return { afterSignIn, afterDisconnect: { access: !!(tok && tok.access), kept: tok && tok.registeredClientId, connected: c.connected() } };
+  };
+  const cy = await carry(DC);
+  ok(cy.afterSignIn.access && cy.afterSignIn.kept === 'selfregClient01' && !cy.afterDisconnect.access && cy.afterDisconnect.kept === 'selfregClient01' && cy.afterDisconnect.connected === false,
+    'B-1e9a: the real client — the sign-in keeps the hub\'s registered client beside the pair; Disconnect forgets the sign-in (not connected) and keeps the registration', cy);
+  const DCSRC = fs.readFileSync(path.join(REPO, 'src/server/dropline-client.js'), 'utf8');
+  const noCarry = M.load('src/server/dropline-client.js', anchored(DCSRC, ", registeredClientId: (pairNow() || {}).registeredClientId || null });", " });", 'B-1e9a: the sign-in drops the registration'), 'dl-nocarry');
+  const cyr = await carry(noCarry);
+  ok(!cyr.afterSignIn.kept, 'RED control: a sign-in that does not carry the registration loses the hub\'s client (the next Connect would register another)', cyr);
+  const oldDisc = M.load('src/server/dropline-client.js', anchored(DCSRC, "if (p.registeredClientId) tokens.write({ registeredFor: p.registeredFor || null, registeredClientId: p.registeredClientId }); else tokens.clear();", "tokens.clear();", 'B-1e9a: Disconnect clears the registration'), 'dl-olddisc');
+  const cyd = await carry(oldDisc);
+  ok(cyd.afterSignIn.kept === 'selfregClient01' && !cyd.afterDisconnect.kept, 'RED control: the old Disconnect (clear everything) drops the registration — a new vendor client at the next Connect', cyd);
   quiet.lines.length = 0; empty.stop?.();
 }
 

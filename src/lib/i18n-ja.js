@@ -9211,6 +9211,7 @@ export default {
   "Your Dropline sign-in has expired — connect again": "Dropline のサインインが期限切れです——もう一度接続してください",
   "Connecting needs an https address: turn on Tailscale HTTPS, or paste a Dropline key": "接続には https のアドレスが必要です：Tailscale HTTPS をオンにするか、Dropline のキーを貼り付けてください",
   "This instance has no https address — ask the person who runs it to set VIBESPACE_PUBLIC_URL (an https address), or paste a Dropline key": "このインスタンスには https のアドレスがありません — 運用している人に VIBESPACE_PUBLIC_URL（https のアドレス）を設定してもらうか、Dropline のキーを貼り付けてください",
+  "The cluster's Fish Audio client has no sign-in relay page — ask the person who runs this instance to give the cluster's Dropline preset a relayUrl (or the fleet a relay page), or paste a Dropline key": "クラスターの Fish Audio クライアントにサインイン中継ページがありません — このインスタンスを運用している人に、クラスターの Dropline プリセットへ relayUrl を（またはクラスター全体に中継ページを）設定してもらうか、Dropline のキーを貼り付けてください",
   "Finish the sign-in in the new tab (Fish Audio mails you a code)…": "新しいタブでサインインを完了してください（Fish Audio からコードがメールで届きます）…",
   "Dropline connected": "Dropline に接続しました",
   "Teach Dropline": "Dropline に教える",

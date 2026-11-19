@@ -22,7 +22,7 @@
  *    {done, ok, error}), `disconnect`; `words` (expired / finish / done /
  *    disconnected) and `whys` — one sentence per `connectWhy` code the
  *    status answer names when Connect cannot run (`self-hosted` /
- *    `operator`); the client never guesses which. Either tier serves the
+ *    `operator` / `preset-no-relay`, CONNECT_WHYS); the client never guesses which. Either tier serves the
  *    row, so a `connect` row requires no field; a card row only.
  *
  *  · `bindsPerMachine` (lane remoteapp-r1b, design q-024 r1 §1.3): ONE
@@ -100,7 +100,7 @@ const REDIRECT_KEYS = Object.freeze(['console', 'refusal', 'create', 'clientType
 const REDIRECT_ALSO = Object.freeze(['drive']);
 /** lane dropline-connect-door: a `connect` block's words and its `connectWhy` codes — closed sets (checkRow) */
 const CONNECT_WORDS = Object.freeze(['expired', 'finish', 'done', 'disconnected']);
-const CONNECT_WHYS = Object.freeze(['self-hosted', 'operator']);
+const CONNECT_WHYS = Object.freeze(['self-hosted', 'operator', 'preset-no-relay']);
 /** design 012: how an account of a bindsPerAccount row signs in when it is not the row's OAuth client. */
 const SIGNIN_KINDS = Object.freeze(['paste']);
 
@@ -375,6 +375,7 @@ const ROWS = Object.freeze([
       whys: {
         'self-hosted': i18nKey('Connecting needs an https address: turn on Tailscale HTTPS, or paste a Dropline key'),
         operator: i18nKey('This instance has no https address — ask the person who runs it to set VIBESPACE_PUBLIC_URL (an https address), or paste a Dropline key'),
+        'preset-no-relay': i18nKey('The cluster\'s Fish Audio client has no sign-in relay page — ask the person who runs this instance to give the cluster\'s Dropline preset a relayUrl (or the fleet a relay page), or paste a Dropline key'),
       },
     },
     test: {
