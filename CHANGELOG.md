@@ -40,6 +40,13 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - New profile and a profile’s ⋯ › Proxy… set the proxy and its login. An old address that holds a password offers “Move the password to the vault”.
 - A profile’s ⋯ › Check the exit… reads its proxy’s public address, country and time zone from a check address you set; nothing is kept until you press Keep.
 - The kept exit is handed to an engine plugin when the browser starts; you can also type it by hand.
+- The Agent browser's notice that a page keeps reloading now has Stop loading and Close this tab buttons.
+- A machine VibeSpace cannot reach now says why, with Copy the public key to add and Try again on the same line.
+- A setting that takes effect after a reload now shows Reload now on its row once you change it.
+- The LLM plugin, turned on without a key, now shows Add the API key…, which opens its key card.
+- A built-in app that is not installed now has Install…, which searches the package sources for it.
+- The Outbox shows who drafted each message on its row; clicking an agent's name shows only its drafts.
+- The For you item about new messages awaiting your approval on an account now has an Open the Outbox button.
 
 ### Changed
 - Conversations and background jobs now start below VibeSpace's CPU priority, so a busy build yields to the page; see Session Properties, turn off in Settings.
@@ -57,6 +64,31 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A paired machine now runs an agent's CLI from where that machine's own login shell finds it, and a new conversation says so when it finds none.
 - In Remote, a machine's «Exit: network — … · commands — …» line is now a button that opens «Who can use it…»; the separate exit icon is gone.
 - The notice about the old background-job secrets file now has buttons: Move into the vault (then the file is deleted) or Delete the file.
+- A question waiting in a paused conversation now offers Open the conversation and answer in For you; Hide there reads Stop reminding.
+- The Lark, Slack and Google sign-in cards now say that one relay page serves all three.
+- Moving a window from its menu now says how to place it, and Esc or Cancel puts it back where it was.
+- A line that said where to change a setting now carries a button that opens that setting.
+- The new browser profile dialog says once that cloud browsers need your key, with a button to the key's card.
+- The voice sheet's https note now has Turn on HTTPS…, and its word-suggestion note has Turn on….
+- The LLM plugin's line now reads «Today … (limit …) · judged N · M needed you».
+- A machine that is offline says since when, with Show the pairing command… on its row; what to check is folded under it.
+- Mounting onto an offline machine says so first, with its pairing command one click away.
+- Run as administrator offers Show the pairing command… first, and a dial-out that is not connected offers Reinstall….
+- With no machine, the Agents panel offers Add an SSH machine… and Pair a device…; Log in on this machine… stays on the Claude row.
+- The export dialog lists only the sensitive data that exists, with Set a password… when no password is set.
+- An account that cannot be removed shows Release… beside each reference, and a Disconnect button.
+- A webhook caller that takes no replies shows Change delivery…, and a refused direct send shows Change the sending policy….
+- The browser switch card offers Install a browser plugin…, and a page waiting for a passkey offers Passkey settings….
+- In a conversation's temporary browser, a page waiting for a passkey says its passkeys stay with the conversation, not with a profile it does not have.
+- An install that cannot run here now offers Open a terminal or the xpra download page, plus Check again, on the same line.
+- A failed app removal says so once, with Forget it, Copy the command and Close; what it printed is under Details.
+- The editor's Unsaved and Saved marks are translated; a file changed on disk offers Reload from disk or Keep my changes.
+- Sign-in no longer mentions a company or an administrator; No Claude account yet? links to claude.ai.
+- A folder that holds only hidden files says so, with Show hidden files.
+- Every remaining note that said where to change a setting now has the button that opens it, from the action trace to the background-job notifications.
+- A pooled account whose subscription stopped now opens Manage Agents from For you, where its Re-check or its setting is.
+- Once Spending allows automatic turns, the Credits chip's tip in the usage popup says they still run while the account bills paid overage.
+- For you items filed before this update keep their earlier words, in Chinese and Japanese too; the new words and buttons come when an item is filed again.
 
 ### Fixed
 - On a busy machine, VibeSpace no longer freezes for up to half a minute at startup while it checks which agent programs are running.
@@ -70,6 +102,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The Helm chart no longer restarts an instance busy for a few minutes (a restart ended its conversations); it stops taking new requests until it answers again.
 - Website login form and login card: the two-step code field opens VibeSpace's own list of your vault's two-step codes, instead of the browser's suggestions.
 - A two-step code name that matches nothing in the vault is said under the field right away, not only when you save.
+- An unwatched agent browser no longer stops drawing a page while the agent's command on it still runs (a large site's first load could hang ~2 minutes).
 - On slow storage, putting a browser engine's previous kernel back no longer leaves browser starts and downloads waiting forever; each answers within 30 seconds.
 - A browser engine that asks for -disable-sync with one dash is now treated like the two-dash form: it is left out, so the browser can still sign in to Google.
 - The live view of an idle agent browser that two conversations share no longer stays blank when you open it: it shows its own tab.
@@ -141,7 +174,13 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Right after VibeSpace starts, the first usage report of a running conversation no longer freezes it for seconds.
 - After a long pause or a big batch from another machine, VibeSpace no longer freezes while it reads the new usage; the Usage window says it is loading.
 - While mounts, open ports or a desktop app's windows are checked in the background, VibeSpace no longer pauses for a moment each time.
-- An unwatched agent browser no longer stops drawing a page while the agent's command on it still runs (a large site's first load could hang ~2 minutes).
+- A new conversation in a folder whose parent folders are missing can create them all instead of being refused.
+- Installing an app from a file that is not there now says so, keeps the path box and offers Choose another file….
+- Stop reminding on a paused conversation's question now still holds after VibeSpace restarts.
+- In the tray and on the phone, a paused conversation's question now offers Open the conversation and answer.
+- When HTTPS is already automatic, the sign-in note now says to turn on HTTPS certificates for your tailnet in Tailscale.
+- The storage access boxes no longer point below at a Connect button that sits above them.
+- Mounting a folder from an offline machine now says it is offline first, with its pairing command.
 
 ### Security
 - A cluster install can let only its ingress reach each user's VibeSpace (networkPolicy.ingress, off until tried on a test cluster).
