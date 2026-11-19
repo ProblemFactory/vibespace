@@ -339,10 +339,39 @@ ok(await p1.load(), 'page 1 loaded the app at 375×667');
   const blocks = await p1.evaljs(`(async () => { for (let i = 0; i < 60 && document.querySelectorAll('.integ-card .integ-connect .oauth-connect-btn').length < ${CONNECT_ROWS.length}; i++) await new Promise((r) => setTimeout(r, 100)); return [...document.querySelectorAll('.integ-card')].filter((c) => c.querySelector('.integ-connect .oauth-connect-btn')).map((c) => c.dataset.integ).sort(); })()`);
   ok(CONNECT_ROWS.length > 0 && sameSet(blocks, CONNECT_ROWS), `the window draws a Connect block on exactly the rows declaring connect (${blocks.join(', ')} vs ${CONNECT_ROWS.join(', ')})`);
   ok(!sameSet(blocks.slice(1), CONNECT_ROWS) && !sameSet([...blocks, BB], CONNECT_ROWS), 'CONTROL: the block census is not vacuous — a lost block and a block on a key-only row each fail it');
+  // the WORDS LINE (ckpt61 hosted cure — the line grew a door on purpose: lane ui-needs-a-button pick 2 + its reader follow-up #14,
+  // src/lib/oauth-connect-row.js sayWhy): it STARTS with the exact sentence the hub picked for its reason; a `self-hosted` why
+  // (this instance has no https address, its owner is the person) carries, on the DEFAULT server.https 'auto', the Tailscale
+  // also-line, and exactly ONE door button labelled by the mode (auto: «Use my own certificate files…», else «Turn on HTTPS…»)
+  // opening the server.https row; any other why is the sentence alone. All three pinned — the whole line, never its first text alone.
+  const HTTPS_ALSO = 'This instance already asks Tailscale for a certificate — turn on HTTPS Certificates for your tailnet in the Tailscale admin console.';
+  const judgeWords = (L, sent, why) => {
+    if (!L || typeof sent !== 'string' || !sent) return 'no words line';
+    if (L.first !== sent || !L.text.startsWith(sent)) return 'not the hub\'s sentence first';
+    if (why !== 'self-hosted') return L.doors.length === 0 && L.text === sent ? null : 'a why with no door drew more than its sentence';
+    const auto = L.mode === 'auto', label = auto ? 'Use my own certificate files…' : 'Turn on HTTPS…';
+    if (L.doors.length !== 1) return `${L.doors.length} door buttons, not exactly one`;
+    if (L.doors[0].label !== label || L.doors[0].door !== 'settings:server.https') return `the door is «${L.doors[0].label}» (${L.doors[0].door}), not «${label}» on server.https`;
+    const want = auto ? `${sent} ${HTTPS_ALSO} ${label}` : `${sent} ${label}`;
+    return L.text === want ? null : `the line is «${L.text}», not «${want}»`;
+  };
   for (const id of CONNECT_ROWS) {
     const st = (await api('GET', R.rowById(id).connect.status)).json || {};
-    const why = await p1.evaljs(`(document.querySelector('.integ-card[data-integ="${id}"] .oauth-connect-words') || {}).textContent || ''`);
-    ok(st.connectVia === null && !!st.connectWhy && why === R.rowById(id).connect.whys[st.connectWhy], `${id}: no https here (connectVia null) ⇒ the block says the hub's sentence for connectWhy=${st.connectWhy} (${why})`);
+    const sent = R.rowById(id).connect.whys[st.connectWhy];
+    const L = await p1.evaljs(`(() => { const w = document.querySelector('.integ-card[data-integ="${id}"] .oauth-connect-words'); if (!w) return null; const f = w.firstChild; return { text: w.textContent, first: f && f.nodeType === 3 ? f.textContent : null, doors: [...w.querySelectorAll('button')].map((b) => ({ label: b.textContent, door: b.dataset.door || '', need: b.classList.contains('need-door') })), mode: (() => { try { return window.app.settings.get('server.https'); } catch { return null; } })() }; })()`);
+    const bad = judgeWords(L, sent, st.connectWhy);
+    ok(st.connectVia === null && !!st.connectWhy && bad === null && (L.doors || []).every((d) => d.need), `${id}: no https here (connectVia null) ⇒ the words line starts with the hub's sentence for connectWhy=${st.connectWhy}${st.connectWhy === 'self-hosted' ? `, then (server.https ${L && L.mode}) ${L && L.mode === 'auto' ? 'the Tailscale also-line and ' : ''}ONE door to the https row` : ''} (${bad || (L && L.text)})`);
+    if (st.connectWhy === 'self-hosted' && L && bad === null) {
+      // RED CONTROLS (the judge on the line as drawn, one planted fault each): a doubled door, a missing door, another
+      // sentence first, the also-line dropped on 'auto', the door labelled for the other mode — each red by name
+      const two = { ...L, doors: [...L.doors, L.doors[0]], text: `${L.text} ${L.doors[0].label}` };
+      const none = { ...L, doors: [], text: L.text.slice(0, L.text.length - L.doors[0].label.length - 1) };
+      const other = { ...L, first: 'Another sentence', text: 'Another sentence' + L.text.slice(sent.length) };
+      const noAlso = L.mode === 'auto' ? { ...L, text: L.text.replace(` ${HTTPS_ALSO}`, '') } : null;
+      const wrongLabel = { ...L, doors: [{ ...L.doors[0], label: L.mode === 'auto' ? 'Turn on HTTPS…' : 'Use my own certificate files…' }] };
+      const reds = [two, none, other, noAlso, wrongLabel].filter(Boolean).map((x) => judgeWords(x, sent, st.connectWhy));
+      ok(reds.length >= 4 && reds.every((r) => typeof r === 'string' && r), `CONTROL: the words-line judge goes red on a doubled door, a missing door, another sentence first, the also-line dropped and the door labelled for the other mode (${reds.join(' · ')})`);
+    }
   }
 }
 
@@ -976,7 +1005,14 @@ const p2 = await newPage();
   let acct = null;
   for (let i = 0; i < 60 && !acct; i++) { acct = await slackAcct(); if (!acct) await sleep(200); }
   ok(acct && acct.auth && acct.auth.state === 'connected' && acct.retention === 'purge-on-remove' && JSON.stringify(acct.policyModes) === '["review"]', `step ③ + Connect created the Slack account (connected, purge-on-remove, review only) — ${JSON.stringify(acct && { id: acct.id, state: acct.auth && acct.auth.state })}`);
-  ok((await p1.evaljs(`localStorage.getItem('vs-paste-app:slack')`)) === null, 'connected: the remembered app is forgotten');
+  // the forget is the DIALOG's, after the connect's reply lands (src/lib/channel-account-dialogs.js: post → steps.connected →
+  // memory.forget): the account on the server is no proof it ran yet — read the PAGE's own state, within a bound (ckpt61
+  // hosted cure: one read raced the handler on try 1); red only if the remembered app survives the bound
+  await p1.evaljs(`(window.__vsGoneWithin = async (k, n, ms) => { for (let i = 0; i < n; i++) { if (localStorage.getItem(k) === null) return null; await new Promise((r) => setTimeout(r, ms)); } return localStorage.getItem(k); }, 1)`);
+  const keptAfter = await p1.evaljs(`window.__vsGoneWithin('vs-paste-app:slack', 60, 100)`);
+  ok(keptAfter === null, `connected: the remembered app is forgotten — read on the page's own state within 6 s (${keptAfter === null ? 'gone' : 'still kept: ' + String(keptAfter).slice(0, 60)})`);
+  const ctl = await p1.evaljs(`(async () => { localStorage.setItem('vs-paste-app:ckpt61-control', '{"appId":"A0CONTROL"}'); const v = await window.__vsGoneWithin('vs-paste-app:ckpt61-control', 5, 20); localStorage.removeItem('vs-paste-app:ckpt61-control'); return v; })()`);
+  ok(typeof ctl === 'string' && ctl.includes('A0CONTROL'), 'CONTROL: the same bounded read stays RED on a remembered app nothing forgets (a planted key, removed after)');
   const cardText = await p1.evaljs(`(async () => { for (let i = 0; i < 100; i++) { const c = document.querySelector('.rail-panel-channels .chan-account[data-adapter=${JSON.stringify((acct && acct.id) || 'slack')}]'); if (c && /免费版/.test(c.textContent)) return c.textContent; await new Promise((r) => setTimeout(r, 150)); } const c = document.querySelector('.rail-panel-channels .chan-account[data-adapter=${JSON.stringify((acct && acct.id) || 'slack')}]'); return c ? c.textContent : null; })()`);
   ok(/保存在这台服务器上/.test(cardText || '') && /Anthropic/.test(cardText || ''), 'the account card says where the copy lives and that agents\' reads go to the model provider (owner Q2), in 中文');
   ok(/免费版/.test(cardText || ''), 'and the setup report\'s free-plan fact (is_limited) — Slack hides older messages');
