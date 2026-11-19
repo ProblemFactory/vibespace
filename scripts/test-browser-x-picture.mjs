@@ -613,11 +613,10 @@ console.log('— ⑦ the X picture shows the tab the view says it shows: a tab i
 
 // ═══ ⑧ ONE WINDOW (the owner's report 2026-11-19, the second of its kind: «这个标签栏的页面和实际画面里的页面又不匹配了»): the tab
 //     on show pushed BEHIND another tab of its own window — the hub says it is a background tab (its own picture polled every
-//     half second) — the view draws THAT tab's own picture (red), never the window's front tab (black) under the red tab's name
+//     half second) — the view draws THAT tab's own picture (red), never the window's front tab (green) under the red tab's name
 //     and address; brought to the front again ⇒ the X picture comes back. WRITTEN BY READING: its first run is int361's (a box row).
 console.log('— ⑧ one window: the tab on show behind another tab of its window ⇒ the view draws ITS picture, never the front tab');
 {
-  const pageGeom2 = (Q) => Q.ev(`(() => { const b = document.getElementById('blk').getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2, top: outerHeight - innerHeight, left: Math.max(0, Math.round((outerWidth - innerWidth) / 2)) }; })()`);
   const geomOf = (Q) => Q.ev(`(() => { const b = document.getElementById('blk').getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()`).then((r) => (r && r.result && r.result.result ? r.result.result.value : r));
   const imgPx = (cx, cy) => P.l(`const im = L.img(); const G = L.geometry(); if (!im || !im.naturalWidth || !G || !G.cssW) return null; const k = im.naturalWidth / G.cssW; const c = document.createElement('canvas'); c.width = im.naturalWidth; c.height = im.naturalHeight; const g = c.getContext('2d'); g.drawImage(im, 0, 0); const d = g.getImageData(Math.round(${cx} * k), Math.round(${cy} * k), 1, 1).data; return [d[0], d[1], d[2]];`);
   const view = async () => { const x = await P.l('return L.x();'); const url = await P.l("const e = L.el().querySelector('.browser-live-url'); return e ? e.textContent : '';"); const tip = await P.l("const e = L.el().querySelector('.browser-live-mode'); return e ? e.title : '';"); const chip = await P.l("const c = L.el().querySelector('.browser-live-tabchip.active'); return c ? c.dataset.target : '';"); return { mounted: !!(x && x.mounted), why: x && x.source && x.source.why, wid: x && x.wid, url: String(url || ''), tip: String(tip || ''), chip: String(chip || '') }; };
@@ -628,25 +627,32 @@ console.log('— ⑧ one window: the tab on show behind another tab of its windo
   const R = DIR ? await agentPage(DIR, '/red') : null;
   const g = R ? await geomOf(R) : null;
   const front0 = R ? await until(async () => { const q = await view(); return q.mounted && /\/red\?n=7/.test(q.url) ? q : null; }, 15000, 250) : null;
-  // ANOTHER tab of the same window to its front — the first tab (black), brought forward over CDP, never by the agent
+  // ANOTHER tab of the same window to its front — the first tab (its GREEN block), brought forward over CDP, never by the agent
   const bf = A ? await A.call('Page.bringToFront', {}) : null;
   const t0 = Date.now(); let own = null, pxOwn = null;
   while (Date.now() - t0 < 20000) { const q = await view(); if (!q.mounted && q.why === 'background-tab' && g) { const px = await imgPx(g.x, g.y); if (px && near(px, RED, 40)) { own = q; pxOwn = px; break; } } await sleep(250); }
   const redTid = R && R.target ? String(R.target.id).toUpperCase() : '';
-  ok(!!sw.ok && !!front0 && !!bf && !!own && /\/red\?n=7/.test(own.url) && /its window shows another tab in front/.test(own.tip) && own.chip.toUpperCase() === redTid,
-    `the red tab on show, pushed behind the black tab of its own window: the view leaves the X window and draws the red tab's OWN picture (${JSON.stringify(pxOwn)} at its block), under its own address (${own && own.url}), the row's active chip the same tab (${own && own.chip.slice(0, 8)}), and the badge's words (${own && own.tip.slice(-80)})`, JSON.stringify({ sw: !!sw.ok, front0: !!front0, bf: !!bf, now: await view() }));
-  // RED CONTROL, THE OLD renderPicture (the X pane kept under the verdict): the X picture mounted by hand now — its window's block
-  // is the FRONT tab's planted colour (green), under the red tab's name: the owner's picture
-  const gF = A ? await pageGeom2(A) : null;
+  ok(!!sw.ok && !!front0 && !!bf && !bf.error && !!own && /\/red\?n=7/.test(own.url) && /its window shows another tab in front/.test(own.tip) && own.chip.toUpperCase() === redTid,
+    `the red tab on show, pushed behind the green tab of its own window: the view leaves the X window and draws the red tab's OWN picture (${JSON.stringify(pxOwn)} at its block), under its own address (${own && own.url}), the row's active chip the same tab (${own && own.chip.slice(0, 8)}), and the badge's words (${own && own.tip.slice(-80)})`, JSON.stringify({ sw: !!sw.ok, front0: !!front0, bf: !!bf, now: await view() }));
+  // its read (S2): the HALF-SECOND picture proven live — the hidden tab's block recoloured (its stream is silent: only the hub's
+  // poll carries it) reaches the view's picture within about two polls
+  const PURPLE = [140, 60, 200];
+  const rc = R ? await R.ev(`(() => { const b = document.getElementById('blk'); b.style.background = 'rgb(${PURPLE.join(',')})'; return true; })()`) : null;
+  const pxPoll = rc && g ? await until(async () => { const px = await imgPx(g.x, g.y); return px && near(px, PURPLE, 40) ? px : null; }, 5000, 200) : null;
+  ok(!!pxPoll, `the hidden tab recoloured: its own half-second picture carries the new colour to the view (${JSON.stringify(pxPoll)})`);
+  // THE LAW where the old renderPicture failed (主开发 21:4xZ): a ticket that lands while the verdict says hidden — sent by hand here,
+  // as a hub follow or a late look would — mounts NOTHING: the window would draw its front tab (green) under the red tab's address
   await P.l("L.send({ type: 'x-ticket' }); return true;");
-  const xr = await until(async () => { const q = await view(); return q.mounted && q.wid != null ? q : null; }, 15000, 250);
-  const pxOld = xr && gF ? await until(async () => { const v = await P.xPixel(xr.wid, gF.left + gF.x, gF.top + gF.y); return v && near(v, BLOCK, 40) ? v : null; }, 10000, 250) : null;
-  ok(!!pxOld && /\/red\?n=7/.test(xr.url), `RED CONTROL (the X pane kept, as the old renderPicture did): the window's block is the FRONT tab's green (${JSON.stringify(pxOld)}) under the red tab's address (${xr && xr.url})`, JSON.stringify(await view()));
+  await sleep(3000);
+  const afterTicket = await view();
+  const pxStill = g ? await imgPx(g.x, g.y) : null;
+  ok(!afterTicket.mounted && afterTicket.why === 'background-tab' && /\/red\?n=7/.test(afterTicket.url) && !!pxStill && !near(pxStill, BLOCK, 40), `a ticket sent while the verdict says hidden mounts nothing: still the tab's own picture (${afterTicket.why}), never the window's green front tab under the red tab's address`, JSON.stringify(afterTicket));
   // the red tab brought to the front again (CDP): it paints again ⇒ the X picture returns only once the clear has held its settle
   const tBack = Date.now(), back = R ? await R.call('Page.bringToFront', {}) : null;
-  const xBack = back ? await until(async () => { const q = await view(); return q.mounted && q.why === 'attach' ? q : null; }, 20000, 250) : null;
-  const settled = xBack ? Date.now() - tBack : null;
-  ok(!!xBack && settled >= PIC.BG_SETTLE_MS - 500, `brought to the front again: the X picture is the view's again after ${settled} ms (its settle ${PIC.BG_SETTLE_MS} ms — no flap between the two pictures)`, JSON.stringify(await view()));
+  let settleAt = null;
+  const xBack = back && !back.error ? await until(async () => { const q = await view(); if (settleAt == null && !q.mounted && q.why === 'background-settle') settleAt = Date.now(); return q.mounted && q.why === 'attach' ? q : null; }, 20000, 250) : null;
+  const settled = xBack && settleAt != null ? Date.now() - settleAt : null;
+  ok(!!xBack && settleAt != null && settled >= PIC.BG_SETTLE_MS - 300, `brought to the front again: the settle shown (${settleAt != null}), then the X picture is the view's again ${settled} ms after it (its settle ${PIC.BG_SETTLE_MS} ms — no flap between the two pictures)`, JSON.stringify(await view()));
   if (R) R.close();
 }
 
