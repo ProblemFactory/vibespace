@@ -93,6 +93,15 @@ function batchRefusalWords(f) {
   return t('The spend guard refused it on {member} ({why}).', { member: who, why: refusedWords(f.why, t) || f.why || '?' }) + where;   // the account BY NAME (paid overage, a credential, the spend control)
 }
 
+/** B-d073: the Close toast's «Open it…» — the dialog again, on the running batch (the caller's onDone rides it). A dialog already open
+ *  is brought forward (its first button focused), never a second one over it: a same-id shell would drop the open one without its
+ *  onClose, its poll still running. Returns 'focused' | 'opened'. */
+export function reopenResume(app, onDone = null, doc = document) {
+  const open = doc.getElementById('resume-stopped-dialog');
+  if (open) { const b = open.querySelector('.resume-stopped-stop, .dialog-footer button, button'); if (b && typeof b.focus === 'function') b.focus(); return 'focused'; }
+  openResumeStoppedDialog(app, { plan: null, onDone }).catch(() => { });
+  return 'opened';
+}
 /** The confirm → the batch → its outcome. Resolves with the final batch record (null = nothing ran). */
 export async function openResumeStoppedDialog(app, { plan = null, onDone = null } = {}) {
   const p = plan || await fetchStoppedPlan();
@@ -100,7 +109,7 @@ export async function openResumeStoppedDialog(app, { plan = null, onDone = null 
   let runningId = null;                      // a batch this dialog follows that has not ended (U2 cure, law 3: Close SAYS it keeps running)
   const shell = createModalShell({ id: 'resume-stopped-dialog', title: t('Resume sessions a limit or overload stopped'), dialogClass: 'resume-stopped-dialog', escapeToClose: true, kind: 'decision', onClose: () => {
     closed = true;
-    if (runningId) showToast(t('The resume keeps running.'), { action: { label: t('Open it…'), run: () => { if (document.getElementById('resume-stopped-dialog')) return; openResumeStoppedDialog(app, { plan: null, onDone }).catch(() => { }); } }, duration: 12000 });   // B-d073: the door on the toast reopens this dialog, where «Stop the rest» is — never a menu path; never a second one over a dialog already open (a same-id shell would drop it without its onClose, its poll still running); the caller's onDone rides the reopened one
+    if (runningId) showToast(t('The resume keeps running.'), { action: { label: t('Open it…'), run: () => reopenResume(app, onDone) } });   // B-d073: the door on the toast reopens this dialog, where «Stop the rest» is — never a menu path; the toast lasts as the person's toast setting says
     try { resolveOuter && resolveOuter(null); } catch { }
   } }); // decision: a consent — N billed turns go out when the person presses (their own act, the owner's ruling 2026-11-18), after the cost is shown
   const { body, dialog, close } = shell;

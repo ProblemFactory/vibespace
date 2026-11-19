@@ -223,6 +223,29 @@ console.log('§6 wiring pins');
   ok('the page (21:04Z (d)): the account billed as overage is named OUTSIDE the cost box\'s condition (an estimate missing names it too)', /if \(n && overAllowed && Array\.isArray\(p\.overage\.billed\) && p\.overage\.billed\.length\) \{/.test(page) && !/if \(cw\) \{[^}]*bill paid overage/.test(page));
   ok('the page (21:04Z (e)): the two other account refusals have their door — sign it in again; the vendor\'s spend control', /why === 'identity-cannot-serve'\) return ' ' \+ t\('Sign the account in again \(Accounts\)\.'\)/.test(page) && /why === 'spend-control-reached'\) return ' ' \+ t\('Its spend control is set with its vendor — raise it there\.'\)/.test(page));
   ok('the page (21:04Z (a)): the Settings row lists the presses of the day from the plan', /pressWords\(plan && plan\.presses, t,/.test(page));
+  // B-d073 (主开发 2026-11-19 04:02Z): the Close toast's «Open it…» PRESSED — it reopens the dialog on the running batch, or brings
+  // an open one forward (its button focused), never a second dialog; the toast carries no fixed time over the person's toast setting
+  {
+    const { anchored } = await import('./scratch.mjs');
+    const BRD = read('src/lib/bulk-resume.js');   // this block's own read (BR above is its block's)
+    const m = BRD.match(/export function reopenResume\(app, onDone = null, doc = document\) \{\n[\s\S]*?\n\}\n/);
+    const make = (src) => new Function('openResumeStoppedDialog', src.slice('export '.length) + '\nreturn reopenResume;');
+    const press = (src, withOpen) => {
+      const calls = []; let focused = 0;
+      const btn = { focus: () => { focused++; } };
+      const doc = { getElementById: (id) => (id === 'resume-stopped-dialog' && withOpen ? { querySelector: () => btn } : null) };
+      const r = make(src)((a, o) => { calls.push([a, o]); return Promise.resolve(null); })('APP', 'DONE', doc);
+      return { r, calls: calls.length, plan: calls[0] && calls[0][1].plan, onDone: calls[0] && calls[0][1].onDone, focused };
+    };
+    const none = m ? press(m[0], false) : null, open = m ? press(m[0], true) : null;
+    ok('B-d073: «Open it…» PRESSED with no dialog open reopens it on the running batch (plan: null), the caller\'s onDone riding it', !!m && none.r === 'opened' && none.calls === 1 && none.plan === null && none.onDone === 'DONE', none);
+    ok('B-d073: …PRESSED while the dialog is open it brings that dialog forward (its button focused) and opens no second one', !!m && open.r === 'focused' && open.focused === 1 && open.calls === 0, open);
+    ok('B-d073: the Close toast\'s door is that function, and the toast lasts as the person\'s toast setting says (no fixed duration)', /if \(runningId\) showToast\(t\('The resume keeps running\.'\), \{ action: \{ label: t\('Open it…'\), run: \(\) => reopenResume\(app, onDone\) \} \}\);/.test(BRD));
+    // RED: the door as first built — over an open dialog it did nothing and said nothing
+    const first = m ? anchored(m[0], "  if (open) { const b = open.querySelector('.resume-stopped-stop, .dialog-footer button, button'); if (b && typeof b.focus === 'function') b.focus(); return 'focused'; }", "  if (open) return 'focused';", 'B-d073: the door as first built') : '';
+    const red = first ? press(first, true) : null;
+    ok('RED: the door as first built (nothing done over an open dialog) leaves it unfocused — the leg above sees it', !!red && red.focused === 0 && red.calls === 0, red);
+  }
 }
 
 console.log(`\n${failed ? 'FAILED' : 'ALL PASS'} (${passed} passed, ${failed} failed)`);

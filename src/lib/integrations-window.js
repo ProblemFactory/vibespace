@@ -82,8 +82,8 @@ const ago = (ms) => {
 const testWaitsLine = (w) => (w && w.code === 'repository-unknown'
   ? (w.params && w.params.host ? t('The Test is offered after the first install from {host}.', { host: w.params.host }) : t('The Test is offered after the first install from its host.'))
   : t('The Test is not offered yet'));
-/** B-d073: the line, and — when the Test waits for a first install — the door to the Plugins list (its Install plugin…) ON it, never a menu path. */
-const testWaitsRow = (app, w) => { const d = el('div', 'plugin-detail integ-test-waits', testWaitsLine(w)); if (w && w.code === 'repository-unknown') { const door = pluginsDoor(app, { label: t('Plugins…'), kind: 'secondary' }); if (door) d.append(' ', needDoorButton(door)); } return d; };
+/** B-d073: the line, and — when the Test waits for a first install — the install form's door («Install plugin…») ON it, never a menu path. */
+const testWaitsRow = (app, w) => { const d = el('div', 'plugin-detail integ-test-waits', testWaitsLine(w)); if (w && w.code === 'repository-unknown') { const door = pluginsDoor(app, { kind: 'secondary', install: true }); if (door) d.append(' ', needDoorButton(door)); } return d; };
 /** The Test button's words follow `testKind` (design §14.2's closed set). */
 const TEST_LABEL = {
   'credential-exchange': () => t('Test connection'),

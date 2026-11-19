@@ -36,6 +36,9 @@
 //      words as said — never the key — so a reworded notice key (pick 5's LLM stop notice) strands nothing
 // DEBT (closure 3, the verifier's M5): the nets read the ENGLISH key — a need word added to a zh / ja VALUE only is not seen.
 // The machine table is read when it exists (it lands on its own lane's pick); the ui table always.
+// THE NET'S BLIND SPOTS (主开发 2026-11-19 04:02Z, said so nobody reads a green census as more than it is): it reads t() / tr() /
+// i18nKey() LITERALS only — a sentence built in a template string, or a server's own English text (an error string a route
+// returns, an agent's refusal) is never caught; such a sentence that sends a person down a menu path is found by reading, not here
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

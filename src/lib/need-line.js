@@ -80,9 +80,11 @@ export function pluginDoor(app, id, { label = '', kind = 'primary' } = {}) {
   if (!app || !id || (typeof app.openPluginDoor !== 'function' && typeof app._openPluginSettings !== 'function')) return null;
   return { label: label || t('Plugin settings…'), kind, door: 'plugin:' + id, run: () => (typeof app.openPluginDoor === 'function' ? app.openPluginDoor({ plugin: String(id) }) : app._openPluginSettings(String(id))) };
 }
-/** A door to the Plugins list (a plugin to turn on, restart or answer). */
-export function pluginsDoor(app, { label = '', kind = 'primary' } = {}) {
+/** A door to the Plugins list (a plugin to turn on, restart or answer). `install` (B-d073): the install form itself, when the app
+ *  has it — the Integrations window's Test that waits for a first install — else the list. */
+export function pluginsDoor(app, { label = '', kind = 'primary', install = false } = {}) {
   if (!app || typeof app.openPluginsDialog !== 'function') return null;
+  if (install && typeof app._pluginInstallDialog === 'function') return { label: label || t('Install plugin…'), kind, door: 'plugins', run: () => app._pluginInstallDialog(() => { }) };
   return { label: label || t('Plugins…'), kind, door: 'plugins', run: () => app.openPluginsDialog() };
 }
 /** The page reloaded — a setting that takes effect on the next load. */
