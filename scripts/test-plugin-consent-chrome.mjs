@@ -27,8 +27,10 @@
 //     Enter puts the focus on its FIRST STOP, the OFF «更新…» with its why (never on «卸载…» behind it), Enter there presses nothing
 //     (the same menu, no second request, no dialog), ArrowDown reaches «卸载…»; a menu opened BY CODE a moment after a key while a
 //     text field holds the focus — no focus moved, no character lost — and while a desktop's picture (a canvas) holds it — the keys
-//     stay there; the plant proven: the same open from a focused button takes the focus; a window's menu opened after a key — its
-//     «➤» row's submenu by ArrowRight (the focus in it), ArrowLeft back to its row (the submenu hidden), Escape.
+//     stay there; the plant proven: the same open from a focused button takes the focus; the person's own MENU key (Shift+F10) in a
+//     text field — the menu takes the focus, on a desktop's canvas the key stays the canvas's (control: on a button it takes it);
+//     after the held update ends, Enter on the new «⋯» lands on the first stop; a window's menu opened after a key — its «➤» row's
+//     submenu by ArrowRight (the focus in it), ArrowLeft back to its row (the submenu hidden), Escape.
 // On 160045063 (the base — run this file on a `git archive` copy) ③ ④ ⑤ ⑥ are RED, in both variants (15 rows); on 63f59d572
 // ⑨ is RED (no 更新… on the row, 更新 in the chip's menu, the press finds no button); on f6ad84f50 (B-db5d's checkpoint) ⑨ is RED
 // (更新… / 卸载… drawn inline, no «⋯» on the row).
@@ -334,6 +336,13 @@ await step('⑨', async () => {
   check('⑩ ①: …the held update let go, it ends as before («已是最新» said)', saidH);
   await evalJs(`(() => { const r = document.querySelector('${hrow}'); if (r) r.dataset.k10old = '1'; return true; })()`);
   check('⑩ the plugin list redrawn after the held update (a new row for ②)', await waitFor(NEWROW, 15000));
+  // ① THE REDRAW WHEN THE HELD UPDATE ENDS (主开发 09:53Z): Enter on the NEW row's «⋯» — the focus on its first stop, the live
+  // «更新…» again, never «卸载…»
+  await evalJs(`(() => { document.querySelectorAll('.context-menu').forEach((e) => e.remove()); const b = document.querySelector('${hrow} .rail-row-more'); if (b) b.focus(); return !!b && document.activeElement === b; })()`);
+  await key('Enter', `!!document.activeElement && !!document.activeElement.closest('.context-menu')`);
+  const r3 = await evalJs(`(() => { const a = document.activeElement; return a ? { text: (a.textContent || '').trim(), off: a.getAttribute('aria-disabled') === 'true' } : null; })()`);
+  check(`⑩ ① after the held update ended and the list redrew: Enter on the new «⋯» — the focus on the first stop «${r3 && r3.text}», live again (never «卸载…»)`, !!r3 && r3.text === '更新…' && !r3.off, r3);
+  await key('Escape', `!document.querySelector('.context-menu')`);
 
   // ⑩ ② — A MENU OPENED BY CODE A MOMENT AFTER A KEY: the plant first (from a focused BUTTON it takes the focus — a key a moment ago
   // is what lets it), then a TEXT FIELD and a desktop's PICTURE (a canvas) holding the keys: no focus moved, no character lost
@@ -359,6 +368,32 @@ await step('⑨', async () => {
     check(`⑩ ② a menu opened BY CODE a moment after a key while ${what} holds the focus — no focus moved (${r.kept}), no character lost («${r.typed}»), the menu open beside it`, focused && stamped && opened && r.kept && r.typed === 'abc' && r.menu && !r.inMenu, r);
     await evalJs(`(() => { document.querySelectorAll('.context-menu, #zz-k10').forEach((e) => e.remove()); return true; })()`);
   }
+
+  // ⑩ ③ THE PERSON'S OWN MENU KEY (主开发 09:53Z — the typing guard is for a menu CODE opened): Shift+F10 while a TEXT FIELD holds
+  // the focus — the menu takes the focus (a keyboard-only person walks the menu they asked for). A stand-in surface: the field's
+  // own `contextmenu` opens the «⋯» menu (where the browser raises one for the key); where it raises none, the open comes a moment
+  // after the key, by code — the key the person pressed decides either way. Its control is ⑩ ②'s field: Enter, then a code open —
+  // no focus. On a remote desktop's CANVAS the menu key is the remote machine's: the canvas keeps the focus and the key; control:
+  // the same key on a button takes the focus.
+  const MENUKEY = async () => { await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'F10', code: 'F10', windowsVirtualKeyCode: 121, nativeVirtualKeyCode: 121, modifiers: 8 }); await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'F10', code: 'F10', windowsVirtualKeyCode: 121, nativeVirtualKeyCode: 121, modifiers: 8 }); };
+  const viaKey = async (make) => {
+    await evalJs(`(() => { document.querySelectorAll('.context-menu, #zz-k10').forEach((e) => e.remove()); window.__k10road = null; return true; })()`);
+    const focused = await evalJs(make);
+    await evalJs(`(() => { const f = document.getElementById('zz-k10') || document.querySelector('${hrow} .rail-row-more'); window.__k10cm = { f, h: (e) => { e.preventDefault(); window.__k10road = 'the key\\'s own contextmenu'; ${OPEN_BY_CODE}; } }; f.addEventListener('contextmenu', window.__k10cm.h, { once: true }); return true; })()`);
+    await MENUKEY();
+    if (!(await waitFor(`!!document.querySelector('.context-menu')`, 600))) { await evalJs(`(() => { window.__k10road = 'code a moment after the key'; return ${OPEN_BY_CODE}; })()`); }
+    await waitFor(`!!document.activeElement && !!document.activeElement.closest('.context-menu')`, 1500);
+    await evalJs(`(() => { const c = window.__k10cm; if (c) c.f.removeEventListener('contextmenu', c.h); window.__k10cm = null; return true; })()`);   // the fallback road leaves no listener behind
+    return { focused, ...(await evalJs(`(() => { const a = document.activeElement, f = document.getElementById('zz-k10'); return { road: window.__k10road, menu: !!document.querySelector('.context-menu'), inMenu: !!a && !!a.closest('.context-menu'), first: a ? (a.textContent || '').trim() : null, kept: !!f && a === f, keys: f ? (f.dataset.keys || '') : null }; })()`)) };
+  };
+  const mf = await viaKey(`(() => { const f = document.createElement('input'); f.id = 'zz-k10'; f.type = 'text'; document.body.appendChild(f); f.focus(); return document.activeElement === f; })()`);
+  check(`⑩ ③ the person's MENU KEY (Shift+F10) in a text field: the menu takes the focus — «${mf.first}», the first stop (${mf.road})`, mf.focused && mf.menu && mf.inMenu && mf.first === '更新…', mf);
+  await key('Escape', `!document.querySelector('.context-menu')`);
+  const mc = await viaKey(`(() => { const f = document.createElement('canvas'); f.id = 'zz-k10'; f.tabIndex = 0; f.width = 120; f.height = 80; f.dataset.keys = ''; f.addEventListener('keydown', (e) => { f.dataset.keys += e.key; }); document.body.appendChild(f); f.focus(); return document.activeElement === f; })()`);
+  check(`⑩ ③ …on a remote desktop's CANVAS the menu key is the remote machine's: the canvas keeps the focus and the key («${mc.keys}»), no menu takes it (${mc.road})`, mc.focused && mc.menu && mc.kept && !mc.inMenu && /F10/.test(mc.keys || ''), mc);
+  const mb = await viaKey(`(() => { const b = document.querySelector('${hrow} .rail-row-more'); b.focus(); return document.activeElement === b; })()`);
+  check(`⑩ ③ CONTROL: the same key on a button — the menu takes the focus («${mb.first}»: the key reaches the page and a menu opened then is walked; the FIELD scene above is the one the base fails — there Shift+F10 is no gesture key)`, mb.focused && mb.inMenu, mb);
+  await evalJs(`(() => { document.querySelectorAll('.context-menu, #zz-k10').forEach((e) => e.remove()); return true; })()`);
 
   // ⑩ ④ — A SUBMENU BY ITS ARROW: a window (a file explorer) and a second desktop — its title bar's menu opened a moment after a
   // key; the «➤» row (Move to Desktop) reached by ArrowDown, ArrowRight opens its submenu WITH the focus in it, ArrowLeft goes back

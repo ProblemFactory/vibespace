@@ -538,13 +538,14 @@ export function toastSeenAtShow({ now, gestureAt, visible, focused, ref = null }
   return !ref && !!visible && !!focused && gestureAt > 0 && now >= gestureAt && now - gestureAt < OWN_GESTURE_MS;
 }
 const _editable = (el) => !!(el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName || '')));
-// B-6944's stamp rides the same two listeners: did a KEY lead to the menu that opens now (showContextMenu, MENU_KEY_MS) — a gesture
-// key stamps it, a pointer press takes it back. NO LISTENER OF ITS OWN (the block checkpoint's red: test-needs-doors' move-mode legs
-// count the document's keydown listeners — a page-long one added at module load stood there after every Esc)
-let _menuKeyAt = 0;
+// B-6944's stamps ride the same two listeners: did a KEY lead to the menu that opens now (showContextMenu, MENU_KEY_MS) — a gesture
+// key stamps `_menuKeyAt`, the person's own MENU key (isMenuKey) `_menuOwnKeyAt`, a pointer press takes both back. NO LISTENER OF
+// ITS OWN (the block checkpoint's red: test-needs-doors' move-mode legs count the document's keydown listeners — a page-long one
+// added at module load stood there after every Esc)
+let _menuKeyAt = 0, _menuOwnKeyAt = 0;
 if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
-  window.addEventListener('pointerdown', () => { _gestureAt = Date.now(); _menuKeyAt = 0; }, true);
-  window.addEventListener('keydown', (e) => { if (isGestureKey(e, _editable(e.target))) _gestureAt = _menuKeyAt = Date.now(); }, true);
+  window.addEventListener('pointerdown', () => { _gestureAt = Date.now(); _menuKeyAt = _menuOwnKeyAt = 0; }, true);
+  window.addEventListener('keydown', (e) => { if (isGestureKey(e, _editable(e.target))) _gestureAt = _menuKeyAt = Date.now(); if (isMenuKey(e)) _menuOwnKeyAt = Date.now(); }, true);
 }
 /** A gesture neither listener above sees — the phone's back swipe (lane mobile-back-guard) — is the person's own act too:
  *  a toast it shows next is not an unread notification. */
@@ -1298,6 +1299,8 @@ export function showContextMenu(x, y, items, className = 'context-menu', { up = 
   const opener = held ? (held._menuOpener || null) : document.activeElement;
   const keep = held ? (document.activeElement.textContent || '').trim() : null;
   const fromKey = !!held || Date.now() - _menuKeyAt < MENU_KEY_MS;
+  const menuKey = Date.now() - _menuOwnKeyAt < MENU_KEY_MS;   // the person's OWN menu key opened it (menuTakesFocus)
+  if (menuKey) _menuOwnKeyAt = 0;   // …one key, one menu: a menu code opens later in the second is code's
   // Remove existing menus of same class
   document.querySelectorAll('.' + className.split(' ')[0]).forEach(p => p.remove());
   const pop = document.createElement('div');
@@ -1435,13 +1438,13 @@ export function showContextMenu(x, y, items, className = 'context-menu', { up = 
     }
     pop.appendChild(el);
   }
-  armMenuKeys(pop, { opener, fromKey, keep });   // B-6944: the keys of this menu (and the focus, when a key led to it)
+  armMenuKeys(pop, { opener, fromKey, keep, menuKey, kept: !!held });   // B-6944: the keys of this menu (and the focus, when a key led to it)
   placeMenu(pop, x, y, { up, placesItself });
   return pop;
 }
 /** B-6944 — THE KEYS OF AN OPEN MENU (PURE menu-place.js menuKeyStep decides): armed by showContextMenu just before its
  *  placement; a menu a KEY led to takes the focus at its first STOP once it stands placed (a microtask: placeMenu shows it) */
-function armMenuKeys(pop, { opener = null, fromKey = false, keep = null } = {}) {
+function armMenuKeys(pop, { opener = null, fromKey = false, keep = null, menuKey = false, kept = false } = {}) {
   // a menu a KEY opened takes the focus at its first STOP — an OFF row first is that stop (read with its why), never skipped for
   // the live row behind it (its round: the plugin's «⋯» while an update runs — Update… off, then Uninstall…: the Enter that opened
   // it landed on Uninstall…). Up / Down / Home / End move among the STOPS of the menu holding the focus — every row, an off one too
@@ -1465,11 +1468,12 @@ function armMenuKeys(pop, { opener = null, fromKey = false, keep = null } = {}) 
     if (st.press) { row.click(); if (!pop.isConnected && (!document.activeElement || document.activeElement === document.body)) giveBack(); return; }
     if (st.focus != null && stops[st.focus]) stops[st.focus].focus({ preventScroll: true });
   });
-  // …never from where a person's keys go (menuOpenerTyping: a field, a frame, a desktop's or a live browser's view — a menu that
-  // opens while a person types leaves the focus where it is)
-  const typing = menuOpenerTyping(opener);
+  // …a menu CODE opened never from where a person's keys go (menuOpenerTyping: a field, a frame, a desktop's or a live browser's
+  // view — it leaves the focus and the characters where they are); a menu the person's OWN menu key opened takes it wherever it was
+  // but on a view (the key is the shown machine's) — menuTakesFocus; a redrawn menu that held the focus keeps it (`kept`)
+  const takes = menuTakesFocus({ fromKey, menuKey, opener, kept });
   // a redrawn menu puts the focus back on the row it was on (by its words), else on its first STOP
-  if (fromKey && !typing) queueMicrotask(() => { if (!pop.isConnected) return; const all = stopsOf(pop); const at = (keep && all.find((r) => (r.textContent || '').trim() === keep)) || all[0]; if (at) at.focus({ preventScroll: true }); });
+  if (takes) queueMicrotask(() => { if (!pop.isConnected) return; const all = stopsOf(pop); const at = (keep && all.find((r) => (r.textContent || '').trim() === keep)) || all[0]; if (at) at.focus({ preventScroll: true }); });
 }
 /** B-6944 ② (its round — THE TYPING GUARD counted fields only). PURE over the element holding the focus when a menu opens: do a
  *  person's KEYS go there? A field (the caret), a frame, or a VIEW that takes keys — a desktop's picture (noVNC's canvas, a stream's
@@ -1477,9 +1481,32 @@ function armMenuKeys(pop, { opener = null, fromKey = false, keep = null } = {}) 
  *  and the characters after it. Then the menu takes no focus. */
 export function menuOpenerTyping(el) {
   if (!el) return false;
-  if (_editable(el)) return true;
-  const tag = String(el.tagName || '').toUpperCase();
-  return tag === 'IFRAME' || tag === 'CANVAS' || tag === 'VIDEO' || !!(el.classList && typeof el.classList.contains === 'function' && el.classList.contains('browser-live'));
+  return _editable(el) || menuOpenerView(el);
+}
+/** …the VIEWS among them (PURE): a frame, a desktop's or a stream's picture, the live browser view's root, and the KEY SINKS a
+ *  driven view keeps the focus in (xpra's `.xpra-ime`, the live browser's `.browser-live-kbd` — textareas, so fields too) — what
+ *  they show takes the keys, its own menu key too (a remote desktop's machine has a menu key of its own) */
+export function menuOpenerView(el) {
+  if (!el) return false;
+  const tag = String(el.tagName || '').toUpperCase(), cls = (c) => !!(el.classList && typeof el.classList.contains === 'function' && el.classList.contains(c));
+  return tag === 'IFRAME' || tag === 'CANVAS' || tag === 'VIDEO' || cls('browser-live') || cls('xpra-ime') || cls('browser-live-kbd');
+}
+/** B-6944 (主开发 09:53Z — THE TYPING GUARD IS FOR A MENU OPENED BY CODE). PURE: is this key the person's own MENU key — the
+ *  context-menu key, or Shift+F10 (and nothing else held)? */
+export function isMenuKey(e) {
+  if (!e || e.ctrlKey || e.metaKey || e.altKey) return false;   // with a modifier the browser raises no menu
+  return e.key === 'ContextMenu' || (e.key === 'F10' && !!e.shiftKey);
+}
+/** PURE: does a menu opening now take the focus? `kept` = a menu redrawing itself while the focus is in it — yes, it keeps it
+ *  (whatever opened it: a menu the menu key opened from a field, redrawn a moment later); `menuKey` = the person's own menu key a
+ *  moment ago (MENU_KEY_MS) — then YES, wherever the focus was (a field too: a keyboard-only person must walk the menu they asked
+ *  for), but NOT from a view that takes keys (menuOpenerView: the key belongs to the machine shown there); else `fromKey` = a
+ *  gesture key a moment ago — yes only from where no person's keys go (menuOpenerTyping); no key — no (a pointer's menu or one a
+ *  timer opens takes no focus). */
+export function menuTakesFocus({ fromKey = false, menuKey = false, opener = null, kept = false } = {}) {
+  if (kept) return true;
+  if (menuKey) return !menuOpenerView(opener);
+  return !!fromKey && !menuOpenerTyping(opener);
 }
 /** B-6944: a menu row that is a STOP for the keys — role menuitem, focusable by script; a live row presses, an OFF one (aria-disabled)
  *  is a stop too: reached and read with its why, never pressed */

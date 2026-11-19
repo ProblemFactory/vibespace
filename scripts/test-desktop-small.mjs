@@ -168,6 +168,29 @@ const keyTable = (step) => {
 };
 // B-6944 ② (its round — THE TYPING GUARD counted fields only): where do a person's KEYS go — the element holding the focus when a
 // menu opens (utils.js menuOpenerTyping) — [name, got, want]
+// B-6944 owed (主开发 09:53Z — THE TYPING GUARD IS FOR A MENU OPENED BY CODE): does a menu opening now take the focus — the
+// person's own MENU key (the context-menu key, Shift+F10) vs any other key a moment ago, from where the focus was (utils.js
+// menuTakesFocus, isMenuKey) — [name, got, want]
+const takesTable = (f, k) => {
+  const el = (tagName, o = {}) => ({ tagName, isContentEditable: false, classList: { contains: (c) => (o.cls || []).includes(c) }, ...o });
+  const field = el('INPUT'), canvas = el('CANVAS'), live = el('DIV', { cls: ['browser-live'] }), button = el('BUTTON');
+  const xpraSink = el('TEXTAREA', { cls: ['xpra-ime'] }), liveSink = el('TEXTAREA', { cls: ['browser-live-kbd'] });
+  return [
+    ['the person\'s MENU key in a text field: the menu takes the focus (a keyboard-only person walks it)', f({ menuKey: true, fromKey: false, opener: field }), true],
+    ['…the menu key on a button: takes it', f({ menuKey: true, opener: button }), true],
+    ['…the menu key with nothing focused: takes it', f({ menuKey: true, opener: null }), true],
+    ['…the menu key on a remote desktop\'s canvas: NO — the key is the remote machine\'s', f({ menuKey: true, fromKey: true, opener: canvas }), false],
+    ['…the menu key in the live browser view: NO — the page\'s', f({ menuKey: true, opener: live }), false],
+    ['…the menu key while DRIVING an xpra desktop (its key sink holds the focus): NO — the remote machine\'s', f({ menuKey: true, opener: xpraSink }), false],
+    ['…the menu key while driving the live browser (its key sink): NO — the page\'s', f({ menuKey: true, opener: liveSink }), false],
+    ['a menu REDRAWING itself while the focus is in it keeps it — opened by the menu key from a field a moment before', f({ kept: true, opener: field }), true],
+    ['a menu CODE opened a moment after a key in a field: no focus (no character lost)', f({ fromKey: true, opener: field }), false],
+    ['…after a key on a canvas: no focus', f({ fromKey: true, opener: canvas }), false],
+    ['…after a key on a button: takes it', f({ fromKey: true, opener: button }), true],
+    ['no key (a pointer\'s menu, a timer\'s): no focus', f({ opener: button }), false],
+    ['isMenuKey: the context-menu key, Shift+F10 — yes; F10, a modifier with either (no menu raised), Enter — no', [k({ key: 'ContextMenu' }), k({ key: 'F10', shiftKey: true }), k({ key: 'F10' }), k({ key: 'F10', shiftKey: true, ctrlKey: true }), k({ key: 'F10', shiftKey: true, altKey: true }), k({ key: 'ContextMenu', metaKey: true }), k({ key: 'Enter' }), k(null)], [true, true, false, false, false, false, false, false]],
+  ];
+};
 const typingTable = (f) => {
   const el = (tagName, o = {}) => ({ tagName, isContentEditable: false, classList: { contains: (c) => (o.cls || []).includes(c) }, ...o });
   return [
@@ -184,6 +207,7 @@ const typingTable = (f) => {
     ['nothing focused', f(null), false],
   ];
 };
+{ const { menuTakesFocus, isMenuKey } = await import('../src/lib/utils.js'); const bad = takesTable(menuTakesFocus, isMenuKey).filter(([, g, w]) => JSON.stringify(g) !== JSON.stringify(w)); ok(bad.length === 0, 'B-6944 owed (09:53Z): a menu the person\'s own MENU key opened takes the focus wherever it was — a field too — but on a view the key is the shown machine\'s; a menu CODE opened takes it only from where no keys go; isMenuKey = the context-menu key and Shift+F10 alone', bad); }
 { const { menuOpenerTyping } = await import('../src/lib/utils.js'); const bad = typingTable(menuOpenerTyping).filter(([, g, w]) => g !== w); ok(bad.length === 0, 'B-6944 ② menuOpenerTyping (its round): a menu opened while a person\'s keys go to a field, a frame, a desktop\'s canvas, a stream\'s video or the live browser view takes no focus; from a button, a tile or nothing it may', bad); }
 { const bad = keyTable(MP.menuKeyStep).filter(([, g, w]) => !same(g, w)); ok(typeof MP.menuKeyStep === 'function' && bad.length === 0, 'B-6944 menuKeyStep: Up / Down wrap, Home / End, Enter / Space press, Enter / ArrowRight open a submenu and ArrowLeft leaves it, Escape and Tab close with the focus back; nothing else is the menu\'s', bad.map(([n]) => n)); }
 
@@ -338,22 +362,25 @@ console.log('§6 the wiring — every door asks its rule');
     && /row\.setAttribute\('role', 'menuitem'\); row\.setAttribute\('aria-disabled', 'true'\); row\.tabIndex = -1; row\.dataset\.menuStop = '1';/.test(u) && /row\.setAttribute\('aria-describedby', why\.id\);/.test(u)
     && /menuStop\(el, !item\.disabled\);/.test(u) && /menuStop\(ce, !child\.disabled\);/.test(u)
     && /const st = menuKeyStep\(\{ key: e\.key, at, count: stops\.length, parent: [^\n]*inSub: level !== pop, off: [^\n]*\}\);/.test(u)
-    && /armMenuKeys\(pop, \{ opener, fromKey, keep \}\);\s*\n\s*placeMenu\(pop, x, y, \{ up, placesItself \}\);/.test(u)
+    && /armMenuKeys\(pop, \{ opener, fromKey, keep, menuKey, kept: !!held \}\);\s*\n\s*placeMenu\(pop, x, y, \{ up, placesItself \}\);/.test(u) && /const menuKey = Date\.now\(\) - _menuOwnKeyAt < MENU_KEY_MS;/.test(u)
     && /const held = \[\.\.\.document\.querySelectorAll\('\.' \+ className\.split\(' '\)\[0\]\)\]\.find\(\(p\) => p\.contains\(document\.activeElement\)\);/.test(u) && /const opener = held \? \(held\._menuOpener \|\| null\) : document\.activeElement;/.test(u)
-    && /const typing = menuOpenerTyping\(opener\);/.test(u) && /if \(fromKey && !typing\) queueMicrotask\(/.test(u)
+    && /const takes = menuTakesFocus\(\{ fromKey, menuKey, opener, kept \}\);/.test(u) && /if \(takes\) queueMicrotask\(/.test(u) && /if \(menuKey\) _menuOwnKeyAt = 0;/.test(u)
     && /const at = \(keep && all\.find\(\(r\) => \(r\.textContent \|\| ''\)\.trim\(\) === keep\)\) \|\| all\[0\]; if \(at\) at\.focus\(\{ preventScroll: true \}\);/.test(u) && !/\|\| live\[0\] \|\| all\[0\]/.test(u)   // stale-pins: kept (an absence check: the first focus never skips an off row for a live one — its round ①)
     && /if \(st\.close\) \{ pop\.remove\(\); if \(st\.back\) giveBack\(\); return; \}/.test(u)
-    && /window\.addEventListener\('pointerdown', \(\) => \{ _gestureAt = Date\.now\(\); _menuKeyAt = 0; \}, true\);/.test(u) && /window\.addEventListener\('keydown', \(e\) => \{ if \(isGestureKey\(e, _editable\(e\.target\)\)\) _gestureAt = _menuKeyAt = Date\.now\(\); \}, true\);/.test(u)
+    && /window\.addEventListener\('pointerdown', \(\) => \{ _gestureAt = Date\.now\(\); _menuKeyAt = _menuOwnKeyAt = 0; \}, true\);/.test(u) && /window\.addEventListener\('keydown', \(e\) => \{ if \(isGestureKey\(e, _editable\(e\.target\)\)\) _gestureAt = _menuKeyAt = Date\.now\(\); if \(isMenuKey\(e\)\) _menuOwnKeyAt = Date\.now\(\); \}, true\);/.test(u)
     && !/document\.addEventListener\('keydown', \(e\) => \{ if \(isGestureKey/.test(u) && !/document\.addEventListener\('pointerdown', \(\) => \{ _menuKeyAt = 0; \}/.test(u)   // stale-pins: kept (an absence check: no page-long document listener of the menu's own — the block checkpoint's red, test-needs-doors)
     && /\.context-menu-item:focus-visible, \.taskbar-context-menu-item:focus-visible \{ background: var\(--bg-hover\);/.test(css) && /\.context-menu-item:focus, \.taskbar-context-menu-item:focus \{ outline: none; \}/.test(css);
   ok(keyed(U, VCSS), 'B-6944: showContextMenu is a keyboard\'s menu — role menu / menuitem, every row a stop (an off row aria-disabled with its why described: read, never pressed), the keys through menuKeyStep, the focus taken only when a gesture key led to it a moment ago (never from a field being typed in or a frame), given back on Escape / Tab, kept on its row when the menu redraws itself; only the KEYS\' row is drawn (a pointer\'s look unchanged)');
-  ok(!keyed(U.replace('if (fromKey && !typing) queueMicrotask(', 'if (false) queueMicrotask('), VCSS) && !keyed(U.replace("if (st.close) { pop.remove(); if (st.back) giveBack(); return; }", 'if (st.close) { pop.remove(); return; }'), VCSS)
+  ok(!keyed(U.replace('if (takes) queueMicrotask(', 'if (false) queueMicrotask('), VCSS) && !keyed(U.replace("if (st.close) { pop.remove(); if (st.back) giveBack(); return; }", 'if (st.close) { pop.remove(); return; }'), VCSS)
     && !keyed(U.replace("const opener = held ? (held._menuOpener || null) : document.activeElement;", 'const opener = document.activeElement;'), VCSS)
     && !keyed(U, VCSS.replace('.context-menu-item:focus-visible, .taskbar-context-menu-item:focus-visible { background: var(--bg-hover);', '.context-menu-item:focus { background: var(--bg-hover);'))
     && !keyed(U + "\ndocument.addEventListener('keydown', (e) => { if (isGestureKey(e, _editable(e.target))) _menuKeyAt = Date.now(); }, true);\n", VCSS)   // stale-pins: kept (103af4972's listener, planted)
     && !keyed(U.replace("|| all[0]; if (at) at.focus({ preventScroll: true });", "|| live[0] || all[0]; if (at) at.focus({ preventScroll: true });"), VCSS)   // stale-pins: kept (the base's first live row, planted)
-    && !keyed(U.replace('const typing = menuOpenerTyping(opener);', "const typing = _editable(opener) || (!!opener && opener.tagName === 'IFRAME');"), VCSS),   // stale-pins: kept (the base's guard, planted)
-    'CONTROL: the checkpoint\'s shapes and the reader\'s finds — a key-opened menu that takes no focus, a close that leaves the focus nowhere, a redrawn menu that forgets its opener, a pointer press painting a row, a page-long document listener of the menu\'s own (103af4972: the block checkpoint\'s red), the first focus skipping an off row for a live one, the guard counting fields only (its round ① ②) — are each refused');
+    && !keyed(U.replace('const takes = menuTakesFocus({ fromKey, menuKey, opener, kept });', "const typing = _editable(opener) || (!!opener && opener.tagName === 'IFRAME'); const takes = fromKey && !typing;"), VCSS)   // stale-pins: kept (the base's guard, planted)
+    && !keyed(U.replace('const takes = menuTakesFocus({ fromKey, menuKey, opener, kept });', 'const takes = fromKey && !menuOpenerTyping(opener);'), VCSS)   // stale-pins: kept (the smalls' guard: no menu key, no redraw kept, planted)
+    && !keyed(U.replace('  if (menuKey) _menuOwnKeyAt = 0;', ''), VCSS)
+    && !keyed(U.replace(' if (isMenuKey(e)) _menuOwnKeyAt = Date.now(); }, true);', ' }, true);'), VCSS),
+    'CONTROL: the checkpoint\'s shapes and the reader\'s finds — a key-opened menu that takes no focus, a close that leaves the focus nowhere, a redrawn menu that forgets its opener, a pointer press painting a row, a page-long document listener of the menu\'s own (103af4972: the block checkpoint\'s red), the first focus skipping an off row for a live one, the guard counting fields only (its round ① ②), the guard judging the opener alone (the person\'s menu key in a field took no focus — 09:53Z), the menu key never stamped, its stamp never consumed — are each refused');
   ok(/if \(shown && !_toastTier\(\) && !_openModalDialog\(\)\) \{ _placeDeskToasts\(stack\); return; \}/.test(U) && /const rect = stack\.getBoundingClientRect\(\);\n  const desk = toastDeskSpot\(\{ rect, avoid: _toastAvoid\(rect\),/.test(U), 'the desktop tier\'s toast stack (anchored or centred) is placed off every open menu and composer');
 }
 
@@ -378,7 +405,11 @@ console.log('§7 controls — each rule\'s base form, on its own table');
   ok(keyTable(mkNoWrap.menuKeyStep).filter(([, g, w]) => !same(g, w)).length >= 1, 'CONTROL menuKeyStep that stops at the last row: ArrowDown never wraps (RED)');
   const mkPressOff = await patched('src/lib/menu-place.js', [["return off ? v({ focus: i }) : parent ?", "return parent ?"]], 'keys-press-off');
   ok(keyTable(mkPressOff.menuKeyStep).filter(([, g, w]) => !same(g, w)).length >= 1, 'CONTROL menuKeyStep that presses an off row (RED)');
-  const mtFields = await patched('src/lib/utils.js', [["  return tag === 'IFRAME' || tag === 'CANVAS' || tag === 'VIDEO' || !!(el.classList && typeof el.classList.contains === 'function' && el.classList.contains('browser-live'));", "  return tag === 'IFRAME';"]], 'typing-fields-only');
+  const mtNoKey = await patched('src/lib/utils.js', [['  if (menuKey) return !menuOpenerView(opener);\n', '']], 'takes-no-menu-key');
+  const mtNoSink = await patched('src/lib/utils.js', [[" || cls('xpra-ime') || cls('browser-live-kbd');", ';']], 'view-no-sinks');
+  ok(takesTable(mtNoSink.menuTakesFocus, mtNoSink.isMenuKey).filter(([n, g, w]) => /DRIVING|driving the live/.test(n) && JSON.stringify(g) !== JSON.stringify(w)).length === 2, 'CONTROL menuOpenerView without the driven views\' key sinks (the reader\'s find): Shift+F10 while driving an xpra desktop or the live browser takes the focus from the remote machine (RED)');
+  ok(takesTable(mtNoKey.menuTakesFocus, mtNoKey.isMenuKey).filter(([, g, w]) => JSON.stringify(g) !== JSON.stringify(w)).length >= 2, 'CONTROL menuTakesFocus judging the opener alone (the smalls\' guard): the person\'s menu key in a field takes no focus, with nothing focused no focus (RED)');
+  const mtFields = await patched('src/lib/utils.js', [["  return tag === 'IFRAME' || tag === 'CANVAS' || tag === 'VIDEO' || cls('browser-live') || cls('xpra-ime') || cls('browser-live-kbd');", "  return tag === 'IFRAME';"]], 'typing-fields-only');
   ok(typingTable(mtFields.menuOpenerTyping).filter(([, g, w]) => g !== w).length === 3, 'CONTROL menuOpenerTyping counting fields and frames only (the base\'s guard — its round ②): a desktop\'s canvas, a stream\'s video, the live browser view lose their keys to the menu (RED)');
   const mkNoBack = await patched('src/lib/menu-place.js', [["  if (key === 'Escape') return v({ close: true, back: true });", "  if (key === 'Escape') return v({ close: true });"]], 'keys-no-back');
   ok(keyTable(mkNoBack.menuKeyStep).filter(([, g, w]) => !same(g, w)).length >= 2, 'CONTROL menuKeyStep whose Escape leaves the focus nowhere (RED)');
