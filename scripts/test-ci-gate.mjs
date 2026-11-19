@@ -976,7 +976,6 @@ console.log('\n§2i a red names its legs: every ✗ line before the tail; the fa
 console.log('\n§2j a suite reads no history master does not have');
 {
   const READS_OFF_MASTER = Object.freeze({ // sha → the scripts that read it (2026-11-01, B-4291's census — each a backlog row)
-    '296a748f': ['test-windows-device-fs.mjs'], // lane device-upgrade-stuck 2026-10-03: const BASE, cat-file -e `${BASE}^{commit}` [B-8390]
     'f36369057': ['test-phone-desktop-sync.mjs'], // lane phone-arrangement-local 2026-10-12: ⑩–⑬'s base TREE (a worktree at it) — no master ancestor holds captureForViewport without captureBuilt [B-44c5]
   });
   // B-1388 (lane bl-tests-e, 2026-11-17 — the B-4291 r2 acceptance's six latent forms, each blind on a planted file while a plain
