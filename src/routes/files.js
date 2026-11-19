@@ -159,12 +159,7 @@ router.use((req, res, next) => {
   next();
 });
 const PATH_WRITES = new Set(['/api/mkdir', '/api/file/write']);   // the routes whose body `path` is what they CREATE
-function pullShadowBody(s) {
-  const params = { machine: s.machine };
-  return s.offline
-    ? { error: `“${s.machine}” is offline — this folder shows its files only while the machine is connected`, code: 'machine_offline', params }
-    : { error: `“${s.machine}”’s folder is not mounted right now — this folder is where it appears; it is tried again by itself, or press Remount now on its row`, code: 'machine_folder_down', params };
-}
+const pullShadowBody = (s) => require('../machine-mounts.js').pullShadowBody(s);   // the words live with the door (WebDAV says the same)
 
 router.get('/api/home', async (req, res) => {
   const R = rfs(req);

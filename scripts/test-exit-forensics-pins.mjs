@@ -116,7 +116,7 @@ console.log('— §6c every kill door is declared: an actor marked before the ki
     'src/opencode-serve.js': [5, 'not respawned: OpenCode serve (backend ≠ claude)'],
     'src/desktop-serve.js': [3, 'not a conversation: desktop apps'],
     'src/device-mount.js': [4, 'not a conversation: rclone mounts (lane mac-pull-refresh added one — its bounded refresh child; composed at the 2.369.202 integration)'],
-    'src/machine-mounts.js': [1, 'not a conversation: mount probes'],
+    'src/machine-mounts.js': [2, 'not a conversation: mount probes — the ls child (a released folder\'s emptiness) and the realpath child (a mount point\'s real path, B-844b), each ended by its handle at its bound'],
     'src/mounts.js': [3, 'not a conversation: mounts — the bounded cache-count child, the token reader, a pending start\'s child (B-e783: the daemons\' own kills go through PI.signalIdentity, src/proc-identity.js — a recycled pid is never signalled; B-91aa: a hung health probe\'s `ls` is the starter\'s child, killed there — src/server/child-starter-proc.js)'],
     'src/server/child-starter.js': [2, 'not a conversation: the hub\'s program starter (B-91aa) — fault(): the ONE starter process it spawned and holds (`proc`), killed at a fault before it is replaced once or the old road takes over (closing it only ends its pipe); run()\'s old direct road: the child that call spawned, at its own timeout'],
     'src/server/child-starter-proc.js': [2, 'not a conversation: the starter\'s own children (B-91aa) — a request\'s child (spawned for that request) at the request\'s timeout; bye(): every child in its `held` map when the hub\'s pipe ends (stdin end / close, a broken stdout) — it kills only what it spawned'],

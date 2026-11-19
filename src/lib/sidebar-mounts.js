@@ -23,6 +23,18 @@ import { FLAGS, SHOWN, IMPLIES, normalize, allowWord, allowArgOf } from './devic
 import * as FFI from '../ffmpeg-install.js'; // lane machine-needs-at-pairing pick 3: step ②'s ffmpeg row (the pinned build's facts)
 import * as MDM from '../machine-desktop-model.js'; // lane machine-needs-at-pairing pick 3: step ②'s TightVNC row
 import { coalesce, singleFlight, patchLastRunRow, rowsByHost, noteLastRun, overlayLastRuns, slowNote, patchHostFace } from './mounts-live.js'; // B-a31a: the panel under a burst — a row patch, one refresh at a time
+/** A pull row's own words in the reader's language — the hub's CODE (B-fcc7 / B-844b / B-6c4f: not empty, a folder in use, a
+ *  nested one), its English for a code this page does not know (the server's sentence). */
+export function pullErrorText(m) {
+  const p = (m && m.errorParams) || {}, c = m && m.errorCode;
+  if (c === 'mount_not_empty') return tr('this folder is not empty, so the machine’s folder cannot be mounted over it — move its files out, then press Remount now');
+  if ((c === 'mount_point_in_use' || c === 'mount_point_nested') && p.held) {   // B-844b / B-6c4f: an existing pair — this row is the one held
+    const who = p.removed ? tr('a removed machine’s {remotePath}', { remotePath: p.remotePath || '' }) : tr('“{machine}”’s {remotePath}', { machine: p.machine || '?', remotePath: p.remotePath || '' });
+    if (c === 'mount_point_in_use') return tr('this folder is also the mount point of {who} — remove one of the two rows', { who });
+    return p.kind === 'over' ? tr('this folder holds {mountpoint}, the mount point of {who} — unmounting one would take the other with it; remove one of the two rows', { who, mountpoint: p.mountpoint || '' }) : tr('this folder is inside {mountpoint}, the mount point of {who} — unmounting one would take the other with it; remove one of the two rows', { who, mountpoint: p.mountpoint || '' });
+  }
+  return String((m && m.error) || '');
+}
 
 
 // 16x16 stroke icons (project convention — no emoji in chrome)
@@ -1277,10 +1289,10 @@ export function installSidebarMounts(Sidebar) {
         // B-fcc7 cure: a pull whose folder could not be released says so here (the server's words, as a cloud mount's error)
         const state = m.live ? 'ok' : (m.error ? 'err' : (m.online ? 'off' : 'err'));
         top.innerHTML = `
-          <span class="mounts-dot mounts-dot-${state}" title="${m.live ? escHtml(tr('Mounted')) : m.error ? escHtml(m.error) : escHtml(tr('Pending — remounts when the machine is reachable'))}"></span>
+          <span class="mounts-dot mounts-dot-${state}" title="${m.live ? escHtml(tr('Mounted')) : m.error ? escHtml(pullErrorText(m)) : escHtml(tr('Pending — remounts when the machine is reachable'))}"></span>
           <b class="mounts-name" title="${escHtml(h.name || m.hostId)}:${escHtml(m.remotePath)} → ${escHtml(m.mountpoint)}">${escHtml(m.remotePath.split('/').pop() || m.remotePath)}</b>
           <span class="mounts-badge" title="${escHtml(tr('Mounted at {mp} (read-only, over the device link)', { mp: m.mountpoint }))}">⬇ ${escHtml(tr('from machine'))}</span>`;
-        if (!m.live) {
+        if (!m.live && !(m.errorParams && m.errorParams.held)) {   // B-844b r4: a HELD row offers no Remount (it can only be refused) — its words are drawn below
           const re = document.createElement('button');
           re.className = 'mounts-icon-btn';
           re.innerHTML = MI.retry; re.title = m.online ? tr('Remount now') : tr('Remount (machine is offline — start its daemon first)');
@@ -1353,6 +1365,22 @@ export function installSidebarMounts(Sidebar) {
         ? `${h.name}:${m.remotePath} → ${tr('here')}:${m.mountpoint}`
         : `${tr('here')}:${m.folder} → ${h.name}:${m.mountpoint}`;
       row.append(top, sub);
+      if (m.dir === 'pull' && !m.live && m.errorParams && m.errorParams.held) {   // B-844b r4: why it waits, as text (a phone has no hover)
+        const held = document.createElement('div');
+        held.className = 'mounts-errline';
+        held.textContent = pullErrorText(m);
+        row.append(held);
+      }
+      for (const s of (m.dir === 'pull' && Array.isArray(m.shares) ? m.shares : [])) {   // B-844b r5/r6: a HOLDER says it shares its folder — each waiting row, by which way it nests
+        // r8c (read 8 #5): an OUTER waiting row ('over') cannot mount over a folder that holds this mount point — it says remove one of the two
+        const shl = document.createElement('div');
+        shl.className = 'mounts-path';
+        const who = s.removed ? tr('a removed machine’s {remotePath}', { remotePath: s.remotePath }) : tr('“{machine}”’s {remotePath}', { machine: s.machine, remotePath: s.remotePath });
+        shl.textContent = s.removed
+          ? (s.kind === 'inside' ? tr('a folder inside this one is the mount point of {who} — that row cannot mount; remove it', { who }) : s.kind === 'over' ? tr('this folder is inside the mount point of {who} — that row cannot mount; remove it', { who }) : tr('this folder is also the mount point of {who} — that row cannot mount; remove it', { who }))
+          : (s.kind === 'inside' ? tr('a folder inside this one is the mount point of {who} (waiting) — while this machine is away, that row takes it', { who }) : s.kind === 'over' ? tr('this folder is inside the mount point of {who} (waiting) — remove one of the two rows', { who }) : tr('this folder is also the mount point of {who} (waiting) — while this machine is away, that row takes the folder', { who }));
+        row.append(shl);
+      }
       return row;
     },
 

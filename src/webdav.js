@@ -199,6 +199,10 @@ function registerWebdav(app, { tokens }) {
     const target = path.resolve(tok.root, '.' + (rel || '/'));
     if (target !== tok.root && !target.startsWith(tok.root + path.sep)) return res.status(403).end();
     if (DOOR.blocked(target)) return res.status(503).type('text/plain').send(DOOR.sentenceFor(target));   // B-afc4: answered, never read
+    // B-fcc7 (主开发's small 1): what a WebDAV request ADDS — a PUT, a MKCOL here, a COPY's or a MOVE's destination below — into a
+    // machine's pull folder that is not mounted is stranded under the next mount: refused with the row's state (the files route's words)
+    const pullRefusal = (p) => { let s = null; try { s = require('./machine-mounts.js').pullShadowOf(p, { writer: true }); } catch { s = null; } return s ? require('./machine-mounts.js').pullShadowBody(s).error : null; };
+    if (req.method === 'PUT' || req.method === 'MKCOL') { const w = pullRefusal(target); if (w) return res.status(503).type('text/plain').send(w); }
     // symlink escape: the closest EXISTING ancestor's realpath must stay inside
     const containedReal = async (p) => {
       let probe = p;
@@ -313,6 +317,7 @@ function registerWebdav(app, { tokens }) {
           const destRel = destPath.slice(davBase.length).replace(/\/+$/, '');
           const dest = path.resolve(tok.root, '.' + (destRel || '/'));
           if (dest !== tok.root && !dest.startsWith(tok.root + path.sep)) return res.status(403).end();
+          { const w = pullRefusal(dest); if (w) return res.status(503).type('text/plain').send(w); }   // B-fcc7: a destination in a pull folder that is not mounted
           if (!(await containedReal(dest))) return res.status(403).end();
           if (!(await exists(target))) return res.status(404).end();
           const overwrite = (req.headers.overwrite || 'T').toUpperCase() !== 'F';

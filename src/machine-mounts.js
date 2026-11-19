@@ -32,6 +32,9 @@ const DM = require('./device-mount'); // the pull chain (B-fcc7: read at each ca
 const removedWhileMounting = () => Object.assign(new Error('this pull mount was removed while it was being mounted — nothing of it stays mounted'), { code: 'mount_removed' });
 const { rcloneMountArgs, shellWords, SSH_HOST_WEBDAV_ROW } = require('./mount-argv.js');   // THE mount argv (B-069b: the push mount's too)
 
+const PAIR_GRACE_MS = 120000;   // B-844b r4: after a start, the mount that worked LAST (else the elder) keeps its folder while the machines redial; then a held record that can mount takes over from a holder that cannot
+const LET_GO_MS = 20000;   // B-844b r4: how long a heal waits for a pull REMOVED from its folder to let it go
+const PROBE_STUCK_MS = 60000;   // 主开发's small 2: a probe child still alive past this is said once (its folder not judged meanwhile)
 /** THE one `ls` child of this file (spawn-env-census: one probe site) — never node fs on a mount point. `names` asks `ls -A`
  *  for the folder's entries (B-fcc7: is a released pull's bare folder empty?). Bounded (8 s), ended by its handle.
  *  → { ok, empty } (empty: null unless `names`). */
@@ -46,6 +49,23 @@ function lsChild(mp, { names = false, ms = 8000 } = {}) {   // → ok: true / fa
     if (names) c.stdout.on('data', (d) => { if (out.length < 4096) out += d; });
     c.on('close', (code) => { exitedRes(); end({ ok: code === 0, empty: names && code === 0 ? out.length === 0 : null }); });   // a name of spaces is a name
     c.on('error', () => { exitedRes(); end({ ok: spawned ? false : null, empty: null }); });   // an error before it started (EAGAIN, ENOENT): no verdict
+  });
+}
+
+/** B-844b: a folder's REAL path — symlinks resolved — by a child `realpath -m` (never node fs on a path that may be a mount
+ *  point), bounded (6 s); a host without GNU realpath (the child refuses) takes the path as written (resolved); a child that did
+ *  not ANSWER in time (a wedged FUSE target) is no answer — null, so the next check asks again (r5: never cached as written). */
+function realpathChild(p, { ms = 6000, onExit = null } = {}) {   // r6: onExit — the child's own end (a stuck child is never doubled)
+  const lex = path.resolve(String(p || '/'));
+  return new Promise((res) => {
+    let out = '', done = false, t = null, gone = false;
+    const exited = () => { if (!gone) { gone = true; try { onExit && onExit(); } catch { } } };
+    const end = (v) => { if (!done) { done = true; clearTimeout(t); res(v); } };
+    let c; try { c = spawn('realpath', ['-m', '--', lex], { stdio: ['ignore', 'pipe', 'ignore'] }); } catch { exited(); return end(null); }
+    t = setTimeout(() => { try { c.kill('SIGKILL'); } catch { } end(null); }, ms);
+    c.stdout.on('data', (d) => { if (out.length < 8192) out += d; });
+    c.on('close', (code) => { exited(); const r = out.replace(/\n$/, ''); end(code === 0 && r.startsWith('/') ? r : lex); });
+    c.on('error', (e) => { exited(); end(e && e.code === 'ENOENT' ? lex : null); });   // r7: no realpath on this host ⇒ as written (final); another error ⇒ no answer
   });
 }
 
@@ -84,6 +104,9 @@ class MachineMounts {
     }
     if (normed) this._save();
     this._live = new Map(); // pull rec.id → { teardown, mountpoint }
+    this._realMp = new Map(); // B-844b: pull rec.id → its mount point's REAL path (a child's realpath; as written until resolved)
+    this._startedAt = Date.now();   // B-844b r4: the pair rank's grace (PAIR_GRACE_MS) runs from here
+    this._held = new Map();   // B-844b / B-6c4f: pull rec.id → { kind, otherId, code, params, words } — a younger record on a folder another holds
     this._mounting = new Set(); // pull rec.id (single-flight)
     // Push tunnel ownership: rec.id whose reverse-forward listener was
     // established by THIS process. The boot re-own (restore→onMachineLinked)
@@ -154,8 +177,18 @@ class MachineMounts {
 
   list() {
     return this._state.mounts.map((m) => m.dir === 'pull'
-      ? { id: m.id, dir: 'pull', hostId: m.hostId, remotePath: m.remotePath, mountpoint: m.mountpoint, live: this._live.has(m.id), online: this._online(m.hostId), createdAt: m.createdAt, error: (this._pullErrors && this._pullErrors.get(m.id)) || null }
+      ? this._pullRow(m)
       : { id: m.id, dir: 'push', hostId: m.hostId, folder: m.folder, mountpoint: m.mountpoint, mode: m.mode, os: m.os, method: m.method, via: m.tunnelPort ? 'tunnel' : 'public', mountedAt: m.mountedAt, remoteMounted: !this._pushDown?.has(m.id) });
+  }
+
+  /** A pull's row: its words AND their code + params when the hub knows them (the page words those — zh, ja — and shows the
+   *  English only for a code it does not know). A code is given only while ITS words are the row's. */
+  _pullRow(m) {
+    const error = (this._pullErrors && this._pullErrors.get(m.id)) || null, pc = error && this._pullErrorCodes && this._pullErrorCodes.get(m.id);
+    // r5/r6 (reads 4 #8, 5 #2): a HOLDER says it shares its folder — EVERY waiting row, which way it nests, and whether its machine is gone
+    const shares = [...this._held].filter(([, h]) => h.otherId === m.id).map(([id, h]) => { const o = this._state.mounts.find((x) => x.id === id) || {}; let name = null; try { name = this.hosts.get(o.hostId).name || o.hostId; } catch { name = null; } return { machine: name == null ? '' : String(name), removed: name == null, remotePath: String(o.remotePath || ''), kind: h.kind }; });
+    return { id: m.id, dir: 'pull', hostId: m.hostId, remotePath: m.remotePath, mountpoint: m.mountpoint, live: this._live.has(m.id), online: this._online(m.hostId), createdAt: m.createdAt, error, ...(shares.length ? { shares } : {}),
+      ...(pc && pc.words === error ? { errorCode: pc.code, errorParams: pc.params || {} } : {}) };
   }
 
   // ═══ PUSH direction (this instance's folder → the machine) ═══
@@ -458,7 +491,7 @@ class MachineMounts {
       console.log(`[machine-mounts] pull mount OK in ${Date.now() - t0}ms → ${r.mountpoint}`);
       return r;
     } catch (e) {
-      if (e && e.code === 'mount_removed') { console.log(`[machine-mounts] pull mount request ended after ${Date.now() - t0}ms: ${e.message}`); throw e; }   // the person's own removal: no failure event
+      if (e && (e.code === 'mount_removed' || e.code === 'mount_point_in_use' || e.code === 'mount_point_nested' || e.code === 'mount_point_releasing' || e.code === 'mount_point_unchecked' || e.code === 'mount_point_add_unchecked')) { console.log(`[machine-mounts] pull mount request ended after ${Date.now() - t0}ms: ${e.message}`); throw e; }   // the person's own removal, a folder refused by name: no failure event
       console.warn(`[machine-mounts] pull mount FAILED after ${Date.now() - t0}ms: ${e.message}`);
       global.__vsEvent?.('machine-mount-pull-failed', { detail: String(e.message).slice(0, 160) });
       throw e;
@@ -486,9 +519,23 @@ class MachineMounts {
     remotePath = String(remotePath).replace(/\/+$/, '') || '/';
     const slug = String(h.name || hostId).replace(/[^\w-]/g, '-').slice(0, 40);
     const mp = mountpoint || path.join(os.homedir(), 'vibespace-machines', `${slug}-${path.basename(remotePath) || 'root'}`);
-    let rec = this._state.mounts.find((m) => m.dir === 'pull' && m.hostId === hostId && m.remotePath === remotePath && m.mountpoint === mp);
+    let rec = this._state.mounts.find((m) => m.dir === 'pull' && m.hostId === hostId && m.remotePath === remotePath && path.resolve(m.mountpoint) === path.resolve(mp));   // r4 (read 3 #5): a slash spelling is that record
+    let askedReal = null;
+    if (!rec) {
+      // B-844b / B-6c4f: ONE folder holds one machine's folder — the same folder (by its REAL path: a symlink, `..`, a slash
+      // spelling are one folder), or one nested inside another pull's in either direction, is refused by name: one record's
+      // release (a lazy unmount) would end the other's mount, or take everything beneath it
+      const [realR, learnedAdd] = await Promise.all([(this._realpath || realpathChild)(mp), this._resolveReals()]), real = realR || path.resolve(mp);
+      if (learnedAdd && learnedAdd.length) await this._recheckPairs().catch(() => { });   // r8 (read 7 #3): a sibling's path learned here — its pair is checked now
+      // r7 (read 6 #2): an add whose folder did not ANSWER is refused (nothing recorded) — its pair could never be checked later
+      if (!realR) throw Object.assign(new Error('this folder did not answer when checked — nothing was added; try again, or pick another folder'), { code: 'mount_point_add_unchecked', params: { mountpoint: mp } });   // r8 (read 7 #1): nothing recorded — nothing is tried again
+      rec = this._state.mounts.find((m) => m.dir === 'pull' && m.hostId === hostId && m.remotePath === remotePath && (this._realMp.get(m.id) || path.resolve(m.mountpoint)) === real);   // its read: asked twice meanwhile (r4: or by another spelling) — that record, never «in use» by itself
+      if (!rec) { const c = this._folderConflict(real, null); if (c) throw this._conflictError(c); }
+      askedReal = realR;
+    }
     if (!rec) {
       rec = { id: 'mm-' + require('crypto').randomBytes(4).toString('hex'), dir: 'pull', hostId, remotePath, mountpoint: mp, createdAt: Date.now() };
+      if (askedReal) this._realMp.set(rec.id, askedReal);   // r6 (read 5 #1): only a REAL answer is kept — no answer is asked again (never the path as written)
       this._state.mounts.push(rec);
       this._save();
     }
@@ -507,16 +554,51 @@ class MachineMounts {
 
   async _up(rec) {
     if (this._live.has(rec.id) || this._mounting.has(rec.id)) return;   // up or being made: nothing to wait for (a second press never queues)
+    // B-844b r4 (its read 3 #1a): the FIRST mount of this hub — a machine dialling in before restore's check — runs the pair check
+    // first (one shared check): which record holds a folder is never decided by which machine redialled first
+    if (!this._pairsOnce) this._pairsOnce = this._recheckPairs().catch(() => { });
+    await this._pairsOnce;
+    // r6 (read 5 #1): a record whose OWN real path is unknown (its realpath child did not answer — a wedged target) is never mounted:
+    // two spellings of one folder must never both mount; the next check asks again
+    if (!this._realMp.has(rec.id)) {
+      const learned = (await this._resolveReals()) || [];   // r8: its «could not be checked» words go in _resolveReals once learned
+      if (learned.length) await this._recheckPairs().catch(() => { });   // r7/r8: a path learned NOW (its own or a sibling's) — the pair check runs again before anything
+    }
+    if (!this._realMp.has(rec.id) && this._held.has(rec.id)) { const h = this._held.get(rec.id); this._pullRetryAt?.delete(rec.id); throw Object.assign(new Error(h.words), { code: h.code, params: h.params }); }   // r8 (read 7 #6): a held row keeps its words
+    if (!this._realMp.has(rec.id)) {   // r7 (read 6 #6): said on the row (the dot), the next check asks again once its child has ended
+      const words = 'this folder could not be checked yet (it did not answer) — it is tried again by itself', params = { mountpoint: String(rec.mountpoint || '') };
+      (this._pullErrorCodes = this._pullErrorCodes || new Map()).set(rec.id, { words, code: 'mount_point_unchecked', params });
+      if ((this._pullErrors = this._pullErrors || new Map()).get(rec.id) !== words) { this._pullErrors.set(rec.id, words); this._notify(); }
+      this._pullRetryAt?.delete(rec.id);
+      throw Object.assign(new Error(words), { code: 'mount_point_unchecked', params });
+    }
     // the cure (the readers' 3): a boot release of THIS record's folder still running is WAITED for — never raced. Keyed by
     // the MOUNT POINT, resolved (cure-2 read #3): a pull removed and added again on the same folder meanwhile has a new id
     // and waits too — never mounted before the boot's step releases that folder under it
-    const rel = this._releasing && this._releasing.get(path.resolve(rec.mountpoint));
-    if (rel) { try { await rel; } catch { } }
+    const mine = this._markKey(rec);   // B-844b: keyed by the REAL path; read 2: a mark on a folder NESTED with this one is waited for too
+    const rels = this._releasing ? [...this._releasing].filter(([k]) => k === mine || (k !== '/' && mine.startsWith(k + '/')) || (mine !== '/' && k.startsWith(mine + '/'))).map(([, v]) => v) : [];
+    for (const rel of rels) { try { await rel; } catch { } }
+    const held = this._held.get(rec.id);
+    if (held) { this._pullRetryAt?.delete(rec.id); throw Object.assign(new Error(held.words), { code: held.code, params: held.params }); }   // r6: never tried — no failed-try mark   // B-844b / B-6c4f: a second record on a folder another holds — never mounted, never released
     // cure 2 (主开发's «as if a must»): the wait can last minutes — a pull the person REMOVED meanwhile is never mounted
     // (an rclone and a live entry with no row and no door)
     if (!this._state.mounts.some((m) => m.id === rec.id)) return;
     if (this._live.has(rec.id) || this._mounting.has(rec.id)) return;
+    let lc = this._liveConflict(rec);   // its read: two machines dialling in before the boot's pair check — never both mounted on one folder
+    if (lc && lc.removed) {   // B-844b r4 (read 3 #2): a pull REMOVED from this folder is still being let go — waited for (bounded), never refused by a row that is gone
+      await this._letGo(lc.other.id);
+      if (!this._state.mounts.some((m) => m.id === rec.id) || this._live.has(rec.id) || this._mounting.has(rec.id)) return;
+      const heldNow = this._held.get(rec.id);   // r5: a re-rank during the wait may have held it
+      if (heldNow) throw Object.assign(new Error(heldNow.words), { code: heldNow.code, params: heldNow.params });
+      lc = this._liveConflict(rec);
+    }
+    if (lc) {
+      this._pullRetryAt?.delete(rec.id);   // read 3 #6: refused for another record's mount — the next sweep asks again (no 5-min wait)
+      if (lc.removed) throw Object.assign(new Error('a pull just removed from this folder is still being let go — it is tried again by itself'), { code: 'mount_point_releasing', params: { mountpoint: String(rec.mountpoint || '') } });
+      const w = this._conflictWords(lc, { held: true }); throw Object.assign(new Error(w.words), { code: w.code, params: w.params });
+    }
     this._mounting.add(rec.id);
+    this._bare?.delete(rec.id);   // B-fcc7 (主开发's small 6): a folder being mounted keeps no old «empty» verdict
     let failed = null;
     try {
       // B-fcc7 (adversarial r1 #2): release what the LAST chain left FIRST, before the machine is asked anything — a heal that
@@ -533,6 +615,7 @@ class MachineMounts {
       const h = await DM.deviceFolderMount({
         device, remotePath, mountpoint: rec.mountpoint,
         rcloneBin: this.rcloneBin(), log: this.log, preCleaned: true,
+        canRelease: () => !this._otherHolds(rec),   // B-844b: a pull removed and added again on this folder — the new record's mount stays
         // B-fcc7: its rclone exited — the mount point is already released (lazy unmount); the row says so at once, the
         // sweep's pending branch remounts while the machine is linked (only THIS chain's entry: a newer one is left alone).
         // r1 #5: a chain that died YOUNG keeps the sweep's 5-min backoff (no remount every sweep, each one a folder server
@@ -540,19 +623,21 @@ class MachineMounts {
         onGone: (gone = {}) => {
           if (!entry || this._live.get(rec.id) !== entry) return;
           this._live.delete(rec.id);
-          if (Date.now() - entry.at < 60000) (this._pullRetryAt = this._pullRetryAt || new Map()).set(rec.id, Date.now() + 5 * 60000);
+          if (Date.now() - entry.at < 60000) { (this._pullRetryAt = this._pullRetryAt || new Map()).set(rec.id, Date.now() + 5 * 60000); (this._pullFailedAt = this._pullFailedAt || new Map()).set(rec.id, Date.now() + 5 * 60000); }   // r8 (read 7 #5): a young death is a failed try for the rank too
           this._notify();
           Promise.resolve(gone.released).catch(() => { }).then(() => this._probeBare(rec)).catch(() => { });   // B-fcc7: once its lazy unmount ended
         },
       });
       // r1 #4: the machine's link closed while this mount was being made (onMachineUnlinked saw no live chain) — let it go now
       if (!this._online(rec.hostId)) { try { await h.teardown(); } catch { } throw new Error('the machine went offline while its folder was being mounted'); }
-      if (!this._state.mounts.some((m) => m.id === rec.id)) { try { await h.teardown(); } catch { } return; }   // cure 2: removed while it was being mounted
+      if (!this._state.mounts.some((m) => m.id === rec.id)) { try { await h.teardown(); } catch { } return; }   // cure 2: removed while it was being mounted (B-844b: canRelease keeps a folder another record now holds)
       entry = { teardown: h.teardown, released: h.released, mountpoint: rec.mountpoint, at: Date.now() };
       this._live.set(rec.id, entry);
+      rec.lastLiveAt = Date.now(); this._save();   // B-844b (read 2): the record live LAST holds its folder after a restart (the rank in _recheckPairs)
       this._bare?.delete(rec.id);   // B-fcc7: mounted — its bare folder's verdict goes (shadowedBy)
       for (const f of pullLiveListeners) { try { f(rec.mountpoint); } catch { } }   // B-fcc7 (read 6): who skipped the folder while it was away writes now
       if (this._pullErrors && this._pullErrors.delete(rec.id)) this._notify();
+      this._pullFailedAt?.delete(rec.id);   // r6/r7: landed — no failed try pending
       this.log(`pull mount up: ${rec.hostId}:${rec.remotePath} → ${rec.mountpoint}`);
     } catch (e) {
       // the cure (the readers' 1): a release that HUNG is SAID where the row is read (list().error), once, and the record
@@ -564,9 +649,11 @@ class MachineMounts {
       // failure's own evidence); the folder is probed again (shadowedBy shows a non-empty one, so its files can be moved out)
       if (e && /(directory|mountpoint) is not empty/i.test(String(e.message || '')) && this._state.mounts.some((m) => m.id === rec.id)) {
         const said = this._pullErrors || (this._pullErrors = new Map()), words = 'this folder is not empty, so the machine\'s folder cannot be mounted over it — move its files out, then press Remount now';
+        (this._pullErrorCodes = this._pullErrorCodes || new Map()).set(rec.id, { words, code: 'mount_not_empty', params: {} });   // 主开发's small 5: worded on the page
         if (said.get(rec.id) !== words) { said.set(rec.id, words); this._notify(); }
       }
       failed = e || true;
+      (this._pullFailedAt = this._pullFailedAt || new Map()).set(rec.id, Date.now() + 5 * 60000);   // r6/r7 (reads 5 #4, 6 #4): a failed try on any road — the RANK's own mark (the sweep's backoff stays the sweep's)
       throw e;
     } finally {
       this._mounting.delete(rec.id);
@@ -608,15 +695,142 @@ class MachineMounts {
       if (live) { try { await live.teardown(); } catch { } this._live.delete(id); }
       this._pullErrors?.delete(id);   // cure 2: its words go with its record
       this._bare?.delete(id);
+      this._held.delete(id);
     } else {
       await this._unmountPush(rec);
       this._pushTunnelOwned.delete(id);
       this._pushRetryAt.delete(id);
       this._pushDown?.delete(id);
     }
-    this._state.mounts.splice(i, 1);
+    this._state.mounts.splice(i, 1);   // (its real path stays known: a chain of it still ending must see a record added again on that folder)
     this._save(); this._notify();
+    if (rec.dir === 'pull') this._recheckPairs().catch(() => { });   // B-844b / B-6c4f: the record it held back may be free now
     return { ok: true };
+  }
+
+  /** B-844b / B-6c4f: the record whose folder is `real` or nests with it (in either direction), but `exceptId` → { kind, other } | null.
+   *  By the REAL paths (`_realMp`, resolved by a child); a path not resolved yet is compared as written. */
+  _folderConflict(real, exceptId) {
+    for (const m of this._state.mounts) {
+      if (m.dir !== 'pull' || m.id === exceptId) continue;
+      const ro = this._realMp.get(m.id) || path.resolve(m.mountpoint);
+      if (ro === real) return { kind: 'same', other: m };
+      if (ro !== '/' && real.startsWith(ro + '/')) return { kind: 'inside', other: m };
+      if (real !== '/' && ro.startsWith(real + '/')) return { kind: 'over', other: m };
+    }
+    return null;
+  }
+  /** The refusal's words, named after the OTHER record (its machine, its folder, its mount point) and a code the client words. */
+  _conflictWords({ kind, other }, { held = false } = {}) {
+    let name = null; try { name = this.hosts.get(other.hostId).name || other.hostId; } catch { name = null; }
+    const params = { machine: name == null ? '' : String(name), removed: name == null, remotePath: String(other.remotePath || ''), mountpoint: String(other.mountpoint || ''), held };
+    const who = params.removed ? `a removed machine’s ${params.remotePath}` : `“${params.machine}”’s ${params.remotePath}`;
+    const end = held ? 'remove one of the two rows' : null;
+    if (kind === 'same') return { code: 'mount_point_in_use', params, words: held ? `this folder is also the mount point of ${who} — ${end}` : `this folder is already the mount point of ${who} — ${params.removed ? 'remove that row in Mounts, or pick another folder' : 'pick another folder (one folder holds one machine’s folder)'}` };
+    params.kind = kind;
+    return { code: 'mount_point_nested', params, words: kind === 'inside'
+      ? `this folder is inside ${params.mountpoint}, the mount point of ${who} — unmounting one would take the other with it; ${end || 'pick a folder outside it'}`
+      : `this folder holds ${params.mountpoint}, the mount point of ${who} — unmounting one would take the other with it; ${end || 'pick a folder outside it'}` };
+  }
+  /** B-844b: every pull record's real path resolved (children, in parallel — never one wedged mount point after another) */
+  async _resolveReals() {
+    const kids = (this._realKids = this._realKids || new Set());   // r6 (read 5 #5): ONE child per record at a time — one stuck in the kernel is never doubled
+    const todo = this._state.mounts.filter((m) => m.dir === 'pull' && !this._realMp.has(m.id) && !kids.has(m.id));
+    todo.forEach((m) => kids.add(m.id));
+    const reals = await Promise.all(todo.map((m) => (this._realpath || realpathChild)(m.mountpoint, { onExit: () => kids.delete(m.id) })));
+    const learned = [];
+    todo.forEach((m, i) => { if (reals[i]) { this._realMp.set(m.id, reals[i]); learned.push(m.id); } });   // r5: a child that did not answer is asked again at the next check
+    // r8 (read 7 #3): a path learned on ANY road — its «could not be checked» words go here (a pair it forms is the callers' re-check)
+    for (const id of learned) { const said = this._pullErrorCodes && this._pullErrorCodes.get(id); if (said && said.code === 'mount_point_unchecked' && this._pullErrors && this._pullErrors.get(id) === said.words) { this._pullErrors.delete(id); this._notify(); } }
+    return learned;
+  }
+  /** B-844b (its read): a record OTHER than `rec` that is live or being mounted on `rec`'s folder, or one nested with it → { kind, other } | null */
+  _liveConflict(rec) {
+    const real = this._markKey(rec);
+    const byId = new Map(this._state.mounts.filter((m) => m.dir === 'pull').map((m) => [m.id, m]));
+    for (const id of new Set([...this._live.keys(), ...this._mounting])) {   // read 2: a REMOVED record still mounting holds its folder too
+      if (id === rec.id) continue;
+      const m = byId.get(id) || { id, dir: 'pull', hostId: null, remotePath: '', mountpoint: (this._live.get(id) || {}).mountpoint || '' };
+      if (!byId.has(id) && !this._realMp.has(id) && !m.mountpoint) continue;
+      const ro = this._realMp.get(id) || path.resolve(String(m.mountpoint || '/'));
+      const removed = !byId.has(id);   // B-844b r4: a record no longer on file (its chain still lets go)
+      if (ro === real) return { kind: 'same', other: m, removed };
+      if (ro !== '/' && real.startsWith(ro + '/')) return { kind: 'inside', other: m, removed };
+      if (real !== '/' && ro.startsWith(real + '/')) return { kind: 'over', other: m, removed };
+    }
+    return null;
+  }
+  /** B-844b r4: wait (bounded, LET_GO_MS) until a removed record's chain has let its folder go — no longer being mounted, no live entry */
+  _letGo(id, ms = this._letGoMs != null ? this._letGoMs : LET_GO_MS) {
+    return new Promise((resolve) => {
+      const t0 = Date.now();
+      const tick = () => { if (!(this._mounting.has(id) || this._live.has(id)) || Date.now() - t0 >= ms) return resolve(); setTimeout(tick, 100); };   // bounded (LET_GO_MS): a ref'd timer — the wait is part of a heal someone awaits
+      tick();
+    });
+  }
+  _conflictError(c) { const w = this._conflictWords(c); return Object.assign(new Error(w.words), { code: w.code, params: w.params }); }
+  /** B-844b: does a record OTHER than `rec` now hold `rec`'s folder (live or being mounted)? — then `rec`'s chain never releases it */
+  _otherHolds(rec) {
+    const real = this._realMp.get(rec.id) || path.resolve(rec.mountpoint);
+    const nests = (ro) => ro === real || (ro !== '/' && real.startsWith(ro + '/')) || (real !== '/' && ro.startsWith(real + '/'));   // read 2: nested too
+    return this._state.mounts.some((m) => m.dir === 'pull' && m.id !== rec.id && (this._live.has(m.id) || this._mounting.has(m.id)) && nests(this._realMp.get(m.id) || path.resolve(m.mountpoint)));
+  }
+  /** B-844b (its read): may the boot release this record's folder? A free record, yes; a HELD one only while its holder is neither
+   *  live nor being mounted (then the folder holds only the last hub's leftover — a dead FUSE entry of either). */
+  _releasableHeld(m) {
+    const h = this._held.get(m.id);
+    return !h || !(this._live.has(h.otherId) || this._mounting.has(h.otherId));
+  }
+  /** The boot mark's key: the folder's REAL path (B-844b), as written until it is resolved */
+  _markKey(rec) { return this._realMp.get(rec.id) || path.resolve(String(rec.mountpoint || '')); }
+  /** B-844b / B-6c4f: EXISTING records on one folder (or nested): ONE of each pair is HELD — never mounted, never released (its
+   *  release would end the other's mount) — its row says why, by the other's name: «… remove one of the two rows»; a removal frees
+   *  it. The HOLDER is ranked (reads 2–5): live, then being mounted; then INSIDE the grace after a start (PAIR_GRACE_MS) the one live
+   *  LAST (`lastLiveAt`), the current holder, the elder — the link decides nothing there; AFTER it the one that CAN MOUNT NOW (a dial
+   *  link up, an ssh machine — no link to read — either way with no failed try pending), the current holder, the one live last,
+   *  the elder; a record whose machine was removed never holds (the orphan an edited ssh machine leaves behind never blocks its new row). Real paths first (children, in parallel). Said once in the journal per pair. */
+  async _recheckPairs() {
+    await this._resolveReals();
+    const pulls = this._state.mounts.filter((m) => m.dir === 'pull');
+    const gone = (m) => { try { this.hosts.get(m.hostId); return false; } catch { return true; } };
+    // r5 (read 4 #2): CAN IT MOUNT NOW — a dial machine whose link is up; an ssh machine (no link to read: «online» is always true)
+    // unless its last try failed (a retry still pending) — a held ssh record takes over from a holder that is down
+    const failedTry = (m) => (this._pullFailedAt && this._pullFailedAt.get(m.id)) > Date.now();   // r6/r7: set by a failed try on any road (its own map)
+    const dialUp = (m) => { try { const h = this.hosts.get(m.hostId); return this._realMp.has(m.id) && (h.transport === 'dial' ? !!this.hosts.dialOnline?.(h.deviceId) : true) && !failedTry(m); } catch { return false; } };   // r7 (read 6 #1): a record whose real path is unknown cannot mount now
+    const rank = (m) => (this._live.has(m.id) ? 0 : this._mounting.has(m.id) ? 1 : gone(m) ? 4 : 2);
+    // r4 (read 3 #1): inside the grace after a start the record live LAST keeps its folder whichever machine redials first; after it,
+    // a record whose dial link is UP takes the folder over from a holder whose link is down (a dead holder never empties it for good)
+    const settled = Date.now() - (this._startedAt || 0) >= (this._pairGraceMs != null ? this._pairGraceMs : PAIR_GRACE_MS);
+    const last = (m) => Number(m.lastLiveAt) || 0, up = (m) => (dialUp(m) ? 1 : 0);
+    // r5 (read 4 #1): INSIDE the grace the link decides NOTHING (records from before have no lastLiveAt — a tie there went to the
+    // machine that redialled first): the one live last, then the elder; AFTER it, the one that can mount now first
+    // r6 (read 5 #3): then the CURRENT holder stays while neither can mount (each failed try's mark lasts 5 min, so two dead machines
+    // may still trade the folder at that pace — each change said once in the journal)
+    const cur = (m) => (this._held.has(m.id) ? 0 : 1);
+    const order = [...pulls].sort((a, b) => rank(a) - rank(b) || (settled ? (up(b) - up(a)) || (cur(b) - cur(a)) || (last(b) - last(a)) : (last(b) - last(a)) || (cur(b) - cur(a))) || (Number(a.createdAt) || 0) - (Number(b.createdAt) || 0) || String(a.id).localeCompare(String(b.id)));
+    const next = new Map();
+    for (let i = 0; i < order.length; i++) {
+      const m = order[i]; if (rank(m) <= 1) continue;   // a live record (or one being mounted) holds its folder by being so
+      const real = this._realMp.get(m.id) || path.resolve(m.mountpoint);
+      for (let j = 0; j < i; j++) {
+        const o = order[j];
+        if (next.has(o.id) || rank(o) === 4) continue;   // one already held — or a removed machine's — holds nothing
+        const ro = this._realMp.get(o.id) || path.resolve(o.mountpoint);
+        const kind = ro === real ? 'same' : (ro !== '/' && real.startsWith(ro + '/')) ? 'inside' : (real !== '/' && ro.startsWith(real + '/')) ? 'over' : null;
+        if (kind) { next.set(m.id, { kind, otherId: o.id, ...this._conflictWords({ kind, other: o }, { held: true }) }); break; }
+      }
+    }
+    let changed = false;
+    for (const [id, h] of next) {
+      const was = this._held.get(id);
+      if (!was || was.words !== h.words) { changed = true; const rec = pulls.find((m) => m.id === id); this.log(`pull mount ${rec && rec.mountpoint}: held — ${h.words}`); }
+      (this._pullErrors = this._pullErrors || new Map()).set(id, h.words);
+      (this._pullErrorCodes = this._pullErrorCodes || new Map()).set(id, { words: h.words, code: h.code, params: h.params });
+    }
+    for (const id of [...this._held.keys()]) if (!next.has(id)) { changed = true; if (this._pullErrors && this._pullErrors.get(id) === this._held.get(id).words) this._pullErrors.delete(id); this._pullRetryAt?.delete(id); }   // freed: the next sweep tries it (no 5-min wait)
+    this._held = next;
+    if (changed) this._notify();
+    return next;
   }
 
   /** A machine (re)linked — dial-in, or its daemon re-exec'd. Heal pulls
@@ -627,8 +841,14 @@ class MachineMounts {
    *  Fire-and-forget. */
   onMachineLinked(hostId) {
     if (!hostId) return;
+    // B-844b r4 (read 3 #1b): a link is a re-rank — a held record of this machine may take its folder over from a holder that is down
+    if (this._held.size) { this._recheckPairs().catch(() => { }).then(() => this._healLinked(hostId)); return; }
+    this._healLinked(hostId);
+  }
+  _healLinked(hostId) {
     for (const rec of this._state.mounts.filter((m) => m.hostId === hostId)) {
       if (rec.dir === 'pull') {
+        if (this._held.has(rec.id)) continue;   // B-844b (read 2): a held record is not healed (said once, by its row)
         const stale = this._live.get(rec.id);
         const heal = async () => {
           if (stale) { try { await stale.teardown(); } catch { } this._live.delete(rec.id); }
@@ -675,7 +895,7 @@ class MachineMounts {
       if (mp === '/' || (rp !== mp && !rp.startsWith(mp + '/'))) continue;   // a whole path segment (…/mac is not …/macbook)
       if (this._live.has(m.id)) return null;
       let h = null; try { h = this.hosts.get(m.hostId); } catch { h = null; }
-      if (!h || (!writer && this._bare?.get(m.id) !== 'empty')) continue;   // a READER: probed empty only (a folder with files of its own shows them); a WRITER: any folder not live (what it adds is hidden under the next mount, or blocks it)
+      if (!h || this._held.has(m.id) || (!writer && this._bare?.get(m.id) !== 'empty')) continue;   // a held record: its holder answers   // a READER: probed empty only (a folder with files of its own shows them); a WRITER: any folder not live (what it adds is hidden under the next mount, or blocks it)
       if (!best || mp.length > best.mp.length) best = { m, mp, h };
     }
     if (!best) return null;
@@ -699,12 +919,23 @@ class MachineMounts {
    *  dropped (not readable, timed out: shown as before). */
   async _probeBare(rec) {
     this._bare = this._bare || new Map(); this._probing = this._probing || new Set();
-    const pending = !!rec && !!this._releasing && this._releasing.has(path.resolve(String(rec.mountpoint || '')));   // the boot's release of it still runs
-    if (rec && this._probing.has(rec.id)) { (this._reprobe = this._reprobe || new Set()).add(rec.id); return this._bare.get(rec.id) || null; }   // asked while one runs: again once that child exits (read 6: a multi-select delete)
-    if (!rec || rec.dir !== 'pull' || this._live.has(rec.id) || this._mounting.has(rec.id) || pending || DM.unmountStuckOf?.(rec.mountpoint)) return this._bare.get(rec && rec.id) || null;
+    const pending = !!rec && !!this._releasing && this._releasing.has(this._markKey(rec));   // the boot's release of it still runs
+    if (rec && this._probing.has(rec.id)) {
+      (this._reprobe = this._reprobe || new Set()).add(rec.id);   // asked while one runs: again once that child exits (read 6: a multi-select delete)
+      // 主开发's small 2: a probe child that never ends (an `ls` asleep in the kernel) — bounded: its folder is not judged meanwhile
+      // (the verdict dropped: shown as before) and the journal says so ONCE
+      const at = this._probingAt && this._probingAt.get(rec.id);
+      if (at && Date.now() - at > PROBE_STUCK_MS && !(this._probeSaid = this._probeSaid || new Set()).has(rec.id)) {
+        this._probeSaid.add(rec.id); this._bare.delete(rec.id);
+        this.log(`pull mount ${rec.mountpoint}: its folder's check (ls -A) has not ended in ${Math.round(PROBE_STUCK_MS / 1000)} s — the folder is not judged until it ends`);
+      }
+      return this._bare.get(rec.id) || null;
+    }
+    if (!rec || rec.dir !== 'pull' || this._live.has(rec.id) || this._mounting.has(rec.id) || pending || this._held.has(rec.id) || DM.unmountStuckOf?.(rec.mountpoint)) return this._bare.get(rec && rec.id) || null;   // read 2: a held record is never probed (its folder may be its holder's live mount)
     this._probing.add(rec.id);   // one probe child per folder while it LIVES (a wedged `ls` is not stacked by every sweep)
-    const r = await lsChild(rec.mountpoint, { names: true });
-    Promise.resolve(r.exited).then(() => { this._probing.delete(rec.id); if (this._reprobe?.delete(rec.id)) this._probeBare(rec).catch(() => { }); });
+    (this._probingAt = this._probingAt || new Map()).set(rec.id, Date.now());
+    const r = await lsChild(rec.mountpoint, { names: true, ms: this._probeMs || 8000 });
+    Promise.resolve(r.exited).then(() => { this._probing.delete(rec.id); this._probingAt.delete(rec.id); this._probeSaid?.delete(rec.id); if (this._reprobe?.delete(rec.id)) this._probeBare(rec).catch(() => { }); });
     if (this._live.has(rec.id) || this._mounting.has(rec.id) || !this._state.mounts.some((m) => m.id === rec.id)) return null;   // it moved meanwhile
     if (r.ok === null) return this._bare.get(rec.id) || null;   // ls could not start: the verdict stands
     if (r.ok) this._bare.set(rec.id, r.empty ? 'empty' : 'not-empty'); else this._bare.delete(rec.id);
@@ -756,13 +987,16 @@ class MachineMounts {
   /** Boot: heal every recorded mount whose machine is reachable. */
   async restore() {
     this.gcOrphanTokens();
+    if (this._pairsOnce) await this._pairsOnce;   // r4: a dial-in's heal ran one already — waited for, then
+    this._pairsOnce = this._recheckPairs().catch(() => { });   // B-844b / B-6c4f: the real paths and the held records FIRST — a held record's folder is another's (r5: restore's own check, fresh)
+    await this._pairsOnce;
     const byHost = new Set(this._state.mounts.map((m) => m.hostId));
     const linked = [], offline = [];
     for (const hostId of byHost) {
       if (this._online(hostId)) linked.push(hostId);
       // B-fcc7: an offline machine's recorded pull may still be mounted by the LAST hub's rclone (detached, it outlived
       // that hub; its bridge died with it) — released now, not at the next mount: the reader meets an empty folder
-      else offline.push(...this._state.mounts.filter((m) => m.dir === 'pull' && m.hostId === hostId && !this._live.has(m.id) && !this._mounting.has(m.id)));
+      else offline.push(...this._state.mounts.filter((m) => m.dir === 'pull' && m.hostId === hostId && !this._live.has(m.id) && !this._mounting.has(m.id) && this._releasableHeld(m)));
     }
     // the cure (the readers' 3): the releases run ONE AFTER ANOTHER (never every one at once) and every one is MARKED at once,
     // BEFORE any linked machine heals (cure-3 read #2) — a heal of the same folder, a dial-in meanwhile, waits in _up for the
@@ -772,9 +1006,9 @@ class MachineMounts {
     this._releasing = this._releasing || new Map();
     let prev = Promise.resolve();
     for (const rec of offline) {
-      const key = path.resolve(rec.mountpoint);
-      const p = prev.then(() => DM.releaseStale(rec.mountpoint, { log: this.log })).then(() => { if (this._pullErrors && this._pullErrors.delete(rec.id)) this._notify(); }).catch((e) => {
-        if (e && e.code === 'unmount_hung' && this._state.mounts.some((m) => m.id === rec.id)) { (this._pullErrors = this._pullErrors || new Map()).set(rec.id, e.message); this._notify(); }
+      const key = this._markKey(rec);   // B-844b: the REAL path
+      const p = prev.then(() => DM.releaseStale(rec.mountpoint, { log: this.log })).then(() => { if (!this._held.has(rec.id) && this._pullErrors && this._pullErrors.delete(rec.id)) this._notify(); }).catch((e) => {   // read 2: a held record's words stay
+        if (e && e.code === 'unmount_hung' && !this._held.has(rec.id) && this._state.mounts.some((m) => m.id === rec.id)) { (this._pullErrors = this._pullErrors || new Map()).set(rec.id, e.message); this._notify(); }
       });
       this._releasing.set(key, p);
       p.then(() => { if (this._releasing.get(key) === p) this._releasing.delete(key); });
@@ -801,7 +1035,8 @@ class MachineMounts {
     // forever). 5min backoff per record so an unreachable machine isn't
     // hammered every sweep.
     this._pullRetryAt = this._pullRetryAt || new Map();
-    for (const rec of this._state.mounts.filter((m) => m.dir === 'pull' && !this._live.has(m.id) && !this._mounting.has(m.id))) {
+    if (this._held.size) await this._recheckPairs().catch(() => { });   // B-844b r4: a holder gone down (or removed) frees its held record here too
+    for (const rec of this._state.mounts.filter((m) => m.dir === 'pull' && !this._live.has(m.id) && !this._mounting.has(m.id) && !this._held.has(m.id))) {
       if (!this._online(rec.hostId)) continue;
       const at = this._pullRetryAt.get(rec.id) || 0;
       if (Date.now() < at) continue;
@@ -894,7 +1129,15 @@ function pullShadowOf(p, { writer = false } = {}) {
   try { const mm = _pullDoor(); return mm && typeof mm.shadowedBy === 'function' ? mm.shadowedBy(String(p), { writer }) || null : null; } catch { return null; }
 }
 
+/** The row's state as a refusal's body — { error (the English for an agent), code, params } the client words (fsErrorText): the
+ *  files route's and WebDAV's one spelling. */
+function pullShadowBody(s) {
+  const params = { machine: s.machine };
+  return s.offline
+    ? { error: `“${s.machine}” is offline — this folder shows its files only while the machine is connected`, code: 'machine_offline', params }
+    : { error: `“${s.machine}”’s folder is not mounted right now — this folder is where it appears; it is tried again by itself, or press Remount now on its row`, code: 'machine_folder_down', params };
+}
 /** A file under a pull folder was removed or moved out (MachineMounts#touched) — never a throw. */
 function pullTouched(p) { if (!_pullDoor || !p) return; try { const mm = _pullDoor(); if (mm && typeof mm.touched === 'function') mm.touched(String(p)); } catch { } }
 
-module.exports = { MachineMounts, registerPullDoor, pullShadowOf, pullTouched, onPullLive };
+module.exports = { MachineMounts, registerPullDoor, pullShadowOf, pullTouched, onPullLive, pullShadowBody };
