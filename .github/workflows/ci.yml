@@ -102,6 +102,26 @@ jobs:
           officially documented CI channel — docs/en/github-actions)
         run: bash scripts/ci-npm.sh install -g @anthropic-ai/claude-code
         timeout-minutes: 5
+      # THE RUNNER'S OWN CLAUDE BUILD, DRAFTED (B-9ff2, lane bl-ci, the coordinator's road (a), 2026-11-19): the box and
+      # the test machine never hold the build this runner installs (the step above: the NEWEST). The tree's dump script
+      # READS the installed file (strings, never run) and names the build by its own stamp; the draft (the dump + its diff
+      # against the newest pinned build) is kept as an artifact for the lane that pins it in test-record-shape. It needs no
+      # node_modules (src/record-shape.js requires nothing). Part 1 only; never a gate. test-cli-registration ⑤ holds it.
+      - name: Dump the runner's claude build (read, never run)
+        if: matrix.part == 1
+        continue-on-error: true
+        run: node scripts/claude-cli-dump.mjs --auto --force --data "$RUNNER_TEMP/cli-dump"
+        timeout-minutes: 3
+      - name: Upload the runner's claude dump
+        if: matrix.part == 1 && always()
+        continue-on-error: true
+        timeout-minutes: 2
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-cli-dump-${{ github.sha }}
+          path: ${{ runner.temp }}/cli-dump/claude-cli-dumps/
+          if-no-files-found: warn
+          retention-days: 14
       # THE ONE NPM DOOR (lane ci-npm-retry, B-fa5e): .330's heavy 6/6 died in
       # `npm ci` on a registry reset MID-DOWNLOAD — a blip npm's own
       # fetch-retries never covers (it retries a request until its headers).

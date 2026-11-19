@@ -15,6 +15,8 @@
 //   ④ the wiring: oat-file-sync's tick tells onCliVersion the build; the drift card tells global.__vsCliSeen; server.js
 //      mounts it on the oat-file-sync line; the routes (GET status, POST draft — a GET never starts the child); the clients;
 //      test-architecture §94: the draft child is a serviceEnv site (a MUTANT with no env is RED)
+//   ⑤ the hosted runner's build (B-9ff2): ci.yml's fast job (part 1) runs the --auto road over the runner's own claude file and
+//      keeps the draft as an artifact — never a run, never a gate; CONTROL: no step, or a step that can fail the job, is RED by name
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -243,6 +245,37 @@ console.log('④ the wiring — the tick, the drift card, the routes, the client
   ok('§94: the census sees the draft child (a tracked file) as a BUILDER site — execFile process.execPath on serviceEnv, no row needed, nothing red', !!real.row && real.row.class === 'serviceEnv' && real.row.cmd === 'process.execPath' && real.red.length === 0, real);
   const mut = site({ 'src/server/cli-registration.js': cr.replace('{ env: serviceEnv(process.env), timeout', '{ timeout') });
   ok('…MUTANT: the same child with no env (it would inherit the hub\'s whole env, secrets included) ⇒ §94 RED, naming the site', cr.includes('{ env: serviceEnv(process.env), timeout') && mut.red.length === 1 && /UNLISTED raw/.test(mut.red[0]), mut);
+}
+
+console.log('\n⑤ THE HOSTED RUNNER\'S BUILD (B-9ff2, the coordinator\'s road (a), 2026-11-19): ci.yml\'s fast job drafts it — read, never run');
+{
+  // the box and the test machine never hold the build a hosted runner installs (ci.yml: `npm install -g @anthropic-ai/claude-code`, the
+  // NEWEST); one hosted step runs THIS tree's --auto road over the runner's own file and keeps the draft as an artifact (no lane downloads
+  // a vendor package: the coordinator's rule on fetched binaries)
+  const DUMP_RUN = 'node scripts/claude-cli-dump.mjs --auto --force --data "$RUNNER_TEMP/cli-dump"';
+  const fastOf = (yml) => { const at = yml.indexOf('\n  fast:\n'), end = yml.indexOf('\n  heavy-shards:\n', at); return at < 0 ? '' : yml.slice(at, end < 0 ? undefined : end); };
+  const wiring = (yml) => {
+    const f = fastOf(yml), bad = [];
+    const dump = /( {6}- name: Dump the runner's claude build[^\n]*\n(?: {8}.*\n)+)/.exec(f), up = /( {6}- name: Upload the runner's claude dump[^\n]*\n(?: {8}.*\n)+)/.exec(f);
+    const install = f.indexOf('run: bash scripts/ci-npm.sh install -g @anthropic-ai/claude-code\n');
+    if (!dump) bad.push('the fast job drafts no runner build');
+    else {
+      const d = dump[1];
+      if (!d.includes(`        run: ${DUMP_RUN}\n`)) bad.push('the dump step is not the tree\'s --auto road over the installed file');
+      if (!d.includes('        continue-on-error: true\n')) bad.push('the dump step can fail the job (no continue-on-error)');
+      if (!d.includes('        if: matrix.part == 1\n')) bad.push('the dump step runs in every part');
+      if (install < 0 || f.indexOf(d) < install) bad.push('the dump step runs before the claude install');
+    }
+    if (!up) bad.push('the draft is not kept (no upload)');
+    else if (!up[1].includes('          path: ${{ runner.temp }}/cli-dump/claude-cli-dumps/\n') || !up[1].includes('          name: claude-cli-dump-${{ github.sha }}\n')) bad.push('the upload is not the draft dir, by the sha');
+    return bad;
+  };
+  const yml = read('.github/workflows/ci.yml'), w = wiring(yml);
+  ok(`ci.yml's fast job (part 1) drafts the runner's own claude build AFTER installing it — \`${DUMP_RUN}\`: the tree's read (strings), never a run, never a gate — and keeps the draft as the artifact claude-cli-dump-<sha>`, w.length === 0, w);
+  const noStep = yml.replace(/ {6}- name: Dump the runner's claude build[^\n]*\n(?: {8}.*\n)+/, '');
+  const asGate = yml.replace(/( {6}- name: Dump the runner's claude build[^\n]*\n(?: {8}(?!continue-on-error).*\n)*) {8}continue-on-error: true\n/, '$1');
+  ok('CONTROL: a ci.yml without the step, or with the step able to fail the job, is RED by name', noStep !== yml && asGate !== yml
+    && wiring(noStep).includes('the fast job drafts no runner build') && wiring(asGate).includes('the dump step can fail the job (no continue-on-error)'), { noStep: wiring(noStep), asGate: wiring(asGate) });
 }
 
 console.log(fail ? `\n✗ (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
