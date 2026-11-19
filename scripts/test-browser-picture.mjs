@@ -586,11 +586,20 @@ console.log('§10 the picture the view says it shows, in ONE window (the owner\'
   // the live view's wiring (pins): the picture reads the hub's verdict; the verdict and a takeover / handback re-judge it; a
   // one-window row says the blanks it folds
   const live = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
-  ok(live.includes("return pictureForView(pictureSourceOf(rec || null), { bg: st.bg, driving: st.mode === 'takeover' && st.mine && st.connected, shownWhy: st.pictureSource && st.pictureSource.why, clearedAt: st.bgClearedAt || 0, now: Date.now() });")
+  ok(live.includes("const bgNow = st.watch ? (st.watch.mode === 'polling' ? { targetId: st.watch.targetId, state: 'hidden' } : null) : st.bg;")
+    && live.includes("return pictureForView(pictureSourceOf(rec || null), { bg: bgNow, driving: st.mode === 'takeover' && st.mine && st.connected, shownWhy: st.pictureSource && st.pictureSource.why, clearedAt: st.bgClearedAt || 0, now: Date.now() });")
     && live.includes("else if (st.bg && st.bg.state === 'hidden') { st.bgClearedAt = Date.now(); clearTimeout(st.bgSettleTimer); st.bgSettleTimer = setTimeout(() => renderPicture(), BG_SETTLE_MS + 50); }")
     && live.includes("renderWatchLine(); renderPicture(); // the owner's report 2026-11-19") && live.includes("renderPicture(); // the owner's report 2026-11-19: a takeover drives the window"),
     'PIN: the view\'s picture is pictureForView over the hub\'s background verdict, re-judged when the verdict or the takeover moves');
   ok(live.includes("text = st.pictureSource && st.pictureSource.source === 'x' ? t('This tab is behind another tab in its window — the tab in front is not the agent’s: press the agent’s tab in the browser’s own tab strip, or Bring it forward')"), 'PIN: a takeover on the window says the tab in front is not the agent\'s and where to press (主开发\'s law 3)');
+  // its read's M1–M3 (pins): the width fold keeps the blanks' count; a ticket that lands after the picture left the window mounts
+  // nothing; a new socket and another browser start with no verdict
+  ok(live.includes("for (const d of dividers) d.style.display = d.dataset.group === 'blanks' ||")
+    && live.includes("    if (!st.pictureSource || st.pictureSource.source !== 'x') { xp.ticket = null; return; }")
+    && live.includes("st.bg = null; st.bgClearedAt = 0; clearTimeout(st.bgSettleTimer); // its read's M3")
+    && live.includes("st.error = null; st.target = null; st.bg = null; st.bgClearedAt = 0;")
+    && live.includes("renderPicture(); // its read's S3: a watch moves the picture's verdict"),
+    'PIN: the blanks said through the width fold; no late ticket mounts the window; no verdict outlives its socket or its browser; a watch re-judges the picture');
   ok(live.includes('if (!m.grouped && m.blanks > 0) {') && live.includes("const txt = t('+{n} blank', { n: m.blanks })"), 'PIN: a one-window tab row says the blank tabs it folds (the lease held three tabs, the row showed one chip)');
 }
 
