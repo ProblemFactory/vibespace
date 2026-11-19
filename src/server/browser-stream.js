@@ -343,8 +343,10 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     const ack = (o) => send(viewer.ws, { type: 'prompt-ack', id: String(msg.id || '').slice(0, 80), ...o });
     // B-b56d (the owner's ruling B, law 2): ON THE PERSON'S OWN WINDOW a sign-in is the person's to answer — a window whose handshake
     // carried a bearer token (any bearer) never answers one, and the window must be THIS instance's own page (its handshake's
-    // write-origin page verdict — never a header-less script). The agent's road (a conversation's view) is unchanged by this unit
-    if (isHuman(relay) && (viewer.bearer || viewer.agent)) return ack({ ok: false, code: 'agent_forbidden', error: 'a sign-in is the user\'s to answer — a view opened with a bearer token cannot answer it' });
+    // write-origin page verdict — never a header-less script). B-1327: the bearer refusal stands on EVERY road — a conversation's view
+    // opened with a bearer (sign-in off, or a bearer beside the cookie) never answers its sign-in either; the own-page verdict and the
+    // named prompt stay the person's window's
+    if (viewer.bearer || viewer.agent) return ack({ ok: false, code: 'agent_forbidden', error: 'a sign-in is the user\'s to answer — a view opened with a bearer token cannot answer it' });
     if (isHuman(relay) && !(viewer.page && pageVerdict(viewer.page.headers, ownOriginOf(viewer.page.headers, { encrypted: !!(viewer.page.socket && viewer.page.socket.encrypted) })).ok)) return ack({ ok: false, code: 'not_your_page', error: 'a sign-in is answered from VibeSpace\'s own page only' });
     if (isHuman(relay) && !msg.id) return ack({ ok: false, code: 'no_prompt', error: 'the answer names no sign-in request — nothing was sent' }); // B-b56d cure: the person's window names the prompt it answers (never «the newest in scope»)
     if (!dialogs || !pid || typeof dialogs.answerPrompt !== 'function') return ack({ ok: false, code: 'not_watched', error: 'VibeSpace is not watching this browser' });

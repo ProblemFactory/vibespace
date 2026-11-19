@@ -2677,8 +2677,9 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   const capture = { capture: true, signal: winInfo._listenerCtl?.signal };
   const appMode = () => (app._commandMode && app._commandMode._cmdMode ? 'command' : null);
   /** BROWSE YOURSELF: the person's window's OWN text boxes — its address row and (B-b56d, the owner's ruling B) the sign-in form's two
-   *  boxes in its dialog bar: typed in, never sent to the page, never reclaimed (the window always drives its own tab) */
-  function ownBox(el) { return !!H && !!el && (el === addrInput || (!!el.classList && (el.classList.contains('browser-live-prompt-user') || el.classList.contains('browser-live-prompt-pass')) && dialogBar.contains(el))); } // (a declaration: the mode redraw reads it before this line runs — B-b56d cure)
+   *  boxes in its dialog bar: typed in, never sent to the page, never reclaimed (the window always drives its own tab). B-1327: the
+   *  sign-in form's two boxes are a conversation's view's own too — a person who took over types the password into them, never into the page */
+  function ownBox(el) { return !!el && ((!!H && el === addrInput) || (!!el.classList && (el.classList.contains('browser-live-prompt-user') || el.classList.contains('browser-live-prompt-pass')) && dialogBar.contains(el))); } // (a declaration: the mode redraw reads it before this line runs — B-b56d cure)
   const onDocKey = (e) => {
     if (ownBox(e.target)) return; // BROWSE YOURSELF: the address row (B-b56d: and the sign-in form's boxes) is typed in, never sent to the page
     // lane dialog-keys: a key the APP takes — typed into a dialog the user opened (its Enter may open the next one), or a

@@ -73,6 +73,7 @@ import os from 'os';
 import vm from 'vm';
 import { fileURLToPath } from 'url';
 import { mutantCopies } from './mutant-copy.mjs';
+import { anchored } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PK = require(path.join(REPO, 'src/browser-passkey.js'));
@@ -1250,15 +1251,17 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
       'B-b56d (law 1): the person\'s OTHER window, the refused clients and every ack receive nothing of the typed password');
     ok(['agent_forbidden', 'not_your_page'].every((c) => BHS.PROMPT_ACK_CODES.includes(c) && BHS.promptAckWords({ ok: false, code: c }) && !/\{why\}/.test(BHS.promptAckWords({ ok: false, code: c }))),
       'B-b56d (law 2): both refusals have their own words in the window (zh / ja: the B-37a1 cure\'s table above reads every code)');
-    { // 主开发 15:42Z (C): the refusals are the PERSON'S road only — a conversation's view (the agent's road) is unchanged by this unit
+    { // 主开发 15:42Z (C), as B-1327 moved it: the own-page refusal is the PERSON'S road only; the bearer refusal stands on EVERY road
       const bsC = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8');
       const fnC = (bsC.match(/  function answerPromptFor\(relay, viewer, msg\) \{[\s\S]*?\n  \}\n/) || [''])[0];
       const refusals = fnC.split('\n').filter((l) => /code: '(agent_forbidden|not_your_page)'/.test(l));
-      ok(refusals.length === 2 && refusals.every((l) => /^ {4}if \(isHuman\(relay\) && /.test(l)), 'B-b56d (scope, 主开发 15:42Z): both refusals stand on the person\'s own window only (`isHuman(relay) &&`) — a conversation\'s view answers as before', refusals);
+      const ownPage = refusals.filter((l) => /code: 'not_your_page'/.test(l)), bearerL = refusals.filter((l) => /code: 'agent_forbidden'/.test(l));
+      ok(refusals.length === 2 && ownPage.length === 1 && /^ {4}if \(isHuman\(relay\) && /.test(ownPage[0]) && bearerL.length === 1 && /^ {4}if \(viewer\.bearer \|\| viewer\.agent\) return ack\(/.test(bearerL[0]),
+        'B-b56d (scope, 主开发 15:42Z) as B-1327 moved it: the own-page refusal stands on the person\'s own window only (`isHuman(relay) &&`); the bearer refusal on every road (the loopback leg below drives a conversation\'s view)', refusals);
     }
     // CONTROL: the base's bridge (no refusal, no window count) — a header-less script answers the person's sign-in, and the watch never hears the windows
     const bsB = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8');
-    const cut1 = "    if (isHuman(relay) && (viewer.bearer || viewer.agent)) return ack(", cut2 = "    if (isHuman(relay) && !(viewer.page && pageVerdict(", cut3 = " if (isHuman(relay)) tellPersonWindows(relayProfileId(relay)); }";
+    const cut1 = "    if (viewer.bearer || viewer.agent) return ack(", cut2 = "    if (isHuman(relay) && !(viewer.page && pageVerdict(", cut3 = " if (isHuman(relay)) tellPersonWindows(relayProfileId(relay)); }";
     for (const c of [cut1, cut2, cut3]) if (bsB.split(c).length !== 2) throw new Error(`B-b56d control setup: the anchor ${JSON.stringify(c.slice(0, 60))} is not found once in src/server/browser-stream.js`);
     // 主开发 17:00Z (4): THE «cancelled at its bound» LINE REACHES THE WINDOW through the bridge — first no fact and no ended, then ended
     const endedRun = async (SBm) => {
@@ -1288,6 +1291,52 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     const baseB = await run(MUTb.load('src/server/browser-stream.js', bsB.replace(cut1, '    if (false && (viewer.bearer || viewer.agent)) return ack(').replace(cut2, '    if (false && !(viewer.page && pageVerdict(').replace(cut3, ' }'), 'no-person-road'));
     ok(baseB.answered.length === 3 && baseB.ack.noId && baseB.ack.noId.code === 'no_prompt' && baseB.ack.script && baseB.ack.script.ok === true && baseB.ack.bearer && baseB.ack.bearer.ok === true && baseB.told.length === 0,
       'CONTROL (B-b56d): a bridge without the two refusals lets a header-less script and a bearer view answer the person\'s sign-in, and without the count the watch never hears the windows (RED for the legs above)', { answered: baseB.answered.length, ack: baseB.ack, told: baseB.told });
+  }
+  // B-1327: THE AGENT'S ROAD TOO — a conversation's view whose handshake carried a bearer (an automation key's, or the agent's own
+  // session / job token; sign-in off lets every upgrade in) never answers its browser's sign-in; the person's view of the
+  // conversation (no bearer) still does, once, with the conversation's key. Loopback: the real bridge over a stub keeper and watch
+  {
+    const http = require('http'), WSm = require('ws');
+    const SB = require(path.join(REPO, 'src/server/browser-stream.js'));
+    const PIDc = 'bp-00001327', BKc = 'bk-00001327', SIDc = 'sess-1327', PWc = ['1327', 'Pw', '4410'].join('-');
+    const knownC = { setFor: () => ({ attachments: [{ profileId: PIDc, alias: 'work', label: 'Work', isDefault: true }] }), list: () => ({ profiles: [{ id: PIDc, label: 'Work', dir: '/nonexistent/bp-00001327' }] }), streamPortFor: async () => ({ ok: true, port: 9 }) };
+    const keeperC = new Proxy(knownC, { get: (o, k) => (k in o ? o[k] : typeof k === 'string' ? () => undefined : undefined) });
+    const FORMc = { state: 'prompt', prompt: { id: 'prm-c-1', type: 'http-auth', origin: 'http://signin.example.test:8080', realm: 'Team', text: 'x' }, since: 1, profileId: PIDc };
+    class UpC { constructor() { this.readyState = 0; this.h = {}; setTimeout(() => { this.readyState = 1; if (this.h.open) this.h.open(); }, 0); } on(ev, fn) { this.h[ev] = fn; return this; } send() {} ping() {} close() { this.readyState = 3; } terminate() { this.readyState = 3; } }
+    const tok = (prefix) => 'Bearer ' + [prefix, '13270000'].join('_');
+    const runC = async (SBm) => {
+      const answered = [];
+      const dialogs = { arm: async () => ({ ok: true, watched: true }), passkeyFactOf: () => null, stuckForKey: () => FORMc, personPromptStateOf: () => null, personWindows: () => {},
+        answerPrompt: async (tg, a) => { answered.push({ tg, a }); return { ok: true }; }, onChange: () => () => {}, openOn: () => null, surfacesIn: () => [] };
+      const bridge = SBm.create({ keeper: keeperC, activeSessions: new Map([[SIDc, { _browserKey: BKc, name: 'one' }]]), requestAuthed: () => true, log: { warn() {}, log() {} }, dialogs, WebSocketImpl: UpC, keepaliveMs: 60000 });
+      const srv = http.createServer(); srv.on('upgrade', (req, s0, h) => bridge.handleUpgrade(req, s0, h));
+      await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+      const own = `http://127.0.0.1:${srv.address().port}`;
+      const open = (headers) => new Promise((res) => { const ws = new WSm.WebSocket(`ws://127.0.0.1:${srv.address().port}${bridge.STREAM_PATH}?session=${SIDc}&profile=${PIDc}`, { origin: own, headers }); const got = []; ws.on('message', (d) => { try { got.push(JSON.parse(String(d))); } catch { /* */ } }); ws.on('open', () => res({ ws, got })); ws.on('error', () => res({ ws, got })); });
+      const views = { key: await open({ authorization: tok('vsak') }), session: await open({ authorization: tok('vsst') }), job: await open({ authorization: tok('jbt') }), person: await open({}) };
+      const acks = (v) => v.got.filter((m) => m.type === 'prompt-ack');
+      const hello = {};
+      for (const [k, v] of Object.entries(views)) { await until2(() => v.got.some((m) => m.type === 'hello'), 800); hello[k] = v.got.some((m) => m.type === 'hello'); }
+      for (const k of ['key', 'session', 'job', 'person']) { views[k].ws.send(JSON.stringify({ type: 'prompt-answer', id: 'prm-c-1', username: 'ann', password: PWc })); await until2(() => acks(views[k]).length === 1, 800); }
+      const ack = Object.fromEntries(Object.entries(views).map(([k, v]) => [k, acks(v)[0] || null]));
+      const saw = JSON.stringify(Object.entries(views).filter(([k]) => k !== 'person').map(([, v]) => v.got));
+      for (const v of Object.values(views)) { try { v.ws.close(); } catch { /* */ } }
+      bridge.shutdown(); await new Promise((r) => srv.close(() => r()));
+      return { hello, ack, answered, saw };
+    };
+    const good = await runC(SB);
+    ok(Object.values(good.hello).every(Boolean) && ['key', 'session', 'job'].every((k) => good.ack[k] && good.ack[k].ok === false && good.ack[k].code === 'agent_forbidden'),
+      'B-1327: on a CONVERSATION\'s view (the agent\'s road) a view opened with an automation key, the agent\'s session token or a job\'s token is refused by name (agent_forbidden)', { hello: good.hello, ack: good.ack });
+    ok(good.ack.person && good.ack.person.ok === true && good.answered.length === 1 && good.answered[0].tg.browserKey === BKc && good.answered[0].tg.sessionId === SIDc && good.answered[0].a.password === PWc && good.answered[0].a.by === 'user',
+      'B-1327: the person\'s view of the conversation (no bearer) answers its sign-in — the watch hears ONE answer, the conversation\'s key, as the user', { ack: good.ack.person, n: good.answered.length });
+    ok(!good.saw.includes(PWc) && !JSON.stringify(good.ack).includes(PWc), 'B-1327: no refused view and no ack carries the typed password');
+    // CONTROL: the base's refusal (the person's road only) — every bearer view answers the conversation's sign-in
+    const bsN = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8');
+    const baseLine = anchored(bsN, "    if (viewer.bearer || viewer.agent) return ack(", "    if (isHuman(relay) && (viewer.bearer || viewer.agent)) return ack(", 'B-1327 control: the base\'s person-road-only refusal');   // stale-pins: kept — the base's line, written back by this RED control
+    const MUTc = mutantCopies('browser-passkey-b1327', REPO);
+    const baseC = await runC(MUTc.load('src/server/browser-stream.js', baseLine, 'person-road-only'));
+    ok(baseLine !== bsN && baseC.answered.length === 4 && ['key', 'session', 'job'].every((k) => baseC.ack[k] && baseC.ack[k].ok === true),
+      'CONTROL (B-1327): a bridge whose bearer refusal stands on the person\'s window only lets all three bearer views answer a conversation\'s sign-in (RED for the legs above)', { answered: baseC.answered.length, ack: baseC.ack });
   }
   // MAJOR 2 + MINOR: the window's own code (sliced from src/lib/browser-live-window.js, run over a stub scope)
   {

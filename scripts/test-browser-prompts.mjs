@@ -16,7 +16,7 @@ import path from 'path';
 import http from 'http';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -512,6 +512,43 @@ ok(s6.fy6.length === 0, 'B-b56d (its read): the person\'s own browsing files NO 
   ok((lw6.match(/if \(prLine\) drawPrLines\(prLine\);/g) || []).length === 2 && /\n {6}if \(prLine\) drawPrLines\(prLine\);/.test(lw6) && /\} else if \(prLine\) drawPrLines\(prLine\);/.test(lw6) && /const prl = H && !d && !stuck && !blind && !pkElse \? personPromptLines/.test(lw6), '…the window draws BOTH sign-in lines (the bound, the hook) in the passkey «unknown» branch too (the cure: the bound\'s line was missing there)');
   ok(ST.personPromptLines({ hook: { armed: false, why: 'kernel', x: false } }, tFor('en')).hook === null && ST.personPromptLines({ hook: { armed: null, why: 'connecting' } }, tFor('en')).hook === null, 'B-b56d (its read): a kernel (its own road) and a watch still connecting draw no standing line — only a refused hook and no watch at all are said');
 }
+{ // B-1327: A CONVERSATION'S HELD SIGN-IN THE PAGE ABANDONED (its tab committed another page) goes at once — the agent's road as the
+  // person's (B-b56d S1): no CancelAuth to a request that is gone, its For-you item resolved, no note for the agent (never «cancelled»
+  // nor «expired»), the watch's hook untouched. The base kept it to its bound (10 minutes): the form, the tray item, then a note
+  const sceneC = async (Dm, { goneMs = 1500 } = {}) => {
+    const chp = await fakeChromeP().listen();
+    const fy = [], res = [], ev = [];
+    const wp = Dm.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: chp.url }), pictureSourceFor: () => ({ source: 'screencast' }) }, log: { warn() {}, log() {}, error() {} },
+      holdersOf: () => [{ browserKey: CONV6, sessionId: 's-1327', ephemeral: false }], forYou: { add: (pid, it) => { fy.push(it); return 'todo-1327-' + fy.length; }, resolve: (id) => res.push(id) }, promptAskMs: 30, authHoldMaxMs: 6000 });
+    wp.onChange((e) => ev.push(e));
+    const of = (m) => chp.calls.filter((x) => x.method === m);
+    const factC = () => wp.factFor({ profileId: PID6, browserKey: CONV6, consume: false });
+    await wp.arm(PID6); await until6(() => of('Fetch.enable').length);
+    chp.emit('Fetch.authRequired', auth6('G1')); await until6(() => (factC().prompt || {}).type === 'http-auth');
+    const held = (factC().prompt || {}).type || null;
+    await until6(() => fy.length === 1, 800); // the ask clock filed the conversation's tray item
+    const hookBefore = of('Fetch.enable').length + of('Fetch.disable').length;
+    chp.emit('Page.frameNavigated', { frame: { id: 'T1', url: ORIGIN6 + '/elsewhere', loaderId: 'L-1327' } });
+    await until6(() => !factC().prompt, goneMs); // (the base's control never sees it go: it keeps the record to its bound — a short wait there)
+    const f = factC();
+    const out = { held, prompt: f.prompt || null, filed: fy.length, resolved: res.slice(), notes: JSON.stringify(f.notes || []),
+      cwa: of('Fetch.continueWithAuth').filter((m) => m.params.requestId === 'G1').map((m) => m.params.authChallengeResponse.response),
+      cleared: ev.filter((e) => e.kind === 'prompt' && e.state === 'cleared').map((e) => e.why), hookMoves: of('Fetch.enable').length + of('Fetch.disable').length - hookBefore };
+    wp.shutdown(); await chp.close();
+    return out;
+  };
+  const sc = await sceneC(D);
+  ok(sc.held === 'http-auth' && sc.filed === 1 && sc.prompt === null && sc.resolved.join() === 'todo-1327-1' && sc.cleared.join() === 'gone',
+    'B-1327: a conversation\'s held sign-in whose tab committed another page is dropped at once — the agent\'s fact no longer names it and its For-you item is resolved (the base kept both for the 10-minute bound)', sc);
+  ok(sc.cwa.length === 0 && sc.notes === '[]' && sc.hookMoves === 0, 'B-1327: …no CancelAuth to the request Chrome already dropped, no note for the agent (never «cancelled» nor «expired»), and the conversation\'s sign-in hook stays as it was', { cwa: sc.cwa, notes: sc.notes, hookMoves: sc.hookMoves });
+  const dsrcC = read('src/server/browser-dialogs.js');
+  const baseDrop = anchored(dsrcC, "{ const hr = e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId ? w.prompts.get(e.targetId) : null;", "{ const hr = e && w.mode === 'person' && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId ? w.prompts.get(e.targetId) : null;", 'B-1327 control: the base\'s person-only drop');   // stale-pins: kept — the base's line, written back by this RED control
+  const MC = mutantCopies('uiprompts-b1327', REPO);
+  const scB = await sceneC(MC.load('src/server/browser-dialogs.js', baseDrop, 'person-only-drop'), { goneMs: 400 });
+  ok(baseDrop !== dsrcC && scB.held === 'http-auth' && scB.prompt && scB.prompt.type === 'http-auth' && scB.resolved.length === 0,
+    'CONTROL (B-1327): a watch that drops an abandoned sign-in on the person\'s road only keeps the conversation\'s record and its tray item open (RED for the legs above)', { prompt: scB.prompt && scB.prompt.type, resolved: scB.resolved });
+  for (const c of copiesCensus(MC.files, MC.dir, REPO, { label: 'B-1327 control: ' })) ok(c.pass, c.name, c.detail);
+}
 { // its read (M1): THE PERSON TYPES INTO THE FORM — the window always drives its own tab, so the keys belong to the page unless a box is the
   // window's OWN: the address row and (B-b56d) the sign-in form's two boxes, in each of the four keyboard handlers (keys, paste, input, focus)
   const lw7 = read('src/lib/browser-live-window.js');
@@ -522,8 +559,13 @@ ok(s6.fy6.length === 0, 'B-b56d (its read): the person\'s own browsing files NO 
   const ADDR = { classList: { contains: () => false } };
   const user = mk('browser-live-prompt-user', true), pass = mk('browser-live-prompt-pass', true), stray = mk('browser-live-prompt-pass', false), other = mk('browser-live-dialog-input', true);
   const own = ownLine ? build(ownLine, { key: HK6 }) : null, conv = ownLine ? build(ownLine, null) : null;
-  ok(own && own(user) && own(pass) && own(ADDR) && !own(stray) && !own(other) && !conv(user) && !conv(pass) && !conv(ADDR),
-    'B-b56d (its read, M1): the person\'s window\'s OWN boxes are its address row and the sign-in form\'s two boxes (in its dialog bar only); a conversation\'s view keeps none (the agent\'s road unchanged)', ownLine.slice(0, 120));
+  ok(own && own(user) && own(pass) && own(ADDR) && !own(stray) && !own(other) && conv(user) && conv(pass) && !conv(ADDR) && !conv(stray) && !conv(other),
+    'B-b56d (its read, M1) as B-1327 widened it: the person\'s window\'s OWN boxes are its address row and the sign-in form\'s two boxes (in its dialog bar only); a conversation\'s view keeps the two sign-in boxes (a person who took over types the password there, never into the page) and no address row', ownLine.slice(0, 120));
+  { // CONTROL (B-1327): the base's line (the person's window only) — in a conversation's view a takeover's keys left the sign-in boxes for the page
+    const baseOwn = anchored(ownLine, '{ return !!el && ((!!H && el === addrInput) || (', '{ return !!H && !!el && (el === addrInput || (', 'B-1327 control: the base\'s person-window-only boxes');   // stale-pins: kept — the base's line, written back by this RED control
+    const ownB = build(baseOwn, { key: HK6 }), convB = build(baseOwn, null);
+    ok(baseOwn !== ownLine && ownB(user) && ownB(ADDR) && !convB(user) && !convB(pass), 'CONTROL (B-1327): the base\'s ownBox gives a conversation\'s view no sign-in box — a takeover\'s keys went to the page (RED for the leg above)');
+  }
   const noBaseGuard = !/document\.activeElement === addrInput\)\) focusSink/.test(lw7);   // stale-pins: kept — a deliberate check that the base's mode-redraw guard is gone
   ok((lw7.match(/ownBox\(e\.target\)/g) || []).length === 4 && (lw7.match(/!ownBox\(document\.activeElement\)\) focusSink\(\)/g) || []).length === 1 && !/e\.target === addrInput/.test(lw7) && noBaseGuard, '…and all four keyboard handlers (keys, paste, beforeinput, focusin) AND the mode redraw\'s focus guard (the cure) leave them alone — none keeps the old address-row-only test');   // stale-pins: kept — a deliberate check that the base's test is gone
   // 主开发 17:00Z (1), as if a must: A SECRET IS NEVER TYPED INTO THE PAGE — every road that gives the focus to the sink goes through
