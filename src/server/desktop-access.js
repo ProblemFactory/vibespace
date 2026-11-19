@@ -364,9 +364,11 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
         const run = new Promise((resolve) => {
           let child;
           try { child = spawn(launch[0], launch.slice(1), { env: { ...env(), LC_ALL: 'C' }, stdio: ['ignore', 'pipe', 'pipe'] }); } catch (e) { relay(Buffer.from(`${e.message}\n`)); resolve({ code: 127 }); return; }
-          child.stdout.on('data', (d) => relay(d));
-          child.stderr.on('data', (d) => relay(d));
+          // the error listener FIRST (ckpt61): a start that fails at once (EMFILE / ENFILE) returns with no pipes and its 'error'
+          // queued for the next tick — a pipe touched first threw, and the error then found no listener: the hub ended
           child.on('error', (e) => { relay(Buffer.from(`${e.message}\n`)); resolve({ code: 127 }); });
+          if (child.stdout) child.stdout.on('data', (d) => relay(d));
+          if (child.stderr) child.stderr.on('data', (d) => relay(d));
           child.on('close', (code) => resolve({ code: code == null ? 1 : code }));
         });
         return await Promise.race([run, deadline]);

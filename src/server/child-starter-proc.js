@@ -36,7 +36,12 @@ function handle(line) {
   try { c = spawn(cmd, args, { env, stdio: ['ignore', capture ? 'pipe' : 'ignore', capture ? 'pipe' : 'ignore'] }); }
   catch (e) { send({ id, ev: 'exit', code: null, signal: null, error: String((e && e.code) || e) }); return; }
   held.set(id, c);
-  if (capture) {
+  // the error listener FIRST (ckpt61): a start that fails at once (EMFILE / ENFILE) returns with no pipes and its 'error' queued for
+  // the next tick — answered as the child's end, never an uncaught exception (this process's own table full: the hub's request
+  // answers the error, the starter lives)
+  const end = (o) => { if (done) return; done = true; if (timer) clearTimeout(timer); held.delete(id); send({ id, ev: 'exit', timedOut, overflow, stdout: out.slice(0, max), stderr: err.slice(0, max), ...o }); };
+  c.on('error', (e) => end({ code: null, signal: null, error: String((e && e.code) || e) }));
+  if (capture && c.stdout && c.stderr) {
     c.stdout.setEncoding('utf8'); c.stderr.setEncoding('utf8');
     // past the bound the child is ENDED, as execFile's maxBuffer did (B-323e smalls, the reader's M2: kept running, a slow listing past
     // 1 MB reached its timer and read «hung»)
@@ -44,9 +49,7 @@ function handle(line) {
     c.stdout.on('data', (d) => { if (out.length < max) out += d; outN += Buffer.byteLength(d); if (outN > max) over(); });   // BYTES, as execFile counted
     c.stderr.on('data', (d) => { if (err.length < max) err += d; errN += Buffer.byteLength(d); if (errN > max) over(); });
   }
-  const end = (o) => { if (done) return; done = true; if (timer) clearTimeout(timer); held.delete(id); send({ id, ev: 'exit', timedOut, overflow, stdout: out.slice(0, max), stderr: err.slice(0, max), ...o }); };
   c.on('spawn', () => send({ id, ev: 'started', pid: c.pid }));
-  c.on('error', (e) => end({ code: null, signal: null, error: String((e && e.code) || e) }));
   c.on('close', (code, signal) => end({ code, signal }));
   if (Number(m.timeoutMs) > 0) timer = setTimeout(() => { timedOut = true; try { c.kill('SIGKILL'); } catch { } send({ id, ev: 'timeout', overflow }); }, Number(m.timeoutMs));   // an overflow kept: the bound past the cut is not «hung»
 }
