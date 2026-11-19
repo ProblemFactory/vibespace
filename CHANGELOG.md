@@ -124,6 +124,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The Background Work list no longer fails when one job record's run list is damaged; that job lists with no runs.
 - A job command given as several unquoted words is refused with the quoted form to use; only its first word used to run, reported as done.
 - Right after VibeSpace starts, the groups list no longer freezes it while unread messages are counted; a count shown as zero fills in a moment later.
+- Opening or resuming a Codex conversation with a very long history no longer freezes the server for everyone else.
 - An app or desktop install no longer says it ended without recording its exit while it is still running (seen on Ubuntu 26.04).
 - When a desktop app's saved login cannot be written to disk, the app is told it was not saved instead of being told it was.
 - An Unlock button pressed right after the page loads now always opens the vault; it no longer does nothing or asks for the password while already unlocked.
@@ -185,7 +186,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The storage access boxes no longer point below at a Connect button that sits above them.
 - Mounting a folder from an offline machine now says it is offline first, with its pairing command.
 - In a Claude chat, a second Rewind to here waits for the first one's answer, and a message sent in that first minute comes back to the box.
-- Opening or resuming a Codex conversation with a very long history no longer freezes the server for everyone else.
+- A paired machine's VibeSpace agent no longer quits when that machine runs out of file watches; new conversations there still show up, a little later.
 
 ### Security
 - A cluster install can let only its ingress reach each user's VibeSpace (networkPolicy.ingress, off until tried on a test cluster).
