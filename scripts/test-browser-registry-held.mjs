@@ -56,13 +56,19 @@ console.log('§1 an UNREADABLE registry is HELD — nothing written over it, the
     }
     try { k.shutdown(); } catch { }
     out.file = (() => { try { fs.chmodSync(F, 0o644); return JSON.parse(fs.readFileSync(F, 'utf8')).profiles.filter((p) => p && p.id === 'bp-0000b001').length; } catch (e) { return '(' + (e.code || 'unparsed') + ')'; } })();   // the ORIGINAL profile on disk
+    out.rewritten = (() => { try { return typeof JSON.parse(fs.readFileSync(F, 'utf8')).host === 'string'; } catch { return false; } })();   // the owed boot's commit stamps the writer
     return out;
   };
   const r = await scene(require(path.join(ROOT, 'src/server/browser-keeper.js')), 'held');
   ok(r.held && /could not be read/.test(r.words), 'browser-profiles.json unreadable at load: HELD, and its words say so', r);
   ok(r.create === 'store_unread' && r.registered === 'store_unread' && r.pin && r.pin.held === true, 'while held a create is refused by name, «is this folder a profile\'s» answers by name (the kept sweep\'s catch then keeps the folder), the create\'s pin ladder answers «held» — never «no longer exists»', r);
   ok(r.boot === 'held' && (asRoot || r.keptWhileHeld), 'the boot judges NOTHING on the held registry (no reconcile, no orphan census, no first commit) — nothing is written over the file', r);
-  ok(r.lifted && r.profile && r.lifts === 1 && r.file === 1, 'read again OFF the loop: the hold lifts, the profile is back, the steps after the boot run once (onReadAgain), the file still holds its profile', r);
+  ok(r.lifted && r.profile && r.lifts === 1 && r.file === 1 && r.rewritten, 'read again OFF the loop: the hold lifts, the profile is back, the OWED boot runs (its commit re-saves the file — the writer stamped), the steps after the boot run once (onReadAgain), the file still holds its profile', r);
+  // its read r1 (N3a): a copy whose read skips the owed boot — the file is never re-saved by the boot (nothing judged after the read)
+  const OWED = '    if (bootOwed) { bootOwed = false; try { await boot(); }';
+  ok(KSRC.split(OWED).length === 2, 'control setup: the anchor of the control «the owed boot at the read» is in browser-keeper.js');
+  const ro = await scene(MJ.load('src/server/browser-keeper.js', KSRC.replace(OWED, '    if (false) { bootOwed = false; try { await boot(); }'), 'registry-no-owed-boot'), 'held-no-owed-boot');
+  ok(ro.lifted && !ro.rewritten, 'CONTROL (the owed boot cut, in a copy): the read lifts the hold but the boot\'s path never runs over what it read', { lifted: ro.lifted, rewritten: ro.rewritten });
   // CONTROL: the release's load (any failure ⇒ an empty registry) — the boot's commit writes the EMPTY registry over the file
   const LOADH = "    else { reg = B.normalizeRegistry(null); if (a.state !== 'missing') holdRegistry(a); }";
   ok(KSRC.split(LOADH).length === 2, 'control setup: the anchor of the control «the release\'s load» is in browser-keeper.js');
@@ -94,7 +100,7 @@ console.log('§2 TORN bytes HOLD too — never set aside into an empty, writable
   const d = path.join(D, 'torn'), H = path.join(d, 'home'); fs.mkdirSync(H, { recursive: true });
   const F = path.join(d, 'browser-profiles.json'); fs.writeFileSync(F, '{"version": 1, "profiles": [');
   const k = require(path.join(ROOT, 'src/server/browser-keeper.js')).create({ dataDir: d, homeDir: H, env: () => ({ HOME: H }), serverSetting: () => undefined, install: false, log: quiet, unreadRetry: { firstMs: 3600e3, maxMs: 3600e3 } });
-  const held = k.held(), b = await k.boot();
+  const held = k.held ? k.held() : false, b = await k.boot();   // (on the base there is no held(): a red line, never a TypeError)
   const after = fs.readFileSync(F, 'utf8');
   try { k.shutdown(); } catch { }
   ok(held && b && b.held && after === '{"version": 1, "profiles": [', 'torn bytes: HELD — the boot judges nothing and the bytes stay as they are (no empty registry written over them)', { held, after });
@@ -102,7 +108,7 @@ console.log('§2 TORN bytes HOLD too — never set aside into an empty, writable
   const d2 = path.join(D, 'shape'), H2 = path.join(d2, 'home'); fs.mkdirSync(H2, { recursive: true });
   fs.writeFileSync(path.join(d2, 'browser-profiles.json'), JSON.stringify({ version: 1 }));
   const k2 = require(path.join(ROOT, 'src/server/browser-keeper.js')).create({ dataDir: d2, homeDir: H2, env: () => ({ HOME: H2 }), serverSetting: () => undefined, install: false, log: quiet, unreadRetry: { firstMs: 3600e3, maxMs: 3600e3 } });
-  const h2 = k2.held(); try { k2.shutdown(); } catch { }
+  const h2 = k2.held ? k2.held() : false; try { k2.shutdown(); } catch { }
   ok(h2, 'a registry without its profiles list is held (not a silent empty registry)');
 }
 
@@ -137,6 +143,14 @@ console.log('§4 WIRING: the route door, Housekeeping, a build\'s removal, the s
   ok(BK.includes("if (k && typeof k.held === 'function' && k.held()) return refused(session, f.id, { ok: false, code: 'store_unread'") && WC.includes('if (pin.held) {') && WC.includes("pin.origin !== 'conversation' && !pin.held"),
     'the late key mints nothing while held; a create keeps the conversation\'s pin as it was (never «no longer exists», never re-pinned)');
   ok(BD.includes("catch (e) { if (e && e.code === 'store_unread') return { ok: false, code: 'store_unread', error: e.message }; st = null; }"), 'the live-fill verdict fails CLOSED on a held registry (it read «no fence»)');
+  // its read r1: M1 — a create while held judges its pin ONCE THE REGISTRY READS (over its own facts); S1 — browser-env's own registry
+  // reader is unknown (null, fail closed) for a parse that is not a registry; N1 — the trace routes' doors answer the hold by name
+  const BE = fs.readFileSync(path.join(ROOT, 'src/server/browser-env.js'), 'utf8'), RT = fs.readFileSync(path.join(ROOT, 'src/routes/browser-trace.js'), 'utf8');
+  ok(WC.includes('const p2 = kp.pinForCreate(pinFacts);') && WC.includes("off = typeof kp.onReadAgain === 'function' ? kp.onReadAgain(() => {") && WC.includes('if (activeSessions.get(id) !== session) return;') && WC.includes('integrationOn && !pin.held)'),
+    'a create while held: its pin ladder runs once the registry reads (its own facts; a conversation gone by then left alone); a keyless spawn writes no empty start record');
+  ok(BE.includes("if (!doc || typeof doc !== 'object' || Array.isArray(doc) || !Array.isArray(doc.profiles)) return null;"), 'browser-env\'s registry reader answers UNKNOWN (null — its sweep spares every folder) for a parse that is not a registry');
+  ok((RT.match(/k\.held\(\)\) \{ res\.status\(503\)\.json\(\{ error: k\.heldWords\(\), code: 'store_unread'/g) || []).length === 1 && RT.includes("ctx.keeper.held()) { res.status(503).json({ error: ctx.keeper.heldWords(), code: 'store_unread'"),
+    'the trace routes\' two doors (keeperOr503, traceOr503) answer the hold by name — never «no profile bp-…»');
 }
 
 for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 1, label: 'browser-registry-held ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));

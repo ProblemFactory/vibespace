@@ -121,11 +121,15 @@ function fail(res, e) {
 function traceOr503(res) {
   const tr = ctx?.trace || null;
   if (!tr) res.status(503).json({ error: 'the browser action trace is not available on this server', code: 'unavailable' });
+  // the B-f276 remainder (its read N1): the trace's profile doors (Forget, Housekeeping, recordings) read the registry — held, by name
+  else if (ctx?.keeper && typeof ctx.keeper.held === 'function' && ctx.keeper.held()) { res.status(503).json({ error: ctx.keeper.heldWords(), code: 'store_unread', unread: ctx.keeper.heldWords() }); return null; }
   return tr;
 }
 function keeperOr503(res) {
   const k = ctx?.keeper || null;
   if (!k) res.status(503).json({ error: 'browser profiles are not available on this server', code: 'unavailable' });
+  // the B-f276 remainder (bl-jobs, its read N1): a HELD profile registry answers by name here too — never «no profile bp-…»
+  else if (typeof k.held === 'function' && k.held()) { res.status(503).json({ error: k.heldWords(), code: 'store_unread', unread: k.heldWords() }); return null; }
   return k;
 }
 const PROFILE_ID_RE = /^bp-[0-9a-f]{8}$/;

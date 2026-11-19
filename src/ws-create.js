@@ -1345,9 +1345,28 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 // the Task-Group rung asks the store with the facts a create has (cwd + the dialog's taskId)
                 const taskGroupDefault = kp.taskGroupDefaultFor({ cwd, hostId: data.hostId || null, initialGroupId: spawnGroups[0] || null, initialGroupIds: spawnGroups });
                 pin = kp.pinForCreate({ explicit: data.browserProfileId || '', priorKey: prior, forkParentKey, taskGroupDefault, resume: !!(data.resume && data.resumeId), fork: !!data.fork });
-                // the B-f276 remainder (bl-jobs): a HELD profile registry names no profile — the pin is never «no longer exists»: the
-                // session keeps the pin it has (nothing re-pinned, nothing written), its first browser command refuses by name
-                if (pin.held) { console.warn(`[browser] ${id}: ${pin.refused} — the conversation keeps its pin as it was`); pin = { profileId: session._browserProfileId || '', dir: null, origin: session._browserPinOrigin || 'harness', held: true }; }
+                // the B-f276 remainder (bl-jobs): a HELD profile registry names no profile — the pin is never «no longer exists» (a null pin
+                // was written): the ladder is judged ONCE THE REGISTRY READS, over this create's own facts (its read r1, M1: a new
+                // conversation has no pin to keep — the pick, a fork's parent, the group's / the instance default were lost for good); the
+                // waiter is this conversation's, runs once, and a conversation gone by then is left alone
+                if (pin.held) {
+                  console.warn(`[browser] ${id}: ${pin.refused} — its pin is judged once the registry reads`);
+                  const pinFacts = { explicit: data.browserProfileId || '', priorKey: prior, forkParentKey, taskGroupDefault, resume: !!(data.resume && data.resumeId), fork: !!data.fork };
+                  const remoteHost = !!data.hostId;
+                  let off = null;
+                  off = typeof kp.onReadAgain === 'function' ? kp.onReadAgain(() => {
+                    try { if (off) off(); } catch { }
+                    try {
+                      if (activeSessions.get(id) !== session) return;
+                      const p2 = kp.pinForCreate(pinFacts);
+                      if (!p2 || p2.held || !p2.profileId) { if (p2 && p2.refused && !p2.held) console.warn(`[browser] ${id}: ${p2.refused} — after the registry's read`); return; }
+                      session._browserProfileId = p2.profileId; session._browserPinOrigin = p2.origin;
+                      if (session._browserKey && p2.origin !== 'conversation') kp.setPin(session._browserKey, p2.profileId, { origin: p2.origin, remote: remoteHost });
+                      console.log(`[browser] ${id}: the profile registry read — its pin ${p2.profileId} (${p2.origin}) applied`);
+                    } catch (e) { console.warn(`[browser] ${id}: its pin after the registry's read was not applied — ${e && e.message}`); }
+                  }) : null;
+                  pin = { profileId: '', dir: null, origin: 'harness', held: true };
+                }
                 else if (pin.refused) console.warn(`[browser] ${id}: ${pin.refused} — starting ephemeral`);
                 // B-6b6d r3 for this knob: the New Session dialog sends the value it
                 // filled in on the user's behalf (the group's / the instance default)
@@ -1386,7 +1405,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             if (!be.variant && spawnPinWitness) {
               // + the Task Group's default cap in force NOW (stampGroupCap's read, unstamped — there is no key to stamp it on)
               try { const kc = require('./server/browser-keeper.js').keeper(); spawnPinWitness.cap = kc && typeof kc.taskGroupCapFor === 'function' ? kc.taskGroupCapFor({ cwd, hostId: data.hostId || null, initialGroupId: spawnGroups[0] || null, initialGroupIds: spawnGroups }) : null; } catch { spawnPinWitness.cap = null; }
-            } else if (!be.variant && be0 && integrationOn) {
+            } else if (!be.variant && be0 && integrationOn && !pin.held) {   // held: no empty start record (a late key judges afresh then)
               // the ladder ran and picked NOTHING: witnessed too (a cap may still be in force), so the late key knows the
               // start had no default rather than guessing from the default the user has by then
               let c = null; try { const kc = require('./server/browser-keeper.js').keeper(); c = kc && typeof kc.taskGroupCapFor === 'function' ? kc.taskGroupCapFor({ cwd, hostId: data.hostId || null, initialGroupId: spawnGroups[0] || null, initialGroupIds: spawnGroups }) : null; } catch { c = null; }

@@ -210,7 +210,9 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
   const registeredDirs = () => {
     let raw;
     try { raw = fs.readFileSync(path.join(dataDir, PROFILE_REGISTRY_FILE), 'utf8'); } catch (e) { return e && e.code === 'ENOENT' ? [] : null; }
-    try { return B.normalizeRegistry(JSON.parse(raw)).profiles.filter((p) => p && p.dir && !p.host && !B.isEphemeralProfile(p)).map((p) => String(p.dir)); } catch { return null; }
+    // the B-f276 remainder (bl-jobs, its read S1): a parse that is NOT a registry (an object without its profiles list, null, an array)
+    // is unknown — null (fail CLOSED), never «no profiles» (the keeper HOLDS such a file; this sweep deleted an adopted profile's folder)
+    try { const doc = JSON.parse(raw); if (!doc || typeof doc !== 'object' || Array.isArray(doc) || !Array.isArray(doc.profiles)) return null; return B.normalizeRegistry(doc).profiles.filter((p) => p && p.dir && !p.host && !B.isEphemeralProfile(p)).map((p) => String(p.dir)); } catch { return null; }
   };
   /** THREE-STATE, because the honest default is "whatever the user's own
    *  ~/.agent-browser/config.json says" and there is no boolean for that.

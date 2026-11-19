@@ -884,6 +884,8 @@ const STORE_READS = [
   { file: 'src/server/usage-pool-engine.js', store: 'reset-credit-tries.json', state: 'debt', why: 'a failed read is «no attempts»: the next write overwrites', mark: /try \{ raw = fs\.readFileSync\(RESET_CREDIT_TRIES_FILE, 'utf8'\); \} catch \{ return 0; \}/ },
   // NAMED WITHOUT A SET-ASIDE (the scan cannot see a store that never sets bytes aside — known ones are rows here): torn or
   // unreadable = empty, the next save overwrites → lane bl-jobs batch 12 (B-6721 holds that store)
+  // the browser registry (lane bl-jobs, the B-f276 remainder, its read r1 N9): through the store-read law — a failed read and torn bytes HOLD
+  { file: 'src/server/browser-keeper.js', store: 'browser-profiles.json', state: 'answer', mark: /const a = SR\.storeAnswer\(read, \{ valid: REG_VALID \}\);/ },
   { file: 'src/jobs.js', store: 'job-notifications.json', state: 'debt', why: '_loadNotifs: any failure is an empty map (catch { }) — the next save writes over it', mark: /_loadNotifs\(\) \{\s*try \{\s*const obj = JSON\.parse\(fs\.readFileSync\(this\.notifsFile, 'utf-8'\)\);/ },
 ];
 const READ_DEBT_CAP = 8;     // lower it as each debt row flips to `answer` — never raise it

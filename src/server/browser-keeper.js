@@ -618,9 +618,11 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const was = heldReg;
     heldReg = null; heldMissingAt = 0; heldTries = 0; heldSaid = false; heldSaveSaid = false;
     if (heldT) { clearTimeout(heldT); heldT = null; }
-    loadFrom(read);   // the READ answer — no second read; the boot's lineage pass runs over it
+    // its read r1 (N4): a throw in the load or the notices never skips the owed boot and the waiters (the release's throw reached the
+    // wiring's catch, and the steps after the boot still ran)
+    try { loadFrom(read); } catch (e) { log.warn?.(`[browser] ${STORE_FILE}: the read's load failed: ${e && e.message}`); }   // the READ answer — no second read
     log.warn?.(`[browser] ${STORE_FILE} read again (held since ${new Date(was.at).toISOString()}, ${was.code}): ${a.state === 'data' ? `${reg.profiles.length} profile(s)` : 'the file is GONE — the registry starts empty'}`);
-    reclaimFolderNotices();
+    try { reclaimFolderNotices(); } catch (e) { log.warn?.(`[browser] the folder notices after the read failed: ${e && e.message}`); }
     if (bootOwed) { bootOwed = false; try { await boot(); } catch (e) { log.warn?.(`[browser] the boot's path after the read failed: ${e && e.message}`); } }
     for (const fn of heldLifts) { try { await fn(); } catch (e) { log.warn?.(`[browser] a wait for the registry failed: ${e && e.message}`); } }
     notify();
@@ -2036,6 +2038,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
    * of the group never reaches a running conversation, nor its resume). No group default ⇒ nothing stamped.
    */
   function stampGroupCap(browserKey, facts = {}, { value = undefined } = {}) {
+    if (!loaded) ensureLoaded();   // its read r1 (N5): the hold is known before it is judged
     if (heldReg) return null;   // the B-f276 remainder: the conversation's own stamp is unread — never re-stamped from the group's live value
     ensureLoaded();
     const bk = B.parentKeyOf(browserKey);
