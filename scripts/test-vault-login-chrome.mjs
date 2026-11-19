@@ -166,7 +166,7 @@ const countingWS = (sent, recv = null) => class extends WSBase {
         try {
           const s = typeof data === 'string' ? data : data.toString('utf8');
           const m = JSON.parse(s);
-          if (m && m.method) recv.push({ method: m.method, bytes: s.length });
+          if (m && m.method) { const ti = (m.method === 'Target.targetCreated' || m.method === 'Target.targetInfoChanged') && m.params && m.params.targetInfo && m.params.targetInfo.type === 'iframe' ? m.params.targetInfo : null; recv.push({ method: m.method, bytes: s.length, ...(ti ? { frame: { id: String(ti.targetId || ''), url: String(ti.url || '').slice(0, 300), parent: ti.parentFrameId ? String(ti.parentFrameId) : null } } : {}) }); } // B-5f2e round 2
         } catch { }
       });
     }
@@ -539,6 +539,40 @@ try {
       ok(frHost.code === 1 && /\[login_in_frame\]/.test(frHost.err) && frChild.code === 1 && /\[login_in_frame\]/.test(frChild.err),
         'RULING 5b: targeting <iframe> selector or @ref inside child iframe refused [login_in_frame] on real Chrome',
         { childPwRef, frHost: frHost.err.trim(), frChild: frChild.err.trim() });
+      ok(!/\[frame_other_site\]/.test(snapF.err), 'B-5f2e CONTROL: a frame of the page\'s own site (/framed — the driver lists its fields) is never said as another site\'s', { err: snapF.err.trim().slice(0, 400) });
+
+      // ── B-5f2e LINE 2 (the coordinator's ruling 2026-11-19 20:18Z) — A FRAME OF ANOTHER SITE SAID BY NAME, on the real Chrome: the
+      // stand-in frames a sign-in form from idp.example.com (another SITE than 127.0.0.1: the suite's one resolver rule maps it to this server), so Chrome runs
+      // it in a process of its own. The watch must SEE its target with its parent (round 2's question) — else no sentence is true.
+      {
+        // ONE resolver rule (the driver cuts its args at every comma — src/browser-verbs.js driverArgsList): idp.example.com is
+        // another SITE than 127.0.0.1 under the rule the suite already has
+        const XS = SITE.replace('127.0.0.1', 'idp.example.com');
+        const XO = new URL(XS).origin;
+        await run(['open', `${SITE}/xframed?src=${encodeURIComponent(XS + '/xsignin')}`]);
+        await run(['wait', '1500']);
+        const loaded = await run(['eval', "(document.getElementById('got') || {}).textContent || ''"]);
+        ok(/idp\.example\.com/.test(loaded.out), 'B-5f2e: the stand-in ran — the frame from another site LOADED (its hello reached the page)', { out: loaded.out.trim() });
+        const heard = w.cdpRecv.filter((x) => x.frame && /\/xsignin/.test(String(x.frame.url || '')));
+        console.log('B-5f2e ROUND 2 ' + JSON.stringify(heard.slice(0, 4).map((x) => x.frame)));
+        ok(heard.length > 0 && heard.some((x) => typeof x.frame.parent === 'string' && x.frame.parent.length > 0),
+          'B-5f2e ROUND 2: the watch HEARD the frame\'s target (Target.targetCreated, type iframe) WITH ITS PARENT (parentFrameId) on this Chrome — no call of ours', heard.slice(0, 4).map((x) => x.frame));
+        const said = (r) => r.err.includes(`note: This page holds a frame from ${XO} (another site): the browser driver cannot see or type into it — if it holds a sign-in, ask the user to sign in there in the live view [frame_other_site]`);
+        const snapX = await run(['snapshot', '-i']);
+        ok(snapX.code === 0 && said(snapX) && !findRef(snapX.out, /Account/i),
+          'B-5f2e: snapshot -i on the page — the driver lists no field of the frame, and the answer SAYS whose frame it is, that the driver cannot reach it, the user in the live view [frame_other_site]', { err: snapX.err.trim().slice(0, 600), out: snapX.out.slice(0, 300) });
+        const fillX = await run(['fill', '#xu', 'alice-x']);
+        ok(fillX.code !== 0 && /Element not found/.test(fillX.out + fillX.err) && said(fillX), 'B-5f2e: a plain fill of the frame\'s field — the driver\'s «Element not found», then the sentence', { err: fillX.err.trim().slice(0, 600) });
+        const frameX = await run(['frame', '#xidp']);
+        ok(frameX.code !== 0 && /Frame not found/.test(frameX.out + frameX.err) && said(frameX), 'B-5f2e: the driver\'s `frame` verb — «Frame not found», then the sentence', { err: frameX.err.trim().slice(0, 600) });
+        const vaultX = await run(['fill', '#xp', '--vault', `${SITE}#${USER}/password`]);
+        ok(vaultX.code !== 0 && /\[(target_not_found|login_in_frame)\]/.test(vaultX.err) && vaultX.err.includes(`a frame from ${XO} (another site)`) && !/top-level tab/.test(vaultX.err),
+          'B-5f2e: the vault fill by CSS — refused as before, now naming the frame of another site and the way that works (never the top-level-tab advice)', { err: vaultX.err.trim().slice(0, 600) });
+        await run(['frame', 'main']);
+        await run(['open', `${SITE}/plain`]);
+        const snapP = await run(['snapshot', '-i']);
+        ok(snapP.code === 0 && !/\[frame_other_site\]/.test(snapP.err), 'B-5f2e: the tab moved to a page with no such frame ⇒ the sentence is gone (the old page\'s frames are not said)', { err: snapP.err.trim().slice(0, 400) });
+      }
 
       // Plain `<input type="text">` (`/plain`)
       await run(['open', `${SITE}/plain`]);

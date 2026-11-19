@@ -2085,12 +2085,18 @@ router.post('/api/agent/browser/audit', async (req, res) => {
     const vpq = req.body?.viewport && typeof req.body.viewport === 'object' ? req.body.viewport : null;
     let viewport = null;
     if (vpq && ctx.browserViewport) { try { viewport = await ctx.browserViewport.answer({ sessionId: f.sessionId, profileRef: typeof vpq.handle === 'string' ? vpq.handle.slice(0, 200) : '', argv: Array.isArray(vpq.argv) ? vpq.argv.slice(0, 16).map((x) => String(x).slice(0, 200)) : [], ran: vpq.ran !== false }); } catch { viewport = null; } }
+    // B-5f2e (line 2): a snapshot, or a verb that failed, on a tab that holds a frame of another site — whose frame, by name
+    // (the watch's kept targets: no CDP call); the CLI prints it after a snapshot and after the driver's own «not found»
+    let otherSiteFrame = null;
+    if (profileId && ctx.dialogs && typeof ctx.dialogs.otherSiteFramesFor === 'function' && (req.body?.verb === 'snapshot' || req.body?.ok === false)) {
+      try { const tF = dialogTargetFor(k, f, profileId); if (tF.ok) otherSiteFrame = ctx.dialogs.otherSiteFramesFor(tF); } catch { otherSiteFrame = null; }
+    }
     let scrubbed = null;
     if (profileId && req.body?.output && typeof req.body.output === 'object' && ctx.dialogs && typeof ctx.dialogs.scrubOutput === 'function') {
       const t = dialogTargetFor(k, f, profileId);
       if (t.ok) { const sc = ctx.dialogs.scrubOutput(t, req.body.output); if (sc && sc.changed) scrubbed = { out: sc.out, err: sc.err }; }
     }
-    res.json({ ok: true, ...(viewport ? { viewport } : {}), ...(interrupted ? { interrupted } : {}), ...dlg, ...(hint ? { hint } : {}), ...(rejected ? { proposalRejected: { site: rejected.site, text: rejected.text } } : {}), ...(tailnet ? { tailnet } : {}), ...(egressRefused ? { egressRefused } : {}), ...(scrubbed ? { scrubbed } : {}) });
+    res.json({ ok: true, ...(viewport ? { viewport } : {}), ...(interrupted ? { interrupted } : {}), ...dlg, ...(hint ? { hint } : {}), ...(rejected ? { proposalRejected: { site: rejected.site, text: rejected.text } } : {}), ...(tailnet ? { tailnet } : {}), ...(otherSiteFrame ? { otherSiteFrame } : {}), ...(egressRefused ? { egressRefused } : {}), ...(scrubbed ? { scrubbed } : {}) });
   } catch (e) { fail(res, e); }
 });
 // ── lane browser-stuck (2026-09-28, the owner's ruling "让agent知道这个对话框的存在和交互能力"): A PAGE DIALOG IS A FACT OF THE
@@ -2395,7 +2401,10 @@ router.post('/api/agent/browser/fill-vault', async (req, res) => {
     if (!r.ok && r.code === 'code_paced') {
       return res.status(429).json({ ok: false, code: 'code_paced', error: text, retryInMs: Math.max(1, Number(r.retryInMs) || 1000), secondsLeft: Math.max(1, Number(r.secondsLeft) || 1) });
     }
-    if (!r.ok) return res.status(STATUS[r.code] || 409).json({ error: text, code: r.code, ...(r.grant ? { grant: r.grant } : {}) });
+    // B-5f2e (line 2): a field the fill could not reach on a tab that holds a frame of another site — whose frame, by name
+    let framed = null;
+    if (!r.ok && (r.code === 'login_in_frame' || r.code === 'target_not_found') && typeof D.otherSiteFramesFor === 'function') { try { framed = D.otherSiteFramesFor(t, { targetId: word(body.targetId, 64) || null }); } catch { framed = null; } }
+    if (!r.ok) return res.status(STATUS[r.code] || 409).json({ error: framed && framed.text ? `${text} — ${framed.text}` : text, code: r.code, ...(r.grant ? { grant: r.grant } : {}), ...(framed ? { otherSiteFrame: framed } : {}) });
     try { ctx.traceDialogAct?.({ sessionId: f.sessionId, profileId: t.ephemeral ? null : t.profileId, action: 'fill-vault', dialog: { type: 'fill-vault', message: `${r.origin || ''} (${r.field || ''})` } }); } catch (e) { console.warn('[browser-login] the trace row was not written — ' + (e && e.message)); }
     res.json({
       ok: true,

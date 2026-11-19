@@ -830,7 +830,7 @@ function fillVerdict({ tabOrigin, inFrame = false, spec, entries = [], grantRows
   }
 
   if (inFrame) {
-    return no('login_in_frame', `the target element is inside a frame — open the frame's own address in a top-level tab or ask the owner in live view`);
+    return no('login_in_frame', `the target element is inside a frame — VibeSpace fills only the top page's fields; ask the user to sign in there in the live view`);
   }
 
   return {

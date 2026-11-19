@@ -178,6 +178,16 @@ document.getElementById('c-run').addEventListener('click', async () => {
 });`);
   },
   '/framed': () => page('Framed login', `<h1>Embedded sign-in</h1><iframe id="fhost" src="/one" width="400" height="240"></iframe>`),
+  // B-5f2e (the measure, then line 2's proof): a sign-in form in a CROSS-SITE child frame that answers its page by a posted message (the shape of a
+  // large vendor's account page). The top page shows what the frame posted (#got); the frame's form posts a ticket that says
+  // only how long the two values were (never the values).
+  '/xframed': (url) => {
+    const src = String((url && url.searchParams.get('src')) || 'about:blank').replace(/[&"<>]/g, (c) => ({ '&': '&amp;', '"': '&quot;', '<': '&lt;', '>': '&gt;' }[c]));
+    return page('Cross-site framed sign-in', `<h1>Sign in with your account</h1><iframe id="xidp" src="${src}" width="420" height="260"></iframe><div id="got"></div>`,
+      `window.addEventListener('message', (e) => { document.getElementById('got').textContent = JSON.stringify({ origin: e.origin, data: e.data }); });`);
+  },
+  '/xsignin': () => page('Account sign-in (frame)', `<form id="xf"><label>Account <input id="xu" name="accountName" autocomplete="username"></label><label>Password <input id="xp" type="password" name="password" autocomplete="current-password"></label><button type="button" class="btn" id="xgo">Continue</button></form>`,
+    `parent.postMessage({ hello: location.origin }, '*'); document.getElementById('xgo').addEventListener('click', () => { parent.postMessage({ ticket: 't-' + document.getElementById('xu').value.length + '-' + document.getElementById('xp').value.length }, '*'); });`),
   '/exfil': (url) => {
     const dest = (url && url.searchParams.get('dest')) || 'http://127.0.0.1:9';
     return page('Exfiltration attempt', `<div><input id="ep" type="password" aria-label="Password"><button type="button" class="btn" id="ego">Submit</button></div>`,

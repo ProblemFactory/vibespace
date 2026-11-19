@@ -994,6 +994,62 @@ function personPromptLines({ ended = null, hook = null } = {}, tIn) {
   return out;
 }
 
+// ── B-5f2e (the coordinator's ruling 2026-11-19 20:18Z, line 2): A FRAME OF ANOTHER SITE, SAID BY NAME ──
+// MEASURED (2026-11-18, the real driver 0.38.2 on a stand-in page that frames a sign-in form from another site): the driver
+// sees nothing inside a frame the browser runs in its own process — its snapshot shows «Iframe [ref=eN]» and no field, a fill or
+// a click answers «Element not found», `frame <css>` answers «Frame not found». The hub's watch hears every such frame as an
+// `iframe` target (Target.setDiscoverTargets; its parentFrameId names the frame it sits in): kept, never asked, said here.
+// Opening the frame's own address in a top-level tab is NO way out — the site hands its ticket back to the framing page only.
+const OTHER_SITE_FRAMES_SHOWN = 3;
+const FRAME_CHAIN_DEPTH = 8;
+const webOrigin = (u) => { let x = null; try { x = new URL(str(u).slice(0, 4096)); } catch { return ''; } return /^https?:$/.test(x.protocol) ? x.origin : ''; };
+/** The tab's own out-of-process frames: `entries` = [targetId, {url, parent}] pairs (the watch's kept iframe targets), `roots` =
+ *  the tab's frame ids (its target id is its top frame's), `known` = the child frame ids the tab's page attached (a frame moved to
+ *  a process of its own keeps its id = its target id). A frame is the tab's when it is known to it, or its parent chain reaches a
+ *  root or a known frame (a frame inside a frame of another site, too); another tab's frame, or one nothing places, never. PURE. */
+function tabFrameTargets(entries, roots, known = null) {
+  const ids = (v) => (v instanceof Set ? [...v] : (Array.isArray(v) ? v : (v == null ? [] : [v]))).map(str).filter(Boolean).slice(0, 256);
+  const list = (Array.isArray(entries) ? entries : [...(entries || [])]).slice(0, 256);
+  const kn = new Set(ids(known));
+  const mine = new Set(ids(roots).concat([...kn]));
+  const taken = new Set();
+  const out = [];
+  if (!ids(roots).length) return out;
+  for (let d = 0; d < FRAME_CHAIN_DEPTH; d++) {
+    let grew = false;
+    for (const [tid, f] of list) {
+      const id = str(tid);
+      if (!id || taken.has(id) || !f || !(kn.has(id) || mine.has(str(f.parent)))) continue;
+      taken.add(id); mine.add(id); out.push({ targetId: id, url: str(f.url) }); grew = true;
+    }
+    if (!grew) break;
+  }
+  return out;
+}
+/** The web origins of those frames, the tab's own origin left out, each once, in the order heard. PURE. */
+function otherSiteFrameOrigins({ tabUrl = '', frames = [] } = {}) {
+  const own = webOrigin(tabUrl);
+  const out = [];
+  for (const f of Array.isArray(frames) ? frames.slice(0, 64) : []) {
+    const o = webOrigin(f && f.url);
+    if (o && o !== own && !out.includes(o)) out.push(o);
+  }
+  return out;
+}
+/** THE SENTENCE: whose frame, that the driver cannot see or type into it, and the way that works (the user, in the live view). */
+function otherSiteFrameText(origins, tIn) {
+  const t = typeof tIn === 'function' ? (s, q) => tIn(s, q) : fill;
+  const list = (Array.isArray(origins) ? origins : []).map((o) => pageText(o, URL_MAX)).filter(Boolean);
+  if (!list.length) return '';
+  if (list.length === 1) return t('This page holds a frame from {origin} (another site): the browser driver cannot see or type into it — if it holds a sign-in, ask the user to sign in there in the live view', { origin: list[0] });
+  const origins2 = list.slice(0, OTHER_SITE_FRAMES_SHOWN).join(', ') + (list.length > OTHER_SITE_FRAMES_SHOWN ? ', …' : '');
+  return t('This page holds frames from {origins} (other sites): the browser driver cannot see or type into them — if one holds a sign-in, ask the user to sign in there in the live view', { origins: origins2 });
+}
+/** The driver's own «not found» words (measured: «✗ Element not found: #sel…», «✗ Frame not found») — a miss a frame of
+ *  another site may explain; any other failure says nothing of frames. PURE. */
+const FRAME_MISS_RE = /\b(?:Element|Frame) not found\b/;
+function frameMissText(text) { return FRAME_MISS_RE.test(str(text).slice(0, 65536)); }
+
 // ── lane browser-ui-prompts-r2 (B-ebfc): THE TWO MEASURED HANGS — a permission prompt and print, decided before they hold ──
 // MEASURED on 0.38.1 + Chrome 154 (lane table: docs/kb-file-structure.md under src/server/browser-dialogs.js): Browser.setPermission
 // with NO origin (= every origin of that browser context) set to `denied` answers geolocation / notifications / microphone / midi
@@ -1076,6 +1132,7 @@ module.exports = {
   restartedCardText, unresponsiveLine, answeredAgainLine, unresponsiveNotice, unresponsiveWords,
   // lane browser-ui-prompts: the browser's own prompts (a file chooser, an HTTP sign-in) — one record, one sentence, one bar
   PROMPT_TYPES, PROMPT_ASK_MS, AUTH_HOLD_MAX_MS, promptFromCdp, promptText, promptBlock, promptAnsweredNote, promptWords, personPromptLines /* B-b56d */, nativeSheetText /* lane browser-x-in-window */,
+  OTHER_SITE_FRAMES_SHOWN, tabFrameTargets, otherSiteFrameOrigins, otherSiteFrameText, frameMissText, // B-5f2e (line 2): a frame of another site, said by name
   // lane browser-ui-prompts-r2: permissions decided ahead (the agent's per-origin flip) + the print preview released and told
   PERMISSION_KINDS, PERMISSION_DEFAULT, permissionPlan, permissionVerdict, permissionNote, permissionWords, PRINT_PREVIEW_RE, printTargetVerdict, PRINT_RELEASE_EXPR, PRINT_TEXT, printNote, printWords,
 };

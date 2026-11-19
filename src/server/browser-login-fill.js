@@ -1199,6 +1199,13 @@ async function evalInWorld(send, contextId, expression, { awaitPromise = false }
   return valOf(r);
 }
 
+/** B-5f2e (line 2): the `iframe` target infos whose parent chain reaches `treeIds` (the tab's frame tree) — PURE, through
+ *  browser-stuck's tabFrameTargets (the watch's own rule); a frame of the tree itself is not one (it is walked in-process). */
+function ownFrameTargetInfos(infos, treeIds) {
+  const list = (Array.isArray(infos) ? infos : []).filter((t) => t && t.type === 'iframe' && t.targetId && !(treeIds && treeIds.has(String(t.targetId))));
+  const byId = new Map(list.map((t) => [String(t.targetId), t]));
+  return require('../browser-stuck.js').tabFrameTargets(list.map((t) => [String(t.targetId), { url: t.url, parent: t.parentFrameId }]), treeIds || new Set()).map((x) => byId.get(x.targetId)).filter(Boolean);
+}
 function flattenDescendantFrames(tree, out = [], ids = new Set()) {
   if (!tree || typeof tree !== 'object') return { list: out, ids };
   if (tree.frame && tree.frame.id) ids.add(String(tree.frame.id));
@@ -1648,7 +1655,9 @@ async function resolveSnapshotRef({
 
     const tgts = await shortSess.browserSend('Target.getTargets', {});
     const infos = tgts && !tgts.error && tgts.result && Array.isArray(tgts.result.targetInfos) ? tgts.result.targetInfos : [];
-    const oopInfos = infos.filter((t) => t && t.type === 'iframe' && t.targetId && !treeFrameIds.has(String(t.targetId))).slice(0, MAX_AX_CHILD_FRAMES);
+    // B-5f2e (line 2): only THIS tab's out-of-process frames — Target.getTargets lists the whole browser's; a frame is the tab's
+    // when its parent chain reaches the tab's frame tree (as inspectOopIframes filters), never another tab's frame
+    const oopInfos = ownFrameTargetInfos(infos, treeFrameIds).slice(0, MAX_AX_CHILD_FRAMES);
     for (const inf of oopInfos) {
       const oop = await shortSess.attachTarget(inf.targetId);
       if (!oop) continue;
@@ -1732,7 +1741,7 @@ async function fillVaultElement({
       return { ok: false, code: 'target_not_found', error: `unknown or stale ref ${targetStr} — run vibespace-browser snapshot -i on the current tab first` };
     }
     if (refEntry.inFrame || (refEntry.frameId && String(refEntry.frameId) !== iso.topFrameId)) {
-      return { ok: false, code: 'login_in_frame', error: `target ${targetStr} sits inside a frame — open the frame's own address in a top-level tab or sign in via live view` };
+      return { ok: false, code: 'login_in_frame', error: `target ${targetStr} sits inside a frame — Vault fill only fills the top page's fields; ask the user to sign in there in the live view` };
     }
     const descRes = await send('DOM.describeNode', { backendNodeId: refEntry.backendNodeId });
     const descNode = descRes && !descRes.timeout && !descRes.error && descRes.result ? descRes.result.node : null;
@@ -2045,6 +2054,7 @@ async function wipeTabTypedInputs({ call, oopFrames = null, sessionId = undefine
 module.exports = {
   openIsolatedOrigin,
   resolveSnapshotRef,
+  ownFrameTargetInfos, // B-5f2e (line 2)
   fillVaultElement,
   wipeTabTypedInputs,
   filledBoxHolds,

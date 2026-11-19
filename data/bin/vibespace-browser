@@ -1271,6 +1271,9 @@ async function runPage(c) {
     if (navVerb && au && !au._failed && au.proposalRejected && au.proposalRejected.text) console.error(`note: ${au.proposalRejected.text} [proposal_rejected]`);
     // verify r1 V1 (lane browser-propose): the sites a wrapped browser's list refused while this verb ran — by name, any page verb
     if (au && !au._failed && au.egressRefused && au.egressRefused.text) console.error(`note: ${au.egressRefused.text} [egress_refused]`);
+    // B-5f2e (line 2): a snapshot, or the driver's own «not found» (an element, a frame), on a tab that holds a frame of another
+    // site — whose frame, that the driver cannot reach into it, and the way that works (the hub's words, from its kept targets)
+    if (au && !au._failed && au.otherSiteFrame && au.otherSiteFrame.text && ((words[0] === 'snapshot' && code === 0) || (code !== 0 && DS && typeof DS.frameMissText === 'function' && DS.frameMissText(outText + '\n' + errText)))) console.error(`note: ${au.otherSiteFrame.text} [frame_other_site]`);
     // lane tailnet-names (LAW 2): a navigation that failed on a tailnet host — why, through Tailscale, by name
     if (navVerb && au && !au._failed && au.tailnet && au.tailnet.text) console.error(`note: ${au.tailnet.text} [tailnet]`);
     // lane browser-resume C: the tab this session was bound to is GONE (closed — by the user while he drove, by you, or with the

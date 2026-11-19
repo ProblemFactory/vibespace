@@ -1,0 +1,226 @@
+#!/usr/bin/env node
+// B-5f2e (the coordinator's ruling 2026-11-19 20:18Z, LINE 2) — A FRAME OF ANOTHER SITE, SAID BY NAME. MEASURED 2026-11-18 (the
+// real driver 0.38.2 on a stand-in page that frames a sign-in form from another site): the driver sees nothing inside a frame the
+// browser runs in its own process — snapshot «Iframe [ref=eN]» and no field, «✗ Element not found», «✗ Frame not found», the vault
+// fill «no element matched … in the top-level document». Stand-ins only: fake CDP sockets on the loopback; no browser, no site.
+//   ① PURE (src/browser-stuck.js): tabFrameTargets — the parent chain (a frame of the tab, a frame inside it), never another tab's
+//      or an unplaced one; otherSiteFrameOrigins — web origins, the tab's own left out, each once; otherSiteFrameText — one / several
+//      in en / zh / ja: whose frame, that the driver cannot see or type into it, the user in the live view; frameMissText — the
+//      driver's measured «not found» words, another failure never
+//   ② THE REAL WATCH over a fake CDP: an `iframe` target heard from Target.targetCreated is kept and said for ITS tab only, at ZERO
+//      calls of the watch; its targetInfoChanged moves the origin; targetDestroyed ends it (and an orphaned child with it).
+//      RED: a copy of the watch without the iframe branch says nothing
+//   ③ THE SNAPSHOT-REF WALK (resolveSnapshotRef over a fake short socket): it walks only the tab's own frames — a ref matched only
+//      in ANOTHER tab's frame is not resolved; the tab's own frame still is. RED: the base's browser-wide filter resolves it there
+//   ④ THE DOORS (source, anchored): the audit answers otherSiteFrame after a snapshot or a failed verb; the CLI prints it after a
+//      snapshot or a «not found» [frame_other_site]; the vault fill's login_in_frame / target_not_found carry it; the stale «open
+//      the frame's own address in a top-level tab» is gone from src and the agent's manual (the ticket cannot come back)
+import fs from 'node:fs';
+import path from 'node:path';
+import http from 'node:http';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import { anchored } from './scratch.mjs';
+import { checker } from './lib/check.mjs';
+const require = createRequire(import.meta.url);
+const Module = require('node:module');
+const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+const { ok, report } = checker();
+const { WebSocketServer } = require('ws');
+const ST = require('../src/browser-stuck.js');
+const D = require('../src/server/browser-dialogs.js');
+const LF = require('../src/server/browser-login-fill.js');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/** a copy of a product file with ONE anchored edit (scratch.mjs: a moved line fails BY NAME), compiled where the file lives */
+function copyOf(rel, anchor, to, name) {
+  const file = path.join(REPO, rel);
+  const m = new Module(file, null); m.filename = file; m.paths = Module._nodeModulePaths(path.dirname(file));
+  m._compile(anchored(read(rel), anchor, to, name), file);
+  return m.exports;
+}
+const zhD = (await import('../src/lib/i18n-zh.js')).default, jaD = (await import('../src/lib/i18n-ja.js')).default;
+const tFor = (d) => (k, p) => { const v = d ? d[k] : k; if (v === undefined) throw new Error(`no words for ${JSON.stringify(k)}`); return String(v).replace(/\{(\w+)\}/g, (m, q) => (p && p[q] !== undefined ? String(p[q]) : m)); };
+
+// ═══ ① PURE ═══
+console.log('— ① PURE: the tab\'s frames, their origins, the sentence, the driver\'s «not found»');
+{
+  const kept = [['F1', { url: 'https://idp.example.net/signin', parent: 'T1' }], ['F9', { url: 'https://other.example.org/', parent: 'T2' }],
+    ['F3', { url: 'https://deep.example.com/x', parent: 'F1' }], ['F4', { url: 'https://lost.example.com/', parent: 'C-unknown' }], ['F5', { url: 'https://idp.example.net/again', parent: 'T1' }]];
+  const mine = ST.tabFrameTargets(kept, 'T1').map((x) => x.targetId);
+  ok(JSON.stringify(mine) === '["F1","F3","F5"]', 'tabFrameTargets: the tab\'s frames and a frame inside one (the parent chain) — never another tab\'s (F9) or one no root reaches (F4)', mine);
+  ok(ST.tabFrameTargets(kept, 'T2').map((x) => x.targetId).join() === 'F9' && ST.tabFrameTargets(kept, '').length === 0 && ST.tabFrameTargets(null, 'T1').length === 0, 'tabFrameTargets: another tab gets its own frame only; no tab, no list ⇒ none');
+  // a target Chrome gave NO parentFrameId: the tab's page attached it (Page.frameAttached — the moved frame keeps its id); a frame of
+  // another site inside one of the page's own in-process frames (C-unknown attached by the page) is placed through it
+  const noParent = kept.concat([['F7', { url: 'https://np.example.com/', parent: '' }]]);
+  ok(ST.tabFrameTargets(noParent, 'T1', new Set(['F7', 'C-unknown'])).map((x) => x.targetId).join() === 'F1,F3,F4,F5,F7' && ST.tabFrameTargets(noParent, 'T1').every((x) => x.targetId !== 'F7') && ST.tabFrameTargets(noParent, 'T2', new Set(['F7'])).map((x) => x.targetId).join() === 'F9,F7',
+    'tabFrameTargets: a frame with no parent is the tab\'s only when its page attached it; an in-process frame the page attached places the frame inside it');
+  const origins = ST.otherSiteFrameOrigins({ tabUrl: 'http://127.0.0.1:9/login', frames: ST.tabFrameTargets(kept, 'T1').concat([{ url: 'about:blank' }, { url: 'data:text/html,x' }, { url: 'http://127.0.0.1:9/same' }]) });
+  ok(JSON.stringify(origins) === '["https://idp.example.net","https://deep.example.com"]', 'otherSiteFrameOrigins: web origins in the order heard, each once; about:/data: and the tab\'s own origin left out', origins);
+  const one = ST.otherSiteFrameText(['https://idp.example.net']), two = ST.otherSiteFrameText(origins);
+  const five = ST.otherSiteFrameText(['https://a.example', 'https://b.example', 'https://c.example', 'https://d.example', 'https://e.example']);
+  ok(one === 'This page holds a frame from https://idp.example.net (another site): the browser driver cannot see or type into it — if it holds a sign-in, ask the user to sign in there in the live view',
+    'the sentence (one frame): whose frame, that the driver cannot see or type into it, and for a sign-in the user in the live view (an ad or a captcha frame is no sign-in)', one);
+  ok(/frames from https:\/\/idp\.example\.net, https:\/\/deep\.example\.com \(other sites\)/.test(two) && /cannot see or type into them/.test(two) && /a\.example, https:\/\/b\.example, https:\/\/c\.example, …/.test(five) && !/d\.example/.test(five),
+    'the sentence (several): every origin up to three, then «…»', { two, five });
+  ok(ST.otherSiteFrameText([]) === '' && ST.otherSiteFrameText(null) === '', 'no frame ⇒ no sentence');
+  const all = [one, two].concat(['zh', 'ja'].flatMap((l) => { const d = l === 'zh' ? zhD : jaD; return [ST.otherSiteFrameText(['https://idp.example.net'], tFor(d)), ST.otherSiteFrameText(origins, tFor(d))]; }));
+  ok(all.every((x) => x.includes('https://idp.example.net')) && new Set(all).size === all.length && all.every((x) => !/top-level tab|frame's own address/.test(x)),   // stale-pins: kept — an absence check (the stale advice must not come back)
+    'en / zh / ja: each sentence its own words, the origin in each, never the top-level-tab advice', all);
+  ok(ST.frameMissText('✗ Element not found: #xu. Verify the selector, role, or name is correct and the element exists in the DOM.') && ST.frameMissText('✗ Frame not found') && !ST.frameMissText('✗ Element is not visible') && !ST.frameMissText('Navigation failed: net::ERR_NAME_NOT_RESOLVED') && !ST.frameMissText(null),
+    'frameMissText: the driver\'s measured «Element not found» / «Frame not found»; another failure says nothing of frames');
+}
+
+// ═══ ② THE REAL WATCH over a fake CDP ═══
+console.log('— ② the REAL watch: a frame target heard is kept and said for its tab only, at zero calls');
+function fakeChrome() {
+  const calls = []; const browsers = new Set(); const sessions = new Map(); let n = 0;
+  const wss = new WebSocketServer({ noServer: true });
+  const srv = http.createServer((q, r) => { r.statusCode = 404; r.end(); });
+  srv.on('upgrade', (req, sock, head) => wss.handleUpgrade(req, sock, head, (ws) => wss.emit('connection', ws)));
+  wss.on('connection', (ws) => { browsers.add(ws); ws.on('close', () => browsers.delete(ws)); ws.on('message', (d) => {
+    const m = JSON.parse(d); calls.push(m); const reply = (o) => ws.send(JSON.stringify({ id: m.id, ...(m.sessionId ? { sessionId: m.sessionId } : {}), ...o }));
+    if (m.method === 'Target.getTargets') return reply({ result: { targetInfos: [{ targetId: 'T1', type: 'page', url: 'http://127.0.0.1:9/login', title: 'one' }, { targetId: 'T2', type: 'page', url: 'http://127.0.0.1:9/two', title: 'two' }] } });
+    if (m.method === 'Target.attachToTarget') { const sid = `S-${m.params.targetId}-${++n}`; sessions.set(sid, { ws, tid: String(m.params.targetId) }); return reply({ result: { sessionId: sid } }); }
+    if (m.method === 'Page.getFrameTree' && m.sessionId) { const tid = (sessions.get(m.sessionId) || {}).tid || ''; return reply({ result: { frameTree: { frame: { id: tid, loaderId: `L-${tid}` }, ...(tid === 'T1' ? { childFrames: [{ frame: { id: 'C5', parentId: 'T1', loaderId: 'L-C5' } }] } : {}) } } }); }
+    return reply({ result: {} });
+  }); });
+  return { calls, browserEvent(method, params) { for (const ws of browsers) ws.send(JSON.stringify({ method, params })); },
+    tabEvent(tid, method, params) { for (const [sid, x] of sessions) if (x.tid === tid) x.ws.send(JSON.stringify({ sessionId: sid, method, params })); },
+    async listen() { await new Promise((r) => srv.listen(0, '127.0.0.1', r)); this.url = `ws://127.0.0.1:${srv.address().port}/devtools/browser/fake`; return this; },
+    async close() { for (const c of wss.clients) c.terminate(); await new Promise((r) => srv.close(() => r())); } };
+}
+const quiet = { warn: () => {}, log: () => {}, error: () => {} };
+const NAMED = 'bp-a0005f2e', KEY = 'bk-00005f2e';
+const tgt = { profileId: NAMED, browserKey: KEY };
+async function watchOver(Dm) {
+  const ch = await fakeChrome().listen();
+  const w = Dm.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: ch.url }) }, log: quiet });
+  await w.arm(NAMED); await sleep(80);
+  w.noteActiveTab(tgt, 'T1');
+  const frame = (targetId, parentFrameId, url) => ch.browserEvent('Target.targetCreated', { targetInfo: { targetId, type: 'iframe', parentFrameId, url, title: '', attached: false } });
+  frame('F1', 'T1', 'https://idp.example.net/signin'); frame('F9', 'T2', 'https://other.example.org/'); frame('F3', 'F1', 'https://deep.example.com/x');
+  await sleep(60);
+  return { ch, w, frame };
+}
+{
+  const { ch, w } = await watchOver(D);
+  const before = ch.calls.length;
+  const said = w.otherSiteFramesFor(tgt);
+  await sleep(60);   // a call the function made reaches the fake on a later tick
+  const after = ch.calls.length;
+  ok(!!said && JSON.stringify(said.origins) === '["https://idp.example.net","https://deep.example.com"]' && said.text === ST.otherSiteFrameText(said.origins),
+    'the conversation\'s tab (T1) holds a frame of another site and a frame inside it ⇒ both said, by origin, in the sentence', said);
+  ok(after === before, 'ZERO calls: the answer is read from the targets the watch already heard (the snapshot stays at no call)', { before, after });
+  ok(!w.otherSiteFramesFor(tgt).origins.includes('https://other.example.org'), 'another tab\'s frame (F9 on T2) is never said for this tab');
+  w.noteActiveTab(tgt, 'T2');
+  ok(JSON.stringify((w.otherSiteFramesFor(tgt) || {}).origins) === '["https://other.example.org"]', 'the tab moved (T2) ⇒ its own frame is said, and only it');
+  w.noteActiveTab(tgt, 'T1');
+  ch.browserEvent('Target.targetInfoChanged', { targetInfo: { targetId: 'F1', type: 'iframe', parentFrameId: 'T1', url: 'https://login.example.co.uk/s', title: '', attached: false } }); await sleep(40);
+  ok(JSON.stringify((w.otherSiteFramesFor(tgt) || {}).origins) === '["https://login.example.co.uk","https://deep.example.com"]', 'targetInfoChanged: the frame navigated ⇒ its new origin is said');
+  ch.browserEvent('Target.targetDestroyed', { targetId: 'F1' }); await sleep(40);
+  ok(w.otherSiteFramesFor(tgt) === null, 'targetDestroyed: the frame went ⇒ nothing said (its child F3 is placed by no root any more ⇒ not said either)');
+  ok(!ch.calls.some((m) => m.method === 'Target.attachToTarget' && /^F/.test(String(m.params && m.params.targetId))), 'the watch never attaches to a frame target to say it (no session, no call into the frame)');
+  ok(w.otherSiteFramesFor({ profileId: 'bp-nobody', browserKey: KEY }) === null, 'a profile no watch holds ⇒ null');
+  // a target Chrome gives NO parentFrameId: the tab's page attached that frame first (Page.frameAttached on the tab's own session)
+  ch.tabEvent('T1', 'Page.frameAttached', { frameId: 'F7', parentFrameId: 'T1' }); await sleep(30);
+  ch.browserEvent('Target.targetCreated', { targetInfo: { targetId: 'F7', type: 'iframe', url: 'https://np.example.com/in', title: '', attached: false } }); await sleep(40);
+  ok(JSON.stringify((w.otherSiteFramesFor(tgt) || {}).origins) === '["https://np.example.com"]', 'a frame target with NO parentFrameId is said for the tab whose page attached it (Page.frameAttached: no call of ours)');
+  ch.tabEvent('T1', 'Page.frameDetached', { frameId: 'F7', reason: 'swap' }); await sleep(30);
+  ok(!!w.otherSiteFramesFor(tgt), 'frameDetached «swap» (the frame moved to a process of its own) keeps it the tab\'s');
+  ch.tabEvent('T1', 'Page.frameDetached', { frameId: 'F7', reason: 'remove' }); await sleep(30);
+  ok(w.otherSiteFramesFor(tgt) === null, 'frameDetached «remove» (the frame left the page) ⇒ no longer placed, not said');
+  w.noteActiveTab(tgt, 'T2');
+  ch.tabEvent('T2', 'Page.frameAttached', { frameId: 'F8', parentFrameId: 'T2' }); await sleep(30);
+  w.noteActiveTab(tgt, 'T1');
+  ch.browserEvent('Target.targetCreated', { targetInfo: { targetId: 'F8', type: 'iframe', url: 'https://t2only.example.com/', title: '', attached: false } }); await sleep(40);
+  ok(w.otherSiteFramesFor(tgt) === null, 'a frame ANOTHER tab\'s page attached is never said for this tab');
+  // a tab the watch met with its frames already there: Page.enable replays no frameAttached — the frame tree the enable reads anyway
+  // seeds them (T1's in-process child C5), so a frame of another site inside it is placed
+  ch.browserEvent('Target.targetCreated', { targetInfo: { targetId: 'F6', type: 'iframe', parentFrameId: 'C5', url: 'https://pay.example.com/card', title: '', attached: false } }); await sleep(40);
+  ok(JSON.stringify((w.otherSiteFramesFor(tgt) || {}).origins) === '["https://pay.example.com"]', 'a frame of another site inside the page\'s own in-process frame (C5, seeded from the enable\'s frame tree) is said for the tab');
+  // the tab's top document changed: the old document's frames are not said (a page the browser keeps for Back keeps its frames)
+  ch.tabEvent('T1', 'Page.frameNavigated', { frame: { id: 'T1', loaderId: 'L-next', url: 'http://127.0.0.1:9/next', securityOrigin: 'http://127.0.0.1:9', mimeType: 'text/html' }, type: 'Navigation' }); await sleep(40);
+  ok(w.otherSiteFramesFor(tgt) === null, 'the top frame navigated ⇒ the old document\'s frames are no longer said');
+  ch.browserEvent('Target.targetCreated', { targetInfo: { targetId: 'F10', type: 'iframe', parentFrameId: 'T1', url: 'https://idp.example.net/again', title: '', attached: false } }); await sleep(40);
+  ok(JSON.stringify((w.otherSiteFramesFor(tgt) || {}).origins) === '["https://idp.example.net"]', 'a frame of the NEW document is said again');
+  w.disarm?.(NAMED); await ch.close();
+}
+{
+  // RED CONTROL for «zero calls»: a copy whose lookup asks Chrome once — the wait above sees it
+  const Dask = copyOf('src/server/browser-dialogs.js', '    const e = pickScopedTabFor(w, target, { targetId });\n    if (!e) return null;\n    const origins = ST.otherSiteFrameOrigins(',
+    '    call(w, \'Target.getTargets\', {}, null, 2000).catch(() => null);\n    const e = pickScopedTabFor(w, target, { targetId });\n    if (!e) return null;\n    const origins = ST.otherSiteFrameOrigins(', 'b5f2e-lookup-asks-chrome');
+  const { ch, w } = await watchOver(Dask);
+  const b0 = ch.calls.length; w.otherSiteFramesFor(tgt); await sleep(60);
+  ok(ch.calls.length > b0, 'CONTROL (a lookup that asks Chrome once): the same wait counts its call — the zero-calls leg can fail', { b0, after: ch.calls.length });
+  w.disarm?.(NAMED); await ch.close();
+}
+{
+  // RED CONTROL: the watch as it was — every non-page target dropped in track(), so a frame is never kept
+  const Dbase = copyOf('src/server/browser-dialogs.js', "if (p.targetInfo && p.targetInfo.type === 'iframe') { noteFrameTarget(w, p.targetInfo); return; } ", '', 'b5f2e-watch-no-frames');
+  const { ch, w } = await watchOver(Dbase);
+  ok(w.otherSiteFramesFor(tgt) === null, 'CONTROL (the watch without the iframe branch): the same frames heard ⇒ nothing said — the branch is what keeps them');
+  w.disarm?.(NAMED); await ch.close();
+}
+
+// ═══ ③ THE SNAPSHOT-REF WALK over a fake short socket ═══
+console.log('— ③ resolveSnapshotRef walks only the tab\'s own frames');
+function fakeShort({ fieldsBySession }) {
+  const wss = new WebSocketServer({ noServer: true }); let n = 0;
+  const srv = http.createServer((q, r) => { r.statusCode = 404; r.end(); });
+  srv.on('upgrade', (req, sock, head) => wss.handleUpgrade(req, sock, head, (ws) => wss.emit('connection', ws)));
+  const walked = [];
+  wss.on('connection', (ws) => ws.on('message', (d) => {
+    const m = JSON.parse(d); const reply = (o) => ws.send(JSON.stringify({ id: m.id, ...(m.sessionId ? { sessionId: m.sessionId } : {}), ...o }));
+    const tidOf = (sid) => String(sid || '').replace(/^S-/, '').replace(/-\d+$/, '');
+    if (m.method === 'Target.attachToTarget') return reply({ result: { sessionId: `S-${m.params.targetId}-${++n}` } });
+    if (m.method === 'Target.getTargets') return reply({ result: { targetInfos: [
+      { targetId: 'T1', type: 'page', url: 'http://127.0.0.1:9/login' }, { targetId: 'T2', type: 'page', url: 'http://127.0.0.1:9/two' },
+      { targetId: 'F9', type: 'iframe', parentFrameId: 'T2', url: 'https://other.example.org/' }, { targetId: 'F1', type: 'iframe', parentFrameId: 'T1', url: 'https://idp.example.net/' }] } });
+    if (m.method === 'Page.getFrameTree') return reply({ result: { frameTree: { frame: { id: tidOf(m.sessionId) } } } });
+    if (m.method === 'Page.createIsolatedWorld') return reply({ result: { executionContextId: 7 } });
+    if (m.method === 'Runtime.evaluate') return reply({ result: { result: { objectId: `root-${tidOf(m.sessionId)}` } } });
+    if (m.method === 'Accessibility.queryAXTree') { const t = tidOf(m.sessionId); walked.push(t); return reply({ result: { nodes: (fieldsBySession[t] || []).filter((x) => x.name.value === m.params.accessibleName) } }); }
+    return reply({ result: {} });
+  }));
+  return { walked, async listen() { await new Promise((r) => srv.listen(0, '127.0.0.1', r)); this.url = `ws://127.0.0.1:${srv.address().port}/devtools/page/T1`; return this; },
+    async close() { for (const c of wss.clients) c.terminate(); await new Promise((r) => srv.close(() => r())); } };
+}
+const fields = { F9: [{ backendDOMNodeId: 91, role: { value: 'textbox' }, name: { value: 'Email' } }], F1: [{ backendDOMNodeId: 11, role: { value: 'textbox' }, name: { value: 'Password box' } }] };
+async function walk(LFm, name) {
+  const s = await fakeShort({ fieldsBySession: fields }).listen();
+  try { const r = await LFm.resolveSnapshotRef({ wsUrl: s.url, targetId: 'T1', parsedRef: { ref: 'e5', role: 'textbox', name } }); return { r, walked: s.walked.slice() }; } finally { await s.close(); }
+}
+{
+  const other = await walk(LF, 'Email');
+  ok(other.r && other.r.ok === false && other.r.code === 'target_not_found' && !other.walked.includes('F9'), 'a ref whose field lives only in ANOTHER tab\'s frame (F9 on T2) is not resolved — that frame is never walked', other);
+  const own = await walk(LF, 'Password box');
+  ok(own.r && own.r.ok === true && own.r.entry && own.r.entry.frameId === 'F1' && own.r.entry.inFrame === true, 'the tab\'s OWN frame of another site is still walked (its entry carries the frame: the fill refuses it as login_in_frame)', own);
+  const infos = [{ targetId: 'F1', type: 'iframe', parentFrameId: 'T1' }, { targetId: 'F9', type: 'iframe', parentFrameId: 'T2' }, { targetId: 'F3', type: 'iframe', parentFrameId: 'F1' }, { targetId: 'F7', type: 'iframe', parentFrameId: 'C2' }, { targetId: 'P1', type: 'page' }];
+  ok(LF.ownFrameTargetInfos(infos, new Set(['T1', 'C2'])).map((t) => t.targetId).join() === 'F1,F3,F7', 'ownFrameTargetInfos: a frame of the tab, of its in-process child (C2), inside one of them — never another tab\'s, never a page', LF.ownFrameTargetInfos(infos, new Set(['T1', 'C2'])).map((t) => t.targetId));
+  // RED CONTROL: the base's browser-wide filter
+  const LFbase = copyOf('src/server/browser-login-fill.js', 'const oopInfos = ownFrameTargetInfos(infos, treeFrameIds).slice(0, MAX_AX_CHILD_FRAMES);',
+    "const oopInfos = infos.filter((t) => t && t.type === 'iframe' && t.targetId && !treeFrameIds.has(String(t.targetId))).slice(0, MAX_AX_CHILD_FRAMES);", 'b5f2e-ref-walk-browser-wide');   // stale-pins: kept — the RED control's REPLACEMENT (the base's own line), never an anchor
+  const base = await walk(LFbase, 'Email');
+  ok(base.r && base.r.ok === true && base.r.entry && base.r.entry.frameId === 'F9' && base.walked.includes('F9'), 'CONTROL (the base\'s browser-wide walk): the same ref RESOLVES into another tab\'s frame — the scope is what keeps it out', base);
+}
+
+// ═══ ④ THE DOORS (source, anchored) ═══
+console.log('— ④ the doors: the audit, the CLI, the vault fill, the stale advice gone');
+{
+  const route = read('src/routes/browser.js'), cli = read('data/bin/vibespace-browser');
+  const audit = (route.match(/router\.post\('\/api\/agent\/browser\/audit'[\s\S]*?\n\}\);\n/) || [''])[0];
+  ok(/\(req\.body\?\.verb === 'snapshot' \|\| req\.body\?\.ok === false\)/.test(audit) && /otherSiteFrame = ctx\.dialogs\.otherSiteFramesFor\(tF\)/.test(audit) && /\.\.\.\(otherSiteFrame \? \{ otherSiteFrame \} : \{\}\)/.test(audit),
+    'the audit answers otherSiteFrame after a snapshot or a failed verb, from the watch (the conversation\'s own tab)');
+  ok(/au\.otherSiteFrame && au\.otherSiteFrame\.text && \(\(words\[0\] === 'snapshot' && code === 0\) \|\| \(code !== 0 && DS && typeof DS\.frameMissText === 'function' && DS\.frameMissText\(outText \+ '\\n' \+ errText\)\)\)\) console\.error\(`note: \$\{au\.otherSiteFrame\.text\} \[frame_other_site\]`\)/.test(cli),
+    'the CLI prints it after a snapshot, or after the driver\'s own «not found» — [frame_other_site]');
+  const fv = (route.match(/router\.post\('\/api\/agent\/browser\/fill-vault'[\s\S]*?\n\}\);\n/) || [''])[0];
+  ok(/\(r\.code === 'login_in_frame' \|\| r\.code === 'target_not_found'\) && typeof D\.otherSiteFramesFor === 'function'/.test(fv) && /error: framed && framed\.text \? `\$\{text\} — \$\{framed\.text\}` : text/.test(fv),
+    'the vault fill: a login_in_frame or target_not_found on a tab with a frame of another site carries the sentence');
+  const walkFiles = (rel) => fs.readdirSync(path.join(REPO, rel), { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? walkFiles(path.join(rel, d.name)) : (/\.(m?js|md)$/.test(d.name) ? [path.join(rel, d.name)] : [])));
+  const stale = walkFiles('src').concat(walkFiles('docs/agent')).filter((f) => /\bopen the frame's own address in a top-level tab/.test(read(f)));   // stale-pins: kept — an absence check (the stale advice must not come back)
+  ok(stale.length === 0, 'the stale advice «open the frame\'s own address in a top-level tab» is gone (the ticket cannot come back to the page)', stale);
+  ok(/ask the user to sign in there in the live view/.test(read('src/browser-login.js')) && /\[frame_other_site\]/.test(read('docs/agent/browser-manual.md')), 'the refusal and the agent\'s manual name the way that works: the user, in the live view');
+}
+
+report();

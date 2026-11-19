@@ -101,6 +101,8 @@ export default {
   "The browser window is not available": "浏览器窗口不可用",
   "Chrome asks you to sign in — in its window below": "Chrome 请你登录 — 在下面它自己的窗口里",
   "Chrome asks you to sign in — in its own window, which this view does not show": "Chrome 请你登录 — 在它自己的窗口里，这个视图里看不到它",
+  "This page holds a frame from {origin} (another site): the browser driver cannot see or type into it — if it holds a sign-in, ask the user to sign in there in the live view": "这个页面里有一个来自 {origin} 的框架（另一个站点）：浏览器驱动看不到它，也无法在里面输入 — 如果里面是登录，请用户在实时视图里在那里登录",
+  "This page holds frames from {origins} (other sites): the browser driver cannot see or type into them — if one holds a sign-in, ask the user to sign in there in the live view": "这个页面里有来自 {origins} 的框架（其他站点）：浏览器驱动看不到它们，也无法在里面输入 — 如果其中有登录，请用户在实时视图里在那里登录",
   "Take over and type the username and password into Chrome’s sheet — the agent never sees them": "接管后在 Chrome 的登录框里输入用户名和密码 — agent 永远看不到",
   // lane chat-mermaid: the diagram card
   "Diagram": "图",

@@ -101,6 +101,8 @@ export default {
   "The browser window is not available": "ブラウザのウィンドウを利用できません",
   "Chrome asks you to sign in — in its window below": "Chrome がサインインを求めています — 下のウィンドウで",
   "Chrome asks you to sign in — in its own window, which this view does not show": "Chrome がサインインを求めています — このビューには映らない Chrome 自身のウィンドウで",
+  "This page holds a frame from {origin} (another site): the browser driver cannot see or type into it — if it holds a sign-in, ask the user to sign in there in the live view": "このページには {origin}（別のサイト）のフレームがあります：ブラウザードライバーはその中を見ることも入力することもできません — サインインがあれば、ユーザーにライブビューでそこからサインインしてもらってください",
+  "This page holds frames from {origins} (other sites): the browser driver cannot see or type into them — if one holds a sign-in, ask the user to sign in there in the live view": "このページには {origins}（別のサイト）のフレームがあります：ブラウザードライバーはそれらの中を見ることも入力することもできません — サインインがあれば、ユーザーにライブビューでそこからサインインしてもらってください",
   "Take over and type the username and password into Chrome’s sheet — the agent never sees them": "引き継いで Chrome のシートにユーザー名とパスワードを入力してください — エージェントには見えません",
   // lane chat-mermaid: the diagram card
   "Diagram": "図",

@@ -516,7 +516,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       else syncTabFetchMode(w, e); // N1: if a live credential signature stands on this tab, keep '*' Request interception active
       if (was) emit({ kind: 'held-cleared', profileId: w.profileId, targetId: e.targetId });
       if (!e.docId) {   // (lane chrome-157, round 32: the document's id — after the hooks arm, never between Page.enable and them)
-        try { const ft = await call(w, 'Page.getFrameTree', {}, e.sid, 1500); const lid = ft && ft.result && ft.result.frameTree && ft.result.frameTree.frame ? ft.result.frameTree.frame.loaderId : ''; if (lid && !e.docId) e.docId = String(lid); } catch { /* unknown ⇒ the same document */ } }
+        try { const ft = await call(w, 'Page.getFrameTree', {}, e.sid, 1500); const lid = ft && ft.result && ft.result.frameTree && ft.result.frameTree.frame ? ft.result.frameTree.frame.loaderId : ''; if (lid && !e.docId) e.docId = String(lid); seedChildFrames(e, ft && ft.result ? ft.result.frameTree : null); } catch { /* unknown ⇒ the same document */ } }
       return;
     }
     if (en && en.timeout && w.state === 'open' && w.targets.get(e.targetId) === e) {
@@ -542,9 +542,10 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       case 'VibeSpace.webauthnRequest': return pkRequest(w, surfaceTab(w, m), p); // lane passkey-sink: a kernel with `webauthn` — the ceremony's data (its surface is the held card)
       case 'VibeSpace.credentialFormDetected': return; // r22 pivot: kernel form pushes retired (agent locates, hub fills)
       case 'VibeSpace.credentialSubmitted': return onOwnerTakeoverSubmit(w, surfaceTab(w, m), p); // human takeover save-login card only
-      case 'Target.targetCreated': case 'Target.targetInfoChanged': track(w, p.targetInfo); return;
+      case 'Target.targetCreated': case 'Target.targetInfoChanged': if (p.targetInfo && p.targetInfo.type === 'iframe') { noteFrameTarget(w, p.targetInfo); return; } track(w, p.targetInfo); return; // B-5f2e: a frame of another site is kept, never tracked as a tab
       case 'Target.targetDestroyed': {
         const tid = String(p.targetId || '');
+        if (w.frameTargets) w.frameTargets.delete(tid); // B-5f2e: a gone frame is no longer said
         const e = w.targets.get(tid);
         if (!e) return;
         w.targets.delete(tid); if (e.sid) w.sessions.delete(e.sid); if (e.reEnable) clearTimeout(e.reEnable);
@@ -577,8 +578,12 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       // lane site-reset: the renderer's OWN request (script / meta refresh / reload / a click's link or form) — measured on
       // 0.38.1: it precedes frameStartedNavigating by ≤ 2 ms; a browser-initiated navigation (the agent's open) has none
       case 'Page.frameRequestedNavigation': { const e = tabOf(w, m); if (e && String(p.frameId || '') === e.targetId) { e.req = { reason: String(p.reason || 'other').slice(0, 40), at: now() }; if (e.activeFill && p.url) { const reqOrigin = BL().originOf(String(p.url)); if (!reqOrigin || (e.activeFill.wantOrigin && reqOrigin !== e.activeFill.wantOrigin)) { e.activeFill.crossNav = reqOrigin || 'an unverified page'; e.activeFill.abort?.(); } } } return; }
-      case 'Page.frameNavigated': { const e = tabOf(w, m); if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId && w.prompts.get(e.targetId)?.type === 'file') dropPrompt(w, w.prompts.get(e.targetId), 'navigated');
+      case 'Page.frameNavigated': { const e = tabOf(w, m); if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId) dropTabFrames(w, e); /* B-5f2e: a new document ⇒ the old one's frames are not said */ if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId && w.prompts.get(e.targetId)?.type === 'file') dropPrompt(w, w.prompts.get(e.targetId), 'navigated');
         if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId && w.prompts.get(e.targetId)?.native && !NATIVE_SHEET_PAGE_RE.test(String(p.frame.url || ''))) settleNative(w, w.prompts.get(e.targetId)); { const hr = e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId ? w.prompts.get(e.targetId) : null; if (hr && hr.type === 'http-auth' && !hr.native && w.authReq.has(hr.id)) dropHeldAuth(w, e, hr); } /* B-b56d (its read, S1): the person's tab committed another page — its held sign-in was abandoned (Chrome dropped that request): dropped, its hook read again, never said as «cancelled»; B-1327: a conversation's tab too (it was held to its bound, its For-you item open, then noted «expired») */ /* lane browser-x-in-window: Chrome's own sheet answered (or cancelled) — the tab committed a real page (MEASURED: the sheet itself stands over a `chrome-error://chromewebdata/` commit) */ if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId) { const navUrl = String(p.frame.url || '') + String(p.frame.urlFragment || ''); /* lane chrome-157 (the real-browser claim, scene 16): Chrome sends the fragment APART (frame.urlFragment) — the address the page shows, and the one check reads, is both */ if (navUrl) e.loginNavUrl = navUrl; e.navTextsStale = true; /* lane chrome-157 (the cure of 2026-11-15, 主开发's GO 18:22Z): the tab's url and title stay the browser's own target info for every reader (a busy verdict, site-reset, a takeover card name the tab as the browser names it); the old document's url and title are only marked STALE for the fence's one check, which reads the navigation's own address until the next target info clears the mark (tabCheckTexts) */ e.navSeq = (e.navSeq || 0) + 1; e.docId = String(p.frame.loaderId || '') || ('nav:' + (++docSeq)); if (e.activeFill) { const navOrigin = BL().originOf(navUrl); if (!navOrigin || (e.activeFill.wantOrigin && navOrigin !== e.activeFill.wantOrigin)) e.activeFill.crossNav = navOrigin || 'an unverified page'; else e.activeFill.contextGone = true; e.activeFill.abort?.(); } if (e.snapshotRefs) e.snapshotExpiredByNav = true; e.snapshotRefs = null; if (e.inflightCredReqs) e.inflightCredReqs.clear(); clearPostLiftOnTab(e, w); endNav(e); hop(w, e, { url: navUrl }); if (e.liveFill) clearLiveFillOnTab(w, e, 'navigated'); } return; }
+      // B-5f2e (line 2): the tab's OWN child frames as its page attaches them — a frame later moved to a process of its own keeps its
+      // id (its `iframe` target's id), so the tab knows it even where Chrome gives the target no parentFrameId; 'swap' = moved, kept
+      case 'Page.frameAttached': { const e = tabOf(w, m); if (e && p.frameId) { if (!e.childFrames) e.childFrames = new Set(); if (e.childFrames.size < 256) e.childFrames.add(String(p.frameId).slice(0, 64)); } return; }
+      case 'Page.frameDetached': { const e = tabOf(w, m); if (e && e.childFrames && p.reason !== 'swap') e.childFrames.delete(String(p.frameId || '')); return; }
       case 'Page.navigatedWithinDocument': case 'Page.frameStoppedLoading': {
         const e = tabOf(w, m);
         if (e && m.method === 'Page.navigatedWithinDocument' && String(p.frameId || '') === e.targetId) {
@@ -4709,6 +4714,41 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     return { ok: true, refilled: anyRefilled };
   }
 
+  // B-5f2e (the coordinator's ruling 2026-11-19 20:18Z, line 2): A FRAME OF ANOTHER SITE — the browser runs it in its own
+  // process, the driver sees nothing in it (measured). Its `iframe` target arrives with the watch's discovered targets (no call
+  // of ours): kept per watch (bounded), dropped at targetDestroyed; read by otherSiteFramesFor at ZERO calls (the snapshot's N2)
+  const FRAME_TARGETS_MAX = 256;
+  function noteFrameTarget(w, info) {
+    const tid = String((info && info.targetId) || '').slice(0, 64);
+    if (!tid) return;
+    if (!w.frameTargets) w.frameTargets = new Map();
+    const m = w.frameTargets;
+    if (!m.has(tid) && m.size >= FRAME_TARGETS_MAX) m.delete(m.keys().next().value);
+    m.set(tid, { url: String(info.url || '').slice(0, 4096), parent: String(info.parentFrameId || '').slice(0, 64) });
+  }
+  /** B-5f2e: the frames of another site on the conversation's tab (the scoped tab a verb ran on) ⇒ `{origins, text}`, else null.
+   *  From the kept targets only — never a CDP call (a snapshot stays at zero calls); a frame is the tab's by its parent chain. */
+  /** B-5f2e: the child frame ids a tab already holds when the watch meets it (Page.enable replays no frameAttached) — from the
+   *  frame tree the enable reads anyway (no call of its own); bounded as frameAttached is */
+  function seedChildFrames(e, tree) {
+    if (!e || !tree || typeof tree !== 'object') return;
+    const walk = (t, d) => { for (const c of Array.isArray(t && t.childFrames) ? t.childFrames : []) { const id = c && c.frame && c.frame.id ? String(c.frame.id).slice(0, 64) : ''; if (!id) continue; if (!e.childFrames) e.childFrames = new Set(); if (e.childFrames.size < 256) e.childFrames.add(id); if (d < 8) walk(c, d + 1); } };
+    walk(tree, 0);
+  }
+  /** B-5f2e: the tab's top document changed ⇒ its kept frames (and the child ids its page attached) belong to the old document */
+  function dropTabFrames(w, e) {
+    if (w.frameTargets && w.frameTargets.size) for (const f of ST.tabFrameTargets(w.frameTargets, e.targetId, e.childFrames || null)) w.frameTargets.delete(f.targetId);
+    e.childFrames = null;
+  }
+  function otherSiteFramesFor(target, { targetId = null } = {}) {
+    const w = watches.get(String((target && target.profileId) || ''));
+    if (!w || w.state !== 'open' || !w.frameTargets || !w.frameTargets.size) return null;
+    const e = pickScopedTabFor(w, target, { targetId });
+    if (!e) return null;
+    const origins = ST.otherSiteFrameOrigins({ tabUrl: e.url, frames: ST.tabFrameTargets(w.frameTargets, e.targetId, e.childFrames || null) });
+    return origins.length ? { origins, text: ST.otherSiteFrameText(origins) } : null;
+  }
+
   async function inspectOopIframes(w, treeFrameIds, visit) {
     if (!w || w.state !== 'open' || !(treeFrameIds instanceof Set) || !treeFrameIds.size || typeof visit !== 'function') return;
     const tgRes = await call(w, 'Target.getTargets', {}, null, 2000);
@@ -5083,7 +5123,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         return {
           ok: false,
           code: 'login_in_frame',
-          error: "the target element is inside a frame — open the frame's own address in a top-level tab or ask the owner in live view",
+          error: "the target element is inside a frame — Vault fill only fills the top page's fields; ask the user to sign in there in the live view",
         };
       }
     }
@@ -5384,7 +5424,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     personWindows, personPromptStateOf, // B-b56d (the owner's ruling B, 2026-11-18): the person's own windows hook a sign-in; what they say beside it
     setPermission, permissionsOf, // lane browser-ui-prompts-r2: every permission decided ahead; the agent's per-origin flip
     answerSurface, surfacesIn, blockingOn, surfaceById, blockOf, kernelFactOf, // lane browser-surfaces: a kernel's surfaces — the answer door, the list, the relay's drop, the owner's card, the readers' block
-    fillVaultField, precheckVaultFill, checkLoginChannelFor, noteSnapshot, liveFillVerdictFor, liveFillOnTarget, fencedTargetsFor, allowVerbInFlight, noteActiveTab, noteActiveTarget, hasScrubSecrets, scrubOutput, scrubText, scrubCdpFrame, loginFenceStats, hasPostLiftGuard, recheckPostLift, recheckPostLiftFor, // lane browser-login r22..r29
+    fillVaultField, precheckVaultFill, checkLoginChannelFor, noteSnapshot, otherSiteFramesFor /* B-5f2e */, liveFillVerdictFor, liveFillOnTarget, fencedTargetsFor, allowVerbInFlight, noteActiveTab, noteActiveTarget, hasScrubSecrets, scrubOutput, scrubText, scrubCdpFrame, loginFenceStats, hasPostLiftGuard, recheckPostLift, recheckPostLiftFor, // lane browser-login r22..r29
     passkeyFactOf, // lane passkey-browse-yourself: ONE passkey fact per live view (his browsing window reads it from its relay)
     shutdown: () => { disposed = true; for (const r of rearms.values()) if (r.t) clearTimeout(r.t); rearms.clear(); shutdown(); try { unsubFenceRefSource?.(); } catch { /* */ } try { unsubProfileDrop?.(); } catch { /* */ } try { unsubLease?.(); } catch { /* */ } try { unsubVaultOpen?.(); } catch { /* */ } try { unsubVaultLock?.(); } catch { /* */ } }, _watches: watches };
 }
