@@ -4648,6 +4648,12 @@ div.cfg-row-held:hover { background: none; }
 /* lane ui-language (the walk's machines-16): the key file is picked by a themed button (the native one spoke the browser's language); the passphrase is a checkbox */
 .mounts-file-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; min-width: 0; }
 .mounts-file-row .mounts-field-hint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* B-2ca0 commit 2: the pasted ssh config block's confirm step — what was understood (field · value · its line), then every line not used */
+.ssh-block-fields { display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 1fr); gap: 2px 10px; margin: 8px 0 4px; font-size: 12px; }
+.ssh-block-fields dt { color: var(--text-dim); }
+.ssh-block-fields dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.ssh-block-fields .ssh-block-from { margin: 0; }
+.ssh-block-unused { margin: 2px 0 6px; padding-left: 18px; font-size: 11px; color: var(--text-dim); overflow-wrap: anywhere; }
 .mounts-check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); cursor: pointer; }
 .mounts-btn:disabled { opacity: 0.45; cursor: default; }
 .mounts-btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }

@@ -70,6 +70,7 @@ const ROWS = [
   ['sidebar-mounts.js', 'mounts-key-field', 'a read-only public key to select and copy (the clipboard refused it; lane ui-needs-a-button)', 1],
   ['sidebar-mounts.js', 'device-pair-cmd', 'a read-only pairing command to copy', 1],
   ['sidebar-mounts.js', '[gdrive]', 'an rclone.conf paste', 1],
+  ['sidebar-mounts.js', 'host-paste-block', 'a pasted ssh config block (host names, key paths) that fills the Add machine form — configuration, not a message (B-2ca0)', 1],
   ['sidebar-mounts.js', '<textarea readonly', 'read-only links / tokens / config to copy', 5],
   ['sidebar-mounts.js', '<textarea name="${k}"', 'a mount form\'s field (configuration)', 1],
   ['sidebar-mounts.js', '<textarea name="token"', 'a held OAuth token\'s replace box — a pasted JSON (lane ui-controls-and-bugs, the write-only law)', 1],

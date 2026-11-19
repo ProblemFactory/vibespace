@@ -457,6 +457,9 @@ const PURE = new Set(['src/utf8-stream.js' /* B-b968: ONE UTF-8 decoder per byte
   // spawn-failure judge and its one wording; imports nothing; the daemon bundles it (it runs where the command runs),
   // exit-reach composes its words, the row / card words in the bundle read its platform labels
   'src/exit-shell.js',
+  // B-2ca0 (commit 2): A PASTED SSH CONFIG BLOCK — the field table, every line not used named, the size bound, the ONE jump-host
+  // verdict (ssh -J builds a command from it); imports nothing — the hub's add / import and the Add machine page share it (bundled)
+  'src/ssh-config-block.js',
   // lane device-act-audit (design q-042 D4): A HUB ACT ON A DEVICE IS NEVER ANONYMOUS — the op layers (read / session / act /
   // code), the `by` spelling, the bounded secret-free summary and THE audit line both ends write; imports only secret-shapes
   // (PURE → PURE); the hub's client, the daemon bundle and the Activity dialog share it

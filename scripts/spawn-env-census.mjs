@@ -322,7 +322,7 @@ export const ROWS = Object.freeze([
   ['src/device-mount.js', "'fusermount'", 'probe', 1, PROBE + ' (unmount — the ladder\'s second rung: fusermount where fusermount3 is not on PATH)'],
   ['src/device-mount.js', "'sh'", 'probe', 1, PROBE + ' (the page-warm reads)'],
   ['src/device-mount.js', "'ls'", 'probe', 1, PROBE + ' (the mount liveness read)'],
-  ['src/hosts.js', "'ssh-keygen'", 'probe', 2, PROBE + " (the hub's own key, once; and a machine key's PUBLIC half derived on a person's read — ui-needs-a-button publicKeyOf)"],
+  ['src/hosts.js', "'ssh-keygen'", 'probe', 3, PROBE + " (the hub's own key, once; and a machine key's PUBLIC half derived on a person's read — ui-needs-a-button publicKeyOf; B-2ca0: keyFileVerdict — a key file the person named, judged usable by BatchMode at the add, public half only)"],
   ['src/hosts.js', "'head'", 'probe', 1, PROBE + " (a machine key's .pub read on a person's press — the key path is the person's, so a 5 s child reads it, never the hub's threadpool: ui-needs-a-button publicKeyOf)"],
   ['src/incident.js', 'cmd', 'probe', 1, PROBE + ' (the incident capture helpers, 8 s)'],
   ['src/installed-apps.js', 'argv[0]', 'default', 1, "listInstalled's default; agentd hands spawnEnv() (daemonEnv), the hub its display env"],

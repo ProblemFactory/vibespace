@@ -25,6 +25,28 @@ const { execFile } = require('child_process');
  *  `this`): an ssh-config entry (`viaConfig`) keeps its own Port when none was typed (null) and its own User when none was given */
 const portArgsOf = (h) => (h && h.viaConfig && h.port == null ? [] : ['-p', String((h && h.port) || 22)]);   // its read 2: a TYPED port (22 too) always wins; only a port left empty is the config's
 const destOf = (h) => (h && h.viaConfig && !h.user ? String(h.host) : `${h.user}@${h.host}`);
+/** B-2ca0 (commit 2): a machine reached THROUGH another host — `jump` (a pasted block's ProxyJump, or the form's field), dialled by
+ *  a hop of OUR ssh (a ProxyCommand, below). A shell command is built from it, so a record's jump is asked again here: one that does
+ *  not read refuses the road by name — never a dial around it, never an option */
+const { jumpVerdict, jumpParts, jumpTargetOk } = require('./ssh-config-block.js');
+// its third read: the hop's command carries the record's address as ssh's %h (an ssh before 9.6 checks no character of it; a tailnet
+// name's %h is the plugin's IP) — a machine behind a jump host has an address of plain host characters (jumpTargetOk, the page's rule
+// too), at the add, at the import and on every road
+const jumpArgsOf = (h) => {
+  if (!h || h.jump == null) return [];
+  const j = jumpVerdict(h.jump);
+  if (!j.ok) throw new Error(`"${h.name || h.host}": its jump host is not one [user@]host[:port] — add the machine again`);
+  if (j.jump && !jumpTargetOk(h.host)) throw new Error(`"${h.name || h.host}": a machine behind a jump host has an address of plain host characters — add the machine again`);
+  if (!j.jump) return [];
+  // its delta read: ssh's own -J hop takes NONE of our -o options (OpenSSH builds it as `ssh -l -p -W … host`) — a bastion never dialled
+  // would ask about its host key on no tty, with no BatchMode and no ConnectTimeout. The hop is OUR ssh, with the same options; each of
+  // its words is plain host characters (jumpVerdict), `[%h]:%p` quoted for the shell ssh runs a ProxyCommand with
+  const p = jumpParts(j.jump);
+  return ['-o', 'ProxyCommand=' + ['ssh', ...SSH_BASE_OPTS, ...(p.user ? ['-l', p.user] : []), ...(p.port ? ['-p', p.port] : []), '-W', "'[%h]:%p'", p.host].join(' ')];
+};
+/** its read: the shared connection's socket — a record reached through a jump host gets its own (an ssh whose %C does not hash the
+ *  jump would let two records to one address, through different jump hosts, ride one connection) */
+const cmNameOf = (h) => (h && (h.jump || (h.sshConfig && h.sshConfig.proxied)) ? `%C-j${crypto.createHash('sha1').update(String(h.jump || 'config:' + h.host)).digest('hex').slice(0, 8)}` : '%C');   // its delta read: an alias its ssh config proxies too
 /** B-2ca0: the add route's verdict over resolveAlias's answer `a` and the form's `body` → { viaConfig, port, user, sshConfig, refuse }.
  *  A CONFIGURED name (an alias, or an entry with its own Port / User) is `viaConfig`; a port left EMPTY is the config's (null) — a
  *  typed one (22 too) is the person's; a blank user is the config's only where the entry names one (else «user required»: ssh would
@@ -35,7 +57,7 @@ function configVerdict(a, body, home = '') {
   if (!user && !(configured && !a.userIsDefault)) return { refuse: 'user required' };
   const idf = a && a.identityFile ? String(a.identityFile).replace(/^~(?=\/)/, home) : null;
   return { viaConfig: configured, user, port: configured && !portIn ? null : (Number(portIn) || 22),
-    ...(configured ? { sshConfig: { host: a.hostname, user: a.user, port: a.port || 22, identityFile: idf } } : {}) };
+    ...(configured ? { sshConfig: { host: a.hostname, user: a.user, port: a.port || 22, identityFile: idf, ...(a.proxied ? { proxied: true } : {}) } } : {}) };   // commit 2: proxied — ssh reaches it through another host (the SFTP road cannot)
 }
 /** B-2ca0: `ssh -G <name>`'s output (one «key value» line each, lower-case keys, the first one wins) → { alias, hostname, user, port } */
 // ssh's DEFAULT identity files: `ssh -G` lists them when an entry names none — then the entry names no key (its read 3)
@@ -45,7 +67,8 @@ function parseSshG(text, name) {
   for (const line of String(text || '').split('\n')) { const m = /^(\S+)\s+(.*)$/.exec(line.trim()); if (!m) continue; if (m[1].toLowerCase() === 'identityfile') ids.push(m[2]); if (!(m[1].toLowerCase() in kv)) kv[m[1].toLowerCase()] = m[2]; }
   const named = ids.every((f) => SSH_DEFAULT_IDS.has(f)) ? null : ids.find((f) => !SSH_DEFAULT_IDS.has(f));
   if (!kv.hostname) return null;
-  return { alias: kv.hostname.toLowerCase() !== String(name).toLowerCase(), hostname: kv.hostname, user: kv.user || null, port: Number(kv.port) || null, identityFile: named || null };
+  const proxied = [kv.proxyjump, kv.proxycommand].some((x) => x && x.toLowerCase() !== 'none');   // commit 2: the entry dials THROUGH another host
+  return { alias: kv.hostname.toLowerCase() !== String(name).toLowerCase(), hostname: kv.hostname, user: kv.user || null, port: Number(kv.port) || null, identityFile: named || null, proxied };
 }
 const { serviceEnv, SSH_ENV_KEEP } = require('./agent-env.js');
 const { claimJsonls, cwdToProjectDir } = require('./session-store');
@@ -646,7 +669,7 @@ class HostManager {
     return true;
   }
 
-  add({ name, user, host, port, keyPath, privateKey, transport, deviceId, dialTokenHash, replaces = null, viaConfig = false, sshConfig = null }) {
+  add({ name, user, host, port, keyPath, privateKey, transport, deviceId, dialTokenHash, replaces = null, viaConfig = false, sshConfig = null, jump = null }) {
     // DIAL host (graduation slice B): a paired dial-out device promoted to a
     // full machine — no ssh fields; every data path rides deviceForDial.
     if (transport === 'dial') {
@@ -662,6 +685,9 @@ class HostManager {
     if (!host) throw new Error('host required');
     if (!user && !viaConfig) throw new Error('user required');   // B-2ca0: an alias of the hub's ssh config may leave its User to the config
     if (String(host).startsWith('-') || String(user || '').startsWith('-')) throw new Error('the address and the user may not start with «-»');   // B-2ca0 (its read): never an ssh option
+    const jv = jumpVerdict(jump);   // B-2ca0 commit 2: ONE jump host, plain host characters (ssh -J builds a command from it)
+    if (!jv.ok) throw Object.assign(new Error(jv.code === 'chain' ? 'one jump host only — a chain of jump hosts is not used' : 'the jump host is not one [user@]host[:port]'), { code: 'jump-' + jv.code });
+    if (jv.jump && !jumpTargetOk(host)) throw Object.assign(new Error('a machine behind a jump host has an address of plain host characters'), { code: 'jump-target-form' });
     const id = 'host-' + crypto.randomBytes(4).toString('hex');
     const hasKeyText = !!(privateKey && String(privateKey).trim());
     const rec = {
@@ -670,11 +696,13 @@ class HostManager {
       user: String(user || ''), host: String(host),
       port: viaConfig && (port == null || port === '') ? null : (Number(port) || 22),   // B-2ca0: null = the ssh config's port
       ...(viaConfig ? { viaConfig: true, ...(sshConfig ? { sshConfig } : {}) } : {}),   // B-2ca0: the address is an ALIAS of the hub's ssh config (the add route asked ssh -G)
+      ...(jv.jump ? { jump: jv.jump } : {}),
       keyPath: null,
       // honest key provenance for the UI (real report: an IMPORTED private key
       // was labeled 'using VibeSpace key'): imported = user pasted/uploaded it;
       // app = the VibeSpace-generated key; default = the system's ssh keys.
-      keySource: hasKeyText ? 'imported' : (keyPath ? 'app' : 'default'),
+      // B-2ca0 commit 2: file = a key file of the hub the person named (a pasted block's IdentityFile) — not VibeSpace's own key
+      keySource: hasKeyText ? 'imported' : (keyPath ? (String(keyPath) === path.join(this._sshDir, 'id_ed25519') ? 'app' : 'file') : 'default'),
       createdAt: Date.now(),
     };
     // Name collision is checked BEFORE any file write — the old order wrote
@@ -781,6 +809,12 @@ class HostManager {
       const rec = { ...h };
       if (rec.sshConfig) delete rec.sshConfig;   // B-2ca0: what ANOTHER hub's ssh config resolved is not this hub's (the SFTP road reads it)
       if (rec.transport !== 'dial' && String(rec.host || '').startsWith('-')) { warnings.push(`${rec.name || h.id}: skipped — its address starts with «-»`); continue; }
+      if (rec.jump != null) {   // B-2ca0 commit 2: a jump host reaches ssh's -J — asked again, as at the add
+        const j = jumpVerdict(rec.jump);
+        if (!j.ok) { warnings.push(`${rec.name || h.id}: skipped — its jump host is not one [user@]host[:port]`); continue; }
+        if (j.jump && !jumpTargetOk(rec.host)) { warnings.push(`${rec.name || h.id}: skipped — behind a jump host, its address is not plain host characters`); continue; }
+        if (j.jump) rec.jump = j.jump; else delete rec.jump;
+      }
       // lane grants-unify: a bundle from before the unify asks each time under `exit.run.ask` — carried to `exit.ask` (the
       // field the reader reads) so an import never runs without asking what used to ask; its lists ride `bundle.grants`
       // (or are mapped from those records) through the exit manager's importLists — never read from here
@@ -825,10 +859,10 @@ class HostManager {
    *  unrelated sessions), and long-lived pipes pin the master forever. */
   sshArgs(h, { tty = false, reverse = null, multiplex = false } = {}) {
     if (h && h.transport === 'dial') throw new Error(`"${h.name}" is a dial-out device — it has no ssh; this operation must ride the device link`);
-    const args = [...SSH_BASE_OPTS, ...portArgsOf(h), ...this._tailnetOpts(h)];
+    const args = [...SSH_BASE_OPTS, ...portArgsOf(h), ...this._tailnetOpts(h), ...jumpArgsOf(h)];
     if (h.keyPath) args.push('-i', h.keyPath, '-o', 'IdentitiesOnly=yes');
     if (multiplex && cmUsable(this)) {
-      args.push('-o', 'ControlMaster=auto', '-o', `ControlPath=${path.join(this._cmDir, '%C')}`, '-o', 'ControlPersist=600');
+      args.push('-o', 'ControlMaster=auto', '-o', `ControlPath=${path.join(this._cmDir, cmNameOf(h))}`, '-o', 'ControlPersist=600');
     }
     if (tty) args.push('-t');
     // Reverse tunnel (remote 127.0.0.1:<rport> → this server): remote agent
@@ -850,10 +884,10 @@ class HostManager {
   /** ssh option STRING for tools that take a transport command (rsync -e):
    *  everything sshArgs adds except the destination. */
   sshCmd(h) {
-    const args = [...SSH_BASE_OPTS, ...portArgsOf(h), ...this._tailnetOpts(h)];
+    const args = [...SSH_BASE_OPTS, ...portArgsOf(h), ...this._tailnetOpts(h), ...jumpArgsOf(h)];
     if (h.keyPath) args.push('-i', h.keyPath, '-o', 'IdentitiesOnly=yes');
     // rsync transports are short-lived per-op — ride the shared master too (unless its folder was refused)
-    if (cmUsable(this)) args.push('-o', 'ControlMaster=auto', '-o', `ControlPath=${path.join(this._cmDir, '%C')}`, '-o', 'ControlPersist=600');
+    if (cmUsable(this)) args.push('-o', 'ControlMaster=auto', '-o', `ControlPath=${path.join(this._cmDir, cmNameOf(h))}`, '-o', 'ControlPersist=600');
     return 'ssh ' + args.map((a) => (/[\s"']/.test(a) ? JSON.stringify(a) : a)).join(' ');
   }
 
@@ -878,7 +912,7 @@ class HostManager {
         // resolves elsewhere, or its port or user is not ssh's default (22, the hub's own user)
         let me = ''; try { me = os.userInfo().username; } catch { }
         const userIsDefault = !g.user || g.user === me;
-        resolve({ ...g, userIsDefault, configured: g.alias || (g.port != null && g.port !== 22) || !userIsDefault });
+        resolve({ ...g, userIsDefault, configured: g.alias || (g.port != null && g.port !== 22) || !userIsDefault || g.proxied });   // commit 2: an entry that dials through another host is configured too
       });
     });
   }
@@ -1688,6 +1722,27 @@ class HostManager {
    *  BOUNDED (reader follow-up #3): the key path is the PERSON's (POST /api/hosts keyPath — it may sit on a hung mount), so every read
    *  is a CHILD with a 5 s bound (`head` for a .pub, `ssh-keygen -y` for the derive) and a timer of our own past it — never a
    *  threadpool read the hub waits on. `timeoutMs` = the bound (a suite shortens it). */
+  /** B-2ca0 (commit 2, its read): a KEY FILE OF THIS SERVER the person named (a pasted block's IdentityFile) — can BatchMode ssh use
+   *  it? ONE bounded `ssh-keygen -y -P '' -f <file>` child (it derives the public half; the private bytes stay in the child): a key
+   *  with a passphrase ⇒ key-file-encrypted (BatchMode never types one: every dial would end in a bare «Permission denied»); a file
+   *  it cannot read, not a private key, or no answer in the bound ⇒ key-file-unusable; a key others can read ⇒ key-file-open (ssh
+   *  refuses such a key too). → { ok: true } | { ok: false, code } */
+  keyFileVerdict(file, { timeoutMs = 5000 } = {}) {
+    return new Promise((resolve) => {
+      let done = false;
+      const end = (v) => { if (done) return; done = true; clearTimeout(tm); resolve(v); };
+      const tm = setTimeout(() => end({ ok: false, code: 'key-file-unusable' }), timeoutMs + 500);   // a child stuck in a mount's read: our own answer
+      try {
+        execFile('ssh-keygen', ['-y', '-P', '', '-f', String(file)], { timeout: timeoutMs, killSignal: 'SIGKILL', maxBuffer: 1 << 16 }, (err, out, errOut) => {
+          if (!err && /^(ssh-|ecdsa-|sk-)/.test(String(out || '').trim())) return end({ ok: true });
+          const f = String(file);   // its reads: ssh-keygen's own words only — never the PATH (it may say anything); only its quoted / leading forms are taken out
+          const why = String(errOut || '').split(`"${f}"`).join('""').split(`'${f}'`).join("''").split(`${f}: `).join(': ');
+          end({ ok: false, code: /UNPROTECTED PRIVATE KEY FILE|are too open/i.test(why) ? 'key-file-open' : /passphrase/i.test(why) ? 'key-file-encrypted' : 'key-file-unusable' });
+        });
+      } catch { end({ ok: false, code: 'key-file-unusable' }); }
+    });
+  }
+
   async publicKeyOf(id, { timeoutMs = 5000 } = {}) {
     const h = this.get(id);
     if (!h || h.transport === 'dial') return { ok: false, code: 'not_ssh' };

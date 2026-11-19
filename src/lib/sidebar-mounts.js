@@ -10,6 +10,7 @@ import { techFold } from './plain-words.js'; // lane ui-plain-words: the mechani
 import { api, oauthLinkRow, mountsDialog, wireOAuthConnect, reauthDialog } from './mounts-dialog.js'; // D1: the ONE dialog component (storage + channel accounts)
 import { revealHeaders, askRevealPassword } from './vault-reveal.js'; // lane vault-contents-window r2: a set-up vault prefills secrets only inside the reveal window of this page
 import { classifyPrivateKey } from '../ssh-key-format.js'; // shared with the server (CJS pulled into the bundle, like task-color-seq.js)
+import { readSshBlock, formOf, confirmRows, jumpVerdict, jumpTargetOk, MAX_CHARS as SSH_BLOCK_MAX, MAX_LINES as SSH_BLOCK_LINES } from '../ssh-config-block.js'; // B-2ca0 commit 2: a pasted ssh config block (PURE, bundled; the hub's add asks the same jump verdict)
 import { dialRowState, pairNameVerdict, pairNameShown, deviceIdOf, commandOsOf } from '../dial-facts.js'; // lane-pairing ③: THE one dial state of a machine row (PURE, bundled); verify-r4 F6: the name rule + its collision verdict
 import { dialAddressPicker, dialStateText, dialHistoryText, dialStateShort, generateConsequenceText } from './dial-address-picker.js'; // lane-pairing ①③: the address choice + the state's words
 import { openExitAccessDialog, exitSummaryText, exitGranted, lastRunText, agentUpgradeText } from './exit-access-dialog.js'; // lane-pairing ⑥: "Who can use it" 
@@ -824,12 +825,20 @@ export function installSidebarMounts(Sidebar) {
     _wireHostPrefill(ctx) {
       ctx.inputs.fromHost?.addEventListener('change', () => {
         const h = (this._hostsData?.hosts || []).find(x => x.id === ctx.inputs.fromHost.value);
+        const err = ctx.body && ctx.body.querySelector('.cfg-err');
+        if (err) err.textContent = '';
         if (!h) return;
+        // B-2ca0 commit 2 (its read): rclone's SFTP dials the address itself — a machine reached through another host is said, not filled in
+        if (h.jump || (h.sshConfig && h.sshConfig.proxied)) {
+          if (err) err.textContent = tr('“{name}” is reached through another host, and SFTP dials the machine directly. Mount its folders from the machine’s own row: read-only, over the device link.', { name: h.name });
+          for (const k of ['sshHost', 'sshUser', 'sshPort', 'keyPath']) if (ctx.inputs[k]) ctx.inputs[k].value = '';   // its delta read: no earlier pick's address left behind
+          return;
+        }
         const c = h.sshConfig || {};   // B-2ca0 (its read 2): rclone's sftp reads no ssh config — an ssh-config entry gives what ssh resolves
         ctx.inputs.sshHost.value = c.host || h.host;
         ctx.inputs.sshUser.value = h.user || c.user || '';
         ctx.inputs.sshPort.value = String(h.port || c.port || 22);
-        if (h.keyPath || c.identityFile) ctx.inputs.keyPath.value = h.keyPath || c.identityFile;
+        ctx.inputs.keyPath.value = h.keyPath || c.identityFile || '';   // B-2ca0 (ALSO CURED, its third read): a machine with no key leaves no earlier pick's key
         if (!ctx.inputs.name.value) ctx.inputs.name.value = h.name.toLowerCase().replace(/[^\w-]+/g, '-') + '-files';
       });
     },
@@ -1227,9 +1236,10 @@ export function installSidebarMounts(Sidebar) {
       } else {
         const keyLabel = h.keySource === 'imported' ? tr('using imported key')
           : h.keySource === 'app' ? tr('using VibeSpace key')
+          : h.keySource === 'file' ? tr('using a key file on this server')   // B-2ca0 commit 2
           : h.keySource === 'default' ? tr('using system ssh keys')
           : (h.keyPath ? tr('using stored key') : ''); // pre-2.153.4 records: provenance unknown
-        sub.textContent = `${h.user ? h.user + '@' : ''}${h.host}${h.port != null ? (h.port !== 22 ? ':' + h.port : '') : (h.sshConfig && h.sshConfig.port && h.sshConfig.port !== 22 ? ':' + h.sshConfig.port : '')}${keyLabel ? ' · ' + keyLabel : ''}`;   // its read 3: a port the ssh config gives is said
+        sub.textContent = `${h.user ? h.user + '@' : ''}${h.host}${h.port != null ? (h.port !== 22 ? ':' + h.port : '') : (h.sshConfig && h.sshConfig.port && h.sshConfig.port !== 22 ? ':' + h.sshConfig.port : '')}${keyLabel ? ' · ' + keyLabel : ''}${h.jump ? ' · ' + tr('through {host}', { host: h.jump }) : (h.sshConfig && h.sshConfig.proxied ? ' · ' + tr('through another host, by its ssh config') : '')}`;   // its read 3: a port the ssh config gives is said; commit 2: the jump host
       }
       row.append(top, sub);
       // lane-pairing ⑥: the exit lists' summary (every machine — a record with no `exit` reads nobody / nobody through
@@ -1446,7 +1456,10 @@ export function installSidebarMounts(Sidebar) {
         { key: 'remotePath', label: tr('Folder on the machine (absolute path)'), placeholder: isDial ? '/Users/me/Documents' : `/home/${h.user || 'me'}`, autocomplete: () => `/api/hosts/${h.id}/dir-complete` },
         { key: 'mountpoint', label: tr('Mount point here (optional)'), placeholder: tr('default: a folder named after the machine and the folder, in vibespace-machines in your home folder'), autocomplete: 'local' },
       ];
-      if (!isDial) fields.push({ key: 'access', label: tr('Access'), type: 'select', options: [['ro', tr('Read-only (device link)')], ['rw', tr('Read-write (SFTP over ssh)')]] });
+      // B-2ca0 commit 2: rclone's SFTP dials the address itself — a machine reached through another host (a jump, a config's proxy) has no read-write road
+      const proxied = !isDial && !!(h.jump || (h.sshConfig && h.sshConfig.proxied));
+      if (!isDial && !proxied) fields.push({ key: 'access', label: tr('Access'), type: 'select', options: [['ro', tr('Read-only (device link)')], ['rw', tr('Read-write (SFTP over ssh)')]] });
+      if (proxied) fields.push({ key: 'accessNote', type: 'note', value: tr('Read-only, over the device link: this machine is reached through another host, and read-write (SFTP) dials the machine directly.') });
       this._mountsDialog(tr('Mount a folder from "{name}" into this VibeSpace', { name: h.name }), fields, tr('Mount'), async (v, { close }) => {
         if (!v.remotePath) throw new Error(tr('Enter the folder path on the machine'));
         if (!isDial && v.access === 'rw') {
@@ -1777,17 +1790,34 @@ export function installSidebarMounts(Sidebar) {
       const again = from && from.id && from.transport !== 'dial' ? from : null;
       // one subject: one machine being added (or added again in place of `again`)
       // not the subject: from — the machine whose words fill the fields; the form is the one Add machine form
-      this._mountsDialog(tr('Add remote machine'), [
+      // B-2ca0 commit 2: «Paste an ssh config block…» — a step beside this form that fills it (the form, as filled, is what is added)
+      const pasteDoor = document.createElement('div');
+      pasteDoor.className = 'mounts-file-row';
+      const pasteBtn = document.createElement('button');
+      pasteBtn.type = 'button'; pasteBtn.className = 'mounts-btn'; pasteBtn.dataset.door = 'ssh-block';
+      pasteBtn.textContent = tr('Paste an ssh config block…');
+      const pasteHint = document.createElement('span');
+      pasteHint.className = 'mounts-field-hint';
+      pasteHint.textContent = tr('Fills this form from a Host entry, as VS Code’s Remote-SSH writes one.');
+      pasteDoor.append(pasteBtn, pasteHint);
+      const formCtx = this._mountsDialog(tr('Add remote machine'), [
         ...(again ? [{ key: 'replaces', type: 'note', value: tr('This replaces “{name}”: it is added again with the key you choose in this form, and the old entry is removed once the new one is saved.', { name: again.name || again.host }) + ' ' + tr('Its exit grants and port forwards go with the old entry — set them again once the machine is added.') }] : []),
+        { key: 'sshBlock', type: 'node', node: pasteDoor },
         { key: 'name', label: tr('Name'), placeholder: 'gpu-01', value: again ? again.name : '', hint: tr('Any label you like — how this machine shows in your lists.') },
         { key: 'user', label: tr('Username on that machine'), placeholder: 'ubuntu', value: again ? again.user : '' },
-        { key: 'host', label: tr('Address'), placeholder: tr('10.0.0.5 or gpu01.example.com'), value: again ? again.host : '', hint: tr('The machine’s IP address or hostname.') },
+        { key: 'host', label: tr('Address'), placeholder: tr('10.0.0.5 or gpu01.example.com'), value: again ? again.host : '', hint: tr('The machine’s IP address or hostname — or a Host name of the hub’s own ssh config.') },   // B-2ca0: an alias is a stated form
         { key: 'port', label: tr('Port'), value: again && again.port != null ? String(again.port) : '', placeholder: '22', hint: tr('Leave empty for 22, or for the port the hub’s ssh config gives that name.') },   // B-2ca0: a port only when typed
-        { key: 'keyChoice', label: tr('How to log in'), type: 'select', options: [
+        { key: 'keyChoice', label: tr('How to log in'), type: 'select', value: again && again.keySource === 'file' ? 'file' : '', options: [
           ['default', tr('The SSH keys already on this server')],
           ['app', hd.key.exists ? tr('VibeSpace’s own key (recommended)') : tr('Create a key for VibeSpace (recommended)')],
           ['paste', tr('Paste or upload my own key…')],
+          ['file', tr('A key file on this server, by its path')],   // B-2ca0 commit 2: a pasted block's IdentityFile
         ], hint: tr('An SSH key lets VibeSpace log in without a password. If unsure, pick the VibeSpace key — we’ll show you a line to add on the other machine.') },
+        // B-2ca0 commit 2: the path is the HUB's (ssh reads the file there; its bytes never reach the page) — the path field checks it on this server
+        { key: 'keyFile', label: tr('Key file on this server'), placeholder: '~/.ssh/id_ed25519', value: again && again.keySource === 'file' ? again.keyPath : '', autocomplete: 'local', pathKind: 'file', when: (v) => v.keyChoice === 'file',
+          hint: tr('A path on the machine VibeSpace runs on, not on the computer you browse from. A key only your own computer holds: pick VibeSpace’s own key instead, and add its line on that machine.') },
+        { key: 'jump', label: tr('Jump host'), placeholder: 'me@bastion:2200', value: again && again.jump ? again.jump : '', advanced: true,
+          hint: tr('Optional — reach this machine through another one first, as ssh -J does: one host, [user@]host[:port].') },
       ], again ? tr('Add and replace') : tr('Add machine'), async (v, { close, err }) => {
        // A sub-dialog (key paste / generated public key) stands BESIDE this one under its own id (lane dialog-yield r2: a form
        // is never replaced — before, it reused this id and removed this dialog); a thrown error after this dialog closed is
@@ -1796,6 +1826,14 @@ export function installSidebarMounts(Sidebar) {
         let keyPath = null;
         let privateKey = null;
         let keyPassphrase = '';
+        // B-2ca0 commit 2: the jump host and a key file of this server, asked before anything is made
+        const jv = jumpVerdict(v.jump);
+        if (!jv.ok) throw new Error(jv.code === 'chain' ? tr('One jump host only — a chain of them is not used yet.') : tr('The jump host reads as [user@]host[:port] — for example me@bastion.example.com.'));
+        if (jv.jump && !jumpTargetOk(v.host)) throw new Error(tr('Behind a jump host, the address is a plain name or IP address: letters, digits, dots, dashes, underscores and colons.'));   // its third read: the hop carries it as ssh's %h
+        if (v.keyChoice === 'file') {
+          if (!v.keyFile) throw new Error(tr('Give the key file’s path on this server, or pick another way to log in.'));
+          keyPath = v.keyFile;
+        }
         if (v.keyChoice === 'paste') {
           const k = await this._askPrivateKey();
           if (!k) throw new Error(tr('Key import cancelled'));
@@ -1838,13 +1876,15 @@ export function installSidebarMounts(Sidebar) {
           try {
             r = await api('/api/hosts', {
               method: 'POST',
-              body: JSON.stringify({ name: v.name, user: v.user, host: v.host, port: v.port, keyPath, privateKey, keyPassphrase: keyPassphrase || undefined, replaces: again ? again.id : undefined }),
+              body: JSON.stringify({ name: v.name, user: v.user, host: v.host, port: v.port, keyPath, privateKey, keyPassphrase: keyPassphrase || undefined, replaces: again ? again.id : undefined, jump: jv.jump || undefined }),
             });
             break;
           } catch (e) {
             // the server names its refusal by code; the words are the page's (lane ui-language, the walk's machines-12)
             if (e.code === 'host-name-taken') throw new Error(tr('A machine named “{name}” already exists — pick another name.', { name: v.name }));
             if (e && e.code === 'host-name-taken') e.door = this._hostRowDoor(v.name, close); // lane ui-needs-a-button (machines-12)
+            // B-2ca0 commit 2 (its read): a key file of this server that BatchMode ssh cannot use, refused by the hub by code
+            if (e && (e.code === 'key-file-encrypted' || e.code === 'key-file-unusable' || e.code === 'key-file-open')) throw new Error(e.code === 'key-file-encrypted' ? tr('That key file is protected by a passphrase, and VibeSpace logs in without typing one. Pick “Paste or upload my own key…” to unlock it once, or use a key without a passphrase.') : e.code === 'key-file-open' ? tr('Other users of this server can read that key file, and ssh refuses such a key. Make it private (chmod 600), then add the machine again.') : tr('This server cannot use that key file: it is not readable here, or it is not a private key.'));
             if (!privateKey || !KEY_ERR_CODES.has(e.code)) throw e;
             const again = await this._askPrivateKey({
               text: privateKey,
@@ -1868,7 +1908,143 @@ export function installSidebarMounts(Sidebar) {
          if (!err.isConnected) { showToast(e.message || tr('Failed'), { type: 'error' }); return; }
          throw e; // dialog still on screen — let it render the error inline
        }
-      }, { id: 'host-add-dialog' });
+      }, { id: 'host-add-dialog', onClose: () => this._endSshBlockStep(formCtx) });   // its read: the paste step lives and ends with ITS form
+      pasteBtn.onclick = () => this._showSshBlockDialog(formCtx);
+    },
+
+    /** B-2ca0 (commit 2): «Paste an ssh config block…» — a step BESIDE Add remote machine (its own id), tied to THAT form (its read:
+     *  a second press raises it as it is; a press from another form ends the old step first; the form's close ends it; «Fill the form»
+     *  into a form that is gone is refused by its words). The PURE readSshBlock reads the block as it is typed; the step shows what it
+     *  understood, field by field with the line each came from, and EVERY line it does not use with why (the other Host blocks of the
+     *  paste too); «Fill the form» puts the block's values in the form — the address, its port and jump host (cleared when the block
+     *  has none), its key file; a User the block does not name keeps what was typed. Nothing is saved here: the form's own «Add
+     *  machine» adds the machine as the form says. */
+    _endSshBlockStep(formCtx = null) {
+      const st = this._sshBlockStep;
+      if (!st || (formCtx && st.formCtx !== formCtx)) return;
+      this._sshBlockStep = null;
+      try { st.ctx.close(); } catch { /* already gone */ }
+    },
+    _showSshBlockDialog(formCtx) {
+      const title = tr('Paste an ssh config block'), fill = tr('Fill the form');
+      const live = (c) => !!c && (typeof c.live !== 'function' || c.live());
+      const was = this._sshBlockStep;
+      if (was && live(was.ctx)) {
+        // one subject: the pasted ssh config block of the one machine being added — the open step is raised as it is
+        if (was.formCtx === formCtx) { this._mountsDialog(title, [], fill, async () => {}, { id: 'host-paste-dialog' }); return; }
+        this._endSshBlockStep();
+      }
+      let read = null;
+      const pick = () => (read && read.ok ? read.hosts[Number(sel.value)] || read.hosts[0] || null : null);
+      const tooBig = () => tr('That is more than one machine’s block — at most {n} characters, {lines} lines. Paste only the Host entry of the machine to add.', { n: SSH_BLOCK_MAX, lines: SSH_BLOCK_LINES });
+      // one subject: the pasted ssh config block of the one machine being added
+      const ctx = this._mountsDialog(title, [], fill, async (_, { close }) => {
+        if (!live(formCtx)) throw new Error(tr('The Add machine form this step fills was closed — nothing was filled. Open Add machine again.'));
+        const h = pick();
+        if (!h) throw new Error(read && !read.ok ? tooBig() : tr('No Host entry for one machine in what is pasted yet.'));
+        const vals = formOf(h);
+        const ins = (formCtx && formCtx.inputs) || {};
+        // its read: a block that names no key file ends an earlier fill's key-file choice (back to the form's first choice); its delta read: a
+        // User an earlier FILL wrote is cleared when this block names none — one the person typed stays
+        if (!vals.keyChoice && ins.keyChoice && ins.keyChoice.value === 'file') vals.keyChoice = 'default';
+        const prev = (formCtx && formCtx._sshFilled) || {};
+        if (!('user' in vals) && prev.user && ins.user && ins.user.value === prev.user) vals.user = '';
+        if (formCtx) formCtx._sshFilled = { ...vals };
+        for (const [k, val] of Object.entries(vals)) if (ins[k]) { ins[k].value = val; ins[k].dispatchEvent(new Event('change', { bubbles: true })); }
+        if (vals.jump && formCtx && formCtx.body) { const adv = formCtx.body.querySelector('details.mounts-advanced'); if (adv) adv.open = true; }
+        if (formCtx && typeof formCtx.applyConds === 'function') formCtx.applyConds();
+        this._sshBlockStep = null;
+        close();
+        showToast(tr('The form is filled from the block — read it, then add the machine.'));
+      }, { id: 'host-paste-dialog' });
+      if (!ctx || !ctx.body || ctx.raised) return;
+      if ([...ctx.body.querySelectorAll('textarea')].some((t) => t.id === 'host-paste-block')) return;   // an open step RAISED as it is (never a second box in it)
+      this._sshBlockStep = { ctx, formCtx };
+      const hint = document.createElement('p');
+      hint.className = 'agents-note';
+      hint.textContent = tr('Paste one Host entry as it stands in an ssh config — the block VS Code’s Remote-SSH writes, for example. It is read here; nothing is written to any ssh config.');
+      const ta = document.createElement('textarea'); ta.dataset.noDictation = '1';   // a config block names hosts and key paths: never a dictation's context
+      ta.id = 'host-paste-block';
+      ta.placeholder = '# ~/.ssh/config\nHost gpu-01\n  HostName 10.0.0.5\n  User ubuntu\n  Port 2222\n  IdentityFile ~/.ssh/id_ed25519';
+      ta.style.cssText = 'min-height:120px;font-size:11px;font-family:monospace';
+      const selRow = document.createElement('label');
+      selRow.className = 'mounts-field-hint';
+      selRow.textContent = tr('Which machine:') + ' ';
+      const sel = document.createElement('select');
+      selRow.appendChild(sel);
+      selRow.hidden = true;
+      const out = document.createElement('div');
+      out.className = 'ssh-block-read';
+      const WHY = {
+        unknown: () => tr('a setting VibeSpace does not read'),
+        match: () => tr('a Match block — its settings apply by a condition'),
+        include: () => tr('an Include — only what is pasted is read'),
+        pattern: () => tr('a Host pattern — it applies to many names, not to one machine'),
+        'more-names': () => tr('the Host line’s other names — its first name names the machine'),
+        repeat: () => tr('said again — ssh takes the first'),
+        'more-keys': () => tr('another key file — one key file is offered'),
+        value: () => tr('a value that does not read: a port outside 1–65535, a value starting with “-”, or more than one word'),
+        token: () => tr('a %-token or an environment variable — ssh expands it, VibeSpace does not'),
+        chain: () => tr('a chain of jump hosts — one jump host only'),
+        'identities-no': () => tr('IdentitiesOnly no — VibeSpace offers only the key it is given'),
+        'before-host': () => tr('before any Host line — in an ssh config it applies to every host'),
+        syntax: () => tr('not a «key value» line'),
+        'bad-host': () => tr('a Host whose name starts with “-” — not a machine to add'),
+        'jump-none': () => tr('ProxyJump none — no jump host'),
+        'identities-alone': () => tr('IdentitiesOnly with no IdentityFile — no key is named, nothing changes'),
+        'jump-key': () => tr('the jump host’s key file — the jump connects with this server’s own ssh keys'),
+        'jump-unread': () => tr('a jump through a Host of this paste whose address cannot be one jump host — no jump is filled'),
+      };
+      const LABEL = { name: () => tr('Name'), host: () => tr('Address'), user: () => tr('Username on that machine'), port: () => tr('Port'),
+        keyFile: () => tr('Key file on this server'), identitiesOnly: () => tr('Only this key'), jump: () => tr('Jump host') };
+      const para = (text, cls) => { const d = document.createElement('div'); d.className = cls || 'mounts-field-hint'; d.textContent = text; return d; };
+      const draw = () => {
+        read = readSshBlock(ta.value);
+        out.replaceChildren();
+        if (!read.ok) { selRow.hidden = true; out.append(para(tooBig(), 'cfg-err')); return; }
+        // the pick is by POSITION (two entries may share a name), shown with its line
+        const opts = read.hosts.map((h, i) => [String(i), tr('{name}, line {n}', { name: h.name, n: h.line })]);
+        if ([...sel.options].map((o) => o.value + '\t' + o.textContent).join('\n') !== opts.map((o) => o.join('\t')).join('\n')) {
+          const was = sel.value;
+          sel.replaceChildren(...opts.map(([v, l]) => { const o = document.createElement('option'); o.value = v; o.textContent = l; return o; }));
+          if (opts.some(([v]) => v === was)) sel.value = was;
+        }
+        selRow.hidden = opts.length < 2;
+        const h = pick();
+        if (h) {
+          const dl = document.createElement('dl');
+          dl.className = 'ssh-block-fields';
+          for (const r of confirmRows(h)) {
+            const dt = document.createElement('dt'); dt.textContent = LABEL[r.field]();
+            const dd = document.createElement('dd');
+            dd.textContent = r.value == null ? tr('not in the block — type it in the form') : r.value === true ? tr('yes — the named key only') : String(r.value);
+            if (r.line) dd.appendChild(para(r.via ? tr('{key}, line {n} — the Host {name} of this paste, line {m}', { key: r.from, n: r.line, name: r.via.name, m: r.via.line }) : tr('{key}, line {n}', { key: r.from, n: r.line }), 'mounts-field-hint ssh-block-from'));
+            dl.append(dt, dd);
+          }
+          out.append(dl);
+          if (h.fields.keyFile) out.append(para(tr('IdentityFile is a path on this server, the machine VibeSpace runs on — the form checks that it is there.')));
+        } else if (ta.value.trim()) out.append(para(tr('No Host entry for one machine in what is pasted yet.')));
+        // every line not used: the picked block's and the lines outside any block, each with why; then the OTHER Host entries of the
+        // paste, by their lines, under their own heading (its delta read: an entry read as the jump host is used, not «not used»)
+        const list = (head, texts) => {
+          if (!texts.length) return;
+          out.append(para(head, 'mounts-field-hint ssh-block-head'));
+          const ul = document.createElement('ul');
+          ul.className = 'ssh-block-unused';
+          for (const t of texts) { const li = document.createElement('li'); li.textContent = t; ul.appendChild(li); }
+          out.append(ul);
+        };
+        const unused = [...(h ? h.notUsed : []), ...read.outside].sort((a, b) => a.line - b.line);
+        list(tr('Lines not used: {n}', { n: unused.length }), unused.map((u) => tr('line {n}: {text} — {why}', { n: u.line, text: u.part ? u.part : u.text, why: WHY[u.why] ? WHY[u.why]() : u.why })));
+        list(tr('Other Host entries of this paste:'), read.hosts.filter((o) => o !== h).map((o) => (h && h.jumpVia && h.jumpVia.line === o.line
+          ? tr('lines {a}–{b}: Host {name} — read as the jump host', { a: o.line, b: o.end, name: o.name })
+          : tr('lines {a}–{b}: Host {name} — another machine of this paste', { a: o.line, b: o.end, name: o.name }))));
+      };
+      ta.addEventListener('input', draw);
+      sel.addEventListener('change', draw);
+      const err = ctx.body.querySelector('.cfg-err');
+      ctx.body.insertBefore(hint, err); ctx.body.insertBefore(ta, err); ctx.body.insertBefore(selRow, err); ctx.body.insertBefore(out, err);
+      ta.focus();
     },
 
 

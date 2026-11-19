@@ -428,7 +428,7 @@ export function renderFields(body, fields) {
     const det = document.createElement('details');
     det.className = 'mounts-advanced';
     const sum = document.createElement('summary');
-    sum.textContent = 'Advanced options';
+    sum.textContent = tr('Advanced options');   // B-2ca0 commit 2 (ALSO CURED): the fold spoke English in every language
     det.append(sum, advBody);
     body.appendChild(det);
   }

@@ -273,6 +273,13 @@ app.post('/api/hosts', async (req, res) => {
     let old = null;
     if (b.replaces) { try { old = hosts.get(String(b.replaces)); } catch { old = null; } }
     if (old && old.transport === 'dial') old = null;
+    // B-2ca0 commit 2 (its read): a KEY FILE OF THIS SERVER the person named must be usable by BatchMode ssh — a passphrase is never
+    // typed at a dial, so a protected key is refused here by code, not stored to fail every connect with a bare «Permission denied»
+    if (b.transport !== 'dial' && b.keyPath && !(b.privateKey && String(b.privateKey).trim()) && String(b.keyPath) !== hosts.keyInfo().path) {
+      b.keyPath = String(b.keyPath).replace(/^~(?=\/)/, require('os').homedir());
+      const kv = await hosts.keyFileVerdict(b.keyPath);
+      if (!kv.ok) throw Object.assign(new Error(kv.code === 'key-file-encrypted' ? 'that key file has a passphrase — ssh in BatchMode never types one' : kv.code === 'key-file-open' ? 'that key file is readable by others — ssh refuses such a key' : 'this server cannot use that key file (not readable here, or not a private key)'), { code: kv.code });
+    }
     // B-2ca0: is the address an ALIAS of this hub's ssh config? Asked here (ssh -G: it connects to nothing), never taken from the body
     delete b.viaConfig;
     delete b.sshConfig;

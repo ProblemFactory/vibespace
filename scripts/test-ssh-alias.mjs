@@ -32,7 +32,7 @@ console.log('① ssh -G\'s lines read');
   const p = HM.parseSshG('user me\nhostname build.example\nport 22\n', 'build.example');
   const dflt = HM.parseSshG('hostname gpu\nidentityfile ~/.ssh/id_rsa\nidentityfile ~/.ssh/id_ed25519\n', 'g'), named = HM.parseSshG('hostname gpu\nidentityfile ~/.ssh/work_key\n', 'g');
   ok(dflt.identityFile === null && named.identityFile === '~/.ssh/work_key', '① its read 3: ssh\'s DEFAULT key list (the entry names none) is no identity file; a key the entry NAMES is kept', { dflt, named });
-  ok(same(a, { alias: true, hostname: '203.0.113.10', user: 'me', port: 2222, identityFile: null }) && p.alias === false && HM.parseSshG('user me\n', 'x') === null && HM.parseSshG('Hostname Box\nconstructor y\n', 'box').alias === false,
+  ok(same(a, { alias: true, hostname: '203.0.113.10', user: 'me', port: 2222, identityFile: null, proxied: false }) && p.alias === false && HM.parseSshG('user me\n', 'x') === null && HM.parseSshG('Hostname Box\nconstructor y\n', 'box').alias === false,
     '① an alias resolves to another hostname (the first «hostname» line wins), a plain address resolves to itself, no hostname is no answer; keys are case-blind', { a, p });
 }
 
@@ -84,7 +84,7 @@ console.log('③ resolveAlias asks ssh -G');
 {
   const bin = path.join(SCR, 'bin'); fs.mkdirSync(bin, { recursive: true });
   const asked = path.join(SCR, 'asked.txt');
-  fs.writeFileSync(path.join(bin, 'ssh'), `#!/bin/sh\necho "$*" >> '${asked}'\n[ "$1" = "-G" ] || exit 9\ncase "$2" in my-vm) printf 'user me\\nhostname 203.0.113.10\\nport 2222\\nidentityfile ~/.ssh/work_key\\n' ;; gpu01.example.com) printf 'user %s\\nhostname gpu01.example.com\\nport 2222\\n' "$(id -un)" ;; *) printf 'user %s\\nhostname %s\\nport 22\\n' "$(id -un)" "$2" ;; esac\n`, { mode: 0o755 });
+  fs.writeFileSync(path.join(bin, 'ssh'), `#!/bin/sh\necho "$*" >> '${asked}'\n[ "$1" = "-G" ] || exit 9\ncase "$2" in my-vm) printf 'user me\\nhostname 203.0.113.10\\nport 2222\\nidentityfile ~/.ssh/work_key\\n' ;; gpu01.example.com) printf 'user %s\\nhostname gpu01.example.com\\nport 2222\\n' "$(id -un)" ;; jump.example.com) printf 'user %s\\nhostname jump.example.com\\nport 22\\nproxyjump me@bastion.example.com\\n' "$(id -un)" ;; *) printf 'user %s\\nhostname %s\\nport 22\\n' "$(id -un)" "$2" ;; esac\n`, { mode: 0o755 });
   const PATH0 = process.env.PATH; process.env.PATH = bin + path.delimiter + PATH0;
   try {
     const hm = world(2);
@@ -93,6 +93,9 @@ console.log('③ resolveAlias asks ssh -G');
     ok(!!a && a.alias === true && a.configured === true && a.port === 2222 && a.identityFile === '~/.ssh/work_key' && !!p && p.alias === false && p.configured === false && p.userIsDefault === true && o === null && sp === null && lines.length === 3 && lines.every((l) => l.startsWith('-G ')),
       '③ resolveAlias asks `ssh -G <name>` (it dials nothing): an alias is one, a plain name is not; a name that is an option (no space in it) or holds a space is never asked', { a, p, lines });
     ok(!!g && g.alias === false && g.configured === true && g.userIsDefault === true, '③ its read: an entry with NO HostName but its own Port (`Host gpu01.example.com` + `Port 2222`) is CONFIGURED — its port is the config\'s', g);
+    const j = await hm.resolveAlias('jump.example.com');   // asked after `lines` was read
+    ok(!!j && j.alias === false && j.proxied === true && j.configured === true && j.userIsDefault === true,
+      '③ commit 2: an entry that dials THROUGH another host (its own ProxyJump; no HostName, port 22, the hub\'s user) is CONFIGURED and proxied — the SFTP road reads it', j);
   } finally { process.env.PATH = PATH0; }
 }
 
