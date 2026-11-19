@@ -11,10 +11,12 @@
 //     is never offered (the listing rank, the fuzzy rank), typed explicitly it resolves; GET /api/home-folders drops it,
 //     so day one's chips start in work/ — RED CONTROL: the census itself holds it (and firstFilesFolder would pick it)
 //   ③ the 500 ms budget: a walk stalled 1.5 s ⇒ the answer comes inside the budget marked `partial`, the walk still lands
-//   ③b B-0f3d: a hung PROBE (a Task Group's folder on a stale mount) never throws the finished listing away — the reply lists what
-//     was typed (not partial) and says `probesLate`; the late probe is not asked again for PROBE_LATE_MS; the field marks no late probe
-//     asked (never «known absent») — RED CONTROLS: the old shape (the probes inside the listing's race), the field without its check
 //     in the cache and the next keystroke has the hits
+//   ③b B-0f3d: a hung PROBE (a Task Group's folder on a stale mount) never throws the finished listing away — the reply lists what
+//     was typed (not partial) and names its late probes in the field's own words; a late probe (and any path under it) is not asked
+//     again for PROBE_LATE_MS; a slow probe that answers after all is unmarked; a probe call that fails is late, never the listing's
+//     end; the field marks no late probe asked, through ONE helper at both sites — RED CONTROLS: the old shape (the probes inside the
+//     listing's race), the field without its filter, a site that marks by itself
 //   ④ the listing cache per folder with mtime invalidation: a second ask < 2 s lists nothing again; later the worker is
 //     asked with `known` and a same mtime answers `same` (no re-read); a new folder (a new mtime) is listed fresh
 //   ⑤ the host rung with a FAKE machine (the real HostManager, its ssh rung stubbed to run the same sh here under a Mac's
@@ -148,28 +150,57 @@ console.log('\n── ③ the 500 ms budget (a stalled walk) ──');
 console.log('\n── ③b a hung PROBE (B-0f3d) ──');
 {
   const DS = require('../src/server/dir-slice.js');
-  // the probe op hangs while `hold` (a stale mount's stat): the slice's own budget, not the probe, decides
-  let hold = true, probeCalls = 0;
-  const mk = (D) => D.create({ home: HOME, repoDir: REPO, call: async (op, p) => { if (op === 'dirSlice' && p.probes && p.probes.length) { probeCalls++; if (hold) await sleep(600); } return (await runOp(op, p)).result; } });
+  // the probe op HANGS for the paths in `hung` (a stale mount's stat), FAILS at once while `failing`, else answers: the slice's own
+  // budget, not the probe, decides
+  const hung = new Set(), seen = []; let failing = false;
+  const mk = (D) => D.create({ home: HOME, repoDir: REPO, call: async (op, p) => {
+    if (op === 'dirSlice' && p.probes && p.probes.length) {
+      seen.push(...p.probes);
+      if (failing) throw new Error('the worker was ended');
+      if (p.probes.some((x) => hung.has(x))) await sleep(600);
+    }
+    return (await runOp(op, p)).result;
+  } });
+  const IR = path.join(HOME, 'work', 'investor-relations');
+  hung.add(IR);
   const ds = mk(DS);
-  const ASK = { text: '~/work/payments', bases: ['~'], probe: ['~/work/investor-relations'], budgetMs: 200 };
+  const ASK = { text: '~/work/payments', bases: ['~'], probe: ['~/work/investor-relations', '~/work/payments'], budgetMs: 200 };
   const a = await ds.slice(ASK);
-  ok('③b a probe hangs (a stale mount): the reply still LISTS what was typed — not partial, ~/work listed — and says its probes were late', a.partial === false && !!a.listing.dirs['~/work'] && a.probesLate === true, { partial: a.partial, probesLate: a.probesLate, dirs: Object.keys(a.listing.dirs).slice(0, 8) });
-  const calls1 = probeCalls;
-  const b = await ds.slice({ ...ASK, text: '~/work/pay' });
-  ok('③b …the next ask (within PROBE_LATE_MS) does not ask the late probe again — a hung mount holds no file worker per keystroke — and says late again', probeCalls === calls1 && b.probesLate === true && b.partial === false, { probeCalls, calls1, partial: b.partial, probesLate: b.probesLate });
+  ok('③b a probe hangs (a stale mount): the reply still LISTS what was typed — not partial, ~/work listed — and names its late probes in the field\'s own words (the text\'s own probe batched with it included)', a.partial === false && !!a.listing.dirs['~/work'] && Array.isArray(a.probesLate) && a.probesLate.includes('~/work/investor-relations') && a.probesLate.includes('~/work/payments'), { partial: a.partial, probesLate: a.probesLate });
+  seen.length = 0;
+  const b = await ds.slice({ ...ASK, text: '~/work/pay', probe: ['~/work/investor-relations', '~/work/investor-relations/测试'] });
+  ok('③b …the next ask skips the late probe AND a path under it (a name row under the hung folder) — no worker held per keystroke — and names both late', !seen.some((x) => x.startsWith(IR)) && b.partial === false && ['~/work/investor-relations', '~/work/investor-relations/测试'].every((x) => (b.probesLate || []).includes(x)), { seen: [...seen], probesLate: b.probesLate });
+  // slow, not hung: a probe that answers after the budget is UNMARKED the moment it answers — the next ask probes it again
+  hung.clear(); hung.add(path.join(HOME, 'work', 'weekly-admin'));
+  const ds2 = mk(DS);
+  const c1 = await ds2.slice({ ...ASK, probe: ['~/work/weekly-admin'] });
+  await sleep(700);   // the slow probe answers (600 ms) after the budget
+  hung.clear(); seen.length = 0;
+  const c2 = await ds2.slice({ ...ASK, probe: ['~/work/weekly-admin'] });
+  ok('③b a SLOW probe (late, then answered): unmarked when it answers — the next ask probes it again and gets it in time', (c1.probesLate || []).includes('~/work/weekly-admin') && seen.includes(path.join(HOME, 'work', 'weekly-admin')) && !c2.probesLate, { c1: c1.probesLate, seen: [...seen], c2: c2.probesLate });
+  // a probe call that FAILS at once (the worker ended under it): late — the listing still answers
+  failing = true;
+  const d1 = await mk(DS).slice({ ...ASK, probe: ['~/work/contracts'] });
+  failing = false;
+  ok('③b a probe call that FAILS at once: the listing still answers (not partial) and the probe is named late — never the reply\'s end', d1.partial === false && !!d1.listing.dirs['~/work'] && (d1.probesLate || []).includes('~/work/contracts'), { partial: d1.partial, probesLate: d1.probesLate, error: d1.error });
   // RED CONTROL: the old shape — the probes inside the listing's race — a hung probe throws the finished listing away
+  hung.clear(); hung.add(IR);
   const M = mutantCopies('dir-complete-probe-old', REPO);
   const OLD = M.load('src/server/dir-slice.js', anchored(read('src/server/dir-slice.js'), '      return { me, listed, idx };\n    })();', "      const pr = probes.length ? (await call('dirSlice', { dirs: [], probes })).probes : [];\n      return { me, listed, idx, pr };\n    })();", 'the old shape: the probes in the listing\'s race'), 'oldprobe');
   const c = await mk(OLD).slice(ASK);
   ok('③b CONTROL: the old shape (the probes inside the listing\'s race) — the hung probe makes the reply partial with NOTHING listed', c.partial === true && !c.listing.dirs['~/work'], { partial: c.partial, dirs: Object.keys(c.listing.dirs) });
-  hold = false;
-  // the field's side: probes the machine answered LATE are never marked asked (knownAbsent would call a healthy folder 新建)
+  hung.clear();
+  // THE FIELD'S SIDE: probes the machine answered late are never marked asked (knownAbsent would call a healthy folder 新建) — the ONE
+  // helper askedOf (PURE src/path-field-model.js) at BOTH sites (the field's ask, the 由名字 chips' probe)
+  const PFM = require('../src/path-field-model.js');
   const PF = read('src/lib/path-field.js');
-  const mergeOf = (src) => { const i = src.indexOf('  function mergeReply(W, h, d, probe) {'), j = src.indexOf('\n  }\n', i); if (i < 0 || j < i) throw new Error('mergeReply moved'); return new Function('mergeListing', 't', `${src.slice(i, j + 4)}\nreturn mergeReply;`)(() => {}, (x) => x); };
-  const askedAfter = (src, late) => { const W = { L: {} }; mergeOf(src)(W, null, { listing: { dirs: {} }, ...(late ? { probesLate: true } : {}) }, new Set(['~/x'])); return !!(W.asked && W.asked.has('~/x')); };
-  ok('③b the field: a reply whose probes were LATE marks none of them asked (never «known absent»); an on-time reply marks them', askedAfter(PF, true) === false && askedAfter(PF, false) === true, { late: askedAfter(PF, true), onTime: askedAfter(PF, false) });
-  ok('③b CONTROL: the field without its check marks the late probes asked (a 新建 chip for a folder that may well be there)', askedAfter(anchored(PF, 'if (!d.probesLate) { W.asked', '{ W.asked', 'the field without its probesLate check'), true) === true);
+  const mergeOf = (src) => { const i = src.indexOf('  function mergeReply(W, h, d, probe) {'), j = src.indexOf('\n  }\n', i); if (i < 0 || j < i) throw new Error('mergeReply moved'); return new Function('mergeListing', 't', 'askedOf', `${src.slice(i, j + 4)}\nreturn mergeReply;`)(() => {}, (x) => x, PFM.askedOf); };
+  const askedAfter = (src, d) => { const W = { L: {} }; mergeOf(src)(W, null, d, ['~/x', '~/y']); return [...((W.asked && W.asked.keys()) || [])].join(); };
+  ok('③b the field: a reply marks asked ONLY the probes it answered in time (~/y), never a late one (~/x); a partial reply marks none', askedAfter(PF, { listing: { dirs: {} }, probesLate: ['~/x'] }) === '~/y' && askedAfter(PF, { listing: { dirs: {} }, partial: true }) === '' && askedAfter(PF, { listing: { dirs: {} } }) === '~/x,~/y', [askedAfter(PF, { listing: { dirs: {} }, probesLate: ['~/x'] })]);
+  ok('③b CONTROL: the field without its filter marks the late probe asked (a 新建 chip for a folder that may well be there)', askedAfter(anchored(PF, 'for (const p of askedOf(probe, d)) W.asked.set(', 'for (const p of probe) W.asked.set(', 'the field without its filter'), { listing: { dirs: {} }, probesLate: ['~/x'] }).split(',').includes('~/x'));
+  const sites = (src) => ({ sets: (src.match(/W\.asked\.set\(/g) || []).length, through: (src.match(/for \(const p of askedOf\(/g) || []).length });
+  const sNow = sites(PF), sBad = sites(anchored(PF, 'for (const p of askedOf(want, d)) W.asked.set(', 'for (const p of want) W.asked.set(', 'the chips\' probe marking by itself'));
+  ok(`③b every site that marks a probe asked goes through askedOf (${sNow.through} of ${sNow.sets}) — CONTROL: the 由名字 chips' probe marking by itself is seen`, sNow.sets >= 2 && sNow.through === sNow.sets && sBad.through === sBad.sets - 1, { sNow, sBad });
 }
 
 console.log('\n── ④ the listing cache per folder, mtime invalidation ──');

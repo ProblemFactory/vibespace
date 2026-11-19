@@ -251,6 +251,15 @@ console.log('\n── ③ the home read · New Session\'s footer ──');
   const kept = load(anchored(SRC, '(d) => { inflight = null; const home', '(d) => { const home', 'the kept failed promise'));
   const c2 = await reread(kept);
   ok('③ CONTROL: the kept failed promise — the second ask never reads the home', c2.b === '' && c2.calls === 1, c2);
+  // B-0f3d: a reply that names the field's OWN text's probe late decided nothing about the text — partial (asked again, bounded), never
+  // «missing» (a folder past the listing's 400 entries is known only by its probe); only probes answered in time are marked asked
+  const L0 = { listing: { dirs: {} } };
+  ok('③ replyKind: a listing whose OWN probe ran late is PARTIAL; another probe late, a listing; partial stays partial; no listing, failed', P.replyKind({ ...L0, probesLate: ['~/zz'] }, '~/zz') === 'partial' && P.replyKind({ ...L0, probesLate: ['~/g'] }, '~/zz') === 'listing' && P.replyKind({ ...L0, partial: true }, '~/zz') === 'partial' && P.replyKind({ error: 'x' }, '~/zz') === 'failed' && P.replyKind(null, '') === 'failed');
+  const ownBlind = load(anchored(SRC, "const own = !!ownProbe && lateOf(d).has(String(ownProbe));", 'const own = false;', 'replyKind blind to its own probe'));
+  ok('③ CONTROL: replyKind blind to the text\'s own probe calls that reply a complete LISTING (the model would then say «missing»)', ownBlind.replyKind({ ...L0, probesLate: ['~/zz'] }, '~/zz') === 'listing');
+  ok('③ askedOf: only the probes SENT and answered in time; none on a partial or failed reply', P.askedOf(['~/a', '~/b'], { ...L0, probesLate: ['~/a'] }).join() === '~/b' && P.askedOf(['~/a'], { ...L0, partial: true }).length === 0 && P.askedOf(['~/a'], null).length === 0);
+  const unfiltered = load(anchored(SRC, 'return (sent || []).map(String).filter((p) => !late.has(p));', 'return (sent || []).map(String);', 'askedOf without the late filter'));
+  ok('③ CONTROL: askedOf without the late filter marks the late probe asked', unfiltered.askedOf(['~/a', '~/b'], { ...L0, probesLate: ['~/a'] }).includes('~/a'));
   const NSM = fs.readFileSync(path.join(REPO, 'src', 'lib', 'new-session-model.js'), 'utf8');
   const refusalOf = (src) => { const a = src.indexOf('export function createRefusal('), b = src.indexOf('\n}\n', a); if (a < 0 || b < a) throw new Error('createRefusal moved'); return new Function(`${src.slice(a, b + 2).replace(/^export /, '')}\nreturn createRefusal;`)(); };
   const said = { status: 'unanswered', text: '这台机器没有回答' };

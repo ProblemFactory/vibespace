@@ -69,6 +69,24 @@ function missingGate({ listed = false, homeKnown = false, asked = false, sought 
   return sought ? 'pending' : 'quiet';
 }
 
+/* B-0f3d: a reply names the probes that ran out of the machine's budget (`probesLate`, the field's own strings). The field's OWN text's
+   probe late ⇒ the reply decided nothing about the text: 'partial' (asked again, bounded) — never «missing» on a listing that could not
+   show it (a folder past the listing's 400 entries is known only by its probe). → 'listing' | 'partial' | 'failed' */
+const lateOf = (d) => new Set(d && Array.isArray(d.probesLate) ? d.probesLate.map(String) : []);
+function replyKind(d, ownProbe = '') {
+  const own = !!ownProbe && lateOf(d).has(String(ownProbe));
+  if (d && d.listing && !d.partial && !own) return 'listing';
+  if (d && (d.partial || (d.listing && own))) return 'partial';
+  return 'failed';
+}
+/* which of the probes SENT a reply may mark ASKED (the field calls an asked-and-not-a-folder path «known absent» — a 新建 chip): only on
+   a complete listing, never a late one */
+function askedOf(sent, d) {
+  if (!(d && d.listing && !d.partial)) return [];
+  const late = lateOf(d);
+  return (sent || []).map(String).filter((p) => !late.has(p));
+}
+
 function init(key = keyOf('', null)) {
   return { key, answer: null, everAsked: false, out: null, soon: null, reask: null, run: { key: null, n: 0 }, owed: null, err: null, errRun: null, open: false, destroyed: false };
 }
@@ -237,4 +255,4 @@ function step(s0, ev = {}) {
   return { state: s, effects: fx };
 }
 
-module.exports = { init, step, view, keyOf, textOf, missingGate, homeReader, PARTIAL_REPLIES, REASK_MS, DEBOUNCE_MS, DEDUPE_MS, REFRESH_AFTER_STOP_MS, HOME_READ_FAILS };
+module.exports = { init, step, view, keyOf, textOf, missingGate, homeReader, replyKind, askedOf, PARTIAL_REPLIES, REASK_MS, DEBOUNCE_MS, DEDUPE_MS, REFRESH_AFTER_STOP_MS, HOME_READ_FAILS };

@@ -21,8 +21,9 @@ const SELF_TTL_MS = 60e3;
 const MAX_LIST = 14;
 const MAX_PROBES = 40;
 /* B-0f3d (lane bl-tests-a, after B-08d5): a PROBE (a recent conversation's folder, a Task Group's folder) that did not answer inside the
-   budget — a stale or hung storage mount — is not asked again for this long: the listing a person typed is never held by it, and a hung
-   mount is not asked (a file worker held up to its deadline) on every keystroke */
+   budget — a stale or hung storage mount — is not asked again for this long, nor any path UNDER it: the listing a person typed is never
+   held by it, and a hung mount is not asked (a file worker held up to its deadline) on every keystroke; a probe that answers late after
+   all is unmarked the moment it answers. The reply names its late probes (`probesLate`, in the field's own words) */
 const PROBE_LATE_MS = 30e3;
 
 function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '..', '..'), dataDir = null, mounts = () => [], now = Date.now } = {}) {
@@ -95,7 +96,10 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
     const baseList = (Array.isArray(bases) ? bases : []).map(String).filter((p) => p && (p.startsWith('/') || p.startsWith('~'))).slice(0, 12);
     const ask = PC.sliceAsk(text, baseList.map((p) => ({ path: PC.toTilde(home, abs(p)) })));
     const toList = [...new Set(ask.list.map(abs))].slice(0, MAX_LIST);
-    const probes = [...new Set((Array.isArray(probe) ? probe : []).map(String).filter((p) => p.startsWith('/') || p.startsWith('~')).map(abs))].slice(0, MAX_PROBES);
+    const probeIn = (Array.isArray(probe) ? probe : []).map(String).filter((p) => p.startsWith('/') || p.startsWith('~'));
+    const sentAs = new Map();   // abs → the strings the field sent for it (a late probe is named back in the field's own words)
+    for (const p of probeIn) { const a = abs(p); if (!sentAs.has(a)) sentAs.set(a, []); sentAs.get(a).push(p); }
+    const probes = [...sentAs.keys()].slice(0, MAX_PROBES);
     const fuzzy = String(q || '').trim();
     const mountRows = [];
     try { for (const m of mounts() || []) if (m && m.path && m.mounted) mountRows.push({ path: m.path, label: m.label || m.source || m.name || '' }); } catch { }
@@ -120,7 +124,8 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
       return { me, listed, idx };
     })();
     const got = await Promise.race([work, deadline]);
-    let me, listed = [], idx = null, pr = [], probesLate = false;
+    let me, listed = [], idx = null, pr = [];
+    const late = new Set();   // abs paths whose probe ran out of the budget (or was skipped as late)
     if (got === 'late') { partial = true; me = selfCache.v || { home, roots: [repoDir, dataRoot] }; work.catch(() => {}); }
     else ({ me, listed, idx } = got);
     // B-0f3d: the PROBES race what is left of the SAME budget on their own — a probe that hangs (a stale mount) never throws the finished
@@ -128,17 +133,24 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
     // reply says `probesLate` (the field marks none of them asked), and a late probe is skipped for PROBE_LATE_MS
     if (got !== 'late' && probes.length) {
       const t1 = now();
-      const ask = probes.filter((p) => !(lateProbes.has(p) && t1 - lateProbes.get(p) < PROBE_LATE_MS));
-      if (ask.length < probes.length) probesLate = true;
+      for (const [q, at] of lateProbes) if (t1 - at >= PROBE_LATE_MS) lateProbes.delete(q);   // bounded: a mark lives PROBE_LATE_MS
+      // a probe AT or UNDER a path marked late is skipped (the name rows under a hung Task Group folder change with every keystroke)
+      const underLate = (p) => { for (const q of lateProbes.keys()) if (p === q || p.startsWith(q.endsWith('/') ? q : q + '/')) return true; return false; };
+      const ask = probes.filter((p) => { if (underLate(p)) { late.add(p); return false; } return true; });
       if (ask.length) {
-        const pw = call('dirSlice', { dirs: [], probes: ask }).then((r) => (r && r.probes) || []);
+        const pw = call('dirSlice', { dirs: [], probes: ask }).then((r) => (r && r.probes) || [], () => null);   // a call that fails is late, never the listing's end
         const pg = await Promise.race([pw, deadline]);
-        if (pg === 'late') { probesLate = true; for (const p of ask) lateProbes.set(p, now()); pw.catch(() => {}); }
-        else { pr = pg; for (const p of ask) lateProbes.delete(p); }
+        if (pg === 'late' || pg === null) {
+          const at = now();
+          for (const p of ask) { late.add(p); lateProbes.set(p, at); }
+          // slow, not hung: the moment it answers, its marks go — the next ask probes it again (never 30 s of a healthy probe called late)
+          if (pg === 'late') pw.then((r) => { if (r) for (const p of ask) if (lateProbes.get(p) === at) lateProbes.delete(p); });
+        } else { pr = pg; for (const p of ask) lateProbes.delete(p); }
       }
     }
+    const probesLate = [...late].flatMap((a) => sentAs.get(a) || [a]);
     const listing = PC.sliceListing({ home, machine: null, dirs: listed, probes: pr, index: idx && idx.dirs ? idx : null, mounts: mountRows, q: fuzzy });
-    return { listing, self: me, took: now() - t0, partial: partial || !!(idx && idx.partial), ...(probesLate ? { probesLate: true } : {}) };
+    return { listing, self: me, took: now() - t0, partial: partial || !!(idx && idx.partial), ...(probesLate.length ? { probesLate } : {}) };
   }
 
   return { slice, self, _caches: { listCache, indexCache } };

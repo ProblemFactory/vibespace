@@ -38,7 +38,7 @@ import { folderChips } from '../day-one.js';
 import { loadHomeFolders, paintFolderChips } from './folder-chips.js';
 // B-08d5 (the coordinator's ruling 2026-11-19 22:19Z): the field's ask-and-answer logic is a PURE MODEL — this file turns what happens into
 // its events and performs its effects; no verdict is decided here
-import { init as pfInit, step as pfStep, view as pfView, keyOf, textOf as keyText, homeReader } from '../path-field-model.js';
+import { init as pfInit, step as pfStep, view as pfView, keyOf, textOf as keyText, homeReader, replyKind, askedOf } from '../path-field-model.js';
 import { rankCandidates, groupOn, mergeListing, missingVerdict, isExcludedPath, toTilde, fromTilde, parentOf, baseName, HOST_ROW, nameChips } from '../path-candidates.js';
 
 const DEBOUNCE_MS = 110;
@@ -359,8 +359,9 @@ export function pathField(input, opts = {}) {
     for (const r of inp.recent.slice(0, 8)) probe.add(r.path);
     if (m.missing) probe.add(m.missing.path);
     const fuzzy = m.mode === 'fuzzy' ? text : '';
-    const qs = `?path=${encodeURIComponent(text)}&bases=${encodeURIComponent(JSON.stringify(inp.bases.map((b) => b.path)))}&probe=${encodeURIComponent(JSON.stringify([...probe].slice(0, 40)))}&q=${encodeURIComponent(fuzzy)}&kind=${kind}`;
-    return { url: (h ? `/api/hosts/${encodeURIComponent(h)}/dir-complete` : '/api/dir-complete') + qs, probe };
+    const sent = [...probe].slice(0, 40);   // the probes SENT (only these may be marked asked)
+    const qs = `?path=${encodeURIComponent(text)}&bases=${encodeURIComponent(JSON.stringify(inp.bases.map((b) => b.path)))}&probe=${encodeURIComponent(JSON.stringify(sent))}&q=${encodeURIComponent(fuzzy)}&kind=${kind}`;
+    return { url: (h ? `/api/hosts/${encodeURIComponent(h)}/dir-complete` : '/api/dir-complete') + qs, probe: sent, own: m.missing ? m.missing.path : '' };
   }
   function mergeReply(W, h, d, probe) {
     if (d && d.listing) {
@@ -368,9 +369,9 @@ export function pathField(input, opts = {}) {
       W.L.machine = h || null;
       if (d.listing.nondirs) Object.assign(W.L.nondirs = W.L.nondirs || {}, d.listing.nondirs);
       if (d.self) W.self = d.self;
-      // B-0f3d: probes that ran out of the machine's budget (a hung mount) are NOT marked asked — never «known absent» (a 新建 chip for a
-      // folder that may well be there); they are asked again later
-      if (!d.probesLate) { W.asked = W.asked || new Map(); for (const p of probe) W.asked.set(p, Date.now()); }
+      // B-0f3d: only the probes SENT and answered in time are marked asked — a late one (a hung mount) is never «known absent» (a 新建
+      // chip for a folder that may well be there); it is asked again later
+      W.asked = W.asked || new Map(); for (const p of askedOf(probe, d)) W.asked.set(p, Date.now());
     }
     W.error = (d && d.error) || (d ? '' : t('the machine did not answer'));
     W.unreachable = (d && d.unreachable) || null;
@@ -380,7 +381,7 @@ export function pathField(input, opts = {}) {
     const text = keyText(key), h = hk(), W = world(h);
     const go = () => {
       if (st.destroyed) return;
-      const { url, probe } = sliceUrl(text, h);
+      const { url, probe, own } = sliceUrl(text, h);
       st.ctl?.abort?.(); st.ctl = new AbortController();
       const my = ++st.seq;
       wrap.dataset.pending = '1';
@@ -388,7 +389,7 @@ export function pathField(input, opts = {}) {
         if (my !== st.seq || st.destroyed) return;
         delete wrap.dataset.pending;
         mergeReply(W, h, d, probe);
-        fire({ type: 'reply', key, kind: d && d.listing && !d.partial ? 'listing' : d && d.partial ? 'partial' : 'failed', err: (d && d.error) || '' });
+        fire({ type: 'reply', key, kind: replyKind(d, own), err: (d && d.error) || '' });   // the model's: the text's own probe late ⇒ partial
       });
     };
     return !h && !LOCAL.home ? localHome().then(go) : go();
@@ -605,7 +606,7 @@ export function pathField(input, opts = {}) {
         mergeListing(W.L, d.listing);
         if (d.listing.nondirs) Object.assign(W.L.nondirs = W.L.nondirs || {}, d.listing.nondirs);
         if (d.self) W.self = d.self;
-        W.asked = W.asked || new Map(); for (const p of want) W.asked.set(p, Date.now());
+        W.asked = W.asked || new Map(); for (const p of askedOf(want, d)) W.asked.set(p, Date.now());   // B-0f3d: never a late probe
         paintChips();
       }).catch(() => { });
       return !h && !LOCAL.home ? localHome().then(go) : go();
