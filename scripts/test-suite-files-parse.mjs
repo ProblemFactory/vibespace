@@ -154,22 +154,36 @@ console.log('\n§3 A RED CONTROL THAT BUILDS NOTHING FAILS BY NAME (B-0d3e) — 
   // file whose count falls is never red (many lanes merge suites into one train) — its stale row is only said. Every
   // mutant copy written through scripts/mutant-copy.mjs fails by name besides when its copy equals the file (all its
   // anchors gone); anchored() fails by name on each one.
-  // THE RATCHET HOLDS BY ITSELF (主开发 2026-11-18 23:33Z — the 2.369.411 block's 166 were counted in once): a count may FALL,
-  // never RISE without a backlog row's id beside it. Every count lives under a row — `rows: { "B-xxxx": { why, files } }` —
-  // and a file's cap is the largest count any row gives it; a plain `files` map (a number with no row id), a row whose id is
-  // no B-xxxx or whose why is empty, and a live count above every row's cap are each RED by name.
-  const ROW_ID = /^B-[0-9a-f]{4}$/;
-  const capsOf = (fx) => {
+  // THE RATCHET HOLDS BY ITSELF (主开发 2026-11-18 23:33Z — the 2.369.411 block's 166 were counted in once; the read of 01:11Z:
+  // a rise inside the founding row was still one number away): a count may FALL, never RISE without a backlog row's id beside
+  // it. Every count lives under a row — `rows: { "B-xxxx": { why, files } }` — and a file's cap is the largest count any row
+  // gives it. THE FOUNDING ROW (B-0d3e, the list the census brought) IS FALL-ONLY: its counts and total are pinned in
+  // scripts/fixtures/census-founding-pins.json, and a founding count above its pin is red — a rise enters only as a NEW row
+  // under the raising unit's own backlog id. RED by name: a plain `files` map (a number with no row id); a row whose id is no
+  // B-xxxx, whose why has fewer than 20 characters, or whose count is not a whole number; the founding row above its pin;
+  // and a live count above every row's cap. (The one escape no suite closes: an invented id of the right shape.)
+  const ROW_ID = /^B-[0-9a-f]{4}$/, WHY_MIN = 20;
+  const PINS = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts', 'fixtures', 'census-founding-pins.json'), 'utf-8'));
+  const capsOf = (fx, pin = null) => {
     const caps = {}, bad = [];
     if (fx && fx.files && Object.keys(fx.files).length) bad.push(`a plain «files» map (${Object.keys(fx.files).length} counts with no row id beside them)`);
     for (const [id, g] of Object.entries((fx && fx.rows) || {})) {
-      if (!ROW_ID.test(id) || !g || typeof g.files !== 'object' || String(g.why || '').trim().length < 20) { bad.push(`row «${id}» (an id B-xxxx, its files and a why of 20+ characters)`); continue; }
-      for (const [f, n] of Object.entries(g.files)) caps[f] = Math.max(caps[f] || 0, Number(n) || 0);
+      if (!ROW_ID.test(id)) { bad.push(`row «${id}»: its id is no backlog id (B-xxxx)`); continue; }
+      if (!g || typeof g.files !== 'object' || g.files === null) { bad.push(`row «${id}»: no «files» map`); continue; }
+      if (String(g.why || '').trim().length < WHY_MIN) { bad.push(`row «${id}»: a why of fewer than ${WHY_MIN} characters`); continue; }
+      const notWhole = Object.entries(g.files).filter(([, n]) => !Number.isInteger(n) || n < 0).map(([f, n]) => `${f}: ${JSON.stringify(n)}`);
+      if (notWhole.length) { bad.push(`row «${id}»: a count that is not a whole number (${notWhole.slice(0, 3).join(', ')})`); continue; }
+      if (pin && id === pin.row) {
+        const over = Object.entries(g.files).filter(([f, n]) => n > ((pin.files || {})[f] || 0)).map(([f, n]) => `${f} ${n} > its pin ${(pin.files || {})[f] || 0}`);
+        const tot = Object.values(g.files).reduce((a, b) => a + b, 0);
+        if (over.length || tot > pin.total) bad.push(`the founding row «${id}» raised above its pin (${over.length ? over.slice(0, 4).join(', ') : `total ${tot} > ${pin.total}`}) — it is fall-only: add a row under YOUR OWN backlog id with its why`);
+      }
+      for (const [f, n] of Object.entries(g.files)) caps[f] = Math.max(caps[f] || 0, n);
     }
     return { caps, bad };
   };
   const UFX = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts', 'fixtures', 'unanchored-controls.json'), 'utf-8'));
-  const { caps: LISTED, bad: UBAD } = capsOf(UFX);
+  const { caps: LISTED, bad: UBAD } = capsOf(UFX, PINS['unanchored-controls']);
   ok(!UBAD.length, `every count of scripts/fixtures/unanchored-controls.json stands under a backlog row's id (${Object.keys(UFX.rows || {}).join(', ')})${UBAD.length ? ` — NO ROW ID: ${UBAD.join(' | ')}` : ''}`);
   const per = Object.fromEntries(Object.entries(EDITS).map(([f, e]) => [f, e.length]));
   const total = Object.values(per).reduce((a, b) => a + b, 0);
@@ -201,18 +215,31 @@ console.log('\n§3 A RED CONTROL THAT BUILDS NOTHING FAILS BY NAME (B-0d3e) — 
   ok(nA === 1 && nB === 0 && nC === 0 && nD === 2, `CONTROL: the walk finds a replace-then-load (1), never an anchored() edit (0) nor a read that feeds no loader (0), and each link of a chain bound once and loaded (2) — ${[nA, nB, nC, nD].join(' / ')}`);
   const jA = judge({ 'test-new.mjs': 1, 'test-old.mjs': 3 }, { 'test-old.mjs': 3 }), jB = judge({ 'test-old.mjs': 1 }, { 'test-old.mjs': 3 });
   ok(jA.added.join() === 'test-new.mjs' && !jB.added.length && jB.fell.join() === 'test-old.mjs', 'CONTROL: a file that ADDS an unanchored edit is red by name; one whose count falls is only said (the one-way rule)');
-  const cA = capsOf({ files: { 'test-a.mjs': 2 } }), cB = capsOf({ rows: { 'X-1': { why: 'a row id that is no backlog id at all', files: { 'test-a.mjs': 2 } } } });
-  const cC = capsOf({ rows: { 'B-0001': { why: '', files: { 'test-a.mjs': 2 } } } });
-  const cD = capsOf({ rows: { 'B-0001': { why: 'the first list of this census, counted in once', files: { 'test-a.mjs': 2 } }, 'B-0002': { why: 'a unit that raised one file under its own row', files: { 'test-a.mjs': 3 } } } });
-  ok(cA.bad.length === 1 && /plain «files»/.test(cA.bad[0]) && cB.bad.length === 1 && cC.bad.length === 1 && !cD.bad.length && cD.caps['test-a.mjs'] === 3
+  const W19 = 'a why of nineteen c'.slice(0, 19), W20 = 'a why of twenty char'.slice(0, 20), row = (why, files) => ({ why, files });
+  const cA = capsOf({ files: { 'test-a.mjs': 2 } }), cB = capsOf({ rows: { 'X-1': row('a row id that is no backlog id at all', { 'test-a.mjs': 2 }) } });
+  const cC = capsOf({ rows: { 'B-0001': row(W19, { 'test-a.mjs': 2 }) } }), cC20 = capsOf({ rows: { 'B-0001': row(W20, { 'test-a.mjs': 2 }) } });
+  const cN = capsOf({ rows: { 'B-0001': row('a count written as a word is no count', { 'test-a.mjs': 'two' }) } });
+  const cD = capsOf({ rows: { 'B-0001': row('the first list of this census, counted in once', { 'test-a.mjs': 2 }), 'B-0002': row('a unit that raised one file under its own row', { 'test-a.mjs': 3 }) } });
+  ok(cA.bad.length === 1 && /plain «files»/.test(cA.bad[0]) && cB.bad.length === 1 && /row «X-1»: its id is no backlog id/.test(cB.bad[0])
+    && cC.bad.length === 1 && /row «B-0001»: a why of fewer than 20 characters/.test(cC.bad[0]) && !cC20.bad.length
+    && cN.bad.length === 1 && /a count that is not a whole number \(test-a\.mjs: "two"\)/.test(cN.bad[0])
+    && !cD.bad.length && cD.caps['test-a.mjs'] === 3
     && judge({ 'test-a.mjs': 4 }, cD.caps).added.join() === 'test-a.mjs' && !judge({ 'test-a.mjs': 3 }, cD.caps).added.length && judge({ 'test-a.mjs': 1 }, cD.caps).fell.join() === 'test-a.mjs',
-    'CONTROL: a count with no row id beside it (a plain «files» map, an id that is no B-xxxx, a row with no why) is RED by name; a file\'s cap is the largest count any row gives it — one over it is a rise (red), at it is held, under it is a fall (said)');
+    'CONTROL: a count with no row id beside it is RED by its words — a plain «files» map, an id that is no B-xxxx, a why of 19 characters (20 holds), a count that is not a whole number; a file\'s cap is the largest count any row gives it — one over it is a rise (red), at it held, under it a fall (said)');
+  const PIN = { row: 'B-0001', total: 2, files: { 'test-a.mjs': 2 } };
+  const fRaised = capsOf({ rows: { 'B-0001': row('the founding list, raised by one in place', { 'test-a.mjs': 3 }) } }, PIN);
+  const fNew = capsOf({ rows: { 'B-0001': row('the founding list as it was pinned', { 'test-a.mjs': 2 }), 'B-0002': row('a unit that raised one file under its own row', { 'test-a.mjs': 3 }) } }, PIN);
+  const fFell = capsOf({ rows: { 'B-0001': row('the founding list after a file fell', { 'test-a.mjs': 1 }) } }, PIN);
+  const fFile = capsOf({ rows: { 'B-0001': row('the founding list given a file it never had', { 'test-a.mjs': 2, 'test-b.mjs': 1 }) } }, PIN);
+  ok(fRaised.bad.length === 1 && /the founding row «B-0001» raised above its pin \(test-a\.mjs 3 > its pin 2\) — it is fall-only: add a row under YOUR OWN backlog id/.test(fRaised.bad[0])
+    && !fNew.bad.length && fNew.caps['test-a.mjs'] === 3 && !fFell.bad.length && fFile.bad.length === 1 && /test-b\.mjs 1 > its pin 0/.test(fFile.bad[0]),
+    'CONTROL: THE FOUNDING ROW IS FALL-ONLY — raised above its pin in place is RED by name (and a file it never had), the same rise as a NEW row under its own id holds, a fall holds');
   // THE ANCHOR HELPERS (the row's «every helper that builds a control from an anchor»): a function whose own parameter is
   // an anchor and whose body reaches a loader FAILS BY NAME — it throws, or it builds through anchored(). The ones that
   // answer null or an unpatched copy instead are listed in scripts/fixtures/anchor-helpers.json, ONE-WAY like the edits:
   // a file that adds one is red by name (a new helper takes scratch.mjs anchored()); a fall is said.
   const HFX = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts', 'fixtures', 'anchor-helpers.json'), 'utf-8'));
-  const { caps: HLISTED, bad: HBAD } = capsOf(HFX);
+  const { caps: HLISTED, bad: HBAD } = capsOf(HFX, PINS['anchor-helpers']);
   ok(!HBAD.length, `every count of scripts/fixtures/anchor-helpers.json stands under a backlog row's id (${Object.keys(HFX.rows || {}).join(', ')})${HBAD.length ? ` — NO ROW ID: ${HBAD.join(' | ')}` : ''}`);
   const hper = Object.fromEntries(Object.entries(HELPERS).map(([f, h]) => [f, h.length]));
   const htotal = Object.values(hper).reduce((a, b) => a + b, 0), hj = judge(hper, HLISTED);
