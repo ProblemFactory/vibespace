@@ -2092,6 +2092,8 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
 .chat-artifact-href { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .chat-artifact-via { flex: none; font-size: 0.9em; padding: 0 6px; border-radius: 8px; background: rgba(127, 127, 127, 0.15); }
 .ports-row.ports-row-flash { outline: 2px solid var(--accent, #6aa0ff); outline-offset: -2px; }
+/* B-ce65: the Remote tab's row a door brought into view («Show in Remote», «Open that machine») — marked a moment */
+.mounts-row.need-focus { outline: 2px solid var(--accent, #6aa0ff); outline-offset: -2px; }
 /* lane artifacts-services: a service a conversation RUNS — a stopped one stays 24 h greyed; ⋯ = copy / new tab / its job */
 .chat-artifact-card[data-state="stopped"], .chat-artifact-row[data-state="stopped"] { opacity: 0.55; }
 .chat-artifact-more { background: none; border: 0; color: inherit; cursor: pointer; padding: 0 6px; font-size: 1.1em; line-height: 1; }

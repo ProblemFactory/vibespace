@@ -566,6 +566,7 @@ export function installSidebarMounts(Sidebar) {
       const isCred = m.kind === 'credential';
       const row = document.createElement('div');
       row.className = 'mounts-row' + (isCred ? ' mounts-row-cred' : '') + (m.parentId ? ' mounts-row-child' : '');
+      row.dataset.mountName = m.name || '';   // B-ce65: a refusal's «Show in Remote» brings THIS row into view
       const dot = m.mounted ? 'ok' : (m.error ? 'err' : 'off');
       const expired = m.expiresAt && Date.now() > m.expiresAt;
       const top = document.createElement('div');
@@ -1724,6 +1725,16 @@ export function installSidebarMounts(Sidebar) {
       const h = (this._hostsData?.hosts || []).find((x) => x && x.name === name);
       if (!h) return null;
       return { label: tr('Open that machine'), kind: 'secondary', door: 'host-row', run: () => { try { close(); } catch { } this._focusHostRow(h.id); } };
+    },
+    /** B-ce65: the mount refusal's door — the row of the mount `name`, else of the machine `name` (a pulled machine folder waits on
+     *  its machine); true once drawn and shown */
+    _focusMountRow(name) {
+      const row = [...document.querySelectorAll('.mounts-row[data-mount-name]')].find((r) => r.dataset.mountName === String(name));
+      if (row) { row.scrollIntoView({ block: 'center' }); row.classList.add('need-focus'); setTimeout(() => row.classList.remove('need-focus'), 2500); return true; }
+      const h = (this._hostsData?.hosts || []).find((x) => x && (x.name || x.host || x.id) === name);   // the hub's machineName: name, else host, else id
+      if (!h || ![...document.querySelectorAll('.mounts-row[data-host-id]')].some((r) => r.dataset.hostId === String(h.id))) return false;
+      this._focusHostRow(h.id);
+      return true;
     },
     _focusHostRow(id) {
       const row = [...document.querySelectorAll('.mounts-row[data-host-id]')].find((r) => r.dataset.hostId === String(id));

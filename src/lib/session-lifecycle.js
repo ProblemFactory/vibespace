@@ -150,11 +150,13 @@ export function installSessionLifecycle(App, ctx = {}) {
     // THE CREATE'S END, ONCE (lane resume-all-paced, L1): `onCreateEnd(how, msg)` — 'created' / 'refused' (the hub's answer), 'error'
     // (an error naming no request), 'lost' (a socket that will not re-send it), 'closed' (its window) — never the 15 s watchdog: a
     // create still in the hub's hands has not ended, and a bulk resume (src/lib/resume-pacer.js) waits for it before the next one
-    let endSaid = false, endHow = null;   // B-ce65: HOW it ended (the moved watchdog is silent only after the hub's answer or a closed window)
+    let endSaid = false, endHow = null, winClosed = false, answered = false;   // B-ce65: HOW it ended, whether its window is closed NOW and whether the hub ANSWERED it (the moved watchdog is silent after the hub's answer or a closed window — read as they stand, whatever ended it first)
     // M1 (主开发's look at L1, 19:11Z): the watchdog releases the join-wait ONLY — the lost-socket watch stays armed after it, because for
     // a harness whose resume is not re-sent on reconnect (resumeResend false) that watch is the ONLY thing that can say «lost»
     const settled = (how = null, msg = null) => {
       if (lostWatch && how !== 'watchdog') { this.ws.offStateChange?.(lostWatch); lostWatch = null; } if (resumeKey && this._resumeWins?.get(resumeKey) === winInfo) this._resumeWins.delete(resumeKey);
+      if (how === 'closed') winClosed = true;   // its read (3): a window closed AFTER an earlier end (lost, an unnamed error) is still closed
+      if (how === 'created' || how === 'refused') answered = true;   // …and a create the hub answered after an unnamed error (another create's) was answered
       if (how && how !== 'watchdog' && !endSaid) { endSaid = true; endHow = how; try { onCreateEnd?.(how, msg); } catch { } }
     };
     this._placeCarried(winInfo, winBounds); // the place the window takes from the one it replaces (box, z, maximize, desktop)
@@ -168,9 +170,10 @@ export function installSessionLifecycle(App, ctx = {}) {
     // used to be blank for all of it, so the only signal was a timeout toast
     // blaming the connection.
     const createHostName = this._hostLabel(hostId);
-    const pending = this._windowPending(winInfo, createHostName
+    const pendingWords0 = createHostName   // B-ce65 (its read, 1): the window line's own words, back after a mount wait
       ? t('Starting the session on {host}… (installing tools / checking the conversation)', { host: createHostName })
-      : (resumeId ? t('Resuming the conversation…') : t('Starting the session…')));
+      : (resumeId ? t('Resuming the conversation…') : t('Starting the session…'));
+    const pending = this._windowPending(winInfo, pendingWords0);
 
     // A NEW session sends model/effort VERBATIM so a STATED "Auto (model
     // default)" (the dialog's first option, value '') survives the wire as a
@@ -256,10 +259,22 @@ export function installSessionLifecycle(App, ctx = {}) {
       this.ws.onStateChange(lostWatch);
     }
     // B-ce65: the hub said it waits (bounded) for this folder's mount to come up (`create-waiting`) — until when, and said once
-    let waitsUntil = 0, waitSaid = false;
+    let waitsUntil = 0, waitSaid = false, watchToast = null;
+    // the moved watchdog's ONE timer, re-scheduled (never stacked): the done frame shortens the deadline, a frame after the watchdog spoke arms it again
+    let movedTimer = null, timeoutTracked = false;   // …and the timeout counted ONCE a create (the re-armed watchdog may speak twice)
     const cancelReq = this.ws.request(createMsg, (msg) => {
+      if (msg.type === 'create-waiting' && msg.reqId === reqId && msg.done) {
+        // its read (1): the hub's wait is over (the mount is back, or its bound) — the line says the window's own words again, and the
+        // create gets the ordinary watchdog's 15 s from now (the start itself still runs)
+        try { pending.set(pendingWords0); } catch { }
+        if (waitsUntil) { waitsUntil = Date.now() + 13000; if (movedTimer) movedWatchdog(); }   // a moved watchdog is re-timed to the new deadline
+        return false;
+      }
       if (msg.type === 'create-waiting' && msg.reqId === reqId) {
-        waitsUntil = Date.now() + (Number(msg.ms) > 0 ? Number(msg.ms) : 45000);   // EVERY frame moves it (a re-sent create waits again)
+        const spoke = !!watchToast;
+        if (watchToast) { try { watchToast.remove(); } catch { } watchToast = null; }   // its read (2): a frame AFTER the watchdog spoke replaces its words
+        waitsUntil = Date.now() + (Number(msg.ms) > 0 ? Math.min(Number(msg.ms), 600000) : 45000);   // EVERY frame moves it (a re-sent create waits again); at most 10 min (a timer past 2^31 ms fires at once)
+        if (spoke || movedTimer) movedWatchdog();   // …and the watchdog watches the new wait: a hub that dies in it is still said (the 15 s timer fires once)
         const words = t('Waiting for {name} to come up before starting — this can take up to {s} s.', { name: msg.waitsFor || msg.cwd || '', s: Math.max(1, Math.round((waitsUntil - Date.now()) / 1000)) });
         try { pending.set(words); } catch { }   // the window's own line says it for the whole wait (a toast is gone in seconds)
         if (!waitSaid) { waitSaid = true; showToast(words, { type: 'info' }); }
@@ -423,6 +438,8 @@ export function installSessionLifecycle(App, ctx = {}) {
         // lane cli-shell-truth: a CLI the person's login shell cannot find is said in a DIALOG (what was asked, where it
         // looked, the two doors) — never a toast alone; the failed-RESUME rescue below stays exactly as it is
         if (msg.code === 'cli-missing') { try { openCliMissingDialog(this, msg); } catch { showToast(text, { type: 'error' }); } }
+        // B-ce65 (its read, 4): a refusal names its DOOR — the sidebar opens on its Remote tab at the row of the mount that is down
+        else if (msg.code === 'mount_down' && msg.waitsFor) showToast(text, { type: 'error', action: { label: t('Show in Remote'), run: () => this._openMountsAt(msg.waitsFor) } });
         else showToast(text, { type: 'error' });
         if (sessionMode === 'chat' && resumeId && !/^sess-\d/.test(resumeId)) {   // B-a5a4 (5): every chat harness (it was claude's alone — viewSession reads any backend)
           rescueViewOnly();
@@ -600,21 +617,24 @@ export function installSessionLifecycle(App, ctx = {}) {
     // the moved watchdog: re-checks the LATEST deadline (a re-sent create's frame moves it again); silent only after the hub's answer
     // or a closed window — a create lost with its socket (or ended by an error naming no request) still gets the watchdog's words
     function movedWatchdog() {
-      setTimeout(() => {
-        if (endSaid && (endHow === 'created' || endHow === 'refused' || endHow === 'closed')) return;
+      clearTimeout(movedTimer);
+      movedTimer = setTimeout(() => {
+        movedTimer = null;
+        if (winClosed || answered) return;
         if (Date.now() < waitsUntil + 2000) { movedWatchdog(); return; }
         watchdogSays();
       }, Math.max(50, waitsUntil + 2000 - Date.now()));
     }
     function watchdogSays() {
         settled('watchdog'); // the watchdog ends the WAIT (r4 N2): a press after it creates again — a late answer still binds in this window
-        try { track('event', 'ws-reply-timeout:create', backend + ':' + sessionMode); } catch { }
+        if (!timeoutTracked) { timeoutTracked = true; try { track('event', 'ws-reply-timeout:create', backend + ':' + sessionMode); } catch { } }
+        try { pending.set(pendingWords0); } catch { }   // B-ce65 (its read, 1): no «Waiting for …» left on the line beside the watchdog's words
         // A slow REMOTE create is not a broken connection — the old wording
         // invited a reload, which abandons the create (fresh creates are not
         // re-sent on reconnect, so the window comes back spec-less).
-        showToast(createHostName
+        watchToast = showToast(createHostName
           ? t('Still starting the session on {host} — this can take a minute on a slow machine. Leave the window open.', { host: createHostName })
-          : t('Creating the session is taking unusually long — it may still be in progress; reloading the tab abandons it'), { type: 'error' });
+          : t('Creating the session is taking unusually long — it may still be in progress; reloading the tab abandons it'), { type: 'error' }) || null;
     }
     // THE WATCHES DIE WITH THEIR WINDOW (r5 N1 — the r4 acceptance: closed before its answer, the window's lostWatch stayed registered
     // until the next reconnect, holding the closed window, and removed itself there mid-notify — the listener after it was skipped):
@@ -885,6 +905,19 @@ export function installSessionLifecycle(App, ctx = {}) {
 
   _closeSidebarOnMobile() {
     if (this.isMobile && this.sidebar.isOpen) this.sidebar.toggle(false); // the class's answer (lane duo-build-1); a regular class's column ignores it
+  },
+
+  /** B-ce65 (its read, 4): the mount refusal's door — the sidebar OPEN on its Remote tab through the one show door (`_railShow`: the
+   *  rail, the classic tab bar, the phone's drawer), then the mount's row (or the machine's, for a pulled machine folder) brought into
+   *  view once the panel has drawn it: asked again every 250 ms, at most 20 s (the panel's own bound for its reads) */
+  _openMountsAt(name) {
+    const sb = this.sidebar;
+    if (!sb || typeof sb._railShow !== 'function') return false;
+    try { sb._tabTouched = true; sb._railShow('mounts'); } catch { return false; }
+    let n = 0;
+    const look = () => { let found = false; try { found = !!sb._focusMountRow?.(name); } catch { } if (!found && ++n < 80) setTimeout(look, 250); };
+    setTimeout(look, 0);
+    return true;
   },
 
   // Transition-state note for a window whose contents only exist once a ws

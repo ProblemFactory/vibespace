@@ -1155,10 +1155,10 @@ console.log('⑫ A FOLDER THAT WAITS IS NOT GONE (B-864f) — a session folder o
     const probe = src.indexOf('missing = await dirMissing();'), ask = src.indexOf('let w = CW.verdict(cwd, { missing });'), rec = src.indexOf('if (missing && data.recreateCwd === true) {');
     const blk = src.slice(ask, rec);
     return probe > 0 && ask > probe && rec > ask && /\n            if \(!data\.hostId\) \{\n              const CW = /.test(src.slice(probe, ask + 40))
-      && /if \(await CW\.whenBack\(cwd\)\) missing = await dirMissing\(\);\n\s*w = CW\.verdict\(cwd, \{ missing \}\);\n\s*if \(w && w\.why === 'mount_starting'\) w = \{ \.\.\.w, why: 'mount_down' \};/.test(blk)
+      && /if \(await CW\.whenBack\(cwd\)\) missing = await dirMissing\(\);\n\s*ws\.send\(JSON\.stringify\(\{ type: 'create-waiting', reqId: data\.reqId, cwd, waitsFor: w\.name, done: true \}\)\);[^\n]*\n\s*w = CW\.verdict\(cwd, \{ missing \}\);\n\s*if \(w && w\.why === 'mount_starting'\) w = \{ \.\.\.w, why: 'mount_down' \};/.test(blk)
       && /code: w\.why, cwd, waitsFor: w\.name/.test(blk) && /break;/.test(blk);
   };
-  ok(asksFirst(wc), 'ws-create: EVERY local cwd is asked (a bare mount point passes test -d), BEFORE the recreate; after the bounded wait a mount still down is refused mount_down; the refusal names the folder and its mount');
+  ok(asksFirst(wc), 'ws-create: EVERY local cwd is asked (a bare mount point passes test -d), BEFORE the recreate; after the bounded wait (and its done frame, B-ce65) a mount still down is refused mount_down; the refusal names the folder and its mount');
   const blk = wc.slice(wc.indexOf('            // A FOLDER THAT WAITS IS NOT GONE'), wc.indexOf('            // Recreate-empty-and-resume (B-7812'));
   const moved = wc.replace(blk, '').replace("            if (missing) {\n              global.__vsEvent?.('spawn-cwd-missing'", blk + "            if (missing) {\n              global.__vsEvent?.('spawn-cwd-missing'");
   ok(blk.length > 200 && moved !== wc && !asksFirst(moved), 'RED control: the ask moved AFTER the recreate (the recreate could make the folder under the waiting mount) ⇒ red');
