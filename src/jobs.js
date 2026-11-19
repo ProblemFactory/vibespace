@@ -443,6 +443,7 @@ class JobManager {
       if (this._unreadT[which]) { clearTimeout(this._unreadT[which]); this._unreadT[which] = null; }
       // cure 2 (主开发 09:20Z, THE LAW): the hold is LIFTED — the note marked done, «nothing was lost», the clean-up resumed — ONLY on a
       // WHOLE read. A file that is GONE, or torn bytes, end the hold with THEIR own true sentence, and the clean-up stays held
+      if (a.state === 'data') { try { this._judgeNotifs(); } catch (e) { this.d.log('[jobs] the waiting notices could not be judged again:', e && e.message); } }   // its read r4 (S1): the records read again judge the waiting notices
       if (a.state === 'data') this._unreadLift(which, was).catch((e) => this.d.log(`[jobs] ${base}: its note could not be lifted:`, e && e.message));
       else this._unreadEnded(which, was, a, pre).catch((e) => this.d.log(`[jobs] ${base}: its end could not be said:`, e && e.message));
       this._unreadTries[which] = 0; this._unreadSaid[which] = false; this._unreadSlow[which] = 0; this._unreadMissingAt[which] = 0;
@@ -624,7 +625,7 @@ class JobManager {
     // torn bytes at boot are HELD, not copied here: the copy aside is a store write, and the boot's main thread takes no new one
     // (test-store-write-census: the debt only shrinks) — the read again, off the loop, copies them aside and lifts (a read-only
     // engine writes nothing: torn bytes are no notices there)
-    if (a.state === 'corrupt') a = this.readOnly ? { state: 'missing' } : { ...SR.afterSetAside(a, null), code: 'torn bytes' };   // its read r3 (N4): said by its cause
+    if (a.state === 'corrupt') a = this.readOnly ? { state: 'missing' } : { ...SR.afterSetAside(a, null), code: a.code };   // its read r3 (N4) / r4 (N3): said by its cause (`did not parse` — its zh / ja words)
     if (a.state === 'unreadable' && this.readOnly) a = { state: 'missing' };   // its read r1 (N4): a read-only engine writes nothing — no hold, no timers
     if (a.state === 'unreadable') return this._notifsHold(a);
     this.releasedAtBoot = [];
@@ -640,7 +641,7 @@ class JobManager {
         // _stashNotif hold them) — the clear ran while the file was held and could not rewrite it
         // its read r2 (M1): at EVERY read — the boot's too: a clear made while the file was held, then a restart, kept the old words (the
         // record's clearedAt is in jobs.json; an archived record is read from the archive at the boot, the one load the sweep does next)
-        for (const n of list) { const j = this.jobs.get(n.jobId) || (n.jobId && !merge && !this.archive && !this.readOnly ? this._archiveAtBoot() : (this.archive || [])).find((r) => r && r.id === n.jobId); if (j && j.clearedAt && !(Number(n.ts) > Math.max(j.clearedAt, j.reclearedAt || 0)) && (n.text !== CLEARED_TEXT || n.jobName !== CLEARED_TEXT)) { n.jobName = CLEARED_TEXT; n.text = CLEARED_TEXT; this._dirty = true; } }   // its read r3 (N6): the rewrite is written by the next tick
+        this._judgeNotifsIn(list, { boot: !merge });   // its read r2 (M1) / r4 (S1): ONE judge — the boot, the merge, a record's read again
         // a hand-over the previous process did not settle (verify r2, the ladder's stash has the same rule): the
         // entries wait again, by name in the log — the shutdown waits for a hand-over in flight, so a stamp here is a
         // process killed mid-post
@@ -655,6 +656,18 @@ class JobManager {
   /** its read r2 (M2): a CLEARED job's notices may still wait in the HELD file — the clear reaches them at the read, by the record's
    *  clearedAt; a record removed meanwhile leaves nothing to judge them by (they came back with the old words): its removal waits */
   _notifsClearedWords(id) { return `${id}'s content was cleared, and notices of it may still wait in job-notifications.json, which cannot be read right now — remove it once that file reads (VibeSpace reads it again every few minutes)`; }
+  /** its read r4 (S1): THE ONE JUDGE of waiting notices by their jobs' clears (clearedAt / reclearedAt against the notice's ts) — at
+   *  the boot, at the merge, and when jobs.json or the archive reads again (a clear made while the notices were held, then a restart
+   *  whose boot found the records held, kept the old words: nothing judged them again). `boot`: the archive may be read here (the
+   *  boot's thread); mid-life only the archive in memory is asked. A rewrite marks the store dirty (written by the next tick). */
+  _judgeNotifsIn(list, { boot = false } = {}) {
+    for (const n of list) {
+      if (!n || !n.jobId) continue;
+      const j = this.jobs.get(n.jobId) || ((boot && !this.archive && !this.readOnly) ? this._archiveAtBoot() : (this.archive || [])).find((r) => r && r.id === n.jobId);
+      if (j && j.clearedAt && !(Number(n.ts) > Math.max(j.clearedAt, j.reclearedAt || 0)) && (n.text !== CLEARED_TEXT || n.jobName !== CLEARED_TEXT)) { n.jobName = CLEARED_TEXT; n.text = CLEARED_TEXT; this._dirty = true; }
+    }
+  }
+  _judgeNotifs() { for (const list of this.pendingNotifs.values()) this._judgeNotifsIn(list || []); }
   /** the boot's archive for the notices' judge (its read r3, N1): a throw is said, never the boot's end */
   _archiveAtBoot() { try { return this._loadArchive() || []; } catch (e) { this.d.log('[jobs] the archive could not be read for the notices\' judge:', e && e.message); return []; } }
   _notifsHold(a) {
@@ -681,9 +694,9 @@ class JobManager {
   async _notifsRetry() {
     if (!this._notifsUnread) return;
     this._notifsRetrySoon();
-    if (this._notifsP) return;
-    // its read r2 (N3): a For-you filing the store refused (full) is asked again at each try, never only once a process
+    // its read r2 (N3) / r4 (N4): a For-you filing the store refused (full) is asked again at each try — a hanging read too
     if (!this._notifsItem) { const v = this._forYou(null, M.forYouCopy(null, 'notifs-unread', { error: this._notifsUnread.code })); if (v && v.id) this._notifsItem = v.id; }
+    if (this._notifsP) return;
     const p = this._notifsP = fs.promises.readFile(this.notifsFile, 'utf-8').then((text) => ({ text }), (error) => ({ error }));
     // its read r2 (N5) / r3 (M1): a read that does not answer within the store's bound is SAID (once) and WAITED FOR — the one slot
     // stays held until it settles (a let-go read keeps its thread of the pool: a new read per try ran it dry), the tries stay armed
@@ -693,13 +706,13 @@ class JobManager {
     const read = await p; clearTimeout(tm);
     if (!this._notifsUnread || this._unreadStopped) { if (this._notifsP === p) this._notifsP = null; return; }
     let a = SR.storeAnswer(read, { valid: NOTIFS_SHAPE });
-    // its read r3 (S1): the notices are judged by their jobs' records (a clear made while held) — while jobs.json or the archive is
-    // held itself, the read waits (the tries stay armed): never merged unjudged
-    if (this._unread.store || this._unread.archive) { if (this._notifsP === p) this._notifsP = null; if (!this._notifsJudgeSaid) { this._notifsJudgeSaid = true; this.d.log('[jobs] job-notifications.json reads again, but the job records that judge its notices are held — it waits for them'); } return; }
     // its read r2 (N2): the one-in-flight slot is held over the copy aside too — a later try never copies the same torn bytes again
     const done = () => { if (this._notifsP === p) this._notifsP = null; };
     if (a.state === 'unreadable') { done(); this._notifsUnread.code = a.code; this._notifsMissingAt = 0; return; }
     if (a.state === 'missing' && !this._notifsMissingAt) { done(); this._notifsMissingAt = now(); return; }
+    // its read r3 (S1) / r4 (N1, after the read's own answer): the notices are judged by their jobs' records (a clear made while held) — while jobs.json or the archive is
+    // held itself, the read waits (the tries stay armed): never merged unjudged
+    if (this._unread.store || this._unread.archive) { done(); if (!this._notifsJudgeSaid) { this._notifsJudgeSaid = true; this.d.log('[jobs] job-notifications.json reads again, but the job records that judge its notices are held — it waits for them'); } return; }
     if (a.state === 'corrupt') {
       const bad = asideOf(this.notifsFile); let to = null;
       if (!this.readOnly) { try { await fs.promises.copyFile(this.notifsFile, bad, fs.constants.COPYFILE_EXCL); to = path.basename(bad); } catch { } }

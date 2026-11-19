@@ -539,7 +539,7 @@ console.log('§5 job-notifications.json (src/jobs.js) — every job notice still
   ok(r.stableWords, 'its read r2 (S1): the item\'s words carry no time — a restart\'s re-filing during the same hold matches the open item by its words (ONE item a hold)');
   ok(r.rmCode === 'notifs-unread' && r.rmKept, 'its read r2 (M2): removing a CLEARED job while the file is held is refused by name — the record that judges its waiting notices stays', { rmCode: r.rmCode, rmKept: r.rmKept });
   const MERGE = '        const mine = merge ? (this.pendingNotifs.get(cid) || []).filter((n) => !list.includes(n)) : [];\n';
-  const CLEAR = "        for (const n of list) { const j = this.jobs.get(n.jobId) || (n.jobId && !merge && !this.archive && !this.readOnly ? this._archiveAtBoot() : (this.archive || [])).find((r) => r && r.id === n.jobId); if (j && j.clearedAt && !(Number(n.ts) > Math.max(j.clearedAt, j.reclearedAt || 0)) && (n.text !== CLEARED_TEXT || n.jobName !== CLEARED_TEXT)) { n.jobName = CLEARED_TEXT; n.text = CLEARED_TEXT; this._dirty = true; } }   // its read r3 (N6): the rewrite is written by the next tick\n";
+  const CLEAR = "        this._judgeNotifsIn(list, { boot: !merge });   // its read r2 (M1) / r4 (S1): ONE judge — the boot, the merge, a record's read again\n";
   ok(JSRC.split(MERGE).length === 2 && JSRC.split(CLEAR).length === 2, 'control setup: the anchors of the controls «the merge» and «the clear at the merge» are in jobs.js');
   const rm = await scene(MJ.load('src/jobs.js', JSRC.replace(MERGE, '        const mine = [];   /* MUTANT: no merge */\n'), 'no-merge'), 'notifs-no-merge');
   ok(rm.old.length === 1, 'CONTROL (no merge, in a copy): the notice filed for conv-old while held is LOST at the read (the file\'s list replaced it)', rm.old);
@@ -573,7 +573,7 @@ console.log('§5 job-notifications.json (src/jobs.js) — every job notice still
   // each); (S1) the read waits while the job records that judge its notices are held; (S2) the hourly gc keeps a CLEARED record
   // while the notices are held (its record judges them)
   {
-    const SLOT = '    const read = await p; clearTimeout(tm);\n', JUDGE = "    if (this._unread.store || this._unread.archive) { if (this._notifsP === p) this._notifsP = null;", GCK = '          if (this._notifsUnread && job.clearedAt) continue;';
+    const SLOT = '    const read = await p; clearTimeout(tm);\n', JUDGE = "    if (this._unread.store || this._unread.archive) { done();", GCK = '          if (this._notifsUnread && job.clearedAt) continue;';
     ok(JSRC.split(SLOT).length === 2 && JSRC.split(JUDGE).length === 2 && JSRC.split(GCK).length === 2, 'control setup: the anchors of the r3 controls are in jobs.js');
     const r3 = async (Mod, name) => {
       const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
@@ -605,9 +605,31 @@ console.log('§5 job-notifications.json (src/jobs.js) — every job notice still
     const g = await r3(require(path.join(ROOT, 'src/jobs.js')), 'notifs-r3');
     ok(g.whileHung === 1 && g.waitedForRecords === true && g.gcKept, 'its read r3: a hung read keeps its one slot (no second read per try — M1), the read waits while the job records are held (S1), the gc keeps a cleared record while the notices are held (S2)', g);
     const gx = await r3(MJ.load('src/jobs.js', JSRC.replace(SLOT, '    this._notifsP = null; const read = await p; clearTimeout(tm);   /* MUTANT: the slot freed at once */\n'), 'r3-slot'), 'notifs-r3-slot');
-    const gj = await r3(MJ.load('src/jobs.js', JSRC.replace(JUDGE, '    if (false) { if (this._notifsP === p) this._notifsP = null;'), 'r3-judge'), 'notifs-r3-judge');
+    const gj = await r3(MJ.load('src/jobs.js', JSRC.replace(JUDGE, '    if (false) { done();'), 'r3-judge'), 'notifs-r3-judge');
     const gg = await r3(MJ.load('src/jobs.js', JSRC.replace(GCK, '          /* MUTANT: gc as before */'), 'r3-gc'), 'notifs-r3-gc');
     ok(gx.whileHung === 2 && gj.waitedForRecords === false && !gg.gcKept, 'CONTROLS (each cure cut alone, in a copy): a second read starts while the first hangs; the notices are merged while their records are held; the gc removes the cleared record', { gx, gj, gg });
+  }
+  // its read r4 (S1): the boot found the JOB RECORDS held (jobs.json unreadable) and read the notices UNJUDGED — when the records read
+  // again, the waiting notice of a job cleared in an earlier process takes the clear (it reached the conversation with its old words)
+  {
+    const RJ = "      if (a.state === 'data') { try { this._judgeNotifs(); } catch (e) { this.d.log('[jobs] the waiting notices could not be judged again:', e && e.message); } }";
+    ok(JSRC.split(RJ).length === 2, 'control setup: the anchor of the control «the records read again judge the notices» is in jobs.js');
+    const recScene = async (Mod, name) => {
+      const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
+      const JF = path.join(d, 'jobs.json'), jbody = JSON.stringify([{ id: 'jb-0n000031', kind: 'task', name: 'deploy prod', state: 'done', clearedAt: 5, owner: {}, access: { view: 'session', control: 'session' }, runs: [] }]);
+      plant(JF, jbody);
+      fs.writeFileSync(path.join(d, 'job-notifications.json'), JSON.stringify({ 'conv-r': [{ ts: 1, jobId: 'jb-0n000031', text: 'done exit=0 secret words (1m)' }] }));
+      const J = new Mod.JobManager({ dataDir: d, broadcast() { }, notifyUser() { return { ok: true }; }, resolveNotice() { }, log: () => { }, logsSweep: { bootDelayMs: 3600e3 } });
+      J.init();
+      const atBoot = (J.pendingNotifs.get('conv-r') || []).map((n) => n.text).join();
+      unplant(JF, jbody);
+      try { await J._unreadRetry('store'); } catch { }
+      const after = (J.pendingNotifs.get('conv-r') || []).map((n) => n.text).join();
+      J.shutdown(); return { storeHeldAtBoot: atBoot.includes('secret words'), after };
+    };
+    const rr = await recScene(require(path.join(ROOT, 'src/jobs.js')), 'notifs-rec-held');
+    const rrx = await recScene(MJ.load('src/jobs.js', JSRC.replace(RJ, '      /* MUTANT: no judge at the records\' read */'), 'no-judge-at-records'), 'notifs-rec-held-mut');
+    ok(asRoot || (rr.storeHeldAtBoot && !rr.after.includes('secret words') && rrx.after.includes('secret words')), 'its read r4 (S1): once the held job records read again, the waiting notice of a cleared job takes the clear\'s words; CONTROL (no judge at the records\' read, in a copy): the old words stay and reach the conversation', { rr, rrx });
   }
   // its read r2 (M1): a clear made while the file was HELD, then a restart — the NEXT boot reads the file whole and judges it by the
   // record's clearedAt (in jobs.json); the release judged only at a read again in the same process
