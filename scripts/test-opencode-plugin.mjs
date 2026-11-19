@@ -130,7 +130,8 @@ console.log('— ③ a REAL keeper driven by the plugin record');
 {
   const dir = mkTmp();
   let spawns = 0;
-  const spawnImpl = (cmd, args, opts) => { spawns++; const c = spawn(cmd, args, opts); strays.add(c.pid); return c; };
+  const spawnArgs = [];
+  const spawnImpl = (cmd, args, opts) => { spawns++; spawnArgs.push(args); const c = spawn(cmd, args, opts); strays.add(c.pid); return c; };
   // the REAL install() wiring shape: autostart reads the plugin through the
   // same function cli-env passes
   let pm = null;
@@ -156,6 +157,12 @@ console.log('— ③ a REAL keeper driven by the plugin record');
   let up = null;
   for (let i = 0; i < 60 && !up; i++) { await sleep(250); if (facts.state().ready) up = facts.state(); }
   ok('…the keeper actually started a serve and adopted it', !!up && up.source === 'spawned' && spawns === 1 && !!up.port, facts.state());
+  // what the first-use dialog promises («only this computer can reach it»), where the service starts: the keeper asks for LOOPBACK
+  // ONLY — one --hostname, 127.0.0.1 (the mock binds loopback whatever it is asked, so the ask is what is pinned). RED CONTROLS: the
+  // same rule over that argv with the host 0.0.0.0, and with no --hostname, fails.
+  const loopbackOnly = (a) => Array.isArray(a) && a.filter((x) => x === '--hostname').length === 1 && a[a.indexOf('--hostname') + 1] === '127.0.0.1';
+  ok('…and it asked the serve to listen on LOOPBACK ONLY (--hostname 127.0.0.1, once)', loopbackOnly(spawnArgs[0]), spawnArgs[0]);
+  ok('RED CONTROL: that rule fails on the argv with the host 0.0.0.0, and with no --hostname', !loopbackOnly((spawnArgs[0] || []).map((x) => (x === '127.0.0.1' ? '0.0.0.0' : x))) && !loopbackOnly((spawnArgs[0] || []).filter((x, i, a) => x !== '--hostname' && a[i - 1] !== '--hostname')));
   const pid1 = facts.state().pid;
   ok('…the record is on disk for the next boot to reuse', fs.existsSync(path.join(dir, 'opencode-serve.json')) && JSON.parse(fs.readFileSync(path.join(dir, 'opencode-serve.json'), 'utf8')).pid === pid1);
   ok('…and discovery now returns the store (the whole point of the service)', (await facts.discover({})).length > 0);
@@ -436,7 +443,14 @@ console.log('— ⑤ the first-use dialog in a real browser');
         return { shown: !!d, count: document.querySelectorAll('#harness-service-dialog').length, text: d ? d.textContent.slice(0, 1200) : '', buttons: d ? [...d.querySelectorAll('button')].map(b => b.textContent) : [] };
       `);
       ok('opening a STOPPED OpenCode conversation shows the first-use dialog (ONE, never a native confirm)', leg1?.shown === true && leg1.count === 1, leg1);
-      ok('…and it says what the service does + how to undo it', /background service/i.test(leg1?.text || '') && /127\.0\.0\.1/.test(leg1?.text || '') && /Plugins/.test(leg1?.text || '') && (leg1?.buttons || []).some((b) => /Not now/.test(b)) && (leg1?.buttons || []).some((b) => /Enable/.test(b)), leg1);
+      // the block's hosted proof (checkpoint 61; stale, the product right): the plain-words chain (pick 3, 6d1135595) took the
+      // address and the command out of the dialog's sentence (src/lib/plugins-ui.js _harnessServiceDialog). THE LAW: the drawn dialog
+      // says in plain words that only this computer can reach the service, that nothing is downloaded (nor opened to the network),
+      // and how to undo it; the loopback bind itself is pinned where the service starts (③). RED CONTROL: the same rule over the
+      // drawn text with the «only this computer» claim taken out fails.
+      const says = (txt) => /background service/i.test(txt) && /only this computer can reach/i.test(txt) && /nothing is downloaded/i.test(txt) && /nothing is opened to the network/i.test(txt) && /disable it in ⚙ → Plugins/.test(txt);
+      ok('…and it says what the service does + how to undo it: only this computer can reach it, nothing is downloaded or opened to the network, and ⚙ → Plugins turns it off (the plain words, as drawn)', says(leg1?.text || '') && (leg1?.buttons || []).some((b) => /Not now/.test(b)) && (leg1?.buttons || []).some((b) => /Enable/.test(b)), leg1);
+      ok('RED CONTROL: that rule fails on the drawn text without its «only this computer can reach» claim', (leg1?.text || '').includes('only this computer can reach') && !says((leg1?.text || '').replace('only this computer can reach', 'anyone can reach')));
 
       // LEG 2: "Not now" is remembered INSTANCE-wide and never asks again.
       const leg2 = await evaluate(`

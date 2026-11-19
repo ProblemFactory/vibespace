@@ -270,7 +270,7 @@ const express = require(path.join(repo, 'node_modules/express'));
 const esbuild = require(path.join(repo, 'node_modules/esbuild'));
 const web0 = path.join(ROOT, 'web'); fs.mkdirSync(web0, { recursive: true });
 await esbuild.build({ stdin: { contents: `import { showNotifyDialog } from ${JSON.stringify(path.join(repo, 'src/lib/channel-filter-editor.js'))};
-window.app = { isMobile: innerWidth < 600, wm: { windows: new Map() }, sidebar: { _webuiSessions: [{ backendSessionId: 'agent-3', name: 'Ledger' }], _tasks: [{ id: 'T-a', title: 'Billing desk' }, { id: 'T-b', title: 'Tech desk' }] }, openPluginsDialog() { window.__plugins = (window.__plugins || 0) + 1; } };
+window.app = { isMobile: innerWidth < 600, wm: { windows: new Map() }, sidebar: { _webuiSessions: [{ backendSessionId: 'agent-3', name: 'Ledger' }], _tasks: [{ id: 'T-a', title: 'Billing desk' }, { id: 'T-b', title: 'Tech desk' }] }, openPluginsDialog() { window.__plugins = (window.__plugins || 0) + 1; }, _settingsUI: { open(o) { (window.__settingsOpened = window.__settingsOpened || []).push(o); } } };
 window.__open = () => showNotifyDialog(window.app, { kind: 'conversation', conv: { adapterId: 'dr', id: 'ops', title: 'Ops room' } });
 window.__open();`, resolveDir: repo, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(web0, 'dlg.js'), loader: { '.css': 'empty' }, logLevel: 'error',
   plugins: [{ name: 'stamp', setup(b) { b.onResolve({ filter: /build-version\.js$/ }, () => ({ path: 'stamp', namespace: 'stamp' })); b.onLoad({ filter: /.*/, namespace: 'stamp' }, () => ({ contents: 'export const BUILD_VERSION = "test";', loader: 'js' })); } }] });
@@ -374,7 +374,7 @@ const ROW = `(() => {
 {
   const INFER = `(() => { const b = document.querySelector('.chan-af-infer'); if (!b) return null; const tick = b.querySelector('.chan-af-infer-tick'); const note = b.querySelector('.chan-af-infer-note');
     const chip = b.querySelector('.chan-road-chip');
-    return { chip: chip && !chip.hidden ? [chip.dataset.road, chip.textContent] : null, on: !!(tick && tick.checked), label: b.querySelector('.chan-af-infer-on')?.textContent || '', note: note && !note.hidden ? note.textContent : null, off: b.querySelector('.chan-dec-off')?.textContent || null, sw: document.documentElement.scrollWidth, vw: document.documentElement.clientWidth }; })()`;
+    return { chip: chip && !chip.hidden ? [chip.dataset.road, chip.textContent] : null, on: !!(tick && tick.checked), label: b.querySelector('.chan-af-infer-on')?.textContent || '', note: note && !note.hidden ? note.textContent : null, words: note && !note.hidden ? (note.querySelector('.need-words')?.textContent || '') : null, door: (() => { const d = note && !note.hidden ? note.querySelector(':scope > .need-doors > button[data-door="settings:channels.replyInferHours"]') : null; return d ? { label: d.textContent, title: d.title } : null; })(), off: b.querySelector('.chan-dec-off')?.textContent || null, sw: document.documentElement.scrollWidth, vw: document.documentElement.clientWidth }; })()`;
   const saveNow = async (pg) => { await pg.ev(`(() => { const b = [...document.querySelectorAll('#chan-notify-dialog button, .chan-notify button')].find((x) => /^Save/.test(x.textContent.trim())); if (b) b.setAttribute('data-test-save', '1'); return !!b; })()`); return pg.press('[data-test-save]'); };
   const n0 = saved.length;
   convRules = [{ kind: 'reply-to-sent' }];
@@ -384,7 +384,17 @@ const ROW = `(() => {
   await pg.press('.chan-af-infer-tick');
   await pg.until(`document.querySelector('.chan-af-infer-tick').checked`, 10);
   const r1 = await pg.ev(INFER);
-  ok(r1.on && /judged once: is it an answer to it\?/.test(r1.note || '') && /Settings › Channels/.test(r1.note || '') && !r1.off, 'F desk: ticked ⇒ the note says what is judged, once, and where the window is set; the plugin on ⇒ no off line', r1);
+  // the block's hosted proof (checkpoint 61; stale, the product right): the ui-needs-a-button chain (pick 5) took the menu path out
+  // of the note's words and put a door on the note's own line (channel-filter-editor.js inferBlock: settingsDoor
+  // 'channels.replyInferHours', «How long after…»; this page's app now carries _settingsUI.open, as the real app does). THE LAW: the
+  // words say what is judged and that it is judged once, with no menu path; the window is reached through that door, and a REAL
+  // press opens Settings at that setting. RED CONTROLS: the same rule over the note without its door, and over the old menu-path words.
+  const legF = (r) => !!r && r.on && /judged once: is it an answer to it\?/.test(r.words || '') && !/Settings ›/.test(r.note || '') && !!r.door && r.door.label === 'How long after…' && !!r.door.title && !r.off;
+  ok(legF(r1), 'F desk: ticked ⇒ the note says what is judged, once — no menu path in its words — and its own line carries the «How long after…» door to the window\'s setting; the plugin on ⇒ no off line', r1);
+  await pg.press('.chan-af-infer-note .need-doors [data-door="settings:channels.replyInferHours"]');
+  const opened = await pg.ev(`(window.__settingsOpened || []).slice(-1)[0] || null`);
+  ok(!!opened && opened.search === 'Judge a plain reply to an agent\'s message for (hours)' && opened.search === r1.door.title, 'F desk: a REAL press on that door opens Settings searched for the setting\'s own label («Judge a plain reply to an agent\'s message for (hours)»)', opened);
+  ok(legF(r1) && !legF({ ...r1, door: null }) && !legF({ ...r1, note: r1.note + ' How long after the agent\'s message: Settings › Channels.' }), 'F desk RED CONTROLS: the rule fails on the note without its door (a page with no Settings door — the hosted red) and on the old words with the menu path');
   ok(!r0.chip && r1.chip && r1.chip[0] === 'live' && r1.chip[1] === 'judged: live', 'lane judged-watch-state: unticked ⇒ no chip; ticked ⇒ «judged: live»', [r0.chip, r1.chip]);
   await pg.shot('infer.png', '.chan-af-list');
   ok(await saveNow(pg) && await pg.until('true', 6) && saved.length === n0 + 1, 'F desk: Save sends the row', saved.length - n0);
