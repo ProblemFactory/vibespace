@@ -2941,11 +2941,13 @@ async function reauthLeg(E, name, { pure = true } = {}) {
     const j = src.indexOf(NOTIFY_WHOLE, i + RJ_CONNECTED.length);
     if (j < 0) return false;
     const between = src.slice(i + RJ_CONNECTED.length, j);
-    return between.length < 600 && !/notify\(|broadcast\(|bcastAll\(/.test(between);
+    return between.length < 600 && !/\bnotify\w*\(|broadcast\w*\(|bcast\w*\(/.test(between);   // every broadcast of the engine (notify, notifyThreads, notifySide, notifyOutbox, broadcast…)
   };
   // CONTROL: the whole digest moved ABOVE the re-judge (the stale verdicts broadcast first) — the pin goes red
   const movedNotify = anchored(esrc, /(    if \(r && r\.ok\) await rejudgeConvCaps\(rec, 'connected'\);\n)([\s\S]{0,600}?)(    if \(!engineCtx\.stopped\) notify\(\[\]\);\n)/, '$3$1$2', 'ckpt61 pin control: the whole digest above the re-judge');
-  ok(orderPin(esrc) && !orderPin(movedNotify), 'PIN (order, not adjacency): the connect path re-judges BEFORE its one whole digest, nothing broadcast between — RED CONTROL: the digest moved above the re-judge fails it', JSON.stringify({ real: orderPin(esrc), moved: orderPin(movedNotify) }));
+  // CONTROL 2: a broadcast planted BETWEEN the re-judge and the digest (the forbidden set itself proven, not only the bound)
+  const bcastBetween = anchored(esrc, RJ_CONNECTED, RJ_CONNECTED + '    notifyThreads(rec.id, null, []);\n', 'ckpt61 pin control: a broadcast between');
+  ok(orderPin(esrc) && !orderPin(movedNotify) && !orderPin(bcastBetween), 'PIN (order, not adjacency): the connect path re-judges BEFORE its one whole digest, nothing broadcast between — RED CONTROLS: the digest moved above the re-judge, and a broadcast planted between them, each fail it', JSON.stringify({ real: orderPin(esrc), moved: orderPin(movedNotify), between: orderPin(bcastBetween) }));
   ok(/await rejudgeConvCaps\(rec, 're-authorized'\);/.test(esrc) && /await rejudgeConvCaps\(rec, 'disconnected'\);/.test(esrc) && /rejudgeConvCaps\(rec, 'boot'\)/.test(esrc), 'PIN: the consent hook, the switched-client rebind, the disconnect and the boot all re-judge BEFORE their one whole digest');
   ok(!/caps\.offers\(c, en(?: && en)?\.convCaps/.test(esrc) && !/convCapsState\(en\.convCaps/.test(esrc), 'PIN: no reader of a cached verdict bypasses `effectiveConvCaps` (views AND send decisions)');
   // THE CONVERSE (verify round, 2026-09-27): a DISCONNECT drops the credential — every conversation of the account flips to
