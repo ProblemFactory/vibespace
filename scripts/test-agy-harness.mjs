@@ -47,7 +47,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratchDir } from './scratch.mjs';
+import { scratchDir, anchored } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -178,6 +178,102 @@ function startWrapper({ env = {}, wrapper = WRAPPER, dir: inDir = null } = {}) {
   h.stop = async () => { try { child.kill('SIGTERM'); } catch { } await sleep(150); };
   return h;
 }
+
+// ⑦c B-bba6 runs as a LANE beside the sections below (as ⑭ does — the suite's time stays its own): its wrappers start here,
+// two batches one after the other; its asserts are printed in order at ⑦c. EVERY PLACEMENT IS AN ORDER THE LEG HOLDS (gate
+// files the stand-in waits on, the wrapper's own log lines waited for) — never a window that load could close.
+const bba6Lane = (async () => {
+  const src = fs.readFileSync(WRAPPER, 'utf8');
+  const mutant = (name, anchor, to) => { const f = path.join(MUTBIN, `agy-wrapper-bba6-${name}.js`); fs.writeFileSync(f, anchored(src, anchor, to, `B-bba6 ${name}`)); return f; };
+  const NO_WAIT = mutant('nowait', '    if (errEnded) { childExited(code, signal); return; }\n    let once = false, t = null;\n', '    { childExited(code, signal); return; }\n    let once = false, t = null;\n');
+  const NO_BOUND = mutant('nobound', '    t = setTimeout(go, ERR_TAIL_MS);\n', '    t = null;\n');
+  const NO_END_FLUSH = mutant('noendflush', "  child.stderr.on('end', () => { errEnded = true; log('agy stderr ended'); flushErr(); });\n", "  child.stderr.on('end', () => { errEnded = true; log('agy stderr ended'); });\n");
+  const NO_LATE = mutant('nolate', '  if (stoppedChild(from)) { lateError(line, from); return; }', '  if (stoppedChild(from)) { return; }');
+  const NO_TURN_GUARD = mutant('noturnguard', '  if (!turnOpenOn.has(old)) lateErrorOf.set(old, servedModel());', '  lateErrorOf.set(old, servedModel());');
+  const LATE_ENDING = mutant('lateending', '    childEnding = mine;\n    if (errEnded) { childExited(code, signal); return; }\n', '    if (errEnded) { childExited(code, signal); return; }\n');
+  const NO_QUIET = mutant('noquiet', '  if (!said || /interrupt|cancel/i.test(said)) return;', '  if (!said) return;');
+  const wlog = (w) => { try { return fs.readFileSync(path.join(w.dir, 'agy-wrapper.log'), 'utf8'); } catch { return ''; } };
+  let seq = 0;
+  const gateFile = (what) => path.join(ROOT, `bba6-${what}-${++seq}`);
+  // (1) one turn whose agy says its last words with no newline and exits 1. end-first: stderr closed, the exit held until the
+  // wrapper LOGGED the pipe's end; held: a grandchild holds the pipe until the leg releases it (after the wrapper ended — or,
+  // for the unbounded control, after it was seen still running)
+  const lastWords = async ({ order = 'end-first', text = 'this will noeol', wrapper = WRAPPER, stillAt = false }) => {
+    const exitGate = gateFile('exit'), release = gateFile('release');
+    const w = startWrapper({ wrapper, env: { AGY_STUB_NOEOL_ORDER: order, AGY_STUB_EXIT_GATE: exitGate, AGY_STUB_HOLDER_RELEASE: release } });
+    try {
+      await w.until(() => w.find('session'), 8000, 'session');
+      w.send({ type: 'chat-input', text, msgId: `ne${seq}` });
+      let endLogged = null, heldAtEnd = null;
+      if (order === 'end-first') {
+        endLogged = await w.until(() => /agy stderr ended/.test(wlog(w)), 8000, 'the wrapper read the pipe\'s end').then(() => true, () => false);   // the stand-in exits only once the leg opens its gate (or the wrapper ends it — a sign-in)
+        fs.writeFileSync(exitGate, '');
+        await w.until(() => w.exited, 8000, 'the wrapper ends').catch(() => null);
+      } else if (stillAt) {
+        await w.until(() => w.stub().some((x) => x.holder), 8000, 'the grandchild holds the pipe');
+        await w.until(() => w.exited, 1500, 'the wrapper ends while held').catch(() => null);
+        heldAtEnd = !!w.exited;
+        fs.writeFileSync(release, '');
+        await w.until(() => w.exited, 8000, 'the wrapper ends once released').catch(() => null);
+      } else {
+        await w.until(() => w.exited, 8000, 'the wrapper ends while the pipe is held').catch(() => null);
+        const hp = (w.stub().find((x) => x.holder) || {}).holder;
+        heldAtEnd = !!w.exited && !!hp && (() => { try { process.kill(hp, 0); return true; } catch { return false; } })();   // the grandchild still alive, holding the pipe
+        fs.writeFileSync(release, '');
+      }
+      const notices = w.all('notice').map((r) => r.noticeKind);
+      return { endLogged, heldAtEnd, exited: w.exited, notices, last: w.find('notice', (r) => r.noticeKind === 'agy-error' && /quota exhausted, said last/.test(r.text)), end: w.find('prompt_end'), cards: w.all('permission_request').length, skipped: w.find('notice', (r) => r.noticeKind === 'soft-deny-ended'), holder: (w.stub().find((x) => x.holder) || {}).holder || null };
+    } finally { fs.writeFileSync(release, ''); fs.writeFileSync(exitGate, ''); await w.stop(); }
+  };
+  // (2) a turn that fails, its RESULT held by a gate until the leg's switch / Stop has been taken in, its AGY_ERROR line (twice)
+  // held by another until the turn's end AND the restart were read
+  const lateErr = async ({ wrapper = WRAPPER, stop = false, short = null }) => {
+    const resultGate = gateFile('result'), errGate = gateFile('err');
+    const w = startWrapper({ wrapper, env: { AGY_STUB_RESULT_GATE: resultGate, AGY_STUB_ERR_GATE: errGate, AGY_STUB_ERR_TWICE: '1', AGY_STUB_EXIT_DELAY_MS: '200', AGY_WEBUI_MODEL: 'claude-sonnet-4-6', ...(short ? { AGY_STUB_ERR_SHORT: short } : {}) } });
+    const starts = () => w.stub().filter((x) => x.argv && x.argv.includes('--input-format')).length;
+    try {
+      await w.until(() => w.find('session'), 8000, 'session');
+      w.send({ type: 'chat-input', text: 'a turn that will faillate', msgId: `le${seq}` });
+      await w.until(() => w.find('prompt_start'), 8000, 'the turn starts');
+      if (stop) { w.send({ type: 'interrupt' }); await w.until(() => w.find('prompt_end'), 8000, 'the Stop ends the turn'); }
+      else { w.send({ type: 'set-model', model: 'gemini-3.8-flash-medium' }); await w.until(() => w.find('notice', (r) => r.noticeKind === 'command_applied'), 8000, 'the switch waits for the turn'); }
+      fs.writeFileSync(resultGate, '');   // now the old process answers its turn
+      const end = await w.until(() => w.find('prompt_end'), 8000, 'the turn ends');
+      await w.until(() => /restart \((model gemini-3\.8-flash-medium|stop)\)/.test(wlog(w)), 8000, 'the restart begins').catch(() => null);
+      const held = { said: w.all('notice', (r) => r.noticeKind === 'agy-error').length > 0, starts: starts(), restarting: /restart \((model gemini-3\.8-flash-medium|stop)\)/.test(wlog(w)) };
+      fs.writeFileSync(errGate, '');   // now the old process writes its line (twice)
+      await w.until(() => (wlog(w).match(/\[stderr\] AGY_ERROR/g) || []).length >= 2, 8000, 'both late lines read').catch(() => null);
+      await w.until(() => starts() >= 2, 8000, 'the next process').catch(() => null);
+      const next = w.stub().filter((x) => x.argv && x.argv.includes('--input-format'))[1] || null;
+      return { end, held, read: (wlog(w).match(/\[stderr\] AGY_ERROR/g) || []).length, said: w.all('notice', (r) => r.noticeKind === 'agy-error'), next: next && next.argv.join(' '), endAt: w.records.indexOf(end), saidAt: w.records.findIndex((r) => r.type === 'acp' && r.kind === 'notice' && r.noticeKind === 'agy-error') };
+    } finally { fs.writeFileSync(resultGate, ''); fs.writeFileSync(errGate, ''); await w.stop(); }
+  };
+  const [ef, held, signin, skipped, cNoEnd, cNoWait, cNoBound] = await Promise.all([
+    lastWords({}), lastWords({ order: 'held' }), lastWords({ text: 'this will noeol signin' }), lastWords({ text: 'this will noeol skipped' }),
+    lastWords({ wrapper: NO_END_FLUSH }), lastWords({ order: 'held', wrapper: NO_WAIT }), lastWords({ order: 'held', wrapper: NO_BOUND, stillAt: true })]);
+  // the grandchildren end once released (each leg releases its own); one still alive now is ended — its pid from the stub log, its command line checked first
+  for (const pid of [held.holder, cNoWait.holder, cNoBound.holder]) { try { if (pid && fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes('setInterval')) process.kill(pid, 'SIGKILL'); } catch { } }
+  // (3) a CRASH mid-turn while a model switch waits for the turn's end: the turn ends error, the wrapper ends — and starts no second agy
+  // (counted by the wrapper's own synchronous «spawned … --input-format» log lines, written before its exit)
+  const crash = async (wrapper = WRAPPER) => {
+    const resultGate = gateFile('crash');
+    const w = startWrapper({ wrapper, env: { AGY_STUB_RESULT_GATE: resultGate } });
+    try {
+      await w.until(() => w.find('session'), 8000, 'session');
+      w.send({ type: 'chat-input', text: 'a turn that will crash', msgId: `cr${seq}` });
+      await w.until(() => w.find('prompt_start'), 8000, 'the turn starts');
+      w.send({ type: 'set-model', model: 'gemini-3.8-flash-medium' });
+      await w.until(() => w.find('notice', (r) => r.noticeKind === 'command_applied'), 8000, 'the switch waits for the turn');
+      fs.writeFileSync(resultGate, '');
+      await w.until(() => w.exited, 8000, 'the wrapper ends').catch(() => null);
+      return { exited: w.exited, end: w.find('prompt_end'), spawned: (wlog(w).match(/spawned [^\n]*--input-format/g) || []).length };
+    } finally { fs.writeFileSync(resultGate, ''); await w.stop(); }
+  };
+  const [cr, cLate] = await Promise.all([crash(), crash(LATE_ENDING)]);
+  const [sw, st, quiet, cNoLate, cNoGuard, cNoQuiet] = await Promise.all([lateErr({}), lateErr({ stop: true }), lateErr({ short: 'interrupted' }), lateErr({ wrapper: NO_LATE }), lateErr({ wrapper: NO_TURN_GUARD, stop: true }), lateErr({ wrapper: NO_QUIET, short: 'interrupted' })]);
+  return { ef, held, signin, skipped, cNoEnd, cNoWait, cNoBound, sw, st, quiet, cNoLate, cNoGuard, cNoQuiet, cr, cLate };
+})();
+bba6Lane.catch(() => { });   // a throw (an anchor gone) is raised where ⑦c awaits it, by name
 
 // ⑭ THE LIVE LANE (lane agy-peer-wake) runs its four wrappers TOGETHER with the sections below (the suite's 10 s
 // tier): started here, its asserts are printed in order at ⑭ at the end
@@ -579,9 +675,9 @@ const streamStarts = (w) => w.stub().filter((x) => x.argv && x.argv.includes('--
     ok('a second answer to the same card is refused by name (stale) — no restart', /unknown\/expired/.test(st.text) && streamStarts(w).length === n0);
   } finally { await w.stop(); }
   const src = fs.readFileSync(WRAPPER, 'utf8');
-  const line = "  if (SOFT_DENY_RE.test(line)) { softDenyCard(line); }";
+  const line = "  if (SOFT_DENY_RE.test(line)) {";   // B-bba6: the line's head (its body now also words a skip said as agy ends)
   const mutated = path.join(MUTBIN, 'agy-wrapper-nodeny.js');
-  fs.writeFileSync(mutated, src.replace(line, '  if (false && SOFT_DENY_RE.test(line)) { softDenyCard(line); }'));
+  fs.writeFileSync(mutated, src.replace(line, '  if (false && SOFT_DENY_RE.test(line)) {'));
   const m = startWrapper({ wrapper: mutated });
   try {
     await m.until(() => m.find('session'), 8000, 'session');
@@ -923,6 +1019,42 @@ console.log('— ⑦b B-518e: the AGY_ERROR line after the result (two pipes in 
     ok('⑦b the plant is where it claims: with the AGY_ERROR line held until the result is read, the wrapper says the notice AFTER the turn\'s end', end.stopReason === 'error' && after, { end, said: !!said, after });
     ok('⑦b RED CONTROL: the old read (the notice looked for at the end\'s instant) misses it under the placement; the cure (its own record, waited for) has it', !atEnd && !!said, { atEnd, said: !!said });
   } finally { await w.stop(); try { fs.rmSync(gate, { force: true }); } catch { } }
+}
+
+// ⑦c B-bba6 — THE LAST WORDS AND THE LATE ERROR. (1) agy's LAST stderr line with no newline is said, in both orders of the
+// pipe's end and the exit (placed by the stand-in: stderr closed and the exit held until the wrapper logged the end / a
+// grandchild holding the pipe until the leg releases it), and the wait for the end is bounded (the wrapper ends while the
+// pipe is STILL held — an order); a sign-in head said last decides the exit's own words; a skip said last is a notice, never
+// a card no process can act on. (2) a process REPLACED after its own turn ended (a model switch made during the turn) says
+// that turn's late AGY_ERROR line ONCE; one stopped mid-turn (Stop) stays quiet, and so does an interruption (bug 5).
+// Every control is a mutant built through anchored(): it fails by name when its line moves.
+console.log('— ⑦c B-bba6: the last stderr words, and the late error of a replaced process');
+{
+  const { ef, held, signin, skipped, cNoEnd, cNoWait, cNoBound, sw, st, quiet, cNoLate, cNoGuard, cNoQuiet, cr, cLate } = await bba6Lane;
+  const before = (r) => r.notices.indexOf('agy-error') >= 0 && r.notices.indexOf('agy-error') < r.notices.indexOf('agent-exited');
+  ok('⑦c the last stderr line with NO newline is said — the wrapper read the pipe\'s END while agy still ran (the exit held behind it): «Antigravity: quota exhausted, said last» before the exit\'s own notice, the turn ends error, the wrapper exits 1',
+    ef.endLogged && !!ef.last && before(ef) && ef.end?.stopReason === 'error' && ef.exited?.code === 1, ef);
+  ok('⑦c …and in the OTHER order (a grandchild holds agy\'s stderr past its exit): the wrapper waits for the end at most its bound — the line is said, and the wrapper ENDS WHILE THE PIPE IS STILL HELD (released only after)',
+    !!held.last && before(held) && held.heldAtEnd === true && !!held.holder, held);
+  ok('⑦c a SIGN-IN head said last decides the exit\'s words: the sign-in notice, no «Antigravity exited» notice, exit 1',
+    signin.endLogged && signin.notices.includes('auth-required') && !signin.notices.includes('agent-exited') && signin.exited?.code === 1, signin);
+  ok('⑦c a soft-deny line said last (no newline) is a notice naming the step — never a permission card whose «allow and retry» needs the process that just ended',
+    skipped.endLogged && !!skipped.skipped && /requires approval and was skipped/.test(skipped.skipped.text) && skipped.cards === 0, skipped);
+  ok('⑦c RED CONTROL (no flush at the pipe\'s end): the end read first (logged), the line is NEVER said — only the exit\'s notice', cNoEnd.endLogged && !cNoEnd.last && cNoEnd.notices.includes('agent-exited'), cNoEnd);
+  ok('⑦c RED CONTROL (no wait for the pipe\'s end at the exit): with the pipe held, the last line is NEVER said', !cNoWait.last && cNoWait.notices.includes('agent-exited'), cNoWait);
+  ok('⑦c a CRASH mid-turn while a model switch waits for the turn\'s end: the turn ends error, the wrapper ends, and NO second agy is started on its way out (one spawn)', cr.end?.stopReason === 'error' && !!cr.exited && cr.spawned === 1, cr);
+  ok('⑦c RED CONTROL (the ending mark set only on the drain\'s road): the switch waiting at the crash spawns a SECOND agy just before the exit', cLate.spawned === 2, cLate);
+  ok('⑦c RED CONTROL (the wait has no bound): while the grandchild holds the pipe the wrapper never ends — it ends only once released', cNoBound.heldAtEnd === false && !!cNoBound.exited, cNoBound);
+  const plant = (r) => !r.held.said && r.held.starts === 1 && r.held.restarting && r.read === 2;
+  ok('⑦c the plant: the switch (or the Stop) taken in BEFORE the turn answers, then its end and the restart read with the old process still alive, nothing said yet — then the old process writes its AGY_ERROR line twice',
+    [sw, st, quiet, cNoLate, cNoGuard, cNoQuiet].every(plant) && sw.end.stopReason === 'error' && st.end.stopReason === 'cancelled', [sw, st, quiet, cNoLate, cNoGuard, cNoQuiet].map((r) => ({ ...r.held, read: r.read })));
+  ok('⑦c a model switch made during a turn that then FAILS: the replaced process\'s late error is said ONCE (two lines, one notice), after the turn\'s end, under the model that process served (the next starts only after it exits); the next process runs the new model',
+    sw.said.length === 1 && sw.saidAt > sw.endAt && /Antigravity: model unavailable/.test(sw.said[0].text) && sw.said[0].servedModel === 'claude-sonnet-4-6' && /--model gemini-3\.8-flash-medium/.test(sw.next || ''), sw);
+  ok('⑦c a Stop in the MIDDLE of the turn: the stopped process\'s error stays quiet (bug 5 — no agy-error notice)', st.said.length === 0, st);
+  ok('⑦c a replaced process that reports an INTERRUPTION on its way out stays quiet too (bug 5)', quiet.said.length === 0, quiet);
+  ok('⑦c RED CONTROL (the late error only logged — the base\'s road): the switch\'s failed turn says nothing', cNoLate.said.length === 0, cNoLate);
+  ok('⑦c RED CONTROL (no open-turn guard): a Stop mid-turn WOULD say the stopped process\'s error', cNoGuard.said.length === 1, cNoGuard);
+  ok('⑦c RED CONTROL (no interruption filter): the replaced process\'s «interrupted» WOULD be said', cNoQuiet.said.length === 1 && /interrupted/.test(cNoQuiet.said[0].text), cNoQuiet);
 }
 
 console.log('— ⑧ THE AUTH GATE: an unauthenticated agy');

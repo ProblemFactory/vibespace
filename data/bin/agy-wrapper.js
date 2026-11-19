@@ -183,6 +183,10 @@ function noteModes() { meta.agentMode = state.mode; meta.modes = modesOf(); sche
 
 // ── the agy child ──
 let child = null, shuttingDown = false, restarting = false, sessionRecorded = false, authFailed = false, childSpokeAt = 0, childStartedAt = 0;
+// B-bba6: the process whose OWN exit is being handled while its last stderr words drain (a new process waits for it), and
+// how long that drain may hold the exit (a grandchild of agy can keep the pipe open)
+let childEnding = null;
+const ERR_TAIL_MS = 500;
 /** Resolves when a user line may be written to agy (see AUTH_GATE): agy spoke, or the grace passed with no sign-in request. */
 function authGate() {
   return new Promise((resolve) => {
@@ -231,13 +235,17 @@ function startChild() {
     let i;
     while ((i = errBuf.indexOf('\n')) !== -1) { const line = errBuf.slice(0, i).replace(/\r/g, ''); errBuf = errBuf.slice(i + 1); if (line.trim()) handleStderr(line, mine); }
   });
+  // B-bba6: agy's LAST stderr words may carry no newline (an error, a sign-in or a soft-deny line written as it ends) — the
+  // pipe's end says what is left, so no line stays only in the buffer
+  let errEnded = false;
+  const flushErr = () => { const rest = errBuf.replace(/\r/g, ''); errBuf = ''; if (rest.trim()) handleStderr(rest, mine, { ending: true }); };
+  child.stderr.on('end', () => { errEnded = true; log('agy stderr ended'); flushErr(); });
+  child.stdin.on('error', (err) => log(`agy stdin: ${(err && (err.code || err.message)) || err}`));   // a write that meets a process already gone (EPIPE) is its exit's to say, never a crash
   child.on('error', (err) => { notice('error', `Antigravity process error: ${err.message}`, 'child-error'); });
   setImmediate(drainPromptQueue); // what queued behind a restart runs on the new process
   if ([...subs.values()].some((x) => !x.done)) armSubTail(); // a sub still working when agy restarted
-  child.on('exit', (code, signal) => {
-    if (mine !== child) return; // an old child after a restart
-    child = null;
-    if (restarting) return;   // the restart path starts the next one
+  // A process that ended BY ITSELF (never a restart's): its turn, its subs, its words, then this wrapper ends
+  const childExited = (code, signal) => {
     subsAtExit();
     const cur = activePrompt;
     if (cur) endPrompt(cur, 'error', { message: `Antigravity exited (${signal || code})` }, cur.opts || {});
@@ -247,15 +255,30 @@ function startChild() {
       else if (!markReadyDone || code) notice('error', `Antigravity exited (${signal ? 'signal ' + signal : 'exit code ' + code}) — see agy-wrapper.log. Resume the conversation to continue.`, 'agent-exited');
     }
     finalizeExit(authFailed ? 1 : (code ?? 0));
+  };
+  child.on('exit', (code, signal) => {
+    if (mine !== child) return; // an old child after a restart
+    child = null;
+    if (restarting) return;   // the restart path starts the next one
+    // B-bba6: from here this wrapper ENDS with its process — nothing starts another (a switch pending at a crash used to spawn
+    // one just before the exit); 'exit' can come BEFORE the stderr pipe's end — the last words are read first (a sign-in
+    // line decides the exit's own words), at most ERR_TAIL_MS
+    childEnding = mine;
+    if (errEnded) { childExited(code, signal); return; }
+    let once = false, t = null;
+    const go = () => { if (once) return; once = true; clearTimeout(t); flushErr(); childExited(code, signal); };
+    t = setTimeout(go, ERR_TAIL_MS);
+    mine.stderr.once('end', go);
   });
 }
 
 /** Restart agy on the same conversation with the current flags (a model / effort / mode switch, or Stop). */
 function restartChild(why) {
   if (restarting) return;   // the restart in flight reads the flags when it starts the next process
-  if (!child) { startChild(); return; }
+  if (!child) { if (!childEnding) startChild(); return; }   // B-bba6: a process still saying its last words ends this wrapper
   restarting = true;
   const old = child;
+  if (!turnOpenOn.has(old)) lateErrorOf.set(old, servedModel());   // B-bba6: replaced after its own turn ended — its late error is said once, under ITS model
   old.once('exit', () => { restarting = false; if (!shuttingDown) startChild(); });
   try { old.stdin.end(); } catch { }
   setTimeout(() => { try { old.kill('SIGTERM'); } catch { } }, 300).unref();
@@ -442,7 +465,24 @@ function adoptConversation(id, how) {
  *  to stop (stdin closed, SIGTERM after 300 ms) and says `result ERROR "interrupted"` / "context canceled" on its way
  *  out, while `restarting` holds or after the next process took over. A process that was asked to stop is never an
  *  error: its result neither raises «Antigravity: interrupted» nor ends the turn now running on the new process. */
-const stoppedChild = (from) => !!from && (from !== child || restarting);
+const stoppedChild = (from) => !!from && from !== childEnding && (from !== child || restarting);
+/** A LATE ERROR OF A REPLACED PROCESS (B-bba6): a process replaced AFTER its own turn ended (a switch made during the turn, a
+ *  rule or the retry's return applied at its end) can still write that turn's AGY_ERROR line — stderr lags stdout — while
+ *  the restart holds or after the next process took over. It is said ONCE, under the model THAT process served (kept here:
+ *  a line read after the next one's init must not be filed under the new model).
+ *  A process stopped in the MIDDLE of a turn (Stop, Steer: its turn is still open) says nothing, as above; nor does an
+ *  interruption it reports on its way out. */
+const turnOpenOn = new WeakSet();     // the processes a dispatched turn is still open on (no result read from them yet)
+const lateErrorOf = new WeakMap();    // a replaced process → the model it served, while its one late error may still be said
+const agyErrorText = (line) => { const m = /^AGY_ERROR:\s*(\{.*\})\s*$/.exec(String(line).trim()); if (!m) return null; const j = safeJsonParse(m[1], {}); return String(j.short_error || j.message || m[1].slice(0, 300)); };
+function lateError(line, from) {
+  if (!lateErrorOf.has(from)) return;
+  const said = agyErrorText(line);
+  if (!said || /interrupt|cancel/i.test(said)) return;
+  const served = lateErrorOf.get(from);
+  lateErrorOf.delete(from);
+  notice('error', `Antigravity: ${said}`, 'agy-error', served ? { servedModel: served } : {});
+}
 function handleEvent(line, from = null) {
   const ev = safeJsonParse(line);
   if (!ev || typeof ev !== 'object' || typeof ev.event !== 'string') { log(`agy stdout non-event: ${clip(line, 200)}`); return; }
@@ -498,6 +538,7 @@ function handleEvent(line, from = null) {
   }
   if (ev.event === 'result') {
     const r = ev.result || {};
+    if (from) turnOpenOn.delete(from);
     if (r.conversation_id && !sessionRecorded) adoptConversation(r.conversation_id, resumeId ? 'load' : 'new');
     if (r.usage && typeof r.usage === 'object') { meta.usage = { ...r.usage, at: Date.now() }; scheduleMeta(); noteTurnUsage(r); }
     if (stoppedChild(from)) { log(`the stopped agy's result ignored (it was asked to stop): ${clip(r.status || '', 40)}${r.error ? ' — ' + clip(r.error, 200) : ''}`); return; }
@@ -574,9 +615,9 @@ function noOutputSkippedNothing() {
   return null;
 }
 let authUrl = null;
-function handleStderr(line, from = null) {
+function handleStderr(line, from = null, { ending = false } = {}) {
   log(`[stderr] ${clip(line, 2000)}`);
-  if (stoppedChild(from)) return;   // bug 5: a process asked to stop says nothing to the chat (logged above)
+  if (stoppedChild(from)) { lateError(line, from); return; }   // bug 5: a process asked to stop says nothing to the chat (logged above) — B-bba6: but a late error of one replaced after its turn, once
   if (AUTH_URL_RE.test(line)) authUrl = line.trim();
   if (AUTH_URL_RE.test(line) || AUTH_HEAD_RE.test(line)) {
     if (authFailed) return;
@@ -595,7 +636,8 @@ function handleStderr(line, from = null) {
   if (m) { const j = safeJsonParse(m[1], {}); notice('error', `Antigravity: ${j.short_error || j.message || m[1].slice(0, 300)}`, 'agy-error', servedField()); return; }
   const nothing = NO_OUTPUT_RE.test(line) ? noOutputSkippedNothing() : null;
   if (nothing) { log(`no soft-deny card: ${nothing}`); return; }
-  if (SOFT_DENY_RE.test(line)) { softDenyCard(line); }
+  // B-bba6: a skip said as agy ENDS gets no card — its «allow and retry» would need the process this wrapper ends with
+  if (SOFT_DENY_RE.test(line)) { if (ending) notice('error', `Antigravity skipped a step that needs approval as it ended: ${clip(line.trim(), 300)}`, 'soft-deny-ended'); else softDenyCard(line); }
 }
 
 // ── SOFT-DENY → the permission card 「agy skipped <tool>」 ──
@@ -809,7 +851,7 @@ async function runPrompt(text, opts = {}) {
     promptQueue.push({ id: `q${++queueSeq}-${process.pid}`, ts: Date.now(), text, opts });
     publishQueue();
     if (!opts.silentQueue) record('queued_input', { msg_id: opts.msgId || '', turn_id: meta.activePromptId || null });
-    if (!child && !restarting && !shuttingDown) startChild();
+    if (!child && !restarting && !shuttingDown && !childEnding) startChild();
     return { mode: 'queued' };
   }
   // THE ONE-TURN BYPASS INVARIANT: only the retry turn ever runs on a process started with the retry's bypass, and
@@ -840,6 +882,7 @@ async function runPrompt(text, opts = {}) {
   record('prompt_start', { promptId, blocks: 1 });
   mine.dispatched = true;
   mine.tools = new Map(); lastTurn = mine;
+  turnOpenOn.add(child);
   child.stdin.write(JSON.stringify({ event: 'user', message: { content: body } }) + '\n');
   if (carriedId) contextCarried(carriedId);   // lane report-mark-on-ack: the turn's text carries the context
   return { mode: 'turn' };

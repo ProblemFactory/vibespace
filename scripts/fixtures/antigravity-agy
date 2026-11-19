@@ -21,6 +21,15 @@
 //       text naming `faillate`    → the same two, the result FIRST and the AGY_ERROR line only once the file $AGY_STUB_ERR_GATE
 //                                   exists (8 s bound) — the two pipes in the order a loaded machine can deliver them, placed
 //                                   by the test (B-518e): an exact order, never a wait that load can close
+//                                   (B-bba6: $AGY_STUB_RESULT_GATE holds the RESULT until that file exists; $AGY_STUB_ERR_TWICE=1
+//                                   writes the line twice — «said once»; $AGY_STUB_ERR_SHORT names its short_error)
+//       text naming `noeol`       → no result: an AGY_ERROR line (with `signin`: agy's sign-in head; with `skipped`: a soft-deny
+//                                   line) written LAST with NO newline, then exit 1 — the pipe's end and the exit in the
+//                                   order $AGY_STUB_NOEOL_ORDER places (B-bba6): `end-first` closes stderr and exits only once
+//                                   the file $AGY_STUB_EXIT_GATE exists; `held` leaves a grandchild holding stderr until the
+//                                   file $AGY_STUB_HOLDER_RELEASE exists, so the exit comes first (its pid in the stub log)
+//       text naming `crash`       → no result, no stderr: the process exits 1 once the file $AGY_STUB_RESULT_GATE exists (B-bba6:
+//                                   a crash mid-turn while a switch waits for the turn's end)
 //       text naming `stuck`       → a run_command step ACTIVE, then nothing: no DONE, no result, the process alive (lane queued-is-not-woke)
 //       text naming `subagent`    → an invoke_subagent tool step (ACTIVE, parameters {Role, TypeName} — what the owner's
 //                                   journal recorded, lane agy-subagent-cards) at step $AGY_STUB_SPAWN_STEP (the fixture
@@ -165,7 +174,18 @@ async function turn(text) {
   // no result); the process stays alive and idle, reading stdin: a turn that never ends (Stop restarts the process)
   if (/\bstuck\b/.test(text)) { const i = step++; modelCall(i); out({ event: 'step_update', step_update: { conversation_id: cid, step_index: i, state: 'ACTIVE', step_type: 'tool', tool_name: 'run_command', tool_info: { name: 'run_command', parameters: { CommandLine: 'node driver.mjs' } } } }); await new Promise(() => { }); }
   if (/\bslow\b/.test(text)) await sleep(Number(process.env.AGY_STUB_SLOW_MS || 1500));
-  if (/\bfaillate\b/.test(text)) { out({ event: 'result', result: { conversation_id: cid, status: 'ERROR', response: '', error: 'model unavailable', duration_seconds: 0.1, num_turns: turns, usage: usage(turns) } }); const gate = process.env.AGY_STUB_ERR_GATE || ''; for (let k = 0; gate && k < 400 && !fs.existsSync(gate); k++) await sleep(20); process.stderr.write('AGY_ERROR: {"short_error":"model unavailable","status":"UNAVAILABLE","code":503,"retryable":true}\n'); return; }
+  const gateWait = async (f) => { for (let k = 0; f && k < 750 && !fs.existsSync(f); k++) await sleep(20); };   // 15 s cap: a stand-in never lingers
+  if (/\bcrash\b/.test(text)) { await gateWait(process.env.AGY_STUB_RESULT_GATE || ''); process.exit(1); }
+  if (/\bnoeol\b/.test(text)) {
+    const last = /\bsignin\b/.test(text) ? 'You are not logged into Antigravity' : /\bskipped\b/.test(text) ? 'Tool run_command(rm -rf build) requires approval and was skipped.' : 'AGY_ERROR: {"short_error":"quota exhausted, said last","status":"RESOURCE_EXHAUSTED","code":429}';
+    if ((process.env.AGY_STUB_NOEOL_ORDER || 'end-first') === 'held') {
+      const g = require('child_process').spawn(process.execPath, ['-e', "const f = process.argv[1]; setInterval(() => { if (!f || require('fs').existsSync(f)) process.exit(0); }, 20); setTimeout(() => process.exit(0), 15000);", process.env.AGY_STUB_HOLDER_RELEASE || ''], { stdio: ['ignore', 'ignore', 'inherit'] });
+      logLine({ holder: g.pid });
+      process.stderr.write(last); process.exit(1);
+    }
+    process.stderr.write(last); fs.closeSync(2); await gateWait(process.env.AGY_STUB_EXIT_GATE || ''); process.exit(1);
+  }
+  if (/\bfaillate\b/.test(text)) { await gateWait(process.env.AGY_STUB_RESULT_GATE || ''); out({ event: 'result', result: { conversation_id: cid, status: 'ERROR', response: '', error: 'model unavailable', duration_seconds: 0.1, num_turns: turns, usage: usage(turns) } }); const gate = process.env.AGY_STUB_ERR_GATE || ''; for (let k = 0; gate && k < 400 && !fs.existsSync(gate); k++) await sleep(20); const line = `AGY_ERROR: {"short_error":${JSON.stringify(process.env.AGY_STUB_ERR_SHORT || 'model unavailable')},"status":"UNAVAILABLE","code":503,"retryable":true}\n`; process.stderr.write(process.env.AGY_STUB_ERR_TWICE === '1' ? line + line : line); return; }
   if (/\bfail\b/.test(text)) { process.stderr.write('AGY_ERROR: {"short_error":"model unavailable","status":"UNAVAILABLE","code":503,"retryable":true}\n'); out({ event: 'result', result: { conversation_id: cid, status: 'ERROR', response: '', error: 'model unavailable', duration_seconds: 0.1, num_turns: turns, usage: usage(turns) } }); return; }
   const reply = `Antigravity (${model}${effort ? ', ' + effort : ''}, ${mode}): ${text}`;
   const i = step++;
