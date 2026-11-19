@@ -973,8 +973,10 @@ function readJsonlLineRange(fp, startLine, endLine) {
 }
 
 
-function parseCodexSessionJsonl(threadId, { why = null } = {}) {
-  const fp = findCodexSessionJsonlPath(threadId);
+// `fp`: the rollout's path when the caller has ALREADY looked it up (null = it looked and found none) — never walked twice (the
+// checkpoint's test-task-scan-loop ⑤ red: the off-loop read's fallback walked ~/.codex/sessions a second time on the main loop)
+function parseCodexSessionJsonl(threadId, { why = null, fp: known } = {}) {
+  const fp = known !== undefined ? known : findCodexSessionJsonlPath(threadId);
   // MISSING ROLLOUT (B-21e4 item 5): serve the thread/read records the store's
   // warmTranscript hook cached (0.153 paginated history with no rollout file on
   // this machine). Lazy require — codex-thread-read never requires this module.

@@ -257,6 +257,16 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
       ok(tw.first === zfile && tw.got === pfile && tw.n === 0 && twr.first === zfile && twr.got === zfile,
         `a kept .jsonl.zst and then its plain twin: the plain wins (${path.basename(String(tw.got))}) with ${tw.n} listings; RED (no twin check): ${path.basename(String(twr.got))}`);
     }
+    // …and NO EXTRA WALK UNDER IT (the 2.369.411 checkpoint's red: status() made 162 listings against the 108 allowed — 216 is the RED
+    // control's count): the off-loop read's fallback REUSES its own lookup of a missing rollout, so status() walks the store no more
+    // than its reader does (two walks: the ancestry, the read). RED CONTROL: the fallback that walks again (three)
+    {
+      const csSrc = fs.readFileSync(path.join(REPO, 'src/codex-session-store.js'), 'utf8'), FB = '  return parseCodexSessionJsonl(threadId, { why, fp });';
+      const { anchored } = await import('./scratch.mjs');
+      const CS2 = mutantCopies('scan-double-walk', REPO).load('src/codex-session-store.js', anchored(csSrc, FB, '  return parseCodexSessionJsonl(threadId, { why });', 'double-walk'), 'double-walk');   // stale-pins: kept (the red control rebuilds the extra walk)
+      const nDouble = CS2 ? await listing(async () => { CTR._resetForTests(); await createTranscriptService({ activeSessions: new Map(), createSessionMessages: (s0) => new CS2.CodexSessionMessages(s0, undefined, { buffersDir: path.join(os.homedir(), 'buf') }), hosts: null }).status(cref); }) : -1;
+      ok(green.nStatus === nReader && nDouble > nReader, `status() walks the codex store no more than its reader does (${green.nStatus} = ${nReader}): the read's fallback reuses its own lookup of a missing rollout; RED CONTROL (the fallback walks again): ${nDouble}`);
+    }
     // claude: its own task-state warm, awaited before the reader is built — on both roads
     const calls = [];
     H.store.warmTaskState = async (...a) => { calls.push('warm'); await realWts(...a); calls.push('warmed'); order.push('warmed'); };

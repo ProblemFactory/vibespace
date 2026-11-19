@@ -680,7 +680,7 @@ async function parseCodexSessionJsonlAsync(threadId) {
       if (Array.isArray(r)) return r;
     } catch (e) { why = 'the off-loop read threw: ' + ((e && e.message) || e); }
   }
-  return parseCodexSessionJsonl(threadId, { why });
+  return parseCodexSessionJsonl(threadId, { why, fp });   // the path this read already looked up (null = none): never a second walk
 }
 
 /** THE HUB READS ONE CONVERSATION'S RECORDS AT A TIME (lane resume-all-paced, L3 — measured: a storm of 8 resumed conversations
