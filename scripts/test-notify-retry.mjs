@@ -988,6 +988,20 @@ await (async () => {
   H.land();
   const rec1 = Object.values(mem())[0] || {};
   ok(!rec1.jobsOwed && (rec1.jobs || []).length === 0, '(must 1) …and the copy is dropped only when the put-back LANDS', rec1);
+  // the moved2 cure 3: its RED control — a copy of the hand-over that drops its kept copy at once (anchored)
+  {
+    const SHSRC = fs.readFileSync(path.join(REPO, 'src/server/stash-handover.js'), 'utf-8');
+    const KEEP_A = "    rec.jobsOwed = true;\n    if (!jm || typeof jm.afterNotifsLanded !== 'function') return;";
+    const SHX = mutantCopies('ntr-ho-drop', REPO).load('src/server/stash-handover.js', anchored(SHSRC, KEEP_A, "    rec.jobs = []; return;   // MUTANT: the copy dropped at the put-back, landed or not", 'the copy waits for the landing'), 'ho-drop-now');
+    const Rx = rig('ride-handover-red'), Hx = heldWriter(), { jm: jmx, job: jobx } = mkJm({ JobManager }, Rx, Hx.W);
+    const viewx = SHX.create({ activeSessions: Rx.sessions, getDeliver: () => Rx.deliver, getJobs: () => jmx, broadcastSessions: () => { }, renderMsgStash, renderNotifStash: JM_MODEL.renderNotifStash, debounceMs: 5, dataDir: Rx.dir, log: { log() { }, warn() { } } });
+    jmx._stashNotif(Rx.cid, jobx, { what: 'a kept result' }, 'not reachable', { held: { kind: 'not-reachable' } });
+    Rx.setAnswer(async () => ({ ok: true, phase: 'written' }));
+    await viewx.handOver('w1', { pressed: PRESS });
+    viewx.restoreHandedOver(Rx.cid, Rx.posts[Rx.posts.length - 1], { kind: 'notification' });
+    let recx = {}; try { recx = Object.values(JSON.parse(fs.readFileSync(path.join(Rx.dir, 'stash-handover.json'), 'utf-8')))[0] || {}; } catch { }
+    ok(!recx.jobsOwed && (recx.jobs || []).length === 0, '(must 1) CONTROL (a copy that drops the kept copy at the put-back): the copy is GONE while the put-back is not on disk — a kill now loses the job notifications (red)', recx);
+  }
 })();
 
 // ── §5 R3: THE PROMPT CARRIES A PARKED ENTRY WHEN IT FITS; WHEN IT CANNOT, THE TURN END POSTS THE STASH ────────────

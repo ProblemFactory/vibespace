@@ -464,6 +464,35 @@ console.log('— the bundle and the export —');
   const rmOk = rmScene(TaskGroupManager, 'real');
   ok('THE STEP RIDES THE LANDING: a group\'s removal not landed yet is TAKEN (never refused, never rolled back) and its archived Activity log is still on disk — a start before the landing finds the group, WITH its log', !rmOk.err && !rmOk.inMemory && rmOk.archive && rmOk.atStart, rmOk);
   ok('…and when the storage answers, the archived Activity log goes by itself (the step, once, at the landing)', !rmOk.archiveAfter, rmOk);
+  // THE MOVED2 CURE 3 (主开发's read wjd3u2jue): an id is made from the title and the date — a group removed while the storage is
+  // held and made AGAIN with the same title gets the SAME id; when the old removal lands, its step leaves the NEW group's visibility
+  // row and Activity folder alone. RED (anchored): a copy without that guard deletes both
+  const remakeScene = (Mgr, tag) => {
+    const d = path.join(root, 'u5-remake-' + tag); fs.mkdirSync(d, { recursive: true });
+    const st = { armed: false, steps: [] }, owed = new Map();
+    const W = { dirty: (f, o) => owed.set(f, o), durable: () => Promise.resolve(!st.armed), pending: (f) => owed.has(f),
+      flushSync: (files) => { const left = []; for (const f of files || [...owed.keys()]) { const o = owed.get(f); if (!o) continue; if (st.armed) { left.push({ file: f, name: o.name, why: 'held (a stand-in)' }); continue; } fs.writeFileSync(f, o.produce()); owed.delete(f); } return { written: [], left, ms: 0 }; },
+      afterLanding: (file, step) => { if (!st.armed && !owed.has(file)) { const value = step(); return Promise.resolve({ landed: true, value }); } st.steps.push(step); return new Promise(() => { }); } };
+    const m = new Mgr({ dataDir: d, homeDir: home, writer: W });
+    const t = m.create({ title: 'u5 remake' });
+    W.flushSync();
+    st.armed = true;
+    m.remove(t.id);
+    const t2 = m.create({ title: 'u5 remake' });
+    const arch = path.join(m._archiveRoot, t2.id); fs.mkdirSync(arch, { recursive: true }); fs.writeFileSync(path.join(arch, 'log.jsonl'), '{"note":"the new group\'s words"}\n');
+    let vis = null; try { m._setVisibility(t2.id, { externalVisibility: 'visible' }); vis = true; } catch (e) { vis = String(e && e.message); }
+    const rows = () => { try { const g = m._grants(); return g ? g.rowsFor('group-visibility', String(t2.id)).length : null; } catch { return null; } };
+    const rowsBefore = rows();
+    st.armed = false; W.flushSync(); const xs = st.steps; st.steps = []; for (const x of xs) x();   // the OLD removal lands
+    let stands = false; try { m.get(t2.id); stands = true; } catch { stands = false; }
+    return { sameId: t2.id === t.id, vis, rowsBefore, rowsAfter: rows(), archive: fs.existsSync(arch), stands };
+  };
+  const rmk = remakeScene(TaskGroupManager, 'real');
+  ok('THE MOVED2 CURE 3: a group removed while the storage is held and made again under the SAME id keeps its visibility row and Activity folder when the old removal lands', rmk.sameId && rmk.stands && rmk.archive && rmk.rowsBefore >= 1 && rmk.rowsAfter === rmk.rowsBefore, rmk);
+  const GUARD_TG = "      if (this._state.tasks[id]) return;\n";
+  const RmkTG = mutantCopies('task-groups-remake', path.resolve(path.dirname(fileURLToPathU5(import.meta.url)), '..')).load('src/task-groups.js', anchored(tgSrc, GUARD_TG, '', 'the removal step leaves a group made again alone'), 'remake-unguarded');
+  const rmkX = remakeScene(RmkTG.TaskGroupManager, 'red');
+  ok('CONTROL (a copy without the guard): the old removal deletes the NEW group\'s Activity folder and visibility row (red)', rmkX.sameId && (!rmkX.archive || rmkX.rowsAfter === 0), rmkX);
   const RIDE_TG = "    require('./store-writer.js').ride(this._writer(), this._file, () => {";
   const RmTG = mutantCopies('task-groups-ride', path.resolve(path.dirname(fileURLToPathU5(import.meta.url)), '..')).load('src/task-groups.js', anchored(tgSrc, RIDE_TG, "    ((w, f, step) => step())(this._writer(), this._file, () => {   // MUTANT: the step runs at the act", 'the group removal rides the landing'), 'ride-ignored');
   const rmX = rmScene(RmTG.TaskGroupManager, 'red');

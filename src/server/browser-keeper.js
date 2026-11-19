@@ -808,13 +808,13 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   }
   /** the registry ON DISK before what follows (lane lg-store-writes U5b: a directory's lineage is written before the directory
    *  moves) — handed to the writer, then that one file's write waited for (a named wait); false: it did not land */
-  function saveNow() { return save() && landNow({ long: true }); }   // the lineage move (its one caller): under the LARGE FINITE bound (store-writer LANDING_BOUND_MS — the moved2 cure 2: never for ever), as the release's synchronous write — a short bound's refusal could leave its bytes in flight to land after the refusal named the old path
+  function saveNow() { return save() && landNow(); }   // the lineage move (its one caller) — under the writer's own bound, as before the moved2 cure (the cure 3: a ten-minute hold of the main thread is not taken; a held write refuses the move by name, and the larger cure — both keys during a move — is said in LEFT)
   /** the registry's owed write waited for (a named wait): saveNow's, and a MIGRATION's reshape — the boot's next migration may
    *  read the FILE (2026-10-grants-unify reads browser-profiles.json from disk), so a reshape is on disk before it returns.
    *  false: it did not land — held past the writer's bound, failed, or DEFERRED by the exit (the exit's flush writes it; until
    *  then it is not on disk, so a move waiting on it is refused) */
   let landDeferred = false;   // the last landNow() was refused because the hub is STOPPING (the exit's flush writes it) — a refusal's words
-  function landNow({ long = false } = {}) { landDeferred = false; try { const W = writerOf(); if (!W.pending(storeKey)) return true; const r = W.flushSync([storeKey], long ? { budgetMs: require('../store-writer.js').LANDING_BOUND_MS } : undefined); landDeferred = !!r.deferred; return !r.deferred && !r.left.some((x) => x.file === storeKey); } catch { return false; } }
+  function landNow() { landDeferred = false; try { const W = writerOf(); if (!W.pending(storeKey)) return true; const r = W.flushSync([storeKey]); landDeferred = !!r.deferred; return !r.deferred && !r.left.some((x) => x.file === storeKey); } catch { return false; } }
   /** a MIGRATION's reshape that did not land fails that migration BY NAME (not recorded: it runs again next boot — the bytes stay
    *  in memory and the writer retries), and the runner HOLDS the migrations after it to the next boot (EVSNOTONDISK: a later one
    *  may read this file) — src/migration-runner.js, the order law */
@@ -838,6 +838,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   // 50 whole-digest broadcasts + 50 active-sessions re-publishes to every client, for one Save. Inside `batched(fn)` a
   // commit only marks; the ONE commit runs when the outermost batch ends (nothing ran ⇒ nothing written).
   let batchDepth = 0, batchDirty = false;
+  const adopting = new Set();   // the moved2 cure 3: adopted profiles whose folder move still rides their record's landing
   const sweepIds = new Set(); let sweepDirty = false; // keeper-sweep-yields F5: the ids the orphan walk is retiring now (retireInSteps) — their removals commit with the walk's piece
   function commit() { if (batchDepth > 0) { batchDirty = true; return; } save(); notify(); }
   function batched(fn) {
@@ -4523,6 +4524,9 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     ensureLoaded();
     const p = profile(profileId);
     if (!p) throw namedError('not-found', `no profile ${profileId}`);
+    // the moved2 cure 3 (its read's should): an ADOPTED profile whose folder has not moved yet (its record's landing is owed) is never
+    // started — a browser launched on the empty target would make the move fail under it
+    if (adopting.has(String(profileId))) throw namedError('adopt_pending', `profile "${p.label}" is being adopted — its folder moves once its record is on disk; start it again in a moment`);
     const cur = reg.browsers[profileId];
     // takeover C3: an ephemeral daemon that idled out between two ticks is
     // judged NOW (a /proc read) so the verb restarts it instead of running on
@@ -6864,13 +6868,16 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     // conversation's kept entry ends (`onMoved`) only once the new record is ON DISK — a kill first leaves the old record, the folder
     // where it was and its kept entry: the adopt simply did not happen, and can be asked again. A move that fails at the landing
     // takes the record out again (it never had its folder) and says so
+    adopting.add(id);   // no start of it until its folder moved (start refuses `adopt_pending`)
     const landing = rideLanding(() => {
+      adopting.delete(id);
       try { fs.renameSync(scratchDir, target); }
       catch (e) {
         log.warn?.(`[browser] profile ${id} "${rec.label}": its folder could not be moved from ${scratchDir} (${e.message}) — the record goes again; the conversation's browser keeps its folder`);
         reg.profiles = reg.profiles.filter((x) => x.id !== id);
         try { const g = grantsOf(); if (g) g.remove('browser-profile', id, 'user'); } catch { /* the row of a gone record admits nobody */ }
         commit();
+        // (the moved2 cure 3: a late failure is BROADCAST — commit() above republishes the list without it — and said in the log line)
         return { moved: false, error: `could not move ${scratchDir} to ${target}: ${e.message}` };
       }
       try { fs.chmodSync(target, 0o700); } catch { /* best effort */ }

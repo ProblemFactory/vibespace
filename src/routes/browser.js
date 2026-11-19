@@ -220,7 +220,7 @@ const STATUS = { // lane browser-profile-clone: the copy's refusals by name
   // BROWSE YOURSELF verify r3: a returning conversation whose new tab could not be bound while its old tab is the user's now
   tab_unbound: 503,
   // §3.7 / §3.8 — the handle refusals are typed so the CLI prints the code and the agent can read why
-  profile_required: 409, profile_changed: 409, not_attached: 404, profile_path_refused: 400, bad_alias: 400, alias_taken: 409, adopt_failed: 409,
+  adopt_pending: 409, /* lane lg-store-writes, the moved2 cure 3: an adopted profile whose folder move rides its record's landing */ profile_required: 409, profile_changed: 409, not_attached: 404, profile_path_refused: 400, bad_alias: 400, alias_taken: 409, adopt_failed: 409,
   // P3 (§4.3): the user drives ⇒ the agent's command is refused typed; the control verbs' own refusals
   browser_paused: 409, held: 409, not_taken: 409, no_confirmation: 404, 'no-browser': 409, refused: 409,
   // lane browser-takeover-queue: a request for a person — its refusals by name (human_asked = a page verb while it waits)

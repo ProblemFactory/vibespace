@@ -2603,6 +2603,7 @@ class JobManager {
     fs.chmodSync(ctl, 0o700); // the run's dir holds its spec file and its log — the owner's alone (mkdir's mode is umask-masked)
     const stateBefore = job.state;   // the U4/U5 cure: what a refused start (its run not on disk) gives back
     job.state = 'starting';
+    delete job._startAfterStop;   // B-cac2 (its read r2): a start asked during a stop is the next run's — any new run ends the ask (never a later run's end)   [lane lg-store-writes, the moved2 cure 3: back where the checkpoint had it — BEFORE the not-on-disk check: a start ATTEMPT ends the ask, refused or not]
     job.runs = job.runs || [];
     // THE MEMORY BOUND (lane jobs-memory-bound): THE LADDER's answer for THIS run (src/job-model.js memoryMbOf) rides the spec;
     // the wrapper measures the rung that enforces it and says so (bound.json while it runs, exit.json `memory` at its end)
@@ -2655,7 +2656,6 @@ class JobManager {
     // the run-arming clears come AFTER the check (the U4/U5 cure 2): a refused start leaves the record as it was
     delete job.ack; // a NEW run is a new claim on the user's attention (triage §13)
     delete job._stopRequested; delete job._termAt; delete job._stopForce; delete job._forced; // round 5: a stop said to an ENDED run never stops the next
-    delete job._startAfterStop;   // B-cac2 (its read r2): a start asked during a stop is the next run's — any new run ends the ask (never a later run's end)
     for (const t of job._killSteps || []) clearTimeout(t); // round 6: …nor does its kill timer — a new run disarms every timer of the last
     delete job._killSteps;
     // accept-fixes-jobs F6: the job's OWN directory (its cmd.cwd — never the server's cwd fallback) is exported as
@@ -4120,10 +4120,11 @@ class JobManager {
     if (job.state === 'awaiting-user') job.state = 'up';
     this._touch(job, { what: 'the user answered its panel', verb: 'answers' });
     this._save();
-    // lane lg-store-writes (the moved2 cure 2 — THE STEP RIDES THE LANDING, no roll back): THE JOB HEARS THE ANSWER only once
-    // jobs.json holds it — its wrapper's answers file (another process reads it at once), its wait woken, the For-you item closed,
-    // its owner told; a kill first leaves the question open and the job never heard it. The route's reply waits its bound
-    // (persisted): not landed yet ⇒ said, and the job hears it by itself at the landing
+    // lane lg-store-writes (the moved2 cure 2 — THE STEP RIDES THE LANDING, no roll back): the record in MEMORY holds the answer at
+    // once (the act is taken: `vibespace-job answers` read through the hub shows it); what cannot be undone rides jobs.json's
+    // landing — the wrapper's answers file (another process reads it at once), the job's wait woken, the For-you item closed, its
+    // owner told. A kill first leaves the question open on disk and none of them happened. The route's reply waits its bound
+    // (persisted): not landed yet ⇒ said, and they follow by themselves at the landing (the moved2 cure 3: the words made true)
     const run = job.stdinOpen && job.runs && job.runs[job.runs.length - 1];
     const ctl = run ? this._ctlDir(job, run.startedAt) : null;
     this._ride(this.file, 'the panel\'s answer', () => {

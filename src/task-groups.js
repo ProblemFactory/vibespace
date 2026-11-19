@@ -2715,20 +2715,21 @@ class TaskGroupManager {
     // log and its visibility grant go once task-groups.json no longer holds the group — a kill first brings the group back WITH
     // them. The route's reply waits its bound (persisted): not landed yet ⇒ said, and the rest follows by itself at the landing
     require('./store-writer.js').ride(this._writer(), this._file, () => {
+      // the moved2 cure 3: an id is made from the title and the date — a group made AGAIN under this id while the removal rode its
+      // landing owns the row and the Activity folder now: the old removal touches neither
+      if (this._state.tasks[id]) return;
       // its archived Activity log goes with it (after the record: a failed delete leaves words on disk, never a group without them)
       if (archivableId(id)) { try { fs.rmSync(path.join(this._archiveRoot, id), { recursive: true, force: true }); } catch (e) { console.warn(`[tasks] the archived Activity log of removed group ${id} was not deleted (${(e && e.code) || e}) — left on disk`); } }
       try { const g = this._grants(); if (g) g.remove('group-visibility', String(id), 'user'); } catch { /* the row of a gone group admits nobody */ }   // lane grants-unify
     }, { what: 'a group\'s removal', timeoutMs: null });
     this._notify(id);
   }
-  /** this store's owed write waited for (a named wait — test-store-write-census WAITS): {ok, why}. `long`: the LARGE FINITE bound
-   *  (store-writer LANDING_BOUND_MS — 主开发, the moved2 cure 2: never a wait for ever) — the release's synchronous write, kept
-   *  where a short bound could leave another store's synchronous write ahead of this one (noteArchived: the user-state file's
-   *  archive list is the baseline) */
-  _landNow(what, { long = false } = {}) {
+  /** this store's owed write waited for (a named wait — test-store-write-census WAITS): {ok, why} — under the writer's own bound
+   *  (the moved2 cure 3: a ten-minute hold of the main thread is not taken; a held unbind stays owed, said, and the writer lands it) */
+  _landNow(what) {
     try {
       const W = this._writer(); if (!W.pending(this._file)) return { ok: true };
-      const r = W.flushSync([this._file], long ? { budgetMs: require('./store-writer.js').LANDING_BOUND_MS } : undefined);
+      const r = W.flushSync([this._file]);
       if (r.deferred) return { ok: false, why: 'the hub is stopping — its exit flush writes it next' };
       const m = (r.left || []).find((x) => x.file === this._file);
       if (m) { console.warn(`[tasks] ${what}: task-groups.json not on disk yet (${m.why})`); return { ok: false, why: m.why }; }
@@ -2798,10 +2799,10 @@ class TaskGroupManager {
     if (!due.length) return [];
     const changed = this.unbindKeys(due).changed;
     // lane lg-store-writes U5 (the move's hunt, D): the user-state file holding the archive list — THIS pass's baseline — is already
-    // written (synchronously, before this hook); the unbind is written before this returns under the LARGE FINITE bound, as the
-    // release's synchronous save was: a kill after it never leaves an archived conversation a member for good (the next baseline
-    // would not see it as new). Larger cures (the baseline inside task-groups.json) are not this release's.
-    if (changed.length) this._landNow('the archived conversations\' unbind', { long: true });
+    // written (synchronously, before this hook); the unbind is waited for under the writer's own bound (the moved2 cure 3: never a
+    // ten-minute hold of the main thread) — landed, a kill after it never leaves an archived conversation a member for good; HELD past
+    // the bound it stays owed (said) and the writer lands it. The larger cure (the baseline inside task-groups.json) is not this one's.
+    if (changed.length) this._landNow('the archived conversations\' unbind');
     return changed;
   }
 

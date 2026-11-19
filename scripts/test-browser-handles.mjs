@@ -240,6 +240,8 @@ let workId, persId;
   // adoptScratch
   const scratchDir = path.join(DATA, 'browser-profiles', 'vs-' + KEY_B); fs.mkdirSync(scratchDir, { recursive: true }); fs.writeFileSync(path.join(scratchDir, 'Cookies'), 'jar');
   const ad = k.adoptScratch({ label: 'Adopted', scratchDir, owner: { kind: 'session', id: KEY_B } });
+  const pend = await threw(() => k.start(ad.id));   // the moved2 cure 3: before the landing its folder has not moved — no start (a browser on the empty target would make the move fail under it)
+  ok(pend && pend.code === 'adopt_pending', 'adoptScratch: a start of the adopted profile before its record landed is refused adopt_pending', pend && { code: pend.code, message: pend.message });
   const adL = await ad.landing;   // lane lg-store-writes (the moved2 cure 2): the folder moves once the new record LANDED (the keeper's step)
   ok(adL && adL.landed && adL.value && adL.value.moved === true, 'adoptScratch: the folder moved by the step that rides the new record\'s landing', adL);
   ok(ad.dir === path.join(HOME, '.agent-browser', 'vs-' + ad.id) && fs.existsSync(path.join(ad.dir, 'Cookies')) && !fs.existsSync(scratchDir) && ad.owner.kind === 'only' && ad.owner.who[0].id === KEY_B, 'adoptScratch MOVES the scratch dir under ~/.agent-browser/ (the login kept) and registers it (a pre-list single owner stored as a one-row list, 2026-09-27)');

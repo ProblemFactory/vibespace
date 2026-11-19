@@ -1053,6 +1053,16 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   const JLAW = MJ.load('src/jobs.js', anchored(jsrc, RIDE_A, "    ((f, w, step) => step())(this.file, 'the panel\\'s answer', () => {   // MUTANT: the step runs at the act", 'the answer rides the landing'), 'law-ride-ignored');
   const lawx = lawRun(JLAW, 'mut');
   ok(lawx.ans.askedBefore === 1, 'CONTROL (a copy whose answer runs its step at the act): the job hears the answer and its For-you item closes while NOTHING is on disk — red', lawx.ans);
+  // the moved2 cure 3: a red control for EACH leg — one copy per law (each plant asserted by anchored())
+  const rideNow = (src, what) => anchored(src, `    this._ride(this.file, '${what}', () => {`, `    ((f, w, step) => step())(this.file, '${what}', () => {   // MUTANT: the step runs at the act`, `the ${what} rides the landing`);
+  const lawRm = lawRun(MJ.load('src/jobs.js', rideNow(jsrc, 'the removal'), 'law-rm-now'), 'mut-rm');
+  ok(lawRm.rm.askedBefore === 1, 'CONTROL (a copy whose removal runs its step at the act): its asks are resolved while NOTHING is on disk — red', lawRm.rm);
+  const CLEAR_A = "    if (askGone.length) this._ride(this.file, 'the cleared asks', () => {";
+  const lawCl = lawRun(MJ.load('src/jobs.js', anchored(jsrc, CLEAR_A, "    if (askGone.length) ((f, w, step) => step())(this.file, 'the cleared asks', () => {   // MUTANT: the step runs at the act", 'the cleared asks ride the landing'), 'law-clear-now'), 'mut-clear');
+  ok(lawCl.clear.askedBefore === 1, 'CONTROL (a copy whose clear runs its step at the act): the asked job\'s For-you item closes while NOTHING is on disk — red', lawCl.clear);
+  const DRAIN_A = "    // stays, a write that does not land is the writer's to retry (_onDisk says it)\n    this._saveNotifs();\n";
+  const lawDr = lawRun(MJ.load('src/jobs.js', anchored(jsrc, DRAIN_A, "    // stays, a write that does not land is the writer's to retry (_onDisk says it)\n    if (this._writer().pending(this.notifsFile)) this.pendingNotifs.set(cid, [...(this.pendingNotifs.get(cid) || []), ...q]);   // MUTANT: the first cure's put-back\n    this._saveNotifs();\n", 'the drain puts nothing back'), 'law-drain-back'), 'mut-drain');
+  ok(lawDr.drain.back === 1, 'CONTROL (a copy that puts a drain not on disk back — the first cure): the text that went out is queued again — red', lawDr.drain);
   // CURE 3: no «unread» item after «gone» was said for the same failure (its note, still being written, lands after)
   {
     const d = mkDir('jobs-triage-gone-owed'), F = path.join(d, 'jobs.json');

@@ -635,9 +635,6 @@ function identityAtExit(res) {
   try { if (shared && shared.exitStartedAt() != null && res && !res.headersSent && typeof res.setHeader === 'function') res.setHeader('Cache-Control', 'no-transform'); } catch { }
 }
 
-/** THE LARGE FINITE BOUND (主开发, the moved2 cure 2: «the two waits without any bound get a large finite one») — a wait that
- *  must hold its caller until a store lands (a release's synchronous save kept) gives up here, said, never for ever */
-const LANDING_BOUND_MS = 10 * 60 * 1000;
 /** THE LAW for a module handed its writer by its caller (a suite's stand-in may be one): the writer's afterLanding; a writer
  *  without it (a stand-in that writes in place) or none runs the step now, answered as landed. → the same promise */
 function ride(W, file, step, opts = {}) {
@@ -647,4 +644,4 @@ function ride(W, file, step, opts = {}) {
   return Promise.resolve({ landed: true, value: v, ...(error ? { error } : {}) });
 }
 
-module.exports = { create, storeWriter, bootKeeper, partsOf, identityAtExit, ride, LANDING_BOUND_MS, GRACE, SLOW_MS, RESTARTS_MAX };
+module.exports = { create, storeWriter, bootKeeper, partsOf, identityAtExit, ride, GRACE, SLOW_MS, RESTARTS_MAX };
