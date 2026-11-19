@@ -43,7 +43,7 @@ import { cardWords, progressWords } from './app-card-model.js'; // design 009: T
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 import { buttonsOf, buttonsNoteOf, endWordsOf } from '../foryou-actions.js';   // lane queued-is-not-woke: a row's declared buttons
 import { decidedStamp, PERSON_DECIDES, closersOf, doorOf, isParkedAsk, isHidden, expiryWords, isDecisionRow, grantWords, verbsOf, runCardOf, runStripOf, factsDroppedWords, deadlineOf, endOf, ruledOf } from '../foryou-actions.js'; // PURE (lane wake-approve-card): THE decided stamp «approved by you · 09:41» — one spelling with the chat card; r3: the closers a row draws, a pointer's hide, a wake ask's lifetime
-import { isAsk } from '../inbox-origin.js'; // PURE: the AGENT's own ask (via 'ask', vibespace-ask) — batch 47's cure: only its fields are its whole words
+import { fieldWhole } from '../inbox-origin.js'; // PURE: batch 47's cure — only the AGENT's own ask (isAsk: via 'ask', vibespace-ask) has whole words; B-76dc: fieldWhole = the ONE answer every surface asks
 import { isSecretAsk, secretBoxEl } from './vault-paste-box.js'; // lane vault-paste-request: an agent's request for a secret — its masked paste box (kept across repaints, like the reply box)
 import { pressVerdict as settingPressVerdict, isProposable, isSettingChange, holdIsLive, PROPOSABLE } from '../ask-setting.js'; // PURE (CJS, lane setting-doors pick 2): an ask that PROPOSES one change of one setting — THE verdict the card draws (the hub judges it again)
 import { clockAt } from '../stash-summary.js'; // PURE: an instant in the viewer's zone (the product's one spelling — «22:00», «Sun 22:00»)
@@ -374,7 +374,7 @@ export function armDeadlines() {
 /** lane vault-paste-request: an agent's REQUEST FOR A SECRET — its words (what, what for, where it goes, what the paste does)
  *  shown whole ABOVE its paste box (the exit-ask lesson: never folded below the answer); the box itself is DOM nodes the
  *  row appends (renderRow / patchRow — never markup: it holds a field the owner pastes into). */
-const secretAskHtml = (i, t, detail) => (isSecretAsk(i) ? `<div class="ut-proposal-plan ut-secret-plan">${wordsHtml(detail || '')}</div>` : '');   // lane login-request-card r2: THE item's words renderer (a masked link = its words + THE note, inline in prose) — a login card's agent words ride only here
+const secretAskHtml = (i, t, detail) => (isSecretAsk(i) ? `<div class="ut-proposal-plan ut-secret-plan">${wordsHtml(detail || '', { whole: fieldWhole(i, 'detail', detail) })}</div>` : '');   // lane login-request-card r2: THE item's words renderer (a masked link = its words + THE note, inline in prose) — a login card's agent words ride only here
 
 /** lane browser-propose (2026-09-30): the agent's PROPOSAL, answered where it appears — its words (the card's, line for
  *  line: what Approve runs) ABOVE Approve / Reject, never folded (the exit-ask lesson: a folded detail below the button
@@ -623,9 +623,10 @@ function partsOf(entry, ctx) {
   // PRODUCER's plain-words item (the browser hand-back, a helper's ask, a desktop app's notice…) may cut a field itself — its own «…»
   // below the store's cap (a confirmation's target at 300, a script at 200) — so it keeps the conservative reading: a «…» ending a
   // line or the text is a cut, and the address it went through is plain words, never a link to a wrong page
-  const own = isAsk(i);
-  const wordsWhole = own && !card && !run && !(i.i18n && i.i18n.text) && words === i.text;
-  const detailWhole = own && !(i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length) && detail === i.detail;
+  // B-76dc: the rule itself is PURE src/inbox-origin.js fieldWhole (isAsk + the field as stored, no i18n template) — the For-you
+  // window's pane and the vault paste box ask the same
+  const wordsWhole = !card && !run && fieldWhole(i, 'text', words);
+  const detailWhole = fieldWhole(i, 'detail', detail);
   const rs = !resolved && ctx.replyState ? ctx.replyState(i) : { show: false };
   const dot = resolved
     ? '<span class="ut-dot" data-urgency=""></span>'

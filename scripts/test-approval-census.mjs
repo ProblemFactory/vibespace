@@ -848,7 +848,7 @@ const SH = await import(pathToFileURL(path.join(REPO, SAFE)).href);
   // lane foryou-honest (2.369.358): the fourth site — a For-you item in the For-you window — parses no markdown any more: its words
   // go through the tray's renderer (user-todos-row.js wordsHtml = linkedHtml, every segment escaped), so nothing to sanitize
   const iw = readRepo('src/lib/inbox-window.js');
-  if (!(iw.includes('el.innerHTML = wordsHtml(src);') && !/from 'marked'|new Marked\(|md\.parse/.test(iw))) off.push('src/lib/inbox-window.js');
+  if (!(iw.includes('el.innerHTML = wordsHtml(src, { whole });') && !/from 'marked'|new Marked\(|md\.parse/.test(iw))) off.push('src/lib/inbox-window.js');
   ok(off.length === 0, 'the four sites the verifier named: assistant / peer / report text, a job panel\'s md and a file\'s markdown preview import and call sanitizeHtml; a For-you item is escaped text (wordsHtml — no markdown since lane foryou-honest)', off);
   ok(configProblems(SH).length === 0, `CONFIG: FORBID_TAGS ⊇ {${MUST_FORBID_TAGS.join(' ')}}, FORBID_ATTR ⊇ {${MUST_FORBID_ATTR.join(' ')}}, SANITIZE_NAMED_PROPS, no data-*, HTML only, nothing widened, frozen`, configProblems(SH));
   ok(wiringProblems(readRepo(SAFE)).length === 0, 'WIRING: a dedicated DOMPurify instance, the two hooks, the config set once, fail closed, the shared default never touched', wiringProblems(readRepo(SAFE)));

@@ -559,7 +559,7 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
     if (!todos || (held && todos.get(held) && todos.get(held).status === 'open')) return;
     try {
       const r = todos.add(NOTIFY_INBOX_KEY, { origin: 'server', urgency: note.urgency === 'critical' ? 'high' : 'normal', by: 'agent', sessionName: label,
-        text: `${label}: ${note.summary || note.body}`.slice(0, 500), detail: note.summary ? note.body.slice(0, 2000) || null : null, action: { type: 'desktop-app-notify', appId: rec.id } });
+        text: `${label}: ${note.summary || note.body}`, detail: note.summary ? note.body || null : null, action: { type: 'desktop-app-notify', appId: rec.id } });   // B-76dc: the store cuts past its caps AND MARKS the cut — a pre-slice to exactly TEXT_MAX / DETAIL_MAX left a silent one (a link cut there read whole)
       const itemId = r && (r.id || (r.item && r.item.id));
       if (itemId) attention.set(rec.id, itemId);
     } catch (e) { log.warn?.(`[desktop] ${rec.id}: the For-you item was not filed — ${e.message}`); }

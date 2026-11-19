@@ -127,6 +127,16 @@ const LEGACY_PRODUCER_LABELS = Object.freeze(['Spending', 'Channels']);
 const LEGACY_BROWSER_TEXTS = Object.freeze([/^Your takeover of .* lapsed after .* without input/, /^The agent's browser.* is waiting for you to confirm "/, /^Browser backend: /]);
 const agentsBefore = (i) => i.origin === 'agent' || (i.origin == null && !LEGACY_PRODUCER_LABELS.includes(i.sessionName) && i.jobId == null && !LEGACY_BROWSER_TEXTS.some((re) => re.test(String(i.text || ''))));
 const isAsk = (i) => !!i && i.via === ASK_VIA; // the mark is written with origin `agent` (the route) or by the load (an item the tray reads as the agent's)
+// B-76dc (B-3f50's follow-up): IS A DRAWN FIELD THE AGENT'S OWN WHOLE WORDS? Only the agent's own ask (isAsk), only the field as
+// it stored it — never a template the page filled from `i18n`, never another string drawn in its place: then its end «…» is the
+// store's cut ONLY at the store's caps (foryou-links `whole`); every other item keeps the conservative reading (a producer may cut
+// a field itself). ONE answer for every surface that draws an item's words — the tray's row, the For-you window's pane, the vault
+// paste row and dialog (the pane and the paste box never passed it: a writer's own line-end «…» link read as a cut there).
+const fieldWhole = (i, field, shown) => {
+  if (!isAsk(i) || (field !== 'text' && field !== 'detail')) return false;
+  const filled = field === 'text' ? !!(i.i18n && i.i18n.text) : !!(i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length);
+  return !filled && typeof shown === 'string' && shown === i[field];
+};
 const legacyAsk = (i, producerOf = () => null) => !!i && agentsBefore(i) && i.via == null && i.i18n == null && (i.action == null || producerOf(i.action.type) === ASK_FILER);
 
-module.exports = { INBOX_ORIGINS, AGENT_WORDS_ORIGINS, AGENT_FIELDS_ORIGINS, FIELDS_FILERS, ORIGIN_LABELS, normalizeOrigin, ASK_VIA, ASK_FILER, isAsk, legacyAsk };
+module.exports = { INBOX_ORIGINS, AGENT_WORDS_ORIGINS, AGENT_FIELDS_ORIGINS, FIELDS_FILERS, ORIGIN_LABELS, normalizeOrigin, ASK_VIA, ASK_FILER, isAsk, fieldWhole, legacyAsk };

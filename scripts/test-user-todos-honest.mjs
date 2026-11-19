@@ -239,12 +239,12 @@ console.log('⑤ ONE RENDERER — the tray row and the For-you pane draw the age
   const ROW = read('src/lib/user-todos-row.js'), IW = read('src/lib/inbox-window.js');
   const census = (row, iw) => ({
     row: /export const wordsHtml = \(text, \{ whole = false \} = \{\}\) => linkedHtml\(String\(text \|\| ''\), \{ escape: escHtml, note: \(g\) => maskedLinkNote\(g, tr\), whole, has: isSettingKey, draw: fyDraw \}\);/.test(row) && /<div class="ut-text">\$\{card \? escHtml\(words\) : wordsHtml\(words, \{ whole: wordsWhole \}\)\}<\/div>/.test(row) && /<div class="ut-detail">\$\{wordsHtml\(detail, \{ whole: detailWhole \}\)\}<\/div>/.test(row),
-    pane: /function wordsInto\(el, src\) \{\s*el\.innerHTML = wordsHtml\(src\);\s*\}/.test(iw) && /wordsInto\(c\.title, v\.title\);/.test(iw) && /else wordsInto\(c\.detail, v\.detail\);/.test(iw),
+    pane: /function wordsInto\(el, src, whole = false\) \{\s*el\.innerHTML = wordsHtml\(src, \{ whole \}\);\s*\}/.test(iw) && /wordsInto\(c\.title, v\.title, fieldWhole\(it, 'text', v\.title\)\);/.test(iw) && /else wordsInto\(c\.detail, v\.detail, fieldWhole\(it, 'detail', v\.detail\)\);/.test(iw),   // B-76dc: the pane asks the row's whole-words answer
     noMarkdown: ![row, iw].some((s) => /from ['"]marked['"]|new Marked\(|renderMarkdown\(|\bmdInto\(/.test(s)),
   });
   const c = census(ROW, IW);
   ok(c.row && c.pane && c.noMarkdown, 'CENSUS: the tray row (words + detail) and the For-you pane (title + detail) both draw wordsHtml; neither file parses markdown', c);
-  const baseIW = IW.replace('function wordsInto(el, src) {\n  el.innerHTML = wordsHtml(src);\n}', "import { Marked } from 'marked';\nconst md = new Marked({});\nfunction mdInto(el, src) {\n  el.innerHTML = md.parse(src);\n}").replace('wordsInto(c.title, v.title);', 'mdInto(c.title, v.title);');
+  const baseIW = IW.replace('function wordsInto(el, src, whole = false) {\n  el.innerHTML = wordsHtml(src, { whole });\n}', "import { Marked } from 'marked';\nconst md = new Marked({});\nfunction mdInto(el, src) {\n  el.innerHTML = md.parse(src);\n}").replace("wordsInto(c.title, v.title, fieldWhole(it, 'text', v.title));", 'mdInto(c.title, v.title);');
   const cb = census(ROW, baseIW);
   ok(baseIW !== IW && !(cb.pane && cb.noMarkdown), 'CONTROL: a pane with its markdown put back ⇒ the census is RED', cb);
 }

@@ -256,7 +256,7 @@ console.log('§5 CENSUSES — one grammar · escaped words · the one artifact d
   // lane foryou-honest (P1-2): ONE renderer — the row's words and detail AND the window's pane draw wordsHtml (= linkedHtml, escaped)
   const wordsEscaped = (row) => /export const wordsHtml = \(text, \{ whole = false \} = \{\}\) => linkedHtml\(String\(text \|\| ''\), \{ escape: escHtml, note: \(g\) => maskedLinkNote\(g, tr\), whole, has: isSettingKey, draw: fyDraw \}\);/.test(row) && /<div class="ut-text">\$\{card \? escHtml\(words\) : wordsHtml\(words, \{ whole: wordsWhole \}\)\}<\/div>/.test(row) && /<div class="ut-detail">\$\{wordsHtml\(detail, \{ whole: detailWhole \}\)\}<\/div>/.test(row) && /a\.textContent = g\.s;/.test(row) && !/\.innerHTML = g\./.test(row);
   ok(wordsEscaped(ROW), 'NO innerHTML OF RAW TEXT: the tray\'s words and detail go through linkedHtml (escaped); the window\'s links are nodes with textContent');
-  ok(/function wordsInto\(el, src\) \{\s*el\.innerHTML = wordsHtml\(src\);\s*\}/.test(IW) && /wordsInto\(c\.title, v\.title\);/.test(IW) && /else wordsInto\(c\.detail, v\.detail\);/.test(IW) && /if \(plain\) linkifyInto\(c\.detail\);/.test(IW) && /c\.arts\.replaceChildren\(\.\.\.askChipEls\(it, t\)\)/.test(IW) && !/\bmdInto\(|from 'marked'/.test(IW),
+  ok(/function wordsInto\(el, src, whole = false\) \{\s*el\.innerHTML = wordsHtml\(src, \{ whole \}\);\s*\}/.test(IW) && /wordsInto\(c\.title, v\.title, fieldWhole\(it, 'text', v\.title\)\);/.test(IW) && /else wordsInto\(c\.detail, v\.detail, fieldWhole\(it, 'detail', v\.detail\)\);/.test(IW) && /if \(plain\) linkifyInto\(c\.detail\);/.test(IW) && /c\.arts\.replaceChildren\(\.\.\.askChipEls\(it, t\)\)/.test(IW) && !/\bmdInto\(|from 'marked'/.test(IW),
     'the For-you window: its words drawn by THE tray\'s renderer (wordsHtml — one renderer over both doors, never markdown: lane foryou-honest), a command\'s verbatim <pre> linked as text nodes, its chips as nodes');
   ok(!wordsEscaped(ROW.replace("linkedHtml(String(text || ''), { escape: escHtml, note: (g) => maskedLinkNote(g, tr), whole, has: isSettingKey, draw: fyDraw })", 'String(text)')), 'CONTROL: the words written raw into the row HTML ⇒ the census is RED');
   const rawHtml = (await import('data:text/javascript,' + encodeURIComponent(fileImports(FY).replace('export function linkedHtml(text, { escape = esc, note = (g) => maskedLinkNote(g), whole = false, has = null, draw = null } = {})', 'export function linkedHtml(text, { escape = (s) => s, note = (g) => maskedLinkNote(g), whole = false, has = null, draw = null } = {})')))).linkedHtml('<img src=x onerror=alert(1)>');
@@ -298,8 +298,8 @@ console.log('\nB-3f50 a line-end «…» of the writer\'s own keeps its link; a 
     ok(B.segmentText(own).filter((g) => g.t === 'link').length === 0 && lk(own, { whole: true }).length === 1, 'B-3f50 RED control: the release b06f36e90\'s tray drew the writer\'s own line-end «…» link as words (the row\'s complaint) — the whole-field road now keeps it');
   } else console.log('  · SKIP: the release b06f36e90 is not in this clone');
   const ROWB = read('src/lib/user-todos-row.js');
-  ok(/const own = isAsk\(i\);\s*const wordsWhole = own && !card && !run && !\(i\.i18n && i\.i18n\.text\) && words === i\.text;/.test(ROWB) && /const detailWhole = own && !\(i\.i18n && Array\.isArray\(i\.i18n\.detail\) && i\.i18n\.detail\.length\) && detail === i\.detail;/.test(ROWB)
-    && /^import \{ isAsk \} from '\.\.\/inbox-origin\.js';/m.test(ROWB),
+  ok(/const wordsWhole = !card && !run && fieldWhole\(i, 'text', words\);/.test(ROWB) && /const detailWhole = fieldWhole\(i, 'detail', detail\);/.test(ROWB)
+    && /^import \{ fieldWhole \} from '\.\.\/inbox-origin\.js';/m.test(ROWB),   // B-76dc: the rule moved into PURE inbox-origin fieldWhole (its own table below)
     'B-3f50 (a): the row reads a field WHOLE only when it draws the agent\'s own stored text / detail — never a template the page filled (a takeover request\'s «{words}» cut at 300), a card, a run headline or a line list; and (batch 47\'s cure) only an AGENT\'S OWN ASK (isAsk: via \'ask\') — a producer\'s item keeps the conservative reading');
   const FY = read('src/lib/foryou-links.js');
   const CM = "const cutMade = (a, z) => !still.has(a) && ends.some((e) => e >= z && !/\\s/.test(src.slice(z, e)));";
@@ -311,6 +311,71 @@ console.log('\nB-3f50 a line-end «…» of the writer\'s own keeps its link; a 
   const vcut = 'open https://h.example/x?k=[vault:…';
   ok(A.segmentText(vcut).filter((g) => g.t === 'link').length === 0, 'B-3f50 (b): the MASKED clause on its own (a copy without cutMade): a cut inside a [vault: mark — the probe\'s closed mark is a MASKED segment over the cut ⇒ the URL before it is drawn as words', A.segmentText(vcut));
   ok(J(M.segmentText(vcut).filter((g) => g.t === 'link').map((g) => g.s)) === J(['https://h.example/x?k=[vault']), 'B-3f50 (b) RED control: the same copy with the masked clause skipped (the verifier\'s M3d) links «https://h.example/x?k=[vault» — the leg above can go red', M.segmentText(vcut));
+}
+
+// B-76dc (B-3f50's follow-up): EVERY SURFACE THAT DRAWS AN ITEM'S STORED FIELD ASKS THE ONE ANSWER — PURE src/inbox-origin.js
+// fieldWhole (the agent's own ask, the field as stored, no i18n template). The For-you window's pane and the vault paste box drew
+// the same field WITHOUT it: a «…» the writer put at a line's end read as a cut there and its link was words, while the tray kept it.
+// + THE ASK FILER CUTS NOTHING ITSELF: the whole reading trusts that an ask's field ends in «…» only where the store's clip put it
+// (at its caps) — so the ask route (ASK_FILER) builds no «…» of its own (a fixed-string census over its code, comments stripped).
+console.log('\nB-76dc every surface asks fieldWhole; the ask filer cuts nothing itself');
+{
+  const OR = require(path.join(REPO, 'src/inbox-origin.js'));
+  const ask = { id: 'a1', via: 'ask', origin: 'agent', text: 'the guide: https://docs.example.com/wiki/Setup…\nthen run it', detail: 'see https://x.example/a…' };
+  const table = (fw0) => { const fw = (...a) => { try { return fw0(...a); } catch (e) { return `threw: ${e && e.message}`; } };   // a planted copy that THROWS is a wrong answer (red), never a crash
+    return [
+    ['an ask\'s stored text, drawn as stored', fw(ask, 'text', ask.text), true],
+    ['an ask\'s stored detail, drawn as stored', fw(ask, 'detail', ask.detail), true],
+    ['another string drawn in its place (a card\'s words)', fw(ask, 'text', 'Approve the plan'), false],
+    ['a page-filled template (i18n.text)', fw({ ...ask, i18n: { text: { key: 'x' } } }, 'text', ask.text), false],
+    ['a page-filled detail (i18n.detail lines)', fw({ ...ask, i18n: { detail: [{ key: 'y' }] } }, 'detail', ask.detail), false],
+    ['a producer\'s item (no via ask) — it may cut a field itself', fw({ ...ask, via: undefined, origin: 'browser' }, 'text', ask.text), false],
+    ['no item', fw(null, 'text', 'x'), false],
+    ['a field that is no field', fw(ask, 'id', 'a1'), false],
+  ]; };
+  const bad = (fw) => table(fw).filter(([, g, w]) => g !== w).map(([n]) => n);
+  ok(typeof OR.fieldWhole === 'function' && bad(OR.fieldWhole).length === 0, 'B-76dc: fieldWhole — only the agent\'s own ask, only the field as it stored it (no i18n template, nothing drawn in its place)', bad(OR.fieldWhole || (() => null)));
+  const ORS = read('src/inbox-origin.js');
+  const loadOr = (src) => { const m = { exports: {} }; new Function('module', 'exports', 'require', src)(m, m.exports, require); return m.exports; };
+  const red1 = loadOr(ORS.replace("  if (!isAsk(i) || (field !== 'text' && field !== 'detail')) return false;", "  if (field !== 'text' && field !== 'detail') return false;"));
+  const red2 = loadOr(ORS.replace('  return !filled && typeof shown === \'string\' && shown === i[field];', '  return typeof shown === \'string\' && shown === i[field];'));
+  ok(bad(red1.fieldWhole).length > 0 && bad(red2.fieldWhole).length > 0, `B-76dc RED controls: a fieldWhole that reads a producer's item as whole (${bad(red1.fieldWhole).join(' | ')}) or a page-filled template as whole (${bad(red2.fieldWhole).join(' | ')})`);
+  // THE SURFACES: the tray's row (words, detail, the vault paste row), the For-you window's pane (title, detail), the paste dialog
+  const ROWS = read('src/lib/user-todos-row.js'), IWS = read('src/lib/inbox-window.js'), VPB = read('src/lib/vault-paste-box.js');
+  const surfaces = (row, iw, vpb) => ({
+    row: /wordsHtml\(words, \{ whole: wordsWhole \}\)/.test(row) && /wordsHtml\(detail, \{ whole: detailWhole \}\)/.test(row) && /const wordsWhole = !card && !run && fieldWhole\(i, 'text', words\);/.test(row),
+    secretRow: /wordsHtml\(detail \|\| '', \{ whole: fieldWhole\(i, 'detail', detail\) \}\)/.test(row),
+    pane: /wordsInto\(c\.title, v\.title, fieldWhole\(it, 'text', v\.title\)\)/.test(iw) && /wordsInto\(c\.detail, v\.detail, fieldWhole\(it, 'detail', v\.detail\)\)/.test(iw) && /el\.innerHTML = wordsHtml\(src, \{ whole \}\);/.test(iw),
+    dialog: /linkedHtml\(String\(detail \|\| ''\), \{ escape: escHtml, note: \(g\) => maskedLinkNote\(g, t\), whole: fieldWhole\(item, 'detail', detail\) \}\)/.test(vpb),
+    // every wordsHtml call that draws an item's text / detail carries `whole` (the census over the client's callers)
+    every: [row, iw].every((src) => [...src.matchAll(/wordsHtml\(([^)]*)\)/g)].filter((m) => /\b(words|detail|src)\b/.test(m[1])).every((m) => /whole/.test(m[1]))),
+  });
+  const sv = surfaces(ROWS, IWS, VPB);
+  ok(Object.values(sv).every(Boolean), 'B-76dc: the tray row, the vault paste row, the For-you window\'s pane and the paste dialog each draw an item\'s stored field with fieldWhole\'s answer — no wordsHtml of an item\'s words without `whole`', sv);
+  ok(!Object.values(surfaces(ROWS, IWS.replace("wordsInto(c.detail, v.detail, fieldWhole(it, 'detail', v.detail))", 'wordsInto(c.detail, v.detail)').replace('el.innerHTML = wordsHtml(src, { whole });', 'el.innerHTML = wordsHtml(src);'), VPB)).every(Boolean)   // stale-pins: kept (the train tip's shape, planted)
+    && !Object.values(surfaces(ROWS.replace("wordsHtml(detail || '', { whole: fieldWhole(i, 'detail', detail) })", "wordsHtml(detail || '')"), IWS, VPB)).every(Boolean)   // stale-pins: kept (the train tip's shape, planted)
+    && !Object.values(surfaces(ROWS, IWS, VPB.replace(", whole: fieldWhole(item, 'detail', detail) })", ' })'))).every(Boolean), 'B-76dc RED controls: the train tip\'s pane, its vault paste row, its paste dialog (no whole) are each refused');   // stale-pins: kept (the train tip's shapes, planted)
+  // THE ASK FILER CUTS NOTHING ITSELF (its code, comments stripped): no «…» literal and no … escape — the store's clip at its caps
+  // (src/user-todos.js TEXT_MAX / DETAIL_MAX) is the only cut an ask's field can carry, which is what the whole reading trusts
+  const codeOnly = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/[^\n]*/g, '$1');
+  const filer = read(OR.ASK_FILER);
+  const cuts = (src) => { const c = codeOnly(src); return ['…', '\\u2026'].filter((x) => c.includes(x)); };
+  ok(OR.ASK_FILER === 'src/agent-routes/status.js' && cuts(filer).length === 0, `B-76dc: the ask filer (${OR.ASK_FILER}) builds no «…» of its own — the store's clip at its caps is an ask's only cut`, cuts(filer));
+  ok(cuts(filer + "\nconst short = (s) => (s.length > 80 ? s.slice(0, 79) + '…' : s);\n").length === 1, 'B-76dc RED control: an ask filer that cuts a field itself (a planted `slice(0, 79) + \'…\'`) is caught by the census');
+  // …AND NO PRODUCER CUTS A FIELD AT THE STORE'S CAPS WITHOUT THE MARK (kb «Left (named, backlog B-76dc)»: a desktop app's notice was
+  // pre-sliced to exactly TEXT_MAX / DETAIL_MAX, so the store saw no overflow and never marked the cut — a link cut there read whole).
+  // Every store add call (`…todos.add(`, its own text, a balanced scan) is read: a `text:` / `detail:` that slices at a cap is a silent cut.
+  const UTS = require(path.join(REPO, 'src/user-todos.js'));
+  const capSlice = new RegExp(`\\b(text|detail)\\s*:[^\\n]*\\.slice\\(0,\\s*(${UTS.TEXT_MAX}|${UTS.DETAIL_MAX})\\)`);
+  // each `userTodos.add(` CALL's own text (a balanced scan to its closing paren — never a neighbouring record that slices a `text:`)
+  const ADD = /\b\w*[Tt]odos\.add\(/g;   // the store's add, by every name a filer holds it under (userTodos, todos, deps.userTodos…)
+  const addCalls = (t) => [...t.matchAll(ADD)].map((m) => { let d = 0, j = m.index + m[0].length - 1; for (; j < t.length; j++) { const ch = t[j]; if (ch === '(') d++; else if (ch === ')' && --d === 0) break; } return t.slice(m.index, j + 1); });
+  const filers = (src) => Object.entries(src).flatMap(([f, t]) => addCalls(codeOnly(t)).filter((c) => capSlice.test(c)).map((c) => `${f}: ${c.replace(/\s+/g, ' ').slice(0, 120)}`));
+  const ALL = Object.fromEntries((function walk(d) { return fs.readdirSync(path.join(REPO, d), { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(`${d}/${e.name}`) : e.name.endsWith('.js') ? [`${d}/${e.name}`] : []); })('src').map((f) => [f, read(f)]));
+  const silent = filers(ALL);
+  ok(Object.values(ALL).filter((t) => addCalls(t).length).length >= 10 && silent.length === 0, `B-76dc: no For-you producer cuts a text / detail at the store's caps (${UTS.TEXT_MAX} / ${UTS.DETAIL_MAX}) itself — the store cuts past them and marks the cut`, silent);
+  const tipDAK = ALL['src/server/desktop-app-keeper.js'].replace("text: `${label}: ${note.summary || note.body}`, detail: note.summary ? note.body || null : null,", "text: `${label}: ${note.summary || note.body}`.slice(0, 500), detail: note.summary ? note.body.slice(0, 2000) || null : null,");   // stale-pins: kept (the train tip's line, planted)
+  ok(tipDAK !== ALL['src/server/desktop-app-keeper.js'] && filers({ ...ALL, 'src/server/desktop-app-keeper.js': tipDAK }).length === 1, 'B-76dc RED control: the train tip\'s desktop-app notice (sliced to exactly 500 / 2000) is caught — the plant stands (the copy differs)');
 }
 
 // batch 47's cure (主开发 09:09Z, «as if a must»): A FIELD A PRODUCER CUT ITSELF IS NOT THE AGENT'S WHOLE WORDS. The browser hand-back

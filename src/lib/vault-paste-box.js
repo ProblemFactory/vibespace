@@ -17,6 +17,7 @@ import { createModalShell, fetchJson, showToast, latestRender } from './utils.js
 import { vaultFacts, showUnlock, showSetup } from './vault-unlock.js';
 import { loginFields, loginRefusalWords } from './vault-login-row.js';   // lane login-request-card: THE add door's fields and words
 import { useLoginWords } from './use-login-words.js';   // lane login-request-card: one login, several sites — the words before «Use a login you already saved…»
+import { fieldWhole } from '../inbox-origin.js';   // B-76dc: the ONE answer to «is this field the agent's own whole words» (the tray row's)
 import { linkedHtml, maskedLinkNote } from './foryou-links.js';   // lane login-request-card r3: THE item's words renderer in the dialog (a masked link = its words + THE note)
 import { escHtml } from './utils.js';
 import { showTotpAddDialog, totpFields } from './vault-totp-row.js';   // lane login-request-card: «Two-step code…» = THE 两步验证… dialog · lane totp-request-card: its field set (THE two-step card)
@@ -468,7 +469,7 @@ export function showSecretPasteDialog(model, item, { words = '', detail = '', pl
     unsaved: { isDirty: () => boxTyped(box), save: () => press('store'), discard: () => { const f = fieldOf(); if (f) f.value = ''; } }, kind: 'form' });
   if (raised) return null;   // raised: the same subject's form, as it was   // a pasted value never vanishes without a word — nor stays in a closed dialog
   const planEl = plan || mk('div', null);
-  if (!plan) planEl.innerHTML = linkedHtml(String(detail || ''), { escape: escHtml, note: (g) => maskedLinkNote(g, t) });   // r3: THE item's words renderer (the tray's wordsHtml) — a masked link = its words + THE note, inline in the prose
+  if (!plan) planEl.innerHTML = linkedHtml(String(detail || ''), { escape: escHtml, note: (g) => maskedLinkNote(g, t), whole: fieldWhole(item, 'detail', detail) });   // r3: THE item's words renderer (the tray's wordsHtml) — a masked link = its words + THE note, inline in the prose
   planEl.className = 'ut-proposal-plan vault-paste-plan';
   body.append(mk('div', 'vault-paste-words', words), planEl, box);
   box.addEventListener('click', (e) => {

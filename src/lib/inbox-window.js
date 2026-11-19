@@ -38,6 +38,7 @@ import { closersOf, doorOf, isDecisionRow, runCardOf, deadlineOf, factsDroppedWo
 import { needLine } from './need-line.js'; // lane ui-needs-a-button: a sentence that says something is needed carries its door on its line // PURE (lane wake-approve-card r2): a decision row's two verbs, no generic closer; r3: a pointer's one closer, Hide
 import { fyLinkMenu } from './internal-link-door.js'; // lane login-request-card piece 1: a link of the scheme in an item's words — «Go» · «Copy link»
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
+import { fieldWhole } from '../inbox-origin.js'; // B-76dc: the tray row's answer to «is this field the agent's own whole words» (a line-end «…» link kept)
 import { replyPictures, backendOfKey } from './reply-pictures.js'; // B-51dd: a reply takes a picture (button · paste · drop) through THE picture door
 import { showSecretPasteDialog } from './vault-paste-box.js'; // lane vault-paste-request: a paste request's box, as a dialog over this window
 
@@ -49,8 +50,10 @@ const ICON = svgIcon16('<path d="M2 9.5h3l1 1.8h4l1-1.8h3"/><path d="M3.5 3.5h9l
 // and the tray as plain text: `test/ 还是 __tests__/？` reached the pane as «test/ 还是 <strong>tests</strong>/？» — the
 // two options the person answered between were not the agent's. Now both draw user-todos-row.js wordsHtml — the words
 // EXACTLY as written (pre-wrap keeps the line breaks), every segment escaped, a link a span around its own words.
-function wordsInto(el, src) {
-  el.innerHTML = wordsHtml(src);
+// B-76dc: `whole` = the field is the agent's own stored words (PURE inbox-origin fieldWhole — the tray row's answer): a «…» the
+// writer put at a line's end keeps its link, as in the tray
+function wordsInto(el, src, whole = false) {
+  el.innerHTML = wordsHtml(src, { whole });
 }
 
 const mk = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
@@ -494,7 +497,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     c.el.classList.toggle('iw-item-resolved', v.resolved);
     c.el.classList.toggle('iw-item-cleared', model.isCleared(it)); // "Clear content…": the cleared sentence, dimmed
     // the words: the title and the detail at FULL width, THE tray's renderer (plain + links, escaped), selectable
-    if (c.sig.title !== v.title) { wordsInto(c.title, v.title); c.sig.title = v.title; } // lane foryou-attachments: its paths / links press-to-open (lane foryou-honest: wordsHtml makes them)
+    if (c.sig.title !== v.title) { wordsInto(c.title, v.title, fieldWhole(it, 'text', v.title)); c.sig.title = v.title; } // lane foryou-attachments: its paths / links press-to-open (lane foryou-honest: wordsHtml makes them)
     // r7 addendum: THE deadline line (foryou-actions deadlineOf — «valid for 60 sec · 42 sec left by the server's clock», then
     // «time is up …» or the late answer's words); the page ticker (user-todos-row tickDeadlines) moves it every second at the
     // HUB's time (r8), this paint only (re)arms it — it never withdraws the answers (the producer's settle does)
@@ -543,7 +546,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     if (c.sig.detail !== detailSig) {
       if (card) { c.detail.innerHTML = appCardHtml(it, t, { lang: resolveLang(), resolved: v.resolved, buttons: false }); c.detail.style.display = ''; }
       else if (plain) { const pre = mk('pre', 'iw-exit-cmd'); pre.textContent = v.detail; c.detail.replaceChildren(pre); }
-      else wordsInto(c.detail, v.detail); // lane foryou-honest: THE tray's renderer (never markdown)
+      else wordsInto(c.detail, v.detail, fieldWhole(it, 'detail', v.detail)); // lane foryou-honest: THE tray's renderer (never markdown)
       // lane vault-scrub-forms (q-043 verify M1): a RUN card says what the scrubbing does not promise — the owner reads the command
       if (dropped) c.detail.prepend(mk('div', 'ut-run-cut ut-facts-dropped', dropped));
       if (!card && it.action && it.action.type === 'vault-run-ask') c.detail.append(mk('div', 'iw-run-note', t('The output is scrubbed of the secret\'s common spellings; a command that re-encodes it can still show it — read the whole command before you allow it.')));
