@@ -78,12 +78,15 @@ const ROOT = scratchDir('vault-run');
 // THE SUITE'S OWN HOME AND ENVIRONMENT (主开发 2026-11-19 00:56Z — a suite judges the same under the kit and under a caller's whole
 // environment: the kit hands a fresh empty home and a minimal env, the tree's fast tier or a probe the caller's own). Every door this
 // suite builds gets SUITE_HOME as its home and SUITE_ENV (+ its PATH) as the agent env — never os.homedir() nor process.env; the
-// mark below is the caller's, and the printer leg proves no run sees it.
+// mark below is the caller's; the leg through world()'s OWN default door proves no run sees it (the printer door's check beside it
+// holds by construction — its env is built inline from SUITE_ENV).
 const SUITE_HOME = path.join(ROOT, 'home'); fs.mkdirSync(path.join(SUITE_HOME, 'Downloads'), { recursive: true });
 // THE SUITE'S OWN TEMP FOLDER = its scratch root: the scratch root sits under /tmp WHATEVER the caller's TMPDIR says (src/fixture-guard.js
 // TMP_ROOTS), while a door's temp folder defaulted to os.tmpdir() — under a caller's own TMPDIR every world's folder fell outside the
 // fence (cwd_refused) wherever a leg ran in a folder that is not its caller's project (the throwaway probe's reading, 2026-11-19)
 const SUITE_TMP = ROOT;
+// …a temp folder only where a leg PINS it: every door world() builds gets SUITE_TMP (a leg may hand its own, B-7f97's privTmp); a door
+// built outside world() and the suite's own process (Node's os.tmpdir(): mutant copies, a leg's own mkdtemp) still follow the caller's TMPDIR.
 const SUITE_ENV = Object.freeze({ HOME: SUITE_HOME, PATH: [path.dirname(process.execPath), '/usr/local/bin', '/usr/bin', '/bin'].join(':'), TMPDIR: SUITE_TMP, LANG: 'C.UTF-8' });
 process.env.VS_SUITE_CALLER_MARK = 'the-caller-env';   // a variable only the CALLER's environment carries
 const M = mutantCopies('vault-run', REPO);
@@ -1833,7 +1836,7 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
 
   // the suite's OWN environment: no run of this suite sees the caller's (the mark only the caller's env carries) — RED: a door whose
   // agent env spreads process.env (the suite's old shape) hands the run the caller's mark
-  ok(EP.VS_SUITE_CALLER_MARK === undefined && EP.HOME === SUITE_HOME, '主开发 00:56Z: a run of this suite sees the suite\'s OWN home and environment — never the caller\'s (its mark absent, HOME the stand-in)', { mark: EP.VS_SUITE_CALLER_MARK, home: EP.HOME });
+  ok(EP.VS_SUITE_CALLER_MARK === undefined && EP.HOME === SUITE_HOME, '主开发 00:56Z: the printer door\'s run carries no caller mark and the stand-in HOME — BY CONSTRUCTION (its env is built inline from SUITE_ENV); the leg through world()\'s own default door below is the one that carries the meaning', { mark: EP.VS_SUITE_CALLER_MARK, home: EP.HOME });
   { const P2 = capOf();
     const leakDoor = mkGh({ spawnImpl: P2.spawn, agentEnv: () => ({ ...process.env, PATH: [WSEAL, BIN, '/usr/bin', '/bin'].join(':') }) });   // stale-pins: kept — a RED control: the suite's old caller-env spread, on purpose
     await leakDoor.run({ caller: sw.caller, args: ['--env', 'T=vault://agent:conv-1/gh-token', '--', NODE, PRINTER, 'ran', path.join(sw.work, 'x2.txt')], cwd: sw.work });
