@@ -769,7 +769,8 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           // read from the CLI itself, src/managed-claude-settings.js): the CLI applies the managed source over the inline override and
           // the spawn's env, so a third-party provider's start would hand the organisation's credential to the provider's address —
           // REFUSED BY NAME before anything spawns; what cannot be told refuses too. Only Claude Code (creds.keyHelper)
-          if (pvModel && harness && harness.creds && harness.creds.keyHelper) {
+          // (a start aimed at a PAIRED machine is refused below by its own name — provider-remote, this machine only — never by this one)
+          if (!data.hostId && pvModel && harness && harness.creds && harness.creds.keyHelper) {
             const mh = await MANAGED.managedHelperFact({ dir: typeof managedClaudeDir === 'string' ? managedClaudeDir : null });
             if (mh.named !== false) {
               const said = MANAGED.refusalOf(mh, (() => { try { return accounts?.providerRecordOf?.(data.accountId)?.label || data.accountId; } catch { return data.accountId; } })());

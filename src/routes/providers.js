@@ -99,7 +99,7 @@ function registerProviderRoutes(app, { providers, tester = null, onChange = () =
     if (!tester) return res.status(409).json({ ok: false, code: 'unfit', error: 'the provider test is not available on this hub' });
     let r;
     try { r = await tester.runProviderTest(String(req.params.id), String((req.body || {}).harness || ''), { by: 'human' }); } catch (e) { r = { ok: false, code: 'failed', error: e.message }; }
-    if (!r.ok) return res.status(STATUS[r.code] || 409).json({ ok: false, code: r.code, error: PT.REFUSAL_WORDS[r.code] || WORDS[r.code] || r.error || r.code });
+    if (!r.ok) return res.status(STATUS[r.code] || 409).json({ ok: false, code: r.code, error: PT.REFUSAL_WORDS[r.code] || WORDS[r.code] || r.error || r.code, ...(r.where ? { where: String(r.where).slice(0, 160) } : {}) });   // the managed refusals name their file
     // the key or the address changed while it ran: what it tested is no longer there — said as a refusal with its words, never «Works»
     if (r.changed) return res.status(409).json({ ok: false, code: 'changed', error: PT.REFUSAL_WORDS.changed });
     if (r.verdict !== 'cli-missing') changed('test', String(req.params.id));

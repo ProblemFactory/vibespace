@@ -43,6 +43,7 @@ import os from 'node:os';
 import path from 'node:path';
 import Module, { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { anchored } from './scratch.mjs';   // the tree's control helper (an anchor gone or not unique fails by name)
 const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = path.join(ROOT, 'src/model-providers.js');
@@ -729,12 +730,14 @@ console.log('⑮ the provider test: a FAKE CLI, empty homes, a third party only,
   fs.rmSync(path.join(MDIR, 'managed-settings.json'));
   fresh();
   const mh2 = await mhRunner.runProviderTest(P.ok.id, 'claude', { by: 'human' });
-  ok(!mh1.ok && mh1.code === 'managed-helper' && mhRan === null && mhKeyReads === 0 && !!PTM.REFUSAL_WORDS['managed-helper'] && mh2.ok && report() !== null && keyReads === 1,
-    'the machine\'s managed Claude settings set a key helper: the test is refused by name (managed-helper), NOTHING spawned and the vault key NEVER read; the managed file gone, the SAME runner tests again (its slot was freed)', { mh1, mh2: mh2.verdict, mhKeyReads, keyReads });
+  ok(!mh1.ok && mh1.code === 'managed-helper' && /managed-settings\.json$/.test(String(mh1.where)) && /\{where\}/.test(PTM.REFUSAL_WORDS['managed-helper']) && !!PTM.REFUSAL_WORDS['windows-policy-unread'] && !/administrator/i.test(PTM.REFUSAL_WORDS['windows-policy-unread'])
+    && read('src/routes/providers.js').includes("...(r.where ? { where: String(r.where).slice(0, 160) } : {})") && read('src/lib/provider-roster.js').includes("{ where: (x && x.where) || '' }")
+    && mhRan === null && mhKeyReads === 0 && !!PTM.REFUSAL_WORDS['managed-helper'] && mh2.ok && report() !== null && keyReads === 1,
+    'the machine\'s managed Claude settings set a key helper: the test is refused by name (managed-helper), the FILE named (the route passes it on, the roster\'s toast says it; the Windows policy unread has its own words), NOTHING spawned and the vault key NEVER read; the managed file gone, the SAME runner tests again (its slot was freed)', { mh1, mh2: mh2.verdict, mhKeyReads, keyReads });
   fs.writeFileSync(path.join(MDIR, 'managed-settings.json'), JSON.stringify({ apiKeyHelper: '/opt/org/key-helper' }));
   fresh();
-  const ptrPatched = (pairs) => { let s = fs.readFileSync(PTRF, 'utf-8'); for (const [from, to] of pairs) { if (s.split(from).length !== 2) throw new Error('control anchor not in provider-test.js once: ' + from.slice(0, 70)); s = s.replace(from, to); } const m = new Module(PTRF); m.filename = PTRF; m.paths = Module._nodeModulePaths(path.dirname(PTRF)); m._compile(s, PTRF); return m.exports; };   // compiled in memory beside the real file (this block runs before the suite's runnerMutant)
-  const mhx = await mk(ptrPatched([["      if (h.creds.keyHelper) { const mh = await MANAGED.managedHelperFact({ dir: managedDir }); if (mh.named !== false) return { ok: false, code: 'managed-helper', where: mh.where }; }\n", '']]), { managedDir: MDIR }).runProviderTest(P.ok.id, 'claude', { by: 'human' });
+  const ptrPatched = (pairs) => { let s = fs.readFileSync(PTRF, 'utf-8'); for (const [from, to] of pairs) s = anchored(s, from, to, 'the Test without its managed check'); const m = new Module(PTRF); m.filename = PTRF; m.paths = Module._nodeModulePaths(path.dirname(PTRF)); m._compile(s, PTRF); return m.exports; };   // compiled in memory beside the real file (this block runs before the suite's runnerMutant)
+  const mhx = await mk(ptrPatched([["      if (h.creds.keyHelper) { const mh = await MANAGED.managedHelperFact({ dir: managedDir }); if (mh.named !== false) return { ok: false, code: mh.cause === 'windows-unread' ? 'windows-policy-unread' : 'managed-helper', where: mh.where }; }\n", '']]), { managedDir: MDIR }).runProviderTest(P.ok.id, 'claude', { by: 'human' });
   ok(mhx.ok && report() !== null, 'CONTROL: the test without the managed-settings check spawns the CLI under the managed helper ⇒ the leg above goes RED', mhx.verdict);
   // A NEW KEY WHILE A TEST RUNS (the chain cure's read, R2): the run tested the OLD key — its verdict is not written onto the new one
   const midRun = slowRunner.runProviderTest(P.slow.id, 'claude', { by: 'human' });

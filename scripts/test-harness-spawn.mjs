@@ -20,7 +20,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { scratchDir } from './scratch.mjs';
+import { scratchDir, anchored } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
 
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -502,12 +502,11 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   // RED CONTROLS FOR THE PROVIDER'S WORDS (主开发 23:45Z): the create without the provider's form says the SUBSCRIPTION words —
   // the notice's (helperNotice without `provider`) and the settings file's (the loop without PROVIDER_BILLING_WORDS)
   const NWORDS = 'hostId: data.hostId || null, provider: onProvider,', FWORDS = 'const w = (onProvider && SFW.PROVIDER_BILLING_WORDS[k]) || SFW.SETTINGS_FILE_WORDS[k], name';
-  if (src.split(NWORDS).length !== 2 || src.split(FWORDS).length !== 2) throw new Error('the anchors of the provider-words controls are not in the source once');
   helperNamed(true);
-  const wn = await noticed(M.load('src/ws-create.js', src.replace(NWORDS, 'hostId: data.hostId || null,'), 'pv-subwords'), { extraArgs: ['--settings', PFILE] });
+  const wn = await noticed(M.load('src/ws-create.js', anchored(src, NWORDS, 'hostId: data.hostId || null,', 'the notice without the provider\'s form'), 'pv-subwords'), { extraArgs: ['--settings', PFILE] });
   const wh = wn.notes.find((n) => n.key.startsWith('billing-pick-helper-'));
   ok(!!wh && wh.i18n.key === BP.HELPER_SET_ASIDE.local && /the subscription you picked/.test(wh.text), 'CONTROL: the notice without the provider\'s form tells a DeepSeek conversation «the subscription you picked» ⇒ the provider-words leg goes RED', wh && wh.text);
-  const wf = await noticed(M.load('src/ws-create.js', src.replace(FWORDS, 'const w = SFW.SETTINGS_FILE_WORDS[k], name'), 'pv-subfilewords'), { extraArgs: ['--settings', PFILE] });
+  const wf = await noticed(M.load('src/ws-create.js', anchored(src, FWORDS, 'const w = SFW.SETTINGS_FILE_WORDS[k], name', 'the file words without the provider\'s form'), 'pv-subfilewords'), { extraArgs: ['--settings', PFILE] });
   const wfn = wf.notes.find((n) => n.key.startsWith('settings-file-'));
   ok(!!wfn && wfn.i18n.key === SFW.SETTINGS_FILE_WORDS.billing && /bills the subscription chosen for it/.test(wfn.text), 'CONTROL: the settings-file loop without the provider\'s words says «bills the subscription chosen for it» ⇒ the file-words leg goes RED', wfn && wfn.text);
   // A MACHINE WHOSE MANAGED CLAUDE SETTINGS NAME A KEY HELPER (主开发 23:45Z, as if a must; the fact read from the CLI 2.1.322's own
@@ -534,9 +533,8 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   const mOwn = await mstart(mdir({ 'managed-settings.json': HELPER }), { backend: 'claude' });
   ok(mNone.x.spawned.length === 1 && mAbsent.x.spawned.length === 1 && mCodex.x.spawned.length === 1 && mOwn.x.spawned.length === 1,
     'managed settings that name no helper, or no managed folder at all: the provider start runs; a Codex provider (no Claude helper reaches it) and a start on the machine\'s own login are not this refusal\'s', [mNone.x.spawned.length, mAbsent.x.spawned.length, mCodex.x.spawned.length, mOwn.x.spawned.length]);
-  const MCHECK = 'if (pvModel && harness && harness.creds && harness.creds.keyHelper) {\n            const mh = await MANAGED.managedHelperFact(';
-  if (src.split(MCHECK).length !== 2) throw new Error('the anchor of the control «the managed-helper refusal» is not in the source once');
-  const mCtl = await mstart(mdir({ 'managed-settings.json': HELPER }), { backend: 'claude', accountId: ds.id }, M.load('src/ws-create.js', src.replace(MCHECK, MCHECK.replace('if (pvModel && harness', 'if (false && pvModel && harness')), 'pv-nomanaged'));
+  const MCHECK = 'if (!data.hostId && pvModel && harness && harness.creds && harness.creds.keyHelper) {\n            const mh = await MANAGED.managedHelperFact(';
+  const mCtl = await mstart(mdir({ 'managed-settings.json': HELPER }), { backend: 'claude', accountId: ds.id }, M.load('src/ws-create.js', anchored(src, MCHECK, MCHECK.replace('if (!data.hostId && pvModel', 'if (false && pvModel'), 'the create without the managed check'), 'pv-nomanaged'));
   ok(mCtl.x.spawned.length === 1 && !mCtl.err, 'CONTROL: the create without the managed-settings check spawns the DeepSeek conversation under the managed helper ⇒ the refusal leg goes RED', mCtl.err);
   // THE MANAGED ENV BLOCK (its reader's MUST): the CLI copies a managed `env` over the spawn's own — an Anthropic credential there
   // goes to the provider, an address there sends the provider's key to the organisation: both refuse like a helper
@@ -547,35 +545,88 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   ok(mEnvTok.x.spawned.length === 0 && mEnvTok.err && mEnvTok.err.i18n.key === MANAGED.MANAGED_HELPER_WORDS.named && /managed-settings\.json/.test(mEnvTok.err.i18n.params.where)
     && mEnvUrl.x.spawned.length === 0 && mEnvUrl.err && mEnvUrl.err.code === 'provider-managed-helper' && mEnvOther.x.spawned.length === 1,
     'a managed env that sets an Anthropic credential (or an address) refuses the provider start by name, the file named; an env of other names does not', [mEnvTok.err && mEnvTok.err.i18n.params, mEnvUrl.err && mEnvUrl.err.code, mEnvOther.x.spawned.length]);
-  const ENVLINE = "  if (env && Object.entries(env).some(([k, v]) => ENV_CREDENTIAL_OR_ROUTE.test(String(k)) && v != null && String(v) !== '')) return { named: true, cause: 'env' };\n";
+  const ENVLINE = "  if (env && envHit(env)) return { named: true, cause: 'env' };\n";
   const MSRC = fs.readFileSync(path.join(REPO, 'src/managed-claude-settings.js'), 'utf8');
-  if (MSRC.split(ENVLINE).length !== 2) throw new Error('the anchor of the control «the managed env block» is not in the source once');
-  const MANAGED_NOENV = M.load('src/managed-claude-settings.js', MSRC.replace(ENVLINE, ''), 'managed-noenv');
+  const MANAGED_NOENV = M.load('src/managed-claude-settings.js', anchored(MSRC, ENVLINE, '', 'the reader without its env check'), 'managed-noenv');
   const envCtl = await MANAGED_NOENV.managedHelperFact({ dir: mdir({ 'managed-settings.json': JSON.stringify({ env: { ANTHROPIC_AUTH_TOKEN: ORG_TOKEN } }) }), wsl: false });
   ok(envCtl.named === false, 'CONTROL: the reader without its env check finds nothing in a managed file whose env carries the organisation\'s token ⇒ the env leg goes RED', envCtl);
+  // THE ENV RULE NAMES ONLY CREDENTIALS AND ROUTES (主开发 00:42Z): a managed model name or a cloud switch set off is neither — the
+  // start runs; a cloud switch ON is a route
+  const mModel = await mstart(mdir({ 'managed-settings.json': JSON.stringify({ env: { ANTHROPIC_MODEL: 'claude-org-pinned', ANTHROPIC_LOG: 'debug', CLAUDE_CODE_USE_BEDROCK: '0' } }) }));
+  const mSwitch = await mstart(mdir({ 'managed-settings.json': JSON.stringify({ env: { CLAUDE_CODE_USE_VERTEX: '1' } }) }));
+  ok(mModel.x.spawned.length === 1 && !mModel.err && mSwitch.x.spawned.length === 0 && mSwitch.err && mSwitch.err.code === 'provider-managed-helper' && MANAGED.envHit({ ANTHROPIC_MODEL: 'x' }) === null && MANAGED.envHit({ CLAUDE_CODE_USE_BEDROCK: 'false' }) === null && MANAGED.envHit({ ANTHROPIC_CUSTOM_HEADERS: 'x' }) === 'ANTHROPIC_CUSTOM_HEADERS' && MANAGED.envHit({ CLAUDE_CODE_USE_MANTLE: '1' }) === 'CLAUDE_CODE_USE_MANTLE' && MANAGED.envHit({ ANTHROPIC_UNIX_SOCKET: '/run/x.sock' }) === 'ANTHROPIC_UNIX_SOCKET',
+    'the env rule names only credentials and routes: a managed model name, a log switch or a cloud switch set to 0 does not refuse; a cloud switch ON does', [mModel.x.spawned.length, mSwitch.err && mSwitch.err.code]);
+  // A PROVIDER START AIMED AT A PAIRED MACHINE answers «this machine only for now» — never the hub's own managed check (主开发 00:42Z)
+  const mRemote = await mstart(mdir({ 'managed-settings.json': HELPER }), { backend: 'claude', accountId: ds.id, hostId: 'host-box-1' });
+  ok(mRemote.x.spawned.length === 0 && mRemote.err && mRemote.err.code !== 'provider-managed-helper' && /runs on this machine only/.test(mRemote.err.message), 'a provider start aimed at a paired machine is refused by ITS reason (this machine only for now), not by the hub\'s managed settings', mRemote.err);
+  // THE WINDOWS POLICY (主开发 00:42Z, WSL — a native Windows hub judged the same): ONE read-only query per key through the Windows
+  // helper on PATH — a STAND-IN reg.exe here (never the real one): no policy ⇒ runs; a policy setting a helper ⇒ refused naming the
+  // Windows policy; the helper absent, failing or over its bound ⇒ refused in ITS OWN words (no administrator named)
+  const regDir = (body) => { const d = fs.mkdtempSync(path.join(scratchDir('hspawn-reg'), 'r-')); fs.writeFileSync(path.join(d, 'reg.exe'), '#!/bin/sh\n' + body + '\n', { mode: 0o755 }); return d; };
+  const NOKEY = "echo 'ERROR: The system was unable to find the specified registry key or value.' >&2; exit 1";
+  const row = (hive, json, name = 'Settings') => `printf '\\r\\nHKEY_${hive}\\\\SOFTWARE\\\\Policies\\\\ClaudeCode\\r\\n    ${name}    REG_SZ    %s\\r\\n\\r\\n' '${json}'`;
+  const policy = (lm, cu) => regDir(`case "$2" in HKLM*) ${lm ? row('LOCAL_MACHINE', lm) : NOKEY};; *) ${cu ? row('CURRENT_USER', cu) : NOKEY};; esac`);
+  const OPT_HELPER = JSON.stringify({ wslInheritsWindowsSettings: true, apiKeyHelper: '/opt/org/key-helper' }), HELPER_ONLY = JSON.stringify({ apiKeyHelper: '/opt/org/key-helper' });
+  const regSet = policy(OPT_HELPER), regNoOpt = policy(HELPER_ONLY), regNone = policy(null, null);
+  const regCuOwn = policy(null, JSON.stringify({ wslInheritsWindowsSettings: true, env: { ANTHROPIC_AUTH_TOKEN: ['org', 'cu', 'token'].join('-') } })), regCuNoOpt = policy(null, HELPER_ONLY);
+  const regLower = regDir(`case "$2" in HKLM*) ${row('LOCAL_MACHINE', OPT_HELPER, 'settings')};; *) ${NOKEY};; esac`);
+  const regFail = regDir('exit 5'), regSlow = regDir('exec /bin/sleep 5');   // exec: the bound's SIGKILL ends the sleep itself (no orphan)
+  const EMPTY = mdir({}), DRV = mdir({});
+  // the CLI asks reg.exe by its own ABSOLUTE path (never PATH): the stand-in is handed by its full path (never the real one)
+  const winFact = (platform, d, extra = {}) => MANAGED.managedHelperFact({ platform, wsl: platform === 'linux', dir: EMPTY, drvfsDir: DRV, reg: { regExe: path.join(d, 'reg.exe'), env: {}, boundMs: 400, ...extra } });
+  const wSet = await winFact('linux', regSet), wNoOpt = await winFact('linux', regNoOpt), wNone = await winFact('linux', regNone), wFail = await winFact('linux', regFail), wSlow = await winFact('linux', regSlow);
+  const wAbsent = await winFact('linux', mdir({})), wNative = await winFact('win32', regNoOpt), wLower = await winFact('linux', regLower);
+  const wCuOwn = await winFact('linux', regCuOwn), wCuNoOpt = await winFact('linux', regCuNoOpt);
+  const wDrv = await MANAGED.managedHelperFact({ platform: 'linux', wsl: true, dir: EMPTY, drvfsDir: mdir({ 'managed-settings.json': OPT_HELPER }), reg: { regExe: path.join(regNone, 'reg.exe'), env: {}, boundMs: 400 } });
+  ok(wSet.named === true && /HKLM/.test(wSet.where) && wNoOpt.named === false && wNative.named === true && wNone.named === false && wLower.named === true
+    && wCuOwn.named === true && /HKCU/.test(wCuOwn.where) && wCuNoOpt.named === false
+    && wFail.named === null && wFail.cause === 'windows-unread' && wFail.why === 'error' && wSlow.named === null && wSlow.why === 'timeout' && wAbsent.named === null && wAbsent.why === 'absent'
+    && wDrv.named === true && /managed-settings\.json$/.test(wDrv.where),
+    'the Windows policy as the CLI applies it: on WSL HKLM / the DrvFs folder only when one opts in (wslInheritsWindowsSettings), HKCU only with its own opt-in, the value name in any case; a native Windows hub applies them all; failing / over its bound / absent ⇒ «cannot read the Windows policy»',
+    { wSet: wSet.named, wNoOpt: wNoOpt.named, wNative: wNative.named, wLower: wLower.named, wCuOwn: wCuOwn.named, wCuNoOpt: wCuNoOpt.named, wFail: wFail.why, wSlow: wSlow.why, wAbsent: wAbsent.why, wDrv: wDrv.named });
+  const wWords = MANAGED.refusalOf(wFail, 'DeepSeek');
+  const dicts = ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js'].map((f) => fs.readFileSync(path.join(REPO, f), 'utf8'));
+  ok(wWords.i18n.key === MANAGED.MANAGED_HELPER_WORDS.windowsUnread && /could not read the Windows policy/.test(wWords.message) && !/administrator/i.test(wWords.message) && /HKLM/.test(wWords.i18n.params.where)
+    && dicts.every((d) => d.includes(JSON.stringify(MANAGED.MANAGED_HELPER_WORDS.windowsUnread) + ':')),
+    'the Windows helper failing is said in ITS OWN words — VibeSpace could not read the Windows policy (named), no administrator door — in en, zh and ja', wWords.message);
+  // ONE OF EACH READ IN FLIGHT (主开发 00:42Z): two starts at once share the folder's stat, statfs and listing — never one per start
+  const calls = { stat: 0, statfs: 0, readdir: 0 };
+  const slowFsp = { stat: async () => { calls.stat++; await new Promise((r) => setTimeout(r, 40)); return { isDirectory: () => true }; }, statfs: async () => { calls.statfs++; return { type: 0xef53 }; }, readdir: async () => { calls.readdir++; return []; }, open: async () => { const e = new Error('none'); e.code = 'ENOENT'; throw e; } };
+  const both = await Promise.all([MANAGED.managedHelperFact({ platform: 'linux', wsl: false, dir: '/stand-in/managed', fsp: slowFsp }), MANAGED.managedHelperFact({ platform: 'linux', wsl: false, dir: '/stand-in/managed', fsp: slowFsp })]);
+  ok(both.every((f) => f.named === false) && calls.stat === 1 && calls.statfs === 1 && calls.readdir === 1, 'two starts at once: the managed folder\'s stat, statfs and listing run ONCE (one in flight each)', calls);
+  // CONTROL ON THE NON-BLOCKING OPEN: the reader opening a FIFO drop-in WITHOUT O_NONBLOCK hangs until its bound (then the pipe is
+  // released by a writer here, so no thread is left holding it)
+  const BLOCKING = anchored(MSRC, 'fh = await fsp.open(file, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);', 'fh = await fsp.open(file, fs.constants.O_RDONLY);', 'the reader without its non-blocking open');
+  const MANAGED_BLOCKING = M.load('src/managed-claude-settings.js', BLOCKING, 'managed-blocking');
+  const pipeDir = mdir({ 'managed-settings.json': JSON.stringify({}) }); fs.mkdirSync(path.join(pipeDir, 'managed-settings.d'));
+  const pipe = path.join(pipeDir, 'managed-settings.d', '10-pipe.json');
+  require('child_process').execFileSync('mkfifo', [pipe]);
+  const blocked = await MANAGED_BLOCKING.managedHelperFact({ dir: pipeDir, wsl: false, boundMs: 300 });
+  let released = false;   // release the hung open: a writer opens once the blocked reader is there (ENXIO until then) — no thread left holding the pipe
+  for (let i = 0; i < 100 && !released; i++) { try { fs.closeSync(fs.openSync(pipe, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK)); released = true; } catch { await new Promise((r) => setTimeout(r, 20)); } }
+  ok(released && blocked.named === null && blocked.cause === 'timeout', 'CONTROL: the reader without its non-blocking open hangs on a FIFO drop-in until its bound ⇒ the FIFO leg (an answer at once) goes RED', blocked);
   // THE READER IS BOUNDED (its reader's S1): a FIFO drop-in never holds a start (opened non-blocking, not a regular file), a file over
   // 1 MiB is not read, the whole answer within its bound; a NETWORK or FUSE filesystem is never read — a local mount is
   const fifoDir = mdir({ 'managed-settings.json': JSON.stringify({ permissions: {} }) });
   fs.mkdirSync(path.join(fifoDir, 'managed-settings.d'));
   require('child_process').execFileSync('mkfifo', [path.join(fifoDir, 'managed-settings.d', '10-pipe.json')]);
-  const t0 = Date.now(); const fifo = await MANAGED.managedHelperFact({ dir: fifoDir, wsl: false }); const fifoMs = Date.now() - t0;
+  const fifo = await MANAGED.managedHelperFact({ dir: fifoDir, wsl: false });   // the FACT, never a wall clock: a hung open would answer its bound's code («timeout»), the non-blocking one answers «unreadable» (not a regular file)
   const big = await MANAGED.managedHelperFact({ dir: mdir({ 'managed-settings.json': JSON.stringify({ pad: 'x'.repeat((1 << 20) + 16) }) }), wsl: false });
-  const hang = await MANAGED.managedHelperFact({ dir: '/etc/claude-code', platform: 'linux', wsl: false, boundMs: 60, fsp: { stat: () => new Promise(() => { }) } });
+  const hang = await MANAGED.managedHelperFact({ dir: '/stand-in/hang', platform: 'linux', wsl: false, boundMs: 60, fsp: { stat: () => new Promise(() => { }) } });   // its own path: a hung stat holds ITS key (one in flight)
   const fsOf = (type) => ({ stat: async () => ({ isDirectory: () => true }), statfs: async () => ({ type }), readdir: async () => [], open: async () => { const e = new Error('none'); e.code = 'ENOENT'; throw e; } });
-  const nfs = await MANAGED.managedHelperFact({ dir: '/etc/claude-code', platform: 'linux', wsl: false, fsp: fsOf(0x6969) });
-  const local = await MANAGED.managedHelperFact({ dir: '/etc/claude-code', platform: 'linux', wsl: false, fsp: fsOf(0x794c7630 /* overlay */) });
-  ok(fifo.named === null && fifo.cause === 'unreadable' && fifoMs < 2000 && big.named === null && hang.named === null && hang.cause === 'timeout' && nfs.named === null && nfs.cause === 'network-mount' && local.named === false,
-    'the reader: a FIFO drop-in answers «cannot tell» at once (never a hung start), a file over 1 MiB too, a stuck read at its bound; a network filesystem is not read, a local mount is', { fifo: fifo.cause, fifoMs, big: big.cause, hang: hang.cause, nfs: nfs.cause, local: local.named });
+  const nfs = await MANAGED.managedHelperFact({ dir: '/stand-in/nfs', platform: 'linux', wsl: false, fsp: fsOf(0x6969) });
+  const local = await MANAGED.managedHelperFact({ dir: '/stand-in/local', platform: 'linux', wsl: false, fsp: fsOf(0x794c7630 /* overlay */) });
+  ok(fifo.named === null && fifo.cause === 'unreadable' && /10-pipe\.json$/.test(String(fifo.where)) && big.named === null && hang.named === null && hang.cause === 'timeout' && nfs.named === null && nfs.cause === 'network-mount' && local.named === false,
+    'the reader: a FIFO drop-in answers «cannot tell» as NOT A REGULAR FILE (the open never blocked — its code is never the bound\'s «timeout»), a file over 1 MiB too, a stuck read at its bound; a network filesystem is not read, a local mount is', { fifo: fifo.cause, fifoWhere: fifo.where, big: big.cause, hang: hang.cause, nfs: nfs.cause, local: local.named });
   // macOS: the CLI's own managed-preferences file cannot be told (not parsed here) — Claude Desktop's is not the CLI's; WSL: the
   // Windows policy keys the CLI reads through reg.exe cannot be told either
   const prefs = fs.mkdtempSync(path.join(scratchDir('hspawn-macprefs'), 'p-')); fs.mkdirSync(path.join(prefs, 'someone'), { recursive: true }); fs.writeFileSync(path.join(prefs, 'someone', 'com.anthropic.claudecode.plist'), 'x');
   const desk = fs.mkdtempSync(path.join(scratchDir('hspawn-macprefs-desktop'), 'd-')); fs.writeFileSync(path.join(desk, 'com.anthropic.claudefordesktop.plist'), 'x');
   const macHit = await MANAGED.managedHelperFact({ platform: 'darwin', dir: path.join(prefs, 'no-managed-dir'), macPrefs: prefs });
   const macDesk = await MANAGED.managedHelperFact({ platform: 'darwin', dir: path.join(prefs, 'no-managed-dir'), macPrefs: desk });
-  const wslFact = await MANAGED.managedHelperFact({ platform: 'linux', wsl: true });
-  ok(macHit.named === null && /com\.anthropic\.claudecode\.plist$/.test(macHit.where) && macDesk.named === false && wslFact.named === null && wslFact.cause === 'wsl'
+  ok(macHit.named === null && /com\.anthropic\.claudecode\.plist$/.test(macHit.where) && macDesk.named === false
     && MANAGED.DIRS.linux === '/etc/claude-code' && MANAGED.DIRS.darwin === '/Library/Application Support/ClaudeCode' && MANAGED.DIRS.win32 === 'C:\\Program Files\\ClaudeCode',
-    'macOS: the CLI\'s managed-preferences file cannot be told, Claude Desktop\'s is not the CLI\'s; a WSL machine cannot be told (the Windows policy keys); the CLI\'s own folders', { macHit: macHit.named, macDesk: macDesk.named, wsl: wslFact.cause });
+    'macOS: the CLI\'s managed-preferences file cannot be told, Claude Desktop\'s is not the CLI\'s; the CLI\'s own folders (WSL: the Windows policy legs above)', { macHit: macHit.named, macDesk: macDesk.named });
   for (const f of ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js']) { const d = fs.readFileSync(path.join(REPO, f), 'utf8'); ok([BP.HELPER_SET_ASIDE.provider, ...Object.values(SFW.PROVIDER_BILLING_WORDS)].every((w) => d.includes(JSON.stringify(w) + ':')), `${path.basename(f)}: a provider's three helper sentences have their rows`); }
   // THE POOL QUESTION (the coordinator's 21:50Z, for the remove confirm that names the conversations on a provider): can a
   // provider be a MEMBER of a pool — would a conversation billed through a pool run on it and go unnamed? NO, and this leg keeps

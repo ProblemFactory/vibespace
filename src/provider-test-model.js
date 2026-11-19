@@ -70,7 +70,8 @@ const REFUSAL_WORDS = Object.freeze({
   'no-key': i18nKey('This provider has no key — paste it again'),
   'model-none': i18nKey('Pick a model first — the test asks the provider with it'),
   'in-flight': i18nKey('A test of this provider is running already'),
-  'managed-helper': i18nKey('This machine’s managed Claude settings set a key helper or an Anthropic credential or address (or what they set could not be told) — the test would send the organization’s credential to this provider, so it does not run. Ask the administrator'),   // 主开发 23:45Z
+  'managed-helper': i18nKey('This machine’s managed Claude settings ({where}) set a key helper, a credential or an address (or what they set could not be told) — the test would send a credential across, so it does not run. Ask the administrator'),   // 主开发 23:45Z
+  'windows-policy-unread': i18nKey('VibeSpace could not read the Windows policy for Claude Code ({where}), so the test does not run — it cannot tell whether that policy would send a credential to this provider. Try again in a moment'),   // the Windows helper absent, failing or over its bound (主开发 00:42Z)
   changed: i18nKey('The key or the address changed while it was being tested — test it again'),   // lane lg-providers chain cure (its delta read, D2)
   human_only: i18nKey('Only a person on this page can run a test'),
   cross_site: i18nKey('Only a person on this page can run a test'),
