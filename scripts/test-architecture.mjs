@@ -5299,7 +5299,7 @@ await section(async () => {
   // CONTROLS: a bare kill of the stored pid planted back into jobs.js, agentd's kill with its proof taken away, an
   // unlisted shell probe, and a comment that must stay quiet
   const [jf, jt] = files85.find(([f]) => f === 'src/jobs.js');
-  const bare = jt.replace('return PI.signalIdentity(stamp, sig, { group: true, what: `job ${job.id}` }).ok;', 'try { process.kill(stamp.pid, sig); return true; } catch { return false; }');
+  const bare = jt.replace('return PI.signalIdentity(stamp, sig, { group: !inGroup, what: `job ${job.id}` }).ok;', 'try { process.kill(stamp.pid, sig); return true; } catch { return false; }');
   const [af, at] = files85.find(([f]) => f === 'src/agentd/agentd.js');
   const noProof = at.replace('if (this._childProven(m)) process.kill(', 'if (this._childAlive(m)) process.kill(').replace(/if \(!this\._childProven\(m\)\)[^\n]*\n\s*else \{/, '{');
   const red85 = (f, src) => C.judgeCensus([[f, src]]).red.length > 0;

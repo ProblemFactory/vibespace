@@ -10,7 +10,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -327,7 +327,7 @@ console.log('§5 THE CONVERSATION DOOR — wiring (read before the first signal;
   ok(iRead > 0 && iKill > iRead && iLocal > iKill && iPty > iLocal && iEnd > iLocal && iEnd < iPty, 'ws-handler kill: each dtach master\'s tree is read BEFORE its SIGTERM, a chat conversation\'s BEFORE the pty\'s kill; ended through PI.endTree', { iRead, iKill, iLocal, iPty, iEnd });
   ok(/const ownTree = \(endTree === true \|\| data\.endTree === true\) && !capsOf\(session\.backend\)\.terminalOnly;/.test(ws) && /session\.pty\.constructor\.name !== 'Object'/.test(ws) && /treeRoots\.filter\(\(m\) => PI\.aliveIdentity\(m\) === true\)/.test(ws) && /\}, 3000\);/.test(ws), 'ws-handler kill: never a plain shell\'s (the declared row terminalOnly — never an id), an OpenCode serve\'s or a pipe conversation\'s (a shim pty: the remainder); only what SURVIVED the teardown hears the stop, 3 s on (never a second signal)');
   const js = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8');
-  ok(/live = !!\(st && this\._verifyAlive\(st\)\), tree = live \? PI\.treeOf\(\[Number\(st\.pid\)\]/.test(js) && /\.\.\.\(rows\.length \? \{ tree: rows \} : \{\}\)/.test(js) && /if \(sig === 'SIGKILL'\) this\._killTree\(job, stamp\);/.test(js) && !/treeOfAsync|_termRunTree/.test(js) && /if \(!k\) \{ const st = this\._readStamp\(job\); if \(this\._verifyAlive\(st\)\) this\._killTree\(job, st\); \}/.test(js) && !/_stopTree|PI\.endTree/.test(js), 'jobs: the engine sends NO stop SIGTERM of its own to the tree (the wrapper\'s one table does); its SIGKILLs (a force stop, the kill step) end the tree first');
+  ok(/live = !!\(st && this\._verifyAlive\(st\)\), tree = live \? PI\.treeOf\(\[Number\(st\.pid\)\]/.test(js) && /\.\.\.\(rows\.length \? \{ tree: rows \} : \{\}\)/.test(js) && /if \(sig === 'SIGKILL'\) this\._killTree\(job, stamp, \{ group: inGroup \}\);/.test(js) && !/treeOfAsync|_termRunTree/.test(js) && /if \(!k\) \{ const st = this\._readStamp\(job\); if \(this\._verifyAlive\(st\)\) this\._killTree\(job, st\); \}/.test(js) && !/_stopTree|PI\.endTree/.test(js), 'jobs: the engine sends NO stop SIGTERM of its own to the tree (the wrapper\'s one table does); its SIGKILLs (a force stop, the kill step) end the tree first');
 }
 
 console.log('§9 B-cac2 (batch 8): a START during a stop is remembered and done when the stop ends; restart = stop, wait, start');
@@ -481,6 +481,80 @@ const svcScene = async (Mod, tag) => {
   for (const r of copiesCensus(MJ9.files, MJ9.dir, ROOT, { minCopies: 5, label: 'B-cac2 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
   const ar = fs.readFileSync(path.join(ROOT, 'src/agent-routes.js'), 'utf8'), cli = fs.readFileSync(path.join(ROOT, 'data/bin/vibespace-job'), 'utf8');
   ok(/const needsControl = \[[^\]]*'restart'[^\]]*\];/.test(ar) && /else if \(act === 'restart'\) r = a\.jm\.restart\(job\);/.test(ar) && /case 'restart': \{/.test(cli) && /vibespace-job restart <id>/.test(cli) && /else if \(r\.pending\) console\.log\(`not started yet: /.test(cli), 'WIRING: the agent route\'s restart needs control; the CLI has `restart <id>` (in its usage) and says a pending start as one');
+}
+
+// ── §10 B-2c5c: a hub started by hand INSIDE a job — its scope, its process group and its mark hold the hub — is never ended by the
+// job's stop: no whole-scope kill (the manager's or cgroup.kill) while it holds the hub; the job's own processes one by one ──
+console.log('§10 B-2c5c — the job\'s stop never ends a hub that runs inside it (or what that hub runs)');
+{
+  const PI10 = require(path.join(ROOT, 'src/proc-identity.js'));
+  // (a) the parent chain — a fake /proc: the hub 4100 (start 50) ← 4101 ← 4102; a job member 4200 under 4000 (not the hub's)
+  const PR = path.join(D, 'proc10'); fs.mkdirSync(PR, { recursive: true });
+  const stat = (pid, comm, ppid, start) => { fs.mkdirSync(path.join(PR, String(pid)), { recursive: true }); fs.writeFileSync(path.join(PR, String(pid), 'stat'), `${pid} (${comm}) S ${ppid} ${pid} ${pid} 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 ${start} 0 0`); };
+  stat(4000, 'bash', 1, 10); stat(4100, 'node', 4000, 50); stat(4101, 'claude', 4100, 60); stat(4102, 'sh', 4101, 70); stat(4200, 'sleep', 4000, 80);
+  const keep = new Map([[4100, 50]]), K = (pid, k = keep, f = PI10.keptByChain) => f(pid, k, { procRoot: PR });
+  ok(K(4100) && K(4101) && K(4102) && !K(4200) && !K(4000) && !K(4102, new Map([[4100, 51]])) && K(4102, new Map([[4100, 0]])),
+    'keptByChain: the hub and everything under it by the parent chain are kept; a job member beside it, the shell above it and a recycled pid (another start) are not', { a: K(4101), b: K(4200) });
+  const PISRC = fs.readFileSync(path.join(ROOT, 'src/proc-identity.js'), 'utf8');
+  const HIT = '    if (keep.has(p) && (!keep.get(p) || keep.get(p) === Number(r[19]))) return true;\n';
+  const chainCut = MJ.load('src/proc-identity.js', anchored(PISRC, HIT, '', 'kept-chain-cut'), 'kept-chain-cut');
+  ok(!K(4101, keep, chainCut.keptByChain) && !K(4100, keep, chainCut.keptByChain), 'CONTROL (the match cut, in a copy): the hub\'s own processes read as the job\'s — RED');
+  // (b) the wrapper's doors, compiled from its own source with the scope's facts stubbed (nothing is signalled)
+  const W = fs.readFileSync(path.join(ROOT, 'data/bin/job-wrapper.js'), 'utf8');
+  const fnOf = (src, head) => { const i = src.indexOf(head); if (i < 0) throw new Error('not found: ' + head); let d = 0, j = src.indexOf('{', i); for (let k = j; k < src.length; k++) { if (src[k] === '{') d++; else if (src[k] === '}') { d--; if (d === 0) return src.slice(i, k + 1); } } throw new Error('unclosed: ' + head); };
+  const forceOf = (src, scope) => {
+    const calls = [];
+    const env = { scopeDir: '/fake/scope', keptTest: () => (scope.hub ? (p) => String(p) === '4100' : null), procsOf: () => scope.procs.slice(),
+      scopeRows: () => scope.procs.filter((p) => p !== '4100').map((p) => [Number(p), 1, 1]), killNow: (r) => { calls.push('kill ' + r[0]); return true; },
+      scopeKill: async (sig) => { calls.push('scope ' + sig); return true; }, sayKept: (n, w) => calls.push(`said ${n} ${w}`),
+      fs: { writeFileSync: (f) => calls.push('write ' + path.basename(f)) }, path };
+    const f = new Function(...Object.keys(env), `let forced = null; ${fnOf(src, 'async function forceScope(why) {')}\nreturn forceScope;`)(...Object.values(env));   // eslint-disable-line no-new-func
+    return f('it did not end').then(() => calls);
+  };
+  const withHub = await forceOf(W, { hub: true, procs: ['4100', '4200'] }), noHub = await forceOf(W, { hub: false, procs: ['4200'] });
+  ok(withHub.join() === 'said 1 its kill,kill 4200' && noHub[0] === 'scope SIGKILL', 'the wrapper\'s forced end of a scope that holds the hub: never the manager\'s kill nor cgroup.kill — the job\'s process killed alone, said; a scope without it is killed whole as before', { withHub, noHub });
+  const GUARD = "  if (held) { sayKept(held, 'its kill'); for (const p of scopeRows() || []) killNow(p); return; }\n";
+  const wx = await forceOf(anchored(W, GUARD, '', 'force-scope-hub-cut'), { hub: true, procs: ['4100', '4200'] });
+  ok(wx.includes('scope SIGKILL'), 'CONTROL (the guard cut, in a copy): the manager kills the WHOLE scope — the hub with it — RED', wx);
+  // the manager's scope signal when the list cannot be read: never while the hub lives in the scope (its own cgroup file)
+  const termOf = (src, inside) => { const calls = []; const env = { keptInScope: () => inside, sayKept: (n, w) => calls.push(`said ${n} ${w}`), scopeKill: (sig) => { calls.push('scope ' + sig); return Promise.resolve(true); } };
+    const i = src.indexOf('const scopeTerm = (sig) => {'), j = src.indexOf('\n', i);
+    const f = new Function(...Object.keys(env), `let scopeSent = 0; ${src.slice(i, j)}\nreturn scopeTerm;`)(...Object.values(env));   // eslint-disable-line no-new-func
+    return f('SIGTERM').then(() => calls); };
+  const t1 = await termOf(W, 1), t0 = await termOf(W, 0);
+  const TG = "const inside = keptInScope(); if (inside) { sayKept(inside, 'its stop'); return Promise.resolve(false); } ";
+  const tx = await termOf(anchored(W, TG, '', 'scope-term-hub-cut'), 1);
+  ok(t1.join() === 'said 1 its stop' && t0.join() === 'scope SIGTERM' && tx.join() === 'scope SIGTERM', 'the manager\'s scope signal (its list unread) is never sent while the hub lives in the scope — said; CONTROL (the guard cut, in a copy): the whole scope signalled — RED', { t1, t0, tx });
+  // the rows a stop signals one by one: never the hub's (the scope's, the group's, the mark's)
+  ok(/!isKeeper\(l\) && !\(kept && kept\(l\)\)\)\.map\(rowOf\)/.test(W) && /r\[0\] !== 'Z' && !\(kept && kept\(e\)\)\) out\.push/.test(W) && /if \(kept && kept\(e\)\) continue;\n\s+try \{ if \(fs\.readFileSync\(`\/proc\/\$\{e\}\/environ`/.test(W)
+    && /own = \(\) => procsOf\(scopeDir\)\.filter\(\(p\) => !\(kept && kept\(p\)\)\)/.test(W) && (fnOf(W, 'async function drainScope() {').match(/procsOf\(scopeDir\)/g) || []).length === 2,
+  'WIRING: the scope\'s rows, the group\'s rows and the marked escapees skip the hub\'s processes; the drain counts, waits on and kills only the job\'s (own())');
+  // (c) the engine: its group signal never reaches a group the hub is in (compiled from its own source, PI stubbed — nothing signalled)
+  const JS = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8');
+  const groupOf = (src, inGroup) => {
+    const calls = [], stamp = { pid: 4321, starttime: 9 };
+    const PIs = { pgidOf: () => (inGroup ? 4321 : 999), signalIdentity: (st, sig, o) => { calls.push(`${sig} group=${!!(o && o.group)}`); return { ok: true }; } };
+    const self = { _readStamp: () => stamp, _verifyAlive: () => true, _killTree: (j, st, o) => calls.push(`tree group=${!!(o && o.group)}`), d: { log: () => calls.push('said') } };
+    const f = new Function('PI', `return function ${fnOf(src, '  _killGroup(job, sig) {').trim()};`)(PIs);   // eslint-disable-line no-new-func
+    f.call(self, { id: 'jb-2c5c0001' }, 'SIGTERM'); f.call(self, { id: 'jb-2c5c0001' }, 'SIGKILL');
+    return calls;
+  };
+  const gIn = groupOf(JS, true), gOut = groupOf(JS, false);
+  const GS = '    return PI.signalIdentity(stamp, sig, { group: !inGroup, what: `job ${job.id}` }).ok;';
+  const gx = groupOf(anchored(JS, GS, '    return PI.signalIdentity(stamp, sig, { group: true, what: `job ${job.id}` }).ok;', 'group-signal-hub-cut'), true);
+  ok(gIn.join() === 'said,SIGTERM group=false,tree group=true,SIGKILL group=false' && gOut.join() === 'SIGTERM group=true,tree group=false,SIGKILL group=true',
+    'the engine\'s stop of a job whose process group holds this hub: the wrapper ALONE hears it (said once), a SIGKILL ends the whole tree by identity (the group\'s members too, the hub\'s pruned); otherwise the group as before', { gIn, gOut });
+  ok(gx.includes('SIGTERM group=true'), 'CONTROL (the group signal back, in a copy): the job\'s group signal reaches the hub — RED', gx);
+  // (d) the engine's one test, by the REAL parent chain: this process (the stand-in hub) and its own child are the hub's; pid 1 is not
+  const JM = require(path.join(ROOT, 'src/jobs.js')).JobManager, own = (pid) => JM.prototype._hubsOwn.call({}, pid);
+  const kid = spawn('sleep', ['30'], { stdio: 'ignore' });
+  await new Promise((r) => setTimeout(r, 100));
+  const kidOwn = own(kid.pid), selfOwn = own(process.pid), initOwn = own(1);
+  try { kid.kill('SIGKILL'); } catch { }
+  ok(selfOwn && kidOwn && !initOwn, 'the engine\'s _hubsOwn: the hub and a process it started are the hub\'s (never a stop\'s); pid 1 is not', { selfOwn, kidOwn, initOwn });
+  ok(/!sent\.has\(id\.pid\) && !this\._hubsOwn\(id\.pid\) && PI\.aliveIdentity\(id\) === true/.test(JS) && /found = marked\.filter\(\(id\) => !this\._hubsOwn\(id\.pid\)\)/.test(JS) && (JS.match(/ownOf\(await this\._scopeProcs\(scope\)\)/g) || []).length === 2
+    && /if \(r === 'hub'\) \{ run\._scopeEmpty = true; return this\._reapSaid\(job, run, scope, r, k\.out\); \}/.test(JS) && /else if \(r === 'hub'\) said\(this\._hubScopeWords\(ko\)\)/.test(JS),
+  'WIRING (the engine): the clear of kept processes and the stop of a doubted run never signal the hub\'s (its mark is the job\'s); the reap and the stop ladder take a scope killed around the hub as done, said');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

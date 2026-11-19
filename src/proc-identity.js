@@ -66,6 +66,8 @@ function starttimeOf(pid, opts) {
 }
 /** /proc/<pid>/stat field 3 ('R', 'S', 'Z' …) or null. */
 function stateOf(pid, opts) { const r = statRest(pid, opts); return r ? r[0] : null; }
+/** B-2c5c: /proc/<pid>/stat field 5 (its process group) or null — the same one read */
+function pgidOf(pid, opts) { const r = statRest(pid, opts); return r && Number(r[2]) > 0 ? Number(r[2]) : null; }
 /** B-91aa (met at 2.369.412's second checkpoint: src/mounts.js keeps no /proc read of its own — B-e783's law): ONE process's
  *  [state, starttime] from the same one read, SYNC (a libuv pool thread may be held by the very mount a probe watches) —
  *  null when it is gone (ENOENT / ESRCH), undefined when /proc cannot be read (never «gone» on an unreadable /proc). */
@@ -260,6 +262,23 @@ function childTreeOf(root, { since = 0, maxRows = 512, maxMs = 50, procRoot = '/
   }
   return { rows, cut, pruned };
 }
+/** B-2c5c (lane bl-jobs): is `pid` — or a process up its PARENT chain — one of `keep` (a Map pid → starttime, 0 = that pid whatever
+ *  its start)? What runs under the hub is the hub's: a hub started by hand INSIDE a job lives in that job's scope, its process
+ *  group and with its mark, and no stop of the job ends it or what it runs. The chain is read from <procRoot>/<p>/stat (its 4th
+ *  field, the parent), at most `maxHops` links up; a link that cannot be read ends the walk — not kept. */
+function keptByChain(pid, keep, { procRoot = '/proc', maxHops = 64 } = {}) {
+  let p = Number(pid);
+  for (let hop = 0; hop <= maxHops && p > 1; hop++) {
+    let st = '';
+    try { st = fs.readFileSync(`${procRoot}/${p}/stat`, 'utf8'); } catch { return false; }
+    const e = st.lastIndexOf(')');
+    if (e < 0) return false;
+    const r = st.slice(e + 2).split(' ');
+    if (keep.has(p) && (!keep.get(p) || keep.get(p) === Number(r[19]))) return true;
+    p = Number(r[1]);
+  }
+  return false;
+}
 // ── SHIPPED TWIN (B-c134) END ──
 /** WHAT NO STOP OWNS (B-c134 cure, MUST A — the kill law: a stop never reaches the hub's own subtree). Each road that HOLDS a
  *  process names it here by the identity it already holds — the conversations' holders (ws-handler), the jobs' wrappers (the jobs
@@ -427,9 +446,9 @@ function legacyOnce(door, pid, say) {
 }
 
 module.exports = {
-  childTreeOf, treeOf, endTree, treeLine, treeNotice, TREE_NOTICE, keepOut, keptOut,
+  childTreeOf, keptByChain, treeOf, endTree, treeLine, treeNotice, TREE_NOTICE, keepOut, keptOut,
   PROC_ROOT, UNPROVABLE, WITHHELD_KEY, LEGACY_LINE,
-  hasProc, bootIdOf, starttimeOf, stateOf, statOf, identityOf, judge, sameProcess, aliveIdentity, signalIdentity, membersOf, reportOnce, startToken,
+  hasProc, bootIdOf, starttimeOf, stateOf, pgidOf, statOf, identityOf, judge, sameProcess, aliveIdentity, signalIdentity, membersOf, reportOnce, startToken,
   bootToken, tokenVerdict, identityFromToken, procIdentityShellFns, withheldWords, legacyOnce,
   _resetReported: () => { _reported.clear(); _legacySaid.clear(); },
 };

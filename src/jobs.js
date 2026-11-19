@@ -1529,15 +1529,19 @@ class JobManager {
   _killGroup(job, sig) { // handle-kill with act-time re-verification (B-16d9 law)
     const stamp = this._readStamp(job);
     if (!this._verifyAlive(stamp)) return false;
-    if (sig === 'SIGKILL') this._killTree(job, stamp);   // B-c134: a SIGKILL ends the wrapper before it can end its tree — the engine does, first
-    return PI.signalIdentity(stamp, sig, { group: true, what: `job ${job.id}` }).ok; // the group, else its leader
+    // B-2c5c: a hub started by hand inside the job may sit in the job's PROCESS GROUP — the group signal would reach this hub: the
+    // wrapper alone hears it (its stop ends its group's rows — never the hub's) and, for a SIGKILL, the job's whole tree by identity
+    const inGroup = PI.pgidOf(process.pid) === Number(stamp.pid);
+    if (inGroup && !this._hubGroupSaid) { this._hubGroupSaid = true; this.d.log(`[jobs] ${job.id}: this VibeSpace hub runs in the job's process group (started inside it) — the job is stopped process by process, never by its group`); }
+    if (sig === 'SIGKILL') this._killTree(job, stamp, { group: inGroup });   // B-c134: a SIGKILL ends the wrapper before it can end its tree — the engine does, first
+    return PI.signalIdentity(stamp, sig, { group: !inGroup, what: `job ${job.id}` }).ok; // the group, else its leader
   }
   /** B-c134 A STOP ENDS THE WHOLE TREE IT STARTED — where the wrapper cannot: a FORCE stop and the ladder's kill step SIGKILL it (its
    *  own stop step, which ends its tree through its one table, never runs). The tree under the wrapper read FIRST (PI.treeOf — the
    *  tree's own cost, procfs, bounded), each member SIGKILLed by identity (pid + start at the act), said in the log; then the caller's
    *  SIGKILL of the group / the scope, in the same tick. A SIGTERM is never sent here (the wrapper's stop step delivers a stop's). */
-  _killTree(job, stamp) {
-    const t = PI.treeOf([Number(stamp.pid)], { since: Number(stamp.starttime) || 0 }), tree = t.filter((m) => m.pgid !== Number(stamp.pid));   // the group dies with the group's SIGKILL
+  _killTree(job, stamp, { group = false } = {}) {
+    const t = PI.treeOf([Number(stamp.pid)], { since: Number(stamp.starttime) || 0 }), tree = group ? t : t.filter((m) => m.pgid !== Number(stamp.pid));   // the group dies with the group's SIGKILL — B-2c5c: unless the hub is in it (then the group's members too, the hub's pruned)
     const killed = [], refused = [];
     let unjudged = 0;
     for (const m of tree) { const r = PI.signalIdentity(m, 'SIGKILL', { what: `job ${job.id}'s tree` }); if (r.ok) killed.push(m.comm); else if (r.why === 'not-ours') refused.push(m.comm); else if (r.why !== 'gone' && r.why !== 'stale' && r.why !== 'pid-recycled') unjudged++; }   // a recycled pid: that member had ended
@@ -1577,7 +1581,7 @@ class JobManager {
     const b = run ? this._ctlJson(job, run, 'bound.json') : null;
     if (!b || b.by !== 'cgroup' || !/^[A-Za-z0-9_.@-]{1,200}\.scope$/.test(String(b.unit || ''))) return null;
     const cg = typeof b.cgroup === 'string' && /^\/[A-Za-z0-9_.@/-]+$/.test(b.cgroup) && !b.cgroup.includes('..') && b.cgroup.endsWith(`/${b.unit}`) ? b.cgroup : '';
-    return { unit: b.unit, dir: cg ? path.join(this.d.cgroupRoot || '/sys/fs/cgroup', cg) : '' }; // cgroupRoot: a fast suite's fake tree only
+    return { unit: b.unit, dir: cg ? path.join(this.d.cgroupRoot || '/sys/fs/cgroup', cg) : '', cg }; // cgroupRoot: a fast suite's fake tree only
   }
   /** SIGKILL to every process of a scope (its cgroup.kill, opened O_WRONLY — never created). Round 6: TWO OUTCOMES, TWO WORDS —
    *  'killed'; 'gone' (nothing there to kill: the scope is gone, or empty); 'nokill' (the scope still holds processes and has no
@@ -1585,11 +1589,45 @@ class JobManager {
    *  cgroup.kill» for a scope that was merely gone */
   async _killScope(scope, out = {}) {
     if (!scope || !scope.dir) return 'gone';
+    // B-2c5c: a scope that holds THIS hub (started by hand inside the job) is never killed WHOLE — its cgroup.kill would end the hub
+    // and everything it runs: the job's own processes are killed one by one instead ('hub'), the hub's left alone
+    if (await this._hubInScope(scope)) return this._killAroundHub(scope, out);
     const err = await fs.promises.writeFile(path.join(scope.dir, 'cgroup.kill'), '1', { flag: fs.constants.O_WRONLY }).then(() => null, (e) => e || {});
     if (!err) return 'killed';
     out.code = err.code || 'an error'; // round 7: a refused kill says its errno
     const pids = await this._scopeProcs(scope);
     return pids === null ? 'unread' : !pids.length ? 'gone' : err.code === 'ENOENT' ? 'nokill' : 'refused';
+  }
+  /** B-2c5c: a process of THIS hub — the hub itself or under it by the parent chain (a hub started by hand inside a job: the job's scope,
+   *  group and mark hold the hub and what it runs) — never a stop's to end */
+  _hubsOwn(pid) { const p = Number(pid); return p === process.pid || PI.keptByChain(p, this._hubKeep || (this._hubKeep = new Map([[process.pid, 0]]))); }
+  /** B-2c5c: does this hub live in `scope`? Its OWN cgroup (/proc/self/cgroup, read once a life — a process never changes its cgroup
+   *  by itself; `d.hubCgroup` = a fast suite's) is the scope's or under it */
+  async _hubInScope(scope) {
+    if (!scope || !scope.cg) return false;
+    if (this._hubCg === undefined) {
+      if (typeof this.d.hubCgroup === 'string') this._hubCg = this.d.hubCgroup;
+      else this._hubCg = await fs.promises.readFile('/proc/self/cgroup', 'utf8').then((t) => { const l = t.split('\n').find((x) => x.startsWith('0::')); return l ? l.slice(3).trim() : ''; }, () => '');
+    }
+    return !!this._hubCg && (this._hubCg === scope.cg || this._hubCg.startsWith(scope.cg + '/'));
+  }
+  /** B-2c5c: the job's processes of a scope that holds this hub, by force, one by one (identity re-read at the act) — never the hub's
+   *  own subtree → 'hub'; `out.hub` = { killed, kept } */
+  async _killAroundHub(scope, out = {}) {
+    const pids = await this._scopeProcs(scope);
+    let killed = 0, kept = 0;
+    for (const p of pids || []) {
+      if (this._hubsOwn(p)) { kept++; continue; }
+      const id = PI.identityOf(p);
+      if (id && PI.signalIdentity(id, 'SIGKILL', { what: `a process of job scope ${scope.unit}` }).ok) killed++;
+    }
+    out.hub = { killed, kept, unread: pids === null };
+    return 'hub';
+  }
+  /** B-2c5c: the words of a scope killed around the hub */
+  _hubScopeWords(out) {
+    const h = (out && out.hub) || {}, k = h.killed || 0;
+    return `its scope holds this VibeSpace hub (started inside the job) — never killed whole: ${h.unread ? 'its list did not answer, nothing of it was killed' : `${k} of its process${k === 1 ? '' : 'es'} killed one by one`}, the hub and what it runs left alone`;
   }
   /** THE STOP'S GRACE (round 5) — the wrapper's drain bound is the same number (a suite's seam shortens both: memorySample.stopMs) */
   _graceMs() { const s = Number(this.d.memorySample && this.d.memorySample.stopMs); return s > 0 ? Math.min(s, STOP_GRACE_MS) : STOP_GRACE_MS; }
@@ -1646,7 +1684,8 @@ class JobManager {
     if (k && !['refused', 'unread', 'nokill'].includes(k.r)) return true; // its kill in flight or landed: the next rung waits its step
     const rec = job._scopeKilled = { unit: scope.unit, at: k ? k.at : now() };
     if (!k) { const st = this._readStamp(job); if (this._verifyAlive(st)) this._killTree(job, st); }   // B-c134: what moved out of the scope dies with it (read first)
-    this._killScope(scope).then((r) => { rec.r = r; if (r === 'killed') said('its scope was killed'); });
+    const ko = {};
+    this._killScope(scope, ko).then((r) => { rec.r = r; if (r === 'killed') said('its scope was killed'); else if (r === 'hub') said(this._hubScopeWords(ko)); });   // B-2c5c
     return true;
   }
   /** a run's SIGTERM — a stop's, a timeout's, an until-marker's — and (round 7) the STOP'S INTENT before it, beside the run's
@@ -1744,6 +1783,7 @@ class JobManager {
     if (r === null || r === 'unread') { st.last = { why: 'unread' }; return false; }
     if (r === 'refused') { st.last = { why: 'refused', code: k.out.code || 'an error' }; return false; }
     if (r === 'gone') return true; // nothing there (it ended on its own meanwhile) — nothing killed, nothing said
+    if (r === 'hub') { run._scopeEmpty = true; return this._reapSaid(job, run, scope, r, k.out); }   // B-2c5c: the job's processes killed; the hub stays — never «survived», never retried
     if (r === 'killed') {
       const e = await this._scopeEmpty(scope, Math.min(this.d.reapConfirmMs ?? 1000, Math.max(0, left())));
       if (typeof e === 'number') { st.last = { why: 'survived', n: e }; return false; } // still there: never «killed» unproven — retried
@@ -1762,10 +1802,10 @@ class JobManager {
     return `its wrapper was gone and its scope did not answer a read in ${tries} tries — ${cmd}`;
   }
   /** the reap's words, once, on the run and its journal — what it read (or that no read answered), and what was done */
-  _reapSaid(job, run, scope, r) {
+  _reapSaid(job, run, scope, r, out = null) {
     const n = run._reap && run._reap.n, bound = this.d.reapReadMs ?? REAP_READ_MS;
     const held = n ? `its wrapper was gone and its scope still held ${n} process${n === 1 ? '' : 'es'}` : `its wrapper was gone and its scope did not answer a read in ${bound / 1000} s`;
-    const words = r === 'killed' ? `stopped by force: ${held} — its scope was killed` : `${held} — not killed: this kernel has no cgroup.kill — systemctl --user kill --signal=KILL ${scope.unit}`;
+    const words = r === 'killed' ? `stopped by force: ${held} — its scope was killed` : r === 'hub' ? `stopped by force: ${held} — ${this._hubScopeWords(out)}` : `${held} — not killed: this kernel has no cgroup.kill — systemctl --user kill --signal=KILL ${scope.unit}`;
     delete run._reap;
     run.forced = run.forced || words;
     this.d.log(`[jobs] ${job.id} ${words}`);
@@ -1801,17 +1841,18 @@ class JobManager {
     const grace = this._graceMs(), scope = this._runScope(job, run), until = now() + grace;
     const recorded = (l.pids || []).map(([pid, starttime]) => ({ pid, starttime, bootId: l.boot || '' }));
     const sent = new Map(); // pid → identity: every process its SIGTERM reached (a pid is never an identity — B-1cc6: read and proven by the one module)
-    const term = (ids) => { for (const id of ids) if (id && !sent.has(id.pid) && PI.aliveIdentity(id) === true) { sent.set(id.pid, id); PI.signalIdentity(id, 'SIGTERM'); } };
+    const term = (ids) => { for (const id of ids) if (id && !sent.has(id.pid) && !this._hubsOwn(id.pid) && PI.aliveIdentity(id) === true) { sent.set(id.pid, id); PI.signalIdentity(id, 'SIGTERM'); } };   // B-2c5c: never the hub's
     let n = 0, force = false, blind = false, seen = null;
     if (scope && scope.dir) {
       // round 6: a read past its bound is no reason to skip the grace — SIGTERM BLIND to what the run recorded (the wrapper names
       // a kept scope's processes too), the read retried through the grace, what it then lists SIGTERMed as it appears
-      let pids = await this._scopeProcs(scope);
+      const ownOf = (ps) => ps && ps.filter((x) => !this._hubsOwn(x));   // B-2c5c: what the hub runs inside the scope is not the run's
+      let pids = ownOf(await this._scopeProcs(scope));
       if (pids) term(pids.map((p) => PI.identityOf(p))); else { blind = true; term(recorded); }
       n = Math.max(pids ? pids.length : 0, sent.size);
       while ((pids === null || pids.length) && now() < until) {
         await pause(50);
-        const p = await this._scopeProcs(scope);
+        const p = ownOf(await this._scopeProcs(scope));
         if (p) { term(p.map((x) => PI.identityOf(x))); pids = p; n = Math.max(n, sent.size); }
       }
       if (pids === null || pids.length) {
@@ -1951,7 +1992,7 @@ class JobManager {
     }
     const scope = this._runScope(job, run);
     const killed = scope && scope.dir ? await this._within(this._killScope(scope), this.d.reapReadMs ?? REAP_READ_MS) : null;
-    const found = PI.membersOf({ mark: `VIBESPACE_JOB_ID=${job.id}` }), scan = found.scan || {};
+    const marked = PI.membersOf({ mark: `VIBESPACE_JOB_ID=${job.id}` }), scan = marked.scan || {}, found = marked.filter((id) => !this._hubsOwn(id.pid));   // B-2c5c: a hub started inside the job carries its mark
     for (const id of found) PI.signalIdentity(id, 'SIGTERM');
     const until = now() + this._graceMs();
     let live = [...found];

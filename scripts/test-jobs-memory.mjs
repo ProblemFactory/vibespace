@@ -438,6 +438,22 @@ leg('§3 IN-PROCESS ⑮ A REAP THAT DID NOT FINISH IS ALWAYS RETRIED — the boo
   stopEngine(E);
 });
 
+leg('§3 IN-PROCESS ⑳ B-2c5c — a scope that holds THIS hub (started by hand inside the job) is never killed whole', async (ok) => {
+  const dir = tmp('vs-jobs-mem-'), root = tmp('vs-jobs-mem-cg-');
+  // the hub (this process) and a member that is gone (past pid_max): the kill must leave the hub's processes and write no cgroup.kill
+  const H = fakeScope(root, 'hub', { pids: [process.pid, DEAD + 1] }), X = fakeScope(root, 'hub-x', { pids: [process.pid, DEAD + 1] });
+  const E = engine(dir, { reapReadMs: NEVER, reapConfirmMs: 10, cgroupRoot: root, hubCgroup: H.cgroup }); legClock(E);
+  const out = {}, r = await E._killScope({ unit: H.unit, dir: H.dir, cg: H.cgroup }, out), words = E._hubScopeWords(out);
+  const below = await E._hubInScope({ unit: 'x.scope', dir: '', cg: H.cgroup.replace(/\/[^/]+$/, '') }), beside = await E._hubInScope({ unit: X.unit, dir: X.dir, cg: X.cgroup });
+  // CONTROL: the hub's own cgroup is ANOTHER scope's (the check answering «not inside») — the whole scope's cgroup.kill is written
+  const E2 = engine(tmp('vs-jobs-mem-'), { reapReadMs: NEVER, reapConfirmMs: 10, cgroupRoot: root, hubCgroup: '/fake.slice/elsewhere.scope' }); legClock(E2);
+  const rx = await E2._killScope({ unit: X.unit, dir: X.dir, cg: X.cgroup });
+  ok(r === 'hub' && H.procs().length === 2 && out.hub && out.hub.kept === 1 && out.hub.killed === 0 && /never killed whole/.test(words) && /the hub and what it runs left alone/.test(words) && below && !beside,
+    `a scope that holds this hub: NO cgroup.kill (its list kept), the hub's processes left alone, said («${words}»); a hub in a cgroup UNDER the scope counts as inside, one beside it does not`, { r, out, below, beside });
+  ok(rx === 'killed' && X.procs().length === 0, 'CONTROL (the hub read as outside the scope): the scope\'s cgroup.kill is written — every process in it, the hub with it — RED', { rx });
+  stopEngine(E); stopEngine(E2);
+});
+
 leg('§3 IN-PROCESS ⑯ TWO OUTCOMES, TWO WORDS — a scope that is gone is not a kernel without cgroup.kill', async (ok) => {
   const dir = tmp('vs-jobs-mem-'), root = tmp('vs-jobs-mem-cg-');
   const K = fakeScope(root, 'kill'), G = fakeScope(root, 'gone'), N = fakeScope(root, 'nokill', { nokill: true }), V = fakeScope(root, 'vanish');
