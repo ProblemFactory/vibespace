@@ -192,6 +192,59 @@ function _lastTurnContextField(threadId, field) {
   return null;
 }
 
+/** RESUME CONTINUITY OFF THE LOOP (lane resume-all-paced, L2 — measured on a 120 MB rollout: `_lastTurnContextField` builds a 32 MB
+ *  string and splits it, ~30 ms of the hub's loop, and a resume asks it TWICE — model, then effort): the last `turn_context`'s
+ *  {model, effort} read BACKWARD from the end in 256 KB chunks through fs.promises, each field the LAST record that states it (nulls
+ *  skipped — the sync rule), over the SAME window (the file whole up to head+tail, else the last 32 MB with its cut-off first line
+ *  dropped). One read serves both knobs (memoized by size + mtime). → {model, effort} (null fields: none stated) | null (no rollout) */
+const _turnCtxMemo = new Map();
+const TURN_CTX_CHUNK = 256 * 1024;
+async function lastCodexTurnContextAsync(threadId, { fsp = fs.promises } = {}) {
+  const found = findCodexSessionJsonlPath(threadId);
+  if (!found) return null;
+  let fp; try { fp = plainJsonlPath(found); } catch { return null; }
+  let fh = null;
+  try {
+    const st = await fsp.stat(fp);
+    const memo = _turnCtxMemo.get(fp);
+    if (memo && memo.size === st.size && memo.mtimeMs === st.mtimeMs) return { model: memo.model, effort: memo.effort };
+    const lower = st.size <= JSONL_HEAD_BYTES + JSONL_TAIL_BYTES ? 0 : st.size - JSONL_TAIL_BYTES;
+    const out = { size: st.size, mtimeMs: st.mtimeMs, model: null, effort: null };
+    fh = await fsp.open(fp, 'r');
+    let end = st.size, carry = Buffer.alloc(0);
+    while (end > lower && !(out.model && out.effort)) {
+      const start = Math.max(lower, end - TURN_CTX_CHUNK);
+      const buf = Buffer.alloc(end - start);
+      const { bytesRead } = await fh.read(buf, 0, buf.length, start);
+      const data = Buffer.concat([buf.subarray(0, bytesRead), carry]);
+      let head = 0;
+      if (start > lower) {   // the bytes before the chunk's first newline belong to a line that starts in an earlier chunk
+        const f = data.indexOf(10);
+        if (f < 0) { carry = data; end = start; continue; }
+        carry = data.subarray(0, f); head = f + 1;
+      } else {
+        carry = Buffer.alloc(0);
+        if (lower > 0) { const f = data.indexOf(10); head = f < 0 ? data.length : f + 1; }   // the window's cut-off first line (readJsonlBounded drops it)
+      }
+      const lines = data.toString('utf-8', head).split('\n');
+      for (let i = lines.length - 1; i >= 0 && !(out.model && out.effort); i--) {
+        const l = lines[i];
+        if (l.indexOf('"turn_context"') < 0) continue;
+        try {
+          const r = JSON.parse(l);
+          if (r.type !== 'turn_context') continue;
+          if (!out.model && r.payload?.model) out.model = String(r.payload.model);
+          if (!out.effort && r.payload?.effort) out.effort = String(r.payload.effort);
+        } catch { }
+      }
+      end = start;
+    }
+    _turnCtxMemo.set(fp, out);
+    if (_turnCtxMemo.size > 256) _turnCtxMemo.delete(_turnCtxMemo.keys().next().value);
+    return { model: out.model, effort: out.effort };
+  } catch { return null; } finally { if (fh) { try { await fh.close(); } catch { } } }
+}
+
 /** lane roster-per-pass: every rollout `findCodexSessionJsonlPath(id)` would find, read ONCE for a liveness sweep — the
  *  same walk as `_walkJsonlFiles` (the sessions tree, directories followed, `.jsonl` / `.jsonl.zst` files) plus the remote
  *  cache's codex directories (data/remote-jsonl/<host>/codex/: exact names, as its existsSync asks), through fs.promises, one directory at a time. Keyed by the
@@ -525,6 +578,32 @@ function getJsonlLineIndex(fp) {
 // requires this module — zero duplication; the mtime+size caches live worker-
 // side where the work happens). Worker down/timeout ⇒ sync inline fallback,
 // identical behavior without the isolation.
+// THE HISTORY READ'S BOUNDS (lane resume-all-paced L3 cure): the history lane worker's heap (above), and a page's size — 8192 lines
+// AND 4 MB of their text, whichever comes first (a run of big tool outputs no longer crosses the thread line as one clone)
+let HISTORY_HEAP_MB = 768, HISTORY_SOFT_CHECK = true;
+const PAGE_LINES = 8192, PAGE_BYTES = 4 * 1048576;
+/** tests only (test-codex-history-bound): the history lane's heap bound — its hard limit is read when the pool is made, its soft
+ *  check at each page; `soft: false` sends no soft check (the red control: the hard limit alone, under a parent heap flag) */
+function _setHistoryHeapMbForTest(mb, { soft = true } = {}) { HISTORY_HEAP_MB = mb; HISTORY_SOFT_CHECK = soft; }
+// what the paged reads did (the legs assert the paged road was taken; a field hub's numbers): pages served, reads done in pages,
+// snapshots found gone, one-shot reads, reads that gave up (each with its reason, onFail)
+const _pagedStats = { pages: 0, reads: 0, gone: 0, oneShot: 0, failed: 0 };
+function pagedReadStats() { return { ..._pagedStats }; }
+// A CODEX PARSE ON THE MAIN LOOP IS SAID (L3 cure, 主开发 23:16Z): every one is counted, and logged with its reason and size —
+// the off-loop road failed (gone twice, the lane busy, the worker died, its heap bound, no pool), or a caller read a reader before
+// its off-loop read. The road stays (a missing pool must not lose the history); it stops being invisible.
+const _onLoop = { count: 0, recent: [] };
+function codexParsesOnLoop() { return { count: _onLoop.count, recent: _onLoop.recent.slice() }; }
+function _noteParseOnLoop(threadId, fp, why) {
+  let mt = true; try { mt = require('worker_threads').isMainThread; } catch { }
+  if (!mt) return;   // a worker's parse (the search index's) holds no loop of the hub's
+  let mb = 0; try { mb = Math.round(fs.statSync(fp).size / 1048576); } catch { }
+  _onLoop.count++;
+  _onLoop.recent.push({ at: Date.now(), threadId, mb, why }); if (_onLoop.recent.length > 20) _onLoop.recent.shift();
+  try { global.__vsMetric?.('codex-parse-on-loop', 1); } catch { }
+  console.warn(`[codex] parsed ${threadId} (${mb} MB rollout) ON THE MAIN LOOP — ${why || 'no reason given'}`);
+}
+
 let _transcriptPool = null;
 // B-f64b cure (主开发 11:47Z): a pool whose construction failed is tried again — every POOL_RETRY_MS, POOL_RETRY_MAX times in all,
 // each failure said with its try — never «inline for good» after one failure (every codex row would read «still checking» until a restart)
@@ -535,11 +614,18 @@ function _transcriptPoolGet() {
     try {
       const { SafeFs } = require('../safe-fs');
       const { runOp } = require('../transcript-worker');
+      // THE HISTORY LANE'S HEAP IS BOUNDED, and only its (lane resume-all-paced L3 cure, 主开发 23:16Z): the bound was measured
+      // for the codex history read alone — the pool's two workers also serve Claude's history reads, the line index and the turn
+      // scans, unmeasured under a cap, so they keep the runtime's limit as before. Twice: the worker's resourceLimits (a hard
+      // limit — which a parent --max-old-space-size REPLACES, as usage-cold-worker.js measured) and its own check of its heap at
+      // each page (HISTORY_HEAP_MB, sent with each page — binds under every start of the hub). A page over it is refused by name
+      // (`heap_bound`): the snapshot dropped, the worker alive, the next call served; the reader parses on the loop, SAID.
       _transcriptPool = new SafeFs({
         workerPath: path.join(__dirname, '..', 'transcript-worker.js'), name: 'transcript',
         poolSize: 2,
+        laneOpts: { history: { resourceLimits: { maxOldGenerationSizeMb: HISTORY_HEAP_MB } } },
         inlineRun: runOp,
-        timeouts: { default: 60000, gapInfo: 120000, lineRange: 60000, userTurns: 120000, taskLines: 120000, boundedParsed: 60000, jsonlTail: 60000, codexThreadMetas: 30000, codexOpenThreads: 15000, locate: 20000 },
+        timeouts: { default: 60000, gapInfo: 120000, lineRange: 60000, userTurns: 120000, taskLines: 120000, boundedParsed: 60000, boundedParsedPage: 60000, jsonlTail: 60000, codexThreadMetas: 30000, codexOpenThreads: 15000, locate: 20000 },
       });
       if (_poolFails) console.log(`[transcript-worker] the pool is up (try ${_poolFails + 1})`);
     } catch (e) {
@@ -577,6 +663,41 @@ async function readJsonlBoundedParsedAsync(fp, { tailOnly = true, dropSubagent =
   const pool = _transcriptPoolGet();
   if (pool) { try { return await pool.call('boundedParsed', { fp, tailOnly, dropSubagent }); } catch {} }
   return null; // caller falls back to its own sync parse
+}
+/** readJsonlBoundedParsedAsync IN PAGES (lane resume-all-paced, L2 — measured: the reply's structured clone of 68 000 records held the
+ *  MAIN loop ~100 ms at its deserialize): the worker reads the tail once and hands its records back a page at a time (≤ PAGE_LINES
+ *  lines and ≤ PAGE_BYTES of their text) from one snapshot in the `history` lane's one worker, the loop free between pages. A
+ *  snapshot gone (another read replaced it) ⇒ asked once more; again ⇒ the one-shot worker read. A page refused by the lane's heap
+ *  bound (`heap_bound`) skips the one-shot read (it would hold more). `onFail(why)` hears why the paged road gave up.
+ *  → the records, or null (the caller parses on the loop, said) */
+async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PAGE_LINES, onFail = null } = {}) {
+  const said = (why) => { _pagedStats.failed++; try { onFail?.(why); } catch { } return null; };
+  const pool = _transcriptPoolGet();
+  if (!pool) return said('no transcript pool on this process');
+  let why = null;
+  for (let tries = 0; tries < 2; tries++) {
+    try {
+      const out = [];
+      let token = null, total = Infinity, start = 0, gone = false;
+      while (start < total) {
+        const r = await pool.call('boundedParsedPage', { fp, tailOnly, start, count: page, maxBytes: PAGE_BYTES, capMb: HISTORY_SOFT_CHECK ? HISTORY_HEAP_MB : 0, ...(token ? { token } : {}) });
+        if (!r || r.gone) { gone = true; _pagedStats.gone++; why = 'its snapshot was gone twice (another read replaced it)'; break; }
+        _pagedStats.pages++;
+        token = r.token; total = r.total;
+        for (const x of r.records) out.push(x);
+        start = Number.isInteger(r.next) && r.next > start ? r.next : start + page;
+      }
+      if (!gone) { _pagedStats.reads++; return out; }
+    } catch (e) {
+      const code = e && e.code;
+      if (code === 'heap_bound') return said(`the history worker's heap bound (${HISTORY_HEAP_MB} MB): ${e.message}`);
+      why = code === 'history_busy' ? 'the history lane was busy past its wait' : `the history worker failed (${(e && e.message) || e})`;
+      break;
+    }
+  }
+  _pagedStats.oneShot++;
+  const r = await readJsonlBoundedParsedAsync(fp, { tailOnly });
+  return r == null ? said(`${why}; then the one-shot read failed too (both pool workers down, or its own failure)`) : r;
 }
 /** Generic off-loop call (S3: codex discovery ops). Resolves the worker's
  *  result, or the inline fallback's when the pool is down/unavailable — the
@@ -821,12 +942,13 @@ function readJsonlLineRange(fp, startLine, endLine) {
 }
 
 
-function parseCodexSessionJsonl(threadId) {
+function parseCodexSessionJsonl(threadId, { why = null } = {}) {
   const fp = findCodexSessionJsonlPath(threadId);
   // MISSING ROLLOUT (B-21e4 item 5): serve the thread/read records the store's
   // warmTranscript hook cached (0.153 paginated history with no rollout file on
   // this machine). Lazy require — codex-thread-read never requires this module.
   if (!fp) { try { return require('../codex-thread-read').cachedThreadRecords(threadId) || []; } catch { return []; } }
+  _noteParseOnLoop(threadId, fp, why);   // the sync parse of a rollout is ON the caller's loop: on the hub's main thread, said
   const messages = [];
   try {
     // Tail-only: earlier history is seek-loaded on scroll (no seam marker).
@@ -1318,9 +1440,11 @@ class CodexAdapter extends BackendAdapter {
   }
 }
 
-module.exports = { codexTranscriptIndex,
-  jsonlGapInfoAsync, readJsonlLineRangeAsync, scanJsonlUserTurnsAsync, readJsonlBoundedParsedAsync, readJsonlTailAsync, transcriptWorkerCall,
-  plainJsonlPath, fileIsZst, ZST_MAX_PLAIN, deriveCodexSessionName, CODEX_ROLLOUT_RE, lastCodexTurnModel, lastCodexTurnEffort,
+// transcriptPool: the pool itself (test-codex-attach-off-loop ⑤ reads its routing)
+module.exports = { codexTranscriptIndex, transcriptPool: _transcriptPoolGet,
+  pagedReadStats, codexParsesOnLoop, _setHistoryHeapMbForTest,
+  jsonlGapInfoAsync, readJsonlLineRangeAsync, scanJsonlUserTurnsAsync, readJsonlBoundedParsedAsync, readJsonlBoundedParsedPagedAsync, readJsonlTailAsync, transcriptWorkerCall,
+  plainJsonlPath, fileIsZst, ZST_MAX_PLAIN, deriveCodexSessionName, CODEX_ROLLOUT_RE, lastCodexTurnModel, lastCodexTurnEffort, lastCodexTurnContextAsync,
   CODEX_SESSIONS_DIR,
   CodexAdapter,
   findCodexSessionJsonlPath,

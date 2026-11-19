@@ -1116,6 +1116,9 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // lane peer-card-sender: a name GIVEN at creation (the client sends `sessionName` only for one — its 'Session N' default
             // stays client-side) outranks the first message on the sidebar card; persisted as meta `nameExplicit`
             _nameExplicit: typeof data.sessionName === 'string' && !!data.sessionName.trim(),
+            // lane resume-all-paced L3: a bulk resume's conversation — its FIRST attach reads its history in the hub's bulk line
+            // (codex-session-store.js oneReadAtATime), behind every read a person's own window asks for; every later attach is a person's
+            _bulkRead: !!(data.resume && data.bulk === true),
             // lane door-day-one-landing (the naive-user studies: the sign-in terminal and the claude inside it showed as two
             // ACTIVE sessions nobody made): a terminal a sign-in opened says so — the sidebar lists no row for it, the live
             // count skips it, and the claude it runs is no discovered row (routes/sessions.js) — src/day-one.js SIGN_IN

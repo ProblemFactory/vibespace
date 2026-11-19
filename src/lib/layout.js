@@ -2077,7 +2077,7 @@ class LayoutManager {
     const rows = this.app.sidebar?._allSessions || [];
     const go = (stopped || []).filter((d) => !unknownRowOf(rows, d.opts?.backend, d.opts?.backendSessionId || d.sessionId));
     if (go.length < (stopped || []).length) showToast(t('{n} not resumed: still checking whether they run in another terminal — resume each one by itself', { n: (stopped || []).length - go.length }), { type: 'info', duration: 6000 });
-    const r = await resumePaced(this.app, go, { extra: { stay: true } });
+    const r = await resumePaced(this.app, go, { extra: { stay: true, bulk: true } });   // `bulk`: each one's history read waits behind a person's own window (L3)
     const kept = r.rows;
     // NOTHING SILENT (LAW 3): the conversations re-opened in their own rows are said once
     if (kept) showToast(kept === 1 ? t('Resumed 1 conversation where it was') : t('Resumed {n} conversations where they were', { n: kept }), { type: 'info', duration: 5000 });

@@ -4,7 +4,7 @@ const { BACKEND_CAPS } = require('../backend-caps');
 const { HARNESS_SETTINGS } = require('../harness-settings'); // PURE: THE declared settings table (design-harness-settings §2)
 const { cliConfigFile } = require('../harness-config');       // SHARED: the descriptor-side file objects over the table's `files`
 const { CodexAdapter } = require('../adapters/codex');
-const { findCodexSessionJsonlPath, extractCodexThreadMeta, lastCodexTurnModel, lastCodexTurnEffort } = require('../adapters/codex');
+const { findCodexSessionJsonlPath, extractCodexThreadMeta, lastCodexTurnContextAsync } = require('../adapters/codex');
 const { CodexMessageManager } = require('../codex-message-manager');
 const codexStore = require('../codex-session-store');
 const codexThreadRead = require('../codex-thread-read');
@@ -182,8 +182,9 @@ module.exports = {
     // `turn_context` per turn, so BOTH knobs are recoverable — the B-21e4
     // continuity fallback, moved out of ws-create's codex branch and onto the
     // descriptor where the claude twin could join it.
-    lastTurnModel: (id) => lastCodexTurnModel(id),
-    lastTurnEffort: (id) => lastCodexTurnEffort(id),
+    // read off the loop, one read for both (lane resume-all-paced L2)
+    lastTurnModel: async (id) => ((await lastCodexTurnContextAsync(id)) || {}).model || null,
+    lastTurnEffort: async (id) => ((await lastCodexTurnContextAsync(id)) || {}).effort || null,
     // (id, cwd, {remote}) → Promise<bool>: the pre-read hook consumers await before
     // constructing a reader (claude warms its worker parse cache here). For codex
     // it is the 0.153 `thread/read` FALLBACK: a thread with NO rollout file on this

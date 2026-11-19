@@ -85,7 +85,15 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     sessionId: ref.sessionId,
     cwd: ref.cwd || '',
     host: ref.host || null,
+    memo: ref.memo && typeof ref.memo === 'object' ? ref.memo : null,   // ONE REQUEST, ONE READ (lane resume-all-paced L3 cure)
   });
+  // the request's reader of this conversation (its memo's, else a fresh one)
+  const readerFor = (r, session) => {
+    if (r.memo && r.memo.sm) return r.memo.sm;
+    const sm = createSessionMessages(sessionShape(r, session));
+    if (r.memo) r.memo.sm = sm;
+    return sm;
+  };
 
   const liveSession = (r) => {
     for (const [, s] of activeSessions) {
@@ -159,10 +167,13 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     if (session?._normalizer && session._normalizer.total > 0 && session._historyLoaded) {
       return { mm: session._normalizer, session };
     }
-    const sm = createSessionMessages(sessionShape(r, session));
+    if (r.memo && r.memo.view) return r.memo.view;   // this request converted it already (one request, one read)
+    const sm = readerFor(r, session);
+    if (typeof sm.rawAsync === 'function') await sm.rawAsync(); // lane resume-all-paced (L2): a store that reads its records off the loop does so first (codex)
     if (typeof sm.prepare === 'function') await sm.prepare(); // S9: a serve-backed reader (opencode stopped conversation) loads here — LOUD on failure, a user opened it
     const mm = createMessageManager(r.backend, 'api', { threadId: r.sessionId }); // the rendered conversation's id (codex ledger key)
     await mm.convertHistoryAsync(sm.raw());
+    if (r.memo) r.memo.view = { mm, session };
     return { mm, session };
   }
 
@@ -215,7 +226,8 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
       return viaDev;
     }
     await taskWarmOf(r); // B-299b A2: the task-tool scan (claude) is read off the loop before taskState answers
-    const sm = createSessionMessages(sessionShape(r, session));
+    const sm = readerFor(r, session);
+    if (typeof sm.rawAsync === 'function') await sm.rawAsync(); // lane resume-all-paced (L2): a store that reads its records off the loop does so first (codex)
     if (typeof sm.prepare === 'function') await sm.prepare(); // S9: a serve-backed reader (opencode stopped conversation) loads here — LOUD on failure, a user opened it
     const chatStatus = sm.chatStatus();
     if (session?._permissionMode && chatStatus && !chatStatus.permissionMode) {

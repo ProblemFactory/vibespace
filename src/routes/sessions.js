@@ -47,7 +47,7 @@ function setup(ctx) {
     const { backend, backendSessionId, claudeSessionId, cwd, offset, limit, search } = req.query;
     const resolvedSessionId = backendSessionId || claudeSessionId;
     if (!resolvedSessionId) return res.status(400).json({ error: 'backendSessionId or claudeSessionId required' });
-    const ref = { backend: backend || 'claude', sessionId: resolvedSessionId, cwd, host: req.query.host };
+    const ref = { backend: backend || 'claude', sessionId: resolvedSessionId, cwd, host: req.query.host, memo: {} };   // one request, one read of its history (lane resume-all-paced L3)
     try {
       if (req.query.turnmap) return res.json(await transcripts.turnmap(ref));
       if (search) return res.json(await transcripts.searchIndexed(ref, search));
@@ -85,7 +85,7 @@ function setup(ctx) {
     const { backend, backendSessionId, claudeSessionId, cwd } = req.query;
     const resolvedSessionId = backendSessionId || claudeSessionId;
     if (!resolvedSessionId) return res.status(400).json({ error: 'backendSessionId or claudeSessionId required' });
-    const ref = { backend: backend || 'claude', sessionId: resolvedSessionId, cwd, host: req.query.host };
+    const ref = { backend: backend || 'claude', sessionId: resolvedSessionId, cwd, host: req.query.host, memo: {} };   // one request, one read of its history (lane resume-all-paced L3)
     const { gap, fp, hostFetchError } = await transcripts.gapInfo(ref);
     // Carry a remote failure to the client: "no transcript" and "the machine
     // holding it was unreachable" produce the same empty view otherwise.

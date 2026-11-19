@@ -8,6 +8,7 @@ const LC = require('./server/loop-counts.js');   // loop-day-report M5: the hour
 const { createMessageManager, feedLive, feedPeerCard, rebuildHistory, seedHelperView, convertWithCards, browserCardsFor, artifactDeriveOpts } = require('./normalizers');
 const { chipAsksOf } = require('./helper-ask.js'); // PURE (lane S1): the pending asks, per harness — the ONE function the chip and the wait watch read
 const { createWsHeartbeat } = require('./server/ws-heartbeat');
+const { readOffLoop, ATTACH_ACK_MS } = require('./attach-read'); // lane resume-all-paced L3: every attach reads a codex history off the loop, acked while it waits
 const { listCodexThreads } = require('./codex-session-store');
 const { findCodexSessionJsonlPath, extractCodexThreadMeta } = require('./adapters/codex');
 const { cwdToProjectDir, findSessionJsonlPath } = require('./session-store');
@@ -1380,18 +1381,20 @@ function registerWsHandler(wss, ctx) {
               // Initialize normalizer from full JSONL + buffer history on first attach.
               // Can't use total===0: PTY output via processLive may have populated the
               // normalizer with partial buffer data before any client connected.
+              // the first attach of a conversation a paced «Resume all» created reads in the hub's BULK line, behind every person's
+              // window (lane resume-all-paced L3 cure); every later attach is a person's
+              const bulkRead = !!session._bulkRead; session._bulkRead = false;
               if (session._normalizer && !session._historyLoaded) {
                 // 2.235.0: warm the JSONL parse cache in the transcript worker
                 // FIRST — the sync rebuild below then reads a warm cache
                 // instead of blocking the loop ~0.5-1s per big-tail parse
-                // (the userL-incident spike class). Codex sessions parse
-                // their own rollouts sync (unwarmed) — smaller files today.
+                // (the userL-incident spike class). Codex sessions read their
+                // rollouts off the loop too since lane resume-all-paced (sm.rawAsync below).
                 // …through the harness descriptor (S3): claude = the worker parse
                 // cache warm above; codex = the 0.153 thread/read FALLBACK for a
                 // MISSING rollout (B-21e4 item 5, local only — the local
                 // app-server knows no remote thread); a harness without the
                 // hook skips. Never throws, never blocks the loop (child process).
-                try { const warm = harnessOf(session.backend || 'claude').store?.warmTranscript; if (warm) await warm(session.claudeSessionId || session.backendSessionId, session.cwd, { remote: !!session.host, session, attach: true }); } catch {} // lane agy-harness-fixes: + the session (agy reads its account's transcript); attach: an ATTACH waits the live bound for agy's cards, never the history page's (the agy chain's cure)
                 // TIME-SLICED + single-flight (2.369.16, userW inc-mtndq0vb):
                 // the old sync convertHistory blocked the loop for seconds per
                 // multi-MB transcript — after a restart, a reconnect storm of
@@ -1404,11 +1407,21 @@ function registerWsHandler(wss, ctx) {
                 // sessions after a restart) keep proving life to the client
                 // with progress acks — its re-attach ladder extends on a fresh
                 // ack instead of flipping read-only at 2 minutes.
+                // P2 (lane resume-all-paced L3 cure, 主开发 23:16Z): WHILE AN ATTACH WAITS, THE WINDOW IS TOLD — the acks start HERE, before the
+                // warm and the off-loop read: a read waits its turn in the hub's one-read-at-a-time line (minutes behind a storm), and a
+                // window late in it went silent after its first ack; `queued` until the rebuild starts converting (session._rebuildProgress)
                 const progressTimer = setInterval(() => {
                   const p = session._rebuildProgress;
                   try { ws.send(JSON.stringify({ type: 'attach-ack', sessionId: data.sessionId, progress: p ? { done: p.done, total: p.total } : null, queued: !p })); } catch { }
-                }, 10000);
-                try { await rebuildHistory(session, data.sessionId, sm.raw(), { helperResults: typeof sm.helperResults === 'function' ? sm.helperResults() : null }); } // verify r3: the helpers' tool_results (skipped from the record list) settle an asked ask the table's result rows
+                }, ATTACH_ACK_MS);
+                try {
+                  try { const warm = harnessOf(session.backend || 'claude').store?.warmTranscript; if (warm) await warm(session.claudeSessionId || session.backendSessionId, session.cwd, { remote: !!session.host, session, attach: true }); } catch {} // lane agy-harness-fixes: + the session (agy reads its account's transcript); attach: an ATTACH waits the live bound for agy's cards, never the history page's (the agy chain's cure)
+                  // lane resume-all-paced (L2): a store that can read its records OFF the loop does so first (codex: the parse in the
+                  // transcript worker, the merge in slices — measured 380–880 ms of one sync hold per 120 MB rollout); raw() then reads it.
+                  // L3: its turn in the hub's line — a person's window first, the first attach of a bulk resume's conversation after them
+                  await readOffLoop(sm, { bulk: bulkRead, label: data.sessionId });
+                  await rebuildHistory(session, data.sessionId, sm.raw(), { helperResults: typeof sm.helperResults === 'function' ? sm.helperResults() : null }); // verify r3: the helpers' tool_results (skipped from the record list) settle an asked ask the table's result rows
+                }
                 finally { clearInterval(progressTimer); }
                 // A kill / CLI exit can land during the (now non-blocking)
                 // rebuild — never hand the client a live ChatView on a dead
@@ -1418,6 +1431,11 @@ function registerWsHandler(wss, ctx) {
                   break;
                 }
               }
+              // P1 (lane resume-all-paced L3 cure, 主开发 23:16Z): A RE-ATTACH IS AN ATTACH — a reload, a reconnect, a second device: the
+              // history is loaded, but this reader is a fresh one and its chat status below would parse the whole rollout ON THE LOOP
+              // (master's storm frame, one open conversation after another). It reads off the loop first, acked while it waits; a reader
+              // that has read already (the first attach above) answers at once.
+              await readOffLoop(sm, { label: data.sessionId, ack: () => { try { ws.send(JSON.stringify({ type: 'attach-ack', sessionId: data.sessionId, progress: null, queued: true })); } catch { } } });
               // Recover goal state from wrapper meta (populated by thread/goal/get on startup)
               if (!session._goal) {
                 const wMeta = sm.wrapperMeta?.() || {};
@@ -1696,6 +1714,7 @@ function registerWsHandler(wss, ctx) {
             // "View History" said "No messages in this session's transcript
             // yet." while the serve had them. A reader that is not prepared is
             // EMPTY, never wrong, which is exactly why it was silent.
+            await readOffLoop(sm, { label: `view ${backendSessionId}` });   // lane resume-all-paced (L2/L3): codex's records off the loop — in the hub's line, a person's read
             if (typeof sm.prepare === 'function') { try { await sm.prepare(); } catch (e) { console.warn(`[view] ${data.backend || 'claude'} reader prepare failed for ${backendSessionId}: ${e.message}`); } }
             const mm = createMessageManager(data.backend || 'claude', data.sessionId || 'view', { threadId: backendSessionId }); // the rendered conversation's id (codex ledger key)
             await convertWithCards(mm, sm.raw(), browserCardsFor({ conversationId: backendSessionId }), { artifacts: artifactDeriveOpts({ backend: data.backend || 'claude', cwd: data.cwd || '' }) }); // lane artifacts-model: its deliverable cards, derived at the read // view-only replay of a dead session — same loop-friendly slicing (boot replay opens N of these at once); its browser-session cards by time (2026-09-27)

@@ -147,7 +147,7 @@ export function resumeGroup(app, sessions, { nameOf = (s) => s.name } = {}) {
     else if (s.status === 'tmux') app.attachTmuxSession(s.tmuxTarget, s.name, s.cwd);
   }
   if (checking.length) showToast(t('{n} not resumed: still checking whether they run in another terminal — resume each one by itself', { n: checking.length }), { type: 'info', duration: 6000 });
-  return resumePaced(app, stopped, { extra: {}, later: { stay: true } });
+  return resumePaced(app, stopped, { extra: {}, later: { stay: true, bulk: true } });   // the press reads first; the rest in the hub's bulk line (L3)
 }
 
 /** the group button's press: the pace started, and anything thrown inside it SAID (S3 — never an unhandled rejection) */

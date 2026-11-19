@@ -71,7 +71,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     });
   },
 
-  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, outputStyle, autoResume, worktree, fork, hostId, keeperSid, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, taskIds, tools, extraTaskBinds, accountId, modelLock, lockModel, lockContext, poolPin, ephemeral = false, purpose = null, winBounds, recreateCwd = false, ignoreNoConvo = false, opencodePty = false, onCreateResult, onCreateEnd, browserProfileId, browserProfileOrigin, quiet = false }) {
+  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, outputStyle, autoResume, worktree, fork, hostId, keeperSid, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, taskIds, tools, extraTaskBinds, accountId, modelLock, lockModel, lockContext, poolPin, ephemeral = false, purpose = null, winBounds, recreateCwd = false, ignoreNoConvo = false, opencodePty = false, onCreateResult, onCreateEnd, browserProfileId, browserProfileOrigin, quiet = false, bulk = false }) {
     const createArgs = arguments[0] || {}; // B-864f: the create as it was asked — a window that waits for the vault replays it whole
     try { track('event', `session-create:${backend || 'claude'}:${mode || 'default'}`); } catch {}
     // FIRST USE of a harness whose history lives behind an opt-in background
@@ -186,6 +186,9 @@ export function installSessionLifecycle(App, ctx = {}) {
       // reason when the cwd is not a repo, and only EMITS the flag on a new
       // session or a fork (a resume re-enters the CLI's own recorded worktree)
       worktree: worktree || undefined,
+      // a BULK resume's create (resume-pacer.js — «Resume all», a group's later members): its first attach reads the conversation's
+      // history in the hub's bulk line, behind every read a person's own window asks for (lane resume-all-paced L3)
+      bulk: (bulk && resumeId) ? true : undefined,
       // tuiRenderer: the INSTANCE default is read server-side from the harness's
       // declared spawn rows (design-harness-settings §5) — the client sends only
       // an explicit per-session pick, and this create path has none.
@@ -1207,7 +1210,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       message: t('VibeSpace has not finished checking whether this conversation is running in another terminal. Resuming it now could start a second agent on the same conversation.'),
       confirmText: t('Resume anyway') });
   },
-  resumeSession(sessionId, cwd, sessionName, { mode, model, effort, permission, accountId, worktree, syncId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, hostId, keeperSid, winBounds, excludeWebuiId, onCreateResult, onCreateEnd, initialMessage, stay = false, fromWin = null, unattended = false, unknownOk = false } = {}) {
+  resumeSession(sessionId, cwd, sessionName, { mode, model, effort, permission, accountId, worktree, syncId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, hostId, keeperSid, winBounds, excludeWebuiId, onCreateResult, onCreateEnd, initialMessage, stay = false, fromWin = null, unattended = false, bulk = false, unknownOk = false } = {}) {
     const shown = this.wm.activeWindowId; // the window the person is in, before anything here moves the focus (r4 N3)
     this._closeSidebarOnMobile();
     const targetBackendId = backendSessionId || sessionId;
@@ -1362,6 +1365,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       winBounds,
       onCreateResult,
       onCreateEnd, // lane resume-all-paced: the bulk resume waits for this create's END before the next one
+      bulk, // lane resume-all-paced L3: a bulk resume's create — its first attach reads its history in the hub's bulk line, behind a person's windows
       initialMessage, // lane door-signin-card: the chat's «Send my message again» re-sends the waiting turn on resume
     });
     if (row) {

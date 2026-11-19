@@ -36,7 +36,7 @@ const wc = read('src/ws-create.js');
 // descriptor's own store hook, which runs BEFORE buildSessionArgs (the claude
 // twin needed the same rung, and the post-fill was unreachable while the client
 // still filled the instance default into every resume).
-ok(require(path.join(REPO, 'src/harnesses/codex.js')).store.lastTurnModel(TID) === 'gpt-6-astra',
+ok((await require(path.join(REPO, 'src/harnesses/codex.js')).store.lastTurnModel(TID)) === 'gpt-6-astra',   // async since lane resume-all-paced (read off the loop)
   'the codex descriptor exposes the thread\'s own last model to the resume ladder');
 ok(/await pickKnob\(data\.model, hstore\.lastTurnModel, 'defaultModel'\)/.test(wc) && /require\('\.\/resume-continuity'\)/.test(wc),
   'ws-create: a codex resume without an explicit model carries the last-run model (client choice still wins when sent)');

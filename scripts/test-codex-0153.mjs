@@ -226,7 +226,7 @@ console.log('— ④ explicit model + effort on EVERY turn/start (resume continu
   ok(CX2.lastCodexTurnEffort(P) === 'high' && CX2.lastCodexTurnModel(P) === 'gpt-6-astra' && CX2.lastCodexTurnEffort('00000000-0000-4000-8000-000000000000') === null, 'lastCodexTurnEffort = the last turn_context.effort (model twin unchanged; unknown thread → null)');
   const wc = read('src/ws-create.js');
   const hx = require(path.join(REPO, 'src/harnesses/codex.js'));
-  ok(hx.store.lastTurnEffort(P) === 'high' && hx.store.lastTurnModel(P) === 'gpt-6-astra',
+  ok((await hx.store.lastTurnEffort(P)) === 'high' && (await hx.store.lastTurnModel(P)) === 'gpt-6-astra',   // async since lane resume-all-paced (read off the loop)
     'the codex harness descriptor is where the resume ladder reads the thread\'s own last model/effort (B-6b6d)');
   ok(/await pickKnob\(data\.effort, hstore\.lastTurnEffort, 'defaultEffort'\)/.test(wc) && /require\('\.\/resume-continuity'\)/.test(wc),
     'ws-create: a codex resume without an explicit effort carries the last-run effort (client choice still wins)');

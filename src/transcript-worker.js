@@ -28,8 +28,72 @@ const SHIPPED = () => (_shipped == null ? (_shipped = require('fs').existsSync(r
 // construction) doesn't create a require cycle with adapters/codex.js.
 function _codex() { return require('./adapters/codex'); }
 
+// lane resume-all-paced (L2): ONE tail kept for its pages (boundedParsedPage — always this worker: the `history` lane, safe-fs.js)
+// — a snapshot named by a token, dropped at its last page or 30 s after its last ask (an abandoned read never stays). L3: the
+// snapshot holds the tail's LINES, never its parsed records — each page parses its own lines (measured on a 32 MB tail: the lines
+// 35 MB with the string, the records 71 MB — their strings keep slices of it; one worker after four tails: heap 82 MB, not 155).
+let _pageSnap = null;
+function _dropPageSnapLater(snap) { clearTimeout(snap.timer); snap.timer = setTimeout(() => { if (_pageSnap === snap) _pageSnap = null; }, 30000); if (snap.timer.unref) snap.timer.unref(); }
+
+/** one line of a bounded tail → its record, or undefined (blank, unparsable, or a subagent's record when `dropSub`) — boundedParsed's
+ *  rule, shared by its pages (JSON.parse never answers undefined; a line `null` is a record unless `dropSub`, as it always was) */
+function parseTailLine(line, dropSub) {
+  const trimmed = line.trim();
+  if (!trimmed) return undefined;
+  let msg;
+  try { msg = JSON.parse(trimmed); } catch { return undefined; }
+  // EXACT parity with session-store isSubagentMessage — a superset
+  // here would drop records the sync fallback keeps (cache divergence)
+  if (dropSub && (msg === null || msg.parent_tool_use_id || msg.isSidechain)) return undefined;
+  return msg;
+}
+
 function runOp(op, payload = {}) {
   switch (op) {
+    case 'boundedParsedPage': {
+      // a big tail's records handed back in PAGES (lane resume-all-paced, L2 — measured: ONE structured clone of 68 000 records was
+      // ~100 ms of the MAIN loop at its deserialize): page 0 reads the bounded tail and names the snapshot (its lines); every page
+      // parses ITS lines from that snapshot (the file may grow meanwhile — the attach reads one instant, as the sync path does).
+      // `start`/`count`/`total`/`next` count LINES; a page ends at `count` lines or `maxBytes` of their text, whichever first (at
+      // least one line), and says where the next begins (`next`); a blank or unparsable line yields no record (parseTailLine).
+      // THE HEAP BOUND (L3 cure): `capMb` — this worker checks its own heap after the tail's read and after each page, and refuses
+      // past it by name (`heap_bound`), the snapshot dropped; a parent --max-old-space-size replaces the worker's resourceLimits,
+      // this check binds under every start of the hub (usage-cold-worker.js's rule)
+      const capBytes = (Number(payload.capMb) || 0) * 1048576;
+      const overCap = (where) => {
+        if (!capBytes) return;
+        const used = require('v8').getHeapStatistics().used_heap_size;
+        if (used <= capBytes) return;
+        if (_pageSnap) { clearTimeout(_pageSnap.timer); _pageSnap = null; }
+        throw Object.assign(new Error(`this history needs more memory than the history worker's ${payload.capMb} MB bound (${Math.round(used / 1048576)} MB ${where})`), { code: 'heap_bound' });
+      };
+      let snap = _pageSnap;
+      if (!payload.token) {
+        const content = _codex().readJsonlBounded(payload.fp, { tailOnly: payload.tailOnly !== false });
+        snap = _pageSnap = { token: `${process.pid}:${Date.now()}:${Math.random().toString(36).slice(2)}`, fp: payload.fp, lines: content.split('\n'), timer: null };
+        overCap('after the tail was read');
+      } else if (!snap || snap.token !== payload.token) {
+        return { result: { gone: true } };
+      }
+      const start = Math.max(0, payload.start | 0), count = Math.max(1, payload.count | 0), total = snap.lines.length;
+      const maxBytes = Math.max(0, Number(payload.maxBytes) || 0);
+      const records = [];
+      let i = start, bytes = 0;
+      for (; i < Math.min(total, start + count); i++) {
+        if (maxBytes && i > start && bytes >= maxBytes) break;
+        const line = snap.lines[i]; bytes += line.length;
+        const msg = parseTailLine(line, !!payload.dropSubagent); if (msg !== undefined) records.push(msg);
+      }
+      overCap('after a page');
+      if (i >= total) { clearTimeout(snap.timer); if (_pageSnap === snap) _pageSnap = null; } else _dropPageSnapLater(snap);
+      return { result: { token: snap.token, total, next: i, records } };
+    }
+    case '__hold': {
+      // TESTS ONLY (safe-fs-worker.js's __sleep, held by the test instead of a clock): this worker waits on payload.sab until the
+      // test releases it (Atomics.notify) or payload.ms passes (≤ 30 s) — a PLACED stall, never a timing guess (test-codex-attach-off-loop ⑤ (d))
+      Atomics.wait(new Int32Array(payload.sab), 0, 0, Math.min(Number(payload.ms) || 5000, 30000));
+      return { result: true };
+    }
     case 'gapInfo': {
       // Builds/extends the worker-side line index as a side effect.
       return { result: _codex().jsonlGapInfo(payload.fp) };
@@ -50,17 +114,7 @@ function runOp(op, payload = {}) {
       const content = readJsonlBounded(payload.fp, { tailOnly: payload.tailOnly !== false });
       const records = [];
       const dropSub = !!payload.dropSubagent;
-      for (const line of content.split('\n')) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        try {
-          const msg = JSON.parse(trimmed);
-          // EXACT parity with session-store isSubagentMessage — a superset
-          // here would drop records the sync fallback keeps (cache divergence)
-          if (dropSub && (msg.parent_tool_use_id || msg.isSidechain)) continue;
-          records.push(msg);
-        } catch {}
-      }
+      for (const line of content.split('\n')) { const msg = parseTailLine(line, dropSub); if (msg !== undefined) records.push(msg); }
       return { result: records };
     }
     case 'jsonlTail': {

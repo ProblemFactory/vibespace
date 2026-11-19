@@ -56,10 +56,16 @@ const DEFAULT_TIMEOUTS = {
 // waits for the new one. The IO pool never holds a parse; a parse never dies of a stat, nor runs on the main thread.
 // r3: a waiting op has two clocks (the WAIT, then its own deadline from the SEND), is asked the blocked-mount door again
 // when it is sent, and leaves the queue when its request is gone (opts.signal) — see _wait.
+// lane resume-all-paced (L3): a conversation's history read in PAGES runs in the `history` lane — its pages answer from ONE parsed
+// snapshot held INSIDE the worker that read page 0; `_pick` (least busy) sent a later page to the other worker whenever any other
+// transcript op held the first (a claude warm, a discovery sweep, a minimap scan) — that page found no snapshot, the read began
+// again and then fell back to the one-shot read (every record in one message: the main thread's ~100 ms deserialize, clone buffers
+// the size of the records). One worker, one page at a time: every page reaches its snapshot.
 const LANES = {
   parse: { poolSize: 1, busy: { message: 'another document is being parsed — try again in a moment', code: 'parse_busy' } },
+  history: { poolSize: 1, busy: { message: "another conversation's history is being read — try again in a moment", code: 'history_busy' } },
 };
-const OP_LANE = { xlsxSheets: 'parse' };   // the ops that always run in a lane (a caller may name one: call(op, p, { lane }))
+const OP_LANE = { xlsxSheets: 'parse', boundedParsedPage: 'history' };   // the ops that always run in a lane (a caller may name one: call(op, p, { lane }))
 const gone = () => Object.assign(new Error('the request was closed before its turn'), { status: 499, code: 'request_gone' });
 
 class SafeFs {
@@ -99,7 +105,7 @@ class SafeFs {
       if (this._closed) return;
       let w;
       try {
-        w = new Worker(this.workerPath, { env: process.env });
+        w = new Worker(this.workerPath, { env: process.env, ...(this._opts.resourceLimits ? { resourceLimits: this._opts.resourceLimits } : {}) });   // a pool may bound its workers' heaps (the transcript pool's history lane: lane resume-all-paced L3 — a HARD limit a parent --max-old-space-size replaces; the worker's own check is the bound that binds)
       } catch (e) {
         // Construction itself failed — retry with backoff; calls fall back to
         // the in-main runOp meanwhile (SafeFs.call handles no-alive-worker).
@@ -191,7 +197,10 @@ class SafeFs {
     if (!l) {
       const L = LANES[name];
       if (!L) throw new Error('unknown safeFs lane: ' + name);
-      l = new SafeFs({ ...this._opts, name: `${this.name}-${name}`, poolSize: L.poolSize, serial: L, timeouts: this.timeouts });
+      // a lane takes its parent's options, then its OWN (opts.laneOpts[name] — the transcript pool bounds its `history` lane's heap,
+      // and only that lane's: lane resume-all-paced L3 cure); never the parent's laneOpts again
+      const { laneOpts, ...parent } = this._opts;
+      l = new SafeFs({ ...parent, ...((laneOpts && laneOpts[name]) || {}), name: `${this.name}-${name}`, poolSize: L.poolSize, serial: L, timeouts: this.timeouts });
       this._lanes.set(name, l);
     }
     return l;

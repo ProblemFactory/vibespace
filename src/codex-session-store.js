@@ -253,15 +253,17 @@ function recordThreadOf(record) {
   return record && typeof record === 'object' && typeof record[RECORD_THREAD_KEY] === 'string' && record[RECORD_THREAD_KEY] ? record[RECORD_THREAD_KEY] : null;
 }
 
+/** sortRecords' two steps, apart (lane resume-all-paced, L2: the merge's generator decorates in steps — the copy and the
+ *  Date.parse of 68 000 records were 66–133 ms of ONE loop turn — and only the numeric sort runs whole) */
+function decorateForSort(record, idx) {
+  const copy = { ...record, __idx: idx, __ts: Date.parse(record.timestamp || '') || 0 };
+  const tid = recordThreadOf(record);
+  if (tid) Object.defineProperty(copy, RECORD_THREAD_KEY, { value: tid, enumerable: false, configurable: true, writable: true }); // the spread drops non-enumerables
+  return copy;
+}
+const sortCompare = (a, b) => (a.__ts - b.__ts) || (a.__idx - b.__idx);
 function sortRecords(records) {
-  return records
-    .map((record, idx) => {
-      const copy = { ...record, __idx: idx, __ts: Date.parse(record.timestamp || '') || 0 };
-      const tid = recordThreadOf(record);
-      if (tid) Object.defineProperty(copy, RECORD_THREAD_KEY, { value: tid, enumerable: false, configurable: true, writable: true }); // the spread drops non-enumerables
-      return copy;
-    })
-    .sort((a, b) => (a.__ts - b.__ts) || (a.__idx - b.__idx));
+  return records.map(decorateForSort).sort(sortCompare);
 }
 
 /** The webui id a user record is FINGERPRINTED by, in every spelling a producer
@@ -513,7 +515,26 @@ function retractionIdOf(record) {
   return String(payload.msg_id || payload.msgId || '');
 }
 
+/** THE MERGE, STEPPED (lane resume-all-paced, L2 — measured on a 120 MB rollout: one merge of a 32 MB tail is 163–343 ms of the
+ *  hub's loop, and an attach ran two): mergeCodexRecords' ONE body as a generator that yields every 1 024 records — the sync
+ *  mergeCodexRecords drives it to the end at once, mergeCodexRecordsAsync in slices with the loop free between them. The same
+ *  records either way (it is the same code). */
 function mergeCodexRecords(historyRecords, liveRecords) {
+  const g = mergeCodexRecordsSteps(historyRecords, liveRecords);
+  let r = g.next();
+  while (!r.done) r = g.next();
+  return r.value;
+}
+async function mergeCodexRecordsAsync(historyRecords, liveRecords, { sliceMs = 20 } = {}) {
+  const g = mergeCodexRecordsSteps(historyRecords, liveRecords);
+  let t0 = performance.now(), r = g.next();
+  while (!r.done) {
+    if (performance.now() - t0 >= sliceMs) { await new Promise((res) => setImmediate(res)); t0 = performance.now(); }
+    r = g.next();
+  }
+  return r.value;
+}
+function* mergeCodexRecordsSteps(historyRecords, liveRecords) {
   const merged = [];
   const seen = new Set();
   const keptTurnContexts = new Map(); // fingerprint → the copy that made it into `merged`
@@ -527,8 +548,14 @@ function mergeCodexRecords(historyRecords, liveRecords) {
   const userClaims = new Map();   // content key → copies of OURS no codex twin has consumed yet (forward, turn-independent)
   const codexUserOut = new Map(); // `<turn>\u0000<content key>` → codex copies emitted in THIS turn no late twin of ours has consumed
   const oursByIdentity = new Map(); // submission id → the content key the copy of OURS carrying that id claimed under (what a retraction names)
-  let currentTurnId = 'prelude';
-  for (const record of sortRecords([...(historyRecords || []), ...(liveRecords || [])])) {
+  let currentTurnId = 'prelude', step = 0;
+  // sortRecords, stepped: the decoration yields every 1 024 records, the numeric sort runs whole (the same order)
+  const all = [...(historyRecords || []), ...(liveRecords || [])], sorted = new Array(all.length);
+  for (let idx = 0; idx < all.length; idx++) { sorted[idx] = decorateForSort(all[idx], idx); if ((idx & 1023) === 1023) yield; }
+  sorted.sort(sortCompare);
+  yield;
+  for (const record of sorted) {
+    if ((++step & 1023) === 0) yield;
     if (record.type === 'turn_context') {
       currentTurnId = record.payload?.turn_id || record.payload?.turnId || currentTurnId;
     }
@@ -638,6 +665,56 @@ function mergeCodexRecords(historyRecords, liveRecords) {
   return merged;
 }
 
+/** parseCodexSessionJsonl OFF THE LOOP (lane resume-all-paced, L2): a present rollout parsed in the transcript worker (its
+ *  boundedParsed parse — the same tail-only read and line parse), handed back in pages; a missing one, or a pool that is down, the
+ *  sync parse — and a parse that goes back on the loop SAYS WHY (L3 cure, 主开发 23:16Z: the paged read's own reason — gone twice,
+ *  the lane busy, the worker died, its heap bound, no pool — counted and logged by parseCodexSessionJsonl). */
+async function parseCodexSessionJsonlAsync(threadId) {
+  let fp = null;
+  try { fp = findCodexSessionJsonlPath(threadId); } catch { fp = null; }
+  let why = 'its rollout was not found (the thread/read copy is read)';
+  if (fp) {
+    try {
+      const { readJsonlBoundedParsedPagedAsync } = require('./adapters/codex');
+      const r = await readJsonlBoundedParsedPagedAsync(fp, { tailOnly: true, onFail: (w) => { why = w; } });   // in pages: the loop free between them
+      if (Array.isArray(r)) return r;
+    } catch (e) { why = 'the off-loop read threw: ' + ((e && e.message) || e); }
+  }
+  return parseCodexSessionJsonl(threadId, { why });
+}
+
+/** THE HUB READS ONE CONVERSATION'S RECORDS AT A TIME (lane resume-all-paced, L3 — measured: a storm of 8 resumed conversations
+ *  over 100 MB on a ballasted scratch hub). Off the loop, the attaches no longer wait on each other as the sync read made them
+ *  do: all eight parsed and merged AT ONCE — the main heap reached 4.1 GB (eight conversations' records alive together) and the
+ *  hub's RSS stayed at 7.0 GB against master's 3.6. A read waits for the one before it to END (records merged, or failed) — never
+ *  on a clock; each still runs off the loop.
+ *  A PERSON'S OWN WINDOW GOES FIRST (L3 cure, 主开发 23:16Z): two lines — a read a person's window asked for (an attach, a view, a
+ *  page) goes before every read a bulk resume queued (`bulk`: the first attach of a conversation a paced «Resume all» created);
+ *  in each line, first come first served. One turn = one conversation's read: its fork ancestry whole (≤ 8 native parents —
+ *  resolveCodexForkAncestry's depth — plus the forks VibeSpace made of it, the session's forkedFrom), each file one ≤ 32 MiB tail
+ *  read in pages. → fn's promise */
+const _readLine = { person: [], bulk: [] };
+let _reading = false;
+function oneReadAtATime(fn, { bulk = false } = {}) {
+  return new Promise((resolve, reject) => {
+    _readLine[bulk ? 'bulk' : 'person'].push({ fn, resolve, reject });
+    _nextRead();
+  });
+}
+function _nextRead() {
+  if (_reading) return;
+  const job = _readLine.person.shift() || _readLine.bulk.shift();
+  if (!job) return;
+  _reading = true;
+  Promise.resolve().then(job.fn).then(job.resolve, job.reject).finally(() => { _reading = false; _nextRead(); });
+}
+/** the reads waiting their turn now (the attach's acks say it; tests read it) */
+function readsWaiting() { return { person: _readLine.person.length, bulk: _readLine.bulk.length, reading: _reading }; }
+
+// the reason a SYNC read of a reader gives when it parses (lane resume-all-paced L3 cure): no door of the hub reads a codex reader
+// before its off-loop read (src/attach-read.js readOffLoop) — a caller that does is named by this line in the hub's log
+const SYNC_ROAD = 'a reader was read before its off-loop read (raw / chatStatus / slice on a fresh reader)';
+
 class CodexSessionMessages {
   constructor(session, sessionId, { buffersDir } = {}) {
     this._session = session;
@@ -662,13 +739,42 @@ class CodexSessionMessages {
     // file, exactly as the walker does; the reader's id is only the default
     // for provenance-less records (the live buffer below).
     for (const { id: forkId, untilOrdinal } of ancestry) {
-      const forkHistory = tagRecordThread(cutRecordsAtOrdinal(parseCodexSessionJsonl(forkId), untilOrdinal), forkId);
+      const forkHistory = tagRecordThread(cutRecordsAtOrdinal(parseCodexSessionJsonl(forkId, { why: SYNC_ROAD }), untilOrdinal), forkId);
       if (forkHistory.length) history = mergeCodexRecords(history, forkHistory);
     }
-    const currentHistory = threadId ? tagRecordThread(parseCodexSessionJsonl(threadId), threadId) : [];
+    const currentHistory = threadId ? tagRecordThread(parseCodexSessionJsonl(threadId, { why: SYNC_ROAD }), threadId) : [];
     if (currentHistory.length) history = mergeCodexRecords(history, currentHistory);
     const live = parseBufferRecords(this._session?.buffer || '');
     this._all = mergeCodexRecords(history, live);
+  }
+
+  /** The attach's records off the loop — kb-file-structure «src/codex-session-store.js» (lane resume-all-paced L2). */
+  rawAsync({ bulk = false } = {}) {
+    // THE ATTACH'S RECORDS OFF THE LOOP (lane resume-all-paced, L2 — measured on a 120 MB rollout: the sync _ensureParsed held the
+    // hub's loop 380–880 ms per attach — the parse 73–123 ms, mergeCodexRecords TWICE at 163–343 ms each): _ensureParsed's SAME
+    // steps, the parse in the transcript worker (readJsonlBoundedParsedAsync — the same parse; the sync one when the pool is down or
+    // the rollout is missing) and every merge in slices. ws-handler's live attach and its read-only view, and the transcript service's
+    // view and status, await it before they read raw(). NOT named prepare(): a reader with prepare() is «serve-backed» to the search
+    // index (src/search-index-worker.js), which then skips it — codex conversations must stay searchable.
+    if (this._all) return Promise.resolve(this._all);
+    if (this._rawAsync) return this._rawAsync;
+    this._rawAsync = oneReadAtATime(async () => {
+      if (this._all) return this._all;   // the sync road filled it while this one waited its turn
+      const threadId = getCodexHistorySessionId(this._session);
+      const ancestry = resolveCodexForkAncestry(threadId, this._session?.forkedFrom || []);
+      let history = [];
+      for (const { id: forkId, untilOrdinal } of ancestry) {
+        const forkHistory = tagRecordThread(cutRecordsAtOrdinal(await parseCodexSessionJsonlAsync(forkId), untilOrdinal), forkId);
+        if (forkHistory.length) history = await mergeCodexRecordsAsync(history, forkHistory);
+      }
+      const currentHistory = threadId ? tagRecordThread(await parseCodexSessionJsonlAsync(threadId), threadId) : [];
+      if (currentHistory.length) history = await mergeCodexRecordsAsync(history, currentHistory);
+      const live = parseBufferRecords(this._session?.buffer || '');
+      const all = await mergeCodexRecordsAsync(history, live);
+      if (!this._all) this._all = all;
+      return this._all;
+    }, { bulk }).finally(() => { this._rawAsync = null; });
+    return this._rawAsync;
   }
 
   get total() { this._ensureParsed(); return this._all.length; }
@@ -828,6 +934,7 @@ async function listCodexThreadsAsync({ activeSessions } = {}) {
   return assembleCodexThreads(facts, { activeSessions, openThreadIds: openThreadIds || new Set(), livenessUnknown: !openThreadIds });   // B-f64b: a walk that could not answer is said (liveness: 'unknown'), never a bare «stopped»
 }
 
+// oneReadAtATime: the hub's one-history-read-at-a-time gate, a person's line before a bulk resume's (lane resume-all-paced L3) — test-codex-attach-off-loop ⑤ ⑥
 module.exports = {
   CODEX_SESSIONS_DIR,
   CodexSessionMessages,
@@ -841,6 +948,10 @@ module.exports = {
   listOpenCodexThreadIdsAsync,
   dirCacheStats,
   mergeCodexRecords,
+  mergeCodexRecordsAsync,
+  parseCodexSessionJsonlAsync,
+  oneReadAtATime,
+  readsWaiting,
   recordFingerprint,
   userTwinKeys,
   userRecordIdentity,
