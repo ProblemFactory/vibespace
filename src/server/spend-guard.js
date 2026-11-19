@@ -47,6 +47,9 @@ const REFUSE_INBOX_MS = 6 * 60 * 60 * 1000; // one "For you" item per (identity,
 const INBOX_KEY = 'accounts';
 const LEDGER_RECHECK_MS = 60 * 1000;     // B-3b0f: an unreadable ledger is read again at most this often
 const LEDGER_ITEM = 'spend-ledger-unreadable';   // B-3b0f: the notice's identity (one For-you item, across restarts)
+/** a DECLARED human-visible string is a KEY (scripts/i18n-extract.mjs collects i18nKey(…) beside t(…)) — B-23c3's notice */
+const i18nKey = (str) => str;
+const RESET_ITEM = 'spend-ledger-reset';         // B-23c3: the record of turns nobody typed went (removed, or an older copy put back)
 const WAIT_CAPS = Object.freeze({ 'hour-cap': 1, 'day-cap': 1, 'instance-cap': 1 });   // B-0a33 round 1: the caps waiting frames can hold             // the same inbox row login-expiry-watch files under
 // WHAT A NOTICE IS ABOUT DECIDES WHEN IT DIES (2.369.152, "SPEND NOTICES LIVED
 // FOREVER AS ACTIONS"): every inbox item this module files carries the end of
@@ -79,6 +82,7 @@ function noticeExpiry(about, now = Date.now()) {
  */
 function create({ dataDir, serverSetting = () => undefined, identityOf = null, readCacheFor = null, credentialStateOf = null, getUserTodos = () => null, log = () => { }, schedule = (fn, ms) => { const t = setTimeout(fn, ms); if (t && t.unref) t.unref(); return t; }, unschedule = (t) => clearTimeout(t) , readLedgerSync = null, readLedgerAsync = null} = {}) {
   const file = path.join(dataDir, 'spend-budget.json');
+  const markerFile = path.join(dataDir, 'spend-budget.born.json');   // B-23c3: the ledger's birth and its last write, beside it
   let state = A.emptyBudget();
   let nudge = {};   // sessionKey -> {at, n, everSeenStatus} (the Stop nudge's PERSISTED cooldown)
   // B-3b0f: THE LEDGER FAILS CLOSED ON ITS OWN RECORD. A file that is there and cannot be read (torn JSON, a directory, a
@@ -129,6 +133,90 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
       if (raw.nudge && typeof raw.nudge === 'object') nudge = raw.nudge;
     }
   }
+  // B-23c3: A FIRST START IS TOLD APART FROM A RECORD THAT WENT. ENOENT read as «nothing spent yet» made a first boot, an rm, a
+  // cleanup script and a restore without the file look the same: the count of turns nobody typed went back to zero in silence. The
+  // MARKER beside the ledger (data/spend-budget.born.json: {born, seq, resets, lastReset}) is written with every ledger write, and the
+  // ledger carries the same `seq`. The ledger gone while the marker stands = REMOVED; a ledger whose seq is below the marker's = AN
+  // OLDER COPY put back. The reset stays possible — removing the file is the stated door for an unreadable ledger (B-3b0f) — but it
+  // is never silent: SAID (the journal and ONE For-you item) and COUNTED (the marker's `resets`, the snapshot's `ledgerResets`), and
+  // the record is written at once so the next boot reads it whole. Neither file there = a first start, silent as before.
+  const seqOf = (raw) => (raw && raw.seq !== undefined ? Math.max(0, Math.floor(Number(raw.seq)) || 0) : null);   // null = written before the marker
+  let seq = loaded.raw ? seqOf(loaded.raw) || 0 : 0;
+  let marker = null;            // {born, seq, resets, lastReset, noticeOwed} once a ledger was written on this data folder
+  let markerUnreadable = null;  // the marker is there and cannot be read: HELD — never set aside, never read as empty and written over (the store-read law)
+  let resetNotice = null;       // the For-you item a reset owes — kept in the marker too (noticeOwed) until the store takes it
+  let resetWriteOwed = false;
+  let noticeTimer = null, lastNoticeTry = 0;
+  const iso = (ms) => (Number.isFinite(Number(ms)) && Math.abs(Number(ms)) < 8.64e15 ? new Date(Number(ms)).toISOString() : String(ms));
+  const readMarker = () => {
+    let t; try { t = syncRead(markerFile); } catch (e) { return e && e.code === 'ENOENT' ? { missing: true } : { error: String((e && e.code) || 'read failed') }; }
+    let m; try { m = JSON.parse(t); } catch { return { error: 'not JSON' }; }
+    return m && typeof m === 'object' && !Array.isArray(m) ? { mark: m } : { error: 'not a marker object' };
+  };
+  const writeMarker = () => {
+    if (markerUnreadable) {   // HELD (the store-read law): read again at each write; written only once it reads, its history adopted
+      const again = readMarker();
+      if (again.error) { markerUnreadable = again.error; return; }
+      markerUnreadable = null;
+      if (again.mark) marker = { ...marker, born: Number(again.mark.born) || marker.born, resets: Math.max(Number(marker.resets) || 0, Math.floor(Number(again.mark.resets)) || 0), lastReset: again.mark.lastReset || marker.lastReset };
+      log('[spend] data/spend-budget.born.json reads again — its count of resets is kept and it is written again');
+    }
+    try { writeJsonAtomic(markerFile, marker); } catch (e) { log('[spend] the ledger\'s marker could not be written: ' + e.message); }
+  };
+  const noticeOf = (kind, n) => {
+    const text = kind === 'removed' ? i18nKey('The record of turns nobody typed was removed — the count started over') : i18nKey('An older copy of the record of turns nobody typed was put back');
+    const detail = kind === 'removed'
+      ? i18nKey('It is gone, so the hourly and daily limits count from zero again. If nobody here removed it, a cleanup or a restore did. Resets of this record so far: {n}.')
+      : i18nKey('The turns nobody typed that were counted after that copy are not in it, so the hourly and daily limits count fewer than ran. Resets of this record so far: {n}.');
+    return { text, detail: detail.replace('{n}', String(n)), i18n: { text: { key: text }, detail: [{ key: detail, params: { n } }] } };
+  };
+  // the notice is FILED when the store answers (at boot it does not: it is built later) — tried at each authorize (once a minute at
+  // most), on a minute's timer, and kept in the marker (noticeOwed) so a restart before any of those files it at the next boot
+  const fileResetNotice = (now = Date.now()) => {
+    if (!resetNotice) return;
+    lastNoticeTry = now;
+    const r = resetNotice;
+    if (!fileInbox(r.text, r.detail, 'high', null, r.i18n, null, RESET_ITEM)) return;
+    resetNotice = null;
+    if (noticeTimer) { try { unschedule(noticeTimer); } catch { } noticeTimer = null; }
+    if (marker && marker.noticeOwed) { marker = { ...marker, noticeOwed: null }; writeMarker(); }
+  };
+  const armNoticeRetry = () => {
+    if (!resetNotice || noticeTimer) return;
+    noticeTimer = schedule(() => { noticeTimer = null; fileResetNotice(); armNoticeRetry(); }, 60 * 1000);
+  };
+  function ledgerReset(kind, facts = {}, now = Date.now()) {
+    const prev = marker || {};
+    marker = { born: Number(prev.born) || now, seq: Math.max(seq, Number(prev.seq) || 0), resets: (Number(prev.resets) || 0) + 1, lastReset: { at: now, kind, ...facts }, noticeOwed: null };
+    seq = marker.seq;
+    const n = marker.resets;
+    log(kind === 'removed'
+      ? `[spend] data/spend-budget.json was removed — the count starts over (this data folder has kept one since ${iso(marker.born)}); reset #${n} of this record, said in For you`
+      : kind === 'unnumbered'
+        ? `[spend] data/spend-budget.json carries no write number (a VibeSpace before the marker wrote it, or a copy from before it was put back) — the turns nobody typed counted after it may not be in it; reset #${n} of this record, said in For you`
+        : `[spend] data/spend-budget.json is an OLDER copy (write ${facts.fileSeq} of ${facts.lastSeq}) — the turns nobody typed counted after it are not in it; reset #${n} of this record, said in For you`);
+    resetNotice = noticeOf(kind === 'removed' ? 'removed' : 'older', n);
+    marker.noticeOwed = { kind: kind === 'removed' ? 'removed' : 'older', n, at: now };
+    resetWriteOwed = true;
+    return marker;
+  }
+  // the record the ledger meets at load (and again when an unreadable ledger reads again): older, unnumbered, or as written
+  const judgeAgainstMarker = (raw, now, facts = {}) => {
+    if (!raw || !marker || !(marker.seq > 0)) return false;
+    const fileSeq = seqOf(raw);
+    if (fileSeq === null) { ledgerReset('unnumbered', facts, now); return true; }
+    if (fileSeq < marker.seq) { ledgerReset('older', { fileSeq, lastSeq: marker.seq, ...facts }, now); return true; }
+    return false;
+  };
+  {
+    const mk = readMarker();   // read even while the ledger cannot be: its history must outlive B-3b0f's road
+    if (mk.mark) marker = { born: Number(mk.mark.born) || null, seq: Math.max(0, Math.floor(Number(mk.mark.seq)) || 0), resets: Math.max(0, Math.floor(Number(mk.mark.resets)) || 0), lastReset: mk.mark.lastReset || null, noticeOwed: mk.mark.noticeOwed || null };
+    if (mk.error) { markerUnreadable = mk.error; log(`[spend] data/spend-budget.born.json could not be read (${mk.error}) — it is held: not written until it reads again, never read as empty and written over (a removed ledger is still told by it being there)`); }
+    if (loaded.missing && (mk.mark || mk.error)) ledgerReset('removed', mk.error ? { markerError: mk.error } : {});
+    else if (loaded.raw) judgeAgainstMarker(loaded.raw, Date.now());
+    // a notice an earlier boot owed (the store never took it): owed still
+    if (!resetNotice && marker && marker.noticeOwed && marker.noticeOwed.kind) resetNotice = noticeOf(marker.noticeOwed.kind, Number(marker.noticeOwed.n) || marker.resets || 1);
+  }
   /** B-3b0f: read an unreadable ledger again — ASYNC (the readers' round). → true when it reads again or is gone (the
    *  refusal ends; the ledger is written at once), false while it still cannot be read. */
   async function recheckLedger(now = Date.now()) {
@@ -145,7 +233,12 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
       state = A.mergeBudget(A.pruneBudget(r.raw.budget || r.raw, now, A.LOAD_RETENTION), state);
       if (r.raw.nudge && typeof r.raw.nudge === 'object') nudge = { ...r.raw.nudge, ...nudge };
     }
-    log(r.raw ? '[spend] data/spend-budget.json reads again — unattended turns are counted and allowed again' : '[spend] data/spend-budget.json was removed — the count starts over from the turns since the hub started');
+    if (r.raw) {
+      log('[spend] data/spend-budget.json reads again — unattended turns are counted and allowed again');
+      if (!judgeAgainstMarker(r.raw, now, { afterUnreadable: true })) seq = Math.max(seq, seqOf(r.raw) || 0);   // B-23c3: a repair from an older copy is said too
+    } else ledgerReset('removed', { afterUnreadable: true }, now);   // B-23c3: the owner's door (B-3b0f) — said and counted, never silent
+    resetWriteOwed = false;   // the recheck road writes at once below (persist)
+    fileResetNotice(); armNoticeRetry();
     unreadable = null;
     try { const ut = getUserTodos(); if (ut && typeof ut.idsWhere === 'function') for (const id of ut.idsWhere((i) => i && i.itemKey === LEDGER_ITEM && i.status === 'open')) ut.setStatus(id, 'done', 'agent'); } catch { }   // its notice is no longer true
     if (recheckTimer) { try { unschedule(recheckTimer); } catch { } recheckTimer = null; }
@@ -181,7 +274,12 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
       if (!unreadable.saidWrite) { unreadable.saidWrite = true; log('[spend] data/spend-budget.json is not written while it cannot be read'); }
       return;
     }
-    try { writeJsonAtomic(file, { v: 1, budget: state, nudge }); }
+    try {
+      seq += 1;
+      writeJsonAtomic(file, { v: 1, seq, budget: state, nudge });
+      marker = { born: (marker && marker.born) || Date.now(), seq, resets: (marker && marker.resets) || 0, lastReset: (marker && marker.lastReset) || null, noticeOwed: (marker && marker.noticeOwed) || null };
+      writeMarker();   // B-23c3: after the ledger — a crash between leaves the ledger AHEAD of the marker, never behind
+    }
     catch (e) { log('[spend] persist failed: ' + e.message); }
   };
   const persist = () => { if (timer) return; timer = setTimeout(() => { timer = null; writeNow(); }, 500); if (timer.unref) timer.unref(); };
@@ -287,6 +385,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
    *  spends, and nothing else may decide. Returns the PURE verdict; the side
    *  effects of a refusal (journal + telemetry + inbox) happen here, once. */
   function authorize({ reason, session = null, sessionId = null, sessionName = null, cid = null, identity: identityHint = null, hold: takeHold = true, now = Date.now() } = {}) {
+    if (resetNotice && now - lastNoticeTry > 60 * 1000) fileResetNotice(now);   // B-23c3: a reset's notice the store could not take at boot (tried once a minute at most)
     sweepHolds(now);
     const identity = identityFor(session, identityHint);
     const key = identity && identity.key;
@@ -557,6 +656,8 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
   }
 
   armRecheck();   // B-3b0f, the readers' round: an unreadable ledger re-reads itself (async, unref'd, once a minute)
+  if (resetWriteOwed) { resetWriteOwed = false; flush(); }   // B-23c3: the record a reset left is written at once — the next boot reads it whole
+  fileResetNotice(); armNoticeRetry();
   return {
     authorize, authorizeBatch, previewBatch, notePress, notePressEnd, pressesToday, renewHolds, note, release, recheckLedger, overageFor, spendControlFor, nudgeRec, noteNudge, flush,
     reservationState: (rid) => A.reservationState(state, rid),   // lane queued-is-not-woke round 3: 'converted' | 'reserved' | null
@@ -570,6 +671,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
       budget: A.pruneBudget(state, Date.now(), A.LOAD_RETENTION), nudge: { ...nudge },   // round 4: every prune keeps what the largest caps could count
       chargesUnhinted, holdsOpen: A.expirePending(pending, Date.now()).live.length, holdsExpired,
       ledgerUnreadable: unreadable ? { error: unreadable.error, since: unreadable.since } : null,   // B-3b0f
+      ledgerResets: marker ? marker.resets : 0, ledgerLastReset: marker ? marker.lastReset : null, ledgerSeq: seq,   // B-23c3
       // lane owner-press-attended: the presses the ceiling neither refused nor counted, by reason (the last 24 h)
       attended: A.producerCounts(A.pruneBudget(state, Date.now(), A.LOAD_RETENTION).attended),
     }),

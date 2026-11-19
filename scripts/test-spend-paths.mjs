@@ -1950,6 +1950,137 @@ console.log('\n§3f B-3b0f: an unreadable ledger refuses every unattended turn b
   }
 }
 
+// ── §3g B-23c3: A FIRST START IS TOLD APART FROM A RECORD THAT WENT ─────────
+// bl-accounts batch 1's verdict (主开发 2026-11-18 00:49Z): spend-guard read ENOENT as «nothing spent yet», so a first boot, an rm, a
+// cleanup script and a restore without the file looked the same — the count of turns nobody typed went back to zero in silence. The
+// marker beside the ledger (data/spend-budget.born.json) tells them apart; removing the file stays the owner's door (B-3b0f) but a reset
+// is SAID (the journal, ONE For-you item) and COUNTED (the marker, the snapshot), and the record is written at once.
+console.log('\n§3g B-23c3: a first start is silent; a removed ledger or an older copy put back resets the count SAID and COUNTED');
+{
+  const LF = path.join;
+  const ID = { key: 'sub-a', name: 'A' };
+  const mk = (mod, dir, inbox, logs) => mod.create({ dataDir: dir, serverSetting: () => undefined,
+    getUserTodos: () => ({ add: (key, item) => { inbox.push({ key, ...item }); return { id: 'ut-' + inbox.length }; } }),
+    log: (...a) => logs.push(a.join(' ')) });
+  const resets = (inbox) => inbox.filter((i) => i.itemKey === 'spend-ledger-reset');
+  const said = (logs) => logs.some((l) => /reset #\d+ of this record/.test(l));
+  const now = Date.now();
+  // (1) A FIRST START: neither file — silent; the first write leaves the ledger and its marker at seq 1
+  const dir = tmpdir('vs-spend-3g-');
+  {
+    const inbox = [], logs = []; const g = mk(guardMod, dir, inbox, logs);
+    ok('§3g a FIRST START (no ledger, no marker) is silent: no notice, no reset line, nothing counted', resets(inbox).length === 0 && !said(logs) && g.snapshot().ledgerResets === 0, JSON.stringify(logs));
+    g.note({ reason: 'auto-resume', identity: ID, now }); g.flush();
+    const L1 = JSON.parse(fs.readFileSync(LF(dir, 'spend-budget.json'), 'utf8')), M1 = JSON.parse(fs.readFileSync(LF(dir, 'spend-budget.born.json'), 'utf8'));
+    ok('§3g …its first write carries seq 1, and the marker beside it the same seq, its birth and no reset', L1.seq === 1 && M1.seq === 1 && M1.resets === 0 && M1.born > 0 && !M1.lastReset, JSON.stringify([L1.seq, M1]));
+  }
+  // (2) REMOVED: the ledger gone, the marker kept — the count starts over (the owner's door) but SAID and COUNTED, written at once
+  fs.rmSync(LF(dir, 'spend-budget.json'));
+  {
+    const inbox = [], logs = []; const g = mk(guardMod, dir, inbox, logs);
+    const r = resets(inbox);
+    ok('§3g a REMOVED ledger (its marker stands): ONE notice in the tray, urgent, its words and the count of resets; the journal says it',
+      r.length === 1 && r[0].key === 'accounts' && r[0].urgency === 'high' && /removed — the count started over/.test(r[0].text) && r[0].i18n && r[0].i18n.detail[0].params.n === 1
+        && logs.some((l) => /was removed — the count starts over \(this data folder has kept one since .*\); reset #1 of this record/.test(l)), JSON.stringify([r.map((x) => x.text), logs]));
+    ok('§3g …the count starts over (the door kept: an unattended turn is allowed on a zero count)', g.authorize({ reason: 'auto-resume', identity: ID, now: now + 1000 }).ok === true);
+    ok('§3g …COUNTED (the snapshot and the marker: reset #1, removed) and the record written at once — a restart reads it whole',
+      g.snapshot().ledgerResets === 1 && g.snapshot().ledgerLastReset && g.snapshot().ledgerLastReset.kind === 'removed' && fs.existsSync(LF(dir, 'spend-budget.json'))
+        && JSON.parse(fs.readFileSync(LF(dir, 'spend-budget.born.json'), 'utf8')).resets === 1, JSON.stringify(g.snapshot().ledgerLastReset));
+    const inbox2 = [], logs2 = []; mk(guardMod, dir, inbox2, logs2);
+    ok('§3g …and the NEXT start is silent (a reset is said once, never at every boot)', resets(inbox2).length === 0 && !said(logs2), JSON.stringify(logs2));
+  }
+  // (3) AN OLDER COPY PUT BACK: the ledger's seq below the marker's — read (it is a record) but SAID and COUNTED
+  {
+    const g0 = mk(guardMod, dir, [], []);
+    const older = fs.readFileSync(LF(dir, 'spend-budget.json'), 'utf8');
+    g0.note({ reason: 'auto-resume', identity: ID, now: now + 2000 }); g0.flush(); g0.note({ reason: 'auto-resume', identity: ID, now: now + 3000 }); g0.flush();
+    fs.writeFileSync(LF(dir, 'spend-budget.json'), older);   // a restore from an older backup
+    const inbox = [], logs = []; const g = mk(guardMod, dir, inbox, logs);
+    const r = resets(inbox);
+    ok('§3g an OLDER COPY put back (its seq below the marker\'s): ONE notice and the journal name it — reset #2',
+      r.length === 1 && /older copy/i.test(r[0].text) && r[0].i18n.detail[0].params.n === 2 && logs.some((l) => /OLDER copy \(write \d+ of \d+\).*reset #2/.test(l)), JSON.stringify([r.map((x) => x.text), logs]));
+    ok('§3g …COUNTED (reset #2, older), and the next write numbers above the marker', g.snapshot().ledgerResets === 2 && g.snapshot().ledgerLastReset.kind === 'older' && g.snapshot().ledgerSeq > 0, JSON.stringify(g.snapshot().ledgerLastReset));
+  }
+  // (4) RED: the load as before (ENOENT = nothing spent yet; the marker never read) — a removed ledger resets in silence
+  {
+    const d2 = tmpdir('vs-spend-3g-red-');
+    const g1 = mk(guardMod, d2, [], []); g1.note({ reason: 'auto-resume', identity: ID, now }); g1.flush();
+    fs.rmSync(LF(d2, 'spend-budget.json'));
+    const { anchored } = await import('./scratch.mjs');
+    let gm = null, err = null;
+    try { gm = require(MUT.write('src/server/spend-guard.js', anchored(read('src/server/spend-guard.js'), "    if (loaded.missing && (mk.mark || mk.error)) ledgerReset('removed', mk.error ? { markerError: mk.error } : {});", "    if (false) ledgerReset('removed', {});", 'B-23c3: the marker never read'))); } catch (e) { err = e.message; }
+    ok('§3g CONTROL: a copy whose load never reads the marker (the patch is anchored, it hit)', !!gm && !err, err || '');
+    if (gm) {
+      const inbox = [], logs = []; const g = mk(gm, d2, inbox, logs);
+      ok('§3g CONTROL: that copy resets the count in SILENCE — no notice, no line, nothing counted (RED: the release\'s road)', resets(inbox).length === 0 && !said(logs) && g.snapshot().ledgerResets === 0, JSON.stringify(logs));
+    }
+  }
+  // (5) THE OWNER'S DOOR FROM B-3b0f: an unreadable ledger removed while it is refused — said and counted the same way
+  {
+    const d3 = tmpdir('vs-spend-3g-door-');
+    const g1 = mk(guardMod, d3, [], []); g1.note({ reason: 'auto-resume', identity: ID, now }); g1.flush();
+    const M3 = JSON.parse(fs.readFileSync(LF(d3, 'spend-budget.born.json'), 'utf8'));
+    fs.writeFileSync(LF(d3, 'spend-budget.born.json'), JSON.stringify({ ...M3, resets: 2 }));   // this folder's two earlier resets
+    fs.writeFileSync(LF(d3, 'spend-budget.json'), '{"v":1,"budget":{');   // torn
+    const inbox = [], logs = []; const g = mk(guardMod, d3, inbox, logs);
+    ok('§3g a torn ledger is refused by name (B-3b0f, unchanged) — no reset is said while it is only unreadable', g.authorize({ reason: 'auto-resume', identity: ID, now: now + 1000 }).why === 'ledger-unreadable' && resets(inbox).length === 0);
+    fs.rmSync(LF(d3, 'spend-budget.json'));
+    const back = await g.recheckLedger();
+    ok('§3g …removed by its owner (the stated door): the refusal ends, and the reset is SAID and COUNTED — #3, the marker read while the ledger could not be (its history kept)',
+      back === true && resets(inbox).length === 1 && g.snapshot().ledgerResets === 3 && resets(inbox)[0].i18n.detail[0].params.n === 3 && g.authorize({ reason: 'auto-resume', identity: ID, now: now + 3 * 60e3 }).ok === true, JSON.stringify([back, resets(inbox).length, logs.slice(-2)]));
+  }
+  // (6) B-3b0f's road the other way (the reader's MUST): a torn ledger REPAIRED from an older copy — said and counted, never silent
+  {
+    const d4 = tmpdir('vs-spend-3g-repair-');
+    const g1 = mk(guardMod, d4, [], []); g1.note({ reason: 'auto-resume', identity: ID, now }); g1.flush();
+    const older = fs.readFileSync(LF(d4, 'spend-budget.json'), 'utf8');
+    g1.note({ reason: 'auto-resume', identity: ID, now: now + 1000 }); g1.flush();
+    fs.writeFileSync(LF(d4, 'spend-budget.json'), '{"v":1,"budget":{');   // torn
+    const inbox = [], logs = []; const g = mk(guardMod, d4, inbox, logs);
+    fs.writeFileSync(LF(d4, 'spend-budget.json'), older);   // repaired from an older backup
+    const back = await g.recheckLedger();
+    ok('§3g a torn ledger REPAIRED FROM AN OLDER COPY: it reads again, and the older copy is SAID and COUNTED (the release\'s road was silent)',
+      back === true && resets(inbox).length === 1 && /older copy/i.test(resets(inbox)[0].text) && g.snapshot().ledgerLastReset.kind === 'older' && logs.some((l) => /OLDER copy \(write 1 of 2\)/.test(l)), JSON.stringify([back, resets(inbox).map((x) => x.text), logs.slice(-3)]));
+  }
+  // (7) A LEDGER WITH NO WRITE NUMBER while the marker has one (a VibeSpace before the marker wrote it, or a copy from before it): its own words
+  {
+    const d5 = tmpdir('vs-spend-3g-unnumbered-');
+    const g1 = mk(guardMod, d5, [], []); g1.note({ reason: 'auto-resume', identity: ID, now }); g1.flush();
+    const L = JSON.parse(fs.readFileSync(LF(d5, 'spend-budget.json'), 'utf8')); delete L.seq;
+    fs.writeFileSync(LF(d5, 'spend-budget.json'), JSON.stringify(L));
+    const inbox = [], logs = []; const g = mk(guardMod, d5, inbox, logs);
+    ok('§3g a ledger with NO WRITE NUMBER under a numbered marker: said in its own words (no number to compare), counted, the notice filed',
+      resets(inbox).length === 1 && g.snapshot().ledgerLastReset.kind === 'unnumbered' && logs.some((l) => /carries no write number/.test(l)), JSON.stringify(logs));
+  }
+  // (8) AN UNREADABLE MARKER beside a readable ledger: said at load and HELD (the store-read law) — never set aside, never read as empty and written over
+  {
+    const d6 = tmpdir('vs-spend-3g-marker-');
+    const g1 = mk(guardMod, d6, [], []); g1.note({ reason: 'auto-resume', identity: ID, now }); g1.flush();
+    fs.writeFileSync(LF(d6, 'spend-budget.born.json'), '{"born":');   // torn
+    const inbox = [], logs = []; const g = mk(guardMod, d6, inbox, logs);
+    g.note({ reason: 'auto-resume', identity: ID, now: now + 1000 }); g.flush();
+    ok('§3g an UNREADABLE MARKER: said at load and HELD — after a write its bytes are its own (never set aside, never written over), the ledger still written',
+      logs.some((l) => /born\.json could not be read \(not JSON\) — it is held/.test(l)) && fs.readFileSync(LF(d6, 'spend-budget.born.json'), 'utf8') === '{"born":'
+        && !fs.readdirSync(d6).some((f) => /born\.json\.(unreadable|corrupt)-/.test(f)) && JSON.parse(fs.readFileSync(LF(d6, 'spend-budget.json'), 'utf8')).seq > 1 && resets(inbox).length === 0, JSON.stringify(logs));
+    fs.writeFileSync(LF(d6, 'spend-budget.born.json'), JSON.stringify({ born: now - 9e6, seq: 1, resets: 4 }));   // repaired
+    g.note({ reason: 'auto-resume', identity: ID, now: now + 2000 }); g.flush();
+    const M6 = JSON.parse(fs.readFileSync(LF(d6, 'spend-budget.born.json'), 'utf8'));
+    ok('§3g …once it reads again its history is adopted (resets 4, its birth) and it is written with this write\'s number', M6.resets === 4 && M6.born === now - 9e6 && M6.seq > 1 && logs.some((l) => /born\.json reads again/.test(l)), JSON.stringify(M6));
+  }
+  // (9) THE NOTICE OUTLIVES A RESTART: the store not there at boot (as on a hub: it is built later) — owed in the marker, filed at the next boot
+  {
+    const d7 = tmpdir('vs-spend-3g-owed-');
+    const g1 = mk(guardMod, d7, [], []); g1.note({ reason: 'auto-resume', identity: ID, now }); g1.flush();
+    fs.rmSync(LF(d7, 'spend-budget.json'));
+    const logs = []; const gNo = guardMod.create({ dataDir: d7, serverSetting: () => undefined, getUserTodos: () => null, log: (...a) => logs.push(a.join(' ')) });
+    const owed = JSON.parse(fs.readFileSync(LF(d7, 'spend-budget.born.json'), 'utf8')).noticeOwed;
+    const inbox = []; mk(guardMod, d7, inbox, []);   // ← the restart, before any unattended turn
+    ok('§3g a reset whose notice the store could not take (no store at boot): OWED in the marker, and the next boot files it',
+      gNo.snapshot().ledgerResets === 1 && owed && owed.kind === 'removed' && owed.n === 1 && resets(inbox).length === 1 && resets(inbox)[0].i18n.detail[0].params.n === 1
+        && !JSON.parse(fs.readFileSync(LF(d7, 'spend-budget.born.json'), 'utf8')).noticeOwed, JSON.stringify([owed, resets(inbox).length]));
+  }
+}
+
 // ── §4 THE REAL AUTO-RESUME + THE REAL POOL ENGINE ──────────────────────────
 console.log('\n§4 the real auto-resume: the ceiling refuses what the loop breaker would allow');
 /** The world: one pooled member, one conversation, real symlinks, real engine

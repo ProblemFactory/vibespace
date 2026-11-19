@@ -239,7 +239,7 @@ const ROWS = [
   ["src/server/published-pages.js","*",11,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/session-stdout.js","*",7,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/session-stdout.js","writeSessionMeta",3,"durable","boot-restore, browser-env, usage-routes, channels liveness, weekly-lanes-unfold, reading-repair (each reads the files itself)","NOT idempotent: a live socket without its meta is restored as a stranger","a session's FIRST meta (a new socket) — its UPDATES go through the store writer"],
-  ["src/server/spend-guard.js","*",3,"durable","—","NOT idempotent: money / authority / a credential","the unattended-spend budget + its journal (money) — must be on disk before the answer"],
+  ["src/server/spend-guard.js","*",4,"durable","—","NOT idempotent: money / authority / a credential","the unattended-spend budget + its journal (money) + its birth marker (B-23c3: written after every ledger write, so a removed ledger or an older copy is told apart from a first start) — must be on disk before the answer"],
   ["src/server/stash-handover.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/sync-fs-witness-worker.js","*",1,"not-main","—","—","the witness's watchdog thread (its journal line on fd 2)"],
   ["src/store-exit-keeper.js","*",1,"not-main","—","—","round 4 (MUST 2): the writer's exit keeper thread — its ONE line on fd 2 at the exit's bound, then the process ends"],
