@@ -17,7 +17,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
 import * as acorn from 'acorn';
 import { checker } from './lib/check.mjs';
 const require = createRequire(import.meta.url);
@@ -137,12 +137,17 @@ console.log('§1 every caller of a lookup (get / list / findByDeviceId, and the 
     {"file": "src/machine-mounts.js", "at": "const dial = (() => { try { return this.hosts.get(hostId).transport === 'dial'; } catch { return", "n": 1, "cls": "harmless", "why": "_davBase dial check: unreachable while held (a mount's road needs its machine, which refuses first)", "bare": "false = the ssh road, which then meets the hold by name"},
     {"file": "src/machine-mounts.js", "at": "const mName = (() => { try { return this.hosts.get(pull.hostId)?.name || pull.hostId; } catch { ", "n": 1, "cls": "harmless", "why": "a refusal's words name the machine by its id meanwhile"},
     {"file": "src/machine-mounts.js", "at": "const h = this.hosts.get(hostId); // throws for unknown machine", "n": 1, "cls": "refuses", "why": "_mountPullInner: get throws hosts-unread by name — the pull mount is refused"},
+    // the stores chain's restack onto checkpoint 60 meets line 244 (bl-machines-a's PAIR hold — another meaning than this census's hold):
+    {"file": "src/machine-mounts.js", "at": "let name = null; try { name = this.hosts.get(o.hostId).name || o.hostId; } catch (e) { name = e && e.code === 'hosts-unread'", "n": 1, "cls": "harmless", "why": "a holder row's shares (line 244): while the machines list is held the other row's machine is named by its id — never «removed» (the restack's cure)"},
+    {"file": "src/machine-mounts.js", "at": "let name = null; try { name = this.hosts.get(other.hostId).name || other.hostId; } catch (e) { name = e && e.code === 'hosts-unread'", "n": 1, "cls": "harmless", "why": "_conflictWords (line 244): while held the other record's machine is named by its id — never «a removed machine» (the restack's cure)"},
+    {"file": "src/machine-mounts.js", "at": "const gone = (m) => { try { this.hosts.get(m.hostId); return false; } catch { return true; } };", "n": 1, "cls": "waits", "why": "_recheckPairs (line 244) WAITS while the machines list is held — judged once it reads (keyed whenRead), the current pair holds standing (the restack's cure: held, every record read «gone» and every hold was dropped)", "bare": "true = its machine removed — reached only on a list that reads"},
+    {"file": "src/machine-mounts.js", "at": "const dialUp = (m) => { try { const h = this.hosts.get(m.hostId);", "n": 1, "cls": "waits", "why": "_recheckPairs (line 244): unreachable while held — the check waits for the read", "bare": "false = cannot mount now — reached only on a list that reads"},
     {"file": "src/port-forward.js", "at": "try { all = (this.hosts.list?.() || []); } catch { return; }", "n": 1, "cls": "harmless", "why": "the forwards' watch sweep: an empty list sweeps nothing (no forward is dropped)", "bare": "held: nothing to sweep this tick; it runs again"},
     {"file": "src/remote-fs.js", "at": "try { dial = this.hosts.get(id)?.transport === 'dial'; } catch { }", "n": 1, "cls": "refuses", "why": "remote-fs _dev dial check: the next step (_host) throws hosts-unread by name", "bare": "false = the ssh road, which meets the hold by name"},
     {"file": "src/remote-fs.js", "at": "_host(id) { return this.hosts.get(id); }", "n": 1, "cls": "refuses", "why": "remote-fs _host: get throws hosts-unread by name — every remote file operation refuses it (routes/files.js answers the words)"},
     {"file": "src/routes/persistence.js", "at": "hosts: (getHosts?.()?.list?.() || []).length, hostsUnread: (getHosts?.()?.held?.() && getHosts()", "n": 1, "cls": "refuses", "why": "the export preview: the count and the hold's words (hostsUnread) — the page says it, never «no hosts configured» (H15); an export that asks for machines is refused 503"},
     {"file": "src/server/account-usage-routes.js", "at": "try { hostName = ev.host ? (hosts.get(ev.host)?.name || null) : null; } catch { }", "n": 1, "cls": "harmless", "why": "the usage-event popup's machine name — an id shows meanwhile", "bare": "display only"},
-    {"file": "src/server/account-usage-routes.js", "at": "try { out.hostNames = Object.fromEntries((hosts.list?.() || []).map((h) => [h.id, h.name || h.id", "n": 1, "cls": "harmless", "why": "GET /api/accounts hostNames — ids show meanwhile", "bare": "display only"},
+    {"file": "src/routes/account-tails.js", "at": "try { out.hostNames = Object.fromEntries((hosts?.list?.() || []).map((h) => [h.id, h.name || h.id", "n": 1, "cls": "harmless", "why": "GET /api/accounts hostNames — ids show meanwhile (moved from src/server/account-usage-routes.js on the train: the restack's census meeting)", "bare": "display only"},
     {"file": "src/server/account-usage-routes.js", "at": "const facts = { ...r, hostId: req.params.id, transport: hosts.get(req.params.id)?.transport === ", "n": 1, "cls": "refuses", "why": "the per-host verdicts run after the route's first lookup, which refuses the hold by name", "bare": "the route's first lookup (accountsStatus) refuses the hold by name; this verdict pass runs only after it answered"},
     {"file": "src/server/account-usage-routes.js", "at": "const hostName = (() => { try { return hosts.get(req.body?.hostId)?.name; } catch { return null;", "n": 1, "cls": "harmless", "why": "the CLI login import's machine name — an id shows meanwhile", "bare": "display only"},
     {"file": "src/server/account-usage-routes.js", "at": "const sweep = () => { for (const h of hosts.list() || []) { try { ", "n": 2, "cls": "waits", "why": "an account delete's remote folder sweep waits for the read (whenRead)", "bare": "one machine unreachable: the sweep goes on to the next"},
@@ -211,7 +216,7 @@ console.log('§1 every caller of a lookup (get / list / findByDeviceId, and the 
     {"file": "src/ws-create.js", "at": "const hostName = data.hostId ? (() => { try { const h = (hosts && hosts.get(data.hostId)) || {};", "n": 1, "cls": "harmless", "why": "the key-helper notice names the machine — no name meanwhile (a create past its own lookup, which refuses the hold by name)", "bare": "a display name only"},
     {"file": "src/ws-handler.js", "at": "const h = hosts.get(session.host);", "n": 1, "cls": "waits", "why": "Terminate of a remote conversation: said unconfirmed by name, the remote stop OWED and run at the read (whenRead) — H1", "bare": "the remote stop runs only when the list is READ (while held it is said and owed at the read, H1); a failed remote stop after that is best-effort, as the release"},
     // the move onto 418bc7210: the train's new callers since the cure's base (the meeting commit)
-    {"file": "src/machine-mounts.js", "at": "try { h = this.hosts.get(m.hostId); } catch (e) { h = e && e.code === 'hosts-unread'", "n": 1, "cls": "refuses", "why": "shadowedBy (B-fcc7, the train): a held list is unknown, never «removed» — the record still shadows its bare folder (named by its id), so a write there is refused as for an offline machine; a reader sees the shadow when probed empty"},
+    {"file": "src/machine-mounts.js", "at": "try { h = this.hosts.get(m.hostId); } catch (e) { h = e && e.code === 'hosts-unread'", "n": 1, "cls": "refuses", "why": "shadowedBy (B-fcc7, the train): a held list is unknown, never «removed» — the record still shadows its bare folder (named by its id), so a write there is refused as the hold (hosts-unread, the moved chain's cure — never «offline»); a reader sees the shadow when probed empty"},
     {"file": "src/server/exit-routes.js", "at": "if (b.replaces) { try { old = hosts.get(String(b.replaces)); } catch { old = null; } }", "n": 1, "cls": "refuses", "why": "POST /api/hosts «Add it again with a key» (the train): the add itself refuses by name on the next line (hosts.add's first line) — nothing is replaced or removed", "bare": "the swallowed hold changes nothing: hosts.add refuses hosts-unread before any record is written, so no machine is replaced"},
     // 主开发 01:20Z (1): the callers of the methods that call get inside (device / deviceBounded / homeDir / the transcript fetches) — audit adv/hosts-callers-2.md
     {"file": "src/ctx-sync.js", "at": "const dm = await hosts.deviceBounded(hostId, connectMs);", "n": 1, "cls": "harmless", "why": "Cannot run while held: its only callers (task-groups-wiring scheduleCtxSync :165, the 60 s timer :175) take the host from hosts().get(), which throws, and skip. Nothing synced or written."},
@@ -575,6 +580,56 @@ console.log('§8 the page words `hosts-unread` itself: a usage refresh, the dial
     'the exit dialog (opened and saved, and the dial status through exitCodeWords) words `hosts-unread` by its code');
   ok(SM.includes("why: e && e.code === 'hosts-unread' ? hostsHeldWords() : (e && e.message) || tr('server unreachable')"), 'a machine\'s removal words `hosts-unread` by its code');
   for (const lang of ['zh', 'ja']) ok(fs.readFileSync(path.join(ROOT, `src/lib/i18n-${lang}.js`), 'utf8').includes(JSON.stringify(SENT) + ':'), `the sentence has its ${lang} row`);
+}
+
+// ── §9 round wojcq4hn4 (its MUST): a held list is unknown BY NAME on the two doors the meeting cured — never «offline», never a bare 400
+console.log('§9 a REAL held HostManager behind a pull mount\'s shadow and the files route\'s answer, and behind a machine\'s public key');
+{
+  const D9 = scratch('hosts-held-census-9'); fs.rmSync(D9, { recursive: true, force: true }); fs.mkdirSync(D9, { recursive: true });
+  process.on('exit', () => { try { fs.rmSync(D9, { recursive: true, force: true }); } catch { } });
+  const asRoot9 = typeof process.getuid === 'function' && process.getuid() === 0;
+  const HF = path.join(D9, 'hosts.json'); const hbody = JSON.stringify({ hosts: [{ id: 'h-0001', name: 'build-box', transport: 'dial', deviceId: 'build-box' }] });
+  if (asRoot9) fs.mkdirSync(HF); else { fs.writeFileSync(HF, hbody); fs.chmodSync(HF, 0o000); }   // held: the read fails (EACCES; a folder as root)
+  const H = new (require(path.join(ROOT, 'src/hosts.js')).HostManager)({ dataDir: D9 });
+  ok(H.held && H.held(), 'the stand-in: a REAL HostManager over an unreadable hosts.json is held');
+  // (a) MachineMounts.shadowedBy → the files route's body
+  const MSRC9 = fs.readFileSync(path.join(ROOT, 'src/machine-mounts.js'), 'utf8'), FSRC9 = fs.readFileSync(path.join(ROOT, 'src/routes/files.js'), 'utf8');
+  // the restack onto checkpoint 60 (bl-machines-a's line 244): the body lives in src/machine-mounts.js (the files route and WebDAV alias
+  // it), and the hosts hold is `hostsHeld` — another meaning than a PAIR-held record (`_held`)
+  const HELDRET = "    if (best.h.hostsHeld) return { id: best.m.id, hostId: best.m.hostId, machine, name: machine, mountpoint: best.mp, hostsHeld: true,";
+  const BODYHELD = "  if (s.hostsHeld) return { error: `“${s.machine}”’s folder: ${s.hostsHeldWords || 'the paired machines cannot be read right now'}`, code: 'hosts-unread', params };\n";
+  const bodyOf = (src) => { const i = src.indexOf('function pullShadowBody(s) {'), j = src.indexOf('\n}\n', i); return new Function(`${src.slice(i, j + 2)}\nreturn pullShadowBody;`)(); };   // eslint-disable-line no-new-func
+  const MP9 = path.join(D9, 'mnt', 'box');
+  // the product's own _online over the held store (its read N2: no stub)
+  const shadow = (Mod) => { const M = Object.create(Mod.MachineMounts.prototype); Object.assign(M, { hosts: H, _state: { mounts: [{ id: 'mm-p1', dir: 'pull', hostId: 'h-0001', mountpoint: MP9 }] }, _live: new Map(), _held: new Map(), _bare: new Map([['mm-p1', 'empty']]) }); return M.shadowedBy(path.join(MP9, 'notes.md'), { writer: true }); };
+  const s9 = shadow(require(path.join(ROOT, 'src/machine-mounts.js'))), b9 = bodyOf(MSRC9)(s9);
+  ok(!!s9 && s9.hostsHeld === true && !s9.offline && /could not be read/.test(s9.hostsHeldWords) && /pullShadowBody = \(s\) => require\('\.\.\/machine-mounts\.js'\)\.pullShadowBody\(s\)/.test(FSRC9) && b9.code === 'hosts-unread' && /could not be read/.test(b9.error), 'a pull mount\'s bare folder while the machines are held: the shadow carries the HOLD (its words), the files route answers it by name (hosts-unread) — never «is offline»', { s9, b9 });
+  const s9x = shadow(MJ.load('src/machine-mounts.js', anchored(MSRC9, HELDRET, '    if (false) return { id: best.m.id, hostId: best.m.hostId, machine, name: machine, mountpoint: best.mp, hostsHeld: true,', 'shadow-held-cut'), 'shadow-held-cut'));
+  const b9x = bodyOf(anchored(MSRC9, BODYHELD, '', 'files-held-cut'))({ ...s9 });
+  ok(!!s9x && s9x.offline === true && !s9x.hostsHeld && bodyOf(MSRC9)(s9x).code === 'machine_offline' && b9x.code !== 'hosts-unread', 'CONTROLS (each cut alone, in a copy): the shadow drops the mark — the online check says «offline» for a machine that may be connected; the route without its held branch never names the hold — each RED', { s9x, b9x });
+  // (a2) the restack meets line 244: the PAIR check (two records on one folder) WAITS while the machines list is held — every record read
+  // «gone» there and every pair hold was dropped; the current holds stand, judged once the list reads (keyed whenRead)
+  const PAIRW = "    if (this.hosts && typeof this.hosts.held === 'function' && this.hosts.held()) {";
+  const pairs = async (Mod) => {
+    const M = Object.create(Mod.MachineMounts.prototype), waited = [];
+    const hosts = Object.create(H); hosts.whenRead = (fn, what, key) => waited.push(key);
+    const a = { id: 'mm-pa', dir: 'pull', hostId: 'h-0001', mountpoint: MP9 }, b = { id: 'mm-pb', dir: 'pull', hostId: 'h-0001', mountpoint: MP9 };
+    Object.assign(M, { hosts, log() { }, _notify() { }, _resolveReals: async () => { }, _realMp: new Map(), _live: new Map(), _mounting: new Set(), _state: { mounts: [a, b] }, _held: new Map([['mm-pb', { kind: 'same', otherId: 'mm-pa', words: 'held' }]]) });
+    await M._recheckPairs().catch(() => null);
+    return { kept: M._held.has('mm-pb'), waited: waited.join() };
+  };
+  ok(MSRC9.split(PAIRW).length === 2, 'control setup: the pair check\'s held wait is found once');
+  const pw = await pairs(require(path.join(ROOT, 'src/machine-mounts.js'))), pwx = await pairs(MJ.load('src/machine-mounts.js', anchored(MSRC9, PAIRW, '    if (false) {', 'pairs-held-cut'), 'pairs-held-cut'));
+  ok(pw.kept && pw.waited === 'mounts:pairs', 'the pair check while the machines are held: the current pair hold STANDS and the check waits for the read (keyed) — never «gone» for a machine nobody could read', pw);
+  ok(!pwx.kept && pwx.waited === '', 'CONTROL (the wait cut, in a copy): every record reads «gone» — the pair hold is DROPPED (two records on one folder may both mount) — RED', pwx);
+  // (b) GET /api/hosts/:id/public-key while held: the route's own handler over the REAL held HostManager
+  const ESRC9 = fs.readFileSync(path.join(ROOT, 'src/server/exit-routes.js'), 'utf8');
+  const PKCATCH = "  catch (e) { res.status(e && e.status === 503 ? 503 : 400).json({ error: e.message, ...(e && e.code === 'hosts-unread' ? { code: e.code } : {}) }); }";
+  const handlerOf = (src) => { const i = src.indexOf("app.get('/api/hosts/:id/public-key', async (req, res) => {"), j = src.indexOf('\n});\n', i); return new Function('hosts', 'personVerdict', src.slice(i, j + 4).replace("app.get('/api/hosts/:id/public-key', ", 'return ('))(H, () => ({ ok: true })); };   // eslint-disable-line no-new-func
+  const call9 = async (src) => { let out = null; const res = { status(c) { this.code = c; return this; }, json(b) { out = { status: this.code, ...b }; return this; } }; await handlerOf(src)({ params: { id: 'h-0001' }, headers: {} }, res); return out; };
+  const k9 = await call9(ESRC9), k9x = await call9(anchored(ESRC9, PKCATCH, '  catch (e) { res.status(400).json({ error: e.message }); }', 'public-key-held-cut'));
+  ok(!!k9 && k9.status === 503 && k9.code === 'hosts-unread' && !!k9x && k9x.status === 400 && !k9x.code, 'a machine\'s public key while held: 503 with the hold\'s name (hosts-unread); CONTROL (the bare 400 put back, in a copy): «400» with no name — RED', { k9, k9x });
+  if (!asRoot9) { try { fs.chmodSync(HF, 0o600); } catch { } }
 }
 
 for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 1, label: 'hosts-held-census ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));

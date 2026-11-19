@@ -450,7 +450,7 @@ console.log('⑦ the cure — the readers\' SHOULDs');
   wa.hm._save();
   const pa = await wa.hm.persisted(), why = wa.hm.whyNotDurable();
   const ER = fs.readFileSync(path.join(REPO, 'src/server/exit-routes.js'), 'utf8'), MPW = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
-  ok(!!(pa === false && why && why.why === 'queued' && (ER.match(/if \(await notDurable\(res\)\) return;/g) || []).length === 3 && (MPW.match(/typeof hosts\.persisted === 'function' && !\(await hosts\.persisted\(\)\)/g) || []).length === 2),
+  ok(!!(pa === false && why && why.why === 'queued' && (ER.match(/if \(await notDurable\(res\)\) return;/g) || []).length === 3 && (MPW.match(/typeof hosts\.persisted === 'function' && !\(await hosts\.persisted\(\)\)/g) || []).length === 3),
     'a save the writer cannot make durable says why; the doors that take a person\'s act on a machine (add, remove, the exit-access PATCH; the pairing mint and the graduation) answer only once it is on disk', { pa, why });
   // (b) a migration's reshape on disk before its ledger says done (read in the same tick: no wait)
   const wb = await world(); await wb.hm.persisted();

@@ -600,7 +600,7 @@ function registerWsHandler(wss, ctx) {
       } };
       if (session.host && hosts && typeof hosts.held === 'function' && hosts.held()) {
         notifyKillHeld(session.hostName || session.host);
-        if (typeof hosts.whenRead === 'function') hosts.whenRead(remoteStop, `the remote stop of conversation ${data.sessionId}`, `stop:${data.sessionId}`);   // keyed: a Terminate pressed again waits ONCE
+        if (typeof hosts.whenRead === 'function') hosts.whenRead(remoteStop, `the remote stop of conversation ${data.sessionId}`, `stop:${data.sessionId}`, { onLetGo: () => notifyKillLetGo(session.name || data.sessionId, session.hostName || session.host) });   // keyed: a Terminate pressed again waits ONCE; 主开发 04:33Z (3): one LET GO is told, by name
       } else remoteStop();
       // 'exited' silently broke terminate-from-sidebar.
       broadcastToSession(session, data.sessionId, { type: 'exited', sessionId: data.sessionId, reason: 'terminated' });
@@ -653,6 +653,15 @@ function registerWsHandler(wss, ctx) {
       ctx.serverNotice?.(`kill-held:${hostName}`,
         `The session on ${hostName} is not stopped yet — VibeSpace cannot read its paired machines right now; it stops it there as soon as they read (a VibeSpace restart before then forgets it: stop it again).`,
         { level: 'warn', i18n: { key: i18nKey('The session on {machine} is not stopped yet — VibeSpace cannot read its paired machines right now; it stops it there as soon as they read (a VibeSpace restart before then forgets it: stop it again).'), params: { machine: String(hostName) } } });
+    } catch { }
+  };
+  // 主开发 04:33Z (3): the stop that waited for the machines was LET GO (past the waits' bound) — the person was told it stops «as soon as
+  // they read»: told now that it will not, naming the conversation
+  const notifyKillLetGo = (name, hostName) => {
+    try {
+      ctx.serverNotice?.(`kill-let-go:${hostName}:${name}`,
+        `The session «${name}» on ${hostName} was not stopped — VibeSpace could not read its paired machines, and so many actions waited for them that its stop was let go. It may still be running there: stop it again once the machines read.`,
+        { level: 'warn', i18n: { key: i18nKey('The session «{name}» on {machine} was not stopped — VibeSpace could not read its paired machines, and so many actions waited for them that its stop was let go. It may still be running there: stop it again once the machines read.'), params: { name: String(name), machine: String(hostName) } } });
     } catch { }
   };
   const notifyKillUnconfirmed = (hostName) => {

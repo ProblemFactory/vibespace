@@ -520,6 +520,9 @@ app.post('/api/hosts/:id/graduate-dial', async (req, res) => {
       hosts.ungraduateDial(h.id);
       try { if (devId && agentdDials.has(devId)) { agentdDials.get(devId)?.destroy?.(); agentdDials.delete(devId); } } catch { }
       bcastAll({ type: 'hosts-updated' });
+      // 主开发 04:33Z (2a): «removed» only once hosts.json carries it — the record's save is QUEUED (the store writer's, B-48a4): the reply
+      // waits for it, as the graduation road does, and says not-on-disk when it did not land (a restart before then brings the pairing back)
+      if (typeof hosts.persisted === 'function' && !(await hosts.persisted())) return res.status(503).json({ error: 'the dial pairing is removed here, but hosts.json is not on disk yet — the hub keeps trying; a restart before it lands brings the pairing back: remove it again if it comes back', code: 'not_durable' });
       return res.json({ success: true, removed: true });
     }
     // lane-pairing ①: the chosen address (the pairing dialog's list) — judged by the ONE verdict before anything runs

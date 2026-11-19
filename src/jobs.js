@@ -666,11 +666,14 @@ class JobManager {
   _judgeNotifsIn(list, { boot = false } = {}) {
     // store (5) cure (2): while the job records or the archive are HELD a clear cannot be judged — the notices wait (marked), judged
     // at the records' read again (`_judgeNotifs`); a hold that ENDS without a whole read lets them go as they are (nothing to judge by)
+    // 主开发 04:33Z (1): at the boot the ARCHIVE is loaded ONCE before the held check (a list naming a job jobs.json has not) — loaded
+    // lazily by the first such notice, an archive whose hold began INSIDE this judge let that first list out with a cleared job's old words
+    if (boot && !this.archive && !this.readOnly && list.some((n) => n && n.jobId && !this.jobs.has(n.jobId))) this._archiveAtBoot();
     if (this._recordsHeld()) { for (const n of list) if (n && n.jobId) this._unjudged.add(n); return; }
     for (const n of list) {
       if (!n || !n.jobId) continue;
       this._unjudged.delete(n);
-      const j = this.jobs.get(n.jobId) || ((boot && !this.archive && !this.readOnly) ? this._archiveAtBoot() : (this.archive || [])).find((r) => r && r.id === n.jobId);
+      const j = this.jobs.get(n.jobId) || (this.archive || []).find((r) => r && r.id === n.jobId);   // the boot's ONE archive load is above (主开发 04:33Z (1))
       if (j && j.clearedAt && !(Number(n.ts) > Math.max(j.clearedAt, j.reclearedAt || 0)) && (n.text !== CLEARED_TEXT || n.jobName !== CLEARED_TEXT)) { n.jobName = CLEARED_TEXT; n.text = CLEARED_TEXT; this._dirty = true; }
     }
   }
@@ -1582,6 +1585,10 @@ class JobManager {
     if (verdict === 'unknown' || heldView) {
       const target = this.jobs.get(meta.jobId) || this.archivedById(meta.jobId) || { id: meta.jobId, name: meta.jobName || meta.jobId };
       this._stashNotif(cid, target, { what: (meta.ev && meta.ev.what) || meta.jobName, at: (meta.ev && meta.ev.at) || (entry && entry.firstAt) }, heldView ? 'held: the Task Groups store cannot be read — judged when it reads' : 'held: no live record proves its view — judged at the turn that would print it', { stampLast: false, held: { kind: heldView ? 'groups-unread' : 'not-running' }, mark: !!meta.sub });
+      // 主开发 04:33Z (2c): the ladder drops its parked copy on this answer and writes its file NOW — the stash is written at once too (a
+      // crash before the next tick lost it for good); while job-notifications.json is HELD that write is refused: the stash waits in memory
+      // and joins the file at the read (the merge)
+      this._saveNotifs();
     }
     return false;
   }

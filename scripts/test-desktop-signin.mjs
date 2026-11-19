@@ -313,7 +313,7 @@ await section('§8 forget + UNPAIR', async () => {
   const got = [];
   hm.onRemoved((id) => got.push(id));
   const id = hm.add({ name: 'pc', user: 'u', host: '127.0.0.9' });
-  hm.remove(id);
+  await hm.remove(id);   // the B-f276 remainder (主开发 04:33Z (2b)): the listeners hear it once hosts.json carries the removal
   ok(got.length === 1 && got[0] === id, 'the REAL HostManager calls its removal listeners with the machine\'s id', got);
 });
 

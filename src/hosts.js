@@ -13,6 +13,7 @@
  */
 
 const fs = require('fs');
+const REMOVAL_RETRY_MS = 60 * 1000;   // 主开发 04:33Z (2b): a removal's own files wait for its record to land — asked again this far apart
 const os = require('os');
 const path = require('path');
 const SR = require('./store-read.js'); // remainder of B-f276 (bl-jobs): a read that FAILED is no answer — held, never written over
@@ -424,19 +425,25 @@ class HostManager {
     console.warn(`[hosts] hosts.json read again (held since ${new Date(was.at).toISOString()}, ${was.code}): ${a.state === 'data' ? `${this._state.hosts.length} machine(s)` : a.setAside ? `torn bytes, kept aside as ${a.setAside} — the machines list starts empty` : 'the file is GONE — the machines list starts empty'}`);
     try { this.onDiscoveryDirty?.(null); } catch { }
     try { this.onReadAgain?.(); } catch { }   // its read r1 (S1): every page's machines list is drawn again (exit-routes wires hosts-updated)
-    const waits = this._readWaits ? [...this._readWaits.values()] : []; this._readWaits = null;   // its read r1 (S5): what waited for the machines runs now
+    const waits = this._readWaits ? [...this._readWaits.values()].map((w) => w.fn) : []; this._readWaits = null;   // its read r1 (S5): what waited for the machines runs now
     for (const fn of waits) { try { fn(); } catch (e) { console.warn('[hosts] a wait for the machines failed:', e && e.message); } }
   }
   /** run `fn` over the machines as soon as they are KNOWN — now, or once a held hosts.json reads (its read r1, S5: a sweep over
    *  the held, empty list ran over nothing and never again) */
   //  主开发 01:20Z (4): the list of waits has a BOUND and a KEY — a wait given a `key` (a conversation's remote stop) REPLACES the
   //  one waiting under it (asked again, ONE runs at the read), and past READ_WAITS_MAX the oldest is let go, said
-  whenRead(fn, what = 'a sweep over the machines', key = null) {
+  //  主开发 04:33Z (3): a wait let go is NAMED in the line, and its `onLetGo` runs (a remote stop's tells the person: the conversation
+  //  they were told «stops as soon as they read» may still be running)
+  whenRead(fn, what = 'a sweep over the machines', key = null, { onLetGo = null } = {}) {
     if (!this._unread) return fn();
     const W = this._readWaits = this._readWaits || new Map();
     const k = key == null ? Symbol(what) : String(key), again = W.has(k);
-    W.delete(k); W.set(k, fn);
-    if (W.size > READ_WAITS_MAX) { const [k0] = W.keys(); W.delete(k0); console.warn(`[hosts] ${READ_WAITS_MAX} waits for hosts.json to read — the oldest is let go (it will not run at the read)`); }
+    W.delete(k); W.set(k, { fn, what, onLetGo: typeof onLetGo === 'function' ? onLetGo : null });
+    if (W.size > READ_WAITS_MAX) {
+      const [[k0, w0]] = W; W.delete(k0);
+      console.warn(`[hosts] ${READ_WAITS_MAX} waits for hosts.json to read — the oldest is let go (it will not run at the read): ${w0.what}`);
+      if (w0.onLetGo) { try { w0.onLetGo(); } catch (e) { console.warn('[hosts] telling a wait let go failed:', e && e.message); } }
+    }
     if (!again) console.warn(`[hosts] ${what} waits for hosts.json to read (${this._unread.code}) — it runs then; a restart before that forgets it`);   // its read r2 (X4): said
   }
 
@@ -806,7 +813,7 @@ class HostManager {
     if (!fs.existsSync(file)) return false;
     // 主开发 01:20Z (6): a HELD hosts.json — the migration WAITS for the read and its boot line says so (it was «failed»: its first
     // lookup threw the hold); the legacy file stays where it is until then
-    if (this._unread) { this.whenRead(() => { try { this.migrateDialTokenFile(file); } catch (e) { console.warn('[hosts] dial-token migration failed:', e && e.message); } }, `the dial-token migration (${path.basename(file)} into hosts.json)`, 'migrate:dial-tokens'); return false; }
+    if (this._unread) { this.whenRead(() => { this._migrateDialTokensAtRead(file); }, `the dial-token migration (${path.basename(file)} into hosts.json)`, 'migrate:dial-tokens'); return false; }   // 主开发 04:33Z (4): at the read, off the loop
     const all = JSON.parse(fs.readFileSync(file, 'utf-8'));
     for (const [devId, hash] of Object.entries(all)) {
       if (hash && !this.dialTokenHash(devId)) this.setDialToken(devId, hash);
@@ -827,6 +834,21 @@ class HostManager {
     }
     fs.renameSync(file, file + '.migrated');
     return true;
+  }
+
+  /** 主开发 04:33Z (4): the migration that WAITED for a held hosts.json runs at the read OFF the main loop — the legacy file sits in the
+   *  data folder that was failing: read async (no existsSync / readFileSync there on the loop), the hashes taken in, the file renamed
+   *  (async) only once the writer says they are on disk; held again meanwhile ⇒ it waits again. → a promise (never rejects) */
+  _migrateDialTokensAtRead(file) {
+    return fs.promises.readFile(file, 'utf-8').then((text) => {
+      if (this._unread) { this.whenRead(() => { this._migrateDialTokensAtRead(file); }, `the dial-token migration (${path.basename(file)} into hosts.json)`, 'migrate:dial-tokens'); return false; }
+      const all = JSON.parse(text);
+      for (const [devId, hash] of Object.entries(all)) if (hash && !this.dialTokenHash(devId)) this.setDialToken(devId, hash);
+      if (!Object.entries(all).every(([devId, hash]) => !hash || this.dialTokenHash(devId))) { console.warn('[hosts] dial-token migration incomplete — legacy file kept'); return false; }
+      const later = () => this.persisted().then((on) => { if (on) fs.rename(file, file + '.migrated', () => { }); else { const t = setTimeout(later, 60000); t.unref?.(); } }, () => { });
+      later();
+      return true;
+    }).catch((e) => { if (!(e && e.code === 'ENOENT')) console.warn('[hosts] dial-token migration failed:', e && e.message); return false; });
   }
 
   add({ name, user, host, port, keyPath, privateKey, transport, deviceId, dialTokenHash, replaces = null, viaConfig = false, sshConfig = null, jump = null }) {
@@ -906,18 +928,36 @@ class HostManager {
     try { if (this._realCwds) this._realCwds.delete(id); } catch { }   // B-16d7: a removed machine's real folders go with it
     const h = this.get(id);
     // uploaded per-host key files are ours to clean up
-    if (h.keyPath && h.keyPath.startsWith(this._sshDir) && h.keyPath.endsWith(`${id}.key`)) {
-      try { fs.unlinkSync(h.keyPath); } catch {}
-    }
+    const uploadedKey = h.keyPath && h.keyPath.startsWith(this._sshDir) && h.keyPath.endsWith(`${id}.key`) ? h.keyPath : null;   // (not a key STORE's file: test-key-file-law names those by `keyFile`)
     this._state.hosts = this._state.hosts.filter(x => x.id !== id);
     this._discoveryCache.delete(id);
-    try { const DMx = require('./agentd/client.js').DeviceManager; if (h.deviceId) DMx.dropHelloFolds('dev:' + h.deviceId); DMx.dropHelloFolds('host:' + id); } catch {}   // B-0194: what its hello folds owe said, then they go (both names)
-    // The host's remote-transcript cache is dead weight once the host is gone
-    // (files up to 64MB each accumulated forever — audit round-3).
-    try { fs.rmSync(path.join(this.dataDir, 'remote-jsonl', id), { recursive: true, force: true }); } catch {}
+    try { const DMx = require('./agentd/client.js').DeviceManager; if (h.deviceId) DMx.dropHelloFolds('dev:' + h.deviceId); DMx.dropHelloFolds('host:' + id); } catch {}   // B-0194: what its hello folds owe said, then they go (both names) — memory only: at once (the restack's meeting; the files wait for the landing below)
     this._save();
     this._reachChanged('remove');
-    this._removed(id);
+    // 主开发 04:33Z (2b): the record LANDS first (its save is the store writer's, QUEUED — B-48a4) — the machine's own files and the other
+    // stores' teardown only once hosts.json carries the removal: unlinked first, a restart before the save landed brought the record back
+    // without its key. → a promise of that teardown (never rejects; false = the record came BACK — an import, a restore — nothing of it goes)
+    return this._whenRemovalLands(id).then((landed) => {
+      if (!landed) { console.warn(`[hosts] ${id} is back in the machines list before its removal reached hosts.json — its key file, its transcript cache and the sign-ins kept for it stay`); return false; }
+      if (uploadedKey) { try { fs.unlinkSync(uploadedKey); } catch {} }
+      // The host's remote-transcript cache is dead weight once the host is gone
+      // (files up to 64MB each accumulated forever — audit round-3).
+      try { fs.rmSync(path.join(this.dataDir, 'remote-jsonl', id), { recursive: true, force: true }); } catch {}
+      this._removed(id);
+      return true;
+    }, () => false);
+  }
+  /** (2b): the removal of `id` is on disk — asked again while the writer still owes it (its read r1, S1: never given up — the writer
+   *  keeps the write owed and may land it later; given up, the key file and the sealed sign-ins stayed for good). Each ask is one
+   *  `persisted()` wait (bounded by the writer), then `_removalRetryMs` (a suite's seam) on an unref'd timer. → true once on disk,
+   *  false when the record is back (an import, a restore) */
+  async _whenRemovalLands(id) {
+    for (let k = 0; ; k++) {
+      if (this._state.hosts.some((x) => x.id === id)) return false;   // the record is back: nothing of it goes
+      if (await this.persisted()) return !this._state.hosts.some((x) => x.id === id);
+      if (k === 0) console.warn(`[hosts] ${id} is removed here, but hosts.json does not carry it yet — its key file, its transcript cache and the sign-ins kept for it wait until it does (asked again until then; a restart before it lands brings the machine back)`);
+      await new Promise((r) => { const t = setTimeout(r, Number(this._removalRetryMs) > 0 ? Number(this._removalRetryMs) : REMOVAL_RETRY_MS); t.unref?.(); });
+    }
   }
   /** lane desktop-vnc-remember: who hears that a machine was REMOVED (its unpair) — a holder of a per-machine secret forgets
    *  it (src/server/desktop-access.js: the machine's sealed sign-ins). → the unsubscribe function */

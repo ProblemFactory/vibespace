@@ -261,7 +261,7 @@ class MachineMounts {
   _pullRow(m) {
     const error = (this._pullErrors && this._pullErrors.get(m.id)) || null, pc = error && this._pullErrorCodes && this._pullErrorCodes.get(m.id);
     // r5/r6 (reads 4 #8, 5 #2): a HOLDER says it shares its folder — EVERY waiting row, which way it nests, and whether its machine is gone
-    const shares = [...this._held].filter(([, h]) => h.otherId === m.id).map(([id, h]) => { const o = this._state.mounts.find((x) => x.id === id) || {}; let name = null; try { name = this.hosts.get(o.hostId).name || o.hostId; } catch { name = null; } return { machine: name == null ? '' : String(name), removed: name == null, remotePath: String(o.remotePath || ''), kind: h.kind }; });
+    const shares = [...this._held].filter(([, h]) => h.otherId === m.id).map(([id, h]) => { const o = this._state.mounts.find((x) => x.id === id) || {}; let name = null; try { name = this.hosts.get(o.hostId).name || o.hostId; } catch (e) { name = e && e.code === 'hosts-unread' ? String(o.hostId || '') : null; } return { machine: name == null ? '' : String(name), removed: name == null, remotePath: String(o.remotePath || ''), kind: h.kind }; });
     // 主开发 09:24Z: a pull row's words with no code recorded beside them are found BY THEIR WORDS, as a cloud row's are (codeOfWords)
     const byWords = !(pc && pc.words === error) && error ? MW.codeOfWords(error) : null;
     return { id: m.id, dir: 'pull', hostId: m.hostId, remotePath: m.remotePath, mountpoint: m.mountpoint, live: this._live.has(m.id), online: this._online(m.hostId), createdAt: m.createdAt, error, ...(shares.length ? { shares } : {}),
@@ -806,7 +806,7 @@ class MachineMounts {
   }
   /** The refusal's words, named after the OTHER record (its machine, its folder, its mount point) and a code the client words. */
   _conflictWords({ kind, other }, { held = false } = {}) {
-    let name = null; try { name = this.hosts.get(other.hostId).name || other.hostId; } catch { name = null; }
+    let name = null; try { name = this.hosts.get(other.hostId).name || other.hostId; } catch (e) { name = e && e.code === 'hosts-unread' ? String(other.hostId || '') : null; }   // the machines list HELD: named by its id — never «a removed machine» (the restack's census)
     const params = { machine: name == null ? '' : String(name), removed: name == null, remotePath: String(other.remotePath || ''), mountpoint: String(other.mountpoint || ''), held };
     if (kind === 'same') return { code: 'mount_point_in_use', params, words: MW.wordsFor('mount_point_in_use', params) };   // B-af94: src/mount-error-words.js composes them (the page: the same in its language)
     params.kind = kind;
@@ -870,6 +870,13 @@ class MachineMounts {
    *  link up, an ssh machine — no link to read — either way with no failed try pending), the current holder, the one live last,
    *  the elder; a record whose machine was removed never holds (the orphan an edited ssh machine leaves behind never blocks its new row). Real paths first (children, in parallel). Said once in the journal per pair. */
   async _recheckPairs() {
+    // the B-f276 remainder meets line 244 (the stores chain's restack, its census): while the MACHINES LIST is held (hosts.json unread)
+    // every record would read «gone» (its machine removed) and every pair hold would be dropped — the pairs are judged once the list
+    // reads (keyed: one wait); the current holds stand meanwhile. Another meaning than a PAIR-held record (`_held`)
+    if (this.hosts && typeof this.hosts.held === 'function' && this.hosts.held()) {
+      if (typeof this.hosts.whenRead === 'function') this.hosts.whenRead(() => { this._recheckPairs().catch(() => { }); }, 'the pull mounts\' pair check', 'mounts:pairs');
+      return this._held;
+    }
     await this._resolveReals();
     const pulls = this._state.mounts.filter((m) => m.dir === 'pull');
     const gone = (m) => { try { this.hosts.get(m.hostId); return false; } catch { return true; } };
@@ -964,7 +971,7 @@ class MachineMounts {
    *  folder not probed yet is shown as before. Never shadowed either: a path under ANY live pull's folder (two records on
    *  one folder, a nested one — what shows there is a machine's own); a removed machine's record (no words would be true).
    *  The innermost record answers. `writer`: the question of a request that ADDS to the folder (a write, a copy's or a move's
-   *  destination, the TASK.md writer) — ANY folder not live, whatever its probe (read 4: «unknown» must not mean «write»). → { id, hostId, machine, name (= machine: the shape the TASK.md writer reads), mountpoint, offline } | null */
+   *  destination, the TASK.md writer) — ANY folder not live, whatever its probe (read 4: «unknown» must not mean «write»). → { id, hostId, machine, name (= machine: the shape the TASK.md writer reads), mountpoint, offline, hostsHeld?, hostsHeldWords? } | null — `hostsHeld`: the MACHINES LIST is held (its words ride out; never «offline»; not a pair-held record) */
   /** B-2ca0 follow-up (主开发 19:42Z): a pull record's folder AS WRITTEN and by its REAL path (`_realMp`, a child's realpath) — the
    *  path a door asks with may be either (WebDAV's target comes from the real-pathed root: a record written through a link was
    *  never matched there, and a PUT landed in the bare folder under an unmounted pull) */
@@ -990,6 +997,9 @@ class MachineMounts {
     }
     if (!best) return null;
     const machine = String(best.h.name || best.m.hostId || '');
+    // round wojcq4hn4 (its MUST): a HELD machines list is unknown BY NAME — the mark and the hold's words ride out (the files route answers
+    // the hold, hosts-unread 503), never «offline»: the online check swallowed the hold and said false for a machine that may be connected
+    if (best.h.hostsHeld) return { id: best.m.id, hostId: best.m.hostId, machine, name: machine, mountpoint: best.mp, hostsHeld: true, hostsHeldWords: (this.hosts && typeof this.hosts.unreadWords === 'function' && this.hosts.unreadWords()) || '', offline: false };
     return { id: best.m.id, hostId: best.m.hostId, machine, name: machine, mountpoint: best.mp, offline: !this._online(best.m.hostId) };
   }
   /** B-fcc7 (read 5): a file under a pull folder that is not live was removed or moved out — probe that folder again now (its
@@ -1224,6 +1234,9 @@ function pullShadowOf(p, { writer = false } = {}) {
  *  files route's and WebDAV's one spelling. */
 function pullShadowBody(s) {
   const params = { machine: s.machine };
+  // the B-f276 remainder (round wojcq4hn4's MUST): the MACHINES LIST held is said as the HOLD, by its name — never «offline» (the files
+  // route and WebDAV alike: one spelling); another meaning than a PAIR-held record (`_held`), which never reaches here
+  if (s.hostsHeld) return { error: `“${s.machine}”’s folder: ${s.hostsHeldWords || 'the paired machines cannot be read right now'}`, code: 'hosts-unread', params };
   return s.offline
     ? { error: `“${s.machine}” is offline — this folder shows its files only while the machine is connected`, code: 'machine_offline', params }
     : { error: `“${s.machine}”’s folder is not mounted right now — this folder is where it appears; it is tried again by itself, or press Remount now on its row`, code: 'machine_folder_down', params };

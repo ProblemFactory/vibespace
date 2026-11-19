@@ -8283,6 +8283,8 @@ export default {
   "its desktop — set up once": "它的桌面 — 需设置一次",
   "{machine} is offline": "{machine}离线",
   "The session on {machine} is not stopped yet — VibeSpace cannot read its paired machines right now; it stops it there as soon as they read (a VibeSpace restart before then forgets it: stop it again).": "{machine} 上的会话尚未停止 — VibeSpace 目前读不出已配对的机器；一旦读出就会在那边停止它（在那之前重启 VibeSpace 会忘掉这件事：请再停止一次）。",
+  "The session «{name}» on {machine} was not stopped — VibeSpace could not read its paired machines, and so many actions waited for them that its stop was let go. It may still be running there: stop it again once the machines read.": "会话「{name}」在 {machine} 上没有被停止——VibeSpace 读不到已配对的机器，等待它们的操作太多，这次停止已被放弃。它可能仍在那里运行：等机器能读到后请再停止一次。",
+  "“{machine}”’s folder: {why}": "「{machine}」的文件夹：{why}",
   "Ready": "就绪",
   "Ready — it asks for your Mac user name and password": "就绪 — 会要求输入你的 Mac 用户名和密码",
   "Ready — it asks for a user name and password": "就绪 — 会要求输入用户名和密码",

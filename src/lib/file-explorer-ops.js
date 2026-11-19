@@ -1,4 +1,4 @@
-import { showToast, showInputDialog, showConfirmDialog, copyText, formatSize, createModalShell, freshKey, attachPopoverClose, placeMenu, absUrl as absUrlShared } from './utils.js';
+import { showToast, showInputDialog, showConfirmDialog, copyText, formatSize, createModalShell, freshKey, attachPopoverClose, placeMenu, absUrl as absUrlShared, hostsHeldWords } from './utils.js';
 import { t } from './i18n.js';
 import { agentUpdateAction, isAgentOld } from './agent-update-door.js'; // B-bd27 X1: «Update its agent…» on a refusal for an old agent
 import { stampAt as when, num } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
@@ -34,6 +34,8 @@ export function fsErrorText(d) {
   // B-5ce7's cure: a PARKED storage's folder — its name and its doors, in the reader's language (src/routes/files.js storage_parked)
   if (d && d.code === 'storage_parked') return t('“{name}” is kept disconnected (its listing kept hanging) — press Connect on its row, or Reconnect in For you.', { name: p.name || '' });
   // B-fcc7: a pull mount's folder while it is not mounted (src/routes/files.js pullShadowBody) — the row's state, never an empty folder
+  // the B-f276 remainder (round wojcq4hn4): the machines list is HELD — said as the hold, never «offline»
+  if (d && d.code === 'hosts-unread') return t('“{machine}”’s folder: {why}', { machine: p.machine || '?', why: hostsHeldWords() });
   if (d && d.code === 'machine_offline') return t('“{machine}” is offline — this folder shows its files only while the machine is connected', { machine: p.machine || '?' });
   if (d && d.code === 'machine_folder_down') return t('“{machine}”’s folder is not mounted right now — this folder is where it appears; it is tried again by itself, or press Remount now on its row', { machine: p.machine || '?' });
   if (d && d.code === 'windows_no_shell') return t('this needs a POSIX shell ({shell}), and this Windows machine has none — not available on Windows machines without one yet', { shell: p.shell || 'sh' });

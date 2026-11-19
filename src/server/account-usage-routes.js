@@ -406,7 +406,7 @@ app.delete('/api/accounts/:id', (req, res) => {
       const dirs = require('../harnesses').list().filter((h) => h.creds?.subsDirName).map((h) => `"$HOME/.vibespace/${h.creds.subsDirName}/${rid}"`).join(' ');
       const rm = `rm -f "$HOME/.vibespace/${rid}.key"; rm -rf ${dirs}`;
       const sweep = () => { for (const h of hosts.list() || []) { try { execFile('ssh', [...hosts.sshArgs(h), '--', rm], { env: hosts.sshEnv(), timeout: 15000 }, () => {}); } catch { } } };
-      if (hosts.whenRead) hosts.whenRead(sweep); else sweep();   // the B-f276 remainder (its read r1, S5): a held hosts.json sweeps once it reads
+      if (hosts.whenRead) hosts.whenRead(sweep, `the token-copy sweep of account ${rid} on every machine`, `token-sweep:${rid}`); else sweep();   // the B-f276 remainder (its read r1, S5): a held hosts.json sweeps once it reads; the moved chain's read (S4): named + keyed
     }
     res.json({ success: true });
   }
@@ -643,7 +643,7 @@ const sweepHostTokenCopies = (rid) => {
   if (/^sub-[a-f0-9]+$/.test(rid) && hosts) {
     const { execFile } = require('child_process');
     const sweep = () => { for (const h of hosts.list() || []) { try { execFile('ssh', [...hosts.sshArgs(h), '--', `rm -f "$HOME/.vibespace/${rid}.key"`], { env: hosts.sshEnv(), timeout: 15000 }, () => {}); } catch { } } };
-    if (hosts.whenRead) hosts.whenRead(sweep); else sweep();   // the B-f276 remainder (its read r1, S5): a held hosts.json sweeps once it reads
+    if (hosts.whenRead) hosts.whenRead(sweep, `the token-copy sweep of account ${rid} on every machine`, `token-sweep:${rid}`); else sweep();   // the B-f276 remainder (its read r1, S5): a held hosts.json sweeps once it reads; the moved chain's read (S4): named + keyed
   }
 };
 app.delete('/api/accounts/:id/oat', (req, res) => {

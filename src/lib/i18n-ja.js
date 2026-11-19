@@ -8282,6 +8282,8 @@ export default {
   "its desktop — set up once": "そのデスクトップ — 一度だけ設定",
   "{machine} is offline": "{machine}はオフラインです",
   "The session on {machine} is not stopped yet — VibeSpace cannot read its paired machines right now; it stops it there as soon as they read (a VibeSpace restart before then forgets it: stop it again).": "{machine} のセッションはまだ停止していません — VibeSpace はいまペアリング済みのマシンを読めません。読めた時点でそちらで停止します（それまでに VibeSpace を再起動すると忘れられます：もう一度停止してください）。",
+  "The session «{name}» on {machine} was not stopped — VibeSpace could not read its paired machines, and so many actions waited for them that its stop was let go. It may still be running there: stop it again once the machines read.": "{machine} 上のセッション「{name}」は停止されていません — VibeSpace がペアリング済みのマシンを読めず、それを待つ操作が多すぎたため、この停止は取りやめになりました。まだそこで動いている可能性があります。マシンを読めるようになったら、もう一度停止してください。",
+  "“{machine}”’s folder: {why}": "「{machine}」のフォルダー：{why}",
   "Ready": "準備完了",
   "Ready — it asks for your Mac user name and password": "準備完了 — Mac のユーザー名とパスワードを求められます",
   "Ready — it asks for a user name and password": "準備完了 — ユーザー名とパスワードを求められます",

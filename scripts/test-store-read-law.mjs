@@ -9,12 +9,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { checker } from './lib/check.mjs';
 const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const { ok, report } = checker();
+// 主开发 04:33Z (5): the closing count says how many legs were SKIPPED by name under root (a green over skipped legs is never a plain ALL PASS)
+const SKIPPED = { n: 0 };
+const { ok, report } = checker({ log: (l) => console.log(SKIPPED.n && /^\n(?:ALL PASS|\d+ FAILED)/.test(l) ? `${l} · ${SKIPPED.n} leg(s) skipped by name under root (each said above)` : l) });
 const D = scratch('store-read-law'); fs.rmSync(D, { recursive: true, force: true }); fs.mkdirSync(D, { recursive: true });
 process.on('exit', () => { try { fs.rmSync(D, { recursive: true, force: true }); } catch { } });
 const MJ = mutantCopies('store-read-law', ROOT);
@@ -23,7 +25,7 @@ const asRoot = typeof process.getuid === 'function' && process.getuid() === 0;
 const plant = (F, body) => { if (asRoot) fs.mkdirSync(F); else { fs.writeFileSync(F, body); fs.chmodSync(F, 0o000); } };
 // store (5)'s round (主开发 02:33Z (4)): a leg root cannot make red (root reads a 000 file — the stand-in is a folder, which no save's
 // rename replaces) is SKIPPED BY NAME under root, never green by an early true
-const rootSkip = (name) => console.log(`  ○ SKIPPED under root (by name, never a green): ${name} — root reads a 000 file, so the stand-in is a folder no save can replace`);
+const rootSkip = (name) => (SKIPPED.n++, console.log(`  ○ SKIPPED under root (by name, never a green): ${name} — root reads a 000 file, so the stand-in is a folder no save can replace`));
 const unplant = (F, body) => { if (asRoot) { fs.rmdirSync(F); fs.writeFileSync(F, body); } else fs.chmodSync(F, 0o644); };
 const bodyOf = (F) => { try { return fs.statSync(F).isDirectory() ? '(a folder)' : (fs.chmodSync(F, 0o644), fs.readFileSync(F, 'utf8')); } catch (e) { return '(' + e.code + ')'; } };
 
@@ -85,11 +87,38 @@ console.log('§1 hosts.json (src/hosts.js) — every paired machine and its dial
     const wk = await waitsScene({ HostManager: MJ.load('src/hosts.js', HSRC.replace(KEYED, 'const k = Symbol(what), again = false;   /* MUTANT: no key */'), 'waits-unkeyed').HostManager }, 'hosts-waits-unkeyed');
     const wb = await waitsScene({ HostManager: MJ.load('src/hosts.js', HSRC.replace(BOUND, '    if (false) {   /* MUTANT: no bound */'), 'waits-unbound').HostManager }, 'hosts-waits-unbound');
     ok(wk.stops === 'stop-a1,stop-a2' && wb.ran === 301 && wb.said === 0, 'CONTROLS: waits with no key run a conversation\'s stop twice; waits with no bound keep every one — each RED', { wk, wb });
+    // 主开发 04:33Z (3): a wait LET GO is named in the line, and a remote stop's is TOLD (its onLetGo: a server notice naming the
+    // conversation the person was told «stops as soon as they read»); CONTROL: the onLetGo call cut
+    const LETGO = '      if (w0.onLetGo) { try { w0.onLetGo(); }';
+    ok(HSRC.split(LETGO).length === 2, 'control setup: the let-go\'s telling is found once');
+    const letGoScene = async (Mod, name) => {
+      const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
+      const F = path.join(d, 'hosts.json'); plant(F, body);
+      const H = new Mod.HostManager({ dataDir: d });
+      const told = [], lines = [], ran = [], warn = console.warn; console.warn = (m) => { lines.push(String(m)); };
+      try {
+        H.whenRead(() => ran.push('stop'), 'the remote stop of conversation conv-lg', 'stop:conv-lg', { onLetGo: () => told.push('conv-lg') });
+        for (let i = 0; i < 256; i++) H.whenRead(() => ran.push('sweep'), `a sweep ${i}`);
+      } finally { console.warn = warn; }
+      unplant(F, body);
+      if (H._unreadRetry) await H._unreadRetry();
+      return { told: told.join(), named: lines.some((l) => /the oldest is let go \(it will not run at the read\): the remote stop of conversation conv-lg$/.test(l)), stopRan: ran.includes('stop'), ran: ran.length };
+    };
+    const lg = await letGoScene({ HostManager: require(path.join(ROOT, 'src/hosts.js')).HostManager }, 'hosts-waits-letgo');
+    const lgx = await letGoScene({ HostManager: MJ.load('src/hosts.js', anchored(HSRC, LETGO, '      if (false) { try { w0.onLetGo(); }', 'waits-letgo-untold'), 'waits-letgo-untold').HostManager }, 'hosts-waits-letgo-mut');
+    ok(lg.told === 'conv-lg' && lg.named && !lg.stopRan && lg.ran === 256, 'a remote stop LET GO past the bound: the line names it, and its onLetGo tells the person (it never runs at the read)', lg);
+    ok(lgx.told === '' && lgx.named, 'CONTROL (the telling cut, in a copy): the stop is let go said only in the log — the person still believes the conversation stops — RED', lgx);
+    const WSH = fs.readFileSync(path.join(ROOT, 'src/ws-handler.js'), 'utf8');
+    const LGKEY = 'The session «{name}» on {machine} was not stopped — VibeSpace could not read its paired machines, and so many actions waited for them that its stop was let go. It may still be running there: stop it again once the machines read.';
+    ok(/hosts\.whenRead\(remoteStop, `the remote stop of conversation \$\{data\.sessionId\}`, `stop:\$\{data\.sessionId\}`, \{ onLetGo: \(\) => notifyKillLetGo\(session\.name \|\| data\.sessionId, /.test(WSH)
+      && WSH.includes("i18n: { key: i18nKey('" + LGKEY + "'), params: { name: String(name), machine: String(hostName) } }")
+      && ['zh', 'ja'].every((lang) => fs.readFileSync(path.join(ROOT, `src/lib/i18n-${lang}.js`), 'utf8').includes(JSON.stringify(LGKEY) + ':')),
+    'WIRING: the Terminate\'s remote stop that waits for the machines carries its onLetGo — a server notice naming the conversation and its machine (zh / ja rows)');
   }
   // 主开发 01:20Z (6): the boot's legacy dial-token migration while held WAITS for the read (said so — never «failed»), the legacy file
   // kept; at the read it runs; CONTROL: a copy with no held branch throws the hold at the boot (its line: «failed»)
   {
-    const MIG = "    if (this._unread) { this.whenRead(() => { try { this.migrateDialTokenFile(file); }";
+    const MIG = "\n    if (this._unread) { this.whenRead(() => { this._migrateDialTokensAtRead(file); }";   // from its line's start: the read-time method repeats the rest
     ok(HSRC.split(MIG).length === 2, 'control setup: the migration\'s held branch is found once');
     const migScene = async (Mod, name) => {
       const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
@@ -100,12 +129,21 @@ console.log('§1 hosts.json (src/hosts.js) — every paired machine and its dial
       let r = null, threw = null; try { r = H.migrateDialTokenFile(L); } catch (e) { threw = e.code || String(e.message); } finally { console.warn = warn; }
       const keptWhileHeld = fs.existsSync(L);
       unplant(F, body);
-      if (H._unreadRetry) await H._unreadRetry();
-      return { r, threw, said: lines.some((l) => /the dial-token migration \(dial-tokens\.json into hosts\.json\) waits for hosts\.json to read/.test(l)), keptWhileHeld, hash: H.dialTokenHash ? H.dialTokenHash('dev-0001') : null };
+      // 主开发 04:33Z (4): the run AT THE READ never reads the legacy file on the main loop (the folder that was failing) — counted
+      let syncReads = 0; const rfs = fs.readFileSync, efs = fs.existsSync;
+      fs.readFileSync = function (f, ...a) { if (String(f) === L) syncReads++; return rfs.call(this, f, ...a); };
+      fs.existsSync = function (f, ...a) { if (String(f) === L) syncReads++; return efs.call(this, f, ...a); };
+      try {
+        if (H._unreadRetry) await H._unreadRetry();
+        for (let i = 0; i < 200 && !(H.dialTokenHash && H.dialTokenHash('dev-0001')); i++) await new Promise((res) => setTimeout(res, 5));   // its async read
+      } finally { fs.readFileSync = rfs; fs.existsSync = efs; }
+      return { r, threw, said: lines.some((l) => /the dial-token migration \(dial-tokens\.json into hosts\.json\) waits for hosts\.json to read/.test(l)), keptWhileHeld, hash: H.dialTokenHash ? H.dialTokenHash('dev-0001') : null, syncReads };
     };
     const m = await migScene({ HostManager: require(path.join(ROOT, 'src/hosts.js')).HostManager }, 'hosts-mig');
-    ok(m.r === false && !m.threw && m.said && m.keptWhileHeld && m.hash === 'a'.repeat(64), 'the legacy dial-token migration while held waits for the read (its line says so), the legacy file kept; at the read the hash is in hosts.json', m);
-    const mx = await migScene({ HostManager: MJ.load('src/hosts.js', HSRC.replace(MIG, '    if (false) { this.whenRead(() => { try { this.migrateDialTokenFile(file); }'), 'mig-unheld').HostManager }, 'hosts-mig-unheld');
+    ok(m.r === false && !m.threw && m.said && m.keptWhileHeld && m.hash === 'a'.repeat(64) && m.syncReads === 0, 'the legacy dial-token migration while held waits for the read (its line says so), the legacy file kept; at the read the hash is in hosts.json — read OFF the main loop (no sync read of the legacy file)', m);
+    const ms = await migScene({ HostManager: MJ.load('src/hosts.js', anchored(HSRC, MIG, "\n    if (this._unread) { this.whenRead(() => { try { this.migrateDialTokenFile(file); } catch { } }", 'mig-sync-at-read'), 'mig-sync-at-read').HostManager }, 'hosts-mig-sync');
+    ok(ms.hash === 'a'.repeat(64) && ms.syncReads >= 2, 'CONTROL (the wait runs the boot\'s synchronous migration, in a copy): at the read the legacy file is stat\'d and read ON the main loop, in the folder that was failing — RED', ms);
+    const mx = await migScene({ HostManager: MJ.load('src/hosts.js', HSRC.replace(MIG, '\n    if (false) { this.whenRead(() => { this._migrateDialTokensAtRead(file); }'), 'mig-unheld').HostManager }, 'hosts-mig-unheld');
     ok(mx.threw === 'hosts-unread' && !mx.said, 'CONTROL (no held branch, in a copy): the migration throws the hold at the boot — its line was «failed» — RED', mx);
   }
   // torn bytes: kept aside (a copy), the list starts empty — as the release did, now through the law
@@ -359,8 +397,79 @@ console.log('§1 hosts.json (src/hosts.js) — every paired machine and its dial
   const DP = fs.readFileSync(path.join(ROOT, 'src/server/dial-pairing.js'), 'utf8'), PS = fs.readFileSync(path.join(ROOT, 'src/routes/persistence.js'), 'utf8'), AU = fs.readFileSync(path.join(ROOT, 'src/server/account-usage-routes.js'), 'utf8');
   ok(/if \(hosts\.unreadWords && hosts\.unreadWords\(\)\) \{ holdDial\(socket, deviceId\); return null; \}\n  const want = hosts\.dialTokenHash\(deviceId\);/.test(DP) && /HTTP\/1\.1 503 Service Unavailable/.test(DP)
     && /if \(hostsHeld\) return res\.status\(503\)/.test(PS) && /const lists = r && r\.skipped \? null :/.test(PS)
-    && (AU.match(/if \(hosts\.whenRead\) hosts\.whenRead\(sweep\); else sweep\(\);/g) || []).length === 2 && /hosts\.onReadAgain = \(\) => bcastAll\(\{ type: 'hosts-updated' \}\);/.test(ER),
+    && (AU.match(/if \(hosts\.whenRead\) hosts\.whenRead\(sweep, `the token-copy sweep of account \$\{rid\} on every machine`, `token-sweep:\$\{rid\}`\); else sweep\(\);/g) || []).length === 2 && /hosts\.onReadAgain = \(\) => bcastAll\(\{ type: 'hosts-updated' \}\);/.test(ER),
   'WIRING (its read r1): a dial met while held is a 503 the device retries (never «pair again»), an export that asks for the machines is refused with its reason, an import adds no exit lists for machines it skipped, both token sweeps wait for the read, the lift is broadcast');
+}
+
+// ── 主开发 04:33Z (2): the hunt's standing — a reply or a teardown that ran ahead of hosts.json's QUEUED save (B-48a4's writer)
+console.log('§1b a removal on disk before it is said or torn down: the graduate-dial removal\'s reply, a machine\'s own files');
+{
+  const tick = async (n = 6) => { for (let i = 0; i < n; i++) await new Promise((r) => setImmediate(r)); };
+  // (2a) the graduate-dial route's REMOVE branch: «removed» waits for hosts.json (as the graduation road does) — the route's own handler,
+  //      compiled from the wiring over a stand-in machines store whose landing is placed (stalled / refused)
+  const WSRC = fs.readFileSync(path.join(ROOT, 'src/server/mounts-plugins-wiring.js'), 'utf8');
+  const GD0 = "app.post('/api/hosts/:id/graduate-dial', async (req, res) => {", GDW = "      if (typeof hosts.persisted === 'function' && !(await hosts.persisted())) return res.status(503).json({ error: 'the dial pairing is removed here, but hosts.json is not on disk yet";
+  ok(WSRC.split(GD0).length === 2 && WSRC.split(GDW).length === 2, 'control setup: the graduate-dial route and its removal\'s wait for the disk are found once');
+  const routeOf = (src, landing) => {
+    const i = src.indexOf(GD0), j = src.indexOf('\n});\n', i); let handler = null; const calls = [];
+    const hosts = { get: (id) => ({ id, name: 'old box', transport: 'ssh', dialRoot: '', deviceId: null }), sshArgs: () => [], sshEnv: () => ({}), ungraduateDial: (id) => calls.push(id), persisted: () => landing() };
+    new Function('app', 'hosts', 'agentdDials', 'bcastAll', 'require', 'fs', 'path', 'rootDir', 'graduateHostToDial', src.slice(i, j + 4))(   // eslint-disable-line no-new-func
+      { post: (p, fn) => { handler = fn; } }, hosts, new Map(), () => { }, (m) => { throw new Error(`the removal road loads nothing (${m})`); }, fs, path, ROOT, null);
+    return { handler, calls };
+  };
+  const ask = async (src, landing) => {
+    const { handler, calls } = routeOf(src, landing); let sent = null;
+    const res = { status(c) { this.c = c; return this; }, json(b) { sent = { status: this.c || 200, ...b }; return this; } };
+    const p = handler({ params: { id: 'h-0002' }, body: { remove: true }, socket: {} }, res);
+    return { p, calls, sent: () => sent };
+  };
+  let release = null;
+  const st = await ask(WSRC, () => new Promise((r) => { release = r; }));   // the landing STALLS (a write queued behind others)
+  await tick(); const beforeLanded = st.sent(); release(true); await st.p;
+  const rf = await ask(WSRC, async () => false); await rf.p;                // the landing is REFUSED (its write failed / timed out)
+  const rfx = await ask(anchored(WSRC, GDW, '      if (false) return res.status(503).json({ error: \'the dial pairing is removed here, but hosts.json is not on disk yet', 'graduate-remove-nowait'), async () => false); await rfx.p;
+  ok(st.calls.join() === 'h-0002' && beforeLanded === null && !!st.sent() && st.sent().removed === true && !!rf.sent() && rf.sent().status === 503 && rf.sent().code === 'not_durable' && !rf.sent().removed,
+    'a graduate-dial REMOVAL: no reply while hosts.json\'s save is still queued (stalled) — «removed» once it landed; a landing refused answers 503 not_durable, never «removed»', { beforeLanded, stalled: st.sent(), refused: rf.sent() });
+  ok(!!rfx.sent() && rfx.sent().removed === true, 'CONTROL (the wait cut, in a copy): «removed» while hosts.json never carried it — a restart brings the pairing back — RED', rfx.sent());
+  // (2b) src/hosts.js remove: the record LANDS first — the machine's own key file, its transcript cache and the removal listeners after it
+  const HSRC1 = fs.readFileSync(path.join(ROOT, 'src/hosts.js'), 'utf8');
+  const AFTER = '    return this._whenRemovalLands(id).then((landed) => {';
+  ok(HSRC1.split(AFTER).length === 2, 'control setup: the removal\'s wait for its record to land is found once');
+  const rmScene = async (Mod, name, landing) => {
+    const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
+    const H = new Mod.HostManager({ dataDir: d });
+    H._storeWriter = { dirty: () => { }, durable: () => Promise.resolve(true), whyNotDurable: () => null };
+    const id = H.add({ name: 'lab box', user: 'u', host: 'lab.invalid' });
+    const kf = path.join(H._sshDir, `${id}.key`); fs.mkdirSync(H._sshDir, { recursive: true }); fs.writeFileSync(kf, 'a key file', { mode: 0o600 });
+    const rec = H._state.hosts.find((x) => x.id === id); rec.keyPath = kf;
+    const cache = path.join(d, 'remote-jsonl', id); fs.mkdirSync(cache, { recursive: true }); fs.writeFileSync(path.join(cache, 'c.jsonl'), '{}\n');
+    const heard = []; H.onRemoved((x) => heard.push(x));
+    const state = () => ({ listed: H._state.hosts.some((x) => x.id === id), key: fs.existsSync(kf), cache: fs.existsSync(cache), heard: heard.length });
+    H._removalRetryMs = 5;   // the suite's pace (the hub's: a minute)
+    let rel = null, asks = 0;
+    // 'stall': the one landing waits (released below); 'refused': refused twice, then made; 'back': refused, and the record comes back
+    H._storeWriter.durable = landing === 'stall' ? () => { asks++; return new Promise((r) => { rel = r; }); } : () => { asks++; return Promise.resolve(landing === 'refused' && asks > 2); };
+    const lines = [], warn = console.warn; console.warn = (m) => lines.push(String(m));
+    let before = null, after = null, answer = null;
+    try {
+      const p = H.remove(id); await tick();
+      before = state();
+      if (landing === 'back') { H._state.hosts.push(rec); }
+      if (rel) rel(true);
+      answer = await Promise.race([p, new Promise((r) => setTimeout(() => r('(still waiting)'), 2000))]);
+      after = state();
+    } finally { console.warn = warn; }
+    return { before, after, answer, asks, said: lines.some((l) => l.includes(`${id} is removed here, but hosts.json does not carry it yet`)), back: lines.some((l) => l.includes(`${id} is back in the machines list`)) };
+  };
+  const H0 = require(path.join(ROOT, 'src/hosts.js'));
+  const rs = await rmScene(H0, 'hosts-rm-stall', 'stall'), rr = await rmScene(H0, 'hosts-rm-refused', 'refused'), rb = await rmScene(H0, 'hosts-rm-back', 'back');
+  const rsx = await rmScene(MJ.load('src/hosts.js', anchored(HSRC1, AFTER, '    return Promise.resolve(true).then((landed) => {   /* MUTANT: the release order — torn down before the record lands */', 'remove-before-landed'), 'remove-before-landed'), 'hosts-rm-stall-mut', 'stall');
+  ok(!!rs.before && !rs.before.listed && rs.before.key && rs.before.cache && rs.before.heard === 0 && !!rs.after && !rs.after.key && !rs.after.cache && rs.after.heard === 1 && rs.answer === true,
+    'a machine removed while hosts.json\'s save is still QUEUED: gone from the list at once, its key file, its transcript cache and the removal listeners wait — all torn down once the record landed', rs);
+  ok(!!rr.before && rr.before.key && rr.before.heard === 0 && rr.said && rr.asks === 3 && !!rr.after && !rr.after.key && !rr.after.cache && rr.after.heard === 1 && rr.answer === true,
+    'its read r1 (S1, S3): a landing REFUSED is asked again (never given up — said once) and the teardown runs when it lands at the third ask', rr);
+  ok(!!rb.after && rb.after.key && rb.after.cache && rb.after.heard === 0 && rb.answer === false && rb.back, 'its read r1 (S3): a record that comes BACK before its removal landed keeps its key file, its cache and its sign-ins (said)', rb);
+  ok(!!rsx.before && !rsx.before.key && !rsx.before.cache && rsx.before.heard === 1, 'CONTROL (the release order, in a copy): the key file unlinked and the listeners told before the record landed — a restart brings the machine back keyless — RED', rsx);
 }
 
 console.log('§2 machine-mounts.json (src/machine-mounts.js) — every mount of a paired machine, each push record\'s token id');
@@ -824,6 +933,36 @@ console.log('§5 job-notifications.json (src/jobs.js) — every job notice still
     const h3 = await hangScene(J0, 'notifs-hang-reask');
     const h3x = await hangScene(MJ.load('src/jobs.js', JSRC.replace(REASK, "    if (this._notifsP) return;\n    if (!this._notifsItem) { const v = this._forYou(null, M.forYouCopy(null, 'notifs-unread', { error: this._notifsUnread.code })); if (v && v.id) this._notifsItem = v.id; }   /* MUTANT: below the slot */\n"), 'reask-below-slot'), 'notifs-hang-reask-mut');
     ok(h3.held && h3.slot && h3.filed === 1 && h3x.slot && h3x.filed === 0, 'a refused For-you filing is asked again while the read HANGS (the slot taken) — filed once the store has room; CONTROL (the ask below the slot check, in a copy): never asked again while the read hangs — RED', { h3, h3x });
+    // 主开发 04:33Z (1): the ARCHIVE's hold begins INSIDE the boot's judge — jobs.json read whole, the archive unreadable, loaded lazily by
+    // the first notice of an archived job: that FIRST conversation's list waits too (peek empty), never out with a cleared job's old words
+    const PRE = "    if (boot && !this.archive && !this.readOnly && list.some((n) => n && n.jobId && !this.jobs.has(n.jobId))) this._archiveAtBoot();\n";
+    ok(JSRC.split(PRE).length === 2, 'control setup: the boot judge\'s archive load before the held check is found once');
+    const archBoot = async (Mod, name) => {
+      const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
+      fs.writeFileSync(path.join(d, 'jobs.json'), '[]');   // the records read whole — the cleared job is ARCHIVED
+      const AF = path.join(d, 'jobs-archive.json'), abody = JSON.stringify([{ id: 'jb-0a000001', kind: 'task', name: 'deploy prod', state: 'done', clearedAt: 5, owner: {}, access: { view: 'session', control: 'session' }, runs: [] }]); plant(AF, abody);
+      fs.writeFileSync(path.join(d, 'job-notifications.json'), JSON.stringify({ 'conv-a1': [{ ts: 1, jobId: 'jb-0a000001', text: 'done exit=0 ok (1m)' }] }));
+      const J = new Mod.JobManager({ dataDir: d, broadcast() { }, notifyUser() { return { ok: true }; }, resolveNotice() { }, log: () => { }, logsSweep: { bootDelayMs: 3600e3 }, viewerOf: () => null });
+      J.init();
+      const out = { archHeld: !!(J._unread && J._unread.archive), peek: J.peekNotifs('conv-a1').map((n) => n.text).join(), waiting: (J.pendingNotifs.get('conv-a1') || []).length };
+      J._unreadStopped = true; J.shutdown(); unplant(AF, abody); return out;
+    };
+    const ab = await archBoot(J0, 'notifs-arch-boot'), abx = await archBoot(MJ.load('src/jobs.js', anchored(JSRC, PRE, '', 'arch-preload-cut'), 'arch-preload-cut'), 'notifs-arch-boot-mut');
+    ok(ab.archHeld && ab.peek === '' && ab.waiting === 1, 'the archive unreadable at the boot (jobs.json whole): the FIRST conversation\'s notice of an archived job WAITS for the records (peek empty, kept)', ab);
+    ok(abx.peek === 'done exit=0 ok (1m)', 'CONTROL (the archive load before the held check cut, in a copy): the judge never knows the archive is held — the first list\'s notice goes out with the cleared job\'s old words — RED', abx);
+    // 主开发 04:33Z (2c): the LADDER's retry judge over a subscriber's parked copy it cannot judge (the records held: «unknown») — the ladder
+    // drops its copy on this answer and writes its file at once: the stash is ON DISK at once too, never only in memory until a tick
+    const SAVE_R = "      this._saveNotifs();\n    }\n    return false;\n";
+    ok(JSRC.split(SAVE_R).length === 2, 'control setup: the retry judge\'s save after its stash is found once');
+    const retryScene = async (Mod, name) => {
+      const x = await recHeld(Mod, name, { notices: {} });
+      const owed = x.J.retryOwed('conv-r', { id: 'rt-0001', producer: 'jobs', firstAt: 1, meta: { subscriber: true, sub: true, jobId: 'jb-0r000001', jobName: 'nightly report', ev: { what: 'done exit=0 (1m)', at: 1 } } });
+      const disk = x.onDisk(), out = { held: !!x.J._unread.store, owed, memory: (x.J.pendingNotifs.get('conv-r') || []).length, disk: ((disk && disk['conv-r']) || []).map((n) => n.jobId).join() };
+      x.J._unreadStopped = true; x.J.shutdown(); unplant(x.JF, x.jbody); return out;
+    };
+    const rt = await retryScene(J0, 'notifs-retry-save'), rtx = await retryScene(MJ.load('src/jobs.js', anchored(JSRC, SAVE_R, "    }\n    return false;\n", 'retry-stash-nosave'), 'retry-stash-nosave'), 'notifs-retry-save-mut');
+    ok(rt.held && rt.owed === false && rt.memory === 1 && rt.disk === 'jb-0r000001', 'the ladder\'s judge answers «not owed» for a copy the held records cannot judge — and the stash it makes instead is ON DISK at once (the ladder drops its own copy now)', rt);
+    ok(rtx.owed === false && rtx.memory === 1 && rtx.disk === '', 'CONTROL (the save cut, in a copy): the stash is only in memory while the ladder already dropped its copy — a crash loses the notice for good — RED', rtx);
   }
 }
 
