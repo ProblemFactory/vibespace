@@ -590,18 +590,21 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   // 主开发 03:35Z (round wm6qxcqcw, its MUST): the hold is TOLD ONCE in For you — the person's own surface says why every agent browser
   // waits (the journal alone told nobody); one item a hold, resolved at the read
   const HELD_NOTICE = 'VibeSpace cannot read {file}, the file of your browser profiles, right now — so the agent browsers wait. Nothing is written over it, and VibeSpace reads it again by itself.';
+  const HELD_TORN = 'VibeSpace cannot use {file}, the file of your browser profiles: its bytes are not a whole profile list (torn or damaged) — so the agent browsers wait. Nothing is written over it, and reading it again will not mend it: put back a copy from a backup.';   // its read r3 (S1): torn bytes ASK in words that say a read again will not mend them
   const HELD_ITEM_KEY = 'browser-registry-held';   // its read r2 (S1): ONE identity in the store — a re-file (a later run, new words) is the same item
   const HELD_DETAIL = 'If this stays: the file is {path} — check that VibeSpace can read it (its storage answers, its permissions), or put back a copy from a backup; VibeSpace reads it again by itself.';   // its read r1 (S2): the way out when a read again cannot fix it
-  let heldItemId = null, heldItemTorn = false;
+  let heldItemId = null, heldItemTorn = false, heldNoStoreSaid = false;
   // its read r2 (S4): TORN bytes never lift by themselves (a read again finds the same bytes) — the item asks the person (an action,
-  // high); a failed read (the storage, the permissions) may answer again by itself — a notice. A hold that turns torn re-files it raised.
+  // high); a failed read (the storage, the permissions) may answer again by itself — a notice. A hold that turns torn re-files it raised;
+  // its read r3 (N2): never lowered in the same hold (a failed read after torn bytes mends nothing — and each flip reopened a dismissed item)
   function fileHeldNotice() {
-    const torn = !!(heldReg && heldReg.state === 'corrupt');
+    const torn = heldItemTorn || !!(heldReg && heldReg.state === 'corrupt');
     if (heldItemId && torn === heldItemTorn) return;
-    const text = HELD_NOTICE.replace('{file}', STORE_FILE);   // its read r2 (S3): no raw code in the words (a torn file's is an English phrase)
-    if (!userTodos || typeof userTodos.add !== 'function') { log.warn?.(`[browser] ${text} (no For-you store is wired, so only this journal says so)`); return; }
+    const key = torn ? HELD_TORN : HELD_NOTICE;   // its read r2 (S3): no raw code in the words; r3 (S1): torn bytes have their own
+    const text = key.replace('{file}', STORE_FILE);
+    if (!userTodos || typeof userTodos.add !== 'function') { if (!heldNoStoreSaid) { heldNoStoreSaid = true; log.warn?.(`[browser] ${text} (no For-you store is wired, so only this journal says so)`); } return; }   // r3 (N4): once
     // its read r1 (M3) / r2 (S1): filed under ONE item key — a previous run's open item IS this item (the store matches the key, a re-file updates it)
-    try { const it = userTodos.add('browser', { origin: 'browser', kind: torn ? 'action' : 'notice', urgency: torn ? 'high' : 'normal', by: 'agent', text, detail: DET_TEXT(), sessionName: 'Agent browser', itemKey: HELD_ITEM_KEY, i18n: { text: { key: HELD_NOTICE, params: { file: STORE_FILE } }, detail: [{ key: HELD_DETAIL, params: { path: storeFile } }] } }); heldItemId = it && typeof it.id === 'string' ? it.id : null; heldItemTorn = torn; }
+    try { const it = userTodos.add('browser', { origin: 'browser', kind: torn ? 'action' : 'notice', urgency: torn ? 'high' : 'normal', by: 'agent', text, detail: DET_TEXT(), sessionName: 'Agent browser', itemKey: HELD_ITEM_KEY, i18n: { text: { key, params: { file: STORE_FILE } }, detail: [{ key: HELD_DETAIL, params: { path: storeFile } }] } }); heldItemId = it && typeof it.id === 'string' ? it.id : null; heldItemTorn = torn; }
     catch (e) { log.warn?.(`[browser] the held registry's For-you notice was not filed (${e && e.message})`); }
   }
   const DET_TEXT = () => HELD_DETAIL.replace('{path}', storeFile);

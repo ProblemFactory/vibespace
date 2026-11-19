@@ -311,6 +311,7 @@ console.log('§7 round wm6qxcqcw (主开发 03:35Z): the hold is TOLD once in Fo
   const dirOf = (name) => { const d = path.join(D, name), H = path.join(d, 'home'); fs.mkdirSync(H, { recursive: true }); return { d, H, F: path.join(d, 'browser-profiles.json') }; };
   // (MUST) ONE For-you item when the hold begins — origin browser, under «Agent browser», its words keyed (zh / ja) — resolved at the read
   const NOTICE_KEY = "VibeSpace cannot read {file}, the file of your browser profiles, right now — so the agent browsers wait. Nothing is written over it, and VibeSpace reads it again by itself.";
+  const TORN_KEY = "VibeSpace cannot use {file}, the file of your browser profiles: its bytes are not a whole profile list (torn or damaged) — so the agent browsers wait. Nothing is written over it, and reading it again will not mend it: put back a copy from a backup.";
   const DETAIL_KEY = "If this stays: the file is {path} — check that VibeSpace can read it (its storage answers, its permissions), or put back a copy from a backup; VibeSpace reads it again by itself.";
   const noticeScene = async (Mod, name) => {
     const { d, H, F } = dirOf(name); plant(F, BODY);
@@ -334,7 +335,7 @@ console.log('§7 round wm6qxcqcw (主开发 03:35Z): the hold is TOLD once in Fo
   ok(n1.held && n1.filed === 1 && n1.group === 'browser' && n1.origin === 'browser' && n1.head === 'Agent browser' && n1.itemKey === 'browser-registry-held' && n1.key === NOTICE_KEY && n1.file === 'browser-profiles.json' && n1.code === undefined && n1.kind === 'notice' && n1.urgency === 'normal' && n1.done === 'it-b1:done',
     'the hold is told ONCE in For you (origin browser, under «Agent browser», ONE item key, its words keyed with the file named and no raw code — r2 S3; a failed read is a notice) — and that item is resolved at the read', n1);
   ok(n1x.filed === 0 && n1x.done === '', 'CONTROL (no filing, no resolving, in a copy): the hold tells the person nothing — every agent browser stops unsaid — RED', n1x);
-  for (const [key, what] of [[NOTICE_KEY, 'notice'], [DETAIL_KEY, 'detail']]) for (const lang of ['zh', 'ja']) ok(fs.readFileSync(path.join(ROOT, `src/lib/i18n-${lang}.js`), 'utf8').includes(JSON.stringify(key) + ':'), `the ${what} has its ${lang} row`);
+  for (const [key, what] of [[NOTICE_KEY, 'notice'], [TORN_KEY, 'torn notice'], [DETAIL_KEY, 'detail']]) for (const lang of ['zh', 'ja']) ok(fs.readFileSync(path.join(ROOT, `src/lib/i18n-${lang}.js`), 'utf8').includes(JSON.stringify(key) + ':'), `the ${what} has its ${lang} row`);
   // its read r2 (N2): the way out (the detail) is a leg — its key, the path named, the English detail naming the file
   const DET_A = 'detail: DET_TEXT(), ', DET_B = ', detail: [{ key: HELD_DETAIL, params: { path: storeFile } }]';
   ok(KSRC.split(DET_A).length === 2 && KSRC.split(DET_B).length === 2, 'control setup: the notice\'s two detail fields are found once');
@@ -353,17 +354,19 @@ console.log('§7 round wm6qxcqcw (主开发 03:35Z): the hold is TOLD once in Fo
     const store = new UTM({ dataDir: d, expirySweepMs: 0 });
     const k = mk(Mod, d, H, { userTodos: store }); k.held(); await k.boot().catch(() => null);
     try { k.shutdown(); } catch { }
-    const it = heldItems(store)[0];
-    return { d, H, F, store, id: it && it.id };
+    // its read r3 (M2): by its words' key (the item-key cut leaves those), among ALL its items (a copy may have closed it already)
+    const id = store.idsWhere((i) => i.sessionKey === 'browser' && !!i.i18n && !!i.i18n.text && i.i18n.text.key === NOTICE_KEY)[0];
+    return { d, H, F, store, id };
   };
   const staleScene = async (Mod, name, { held }) => {
     const { d, H, F, store, id } = await prevRun(Mod, name);
     if (!held) unplant(F, BODY);
     const k = mk(Mod, d, H, { userTodos: store });
     const h = k.held(); let again = null;
-    if (held) { let lifts = 0; k.onReadAgain(() => { lifts++; }); await k.boot().catch(() => null); again = heldItems(store).map((i) => i.id).join(); await lift(k, F, BODY, () => lifts > 0); }
+    let whileHeld = null;
+    if (held) { let lifts = 0; k.onReadAgain(() => { lifts++; }); await k.boot().catch(() => null); again = heldItems(store).map((i) => i.id).join(); whileHeld = id && store.get(id) ? store.get(id).status : null; await lift(k, F, BODY, () => lifts > 0); }
     const old = id ? store.get(id) : null;
-    const out = { held: h, filedByRunOne: !!id, oldStatus: old && old.status, again, openAfter: heldItems(store).length };
+    const out = { held: h, filedByRunOne: !!id, runOneId: id || null, oldStatus: old && old.status, again, whileHeld, openAfter: heldItems(store).length };
     try { k.shutdown(); } catch { } try { store.stop(); } catch { }
     return out;
   };
@@ -372,8 +375,13 @@ console.log('§7 round wm6qxcqcw (主开发 03:35Z): the hold is TOLD once in Fo
   const st1 = await staleScene(KREAL, 'stale-read', { held: false });
   const st2 = await staleScene(KREAL, 'stale-held', { held: true });
   const st1x = await staleScene(MJ.load('src/server/browser-keeper.js', anchored(KSRC, KEYED, 'i18n:', 'item-key-cut'), 'item-key-cut'), 'stale-read-keycut', { held: false });
-  ok(st1.filedByRunOne && !st1.held && st1.oldStatus === 'done' && st1.openAfter === 0 && st2.filedByRunOne && st2.held && st2.again === st2.again.split(',')[0] && st2.oldStatus === 'done' && st2.openAfter === 0,
-    'a For-you item a previous run left open (the real store): closed by a start that reads the file; a start held again re-files the SAME item (one open, the same id) and closes it at the read', { st1, st2 });
+  ok(st1.filedByRunOne && !st1.held && st1.oldStatus === 'done' && st1.openAfter === 0 && st2.filedByRunOne && st2.held && !!st2.runOneId && st2.again === st2.runOneId && st2.whileHeld === 'open' && st2.oldStatus === 'done' && st2.openAfter === 0,
+    'a For-you item a previous run left open (the real store): closed by a start that reads the file; a start held again keeps the SAME item OPEN while held (one open, run one\'s id) and closes it at the read', { st1, st2 });
+  // its read r3 (N3): «never closed while held» — CONTROL: both close guards cut (the boot's and the close's own)
+  const G_BOOT = '    if (!heldReg) closeStaleHeldNotices();   // its read r1 (M3) / r2 (S2): a boot that READ', G_OWN = '    if (heldReg || !userTodos || typeof userTodos.setStatus';
+  ok(KSRC.split(G_BOOT).length === 2 && KSRC.split(G_OWN).length === 2, 'control setup: the two close guards are found once');
+  const st2x = await staleScene(MJ.load('src/server/browser-keeper.js', anchored(anchored(KSRC, G_BOOT, '    closeStaleHeldNotices();   // its read r1 (M3) / r2 (S2): a boot that READ', 'close-guard-boot-cut'), G_OWN, '    if (!userTodos || typeof userTodos.setStatus', 'close-guard-own-cut'), 'close-guards-cut'), 'stale-held-guards-cut', { held: true });
+  ok(st2x.held && st2x.whileHeld === 'done', 'CONTROL (both close guards cut, in a copy): a start held again closes the item while the store is still held — the person told the hold is over — RED', st2x);
   ok(st1x.filedByRunOne && st1x.oldStatus === 'open', 'CONTROL (the item key cut, in a copy): the start that reads the file cannot find the old item — it stays open over a registry that reads (the person told a hold that is over) — RED', st1x);
   // its read r2 (S2): a read again whose LOAD THROWS late (after the old in-load close) is held again — this hold's item stays OPEN
   const LATE = '    fileHost = reg.host || null;\n', OLDSPOT = "    else { reg = B.normalizeRegistry(null); if (a.state !== 'missing') holdRegistry(a); }\n";
@@ -397,32 +405,47 @@ console.log('§7 round wm6qxcqcw (主开发 03:35Z): the hold is TOLD once in Fo
   ok(ltx.filed && ltx.heldAfter && ltx.status === 'done' && ltx.open === 0, 'CONTROL (the close back inside the load, in a copy): the store is held again but the item was closed — the person is told the hold is over — RED', ltx);
   // its read r2 (S4): TORN bytes never lift by themselves — the item ASKS the person (an action, high); a failed read is a notice; a hold
   // that turns torn at a read again re-files the same item raised
-  const tornScene = async (src, name, { bootTorn }) => {
+  const toUnread = (F) => { if (asRoot) { fs.rmSync(F, { force: true }); fs.mkdirSync(F); } else fs.chmodSync(F, 0o000); };   // a failed read again (EACCES; a folder as root)
+  const wordsKey = (it) => (it && it.i18n && it.i18n.text && it.i18n.text.key) || null;
+  const tornScene = async (Mod, name, { bootTorn }) => {   // its read r3 (M1): a MODULE — the plain scenes load the real keeper (an unchanged copy is refused)
     const { d, H, F } = dirOf(name); if (bootTorn) fs.writeFileSync(F, TORN); else plant(F, BODY);
     const store = new UTM({ dataDir: d, expirySweepMs: 0 });
-    const k = mk(MJ.load('src/server/browser-keeper.js', src, name), d, H, { userTodos: store });
+    const k = mk(Mod, d, H, { userTodos: store });
     k.held(); await k.boot().catch(() => null);
     const first = heldItems(store)[0] || {};
-    const out = { held: k.held(), kind0: first.kind, urgency0: first.urgency };
+    const out = { held: k.held(), kind0: first.kind, urgency0: first.urgency, words0: wordsKey(first) };
     if (!bootTorn) {
       toTorn(F);
       const keep = setInterval(() => { }, 1000);
-      try { for (let i = 0; i < 300 && (heldItems(store)[0] || {}).kind !== 'action'; i++) await new Promise((r) => setTimeout(r, 10)); } finally { clearInterval(keep); }
-      await flush();
-      const now = heldItems(store);
-      Object.assign(out, { kind1: now[0] && now[0].kind, urgency1: now[0] && now[0].urgency, same: !!(now[0] && now[0].id === first.id), open1: now.length });
+      try {
+        for (let i = 0; i < 100 && (heldItems(store)[0] || {}).kind !== 'action'; i++) await new Promise((r) => setTimeout(r, 10));   // reads again 15–30 ms apart
+        await flush();
+        const now = heldItems(store);
+        Object.assign(out, { kind1: now[0] && now[0].kind, urgency1: now[0] && now[0].urgency, words1: wordsKey(now[0]), same: !!(now[0] && now[0].id === first.id), open1: now.length });
+        // its read r3 (N2): a FAILED read after the torn bytes mends nothing — the ask stays raised (several reads again, 15–30 ms apart)
+        toUnread(F); await new Promise((r) => setTimeout(r, 250)); await flush();
+        const later = heldItems(store)[0] || {};
+        Object.assign(out, { held2: k.held(), kind2: later.kind, urgency2: later.urgency, words2: wordsKey(later) });
+      } finally { clearInterval(keep); }
     }
     try { k.shutdown(); } catch { } try { store.stop(); } catch { }
+    if (!bootTorn && asRoot) { try { fs.rmSync(F, { recursive: true, force: true }); } catch { } }
     return out;
   };
   const RAISE = "kind: torn ? 'action' : 'notice', urgency: torn ? 'high' : 'normal'";
   ok(KSRC.split(RAISE).length === 2, 'control setup: the torn raise is found once');
-  const tb = await tornScene(KSRC, 'torn-boot', { bootTorn: true });
-  const tt = await tornScene(KSRC, 'turns-torn', { bootTorn: false });
-  const tbx = await tornScene(anchored(KSRC, RAISE, "kind: 'notice', urgency: 'normal'", 'torn-raise-cut'), 'torn-boot-cut', { bootTorn: true });
-  ok(tb.held && tb.kind0 === 'action' && tb.urgency0 === 'high', 'a boot over TORN bytes: held, and the item asks the person (an action, high — it never lifts by itself)', tb);
-  ok(tt.held && tt.kind0 === 'notice' && tt.urgency0 === 'normal' && tt.kind1 === 'action' && tt.urgency1 === 'high' && tt.same && tt.open1 === 1, 'a failed read is a notice; the hold turning torn at a read again re-files the SAME item raised', tt);
+  const AGAIN = "heldReg.state = a.state; heldMissingAt = 0; fileHeldNotice(); return; }";
+  ok(KSRC.split(AGAIN).length === 2, 'control setup: the read again\'s re-file is found once');
+  const tb = await tornScene(KREAL, 'torn-boot', { bootTorn: true });
+  const tt = await tornScene(KREAL, 'turns-torn', { bootTorn: false });
+  const tbx = await tornScene(MJ.load('src/server/browser-keeper.js', anchored(KSRC, RAISE, "kind: 'notice', urgency: 'normal'", 'torn-raise-cut'), 'torn-raise-cut'), 'torn-boot-cut', { bootTorn: true });
+  const ttx = await tornScene(MJ.load('src/server/browser-keeper.js', anchored(KSRC, AGAIN, 'heldReg.state = a.state; heldMissingAt = 0; return; }', 'torn-again-cut'), 'torn-again-cut'), 'turns-torn-cut', { bootTorn: false });
+  ok(tb.held && tb.kind0 === 'action' && tb.urgency0 === 'high' && tb.words0 === TORN_KEY, 'a boot over TORN bytes: held, and the item asks the person (an action, high) in words that say a read again will not mend it', tb);
+  ok(tt.held && tt.kind0 === 'notice' && tt.urgency0 === 'normal' && tt.words0 === NOTICE_KEY && tt.kind1 === 'action' && tt.urgency1 === 'high' && tt.words1 === TORN_KEY && tt.same && tt.open1 === 1,
+    'a failed read is a notice; the hold turning torn at a read again re-files the SAME item raised, in the torn words', tt);
+  ok(tt.held2 && tt.kind2 === 'action' && tt.urgency2 === 'high' && tt.words2 === TORN_KEY, 'its read r3 (N2): a failed read after the torn bytes keeps the ask raised (nothing was mended)', tt);
   ok(tbx.held && tbx.kind0 === 'notice' && tbx.urgency0 === 'normal', 'CONTROL (no raise, in a copy): the torn file is a grey notice outside the badge — a state only the person can end, unasked — RED', tbx);
+  ok(ttx.held && ttx.kind0 === 'notice' && ttx.kind1 === 'notice', 'CONTROL (the read again\'s re-file cut, in a copy): a hold that turns torn stays a grey notice — RED', ttx);
   // (1) a RESUME's explicit pick while held, then a restart still held: the restored owe is NEWER than the file's pin — judged, never the
   //     file's older pin kept over the person's newer pick; (2) a restored FORK is judged after its owed parent
   const PA = 'bk-00004444', FK = 'bk-00005555', KX = 'bk-00006666';
@@ -467,7 +490,7 @@ console.log('§7 round wm6qxcqcw (主开发 03:35Z): the hold is TOLD once in Fo
   const CG = '    if (heldReg) return Promise.resolve(null);   // the B-f276 remainder: a held registry names no record', TG = "    if (heldReg) return;   // the B-f276 remainder: nothing is judged on a held registry\n";
   ok(KSRC.split(CG).length === 2 && KSRC.split(TG).length === 2, 'control setup: the census\'s and the tick\'s held guards are found once');
   const c7 = await censusScene(require(path.join(ROOT, 'src/server/browser-keeper.js')), 'census-held');
-  const c7x = await censusScene(MJ.load('src/server/browser-keeper.js', anchored(anchored(KSRC, CG, '    if (false) return Promise.resolve(null);', 'census-guard-cut'), TG, '', 'tick-guard-cut'), 'census-held-cut'), 'census-held-cut');
+  const c7x = await censusScene(MJ.load('src/server/browser-keeper.js', anchored(anchored(KSRC, CG, CG.replace('if (heldReg)', 'if (false)'), 'census-guard-cut'), TG, '', 'tick-guard-cut'), 'census-held-cut'), 'census-held-cut');
   ok(c7.held && c7.ended === '', 'while held the tick and the orphan census end NO daemon (the held registry names no record — every one would read «unkept»)', c7);
   ok(c7x.ended === '9904:444', 'CONTROL (both guards cut, in a copy): the census ENDS a live browser daemon on the held registry — RED', c7x);
   // (5b) ONE read in flight while the storage hangs; (5c) a «missing» answer right after an unreadable one is read once more
