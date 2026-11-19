@@ -66,7 +66,7 @@ const readLimit = () => { try { return Number(fs.readFileSync(LIMIT_FILE, 'utf8'
 let limitNow = readLimit;
 let gen = 0;   // a reset's generation: a tick of an older one never gives a slot back into the new one (its reader's N10)
 const fresh = () => ({ limited: false, code: null, itemId: null, pollers: 0, refusals: 0, listenerSaid: false, saidOther: false, failSaid: false,
-  lastRefusalAt: 0, armsInRow: 0, lastFiledAt: -Infinity, filesDue: false, gapSaid: false, filed: 0, lifted: 0, probe: null, running: 0, inflight: 0, maxInflight: 0, maxRunning: 0 });
+  lastRefusalAt: 0, armsInRow: 0, lastFiledAt: -Infinity, filesDue: false, adoptAtRead: false, gapSaid: false, filed: 0, lifted: 0, probe: null, running: 0, inflight: 0, maxInflight: 0, maxRunning: 0 });
 const state = fresh();
 const runWait = [], slotWait = [];
 
@@ -103,6 +103,7 @@ function fileNotice() {
   if (state.itemId) return;
   const todos = todosOf();
   if (!todos || typeof todos.add !== 'function') { state.filesDue = true; return; }   // configure() files it when the store arrives
+  if (state.adoptAtRead) { state.filesDue = true; return; }   // B-44f3: the look for an earlier notice waits for For you's read — it files after it
   if (now() - state.lastFiledAt < LIMITS.fileGapMs) {   // at most ONE item an hour: said in the journal, filed when the hour has passed
     state.filesDue = true;
     if (!state.gapSaid) { state.gapSaid = true; log('[watch] the limit of file watches is reached again — its For-you notice was filed less than an hour ago; it is filed again once the hour has passed'); }
@@ -117,7 +118,11 @@ function fileNotice() {
 }
 function liftNotice() {
   const todos = todosOf();
-  if (todos && state.itemId) { try { const it = todos.get && todos.get(state.itemId); if (!it || it.status === 'open') todos.setStatus(state.itemId, 'done', 'agent'); } catch { /* the owner cleared it */ } }
+  if (todos && state.itemId) {
+    const id = state.itemId, close = () => { try { const it = todos.get && todos.get(id); if (!it || it.status === 'open') todos.setStatus(id, 'done', 'agent'); } catch { /* the owner cleared it */ } };
+    // B-44f3 (the meeting, lane bl-windows): For you held unread ⇒ the notice is closed at its read (whenRead), never left open
+    if (typeof todos.isHeldUnread === 'function' && todos.isHeldUnread() && typeof todos.whenRead === 'function') todos.whenRead(close, "the file watches' notice"); else close();
+  }
   state.itemId = null; state.filesDue = false;
 }
 /** While limited: one watch tried every probeMs and closed at once — a hub that arms nothing else still learns the limit cleared. */
@@ -164,6 +169,17 @@ function adoptOpen() {
   if (state.itemId) return true;
   const t = todosOf();
   if (!t || typeof t.openItems !== 'function') return false;
+  // B-44f3 (its third read's MUST): For you HELD unread ⇒ its open list is not known (a held store answers [] — «nothing to adopt»
+  // would file a second notice beside the old one at the read, or leave the old one open for good): looked for at the read (whenRead)
+  // — the filing waits for that look (fileNotice below), then files only when nothing was adopted
+  if (typeof t.isHeldUnread === 'function' && t.isHeldUnread() && typeof t.whenRead === 'function') {
+    if (!state.adoptAtRead) {
+      const g = gen; state.adoptAtRead = true;
+      log('[watch] For you cannot be read now — the look for a watch-limit notice from before the restart, and any filing of the notice, wait until it reads');   // said once a wait (a store held for good still says why nothing is filed)
+      t.whenRead(() => { if (g !== gen) return; state.adoptAtRead = false; if (adoptOpen() && state.limited && !state.itemId) fileNotice(); }, "the file watches' notice (adopt)");
+    }
+    return true;
+  }
   let open = null;
   try { open = t.openItems().find((x) => x && x.sessionKey === NOTICE_KEY) || null; } catch { return false; }
   if (!open) return true;

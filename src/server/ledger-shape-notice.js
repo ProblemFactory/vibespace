@@ -532,6 +532,7 @@ function wire({ usageHistory, userTodos, log = (m) => console.log('[usage]', m),
    *  many notices it closed. */
   function reconcile() {
     if (!userTodos) return 0;
+    if (userTodos.isHeldUnread?.()) { userTodos.whenRead(() => { const n = reconcile(); if (n) log(`${n} growth-alarm notice(s) from before the restart closed (at For you's read)`); }, 'the growth-alarm notices reconcile'); return 0; }   // B-44f3: For you held unread — its list is empty because it is unread: the pass judges the FILE, at the read
     let n = 0;
     try {
       for (const it of (userTodos.snapshot?.() || {}).open || []) {

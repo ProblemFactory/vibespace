@@ -4299,7 +4299,7 @@ function sweepResetCreditAsks() {
   // item filed before a server restart was never dismissed by the new engine
   // (its button then answered no_live_session forever). The item itself carries
   // what the sweep needs (its action: accountKey + sessionId).
-  if (!_resetCreditAsksSeeded && todos && typeof todos.snapshot === 'function') {
+  if (!_resetCreditAsksSeeded && todos && typeof todos.snapshot === 'function' && !(typeof todos.isHeldUnread === 'function' && todos.isHeldUnread())) {   // B-44f3: never seeded once from a held (unread) list
     _resetCreditAsksSeeded = true;
     try {
       for (const it of todos.snapshot().open || []) {
@@ -6610,7 +6610,13 @@ function memberServeLapsed(id, { verified = false } = {}) {
   const name = accounts.get(id)?.name || id;
   console.log(`[pool] serve: ${name} (${id}) answered again — a reading of its own window at ${new Date(at).toISOString()}, after the last failure ${new Date(s.lastFail).toISOString()}; it rejoins the pool`);
   try { global.__vsEvent?.('pool-member-serve-restored', id); } catch { }
-  try { const todos = getUserTodos(); const it = s.todoId && todos && typeof todos.get === 'function' ? todos.get(s.todoId) : null; if (it && it.status === 'open' && typeof todos.setStatus === 'function') todos.setStatus(s.todoId, 'done', 'answered again'); } catch { }
+  try {
+    const todos = getUserTodos();
+    const close = () => { try { const it = s.todoId && todos && typeof todos.get === 'function' ? todos.get(s.todoId) : null; if (it && it.status === 'open' && typeof todos.setStatus === 'function') todos.setStatus(s.todoId, 'done', 'answered again'); } catch { } };
+    // B-44f3 (主开发 03:57Z, a should): the lapse is cleared NOW (the pool's decision never waits on For you); while For you is held
+    // its «no longer active» notice is closed at the read — the id kept in the waiter, never dropped with the state
+    if (s.todoId && todos && typeof todos.isHeldUnread === 'function' && todos.isHeldUnread() && typeof todos.whenRead === 'function') todos.whenRead(close, "a pool member's «no longer active» notice"); else close();
+  } catch { }
   return null;
 }
 /** One failure on member `memberId` (a turn's error record, or a probe's answer): the harness's closed
@@ -6774,6 +6780,10 @@ const _poolBlockedLooked = new Set(); // B-5e0d: the pools whose item this run h
  *  expiry — 1 to 2 h ahead: the store's boot sweep closes it before the first tick) or the agent closed (a recovery) is no
  *  live episode: the block files again, as the parent did */
 function poolBlockedEpisode(todos, poolId) {
+  // B-44f3 (主开发 03:57Z, a should): For you held unread — its list is empty because it is unread: the episode is not known
+  // meanwhile and NOTHING is spent (the ONE read-back, this run's item id): a deferral consumes nothing — the next evaluation
+  // after the read looks (a filing meanwhile is refused by name; the end of an episode is written at the first serving pass after it)
+  if (typeof todos.isHeldUnread === 'function' && todos.isHeldUnread()) return { known: false, it: null };
   if (!_poolBlockedTodo.has(poolId) && !_poolBlockedLooked.has(poolId)) {
     _poolBlockedLooked.add(poolId);
     let items = [];
@@ -6823,10 +6833,17 @@ function poolBlockedTodo(poolId, poolName, d, currentName, now) {
  *  B-5e0d: an item an EARLIER run left is found too (read back once a run), and the episode's end is written ON the item
  *  (resolvedFact.endedAt, this recovery's — a re-filed item's older end is replaced), so a restart after the recovery files the
  *  next block's item instead of reading it as resolved */
+const _poolEndAtRead = new Set();   // B-44f3: the pools whose recovery waits for For you's read (one waiter each)
 function poolBlockedTodoEnd(poolId, now = Date.now()) {
   let todos = null;
   try { todos = getUserTodos(); } catch { todos = null; }
   if (!todos || typeof todos.get !== 'function') return;
+  // B-44f3 (its read's should): a recovery while For you is held is DEFERRED, never dropped — its end (on the recovery's clock) is
+  // written at the read, before the next evaluation (a block again before any serving pass would read the old item as live)
+  if (typeof todos.isHeldUnread === 'function' && todos.isHeldUnread() && typeof todos.whenRead === 'function') {
+    if (!_poolEndAtRead.has(poolId)) { _poolEndAtRead.add(poolId); todos.whenRead(() => { _poolEndAtRead.delete(poolId); poolBlockedTodoEnd(poolId, now); }, "a blocked pool's recovery"); }
+    return;
+  }
   try {
     const { known, it } = poolBlockedEpisode(todos, poolId);
     if (!known) return;
@@ -7148,11 +7165,14 @@ function crossMoveNow(poolId, sid, memberId, now = Date.now()) {
   return applyCrossMove(poolId, sid, s2, curFor, d, now);
 }
 // a card a previous process filed can never be answered (its ask died with it): closed once, at the first pass
-let _crossReconciled = false;
+let _crossReconciled = false, _crossAtRead = false;   // B-44f3: ONE waiter while For you is held (every pool pass asks again)
 function reconcileCrossAsks() {
   if (_crossReconciled) return;
   let t = null; try { t = getUserTodos(); } catch { }
   if (!t || typeof t.openItems !== 'function') return;
+  // B-44f3 (the first read's MUST): For you held unread ⇒ the pass WAITS for its read (the held list is empty — a pass now would
+  // close nothing and never run again)
+  if (typeof t.isHeldUnread === 'function' && t.isHeldUnread()) { if (!_crossAtRead && typeof t.whenRead === 'function') { _crossAtRead = true; t.whenRead(() => { _crossAtRead = false; reconcileCrossAsks(); }, 'the cross-provider asks reconcile'); } return; }
   _crossReconciled = true;
   try { for (const it of t.openItems() || []) if (it && it.action && it.action.type === CROSS_ASK_TYPE && !_crossAsks.has(String(it.action.askId || ''))) t.setStatus(it.id, 'done', 'ask-over'); } catch { }
   // the item leaving 'open' by another door (dismissed in the tray) settles its ask as a Deny

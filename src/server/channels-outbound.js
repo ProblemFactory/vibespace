@@ -1031,7 +1031,16 @@ function create(engineCtx) {
    *  account (a composed message has no conversation to hang one on), its
    *  id on the account record, retracted by this producer when the last one
    *  leaves `awaiting-approval`. */
+  // B-44f3 (For you held unread): a pointer's sync WAITS for the read — while held its file cannot be written, and the retract below
+  // forgets the item's id before it closes it (the close refused ⇒ an orphan pointer, open for good); one deferred sync a key
+  const syncAtRead = new Set();
+  const waitRead = (key, fn) => {
+    if (!userTodos || typeof userTodos.isHeldUnread !== 'function' || !userTodos.isHeldUnread()) return false;
+    if (!syncAtRead.has(key)) { syncAtRead.add(key); userTodos.whenRead(() => { syncAtRead.delete(key); fn().catch((e) => log.warn(`[channels] ${key}: the pointer's sync at the read failed: ${(e && e.message) || e}`)); }, 'a channels pointer'); }
+    return true;
+  };
   async function composePointerSync(adapterId) {
+    if (waitRead(`~compose:${adapterId}`, () => composePointerSync(adapterId))) return;
     const rec = adapterRecords().adapters.find((r) => r.id === adapterId);
     if (!rec) return;
     const awaiting = proposalsFor().filter((p) => p.adapterId === adapterId && p.compose && p.state === 'awaiting-approval');
@@ -2327,6 +2336,7 @@ function create(engineCtx) {
    */
   async function pointerSync(key) {
     if (typeof key === 'string' && key.includes('/~compose/')) return composePointerSync(key.slice(0, key.indexOf('/~compose/')));
+    if (waitRead(key, () => pointerSync(key))) return;
     const en = store.index.peek(key);
     if (!en) return;
     const awaiting = proposalsFor(key).filter((p) => p.state === 'awaiting-approval');

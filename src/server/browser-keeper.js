@@ -610,6 +610,9 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const key = torn ? HELD_TORN : HELD_NOTICE;   // its read r2 (S3): no raw code in the words; r3 (S1): torn bytes have their own
     const text = key.replace('{file}', STORE_FILE);
     if (!userTodos || typeof userTodos.add !== 'function') { if (!heldNoStoreSaid) { heldNoStoreSaid = true; log.warn?.(`[browser] ${text} (no For-you store is wired, so only this journal says so)`); } return; }   // r3 (N4): once
+    // B-44f3 × the held registry (the meeting, lane bl-windows): For you itself held unread ⇒ the notice WAITS for its read (whenRead),
+    // never lost to a refused write
+    if (typeof userTodos.isHeldUnread === 'function' && userTodos.isHeldUnread()) { userTodos.whenRead(() => { if (heldReg) fileHeldNotice(); }, "the held profile registry's notice"); return; }   // still held at that read, else nothing to say
     // its read r1 (M3) / r2 (S1): filed under ONE item key — a previous run's open item IS this item (the store matches the key, a re-file updates it)
     try { const it = userTodos.add('browser', { origin: 'browser', kind: torn ? 'action' : 'notice', urgency: torn ? 'high' : 'normal', by: 'agent', text, detail: DET_TEXT(), sessionName: 'Agent browser', itemKey: HELD_ITEM_KEY, i18n: { text: { key, params: { file: STORE_FILE } }, detail: [{ key: HELD_DETAIL, params: { path: storeFile } }] } }); heldItemId = it && typeof it.id === 'string' ? it.id : null; heldItemTorn = torn; }
     catch (e) { log.warn?.(`[browser] the held registry's For-you notice was not filed (${e && e.message})`); }
@@ -623,11 +626,13 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   /** its read r1 (M3): a load that READ closes every held notice still open — a previous run's that stopped while held too */
   function closeStaleHeldNotices() {
     if (heldReg || !userTodos || typeof userTodos.setStatus !== 'function') return;
+    if (typeof userTodos.isHeldUnread === 'function' && userTodos.isHeldUnread()) { userTodos.whenRead(() => closeStaleHeldNotices(), "the held profile registry's stale notices"); return; }   // B-44f3: For you held ⇒ closed at its read
     for (const it of openHeldNotices()) { try { userTodos.setStatus(it.id, 'done', 'agent'); } catch (e) { log.warn?.(`[browser] a held-registry notice was not closed (${e && e.message})`); } }
   }
   function resolveHeldNotice() {
     const id = heldItemId; heldItemId = null; heldItemTorn = false;
     if (!id || !userTodos || typeof userTodos.setStatus !== 'function') return;
+    if (typeof userTodos.isHeldUnread === 'function' && userTodos.isHeldUnread()) { userTodos.whenRead(() => { try { const it = userTodos.get ? userTodos.get(id) : null; if (!it || it.status === 'open') userTodos.setStatus(id, 'done', 'agent'); } catch (e) { log.warn?.(`[browser] the held registry's For-you notice was not resolved at For you's read (${e && e.message})`); } }, "the held profile registry's notice"); return; }   // B-44f3: For you held ⇒ resolved at its read
     try { const it = typeof userTodos.get === 'function' ? userTodos.get(id) : null; if (!it || it.status === 'open') userTodos.setStatus(id, 'done', 'agent'); } catch (e) { log.warn?.(`[browser] the held registry's For-you notice was not resolved (${e && e.message})`); }
   }
   function holdRegistry(a) {
@@ -4794,6 +4799,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   function reclaimFolderNotices() {
     if (heldReg) return;   // the B-f276 remainder: no live record is known — every «folder not put back» notice would close (it runs at the read)
     if (!userTodos || typeof userTodos.openItems !== 'function') return;
+    if (userTodos.isHeldUnread?.()) { userTodos.whenRead(() => reclaimFolderNotices(), 'the folder-lost notices reclaim'); return; }   // B-44f3: For you held unread — the reclaim judges the FILE's items, at the read
     let open = [];
     try { open = userTodos.openItems(); } catch { return; }
     for (const it of open) {

@@ -325,6 +325,7 @@ function create({ hosts, userTodos = null, log = () => {}, now = () => Date.now(
   /** Boot: a card a previous process filed can never be answered (the acts it held died with it) — resolved `expired`. */
   function reconcile() {
     if (!userTodos) return 0;
+    if (userTodos.isHeldUnread?.()) { userTodos.whenRead(() => { const n = reconcile(); if (n) log(`${n} hub-act ask(s) from before the restart resolved expired (at For you's read)`); }, 'the hub-act asks reconcile'); return 0; }   // B-44f3: For you held unread — its list is empty because it is unread: the pass judges the FILE, at the read
     let n = 0;
     try {
       const snap = userTodos.snapshot?.() || {};

@@ -79,7 +79,7 @@ function create({ userTodos = null, dataDir, log = () => {}, now = () => Date.no
       return v;
     }
     if (rec && !rec.clearSince) { rec.clearSince = t; save(); try { bcast(); } catch { } } // the row's line goes now; the item waits CLEAR_MS
-    else if (rec && DH.clearDue(rec.clearSince, t)) {
+    else if (rec && DH.clearDue(rec.clearSince, t) && !(userTodos && userTodos.isHeldUnread?.())) {   // B-44f3: held ⇒ the record kept (its retract would be refused; resolved at the first clear pass after the read)
       retract(rec); delete ledger[key]; save();
       log(`[dial-health] ${rec.machine}: no second agent for ${Math.round(DH.CLEAR_MS / 60000)} min — the For-you item is resolved`);
     }

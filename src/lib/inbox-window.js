@@ -30,7 +30,7 @@ import { pressVerdict } from './press-arm.js'; // verify-r6 V1: an Allow counts 
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
 import { REACH_CHOICES, reachWord, reachTitle } from './automation-reach.js'; // lane key-instance-scope: an automation card's reach choices in the pane
-import { inboxModel, actionWords, mountProposalRows, proposalPressOf } from './user-todos-actions.js'; // THE store + the verbs (one implementation with the popup)
+import { inboxModel, actionWords, mountProposalRows, proposalPressOf, heldWords } from './user-todos-actions.js'; // THE store + the verbs (one implementation with the popup)
 import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, isNotice, noticeGroups, noticeReadAll, tabCounts, originOf, ORIGIN_LABELS } from './user-todos-layout.js'; // PURE: the popup's order, notices, counts; «Mark all read»'s ids
 import { reconcileKeyed, agoText, expiresText, statusWords, resolvedByText, endCodeOf, appCardHtml, askChipEls, linkifyInto, grantAskOf, proposalCardOf, proposalCardEls, optionWords, wordsHtml, runFactsHtml, armDeadlines, hubNow, hubClock, settingCardOf, settingCardEls, patchSettingVolatile } from './user-todos-row.js'; // THE keyed reconciler + the row words (r7: the run card's facts, its deadline's ticker)
 import { TABS, nextSelection, holdSelection, paneMode, scopeRows, rowPreview, itemView, readOnSight, NOTICE_READ_MS } from './inbox-window-layout.js'; // PURE: the window's rules (test-inbox-window-model)
@@ -694,6 +694,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     // the empty hint names WHY the list is empty — under a session scope "nothing needs you" would be a lie (verify round)
     const emptyTxt = !model.loaded ? t('Loading…')
       : main.length ? ''
+      : heldWords(todos) ? heldWords(todos)   // B-44f3: the list could not be read — said, never «nothing»
       : st.query ? t('No matches')
       : st.scopeKey ? (st.tab === 'notices' ? t('No notices for this session.') : t('No open items for this session.'))
       : st.tab === 'notices' ? t('No notices right now.')

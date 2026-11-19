@@ -151,6 +151,7 @@ function create({ userTodos = null, dataDir, log = () => {}, now = () => Date.no
   function matched({ hostKey, version } = {}) {
     const key = String(hostKey || '').slice(0, 160), rec = ledger[key];
     if (!rec) return false;
+    if (userTodos && userTodos.isHeldUnread?.()) return false;   // B-44f3: For you held unread — «gone» is unread there: keep the record (its retract would be refused — the item would stay open for good); the next report after the read resolves it
     retract(rec); delete ledger[key]; save();
     log(`[device-upgrade] ${rec.machine}: agent reports ${verOf(version) || '?'} — the stuck-upgrade item is resolved`);
     try { bcast(); } catch { }

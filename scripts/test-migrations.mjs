@@ -2778,7 +2778,8 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     };
     const toastOf = (list, id) => list.filter(([k]) => k === 'migration-failed:' + id).map(([, t]) => String(t)).join('\n');
     const MS = fs.readFileSync(path.join(REPO_ROOT, 'src/server/migrations.js'), 'utf8').split('\n').filter((l) => l.includes("'migration-failed:'"));
-    ok(MS.length === 3 && MS.every((l) => /failedLine\((e|r\.error)\)/.test(l) && !/\$\{(e\.message|r\.error)\}/.test(l)), `every \`migration-failed:\` toast in src/server/migrations.js (${MS.length}) carries its error through the runner's failedLine — never the raw line`, MS.map((l) => l.trim().slice(0, 100)));
+    // B-44f3: the stepped migration's late failure is said through the SAME door as a sync one's (migrations.js sayFailures) — two toast lines, never a third
+    ok(MS.length === 2 && MS.every((l) => /failedLine\((e|r\.error)\)/.test(l) && !/\$\{(e\.message|r\.error)\}/.test(l)), `every \`migration-failed:\` toast in src/server/migrations.js (${MS.length}) carries its error through the runner's failedLine — never the raw line`, MS.map((l) => l.trim().slice(0, 100)));
     // (a) the boot's sync failure — the job-secrets one-shot whose own notice the store refused with a token in its words
     const JID = '2026-10-job-secrets-retired';
     const dA = path.join(tmp, 'toast-sync', 'data');

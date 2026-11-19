@@ -177,15 +177,22 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
     // apps-joint r1 (F6): a FAILED download keeps its file for Try again — for EXPIRE_MS, then it expires like an unanswered one
     for (const p of store.proposals.slice()) if (p.state === 'failed' && p.request && p.request.staged && t - (p.finishedAt || t) > EXPIRE_MS) {
       setState(p, 'withdrawn', { decidedBy: 'apps', result: { code: 'expired' } }, { tell: true });
-      if (userTodos && p.todoId) { try { if (userTodos.get(p.todoId)?.status === 'open') userTodos.setStatus(p.todoId, 'dismissed', 'apps'); } catch { /* gone */ } }
+      dismissCard(p.todoId);
     }
+  }
+  // an app card's ONE close (B-44f3, the first read's should: a one-shot settle while For you is held found nothing and never ran again —
+  // it waits for the read now)
+  function dismissCard(todoId) {
+    if (!userTodos || !todoId) return;
+    const go = () => { try { if (userTodos.get(todoId)?.status === 'open') userTodos.setStatus(todoId, 'dismissed', 'apps'); } catch { /* gone */ } };
+    if (typeof userTodos.isHeldUnread === 'function' && userTodos.isHeldUnread() && typeof userTodos.whenRead === 'function') userTodos.whenRead(go, "an app card's close"); else go();
   }
   function withdraw(id, { code = 'withdrawn', by = 'apps' } = {}) {
     const p = get(id);
     if (!p) throw named('not-found', `no proposal ${id}`);
     if (p.state !== 'proposed') throw named('proposal_state', `that proposal is ${p.state}`);
     setState(p, 'withdrawn', { decidedAt: now(), decidedBy: by, result: { code } }, { tell: true });
-    if (userTodos && p.todoId) { try { if (userTodos.get(p.todoId)?.status === 'open') userTodos.setStatus(p.todoId, 'dismissed', 'apps'); } catch { /* gone */ } }
+    dismissCard(p.todoId);
     return view(p);
   }
 
@@ -497,7 +504,7 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
     if (!p) throw named('not-found', `no proposal ${id}`);
     if (p.state !== 'proposed') throw named('proposal_state', `that proposal is ${p.state}`);
     setState(p, 'rejected', { decidedAt: now(), decidedBy: by }, { tell: true });
-    if (userTodos && p.todoId) { try { if (userTodos.get(p.todoId)?.status === 'open') userTodos.setStatus(p.todoId, 'dismissed', 'apps'); } catch { /* gone */ } }
+    dismissCard(p.todoId);
     return view(p);
   }
   if (userTodos && typeof userTodos.onStatus === 'function') {

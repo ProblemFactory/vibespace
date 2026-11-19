@@ -482,6 +482,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
   /** Boot: a card a previous process filed can never be answered (the call it held died with it). */
   function reconcile() {
     if (!userTodos) return 0;
+    if (userTodos.isHeldUnread?.()) { userTodos.whenRead(() => { const n = reconcile(); if (n) log(`${n} first-use card(s) from before the restart resolved expired (at For you's read)`); }, 'the first-use cards reconcile'); return 0; }   // B-44f3: For you held unread — its list is empty because it is unread: the pass judges the FILE, at the read
     let n = 0;
     try { for (const it of (userTodos.snapshot?.() || {}).open || []) if (it && it.action && it.action.type === ACTION_TYPE && !asks.has(it.action.askId)) { try { userTodos.setStatus(it.id, 'done', 'ask-expired'); n++; } catch { } } } catch (e) { log(`automation ask reconcile failed: ${e.message}`); }
     return n;

@@ -239,7 +239,7 @@ export const ROWS = [
   ['src/usage-origin-backfill.js', 'own-tree', 10, null, CLI],
   ['src/usage-routes.js', 'own-tree', 23, null, CLI], // lane oat-identity-fix-r3 −1: the `.window-` sidecar read moved to its ONE reader (src/window-stamp.js)
   ['src/usage-walker.js', 'user-path', 12, 'DOOR\\.blocked\\(', 'the usage walk: a blocked project folder skipped this pass, said once'],
-  ['src/user-todos.js', 'own-tree', 1, null, DATA],
+  ['src/user-todos.js', 'own-tree', 2, null, DATA], // B-44f3: +1 — a held store's read again (fs.promises.readFile of its own data/user-todos.json, off the loop)
   ['src/vnc.js', 'own-tree', 3, null, PROC],
   ['src/webdav.js', 'user-path', 11, 'DOOR\\.blocked\\(', 'a WebDAV share root: 503 by name; lane hub-fuse-sync-guard: the /dav verbs are async fs (exists() = one fsp.access) — −5 sites'],
   ['src/weekly-lanes-unfold.js', 'own-tree', 8, null, CLI], // lane oat-identity-fix-r3 −1: the `.window-` sidecar read moved to its ONE reader (src/window-stamp.js)

@@ -31,6 +31,7 @@ const { normalizeOrigin, AGENT_WORDS_ORIGINS, AGENT_FIELDS_ORIGINS, FIELDS_FILER
 const { legacyCopyFact } = require('./job-model.js'); // PURE: THE ONE LEGACY RUNG reads a ≤ .360 job copy's fact off its own template (lane job-notify-user r4)
 const belt = require('./agent-output-belt.js'); // lane agent-output-sinks: the sink belt — a For-you item's text / detail never carries a credential in the clear
 const { clip, sameWords } = require('./inbox-reply-text.js'); // PURE: THE cut mark (r6) — every cap of an item's words cuts through it (r7: the facts' strings too — one surrogate-safe cut)
+const SR = require('./store-read.js'); // PURE: THE STORE READ (B-f276) — what one read answers: data / missing / unreadable / corrupt (B-44f3)
 const { applyClear } = require('./record-clear.js'); // PURE: "Clear content…" (2026-09-28) — what a clear replaces; this store holds the door (clearItems)
 
 /** lane lark-refresh-stall: the params a WORDS param may carry (each a string or a finite number) — more is refused by name. */
@@ -279,6 +280,14 @@ const FACTS_DROPPED = ['too-large', 'not-an-object'];
 const i18nKey = (s) => s;   // marks an English sentence as a dictionary key (the i18n check reads it)
 /** r9: the set-aside notice's group key (a For-you notice of the store itself — one per boot that set a file aside). */
 const SET_ASIDE_KEY = 'for-you-store';
+// B-44f3 — THE STORE HELD UNREAD (the store-read law, ruled (A) by 主开发 2026-11-18): the shape a read must answer to load, the
+// refusal's code and words (an asker hears them: the route, the CLI, a producer's log), the page's line (drawn from the snapshot's
+// `held` — never an item: the store cannot be written while it is held)
+const STORE_SHAPE = (v) => !!(v && typeof v === 'object' && Array.isArray(v.items));
+const TODOS_UNREAD = 'todos-unread';
+const UNREAD_REFUSAL = 'For you cannot read its saved list right now ({file}: {code}) — {act} is refused and nothing was recorded; it is read again soon';
+const UNREAD_REFUSAL_DAMAGED = 'For you\'s saved list is damaged and could not be set aside ({file}) — {act} is refused and nothing was recorded; the file is kept exactly as it is until it is fixed';
+const damagedOf = (u) => !!(u && u.code === 'not set aside');
 
 // THE DOOR (lane foryou-plugin-notices, owner 2026-10-19 on Dropline's 「建议加入词库」 rows: 「这个部分点击应该要自动跳转」): where a
 // click on the item's BODY takes the owner — declared by the producer at filing, validated like `action`:
@@ -446,7 +455,7 @@ class UserTodoManager {
    *  engine runs on, so a filing's createdAt and the engine's `now` agree at any
    *  wall-clock time (test-decision-inbox's ONE CLOCK census: no other wall-clock read in the class);
    *  the default reads the global per call, so a suite that swaps it still steers the store */
-  constructor({ dataDir, onChange, expirySweepMs = EXPIRY_SWEEP_MS, onWriteError = null, maxItems = MAX_ITEMS, now = () => Date.now() }) {
+  constructor({ dataDir, onChange, expirySweepMs = EXPIRY_SWEEP_MS, onWriteError = null, maxItems = MAX_ITEMS, unreadRetry = null, now = () => Date.now() }) {
     this._now = now;
     this._maxItems = Number.isInteger(maxItems) && maxItems > 0 ? maxItems : MAX_ITEMS; // the total cap (a suite's seam)
     this._file = path.join(dataDir, 'user-todos.json');
@@ -463,32 +472,25 @@ class UserTodoManager {
     // (`user-todos.json.corrupt-<ts>`, its bytes kept, never unlinked), with ONE named log line and ONE For-you notice naming
     // where the bytes are (filed below, once the store is up); the channels engine's boot reconcile files a held decision's
     // card again from its request row.
+    // B-44f3 (THE STORE-READ LAW, src/store-read.js): only a MISSING file is an empty store and only bytes that were READ and do
+    // not parse are set aside (r9, above). A read that FAILED (EIO, EACCES, ETIMEDOUT …), or torn bytes that could be neither
+    // renamed nor copied (the live file is their only copy), HOLD the store: kept exactly as it is, nothing writes it, every write
+    // is refused BY NAME (code todos-unread — the asker hears it), the page draws the hold from the snapshot, the boot's
+    // reconcilers / migrations / clears wait for the read (whenRead), and it is read again soon. At the read the FILE is the truth:
+    // memory held nothing meanwhile (every write was refused), so nothing is merged.
+    this._unread = null; this._unreadT = null; this._unreadTries = 0; this._unreadP = null; this._unreadStopped = false;
+    this._unreadGoneOnce = false;   // a held file found GONE at one read again (a mark, never a clock): the next read that finds it gone lifts
+    this._unreadRetryCfg = unreadRetry && typeof unreadRetry === 'object' ? unreadRetry : {};
+    this._readWaiters = [];
     let setAside = null;
-    try {
-      const text = timedSync('user-todos.read', () => fs.readFileSync(this._file, 'utf-8'));
-      let parsed = null, why = null;
-      try { parsed = JSON.parse(text); } catch (e) { why = `corrupt JSON (${String((e && e.message) || e).slice(0, 80)})`; }
-      if (!why && !(parsed && Array.isArray(parsed.items))) why = 'not the expected shape';
-      if (why) setAside = this._setAside(why);
-      else { this._state = parsed; this._lastWritten = JSON.stringify(this._state, null, 2); }
-    } catch (e) { if (!(e && e.code === 'ENOENT')) setAside = this._setAside(`unreadable (${(e && e.code) || (e && e.message)})`); }
-    // THE ONE LEGACY RUNG (lane job-notify-user r3 → r4: every copy, AFTER the load): a job's copy filed before 2.369.361
-    // carries no `jobFact` — the only place the store reads a sentence, once, at load. An engine ≤ .360 filed each of its
-    // five copies as the template's sentence whole, so every OPEN one takes the fact its own template implies (job-model
-    // legacyCopyFact: end:<state>:<cause> parsed out, parked, missed, ask, else the fire's) — the resolver keys on the fact
-    // alone (the panel answered after the upgrade still closes the ask) and the next copy of the same job re-files into it
-    // (r3 covered asks only: an open .360 end / park / missed / fire copy sat beside its first fact-keyed twin). An item with
-    // no stored origin but a job id is a pre-B-328d job copy (only Background Work files a jobId) — r3 skipped it.
-    for (const it of this._state.items) {
-      if (it && it.jobId && (it.origin === 'jobs' || it.origin == null) && it.jobFact == null && it.status === 'open' && !it.clearedAt) {
-        const f = legacyCopyFact(it.text, it.jobId);
-        if (f) it.jobFact = f;
-      }
-      // …and THE ASK'S MARK (lane artifacts-by-intent r7): an item the ask route filed before `via` existed takes it here —
-      // the route's shape on every older tree (legacyAsk: the agent's own words, no action but one the action registry says
-      // the route files); a producer's record carries its own action or its words as structure (i18n), never the route's
-      if (legacyAsk(it, (type) => (ROW_OF[type] || {}).producer)) it.via = ASK_VIA;
-    }
+    const a0 = SR.storeAnswer(this._readNow(), { valid: STORE_SHAPE });
+    if (a0.state === 'data') { this._state = a0.value; this._lastWritten = JSON.stringify(this._state, null, 2); }
+    else if (a0.state === 'corrupt') {
+      const s = this._setAside(a0.error ? `corrupt JSON (${String((a0.error && a0.error.message) || a0.error).slice(0, 80)})` : 'not the expected shape');   // the release's words (the notice's detail)
+      const a = SR.afterSetAside(a0, s.to);
+      if (a.state === 'missing') setAside = s; else this._holdUnread(a);
+    } else if (a0.state === 'unreadable') this._holdUnread(a0);
+    if (!this._unread) this._afterLoad();
     // EXPIRY (2.369.152, "SPEND NOTICES LIVED FOREVER AS ACTIONS"): a notice
     // about a WINDOW (this hour's / today's unattended-turn budget, a 6 h
     // refusal) carries the window's end as `expiresAt` and dies with it. The
@@ -506,13 +508,13 @@ class UserTodoManager {
   }
 
   /** r9: the unreadable file RENAMED beside itself (a copy when the rename cannot be done) → {why, to | null}. */
-  _setAside(why) {
+  _setAside(why, { quiet = false } = {}) {   // B-44f3: `quiet` — a damaged hold's retry says its failure once (the hold said it)
     const dir = path.dirname(this._file);
     const to = `user-todos.json.corrupt-${new Date(this._now()).toISOString().replace(/[:.]/g, '-')}`;
     try { fs.renameSync(this._file, path.join(dir, to)); }
     catch (e) {
       try { fs.copyFileSync(this._file, path.join(dir, to)); }
-      catch (e2) { console.warn(`[user-todos] user-todos.json is ${why} and could NOT be set aside (${(e2 && e2.code) || (e2 && e2.message)}) — the next save replaces it`); return { why, to: null }; }
+      catch (e2) { if (!quiet) console.warn(`[user-todos] user-todos.json is ${why} and could NOT be set aside (${(e2 && e2.code) || (e2 && e2.message)}) — HELD: the live file is its only copy, nothing writes it`); return { why, to: null }; }
     }
     console.warn(`[user-todos] user-todos.json was ${why} — set aside as ${to} (its bytes kept, never overwritten); For you starts empty`);
     return { why, to };
@@ -533,13 +535,117 @@ class UserTodoManager {
     } catch (e) { console.warn(`[user-todos] the set-aside notice could not be filed: ${(e && e.message) || e}`); }
   }
 
+  /** B-44f3: ONE read of the live file NOW (the boot's) → {text} | {error} (store-read's input) */
+  _readNow() { try { return { text: timedSync('user-todos.read', () => fs.readFileSync(this._file, 'utf-8')) }; } catch (error) { return { error }; } }
+  /** what follows a load — the boot's and a held store's read that answered: the legacy rungs over the loaded items */
+  _afterLoad() {
+    // THE ONE LEGACY RUNG (lane job-notify-user r3 → r4: every copy, AFTER the load): a job's copy filed before 2.369.361
+    // carries no `jobFact` — the only place the store reads a sentence, once, at load. An engine ≤ .360 filed each of its
+    // five copies as the template's sentence whole, so every OPEN one takes the fact its own template implies (job-model
+    // legacyCopyFact: end:<state>:<cause> parsed out, parked, missed, ask, else the fire's) — the resolver keys on the fact
+    // alone (the panel answered after the upgrade still closes the ask) and the next copy of the same job re-files into it
+    // (r3 covered asks only: an open .360 end / park / missed / fire copy sat beside its first fact-keyed twin). An item with
+    // no stored origin but a job id is a pre-B-328d job copy (only Background Work files a jobId) — r3 skipped it.
+    for (const it of this._state.items) {
+      if (it && it.jobId && (it.origin === 'jobs' || it.origin == null) && it.jobFact == null && it.status === 'open' && !it.clearedAt) {
+        const f = legacyCopyFact(it.text, it.jobId);
+        if (f) it.jobFact = f;
+      }
+      // …and THE ASK'S MARK (lane artifacts-by-intent r7): an item the ask route filed before `via` existed takes it here —
+      // the route's shape on every older tree (legacyAsk: the agent's own words, no action but one the action registry says
+      // the route files); a producer's record carries its own action or its words as structure (i18n), never the route's
+      if (legacyAsk(it, (type) => (ROW_OF[type] || {}).producer)) it.via = ASK_VIA;
+    }
+  }
+
+  // ── B-44f3: THE STORE HELD UNREAD ──
+  /** the store could not be read: HELD — said once in the log (the page draws it from the snapshot), read again soon */
+  _holdUnread(a) {
+    const was = this._unread;
+    this._unread = { file: path.basename(this._file), code: String(a.code || a.why || 'unreadable').slice(0, 60), why: String(a.why || 'unreadable').slice(0, 120), at: (was && was.at) || this._now() };
+    if (!was) console.warn(`[user-todos] ${this._unread.file} could not be read (${this._unread.code}: ${this._unread.why}) — HELD: kept exactly as it is, nothing writes it, every write is refused by name (${TODOS_UNREAD}) until it reads; read again soon`);
+    else if (was.code !== this._unread.code) console.warn(`[user-todos] ${this._unread.file} still cannot be read — now ${this._unread.code}: ${this._unread.why}`);
+    this._unreadRetrySoon();
+  }
+  /** → { file, code, why, at, damaged } while the store is held, else null — the snapshot's `held`, the routes' question */
+  unreadState() { return this._unread ? { ...this._unread, damaged: damagedOf(this._unread) } : null; }
+  /** → whether the store is held (no copy) */
+  isHeldUnread() { return !!this._unread; }
+  /** → the refusal's words while held (else null) — for a caller that answers instead of catching */
+  unreadRefusal(act) { return this._unread ? fillWords({ key: damagedOf(this._unread) ? UNREAD_REFUSAL_DAMAGED : UNREAD_REFUSAL, params: { act: String(act || 'this'), file: this._unread.file, code: this._unread.code } }) : null; }
+  /** an act that would record something, while the store is held: REFUSED BY NAME (code todos-unread) — thrown before anything moves */
+  _refuseUnread(act) {
+    if (!this._unread) return;
+    throw Object.assign(new Error(this.unreadRefusal(act)), { code: TODOS_UNREAD, held: this.unreadState() });
+  }
+  /** `fn` runs once the store has READ — now when it has, else right after the read that lifts the hold (a boot reconciler, a
+   *  migration's step, a clear: what judges «not in For you» must judge the file, never the held store's empty memory). A
+   *  throwing fn is contained (logged). → true when it ran now */
+  whenRead(fn, label = 'a deferred step') {
+    if (typeof fn !== 'function') return false;
+    if (!this._unread) { try { fn(); } catch (e) { console.warn(`[user-todos] ${String(label).slice(0, 80)} threw: ${(e && e.message) || e}`); } return true; }   // contained in BOTH roads (the first read's nit)
+    this._readWaiters.push({ fn, label: String(label).slice(0, 80) });
+    return false;
+  }
+  _unreadRetrySoon() {
+    if (this._unreadT || !this._unread || this._unreadStopped) return;
+    const n = ++this._unreadTries;
+    const t = setTimeout(() => { this._unreadT = null; this.readAgain().catch((e) => { console.warn(`[user-todos] the read again failed: ${(e && e.message) || e}`); this._unreadRetrySoon(); }); }, SR.retryDelay(n, this._unreadRetryCfg));
+    t.unref?.(); this._unreadT = t;
+  }
+  /** ONE read again of a held store, OFF the loop (fs.promises), one in flight → true when it answered (the hold LIFTED: the file
+   *  loaded as the boot loads it, every deferred step run, the read list broadcast — a step that writes broadcasts its own); false = still held (the next try is armed). A held
+   *  store's file that is now ABSENT is read once more (a hold proves the file was there: a detached data folder may come back) and lifts, empty, at the second read that finds it gone (machine-mounts' rule). */
+  readAgain() {
+    if (!this._unread) return Promise.resolve(true);
+    if (this._unreadP) return this._unreadP;
+    const job = this._unreadP = (async () => {
+      const r = await fs.promises.readFile(this._file, 'utf-8').then((text) => ({ text }), (error) => ({ error }));
+      if (this._unreadStopped || !this._unread) return !this._unread;
+      const a = SR.storeAnswer(r, { valid: STORE_SHAPE });
+      const wasDamaged = damagedOf(this._unread);
+      let state = null, aside = null;
+      if (a.state === 'data') state = a.value;
+      else if (a.state === 'missing') {
+        // a DAMAGED hold whose torn file is gone was FIXED (the person moved it away — the words asked for it): start empty. Any other
+        // hold proves the file was there: gone ONCE may be a detached data folder (a mount coming back) — read once more; gone AGAIN at
+        // the next read (the reference: machine-mounts' rule, the first read's should) — the next boot would start empty anyway: lifted
+        if (!wasDamaged && !this._unreadGoneOnce) { this._unreadGoneOnce = true;   /* a mark, never a clock (ONE CLOCK: test-decision-inbox ⑦) */ this._holdUnread({ code: 'ENOENT', why: 'the file is not there since it could not be read' }); return false; }
+        state = { items: [] };
+      } else if (a.state === 'corrupt') {
+        // torn bytes (again): set aside now if they can be (r9's road — the store writable, ONE notice), else STILL damaged (its code kept)
+        const s0 = this._setAside(a.error ? `corrupt JSON (${String((a.error && a.error.message) || a.error).slice(0, 80)})` : 'not the expected shape', { quiet: wasDamaged });
+        const b = SR.afterSetAside(a, s0.to);
+        if (b.state !== 'missing') { this._holdUnread(b); return false; }
+        state = { items: [] }; aside = s0;
+      } else { this._unreadGoneOnce = false; this._holdUnread(a); return false; }
+      const was = this._unread, tries = this._unreadTries;
+      this._unreadGoneOnce = false;
+      this._unread = null; this._state = state; this._lastWritten = a.state === 'data' ? JSON.stringify(this._state, null, 2) : null; this._dirty = false;
+      this._unreadTries = 0;
+      if (this._unreadT) { clearTimeout(this._unreadT); this._unreadT = null; }
+      try { this._afterLoad(); } catch (e) { console.warn(`[user-todos] the load's rungs failed after the read: ${(e && e.message) || e}`); }
+      console.log(`[user-todos] ${was.file} read again after ${tries} tr${tries === 1 ? 'y' : 'ies'}: ${a.state === 'data' ? `${this._state.items.length} item(s)` : a.state === 'missing' ? 'its torn file was moved away — For you starts empty' : `its torn bytes are set aside as ${aside && aside.to} — For you starts empty`} — the hold is lifted`);
+      if (aside) this._fileSetAside(aside);   // r9's ONE notice, now that the store can be written
+      try { this.expireDue(); } catch { }
+      const waiters = this._readWaiters; this._readWaiters = [];
+      for (const w of waiters) { try { w.fn(); } catch (e) { console.warn(`[user-todos] ${w.label} (waited for the read) failed: ${(e && e.message) || e}`); } }
+      this._notify();
+      return true;
+    })();
+    const free = () => { if (this._unreadP === job) this._unreadP = null; };
+    job.then(free, free);
+    return job;
+  }
+
   /** The manager's last act (suites, a migration's private manager): the
    *  expiry timer cleared AND a pending debounced write flushed NOW (r2: the
    *  500 ms write timer outlived stop() and fired into a data dir its owner had
    *  already removed — ENOENT from a timer nobody could catch). */
   stop() {
     if (this._expiryTimer) { clearInterval(this._expiryTimer); this._expiryTimer = null; }
-    this.flush();
+    this._unreadStopped = true; if (this._unreadT) { clearTimeout(this._unreadT); this._unreadT = null; }   // B-44f3: no read again after the stop
+    if (!this._unread) this.flush();   // held: nothing was ever made dirty (every write refused) — nothing to write, nothing over the file
   }
 
   /** THE ITEM'S END IS ONE EVENT (verify-r2 ask-b, lane-pairing): a producer whose item STANDS FOR a pending
@@ -568,6 +674,7 @@ class UserTodoManager {
    *  declaration, never inferred from age or text. ONE save + ONE broadcast
    *  per sweep however many items went. @returns the count resolved */
   expireDue(now = this._now()) {
+    if (this._unread) return 0;   // B-44f3: held unread — nothing resolves (the read runs it)
     let n = 0;
     const went = [];
     for (const it of this._state.items) {
@@ -587,6 +694,7 @@ class UserTodoManager {
    *  overwritten by this manager's next save. ONE save + ONE broadcast.
    *  @returns the number of items `fn` changed */
   reshapeItems(fn, now = this._now()) {
+    this._refuseUnread('reshaping its items');   // B-44f3
     let n = 0;
     for (const it of this._state.items) { if (fn(it, now)) n++; }
     if (n) { this._save(); this._notify(); }
@@ -599,6 +707,7 @@ class UserTodoManager {
    *  cuts, the {dropped} stub), the detail by DETAIL_MAX, the i18n by normalizeI18n (a shape it refuses ⇒ nothing changes).
    *  ONE save + ONE broadcast. → { ok: true, facts } (the facts as stored) | { ok: false, code } */
   redrawItem(pred, { detail, facts = null, i18n, text = null, action } = {}) {
+    this._refuseUnread('drawing a card again');   // B-44f3
     const it = this._state.items.find((x) => x.status === 'open' && pred(x));
     if (!it) return { ok: false, code: 'not_open' };
     let words, act;
@@ -621,6 +730,7 @@ class UserTodoManager {
   }
 
   _save() {
+    this._refuseUnread('a write');   // B-44f3 belt: every writer refuses before it moves anything — a save while held never arms
     // Prune: drop resolved items past the cap (open items never pruned) — the ones that ended unanswered first (EXPIRED_BY),
     // then the rest, oldest first in each
     if (this._state.items.length > this._maxItems) {
@@ -661,7 +771,7 @@ class UserTodoManager {
     const ws = this._writtenWaiters; this._writtenWaiters = null; if (ws) for (const r of ws) { try { r(true); } catch { } }
   }
 
-  flush() { if (this._writeTimer) { clearTimeout(this._writeTimer); this._writeTimer = null; } this._flush(); }
+  flush() { this._refuseUnread('writing the list'); if (this._writeTimer) { clearTimeout(this._writeTimer); this._writeTimer = null; } this._flush(); }   // B-44f3: held ⇒ refused by name (a migration's «flushed» never reads true over nothing)
   /** lane job-logs-sweep r3 §6: a promise resolved once what is in memory NOW has been written by the debounced write (a caller that
    *  records «I told the owner» does it after the item is on disk); resolved at once when nothing is pending */
   whenWritten() { if (!this._dirty) return Promise.resolve(true); return new Promise((resolve) => { (this._writtenWaiters || (this._writtenWaiters = [])).push(resolve); }); }
@@ -694,6 +804,8 @@ class UserTodoManager {
     // (the engine's `grouping()`), so a switched-off tray receives today's payload byte for byte
     let grouping = null;
     try { grouping = this._grouping ? this._grouping() : null; } catch { grouping = null; }
+    // B-44f3: a HELD store says so — the page draws its line from `held` (never an item: nothing can be filed while held)
+    if (this._unread) return { open, resolved: resolved.map(previewOf), ...(grouping ? { grouping } : {}), held: this.unreadState() };
     if (grouping) return { open, resolved: resolved.map(previewOf), grouping };
     return { open, resolved: resolved.map(previewOf) };
   }
@@ -708,6 +820,7 @@ class UserTodoManager {
   setGrouping(fn) { this._grouping = typeof fn === 'function' ? fn : null; }
   openItems() { return this._state.items.filter((i) => i.status === 'open').map((i) => ({ ...i })); }
   setJudged(id, judged) {
+    this._refuseUnread('recording a judgment');   // B-44f3
     const it = this.get(id);
     if (!it || it.status !== 'open' || !judged || typeof judged !== 'object') return false;
     const group = judged.group === 'now' || judged.group === 'later' ? judged.group : null;
@@ -720,6 +833,7 @@ class UserTodoManager {
     return true;
   }
   setFacts(entries) {
+    this._refuseUnread('recording the facts');   // B-44f3
     let changed = false;
     for (const [id, f] of Array.isArray(entries) ? entries : []) {
       const it = this.get(id), facts = normalizeFacts(f);
@@ -762,6 +876,7 @@ class UserTodoManager {
     return minted.get(origin);
   }
   add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null, i18n = null, expiresAt = null, action = null, options = null, origin = null, card = null, facts = null, artifacts = null, cwd = null, hostId = null, openCap = null, plugin = null, open = null, about = null, jobName = null, jobFact = null, itemKey = null, filerKey = null, via = null } = {}) {
+    this._refuseUnread('filing an item');   // B-44f3: held ⇒ refused by name before any check (nothing is filed into an unread list)
     const _dataDir = path.dirname(this._file);   // agent-output-sinks: the belt finds the vault from here
     // agent-output-sinks: belt an AGENT's own words — never a system producer's notice (vault / spend / channels / machines / …).
     // Two shapes (src/inbox-origin.js): AGENT_WORDS_ORIGINS — the whole text and detail are the agent's (vibespace-ask);
@@ -986,6 +1101,7 @@ class UserTodoManager {
    *  needs-your-input entry). onlyAsk keeps completion/failure notices intact
    *  unless the whole job is being removed. */
   resolveByJob(jobId, { onlyAsk = true } = {}) {
+    this._refuseUnread('closing the items of a job');   // B-44f3
     if (!jobId) return 0;
     let n = 0;
     const went = [];
@@ -1007,6 +1123,7 @@ class UserTodoManager {
    *  item's `card` replaced, nothing else (its status stays the producer's setStatus). A CLEARED item keeps nothing
    *  (Clear content… dropped its card). → true when it changed. */
   setCard(id, card) {
+    this._refuseUnread('recording a card');   // B-44f3
     const it = this.get(id);
     if (!it || it.clearedAt) return false;
     const c = normalizeCard(card);
@@ -1017,6 +1134,7 @@ class UserTodoManager {
   }
 
   setStatus(id, status, by = 'user', { pressed = null } = {}) {
+    this._refuseUnread('changing an item');   // B-44f3
     if (!STATUSES.includes(status)) throw new Error(`status must be one of ${STATUSES.join('/')}`);
     const item = this._state.items.find((i) => i.id === id);
     if (!item) throw new Error('item not found');
@@ -1048,6 +1166,7 @@ class UserTodoManager {
    *  `decisions` (the page says «N decisions left for you»), never closed by a bulk verb.
    *  @returns {{changed: string[], unknown: string[], decisions: string[]}} */
   setStatusMany(ids, status, by = 'user') {
+    this._refuseUnread('changing items');   // B-44f3
     if (!STATUSES.includes(status)) throw new Error(`status must be one of ${STATUSES.join('/')}`);
     const changed = [], unknown = [], went = [], decisions = [];
     const now = this._now();
@@ -1076,6 +1195,7 @@ class UserTodoManager {
    *  one another door resolved meanwhile (expired, withdrawn) stays resolved. ONE save + ONE broadcast however many
    *  went; the status listeners hear a batch. @returns {{changed: string[], already: string[], refused: string[], unknown: string[]}} */
   readNotices(ids, read = true, by = 'user') {
+    this._refuseUnread('marking notices read');   // B-44f3
     const changed = [], already = [], refused = [], unknown = [], went = [];
     const now = this._now();
     for (const id of new Set(Array.isArray(ids) ? ids : [])) {
@@ -1097,6 +1217,7 @@ class UserTodoManager {
    *  exactly as it is. ONE save + ONE broadcast; the status listeners hear it as they hear setStatus.
    *  @returns the ids resolved */
   resolveAnswered(ids, by, fact = null) {
+    this._refuseUnread('closing answered items');   // B-44f3
     const went = [], restamped = [], now = this._now();
     for (const id of new Set(Array.isArray(ids) ? ids : [])) {
       const item = this._state.items.find((i) => i.id === id);
@@ -1120,6 +1241,7 @@ class UserTodoManager {
    *  `resolvedFact`; the decision itself (status, resolvedBy, decidedBy / decidedAt) is never touched, and the first end
    *  stands. ONE save + ONE broadcast. → whether it was written. */
   noteFact(id, patch) {
+    this._refuseUnread('recording a fact');   // B-44f3
     const it = this.get(id);
     const endedAt = Number(patch && patch.endedAt);
     if (!it || it.status === 'open' || !Number.isFinite(endedAt) || endedAt <= 0) return false;
@@ -1140,6 +1262,7 @@ class UserTodoManager {
    *  is refused for delivery reasons only, never bookkeeping) — either way the
    *  reply is kept on it as `{text ≤4000, at}`. ONE save + ONE broadcast. */
   resolveByReply(id, text, now = this._now(), { pictures = 0 } = {}) {   // B-51dd: `pictures` = how many the reply carried (a picture alone is a reply)
+    this._refuseUnread('a reply');   // B-44f3
     const item = this._state.items.find((i) => i.id === id);
     if (!item) throw new Error('item not found');
     const n = Math.max(0, Math.floor(Number(pictures) || 0));
@@ -1166,6 +1289,7 @@ class UserTodoManager {
   // the item as it is — the agent was told to resolve on an answer, and the
   // reply WAS the answer.
   resolveByAgent(sessionKey, ref) {
+    this._refuseUnread('closing an item');   // B-44f3
     ref = String(ref || '').trim();
     if (!ref) throw new Error('pass the item id or a unique text fragment');
     const done = this._state.items.find((i) => i.id === ref && i.sessionKey === sessionKey && i.status !== 'open');
@@ -1201,6 +1325,7 @@ class UserTodoManager {
    * {cleared: [ids], already: [ids], unknown: [ids], refused: [{id, code, why, status}]}.
    */
   clearItems(ids, { by = 'owner', at = this._now(), allow = null } = {}) {
+    this._refuseUnread('clearing content');   // B-44f3
     const out = { cleared: [], already: [], unknown: [], refused: [] };
     for (const id of new Set(Array.isArray(ids) ? ids : [ids])) {
       const item = this._state.items.find((i) => i.id === id);
@@ -1232,6 +1357,7 @@ class UserTodoManager {
 
   // Move webui:<id> placeholder items onto the real sessionKey once known.
   rekey(fromKey, toKey) {
+    this._refuseUnread('moving items to another conversation');   // B-44f3
     if (fromKey === toKey) return;
     let changed = false;
     for (const i of this._state.items) {

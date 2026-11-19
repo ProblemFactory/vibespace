@@ -123,10 +123,19 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
   // the live inbox store (r2/r3) by both; `buttons` = its action (src/foryou-actions.js `job-secrets-retired`: «Move into the vault» /
   // «Delete the file», src/server/job-secrets-door.js) — the «Two files…» notice carries none (nothing was moved, the owner chooses)
   const jsFill = (l) => l.key.replace(/\{(\w+)\}/g, (m, k) => (l.params && l.params[k] != null ? String(l.params[k]) : m));
+  // B-44f3 (THE STORE-READ LAW): the live For-you store a migration goes through — while it is HELD unread the migration is
+  // refused BY NAME before it reads anything (code todos-unread): a held store's list is empty because it is unread, so a reshape
+  // or a «no notice needed» judged on it would be recorded as applied over nothing. runLocalMigrations runs the refused rows again
+  // at the read (whenRead) — never «at the next restart».
+  const liveTodos = () => {
+    const t = typeof userTodos === 'function' ? userTodos() : userTodos;
+    if (t && typeof t.isHeldUnread === 'function' && t.isHeldUnread()) throw Object.assign(new Error(t.unreadRefusal('a data migration')), { code: 'todos-unread' });
+    return t;
+  };
   // ONE For-you item keyed by this migration — THROUGH the live inbox store (it holds data/user-todos.json in memory);
   // without one a PRIVATE store on the same file, flushed before the runner records the row (a throw fails the run)
   const jsTell = (head, lines, { buttons = false } = {}) => {
-    const live = typeof userTodos === 'function' ? userTodos() : userTodos;
+    const live = liveTodos();   // B-44f3: refused by name while For you is held unread
     let store = live, priv = false;
     if (!store || typeof store.add !== 'function') {
       const { UserTodoManager } = require('../user-todos.js');
@@ -588,7 +597,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       run() {
         const { noticeExpiry } = require('./spend-guard.js');
         const isSpend = (it) => !!it && it.sessionName === 'Spending' && it.sessionKey === 'accounts';
-        const live = typeof userTodos === 'function' ? userTodos() : userTodos;
+        const live = liveTodos();   // B-44f3: refused by name while For you is held unread
         let store = live, priv = false;
         if (!store || typeof store.reshapeItems !== 'function') {
           if (!fs.existsSync(path.join(dataDir, 'user-todos.json'))) return { matched: 0, rekinded: 0, expired: 0, stamped: 0, store: 'absent' };
@@ -878,7 +887,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         const ids = new Set(eng.openAccessPointers());
         if (!ids.size) return { open: 0, hidden: 0, back: 0 };
         const { isPointer, HIDDEN_BY } = require('../foryou-actions.js');
-        const live = typeof userTodos === 'function' ? userTodos() : userTodos;
+        const live = liveTodos();   // B-44f3: refused by name while For you is held unread
         let store = live, priv = false;
         if (!store || typeof store.reshapeItems !== 'function') {
           if (!fs.existsSync(path.join(dataDir, 'user-todos.json'))) return { open: ids.size, hidden: 0, back: 0, store: 'absent' };
@@ -940,8 +949,8 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         // «Two files…» never stays open over files the owner already removed (r4, review R3-F2). The LIVE store only (a fresh
         // install still makes no data/user-todos.json), flushed before the runner records the row — the row never runs again
         const settle = (rep) => {
+          const live = liveTodos();   // B-44f3: held ⇒ refused by name OUTSIDE the catch (the row runs again at the read — never «settled» over an unread list)
           try {
-            const live = typeof userTodos === 'function' ? userTodos() : userTodos;
             const ids = live?.idsWhere?.((i) => i.sessionKey === 'vault' && i.itemKey === JOB_SECRETS_ITEM && i.status === 'open') || [];
             for (const x of ids) live.setStatus(x, 'done', 'system');
             if (ids.length) live.flush?.();
@@ -956,7 +965,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
             // r3 (review F2): the runner runs inside hub.listen's callback, before any client connects — the failure is said
             // in For you too, and the error carries `told` so the runner files no second item for it
             let told = false;
-            try { told = jsTell({ key: JOB_SECRETS_WORDS.both, params: { from: 'data/' + JOB_SECRETS_FILE, to: 'data/' + JOB_SECRETS_RETIRED } }, []).notice === 'filed'; } catch (e) { console.warn(`[migrate] job-secrets-retired: the For-you notice was not filed — ${e && e.message}`); }
+            try { told = jsTell({ key: JOB_SECRETS_WORDS.both, params: { from: 'data/' + JOB_SECRETS_FILE, to: 'data/' + JOB_SECRETS_RETIRED } }, []).notice === 'filed'; } catch (e) { if (e && e.code === 'todos-unread') throw e; console.warn(`[migrate] job-secrets-retired: the For-you notice was not filed — ${e && e.message}`); }   // B-44f3: a refusal by name rides out — the row runs again at the read (never «retry on next restart»)
             throw Object.assign(new Error(`data/${JOB_SECRETS_RETIRED} already exists beside data/${JOB_SECRETS_FILE} — nothing moved (never over the owner's bytes); move one of them aside and restart`), { told });
           }
           fs.renameSync(from, to);
@@ -1018,7 +1027,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         try { st = fs.lstatSync(to); } catch { return { notice: 'none (no retired file)' }; }
         if (!st.isFile()) return { notice: 'none (not a file)' };
         if (fs.existsSync(path.join(dataDir, JOB_SECRETS_FILE))) return { notice: 'none (two files — 2026-10-job-secrets-retired says so)' };
-        const live = typeof userTodos === 'function' ? userTodos() : userTodos;
+        const live = liveTodos();   // B-44f3: refused by name while For you is held unread
         let store = live, priv = false;
         if (!store || typeof store.idsWhere !== 'function') { const { UserTodoManager } = require('../user-todos.js'); store = new UserTodoManager({ dataDir, expirySweepMs: 0 }); priv = true; }
         let keyed = [], open = [];
@@ -1411,7 +1420,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
     const fill = (l) => l.key.replace(/\{(\w+)\}/g, (m, k) => (l.params && l.params[k] != null ? String(l.params[k]) : m));
     const told = somethingNow;
     if (told) {
-      const live = typeof userTodos === 'function' ? userTodos() : userTodos;
+      const live = liveTodos();   // B-44f3: refused by name while For you is held unread
       let store = live, priv = false;
       if (!store || typeof store.add !== 'function') { const { UserTodoManager } = require('../user-todos.js'); store = new UserTodoManager({ dataDir, expirySweepMs: 0 }); priv = true; }
       let filed = false;
@@ -1594,17 +1603,31 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
     try { const uh0 = typeof usageHistory === 'function' ? usageHistory() : usageHistory; if (uh0 && typeof uh0.settleCursors === 'function') uh0.settleCursors(); } catch { }
     // `todos` (r3, review F2b): a failed row is ONE For-you item keyed by its id, resolved by the run that succeeds (the runner's)
     const results = runMigrations({ ledgerPath: path.join(dataDir, 'migrations.json'), migrations: Array.isArray(only) ? MIGRATIONS.filter((m) => only.includes(m.id)) : MIGRATIONS, todos: userTodos, onLate: (r) => {
-      // a stepped migration that ended after the boot's pass (lane ledger-dedup-law): its failure is said like a sync one's.
+      // a stepped migration that ended after the boot's pass (lane ledger-dedup-law): its failure is said like a sync one's —
+      // through the SAME door (B-44f3, the first read's should: a For-you refusal there waits for the read too, never «next restart»).
       // A toast reaches every client's screen: its error is the runner's failedLine — belted whole, then cut (r4, review N3)
-      if (r.status === 'failed') { try { serverNotice?.('migration-failed:' + r.id, `Data migration ${r.id} failed (${failedLine(r.error)}) — will retry on next restart.`, { level: 'warn' }); } catch { } }
+      if (r.status === 'failed') sayFailures([r]);
     } });
     for (const r of results) if (r.id === '2026-10-grants-unify' && r.status === 'already') Object.assign(r, grantsStoreBoot());   // verify F2: the ledger stamped, the store deleted
+    sayFailures(results);   // B-44f3: a row For you refused while held waits for its read; any other failure is said as before
+    return results;
+  }
+  /** B-44f3: the rows For you refused while it is held unread run again at its read (whenRead — an async step after the boot, for
+   *  those rows only: the ledger backfill touches no For-you item, so its synchronous load never runs here) — said as WAITING, never
+   *  as «failed»; every other failed row is said as before («will retry on next restart»). */
+  function sayFailures(results) {
+    // waiting only when the LIVE store can say when it reads (a private store a suite wires says nothing — said as failed, as before)
+    const ut = typeof userTodos === 'function' ? userTodos() : userTodos, canWait = !!(ut && typeof ut.whenRead === 'function');
+    const waiting = canWait ? results.filter((r) => r.status === 'failed' && r.code === 'todos-unread').map((r) => r.id) : [];
+    if (waiting.length) {
+      console.warn(`[migrate] ${waiting.join(', ')}: For you cannot read its saved list — ${waiting.length === 1 ? 'it runs' : 'they run'} once it reads`);
+      try { ut?.whenRead?.(() => { runLocalMigrations({ only: waiting }); }, 'the data migrations that waited for For you'); } catch { }
+    }
     for (const r of results) {
-      if (r.status === 'failed') {
+      if (r.status === 'failed' && !waiting.includes(r.id)) {
         try { serverNotice?.('migration-failed:' + r.id, `Data migration ${r.id} failed (${failedLine(r.error)}) — will retry on next restart.`, { level: 'warn' }); } catch { }
       }
     }
-    return results;
   }
 
   return { runLocalMigrations, MIGRATIONS, grantsStoreBoot };

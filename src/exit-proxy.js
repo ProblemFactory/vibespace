@@ -1154,6 +1154,7 @@ class ExitProxyManager {
    *  `expired` (helper-asks' reconcile precedent). → how many. */
   reconcileAsks() {
     if (!this.userTodos) return 0;
+    if (this.userTodos.isHeldUnread?.()) { this.userTodos.whenRead(() => { const n = this.reconcileAsks(); if (n) this.log?.(`[exit] ${n} "ask me" item(s) from before the restart resolved expired (at For you's read)`); }, 'the exit asks reconcile'); return 0; }   // B-44f3: For you held unread — its list is empty because it is unread: the pass judges the FILE, at the read
     let n = 0;
     try {
       const snap = this.userTodos.snapshot?.() || {};

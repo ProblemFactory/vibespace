@@ -574,7 +574,7 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
       if (!f.sessionKey) return { ok: false, code: 'pending', why: 'the conversation has not reported its id yet — poll conversations.status, then archive', target: label };
       const v = reach({ conversationId: f.conversationId, webuiId: f.id, groups: f.groups, ...require('./groups-hold.js').fact() });
       if (!v || !v.ok) return { ok: false, code: (v && v.code) || 'not_granted', why: (v && v.why) || 'the key does not reach that conversation', target: label, ...(v.reach ? { reach: v.reach } : {}) };
-      const asks = (asksOf(f.sessionKey) || []).map((i) => i && i.id).filter(Boolean);
+      let asks; try { asks = (asksOf(f.sessionKey) || []).map((i) => i && i.id).filter(Boolean); } catch (e) { if (e && e.code === 'todos-unread') return { ok: false, code: 'todos-unread', why: e.message, target: label }; throw e; }   // B-44f3: For you held unread — its asks are unknown, never «none»
       if (asks.length && !args.resolveAsks) return { ok: false, code: 'asks_open', why: `${asks.length} open For-you ask${asks.length === 1 ? '' : 's'} of that conversation (${asks.join(', ')}) — the owner answers them, or pass resolveAsks`, asks, target: label };
       const discountAsks = !!args.resolveAsks;   // the archive's recipe: the asks it resolves are no reason to refuse
       if (f.s) { const gate = endGate({ s: f.s, id: f.id, by: v.by }, args, label, { discountAsks, propose: Array.isArray(ctx.scopes) ? ctx.scopes.includes('conversations.propose') : null }); if (gate) return gate; }   // the ONE end gate (lane end-obeys-verdict: must 1)
@@ -656,7 +656,8 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
     // (src/server/end-proposals.js); a target outside the key's reach is refused by name, nothing filed; nothing ends here
     'conversations.propose': async (args, ctx) => {
       if (!proposals || typeof proposals.propose !== 'function') return { ok: false, code: 'not_ready', why: 'the proposal card is not wired yet' };
-      return proposals.propose({ targets: args.targets, why: args.why }, ctx);
+      // B-44f3 (its second read's should): For you held unread refuses the card BY NAME — its code reaches the agent (never «failed»)
+      try { return await proposals.propose({ targets: args.targets, why: args.why }, ctx); } catch (e) { if (e && e.code === 'todos-unread') return { ok: false, code: 'todos-unread', why: e.message }; throw e; }
     },
     'groups.invite': async (args, ctx) => {
       const t = reached(args.target, ctx);

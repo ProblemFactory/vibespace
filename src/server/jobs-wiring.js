@@ -91,7 +91,8 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
       });
     },
     log, getTelemetry, // optional: an archive write failure names itself (jobs-archive-write-failed)
-    resolveJobAsk: (jobId, opts) => { try { return userTodos.resolveByJob(jobId, opts); } catch (e) { log('[jobs] inbox resolve failed:', e.message); return 0; } },
+    // B-44f3: For you held unread — the close is refused by name; it runs again at the read (the ask's item never reopens over an answered panel)
+    resolveJobAsk: (jobId, opts) => { try { return userTodos.resolveByJob(jobId, opts); } catch (e) { if (e && e.code === 'todos-unread' && typeof userTodos.whenRead === 'function') { userTodos.whenRead(() => { try { userTodos.resolveByJob(jobId, opts); } catch (e2) { log('[jobs] inbox resolve failed at the read:', e2.message); } }, "a job's answered ask"); log(`[jobs] ${jobId}: its For-you ask closes once For you reads its list`); return 0; } log('[jobs] inbox resolve failed:', e.message); return 0; } },
     // B-f276 cure r1: an engine notice whose cause is gone (a store read again) — resolved by the id its filing returned
     resolveNotice: (id) => { try { return userTodos.setStatus(id, 'done', 'agent'); } catch (e) { log('[jobs] For-you resolve failed:', e.message); return null; } },
     // ── owner auto-notify lanes (2.344.0, B-0bf4) ─────────────────────────

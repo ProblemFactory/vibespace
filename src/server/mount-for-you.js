@@ -64,6 +64,9 @@ function create({ getUserTodos, mountCount = () => 0, log = () => { }, onReopen 
   function unpark(m, why) {
     const t = todos();
     if (!t || !m) return 0;
+    // B-44f3 (the first read's MUST): For you held unread — its list reads empty, so a resolve now finds nothing and the boot's pass
+    // never runs again: it WAITS for the read (the record still not parked then, else its item is right)
+    if (typeof t.isHeldUnread === 'function' && t.isHeldUnread()) { if (typeof t.whenRead === 'function') t.whenRead(() => { if (!m.parked) unpark(m, why); }, `the parked item of ${m.id}`); return 0; }
     let n = 0;
     for (const i of openOf(t, m.id)) { try { t.setStatus(i.id, 'done', 'mounts'); n++; } catch (e) { log(`[mounts] ${m.id}: the parked item ${i.id} was not resolved: ${e.message}`); } }
     return n;
@@ -86,6 +89,7 @@ function create({ getUserTodos, mountCount = () => 0, log = () => { }, onReopen 
   function answered(m) {
     const t = todos();
     if (!t || !m) return 0;
+    if (typeof t.isHeldUnread === 'function' && t.isHeldUnread()) { if (typeof t.whenRead === 'function') t.whenRead(() => answered(m), `the killed notice of ${m.id}`); return 0; }   // B-44f3: the held list is empty — settled at the read
     let n = 0;
     for (const i of (t.forSession([ITEM_KEY]) || []).filter((x) => x && x.facts && x.facts.mountId === m.id && x.facts.why === 'killed')) { try { t.setStatus(i.id, 'done', 'mounts'); n++; } catch { } }
     return n;
@@ -104,6 +108,7 @@ function create({ getUserTodos, mountCount = () => 0, log = () => { }, onReopen 
   function removed(m) {
     const t = todos();
     if (!t || !m) return 0;
+    if (typeof t.isHeldUnread === 'function' && t.isHeldUnread()) { if (typeof t.whenRead === 'function') t.whenRead(() => removed(m), `the items of ${m.id}`); return 0; }   // B-44f3: the held list is empty — settled at the read
     let n = 0;
     // (a client-swap item names a mount only as its FIRST door: it follows who is left at the check after the removal, never closed here)
     for (const i of (t.forSession([ITEM_KEY]) || []).filter((x) => x && !isSwap(x) && ((x.facts && x.facts.mountId === m.id) || (x.action && x.action.mountId === m.id)))) { try { t.setStatus(i.id, 'done', 'mounts'); n++; } catch { } }
@@ -118,6 +123,9 @@ function create({ getUserTodos, mountCount = () => 0, log = () => { }, onReopen 
     const t = todos();
     const next = { ...(memos && typeof memos === 'object' ? memos : {}) };
     if (!t) return next;
+    // B-44f3 (the meeting on the stores tip): For you held unread — its list reads empty (a swap item «not open» would be filed or a
+    // memo dropped on nothing): judged at the next check after the read, the memos unchanged now
+    if (typeof t.isHeldUnread === 'function' && t.isHeldUnread()) return next;
     // a REOPENED swap item is judged at once (B-166e's verify-r6 W2): the store says a reopen, the check runs — never stale words
     if (!reopenHooked && typeof onReopen === 'function' && typeof t.onStatus === 'function') { reopenHooked = true; t.onStatus((it, { status } = {}) => { if (status === 'open' && isSwap(it)) { try { onReopen(); } catch { } } }); }
     const own = (it) => !!(it && it.sessionKey === ITEM_KEY && isSwap(it));   // only this producer's swap items (a memo naming another item never closes it)

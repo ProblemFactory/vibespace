@@ -25,17 +25,26 @@ function create({ getUserTodos, deliver, log = () => { } }) {
   const todos = () => { try { return getUserTodos(); } catch { return null; } };
   const openItems = (t) => (t.forSession([ITEM_KEY]) || []).filter((i) => i && i.status === 'open' && i.action && i.action.type === TYPE);
   /** File the item (ONE: its itemKey) while the file cannot be read. → its id, or null */
+  const heldFy = (t) => !!(t && typeof t.isHeldUnread === 'function' && t.isHeldUnread() && typeof t.whenRead === 'function');
+  const stateNow = () => (deliver && typeof deliver.queuedFileState === 'function' ? deliver.queuedFileState() : null);
+  let saidAtRead = false, settledAtRead = false;   // ONE waiter each while For you is held (a file-state event per change adds none)
   function said() {
-    const t = todos(), st = deliver && typeof deliver.queuedFileState === 'function' ? deliver.queuedFileState() : null;
+    const t = todos(), st = stateNow();
     if (!t || !st || !st.unread) return null;
+    // B-44f3 (its second read's MUST): For you held unread too — filed at ITS read (the file judged again then), never a throw out of
+    // the boot's wiring (create() runs at the top of server.js: a refused add there would stop the hub)
+    if (heldFy(t)) { if (!saidAtRead) { saidAtRead = true; t.whenRead(() => { saidAtRead = false; said(); }, "the unread queued-messages file's item"); } return null; }
     const it = itemOf('data/' + st.file);
-    const r = t.add(ITEM_KEY, { origin: 'server', kind: 'action', urgency: 'high', by: 'agent', sessionName: 'Agent messages', text: it.text, detail: it.detail, i18n: it.i18n, action: { type: TYPE }, itemKey: TYPE });
+    let r = null; try { r = t.add(ITEM_KEY, { origin: 'server', kind: 'action', urgency: 'high', by: 'agent', sessionName: 'Agent messages', text: it.text, detail: it.detail, i18n: it.i18n, action: { type: TYPE }, itemKey: TYPE });
+    } catch (e) { log(`[queued] the unread-file item was not filed: ${e && e.message}`); return null; }
     return (r && (r.id || (r.item && r.item.id))) || null;
   }
   /** The file reads again, is gone, or was set aside: the item resolves. → how many */
   function settled(how) {
     const t = todos();
     if (!t) return 0;
+    // B-44f3: For you held — its list reads empty (an earlier run's item would stay open): settled at its read, if the file still reads
+    if (heldFy(t)) { if (!settledAtRead) { settledAtRead = true; t.whenRead(() => { settledAtRead = false; const st = stateNow(); if (!st || !st.unread) settled(how); }, "the queued-messages file's item"); } return 0; }
     let n = 0;
     for (const i of openItems(t)) { try { t.setStatus(i.id, 'done', 'queued-wakes'); n++; } catch (e) { log(`[queued] the unread-file item ${i.id} was not resolved (${how}): ${e.message}`); } }
     return n;

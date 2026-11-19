@@ -54,6 +54,7 @@ const WORDS = Object.freeze({
   maintainer_key_scope: 'the maintainer key opens the two feedback verbs only (feedback.list, feedback.handled)',   // lane fleet-feedback-marks
   maintainer_key_unknown: 'this instance does not know that maintainer key',
   session_only: 'only a conversation uses automation keys (a job does not, yet)',
+  'todos-unread': 'For you is held unread',   // B-44f3: a verb For you held refuses (conversations.archive / .propose)
   // the manager design's piece 4 (conversations.resume) — the answer's `why` says which and the door
   not_ended: 'that conversation is running', archived: 'that conversation is archived',
   needs_a_page: 'that conversation resumes only in a window a person opens',
@@ -65,7 +66,7 @@ const WORDS = Object.freeze({
   cross_site: 'these doors answer this instance\'s own page only',
   unauthorized: 'missing or unknown session token', not_found: 'not found', not_ready: 'the server is still starting — try again in a moment', failed: 'it failed',
 });
-const STATUS = Object.freeze({ ...A.CODES, vault_not_set_up: 409, ask_unknown: 404, ask_settled: 409, human_only: 403, cross_site: 403, not_ready: 503, except_unnamed: 409 });
+const STATUS = Object.freeze({ ...A.CODES, vault_not_set_up: 409, ask_unknown: 404, ask_settled: 409, human_only: 403, cross_site: 403, not_ready: 503, except_unnamed: 409, 'todos-unread': 503 });
 
 /**
  * @param {object} o

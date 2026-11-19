@@ -1320,6 +1320,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   /** Boot: a LIVE card a previous process filed can never be answered (the run it held died with it); a LATE card is KEPT (the owner may still allow one run). */
   function reconcile() {
     if (!userTodos) return 0;
+    if (userTodos.isHeldUnread?.()) { userTodos.whenRead(() => { const n = reconcile(); if (n) log(`${n} run card(s) from before the restart resolved expired (at For you's read)`); }, 'the vault run cards reconcile'); return 0; }   // B-44f3: For you held unread — its list is empty because it is unread: the pass judges the FILE, at the read
     let n = 0;
     try { for (const it of (userTodos.snapshot?.() || {}).open || []) if (it && it.action) {
       if (it.action.type === ACTION_TYPE && !asks.has(it.action.askId)) { if (it.action.late) reregisterLate(it); else { try { userTodos.setStatus(it.id, 'done', 'ask-expired'); n++; } catch { } } }
@@ -2445,9 +2446,15 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   if (typeof vault.onLock === 'function') vault.onLock((why) => onLocked(why));
   // r6: A RESTART ENDS EVERY GRANT (the grant rows are memory; the vault locks at each start) — a record that still reads live
   // (its `until` ahead, no end written: the hub stopped inside its 8 hours) says so now
+  // B-44f3: judged at the READ — while For you is held unread its list is empty because it is unread (no record would be seen,
+  // and noteFact is refused): the grant cards would read «granted until …» after the read
   if (userTodos && typeof userTodos.resolvedOf === 'function' && typeof userTodos.noteFact === 'function') {
-    try { const t0 = now(); for (const it of userTodos.resolvedOf(REQUEST_TYPE)) { const f = it.resolvedFact || {}; if (it.resolvedBy === 'granted' && Number(f.until) > t0 && !f.endedAt) userTodos.noteFact(it.id, { endedAt: t0, endedBy: 'restart' }); } } catch { }
-    try { const t0 = now(); for (const it of userTodos.resolvedOf(ACTION_TYPE)) { const f = it.resolvedFact || {}; if (it.resolvedBy === 'always' && f.alwaysFor === '8h' && Number(f.until) > t0 && !f.endedAt) userTodos.noteFact(it.id, { endedAt: t0, endedBy: 'restart' }); } } catch { }   // an 8-hour «always» is memory too
+    const tBoot = now();   // the restart ended them — its time, even when they are noted at a later read
+    const endGrants = () => {
+      try { const t0 = tBoot; for (const it of userTodos.resolvedOf(REQUEST_TYPE)) { const f = it.resolvedFact || {}; if (it.resolvedBy === 'granted' && Number(f.until) > t0 && !f.endedAt) userTodos.noteFact(it.id, { endedAt: t0, endedBy: 'restart' }); } } catch { }
+      try { const t0 = tBoot; for (const it of userTodos.resolvedOf(ACTION_TYPE)) { const f = it.resolvedFact || {}; if (it.resolvedBy === 'always' && f.alwaysFor === '8h' && Number(f.until) > t0 && !f.endedAt) userTodos.noteFact(it.id, { endedAt: t0, endedBy: 'restart' }); } } catch { }   // an 8-hour «always» is memory too
+    };
+    if (typeof userTodos.whenRead === 'function') userTodos.whenRead(endGrants, 'a restart ends every grant'); else endGrants();
   }
 
   /** Boot: a run directory a previous process left (it died with its child) — shredded. → how many. */

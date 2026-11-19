@@ -330,7 +330,12 @@ module.exports = {
       delete w.relayDropSaid;
       if (forget) delete w.relayTry;
       h.save();
-      if (said && said.itemId) { try { const it = forYou().get(said.itemId); if (it && it.status === 'open') forYou().setStatus(said.itemId, 'done', 'frp'); } catch { } }
+      if (said && said.itemId) {
+        const close = () => { try { const it = forYou().get(said.itemId); if (it && it.status === 'open') forYou().setStatus(said.itemId, 'done', 'frp'); } catch { /* the owner cleared it */ } };
+        // B-44f3: For you held unread (a hub start's first window) — the close runs at its read, never lost to a refused write
+        let ut = null; try { ut = forYou(); } catch { ut = null; }
+        if (ut && typeof ut.isHeldUnread === 'function' && ut.isHeldUnread() && typeof ut.whenRead === 'function') ut.whenRead(close, "the relay's notice"); else close();
+      }
     };
     /** a publish's ONE NewProxy went unanswered (neither started nor refused) — the episode's first try in this run is kept */
     const noteTry = (at) => {

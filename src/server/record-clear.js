@@ -99,6 +99,7 @@ function create({ tasks = null, userTodos = null, sessionStatus = null, getJobs 
     }
     if (kind === 'todo') {
       if (!userTodos) return { error: RC.refuse('unavailable') };
+      if (userTodos.isHeldUnread?.()) return { error: RC.refuse('todos_unread') };   // B-44f3: held — refused by name (nothing was cleared)
       return userTodos.clearItems(ids, { by, at, allow: verdictFor('todo', caller) });
     }
     if (kind === 'status') {
@@ -109,6 +110,9 @@ function create({ tasks = null, userTodos = null, sessionStatus = null, getJobs 
     if (kind === 'job') {
       const jm = getJobs && getJobs();
       if (!jm || !jm.ready) return { error: RC.refuse('unavailable') };
+      // B-44f3 (the verdict's M4): the cascade below clears the job's For-you items — while For you is held unread its list is empty
+      // because it is unread, so the job would be cleared and its items (with its name) back at the read: the WHOLE clear waits
+      if (userTodos && userTodos.isHeldUnread?.()) return { error: RC.refuse('todos_unread') };
       const r = jm.clearJobs(ids, { by, at, allow: verdictFor('job', caller) });
       if (r.error) { log(`[clear] job ${ids.join(', ')} — FAILED: ${r.error}`); return { error: RC.refuse('failed') }; }
       // THE CASCADE: a job's For-you items carry its name ("<name> needs your input", "· via <name>",

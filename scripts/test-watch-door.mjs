@@ -190,6 +190,37 @@ console.log('§1b the block\'s follow (its readers\' S1 / S3 / N4 / N8 / N9 / N1
     const cl = cutLate.error ? null : await late(cutLate);
     ok(!!cl && cl.after !== 'fy-before', `CONTROL (adoption tried at configure() only${cutLate.error ? ` — NOT BUILT: ${cutLate.error}` : ''}): the item is never adopted — the reader's must, as it shipped in the first form`, cl);
   }
+  { // S1 (B-44f3, its third read's MUST) FOR YOU HELD UNREAD at the boot: a held store's open list is not known (it answers []), so
+    // «nothing to adopt» is never judged there — the look for the earlier notice waits for the read (whenRead) and finds it then;
+    // the probe's turns after the read file NO second item beside it
+    const heldBoot = async (D) => {
+      D.resetForTest(); let held = true, tries = 0; const waiters = [];
+      const T = todosStub(); T.items.set('fy-before', { id: 'fy-before', status: 'open' });
+      T.openItems = () => (held ? [] : [{ id: 'fy-before', sessionKey: D.NOTICE_KEY, status: 'open' }]);
+      let tried = 0; const said = [];
+      const add0 = T.add; T.add = (k, it) => { tried++; if (held) throw Object.assign(new Error('For you is held unread'), { code: 'todos-unread' }); return add0(k, it); };
+      T.isHeldUnread = () => held; T.whenRead = (fn) => { if (!held) { fn(); return true; } waiters.push(fn); return false; };
+      Object.assign(D.LIMITS, { probeMs: 5 });
+      D.configure({ getUserTodos: () => T, log: (l) => said.push(l), container: false, limitNow: () => 65536, probeFs: { ...refusing, watch(...a) { tries++; return refusing.watch(...a); } } });
+      const w0 = D.watch(f, () => {}, { fs: refusing });   // the limit met while For you is held
+      const t1 = tries; await until(() => tries >= t1 + 2, 60, 10);   // two probe turns while held (each refused)
+      const whileHeld = { heldTurns: tries - t1, itemId: D.status().itemId, adds: T.adds.length, waits: waiters.length, tried, notFiled: said.filter((l) => /was not filed/.test(l)).length, waitSaid: said.filter((l) => /For you cannot be read now/.test(l)).length };
+      held = false; for (const fn of waiters.splice(0)) fn();   // the read lifts the hold
+      const t0 = tries; await until(() => tries >= t0 + 3, 60, 10);   // three probe turns after the read (each refused: the limit still met)
+      const out = { whileHeld, itemId: D.status().itemId, limited: D.status().limited, adds: T.adds.length, probes: tries - t0 };
+      w0.close(); D.resetForTest();
+      return out;
+    };
+    const h = await heldBoot(WD);
+    ok(h.whileHeld.heldTurns >= 2 && h.whileHeld.itemId === null && h.whileHeld.adds === 0 && h.whileHeld.waits === 1 && h.whileHeld.tried === 0 && h.whileHeld.notFiled === 0 && h.whileHeld.waitSaid === 1 && h.itemId === 'fy-before' && h.limited === true && h.adds === 0 && h.probes >= 3,
+      'S1 For you HELD at the boot: the look for the notice from before the restart waits for the read (one waiter, said ONCE; nothing tried while held — the refusal and the probe turns file nothing) — adopted at the read, and the probe\'s turns after it file no second item', h);
+    const cutGuard = mutant('  if (state.adoptAtRead) { state.filesDue = true; return; }', '', 'S1 the filing guard cut');
+    const cg = cutGuard.error ? null : await heldBoot(cutGuard);
+    ok(!!cg && cg.whileHeld.tried > 0 && cg.whileHeld.notFiled === 1, `CONTROL (the filing guard cut${cutGuard.error ? ` — NOT BUILT: ${cutGuard.error}` : ''}): the filing is tried against the held store while the look waits — refused, and the journal says «not filed»`, cg && cg.whileHeld);
+    const cutHeld = mutant("  if (typeof t.isHeldUnread === 'function' && t.isHeldUnread() && typeof t.whenRead === 'function') {\n", '  if (false) {\n', 'S1 the held look cut');
+    const ch = cutHeld.error ? null : await heldBoot(cutHeld);
+    ok(!!ch && ch.itemId !== 'fy-before' && ch.adds === 1, `CONTROL (the held store's [] taken as «nothing to adopt»${cutHeld.error ? ` — NOT BUILT: ${cutHeld.error}` : ''}): a second item is filed beside the one from before the restart`, ch);
+  }
   { // S1 an adopted item on a machine that ARMS NOTHING ELSE is lifted by the PROBE alone (the limit fine after the restart)
     const byProbe = async (D) => {
       D.resetForTest(); let tries = 0;
@@ -206,6 +237,28 @@ console.log('§1b the block\'s follow (its readers\' S1 / S3 / N4 / N8 / N9 / N1
     const cutP = mutant("log('[watch] a watch-limit notice from before the restart is kept until watches have been set again for a while'); armProbe(); }", "log('[watch] a watch-limit notice from before the restart is kept until watches have been set again for a while'); }", 'S1 the adoption probe cut');
     const cp = cutP.error ? null : await byProbe(cutP);
     ok(!!cp && cp.limited === true && cp.tries === 0 && !cp.done.length, `CONTROL (the adoption arms no probe${cutP.error ? ` — NOT BUILT: ${cutP.error}` : ''}): nothing lifts the item`, cp);
+    // (B-44f3, its fourth read's should) THE ROAD THAT DID THE HARM: For you HELD at the boot and the limit FINE after the restart —
+    // nothing refuses, so only the look at the read finds the old notice; the probe then lifts it (a held [] taken as «nothing to
+    // adopt» leaves it open for good — the real store merges a second filing by its words, so «open for good» is the harm)
+    const heldProbe = async (D, settle = true) => {
+      D.resetForTest(); let tries = 0, held = true; const waiters = [];
+      const T = todosStub(); T.items.set('fy-before', { id: 'fy-before', status: 'open' });
+      T.openItems = () => (held ? [] : [{ id: 'fy-before', sessionKey: D.NOTICE_KEY, status: 'open' }]);
+      T.isHeldUnread = () => held; T.whenRead = (fn) => { if (!held) { fn(); return true; } waiters.push(fn); return false; };
+      Object.assign(D.LIMITS, { probeMs: 5, liftArms: 3, liftQuietMs: 0 });
+      D.configure({ getUserTodos: () => T, log: () => {}, container: false, probeFs: { ...arming, watch(...a) { tries++; return arming.watch(...a); } } });
+      const before = { waits: waiters.length, done: T.done.length, limited: D.status().limited };   // the look WAITS (whenRead), nothing judged yet
+      held = false; for (const fn of waiters.splice(0)) fn();   // the read lifts the hold
+      if (settle) await until(() => !D.status().limited && tries >= 3, 60, 10);   // the probe's turns (the control is judged at once: nothing is armed)
+      const out = { before, tries, limited: D.status().limited, itemId: D.status().itemId, done: T.done.map((d) => d.id) };
+      D.resetForTest();
+      return out;
+    };
+    const hp = await heldProbe(WD);
+    ok(hp.before.waits === 1 && hp.before.done === 0 && hp.before.limited === false && hp.limited === false && hp.done.join() === 'fy-before' && hp.tries >= 3, `S1 For you held at the boot, the limit fine after the restart: the notice from before it is adopted at the read and ${hp.tries} probe watches lift it`, hp);
+    const cutHp = mutant("  if (typeof t.isHeldUnread === 'function' && t.isHeldUnread() && typeof t.whenRead === 'function') {\n", '  if (false) {\n', 'S1 the held look cut (probe road)');
+    const chp = cutHp.error ? null : await heldProbe(cutHp, false);
+    ok(!!chp && chp.before.waits === 0 && chp.itemId === null && chp.limited === false && !chp.done.length && chp.tries === 0, `CONTROL (the held store's [] taken as «nothing to adopt»${cutHp.error ? ` — NOT BUILT: ${cutHp.error}` : ''}): the notice from before the restart is never lifted — open for good`, chp);
   }
   { // S3 (a) THE PROBE: a hub that arms nothing else still learns the limit cleared — one watch tried every probeMs and closed at once
     const probe = async (D, pf) => {

@@ -47,6 +47,7 @@ function create({ dataDir, vault, paste, userTodos = null, log = () => {} } = {}
   function settle(by) {
     try {
       const live = typeof userTodos === 'function' ? userTodos() : userTodos;
+      if (live && typeof live.isHeldUnread === 'function' && live.isHeldUnread()) { live.whenRead(() => settle(by), 'the job-secrets notice'); return 0; }   // B-44f3: For you held unread — settled at the read (never «none open» over an unread list)
       const ids = (live && typeof live.idsWhere === 'function' && live.idsWhere((i) => i.sessionKey === 'vault' && i.itemKey === ITEM && i.status === 'open')) || [];
       for (const x of ids) live.setStatus(x, 'done', by);
       return ids.length;

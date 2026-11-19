@@ -893,7 +893,7 @@ app.post('/api/user-todos/:id', (req, res) => { // User actions from the panel: 
   if (require('./src/write-origin.js').pressBearer(req.headers)) return res.status(403).json({ error: 'the For-you item\'s ✓ is the user\'s — a bearer token (an agent, a job, an automation key) cannot press it', code: 'agent_forbidden' });
   const press = require('./src/write-origin.js').pressOf(req);
   try { res.json({ success: true, item: userTodos.setStatus(req.params.id, req.body?.status, 'user', { pressed: press }) }); }
-  catch (e) { const decision = e && (e.code === 'decision_row' || e.code === 'decision_final'); res.status(decision ? 409 : 400).json({ error: e.message, ...(decision ? { code: e.code } : {}) }); } // lane wake-approve-card r2: a decision row's two verbs only — refused by name
+  catch (e) { const decision = e && (e.code === 'decision_row' || e.code === 'decision_final'), held = e && e.code === 'todos-unread'; res.status(held ? 503 : decision ? 409 : 400).json({ error: e.message, ...(decision || held ? { code: e.code } : {}) }); } // lane wake-approve-card r2: a decision row's two verbs only — refused by name
 });
 // ── Agent-facing routes ── (extracted to src/agent-routes.js in the 2.92.0 split)
 const { setupAgentRoutes } = require('./src/agent-routes');

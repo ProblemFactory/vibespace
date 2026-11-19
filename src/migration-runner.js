@@ -55,6 +55,7 @@ function sayFailed(todos, id, e, warn) {
 }
 function sayRan(todos, id) {
   const store = inboxOf(todos);
+  if (store && typeof store.isHeldUnread === 'function' && store.isHeldUnread()) { try { store.whenRead(() => sayRan(todos, id), `migration ${id}'s failed notice`); } catch { } return; }   // B-44f3: For you held unread — its failed notice is closed at the read (never «none open» over an unread list)
   try { for (const x of store?.idsWhere?.((i) => i.sessionKey === FAILED_INBOX_KEY && i.itemKey === id && i.status === 'open') || []) store.setStatus(x, 'done', 'system'); } catch { }
 }
 
@@ -105,7 +106,7 @@ function runMigrations({ ledgerPath, migrations, log = console.log, warn = conso
         }, (e) => {
           warn(`[migrate] ${m.id} FAILED (will retry next boot): ${(e && e.message) || e}`);
           sayFailed(todos, m.id, e, warn);
-          try { onLate?.({ id: m.id, status: 'failed', error: (e && e.message) || String(e) }); } catch { }
+          try { onLate?.({ id: m.id, status: 'failed', error: (e && e.message) || String(e), ...(e && e.code ? { code: String(e.code) } : {}) }); } catch { }   // B-44f3: + the refusal's code (a store held unread: its rows run again at the read)
         });
         continue;
       }
@@ -123,7 +124,7 @@ function runMigrations({ ledgerPath, migrations, log = console.log, warn = conso
       // VERBATIM message (the loud-catch rule): a silent migration failure
       // re-manifests as mystery state drift releases later.
       warn(`[migrate] ${m.id} FAILED (will retry next boot): ${e.message}`);
-      results.push({ id: m.id, status: 'failed', error: e.message });
+      results.push({ id: m.id, status: 'failed', error: e.message, ...(e && e.code ? { code: String(e.code) } : {}) });   // B-44f3: + the code
       sayFailed(todos, m.id, e, warn);
     }
   }

@@ -30,7 +30,7 @@ import { t, tc } from './i18n.js';
 import { SHEET_ROOTS, DIALOG_ROOTS, personDialogOf } from './form-yield.js'; // PURE (lane dialog-yield r2): the ONE dialog predicate set
 import { rowOf as attentionRow, toastWorthy, PARKED, FOLD_HEAD, settingsPolicy, bandKey, BANDS, CAP_KEY } from '../attention-model.js'; // PURE: THE attention list (lane foryou-folds) — an arrival's band (the toast rule), the 搁置 band, the fold's words; the owner's switches + cap (lane attention-predicate-shared, settingsPolicy — their ONE reader)
 import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, badgeOf, bandLayout, bandEntries, inboxBadgeFor, miniInboxEntries, noticeGroups, noticeChips, noticeFilterFor, tabCounts, NOTICE_FILTER_KEY, HISTORY_SEEN_KEY, noticeReadAll, openCount, sessionMark, firstLine } from './user-todos-layout.js'; // PURE: the append-only order while the popup is open (inc-mtw02kbq-kj96) — the notices' groups and the bands' slots (lane foryou-folds); notices split (2.369.118); notices by origin + the tab counts (B-328d)
-import { inboxModel, tierCounts, actionWords, mountProposalRows, proposalPressOf } from './user-todos-actions.js'; // THE client model (§9): the store, the live facts (the running dot + the reply verdict, D1.5/D1.7), the words, every verb — shared with the For-you window
+import { inboxModel, tierCounts, actionWords, mountProposalRows, proposalPressOf, heldWords } from './user-todos-actions.js'; // THE client model (§9): the store, the live facts (the running dot + the reply verdict, D1.5/D1.7), the words, every verb — shared with the For-you window
 import { trayWhere } from './user-todos-layout.js'; // lane S3: the new-item toast names the corner the tray sits in on this device
 import { renderRow, patchRow, applyLive, replyBoxEl, reconcileKeyed, agoText as agoTextOf, reachFor, pickReach, forgetReachPicks } from './user-todos-row.js'; // THE row renderer (one spelling of a row; keyed patching keeps a reply box alive)
 import { anchorFixedPopup, copyText, createPopover, escHtml, fetchJson, getToastHistory, isTouchDevice, onOutsidePress, showContextMenu, showToast, stripLegacyRecordToasts, uiScale, chromeAvoidRects, frontRects, seenAt, toastDeskSpot, placeToastsSoon, MODAL_OPEN_EVENT, markTyped } from './utils.js';
@@ -595,9 +595,13 @@ export function installUserTodos(app) {
     // NOTICES (2.369.118): for-your-information rows leave the list for a section of their own under the bands
     const { notices } = splitNotices(allRows);
     const openActions = openCount(todos.open); // lane foryou-honest: THE honest count (the badge's number)
-    root.querySelector(':scope > .ut-title > .ut-head-sub').textContent = openActions ? t('{n} open', { n: openActions }) : t('all clear');
+    const held = heldWords(todos);   // B-44f3: the list could not be read — never «all clear» / «Nothing needs you»
+    root.querySelector(':scope > .ut-title > .ut-head-sub').textContent = held ? t('cannot be read') : openActions ? t('{n} open', { n: openActions }) : t('all clear');
     drawBands(root.querySelector(':scope > .ut-bands'), drawn);
-    root.querySelector(':scope > .ut-empty').style.display = drawn.length ? 'none' : '';
+    // the idle words are the element's own (its one site — a plain-words debt sentence never gains a site); held words swap in
+    const emptyEl = root.querySelector(':scope > .ut-empty'), idle = emptyEl.dataset.idle != null ? emptyEl.dataset.idle : (emptyEl.dataset.idle = emptyEl.textContent), emptyWords = held || idle;
+    if (emptyEl.textContent !== emptyWords) emptyEl.textContent = emptyWords;
+    emptyEl.style.display = drawn.length ? 'none' : '';
     // notices — a GREY COUNT that opens in one click (lane foryou-folds); open: grouped by ORIGIN behind the filter strip (B-328d)
     paintNotices(root.querySelector(':scope > .ut-notices'), notices, noticesOpen);
     // the recently-resolved tail (a row still holding its slot above is not listed twice)

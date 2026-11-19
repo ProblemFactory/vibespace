@@ -73,10 +73,49 @@ function create({ accounts, todos = () => null, windows = () => ({}), groups = (
   }
   /** the check rewritten whole (setOatCheck replaces it): `patch` over what it holds now */
   const put = (id, cur, patch) => A().setOatCheck(id, { ...cur, ...patch });
-  /** ONE For-you filing door for every item this check files (a mark's notice, a hint, an anchor ask) */
-  function fileItem(id, { text, detail, i18n }) {
+  // B-44f3 (主开发 03:57Z, THE MONEY LAW): a verdict about money never waits on the For-you store — while it is HELD unread the
+  // check still judges and saves its mark (accounts._placeable stops the pool's new placements at once); only the FILING of its
+  // item is owed: the check is saved with the item id OWED (on the check itself, so the debt outlives a restart), and a pass at
+  // For you's read files every owed item — its words rebuilt from what the check saved — and saves the real id. A check an
+  // owner's act replaced meanwhile (a new token, an answer) carries no OWED, and nothing is filed for it
+  const OWED = 'owed-at-read';
+  const heldNow = () => { const t = T(); return !!(t && typeof t.isHeldUnread === 'function' && t.isHeldUnread() && typeof t.whenRead === 'function'); };
+  let owedPass = false, bootLooked = false;   // ONE pass waits for the read at a time; the boot's look (a restart while owed) once
+  function oweAtRead() {
+    if (owedPass) return true;
+    const t = T();
+    if (!t || typeof t.whenRead !== 'function') return false;
+    owedPass = true;
+    t.whenRead(() => { owedPass = false; fileOwed(); }, "the long-lived token checks' owed items");
+    return true;
+  }
+  const lookOnce = () => { if (!bootLooked && oweAtRead()) bootLooked = true; };   // at attach() (again on the next turn: the hub builds the store after it), else at the first reading
+  function fileOwed() {
+    let ids = [];
+    try { ids = (A().list().accounts || []).map((a) => a && a.id).filter(Boolean); } catch { ids = []; }
+    for (const id of ids) {
+      let c = null; try { c = A().oatCheckOf(id); } catch { c = null; }
+      if (!c) continue;
+      try {
+        if (c.state === 'mismatch' && c.todoId === OWED) {
+          const todoId = fileNotice(id, { others: c.others || [], fp: c.fp || null, via: c.via || null, why: c.why || null });
+          put(id, c, { todoId });
+          log(`[oat-identity] ${nameOf(id)}: For you reads — the mark saved while it could not be read is filed now`);
+        } else if (c.ask && c.ask.todoId === OWED) {
+          const fp = c.ask.win ? (M.anchorFromProbe(c.ask.win) || {}).fp || null : null;
+          const todoId = fileAsk(id, c.ask.kind, { others: c.ask.others || [], fp, pending: c.state === 'pending', lost: c.ask.lost === true });
+          put(id, c, { ask: { ...c.ask, todoId } });
+          log(`[oat-identity] ${nameOf(id)}: For you reads — the ask saved while it could not be read is filed now`);
+        }
+      } catch (e) { log('[oat-identity] could not file an owed For-you item:', e.message); }
+    }
+  }
+  /** ONE For-you filing door for every item this check files (a mark's notice, a hint, an anchor ask); `slot` = what the
+   *  item's id is saved on ('mark' → check.todoId, 'ask' → check.ask.todoId) — while For you is held the filing is owed */
+  function fileItem(id, { text, detail, i18n }, slot = null) {
     const t = T();
     if (!t || typeof t.add !== 'function') return null;
+    if (slot && heldNow()) { oweAtRead(); return OWED; }   // B-44f3: owed — the check saves OWED, filed at the read
     try {
       // fix r2 L1: at most ONE open item per account row (a mark resolves the ask) — the store's per-key cap of 20 (an
       // agent looping on add) would otherwise drop the 21st row's item while its roster line says it is asked
@@ -99,7 +138,7 @@ function create({ accounts, todos = () => null, windows = () => ({}), groups = (
       i18n: { text: otherNames.length
         ? { key: i18nKey('{account}\'s long-lived token belongs to another account (its usage matches {other}) — re-mint it or re-bind it in Manage Agents'), params: { account: name, other: otherNames.join(', ') } }
         : { key: i18nKey('{account}\'s long-lived token belongs to another account — re-mint it or re-bind it in Manage Agents'), params: { account: name } } },
-    });
+    }, 'mark');
   }
   function fileAsk(id, kind, { others = [], fp = null, pending = false, lost = false } = {}) {
     const name = nameOf(id);
@@ -111,7 +150,7 @@ function create({ accounts, todos = () => null, windows = () => ({}), groups = (
           + 'This row\'s usage window was last written by a step that could not tell this account\'s sign-in from its long-lived token (an identity repair, or a conversation whose start was never recorded), so nothing proves whose the token is. Nothing was marked and the pool keeps using it. '
           + 'Manage Agents → the row\'s ⋯ → Long-lived token: confirm it is this account\'s, or re-bind it to the account it belongs to.',
         i18n: { text: { key: i18nKey('{account}\'s long-lived token is unverified: its usage window can no longer say whose it is — confirm the token is {account}\'s, or re-bind it in Manage Agents'), params: { account: name } } },
-      });
+      }, 'ask');
     }
     return kind === 'hint'
       ? fileItem(id, {
@@ -120,7 +159,7 @@ function create({ accounts, todos = () => null, windows = () => ({}), groups = (
           + `This row has no usage window of its own to check its long-lived token against, and the token's usage window is the one ${otherNames.join(', ')} holds. Two accounts can share a weekly reset hour by chance, so nothing was marked and the pool keeps using it. `
           + 'Manage Agents → the row\'s ⋯ → Long-lived token: confirm it is this account\'s, or re-bind it to the account it belongs to.',
         i18n: { text: { key: i18nKey('{account}\'s long-lived token looks like {other}\'s — confirm it is {account}\'s, or re-bind it in Manage Agents'), params: { account: name, other: otherNames.join(', ') } } },
-      })
+      }, 'ask')
       : fileItem(id, {
         text: `${name}'s usage window moved away from the one its long-lived token was confirmed with — confirm the token is still ${name}'s, or re-bind it in Manage Agents`,
         detail: pending
@@ -131,12 +170,13 @@ function create({ accounts, todos = () => null, windows = () => ({}), groups = (
             + 'The window moved by the long-lived token\'s own readings, so the move cannot vouch for the token: the anchor the owner confirmed is kept and nothing was marked. '
             + 'A renewal or a plan change moves the window too. Manage Agents → the row\'s ⋯ → Long-lived token: confirm it is still this account\'s, or re-bind it.',
         i18n: { text: { key: i18nKey('{account}\'s usage window moved away from the one its long-lived token was confirmed with — confirm the token is still {account}\'s, or re-bind it in Manage Agents'), params: { account: name } } },
-      });
+      }, 'ask');
   }
   function resolveItem(id, todoId, why) {
-    if (!todoId) return false;
+    if (!todoId || todoId === OWED) return false;   // an owed item was never filed (the pass at the read files only what is still owed)
     const t = T();
     if (!t || typeof t.get !== 'function') return false;
+    if (heldNow()) { t.whenRead(() => { resolveItem(id, todoId, why); }, "the long-lived token check's resolved item"); return false; }   // B-44f3: closed at the read (a held list knows no item)
     let it = null;
     try { it = t.get(todoId); } catch { it = null; }
     if (!it || it.status !== 'open' || it.sessionKey !== INBOX_KEY) return false;
@@ -149,6 +189,7 @@ function create({ accounts, todos = () => null, windows = () => ({}), groups = (
    *  member's credential file). */
   function onReading(key, reading = {}) {
     if (!key) return { verdict: 'idle' };
+    lookOnce();
     let check = null;
     try { check = A().oatCheckOf(key); } catch { check = null; }
     if (!check) return { verdict: 'idle' };
@@ -162,6 +203,8 @@ function create({ accounts, todos = () => null, windows = () => ({}), groups = (
       log(`[oat-identity] ${nameOf(key)}: the row's identity anchor moved (${was} → ${cur.fp}) — its long-lived token's next reading is checked again`);
     }
     if (check.state !== 'pending') return { verdict: 'idle' };
+    // B-44f3: judged whatever For you's state (THE MONEY LAW — a mark stops the pool's placements at once, the run of readings is
+    // kept); while For you is held only the item's filing is owed to its read (fileItem's slot), filed once then
     const ask = (f, dflt) => { try { return typeof f === 'function' ? f() : (f === undefined ? dflt : f); } catch { return dflt; } };
     const viaRaw = ask(reading.viaToken, false);
     const via = viaRaw === true ? true : (viaRaw === null ? null : false); // null = the conversation's road is unknown (fix r3 F-R1)
@@ -302,7 +345,15 @@ function create({ accounts, todos = () => null, windows = () => ({}), groups = (
     return a || b;
   }
   /** wire the store's hook (called once the account store exists — the account routes) */
-  function attach() { try { A()._oatCheckHook = checkReplaced; return true; } catch { return false; } }
+  function attach() {
+    try { A()._oatCheckHook = checkReplaced; } catch { return false; }
+    // B-44f3: the boot's look for items owed before a restart — the hub wires this BEFORE it builds the For-you store, so a look
+    // that finds no store is tried again once the boot's synchronous wiring has run (the next turn), and else at the first reading
+    const look = () => { try { lookOnce(); } catch (e) { log('[oat-identity] the look for owed For-you items failed:', e && e.message); } };
+    look();
+    if (!bootLooked) { const t = setImmediate(look); if (t && t.unref) t.unref(); }
+    return true;
+  }
   /** 改绑: the owner moves `fromId`'s token to `toId` (accounts.moveOat — the sealed blob, never decrypted). */
   function rebind(fromId, toId) {
     const r = A().moveOat(fromId, toId);

@@ -1201,7 +1201,7 @@ function create(engineCtx) {
     const t = now();
     // r3: an ask past its end is over even before the sweep wrote it — expired now, never approved late
     if (askEndOf(req0) <= t) { await expireWatchRequests(t); return expiredRefusal(req0); }
-    if (req0.kind === 'held') return decideHeld(req0, approve, by, { person });   // r6: a held digest — deliver / discard
+    if (req0.kind === 'held') return decideHeldMarked(req0, approve, by, { person });   // r6: a held digest — deliver / discard
     deciding.set(requestId, t);   // lane bl-msg B-ae13 r2: the asker's withdraw waits out a decision in flight (its watcher write awaits below)
     try { return await decideOpenWatch(requestId, req0, approve, by, person, t); } finally { deciding.delete(requestId); }   // the cure (主开发 09:24Z): the mark is released on EVERY exit (an early return held a withdraw off for 30 s)
   }
@@ -1425,6 +1425,10 @@ function create(engineCtx) {
   /** THE OWNER'S DECISION on a held digest (the decide route — the person verdict): Deliver puts the request's hits back and
    *  flushes them NOW through the one flush (a billed turn: the ladder's spend authorizer; a refusal there — the daily cap,
    *  nobody live — keeps them pending for the next delivery, said); Discard drops them. Both touch exactly the card's count. */
+  // B-44f3: the presses THIS process has in flight — the boot reconcile can run LATE (at For you's read, when it was held unread): a
+  // press of this process then carries `held.inFlight` while it runs, and is never «a press a stop cut short»
+  const pressing = new Set();
+  async function decideHeldMarked(req0, approve, by, opts = {}) { pressing.add(req0.id); try { return await decideHeld(req0, approve, by, opts); } finally { pressing.delete(req0.id); } }
   async function decideHeld(req0, approve, by, { person = false } = {}) {
     const reqNow = () => (store.index.table('watchRequests') || []).find((r) => r && r.id === req0.id) || req0;
     if (approve) {
@@ -1683,6 +1687,9 @@ function create(engineCtx) {
     return { ok: true, request: { id, status: 'withdrawn', decidedAt: t } };
   }
   async function expireWatchRequests(t = now()) {
+    // B-44f3: For you held unread — an expiry would end the request and could not close its card (refused): it waits, and the boot
+    // reconcile (run at the read) expires what is due then, card and all
+    if (userTodos && typeof userTodos.isHeldUnread === 'function' && userTodos.isHeldUnread()) return [];
     const due = new Set((store.index.table('watchRequests') || []).filter((r) => r && r.status === 'open' && askEndOf(r) <= t).map((r) => r.id));
     if (!due.size) return [];
     const went = [];
@@ -1733,7 +1740,7 @@ function create(engineCtx) {
    *  pending ⇒ the request reopens and its card says the count; the delivery found done ⇒ the card closes «delivered»; ② a request
    *  DECIDED whose card is still open (a stop between the two stores' writes) ⇒ the card takes the decision. → how many. */
   async function reconcilePresses(t = now()) {
-    const ids = new Set((store.index.table('watchRequests') || []).filter((r) => r && r.kind === 'held' && (r.status === 'approved' || r.status === 'denied')).map((r) => r.id));
+    const ids = new Set((store.index.table('watchRequests') || []).filter((r) => r && r.kind === 'held' && (r.status === 'approved' || r.status === 'denied') && !pressing.has(r.id)).map((r) => r.id));   // B-44f3: never this process's own press in flight
     if (!ids.size) return 0;
     const out = [];
     await store.index.update((ix) => {

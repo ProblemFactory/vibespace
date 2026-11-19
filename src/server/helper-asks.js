@@ -43,12 +43,14 @@ const { setAsksObserver } = require('../normalizers');
 const { answerPermission } = require('./permission-answer'); // THE one permission answer (lane J r2) — written only after the table says so
 const { answerFromRecord } = require('../agent-tool-rules.js'); // verify r6 F6: the answer's input + updates derived from the server's own record
 
+let syncAtRead = new WeakSet();   // B-44f3: the sessions whose sync waits for For you's read (one waiter each; a new install starts empty)
 let deps = null;               // { userTodos, sessionKeyFor, activeSessions, log, persistAskedAt }
 const perSession = new WeakMap(); // session → Map<requestId, {timer, filed}>
 const forgotten = new WeakSet();  // sessions the kill / exit path ended — a late sync files nothing
 
 function install({ userTodos = null, sessionKeyFor = null, activeSessions = null, log = console, persistAskedAt = null } = {}) {
   deps = { userTodos, sessionKeyFor, activeSessions, log, persistAskedAt };
+  syncAtRead = new WeakSet();
   setAsksObserver((session) => sync(session));
   return { sync, sessionForAnswer, reconcileAll, forget, settledState, answerFrame };
 }
@@ -141,6 +143,9 @@ function sync(session, now = Date.now()) {
         // still waiting? (the ask may have been settled while the timer ran — the store is told only about a live ask)
         const still = helperAsksOf(session).find((x) => String(x.requestId) === rid);
         if (still && !e.filed && H.askTransition(H.ASK_INITIAL, 'timer').effects.includes('file-item')) e.filed = fileItem(session, still); // the table's timer row on `asked`
+        // B-44f3 (the first read's nit): For you held unread refused the filing — the ask is filed at its read (a sync then), never left
+        // unfiled until some later change of the asks
+        if (still && !e.filed) { const ut = deps && deps.userTodos; if (ut && typeof ut.isHeldUnread === 'function' && ut.isHeldUnread() && typeof ut.whenRead === 'function' && !syncAtRead.has(session)) { syncAtRead.add(session); ut.whenRead(() => { syncAtRead.delete(session); sync(session); }, "a helper's ask"); } }   // ONE waiter a session (a long hold never grows the list)
       };
       // a sync is also a TICK: an ask already due is filed now (the timer is the idle path)
       const wait = Math.max(0, H.inboxDueAt(e.at) - now);

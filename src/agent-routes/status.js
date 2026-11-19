@@ -41,8 +41,10 @@ app.post('/api/agent/user-todo', async (req, res) => {
   if (!toolOn('Ask')) return toolDisabled(res, 'vibespace-ask');
   const [s, id] = hit;
   const key = askKey(s, id, sessionStatusKey); // the ONE key rule (a pending fork files under its placeholder) — asksOf reads by it
-  if (!key.startsWith('webui:')) userTodos.rekey(`webui:${id}`, key); // migrate early items once the real id exists
   const { add, list, resolve, show, clear } = req.body || {};
+  // B-44f3: For you held unread — every verb of the ask needs the list (an empty one is unread, never «nothing open»): refused by name
+  if (typeof userTodos.isHeldUnread === 'function' && userTodos.isHeldUnread()) return res.status(503).json({ error: userTodos.unreadRefusal(add ? 'filing this ask' : list ? 'listing your items' : resolve ? 'closing an item' : show ? 'showing an item' : clear ? 'clearing an item' : 'vibespace-ask'), code: 'todos-unread' });
+  if (!key.startsWith('webui:')) userTodos.rekey(`webui:${id}`, key); // migrate early items once the real id exists
   try {
     if (list) return res.json({ success: true, sessionKey: key, items: userTodos.forSession([key, `webui:${id}`]) });
     // `vibespace-ask clear <id>` ("Clear content…", 2026-09-28): an item THIS session filed itself —
@@ -103,7 +105,7 @@ app.post('/api/agent/user-todo', async (req, res) => {
       return res.json({ success: true, item, chars: cliText.chars(item.text), ...(item.detail ? { detailChars: cliText.chars(item.detail) } : {}), tray: (({ name, phrase }) => ({ name, phrase }))(OF.tray()), ...(item.existing ? {} : { filed: CN.filedLine(item, item.id, OF.tray()) }), ...(proposeFields ? { proposed: require('../ask-setting.js').proposedLine(item.action) } : {}) });   // lane cli-one-text-arg: what the store KEPT (a question past 500 is cut) · B-7960 b: WHERE it landed in the hub's words (its label + current place)
     }
     res.status(400).json({ error: 'pass {add:{text,...}} | {list:true} | {resolve:"id or text"} | {show:"id"} | {clear:"id"}' });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { res.status(e && e.code === 'todos-unread' ? 503 : 400).json({ error: e.message, ...(e && e.code === 'todos-unread' ? { code: e.code } : {}) }); }
 });
 app.get('/api/session-status', (req, res) => res.json({ statuses: sessionStatus.snapshot(), ...(typeof sessionStatus.syncMark === 'function' ? sessionStatus.syncMark() : {}) }));   // lane task-group-fanout: + {epoch, seq} — where this answer sits in the broadcast order
 // User set/override/clear from the UI (cookie-authed like every route)

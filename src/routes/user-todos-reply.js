@@ -59,7 +59,7 @@ const { imageLimitsOf, harnessOfRecord } = require('../backend-caps.js');   // b
 const { conversationOfKey } = require('../inbox-reopen.js');   // …a reopened one's harness is its key's
 
 const STATUS = Object.freeze({
-  agent_forbidden: 403, not_found: 404,
+  agent_forbidden: 403, not_found: 404, 'todos-unread': 503,   // B-44f3: For you held unread — refused by name
   empty: 400, too_long: 400, input_rejected: 400, too_large: 400, bad_image: 400,
   no_session: 409, job_item: 409, card_item: 409, exit_ask: 409, no_live_session: 409, not_chat: 409, host_unreachable: 409,
   resume_failed: 409, rewind_out: 409, send_failed: 500,
@@ -138,6 +138,7 @@ function registerUserTodoReplyRoutes(app, { userTodos, activeSessions, sendUserI
   app.post('/api/user-todos/:id/reply', (req, res) => {
     try {
       if (isAgentBearer(req)) return fail(res, 'agent_forbidden', 'a reply is the user\'s own message — an agent token cannot send one');
+      if (userTodos.isHeldUnread?.()) return fail(res, 'todos-unread', userTodos.unreadRefusal('a reply'));   // B-44f3: before any send — nothing is sent for an item the list cannot read
       const item = userTodos.get(String(req.params.id));
       if (!item) return fail(res, 'not_found', 'item not found');
       // the conversation the reply goes to — FIRST, so its pictures are judged with ITS harness (the live one's, else the one the
@@ -185,7 +186,7 @@ function registerResolveManyRoute(app, { userTodos }) {
       if (!RESOLVE_MANY_STATUSES.includes(status)) return fail(400, 'bad_status', `status must be one of ${RESOLVE_MANY_STATUSES.join('/')}`);
       const r = userTodos.setStatusMany(ids, status, 'user');
       res.json({ ok: true, changed: r.changed.length, unknown: r.unknown, decisions: r.decisions || [] });   // lane wake-approve-card r2: a decision row stays until decided
-    } catch (e) { fail(500, 'failed', e.message); }
+    } catch (e) { if (e && e.code === 'todos-unread') return fail(503, e.code, e.message); fail(500, 'failed', e.message); }   // B-44f3: held — by name
   });
   // «Mark all read» (lane inbox-fyi-mark-all): POST /api/user-todos/notices/read-all {ids} — every open NOTICE among the
   // ids done in ONE store write + ONE broadcast (idempotent: an id already resolved stays as it is); …/unread {ids} = its
@@ -199,7 +200,7 @@ function registerResolveManyRoute(app, { userTodos }) {
       if (ids.length > NOTICES_READ_MAX) return fail(400, 'too_many', `at most ${NOTICES_READ_MAX} ids per request (got ${ids.length})`);
       const r = userTodos.readNotices(ids, read, 'user');
       res.json({ ok: true, changed: r.changed, already: r.already.length, refused: r.refused, unknown: r.unknown });
-    } catch (e) { fail(500, 'failed', e.message); }
+    } catch (e) { if (e && e.code === 'todos-unread') return fail(503, e.code, e.message); fail(500, 'failed', e.message); }   // B-44f3: held — by name
   };
   app.post('/api/user-todos/notices/read-all', noticesDoor(true));
   app.post('/api/user-todos/notices/unread', noticesDoor(false));
@@ -215,6 +216,7 @@ function registerResolveManyRoute(app, { userTodos }) {
 function registerItemReadRoute(app, { userTodos }) {
   app.get('/api/user-todos/:id', (req, res) => {
     if (isAgentBearer(req)) return res.status(403).json({ error: 'the user\'s inbox is read with the user\'s cookie — an agent token reads its own items through vibespace-ask show', code: 'agent_forbidden' });
+    if (userTodos.isHeldUnread?.()) return res.status(503).json({ error: userTodos.unreadRefusal('reading an item'), code: 'todos-unread' });   // B-44f3: unread, never «not found»
     const item = userTodos.get(String(req.params.id));
     if (!item) return res.status(404).json({ error: 'item not found', code: 'not_found' });
     res.json({ item });

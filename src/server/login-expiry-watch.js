@@ -268,6 +268,7 @@ function create({ accounts, userTodos, dataDir, log = () => {}, now = () => Date
   function resolveFiled(entry) {
     const recs = Array.isArray(entry?.items) ? entry.items : [];
     if (!recs.length) return { n: 0, remaining: [] };
+    if (userTodos && userTodos.isHeldUnread?.()) return { n: 0, remaining: recs };   // B-44f3: For you held unread — «gone» is unread there: keep every record (the next sweep after the read judges them)
     let n = 0; const remaining = [];
     for (const rec of recs) {
       if (!rec || typeof rec.id !== 'string') continue;

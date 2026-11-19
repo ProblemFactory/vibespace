@@ -881,7 +881,7 @@ const STORE_READS = [
   { file: 'src/job-logs-sweep.js', store: '(none)', state: 'names', why: 'names the set-aside and note files the clean-up honours; reads no store', mark: /const NOTE_SUFFIX = '\.corrupt-unread';/ },
   // DEBT (B-f276's census, 2026-11-17) — each is converted by the lane that holds its file; then its row flips to `answer` and READ_DEBT_CAP drops
   { file: 'src/channel-store.js', store: 'channels/*.json (loadJsonFamily)', state: 'debt', why: 'sets the LIVE file aside on a failed read', mark: /return setAside\(`unreadable \(\$\{\(e && e\.code\) \|\| \(e && e\.message\)\}\)`\);/ },
-  { file: 'src/user-todos.js', store: 'user-todos.json', state: 'debt', why: 'sets the live file aside on a failed read', mark: /if \(!\(e && e\.code === 'ENOENT'\)\) setAside = this\._setAside\(`unreadable/ },
+  { file: 'src/user-todos.js', store: 'user-todos.json', state: 'answer', mark: /const a0 = SR\.storeAnswer\(this\._readNow\(\), \{ valid: STORE_SHAPE \}\);/ },   // B-44f3: held unread, every write refused by name
   { file: 'src/server/browser-kept.js', store: 'browser-kept.json', state: 'debt', why: 'sets the live file aside on any failure but ENOENT', mark: /if \(e && e\.code !== 'ENOENT'\) \{[\s\S]{0,600}?fs\.renameSync\(file, aside\)/ },
   { file: 'src/hosts.js', store: 'hosts.json', state: 'answer', mark: /this\._loadAnswer\(SR\.storeAnswer\(read, \{ valid: \(v\) => !!v && typeof v === 'object' && !Array\.isArray\(v\) \}\)\)/ },   // remainder of B-f276 (bl-jobs, 2.369.411): held, never written over
   { file: 'src/machine-mounts.js', store: 'machine-mounts.json', state: 'answer', mark: /this\._loadAnswer\(SR\.storeAnswer\(read, \{ valid: STORE_SHAPE \}\)\);/ },   // remainder of B-f276 (bl-jobs, 2.369.411): held — no save, no legacy ingest, no token sweep
@@ -896,7 +896,7 @@ const STORE_READS = [
   { file: 'src/desktop-serve.js', store: 'desktop-apps.json', state: 'answer', mark: /const a = SR\.storeAnswer\(read, \{ valid: STORE_VALID \}\);\n    if \(a\.state === 'data'\) \{ store = \{ apps: a\.value\.apps \}; return; \}/ },
   { file: 'src/jobs.js', store: 'job-notifications.json', state: 'answer', mark: /this\._notifsAnswer\(SR\.storeAnswer\(read, \{ valid: NOTIFS_SHAPE \}\)\);/ },   // remainder of B-f276 (bl-jobs, 2.369.411): held — the waiting notices never written over
 ];
-const READ_DEBT_CAP = 5;     // lower it as each debt row flips to `answer` — never raise it (8 → 7: hosts.json, 7 → 6: machine-mounts.json, 6 → 5: job-notifications.json — bl-jobs B-f276's remainder)
+const READ_DEBT_CAP = 4;     // lower it as each debt row flips to `answer` — never raise it (8 → 7: hosts.json, 7 → 6: machine-mounts.json, 6 → 5: job-notifications.json — bl-jobs B-f276's remainder, 5 → 4: user-todos.json — bl-windows B-44f3)
 const READ_DEBT_AT_BIRTH = 8;            // the census's first count (2026-11-17): DEBT_CAP never passes it
 const STATES = new Set(['answer', 'right', 'names', 'debt']);
 const USES_HELPER = /require\(['"](?:\.{1,2}\/)+(?:[\w-]+\/)*store-read(?:\.js)?['"]\)/;

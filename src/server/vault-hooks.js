@@ -101,10 +101,17 @@ function wireVaultHooks({ vault, auth = null, wss = null, hostTokens = null, plu
     } catch (e) { log.warn?.(`[vault] the vault's For-you item was not filed: ${(e && e.message) || e}`); }
   }
   if (userTodos) {
-    // an older build's restart notice (its own text) gives way to THE item — never two rows for one lock
-    try { for (const it of userTodos.forSession(VAULT_INBOX_KEY)) if (isVaultItem(it) && it.text !== VAULT_ITEM_TEXT) userTodos.setStatus(it.id, 'done', 'vault'); } catch { /* gone already */ }
     const loud = () => VL.vaultLoudState({ facts: vault.facts() }).item;   // lane vault-locked-loud: THE table's word — set up + locked
-    if (loud()) fileItem(typeof vault.blockedSummary === 'function' ? vault.blockedSummary() : null);
+    const boot = (late) => {
+      // an older build's restart notice (its own text) gives way to THE item — never two rows for one lock
+      try { for (const it of userTodos.forSession(VAULT_INBOX_KEY)) if (isVaultItem(it) && it.text !== VAULT_ITEM_TEXT) userTodos.setStatus(it.id, 'done', 'vault'); } catch { /* gone already */ }
+      if (loud()) fileItem(typeof vault.blockedSummary === 'function' ? vault.blockedSummary() : null);
+      else if (late) { try { for (const it of userTodos.forSession(VAULT_INBOX_KEY)) if (isVaultItem(it) && it.status === 'open') userTodos.setStatus(it.id, 'done', 'vault'); } catch { } }   // B-44f3: unlocked before the read (THE item's own test — no new branch on its type)
+    };
+    // B-44f3 (For you held unread — the verdict's M1b): judged at the READ, by the lock state of then — while held a lock could file
+    // no item and an unlock could close none, so the file's item would come back «locked» over an open vault
+    const late = typeof userTodos.isHeldUnread === 'function' && userTodos.isHeldUnread();
+    if (typeof userTodos.whenRead === 'function') userTodos.whenRead(() => boot(late), "the vault's For-you item"); else boot(false);
     vault.onLock(() => { if (loud()) fileItem(null); });   // lane vault-locked-loud: the moment it locks (a lock act, the idle lock) — not first at a refusal
     if (typeof vault.onBlocked === 'function') vault.onBlocked((summary) => fileItem(summary));
   }

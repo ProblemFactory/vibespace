@@ -4051,6 +4051,33 @@ console.log('── pool-silent-members r2: the roster is read ONCE per evaluati
         JSON.stringify(cE.atBoot) === '["done:expired"]' && JSON.stringify(cE.after) === '["open"]' && JSON.stringify(cG.atBoot) === '["done:agent"]' && JSON.stringify(cG.after) === '["open"]');
       ck(`r3 ⑦b B-5e0d (D): two items of the key — the NEWEST filing (by createdAt) the owner dismissed, an older one AFTER it in the list closed by the agent with its end — after a restart the newest stays dismissed (${tD.x}, ${tD.n} items)`,
         tD.x === 'dismissed' && tD.n === 2);
+      // B-44f3 (its read's should): A RECOVERY WHILE FOR YOU IS HELD is deferred, never dropped — the pool serves while For you
+      // cannot be read (its list reads empty), and the episode's end is written AT THE READ, on the recovery's clock (a block again
+      // before any serving pass after the read would otherwise read the old item as live)
+      const heldRecoveryRun = async (mod) => {
+        const w = await world(mod, { sessions: 1, withTodos: true });
+        w.evaluate(); w.evaluate();   // blocked: the item, open
+        const f = w.todos._file;
+        const r0 = w.restart(mod); r0.stop();   // the store ends: its file on disk
+        fs.renameSync(f, f + '.aside'); fs.mkdirSync(f);   // For you cannot be read at the next start (EISDIR): HELD
+        const o = console.log, ww = console.warn; console.log = () => { }; console.warn = () => { };
+        let r1 = null; try { r1 = w.restart(mod); } finally { console.log = o; console.warn = ww; }
+        const held = r1.todos.isHeldUnread();
+        put(w, 0.1); r1.evaluate();   // the pool serves again while For you is held
+        const recoveredBy = Date.now(); await new Promise((res) => setTimeout(res, 25));   // the read comes later: the end must carry the RECOVERY's clock
+        fs.rmdirSync(f); fs.renameSync(f + '.aside', f);
+        { const o2 = console.log, w2 = console.warn; console.log = () => { }; console.warn = () => { }; try { await r1.todos.readAgain(); } finally { console.log = o2; console.warn = w2; } }   // the read
+        const st = itemsOf(w, r1.todos).map((i) => ({ status: i.status, by: i.resolvedBy, ended: !!(i.resolvedFact && i.resolvedFact.endedAt), onRecovery: !!(i.resolvedFact && i.resolvedFact.endedAt <= recoveredBy) }));
+        r1.stop();
+        return { held, st };
+      };
+      const hR = await heldRecoveryRun(engMod);
+      ck(`r3 ⑦b B-44f3: a recovery while For you is HELD (${hR.held}) ends the episode AT THE READ — the item done by the agent, its end on it (${JSON.stringify(hR.st)})`,
+        hR.held === true && hR.st.length === 1 && hR.st[0].status === 'done' && hR.st[0].by === 'agent' && hR.st[0].ended === true && hR.st[0].onRecovery === true);
+      const noEndDefer = engOf('b44f3-no-end-defer', anchored(ENG_SRC, "  if (typeof todos.isHeldUnread === 'function' && todos.isHeldUnread() && typeof todos.whenRead === 'function') {\n    if (!_poolEndAtRead.has(poolId))", "  if (false) {\n    if (!_poolEndAtRead.has(poolId))", 'B-44f3: the held recovery not deferred'));
+      const lateClock = engOf('b44f3-end-late-clock', anchored(ENG_SRC, "todos.whenRead(() => { _poolEndAtRead.delete(poolId); poolBlockedTodoEnd(poolId, now); }", "todos.whenRead(() => { _poolEndAtRead.delete(poolId); poolBlockedTodoEnd(poolId); }", 'B-44f3: the held recovery ended on the read\'s clock'));
+      { const x = await heldRecoveryRun(lateClock); ck(`RED CONTROL (B-44f3): a held recovery ended on the READ's clock is caught — its end later than the recovery (${JSON.stringify(x.st)})`, x.st.length === 1 && x.st[0].ended === true && x.st[0].onRecovery === false); }
+      { const x = await heldRecoveryRun(noEndDefer); ck(`RED CONTROL (B-44f3): with the held recovery not deferred the item stays OPEN after the read (${JSON.stringify(x.st)})`, x.st.length === 1 && x.st[0].status === 'open'); }
       const noReadBack = engOf('b5e0d-noreadback', anchored(ENG_SRC, "  if (!_poolBlockedTodo.has(poolId) && !_poolBlockedLooked.has(poolId)) {", "  if (false) {", 'B-5e0d: the episode not read back after a restart'));
       {
         const rA = await dismissedRun(noReadBack), rB = await leftOpenRun(noReadBack);

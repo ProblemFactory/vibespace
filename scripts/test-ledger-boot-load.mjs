@@ -294,7 +294,7 @@ console.log('⑥ the wiring: the hub\'s ledger has the flag; the migration keeps
   const mig = fs.readFileSync(path.join(REPO, 'src/server/migrations.js'), 'utf8'), rl = mig.slice(mig.indexOf('  function runLocalMigrations('), mig.indexOf('  function runLocalMigrations(') + 2000);
   ok(/const results = runMigrations\(/.test(rl) && /\n {4}return results;\n {2}\}/.test(rl), '⑥ runLocalMigrations is synchronous: the registry\'s results are read and returned in the same call');
   // THE CALLERS, by call expression (acorn: a comment never counts) — the sync road's three names, in all of src/ + server.js
-  const NAMES = new Set(['backfillLedgerBySlot', 'runLocalMigrations', 'learnNow']), WANT = { 'server.js runLocalMigrations': 1, 'src/server/migrations.js backfillLedgerBySlot': 1, 'src/ledger-slot-backfill.js learnNow': 1 };
+  const NAMES = new Set(['backfillLedgerBySlot', 'runLocalMigrations', 'learnNow']), WANT = { 'server.js runLocalMigrations': 1, 'src/server/migrations.js backfillLedgerBySlot': 1, 'src/ledger-slot-backfill.js learnNow': 1, 'src/server/migrations.js runLocalMigrations': 1 };   // + B-44f3: the rows For you refused while held run again at its read (migrations.js sayFailures — an async step for those rows only; the ledger backfill touches no For-you item)
   const files = fs.readdirSync(path.join(REPO, 'src'), { recursive: true }).filter((f) => /\.(c|m)?js$/.test(f)).map((f) => path.join('src', f)).concat([SERVER_SOURCE]);
   const got = {};
   for (const f of files) {

@@ -65,6 +65,16 @@ export function tierCounts(action) {
  *  item open the words never say «Nothing waiting on you» — a quiet-only count reads «21 waiting on you — none pressing»,
  *  a loud one adds «· 18 more, none pressing». */
 export function actionWords(action, total = action.length) { return badgeWords(action, total, t); } // the sentence is PURE (user-todos-layout.js badgeWords)
+/** B-44f3: a HELD store's line — the snapshot's `held` (For you could not read its saved list: nothing can be filed or changed
+ *  until it reads) → its words, else null. Drawn where «Nothing needs you» / «all clear» would stand: an unread list is never
+ *  «nothing» (the store keeps no item for it — it cannot be written while held). */
+export function heldWords(todos) {
+  const h = todos && todos.held;
+  if (!h || typeof h !== 'object') return null;
+  const p = { file: String(h.file || 'user-todos.json'), code: String(h.code || '?') };
+  return h.damaged ? t("For you's saved list is damaged and could not be set aside ({file}) — it is kept exactly as it is, and nothing can be filed or changed until it is fixed.", p)
+    : t('For you cannot read its saved list right now ({file}: {code}) — nothing can be filed or changed until it reads. It is read again soon.', p);
+}
 
 /** THE SIDEBAR ROW a conversation key names — exported ONCE (lane login-request-card piece 1: a link of the scheme names its
  *  conversation by the same key): the sidebar's OWN canonical key derivation (the one the status chips use) — an ad-hoc

@@ -500,8 +500,13 @@ function create(engineCtx) {
   }
   // a RESTART ends every pending sign-in (they live in memory, their states are signed per boot): the items they filed go too
   const LANDED_TYPE = 'channel-connect';
-  try { if (userTodos && typeof userTodos.idsWhere === 'function') for (const id of userTodos.idsWhere((i) => i.status === 'open' && i.sessionKey === INBOX_KEY && i.action && i.action.type === LANDED_TYPE)) userTodos.setStatus(id, 'done', RESOLVED_BY); }
-  catch (e) { log.warn(`[channels] the «finish connecting» items of the last run could not be resolved: ${(e && e.message) || e}`); }
+  // B-44f3: judged at the READ — while For you is held unread its list is empty because it is unread (the last run's cards would
+  // come back open after the read, their sign-ins gone)
+  const endLastRun = () => {
+    try { if (userTodos && typeof userTodos.idsWhere === 'function') for (const id of userTodos.idsWhere((i) => i.status === 'open' && i.sessionKey === INBOX_KEY && i.action && i.action.type === LANDED_TYPE)) userTodos.setStatus(id, 'done', RESOLVED_BY); }
+    catch (e) { log.warn(`[channels] the «finish connecting» items of the last run could not be resolved: ${(e && e.message) || e}`); }
+  };
+  if (userTodos && typeof userTodos.whenRead === 'function') userTodos.whenRead(endLastRun, "the last run's «finish connecting» items"); else endLastRun();
   /** The retraction: ONLY the item this sign-in filed (same id, same text), only while it is still open. */
   function endLandedAsk(p, why) {
     clearLandedAsk(p);

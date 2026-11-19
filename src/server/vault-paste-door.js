@@ -84,7 +84,7 @@ const MORE_WORDS = Object.freeze({
   totp_no_door: 'this server keeps no two-step codes — nothing was asked',
 });
 const STATUS = Object.freeze({
-  unauthorized: 401, job_no_use: 403, request_quiet: 429, too_many_requests: 429, unfiled: 503, ask_unknown: 404, ask_settled: 409,
+  unauthorized: 401, job_no_use: 403, 'todos-unread': 503, request_quiet: 429, too_many_requests: 429, unfiled: 503, ask_unknown: 404, ask_settled: 409,
   bad_answer: 400, vault_locked: 423, vault_not_set_up: 409, invalid_value: 400, store_failed: 500, value_required: 400, value_too_long: 400, entry_unknown_id: 404,
   entry_unknown: 404, words_not_here: 400, words_same: 409, words_pending: 409,   // lane vault-entry-description
   totp_no_door: 409, totp_bad_name: 400, totp_words: 400, totp_host: 400, exists: 409, bad_uri: 400, hotp_unsupported: 400, bad_seed: 400, seed_too_short: 400, bad_digits: 400, bad_period: 400, bad_algorithm: 400, bad_text: 400, bad_name: 400, name_required: 400, bad_way: 400,   // lane totp-request-card (the two-step add door's own codes)
@@ -128,6 +128,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
   /** THE INDEX from the store (once — the items outlive a restart; a request is the item). */
   function index() {
     if (indexed || !userTodos) return;
+    if (userTodos.isHeldUnread?.()) return;   // B-44f3: For you held unread — its list is empty because it is unread: never frozen as the index (built from the FILE after the read)
     indexed = true;
     try { for (const it of (userTodos.snapshot?.() || {}).open || []) { const q = recordOf(it); if (q) open.set(q.requestId, q); const w = wrecordOf(it); if (w) wopen.set(w.proposalId, w); } } catch (e) { log(`the paste requests could not be read back: ${e.message}`); }
   }
@@ -162,6 +163,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     const v = P.requestVerdict({ words, purpose, into, kind, name, hosts, note });   // note: lane vault-entry-description (`--note`)
     if (!v.ok) return v;
     if (!userTodos) return named('unfiled');
+    if (userTodos.isHeldUnread?.()) return { ok: false, code: 'todos-unread', words: userTodos.unreadRefusal('a paste request') };   // B-44f3: no card can be filed, and the open ones are unread — refused by name
     if (v.target.kind === P.LOGIN_KIND && !(logins && typeof logins.addOwn === 'function')) return named('login_no_door');   // lane login-request-card
     if (v.target.kind === P.LOGIN_KIND && loginChannelFn) {
       const ch = loginChannelFn({ caller, handle: (caller && caller.handle) || '' });
@@ -491,6 +493,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     if (caller.job) return named('job_no_use');
     if (!caller.conversationId) return named('unauthorized');
     if ((name === undefined || name === null) && (note === undefined || note === null)) return named('describe_required');
+    if (userTodos && userTodos.isHeldUnread?.()) return { ok: false, code: 'todos-unread', words: userTodos.unreadRefusal('a words proposal') };   // B-44f3: the open proposals are unread — refused by name
     const v = P.wordsOf({ name, note });
     if (!v.ok) return v;
     const st = vault.state();

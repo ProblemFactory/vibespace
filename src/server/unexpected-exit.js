@@ -139,6 +139,7 @@ function healResumed() {
     let key = null;
     try { key = deps.sessionKeyFor(s, sid); } catch { }
     if (!key || healed.get(s) === key) continue;
+    if (deps.userTodos && deps.userTodos.isHeldUnread?.()) break;   // B-44f3: For you held unread — «gone» is unread there: keep nothing marked healed (the pass after the read heals)
     healed.set(s, key);
     const startedAt = Number(s.createdAt) || 0;
     let ids = [];

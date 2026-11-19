@@ -5384,15 +5384,20 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     });
   }
 
-  // B-97ae round 2: a leftover's For-you item a PAST hub life filed names a tab this hub does not hold — and the hub that held it
-  // took its sessions (and, measured — S12 — the authenticators in them) when it went: it is not kept
-  try { const n = forYou && typeof forYou.sweep === 'function' ? forYou.sweep('pk-left:') : 0; if (n) log.log?.(`[browser-dialog] ${n} passkey «could not be taken back» item(s) of a past hub life resolved — that hub's sessions took the authenticators with them`); } catch { /* the tray's own failure */ }
-  // B-ebb7: a sign-in a PAST hub life asked the person to type — its paused request was held on that hub's watch socket, which
-  // closed with it: no answer typed now could reach it, so the item is closed here, said once — DISMISSED by «the hub restarted»
-  // (never «done»: in the tray's history an ask nobody answered must not read as answered). RIGHT ONLY WHILE THIS MODULE IS
-  // CREATED ONCE PER HUB LIFE (src/server/mounts-plugins-wiring.js makes the one): a second create in the same life — a reload —
-  // would close this life's LIVE asks too
-  try { const n = forYou && typeof forYou.sweepAs === 'function' ? forYou.sweepAs(PROMPT_FY_KEY, 'dismissed', 'hub-restart') : 0; if (n) log.log?.(`[browser-dialog] ${n} sign-in For-you item(s) of a past hub life resolved — that hub's sign-in requests ended with it`); } catch { /* the tray's own failure */ }
+  // B-44f3 (the first read's MUST): the two sweeps of a PAST hub life's items below run at For you's read when it is held unread (the
+  // held list is empty — a sweep now closes nothing, and never runs again); no item of THIS life can be filed before that read
+  const sweepPastLife = () => {
+    // B-97ae round 2: a leftover's For-you item a PAST hub life filed names a tab this hub does not hold — and the hub that held it
+    // took its sessions (and, measured — S12 — the authenticators in them) when it went: it is not kept
+    try { const n = forYou && typeof forYou.sweep === 'function' ? forYou.sweep('pk-left:') : 0; if (n) log.log?.(`[browser-dialog] ${n} passkey «could not be taken back» item(s) of a past hub life resolved — that hub's sessions took the authenticators with them`); } catch { /* the tray's own failure */ }
+    // B-ebb7: a sign-in a PAST hub life asked the person to type — its paused request was held on that hub's watch socket, which
+    // closed with it: no answer typed now could reach it, so the item is closed here, said once — DISMISSED by «the hub restarted»
+    // (never «done»: in the tray's history an ask nobody answered must not read as answered). RIGHT ONLY WHILE THIS MODULE IS
+    // CREATED ONCE PER HUB LIFE (src/server/mounts-plugins-wiring.js makes the one): a second create in the same life — a reload —
+    // would close this life's LIVE asks too
+    try { const n = forYou && typeof forYou.sweepAs === 'function' ? forYou.sweepAs(PROMPT_FY_KEY, 'dismissed', 'hub-restart') : 0; if (n) log.log?.(`[browser-dialog] ${n} sign-in For-you item(s) of a past hub life resolved — that hub's sign-in requests ended with it`); } catch { /* the tray's own failure */ }
+  };
+  if (forYou && typeof forYou.isHeldUnread === 'function' && forYou.isHeldUnread() && typeof forYou.whenRead === 'function') forYou.whenRead(sweepPastLife, "a past hub life's browser items"); else sweepPastLife();
 
   if (logins && typeof logins.onVaultOpen === 'function') {
     unsubVaultOpen = logins.onVaultOpen(() => {

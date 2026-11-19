@@ -392,7 +392,11 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     resetWriteOwed = false;   // the recheck road writes at once below (persist)
     fileResetNotice(); armNoticeRetry();
     unreadable = null;
-    try { const ut = getUserTodos(); if (ut && typeof ut.idsWhere === 'function') for (const id of ut.idsWhere((i) => i && i.itemKey === LEDGER_ITEM && i.status === 'open')) ut.setStatus(id, 'done', 'agent'); } catch { }   // its notice is no longer true
+    { // its notice is no longer true — B-44f3 (主开发 03:57Z, a should; the sibling of the held notice's close): For you held unread ⇒ closed at ITS read
+      const closeLedger = () => { try { const ut = getUserTodos(); if (ut && typeof ut.idsWhere === 'function') for (const id of ut.idsWhere((i) => i && i.itemKey === LEDGER_ITEM && i.status === 'open')) ut.setStatus(id, 'done', 'agent'); } catch { } };
+      let ut0 = null; try { ut0 = getUserTodos(); } catch { ut0 = null; }
+      if (ut0 && typeof ut0.isHeldUnread === 'function' && ut0.isHeldUnread() && typeof ut0.whenRead === 'function') ut0.whenRead(closeLedger, "the spend ledger's unreadable notice"); else closeLedger();
+    }
     if (recheckTimer) { try { unschedule(recheckTimer); } catch { } recheckTimer = null; }
     persist();
     return true;
@@ -867,7 +871,11 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     if (mk.mark) marker = markerOf(mk.mark);
     if (mk.error) markerUnreadable = mk.error;
     judgeLoaded(ld, mk, now);
-    try { const ut = getUserTodos(); if (ut && typeof ut.idsWhere === 'function') for (const id of ut.idsWhere((i) => i && i.itemKey === HELD_ITEM && i.status === 'open')) ut.setStatus(id, 'done', 'agent'); } catch { }   // its notice is no longer true
+    { // B-44f3 (the meeting on the stores tip): For you held unread — its list reads empty, so the held notice's close waits for its read
+      const closeHeld = () => { try { const ut = getUserTodos(); if (ut && typeof ut.idsWhere === 'function') for (const id of ut.idsWhere((i) => i && i.itemKey === HELD_ITEM && i.status === 'open')) ut.setStatus(id, 'done', 'agent'); } catch { } };
+      let ut0 = null; try { ut0 = getUserTodos(); } catch { ut0 = null; }
+      if (ut0 && typeof ut0.isHeldUnread === 'function' && ut0.isHeldUnread() && typeof ut0.whenRead === 'function') ut0.whenRead(closeHeld, "the spend ledger's held notice"); else closeHeld();
+    }   // its notice is no longer true
     armBeat();
     if (!unreadable) flush();
     fileResetNotice(); armNoticeRetry();

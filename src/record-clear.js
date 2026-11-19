@@ -177,6 +177,8 @@ const REFUSALS = Object.freeze({
   bad_items: { status: 400, why: 'items must be a non-empty array of {kind, id} records' },
   too_many: { status: 400, why: `at most ${MAX_ITEMS} records per request` },
   unavailable: { status: 503, why: 'that store is not available on this instance right now — retry shortly' },
+  // B-44f3: For you is held unread — a For-you clear, and a job's (it clears the job's For-you items too), waits for the read
+  todos_unread: { status: 503, why: 'For you cannot read its saved list right now — nothing was cleared (a job\'s clear also clears its For-you items); try again once it reads' },
   failed: { status: 500, why: 'the clear could not be written — nothing was changed' },
 });
 const refuse = (code) => ({ ok: false, code, why: (REFUSALS[code] || REFUSALS.failed).why, status: (REFUSALS[code] || REFUSALS.failed).status });

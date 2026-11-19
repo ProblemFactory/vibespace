@@ -332,7 +332,7 @@ const automation = require('./automation-engine.js').create({ dataDir: path.join
   // an ENDED conversation's facts (its session key from the stores that still name it — the sidebar's names, the Task Groups — else claude:<id>)
   verbs: { ...require('./conversation-ops.js').automationVerbs({ activeSessions, groupsOf: automationGroupsOf,
     archive: (key) => persistenceRouter.archiveSession(key),
-    asksOf: (key) => { try { return userTodos.forSession([key]).filter((i) => i && i.by === 'agent' && i.kind !== 'notice' && i.kind !== 'page'); } catch { return []; } },
+    asksOf: (key) => { if (userTodos.isHeldUnread?.()) throw Object.assign(new Error(userTodos.unreadRefusal('archiving a conversation (its open asks are unread)')), { code: 'todos-unread' }); try { return userTodos.forSession([key]).filter((i) => i && i.by === 'agent' && i.kind !== 'notice' && i.kind !== 'page'); } catch { return []; } },   // B-44f3: held ⇒ refused by name (never «no open asks»)
     resolveAsks: (ids, by) => userTodos.setStatusMany(ids, 'dismissed', by),
     turnOf: require('./turn-facts.js').turnOf,
     resumeLine, resumeFactsOf,
@@ -1389,6 +1389,9 @@ function createSessionMessages(session, sessionId) {
           sweep: (prefix) => { if (!userTodos || typeof userTodos.idsWhere !== 'function') return 0; const ids = browserItemIds(prefix); for (const id of ids) userTodos.setStatus(id, 'done', 'browser'); return ids.length; }, // B-97ae round 2: the watch's items of a past hub life (an item whose tab this hub does not hold is not kept)
           ended: (id, fact) => { if (userTodos && typeof userTodos.noteFact === 'function') userTodos.noteFact(id, fact); }, // lane passkey-browse-yourself r10: a card's «Allow once» taken back by a later answer — the record carries the end
           sweepAs: (prefix, status, by) => { if (!userTodos || typeof userTodos.idsWhere !== 'function') return 0; const ids = browserItemIds(prefix); for (const id of ids) userTodos.setStatus(id, status, by); return ids.length; }, // B-ebb7: the sweep with its close named — a past life's sign-in ask «dismissed · hub-restart», never «done»
+          // B-44f3: the store held unread — the watch's boot sweeps wait for its read (the held list is empty: a sweep now closes nothing)
+          isHeldUnread: () => !!(userTodos && typeof userTodos.isHeldUnread === 'function' && userTodos.isHeldUnread()),
+          whenRead: (fn, label) => { if (userTodos && typeof userTodos.whenRead === 'function') userTodos.whenRead(fn, label); else fn(); }
         },
         // lane passkey-store-core: THE PASSKEY STORE — data/browser-passkeys.json (0600, written only by the watch) + the
         // per-instance key file data/browser-passkeys.key (0600, made once; B-4a59(b)'s keyring replaces this pair)
