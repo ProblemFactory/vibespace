@@ -5604,6 +5604,117 @@ function create(deps = {}) {
     if (typeof readMembership !== 'function' || !unreadNow(cids)) return 0;
     try { return await readMembership(cids); } catch { return 0; }
   };
+  // B-43bc CURE (主开发 04:09Z — «said, never silent»): a delivery whose audience is STILL being read when the hold ends (the
+  // decided read's bound, or at once for a path in its back-off) is KEPT, never dropped — the wake's records for the watchers
+  // that member would have, a recall's note (its «noted» mark left unset), a reaction digest's line — and re-judged by
+  // heldPass when the read lands (the store's signal → membershipChanged) and at the latest every HELD_LOOK_MS after it.
+  // ONE journal line a hold (never a line a message). Memory only: a restart forgets it (as the owed batches).
+  const HELD_LOOK_MS = 30e3, HELD_CONVS = 200, HELD_PER_CONV = 50;
+  const heldUnread = new Map();   // `${adapterId}/${convId}` → {adapterId, convId, cids: Set, wake: Map(record id → {r, at, pks: Set}), notes: Set(vid)}
+  let heldTimer = null, heldBusy = false;
+  const liveUnreadCids = () => { try { return (liveSessions() || []).filter((x) => x && x.cid && x.groupsUnread).map((x) => String(x.cid)); } catch { return []; } };
+  function holdFor(kind, rec, convId, cids, add) {
+    const key = `${rec.id}/${convId}`;
+    let h = heldUnread.get(key);
+    if (!h) { if (heldUnread.size >= HELD_CONVS) heldUnread.delete(heldUnread.keys().next().value); h = { adapterId: rec.id, convId, cids: new Set(), wake: new Map(), notes: new Set() }; heldUnread.set(key, h); }
+    const who = [...new Set(cids.map(String))];
+    for (const c of who) h.cids.add(c);
+    add(h);
+    log.warn(`[channels] ${key}: a ${kind} judged on «still reading» for ${who.join(', ')} — KEPT for them, delivered when their Task Groups read lands (the store's signal; at the latest ${Math.round(HELD_LOOK_MS / 1000)} s after it)`);
+    if (!heldTimer && !stopped) { heldTimer = setInterval(() => { track(heldPass()); }, HELD_LOOK_MS); if (heldTimer.unref) heldTimer.unref(); }
+  }
+  /** The kept deliveries whose members are read now are judged again, ONCE: the wake through the owed road (it reaches only
+   *  the watchers it was kept for), the note through noteRecall (its mark still unset), the digest re-batched. */
+  async function heldPass() {
+    if (heldBusy || stopped || !heldUnread.size) return 0;
+    heldBusy = true;
+    let n = 0;
+    try {
+      for (const [key, h] of [...heldUnread]) {
+        if (unreadNow([...h.cids])) await readFirst([...h.cids]);
+        if (unreadNow([...h.cids])) continue;   // still being read: kept for the next signal / look
+        heldUnread.delete(key);
+        const rec = adapterRecords().adapters.find((x) => x.id === h.adapterId);
+        if (!rec || rec.enabled === false) continue;
+        if (h.wake.size) { n += h.wake.size; try { await onFresh(rec, h.convId, [...h.wake.values()].map((e) => e.r), { origin: 'unread', owed: h.wake }); } catch (err) { log.warn(`[channels] ${key}: a kept wake failed — ${(err && err.message) || err}`); } }
+        for (const vid of h.notes) { n++; try { await noteRecall(rec, h.convId, vid); } catch (err) { log.warn(`[channels] ${key}: a kept recall note failed — ${(err && err.message) || err}`); } }
+      }
+    } finally { heldBusy = false; }
+    if (!heldUnread.size && heldTimer) { clearInterval(heldTimer); heldTimer = null; }
+    return n;
+  }
+  // THE DIGEST'S OWN HOLD (test-architecture §64: a side record never reaches a wake site — the digest's kept lines are
+  // re-batched by their own pass, which only queues the side batch again; never heldPass, never onFresh)
+  const heldDigest = new Map();   // `${adapterId}/${convId}` → {adapterId, convId, cids: Set, vids: Set}
+  let heldDigestTimer = null;
+  function holdDigestFor(rec, convId, kept) {
+    const key = `${rec.id}/${convId}`;
+    let h = heldDigest.get(key);
+    if (!h) { if (heldDigest.size >= HELD_CONVS) heldDigest.delete(heldDigest.keys().next().value); h = { adapterId: rec.id, convId, cids: new Set(), vids: new Set() }; heldDigest.set(key, h); }
+    const who = [...new Set(kept.map((x) => String(x[1])))];
+    for (const [v, c] of kept) { h.vids.add(String(v)); h.cids.add(String(c)); }
+    log.warn(`[channels] ${key}: a reaction digest judged on «still reading» for ${who.join(', ')} — KEPT for them, delivered when their Task Groups read lands (the store's signal; at the latest ${Math.round(HELD_LOOK_MS / 1000)} s after it)`);
+    if (!heldDigestTimer && !stopped) { heldDigestTimer = setInterval(heldDigestPass, HELD_LOOK_MS); if (heldDigestTimer.unref) heldDigestTimer.unref(); }
+  }
+  function heldDigestPass() {
+    for (const [key, h] of [...heldDigest]) {
+      if (unreadNow([...h.cids])) continue;   // still being read: kept (the digest's flush itself reads first)
+      heldDigest.delete(key);
+      notifySide(h.adapterId, h.convId, [...h.vids]);
+    }
+    if (!heldDigest.size && heldDigestTimer) { clearInterval(heldDigestTimer); heldDigestTimer = null; }
+  }
+  /** THE WAKE'S AUDIENCE STILL BEING READ (the cure's should): only the members THIS conversation's watchers can depend on —
+   *  a via row names its member; a group row (or an exception anywhere) can name any member still being read. */
+  function unreadAudience(en) {
+    const unread = liveUnreadCids();
+    if (!unread.length || !en) return [];
+    let e0 = null; try { e0 = effectiveFor(en); } catch { e0 = null; }
+    const ws = e0 && Array.isArray(e0.watchers) ? e0.watchers : [];
+    if (CG.hasAnyExcept() || ws.some((it) => it && it.watcher && it.watcher.principal && it.watcher.principal.kind === 'group')) return unread;
+    const via = new Set(ws.filter((it) => it && it.watcher && it.watcher.via && it.watcher.principal && it.watcher.principal.kind === 'agent').map((it) => String(it.watcher.principal.id)));
+    return unread.filter((c) => via.has(c));
+  }
+  /** What a member STILL being read would have got from this wake — the watchers its membership decides and the wake did
+   *  not reach — is KEPT (said once), never dropped. */
+  function holdUnreadWake(rec, convId, en, eff, aud, fresh0) {
+    const still = aud.filter((c) => unreadNow([c]));
+    if (!still.length || !Array.isArray(fresh0) || !fresh0.length) return;
+    let e0 = null; try { e0 = effectiveFor(en); } catch { e0 = null; }
+    if (!e0 || !Array.isArray(e0.watchers)) return;
+    const given = new Set(eff && Array.isArray(eff.watchers) ? eff.watchers.map((it) => pkOf(it.watcher.principal)) : []);
+    const anyExcept = CG.hasAnyExcept();
+    const pks = new Set();
+    for (const it of e0.watchers) {
+      const p = it && it.watcher && it.watcher.principal;
+      if (!p) continue;
+      if (p.kind === 'agent' && still.includes(String(p.id)) && (it.watcher.via || anyExcept)) pks.add(pkOf(p));
+      else if (p.kind === 'group') for (const c of still) pks.add(pkOf({ kind: 'group', id: p.id, target: c }));
+      else if (p.kind === 'everyone' && anyExcept) for (const c of still) pks.add(pkOf({ kind: 'everyone', target: c }));
+    }
+    // a GROUP row's own item (its round-robin wakes ONE live member): kept when no member READ now is in the group — its wake
+    // reached nobody; with a read member in it, the group was reached (a re-run would wake it twice)
+    for (const it of e0.watchers) {
+      const p = it && it.watcher && it.watcher.principal;
+      if (!p || p.kind !== 'group') continue;
+      const gid = String(p.id);
+      let readIn = false;
+      try { readIn = (liveSessions() || []).some((x) => x && x.cid && !x.groupsUnread && Array.isArray(x.groups) && x.groups.map(String).includes(gid)); } catch { readIn = false; }
+      if (!readIn) pks.add(pkOf(p));
+    }
+    const keep = [...pks].filter((pk) => pk && (!given.has(pk) || /^group:[^>]+$/.test(pk)));
+    if (!keep.length) return;
+    const t = now();
+    holdFor('wake', rec, convId, still, (h) => {
+      for (const r of fresh0) {
+        const id = String(r && r.id);
+        const e = h.wake.get(id) || { r, at: t, pks: new Set() };
+        for (const pk of keep) e.pks.add(pk);
+        h.wake.delete(id); h.wake.set(id, e);
+        while (h.wake.size > HELD_PER_CONV) h.wake.delete(h.wake.keys().next().value);
+      }
+    });
+  }
   function flushSide() {
     // B-43bc: the digest judges each sender's reach by its Task Groups — a sender still being read is waited for first; the
     // batch keeps filling meanwhile (the slot stays taken), then ONE flush takes it all
@@ -5670,9 +5781,11 @@ function create(deps = {}) {
       }
       return reach.get(cid);
     };
+    const keptFor = [];   // B-43bc cure: [vid, cid] of a sender still being read — KEPT (said once below), never skipped
     for (const vid of ids) {
       const cid = whose.get(String(vid));
       if (!cid) continue;
+      if (unreadNow([cid])) { keptFor.push([String(vid), cid]); continue; }
       if (!mayHear(cid)) continue;
       const list = folded.get(vid) || [];
       const sig = list.map((x) => `${x.key}:${x.count}`).join(',');
@@ -5690,6 +5803,7 @@ function create(deps = {}) {
       try { deliver.stashFor(cid, { source: 'channel', kind: 'notification', fromName: RX_DIGEST_FROM, text: `${line} — message ${inertFrames(String(vid).slice(0, 200))} ${tag}`, about: stashAbout({ keys: [`${rec.id}/${convId}`], cid }) }); }
       catch (err) { log.warn(`[channels] ${rec.id}/${convId}: a reaction digest could not be stored for ${cid}: ${(err && err.message) || err}`); }
     }
+    if (keptFor.length) holdDigestFor(rec, convId, keptFor);
   }
   /** A thread changed (a reply appended into it, a walk landed): the roots' chips are re-spelled in place. */
   function notifyThreads(adapterId, convId, keys) {
@@ -6156,6 +6270,13 @@ function create(deps = {}) {
   async function noteRecall(rec, convId, vid) {
     if (!deliver || typeof deliver.stashFor !== 'function') return;
     const due = [];
+    // B-43bc cure: the recipients are DECIDED before any mark — read first; one STILL being read keeps its «noted» mark
+    // unset (KEPT: heldPass runs this again when its read lands), never marked and then dropped
+    const wkey = Rev.wokeKeyOf(vid);
+    const en0 = store.index.live()[`${rec.id}/${convId}`];
+    const cand = [...new Set((en0 && Array.isArray(en0.wokeFor) ? en0.wokeFor : []).filter((w) => w && String(w.vid) === wkey && !w.noted).map((w) => String(w.cid)))];
+    if (cand.length) await readFirst(cand);
+    const still = new Set(cand.filter((c) => unreadNow([c])));
     // round 3 (smaller 2): the note goes WITH the mark — a durable update that failed (not-durable: applied in memory, not on
     // disk yet) still sends the notes; round 2 rejected before them and the agent never heard of the recall (master sent it)
     let notDurable = null;
@@ -6165,10 +6286,10 @@ function create(deps = {}) {
       // ONE note per conversation (lane channel-recall-engine-leg): a message carried to it twice (a re-delivery, a scope
       // digest beside a wake) has two rows here — both are marked, the conversation hears it once (the first wake's time)
       const key = Rev.wokeKeyOf(vid);   // the door's key (lane channel-recall-ledger)
-      for (const w of en.wokeFor) if (w && String(w.vid) === key && !w.noted) { w.noted = true; if (!due.some((d) => d.cid === w.cid)) due.push({ cid: w.cid, at: w.at }); }
+      for (const w of en.wokeFor) if (w && String(w.vid) === key && !w.noted && !still.has(String(w.cid))) { w.noted = true; if (!due.some((d) => d.cid === w.cid)) due.push({ cid: w.cid, at: w.at }); }
     }, { durable: true }); } catch (e) { if (e && e.code === 'not-durable' && e.applied) notDurable = e; else throw e; }
     if (notDurable && due.length) log.warn(`[channels] ${rec.id}/${convId}: a recall's «noted» marks are in memory, not on disk yet — the note is sent now (a restart before the storage answers may send it once more)`);
-    await readFirst(due.map((d) => d.cid));   // B-43bc: a recipient still being read is read first (never «not a member» on it)
+    if (still.size) holdFor('recall note', rec, convId, [...still], (h) => { h.notes.add(String(vid)); });
     const en = store.index.live()[`${rec.id}/${convId}`];
     // REACH FIRST (the reaction digest's rule): the note is news FROM the conversation — an agent whose access the owner
     // removed since the wake hears nothing more from here
@@ -7939,9 +8060,12 @@ function create(deps = {}) {
     const ledger = async (what, fn) => { try { await store.index.update(fn); } catch (err) { log.warn(`[channels] ${rec.id}/${convId}: ${what} ledger failed: ${(err && err.message) || err}`); } };
     // msgs7d — the estimate's denominator measured after the fact (§7.2)
     if (!owedFor) await ledger('msgs', () => { const e2 = store.index.entry(rec.id, convId, { create: false }); if (!e2) return; healP2(e2); e2.stats.msgs.push({ at: t, n: fresh.length }); e2.stats.msgs = F.pruneLedger(e2.stats.msgs, t); e2.stats.msgs7d = F.countSince(e2.stats.msgs, t, 7); });
-    // B-43bc: a member whose Task Groups are still being read is READ first — the wake never judges «not a member» on it
-    if ((await readFirst()) && stopped) return;
+    // B-43bc: a member whose Task Groups are still being read is READ first (only the members THIS conversation's watchers can
+    // depend on) — the wake never judges «not a member» on it; what one still being read would have got is KEPT, said
+    const aud = unreadAudience(en);
+    if (aud.length && (await readFirst(aud)) && stopped) return;
     const eff = wakeEffOf(en);   // ALL AGENTS fanned out: one item per running conversation
+    holdUnreadWake(rec, convId, en, eff, aud, fresh0);
     if (!eff || !eff.watchers.length) return;
     // a named AGENT first, then groups (and the All-agents fan-out): a group's round-robin skips a session
     // this batch already reached (one batch never bills one agent twice)
@@ -9088,6 +9212,8 @@ function create(deps = {}) {
     if (offStashGate) { try { offStashGate(); } catch {} offStashGate = null; }   // verify r3: the stash gate
     if (offSwapReopen) { try { offSwapReopen(); } catch {} }   // B-166e: the client-swap item's reopen listener
     if (timer) { clearInterval(timer); timer = null; }
+    if (heldDigestTimer) { clearInterval(heldDigestTimer); heldDigestTimer = null; }
+    if (heldTimer) { clearInterval(heldTimer); heldTimer = null; }   // B-43bc cure: the kept deliveries' look (memory: a restart forgets it)
     if (owedTimer) { clearInterval(owedTimer); owedTimer = null; }   // lane judged-watch-state: the owed look (what is owed is memory — a restart forgets it)
     // P2: a window that never fired keeps its hits PENDING on the index (they
     // were persisted before the timer existed), so the next boot delivers them.
@@ -9284,7 +9410,8 @@ function create(deps = {}) {
     resurfacePointers, openAccessPointers,   // r4: the 2026-10-closed-access-pointers-hidden migration (src/server/migrations.js) goes through these
     agentWatch, agentUnwatch, agentWatchesFor, setAgentDirectory, directoryLists,   // lane channel-agent-watch
     attention, setJudge, labelJudged,   // lane decision-attention: the judged rows' scan, the account's "never judge", a label
-    owedPass, judgedRoadFor,   // lane judged-watch-state: the owed re-judgment's look (a suite drives it by hand) + the doors' reading of a judged road
+    owedPass, judgedRoadFor,
+    heldPass, membershipChanged: () => { if (heldDigest.size) heldDigestPass(); return heldUnread.size ? track(heldPass()) : Promise.resolve(0); },   // B-43bc cure: the kept deliveries' look (the store's signal; a suite drives heldPass by hand)   // lane judged-watch-state: the owed re-judgment's look (a suite drives it by hand) + the doors' reading of a judged road
     onFresh,   // lane channel-agent-watch: the hit dispatch, driven by test-channel-agent-watch ⑤ with records the store already holds
     carryParked,   // lane stash-pending-live: a member's own turn (the hook's stash drain) carries what its watchers parked
     listFor, readFor, statusFor,

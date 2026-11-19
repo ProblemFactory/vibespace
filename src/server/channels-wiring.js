@@ -230,7 +230,9 @@ function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env
   app.use(webhookRoutes.router);
   app.use(channelsRoutes.router);
   channels.start();
-  return { channels, groups, touches, flushGroupCards, liveness, roster: liveSessions, rosterChanged: () => rosterPass.invalidate(), rosterBuilds: () => rosterPass.builds(), shutdown: () => { try { channels.apiCards.stop(); } catch {} try { touches.flush(); } catch (e) { console.warn('[channel-touches] flush:', e && e.message); } try { flushGroupCards(); } catch (e) { console.warn('[groups] card flush:', e && e.message); } try { channels.stop(); } catch (e) { console.warn('[channels] shutdown:', e && e.message); } } };
+  // B-43bc cure: rosterChanged (the Task Groups' change signal — a read that landed among them) also re-judges the channels
+  // engine's KEPT deliveries (membershipChanged → heldPass)
+  return { channels, groups, touches, flushGroupCards, liveness, roster: liveSessions, rosterChanged: () => { rosterPass.invalidate(); try { if (channels && typeof channels.membershipChanged === 'function') channels.membershipChanged(); } catch { } }, rosterBuilds: () => rosterPass.builds(), shutdown: () => { try { channels.apiCards.stop(); } catch {} try { touches.flush(); } catch (e) { console.warn('[channel-touches] flush:', e && e.message); } try { flushGroupCards(); } catch (e) { console.warn('[groups] card flush:', e && e.message); } try { channels.stop(); } catch (e) { console.warn('[channels] shutdown:', e && e.message); } } };
 }
 
 module.exports = { create, livenessReader };

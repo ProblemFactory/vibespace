@@ -119,7 +119,7 @@ const NOTE_FROM = 'Channels · recalls';
 function dayStartClock() { const t0 = Date.now(); const day0 = Math.floor(t0 / 86400e3) * 86400e3 + 60e3; let skew = 0; const f = () => day0 + (Date.now() - t0) + skew; f.advance = (ms) => { skew += ms; }; return f; }
 /** One engine over `dataDir` (a restart = a second one over the same dir, the same clock): the fake answers a stored
  *  message by id from its revisions file; every by-id ask is counted; the stub ladder delivers, the stub stash keeps. */
-function mkEngine(ENGM, dataDir, { clock = dayStartClock(), refuse = false, roster = null, readMembership = null } = {}) {
+function mkEngine(ENGM, dataDir, { clock = dayStartClock(), refuse = false, roster = null, readMembership = null, log = null } = {}) {
   fs.mkdirSync(dataDir, { recursive: true });
   const REVS = path.join(dataDir, 'revisions.json');
   if (!fs.existsSync(REVS)) fs.writeFileSync(REVS, J({ revisions: {} }));
@@ -134,7 +134,7 @@ function mkEngine(ENGM, dataDir, { clock = dayStartClock(), refuse = false, rost
   const mk0 = fk.create;
   fk.create = (record, deps) => { const a = mk0(record, deps); const by = a.revisionOf; a.revisionOf = (convId, o) => { asked.push(o && o.messageId); return by(convId, o); }; return a; };
   registry.register(fk);
-  const eng = ENGM.create({ dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, registry, broadcast: () => {}, userTodos: new UserTodoManager({ dataDir, now: clock }), deliver, now: clock, log: { log() {}, warn() {}, error() {} }, liveSessions: () => (roster ? roster() : [{ cid: 'agent-1', name: 'Worker', groups: [] }, { cid: 'agent-2', name: 'Other', groups: [] }]), readMembership });
+  const eng = ENGM.create({ dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, registry, broadcast: () => {}, userTodos: new UserTodoManager({ dataDir, now: clock }), deliver, now: clock, log: log || { log() {}, warn() {}, error() {} }, liveSessions: () => (roster ? roster() : [{ cid: 'agent-1', name: 'Worker', groups: [] }, { cid: 'agent-2', name: 'Other', groups: [] }]), readMembership });
   const recall = (...vids) => { const j = JSON.parse(fs.readFileSync(REVS, 'utf8')); for (const v of vids) j.revisions[v] = { state: 'recalled' }; fs.writeFileSync(REVS, J(j)); };
   const tail = (c) => { const m = eng.messages(A, c, { limit: 5 }); return m.records || m; };
   const recOf = () => eng.adapterRecords().adapters.find((r) => r.id === A);
@@ -511,11 +511,13 @@ console.log('⑧ B-43bc: a member still being read is read first — the wake an
 
   // the ENGINE: the recall note and the wake over the REAL engine
   const GRP = { kind: 'group', id: 'G' };
-  const mkWorld = (ENGM, tag, start) => {
-    const st = { state: start, reads: 0 };
+  const mkWorld = (ENGM, tag, start, { stuck = false } = {}) => {
+    const st = { state: start, reads: 0, said: [] };
     const roster = () => [{ cid: 'agent-1', name: 'Worker', groups: st.state === 'read' ? ['G'] : [], ...(st.state === 'unread' ? { groupsUnread: true } : {}) }, { cid: 'agent-2', name: 'Other', groups: [] }];
-    const readMembership = async () => { st.reads++; if (st.state !== 'unread') return 0; st.state = 'read'; return 1; };
-    return { st, w: mkEngine(ENGM, path.join(ROOT, tag), { roster, readMembership }) };
+    // `stuck`: the decided read passes its bound (or the path waits its back-off) — the answer is still «reading» after it
+    const readMembership = async () => { st.reads++; if (st.state !== 'unread' || stuck) return 0; st.state = 'read'; return 1; };
+    const log = { log() {}, warn: (m) => { st.said.push(String(m)); }, error() {} };
+    return { st, w: mkEngine(ENGM, path.join(ROOT, tag), { roster, readMembership, log }) };
   };
   async function noteLeg(ENGM, tag) {
     const { st, w } = mkWorld(ENGM, tag, 'read');
@@ -550,14 +552,71 @@ console.log('⑧ B-43bc: a member still being read is read first — the wake an
     `the WAKE of a member still being read waits for the read, then reaches it (${J(wl.delivered)}, ${wl.reads} read)`, J(wl));
   // RED CONTROLS: the engine without the read — the note and the wake are judged on the unread answer and lost
   const src = engineSource(REPO);
-  const NOTE_READ = "    await readFirst(due.map((d) => d.cid));   // B-43bc: a recipient still being read is read first (never «not a member» on it)\n";
-  const WAKE_READ = "    if ((await readFirst()) && stopped) return;\n";
+  const NOTE_READ = "    if (cand.length) await readFirst(cand);\n";
+  const WAKE_READ = "    if (aud.length && (await readFirst(aud)) && stopped) return;\n";
   ok(src.split(NOTE_READ).length === 2 && src.split(WAKE_READ).length === 2, 'control setup: the two reads are present once each');
   const noRead = MUT.load('src/server/channels-engine.js', src.replace(NOTE_READ, '').replace(WAKE_READ, ''), 'no-unread-read');
   const nlR = await noteLeg(noRead, 'unread-note-red');
   const wlR = await wakeLeg(noRead, 'unread-wake-red');
-  ok(nlR.woke.includes('agent-1') && nlR.notes === 0 && nlR.reads === 0, `RED CONTROL: without the read the recall note is judged on the unread answer and LOST (${nlR.notes} notes)`, J(nlR));
-  ok(wlR.delivered.length === 0 && wlR.reads === 0, `RED CONTROL: without the read the wake is judged on the unread answer and the member is not reached (${J(wlR.delivered)})`, J(wlR));
+  ok(nlR.woke.includes('agent-1') && nlR.notes === 0 && nlR.reads === 0, `RED CONTROL: without the read the recall note is judged on the unread answer at the moment — no note then (${nlR.notes})`, J(nlR));
+  ok(wlR.delivered.length === 0 && wlR.reads === 0, `RED CONTROL: without the read the wake is judged on the unread answer at the moment — the member not reached then (${J(wlR.delivered)})`, J(wlR));
+
+  // ── THE CURE (主开发 04:09Z): the read held PAST its bound (the stand-in read never lands) — the delivery is KEPT, SAID once,
+  //    and arrives ONCE after the read lands (the store's signal → membershipChanged → heldPass); a recall in that window
+  //    still delivers its note (its mark left unset until then) ──
+  async function keptWakeLeg(ENGM, tag) {
+    const { st, w } = mkWorld(ENGM, tag, 'read', { stuck: true });
+    await w.eng.pass(A, { force: true });
+    await w.eng.setGrain(A, { kind: 'conversation', convId: OPS }, { access: [acc(GRP)], watchers: [{ principal: GRP }] });
+    const m8 = w.tail(OPS).slice(-1)[0];
+    st.state = 'unread';
+    await w.eng.onFresh(w.recOf(), OPS, [m8], { origin: 'test' });
+    const then = w.delivered.map((d) => d.cid);
+    const said = st.said.filter((m) => /a wake judged on «still reading» for agent-1 — KEPT/.test(m)).length;
+    st.state = 'read';   // the read lands
+    await w.eng.membershipChanged();   // the store's signal (channels-wiring rosterChanged) runs the kept deliveries' look
+    const after = w.delivered.map((d) => d.cid);
+    await w.eng.heldPass();   // a second look delivers nothing more
+    const twice = w.delivered.length;
+    await w.eng.stop();
+    return { then, said, after, twice };
+  }
+  async function keptNoteLeg(ENGM, tag) {
+    const { st, w } = mkWorld(ENGM, tag, 'read', { stuck: true });
+    await w.eng.pass(A, { force: true });
+    await w.eng.setGrain(A, { kind: 'conversation', convId: OPS }, { access: [acc(GRP)], watchers: [{ principal: GRP }] });
+    const m8 = w.tail(OPS).slice(-1)[0];
+    await w.eng.onFresh(w.recOf(), OPS, [m8], { origin: 'test' });
+    st.state = 'unread';
+    w.recall(m8.vendorId);
+    await w.hourLater();
+    const then = w.notes().filter((x) => x.cid === 'agent-1').length;
+    const unmarked = w.woke(OPS).filter((x) => x.cid === 'agent-1').every((x) => !x.noted);
+    const said = st.said.filter((m) => /a recall note judged on «still reading» for agent-1 — KEPT/.test(m)).length;
+    st.state = 'read';
+    await w.eng.heldPass();
+    const after = w.notes().filter((x) => x.cid === 'agent-1').length;
+    await w.eng.heldPass();
+    const twice = w.notes().filter((x) => x.cid === 'agent-1').length;
+    await w.eng.stop();
+    return { then, unmarked, said, after, twice };
+  }
+  const kw = await keptWakeLeg(ENG, 'kept-wake');
+  ok(kw.then.length === 0 && kw.said === 1 && J(kw.after) === J(['agent-1']) && kw.twice === 1,
+    `a WAKE whose member is still being read past the bound is KEPT (0 then), SAID once, and reaches it ONCE after the read lands (${J(kw.after)}, ${kw.twice} in all)`, J(kw));
+  const kn = await keptNoteLeg(ENG, 'kept-note');
+  ok(kn.then === 0 && kn.unmarked && kn.said === 1 && kn.after === 1 && kn.twice === 1,
+    `a RECALL in that window: no note then, its «noted» mark left UNSET, said once — the note arrives ONCE after the read lands (${kn.after})`, J(kn));
+  // RED CONTROL: the engine without the holds (the first commit's form) — the wake and the note are DROPPED for good
+  const HOLD_WAKE = '    holdUnreadWake(rec, convId, en, eff, aud, fresh0);\n';
+  const NOTE_STILL = ' && !still.has(String(w.cid))) { w.noted = true;';
+  const NOTE_HOLD = "    if (still.size) holdFor('recall note', rec, convId, [...still], (h) => { h.notes.add(String(vid)); });\n";
+  ok(src.split(HOLD_WAKE).length === 2 && src.split(NOTE_STILL).length === 2 && src.split(NOTE_HOLD).length === 2, 'control setup: the wake hold, the note\'s unset mark and the note hold are present once each');
+  const noHold = MUT.load('src/server/channels-engine.js', src.replace(HOLD_WAKE, '').replace(NOTE_STILL, ') { w.noted = true;').replace(NOTE_HOLD, ''), 'no-unread-hold');
+  const kwR = await keptWakeLeg(noHold, 'kept-wake-red');
+  const knR = await keptNoteLeg(noHold, 'kept-note-red');
+  ok(kwR.after.length === 0 && kwR.said === 0, `RED CONTROL: without the hold the wake is DROPPED for good and nothing is said (${J(kwR.after)} after the read)`, J(kwR));
+  ok(knR.after === 0 && !knR.unmarked && knR.said === 0, `RED CONTROL: without the hold the note's mark is written and the note is DROPPED for good (${knR.after} after the read)`, J(knR));
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
