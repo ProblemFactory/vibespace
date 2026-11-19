@@ -53,6 +53,7 @@ function agentdMintDialPair(deviceId, { host = '', base = '', keepLink = false, 
   const hostToken = agentdHostToken('dial-' + deviceId);
   const tok = PT.mintToken('dial');
   hosts.setDialToken(deviceId, PT.tokenHash(tok));
+  try { require('../agentd/client.js').DeviceManager.dropHelloFolds('dev:' + deviceId); } catch { }   // a pairing made again starts its hello folds fresh (what the old one owed is said)
   try { hosts.noteDial(deviceId, 'minted', { host, base }); } catch (e) { console.warn('[device] dial facts not stamped at mint:', e.message); }
   const generation = (() => { try { return Number(hosts.findByDeviceId(deviceId)?.dial?.generation) || 1; } catch { return 1; } })();
   try { const h = hosts.findByDeviceId(deviceId); hosts.onDeviceAlert?.('pairing-minted', { hostKey: h ? h.id : 'host-dial-' + deviceId, machine: (h && h.name) || deviceId, deviceId, by, from: String(from || '').slice(0, 120), generation, host: String(host || '').slice(0, 120) }); } catch (e) { console.warn('[device] pairing alert not filed:', e.message); }

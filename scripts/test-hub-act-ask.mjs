@@ -561,8 +561,8 @@ console.log('  · the agent update at hello');
   const goes = freshDm(wn, 'dev:t-never', kn); goes._helloFoldEnd(reqOf(goes));
   ok(kn.lines.length === 2 && kn.lines[1].repeats === 4 && kn.lines[1].ask === 'never' && DeviceManager.helloFoldsOf('dev:t-never').size === 0, 'the update then goes: its refusals\' count said FIRST (ONE line, 4 repeats) and the record closed', kn.lines.map((l) => l.repeats || 0));
   ok(read('src/agentd/client.js').includes("              this._helloFoldEnd({ op: 'upgrade', version: expected, from: msg.daemonVersion || undefined, by: BY_UPGRADE });")
-    && read('src/agentd/client.js').includes("      this._helloFoldEnd(req);   // B-0194: allowed")
-    && read('src/server/dial-pairing.js').includes("      helloKey: 'dev:' + deviceId,") && read('src/hosts.js').includes("      helloKey: 'dev:' + (h.deviceId || id),"),
+    && read('src/agentd/client.js').includes("      this._helloFoldEnd(req, gen0);   // B-0194: allowed")
+    && read('src/server/dial-pairing.js').includes("      helloKey: 'dev:' + deviceId,") && read('src/hosts.js').includes("      helloKey: h.deviceId ? 'dev:' + h.deviceId : 'host:' + id,"),
     'the push at the hello and the owner\'s Allow say the count first (the same key); BOTH construction sites key the store by the DEVICE (a graduated ssh host shares the dial road\'s)');
   // THE RECORD'S OWN TIMER: the hellos stop — the count is said all the same (no hello, no exit needed)
   const wt = world({ hub: 'nobody' }), kt = sinkOf();
@@ -604,6 +604,72 @@ console.log('  · the agent update at hello');
   for (let k = 0; k < 20; k++) { const dm = freshDm(wcap, 'dev:t-cap', kcap); dm._upgradeHeld(`2.369.${100 + k}`); dm.stop(); }
   ok(DeviceManager.helloFoldsOf('dev:t-cap').size === 16, 'twenty versions reported: the device\'s store holds 16 records (the oldest said, then evicted)', DeviceManager.helloFoldsOf('dev:t-cap').size);
   DeviceManager.dropHelloFolds('dev:t-cap'); DeviceManager.dropHelloFolds('dev:t-never'); DeviceManager.dropHelloFolds('dev:t-timer'); DeviceManager.dropHelloFolds('dev:t-hour');
+  // ITS ROUND'S OWED (主开发 08:03Z): a pairing made again starts fresh; a stopped client makes no store; two name spaces; the
+  // eviction says its count; the drops wired at unpair, removal and graduation
+  const wr = world({ hub: 'nobody' }), kr = sinkOf();
+  for (let k = 0; k < 3; k++) hello(wr, 'dev:t-repair', kr).dm.stop();
+  DeviceManager.dropHelloFolds('dev:t-repair');   // what agentdMintDialPair does at a pairing made again
+  hello(wr, 'dev:t-repair', kr).dm.stop();
+  ok(kr.lines.length === 3 && kr.lines[1].repeats === 2 && !kr.lines[2].repeats, 'a pairing made again: what the old folds owed is said (2), and the new pairing\'s first refusal is said AT ONCE, never counted', kr.lines.map((l) => l.repeats || 0));
+  // RED CONTROL (no drop at the pairing made again): the new pairing's first refusal is counted into the old fold, never said
+  const wr2 = world({ hub: 'nobody' }), kr2 = sinkOf();
+  for (let k = 0; k < 4; k++) hello(wr2, 'dev:t-repair2', kr2).dm.stop();
+  ok(kr2.lines.length === 1, 'CONTROL (the same four hellos with NO drop between): the fourth is counted into the old fold, never said ⇒ RED', kr2.lines.length);
+  DeviceManager.dropHelloFolds('dev:t-repair2');
+  // AN ASK BEGUN BEFORE A DROP (the owner's card still open at an unpair; nobody stops the cached client): the answer is said,
+  // and no store is made for the gone device — the ask carries the generation it began in (the real road: the ask, the drop,
+  // the owner's Deny)
+  const lateAsk = async (key) => {
+    const wg = world(), kg = sinkOf(), asking = hello(wg, key, kg);
+    await settle();
+    const card = wg.cards().find((c) => c.action.kind === 'upgrade');
+    DeviceManager.dropHelloFolds(key);   // the unpair, the card still open
+    if (card) await wg.asker.answer(card.action.askId, { answer: 'deny', by: 'user', answeredBy: 'human:0123456789ab' });
+    for (let i = 0; i < 20 && !kg.lines.length; i++) await tick();
+    return { held: asking.held, card: !!card, lines: kg.lines.length, store: !!DeviceManager.helloFoldsOf(key) };
+  };
+  const lg = await lateAsk('dev:t-gen');
+  ok(lg.held === 'ask' && lg.card && lg.lines === 1 && !lg.store, 'an ask begun before an unpair, answered after it: the refusal is said, and no store is made for the gone device', lg);
+  const keepHF = DeviceManager.prototype._helloFold; let askedHF = 0;
+  DeviceManager.prototype._helloFold = function (l, g) { askedHF++; return keepHF.call(this, l, g); };   // (a plant: the generation read at the answer, not where the ask began)
+  let lc = null; try { lc = await lateAsk('dev:t-gen-ctl'); } finally { DeviceManager.prototype._helloFold = keepHF; }
+  ok(askedHF >= 1 && lc.lines === 1 && lc.store, `CONTROL (the ask without its generation; the plant asked ${askedHF}×): the late answer makes the gone device's store ⇒ RED`, lc);
+  DeviceManager.dropHelloFolds('dev:t-gen-ctl');
+  // A CLIENT KEPT ACROSS A DROP (a pairing made again IN PLACE keeps the link; a graduation rolled back): its next hellos fold on
+  const wk = world({ hub: 'nobody' }), kk = sinkOf(), kept = freshDm(wk, 'dev:t-keep', kk);
+  kept._upgradeHeld('2.369.100');
+  DeviceManager.dropHelloFolds('dev:t-keep');
+  kept._upgradeHeld('2.369.100'); kept._upgradeHeld('2.369.100'); kept._upgradeHeld('2.369.100');
+  const keptRec = DeviceManager.helloFoldsOf('dev:t-keep') && [...DeviceManager.helloFoldsOf('dev:t-keep').values()][0];
+  ok(kk.lines.length === 2 && keptRec && keptRec.more === 2, 'a client kept across a drop: its first hello after it is said, the next two counted — it folds on, never one line per hello', { lines: kk.lines.length, more: keptRec && keptRec.more });
+  DeviceManager.dropHelloFolds('dev:t-keep');
+  const kb = sinkOf(), born = freshDm(wk, 'dev:t-keep2', kb), bornGen = born._helloGenNow(); let askedB = 0;
+  const keyGen = () => DeviceManager.prototype._helloGenNow.call({ _helloKey: 'dev:t-keep2' });
+  born._helloStore = function (make = true) { askedB++; return keyGen() !== bornGen ? null : DeviceManager.prototype._helloStore.call(this, make); };   // (a plant: the generation fixed at the client's birth)
+  born._upgradeHeld('2.369.100'); DeviceManager.dropHelloFolds('dev:t-keep2');
+  born._upgradeHeld('2.369.100'); born._upgradeHeld('2.369.100'); born._upgradeHeld('2.369.100');
+  ok(askedB >= 4 && kb.lines.length === 4, `CONTROL (the generation fixed at the client's birth; the plant asked ${askedB}×): every hello after the drop is a line of its own ⇒ RED`, kb.lines.length);
+  DeviceManager.dropHelloFolds('dev:t-keep2');
+  const wj = world({ hub: 'nobody' }), kj = sinkOf(), oldDm = freshDm(wj, 'dev:t-join', kj), newDm = freshDm(wj, 'dev:t-join', kj); oldDm.stop();
+  oldDm._upgradeHeld('2.369.100'); newDm._upgradeHeld('2.369.100');
+  ok(kj.lines.length === 1 && DeviceManager.helloFoldsOf('dev:t-join') && [...DeviceManager.helloFoldsOf('dev:t-join').values()][0].more === 1, 'a re-dial joined the same ask: the old client (stopped) and the new one answer — ONE line, the second counted', kj.lines.length);
+  const live = freshDm(wj, 'dev:t-nostore', kj); live._helloFoldEnd(reqOf(live));
+  ok(!DeviceManager.helloFoldsOf('dev:t-nostore'), 'the update going on a device with no store: none is made');
+  DeviceManager.dropHelloFolds('dev:t-join');
+  const we = world({ hub: 'nobody' }), ke = sinkOf();
+  for (let k = 0; k < 17; k++) for (let r = 0; r < 2; r++) { const dm = freshDm(we, 'dev:t-evict', ke); dm._upgradeHeld(`2.369.${100 + k}`); dm.stop(); }
+  const evicted = ke.lines.find((l) => l.repeats && /2\.369\.100/.test(l.summary || ''));
+  ok(DeviceManager.helloFoldsOf('dev:t-evict').size === 16 && evicted && evicted.repeats === 1, 'seventeen versions, each refused twice: the oldest record is evicted at the cap AND its count said (1 repeat)', { size: DeviceManager.helloFoldsOf('dev:t-evict').size, evicted });
+  DeviceManager.dropHelloFolds('dev:t-evict');
+  const DPS = read('src/server/dial-pairing.js'), HS = read('src/hosts.js');
+  ok(DPS.includes("  hosts.setDialToken(deviceId, PT.tokenHash(tok));\n  try { require('../agentd/client.js').DeviceManager.dropHelloFolds('dev:' + deviceId); } catch { }   // a pairing made again")
+    && DPS.includes("  try { require('../agentd/client.js').DeviceManager.dropHelloFolds('dev:' + deviceId); } catch { }   // B-0194: what its hello folds owe said")
+    && HS.includes("if (h.deviceId) DMx.dropHelloFolds('dev:' + h.deviceId); DMx.dropHelloFolds('host:' + id);")
+    && HS.includes("require('./agentd/client.js').DeviceManager.dropHelloFolds('host:' + id); } catch {}   // B-0194: its ssh name's")
+    && HS.includes("require('./agentd/client.js').DeviceManager.dropHelloFolds('dev:' + h.deviceId); } catch {}   // B-0194: its device name's"),
+    'the drops are wired: a pairing made again and a dial unpair (dial-pairing), a host removed (both names), a graduation (the ssh name) and its undoing (the device name)');
+  const MS = read('src/agentd/client.js');
+  ok(MS.includes("    if (!this._helloKey || this._helloGenNow() !== gen) return null;") && MS.includes("if (this._helloFold(l, g, gen0)) return;") && MS.includes(", gen0 = this._helloGenNow();"), 'the store is read and made only at the generation the hello began in (the ask\'s answer carries its own)');
   // RED CONTROL: no device key (the fold on the instance, as the unit's first cut) — every reconnect says it again
   const wc = world({ hub: 'nobody' }), kc = sinkOf();
   for (let k = 0; k < 5; k++) hello(wc, null, kc).dm.stop();

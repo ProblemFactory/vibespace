@@ -25,10 +25,14 @@ const FOLD_SAY_MS = 60 * 60e3, FOLDS_MAX = 256;   // B-c632: a fold of repeated 
 const _OPEN_FOLDS = new Set();
 process.on('exit', () => { for (const dm of [..._OPEN_FOLDS]) { try { dm._foldEndAll(); } catch { } } });
 // B-0194: THE UPDATE'S REFUSALS AT THE HELLO, per DEVICE — `helloKey` (the dial road `dev:<deviceId>`, the ssh road the same for a
-// graduated host, else its host id) → its records; they outlive every DeviceManager of that device (a re-dial / reconnect builds
+// graduated host, else `host:<hostId>`) → its records; they outlive every DeviceManager of that device (a re-dial / reconnect builds
 // a fresh one). Each record says through the writers of the last client that counted it (never the client itself); at most
 // HELLO_FOLDS_MAX a device (the oldest said, then evicted); owed counts said at exit.
 const HELLO_FOLDS = new Map(), HELLO_FOLDS_MAX = 16;
+// a key's GENERATION: dropHelloFolds (an unpair, a pairing made again, a graduation) bumps it — the owner's answer to an ask
+// BEGUN before the drop neither makes nor reads that key's store (said, never folded: an answer landing after an unpair); a hello
+// begun after it folds as any (a client kept across a re-pair in place, or a graduation rolled back, folds on)
+const HELLO_GEN = new Map();
 function sayHello(f) {
   if (f.timer) { clearTimeout(f.timer); f.timer = null; }
   if (f.more > 0 && f.out) {
@@ -860,10 +864,14 @@ class DeviceManager {
    *  said at once, the repeats counted, said on a change of verdict, when the update goes, hourly (a timer of the record's own,
    *  unref'd — the count is said even when the hellos stop), at unpair and at exit. No key ⇒ this instance's own folds. → true
    *  when a repeat */
-  _helloStore() { if (!this._helloKey) return null; let s = HELLO_FOLDS.get(this._helloKey); if (!s) HELLO_FOLDS.set(this._helloKey, (s = new Map())); return s; }
-  _helloFold(l, g) {
-    const s = this._helloStore();
-    if (!s) return this._foldCount(l, g);
+  _helloGenNow() { return this._helloKey ? (HELLO_GEN.get(this._helloKey) || 0) : 0; }
+  _helloStore(make = true, gen = this._helloGenNow()) {   // its key's store — only at the generation the hello began in (a drop since: nothing made, nothing read)
+    if (!this._helloKey || this._helloGenNow() !== gen) return null;
+    let s = HELLO_FOLDS.get(this._helloKey); if (!s && make) HELLO_FOLDS.set(this._helloKey, (s = new Map())); return s || null;
+  }
+  _helloFold(l, g, gen) {   // gen: the generation its hello began in (an ask's answer lands later); none ⇒ now
+    const s = this._helloStore(true, gen);   // a client stopped by a re-dial still folds into its device's store (its twin joined the same ask)
+    if (!s) return this._helloKey ? false : this._foldCount(l, g);   // an answer to an ask begun before a drop: said, never folded
     const k = this._foldKey(l.op, l.by, l.summary), v = `${g.code}\0${g.ask || ''}\0${g.answeredBy || ''}`, f = s.get(k);
     const out = { log: this._log, onAct: this._onAct, clock: this._clock };   // the writers, never the client (a stopped one is not kept alive)
     if (f && f.v === v && !(f.more === 0 && l.at - f.lastAt >= this._foldSayMs)) {
@@ -879,13 +887,14 @@ class DeviceManager {
   /** the record's own hourly say (unref'd): the count is said even when no hello comes again */
   _helloArm(f, ms) { if (f.timer) return; f.timer = setTimeout(() => { f.timer = null; sayHello(f); }, Math.max(0, ms)); if (f.timer.unref) f.timer.unref(); }
   /** B-0194: the update goes (pushed at the hello, or allowed by the owner) — its refusals' count said first, the record closed */
-  _helloFoldEnd(req) {
-    const k = this._foldKey(DA.keyOf(req), req.by, DA.summaryOf(req)), s = this._helloStore();
-    if (!s) { this._foldEnd(k); return; }
+  _helloFoldEnd(req, gen) {
+    const k = this._foldKey(DA.keyOf(req), req.by, DA.summaryOf(req)), s = this._helloStore(false, gen);
+    if (!this._helloKey) { this._foldEnd(k); return; }
+    if (!s) return;
     const f = s.get(k); if (f) { sayHello(f); s.delete(k); }
   }
   /** B-0194: a device unpaired — what its store owes is said, then the store goes */
-  static dropHelloFolds(key) { const s = HELLO_FOLDS.get(key); if (!s) return; for (const f of s.values()) { try { sayHello(f); } catch { } } HELLO_FOLDS.delete(key); }
+  static dropHelloFolds(key) { HELLO_GEN.set(key, (HELLO_GEN.get(key) || 0) + 1); const s = HELLO_FOLDS.get(key); if (!s) return; for (const f of s.values()) { try { sayHello(f); } catch { } } HELLO_FOLDS.delete(key); }   // the generation bumped first: no answer to an older ask makes it again
   /** (a suite's look at a device's store) */
   static helloFoldsOf(key) { return HELLO_FOLDS.get(key) || null; }
   _foldEndAll() { for (const k of [...this._folds.keys()]) this._foldEnd(k); }
@@ -907,19 +916,19 @@ class DeviceManager {
   /** lane hub-act-ask: the owner is asked about the update while the link runs on the agent as it is; an Allow pushes it over
    *  THIS link (the daemon takes `upgrade` any time after hello), then the link is dropped and dialed again (the re-exec). */
   _askUpgrade(from, { mux, sock, platform } = {}) {
-    const expected = this._expectedVersion();
+    const expected = this._expectedVersion(), gen0 = this._helloGenNow();   // the generation this ask began in (its answer lands later)
     const req = { op: 'upgrade', version: expected, from: from || undefined, by: BY_UPGRADE };
     // B-0194: while the standing item refuses this update (its fold open, not stale) a hello's ask is a repeat — no «waits» line
-    const k = this._foldKey(DA.keyOf(req), req.by, DA.summaryOf(req)), hs = this._helloStore(), open = hs ? hs.get(k) : this._folds.get(k);
+    const k = this._foldKey(DA.keyOf(req), req.by, DA.summaryOf(req)), hs = this._helloStore(false), open = this._helloKey ? (hs ? hs.get(k) : null) : this._folds.get(k);
     if (!(open && open.code === 'ask_standing' && this._clock() - open.lastAt < this._foldSayMs)) this._log(`[agentd] daemon ${from} ≠ ${expected} — the update waits for the owner's answer (For you)`);
     Promise.resolve(this._actGate.check(req)).then((g) => {
       if (g && !g.ok) {
         let l = null;
-        try { l = DA.lineOf({ at: this._clock(), payload: req, by: req.by, ok: false, code: g.code, ask: g.ask, answeredBy: g.answeredBy }); if (this._helloFold(l, g)) return; } catch { }   // B-0194: refused again at a later hello — counted (per device)
+        try { l = DA.lineOf({ at: this._clock(), payload: req, by: req.by, ok: false, code: g.code, ask: g.ask, answeredBy: g.answeredBy }); if (this._helloFold(l, g, gen0)) return; } catch { }   // B-0194: refused again at a later hello — counted (per device)
         if (this._onAct && l) { try { this._onAct(l); } catch { } }
         this._log(`[agentd] the update to ${expected} was not allowed (${g.code}) — the agent stays at ${from}`); return;
       }
-      this._helloFoldEnd(req);   // B-0194: allowed — its refusals' count said first
+      this._helloFoldEnd(req, gen0);   // B-0194: allowed — its refusals' count said first
       if (!this._conn || this._conn.mux !== mux) { this._log('[agentd] the update was allowed but its link is gone — the next hello asks again'); return; }
       const led = this._ledgerRead(expected); led.tries += 1; this._ledgerWrite(expected, led);
       try { this._onUpgradeBegin?.(from, expected, { platform }); } catch { }
