@@ -191,6 +191,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The storage access boxes no longer point below at a Connect button that sits above them.
 - Mounting a folder from an offline machine now says it is offline first, with its pairing command.
 - In a Claude chat, a second Rewind to here waits for the first one's answer, and a message sent in that first minute comes back to the box.
+- When an agent's new tab loses its window before it is ready, VibeSpace opens it in a new window of the agent's own; it used to ask the agent to run it again.
 
 ### Security
 - A cluster install can let only its ingress reach each user's VibeSpace (networkPolicy.ingress, off until tried on a test cluster).
