@@ -502,6 +502,7 @@ function create(deps = {}) {
     // `takeWaitMs` how long a second chain waits for a start in flight (B-1ca5, default 30 s). A suite narrows them to reach a
     // bound with a few records.
     heldBound = null,
+    lineageOf = null,   // B-4852: the Task Group store's ONE lineage reader (ids → ancestors) — an ENDED conversation's recorded own groups are re-read with it
     // lane R5 (drain rule 18): the PER-SECOND bucket runs on a PHYSICAL clock —
     // the vendor meters requests in real time, whatever the engine's logical
     // `now` says (a suite freezes `now`; the bucket must still refill). Default:
@@ -9511,7 +9512,10 @@ function create(deps = {}) {
   // the chain's cure (E, the U3c read): an agent principal whose conversation RUNS is judged with its groups and lineage NOW — an API
   // proposal's approve / redirect press carries the ones recorded at filing (a parent removed since must not run the call); an
   // ended conversation keeps the recorded ones
-  function apiTierFor(ctx, cred) { const live = ctx && ctx.kind === 'agent' ? liveGroupsOf(ctx.id) : null; return ACL.effectiveApi(live ? { ...ctx, groups: live.groups, inheritedGroups: live.inherited } : ctx, String(cred || ''), apiGrants()); }
+  // B-4852: an ENDED one re-reads its recorded OWN groups' ancestors NOW (a parent removed since no longer counts); a read that throws
+  // judges own groups alone — never the wider lineage recorded at filing
+  const lineageNowOf = (ctx) => { if (typeof lineageOf !== 'function') return ctx; let inh = []; try { inh = (lineageOf(Array.isArray(ctx.groups) ? ctx.groups.map(String) : []) || []).map(String); } catch { inh = []; } return { ...ctx, inheritedGroups: inh }; };
+  function apiTierFor(ctx, cred) { const live = ctx && ctx.kind === 'agent' ? liveGroupsOf(ctx.id) : null; return ACL.effectiveApi(live ? { ...ctx, groups: live.groups, inheritedGroups: live.inherited } : ctx && ctx.kind === 'agent' ? lineageNowOf(ctx) : ctx, String(cred || ''), apiGrants()); }
   /** A Channels account as a raw-API credential: its kind, its adapter's DECLARED raw-API row (`api`), its label, its
    *  bearer, the account's meter. `null` = no such account. */
   function apiCredential(adapterId) {

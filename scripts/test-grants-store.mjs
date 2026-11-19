@@ -499,7 +499,7 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
   ok(msgAcl.levelFor({ cid: 'k1', groups: ['tg-c'], inheritedGroups: ['tg-p'] }, ['g-out'], (g) => st.rowsFor('group-visibility', g)) === 'none' && msgAcl.levelFor({ cid: 'p1', groups: ['tg-p'] }, ['g-out'], (g) => st.rowsFor('group-visibility', g)) === 'messageable', 'rule ④: a public PARENT never shows its child\'s members (group-visibility reads own groups only)');
   // the producers: the server hands the exit and window doors the ONE reader; vault-use's facts carry it
   const server = fs.readFileSync(path.join(REPO, 'server.js'), 'utf-8'), wiring = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf-8'), eng = fs.readFileSync(path.join(REPO, 'src/server/window-targets-engine.js'), 'utf-8');
-  ok((server.match(/lineageOf: \(ids\) => tasks\.grantGroupsOf\(ids\)\.inherited/g) || []).length === 2 && /broadcast: leaseBroadcast, groupsOf, lineageOf, log \}\)/.test(fs.readFileSync(path.join(REPO, 'src/server/window-live-wiring.js'), 'utf-8')) && /inheritedGroupIds = \(lineageOf\(groupIds\) \|\| \[\]\)\.map\(String\)/.test(eng) && /const gg = tasks\.grantGroupsOf\(gs\); groupIds = gg\.ids; inheritedGroupIds = gg\.inherited; if \(gs\.unread\) groupsUnreadable = true;/.test(wiring) && /groupIds, inheritedGroupIds, groupsUnreadable, turnBy:/.test(wiring), 'the producers: server.js hands exit + window the ONE reader (tasks.grantGroupsOf); the window engine asks it; vaultUseFacts carries it (vault-run-door spreads those facts into every vault-use verdict)');
+  ok((server.match(/lineageOf: \(ids\) => tasks\.grantGroupsOf\(ids\)\.inherited/g) || []).length === 3 && /broadcast: leaseBroadcast, groupsOf, lineageOf, log \}\)/.test(fs.readFileSync(path.join(REPO, 'src/server/window-live-wiring.js'), 'utf-8')) && /inheritedGroupIds = \(lineageOf\(groupIds\) \|\| \[\]\)\.map\(String\)/.test(eng) && /const gg = tasks\.grantGroupsOf\(gs\); groupIds = gg\.ids; inheritedGroupIds = gg\.inherited; if \(gs\.unread\) groupsUnreadable = true;/.test(wiring) && /groupIds, inheritedGroupIds, groupsUnreadable, turnBy:/.test(wiring), 'the producers: server.js hands exit + window + the channels wiring (B-4852) the ONE reader (tasks.grantGroupsOf); the window engine asks it; vaultUseFacts carries it (vault-run-door spreads those facts into every vault-use verdict)');
   // THE CENSUS: every facts builder that names a caller's groups in a file that asks the grant model carries the lineage, or
   // is NAMED here — exempt (with why) or PENDING (the unit that wires it). A stale entry is red too (the table stays true).
   const EXEMPT = [
@@ -616,9 +616,24 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
     const tFiled = engL.apiTierFor(recorded, 'lark-y').tier;
     liveL = [{ cid: 'k1', name: 'Child', groups: ['tg-c'], inherited: [] }];   // the owner took P away as C's parent
     const tLive = engL.apiTierFor(recorded, 'lark-y').tier;
-    liveL = [];   // the conversation ended: the recorded lineage is all there is
+    liveL = [];   // the conversation ended: the engine of the release (no lineage reader) keeps the recorded lineage
     const tEnded = engL.apiTierFor(recorded, 'lark-y').tier;
-    ok(wL.ok && tFiled === 'write-ask' && tLive === 'none' && tEnded === 'write-ask', 'cure (E): the API tier of a recorded principal is judged with the LIVE lineage while its conversation runs (a parent removed since ⇒ none); an ended one keeps the recorded lineage', { wL: wL.ok, tFiled, tLive, tEnded });
+    ok(wL.ok && tFiled === 'write-ask' && tLive === 'none' && tEnded === 'write-ask', 'cure (E): the API tier of a recorded principal is judged with the LIVE lineage while its conversation runs (a parent removed since ⇒ none); an engine with no lineage reader keeps the recorded one for an ended conversation (the RED control of B-4852 below: the plant is the missing reader)', { wL: wL.ok, tFiled, tLive, tEnded });
+    // B-4852: the engine as the hub builds it — WITH the Task Group store's lineage reader: an ENDED conversation's recorded own groups are
+    // re-read NOW (a parent removed since no longer counts; one kept still does); a read that throws judges own groups alone
+    let lineageNow = (ids) => (ids.includes('tg-c') ? ['tg-p'] : []);
+    const dE2 = dirOf(`api-ended-${++worldN}`); fs.mkdirSync(dE2, { recursive: true });
+    const engE = ENGL.create({ dataDir: dE2, log: { log() {}, info() {}, warn() {}, error() {} }, fetch: async () => { throw new Error('no network in this suite'); }, liveSessions: () => [], lineageOf: (ids) => lineageNow(ids) });
+    const wE = await engE.setApiGrants('lark-y', [FA.apiGrant({ principal: { kind: 'group', id: 'tg-p', name: 'Parent' }, cred: 'lark-y', tier: 'write-ask', at: 1 })], { by: 'user' });
+    const eKept = engE.apiTierFor(recorded, 'lark-y').tier;
+    lineageNow = () => [];   // the owner took P away as C's parent, after the conversation ended
+    const eRemoved = engE.apiTierFor(recorded, 'lark-y').tier;
+    lineageNow = () => { throw new Error('the store'); };
+    const eThrew = engE.apiTierFor(recorded, 'lark-y').tier;
+    const ownGrant = await engE.setApiGrants('lark-y', [FA.apiGrant({ principal: { kind: 'group', id: 'tg-c', name: 'Child' }, cred: 'lark-y', tier: 'read', at: 2 })], { by: 'user' });
+    const eOwn = engE.apiTierFor(recorded, 'lark-y').tier;
+    const srvE = fs.readFileSync(path.join(REPO, 'server.js'), 'utf-8'), cwE = fs.readFileSync(path.join(REPO, 'src/server/channels-wiring.js'), 'utf-8');
+    ok(wE.ok && eKept === 'write-ask' && eRemoved === 'none' && eThrew === 'none' && ownGrant.ok && eOwn === 'read' && /userTodos, lineageOf: \(ids\) => tasks\.grantGroupsOf\(ids\)\.inherited, readUserState:/.test(srvE) && /liveSessions, lineageOf, mountClients,/.test(cwE), 'B-4852: an ENDED conversation\'s API proposal is judged with its recorded own groups\' ancestors read NOW — a kept parent still counts, a removed one no longer does, a lineage read that throws judges own groups alone (its own group\'s grant still serves); server.js hands the ONE reader to the channels engine', { eKept, eRemoved, eThrew, eOwn });
   }
   // the chain's cure (B): `vibespace-channels status` never says «as a member of group P» for a conversation only in a child of P
   {
