@@ -508,7 +508,7 @@ const INDEX_HTML = { name: 'public/index.html', src: fs.readFileSync(path.join(R
 // searches read — held to a budget declared from src/lib at a base; how fast it ran is judged only RELATIVE to a
 // control measured in this same process (the bare parse + walk of ONE reference module, scaled to every node the
 // census parsed), on CPU time, so a slower or busier runner moves both sides. The milliseconds printed are information.
-// RE-DECLARED at the .411 checkpoint a68be1413: src/lib's growth since the d419156bd base (226 files / 9305042 B /
+// RE-DECLARED at the .412 checkpoint a68be1413: src/lib's growth since the d419156bd base (226 files / 9305042 B /
 // 932197 nodes / 6.4) crossed 1.5 × in bytes (14154772 > 13957563; files and nodes 1.44 ×). Files, bytes and nodes as
 // measured there in the BUILT tree the suite runs on (325 = 324 tracked + the build's gitignored src/lib/build-version.js,
 // 177 B), the ratio RE-MEASURED in the same run (3137 selector searches read 122740682 B over 14154772 B parsed = 8.67 B

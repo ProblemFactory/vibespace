@@ -473,7 +473,7 @@ const _hostUsage = {};
 // checked FIRST — the plain host pattern would otherwise swallow these files
 // and pollute _hostUsage with bogus host keys.
 const _hostAcctUsage = {};
-// B-ff9d: a host-held file written before 2.369.411 stamped its read 'on-demand' (this hub's own panel). Every 'on-demand' in such a
+// B-ff9d: a host-held file written before 2.369.412 stamped its read 'on-demand' (this hub's own panel). Every 'on-demand' in such a
 // file — at the top or on a limit a later merge kept — was one of the two held legs' reads, so it is read as 'on-demand-held' (the
 // file keeps its bytes until its next write)
 const heldSource = (snap) => { if (snap && typeof snap === 'object') { if (snap.source === 'on-demand') snap.source = 'on-demand-held'; if (Array.isArray(snap.limits)) for (const l of snap.limits) if (l && l.source === 'on-demand') l.source = 'on-demand-held'; } return snap; };

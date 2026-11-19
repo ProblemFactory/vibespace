@@ -435,7 +435,7 @@ function starveOf(r) {
   });
 }
 // (its second reader's M1 / S3) THE BOOT'S HOLD IS LEFT OUT of the agreement and the floor: its span (bootHog, wrapped since
-// 2.369.411 so ② can say a starved boot) starts before the watchdog thread has booted, so the product's window cannot cover it
+// 2.369.412 so ② can say a starved boot) starts before the watchdog thread has booted, so the product's window cannot cover it
 // (before, it had no span at all); ② judges it alone, and a starved boot is ②'s named non-verdict — never a red here
 const notBoot = (rs) => rs.filter((x) => !(x.h && x.h.boot));
 function account(rows0, plan) {
@@ -1003,7 +1003,7 @@ async function legRound4(node, tag, tree = null) {
   // (C) MUST 2 — THE WATCHDOG'S OWN FILE READS NEVER DELAY A CHECK: every read of a repo source takes SLOW_READ_MS (sync or async,
   //     in the watchdog's own thread); a 700 ms hold is asked at held ≈ 80, 200, 400 ms ON TIME, the next hold too, and
   //     the frames whose files were not read are said by location, with why
-  // (its readers' S2 / S3; 主开发 21:55Z law 4) the stand-in's read is 700 ms (300 before 2.369.411). COVERED: a read at the FIRST or
+  // (its readers' S2 / S3; 主开发 21:55Z law 4) the stand-in's read is 700 ms (300 before 2.369.412). COVERED: a read at the FIRST or
   // SECOND ask (the next ask lands at ≥ 780 / 900 ms — past the 700 ms hold's end: the hold carries fewer than 3 asks, red by the
   // count; lateness only pushes it later), and at the HOLD'S END (the next hold starts ≥ 150 ms later, so its first ask comes ≥ 550 ms
   // into it — past its due + 250 = 330, or past that 400 ms hold altogether; the margin is ~220 ms, a child's late timer eats it only

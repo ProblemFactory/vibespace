@@ -29,7 +29,7 @@
 //   ⑦ THE CURE (the readers' SHOULDs on the taken unit): (a) a save the store writer cannot make durable says why (whyNotDurable) and the
 //      person-act doors await it (pins); (b) a migration's reshape is ON DISK before its ledger says done; (c) a rotation's rename the storage
 //      refuses keeps the ring recording; (d) generateKey reads the key fresh (the kept facts dropped); (e) a removal from the group DURING
-//      the user's ask is refused at the stillGranted verdict; (f) THE CHECKPOINT CURE (2.369.411): the dial-token migration renames its
+//      the user's ask is refused at the stillGranted verdict; (f) THE CHECKPOINT CURE (2.369.412): the dial-token migration renames its
 //      legacy file only once hosts.json holds the hashes (read AT the rename), and a flush that left the file keeps it — renamed in this
 //      process once the writer says it is on disk; (g) a reshape the writer left is a FAILED migration (the REAL runner stamps no ledger;
 //      the exit's deferred flush and a silent writer too) — each with its red control
@@ -409,7 +409,7 @@ console.log('⑦ the cure — the readers\' SHOULDs');
   const EPn = compileAt('src/exit-proxy.js', [["    const ctxNow = this._ctxAgain(session, sessionId, j.ctx, accNow.run);", "    const ctxNow = j.ctx;"]]);
   const ranC = await askRemoval(EPn.ExitProxyManager);
   ok(refused.code === 'not_granted' && refused.ran === 0 && ranC.ran === 1, `a removal from the group during the user's ask ⇒ refused (${refused.code}, ${refused.ran} run); CONTROL (RED): the membership as judged ⇒ the command ran (${ranC.ran})`);
-  // (f) the checkpoint's red (heavy test-machine-migrate, 2.369.411 block 1): the dial-token migration renames its legacy file only
+  // (f) the checkpoint's red (heavy test-machine-migrate, 2.369.412 block 1): the dial-token migration renames its legacy file only
   // once the hashes ARE on disk — read the file at the rename itself (the moment a kill would lose them)
   const migrate = async (HMx) => {
     const w = await world({ HM: HMx }); await w.hm.persisted();
@@ -443,7 +443,7 @@ console.log('⑦ the cure — the readers\' SHOULDs');
   const HMk2 = compileAt('src/hosts.js', [["    if (!this._flushLanded()) {\n      console.warn('[hosts] dial-token migration", "    if (!this.flushThrottled() && false) {\n      console.warn('[hosts] dial-token migration"]]);
   const kfc = await keptOf(HMk2.HostManager);
   ok(kf.ret === false && kf.keptAtReturn && kf.held && kf.renamedLater && kfc.ret === true && !kfc.keptAtReturn, `a flush that LEFT hosts.json: the legacy file is kept at return (${kf.keptAtReturn}, the hash held in memory), renamed in this process once the writer says it is on disk (${kf.renamedLater}); CONTROL (RED: the answer ignored): renamed at once (kept ${kfc.keptAtReturn}) while the file is not on disk`);
-  // (g) the census of the class (2.369.411): a reshape the writer LEFT (held past its bound, or a failed write) is no migration done —
+  // (g) the census of the class (2.369.412): a reshape the writer LEFT (held past its bound, or a failed write) is no migration done —
   // the REAL runner over a writer stand-in that leaves hosts.json: the ledger is NOT stamped (it runs again at the next boot)
   const { runMigrations } = require(path.join(REPO, 'src/migration-runner.js'));
   const stampOf = async (HMx, tag) => {

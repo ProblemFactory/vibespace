@@ -597,7 +597,7 @@ ok(/'queue_settle', 'frame_stamp', 'rewind_out',/.test(read('server.js')) && /fa
 // rewind is out, a person's hand-over is refused by the typing path — nothing written, the group messages NOT committed
 // (they keep waiting for the agent's next turn), the presser told so. It runs where line 87 meets B-02a3 (the train); a
 // tree without the hand-over SKIPS it by name (counted)
-if (!/async function handOverGroups\(/.test(read('src/server/stash-handover.js'))) { skipped++; say('  - SKIP the group hand-over leg: B-02a3 is not in this tree (it runs where line 87 meets it, the 2.369.411 train)'); }
+if (!/async function handOverGroups\(/.test(read('src/server/stash-handover.js'))) { skipped++; say('  - SKIP the group hand-over leg: B-02a3 is not in this tree (it runs where line 87 meets it, the 2.369.412 train)'); }
 else {
   const SH = require(path.join(REPO, 'src/server/stash-handover.js'));
   const WO = require(path.join(REPO, 'src/write-origin.js'));

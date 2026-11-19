@@ -1557,7 +1557,7 @@ class MountManager {
     // B-91aa: the `ls` is started by THE STARTER (src/server/child-starter.js) — never a fork of the hub from its sweep. Its
     // answer: exit 0 'ok', another exit 'error', past its bound 'hung' (killed there; the held key stays until it ends at
     // last), and NO ANSWER (a dead or slow starter) 'unknown' — never «the mount is down» (no strike, no heal, no remount).
-    // B-e783 (met at 2.369.411's second checkpoint): a child that NEVER STARTED (the starter's spawn error) is `spawnErr` —
+    // B-e783 (met at 2.369.412's second checkpoint): a child that NEVER STARTED (the starter's spawn error) is `spawnErr` —
     // _zombieAt answers nothing for it, never «dead»; its `ls` is resolved on the hub's PATH as the direct spawn resolved it
     const t0 = Date.now();
     return require('./server/child-starter').childStarter().run('ls', verb === 'attr' ? ['-d', mp] : [mp], { timeoutMs, envAdd: { PATH: process.env.PATH || '' }, onTimeout: (pid) => heldMap.set(key, { t0, pid, start: pid ? ((PI.statOf(pid) || [])[1] || null) : null }), onLateExit: () => heldMap.delete(key) })

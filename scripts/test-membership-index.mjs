@@ -357,7 +357,7 @@ for (const [tag, [, , leg, what]] of Object.entries(PATCHES)) {
 // Task-Group facts (taskGroupDefaultFor / taskGroupCapFor / stampGroupCap) — hands its machine too (src/ + server.js). Each call's
 // OWN argument is cut by bracket matching (multi-line calls included; a hostId of a later call on the same line never counts).
 {
-  // the restack for 2.369.411 (the meeting with B-55dc): B-55dc's DECIDING doors hand a conversation's cwd too — membershipRead,
+  // the restack for 2.369.412 (the meeting with B-55dc): B-55dc's DECIDING doors hand a conversation's cwd too — membershipRead,
   // groupsForSessionDecided, memberIds (the drawing door's ids, its flag kept) and the keeper's taskGroupReadFor (the create's)
   const CALLS = /\b(groupsForSession|groupsForSessionDecided|membershipRead|memberIds|taskGroupDefaultFor|taskGroupCapFor|stampGroupCap|taskGroupReadFor)\(/g;
   const inside = (t, open, o, c) => { let d = 0, q = null; for (let k = open; k < t.length; k++) { const ch = t[k];
@@ -429,7 +429,7 @@ for (const [tag, [, , leg, what]] of Object.entries(PATCHES)) {
 {
   const req = createRequire(import.meta.url);
   const TM = req(path.join(REPO, 'src/task-membership.js'));
-  // B-891e (the sweep, met at 2.369.411's second checkpoint): the row builder lives in src/sessions-assemble.js — ONE copy for
+  // B-891e (the sweep, met at 2.369.412's second checkpoint): the row builder lives in src/sessions-assemble.js — ONE copy for
   // the hub's thread and the sweep's worker; src/routes/sessions.js re-exports it (the guard rides the builder there)
   const SRC = fs.readFileSync(path.join(REPO, 'src/sessions-assemble.js'), 'utf8');
   const PAGE = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-tasks.js'), 'utf8'), MERGE = fs.readFileSync(path.join(REPO, 'src/lib/sidebar.js'), 'utf8'), APP = fs.readFileSync(path.join(REPO, 'src/lib/app.js'), 'utf8');

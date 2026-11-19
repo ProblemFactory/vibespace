@@ -309,7 +309,7 @@ console.log('\n§7 no gate suite pins the codex prose reset as a literal date');
 // Lane fable-52-cli-321 r5 (2026-11-10): thirteen new legs of test-status-bar-chips called ok(name, condition) against a
 // helper defined ok(condition, name) — a non-empty string is truthy, so the suite read ALL PASS (67) and four census plants
 // stayed green. Both orders live in the tree, every suite with its own copy. This census reads every script's OWN
-// assertion helper — every name in scripts/lib/check.mjs HELPER_NAMES: ok, check, and since B-1747's remainder (2.369.411) the
+// assertion helper — every name in scripts/lib/check.mjs HELPER_NAMES: ok, check, and since B-1747's remainder (2.369.412) the
 // ck / leg / assert a shape survey found — (its order = the parameter its body tests, helperDefs) and fails a call whose
 // CONDITION slot holds a string literal while its name slot does not: on 2.369.407 eight such legs, in test-record-shape,
 // test-queue-steer (the catch of ⑪'s browser leg: a THROWING leg passed), test-voice-follow-chrome and
@@ -320,7 +320,7 @@ console.log('\n§7b a leg never passes by its name: no swapped call anywhere, on
 {
   const C = await import('./lib/check.mjs');
   // The inline helpers without the swap guard, BY FILE (scripts/fixtures/unguarded-helpers.json — 1020 in 1016 files on
-  // 2.369.407; 1030 in 1026 at 2.369.410; + 80 in 32 files = 1110 in 1041 when the census learned ck / leg / assert at 2.369.411 —
+  // 2.369.407; 1030 in 1026 at 2.369.410; + 80 in 32 files = 1110 in 1041 when the census learned ck / leg / assert at 2.369.412 —
   // a first reading of helpers the tree already held, none new). ONE-WAY (主开发 2026-11-17, the batch-36 readers): a file that ADDS one is red by name — a new suite takes
   // `import { checker } from './lib/check.mjs'` — and the red prints the row that admits it on purpose; a file whose helper is
   // gone or guarded is NEVER red (forty-six lanes merge suites into one train), its stale row is only said.
@@ -360,7 +360,7 @@ console.log('\n§7b a leg never passes by its name: no swapped call anywhere, on
   ok(sw(NF + "ok('the leg', x === 1);\n" + "ok(`leg ${n}`, y > 2, 'detail');\n") === '' && sw(CF + "ok(x === 1, 'the leg');\nok(/a'b\\(/.test(s), 'regex');\nok(s === \"it's\", `t ${f({ a: 1 })}`);\n") === '',
     'the right orders pass — a regex holding a quote and a paren, a template with an object in its ${…}, a string compared in the condition');
   ok(sw(CF + "ok(c, name);\nok(f('x'), 'leg');\n") === '', 'a variable or a call in the condition slot is not a swap (the runtime guard owns those)');
-  // B-1747's remainder (2.369.411): the names the shape survey found are read — a ck, leg or assert helper handed a swap is found
+  // B-1747's remainder (2.369.412): the names the shape survey found are read — a ck, leg or assert helper handed a swap is found
   // as an ok one is. RED CONTROL: the library as it was (ok / check only), a copy built from its names line, misses all three —
   // and still finds an ok swap (the copy is the old census, never a copy that reads nothing)
   const CK = `${K} ck = (n, c) => { if (c) { pass++; } else { fail++; } };\n`, LG = 'function le' + 'g(c, n) { if (c) { pass++; } else { fail++; } }\n';
@@ -1012,7 +1012,7 @@ console.log('\n§8h a green suite\'s SKIP lines are counted on its row and named
   ok(!!b && !rowOf(b, 'test-sk-mid').includes('SKIP') && / — ALL PASS \(2\)$/.test(rowOf(b, 'test-sk-mid')) && !b.skippedLegs.length && !b.fails.some((f) => f.includes('.skip.')),
     `CONTROL: a copy of ci.mjs on today's last-line rule prints the mid-output skipper as a plain green (${b ? rowOf(b, 'test-sk-mid') : gone}) and names and keeps nothing — the legs above are red without the change`);
   // WIRING: both tiers' closing lines carry the count; the heavy tier records every green that skipped (try 1 or the retry)
-  // (the fast closing's two skip lines live in fastClosing since the keep-going cure moved onto 2.369.411 — read by behaviour:
+  // (the fast closing's two skip lines live in fastClosing since the keep-going cure moved onto 2.369.412 — read by behaviour:
   // a planted green with a skipped leg prints its SKIPPED LEG(S) line and no exit code; a planted red carries the count)
   // (exact SEQUENCES — the old source pin refused a guard dropped or a skip line gated on no red; the adversarial read: compare
   // the whole output, two skipping suites — the join and the kept-output suffix — and nothing printed for nothing)

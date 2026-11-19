@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // THE MOUNT SWEEP'S RCLONE PROBES AND THE STORAGE PANEL'S READ START NO PROGRAM FROM THE HUB'S MAIN PROCESS (B-323e, lane
-// hub-loop-stalls; measured first on a scratch hub of 2.369.411's first block: a first sweep over an OAuth mount, an imported
+// hub-loop-stalls; measured first on a scratch hub of 2.369.412's first block: a first sweep over an OAuth mount, an imported
 // share and a hung listing started SEVEN rclone programs from the main process — two of them synchronous help runs that held
 // the loop the child's whole run — each later sweep two; every Storage-panel read a synchronous `rclone version`). Every child
 // the hub starts forks the whole hub (about a second each at 5 GB, B-91aa's witness); THE STARTER (src/server/child-starter.js,

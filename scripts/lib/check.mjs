@@ -40,7 +40,7 @@ const safeJson = (v) => { try { return JSON.stringify(v); } catch { return Strin
 // ── the census (PURE over a file's text) ──────────────────────────────────────────────────────────────────────────────
 // A helper definition = a const / let / var binding of the name to an arrow function of two or more parameters, or a
 // function declaration of it. Only the names a suite uses for its pass/fail counter — a richer name (okCli, okBase) is a
-// wrapper with its own contract. HELPER_NAMES: ok and check (2.369.408), and since B-1747's remainder (2.369.411) the names
+// wrapper with its own contract. HELPER_NAMES: ok and check (2.369.408), and since B-1747's remainder (2.369.412) the names
 // a shape survey of every script found (a two-parameter helper that tests a parameter as its condition and counts a fail,
 // or hands it on): ck (13 helpers, 13 files), leg (65 in 17 files: wrappers handing (c, n) to ok, row-pushers — the 7
 // (name, fn) runners also spelled so test no parameter: order unknown, never judged), assert (2). LEFT, said: pin (1 —

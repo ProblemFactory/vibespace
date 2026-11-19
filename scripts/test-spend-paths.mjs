@@ -580,7 +580,7 @@ const GUARD_HINT = /authorizeSpend|getSpendGuard|spendGuard/;
 function matchClose(t, open, a, b) { let d = 0; for (let j = open; j < t.length; j++) { if (t[j] === a) d++; else if (t[j] === b) { d--; if (d === 0) return j; } } return -1; }
 /** A JavaScript text with its comments blanked (each comment byte a space, every line break kept): strings, template
  *  literals (with their `${…}` parts) and regex literals pass through untouched, so a `//` or `/*` inside one is never a comment. */
-function stripJsComments(src) {   // (its locals never share a name with a clock span of this suite: the wall-clock census flows by NAME — an `end` here once flooded it, 2.369.411's first checkpoint)
+function stripJsComments(src) {   // (its locals never share a name with a clock span of this suite: the wall-clock census flows by NAME — an `end` here once flooded it, 2.369.412's first checkpoint)
   let out = '', i = 0, prevSig = '';
   const n = src.length, tpl = [];   // tpl: the brace depth of each open template `${…}`
   const blank = (x) => x.replace(/[^\n]/g, ' ');

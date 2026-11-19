@@ -124,7 +124,7 @@ check('④ a guided window opened from the tour (#welcome.onboarding) hides the 
   /const welcome = own && document\.getElementById\('welcome'\);/.test(FLOWS) && /welcome\.classList\.add\('ob-yield'\);\s*outcome\.finally\(\(\) => welcome\.classList\.remove\('ob-yield'\)\);/.test(FLOWS)
   && has('#welcome.onboarding.ob-yield', 'visibility: hidden'));
 
-// ⑤ THE DISK NOTICE IS ITS OWN ROW (the restack for 2.369.411 — ui-needs-a-button's need line MEETS ui-phone-and-fit's wrap mark;
+// ⑤ THE DISK NOTICE IS ITS OWN ROW (the restack for 2.369.412 — ui-needs-a-button's need line MEETS ui-phone-and-fit's wrap mark;
 // 主开发's ruling 2026-11-11 14:09Z, restated 2026-11-18 20:10Z): the notice is the NEED LINE on its own row under the toolbar, with its
 // two doors (reload from disk · keep my changes); the bar carries no wrap mark — nothing in the toolbar wraps. The phone-width
 // geometry (the bar one line with the notice shown and after each door) is test-ui-fit-chrome ⑤'s

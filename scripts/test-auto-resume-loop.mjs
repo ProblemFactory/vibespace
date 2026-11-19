@@ -1447,7 +1447,7 @@ if (!probe) {
   ok('§8 a SECOND press while it runs is refused by name (in-flight) — never a second batch', w.ar.resumeBatch().why === 'in-flight');
   rec = await w.settle(rec);
   const c = w.counts();
-  // THE ASKS AS THEY ARE NOW (the hosted red of 2.369.411's prep run 2, placed by 主开发 2026-11-19 00:53Z): the U2 cure asks the
+  // THE ASKS AS THEY ARE NOW (the hosted red of 2.369.412's prep run 2, placed by 主开发 2026-11-19 00:53Z): the U2 cure asks the
   // authorizer AGAIN before EACH continue (主开发's law 1 — what the account became while the batch ran), so the press's ONE
   // authorization is followed by one single-item ask per continue that reaches its deliver; this leg pinned the old one-call shape.
   // gateNo's gate still reads a wall: it is skipped BEFORE its re-ask, so it is never asked again

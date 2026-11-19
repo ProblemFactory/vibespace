@@ -66,7 +66,7 @@ function starttimeOf(pid, opts) {
 }
 /** /proc/<pid>/stat field 3 ('R', 'S', 'Z' …) or null. */
 function stateOf(pid, opts) { const r = statRest(pid, opts); return r ? r[0] : null; }
-/** B-91aa (met at 2.369.411's second checkpoint: src/mounts.js keeps no /proc read of its own — B-e783's law): ONE process's
+/** B-91aa (met at 2.369.412's second checkpoint: src/mounts.js keeps no /proc read of its own — B-e783's law): ONE process's
  *  [state, starttime] from the same one read, SYNC (a libuv pool thread may be held by the very mount a probe watches) —
  *  null when it is gone (ENOENT / ESRCH), undefined when /proc cannot be read (never «gone» on an unreadable /proc). */
 function statOf(pid, opts) {

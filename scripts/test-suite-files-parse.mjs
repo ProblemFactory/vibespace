@@ -154,7 +154,7 @@ console.log('\n§3 A RED CONTROL THAT BUILDS NOTHING FAILS BY NAME (B-0d3e) — 
   // file whose count falls is never red (many lanes merge suites into one train) — its stale row is only said. Every
   // mutant copy written through scripts/mutant-copy.mjs fails by name besides when its copy equals the file (all its
   // anchors gone); anchored() fails by name on each one.
-  // THE RATCHET HOLDS BY ITSELF (主开发 2026-11-18 23:33Z — the 2.369.411 block's 166 were counted in once; the read of 01:11Z:
+  // THE RATCHET HOLDS BY ITSELF (主开发 2026-11-18 23:33Z — the 2.369.412 block's 166 were counted in once; the read of 01:11Z:
   // a rise inside the founding row was still one number away): a count may FALL, never RISE without a backlog row's id beside
   // it. Every count lives under a row — `rows: { "B-xxxx": { why, files } }` — and a file's cap is the largest count any row
   // gives it. THE FOUNDING ROW (B-0d3e, the list the census brought) IS FALL-ONLY: its counts and total are pinned in

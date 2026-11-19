@@ -150,7 +150,7 @@ export function patchHostFace(row, prev, next, { chipOf, badgeOf, errOf } = {}) 
   else if (chip) { const acts = kid(top, 'mounts-row-actions'); if (acts) top.insertBefore(chip, acts); else top.appendChild(chip); }
   const oldErr = kid(row, 'mounts-errline');
   if (errOf) {
-    // lane ui-needs-a-button MEETS B-a31a (the restack for 2.369.411, 主开发 20:03Z, ruling (a)): the failure line is the NEED LINE —
+    // lane ui-needs-a-button MEETS B-a31a (the restack for 2.369.412, 主开发 20:03Z, ruling (a)): the failure line is the NEED LINE —
     // its words and its doors — with its Details fold, drawn by the builder (`errOf(errline)` → [line, fold]). Each is replaced WHOLE,
     // in its own place (a key answer between them stays), only when the words or the title change — never written in place (a text
     // write would take the doors); the same words build nothing and touch nothing

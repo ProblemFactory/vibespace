@@ -596,11 +596,11 @@ console.log('⑮ THE SPLIT\'S TWO LAWS (主开发\'s bounded check U1 + U2, 2026
     !law1(pm1) && pm1.a1.code === 'auto-reads-off' && pm1.runs === 0 && pm1.counted === 0 && !law1(pm2) && pm2.a1.code === 'refresh-off' && pm2.runs === 0 && pm2.counted === 0, brief([pm1.a1, pm2.a1]));
   // the words say it: the door's and the after-turn module's header comments, and the three changelogs
   const DOORSRC_ALL = read(DOORF), ATRSRC = read('src/server/after-turn-read.js');
-  const CL = ['CHANGELOG.md', 'CHANGELOG.zh.md', 'CHANGELOG.ja.md'].map((f) => { const s = read(f); const i = s.indexOf('\n## 2.369.411'); const j = s.indexOf('\n## ', i + 5); return i < 0 ? '' : s.slice(i, j < 0 ? undefined : j); });
+  const CL = ['CHANGELOG.md', 'CHANGELOG.zh.md', 'CHANGELOG.ja.md'].map((f) => { const s = read(f); const i = s.indexOf('\n## 2.369.412'); const j = s.indexOf('\n## ', i + 5); return i < 0 ? '' : s.slice(i, j < 0 ? undefined : j); });
   ok('U1 said: the door\'s header says a Re-check on an Antigravity account READS while Claude\'s row is Off and was refused before the split (403 refresh-off), and that Claude declares no on-demand reading (the readsRow branch a fence); the after-turn header names the vendor\'s own row; no header promises «never under accounts.onDemandQuotaRefresh = off»',
     /a Re-check on an Antigravity\n\/\/ account READS while Claude's row is Off — once, counted, paced as any press; before the split that press was refused\n\/\/ \(403 refresh-off\)/.test(DOORSRC_ALL) && /Claude declares no\n\/\/ on-demand reading today, so that branch is a fence for a later one/.test(DOORSRC_ALL)
       && /the vendor's own row antigravity\.autoUsageReads — Off refuses\n\/\/ this read and the wall's, never a person's Re-check/.test(ATRSRC) && ![DOORSRC_ALL, ATRSRC].some((s) => /never under `accounts\.onDemandQuotaRefresh = off`|`accounts\.onDemandQuotaRefresh = off`, the judge/.test(s)));
-  ok('U1 said to the person: each of the three changelogs\' 2.369.411 sections says, in the screen\'s words, that Re-check on an Antigravity account now reads even while Claude usage refresh is Off, which refused it before',
+  ok('U1 said to the person: each of the three changelogs\' 2.369.412 sections says, in the screen\'s words, that Re-check on an Antigravity account now reads even while Claude usage refresh is Off, which refused it before',
     /Re-check on an Antigravity account now reads its usage even while Claude usage refresh is Off \(that press was refused before\)/.test(CL[0]) && /Antigravity 账号的「重新检查」现在即使在 Claude 用量刷新为「关闭」时也会读取用量（以前这一按会被拒绝）/.test(CL[1])
       && /Antigravity アカウントの「再チェック」は、Claude の使用量の更新が「オフ」でも読み取ります（以前は拒否されていました）/.test(CL[2]), JSON.stringify(CL.map((s) => s.length)));
 

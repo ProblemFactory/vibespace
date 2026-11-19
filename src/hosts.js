@@ -330,7 +330,7 @@ class HostManager {
     this._save();
     this._reachChanged('reshape');
     // B-48a4 cure: a migration's reshape is ON DISK before its ledger says done (a boot-time kill leaves no unmigrated file under a
-    // stamped ledger) — by the flush's OWN answer (the census of the class, 2.369.411): a file it LEFT (the storage held the writer
+    // stamped ledger) — by the flush's OWN answer (the census of the class, 2.369.412): a file it LEFT (the storage held the writer
     // past its bound, or the write failed) THROWS, so the runner counts the migration failed and runs it again at the next boot
     // (each reshape through here is idempotent); the queued write still lands when the writer can
     if (!this._flushLanded()) throw new Error('data/hosts.json is not on disk yet (the store writer has not written it: held by the storage past its bound, a failed write, or the hub is exiting) — the migration runs again at the next boot');

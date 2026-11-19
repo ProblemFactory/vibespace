@@ -1368,7 +1368,7 @@ ok(hs && hs.browserKey === HL && hs.open && hs.recorded === true && hs.count >= 
     for (const tokn of ['vsst_' + 'w'.repeat(24), 'jbt_' + 'w'.repeat(24)]) for (const [m, , p, body] of WALK_H) { const x = await hit(W, m, p, body, tokn); rows.push([tokn.slice(0, 5), m + ' ' + p.replace(HL, 'hu-…').replace(clickE.id, ':id'), x.status, x.code]); }
     const bad = rows.filter(([, , st, c]) => !(st === 403 && c === 'agent_forbidden'));
     ok(!bad.length && stateNow() === s0, `every human route × {vsst_, jbt_} (${rows.length}) refused 403 agent_forbidden over his REAL recorded entries — nothing started, drove, ended or answered`, bad);
-    // THE EXIT CHECK's two rows (lane cli-update-needs-nothing, B-8b87 — the box red of 2.369.411's prep: both routes derived, none
+    // THE EXIT CHECK's two rows (lane cli-update-needs-nothing, B-8b87 — the box red of 2.369.412's prep: both routes derived, none
     // walked). The walk above refused both to either token; here: a token kept nothing, the PERSON's press (the cookie path) reaches
     // the keeper's own verdicts, a profile the person does not have answers 404 like no profile, and a copy of the routes without the
     // exit check's guard lets a token through — the walk can go red on it

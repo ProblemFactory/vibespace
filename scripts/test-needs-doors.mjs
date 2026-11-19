@@ -2041,7 +2041,7 @@ console.log('⑩ THE VERIFIER\'S LIST FOR PICKS 3–6 (stored words — the cens
     ALIASED.filter((f) => !SWN.filings.some((x) => x.f === f && x.words.size > 0)));
   // A FILING THE STORE REFUSES (its i18n.detail not an array of lines: add() throws, the item is never filed) is NAMED — the known
   // one is a debt (the sign-in ask, browser-dialogs promptAsk); another is red, and a fix of it removes its row
-  const REFUSED_DEBT = [];   // the sign-in ask's row left at the restack for 2.369.411: B-ebb7 (2.369.410) files it, its detail an array of lines
+  const REFUSED_DEBT = [];   // the sign-in ask's row left at the restack for 2.369.412: B-ebb7 (2.369.410) files it, its detail an array of lines
   const refusedNow = SWN.filings.filter((x) => x.refused && x.refused.length).map((x) => `${x.f} «${[...x.words][0] || '?'}»`).sort();
   if (refusedNow.length) console.log(`  · ${refusedNow.length} filing(s) the store refuses (i18n.detail not an array of lines — never filed): ${refusedNow.join(', ')}`);
   ok(JSON.stringify(refusedNow) === JSON.stringify(REFUSED_DEBT),

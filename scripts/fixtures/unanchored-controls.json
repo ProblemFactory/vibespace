@@ -2,7 +2,7 @@
  "//": "B-0d3e (lane lg-leak-census): the scripts whose red controls edit a product file's text with a plain .replace / .replaceAll / .split().join() that reaches a loader — not through scripts/scratch.mjs anchored() — with how many. The list only FALLS: test-suite-files-parse §3 reds a file that ADDS one, by name, and prints the row that would admit it. A mutant copy through scripts/mutant-copy.mjs fails by name besides when its copy equals the file (all its anchors gone). A COUNT NEVER RISES WITHOUT A BACKLOG ROW'S ID BESIDE IT: every count stands under `rows` — { \"B-xxxx\": { \"why\": …, \"files\": { … } } } — a file's cap is the largest count any row gives it; a unit that must raise one ADDS A ROW under its own backlog id with a why of 20 or more characters; the founding row B-0d3e is FALL-ONLY (pinned in census-founding-pins.json); a plain number with no row id, or a count that is not a whole number, is red.",
  "rows": {
   "B-0d3e": {
-   "why": "the list B-0d3e brought (lane lg-leak-census): 2444 at fe1d59c41, 2516 on 2.369.410, 2679 with the 2.369.411 block's units counted in once (主开发 2026-11-18 23:33Z) and the integrator's seams by arithmetic since — B-0d3e's detail holds the rise",
+   "why": "the list B-0d3e brought (lane lg-leak-census): 2444 at fe1d59c41, 2516 on 2.369.410, 2679 with the 2.369.412 block's units counted in once (主开发 2026-11-18 23:33Z) and the integrator's seams by arithmetic since — B-0d3e's detail holds the rise",
    "files": {
     "test-account-pool.mjs": 2,
     "test-account-reset-door.mjs": 2,

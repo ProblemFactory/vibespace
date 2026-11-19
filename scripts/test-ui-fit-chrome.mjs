@@ -250,7 +250,7 @@ try {
   })()`);
   check(`④ a guided window opened while the tour is up: the tour steps aside (${tour && tour.during.vis}) while the window is up, and is back (${tour && tour.after.vis}) once it closes`, !!tour && tour.during.dialog && tour.during.yield && tour.during.vis === 'hidden' && tour.cancelled && !tour.after.yield && tour.after.vis === 'visible', tour);
 
-  // ⑤ THE DISK NOTICE ON A PHONE — the need line on its OWN row under the toolbar (the restack for 2.369.411: ui-needs-a-button's need
+  // ⑤ THE DISK NOTICE ON A PHONE — the need line on its OWN row under the toolbar (the restack for 2.369.412: ui-needs-a-button's need
   // line MEETS ui-phone-and-fit's wrap mark; 主开发's ruling 2026-11-11 14:09Z, restated 2026-11-18 20:10Z): the toolbar stays ONE line
   // at a phone width with the notice shown and after each of its two doors is pressed. RED CONTROL: the notice put back INTO the bar
   // (where the release drew it) — the plant proven first — and the leg reads it red

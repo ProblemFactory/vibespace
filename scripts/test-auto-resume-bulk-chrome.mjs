@@ -221,7 +221,7 @@ try {
   await press(D.S, D.ev, '#stopped-quick-tabs .stopped-quick-tab');
   const all4 = await until(() => D.ev(`(() => { const l = ${listed}; return l.length === 4 ? l : null; })()`), 5000, 150);
   check('desk: …a second press shows everything again', !!all4, await D.ev(listed));
-  // one card's toggle — THE WORDS FOR THIS STOP (the hosted red of 2.369.411's prep run 2, placed by lane lg-recovery): the
+  // one card's toggle — THE WORDS FOR THIS STOP (the hosted red of 2.369.412's prep run 2, placed by lane lg-recovery): the
   // fixture's wall states a reset two minutes BEFORE the stop (resetsAt now − 120 s; the mark says «上限已重置»), so turning
   // auto-continue on arms nothing (auto-resume.js setEnabled arms only a reset still ahead) and the card says it is on but not
   // waiting for this limit (the card never promises a continue that cannot happen — stopped-by.js stoppedChipWords

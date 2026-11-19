@@ -26,7 +26,7 @@
 //   §9 THE HELD ACCOUNT (r2) — a resume that states no account goes to its row's, server-side, from every door (B-a5a4: a
 //      kept agy meta naming none ran on the machine's own login — resumed there)
 //   §10 B-a5a4 (the r2 reviewer's nine follow-ups): a deleted account on an account-bound harness refused; the seam before
-//      the first sweep; ONE refusal sentence; a pending fork's copy swept by the next boot; item (2) (its remainder, 2.369.411):
+//      the first sweep; ONE refusal sentence; a pending fork's copy swept by the next boot; item (2) (its remainder, 2.369.412):
 //      a resume that RAN — its turn ended WELL — consumes its copy at once (a failed resume's error result keeps it: r1 lost it)
 //   §11 B-a5a4 follow-up: ONE precedence for «which account holds it» (the page's merge rule, on a copy); the refusal names
 //      that account; the Resume switch offers no account the server refuses; the rescue reads the server's message; the
@@ -502,7 +502,7 @@ await section('§10 B-a5a4 — the r2 reviewer\'s follow-ups: a deleted account 
         && !BRm.turnRan(null, agyS('error')) && !BRm.turnRan(null, agyS('cancelled')) && BRm.turnRan(null, agyS('end_turn')) && BRm.turnRan(undefined, null),
       '§10 (2) turnRan (PURE): a claude result proves the resume only as a success; an ACP prompt only when it ended neither in \'error\' nor \'cancelled\' (agy can cancel before its agent answered); codex\'s task_complete (no record) does');
     // the WIRING, as the LAWS it holds — by behaviour, never one line's text (another unit rewrites these lines around them:
-    // the .411 block's third checkpoint went red on an exact pin of codex's call)
+    // the .412 block's third checkpoint went red on an exact pin of codex's call)
     // (a) server.js's ONE turn-end entry — ITS OWN SOURCE, read out of server.js and run over stand-ins: the delivery steps
     //     first and unchanged (the pool engine gets the session and the record, the ladder the session), the consume LAST with
     //     the record; a consume that throws or rejects is warned by name and skips nothing before it; a ladder that throws

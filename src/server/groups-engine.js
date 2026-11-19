@@ -331,7 +331,7 @@ function create({
    *  be stale-free or absent: `list()`/`listFor()` read no log after the
    *  first count. The first count is warmed in the background after boot. */
   const unreadMemo = new Map();   // `${gid}|${who}` → {since, lastAt, n}
-  // B-b17f's remainder (2.369.411): until the boot warm-up has PASSED a group, a reader never reads that group's log on the
+  // B-b17f's remainder (2.369.412): until the boot warm-up has PASSED a group, a reader never reads that group's log on the
   // loop — an owed count is null («not counted yet»). The release's readers counted every group the warm-up had not reached
   // from its log, synchronously, all in ONE turn (a page asking at the hub's start: every cold group's log at once). The
   // warm-up's end announces the list once when a reader was answered null. coldIds: the groups of the start, not yet passed

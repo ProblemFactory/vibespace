@@ -475,7 +475,7 @@ ok(fc.same === 'same' && fc.replaced1 === 0 && fc.added1 === 0 && fc.touched1 ==
 ok(fc.changed === 'patched' && fc.replaced2 === 0 && fc.dotNow === 'mounts-dot mounts-dot-err' && fc.chipBeforeActs && fc.errline, 'a CHANGED answer changes the dot and its words only: the dot\'s class and title, the chip before the actions, the failure line — every node the row had is the same node', fc);
 const pq2 = (() => { const src0 = fs.readFileSync(path.join(REPO, 'src/lib/mounts-live.js'), 'utf8'); const src = src0.replace("  if (hostFaceSame(prev, next)) return 'same';\n", '').replace("    if (dot.className !== cls) dot.className = cls;", "    { const nd = document.createElement('span'); nd.className = cls; dot.replaceWith(nd); } // CONTROL: the probe rebuilds what it shows"); return { file: 'src/lib/mounts-live.js', src, applies: src !== src0 && !src.includes("return 'same';\n  const dot") }; })();
 ok(pq2.applies && faceCase(await bundle('src/lib/mounts-live.js', pq2)).replaced1 > 0, 'CONTROL (p): a probe that rebuilds what it shows (the tip as it stood replaced the whole row twice) — the zero-replaced leg goes red');
-// THE MEETING AT THE RESTACK FOR 2.369.411 (主开发 20:03Z, ruling (a), both meanings): ui-needs-a-button's NEED LINE (its words and its
+// THE MEETING AT THE RESTACK FOR 2.369.412 (主开发 20:03Z, ruling (a), both meanings): ui-needs-a-button's NEED LINE (its words and its
 // doors) is the row's failure line that B-a31a's probe patches IN PLACE — the face carries the need line's inputs, the builder draws it
 // (errOf). An answer with the SAME words builds nothing and writes nothing to the line; CHANGED words replace it and its fold once,
 // each in its own place, with doors that work
@@ -517,7 +517,7 @@ const needCase = (M) => {
   return { same, sameOther, kept, changed, built, replaced: !!line1 && line1 !== line0 && !!fold1 && fold1 !== fold0, doors: doors.length, pressed, words: line1 && line1.textContent, foldText: fold1 && fold1.textContent, lines: row.children.filter((k) => k._cls.includes('mounts-errline')).length, order };
 };
 const nd = needCase(ML);
-ok(nd.same === 'same' && nd.sameOther === 'patched' && nd.kept.built === 0 && nd.kept.writes === 0 && nd.kept.line && nd.kept.fold, 'THE MEETING (ruling (a), the restack for 2.369.411): a probe answer with the SAME words builds nothing and writes nothing to the need line or its fold (the identical answer ⇒ «same»; the same words with the chip moved ⇒ the chip patched, the line at zero writes)', nd);
+ok(nd.same === 'same' && nd.sameOther === 'patched' && nd.kept.built === 0 && nd.kept.writes === 0 && nd.kept.line && nd.kept.fold, 'THE MEETING (ruling (a), the restack for 2.369.412): a probe answer with the SAME words builds nothing and writes nothing to the need line or its fold (the identical answer ⇒ «same»; the same words with the chip moved ⇒ the chip patched, the line at zero writes)', nd);
 ok(nd.changed === 'patched' && nd.built === 1 && nd.replaced && nd.lines === 1 && nd.doors === 1 && nd.pressed === 1 && /refused the key/.test(nd.words || '') && /publickey/.test(nd.foldText || '') && nd.order === 'line,key,fold', '…CHANGED words replace the need line and its fold ONCE, each in its own place (a key answer between them stays): its door is there and works', nd);
 // RED CONTROL (v), its plant proven first: the release's patch — the failure line's words written IN PLACE — takes the doors
 const pnd = patched('src/lib/mounts-live.js', '  if (errOf) {\n', "  if (false) { // CONTROL: the release's in-place text\n");

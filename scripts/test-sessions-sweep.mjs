@@ -481,7 +481,7 @@ parentPort.on('message', (m) => { if (!m || !m.op || !ops[m.op]) return; Promise
 console.log('⑫ the chain\'s -cure (主开发 12:08Z): no walk on the loop after a worker RAN; a list that stopped refreshing said in seconds; the bounds; a newer conversation reopened; a pause named');
 {
   const M12 = mutantCopies('sessions-sweep-chain-cure', REPO);
-  // the checkpoint's B-0d3e loader guard (met at 2.369.411's second checkpoint): the TIP's own route loaded fresh is a deliberate
+  // the checkpoint's B-0d3e loader guard (met at 2.369.412's second checkpoint): the TIP's own route loaded fresh is a deliberate
   // unpatched copy (`same: true`) — only for the tip legs' tags, so a red control whose anchor went still fails by name
   const TIP_TAGS = new Set(['first', 'second', 'no-worker', 'cure', 'cure2-spaced']);
   const fresh = (src, tag, ctx = routeCtx()) => { const Mod = M12.load('src/routes/sessions.js', src, tag, { same: TIP_TAGS.has(tag) }); Mod.setup(ctx); return Mod; };

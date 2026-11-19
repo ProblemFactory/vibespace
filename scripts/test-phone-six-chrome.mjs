@@ -71,7 +71,7 @@ const wt = path.join(root, 't');
 const fakeHome = path.join(root, 'home');
 const chromeHome = path.join(root, 'chrome-home'); fs.mkdirSync(chromeHome, { recursive: true });   // rule nine (hub-boot.mjs): the suite's own browser carries a HOME in the root, so the helper ends it before the root goes
 for (const d of ['.claude/projects', '.claude/sessions', '.config', '.vibespace']) fs.mkdirSync(path.join(fakeHome, d), { recursive: true });
-// ⑦e's files window shows a folder NAMED AT LENGTH (the 2.369.411 checkpoint's red): the boot helper's home is «home» — four
+// ⑦e's files window shows a folder NAMED AT LENGTH (the 2.369.412 checkpoint's red): the boot helper's home is «home» — four
 // letters that fit beside the list column with nothing yielded, so ⚙ never folded and ⋯ held no row to read. Before §57c the
 // suite's home was /tmp/vs-phone-six-home-<pid>, whose readable minimum «vs-phone-six…» (114 px) made the ladder reach ⚙
 // (the 11-17 hosted run); this folder keeps that minimum wherever the helper mints the root

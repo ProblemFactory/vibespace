@@ -100,7 +100,7 @@ const card = box.slice(box.indexOf('function loginBoxEl('), box.indexOf('functio
 ok(/body\.append\(\.\.\.f\.fields, f\.otpList, f\.hint, err\)/.test(add) && /loginFields\(\{ addCode: \(\) => showTotpAddDialog\(/.test(add) && /f\.otpPick\.added\(r\.name\)/.test(add)
   && /otpRow, f\.otpList, f\.hint/.test(card) && /loginFields\(\{ site, fixed: true, addCode: \(\) => addCode\.click\(\) \}\)/.test(card) && /f\.otpPick\.added\(n\)/.test(card) && !/otpNames/.test(box + row),
   'the three places draw it: the Vault\'s add dialog (its door opens THE 两步验证… dialog, the saved name fills the field) and the card in the tray / its own window (its door is the card\'s «Two-step code…», which moves the box first)');
-// THE PICKED LOGIN HIDES THE TWO-STEP FIELD (the meeting with login-request-card's saved-login door, 2.369.411): the card hands
+// THE PICKED LOGIN HIDES THE TWO-STEP FIELD (the meeting with login-request-card's saved-login door, 2.369.412): the card hands
 // useSavedLoginEl the elements a picked login hides — the old datalist's name there was skipped in SILENCE (`if (n)`), so a leg
 // reads the REAL call: exactly these four, each a name loginFields returns (or the card's own otpRow). Its RED control first.
 const typedOf = (src) => { const m = /useSavedLoginEl\(\{[^}]*?typed: \[((?:[^\[\]]|\[[^\]]*\])*)\]/.exec(src); return m ? m[1].split(',').map((x) => x.trim()) : null; };

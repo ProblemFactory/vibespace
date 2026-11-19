@@ -20,7 +20,7 @@
 //   ⑥ a failed read is not a fact · ⑦ the settle fires with re-reads in flight (cure r1) · ⑧ THE CARRY: the four-row
 //     scene of the coordinator's must against the release's answer, the settle of a failed first read, «unknown» at once
 //     for a key in its back-off · ⑨ the no-inline form on a real SafeFs with no live worker (cure r2).
-//   ⑩ the meeting with B-df5f (restack 2.369.411): another machine's conversation is matched as written, its cwd never read,
+//   ⑩ the meeting with B-df5f (restack 2.369.412): another machine's conversation is matched as written, its cwd never read,
 //     waited for or flagged; the hub's own is (the control).
 // Run: node scripts/test-membership-doors.mjs
 import fs from 'node:fs';
@@ -393,7 +393,7 @@ fs.realpathSync.native = real.native;
   ok(!red.keptDuring && red.stoppedDuring === 1, `RED: the same wiring without the flag DROPS the forward during the stall (${red.stoppedDuring} stopped)`, red);
 }
 
-// ── ⑩ THE MEETING WITH B-df5f (the restack for 2.369.411) — BOTH LAWS: a conversation of ANOTHER machine (`hostId`) is matched
+// ── ⑩ THE MEETING WITH B-df5f (the restack for 2.369.412) — BOTH LAWS: a conversation of ANOTHER machine (`hostId`) is matched
 //      by its cwd as written, never through the hub's realpath (B-df5f); so its cwd is never READ for one, never WAITED for,
 //      never FLAGGED (B-55dc). CONTROL: the hub's own conversation at the same path is read, flagged until then, then a member ──
 {

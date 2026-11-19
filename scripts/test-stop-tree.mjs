@@ -397,7 +397,7 @@ const svcScene = async (Mod, tag) => {
   const R = await svcScene(MJ9.load('src/jobs.js', JSRC.replace(PEND, '    if (false /* MUTANT: the release — a start during a stop is «already running» */) {'), 'release'), 'job-start-during-stop-mut');
   const rx = await R.press('start', { settle: true });
   await R.end();
-  // the release (measured on the test machine, 2.369.411 base): its start sets desiredUp BEFORE the «already running» refusal, so at
+  // the release (measured on the test machine, 2.369.412 base): its start sets desiredUp BEFORE the «already running» refusal, so at
   // the stop's end the service is DOWN with no new run and the crash policy's timer brings it back 5 s on, COUNTED as a crash
   // (six such presses park it); with `restart: 'never'` nothing brings it back — by reading src/job-model.js onServiceExit (the row's
   // «a second start was needed»)

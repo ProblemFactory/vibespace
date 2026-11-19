@@ -145,7 +145,7 @@ try {
     ok(K.ok && K.cpid && K.port, 'the child browser launched through the driver on its own config', K.error);
     let cmd = ''; try { cmd = fs.readFileSync(`/proc/${K.cpid}/cmdline`, 'utf8').split('\0').join(' '); } catch { cmd = ''; }
     ok(BE.QUIET_LOG_ARGS.every((q) => cmd.includes(q)), 'its Chrome\'s command line carries --disable-logging --log-level=3', cmd.slice(0, 300));
-    // the box's first run of this leg (2.369.411, int361's row 7 at 691f34c0b): 65 of 65 `eval`s judged missed FROM 0 s while
+    // the box's first run of this leg (2.369.412, int361's row 7 at 691f34c0b): 65 of 65 `eval`s judged missed FROM 0 s while
     // the child's Chrome was up (launched, its command line read) — a stderr hang answers first and then stops; a judge that misses
     // from the first ask is the judge's own. Ⓓ now asks the way Ⓑ and Ⓒ do (the suite's measured signal: the stderr hang is
     // DevTools answering 0 bytes): /json/version on the child's own port, once a second; the first `eval`'s raw answer is SAID in

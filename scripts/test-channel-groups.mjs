@@ -863,7 +863,7 @@ console.log('§3g2 B-b17f the boot warm-up reads each group\'s log ONCE, off the
   ok(reads === 0 && bad.length === 0 && lst.length === NG && lst.every((g) => g.unread > 0),
     `§3g2 then list() + listFor() read ${reads} log(s); every count (the owner's and a member's) = the from-scratch count`, bad.slice(0, 4).join(' '));
   b1.st.close();
-  // (e) B-b17f's remainder (2.369.411): A READER DURING THE WARM-UP — a page asking in the start's own turn, before the
+  // (e) B-b17f's remainder (2.369.412): A READER DURING THE WARM-UP — a page asking in the start's own turn, before the
   // warm-up's first — reads NO log on the loop: every owed count the warm-up has not passed is null («not counted yet»),
   // never a synchronous read of every cold group in that turn; the warm-up's end says the list ONCE, every count in it
   const MUTWU = mutantCopies('chan-groups-warm', REPO);

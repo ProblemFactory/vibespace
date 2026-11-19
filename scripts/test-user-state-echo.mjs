@@ -863,7 +863,7 @@ const converged = (w, pages) => { const st = slotsOf(w.serverState()); return pa
   // master did not have is red whatever it is called (a counter spelled `vsSeq` included), not by a word list
   // + ONE row the .397 train adds (int361's test-only seam, 2026-11-12): account-reset-door's per-device «said once» set
   // + ONE row B-bd27 adds (2.369.408): «Update its agent…» opens Manage agents on its Machines tab — the same tab name user-todos-actions writes
-  // + TWO rows B-3d6a adds (2.369.411): the «not found» dialog opens Manage agents FOR a machine (_showAgentsFor) — its tab (Machines or
+  // + TWO rows B-3d6a adds (2.369.412): the «not found» dialog opens Manage agents FOR a machine (_showAgentsFor) — its tab (Machines or
   //   Accounts) and, for a paired machine, its card in the remembered open set: the same two keys the manager already writes
   //   (src/lib/usage-meter.js 'vibespace.resetOutcomesSeen' — which outcome toasts THIS device has shown; one device's memory, not a store of acts)
   // + ONE row lane think-tools-phone adds (2026-11-17, a stale page that gave up checks again): the behind-notice's ✕ — hidden for THIS

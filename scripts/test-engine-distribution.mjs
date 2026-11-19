@@ -1601,7 +1601,7 @@ await leg('B-4d35 a put-back outside a landing is waited for within each ask\'s 
     rmGo(); const a = await A;
     return { inCleanup, m, a, said: L.journal.filter((l) => /is still being put back after/.test(l)).length };
   };
-  // the control's plant (2.369.411 block 1, a red by this chain alone — the race was IN the control): «a late ask refused at once»
+  // the control's plant (2.369.412 block 1, a red by this chain alone — the race was IN the control): «a late ask refused at once»
   // goes at the TOP of waitPutBack, before its zero-time check `within(p, 0)`. Cut in place of the look, the refusal raced that
   // check: a put-back with nothing aside can settle before the 0 ms timer, the ask answered «over» before it was ever refused,
   // and the control read {ok:true}. The plant is asserted where it claims before its verdict (the close's rule b)

@@ -105,7 +105,7 @@ console.log('③ THE CENSUS — every product sentence that names a place in Set
     { file: 'src/lib/jobs-layout.js', re: /tr\('Settings → Spending'\)/, why: 'heldText is drawn as plain text by three surfaces (the chat line, the jobs panel, the rail tip) — debt: those surfaces draw no link yet' },
     { file: 'src/lib/settings-schema.js', re: /under the same unattended-spend ceiling \(Settings → Spending\)/, why: 'a Settings row\'s description naming the section beside it — Settings draws descriptions as text (debt: descriptions draw no link)' },
     { file: 'src/plugin-settings.js', re: /Settings › Spending show today/, why: 'the LLM plugin\'s budget description naming where its spend is shown — a description, drawn as text' },
-    // usage-source's overage tip left this list at the move onto 2.369.411's checkpoint (-moved2): lane ui-needs-a-button's words name no place («a Spending setting can allow them»)
+    // usage-source's overage tip left this list at the move onto 2.369.412's checkpoint (-moved2): lane ui-needs-a-button's words name no place («a Spending setting can allow them»)
     // the restack on the train's checkpoint (lane login-request-card, 2026-11-18): bl-accounts batch 1, boarded BEFORE this unit, wrote
     // four Spending sentences this census reads now — named here, each with its reason (three of them paid since: the links unit's
     // follow-up on 2.369.410 links the empty row in the door line's twin, the agent's sentence and the hand-over toast; the ledger's stays, by design)

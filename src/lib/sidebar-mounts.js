@@ -980,7 +980,7 @@ export function installSidebarMounts(Sidebar) {
         errline: st && !st.ok ? this._hostErrFacts(h, st) : null,   // + the need line's inputs (the meeting with ui-needs-a-button)
       };
     },
-    /** lane ui-needs-a-button (machines-1), carried into the face at the restack for 2.369.411 (the meeting with B-a31a, ruling (a)):
+    /** lane ui-needs-a-button (machines-1), carried into the face at the restack for 2.369.412 (the meeting with B-a31a, ruling (a)):
      *  a failed probe's reason in the reader's language (hostErrorWords) — the need line's words, the system's own text (its title
      *  and its Details fold), and whether the key door is offered */
     _hostErrFacts(h, st) {
@@ -1243,7 +1243,7 @@ export function installSidebarMounts(Sidebar) {
       // no visible reason — the error lived only in the dot's hover tooltip,
       // invisible on touch and undiscoverable on a 6px target). Same errline
       // pattern as storage rows; full text in title.
-      // lane ui-needs-a-button (machines-1) MEETS B-a31a at the restack for 2.369.411 (主开发 20:03Z, ruling (a), both meanings): the
+      // lane ui-needs-a-button (machines-1) MEETS B-a31a at the restack for 2.369.412 (主开发 20:03Z, ruling (a), both meanings): the
       // face's failure line carries the need line's inputs (_hostErrFacts); the builder draws the need line and its Details fold
       // from it (_hostErrLine), and the probe's in-place patch replaces them WHOLE only when their words or title change (errOf)
       if (face && face.errline) {
