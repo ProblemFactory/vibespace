@@ -28,7 +28,8 @@ const GROUP_ID_RE = /^T-[\w.-]{1,100}$/;
 const HOST_RE = /^([^:/\s]+)::(\/.*)$/;   // host::/path — a folder on another machine (the old folders[] form)
 
 const oneLine = (s, max) => String(s == null ? '' : s).replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').replace(/\s*\n\s*/g, ' ').trim().slice(0, max);
-const trimSlash = (p) => (p.length > 1 ? p.replace(/\/+$/, '') : p);
+// a machine's root (`h1::/`) keeps its one slash — trimmed to `h1::` it would read as a relative hub row (B-06de)
+const trimSlash = (p) => (p.length > 1 ? p.replace(/(::)?\/+$/, (m, c) => (c ? '::/' : '')) : p);
 
 /** One row as the store keeps it, or null (unusable). `selfId` = the group's own id (a row never references itself). */
 function sanitizeRow(raw, { selfId = null } = {}) {

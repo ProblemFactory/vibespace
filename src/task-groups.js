@@ -75,7 +75,7 @@ const crypto = require('crypto');
 const os = require('os');
 const TC = require('./task-context.js'); // PURE: the Context table's rows, resolution, derivations, budget plan (lane task-group-context)
 const { pickColorSeq } = require('./task-color-seq');
-const { folderOf, insideFolder, membersWithout, onOtherMachine } = require('./task-membership.js'); // PURE (lane open-task-binds): THE folder rule (a folder includes itself; a glob tail is the recursive switch) — the bundle's panel asks the same one
+const { folderOf, insideFolder, membersWithout, onOtherMachine, memberFolders, folderOnHost } = require('./task-membership.js'); // PURE (lane open-task-binds): THE folder rule (a folder includes itself; a glob tail is the recursive switch) — the bundle's panel asks the same one
 const belt = require('./agent-output-belt.js'); // lane agent-output-sinks: the sink belt — a progress note / detail a reader sees never carries a credential in the clear
 // lane cli-call-timeouts: one TASK.md mirror write's bound (each op through SafeFs / fs.promises) and the retry after a miss
 const MIRROR_BOUND_MS = 10000;
@@ -865,6 +865,8 @@ class TaskGroupManager {
 
   /** The old folders[], derived: every 'discover' row's folder [{ path, recursive: true }] (membership by cwd). */
   foldersOf(tOrId) { const t = this._groupOf(tOrId); return t ? TC.discoverFolders(this._ctxRows(t), this._memberRes(t)) : []; }
+  /** B-06de: the folder rows FOR MEMBERSHIP, machine-scoped ({path, recursive, host}: a hub row, or `host::/path` another machine's) */
+  memberFoldersOf(tOrId) { const t = this._groupOf(tOrId); return t ? memberFolders(this._ctxRows(t), this._memberRes(t)) : []; }
   /** B-55dc: a row's kind FOR MEMBERSHIP — _kindOf's answer with no file call: the door, a STORAGE row's SafeFs fact (as
    *  _kindOf), else the last off-loop read of this path ('reading' before its first one lands). */
   _memberKindOf(abs) {
@@ -2113,7 +2115,7 @@ class TaskGroupManager {
       if (!g.rows) continue;   // no rows ⇒ no folders (the walk's _res answers [] there, uncached)
       const e = g.resKey !== null && this._mresCache ? this._mresCache.get(g.resKey) : undefined;
       if (e !== undefined && e === g.resEntry && e.gen === this._mfacts.gen() && now - e.at < 4000) continue;
-      g.dirs = this.foldersOf(g.t);
+      g.dirs = this.memberFoldersOf(g.t);   // B-06de: machine-scoped rows
       g.resKey = this._resKey(this._ctxRows(g.t));
       g.resEntry = this._mresCache ? this._mresCache.get(g.resKey) : undefined;
       const fsig = JSON.stringify(g.dirs);
@@ -2131,13 +2133,14 @@ class TaskGroupManager {
     const real = this._realHere(cwd, realCwd, hostId);
     const cwds = [cwd, real && real !== cwd ? real : null].filter(Boolean);
     const key = JSON.stringify([sessionKey || '', cwds, spawned]);
-    let hit = ix.results.get(key);
+    const hkey = onOtherMachine(hostId) ? `${key}\u0001${hostId}` : key;   // B-06de: the machine is part of the answer
+    let hit = ix.results.get(hkey);
     if (hit) this._mixStats.hits++;
     else {
       const sp = new Set(spawned);
-      hit = ix.groups.filter((g) => (sessionKey && g.sessions.has(sessionKey)) || sp.has(g.t.id) || (cwds.length > 0 && g.dirs.some((f) => cwds.some((c) => insideFolder(c, f)))));
+      hit = ix.groups.filter((g) => (sessionKey && g.sessions.has(sessionKey)) || sp.has(g.t.id) || (cwds.length > 0 && g.dirs.some((f) => folderOnHost(f, hostId) && cwds.some((c) => insideFolder(c, f)))));
       if (ix.results.size >= MEMBER_RESULTS_MAX) { ix.results.clear(); this._mixStats.cleared++; }
-      ix.results.set(key, hit);
+      ix.results.set(hkey, hit);
     }
     return hit.map((g) => g.t);
   }
@@ -2276,8 +2279,8 @@ class TaskGroupManager {
       if (sessionKey && Array.isArray(t.sessions) && t.sessions.includes(sessionKey)) member = true;
       if (!member && spawnedInto.has(t.id)) member = true;
       if (!member && cwds.length) {
-        for (const f of this.foldersOf(t)) {   // lane task-group-context: the 自动发现会话 rows (recursive)
-          if (cwds.some((c) => insideFolder(c, f))) { member = true; break; }
+        for (const f of this.memberFoldersOf(t)) {   // lane task-group-context: the 自动发现会话 rows (recursive) — B-06de: of the conversation's OWN machine
+          if (folderOnHost(f, hostId) && cwds.some((c) => insideFolder(c, f))) { member = true; break; }
         }
       }
       if (member) out.push(t);

@@ -4,7 +4,8 @@
  *
  * Installed on Sidebar.prototype via installSidebarRender(Sidebar).
  */
-import { escHtml, createPopover, showContextMenu, copyText, showToast, showInputDialog, showConfirmDialog } from './utils.js';
+import { escHtml, createPopover, showContextMenu, copyText, showToast, showInputDialog, showConfirmDialog, stripCwdHostLabel } from './utils.js';
+import { onOtherMachine } from '../task-membership.js'; // PURE: B-06de — a folder group links as another machine's row only when it IS that machine's
 import { track } from './telemetry-client.js';
 import { t as tr } from './i18n.js';
 import { createBackendIcon, getBackendMeta, getSessionKey } from './agent-meta.js';
@@ -139,11 +140,17 @@ export function installSidebarRender(SidebarClass) {
       const linkBtn = document.createElement('button'); linkBtn.className = 'folder-add-btn';
       linkBtn.innerHTML = '<svg style="width:10px;height:10px" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M7 9l2-2M6 12l-1.5 1.5a2 2 0 01-3-3L4 8M10 4l1.5-1.5a2 2 0 013 3L12 8"/></svg>'; linkBtn.title = tr('Link folder to a task');
       linkBtn.style.fontSize = '10px';
+      // B-06de: another machine's folder group links as THAT machine's row (`host::/path`; the group's key is the display «<name>:
+      // /path», which matched nothing as a row) — ONLY when every session in it is that one machine's (a shared home's hub group
+      // with one live remote conversation laid over it stays the hub's row)
+      const hosts = new Set(items.map((s0) => (s0 && onOtherMachine(s0.host) ? String(s0.host) : '')));
+      const groupHost = hosts.size === 1 ? [...hosts][0] : '';
+      const linkPath = groupHost ? `${groupHost}::${stripCwdHostLabel(cwd)}` : cwd;
       linkBtn.onclick = (e) => {
         e.stopPropagation();
         this._showTaskBindPopover(linkBtn,
-          (task) => this._folderPaths(task).includes(cwd),
-          (task, checked, pop) => { if (checked) this._taskAddFolder(task.id, cwd); else this._taskRemoveFolder(task.id, cwd); pop.remove(); });
+          (task) => this._folderPaths(task).includes(linkPath),
+          (task, checked, pop) => { if (checked) this._taskAddFolder(task.id, linkPath); else this._taskRemoveFolder(task.id, linkPath); pop.remove(); });
       };
       header.appendChild(linkBtn);
 

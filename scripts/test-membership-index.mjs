@@ -21,7 +21,8 @@
 //   ⑧ THE BENCH at the owner's shape (7 Task Groups of ~200 conversations, 6 discover rows, 36 live): µs per ask.
 //   ⑨ B-df5f (a folder is resolved on the machine it belongs to, or not at all): a conversation of ANOTHER machine (hostId)
 //     whose cwd exists on the hub as a symlink into a discover folder is not that group's by the hub's real path; the same
-//     cwd of this machine is; another machine's cwd written inside the folder, or a real path that machine resolved, is —
+//     cwd of this machine is; another machine's cwd written inside ITS OWN row (`host::/path`, B-06de), or a real path that
+//     machine resolved, is; another machine's conversation never joins a HUB row (B-06de) —
 //     index ≡ walk; ⑨b every caller handing a conversation's cwd hands its machine (a census of src/ + server.js; an
 //     argument handed as a VARIABLE is read at its nearest declaration before the call; one it cannot read — a spread, a
 //     parameter — is a red); ⑨c THE BOARD AND THE SERVER ANSWER THE SAME MEMBERSHIP: over rows built as the page's merge
@@ -252,13 +253,15 @@ const LEGS = {
   },
   // ⑨ B-df5f — A FOLDER IS RESOLVED ON THE MACHINE IT BELONGS TO, OR NOT AT ALL: a conversation of another machine (hostId)
   // whose cwd EXISTS ON THE HUB as a symlink into a group's discover folder is NOT that group's by the hub's real path; the
-  // same cwd of a conversation of this machine is (its realpath); another machine's cwd written inside the folder, or a real
-  // path that machine resolved itself (realCwd), still belongs — index ≡ walk, both orders
+  // same cwd of a conversation of this machine is (its realpath); another machine's cwd written inside ITS OWN row of the folder
+  // (`host-dial-far::<D>` — B-06de: a folder row is its machine's), or a real path that machine resolved itself (realCwd), still
+  // belongs; that machine's conversation never joins the HUB row of the same spelling — index ≡ walk, both orders
   async 'other-machine'(T) {
     const base = path.join(ROOT, 'om' + (++mn)), D = path.join(base, 'folder');
     fs.mkdirSync(path.join(D, 'sub', 'w'), { recursive: true });
     fs.symlinkSync(path.join(D, 'sub'), path.join(base, 'link'));   // base/link → folder/sub ON THE HUB
-    const tasks = () => ({ 'T-om': { id: 'T-om', title: 'om', kind: 'task', createdAt: 1, sessions: [], ctx: [{ path: D, tags: ['discover'] }], progress: [] } });
+    const tasks = () => ({ 'T-om': { id: 'T-om', title: 'om', kind: 'task', createdAt: 1, sessions: [], ctx: [{ path: D, tags: ['discover'] }, { path: 'host-dial-far::' + D, tags: ['discover'] }], progress: [] } });
+    const hubOnly = () => ({ 'T-om': { id: 'T-om', title: 'om', kind: 'task', createdAt: 1, sessions: [], ctx: [{ path: D, tags: ['discover'] }], progress: [] } });
     const said = [];
     // B-55dc: the hub's realpath is an OFF-LOOP fact — the first ask starts its read; the answer compared is the one once read
     const ask = async (tg, a) => { tg.groupsForSession(a); for (let k = 0; k < 12; k++) { await tg._mfacts.settled(); await new Promise((r) => setImmediate(() => setImmediate(r))); if (!tg._mfacts.busy() && !tg._mmTimer) break; } const i = tg.groupsForSession(a), w = tg._groupsForSessionWalk(a); said.push(`${a.hostId ? a.hostId + ':' : 'here:'}${a.cwd}${a.realCwd ? ' (real ' + a.realCwd + ')' : ''} → index [${ids(i)}] walk [${ids(w)}]`); return same(i, w) ? ids(i) : `index ${ids(i)} ≠ walk ${ids(w)}`; };
@@ -269,7 +272,10 @@ const LEGS = {
     const local2 = await ask(t2, { sessionKey: 'claude:om2', cwd: linked }), remote2 = await ask(t2, { sessionKey: 'claude:om1', cwd: linked, hostId: 'host-dial-far' });
     const written = await ask(t2, { sessionKey: 'claude:om3', cwd: path.join(D, 'sub', 'w'), hostId: 'host-dial-far' });
     const ownReal = await ask(t2, { sessionKey: 'claude:om4', cwd: '/far/home/proj', realCwd: path.join(D, 'sub'), hostId: 'host-dial-far' });
-    const okv = remote1 === '' && remote2 === '' && local1 === 'T-om' && local2 === 'T-om' && written === 'T-om' && ownReal === 'T-om';
+    const t3 = manager(T).tg; t3._state.tasks = hubOnly(); t3._save();   // B-06de: the hub row alone — the far machine's conversation written inside it never joins
+    const hubRowFar = await ask(t3, { sessionKey: 'claude:om5', cwd: path.join(D, 'sub', 'w'), hostId: 'host-dial-far' });
+    said.push(`hub row + far cwd: ${JSON.stringify(hubRowFar)}`);
+    const okv = remote1 === '' && remote2 === '' && local1 === 'T-om' && local2 === 'T-om' && written === 'T-om' && ownReal === 'T-om' && hubRowFar === '';
     return { ok: okv, detail: said.join(' · ') };
   },
   async 'cache-cliff'(T) {

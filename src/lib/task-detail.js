@@ -764,7 +764,7 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     const start = document.createElement('button'); start.className = 'task-detail-btn task-detail-primary';
     const firstFolder = sidebar._folderPaths(task)[0] || '';
     start.textContent = t('+ Start a conversation here');
-    start.onclick = () => app.showNewSessionDialog({ taskId, cwd: firstFolder || undefined });
+    start.onclick = () => app.showNewSessionDialog({ taskId, ...(typeof sidebar._firstFolder === 'function' ? sidebar._firstFolder(task) : { cwd: firstFolder || undefined }) });   // B-06de: another machine's row opens there
     const startHint = document.createElement('span'); startHint.className = 'task-detail-hint';
     startHint.textContent = firstFolder ? t('New Session with 「{name}」 selected, its folder = {path}', { name: task.title, path: tilde(firstFolder, home()) }) : t('New Session with 「{name}」 selected', { name: task.title });
     startRow.append(start, startHint);

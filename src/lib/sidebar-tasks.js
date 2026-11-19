@@ -4,7 +4,7 @@ import { track } from './telemetry-client.js';
 import { t as tr } from './i18n.js';
 import { valueWord } from './value-words.js'; // lane ui-language: the board's state / urgency words live in the ONE door
 import { mergePendingBind, pendingBindVerdict, sweepPendingBinds } from './fork-groups.js';
-import { folderOf, insideFolder, membershipCwds } from '../task-membership.js'; // PURE (lane open-task-binds): THE folder rule, the server's groupsForSession asks the same one
+import { folderOf, insideFolder, membershipCwds, memberFolders, folderOnHost } from '../task-membership.js'; // PURE (lane open-task-binds): THE folder rule, the server's groupsForSession asks the same one
 import { applyTasksDelta, applyStatusDelta, frameStep, fetchVerdict, metaChanged, listVerdict } from '../task-delta.js'; // PURE (lane task-group-fanout): a broadcast is a DELTA in the hub's order
 import { pressResumeGroup } from './resume-pacer.js'; // lane resume-all-paced (L1): the group's button paces its resumes
 
@@ -480,6 +480,12 @@ export function installSidebarTasks(SidebarClass) {
     const res = task.ctxRes || [];
     return task.ctx.map((r, i) => (r && !r.ref && (r.tags || []).includes('discover') && res[i] && res[i].abs && res[i].kind !== 'file' ? res[i].abs : null)).filter(Boolean);
   };
+  /** B-06de: the group's FIRST folder for a New Session — {cwd, hostId}: another machine's `host::/path` row opens on THAT machine
+   *  (never a hub session with the literal `host::/path` as its cwd); none ⇒ {} */
+  proto._firstFolder = function(task) {
+    const f = this._memberFolderRecs(task)[0];
+    return f ? { cwd: f.path, ...(f.host ? { hostId: f.host } : {}) } : {};
+  };
   const ctxCopy = (t) => (t.ctx || []).map((r) => (r.ref ? { ...r } : { ...r, tags: [...(r.tags || [])] }));
   const ctxRowOf = (t, rows, folderPath) => rows.findIndex((r, i) => !r.ref && (r.path === folderPath || ((t.ctxRes || [])[i] || {}).abs === folderPath));
   proto._taskAddFolder = function(id, folderPath) {
@@ -522,6 +528,7 @@ export function installSidebarTasks(SidebarClass) {
     // board membership and injected context disagreed for remote sessions).
     const cwds = membershipCwds({ cwd: stripCwdHostLabel(s.cwd), realCwd: s.realCwd, hostRealCwd: s.hostRealCwd, host: s.host });
     for (const f of folderRecs) {
+      if (!folderOnHost(f, s.host)) continue;   // B-06de: a hub row for the hub's conversations, `R::/x` for machine R's (the server's rule)
       for (const c of cwds) {
         if (insideFolder(c, f)) return true;
       }
@@ -529,9 +536,15 @@ export function installSidebarTasks(SidebarClass) {
     return false;
   };
 
+  /** B-06de: a group's folder rows FOR MEMBERSHIP, machine-scoped (task-membership memberFolders over the answer's ctx rows +
+   *  their resolution — the server's list); an answer without the table keeps the old folders (the hub's) */
+  proto._memberFolderRecs = function(task) {
+    return task && Array.isArray(task.ctx) && Array.isArray(task.ctxRes) && task.ctxRes.length === task.ctx.length ? memberFolders(task.ctx, task.ctxRes) : ((task && task.folders) || []).map(this._folderRec);   // a PATCH's answer (new ctx, the old resolutions) waits for its delta
+  };
+
   proto._getTaskSessionKeys = function(task, allSessions) {
     const result = new Set(task.sessions || []);
-    const folders = (task.folders || []).map(this._folderRec);
+    const folders = this._memberFolderRecs(task);
     for (const s of allSessions || []) {
       const sessionKey = this._getSessionStateKey(s);
       if (result.has(sessionKey) || result.has(s.sessionId)) continue;
@@ -561,7 +574,7 @@ export function installSidebarTasks(SidebarClass) {
     return (this._tasks || []).filter(t => {
       if (t.archived) return false;
       if ((t.sessions || []).includes(stateKey) || (legacyId && (t.sessions || []).includes(legacyId))) return true;
-      return this._sessionFolderMatch(s, (t.folders || []).map(this._folderRec));
+      return this._sessionFolderMatch(s, this._memberFolderRecs(t));
     });
   };
 
@@ -699,7 +712,7 @@ export function installSidebarTasks(SidebarClass) {
     const items = [
       { label: tr('Details…'), action: () => this.app.openTaskDetail(taskId) },
       { label: tr('Backlog & activity…'), action: () => this.app.openTaskLog(taskId, { tab: 'activity' }) },
-      { label: tr('New session in this task…'), action: () => this.app.showNewSessionDialog({ cwd: this._folderPaths(t)[0], taskId }) },
+      { label: tr('New session in this task…'), action: () => this.app.showNewSessionDialog({ ...this._firstFolder(t), taskId }) },
       { label: tr('Rename'), action: async () => {
         const n = await showInputDialog({ title: tr('Rename Task Group'), label: tr('Title'), value: t.title, confirmText: tr('Rename') });
         if (n && n.trim() && n.trim() !== t.title) this._taskUpdate(taskId, { title: n.trim() });
@@ -865,7 +878,7 @@ export function installSidebarTasks(SidebarClass) {
         ...groupsAll.map(g => ({
           label: g.title,
           style: (() => { const c = this.getTaskColor(g); return c ? `box-shadow: inset 3px 0 0 ${c}` : ''; })(),
-          action: () => this.app.showNewSessionDialog({ taskId: g.id, cwd: this._folderPaths(g)[0] }),
+          action: () => this.app.showNewSessionDialog({ ...this._firstFolder(g), taskId: g.id }),   // B-06de: another machine's first folder opens there
         })),
         ...(groupsAll.length ? [{ separator: true }] : []),
         { label: tr('No group'), action: () => this.app.showNewSessionDialog({}) },
@@ -1001,12 +1014,12 @@ export function installSidebarTasks(SidebarClass) {
       const plusBtn = document.createElement('button');
       plusBtn.className = 'folder-add-btn';
       plusBtn.textContent = '+';
-      plusBtn.title = tr('New session in this task') + (this._folderPaths(task)[0] ? ` (${this._folderPaths(task)[0]})` : '');
+      plusBtn.title = tr('New session in this task') + (this._folderPaths(task)[0] ? ` (${this._folderPaths(task)[0]})` : '');   // the row as written (another machine's `host::/path` says its machine)
       plusBtn.onclick = (e) => {
         e.stopPropagation();
         // Reuse the normal dialog PRE-FILLED (user confirms all params):
         // cwd defaults to the first auto-include folder, task pre-selected.
-        this.app.showNewSessionDialog({ cwd: this._folderPaths(task)[0], taskId: task.id });
+        this.app.showNewSessionDialog({ ...this._firstFolder(task), taskId: task.id });   // B-06de: its machine too
       };
       header.appendChild(plusBtn);
 
@@ -1044,10 +1057,10 @@ export function installSidebarTasks(SidebarClass) {
         el.addEventListener('dragleave', (e) => { if (!groupEl.contains(e.relatedTarget)) header.classList.remove('drop-target'); });
         el.addEventListener('drop', (e) => {
           e.preventDefault(); e.stopPropagation(); header.classList.remove('drop-target');
-          const folderPath = e.dataTransfer.getData('application/x-folder-path');
+          const folderPath = e.dataTransfer.getData('application/x-folder-path'), folderHost = e.dataTransfer.getData('application/x-file-host');   // B-06de: a folder dragged from ANOTHER machine's Files is that machine's row
           const sessionKey = e.dataTransfer.getData('application/x-session-key');
           const sessionId = e.dataTransfer.getData('application/x-session-id');
-          if (folderPath) this._taskAddFolder(task.id, folderPath);
+          if (folderPath) this._taskAddFolder(task.id, folderHost ? `${folderHost}::${folderPath}` : folderPath);
           else if (sessionKey || sessionId) this._taskBind(task.id, sessionKey || sessionId);
         });
       };

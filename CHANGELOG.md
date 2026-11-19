@@ -112,6 +112,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Changed
 - Conversations and background jobs now start below VibeSpace's CPU priority, so a busy build yields to the page; see Session Properties, turn off in Settings.
 - A conversation on another machine no longer joins a Task Group through a symbolic link on the server's disk; only its folder as written counts.
+- A Task Group folder now gathers only conversations on its own machine; a folder linked from another machine's Files gathers that machine's conversations.
 - Your channel messages are kept in a folder only your own account on this computer can open; only your channel sign-ins are locked in the vault.
 - The resume dialog's closing notice, the Integrations card's Test line and the hand-over refusal now carry their own button or link instead of a menu path.
 - A command the vault runs for an agent now runs below VibeSpace's CPU priority too, like conversations and jobs (the same setting turns it off).

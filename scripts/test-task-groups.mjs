@@ -217,11 +217,11 @@ console.log('④ the panel\'s own resolver (sidebar-tasks.js, evaluated from the
     return null;
   };
   const recLine = (src.match(/proto\._folderRec = (\(f\) => .+);\n/) || [])[1];
-  const sfm = body('proto._sessionFolderMatch = function(s, folderRecs)'), gtk = body('proto._getTaskSessionKeys = function(task, allSessions)');
+  const sfm = body('proto._sessionFolderMatch = function(s, folderRecs)'), gtk = body('proto._getTaskSessionKeys = function(task, allSessions)'), mfr = body('proto._memberFolderRecs = function(task)') || '{ return ((task && task.folders) || []).map(this._folderRec); }';
   let keys = null, err = null;
   try {
-    const mk = new Function('folderOf', 'insideFolder', 'stripCwdHostLabel', 'membershipCwds', `return { _folderRec: ${recLine}, _sessionFolderMatch: function(s, folderRecs) ${sfm}, _getTaskSessionKeys: function(task, allSessions) ${gtk}, _getSessionStateKey: (s) => s.sessionKey };`);
-    const sb = mk(M.folderOf, M.insideFolder, (c) => String(c || '').replace(/^[^:]+: (?=\/)/, ''), M.membershipCwds);   // B-df5f: the panel's cwds through the one rule
+    const mk = new Function('folderOf', 'insideFolder', 'stripCwdHostLabel', 'membershipCwds', 'memberFolders', 'folderOnHost', `return { _folderRec: ${recLine}, _sessionFolderMatch: function(s, folderRecs) ${sfm}, _memberFolderRecs: function(task) ${mfr}, _getTaskSessionKeys: function(task, allSessions) ${gtk}, _getSessionStateKey: (s) => s.sessionKey };`);
+    const sb = mk(M.folderOf, M.insideFolder, (c) => String(c || '').replace(/^[^:]+: (?=\/)/, ''), M.membershipCwds, M.memberFolders, M.folderOnHost);   // B-df5f: the panel's cwds through the one rule; B-06de: its machine-scoped rows
     const tgm = freshStore();
     const g = tgm.create({ title: 'Lanes', folders: [{ path: LANES + '/**', recursive: true }] });
     tgm.bind(g.id, 'claude:ee55aa01');
@@ -234,6 +234,75 @@ console.log('④ the panel\'s own resolver (sidebar-tasks.js, evaluated from the
   ok(same(keys, ['claude:ab12', 'claude:cd34', 'claude:ee55aa01']), 'the panel lists the conversation bound by its opening, the one started AT the folder and the one under it — not the same-prefix sibling', { keys, err });
 }
 
+console.log('⑥ B-06de: a Task Group folder row matches conversations of ITS OWN machine — a hub row the hub\'s, `R::/x` machine R\'s');
+{
+  const HUBW = path.join(SCR, 'hubwork');   // a hub folder (never created: a rooted row matches by its string, as before)
+  const cases = (t) => [
+    [{ cwd: path.join(HUBW, 'x') }, t, 'the hub\'s conversation under the hub row'],
+    [{ cwd: path.join(HUBW, 'x'), hostId: 'local' }, t, '«local» is the hub'],
+    [{ cwd: path.join(HUBW, 'x'), hostId: 'h1' }, '', 'machine h1\'s conversation at the SAME spelling: not a member (the row\'s own scene)'],
+    [{ cwd: '/srv/app/y', hostId: 'h1' }, t, 'h1\'s conversation under h1\'s `h1::/srv/app` row'],
+    [{ cwd: '/srv/app', hostId: 'h1' }, t, '…at the folder itself'],
+    [{ cwd: '/srv/app/y' }, '', 'the hub\'s conversation at h1\'s path: not'],
+    [{ cwd: '/srv/app/y', hostId: 'h2' }, '', 'another machine\'s: not'],
+  ];
+  const world = (Manager) => {
+    const d = path.join(SCR, `data-${++dirSeq}`); fs.mkdirSync(d, { recursive: true });
+    const tgm = new Manager({ dataDir: d });
+    const g = tgm.create({ title: 'Mixed', ctx: [{ path: HUBW, note: 'hub work', tags: ['discover'] }, { path: 'h1::/srv/app', note: 'h1 app', tags: ['discover'] }] });
+    return { tgm, g };
+  };
+  const judge = (Manager) => { const { tgm, g } = world(Manager); return cases(g.id).map(([a, want, what]) => ({ what, want, index: tgm.groupsForSession(a).map((t) => t.id).join(), walk: tgm._groupsForSessionWalk(a).map((t) => t.id).join() })); };
+  const cur = judge(TaskGroupManager);
+  const bad = cur.filter((c) => c.index !== c.want || c.walk !== c.want);
+  ok(bad.length === 0, `the REAL store (the member index AND the walk), ${cur.length} cases: ${cur.map((c) => c.what).join(' · ')}`, bad);
+  const mf = has('memberFolders') ? M.memberFolders([{ path: '/a', tags: ['discover'] }, { path: 'h1::/b/', tags: ['discover'] }, { path: '/c', tags: ['notes'] }, { path: '/f.md', tags: ['discover'] }], [{ abs: '/a', kind: 'dir' }, { abs: 'h1::/b/', kind: 'remote', host: 'h1' }, { abs: '/c', kind: 'dir' }, { abs: '/f.md', kind: 'file' }]) : null;
+  ok(same(mf, [{ path: '/a', recursive: true, host: null }, { path: '/b', recursive: true, host: 'h1' }]) && has('folderOnHost') && M.folderOnHost({ path: '/a', host: null }, null) && M.folderOnHost({ path: '/a', host: null }, 'local') && !M.folderOnHost({ path: '/a', host: null }, 'h1') && M.folderOnHost({ path: '/b', host: 'h1' }, 'h1') && !M.folderOnHost({ path: '/b', host: 'h1' }, null) && !M.folderOnHost({ path: '/b', host: 'h1' }, 'h2'),
+    'PURE memberFolders (discover rows only, a file never, `h1::/b/` → {/b, host h1}) and folderOnHost (a hub row: the hub\'s only — none / local; an R row: R\'s only)', mf);
+  // CONTROL — the release's matcher (the folders with no machine, matched by spelling — anchored on the source)
+  const { anchored } = await import('./scratch.mjs');
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  let rel = anchored(read('src/task-groups.js'), '      g.dirs = this.memberFoldersOf(g.t);', '      g.dirs = this.foldersOf(g.t);', 'the index rows');   // stale-pins: kept — the control writes the release's rows back on purpose
+  rel = anchored(rel, 'for (const f of this.memberFoldersOf(t)) {', 'for (const f of this.foldersOf(t)) {', 'the walk rows');   // stale-pins: kept — the same
+  rel = anchored(rel, 'folderOnHost(f, hostId) && ', '', 'the machine check', { count: 2 });
+  const RelM = mutantCopies('tg-b06de', ROOT).load('src/task-groups.js', rel, 'release').TaskGroupManager;
+  const r = judge(RelM);
+  const sameSpelling = r.find((c) => /SAME spelling/.test(c.what)), remoteRow = r.find((c) => /under h1/.test(c.what));
+  ok(sameSpelling.index !== '' && sameSpelling.walk !== '' && remoteRow.index === '' && remoteRow.walk === '', 'CONTROL — the release\'s matcher: h1\'s conversation at the hub row\'s spelling JOINS the group, and h1\'s conversation under `h1::/srv/app` does NOT', { sameSpelling, remoteRow });
+  // THE PAGE (sidebar-tasks `_getTaskSessionKeys` / `_memberFolderRecs` / `_sessionFolderMatch`, evaluated from the source as ④) — the same rows
+  const src = read('src/lib/sidebar-tasks.js');
+  const body = (marker) => { const i = src.indexOf(marker); if (i < 0) return null; const j = src.indexOf('{', i); let d = 0; for (let k = j; k < src.length; k++) { if (src[k] === '{') d++; else if (src[k] === '}' && --d === 0) return src.slice(j, k + 1); } return null; };
+  const recLine = (src.match(/proto\._folderRec = (\(f\) => .+);\n/) || [])[1];
+  let keys = null, err = null;
+  try {
+    const mk = new Function('folderOf', 'insideFolder', 'stripCwdHostLabel', 'membershipCwds', 'memberFolders', 'folderOnHost', `return { _folderRec: ${recLine}, _sessionFolderMatch: function(s, folderRecs) ${body('proto._sessionFolderMatch = function(s, folderRecs)')}, _memberFolderRecs: function(task) ${body('proto._memberFolderRecs = function(task)')}, _getTaskSessionKeys: function(task, allSessions) ${body('proto._getTaskSessionKeys = function(task, allSessions)')}, _getSessionTaskGroups: function(s) ${body('proto._getSessionTaskGroups = function(s)')}, _firstFolder: function(task) ${body('proto._firstFolder = function(task)')}, _getSessionStateKey: (s) => s.sessionKey, _getLegacySessionId: () => null, _tasks: [] };`);
+    const sb = mk(M.folderOf, M.insideFolder, (c) => String(c || '').replace(/^[^:]+: (?=\/)/, ''), M.membershipCwds, M.memberFolders, M.folderOnHost);
+    const { tgm, g } = world(TaskGroupManager);
+    const task = tgm.list().find((t) => t.id === g.id);   // the group as the page receives it (ctx + ctxRes + the derived folders)
+    const SESS = [
+      { sessionKey: 'claude:hub1', cwd: path.join(HUBW, 'x') }, { sessionKey: 'claude:h1same', cwd: 'h1: ' + path.join(HUBW, 'x'), host: 'h1' },
+      { sessionKey: 'claude:h1app', cwd: 'h1: /srv/app/y', host: 'h1' }, { sessionKey: 'claude:hubapp', cwd: '/srv/app/y' }, { sessionKey: 'claude:h2app', cwd: 'h2: /srv/app/y', host: 'h2' },
+    ];
+    keys = [...sb._getTaskSessionKeys(task, SESS)].sort();
+    sb._tasks = [task];   // _getSessionTaskGroups (Task View, the cards, the pickers, the taskbar) reads the same rows
+    keys = { board: keys, perSession: SESS.filter((x) => sb._getSessionTaskGroups(x).length > 0).map((x) => x.sessionKey).sort() };
+    const first = world(TaskGroupManager);
+    first.tgm.update(first.g.id, { ctx: [{ path: 'h1::/srv/app', note: 'h1 app', tags: ['discover'] }, { path: HUBW, note: 'hub', tags: ['discover'] }] });
+    keys.firstFolder = sb._firstFolder(first.tgm.list().find((t) => t.id === first.g.id));
+  } catch (e) { err = e.message; }
+  ok(!!keys && same(keys.board, ['claude:h1app', 'claude:hub1']) && same(keys.perSession, ['claude:h1app', 'claude:hub1']), 'the PAGE lists the same members — the board (_getTaskSessionKeys) AND each session\'s groups (_getSessionTaskGroups): the hub\'s conversation under the hub row and h1\'s under h1\'s row — never h1\'s at the hub spelling, the hub\'s at h1\'s path, h2\'s', { keys, err });
+  // THE PAGE'S WRITE DOORS write the machine's row for another machine's folder, and a New Session from a group opens on its row's machine
+  const FE = read('src/lib/file-explorer-ops.js'), SR = read('src/lib/sidebar-render.js'), ST = read('src/lib/sidebar-tasks.js');
+  ok(/const fullPath = this\.currentPath \+ '\/' \+ dataset\.name;\n *const fullHost = this\._host \|\| '';/.test(FE) && /_taskAddFolder\(t\.id, fullHost \? `\$\{fullHost\}::\$\{fullPath\}` : fullPath\)/.test(FE)
+    && /folderHost = e\.dataTransfer\.getData\('application\/x-file-host'\)/.test(ST) && /this\._taskAddFolder\(task\.id, folderHost \? `\$\{folderHost\}::\$\{folderPath\}` : folderPath\)/.test(ST)
+    && /const groupHost = hosts\.size === 1 \? \[\.\.\.hosts\]\[0\] : '';/.test(SR) && /const linkPath = groupHost \? `\$\{groupHost\}::\$\{stripCwdHostLabel\(cwd\)\}` : cwd;/.test(SR),
+    'the write doors: Files «Add to task» (the machine taken WITH the path), a folder dragged from another machine\'s Files, the sidebar folder-group link (another machine\'s row only when EVERY session of the group is that machine\'s — a shared home\'s hub group stays the hub\'s)');
+  const nsCalls = ['src/lib/sidebar-tasks.js', 'src/lib/task-detail.js', 'src/lib/sidebar.js', 'src/lib/sidebar-render.js', 'src/lib/app.js'].flatMap((f) => [...read(f).matchAll(/showNewSessionDialog\(\{([^\n]*?)\}\)/g)].map((m) => ({ f, args: m[1] }))).filter((c) => /taskId/.test(c.args) && !/\} = \{/.test(c.args));   // the calls, never the method's own definition
+  const nsBad = nsCalls.filter((c) => /_folderPaths\(/.test(c.args) || (/\bcwd\b/.test(c.args) && !/_firstFolder\(/.test(c.args)));
+  ok(nsCalls.length >= 3 && nsBad.length === 0, `every New Session opened FROM a group (${nsCalls.length} calls) takes its folder through _firstFolder (another machine's row opens on that machine) — never the literal row as a hub cwd`, nsBad);
+  ok(!!keys && same(keys.firstFolder, { cwd: '/srv/app', hostId: 'h1' }), 'a New Session from a group whose first folder is `h1::/srv/app` opens ON h1 at /srv/app (never a hub session with the literal row as its cwd)', keys && keys.firstFolder);
+}
+
 console.log('⑤ the wiring pins + THE CENSUS (one folder rule, one bind writer)');
 {
   const server = read('server.js'), ops = read('src/server/conversation-ops.js');
@@ -242,8 +311,8 @@ console.log('⑤ the wiring pins + THE CENSUS (one folder rule, one bind writer)
   ok(/const \{ birthBindVerdict \} = require\('\.\.\/task-membership\.js'\);/.test(ops) && /for \(const groupId of v\.groupIds\) \{[^\n]*\n\s*try \{\n\s*bindConversation\(\{ webuiId: id \}, groupId,/.test(ops) && /\{ birthBy \}\);/.test(ops) && /if \(s && s\._birthBind && birthBy\) s\._birthBind\.by = birthBy;/.test(ops),
     'conversation-ops: the verdict is the PURE one, the bind is bindConversation (the owner\'s route\'s writer), the verb hands who bound it to the headless create');
   ok((ops.match(/\[automation\] session \$\{/g) || []).length === 1 && (ops.match(/boundNote\(/g) || []).length === 2, 'ONE spelling of the automation bind line (boundNote — conversations.bind and the --task open)');
-  ok(/import \{ folderOf, insideFolder, membershipCwds \} from '\.\.\/task-membership\.js';/.test(read('src/lib/sidebar-tasks.js')) && /import \{ insideFolder, membershipCwds \} from '\.\.\/task-membership\.js';/.test(read('src/lib/app.js'))
-    && /const \{ folderOf, insideFolder, membersWithout, onOtherMachine \} = require\('\.\/task-membership\.js'\);/.test(read('src/task-groups.js')), 'the store, the panel and the New Session chips import THE folder rule (lane task-group-fanout: + THE unbind rule; B-df5f: + THE hub-real-path rule, membershipCwds / onOtherMachine)');
+  ok(/import \{ folderOf, insideFolder, membershipCwds, memberFolders, folderOnHost \} from '\.\.\/task-membership\.js';/.test(read('src/lib/sidebar-tasks.js')) && /import \{ insideFolder, membershipCwds \} from '\.\.\/task-membership\.js';/.test(read('src/lib/app.js'))
+    && /const \{ folderOf, insideFolder, membersWithout, onOtherMachine, memberFolders, folderOnHost \} = require\('\.\/task-membership\.js'\);/.test(read('src/task-groups.js')), 'the store, the panel and the New Session chips import THE folder rule (lane task-group-fanout: + THE unbind rule; B-df5f: + THE hub-real-path rule, membershipCwds / onOtherMachine)');
   // THE CENSUS: a Task Group folder file (it reads a group's folders) never hand-rolls the prefix test
   const HAND = /startsWith\(\s*[\w$.]*\.path\s*\+\s*'\/'\s*\)/;
   const FOLDER_FILE = /_folderRec\b|_sanitizeFolders\b|\b(?:t|task|tg|g|group)\.folders\b/;

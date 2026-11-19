@@ -19,6 +19,12 @@
  *                              'local' are the hub) — task-groups _realHere and the /api/sessions row builder (routes/sessions).
  *   membershipCwds({cwd, realCwd, hostRealCwd, host})  B-df5f: the PAGE's cwds of a conversation (sidebar-tasks _sessionFolderMatch): its
  *                              cwd, and the hub-stamped realCwd only for the hub's own.
+ *   memberFolders(rows, res)   B-06de: the folder rows FOR MEMBERSHIP, machine-scoped — a Task Group's 'discover' rows with
+ *                              their resolution → [{path, recursive, host}]: a hub row (host null) and another machine's
+ *                              `host::/path` row (host = that machine, the path as it is there). The server's walk + member
+ *                              index and the page's board read the same list.
+ *   folderOnHost(f, host)      B-06de: a folder row belongs to the machine a conversation runs on — a hub row only to the
+ *                              hub's conversations, `R::/x` only to machine R's (`host`: the conversation's host / hostId).
  *   membersWithout(list, keys, {exact})  THE unbind rule (lane task-group-fanout): a group's members (sessions[]) without
  *                              `keys` → { keep, gone }. A key `<backend>:<id>` matches itself; a BARE id (an older archive
  *                              list's spelling) matches any member with that id unless `exact`. The store's ONE unbind
@@ -86,4 +92,28 @@ function membersWithout(list, keys, { exact = false } = {}) {
   return { keep, gone };
 }
 
-module.exports = { folderOf, insideFolder, onOtherMachine, membershipCwds, birthBindVerdict, membersWithout };
+const HOST_ROW = /^([^:/\s]+)::(\/.*)$/;   // host::/path — a folder on another machine (task-context's HOST_RE: one spelling)
+/** B-06de — THE FOLDER ROWS FOR MEMBERSHIP, machine-scoped (the row's own words: «Task Group folder rows match conversations of
+ *  their own machine only»): every 'discover' row of `rows` with its resolution `res[i]` (task-context resolveRows) that names a
+ *  folder → {path, recursive: true, host} — host null for the hub's own row; for `host::/path` (resolved `kind: 'remote'`) that
+ *  machine's id and the path as written there. A file never; a folder once per machine. */
+function memberFolders(rows, res) {
+  const out = [];
+  (Array.isArray(rows) ? rows : []).forEach((r, i) => {
+    const x = Array.isArray(res) ? res[i] : null;
+    if (!r || r.ref || !Array.isArray(r.tags) || !r.tags.includes('discover') || !x || typeof x.abs !== 'string' || !x.abs || x.kind === 'file') return;
+    const hm = HOST_ROW.exec(x.abs);
+    if (x.kind === 'remote' && !hm) return;
+    const host = hm ? String(x.host || hm[1]) : null, p = hm ? (hm[2].replace(/\/{2,}/g, '/').replace(/\/+$/, '') || '/') : x.abs;   // the path as written there, its doubled / trailing slashes folded
+    if (!out.some((o) => o.path === p && o.host === host)) out.push({ path: p, recursive: true, host });
+  });
+  return out;
+}
+/** B-06de — does folder row `f` belong to the machine a conversation runs on (`host`: its host / hostId — none / 'local' is the
+ *  hub)? A row with no host is the hub's: only the hub's conversations; `R::/x` only machine R's. */
+function folderOnHost(f, host) {
+  const h = f && f.host != null && f.host !== '' ? String(f.host) : null;
+  return h === null ? !onOtherMachine(host) : onOtherMachine(host) && String(host) === h;
+}
+
+module.exports = { folderOf, insideFolder, onOtherMachine, membershipCwds, birthBindVerdict, membersWithout, memberFolders, folderOnHost };

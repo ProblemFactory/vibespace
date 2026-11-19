@@ -76,6 +76,7 @@ export function installExplorerOps(FileExplorer) {
     const sel = [...this._selection];
     const multi = sel.length > 1;
     const fullPath = this.currentPath + '/' + dataset.name;
+    const fullHost = this._host || '';   // B-06de: the machine taken WITH the path (a sync between menu and click never pairs another host)
     const isDir = dataset.isDir === 'true';
     const isArchive = /\.(zip|tar|tgz|tbz2|txz|gz|bz2|xz)$/i.test(dataset.name);
     const items = [];
@@ -176,7 +177,7 @@ export function installExplorerOps(FileExplorer) {
       const tasks = this.app.sidebar?._tasks || [];
       if (tasks.length > 0) {
         items.push({ label: t('Add to task'), submenu: () => {
-          return tasks.map(t => ({ label: t.title, action: () => this.app.sidebar?._taskAddFolder(t.id, fullPath) }));
+          return tasks.map(t => ({ label: t.title, action: () => this.app.sidebar?._taskAddFolder(t.id, fullHost ? `${fullHost}::${fullPath}` : fullPath) }));   // B-06de: a folder of ANOTHER machine's Files is that machine's row (`host::/path`)
         }});
       }
     }

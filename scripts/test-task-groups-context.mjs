@@ -56,6 +56,8 @@ console.log('— PURE: a row and the table —');
   ok('a 不许改 row can only be shared read-only (rw → ro)', ro.share === 'ro');
   ok('the default key set is not stored', TC.sanitizeRow({ path: '/x', keys: TC.KEY_FILES.slice() }).keys === undefined);
   ok('a reference row needs a group id and never references its own group', !!TC.sanitizeRow({ ref: 'T-1-x' }) && TC.sanitizeRow({ ref: 'T-1-x' }, { selfId: 'T-1-x' }) === null && TC.sanitizeRow({ ref: 'nope' }) === null);
+  // B-06de: another machine's root is stored as written (the sidebar's link writes `<host>::/` for a conversation at /)
+  ok('a machine\'s root row keeps its slash (h1::/ stays remote, never the relative hub row h1::); a trailing slash elsewhere folds', TC.sanitizeRow({ path: 'h1::/' }).path === 'h1::/' && TC.sanitizeRow({ path: 'h1:://' }).path === 'h1::/' && TC.sanitizeRow({ path: 'h1::/srv/app/' }).path === 'h1::/srv/app' && TC.sanitizeRow({ path: '/srv/' }).path === '/srv' && TC.sanitizeRow({ path: '/' }).path === '/' && TC.resolveRows([TC.sanitizeRow({ path: 'h1::/', tags: ['discover'] })], { home: '/home/u' })[0].kind === 'remote');
   const rows = TC.sanitizeRows([{ path: '/a', tags: ['notes'] }, { path: '/b', tags: ['notes'] }, { path: '/a', note: 'dup' }, { ref: 'T-2-y' }, { ref: 'T-2-y' }]);
   ok('ONE notes row (the first keeps it), no duplicate path or reference', rows.length === 3 && rows[0].tags.includes('notes') && !rows[1].tags.includes('notes'), rows);
   ok('the four levels, in order', JSON.stringify(TC.TELL) === JSON.stringify(['note', 'names', 'index', 'contents']));
