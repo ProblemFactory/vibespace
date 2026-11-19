@@ -639,6 +639,10 @@ This file is the engineers' record of every release: the lanes, the verification
 ### bl-tests-a — B-cabe's remainder: the OAuth loopback's stopAll() hands back its servers' own close events (product, src/oauth-loopback.js)
 - CURE 2 (the coordinator's 2026-11-19 01:11Z, lg-leak-census's census at the checkpoint): B-cabe's two red controls (the stopAll shape copy, the drop copy) were plain replaces — test-oauth-loopback carried 8 unanchored control edits against its row's 7. Both are built through scripts/scratch.mjs anchored() now (a moved anchor throws by name); the row is lowered to 6.
 
+
+
+
+
 ### bl-mail B-dfa4 cut 1 — a door of ONE account reads its own rows (主开发 19:51Z / 20:16Z: «the rest of the row», measured first)
 - THE MEASURE (a scratch script, never lined; the test machine, a STAND-IN store of the owner's shape: 89 000 + 6 000 + 1 500 rows; median of 5, the first run and the steady state apart): the agent status `accessFor` 549 ms and the agent search `searchFor` 415 ms each walked the WHOLE index once PER ACCOUNT on every call; one account's card `rows({adapter})` 111 ms walked every row for a 1 500-row account; the census build walked it once per account (1 007 ms at the first digest after a boot). Not this cut: the full digest (panel open / a broadcast naming nothing, 146 ms = ONE first-read walk: cut 2); a pass's PARTIAL broadcast is 0.4 ms.
 - THE CUT: the store gives `index.rowsOf(account)` — unit 2's kept keys (`keysOf`) read off the map, read-only (never a touch): the account's own rows in the map's order, a row whose key is not its account's (only a damaged act line) after them. Nineteen walks read it or `keysOf`: the store's own search; the engine's census build, account kick, scope flush, one-account card, credential re-judge, complete discovery's unlisted sweep; the access module's search (both walks of `--full`), status, watch target, estimate, rule preview, held-hit prune, wake-hold checks (storingConvs, wakeNamesFilter), dead sign-ins; the remove dialog's references.
@@ -990,6 +994,12 @@ This file is the engineers' record of every release: the lanes, the verification
 
 ### lg-text-legs-3 — B-55dc: the Task Group membership answer costs the main loop no file call (the owner's «the hub is laggy»)
 - **Hosted cure** (主开发 00:53Z, tests only): the second hosted prep run of 2.369.411 found test-group-admin and test-prompt-context reading an agent route's reply at once through a synchronous stand-in — since B-55dc a route may answer after an awaited membership read; their callers now return a promise resolved by the reply, every call site awaits (PROVE both). The create route's re-entry gets its leg in test-msg-cli-groups (a throw on the SECOND entry answered by name; RED: the bare handler — no reply). The sweep of every other suite reaching the nine deferred routes, by reading, is in the line. test-msg-cli-groups restated 1.9 → 4.8 s (the slower of two test-machine runs); FAST_SUM_CAP_MS 1359 → 1362 by arithmetic (1358.444 + 2.9 = 1361.344 s over 717).
+
+### lg-leak-census, B-0d3e's ratchet holds by itself — a count never rises without a backlog row's id beside it (test-only)
+- **Why** (主开发 2026-11-18 23:33Z): the 2.369.411 block's units raised the unanchored-controls list by 166 and the rows were counted in once; from now a rise must be attributable.
+- **scripts/fixtures/unanchored-controls.json and anchor-helpers.json:** every count stands under `rows` — `{ "B-xxxx": { "why", "files" } }` — today one row, B-0d3e (the list it brought, 2444 → 2516 → 2679, and the integrator's seams by arithmetic). A file's cap is the largest count any row gives it.
+- **test-suite-files-parse §3:** a plain `files` map (a number with no row id), a row whose id is no B-xxxx, whose why has fewer than 20 characters or whose count is not a whole number, and a live count above every row's cap are each RED by name; a fall stays allowed (said).
+- **The founding row is fall-only** (主开发's read 2026-11-19 01:11Z: a rise inside B-0d3e was still one number away): its total and each file's count are pinned in scripts/fixtures/census-founding-pins.json; a founding count above its pin is red — a rise enters only as a NEW row under the raising unit's own backlog id. Controls on planted fixtures, each checking its words (the 19/20-character boundary, a word for a count, the founding row raised in place vs. as a new row). The one escape no suite closes: an invented id of the right shape.
 
 ### lane login-request-card — THE RESTACK ON THE PUSHED 2.369.410 (e3754d9cd, 主开发 19:52Z): the links unit with setting-doors (recorded 12:46Z) and one login, several sites with its page door «Use a login you already saved…» (recorded 13:20Z) — one chain, the release's meetings said in the line file (lines/login-request-card-restack-411.md)
 
@@ -1683,10 +1693,6 @@ This file is the engineers' record of every release: the lanes, the verification
 
 ### bl-ci — B-e601: fast rows restated to their readings alone on the test machine
 - r2 (the coordinator's rulings: the bound on the count of over rows STAYS 12; two rows leave instead). test-oat-materialize's F13 (the sweep never blocks the loop, ~16 s of its 18.4 s) and its three RED controls moved verbatim to the HEAVY twin test-oat-materialize-sweep (5.6 s alone); the fast suite reads 1.9 s and leaves FAST_SERIAL (it judges no clock). test-record-clear-census §I (the interpolation census, verify r8 + r9) moved verbatim to the HEAVY twin test-record-clear-census-interp (7.2–8.6 s alone; its copies census asks at least 20 — the whole suite's 46 less the 26 made by §H6's end, which the fast suite keeps; §I memoises per file already — a CPU profile put its ~5 s in one pass over ~40 MB of sources, and a faster mask gave no gain past noise); the fast suite reads 2.9 s; harness-fences' alias-pass row names the twin, and its checklist line says the rule now lives in a HEAVY suite (a lane that runs only the fast tier meets it at the integrator's heavy run). test-vendor-whitelist reads each server-side file ONCE instead of in a dozen whole-tree passes: 10.2 → 8.9 s alone (stated 7.7 → 8.9), under 10 s with its binary allowance. The over rows stay 12; the fast cap 1250 → 1261 s by arithmetic (1249.320 + 11.400 = 1260.720 s over 633 rows).
-
-
-
-
 
 ## 2.369.410 — 2026-11-18
 
