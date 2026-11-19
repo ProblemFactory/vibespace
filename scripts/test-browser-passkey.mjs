@@ -72,7 +72,7 @@ import fs from 'fs';
 import os from 'os';
 import vm from 'vm';
 import { fileURLToPath } from 'url';
-import { mutantCopies } from './mutant-copy.mjs';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { anchored } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -1256,12 +1256,12 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
       const fnC = (bsC.match(/  function answerPromptFor\(relay, viewer, msg\) \{[\s\S]*?\n  \}\n/) || [''])[0];
       const refusals = fnC.split('\n').filter((l) => /code: '(agent_forbidden|not_your_page)'/.test(l));
       const ownPage = refusals.filter((l) => /code: 'not_your_page'/.test(l)), bearerL = refusals.filter((l) => /code: 'agent_forbidden'/.test(l));
-      ok(refusals.length === 2 && ownPage.length === 1 && /^ {4}if \(isHuman\(relay\) && /.test(ownPage[0]) && bearerL.length === 1 && /^ {4}if \(viewer\.bearer \|\| viewer\.agent\) return ack\(/.test(bearerL[0]),
+      ok(refusals.length === 2 && ownPage.length === 1 && /^ {4}if \(isHuman\(relay\) && /.test(ownPage[0]) && bearerL.length === 1 && /^ {4}if \(credentialView\(viewer\)\) return ack\(/.test(bearerL[0]),
         'B-b56d (scope, 主开发 15:42Z) as B-1327 moved it: the own-page refusal stands on the person\'s own window only (`isHuman(relay) &&`); the bearer refusal on every road (the loopback leg below drives a conversation\'s view)', refusals);
     }
     // CONTROL: the base's bridge (no refusal, no window count) — a header-less script answers the person's sign-in, and the watch never hears the windows
     const bsB = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8');
-    const cut1 = "    if (viewer.bearer || viewer.agent) return ack(", cut2 = "    if (isHuman(relay) && !(viewer.page && pageVerdict(", cut3 = " if (isHuman(relay)) tellPersonWindows(relayProfileId(relay)); }";
+    const cut1 = "    if (credentialView(viewer)) return ack({ ok: false, code: 'agent_forbidden', error: 'a sign-in", cut2 = "    if (isHuman(relay) && !(viewer.page && pageVerdict(", cut3 = " if (isHuman(relay)) tellPersonWindows(relayProfileId(relay)); }";
     for (const c of [cut1, cut2, cut3]) if (bsB.split(c).length !== 2) throw new Error(`B-b56d control setup: the anchor ${JSON.stringify(c.slice(0, 60))} is not found once in src/server/browser-stream.js`);
     // 主开发 17:00Z (4): THE «cancelled at its bound» LINE REACHES THE WINDOW through the bridge — first no fact and no ended, then ended
     const endedRun = async (SBm) => {
@@ -1288,55 +1288,86 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     const erBase = await endedRun(MUTe.load('src/server/browser-stream.js', bsB.replace(digestNow, "  const promptDigestOf = (rec) => (rec && rec.fact ? JSON.stringify(rec.fact.prompt) : '');"), 'digest-fact-only'));   // stale-pins: kept — the base's digest, written back by this RED control
     ok(erBase.after.length === 1 && !erBase.after.some((m) => m.ended), 'CONTROL (主开发 (4)): a bridge whose digest reads the fact only never sends the ended note — the window would not say it (RED for the leg above)', erBase);
     const MUTb = mutantCopies('browser-passkey-b56d', REPO);
-    const baseB = await run(MUTb.load('src/server/browser-stream.js', bsB.replace(cut1, '    if (false && (viewer.bearer || viewer.agent)) return ack(').replace(cut2, '    if (false && !(viewer.page && pageVerdict(').replace(cut3, ' }'), 'no-person-road'));
+    const baseB = await run(MUTb.load('src/server/browser-stream.js', bsB.replace(cut1, "    if (false && credentialView(viewer)) return ack({ ok: false, code: 'agent_forbidden', error: 'a sign-in").replace(cut2, '    if (false && !(viewer.page && pageVerdict(').replace(cut3, ' }'), 'no-person-road'));
     ok(baseB.answered.length === 3 && baseB.ack.noId && baseB.ack.noId.code === 'no_prompt' && baseB.ack.script && baseB.ack.script.ok === true && baseB.ack.bearer && baseB.ack.bearer.ok === true && baseB.told.length === 0,
       'CONTROL (B-b56d): a bridge without the two refusals lets a header-less script and a bearer view answer the person\'s sign-in, and without the count the watch never hears the windows (RED for the legs above)', { answered: baseB.answered.length, ack: baseB.ack, told: baseB.told });
   }
   // B-1327: THE AGENT'S ROAD TOO — a conversation's view whose handshake carried a bearer (an automation key's, or the agent's own
-  // session / job token; sign-in off lets every upgrade in) never answers its browser's sign-in; the person's view of the
-  // conversation (no bearer) still does, once, with the conversation's key. Loopback: the real bridge over a stub keeper and watch
+  // session / job token; sign-in off lets every upgrade in) makes NO act of the user's: a sign-in answer, a file chooser's dismissal,
+  // a takeover's start, a forwarded input, a page dialog's answer, a kernel surface's answer (主开发 03:40Z: the law is wider than the
+  // row — ONE verdict, `credentialView`). The person's view of the conversation (no bearer) still makes each. Loopback: the real
+  // bridge over a stub keeper and watch
   {
     const http = require('http'), WSm = require('ws');
     const SB = require(path.join(REPO, 'src/server/browser-stream.js'));
     const PIDc = 'bp-00001327', BKc = 'bk-00001327', SIDc = 'sess-1327', PWc = ['1327', 'Pw', '4410'].join('-');
-    const knownC = { setFor: () => ({ attachments: [{ profileId: PIDc, alias: 'work', label: 'Work', isDefault: true }] }), list: () => ({ profiles: [{ id: PIDc, label: 'Work', dir: '/nonexistent/bp-00001327' }] }), streamPortFor: async () => ({ ok: true, port: 9 }) };
+    const tookOver = [];
+    const knownC = { setFor: () => ({ attachments: [{ profileId: PIDc, alias: 'work', label: 'Work', isDefault: true }] }), list: () => ({ profiles: [{ id: PIDc, label: 'Work', dir: '/nonexistent/bp-00001327' }] }), streamPortFor: async () => ({ ok: true, port: 9 }),
+      takeover: (o) => { tookOver.push(o.viewerId); return { ok: false, code: 'unavailable', error: 'the stand-in keeper takes no takeover' }; } };
     const keeperC = new Proxy(knownC, { get: (o, k) => (k in o ? o[k] : typeof k === 'string' ? () => undefined : undefined) });
     const FORMc = { state: 'prompt', prompt: { id: 'prm-c-1', type: 'http-auth', origin: 'http://signin.example.test:8080', realm: 'Team', text: 'x' }, since: 1, profileId: PIDc };
     class UpC { constructor() { this.readyState = 0; this.h = {}; setTimeout(() => { this.readyState = 1; if (this.h.open) this.h.open(); }, 0); } on(ev, fn) { this.h[ev] = fn; return this; } send() {} ping() {} close() { this.readyState = 3; } terminate() { this.readyState = 3; } }
     const tok = (prefix) => 'Bearer ' + [prefix, '13270000'].join('_');
+    const ACTS = [ // [name, the message, the reply it waits for, the code read from it]
+      ['signin', { type: 'prompt-answer', id: 'prm-c-1', username: 'ann', password: PWc }, (m) => m.type === 'prompt-ack' && m.id === 'prm-c-1'],
+      ['dismiss', { type: 'prompt-answer', id: 'prm-c-f', cancel: true }, (m) => m.type === 'prompt-ack' && m.id === 'prm-c-f'],
+      ['takeover', { type: 'takeover' }, (m) => (m.type === 'refused' && m.code !== 'watch-mode') || m.type === 'mode-ack'],
+      ['input', { type: 'input_text', text: 'x', rid: 1327 }, (m) => m.type === 'input-receipt' && m.rid === 1327],
+      ['dialog', { type: 'dialog-answer', id: 'dlg-c-1', accept: true }, (m) => m.type === 'dialog-ack' && m.id === 'dlg-c-1'],
+      ['surface', { type: 'dialog-answer', id: 'srf-c-1', answerId: 'ans-c-1', values: { name: 'x' } }, (m) => m.type === 'dialog-ack' && m.id === 'srf-c-1'],
+    ];
+    const codeOf = (m) => (!m ? 'none' : m.type === 'mode-ack' ? 'ok' : m.ok === true ? 'ok' : m.code || 'refused');
     const runC = async (SBm) => {
-      const answered = [];
-      const dialogs = { arm: async () => ({ ok: true, watched: true }), passkeyFactOf: () => null, stuckForKey: () => FORMc, personPromptStateOf: () => null, personWindows: () => {},
-        answerPrompt: async (tg, a) => { answered.push({ tg, a }); return { ok: true }; }, onChange: () => () => {}, openOn: () => null, surfacesIn: () => [] };
+      const heard = { signin: [], dismiss: [], dialog: [], surface: [] }; tookOver.length = 0;
+      const dialogs = { arm: async () => ({ ok: true, watched: true }), passkeyFactOf: () => null, stuckForKey: () => FORMc, personPromptStateOf: () => null, personWindows: () => {}, onChange: () => () => {}, openOn: () => null, surfacesIn: () => [],
+        answerPrompt: async (tg, a) => { (a.cancel ? heard.dismiss : heard.signin).push({ tg, a }); return { ok: true }; },
+        answer: async (tg) => { heard.dialog.push(tg); return { ok: true }; }, answerSurface: async (tg) => { heard.surface.push(tg); return { ok: true }; } };
       const bridge = SBm.create({ keeper: keeperC, activeSessions: new Map([[SIDc, { _browserKey: BKc, name: 'one' }]]), requestAuthed: () => true, log: { warn() {}, log() {} }, dialogs, WebSocketImpl: UpC, keepaliveMs: 60000 });
       const srv = http.createServer(); srv.on('upgrade', (req, s0, h) => bridge.handleUpgrade(req, s0, h));
       await new Promise((r) => srv.listen(0, '127.0.0.1', r));
       const own = `http://127.0.0.1:${srv.address().port}`;
       const open = (headers) => new Promise((res) => { const ws = new WSm.WebSocket(`ws://127.0.0.1:${srv.address().port}${bridge.STREAM_PATH}?session=${SIDc}&profile=${PIDc}`, { origin: own, headers }); const got = []; ws.on('message', (d) => { try { got.push(JSON.parse(String(d))); } catch { /* */ } }); ws.on('open', () => res({ ws, got })); ws.on('error', () => res({ ws, got })); });
       const views = { key: await open({ authorization: tok('vsak') }), session: await open({ authorization: tok('vsst') }), job: await open({ authorization: tok('jbt') }), person: await open({}) };
-      const acks = (v) => v.got.filter((m) => m.type === 'prompt-ack');
-      const hello = {};
-      for (const [k, v] of Object.entries(views)) { await until2(() => v.got.some((m) => m.type === 'hello'), 800); hello[k] = v.got.some((m) => m.type === 'hello'); }
-      for (const k of ['key', 'session', 'job', 'person']) { views[k].ws.send(JSON.stringify({ type: 'prompt-answer', id: 'prm-c-1', username: 'ann', password: PWc })); await until2(() => acks(views[k]).length === 1, 800); }
-      const ack = Object.fromEntries(Object.entries(views).map(([k, v]) => [k, acks(v)[0] || null]));
+      const hello = {}, code = {}, ids = {};
+      for (const [k, v] of Object.entries(views)) { await until2(() => v.got.some((m) => m.type === 'hello'), 800); const h = v.got.find((m) => m.type === 'hello'); hello[k] = !!h; ids[k] = h ? h.you : null; }
+      for (const k of ['key', 'session', 'job', 'person']) {
+        code[k] = {};
+        for (const [name, msg, isReply] of ACTS) { const v = views[k], n0 = v.got.length; v.ws.send(JSON.stringify(msg)); await until2(() => v.got.slice(n0).some(isReply), 800); code[k][name] = codeOf(v.got.slice(n0).find(isReply)); }
+      }
       const saw = JSON.stringify(Object.entries(views).filter(([k]) => k !== 'person').map(([, v]) => v.got));
       for (const v of Object.values(views)) { try { v.ws.close(); } catch { /* */ } }
       bridge.shutdown(); await new Promise((r) => srv.close(() => r()));
-      return { hello, ack, answered, saw };
+      return { hello, code, ids, heard, tookOver: tookOver.slice(), saw };
     };
+    const BEARERS = ['key', 'session', 'job'];
     const good = await runC(SB);
-    ok(Object.values(good.hello).every(Boolean) && ['key', 'session', 'job'].every((k) => good.ack[k] && good.ack[k].ok === false && good.ack[k].code === 'agent_forbidden'),
-      'B-1327: on a CONVERSATION\'s view (the agent\'s road) a view opened with an automation key, the agent\'s session token or a job\'s token is refused by name (agent_forbidden)', { hello: good.hello, ack: good.ack });
-    ok(good.ack.person && good.ack.person.ok === true && good.answered.length === 1 && good.answered[0].tg.browserKey === BKc && good.answered[0].tg.sessionId === SIDc && good.answered[0].a.password === PWc && good.answered[0].a.by === 'user',
-      'B-1327: the person\'s view of the conversation (no bearer) answers its sign-in — the watch hears ONE answer, the conversation\'s key, as the user', { ack: good.ack.person, n: good.answered.length });
-    ok(!good.saw.includes(PWc) && !JSON.stringify(good.ack).includes(PWc), 'B-1327: no refused view and no ack carries the typed password');
-    // CONTROL: the base's refusal (the person's road only) — every bearer view answers the conversation's sign-in
+    ok(Object.values(good.hello).every(Boolean) && BEARERS.every((k) => good.code[k].signin === 'agent_forbidden'),
+      'B-1327: on a CONVERSATION\'s view (the agent\'s road) a view opened with an automation key, the agent\'s session token or a job\'s token is refused its sign-in answer by name (agent_forbidden)', { hello: good.hello, code: good.code });
+    ok(good.code.person.signin === 'ok' && good.heard.signin.length === 1 && good.heard.signin[0].tg.browserKey === BKc && good.heard.signin[0].tg.sessionId === SIDc && good.heard.signin[0].a.password === PWc && good.heard.signin[0].a.by === 'user',
+      'B-1327: the person\'s view of the conversation (no bearer) answers its sign-in — the watch hears ONE answer, the conversation\'s key, as the user', { code: good.code.person, n: good.heard.signin.length });
+    ok(!good.saw.includes(PWc), 'B-1327: no refused view receives anything of the typed password');
+    ok(BEARERS.every((k) => good.code[k].dismiss === 'agent_forbidden') && good.code.person.dismiss === 'ok' && good.heard.dismiss.length === 1,
+      'B-1327 (主开发 03:40Z): a file chooser\'s dismissal (the same answer road) — refused by name from every credential-opened view; the person\'s view dismisses it once', { dismiss: Object.fromEntries(Object.entries(good.code).map(([k, c]) => [k, c.dismiss])) });
+    ok(BEARERS.every((k) => good.code[k].takeover === 'agent_forbidden') && good.code.person.takeover === 'unavailable' && good.tookOver.length === 1 && good.tookOver[0] === good.ids.person,
+      'B-1327 (主开发 03:40Z): a TAKEOVER\'s start — refused by name from every credential-opened view (the keeper never asked); the person\'s view reaches the keeper (its stand-in answers «unavailable»)', { takeover: Object.fromEntries(Object.entries(good.code).map(([k, c]) => [k, c.takeover])), tookOver: good.tookOver });
+    ok(BEARERS.every((k) => good.code[k].input === 'agent_forbidden') && good.code.person.input === 'watch-mode',
+      'B-1327 (主开发 03:40Z): a FORWARDED INPUT — refused by name from every credential-opened view; the person\'s view without the controls is answered «watch-mode» as before', { input: Object.fromEntries(Object.entries(good.code).map(([k, c]) => [k, c.input])) });
+    ok(BEARERS.every((k) => good.code[k].dialog === 'agent_forbidden' && good.code[k].surface === 'agent_forbidden') && good.code.person.dialog === 'ok' && good.code.person.surface === 'ok' && good.heard.dialog.length === 1 && good.heard.surface.length === 1,
+      'B-1327 (主开发 03:40Z): a DIALOG\'s answer (a page dialog; a kernel surface\'s values) — refused by name from every credential-opened view; the person\'s view answers each once', { dialog: Object.fromEntries(Object.entries(good.code).map(([k, c]) => [k, [c.dialog, c.surface]])) });
+    // CONTROLS — each road's refusal taken out of a copy of the bridge (anchored: the road's own line), its plant proven by its effect
     const bsN = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8');
-    const baseLine = anchored(bsN, "    if (viewer.bearer || viewer.agent) return ack(", "    if (isHuman(relay) && (viewer.bearer || viewer.agent)) return ack(", 'B-1327 control: the base\'s person-road-only refusal');   // stale-pins: kept — the base's line, written back by this RED control
     const MUTc = mutantCopies('browser-passkey-b1327', REPO);
-    const baseC = await runC(MUTc.load('src/server/browser-stream.js', baseLine, 'person-road-only'));
-    ok(baseLine !== bsN && baseC.answered.length === 4 && ['key', 'session', 'job'].every((k) => baseC.ack[k] && baseC.ack[k].ok === true),
-      'CONTROL (B-1327): a bridge whose bearer refusal stands on the person\'s window only lets all three bearer views answer a conversation\'s sign-in (RED for the legs above)', { answered: baseC.answered.length, ack: baseC.ack });
+    const ctl = async (anchor, to, name) => { const t = anchored(bsN, anchor, to, name); return { planted: t !== bsN, r: await runC(MUTc.load('src/server/browser-stream.js', t, name.replace(/[^a-z0-9]+/gi, '-').slice(0, 40))) }; };
+    const c1 = await ctl("    if (credentialView(viewer)) return ack({ ok: false, code: 'agent_forbidden', error: 'a sign-in", "    if (isHuman(relay) && credentialView(viewer)) return ack({ ok: false, code: 'agent_forbidden', error: 'a sign-in", 'B-1327 control: the base\'s person-road-only refusal');   // stale-pins: kept — the base's line, written back by this RED control
+    ok(c1.planted && c1.r.heard.signin.length === 4 && c1.r.heard.dismiss.length === 4 && BEARERS.every((k) => c1.r.code[k].signin === 'ok'),
+      'CONTROL (B-1327): a bridge whose answer refusal stands on the person\'s window only lets all three bearer views answer (and dismiss) a conversation\'s sign-in (RED for the legs above)', { signin: c1.r.heard.signin.length, dismiss: c1.r.heard.dismiss.length });
+    const c2 = await ctl("      if (credentialView(viewer)) { send(viewer.ws, { type: 'refused', code: 'agent_forbidden', error: 'taking over", "      if (false) { send(viewer.ws, { type: 'refused', code: 'agent_forbidden', error: 'taking over", 'B-1327 control: no takeover refusal');
+    ok(c2.planted && c2.r.tookOver.length === 4 && BEARERS.every((k) => c2.r.code[k].takeover === 'unavailable'), 'CONTROL (B-1327): without its refusal a credential-opened view\'s takeover reaches the keeper (RED for the takeover leg)', { tookOver: c2.r.tookOver.length });
+    const c3 = await ctl("      if (credentialView(viewer)) { const w = 'input is the user", "      if (false) { const w = 'input is the user", 'B-1327 control: no input refusal');
+    ok(c3.planted && BEARERS.every((k) => c3.r.code[k].input === 'watch-mode'), 'CONTROL (B-1327): without its refusal a credential-opened view\'s input is judged only by who holds the controls — never refused by name (RED for the input leg)', { input: BEARERS.map((k) => c3.r.code[k].input) });
+    const c4 = await ctl("    if (credentialView(viewer)) return ack({ ok: false, code: 'agent_forbidden', error: 'a dialog", "    if (false) return ack({ ok: false, code: 'agent_forbidden', error: 'a dialog", 'B-1327 control: no dialog refusal');
+    ok(c4.planted && c4.r.heard.dialog.length === 4 && c4.r.heard.surface.length === 4, 'CONTROL (B-1327): without its refusal every credential-opened view answers the page dialog and the kernel surface (RED for the dialog leg)', { dialog: c4.r.heard.dialog.length, surface: c4.r.heard.surface.length });
+    for (const c of copiesCensus(MUTc.files, MUTc.dir, REPO, { label: 'B-1327 controls: ' })) ok(c.pass, c.name, c.detail);
   }
   // MAJOR 2 + MINOR: the window's own code (sliced from src/lib/browser-live-window.js, run over a stub scope)
   {

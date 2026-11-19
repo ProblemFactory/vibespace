@@ -214,6 +214,12 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
    *  session; its controls are the keeper's `human*` verbs (never a takeover: nothing of any agent is paused), no tab
    *  anchor (every tab change on it is his), and his forwarded input becomes ACTS on its taps (the recorder's). */
   const isHuman = (relay) => !!(relay && relay.target && relay.target.kind === 'human');
+  // B-1327 (主开发 03:40Z: the law is wider than the row) — ONE verdict for every act a live view makes AS THE USER: a sign-in
+  // answer (a file chooser's dismissal rides the same road), a takeover's start, a forwarded input (keys, pointer, paste, text)
+  // and a dialog's answer (a page dialog, a kernel surface's values and files). A view whose handshake carried a bearer (any
+  // bearer) or an agent's or a job's token makes none of them, on any road. A header-less client on an instance with sign-in off
+  // is not refused here: it could forge the page's header anyway — this guards against a credentialed tool's mistake
+  const credentialView = (viewer) => !!(viewer && (viewer.bearer || viewer.agent));
   const broadcast = (relay, obj) => { const text = typeof obj === 'string' ? obj : JSON.stringify(obj); for (const v of relay.viewers.values()) send(v.ws, text); };
 
   // ── lane browser-stuck (2026-09-28): A PAGE DIALOG IS SHOWN WHERE THE USER LOOKS. The stream server says nothing of a
@@ -313,6 +319,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
   function answerDialog(relay, viewer, msg) {
     const pid = relayProfileId(relay);
     const ack = (o) => send(viewer.ws, { type: 'dialog-ack', id: String(msg.id || ''), ...o });
+    if (credentialView(viewer)) return ack({ ok: false, code: 'agent_forbidden', error: 'a dialog is the user\'s to answer — a view opened with a bearer token cannot answer it' }); // B-1327
     if (!dialogs || !pid) return ack({ ok: false, code: 'not_watched', error: 'VibeSpace is not watching this browser' });
     // lane browser-surfaces: a kernel's prompt answered by its OWN answer id (the bar's buttons; a sheet's values / files) — as the USER
     if (typeof msg.answerId === 'string' && typeof dialogs.answerSurface === 'function') {
@@ -346,7 +353,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     // write-origin page verdict — never a header-less script). B-1327: the bearer refusal stands on EVERY road — a conversation's view
     // opened with a bearer (sign-in off, or a bearer beside the cookie) never answers its sign-in either; the own-page verdict and the
     // named prompt stay the person's window's
-    if (viewer.bearer || viewer.agent) return ack({ ok: false, code: 'agent_forbidden', error: 'a sign-in is the user\'s to answer — a view opened with a bearer token cannot answer it' });
+    if (credentialView(viewer)) return ack({ ok: false, code: 'agent_forbidden', error: 'a sign-in is the user\'s to answer — a view opened with a bearer token cannot answer it' });
     if (isHuman(relay) && !(viewer.page && pageVerdict(viewer.page.headers, ownOriginOf(viewer.page.headers, { encrypted: !!(viewer.page.socket && viewer.page.socket.encrypted) })).ok)) return ack({ ok: false, code: 'not_your_page', error: 'a sign-in is answered from VibeSpace\'s own page only' });
     if (isHuman(relay) && !msg.id) return ack({ ok: false, code: 'no_prompt', error: 'the answer names no sign-in request — nothing was sent' }); // B-b56d cure: the person's window names the prompt it answers (never «the newest in scope»)
     if (!dialogs || !pid || typeof dialogs.answerPrompt !== 'function') return ack({ ok: false, code: 'not_watched', error: 'VibeSpace is not watching this browser' });
@@ -1635,6 +1642,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       // mediator's paused fence), or from the stream server's write (a direct lease), or the refusal. Never silence.
       const rid = Number.isInteger(msg.rid) ? msg.rid : null;
       const receipt = (r) => { if (rid !== null) send(viewer.ws, { type: 'input-receipt', rid, ok: !!r.ok, via: r.via || null, code: r.code || null, error: r.error || null, ...(Number.isFinite(r.landed) ? { landed: r.landed } : {}), ...(r.dropped ? { dropped: r.dropped } : {}) }); }; // lane live-input: a text act says how much landed (and a line break it could not type)
+      if (credentialView(viewer)) { const w = 'input is the user\'s — a view opened with a bearer token cannot send it'; send(viewer.ws, { type: 'refused', code: 'agent_forbidden', error: w }); receipt({ ok: false, code: 'agent_forbidden', error: w }); return; } // B-1327
       if (v.forward && relay.anchor && relay.anchor.switched) { receipt(S.tabSwitchedReceipt(relay.anchor)); return; } // verify r3: the takeover is on another tab than the one on show — nothing forwarded, said by name
       { const pid = v.forward && dialogs && typeof dialogs.blockingOn === 'function' ? relayProfileId(relay) : null; const blk = pid ? dialogs.blockingOn(pid, relay.activeTarget ? [relay.activeTarget] : null) : null; if (blk) { receipt({ ok: false, code: 'surface_blocking', error: 'a browser prompt holds the page — answer it in the bar above first' }); return; } } // lane browser-surfaces: while a BLOCKING surface stands, input never reaches the page
       if (v.forward && relay.upstream && relay.upstream.readyState === 1) {
@@ -1655,6 +1663,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     }
     // P3 (§4.3): the control verbs
     if (v.kind === 'takeover') {
+      if (credentialView(viewer)) { send(viewer.ws, { type: 'refused', code: 'agent_forbidden', error: 'taking over is the user\'s press — a view opened with a bearer token cannot make it', mode: relay.mode }); return; } // B-1327
       if (viewer.watch) stopViewerWatch(relay, viewer, 'you took over — the view follows the agent\'s tab'); // lane browser-windows (U3): a takeover drives the agent's tab
       const r = takeoverFor(relay, viewer);
       if (r.ok) scheduleViewport(relay, 'takeover'); // lane J: the page is re-read the moment input starts to matter (a window resized in the same proportions keeps its picture size)
