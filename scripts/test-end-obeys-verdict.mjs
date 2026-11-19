@@ -261,7 +261,7 @@ console.log('⑥ THE ONE END RECORD\'s contract (主开发 14:51Z): the one boun
   const c1 = await api.endFactsBefore({ backend: 'codex', mode: 'chat' }, 'sess-c1'), c2 = await api.endFactsBefore({ backend: 'codex', mode: 'chat' }, 'sess-c2');
   const cw = fs.readFileSync(path.join(REPO, 'data/bin/codex-chat-wrapper.js'), 'utf8');
   ok(c1.queueRead === false && c1.queueCount === null && c2.queueRead === true && c2.queueCount === 0 && c1.goalStated === false && c1.goalStatus === null
-    && /if \(fresh\) \{ const first = !Number\.isFinite\(meta\.queueReadAt\); meta\.queueReadAt = Date\.now\(\); if \(first\) scheduleMeta\(\); \}\n  const fp = /.test(cw),
+    && /if \(fresh\) \{ const first = !Number\.isFinite\(meta\.queueReadAt\); meta\.queueReadAt = Date\.now\(\); if \(first\) scheduleMeta\(\); \}\n  if \(!force && fp === queueFingerprint\) return;/.test(cw),
     'the codex wrapper: the empty list it begins with states NO read; its `queueReadAt` mark (piece 4\'s reader\'s name: when a fresh list answered — set before the unchanged-answer return) does', { c1, c2 });
   // a forced end says so on the stopped row; a record write that THROWS never fails the end
   active.set('sess-f', session({ backendSessionId: 'e2e00000-0000-4000-8000-0000000000e9', sockName: 'cw-11-1794880000011', name: 'Cut' }));
@@ -402,11 +402,13 @@ console.log('⑤ the words and the census of stopReason readers');
   const BAN = /\b(sleep|asleep|hibernat\w*|suspend\w*|paus\w*)\b|睡眠|休眠|挂起|暂停|スリープ|休止/i;
   ok(![a, p, '{time} 由「{name}」终止。', '{time} 手动终止。', '{time} に「{name}」が終了しました。', '{time} に手動で終了しました。'].some((w) => BAN.test(w)), 'the words never say sleep');
   // the census: every src file that reads a SESSION's stopReason is a row; the model's own stop reason is another meaning
-  const SESSION_READERS = ['src/server/boot-restore.js', 'src/routes/sessions.js', 'src/lib/stopped-why.js', 'src/lib/session-card.js', 'src/lib/chat-view.js', 'src/server/conversation-facts.js', 'src/lib/layout.js',
+  const SESSION_READERS = ['src/server/boot-restore.js', 'src/sessions-assemble.js' /* int411 moved the kept-stopped merge out of src/routes/sessions.js (B-891e) */, 'src/lib/stopped-why.js', 'src/lib/session-card.js', 'src/lib/chat-view.js', 'src/server/conversation-facts.js', 'src/lib/layout.js',
     // the manager design's piece 7: how an ENDED conversation ended, read through piece 4's reader (resume-line keptFacts hands it) by the delivery's gate
     'src/server/resume-line.js', 'src/delivery-wake.js', 'src/server/delivery-wake.js'];
   const OTHER_MEANING = { 'src/opencode-serve.js': 'the model\'s stop reason', 'src/harnesses/antigravity-wall.js': 'the model\'s stop reason', 'src/record-shape.js': 'a record field\'s name',
-    'src/message-manager.js': 'the model\'s stop reason', 'src/codex-message-manager.js': 'the model\'s stop reason', 'src/acp-message-manager.js': 'the model\'s stop reason' };
+    'src/message-manager.js': 'the model\'s stop reason', 'src/codex-message-manager.js': 'the model\'s stop reason', 'src/acp-message-manager.js': 'the model\'s stop reason',
+    // int411's B-a5a4 (2): how an ACP prompt ENDED (prompt_end's own field), stamped as the session's _promptStopReason for turnRan
+    'src/server/stdout/acp-events.js': 'an ACP prompt\'s stop reason (prompt_end)', 'src/session-schema.js': 'the schema note of _promptStopReason (an ACP prompt\'s stop reason)' };
   const walkFrom = (root) => { const out = []; const walk = (d) => { for (const e of fs.readdirSync(path.join(root, d), { withFileTypes: true })) { const r = d + '/' + e.name; if (e.isDirectory()) walk(r); else if (e.name.endsWith('.js') && /\bstopReason\b|\bstopped(?:Why|Reason)For\b/.test(fs.readFileSync(path.join(root, r), 'utf8'))) out.push(r); } }; walk('src'); return out; };   // + the readers that go THROUGH the stopped-why helper (the layout's tile and the offer's count)
   const files = walkFrom(REPO);
   const unlisted = files.filter((f) => !SESSION_READERS.includes(f) && !OTHER_MEANING[f]);

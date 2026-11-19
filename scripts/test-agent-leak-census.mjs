@@ -724,6 +724,10 @@ const CATALOG = {
   'server.js:decisionEngine': { kind: 'inert', why: 'a pick of mounts-plugins-wiring create() (the whole wiring — never evaluated whole): the decision API, no judgment is asked' },
   'server.js:mounts': { kind: 'inert', why: 'a pick of mounts-plugins-wiring create(): the mount manager — no storage is mounted' },
   'server.js:telemetry': { kind: 'inert', why: 'the telemetry recorder — nothing is reported' },
+  // the manager stack (lane conversation-facts, restacked onto int411): conversations.list's in-memory sources (server.js listSources)
+  'server.js:autoResume': { kind: 'inert', why: 'the auto-resume engine (it arms timers that resume a conversation at its reset) — a source of conversations.list (listSources): no conversation runs in the census, so no row reads its armed state (the list says it does not know)' },
+  'server.js:sysinfo': { kind: 'inert', why: 'a pick of sysinfo-wiring create(): the machine\'s sampler (it reads /proc on a timer) — conversations.list\'s memory source: the census list reads the machine\'s memory as not read' },
+  'server.js:stoppedSessions': { kind: 'inert', why: 'a pick of boot-restore create() (the boot\'s restore — never evaluated whole): the kept stopped rows conversations.list reads — the census world keeps none' },
   'server.js:jsonBody': { kind: 'eval', why: 'THE body parser (express.json, 50 MB) — every agent POST reads its body through it' },
   'server.js:channelsWiring': { kind: 'eval', why: 'THE channels + agent groups wiring, real (channels-wiring.js create) on the scratch data dir — no channel connected' },
   'server.js:publishedPages': { kind: 'eval', why: 'THE published pages store, real (published-pages.js) on the scratch data dir' },

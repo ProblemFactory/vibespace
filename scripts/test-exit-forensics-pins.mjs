@@ -69,9 +69,15 @@ console.log('— §5 wiring: the line, the event and the tomb are built from exi
     'chat-wrapper.js\'s one non-builtin require (src/harnesses/claude-transport.js) is PURE (no require / import) and no wrapper is on the remote ship list (HostManager.AGENT_TOOLS)');
   ok(!transportPure("'use strict';\nconst x = require('./other.js');\n") && /wrapper/.test(shipList("  static AGENT_TOOLS = ['vibespace-status', 'chat-wrapper.js'];")),
     'CONTROL: a require in the transport module, or a wrapper on the ship list, is red');
+  // the manager stack (lane conversation-facts, majordomo piece 2; restacked onto int411): the wrapper keeps the conversation's FACTS
+  // in its sidecar (observations only — the hub judges) through src/conversation-facts.js, SHARED with the hub's judge. Admitted on
+  // the transport module's terms: PURE (no require / import), and required ONCE at the wrapper's start (the build it shipped with).
+  const CF_REQ = "require(path.join(__dirname, '..', '..', 'src', 'conversation-facts.js'))";
+  ok(transportPure(read('src/conversation-facts.js')) && /^try \{ CF = require\(path\.join\(__dirname, '\.\.', '\.\.', 'src', 'conversation-facts\.js'\)\);/m.test(read('data/bin/chat-wrapper.js')),
+    'chat-wrapper.js\'s facts module (src/conversation-facts.js) is PURE (no require / import) and is required once, at the wrapper\'s start (top level)');
   for (const [f, src] of KINDS.map((k) => [path.basename(REL[k]), SRC[k]])) {
-    ok(!/require\((?!['"](fs|path|os|child_process|crypto)['"])[^)]*\)/.test(src.replace(/require\(path\.join\(__dirname, '\.\.\/\.\.\/node_modules\/node-pty'\)\)/, '').replace(TRANSPORT_REQ, '').replace(PI_REQ, '').replace(KC_REQ, '')),
-      `${f}: node builtins only (a STATIC file; node-pty is its one pre-existing dependency; crypto since lane codex-0159: the reset-credit consume's idempotencyKey; dc-harness-store 2.369.213: the claude transport flags' PURE module, below; pid-identity-close 2.369.242: the child's birth, src/proc-identity.js, above; claude-steer-inject 2.369.362: the kept copies, src/kept-copies.js, above)`);
+    ok(!/require\((?!['"](fs|path|os|child_process|crypto)['"])[^)]*\)/.test(src.replace(/require\(path\.join\(__dirname, '\.\.\/\.\.\/node_modules\/node-pty'\)\)/, '').replace(TRANSPORT_REQ, '').replace(PI_REQ, '').replace(KC_REQ, '').replace(CF_REQ, '')),
+      `${f}: node builtins only (a STATIC file; node-pty is its one pre-existing dependency; crypto since lane codex-0159: the reset-credit consume's idempotencyKey; dc-harness-store 2.369.213: the claude transport flags' PURE module, below; pid-identity-close 2.369.242: the child's birth, src/proc-identity.js, above; claude-steer-inject 2.369.362: the kept copies, src/kept-copies.js, above; the manager stack: the conversation's facts, src/conversation-facts.js, PURE, above)`);
     const body = src.slice(src.indexOf('function onWrapperSignal'), src.indexOf('for (const sig of Object.keys(WRAPPER_SIGNO))'));
     ok(body.length > 0 && !/await|setTimeout|setImmediate|\.write\(|\.end\(|Promise/.test(body.replace(/fs\.writeFileSync|clearTimeout/g, '')),   // stale-pins: kept — an absence check on ITS own body (fs.writeFileSync left only in src/app-secrets-seal.js by B-694d)
       `${f}: the signal handler is synchronous (no await/timer/stream write)`);

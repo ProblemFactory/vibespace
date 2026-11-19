@@ -281,7 +281,7 @@ const deliveryWakeSeams = { keyOf: endedKeyOf, factsOf: (key) => resumeFactsOf(k
 // one ended on purpose only for the jobs and schedules the person kept at the ending). A wake owed to an ENDED conversation is a rung of the ladder's retry park; the park hands it here, and this puts it on the
 // ONE LINE above with its own start: the account's limit, the spend guard as a probe (under the delivery's own reason and the kept
 // record's account, through the guard's own identity road), then the claim, the road's reopen and ONE hand-over (./delivery-wake.js).
-const deliveryWake = require('./delivery-wake.js').create({ resumeLine, seams: deliveryWakeSeams, ...deliveryWakeDeps(),
+const deliveryWake = require('./delivery-wake.js').create({ resumeLine, seams: deliveryWakeSeams, ...deliveryWakeDeps(), spendGuard: deliveryWakeDeps().spendGuard,   // the guard NAMED at its site (test-spend-paths §2c: a spread hands nothing it can read)
   isPoolScope: (id) => { try { const a = getAccounts() && getAccounts().get(id); return !!(a && a.type === 'pooled'); } catch { return false; } },
   log: (m) => console.log(m) });
 if (deliver && typeof deliver.registerEndedWake === 'function') deliver.registerEndedWake((cid, entry) => deliveryWake.onEndedWake(cid, entry));

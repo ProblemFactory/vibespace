@@ -19,6 +19,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { anchored } from './scratch.mjs';   // a control whose anchor moved throws «ANCHOR GONE» by its name (test-suite-files-parse §3)
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -27,7 +28,7 @@ const ok = (c, n, extra) => { if (typeof n !== 'string') throw new TypeError('ok
 const D = require(path.join(REPO, 'src/delivery-wake.js'));
 const SRC = fs.readFileSync(path.join(REPO, 'src/delivery-wake.js'), 'utf8');
 const M = mutantCopies('delivery-wake', REPO);
-const mutant = (from, to, tag) => { const patched = SRC.replace(from, to); return patched === SRC ? null : require(M.write('src/delivery-wake.js', patched, tag)); };
+const mutant = (from, to, tag) => require(M.write('src/delivery-wake.js', anchored(SRC, from, to, tag), tag));
 
 console.log('① which deliveries owe their ended addressee a wake');
 {

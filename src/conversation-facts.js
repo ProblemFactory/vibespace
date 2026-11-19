@@ -53,7 +53,7 @@ const FACTS_VERSION = 2;
  *  published from the CLI's start IS the empty set on a build inside the span. A build outside it (older, or newer and not yet
  *  measured) reads UNKNOWN and says so; a measurement lane moves the bound (test-conversation-facts pins it to the dumps). */
 const LEVEL_MEASURED_FROM = '2.1.281';
-const LEVEL_MEASURED_TO = '2.1.321';
+const LEVEL_MEASURED_TO = '2.1.322';   // the restack onto int411: the release tracks 2.1.322's dump (B-9ff2), which declares the signal
 /** Tool names that set a CLI timer (the tree's own recordings: the init's tools list names ScheduleWakeup and CronCreate). */
 const TIMER_TOOLS = Object.freeze(['ScheduleWakeup', 'CronCreate']);
 /** A tool the hub does not know whose name looks like a timer reads unknown, never «none seen». */

@@ -300,7 +300,8 @@ console.log('⑦ THE WORDS: three languages, and never «sleep»');
   ok(!SLEEP.test(said), 'NONE of this piece\'s words says sleep (en / zh / ja, and the manual\'s paragraph)', said.match(SLEEP));
   ok(SLEEP.test(said + '\nOpened on {desktop} — it was asleep.') && SLEEP.test('它已休眠'), 'RED CONTROL: a planted «asleep» / «休眠» is caught by the same grep');
 }
-function manualPara() { const m = read('docs/agent/automation-manual.md'); const i = m.indexOf('vibespace://conversation/'); return i < 0 ? '' : m.slice(Math.max(0, m.lastIndexOf('\n\n', i)), m.indexOf('\n\n', i) < 0 ? m.length : m.indexOf('\n\n', i)); }
+// the paragraph of the LINK FORM (the manager stack's resume section names the bare address earlier in the manual)
+function manualPara() { const m = read('docs/agent/automation-manual.md'); const i = m.indexOf('](vibespace://conversation/'); return i < 0 ? '' : m.slice(Math.max(0, m.lastIndexOf('\n\n', i)), m.indexOf('\n\n', i) < 0 ? m.length : m.indexOf('\n\n', i)); }
 
 console.log('⑧ HOW AGENTS LEARN IT: one paragraph in the manual; NOTHING added to the session intro (it is at its byte cap)');
 {
