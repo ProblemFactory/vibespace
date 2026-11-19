@@ -13998,6 +13998,7 @@ export default {
   "Its agents use it for the hosts below without asking you each time, and never see the secret itself. Another host, or a command that could go anywhere (a shell, a script), still asks you.": "その agent は下のホストでは毎回確認せずに使え、シークレットそのものは決して見ません。ほかのホストや、行き先がわからないコマンド（shell・スクリプト）は引き続き確認します。",
   "It sends you ONE card with exactly this permission to allow — it knows the command.": "この権限そのままのカードが 1 枚届くので、許可するだけです——コマンドは agent が知っています。",
   "No secure address: Tailscale is not running on this machine.": "安全なアドレスがありません：このマシンで Tailscale が動いていません。",
+  "No secure address: Tailscale is not running on this machine (or set VIBESPACE_TLS_CERT and VIBESPACE_TLS_KEY to a certificate of your own).": "安全なアドレスがありません：このマシンで Tailscale が動いていません（VIBESPACE_TLS_CERT と VIBESPACE_TLS_KEY で自分の証明書を指定することもできます）。",
   "Or use a certificate of your own: set VIBESPACE_TLS_CERT and VIBESPACE_TLS_KEY to its certificate and key files.": "または自分の証明書を使います：VIBESPACE_TLS_CERT と VIBESPACE_TLS_KEY に証明書と鍵のファイルを指定してください。",
   // lane ui-plain-words pick 5 — M4: a button says what it does
   "Handled · tell the agent": "対応済み · agent に伝える",

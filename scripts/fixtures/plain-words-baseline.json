@@ -77,7 +77,7 @@
    "the plugin's kernel.json names the browser download form; a private repository's asset needs the API form (api.github.com/repos/<owner>/<repo>/releases/assets/<id>) — tell the plugin's author",
    "token files exist under /home/claude/.claude/remote — Claude Code would read them, so the check does not run here",
    "~/.claude/.credentials.json — no re-login on the new instance",
-   "② Or host your own copy: the two static files in docs/slack-relay on any https host, with data-allow set to your domain — register its address and enter it in Settings → Channels → relay page."
+   "② Or host your own copy (one page serves every provider): the two static files in docs/slack-relay on any https host, with data-allow set to your domain — register its address and set it as the relay page."
   ],
   "flag": [
    "Auto-compact window size (--autocompact)",
@@ -105,7 +105,6 @@
   "env": [
    "0 = the cluster's port (VIBESPACE_FRPS_PORT, else 7000).",
    "AWS_REGION; its Test host is derived from this region.",
-   "Cache on a network filesystem with no local disk to move it to — set Settings › Storage mount cache folder (or VIBESPACE_VFS_CACHE_DIR) to a local folder",
    "Forced OFF by the environment (VIBESPACE_OPENCODE_SERVE=0) — the switch below is ignored on this instance.",
    "Forced ON by the environment (VIBESPACE_OPENCODE_SERVE=1) — the switch below is ignored on this instance.",
    "How long the server's main loop was held while it started — pages, paired devices and timers waited that long. Start it with VIBESPACE_BOOT_TRACE=1 to name the file read or command behind each.",
@@ -127,9 +126,6 @@
    "Your Browserbase API key (its env name in the browser child is BROWSERBASE_API_KEY).",
    "Your Browserless token (BROWSERLESS_API_KEY in the browser child).",
    "Your Kernel API key (KERNEL_API_KEY in the browser child)."
-  ],
-  "setting-key": [
-   "Blank = any address. Judged on the connecting address; behind a reverse proxy set webhook.trustProxyHops."
   ],
   "id": [
    "VibeSpace no longer reads this file and deletes it only when you say so: «Move into the vault» seals each value as a vault entry and then deletes the file, «Delete the file» deletes it as it is. A job reads a stored secret with --vault NAME=vault://… (vibespace-docs jobs)."
@@ -209,7 +205,7 @@
   "the plugin's kernel.json names the browser download form; a private repository's asset needs the API form (api.github.com/repos/<owner>/<repo>/releases/assets/<id>) — tell the plugin's author": 2,
   "token files exist under /home/claude/.claude/remote — Claude Code would read them, so the check does not run here": 1,
   "~/.claude/.credentials.json — no re-login on the new instance": 1,
-  "② Or host your own copy: the two static files in docs/slack-relay on any https host, with data-allow set to your domain — register its address and enter it in Settings → Channels → relay page.": 1,
+  "② Or host your own copy (one page serves every provider): the two static files in docs/slack-relay on any https host, with data-allow set to your domain — register its address and set it as the relay page.": 1,
   "Auto-compact window size (--autocompact)": 1,
   "Custom name (--name on resume). Original: {name}": 1,
   "Extra “tailscale up” flags — applied on the next Log in / mode change. Reachability flags we manage (--socket/--tun/--accept-routes/--accept-dns/proxy) are ignored.": 1,
@@ -229,7 +225,6 @@
   "{target} still has open For-you asks — answer its cards, or let the caller pass --resolve-asks": 1,
   "0 = the cluster's port (VIBESPACE_FRPS_PORT, else 7000).": 1,
   "AWS_REGION; its Test host is derived from this region.": 1,
-  "Cache on a network filesystem with no local disk to move it to — set Settings › Storage mount cache folder (or VIBESPACE_VFS_CACHE_DIR) to a local folder": 1,
   "Forced OFF by the environment (VIBESPACE_OPENCODE_SERVE=0) — the switch below is ignored on this instance.": 1,
   "Forced ON by the environment (VIBESPACE_OPENCODE_SERVE=1) — the switch below is ignored on this instance.": 1,
   "How long the server's main loop was held while it started — pages, paired devices and timers waited that long. Start it with VIBESPACE_BOOT_TRACE=1 to name the file read or command behind each.": 1,
@@ -249,8 +244,7 @@
   "Your Browser Use API key (BROWSER_USE_API_KEY in the browser child).": 1,
   "Your Browserbase API key (its env name in the browser child is BROWSERBASE_API_KEY).": 1,
   "Your Browserless token (BROWSERLESS_API_KEY in the browser child).": 1,
-  "Your Kernel API key (KERNEL_API_KEY in the browser child).": 1,
-  "Blank = any address. Judged on the connecting address; behind a reverse proxy set webhook.trustProxyHops.": 1
+  "Your Kernel API key (KERNEL_API_KEY in the browser child).": 1
  },
  "wall": [
   "accessibility.exposeChat",

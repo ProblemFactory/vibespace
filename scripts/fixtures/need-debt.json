@@ -39,7 +39,6 @@
     "Compaction failed: {error}",
     "Compress failed: server unreachable — it may still have complete",
     "Compress failed: {msg}",
-    "Connected since {time} — before that {n} attempts failed ({reaso",
     "Copy failed: {msg}",
     "Could not set aside",
     "Create a Slack app at api.slack.com/apps (a workspace app: its C",

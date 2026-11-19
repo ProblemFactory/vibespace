@@ -2139,13 +2139,15 @@ console.log('⑩ THE VERIFIER\'S LIST FOR PICKS 3–6 (stored words — the cens
     ok(red.length === 0, `stored words (closure 3): each of the ${relStored.size} sentences the release ${relVer} stored keeps its zh and ja rows now; the ${lost.length} no producer files any more are named legacy rows`, red.map((x) => x.s.slice(0, 90)));
     ok(Object.values(LEG).every((e) => e.left !== relVer || relStored.has(e.key)), `stored words: every legacy row left in ${relVer} is a sentence that release STORED (read from it, never picked)`, Object.entries(LEG).filter(([, e]) => e.left === relVer && !relStored.has(e.key)).map(([k]) => k));
   }
-  // EACH LEGACY ROW: its release, its producer, its two rows, filed by no producer now — and an item stored with it says it in zh / ja
+  // EACH LEGACY ROW: its release, its producer, its two rows, filed by no producer now — and an item stored with it says it in zh / ja.
+  // «Filed» is a PRODUCER's filing (the census above); a page may still say the sentence by itself (ui-plain-words vault-7: the login
+  // card stopped filing LOGIN_ONLY, the add door's own hint still says it) — reported as saidNow, never red (the move -moved3)
   for (const [name, e] of Object.entries(LEG)) {
     const params = Object.fromEntries([...String(e.key).matchAll(/\{(\w+)\}/g)].map((m) => [m[1], m[1] === 'account' ? 'UCI Max' : m[1] === 'since' ? '10/8/26, 1:30 PM' : 3]));
     const item = { id: 'ut-1', text: 'x', i18n: { text: { key: e.key, params }, detail: [{ key: e.key, params }] } };
     const say = (dict) => { const said = (l) => UTL.saidLine(l, tOf(dict)); return `${UTL.itemTextOf(item, said)} ${UTL.itemDetailLinesOf(item, said).join(' ')}`; };
     const zh = say(ZH), ja = say(JA);
-    const d = { named: /^2\.\d+\.\d+$/.test(String(e.left)) && typeof e.filedBy === 'string' && fs.existsSync(path.join(REPO, e.filedBy)), rows: has(ZH, e.key) && has(JA, e.key), filedNow: words.has(e.key) || storedNow.has(e.key), english: sentence.test(zh) || sentence.test(ja) };
+    const d = { named: /^2\.\d+\.\d+$/.test(String(e.left)) && typeof e.filedBy === 'string' && fs.existsSync(path.join(REPO, e.filedBy)), rows: has(ZH, e.key) && has(JA, e.key), filedNow: storedNow.has(e.key), saidNow: words.has(e.key), english: sentence.test(zh) || sentence.test(ja) };
     ok(d.named && d.rows && !d.filedNow && !d.english, `stored words: legacy «${name}» (left in ${e.left}, filed by ${e.filedBy}) — its key keeps its zh and ja rows, no producer files it now, and an item stored with it says it in zh / ja, not English`, { ...d, zh: zh.slice(0, 90), ja: ja.slice(0, 90) });
   }
   // #4 the overage refusal is a need with its door (a rewording had taken it out of the net): the row, present, its door beside the chip

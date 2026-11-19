@@ -13999,6 +13999,7 @@ export default {
   "Its agents use it for the hosts below without asking you each time, and never see the secret itself. Another host, or a command that could go anywhere (a shell, a script), still asks you.": "它的 agent 可以在下面这些主机上使用它，不必每次问你，而且永远看不到密钥本身。其他主机，或者去向说不清的命令（shell、脚本），仍会问你。",
   "It sends you ONE card with exactly this permission to allow — it knows the command.": "它会发给你一张卡片，正好是这条授权，你点允许即可——命令它自己知道。",
   "No secure address: Tailscale is not running on this machine.": "没有安全地址：这台机器上没有运行 Tailscale。",
+  "No secure address: Tailscale is not running on this machine (or set VIBESPACE_TLS_CERT and VIBESPACE_TLS_KEY to a certificate of your own).": "没有安全地址：这台机器上没有运行 Tailscale（也可以用 VIBESPACE_TLS_CERT 和 VIBESPACE_TLS_KEY 指定你自己的证书）。",
   "Or use a certificate of your own: set VIBESPACE_TLS_CERT and VIBESPACE_TLS_KEY to its certificate and key files.": "或者用你自己的证书：把 VIBESPACE_TLS_CERT 和 VIBESPACE_TLS_KEY 设为它的证书和私钥文件。",
   // lane ui-plain-words pick 5 — M4: a button says what it does
   "Handled · tell the agent": "已处理好 · 告诉 agent",
