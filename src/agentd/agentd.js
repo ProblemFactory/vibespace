@@ -736,6 +736,8 @@ const { reExecArgv, repointCurrent, handOver, listenWithRetry } = require('./ree
 // lane win-device-boot-hidden: the daemon's OWN launch on Windows — the console look + the logon task (PURE rules + texts)
 const HS = require('./hidden-start.js');
 const LH = require('./lock-holder.js'); // B-8475: whose agent a live pid in the lock is
+const { armWatch, endWatches } = require('./watch-guard.js'); // every watch the agent arms carries its 'error' listener at once; a lost watch falls back to a sweep
+const WATCH = { fs, log: (m) => log(m), said: new Set() };
 // THE RE-EXEC — the one site that starts this daemon's successor: the self-upgrade (beginUpgrade) and the console
 // self-heal at the start (lane win-device-boot-hidden). Each caller hands `reExecArgv(<script>)` (the script + EVERY
 // original flag); the successor is born sanitized (src/agent-env.js) with the caller's own names on top.
@@ -2055,7 +2057,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
             // discovery freshness and the push-triggered usage harvest
             for (const d of [path.join(home, '.claude', 'sessions'), path.join(home, '.claude', 'projects'),
               path.join(process.env.CODEX_HOME || path.join(home, '.codex'), 'sessions')]) {
-              try { watches.push(fs.watch(d, { recursive: true }, kick)); } catch { try { watches.push(fs.watch(d, kick)); } catch { } }
+              armWatch(WATCH, watches, d, kick, 'discovery-watch');
             }
             watches.clearKick = () => { if (timer) { clearTimeout(timer); timer = null; } }; // its pending kick dies with the link (U1)
             this._discoWatch = watches;
@@ -2201,7 +2203,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
             st.clearKick = () => { if (timer) { clearTimeout(timer); timer = null; } };
             for (const d of [path.join(home, '.claude', 'projects'),
               path.join(process.env.CODEX_HOME || path.join(home, '.codex'), 'sessions')]) {
-              try { st.watches.push(fs.watch(d, { recursive: true }, kick)); } catch { try { st.watches.push(fs.watch(d, kick)); } catch { } }
+              armWatch(WATCH, st.watches, d, kick, 'usage-events-watch');
             }
             runWalk(); // initial drain so the subscriber starts complete
           }
@@ -2899,10 +2901,10 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
       // close THIS connection's SOCKS egress servers — an open egress must not
       // outlive the server that asked for it (ExitManager re-creates on reconnect)
       for (const [port, s] of socksServers) { if (s.owner === mux) { try { s.server.close(); } catch { } socksServers.delete(port); } }
-      if (this._discoWatch) { for (const w of this._discoWatch) { try { w.close(); } catch { } } try { this._discoWatch.clearKick?.(); } catch { } this._discoWatch = null; }
+      if (this._discoWatch) { endWatches(WATCH, this._discoWatch); try { this._discoWatch.clearKick?.(); } catch { } this._discoWatch = null; }
       for (const rec of [...windowWatches.values()]) if (rec.owner === mux) rec.h.stop(); // lane machine-app-crop: a watch dies with its link (unpinned); the hub re-arms it
       if (streamHost) streamHost.linkDead(mux); // lane stream-p1a-transport: its streams become orphans (the media keeps flowing) until the hub re-arms them
-      if (this._usageEvWatch) { const st = this._usageEvWatch; st.dead = true; try { st.clearKick?.(); } catch { } try { for (const w of st.watches) w.close(); } catch { } this._usageEvWatch = null; }
+      if (this._usageEvWatch) { const st = this._usageEvWatch; st.dead = true; try { st.clearKick?.(); } catch { } endWatches(WATCH, st.watches); this._usageEvWatch = null; }
       // THE SESSION-EVENTS WATCH ENDS WITH ITS LINK (lane soak-can-fail U1, 主开发 2026-11-16): its one-second tick and its tails
       // (a normalizer per pipe session) were never cleared, so every dead link left one more tick reading the sessions folder
       // and normalizing every session's output for a link nobody hears — in a daemon that outlives the hub. A re-arm on a new
