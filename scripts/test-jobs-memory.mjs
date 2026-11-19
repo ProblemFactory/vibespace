@@ -441,17 +441,20 @@ leg('§3 IN-PROCESS ⑮ A REAP THAT DID NOT FINISH IS ALWAYS RETRIED — the boo
 leg('§3 IN-PROCESS ⑳ B-2c5c — a scope that holds THIS hub (started by hand inside the job) is never killed whole', async (ok) => {
   const dir = tmp('vs-jobs-mem-'), root = tmp('vs-jobs-mem-cg-');
   // the hub (this process) and a member that is gone (past pid_max): the kill must leave the hub's processes and write no cgroup.kill
-  const H = fakeScope(root, 'hub', { pids: [process.pid, DEAD + 1] }), X = fakeScope(root, 'hub-x', { pids: [process.pid, DEAD + 1] });
+  const H = fakeScope(root, 'hub', { pids: [process.pid] }), X = fakeScope(root, 'hub-x', { pids: [process.pid, DEAD + 1] }), S = fakeScope(root, 'hub-s', { pids: [process.pid, DEAD + 1] });
   const E = engine(dir, { reapReadMs: NEVER, reapConfirmMs: 10, cgroupRoot: root, hubCgroup: H.cgroup }); legClock(E);
   const out = {}, r = await E._killScope({ unit: H.unit, dir: H.dir, cg: H.cgroup }, out), words = E._hubScopeWords(out);
+  const E3 = engine(tmp('vs-jobs-mem-'), { reapReadMs: NEVER, reapConfirmMs: 10, cgroupRoot: root, hubCgroup: S.cgroup }); legClock(E3);
+  const outS = {}, rs = await E3._killScope({ unit: S.unit, dir: S.dir, cg: S.cgroup }, outS);
   const below = await E._hubInScope({ unit: 'x.scope', dir: '', cg: H.cgroup.replace(/\/[^/]+$/, '') }), beside = await E._hubInScope({ unit: X.unit, dir: X.dir, cg: X.cgroup });
   // CONTROL: the hub's own cgroup is ANOTHER scope's (the check answering «not inside») — the whole scope's cgroup.kill is written
   const E2 = engine(tmp('vs-jobs-mem-'), { reapReadMs: NEVER, reapConfirmMs: 10, cgroupRoot: root, hubCgroup: '/fake.slice/elsewhere.scope' }); legClock(E2);
   const rx = await E2._killScope({ unit: X.unit, dir: X.dir, cg: X.cgroup });
-  ok(r === 'hub' && H.procs().length === 2 && out.hub && out.hub.kept === 1 && out.hub.killed === 0 && /never killed whole/.test(words) && /the hub and what it runs left alone/.test(words) && below && !beside,
-    `a scope that holds this hub: NO cgroup.kill (its list kept), the hub's processes left alone, said («${words}»); a hub in a cgroup UNDER the scope counts as inside, one beside it does not`, { r, out, below, beside });
+  ok(r === 'hub' && H.procs().length === 1 && out.hub && out.hub.kept === 1 && out.hub.killed === 0 && out.hub.left === 0 && /never killed whole/.test(words) && /the hub and what it runs left alone/.test(words) && below && !beside
+    && rs === 'refused' && S.procs().length === 2 && /survived the kill around the hub/.test(outS.code || ''),
+    `a scope that holds this hub: NO cgroup.kill (its list kept), the hub's processes left alone, said («${words}»); a process that SURVIVES the kill around it is «refused» (retried), never «done» (the read's S3); a hub in a cgroup UNDER the scope counts as inside, one beside it does not`, { r, out, rs, outS, below, beside });
   ok(rx === 'killed' && X.procs().length === 0, 'CONTROL (the hub read as outside the scope): the scope\'s cgroup.kill is written — every process in it, the hub with it — RED', { rx });
-  stopEngine(E); stopEngine(E2);
+  stopEngine(E); stopEngine(E2); stopEngine(E3);
 });
 
 leg('§3 IN-PROCESS ⑯ TWO OUTCOMES, TWO WORDS — a scope that is gone is not a kernel without cgroup.kill', async (ok) => {
@@ -827,8 +830,8 @@ try {
     ok(/memEff\.textContent = memoryEffectiveWords\(job, t\);/.test(panel) && /memRow\.append\(memLbl, memIn, memSet, memFact, memEff\);/.test(panel), 'the properties: the effective bound and its limit stand BESIDE the stored value, read-only');
     // a stop ends the JOB: the gate execs it on every rung (the < 253 keeper sits beside it, never its parent) and nothing but
     // its own rung and child is read by a proof's timer
-    ok(/const GATE_KEEP = 'read -r go <&3 \|\| exit 125; \( \(trap "" TERM INT HUP; read -r ack <&3\) <\/dev\/null >\/dev\/null 2>&1 & echo "keeper \$!" >&3 \); exec "\$@" 3<&-';/.test(WRAPPER_SRC) && /const isKeeper = \(pid\) => !!keeper && Number\(pid\) === keeper\.pid/.test(WRAPPER_SRC) && !/\/cmdline`/.test(WRAPPER_SRC) && !/GATE_HOLD/.test(WRAPPER_SRC) && /r\.timer = setTimeout\(\(\) => prove\(r, c, deadline\), 10\)/.test(WRAPPER_SRC) && !/setTimeout\(\(\) => prove\(deadline\)/.test(WRAPPER_SRC),
-      'the wrapper: the job is exec\'d on every rung (the < 253 keeper double-forked beside it, deaf to a stop — round 6: known by the PID its gate says, never its command line); a proof\'s timer is bound to its rung and its child');
+    ok(/const GATE_KEEP = 'read -r go <&3 \|\| exit 125; \( \(trap "" TERM INT HUP; read -r ack <&3\) <\/dev\/null >\/dev\/null 2>&1 & echo "keeper \$!" >&3 \); exec "\$@" 3<&-';/.test(WRAPPER_SRC) && /const isKeeper = \(pid\) => !!keeper && Number\(pid\) === keeper\.pid/.test(WRAPPER_SRC) && !/\/cmdline`/.test(WRAPPER_SRC.replace(/\nfunction hubShaped\(pid\) \{[\s\S]*?\n\}\n/, '\n')) && (WRAPPER_SRC.match(/\/cmdline`/g) || []).length === 1 && !/GATE_HOLD/.test(WRAPPER_SRC) && /r\.timer = setTimeout\(\(\) => prove\(r, c, deadline\), 10\)/.test(WRAPPER_SRC) && !/setTimeout\(\(\) => prove\(deadline\)/.test(WRAPPER_SRC),
+      'the wrapper: the job is exec\'d on every rung (the < 253 keeper double-forked beside it, deaf to a stop — round 6: known by the PID its gate says, never its command line — the ONE command-line read is B-2c5c\'s hubShaped, a hub of this checkout); a proof\'s timer is bound to its rung and its child');
     ok(/const hadProc = force && scope \? this\._escalate\(job, scope, undefined, run\) : force \? this\._killGroup\(job, 'SIGKILL'\) : this\._termRun\(job, run\);/.test(jobs) && /this\._escalate\(job, this\._runScope\(job, run\), undefined, run\); \/\/ round 4/.test(jobs) && /else if \(run && !this\._reapLater\.has\(run\)\) this\._reapLater\.set\(run, \{ job, tries: 0 \}\);/.test(jobs) && jobs.split("setTimeout(() => this._killGroup(job, 'SIGKILL')").length === 1,
       'src/jobs.js: every kill step goes through _escalate (the scope on the cgroup rung, whether or not its wrapper lives); a dead wrapper\'s scope is reaped — round 6: a reap that did not finish enqueues itself');
     // ROUND 6: a kill timer belongs to its run — armed for it, fired only while it runs, disarmed by the next spawn; every start

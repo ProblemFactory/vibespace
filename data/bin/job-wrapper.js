@@ -378,6 +378,7 @@ function readEvents(dir) {
 }
 /** the processes still in a cgroup (its cgroup.procs) — [] once it is empty or gone */
 function procsOf(dir) { try { return fs.readFileSync(path.join(dir, 'cgroup.procs'), 'utf8').split('\n').filter((l) => /^\d+$/.test(l)); } catch { return []; } }
+function procsOrNull(dir) { try { return fs.readFileSync(path.join(dir, 'cgroup.procs'), 'utf8').split('\n').filter((l) => /^\d+$/.test(l)); } catch { return null; } }   // B-2c5c r1: unread ≠ empty
 /** the keeper (< 253) is ours, never something the job left — known by the PID its gate said, and its start (round 6) */
 const isKeeper = (pid) => !!keeper && Number(pid) === keeper.pid && Number((statOf(pid) || [])[19]) === keeper.start;
 
@@ -611,7 +612,8 @@ async function forceScope(why) {
   if (!forced) forced = why; // the first kill's why — and every call kills (round 5: a label is never the guard)
   // B-2c5c: a scope that holds what no stop of this job ends (the hub started by hand INSIDE the job, and what it runs) is never killed
   // WHOLE — neither the manager's kill nor the kernel's cgroup.kill: the job's own processes by force, one by one (identity re-read)
-  const kept = keptTest(), held = kept ? procsOf(scopeDir).filter((p) => kept(p)).length : 0;
+  const kept = keptTest(), list = procsOrNull(scopeDir);
+  const held = list === null ? keptInScope() : kept ? list.filter((p) => kept(p)).length : 0;   // its read r1 (S1): a list unread is no proof the hub is not there
   if (held) { sayKept(held, 'its kill'); for (const p of scopeRows() || []) killNow(p); return; }
   await scopeKill('SIGKILL');
   if (procsOf(scopeDir).length) { try { fs.writeFileSync(path.join(scopeDir, 'cgroup.kill'), '1'); } catch { } } // no manager answered: the kernel's own
@@ -673,18 +675,21 @@ function childTreeOf(root, { since = 0, maxRows = 512, maxMs = 50, procRoot = '/
   return { rows, cut, pruned };
 }
 /** B-2c5c (lane bl-jobs): is `pid` — or a process up its PARENT chain — one of `keep` (a Map pid → starttime, 0 = that pid whatever
- *  its start)? What runs under the hub is the hub's: a hub started by hand INSIDE a job lives in that job's scope, its process
- *  group and with its mark, and no stop of the job ends it or what it runs. The chain is read from <procRoot>/<p>/stat (its 4th
- *  field, the parent), at most `maxHops` links up; a link that cannot be read ends the walk — not kept. */
-function keptByChain(pid, keep, { procRoot = '/proc', maxHops = 64 } = {}) {
+ *  its start), or one `isRoot` names? What runs under the hub is the hub's: a hub started by hand INSIDE a job lives in that job's
+ *  scope, its process group and with its mark, and no stop of the job ends it or what it runs. The walk STOPS at a pid of `stop` (the
+ *  job's own wrapper: the hub spawned every wrapper, so a walk past it reaches the hub from EVERY job process — its read r1, M1). The
+ *  chain is read from <procRoot>/<p>/stat (its 4th field, the parent), at most `maxHops` links up; a link that cannot be read ends
+ *  the walk — not kept. */
+function keptByChain(pid, keep, { procRoot = '/proc', maxHops = 64, stop = null, isRoot = null } = {}) {
   let p = Number(pid);
   for (let hop = 0; hop <= maxHops && p > 1; hop++) {
+    if (stop && stop.has(p)) return false;
     let st = '';
     try { st = fs.readFileSync(`${procRoot}/${p}/stat`, 'utf8'); } catch { return false; }
     const e = st.lastIndexOf(')');
     if (e < 0) return false;
     const r = st.slice(e + 2).split(' ');
-    if (keep.has(p) && (!keep.get(p) || keep.get(p) === Number(r[19]))) return true;
+    if ((keep.has(p) && (!keep.get(p) || keep.get(p) === Number(r[19]))) || (isRoot && isRoot(p))) return true;
     p = Number(r[1]);
   }
   return false;
@@ -740,13 +745,14 @@ function onStop(sig, at, by) {
   if (by === 'engine') for (const p of rows) if (p[2] === process.pid && !termed.has(termKey(p))) termed.set(termKey(p), { at, pass: 'stop' });
   const who = by === 'engine' ? `the engine signalled its process group${mainBy === 'wrapper' ? '; its main process had left that group — the wrapper signals it' : ''}`
     : by === 'intent' ? "the engine's stop never reached its group — the wrapper signals it"
+      : by === 'alone-hub' ? 'the VibeSpace hub runs in its process group (started inside the job) — the engine signalled the wrapper alone; the wrapper signals the job\'s processes, once'
       : by === 'alone' ? "the engine's stop reached the wrapper alone, already stopping what its job left — the wrapper signals the rest, once"
         : 'a signal to the wrapper alone — the wrapper signals its group';
   try { fs.writeSync(logFd, Buffer.from(`\n[job-wrapper] stop: ${sig} — ${stopMs / 1000} s to end (${who}${mainBy === 'ended' ? '; its main process had already ended' : ''})\n`)); } catch { }
   for (const p of rows) termOnce(p); // what the engine's signal did not reach — every member, for a stop not the engine's
   // B-c134: the tree's members outside our group — not the main (its own road above), each once (the table); the drain takes the rest
   // the engine's intent carries the tree it read BEFORE its signal (ours here may come after the main's children were re-parented)
-  const fromIntent = by === 'engine' || by === 'intent' || by === 'alone' ? intentTree() : { rows: [], cut: false };
+  const fromIntent = by === 'engine' || by === 'intent' || by === 'alone' || by === 'alone-hub' ? intentTree() : { rows: [], cut: false };
   const keyed = new Map([...fromIntent.rows, ...tree.rows].filter((r) => r[2] !== process.pid && !(child && r[0] === child.pid) && !ko.some((x) => x[0] === r[0])).map((r) => [termKey(r), r]));
   stopTree = [...keyed.values()];
   let treeHeard = 0;
@@ -776,7 +782,7 @@ function scopeRows() {
 }
 for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => {
   const s = stopIntent(), engine = !!s && Date.now() - s.at <= INTENT_FRESH_MS; // round 8: the engine's — its clock is the intent's
-  onStop(sig, engine ? s.at : Date.now(), engine ? (s.alone ? 'alone' : 'engine') : 'signal');
+  onStop(sig, engine ? s.at : Date.now(), engine ? (s.alone ? (s.hub ? 'alone-hub' : 'alone') : 'engine') : 'signal');
   if (heard) heard();
 });
 /** B-c134 cure (MUST A): WHAT THIS WRAPPER'S WALK NEVER ENTERS — the hub (its pid in <data>/server.pid, which the hub writes at its
@@ -791,10 +797,23 @@ function keptOutHere() {
 /** B-2c5c: WHAT NO STOP OF THIS JOB ENDS, BY THE PARENT CHAIN — the kept-out roots (keptOutHere: the hub of <data>/server.pid and what
  *  the engine's intent names) and everything under them. → (pid) => true when kept (memoised for this call's rows), or null */
 function keptTest() {
-  const ko = keptOutHere();
-  if (!ko.length) return null;
-  const keep = new Map(ko.map(([p, st]) => [Number(p), Number(st) || 0])), memo = new Map();
-  return (pid) => { const p = Number(pid); if (!memo.has(p)) memo.set(p, keptByChain(p, keep)); return memo.get(p); };
+  // its read r1: the walk STOPS at this wrapper (M1 — every job process reaches the hub that spawned us); a hub that has not yet written
+  // <data>/server.pid (it writes it once it listens, seconds into its boot) is named by its SHAPE — this checkout's server.js (M4); the
+  // server.pid root counts only while it is a hub (a stale file's pid may be another process now)
+  const shaped = new Map(), isHub = (p) => { if (!shaped.has(p)) shaped.set(p, hubShaped(p)); return shaped.get(p); };
+  const ko = keptOutHere().filter(([p, st]) => st || isHub(Number(p)));
+  const keep = new Map(ko.map(([p, st]) => [Number(p), Number(st) || 0])), memo = new Map(), stop = new Set([process.pid]);
+  return (pid) => { const p = Number(pid); if (!memo.has(p)) memo.set(p, keptByChain(p, keep, { stop, isRoot: isHub })); return memo.get(p); };
+}
+/** B-2c5c r1 (M4): a process that IS a VibeSpace hub of this checkout — `node …/server.js` by its argv (the checkout's own path, or
+ *  `server.js` run from the checkout as its cwd). The wrapper lives at <checkout>/data/bin */
+const CHECKOUT = path.resolve(__dirname, '..', '..'), SERVER_JS = path.join(CHECKOUT, 'server.js');
+function hubShaped(pid) {
+  let args = [];
+  try { args = fs.readFileSync(`/proc/${pid}/cmdline`, 'latin1').split('\0'); } catch { return false; }
+  if (args.includes(SERVER_JS)) return true;
+  if (!args.some((a) => a === 'server.js' || a === './server.js')) return false;
+  try { return fs.readlinkSync(`/proc/${pid}/cwd`) === CHECKOUT; } catch { return false; }
 }
 /** B-2c5c: how many kept-out roots LIVE IN this job's scope by their own cgroup file (/proc/<pid>/cgroup names `<unit>.scope`) — the
  *  answer when the scope's list cannot be read */
@@ -815,7 +834,7 @@ function intentTree() {
 }
 /** the engine's stop intent for THIS run (its ctl dir), or null */
 function stopIntent() {
-  try { const s = JSON.parse(fs.readFileSync(path.join(ctlDir, 'stop.json'), 'utf8')); return { sig: /^SIG[A-Z]{2,6}$/.test(s.sig) ? s.sig : 'SIGTERM', at: Number(s.at) > 0 && Number(s.at) <= Date.now() ? Number(s.at) : Date.now(), alone: s.alone === true }; } catch { return null; }
+  try { const s = JSON.parse(fs.readFileSync(path.join(ctlDir, 'stop.json'), 'utf8')); return { sig: /^SIG[A-Z]{2,6}$/.test(s.sig) ? s.sig : 'SIGTERM', at: Number(s.at) > 0 && Number(s.at) <= Date.now() ? Number(s.at) : Date.now(), alone: s.alone === true, hub: s.hub === true }; } catch { return null; }
 }
 // THE END IS WRITTEN ONCE THE SCOPE IS EMPTY (the cgroup rung): the keeper is let go (its events read), then — round 5, the
 // ruling of 2026-10-27 (a job's scope IS the job) — at a natural end what still runs in the scope is what the job LEFT: a

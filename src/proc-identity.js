@@ -263,18 +263,21 @@ function childTreeOf(root, { since = 0, maxRows = 512, maxMs = 50, procRoot = '/
   return { rows, cut, pruned };
 }
 /** B-2c5c (lane bl-jobs): is `pid` — or a process up its PARENT chain — one of `keep` (a Map pid → starttime, 0 = that pid whatever
- *  its start)? What runs under the hub is the hub's: a hub started by hand INSIDE a job lives in that job's scope, its process
- *  group and with its mark, and no stop of the job ends it or what it runs. The chain is read from <procRoot>/<p>/stat (its 4th
- *  field, the parent), at most `maxHops` links up; a link that cannot be read ends the walk — not kept. */
-function keptByChain(pid, keep, { procRoot = '/proc', maxHops = 64 } = {}) {
+ *  its start), or one `isRoot` names? What runs under the hub is the hub's: a hub started by hand INSIDE a job lives in that job's
+ *  scope, its process group and with its mark, and no stop of the job ends it or what it runs. The walk STOPS at a pid of `stop` (the
+ *  job's own wrapper: the hub spawned every wrapper, so a walk past it reaches the hub from EVERY job process — its read r1, M1). The
+ *  chain is read from <procRoot>/<p>/stat (its 4th field, the parent), at most `maxHops` links up; a link that cannot be read ends
+ *  the walk — not kept. */
+function keptByChain(pid, keep, { procRoot = '/proc', maxHops = 64, stop = null, isRoot = null } = {}) {
   let p = Number(pid);
   for (let hop = 0; hop <= maxHops && p > 1; hop++) {
+    if (stop && stop.has(p)) return false;
     let st = '';
     try { st = fs.readFileSync(`${procRoot}/${p}/stat`, 'utf8'); } catch { return false; }
     const e = st.lastIndexOf(')');
     if (e < 0) return false;
     const r = st.slice(e + 2).split(' ');
-    if (keep.has(p) && (!keep.get(p) || keep.get(p) === Number(r[19]))) return true;
+    if ((keep.has(p) && (!keep.get(p) || keep.get(p) === Number(r[19]))) || (isRoot && isRoot(p))) return true;
     p = Number(r[1]);
   }
   return false;

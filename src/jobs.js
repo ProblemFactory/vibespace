@@ -1600,7 +1600,12 @@ class JobManager {
   }
   /** B-2c5c: a process of THIS hub — the hub itself or under it by the parent chain (a hub started by hand inside a job: the job's scope,
    *  group and mark hold the hub and what it runs) — never a stop's to end */
-  _hubsOwn(pid) { const p = Number(pid); return p === process.pid || PI.keptByChain(p, this._hubKeep || (this._hubKeep = new Map([[process.pid, 0]]))); }
+  _hubsOwn(pid) {
+    const p = Number(pid);
+    if (p === process.pid) return true;
+    const stop = new Set(this._wrappersHeld().map(([w]) => w));   // its read r1 (M1): the walk ends at a job's wrapper — the hub spawned every one
+    return PI.keptByChain(p, this._hubKeep || (this._hubKeep = new Map([[process.pid, 0]])), { stop });
+  }
   /** B-2c5c: does this hub live in `scope`? Its OWN cgroup (/proc/self/cgroup, read once a life — a process never changes its cgroup
    *  by itself; `d.hubCgroup` = a fast suite's) is the scope's or under it */
   async _hubInScope(scope) {
@@ -1614,20 +1619,26 @@ class JobManager {
   /** B-2c5c: the job's processes of a scope that holds this hub, by force, one by one (identity re-read at the act) — never the hub's
    *  own subtree → 'hub'; `out.hub` = { killed, kept } */
   async _killAroundHub(scope, out = {}) {
-    const pids = await this._scopeProcs(scope);
-    let killed = 0, kept = 0;
-    for (const p of pids || []) {
-      if (this._hubsOwn(p)) { kept++; continue; }
-      const id = PI.identityOf(p);
-      if (id && PI.signalIdentity(id, 'SIGKILL', { what: `a process of job scope ${scope.unit}` }).ok) killed++;
+    // its read r1 (S3): never «done» unproven — a list unread is 'unread'; the scope is read again after the kill (a forking job), at
+    // most three passes; what survives them is 'refused' (the reap retries it), never 'hub'
+    let killed = 0, kept = 0, left = 0;
+    for (let pass = 0; pass < 3; pass++) {
+      const pids = await this._scopeProcs(scope);
+      if (pids === null) { out.hub = { killed, kept, unread: true }; out.code = 'its list did not answer'; return pass ? 'refused' : 'unread'; }
+      const own = pids.filter((p) => !this._hubsOwn(p));
+      kept = pids.length - own.length; left = own.length;
+      if (!own.length || pass === 2) break;
+      for (const p of own) { const id = PI.identityOf(p); if (id && PI.signalIdentity(id, 'SIGKILL', { what: `a process of job scope ${scope.unit}` }).ok) killed++; }
+      await pause(50);
     }
-    out.hub = { killed, kept, unread: pids === null };
+    out.hub = { killed, kept, left };
+    if (left) { out.code = `${left} of its process${left === 1 ? '' : 'es'} survived the kill around the hub`; return 'refused'; }
     return 'hub';
   }
   /** B-2c5c: the words of a scope killed around the hub */
   _hubScopeWords(out) {
     const h = (out && out.hub) || {}, k = h.killed || 0;
-    return `its scope holds this VibeSpace hub (started inside the job) — never killed whole: ${h.unread ? 'its list did not answer, nothing of it was killed' : `${k} of its process${k === 1 ? '' : 'es'} killed one by one`}, the hub and what it runs left alone`;
+    return `its scope holds this VibeSpace hub (started inside the job) — never killed whole: ${k} of its process${k === 1 ? '' : 'es'} killed one by one, the hub and what it runs left alone`;
   }
   /** THE STOP'S GRACE (round 5) — the wrapper's drain bound is the same number (a suite's seam shortens both: memorySample.stopMs) */
   _graceMs() { const s = Number(this.d.memorySample && this.d.memorySample.stopMs); return s > 0 ? Math.min(s, STOP_GRACE_MS) : STOP_GRACE_MS; }
@@ -1700,12 +1711,15 @@ class JobManager {
       // moment the main dies — and the group's signal reaches the main and the wrapper at once) and rides the intent; the wrapper's stop
       // step delivers it through its ONE table (one SIGTERM a process — the engine sends the tree none). Synchronous, as the release's
       // member walk: procfs, the tree's own cost, bounded — the stop's signal stays in this same tick
-      const ctl = this._ctlDir(job, run.startedAt), alone = !!this._ctlJson(job, run, 'stopping.json');
-      const st = this._readStamp(job), live = !!(st && this._verifyAlive(st)), tree = live ? PI.treeOf([Number(st.pid)], { since: Number(st.starttime) || 0 }) : Object.assign([], { cut: false, keptOut: [] });
+      // B-2c5c r1 (M3): a hub in the job's PROCESS GROUP — the engine signals the wrapper alone (_killGroup), so the intent says so
+      // (`alone`, `hub`): the wrapper then signals the job's processes itself, once (else it took the group as having heard the stop)
+      const st = this._readStamp(job), live = !!(st && this._verifyAlive(st)), hubInGroup = live && PI.pgidOf(process.pid) === Number(st.pid);
+      const ctl = this._ctlDir(job, run.startedAt), alone = !!this._ctlJson(job, run, 'stopping.json') || hubInGroup;
+      const tree = live ? PI.treeOf([Number(st.pid)], { since: Number(st.starttime) || 0 }) : Object.assign([], { cut: false, keptOut: [] });
       const all = tree.filter((m) => m.pgid !== Number(st && st.pid)), rows = all.slice(0, 256).map((m) => [m.pid, m.starttime, m.pgid, m.comm]);
       const treeCut = tree.cut || all.length > rows.length;   // cure: the intent's row cap is a cut too — said by the wrapper
       // cure (MUST A): the intent names what the wrapper's walk must not enter (the hub, the conversations' holders, the other jobs' wrappers)
-      try { writeJsonAtomic(path.join(ctl, 'stop.json'), { sig: 'SIGTERM', at: now(), ...(alone ? { alone: true } : {}), ...(rows.length ? { tree: rows } : {}), ...(treeCut ? { treeCut: true } : {}), ...(tree.keptOut && tree.keptOut.length ? { keepOut: tree.keptOut.slice(0, 512) } : {}) }); } catch { }
+      try { writeJsonAtomic(path.join(ctl, 'stop.json'), { sig: 'SIGTERM', at: now(), ...(alone ? { alone: true } : {}), ...(hubInGroup ? { hub: true } : {}), ...(rows.length ? { tree: rows } : {}), ...(treeCut ? { treeCut: true } : {}), ...(tree.keptOut && tree.keptOut.length ? { keepOut: tree.keptOut.slice(0, 512) } : {}) }); } catch { }
       // cure r2 (its own read F6): said only of a wrapper PROVEN gone — a stamp of this boot whose process is not there, no end record — once a run
       if (st && !live && st.bootId === bootId() && PI.aliveIdentity(st) === false && !this._ctlJson(job, run, 'exit.json') && !(this._goneSaid || (this._goneSaid = new Set())).has(ctl)) { this._goneSaid.add(ctl); this._runLogLine(this._runLogFile(job), '[jobs] stop: its wrapper had already ended — what the job started could not be read, and may still be running'); }
       if (tree.pruned) this._runLogLine(this._runLogFile(job), `[jobs] stop: its tree walk left alone ${tree.pruned} process${tree.pruned === 1 ? '' : 'es'} it does not own (the hub's, another conversation's or another job's)`);
@@ -1883,7 +1897,7 @@ class JobManager {
       while (live.length && now() < until) { await pause(50); live = live.filter((id) => PI.aliveIdentity(id) === true); }
       // round 9: the second walk only after a grace something lived through — nothing signalled, nothing could fork since: the
       // first walk's answer stands (never two walks back to back on the event loop)
-      const late = sent.size ? scan().filter((id) => !sent.has(id.pid)) : []; // forked during the grace: by force with the rest
+      const late = sent.size ? scan().filter((id) => !sent.has(id.pid) && !this._hubsOwn(id.pid)) : []; // forked during the grace: by force with the rest — B-2c5c r1 (S2): never the hub's
       for (const id of late) sent.set(id.pid, id);
       live.push(...late.filter((id) => PI.aliveIdentity(id) === true));
       n = sent.size;
