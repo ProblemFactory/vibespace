@@ -834,7 +834,7 @@ console.log('§5 job-notifications.json (src/jobs.js) — every job notice still
       return { J, JF, jbody, NF, onDisk: () => { try { return JSON.parse(fs.readFileSync(NF, 'utf8')); } catch (e) { return '(' + (e.code || 'unparsed') + ')'; } } };
     };
     // (1)
-    const GONE = "    if (!rec) return sub ? (this._recordsHeld() ? 'unknown' : 'gone') : 'owner';\n";
+    const GONE = "    if (!rec) return sub ? (this._recordsHeld() ? (viewOf()?.held ? 'groups-unread' : 'unknown') : 'gone') : 'owner';\n";
     ok(JSRC.split(GONE).length === 2, 'control setup: the view verdict\'s held answer is found once');
     const subScene = async (Mod, name) => {
       const x = await recHeld(Mod, name, { notices: { 'conv-s': [{ ts: 1, jobId: 'jb-0s000001', text: 'done exit=0 (1m)', sub: true }] } });
@@ -976,11 +976,14 @@ console.log('§5 job-notifications.json (src/jobs.js) — every job notice still
       J._unreadStopped = true; J.shutdown(); unplant(JF, jbody); return out;
     };
     const th = await twoHolds(J0, 'notifs-two-holds');
-    const thR = await twoHolds(MJ.load('src/jobs.js', anchored(JSRC, PEEK_REC, "    const q = (this.pendingNotifs.get(cid) || []).slice();\n", 'peek-records-cut'), 'peek-records-cut'), 'notifs-two-holds-rec');
+    const thR = await twoHolds(MJ.load('src/jobs.js', anchored(JSRC, PEEK_REC, "    const q = (this.pendingNotifs.get(cid) || []).slice();\n", 'peek-records-cut'), 'peek-records-cut'), 'notifs-two-holds-rec');   // stale-pins: kept — the control plants the older form in a copy
     const thV = await twoHolds(MJ.load('src/jobs.js', anchored(JSRC, PEEK_VIEW, '    return q;', 'peek-viewer-cut'), 'peek-viewer-cut'), 'notifs-two-holds-view');
     const thC = await twoHolds(MJ.load('src/jobs.js', anchored(JSRC, PEEK_VIEW, PEEK_VIEW.replace('(n.ho || this.printableNow(', '(this.printableNow('), 'peek-claim-cut'), 'peek-claim-cut'), 'notifs-two-holds-claim');
+    // the move onto checkpoint 61: the missing record's verdict meets lane bl-windows' 'groups-unread' — CONTROL (the meeting cut: a plain
+    // «unknown» under both holds, which checkpoint 61's printableNow prints): the undecided subscriber's line is peeked
+    const thM = await twoHolds(MJ.load('src/jobs.js', anchored(JSRC, GONE, "    if (!rec) return sub ? (this._recordsHeld() ? 'unknown' : 'gone') : 'owner';\n", 'peek-meeting-cut'), 'peek-meeting-cut'), 'notifs-two-holds-meet');   // stale-pins: kept — the control plants the older form in a copy
     ok(th.held && th.peek === 'c' && th.drained === 'c' && th.kept === 'ab' && !th.claimLeft, 'the records AND the Task Groups held at once: the peek is the intersection of the two holds (only the claimed line), the drain of the peeked set takes exactly it — the file\'s waiting line and the undecided subscriber\'s stay queued', th);
-    ok(thR.peek === 'ac' && thV.peek === 'bc' && thC.peek === '', 'CONTROLS (each in a copy): the records filter cut — the file\'s line the held records cannot judge is peeked; the viewer\'s held branch cut — the undecided subscriber\'s line is peeked; the claim\'s pass cut — the claimed line waits with the undecided — each RED', { thR, thV, thC });
+    ok(thR.peek === 'ac' && thV.peek === 'bc' && thC.peek === '' && thM.peek === 'bc', 'CONTROLS (each in a copy): the records filter cut — the file\'s line the held records cannot judge is peeked; the viewer\'s held branch cut — the undecided subscriber\'s line is peeked; the claim\'s pass cut — the claimed line waits with the undecided; the missing record\'s held view said «unknown» (the meeting with checkpoint 61 cut) — the undecided line is peeked — each RED', { thR, thV, thC, thM });
     ok(thR.drained === 'c' && thR.kept === 'ab', 'and the DRAIN keeps its own guard: a peek that offers the file\'s waiting line (the records filter cut) still drains only the claimed one — the waiting line stays', thR);
     // 主开发 04:33Z (2c): the LADDER's retry judge over a subscriber's parked copy it cannot judge (the records held: «unknown») — the ladder
     // drops its copy on this answer and writes its file at once: the stash is ON DISK at once too, never only in memory until a tick

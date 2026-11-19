@@ -1546,8 +1546,12 @@ class JobManager {
     const rec = job && typeof job === 'object' ? job : this.jobs.get(job) || this.archivedById(job);
     // store (5) cure (1), 主开发 02:33Z: while the job records or the archive are HELD a missing record is UNKNOWN — a subscriber's notice
     // waits (the drain dropped it as «gone» and saved: lost for good), as the gc keeps a cleared record while held
-    if (!rec) return sub ? (this._recordsHeld() ? 'unknown' : 'gone') : 'owner';
-    const v = viewer !== undefined ? viewer : typeof this.d.viewerOf === 'function' ? this.d.viewerOf(cid) : undefined;
+    // THE MOVE ONTO CHECKPOINT 61 meets lane bl-windows' own verdict ('groups-unread', d7eb727a0): a held VIEW (the Task Groups store
+    // unreadable) is said as itself here too — a subscriber's undecided line under BOTH holds stays queued (printableNow keeps it), never
+    // printed as a plain «unknown»
+    const viewOf = () => (viewer !== undefined ? viewer : typeof this.d.viewerOf === 'function' ? this.d.viewerOf(cid) : undefined);   // asked only where it decides
+    if (!rec) return sub ? (this._recordsHeld() ? (viewOf()?.held ? 'groups-unread' : 'unknown') : 'gone') : 'owner';
+    const v = viewOf();
     if (v === undefined) return fallback && M.ownerLineage(rec, fallback) ? 'owner' : 'subscriber';
     if (!v) return 'unknown';
     const role = M.addressedTo(rec, v, parent !== undefined ? parent : this._cronParentOf(rec));
