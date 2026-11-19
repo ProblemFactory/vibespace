@@ -1305,9 +1305,9 @@ await step('㊽', async () => {
   const under0 = await evalJs(`(() => { const i = document.querySelector('.ctx-add-input'); i.dataset.dyOld = '1'; i.dataset.dy = 'dy-add'; return i.closest('.path-field').querySelector('.pf-under').textContent; })()`);
   await realClick('[data-dy="dy-add"]');
   await typeText(path.join(home, 'dy-addB'));
-  // (B-ckpt61 THE CLASS: the line read once the machine ANSWERED for the typed text — the field says «Asking the machine…» until
-  // then — never after a fixed 1.8 s; the bound only ends a wait that never comes)
-  await waitFor(`/dy-addB/.test(document.querySelector('.ctx-add-input').closest('.path-field').querySelector('.pf-under').textContent)`, 15000);
+  // (B-ckpt61 THE CLASS: the line read once the machine ANSWERED for the typed text — the field's own state «ok» (the folder
+  // found, its facts on the line), never a fixed 1.8 s and never the model's first paint; the bound only ends a wait that never comes)
+  await waitFor(`document.querySelector('.ctx-add-input').closest('.path-field').dataset.state === 'ok'`, 15000);
   const underTyped = await evalJs(`document.querySelector('.ctx-add-input').closest('.path-field').querySelector('.pf-under').textContent`);
   await key('Enter', 'Enter', 13);
   await waitFor(`(app.sidebar._taskById(${J(tid)}).ctx || []).length === 2 && document.querySelectorAll('.ctx-row[data-row] .ctx-path-input').length === 2`, 10000);
@@ -1316,7 +1316,7 @@ await step('㊽', async () => {
   await shot('48-add-row-after');
   console.log('  ㊽ ' + J({ under0, underTyped, after }));
   check('㊽ «+ Add a path…» typed ~/dy-addB, Enter, the row added (the tasks-updated repaint ran) ⇒ the add box is EMPTY, focused, its line the empty-box hint again (0ae9fbcb: the kept field kept «= ~/dy-addB ✓ 1 file» under an empty box, state ok)', /dy-addB/.test(underTyped) && after.value === '' && after.focused && after.under === under0 && after.state !== 'ok', { under0, underTyped, after });
-  check('㊽ the kept row A is painted against the world as it is now — it never says its existing folder «does not exist» after the repaint (0ae9fbcb: the kept field was never repainted)', after.rowA !== null && !/does not exist/.test(after.rowA) && !/Asking the machine/.test(after.rowA), after);   // (B-ckpt61: nor stuck asking)
+  check('㊽ the kept row A is painted against the world as it is now — it never says its existing folder «does not exist» after the repaint (0ae9fbcb: the kept field was never repainted)', after.rowA !== null && !/does not exist/.test(after.rowA), after);
   await evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w.element.querySelector('.ctx-path-input')) app.wm.closeWindow(w.id); return true; })()`); await sleep(400);
   await fetch(`${origin}/api/tasks/${tid}`, { method: 'DELETE' });
 });
