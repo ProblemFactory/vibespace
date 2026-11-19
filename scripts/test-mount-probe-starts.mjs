@@ -308,10 +308,10 @@ try {
   const HUBSEC = ['VIBESPACE', 'STANDIN', 'OLDROAD', 'TO' + 'KEN'].join('_');
   const dumpTo = path.join(T, 'oldroad.env'), dumper = path.join(T, 'env-dump.sh');
   fs.writeFileSync(dumper, `#!/bin/sh\nenv > '${dumpTo}'\nexit 0\n`, { mode: 0o755 });
-  const oldRoad = async (M, call = (mm) => mm._toolKnown('envprobe', dumper, [], 5000)) => {
+  const oldRoad = async (M, call = (mm) => mm._toolKnown('envprobe', dumper, [], 5000), mk = CS) => {
     try { fs.rmSync(dumpTo, { force: true }); } catch { }
     process.env[HUBSEC] = SEC_VAL;
-    const Q = CS.createChildStarter({ script: silent, guardMs: 50, log: { warn() { } } }); CS.setChildStarter(Q);
+    const Q = mk.createChildStarter({ script: silent, guardMs: 50, log: { warn() { } } }); CS.setChildStarter(Q);
     try {
       await Q.run('true', [], { timeoutMs: 100 }); await Q.run('true', [], { timeoutMs: 100 });   // two faults ⇒ the old road
       await call(mmOf(M));
@@ -320,13 +320,19 @@ try {
     return { dumped: env.length > 0, hasSecret: env.includes(SEC_VAL), hasPath: /^PATH=/m.test(env) };
   };
   const SVC = "{ timeoutMs, env: serviceEnv(process.env), envAdd: { PATH: process.env.PATH || '' } })";
-  const or1 = await oldRoad({ MountManager }), or1r = await oldRoad(MC.load('src/mounts.js', anchored(msrc, SVC, "{ timeoutMs, envAdd: { PATH: process.env.PATH || '' } })", 'red-oldroad-env'), 'red-oldroad-env'));   // stale-pins: kept (the RED plants the base's road back)
-  ok(or1.dumped && or1.hasPath && !or1.hasSecret && or1r.dumped && or1r.hasSecret, `the starter's old road: the presence ask's child gets the service env (PATH ${or1.hasPath}, the hub's secret ${or1.hasSecret}); RED (no env handed): the hub's whole env, its secret in it (${or1r.hasSecret})`);
+  // since the old road gives the starter road's env by default (B-323e left, 主开发 05:18Z): the site that hands none is safe too;
+  // the RED is the site handing none on the old road AS RELEASED (`env: o.env`: the child inherited the hub's whole env)
+  const ODE = 'env: directEnv(o)', cssrc7 = fs.readFileSync(path.join(REPO, 'src/server/child-starter.js'), 'utf8');
+  const CSrel = MC.load('src/server/child-starter.js', anchored(cssrc7, ODE, 'env: o.env', 'red-old-road-as-released'), 'red-old-road-as-released');   // stale-pins: kept (the RED plants the released road back)
+  const M1none = MC.load('src/mounts.js', anchored(msrc, SVC, "{ timeoutMs, envAdd: { PATH: process.env.PATH || '' } })", 'red-oldroad-env'), 'red-oldroad-env');   // stale-pins: kept (the site handing none)
+  const or1 = await oldRoad({ MountManager }), or1n = await oldRoad(M1none), or1r = await oldRoad(M1none, undefined, CSrel);
+  ok(cssrc7.split(ODE).length === 2 && or1.dumped && or1.hasPath && !or1.hasSecret && or1n.dumped && or1n.hasPath && !or1n.hasSecret && or1r.dumped && or1r.hasSecret, `the starter's old road: the presence ask's child gets the service env (PATH ${or1.hasPath}, the hub's secret ${or1.hasSecret}), and so does a site that hands none (the starter road's env: the hub's secret ${or1n.hasSecret}); RED (a site handing none on the old road as released): the hub's whole env, its secret in it (${or1r.hasSecret})`);
   // …the flag text's two help runs (the reader's S2: that half had no leg) — the stand-in rclone is the env dumper
   const FLAGS = 'maxBuffer: 4 * 1024 * 1024, env: serviceEnv(process.env), envAdd';
   const flagsCall = (mm) => { mm.rcloneBin = () => dumper; return mm._rcloneFlagsReady(5000); };
-  const or2 = await oldRoad({ MountManager }, flagsCall), or2r = await oldRoad(MC.load('src/mounts.js', anchored(msrc, FLAGS, 'maxBuffer: 4 * 1024 * 1024, envAdd', 'red-oldroad-flags'), 'red-oldroad-flags'), flagsCall);   // stale-pins: kept (the RED plants the base's road back)
-  ok(msrc.split(FLAGS).length === 2 && or2.dumped && or2.hasPath && !or2.hasSecret && or2r.dumped && or2r.hasSecret, `…and the flag text's help runs: the service env (PATH ${or2.hasPath}, the hub's secret ${or2.hasSecret}); RED (no env handed): the hub's whole env (${or2r.hasSecret})`);
+  const M2none = MC.load('src/mounts.js', anchored(msrc, FLAGS, 'maxBuffer: 4 * 1024 * 1024, envAdd', 'red-oldroad-flags'), 'red-oldroad-flags');   // stale-pins: kept (the site handing none)
+  const or2 = await oldRoad({ MountManager }, flagsCall), or2n = await oldRoad(M2none, flagsCall), or2r = await oldRoad(M2none, flagsCall, CSrel);
+  ok(msrc.split(FLAGS).length === 2 && or2.dumped && or2.hasPath && !or2.hasSecret && or2n.dumped && or2n.hasPath && !or2n.hasSecret && or2r.dumped && or2r.hasSecret, `…and the flag text's help runs: the service env (PATH ${or2.hasPath}, the hub's secret ${or2.hasSecret}), handed none the same (${or2n.hasSecret}); RED (handed none, the old road as released): the hub's whole env (${or2r.hasSecret})`);
 
   console.log('⑥ the spawn census row');
   const C = await import('./spawn-env-census.mjs');

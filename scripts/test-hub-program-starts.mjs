@@ -300,6 +300,34 @@ try {
   const starterEnv = (() => { try { return fs.readFileSync(`/proc/${sp5.pid}/environ`, 'utf8'); } catch { return null; } })();
   ok(envOut.code === 0 && /^PATH=/m.test(envOut.stdout) && /^DISPLAY=:42$/m.test(envOut.stdout) && !envOut.stdout.includes(SEC_NAME) && !envOut.stdout.includes(SEC_VAL) && lines.length >= 2 && !lines.some((l) => l.includes(SEC_NAME) || l.includes(SEC_VAL)) && starterEnv !== null && !starterEnv.includes(SEC_VAL) && xv.ok && xv.w === 1000 && xv.h === 542,
     `the starter's env holds no secret of the hub's (${starterEnv === null ? 'unread' : 'read'}), nor does what it starts (env: PATH + the request's DISPLAY, the secret-shaped name dropped); ${lines.length} request lines carry neither its name nor its value; the belt's X tool got its site's display and no secret (${xv.w}x${xv.h}: 1000 + 0, 500 + 42)`, { envHead: envOut.stdout.slice(0, 200), xv });
+  // …and the OLD road (after two faults) gives a site that hands NO env the same: the service env + its names (a secret-shaped one
+  // refused) — never the hub's whole env (B-323e left, 主开发 05:18Z: the mountpoint probe, the port scan, the docker enrich hand
+  // none; the desktop belt hands a non-whole env made from the agent env, never read); RED: the old road as released (`env: o.env` ⇒ the child inherits this process's env)
+  const HUB_SEC = ['VIBESPACE', 'B323E', 'OLDROAD', 'TO' + 'KEN'].join('_'), BELT_SEC = ['STANDIN', 'CLOUD', 'SE' + 'CRET'].join('_'), WHOLE_SEC = ['STANDIN', 'WHOLE', 'SE' + 'CRET', 'KEY'].join('_'), ODE = 'env: directEnv(o)', WH = '    if (o.wholeEnv) return o.env;\n';
+  const cssrc5 = fs.readFileSync(path.join(REPO, 'src/server/child-starter.js'), 'utf8'), MC5 = mutantCopies('hub-program-starts-5', REPO);
+  const SIL5 = path.join(T, 'silent-starter-5.js'); fs.writeFileSync(SIL5, 'process.stdin.resume();\n');
+  const oldEnv = async (mk) => {
+    const Q = mk.createChildStarter({ script: SIL5, guardMs: 50, log: { warn() { } } });
+    try {
+      await Q.run('true', [], { timeoutMs: 20 }); await Q.run('true', [], { timeoutMs: 20 }); const st = Q.stats();   // two faults (bound + guard + its one grace each) ⇒ the old road
+      const r = await Q.run('env', [], { timeoutMs: 10000, capture: true, envAdd: { DISPLAY: ':43', [SEC_NAME]: SEC_VAL } });
+      // the desktop belt's shape (its read's must): a NON-whole env made from the agent env — a cloud key in it — plus its X names
+      const rb = await Q.run('env', [], { timeoutMs: 10000, capture: true, env: { ...process.env, [BELT_SEC]: SEC_VAL }, envAdd: { DISPLAY: ':44' } });
+      // …and a WHOLE env (the mount probes' road: a credential the site built in) is given as built — the secret-shaped name kept
+      const rw = await Q.run('env', [], { timeoutMs: 10000, capture: true, wholeEnv: true, env: { PATH: process.env.PATH || '', [WHOLE_SEC]: SEC_VAL } });
+      return { st, r, rb, rw };
+    }
+    finally { Q.closePipe(); }
+  };
+  const CSr5 = MC5.load('src/server/child-starter.js', anchored(cssrc5, ODE, 'env: o.env', 'red-old-road-env'), 'red-old-road-env');   // stale-pins: kept (the RED plants the released road back)
+  const CSr5b = MC5.load('src/server/child-starter.js', anchored(cssrc5, WH, '    if (o.env) return o.env;\n', 'red-old-road-site-env'), 'red-old-road-site-env');   // its read's must: a site's own env read as given
+  const CSr5w = MC5.load('src/server/child-starter.js', anchored(cssrc5, WH, '    if (false) return o.env;\n', 'red-old-road-no-whole'), 'red-old-road-no-whole');   // the whole half off
+  process.env[HUB_SEC] = SEC_VAL;   // the green and its REDs side by side (starters of their own: one wait, not four)
+  let oe, oer, oeb, oew; try { [oe, oer, oeb, oew] = await Promise.all([oldEnv(CS), oldEnv(CSr5), oldEnv(CSr5b), oldEnv(CSr5w)]); } finally { delete process.env[HUB_SEC]; }
+  ok(cssrc5.split(ODE).length === 2 && cssrc5.split(WH).length === 2 && oe.st.direct && oe.r.code === 0 && /^PATH=/m.test(oe.r.stdout) && /^DISPLAY=:43$/m.test(oe.r.stdout) && !oe.r.stdout.includes(HUB_SEC) && !oe.r.stdout.includes(SEC_NAME)
+    && oe.rb.code === 0 && /^DISPLAY=:44$/m.test(oe.rb.stdout) && !oe.rb.stdout.includes(BELT_SEC) && !oe.rb.stdout.includes(HUB_SEC) && oer.st.direct && oer.r.stdout.includes(HUB_SEC) && oeb.st.direct && !oeb.r.stdout.includes(HUB_SEC) && oeb.rb.stdout.includes(BELT_SEC)
+    && oe.rw.code === 0 && oe.rw.stdout.includes(WHOLE_SEC) && !oe.rw.stdout.includes(HUB_SEC) && oew.st.direct && !oew.rw.stdout.includes(WHOLE_SEC),
+    `the old road gives exactly the starter road's env: a site that hands none — PATH, DISPLAY=:43, no secret of the hub's (${oe.r.stdout.includes(HUB_SEC)}), the secret-shaped name refused (${oe.r.stdout.includes(SEC_NAME)}); a site that hands a NON-whole env (the desktop belt's shape: a cloud key in it) — DISPLAY=:44, the key not there (${oe.rb.stdout.includes(BELT_SEC)}); RED (the old road as released): the hub's secret (${oer.r.stdout.includes(HUB_SEC)}); RED (a site's own env read as given): the key (${oeb.rb.stdout.includes(BELT_SEC)}); a WHOLE env is given as built (its credential there: ${oe.rw.stdout.includes(WHOLE_SEC)}); RED (the whole half off): the credential lost (${!oew.rw.stdout.includes(WHOLE_SEC)})`);
 
   console.log('⑥ the shared module: desktop-display answers the same through the hub\'s starter as on its own (the daemon\'s road)');
   const cleanEnv = { PATH: process.env.PATH, HOME: process.env.HOME || '/' };

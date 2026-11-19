@@ -15,7 +15,7 @@
  *  · A DEAD OR SLOW STARTER IS NEVER «the mount is down»: a request whose start was never confirmed, or that got no
  *    answer by its own bound + GUARD_MS — + one more GUARD_MS while the starter lives (a whole-box stall) — answers
  *    `unknown` (never «hung», never «error»). That starter is replaced ONCE; a second fault puts the old road back (a direct
- *    start from this process, the site's own env) — said once in the journal and named by every hourly loop line while in force
+ *    start from this process, with the env the starter's road gives: the service env + the request's names, or a whole env as its site built it) — said once in the journal and named by every hourly loop line while in force
  *    («program-starts=direct-since-…»); a fresh starter is tried again at most once an hour (REARM_MS), and a fault after
  *    that re-arm falls back for the hour (a broken starter costs one `unknown` an hour).
  *  · HYGIENE: the starter is born with serviceEnv (the service list, never the hub's secrets); a request carries the
@@ -98,7 +98,7 @@ function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = 
     }
   }
   /** run(cmd, args, {timeoutMs, maxBuffer, capture, env, envAdd, onLateExit}) → {started, timedOut, overflow, unknown, code, signal, stdout, stderr, error} (overflow: the output passed maxBuffer and the child was ended, as execFile did).
-   *  `env` is the site's own env, used ONLY on the old road; `envAdd` the names it sets, the only ones sent to the starter —
+   *  `env` is read ONLY with `wholeEnv` (below); `envAdd` the names it sets, the only ones sent to the starter, on both roads —
    *  or, with `wholeEnv: true`, `env` IS the child's whole env (built through serviceEnv), sent whole (B-323e). */
   function run(cmd, args = [], o = {}) {
     stats.requests++;
@@ -124,14 +124,24 @@ function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = 
       catch { fault('the pipe to the starter broke'); }
     });
   }
-  /** THE OLD ROAD (after two faults): a direct start from this process, with the site's own env — as before the unit */
+  /** THE OLD ROAD's env (主开发 05:18Z, B-323e left): exactly what the starter's road gives — a whole env as its site built it
+   *  (`wholeEnv`, already through wholeOf), else the service env with the request's names on top (a secret-shaped name refused,
+   *  null removes). A site's non-whole `env` is never read (its read's must: the desktop belt hands an env made from the agent
+   *  env — a cloud key, a token — that the starter's road never gave its child) — never the hub's whole env */
+  function directEnv(o) {
+    if (o.wholeEnv) return o.env;
+    const env = serviceEnv(process.env);
+    for (const [k, v] of Object.entries(o.envAdd || {})) { if (SECRET_NAME.test(k)) continue; if (typeof v === 'string') env[k] = v; else if (v === null) delete env[k]; }
+    return env;
+  }
+  /** THE OLD ROAD (after two faults): a direct start from this process, with the starter road's env (directEnv) */
   function runDirect(cmd, args, o) {
     stats.direct++;
     return new Promise((resolve) => {
       let c, out = '', err = '', done = false, timedOut = false, outN = 0, errN = 0, overflow = false, t = null;
       const max = o.maxBuffer || 1048576;
       const over = () => { if (overflow) return; overflow = true; try { c.stdout?.destroy(); c.stderr?.destroy(); c.kill('SIGTERM'); } catch { } };   // past the bound: ended, as execFile did (the pipes first)
-      try { c = spawn(cmd, args, { env: o.env, stdio: ['ignore', o.capture ? 'pipe' : 'ignore', o.capture ? 'pipe' : 'ignore'] }); }
+      try { c = spawn(cmd, args, { env: directEnv(o), stdio: ['ignore', o.capture ? 'pipe' : 'ignore', o.capture ? 'pipe' : 'ignore'] }); }
       catch (e) { resolve({ started: false, code: null, error: String((e && e.code) || e) }); return; }
       // the error listener FIRST, as the starter's own (ckpt61): a start that fails at once has no pipes and its 'error' queued
       c.on('error', (e) => { if (t) clearTimeout(t); if (!done) { done = true; resolve({ started: false, code: null, error: String((e && e.code) || e), stdout: out, stderr: err }); } });
