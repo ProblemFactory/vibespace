@@ -485,17 +485,46 @@ console.log('⑩ the sync-fs guard + RED controls');
   await sleep(5); open(); await Promise.all(all); nolimit.close();
   ok(max > ROUTES.MAX_AT_ONCE, 'RED CONTROL: a route with no limit runs every reading at once — what the LAW 4 leg catches', { max });
 }
-// ── B-a09e: THE LINK IS ON DISK BEFORE THE FIRST FILE IS PLACED ──────────────────────────────────────────────────────────
-// The upload route (src/routes/files.js) writes the folder's link through the store writer: it is written and AWAITED (durable)
-// before the copy loop — a crash between them leaves a link with no files, never files with no link (Settings' Remove door would
-// offer them as gone). RED (anchored): the release's order (the link after the loop) is named.
+// ── B-a09e: THE LINK IS ON DISK BEFORE THE FIRST FILE IS PLACED (and its smalls, 主开发 2026-11-19 09:18Z) ────────────────────
+// The upload route (src/routes/files.js) asks ONE door, chat-attachments linkOnDisk: the folder's link NOT rewritten when the same
+// link is already on disk, else written through the store writer and its landing AWAITED — the route READS the answer: not on disk
+// (a write that rejected, or one held past the writer's bound) ⇒ NO file is placed and the upload is refused by name (503,
+// not-on-disk). A crash between the link and the files leaves a link with no files, never files with no link. RED (anchored): the
+// door that ignores the landing's answer (the old dead catch); the route that places the files anyway.
 {
-  const FILES = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src/routes/files.js'), 'utf8');
-  const linkFirst = (t) => { const a = t.indexOf('lf = CA.writeLink('), d = t.indexOf("await require('../store-writer.js').storeWriter().durable(lf)"), loop = t.indexOf('    for (let i = 0; i < req.files.length; i++) {', a); return a > 0 && d > a && loop > d; };
-  ok(linkFirst(FILES), 'B-a09e: the upload writes the folder\'s link and AWAITS its landing before it places the first file');
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const root = scratch('cap-link-ondisk'); fs.mkdirSync(root, { recursive: true });
+  const standIn = (mode) => {
+    const W = { dirties: 0, owed: null };
+    W.dirty = (f, o) => { W.dirties++; W.owed = { f, o }; };
+    W.durable = (f) => {
+      if (mode === 'lands') { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, W.owed.o.produce()); return Promise.resolve(true); }
+      if (mode === 'rejects') return Promise.reject(Object.assign(new Error('EIO: the storage refused the write'), { code: 'EIO' }));
+      return Promise.resolve(false);   // 'never': held past the writer's bound — the write stays owed, not on disk
+    };
+    return W;
+  };
+  const leg = async (Mod, mode, conv) => { const W = standIn(mode); const r = await Mod.linkOnDisk(root, conv, { backend: 'claude', tx: null }, () => W); return { ...r, dirties: W.dirties, onDisk: fs.existsSync(path.join(root, conv, CA.LINK_FILE)) }; };
+  const landed = await leg(CA, 'lands', 'c-lands');
+  ok(landed.ok && landed.wrote && landed.dirties === 1 && landed.onDisk, 'B-a09e: a link that LANDS ⇒ ok (written once, on disk) — the files may follow', landed);
+  const again = await leg(CA, 'lands', 'c-lands');
+  ok(again.ok && again.wrote === false && again.dirties === 0, 'B-a09e small: the SAME link already on disk is not written again (no write, no wait)', again);
+  const rej = await leg(CA, 'rejects', 'c-rejects');
+  ok(rej.ok === false && /failed/.test(rej.why || '') && !rej.onDisk, 'B-a09e small: a writer that REJECTS ⇒ not ok, said (the route places no file)', rej);
+  const never = await leg(CA, 'never', 'c-never');
+  ok(never.ok === false && /not on disk/.test(never.why || '') && !never.onDisk, 'B-a09e small: a writer that NEVER LANDS (held past its bound) ⇒ not ok, said (the route places no file)', never);
+  const CAsrc = fs.readFileSync(path.join(REPO, 'src/server/chat-attachments.js'), 'utf8');
+  const READS = "  try { return (await w.durable(file)) === true ? { ok: true, file, wrote: true } : { ok: false, file, why: 'not on disk inside the writer\\'s bound' }; }\n";
+  const Dead = mutantCopies('chat-attach-link', REPO).load('src/server/chat-attachments.js', anchored(CAsrc, READS, "  try { await w.durable(file); } catch { /* MUTANT: the old dead catch — the answer never read */ }\n  return { ok: true, file, wrote: true };\n  try { return null; }\n", 'the door reads the landing\'s answer'), 'link-dead-catch');
+  const deadRej = await leg(Dead, 'rejects', 'c-dead-rejects'), deadNever = await leg(Dead, 'never', 'c-dead-never');
+  ok(deadRej.ok === true && deadNever.ok === true, 'CONTROL (the door that ignores the landing\'s answer — the old dead catch): a rejected and a never-landed link both read as ok (red)', { deadRej, deadNever });
+  // THE ROUTE: the door's answer is read BEFORE the copy loop, and a link not on disk refuses the upload by name (no file placed)
+  const FILES = fs.readFileSync(path.join(REPO, 'src/routes/files.js'), 'utf8');
   const LOOP = '    for (let i = 0; i < req.files.length; i++) {\n      const file = req.files[i];\n      const name = rename(names[i]);';
-  const late = anchored(FILES, "      if (lf) { try { await require('../store-writer.js').storeWriter().durable(lf); } catch { /* said by the writer; the boot's sweep writes the link again */ } }\n", '', 'the link awaited before the files');
-  ok(!linkFirst(late) && FILES.includes(LOOP), 'B-a09e CONTROL (the link not awaited before the loop, in a copy of the text): the order check is red');
+  const REFUSE = "      if (!L.ok) { const msg = `nothing was uploaded: this conversation's folder link is not on disk yet (${L.why}) — upload again in a moment`; throw Object.assign(new Error(msg), { status: 503, pullBody: { error: msg, code: 'not-on-disk', notOnDisk: true } }); }\n";
+  const refusesFirst = (t) => { const d = t.indexOf('const L = await CA.linkOnDisk('), r = t.indexOf(REFUSE), loop = t.indexOf(LOOP); return d > 0 && r > d && loop > r; };
+  ok(refusesFirst(FILES), 'B-a09e: the upload asks linkOnDisk and REFUSES (503 not-on-disk, nothing placed) before its copy loop when the link is not on disk');
+  ok(!refusesFirst(anchored(FILES, REFUSE, '', 'the route reads the door\'s answer')), 'CONTROL (the route that places the files whatever the link\'s answer, in a copy of the text): red');
 }
 S1.close();
 console.log(`\n${fail ? '✗' : '✓'} test-chat-attachments: ${pass} passed, ${fail} failed`);

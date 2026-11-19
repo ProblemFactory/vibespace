@@ -1582,6 +1582,29 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     seed(dD, { v: 1, conversations: {}, updatedAt: 0 });
     const resD = runOnly(create({ rootDir: rD, homeDir: scratchHomeDir, serverNotice: () => { }, channels: null }), rD).find((x) => x.id === ID);
     ok(resD && resD.status === 'ran', '…and an index with nothing to split is a success');
+    // (e) B-a09e's small (主开发 09:18Z) — THE INDEX'S LANDING: its ordering write answering false (held past the writer's bound, or
+    // failed and still owed) ⇒ the stepped migration FAILS by name and is NOT recorded (the next boot runs it again); the same
+    // scene with the write landing is recorded (the leg discriminates)
+    const indexLeg = async (tag, answer) => {
+      const rE = path.join(tmp, 'aw-e-' + tag); const dE = path.join(rE, 'data');
+      seed(dE, legacyIndex());
+      const eE = ENG.create({ dataDir: dE, env: {}, log: quiet, liveSessions: () => [] });
+      runGrantsUnify(rE, { channels: eE });
+      const real = eE.store.index.durable.bind(eE.store.index);
+      eE.store.index.durable = () => (answer ? real() : Promise.resolve(false));
+      const warns = [];
+      const resE = runMigrations({ ledgerPath: path.join(dE, 'migrations.json'), migrations: create({ rootDir: rE, homeDir: scratchHomeDir, serverNotice: () => { }, channels: eE }).MIGRATIONS.filter((x) => x.id === ID), log: () => { }, warn: (m) => warns.push(String(m)) }).find((x) => x.id === ID);
+      const lg = answer ? await waitLedger(dE, ID) : null;
+      for (let i = 0; !answer && i < 250 && !warns.some((w) => w.includes(ID)); i++) await new Promise((r) => setTimeout(r, 20));
+      let applied = false; try { applied = !!(JSON.parse(fs.readFileSync(path.join(dE, 'migrations.json'), 'utf-8')).applied || {})[ID]; } catch { applied = false; }
+      eE.store.index.durable = real;
+      try { eE.stop(); } catch { }
+      return { status: resE && resE.status, failedSaid: warns.some((w) => /FAILED/.test(w) && /index\.json is not on disk yet/.test(w)), applied, lg: !!(lg && lg.applied) };
+    };
+    const notLanded = await indexLeg('held', false);
+    ok(notLanded.status === 'started' && notLanded.failedSaid && !notLanded.applied, 'B-a09e small: the index NOT landing (its ordering write answers false) fails the stepped run BY NAME — NOT recorded, the next boot runs it again', notLanded);
+    const landedE = await indexLeg('lands', true);
+    ok(landedE.status === 'started' && landedE.applied && !landedE.failedSaid, '…and the same scene with the index landing is recorded (the leg discriminates)', landedE);
   }
   // ── 2026-09-exit-access-lists (lane-pairing ⑥, B-7007): ONE `allowExit` boolean → two lists per machine ──
   {

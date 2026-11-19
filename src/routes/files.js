@@ -667,10 +667,11 @@ router.post('/api/upload', uploadFiles, async (req, res) => {
     if (keptFrom) {   // THE LINK beside the files: which conversation they belong to — it outlives the hub's session record
       // B-a09e: the link is ON DISK before the first file is placed (its write is the store writer's): a crash between them leaves a
       // link with no files (nothing to offer for removal), never files with no link (Settings' Remove door would offer them as gone)
+      // (its smalls, 主开发 09:18Z): the landing's ANSWER is read — not on disk (rejected, or held past the writer's bound) ⇒ NO file is
+      // placed and the upload is refused by name (the person uploads again); the same link already on disk is not written again
       const live = req.app.locals.activeSessions && req.app.locals.activeSessions.get(conv);
-      let lf = null;
-      try { lf = CA.writeLink(path.dirname(path.dirname(destRoot)), conv, live ? { backend: live.backend || 'claude', tx: live.backendSessionId || live.claudeSessionId || null } : {}); } catch { }
-      if (lf) { try { await require('../store-writer.js').storeWriter().durable(lf); } catch { /* said by the writer; the boot's sweep writes the link again */ } }
+      const L = await CA.linkOnDisk(path.dirname(path.dirname(destRoot)), conv, live ? { backend: live.backend || 'claude', tx: live.backendSessionId || live.claudeSessionId || null } : {});
+      if (!L.ok) { const msg = `nothing was uploaded: this conversation's folder link is not on disk yet (${L.why}) — upload again in a moment`; throw Object.assign(new Error(msg), { status: 503, pullBody: { error: msg, code: 'not-on-disk', notOnDisk: true } }); }
     }
     for (let i = 0; i < req.files.length; i++) {
       const file = req.files[i];

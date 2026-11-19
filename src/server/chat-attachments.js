@@ -65,14 +65,27 @@ async function placeFile(src, dir, name) {
 
 /** THE LINK: which conversation a folder belongs to ({backend, tx} — tx = its transcript id when known), through the store
  *  writer (temp + rename on its own thread). → the file, or null for a bad id. */
+const linkOf = (conv, of = {}) => ({ v: 1, conv, backend: of && typeof of.backend === 'string' && of.backend ? of.backend : null, tx: of && typeof of.tx === 'string' && CONV_RE.test(of.tx) ? of.tx : null });
 function writeLink(root, conv, of = {}, writer = null) {
   if (!convOk(conv)) return null;
   const file = path.join(root, conv, LINK_FILE);
-  const backend = of && typeof of.backend === 'string' && of.backend ? of.backend : null, tx = of && typeof of.tx === 'string' && CONV_RE.test(of.tx) ? of.tx : null;
-  const link = { v: 1, conv, backend, tx };
+  const link = linkOf(conv, of);
   const w = writer ? writer() : require('../store-writer.js').storeWriter();
   w.dirty(file, { name: 'chat-attachments-link.write', mode: 0o600, produce: () => JSON.stringify(link) });
   return file;
+}
+/** THE LINK ON DISK BEFORE THE FILES (B-a09e and its smalls — the upload route's one door): the folder's link, NOT rewritten when
+ *  the same link is already on disk, else written and its landing AWAITED (the writer's own bound) → {ok: true, file, wrote} |
+ *  {ok: false, file, why} — a write that REJECTED or did not land inside the bound is not on disk: the caller places no file */
+async function linkOnDisk(root, conv, of = {}, writer = null) {
+  if (!convOk(conv)) return { ok: false, file: null, why: 'not a conversation id' };
+  const want = linkOf(conv, of), file = path.join(root, conv, LINK_FILE);
+  const cur = await readLink(root, conv);
+  if (cur && !cur.unreadable && cur.v === want.v && cur.conv === want.conv && (cur.backend || null) === want.backend && (cur.tx || null) === want.tx) return { ok: true, file, wrote: false };
+  if (!writeLink(root, conv, of, writer)) return { ok: false, file, why: 'the link could not be made' };
+  const w = writer ? writer() : require('../store-writer.js').storeWriter();
+  try { return (await w.durable(file)) === true ? { ok: true, file, wrote: true } : { ok: false, file, why: 'not on disk inside the writer\'s bound' }; }
+  catch (e) { return { ok: false, file, why: `the write failed (${(e && (e.code || e.message)) || e})` }; }
 }
 /** the folder's link: the link | null (NO link: the file is not there — ENOENT, a read that SUCCEEDED in saying so) |
  *  {unreadable: true} (any other read error, or bytes that do not parse — a half-written file: nothing is proven) */
@@ -234,4 +247,4 @@ function hubKnowledge({ activeSessions = new Map(), metaDir, transcripts = trans
   };
 }
 
-module.exports = { create, hubKnowledge, transcriptIndexes, locateIsProof, placeFile, writeLink, readLink, isTemp, convOk, CONV_RE, TMP_SUFFIX, TMP_RE, TMP_AGE_MS, LINK_FILE, RECORD_RE };
+module.exports = { create, hubKnowledge, transcriptIndexes, locateIsProof, placeFile, writeLink, linkOnDisk, readLink, isTemp, convOk, CONV_RE, TMP_SUFFIX, TMP_RE, TMP_AGE_MS, LINK_FILE, RECORD_RE };
