@@ -203,10 +203,13 @@ function inertFrames(text) {
 }
 
 /** Does this text still carry a LIVE frame marker? (the suite's own predicate,
- *  so "inert" is checked by the same rule that produces it) */
+ *  so "inert" is checked by the same rule that produces it). HOTFIX 2.369.411: it tests the ONE compiled twin above
+ *  (FRAME_LIVE_RE: the same source, flags `iu` — no `g`, no `y`, so no state between calls). It built a new expression
+ *  on EVERY call; the belt calls it once a piece and the agents' search / list doors belt every conversation title an
+ *  agent can see, on the main loop: 15 µs a call, the production hub's top hold (1.1–1.7 s, ~10 a minute). */
 function carriesFrame(text) {
   if (typeof text !== 'string') return false;
-  return new RegExp(FRAME_TAG_RE.source, 'iu').test(text);
+  return FRAME_LIVE_RE.test(text);
 }
 
 /** ONE LINE of a text that is neutered LINE BY LINE and joined again (lane
@@ -1006,7 +1009,7 @@ function makeConversation(input) {
 module.exports = {
   RECORD_KINDS, SYSTEM_KINDS, isSystemRecord, asSystemRecord,   // lane lark-system-records
   DRAFT_STATES, isDraftRecord, draftStateOf, asDraftRecord, draftsOf,   // lane gmail-draft-not-a-message
-  RECORD_FIELDS, OPTIONAL_FIELDS, MAX_TEXT, MAX_RAW_BYTES, FRAME_TAG_RE, FRAME_TAGS, FRAME_PASSES, FRAME_WITHHELD, foldFrames, MENTION_KINDS,
+  RECORD_FIELDS, OPTIONAL_FIELDS, MAX_TEXT, MAX_RAW_BYTES, FRAME_TAG_RE, FRAME_LIVE_RE, FRAME_TAGS, FRAME_PASSES, FRAME_WITHHELD, foldFrames, MENTION_KINDS,
   BLOCK_KINDS, RUN_KINDS, ATTACHMENT_ROLES, SYS_WHATS, BLOCK_LIMITS, LINK_SCHEMES,
   makeRecord, makeConversation, resolveMentions, inertFrames, inertFrameLine, inertOpeners, peerText, peerName, carriesFrame, recordKey, isSynthetic,
   safeHref, validateBlocks,
