@@ -72,7 +72,7 @@ console.log('§1 the source verdict (PURE pictureSourceOf)');
   for (const [name, rec, why, words, ctx] of rows) { const r = PIC.pictureSourceOf(rec, ctx); ok(r.source === 'screencast' && r.why === why && (words === null || r.words === words) && r.displaySession === null, `${name} ⇒ the screencast (${r.why}${words ? `, "${r.words}"` : ''})`, r); }
   ok(PIC.pictureSourceOf({ ...attach, host: 'some-other-name' }).source === 'x', "MEASURED TRAP: a record's `host` names the machine that LAUNCHED it (this one) — never \"another machine\" (only `hostId` is)");
   ok(AT.HIDDEN_WINDOW_WHY.startsWith(PIC.NO_XPRA_WHY_HEAD), `the no-display why is browser-attach's own sentence head ("${PIC.NO_XPRA_WHY_HEAD}")`);
-  ok(Object.keys(PIC.SOURCE_WORDS).length === 7 && Object.values(PIC.SOURCE_WORDS).every((w) => typeof w === 'string' && w.length > 10), 'one phrase per why (7)');
+  ok(Object.keys(PIC.SOURCE_WORDS).length === 8 && Object.values(PIC.SOURCE_WORDS).every((w) => typeof w === 'string' && w.length > 10), 'one phrase per why (8)');
 }
 
 // ═══ §2 THE DISPLAY'S ROWS ═══
@@ -567,16 +567,30 @@ console.log('§10 the picture the view says it shows, in ONE window (the owner\'
   const d = PIC.pictureForView(X, { bg: null }), e = PIC.pictureForView(S0, { bg: hid }), f = PIC.pictureForView(X, { bg: { state: 'hidden' } });
   ok(X.source === PIC.PICTURE_X && a.source === PIC.PICTURE_SCREENCAST && a.why === 'background-tab' && a.displaySession === null && a.words === PIC.SOURCE_WORDS['background-tab'] && b === X && c === X && d === X && e === S0 && f === X,
     `the tab on show hidden in its window: its own picture (${a.source}, ${a.why}); a takeover keeps the window (${b.source}); a tab that never answers keeps it (${c.source}); no verdict keeps it (${d.source}); a page picture stays one (${e.source})`);
-  const psrc = fs.readFileSync(path.join(REPO, 'src/browser-picture.js'), 'utf8'), RULE = "  if (!isX(v) || driving || !bg || bg.state !== 'hidden' || !bg.targetId) return v;\n";
-  const PICr = mutantCopies('picture-one-window', REPO).load('src/browser-picture.js', anchored(psrc, RULE, '  return v;\n', 'no-background-rule'), 'no-background-rule');
+  const psrc = fs.readFileSync(path.join(REPO, 'src/browser-picture.js'), 'utf8'), RULE = "  if (bg && bg.state === 'hidden' && bg.targetId) return { source: PICTURE_SCREENCAST, why: 'background-tab', words: SOURCE_WORDS['background-tab'], displaySession: null };\n";
+  const MCp = mutantCopies('picture-one-window', REPO);
+  const PICr = MCp.load('src/browser-picture.js', anchored(psrc, RULE, '', 'no-background-rule'), 'no-background-rule');
   const r = PICr.pictureForView(PICr.pictureSourceOf({ launch: 'attach', state: 'ready', displaySession: { id: 'ds-1' } }), { bg: hid });
   ok(psrc.split(RULE).length === 2 && r.source === PIC.PICTURE_X, `RED (the copy without the background rule): the X window (${r.source}) — its FRONT tab under the shown tab's name, the owner's report`);
+  // 主开发's law (1): NO FLAP — the clear returns the window only once it has held BG_SETTLE_MS (3 s; the journal's flap was 2 s); a
+  // view that showed the window all along is not held; a takeover returns it at once
+  const T0 = 100000, set = PIC.BG_SETTLE_MS;
+  const s1 = PIC.pictureForView(X, { bg: null, shownWhy: 'background-tab', clearedAt: T0, now: T0 + set - 1 }), s2 = PIC.pictureForView(X, { bg: null, shownWhy: 'background-settle', clearedAt: T0, now: T0 + set });
+  const s3 = PIC.pictureForView(X, { bg: null, shownWhy: 'attach', clearedAt: T0, now: T0 + 1 }), s4 = PIC.pictureForView(X, { bg: null, shownWhy: 'background-tab', clearedAt: T0, now: T0 + 1, driving: true });
+  ok(set === 3000 && s1.why === 'background-settle' && s1.source === PIC.PICTURE_SCREENCAST && s2 === X && s3 === X && s4 === X,
+    `the clear holds ${set} ms before the window returns (at ${set - 1} ms: ${s1.why}; at ${set} ms: ${s2.source}); a view on the window all along stays (${s3.source}); a takeover returns it at once (${s4.source})`);
+  const SETTLE = "  if ((shownWhy === 'background-tab' || shownWhy === 'background-settle') && clearedAt > 0 && now - clearedAt < settleMs) return { source: PICTURE_SCREENCAST, why: 'background-settle', words: SOURCE_WORDS['background-settle'], displaySession: null };\n";
+  const PICs = MCp.load('src/browser-picture.js', anchored(psrc, SETTLE, '', 'no-settle'), 'no-settle');
+  const rs = PICs.pictureForView(PICs.pictureSourceOf({ launch: 'attach', state: 'ready', displaySession: { id: 'ds-1' } }), { bg: null, shownWhy: 'background-tab', clearedAt: T0, now: T0 + 1 });
+  ok(psrc.split(SETTLE).length === 2 && rs.source === PIC.PICTURE_X, `RED (the copy without the settle): the window at once (${rs.source}) — a 2 s flap flips the two pictures`);
   // the live view's wiring (pins): the picture reads the hub's verdict; the verdict and a takeover / handback re-judge it; a
   // one-window row says the blanks it folds
   const live = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
-  ok(live.includes("return pictureForView(pictureSourceOf(rec || null), { bg: st.bg, driving: st.mode === 'takeover' && st.mine && st.connected });")
+  ok(live.includes("return pictureForView(pictureSourceOf(rec || null), { bg: st.bg, driving: st.mode === 'takeover' && st.mine && st.connected, shownWhy: st.pictureSource && st.pictureSource.why, clearedAt: st.bgClearedAt || 0, now: Date.now() });")
+    && live.includes("else if (st.bg && st.bg.state === 'hidden') { st.bgClearedAt = Date.now(); clearTimeout(st.bgSettleTimer); st.bgSettleTimer = setTimeout(() => renderPicture(), BG_SETTLE_MS + 50); }")
     && live.includes("renderWatchLine(); renderPicture(); // the owner's report 2026-11-19") && live.includes("renderPicture(); // the owner's report 2026-11-19: a takeover drives the window"),
     'PIN: the view\'s picture is pictureForView over the hub\'s background verdict, re-judged when the verdict or the takeover moves');
+  ok(live.includes("text = st.pictureSource && st.pictureSource.source === 'x' ? t('This tab is behind another tab in its window — the tab in front is not the agent’s: press the agent’s tab in the browser’s own tab strip, or Bring it forward')"), 'PIN: a takeover on the window says the tab in front is not the agent\'s and where to press (主开发\'s law 3)');
   ok(live.includes('if (!m.grouped && m.blanks > 0) {') && live.includes("const txt = t('+{n} blank', { n: m.blanks })"), 'PIN: a one-window tab row says the blank tabs it folds (the lease held three tabs, the row showed one chip)');
 }
 

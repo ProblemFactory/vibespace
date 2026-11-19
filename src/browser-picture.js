@@ -48,6 +48,7 @@ const SOURCE_WORDS = Object.freeze({
   'no-display-session': "the page's picture — the browser's display session is gone",
   'not-running': "the page's picture",
   'background-tab': "the tab's own picture, a new one every half second — its window shows another tab in front",
+  'background-settle': "the tab's own picture — its window's picture again in a moment",
 });
 const RUNNING = new Set(['ready']);
 
@@ -71,9 +72,15 @@ const isX = (v) => !!v && v.source === PICTURE_X;
  *  the view draws THAT tab's own picture (the page's) and says so — never the front tab under the shown tab's name and address.
  *  A takeover keeps the window: that is where the person brings the tab forward. A tab that never answers (`unresponsive`)
  *  keeps the window too: nothing is polled for it. */
-function pictureForView(v, { bg = null, driving = false } = {}) {
-  if (!isX(v) || driving || !bg || bg.state !== 'hidden' || !bg.targetId) return v;
-  return { source: PICTURE_SCREENCAST, why: 'background-tab', words: SOURCE_WORDS['background-tab'], displaySession: null };
+/** 主开发's law (1), 21:1xZ: no flap between the two pictures — the journal showed hidden, «paints again», hidden within 2 s. A
+ *  hidden verdict switches at once; its clear returns the window only once it has held BG_SETTLE_MS (the tab's live page picture
+ *  meanwhile — it paints again); a takeover returns the window at once. */
+const BG_SETTLE_MS = 3000;
+function pictureForView(v, { bg = null, driving = false, shownWhy = null, clearedAt = 0, now = Date.now(), settleMs = BG_SETTLE_MS } = {}) {
+  if (!isX(v) || driving) return v;
+  if (bg && bg.state === 'hidden' && bg.targetId) return { source: PICTURE_SCREENCAST, why: 'background-tab', words: SOURCE_WORDS['background-tab'], displaySession: null };
+  if ((shownWhy === 'background-tab' || shownWhy === 'background-settle') && clearedAt > 0 && now - clearedAt < settleMs) return { source: PICTURE_SCREENCAST, why: 'background-settle', words: SOURCE_WORDS['background-settle'], displaySession: null };
+  return v;
 }
 
 // ── the display's rows (the desktop keeper's `windows(id)`: {id, title, instance, cls, x, y, w, h, frame}) ──
@@ -268,6 +275,6 @@ function deskDoorOf({ source = null, xShown = false, stuck = null, human = false
 
 module.exports = {
   PICTURE_X, PICTURE_SCREENCAST, NO_XPRA_WHY_HEAD, SOURCE_WORDS, DIALOG_MIN_W, DIALOG_MIN_H, X_TICKET_RE, DESK_DOOR_WORDS,
-  pictureSourceOf, pictureForView, isX, isBrowserRow, xWindowOf, nativeDialogsOf, nativeDialogOwner, dialogsOver, nativeDialogFact, nativeDialogText, deskSeat, deskSeatWhy, xSeatRootOf, xScopeOf, deskDoorAct, deskDoorOf, deskDoorStuck,
+  pictureSourceOf, pictureForView, BG_SETTLE_MS, isX, isBrowserRow, xWindowOf, nativeDialogsOf, nativeDialogOwner, dialogsOver, nativeDialogFact, nativeDialogText, deskSeat, deskSeatWhy, xSeatRootOf, xScopeOf, deskDoorAct, deskDoorOf, deskDoorStuck,
   xShownTarget, xWindowLookups, xTicketMoved, xFollowVerdict, // hotfix 2026-11-17: the picture shows the tab the view says it shows (+ cure r2: moved by the CDP window)
 };
