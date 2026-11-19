@@ -211,8 +211,8 @@ console.log('— ④ the real routes + keeper: a job gets its own lease + window
   const fakeRemove = (ns, tid) => { const st = fakeState(ns); st.tabs = st.tabs.filter((t) => t.targetId !== tid); fakeWrite(ns, st); }; // verify r5 ③: the binary knows the tab no more
   const hook = async (name, ...a) => { const f = model[name]; if (typeof f !== 'function') return; model[name] = null; await f(...a); }; // verify r5: fired ONCE
   const fns = {
-    readTargets: async () => { const targets = liveTargets().map(([id, t]) => ({ targetId: id, type: 'page', openerId: t.openerId || undefined })); if (model.readGate) { const g = model.readGate; model.readGate = null; await g; } return { ok: true, targets }; }, // THE .229 MIRROR: a gate holds ONE read's answer (taken before it) in flight
-    openWindow: async (url) => { model.openWindowCalls++; const w = ++model.nextW; const tid = addTab(nsOfUrl(url), mintTid(), { windowId: w, holder: 'keeper' }); const readOk = model.windowReadFails <= 0; if (!readOk) model.windowReadFails--; return { ok: true, targetId: tid, windowId: readOk ? w : null }; },
+    readTargets: async () => { if (model.readFails > 0) { model.readFails--; return { ok: false, error: 'fake: the target list did not answer' }; } const targets = liveTargets().map(([id, t]) => ({ targetId: id, type: 'page', openerId: t.openerId || undefined })); if (model.readGate) { const g = model.readGate; model.readGate = null; await g; } return { ok: true, targets }; }, // THE .229 MIRROR: a gate holds ONE read's answer (taken before it) in flight
+    openWindow: async (url) => { model.openWindowCalls++; const w = ++model.nextW; const tid = addTab(nsOfUrl(url), mintTid(), { windowId: w, holder: 'keeper' }); const readOk = model.windowReadFails <= 0; if (!readOk) model.windowReadFails--; await hook('onWindow', tid); return { ok: true, targetId: tid, windowId: readOk ? w : null }; }, // B-0cee follow-up: onWindow (one-shot) acts on a new window's tab
     windowOf: async (url, tid) => { const t = model.targets.get(String(tid)); return t && t.state !== 'closed' ? t.windowId : null; },
     closeTarget: async (url, tid) => { closeTab(String(tid)); return { ok: true }; },
     openTabInWindow: async (url, { anchorTargetId, windowId }) => {
@@ -409,8 +409,48 @@ console.log('— ④ the real routes + keeper: a job gets its own lease + window
   };
   const b0 = await bindGone(K, 'tree');
   ok(JSON.stringify(b0) === JSON.stringify({ first: true, hookFired: true, ok: true, code: null, why: null, shared: false, note: 'tab_new_window', newWindows: 1 }), 'B-0cee: the holder\'s window closed between the create and the bind ⇒ the keeper asks once more itself — the tab opens in a NEW window of its own, said (tab_new_window), never shared, nothing for the agent to repeat', b0);
-  const b0r = await bindGone(MK.load('src/server/browser-keeper.js', anchored(KSRC, 'return openOwnTab(p, holderKey, { url, ns, opts, pin, fallback, json, timeout, _again: true }); }', '}', 'B-0cee the release: no second ask'), 'no-bind-retry'), 'release');
+  const b0r = await bindGone(MK.load('src/server/browser-keeper.js', anchored(KSRC, "const again = await openOwnTab(p, holderKey, { url, ns, opts, pin, fallback, json, timeout, _again: true }); if (again && again.ok && again.window === 'own') { again.remade = true; again.intoWindow = false; } return again; }", '}', 'B-0cee the release: no second ask'), 'no-bind-retry'), 'release');
   ok(JSON.stringify(b0r) === JSON.stringify({ first: true, hookFired: true, ok: false, code: 'window_busy', why: 'bind_failed', shared: false, note: null, newWindows: 0 }), 'CONTROL (the release): the same scene is refused window_busy (bind_failed) — the agent repeats `tab new` by hand (fb-61e4794124) — RED', b0r);
+  // B-0cee follow-up (主开发 03:47Z): the THREE BOUNDS the second ask rests on, each driven, and its words true without a stamp.
+  // Each scene counts what the act made: new windows (openWindow) and new tabs (every create mints a target id)
+  const bindBounds = async (Kmod, tag, { first = true, unstamp = false, onCreated = null, onWindow = null } = {}) => {
+    const kx = mk(Kmod, { dataDir: path.join(O, 'data-b0b-' + tag) }); await kx._facts.probeVersion();
+    const px = kx.createProfile({ label: 'B0b ' + tag }); await kx.attach({ profileId: px.id, browserKey: KA, sessionId: 'x-b0b-' + tag });
+    const NS = B.sessionNameFor(px.id);
+    const closeWin = (tid) => { const w = model.targets.get(tid).windowId; for (const [id, t] of [...model.targets]) if (t.windowId === w && t.state !== 'closed') { closeTab(id); fakeRemove(NS, id); } };
+    const forget = (tid) => fakeRemove(NS, tid); // the binary knows the tab no more; the browser still has it (the B-19a9 class)
+    const act = async (u) => { try { const r = await kx.agentTabAct({ browserKey: KA, argv: ['tab', 'new', u] }); return r && r.ok === false ? { ok: false, code: r.code || null, why: r.why || null } : { ok: true, r }; } catch (e) { return { ok: false, code: e.code || null, why: e.why || null }; } };
+    const firstOk = first ? (await act('https://b0b.example/1')).ok : null;
+    // a lease whose window is not of THIS browser run (no stamp, no windowIn — a lease from before it): its tab new opens a window
+    if (unstamp) { const l = B.findLease(kx._reg().leases, px.id, KA); if (l) { l.windowId = null; l.windowIn = null; } }
+    const H = { closeWin, forget };
+    model.onCreated = onCreated ? (tid) => onCreated(H, tid) : null; model.onWindow = onWindow ? (tid) => onWindow(H, tid) : null;
+    const w0 = model.openWindowCalls, t0 = model.nextT;
+    const r = await act('https://b0b.example/2'); model.onCreated = null; model.onWindow = null; model.readFails = 0;
+    try { kx.shutdown(); } catch { }
+    return { first: firstOk, ok: r.ok, code: r.code || null, why: r.why || null, note: (r.r && r.r.noteCode) || null, windows: model.openWindowCalls - w0, tabs: model.nextT - t0 };
+  };
+  const REFUSED = (windows, tabs) => ({ ok: false, code: 'window_busy', why: 'bind_failed', note: null, windows, tabs });
+  const SC = {
+    lives: [{ onCreated: (H, tid) => H.forget(tid) }, { first: true, ...REFUSED(0, 1) }, 'a bind that failed on a tab that STILL LIVES (the browser lists it) ⇒ refused as before, never a second tab (the B-19a9 stall is never doubled)'],
+    unread: [{ onCreated: (H, tid) => { H.closeWin(tid); model.readFails = 1; } }, { first: true, ...REFUSED(0, 1) }, 'a target list that did NOT ANSWER after the failed bind ⇒ refused as before, never a guess'],
+    twice: [{ onCreated: (H, tid) => H.closeWin(tid), onWindow: (H, tid) => H.closeWin(tid) }, { first: true, ...REFUSED(1, 2) }, 'a SECOND loss (the asked-again window closed too) ⇒ refused, exactly one more ask, never a third'],
+    unstamped: [{ first: false, unstamp: true, onWindow: (H, tid) => H.closeWin(tid) }, { first: null, ok: true, code: null, why: null, note: 'tab_new_window', windows: 2, tabs: 2 }, 'a lease with NO window of this browser run (no stamp) whose new window closed before the bind ⇒ asked once more and SAID (tab_new_window): the manual\'s «says so» true without a stamp'],
+  };
+  const bounds = async (Kmod, tag) => { const out = {}; for (const [k, [o]] of Object.entries(SC)) out[k] = await bindBounds(Kmod, `${tag}-${k}`, o); return out; };
+  const bt = await bounds(K, 'tree');
+  for (const [k, [, want, words]] of Object.entries(SC)) ok(JSON.stringify(bt[k]) === JSON.stringify(want), `B-0cee bound: ${words}`, bt[k]);
+  const ANCH_LIST = "tabGone = !!(tl && tl.ok && Array.isArray(tl.targets) && !tl.targets.some((t) => String(t.targetId || '').toUpperCase() === id));";
+  const B0C = [
+    ['the list read but never judged (any failed bind asked again)', anchored(KSRC, ANCH_LIST, 'tabGone = !!(tl && tl.ok);', 'B-0cee: the list not judged'), 'lives'],
+    ['an unread list taken for a gone tab', anchored(KSRC, ANCH_LIST, "tabGone = !(tl && tl.ok) || !tl.targets.some((t) => String(t.targetId || '').toUpperCase() === id);", 'B-0cee: unread is gone'), 'unread'],
+    ['asked again with no bound', anchored(KSRC, 'if (fallback && !_again) { let tl = null;', 'if (fallback) { let tl = null;', 'B-0cee: no second-loss bound'), 'twice'],
+    ['the second ask said only when a window was stamped (6e617b6b7)', anchored(KSRC, " if (again && again.ok && again.window === 'own') { again.remade = true; again.intoWindow = false; }", '', 'B-0cee: the words of a stamp only'), 'unstamped'],
+  ];
+  for (const [what, src, red] of B0C) {
+    const got = await bindBounds(MK.load('src/server/browser-keeper.js', src, 'b0cee-' + red), 'ctl-' + red, SC[red][0]);
+    ok(JSON.stringify(got) !== JSON.stringify(SC[red][1]) && JSON.stringify(got) !== JSON.stringify(bt[red]) && got.ok === true && (red !== 'unstamped' || (got.note === null && got.windows === 2)), `CONTROL (B-0cee, ${what}): the «${red}» bound goes RED — ${red === 'unstamped' ? 'the tab opens and nothing says why' : 'the act asks again where it must not'}`, got);
+  }
   for (const row of copiesCensus(MK.files, MK.dir, REPO, { minCopies: 1 })) ok(row.pass, row.name, row.detail);
 }
 

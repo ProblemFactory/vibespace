@@ -634,8 +634,9 @@ vibespace-browser blocked --url <u> [--why <code>] [--evidence <text>] [--tier 2
   now"): run it once more then, no polling. A new tab of yours whose window
   closed under it before it was bound to your session opens, on the same
   `tab new`, in a new window of your own (VibeSpace asks once more itself, and
-  says so) — never a tab in another conversation's window. Only a bind that
-  failed on a tab that still lives, or a second loss, is `window_busy`
+  says so: note `tab_new_window`) — never a tab in another conversation's
+  window. Only a bind that failed on a tab that still lives, a browser that
+  did not answer whether the tab is gone, or a second loss is `window_busy`
   (`why: bind_failed`); the same `tab new` once more then opens a new window
   of your own.
   Nobody waits for anybody: there is no "one conversation at a time" any more
