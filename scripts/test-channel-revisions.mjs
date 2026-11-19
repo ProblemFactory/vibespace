@@ -119,7 +119,7 @@ const NOTE_FROM = 'Channels · recalls';
 function dayStartClock() { const t0 = Date.now(); const day0 = Math.floor(t0 / 86400e3) * 86400e3 + 60e3; let skew = 0; const f = () => day0 + (Date.now() - t0) + skew; f.advance = (ms) => { skew += ms; }; return f; }
 /** One engine over `dataDir` (a restart = a second one over the same dir, the same clock): the fake answers a stored
  *  message by id from its revisions file; every by-id ask is counted; the stub ladder delivers, the stub stash keeps. */
-function mkEngine(ENGM, dataDir, { clock = dayStartClock(), refuse = false, roster = null } = {}) {
+function mkEngine(ENGM, dataDir, { clock = dayStartClock(), refuse = false, roster = null, readMembership = null } = {}) {
   fs.mkdirSync(dataDir, { recursive: true });
   const REVS = path.join(dataDir, 'revisions.json');
   if (!fs.existsSync(REVS)) fs.writeFileSync(REVS, J({ revisions: {} }));
@@ -134,7 +134,7 @@ function mkEngine(ENGM, dataDir, { clock = dayStartClock(), refuse = false, rost
   const mk0 = fk.create;
   fk.create = (record, deps) => { const a = mk0(record, deps); const by = a.revisionOf; a.revisionOf = (convId, o) => { asked.push(o && o.messageId); return by(convId, o); }; return a; };
   registry.register(fk);
-  const eng = ENGM.create({ dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, registry, broadcast: () => {}, userTodos: new UserTodoManager({ dataDir, now: clock }), deliver, now: clock, log: { log() {}, warn() {}, error() {} }, liveSessions: () => (roster ? roster() : [{ cid: 'agent-1', name: 'Worker', groups: [] }, { cid: 'agent-2', name: 'Other', groups: [] }]) });
+  const eng = ENGM.create({ dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, registry, broadcast: () => {}, userTodos: new UserTodoManager({ dataDir, now: clock }), deliver, now: clock, log: { log() {}, warn() {}, error() {} }, liveSessions: () => (roster ? roster() : [{ cid: 'agent-1', name: 'Worker', groups: [] }, { cid: 'agent-2', name: 'Other', groups: [] }]), readMembership });
   const recall = (...vids) => { const j = JSON.parse(fs.readFileSync(REVS, 'utf8')); for (const v of vids) j.revisions[v] = { state: 'recalled' }; fs.writeFileSync(REVS, J(j)); };
   const tail = (c) => { const m = eng.messages(A, c, { limit: 5 }); return m.records || m; };
   const recOf = () => eng.adapterRecords().adapters.find((r) => r.id === A);
@@ -485,6 +485,79 @@ ok(Rev.wokeKeyOf('om_1') === 'om_1' && Rev.wokeKeyOf(42) === '42' && Rev.wokeKey
   ok(J(Rev.capWokeRows(small, 40)) === J(small) && Rev.capWokeRows(null, 40).length === 0, 'under the bound: unchanged', '');
   // RED control: the newest-N bound (the base door) loses the lone wake row
   ok(!one.slice(-40).some((x) => x.cid === 'a1'), 'CONTROL: the newest-40 bound drops the lone wake row the fair bound keeps', '');
+}
+
+// ── ⑧ B-43bc (lane lg-text-legs-3, the B-55dc residual): a member whose Task Groups are still being READ is never judged «not a
+//    member» on that answer — the roster entry says so (`groupsUnread`), and a delivery first waits for the read
+//    (readMembership, the roster's deciding door), then judges. Agent-1 hears the Ops room only through Task Group G. ──
+console.log('⑧ B-43bc: a member still being read is read first — the wake and the recall note');
+{
+  const RP = require(path.join(REPO, 'src/server/roster-pass.js'));
+  // the roster entry: `groupsUnread` only when the drawing door's answer is flagged (a read entry is byte-identical to before)
+  const ans = (ids, unread) => { const a = ids.map((id) => ({ id })); if (unread) Object.defineProperty(a, 'unread', { value: true, enumerable: false }); return a; };
+  const sess = new Map([['w1', { name: 'one', cwd: '/w/a' }], ['w2', { name: 'two', cwd: '/w/b' }]]);
+  let asked = [];
+  const tasksRP = { groupsForSession: ({ cwd }) => (cwd === '/w/a' ? ans(['G'], false) : ans([], true)), rev: () => 1,
+    membershipRead: (a) => { asked.push(a.cwd); return a.cwd === '/w/b' ? Promise.resolve(true) : null; } };
+  const R = RP.sessionRoster({ sessions: () => sess, tasks: () => tasksRP, addressableId: (s) => 'c-' + s.name, statusKey: (s, id) => 'claude:' + id });
+  const built = R.build();
+  ok(J(built[0]) === J({ cid: 'c-one', name: 'one', groups: ['G'], webuiId: 'w1', reachability: null }) && built[1].groupsUnread === true && J(built[1].groups) === '[]',
+    'the roster entry of an answer still being read says `groupsUnread: true`; a read one is byte-identical to before', J(built));
+  const n1 = await R.readUnread();
+  const askedAll = asked.slice(); asked = [];
+  const n2 = await R.readUnread(['c-one']);
+  ok(n1 === 1 && J(askedAll) === J(['/w/a', '/w/b']) && n2 === 0 && J(asked) === J(['/w/a']),
+    `readUnread asks every live member's (or the named ones') deciding door and counts the reads it waited for (${n1} of all; ${n2} for c-one alone, which needs none)`, J({ askedAll, asked }));
+
+  // the ENGINE: the recall note and the wake over the REAL engine
+  const GRP = { kind: 'group', id: 'G' };
+  const mkWorld = (ENGM, tag, start) => {
+    const st = { state: start, reads: 0 };
+    const roster = () => [{ cid: 'agent-1', name: 'Worker', groups: st.state === 'read' ? ['G'] : [], ...(st.state === 'unread' ? { groupsUnread: true } : {}) }, { cid: 'agent-2', name: 'Other', groups: [] }];
+    const readMembership = async () => { st.reads++; if (st.state !== 'unread') return 0; st.state = 'read'; return 1; };
+    return { st, w: mkEngine(ENGM, path.join(ROOT, tag), { roster, readMembership }) };
+  };
+  async function noteLeg(ENGM, tag) {
+    const { st, w } = mkWorld(ENGM, tag, 'read');
+    await w.eng.pass(A, { force: true });
+    await w.eng.setGrain(A, { kind: 'conversation', convId: OPS }, { access: [acc(GRP)], watchers: [{ principal: GRP }] });
+    const m8 = w.tail(OPS).slice(-1)[0];
+    await w.eng.onFresh(w.recOf(), OPS, [m8], { origin: 'test' });
+    const woke = w.woke(OPS).map((x) => x.cid);
+    st.state = 'unread';   // the member's Task Groups answer is being read again (a boot, a row edit)
+    w.recall(m8.vendorId);
+    await w.hourLater();
+    const notes = w.notes().filter((x) => x.cid === 'agent-1').length;
+    await w.eng.stop();
+    return { woke, notes, reads: st.reads, state: st.state };
+  }
+  async function wakeLeg(ENGM, tag) {
+    const { st, w } = mkWorld(ENGM, tag, 'read');
+    await w.eng.pass(A, { force: true });
+    await w.eng.setGrain(A, { kind: 'conversation', convId: OPS }, { access: [acc(GRP)], watchers: [{ principal: GRP }] });
+    const m8 = w.tail(OPS).slice(-1)[0];
+    st.state = 'unread';   // the hit lands while the member's Task Groups are still being read
+    await w.eng.onFresh(w.recOf(), OPS, [m8], { origin: 'test' });
+    const delivered = w.delivered.map((d) => d.cid);
+    await w.eng.stop();
+    return { delivered, reads: st.reads, state: st.state };
+  }
+  const nl = await noteLeg(ENG, 'unread-note');
+  ok(nl.woke.includes('agent-1') && nl.notes === 1 && nl.reads >= 1 && nl.state === 'read',
+    `the RECALL NOTE of a member still being read waits for the read, then is stashed (${nl.notes} note, ${nl.reads} read)`, J(nl));
+  const wl = await wakeLeg(ENG, 'unread-wake');
+  ok(J(wl.delivered) === J(['agent-1']) && wl.reads >= 1 && wl.state === 'read',
+    `the WAKE of a member still being read waits for the read, then reaches it (${J(wl.delivered)}, ${wl.reads} read)`, J(wl));
+  // RED CONTROLS: the engine without the read — the note and the wake are judged on the unread answer and lost
+  const src = engineSource(REPO);
+  const NOTE_READ = "    await readFirst(due.map((d) => d.cid));   // B-43bc: a recipient still being read is read first (never «not a member» on it)\n";
+  const WAKE_READ = "    if ((await readFirst()) && stopped) return;\n";
+  ok(src.split(NOTE_READ).length === 2 && src.split(WAKE_READ).length === 2, 'control setup: the two reads are present once each');
+  const noRead = MUT.load('src/server/channels-engine.js', src.replace(NOTE_READ, '').replace(WAKE_READ, ''), 'no-unread-read');
+  const nlR = await noteLeg(noRead, 'unread-note-red');
+  const wlR = await wakeLeg(noRead, 'unread-wake-red');
+  ok(nlR.woke.includes('agent-1') && nlR.notes === 0 && nlR.reads === 0, `RED CONTROL: without the read the recall note is judged on the unread answer and LOST (${nlR.notes} notes)`, J(nlR));
+  ok(wlR.delivered.length === 0 && wlR.reads === 0, `RED CONTROL: without the read the wake is judged on the unread answer and the member is not reached (${J(wlR.delivered)})`, J(wlR));
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

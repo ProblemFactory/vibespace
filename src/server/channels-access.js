@@ -2603,6 +2603,11 @@ function create(engineCtx) {
   async function prunePending(adapterId, onlyKey = null) {
     await pruneHeld(adapterId);
     const drop = [];
+    // B-43bc: a hit held for a member whose Task Groups are still being READ (the roster's `groupsUnread`) is not «gone»: its
+    // watcher left the live list only because the answer is not read yet — kept until a pass judges it on a read answer
+    let unreadCids = new Set();
+    try { unreadCids = new Set((liveSessions() || []).filter((x) => x && x.cid && x.groupsUnread).map((x) => String(x.cid))); } catch { unreadCids = new Set(); }
+    const heldFor = (pk) => { if (!unreadCids.size || typeof pk !== 'string') return false; const i = pk.lastIndexOf('>'); const cid = i >= 0 ? pk.slice(i + 1) : pk.startsWith('agent:') ? pk.slice(6) : ''; return !!cid && unreadCids.has(cid); };
     for (const en of store.index.rowsOf(adapterId)) {   // B-dfa4 cut 1: this account's rows only
       if (!en || en.adapterId !== adapterId || (onlyKey && en.key !== onlyKey)) continue;
       const hasTagged = Array.isArray(en.pending) && en.pending.some((x) => x && x.for);
@@ -2611,7 +2616,7 @@ function create(engineCtx) {
       if (!hasTagged && !hasElided && !hasUntagged) continue;
       const eff = wakeEffOf(en);   // a fan-out target's hits wait only while its conversation runs
       const live = new Set(eff ? eff.watchers.map((x) => pkOf(x.watcher.principal)) : []);
-      const gone = new Set([...(en.pending || []).map((x) => x && x.for).filter(Boolean), ...Object.keys(en.pendingElidedBy || {})].filter((pk) => !live.has(pk)));
+      const gone = new Set([...(en.pending || []).map((x) => x && x.for).filter(Boolean), ...Object.keys(en.pendingElidedBy || {})].filter((pk) => !live.has(pk) && !heldFor(pk)));
       if (gone.size || (hasUntagged && !live.size)) drop.push({ key: en.key, gone, untagged: hasUntagged && !live.size });
     }
     if (!drop.length) return;

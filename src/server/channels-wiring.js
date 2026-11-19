@@ -94,7 +94,7 @@ function livenessReader({ liveSessions = () => [], readUserState = () => ({}), c
   return reader;
 }
 
-function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env = process.env, integrations = null, userTodos = null, deliver = null, serverSetting = () => undefined, liveSessions = () => [], rosterFingerprint = null, sweepGapMs = 5000, transcriptIndex = null, readUserState = () => ({}), convIndex = () => null, groupSetting = () => 'none', authEnabled = () => false, publicUrl = () => null, getMounts = () => null, sessions = () => null, sessionMeta = () => null, onGroupsPending = () => {}, decisionEngine = null } = {}) {
+function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env = process.env, integrations = null, userTodos = null, deliver = null, serverSetting = () => undefined, liveSessions = () => [], rosterFingerprint = null, rosterRead = null, sweepGapMs = 5000, transcriptIndex = null, readUserState = () => ({}), convIndex = () => null, groupSetting = () => 'none', authEnabled = () => false, publicUrl = () => null, getMounts = () => null, sessions = () => null, sessionMeta = () => null, onGroupsPending = () => {}, decisionEngine = null } = {}) {
   if (!app) throw new Error('channels-wiring: app is required');
   if (!dataDir) throw new Error('channels-wiring: dataDir is required');
   // lane roster-per-pass: THE live roster, built ONCE per pass for every reader below — the channels engine (access,
@@ -102,6 +102,11 @@ function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env
   // the fingerprint of what the builder reads; server.js hands both)
   const rosterPass = require('./roster-pass.js').createRosterPass(liveSessions, { fingerprint: rosterFingerprint });
   liveSessions = rosterPass.read;
+  // B-43bc: the roster's deciding door (server.js hands roster-pass sessionRoster's readUnread) — a channels delivery that
+  // finds a member whose Task Groups are still being read WAITS for the read (bounded), then judges on a fresh roster
+  const readMembership = typeof rosterRead === 'function'
+    ? async (cids = null) => { let n = 0; try { n = await rosterRead(cids); } catch { n = 0; } if (n) rosterPass.invalidate(); return n; }
+    : null;
 
   // `integrations` is the §14 store handle: adapters ask its
   // `resolveIntegration(id)` — never `process.env` — and every real row's
@@ -122,7 +127,7 @@ function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env
     head: (mountId, opts = {}) => { const m = getMounts(); if (!m || typeof m.oauthClientIdOf !== 'function') noMounts(); return m.oauthClientIdOf(mountId, opts); },
     of: (mountId, opts = {}) => { const m = getMounts(); if (!m || typeof m.oauthClientOf !== 'function') noMounts(); return m.oauthClientOf(mountId, opts); },
   };
-  const channels = createEngine({ dataDir, broadcast: (msg) => bcastAll(msg), now, env, integrations, userTodos, deliver, serverSetting, liveSessions, mountClients, httpInbound: true, decisionEngine, publicUrl });   // lane pod-oauth-callback: the instance's address (a redirect consent lands on its route)   // + D1's ONE decision engine: lane decision-attention's judged rows + lane decision-rule's pre-judge
+  const channels = createEngine({ dataDir, broadcast: (msg) => bcastAll(msg), now, env, integrations, userTodos, deliver, serverSetting, liveSessions, readMembership, mountClients, httpInbound: true, decisionEngine, publicUrl });   // lane pod-oauth-callback: the instance's address (a redirect consent lands on its route)   // + D1's ONE decision engine: lane decision-attention's judged rows + lane decision-rule's pre-judge
   // B-2198: the raw API pass-through's orchestrator (src/server/channel-api.js) — reached by the agent and owner routes as `channels.rawApi`
   channels.rawApi = createChannelApi({ dataDir, engine: channels, getMounts, now, broadcast: (msg) => { bcastAll(msg); if (channels.apiCards) channels.apiCards.onUpdate(msg); } });
   // B-2198 part 2: ONE card per proposal in the chat, the Outbox and For you; the next-turn receipt; the 24 h expiry + withdrawal

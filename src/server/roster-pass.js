@@ -34,11 +34,33 @@ function sessionRoster({ sessions, tasks, addressableId, statusKey }) {
     }
     return out;
   };
+  // B-43bc (the B-55dc residual): an entry whose Task Groups answer is STILL BEING READ (the drawing door's `unread`) says so —
+  // `groupsUnread: true`, set only then (a read entry is byte-identical to before) — so the channels readers can wait for the
+  // read (readUnread below) instead of judging «not a member» on it and dropping a delivery
   const build = () => heads().map(([id, s, cid]) => {
-    let groups = [];
-    try { groups = (tasks().groupsForSession({ sessionKey: statusKey(s, id), cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }) || []).map((g) => g.id); } catch { }
-    return { cid, name: s.name || null, groups, webuiId: id, reachability: s._msgReachability || null };
+    let groups = [], unread = false;
+    try { const gs = tasks().groupsForSession({ sessionKey: statusKey(s, id), cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }) || []; groups = gs.map((g) => g.id); unread = !!gs.unread; } catch { }
+    return { cid, name: s.name || null, groups, webuiId: id, reachability: s._msgReachability || null, ...(unread ? { groupsUnread: true } : {}) };
   });
+  /** B-43bc — THE DECIDING DOOR FOR THE ROSTER: before a channels delivery judges a member (a wake, a recall note, a reaction
+   *  digest), the live conversations (`cids`, or all) whose membership facts were never read are READ — the Task Groups'
+   *  bounded `membershipRead` (off the loop; a mount that does not answer passes its bound). → how many reads were waited
+   *  for (0: nothing to read — the caller goes straight on). The caller invalidates the roster when one was. */
+  const readUnread = async (cids = null) => {
+    const want = Array.isArray(cids) ? new Set(cids.map(String)) : null;
+    let tk = null; try { tk = tasks(); } catch { tk = null; }
+    if (!tk || typeof tk.membershipRead !== 'function') return 0;
+    const waits = [];
+    for (const [id, s, cid] of heads()) {
+      if (want && !want.has(String(cid))) continue;
+      let p = null;
+      try { p = tk.membershipRead({ sessionKey: statusKey(s, id), cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }); } catch { p = null; }
+      if (p) waits.push(Promise.resolve(p).catch(() => false));
+    }
+    if (!waits.length) return 0;
+    await Promise.all(waits);
+    return waits.length;
+  };
   const fingerprint = () => {
     let t = 0;
     try { const tk = tasks(); t = tk && typeof tk.rev === 'function' ? tk.rev() : 0; } catch { t = 0; }
@@ -48,7 +70,7 @@ function sessionRoster({ sessions, tasks, addressableId, statusKey }) {
     }
     return fp;
   };
-  return { build, fingerprint };
+  return { build, fingerprint, readUnread };
 }
 
 function createRosterPass(build, { fingerprint = null } = {}) {

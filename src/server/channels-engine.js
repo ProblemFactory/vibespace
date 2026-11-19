@@ -516,6 +516,9 @@ function create(deps = {}) {
     // groups[]}]` — cid is the conversation id the ladder addresses; groups
     // are the task-group ids the session belongs to (round-robin, §7.3).
     liveSessions = () => [],
+    // B-43bc: the roster's deciding door (channels-wiring): `(cids?) => Promise<number>` — waits, bounded, for the Task Groups
+    // read of the live members whose membership is still being READ (their roster entry's `groupsUnread`); null = none
+    readMembership = null,
     // lane R5 (drain rule 18): the PER-SECOND bucket runs on a PHYSICAL clock —
     // the vendor meters requests in real time, whatever the engine's logical
     // `now` says (a suite freezes `now`; the bucket must still refill). Default:
@@ -5591,7 +5594,27 @@ function create(deps = {}) {
     sideTimer = setTimeout(flushSide, SIDE_NOTIFY_DEBOUNCE_MS);
     if (sideTimer.unref) sideTimer.unref();
   }
+  // B-43bc (the B-55dc residual): a live member whose Task Groups are still being READ (the roster's `groupsUnread`) is
+  // never judged «not a member» on that answer — a delivery first waits for the read (readMembership: bounded, off the loop),
+  // then judges a fresh roster. The wake (onFresh), the recall note (noteRecall) and the reaction digest (flushSide) do.
+  const unreadNow = (cids = null) => {
+    try { const want = Array.isArray(cids) ? new Set(cids.map(String)) : null; return (liveSessions() || []).some((x) => x && x.groupsUnread && (!want || want.has(String(x.cid)))); } catch { return false; }
+  };
+  const readFirst = async (cids = null) => {
+    if (typeof readMembership !== 'function' || !unreadNow(cids)) return 0;
+    try { return await readMembership(cids); } catch { return 0; }
+  };
   function flushSide() {
+    // B-43bc: the digest judges each sender's reach by its Task Groups — a sender still being read is waited for first; the
+    // batch keeps filling meanwhile (the slot stays taken), then ONE flush takes it all
+    if (!stopped && typeof readMembership === 'function' && unreadNow()) {
+      sideTimer = { reading: true };
+      readFirst().catch(() => 0).then(() => { sideTimer = null; flushSideNow(); });
+      return;
+    }
+    flushSideNow();
+  }
+  function flushSideNow() {
     sideTimer = null;
     const batch = [...sideBatch]; sideBatch.clear();
     if (!batch.length || stopped) return;
@@ -6145,6 +6168,7 @@ function create(deps = {}) {
       for (const w of en.wokeFor) if (w && String(w.vid) === key && !w.noted) { w.noted = true; if (!due.some((d) => d.cid === w.cid)) due.push({ cid: w.cid, at: w.at }); }
     }, { durable: true }); } catch (e) { if (e && e.code === 'not-durable' && e.applied) notDurable = e; else throw e; }
     if (notDurable && due.length) log.warn(`[channels] ${rec.id}/${convId}: a recall's «noted» marks are in memory, not on disk yet — the note is sent now (a restart before the storage answers may send it once more)`);
+    await readFirst(due.map((d) => d.cid));   // B-43bc: a recipient still being read is read first (never «not a member» on it)
     const en = store.index.live()[`${rec.id}/${convId}`];
     // REACH FIRST (the reaction digest's rule): the note is news FROM the conversation — an agent whose access the owner
     // removed since the wake hears nothing more from here
@@ -7915,6 +7939,8 @@ function create(deps = {}) {
     const ledger = async (what, fn) => { try { await store.index.update(fn); } catch (err) { log.warn(`[channels] ${rec.id}/${convId}: ${what} ledger failed: ${(err && err.message) || err}`); } };
     // msgs7d — the estimate's denominator measured after the fact (§7.2)
     if (!owedFor) await ledger('msgs', () => { const e2 = store.index.entry(rec.id, convId, { create: false }); if (!e2) return; healP2(e2); e2.stats.msgs.push({ at: t, n: fresh.length }); e2.stats.msgs = F.pruneLedger(e2.stats.msgs, t); e2.stats.msgs7d = F.countSince(e2.stats.msgs, t, 7); });
+    // B-43bc: a member whose Task Groups are still being read is READ first — the wake never judges «not a member» on it
+    if ((await readFirst()) && stopped) return;
     const eff = wakeEffOf(en);   // ALL AGENTS fanned out: one item per running conversation
     if (!eff || !eff.watchers.length) return;
     // a named AGENT first, then groups (and the All-agents fan-out): a group's round-robin skips a session
