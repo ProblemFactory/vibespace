@@ -689,7 +689,29 @@ console.log('⑧ THE MIGRATION TABLE — a production-shaped data dir, every r2 
     ok(scope.length > 100 && readers.join() === [...KNOWN.keys()].sort().join(), `NO READER LEFT: outside a comment only the two named files name data/job-secrets.json or /api/jobs-secrets (${[...KNOWN].map(([f, why]) => f + ' — ' + why).join('; ')})`, readers);
     // B-ef1b: + the notice's own door — a PERSON's press moves each value into the vault (then deletes the file) or deletes it
     const RETIRED_KNOWN = new Map([...KNOWN, ['src/server/job-secrets-door.js', 'B-ef1b: the notice\'s two buttons — a person\'s press seals each value into the vault, then deletes the file (or deletes it) — never into a job, never a value said']]);
-    ok(naming(/job-secrets\.retired\.json/).join() === [...RETIRED_KNOWN.keys()].sort().join(), 'the retired name is KNOWN: the one-shot writes it, SECRETS_AT_REST names it, the notice\'s door (B-ef1b) moves or deletes it — no other file', naming(/job-secrets\.retired\.json/));
+    // the batches 52–54 «also» (B-ef1b's refusals name their way on): the WORDS that tell a person / an API caller where to act name
+    // the file's path — they SAY it, they never open it: in a WORDS file every mention is the sentence form «data/job-secrets.retired.json»
+    // followed by a space or a comma (a reader joins the bare quoted name — the one-shot, the door), so a reader there is still red
+    const RETIRED_WORDS = new Map([
+      ['src/lib/vault-paste-box.js', 'the page\'s refusal words for the notice\'s two buttons (job_secrets_not_a_file / job_secrets_value_shape): where to act, then press again'],
+      ['src/lib/i18n-zh.js', 'the same two refusal sentences in Chinese'],
+      ['src/lib/i18n-ja.js', 'the same two refusal sentences in Japanese'],
+      ['src/routes/vault.js', 'the route\'s own words for the same two refusals (an API caller reads them)'],
+    ]);
+    const retiredNaming = naming(/job-secrets\.retired\.json/), retiredKnown = new Set([...RETIRED_KNOWN.keys(), ...RETIRED_WORDS.keys()]);
+    const unsaidIn = (t) => (t.match(/job-secrets\.retired\.json/g) || []).length !== (t.match(/data\/job-secrets\.retired\.json[ ,]/g) || []).length;   // a mention that is not the sentence form
+    const notSaid = (f) => unsaidIn(code(path.join(REPO, f)));
+    const retiredVerdict = (names, unsaid = (f) => RETIRED_WORDS.has(f) && notSaid(f)) => ({ unknown: names.filter((f) => !retiredKnown.has(f)), missing: [...RETIRED_KNOWN.keys()].filter((f) => !names.includes(f)), notWords: names.filter(unsaid) });
+    const rv = retiredVerdict(retiredNaming);
+    ok(!rv.unknown.length && !rv.missing.length && !rv.notWords.length,
+      `the retired name is KNOWN: the one-shot writes it, SECRETS_AT_REST names it, the notice's door (B-ef1b) moves or deletes it — and only the refusal WORDS besides (${[...RETIRED_WORDS].map(([f, why]) => f + ' — ' + why).join('; ')}) — no other file; a WORDS file names it only as a sentence`, { naming: retiredNaming, ...rv });
+    // RED controls of the leg's OWN predicate (retiredVerdict, planted inputs): a file outside both lists naming it ⇒ unknown; the door
+    // no longer naming it ⇒ missing; a WORDS file that joins the bare name as a reader would ⇒ not words
+    const plantedOut = retiredVerdict([...retiredNaming, 'src/lib/elsewhere.js']), plantedGone = retiredVerdict(retiredNaming.filter((f) => f !== 'src/server/job-secrets-door.js'));
+    const asReader = code(path.join(REPO, 'src/lib/vault-paste-box.js')) + "\nconst f = path.join(dataDir, 'job-secrets" + ".retired.json');";   // the page's words + a reader line planted
+    const plantedRead = retiredVerdict(['src/lib/vault-paste-box.js', ...RETIRED_KNOWN.keys()], (f) => RETIRED_WORDS.has(f) && unsaidIn(asReader));
+    ok(plantedOut.unknown.join() === 'src/lib/elsewhere.js' && !plantedOut.missing.length && plantedGone.missing.join() === 'src/server/job-secrets-door.js' && !plantedGone.unknown.length && plantedRead.notWords.join() === 'src/lib/vault-paste-box.js',
+      'RED controls of the leg\'s own predicate: a planted file outside the lists ⇒ unknown; the door no longer naming it ⇒ missing; a WORDS file joining the bare name as a reader ⇒ not words', { plantedOut, plantedGone, plantedRead });
     const row = R('src/vault.js').SECRETS_AT_REST.find((r) => /data\/job-secrets\.retired\.json/.test(r.where || ''));
     ok(!!row && /0600/.test(row.where) && /OWNER/.test(row.exception || '') && /never a value/.test(row.exception || '') && /into the vault/.test(row.exception || ''),
       'SECRETS_AT_REST names data/job-secrets.retired.json (0600) as an EXCEPTION with its reason: the owner\'s bytes, kept until they delete them; the notice names them (never a value) and the recipe', row);
