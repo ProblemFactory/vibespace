@@ -25,7 +25,7 @@ import v8 from 'node:v8';
 import vm from 'node:vm';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -307,7 +307,7 @@ console.log('— ⑥ THE CURE ROUND (主开发 23:16Z): every attach reads off t
     };
     const csSrc = read('src/codex-session-store.js'), SHARE = "    if (typeof wanted === 'function') return job;\n";
     const m1 = await memoScene(S);
-    const m0 = csSrc.split(SHARE).length === 2 ? await memoScene(MCW.load('src/codex-session-store.js', csSrc.replace(SHARE, ''), 'memo-shared')) : null;
+    const m0 = await memoScene(MCW.load('src/codex-session-store.js', anchored(csSrc, SHARE, '', 'memo-shared'), 'memo-shared'));
     ok(m1.a === null && typeof m1.b === 'number' && m1.b > 0 && !!m0 && m0.b === null, `A READ THAT MAY BE DROPPED IS NEVER THE READER'S SHARED MEMO: the dropped read answered nothing, the second caller on the same reader its ${m1.b} records; RED CONTROL (the dropped job shared): the second caller got nothing`, { m1, m0 });
   }
 }
