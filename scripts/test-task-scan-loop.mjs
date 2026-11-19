@@ -225,6 +225,32 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
       ok(o1 === 'warmed reader' && o2 === 'warmed reader' && calls.length === 4,
         `claude: status() and taskState() await ITS task-state warm (the task scan) before the reader answers (${o1} · ${o2})`);
     } finally { H.store.warmTaskState = realWts; }
+    // B-952b: A LIVE CODEX CONVERSATION'S «AGENT STEPS» ARE ITS WRAPPER'S PLAN — the task-state road hands the reader the session's
+    // own id (its key in activeSessions, the webui id the wrapper was spawned with), so BUFFERS_DIR/<id>.json is read. RED CONTROL:
+    // the base's road (no id) ⇒ no side file read ⇒ [] (the row: «empty on every road»)
+    {
+      const bdir = path.join(os.homedir(), 'buf'), wid = 'w-b952b', ctid = 'eeeeeeee-0000-4000-8000-0000000b952b';
+      fs.mkdirSync(bdir, { recursive: true });
+      fs.writeFileSync(path.join(bdir, wid + '.json'), JSON.stringify({ plan: [{ step: 'Read the failing test', status: 'completed' }, { step: 'Write the cure', status: 'inProgress' }, { step: 'Gate it', status: 'pending' }] }));
+      const liveS = { backend: 'codex', mode: 'chat', backendSessionId: ctid, cwd, buffer: '' };
+      const mk2 = (s0, id) => (s0.backend === 'codex' ? new CS.CodexSessionMessages(s0, id, { buffersDir: bdir }) : new SS.SessionMessages(s0, id || null, { buffersDir: bdir, permissionModes: [] }));
+      const stepsOf = async (TS) => ((await TS.createTranscriptService({ activeSessions: new Map([[wid, liveS]]), createSessionMessages: mk2, hosts: null }).taskState({ backend: 'codex', sessionId: ctid, cwd })) || {}).todos || [];
+      const CALL = 'createSessionMessages(sessionShape(r, live), liveIdOf(live))';
+      const got = await stepsOf({ createTranscriptService });
+      const noId = mutantCopies('b952b-no-id', REPO).load('src/transcript-service.js', tsSrc.replace(CALL, () => 'createSessionMessages(sessionShape(r, live))'), 'no-id');
+      const base = await stepsOf(noId);
+      ok(tsSrc.split(CALL).length === 2 && got.length === 3 && got.map((t) => t.status).join(',') === 'completed,in_progress,pending' && got[1].content === 'Write the cure' && base.length === 0,
+        `B-952b: a LIVE codex conversation's «Agent steps» (GET /api/session-todos) are its wrapper's plan — ${got.length} steps, their states mapped; RED CONTROL (the reader without the session's id, the base): ${base.length} steps`, { got, base });
+      // …a LIVE claude conversation on the same road: its task state now comes from its wrapper's side file FIRST (the wrapper's
+      // todos when it holds some), as the attach's does — Properties and the chat agree. RED CONTROL: no id ⇒ the transcript's alone
+      const clId = 'w-b952b-cl';
+      fs.writeFileSync(path.join(bdir, clId + '.json'), JSON.stringify({ todos: [{ content: 'Ship the restated leg', status: 'in_progress', activeForm: 'Shipping the restated leg' }] }));
+      const liveC = { backend: 'claude', mode: 'chat', claudeSessionId: sid, backendSessionId: sid, cwd, buffer: '' };
+      const todosC = async (TS) => ((await TS.createTranscriptService({ activeSessions: new Map([[clId, liveC]]), createSessionMessages: mk2, hosts: null }).taskState({ backend: 'claude', sessionId: sid, cwd })) || {}).todos || [];
+      const gotC = await todosC({ createTranscriptService }), baseC = await todosC(noId);
+      ok(gotC.length === 1 && gotC[0].content === 'Ship the restated leg' && !baseC.some((t) => t.content === 'Ship the restated leg'),
+        `B-952b, claude on the same road: a LIVE claude conversation's task state comes from its wrapper's side file first, as the attach's does (the wrapper's one todo); RED CONTROL (no id): the transcript's alone (${baseC.length} todos, none the wrapper's)`, { gotC, baseC });
+    }
     // THE ROUTE + THE SERVICE (its read, S1): the route hands every harness its machine; the task-state road asks that machine
     // only for a harness whose task state reads its transcript (claude) — a codex conversation on m1 is answered here, as the
     // release did (its steps are the wrapper's side file): no device op, no remote find + copy, nothing listed or started.

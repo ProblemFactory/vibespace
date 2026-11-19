@@ -282,6 +282,10 @@ const fixes2 = (async () => {
   const wlog = (w) => { try { return fs.readFileSync(path.join(w.dir, 'agy-wrapper.log'), 'utf8'); } catch { return ''; } };
   const { AcpSessionMessages } = require(path.join(REPO, 'src/acp-message-manager.js'));
   const { createTranscriptService } = require(path.join(REPO, 'src/transcript-service.js'));
+  // ⑯ RED, the base ROAD (B-952b: the status road now hands the live session's reader its id — before, it passed none): the
+  // service whose readerFor builds the reader with no id, loaded once
+  const tsSrc = fs.readFileSync(path.join(REPO, 'src/transcript-service.js'), 'utf8'), ROAD = 'createSessionMessages(sessionShape(r, session), liveIdOf(session))';
+  const baseRoad = tsSrc.split(ROAD).length === 2 ? mutantCopies('agy-harness-road', REPO).load('src/transcript-service.js', tsSrc.replace(ROAD, () => 'createSessionMessages(sessionShape(r, session))'), 'base-road') : null;   // stale-pins: kept (the red control rebuilds the base road)
   const AgyReader = g.store.SessionMessages; // the agy descriptor's reader (AgySessionMessages over AcpSessionMessages)
   let baseReader = null; // ⑯ RED: the base wrapperMeta (the sidecar only by the caller's session id) — set in ⑮
   // ⑯ the HUB's consumer (src/server/stdout/acp-events.js) over the resumed wrapper's own stdout: what the creator's window is told
@@ -361,9 +365,9 @@ const fixes2 = (async () => {
         await b.until(() => { try { return JSON.parse(fs.readFileSync(path.join(at, 's.json'), 'utf8')).sessionId === cid && fs.readFileSync(path.join(at, 's.buf'), 'utf8').includes('"kind":"prompt_end"'); } catch { return false; } }, 4000, 'its sidecar + journal (persisted on their timers)').catch(() => null);
         // the Resume's own status road: the client's GET /api/session-messages?withStatus=1 → transcript-service.status(),
         // by CONVERSATION id, over the live session — whose hub journal may not hold the wrapper's boot records yet
-        const route = async (Cls) => createTranscriptService({ activeSessions: new Map([['s', { backend: 'antigravity', backendSessionId: cid, buffer: '', _webuiId: 's' }]]), createSessionMessages: (sess, sid) => new Cls(sess, sid, { buffersDir: at }) })
+        const route = async (Cls, TS = { createTranscriptService }) => TS.createTranscriptService({ activeSessions: new Map([['s', { backend: 'antigravity', backendSessionId: cid, buffer: '', _webuiId: 's' }]]), createSessionMessages: (sess, sid) => new Cls(sess, sid, { buffersDir: at }) })
           .status({ backend: 'antigravity', sessionId: cid, cwd: at }).then((x) => x.chatStatus).catch((e) => ({ err: e.message }));
-        return { argv, text: b.text(), st: statusOf(AcpSessionMessages, at), said: b.find('notice', (r) => r.noticeKind === 'mode-resumed')?.text || null, routeSt: await route(AgyReader), routeBase: baseReader ? await route(baseReader) : undefined, hub: await hubOf(b.records), hubBase: baseEvents ? await hubOf(b.records, baseEvents) : undefined, hubNoStrip: noStrip ? await hubOf(b.records, noStrip) : undefined, first: b.records[0]?.kind };
+        return { argv, text: b.text(), st: statusOf(AcpSessionMessages, at), said: b.find('notice', (r) => r.noticeKind === 'mode-resumed')?.text || null, routeSt: await route(AgyReader), routeBase: baseReader && baseRoad ? await route(baseReader, baseRoad) : undefined, routeRoad: baseReader ? await route(baseReader) : undefined, hub: await hubOf(b.records), hubBase: baseEvents ? await hubOf(b.records, baseEvents) : undefined, hubNoStrip: noStrip ? await hubOf(b.records, noStrip) : undefined, first: b.records[0]?.kind };
       } finally { await ended(b); }
     };
     const r = await resume(WRAPPER, dir);
@@ -372,7 +376,8 @@ const fixes2 = (async () => {
       r.argv.includes('--dangerously-skip-permissions') && r.argv[r.argv.indexOf('--conversation') + 1] === cid && /always-proceed\): after the resume/.test(r.text), { argv: r.argv, text: r.text.slice(-80) });
     ck('⑯ …and the Resume\'s OWN status road says it: transcript-service.status() by conversation id, over the live session with an EMPTY hub journal ⇒ the sidecar (by the session\'s _webuiId): bypassPermissions + the four',
       r.routeSt?.permissionMode === 'bypassPermissions' && (r.routeSt.permissionModes || []).join() === FOUR, r.routeSt);
-    ck('⑯ RED copy (the base reader: the sidecar only by the caller\'s id, which this road never passes): null — the resumed chip said «default»', !!baseReader && r.routeBase === null, r.routeBase);
+    ck('⑯ RED copy (the base reader on the base road: the sidecar by neither the session\'s _webuiId nor the caller\'s id — the road passed none before B-952b): null — the resumed chip said «default»', !!baseReader && !!baseRoad && r.routeBase === null, r.routeBase);
+    ck('⑯ …and the ROAD alone (B-952b: readerFor hands the live session\'s reader its id): the base reader finds the sidecar by that id — bypassPermissions', !!baseReader && r.routeRoad?.permissionMode === 'bypassPermissions', r.routeRoad);
     ck('⑯ …and the HUB is told: acp-events over the resumed wrapper\'s stdout sets session._permissionMode, writes it to session-meta and tells the windows (permission-mode-ack {ok, bypassPermissions}) — the creator\'s chip, which no init card reaches',
       r.hub?.mode === 'bypassPermissions' && JSON.stringify(r.hub.acks) === JSON.stringify([[true, 'bypassPermissions']]) && r.hub.meta === 'bypassPermissions', r.hub);
     ck('⑯ RED copy (the base consumer: the record\'s mode is never read): no ack, the hub\'s mode stays null — the resumed window\'s chip said «default»', !!baseEvents && r.hubBase?.mode === null && r.hubBase.acks.length === 0, r.hubBase);

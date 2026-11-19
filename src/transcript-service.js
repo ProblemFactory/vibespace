@@ -87,10 +87,17 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     host: ref.host || null,
     memo: ref.memo && typeof ref.memo === 'object' ? ref.memo : null,   // ONE REQUEST, ONE READ (lane resume-all-paced L3 cure)
   });
+  // B-952b: a LIVE conversation's reader gets the session's own id (its key in activeSessions — the webui id the hub spawned its
+  // wrapper with): the wrapper's side file is BUFFERS_DIR/<that id>.json (codex: its plan — the Properties «Agent steps» — its
+  // running tasks, model and usage; claude: its streaming flag, its start, and its task state FIRST when the wrapper holds todos), as
+  // ws-handler's attach builds it — Properties and the chat answer alike. With no id the side file
+  // was never read on these roads: a codex conversation's steps answered [] everywhere. A stopped one has no side file here (a
+  // kill removes it), so it gets none, as before.
+  const liveIdOf = (session) => { if (!session) return undefined; for (const [id, s] of activeSessions) if (s === session) return id; return undefined; };
   // the request's reader of this conversation (its memo's, else a fresh one)
   const readerFor = (r, session) => {
     if (r.memo && r.memo.sm) return r.memo.sm;
-    const sm = createSessionMessages(sessionShape(r, session));
+    const sm = createSessionMessages(sessionShape(r, session), liveIdOf(session));
     if (r.memo) r.memo.sm = sm;
     return sm;
   };
@@ -247,7 +254,8 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     if (viaDev) return viaDev;
     if (fromTranscript) await refreshRemote(r);
     await taskWarmOf(r); // B-299b A2: GET /api/session-todos (a Properties window re-asks at every broadcast) — the scan off the loop
-    const sm = createSessionMessages(sessionShape(r, liveSession(r)));
+    const live = liveSession(r);
+    const sm = createSessionMessages(sessionShape(r, live), liveIdOf(live));   // B-952b: the live session's id — its wrapper's side file holds codex's plan
     if (typeof sm.prepare === 'function') await sm.prepare(); // S9: a serve-backed reader (opencode stopped conversation) loads here — LOUD on failure, a user opened it
     return sm.taskState() || {};
   }
