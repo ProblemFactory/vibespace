@@ -121,6 +121,17 @@ export function openSessionProps(app, sessionRef, { syncId, section = null } = {
   body.className = 'task-detail-body';
   root.appendChild(body);
   winInfo.content.appendChild(root);
+  // «What it may use» (the hosted cure, 主开发 00:53Z): its two helpers live at the WINDOW's scope, never inside render() —
+  // the ref the section keeps for the window's whole life must not hold the first render's DOM (test-record-clear-client: a
+  // cleared record's words stayed reachable through it), and the asked scroll lands on the section ON the page at the frame:
+  // looked up then, the flag cleared only after the scroll (a render may replace the section before the frame)
+  const mayUseRef = () => { const x = findSession(); return x ? { sessionKey: refKey, webuiId: x.webuiId || null } : null; };
+  const scrollToMayUse = () => requestAnimationFrame(() => {
+    const sec = body.querySelector('.session-props-may-use');
+    if (!winInfo._mayUseFocus || !sec || !sec.isConnected) return;   // replaced before the frame: the next render's frame lands it
+    try { sec.scrollIntoView({ block: 'start' }); } catch { }
+    winInfo._mayUseFocus = false;
+  });
 
   /** The "Now" value — the CURRENT status record's state, reason (a cleared one in this device's words) and detail. */
   const nowHtml = (s) => statusNowHtml(sidebar.getSessionStatus?.(s));   // lane mask-value-shape r4: the row's markup is module-level (a render leg draws the real one)
@@ -733,9 +744,9 @@ export function openSessionProps(app, sessionRef, { syncId, section = null } = {
     {
       const muSec = section(t('What it may use'));
       muSec.classList.add('session-props-may-use');
-      if (!winInfo._mayUse) winInfo._mayUse = mountMayUse(app, () => { const x = findSession(); return x ? { sessionKey: refKey, webuiId: x.webuiId || null } : null; });
+      if (!winInfo._mayUse) winInfo._mayUse = mountMayUse(app, mayUseRef);
       muSec.appendChild(winInfo._mayUse.el);
-      if (winInfo._mayUseFocus) { winInfo._mayUseFocus = false; requestAnimationFrame(() => { try { muSec.scrollIntoView({ block: 'start' }); } catch { } }); }
+      if (winInfo._mayUseFocus) scrollToMayUse();
     }
 
     // ── Agent permissions: Group manager delegation (issue #21) ──

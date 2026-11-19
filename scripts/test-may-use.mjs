@@ -25,6 +25,9 @@
 //   ⑮–⑰ THE MOVE ONTO int411 8cef0006a (the meetings of logic): ⑮ the Task Groups are asked with the conversation's machine, as
 //      every door asks since B-df5f (RED: the copy without it); ⑯ the exit lister answers as the door does after B-48a4 (RED: a lister
 //      that drops the groups); ⑰ Session Properties holds B-460d's CPU priority row and the «What it may use» section, each once
+//   ⑱–⑲ THE HOSTED CURE (主开发 00:53Z): ⑱ the section's ref is made ONCE at the window's scope (a ref made inside render kept the
+//      first render's DOM alive — test-record-clear-client's heap leg); ⑲ the asked scroll lands on the section on the page at
+//      the frame, the flag cleared only after it (RED: each release form planted back)
 //   ⑭ THE RESTACK ONTO 2.369.410: the key lister reads the door's LIVE grants (a once-grant from before a restart is not
 //      listed; RED: a lister over the raw store) — the release's B-3190 follow-up made the key door read them
 //   ⑧ THE FORM'S ROWS BYTE FOR BYTE: src/lib/may-use-rows.js renders what the released form's closures rendered (a frozen copy of
@@ -538,6 +541,33 @@ console.log('— ⑰ B-460d + B-70f9: Session Properties holds the CPU priority 
   const secCut = 'moreOf({ more: br.loginsMore, moreOut: br.loginsMoreOut, moreClosed: br.loginsMoreClosed }, ';
   ok(sec.includes(secCut) && allShut(Mf).logins === undefined && unforwarded(sec.replace(secCut, 'moreOf({ more: br.loginsMore, moreOut: br.loginsMoreOut }, ')).length === 1,   // stale-pins: kept — the base's line, written back by this RED control
     'CONTROL (B-e630 cure 2): a model without the logins\' forward counts their closed rows nowhere, and a section call without it is named by the census (RED for the two legs above)');
+}
+
+// ── ⑱–⑲ THE HOSTED CURE (主开发 00:53Z): the leak and the scroll in session-props.js; the heavy suites are the proof ──
+console.log('— ⑱ the section\'s ref is made once at the WINDOW\'s scope, never inside render (it lives as long as the window)');
+{
+  const SP = fs.readFileSync(path.join(REPO, 'src/lib/session-props.js'), 'utf8');
+  const REF = 'const mayUseRef = () => { const x = findSession(); return x ? { sessionKey: refKey, webuiId: x.webuiId || null } : null; };';
+  const MOUNT = 'winInfo._mayUse = mountMayUse(app, mayUseRef);';
+  const atWindow = (sp) => { const r = sp.indexOf('  const render = () => {'); return r > 0 && sp.split(REF).length === 2 && sp.indexOf(REF) < r && sp.split(MOUNT).length === 2 && sp.indexOf(MOUNT) > r && !/mountMayUse\(app, \(\) =>/.test(sp); };   // stale-pins: kept — the release's form, named on purpose (an absence check / the RED control's plant)
+  ok(atWindow(SP), '⑱ mountMayUse is handed mayUseRef, made once beside findSession / refKey before render() — no arrow made inside a render is kept for the window\'s life');
+  const OLD = 'winInfo._mayUse = mountMayUse(app, () => { const x = findSession(); return x ? { sessionKey: refKey, webuiId: x.webuiId || null } : null; });';   // stale-pins: kept — the release's form, named on purpose (an absence check / the RED control's plant)
+  const planted = SP.split(MOUNT).length === 2 ? SP.replace(MOUNT, OLD) : null;
+  ok(!!planted && planted.includes(OLD) && !planted.includes(MOUNT), '⑱ CONTROL plant: the mount stands once, and the copy makes its ref inside render as the release did');
+  ok(!!planted && atWindow(planted) === false, '⑱ RED CONTROL: a ref made inside render (the leak) is caught');
+}
+console.log('— ⑲ the asked scroll lands on the section ON the page at the frame; the flag is cleared only after it');
+{
+  const SP = fs.readFileSync(path.join(REPO, 'src/lib/session-props.js'), 'utf8');
+  const lands = (sp) => { const i = sp.indexOf('const scrollToMayUse = () => requestAnimationFrame(() => {'); if (i < 0) return false; const b = sp.slice(i, sp.indexOf('\n  });', i));
+    const q = b.indexOf("body.querySelector('.session-props-may-use')"), c = b.indexOf('sec.isConnected'), sc = b.indexOf('sec.scrollIntoView('), cl = b.indexOf('winInfo._mayUseFocus = false;');
+    return q > 0 && c > q && sc > c && cl > sc && sp.split('if (winInfo._mayUseFocus) scrollToMayUse();').length === 2 && !sp.includes('muSec.scrollIntoView('); };   // stale-pins: kept — the release's form, named on purpose (an absence check / the RED control's plant)
+  ok(lands(SP), '⑲ the frame callback looks the section up in the body, scrolls it only when connected, and clears the focus flag only after the scroll');
+  const NOW = 'if (winInfo._mayUseFocus) scrollToMayUse();';
+  const OLD = "if (winInfo._mayUseFocus) { winInfo._mayUseFocus = false; requestAnimationFrame(() => { try { muSec.scrollIntoView({ block: 'start' }); } catch { } }); }";   // stale-pins: kept — the release's form, named on purpose (an absence check / the RED control's plant)
+  const planted = SP.split(NOW).length === 2 ? SP.replace(NOW, OLD) : null;
+  ok(!!planted && planted.includes(OLD) && !planted.includes(NOW), '⑲ CONTROL plant: the render\'s call stands once, and the copy clears the flag first and scrolls the captured section');
+  ok(!!planted && lands(planted) === false, '⑲ RED CONTROL: the release\'s order (the flag cleared before the frame, the captured section scrolled) is caught');
 }
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);

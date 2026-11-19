@@ -103,6 +103,10 @@ const accts = await j('GET', '/api/channels?scope=accounts');
 const ACC = ((accts.json && accts.json.adapters) || []).filter((a) => a && a.id && !a.builtin && a.listed !== false && (a.reach || 'grants') === 'grants');
 check('a Task Group (titled with markup) holds the conversation; three fake channel accounts to judge', !!TID && bd.status === 200 && ACC.length >= 3, { TID, bind: bd.status, accounts: ACC.map((a) => a.id) });
 const [A1, A2, A3] = ACC;
+// the hosted run (主开发 00:53Z): a fresh stand-in account sends under REVIEW, where a Task Group's «send» is capped (409
+// authority-capped, rightly) — the account's own policy route sets direct first, as the owner's Edit dialog would
+const pol = await j('PUT', `/api/channels/adapters/${encodeURIComponent(A1.id)}`, { policy: 'direct' });
+check(`«${A1.label}»'s sending policy set to direct through the account's own route (under review a group's «send» is capped)`, pol.status === 200, pol);
 const g1 = await j('PUT', `/api/channels/adapters/${encodeURIComponent(A1.id)}/access`, { access: [{ principal: { kind: 'group', id: TID }, authority: 'send' }] });
 check(`«${A1.label}» shared with the Task Group (can send) through the account's own access route`, g1.status === 200, g1);
 
@@ -112,13 +116,21 @@ check('the conversation\'s menu lists «What it may use…» right after «Prope
 await evalJs(`(() => { const m = document.querySelector('.context-menu'); const it = m && [...m.children].find((e) => (e.textContent || '').trim() === 'What it may use…'); if (it) it.click(); return !!it; })()`);
 const SEC = '.session-props-may-use .mu-section';
 const drawn = await until(`!!document.querySelector(${JSON.stringify(SEC + ' [data-row="chan"]')})`, 20000);
-const scrolled = await evalJs(`(() => { const s = document.querySelector('.session-props-may-use'); const b = s && s.closest('.task-detail-body'); if (!s || !b) return null; const top = s.getBoundingClientRect().top - b.getBoundingClientRect().top; return { top: Math.round(top), scrollTop: Math.round(b.scrollTop) }; })()`);
+const SCROLL = `(() => { const s = document.querySelector('.session-props-may-use'); const b = s && s.closest('.task-detail-body'); if (!s || !b) return null; const top = s.getBoundingClientRect().top - b.getBoundingClientRect().top; return { top: Math.round(top), scrollTop: Math.round(b.scrollTop) }; })()`;
+// WAIT for the scroll to land (the hosted run measured once, before the frame: top 795, scrollTop 0), never one reading
+const scrolled = (await until(`(() => { const m = ${SCROLL}; return m && m.top >= -2 && m.top <= 40 && m.scrollTop > 0 ? m : null; })()`, 10000)) || (await evalJs(SCROLL));
 check('Properties opened with «What it may use» drawn and SCROLLED INTO VIEW (the section at the body\'s top)', !!drawn && scrolled && scrolled.top >= -2 && scrolled.top <= 40 && scrolled.scrollTop > 0, scrolled);
 await shot('may-use-440.png');
 
 console.log('— ② the owner\'s order; the Task Group named; a group grant ticked and locked');
+// the order is read on the CARDS: Properties opens 440 px wide, where the section (~399 px) is the accordion — the hosted run
+// read only ["builtins"]. Give the window its width and wait on the section's own shape, then back to 440 for ③ and ④
+const SHAPE = `(() => { const s = document.querySelector(${JSON.stringify(SEC)}); if (!s) return null; return { w: Math.round(s.getBoundingClientRect().width), acc: !!s.querySelector('.ns-res-list'), cards: !!s.querySelector('.ns-card[data-card="vibespace"]') }; })()`;
+const sizeTo = async (W) => { const id = await evalJs(`(() => { for (const [id, w] of app.wm.windows) if (w._sessionPropsKey) return id; return null; })()`); await evalJs(`(() => { const w = app.wm.windows.get(${JSON.stringify(id)}); w.element.style.width = '${W}px'; return true; })()`); return until(`(() => { const m = ${SHAPE}; return !!m && (m.w < 400 ? m.acc && !m.cards : m.cards && !m.acc) ? m : null; })()`, 5000); };
+const wide = await sizeTo(900);
 const order = await evalJs(`[...document.querySelectorAll(${JSON.stringify(SEC + ' .ns-card[data-card="vibespace"] > [data-row], ' + SEC + ' .ns-card[data-card="vibespace"] > [data-fact], ' + SEC + ' .ns-builtin')})].map((e) => e.classList.contains('ns-builtin') ? 'builtins' : (e.dataset.row || e.dataset.fact))`);
-check('the kinds in THE OWNER\'S ORDER: sessions, channels, browser, vault, keys, exits, windows — the built-ins last', JSON.stringify(order) === JSON.stringify(['sessions', 'chan', 'bprof', 'vault', 'keys', 'exits', 'windows', 'builtins']), order);
+check('the kinds in THE OWNER\'S ORDER: sessions, channels, browser, vault, keys, exits, windows — the built-ins last (read on the cards, the window 900 px)', !!wide && wide.cards && JSON.stringify(order) === JSON.stringify(['sessions', 'chan', 'bprof', 'vault', 'keys', 'exits', 'windows', 'builtins']), { order, shape: wide });
+await sizeTo(440);
 const g1row = await until(`(() => { const r = document.querySelector(${JSON.stringify(SEC + ' .ns-acc.granted[data-acc-row="' + A1.id + '"]')}); if (!r) return null; const i = r.querySelector('input'); return { checked: i && i.checked, disabled: i && i.disabled, text: r.textContent }; })()`, 15000);
 check(`«${A1.label}»: ticked and locked, «through Task Group …» naming the group, can send`, g1row && g1row.checked && g1row.disabled && g1row.text.includes('Through Task Group') && g1row.text.includes(TITLE) && g1row.text.includes('can send'), g1row);
 const reach = await evalJs(`(document.querySelector(${JSON.stringify(SEC + ' [data-reach]')}) || {}).textContent || ''`);
