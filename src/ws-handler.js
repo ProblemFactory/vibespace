@@ -973,6 +973,13 @@ function registerWsHandler(wss, ctx) {
           break;
         }
 
+        case 'end-left-behind': {   // B-69a7: «End them» — a PERSON's press only (the page verdict proved at this socket's handshake)
+          const session = activeSessions.get(data.sessionId);
+          require('./server/left-behind-door.js').endLeft(session, { by: ws._personPage === true ? byOfWs(ws) : null, at: data.at })
+            .then((r) => { try { ws.send(JSON.stringify({ type: 'end-left-behind-result', sessionId: data.sessionId, reqId: data.reqId ?? null, ...r })); } catch { } }, () => { });
+          break;
+        }
+
         case 'interrupt': {
           const session = activeSessions.get(data.sessionId);
           if (session?.pty && session.mode === 'chat') {

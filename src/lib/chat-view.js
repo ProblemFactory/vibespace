@@ -5154,6 +5154,8 @@ class ChatView {
     // landed first); ONE toast on every open client says how many, and what could not come back. No transcript card —
     // the bubbles already read Removed.
     // B-bba6 cure: a put-back at the conversation's END (no Stop — its process ended; text only): its own one toast
+    // B-69a7: what a settled Stop's command tool left running — said once, «End them» on THIS machine (a person's press)
+    if (op.subtype === 'left-behind') { this._sayLeftBehind(op.data || {}); return; }
     if (op.subtype === 'queue-putback' && op.by === 'exit' && op.n > 0) {
       const said = [t('The conversation ended — {n} queued message(s) put back into the input box', { n: op.n })];
       if (op.cut > 0) said.push(t('{m} message(s) came back shortened', { m: op.cut }));
@@ -7094,6 +7096,59 @@ class ChatView {
     try { this._trace('reset:drain', { held: held.length, applied, inSlab, foreign, failed, opSeq: floor }); } catch { }
   }
 
+  /** B-69a7: the line a settled Stop's read says (src/server/left-behind-door.js) — what this turn's command tool left running, what
+   *  the CLI keeps on purpose (named, never offered for ending), or that it could not be read; «End them» only on THIS machine */
+  _sayLeftBehind(d) {
+    const left = Array.isArray(d.left) ? d.left : [], kept = Array.isArray(d.kept) ? d.kept : [];
+    const names = (l) => [...new Set(l.map((x) => String((x && x.comm) || '?')))].slice(0, 6).join(', ');
+    const parts = [];
+    if (left.length) parts.push(d.machine ? t('Its command tool left {n} process(es) running on {machine}: {names}', { n: left.length, machine: d.machine, names: names(left) }) : t('Its command tool left {n} process(es) running: {names}', { n: left.length, names: names(left) }));
+    if (kept.length) parts.push(t('kept running by the CLI on purpose: {names}', { names: names(kept) }));
+    if (d.unreadable > 0) parts.push(t('{n} process(es) of this user started during the turn could not be read', { n: d.unreadable }));
+    if (d.unread) parts.push(t('what its command tool left could not be read'));
+    if (!parts.length) return;
+    const seen = this._leftBehindSaid || (this._leftBehindSaid = new Set());
+    if (d.at && seen.has(d.at)) return;   // one line per settled Stop (each its own list on the hub)
+    if (d.at) seen.add(d.at);
+    const el = document.createElement('div');
+    el.className = 'chat-left-behind';
+    this._container.appendChild(el);
+    const line = document.createElement('div');
+    line.className = 'chat-system';
+    const words = document.createElement('span');
+    words.textContent = t('Stopped — {what}', { what: parts.join(' · ') });
+    line.appendChild(words);
+    if (d.door) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'chat-left-behind-end'; b.textContent = t('End them');
+      b.onclick = () => this._endLeftBehind(b, words, d.at);
+      line.appendChild(b);
+    }
+    const x = document.createElement('button');
+    x.type = 'button'; x.className = 'chat-left-behind-close'; x.setAttribute('aria-label', t('Close')); x.innerHTML = UI_ICONS.close;
+    x.onclick = () => el.remove();
+    line.appendChild(x);
+    el.appendChild(line);
+  }
+  /** «End them»: ONE request; the hub re-checks every pid of THIS line's list (start time, not held, this conversation's mark) and says what ended */
+  _endLeftBehind(btn, words, at) {
+    btn.disabled = true;
+    const reqId = 'lb-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const why = { 'not-the-person': t('Only a press on this page can end them'), 'paired-machine': t('Ending them on a paired machine is not offered yet'), 'nothing-listed': t('Nothing is listed to end any more'), stopped: t('Nothing is listed to end any more') };
+    this.ws.request({ type: 'end-left-behind', sessionId: this.sessionId, reqId, at }, (m) => {
+      if (!m || m.type !== 'end-left-behind-result' || m.sessionId !== this.sessionId || m.reqId !== reqId) return false;
+      btn.remove();
+      const said = [];
+      if (!m.ok) said.push(why[m.reason] || t('Nothing is listed to end any more'));
+      else {
+        if (Array.isArray(m.ended) && m.ended.length) said.push(t('Ended: {names}', { names: [...new Set(m.ended)].join(', ') }));
+        if (Array.isArray(m.still) && m.still.length) said.push(t('Still running: {names}', { names: [...new Set(m.still)].join(', ') }));
+        if (m.gone > 0) said.push(t('{n} had already ended', { n: m.gone }));
+      }
+      if (said.length) words.textContent += ' — ' + said.join(' · ');
+      return true;
+    }, { isAlive: () => !this._disposed, timeoutMs: 15000, onTimeout: () => { btn.disabled = false; showToast(t('No answer to «End them» yet'), { duration: 5000 }); } });
+  }
   /** THE TURN SEQUENCE THIS VIEW WAS TOLD OF (lane phone-take-photo r3, PURE turnSeq): every record (_onCreateMessage, every path)
    *  and every completion (turn_complete) is fed here; a record of a turn PAST the completed one starts a turn on this client. NOT
    *  the activity label: «streaming» is restated by an attach, a reconnect, a held resume and a background tail after the

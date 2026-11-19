@@ -1580,6 +1580,15 @@ class DeviceManager {
     return r.result || { ok: false, code: 'pin_failed', error: 'no answer' };
   }
 
+  /** B-69a7: what a stopped turn's command tool left running on that machine — READ-ONLY, asked only of an agent that says it has it */
+  async leftBehind({ mark, ageMs } = {}) {
+    const conn = await this.connect();
+    if (!conn.info?.capabilities?.includes?.('left-behind')) throw new Error('daemon lacks left-behind (capabilities gate)');
+    const r = await this._request({ op: 'left-behind', mark, ageMs, timeoutMs: 15000 });
+    if (r.error) throw new Error(r.error);
+    const { id, op, ...rest } = r;
+    return rest;
+  }
   /** Full process table (System panel process manager, 2.354.0). */
   async procList({ max } = {}) {
     const conn = await this.connect();

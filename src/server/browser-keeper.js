@@ -8587,6 +8587,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   };
   wireDisplayKeeper(); // lane browser-display-holders: a display keeper handed in at create is wired like a late one
   if (install) installed = api;
+  if (install) { try { require('../proc-identity.js').keepOut('agent-browsers', () => api.browserPids().map((x) => [x.pid, x.starttime])); } catch { } }   // B-69a7: the hub's keeper's own records — never a conversation's leftover
   return api;
 }
 

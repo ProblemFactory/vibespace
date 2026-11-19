@@ -1536,6 +1536,12 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
 .chat-history-status {
   position: absolute; top: 6px; left: 50%; transform: translateX(-50%); z-index: 20; max-width: 80%;
 }
+/* B-69a7: what a settled Stop's command tool left running — one line under the history status, its door and its close */
+.chat-left-behind { position: absolute; top: 40px; left: 50%; transform: translateX(-50%); z-index: 19; max-width: 86%; }
+.chat-left-behind .chat-system { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.chat-left-behind button { font: inherit; padding: 1px 8px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-panel, var(--bg-dialog)); color: var(--text); cursor: pointer; }
+.chat-left-behind button.chat-left-behind-close { padding: 0 4px; border: 0; background: transparent; color: var(--text-dim); display: inline-flex; }
+.chat-left-behind button.chat-left-behind-close svg { width: 12px; height: 12px; }
 .chat-pos-indicator {
   position: absolute; top: 8px; left: 50%; transform: translateX(-50%); z-index: 10;
   font-size: 10px; padding: 3px 8px; border-radius: var(--radius-sm); pointer-events: none;

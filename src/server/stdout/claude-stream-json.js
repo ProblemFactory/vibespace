@@ -1331,7 +1331,11 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
           // the Stop window whoever stopped it — the hub's own Stop, or a person's terminal writing the interrupt straight to the wrapper
           if (msg.type === 'result' && typeof msg.terminal_reason === 'string' && msg.terminal_reason.startsWith('aborted') && !session._stopAskedAt) session._stopAskedAt = Date.now();
           // B-02a3: a Stop settles at the CLI's idle (the wrapper's window closes on the same word)
-          if (msg.type === 'system' && msg.subtype === 'session_state_changed' && msg.state === 'idle' && session._stopAskedAt) session._stopAskedAt = 0;
+          if (msg.type === 'system' && msg.subtype === 'session_state_changed' && msg.state === 'idle' && session._stopAskedAt) {
+            session._stopAskedAt = 0;
+            // B-69a7: the Stop SETTLED — ONE read of what this turn's command tool left running (src/server/left-behind-door.js), said once
+            require('../left-behind-door.js').afterStop(session, id, { broadcastToSession, hosts }).catch(() => { });
+          }
           // B-02a3: the wrapper's word on a group hand-over's frame — the only frame written with no message id, so its record names none
           if (msg.type === 'input_handover' && Array.isArray(msg.msg_ids) && !msg.msg_ids.length && typeof msg.state === 'string' && session._groupHandover && typeof session._groupHandover.said === 'function') { try { session._groupHandover.said(msg.state); } catch { } }
           if (msg.type === 'result') { try { require('../model-ask.js').noteRefusal(session, msg, { readSessionMeta, writeSessionMeta }); } catch { } }   // the API's 404 naming the ask: the pressing page says it once (round 15: it writes nothing a person set)

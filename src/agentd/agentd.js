@@ -1913,7 +1913,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'transcript-picture', 'pipe-detach' /* B-beaf: a CLOSE on a pipe session's channel ends its tail */, 'usage-scan', 'usage-scan-hub-cursor', 'discovery-claims', 'place-secret', 'quota-refresh', 'quota-refresh-bearer-law' /* B-5e0d: this agent's quota-refresh never sends a long-lived token */, 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input', 'stream-mic', 'stream-audio'],
+          capabilities: ['probe', 'transcript-op', 'transcript-picture', 'pipe-detach' /* B-beaf: a CLOSE on a pipe session's channel ends its tail */, 'usage-scan', 'usage-scan-hub-cursor', 'discovery-claims', 'place-secret', 'quota-refresh', 'quota-refresh-bearer-law' /* B-5e0d: this agent's quota-refresh never sends a long-lived token */, 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'left-behind' /* B-69a7: a READ of what a stopped turn's tool left (pid, name, start only) */, 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input', 'stream-mic', 'stream-audio'],
         }));
         return;
       }
@@ -2590,6 +2590,10 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
         const on = !!msg.on;
         require('./../machine-window.js').pinWindow({ platform: process.platform, hwnd: rec.last.hwnd, pid: rec.last.pid, bundle: rec.last.bundle, on, execFile: require('child_process').execFile, env: spawnEnv() })
           .then((r) => { if (r && r.ok) rec.pinned = !!r.pinned; mux.control({ op: 'window-pin-result', id: msg.id, result: r }); }, (e) => mux.control({ op: 'window-pin-result', id: msg.id, error: String((e && e.message) || e) }));
+        return;
+      }
+      if (msg.op === 'left-behind') {   // B-69a7: READ-ONLY — the same read as the hub's (src/left-behind.js), this agent's own tree and its desktop apps held out
+        require('./../left-behind.js').leftBehindOp(msg, { keep: dsKeeper && typeof dsKeeper.liveRecords === 'function' ? dsKeeper.liveRecords().flatMap((r) => Object.values(r.pids || {})) : [] }).then((r) => mux.control({ op: 'left-behind-result', id: msg.id, ...r }), (e) => mux.control({ op: 'left-behind-result', id: msg.id, error: String((e && e.message) || e) }));
         return;
       }
       if (msg.op === 'proc-list') {

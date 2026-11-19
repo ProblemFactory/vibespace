@@ -113,6 +113,8 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     if (!hosts || typeof hosts.get !== 'function') return false;
     try { return !!hosts.get(hostId); } catch { return false; }
   }
+  // B-69a7: this machine's desktop apps (every part's pid, the keeper's own records) are the hub's — never a conversation's leftover
+  try { require('../proc-identity.js').keepOut('desktop-apps', () => { const ds = typeof local === 'function' ? local() : local; return ds && typeof ds.liveRecords === 'function' ? ds.liveRecords().flatMap((r) => Object.values(r.pids || {}).filter((p) => Number.isInteger(p) && p > 1).map((p) => [p, 0])) : []; }); } catch { }
   function localOf() {
     const ds = typeof local === 'function' ? local() : local;
     if (!ds) throw named('host_unavailable', 'this machine\'s desktop keeper is not wired on this instance');
