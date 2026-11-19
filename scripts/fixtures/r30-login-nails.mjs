@@ -40,9 +40,10 @@ const quiet = { log() {}, warn() {}, error() {} };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // B-518e (the R30 member, the R29 child's sibling): a step waits on the FACT it needs — asked a bounded COUNT of times from ONE
 // pool for the child (1500 asks, at most 300 a wait: a broken road keeps the child inside the parent's 30 s kill and each later
-// red is its own) — never a fixed sleep raced against the product's 250 ms ceiling
-let askPool = 1500;
-const until = async (fn, { tries = 300, step = 10 } = {}) => {
+// red is its own) — never a fixed sleep raced against the product's 250 ms ceiling (900 asks, at most 150 a wait: every fact
+// lands in ms, the slowest is the real 250 ms timer)
+let askPool = 900;
+const until = async (fn, { tries = 150, step = 10 } = {}) => {
   const n = Math.max(1, Math.min(tries, askPool));
   for (let k = 0; k < n; k++) { askPool = Math.max(0, askPool - 1); if (await fn()) return true; await sleep(step); }
   return Boolean(await fn());
@@ -55,6 +56,10 @@ const tabEntry = (dlg, pid, tid) => {
 };
 const fenceLifted = (dlg, pid, tid) => { const e = tabEntry(dlg, pid, tid); return Boolean(e) && !e.liveFill; };
 const wipeSettled = (dlg, pid, tid) => { const e = tabEntry(dlg, pid, tid); return Boolean(e) && (!e.liveFill || !e.liveFill.wiping); };
+// …and a lift is SETTLED once the product's own 35 ms post-lift recheck has run (its timer and its check both done): a refill
+// the leg puts back after that is caught by the leg's read, never by that recheck racing it (the R30 read's MUST)
+const postLiftQuiet = (dlg, pid, tid) => { const e = tabEntry(dlg, pid, tid); return Boolean(e) && !e.postLiftTimer && !e.postLiftChecking; };
+const liftSettled = (dlg, pid, tid) => fenceLifted(dlg, pid, tid) && postLiftQuiet(dlg, pid, tid);
 
 async function startKernelRelay(fk) {
   const { WebSocketServer, WebSocket } = createRequire(import.meta.url)('ws');
@@ -504,7 +509,7 @@ export async function runR30LoginNails({ repoDir, ok }) {
         const f1 = await post('/api/agent/browser/fill-vault', { profile: PID, target: '#pw', spec: 'item2r30.example.test#alice/password', targetId: tid });
         clock += 500;
         await rd(['get', 'title']);   // (the read starts the ceiling on the clock handed in)
-        const lift1 = await until(() => fenceLifted(dialogs, PID, tid));   // B-518e: the lift's fact, never an 80 ms sleep
+        const lift1 = await until(() => liftSettled(dialogs, PID, tid));   // B-518e: the lift's fact (settled), never an 80 ms sleep
         const afterLift = await rd(['get', 'value', '#pw']);
 
         // Part A: Page puts PW back -> read #1 wipes & refuses 409 login_fill_live -> read #2 verifies empty & returns 200!
@@ -515,13 +520,29 @@ export async function runR30LoginNails({ repoDir, ok }) {
         const openFyAfterLift = fyItems.filter((x) => x.status === 'open');
 
         // Also verify ordinary ceiling timer still runs on a postLiftHeld fence when unread:
+        // (B-518e, the R30 read's should: the TIMER's wipe is HELD at the relay — its Runtime calls wait while the fence is wiping —
+        // so reading heldBeforeCeiling can never lose a race to the real 250 ms timer; and the wipe seen with no read in flight
+        // proves the timer was its road)
+        let openTimerWipe = null;
+        const timerGate = new Promise((r) => { openTimerWipe = r; });
+        const hookBeforeTimer = relay.state.hook;
+        relay.state.hook = async (m, x) => {
+          const r0 = typeof hookBeforeTimer === 'function' ? await hookBeforeTimer(m, x) : undefined;
+          if (r0 === true) return true;
+          if (openTimerWipe && /^Runtime\./.test(String((m && m.method) || '')) && tabEntry(dialogs, PID, tid)?.liveFill?.wiping === true) await timerGate;
+          return r0;
+        };
         await pageEval(`(() => { const n = document.querySelector('#pw'); n.value = ${JSON.stringify(PW)}; return 1; })()`);
         const refillRead3 = await rd(['get', 'value', '#pw']);
         const heldBeforeCeiling = Boolean(dialogs.liveFillOnTarget(PID, tid));
+        // the ceiling's TIMER (its real 250 ms — the leg's point: it runs on a postLiftHeld fence nobody reads) has started the wipe —
+        // the tab's own state (a look that starts no check, no read in flight: the timer is the only road)
+        const timerWiping = await until(() => tabEntry(dialogs, PID, tid)?.liveFill?.wiping === true);
         clock += 500;
-        // the ceiling's TIMER (its real 250 ms — the leg's point: it runs on a postLiftHeld fence nobody reads) — waited for by the
-        // tab's own state (a look that starts no check, so the timer is the only road), never a 310 ms sleep (B-518e)
-        const timerLift = await until(() => fenceLifted(dialogs, PID, tid));
+        { const go = openTimerWipe; openTimerWipe = null; go(); }
+        relay.state.hook = hookBeforeTimer;
+        // …and its lift has SETTLED (the 35 ms recheck done before Part B's failing hook), never a 310 ms sleep (B-518e)
+        const timerLift = await until(() => liftSettled(dialogs, PID, tid));
         const heldAfterCeiling = dialogs.liveFillOnTarget(PID, tid);
 
         // Part B: Recheck fails once (`Runtime.evaluate` + `Page.getFrameTree` error) -> 409 login_check_failed, 0 For-you, next read 200!
@@ -548,7 +569,7 @@ export async function runR30LoginNails({ repoDir, ok }) {
 
         ok(
           f1.status === 200
-            && lift1 && timerLift
+            && lift1 && timerWiping && timerLift
             && afterLift.status === 200
             && refillRead1.status === 409 && refillRead1.json?.code === 'login_fill_live' && domAfterRead1 === ''
             && refillRead2.status === 200
@@ -561,7 +582,7 @@ export async function runR30LoginNails({ repoDir, ok }) {
             && openFyAfterCheckFail.length === 0
             && nextHealthyRead.status === 200,
           'R30-2 (Item 2 readable once gone + honest check_failed): post-lift refill wipes on read #1 (0 For-you notices), lifts to 200 on read #2 (and at ceiling), and failed check returns 409 login_check_failed without locking the empty tab',
-          { lift1, timerLift, refillRead1, domAfterRead1, refillRead2, openFyAfterLift, heldBeforeCeiling, heldAfterCeiling, checkFailRead, fenceAfterCheckFail, nextHealthyRead },
+          { lift1, timerWiping, timerLift, refillRead1, domAfterRead1, refillRead2, openFyAfterLift, heldBeforeCeiling, heldAfterCeiling, checkFailRead, fenceAfterCheckFail, nextHealthyRead },
         );
 
         // R30-X1: Page re-mounts filled secret into a brand-new <input id="pw2"> via createElement + appendChild!
@@ -1188,7 +1209,7 @@ export async function runR30LoginNails({ repoDir, ok }) {
         clock += 60_001;
         await post('/api/agent/browser/resolve', { profile: PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'title'], targetId: tid });
         // B-518e: the ceiling's wipe has wiped the box and SETTLED (the tab's own state), never a 90 ms sleep
-        const x3Wiped = await until(() => fk.readDomValues(tid).pw === '' && wipeSettled(dialogs, PID, tid));
+        const x3Wiped = await until(() => fk.readDomValues(tid).pw === '' && wipeSettled(dialogs, PID, tid) && postLiftQuiet(dialogs, PID, tid));
         const domWiped = fk.readDomValues(tid).pw;
 
         // Post-lift refill + read #1 wipe + read #2 lift in custom-kernel mode
@@ -1358,15 +1379,16 @@ export async function runR30LoginNails({ repoDir, ok }) {
         relay.state.hook = async (msg, x) => {
           const r = typeof hookBefore === 'function' ? await hookBefore(msg, x) : undefined;
           if (r === true) return true;
-          if (openWipe && /^Runtime\./.test(String((msg && msg.method) || ''))) { wipeCallsHeld += 1; await wipeGate; }
+          // (only the WIPE's calls: the read's own box look — a Runtime call before the ceiling starts — passes; the R30 read's MUST)
+          if (openWipe && /^Runtime\./.test(String((msg && msg.method) || '')) && tabEntry(dialogs, PID, tid)?.liveFill?.wiping === true) { wipeCallsHeld += 1; await wipeGate; }
           return r;
         };
         await post('/api/agent/browser/resolve', { profile: PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'title'], targetId: tid });
-        const wipeHeld = await until(() => wipeCallsHeld > 0);
+        const wipeHeld = await until(() => wipeCallsHeld > 0 && tabEntry(dialogs, PID, tid)?.liveFill?.wiping === true);
         const readInWipe = await post('/api/agent/browser/resolve', { profile: PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'value', '#pw'], targetId: tid });
         const release = openWipe; openWipe = null; release();
         relay.state.hook = hookBefore;
-        const spaLift1 = await until(() => fenceLifted(dialogs, PID, tid));   // B-518e: the lift's fact, never a 90 ms sleep
+        const spaLift1 = await until(() => liftSettled(dialogs, PID, tid));   // B-518e: the lift's fact (settled), never a 90 ms sleep
         const lift1Read = await post('/api/agent/browser/resolve', { profile: PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'value', '#pw'], targetId: tid });
         relay.state.hook = null;
 
@@ -1387,7 +1409,7 @@ export async function runR30LoginNails({ repoDir, ok }) {
         const fill2 = await post('/api/agent/browser/fill-vault', { profile: PID, target: '#pw', spec: 'r31-spa.example.test#alice/password', targetId: tid });
         clock += 60_001;
         await post('/api/agent/browser/resolve', { profile: PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'title'], targetId: tid });
-        const spaLift2 = await until(() => fenceLifted(dialogs, PID, tid));   // B-518e: the lift's fact, never a 90 ms sleep
+        const spaLift2 = await until(() => liftSettled(dialogs, PID, tid));   // B-518e: the lift's fact (settled), never a 90 ms sleep
         const lift2Read = await post('/api/agent/browser/resolve', { profile: PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'value', '#pw'], targetId: tid });
 
         await rawWs.evalOnTarget(tid, `(() => { document.querySelector('#pw').value = ${JSON.stringify(SHORT_PW)}; return 1; })()`);
