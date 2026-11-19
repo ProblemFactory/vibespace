@@ -10067,6 +10067,8 @@ export default {
   "output head": "输出开头", // lane device-act-audit
   "no output kept": "没有保留输出", // lane device-act-audit
   "Nothing has been done on this machine yet": "还没有在这台机器上做过任何事", // lane device-act-audit
+  "Since the hub started, this VibeSpace’s record (shared by all machines) dropped 1 line, at {when}: it could not be written in time and may be from any machine — this list may miss it": "自 hub 启动以来，这个 VibeSpace 的记录（所有机器共用）丢弃了 1 行，时间 {when}：它没能及时写入，可能来自任何一台机器——这个列表可能少了它",
+  "Since the hub started, this VibeSpace’s record (shared by all machines) dropped {n} lines, the last at {when}: they could not be written in time and may be from any machine — this list may miss some": "自 hub 启动以来，这个 VibeSpace 的记录（所有机器共用）丢弃了 {n} 行，最后一次在 {when}：它们没能及时写入，可能来自任何一台机器——这个列表可能少了一些",
   "Could not load the activity": "无法加载活动记录", // lane device-act-audit
   "New pairing command for {machine} — made by {by} from {from}": "{machine} 的新配对命令——由 {by} 从 {from} 生成", // lane device-act-audit
   "A pairing command for {machine} was made (pairing {generation}) by {by}, from the browser address {from}. Whoever runs it connects that machine to this VibeSpace.": "{by} 从浏览器地址 {from} 为 {machine} 生成了一条配对命令（第 {generation} 次配对）。谁运行它，谁就能把那台机器接入这个 VibeSpace。", // lane device-act-audit

@@ -292,6 +292,8 @@ class ExitProxyManager {
   /** B-48a4: resolves once every audit line written so far is on disk (a reader of the FILE itself — a suite; the hub's own
    *  readers judge the queued lines first, auditTail). */
   auditWritten() { return this._jr ? this._jr.whenWritten() : Promise.resolve(true); }
+  /** B-f7a6: the exit audit's lines dropped since the hub started (its journal's queue bound) — the Commands list says so */
+  auditLost() { return this._jr ? this._jr.lost() : { total: 0, lastAt: null }; }
   /** THE ONE run/attempt history: `run` lines with a command, newest first, ≤ RUNS_MAX (verify: a hand-written
    *  line is re-bounded by E.runRow). `agent: true` drops names / keys. */
   _runs({ hostId = null, sessionKeys = null, machine = null, limit = E.RUNS_DEFAULT, agent = false } = {}) {

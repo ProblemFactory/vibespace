@@ -61,7 +61,7 @@ function durationMs(s) {
  *  disk NOW (the writer's `durable`, its pace set aside) — a reader of the FILE itself (a suite); the hub never waits on it.
  *  ONE journal per file (a second manager on the same data dir gets the same one). `ask(opts)` = the owner's own hand-off to
  *  the store writer, under its timed-sync row's LITERAL name (test-architecture §72) — never a name computed here.
- *  → { append(text, {id}), pending(), whenWritten(), file } */
+ *  → { append(text, {id}), pending(), whenWritten(), lost(), file } */
 const QUEUE_MAX = 4 * 1024 * 1024;   // the unwritten lines' bound (a storage that never answers keeps at most this much in memory)
 const JOURNALS = new Map();          // file → its one journal: a SECOND journal() of a file gets the FIRST one (its ask, durable and bound — a second caller's are not used; the hub has one manager of each file, only a suite could build two)
 function journal({ file, bound = AUDIT_MAX_BYTES, mode = null, ask, durable, log = () => {} } = {}) {
@@ -69,6 +69,7 @@ function journal({ file, bound = AUDIT_MAX_BYTES, mode = null, ask, durable, log
   const batchMax = Math.max(1, Math.floor(bound / 2));
   const q = [];                       // {seq, text, bytes, id} not known on disk, oldest first
   let seq = 0, queuedBytes = 0, inFlight = null, dropped = 0;
+  let lostTotal = 0, lostAt = null;   // B-f7a6: every line DROPPED since the hub started — a person reads it on the machine's Commands (exit audit) or Activity (device audit) list
   const opts = { produce, onWritten, ...(mode == null ? {} : { mode }), allowEmpty: false, rotateAt: bound, makeDir: true };   // a data dir not made yet is made on the writer's thread (the old code's mkdir per line)
   function produce() {
     if (!q.length) return null;       // nothing queued: equal to the disk — the ONLY null
@@ -93,7 +94,7 @@ function journal({ file, bound = AUDIT_MAX_BYTES, mode = null, ask, durable, log
     while (queuedBytes > QUEUE_MAX) {
       const at = inFlight ? inFlight.n : 0;   // never a line an append in flight carries
       if (q.length <= at + 1) break;          // the newest line always stays
-      const [x] = q.splice(at, 1); queuedBytes -= x.bytes;
+      const [x] = q.splice(at, 1); queuedBytes -= x.bytes; lostTotal++; lostAt = Date.now();
       if (dropped++ === 0) log(`[audit] ${path.basename(file)}: the storage has not answered — the oldest unwritten lines are dropped (bound ${Math.round(QUEUE_MAX / 1048576)} MB; said once until a line lands)`);
     }
     ask(opts);
@@ -105,7 +106,9 @@ function journal({ file, bound = AUDIT_MAX_BYTES, mode = null, ask, durable, log
     for (let i = 0; i < 64 && q.length && q[0].seq <= upTo; i++) if (!(await durable())) return false;
     return !(q.length && q[0].seq <= upTo);
   }
-  const jr = { append, pending, whenWritten, file };
+  /** B-f7a6: the lines dropped since the hub started (the queue's bound, a storage that did not answer) → { total, lastAt } */
+  const lost = () => ({ total: lostTotal, lastAt: lostAt });
+  const jr = { append, pending, whenWritten, lost, file };
   JOURNALS.set(file, jr);
   return jr;
 }
@@ -188,7 +191,8 @@ function create({ dataDir = null, maxBytes = AUDIT_MAX_BYTES, now = () => Date.n
     return out;
   }
   const whenWritten = () => (jr ? jr.whenWritten() : Promise.resolve(true));
-  return { append, tail, whenWritten, set onLine(f) { listener = typeof f === 'function' ? f : null; }, get onLine() { return listener; }, file: dataDir ? path.join(dataDir, AUDIT_FILE) : null };
+  const lost = () => (jr ? jr.lost() : { total: 0, lastAt: null });   // B-f7a6: the route hands it to the Activity list
+  return { append, tail, whenWritten, lost, set onLine(f) { listener = typeof f === 'function' ? f : null; }, get onLine() { return listener; }, file: dataDir ? path.join(dataDir, AUDIT_FILE) : null };
 }
 
 module.exports = { create, journal, idIn, byOfReq, durationMs, AUDIT_FILE, AUDIT_MAX_BYTES, LIMIT_DEFAULT, LIMIT_MAX, QUEUE_MAX };

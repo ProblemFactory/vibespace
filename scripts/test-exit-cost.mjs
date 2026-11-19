@@ -230,12 +230,67 @@ console.log('③ the one appender (src/device-audit.js journal) over a stand-in 
   for (let n = 1; n <= 6; n++) jb.append(JSON.stringify({ n, MB }) + '\n', { id: 'b' + n });
   const left = jb.pending().map((t) => JSON.parse(t).n);
   ok(!!(inFlight && left[0] === 0 && left.length < 7 && left[left.length - 1] === 6 && saidB.filter((m) => /oldest unwritten lines are dropped/.test(m)).length === 1), `past the queue's bound (${DAU.QUEUE_MAX / 1048576} MB) the oldest unwritten lines go — never the one in flight, never the newest — said once (left ${left.join(',')})`);
+  // B-f7a6: the lines DROPPED past the bound are COUNTED for a person (the machine's Activity list), with the last drop's time
+  const lostB = typeof jb.lost === 'function' ? jb.lost() : null;
+  ok(!!(lostB && lostB.total === 7 - left.length && lostB.total > 0 && Number.isFinite(lostB.lastAt)), `B-f7a6: every dropped line is counted (${lostB && lostB.total} dropped, ${left.length} kept of 7) with the last drop's time`, lostB);
+  B.st.opts.onWritten(true);   // the line in flight lands: «written again» (the journal's own `dropped` resets)
+  ok(!!(lostB && jb.lost().total === lostB.total && saidB.some((m) => /written again/.test(m))), 'B-f7a6: the count SURVIVES the journal\'s «written again» reset — since the hub started, not since the last stall', jb.lost());
+  {
+    // RED CONTROL: the journal with its count cut (a patched copy, its requires pointed at this tree) — the plant first (lines WERE
+    // dropped past the bound), then the count reads none
+    const DSRC = fs.readFileSync(path.join(REPO, 'src/device-audit.js'), 'utf8'), CUT = ' lostTotal++; lostAt = Date.now();';
+    let C = null;
+    if (DSRC.split(CUT).length === 2) {
+      const f = path.join(SCR, 'device-audit.nocount.cjs');
+      fs.writeFileSync(f, DSRC.replace(CUT, '').replace(/require\('\.\//g, `require('${path.join(REPO, 'src')}/`));
+      try { C = require(f); } catch { C = null; }
+    }
+    const BC = standin();
+    const jc = C ? C.journal({ file: path.join(SCR, 'nowhere-ctl.jsonl'), ask: BC.ask, durable: BC.durable, log: () => { } }) : null;
+    if (jc) { jc.append(JSON.stringify({ n: 0, MB }) + '\n', { id: 'c0' }); BC.st.opts.produce(); for (let n = 1; n <= 6; n++) jc.append(JSON.stringify({ n, MB }) + '\n', { id: 'c' + n }); }
+    const keptC = jc ? jc.pending().length : 7;
+    ok(!!jc && keptC < 7, 'CONTROL B-f7a6 proves its plant first: past the bound, lines WERE dropped from the copy\'s queue', keptC);
+    ok(!!jc && jc.lost().total === 0, 'CONTROL B-f7a6 (the count cut): the drops are invisible — the person would read nothing (red)', jc && jc.lost());
+  }
   // the reader: the queued lines first (the newest), a line on disk AND still queued read once, a queued id inside a text hides nothing
   const dir = path.join(SCR, 'tail'); fs.mkdirSync(dir, { recursive: true });
   const T = { opts: null };
   const store = DAU.create({ dataDir: dir, writer: { dirty: (f, o) => { T.opts = o; }, durable: async () => true } });
   const recs = [];
   for (let i = 0; i < 3; i++) recs.push(store.append(DA.lineOf({ at: 1000 + i, hostId: 'h1', payload: { op: 'run-cmd', shell: 'echo ' + i }, by: 'system:x', ok: true })));
+  const sl = typeof store.lost === 'function' ? store.lost() : null;
+  const dir2 = path.join(SCR, 'tail-lost'); fs.mkdirSync(dir2, { recursive: true });
+  const store2 = DAU.create({ dataDir: dir2, writer: { dirty: () => { }, durable: async () => true } });   // a writer that never takes a line
+  const jr2 = DAU.journal({ file: store2.file });   // the SAME journal (one per file)
+  for (let n = 0; n < 6; n++) jr2.append(JSON.stringify({ n, MB }) + '\n', { id: 's' + n });
+  const sl2 = store2.lost();
+  ok(!!(sl && sl.total === 0 && sl.lastAt === null && sl2 && sl2.total > 0 && sl2.total === jr2.lost().total), 'B-f7a6: the audit store hands its journal\'s count on — none on a quiet store, every drop on a flooded one', { sl, sl2 });
+  {
+    const ER = fs.readFileSync(path.join(REPO, 'src/server/exit-routes.js'), 'utf8');
+    ok(/const lost = typeof hosts\.deviceAudit\.lost === 'function' \? hosts\.deviceAudit\.lost\(\) : null;[^\n]*\n\s*res\.json\(\{ machine: \{ id: h\.id, name: h\.name \|\| h\.id \}, acts: [^\n]*\.\.\.\(lost && lost\.total > 0 \? \{ lost \} : \{\}\) \}\);/.test(ER), 'B-f7a6: the Activity list\'s route answers the dropped count beside the acts (only when lines were dropped)');
+    // the words, in-process: the REAL src/lib/device-acts-dialog.js bundled over stubbed i18n / page-time / utils
+    const esbuild = require('esbuild');
+    const stubs = { 'i18n.js': "export const t = (s, p) => String(s).replace(/\\{(\\w+)\\}/g, (m, k) => (p && p[k] !== undefined ? String(p[k]) : m)); export const deviceLocale = () => 'en';",
+      'page-time.js': "export const stampAt = (at) => 'AT:' + at;", 'utils.js': "export function createModalShell() { return {}; } export function showToast() { }" };
+    let dm = null;
+    try {
+      const out = await esbuild.build({ entryPoints: [path.join(REPO, 'src/lib/device-acts-dialog.js')], bundle: true, format: 'cjs', platform: 'node', write: false, logLevel: 'silent',
+        plugins: [{ name: 'stubs', setup(b) { b.onResolve({ filter: /^\.\/(i18n|page-time|utils)\.js$/ }, (a) => ({ path: path.basename(a.path), namespace: 'stub' })); b.onLoad({ filter: /.*/, namespace: 'stub' }, (a) => ({ contents: stubs[a.path], loader: 'js' })); } }] });
+      const f = path.join(SCR, 'device-acts-dialog.cjs'); fs.writeFileSync(f, out.outputFiles[0].text); dm = require(f);
+    } catch { dm = null; }
+    const w3 = dm ? dm.lostLine({ total: 3, lastAt: 1700000000000 }) : null, w1 = dm ? dm.lostLine({ total: 1, lastAt: 1700000000000 }) : null;
+    ok(!!dm && w3 === 'Since the hub started, this VibeSpace’s record (shared by all machines) dropped 3 lines, the last at AT:1700000000000: they could not be written in time and may be from any machine — this list may miss some'
+      && w1 === 'Since the hub started, this VibeSpace’s record (shared by all machines) dropped 1 line, at AT:1700000000000: it could not be written in time and may be from any machine — this list may miss it'
+      && dm.lostLine({ total: 0, lastAt: null }) === '' && dm.lostLine(null) === '' && dm.lostLine(undefined) === '',
+      'B-f7a6: the lists say how many lines the record dropped and when — one line said as one (none ⇒ nothing said)', { w3, w1 });
+    const XP = fs.readFileSync(path.join(REPO, 'src/exit-proxy.js'), 'utf8'), XD = fs.readFileSync(path.join(REPO, 'src/lib/exit-runs-dialog.js'), 'utf8');
+    ok(/auditLost\(\) \{ return this\._jr \? this\._jr\.lost\(\) : \{ total: 0, lastAt: null \}; \}/.test(XP)
+      && /const lostE = typeof exitProxy\.auditLost === 'function' \? exitProxy\.auditLost\(\) : null;[^\n]*\n\s*res\.json\(\{ machine: [^\n]*runs: exitProxy\.runsOf\([^\n]*\.\.\.\(lostE && lostE\.total > 0 \? \{ lost: lostE \} : \{\}\) \}\);/.test(ER)
+      && /import \{ lostLine \} from '\.\/device-acts-dialog\.js';/.test(XD) && /const lostText = lostLine\(d\.lost\); if \(lostText\) body\.appendChild\(el\('p', 'agents-note exit-runs-lost', lostText\)\);/.test(XD),
+      'B-f7a6: the COMMANDS list too — the exit audit\'s own journal count (exitProxy.auditLost), its route\'s answer, its dialog\'s line in the same words');
+    const DD = fs.readFileSync(path.join(REPO, 'src/lib/device-acts-dialog.js'), 'utf8');
+    ok(/lostNote\.textContent = lostLine\(d\.lost\); lostNote\.hidden = !lostNote\.textContent;/.test(DD) && /body\.append\(note, lostNote, bar, list, empty\)/.test(DD), 'B-f7a6: the dialog draws that line under its note on every load (hidden when nothing was dropped)');
+  }
   const q1 = store.tail({ hostId: 'h1' });
   ok(q1.length === 3 && q1[0].at === 1002, 'the queued lines are read (newest first) before any reaches the disk', q1.map((r) => r.at));
   fs.appendFileSync(path.join(dir, DAU.AUDIT_FILE), JSON.stringify({ at: 999, hostId: 'h1', op: 'run-cmd', layer: 'act', by: 'system:x', summary: `echo "id":"${recs[0].id}"`, id: 'feedfacecafe' }) + '\n');

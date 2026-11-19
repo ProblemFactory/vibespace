@@ -8919,7 +8919,7 @@ button.mounts-exit-door.mounts-exit-door-open { border-color: var(--accent); }
    wider than it — text wraps, the row's command column is min-width 0, a pre scrolls itself; the body scrolls down. */
 .dialog.exit-runs-dialog { width: 960px; max-width: calc((100vw - 32px) / var(--ui-scale, 1)); }
 .exit-runs-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; max-height: 70vh; overflow-x: hidden; overflow-y: auto; }
-.exit-runs-note, .exit-runs-platform, .exit-runs-empty { margin: 0; }
+.exit-runs-note, .exit-runs-platform, .exit-runs-empty, .exit-runs-lost, .device-acts-lost { margin: 0; }   /* B-f7a6: the record's dropped-lines line */
 .exit-runs-list { display: flex; flex-direction: column; gap: 2px; container-type: inline-size; min-width: 0; }
 .exit-runs-row { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 2px 6px; font-size: 12px; }
 .exit-runs-row[data-outcome="spawn_failed"], .exit-runs-row[data-outcome="refused"], .exit-runs-row[data-outcome="timed_out"] { border-left: 2px solid var(--red); }

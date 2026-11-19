@@ -164,7 +164,8 @@ app.get('/api/hosts/:id/exit-runs', (req, res) => {
   try { h = hosts.get(req.params.id); } catch { }
   if (!h) return res.status(404).json({ error: 'no such machine', code: 'not-found' });
   const platform = h.dial && h.dial.lastAccept && typeof h.dial.lastAccept.platform === 'string' ? h.dial.lastAccept.platform : null;
-  res.json({ machine: { id: h.id, name: h.name || h.id, platform, interpreter: platform ? E.interpreterOf(platform) : null }, runs: exitProxy.runsOf(h.id, { limit: Number(req.query.limit) || undefined }) });
+  const lostE = typeof exitProxy.auditLost === 'function' ? exitProxy.auditLost() : null;   // B-f7a6: the exit audit's dropped lines — the Commands list says so
+  res.json({ machine: { id: h.id, name: h.name || h.id, platform, interpreter: platform ? E.interpreterOf(platform) : null }, runs: exitProxy.runsOf(h.id, { limit: Number(req.query.limit) || undefined }), ...(lostE && lostE.total > 0 ? { lost: lostE } : {}) });
 });
 // lane device-act-audit (design q-042 D4): WHAT THE HUB DID ON A MACHINE — every act / code op it sent there, with who asked
 // (src/device-audit.js — data/device-audit.jsonl). The OWNER's list of one machine (the Machines card's 「活动…」): cookie
@@ -183,7 +184,8 @@ app.get('/api/hosts/:id/device-acts', (req, res) => {
   if (since.bad) return res.status(400).json({ error: 'since is a duration: 90s, 15m, 2h, 3d', code: 'bad_since' });
   const kind = DA.BY_KINDS.includes(q.kind) ? q.kind : null;
   const layer = q.layer === 'act' || q.layer === 'code' ? q.layer : null;
-  res.json({ machine: { id: h.id, name: h.name || h.id }, acts: hosts.deviceAudit.tail({ hostId: h.id, kind, layer, since: since.at, limit: Number(q.limit) || undefined }) });
+  const lost = typeof hosts.deviceAudit.lost === 'function' ? hosts.deviceAudit.lost() : null;   // B-f7a6: lines dropped since the hub started — the list says so
+  res.json({ machine: { id: h.id, name: h.name || h.id }, acts: hosts.deviceAudit.tail({ hostId: h.id, kind, layer, since: since.at, limit: Number(q.limit) || undefined }), ...(lost && lost.total > 0 ? { lost } : {}) });
 });
 // THE AGENT's read (vibespace-remote audit): ONLY the acts `by` this conversation (its keys through window-reach's caller
 // keys, like every exit verb); naming another subject is `human_only` — the owner reads every line on the card

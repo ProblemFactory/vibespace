@@ -34,6 +34,15 @@ export function actVerdictText(r) {
 }
 export const actKeyOf = (r) => (r.id ? `id:${r.id}` : `${Number(r.at) || 0}:${r.op}:${r.by || ''}:${String(r.summary || '').slice(0, 120)}`);
 
+/** B-f7a6: the record's lines the hub DROPPED since it started (they could not be written in time: the queue keeps at most
+ *  4 MB) — one record for every machine, so a list may miss them. '' when none. The Commands list (exit-runs-dialog.js) says
+ *  the same of its own record. */
+export function lostLine(lost) {
+  const n = lost && Number(lost.total) > 0 ? Math.floor(Number(lost.total)) : 0;
+  if (!n) return '';
+  return n === 1 ? t('Since the hub started, this VibeSpace’s record (shared by all machines) dropped 1 line, at {when}: it could not be written in time and may be from any machine — this list may miss it', { when: when(Number(lost.lastAt) || 0, { seconds: true, words: true }) })
+    : t('Since the hub started, this VibeSpace’s record (shared by all machines) dropped {n} lines, the last at {when}: they could not be written in time and may be from any machine — this list may miss some', { n, when: when(Number(lost.lastAt) || 0, { seconds: true, words: true }) });
+}
 /** The ONE row painter (keyed; an existing node is re-worded in place). */
 export function paintActRow(node, r) {
   node.dataset.key = actKeyOf(r);
@@ -75,6 +84,7 @@ export async function openDeviceActsDialog(app, { hostId, name = '' } = {}) {
   const { body, close, dialog, raised, ready } = createModalShell({ id: 'device-acts-dialog', key: hostId, title: title(name), dialogClass: 'exit-runs-dialog device-acts-dialog', bodyClass: 'exit-runs-body', escapeToClose: true, onClose: unhook, kind: 'form' });
   if (raised) return null;   // raised: the same subject's form, as it was
   const note = el('p', 'agents-note exit-runs-note', t('The last 50 things this VibeSpace did on {machine}, newest first, each with who asked; a row opens its output head.', { machine: name || hostId }));
+  const lostNote = el('p', 'agents-note device-acts-lost'); lostNote.hidden = true;   // B-f7a6: lines the record dropped
   const bar = el('div', 'device-acts-filter');
   const pick = el('select', 'device-acts-kind');
   pick.setAttribute('aria-label', t('Who asked'));
@@ -117,6 +127,7 @@ export async function openDeviceActsDialog(app, { hostId, name = '' } = {}) {
     const machine = (d.machine && d.machine.name) || name || hostId;
     const hdr = dialog.querySelector('.dialog-header h3'); if (hdr) hdr.textContent = title(machine);
     note.textContent = t('The last 50 things this VibeSpace did on {machine}, newest first, each with who asked; a row opens its output head.', { machine });
+    lostNote.textContent = lostLine(d.lost); lostNote.hidden = !lostNote.textContent;
     for (const r0 of [...(d.acts || [])].reverse()) { const r = rowOf(r0); if (r) place(r); }
     for (const r of queued.splice(0)) place(r);
     upsert = place;
@@ -125,7 +136,7 @@ export async function openDeviceActsDialog(app, { hostId, name = '' } = {}) {
   }
   body.textContent = t('Loading…');
   pick.onchange = () => { kind = pick.value; queued.length = 0; load(); };
-  const drawn = await (async () => { body.textContent = ''; body.append(note, bar, list, empty); return load(); })();
+  const drawn = await (async () => { body.textContent = ''; body.append(note, lostNote, bar, list, empty); return load(); })();
   if (!drawn || !(await ready)) { unhook(); return null; }   // r4: a queued form opens when the open one's ask lets it — null: the person kept that one
   return { close, upsert: (r) => upsert && upsert(r), rows };
 }

@@ -13,6 +13,7 @@ import { runRow, spawnFailureText, platformLabel, RUNS_DEFAULT, EXIT_RUN_TIMEOUT
 import { encodedCommandOf } from '../encoded-command.js'; // lane machine-card-fold: a PowerShell -EncodedCommand row reads as its script
 import { revealHidden } from '../hidden-chars.js';
 import { agentUpdateDoor, isAgentOld } from './agent-update-door.js'; // B-bd27 X1: a run refused for an old agent carries its door
+import { lostLine } from './device-acts-dialog.js'; // B-f7a6: the record's dropped lines, said in the Activity list's words
 
 const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
 /** lane exit-runs-dialog-fit (2.369.209): a run's duration in tenths — one that rounds to nothing reads "<0.1 s", never "0.0 s". */
@@ -157,6 +158,7 @@ export async function openExitRunsDialog(app, { hostId, name = '' } = {}) {
   body.textContent = '';
   const note = el('p', 'agents-note exit-runs-note', t('The last 50 commands agents ran on {machine}, newest first; a row opens its output (the first 4 KiB of each stream).', { machine }));
   body.appendChild(note);
+  const lostText = lostLine(d.lost); if (lostText) body.appendChild(el('p', 'agents-note exit-runs-lost', lostText));   // B-f7a6: lines the exit audit dropped
   const plat = d.machine && platformLabel(d.machine.platform);
   if (plat && d.machine.interpreter) body.appendChild(el('p', 'agents-note exit-runs-platform', t('Commands run under {interpreter} ({platform})', { interpreter: d.machine.interpreter, platform: plat })));
   const list = el('div', 'exit-runs-list');

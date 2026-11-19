@@ -10066,6 +10066,8 @@ export default {
   "output head": "出力の先頭", // lane device-act-audit
   "no output kept": "出力は保存されていません", // lane device-act-audit
   "Nothing has been done on this machine yet": "このマシンではまだ何も行っていません", // lane device-act-audit
+  "Since the hub started, this VibeSpace’s record (shared by all machines) dropped 1 line, at {when}: it could not be written in time and may be from any machine — this list may miss it": "hub の起動以降、この VibeSpace の記録（全マシン共通）から 1 行が破棄されました（{when}）。時間内に書き込めず、どのマシンのものかもしれません――この一覧にはそれが欠けている可能性があります",
+  "Since the hub started, this VibeSpace’s record (shared by all machines) dropped {n} lines, the last at {when}: they could not be written in time and may be from any machine — this list may miss some": "hub の起動以降、この VibeSpace の記録（全マシン共通）から {n} 行が破棄されました。最後は {when}。時間内に書き込めず、どのマシンのものかもしれません――この一覧には一部が欠けている可能性があります",
   "Could not load the activity": "アクティビティを読み込めませんでした", // lane device-act-audit
   "New pairing command for {machine} — made by {by} from {from}": "{machine} の新しいペアリングコマンド — {by} が {from} から作成", // lane device-act-audit
   "A pairing command for {machine} was made (pairing {generation}) by {by}, from the browser address {from}. Whoever runs it connects that machine to this VibeSpace.": "{by} がブラウザのアドレス {from} から {machine} のペアリングコマンドを作成しました（ペアリング {generation}）。これを実行した人がそのマシンをこの VibeSpace につなげます。", // lane device-act-audit
