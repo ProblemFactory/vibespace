@@ -9,7 +9,8 @@
 //   ② Create pairing ⇒ ONE POST carrying the CHOSEN base, and BOTH command URLs on that base; re-open the row's
 //      sheet ⇒ no POST, its head says `never`; Generate a new command ⇒ ONE POST, generation 2, the "previous command
 //      stops working" sentence (attack 16: ten re-opens, zero mints). The never row (ui-needs-a-button, machines-6) says its
-//      state SHORT (从未连接) with the sheet's door on its line and the whole sentence in a fold a REAL press opens
+//      state SHORT (从未连接) with the sheet's door on its line and the whole sentence in a fold a REAL press opens (its place
+//      printed, never judged: the row is a flex row)
 //      (CONTROL: a bundle of the pre-chain row, the whole sentence as its state)
 //   ③ a daemon dialing with the RETIRED token (generation 1) ⇒ the row reads 最近一次拨号：被拒绝（令牌不匹配）… and the
 //      Machines card the same (attack 17); the English page says it in English
@@ -144,22 +145,27 @@ try {
   ok(await P.waitFor(`!!${rowOf('host-dial-uimac')}`, 10000), 'the new device has a machine row');
   // lane ui-needs-a-button (machines-6, carried into 2.369.411): an OFFLINE row says its state SHORT, with the pairing sheet's
   // door on its line, and folds the whole sentence (what to check) under it. The leg reads what a person sees where it is
-  // drawn: the short words, the door in that line above the fold, the fold closed; then a REAL press on the fold's summary
+  // drawn: the short words, the door in that line, the fold closed; then a REAL press on the fold's summary
   // and the whole sentence read from the page once it shows (checkVisibility + a hit test: a closed <details> keeps its
-  // text in the DOM, unseen). The pre-chain row (the whole sentence as the state) is the CONTROL below.
+  // text in the DOM, unseen). Where the fold sits is not the law's (the row's .mounts-path is a flex ROW: the fold's summary
+  // sits at the line's right, and opens there) — the geometry is printed, never judged. The pre-chain row (the whole sentence as
+  // the state) is the CONTROL below.
   const SENT_NEVER = /^从未连接 — .+ 生成的命令尚未到达本服务器（还没运行，或设备无法访问 .+）$/;
   const neverJs = (id) => `(() => { const r = ${rowOf(id)}; const s = r && r.querySelector('.mounts-dial-state'); if (!s) return null;
     const vis = (e) => !!e && (typeof e.checkVisibility !== 'function' || e.checkVisibility()) && e.getClientRects().length > 0 && e.getBoundingClientRect().height > 0;
     const line = s.querySelector(':scope > .need-line'), w = line && line.querySelector(':scope > .need-words'), b = line && line.querySelector(':scope > .need-doors > .need-door');
     const f = s.querySelector(':scope > details.mounts-errline-details'), sm = f && f.querySelector(':scope > summary'), body = f && f.querySelector(':scope > :not(summary)');
     let hit = false; if (vis(body)) { body.scrollIntoView({ block: 'nearest' }); const q = body.getBoundingClientRect(); const e = document.elementFromPoint(q.left + Math.min(q.width / 2, 20), q.top + q.height / 2); hit = !!e && body.contains(e); }
+    const box = (e) => { if (!e) return null; const q = e.getBoundingClientRect(); return [Math.round(q.left), Math.round(q.top), Math.round(q.width), Math.round(q.height)].join(','); };
     return { state: s.dataset.dialState, text: s.textContent, words: w ? w.textContent : null, wordsShown: vis(w), lineText: line ? line.textContent : null,
-      door: b ? { label: b.textContent, door: b.dataset.door || '', shown: vis(b), aboveFold: !!f && b.getBoundingClientRect().bottom <= f.getBoundingClientRect().top + 1 } : null,
+      door: b ? { label: b.textContent, door: b.dataset.door || '', shown: vis(b) } : null,
+      drawn: { line: box(line), words: box(w), door: box(b), fold: box(f), body: vis(body) ? box(body) : null },
       fold: f ? { open: f.open, summary: sm ? sm.textContent : '', shown: vis(body), hit, said: vis(body) ? body.innerText : '' } : null }; })()`;
-  const shortOk = (v) => !!v && v.state === 'never' && v.words === '从未连接' && v.wordsShown && !!v.door && v.door.label === '查看配对命令…' && v.door.door === 'pair:host-dial-uimac' && v.door.shown && v.door.aboveFold
+  const shortOk = (v) => !!v && v.state === 'never' && v.words === '从未连接' && v.wordsShown && !!v.door && v.door.label === '查看配对命令…' && v.door.door === 'pair:host-dial-uimac' && v.door.shown
     && v.lineText === v.words + v.door.label && !!v.fold && v.fold.summary === '检查什么';
   const vNever = await P.evalJs(neverJs('host-dial-uimac'));
-  ok(shortOk(vNever) && !vNever.fold.open && !vNever.fold.shown, 'the row says 从未连接 SHORT, the door 查看配对命令… on its line above the fold, and 检查什么 folded shut (the whole sentence not shown)', vNever);
+  ok(shortOk(vNever) && !vNever.fold.open && !vNever.fold.shown, 'the row says 从未连接 SHORT, the door 查看配对命令… on its line, and 检查什么 folded shut (the whole sentence not shown)', vNever);
+  if (vNever) console.log(`  · the never row as drawn (left,top,width,height): line ${vNever.drawn.line} · words ${vNever.drawn.words} · door ${vNever.drawn.door} · fold ${vNever.drawn.fold}`);
   // the REAL press on 检查什么 — a redraw of the panel (a hosts push) builds the row anew with its fold shut: pressed again, said
   let vOpen = null;
   const presses = [];
@@ -169,7 +175,8 @@ try {
     await P.waitFor(`(() => { const f = ${rowOf('host-dial-uimac')}?.querySelector('.mounts-dial-state > details.mounts-errline-details'); return !!f && f.open; })()`, 3000);
     vOpen = await P.evalJs(neverJs('host-dial-uimac'));
   }
-  ok(shortOk(vOpen) && vOpen.fold.open && vOpen.fold.shown && vOpen.fold.hit && SENT_NEVER.test(vOpen.fold.said), 'a real press on 检查什么 opens the fold: the whole sentence shows under the short state — 从未连接 — the command generated at … has not reached this server (not run yet, or the device cannot reach …)', { ...vOpen, presses });
+  ok(shortOk(vOpen) && vOpen.fold.open && vOpen.fold.shown && vOpen.fold.hit && SENT_NEVER.test(vOpen.fold.said), 'a real press on 检查什么 opens the fold: the whole sentence shows beside the short state — 从未连接 — the command generated at … has not reached this server (not run yet, or the device cannot reach …)', { ...vOpen, presses });
+  if (vOpen) console.log(`  · …opened (left,top,width,height): line ${vOpen.drawn.line} · fold ${vOpen.drawn.fold} · its sentence ${vOpen.drawn.body}`);
   {
     // CONTROL: the pre-chain row — a patched copy of src/lib/sidebar-mounts.js that never draws the short state (the whole
     // sentence on the row, as before machines-6), in a page of its own: the plant shows first, then the leg's reading goes red
