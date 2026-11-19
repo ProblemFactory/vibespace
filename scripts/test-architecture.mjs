@@ -5111,7 +5111,7 @@ await section(async () => {
     ['with twenty new INDEX lines, a copy missing the control\'s line', census82(bug, more82.filter((_, i) => i !== mid)).lost === 1, true],
     ['a file line\'s head reworded', census82(fsb, fl.map((l) => (l.startsWith('src/exit-shell.js — ') ? 'src/exit-shel1.js — ' + l.slice(20) : l))).lost === 1, true],
     ['a reworded head', census82(bug, head).lost === 1, true],
-    ['a tail edit (edited, never lost)', census82(bug, tail).lost > 0 || census82(bug, tail).edited !== 1, false],
+    ['a tail edit (edited, never lost)', census82(bug, tail).lost > 0 || census82(bug, tail).edited !== census82(bug, bl).edited + 1, false],   // B-49b5: ONE MORE edited line than the tree holds — a reworded tail (no pronoun of a person) is an edit the tree may already carry
     ['a retired line removed (neither lost nor edited)', !judgeMoved(fx82, ret82, drop).ok, false],
     ['a dead retirement (its line still there)', judgeMoved(fx82, ret82, bl).said.some((x) => x.startsWith('dead retirement: bugfix-index row ')), true],
     ['a lost line said in words', judgeMoved(fx82, bug, drop).said.some((x) => x === `lost: bugfix-index row ${midRow + 1}: "${bug.heads[midRow]}"`), true],
