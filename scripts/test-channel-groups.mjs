@@ -48,7 +48,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
 import { pathToFileURL } from 'node:url';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
@@ -914,7 +914,7 @@ console.log('§3g2 B-b17f the boot warm-up reads each group\'s log ONCE, off the
     ok(g1 && g1.unread === null && others.length === NG - 1 && wantOthers && named.length === 1 && f1.said[0] && !f1.said[0].changed.includes(stuckG) && g1b && g1b.unread === want1 && f1.said[1] && f1.said[1].changed.length === 1 && f1.said[1].changed[0] === stuckG,
       `§3g2 (f) one warm read that never settles: the other ${others.length} groups counted (= from scratch), the warm-up's end said; the stuck group «not counted yet» (${g1 && g1.unread}), said once by name (${named.length} line); its read landing at last: counted ${g1b && g1b.unread} = ${want1}, the list said again naming it alone`);
     const BND = '          const got = await bounded(rd);\n';
-    const noBound = geSrc.replace(BND, '          const got = await rd;\n');
+    const noBound = anchored(geSrc, BND, '          const got = await rd;\n', 'nobound');   // B-0d3e's one door: the bounded await spelled once, else a red by name
     ok(geSrc.split(BND).length === 2 && noBound !== geSrc, 'CONTROL (no bound on a warm read): its plant — the bounded await — is spelled exactly once');
     let landNow2 = null; const hang2 = new Promise((r) => { landNow2 = r; });
     const said2 = [];
@@ -1017,7 +1017,7 @@ console.log('§3g2 B-b17f the boot warm-up reads each group\'s log ONCE, off the
     };
     const m1 = await made(GE);
     const ALLCOLD = '(coldIds && coldIds.has(g.id))';
-    const allCold = geSrc.replace(ALLCOLD, '(coldIds && coldIds.size > 0)');
+    const allCold = anchored(geSrc, ALLCOLD, '(coldIds && coldIds.size > 0)', 'all-cold');   // B-0d3e's one door
     ok(geSrc.split(ALLCOLD).length === 2 && allCold !== geSrc, 'CONTROL (every group cold while the warm-up runs): its plant — the start set\'s own test — is spelled exactly once');
     const m2 = await made(MUTWU.load('src/server/groups-engine.js', allCold, 'all-cold'));
     let7();
