@@ -31,7 +31,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { scratchDir } from './scratch.mjs';
+import { scratchDir, anchored } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -367,7 +367,7 @@ console.log('— ⑪b B-299b A1: the cards off the hub\'s loop');
     `a warm + its reader and a turn end make ${nAttach} and ${nTurn} sync fs calls into the store on the main thread (path- or fd-named — the worker reads it); the card and its 13 steps as the release drew them`, { nAttach, nTurn, late: late.length });
   // RED: the release's road — the worker's own code called on the main thread
   const src = fs.readFileSync(path.join(REPO, 'src/agy-backfill.js'), 'utf8'), CALL = "got = await pool().call('agySnapshots',";
-  const Rel = mutantCopies('agy-cards-inline', REPO).load('src/agy-backfill.js', src.replace(CALL, "got = await (async (op, x) => require('./agy-cards.js').snapshotsOf(x))('agySnapshots',"), 'inline');
+  const Rel = mutantCopies('agy-cards-inline', REPO).load('src/agy-backfill.js', anchored(src, CALL, "got = await (async (op, x) => require('./agy-cards.js').snapshotsOf(x))('agySnapshots',", 'inline'), 'inline');
   const nRel = await counting(async () => { await Rel.warmCards(sess(), { dataDir: DATA }); });
   ok(src.split(CALL).length === 2 && nRel > 3, `control (the store read on the main thread, as the release read it): ${nRel} sync calls into the store ⇒ RED`);
   // 2. EVERY ROAD a reader is built on (M2): the descriptor's warm with the live session (ws-handler's attach); a FRESH reader
@@ -400,7 +400,7 @@ console.log('— ⑪b B-299b A1: the cards off the hub\'s loop');
     scanN = BF.spawnsOf(synthetic()).length;
     scanSame = ids(BF.spawnsOf(synthetic())) === ids(AS.unlinkedSpawns(BF.withHistory(synthetic(), []))) && ids(BF.spawnsOf(ring)) === ids(AS.unlinkedSpawns(BF.withHistory(ring, parseAcpBufferRecords(JOURNAL))));
     fresh();
-    const D1 = mutantCopies('agy-desc-a1', REPO).load('src/harnesses/antigravity.js', dsrc.replace(DW, 'if (o.session && !o.remote) await AGY_BACKFILL.warmCards(o.session);'), 'a1');
+    const D1 = mutantCopies('agy-desc-a1', REPO).load('src/harnesses/antigravity.js', anchored(dsrc, DW, 'if (o.session && !o.remote) await AGY_BACKFILL.warmCards(o.session);', 'a1'), 'a1');
     await D1.store.warmTranscript(P, '', { remote: false });
     viewRed = cardsIn(synthetic());
   } finally { process.env.HOME = preH; BF._historyCache.delete(P); }
@@ -419,7 +419,7 @@ console.log('— ⑪b B-299b A1: the cards off the hub\'s loop');
       try { await D.store.warmTranscript(P, '', o); } finally { BF.warmCards = realWC; }
       return !got ? null : got.waitMs != null ? got.waitMs : got.late ? (got.liveWaitMs != null ? got.liveWaitMs : BF.CARDS_WAIT_MS) : (got.viewWaitMs != null ? got.viewWaitMs : BF.CARDS_VIEW_WAIT_MS);
     };
-    const DA = mutantCopies('agy-desc-no-attach', REPO).load('src/harnesses/antigravity.js', dsrc.replace(DW, () => "if (!o.remote) await AGY_BACKFILL.warmCards(o.session || { backend: 'antigravity', backendSessionId: id, buffer: '' });"), 'no-attach');   // stale-pins: kept (cadb07780's descriptor line, planted back as the RED control)
+    const DA = mutantCopies('agy-desc-no-attach', REPO).load('src/harnesses/antigravity.js', anchored(dsrc, DW, () => "if (!o.remote) await AGY_BACKFILL.warmCards(o.session || { backend: 'antigravity', backendSessionId: id, buffer: '' });", 'no-attach'), 'no-attach');   // stale-pins: kept (cadb07780's descriptor line, planted back as the RED control)
     fresh();
     const atAttach = await boundOf(H8, { session: withData(sess()), attach: true }), atView = await boundOf(H8, { session: withData(sess()) }), atRed = await boundOf(DA, { session: withData(sess()), attach: true });
     ok(atAttach === BF.CARDS_WAIT_MS && BF.CARDS_WAIT_MS < BF.CARDS_VIEW_WAIT_MS && atView === BF.CARDS_VIEW_WAIT_MS && atRed === BF.CARDS_VIEW_WAIT_MS,
@@ -475,7 +475,7 @@ console.log('— ⑪b B-299b A1: the cards off the hub\'s loop');
     ok(tries === 2 && rr.length === 14, `a live conversation whose call failed (an idle one has no turn end): asked ONCE more, its card routed then (${tries} calls, ${rr.length} records)`);
     fresh();
     const bsrc = fs.readFileSync(path.join(REPO, 'src/agy-backfill.js'), 'utf8'), WK = "if (!fs.existsSync(path.join(__dirname, 'agy-cards-worker.js'))) return";
-    const Dev = mutantCopies('agy-cards-device', REPO).load('src/agy-backfill.js', bsrc.replace(WK, "if (!fs.existsSync(path.join(__dirname, 'agy-cards-worker-not-shipped.js'))) return"), 'device');
+    const Dev = mutantCopies('agy-cards-device', REPO).load('src/agy-backfill.js', anchored(bsrc, WK, "if (!fs.existsSync(path.join(__dirname, 'agy-cards-worker-not-shipped.js'))) return", 'device'), 'device');
     const dv = sess(); dv._agyCards = new Map(); dv._agyCards.dataDir = DATA;
     await Dev.warmCards(dv, { dataDir: DATA });
     const devCards = new Dev.AgySessionMessages(dv, 'p', { buffersDir: BUFS }).raw().filter((r) => r.kind === 'subagent' && r.toolCallId === KEY);
