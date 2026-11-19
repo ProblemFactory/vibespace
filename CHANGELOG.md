@@ -67,6 +67,11 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Elsewhere the popup shows the reading and how many requests ran here since, and the account pool reads an estimate only where it has proven itself.
 - Codex and Antigravity usage estimates learn only from their own readings, never from Claude’s quota sizes.
 - Gmail: when the company switches its sign-in client, For you says how many accounts still use the old one, with Re-authorize for each in turn.
+- Settings, Task Groups, machines and requests now start with one or two plain sentences; commands, paths and mechanics sit under «Technical details».
+- Windows, machines, jobs and the activity list now show names and plain words instead of internal ids, kinds and op codes.
+- Agents, browsers, designs, apps and plugins now say what happened in a sentence; commands, paths and probe results sit under «Technical details».
+- Storage, usage, settings, the vault, machines and channel accounts say it in a sentence too; commands, file paths and permission names are folded away.
+- Buttons say what they do: no dialog asks you to press «OK», and a status no longer looks like a button.
 - When a usage limit cuts a Workflow run short, the automatic continue tells the agent to resume that run instead of starting it again.
 - A paired machine now runs an agent's CLI from where that machine's own login shell finds it, and a new conversation says so when it finds none.
 - In Remote, a machine's «Exit: network — … · commands — …» line is now a button that opens «Who can use it…»; the separate exit icon is gone.
@@ -136,7 +141,6 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - When many conversations share an account pool, a conversation that stops now decides again only which account it runs on, so VibeSpace stays responsive.
 - A comment or edit in a document opened from a conversation now reaches that conversation, even when another one wrote the same file later.
 - A website sign-in left behind by a page in a conversation's Agent browser (it went elsewhere) now ends at once with its For you item; it stayed 10 minutes.
-- A running Codex conversation's Agent steps in its Properties now show the plan it is working through; they were always empty.
 - An app or desktop install no longer says it ended without recording its exit while it is still running (seen on Ubuntu 26.04).
 - When an agent's new tab loses its window before it is ready, VibeSpace opens it in a new window of the agent's own; it used to ask the agent to run it again.
 - While a conversation waits for its folder's storage to come up, VibeSpace says what it is waiting for instead of «taking unusually long».
@@ -184,6 +188,13 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A quota read for an account another machine holds is no longer labelled «own /usage panel»: the usage popup says it was read through that machine.
 - On a paired machine whose Claude settings can't be read, a subscription you picked now sets your own settings file aside for that start and says so, as here.
 - A Gmail or Google Drive storage folder keeps working when the OAuth client under its preset name is replaced — it keeps the client it signed in with.
+- A channel search no longer says «No message matches.» above the results its accounts found.
+- A message between agents keeps more words beside a hidden secret: a word right after a short value or a Chinese word, and the colon after a member's name.
+- When the record of your browser profiles cannot be read, they are kept and read again; they used to be lost at the next start, with their logins.
+- In the For you window, a link an agent ended with «…» at a line's end now opens, as in the tray; a long desktop-app notification says where it was cut.
+- In Properties, a running conversation's Agent steps now match its chat: Codex shows its plan (always empty before), Claude its current steps.
+- A sub-agent's message read while it was still being written is no longer lost from the sub-agent's view.
+- A folder already showing a machine's folder (or inside or around one) is refused by name; of two such rows already there, one says so and waits.
 - A picture you paste, pick or take in a chat is checked at once: an empty file, a HEIC, a non-picture or one too large for the model is refused with its reason.
 - A subscription you pick now pays on a machine whose Claude settings name an apiKeyHelper; the helper's key used to pay. Its first start says so.
 - A session's own auto-continue choice now survives a VibeSpace restart instead of falling back to the default.
