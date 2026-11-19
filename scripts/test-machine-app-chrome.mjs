@@ -250,8 +250,12 @@ const pointerAfter = async (n, ms = 5000) => { const t0 = Date.now(); while (Dat
 // machine px): Chrome hands noVNC an integer clientX / clientY (under one CSS pixel off) and noVNC cuts the machine coordinate with
 // `|0` (under one machine pixel) — so |off| < 1/s + 1, computed from the LIVE geometry, never a fixed number. The old ±1 held only
 // while the crop sat at a whole scale on integer offsets; the command's fold (ui-plain-words pick 2) made the pane shorter, s ≈ 0.974.
+// its read: BOTH cuts move the coordinate DOWN (noVNC listens to mousedown — a MouseEvent, whose clientX / clientY Chrome FLOORS —
+// and cuts with |0; noVNC 1.7 takes its scale from the canvas's getBoundingClientRect, so nothing else drifts): the press lands in
+// (target − (1/s + 1), target] — past it either way is red (a press ABOVE the target can only be a drift)
 const quant = (s) => 1 / s + 1;
-const near = (e, x, y, s) => !!e && Math.abs(e.x - x) < quant(s) && Math.abs(e.y - y) < quant(s);
+const offIn = (v, t, s) => v - t <= 0 && v - t > -quant(s);
+const near = (e, x, y, s) => !!e && offIn(e.x, x, s) && offIn(e.y, y, s);
 async function runAsWindow(p) {
   await p.ev(`window.__open(${ROW('win-a', 'WIN-DESK1')})`);
   await p.ev(`(() => { const i = document.querySelector('.machine-desktop-cmd'); i.value = 'start "" blender'; i.dispatchEvent(new Event('input')); })()`);
@@ -281,23 +285,28 @@ console.log('① – ⑤ desk 1100 px');
   await p.shot('desk.png');
   await p.click(5, 5); // the page's own first press (outside the window)
   g = await p.ev(GEO);
-  // the press at TWO scales (主开发's law): this crop's (s < 1 — the fold made the pane shorter) and the WHOLE one (the window made
-  // taller, the crop re-fitted by its ResizeObserver) — each within ITS quantization, so a drift that grows with the scale's distance
-  // from 1 is red; both offsets printed (the measure that decides quantization vs drift)
+  // the press at THREE window heights (主开发's law: two scales at least): the leg's own window (the hosted red's s ≈ 0.974), one made
+  // SHORTER (s < 1 by construction) and one TALLER (the whole scale, s ≥ 1) — the crop re-fitted each time by its ResizeObserver; each
+  // press within ITS scale's quantization, so a drift that grows with the scale's distance from 1 is red; every offset printed (the
+  // measure that decides quantization vs drift)
   const pressAt = async (gg) => { const k = vnc.seen.pointers.length; await p.click(gg.box[0] + gg.box[2] / 2, gg.box[1] + gg.box[3] / 2); return (await pointerAfter(k)).find((e) => e.mask & 1); };
-  const sNow = g.box[2] / 800, here = await pressAt(g);
-  ok(near(here, 700, 450, sNow), `② a click at the pane's centre arrives at the app's centre on the machine (700, 450) within this crop's pointer quantization (s ${sNow.toFixed(4)}: |off| < ${quant(sNow).toFixed(3)}) — got ${JSON.stringify(here)}`, { here, sNow, g });
   const winEl = `[...document.querySelectorAll('.vs-win[data-type="machine-app"]')].pop()`;
   const h0 = await p.ev(`${winEl}.style.height`);
-  await p.ev(`(() => { ${winEl}.style.height = '680px'; return true; })()`);
-  await p.until(`(() => { const g = ${GEO}; return g && g.box[2] / 800 >= 1; })()`, 5000);
-  await sleep(300);
-  const gW = await p.ev(GEO), sW = gW.box[2] / 800, whole = await pressAt(gW);
-  console.log(`    · measured: s ${sNow.toFixed(4)} → off (${here ? here.x - 700 : '?'}, ${here ? here.y - 450 : '?'}) of < ${quant(sNow).toFixed(3)}; s ${sW.toFixed(4)} → off (${whole ? whole.x - 700 : '?'}, ${whole ? whole.y - 450 : '?'}) of < ${quant(sW).toFixed(3)}`);
-  ok(sNow < 1 && sW >= 1 && near(whole, 700, 450, sW), `② the same press at the WHOLE scale (s ${sW.toFixed(4)}: |off| < ${quant(sW).toFixed(3)}) — got ${JSON.stringify(whole)}`, { whole, sW, gW });
-  ok(!near({ x: 300 + Math.trunc(g.box[2] / 2), y: 200 + Math.trunc(g.box[3] / 2) }, 700, 450, sNow),
-    `CONTROL (RED): a press mapped WITHOUT the crop's scale (one CSS pixel taken as one machine pixel — a drift) lands ~${(700 - 300 - Math.trunc(g.box[2] / 2)).toFixed(0)} px off: outside this scale's quantization`);
-  await p.ev(`(() => { ${winEl}.style.height = ${JSON.stringify(h0)}; return true; })()`);
+  const sizeTo = async (h) => { await p.ev(`(() => { ${winEl}.style.height = ${JSON.stringify(h)}; return true; })()`); await sleep(400); return p.ev(GEO); };
+  const off = (e, x, y) => (e ? `(${e.x - x}, ${e.y - y})` : '(none)');
+  const sNow = g.box[2] / 800, here = await pressAt(g);
+  const gL = await sizeTo('600px'), sL = gL.box[2] / 800, low = await pressAt(gL);
+  const gW = await sizeTo('680px'), sW = gW.box[2] / 800, whole = await pressAt(gW);
+  console.log(`    · measured (the press at (700, 450)): s ${sNow.toFixed(4)} → off ${off(here, 700, 450)} in (−${quant(sNow).toFixed(3)}, 0]; s ${sL.toFixed(4)} → off ${off(low, 700, 450)} in (−${quant(sL).toFixed(3)}, 0]; s ${sW.toFixed(4)} → off ${off(whole, 700, 450)} in (−${quant(sW).toFixed(3)}, 0]`);
+  ok(near(here, 700, 450, sNow), `② a click at the pane's centre arrives at the app's centre on the machine (700, 450) within this crop's pointer quantization (s ${sNow.toFixed(4)}: off in (−${quant(sNow).toFixed(3)}, 0]) — got ${JSON.stringify(here)}`, { here, sNow, g });
+  ok(sL < 1 && sW >= 1 && near(low, 700, 450, sL) && near(whole, 700, 450, sW), `② the same press with the window SHORTER (s ${sL.toFixed(4)}) and TALLER (the whole scale, s ${sW.toFixed(4)}) — each within its own quantization; got ${off(low, 700, 450)} and ${off(whole, 700, 450)}`, { low, sL, whole, sW });
+  // RED CONTROL, a REAL press: the picture nudged 2 CSS px right inside its crop (what is drawn no longer under the crop's centre — a
+  // drift) — the same press at the crop's centre lands at least 3 machine px left: outside the bound
+  const gD = await sizeTo(h0), sD = gD.box[2] / 800;
+  const st0 = await p.ev(`(() => { const st = ${winEl}.querySelector('.machine-app-stage'); const l = st.style.left; st.style.left = (parseFloat(l) + 2) + 'px'; return l; })()`);
+  const drifted = await pressAt(gD);
+  await p.ev(`(() => { ${winEl}.querySelector('.machine-app-stage').style.left = ${JSON.stringify(st0)}; return true; })()`);
+  ok(!!drifted && !near(drifted, 700, 450, sD), `CONTROL (RED): a REAL press with the picture nudged 2 CSS px inside its crop misses the bound — got ${off(drifted, 700, 450)}`, drifted);
   await p.until(`(() => { const g = ${GEO}; return g && Math.abs(g.box[2] / 800 - ${sNow}) < 0.002; })()`, 5000);
   await sleep(300);
   g = await p.ev(GEO);
@@ -363,7 +372,7 @@ console.log('⑥ the phone: 390 px');
   const n = vnc.seen.pointers.length;
   await p.click(g2.box[0] + g2.box[2] / 2, g2.box[1] + g2.box[3] / 2);
   const got = await pointerAfter(n);
-  ok((({ x, y } = got.find((e) => e.mask & 1) || {}) => Math.abs(x - 700) <= 2 && Math.abs(y - 450) <= 2)(), `⑥ a click at the crop's centre lands at the app's centre within one CSS pixel of the 0.49× crop (${JSON.stringify(got.find((e) => e.mask & 1))})`, got);
+  ok(near(got.find((e) => e.mask & 1), 700, 450, g2.box[2] / 800), `⑥ a click at the crop's centre lands at the app's centre within the pointer's quantization of the ${(g2.box[2] / 800).toFixed(3)}× crop (off in (−${quant(g2.box[2] / 800).toFixed(3)}, 0]) — ${JSON.stringify(got.find((e) => e.mask & 1))}`, got);
   await p.ev(`(() => { const w = [...window.__wm.windows.values()].find((x) => x.type === 'machine-app'); window.__wm.closeWindow(w.id); })()`);
   p.close();
 }
