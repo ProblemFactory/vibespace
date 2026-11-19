@@ -251,12 +251,13 @@ console.log('— ④ B-460d: what a conversation starts never outranks the hub �
   const clean = C.priorityJudge(rd({}), FILES);
   const cutWs = C.priorityJudge(rd({ 'src/ws-create.js': src.replace(CUTP, '              exe: spawnCmd, args: spawnArgs,\n') }), FILES);   // stale-pins: kept (the red control rebuilds the release's line)
   const cutJob = C.priorityJudge(rd({ 'src/jobs.js': JSRC.replace('const argv = [...priorityArgv(pri && pri.priority), process.execPath,', 'const argv = [process.execPath,') }), FILES);
+  const VRS = read('src/server/vault-run-door.js'), cutVault = C.priorityJudge(rd({ 'src/server/vault-run-door.js': VRS.replace('if (by && child && child.pid) { try { lowerImpl(child.pid, by); } catch { } }', '') }), FILES);   // B-7f18
   const BRS = read('src/server/boot-restore.js'), RA = "exe: 'ssh', args: sshArgs });";
   const twoInBr = C.priorityJudge(rd({ 'src/server/boot-restore.js': BRS.replace(RA, RA + "\n      sessionSpawnLine({ node: NODE_CMD, wrapper: CHAT_WRAPPER, bufFile, metaFile: metaFileW, exe: 'claude' });") }), FILES);
   const newRoad = C.priorityJudge(rd({ 'src/server/new-road.js': "const { sessionSpawnLine } = require('../spawn/line.js');\nsessionSpawnLine({ node: 'n', wrapper: 'w', bufFile: 'b', metaFile: 'm', exe: 'x' });\n" }), [...FILES, 'src/server/new-road.js']);
   ok(!clean.length && cutWs.some((r) => /PRIORITY ROAD src\/ws-create\.js/.test(r)) && cutJob.some((r) => /PRIORITY ROAD src\/jobs\.js/.test(r)) && newRoad.some((r) => /UNLISTED session line src\/server\/new-road\.js/.test(r))
-    && twoInBr.some((r) => /PRIORITY EXCEPTION src\/server\/boot-restore\.js: 2 session line/.test(r)),
-    `THE SPAWN CENSUS: the ${C.PRIORITY_ROADS.length} places read clean; RED for the ws-create line with its priority cut, the job spawn without it, a NEW caller of the session line with no row, and a SECOND (local) line in the excepted file`, { clean, cutWs, cutJob, newRoad, twoInBr });
+    && twoInBr.some((r) => /PRIORITY EXCEPTION src\/server\/boot-restore\.js: 2 session line/.test(r)) && cutVault.some((r) => /PRIORITY ROAD src\/server\/vault-run-door\.js/.test(r)),
+    `THE SPAWN CENSUS: the ${C.PRIORITY_ROADS.length} places read clean; RED for the ws-create line with its priority cut, the job spawn without it, the vault run door's command without it (B-7f18), a NEW caller of the session line with no row, and a SECOND (local) line in the excepted file`, { clean, cutWs, cutJob, cutVault, newRoad, twoInBr });
   ok(/session\._cpuNice = ocPty \? null : r6Pri\.fact;/.test(src) && /child\.once\('error', /.test(JSRC),
     'an OpenCode serve terminal (its pty is the serve\'s, never this line) gets no fact — no row claims it lowered; a job wrapper whose exec fails late is an error event the engine catches, never the hub\'s crash');
   // the words a person reads (Session Properties' row, src/lib/cpu-priority-words.js)

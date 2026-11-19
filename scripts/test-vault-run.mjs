@@ -62,7 +62,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { scratchDir } from './scratch.mjs';
+import { scratchDir, anchored } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -117,6 +117,7 @@ const [mode, arg] = process.argv.slice(2);
     return;
   }
   if (mode === 'ran') { fs.writeFileSync(arg, 'ran'); return; }
+  if (mode === 'nice') { process.stdin.on('data', () => {}); process.stdin.on('end', () => process.stdout.write('NICE ' + require('os').getPriority())); return; }   // B-7f18: the run's own niceness, read by itself once its stdin closed (the door writes it after the set)
   if (mode === 'json') { const v = process.env.T, b = Buffer.from(v); process.stdout.write('{"meta":{"rc":"ok"},"key":"deadbeefcafef00dba5eba11","use_auth":false,"site":"HQ","auth":"' + b.toString('base64') + '","raw":"' + v + '","ok":true}\\n'); return; }
   if (mode === 'split') { const v = process.env.T, h = v.length >> 1; process.stdout.write('<' + v.slice(0, h)); await sleep(40); process.stderr.write(v.slice(h) + '>\\n'); await sleep(40); process.stdout.write(' tail\\n'); return; }   // ONE value, half on each pipe
   if (mode === 'edge2') { process.stdout.write('x'.repeat(2 * 1024 * 1024 - 60) + [...process.env.T].map((c) => '&#' + c.codePointAt(0) + ';').join('') + 'y'.repeat(4096)); return; }   // a LONG new form across the 2 MiB cut
@@ -1519,7 +1520,7 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
   const NOWHERE = DOOR.SEAL_NOWHERE;
   const REAL = DOOR.rootOwnedNoWrite;                     // the ACTUAL ownership predicate (uid 0 && no group/other write)
   const GHSHA = VR.knownToolOf('gh').toolSha256;          // the pinned tool digest
-  const capOf = () => { let cap = null; const spawn = (cmd, args, opts) => { cap = { cmd, env: opts.env, cwd: opts.cwd }; const c = new EventEmitter(); c.pid = 99001; c.stdout = new EventEmitter(); c.stdout.destroy = () => {}; c.stderr = new EventEmitter(); c.stderr.destroy = () => {}; c.stdin = null; setImmediate(() => { c.emit('exit', 0, null); c.emit('close', 0, null); }); return c; }; return { get: () => cap, spawn }; };
+  const capOf = () => { let cap = null; const spawn = (cmd, args, opts) => { cap = { cmd, args, env: opts.env, cwd: opts.cwd, argv0: opts.argv0, detached: opts.detached, stdio: opts.stdio }; const c = new EventEmitter(); c.pid = 99001; c.stdout = new EventEmitter(); c.stdout.destroy = () => {}; c.stderr = new EventEmitter(); c.stderr.destroy = () => {}; c.stdin = null; setImmediate(() => { c.emit('exit', 0, null); c.emit('close', 0, null); }); return c; }; return { get: () => cap, spawn }; };
   // a uid-owned dir holding a fake gh; the door (REAL ownership) sees it as replaceable, so the digest gate runs — an injected
   // toolDigest returns the PIN for this exact path (the fake "matches", runs ok:own), a different sha for anything else.
   const GHREAL = path.join(ROOT, 'ghreal'); fs.mkdirSync(GHREAL, { recursive: true });
@@ -1547,6 +1548,40 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
     'round 12/13 (BLOCKER): the sealed PATH is root-owned REALPATHS only — WSEAL/NOTYET/GHREAL (all uid-owned) are dropped, /usr/bin kept, every surviving entry is its own canonical root-owned realpath', { WSEAL: dirs.includes(WSEAL), NOTYET: dirs.includes(NOTYET), GHREAL: dirs.includes(GHREAL), usrbin: dirs.includes('/usr/bin'), dirs });
   ok(E.GIT_CONFIG_GLOBAL === '/dev/null' && E.GIT_CONFIG_NOSYSTEM === '1' && E.GIT_TERMINAL_PROMPT === '0', 'BLOCKER (r11): gh’s git child reads no user / system config', { GIT_CONFIG_GLOBAL: E.GIT_CONFIG_GLOBAL });
   ok(E.GH_TOKEN === 'agent-minted-value-0123456789' && E.GH_HOST === 'github.com' && E.GH_ENTERPRISE_TOKEN === undefined, 'round 15 (the ONE host set): a STORED value run as a default-host verb (gh issue list) ROUTES to github.com (routeHosts\' default) — GH_HOST is pinned to github.com and the credential stays GH_TOKEN (not re-homed to GH_ENTERPRISE_TOKEN)', { token: !!E.GH_TOKEN, GH_HOST: E.GH_HOST });
+
+  // B-7f18 (B-460d's follow-up): THE RUN STARTS BELOW THE HUB — handed the start's step, the door spawns EXACTLY what it spawned
+  // before (the same program, argv, argv[0], env, options: never `nice` in front, which would hold the minted env unchecked and lose
+  // the typed argv[0]) and sets the child `by` below the hub the moment spawn returns; none handed (the setting off, no nice) ⇒ no set
+  {
+    const NICE = { nice: '/usr/bin/nice', by: 5 }, ENVP = () => ({ ...SUITE_ENV, HOME: SUITE_HOME, PATH: [WSEAL, NOTYET, GHREAL, '/usr/bin', '/bin'].join(':') });
+    const RUNP = { caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', GHREAL_GH, 'issue', 'list'], cwd: sw.work };
+    const shape = (c) => c && JSON.stringify({ cmd: c.cmd, args: c.args, argv0: c.argv0, detached: c.detached, stdio: c.stdio, cwd: c.cwd, env: Object.fromEntries(Object.entries(c.env || {}).filter(([k]) => k !== DOOR.MARK_ENV).sort()) });
+    const legOf = async (mod) => {
+      const sets = [], P0 = capOf(), P1 = capOf(), P2 = capOf(), P3 = capOf();
+      const r0 = await sw.mk(mod, { isRootOwned: REAL, toolDigest: digestVouch, toolSealed: sealedVouch, spawnImpl: P0.spawn, lowerImpl: (pid, by) => sets.push(['none', pid, by]), agentEnv: ENVP }).run(RUNP);
+      const r1 = await sw.mk(mod, { isRootOwned: REAL, toolDigest: digestVouch, toolSealed: sealedVouch, spawnImpl: P1.spawn, spawnPriority: () => ({ priority: NICE }), lowerImpl: (pid, by) => sets.push(['lowered', pid, by]), agentEnv: ENVP }).run(RUNP);
+      const r2 = await sw.mk(mod, { isRootOwned: REAL, toolDigest: digestVouch, toolSealed: sealedVouch, spawnImpl: P2.spawn, spawnPriority: () => { throw new Error('no verdict'); }, lowerImpl: (pid, by) => sets.push(['threw', pid, by]), agentEnv: ENVP }).run(RUNP);
+      const r3 = await sw.mk(mod, { isRootOwned: REAL, toolDigest: digestVouch, toolSealed: sealedVouch, spawnImpl: P3.spawn, spawnPriority: () => ({ priority: NICE }), lowerImpl: () => { throw Object.assign(new Error('gone'), { code: 'ESRCH' }); }, agentEnv: ENVP }).run(RUNP);
+      return { ok: [r0, r1, r2, r3].every((r) => r && r.ok), same: !!P0.get() && [P1, P2, P3].every((P) => shape(P.get()) === shape(P0.get())), sets: JSON.stringify(sets), argv0: P1.get() && P1.get().argv0, cmd: P1.get() && P1.get().cmd };
+    };
+    const L = await legOf(DOOR);
+    ok(L.ok && L.same && L.sets === JSON.stringify([['lowered', 99001, 5]]) && /^\/proc\/\d+\/fd\/\d+$/.test(L.cmd || '') && /\/gh$/.test(L.argv0 || ''),
+      `B-7f18: handed the start's step, the run's spawn is the release's own, byte for byte (the hashed inode «${L.cmd}», argv[0] the tool's path, the same env and options) and its child is set 5 below the hub ONCE, after the spawn — none handed: no set; a verdict that throws: no set; a refused set: the run ran`, L);
+    // RED CONTROL (scripts/mutant-copy.mjs, the anchor through scratch.mjs anchored()): the door with its set cut runs at the hub's priority
+    const SRC7 = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
+    let cut = null; try { cut = await legOf(M.load('src/server/vault-run-door.js', anchored(SRC7, 'if (by && child && child.pid) { try { lowerImpl(child.pid, by); } catch { } }', '', 'B-7f18 the set cut'), 'b7f18-noset')); } catch (e) { cut = { error: String(e && e.message).slice(0, 160) }; }
+    ok(!!cut && !cut.error && cut.sets === '[]', `RED CONTROL: the door with its set cut lowers nothing — the leg above is red on it${cut && cut.error ? ` (${cut.error})` : ''}`, cut);
+    // THE REAL ROAD (its reader's should 4): a REAL spawn through the door with the DEFAULT setter (lowerRun) — the child reads its own
+    // niceness once its stdin closed, and the door writes that stdin only AFTER the set (the same turn): an order, never a race
+    const own = os.getPriority(), want = Math.min(19, own + 5);
+    const wN = await world(); openRow(wN);
+    const NICE_RUN = ['--stdin', 'vault://mounts/m1/secretKey', '--', NODE, PRINTER, 'nice'];
+    const { r: rN } = await runAnswered(wN, NICE_RUN, { answer: 'once', door: wN.mk(DOOR, { spawnPriority: () => ({ priority: NICE }) }) });
+    const wO = await world(); openRow(wO);
+    const { r: rO } = await runAnswered(wO, NICE_RUN, { answer: 'once' });
+    ok(!!rN && rN.ok && rN.stdout === 'NICE ' + want && !!rO && rO.ok && rO.stdout === 'NICE ' + own,
+      `B-7f18 THE REAL ROAD: a real run handed the step reads its own niceness ${rN && rN.stdout} (the suite's own ${own} + 5); handed none it reads ${rO && rO.stdout}${want > own ? '' : ' — NOT OBSERVABLE here: the suite already runs at niceness 19 (the set leaves it there)'}`, { own, want, n: rN && { ok: rN.ok, out: rN.stdout, err: rN.error }, o: rO && { ok: rO.ok, out: rO.stdout, err: rO.error } });
+  }
 
   // RUN A2 — INVERTED (round 12/13): the agent MAKES NOTYET 0555 (uid-owned) and a FRESH seal still DROPS it — "cannot write" is
   // OWNERSHIP, not the write bit (round 11 with accessSync W_OK KEPT this exact dir and a planted `git` shim ran). A fresh door so

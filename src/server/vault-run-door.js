@@ -356,9 +356,20 @@ function redactLong(text) {
  * @param {() => ('cluster'|'local')} [o.instanceKind]
  * @param {(conversationId: string) => boolean} [o.liveOf]  is the asking conversation still running
  */
+/** B-7f18: lower a vault run's child `by` steps below the hub's own niceness (at most 19). On Linux a niceness is per THREAD
+ *  (setpriority on a pid moves its main thread only; a thread or child takes its creator's), and a runtime may start threads before
+ *  the set (Go's own, microseconds after exec) — so the threads /proc lists for it a moment later (an async read, off the loop) are
+ *  set too: what is left is a thread born between that read and its set. */
+function lowerRun(pid, by) {
+  const n = Math.min(19, os.getPriority() + by);
+  os.setPriority(pid, n);
+  if (process.platform === 'linux') fs.readdir(`/proc/${pid}/task`, (e, tids) => { if (e) return; for (const t of tids) { const tid = Number(t); if (tid > 0 && tid !== pid) { try { os.setPriority(tid, n); } catch { } } } });
+}
 function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () => ({ ...process.env }), instanceKind = () => 'local', policy = () => null,
   liveOf = () => true, runRoot = () => process.env.XDG_RUNTIME_DIR || os.tmpdir(), home = os.homedir(), tmpDir = os.tmpdir(),
   now = () => Date.now(), log = () => {}, spawnImpl = spawn, killGraceMs = KILL_GRACE_MS, pipeGraceMs = PIPE_GRACE_MS,
+  spawnPriority = () => null,   // B-7f18: () → src/server/spawn-priority.js priorityFor's answer (its `priority.by` = the step below the hub); none = the hub's own
+  lowerImpl = lowerRun,   // B-7f18: the run's child set `by` below the hub (a suite's seam)
   timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h) }, randomBytes = crypto.randomBytes,
   useGrants = null, useFacts = () => null,
   entryMax = 256,   // B-be21: the run list's bound (a suite seam — the product keeps 256)
@@ -2389,7 +2400,15 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
         const credHome = (() => { const rs = spec.row && spec.row.runSeal; if (!rs || !rs.credRef || !sealHost) return {}; const ref = rs.credRef, name = VR.ghCredEnvFor(sealHost, spec.row), val = m.env[ref]; return (name && name !== ref && val !== undefined) ? { [name]: val, [ref]: undefined } : {}; })();
         const execPath = toolFd != null ? ('/proc/' + process.pid + '/fd/' + toolFd) : spec.tool;   // round 13: exec the open inode we hashed, never a second path lookup
         const argv0 = toolFd != null ? spec.tool : m.argv[0];   // the child's argv[0] = the tool's real path (gh reads it only for help text)
+        // B-7f18 (B-460d's follow-up): WHAT AN AGENT STARTS NEVER OUTRANKS THE HUB — the start's step (src/server/spawn-priority.js:
+        // 5 while agents.lowerCpuPriority is on) is read BEFORE the spawn and set on the run's child the moment spawn returns (its exec
+        // has then succeeded; lowerRun). NOT `nice` in front, as a conversation's line has: nice would be one more program holding the
+        // minted env with none of this door's ownership checks, it cannot keep the argv[0] the agent typed (a multi-call program
+        // dispatches on it), and a failed exec would come back as a run that ran. Its cost, said: what the tool starts before the set
+        // reaches it keeps the hub's priority. A refused set (a security module) leaves the run as it is
+        let by = 0; try { const pri = spawnPriority(), b = pri && pri.priority && pri.priority.by; by = Number.isInteger(b) && b >= 1 && b <= 19 ? b : 0; } catch { by = 0; }
         child = spawnImpl(execPath, m.argv.slice(1), { argv0, cwd: place, env: { ...base, ...m.env, ...sealEnv, ...credHome, [MARK_ENV]: mark }, stdio: [m.stdin != null ? 'pipe' : 'ignore', 'pipe', 'pipe'], detached: true, windowsHide: true });
+        if (by && child && child.pid) { try { lowerImpl(child.pid, by); } catch { } }
       } catch (e) { spawnError = String((e && e.code) || (e && e.message) || 'spawn').slice(0, 80); finish(null, null); return; }
       rec.child = child;
       runs.add(rec);

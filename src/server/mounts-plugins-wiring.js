@@ -135,7 +135,9 @@ const vaultUseFacts = (caller) => {
   }
   return { conversationKeys: caller && caller.conversationId ? [caller.conversationId] : [] };
 };
-const vaultRun = require('./vault-run-door.js').create({ dataDir: path.join(rootDir, 'data'), vault, sources: vaultSources, userTodos, log: (m) => console.log('[vault-run]', m), useGrants: vaultUseGrants, useFacts: vaultUseFacts,
+const vaultRun = require('./vault-run-door.js').create({ dataDir: path.join(rootDir, 'data'), vault, sources: vaultSources, userTodos, log: (m) => console.log('[vault-run]', m),
+  spawnPriority: () => require('./spawn-priority.js').priorityFor({ serverSetting, local: true, log: console }),   // B-7f18: a run's command starts below the hub, as a conversation does (the setting read per run)
+  useGrants: vaultUseGrants, useFacts: vaultUseFacts,
   notice: (key, text, o) => (typeof serverNotice === 'function' ? serverNotice(key, text, o) : 0),   // lane vault-standing-request r7: a run the 1-hour window let through pops ONE notice on every open client (never filed in For you)
   // lane vault-use-grants (R4, default OFF): the policy judge = the ONE decisions caller (decision-engine judge, use vault-use-policy —
   // its gates: the LLM plugin, the key, the day's money); the owner's policy rides the question, the card's facts the input

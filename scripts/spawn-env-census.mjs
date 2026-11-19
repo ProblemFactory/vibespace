@@ -398,7 +398,8 @@ export const COPIES = Object.freeze([
 ]);
 // THE PRIORITY ROADS (B-460d, the owner's yes of 2026-11-17 — WHAT A CONVERSATION STARTS NEVER OUTRANKS THE HUB): each road
 // that starts a local conversation or a job has ONE place where its spawn's argv takes `nice -n 5` (src/server/spawn-priority.js
-// decides, src/spawn/line.js priorityArgv spells it). Rows: [file, what, the place spelled, count]. Every caller of the session
+// decides, src/spawn/line.js priorityArgv spells it) — B-7f18's vault run door the one road that sets it right after its spawn instead
+// (src/server/vault-run-door.js lowerRun: no program in front of a minted value). Rows: [file, what, the place spelled, count]. Every caller of the session
 // line (`sessionSpawnLine(`) is a row's file or a PRIORITY_EXCEPT row with its reason — a new road with no priority is RED.
 export const PRIORITY_ROADS = Object.freeze([
   ['src/spawn/line.js', 'THE session line starts with the start\'s priority words', 'argv: [...priorityArgv(priority), node, wrapper,', 1],
@@ -407,6 +408,11 @@ export const PRIORITY_ROADS = Object.freeze([
   ['src/jobs.js', 'a job\'s wrapper is spawned with the priority words first', "const argv = [...priorityArgv(pri && pri.priority), process.execPath, ...[wrapper, ctl, specPath, '--proto=' + WRAPPER_PROTO]];", 1],
   ['src/jobs.js', '…and spawned by that argv', 'child = spawn(argv[0], argv.slice(1), {', 1],
   ['src/server/jobs-wiring.js', 'the jobs engine is handed the start\'s priority (the setting read per start)', "spawnPriority: () => require('./spawn-priority.js').priorityFor({ serverSetting,", 1],
+  ['src/server/vault-run-door.js', 'B-7f18: a vault run\'s command (the door spawns it for an agent) reads the start\'s step before its spawn', 'let by = 0; try { const pri = spawnPriority(), b = pri && pri.priority && pri.priority.by;', 1],
+  ['src/server/vault-run-door.js', '…and sets it on the run\'s child the moment spawn returns (never nice in front: the door\'s own checks, argv[0], a failed exec)', 'if (by && child && child.pid) { try { lowerImpl(child.pid, by); } catch { } }', 1],
+  ['src/server/vault-run-door.js', '…through the door\'s own setter: the step below the hub\'s own niceness, at most 19 (each thread /proc lists for it too)', 'const n = Math.min(19, os.getPriority() + by);', 1],
+  ['src/server/vault-run-door.js', '…which is the door\'s default (a suite hands its own)', 'lowerImpl = lowerRun,', 1],
+  ['src/server/mounts-plugins-wiring.js', 'the vault run door is handed the start\'s priority (the setting read per run)', "spawnPriority: () => require('./spawn-priority.js').priorityFor({ serverSetting, local: true, log: console }),", 1],
 ]);
 export const PRIORITY_EXCEPT = Object.freeze([
   // [file, why, the line's own spelling there, count] — a SECOND line in an excepted file (a local one) is RED

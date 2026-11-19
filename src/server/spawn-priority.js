@@ -6,7 +6,9 @@
 // the cores the page needed. A LOCAL conversation (the dtach road and the daemon pipe road — both run src/spawn/line.js)
 // and a Background Work job (src/jobs.js) now START below the hub: `nice -n 5` on the spawn itself, so the first process
 // is born with it and everything it starts inherits it (never a set-priority call after the fork, which races the
-// child's own children). +5 over the hub's own niceness, whatever that is.
+// child's own children). +5 over the hub's own niceness, whatever that is. ONE road reads this answer and sets the step right
+// AFTER its spawn instead: the vault run door (B-7f18 — no program may stand in front of a minted value; src/server/vault-run-door.js
+// lowerRun says what that costs).
 //
 // The setting `agents.lowerCpuPriority` (default on; off = the release's spawn, byte for byte) is read at each START: a
 // running conversation keeps the priority it started with. A machine with no nice program is never unable to start one:
@@ -43,7 +45,7 @@ function priorityFor({ serverSetting = () => undefined, local = true, log = cons
   if (!on) return { priority: null, fact: { by: 0, why: 'off' } };
   const p = nice();
   if (!p) {
-    if (!saidMissing) { saidMissing = true; try { log.warn?.(`[spawn-priority] no nice program in ${NICE_DIRS.join(', ')} — conversations and jobs start at the server's own CPU priority (${SETTING} is on)`); } catch { } }
+    if (!saidMissing) { saidMissing = true; try { log.warn?.(`[spawn-priority] no nice program in ${NICE_DIRS.join(', ')} — conversations, jobs and vault runs start at the server's own CPU priority (${SETTING} is on)`); } catch { } }
     return { priority: null, fact: { by: 0, why: 'no-nice' } };
   }
   return { priority: { nice: p, by: PRIORITY_BY }, fact: { by: PRIORITY_BY } };
