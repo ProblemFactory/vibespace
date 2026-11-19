@@ -257,7 +257,7 @@ function createEventStream({
  *  re-arms (the serve creates the db at boot). */
 function createStoreWatch({ dirs = [], onDirty = null, debounceMs = STORE_DEBOUNCE_MS, log = console, watchImpl = fs.watch, existsImpl = fs.existsSync } = {}) {
   const watchers = [];
-  const state = { watching: [], failed: [], hits: 0, lastAt: 0 };
+  const state = { watching: [], failed: [], hits: 0, lastAt: 0, lost: 0 };
   let timer = null;
   function fire(reason) {
     state.hits++; state.lastAt = Date.now();
@@ -279,7 +279,19 @@ function createStoreWatch({ dirs = [], onDirty = null, debounceMs = STORE_DEBOUN
         if (n && !/^opencode\.db/.test(n)) return;
         fire(`store:${n || 'change'}`);
       });
-      w.on?.('error', (e) => { state.failed.push({ dir, reason: e.message }); log?.warn?.(`[opencode-events] store watch on ${dir} failed: ${e.message} — external (TUI) changes will not be noticed live`); });
+      // a store watch that errors or closes LEAVES the list (主开发's ruling, 2026-11-19): `active` then reads false, so
+      // laneHealthy() turns false and the timed list refresh takes its place again — said once per lost watch; `lost`
+      // counts it, so the next `connected` re-arms instead of handing the dead watch back (createLiveLane)
+      const lost = (why) => {
+        const i = watchers.indexOf(w); if (i < 0) return;
+        watchers.splice(i, 1);
+        const j = state.watching.indexOf(dir); if (j >= 0) state.watching.splice(j, 1);
+        state.failed.push({ dir, reason: why }); state.lost++;
+        try { w.close(); } catch { }
+        log?.warn?.(`[opencode-events] store watch on ${dir} ended (${why}) — the timed list refresh takes its place; external (TUI) changes are seen at its pace`);
+      };
+      w.on?.('error', (e) => lost((e && e.message) || 'error'));
+      w.on?.('close', () => lost('closed'));
       watchers.push(w);
       state.watching.push(dir);
     } catch (e) {
@@ -288,8 +300,10 @@ function createStoreWatch({ dirs = [], onDirty = null, debounceMs = STORE_DEBOUN
     }
   }
   return {
-    state: () => ({ watching: [...state.watching], failed: [...state.failed], hits: state.hits, lastAt: state.lastAt, active: watchers.length > 0 }),
-    stop() { clearTimeout(timer); for (const w of watchers) { try { w.close(); } catch { } } watchers.length = 0; state.watching.length = 0; },
+    // a store watch lost makes the lane UNHEALTHY at once (the timed list refresh returns) even while another dir's watch
+    // lives — that one may be a stray dir, the lost one the store the serve uses; the next `connected` re-arms a fresh watch
+    state: () => ({ watching: [...state.watching], failed: [...state.failed], hits: state.hits, lastAt: state.lastAt, lost: state.lost, active: watchers.length > 0 && !state.lost }),
+    stop() { clearTimeout(timer); for (const w of watchers.splice(0)) { try { w.close(); } catch { } } state.watching.length = 0; },
   };
 }
 
@@ -393,8 +407,10 @@ function createLiveLane({ locator, onEvent = null, onExternal = null, onState = 
     if (!watch && watchTried && why !== 'connected') return watch;
     const dirs = await resolveDirs();
     if (watch) {
-      if (sameDirs(dirs, watchedDirs)) return watch;      // NOTHING MOVED: never churn the watchers on a reconnect
-      log?.warn?.(`[opencode-events] the OpenCode store moved (${watchedDirs.join(', ') || 'none'} → ${dirs.join(', ') || 'none'}) — re-arming the store watch`);
+      const lostSome = !!watch.state().lost;
+      if (sameDirs(dirs, watchedDirs) && !lostSome) return watch;      // NOTHING MOVED and nothing lost: never churn the watchers on a reconnect
+      if (lostSome && sameDirs(dirs, watchedDirs)) log?.warn?.(`[opencode-events] a store watch was lost — re-arming the store watch at this reconnect`);
+      else log?.warn?.(`[opencode-events] the OpenCode store moved (${watchedDirs.join(', ') || 'none'} → ${dirs.join(', ') || 'none'}) — re-arming the store watch`);
       try { watch.stop(); } catch { }
       watch = null; watchedDirs = []; rearms++;
     }
