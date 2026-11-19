@@ -138,6 +138,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
   const SID = {};
   for (const [k, n] of [['P', 'Pin chat'], ['D', 'Delete chat'], ['M', 'Shared chat']]) SID[k] = await create(k, n);
   const ups = []; let chromeProc = null; let fchrome = null;
+  let cdp = null;   // B-7a99: the page socket, held where the finally sees it (it was a const in the try: the finally closed nothing)
   try {
     if (!ok(Object.values(SID).every(Boolean), 'three chat sessions were created on the fake claude', journal.slice(-600))) return;
     await sleep(1200);
@@ -153,7 +154,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     procs.add(chromeProc);
     let target = null; for (let i = 0; i < 120 && !target; i++) { try { target = (await (await fetch(`http://127.0.0.1:${CDP}/json`)).json()).find((t) => t.type === 'page'); } catch { } if (!target) await sleep(250); }
     if (!ok(!!target, 'chrome exposed a CDP page target')) return;
-    const cdp = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
+    cdp = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
     await new Promise((r, e) => { cdp.on('open', r); cdp.on('error', e); });
     let seq = 0; const pend = new Map();
     cdp.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); } });
@@ -390,7 +391,11 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     if (hb) await click(centre(hb));
     try { medWs?.close(); } catch { }
   } finally {
-    try { cdp?.close?.(); } catch { }
+    if (cdp) {   // B-7a99: closed, and PROVED closed — its close event heard, its state CLOSED
+      const shut = cdp.readyState === 3 ? Promise.resolve(true) : new Promise((r) => { cdp.once('close', () => r(true)); setTimeout(() => r(false), 3000); });
+      try { cdp.close(); } catch { }
+      ok((await shut) === true && cdp.readyState === 3, 'the finally closed the page socket the suite opened (its close heard, CLOSED)');
+    }
     for (const u of ups) { try { await u.close(); } catch { } }
     try { await fchrome?.close(); } catch { }
     for (const sid of Object.values(SID)) { try { wsMain.send(JSON.stringify({ type: 'kill', sessionId: sid })); } catch { } }

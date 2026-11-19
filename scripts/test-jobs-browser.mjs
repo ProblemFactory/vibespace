@@ -19,6 +19,7 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const J = require(path.join(REPO, 'src/browser-job-principal.js'));
 const B = require(path.join(REPO, 'src/browser-profiles.js'));
+const W = require(path.join(REPO, 'src/browser-windows.js'));   // B-7a99: the rung-2 stand-in's RUNG2_CREATE (its line came from test-browser-windows with 066b90274, its import did not); no leg here asks rung 2 today (measured: 0 calls)
 
 let pass = 0, fail = 0;
 function ok(cond, name, detail) {

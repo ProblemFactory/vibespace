@@ -31,6 +31,9 @@ const req=(m,p,body)=>new Promise((res,rej)=>{const d=body?JSON.stringify(body):
   const r=http.request({host:'127.0.0.1',port:PORT,path:p,method:m,headers:d?{'Content-Type':'application/json','Content-Length':Buffer.byteLength(d)}:{}},(s)=>{let b='';s.on('data',c=>b+=c);s.on('end',()=>{try{res({status:s.statusCode,json:JSON.parse(b||'{}')})}catch{res({status:s.statusCode,json:{raw:b.slice(0,200)}})}})});
   r.on('error',rej); r.end(d);});
 const wait=async(fn,ms=60000)=>{const t=Date.now();while(Date.now()-t<ms){try{if(await fn())return true}catch{}await new Promise(r=>setTimeout(r,1500))}return false};
+// B-7a99: the ssh reverse tunnel this suite starts, held HERE where the end sees it (it was declared inside the try: the end's
+// `tun?.kill()` threw, its catch swallowed it, and every run that reached the tunnel left an ssh process behind)
+let tun=null;
 let pass=0,fail=0; const ck=(n,c,extra='')=>{ if(c){pass++;console.log('  ✓ '+n)}else{fail++;console.log('  ✗ '+n+(extra?' — '+extra:''))} };
 try{
   ck('server booted', await wait(async()=>(await req('GET','/api/home')).status===200, 60000));
@@ -41,7 +44,7 @@ try{
   // an ssh reverse tunnel (the same shape a NAT'd instance gets from the frp
   // relay). Without it the precheck correctly refuses — which is itself the
   // NAT guard working, but we want to exercise the whole chain here.
-  const tun=spawn('ssh',['-o','BatchMode=yes','-o','ConnectTimeout=8','-o','ExitOnForwardFailure=yes','-o','StrictHostKeyChecking=accept-new','-i',KEY,'-p',PORT_SSH,'-N','-R',`${PORT}:127.0.0.1:${PORT}`,`${USER}@${HOST}`],{stdio:'ignore'});
+  tun=spawn('ssh',['-o','BatchMode=yes','-o','ConnectTimeout=8','-o','ExitOnForwardFailure=yes','-o','StrictHostKeyChecking=accept-new','-i',KEY,'-p',PORT_SSH,'-N','-R',`${PORT}:127.0.0.1:${PORT}`,`${USER}@${HOST}`],{stdio:'ignore'});
   await new Promise(r=>setTimeout(r,4000));
   console.log('  … graduating (installs the daemon as a service over ssh; up to 5min)');
   const g=await req('POST',`/api/hosts/${hid}/graduate-dial`,{serverUrl:`http://127.0.0.1:${PORT}`});
@@ -58,7 +61,17 @@ try{
   ck('record is a plain ssh machine again', !!h2 && !h2.graduated && !h2.deviceId);
   const t2=await req('POST',`/api/hosts/${hid}/test`); ck('ssh still works after removal', t2.status===200 && !t2.json?.error, JSON.stringify(t2.json).slice(0,120));
 }catch(e){ console.log('HARNESS THREW:', e.message); fail++; }
+// B-7a99: THE TUNNEL ENDED, PROVED — THE KILL LAW: only the child this suite spawned and holds (its own handle, a real pid, still
+// running) is signalled, never a pid read from anywhere; its exit is HEARD, then signal 0 to that pid is refused (ESRCH)
+if(tun&&Number.isInteger(tun.pid)&&tun.pid>1){
+  const running=()=>tun.exitCode===null&&tun.signalCode===null;
+  const ended=running()?new Promise(r=>{tun.once('exit',()=>r(true));setTimeout(()=>r(false),5000);}):Promise.resolve(true);
+  if(running()){ try{ tun.kill('SIGTERM'); }catch{} }
+  const heard=await ended;
+  if(!heard&&running()){ try{ tun.kill('SIGKILL'); }catch{} await new Promise(r=>{tun.once('exit',r);setTimeout(r,3000);}); }
+  let alive=true; try{ process.kill(tun.pid,0); }catch(e){ alive=e.code!=='ESRCH'; }
+  ck('the ssh tunnel this suite started is gone (its exit heard after SIGTERM, its pid answers no signal)', heard&&!alive, `pid ${tun.pid}`);
+}
 console.log(fail?`${fail} FAILED (${pass} passed)`:`ALL PASS (${pass})`);
 if(fail) console.log('--- server log tail ---\n'+log.slice(-2500));
-try{ tun?.kill(); }catch{}
 srv.kill(); try{ execFileSync('git',['worktree','remove','--force',WT],{cwd:REPO,stdio:'ignore'}); }catch{} process.exit(fail?1:0);

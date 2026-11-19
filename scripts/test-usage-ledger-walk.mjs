@@ -392,7 +392,6 @@ let storeBlind = null, twoLoads = null, countBlind = null, boundFatal = null; //
   const M = mutantCopies('usage-ledger-walk', REPO), src = read('src/usage-anchors.js');
   const plant = (name, from, to) => { if (!src.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); return require(M.write('src/usage-anchors.js', src.replace(from, to), name)); };
   const withAnchors = (UA2, fn) => { const k = require.resolve('../src/usage-anchors.js'), real = require.cache[k]; require.cache[k] = { ...real, exports: UA2 }; try { return fn(); } finally { require.cache[k] = real; } };
-  const relearnWith = (UA2) => withAnchors(UA2, () => relearnRows(2400));
   const plantMany = (name, pairs) => { let t = src; for (const [a, b] of pairs) { if (!t.includes(a)) return null; t = t.replace(a, b); } return require(M.write('src/usage-anchors.js', t, name)); };
   const otherAcct = plant('log-adds-another-account', "late = usageHistory.arrivalsFor(mark, want, fromMs, sl[0]);", "late = usageHistory.arrivalsFor(mark, [...usageHistory._evCache.arr.ids.key.keys()], fromMs, sl[0]);");
   const pastEnd = plant('log-takes-past-the-end-too', "late = usageHistory.arrivalsFor(mark, want, fromMs, sl[0]);", "late = usageHistory.arrivalsFor(mark, want, fromMs, Infinity);");

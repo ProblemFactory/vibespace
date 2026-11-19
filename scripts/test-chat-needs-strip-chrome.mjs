@@ -145,7 +145,9 @@ const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_P
   '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, HOME: chromeHome } });
 const cleanup = () => {
   try { chrome.kill('SIGKILL'); } catch { }
-  for (const d of [chromeDir, MUT, MUT2, MUT3, MUT4, MUT5]) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { } }
+  // B-7a99: what this suite makes TODAY — its browser's profile folder (70758c1e9 stopped making the five MUT folders this line still
+  // named: the line threw at every exit, before it removed anything, and the browser folder stayed behind every run)
+  for (const d of [chromeDir]) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { } }
 };
 process.on('exit', cleanup);
 const PENDS = new Map();
@@ -1541,6 +1543,15 @@ try {
   check('no page error', pageErrors.length === 0, pageErrors.slice(0, 5));
 } catch (e) { fail++; console.log('  ✗ threw: ' + (e?.stack || e)); }
 
+// B-7a99: THE CLEANUP RUNS, PROVED before the count — the browser this suite started has exited (its exit heard) and its profile folder
+// is gone; the exit hook stays as the net for a run that throws (the cleanup is idempotent)
+{
+  const browserEnded = chrome.exitCode !== null || chrome.signalCode !== null ? Promise.resolve(true) : new Promise((r) => { chrome.once('exit', () => r(true)); setTimeout(() => r(false), 5000); });
+  cleanup();
+  const ended = await browserEnded;
+  cleanup();   // a profile file the browser wrote while it went down
+  check('the cleanup ran: the browser this suite started has exited and its profile folder is gone', ended && !fs.existsSync(chromeDir), chromeDir);
+}
 console.log(`\nshots: ${SHOTS}`);
 console.log(fail ? `\n${fail} FAILED (${pass} passed${skipped ? `, ${skipped} skipped` : ''})` : `\nALL PASS (${pass}${skipped ? `, ${skipped} skipped` : ''})`);
 process.exit(fail ? 1 : 0);
