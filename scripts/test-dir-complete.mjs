@@ -157,14 +157,14 @@ console.log('\n── ③b a hung PROBE (B-0f3d) ──');
     if (op === 'dirSlice' && p.probes && p.probes.length) {
       seen.push(...p.probes);
       if (failing) throw new Error('the worker was ended');
-      if (p.probes.some((x) => hung.has(x))) await sleep(600);
+      if (p.probes.some((x) => hung.has(x))) await sleep(300);   // twice the leg's budget
     }
     return (await runOp(op, p)).result;
   } });
   const IR = path.join(HOME, 'work', 'investor-relations');
   hung.add(IR);
   const ds = mk(DS);
-  const ASK = { text: '~/work/payments', bases: ['~'], probe: ['~/work/investor-relations', '~/work/payments'], budgetMs: 200 };
+  const ASK = { text: '~/work/payments', bases: ['~'], probe: ['~/work/investor-relations', '~/work/payments'], budgetMs: 150 };
   const a = await ds.slice(ASK);
   ok('③b a probe hangs (a stale mount): the reply still LISTS what was typed — not partial, ~/work listed — and names its late probes in the field\'s own words (the text\'s own probe batched with it included)', a.partial === false && !!a.listing.dirs['~/work'] && Array.isArray(a.probesLate) && a.probesLate.includes('~/work/investor-relations') && a.probesLate.includes('~/work/payments'), { partial: a.partial, probesLate: a.probesLate });
   seen.length = 0;
@@ -174,7 +174,7 @@ console.log('\n── ③b a hung PROBE (B-0f3d) ──');
   hung.clear(); hung.add(path.join(HOME, 'work', 'weekly-admin'));
   const ds2 = mk(DS);
   const c1 = await ds2.slice({ ...ASK, probe: ['~/work/weekly-admin'] });
-  await sleep(700);   // the slow probe answers (600 ms) after the budget
+  await sleep(350);   // the slow probe answers (300 ms) after the budget
   hung.clear(); seen.length = 0;
   const c2 = await ds2.slice({ ...ASK, probe: ['~/work/weekly-admin'] });
   ok('③b a SLOW probe (late, then answered): unmarked when it answers — the next ask probes it again and gets it in time', (c1.probesLate || []).includes('~/work/weekly-admin') && seen.includes(path.join(HOME, 'work', 'weekly-admin')) && !c2.probesLate, { c1: c1.probesLate, seen: [...seen], c2: c2.probesLate });
