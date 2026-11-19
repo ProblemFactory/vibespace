@@ -257,5 +257,50 @@ console.log('⑧ the release\'s phone bar — no search door: the title paints, 
   ok(rc.notMade.includes('_shownChat') && rc.notOnPage.includes('mobile-nav-search'), `CONTROL (b): the cure's line put back names a method and an element the release does not have — the census goes RED (${JSON.stringify({ notMade: rc.notMade, notOnPage: rc.notOnPage })})`, rc);
 }
 
+// ⑨ lane ui-plain-words closure F13 ON PHONE-SIX'S PAINTER (the move -moved2; 主开发 2026-11-19 01:13Z, a MUST): a window with no
+// title is named by its KIND's words, never the bare «Window». The product's two lines run here — the painter sliced as ⑧ slices
+// it, handed the REAL windowWords / windowKindWords of src/lib/window-types.js (imported in plain node, a kind registered for the
+// leg), the REGULAR class, an empty-titled window of that kind: the head's text (its short name) is the kind's words, and its full
+// name — the head's hover / accessible name — is too (read where the painter writes it: the icon step's aria-label). A control
+// for each of the two lines, built through scripts/scratch.mjs anchored() (the line put back to the bare word): the leg reads Window.
+console.log('⑨ closure F13 on phone-six\'s painter: a title-less window is named by its kind, never «Window» (the real window-types)');
+{
+  const { anchored } = await import('./scratch.mjs');
+  const WT = await import('../src/lib/window-types.js');
+  const KIND = 'f13-leg-kind', KIND_LABEL = 'Machine files';
+  WT.registerWindowType({ type: KIND, icon: '', label: KIND_LABEL, action: 'openF13LegKind', replay: () => { } });
+  const KW = WT.windowKindWords(KIND);
+  const MN = read('src/lib/mobile-nav.js');
+  const sliceOf = (src, name) => { const a = src.indexOf(`\n  ${name}(`); const b = a < 0 ? -1 : src.indexOf('\n  }\n', a); return a < 0 || b < 0 ? null : src.slice(a + 1, b + 4); };
+  const MIN_OF = (/^const minimizedOf = [^\n]+$/m.exec(MN) || [null])[0];
+  // fits: true ⇒ the head keeps its words (the first step of the ladder fits); false ⇒ the ladder ends at the icon, whose
+  // accessible name is the window's FULL name (el.setAttribute('aria-label', full))
+  const paint = (src, fits) => {
+    const Probe = new Function('t', 'headName', 'nameFits', 'YIELD_LADDER', 'navTitleMinText', 'windowTypeIcon', 'document', 'getComputedStyle', 'windowWords', 'windowKindWords',
+      `${MIN_OF}\nreturn class Probe {\n${sliceOf(src, 'updateTitle')}\n${sliceOf(src, '_paintHead')}\n${sliceOf(src, '_titleWin')}\n};`);
+    const nav = { dataset: {}, style: {} };
+    const doc = { getElementById: (id) => (id === 'mobile-nav' ? nav : null), createElement: () => ({ style: {}, getBoundingClientRect: () => ({ width: 10 }), remove() { } }) };
+    const P = Probe((x) => x, H ? H.headName : (x) => x, () => fits, ['', 'x'], (x) => x, () => '', doc, () => ({ fontSize: '14px', flexDirection: 'row' }), WT.windowWords, WT.windowKindWords);
+    const attrs = {};
+    const el = { textContent: '', title: '', innerHTML: '', classList: { toggle() { } }, removeAttribute(k) { delete attrs[k]; }, setAttribute(k, v) { attrs[k] = v; }, appendChild() { }, getBoundingClientRect: () => ({ width: 200 }), scrollWidth: 200 };
+    const win = { id: 1, title: '', type: KIND, element: { classList: { contains: () => false } } };
+    const p = Object.assign(Object.create(P.prototype), { _noteShown() { }, _titleEl: el, _shown: {}, bar: null, split: null, updateDesktopsDoor() { },
+      app: { wm: { windows: new Map([[1, win]]), activeWindowId: 1 }, viewportClass: () => 'regular', phoneHome: { shown: () => false }, desktopManager: { activeDesktopId: '' } } });
+    try { p.updateTitle(); return { threw: null, text: el.textContent, title: el.title, label: attrs['aria-label'] || null }; } catch (e) { return { threw: String(e && e.message), text: el.textContent, title: el.title, label: attrs['aria-label'] || null }; }
+  };
+  ok(KW === KIND_LABEL && KW !== 'Window', `the kind registered for the leg names itself by its words («${KW}»)`, KW);
+  const kept = paint(MN, true), icon = paint(MN, false);
+  ok(kept.threw === null && kept.text === KW && kept.title !== 'Window', `⑨ the head of an empty-titled «${KIND}» window reads its kind's words in the regular class («${kept.text}»; its hover «${kept.title}»)`, kept);
+  ok(icon.threw === null && icon.label === KW, `⑨ …and its full name — the head's accessible name when it folds to the icon — is the kind's words too («${icon.label}»)`, icon);
+  const FULL = "    const full = win ? windowWords(win) : t('No window');\n";
+  const NAME = "    const name = win ? (headName(win.title) || windowKindWords(win.type)) : t('No window');\n";
+  const fullBare = anchored(MN, FULL, "    const full = win ? (String(win.title || '').split(' — ')[0].trim() || t('Window')) : t('No window');\n", 'F13 full name put back to the bare word');
+  const nameBare = anchored(MN, NAME, "    const name = win ? (headName(win.title) || t('Window')) : t('No window');\n", 'F13 short name put back to the bare word');
+  const rf = paint(fullBare, false), rfk = paint(fullBare, true);
+  ok(rf.threw === null && rf.label === 'Window' && rfk.title === 'Window', `⑨ CONTROL: the full-name line put back to the bare word ⇒ the leg reads Window (its accessible name «${rf.label}», its hover «${rfk.title}»)`, { rf, rfk });
+  const rn = paint(nameBare, true);
+  ok(rn.threw === null && rn.text === 'Window', `⑨ CONTROL: the short-name line put back to the bare word ⇒ the leg reads Window (the head's text «${rn.text}»)`, rn);
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
