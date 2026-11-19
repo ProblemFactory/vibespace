@@ -24,6 +24,10 @@
 //      it is, ended by another form's press and by its form's close; a closed form is never filled), a later fill clears an earlier
 //      one's jump / port / key file, nothing is sent at the fill, the other Host blocks are listed, a hub refusal of a key file is
 //      worded, the SFTP storage prefill says a machine reached through another host instead of filling it;
+//   ⑧ B-2ca0 follow-up (主开发 19:23Z): THE CONFIG IMPORT JUDGES A MACHINE RECORD AS THE ADD DOES — a hostile bundle (a user or a
+//      port that would be an ssh option, a control character, no user, a key path that is no path, a lying key source) is skipped by
+//      name or derived again; no kept record puts an option-shaped word on ssh's argv; the add's port rule; the parser's line pattern
+//      bounded and linear; a target whose HostName line was refused is SAID (no address filled), never the bare Host name;
 //   RED CONTROLS (one patched copy each, a flag per cut): the parser dropping an unknown line silently, not resolving a jump of the
 //      paste, keeping the bare name of an entry whose address does not read; hosts.js's argv without the hop and its import keeping any
 //      jump; the page listing only the machine's own block, sending an unread jump, offering SFTP, filling a closed form, a step
@@ -42,6 +46,20 @@ const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const { ok, report } = checker();
 const SCR = scratch('ssh-config-block'); fs.mkdirSync(SCR, { recursive: true });
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+/** rsync's -e splitter, as its manual states it: words split on spaces; '…' and "…" keep a word together; a doubled quote inside the
+ *  same quotes is one quote; a backslash is NO escape */
+const rsyncSplit = (cmd) => {
+  const out = []; let w = null, q = null;
+  for (let i = 0; i < cmd.length; i++) {
+    const c = cmd[i];
+    if (q) { if (c === q) { if (cmd[i + 1] === q) { w += q; i++; } else q = null; } else w += c; continue; }
+    if (c === ' ') { if (w !== null) { out.push(w); w = null; } continue; }
+    if (c === "'" || c === '"') { q = c; if (w === null) w = ''; continue; }
+    w = (w || '') + c;
+  }
+  if (w !== null) out.push(w);
+  return out;
+};
 const compileAt = (rel, src) => { const file = path.join(REPO, rel); const m = new Module(file, null); m.filename = file; m.paths = Module._nodeModulePaths(path.dirname(file)); m._compile(src, file); return m.exports; };
 const SB = require(path.join(REPO, 'src/ssh-config-block.js'));
 const HM = require(path.join(REPO, 'src/hosts.js'));
@@ -170,12 +188,12 @@ const real = hostLegs(HM, 1);
   const pc = real.a[real.j] || '';
   ok(real.h.jump === 'me@bastion.example.com:2200' && real.j > 0 && real.a[real.j - 1] === '-o' && real.j < real.a.length - 1 && real.a.at(-1) === 'ubuntu@203.0.113.10' && !real.a.includes('-J')
     && pc.startsWith('ProxyCommand=ssh -o BatchMode=yes') && pc.includes(' -o StrictHostKeyChecking=accept-new') && pc.includes(' -o ConnectTimeout=') && pc.endsWith(" -l me -p 2200 -W '[%h]:%p' bastion.example.com")
-    && real.cmd.includes("-W '[%h]:%p' bastion.example.com") && real.v6.endsWith(" -l me -p 22 -W '[%h]:%p' 2001:db8::1"),
+    && rsyncSplit(real.cmd).includes(pc) && real.v6.endsWith(" -l me -p 22 -W '[%h]:%p' 2001:db8::1"),
     '⑥ a jump record: the hop is OUR ssh (`-o ProxyCommand=ssh <the same BatchMode / accept-new / timeout options> -l -p -W [%h]:%p <host>` — ssh\'s own -J hop takes none of them) before the destination, and in sshCmd (rsync -e) too; an IPv6 jump host without its brackets', { a: real.a, v6: real.v6 });
 }
 ok(same(real.refused, ['jump-chain', 'jump-form', 'jump-form']) && real.count === 1 && /its jump host is not one \[user@\]host\[:port\] — add the machine again/.test(String(real.road)),
   '⑥ a jump that does not read: refused at the add by code (a chain, an option, a shell word — nothing saved); a hand-edited record\'s refuses the road by name (never a dial around it, never an option)', { refused: real.refused, road: real.road });
-ok(same(real.imported, [['host-a', 'me@bastion.example.com'], ['host-c', '-']]) && real.warnings.some((w) => /^b: skipped — its jump host is not one/.test(w)) && real.warnings.some((w) => /^d: skipped — behind a jump host, its address is not plain host characters/.test(w)),
+ok(same(real.imported, [['host-a', 'me@bastion.example.com'], ['host-c', '-']]) && real.warnings.some((w) => /^b: skipped — the jump host is not one/.test(w)) && real.warnings.some((w) => /^d: skipped — a machine behind a jump host has an address of plain host characters/.test(w)),
   '⑥ an import asks the jump again: a good one kept, one that does not read skipped by name, «none» is no jump, a jump machine whose own address is not plain host characters skipped by name', { imported: real.imported, warnings: real.warnings });
 ok(real.tgt === 'jump-target-form' && /a machine behind a jump host has an address of plain host characters/.test(String(real.roadTgt)),
   '⑥ its third read: the hop carries the record\'s OWN address as ssh\'s %h — behind a jump host it is plain host characters: refused at the add by code, and a hand-edited record refuses the road by name', { tgt: real.tgt, road: real.roadTgt });
@@ -206,6 +224,93 @@ ok(same(real.keySource, ['file', 'app']), '⑥ a key file of the hub the person 
   const h8 = (await import('node:crypto')).createHash('sha1').update('me@bastion.example.com').digest('hex').slice(0, 8);
   ok((cp(j).endsWith('/%C-j' + h8) && cp(p0).endsWith('/%C') && cp(pa).endsWith('/%C-j' + hpa) && hm.sshCmd(j).includes('%C-j' + h8)) || (!cp(j) && !!hm._cmRefused),
     '⑥ its read: a jump record\'s shared connection has a socket of its own (%C-j<its jump\'s hash>), and so has an alias its ssh config proxies — never another record\'s to the same address', [cp(j), cp(p0), cp(pa)]);
+}
+
+// ═══ ⑧ the follow-up: the import judged as the add; the line pattern; a refused HostName ═══
+console.log('⑧ the config import judges a machine record as the add does');
+const HOSTILE = [
+  { id: 'host-u', name: 'u', user: '-oProxyCommand=touch', host: 'u.example.com', port: 22 },
+  { id: 'host-c', name: 'c', user: 'me\nx', host: 'c.example.com', port: 22 },
+  { id: 'host-p', name: 'p', user: 'me', host: 'p.example.com', port: '-oX' },
+  { id: 'host-q', name: 'q', user: 'me', host: 'q.example.com', port: 70000 },
+  { id: 'host-n', name: 'n', user: '', host: 'n.example.com', port: 22 },
+  { id: 'host-k', name: 'k', user: 'me', host: 'k.example.com', port: 22, keyPath: '/k\nx', keySource: 'file' },
+  { id: 'host-l', name: 'l', user: 'me', host: 'l.example.com', port: 22, keyPath: '/home/me/.ssh/k', keySource: 'imported' },
+  { id: 'host-g', name: 'g', user: 'me', host: 'g.example.com', port: '2222' },
+  { id: 'host-a', name: 'a', user: '', host: 'my-vm', port: null, viaConfig: true },
+  { id: 'host-kq', name: 'kq', user: 'me', host: 'kq.example.com', port: 22, keyPath: '/x" -oProxyCommand=touch -i "/y' },
+  { id: 'host-dr', name: 'dr', user: 'me', host: 'dr.example.com', port: 22, dialRoot: '$HOME/..' },
+  { id: 'host-d2', name: 'd2', user: 'me', host: 'd2.example.com', port: 22, dialRoot: '$HOME//' },
+  { id: 'host-d3', name: 'd3', user: 'me', host: 'd3.example.com', port: 22, dialRoot: '$HOME/.ssh' },
+  { id: 'host-d4', name: 'd4', user: 'me', host: 'd4.example.com', port: 22, dialRoot: '$HOME/.vibespace/device@hub.example.com' },
+  { id: 'host-dial-d1', name: 'dev', transport: 'dial', deviceId: 'd1' },
+];
+const importLegs = (H, tag) => {
+  const w = world(tag, H), res = w.importBundle({ hosts: JSON.parse(JSON.stringify(HOSTILE)), keys: {} });
+  const kept = w._state.hosts.map((x) => x.id);
+  const optionWords = w._state.hosts.filter((x) => x.transport !== 'dial').map((x) => { try { const a = w.sshArgs(x); return a.at(-1).startsWith('-') ? x.id : null; } catch { return null; } }).filter(Boolean);
+  const kq = w._state.hosts.find((x) => x.id === 'host-kq'), kqWords = kq ? rsyncSplit(w.sshCmd(kq)) : [];
+  return { kept, warnings: res.warnings, optionWords, kqWords, rec: Object.fromEntries(w._state.hosts.map((x) => [x.id, x])) };
+};
+{
+  const I = importLegs(HM, 7), wn = (n, why) => I.warnings.some((x) => x.startsWith(`${n}: skipped — ${why}`));
+  const dropped = (n) => I.warnings.some((x) => x.startsWith(`${n}: its install folder is not one this hub writes`));
+  ok(same(I.kept, ['host-l', 'host-g', 'host-a', 'host-kq', 'host-dr', 'host-d2', 'host-d3', 'host-d4', 'host-dial-d1']) && wn('u', 'the address and the user may not start with «-»') && wn('c', 'the address and the user hold no control character')
+    && wn('p', 'the port is a whole number') && wn('q', 'the port is a whole number') && wn('n', 'user required') && wn('k', 'its key path holds a control character')
+    && ['dr', 'd2', 'd3'].every(dropped) && !dropped('d4') && ['host-dr', 'host-d2', 'host-d3'].every((id) => I.rec[id].dialRoot === undefined) && I.rec['host-d4'].dialRoot === '$HOME/.vibespace/device@hub.example.com'
+    && I.optionWords.length === 0 && I.kqWords.length > 0 && !I.kqWords.includes('-oProxyCommand=touch') && I.kqWords.includes('/x" -oProxyCommand=touch -i "/y'),
+    '⑧ a hostile bundle: a user that would be an ssh option, a control character, a port that is no port (an option word, 70000), no user, a key path that is not absolute — each skipped BY NAME; a key path holding a quote is a file name (kept, as the add takes one) and stays ONE word of rsync\'s -e; an install folder that is not EXACTLY the graduation\'s shape («$HOME/..», «$HOME//», «$HOME/.ssh» — the removal\'s rm -rf) dropped by name, the hub\'s own kept; no kept record puts an option-shaped word on ssh\'s argv', { kept: I.kept, warnings: I.warnings, kq: I.kqWords });
+  ok(read('src/server/mounts-plugins-wiring.js').includes("if (root && require('../hosts.js').dialRootOk(root)) {") && !read('src/server/mounts-plugins-wiring.js').includes("/^\\$HOME\\/[\\w@.\\/-]+$/")
+    && read('src/server/mounts-plugins-wiring.js').includes("const root = require('../hosts.js').dialRootOf(base);"),
+    '⑧ its reads: the removal\'s guard asks THE install-folder rule (dialRootOk), the graduation writes by THE derivation (dialRootOf) — never their own patterns');
+  // its delta read: the hub derives a graduated machine's install folder AS THE INSTALLER DOES (sed «://» up to the first / : ?, tr -cd A-Za-z0-9.-)
+  const installer = (url) => { const m = /^[a-z]+:\/\/([^/:?]+)/.exec(url); const h = (m ? m[1] : url).replace(/[^A-Za-z0-9.-]/g, ''); return `$HOME/.vibespace/device@${h || 'dial'}`; };
+  const bases = ['https://hub.example.com:8443', 'http://[fd00::1]:8443', 'http://[::2]:8443/x', 'http://10.0.0.5', 'wss://hub.example.com/p?q=1'];
+  const HMd = HM;
+  ok(bases.every((b) => HMd.dialRootOf(b) === installer(b) && HMd.dialRootOk(HMd.dialRootOf(b))) && HMd.dialRootOf('http://[fd00::1]:8443') === '$HOME/.vibespace/device@fd00' && !HMd.dialRootOk('$HOME/.vibespace/device@..'),
+    '⑧ its delta read: the hub derives the install folder as the installer does — an IPv6 base names the SAME folder (fd00, never fd001), so the removal tears down the real install; every derived folder passes the rule, «device@..» does not', bases.map((b) => [HMd.dialRootOf(b), installer(b)]));
+  ok(I.rec['host-l'].keySource === 'file' && I.rec['host-g'].port === 2222 && I.rec['host-a'].port === null && I.rec['host-dial-d1'].transport === 'dial',
+    '⑧ what is kept is the ADD\'s: the key source derived again (a bundle that says «imported» for a path of its own reads «file» here), the port a number (an alias left to its config: null), a dial record as it was', I.rec);
+  const hm = world(8); const port = (p, via) => { try { return hm.get(hm.add({ name: 'x' + Math.random(), user: via ? '' : 'me', host: via ? 'my-vm' : 'h.example.com', port: p, viaConfig: via })).port; } catch (e) { return e.code; } };
+  ok(same([port(''), port('2222'), port('abc'), port('70000'), port('', true)], [22, 2222, 'port-form', 'port-form', null]),
+    '⑧ the add\'s port rule (the import\'s too): empty ⇒ 22, a whole number 1–65535, anything else refused by code — never 22 in silence; an alias left empty ⇒ the config\'s', [port(''), port('abc')]);
+}
+{
+  const longLine = SB.readSshBlock('Host g\n  User' + ' '.repeat(SB.MAX_LINE_CHARS) + 'x\n'), sep = SB.readSshBlock('Host g\n  HostName 10.0.0.1\u2028x\n');
+  const lu = longLine.hosts[0].notUsed[0], su = sep.hosts[0].notUsed[0];
+  ok(lu.why === 'long' && lu.text.length === 61 && su.why === 'value' && su.line === 2,
+    '⑧ the line pattern: a line over the bound is NAMED (never matched; its text cut for the step); a line separator inside a line is read as part of it (the pattern\'s `.` takes it — linear), so a long run of spaces before one never backtracks', { lu, su });
+  const r = SB.readSshBlock('Host gx\n  HostName %h.example\n  User me\n'), h = r.hosts[0], row = SB.confirmRows(h).find((x) => x.field === 'host');
+  ok(h.hostRefused === 2 && h.fields.host === undefined && !('host' in SB.formOf(h)) && row.value === null && row.refused === true && row.line === 2 && same(h.notUsed.map((u) => [u.line, u.why]), [[2, 'token']]),
+    '⑧ a target whose HostName line was refused (a %-token) is SAID: no address filled (formOf names none), the confirm row says its line is not used — never the bare Host name in silence', { h, row });
+  // its read: a HostName that does not READ (an unclosed quote, no value, a line over the bound) is a refused one too; a Host line over the
+  // bound ends the block before it (its lines never fill the machine before)
+  const q = ['Host ga\n  HostName "10.0.0.5\n', 'Host gb\n  HostName=\n', 'Host gc\n  HostName ' + 'h'.repeat(SB.MAX_LINE_CHARS) + '\n'].map((t) => SB.readSshBlock(t).hosts[0]);
+  const lh = SB.readSshBlock('Host g1\n  HostName 10.0.0.1\nHost ' + 'x'.repeat(SB.MAX_LINE_CHARS) + '\n  User intruder\n  Port 2222\n');
+  ok(q.every((x) => x.hostRefused === 2 && !('host' in SB.formOf(x))) && lh.hosts.length === 1 && lh.hosts[0].fields.user === undefined && lh.hosts[0].fields.port === undefined && lh.hosts[0].end === 2
+    && same(lh.outside.map((u) => [u.line, u.why]), [[3, 'long'], [4, 'bad-host'], [5, 'bad-host']]),
+    '⑧ its read: a HostName that does not read (an unclosed quote, no value, over the bound) is REFUSED — said, no address, never the bare Host name; a Host line over the bound ends the block before it (its User / Port never fill g1)', { q: q.map((x) => [x.hostRefused, x.fields]), lh: lh.outside });
+  // its read: the import's other inputs — a bundle's «viaConfig: 'yes'» is no alias (a user is asked), an id that is not this hub's shape is refused
+  const w = world(11), res = w.importBundle({ hosts: [{ id: 'host-v', name: 'v', user: '', host: 'v.example.com', port: 22, viaConfig: 'yes' }, { id: '../../x', name: 'dots', user: 'me', host: 'x.example.com', port: 22 }], keys: { '../../x': 'k' } });
+  ok(w._state.hosts.length === 0 && res.warnings.some((x) => /^v: skipped — user required/.test(x)) && res.warnings.some((x) => /^dots: skipped — its id is not one this hub makes/.test(x)),
+    '⑧ its read: a bundle\'s «viaConfig: \'yes\'» is no alias (its empty user refused); an id that is not one this hub makes («../../x» would name a key file outside the ssh folder) is refused by name', res.warnings);
+}
+
+// ═══ ⑧b sshCmd is read by rsync's own rule (its -e splitter) ═══
+console.log('⑧b the rsync -e string reads back as the argv');
+{
+  const qh = world(12), base = qh.get(qh.add({ name: 'q', user: 'me', host: 'q.example.com', jump: 'me@bastion.example.com' }));
+  const evil = { ...base, keyPath: '/x" -oProxyCommand=touch -i "/y' }, spacey = { ...base, keyPath: "/home/me/my 'key" };
+  const back = (h) => rsyncSplit(qh.sshCmd(h)), want = (h) => ['ssh', ...qh.sshArgs(h, { multiplex: true }).slice(0, -1)];
+  ok([base, evil, spacey].every((h) => same(back(h), want(h))) && !back(evil).includes('-oProxyCommand=touch'),
+    '⑧b its read: sshCmd is quoted by RSYNC\'s rule (\'…\', a doubled quote inside, no backslash escape) — read back as rsync splits it, it is EXACTLY the argv: the jump\'s hop, a key path with a space or a quote stays ONE word (never an `-oProxyCommand` of its own)', { evil: back(evil) });
+  const src = read('src/hosts.js'), a = "args.map((a) => (/[\\s\"'\\\\]/.test(a) ? `'${a.replace(/'/g, \"''\")}'` : a))";
+  if (src.split(a).length !== 2) ok(false, 'CONTROL: the sshCmd anchor moved — update this suite');
+  else {
+    const C = compileAt('src/hosts.js', src.replace(a, "args.map((a) => (/[\\s\"']/.test(a) ? JSON.stringify(a) : a))"));
+    const ch = world(13, C), cb = ch.get(ch.add({ name: 'q', user: 'me', host: 'q.example.com' }));
+    ok(rsyncSplit(ch.sshCmd({ ...cb, keyPath: '/x" -oProxyCommand=touch -i "/y' })).includes('-oProxyCommand=touch'), 'CONTROL (RED): the release\'s JSON quoting — rsync reads the key path\'s `\\"` as the quote\'s end: `-oProxyCommand=touch` becomes an ssh option of its own');
+  }
 }
 
 // ═══ ⑦ the page, driven ═══
@@ -288,6 +393,9 @@ const page = async (install) => {
     // its read: a later fill of a block with no jump / port / key file clears the earlier one's
     const st2 = step(f); type(st2, 'Host gpu-02.example.com\n'); await st2.d.onSubmit({}, { close: st2.d.ctx.close });
     out.refill = [f.inputs.jump.value, f.inputs.port.value, f.inputs.keyFile.value, f.inputs.keyChoice.value, f.inputs.user.value];
+    // follow-up: a block whose HostName line was refused fills no address — the earlier fill's is cleared, the step says why
+    const st3 = step(f); out.refusedText = type(st3, 'Host gx\n  HostName %h.example\n  User me\n'); await st3.d.onSubmit({}, { close: st3.d.ctx.close });
+    out.refusedHost = [f.inputs.host.value, f.inputs.name.value];
   }
   {
     const f = form(), st = step(f);
@@ -363,6 +471,8 @@ if (P) {
     '⑦ the paste step (its own id, beside the form) reads the block AS IT IS TYPED: each field with the keyword and line it came from, every line not used with why, the key file said to be the hub\'s', P.vscode);
   ok(same(P.filled, { name: 'gpu-01', host: '203.0.113.10', user: 'ubuntu', port: '2222', keyFile: '~/.ssh/work_key', jump: 'me@bastion.example.com:2200', keyChoice: 'file' }) && P.adv && P.conds > 0 && P.closed === 1 && P.sentAtFill === 0,
     '⑦ «Fill the form» fills the form\'s inputs (the key-file choice picked and the form\'s conditions applied again, the jump\'s fold opened), closes the step and SENDS NOTHING', { filled: P.filled, adv: P.adv, conds: P.conds, sent: P.sentAtFill });
+  ok(same(P.refusedHost, ['', 'gx']) && /Addressits HostName line is not used — type the address in the formHostName, line 2/.test(P.refusedText),
+    '⑦ follow-up: a block whose HostName line was refused fills NO address (the earlier fill\'s cleared) and the step says so, by its line', { host: P.refusedHost, text: P.refusedText });
   ok(same(P.refill, ['', '', '', 'default', '']), '⑦ its reads: a later fill of a block with no jump, port, key file or User clears what the earlier FILL wrote (the key choice back to the form\'s first); a User the person typed stays (the «kept» leg)', P.refill);
   ok(same(P.jopts.map((o) => o[1]), ['bastion, line 1', 'gpu-06, line 6', 'gpu-07, line 10', 'gpu-06, line 14']) && /Jump hostjump@198\.51\.100\.20:2200ProxyJump, line 8 — the Host bastion of this paste, line 1/.test(P.g6)
     && /lines 1–5: Host bastion — read as the jump host/.test(P.g6) && /line 5: IdentityFile ~\/\.ssh\/bastion_key — the jump host’s key file/.test(P.g6) && /line 9: IdentitiesOnly yes — IdentitiesOnly with no IdentityFile/.test(P.g6)
@@ -420,11 +530,33 @@ console.log('RED CONTROLS');
   else { const { g6 } = jumpLegs(compileAt('src/ssh-config-block.js', src.replace(b, '    continue;'))); ok(g6.fields.jump === 'bastion', 'CONTROL (RED): the parser not resolving a jump of the paste — gpu-06 would be dialled through the bare name «bastion» (②b sees it)', g6.fields.jump); }
 }
 {
+  const src = read('src/hosts.js'), a = "const why = refusal ? refusal.message : po.refuse ? po.refuse.message : badKey ? (typeof rec.keyPath === 'string' && CONTROL_RE.test(rec.keyPath) ? 'its key path holds a control character' : 'its key path is not an absolute path') : null;";
+  if (src.split(a).length !== 2) ok(false, 'CONTROL: the import verdict\'s anchor moved — update this suite');
+  else {
+    const C = importLegs(compileAt('src/hosts.js', src.replace(a, 'const why = null;')), 10);
+    ok(C.kept.includes('host-u') && C.optionWords.includes('host-u'), 'CONTROL (RED): an import that does not judge its records — the user «-oProxyCommand=touch» is kept, and its argv\'s destination is an option word', { kept: C.kept, optionWords: C.optionWords });
+  }
+}
+{
+  const src = read('src/ssh-config-block.js'), e1 = '      if (cur && cur.kind === \'host\' && FIELDS[kw] && kw !== \'host\' && !cur.h.seen[kw]) cur.h.seen[kw] = n;';
+  if (src.split(e1).length !== 2) ok(false, 'CONTROL: the unread-keyword anchor moved — update this suite');
+  else { const x = compileAt('src/ssh-config-block.js', src.replace(e1, '')).readSshBlock('Host ga\n  HostName "10.0.0.5\n').hosts[0]; ok(!x.hostRefused && x.fields.host === 'ga', 'CONTROL (RED): an unread HostName not counted as refused — the bare Host name «ga» fills the address in silence', x.fields); }
+}
+{
+  const src = read('src/ssh-config-block.js'), b1 = "    if (t.length > MAX_LINE_CHARS) return unread('long', t.slice(0, 60) + '…');\n", b2 = '(.*)$/s.exec(t);';
+  if (src.split(b1).length !== 2 || src.split(b2).length !== 2) ok(false, 'CONTROL: the line pattern\'s anchors moved — update this suite');
+  else {
+    const L1 = compileAt('src/ssh-config-block.js', src.replace(b1, '')).readSshBlock('Host g\n  User' + ' '.repeat(SB.MAX_LINE_CHARS) + 'x\n').hosts[0].notUsed[0] || {};
+    const L2 = compileAt('src/ssh-config-block.js', src.replace(b2, '(.*)$/.exec(t);')).readSshBlock('Host g\n  HostName 10.0.0.1\u2028x\n').hosts[0].notUsed[0] || {};
+    ok(L1.why !== 'long' && L2.why === 'syntax', 'CONTROL (RED): the line pattern unbounded (the long line is matched, not named) and without `s` (`.` stops at a line separator — the pattern fails there and backtracks over the run before it)', { L1: L1.why, L2: L2.why });
+  }
+}
+{
   let src = read('src/hosts.js');
-  const a1 = ', ...jumpArgsOf(h)];', a2 = '      if (rec.jump != null) {   // B-2ca0 commit 2';
+  const a1 = ', ...jumpArgsOf(h)];', a2 = "        const why = refusal ? refusal.message : po.refuse ? po.refuse.message : badKey ? (typeof rec.keyPath === 'string' && CONTROL_RE.test(rec.keyPath) ? 'its key path holds a control character' : 'its key path is not an absolute path') : null;";
   if (src.split(a1).length !== 3 || src.split(a2).length !== 2) ok(false, 'CONTROL: the hosts.js anchors moved — update this suite');
   else {
-    src = src.split(a1).join('];').replace(a2, '      if (false) {   // CONTROL');
+    src = src.split(a1).join('];').replace(a2, '        const why = null;   // CONTROL');
     const C = hostLegs(compileAt('src/hosts.js', src), 9);
     ok(C.j === -1 && !C.cmd.includes('ProxyCommand='), 'CONTROL (RED): hosts.js\'s argv without the jump — the jump record is dialled directly', C.a);
     ok(C.imported.some(([id]) => id === 'host-b'), 'CONTROL (RED): an import that keeps any jump — the option-shaped one survives', C.imported);

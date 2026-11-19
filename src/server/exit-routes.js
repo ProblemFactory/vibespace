@@ -286,7 +286,7 @@ app.post('/api/hosts', async (req, res) => {
     if (b.transport !== 'dial' && b.host) {
       const a = await hosts.resolveAlias(b.host).catch(() => null);
       const v = require('../hosts.js').configVerdict(a, b, require('os').homedir());   // B-2ca0: pure (its read 2: driven by a leg)
-      if (v.refuse) throw new Error(v.refuse);
+      if (v.refuse) throw Object.assign(new Error(v.refuse), v.code ? { code: v.code } : {});   // B-2ca0 follow-up: a port refusal carries its code (the page words it)
       b.user = v.user; b.port = v.port; if (v.viaConfig) { b.viaConfig = true; b.sshConfig = v.sshConfig; }
     }
     const id = hosts.add({ ...b, replaces: old ? old.id : null });

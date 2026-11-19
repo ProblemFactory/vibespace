@@ -372,8 +372,7 @@ async function graduateHostToDial(h, { serverUrl, viaRelay, by = 'system:graduat
     // dialRoot must mirror the INSTALLER's derivation byte-for-byte (it does
     // sed hostname-only + tr -cd 'A-Za-z0-9.-') or the removal path tears
     // down the wrong directory.
-    const dialHost = (new URL(base).hostname || 'dial').replace(/[^A-Za-z0-9.-]/g, '');
-    const root = `$HOME/.vibespace/device@${dialHost || 'dial'}`;
+    const root = require('../hosts.js').dialRootOf(base);   // B-2ca0 follow-up (its delta read): the installer's own derivation (an IPv6 base named another folder)
     hosts.graduateDial(h.id, { dialRoot: root });
     const gradDevice = hosts.get(h.id).deviceId;
     const dialUrl = `${base.replace(/^http/, 'ws')}/api/device-dial?device=${gradDevice}`;
@@ -418,7 +417,7 @@ app.post('/api/hosts/:id/graduate-dial', async (req, res) => {
       // best-effort remote teardown, ALWAYS clear the record (dead host must
       // not hold the graduation hostage — the machine-mounts unmount lesson)
       const root = h.dialRoot || '';
-      if (root && /^\$HOME\/[\w@.\/-]+$/.test(root)) {
+      if (root && require('../hosts.js').dialRootOk(root)) {   // B-2ca0 follow-up (its reads): EXACTLY the folder the graduation writes — never `rm -rf "$HOME//"` / `"$HOME/.."`
         const key = require('path').basename(root).replace(/[^A-Za-z0-9.-]/g, '-').replace(/-+$/, '');
         // B-8475: a container's boot-hook block of this key leaves FIRST, in the same one call — the installer's OWN functions
         // (a whole begin…end pair only, written through the hook's real file) on `bash -s` stdin, whatever the login shell is;

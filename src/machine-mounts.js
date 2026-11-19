@@ -885,14 +885,21 @@ class MachineMounts {
    *  one folder, a nested one — what shows there is a machine's own); a removed machine's record (no words would be true).
    *  The innermost record answers. `writer`: the question of a request that ADDS to the folder (a write, a copy's or a move's
    *  destination, the TASK.md writer) — ANY folder not live, whatever its probe (read 4: «unknown» must not mean «write»). → { id, hostId, machine, name (= machine: the shape the TASK.md writer reads), mountpoint, offline } | null */
+  /** B-2ca0 follow-up (主开发 19:42Z): a pull record's folder AS WRITTEN and by its REAL path (`_realMp`, a child's realpath) — the
+   *  path a door asks with may be either (WebDAV's target comes from the real-pathed root: a record written through a link was
+   *  never matched there, and a PUT landed in the bare folder under an unmounted pull) */
+  _pullFolders(m) {
+    const w = path.resolve(m.mountpoint), r = this._realMp.get(m.id);
+    return r && r !== w ? [w, r] : [w];
+  }
   shadowedBy(p, { writer = false } = {}) {
     const rp = typeof p === 'string' ? p : '';
     if (!rp.startsWith('/')) return null;
     let best = null;
     for (const m of this._state.mounts) {
       if (m.dir !== 'pull' || typeof m.mountpoint !== 'string' || !m.mountpoint) continue;
-      const mp = path.resolve(m.mountpoint);
-      if (mp === '/' || (rp !== mp && !rp.startsWith(mp + '/'))) continue;   // a whole path segment (…/mac is not …/macbook)
+      const mp = this._pullFolders(m).find((x) => x !== '/' && (rp === x || rp.startsWith(x + '/')));   // a whole path segment (…/mac is not …/macbook)
+      if (!mp) continue;
       if (this._live.has(m.id)) return null;
       let h = null; try { h = this.hosts.get(m.hostId); } catch { h = null; }
       if (!h || this._held.has(m.id) || (!writer && this._bare?.get(m.id) !== 'empty')) continue;   // a held record: its holder answers   // a READER: probed empty only (a folder with files of its own shows them); a WRITER: any folder not live (what it adds is hidden under the next mount, or blocks it)
@@ -909,8 +916,8 @@ class MachineMounts {
     let best = null;
     for (const m of this._state.mounts) {
       if (m.dir !== 'pull' || typeof m.mountpoint !== 'string' || !m.mountpoint || this._live.has(m.id)) continue;
-      const mp = path.resolve(m.mountpoint);
-      if (mp !== '/' && (rp === mp || rp.startsWith(mp + '/')) && (!best || mp.length > best.mp.length)) best = { m, mp };
+      const mp = this._pullFolders(m).find((x) => x !== '/' && (rp === x || rp.startsWith(x + '/')));   // B-2ca0 follow-up: by its real path too
+      if (mp && (!best || mp.length > best.mp.length)) best = { m, mp };
     }
     if (best) this._probeBare(best.m).catch(() => { });
   }

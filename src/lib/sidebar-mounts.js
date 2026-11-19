@@ -1883,6 +1883,9 @@ export function installSidebarMounts(Sidebar) {
             // the server names its refusal by code; the words are the page's (lane ui-language, the walk's machines-12)
             if (e.code === 'host-name-taken') throw new Error(tr('A machine named “{name}” already exists — pick another name.', { name: v.name }));
             if (e && e.code === 'host-name-taken') e.door = this._hostRowDoor(v.name, close); // lane ui-needs-a-button (machines-12)
+            // B-2ca0 follow-up: the record verdict's own refusals, worded (the hub's English is for logs and other callers)
+            if (e && e.code === 'port-form') throw new Error(tr('The port is a whole number from 1 to 65535.'));
+            if (e && (e.code === 'dash' || e.code === 'control')) throw new Error(tr('The address and the username are plain words: none starts with “-” or holds a control character.'));
             // B-2ca0 commit 2 (its read): a key file of this server that BatchMode ssh cannot use, refused by the hub by code
             if (e && (e.code === 'key-file-encrypted' || e.code === 'key-file-unusable' || e.code === 'key-file-open')) throw new Error(e.code === 'key-file-encrypted' ? tr('That key file is protected by a passphrase, and VibeSpace logs in without typing one. Pick “Paste or upload my own key…” to unlock it once, or use a key without a passphrase.') : e.code === 'key-file-open' ? tr('Other users of this server can read that key file, and ssh refuses such a key. Make it private (chmod 600), then add the machine again.') : tr('This server cannot use that key file: it is not readable here, or it is not a private key.'));
             if (!privateKey || !KEY_ERR_CODES.has(e.code)) throw e;
@@ -1948,7 +1951,7 @@ export function installSidebarMounts(Sidebar) {
         // User an earlier FILL wrote is cleared when this block names none — one the person typed stays
         if (!vals.keyChoice && ins.keyChoice && ins.keyChoice.value === 'file') vals.keyChoice = 'default';
         const prev = (formCtx && formCtx._sshFilled) || {};
-        if (!('user' in vals) && prev.user && ins.user && ins.user.value === prev.user) vals.user = '';
+        for (const k of ['user', 'host']) if (!(k in vals) && prev[k] && ins[k] && ins[k].value === prev[k]) vals[k] = '';   // follow-up: a refused HostName fills no address
         if (formCtx) formCtx._sshFilled = { ...vals };
         for (const [k, val] of Object.entries(vals)) if (ins[k]) { ins[k].value = val; ins[k].dispatchEvent(new Event('change', { bubbles: true })); }
         if (vals.jump && formCtx && formCtx.body) { const adv = formCtx.body.querySelector('details.mounts-advanced'); if (adv) adv.open = true; }
@@ -1993,6 +1996,7 @@ export function installSidebarMounts(Sidebar) {
         'jump-none': () => tr('ProxyJump none — no jump host'),
         'identities-alone': () => tr('IdentitiesOnly with no IdentityFile — no key is named, nothing changes'),
         'jump-key': () => tr('the jump host’s key file — the jump connects with this server’s own ssh keys'),
+        long: () => tr('a line over 1 024 characters — not read'),
         'jump-unread': () => tr('a jump through a Host of this paste whose address cannot be one jump host — no jump is filled'),
       };
       const LABEL = { name: () => tr('Name'), host: () => tr('Address'), user: () => tr('Username on that machine'), port: () => tr('Port'),
@@ -2017,7 +2021,7 @@ export function installSidebarMounts(Sidebar) {
           for (const r of confirmRows(h)) {
             const dt = document.createElement('dt'); dt.textContent = LABEL[r.field]();
             const dd = document.createElement('dd');
-            dd.textContent = r.value == null ? tr('not in the block — type it in the form') : r.value === true ? tr('yes — the named key only') : String(r.value);
+            dd.textContent = r.value == null ? (r.refused ? tr('its HostName line is not used — type the address in the form') : tr('not in the block — type it in the form')) : r.value === true ? tr('yes — the named key only') : String(r.value);
             if (r.line) dd.appendChild(para(r.via ? tr('{key}, line {n} — the Host {name} of this paste, line {m}', { key: r.from, n: r.line, name: r.via.name, m: r.via.line }) : tr('{key}, line {n}', { key: r.from, n: r.line }), 'mounts-field-hint ssh-block-from'));
             dl.append(dt, dd);
           }

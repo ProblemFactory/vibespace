@@ -44,6 +44,42 @@ const jumpArgsOf = (h) => {
   const p = jumpParts(j.jump);
   return ['-o', 'ProxyCommand=' + ['ssh', ...SSH_BASE_OPTS, ...(p.user ? ['-l', p.user] : []), ...(p.port ? ['-p', p.port] : []), '-W', "'[%h]:%p'", p.host].join(' ')];
 };
+/** B-2ca0 follow-up (主开发 19:23Z): ONE VERDICT over an ssh machine record's words — the add asks it of a typed machine and the config
+ *  import of EVERY record a bundle carries (an imported record is judged as the add judges a typed one: a user beginning with «-» would
+ *  be an argv word ssh reads as an option at the next dial). → null | an Error with its code (the add throws it; the import names it) */
+const CONTROL_RE = /[\x00-\x1f\x7f]/;
+/** its reads: an imported KEY PATH is absolute and holds no control character — as the add takes one (a space or a quote is a
+ *  person's file name: sshCmd quotes by rsync's own rule, every other road passes argv) */
+const PLAIN_KEY_PATH = /^\/[^\x00-\x1f\x7f]*$/;
+/** its reads: a graduated machine's install folder is EXACTLY the shape the hub writes — `$HOME/.vibespace/device@<host>`, the host
+ *  in the installer's own characters (src/server/mounts-plugins-wiring.js graduation; scripts/vibespace-agentd-install.sh ROOT).
+ *  The removal runs `rm -rf` on it there: `$HOME//`, `$HOME/.ssh` or `$HOME/..` never pass (the wiring's guard asks THIS rule) */
+const dialRootOk = (r) => typeof r === 'string' && /^\$HOME\/\.vibespace\/device@[A-Za-z0-9][A-Za-z0-9.-]*$/.test(r);   // its delta read: the host starts with a letter or digit (`device@..` is no host; the removal's pkill reads it as a pattern)
+/** its delta read: the install folder of a graduated machine, derived as the INSTALLER derives it (scripts/vibespace-agentd-install.sh:
+ *  the URL's text after `://` up to the first «/», «:» or «?», then only A-Za-z0-9.-, else `dial`) — the hub's old derivation took the
+ *  URL's whole hostname, so an IPv6 base named another folder (`[fd00::1]` ⇒ fd001 here, fd00 there) and the removal missed the install */
+const dialRootOf = (base) => {
+  const host = ((String(base || '').replace(/^[a-z]+:\/\//i, '').match(/^[^/:?]+/) || [''])[0]).replace(/[^A-Za-z0-9.-]/g, '');
+  return `$HOME/.vibespace/device@${host || 'dial'}`;
+};
+function sshRecordRefusal({ host, user, viaConfig = false, jump = null } = {}) {
+  const no = (why, code) => Object.assign(new Error(why), code ? { code } : {});
+  if (!host) return no('host required');
+  if (!user && !viaConfig) return no('user required');   // an alias of the hub's ssh config may leave its User to the config
+  if (String(host).startsWith('-') || String(user || '').startsWith('-')) return no('the address and the user may not start with «-»', 'dash');   // never an ssh option
+  if (CONTROL_RE.test(String(host)) || CONTROL_RE.test(String(user || ''))) return no('the address and the user hold no control character', 'control');
+  const jv = jumpVerdict(jump);   // ONE jump host, plain host characters (the hop's command is built from it)
+  if (!jv.ok) return no(jv.code === 'chain' ? 'one jump host only — a chain of jump hosts is not used' : 'the jump host is not one [user@]host[:port]', 'jump-' + jv.code);
+  if (jv.jump && !jumpTargetOk(host)) return no('a machine behind a jump host has an address of plain host characters', 'jump-target-form');
+  return null;
+}
+/** …and its PORT, as the add stores it: an alias left empty ⇒ null (the config's); empty ⇒ 22; else a whole number 1–65535 —
+ *  anything else is refused by code (never a word on ssh's argv). → { port } | { refuse: Error } */
+function sshPortOf(port, viaConfig = false) {
+  if (port == null || String(port).trim() === '') return { port: viaConfig ? null : 22 };
+  const n = Number(String(port).trim());
+  return Number.isInteger(n) && n >= 1 && n <= 65535 ? { port: n } : { refuse: Object.assign(new Error('the port is a whole number from 1 to 65535'), { code: 'port-form' }) };
+}
 /** its read: the shared connection's socket — a record reached through a jump host gets its own (an ssh whose %C does not hash the
  *  jump would let two records to one address, through different jump hosts, ride one connection) */
 const cmNameOf = (h) => (h && (h.jump || (h.sshConfig && h.sshConfig.proxied)) ? `%C-j${crypto.createHash('sha1').update(String(h.jump || 'config:' + h.host)).digest('hex').slice(0, 8)}` : '%C');   // its delta read: an alias its ssh config proxies too
@@ -56,7 +92,9 @@ function configVerdict(a, body, home = '') {
   const configured = !!(a && a.configured);
   if (!user && !(configured && !a.userIsDefault)) return { refuse: 'user required' };
   const idf = a && a.identityFile ? String(a.identityFile).replace(/^~(?=\/)/, home) : null;
-  return { viaConfig: configured, user, port: configured && !portIn ? null : (Number(portIn) || 22),
+  const po = sshPortOf(portIn, configured);   // B-2ca0 follow-up: the add's own port rule — a typed «abc» is refused by code, never 22 in silence
+  if (po.refuse) return { refuse: po.refuse.message, code: 'port-form' };
+  return { viaConfig: configured, user, port: po.port,
     ...(configured ? { sshConfig: { host: a.hostname, user: a.user, port: a.port || 22, identityFile: idf, ...(a.proxied ? { proxied: true } : {}) } } : {}) };   // commit 2: proxied — ssh reaches it through another host (the SFTP road cannot)
 }
 /** B-2ca0: `ssh -G <name>`'s output (one «key value» line each, lower-case keys, the first one wins) → { alias, hostname, user, port } */
@@ -682,19 +720,19 @@ class HostManager {
       this._save();
       return id;
     }
-    if (!host) throw new Error('host required');
-    if (!user && !viaConfig) throw new Error('user required');   // B-2ca0: an alias of the hub's ssh config may leave its User to the config
-    if (String(host).startsWith('-') || String(user || '').startsWith('-')) throw new Error('the address and the user may not start with «-»');   // B-2ca0 (its read): never an ssh option
-    const jv = jumpVerdict(jump);   // B-2ca0 commit 2: ONE jump host, plain host characters (ssh -J builds a command from it)
-    if (!jv.ok) throw Object.assign(new Error(jv.code === 'chain' ? 'one jump host only — a chain of jump hosts is not used' : 'the jump host is not one [user@]host[:port]'), { code: 'jump-' + jv.code });
-    if (jv.jump && !jumpTargetOk(host)) throw Object.assign(new Error('a machine behind a jump host has an address of plain host characters'), { code: 'jump-target-form' });
+    // B-2ca0: the record's words judged by THE verdict the config import asks too (follow-up, 主开发 19:23Z)
+    const refusal = sshRecordRefusal({ host, user, viaConfig, jump });
+    if (refusal) throw refusal;
+    const po = sshPortOf(port, viaConfig);
+    if (po.refuse) throw po.refuse;
+    const jv = jumpVerdict(jump);
     const id = 'host-' + crypto.randomBytes(4).toString('hex');
     const hasKeyText = !!(privateKey && String(privateKey).trim());
     const rec = {
       id,
       name: String(name || host).slice(0, 60),
       user: String(user || ''), host: String(host),
-      port: viaConfig && (port == null || port === '') ? null : (Number(port) || 22),   // B-2ca0: null = the ssh config's port
+      port: po.port,   // B-2ca0: null = the ssh config's port; follow-up: a whole number 1–65535, else refused above
       ...(viaConfig ? { viaConfig: true, ...(sshConfig ? { sshConfig } : {}) } : {}),   // B-2ca0: the address is an ALIAS of the hub's ssh config (the add route asked ssh -G)
       ...(jv.jump ? { jump: jv.jump } : {}),
       keyPath: null,
@@ -808,12 +846,23 @@ class HostManager {
     for (const h of bundle.hosts) {
       const rec = { ...h };
       if (rec.sshConfig) delete rec.sshConfig;   // B-2ca0: what ANOTHER hub's ssh config resolved is not this hub's (the SFTP road reads it)
-      if (rec.transport !== 'dial' && String(rec.host || '').startsWith('-')) { warnings.push(`${rec.name || h.id}: skipped — its address starts with «-»`); continue; }
-      if (rec.jump != null) {   // B-2ca0 commit 2: a jump host reaches ssh's -J — asked again, as at the add
+      // its read (follow-up): the record's ID names its key file (<ssh dir>/<id>.key) and caches — only the shape this hub makes
+      if (!/^host-[A-Za-z0-9_-]+$/.test(String(rec.id || ''))) { warnings.push(`${rec.name || 'a record'}: skipped — its id is not one this hub makes`); continue; }
+      if (rec.transport !== 'dial') {
+        rec.viaConfig = rec.viaConfig === true;   // its read: a boolean, never a bundle's «yes»
+        if (!rec.viaConfig) delete rec.viaConfig;
+        // B-2ca0 follow-up (主开发 19:23Z): EVERY imported ssh record is judged as the add judges a typed one — its user, address, jump
+        // (THE verdict), its port (the add's rule) and its key path; one that fails is skipped by name, never carried to an argv
+        const refusal = sshRecordRefusal({ host: rec.host, user: rec.user, viaConfig: !!rec.viaConfig, jump: rec.jump });
+        const po = sshPortOf(rec.port, !!rec.viaConfig);
+        const ownKey = !!(bundle.keys && bundle.keys[h.id] && typeof rec.keyPath === 'string' && rec.keyPath.startsWith(this._sshDir));   // rewritten below
+        const badKey = rec.keyPath != null && (typeof rec.keyPath !== 'string' || CONTROL_RE.test(rec.keyPath) || (!ownKey && !PLAIN_KEY_PATH.test(rec.keyPath)));
+        const why = refusal ? refusal.message : po.refuse ? po.refuse.message : badKey ? (typeof rec.keyPath === 'string' && CONTROL_RE.test(rec.keyPath) ? 'its key path holds a control character' : 'its key path is not an absolute path') : null;
+        if (why) { warnings.push(`${rec.name || h.id}: skipped — ${why}`); continue; }
         const j = jumpVerdict(rec.jump);
-        if (!j.ok) { warnings.push(`${rec.name || h.id}: skipped — its jump host is not one [user@]host[:port]`); continue; }
-        if (j.jump && !jumpTargetOk(rec.host)) { warnings.push(`${rec.name || h.id}: skipped — behind a jump host, its address is not plain host characters`); continue; }
         if (j.jump) rec.jump = j.jump; else delete rec.jump;
+        rec.port = po.port; rec.host = String(rec.host); rec.user = String(rec.user || '');
+        if (rec.dialRoot != null && !dialRootOk(rec.dialRoot)) { warnings.push(`${rec.name || h.id}: its install folder is not one this hub writes — dropped (no remote teardown)`); delete rec.dialRoot; }
       }
       // lane grants-unify: a bundle from before the unify asks each time under `exit.run.ask` — carried to `exit.ask` (the
       // field the reader reads) so an import never runs without asking what used to ask; its lists ride `bundle.grants`
@@ -842,6 +891,8 @@ class HostManager {
       } else if (h.keyPath && h.keyPath.startsWith(this._sshDir)) {
         rec.keyPath = null; // key text missing — fall back to ~/.ssh
       }
+      // B-2ca0 follow-up: the KEY SOURCE is the add's own derivation from what this hub now holds — never the bundle's word
+      if (rec.transport !== 'dial') rec.keySource = rec.keyPath ? (rec.keyPath === path.join(this._sshDir, 'id_ed25519') ? 'app' : String(rec.keyPath).startsWith(this._sshDir) ? 'imported' : 'file') : 'default';
       hosts.push(rec);
     }
     this._state.hosts = hosts;
@@ -888,7 +939,9 @@ class HostManager {
     if (h.keyPath) args.push('-i', h.keyPath, '-o', 'IdentitiesOnly=yes');
     // rsync transports are short-lived per-op — ride the shared master too (unless its folder was refused)
     if (cmUsable(this)) args.push('-o', 'ControlMaster=auto', '-o', `ControlPath=${path.join(this._cmDir, cmNameOf(h))}`, '-o', 'ControlPersist=600');
-    return 'ssh ' + args.map((a) => (/[\s"']/.test(a) ? JSON.stringify(a) : a)).join(' ');
+    // B-2ca0 follow-up (its read): quoted by RSYNC's own rule — its -e splitter honours '…' and "…", a doubled quote inside is one quote,
+    // and a backslash is NO escape (a JSON-quoted `\"` ended the quote there: a path holding `"` became words — an option — of ssh)
+    return 'ssh ' + args.map((a) => (/[\s"'\\]/.test(a) ? `'${a.replace(/'/g, "''")}'` : a)).join(' ');
   }
 
   /** B-2ca0: an ALIAS of the hub's ssh config (`viaConfig`) keeps the config's own Port and User unless the person set them — the
@@ -901,11 +954,17 @@ class HostManager {
    *  user, port, identityFile } (alias: the resolved hostname is not the name typed;
    *  configured: alias, or the entry sets a port / user of its own) | null (no answer, a
    *  name that is not a plain host word — never an option) */
-  resolveAlias(host, { ms = 5000 } = {}) {
+  resolveAlias(host, { ms = 5000, graceMs = 500 } = {}) {
     const name = String(host || '');
     if (!name || name.startsWith('-') || /\s/.test(name)) return Promise.resolve(null);
-    return new Promise((resolve) => {
-      execFile('ssh', ['-G', name], { env: this.sshEnv(), timeout: ms }, (err, out) => {
+    return new Promise((done) => {
+      // B-2ca0 follow-up (主开发 19:23Z): a TIMER OF ITS OWN — a killed child whose stdout a grandchild still holds (a `Match exec` of the
+      // hub's config, a ProxyCommand) never calls back; the add route answers anyway, as «not an alias» (`graceMs` past the kill)
+      let over = false, cp = null;
+      const resolve = (v) => { if (over) return; over = true; clearTimeout(tm); done(v); };
+      // its read: the timer also lets go of the child's pipes (a grandchild holding them would keep the fds for as long as it lives)
+      const tm = setTimeout(() => { try { if (cp && cp.stdout) cp.stdout.destroy(); if (cp && cp.stderr) cp.stderr.destroy(); } catch { /* gone */ } resolve(null); }, ms + graceMs);
+      cp = execFile('ssh', ['-G', name], { env: this.sshEnv(), timeout: ms, killSignal: 'SIGKILL' }, (err, out) => {
         const g = err ? null : parseSshG(out, name);
         if (!g) return resolve(null);
         // its read: an entry with NO HostName still configures the name (`Host gpu01.example.com` + `Port 2222`) — configured = it
@@ -3345,4 +3404,4 @@ HostManager.prototype.bootstrap = function (id, onEvent) {
   });
 };
 
-module.exports = { HostManager, USAGE_HARVEST_LIMITS, usageScanBound, codexOpenRolloutsShell, killPidShell, installAgentdScript, installAgentdAnswer, feedStdin, sshRefusal, unreachableError, refusalBody, parseSshG, configVerdict };
+module.exports = { HostManager, USAGE_HARVEST_LIMITS, usageScanBound, codexOpenRolloutsShell, killPidShell, installAgentdScript, installAgentdAnswer, feedStdin, sshRefusal, unreachableError, refusalBody, parseSshG, configVerdict, sshRecordRefusal, sshPortOf, dialRootOk, dialRootOf };

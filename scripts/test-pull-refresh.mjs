@@ -821,6 +821,31 @@ try {
     live('mm-mac', mpMac); live('mm-mb', mpMacbook); live('mm-two-old', mpTwo);
     check('§16 under ANY live pull\'s folder nothing is shadowed: a mounted one, a nested record under a live one (what shows is the machine\'s own), a second record on a live folder', sh(path.join(mpMac, 'Documents', 'a.txt')) === null && sh(path.join(mpIn, 'x')) === null && sh(path.join(mpTwo, 'f')) === null);
     mm._live.clear();
+    // B-2ca0 follow-up (主开发 19:42Z): a record whose mount point was written THROUGH A LINK is matched by its REAL path too — WebDAV's
+    // target comes from the real-pathed root: a write at the real path is refused by the door's words
+    {
+      const realD = path.join(base, 'lk-real'), linkD = path.join(base, 'lk-link');
+      fs.mkdirSync(path.join(realD, 'mac'), { recursive: true }); fs.symlinkSync(realD, linkD);
+      const realMac = fs.realpathSync(path.join(linkD, 'mac'));
+      const lk = { id: 'mm-lk', dir: 'pull', hostId: 'h-mac', remotePath: '/lk', mountpoint: path.join(linkD, 'mac'), createdAt: 9 };
+      const run = (M) => {
+        M._state.mounts.push(lk); M._realMp.set('mm-lk', realMac);
+        try { const w = M.shadowedBy(path.join(realMac, 'f.txt'), { writer: true }); return { w, words: w ? MMx.pullShadowBody(w).error : null, asWritten: M.shadowedBy(path.join(linkD, 'mac', 'f.txt'), { writer: true }) }; } finally { M._state.mounts.pop(); M._realMp.delete('mm-lk'); }
+      };
+      const got = run(mm);
+      check('§16b B-2ca0 follow-up: a record whose mount point was written THROUGH A LINK — a write at its REAL path (WebDAV\'s real-pathed target) is refused by the door\'s words, as one at the path as written', got.w?.id === 'mm-lk' && got.asWritten?.id === 'mm-lk' && /“Studio Mac” is offline/.test(got.words || ''), JSON.stringify({ w: got.w && got.w.id, words: got.words }));
+      const SRC0 = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../src');
+      const src0 = fs.readFileSync(path.join(SRC0, 'machine-mounts.js'), 'utf8');
+      const anchor = "      const mp = this._pullFolders(m).find((x) => x !== '/' && (rp === x || rp.startsWith(x + '/')));   // a whole path segment (…/mac is not …/macbook)";
+      if (src0.split(anchor).length !== 2) check('§16b CONTROL: the shadowedBy anchor moved — update this suite', false);
+      else {
+        const Mod = require('module'), file = path.join(SRC0, 'machine-mounts.js'), mo = new Mod(file, null); mo.filename = file; mo.paths = Mod._nodeModulePaths(path.dirname(file));
+        mo._compile(src0.replace(anchor, "      const mp0 = path.resolve(m.mountpoint), mp = mp0 !== '/' && (rp === mp0 || rp.startsWith(mp0 + '/')) ? mp0 : null;"), file);
+        const mmC = new mo.exports.MachineMounts({ dataDir, hosts, rcloneBin: () => 'rclone', broadcast: () => { }, log: () => { } }); clearInterval(mmC._sweep);
+        const c = run(mmC);
+        check('§16b CONTROL (RED): the release\'s match (the mount point as written only) — a write at the real path is NOT refused (the PUT would land in the bare folder)', c.w === null && c.asWritten?.id === 'mm-lk', JSON.stringify({ w: c.w }));
+      }
+    }
     // a mount clears the verdict; the link closing releases it and PROBES it again (the stub chain: the module's own DM seams)
     const realRel = DMX.releaseStale, realMount = DMX.deviceFolderMount;
     DMX.releaseStale = async () => [];

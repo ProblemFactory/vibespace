@@ -30,10 +30,12 @@
 
 const MAX_CHARS = 16384;
 const MAX_LINES = 400;
+/** B-2ca0 follow-up (主开发 19:23Z): a line longer than this is NAMED, never matched — the line pattern is linear, and bounded too */
+const MAX_LINE_CHARS = 1024;
 /** the keys read, lower-case → the field they fill */
 const FIELDS = Object.freeze({ host: 'name', hostname: 'host', user: 'user', port: 'port', identityfile: 'keyFile', identitiesonly: 'identitiesOnly', proxyjump: 'jump' });
 const WHY = Object.freeze(['unknown', 'match', 'include', 'pattern', 'more-names', 'repeat', 'more-keys', 'value', 'token', 'chain', 'identities-no', 'before-host', 'syntax',
-  'bad-host', 'jump-none', 'identities-alone', 'jump-key', 'jump-unread']);
+  'bad-host', 'jump-none', 'identities-alone', 'jump-key', 'jump-unread', 'long']);
 /** the keyword names as ssh_config(5) spells them — for the confirm step's «from» */
 const SPELLED = Object.freeze({ host: 'Host', hostname: 'HostName', user: 'User', port: 'Port', identityfile: 'IdentityFile', identitiesonly: 'IdentitiesOnly', proxyjump: 'ProxyJump' });
 
@@ -90,10 +92,23 @@ function readSshBlock(text) {
     const n = i + 1, t = raw.trim();
     if (!t || t.startsWith('#')) return;
     const before = last; last = n;
-    const m = /^([A-Za-z][A-Za-z0-9]*)(?:\s*=\s*|\s+)(.*)$/.exec(t);
+    // B-2ca0 follow-up: bounded BEFORE the pattern, and the pattern linear — `.` matches a line separator (U+2028 / U+2029 are no line
+    // break here), so `(.*)$` never fails at one and sends the alternation backtracking over a long run of spaces
+    // its read (follow-up): the KEYWORD of a line that does not read (too long, no value, an unclosed quote) still counts — a Host /
+    // Match keyword ends the block before it; a field keyword is that field's FIRST line, refused (so a refused HostName is said, never
+    // the bare Host name). Read from a bounded prefix: linear.
+    const kw = ((/^([A-Za-z][A-Za-z0-9]{0,39})(?![A-Za-z0-9])/.exec(t) || [])[1] || '').toLowerCase();
+    const unread = (why, text) => {
+      if (kw === 'host' || kw === 'match') { endBlock(before); cur = { kind: kw === 'host' ? 'bad-host' : 'match' }; outside.push({ line: n, text, why }); return undefined; }
+      if (cur && cur.kind === 'host' && FIELDS[kw] && kw !== 'host' && !cur.h.seen[kw]) cur.h.seen[kw] = n;
+      if (cur && cur.kind === 'host' && kw === 'proxycommand') cur.h.proxied = true;
+      return note(n, text, why);
+    };
+    if (t.length > MAX_LINE_CHARS) return unread('long', t.slice(0, 60) + '…');
+    const m = /^([A-Za-z][A-Za-z0-9]*)(?:\s*=\s*|\s+)(.*)$/s.exec(t);
     const key = m ? m[1].toLowerCase() : '';
     const words = m ? wordsOf(m[2].trim()) : null;
-    if (!m || !words || !words.length) return note(n, t, 'syntax');
+    if (!m || !words || !words.length) return unread('syntax', t);
     if (key === 'host') {
       endBlock(before);
       if (words.some((w) => /[*?!]/.test(w))) { cur = { kind: 'pattern' }; outside.push({ line: n, text: t, why: 'pattern' }); return; }
@@ -173,7 +188,8 @@ function readSshBlock(text) {
   }
   return {
     ok: true,
-    hosts: hosts.map((h) => ({ name: h.name, line: h.line, end: h.end, fields: { ...h.fields, host: h.fields.host || h.name }, from: { host: h.line, ...h.from }, notUsed: h.notUsed.sort((a, b) => a.line - b.line), ...(h.jumpVia ? { jumpVia: h.jumpVia } : {}) })),
+    // B-2ca0 follow-up: a block whose HostName line was REFUSED has no address — it is said (`hostRefused`), never the bare Host name
+    hosts: hosts.map((h) => ({ name: h.name, line: h.line, end: h.end, fields: { ...h.fields, ...(h.seen.hostname && !h.fields.host ? {} : { host: h.fields.host || h.name }) }, ...(h.seen.hostname && !h.fields.host ? { hostRefused: h.seen.hostname } : {}), from: { host: h.line, ...h.from }, notUsed: h.notUsed.sort((a, b) => a.line - b.line), ...(h.jumpVia ? { jumpVia: h.jumpVia } : {}) })),
     outside,
   };
 }
@@ -181,7 +197,7 @@ function readSshBlock(text) {
 function formOf(h) {
   const f = (h && h.fields) || {};
   return {
-    name: String(h.name), host: String(f.host || h.name),
+    name: String(h.name), ...(h.hostRefused ? {} : { host: String(f.host || h.name) }),   // a refused HostName fills no address
     ...(f.user ? { user: f.user } : {}),
     port: f.port ? String(f.port) : '',   // its read: a block with no Port means 22 — an earlier fill's port is not left behind
     jump: f.jump || '',                   // …nor an earlier fill's jump host
@@ -195,7 +211,7 @@ function confirmRows(h) {
   const row = (field, key, value) => ({ field, value: value == null ? null : value, from: SPELLED[key], line: value == null ? null : from[key] || null });
   return [
     row('name', 'host', h.name),
-    row('host', from.hostname ? 'hostname' : 'host', f.host || h.name),
+    h.hostRefused ? { field: 'host', value: null, from: 'HostName', line: h.hostRefused, refused: true } : row('host', from.hostname ? 'hostname' : 'host', f.host || h.name),
     row('user', 'user', f.user),
     ...(f.port ? [row('port', 'port', f.port)] : []),
     ...(f.keyFile ? [row('keyFile', 'identityfile', f.keyFile)] : []),
@@ -204,4 +220,4 @@ function confirmRows(h) {
   ];
 }
 
-module.exports = { MAX_CHARS, MAX_LINES, FIELDS, WHY, SPELLED, jumpVerdict, jumpParts, jumpTargetOk, readSshBlock, formOf, confirmRows };
+module.exports = { MAX_CHARS, MAX_LINES, MAX_LINE_CHARS, FIELDS, WHY, SPELLED, jumpVerdict, jumpParts, jumpTargetOk, readSshBlock, formOf, confirmRows };

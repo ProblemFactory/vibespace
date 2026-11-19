@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Module, { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
 import { checker } from './lib/check.mjs';
 
 const require = createRequire(import.meta.url);
@@ -74,6 +74,8 @@ console.log('②b the route\'s verdict');
       { viaConfig: true, user: '', port: null, sshConfig: { host: 'h', user: 'ubuntu', port: 2222, identityFile: '/home/hub/.ssh/id_x' } }],
     ['a configured name, a typed 22', V(cfg({ alias: true, port: 2222 }), { user: 'me', port: '22' }, home), { viaConfig: true, user: 'me', port: 22, sshConfig: { host: 'h', user: 'hubuser', port: 2222, identityFile: null } }],
     ['a plain name, an empty port', V({ alias: false, configured: false, userIsDefault: true, hostname: 'x', user: 'hubuser', port: 22 }, { user: 'me', port: '' }, home), { viaConfig: false, user: 'me', port: 22 }],
+    ['B-2ca0 follow-up: a typed port that is no port («abc», 70000) is refused by code — never 22 in silence', [V(null, { user: 'me', port: 'abc' }, home), V(null, { user: 'me', port: '70000' }, home)],
+      [{ refuse: 'the port is a whole number from 1 to 65535', code: 'port-form' }, { refuse: 'the port is a whole number from 1 to 65535', code: 'port-form' }]],
   ];
   const bad = rows.filter(([, got, want]) => !same(got, want));
   ok(bad.length === 0, `②b the route's verdict — ${rows.map((r) => r[0]).join(' · ')}`, bad.map(([n, got]) => [n, got]));
@@ -99,12 +101,33 @@ console.log('③ resolveAlias asks ssh -G');
   } finally { process.env.PATH = PATH0; }
 }
 
+// ═══ ③b the lookup's own timer ═══
+console.log('③b B-2ca0 follow-up: resolveAlias answers by its own timer');
+{
+  // a copy whose ssh -G child never calls back (a killed child whose stdout a grandchild still holds) — the stall placed IN the window
+  let src = read('src/hosts.js');
+  const a = 'cp = execFile(', t = "const tm = setTimeout(() => { try { if (cp && cp.stdout) cp.stdout.destroy(); if (cp && cp.stderr) cp.stderr.destroy(); } catch { /* gone */ } resolve(null); }, ms + graceMs);";
+  if (src.split(a).length !== 2 || src.split(t).length !== 2) ok(false, '③b the lookup\'s anchors moved in src/hosts.js — update this suite');
+  else {
+    const file = path.join(REPO, 'src/hosts.js');
+    const load = (s) => { const m = new Module(file, null); m.filename = file; m.paths = Module._nodeModulePaths(path.dirname(file)); m._compile(s, file); return m.exports; };
+    const stalled = anchored(src, a, 'cp = ((..._) => globalThis.__stallChild)(', 'the lookup child');   // a child that never calls back; its pipes count their release
+    let released = 0; globalThis.__stallChild = { stdout: { destroy() { released++; } }, stderr: { destroy() { released++; } } };
+    const mk = (H, n) => { const dataDir = path.join(SCR, 'tm' + n); fs.mkdirSync(dataDir, { recursive: true }); fs.writeFileSync(path.join(dataDir, 'hosts.json'), JSON.stringify({ hosts: [] })); return new H.HostManager({ dataDir }); };
+    const marker = (ms) => new Promise((r) => setTimeout(() => r('still waiting'), ms));
+    const [own, ctl] = await Promise.all([Promise.race([mk(load(stalled), 1).resolveAlias('my-vm', { ms: 20, graceMs: 30 }), marker(200)]),
+      Promise.race([mk(load(anchored(stalled, t, 'const tm = null;', 'the lookup timer')), 2).resolveAlias('my-vm', { ms: 20, graceMs: 30 }), marker(200)])]);
+    ok(own === null && released === 2, '③b a lookup whose child never answers is answered by the lookup\'s OWN timer (as «not an alias») — the add route never waits on it — and the timer lets go of the child\'s two pipes', { own, released });
+    ok(ctl === 'still waiting', 'CONTROL (RED): the same stall without the timer — the lookup (and the add route awaiting it) never answers', ctl);
+  }
+}
+
 // ═══ ④ the add route ═══
 console.log('④ the add route asks, never takes it from the body');
 {
   const R = read('src/server/exit-routes.js');
   const iDel = R.indexOf('delete b.viaConfig;'), iAsk = R.indexOf('const a = await hosts.resolveAlias(b.host).catch(() => null);'), iV = R.indexOf("const v = require('../hosts.js').configVerdict(a, b, require('os').homedir());"), iAdd = R.indexOf('const id = hosts.add({ ...b, replaces: old ? old.id : null });');
-  ok(iDel > 0 && iDel < iAsk && iAsk < iV && iV < iAdd && R.includes('delete b.sshConfig;') && R.includes('if (v.refuse) throw new Error(v.refuse);') && R.includes('b.user = v.user; b.port = v.port; if (v.viaConfig) { b.viaConfig = true; b.sshConfig = v.sshConfig; }'),
+  ok(iDel > 0 && iDel < iAsk && iAsk < iV && iV < iAdd && R.includes('delete b.sshConfig;') && R.includes('if (v.refuse) throw Object.assign(new Error(v.refuse), v.code ? { code: v.code } : {});') && R.includes('b.user = v.user; b.port = v.port; if (v.viaConfig) { b.viaConfig = true; b.sshConfig = v.sshConfig; }'),
     '④ POST /api/hosts drops a body\'s viaConfig / sshConfig, THEN asks resolveAlias, takes the pure verdict (②b), THEN adds (in that order)');
 }
 
