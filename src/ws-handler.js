@@ -1356,7 +1356,7 @@ function registerWsHandler(wss, ctx) {
               // lane resume-all-paced L3 P1 on THIS rule (every wait of an attach here, never between the join and the verdict): a
               // RE-ATTACH (the history loaded) reads its codex history off the loop now, acked while it waits; the attach below keeps
               // this reader. A first attach reads after its harness's warm (below — a missing rollout is written there first)
-              if (s0._historyLoaded) { reSm = createSessionMessages(s0, data.sessionId); await readOffLoop(reSm, { label: data.sessionId, ack: () => { try { ws.send(JSON.stringify({ type: 'attach-ack', sessionId: data.sessionId, progress: null, queued: true })); } catch { } } }); }
+              if (s0._historyLoaded) { reSm = createSessionMessages(s0, data.sessionId); await readOffLoop(reSm, { label: data.sessionId, wanted: () => ws.readyState === WS_OPEN, ack: () => { try { ws.send(JSON.stringify({ type: 'attach-ack', sessionId: data.sessionId, progress: null, queued: true })); } catch { } } }); }
               const left = activeSessions.get(data.sessionId) !== s0 || ws.readyState === 2 || ws.readyState === 3;   // replaced / ended, or the socket closing
               if (left && s0.clients.get(ws)?.pending) s0.clients.delete(ws);
               if (ws.readyState === 2 || ws.readyState === 3) break;   // closing / closed during the waits: nothing to attach to
@@ -1722,7 +1722,8 @@ function registerWsHandler(wss, ctx) {
             // "View History" said "No messages in this session's transcript
             // yet." while the serve had them. A reader that is not prepared is
             // EMPTY, never wrong, which is exactly why it was silent.
-            await readOffLoop(sm, { label: `view ${backendSessionId}` });   // lane resume-all-paced (L2/L3): codex's records off the loop — in the hub's line, a person's read
+            await readOffLoop(sm, { label: `view ${backendSessionId}`, wanted: () => ws.readyState === WS_OPEN });   // lane resume-all-paced (L2/L3): codex's records off the loop — in the hub's line, a person's read; a closed socket's read is dropped before it starts
+            if (ws.readyState !== WS_OPEN) break;   // …and its view goes no further: nothing to send, and no read of the reader on the loop for it
             if (typeof sm.prepare === 'function') { try { await sm.prepare(); } catch (e) { console.warn(`[view] ${data.backend || 'claude'} reader prepare failed for ${backendSessionId}: ${e.message}`); } }
             const mm = createMessageManager(data.backend || 'claude', data.sessionId || 'view', { threadId: backendSessionId }); // the rendered conversation's id (codex ledger key)
             await convertWithCards(mm, sm.raw(), browserCardsFor({ conversationId: backendSessionId }), { artifacts: artifactDeriveOpts({ backend: data.backend || 'claude', cwd: data.cwd || '' }) }); // lane artifacts-model: its deliverable cards, derived at the read // view-only replay of a dead session — same loop-friendly slicing (boot replay opens N of these at once); its browser-session cards by time (2026-09-27)

@@ -13,14 +13,17 @@
  * read-only after ~2.5 min without an ack (chat-view.js), so the wait is acked every ACK_MS like the history rebuild's wait
  * (`queued: true` — it has not started converting yet). The caller passes its own `ack`.
  *
- * → true when it read (a reader with rawAsync), false when the reader reads synchronously by design (claude: its own warm cache)
+ * `wanted` (主开发 02:22Z, the restack's follow-up): asked when the read's turn comes in the line — false (the socket closed while it
+ * waited) drops the read before it starts. It travels with the reader's one read: a later caller of the SAME reader shares it.
+ * → true when the reader went the off-loop road (read, or dropped as unwanted), false when the reader reads synchronously by design
+ * (claude: its own warm cache)
  */
 const ATTACH_ACK_MS = 10000;   // the rebuild's re-ack cadence (ws-handler.js, 2.369.16): one clock for every wait of an attach
 
-async function readOffLoop(sm, { ack = null, ackMs = ATTACH_ACK_MS, bulk = false, label = '' } = {}) {
+async function readOffLoop(sm, { ack = null, ackMs = ATTACH_ACK_MS, bulk = false, label = '', wanted = null } = {}) {
   if (!sm || typeof sm.rawAsync !== 'function') return false;
   const timer = ack ? setInterval(() => { try { ack(); } catch { } }, ackMs) : null;
-  try { await sm.rawAsync({ bulk }); }
+  try { await sm.rawAsync({ bulk, wanted }); }
   catch (e) { console.warn(`[attach] ${label}: off-loop history read failed — ${(e && e.message) || e}`); }
   finally { if (timer) clearInterval(timer); }
   return true;

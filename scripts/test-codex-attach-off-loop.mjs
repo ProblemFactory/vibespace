@@ -132,9 +132,9 @@ console.log('— ④ THE WIRING');
 {
   const ws = read('src/ws-handler.js');
   const i = ws.indexOf('await readOffLoop(sm, { bulk: bulkRead'), j = ws.indexOf('await rebuildHistory(session, data.sessionId, sm.raw()');   // L3: through src/attach-read.js readOffLoop (sm.rawAsync)
-  ok(i > 0 && j > i && ws.lastIndexOf('const sm = reSm && session === waitedFor ? reSm : createSessionMessages(session, data.sessionId);', i) > 0 && /await sm\.rawAsync\(\{ bulk \}\)/.test(read('src/attach-read.js')), 'the live attach (ws-handler) awaits sm.rawAsync() (src/attach-read.js readOffLoop) before rebuildHistory reads sm.raw()');
+  ok(i > 0 && j > i && ws.lastIndexOf('const sm = reSm && session === waitedFor ? reSm : createSessionMessages(session, data.sessionId);', i) > 0 && /await sm\.rawAsync\(\{ bulk, wanted \}\)/.test(read('src/attach-read.js')), 'the live attach (ws-handler) awaits sm.rawAsync() (src/attach-read.js readOffLoop) before rebuildHistory reads sm.raw()');
   const st = new S.CodexSessionMessages(sess('c'), 'w-c', { buffersDir }), tsv = read('src/transcript-service.js');
-  ok((tsv.match(/if \(typeof sm\.rawAsync === 'function'\) await sm\.rawAsync\(\);/g) || []).length === 2 && ws.includes("await readOffLoop(sm, { label: `view ${backendSessionId}` });"),
+  ok((tsv.match(/if \(typeof sm\.rawAsync === 'function'\) await sm\.rawAsync\(\);/g) || []).length === 2 && ws.includes("await readOffLoop(sm, { label: `view ${backendSessionId}`, wanted: () => ws.readyState === WS_OPEN });") && /readyState === WS_OPEN \}\);[^\n]*\n\s*if \(ws\.readyState !== WS_OPEN\) break;/.test(ws),
     'the read-only view (ws-handler — the restore opens every stopped conversation as one) and the transcript service\'s view and status await rawAsync first');
   ok(typeof st.prepare !== 'function', 'a codex reader has NO prepare(): to the search index that marks a «serve-backed» reader it skips — codex conversations stay searchable (the gate\'s test-global-search red)');
   ok(desc.store.lastTurnModel(ID) instanceof Promise && desc.store.lastTurnEffort(ID) instanceof Promise, 'the continuity hooks are async (ws-create awaits them)');
@@ -157,7 +157,7 @@ console.log('— ⑥ THE CURE ROUND (主开发 23:16Z): P1 — a re-attach reads
   ok(/\n {14}if \(sm !== reSm\) await readOffLoop\(sm, \{ label: data\.sessionId, ack: /.test(WS) && WS.indexOf('await readOffLoop(sm, { label: data.sessionId, ack:') < WS.indexOf('const chatStatus = sm.chatStatus() || {};') && WS.indexOf('if (session._normalizer && !session._historyLoaded) {') < WS.indexOf('await readOffLoop(sm, { label: data.sessionId, ack:'), 'P1 (the wiring) ws-handler\'s attach reads off the loop on EVERY attach — after the first-attach block, at its level, before the chat status — and the view door reads through the same door', { view: /await readOffLoop\(sm, \{ label: `view /.test(WS) });
   // B-299b's attach rule (r2–r4: every wait of an attach in the PENDING window, never between the join and the verdict) — the
   // re-attach's read stands there (the restack onto the 2.369.411 block, its adversarial read's S1)
-  ok(WS.indexOf('if (s0._historyLoaded) { reSm = createSessionMessages(s0, data.sessionId); await readOffLoop(reSm, { label: data.sessionId, ack:') > 0   // the wait that waits is the one acked
+  ok(WS.indexOf('if (s0._historyLoaded) { reSm = createSessionMessages(s0, data.sessionId); await readOffLoop(reSm, { label: data.sessionId, wanted: () => ws.readyState === WS_OPEN, ack:') > 0   // the wait that waits is the one acked (and dropped for a closed socket)
     && WS.indexOf('await warmTaskStateFor(s0);') < WS.indexOf('await readOffLoop(reSm,')
     && WS.indexOf('await readOffLoop(reSm,') < WS.indexOf('const session = activeSessions.get(data.sessionId);   // read AFTER the warm'),
     'P1 on B-299b\'s rule (the wiring): a re-attach reads its history off the loop in the PENDING window, ACKED while it waits — after the task-state warm, before the session is read again and the socket joins');

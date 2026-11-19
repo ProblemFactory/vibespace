@@ -749,7 +749,7 @@ class CodexSessionMessages {
   }
 
   /** The attach's records off the loop — kb-file-structure «src/codex-session-store.js» (lane resume-all-paced L2). */
-  rawAsync({ bulk = false } = {}) {
+  rawAsync({ bulk = false, wanted = null } = {}) {
     // THE ATTACH'S RECORDS OFF THE LOOP (lane resume-all-paced, L2 — measured on a 120 MB rollout: the sync _ensureParsed held the
     // hub's loop 380–880 ms per attach — the parse 73–123 ms, mergeCodexRecords TWICE at 163–343 ms each): _ensureParsed's SAME
     // steps, the parse in the transcript worker (readJsonlBoundedParsedAsync — the same parse; the sync one when the pool is down or
@@ -760,6 +760,9 @@ class CodexSessionMessages {
     if (this._rawAsync) return this._rawAsync;
     this._rawAsync = oneReadAtATime(async () => {
       if (this._all) return this._all;   // the sync road filled it while this one waited its turn
+      // A READ NOBODY WILL USE IS DROPPED BEFORE IT STARTS (主开发 02:22Z, the restack's follow-up): `wanted` is asked when this read's
+      // turn comes — a socket closed while it waited (a reload storm queues reads nobody will use) frees the line at once, unread
+      if (typeof wanted === 'function' && !wanted()) return null;
       const threadId = getCodexHistorySessionId(this._session);
       const ancestry = resolveCodexForkAncestry(threadId, this._session?.forkedFrom || []);
       let history = [];

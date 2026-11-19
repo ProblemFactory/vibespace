@@ -127,9 +127,10 @@ console.log('— ⑪c WIRING: every resume/fork/restart entry point, and where t
     'the chat RESUME BAR sends no model/effort at all — the path the owner hit');
   const lay = read('src/lib/layout.js'), pacer = read('src/lib/resume-pacer.js');
   // lane resume-all-paced (L1): resume-all goes through the pacer (src/lib/resume-pacer.js) — layout.js hands it `extra: { stay: true }`
-  // (L3: `bulk: true` beside it — the history read's place in the hub's line, not a spawn option),
+  // (L3: `bulk: true` beside it — the history read's place in the hub's line, not a spawn option — REQUIRED since it is in the
+  // tree: the pin no longer passes a resume-all that dropped it),
   // resumeAndWait spreads the row's own opts, then `extra`, then its ONE addition: the create's end it waits on (onCreateEnd)
-  ok(/resumePaced\(this\.app, go, \{ extra: \{ stay: true(, bulk: true)? \} \}\)/.test(lay)   // B-f64b cure: `go` = the offer's rows less the ones still being checked
+  ok(/resumePaced\(this\.app, go, \{ extra: \{ stay: true, bulk: true \} \}\)/.test(lay)   // B-f64b cure: `go` = the offer's rows less the ones still being checked
     && /const opts = d\.opts \|\| \{\};/.test(pacer)
     && /app\.resumeSession\(d\.sessionId, d\.cwd, d\.name, \{ \.\.\.opts, \.\.\.extra, onCreateEnd: \(how, msg\) => end\(how, msg, r && r\.row \? r\.row : null\) \}\)/.test(pacer),
     'resume-all replays the window\'s own opts and invents nothing (lane phone-resume-keeps-layout: + `stay` — each row re-opened where it is, no switch)');
