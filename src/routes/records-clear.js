@@ -37,7 +37,7 @@ function registerRecordClearRoutes(app, { recordClear }) {
       if (isAgentBearer(req)) return fail(res, RC.refuse('agent_forbidden'));
       const r = await recordClear.clear(itemOf(req.body || {}), { caller: OWNER });
       if (!r.ok) return fail(res, r);
-      res.json({ ok: true, cleared: r.cleared, already: r.already });
+      res.json({ ok: true, cleared: r.cleared, already: r.already, ...(r.archiveUnread ? { archiveUnread: true } : {}) });   // B-20b6: the archived records left uncleared are said
     } catch (e) { res.status(500).json({ error: e.message, code: 'failed' }); }
   });
   app.post('/api/records/clear-many', async (req, res) => {
@@ -46,7 +46,7 @@ function registerRecordClearRoutes(app, { recordClear }) {
       const items = req.body && req.body.items;
       const r = await recordClear.clearMany(Array.isArray(items) ? items.map(itemOf) : items, { caller: OWNER });
       if (!r.ok) return fail(res, r);
-      res.json({ ok: true, cleared: r.cleared, already: r.already, unknown: r.unknown, refused: [...r.refused, ...r.ambiguous].map((x) => ({ kind: x.kind, id: x.id, code: x.code, error: x.why })) });
+      res.json({ ok: true, cleared: r.cleared, already: r.already, unknown: r.unknown, refused: [...r.refused, ...r.ambiguous].map((x) => ({ kind: x.kind, id: x.id, code: x.code, error: x.why })), ...(r.archiveUnread ? { archiveUnread: true } : {}) });   // B-20b6
     } catch (e) { res.status(500).json({ error: e.message, code: 'failed' }); }
   });
 }

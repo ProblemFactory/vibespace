@@ -74,6 +74,7 @@ function create({ tasks = null, userTodos = null, sessionStatus = null, getJobs 
       res.already += r.already.length;
       res.ids.push(...r.cleared.map((id) => ({ kind, id: String(id) })));
       for (const id of r.unknown) res.unknown.push({ kind, id: String(id) });
+      if (r.archiveUnread) res.archiveUnread = true;   // B-20b6: the job store could not reach its ARCHIVED records — their words were not cleared; said to the person
       for (const x of r.ambiguous || []) res.ambiguous.push({ kind, id: String(x), ...pick(RC.refuse('ambiguous')) });
       for (const x of r.refused) res.refused.push({ kind, id: String(x.id ?? x.at ?? x.ref), code: x.code, why: x.why || (RC.REFUSALS[x.code] || {}).why || '', status: x.status || (RC.REFUSALS[x.code] || {}).status || 403 });
       journal(kind, container, r.cleared.map(String), by);
@@ -155,7 +156,7 @@ function create({ tasks = null, userTodos = null, sessionStatus = null, getJobs 
     if (r.refused.length) { const x = r.refused[0]; return { ok: false, code: x.code, why: x.why, status: x.status }; }
     if (r.ambiguous.length) return { ok: false, ...pick(RC.refuse('ambiguous')) };
     if (r.unknown.length) return { ok: false, ...pick(RC.refuse('not_found')) };
-    return { ok: true, cleared: r.cleared, already: r.already, ids: r.ids };
+    return { ok: true, cleared: r.cleared, already: r.already, ids: r.ids, ...(r.archiveUnread ? { archiveUnread: true } : {}) };
   }
 
   return { clear, clearMany, MAX_ITEMS };

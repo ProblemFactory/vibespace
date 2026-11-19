@@ -5868,6 +5868,7 @@ export default {
   "no such record": "找不到这条记录",
   "Content cleared": "内容已清除",
   "Already cleared": "已经清除过了",
+  "Archived job records could not be reached, so their words were not cleared — clear them again once they can be read.": "存档的后台任务记录暂时无法读取，因此其中的内容没有被清除 — 等它们可以读取后请再清除一次。",
   "{n} cleared": "已清除 {n} 条",
   "Find…": "查找…",
   "select::Done": "完成",

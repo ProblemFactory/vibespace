@@ -625,6 +625,34 @@ console.log('⑥ negative controls — each rule broken on a copy goes red');
 }
 
 // ── ⑦ the census ──
+// B-20b6: «Clear content…» SAYS the archived job records it could not reach — the job store's `archiveUnread` rides the seam and both
+// routes to the dialog (it showed «Content cleared» alone while the archived copies kept their words)
+{
+  const ARCH = 'Archived job records could not be reached, so their words were not cleared — clear them again once they can be read.';
+  const jmOf = (unread) => ({ ready: true, clearJobs: (ids) => ({ cleared: ids.slice(), already: [], unknown: [], refused: [], ...(unread ? { archiveUnread: 'archived records could not be reached, so their words were not cleared' } : {}) }) });
+  const SEAM = require(path.join(ROOT, 'src/server/record-clear.js'));
+  const RCS = SEAM.create({ getJobs: () => jmOf(true), log: () => { } }), RCP = SEAM.create({ getJobs: () => jmOf(false), log: () => { } });
+  const one = await RCS.clear({ kind: 'job', id: 'jb-0000a001' }, { caller: OWNER });
+  const many = await RCS.clearMany([{ kind: 'job', id: 'jb-0000a001' }, { kind: 'job', id: 'jb-0000a002' }], { caller: OWNER });
+  const plain = await RCP.clear({ kind: 'job', id: 'jb-0000a001' }, { caller: OWNER });
+  ok(one.ok && one.archiveUnread === true && many.ok && many.archiveUnread === true && plain.ok && !('archiveUnread' in plain), 'B-20b6: a job clear whose archived records could not be reached carries archiveUnread through the seam (one and many); a clear that reached them carries nothing', { one, many, plain });
+  const SSRC = fs.readFileSync(path.join(ROOT, 'src/server/record-clear.js'), 'utf8');
+  const CARRY = '      if (r.archiveUnread) res.archiveUnread = true;';
+  ok(SSRC.split(CARRY).length === 2, 'control setup: the seam\'s carry is found once');
+  const RX = M.load('src/server/record-clear.js', SSRC.replace(CARRY, '      /* MUTANT: not carried */'), 'b20b6-no-carry').create({ getJobs: () => jmOf(true), log: () => { } });
+  const ox = await RX.clear({ kind: 'job', id: 'jb-0000a001' }, { caller: OWNER });
+  ok(ox.ok && !ox.archiveUnread, 'CONTROL (the carry cut, in a copy): the clear answers «cleared» alone — the archived words left uncleared are never said — RED', ox);
+  const routes = new Map(), app = { post: (p, h) => routes.set(p, h) };
+  require(path.join(ROOT, 'src/routes/records-clear.js')).registerRecordClearRoutes(app, { recordClear: RCS });
+  const call = async (p, body) => { let out = null, code = 200; await routes.get(p)({ body, headers: {} }, { status(c) { code = c; return this; }, json(b) { out = { code, ...b }; } }); return out; };
+  const a1 = await call('/api/records/clear', { kind: 'job', id: 'jb-0000a001' }), a2 = await call('/api/records/clear-many', { items: [{ kind: 'job', id: 'jb-0000a001' }] });
+  ok(a1 && a1.code === 200 && a1.archiveUnread === true && a2 && a2.code === 200 && a2.archiveUnread === true, 'B-20b6: both clear routes answer archiveUnread (they cut the answer to {ok, cleared, already…})', { a1, a2 });
+  const UI = fs.readFileSync(path.join(ROOT, 'src/lib/record-clear-ui.js'), 'utf8');
+  ok(UI.includes("if (r.archiveUnread) showToast(t('" + ARCH + "'), { type: 'error' });") && UI.includes("if (archiveUnread) showToast(t('" + ARCH + "'), { type: 'error' });") && UI.includes('if (r.archiveUnread) archiveUnread = true;'),
+    'B-20b6: the dialog says it — one record\'s clear and a batch (any part) — beside its «cleared» line');
+  for (const lang of ['zh', 'ja']) ok(fs.readFileSync(path.join(ROOT, `src/lib/i18n-${lang}.js`), 'utf8').includes(JSON.stringify(ARCH) + ':'), `B-20b6: the sentence has its ${lang} row`);
+}
+
 for (const row of copiesCensus(M.files, M.dir, ROOT, { minCopies: 8, label: '⑦ ' })) ok(row.pass, row.name, row.detail);
 
 // ── lane webhook-l1-server: `channel-webhook` — a webhook caller's call, cleared through the channel store's rewrite door

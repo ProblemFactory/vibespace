@@ -147,15 +147,17 @@ export async function clearRecords(rows) {
     const r = await post('/api/records/clear', itemOf(list[0]));
     if (!r || !r.ok) { showToast(t('Could not clear: {why}', { why: clearErrorText(r ? r.code : 'unreachable', r && r.error) }), { type: 'error' }); return { ok: false, cleared: 0 }; }
     showToast(r.cleared ? t('Content cleared') : t('Already cleared'));
+    if (r.archiveUnread) showToast(t('Archived job records could not be reached, so their words were not cleared — clear them again once they can be read.'), { type: 'error' });   // B-20b6: said, never a silent «cleared»
     return { ok: true, cleared: r.cleared || 0 };
   }
-  let cleared = 0, answered = 0, missed = 0, why = '';
+  let cleared = 0, answered = 0, missed = 0, why = '', archiveUnread = false;
   const note = (code, fallback) => { if (!why) why = clearErrorText(code, fallback); };
   for (const part of chunked(list, MAX_ITEMS)) {
     const r = await post('/api/records/clear-many', { items: part.map(itemOf) });
     if (!r || !r.ok) { missed += part.length; note(r ? r.code : 'unreachable', r && r.error); continue; }
     answered++;
     cleared += r.cleared || 0;
+    if (r.archiveUnread) archiveUnread = true;
     const refused = r.refused || [], unknown = r.unknown || [];
     missed += refused.length + unknown.length;
     if (refused.length) note(refused[0].code, refused[0].error);
@@ -164,6 +166,7 @@ export async function clearRecords(rows) {
   if (!answered) { showToast(t('Could not clear: {why}', { why }), { type: 'error' }); return { ok: false, cleared: 0 }; }
   if (missed) showToast(t('{n} cleared · {m} could not be cleared: {why}', { n: cleared, m: missed, why }), { type: 'error' });
   else showToast(cleared ? t('{n} cleared', { n: cleared }) : t('Already cleared'));
+  if (archiveUnread) showToast(t('Archived job records could not be reached, so their words were not cleared — clear them again once they can be read.'), { type: 'error' });   // B-20b6
   return { ok: true, cleared };
 }
 

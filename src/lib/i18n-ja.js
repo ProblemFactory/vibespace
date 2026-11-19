@@ -5867,6 +5867,7 @@ export default {
   "no such record": "該当する記録がありません",
   "Content cleared": "内容を消去しました",
   "Already cleared": "消去済みです",
+  "Archived job records could not be reached, so their words were not cleared — clear them again once they can be read.": "アーカイブされたジョブの記録に到達できなかったため、その内容は消去されていません — 読めるようになったらもう一度消去してください。",
   "{n} cleared": "{n} 件を消去しました",
   "Find…": "検索…",
   "select::Done": "完了",
