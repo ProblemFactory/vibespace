@@ -25,7 +25,7 @@
 //   ⑧ RED CONTROLS on the base tree, printed: ①'s taps restack D (z changes); ②'s window lands near {0,0,1,1}
 //   ⑨ an unstamped record (an old desktop bundle) and a desktop-stamped one still move D's window (today's path)
 //   ⑩–⑬ lane phone-arrangement-fixes (phone-arrangement-verify r1 F1–F4) on a FRESH two-desktop record, each with a RED
-//      control on the commit before the fix (printed): ⑩ F1 D drags while D2 is offline, the phone saves, D2 re-reads on
+//      control on this tree with the four fixes taken back (B-44c5: FIX_REVERTS, a frozen patch; was the lane commit): ⑩ F1 D drags while D2 is offline, the phone saves, D2 re-reads on
 //      reconnect and saves ⇒ D's drag kept on disk AND on D (the stamp names the writer — a re-read takes the record
 //      whole); ⑪ F2 a phone save the shrink belt refuses ⇒ the re-send carries the held arrangement, D's reload keeps its
 //      z order; ⑫ F3 the phone moves a window to another desktop ⇒ its entry there keeps the held z / box / minimize, a
@@ -73,7 +73,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, scratchHome, freePorts, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE } from './scratch.mjs';
+import { scratch, scratchHome, freePorts, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, anchored } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // never the machine-global :7/5901 (test-architecture §57)
 const require = createRequire(import.meta.url);
 const { WebSocket } = require('ws');
@@ -119,13 +119,24 @@ const fixture = () => ({
 });
 
 // (⑭ THE CAPTURE CENSUS's table and walker — CAPTURE_SITES, APP_DM, captureCensus, libSources: MOVED to the fast scripts/test-phone-desktop-sync-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
-/** The commit before THIS lane's fix (its first commit carrying captureBuilt, minus one; HEAD while it is uncommitted). */
-// int263 seam (j): after the release squash the pair (phone-arrangement-local + its fixes) is ONE commit, so the commit before
-// `captureBuilt(` is the previous release — no phone protocol at all (⑩–⑬'s setup is not real there). The fix base must HOLD
-// captureForViewport and lack captureBuilt: else the lane's own phone-arrangement-local commit when this clone has it, else none (skip)
-const fixBaseShaped = (ref) => { try { const t = execFileSync('git', ['-C', repo, 'show', `${ref}:src/lib/desktop-manager.js`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); return t.includes('captureForViewport') && !t.includes('captureBuilt('); } catch { return false; } };
-const fixBaseRef = (() => { let first = 'HEAD'; try { const c = execFileSync('git', ['-C', repo, 'log', '--format=%H', '--reverse', '-S', 'captureBuilt(', '--', 'src/lib/desktop-manager.js'], { encoding: 'utf8' }).trim().split('\n').filter(Boolean)[0]; if (c) first = c + '^'; } catch { }
-  return fixBaseShaped(first) ? first : fixBaseShaped('f36369057') ? 'f36369057' : 'HEAD'; })();
+/** ⑩–⑬'s RED BASE (B-44c5, lane bl-tests-e): THIS tree with the four fixes of lane phone-arrangement-fixes taken back — a
+ *  frozen patch over HEAD's tree (anchored edits: a moved anchor fails by name). It was the lane commit f36369057 booted
+ *  whole, which only a clone that fetched that lane branch held (the B-4291 class), so the controls ran nowhere else.
+ *  F1 a re-read (resync) of a phone's record is taken whole (layout-model.js writerClass); F2 a refused save's re-send
+ *  merges the page's windows through THE ONE CAPTURE; F3 a moved window keeps the held arrangement; F4 a preset saved on
+ *  a phone is THE ONE CAPTURE's (layout.js savePreset → presetState). Each line is the fix's own, read at 500911fd9.
+ *  F2-gate: the server's layerGate (desktop-record.js, .274 — after the fix) refuses a phone's cross-layer re-send, a
+ *  second belt over F2's bug: with only F2 taken back ⑪'s checks would still hold (nothing written), so the base takes the
+ *  gate back too — the same edit as ⑰'s RED copy (which judges the gate alone). */
+const FIX_REVERTS = [
+  ['src/lib/layout-model.js', 'F1', "  if (!msg || msg.resync) return 'desktop';", "  if (!msg) return 'desktop';"],
+  ['src/lib/desktop-manager.js', 'F2', 'built: this.captureBuilt(d, rec), remove: lm.heldCloseIds?.() || [] }', 'built: lm.captureWindows(d), remove: lm.heldCloseIds?.() || [] }'],
+  ['src/lib/desktop-manager.js', 'F3', '    const moved = this.captureBuilt(desktopId, { windows: [...(src.windows || []), ...(dst.windows || [])] }, ids);', '    const moved = ids.map((id) => this.app.wm.windows.get(id)).filter(Boolean).map((w) => this.app.layoutManager.captureWin(w, w.id)).filter(Boolean);'],
+  ['src/lib/layout.js', 'F4', '    const state = dm?.presetState ? dm.presetState() : this.captureState();', '    const state = this.captureState();'],
+  ['src/lib/desktop-record.js', 'F2-gate', "  if (stamp !== 'phone' || !held", '  if (true || !held'],
+];
+/** the reverts as mkTree patches, one [file, fn] per file (each fn applies that file's reverts in order) */
+const fixBasePatches = () => [...new Set(FIX_REVERTS.map(([f]) => f))].map((f) => [f, (src) => FIX_REVERTS.filter(([g]) => g === f).reduce((t, [, tag, from, to]) => anchored(t, from, to, `⑩–⑬ base ${tag} (${f})`), src)]);
 // (⑭ THE CAPTURE CENSUS and its RED control on the base: MOVED to the fast scripts/test-phone-desktop-sync-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
@@ -135,7 +146,7 @@ else await (async () => {
   const esbuild = path.join(repo, 'node_modules', '.bin', 'esbuild');
   /** A tree at `ref`; `copy` = this checkout's source over it (the fixed tree judges THIS source, never a stale bundle);
    *  `patchLayout` (⑮'s RED copies) rewrites its src/lib/layout.js before the bundle is built; `patch` = [file, fn] any
-   *  one file (⑰'s RED copy: the server's gate in src/lib/desktop-record.js). */
+   *  one file (⑰'s RED copy: the server's gate in src/lib/desktop-record.js), or a list of them (⑩–⑬'s base, B-44c5). */
   const mkTree = (name, ref, copy, patchLayout = null, patch = null) => {
     const wt = path.join(ROOT, name);
     execFileSync('git', ['-C', repo, 'worktree', 'add', '--detach', wt, ref], { stdio: 'ignore' }); worktrees.add(wt);
@@ -144,7 +155,7 @@ else await (async () => {
     if (fs.existsSync(bv) && !fs.existsSync(path.join(wt, 'src', 'lib', 'build-version.js'))) fs.copyFileSync(bv, path.join(wt, 'src', 'lib', 'build-version.js'));
     fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
     if (patchLayout) { const lf = path.join(wt, 'src', 'lib', 'layout.js'); fs.writeFileSync(lf, patchLayout(fs.readFileSync(lf, 'utf8'))); }
-    if (patch) { const pf = path.join(wt, patch[0]); fs.writeFileSync(pf, patch[1](fs.readFileSync(pf, 'utf8'))); }
+    for (const [pfile, pfn] of (patch ? (typeof patch[0] === 'string' ? [patch] : patch) : [])) { const pf = path.join(wt, pfile); fs.writeFileSync(pf, pfn(fs.readFileSync(pf, 'utf8'))); }
     execFileSync(esbuild, ['src/client.js', '--bundle', '--outfile=public/bundle.js', '--format=iife', '--platform=browser', '--target=es2020', '--loader:.css=css', '--minify'], { cwd: wt, stdio: 'pipe' });
     return wt;
   };
@@ -843,7 +854,7 @@ else await (async () => {
       }
     }
 
-    // ── ⑩–⑬ on a fresh record: the fixed tree, then the commit before the fix (RED controls, printed) ──
+    // ── ⑩–⑬ on a fresh record: the fixed tree, then this tree with the fixes taken back (RED controls, printed — B-44c5) ──
     if ([10, 11, 12, 13].some(want)) {
       const D2 = want(10) ? await mkPage('desk2', false) : null;
       try {
@@ -851,13 +862,18 @@ else await (async () => {
         const S2 = await startServer(fixedTree, 'fixed2', fixture2);
         if (ok(S2.up, '⑩–⑬: the fixed-tree server re-booted on a fresh two-desktop record', S2.journal.slice(-600))) await fixLegs(S2, D, P, D2, false);
         await S2.stop();
-        let baseSrc = ''; try { baseSrc = execFileSync('git', ['-C', repo, 'show', `${fixBaseRef}:src/lib/desktop-manager.js`], { encoding: 'utf8' }); } catch { }
-        if (!baseSrc || baseSrc.includes('captureBuilt(')) skip(`⑩–⑬ RED controls: no base tree without captureBuilt (${fixBaseRef})`);
-        else {
-          console.log(`— ⑩–⑬ RED controls on the commit before the fix (${execFileSync('git', ['-C', repo, 'rev-parse', '--short', fixBaseRef], { encoding: 'utf8' }).trim()})`);
-          const B2 = await startServer(mkTree('fixbase', fixBaseRef, false), 'fixbase', fixture2);
-          if (ok(B2.up, '⑩–⑬: the base-tree server booted', B2.journal.slice(-600))) await fixLegs(B2, D, P, D2, true);
-          await B2.stop();
+        // B-44c5: the base is THIS tree with F1–F4 taken back (FIX_REVERTS) — it runs on every clone, never skipped for a
+        // lane commit the clone lacks; the patch PROVES ITSELF first: each fix's line stood once and is gone from the copy
+        console.log(`— ⑩–⑬ RED controls on this tree with the four fixes and the gate over F2 taken back (${FIX_REVERTS.map(([, t]) => t).join(' ')})`);
+        const stood = FIX_REVERTS.map(([f, tag, from]) => [tag, fs.readFileSync(path.join(repo, f), 'utf8').split(from).length === 2]);
+        if (ok(stood.every(([, y]) => y), `⑩–⑬ base: each line it takes back stands ONCE in this tree (${stood.map(([t, y]) => `${t} ${y ? 'once' : 'MOVED'}`).join(' · ')})`)) {
+          const baseTree = mkTree('fixbase', 'HEAD', true, null, fixBasePatches());
+          const took = FIX_REVERTS.map(([f, tag, from, to]) => { const t = fs.readFileSync(path.join(baseTree, f), 'utf8'); return [tag, !t.includes(from) && t.includes(to)]; });
+          if (ok(took.every(([, y]) => y), `⑩–⑬ base: …and is taken back in the copy (${took.map(([t, y]) => `${t} ${y ? 'taken back' : 'NOT'}`).join(' · ')})`)) {
+            const B2 = await startServer(baseTree, 'fixbase', fixture2);
+            if (ok(B2.up, '⑩–⑬: the base-tree server booted', B2.journal.slice(-600))) await fixLegs(B2, D, P, D2, true);
+            await B2.stop();
+          }
         }
       } finally { D2?.close(); }
     }

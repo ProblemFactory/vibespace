@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // THE PHONE ⇄ DESKTOP SYNC — ⑭ THE CAPTURE CENSUS (fast, text only — lane lg-text-legs-2, B-94d3 part two). MOVED VERBATIM from the heavy
-// scripts/test-phone-desktop-sync.mjs (its two-chrome legs and its git-base ⑩–⑬ controls stay there; ⑭'s base control is a PLANTED text copy here):
+// scripts/test-phone-desktop-sync.mjs (its two-chrome legs and its ⑩–⑬ controls — over a frozen patch of HEAD's tree since B-44c5 — stay there; ⑭'s base control is a PLANTED text copy here):
 //   ⑭ THE CAPTURE CENSUS (static): every call of a raw page capture (captureState / captureWindows / captureWin), of THE
 //      ONE CAPTURE (desktop-manager.js captureBuilt) and of recordFor in src/lib, grep-derived per enclosing method — a
 //      site the table does not name is RED (a new back door), so is a dead row; the RED control runs it on the base

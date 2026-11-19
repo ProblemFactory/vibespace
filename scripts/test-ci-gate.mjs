@@ -966,7 +966,7 @@ console.log('\n§2i a red names its legs: every ✗ line before the tail; the fa
 // The reads (r2, the acceptance's blind forms): a quoted sha on a git-read line — single, double or back quotes, `<sha>:path`,
 // `<sha>^{commit}`, a concatenation `'<sha>' + ':'`; a binding `const NAME = '<sha>'` or `= process.env.X || '<sha>'` (?? too)
 // fed to a git-read line (`${NAME}:`, `${NAME}^{commit}`, NAME as an argument or concatenated); and a FUNCTION ARGUMENT — a
-// function whose body hands its parameter to git (`${ref}:…`) called with a literal sha (`fixBaseShaped('f36369057')`).
+// function whose body hands its parameter to git (`${ref}:…`) called with a literal sha (the retired `fixBaseShaped('f36369057')`, B-44c5).
 // The verdict resolves `<sha>^{commit}` first (a short sha git cannot tell from another commit is AMBIGUOUS — «lengthen it», never
 // «off-master»), then asks `merge-base --is-ancestor` with the full sha (GIT_ENV: no alternates). A full clone holds every
 // ancestor of HEAD, so «absent» and «present but off master» are ONE verdict in every full checkout; a shallow clone (the runner)
@@ -976,7 +976,6 @@ console.log('\n§2i a red names its legs: every ✗ line before the tail; the fa
 console.log('\n§2j a suite reads no history master does not have');
 {
   const READS_OFF_MASTER = Object.freeze({ // sha → the scripts that read it (2026-11-01, B-4291's census — each a backlog row)
-    'f36369057': ['test-phone-desktop-sync.mjs'], // lane phone-arrangement-local 2026-10-12: ⑩–⑬'s base TREE (a worktree at it) — no master ancestor holds captureForViewport without captureBuilt [B-44c5]
   });
   // B-1388 (lane bl-tests-e, 2026-11-17 — the B-4291 r2 acceptance's six latent forms, each blind on a planted file while a plain
   // show in the same file went red): a verb that READS a tree too (worktree add / archive / diff / log / checkout); `git -C <dir>
