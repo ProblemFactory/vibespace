@@ -89,6 +89,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A pooled account whose subscription stopped now opens Manage Agents from For you, where its Re-check or its setting is.
 - Once Spending allows automatic turns, the Credits chip's tip in the usage popup says they still run while the account bills paid overage.
 - For you items filed before this update keep their earlier words, in Chinese and Japanese too; the new words and buttons come when an item is filed again.
+- Settings → Plugins: an installed plugin's Update… and Uninstall… are now in its row's ⋯ menu, so the plugin's name keeps its room.
 
 ### Fixed
 - On a busy machine, VibeSpace no longer freezes for up to half a minute at startup while it checks which agent programs are running.
