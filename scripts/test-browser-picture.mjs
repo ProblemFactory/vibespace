@@ -156,7 +156,7 @@ console.log("§4 the bar's words — literal t() keys with zh + ja");
   const keys = [...Object.values(PIC.SOURCE_WORDS), "the page's picture — this conversation's window could not be told apart on the display", 'Connecting to the browser window…', 'The browser window is not available'];
   const missing = keys.filter((k) => !live.includes(`t(${JSON.stringify(k)})`) && !live.includes(`t('${k.replace(/'/g, "\\'")}')`));
   ok(!missing.length, `every source phrase is a LITERAL t() in the live view (${keys.length})`, missing);
-  const untranslated = [...keys, 'Chrome asks you to sign in — in its window below', 'Take over and type the username and password into Chrome’s sheet — the agent never sees them'].filter((k) => !zh[k] || !ja[k]);
+  const untranslated = [...keys, 'Chrome asks you to sign in — in its window below', 'Take over and type the username and password into Chrome’s sheet — the agent never sees them', 'This tab is behind another tab in its window — the tab in front is not the agent’s: press the agent’s tab in the browser’s own tab strip, or Bring it forward'].filter((k) => !zh[k] || !ja[k]);
   ok(!untranslated.length, 'every one has zh + ja', untranslated);
   ok(/\{ const pw = pictureWords\(\); if \(pw\) modeBadge\.title = `\$\{modeBadge\.title\} · \$\{pw\}`; \}/.test(live), "the badge's tooltip carries the source (the bar itself unchanged)");
 }
@@ -577,12 +577,13 @@ console.log('§10 the picture the view says it shows, in ONE window (the owner\'
   const T0 = 100000, set = PIC.BG_SETTLE_MS;
   const s1 = PIC.pictureForView(X, { bg: null, shownWhy: 'background-tab', clearedAt: T0, now: T0 + set - 1 }), s2 = PIC.pictureForView(X, { bg: null, shownWhy: 'background-settle', clearedAt: T0, now: T0 + set });
   const s3 = PIC.pictureForView(X, { bg: null, shownWhy: 'attach', clearedAt: T0, now: T0 + 1 }), s4 = PIC.pictureForView(X, { bg: null, shownWhy: 'background-tab', clearedAt: T0, now: T0 + 1, driving: true });
-  ok(set === 3000 && s1.why === 'background-settle' && s1.source === PIC.PICTURE_SCREENCAST && s2 === X && s3 === X && s4 === X,
-    `the clear holds ${set} ms before the window returns (at ${set - 1} ms: ${s1.why}; at ${set} ms: ${s2.source}); a view on the window all along stays (${s3.source}); a takeover returns it at once (${s4.source})`);
+  const WINm = require('../src/browser-windows.js');   // its read (M2): the settle outlasts the hub's own re-hide (2 s silence + its 1 s tick, twice)
+  ok(set === 4000 && set >= WINm.BACKGROUND_SILENCE_MS + 2000 && s1.why === 'background-settle' && s1.source === PIC.PICTURE_SCREENCAST && s2 === X && s3 === X && s4 === X,
+    `the clear holds ${set} ms (≥ the hub's re-hide: ${WINm.BACKGROUND_SILENCE_MS} ms silence + two 1 s ticks) before the window returns (at ${set - 1} ms: ${s1.why}; at ${set} ms: ${s2.source}); a view on the window all along stays (${s3.source}); a takeover returns it at once (${s4.source})`);
   const SETTLE = "  if ((shownWhy === 'background-tab' || shownWhy === 'background-settle') && clearedAt > 0 && now - clearedAt < settleMs) return { source: PICTURE_SCREENCAST, why: 'background-settle', words: SOURCE_WORDS['background-settle'], displaySession: null };\n";
   const PICs = MCp.load('src/browser-picture.js', anchored(psrc, SETTLE, '', 'no-settle'), 'no-settle');
   const rs = PICs.pictureForView(PICs.pictureSourceOf({ launch: 'attach', state: 'ready', displaySession: { id: 'ds-1' } }), { bg: null, shownWhy: 'background-tab', clearedAt: T0, now: T0 + 1 });
-  ok(psrc.split(SETTLE).length === 2 && rs.source === PIC.PICTURE_X, `RED (the copy without the settle): the window at once (${rs.source}) — a 2 s flap flips the two pictures`);
+  ok(psrc.split(SETTLE).length === 2 && rs.source === PIC.PICTURE_X, `RED (the copy without the settle): the window at once (${rs.source}) — a 2–3 s flap flips the two pictures`);
   // the live view's wiring (pins): the picture reads the hub's verdict; the verdict and a takeover / handback re-judge it; a
   // one-window row says the blanks it folds
   const live = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
