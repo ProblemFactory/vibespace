@@ -483,6 +483,69 @@ console.log('  · the agent update at hello');
   w2.fire(); await codeOf(p2);
 }
 
+{
+  // B-2fa8 (lane bl-machines-b): THE DEVICE'S OWN ALLOW-LIST REFUSALS FOLD AS B-c632's DO. A request the device's list leaves
+  // off was a journal line and an audit line EACH time; now B-c632's key (op, by, summary, argv hash) and its say rules: the
+  // first at once, the repeats counted, said on a change (the list allowing it again is one), hourly, at stop() and at exit.
+  const listed = { v: 1, allow: ['run', 'files', 'sessions'], all: false, source: 'install', at: 1 };
+  const runPolicy = async (w, n = 30) => {
+    w.conn.info.policy = listed;
+    const codes = []; for (let k = 0; k < n; k++) codes.push(await codeOf(w.dm._request({ op: 'input-events', events: [{ type: 'key', key: 'a' }], by: 'agent:claude:c1' })));
+    const a = { codes, journal: w.logs.filter((m) => m.startsWith('[device-policy] REFUSED')).length, audit: w.lines.length, sent: ops(w.sent).length };
+    w.conn.mux.destroy = () => { }; w.dm.stop();
+    return { a, end: w.lines.slice(), logs: w.logs.slice() };
+  };
+  const p = await runPolicy(world());
+  const pf = p.end.find((l) => l.repeats);
+  ok(p.a.codes.every((c) => c === 'op-not-allowed') && p.a.sent === 0 && p.a.journal === 1 && p.a.audit === 1,
+    `B-2fa8: 30 requests the device's own list leaves off (input): ${p.a.journal} journal line, ${p.a.audit} audit line — the first said at once, the 29 repeats counted, nothing sent`, p.a);
+  ok(p.end.length === 2 && pf && pf.repeats === 29 && pf.code === 'op-not-allowed' && p.logs.some((m) => /^\[device-policy\] REFUSED input-events — op-not-allowed: 29 more time\(s\) since /.test(m)),
+    `…stop() says the fold: ONE line for its ${pf && pf.repeats} repeats, worded as the device's own refusal`, p.end);
+  // THE LIST ALLOWS IT AGAIN (a road with no _gate: the send point's own check) — the fold is said and closed; a later refusal is said at once
+  const allowed = async () => {
+    const w = world({ instanceKind: 'local' }), req = { op: 'input-events', events: [{ type: 'key', key: 'a' }], by: 'agent:claude:c1' };
+    w.conn.info.policy = listed;
+    for (let k = 0; k < 3; k++) w.dm._policyError(w.conn, req, true);
+    w.conn.info.policy = { ...listed, allow: [...listed.allow, 'input'] }; const ok1 = w.dm._policyError(w.conn, req, true) === null;
+    w.conn.info.policy = listed; w.dm._policyError(w.conn, req, true);
+    return { ok1, lines: w.lines.slice() };
+  };
+  const al = await allowed();
+  const allowedRun = async () => {   // a run-cmd: the fold key carries the argv hash — the allowed check must build the SAME key
+    const w = world({ instanceKind: 'local' }), req = { op: 'run-cmd', cmd: 'ls', args: ['-la'], by: 'agent:claude:c1' }, noRun = { ...listed, allow: ['files'] };   // (sessions implies run: a list without run names neither)
+    w.conn.info.policy = noRun;
+    for (let k = 0; k < 3; k++) w.dm._policyError(w.conn, req, true);
+    w.conn.info.policy = listed; const ok1 = w.dm._policyError(w.conn, req, true) === null;
+    w.conn.info.policy = noRun; w.dm._policyError(w.conn, req, true);
+    return { ok1, lines: w.lines.slice() };
+  };
+  const ar = await allowedRun();
+  ok(ar.ok1 && ar.lines.length === 3 && ar.lines[1].repeats === 2 && !ar.lines[2].repeats, '…a command too (its key carries the argv hash): the fold said when the list allows it, the next refusal said at once', ar.lines.map((l) => l.repeats || 0));
+  ok(al.ok1 && al.lines.length === 3 && !al.lines[0].repeats && al.lines[1].repeats === 2 && !al.lines[2].repeats,
+    'the list allows the request again: its fold said (ONE line, 2 repeats); taken off once more — said AT ONCE as a first (the allowed interval is a change)', al.lines.map((l) => l.repeats || 0));
+  const wl = world(), v = { ok: false, code: 'op-not-allowed', op: 'input-events', flag: 'input', remedy: 'allow it' }, req = { op: 'input-events', events: [], by: 'agent:claude:c2' };
+  const said = []; for (let k = 0; k < 5; k++) said.push(wl.dm._refusedLine(req, v));
+  ok(said.join() === 'true,false,false,false,false' && wl.lines.length === 1, '_refusedLine answers whether it said its line: once (→ true), then counted (→ false)', said);
+  // RED CONTROLS (runtime mutants; each plant proves it is on its road — the method exists and is asked)
+  const keepF = DeviceManager.prototype._foldCount; let askedF = 0;
+  DeviceManager.prototype._foldCount = () => { askedF++; return false; };
+  let rp; try { rp = await runPolicy(world()); } finally { DeviceManager.prototype._foldCount = keepF; }
+  ok(typeof keepF === 'function' && askedF >= 30 && rp.a.journal === 30 && rp.a.audit === 30, `control (no fold on the list's road; the plant asked ${askedF}×): 30 refusals ⇒ ${rp.a.journal} journal + ${rp.a.audit} audit lines ⇒ RED`, rp.a);
+  const keepE = DeviceManager.prototype._policyFoldEnd; let askedE = 0;
+  DeviceManager.prototype._policyFoldEnd = () => { askedE++; };
+  let ra; try { ra = await allowed(); } finally { DeviceManager.prototype._policyFoldEnd = keepE; }
+  ok(typeof keepE === 'function' && askedE >= 1 && ra.lines.length === 1, `control (an allowed check closes nothing; the plant asked ${askedE}×): the refusal after the allowed interval is counted, never said ⇒ RED`, ra.lines.map((l) => l.repeats || 0));
+  // CONTROL: the allowed check WITHOUT its code filter ends the gate's folds too — a standing subject's refusals said one by one
+  let askedG = 0;
+  DeviceManager.prototype._policyFoldEnd = function () { askedG++; for (const k of [...this._folds.keys()]) this._foldEnd(k); };   // (no filter: a fold of ANY verdict ended)
+  let rg; try {
+    const w = world(), subj = { by: 'system:desktop-access' };
+    const p0 = w.dm.runCmd('ls', [], subj); await settle(); w.clock.t += 60000; w.fire(); await codeOf(p0);
+    const l0 = w.lines.length; for (let k = 0; k < 10; k++) await codeOf(w.dm.runCmd('ls', [], subj));
+    rg = w.lines.length - l0;
+  } finally { DeviceManager.prototype._policyFoldEnd = keepE; }
+  ok(askedG >= 10 && rg >= 10, `control (the allowed check without its «op-not-allowed» filter; the plant asked ${askedG}×): 10 standing refusals ⇒ ${rg} lines (the gate's fold ended at every check) ⇒ RED`, rg);
+}
 console.log('— ⑤ the routes');
 {
   const express = require('express');

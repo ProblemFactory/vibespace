@@ -111,6 +111,7 @@ class DeviceManager {
     // B-c632: REPEATED REFUSALS FOLD (`_foldCount`) — `${op}\0${by}\0${summary}\0${argv hash}` → the open fold of one act's
     // refusals; `_clock` = the folds' time (a test injects one: the hour is never a loaded runner's gaps)
     this._folds = new Map(); this._foldSayMs = FOLD_SAY_MS; this._clock = Date.now;
+    this._policyOps = new Set();   // B-2fa8: the ops with a fold of the list's own refusal open (an allowed check of another op computes no key)
     // lane device-bundle-signing (design q-042 D2): an upgrade this hub WILL NOT push (its build is not the signed release)
     // or one the DEVICE refused (its signature did not check) — the same door (device-upgrade-watch `refused`)
     this._onUpgradeRefused = typeof onUpgradeRefused === 'function' ? onUpgradeRefused : null;
@@ -446,7 +447,7 @@ class DeviceManager {
               // lane device-allow-flags: THIS machine's own list leaves `upgrade` off — no push (the device would refuse it
               // anyway); the link is kept as-is (capability-gated), said once per link, one refused line in the audit
               this._log(`[agentd] daemon ${msg.daemonVersion} ≠ ${expected} — its allow list leaves "upgrade" off; using it as-is (${DP.remedyOf({ machine: this._machineName(), allow: pol.allow, flag: 'upgrade', platform: msg.platform })})`);
-              this._refusedLine({ op: 'upgrade', version: expected, from: msg.daemonVersion, by: BY_UPGRADE }, DP.verdict(pol, { op: 'upgrade' }, { machine: this._machineName(), platform: msg.platform }));
+              this._refusedLine({ op: 'upgrade', version: expected, from: msg.daemonVersion, by: BY_UPGRADE }, DP.verdict(pol, { op: 'upgrade' }, { machine: this._machineName(), platform: msg.platform }), null, { fold: false });   // (the hello's own road: B-0194)
             } else if (msg.daemonVersion !== expected && fs.existsSync(this._bundlePath) && this._mayPush(msg.daemonVersion, expected) && !held) {
               led.tries += 1; this._ledgerWrite(expected, led);
               // version drift → stream the new bundle (self-upgrade), then reconnect
@@ -734,22 +735,38 @@ class DeviceManager {
   _machineName() { try { const m = typeof this._machine === 'function' ? this._machine() : this._machine; return m ? String(m) : null; } catch { return null; } }
   /** lane device-allow-flags: THE hub half of the device's allow list — the verdict over the list its hello-ack stated
    *  (none stated = an older agent = not judged). → null, or the refusal as an Error {code:'op-not-allowed', flag, op,
-   *  remedy, allow} whose message names the flag and THE re-run sentence; `line` = said in the journal + ONE audit line. */
+   *  remedy, allow} whose message names the flag and THE re-run sentence; `line` = said in the journal + ONE audit line (a
+   *  repeat of the same refusal counted in its fold, B-2fa8). */
   _policyError(conn, payload, line = false) {
     const info = (conn && conn.info) || {};
     const v = DP.verdict(DP.reportOf(info.policy), payload, { machine: this._machineName(), platform: info.platform });
-    if (v.ok) return null;
+    if (v.ok) { this._policyFoldEnd(payload); return null; }
     const e = Object.assign(new Error(DP.sentenceOf(v, { machine: this._machineName() })), { code: v.code, flag: v.flag, op: v.op, remedy: v.remedy, allow: v.allow });
     if (line) this._refusedLine(payload, v, e.message);
     return e;
   }
-  /** One refused request: the journal line + ONE audit line (`op-not-allowed`, the re-run sentence as its head). */
-  _refusedLine(payload, v, sentence = null) {
+  /** One refused request: the journal line + ONE audit line (`op-not-allowed`, the re-run sentence as its head). B-2fa8: a repeat
+   *  of the open fold's refusal (the same act, the same verdict — B-c632's key and say rules) is counted, not said. → true when said */
+  _refusedLine(payload, v, sentence = null, { fold = true } = {}) {
+    let l = null;
+    try { l = DA.lineOf({ at: this._clock(), payload, by: payload.by, ok: false, code: v.code, outHead: v.remedy || '' }); if (fold) { this._policyOps.add(l.op); if (this._foldCount(l, { code: v.code }, argvIdOf(payload))) return false; } } catch { }
     try { this._log(`[device-policy] REFUSED ${DA.keyOf(payload)} — ${sentence || DP.sentenceOf(v, { machine: this._machineName() })}`); } catch { }
-    if (this._onAct) { try { this._onAct(DA.lineOf({ at: Date.now(), payload, by: payload.by, ok: false, code: v.code, outHead: v.remedy || '' })); } catch { } }
+    if (this._onAct && l) { try { this._onAct(l); } catch { } }
+    return true;
+  }
+  /** B-2fa8: the device's own list ALLOWS this request now — an open fold of its refusal is said and closed (the allowed interval
+   *  is a change: a later refusal is said at once). Only a fold of the list's own verdict: _gate's folds are the gate's. */
+  _policyFoldEnd(payload) {
+    if (!this._policyOps.size || !this._folds.size) return;
+    try {
+      const op = DA.keyOf(payload); if (!this._policyOps.has(op)) return;   // the cheap test first: an op with no such fold open costs no summary, no hash
+      const k = this._foldKey(op, DA.validBy(payload.by) ? payload.by : null, DA.summaryOf(payload), argvIdOf(payload)), f = this._folds.get(k);
+      if (f && f.code === 'op-not-allowed') this._foldEnd(k);
+      if (![...this._folds.values()].some((x) => x.code === 'op-not-allowed' && x.last && x.last.op === op)) this._policyOps.delete(op);
+    } catch { }
   }
   /** lane device-allow-flags: would the machine's own list refuse this request? (a caller that must not START a chain —
-   *  a session's setup — asks before its first act). → null | the refusal Error (said + ONE audit line; nothing sent). */
+   *  a session's setup — asks before its first act). → null | the refusal Error (said + ONE audit line, a repeat folded; nothing sent). */
   async refusalOf(payload) { const conn = await this.connect(); return this._policyError(conn, payload, true); }
   /** lane device-allow-flags: the allow list the connected agent states (null = none stated / not connected). */
   policy() { return DP.reportOf(this._conn && this._conn.info && this._conn.info.policy); }
@@ -806,7 +823,7 @@ class DeviceManager {
     if (f.timer) { clearTimeout(f.timer); f.timer = null; }
     if (f.more > 0) {
       const l = f.last;
-      try { this._log(`[device-acts] NOT SENT ${l.op} by ${l.by} — ${f.code}: ${f.more} more time(s) since ${new Date(f.saidAt).toISOString()} (the last ${new Date(f.lastAt).toISOString()}) — one line for the repeats: ${l.summary}`); } catch { }
+      try { this._log(`${f.code === 'op-not-allowed' ? `[device-policy] REFUSED ${l.op}` : `[device-acts] NOT SENT ${l.op} by ${l.by}`} — ${f.code}: ${f.more} more time(s) since ${new Date(f.saidAt).toISOString()} (the last ${new Date(f.lastAt).toISOString()}) — one line for the repeats: ${l.summary}`); } catch { }
       if (this._onAct) { try { this._onAct({ ...l, at: f.lastAt, repeats: f.more, since: f.saidAt }); } catch { } }
     }
     f.more = 0; f.saidAt = this._clock();   // the next line counts from THIS line's time (never from a repeat it covered)
