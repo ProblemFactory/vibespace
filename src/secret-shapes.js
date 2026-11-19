@@ -149,11 +149,14 @@ const OPENS_VALUE_RE = /^[\p{L}\p{N}]/u;
 const isMention = (tok, mset) => { if (!mset || tok.length > 81 || tok.charCodeAt(0) !== 64) return false; let e = tok.length; while (e > 1 && '.,;:!?'.includes(tok[e - 1])) e--; const nm = tok.slice(1, e).toLowerCase(); return nm.length > 0 && mset.has(nm); };
 const EDGE_TAIL_RE = /\p{P}+$/u;
 // cure 2 (MUST 1): R5's token (`password <token>`) in a message, when it opens on a MEMBER's @ — the @ to a CJK stop or a mask, spared;
-// what a stop glues behind it is masked (the line rule's), a mask there is itself (a second pass) → null: no member's @
+// a CJK stop right after it is kept and what it glues behind is masked (B-34c8), a mask there is itself (a second pass) → null: no member's @
 const MENTION_LEAD_RE = /^@[^\s«、。，；：！？「」『』（）【】《》〈〉]{1,80}/;
 function mentionLead(tok, mset) {
   const at = MENTION_LEAD_RE.exec(tok), rest = at ? tok.slice(at[0].length) : '';
-  return at && isMention(at[0], mset) ? at[0] + (!rest || rest === REDACTED ? rest : REDACTED) : null;
+  if (!at || !isMention(at[0], mset)) return null;
+  // B-34c8 (3): a CJK stop right after the member's @ is a separator, kept («password @beta：x» keeps its 「：」); what follows it is masked
+  const stop = rest && MESSAGE_STOPS.has(rest.charCodeAt(0)) ? rest[0] : '', more = rest.slice(stop.length);
+  return at[0] + stop + (!more || more === REDACTED ? more : REDACTED);
 }
 // r4 (the read's F1): a HEAD inside the region — KV_HEAD's own shape at a place KV_HEAD can open — ends the region there, and the main
 // scan judges that head with every rule (a quoted key, a blank before `=`, a header, a credential word, a quoted value)
@@ -164,22 +167,27 @@ function headAt(text, p, e) { HEAD_AT.lastIndex = p; const h = HEAD_AT.exec(text
 const groupOf = (c) => (/^[a-z0-9]{4,8}$/.test(c) ? `l${c.length}` : /^[A-Z0-9]{4,8}$/.test(c) ? `u${c.length}` : null);
 // cure 2 (the test machine's run of the cure at dcdd8d590): a LATER chunk is of the group without its trailing prose marks — the last
 // group before a comma («zwhp orlo ufnb qmjf, auth: …») stayed in clear
-const groupAt = (c) => groupOf(c.length > 16 ? '' : c.replace(/[.,;:!?)\]}"'»”’…—–-]+$/, ''));
+// B-34c8 (1): stripped only when the chunk is NO plain word («5678,» of a split code) or the group already holds two chunks («qmjf,», an
+// app password's last group) — a plain word with its comma right after ONE short value is prose («session: fixed1 failed, retry»)
+const groupAt = (c, n = 2) => groupOf(c.length > 16 ? '' : c) || (n >= 2 || !plainChunk(c) ? groupOf(c.length > 16 ? '' : c.replace(/[.,;:!?)\]}"'»”’…—–-]+$/, '')) : null);
+// B-34c8 (2): a value of letters of other scripts only («已修好») is a word, not a credential: ASCII glued behind it through a stop is
+// a new word, judged as one (the glued rule stays for a value that holds ASCII — «Q9x…，hunter»)
+const OTHER_SCRIPT_RE = /^[^\x00-\x7f]{1,64}$/;
 /** The message mode's rewrite of a value region [s, e) → { out, end } (end = where a head inside the region begins, else e) — or null:
  *  the LINE RULE (the region masked whole). Chunks split at blanks and CJK stops (both kept). THE FIRST CHUNK: the mask itself, or a
  *  member's @ under a `:` head, is kept; a pair closed on its line has its inside masked (the pair kept); anything opening on a mark, a
  *  stop or an open pair is no value this mode recognises ⇒ null; a chunk opening on a letter or a digit of ANY script (cure 2) is
  *  masked — and after a scheme or credential word the next chunk too, after a grouped first chunk every chunk of its group. EVERY
  *  LATER CHUNK goes through ONE judgement, `keeps` (cure 2): a MEMBER's @ is kept first (never glued, never the word after a credential
- *  word); else it is masked by the next-chunk, glued (ASCII glued to the value through a stop or a pair, no blank between) and group
- *  rules (`groupAt`: the chunk without its trailing prose marks), and kept only when plainChunk. THE PIECE BEFORE AN INNER HEAD goes
+ *  word); else it is masked by the next-chunk, glued (ASCII glued to the value through a stop or a pair, no blank between; never behind a value of other scripts only — B-34c8) and group
+ *  rules (`groupAt`: the chunk, or without its trailing prose marks when it is no plain word or its group holds two — B-34c8), and kept only when plainChunk. THE PIECE BEFORE AN INNER HEAD goes
  *  through `keeps` too (its own opener stays). Masked chunks that only blanks part become ONE mask. */
 function messageValue(text, s, e, { sepColon = false, mentions = null, twin = '', later = false } = {}) {
-  let out = '', i = s, first = !later, takeNext = false, masking = false, glued = false, group = null, prevWord = '';
+  let out = '', i = s, first = !later, takeNext = false, masking = false, glued = false, group = null, groupN = 0, prose = false, prevWord = '';
   // cure 2 (主开发 08:42Z): ONE judgement of a later chunk `c` (its word `w`) — MUST 1: a MEMBER's @ is never a value, not glued, not the
   // word after a credential word; then the next-chunk, glued and group rules and a plain word — MUST 2: THE PIECE BEFORE AN INNER HEAD
   // is judged by it too («auth: password hunter,token=x» masks «hunter»)
-  const keeps = (c, w) => (w.charCodeAt(0) === 64 && isMention(w, mentions)) || (!takeNext && !(glued && /^[\x00-\x7f]*$/.test(w.length <= 64 ? w : 'xĀ') && !maskedChunk(w)) && !(group && groupAt(w) === group) && (plainChunk(c) || maskedChunk(w)));
+  const keeps = (c, w) => (w.charCodeAt(0) === 64 && isMention(w, mentions)) || (!takeNext && !(glued && /^[\x00-\x7f]*$/.test(w.length <= 64 ? w : 'xĀ') && !maskedChunk(w)) && !(group && groupAt(w, groupN) === group) && (plainChunk(c) || maskedChunk(w)));
   while (i < e) {
     /*msg-step*/
     let j = i;
@@ -210,12 +218,12 @@ function messageValue(text, s, e, { sepColon = false, mentions = null, twin = ''
       else if (!OPENS_VALUE_RE.test(chunk)) return null;   // THE LAW: an opener with no rule here ⇒ the line rule (cure 2: a letter or a digit of any script is one)
       const w = chunk.length <= 40 ? chunk.replace(EDGE_TAIL_RE, '').toLowerCase() : '';
       takeNext = !keep && (AUTH_SCHEMES.has(w) || SECRET_WORDS.has(w));
-      group = keep ? null : groupOf(chunk);
-      glued = !keep;
+      group = keep ? null : groupOf(chunk); groupN = group ? 1 : 0;
+      glued = !keep; prose = !keep && OTHER_SCRIPT_RE.test(chunk);
     } else {
       keep = keeps(chunk, chunk);
-      if (takeNext && !group) group = groupOf(chunk);   // r5: a group seeded by the value after a credential word too
-      if (!(group && groupAt(chunk) === group)) group = null;
+      if (takeNext && !group) { group = groupOf(chunk); groupN = 0; }   // r5: a group seeded by the value after a credential word too
+      if (group && groupAt(chunk, groupN) === group) groupN++; else { group = null; groupN = 0; }
       // a head glued behind a CJK stop (no opener the main scan reads): its value is the next chunk
       takeNext = chunk.length <= 82 && (((chunk.endsWith(':') || chunk.endsWith('=')) && holderName(chunk.slice(0, -1).replace(/^[^A-Za-z_]+/, ''))) || ((chunk === ':' || chunk === '=') && !!prevWord && holderName(prevWord)));
       prevWord = chunk.length <= 82 ? chunk.replace(/^[^A-Za-z_]+|[^A-Za-z0-9_]+$/g, '') : '';   // r8 (the test machine's first corpus run): the last WORD seen, masked or kept — «…，password : x» masks x
@@ -223,7 +231,8 @@ function messageValue(text, s, e, { sepColon = false, mentions = null, twin = ''
     first = false;
     if (keep) { out += blank + chunk + tail; masking = false; glued = false; }
     else if (masking && !tail) { glued = true; /* joins the running mask */ }
-    else { out += blank + REDACTED + tail; masking = !tail; glued = true; }
+    else { out += blank + REDACTED + tail; masking = !tail; glued = !prose; }
+    prose = false;
     i = k;
   }
   return { out, end: e };

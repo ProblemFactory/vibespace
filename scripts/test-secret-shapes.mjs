@@ -575,7 +575,9 @@ console.log('the cure of batch 6 — THE LAW over a GENERATED corpus: a message 
       const lo = SSx.redactSecrets(L).text, mo = SSx.redactSecrets(L, { message: true, ...opt }).text;
       lines++;
       if (!stopAtFirst && SSx.redactSecrets(mo, { message: true, ...opt }).text !== mo) nonIdem.push(L + ' ⇒ ' + mo);   // r5: a second pass changes nothing
-      if (must.some((t) => !lo.includes(t) && mo.includes(t))) leaks.push({ L, op, mo, scene });
+      // B-34c8 (ALSO CURED, run 8f594ece4-20261119034021-both): a token leaks only inside a chunk that is no head piece the corpus wrote — a
+      // random app-password group «assw» inside a kept «,password=» was read as a leak by a substring check
+      if (must.some((t) => !lo.includes(t) && chunks(mo).some((c) => c.includes(t) && !headPiece(c)))) leaks.push({ L, op, mo, scene });
       const lt = chunks(lo), extra = chunks(mo).filter((x) => { const at = lt.indexOf(x); if (at >= 0) { lt.splice(at, 1); return false; } return true; });
       const allowedIn = (x) => { const y = x.replace(/[.,;:!?]+$/, ''); return allowed.some((w) => y === w || (y.endsWith(w) && headPiece(y.slice(0, -w.length)))); };   // cure 2: «@beta,» and «session:@beta» (a head glued to it) are the member's @ too
       if (extra.some((x) => !plainT(x) && !allowedIn(x))) loose.push(L + ' ⇒ ' + mo);
@@ -650,11 +652,60 @@ console.log('the cure of batch 6 — THE LAW over a GENERATED corpus: a message 
     'the word after a credential word eats a member (MUST 1)': [c2('const keeps = (c, w) => (w.charCodeAt(0) === 64 && isMention(w, mentions)) ||', 'const keeps = (c, w) => (!takeNext && w.charCodeAt(0) === 64 && isMention(w, mentions)) ||', 'c2-next'), 'mentions', 'next'],
     '«password» in prose eats a member (MUST 1)': [c2('ml = mset && mentionLead(tok, mset);', 'ml = null;', 'c2-r5'), 'mentions', 'r5'],
     'the piece before an inner head kept when plain (MUST 2)': [c2('out += blank + (OPENER_PIECE_RE.test(pre) || !w || keeps(pre, w) ? pre : REDACTED + pre.slice(t));', 'out += blank + (plainChunk(pre) || OPENER_PIECE_RE.test(pre) ? pre : REDACTED);', 'c2-pre'), 'pre', 'pre'],   // stale-pins: kept (the OLD line is the mutant compiled back in, never an anchor)
-    'a group read with its comma': [c2('!(group && groupAt(w) === group)', '!(group && groupOf(w) === group)', 'c2-group'), 'pre', 'group'],
+    'a group read with its comma': [c2('!(group && groupAt(w, groupN) === group)', '!(group && groupOf(w) === group)', 'c2-group'), 'pre', 'group'],
   };
   for (const [name, [SSc, only, scene]] of Object.entries(C2)) {
     const rc = judge(SSc, { only }), hit = rc.leaks.find((x) => x.scene === scene);
     ok(!!hit, `RED CONTROL (${name}): the corpus finds a leak of its own scene «${scene}»${hit ? ', e.g. ' + J(hit.L + ' ⇒ ' + hit.mo) : ' — none found'}`);
+  }
+  // B-34c8 (cure 2's readers, measured; 主开发: ONE backlog row): THE MEASURED CASES as corpus rows — each a group message with the
+  // member set given — and THE OVER-MASK ORACLE: ordinary text beside a value keeps every word the STRICTER, independent rule (plainT)
+  // calls plain, and with no head at all the line comes back as it was. Three were cured (groupAt, the glued rule after a value of
+  // other scripts, mentionLead's stop); three stay as stated (the plain-word cost, R5's non-mention, a label of other scripts)
+  {
+    const MSG = (SSx, L) => SSx.redactSecrets(L, { message: true, mentions: ['beta'] }).text, LINE = (L) => SS.redactSecrets(L).text;
+    const val = 'Xk9' + rnd(9, MIX), tok = 'Hx7' + rnd(8, MIX);
+    const CASES = {
+      c1: ['(1) a plain word with its comma right after ONE short value is prose — «failed,» kept (groupAt; cured)', 'session: fixed1 failed, retry now', (o) => !o.includes('fixed1') && o.includes(' failed, retry now')],
+      c1b: ['(1) …a split code keeps its second group hidden with its comma («5678,» is no plain word)', 'password: 1234 5678, ok', (o) => !o.includes('1234') && !o.includes('5678') && o.endsWith(' ok')],
+      c2: ['(2) ASCII glued behind a value of other scripts through a CJK stop is a new word — «please» kept (cured)', 'session: 已修好，please check', (o) => !o.includes('已修好') && o.includes('，please check')],
+      c2b: ['(2) …a value that holds ASCII keeps the glued rule — «hunter» behind «Xk9…，» hidden', `session: ${val}，hunter check`, (o) => !o.includes(val) && !o.includes('hunter') && o.endsWith(' check')],
+      c3: ['(3) R5: the full-width colon after a member\'s @ is kept, what follows it hidden (mentionLead; cured)', `I reset the password @beta：${tok}`, (o) => o.includes('@beta：') && !o.includes(tok)],
+      c4: ['(4) a member\'s @ resets the word after a credential word: a plain word after it stays — the stated plain-word cost', 'auth: password @beta hunter', (o) => o.includes('@beta hunter')],
+      c4b: ['(4) …a word with a digit after it is still hidden', 'auth: password @beta hunter2', (o) => o.includes('@beta') && !o.includes('hunter2')],
+      c5: ['(5) R5 with a possessive after the @ is no mention — the token hidden whole, as the release (the line rule) does', 'I reset the password @beta\'s', (o, L) => !o.includes('beta') && o === LINE(L)],
+      c5b: ['(5) …and with a glued ASCII mark after it', `I reset the password @beta:${tok}`, (o, L) => !o.includes(tok) && o === LINE(L)],
+      c6: ['(6) a full-width colon after a label of other scripts is left as the release leaves it (the message mode = the line rule)', `密码：${tok}`, (o, L) => o === LINE(L)],
+    };
+    for (const [, [name, L, pass]] of Object.entries(CASES)) { const o = MSG(SS, L); ok(pass(o, L), `B-34c8 ${name}`, J({ L, o })); }
+    // THE OVER-MASK ORACLE: ordinary chunks (a path with a line number, a URL with a query, a base64 run) in four places — no head; after
+    // an ASCII value; after a value of other scripts, a blank or a CJK stop between; after ONE short group-shaped value (cure 2's
+    // groupAt case). The group rule's own cost is outside it: a same-length word with NO mark right after a 4–8 value is the group's
+    // (an app password's groups are plain-looking words)
+    const ORD = ['src/foo.js line 42', 'https://example.com/search?q=build&page=2', 'aGVsbG8gd29ybGQ= 和 dGhlIHJlc3Q='];
+    const over = [];
+    for (const X of ORD) {
+      for (const L of [`see ${X} then`]) { const o = MSG(SS, L); if (!(o === LINE(L) && (X.startsWith('aGVs') || o === L))) over.push({ L, o, why: 'no head: not as it was' }); }
+      for (const [L, after] of [[`session: ${val} ${X} and the rest`, val], [`session: 已修好 ${X} 然后 more`, '已修好'], [`session: 已修好，${X} and more`, '已修好'], [`session: fixed1 ${X}, then more`, 'fixed1']]) {
+        const o = MSG(SS, L), have = chunks(o), want = chunks(L.slice(L.indexOf(after) + after.length)).filter((x) => plainT(x));
+        const lost = want.filter((x) => { const at = have.indexOf(x); if (at < 0) return true; have.splice(at, 1); return false; });
+        if (lost.length || o.includes(after)) over.push({ L, o, lost });
+      }
+    }
+    ok(over.length === 0, `B-34c8 THE OVER-MASK ORACLE: ${ORD.length} ordinary chunks × 5 places — every word the stricter rule calls plain stays beside a value, the value itself hidden; with no head the line is as it was${over.length ? ' — ' + over.slice(0, 3).map(J).join(' · ') : ''}`);
+    // RED CONTROLS: each cure compiled back out ⇒ its measured row goes red (a control whose line is gone fails by name)
+    const GA = "const groupAt = (c, n = 2) => groupOf(c.length > 16 ? '' : c) || (n >= 2 || !plainChunk(c) ? groupOf(c.length > 16 ? '' : c.replace(/[.,;:!?)\\]}\"'»”’…—–-]+$/, '')) : null);";
+    const GL = 'masking = !tail; glued = !prose; }';
+    const ML = '  return at[0] + stop + (!more || more === REDACTED ? more : REDACTED);';
+    for (const [name, from, to, key] of [
+      ['groupAt strips every chunk\'s comma (cure 2\'s)', GA, "const groupAt = (c) => groupOf(c.length > 16 ? '' : c.replace(/[.,;:!?)\\]}\"'»”’…—–-]+$/, ''));", 'c1'],   // stale-pins: kept (the OLD line is the mutant compiled back in, never an anchor)
+      ['the glued rule after any value', GL, 'masking = !tail; glued = true; }', 'c2'],   // stale-pins: kept (the OLD line is the mutant compiled back in, never an anchor)
+      ['mentionLead eats the stop', ML, "  return at[0] + (!rest || rest === REDACTED ? rest : REDACTED);", 'c3'],
+    ]) {
+      ok(SRC.split(from).length === 2, `the control «${name}» finds its line`);
+      const SSc = M.load('src/secret-shapes.js', SRC.replace(from, to), 'b34c8-' + key), [, L, pass] = CASES[key], o = MSG(SSc, L);
+      ok(!pass(o, L), `RED CONTROL (${name}): its measured row goes red — ${J(o)}`);
+    }
   }
   // the main loop's guard: a COUNT of steps, never a clock — every message-mode loop is marked, each character read a bounded number of times
   ok(SRC.split('/*msg-step*/').length - 1 >= 9, 'the step marks are in every message-mode loop');
