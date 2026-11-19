@@ -127,7 +127,7 @@ console.log('— §6c every kill door is declared: an actor marked before the ki
     'src/server/plugin-loader.js': [2, 'not a conversation: plugin children'],
     'src/port-forward.js': [1, 'not a conversation: port forwards'],
     'src/remote-fs.js': [2, 'not a conversation: file transfers'],
-    'src/routes/files.js': [5, 'not a conversation: file transfers'],
+    'src/routes/files.js': [6, 'not a conversation: file transfers (ckpt61 cure 3: + a failed folder copy ends whichever side still runs)'],
     'src/server/browser-keeper.js': [5, 'not a conversation: agent browsers and their stale holders (the 2.369.202 integration: lanes browser-windows / jobs-browser / browser-admin added four; rv-browser F7 moved the install children out — the two rows below; lane one-browser-b1 added the fifth: attachStart SIGKILLs the Chrome it just spawned when its starttime cannot be read)'],
     'src/server/browser-attach-launch.js': [2, "not a conversation: agent browsers — the attach road's Chrome that the launch itself spawned (our child handle), ended by endChild (SIGTERM, a grace, then SIGKILL) when its DevToolsActivePort never appeared (lane one-browser-b1)"],
     'src/server/browser-installs.js': [3, 'not a conversation: THE install slot — a step child past its wall clock, a re-attached stalled step (its pid, or its npm group) — rv-browser F7, moved out of the keeper'],

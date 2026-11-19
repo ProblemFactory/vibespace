@@ -233,7 +233,7 @@ console.log('§4 B-8475 the image\'s user boot hook: the installer registers the
     MPW.includes(`inst.indexOf(${JSON.stringify(B0)}), h1 = inst.indexOf('${B1}')`) && MPW.includes("hookDrop = `${inst.slice(h0, h1)}\\ndrop_hook_block ${key} || true\\n`;")
     && MPW.includes("const ran = hookDrop ? await sshRun('bash -s', 30000, hookDrop + teardown + '\\n') : null;\n        if (!ran || !String(ran.out || '').includes('VS_REMOVED')) await sshRun(teardown, 30000);")
     && MPW.includes("const inst = await fs.promises.readFile(path.join(rootDir, 'scripts', 'vibespace-agentd-install.sh'), 'utf-8');")
-    && MPW.includes('if (input != null) { child.stdin.on(\'error\', () => { }); child.stdin.end(input); }') && !/sed -i[^\n]*vibespace-device/.test(MPW));
+    && MPW.includes('if (input != null && child.stdin) { child.stdin.on(\'error\', () => { }); child.stdin.end(input); }') && !/sed -i[^\n]*vibespace-device/.test(MPW));   // ckpt61 cure 2: the stdin guarded (none after a start that failed at once)
   const un = spawnSync('bash', ['-s'], { input: `${SH.slice(i0, i1)}\ndrop_hook_block device-b || true\necho TEARDOWN-RAN\n`, encoding: 'utf8', env: { PATH: process.env.PATH, HOME: H } });
   const afterUn = fs.readFileSync(HOOK, 'utf8');
   ok(`…that very script, run by \`bash -s\`, removes the key's block, keeps the owner's lines and goes on to the teardown — ${un.status}`, un.status === 0 && blocks('device-b', afterUn) === 0 && afterUn.includes('echo own-line\nexit 0') && /TEARDOWN-RAN/.test(un.stdout), afterUn);

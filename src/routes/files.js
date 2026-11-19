@@ -997,6 +997,10 @@ router.post('/api/archive/extract-entry', (req, res) => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'webui-archive-'));
   const outPath = path.join(tmpDir, path.basename(entry) || 'entry');
   const outStream = fs.createWriteStream(outPath);
+  // ckpt61 cure 3 — THE LAW, widened: ANY stream the hub opens on these roads has its error listener before anything that can
+  // throw (a full file table fails its open on a later tick: unheard, the hub ended)
+  let outErr = null;
+  outStream.on('error', (e) => { outErr = outErr || e; });
   let cmd, args;
   if (type === 'zip') {
     // unzip treats [ ] * ? as globs — escape for a literal member name
@@ -1007,6 +1011,7 @@ router.post('/api/archive/extract-entry', (req, res) => {
   // kills the child — for streaming, pipe from a spawned process instead
   const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'ignore'] });
   child.on('error', (e) => console.warn(`[files] an archive entry's reader could not be started: ${(e && e.code) || e}`));   // ckpt61 cure 2: the hub survives a start that fails (the road's own failure words owed: the next unit)
+  if (!child.stdout) { try { outStream.destroy(); } catch {} try { fs.rmSync(tmpDir, { recursive: true }); } catch {} return res.status(503).json({ error: 'the archive could not be read now (its reader did not start)' }); }   // ckpt61 cure 3
   child.stdout.pipe(outStream);
   let written = 0, killed = false;
   const CAP = 200 * 1024 * 1024;
@@ -1016,6 +1021,7 @@ router.post('/api/archive/extract-entry', (req, res) => {
     clearTimeout(timer);
     if (killed) { try { fs.rmSync(tmpDir, { recursive: true }); } catch {} return res.status(413).json({ error: 'entry too large (>200MB)' }); }
     if (code !== 0) { try { fs.rmSync(tmpDir, { recursive: true }); } catch {} return res.status(400).json({ error: `extract failed (exit ${code})` }); }
+    if (outErr) { try { fs.rmSync(tmpDir, { recursive: true }); } catch {} return res.status(503).json({ error: `the entry could not be written (${outErr.code || outErr.message})` }); }   // ckpt61 cure 3
     outStream.end(() => res.json({ path: outPath, size: written }));
   });
 });
@@ -1264,9 +1270,9 @@ async function crossHostTransfer(req, res, { move }) {
     if (srcHost) srcChild = inst._spawn(srcHost, `cd ${shq(srcParent)} && tar -cf - ${shq(base)}`);
     else { const sp = safePath(src); srcChild = spawn('tar', ['-cf', '-', path.basename(sp)], { cwd: path.dirname(sp) }); }
     srcChild.on('error', (e) => console.warn(`[files] a copy's reader could not be started: ${(e && e.code) || e}`));   // ckpt61 cure 2: the hub survives a start that fails (the road's own failure words owed: the next unit)
-    let stageLocal = null;
+    let stageLocal = null, destChild = null;
     try {
-      let destChild, localRename = null;
+      let localRename = null;
       if (destHost) {
         const h = inst._host(destHost);
         if (overwrite) {
@@ -1300,6 +1306,9 @@ async function crossHostTransfer(req, res, { move }) {
         }
       }
       destChild.on('error', (e) => console.warn(`[files] a copy's writer could not be started: ${(e && e.code) || e}`));   // ckpt61 cure 2: the hub survives a start that fails (the road's own failure words owed: the next unit)
+      // ckpt61 cure 3: a side that failed at once has no pipe — refused in the copy's own words; the catch below ends the side that
+      // DID start (never left holding the hub's handles while the table is full)
+      if (!srcChild.stdout || !destChild.stdin) throw new Error('the copy could not be started');
       count(srcChild.stdout);
       if (op) op.cancel = () => { try { srcChild.kill('SIGTERM'); } catch {} try { destChild.kill('SIGTERM'); } catch {} };
       srcChild.stdout.pipe(destChild.stdin);
@@ -1315,6 +1324,7 @@ async function crossHostTransfer(req, res, { move }) {
       if (move) { if (srcHost) await inst.remove(srcHost, src); else fs.rmSync(safePath(src), { recursive: true, force: true }); }
       return res.json({ success: true, dest: destPath });
     } catch (e) {
+      for (const c of [srcChild, destChild]) { try { if (c && c.exitCode === null && c.signalCode === null) c.kill('SIGTERM'); } catch {} }   // ckpt61 cure 3: a side that failed never leaves the other running
       if (stageLocal) { try { fs.rmSync(stageLocal, { recursive: true, force: true }); } catch {} }
       return res.status(400).json({ error: e.message });
     }
@@ -1333,6 +1343,10 @@ async function crossHostTransfer(req, res, { move }) {
   let reader;
   if (srcHost) reader = inst._spawn(srcHost, `cat '${String(src).replace(/'/g, `'\\''`)}'`).stdout;
   else reader = fs.createReadStream(safePath(src));
+  // ckpt61 cure 3 (THE LAW, widened to streams): a remote reader that never started (its child has no stdout at a full table) is
+  // refused BEFORE any stream is made; a local one has its error listener at once (its open fails on a later tick)
+  if (!reader) return res.status(503).json({ error: 'the copy could not be started (its reader did not start)' });
+  reader.on('error', () => { });   // heard here; the transfer's own promise below answers it
   count(reader);
   if (op) op.cancel = () => { try { reader.destroy(new Error('cancelled')); } catch {} };
   try {
@@ -1347,8 +1361,13 @@ async function crossHostTransfer(req, res, { move }) {
       const sizeGuard = srcSize != null ? ` && [ "$(wc -c < ${shq(part)})" -eq ${srcSize} ]` : '';
       const w = spawn('ssh', [...inst.hosts.sshArgs(h), '--',
         `mkdir -p "$(dirname ${shq(destPath)})" && { cat > ${shq(part)}${sizeGuard} && mv -f ${shq(part)} ${shq(destPath)}; } || { rm -f ${shq(part)}; exit 1; }`], { env: inst.hosts.sshEnv() });
+      // ckpt61 cure 3: the writer's error listener FIRST — with none, any failed start (a full file table, no ssh) ended the hub;
+      // a start that failed at once has no stdin (the reader then ended, the copy refused in its own words)
+      let wErr = null;
+      w.on('error', (e) => { wErr = e; });
+      if (!w.stdin) { try { reader.destroy(); } catch {} throw new Error('the remote write could not be started'); }
       reader.pipe(w.stdin);
-      await new Promise((resolve, reject) => { w.on('close', c => c === 0 ? resolve() : reject(new Error('remote write failed'))); reader.on('error', reject); });
+      await new Promise((resolve, reject) => { w.on('close', c => c === 0 ? resolve() : reject(new Error(wErr ? `the remote write could not be started (${wErr.code || wErr.message})` : 'remote write failed'))); reader.on('error', reject); });
     } else {
       const dPath = safePath(destPath);
       fs.mkdirSync(path.dirname(dPath), { recursive: true });
@@ -1358,7 +1377,7 @@ async function crossHostTransfer(req, res, { move }) {
       // marked partial, never a truncated file at the final name.
       const part = dPath + PARTIAL_SUFFIX;
       try {
-        await new Promise((resolve, reject) => { const w = fs.createWriteStream(part); reader.pipe(w); w.on('finish', resolve); w.on('error', reject); reader.on('error', reject); });
+        await new Promise((resolve, reject) => { const w = fs.createWriteStream(part); w.on('error', reject); w.on('finish', resolve); reader.on('error', reject); reader.pipe(w); });   // ckpt61 cure 3: the listeners before the pipe
         if (srcSize != null && fs.statSync(part).size !== srcSize) throw new Error('transfer truncated (source changed or connection dropped)');
         fs.renameSync(part, dPath);
       } catch (e) { try { fs.rmSync(part, { force: true }); } catch {} throw e; }

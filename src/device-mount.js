@@ -385,7 +385,7 @@ async function deviceFolderMount({ device, remotePath, mountpoint, rcloneBin, vf
   const rc = spawn(rcloneBin, args, { env, detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
   rc.on('error', (e) => console.warn(`[device-mount] the pull mount's rclone could not be started: ${(e && e.code) || e}`));   // ckpt61 cure 2: the hub survives a start that fails (the road's own failure words owed: the next unit)
   let stderr = '';
-  rc.stderr.on('data', (d) => { stderr += d.toString().slice(0, 2000); });
+  if (rc.stderr) rc.stderr.on('data', (d) => { stderr += d.toString().slice(0, 2000); });   // ckpt61 cure 3: none after a start that failed at once (the wait below says it did not come up)
   rc.unref();
   // rclone gone = the mount is gone: the refresher stops and the journal says so. B-fcc7: and the mount point is RELEASED
   // at once — the lazy unmount (a child), the bridge closed, the device's folder server let go — and the owner told

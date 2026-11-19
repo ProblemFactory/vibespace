@@ -177,17 +177,19 @@ class VncManager {
       let buf = '', done = false, timer = null;
       const finish = (v) => {
         if (done) return; done = true; clearTimeout(timer);
-        try { x.stdio[3].destroy(); } catch {}
+        try { x.stdio && x.stdio[3] && x.stdio[3].destroy(); } catch {}
         if (v.display) x.unref(); else if (x.exitCode == null && x.signalCode == null) { try { x.kill('SIGTERM'); } catch {} }
         resolve(v);
       };
-      timer = setTimeout(() => finish({ child: null, display: null, why: `no display number within ${DISPLAYFD_MS} ms` }), DISPLAYFD_MS);
-      x.stdio[3].on('data', (d) => { buf += d; const m = /^(\d+)\s/.exec(buf); if (m) finish({ child: x, display: `:${m[1]}` }); });
-      x.stdio[3].on('error', () => { /* the exit below answers */ });
-      x.once('exit', (code, sig) => finish({ child: null, display: null, why: `${path.basename(xvnc)} exited (${sig || `code ${code}`}) before naming a display` }));
-      // an `error` with no listener is an uncaught exception = the whole server
-      // (the desktop-display.js r2 lesson: a binary gone between probe and spawn)
+      // an `error` with no listener is an uncaught exception = the whole server (the desktop-display.js r2 lesson: a binary gone
+      // between probe and spawn) — and it comes FIRST (ckpt61 cure 3): a start that fails at once (a full file table) has no stdio
+      // at all, and the display pipe read before it threw while its error was still queued
       x.on('error', (e) => { console.warn(`[vnc] ${path.basename(xvnc)} failed to spawn: ${e.message}`); finish({ child: null, display: null, why: e.message }); });
+      timer = setTimeout(() => finish({ child: null, display: null, why: `no display number within ${DISPLAYFD_MS} ms` }), DISPLAYFD_MS);
+      const fd3 = x.stdio && x.stdio[3];
+      if (fd3) fd3.on('data', (d) => { buf += d; const m = /^(\d+)\s/.exec(buf); if (m) finish({ child: x, display: `:${m[1]}` }); });
+      if (fd3) fd3.on('error', () => { /* the exit below answers */ });
+      x.once('exit', (code, sig) => finish({ child: null, display: null, why: `${path.basename(xvnc)} exited (${sig || `code ${code}`}) before naming a display` }));
     });
   }
 

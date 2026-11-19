@@ -106,7 +106,7 @@ app.post('/api/self-update', (req, res) => {
       console.warn(`[update] the update could not be started: ${why}`);
       if (_selfUpdate && _selfUpdate.child === child) _selfUpdate = null;
       _selfUpdateFailed = { why };
-      try { fs.appendFileSync(_updateLogPath, failedStart(why)); } catch { }   // the dialog reads it; refused ⇒ the status answers it
+      fs.promises.appendFile(_updateLogPath, failedStart(why)).catch(() => { });   // the dialog reads it (async: the log may sit on a network mount); refused ⇒ the status answers it
     });
     fs.closeSync(fd);
     child.unref();

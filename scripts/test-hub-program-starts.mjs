@@ -328,7 +328,7 @@ try {
       if (c.stdout) c.stdout.on('data', (d) => { out += d; });
       if (c.stderr) c.stderr.on('data', (d) => { err += d; });
       const t = setTimeout(() => { try { c.kill('SIGKILL'); } catch { } }, 20000);
-      c.on('close', (code, signal) => { clearTimeout(t); let j = null; try { j = JSON.parse(out.trim().split('\n').pop()); } catch { } resolve({ code, signal, j, asked: (err.match(/ASKED-\d/g) || []).length, emfile: /spawn \S+ EMFILE/.test(err), err: err.slice(-500) }); });
+      c.on('close', (code, signal) => { clearTimeout(t); let j = null; try { j = JSON.parse(out.trim().split('\n').pop()); } catch { } resolve({ code, signal, j, unheard: /Unhandled 'error' event|Emitted 'error' event on ChildProcess/.test(err), died: (/Error: spawn (\S+) EMFILE/.exec(err) || [])[1] || null, err: err.slice(-500) }); });
     });
     const csE = fs.readFileSync(path.join(REPO, 'src/server/child-starter.js'), 'utf8');
     const LIS = "    p.on('error', () => { if (p === proc) fault('the starter could not be started'); });\n", PIPE_IN = "    p.stdin.on('error', () => { });\n";
@@ -343,51 +343,66 @@ try {
     const j = g.j || {};
     ok(g.code === 0 && j.full === 'EMFILE' && j.r1 && j.r1.unknown === true && j.st1.faults === 1 && j.st1.restarted && !j.st1.direct && j.st1.unknown === 1
       && j.r2 && j.r2.started === false && /EMFILE|ENFILE/.test(String(j.r2.error)) && j.st2.faults === 2 && j.st2.direct && j.st2.starts === 2
-      && rA.code === 1 && rA.emfile && rA.asked === 0 && !rA.j && rB.code === 1 && rB.emfile && rB.asked === 2 && !rB.j
+      // the reds are judged by THE DEATH ITSELF — exit 1, no answer line, and the uncaught start error by its name — never by how many
+      // asks ran before it (the order of a tick and a rejection is the runtime's: the hosted Node 22 and the hub's Node 24)
+      && rA.code === 1 && rA.unheard && path.basename(String(rA.died)) === path.basename(process.execPath) && !rA.j
+      && rB.code === 1 && rB.unheard && rB.died === 'true' && !rB.j
       && rU.code === 0 && rU.j && rU.j.r1 && rU.j.r1.unknown === true && rU.j.st1.unknown === 0,
-      `a FULL file table (${j.held} handles held, the next open «${j.full}»): the starter's start fails at once ⇒ answered «unknown», ${j.st1 && j.st1.faults} fault counted, ${j.st1 && j.st1.unknown} unknown; the second ⇒ the old road, its start failing the same way ⇒ «not started» (${j.r2 && j.r2.error}), ${j.st2 && j.st2.faults} faults — the process ALIVE after (exit ${g.code}); RED the tip's order: the starter's pipe first ⇒ exit ${rA.code} before any answer (the uncaught spawn EMFILE: ${rA.emfile}), the old road's pipes first ⇒ exit ${rB.code} after its ${rB.asked} asks (the rejection's turn runs before the queued error's tick), no answer line; RED the unknown not counted ⇒ ${rU.j && rU.j.st1 ? rU.j.st1.unknown : '?'} counted for the same answer`,
-      { g: { code: g.code, j: g.j, err: g.err }, rA: { code: rA.code, asked: rA.asked, err: rA.err }, rB: { code: rB.code, asked: rB.asked, err: rB.err }, rU: { code: rU.code, st1: rU.j && rU.j.st1 } });
+      `a FULL file table (${j.held} handles held, the next open «${j.full}»): the starter's start fails at once ⇒ answered «unknown», ${j.st1 && j.st1.faults} fault counted, ${j.st1 && j.st1.unknown} unknown; the second ⇒ the old road, its start failing the same way ⇒ «not started» (${j.r2 && j.r2.error}), ${j.st2 && j.st2.faults} faults — the process ALIVE after (exit ${g.code}); RED the tip's order: the starter's pipe first ⇒ exit ${rA.code}, the unheard «spawn ${rA.died} EMFILE», no answer line; the old road's pipes first ⇒ exit ${rB.code}, the unheard «spawn ${rB.died} EMFILE», no answer line; RED the unknown not counted ⇒ ${rU.j && rU.j.st1 ? rU.j.st1.unknown : '?'} counted for the same answer`,
+      { g: { code: g.code, j: g.j, err: g.err }, rA: { code: rA.code, died: rA.died, unheard: rA.unheard, err: rA.err }, rB: { code: rB.code, died: rB.died, unheard: rB.unheard, err: rB.err }, rU: { code: rU.code, st1: rU.j && rU.j.st1 } });
 
-    // ④k THE SELF-UPDATE'S FAILED START IS SAID (cure 2): the route answers «started» before the queued 'error' arrives; the dialog
-    // reads the update's log for its end mark (src/lib/app.js: «Update failed (exit N) — see the log below») — without it, it
-    // spun to its ten-minute timeout, and a second press was refused as a run «already» in flight. A REAL full table with ONE
-    // handle free (the route opens its log; the start's pipes cannot be made): the status's log says it and carries the mark, the
-    // process alive, a second press tries again. RED (the failure not written, not kept): no mark, and the press refused
+    // ④k THE SELF-UPDATE'S FAILED START IS SAID (cure 2; cure 3: each half with its own red): the route answers «started» before the
+    // queued 'error' arrives; the dialog reads the update's log for its end mark (src/lib/app.js: «Update failed (exit N) — see the log
+    // below») — without it, it spun to its ten-minute timeout, and a second press was refused as a run «already» in flight. A REAL
+    // full table, refilled before EACH call with exactly ONE handle free (the route opens its log, the start's pipes cannot be made —
+    // whatever else of the process took a handle meanwhile): the status's log says it and carries the mark, the process alive, a
+    // second press tries again — with the log write allowed, and with it REFUSED (the status answers the mark from memory).
+    // RED, each half alone: the status's fallback out (the write refused ⇒ no mark), the in-flight check's «failed at once» out (the
+    // write refused ⇒ the press refused), the failure neither written nor kept (no mark, the press refused)
     const OPSF = path.join(T, 'ops-full.cjs'), ROOT = path.join(T, 'ops-root');
     fs.mkdirSync(path.join(ROOT, 'scripts'), { recursive: true }); fs.mkdirSync(path.join(ROOT, 'data'), { recursive: true });
     fs.writeFileSync(path.join(ROOT, 'scripts', 'update.sh'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     fs.writeFileSync(OPSF, [
-      "const fs = require('fs'); const [opsPath, root] = process.argv.slice(2); const routes = {};",
+      "const fs = require('fs'); const [opsPath, root, refuse] = process.argv.slice(2); const routes = {};",
+      "if (refuse === '1') { const ra = fs.promises.appendFile; fs.promises.appendFile = async function (p, ...a) { if (String(p).endsWith('update.log')) { const e = new Error('EMFILE: the leg refuses the write'); e.code = 'EMFILE'; throw e; } return ra.call(this, p, ...a); }; }",
       "const app = new Proxy({}, { get: (t, k) => (p, ...h) => { if (typeof p === 'string' && h.length) routes[String(k).toUpperCase() + ' ' + p] = h[h.length - 1]; } });",
       "require(opsPath).create({ app, rootDir: root, wss: { clients: new Set() }, WS_OPEN: 1 });",
       "const call = (k) => new Promise((r) => { const res = { statusCode: 200, status(c) { this.statusCode = c; return this; }, json(o) { r({ code: this.statusCode, body: o }); return this; }, end() { r({ code: this.statusCode }); }, set() { return this; }, setHeader() { } }; routes[k]({ body: {}, query: {}, headers: {} }, res); });",
-      "const held = []; let full = null; try { for (let i = 0; i < 100000; i++) held.push(fs.openSync('/dev/null', 'r')); } catch (e) { full = e.code; }",
-      "fs.closeSync(held.pop());   // ONE handle free: the route opens its log, the start (its pipes) cannot",
+      "const held = []; let full = null;",
+      "const oneFree = () => { try { for (let i = 0; i < 100000; i++) held.push(fs.openSync('/dev/null', 'r')); } catch (e) { full = e.code; } fs.closeSync(held.pop()); };   // full, ONE handle free",
+      "const sleep = (ms) => new Promise((r) => setTimeout(r, ms));",
       "(async () => {",
-      "  const post = await call('POST /api/self-update'); await new Promise((r) => setTimeout(r, 300));",
-      "  const st = await call('GET /api/self-update/status');",
-      "  const again = await call('POST /api/self-update'); await new Promise((r) => setTimeout(r, 300));",
+      "  oneFree(); const post = await call('POST /api/self-update'); await sleep(300);",
+      "  oneFree(); const st = await call('GET /api/self-update/status');",
+      "  oneFree(); const again = await call('POST /api/self-update'); await sleep(300);",
       "  for (const fd of held) fs.closeSync(fd);",
       "  process.stdout.write(JSON.stringify({ full, post, st, again }) + '\\n'); process.exit(0);",
       "})();",
     ].join('\n'));
-    const opsRun = (opsPath) => new Promise((resolve) => {
+    const opsRun = (opsPath, refuse) => new Promise((resolve) => {
       let out = '', err = '', c;
-      try { c = CP.spawn('sh', ['-c', 'ulimit -n 128 && exec "$0" "$@"', process.execPath, OPSF, opsPath, ROOT], { stdio: ['ignore', 'pipe', 'pipe'] }); } catch (e) { resolve({ code: null, err: String(e) }); return; }
+      try { c = CP.spawn('sh', ['-c', 'ulimit -n 128 && exec "$0" "$@"', process.execPath, OPSF, opsPath, ROOT, refuse ? '1' : '0'], { stdio: ['ignore', 'pipe', 'pipe'] }); } catch (e) { resolve({ code: null, err: String(e) }); return; }
       c.on('error', (e) => { err += String(e); });
       if (c.stdout) c.stdout.on('data', (d) => { out += d; });
       if (c.stderr) c.stderr.on('data', (d) => { err += d; });
       const t = setTimeout(() => { try { c.kill('SIGKILL'); } catch { } }, 20000);
       c.on('close', (code) => { clearTimeout(t); let j = null; try { j = JSON.parse(out.trim().split('\n').pop()); } catch { } resolve({ code, j, err: err.slice(-400) }); });
     });
-    const opsSrc = fs.readFileSync(path.join(REPO, 'src/server/ops-routes.js'), 'utf8');
-    const k1 = await opsRun(path.join(REPO, 'src/server/ops-routes.js'));
-    const kr = await opsRun(MC.write('src/server/ops-routes.js', anchored(anchored(opsSrc, "      _selfUpdateFailed = { why };\n", '', 'update-failed-kept'), /\n {6}try \{ fs\.appendFileSync\(_updateLogPath, failedStart\(why\)\); \} catch \{ \}[^\n]*/, '', 'update-failed-written'), 'red-update-silent'));
-    const kj = k1.j || {}, kl = String((kj.st && kj.st.body && kj.st.body.log) || ''), rj = kr.j || {}, rl = String((rj.st && rj.st.body && rj.st.body.log) || '');
-    ok(k1.code === 0 && kj.full === 'EMFILE' && kj.post && kj.post.body && kj.post.body.success === true && /could not be started \(EMFILE\)/.test(kl) && /__UPDATE_EXIT:127\s*$/.test(kl) && kj.st.body.running === false && kj.again && kj.again.body && !kj.again.body.already
-      && kr.code === 0 && !/__UPDATE_EXIT:/.test(rl) && rj.again && rj.again.body && rj.again.body.already === true,
-      `the self-update's start failing at once (a full table): the dialog's log says «${(kl.match(/could not be started \([^)]*\)/) || ['—'])[0]}» and ends with its mark (${(kl.match(/__UPDATE_EXIT:\d+/) || ['none'])[0]} ⇒ «Update failed»), nothing running, a second press tries again (already: ${kj.again && kj.again.body ? !!kj.again.body.already : '?'}); the process alive (exit ${k1.code}); RED (the failure neither written nor kept): no mark, the press refused as in flight (already: ${rj.again && rj.again.body ? rj.again.body.already : '?'})`,
-      { k1: { code: k1.code, j: k1.j, err: k1.err }, kr: { code: kr.code, j: kr.j, err: kr.err } });
+    const opsSrc = fs.readFileSync(path.join(REPO, 'src/server/ops-routes.js'), 'utf8'), OPS = path.join(REPO, 'src/server/ops-routes.js');
+    const KEPT = "      _selfUpdateFailed = { why };\n", WRITTEN = /\n {6}fs\.promises\.appendFile\(_updateLogPath, failedStart\(why\)\)\.catch\(\(\) => \{ \}\);[^\n]*/;
+    const FALLBACK = /\n {2}if \(_selfUpdateFailed && !log\.includes\('__UPDATE_EXIT:'\)\) log \+= failedStart\(_selfUpdateFailed\.why\);[^\n]*/, INFLIGHT = " && !_selfUpdateFailed) return res.json({ success: true, already: true });";
+    const view = (r) => { const j = r.j || {}; return { code: r.code, full: j.full, posted: !!(j.post && j.post.body && j.post.body.success), log: String((j.st && j.st.body && j.st.body.log) || ''), running: j.st && j.st.body ? j.st.body.running : null, already: j.again && j.again.body ? j.again.body.already === true : null, err: r.err }; };
+    const kOk = view(await opsRun(OPS, false)), kRef = view(await opsRun(OPS, true));
+    const kSilent = view(await opsRun(MC.write('src/server/ops-routes.js', anchored(anchored(opsSrc, KEPT, '', 'update-failed-kept'), WRITTEN, '', 'update-failed-written'), 'red-update-silent'), false));
+    const kNoFallback = view(await opsRun(MC.write('src/server/ops-routes.js', anchored(opsSrc, FALLBACK, '', 'update-status-fallback'), 'red-update-no-fallback'), true));
+    const kInflight = view(await opsRun(MC.write('src/server/ops-routes.js', anchored(opsSrc, INFLIGHT, ') return res.json({ success: true, already: true });', 'update-inflight'), 'red-update-inflight'), true));
+    const said = (v) => /could not be started \(EMFILE\)/.test(v.log) && /__UPDATE_EXIT:127\s*$/.test(v.log);
+    ok([kOk, kRef].every((v) => v.code === 0 && v.full === 'EMFILE' && v.posted && said(v) && v.running === false && v.already === false)
+      && kSilent.code === 0 && !/__UPDATE_EXIT:/.test(kSilent.log) && kSilent.already === true
+      && kNoFallback.code === 0 && !/__UPDATE_EXIT:/.test(kNoFallback.log)
+      && kInflight.code === 0 && said(kInflight) && kInflight.already === true,
+      `the self-update's start failing at once (a full table, one handle free before each call): the dialog's log says «${(kOk.log.match(/could not be started \([^)]*\)/) || ['—'])[0]}» and ends with its mark (${(kOk.log.match(/__UPDATE_EXIT:\d+/) || ['none'])[0]} ⇒ «Update failed»), nothing running, a second press tries again — the log write allowed and REFUSED alike (refused: ${(kRef.log.match(/__UPDATE_EXIT:\d+/) || ['no mark'])[0]} from memory, already ${kRef.already}); the process alive; RED each half: the failure neither written nor kept ⇒ no mark + the press refused (${kSilent.already}); the status's fallback out ⇒ ${/__UPDATE_EXIT:/.test(kNoFallback.log) ? 'a mark' : 'no mark'}; the in-flight check's «failed at once» out ⇒ the press refused (${kInflight.already})`,
+      { kOk, kRef, kSilent, kNoFallback, kInflight });
 
     // ④j THE CLASS (cure 2: every module the HUB loads, every form of a start): the hub's module set is DERIVED — the require graph
     // from server.js, never a typed list — and in each, every start is read: a bare spawn / fork / execFile destructured from
@@ -397,9 +412,45 @@ try {
     // unguarded (a rejection instead of the road's own refusal). A start handed straight on (an argument, a return) is judged
     // where it lands, counted here. Comments are blanked first. node-pty's spawn (claude-signin, oat-mint: a local `spawn`) throws
     // instead: not this class. RED: each form planted broken, the five sites cured here put back, and three shapes it must NOT flag
-    const blank = (src) => src.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/(^|[^:'"`\\/])(\/\/[^\n]*)/g, (m, a, b) => a + ' '.repeat(b.length));
+    // the engine (cure 3, the fresh read's MUST: a `/*` inside a line comment or a string opened a FAKE comment — server.js's
+    // «/api/file/serve/*» hid its lines 143–579 and with them 37 hub modules): comments are blanked in ONE left-to-right pass
+    // that knows strings, template literals (and their ${…}) and regex literals; a start's listener is judged in its own scope (up
+    // to its name's next declaration: a second `const w` is another child); a pipe is touched by a member read, a stdio slot or
+    // being handed as a call's first argument
+    function blank(src) {
+      const out = src.split(''), n = src.length, stack = [];   // stack: brace depth of each ${…} we are inside
+      let i = 0, last = '';                                     // last: the last significant code token's tail (regex vs division)
+      const wipe = (a, b) => { for (let k = a; k < b; k++) if (out[k] !== '\n') out[k] = ' '; };
+      const regexStart = () => /^$|[(,=:[!&|?{};+\-*%<>~^]$/.test(last) || /(?:^|[^\w$.])(?:return|typeof|case|do|else|in|of|void|yield|await|delete|throw|new)$/.test(last);
+      const tpl = () => {   // i at the char after the opening backtick: scan to its closing backtick, recursing into ${…}
+        while (i < n) {
+          const c = src[i];
+          if (c === '\\') { i += 2; continue; }
+          if (c === '`') { i++; return; }
+          if (c === '$' && src[i + 1] === '{') { i += 2; stack.push(0); code(true); continue; }
+          i++;
+        }
+      };
+      const code = (inTpl) => {
+        while (i < n) {
+          const c = src[i], d = src[i + 1];
+          if (c === '/' && d === '/') { const e = src.indexOf('\n', i); const end = e < 0 ? n : e; wipe(i, end); i = end; continue; }
+          if (c === '/' && d === '*') { const e = src.indexOf('*/', i + 2); const end = e < 0 ? n : e + 2; wipe(i, end); i = end; continue; }
+          if (c === '/' && regexStart()) { let k = i + 1, cls = false; while (k < n && src[k] !== '\n') { const x = src[k]; if (x === '\\') { k += 2; continue; } if (x === '[') cls = true; else if (x === ']') cls = false; else if (x === '/' && !cls) break; k++; } i = k + 1; while (i < n && /[a-z]/.test(src[i])) i++; last = 'r'; continue; }
+          if (c === '"' || c === "'") { let k = i + 1; while (k < n && src[k] !== c && src[k] !== '\n') { if (src[k] === '\\') k++; k++; } i = k + 1; last = 's'; continue; }
+          if (c === '`') { i++; tpl(); last = 's'; continue; }
+          if (inTpl && c === '{') { stack[stack.length - 1]++; i++; last = '{'; continue; }
+          if (inTpl && c === '}') { if (stack[stack.length - 1] === 0) { stack.pop(); i++; return; } stack[stack.length - 1]--; i++; last = '}'; continue; }
+          if (!/\s/.test(c)) { last = /[\w$]/.test(c) ? (/[\w$]$/.test(last) ? last + c : c).slice(-12) : c; }
+          i++;
+        }
+      };
+      code(false);
+      return out.join('');
+    }
     const CPQ = `require\\(\\s*['"](?:node:)?child_process['"]\\s*\\)`;
-    const sitesOf = (rel, raw) => {
+    // sitesOf(rel, raw) → [{ site, form, v, handed, bad }]: every start in a file, judged
+    function sitesOf(rel, raw) {
       const src = blank(raw), out = [];
       const ns = [...src.matchAll(new RegExp(`(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*${CPQ}`, 'g'))].map((m) => m[1]);
       const bare = new Map();
@@ -414,17 +465,28 @@ try {
       for (const c of calls) {
         const back = src.slice(Math.max(0, c.at - 300), c.at).split(';').pop(), line = src.slice(0, c.at).split('\n').length, site = `${rel}:${line}`;
         if (/(?:\breturn|=>)\s*$/.test(back) || /[(,]\s*$/.test(back)) { out.push({ site, form: c.form, handed: true, bad: false }); continue; }
-        const a = /([A-Za-z_$][\w$]*)\s*=\s*(?:[^;=]*?[?:]\s*)?$/.exec(back), v = a ? a[1] : null, win = src.slice(c.at, c.at + 4000);
+        const a = /([A-Za-z_$][\w$]*)\s*=\s*(?:[^;=]*?[?:]\s*)?$/.exec(back), v = a ? a[1] : null;
+        let win = src.slice(c.at, c.at + 4000);
+        if (v) { const re = new RegExp(`\\b(?:const|let|var)\\s+${v.replace(/\$/g, '\\$')}\\b`); const k = win.slice(1).search(re); if (k >= 0) win = win.slice(0, k + 1); }   // the start's own scope: up to the name's next declaration
         let lis = -1, first = -1;
         if (v) {
-          lis = win.search(new RegExp(`\\b${v}\\.(?:on|once|addListener)\\('error'`));
-          const touch = new RegExp(`\\b${v}\\.(stdout|stdin|stderr)\\.`, 'g'), guard = new RegExp(`if \\((?:[^)\\n]*&&\\s*)?!?${v}\\.std|${v}\\.std\\w+ &&|\\btry \\{\\s*$`); let t;
-          while ((t = touch.exec(win))) { const pre = win.slice(Math.max(0, t.index - 160), t.index).split('\n').pop(), post = win.slice(t.index, t.index + 240).split('\n')[0]; if (guard.test(pre) || (/\btry \{/.test(pre) && /\}\s*catch\b/.test(post))) continue; first = t.index; break; }
+          const V = v.replace(/\$/g, '\\$');
+          lis = win.search(new RegExp(`\\b${V}\\.(?:on|once|addListener)\\('error'`));
+          // a TOUCH: a member read on a pipe (x.stdout.on — `?.` is guarded), a stdio slot (x.stdio[3]), or a pipe handed as a call's
+          // first argument (count(x.stdout), r.pipe(w.stdin)) — never a pipe listed in an array (each then checked by the reader)
+          const touch = new RegExp(`\\b${V}\\.(?:stdout|stdin|stderr)\\s*\\.(?!\\?)|\\b${V}\\.stdio\\s*\\[|\\(\\s*${V}\\.(?:stdout|stdin|stderr)\\s*[),]`, 'g');
+          const guard = new RegExp(`if \\((?:[^)\\n]*(?:&&|\\|\\|)\\s*)?!?${V}\\.std|${V}\\.std\\w* &&`);
+          let t;
+          while ((t = touch.exec(win))) {
+            const lineStart = win.lastIndexOf('\n', t.index) + 1, upto = win.slice(lineStart, t.index + t[0].length), post = win.slice(t.index, t.index + 240).split('\n')[0];
+            if (guard.test(upto) || (/\btry \{/.test(upto) && /\}\s*catch\b/.test(post))) continue;
+            first = t.index; break;
+          }
         }
         out.push({ site, form: c.form, v, bad: c.form === 'execFile' ? first >= 0 : (!v || lis < 0 || (first >= 0 && first < lis)) });
       }
       return out;
-    };
+    }
     const hubModules = () => {
       const seen = new Set(), todo = ['server.js'];
       while (todo.length) {
@@ -444,33 +506,48 @@ try {
     // starts that only SURVIVE (one listener, the journal line: «the hub survives; the road's own failure words owed») — each
     // file's survival lines counted and each still holding its listener on its line
     const FIX = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/spawn-listener-debt.json'), 'utf8')), DEBT = FIX.pipeFirst, SURV = FIX.survives;
-    const FOUNDING = { pipeFirst: 9, survives: 13 }, SURV_MARK = 'ckpt61 cure 2: the hub survives a start that fails';
+    // FOUNDING, a count a FILE (cure 3, the read's SHOULD: a sum let one file grow while another fell): raising one is an edit here
+    const FOUNDING = {
+      pipeFirst: { 'src/routes/files.js': 3, 'src/machine-mounts.js': 2, 'src/remote-fs.js': 1, 'src/desktop-display.js': 2, 'src/node-runtime.js': 1 },
+      survives: { 'src/mounts.js': 2, 'src/plugins/frp.js': 1, 'src/plugins/tailscale.js': 2, 'src/vnc.js': 1, 'src/routes/files.js': 4, 'src/remote-fs.js': 1, 'src/claude-oat-probe.js': 1, 'src/device-mount.js': 1 },
+    };
+    const SURV_MARK = 'ckpt61 cure 2: the hub survives a start that fails';
     const bad = sites.filter((x) => x.bad).map((x) => x.site);
     const newBad = bad.filter((x) => !DEBT.some((d) => x.startsWith(d.file + ':') && d.n > 0)), debtNow = Object.fromEntries(DEBT.map((d) => [d.file, bad.filter((x) => x.startsWith(d.file + ':')).length]));
-    const survNow = SURV.map((r) => { const lines = rd(r.file).split('\n').filter((l) => l.includes(SURV_MARK)); return { file: r.file, n: r.n, now: lines.length, held: lines.filter((l) => /\.on\('error', \(e\) => console\.warn\(/.test(l)).length }; });
-    const sumOf = (rows) => rows.reduce((a, r) => a + r.n, 0);
-    const survOk = survNow.every((r) => r.now === r.n && r.held === r.n) && sumOf(SURV) <= FOUNDING.survives && sumOf(DEBT) <= FOUNDING.pipeFirst;
+    // the survival lines are counted in EVERY hub module (a new survive-only start in a file the fixture does not name is red)
+    const marked = mods.map((r) => { const lines = rd(r).split('\n').filter((l) => l.includes(SURV_MARK)); return { file: r, now: lines.length, held: lines.filter((l) => /\.on\('error', \(e\) => console\.warn\(/.test(l)).length }; }).filter((x) => x.now > 0);
+    const survNow = SURV.map((r) => ({ file: r.file, n: r.n, ...(marked.find((x) => x.file === r.file) || { now: 0, held: 0 }) }));
+    const unnamedSurv = marked.filter((x) => !SURV.some((r) => r.file === x.file)).map((x) => x.file);
+    const survOk = survNow.every((r) => r.now === r.n && r.held === r.n) && !unnamedSurv.length
+      && DEBT.every((d) => FOUNDING.pipeFirst[d.file] != null && d.n <= FOUNDING.pipeFirst[d.file]) && SURV.every((r) => FOUNDING.survives[r.file] != null && r.n <= FOUNDING.survives[r.file]);
     const planted = {
       'a namespaced spawn, its pipe first': "const cp = require('child_process');\nfunction f() { const c = cp.spawn('x', [], { stdio: 'pipe' }); c.stdout.on('data', () => {}); c.on('error', () => {}); }",
       'an inline spawn, no listener': "function f() { const c = require('child_process').spawn('x', [], { stdio: 'ignore' }); c.unref(); }",
       'a fork, its pipe first': "const { fork } = require('child_process');\nfunction f() { const w = fork('w.js', [], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] }); w.stdout.on('data', () => {}); w.on('error', () => {}); }",
       'an execFile, its stdin unguarded': "const { execFile } = require('child_process');\nfunction f() { const c = execFile('x', [], () => {}); c.stdin.end('y'); }",
+      'a stdio slot read first': "const { spawn } = require('child_process');\nfunction f() { const x = spawn('x', [], { stdio: ['ignore', 'ignore', 'ignore', 'pipe'] }); x.stdio[3].on('data', () => {}); x.on('error', () => {}); }",
+      'a pipe handed on before the listener': "const { spawn } = require('child_process');\nfunction f(r) { const w = spawn('x', [], { stdio: 'pipe' }); r.pipe(w.stdin); w.on('error', () => {}); }",
+      'a listener of ANOTHER child of the same name': "const { spawn } = require('child_process'); const fs = require('fs');\nfunction f(r) { const w = spawn('x', [], { stdio: 'pipe' }); r.pipe(w.stdin); }\nfunction g() { const w = fs.createWriteStream('p'); w.on('error', () => {}); }",
+      'a start behind a «/*» in a string and a comment': "const { spawn } = require('child_process');\nconst ROUTE = '/files/*'; // a route /api/x/* serves it\nfunction f() { const c = spawn('x', [], { stdio: 'pipe' }); c.stdout.on('data', () => {}); }\n// */",
     };
     const keep = {
       'a start in a comment': "const { spawn } = require('child_process');\n// spawn(cmd) — its child.stdout.on(...) before c.on('error') would be the fault\nfunction f() { const c = spawn('x', [], { stdio: 'pipe' }); c.on('error', () => {}); if (c.stdout) c.stdout.on('data', () => {}); }",
       'a child handed on': "const { spawn } = require('child_process');\nfunction f(ran) { return new Promise((r) => { ran(spawn('x', [], { stdio: 'ignore' }), r); }); }",
       'a try-guarded pipe': "const cp = require('child_process');\nfunction f() { const c = cp.execFile('x', [], () => {}); if (c.stdin) c.stdin.on('error', () => {}); try { c.stdin.end('y'); } catch { } }",
+      'pipes listed in an array': "const cp = require('child_process');\nfunction f() { const c = cp.spawn('x', []); for (const p of [c.stdin, c.stdout]) if (p) p.destroy(); c.on('error', () => {}); }",
     };
     const reds = [
       ...Object.entries(planted).map(([w, src]) => [w, sitesOf('planted.js', src).filter((x) => x.bad).length]),
       ['the starter (its pipe first)', sitesOf('src/server/child-starter.js', redStartSrc).filter((x) => x.bad).length], ['the old road (its pipes first)', sitesOf('src/server/child-starter.js', redDirectSrc).filter((x) => x.bad).length],
       ['the self-update (no listener)', sitesOf('src/server/ops-routes.js', anchored(rd('src/server/ops-routes.js'), /\n {4}child\.on\('error', \(e\) => \{\n/, '\n    child.on(\'exit\', (e) => {\n', 'class-ops')).filter((x) => x.bad).length],
       ['the local daemon start (no listener)', sitesOf('src/agentd/client.js', anchored(rd('src/agentd/client.js'), /\n {4}child\.on\('error', \(e\) => \{ this\._log\([^\n]*/, '', 'class-daemon')).filter((x) => x.bad).length],
+      ['the desktop session X server (no listener: its display slot read first)', sitesOf('src/vnc.js', anchored(rd('src/vnc.js'), /\n {6}x\.on\('error', \(e\) => \{ console\.warn\(`\[vnc\][^\n]*/, '', 'class-vnc')).filter((x) => x.bad).length],
+      ['the single-file copy writer (no listener; the later `const w` is another child)', sitesOf('src/routes/files.js', anchored(rd('src/routes/files.js'), "      w.on('error', (e) => { wErr = e; });\n", '', 'class-copy-writer')).filter((x) => x.bad).length - FOUNDING.pipeFirst['src/routes/files.js']],
       ['the cache count (its pipe first)', sitesOf('src/mounts.js', anchored(rd('src/mounts.js'), "      c.on('error', end); c.on('close', end);\n      if (c.stdout) c.stdout.on(", "      c.stdout.on(", 'class-cache-count')).filter((x) => x.bad).length],
     ];
     const kept = Object.entries(keep).map(([w, src]) => [w, sitesOf('kept.js', src).filter((x) => x.bad).length]);
     ok(mods.length > 100 && mods.includes('src/agentd/client.js') && mods.includes('src/mounts.js') && sites.length > 100 && !newBad.length && DEBT.every((d) => debtNow[d.file] <= d.n) && survOk && reds.every(([, n]) => n === 1) && kept.every(([, n]) => n === 0),
-      `the hub's ${mods.length} modules (the require graph from server.js) hold ${sites.length} starts (${sites.filter((x) => x.handed).length} handed on): every spawn / fork has its error listener before its first unguarded pipe touch, every execFile's pipes guarded${newBad.length ? '; NOT: ' + newBad.join(', ') : ''}; the named debt (a count a file only falls): ${DEBT.map((d) => `${d.file} ${debtNow[d.file]}/${d.n}`).join(', ')}; the starts that only survive (words owed): ${survNow.map((r) => `${r.file} ${r.held}/${r.n}`).join(', ')}; RED each planted break named once: ${reds.map(([w, n]) => `${w} ${n}`).join(' · ')}; never flagged: ${kept.map(([w, n]) => `${w} ${n}`).join(' · ')}`, { newBad, debtNow, survNow, reds, kept });
+      `the hub's ${mods.length} modules (the require graph from server.js) hold ${sites.length} starts (${sites.filter((x) => x.handed).length} handed on): every spawn / fork has its error listener before its first unguarded pipe touch, every execFile's pipes guarded${newBad.length ? '; NOT: ' + newBad.join(', ') : ''}; the named debt (a count a file only falls): ${DEBT.map((d) => `${d.file} ${debtNow[d.file]}/${d.n}`).join(', ')}; the starts that only survive (words owed): ${survNow.map((r) => `${r.file} ${r.held}/${r.n}`).join(', ')}; RED each planted break named once: ${reds.map(([w, n]) => `${w} ${n}`).join(' · ')}; never flagged: ${kept.map(([w, n]) => `${w} ${n}`).join(' · ')}`, { newBad, debtNow, survNow, unnamedSurv, reds, kept });
   }
 
   console.log('⑤ hygiene: the service env, no secret on a request line, the site\'s own names');

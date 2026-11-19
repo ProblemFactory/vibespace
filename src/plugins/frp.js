@@ -594,6 +594,7 @@ module.exports = {
         const env = RT.relayEnv(process.env, { token: cfg.ident.token || '', knock });
         const child = spawn(bin, ['-c', frpConf()], { detached: true, stdio: ['ignore', logFd, logFd], env });
         child.on('error', (e) => console.warn(`[plugins] frp: frpc could not be started: ${(e && e.code) || e}`));   // ckpt61 cure 2: the hub survives a start that fails (the road's own failure words owed: the next unit)
+        try { fs.closeSync(logFd); } catch { }   // ALSO CURED (ckpt61 cure 3): the child holds its own copy — the hub's leaked one handle a start
         child.unref();
         fs.writeFileSync(frpPidFile(), String(child.pid));
         const rec = h.rec();

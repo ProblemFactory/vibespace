@@ -6179,7 +6179,7 @@ await section(async () => {
   // lane spawn-env-debts: the debts paid — each fixed shape restored in ONE file ⇒ RED
   const rd93 = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
   const rfs93 = rd93('src/remote-fs.js'), ws93 = rd93('src/writer-sweep.js'), ctx93 = rd93('src/ctx-sync.js'), hst93 = rd93('src/hosts.js'), mnt93 = rd93('src/mounts.js'), dev93 = rd93('src/device-mount.js'), ts93 = rd93('src/plugins/tailscale.js'), fil93 = rd93('src/routes/files.js'), br93 = rd93('src/server/boot-restore.js');
-  const mRoad = m93(rfs93, "return spawn('ssh', [...this.hosts.sshArgs(h, { multiplex: true }), '--', cmd], { env: this.hosts.sshEnv() });", "return spawn('ssh', [...this.hosts.sshArgs(h, { multiplex: true }), '--', cmd]);");
+  const mRoad = m93(rfs93, "const c = spawn('ssh', [...this.hosts.sshArgs(h, { multiplex: true }), '--', cmd], { env: this.hosts.sshEnv() });", "const c = spawn('ssh', [...this.hosts.sshArgs(h, { multiplex: true }), '--', cmd]);");   // ckpt61 cure 2: the helper holds its child (its error listener) before returning it
   const mBlind = m93(ws93, "{ env: hosts.sshEnv(), timeout: timeoutMs, encoding: 'utf-8' }", "{ timeout: timeoutMs, encoding: 'utf-8' }");
   const mRsync = m93(ctx93, "execFile('rsync', args, { env: hosts.sshEnv(), timeout: 60000 }", "execFile('rsync', args, { timeout: 60000 }");
   const mDerived = m93(hst93, 'sshEnv() { return serviceEnv(process.env, { keep: SSH_ENV_KEEP }); }', 'sshEnv() { return { ...process.env }; }');

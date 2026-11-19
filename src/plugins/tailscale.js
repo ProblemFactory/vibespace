@@ -259,6 +259,7 @@ module.exports = {
         // the tailnet's control plane, so the egress door (the operator's proxy + trust roots) — never the hub's tokens
         const child = spawn(cmd, argv, { env: serviceEnv(process.env, { egress: true }), detached: true, stdio: ['ignore', logFd, logFd] });
         child.on('error', (e) => console.warn(`[plugins] tailscale: tailscaled could not be started: ${(e && e.code) || e}`));   // ckpt61 cure 2: the hub survives a start that fails (the road's own failure words owed: the next unit)
+        try { fs.closeSync(logFd); } catch { }   // ALSO CURED (ckpt61 cure 3): the child holds its own copy — the hub's leaked one handle a start
         child.unref();
         fs.writeFileSync(tsPidFile(), String(child.pid));
         const rec = h.rec();
