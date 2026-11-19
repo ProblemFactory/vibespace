@@ -65,6 +65,7 @@ import { openProxyDialog } from './browser-proxy-dialog.js'; // B-8b87: a profil
 import { proxyWords, proxyDoor, PROXY_REFUSALS } from './browser-proxy-model.js'; // B-8b87 cure: a proxy refusal in the page's words
 import { showUnlock, showSetup } from './vault-unlock.js';
 import { openExitDialog } from './browser-exit-dialog.js'; // the exit check (the owner 2026-11-17)
+import { registerBrowserProfileCommands } from './browser-profile-commands.js'; // B-acb9: a plugin's window opens this card's «Proxy…» / «Check the exit…»
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const STRIP_MAX = 12;
@@ -1323,6 +1324,13 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null, open = nu
   return winInfo;
 }
 
+// B-acb9: the two CORE commands a plugin's window runs (api.runCommand) — the card's own dialogs on the profile's own row; the caller
+// hears onDone('done' | 'cancelled') and nothing else (src/lib/browser-profile-commands.js)
+registerBrowserProfileCommands({
+  openProxy: openProxyDialog, openExit: openExitDialog, titles: { proxy: () => t('Proxy…'), exit: () => t('Check the exit…') },
+  rowOf: async (id) => { const d = await fetchJson('/api/browser/profiles'); return ((d && Array.isArray(d.profiles)) ? d.profiles : []).find((x) => x && x.id === id) || null; },
+  notFound: (id) => showToast(t('No browser profile {id} here', { id: id || '?' }), { type: 'error' }),
+});
 export function installBrowserTrace(App) {
   /** THE profiles panel, one window: `{syncId?, focus?: profileId}`. */
   App.prototype.openBrowserProfiles = function (opts) { return openBrowserProfilesWindow(this, opts || {}); };

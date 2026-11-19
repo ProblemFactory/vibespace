@@ -8,10 +8,11 @@ import { mountProxyField } from './browser-proxy-field.js';
 import { proxyWords, proxyDoor } from './browser-proxy-model.js';
 import { showUnlock, showSetup } from './vault-unlock.js';
 
-export function openProxyDialog(app, r, { onDone = null } = {}) {
+export function openProxyDialog(app, r, { onDone = null, onClose = null } = {}) {   // onClose('done' | 'cancelled'): a caller outside the card (B-acb9)
+  let saved = false;   // B-acb9: 'done' only after one of THIS dialog's own saves — a cancel, an Esc or a ✕ is 'cancelled'
   const label = String((r && (r.label || r.id)) || '');
   let field = null;
-  const shell = createModalShell({ id: 'browser-proxy-dialog', key: String(r.id), opener: 'person', title: t('Proxy of {label}', { label }), dialogClass: 'bwho-dialog bproxy-dialog', onClose: () => { },
+  const shell = createModalShell({ id: 'browser-proxy-dialog', key: String(r.id), opener: 'person', title: t('Proxy of {label}', { label }), dialogClass: 'bwho-dialog bproxy-dialog', onClose: () => { try { onClose?.(saved ? 'done' : 'cancelled'); } catch { /* the caller's own */ } },
     unsaved: { isDirty: () => !!field && field.isDirty(), save: () => doSave() }, kind: 'form' });
   if (shell.raised) return shell;
   // 主开发 18:36Z: ANSWERABLE WHERE IT APPEARS — the note offers the move itself (one press; the row's menu item stays)
@@ -42,6 +43,7 @@ export function openProxyDialog(app, r, { onDone = null } = {}) {
       const res = await fetchJson('/api/vault/proxy-logins/move', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId: r.id }) });
       if (!res || res.error || res.ok === false) { say(proxyWords(res && res.code, t, '', { act: 'move', word: res && res.word }), proxyDoor(res && res.code, res && res.word)); return; }
       showToast(t('{label}\'s proxy password is in the vault now — the profile keeps the address alone', { label }), { duration: 6000 });
+      saved = true;
       shell.close();
       try { onDone?.(); } catch { /* the panel reloads on its own */ }
     } finally { busy = false; save.disabled = false; }
@@ -57,6 +59,7 @@ export function openProxyDialog(app, r, { onDone = null } = {}) {
       // the exit check (主开发 17:04Z): a kept exit belongs to the road it was kept for — this change forgot it, said in place
       const forgot = !!(res.changed && res.changed.exitForgotten);
       showToast((v.proxy ? t('{label} goes through its proxy from its next start', { label }) : t('{label} has no proxy from its next start', { label })) + (forgot ? ' — ' + t('its kept exit is forgotten (it belonged to the old proxy); check it again') : ''), { duration: 8000 });
+      saved = true;
       shell.close();
       try { onDone?.(); } catch { /* the panel reloads on its own */ }
     } finally { busy = false; save.disabled = false; }

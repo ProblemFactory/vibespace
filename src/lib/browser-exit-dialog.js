@@ -13,10 +13,11 @@ const post = (url, body) => fetchJson(url, { method: 'POST', headers: { 'Content
 // side said rides after it as data, never as the sentence
 const WORDS = (code, extra = {}) => exitSay(code, t, extra);
 
-export function openExitDialog(app, r, { onDone = null } = {}) {
+export function openExitDialog(app, r, { onDone = null, onClose = null } = {}) {   // onClose('done' | 'cancelled'): a caller outside the card (B-acb9)
+  let saved = false;   // B-acb9: 'done' only after one of THIS dialog's own saves — a cancel, an Esc or a ✕ is 'cancelled'
   const label = String((r && (r.label || r.id)) || '');
   let dirty = false;
-  const shell = createModalShell({ id: 'browser-exit-dialog', key: String(r.id), opener: 'person', title: t('The exit of {label}', { label }), dialogClass: 'bwho-dialog bexit-dialog', onClose: () => { },
+  const shell = createModalShell({ id: 'browser-exit-dialog', key: String(r.id), opener: 'person', title: t('The exit of {label}', { label }), dialogClass: 'bwho-dialog bexit-dialog', onClose: () => { try { onClose?.(saved ? 'done' : 'cancelled'); } catch { /* the caller's own */ } },
     unsaved: { isDirty: () => dirty, save: () => doKeep() }, kind: 'form' });
   if (shell.raised) return shell;
   const body = shell.body;
@@ -86,6 +87,7 @@ export function openExitDialog(app, r, { onDone = null } = {}) {
     if (!res || !res.ok) { say(WORDS(res && res.code)); return; }
     dirty = false;
     showToast(t('{label}\'s kept exit is forgotten — an engine plugin gets none at the next start', { label }), { duration: 6000 });
+    saved = true;
     shell.close();
     try { onDone?.(); } catch { /* the panel reloads on its own */ }
   }
@@ -96,6 +98,7 @@ export function openExitDialog(app, r, { onDone = null } = {}) {
     if (!res || !res.ok) { say(WORDS(res && res.code)); if (res && res.code === 'exit_timezone_invalid') zoneInput.focus(); return; }
     dirty = false;
     showToast(t('{label}\'s exit is kept — an engine plugin reads it when the browser starts', { label }), { duration: 6000 });
+    saved = true;
     shell.close();
     try { onDone?.(); } catch { /* the panel reloads on its own */ }
   }
