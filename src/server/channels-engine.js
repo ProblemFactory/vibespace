@@ -7306,6 +7306,7 @@ function create(deps = {}) {
    *  enable change, a disconnect, a rename, a dead sign-in set or cleared); one running, at most one queued. */
   let swapChain = Promise.resolve(), swapQueued = null;
   const blindSaid = new Set();   // presets whose unread sign-in was said in the journal (once, until it reads again)
+  const fullSaid = new Set();    // presets whose item a FULL tray refused, said once an episode (it ends when an item is filed or a check has nothing to file)
   function clientSwapCheck() {
     // a burst coalesces: one check running, at most ONE queued (it reads the state after the running one)
     if (swapQueued) return swapQueued;
@@ -7314,8 +7315,12 @@ function create(deps = {}) {
     swapChain = run.catch(() => {});
     return run;
   }
+  const CLIENT_SWAP_WORDS = i18nKey('{kind}: the company preset «{preset}» signs in with another client now — {n} account(s) still signed in with the old one; re-authorize each');
+  // A REOPENED client-swap item is judged AT ONCE (the store says a reopen: verify-r6 W2) — one no memo holds closes again,
+  // the rule's own is read by the rule — never left open with stale words until some later check
+  const offSwapReopen = userTodos && typeof userTodos.onStatus === 'function' ? userTodos.onStatus((it, { status } = {}) => { if (status === 'open' && it && it.sessionKey === INBOX_KEY && it.i18n && it.i18n.text && it.i18n.text.key === CLIENT_SWAP_WORDS && !stopped) clientSwapCheck().catch((err) => log.warn(`[channels] client-swap check (a reopen) failed: ${(err && err.message) || err}`)); }) : null;
   const swapMemoOf = (x) => (x && typeof x === 'object' && typeof x.to === 'string' && x.to
-    ? { to: x.to, named: Array.isArray(x.named) ? x.named.filter((id) => typeof id === 'string') : [], itemId: typeof x.itemId === 'string' && x.itemId ? x.itemId : null, sig: typeof x.sig === 'string' ? x.sig : '' } : null);   // a hand-edited / older memo read strictly
+    ? { to: x.to, named: Array.isArray(x.named) ? x.named.filter((id) => typeof id === 'string') : [], itemId: typeof x.itemId === 'string' && x.itemId ? x.itemId : null, sig: typeof x.sig === 'string' ? x.sig : '', stuck: typeof x.stuck === 'string' ? x.stuck : '' } : null);   // a hand-edited / older memo read strictly
   async function clientSwapCheckNow() {
     if (stopped || !integrations || typeof integrations.resolveIntegration !== 'function' || vaultLocked()) return;
     const memos = (() => { const m = store.adapters.live().clientSwaps; return m && typeof m === 'object' && !Array.isArray(m) ? m : {}; })();
@@ -7346,7 +7351,7 @@ function create(deps = {}) {
       const integ = mk.slice(0, mk.indexOf('|')), key = mk.slice(mk.indexOf('|') + 1);
       let r = null; try { r = integrations.resolveIntegration(integ, { credentialKey: key }); } catch { r = null; }
       const v = r && r.source === 'cluster' && r.values ? r.values : null;
-      keys.set(mk, { key, to: v && v.clientId ? String(v.clientId) : m0.to, kind: '', label: (r && r.clusterLabel) || '', need: [], blind: false });
+      keys.set(mk, { key, to: v && v.clientId ? String(v.clientId) : m0.to, kind: '', label: (r && r.clusterLabel) || '', need: [], blind: false, only: true });
     }
     const byLabel = new Map();
     for (const k of keys.values()) if (k.label) byLabel.set(k.label, (byLabel.get(k.label) || 0) + 1);
@@ -7359,30 +7364,35 @@ function create(deps = {}) {
       // A PRESET THIS CHECK CANNOT FULLY READ is left as it stands — said ONCE in the journal while it lasts
       if (k.blind) { if (!blindSaid.has(mk)) { blindSaid.add(mk); log.warn(`[channels] ${k.key}: a sign-in under this preset cannot be read — its client-swap notice waits until every one reads`); } continue; }
       blindSaid.delete(mk);
-      if (!k.to) continue;   // the preset withdrawn: as it stands (the accounts' own refresh says it)
+      if (!k.to) { fullSaid.delete(mk); continue; }   // the preset withdrawn: as it stands (the accounts' own refresh says it); nothing to file
       const m = swapMemoOf(memos[mk]);
       try {
         k.need.sort((a, b) => String(a.label || a.id).localeCompare(String(b.label || b.id)) || (a.id < b.id ? -1 : 1));
         // THE RULE (a pure function — its table is in test-channels-gmail-shape ㉗ (1c)); the memo's `open` is the item's own state
         const step = clientSwapStep(m ? { to: m.to, named: m.named, open: isOpen(m.itemId) } : null, k.to, k.need.map((r) => r.id));
-        let itemId = step.supersede || !m || m.to !== k.to ? null : m.itemId, sig = m && m.to === k.to ? m.sig : '', refused = false;
+        let itemId = step.supersede || !m || m.to !== k.to ? null : m.itemId, sig = m && m.to === k.to ? m.sig : '', refused = false, stuck = m && m.to === k.to ? m.stuck : '';
+        if (step.act !== 'file') fullSaid.delete(mk);   // nothing to file now: a later full tray is a new episode, said again
         if (step.act === 'file' || step.act === 'redraw') {
           const n = k.need.length, labels = k.need.map((r) => r.label || r.id).join(', ');
           const text = `${k.kind}: the company preset «${k.preset}» signs in with another client now — ${n} account(s) still signed in with the old one; re-authorize each`;
           const L1 = 'Its OAuth client is another one now. These accounts keep refreshing with the client they signed in with until the vendor deletes it: {labels}.';
           const L2 = 'Re-authorize opens the next one; this item resolves when none is left.';
           const detail = `${L1.replace('{labels}', labels)}\n${L2}`;
-          const i18n = { text: { key: i18nKey('{kind}: the company preset «{preset}» signs in with another client now — {n} account(s) still signed in with the old one; re-authorize each'), params: { kind: k.kind, preset: k.preset, n } }, detail: [{ key: i18nKey(L1), params: { labels } }, { key: i18nKey(L2), params: {} }], source: INBOX_SOURCE };
+          const i18n = { text: { key: CLIENT_SWAP_WORDS, params: { kind: k.kind, preset: k.preset, n } }, detail: [{ key: i18nKey(L1), params: { labels } }, { key: i18nKey(L2), params: {} }], source: INBOX_SOURCE };
           const action = { type: 'channel-reauth', adapterId: k.need[0].id };
           const want = JSON.stringify([text, detail, action.adapterId]);
           if (step.act === 'file' && userTodos && typeof userTodos.add === 'function') {
             // filed FIRST (a full tray refuses it by name: the older item stays), then a superseded item closed
             const item = userTodos.add(INBOX_KEY, { origin: 'channels', kind: 'action', text, detail, urgency: 'normal', by: 'agent', sessionName: 'Channels', action, i18n, openCap: Math.max(20, 4 * (adapterRecords().adapters.length + 1)) });
-            itemId = item && item.id ? item.id : null; sig = want;
+            itemId = item && item.id ? item.id : null; sig = want; stuck = ''; fullSaid.delete(mk);
             log.log(`[channels] ${k.key}: the preset's client changed — ${n} account(s) to re-authorize, said`);
           } else if (step.act === 'redraw' && want !== sig && itemId && userTodos && typeof userTodos.redrawItem === 'function') {   // only when its words or its door moved
-            const r = userTodos.redrawItem((x) => x.id === itemId, { text, detail, i18n, action });
-            if (r && r.ok) sig = want; else refused = true;
+            if (want === stuck) refused = true;   // the tray refused these very words before: said once, never tried again until they change
+            else {
+              const r = userTodos.redrawItem((x) => x.id === itemId, { text, detail, i18n, action });
+              if (r && r.ok) { sig = want; stuck = ''; }
+              else { refused = true; stuck = want; log.warn(`[channels] ${k.key}: the tray refused to redraw the client-swap item (${(r && r.code) || 'refused'}) — said once; tried again when its words change`); }
+            }
           }
         }
         if (step.act === 'file' && !itemId) continue;   // nothing was filed (no tray): nobody is named, the memo stands — the next check says it
@@ -7390,10 +7400,24 @@ function create(deps = {}) {
         const named = refused && m && m.to === k.to ? m.named : step.memo.named;
         if (step.supersede && m && m.itemId && m.itemId !== itemId) close(m.itemId);
         if (step.act === 'close') close(itemId);
-        const after = { to: step.memo.to, named, itemId, sig };
-        if (JSON.stringify(after) !== JSON.stringify(m ? { to: m.to, named: m.named, itemId: m.itemId, sig: m.sig } : null)) { next[mk] = after; changed = true; }
-      } catch (e) { log.warn(`[channels] ${k.key}: the client-swap notice could not be kept: ${(e && e.message) || e}`); }
+        // a preset with NO account left whose item is closed: nothing to remember — its memo leaves the map
+        if (k.only && !step.memo.open) { if (mk in next) { delete next[mk]; changed = true; } continue; }
+        const after = { to: step.memo.to, named, itemId, sig, ...(stuck ? { stuck } : {}) };
+        if (JSON.stringify(after) !== JSON.stringify(m ? { to: m.to, named: m.named, itemId: m.itemId, sig: m.sig, ...(m.stuck ? { stuck: m.stuck } : {}) } : null)) { next[mk] = after; changed = true; }
+      } catch (e) {
+        if (e && e.code === 'full') { if (!fullSaid.has(mk)) { fullSaid.add(mk); log.warn(`[channels] ${k.key}: the For-you tray is full — the client-swap item waits (said once, until an item is filed or nothing is owed)`); } }
+        else log.warn(`[channels] ${k.key}: the client-swap notice could not be kept: ${(e && e.message) || e}`);
+      }
     }
+    // AN OPEN CLIENT-SWAP ITEM NO MEMO HOLDS (a person re-opened the closed item of a preset whose memo was pruned — its last
+    // account removed or moved to another key; or a superseded one): closed again — the rule holds every item it still owns,
+    // so one no memo holds says nothing true. The item is known by its own words' key, never by its action's type (§78: no
+    // branch on a member id outside its owner)
+    try {
+      const held = new Set(Object.values(next).map((x) => x && x.itemId).filter(Boolean));
+      const dead = userTodos && typeof userTodos.idsWhere === 'function' ? userTodos.idsWhere((i) => i && i.status === 'open' && i.sessionKey === INBOX_KEY && !held.has(i.id) && i.i18n && i.i18n.text && i.i18n.text.key === CLIENT_SWAP_WORDS) : [];
+      for (const id of dead) close(id);
+    } catch { }
     if (changed && !stopped) {
       try { await store.adapters.update(() => { store.adapters.live().clientSwaps = next; }); }
       catch (e) { log.warn(`[channels] the client-swap memo was not written: ${(e && e.message) || e} — the next check reads the presets again`); }
@@ -9034,6 +9058,7 @@ function create(deps = {}) {
     if (offStash) { try { offStash(); } catch {} offStash = null; }   // 2026-09-27: the receipt-fate listener
     if (offRetryFell) { try { offRetryFell(); } catch {} offRetryFell = null; }   // lane paced-wake-retry: the fallen wake's listener
     if (offStashGate) { try { offStashGate(); } catch {} offStashGate = null; }   // verify r3: the stash gate
+    if (offSwapReopen) { try { offSwapReopen(); } catch {} }   // B-166e: the client-swap item's reopen listener
     if (timer) { clearInterval(timer); timer = null; }
     if (owedTimer) { clearInterval(owedTimer); owedTimer = null; }   // lane judged-watch-state: the owed look (what is owed is memory — a restart forgets it)
     // P2: a window that never fired keeps its hits PENDING on the index (they

@@ -2483,7 +2483,7 @@ console.log('\n㉗ (1b) B-166e part 2 cure: the client in force kept at the clos
   const BP = mkp('chb', 'b', 'Channels'), CP = mkp('chc', 'c', 'Channels C');   // the third client under another LABEL: its item's words differ
   const saved = presetsHolder.list;
   const J = JSON.stringify;
-  const driftWorld = async (M, tag) => {
+  const driftWorld = async (M, tag, upto = null) => {   // upto: a control whose step comes early stops there (its own step is its verdict)
     const dir = path.join(ROOT, tag); fs.mkdirSync(path.join(dir, 'channels'), { recursive: true });
     // the tokens are sealed FIRST under the store's own key file; then a vault is registered over the data dir that serves
     // THAT key while open and refuses it while locked (peek says the lock: the engine's vaultLocked() reads it)
@@ -2509,15 +2509,19 @@ console.log('\n㉗ (1b) B-166e part 2 cure: the client in force kept at the clos
     try {
       await E.clientSwapCheck();
       presetsHolder.list = [BP]; integrations.presetsChanged('presets'); await settle(); st.swap = look(); st.swapText = (open()[0] || {}).text || '';
+      if (upto === 'swap') return st;
       const firstId = (open()[0] || {}).id;
       presetsHolder.list = [CP]; integrations.presetsChanged('presets'); await settle(); st.supersede = { open: look(), memo: memoTo(), text: (open()[0] || {}).text || '', first: (todos.get(firstId) || {}).status || null, items: items().length };
       presetsHolder.list = [OLDP]; integrations.presetsChanged('presets'); await settle(); st.revert = { open: open().length, memo: memoTo() };
       presetsHolder.list = [CP]; integrations.presetsChanged('presets'); await settle(); st.again = look();   // back to the client the memo held before the revert
       const s0 = saves; integrations.presetsChanged('presets'); await settle(); st.idleSaves = saves - s0;   // nothing moved
+      if (upto === 'idle') return st;
       const w0 = warns.length;
       LOCKED = true; presetsHolder.list = [BP]; integrations.presetsChanged('presets'); await settle(); st.locked = { open: look(), memo: memoTo(), blindLines: warns.slice(w0).filter((w) => /cannot be read/.test(w)).length };
+      if (upto === 'locked') return st;
       LOCKED = false; integrations.presetsChanged('vault'); await settle(); st.unlocked = { open: look(), memo: memoTo() };
       await E.disconnect('d-one'); await settle(); st.disconnect = look();
+      if (upto === 'disconnect') return st;
       const rec = (id) => E.adapterRecords().adapters.find((x) => x.id === id);
       // a DEAD sign-in is said by its own item: not counted here (the store's flag, then the check its doors start)
       await E.store.adapters.update(() => { rec('d-three').signinDead = { cause: 'test', since: clock, at: clock }; }); await E.clientSwapCheck(); st.dead = look();
@@ -2532,9 +2536,57 @@ console.log('\n㉗ (1b) B-166e part 2 cure: the client in force kept at the clos
       await E.setEnabled('d-two', false); await E.setEnabled('d-three', false); await settle(); st.uncountedClose = { open: open().length, memo: memoTo() };
       presetsHolder.list = [CP]; integrations.presetsChanged('presets'); await settle(); st.uncountedMoved = { open: open().length, memo: memoTo() };
       await E.setEnabled('d-two', true); await E.setEnabled('d-three', true); await settle(); st.reenabled = look();
-      // THE LAST ACCOUNTS LEAVE THE PRESET (removed): nobody left to act — its item closes (its memo alone is read)
+      // A REDRAW THE TRAY REFUSES: said once, never tried again until its words change
+      const realRedraw = todos.redrawItem.bind(todos); let redraws = 0;
+      todos.redrawItem = (...a) => { redraws++; return { ok: false, code: 'i18n_refused' }; };
+      const r0 = warns.length;
+      await E.setEnabled('d-two', false); await settle(); const c1 = redraws;
+      integrations.presetsChanged('presets'); await settle(); const c2 = redraws;   // the same words again: not tried
+      await E.setLabel('d-three', 'Third mail'); await settle(); const c3 = redraws;   // the words moved (a rename): tried again
+      todos.redrawItem = realRedraw;
+      st.refused = { tries: [c1, c2, c3], lines: warns.slice(r0).filter((w) => /refused to redraw/.test(w)).length };
+      // A FULL TRAY refuses the item of a new swap: said once, however many checks (until an item is filed)
+      const realAdd = todos.add.bind(todos); let adds = 0;
+      todos.add = () => { adds++; throw Object.assign(new Error('this session already has 20 open items'), { code: 'full' }); };
+      const f0 = warns.length;
+      presetsHolder.list = [BP]; integrations.presetsChanged('presets'); await settle();
+      integrations.presetsChanged('presets'); await settle();
+      todos.add = realAdd;
+      st.full = { adds, lines: warns.slice(f0).filter((w) => /tray is full/.test(w)).length };
+      integrations.presetsChanged('presets'); await settle(); st.fullAfter = look(); st.fullMemo = memoTo();
+      const bpId = (open()[0] || {}).id;
+      // A FULL TRAY AGAIN: a new episode is said again — after an item was FILED (the filing ends the episode) …
+      const fullLines = () => warns.filter((w) => /tray is full/.test(w)).length;
+      todos.add = () => { adds++; throw Object.assign(new Error('this session already has 20 open items'), { code: 'full' }); };
+      const g0 = fullLines();
+      presetsHolder.list = [CP]; integrations.presetsChanged('presets'); await settle(); st.fullAgainFiled = fullLines() - g0;
+      // … and after a check with NOTHING to file (back to the client the memo holds: nobody owed) — the episode ended unfiled
+      presetsHolder.list = [BP]; integrations.presetsChanged('presets'); await settle();
+      const g1 = fullLines();
+      presetsHolder.list = [CP]; integrations.presetsChanged('presets'); await settle(); st.fullAgainIdle = fullLines() - g1;
+      // … and after the preset was WITHDRAWN (nothing to file while it is gone)
+      presetsHolder.list = []; integrations.presetsChanged('presets'); await settle();
+      const g2 = fullLines();
+      presetsHolder.list = [CP]; integrations.presetsChanged('presets'); await settle(); st.fullAgainWithdrawn = fullLines() - g2;
+      todos.add = realAdd;
+      presetsHolder.list = [BP]; integrations.presetsChanged('presets'); await settle(); st.fullBack = look();
+      // THE LAST ACCOUNTS MOVED to another key (their own client — the doors at channels-auth's custom client): nobody left
+      // under the preset — its item closes, its memo leaves the map
+      const THREE = ['d-one', 'd-two', 'd-three'];
+      await E.store.adapters.update(() => { for (const id of THREE) rec(id).credentialKey = 'custom'; }); await E.clientSwapCheck(); await settle();
+      st.moved = { open: open().length, memo: memoTo() };
+      // THE PERSON REOPENS that closed item (its memo pruned; its door an account that still exists): the store says the
+      // reopen — closed again AT ONCE (no other check runs here)
+      try { todos.setStatus(bpId, 'open', 'user'); } catch { }
+      const was = (todos.get(bpId) || {}).status || null;
+      await settle();
+      st.reopened = { was, after: (todos.get(bpId) || {}).status || null };
+      // back under the preset, still signed in with the old client: a new swap for them — SAID
+      await E.store.adapters.update(() => { for (const id of THREE) rec(id).credentialKey = KEY; }); await E.clientSwapCheck(); await settle();
+      st.movedBack = look();
+      // THE LAST ACCOUNTS LEAVE THE PRESET (removed): nobody left to act — its item closes; its memo leaves the map
       for (const id of ['d-one', 'd-two', 'd-three']) await E.remove(id);
-      await settle(); st.allGone = { open: open().length, accounts: E.adapterRecords().adapters.filter((x) => x.credentialKey === KEY).length };
+      await settle(); st.allGone = { open: open().length, accounts: E.adapterRecords().adapters.filter((x) => x.credentialKey === KEY).length, memo: memoTo() };
     } finally { try { E.stop(); } catch { } try { E.store.close(); } catch { } presetsHolder.list = saved; unreg(); }
     st.warns = warns.filter((w) => /client-swap|cannot be read|vault/i.test(w)).slice(0, 6);
     return st;
@@ -2552,21 +2604,36 @@ console.log('\n㉗ (1b) B-166e part 2 cure: the client in force kept at the clos
   ok(J(got.dead) === J([{ n: 1, door: 'd-two' }]), '㉗ (1b) a dead sign-in is not counted (its own item says it): «1»', J(got.dead));
   ok(got.blindLines === 1, `㉗ (1b) a preset with a sign-in the check cannot read is said ONCE in the journal while it lasts (${got.blindLines} lines over two checks)`, J(got.blindLines));
   ok(got.uncountedClose.open === 0 && got.uncountedClose.memo && got.uncountedClose.memo.to === BP.clientId && got.uncountedClose.memo.named === 3, '㉗ (1b) every account on the old client disabled: nobody left to act — the item closes; the named stay named', J(got.uncountedClose));
+  ok(got.full.adds === 2 && got.full.lines === 1 && J(got.fullAfter) === J([{ n: 1, door: 'd-three' }]) && got.fullMemo && got.fullMemo.to === BP.clientId, `㉗ (1b) a FULL tray refuses the new swap's item at two checks: said ONCE (${got.full.lines} line); the tray free again — FILED: «1», its door the one owed, the memo on the new client`, J({ full: got.full, after: got.fullAfter, memo: got.fullMemo }));
+  ok(got.fullAgainFiled === 1 && got.fullAgainIdle === 1 && got.fullAgainWithdrawn === 1 && J(got.fullBack) === J([{ n: 1, door: 'd-three' }]), `㉗ (1b) a full tray AGAIN is a new episode, said again: after an item was filed (${got.fullAgainFiled}), after a check with nothing to file (${got.fullAgainIdle}) and after the preset was withdrawn (${got.fullAgainWithdrawn}); the filed item stands`, J({ filed: got.fullAgainFiled, idle: got.fullAgainIdle, withdrawn: got.fullAgainWithdrawn, back: got.fullBack }));
+  ok(J(got.refused.tries) === J([1, 1, 2]) && got.refused.lines === 2, `㉗ (1b) a redraw the tray REFUSES is said once and not tried again with the same words (tries ${J(got.refused.tries)}); words that moved are tried again (and said again)`, J(got.refused));
+  ok(got.moved.open === 0 && got.moved.memo === null, '㉗ (1b) the last accounts MOVED to another key: nobody left under the preset — its item closes, its memo leaves the map', J(got.moved));
+  ok(got.reopened.was === 'open' && got.reopened.after === 'done', '㉗ (1b) that item REOPENED by the person (its memo pruned, its door an account that still exists): closed again AT ONCE — the store\'s reopen starts the check', J(got.reopened));
+  ok(J(got.movedBack) === J([{ n: 1, door: 'd-three' }]), '㉗ (1b) the accounts back under the preset, still on the old client: a new item SAYS them', J(got.movedBack));
+  ok(got.allGone.memo === null, '㉗ (1b) the last accounts removed: the preset\'s memo leaves the map', J(got.allGone));
   ok(got.allGone.accounts === 0 && got.allGone.open === 0, '㉗ (1b) the LAST accounts of the preset removed: nobody left to act — its item closes (the memo alone is read; the door never points at a removed account)', J(got.allGone));
   ok(J(got.reenabled) === J([{ n: 2, door: 'd-three' }]), '㉗ (1b) the preset moved on (a new swap: nobody counted to name), then the accounts enabled again — still on the old client: SAID', J({ moved: got.uncountedMoved, reenabled: got.reenabled }));
   // RED CONTROLS — an engine copy (the families inlined) with one line gone; its own step is the red
   const ESRC = engineSource(REPO);
   const PL = [
-    ['no-sig', "} else if (step.act === 'redraw' && want !== sig && itemId && userTodos && typeof userTodos.redrawItem === 'function') {", "} else if (step.act === 'redraw' && itemId && userTodos && typeof userTodos.redrawItem === 'function') {", (c) => c.idleSaves > 0, 'without the comparison every reload saves and broadcasts the same item'],
-    ['no-disconnect', "    clientSwapCheck().catch(() => {});   // B-166e part 2 (1): a disconnected account holds no sign-in on its preset's old client", "", (c) => J(c.disconnect) === J(one3), 'without the disconnect trigger the item still counts the disconnected account and opens it'],
-    ['no-label', "kind: mod.label || rec.kind, label: (r && r.clusterLabel) || '', need: [], blind: false }));", "kind: mod.label || rec.kind, label: '', need: [], blind: false }));", (c) => /company preset «channels» /.test(c.swapText), 'without the preset\'s label the item names its KEY («channels»), not what the client picker shows'],
-    ['no-memo-only', "      keys.set(mk, { key, to: v && v.clientId ? String(v.clientId) : m0.to, kind: '', label: (r && r.clusterLabel) || '', need: [], blind: false });", "", (c) => c.allGone.open === 1, 'without the memo-only presets the item of a preset whose last account left stays open for ever'],
-    ['no-vault-guard', "    if (stopped || !integrations || typeof integrations.resolveIntegration !== 'function' || vaultLocked()) return;", "    if (stopped || !integrations || typeof integrations.resolveIntegration !== 'function') return;", (c) => c.locked.blindLines > 0, 'without the vault guard a locked vault is read sign-in by sign-in and said unreadable, where it should judge nothing'],
+    ['no-sig', "} else if (step.act === 'redraw' && want !== sig && itemId && userTodos && typeof userTodos.redrawItem === 'function') {", "} else if (step.act === 'redraw' && itemId && userTodos && typeof userTodos.redrawItem === 'function') {", (c) => c.idleSaves > 0, 'without the comparison every reload saves and broadcasts the same item', 'idle'],
+    ['no-disconnect', "    clientSwapCheck().catch(() => {});   // B-166e part 2 (1): a disconnected account holds no sign-in on its preset's old client", "", (c) => J(c.disconnect) === J(one3), 'without the disconnect trigger the item still counts the disconnected account and opens it', 'disconnect'],
+    ['no-label', "kind: mod.label || rec.kind, label: (r && r.clusterLabel) || '', need: [], blind: false }));", "kind: mod.label || rec.kind, label: '', need: [], blind: false }));", (c) => /company preset «channels» /.test(c.swapText), 'without the preset\'s label the item names its KEY («channels»), not what the client picker shows', 'swap'],
+    ['no-prune', "        if (k.only && !step.memo.open) { if (mk in next) { delete next[mk]; changed = true; } continue; }", "", (c) => c.allGone.memo !== null, 'without the prune the memo of a preset with no account left stays in the map for ever'],
+    ['no-full-once', "        if (e && e.code === 'full') { if (!fullSaid.has(mk)) { fullSaid.add(mk); log.warn(", "        if (e && e.code === 'full') { if (true) { fullSaid.add(mk); log.warn(", (c) => c.full.lines > 1, 'without the once the full tray is said at every check'],
+    ['no-full-clear-filed', "            itemId = item && item.id ? item.id : null; sig = want; stuck = ''; fullSaid.delete(mk);", "            itemId = item && item.id ? item.id : null; sig = want; stuck = '';", (c) => c.fullAgainFiled === 0, 'without the filing\'s clear a full tray after a filed item is never said again'],
+    ['no-full-clear-idle', "        if (step.act !== 'file') fullSaid.delete(mk);   // nothing to file now: a later full tray is a new episode, said again", "", (c) => c.fullAgainIdle === 0, 'without the clear at a check with nothing to file a full tray after an unfiled episode is never said again'],
+    ['no-full-clear-withdrawn', "      if (!k.to) { fullSaid.delete(mk); continue; }   // the preset withdrawn: as it stands (the accounts' own refresh says it); nothing to file", "      if (!k.to) continue;", (c) => c.fullAgainWithdrawn === 0, 'without the clear at a withdrawn preset a full tray after it comes back is never said'],   // stale-pins: kept (the control restores the old line)
+    ['no-sweep', "      for (const id of dead) close(id);", "", (c) => c.reopened.after === 'open', 'without the sweep the reopened item no memo holds stays open for good, its words stale'],
+    ['no-reopen-hook', "  const offSwapReopen = userTodos && typeof userTodos.onStatus === 'function' ? userTodos.onStatus(", "  const offSwapReopen = false ? userTodos.onStatus(", (c) => c.reopened.after === 'open', 'without the reopen listener a reopened item waits for some later check'],
+    ['no-stuck', "            if (want === stuck) refused = true;   // the tray refused these very words before: said once, never tried again until they change", "            if (false) refused = true;", (c) => c.refused.tries[1] > c.refused.tries[0], 'without the stuck words the refused redraw is tried again at every check'],
+    ['no-memo-only', "      keys.set(mk, { key, to: v && v.clientId ? String(v.clientId) : m0.to, kind: '', label: (r && r.clusterLabel) || '', need: [], blind: false, only: true });", "", (c) => c.allGone.open === 1, 'without the memo-only presets the item of a preset whose last account left stays open for ever'],
+    ['no-vault-guard', "    if (stopped || !integrations || typeof integrations.resolveIntegration !== 'function' || vaultLocked()) return;", "    if (stopped || !integrations || typeof integrations.resolveIntegration !== 'function') return;", (c) => c.locked.blindLines > 0, 'without the vault guard a locked vault is read sign-in by sign-in and said unreadable, where it should judge nothing', 'locked'],
   ];
   const MD = mutantCopies('chan-gmail-drift', REPO);
-  for (const [t, line, repl, red, words] of PL) {
+  for (const [t, line, repl, red, words, upto = null] of PL) {
     ok(ESRC.split(line).length === 2, `㉗ (1b) control setup (${t}): the line is present once`);
-    const c = await driftWorld(MD.load('src/server/channels-engine.js', anchoredCopy(ESRC, [[line, repl]], `㉗ (1b) ${t}`), t), `drift-${t}`);
+    const c = await driftWorld(MD.load('src/server/channels-engine.js', anchoredCopy(ESRC, [[line, repl]], `㉗ (1b) ${t}`), t), `drift-${t}`, upto);
     ok(red(c), `㉗ (1b) RED CONTROL (${t}): ${words} — red`, J(c));
   }
   for (const x of copiesCensus(MD.files, MD.dir, REPO, { minCopies: PL.length, label: '㉗ (1b) ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
@@ -2631,12 +2698,14 @@ console.log('\n㉗ (1c) B-166e part 2 cure 2: the memo is what was said — the 
     ['X named, disabled, back — never said twice', [['B', ['x', 'y']], ['B', []], ['B', ['x']]], ['file', 'close', 'none'], ['x', 'y']],
     ['the skeptic\'s scene: X re-authorizes on B then is disabled, the revert to A, the REAL swap to B — Y said', [['B', ['x', 'y']], ['B', ['y']], ['B', ['y']], ['A', []], ['B', ['y']]], ['file', 'redraw', 'redraw', 'none+S', 'file'], ['y']],
     ['the dead one at the revert, back after it', [['B', ['x', 'y']], ['A', []], ['A', ['x']]], ['file', 'none+S', 'file'], ['x']],
+    ['the first round\'s own scene: back to A before anyone acts, then the real swap to B — said', [['B', ['x', 'y']], ['A', []], ['B', ['x', 'y']]], ['file', 'none+S', 'file'], ['x', 'y']],
     ['a dismissal stands; a newcomer is still told', [['B', ['x', 'y']], 'dismiss', ['B', ['x', 'y']], ['B', ['x', 'y', 'z']]], ['file', 'dismissed', 'none', 'file'], ['x', 'y', 'z']],
   ];
   const table = (step) => ROWS.map(([what, steps, acts, named]) => { const r = runRow(step, steps); return { what, ok: J(r.acts) === J(acts) && J(r.named) === J(named), got: r }; });
   const real = table(ENG.clientSwapStep);
   for (const r of real) ok(r.ok, `㉗ (1c) ${r.what}: ${J(r.got.acts)} — named ${J(r.got.named)}`, J(r.got));
-  // a locked vault: nothing judged, nothing changed — the engine's guard (㉗ (1b), with its control), never reached by the rule
+  // a locked vault: nothing judged, nothing changed — the engine's guard (㉗ (1b) «the vault LOCKED», with its control); a restart and
+  // the memo's persistence: ㉗ (1) «said ONCE a swap … a restart» and «the memo persists» — never reached by the rule itself
   const ESRC1 = engineSource(REPO);
   const MR = mutantCopies('chan-gmail-rule', REPO);
   const PL = [
@@ -2651,6 +2720,17 @@ console.log('\n㉗ (1c) B-166e part 2 cure 2: the memo is what was said — the 
     ok(!!r && r.ok === false, `㉗ (1c) RED CONTROL (${tag}): ${words} — the row «${row}…» red`, J(r && r.got));
   }
   for (const x of copiesCensus(MR.files, MR.dir, REPO, { minCopies: PL.length, label: '㉗ (1c) ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
+}
+
+// ── ㉗ (1d) WHERE THE ITEM'S DETAIL TRAVELS (主开发 01:20Z asked: its labels may be addresses): a For-you item under the key
+//    'channels' reaches the OWNER's own clients (the tray, its broadcasts, user-todos.json); an agent reads For-you items through ONE
+//    road, src/agent-routes/status.js — the asking session's own keys only (its claude key and its webui key), never 'channels'.
+console.log('\n㉗ (1d) the client-swap item\'s detail reaches the owner\'s clients only — no agent road reads a channels item');
+{
+  const ST = fs.readFileSync(path.join(REPO, 'src/agent-routes/status.js'), 'utf8');
+  const reads = (ST.match(/userTodos\.(forSession|getForSession|openItems|snapshot|get)\(/g) || []).length;
+  ok(reads === 2 && ST.includes('userTodos.forSession([key, `webui:${id}`])') && ST.includes('userTodos.getForSession([key, `webui:${id}`], String(show))') && !/['"`]channels['"`]/.test(ST),
+    '㉗ (1d) the agents\' one For-you road (status.js) lists and shows the asking session\'s OWN keys only — never \'channels\': the item\'s labels stay with the owner', reads);
 }
 
 // ── ㉗ B-166e part 2 (主开发 2026-11-18 20:07Z «A (BOTH)», confirmed 20:11Z) — (2) THE OWNER'S OWN CLIENT: per account since

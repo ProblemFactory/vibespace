@@ -799,8 +799,8 @@ const crypto = require('node:crypto');
 const http = require('node:http');
 const hex = (n) => crypto.randomBytes(n).toString('hex');
 const word = (k) => `zq${k}${hex(5)}`;
-const SENT = { bName: word('bname'), bCwd: word('bcwd'), bPrompt: word('bprompt'), bGroup: word('bgroup'), bProgress: word('bprogress'), bJob: word('bjob'), bJobNote: word('bjobnote'), bTodo: word('btodo'), bMeta: word('bmeta'), bPage: word('bpage'), secret: word('secret') + hex(8), loginUser: word('loginuser'), loginPass: word('loginpass') + hex(4) };
-const KIND = { bToken: 'CRITICAL', bJobToken: 'CRITICAL', secret: 'CRITICAL', loginPass: 'CRITICAL', loginUser: 'LAW', bName: 'CONV', bCwd: 'CONV', bPrompt: 'CONV', bGroup: 'CONV', bProgress: 'CONV', bJob: 'CONV', bJobNote: 'CONV', bTodo: 'CONV', bMeta: 'CONV', bPage: 'CONV' };
+const SENT = { bName: word('bname'), bCwd: word('bcwd'), bPrompt: word('bprompt'), bGroup: word('bgroup'), bProgress: word('bprogress'), bJob: word('bjob'), bJobNote: word('bjobnote'), bTodo: word('btodo'), bMeta: word('bmeta'), bPage: word('bpage'), secret: word('secret') + hex(8), loginUser: word('loginuser'), loginPass: word('loginpass') + hex(4), chanLabel: word('chanlabel'), chanUser: word('chanuser') };
+const KIND = { bToken: 'CRITICAL', bJobToken: 'CRITICAL', secret: 'CRITICAL', loginPass: 'CRITICAL', loginUser: 'LAW', bName: 'CONV', bCwd: 'CONV', bPrompt: 'CONV', bGroup: 'CONV', bProgress: 'CONV', bJob: 'CONV', bJobNote: 'CONV', bTodo: 'CONV', bMeta: 'CONV', bPage: 'CONV', chanLabel: 'LAW', chanUser: 'LAW' };
 const TA = 'vsst_' + hex(24), TB = 'vsst_' + hex(24), TM = 'vsmk_' + crypto.randomBytes(32).toString('base64url').slice(0, 43);
 process.env.VIBESPACE_MAINTAINER_KEY_SHA = crypto.createHash('sha256').update(TM).digest('hex');
 const SID_A = fixtureSid(hex(6)), SID_B = fixtureSid(hex(6));
@@ -850,6 +850,30 @@ const JM = W0.made.get('server.js:jobsWiring').jm;
 const jobB = [...JM.jobs.values()].find((j) => j.name === SENT.bJob), jobA = [...JM.jobs.values()].find((j) => j.name === 'census-a-job');
 const TJA = jobA ? JM._jobToken(jobA) : null, TJB = jobB ? JM._jobToken(jobB) : null;
 W0.made.get('server.js:userTodos').add(KEY_B, { text: SENT.bTodo, detail: SENT.bTodo + ' detail', by: 'agent', origin: 'agent', sessionName: SENT.bName });
+// B-166e part 2 smalls (主开发 2026-11-19 01:20Z): the OWNER's channels items — words that name accounts (labels, a vendor
+// address) — in the shapes the channels engine files them (sessionKey 'channels', the names in the text / detail and the
+// i18n params): no agent bearer route returns either (agents read For-you only on their own keys). (1) THE CLIENT-SWAP ITEM:
+// in this world no memo holds it, so the engine's own sweep closes it at the vault's first event — it stays in the store,
+// RESOLVED, and is swept as such; (2) a landed sign-in's «finish connecting» item, which no check closes — OPEN through
+// every pass
+// the channels wiring is made HERE, before the plant (the world makes it lazily): its engine's boot ends the last run's
+// landed sign-ins (their «finish connecting» items) and runs the client-swap check — a plant made before it would be ended
+// by the boot, not by anything a caller did
+const CHW = W0.value('server.js', 'channelsWiring');
+ok(!!(CHW && CHW.channels && typeof CHW.channels.clientSwapSettled === 'function'), 'the channels wiring is made before the owner\'s channels items are planted (its boot comes first)', JSON.stringify(Object.keys(CHW || {}).slice(0, 8)));
+if (CHW && CHW.channels && typeof CHW.channels.clientSwapSettled === 'function') await CHW.channels.clientSwapSettled();
+const CHAN_L1 = 'Its OAuth client is another one now. These accounts keep refreshing with the client they signed in with until the vendor deletes it: {labels}.';
+const CHAN_L2 = 'Re-authorize opens the next one; this item resolves when none is left.';
+W0.made.get('server.js:userTodos').add('channels', { origin: 'channels', kind: 'action', urgency: 'normal', by: 'agent', sessionName: 'Channels', openCap: 20,
+  text: 'Gmail: the company preset «census» signs in with another client now — 1 account(s) still signed in with the old one; re-authorize each',
+  detail: `${CHAN_L1.replace('{labels}', SENT.chanLabel)}\n${CHAN_L2}`, action: { type: 'channel-reauth', adapterId: 'census-acct' },
+  i18n: { text: { key: '{kind}: the company preset «{preset}» signs in with another client now — {n} account(s) still signed in with the old one; re-authorize each', params: { kind: 'Gmail', preset: 'census', n: 1 } }, detail: [{ key: CHAN_L1, params: { labels: SENT.chanLabel } }, { key: CHAN_L2, params: {} }], source: { key: 'Channels' } } });
+const CHAN_USER = `${SENT.chanUser}@example.test`, CHAN_UNTIL = Date.now() + 30 * 60e3;
+W0.made.get('server.js:userTodos').add('channels', { origin: 'channels', kind: 'action', urgency: 'normal', by: 'agent', sessionName: 'Channels', openCap: 20, expiresAt: CHAN_UNTIL,
+  text: `Gmail: signed in as ${CHAN_USER} — finish connecting`,
+  detail: 'The sign-in landed but the account was not connected — open Connect an account to finish; the sign-in waits 30 minutes from its start.',
+  action: { type: 'channel-connect', kind: 'gmail', flowId: 'census-flow' },
+  i18n: { text: { key: '{kind}: signed in as {user} — finish connecting', params: { kind: 'Gmail', user: CHAN_USER } }, detail: [{ key: 'The sign-in landed but the account was not connected — open Connect an account to finish; {until}.', params: { until: { at: CHAN_UNTIL, key: 'the sign-in waits until {time}', gone: 'the sign-in has run out — sign in again' } } }], source: { key: 'Channels' } } });
 META.set('cw-census-b', { name: SENT.bMeta, title: SENT.bMeta, customName: SENT.bMeta, prompt: SENT.bPrompt });   // every reader keys the meta by the session's sockName
 const VAULT = W0.made.get('src/server/mounts-plugins-wiring.js:vault');
 const VAULT_PW = 'census-vault-' + hex(4);
@@ -865,6 +889,10 @@ const pageB = (() => { try { return JSON.parse(plant.find(([n]) => /B's page/.te
 const todoB = (W0.made.get('server.js:userTodos').snapshot().open || []).find((i) => i && String(i.text || '').includes(SENT.bTodo)) || null;
 const fbB = (() => { try { return JSON.parse(plant.find(([n]) => /B's feedback/.test(n))[1].text).report; } catch { return null; } })();
 Object.assign(B_REF, { group: gB.id, sid: SID_B, key: KEY_B, job: jobB && jobB.id, page: pageB && (pageB.id || (pageB.page && pageB.page.id)), todo: todoB && todoB.id, feedback: fbB && fbB.id });
+const UT = W0.made.get('server.js:userTodos');
+const chanIdOf = (needle) => (UT.idsWhere((i) => i && i.sessionKey === 'channels' && JSON.stringify([i.text, i.detail, i.i18n]).includes(needle)) || [])[0] || null;
+const chanSwapId = chanIdOf(SENT.chanLabel), chanLandId = chanIdOf(SENT.chanUser);
+ok(!!(chanSwapId && chanLandId && JSON.stringify(UT.get(chanSwapId).i18n).includes(SENT.chanLabel) && JSON.stringify(UT.get(chanLandId).i18n).includes(SENT.chanUser)), 'the owner\'s two channels items are planted through the real For-you writer (the account names in their words and i18n params)', JSON.stringify({ swap: chanSwapId, landed: chanLandId }));
 ok(Object.values(B_REF).every((v) => typeof v === 'string' && v.length > 3), 'B\'s planted things have the ids their real writers gave them (group, conversation, job, page, For-you item, feedback report)', JSON.stringify(B_REF));
 const NEEDLES = [];
 for (const [k, v] of Object.entries({ ...SENT, ...TOKENS })) {
@@ -1034,6 +1062,8 @@ ok(!SV.anon.unrowed.length && !SV.anon.dead.length, `a refusal to an unknown cal
 for (const h of SVF.hits) console.log(`    FINDING ${KIND[h.split(' · ')[2]]}: ${h}${has(TABLE.findings || {}, h) ? '' : ' — NEW'}`);
 ok(!SVF.unrowed.length, `every answer that carries another conversation's fact or a secret's bytes is a \`findings\` row with its why (${SVF.hits.length} hit(s) over the five callers, the granted key and the related reads)`, SVF.unrowed.map((h) => 'NEW ' + h).join(' | '));
 ok(!SVF.dead.length, 'no findings row no answer carries', SVF.dead.join(' | '));
+{ const land = UT.get(chanLandId), swap = UT.get(chanSwapId);
+  ok(!!(land && land.status === 'open' && swap && JSON.stringify(swap.i18n).includes(SENT.chanLabel)), 'through every pass the owner\'s «finish connecting» item stood OPEN and the client-swap item stayed in the store with its labels (open or resolved — swept either way)', JSON.stringify({ landed: land && land.status, swap: swap && { status: swap.status, by: swap.resolvedBy } })); }
 ok(!SVF.hits.some((h) => /· A(-job|-key|-related)? ·/.test(h) && KIND[h.split(' · ')[2]] === 'CRITICAL'), 'no CRITICAL sentinel (B\'s tokens, a secret\'s bytes, a login\'s password) reaches A by any road — its token, its job, its granted key, its membership — rowed or not');
 ok(!SVF.critical.length, 'no CRITICAL sentinel reaches any caller outside a listed finding', SVF.critical.join(' | '));
 // ── the table kinds' RED controls: the same verdict function over planted tables ──
