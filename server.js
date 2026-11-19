@@ -246,7 +246,7 @@ const { CHAT_WRAPPER, agentdDialDevices, agentdDials,
   unpairDialDevice, gateDialUpgrade, admitDial, noteDialEvent, lockOutDialHolder,
 } = require('./src/server/dial-pairing.js').create({
   rootDir: __dirname, AGENTD_DIR, bcastAll: (...a) => bcastAll(...a),
-  agentdHostToken: (...a) => agentdHostToken(...a), dropHostToken: (id) => hostTokens.drop(id),
+  agentdHostToken: (...a) => agentdHostToken(...a), hostTokenLocked: (id) => hostTokens.lockedWhy(id), dropHostToken: (id) => hostTokens.drop(id),
   getHosts: () => { try { return hosts; } catch { return null; } },
   getMounts: () => { try { return mounts; } catch { return null; } },
   getMachineMounts: () => { try { return machineMounts; } catch { return null; } },

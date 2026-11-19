@@ -34,15 +34,22 @@ const bashOk = spawnSync('bash', ['-c', 'true']).status === 0 && process.platfor
 console.log('§1 the proof: only the hub that held the pairing can make it, for THIS dial and THIS token');
 {
   const tok = PT.mintToken('host'), other = PT.mintToken('host'), dialTok = PT.mintToken('dial'), nonce = 'a1'.repeat(16), nonce2 = 'b2'.repeat(16);
-  const proof = PT.retireProof(PT.tokenHash(tok), nonce);
-  ok(/^[0-9a-f]{64}$/.test(proof) && PT.retireProofMatches(tok, nonce, proof), 'the hub\'s proof (from the HOST token\'s hash it keeps in the tombstone) holds for the device\'s own host token and nonce');
-  ok(!PT.retireProofMatches(tok, nonce2, proof), 'a proof replayed to another dial (another nonce): refused');
-  ok(!PT.retireProofMatches(other, nonce, proof) && !PT.retireProofMatches(dialTok, nonce, proof), 'another device\'s host token, or a dial token: refused');
-  ok(!PT.retireProofMatches('', nonce, PT.retireProof(PT.tokenHash(''), nonce)), 'an EMPTY token never proves (sha256 of nothing is anyone\'s to compute)');
-  ok(!PT.retireProofMatches(tok, '', PT.retireProof(PT.tokenHash(tok), '')), 'no nonce: refused (a proof needs this dial\'s nonce)');
+  // THE PROOF NAMES ITS PURPOSE (主开发's round wz421di05: its format is fixed at its first release): a fixed purpose word, the
+  // device's id, the hash of the dial token that matched the tombstone, the nonce — \0 between them (it occurs in none)
+  const F = { deviceId: 'mini', dialToken: dialTok, nonce }, hubF = { deviceId: 'mini', dialTokenHash: PT.tokenHash(dialTok), nonce };
+  const proof = PT.retireProof(PT.tokenHash(tok), hubF);
+  ok(PT.RETIRE_PURPOSE === 'vibespace-retire-v1' && PT.retireMessage(hubF) === ['vibespace-retire-v1', 'mini', PT.tokenHash(dialTok), nonce].join('\0'), 'the message: the purpose word, the device\'s id, the dial token\'s hash, the nonce — \\0 between them');
+  ok(/^[0-9a-f]{64}$/.test(proof) && PT.retireProofMatches(tok, F, proof), 'the hub\'s proof (keyed by the HOST token\'s hash its tombstone keeps) holds for the device\'s own host token, id, dial token and nonce');
+  ok(!PT.retireProofMatches(tok, { ...F, nonce: nonce2 }, proof), 'a proof replayed to another dial (another nonce): refused');
+  ok(!PT.retireProofMatches(tok, { ...F, deviceId: 'other' }, proof) && !PT.retireProofMatches(tok, { ...F, dialToken: PT.mintToken('dial') }, proof), 'the same proof for another device id, or another pairing\'s dial token: refused');
+  ok(!PT.retireProofMatches(other, F, proof) && !PT.retireProofMatches(dialTok, F, proof), 'another device\'s host token, or the dial token in its place: refused');
+  ok(!PT.retireProofMatches('', F, PT.retireProof(PT.tokenHash(''), hubF)) && !PT.retireProofMatches(tok, { ...F, nonce: '' }, PT.retireProof(PT.tokenHash(tok), { ...hubF, nonce: '' })), 'an EMPTY token, or no nonce: no proof can hold');
+  ok(PT.retireProof(PT.tokenHash(tok), { ...hubF, deviceId: 'a\0b' }) === '' && PT.retireMessage({ ...hubF, nonce: '' }) === null, 'a part holding the separator, or an empty part, makes no proof (no two messages share one spelling)');
+  const bare = require('node:crypto').createHmac('sha256', PT.tokenHash(tok)).update(nonce).digest('hex');
+  ok(!PT.retireProofMatches(tok, F, bare), 'CONTROL: the bare HMAC of the nonce (the proof before it named its purpose) is NOT a retire proof');
   let threw = false; let r = [];
-  try { r = [PT.retireProofMatches(tok, nonce, proof.slice(0, 40)), PT.retireProofMatches(tok, nonce, 'zz'.repeat(32)), PT.retireProofMatches(tok, nonce, undefined), PT.retireProofMatches(tok, nonce, null)]; } catch { threw = true; }
-  ok(!threw && r.every((x) => x === false), 'a cut, a non-hex, a missing proof: refused, never a throw', r);
+  try { r = [PT.retireProofMatches(tok, F, proof.slice(0, 40)), PT.retireProofMatches(tok, F, 'zz'.repeat(32)), PT.retireProofMatches(tok, F, undefined), PT.retireProofMatches(tok, F, null), PT.retireProofMatches(tok, undefined, proof)]; } catch { threw = true; }
+  ok(!threw && r.every((x) => x === false), 'a cut, a non-hex, a missing proof, missing facts: refused, never a throw', r);
 }
 
 console.log('§2 the answer\'s words: «retired» is a named refusal, read by the agent, said by the dial check');
@@ -143,6 +150,14 @@ console.log('§5 the steps per platform, named as the installer names them; the 
   const win = shape(SR.retireSteps({ root: 'C:\\Users\\u\\.vibespace\\device@hub', platform: 'win32', home: 'C:\\Users\\u' }));
   ok(win.length === 3 && win[2] === 'exec:schtasks /Delete /TN VibeSpaceDevice-hub /F', 'Windows: the logon task the installer made for that root (hidden-start logonTaskName)', win);
   ok(SR.retireSteps({ root: 'C:\\x\\agentd', platform: 'win32', home: 'C:\\Users\\u' }).length === 2, 'Windows, a root that is not the installer\'s: no task is named (none is ours)');
+  {
+    const H5 = path.join(T, 'home5'); fs.mkdirSync(H5, { recursive: true });
+    const st5 = SR.retireSteps({ root: path.join(H5, '.vibespace', 'device@x'), platform: 'linux', home: H5, uid: process.getuid() }), calls5 = [];
+    const pres5 = SR.presentOf(st5, fs);
+    await SR.runRetire(st5.filter((s) => !s.last), { fs, supervisor: async (c, a2) => { calls5.push(c); return true; }, uid: process.getuid(), present: pres5 });
+    await SR.runRetire(st5.filter((s) => s.last), { fs, supervisor: async (c, a2) => { calls5.push(c); return true; }, uid: process.getuid(), present: pres5 });
+    ok(calls5.length === 0, 'no unit file of ours: no systemd step runs (no disable, no reload, no stop of a unit that is not there)', calls5);
+  }
 }
 
 console.log('§6 the steps run over a scratch root: each done or LEFT with its why; the stop is the caller\'s last');
@@ -154,16 +169,17 @@ console.log('§6 the steps run over a scratch root: each done or LEFT with its w
   plant();
   const steps = SR.retireSteps({ root: R, platform: 'linux', home: H, uid: process.getuid() });
   const calls = []; const exec = async (c, a) => { calls.push([c, ...a].join(' ')); return true; };
-  const r1 = await SR.runRetire(steps.filter((s) => !s.last), { fs, supervisor: exec, uid: process.getuid() });
+  const pres6 = SR.presentOf(steps, fs);   // (read before any step: the stop runs after the unit file is gone)
+  const r1 = await SR.runRetire(steps.filter((s) => !s.last), { fs, supervisor: exec, uid: process.getuid(), present: pres6 });
   ok(r1.done.length === 6 && r1.left.length === 0 && !fs.existsSync(path.join(R, 'state', 'dial.json')) && !fs.existsSync(path.join(R, 'state', 'token')) && !fs.existsSync(unitFile) && fs.readFileSync(HOOK, 'utf8') === '#!/bin/bash\necho mine\n',
     'the steps before the stop: the dial config and token gone, the hook block gone (the person\'s line kept), the unit file gone', r1);
   ok(calls.join(' · ') === `systemctl --user disable vibespace-device-${K}.service · systemctl --user daemon-reload`, '…the supervisor asked to disable and reload — never to stop (that is the last step, after the answer)', calls);
-  const r2 = await SR.runRetire(steps.filter((s) => s.last), { fs, supervisor: exec, uid: process.getuid() });
+  const r2 = await SR.runRetire(steps.filter((s) => s.last), { fs, supervisor: exec, uid: process.getuid(), present: pres6 });
   ok(r2.done.length === 1 && calls[2] === `systemctl --user stop vibespace-device-${K}.service`, 'the last step: the supervisor\'s stop', calls);
   const again = await SR.runRetire(steps.filter((s) => !s.last && s.kind !== 'exec'), { fs, supervisor: exec, uid: process.getuid() });
   ok(again.done.length === 0 && again.left.length === 0, 'run again: nothing is there, nothing is said (a missing file is no failure)', again);
   plant();
-  const r3 = await SR.runRetire(steps.filter((s) => !s.last), { fs, supervisor: async (c, a) => a[1] !== 'disable', uid: process.getuid() });
+  const r3 = await SR.runRetire(steps.filter((s) => !s.last), { fs, supervisor: async (c, a) => a[1] !== 'disable', uid: process.getuid(), present: SR.presentOf(steps, fs) });
   ok(r3.left.length === 1 && /did not answer/.test(r3.left[0].why) && !fs.existsSync(unitFile) && r3.done.length === 5, 'a supervisor that fails a step: that step is LEFT with its why, the next steps still run', r3);
 }
 
@@ -171,9 +187,10 @@ console.log('§7 the agent\'s wiring: only a dial device retires; the proof is c
 {
   const A = read('src/agentd/agentd.js');
   ok(A.includes("  if (!now || !provenDialToken || now.token !== provenDialToken) return false;\n"), 'a root with no dial config (the hub\'s own agent, a hand-made root), or one whose dial config no longer holds the token just proven (a pairing made again into it), retires nothing');
-  ok(A.includes('  SR.runRetire(steps.filter((s) => !s.last), { fs, supervisor: run, uid }).then((r) => {') && A.includes('SR.runRetire(steps.filter((s) => s.last), { fs, supervisor: run, uid }).then((z) => { if (z.left.length) log(') && A.includes('}).finally(() => process.exit(0)); }, 500).unref?.();'), 'the steps before the stop first, said in the agent\'s log; the supervisor\'s stop last, a stop that did not answer said too; then the agent ends');
+  ok(A.includes('  SR.runRetire(steps.filter((s) => !s.last), { fs, supervisor: run, uid, present }).then((r) => {') && A.includes('SR.runRetire(steps.filter((s) => s.last), { fs, supervisor: run, uid, present }).then((z) => { if (z.left.length) log(') && A.includes('}).finally(() => process.exit(0)); }, 500).unref?.();'), 'the steps before the stop first, said in the agent\'s log; the supervisor\'s stop last, a stop that did not answer said too; then the agent ends');
   ok(A.includes("const dialNonce = require('crypto').randomBytes(16).toString('hex');") && A.includes("'x-vibespace-dial-nonce': dialNonce,"), 'every dial sends a fresh nonce of its own');
-  ok(A.includes("        let hostTok = ''; try { hostTok = fs.readFileSync(TOKEN_FILE, 'utf-8').trim(); } catch { }") && A.includes("if (lastErr && require('../pairing-token.js').retireProofMatches(hostTok, dialNonce, lastErr.retireProof)) { if (retireOwnStart('the hub this device was paired with unpaired it (its proof checked)', cfg.token)) return; }"), 'a «retired» answer retires the start only when its proof holds for THIS dial\'s nonce and the device\'s HOST token (never the dial token it sends)');
+  ok(A.includes("        let hostTok = ''; try { hostTok = fs.readFileSync(TOKEN_FILE, 'utf-8').trim(); } catch { }") && A.includes("if (lastErr && require('../pairing-token.js').retireProofMatches(hostTok, { deviceId: devId, dialToken: cfg.token || '', nonce: dialNonce }, lastErr.retireProof)) { if (retireOwnStart('the hub this device was paired with unpaired it (its proof checked)', cfg.token)) return; }"),
+    'a «retired» answer retires the start only when its proof holds for THIS dial\'s nonce, this device\'s id and dial token, under its HOST token');
   ok(read('scripts/test-architecture.mjs').includes("'src/agentd/self-retire.js'"), 'self-retire.js is a DEVICE module (test-architecture\'s tiers)');
 }
 

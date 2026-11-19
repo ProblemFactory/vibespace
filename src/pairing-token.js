@@ -49,13 +49,29 @@ function sameToken(presented, secret) {
 }
 
 /** B-4d71: THE RETIRE PROOF — a hub that held a device's pairing answers that device's dial (its exact, now unpaired DIAL token)
- *  with an HMAC of the device's own per-dial nonce, keyed by the hash of the device's HOST token (vsht_: the hub sends it only
- *  inside the live link's hello, never on a dial — whoever merely receives a dial, a lapsed name, a relay, cannot make the
- *  proof; the dial token itself rides every dial and keys nothing). The device checks it from the host token it holds. */
-function retireProof(hostTokenHashHex, nonce) { return crypto.createHmac('sha256', String(hostTokenHashHex || '')).update(String(nonce || '')).digest('hex'); }
-function retireProofMatches(hostToken, nonce, proof) {
-  if (typeof hostToken !== 'string' || !hostToken || !nonce) return false;   // no token, no nonce: no proof can hold
-  const want = Buffer.from(retireProof(tokenHash(hostToken), nonce), 'hex'), got = Buffer.from(String(proof || ''), 'hex');
+ *  with an HMAC keyed by the hash of the device's HOST token (vsht_), over a message that NAMES ITS PURPOSE (主开发's round
+ *  wz421di05: a proof's format is fixed at its first release — hubs and signed agents agree on it for ever):
+ *      RETIRE_PURPOSE \0 <the device's id> \0 <the hash of the dial token that matched the tombstone> \0 <the dial's nonce>
+ *  (\0 never occurs in any part — a part holding one, or an empty part, makes no proof). The host token never rides a dial (the
+ *  device sends only its dial token there); it rides the live link's hello and the install command the hub minted for this
+ *  device. So a proof can be made by the hub (its tombstone keeps the host token's hash) and by whoever holds that install
+ *  command — who can already speak the hub's hello to the device — and by nobody who merely receives a dial (a lapsed name, a
+ *  leased address, a relay). The device checks the same message from what it holds. */
+const RETIRE_PURPOSE = 'vibespace-retire-v1';
+function retireMessage({ deviceId, dialTokenHash, nonce } = {}) {
+  const parts = [RETIRE_PURPOSE, deviceId, dialTokenHash, nonce].map((x) => (typeof x === 'string' ? x : ''));
+  return parts.some((x) => !x || x.includes('\0')) ? null : parts.join('\0');
+}
+function retireProof(hostTokenHashHex, facts) {
+  const m = retireMessage(facts);
+  if (!m || typeof hostTokenHashHex !== 'string' || !hostTokenHashHex) return '';
+  return crypto.createHmac('sha256', hostTokenHashHex).update(m).digest('hex');
+}
+function retireProofMatches(hostToken, { deviceId, dialToken, nonce } = {}, proof) {
+  if (typeof hostToken !== 'string' || !hostToken || typeof dialToken !== 'string' || !dialToken) return false;   // no token: no proof can hold
+  const w = retireProof(tokenHash(hostToken), { deviceId, dialTokenHash: tokenHash(dialToken), nonce });
+  if (!w) return false;
+  const want = Buffer.from(w, 'hex'), got = Buffer.from(String(proof || ''), 'hex');
   return got.length === want.length && crypto.timingSafeEqual(got, want);
 }
-module.exports = { KINDS, mintToken, tokenHash, tokenMatches, sameToken, retireProof, retireProofMatches };
+module.exports = { KINDS, mintToken, tokenHash, tokenMatches, sameToken, RETIRE_PURPOSE, retireMessage, retireProof, retireProofMatches };

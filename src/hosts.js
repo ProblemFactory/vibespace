@@ -328,7 +328,9 @@ class HostManager {
    *  with), the hash of its HOST token (the retire proof's key, src/pairing-token.js) and when. A device unpaired while offline dials
    *  again with that exact token and is answered «retired» with the proof (src/server/dial-pairing.js). Several a name (an unpair, a
    *  re-pair, an unpair again: each pairing's device is told); a new pairing drops none (a fresh token never matches one). At most
-   *  RETIRED_MAX, the oldest out; past RETIRED_DAYS a tombstone is forgotten. Not carried by exportBundle (a moved hub forgets them). */
+   *  RETIRED_MAX, the oldest out; past RETIRED_DAYS a tombstone is forgotten. Not carried by exportBundle (a moved hub forgets them).
+   *  The proof key (the HOST token's hash) sits here in the clear: what it can do is make the retire proof for a device that is
+   *  already unpaired — nothing more (the proof names its purpose and that device; src/pairing-token.js). */
   noteRetiredDial(deviceId, hash, proofKey = null) {
     if (!deviceId || !hash) return;
     const now = Date.now(), keep = (this._state.retiredDials || []).filter((r) => r && now - (Number(r.at) || 0) < RETIRED_DAYS * 864e5);   // (a pairing is unpaired once: its record goes with it)

@@ -358,9 +358,10 @@ console.log('— B-4d71 an unpaired device: «retired» with the proof to its ow
   await unpair(g, 'mini');
   const nonce = crypto.randomBytes(16).toString('hex');
   const r1 = heard(dial(g.DP, 'mini', tok, nonce));
-  ok(r1.code === 'retired' && !!r1.proof && PT.retireProofMatches(HOST_TOKEN, nonce, r1.proof), 'an unpaired device dials with its own token: «retired», and the proof its agent checks from its HOST token holds', r1);
-  ok(!PT.retireProofMatches(HOST_TOKEN, crypto.randomBytes(16).toString('hex'), r1.proof) && !PT.retireProofMatches('vsht_' + crypto.randomBytes(24).toString('hex'), nonce, r1.proof) && !PT.retireProofMatches(tok, nonce, r1.proof),
-    '…the proof holds for THAT dial\'s nonce and THAT host token only — a replay to another dial, another device, and the DIAL token (it rides every dial: whoever receives one dial knows it) all refused');
+  ok(r1.code === 'retired' && !!r1.proof && PT.retireProofMatches(HOST_TOKEN, { deviceId: 'mini', dialToken: tok, nonce }, r1.proof), 'an unpaired device dials with its own token: «retired», and the proof its agent checks (its HOST token, its id, its dial token, the nonce) holds', r1);
+  ok(!PT.retireProofMatches(HOST_TOKEN, { deviceId: 'mini', dialToken: tok, nonce: crypto.randomBytes(16).toString('hex') }, r1.proof) && !PT.retireProofMatches('vsht_' + crypto.randomBytes(24).toString('hex'), { deviceId: 'mini', dialToken: tok, nonce }, r1.proof)
+    && !PT.retireProofMatches(tok, { deviceId: 'mini', dialToken: tok, nonce }, r1.proof) && !PT.retireProofMatches(HOST_TOKEN, { deviceId: 'mini2', dialToken: tok, nonce }, r1.proof),
+    '…the proof holds for THAT dial\'s nonce, THAT host token and THAT device only — a replay to another dial, another host token, the DIAL token in its place (it rides every dial), another device id: all refused');
   await g.H.persisted();   // (the store writes on its own thread)
   const reloaded = new HostManager({ dataDir: g.dataDir }), rt = reloaded.retiredDialFor('mini', tok, PT.tokenMatches);
   ok(!!rt && rt.hash === PT.tokenHash(tok) && rt.proofKey === PT.tokenHash(HOST_TOKEN), '…the tombstone keeps the two HASHES (the dial token\'s, the host token\'s) and outlives a hub restart (hosts.json)', rt);
@@ -374,6 +375,17 @@ console.log('— B-4d71 an unpaired device: «retired» with the proof to its ow
   ok(heard(dial(g.DP, 'mini', tok, nonce)).code === 'retired', 'the name paired again: the old pairing\'s device is still told «retired» (never «token-mismatch» for ever, nor a «second agent» warning on the new row)');
   await unpair(g, 'mini');
   ok(heard(dial(g.DP, 'mini', tok, nonce)).code === 'retired' && heard(dial(g.DP, 'mini', tok2, nonce)).code === 'retired', 'unpaired again: both pairings\' devices are told (a tombstone per token)');
+  {
+    let asked = 0;
+    const dataDirL = path.join(tmp, 'retire-locked'); fs.mkdirSync(dataDirL, { recursive: true });
+    const HL = new HostManager({ dataDir: dataDirL });
+    const DPL = require('../src/server/dial-pairing.js').create({ rootDir: tmp, AGENTD_DIR: path.join(dataDirL, 'agentd'), agentdHostToken: () => { asked++; return 'vsht_ok'; }, hostTokenLocked: () => (asked > 0 ? 'the vault is locked' : null), getHosts: () => HL, getMounts: () => null, getMachineMounts: () => ({ onMachineUnpaired() {} }), getPortForwards: () => ({ onMachineUnpaired() {} }), getExitProxy: () => ({ onMachineUnpaired() {} }), bcastAll: () => {} });
+    const { dialToken: tokL } = DPL.agentdMintDialPair('locked', { host: 'hub:3456' });   // (the mint asks it once: the vault was open then)
+    const before = asked;
+    await DPL.unpairDialDevice('locked'); const hl = HL.findByDeviceId('locked'); if (hl) HL.remove(hl.id);
+    const rl = heard(dial(DPL, 'locked', tokL, nonce)), tl = HL.retiredDialFor('locked', tokL, PT.tokenMatches);
+    ok(asked === before && !!tl && !tl.proofKey && rl.code === 'retired' && !rl.proof, 'a vault locked at the unpair: the host token is never asked (no «waiting on the vault» note for a machine just removed), the tombstone has no proof key — the device hears «retired» without a proof and keeps its start', { asked, before, tl, rl });
+  }
   const tomb2 = mkGate(require('../src/server/dial-pairing.js'));
   for (let i = 0; i < 3; i++) { tomb2.DP.agentdMintDialPair('d' + i, { host: 'hub:3456' }); await unpair(tomb2, 'd' + i); }
   ok((tomb2.H._state.retiredDials || []).length === 3 && (tomb2.H._state.retiredDials || []).every((x) => x.proofKey === PT.tokenHash(HOST_TOKEN)), 'one tombstone per unpaired pairing, each with its proof key');

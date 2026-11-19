@@ -597,9 +597,10 @@ function retireOwnStart(why, provenDialToken) {
   const uid = typeof process.getuid === 'function' ? process.getuid() : null;
   const steps = SR.retireSteps({ root: ROOT, platform: process.platform, home: os.homedir(), uid });
   const run = (c, a) => new Promise((r) => { try { require('child_process').execFile(c, a, { windowsHide: true, timeout: 10000, env: spawnEnv() }, (err) => r(!err)); } catch { r(false); } });
-  SR.runRetire(steps.filter((s) => !s.last), { fs, supervisor: run, uid }).then((r) => {
+  const present = SR.presentOf(steps, fs);   // (read before any step: the stop runs after the unit file is gone)
+  SR.runRetire(steps.filter((s) => !s.last), { fs, supervisor: run, uid, present }).then((r) => {
     log(`retire: ${why} — removed: ${r.done.join(', ') || 'nothing'}${r.left.length ? `; left: ${r.left.map((x) => `${x.what} (${x.why})`).join(', ')}` : ''}`);
-    setTimeout(() => { SR.runRetire(steps.filter((s) => s.last), { fs, supervisor: run, uid }).then((z) => { if (z.left.length) log(`retire: the supervisor's stop did not answer (${z.left.map((x) => x.why).join(', ')}) — this agent ends itself; with no dial config it dials nothing if its supervisor starts it again`); }).finally(() => process.exit(0)); }, 500).unref?.();   // the supervisor's stop last (it ends this agent), then the agent ends itself
+    setTimeout(() => { SR.runRetire(steps.filter((s) => s.last), { fs, supervisor: run, uid, present }).then((z) => { if (z.left.length) log(`retire: the supervisor's stop did not answer (${z.left.map((x) => `${x.what}: ${x.why}`).join(', ')}) — this agent ends itself; a supervisor that restarts it (a restart-always unit, a KeepAlive item) brings it back IDLE (no dial config: it dials nothing) until that item is removed by hand`); }).finally(() => process.exit(0)); }, 500).unref?.();   // the supervisor's stop last (it ends this agent), then the agent ends itself
   });
   return true;
 }
@@ -3045,8 +3046,9 @@ const DIAL_FILE = path.join(STATE, 'dial.json');
       // B-4d71: the hub that held this pairing says it is gone — WITH its proof (made over this dial's nonce from the token's
       // hash): this device retires its own start and ends; a «retired» without a valid proof (not this pairing's hub) changes nothing
       if (f.code === 'refused-retired') {
-        let hostTok = ''; try { hostTok = fs.readFileSync(TOKEN_FILE, 'utf-8').trim(); } catch { }   // the proof's key: the HOST token, never sent on a dial
-        if (lastErr && require('../pairing-token.js').retireProofMatches(hostTok, dialNonce, lastErr.retireProof)) { if (retireOwnStart('the hub this device was paired with unpaired it (its proof checked)', cfg.token)) return; }
+        let hostTok = ''; try { hostTok = fs.readFileSync(TOKEN_FILE, 'utf-8').trim(); } catch { }   // the proof's key: the HOST token (never sent on a dial; the hello and this device's install command carry it)
+        const devId = (() => { try { return new URL(cfg.url).searchParams.get('device') || ''; } catch { return ''; } })();   // the id this dial named (the hub binds the same)
+        if (lastErr && require('../pairing-token.js').retireProofMatches(hostTok, { deviceId: devId, dialToken: cfg.token || '', nonce: dialNonce }, lastErr.retireProof)) { if (retireOwnStart('the hub this device was paired with unpaired it (its proof checked)', cfg.token)) return; }
         else log('dial refused as «retired» without a valid proof — not this pairing\'s hub: this device keeps its start');
       }
       const outcome = f.code === 'lost' ? 'lost' : 'failed';

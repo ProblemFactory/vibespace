@@ -13,7 +13,7 @@ const { utf8Stream } = require('../utf8-stream.js'); // B-b968: a session re-att
 const DF = require('../dial-facts.js');
 const PT = require('../pairing-token.js'); // verify-r3: THE ONE DOOR of a pairing token (mint, hash, compare)
 
-function create({ rootDir, AGENTD_DIR, agentdHostToken, dropHostToken = (id) => { try { fs.unlinkSync(path.join(AGENTD_DIR, `host-${id}.token`)); } catch { } }, getHosts, getMounts,
+function create({ rootDir, AGENTD_DIR, agentdHostToken, hostTokenLocked = () => null, dropHostToken = (id) => { try { fs.unlinkSync(path.join(AGENTD_DIR, `host-${id}.token`)); } catch { } }, getHosts, getMounts,
   getMachineMounts, getPortForwards, getExitProxy, getDialHealth = () => null, bcastAll = () => { } }) {
   const hosts = mk(getHosts);
   const mounts = mk(getMounts);
@@ -160,11 +160,12 @@ function gateDialUpgrade(req, socket) {
   const facts = { at: Date.now(), from: (req.socket && req.socket.remoteAddress) || '', attempt: hints.attempt, last: hints.last, daemon: hints.daemon, boot: hints.boot, dialed: hints.dialed, platform: hints.platform, host: String(req.headers.host || '').slice(0, 120) };
   // verify-r3: THE ONE DOOR — a constant-time compare over the two digests (never `!==`)
   // B-4d71: a device UNPAIRED while offline dials with its exact old token — it is told «retired» with the proof that only the
-  // hub that held its pairing can make (an HMAC of its own nonce, keyed by that token's hash): it removes its own start and ends
+  // hub that held its pairing — or the holder of its install command — can make (src/pairing-token.js: keyed by its HOST token's
+  // hash, over the purpose word, its id, this dial token's hash and its own nonce): it removes its own start and ends
   const tomb = deviceId && !(want && PT.tokenMatches(tok, want)) ? hosts.retiredDialFor?.(deviceId, tok, PT.tokenMatches) : null;
   if (tomb) {
     const nonce = String(req.headers['x-vibespace-dial-nonce'] || '').slice(0, 64);
-    refuseDial(socket, 'retired', deviceId, nonce && tomb.proofKey ? PT.retireProof(tomb.proofKey, nonce) : '');
+    refuseDial(socket, 'retired', deviceId, nonce && tomb.proofKey ? PT.retireProof(tomb.proofKey, { deviceId, dialTokenHash: tomb.hash, nonce }) : '');
     logRefusal(facts, deviceId, `[device] dial from '${String(deviceId).replace(/[\u0000-\u001f\u007f\u2028\u2029]/g, '?')}' — this device was unpaired: told to retire its own start${nonce ? '' : ' (no nonce: an agent older than this answer — it keeps dialing)'}`);
     return null;
   }
@@ -243,9 +244,11 @@ async function admitDial(deviceId, facts, socket) {
 async function unpairDialDevice(deviceId) {
   // B-4d71: its token's TOMBSTONE — the device's next dial (at once for a device dialed in now: its link ends below; an offline
   // one whenever it comes back) is told «retired» with the proof, and its own agent removes its start and ends
-  // (the HOST token's hash keys the proof: read before dropHostToken below; a vault locked now leaves no key — that device is
-  // told «retired» without a proof and keeps its start, as before)
-  let proofKey = null; try { proofKey = PT.tokenHash(agentdHostToken('dial-' + deviceId)); } catch { }
+  // (the HOST token's hash keys the proof: read before dropHostToken below. A vault locked now is never asked — that would file
+  // «waiting on the vault» for a machine just removed — and leaves no key: that device is told «retired» without a proof and
+  // keeps its start, as before)
+  let proofKey = null;
+  try { if (!hostTokenLocked('dial-' + deviceId)) proofKey = PT.tokenHash(agentdHostToken('dial-' + deviceId)); } catch { }
   try { hosts.noteRetiredDial?.(deviceId, hosts.dialTokenHash(deviceId), proofKey); } catch { }
   try { await machineMounts.onMachineUnpaired(hosts.findByDeviceId(deviceId)?.id); } catch { }
   try { portForwards.onMachineUnpaired(hosts.findByDeviceId(deviceId)?.id); } catch { }

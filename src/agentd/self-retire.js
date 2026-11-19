@@ -54,22 +54,29 @@ function retireSteps({ root, platform, home, uid = null }) {
   steps.push({ kind: 'hook', what: 'the container boot-hook block', file: path.join(home, '.vibespace-init.sh'), key });
   if (platform === 'darwin') {
     const label = `cc.vibespace.device.${key}`;
-    steps.push({ kind: 'unlink', what: 'the launchd item', file: path.join(home, 'Library', 'LaunchAgents', `${label}.plist`) });
-    steps.push({ kind: 'exec', what: 'the launchd job (ends this agent)', cmd: 'launchctl', args: ['bootout', `gui/${uid}/${label}`], last: true });
+    const plist = path.join(home, 'Library', 'LaunchAgents', `${label}.plist`);
+    steps.push({ kind: 'unlink', what: 'the launchd item', file: plist });
+    steps.push({ kind: 'exec', what: 'the launchd job (ends this agent)', cmd: 'launchctl', args: ['bootout', `gui/${uid}/${label}`], last: true, onlyIf: plist });
   } else {
     const unit = `vibespace-device-${key}.service`;
-    steps.push({ kind: 'exec', what: 'the systemd unit, disabled', cmd: 'systemctl', args: ['--user', 'disable', unit] });
-    steps.push({ kind: 'unlink', what: 'the systemd unit file', file: path.join(home, '.config', 'systemd', 'user', unit) });
-    steps.push({ kind: 'exec', what: 'systemd reads its units again', cmd: 'systemctl', args: ['--user', 'daemon-reload'] });
-    steps.push({ kind: 'exec', what: 'the systemd unit, stopped (ends this agent)', cmd: 'systemctl', args: ['--user', 'stop', unit], last: true });
+    const unitFile = path.join(home, '.config', 'systemd', 'user', unit);   // (no unit file ⇒ no systemd step: nothing of ours is there)
+    steps.push({ kind: 'exec', what: 'the systemd unit, disabled', cmd: 'systemctl', args: ['--user', 'disable', unit], onlyIf: unitFile });
+    steps.push({ kind: 'unlink', what: 'the systemd unit file', file: unitFile });
+    steps.push({ kind: 'exec', what: 'systemd reads its units again', cmd: 'systemctl', args: ['--user', 'daemon-reload'], onlyIf: unitFile });
+    steps.push({ kind: 'exec', what: 'the systemd unit, stopped (ends this agent)', cmd: 'systemctl', args: ['--user', 'stop', unit], last: true, onlyIf: unitFile });
   }
   return steps;
 }
 
 /** run steps → { done: [what], left: [{what, why}] } — never throws; a step that fails is LEFT with its why, the next still runs */
-async function runRetire(steps, { fs, supervisor, uid = null }) {
+async function runRetire(steps, { fs, supervisor, uid = null, present = null }) {
   const done = [], left = [];
+  // a step `onlyIf` a file runs only when that file was there BEFORE the steps began (`present`: the caller's earlier reading —
+  // the last step runs after the unit file is gone; else read here)
+  const had = present || new Map();
+  for (const s of steps) if (s.onlyIf && !had.has(s.onlyIf)) { let e = false; try { fs.statSync(s.onlyIf); e = true; } catch { } had.set(s.onlyIf, e); }
   for (const s of steps) {
+    if (s.onlyIf && !had.get(s.onlyIf)) continue;
     try {
       if (s.kind === 'unlink') {
         try { fs.unlinkSync(s.file); done.push(s.what); } catch (e) { if (e && e.code === 'ENOENT') continue; left.push({ what: s.what, why: (e && e.code) || 'error' }); }
@@ -93,4 +100,7 @@ async function runRetire(steps, { fs, supervisor, uid = null }) {
   return { done, left };
 }
 
-module.exports = { keyOf, dropHookBlock, retireSteps, runRetire };
+/** which `onlyIf` files are there now (read BEFORE any step runs: the caller hands it to every runRetire of the same steps) */
+function presentOf(steps, fs) { const m = new Map(); for (const s of steps) if (s.onlyIf && !m.has(s.onlyIf)) { let e = false; try { fs.statSync(s.onlyIf); e = true; } catch { } m.set(s.onlyIf, e); } return m; }
+
+module.exports = { keyOf, dropHookBlock, retireSteps, runRetire, presentOf };
