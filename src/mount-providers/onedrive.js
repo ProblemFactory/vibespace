@@ -93,7 +93,7 @@ module.exports = {
     // like the mountpoint branch — the route reply alone never reaches it.
     if (!m.driveId) {
       try { await x._resolveOneDriveDrive(m); x._save(); }
-      catch (e) { x._errors.set(id, String(e.message || e)); x._notify(); throw e; }
+      catch (e) { x._errors.set(id, x._sayE(id, e)); x._notify(); throw e; }   // B-af94: a coded refusal keeps its code on the row
     }
   },
   reauthClient(m, x) {

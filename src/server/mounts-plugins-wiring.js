@@ -1027,12 +1027,12 @@ app.post('/api/mounts/:id/mount', async (req, res) => {
     const ok = await mounts.mount(req.params.id);
     // 'starting' = the daemon lives and rebuilds its cache index — the row says so
     res.json({ success: ok === 'starting' || ok, starting: ok === 'starting', mounts: mounts.list() });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { res.status(400).json(require('../mount-error-words.js').errorBody(e)); }   // B-af94: a coded refusal keeps its code
 });
 // B-5ce7: the parked mount's Reconnect door (the For-you row `mount-reconnect` declares it — {ok, state} as the row's said words read)
 app.post('/api/mounts/:id/reconnect', async (req, res) => {
   try { res.json(await mounts.reconnect(req.params.id)); }   // B-5ce7: MountManager.reconnect answers {ok, state} as the row's words read
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { res.status(400).json(require('../mount-error-words.js').errorBody(e)); }   // B-af94: a coded refusal keeps its code
 });
 app.post('/api/mounts/:id/unmount', async (req, res) => {
   try { res.json({ success: await mounts.unmount(req.params.id) }); }

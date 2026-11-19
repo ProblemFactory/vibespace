@@ -819,9 +819,16 @@ console.log('㉓ THE HOLD IS SAID, WITH ITS DOOR (B-e3fe follow-up, 主开发 04
   const iH = hub(QW, QF, TORN_QW, { rename: async () => { throw Object.assign(new Error('EACCES: permission denied, rename'), { code: 'EACCES' }); } });
   const ri = await iH.q.setAside();
   const acts = read('src/lib/user-todos-actions.js');
+  // the toast line: the declared sentence, then the code. B-af94 (moved onto .413) put ONE door in front of it — a MOUNT route's code
+  // worded in the reader's language (/api/mounts/… only) — so this route (/api/queued-wakes/…) falls through to the same words; any
+  // other prefix is red by its text (toastPre)
+  const TOAST_TAIL = "(r && r.error) || t(said.failed) + (r && r.code ? ` (${String(r.code).slice(0, 40)})` : ''), { type: 'error' });";
+  const MOUNT_FIRST = "(r && r.code && String(checkRow.checkRoute).startsWith('/api/mounts/') && mountWords(r.code, r.params, { t, lang: resolveLang() })) || ";
+  const toastLines = acts.split('\n').map((l) => l.trim()).filter((l) => l.includes(TOAST_TAIL));
+  const toastPre = toastLines.length === 1 && toastLines[0].startsWith('showToast(') ? toastLines[0].slice('showToast('.length, toastLines[0].indexOf(TOAST_TAIL)) : null;
   ok('㉓ I: a refused rename answers {ok:false, code} (no bare text), the file stays where it was, the item stays open — and the press\'s toast is the declared sentence, then the code',
     ri.ok === false && ri.code === 'EACCES' && !('error' in ri) && fs.readFileSync(path.join(iH.dir, 'msg-queued.json'), 'utf8') === TORN_QW && iH.open().length === 1
-      && /showToast\(\(r && r\.error\) \|\| t\(said\.failed\) \+ \(r && r\.code \? ` \(\$\{String\(r\.code\)\.slice\(0, 40\)\}\)` : ''\), \{ type: 'error' \}\);/.test(acts), S(ri));
+      && toastPre !== null && (toastPre === '' || toastPre === MOUNT_FIRST), S({ ri, toastPre }));
   // small 1: the press reads the file OFF the loop — setAside awaits the async reader and never calls the bounded synchronous re-read
   const qsrc0 = read('src/server/queued-wakes.js'), sa = qsrc0.slice(qsrc0.indexOf('  async function setAside() {'), qsrc0.indexOf('\n  }\n', qsrc0.indexOf('  async function setAside() {')));
   ok('㉓ J: the press\'s re-read is OFF the loop — setAside awaits readHeldAsync (fs.promises) and calls neither stillUnread() nor readHeld()', sa.length > 200 && /await readHeldAsync\(\)/.test(sa) && !/stillUnread\(\)|readHeld\(\)/.test(sa) && /await require\('fs'\)\.promises\.readFile\(file, 'utf8'\)/.test(qsrc0));

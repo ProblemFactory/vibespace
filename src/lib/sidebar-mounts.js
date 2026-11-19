@@ -4,7 +4,7 @@
 import { createModalShell, showToast, showConfirmDialog, showContextMenu, copyText, escHtml, hostStateChip, getInstanceUrl, fetchJson } from './utils.js';
 import { protoChip } from './sidebar-rail.js'; // http/https/tcp chip (override menu = this._portProtoMenu, same prototype)
 import { pluginProvides } from './plugins-ui.js'; // the ONE relay probe (declared capability)
-import { t as tr, tc, deviceLocale } from './i18n.js'; // sidebar cluster convention: local `t` is pervasively a task var (verify-r5 A1: + the device's locale for a time)
+import { t as tr, tc, deviceLocale, resolveLang } from './i18n.js'; // sidebar cluster convention: local `t` is pervasively a task var (verify-r5 A1: + the device's locale for a time)
 import { dateOf, clockOf, stampAt as when } from './page-time.js';
 import { techFold } from './plain-words.js'; // lane ui-plain-words: the mechanics fold
 import { api, oauthLinkRow, mountsDialog, wireOAuthConnect, reauthDialog } from './mounts-dialog.js'; // D1: the ONE dialog component (storage + channel accounts)
@@ -23,19 +23,22 @@ import { enterSubmits } from './chat-enter-keys.js';
 import { FLAGS, SHOWN, IMPLIES, normalize, allowWord, allowArgOf } from './device-allow-words.js'; // lane device-allow-flags: the device's own allow list, ticked here
 import * as FFI from '../ffmpeg-install.js'; // lane machine-needs-at-pairing pick 3: step ②'s ffmpeg row (the pinned build's facts)
 import * as MDM from '../machine-desktop-model.js'; // lane machine-needs-at-pairing pick 3: step ②'s TightVNC row
+import * as MW from '../mount-error-words.js'; // B-af94: a mount's words BY CODE (the hub's one table) — worded here in the reader's language
 import { coalesce, singleFlight, patchLastRunRow, rowsByHost, noteLastRun, overlayLastRuns, slowNote, patchHostFace } from './mounts-live.js'; // B-a31a: the panel under a burst — a row patch, one refresh at a time
-/** A pull row's own words in the reader's language — the hub's CODE (B-fcc7 / B-844b / B-6c4f: not empty, a folder in use, a
- *  nested one), its English for a code this page does not know (the server's sentence). */
-export function pullErrorText(m) {
-  const p = (m && m.errorParams) || {}, c = m && m.errorCode;
-  if (c === 'mount_not_empty') return tr('this folder is not empty, so the machine’s folder cannot be mounted over it — move its files out, then press Remount now');
-  if ((c === 'mount_point_in_use' || c === 'mount_point_nested') && p.held) {   // B-844b / B-6c4f: an existing pair — this row is the one held
-    const who = p.removed ? tr('a removed machine’s {remotePath}', { remotePath: p.remotePath || '' }) : tr('“{machine}”’s {remotePath}', { machine: p.machine || '?', remotePath: p.remotePath || '' });
-    if (c === 'mount_point_in_use') return tr('this folder is also the mount point of {who} — remove one of the two rows', { who });
-    return p.kind === 'over' ? tr('this folder holds {mountpoint}, the mount point of {who} — unmounting one would take the other with it; remove one of the two rows', { who, mountpoint: p.mountpoint || '' }) : tr('this folder is inside {mountpoint}, the mount point of {who} — unmounting one would take the other with it; remove one of the two rows', { who, mountpoint: p.mountpoint || '' });
-  }
-  return String((m && m.error) || '');
+/** B-af94: a mount's words in the reader's language — the hub's CODE + params (src/mount-error-words.js: a cloud row, a pull
+ *  row — B-fcc7 not empty, B-844b / B-6c4f a folder in use or nested —, every machine-mount refusal) through t(); the hub's
+ *  English for a code this page does not know (its sentence, a tool's own text). */
+export function mountErrorText(m) {
+  return MW.wordsFor(m && m.errorCode, (m && m.errorParams) || {}, { t: tr, lang: resolveLang() }) || String((m && m.error) || '');
 }
+/** …a mounts route's refusal (mounts-dialog api(): e.code + e.body.params beside e.message) */
+export function thrownText(e, fallback = '') {
+  return MW.wordsFor(e && e.code, (e && e.body && e.body.params) || {}, { t: tr, lang: resolveLang() }) || (e && e.message) || fallback;
+}
+export function pullErrorText(m) { return mountErrorText(m); }
+/** api() for the mount doors: a refusal comes back WORDED (its message in the reader's language; code, body, door kept) —
+ *  every toast and dialog line that shows err.message shows the reader's words */
+const mmApi = (url, opts) => api(url, opts).catch((e) => { throw Object.assign(new Error(thrownText(e, tr('Failed'))), { code: e && e.code, body: e && e.body, door: e && e.door }); });
 
 
 // 16x16 stroke icons (project convention — no emoji in chrome)
@@ -591,7 +594,7 @@ export function installSidebarMounts(Sidebar) {
       top.innerHTML = `
         ${isCred
           ? `<span class="mounts-cred-key" title="${escHtml(tr('Credential only — this token can’t open the storage root; add submounts (specific buckets/paths) under it.'))}">${MI.key}</span>`
-          : `<span class="mounts-dot mounts-dot-${dot}" title="${m.mounted ? 'Mounted' : escHtml(m.connecting ? tr('Connecting…') : (m.error || 'Not mounted'))}"></span>`}
+          : `<span class="mounts-dot mounts-dot-${dot}" title="${m.mounted ? escHtml(tr('Mounted')) : escHtml(m.connecting ? tr('Connecting…') : (m.error ? mountErrorText(m) : tr('Not mounted')))}"></span>`}
         ${m.parentId ? '<span class="mounts-child-arrow">↳</span>' : ''}
         <b class="mounts-name" title="${escHtml(m.name)}">${escHtml(m.name)}</b>
         ${m.mode === 'ro' ? '<span class="mounts-badge">RO</span>' : ''}
@@ -630,8 +633,8 @@ export function installSidebarMounts(Sidebar) {
           // a connect is already in flight — a second POST is refused server-
           // side (success:false) and would report a bogus connect FAILURE
           if (m.connecting) { showToast(tr('Already connecting…')); return; }
-          const r = await api(`/api/mounts/${m.id}/mount`, { method: 'POST' });
-          if (!r.success) throw new Error('Couldn’t connect — hover the status dot for details');
+          const r = await mmApi(`/api/mounts/${m.id}/mount`, { method: 'POST' });
+          if (!r.success) throw new Error(tr('Couldn’t connect — hover the status dot for details'));
         }, 'mounts-icon-accent'));
       }
       // Share a folder FROM this connection — S3 (STS/service-account link) or
@@ -709,8 +712,8 @@ export function installSidebarMounts(Sidebar) {
           if (m.connecting) { showToast(tr('Already connecting…')); return; } // see the Connect button
           row.style.opacity = '0.6';
           try {
-            const r = await api(`/api/mounts/${m.id}/mount`, { method: 'POST' });
-            if (!r.success) throw new Error('Couldn’t connect — hover the status dot for details');
+            const r = await mmApi(`/api/mounts/${m.id}/mount`, { method: 'POST' });
+            if (!r.success) throw new Error(tr('Couldn’t connect — hover the status dot for details'));
           } catch (err2) { showToast(err2.message || 'Failed', { type: 'error' }); }
           this._renderMounts();
         };
@@ -765,8 +768,8 @@ export function installSidebarMounts(Sidebar) {
         // no aggressive truncation — our own messages are meaningful to the
         // END (user report: "…disconnected to protect the s" cut mid-word);
         // 300 caps only pathological rclone log tails, full text in title
-        err.textContent = tr('Couldn’t connect:') + ' ' + m.error.slice(0, 300);
-        err.title = m.error;
+        err.textContent = tr('Couldn’t connect:') + ' ' + mountErrorText(m).slice(0, 300);   // B-af94: the hub's code, in the reader's language
+        err.title = mountErrorText(m);
         // Dead Google OAuth token (invalid_grant: revoked/expired) — offer the
         // guided re-authorization right where the failure is visible.
         // "sign-in has expired…re-authorize" = the server's OAuth-death health
@@ -979,7 +982,7 @@ export function installSidebarMounts(Sidebar) {
         { key: 'mode', label: tr('Access'), type: 'select', options: [['rw', 'Read-write'], ['ro', 'Read-only']] },
       ], tr('Create & connect'), async (v, { close }) => {
         const r = await api(`/api/mounts/${cred.id}/children`, { method: 'POST', body: JSON.stringify(v) });
-        try { await api(`/api/mounts/${r.id}/mount`, { method: 'POST' }); }
+        try { await mmApi(`/api/mounts/${r.id}/mount`, { method: 'POST' }); }
         catch (e) { showToast(e.message || tr('Created, but connecting failed — check the path'), { type: 'error' }); }
         close(); this._renderMounts();
       }, { id: 'mount-submount-dialog', key: cred.id });
@@ -1329,7 +1332,7 @@ export function installSidebarMounts(Sidebar) {
           re.innerHTML = MI.retry; re.title = m.online ? tr('Remount now') : tr('Remount (machine is offline — start its daemon first)');
           re.onclick = async (e) => {
             e.stopPropagation(); re.disabled = true;
-            try { await api(`/api/machine-mounts/${encodeURIComponent(m.id)}/remount`, { method: 'POST' }); showToast(tr('Mounted')); }
+            try { await mmApi(`/api/machine-mounts/${encodeURIComponent(m.id)}/remount`, { method: 'POST' }); showToast(tr('Mounted')); }
             catch (err) { showToast(err.message, { type: 'error' }); }
             this._renderMounts();
           };
@@ -1368,7 +1371,7 @@ export function installSidebarMounts(Sidebar) {
           re.innerHTML = MI.retry; re.title = tr('Re-mount on the machine');
           re.onclick = async (e) => {
             e.stopPropagation(); re.disabled = true;
-            try { await api(`/api/machine-mounts/${encodeURIComponent(m.id)}/remount`, { method: 'POST' }); showToast(tr('Mounted')); }
+            try { await mmApi(`/api/machine-mounts/${encodeURIComponent(m.id)}/remount`, { method: 'POST' }); showToast(tr('Mounted')); }
             catch (err) { showToast(err.message, { type: 'error' }); }
             this._renderMounts();
           };
@@ -1381,7 +1384,7 @@ export function installSidebarMounts(Sidebar) {
       un.title = m.dir === 'pull' ? tr('Unmount') : tr('Unmount from this machine');
       un.onclick = async (e) => {
         e.stopPropagation(); un.disabled = true;
-        try { await api(`/api/machine-mounts/${encodeURIComponent(m.id)}`, { method: 'DELETE' }); showToast(tr('Unmounted')); }
+        try { await mmApi(`/api/machine-mounts/${encodeURIComponent(m.id)}`, { method: 'DELETE' }); showToast(tr('Unmounted')); }
         catch (err) { showToast(err.message || 'Failed', { type: 'error' }); }
         this._renderMounts();
       };
@@ -1432,7 +1435,7 @@ export function installSidebarMounts(Sidebar) {
       ], tr('Mount'), async (v, { close }) => {
         if (!v.folder) throw new Error(tr('Choose a folder to share'));
         const h = hosts.find((x) => x.id === v.hostId) || { id: v.hostId, name: v.hostId };
-        const r = await api(`/api/machine-mounts/${v.hostId}`, { method: 'POST', body: JSON.stringify({ dir: 'push', folder: v.folder, mode: v.mode }) });
+        const r = await mmApi(`/api/machine-mounts/${v.hostId}`, { method: 'POST', body: JSON.stringify({ dir: 'push', folder: v.folder, mode: v.mode }) });
         close();
         const via = r.via === 'tunnel' ? tr('over the device tunnel') : tr('over the public address');
         showToast(tr('Mounted at {mp} on {name} ({via})', { mp: r.mountpoint, name: h.name, via }));
@@ -1447,7 +1450,7 @@ export function installSidebarMounts(Sidebar) {
         { key: 'mountpoint', label: tr('Mount point on the machine (optional)'), placeholder: tr('default: a folder of the same name in vibespace-remote, in its home folder'), autocomplete: () => `/api/hosts/${h.id}/dir-complete` },
       ], tr('Mount'), async (v, { close }) => {
         if (!v.folder) throw new Error(tr('Choose a folder to share'));
-        const r = await api(`/api/machine-mounts/${h.id}`, { method: 'POST', body: JSON.stringify({ dir: 'push', folder: v.folder, mode: v.mode, mountpoint: v.mountpoint || undefined }) });
+        const r = await mmApi(`/api/machine-mounts/${h.id}`, { method: 'POST', body: JSON.stringify({ dir: 'push', folder: v.folder, mode: v.mode, mountpoint: v.mountpoint || undefined }) });
         close();
         const via = r.via === 'tunnel' ? tr('over the device tunnel') : tr('over the public address');
         showToast(tr('Mounted at {mp} on {name} ({via})', { mp: r.mountpoint, name: h.name, via }));
@@ -1494,7 +1497,7 @@ export function installSidebarMounts(Sidebar) {
           close(); showToast(tr('Storage connected')); this._renderMounts();
           return;
         }
-        const r = await api(`/api/machine-mounts/${h.id}`, { method: 'POST', body: JSON.stringify({ dir: 'pull', remotePath: v.remotePath, mountpoint: v.mountpoint || undefined }) });
+        const r = await mmApi(`/api/machine-mounts/${h.id}`, { method: 'POST', body: JSON.stringify({ dir: 'pull', remotePath: v.remotePath, mountpoint: v.mountpoint || undefined }) });
         close();
         showToast(tr('Mounted at {mp} (read-only, over the device link)', { mp: r.mountpoint }));
         this._renderMounts();
@@ -2671,7 +2674,7 @@ export function installSidebarMounts(Sidebar) {
     // (+ this toast) carries the reason.
     async _connectNewMount(id, close) {
       try {
-        const r = await api(`/api/mounts/${id}/mount`, { method: 'POST' });
+        const r = await mmApi(`/api/mounts/${id}/mount`, { method: 'POST' });
         if (!r.success) throw new Error(tr('the connection did not come up — hover the row’s status dot for details'));
         return true;
       } catch (e) {

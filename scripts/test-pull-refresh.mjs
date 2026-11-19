@@ -461,7 +461,7 @@ try {
     check('A: a later teardown releases nothing twice (no second unmount, no second unserve)', ra.once, ra.onceWhy);
     check('A: releaseStale — a stale daemon of the mount point (argv0 rclone, left by a dead hub) is ended after the lazy unmount', ra.stale, ra.staleWhy);
     const dy = await dyingChain;
-    check('A: an rclone that dies while the mount is awaited ⇒ a FAILED mount, its mount point released all the same, its folder server let go, nobody told «gone»', /rclone webdav mount exited/.test(dy.err || '') && dy.fuses === 2 && dy.gone === 0 && JSON.stringify(dy.unserved) === JSON.stringify([4300]), JSON.stringify(dy));
+    check('A: an rclone that dies while the mount is awaited ⇒ a FAILED mount, its mount point released all the same, its folder server let go, nobody told «gone»', /rclone webdav mount exited/.test(dy.err || '') && dy.fuses === 2 && dy.gone === 0 && JSON.stringify(dy.unserved) === JSON.stringify([4300]), JSON.stringify(dy));   // stale-pins: kept — the RUNTIME words (src/mount-error-words.js fills them, unchanged)
     { // the unmount LADDER (r1 #3): fusermount3 first, fusermount when it is not here, neither said once
       const DM = require('../src/device-mount.js');
       const B2 = path.join(FC, 'bin2'), B0 = path.join(FC, 'bin-empty'); fs.mkdirSync(B2, { recursive: true }); fs.mkdirSync(B0, { recursive: true });
@@ -703,7 +703,7 @@ try {
         ['gone1', "    if (!this._state.mounts.some((m) => m.id === rec.id)) return;\n    if (this._live.has(rec.id)", "    if (!globalThis.__mmCut.gone1 && !this._state.mounts.some((m) => m.id === rec.id)) return;\n    if (this._live.has(rec.id)"],
         ['gone2', "      if (!this._state.mounts.some((m) => m.id === rec.id)) { try { await h.teardown(); } catch { } return; }", "      if (!globalThis.__mmCut.gone2 && !this._state.mounts.some((m) => m.id === rec.id)) { try { await h.teardown(); } catch { } return; }"],
         ['words1', "      if (e && e.code === 'unmount_hung' && this._state.mounts.some((m) => m.id === rec.id)) { const said", "      if (e && e.code === 'unmount_hung' && (globalThis.__mmCut.words1 || this._state.mounts.some((m) => m.id === rec.id))) { const said"],
-        ['words2', "        if (e && e.code === 'unmount_hung' && !this._held.has(rec.id) && this._state.mounts.some((m) => m.id === rec.id)) { (this._pullErrors", "        if (e && e.code === 'unmount_hung' && !this._held.has(rec.id) && (globalThis.__mmCut.words2 || this._state.mounts.some((m) => m.id === rec.id))) { (this._pullErrors"],
+        ['words2', "        if (e && e.code === 'unmount_hung' && !this._held.has(rec.id) && this._state.mounts.some((m) => m.id === rec.id)) { this._sayCode(rec.id, e); (this._pullErrors", "        if (e && e.code === 'unmount_hung' && !this._held.has(rec.id) && (globalThis.__mmCut.words2 || this._state.mounts.some((m) => m.id === rec.id))) { this._sayCode(rec.id, e); (this._pullErrors"],   // B-af94: the hung release keeps its code
         ['asked', "    if (gone()) throw removedWhileMounting();\n  }", "    if (!globalThis.__mmCut.asked && gone()) throw removedWhileMounting();\n  }"],
         ['asked throw', "catch (e) { if (gone()) throw removedWhileMounting(); throw e; }", "catch (e) { if (!globalThis.__mmCut.askedThrow && gone()) throw removedWhileMounting(); throw e; }"],
         ['asked quiet', "      if (e && (e.code === 'mount_removed' || e.code === 'mount_point_in_use' || e.code === 'mount_point_nested' || e.code === 'mount_point_releasing' || e.code === 'mount_point_unchecked' || e.code === 'mount_point_add_unchecked')) {", "      if (!globalThis.__mmCut.quiet && e && (e.code === 'mount_removed' || e.code === 'mount_point_in_use' || e.code === 'mount_point_nested' || e.code === 'mount_point_releasing' || e.code === 'mount_point_unchecked' || e.code === 'mount_point_add_unchecked')) {"],   // B-844b r5–r8: the no-event codes grew
@@ -1102,7 +1102,7 @@ try {
       mm6._mounting.add('mm-gone6');
       mm6._mounting.add('mm-new6'); const sees = mm6._otherHolds({ id: 'mm-gone6', dir: 'pull', mountpoint: mpOuter }); mm6._mounting.delete('mm-new6');
       mm6._mounting.delete('mm-gone6');
-      check('§17 r4 (read 3 #2): a REMOVED record still mounting a folder nested with a new one\'s is WAITED for (bounded), never named as a row: its chain let go ⇒ the new record mounts; still holding past the bound ⇒ refused by its own words (mount_point_releasing), the retry mark cleared; its chain sees the new record nested beneath (canRelease: no)', e6 === 'mount_point_releasing' && /still being let go — it is tried again by itself/.test(w6) && !retry6 && !e6b && mounted6 && sees === true, JSON.stringify({ e6, w6, retry6, e6b, mounted6, sees }));
+      check('§17 r4 (read 3 #2): a REMOVED record still mounting a folder nested with a new one\'s is WAITED for (bounded), never named as a row: its chain let go ⇒ the new record mounts; still holding past the bound ⇒ refused by its own words (mount_point_releasing), the retry mark cleared; its chain sees the new record nested beneath (canRelease: no)', e6 === 'mount_point_releasing' && /still being let go — it is tried again by itself/.test(w6) && !retry6 && !e6b && mounted6 && sees === true, JSON.stringify({ e6, w6, retry6, e6b, mounted6, sees }));   // stale-pins: kept — the RUNTIME words (src/mount-error-words.js fills them)
       // r4 (read 3 #1a): THE BOOT GATE — two records from before (no lastLiveAt), the YOUNGER's machine redials first, before restore
       const pairOf = (name, mpX) => mkMM(name, [
         { id: 'mm-el', dir: 'pull', hostId: 'h1', remotePath: '/e', mountpoint: mpX, createdAt: 1 },
@@ -1197,7 +1197,7 @@ try {
         m._realpath = async (pX, o) => { if (o && o.onExit) o.onExit(); return null; };
         const n0 = m._state.mounts.length;
         let ac = '', aw = ''; try { await m.mountPull('h2', { remotePath: '/z0', mountpoint: mpLink }); } catch (e) { ac = String(e.code || ''); aw = e.message; }
-        check('§17 r7/r8 (reads 6 #2, 7 #1): an add whose folder did not ANSWER (a wedged target) is refused by ITS OWN words — «nothing was added» (nothing is tried again) — and nothing is recorded', ac === 'mount_point_add_unchecked' && /nothing was added/.test(aw) && m._state.mounts.length === n0, JSON.stringify({ ac, aw, n: m._state.mounts.length }));
+        check('§17 r7/r8 (reads 6 #2, 7 #1): an add whose folder did not ANSWER (a wedged target) is refused by ITS OWN words — «nothing was added» (nothing is tried again) — and nothing is recorded', ac === 'mount_point_add_unchecked' && /nothing was added/.test(aw) && m._state.mounts.length === n0, JSON.stringify({ ac, aw, n: m._state.mounts.length }));   // stale-pins: kept — the RUNTIME words (src/mount-error-words.js fills them)
         // r7 (read 6 #5): ONE child per record — a record whose child still runs is not asked again
         let calls = 0; m._realpath = async (pX, o) => { calls++; if (o && o.onExit) o.onExit(); return pX; };
         m._realMp.delete('mm-a0'); m._realKids = new Set(['mm-a0']);
@@ -1341,9 +1341,10 @@ try {
       // the page's words for the codes: the client words each, a zh and a ja row each
       const SB = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src/lib/sidebar-mounts.js'), 'utf8');
       const ZH = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src/lib/i18n-zh.js'), 'utf8'), JA = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src/lib/i18n-ja.js'), 'utf8');
-      const PE = SB.slice(SB.indexOf('export function pullErrorText(m) {'), SB.indexOf('\n}\n', SB.indexOf('export function pullErrorText(m) {')));
-      const keys = [...PE.matchAll(/tr\('([^']*)'/g)].map((m) => m[1]);
-      check('§17 (small 5) the pull row words its codes in the reader\'s language (not empty; a held row\'s in use, nested both ways, by a named or a removed machine) — a zh and a ja row each; the dot\'s title reads them', keys.length === 6 && keys.every((k) => ZH.includes(JSON.stringify(k) + ':') && JA.includes(JSON.stringify(k) + ':')) && /m\.error \? escHtml\(pullErrorText\(m\)\)/.test(SB), JSON.stringify(keys));
+      // B-af94: the words live in ONE table (src/mount-error-words.js) the hub fills in English and the page words through t()
+      const MWt = require('../src/mount-error-words.js');
+      const keys = [MWt.WORDS.mount_not_empty, ...['who_machine', 'who_removed', 'same_held', 'inside_held', 'over_held'].map((k) => MWt.PARTS[k])];
+      check('§17 (small 5) the pull row words its codes in the reader\'s language (not empty; a held row\'s in use, nested both ways, by a named or a removed machine) — a zh and a ja row each; the dot\'s title reads them', keys.length === 6 && keys.every((k) => ZH.includes(JSON.stringify(k) + ':') && JA.includes(JSON.stringify(k) + ':')) && /m\.error \? escHtml\(pullErrorText\(m\)\)/.test(SB) && SB.includes('export function pullErrorText(m) { return mountErrorText(m); }'), JSON.stringify(keys));
       // (4) + the guard over the REAL chain
       const rc = await releasedChain;
       check('§17 A (small 4) the REAL chain: released() is nothing before its teardown, then the lazy unmount\'s promise (ok, one fusermount); a chain told another record holds its folder ends its rclone and KEEPS the folder (kept, no fusermount)', !!(rc.own && rc.own.before === null && rc.own.result === 'ok' && rc.own.fuses === 1 && rc.own.rcloneGone && rc.kept && rc.kept.result === 'kept' && rc.kept.fuses === 0 && rc.kept.rcloneGone), JSON.stringify(rc));

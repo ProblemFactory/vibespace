@@ -18,6 +18,7 @@
 // `inboxModel(app)` is memoized on the app: the first caller (the panel's
 // install at boot) builds it, the window asks for the same one.
 import { t, resolveLang } from './i18n.js';
+import { wordsFor as mountWords } from '../mount-error-words.js'; // B-af94: a check door's refusal by code (a mount's Reconnect) in the reader's language
 import { i18nParams } from './stopped-why.js'; // B-a5a4 cure 2: a refusal's interface words in the reader's language
 import { settingsDoor } from './need-line.js'; // lane ui-needs-a-button pick 5: a check's switch
 import { isProposal } from '../end-proposal.js'; // PURE (CJS, lane login-request-card piece 3b): THE proposal card's type, spelled once
@@ -534,7 +535,7 @@ export function inboxModel(app) {
       if (r && r.ok && r.already) { showToast(t(said.already, { n: String(Number(r.leftMin) || 1) })); return true; }
       // lane ui-needs-a-button pick 5: a check that is turned off — its toast opens the switch the row declares (checkOffSetting)
       if (r && r.ok) { showToast(t(r.state === 'pass' || r.state === 'fixture' ? said.done : r.state === 'checking' ? said.started : r.state === 'off' ? said.off : said.none), r.state === 'off' && checkRow.checkOffSetting ? { action: settingsDoor(app, checkRow.checkOffSetting, { label: t('Turn on…') }) || undefined } : {}); return true; }
-      showToast((r && r.error) || t(said.failed) + (r && r.code ? ` (${String(r.code).slice(0, 40)})` : ''), { type: 'error' });   // B-e3fe follow-up cure (small 2): a route that answers only a code — the declared sentence first, the code after it
+      showToast((r && r.code && String(checkRow.checkRoute).startsWith('/api/mounts/') && mountWords(r.code, r.params, { t, lang: resolveLang() })) || (r && r.error) || t(said.failed) + (r && r.code ? ` (${String(r.code).slice(0, 40)})` : ''), { type: 'error' });   // B-af94 (its read 2): a mount door's code in the reader's words — another door's code names its own thing (startsWith, never a regex literal: test-desktop-small's toast census reads an escaped slash before the closing one as a comment); B-e3fe follow-up cure (small 2): a route that answers only a code — the declared sentence first, the code after it
       return false;
     }
     if (rec && rec.action && rec.action.type === 'browser-floor-check') {

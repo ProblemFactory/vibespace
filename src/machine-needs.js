@@ -81,6 +81,7 @@ const NEEDS = Object.freeze([
 ]);
 /** The net's catches that state no need of a machine — each with its reason. */
 const NOT_NEEDS = Object.freeze([
+  { why: 'a push mount\'s refusal naming the Settings key that fixes it (agentd.publicUrl) — said in the push dialog (B-af94: now a t() key, so this net reads it); its Settings door on the line is OWED (named: FOUND, not built there)', match: /^no path for the remote to reach this instance — the device tunnel needs the machine daemon link/ },
   { why: 'a setting\'s description (its words explain a choice, they ask nothing of a machine)', match: /^(Show the |How long |Whether |Which agent-browser |When an SSH |Expose a machine|VibeSpace also answers|What an agent's browser|When this machine has no desktop session$|ON \(recommended\): )/ },
   { why: 'where a browser runs on the hub machine (an outcome, said; nothing to install)', match: /has no desktop session|the page's picture — this machine has no display/ },
   { why: 'a session\'s own login or an app\'s sign-in road (accounts, not the machine)', match: /has no login on this machine|CLI login|[Rr]uns on this machine only|company app has no relay page|OAuth login and its long-lived token|subscription login has its own absolute lifetime/ }, // 2.369.402's meetings: the account rows' «Runs on this machine only» (a capital R) and login-expiry's two lifetime facts

@@ -138,6 +138,18 @@ const INSIDE_SETTINGS = Object.freeze([
     "Only here in Settings",
     "The LLM plugin's own switch, shown here too. It judges the rows ",
   ]);
+// B-af94: a mount door's refusal or row words (src/mount-error-words.js — now t() keys, so the need net reads them): said AT the
+// door the person used, which is its way out — the exact templates the net catches
+const MOUNT_REFUSALS = Object.freeze([
+  "rclone install on the device failed: {detail}",
+  "rclone install on host failed: {detail}",
+  "net use failed: {detail}",
+  "device serve-folder failed: {detail}",
+  "endpoint proxy rewrites signed headers (Cloudflare?) — temporary-credential (STS) shares need rclone 1.63–1.69, a service-account share, or an un-proxied endpoint",
+  "connected but the sign-in has expired or been revoked — listings come from cache while every file read fails; re-authorize to fix",
+  "CephFS mount failed: {detail}",
+  "OneDrive drive lookup failed (HTTP {status})",
+]);
 const MACHINE_OS = Object.freeze([
     "Opened System Settings › {pane} on {machine}",
     "Remote Desktop is on, but nothing answers on its port 3389; rest",
@@ -286,6 +298,7 @@ const NEEDS = Object.freeze([
 ]);
 /** The net's catches that state no need with a missing door — each with its reason. */
 const NOT_NEEDS = Object.freeze([
+  { why: 'a mount door\'s refusal or row words, worded by code (src/mount-error-words.js, B-af94): said AT the door the person used — the storage or machine row, the dialog that asked, its toast — and that door is its way out (the dialog\'s own fields, Remount, Re-authorize, Connect)', match: oneOf(MOUNT_REFUSALS) },
   { why: 'says what is NOT needed («no terminal needed») — the Connect button it names is on the same form, above the box (pick 4, storage-1)', match: /^press “Connect[^”]*” — no terminal needed$/ },
   { why: 'the need\'s own fields are under it on the same form (the client id and secret boxes) — the form is its door', match: /^Gmail needs your own OAuth client here \(with the gmail\.readonly scope\)\.$/ },
   { why: 'inside Settings: a row\'s own description naming another row of the same window (no door is owed — it is on that page)', match: oneOf(INSIDE_SETTINGS) },

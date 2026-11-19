@@ -57,6 +57,7 @@ const { obscure: rcloneObscure } = require('./rclone-obscure.js'); // lane mount
 const rcloneEnv = (cfg = {}) => serviceEnv(process.env, { keep: RCLONE_ENV_KEEP, egress: true, add: cfg });
 const PROBE_OUT_MAX = 1024 * 1024;   // B-323e: a probe's output bound — the old road's (execFile's default maxBuffer; past it the child was ended and the answer read no proof)
 const LIVENESS = require('./mount-liveness.js');   // lane mount-liveness: THE sweep's verdict table (PURE)
+const MW = require('./mount-error-words.js');   // B-af94: a row's words BY CODE — the page words them in its language
 const CACHE_PLACE = require('./vfs-cache-place.js');   // lane vfs-cache-local: where the VFS cache lives + the dirty witnesses (PURE)
 // The vfsMeta walk, run in a CHILD node (never the loop, never the threadpool: 164 788 files over NFS): each file judged
 // by the PURE metaVerdict (PARSED — never a grep for a spelling) → one JSON summary on stdout.
@@ -767,7 +768,7 @@ class MountManager {
         canShare: this.canShareFromMount(m),
         canCephShare: this.canCephShare(m),
         path: this.pathOf(m), desired: m.desired, expiresAt: m.expiresAt || null,
-        mounted: this.isMounted(m), error: this._errors.get(m.id) || null,
+        mounted: this.isMounted(m), error: this._errors.get(m.id) || null, ...this._errorCodeOf(m.id),
         parked: m.parked ? { at: m.parked.at, verdict: m.parked.verdict } : null,   // B-5ce7: kept disconnected until the person's Reconnect
         ...(BOX_CIPHERTEXT_RE.test(JSON.stringify(conn)) && keyOf() ? { keyFile: keyOf() } : {}),   // { code, file } only on a refusal: a row with a secret says restore the key file
         ...((lv) => lv ? { probe: { verdict: lv.verdict, strikes: lv.strikes, lastMs: lv.lastMs } } : {})(this._liveness?.get(m.id)),   // the sweep's last verdict (lane mount-liveness)
@@ -1038,7 +1039,7 @@ class MountManager {
     this._mountGen?.delete(id); this._cantTell?.delete(mpRemoved);   // B-e783: its generation and any «can't tell» wait leave with the record (after the unmount, which moves it)
     this._state.mounts = this._state.mounts.filter(x => x.id !== id);
     setTimeout(() => this._cleanupEmptyMountpoint(mpRemoved), 1500);
-    this._errors.delete(id);
+    this._errors.delete(id); this._errorCodes?.delete(id);   // B-af94: the code goes with its record
     this._reconnects?.delete(id);
     // a CHILD removes the cache (up to vfsCacheMaxSizeGB, 164 788 files over NFS on the owner's box): fs.rm on the
     // libuv threadpool is the FUSE-threadpool outage class this module exists to prevent (lane vfs-cache-local)
@@ -1123,7 +1124,7 @@ class MountManager {
     // successful save; no-silent-failure rule).
     if (wasMounted) {
       try { await this.mount(id); }
-      catch (e) { if (!this._errors.get(id)) { this._errors.set(id, String(e.message || e)); this._notify(); } }
+      catch (e) { if (!this._errors.get(id)) { this._errors.set(id, this._sayE(id, e)); this._notify(); } }
     }
     // Editing a CREDENTIAL (token refresh, endpoint change) must reach every
     // mount point that resolves through it — bounce the mounted children.
@@ -1282,7 +1283,7 @@ class MountManager {
         this._errors.delete(id);
         this._save();
         this._notify();
-        throw new Error('This token can’t list the account root (it’s bucket-scoped) — add a submount with a specific bucket under it.');
+        throw MW.refusal('root_denied');
       }
       // Auto-heal: a previously credential-only record whose token can NOW
       // list the root (rescoped token) becomes root-mountable again.
@@ -1291,7 +1292,7 @@ class MountManager {
     const mp = this.pathOf(m);
     let dest = null;
     try { dest = await this._ensureMountpointDir(mp, { quarantine: true }); }
-    catch (e) { this._errors.set(id, String(e.message || e)); this._notify(); throw e; } // mount()'s finally clears _connecting
+    catch (e) { this._errors.set(id, this._sayE(id, e)); this._notify(); throw e; } // mount()'s finally clears _connecting
     if (dest) this._noteStranded(m, dest);
     await this._rcloneFlagsReady();   // B-323e: the help text through THE STARTER first — the argv's flag checks below then read the cache
     const { env, remote } = this._rcloneFor(m);
@@ -1320,7 +1321,7 @@ class MountManager {
         // read (the FishR2 trap: bucket typo / out-of-scope bucket). v2Auth
         // stays undefined so a fixed path re-probes on the next mount.
         const target = remote.split(':').slice(1).join(':') || '(account root)';
-        this._errors.set(id, `the credential can’t access “${target}” (AccessDenied) — check the bucket name (S3 buckets are lowercase letters/digits/hyphens) and the token’s bucket scope`);
+        this._errors.set(id, this._sayW(id, 's3_access_denied', { target }));   // B-af94: worded by code (src/mount-error-words.js)
         this._notify();
         return false;
       }
@@ -1388,7 +1389,7 @@ class MountManager {
     this._notify();
     const done = this._waitMounted(m, pid, mp)
       .then((r) => { if (r !== 'mounted') this._starting.delete(m.id); return this._startSettled(m, mp, r, opts); })
-      .catch((e) => { this._errors.set(m.id, String(e.message || e)); return false; })
+      .catch((e) => { this._errors.set(m.id, this._sayE(m.id, e)); return false; })
       .finally(() => { if (this._starting.get(m.id) === st) this._starting.delete(m.id); this._notify(); });
     return Promise.race([done, new Promise((r) => { setTimeout(() => r('starting'), T.quickMs).unref?.(); })]);
   }
@@ -1466,17 +1467,16 @@ class MountManager {
       return this._mountInner(id, { retried: true });
     }
     const T = this._startingT || MountManager.STARTING;
-    let msg = tail || 'rclone exited before mounting';
+    let msg = tail || 'rclone exited before mounting', coded = null;   // B-af94 (its read): the code is recorded WITH the words, after the kill's await
     if (r !== 'died') {
-      msg = r === 'hung'
-        ? `rclone made no progress for ${Math.round(T.hungMs / 1000)} s and never mounted — stopped it; will retry`
-        : `still not mounted after ${Math.round(T.ceilingMs / 60e3)} min of starting — stopped it; will retry`;
+      coded = r === 'hung' ? ['start_hung', { s: Math.round(T.hungMs / 1000) }] : ['start_ceiling', { min: Math.round(T.ceilingMs / 60e3) }];
+      msg = MW.wordsFor(coded[0], coded[1]);
       console.warn(`[mounts] ${r} daemon on ${mp} (never mounted) — killed`);
       await this._killMountDaemon(mp);
       this._noteReconnectBackoff(id);
       this._saidKilled(m);   // B-5ce7 (merged B-f230): the STARTING state too — a daemon stopped while it was coming up is said
     }
-    this._errors.set(id, msg);
+    this._errors.set(id, coded ? this._sayCoded(id, msg, coded[0], coded[1]) : msg);
     this.unblockPath(mp);
     this._notify();
     return false;
@@ -1919,7 +1919,7 @@ class MountManager {
     console.warn(LIVENESS.verdictLine(m.id, v, w));   // the record id, never its name (the journal ring outlives a clear)
     try { global.__vsMetric?.('mount-probe-ms', Math.round((w.list?.state === 'hung' ? w.list.ms : w.attr?.ms) || 0), `mount=${m.id} verdict=${v.verdict}`); } catch {}
     if (v.blockMs) this.blockPath(mp, v.blockMs);
-    const words = LIVENESS.wordsFor(v.words.key, 'en', v.words.vars);
+    const words = this._sayCoded(m.id, LIVENESS.wordsFor(v.words.key, 'en', v.words.vars), MW.LIVE + v.words.key, v.words.vars);   // B-af94: the page words the verdict from the same table
     if (this._errors.get(m.id) !== words) { this._errors.set(m.id, words); if (!v.teardown) this._notify(); }
     if (v.teardown && v.verdict !== 'died') {
       // desired stays 'mounted' → the sweep's dead-mount branch reconnects with backoff; only a user Unmount ends supervision —
@@ -2114,12 +2114,13 @@ class MountManager {
     const s0 = this._livenessSeq || 0;   // the last verdict before the press (a counter: the clock cannot order two verdicts in one ms)
     const ok = await this.mount(id);
     const row = this.list().find((x) => x.id === id);
-    if (!(ok || (row && row.mounted))) return { ok: false, error: (row && row.error) || 'the storage did not connect' };
+    const coded = (r) => (r && r.errorCode ? { code: r.errorCode, params: r.errorParams || {} } : {});   // B-af94 (its read): the For-you Reconnect words the row's code
+    if (!(ok || (row && row.mounted))) return row && row.error ? { ok: false, error: row.error, ...coded(row) } : { ok: false, error: MW.wordsFor('storage_not_connected'), code: 'storage_not_connected', params: {} };
     // 'pass' ONLY on THIS connect's own answer — the mount's first check said alive at or after the press (round 2 of the cure:
     // a verdict from before the press, or none at all, is 'checking'; the sweep's verdicts are never deleted — the cache
     // placement reads them); alive but the row says what is wrong (a sign-in that expired) is that error, never the success words
     const lv = this._liveness && this._liveness.get(id);
-    if (ok !== 'starting' && lv && lv.verdict === 'alive' && lv.seq > s0) return row && row.error ? { ok: false, error: row.error } : { ok: true, state: 'pass' };
+    if (ok !== 'starting' && lv && lv.verdict === 'alive' && lv.seq > s0) return row && row.error ? { ok: false, error: row.error, ...coded(row) } : { ok: true, state: 'pass' };
     return { ok: true, state: 'checking' };
   }
   /** B-5ce7 (B-f230): a stopped process is said once per episode (`onKilled`), resolved at its next answer. */
@@ -2156,8 +2157,20 @@ class MountManager {
     console.warn(`[mounts] ${m.id} park ended (${why})`);
     try { this.onUnpark?.(m, why); } catch (e) { console.warn(`[mounts] ${m.id}: the parked notice was not resolved: ${e.message}`); }
   }
+  /** B-af94: a row's words with their code — recorded beside `_errors` (a code is shown only while ITS words are the row's;
+   *  a paramless sentence of ours is found by its words, src/mount-error-words.js codeOfWords). → the words */
+  _sayCoded(id, words, code, params) { (this._errorCodes = this._errorCodes || new Map()).set(id, { words, code, params: params || {} }); return words; }
+  _sayW(id, code, params) { return this._sayCoded(id, MW.wordsFor(code, params), code, params); }
+  _sayE(id, e) { const words = String((e && e.message) || e); if (e && MW.known(e.code)) this._sayCoded(id, words, e.code, e.params); return words; }
+  _errorCodeOf(id) {
+    const words = this._errors.get(id), c = words && this._errorCodes && this._errorCodes.get(id);
+    if (c && c.words === words) return { errorCode: c.code, errorParams: c.params };
+    const k = MW.codeOfWords(words);
+    return k ? { errorCode: k.code, errorParams: k.params } : {};
+  }
+
   _parkedWords(m) {
-    const words = LIVENESS.wordsFor('wedged', 'en', { N: (m.parked && m.parked.strikes) || 2 });   // the one verdict that parks
+    const N = (m.parked && m.parked.strikes) || 2, words = this._sayCoded(m.id, LIVENESS.wordsFor('wedged', 'en', { N }), MW.LIVE + 'wedged', { N });   // the one verdict that parks
     (this._parkedSaid = this._parkedSaid || new Map()).set(m.id, words);
     return words;
   }
@@ -2182,7 +2195,7 @@ class MountManager {
     if (st && Date.now() < st.nextAt) return;
     this._noteReconnectBackoff(m.id);
     const n = this._reconnects.get(m.id).attempts;
-    this._errors.set(m.id, `storage disconnected — auto-reconnecting (attempt ${n})…`);
+    this._errors.set(m.id, this._sayW(m.id, 'reconnecting', { n }));
     this._notify();
     // A crashed daemon leaves a dead fuse endpoint ("Transport endpoint is
     // not connected") that blocks the fresh mount — clear it first.
@@ -2234,7 +2247,7 @@ class MountManager {
     return new Promise((resolve) => {
       execFile('sudo', ['-n', 'mount', '-t', 'ceph', src, mp, '-o', opts], { timeout: 30000 }, (err, _o, stderr) => {
         if (err || !this.isMounted(m)) {
-          this._errors.set(id, ('CephFS mount failed: ' + String(stderr || err?.message || 'unknown')).slice(0, 200));
+          this._errors.set(id, this._sayW(id, 'cephfs_failed', { detail: String(stderr || err?.message || 'unknown').slice(0, 200 - 'CephFS mount failed: '.length) }));
           this._notify();
           return resolve(false);
         }
@@ -2502,7 +2515,7 @@ class MountManager {
       }
     }
     if (!made.ok) {
-      throw new Error(`No permission to create the mount point ${mp} — pick a writable location, or create it yourself first: sudo mkdir -p '${mp}' && sudo chown ${owner} '${mp}'`);
+      throw MW.refusal('mp_no_permission', { mp, owner });
     }
     // Writability check catches a PRE-EXISTING root-owned dir too.
     let w = await run('test', ['-w', mp]);
@@ -2510,7 +2523,7 @@ class MountManager {
       const su = await run('sudo', ['-n', 'chown', owner, mp]);
       if (su.ok) { global.__vsEvent?.('mount-mkdir-sudo'); w = await run('test', ['-w', mp]); }
     }
-    if (!w.ok) throw new Error(`The mount point ${mp} exists but is not writable by VibeSpace — fix ownership: sudo chown ${owner} '${mp}'`);
+    if (!w.ok) throw MW.refusal('mp_not_writable', { mp, owner });
     if (!quarantine) return null;
     // Leftovers under an UNMOUNTED mount point are STRANDED writes: something
     // wrote into the bare directory while the storage was down. rclone
@@ -2524,9 +2537,9 @@ class MountManager {
     const dest = `${mp}.stranded-${new Date().toISOString().replace(/[-:]/g, '').slice(0, 13)}`;
     let mv = await run('mv', [mp, dest]);
     if (!mv.ok) mv = await run('sudo', ['-n', 'mv', mp, dest]);
-    if (!mv.ok) throw new Error(`The mount point ${mp} is not empty (${names.slice(0, 5).join(', ')}${names.length > 5 ? ', …' : ''}) — these were written while the storage was disconnected; move them away, then reconnect`);
+    if (!mv.ok) throw MW.refusal('mp_not_empty', { mp, names: `${names.slice(0, 5).join(', ')}${names.length > 5 ? ', …' : ''}` });
     const re = await run('mkdir', ['-p', mp]);
-    if (!re.ok) throw new Error(`Moved stranded files to ${dest} but could not recreate the mount point ${mp}: ${re.stderr}`);
+    if (!re.ok) throw MW.refusal('mp_not_recreated', { dest, mp, detail: String(re.stderr || '') });
     const text = `${mp} held ${names.length} item${names.length === 1 ? '' : 's'} written while the storage was disconnected (${names.slice(0, 5).join(', ')}${names.length > 5 ? ', …' : ''}) — moved to ${dest}. Nothing was deleted; merge them into the storage yourself.`;
     console.warn(`[mounts] stranded content quarantined: ${text}`);
     global.__vsEvent?.('mount-stranded-quarantine');
@@ -2602,7 +2615,7 @@ class MountManager {
       }
       if (m.expiresAt && Date.now() > m.expiresAt) { this._errors.set(m.id, 'credential expired'); continue; }
       if (this.isMounted(m)) continue; // adopted — detached rclone survived
-      try { await this.mount(m.id); } catch (e) { this._errors.set(m.id, String(e.message || e)); }
+      try { await this.mount(m.id); } catch (e) { this._errors.set(m.id, this._sayE(m.id, e)); }
     }
     this._notify();
   }
@@ -3117,7 +3130,7 @@ class MountManager {
     const base = MountManager.GRAPH_BASE[m.region || 'global'] || MountManager.GRAPH_BASE.global;
     const r = await fetch(base + '/v1.0/me/drive', { headers: { Authorization: `Bearer ${tok.access_token || ''}` }, signal: AbortSignal.timeout(15000) });
     if (r.status === 401) throw new Error('OneDrive token expired before the drive could be resolved — sign in again ("Re-authorize OneDrive…" in the edit dialog)');
-    if (!r.ok) throw new Error(`OneDrive drive lookup failed (HTTP ${r.status})`);
+    if (!r.ok) throw MW.refusal('onedrive_lookup_failed', { status: r.status });
     const d = await r.json().catch(() => null);
     if (!d?.id) throw new Error('OneDrive drive lookup returned no drive id');
     m.driveId = String(d.id);

@@ -24,12 +24,13 @@ const os = require('os');
 const fs = require('fs');
 const path = require('path');
 const { execFile, spawn } = require('child_process');
+const MW = require('./mount-error-words.js'); // B-af94: every refusal and row words BY CODE — the page words them in its language
 const DM = require('./device-mount'); // the pull chain (B-fcc7: read at each call — test-pull-refresh §15 drives the manager over a stub chain)
 // cure 4 (the readers' should): a pull the person REMOVED while the mount it was asked for waited is refused to the caller
 // that asked (mountPull / remount) with these words — whatever road the removal took (the boot's mark, the release, the
 // mount landing, a throw on the way) — never a 200 with live:false for a record that is gone. The code names it in-process
 // (logs, the suite); the routes answer the words (server.js takes no line)
-const removedWhileMounting = () => Object.assign(new Error('this pull mount was removed while it was being mounted — nothing of it stays mounted'), { code: 'mount_removed' });
+const removedWhileMounting = () => MW.refusal('mount_removed');
 const { rcloneMountArgs, shellWords, SSH_HOST_WEBDAV_ROW } = require('./mount-argv.js');   // THE mount argv (B-069b: the push mount's too)
 
 const PAIR_GRACE_MS = 120000;   // B-844b r4: after a start, the mount that worked LAST (else the elder) keeps its folder while the machines redial; then a held record that can mount takes over from a holder that cannot
@@ -181,6 +182,9 @@ class MachineMounts {
       : { id: m.id, dir: 'push', hostId: m.hostId, folder: m.folder, mountpoint: m.mountpoint, mode: m.mode, os: m.os, method: m.method, via: m.tunnelPort ? 'tunnel' : 'public', mountedAt: m.mountedAt, remoteMounted: !this._pushDown?.has(m.id) });
   }
 
+  /** B-af94: a pull row's words said from a coded error keep its code (a code is shown only while ITS words are the row's) */
+  _sayCode(id, e) { if (e && MW.known(e.code)) (this._pullErrorCodes = this._pullErrorCodes || new Map()).set(id, { words: String(e.message), code: e.code, params: e.params || {} }); }
+
   /** A pull's row: its words AND their code + params when the hub knows them (the page words those — zh, ja — and shows the
    *  English only for a code it does not know). A code is given only while ITS words are the row's. */
   _pullRow(m) {
@@ -205,11 +209,11 @@ class MachineMounts {
         const net = require('net');
         const { port } = await dm.reverseForward({ port: wantPort || 0, connectLocal: () => net.connect(lp, '127.0.0.1') });
         return { base: `http://127.0.0.1:${port}`, tunnelPort: port };
-      } catch { if (dial) throw new Error('device unreachable — its daemon is not dialed in'); /* ssh → public fallback below */ }
+      } catch { if (dial) throw MW.refusal('device_unreachable'); /* ssh → public fallback below */ }
     }
     const pub = this.publicUrl() || publicUrlFallback;
     if (pub) return { base: String(pub).replace(/\/$/, ''), tunnelPort: null };
-    throw new Error('no path for the remote to reach this instance — the device tunnel needs the machine daemon link; otherwise set agentd.publicUrl (Settings) or deploy with VIBESPACE_PUBLIC_URL');
+    throw MW.refusal('no_dav_path');
   }
 
   // ── run-on-machine helpers (device link first; ssh fallback for ssh hosts) ──
@@ -285,7 +289,7 @@ class MachineMounts {
         out = Buffer.concat(chunks).toString('utf8');
         if (r.code !== 0 && !out.includes('OK')) throw new Error('exit ' + r.code + ': ' + out.slice(-200));
       } catch (e) {
-        if (h.transport === 'dial') throw new Error('rclone install on the device failed: ' + String(e.message || e).slice(0, 200));
+        if (h.transport === 'dial') throw MW.refusal('rclone_install_device_failed', { detail: String(e.message || e).slice(0, 200) });
         out = ''; // ssh fallback below
       }
     }
@@ -293,7 +297,7 @@ class MachineMounts {
       const fetch = await this._run(hostId, 'sh', ['-c', script]);
       out = (fetch.stdout || '') + (fetch.stderr || '');
     }
-    if (!out.includes('OK')) throw new Error('rclone install on host failed: ' + out.slice(0, 200));
+    if (!out.includes('OK')) throw MW.refusal('rclone_install_host_failed', { detail: out.slice(0, 200) });
     return remoteBin;
   }
 
@@ -306,7 +310,7 @@ class MachineMounts {
   // the dialog always gets a real, actionable error.
   _withDeadline(p, ms, label) {
     return Promise.race([p, new Promise((_, rej) => {
-      const t = setTimeout(() => rej(new Error(`${label} timed out after ${Math.round(ms / 1000)}s — the device link may be stalled (machine asleep/offline?); wake the machine and retry`)), ms);
+      const t = setTimeout(() => rej(MW.refusal(label === 'push mount' ? 'push_mount_timed_out' : 'pull_mount_timed_out', { s: Math.round(ms / 1000) })), ms);
       t.unref?.();
     })]);
   }
@@ -337,9 +341,7 @@ class MachineMounts {
     const pull = this._state.mounts.find((m) => m.dir === 'pull' && m.mountpoint && (abs === m.mountpoint || abs.startsWith(m.mountpoint + '/')));
     if (pull) {
       const mName = (() => { try { return this.hosts.get(pull.hostId)?.name || pull.hostId; } catch { return pull.hostId; } })();
-      throw new Error(pull.hostId === hostId
-        ? `this folder is the live mirror of ${mName}'s own ${pull.remotePath} — it already lives on that machine; open it there directly instead of mounting it back`
-        : `this folder is the live mirror of ${mName}'s ${pull.remotePath} — sharing a mounted mirror loops through two mount chains; share a real folder on this instance instead`);
+      throw MW.refusal(pull.hostId === hostId ? 'push_loop_own' : 'push_loop_other', { machine: String(mName), remotePath: String(pull.remotePath || '') });
     }
     // Existence/health probe via a CHILD process — NEVER node fs on a
     // possibly-FUSE-backed path (2.108.3 class; real incident: the old
@@ -353,10 +355,8 @@ class MachineMounts {
         resolve(err.code === 3 ? 'missing' : err.code === 4 ? 'unreadable' : 'hung');
       });
     });
-    if (probe === 'missing') throw new Error(`folder does not exist on this instance: ${abs}`);
-    if (probe !== 'ok') throw new Error(probe === 'hung'
-      ? `folder is not responding (its backing mount/storage may be stalled): ${abs} — reconnect that storage first, or share a plain local folder`
-      : `folder is not readable: ${abs}`);
+    if (probe === 'missing') throw MW.refusal('folder_missing', { path: abs });
+    if (probe !== 'ok') throw MW.refusal(probe === 'hung' ? 'folder_hung' : 'folder_unreadable', { path: abs });
     const { base, tunnelPort } = await this._davBase(hostId, { publicUrlFallback });
     console.log(`[machine-mounts] push: dav base ready (${tunnelPort ? 'tunnel:' + tunnelPort : 'public'})`);
     const share = this.mountTokens.mint({ name: 'host:' + hostId, kind: 'reverse-mount', owner: hostId, root: abs, mode: mode === 'rw' ? 'rw' : 'ro' });
@@ -380,7 +380,7 @@ class MachineMounts {
     if (osKind === 'windows') {
       // native WebClient redirector — no FUSE. drive letter or UNC-style path.
       const r = await this._run(hostId, 'cmd', ['/c', `net use * ${davUrl.replace(/^https?:/, m => m)} /user:vibespace ${shareToken} /persistent:no`]);
-      if (r.code !== 0) throw new Error('net use failed: ' + (r.stderr || r.stdout).slice(0, 200));
+      if (r.code !== 0) throw MW.refusal('net_use_failed', { detail: (r.stderr || r.stdout).slice(0, 200) });
       method = 'net-use';
     } else {
       // MOUNT LADDER (2.369.12, inc-mtl78uhs — userW's Mac HAS macFUSE, yet
@@ -448,7 +448,7 @@ class MachineMounts {
         try { await rung.run(); method = rung.method; break; }
         catch (e) { errs.push(`[${rung.method}] ${String(e.message || e)}`); console.warn(`[machine-mounts] push rung ${rung.method} failed on ${hostId}: ${String(e.message || e).slice(0, 200)}`); }
       }
-      if (!method) throw new Error(errs.join('\n') || 'no mount method available on this machine');
+      if (!method) throw (errs.length ? new Error(errs.join('\n')) : MW.refusal('no_mount_method'));   // B-af94: the rungs' list is the tools' own text
     }
     const rec = { id, dir: 'push', hostId, folder: abs, mountpoint: mp, mode, os: osKind, method, tokenId: shareTokenId, tunnelPort, mountedAt: Date.now() };
     if (tunnelPort) this._pushTunnelOwned.add(id);
@@ -506,11 +506,11 @@ class MachineMounts {
     if (rp === '~' || rp.startsWith('~/')) {
       const dm = await this.hosts.deviceBounded(hostId, 8000);
       const home = String((await dm.runCmd('sh', ['-c', 'echo "$HOME"'], { timeoutMs: 8000, by: 'system:machine-mounts' })).stdout || '').trim();
-      if (!home.startsWith('/')) throw new Error('could not resolve ~ on the machine — use an absolute path');
+      if (!home.startsWith('/')) throw MW.refusal('home_unresolved');
       rp = home + rp.slice(1);
       remotePath = rp;
     }
-    if (!remotePath || !String(remotePath).startsWith('/')) throw new Error('remotePath must be absolute (a folder ON the machine)');
+    if (!remotePath || !String(remotePath).startsWith('/')) throw MW.refusal('remote_path_relative');
     // Strip a trailing slash (real userW bug): the daemon's serve-folder
     // confines requests with `root + path.sep`, so a root ending in '/' makes
     // the prefix a DOUBLE slash that no real subpath matches → every file 403s
@@ -528,7 +528,7 @@ class MachineMounts {
       const [realR, learnedAdd] = await Promise.all([(this._realpath || realpathChild)(mp), this._resolveReals()]), real = realR || path.resolve(mp);
       if (learnedAdd && learnedAdd.length) await this._recheckPairs().catch(() => { });   // r8 (read 7 #3): a sibling's path learned here — its pair is checked now
       // r7 (read 6 #2): an add whose folder did not ANSWER is refused (nothing recorded) — its pair could never be checked later
-      if (!realR) throw Object.assign(new Error('this folder did not answer when checked — nothing was added; try again, or pick another folder'), { code: 'mount_point_add_unchecked', params: { mountpoint: mp } });   // r8 (read 7 #1): nothing recorded — nothing is tried again
+      if (!realR) throw MW.refusal('mount_point_add_unchecked', { mountpoint: mp });   // r8 (read 7 #1): nothing recorded — nothing is tried again
       rec = this._state.mounts.find((m) => m.dir === 'pull' && m.hostId === hostId && m.remotePath === remotePath && (this._realMp.get(m.id) || path.resolve(m.mountpoint)) === real);   // its read: asked twice meanwhile (r4: or by another spelling) — that record, never «in use» by itself
       if (!rec) { const c = this._folderConflict(real, null); if (c) throw this._conflictError(c); }
       askedReal = realR;
@@ -566,11 +566,11 @@ class MachineMounts {
     }
     if (!this._realMp.has(rec.id) && this._held.has(rec.id)) { const h = this._held.get(rec.id); this._pullRetryAt?.delete(rec.id); throw Object.assign(new Error(h.words), { code: h.code, params: h.params }); }   // r8 (read 7 #6): a held row keeps its words
     if (!this._realMp.has(rec.id)) {   // r7 (read 6 #6): said on the row (the dot), the next check asks again once its child has ended
-      const words = 'this folder could not be checked yet (it did not answer) — it is tried again by itself', params = { mountpoint: String(rec.mountpoint || '') };
+      const params = { mountpoint: String(rec.mountpoint || '') }, words = MW.wordsFor('mount_point_unchecked', params);
       (this._pullErrorCodes = this._pullErrorCodes || new Map()).set(rec.id, { words, code: 'mount_point_unchecked', params });
       if ((this._pullErrors = this._pullErrors || new Map()).get(rec.id) !== words) { this._pullErrors.set(rec.id, words); this._notify(); }
       this._pullRetryAt?.delete(rec.id);
-      throw Object.assign(new Error(words), { code: 'mount_point_unchecked', params });
+      throw MW.refusal('mount_point_unchecked', params);
     }
     // the cure (the readers' 3): a boot release of THIS record's folder still running is WAITED for — never raced. Keyed by
     // the MOUNT POINT, resolved (cure-2 read #3): a pull removed and added again on the same folder meanwhile has a new id
@@ -594,7 +594,7 @@ class MachineMounts {
     }
     if (lc) {
       this._pullRetryAt?.delete(rec.id);   // read 3 #6: refused for another record's mount — the next sweep asks again (no 5-min wait)
-      if (lc.removed) throw Object.assign(new Error('a pull just removed from this folder is still being let go — it is tried again by itself'), { code: 'mount_point_releasing', params: { mountpoint: String(rec.mountpoint || '') } });
+      if (lc.removed) throw MW.refusal('mount_point_releasing', { mountpoint: String(rec.mountpoint || '') });
       const w = this._conflictWords(lc, { held: true }); throw Object.assign(new Error(w.words), { code: w.code, params: w.params });
     }
     this._mounting.add(rec.id);
@@ -629,7 +629,7 @@ class MachineMounts {
         },
       });
       // r1 #4: the machine's link closed while this mount was being made (onMachineUnlinked saw no live chain) — let it go now
-      if (!this._online(rec.hostId)) { try { await h.teardown(); } catch { } throw new Error('the machine went offline while its folder was being mounted'); }
+      if (!this._online(rec.hostId)) { try { await h.teardown(); } catch { } throw MW.refusal('machine_went_offline'); }
       if (!this._state.mounts.some((m) => m.id === rec.id)) { try { await h.teardown(); } catch { } return; }   // cure 2: removed while it was being mounted (B-844b: canRelease keeps a folder another record now holds)
       entry = { teardown: h.teardown, released: h.released, mountpoint: rec.mountpoint, at: Date.now() };
       this._live.set(rec.id, entry);
@@ -643,12 +643,12 @@ class MachineMounts {
       // the cure (the readers' 1): a release that HUNG is SAID where the row is read (list().error), once, and the record
       // leaves the mounting set (the finally) so the next check may try again — never a silent forever-«mounting»
       // cure-2 read #6: said only while the record exists — a pull removed during its release gets no words back
-      if (e && e.code === 'unmount_hung' && this._state.mounts.some((m) => m.id === rec.id)) { const said = this._pullErrors || (this._pullErrors = new Map()); if (said.get(rec.id) !== e.message) { said.set(rec.id, e.message); this._notify(); } }
+      if (e && e.code === 'unmount_hung' && this._state.mounts.some((m) => m.id === rec.id)) { const said = this._pullErrors || (this._pullErrors = new Map()); this._sayCode(rec.id, e); if (said.get(rec.id) !== e.message) { said.set(rec.id, e.message); this._notify(); } }
       // B-fcc7 (its reads 2–3): a mount refused because its folder is NOT EMPTY (rclone's «directory is not empty», fusermount's
       // «mountpoint is not empty») — a file a writer left in the bare folder while the machine was away: the row says why (that
       // failure's own evidence); the folder is probed again (shadowedBy shows a non-empty one, so its files can be moved out)
       if (e && /(directory|mountpoint) is not empty/i.test(String(e.message || '')) && this._state.mounts.some((m) => m.id === rec.id)) {
-        const said = this._pullErrors || (this._pullErrors = new Map()), words = 'this folder is not empty, so the machine\'s folder cannot be mounted over it — move its files out, then press Remount now';
+        const said = this._pullErrors || (this._pullErrors = new Map()), words = MW.wordsFor('mount_not_empty');
         (this._pullErrorCodes = this._pullErrorCodes || new Map()).set(rec.id, { words, code: 'mount_not_empty', params: {} });   // 主开发's small 5: worded on the page
         if (said.get(rec.id) !== words) { said.set(rec.id, words); this._notify(); }
       }
@@ -666,8 +666,8 @@ class MachineMounts {
   /** Manual remount (the pull row's ↻ — e.g. after a failed heal). */
   async remount(id) {
     const rec = this._state.mounts.find((m) => m.id === id);
-    if (!rec) throw new Error('unknown machine mount');
-    if (!this._online(rec.hostId)) throw new Error('machine is offline — start its daemon first');
+    if (!rec) throw MW.refusal('unknown_mount');
+    if (!this._online(rec.hostId)) throw MW.refusal('machine_offline_start');
     if (rec.dir === 'push') {
       // a push mount manually umounted ON the machine (or torn by a reboot):
       // the raw token is unrecoverable (hashed at rest), so re-creating with
@@ -688,12 +688,13 @@ class MachineMounts {
 
   async unmount(id) {
     const i = this._state.mounts.findIndex((m) => m.id === id);
-    if (i < 0) throw new Error('unknown machine mount');
+    if (i < 0) throw MW.refusal('unknown_mount');
     const rec = this._state.mounts[i];
     if (rec.dir === 'pull') {
       const live = this._live.get(id);
       if (live) { try { await live.teardown(); } catch { } this._live.delete(id); }
       this._pullErrors?.delete(id);   // cure 2: its words go with its record
+      this._pullErrorCodes?.delete(id);   // B-af94: and their code
       this._bare?.delete(id);
       this._held.delete(id);
     } else {
@@ -724,13 +725,9 @@ class MachineMounts {
   _conflictWords({ kind, other }, { held = false } = {}) {
     let name = null; try { name = this.hosts.get(other.hostId).name || other.hostId; } catch { name = null; }
     const params = { machine: name == null ? '' : String(name), removed: name == null, remotePath: String(other.remotePath || ''), mountpoint: String(other.mountpoint || ''), held };
-    const who = params.removed ? `a removed machine’s ${params.remotePath}` : `“${params.machine}”’s ${params.remotePath}`;
-    const end = held ? 'remove one of the two rows' : null;
-    if (kind === 'same') return { code: 'mount_point_in_use', params, words: held ? `this folder is also the mount point of ${who} — ${end}` : `this folder is already the mount point of ${who} — ${params.removed ? 'remove that row in Mounts, or pick another folder' : 'pick another folder (one folder holds one machine’s folder)'}` };
+    if (kind === 'same') return { code: 'mount_point_in_use', params, words: MW.wordsFor('mount_point_in_use', params) };   // B-af94: src/mount-error-words.js composes them (the page: the same in its language)
     params.kind = kind;
-    return { code: 'mount_point_nested', params, words: kind === 'inside'
-      ? `this folder is inside ${params.mountpoint}, the mount point of ${who} — unmounting one would take the other with it; ${end || 'pick a folder outside it'}`
-      : `this folder holds ${params.mountpoint}, the mount point of ${who} — unmounting one would take the other with it; ${end || 'pick a folder outside it'}` };
+    return { code: 'mount_point_nested', params, words: MW.wordsFor('mount_point_nested', params) };
   }
   /** B-844b: every pull record's real path resolved (children, in parallel — never one wedged mount point after another) */
   async _resolveReals() {
@@ -1015,7 +1012,7 @@ class MachineMounts {
     for (const rec of offline) {
       const key = this._markKey(rec);   // B-844b: the REAL path
       const p = prev.then(() => DM.releaseStale(rec.mountpoint, { log: this.log })).then(() => { if (!this._held.has(rec.id) && this._pullErrors && this._pullErrors.delete(rec.id)) this._notify(); }).catch((e) => {   // read 2: a held record's words stay
-        if (e && e.code === 'unmount_hung' && !this._held.has(rec.id) && this._state.mounts.some((m) => m.id === rec.id)) { (this._pullErrors = this._pullErrors || new Map()).set(rec.id, e.message); this._notify(); }
+        if (e && e.code === 'unmount_hung' && !this._held.has(rec.id) && this._state.mounts.some((m) => m.id === rec.id)) { this._sayCode(rec.id, e); (this._pullErrors = this._pullErrors || new Map()).set(rec.id, e.message); this._notify(); }
       });
       this._releasing.set(key, p);
       p.then(() => { if (this._releasing.get(key) === p) this._releasing.delete(key); });

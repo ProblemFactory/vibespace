@@ -1132,13 +1132,13 @@ app.post('/api/machine-mounts/:hostId', async (req, res) => {
       if (!pub) pub = require('./src/write-origin.js').ownOriginOf(req.headers, { encrypted: !!(req.socket && req.socket.encrypted) }) || null; // the request's own origin: THE one rule
       res.json(await machineMounts.mountPush(req.params.hostId, { folder: b.folder, mode: b.mode, mountpoint: b.mountpoint, publicUrlFallback: pub }));
     }
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { res.status(400).json(require('./src/mount-error-words.js').errorBody(e)); }
 });
 app.delete('/api/machine-mounts/:id', async (req, res) => {
-  try { res.json(await machineMounts.unmount(String(req.params.id))); } catch (e) { res.status(400).json({ error: e.message }); }
+  try { res.json(await machineMounts.unmount(String(req.params.id))); } catch (e) { res.status(400).json(require('./src/mount-error-words.js').errorBody(e)); }
 });
 app.post('/api/machine-mounts/:id/remount', async (req, res) => {
-  try { res.json(await machineMounts.remount(String(req.params.id))); } catch (e) { res.status(400).json({ error: e.message }); }
+  try { res.json(await machineMounts.remount(String(req.params.id))); } catch (e) { res.status(400).json(require('./src/mount-error-words.js').errorBody(e)); }
 });
 
 // ── Port forwarding (B-0b60, tunnel path): expose a machine's loopback

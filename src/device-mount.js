@@ -173,7 +173,7 @@ function lazyUnmount(mountpoint, { say = null, ms = UNMOUNT_MS } = {}) {
  *  last hub's rclone must not stay a FUSE entry whose every read fails ENOTCONN until the next mount. */
 async function releaseStale(mountpoint, { log = () => {}, ms = UNMOUNT_MS } = {}) {
   // a release whose unmount HUNG is a failure by name (`unmount_hung`): nothing is mounted over a folder still held
-  if ((await lazyUnmount(mountpoint, { say: log, ms })) === 'hung') throw Object.assign(new Error(`could not release the folder ${mountpoint} — its unmount did not answer in ${Math.round(ms / 1000)} s`), { code: 'unmount_hung' });
+  if ((await lazyUnmount(mountpoint, { say: log, ms })) === 'hung') throw require('./mount-error-words.js').refusal('unmount_hung', { mountpoint, s: Math.round(ms / 1000) });   // B-af94: worded by code
   return killMountDaemons(mountpoint, { say: log }); // non-Linux: no /proc — the lazy unmount alone
 }
 
@@ -313,7 +313,7 @@ async function deviceFolderMount({ device, remotePath, mountpoint, rcloneBin, vf
   const sawGet = (d) => { if (refresher && d.indexOf('GET ') !== -1) refresher.sawRead(); };
   // 1) ask the device to serve the folder over WebDAV on its own loopback
   const sf = await device.serveFolder(remotePath, { by: 'system:device-mount' }); // lane device-act-audit: a pull mount's folder server
-  if (!sf || !sf.port) throw new Error('device serve-folder failed: ' + (sf && sf.error || 'no port'));
+  if (!sf || !sf.port) throw require('./mount-error-words.js').refusal('serve_folder_failed', { detail: String((sf && sf.error) || 'no port') });
   const devicePort = sf.port;
 
   // 2) bridge a LOCAL loopback port → tcp-forward → the device's HTTP server.
@@ -416,7 +416,7 @@ async function deviceFolderMount({ device, remotePath, mountpoint, rcloneBin, vf
     const releasedF = releaseOwn(); // r1 #1: a mount that came up BROKEN (its listing failed) is a FUSE entry too — released (B-fcc7: its promise rides the error)
     try { bridge.close(); } catch {}
     try { await device.unserveFolder(devicePort); } catch {}
-    throw Object.assign(new Error((rcGone ? 'rclone webdav mount exited: ' : 'rclone webdav mount did not come up: ') + (stderr.slice(-300) || (rcGone ? 'no message' : 'timeout'))), { released: releasedF });
+    throw Object.assign(require('./mount-error-words.js').refusal(rcGone ? 'webdav_mount_exited' : 'webdav_mount_not_up', { detail: stderr.slice(-300) || (rcGone ? 'no message' : 'timeout') }), { released: releasedF });   // B-af94: worded by code
   }
   log(`device folder ${remotePath} mounted at ${mountpoint} (device:${devicePort} ↔ bridge:${bridgePort})`);
   refresher = heldRefresher({

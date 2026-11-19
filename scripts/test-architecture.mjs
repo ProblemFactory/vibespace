@@ -308,6 +308,10 @@ const PURE = new Set(['src/utf8-stream.js' /* B-b968: ONE UTF-8 decoder per byte
   //     `caps.receive`, which is why they must be importable from the browser
   //     bundle and from a node suite with no server at all.
   'src/channel-record.js', 'src/channel-caps.js',
+  //   mount-error-words — B-af94: a mount's words BY CODE (cloud rows, pull rows, machine-mount refusals): the hub fills the
+  //     English, the page (src/lib/sidebar-mounts.js) words the same code in its language; mount-liveness = the sweep's verdict
+  //     table (en / zh / ja, PURE already) it reads for a `liveness_<key>` code — bundled by the browser, so pure
+  'src/mount-error-words.js',
   //   peer-text — THE belt on peer text toward an agent (lane peer-census, 2026-09-29): bound → the hidden
   //     characters folded → the frame rule per line and per inline piece, composed ONCE over channel-record's
   //     frame rule and hidden-chars' set (PURE → PURE); every census row of test-peer-text-census that claims the
