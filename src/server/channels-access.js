@@ -330,7 +330,7 @@ function create(engineCtx) {
   function fanTargets() {
     let live = [];
     try { live = liveSessions() || []; } catch (err) { log.warn(`[channels] liveSessions threw: ${(err && err.message) || err}`); }
-    return live.filter((x) => x && x.cid).map((x) => ({ cid: String(x.cid), name: x.name || null, groups: Array.isArray(x.groups) ? x.groups.map(String) : [], inherited: Array.isArray(x.inherited) ? x.inherited.map(String) : [] }));   // lane lg-group-parents U3c: + the lineage
+    return live.filter((x) => x && x.cid).map((x) => ({ cid: String(x.cid), name: x.name || null, groups: Array.isArray(x.groups) ? x.groups.map(String) : [], inherited: Array.isArray(x.inherited) ? x.inherited.map(String) : (x.inherited === null ? null : []) }));   // lane lg-group-parents U3c: + the lineage
   }
   /** THE ANSWER EVERY WAKE PATH READS (lane everyone-principal): `effectiveFor` with every ALL-AGENTS watcher fanned
    *  out to one item per RUNNING conversation (F.fanOutWatchers — each its own key, pending, timers, scope chain and
@@ -592,7 +592,7 @@ function create(engineCtx) {
    *  session belongs to (server.js liveSessions: tasks.groupsForSession, the same crosswalk the group round-robin wakes
    *  over). A group's access reaches its member sessions as notification targets through it (F.memberVia / memberStill). */
   function membersNow() {
-    try { return (liveSessions() || []).filter((x) => x && x.cid).map((x) => ({ cid: String(x.cid), groups: Array.isArray(x.groups) ? x.groups.map(String) : [], inherited: Array.isArray(x.inherited) ? x.inherited.map(String) : [] })); } catch { return []; }   // lane lg-group-parents U3c: + the lineage
+    try { return (liveSessions() || []).filter((x) => x && x.cid).map((x) => ({ cid: String(x.cid), groups: Array.isArray(x.groups) ? x.groups.map(String) : [], inherited: Array.isArray(x.inherited) ? x.inherited.map(String) : (x.inherited === null ? null : []) })); } catch { return []; }   // lane lg-group-parents U3c: + the lineage
   }
   /** The groups a live session belongs to (a drafter's, for its receipt). */
   function groupsOfSession(cid) {
@@ -601,12 +601,12 @@ function create(engineCtx) {
   /** lane lg-group-parents U3c: the ancestors of those groups (the roster's `inherited`, from the ONE reader) — beside every
    *  `groups: groupsOfSession(cid)` a channel ctx is built with */
   function inheritedOfSession(cid) {
-    try { const s = (liveSessions() || []).find((x) => x && x.cid === cid); return s && Array.isArray(s.inherited) ? s.inherited.slice() : []; } catch { return []; }
+    try { const s = (liveSessions() || []).find((x) => x && x.cid === cid); return s && Array.isArray(s.inherited) ? s.inherited.slice() : (s && s.inherited === null ? null : []); } catch { return []; }
   }
   /** the chain's cure (E): a RUNNING conversation's own groups and their ancestors NOW (`{groups, inherited}`), null when it is
    *  not running — a principal stored earlier (an API proposal's) is judged with the live lineage while its conversation runs */
   function liveGroupsOf(cid) {
-    try { const s = (liveSessions() || []).find((x) => x && x.cid === String(cid)); return s ? { groups: Array.isArray(s.groups) ? s.groups.map(String) : [], inherited: Array.isArray(s.inherited) ? s.inherited.map(String) : [] } : null; } catch { return null; }
+    try { const s = (liveSessions() || []).find((x) => x && x.cid === String(cid)); return s ? { groups: Array.isArray(s.groups) ? s.groups.map(String) : [], inherited: Array.isArray(s.inherited) ? s.inherited.map(String) : (s.inherited === null ? null : []) } : null; } catch { return null; }
   }
   function convFor(adapterId, convId) {
     const en = store.index.peek(`${adapterId}/${convId}`);   // B-f32b: a copy of THAT row, never of the index

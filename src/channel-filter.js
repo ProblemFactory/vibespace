@@ -1246,7 +1246,7 @@ function viaJudge(keys, s, cid, rows, except) {
   const gmRows = parts.map((x) => ({ door: 'channel-reach', resource: '-', to: [{ kind: 'group', id: str(x.p.id), ...(x.p.only === true ? { only: true } : {}) }], except: x.ex }));
   const rowIds = new Set(parts.map((x) => str(x.p.id)));
   const fromKeys = [...keyIds].filter((id) => !rowIds.has(id)).map((id) => ({ kind: 'group', id }));
-  const v1 = gmRows.length ? GM.admits(gmRows, { conversationKey: str(cid), groupIds: Array.isArray(s.groups) ? s.groups.map(str) : [], inheritedGroupIds: Array.isArray(s.inherited) ? s.inherited.map(str) : [] }) : null;
+  const v1 = gmRows.length ? GM.admits(gmRows, { conversationKey: str(cid), groupIds: Array.isArray(s.groups) ? s.groups.map(str) : [], inheritedGroupIds: Array.isArray(s.inherited) ? s.inherited.map(str) : [], groupsUnreadable: s.inherited === null }) : null;
   if (v1 && (v1.ok || v1.code === 'excepted')) return v1;
   const v2 = fromKeys.length ? GM.admits([{ door: 'channel-reach', resource: '-', to: fromKeys, except: viaExceptOf(except) }], { conversationKey: str(cid), groupIds: Array.isArray(s.groups) ? s.groups.map(str) : [], inheritedGroupIds: [] }) : null;
   return v2 && v2.ok ? v2 : v1 || v2;
@@ -1266,7 +1266,7 @@ function memberStill(row, members = [], { rows = null, except = [] } = {}) {   /
   const s = (Array.isArray(members) ? members : []).find((x) => x && str(x.cid) === str(row.principal.id));
   const viaEnt = (Array.isArray(rows) ? rows : []).find((r) => { const pr = principalOfRow(r); return pr && pr.kind === 'group' && str(pr.id) === str(row.via); });   // the cure's cure (1): the via row WITH its own «除了»
   const viaRow = viaEnt ? viaRowOf([viaEnt])[0] : null, viaEx = viaEnt && viaEnt.row && Array.isArray(viaEnt.row.except) ? viaEnt.row.except : viaEnt && Array.isArray(viaEnt.except) ? viaEnt.except : except;
-  if (viaRow) return !!s && GM.admits([{ door: 'channel-reach', resource: '-', to: [viaRow], except: viaExceptOf(viaEx) }], { conversationKey: str(row.principal.id), groupIds: Array.isArray(s.groups) ? s.groups.map(str) : [], inheritedGroupIds: Array.isArray(s.inherited) ? s.inherited.map(str) : [] }).ok;
+  if (viaRow) return !!s && GM.admits([{ door: 'channel-reach', resource: '-', to: [viaRow], except: viaExceptOf(viaEx) }], { conversationKey: str(row.principal.id), groupIds: Array.isArray(s.groups) ? s.groups.map(str) : [], inheritedGroupIds: Array.isArray(s.inherited) ? s.inherited.map(str) : [], groupsUnreadable: s.inherited === null }).ok;
   return !!s && GM.admits([{ door: 'channel-reach', resource: '-', to: [{ kind: 'group', id: str(row.via) }], except: [] }], { conversationKey: str(row.principal.id), groupIds: Array.isArray(s.groups) ? s.groups.map(str) : [], inheritedGroupIds: [] }).ok;   // lane lg-group-parents (the U3c read, MAJOR 4): own groups only, as memberVia
 }
 /** the chain's cure (D): why a member the via judge refused is refused, in the model's words (a parent's «仅本组» access) — '' when
@@ -1668,7 +1668,7 @@ function namedRowOf(p, x) {
 const _namedFacts = new WeakMap();  // ctx → its facts as the model last prepared them (the model answers them again while they are the same)
 const NO_GROUPS = Object.freeze([]);
 function namedFactsOf(ctx) {
-  const held = ctx.groupsUnreadable === true;   // THE STORE HELD UNREAD (lane bl-windows): a fact the hub's principal carries — the groups UNKNOWN, never «in none» (a row's except)
+  const held = ctx.groupsUnreadable === true || ctx.inheritedGroups === null;   // THE STORE HELD UNREAD (lane bl-windows): a fact the hub's principal carries — the groups UNKNOWN, never «in none» (a row's except)
   const F = GM.prepareFacts({ conversationKey: str(ctx.id), groupIds: Array.isArray(ctx.groups) ? ctx.groups : NO_GROUPS, inheritedGroupIds: Array.isArray(ctx.inheritedGroups) ? ctx.inheritedGroups : NO_GROUPS, ...(held ? { groupsUnreadable: true } : {}) }, _namedFacts.get(ctx));
   _namedFacts.set(ctx, F);
   return F;
@@ -1715,7 +1715,7 @@ function fanOutWatchers(eff, live = [], { filterOf = null, admit = null } = {}) 
   // lane grants-unify: WHO a fanned row may wake is THE model's answer — the caller's `admit(item, target)` (the watch
   // row's `except`, the target's reach) or, without one, `admits` over the row's principal alone (All agents: every
   // running conversation; a Task Group: its members)
-  const mayWake = (item, tg) => (typeof admit === 'function' ? !!admit(item, tg) : GM.admits([{ door: 'channel-watch', resource: '-', to: [GM.fromChannelPrincipal(item.watcher.principal)].filter(Boolean), except: [] }], { conversationKey: tg.cid, groupIds: tg.groups, inheritedGroupIds: Array.isArray(tg.inherited) ? tg.inherited : [] }).ok);   // lane lg-group-parents U3c
+  const mayWake = (item, tg) => (typeof admit === 'function' ? !!admit(item, tg) : GM.admits([{ door: 'channel-watch', resource: '-', to: [GM.fromChannelPrincipal(item.watcher.principal)].filter(Boolean), except: [] }], { conversationKey: tg.cid, groupIds: tg.groups, inheritedGroupIds: Array.isArray(tg.inherited) ? tg.inherited : [], groupsUnreadable: tg.inherited === null }).ok);   // lane lg-group-parents U3c
   const seen = new Set();
   const targets = [];
   for (const s of Array.isArray(live) ? live : []) {

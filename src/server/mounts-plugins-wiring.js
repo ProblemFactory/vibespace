@@ -345,7 +345,7 @@ const automation = require('./automation-engine.js').create({ dataDir: path.join
   // lane conversations-archive-verb: the archive verb's seams on conversation-ops' automationVerbs — the sidebar's own archived-list
   // write, the For-you store's open asks of a conversation (its own: by agent, not a notice) and their dismissal, the turn fact, and
   // an ENDED conversation's facts (its session key from the stores that still name it — the sidebar's names, the Task Groups — else claude:<id>)
-  verbs: { ...require('./conversation-ops.js').automationVerbs({ activeSessions, groupsOf: automationGroupsStrict, lineageOf: (ids) => { const tk = getTasks && getTasks(); return tk ? tk.grantGroupsOf(ids).inherited : []; },
+  verbs: { ...require('./conversation-ops.js').automationVerbs({ activeSessions, groupsOf: automationGroupsStrict, lineageOf: (ids) => { const tk = getTasks && getTasks(); if (!tk) throw new Error('the Task Group store is not ready'); return tk.grantGroupsOf(ids).inherited; },
     archive: (key) => persistenceRouter.archiveSession(key),
     asksOf: (key) => { if (userTodos.isHeldUnread?.()) throw Object.assign(new Error(userTodos.unreadRefusal('archiving a conversation (its open asks are unread)')), { code: 'todos-unread' }); try { return userTodos.forSession([key]).filter((i) => i && i.by === 'agent' && i.kind !== 'notice' && i.kind !== 'page'); } catch { return []; } },   // B-44f3: held ⇒ refused by name (never «no open asks»)
     resolveAsks: (ids, by) => userTodos.setStatusMany(ids, 'dismissed', by),
@@ -1343,7 +1343,7 @@ function createSessionMessages(session, sessionId) {
       // conversation's membership cannot be read through the live rule, and it is not "no groups" either (verify
       // 2026-09-28: read as "no groups", a WIDENING detached a stopped member of the listed Task Group — its tab in the
       // shared browser closed for a change that kept it); the keeper judges it at its next command instead
-      groupLineageOf: (ids) => { const tasks = getTasks ? getTasks() : null; return tasks ? tasks.grantGroupsOf(ids).inherited : []; },   // lane lg-group-parents U3b: the ONE reader
+      groupLineageOf: (ids) => { const tasks = getTasks ? getTasks() : null; if (!tasks) throw new Error('the Task Group store is not ready'); return tasks.grantGroupsOf(ids).inherited; },   // lane lg-group-parents U3b: the ONE reader · the restack's cure: no store ⇒ unknown (the keeper's lineOf), never «no parents»   // lane lg-group-parents U3b: the ONE reader
       groupNameOf: (id) => { const tasks = getTasks ? getTasks() : null; return tasks ? tasks.lineageNameOf(id) : null; },   // the chain's cure (B): the name door of the lineage words
       taskIdsForKey: (bk) => {
         const tasks = getTasks ? getTasks() : null;
@@ -1575,7 +1575,7 @@ function createSessionMessages(session, sessionId) {
         return userTodos.add(sessionStatusKey(session, sessionId), { origin: 'browser', text, detail, urgency: 'normal', by, sessionName: session && (session.name || session.webuiName) || null }); // origin: the BROWSER routes' switch proposal (this file only wires them)
       },
       tasksForSession: (s, id) => taskIdsFor(s, id),
-      lineageOf: (ids) => { const tasks = getTasks ? getTasks() : null; return tasks ? tasks.grantGroupsOf(ids).inherited : []; },   // lane lg-group-parents U3b: the routes' direct judgements
+      lineageOf: (ids) => { const tasks = getTasks ? getTasks() : null; if (!tasks) throw new Error('the Task Group store is not ready'); return tasks.grantGroupsOf(ids).inherited; },   // lane lg-group-parents U3b: the routes' direct judgements · the restack's cure: no store ⇒ unknown (the routes' groupsUnreadable), never «no parents»   // lane lg-group-parents U3b: the routes' direct judgements
       groupNameOf: (id) => { const tasks = getTasks ? getTasks() : null; return tasks ? tasks.lineageNameOf(id) : null; },   // the chain's cure (B)
       // §3.8 layer ②: a USER's pin/attach/detach queues one typed notice that
       // rides the user's own next message (zero billed turns); the queue is

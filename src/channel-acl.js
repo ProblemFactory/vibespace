@@ -152,7 +152,7 @@ const NO_GROUPS = Object.freeze([]);
 // UNKNOWN, never «in no group» (a row «All agents, except Task Group G» would admit G's members) — a FACT the hub's principal
 // carries (`groupsUnreadable`, src/server/groups-hold.js); this pure judge reads only its arguments
 function factsFor(ctx) {
-  const held = ctx.groupsUnreadable === true;
+  const held = ctx.groupsUnreadable === true || ctx.inheritedGroups === null;   // lane lg-group-parents (the restack's cure): + a lineage that could not be read (null) is unknown by name
   const F = GM.prepareFacts({ conversationKey: String(ctx.id), groupIds: Array.isArray(ctx.groups) ? ctx.groups : NO_GROUPS, inheritedGroupIds: Array.isArray(ctx.inheritedGroups) ? ctx.inheritedGroups : NO_GROUPS, ...(held ? { groupsUnreadable: true } : {}) }, _facts.get(ctx));
   _facts.set(ctx, F);
   return F;

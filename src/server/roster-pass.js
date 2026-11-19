@@ -42,7 +42,7 @@ function sessionRoster({ sessions, tasks, addressableId, statusKey }) {
     try { const gs = tasks().groupsForSession({ sessionKey: statusKey(s, id), cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }) || []; groups = gs.map((g) => g.id); unread = !!gs.unread; } catch { }
     // lane lg-group-parents U3c: the ancestors of those groups (the ONE reader) — the channel doors' lineage; `groups` stays own
     // (msg-acl's «the same group» and group-visibility read only it — rule ④)
-    try { const tk = tasks(); inherited = tk && typeof tk.grantGroupsOf === 'function' ? tk.grantGroupsOf(groups).inherited : []; } catch { inherited = []; }
+    try { const tk = tasks(); inherited = tk && typeof tk.grantGroupsOf === 'function' ? tk.grantGroupsOf(groups).inherited : []; } catch { inherited = null; }   // the restack's cure: a read that throws is UNKNOWN (null ⇒ groupsUnreadable downstream), never «no parents»
     return { cid, name: s.name || null, groups, inherited, webuiId: id, reachability: s._msgReachability || null, ...(unread ? { groupsUnread: true } : {}) };
   });
   /** B-43bc — THE DECIDING DOOR FOR THE ROSTER: before a channels delivery judges a member (a wake, a recall note, a reaction

@@ -210,7 +210,7 @@ function create({ grants = null, dataDir = null } = {}) {
     const k = GM.principalKey(e);
     const own = r.to.filter((x) => GM.principalKey(x) === k);
     if (!own.length) return false;
-    return GM.admits([{ door: DOORS.watch, resource: String(res), to: own, except: exceptFor(own[0], r.except) }], { conversationKey: String(cid), groupIds: groups, inheritedGroupIds: Array.isArray(inherited) ? inherited : [], ...(groupsUnreadable === true ? { groupsUnreadable: true } : {}) }).ok;   // THE STORE HELD UNREAD (lane bl-windows): the caller hands the hold (a fact) — the groups UNKNOWN
+    return GM.admits([{ door: DOORS.watch, resource: String(res), to: own, except: exceptFor(own[0], r.except) }], { conversationKey: String(cid), groupIds: groups, inheritedGroupIds: Array.isArray(inherited) ? inherited : [], ...(groupsUnreadable === true || inherited === null ? { groupsUnreadable: true } : {}) }).ok;   // THE STORE HELD UNREAD (lane bl-windows): the caller hands the hold (a fact) — the groups UNKNOWN
   }
   /** «WHAT IT MAY USE» (unit what-it-may-use, cure r1 — 主开发 MUST 1): WHY nothing of a grain admits one conversation, judged
    *  ENTRY BY ENTRY exactly as the door gives them (each entry its OWN 「除了」 — exceptFor: a group's / everyone's carries the
@@ -238,7 +238,7 @@ function create({ grants = null, dataDir = null } = {}) {
       const p = GM.toChannelPrincipal(e);
       if (p && wakeAdmits(res, p, { cid, groups, inherited, groupsUnreadable })) return { ok: true, via: e.kind, ...(e.kind === 'group' ? { groupId: String(e.id) } : {}) };
     }
-    return refusalOf(DOORS.watch, res, { conversationKey: String(cid || ''), groupIds: groups, inheritedGroupIds: Array.isArray(inherited) ? inherited : [], groupsUnreadable });
+    return refusalOf(DOORS.watch, res, { conversationKey: String(cid || ''), groupIds: groups, inheritedGroupIds: Array.isArray(inherited) ? inherited : [], groupsUnreadable: !!groupsUnreadable || inherited === null });
   }
   /** A grain's 「除了」 in bare principals (what the form draws under a granted account). */
   function exceptBare(res) { return rowOf(DOORS.reach, res).except.map((e) => GM.bareOf(e)).filter(Boolean); }

@@ -8934,7 +8934,7 @@ function create(deps = {}) {
     if (!w || w.principal.kind !== 'group') return true;
     let live = []; try { live = liveSessions() || []; } catch { return false; }
     // lane grants-unify: THE model's answer (a member of the group NOW), never a hand-written membership test
-    return live.some((x) => x && x.cid === cid && GM.admits([{ door: 'channel-watch', resource: '-', to: [GM.fromChannelPrincipal(w.principal)].filter(Boolean), except: [] }], { conversationKey: String(cid), groupIds: Array.isArray(x.groups) ? x.groups.map(String) : [], inheritedGroupIds: Array.isArray(x.inherited) ? x.inherited.map(String) : [] }).ok);   // lane lg-group-parents U3c
+    return live.some((x) => x && x.cid === cid && GM.admits([{ door: 'channel-watch', resource: '-', to: [GM.fromChannelPrincipal(w.principal)].filter(Boolean), except: [] }], { conversationKey: String(cid), groupIds: Array.isArray(x.groups) ? x.groups.map(String) : [], inheritedGroupIds: Array.isArray(x.inherited) ? x.inherited.map(String) : [], groupsUnreadable: x.inherited === null }).ok);   // lane lg-group-parents U3c
   }
   /** R4 verify r2: is the watcher `pk` of this conversation STILL in effect
    *  (its access + notification rows, read fresh) and its target still

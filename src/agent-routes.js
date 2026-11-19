@@ -2134,7 +2134,7 @@ function channelPrincipal(s, id) {
   // lane lg-group-parents U3c: the ancestors of those groups (the ONE reader) — the channel doors' lineage; `groups` stays own
   // (msg-acl's «the same group» and group-visibility read only it — rule ④)
   let inheritedGroups = [];
-  try { inheritedGroups = tasks.grantGroupsOf(myGroups).inherited; } catch { inheritedGroups = []; }
+  try { inheritedGroups = tasks.grantGroupsOf(myGroups).inherited; } catch { inheritedGroups = null; }   // the restack's cure: a lineage that cannot be read is UNKNOWN (the channel facts read null as groupsUnreadable), never «no parents»
   return {
     kind: 'agent', id: cid || `webui:${id}`, name: s.name || null, groups: myGroups, ...(require('./server/groups-hold.js').fact()),   // THE STORE HELD UNREAD (lane bl-windows): the hub's fact, for the channel judges inheritedGroups,
     // lane chat-needs-you-card: the CONVERSATION's own key — a request the engine files under 'channels' names it (`about`),
@@ -2456,7 +2456,7 @@ async function composeCallers(req, res, eng, s, id, b) {
 // THE JOB CALLER'S PRINCIPAL, BUILT ONCE (lane-redact verify r9; restack-411: the withdraw route and lane bl-msg B-da74's rest
 // route both call it — test-record-clear-stores swaps exactly this literal): a session speaks as its conversation; a JOB
 // speaks for its conversation, NAMELESS (its name is words its «Clear content…» never reaches)
-const callerChannelPrincipal = (who) => (who.s ? channelPrincipal(who.s, who.id) : (who.cid ? Object.assign({ kind: 'agent', id: who.cid, name: null, groups: who.myGroups || [], inheritedGroups: (() => { try { return tasks.grantGroupsOf(who.myGroups || []).inherited; } catch { return []; } })() }, require('./server/groups-hold.js').fact()) : null));   // lane lg-group-parents U3c: + the lineage (restack 412: moved into the helper)
+const callerChannelPrincipal = (who) => (who.s ? channelPrincipal(who.s, who.id) : (who.cid ? Object.assign({ kind: 'agent', id: who.cid, name: null, groups: who.myGroups || [], inheritedGroups: (() => { try { return tasks.grantGroupsOf(who.myGroups || []).inherited; } catch { return null; } })() }, require('./server/groups-hold.js').fact()) : null));   // lane lg-group-parents U3c: + the lineage (restack 412: moved into the helper)
 app.post('/api/agent/channels/proposals/:id/withdraw', async (req, res) => {
   // verify r2 (round 1 LOW 6): a BROWSER here (the owner's cookie / a fetch from a page, no agent token) is
   // refused BY NAME — withdraw is the drafting agent's verb; the user rejects from the card — not "missing token".
