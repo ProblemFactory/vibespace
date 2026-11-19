@@ -8,7 +8,10 @@
 //      the listener AT ONCE; a late error closes, drops, says once per feature and falls back to a SWEEP (the feature's own
 //      kick every 60 s, its timer unref'd); a refusal at arming said and swept; a missing folder silent; endWatches.
 //   §2 THE LINUX TREE: one plain watch per folder, each in a try with its own listener; a 'rename' arms the new subfolder; a
-//      new subfolder refused by the limit is caught, said, swept; a folder gone drops its watch; a link is not followed.
+//      new subfolder refused by the limit is caught, said, swept; a folder gone drops its watch; a link is not followed;
+//      THE CAP (a feature past it arms that many, says so once, sweeps) and the walk BREADTH-FIRST; a folder made again armed
+//      again (another inode in its parent's event, or its OWN event — the root too); a folder replaced by a file dropped; a
+//      drop walks the folder's own index (a folder whose own watch ended still takes its subfolders when it goes).
 //      A REAL tree of folders on this machine (node's FSWatcher) armed the same way.
 //   §3 src/opencode-events.js (it rides the bundle): a store watch that errors or closes LEAVES the list (the 10 s list
 //      refresh takes its place) and a later connect arms it again.
@@ -17,8 +20,8 @@
 //      one — is armWatch's own, carries its 'error' listener in the same statement, or is a named row; the hub's watch door
 //      is required by no module of the closure.
 //   §5 the wiring in agentd.js.
-//   CONTROLS (14): no listener · no sweep · endWatches without its close loop · the arm-time catch removed · the tree's
-//      catch removed · the store's dead watch kept · the reconnect without its lost check · a planted destructured watch ·
+//   CONTROLS (18): no listener · no sweep · endWatches without its close loop · the arm-time catch removed · the tree's
+//      catch removed · the walk without its cap · no inode check · the walk depth-first · the folder's own event ignored · the store's dead watch kept · the reconnect without its lost check · a planted destructured watch ·
 //      an inline required one · an alias · one destructured from the fs binding · a recursive one with its listener · a
 //      second bare watch in a named row's file · a watch-door require.
 // Run: node scripts/test-agentd-watch-guard.mjs
@@ -52,7 +55,7 @@ const standIn = ({ recursiveThrows = null, plainThrows = null } = {}) => {
     const w = mkWatcher(made, dir, typeof a === 'function' ? a : b); w.recursive = recursive; return w;
   } };
 };
-const ctxOf = (F, T, lines, { said = new Set(), platform = 'darwin' } = {}) => ({ fs: F, log: (m) => lines.push(m), said, setInterval: T.setInterval, clearInterval: T.clearInterval, platform });
+const ctxOf = (F, T, lines, { said = new Set(), platform = 'darwin', walkCap } = {}) => ({ fs: F, log: (m) => lines.push(m), said, setInterval: T.setInterval, clearInterval: T.clearInterval, platform, ...(walkCap ? { walkCap } : {}) });
 
 console.log('§1 the native recursive road (macOS / Windows): the listener at once; a lost watch closes, says once, sweeps');
 {
@@ -114,10 +117,11 @@ const bothRefused = (M) => { const F = standIn({ recursiveThrows: 'ENOSPC', plai
 console.log('§2 THE LINUX TREE: one plain watch per folder, each in a try with its own listener');
 /** A stand-in fs over a folder tree ({ name: subtree | null(file) | 'link' }): watch() never recursive here. */
 const treeFs = (tree, { refuse = new Set(), unreadable = new Set() } = {}) => {
-  const made = [], reads = [];
+  const made = [], reads = [], inos = new Map(); let nextIno = 1;
+  const inoOf = (p) => { if (!inos.has(p)) inos.set(p, nextIno++); return inos.get(p); };
   const node = (dir) => { let n = tree; for (const p of dir.split('/').filter(Boolean)) { if (!n || typeof n !== 'object' || !(p in n)) return undefined; n = n[p]; } return n; };
-  const statOf = (p) => { const n = node(p); if (n === undefined) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); return { isDirectory: () => !!n && typeof n === 'object', isSymbolicLink: () => n === 'link' }; };
-  return { made, tree, reads, lstatSync: statOf, statSync: statOf, watch(dir, a, b) {
+  const statOf = (p) => { const n = node(p); if (n === undefined) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); return { isDirectory: () => !!n && typeof n === 'object', isSymbolicLink: () => n === 'link', ino: inoOf(p) }; };
+  return { made, tree, reads, remake: (p) => inos.set(p, nextIno++), lstatSync: statOf, statSync: statOf, watch(dir, a, b) {
     if (a && typeof a === 'object' && a.recursive) throw new Error('the tree road never asks node for a recursive watch');
     const n = node(dir); if (n === undefined || n === null || n === 'link') throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
     if (refuse.has(dir)) throw ENOSPC();
@@ -175,6 +179,81 @@ const treeFs = (tree, { refuse = new Set(), unreadable = new Set() } = {}) => {
   ok(!!threw5 && threw5.code === 'ENOSPC', 'CONTROL: the tree\'s catch removed — the refused subfolder THROWS out of the watcher\'s callback (the agent would end) — RED');
   const F6 = treeFs({ h: {} }), lines6 = [];
   ok(WG.armWatch(ctxOf(F6, fakeTimers(), lines6, { platform: 'linux' }), [], '/h/missing', () => { }, 'discovery-watch') === null && !lines6.length, 'a root that does not exist ⇒ null, nothing said (as before)');
+}
+{
+  // 主开发 03:57Z (the next line of this file): THE WALK IS CAPPED — every folder read in one tick holds one of the user's watches
+  const big = () => ({ h: { proj: Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`s${i}`, {}])) } });
+  const F = treeFs(big()), T = fakeTimers(), lines = [], list = [];
+  WG.armWatch(ctxOf(F, T, lines, { platform: 'linux', walkCap: 5 }), list, '/h/proj', () => { }, 'discovery-watch');
+  ok(list.length === 5 && lines.length === 1 && lines[0] === 'discovery-watch: its watches reached 5 folders, the most it keeps; the ones past it under /h/proj are not watched — it falls back to a sweep every 60 s' && T.live.size === 1,
+    'THE CAP: a feature past the cap (5 here) arms that many watches and no more — said ONCE, and the 60 s sweep stands in', { n: list.length, lines });
+  ok(WG.WALK_CAP === 2048 && /const WALK_CAP = 2048;/.test(GUARD_SRC), 'the cap is a number stated in the code: 2048 watches a feature (every root of it)');
+  const MC = modOf(anchored(GUARD_SRC, "    if (list.length >= cap) { lost(ctx, list, onChange, what, `its watches reached ${cap} folders, the most it keeps; the ones past it under ${top} are not watched`); return null; }\n", '', 'walk-without-cap'));
+  const lc = [];
+  MC.armWatch(ctxOf(treeFs(big()), fakeTimers(), [], { platform: 'linux', walkCap: 5 }), lc, '/h/proj', () => { }, 'discovery-watch');
+  ok(lc.length === 10, 'CONTROL: the walk without its cap arms every folder (10 for a cap of 5) — RED', lc.length);
+}
+{
+  // A FOLDER REMOVED AND MADE AGAIN before its event is read: its inode at the add tells it apart (主开发 03:57Z (2), the read's N3)
+  const F = treeFs({ h: { proj: { a: { x: {} } } } }), list = [], lines = [];
+  const root = WG.armWatch(ctxOf(F, fakeTimers(), lines, { platform: 'linux' }), list, '/h/proj', () => { }, 'discovery-watch');
+  const old = list.find((w) => w.dir === '/h/proj/a'), oldX = list.find((w) => w.dir === '/h/proj/a/x');
+  F.tree.h.proj.a = { y: {} }; F.remake('/h/proj/a');
+  root.cb('rename', 'a');
+  const now = list.filter((w) => w.dir === '/h/proj/a');
+  ok(old.closed && oldX.closed && now.length === 1 && now[0] !== old && list.some((w) => w.dir === '/h/proj/a/y') && !list.some((w) => w.dir === '/h/proj/a/x') && !lines.length,
+    'a folder removed and made again (another inode): the dead watch and the ones under it closed, the new folder armed with its subfolders — nothing said', list.map((w) => w.dir));
+  root.cb('rename', 'a');
+  ok(list.filter((w) => w.dir === '/h/proj/a').length === 1 && list.find((w) => w.dir === '/h/proj/a') === now[0], 'the same folder named again (the same inode): its watch kept, nothing armed twice');
+  const MI = modOf(anchored(GUARD_SRC, '    if ((had && had.ino != null && st.ino != null && had.ino !== st.ino) || (!had && kids.has(p))) drop(p);   // made again before its event was read (or after its own watch ended): the old watches are dead\n', '', 'no-inode-check'));
+  const FI = treeFs({ h: { proj: { a: {} } } }), li = [];
+  const ri = MI.armWatch(ctxOf(FI, fakeTimers(), [], { platform: 'linux' }), li, '/h/proj', () => { }, 'discovery-watch');
+  const oi = li.find((w) => w.dir === '/h/proj/a'); FI.remake('/h/proj/a'); ri.cb('rename', 'a');
+  ok(!oi.closed && li.find((w) => w.dir === '/h/proj/a') === oi, 'CONTROL: without the inode check the dead watch is kept (the new folder\'s files unseen, no word) — RED');
+}
+{
+  // A DROP WALKS THE FOLDER'S OWN INDEX (主开发 03:57Z (3)): a removed file walks nothing; a folder whose own watch ended still
+  // takes its subfolders' watches when it goes
+  const F = treeFs({ h: { proj: { a: { b: { c: {} } }, k: {} } } }), list = [];
+  const root = WG.armWatch(ctxOf(F, fakeTimers(), [], { platform: 'linux' }), list, '/h/proj', () => { }, 'discovery-watch');
+  emitSafely(list.find((w) => w.dir === '/h/proj/a'), ENOSPC());
+  ok(!list.some((w) => w.dir === '/h/proj/a') && list.some((w) => w.dir === '/h/proj/a/b/c'), 'setup: a\'s own watch lost alone (its subfolders keep theirs)');
+  delete F.tree.h.proj.a; root.cb('rename', 'a');
+  ok(list.map((w) => w.dir).sort().join() === '/h/proj,/h/proj/k', 'the folder then removed: every watch under it goes with it (the index holds them past its own lost watch)', list.map((w) => w.dir));
+  ok(!GUARD_SRC.includes('[...byDir]') && GUARD_SRC.includes('    list.length = j;   // the feature\'s list compacted ONCE for the whole subtree'), 'a drop never copies the whole map; the feature\'s list is compacted once a subtree');
+}
+{
+  // its read's shoulds (the next line, round two): BREADTH-FIRST, the folder's OWN event, a folder replaced by a file, a folder
+  // made again after its own watch ended
+  const deep = () => ({ h: { p: { a: { d1: { d2: {} } }, b: {}, c: {} } } });
+  const lb = [];
+  WG.armWatch(ctxOf(treeFs(deep()), fakeTimers(), [], { platform: 'linux', walkCap: 4 }), lb, '/h/p', () => { }, 'discovery-watch');
+  ok(lb.map((w) => w.dir).sort().join() === '/h/p,/h/p/a,/h/p/b,/h/p/c', 'BREADTH-FIRST: under a cap of 4 the shallow folders take the slots (a, b, c) before the first project\'s deep ones', lb.map((w) => w.dir));
+  const MB = modOf(anchored(GUARD_SRC, '    queue.push(dir); pump();\n    return w;\n', '    scan(dir);\n    return w;\n', 'walk-depth-first')); // stale-pins: kept — the control plants the walk as it was
+  const lbd = [];
+  MB.armWatch(ctxOf(treeFs(deep()), fakeTimers(), [], { platform: 'linux', walkCap: 4 }), lbd, '/h/p', () => { }, 'discovery-watch');
+  ok(lbd.map((w) => w.dir).sort().join() === '/h/p,/h/p/a,/h/p/a/d1,/h/p/a/d1/d2', 'CONTROL: the walk depth-first spends the slots on the first project\'s deep folders (b and c unwatched) — RED', lbd.map((w) => w.dir));
+  const FR = treeFs({ h: { proj: { a: {} } } }), lr = [];
+  const rr = WG.armWatch(ctxOf(FR, fakeTimers(), [], { platform: 'linux' }), lr, '/h/proj', () => { }, 'discovery-watch');
+  const ar = lr.find((w) => w.dir === '/h/proj/a');
+  FR.tree.h.proj = { b: {} }; FR.remake('/h/proj'); rr.cb('rename', 'proj');
+  ok(rr.closed && ar.closed && lr.map((w) => w.dir).sort().join() === '/h/proj,/h/proj/b' && !lr.includes(rr), 'THE ROOT made again (no parent watches it): its own event, a folder standing at its path again ⇒ the dead watches go, the new root armed with its subfolders', lr.map((w) => w.dir));
+  const MR = modOf(anchored(GUARD_SRC, "      if (!dirGone && name === dir.slice(dir.lastIndexOf('/') + 1) && byDir.has(dir)) { drop(dir); add(dir, dir === top ? null : parentOf(dir)); }\n", '', 'own-event-ignored'));
+  const FM = treeFs({ h: { proj: { a: {} } } }), lm = [];
+  const rm = MR.armWatch(ctxOf(FM, fakeTimers(), [], { platform: 'linux' }), lm, '/h/proj', () => { }, 'discovery-watch');
+  FM.tree.h.proj = { b: {} }; FM.remake('/h/proj'); rm.cb('rename', 'proj');
+  ok(!rm.closed && !lm.some((w) => w.dir === '/h/proj/b'), 'CONTROL: the folder\'s own event ignored — the dead root watch kept, the new folder\'s subfolders unwatched — RED');
+  const FF = treeFs({ h: { proj: { a: { x: {} } } } }), lf = [];
+  const rf = WG.armWatch(ctxOf(FF, fakeTimers(), [], { platform: 'linux' }), lf, '/h/proj', () => { }, 'discovery-watch');
+  const af = lf.find((w) => w.dir === '/h/proj/a'), xf = lf.find((w) => w.dir === '/h/proj/a/x');
+  FF.tree.h.proj.a = null; rf.cb('rename', 'a');
+  ok(af.closed && xf.closed && lf.map((w) => w.dir).join() === '/h/proj', 'a watched folder replaced by a FILE: its watch and the ones under it go (they no longer count against the cap)', lf.map((w) => w.dir));
+  const FE = treeFs({ h: { proj: { a: { x: {} } } } }), le = [];
+  const re = WG.armWatch(ctxOf(FE, fakeTimers(), [], { platform: 'linux' }), le, '/h/proj', () => { }, 'discovery-watch');
+  const xe = le.find((w) => w.dir === '/h/proj/a/x');
+  emitSafely(le.find((w) => w.dir === '/h/proj/a'), ENOSPC());
+  FE.tree.h.proj.a = { y: {} }; FE.remake('/h/proj/a'); re.cb('rename', 'a');
+  ok(xe.closed && le.some((w) => w.dir === '/h/proj/a') && le.some((w) => w.dir === '/h/proj/a/y') && !le.some((w) => w.dir === '/h/proj/a/x'), 'a folder made again AFTER its own watch ended: its old subfolders\' dead watches go, the new folder and its subfolder armed', le.map((w) => w.dir));
 }
 {
   const dir = scratch('watch-guard'); fs.rmSync(dir, { recursive: true, force: true }); fs.mkdirSync(path.join(dir, 'proj', 'sub'), { recursive: true });
