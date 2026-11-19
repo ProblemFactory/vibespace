@@ -74,10 +74,10 @@ function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = 
     if (!m || typeof m !== 'object') return;   // only an object is an answer (a stray `null` / number never throws in the pipe's handler)
     const q = pending.get(m.id); if (!q) return;
     if (m.ev === 'started') { q.started = true; q.pid = Number(m.pid) || 0; return; }
-    if (m.ev === 'timeout') { settle(m.id, { started: true, timedOut: true, code: null, signal: 'SIGKILL', stdout: '', stderr: '' }); return; }
+    if (m.ev === 'timeout') { settle(m.id, { started: true, timedOut: true, overflow: !!m.overflow, code: null, signal: 'SIGKILL', stdout: '', stderr: '' }); return; }
     if (m.ev === 'exit') {
       if (q.settled) { pending.delete(m.id); refs(); try { q.onLateExit?.(); } catch { } return; }   // a timed-out child that ended at last
-      settle(m.id, { started: q.started || m.code != null, timedOut: !!m.timedOut, code: m.code, signal: m.signal || null, stdout: m.stdout || '', stderr: m.stderr || '', error: m.error || null });
+      settle(m.id, { started: q.started || m.code != null, timedOut: !!m.timedOut, overflow: !!m.overflow, code: m.code, signal: m.signal || null, stdout: m.stdout || '', stderr: m.stderr || '', error: m.error || null });
     }
   }
   /** a fault of the held starter: its pending requests answer `unknown`; it is replaced ONCE, then the old road */
@@ -92,7 +92,7 @@ function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = 
       if (!said) { said = true; try { log.warn?.(`[child-starter] the starter failed twice (${why}) — the timer sites start their programs from the hub's process again (the old road)`); } catch { } }
     }
   }
-  /** run(cmd, args, {timeoutMs, maxBuffer, capture, env, envAdd, onLateExit}) → {started, timedOut, unknown, code, signal, stdout, stderr, error}.
+  /** run(cmd, args, {timeoutMs, maxBuffer, capture, env, envAdd, onLateExit}) → {started, timedOut, overflow, unknown, code, signal, stdout, stderr, error} (overflow: the output passed maxBuffer and the child was ended, as execFile did).
    *  `env` is the site's own env, used ONLY on the old road; `envAdd` the names it sets, the only ones sent to the starter —
    *  or, with `wholeEnv: true`, `env` IS the child's whole env (built through serviceEnv), sent whole (B-323e). */
   function run(cmd, args = [], o = {}) {
@@ -123,14 +123,15 @@ function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = 
   function runDirect(cmd, args, o) {
     stats.direct++;
     return new Promise((resolve) => {
-      let c, out = '', err = '', done = false, timedOut = false;
+      let c, out = '', err = '', done = false, timedOut = false, outN = 0, errN = 0, overflow = false;
       const max = o.maxBuffer || 1048576;
+      const over = () => { if (overflow) return; overflow = true; try { c.stdout?.destroy(); c.stderr?.destroy(); c.kill('SIGTERM'); } catch { } };   // past the bound: ended, as execFile did (the pipes first)
       try { c = spawn(cmd, args, { env: o.env, stdio: ['ignore', o.capture ? 'pipe' : 'ignore', o.capture ? 'pipe' : 'ignore'] }); }
       catch (e) { resolve({ started: false, code: null, error: String((e && e.code) || e) }); return; }
-      if (o.capture) { c.stdout.setEncoding('utf8'); c.stderr.setEncoding('utf8'); c.stdout.on('data', (d) => { if (out.length < max) out += d; }); c.stderr.on('data', (d) => { if (err.length < max) err += d; }); }
-      const t = o.timeoutMs > 0 ? setTimeout(() => { timedOut = true; try { c.kill('SIGKILL'); } catch { } if (!done) { done = true; try { o.onTimeout?.(c.pid || 0); } catch { } resolve({ started: true, timedOut: true, code: null, signal: 'SIGKILL', stdout: '', stderr: '', pid: c.pid || 0 }); } }, o.timeoutMs) : null;
+      if (o.capture) { c.stdout.setEncoding('utf8'); c.stderr.setEncoding('utf8'); c.stdout.on('data', (d) => { if (out.length < max) out += d; outN += Buffer.byteLength(d); if (outN > max) over(); }); c.stderr.on('data', (d) => { if (err.length < max) err += d; errN += Buffer.byteLength(d); if (errN > max) over(); }); }
+      const t = o.timeoutMs > 0 ? setTimeout(() => { timedOut = true; try { c.kill('SIGKILL'); } catch { } if (!done) { done = true; try { o.onTimeout?.(c.pid || 0); } catch { } resolve({ started: true, timedOut: true, overflow, code: null, signal: 'SIGKILL', stdout: '', stderr: '', pid: c.pid || 0 }); } }, o.timeoutMs) : null;
       c.on('error', (e) => { if (t) clearTimeout(t); if (!done) { done = true; resolve({ started: false, code: null, error: String((e && e.code) || e), stdout: out, stderr: err }); } });
-      c.on('close', (code, signal) => { if (t) clearTimeout(t); if (!done) { done = true; resolve({ started: true, timedOut, code, signal, stdout: out, stderr: err }); } else if (timedOut) { try { o.onLateExit?.(); } catch { } } });
+      c.on('close', (code, signal) => { if (t) clearTimeout(t); if (!done) { done = true; resolve({ started: true, timedOut, overflow, code, signal, stdout: out, stderr: err }); } else if (timedOut) { try { o.onLateExit?.(); } catch { } } });
     });
   }
   /** the hub's end of the pipe closed (a test's «the hub is gone»): the starter ends by itself — nothing is signalled */

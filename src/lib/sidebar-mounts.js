@@ -550,9 +550,12 @@ export function installSidebarMounts(Sidebar) {
       }
       const note = document.createElement('div');
       note.className = 'mounts-note';
-      note.textContent = d.mcAvailable
+      // B-323e (its read): the server's «don't know» (null — its starter gave no answer) says neither «stay valid» nor «expire»
+      note.textContent = d.mcAvailable === true
         ? tr('Connected folders live under {base}. Shared links stay valid until you revoke them.', { base: d.mountBase })
-        : tr('Connected folders live under {base}. Shared links currently expire after 7 days; to create links that never expire, an admin can install the “mc” tool on the server.', { base: d.mountBase });
+        : d.mcAvailable === false
+          ? tr('Connected folders live under {base}. Shared links currently expire after 7 days; to create links that never expire, an admin can install the “mc” tool on the server.', { base: d.mountBase })
+          : tr('Connected folders live under {base}.', { base: d.mountBase });
       root.appendChild(note);
       this.listEl.appendChild(root);
       scrollers.forEach((el, i) => { if (keepScroll[i]) el.scrollTop = keepScroll[i]; });
@@ -3048,12 +3051,16 @@ export function installSidebarMounts(Sidebar) {
         { key: 'name', label: tr('Share name'), placeholder: 'dataset-v2', value: m.name + '-share' },
         { key: 'folder', label: tr('Folder under {path} (empty = share everything)', { path: under }), placeholder: 'datasets/v2' },
         { key: 'mode', label: tr('Access'), type: 'select', options: [['ro', tr('Read-only')], ['rw', tr('Read-write')]] },
-        ...(mc ? [] : [{ key: 'expiryDays', label: tr('Link expires after (days, max 7)'), value: '7' }]),
+        // B-323e smalls (the reader's M1): the server's «don't know» (null) asks the days only as a condition — the mint asks for «mc»
+        // afresh, and a key minted with it never expires (the days are not read)
+        ...(mc === true ? [] : [{ key: 'expiryDays', label: mc === false ? tr('Link expires after (days, max 7)') : tr('Link expires after (days, max 7) — only if the server has no “mc” tool; with it, the link stays valid until you revoke it'), value: '7' }]),
       ], tr('Create link'), async (v, { close, body, err }) => {
         const r = await api(`/api/mounts/${m.id}/share`, { method: 'POST', body: JSON.stringify(v), headers: { 'Content-Type': 'application/json' } });
         // show the link with a copy button (it embeds the credential — a secret)
         body.innerHTML = `<label>${escHtml(tr('Share link — treat it like a key; send over company chat only'))}</label>
           <textarea readonly style="min-height:84px;font-size:11px">${escHtml(r.link)}</textarea>`;
+        // …and what was made: the link's own end, from the mint's answer (a date, or valid until revoked)
+        if (r && r.share) { const ends = document.createElement('div'); ends.className = 'mounts-note'; ends.textContent = r.share.expiresAt ? tr('This link expires on {date}.', { date: dateOf(r.share.expiresAt, { words: true }) }) : r.share.method === 'sts' ? '' : tr('This link stays valid until you revoke it.'); if (ends.textContent) body.appendChild(ends); }   // an STS key whose date was not read never says «until revoked»
         const copyBtn = document.createElement('button');
         copyBtn.className = 'btn-create';
         copyBtn.textContent = tr('Copy link');

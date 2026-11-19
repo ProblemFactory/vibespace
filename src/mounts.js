@@ -423,7 +423,7 @@ class MountManager {
     if (c && c.v === false && !fresh && Date.now() - c.at < 60000) return Promise.resolve(false);
     if (c && c.ask) return c.ask;
     const gen = this._toolsGen || 0;
-    const ask = require('./server/child-starter').childStarter().run(bin, argv, { timeoutMs, envAdd: { PATH: process.env.PATH || '' } })   // resolved on the hub's PATH, as the direct start resolved it (B-e783's meeting)
+    const ask = require('./server/child-starter').childStarter().run(bin, argv, { timeoutMs, env: serviceEnv(process.env), envAdd: { PATH: process.env.PATH || '' } })   // resolved on the hub's PATH, as the direct start resolved it (B-e783's meeting); the starter's old road gets the service env, never the hub's whole env (its read)
       .then((r) => {
         if (!r || r.unknown || r.timedOut) return null;   // no answer, or slower than its bound: no proof either way, nothing kept
         const v = r.code === 0;
@@ -1605,8 +1605,9 @@ class MountManager {
       // (the old road read a start error so: execFile's own callback answered before the 'error' listener)
       if (!r || r.unknown) return 'unanswered';
       if (!r.started) return 'unknown';
+      if (r.overflow) return 'unknown';   // the output passed the bound: the child was ended (as execFile did) — no proof either way
       if (r.timedOut) return 'hung';
-      if (String(r.stdout || '').length >= PROBE_OUT_MAX) return 'unknown';   // past the old road's 1 MB bound: execFile ended it and read no proof
+      if (String(r.stdout || '').length >= PROBE_OUT_MAX) return 'unknown';   // past the old road's 1 MB bound: the release's verdict — execFile ENDED the child with ERR_CHILD_PROCESS_STDIO_MAXBUFFER, which carries no `killed` flag (measured: killed undefined), so it read 'unknown' too, never 'hung' (unless its stderr named a timeout or an auth word: now 'unknown' there too)
       if (r.code === 0) return 'ok';
       const s = String(r.stderr || '');
       if (/ETIMEDOUT/.test(s)) return 'hung';
@@ -2641,7 +2642,7 @@ class MountManager {
     if (this._rcloneFlagsAsk) return this._rcloneFlagsAsk;
     const once = () => {
       const gen = this._rcloneFlagsGen || 0, bin = this.rcloneBin(), S = require('./server/child-starter').childStarter();
-      return Promise.all([['help', 'flags'], ['mount', '--help']].map((argv) => S.run(bin, argv, { timeoutMs, capture: true, maxBuffer: 4 * 1024 * 1024, envAdd: { PATH: process.env.PATH || '' } })))
+      return Promise.all([['help', 'flags'], ['mount', '--help']].map((argv) => S.run(bin, argv, { timeoutMs, capture: true, maxBuffer: 4 * 1024 * 1024, env: serviceEnv(process.env), envAdd: { PATH: process.env.PATH || '' } })))
         .then((rs) => {
           if (rs.some((r) => !r || r.unknown) || gen !== (this._rcloneFlagsGen || 0)) return false;
           if (this._rcloneFlagsHelp === undefined) this._rcloneFlagsHelp = rs.map((r) => (r.code === 0 && !r.timedOut ? String(r.stdout || '') : '')).join('');
@@ -2656,6 +2657,7 @@ class MountManager {
 
   _rcloneSupportsAcceptEncodingFlag() {
     if (this._rcloneAEFlag !== undefined) return this._rcloneAEFlag;
+    if (this._rcloneFlagsHelp === undefined) return false;   // B-323e (its read): a help text never read is no answer — off for this call, never kept as «false» for the process
     this._rcloneAEFlag = this._rcloneHasFlag('use-accept-encoding-gzip');
     return this._rcloneAEFlag;
   }
@@ -3020,12 +3022,13 @@ class MountManager {
   // ── Minting (mc service account → STS AssumeRole fallback) ──
 
   /** B-323e: is `mc` there? Asked of THE STARTER and kept (`_toolKnown`) — never a fork of the hub per Storage-panel read.
-   *  A SHARE'S ACT (`act: true` — a mint, a revoke) never reads «no answer» as «no mc»: it asks afresh (a kept no is not
+   *  The panel's read answers null when the starter gave no answer. A SHARE'S ACT (`act: true` — a mint, a revoke) never reads «no answer» as «no mc»: it asks afresh (a kept no is not
    *  enough), and when the starter gives no answer it asks the old way, once (a revoke that skipped `mc` would leave a
    *  never-expiring key alive; a mint would make a 7-day link the panel did not promise). */
   async mcAvailable({ act = false } = {}) {
     const v = await this._toolKnown('mc', 'mc', ['--version'], 10000, { fresh: act });
-    if (v !== null || !act) return v === true;
+    if (!act) return v;   // the panel's read: true · false · null («don't know» — the panel then says neither «expires» nor «stays valid»)
+    if (v !== null) return v === true;
     return new Promise((resolve) => execFile('mc', ['--version'], { timeout: 30000 }, (err) => resolve(!err)));
   }
 

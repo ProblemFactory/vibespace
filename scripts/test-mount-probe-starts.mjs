@@ -24,6 +24,10 @@
 //     probe; the flag check asks again (the replaced starter, then its old async road) and keeps the text — never a
 //     synchronous start (RED: one ask ⇒ nothing kept, the flags left off, said once); a timeout ⇒ 'hung'; a 401 ⇒ 'denied'; a
 //     non-auth failure ⇒ 'unknown'; an output past the old 1 MB bound ⇒ 'unknown' (as execFile's maxBuffer read it)
+//  ⑦ ITS READ (B-323e TAKEN with smalls): a hung listing whose backend probe got no answer is slow, never «unreachable» (RED:
+//     no answer read as «hung»); the accept-encoding flag is never kept false from a help text never read; the panel's presence
+//     ask answers «don't know» (null) and its words say neither «expire» nor «stay valid»; the starter's OLD road hands the
+//     presence ask the service env, never the hub's whole env — each with its RED control
 //  ⑥ THE SPAWN CENSUS ROW: the whole env handed in _rcloneProbeRun is a WHOLE_ROWS row; RED a second one elsewhere ⇒ UNLISTED,
 //     a row with no request ⇒ DEAD
 import fs from 'node:fs';
@@ -67,6 +71,8 @@ case "$1" in
        [ "$MODE" = boom ] && { echo 'Failed to lsf: directory not found' >&2; exit 3; }
        [ "$MODE" = sleep ] && exec sleep 5
        [ "$MODE" = big ] && { head -c 1100000 /dev/zero | tr '\\0' a; echo; }
+       [ "$MODE" = bigslow ] && { head -c 1100000 /dev/zero | tr '\\0' a; echo; exec sleep 5; }
+       [ "$MODE" = bigerr401 ] && { echo 'Failed to lsf: 401 Unauthorized' >&2; head -c 1100000 /dev/zero | tr '\\0' a >&2; exec sleep 5; }
        echo f.txt ;;
   cat) [ "$MODE" = cat401 ] && { echo 'Failed to cat: 401 Unauthorized' >&2; exit 1; }; printf x ;;
 esac
@@ -129,7 +135,8 @@ try {
   const HAS_NEW = "    if (this._rcloneFlagsHelp === undefined) {\n      if (!this._rcloneFlagsUnsaid) {";
   const HAS_OLD = "    if (this._rcloneFlagsHelp === undefined) { let out = ''; for (const argv of [['help', 'flags'], ['mount', '--help']]) { try { out += require('child_process').execFileSync(this.rcloneBin(), argv, { encoding: 'utf-8', timeout: 10000 }); } catch { } } this._rcloneFlagsHelp = out; }\n    if (this._rcloneFlagsHelp === undefined) {\n      if (!this._rcloneFlagsUnsaid) {";
   const planted = msrc.split(RUN_NEW).length === 2 && msrc.split(FLAGS_NEW).length === 2 && msrc.split(HAS_NEW).length === 2;
-  const RED1 = planted ? MC.load('src/mounts.js', anchored(anchored(anchored(msrc, RUN_NEW, RUN_OLD, 'red-base: the probes\' run'), FLAGS_NEW, FLAGS_OLD, 'red-base: the flag ask'), HAS_NEW, HAS_OLD, 'red-base: the flag reader'), 'red-base') : null;
+  const AEG0 = "    if (this._rcloneFlagsHelp === undefined) return false;   // B-323e (its read):";   // the base had no such guard: its flag check went to the synchronous road
+  const RED1 = planted && msrc.split(AEG0).length === 2 ? MC.load('src/mounts.js', anchored(anchored(anchored(anchored(msrc, RUN_NEW, RUN_OLD, 'red-base: the probes\' run'), FLAGS_NEW, FLAGS_OLD, 'red-base: the flag ask'), HAS_NEW, HAS_OLD, 'red-base: the flag reader'), AEG0, '    // (control) the base: no guard here;', 'red-base: the accept-encoding guard'), 'red-base') : null;
   const red = RED1 ? await sweep(RED1) : { main: -1, sync: -1 };
   ok(planted, 'the RED control\'s plants are in the tree: the probes\' one run through the starter, the flag check\'s ask and its reader, each exactly once');
   ok(now.main === 0 && now.via === 7 && now.lines.length === 7 && now.lines.every((l) => !l.startsWith(process.pid + ' ')),
@@ -157,7 +164,7 @@ try {
   ok(k1[0] === false && k1[1] === true && k1r[1] === false, `a kept «no mc» (60 s): the panel reads it (${k1[0]}), a share's act asks afresh (${k1[1]}); RED (the act reads the kept no): ${k1r[1]} — a revoke would skip \`mc\` and leave a never-expiring key alive`);
   const AV_NEW = "  rcloneAvailable() { return this._toolKnown('rclone', this.rcloneBin(), ['version'], 5000); }";
   const AV_OLD = "  rcloneAvailable() {\n    try { require('child_process').execFileSync(this.rcloneBin(), ['version'], { timeout: 5000, stdio: 'pipe' }); return true; }\n    catch { return false; }\n  }";
-  const MC_NEW = "    const v = await this._toolKnown('mc', 'mc', ['--version'], 10000, { fresh: act });\n    if (v !== null || !act) return v === true;\n";
+  const MC_NEW = "    const v = await this._toolKnown('mc', 'mc', ['--version'], 10000, { fresh: act });\n";
   const MC_OLD = "    return new Promise((resolve) => execFile('mc', ['--version'], (err) => resolve(!err)));\n";   // stale-pins: kept (the RED control plants the base's line back)
   const planted2 = msrc.split(AV_NEW).length === 2 && msrc.split(MC_NEW).length === 2;
   const p2 = planted2 ? await panel(MC.load('src/mounts.js', anchored(anchored(msrc, AV_NEW, AV_OLD, 'red-panel: rclone'), MC_NEW, MC_OLD, 'red-panel: mc'), 'red-panel')) : { main: -1, sync: -1 };
@@ -240,7 +247,86 @@ try {
   const rOk = await mmOf({ MountManager })._probeBackendRead(REC.oauth, 10000);
   mode('big'); const big1 = await mmOf({ MountManager })._probeBackendAccess(REC.oauth, 10000), big2 = await mmOf({ MountManager })._probeBackendRead(REC.oauth, 10000); mode('ok');
   ok(h1 === 'hung' && r401 === 'denied' && rOk === 'ok', `past its bound «${h1}»; the read probe's one-byte read refused with a 401 «${r401}», read «${rOk}»`);
-  ok(big1 === 'unknown' && big2 === 'unknown', `a listing past the old 1 MB bound: the access probe «${big1}», the read probe «${big2}» — as execFile's maxBuffer read it (no proof)`);
+  ok(big1 === 'unknown' && big2 === 'unknown', `a listing past the old 1 MB bound: the access probe «${big1}», the read probe «${big2}» — the release's verdict: execFile's maxBuffer error carries no \`killed\` flag, so it read 'unknown' too, never 'hung'`);
+  // the reader's M2: a SLOW listing past the bound — the starter ENDS the child there (as execFile did), so the probe reads 'unknown' at
+  // once, never its timer's 'hung' (a false «unreachable», then a teardown); RED: a starter copy that keeps the child running
+  const OVER = "    const over = () => { if (overflow) return; overflow = true; try { c.stdout?.destroy(); c.stderr?.destroy(); c.kill('SIGTERM'); } catch { } };", psrc5 = fs.readFileSync(path.join(REPO, 'src/server/child-starter-proc.js'), 'utf8');
+  mode('bigslow'); const slow1 = await mmOf({ MountManager })._probeBackendAccess(REC.oauth, 2000);   // no clock read: a timeout would read «hung»
+  const S5 = CS.createChildStarter({ script: MC.write('src/server/child-starter-proc.js', anchored(psrc5, OVER, '    const over = () => { };', 'red-overcap'), 'overcap'), log: { warn() { } } }); CS.setChildStarter(S5);
+  let slowR; try { slowR = await mmOf({ MountManager })._probeBackendAccess(REC.oauth, 800); } finally { S5.closePipe(); CS.setChildStarter(S); mode('ok'); }
+  ok(psrc5.split(OVER).length === 2 && slow1 === 'unknown' && slowR === 'hung', `…and a SLOW listing past it (1.1 MB, then 5 s more): the starter ENDS the child at the bound, as execFile did — «${slow1}» before its bound (2 s); RED (a starter that keeps it running): «${slowR}» at its bound`);
+  // …the answer says it (`overflow`), on the starter's process AND on its OLD road (after two faults — runDirect); RED: a copy of
+  // child-starter.js whose old road keeps the child running ⇒ its timer, no overflow
+  const bigRun = (Q) => Q.run(RCLONE, ['lsf', 'VS:'], { timeoutMs: 2000, capture: true, maxBuffer: 1048576, env: builtEnv(), wholeEnv: true });
+  const viaOld = async (mk, fn) => { const Q = mk.createChildStarter({ script: silent, guardMs: 50, log: { warn() { } } }); CS.setChildStarter(Q); try { await Q.run('true', [], { timeoutMs: 100 }); await Q.run('true', [], { timeoutMs: 100 }); return await fn(Q); } finally { Q.closePipe(); CS.setChildStarter(S); } };
+  const cssrc = fs.readFileSync(path.join(REPO, 'src/server/child-starter.js'), 'utf8');
+  const OVER_D = "      const over = () => { if (overflow) return; overflow = true; try { c.stdout?.destroy(); c.stderr?.destroy(); c.kill('SIGTERM'); } catch { } };";
+  mode('bigslow');
+  let rMain, rOld, rOldR;
+  try { rMain = await bigRun(S); rOld = await viaOld(CS, bigRun); rOldR = await viaOld(MC.load('src/server/child-starter.js', anchored(cssrc, OVER_D, '      const over = () => { };', 'red-overcap-direct'), 'red-overcap-direct'), (Q) => Q.run(RCLONE, ['lsf', 'VS:'], { timeoutMs: 800, capture: true, maxBuffer: 1048576, env: builtEnv(), wholeEnv: true })); } finally { mode('ok'); }
+  ok(cssrc.split(OVER_D).length === 2 && rMain.overflow === true && !rMain.timedOut && rOld.overflow === true && !rOld.timedOut && rOldR.timedOut === true && !rOldR.overflow,
+    `the answer says it: the starter's process «overflow ${rMain.overflow}», its old road «overflow ${rOld.overflow}» (neither its timer); RED (the old road keeps the child running): timed out ${rOldR.timedOut}, overflow ${!!rOldR.overflow}`);
+  // …and the probe reads `overflow` FIRST: a stderr past the bound whose first line names a 401 is no proof of a revoked share
+  // (the child was cut); RED: a copy of src/mounts.js without that line ⇒ «denied» — a false «access denied» banner
+  const OVF = "      if (r.overflow) return 'unknown';   // the output passed the bound: the child was ended (as execFile did) — no proof either way";
+  mode('bigerr401');
+  let ov1, ov1r;
+  try { ov1 = await mmOf({ MountManager })._probeBackendAccess(REC.oauth, 2000); ov1r = await mmOf(MC.load('src/mounts.js', anchored(msrc, OVF + '\n', '', 'red-overflow-read'), 'red-overflow-read'))._probeBackendAccess(REC.oauth, 2000); } finally { mode('ok'); }
+  ok(msrc.split(OVF).length === 2 && ov1 === 'unknown' && ov1r === 'denied', `a stderr past the bound that names a 401 first: «${ov1}»; RED (overflow not read first): «${ov1r}»`);
+
+  console.log('⑦ its read (B-323e, TAKEN with smalls)');
+  // (2) THE TEARDOWN GUARD: a hung listing whose backend probe got NO ANSWER is slow (the same listing still hung: the chain held),
+  // never «unreachable», never a teardown — RED: no answer read as «hung» ⇒ unreachable
+  const liveOf = async (M) => {
+    const mm = mmOf(M);
+    mm._probeMountpoint = async (_mp, _t, verb) => (verb === 'attr' ? { health: 'ok', ms: 1 } : { health: 'hung', ms: 6000, held: true });
+    mm._probeBackendAccess = async () => 'unanswered';
+    const mp = path.join(T, 'mnt-' + REC.hang.id), out = [];
+    for (let i = 0; i < 3; i++) { const v = await mm._probeLiveness(REC.hang, mp); out.push({ verdict: v.verdict, teardown: !!v.teardown }); }
+    return out;
+  };
+  const NOANS = "said === 'hung' ? 'hung' : 'skipped'";
+  const lv1 = await liveOf({ MountManager }), lv1r = await liveOf(MC.load('src/mounts.js', anchored(msrc, NOANS, "(said === 'hung' || said === 'unanswered') ? 'hung' : 'skipped'", 'red-noanswer-hung'), 'red-noanswer-hung'));
+  ok(lv1.every((v) => v.verdict === 'slow' && !v.teardown) && lv1r.some((v) => v.verdict === 'unreachable'), `a hung listing whose backend probe got no answer: ${lv1.map((v) => v.verdict).join(' / ')} over three sweeps, no teardown; RED (no answer read as «hung»): ${lv1r.map((v) => v.verdict).join(' / ')}`);
+  // (3) the accept-encoding flag is never KEPT as false from a help text never read
+  const aeOf = (M) => { const mm = mmOf(M); const a0 = mm._rcloneSupportsAcceptEncodingFlag(), kept0 = mm._rcloneAEFlag; mm._rcloneFlagsHelp = '--use-accept-encoding-gzip'; return { a0, kept0, a1: mm._rcloneSupportsAcceptEncodingFlag() }; };
+  const AEG = "    if (this._rcloneFlagsHelp === undefined) return false;   // B-323e (its read):";
+  const ae1 = aeOf({ MountManager }), ae1r = aeOf(MC.load('src/mounts.js', anchored(msrc, AEG, '    // (control) its read:', 'red-ae-kept'), 'red-ae-kept'));
+  ok(ae1.a0 === false && ae1.kept0 === undefined && ae1.a1 === true && ae1r.kept0 === false && ae1r.a1 === false, `the help text not read yet: the flag is off for that call (${ae1.a0}) and NOT kept (${ae1.kept0}); read later: on (${ae1.a1}); RED (kept): «${ae1r.kept0}» for the process (${ae1r.a1})`);
+  // (4) the panel's presence ask keeps «don't know» (null), and the panel says neither «expire» nor «stay valid» then; an act still asks the old way
+  const mcOf = async (M) => { const mm = mmOf(M); mm._toolKnown = async () => null; return [await mm.mcAvailable(), await mm.mcAvailable({ act: true })]; };
+  const PANEL = "    if (!act) return v;   // the panel's read:";
+  const mc1 = await mcOf({ MountManager }), mc1r = await mcOf(MC.load('src/mounts.js', anchored(msrc, PANEL, '    if (!act) return v === true;   // (control):', 'red-panel-no'), 'red-panel-no'));
+  const SBM = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-mounts.js'), 'utf8');
+  const NOTE3 = "          : tr('Connected folders live under {base}.', { base: d.mountBase });";
+  ok(mc1[0] === null && mc1[1] === true && mc1r[0] === false && SBM.split("note.textContent = d.mcAvailable === true").length === 2 && SBM.split(NOTE3).length === 2, `no answer: the panel's read is «${mc1[0]}» (not «no»), an act asks the old way (${mc1[1]}); the panel's third words say only where the folders live; RED (no answer read as «no»): «${mc1r[0]}» — the panel would say links expire while a mint may make one that does not`);
+  // …the share dialog under «don't know» (the reader's M1; a DOM dialog, so PINS): the days asked only as a condition, the result says what was made
+  const DLG = "...(mc === true ? [] : [{ key: 'expiryDays', label: mc === false ? tr('Link expires after (days, max 7)') : tr('Link expires after (days, max 7) — only if the server has no “mc” tool; with it, the link stays valid until you revoke it'), value: '7' }]),";
+  const ENDS = "ends.textContent = r.share.expiresAt ? tr('This link expires on {date}.', { date: dateOf(r.share.expiresAt, { words: true }) }) : r.share.method === 'sts' ? '' : tr('This link stays valid until you revoke it.');";
+  ok(SBM.split(DLG).length === 2 && SBM.split(ENDS).length === 2, 'PIN: the share dialog asks the days as a condition under «don\'t know» (null), plainly under «no mc», not at all under «mc»; its result says the link\'s date, or valid until revoked (never for an STS key)');
+  // (5) the starter's OLD road (after two faults) starts the presence ask AND the flag text with the SERVICE env — never the hub's whole env
+  const HUBSEC = ['VIBESPACE', 'STANDIN', 'OLDROAD', 'TO' + 'KEN'].join('_');
+  const dumpTo = path.join(T, 'oldroad.env'), dumper = path.join(T, 'env-dump.sh');
+  fs.writeFileSync(dumper, `#!/bin/sh\nenv > '${dumpTo}'\nexit 0\n`, { mode: 0o755 });
+  const oldRoad = async (M, call = (mm) => mm._toolKnown('envprobe', dumper, [], 5000)) => {
+    try { fs.rmSync(dumpTo, { force: true }); } catch { }
+    process.env[HUBSEC] = SEC_VAL;
+    const Q = CS.createChildStarter({ script: silent, guardMs: 50, log: { warn() { } } }); CS.setChildStarter(Q);
+    try {
+      await Q.run('true', [], { timeoutMs: 100 }); await Q.run('true', [], { timeoutMs: 100 });   // two faults ⇒ the old road
+      await call(mmOf(M));
+    } finally { Q.closePipe(); CS.setChildStarter(S); delete process.env[HUBSEC]; }
+    const env = fs.existsSync(dumpTo) ? fs.readFileSync(dumpTo, 'utf8') : '';
+    return { dumped: env.length > 0, hasSecret: env.includes(SEC_VAL), hasPath: /^PATH=/m.test(env) };
+  };
+  const SVC = "{ timeoutMs, env: serviceEnv(process.env), envAdd: { PATH: process.env.PATH || '' } })";
+  const or1 = await oldRoad({ MountManager }), or1r = await oldRoad(MC.load('src/mounts.js', anchored(msrc, SVC, "{ timeoutMs, envAdd: { PATH: process.env.PATH || '' } })", 'red-oldroad-env'), 'red-oldroad-env'));   // stale-pins: kept (the RED plants the base's road back)
+  ok(or1.dumped && or1.hasPath && !or1.hasSecret && or1r.dumped && or1r.hasSecret, `the starter's old road: the presence ask's child gets the service env (PATH ${or1.hasPath}, the hub's secret ${or1.hasSecret}); RED (no env handed): the hub's whole env, its secret in it (${or1r.hasSecret})`);
+  // …the flag text's two help runs (the reader's S2: that half had no leg) — the stand-in rclone is the env dumper
+  const FLAGS = 'maxBuffer: 4 * 1024 * 1024, env: serviceEnv(process.env), envAdd';
+  const flagsCall = (mm) => { mm.rcloneBin = () => dumper; return mm._rcloneFlagsReady(5000); };
+  const or2 = await oldRoad({ MountManager }, flagsCall), or2r = await oldRoad(MC.load('src/mounts.js', anchored(msrc, FLAGS, 'maxBuffer: 4 * 1024 * 1024, envAdd', 'red-oldroad-flags'), 'red-oldroad-flags'), flagsCall);   // stale-pins: kept (the RED plants the base's road back)
+  ok(msrc.split(FLAGS).length === 2 && or2.dumped && or2.hasPath && !or2.hasSecret && or2r.dumped && or2r.hasSecret, `…and the flag text's help runs: the service env (PATH ${or2.hasPath}, the hub's secret ${or2.hasSecret}); RED (no env handed): the hub's whole env (${or2r.hasSecret})`);
 
   console.log('⑥ the spawn census row');
   const C = await import('./spawn-env-census.mjs');
