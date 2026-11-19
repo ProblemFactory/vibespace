@@ -164,18 +164,21 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
    *  + what a later step of this start added — and SAID like it (its settingsNotes). */
   const ownSettingsOnDisk = async (args, id, spec) => {   // off the loop (the sync-fs and store-write censuses): the create is async
     const i = args.indexOf('--settings');
-    if (i < 0 || !BUFFERS_DIR) return args;
-    const out = args.slice(), file = path.join(BUFFERS_DIR, `${id}.settings`);
+    if (i < 0) return args;
+    const out = args.slice(), file = BUFFERS_DIR ? path.join(BUFFERS_DIR, `${id}.settings`) : null;
     try {
+      if (!file) throw new Error('no buffers folder');   // the merged JSON never stays inline: the set-aside, as a write failure
       await fs.promises.unlink(file).catch(() => { });
       await fs.promises.writeFile(file, String(out[i + 1]), { mode: 0o600, flag: 'wx' });
       out[i + 1] = file;
+      spec.ownFile = file;   // a start that fails after this removes it (no end path knows a conversation never registered)
     } catch (e) {
       const parse = (v) => { try { const o = JSON.parse(v); return o && typeof o === 'object' ? o : {}; } catch { return {}; } };
       const built = parse(spec.setAside && spec.setAside.merged), fin = parse(out[i + 1]);
       const later = Object.fromEntries(Object.entries(fin).filter(([k, v]) => JSON.stringify(built[k]) !== JSON.stringify(v)));
       out[i + 1] = JSON.stringify({ ...parse(spec.setAside && spec.setAside.settings), ...later });
       spec.settingsNotes = (spec.setAside && spec.setAside.settingsNotes) || [];
+      spec.ownFellBack = true;
       console.warn(`[ws-create] ${id}: the merged settings file could not be written (${(e && e.code) || (e && e.message)}) — the person's settings file is set aside for this start`);
     }
     return out;
@@ -1047,8 +1050,9 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           // is not this hub's to read); a file that is no JSON object, or was not read in time, is set aside as before
           // …only for a SUBSCRIPTION pick (a provider's start keeps its own road) whose own file does not ITSELF name a helper (that file is
           // about billing: set aside and said, as the release does)
-          const ownObj = keyHelperNamed !== undefined && keyHelperNamed !== false && !data.hostId && !onProvider ? BILLPICK.settingsObjectOf(ownRead.text) : null;
-          const ownSettings = ownObj && !BILLPICK.namesHelper(ownObj, harness && harness.creds && harness.creds.keyHelper) ? ownObj : null;
+          const ownGot = keyHelperNamed !== undefined && keyHelperNamed !== false && !data.hostId && !onProvider ? BILLPICK.ownSettingsOf(ownRead.text) : null;
+          const ownSettings = ownGot && !BILLPICK.namesHelper(ownGot.settings, harness && harness.creds && harness.creds.keyHelper) ? ownGot.settings : null;
+          const ownDropped = ownSettings ? ownGot.dropped : [];   // the names the merged copy does not carry — said once at the start
           const sessionSpec = adapter.buildSessionArgs({
             cwd,
             model: commandModel,
@@ -1738,6 +1742,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               name: 'xterm-256color', cols: data.cols || 120, rows: data.rows || 30, cwd: spawnCwd, env: r6Env,
             });
           } catch (err) {
+            if (sessionSpec && sessionSpec.ownFile) fs.promises.unlink(sessionSpec.ownFile).catch(() => { });   // B-e7c0 cure: the merged file goes with the failed start
             ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: `Failed to spawn session: ${err.message}\ndtach=${DTACH_CMD} node=${NODE_CMD} cwd=${cwd}` })); // the request named (r4 N2): the page's window says it failed
             return;
           }
@@ -1784,6 +1789,11 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // a third-party provider's start says ITS billing words (no subscription bills it; no «CLI login» door)
             const w = (onProvider && SFW.PROVIDER_BILLING_WORDS[k]) || SFW.SETTINGS_FILE_WORDS[k], name = String(session.name || data.name || '').slice(0, 80) || 'This conversation';
             if (w) { try { serverNotice?.(`settings-file-${k}-${id}`, w.replace('{name}', () => name), { level: 1, i18n: { key: w, params: { name } } }); } catch { } }   // a function: a «$&» in a name is words
+          }
+          // B-e7c0 cure: a merged copy that dropped names SAYS them once, by name, with the door to the pick (a fallen-back start said «billing»)
+          if (!data.keeperSid && ownDropped.length && sessionSpec && sessionSpec.ownFileMerged && !sessionSpec.ownFellBack) {
+            const w = SFW.MERGE_DROPPED_WORDS, name = String(session.name || data.name || '').slice(0, 80) || 'This conversation', names = [...new Set(ownDropped)].join(', ').slice(0, 400);
+            try { serverNotice?.(`settings-file-mergeDropped-${id}`, w.replace('{name}', () => name).replace('{names}', () => names), { level: 1, i18n: { key: w, params: { name, names } } }); } catch { }
           }
           // B-6c55 (c): the CLI's own catalog gives the locked model no 1M form — SAID here, after the start's refusals (batch 21's cure);
           // an adopted process keeps the context it started with

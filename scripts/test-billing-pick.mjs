@@ -139,7 +139,7 @@ function factSpy({ hangOpen = false } = {}) {
 }
 const within = (p, ms = 5000) => Promise.race([p.then(() => true), new Promise((r) => setTimeout(() => r(false), ms))]);
 /** ONE create handler (its own said-once memo, as one hub run) — `create` runs one create through it */
-function makeCreate(mod, { accounts = accountsStub(), pipe = false, hosts: hostsIn = null, env = {}, helperFactMs = undefined, hangOpen = false } = {}) {
+function makeCreate(mod, { accounts = accountsStub(), pipe = false, hosts: hostsIn = null, env = {}, helperFactMs = undefined, hangOpen = false, failSpawn = false } = {}) {
   const active = new Map(), noop = () => undefined, pipes = [];
   let st = null;   // the current create's record
   const hosts = hostsIn || (pipe ? { device: async () => ({ openPipeSession: async (spec) => { pipes.push(spec); return { pid: 4343, write() { }, kill() { } }; } }) } : null);
@@ -154,7 +154,7 @@ function makeCreate(mod, { accounts = accountsStub(), pipe = false, hosts: hosts
     serverSetting: (k) => (pipe && k === 'agentd.localPipeSessions' ? true : undefined), harnessSetting: noop, harnessDeclares: () => false, harnessSpawnSettings: () => ({}),
     integrationEnabled: () => true, readSessionMeta: () => null, readLayouts: () => ({}), getSyncStore: () => null,
     serverNotice: (key, text, o) => { st.notices.push({ key, text, ...(o || {}) }); return 1; },
-    pty: { spawn: (cmd, args, opts) => { st.spawned.push({ cmd, args, env: opts.env }); return { pid: 4242, onData() { }, onExit() { }, write() { }, resize() { }, kill() { } }; } },
+    pty: { spawn: (cmd, args, opts) => { if (failSpawn) throw new Error('the pty refused the spawn (stand-in)'); st.spawned.push({ cmd, args, env: opts.env }); return { pid: 4242, onData() { }, onExit() { }, write() { }, resize() { }, kill() { } }; } },
     setupSessionPty: (s, id, p) => { s.pty = p; },
   }, { get: (t, k) => (k in t ? t[k] : (typeof k === 'string' && /^[a-z]/.test(k) ? noop : undefined)) });
   const handler = mod.createWsCreateHandler({
@@ -308,6 +308,42 @@ const merged = (o, x) => !o.why && o.at === path.join(BUF, `${x.id}.settings`) &
     ok(neutralized(wl) && !wl.line.join(' ').includes(OWN_MARK) && !wl.line.join(' ').includes(PAID_KEY) && !(wl.settings && wl.settings.hooks) && !deny.includes('Bash(rm -rf:*)') && !fs.existsSync(path.join(BUF, `${w.id}.settings`)) && saidKind(w, 'billing') === 1,
       'B-e7c0 a merged file that cannot be written (the buffers folder read-only): the RELEASE\'S SET-ASIDE — the override kept (even when the person\'s own file says apiKeyHelper ""), none of the person\'s values (hooks, deny rules, env) on the line, and the set-aside SAID («billing»)', [wl.settings || wl.why, w.notices.map((n) => n.key)]);
   }
+}
+
+// B-e7c0 CURE (主开发 07:55Z, the must): the merged copy drops EVERY name the tree's own rule counts — ONE list (src/claude-route-
+// names.js) src/managed-claude-settings.js and the merge both read — in ANY case, a switch when present, plus the cloud credential
+// commands; the drop is SAID once, by name, with the door to the pick. A start that fails after the file was written removes it; the
+// end paths take it (THE ONE LIST). The paired-machine guard has its red control.
+{
+  const MCS = require(path.join(REPO, 'src/managed-claude-settings.js')), RN = require(path.join(REPO, 'src/claude-route-names.js'));
+  const every = [...MCS.ENV_NAMES, ...MCS.ENV_SWITCHES];
+  const envAll = Object.fromEntries(every.map((n, k) => [k === 0 ? n.toLowerCase() : n, k % 2 ? '0' : 'x']));
+  const got = BP.ownSettingsOf(JSON.stringify({ hooks: {}, env: { ...envAll, KEEP_ME: 'yes' }, awsAuthRefresh: 'aws sso login', awsCredentialExport: 'aws export', gcpAuthRefresh: 'gcloud auth login' }));
+  const left = Object.keys(got.settings.env).filter((k) => k !== 'KEEP_ME');
+  ok(MCS.ENV_NAMES === RN.ENV_NAMES && MCS.ENV_SWITCHES === RN.ENV_SWITCHES && every.length > 100 && left.length === 0 && got.settings.env.KEEP_ME === 'yes'
+    && !['awsAuthRefresh', 'awsCredentialExport', 'gcpAuthRefresh'].some((k) => k in got.settings) && got.dropped.length === every.length + 3 && 'hooks' in got.settings,
+    `B-e7c0 THE CENSUS: every one of the ${every.length} names the managed rule counts (ONE list, the same objects; its switches whatever their value; one in lower case) is dropped from a merged copy and named; a name that decides nothing stays; the three cloud credential commands go`, { left, dropped: got.dropped.length });
+  helperOn(true);
+  const FOUNDRY_KEY = ['foundry', 'key', 'stand', 'in'].join('-');
+  fs.writeFileSync(OWN, JSON.stringify({ ...PERSON, env: { ...PERSON.env, CLAUDE_CODE_USE_FOUNDRY: '1', ANTHROPIC_FOUNDRY_API_KEY: FOUNDRY_KEY, claude_config_dir: '/srv/another-login' }, awsAuthRefresh: 'aws sso login --profile other' }));
+  const f = await drive(wsCreate, { accountId: 'sub-a1', extraArgs: ['--settings', OWN] });
+  const fo = ownLine(f), fenv = (fo.disk && fo.disk.env) || {}, said = f.notices.filter((n) => n.key.startsWith('settings-file-mergeDropped-'));
+  const gone = (n) => !Object.keys(fenv).some((k) => k.toUpperCase() === n.toUpperCase());
+  ok(merged(fo, f) && gone('CLAUDE_CODE_USE_FOUNDRY') && gone('ANTHROPIC_FOUNDRY_API_KEY') && gone('CLAUDE_CONFIG_DIR') && !('awsAuthRefresh' in fo.disk) && !JSON.stringify(fo.disk).includes(FOUNDRY_KEY)
+    && said.length === 1 && ['CLAUDE_CODE_USE_FOUNDRY', 'ANTHROPIC_FOUNDRY_API_KEY', 'claude_config_dir', 'awsAuthRefresh', 'ANTHROPIC_API_KEY'].every((n) => said[0].text.includes(n)) && /«CLI login»/.test(said[0].text) && !said[0].text.includes(FOUNDRY_KEY),
+    'B-e7c0 a person\'s Foundry road (its switch and its key), another login\'s config dir (lower case) and a cloud credential command in the merged file: none on disk — and SAID once, by name only (never a value), with the door to the pick', { env: Object.keys(fenv), said: said.map((n) => n.text) });
+  // a start that FAILS after its merged file was written takes the file with it
+  const before = new Set(fs.readdirSync(BUF).filter((n) => n.endsWith('.settings')));
+  const fail = await makeCreate(wsCreate, { failSpawn: true }).create({ accountId: 'sub-a1', extraArgs: ['--settings', OWN] });
+  const orphan = () => fs.readdirSync(BUF).filter((n) => n.endsWith('.settings') && !before.has(n));
+  for (let k = 0; k < 100 && orphan().length; k++) await new Promise((r) => setTimeout(r, 20));
+  ok(fail.sent.some((m) => m.type === 'error' && /Failed to spawn session/.test(m.message || '')) && orphan().length === 0, 'B-e7c0 a start that fails after its merged file was written removes the file (no end path knows a conversation that never registered)', orphan());
+  // the end paths: THE ONE LIST of a wrapper's files takes <id>.settings
+  const WF = require(path.join(REPO, 'src/server/wrapper-files.js'));
+  const at = fo.at;
+  WF.removeWrapperFiles(BUF, f.id);
+  for (let k = 0; k < 100 && fs.existsSync(at); k++) await new Promise((r) => setTimeout(r, 20));
+  ok(WF.WRAPPER_FILE_KINDS.includes('settings') && !fs.existsSync(at), 'B-e7c0 the end paths take the merged file: removeWrapperFiles (the kill, the exit teardown, a duplicate retired at boot) removes <id>.settings', at);
 }
 
 console.log('— ③ the DAEMON PIPE road (agentd.localPipeSessions)');
@@ -530,6 +566,20 @@ const helperSaid = (x) => x.notices.filter((n) => n.key.startsWith('billing-pick
   const namedF = hostsStub({ helper: true }), nf = await makeCreate(remoteCreate, { hosts: namedF }).create(R({ accountId: 'sub-a1', extraArgs: FILE }), { wait: 5000 });
   ok(neutralized(lineOf(nf)) && !lineOf(nf).line.includes('/home/u/my-settings.json') && saidKind(nf, 'billing') === 1 && helperSaid(nf).length === 1 && namedF.asked.length === 1,
     'the paired machine NAMES a helper and the start carries the person\'s file: the file is set aside on the remote line, said «billing», and the helper notice said — the machine asked ONCE', { notes: nf.notices.map((n) => n.key), asked: namedF.asked });
+  {
+    // THE PAIRED-MACHINE GUARD, its red control: a remote start made to read THIS machine's files (planted) still never merges — the
+    // guard holds; with the guard removed too, the person's values ride the REMOTE line inline (the file road is this machine's only)
+    helperOn(true); fs.writeFileSync(OWN, JSON.stringify(PERSON));   // THIS machine names a helper; the person's file as the other legs have it
+    const REMOTE_READ = '    if (hostId) return BILLPICK.remoteHelperFact(await hosts.backendStatus(hostId), backend);';
+    const GUARD = ' && !data.hostId && !onProvider ? BILLPICK.ownSettingsOf(ownRead.text) : null;';
+    const planted = anchored(SRC, REMOTE_READ, '    if (hostId && false) return BILLPICK.remoteHelperFact(await hosts.backendStatus(hostId), backend);', 'B-e7c0 a remote start reads this machine (planted)');
+    const withGuard = withLadder(planted, 'e7c0-remote-guarded'), noGuard = withLadder(anchored(planted, GUARD, ' && !onProvider ? BILLPICK.ownSettingsOf(ownRead.text) : null;', 'B-e7c0 the paired-machine guard removed'), 'e7c0-remote-unguarded');
+    const rgx = await makeCreate(withGuard, { hosts: hostsStub({ helper: true }) }).create(R({ accountId: 'sub-a1', extraArgs: ['--settings', OWN] }));
+    const rux = await makeCreate(noGuard, { hosts: hostsStub({ helper: true }) }).create(R({ accountId: 'sub-a1', extraArgs: ['--settings', OWN] }));
+    const mergedSaid = (x) => x.notices.filter((n) => n.key.startsWith('settings-file-mergeDropped-')).length;
+    ok(!lineOf(rgx).why && saidKind(rgx, 'billing') === 1 && mergedSaid(rgx) === 0 && mergedSaid(rux) === 1 && saidKind(rux, 'billing') === 0,
+      'B-e7c0 RED CONTROL for the paired-machine guard: a remote start made to read this machine\'s files still SETS THE FILE ASIDE (said «billing», nothing merged); without the guard that remote start MERGES the person\'s file (its drop said)', { guarded: rgx.notices.map((n) => n.key), unguarded: rux.notices.map((n) => n.key) });
+  }
   // THE BOUND on the paired machine's road: a device that never answers holds no start
   const hang = hostsStub({ hang: true }), hp = makeCreate(remoteCreate, { hosts: hang, helperFactMs: 300 }).create(R({ accountId: 'sub-a1', extraArgs: FILE }));
   const hDone = await within(hp, 4000), hx = hDone ? await hp : null;

@@ -1,6 +1,6 @@
 'use strict';
 /**
- * A SUBSCRIPTION PICK (OR A THIRD-PARTY PROVIDER) SETS THE MACHINE'S KEY HELPER ASIDE — PURE, imports only the PURE src/helper-fact.js; CJS so the create, the suites and the
+ * A SUBSCRIPTION PICK (OR A THIRD-PARTY PROVIDER) SETS THE MACHINE'S KEY HELPER ASIDE — PURE, imports only the PURE src/helper-fact.js and src/claude-route-names.js; CJS so the create, the suites and the
  * dictionary check share ONE spelling (unit «billing pick alive», ruled by 主开发 2026-11-18 01:45Z).
  *
  * A helper named in the Claude settings of the machine the CLI runs on (`apiKeyHelper` in ~/.claude/settings.json) OUTRANKS
@@ -37,8 +37,13 @@
  *     set aside (said); the fact cannot be read (a settings file that does not parse, a paired machine that does not answer) ⇒
  *     billing wins and the words say so; not named ⇒ the file applies whole, as on the release (nothing is set aside — a
  *     helper the person's own file names is that file's own word). A start without such a file never waits on the fact.
+ *   · B-e7c0 (2.369.412): ON THIS MACHINE, under a SUBSCRIPTION pick, where that file would be set aside and the create read it
+ *     (and it names no helper itself), it is MERGED instead — a copy with every route / credential name of the tree's own list
+ *     and the cloud credential commands dropped (said by name), the override applied last, written to <buffers>/<id>.settings
+ *     (0600). A paired machine, a provider's start, a file that is no JSON object or names a helper itself: set aside, as above.
  */
 const { namesHelper, helperFactOfText, SETTINGS_READ_MAX } = require('./helper-fact.js');   // B-bc9f: ONE rule with a paired machine's probe
+const ROUTE = require('./claude-route-names.js');
 
 /** does this spawn set the machine's key helper aside? `creds` = the harness's creds row, `account` = what
  *  accounts.resolveForSpawn answered (null = the CLI's own login), `linked` = the picked account id that resolved to the
@@ -77,16 +82,26 @@ function ownSettingsPathOf(cwd, ownFile = null) {
   const f = typeof ownFile === 'string' ? ownFile.trim() : '';
   return !f ? null : f.startsWith('/') ? f : base ? `${base}/${f}` : null;
 }
-/** B-e7c0: the env names a merged copy never carries from the person's file — each decides WHO BILLS, and the pick decides that */
-const MERGE_DROPS_ENV = Object.freeze(['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR', 'CLAUDE_SECURESTORAGE_CONFIG_DIR', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX']);
-/** B-e7c0: that file's text → its settings object (a plain JSON object) without those env names, else null — no object is never merged */
-function settingsObjectOf(text) {
+/** B-e7c0 cure: the top-level settings keys that run a cloud credential command (the AWS refresh and export, the Google refresh) */
+const MERGE_DROPS_KEYS = Object.freeze(['awsAuthRefresh', 'awsCredentialExport', 'gcpAuthRefresh']);
+/** B-e7c0: the person's file text → { settings, dropped } (a plain JSON object), else null — no object is never merged. Under a pick
+ *  the pick decides where the turn goes and who bills, so EVERY env name the tree's own rule counts is dropped (src/claude-route-
+ *  names.js, the list src/managed-claude-settings.js refuses: the routes and their switches — a switch when present, whatever its
+ *  value — the credentials, the proxies and TLS trust, the config folders another login is read from), matched in ANY case, and so
+ *  are the cloud credential commands. `dropped` names each (the create says them once, by name, with the door to the pick). */
+function ownSettingsOf(text) {
   if (typeof text !== 'string') return null;
   let o = null;
   try { o = JSON.parse(text); } catch { return null; }
   if (!o || typeof o !== 'object' || Array.isArray(o)) return null;
-  if (!o.env || typeof o.env !== 'object' || Array.isArray(o.env)) return o;
-  return { ...o, env: Object.fromEntries(Object.entries(o.env).filter(([k]) => !MERGE_DROPS_ENV.includes(k))) };
+  const settings = { ...o }, dropped = [];
+  for (const k of MERGE_DROPS_KEYS) if (Object.prototype.hasOwnProperty.call(settings, k)) { delete settings[k]; dropped.push(k); }
+  if (settings.env && typeof settings.env === 'object' && !Array.isArray(settings.env)) {
+    const env = {};
+    for (const [k, v] of Object.entries(settings.env)) { if (ROUTE.routeNameAny(k)) dropped.push(k); else env[k] = v; }
+    settings.env = env;
+  }
+  return { settings, dropped };
 }
 /** ONE start's fact over every file read: a helper named in ANY ⇒ true; else one that cannot be read ⇒ null (billing wins); else false */
 const combinedFact = (facts) => (facts.some((f) => f === true) ? true : facts.some((f) => f !== false) ? null : false);
@@ -127,4 +142,4 @@ function helperNotice({ name, account, accountId, host = null, hostId = null, pr
   return { key: noticeKey(accountId, hostId), words, params, text };
 }
 
-module.exports = { setsHelperAside, settingsFileOf, projectSettingsFilesOf, ownSettingsPathOf, settingsObjectOf, MERGE_DROPS_ENV, combinedFact, namesHelper, localHelperFact, remoteHelperFact, SETTINGS_READ_MAX, HELPER_SET_ASIDE, noticeKey, helperNotice };
+module.exports = { setsHelperAside, settingsFileOf, projectSettingsFilesOf, ownSettingsPathOf, ownSettingsOf, MERGE_DROPS_KEYS, combinedFact, namesHelper, localHelperFact, remoteHelperFact, SETTINGS_READ_MAX, HELPER_SET_ASIDE, noticeKey, helperNotice };

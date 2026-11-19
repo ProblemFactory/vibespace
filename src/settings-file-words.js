@@ -47,4 +47,6 @@ const GOVERNED_KINDS = Object.freeze(['outputStyle', 'noFallback', 'jobNotices']
 const fileGoverns = (session, kind) => !!(session && Array.isArray(session._settingsFileGoverns) && session._settingsFileGoverns.includes(kind));
 /** the live settings row a kind stands for (harness-config-sync's push) */
 const KIND_OF_ROW = Object.freeze({ disableModelFallback: 'noFallback' });
-module.exports = { SETTINGS_FILE_WORDS, SETTINGS_FILE_KINDS, PROVIDER_BILLING_WORDS, GOVERNED_KINDS, fileGoverns, KIND_OF_ROW };
+/** B-e7c0 cure: a settings file MERGED under a subscription pick dropped these names — said once, by name, with the door to the pick */
+const MERGE_DROPPED_WORDS = '{name}: under the subscription chosen for it, these entries of your settings file are not applied — {names} — they decide where its requests go or what credential they carry; to use them, set its billing to «CLI login»';
+module.exports = { SETTINGS_FILE_WORDS, SETTINGS_FILE_KINDS, PROVIDER_BILLING_WORDS, GOVERNED_KINDS, fileGoverns, KIND_OF_ROW, MERGE_DROPPED_WORDS };
