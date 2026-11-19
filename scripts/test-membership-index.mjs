@@ -359,7 +359,9 @@ for (const [tag, [, , leg, what]] of Object.entries(PATCHES)) {
 {
   // the restack for 2.369.412 (the meeting with B-55dc): B-55dc's DECIDING doors hand a conversation's cwd too — membershipRead,
   // groupsForSessionDecided, memberIds (the drawing door's ids, its flag kept) and the keeper's taskGroupReadFor (the create's)
-  const CALLS = /\b(groupsForSession|groupsForSessionDecided|membershipRead|memberIds|taskGroupDefaultFor|taskGroupCapFor|stampGroupCap|taskGroupReadFor)\(/g;
+  // + the seam's helper (2.369.411 × .412, lane bl-windows): grantMemberIds(tasks, facts, …) — its callers hand the facts (its SECOND
+  // argument), and its own memberIds(a) is ONE declared pass-through (the helper's line, below)
+  const CALLS = /\b(groupsForSession|groupsForSessionDecided|membershipRead|memberIds|taskGroupDefaultFor|taskGroupCapFor|stampGroupCap|taskGroupReadFor|grantMemberIds)\(/g;
   const inside = (t, open, o, c) => { let d = 0, q = null; for (let k = open; k < t.length; k++) { const ch = t[k];
     if (q) { if (ch === '\\') { k++; continue; } if (ch === q) q = null; continue; }
     if (ch === "'" || ch === '"' || ch === '`') { q = ch; continue; }
@@ -378,7 +380,7 @@ for (const [tag, [, , leg, what]] of Object.entries(PATCHES)) {
   // → { facts } (text holding a cwd) · { unseen } · null (no cwd handed: a key-only ask, a definition)
   const litOf = (x, via) => (/\.\.\./.test(x) ? { unseen: `${via || 'a literal'} holds a spread` } : /\bcwd\b/.test(x) ? { facts: x, via } : null);
   const factsOf = (t, name, a, at = t.length) => {
-    const x = argsOf(a)[name === 'stampGroupCap' ? 1 : 0] || '';
+    const x = argsOf(a)[name === 'stampGroupCap' || name === 'grantMemberIds' ? 1 : 0] || '';
     if (x.startsWith('{')) return litOf(x);
     if (/^[A-Za-z_$][\w$]*\s*=/.test(x) || x === '') return null;
     if (!/^[A-Za-z_$][\w$]*$/.test(x)) return { unseen: x };
@@ -394,8 +396,14 @@ for (const [tag, [, , leg, what]] of Object.entries(PATCHES)) {
   // with a bare name: anywhere else the same shape is UNSEEN (a red — the control below)
   let reentries = 0;
   const reentry = (t, file, m, a) => file === 'src/task-groups.js' && t.slice(Math.max(0, m.index - 5), m.index) === 'this.' && /^[A-Za-z_$][\w$]*$/.test(argsOf(a)[0] || '');
+  // THE SEAM'S HELPER (2.369.411 × .412): src/server/mounts-plugins-wiring.js `const grantMemberIds = (tasks, a, …) =>` hands its
+  // callers' facts to memberIds / groupIdsForGrant — its callers are rows of this census (grantMemberIds is a CALL above); only
+  // that line, only a bare parameter: the same shape anywhere else is UNSEEN (the control below)
+  let passes = 0;
+  const lineOf = (t, at) => t.slice(t.lastIndexOf('\n', at) + 1, (t.indexOf('\n', at) + 1 || t.length + 1) - 1);
+  const helperPass = (t, file, m, a) => file === path.join('src', 'server', 'mounts-plugins-wiring.js') && m[1] === 'memberIds' && /^const grantMemberIds = \(tasks, a(?:, [A-Za-z_$][\w$]*)?\) => /.test(lineOf(t, m.index)) && argsOf(a)[0] === 'a';
   const missing = (t, file = '') => { const out = []; let m; CALLS.lastIndex = 0;
-    while ((m = CALLS.exec(t))) { const a = argOf(t, m.index + m[0].length - 1); if (a != null && reentry(t, file, m, a)) { reentries++; continue; } const f = a != null && factsOf(t, m[1], a, m.index); if (!f) continue;
+    while ((m = CALLS.exec(t))) { const a = argOf(t, m.index + m[0].length - 1); if (a != null && reentry(t, file, m, a)) { reentries++; continue; } if (a != null && helperPass(t, file, m, a)) { passes++; continue; } const f = a != null && factsOf(t, m[1], a, m.index); if (!f) continue;
       if (f.unseen) out.push(`${m[1]}(${a.replace(/\s+/g, ' ').slice(0, 80)}) — «${f.unseen}» UNSEEN (no object literal of it in this file)`);
       else if (!handsMachine(f.facts)) out.push(`${m[1]}(${(f.via ? f.via + ' = ' : '') + f.facts.replace(/\s+/g, ' ').slice(0, 100)})`); }
     return out; };
@@ -404,8 +412,14 @@ for (const [tag, [, , leg, what]] of Object.entries(PATCHES)) {
   const bad = [];
   let calls = 0, viaVar = 0;
   for (const f of files) { const t = fs.readFileSync(path.join(REPO, f), 'utf8'); let m; CALLS.lastIndex = 0; while ((m = CALLS.exec(t))) { const a = argOf(t, m.index + m[0].length - 1); const x = a != null && factsOf(t, m[1], a, m.index); if (x && x.facts) { calls++; if (x.via) viaVar++; } } for (const x of missing(t, f)) bad.push(`${f}: ${x}`); }
-  ok(calls >= 26 && viaVar >= 2 && bad.length === 0 && reentries === 3, `B-df5f: every call handing the store a conversation's cwd hands its machine (hostId) — ${calls} calls in src/ + server.js (groupsForSession, B-55dc's deciding doors and the create's Task-Group facts; the store's own ${reentries} re-entries pass their caller's facts), ${viaVar} of them through a variable read at its object literal${bad.length ? ' · MISSING: ' + bad.join(' | ') : ''}`);
+  ok(calls >= 26 && viaVar >= 2 && bad.length === 0 && reentries === 4 && passes === 1, `B-df5f: every call handing the store a conversation's cwd hands its machine (hostId) — ${calls} calls in src/ + server.js (groupsForSession, B-55dc's deciding doors and the create's Task-Group facts; the store's own ${reentries} re-entries pass their caller's facts — 2.369.411's groupIdsForGrant among them; the seam's ONE helper grantMemberIds passes ${passes}, its callers rows here), ${viaVar} of them through a variable read at its object literal${bad.length ? ' · MISSING: ' + bad.join(' | ') : ''}`);
   ok(missing("x = tasks.groupsForSession({\n  sessionKey: k,\n  cwd: s.cwd,\n  initialGroupId: s._initialGroupId,\n});").length === 1, 'CONTROL: a planted MULTI-LINE call that hands a cwd without its machine is caught');
+  { const before = passes, MPF = path.join('src', 'server', 'mounts-plugins-wiring.js');
+    ok(/UNSEEN/.test(missing("const grantMemberIds = (tasks, a) => tasks.memberIds(a);", 'src/server/other.js').join('')) && /UNSEEN/.test(missing("const otherHelper = (tasks, a) => tasks.memberIds(a);", MPF).join(''))
+      && missing("const grantMemberIds = (tasks, a, reader) => (tasks.isHeldUnread() ? tasks.groupIdsForGrant(a, reader) : tasks.memberIds(a));", MPF).length === 0
+      && missing("x = grantMemberIds(tasks, { sessionKey: k, cwd: s.cwd });", MPF).length === 1 && missing("x = grantMemberIds(tasks, { sessionKey: k, cwd: s.cwd, hostId: s.host || null });", MPF).length === 0,
+      'CONTROL (the seam\'s helper): its memberIds(a) passes ONLY on its own line in the wiring (the same line in another file, another name: UNSEEN, a red); a CALLER of it that hands a cwd without its machine is caught, one with it passes');
+    passes = before; }
   ok(missing("a = kc.taskGroupCapFor({ cwd, initialGroupId: g }); b = tasks.groupsForSession({ cwd: s.cwd, hostId: s.host || null });").length === 1, 'CONTROL: a hostId of a LATER call on the same line does not cover an earlier one');
   ok(missing("const facts = { cwd: s.cwd, initialGroupId: g };\nconst d = kc.taskGroupDefaultFor(facts); kc.stampGroupCap(k, facts, {});").length === 2, 'CONTROL: a planted VARIABLE whose object literal hands a cwd without its machine is caught at each call that hands it');
   ok(/UNSEEN/.test(missing("function f(a) { return tasks.groupsForSession(a); }").join('')), 'CONTROL: a variable the census cannot read at an object literal (a parameter) is UNSEEN — a red');
