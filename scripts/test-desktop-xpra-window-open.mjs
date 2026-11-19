@@ -591,7 +591,7 @@ try {
     // the page (lane xpra-ime-mac): a text box for the keys legs, its key events and value reported back to this server (/vs-bfe6-k —
     // what the browser IN the app saw: key, code, keyCode; lane xpra-mac-modifiers: + ctrlKey / metaKey, and the box's selection
     // 60 ms after each keydown, once its default action ran), and a long text below for the scroll leg
-    const KEYS_PAGE = `<textarea id="t" autofocus style="position:fixed;left:0;top:0;width:100%;height:45vh;font-size:18px;z-index:1"></textarea><div style="height:45vh"></div><div style="font:16px monospace">${Array.from({ length: 400 }, (_, i) => `line ${i} of the scroll leg`).join('<br>')}</div><script>let n=0;const send=(o)=>fetch('/vs-bfe6-k?e='+encodeURIComponent(JSON.stringify(o))).catch(()=>{});const sel=()=>{const t=document.getElementById('t');return{ss:t.selectionStart,se:t.selectionEnd,len:t.value.length};};for(const ty of ['keydown','keyup'])document.addEventListener(ty,(e)=>{send({n:n++,ty,key:e.key,code:e.code,kc:e.keyCode,rep:e.repeat,ctrl:e.ctrlKey,meta:e.metaKey});if(ty==='keydown')setTimeout(()=>send({n:n++,ty:'sel',...sel()}),60);},true);document.getElementById('t').addEventListener('input',(e)=>send({n:n++,ty:'value',v:e.target.value}));</script>`;
+    const KEYS_PAGE = `<textarea id="t" autofocus style="position:fixed;left:0;top:0;width:100%;height:45vh;font-size:18px;z-index:1"></textarea><div style="height:45vh"></div><div style="font:16px monospace">${Array.from({ length: 400 }, (_, i) => `line ${i} of the scroll leg`).join('<br>')}</div><script>let n=0;const send=(o)=>fetch('/vs-bfe6-k?e='+encodeURIComponent(JSON.stringify(o))).catch(()=>{});const sel=()=>{const t=document.getElementById('t');return{ss:t.selectionStart,se:t.selectionEnd,len:t.value.length};};for(const ty of ['keydown','keyup'])document.addEventListener(ty,(e)=>{send({n:n++,ty,key:e.key,code:e.code,kc:e.keyCode,rep:e.repeat,ctrl:e.ctrlKey,meta:e.metaKey});if(ty==='keydown')setTimeout(()=>send({n:n++,ty:'sel',...sel()}),60);},true);document.getElementById('t').addEventListener('input',(e)=>send({n:n++,ty:'value',v:e.target.value}));document.getElementById('t').addEventListener('blur',(e)=>send({n:n++,ty:'blur',to:e.relatedTarget?e.relatedTarget.tagName:null,doc:document.hasFocus()}));document.getElementById('t').addEventListener('focus',()=>send({n:n++,ty:'focus'}));window.addEventListener('blur',()=>send({n:n++,ty:'wblur'}));window.addEventListener('focus',()=>send({n:n++,ty:'wfocus'}));document.addEventListener('visibilitychange',()=>send({n:n++,ty:'vis',v:document.visibilityState}));</script>`;
     const web = http.createServer((q, s) => { hits.push({ url: q.url, ua: String(q.headers['user-agent'] || '') }); s.writeHead(q.url.startsWith('/vs-bfe6') ? 200 : 404, { 'Content-Type': 'text/html; charset=utf-8' }); s.end(q.url.startsWith('/vs-bfe6') ? `<!doctype html><title>${PAGE_TITLE}</title><body style="background:#fff"><h1>${PAGE_TITLE}</h1>${KEYS_PAGE}` : ''); });
     const keyLog = () => hits.filter((h) => h.url.startsWith('/vs-bfe6-k?e=')).map((h) => { try { return JSON.parse(decodeURIComponent(h.url.slice('/vs-bfe6-k?e='.length))); } catch { return null; } }).filter(Boolean).sort((a, b) => a.n - b.n);
     const [WEB_PORT] = await freePorts(1);
@@ -669,7 +669,23 @@ try {
           // layout's & (the 1 key, no Shift) types "&". CONTROL in this session: the pre-fix packet for the Mac's
           // Caps Lock + Shift + w — w with [shift, lock] — makes X type the small "w". ──
           const valueNow = () => (keyLog().filter((e) => e.ty === 'value').pop() || {}).v;
-          const typedAfter = async (before, want) => { const v = await until(() => { const x = valueNow(); return x === before + want ? x : null; }, 8000, 200); return { ok: !!v, got: String(valueNow() || '').slice(before.length) }; };
+          // B-2a93 (four keyboard legs red on the box and the first test machine since 11-17, each «got ""» — and from a different
+          // leg on each machine, the CONTROL that goes straight to xpra too): a miss says where the keys went — the page's last
+          // events (keydown / keyup reaching it at all, a blur of the text box or of the window: the page logs them now) and,
+          // at the first miss, the app's X windows as the product lists them (a new top-level that took the keys shows there)
+          let xListed = false;
+          // (the read: the answer's ok / why are kept — an app gone or a failed listing must not read as «no windows»; X's own
+          // focused window is named, since a mapped portal or clipboard window that took the keys is not NEW)
+          const missFacts = async () => {
+            let xWindows, xFocus;
+            if (!xListed) {
+              xListed = true;
+              xWindows = await p1.evalJs(`fetch('/api/desktop/apps/${recB.id}/windows').then((r) => r.json()).then((j) => ({ ok: j.ok, why: j.why || j.error || null, rows: (j.windows || []).map((w) => [w.wid || w.id || null, w.title || '', w.w && w.h ? w.w + 'x' + w.h : '']) }))`).catch((e) => 'unread: ' + e.message);
+              try { xFocus = XDOTOOL && recB.display ? execFileSync(XDOTOOL, ['getwindowfocus', 'getwindowname'], { env: xenvFor(wt, recB), encoding: 'utf8', timeout: 4000 }).trim() : 'no xdotool / display'; } catch (e) { xFocus = 'unread: ' + String(e.message).slice(0, 80); }
+            }
+            return { tail: keyLog().slice(-12).map((e) => [e.n, e.ty, e.key || e.v || e.to || '']), xWindows, xFocus };
+          };
+          const typedAfter = async (before, want) => { const v = await until(() => { const x = valueNow(); return x === before + want ? x : null; }, 8000, 200); const r = { ok: !!v, got: String(valueNow() || '').slice(before.length) }; if (!v) r.facts = await missFacts(); return r; };
           const base0 = valueNow() || '';
           await p1.cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16, location: 1, modifiers: 8 });
           await p1.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'W', code: 'KeyW', windowsVirtualKeyCode: 87, text: 'W', unmodifiedText: 'w', modifiers: 8 });

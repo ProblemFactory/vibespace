@@ -102,15 +102,23 @@ await A.evalJs(`navigator.clipboard.writeText(${JSON.stringify(TEXT)}).then(() =
 const readBack = await A.evalJs('navigator.clipboard.readText().then((t) => t, (e) => "ERR " + e.name)');
 console.log('  (headless clipboard read-back right after the write: ' + JSON.stringify(readBack) + ')');
 await A.evalJs(`window.__toasts = []; new MutationObserver((ms) => { for (const m of ms) for (const n of m.addedNodes) { if (n.nodeType !== 1) continue; const el = /toast/.test(String(n.className || '')) ? n : n.querySelector && n.querySelector('[class*=toast]'); const t = el && el.textContent; if (t && !window.__toasts.includes(t)) window.__toasts.push(t); } }).observe(document.body, { childList: true, subtree: true }); true`);
+// B-2a93: THE EMPTY CLIPBOARD IS MADE, NEVER ASSUMED. This suite read «headless Chrome holds no system clipboard» from a read-back
+// that answered "" (the line above prints it). Since 11-17 every kept run reads the text straight back («vs-dkp-paste-<pid>»), so
+// the press pasted from the clipboard, drew no box, and the two box legs below went red. The leg is named for the no-text road:
+// the clipboard is emptied here and the empty read-back is asserted BEFORE the press (rule (b): the plant proves itself first)
+const wroteEmpty = await A.evalJs('navigator.clipboard.writeText("").then(() => true, (e) => "ERR " + e.name)');
+const emptied = await A.evalJs('navigator.clipboard.readText().then((t) => t, (e) => "ERR " + e.name)');
+check(`the clipboard is EMPTY before the press (write ${JSON.stringify(wroteEmpty)}, read back ${JSON.stringify(emptied)}) — the no-text road by construction, not by the browser`, wroteEmpty === true && emptied === '', { wroteEmpty, emptied });
 for (const pid of ourXvnc()) { try { process.kill(pid, 'SIGKILL'); } catch { } }
 const down = await until(async () => { const s = await state(); return s && s.status !== 'Connected' ? s : null; }, 15000, 100);
 check('killing the VNC server drops the stream (the window leaves "Connected")', !!down, await state());
 await A.evalJs(`(() => { const w = [...app.wm.windows.values()].find((x) => x._isDesktop); w.content.querySelector('.desktop-paste').click(); return true; })()`);
 const said = await until(() => A.evalJs(`window.__toasts.find((t) => /reconnecting — your text is pasted when it is back/.test(t)) || null`), 8000, 100);
 check('the press is SAID while the stream reconnects', !!said, await A.evalJs('window.__toasts'));
-// headless Chrome holds no system clipboard (measured above: readText() answers "" right after a writeText) — so the press
-// opened the paste box and SAID so (K2); the text goes in through the box's Send, still while the stream is down ⇒ queued
-const boxSaid = await A.evalJs(`window.__toasts.some((t) => /paste into the box under the bar/.test(t))`);
+// the clipboard was emptied above (B-2a93; asserted before the press) — so the press opened the paste box and SAID so (K2); the text goes in through the box's Send, still while the stream is down ⇒ queued
+// waited for (the product awaits readText first, up to its bound) and matched to the EMPTY road's own words — a denied or timed-out
+// read opens the box too, with other words (src/lib/picture-shell.js pasteBoxToastKey)
+const boxSaid = !!(await until(() => A.evalJs(`window.__toasts.some((t) => /Your clipboard holds no text/.test(t)) || null`), 8000, 100));
 check('with no clipboard text the press opened the paste box and said so', boxSaid, await A.evalJs('window.__toasts'));
 const sentWhileDown = await A.evalJs(`(() => { const w = [...app.wm.windows.values()].find((x) => x._isDesktop); const ta = w.content.querySelector('.vnc-paste-input'); if (!ta) return 'no box'; ta.value = ${JSON.stringify(TEXT)}; w.content.querySelector('.vnc-paste-send').click(); const st = w.content.querySelector('.desktop-status'); return st ? st.textContent : '?'; })()`);
 check(`the box's Send went in while the stream was still down (status "${sentWhileDown}")`, typeof sentWhileDown === 'string' && sentWhileDown !== 'Connected' && sentWhileDown !== 'no box');

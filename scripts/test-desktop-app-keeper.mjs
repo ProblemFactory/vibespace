@@ -1228,7 +1228,11 @@ console.log('§12 THE XPRA RUNG (P8-2): the default ladder picks it, one xpra pe
     ok(D.listenerHeldBy(r1.port, D.sessionCensus([r1.pids.x], { fresh: true })) === r1.pids.x, 'the 127.0.0.1 listener is held by the xpra pid itself (rule 3 on this rung)');
     const members = D.sessionMembers(r1.pids.x, { fresh: true });
     ok(members.length >= 2 && members.includes(r1.pids.x), `xpra's session holds its Xvfb too (${members.length} members) — the sid identity that survives xpra's environ rewrite`);
-    ok(!D.environHas(r1.pids.x, `${K.SESSION_ENV}=${rec.id}`) && D.environHas(r1.pids.app, `${K.SESSION_ENV}=${rec.id}`), 'MEASURED FACT the belt rests on: xpra rewrites its own environ (the marker is invisible on the xpra pid) while the app we spawned still carries it');
+    // B-2a93: red on the box and the first test machine since 11-17 with no word of which half — the detail now says both
+    const xHas = D.environHas(r1.pids.x, `${K.SESSION_ENV}=${rec.id}`), appHas = D.environHas(r1.pids.app, `${K.SESSION_ENV}=${rec.id}`);
+    let xArgv = null; try { xArgv = fs.readFileSync(`/proc/${r1.pids.x}/cmdline`, 'utf8').split('\0').filter(Boolean).slice(0, 3).join(' ').slice(0, 120); } catch (e) { xArgv = 'unread: ' + e.code; }
+    const environBytes = (pid) => { try { return fs.readFileSync(`/proc/${pid}/environ`).length; } catch (e) { return 'unread: ' + e.code; } };
+    ok(!xHas && appHas, 'MEASURED FACT the belt rests on: xpra rewrites its own environ (the marker is invisible on the xpra pid) while the app we spawned still carries it', { xpraPid: r1.pids.x, xpraEnvironHasMarker: xHas, xpraEnvironBytes: environBytes(r1.pids.x), xpraArgv: xArgv, appPid: r1.pids.app, appEnvironHasMarker: appHas, appEnvironBytes: environBytes(r1.pids.app) });
     ok(fs.existsSync(path.join(k.logRoot, rec.id, 'Xauthority')) && fs.statSync(path.join(k.logRoot, rec.id, 'Xauthority')).size > 0 && fs.existsSync(path.join(k.logRoot, rec.id, 'xpra')), 'the per-app dir holds the Xauthority xpra wrote into (pinned, never ~/.Xauthority) and xpra\'s own socket/session dir');
     ok(k.streamTarget(rec.id) && k.streamTarget(rec.id).kind === 'xpra' && k.streamTarget(rec.id).port === r1.port, 'streamTarget: kind xpra on the recorded port');
     // (b) per-window facts: the app's window, no xpra wrapper rows
