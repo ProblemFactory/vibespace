@@ -78,7 +78,11 @@ const S = require(path.join(REPO, 'src/codex-session-store.js'));
 const { rebuildHistory } = require(path.join(REPO, 'src/normalizers.js'));
 const desc = require(path.join(REPO, 'src/harnesses/codex.js'));
 // the cure round's seams, absent on a tree before it — the suite still runs to its end there (each leg red, never a crash)
-const statsOf = () => (codex.pagedReadStats ? codex.pagedReadStats() : { pages: 0, reads: 0, gone: 0, oneShot: 0, failed: 0 });
+const statsOf = () => {   // B-f3f9: a store's read is the worker's MERGED read now (the paged read its fallback) — both roads counted
+  const p = codex.pagedReadStats ? codex.pagedReadStats() : { pages: 0, reads: 0, gone: 0, oneShot: 0, failed: 0 };
+  const m = codex.mergedReadStats ? codex.mergedReadStats() : { pages: 0, reads: 0, gone: 0, failed: 0 };
+  return { pages: p.pages + m.pages, reads: p.reads + m.reads, gone: p.gone + m.gone, oneShot: p.oneShot, failed: p.failed + m.failed };
+};
 const onLoopOf = () => (codex.codexParsesOnLoop ? codex.codexParsesOnLoop() : { count: 0, recent: [] });
 const setBound = (mb, o) => { if (codex._setHistoryHeapMbForTest) codex._setHistoryHeapMbForTest(mb, o); };
 const AR = (() => { try { return require(path.join(REPO, 'src/attach-read.js')); } catch { return { readOffLoop: async () => false }; } })();   // before the cure: no door — a re-attach read nothing off the loop, nothing acked
@@ -131,9 +135,10 @@ console.log('— ⑤ L3 MEMORY: the worker keeps lines between pages; one histor
   const small = (n) => ({ ...sess(n), backendSessionId: SID });
   const smallN = (await new S.CodexSessionMessages(small('s0'), 'w-s0', { buffersDir }).rawAsync()).length;
   // (c) one history read at a time — the store's reads seen at the paged reader they call
-  const real = codex.readJsonlBoundedParsedPagedAsync;
+  const real = codex.readJsonlBoundedParsedPagedAsync, realM = codex.codexHistoryMergedPagedAsync;   // B-f3f9: a store's read is the worker's merged read now — both readers seen
   let inflight = 0, most = 0; const order = [];
-  codex.readJsonlBoundedParsedPagedAsync = async (...args) => { inflight++; most = Math.max(most, inflight); order.push('start'); try { return await real(...args); } finally { inflight--; order.push('end'); } };
+  const seenRead = (fn) => async (...args) => { inflight++; most = Math.max(most, inflight); order.push('start'); try { return await fn(...args); } finally { inflight--; order.push('end'); } };
+  codex.readJsonlBoundedParsedPagedAsync = seenRead(real); if (realM) codex.codexHistoryMergedPagedAsync = seenRead(realM);
   try {
     const stores = [1, 2, 3].map((k) => new S.CodexSessionMessages(small('g' + k), 'w-g' + k, { buffersDir }));
     const all = await Promise.all(stores.map((st) => st.rawAsync()));
@@ -141,7 +146,7 @@ console.log('— ⑤ L3 MEMORY: the worker keeps lines between pages; one histor
     inflight = 0; most = 0; order.length = 0;
     await Promise.all([1, 2, 3].map(() => S.parseCodexSessionJsonlAsync(SID)));
     ok(most === 3, `RED CONTROL — the ungated read (L2 before L3), three at once: ${most} in flight together`);
-  } finally { codex.readJsonlBoundedParsedPagedAsync = real; }
+  } finally { codex.readJsonlBoundedParsedPagedAsync = real; if (realM) codex.codexHistoryMergedPagedAsync = realM; }
   // (d) the pages' worker: a snapshot lives in ONE worker; another transcript op holding the pool's first worker sent L2's next page
   // to the other one (least busy)
   // the stalls are PLACED (the worker's __hold op waits on a shared word until the test releases it) — never a scan that may have ended

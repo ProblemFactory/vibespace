@@ -241,6 +241,9 @@ function cutRecordsAtOrdinal(records, untilOrdinal) {
  *  normalizer's in-stream default (wrapper_meta.threadId = the file the
  *  wrapper writes), see codex-message-manager._adoptThreadId. */
 const RECORD_THREAD_KEY = '__threadId';
+function tagOne(record, tid) {   // B-f3f9: one record's tag, as tagRecordThread sets it
+  if (record && typeof record === 'object') Object.defineProperty(record, RECORD_THREAD_KEY, { value: tid, enumerable: false, configurable: true, writable: true });
+}
 function tagRecordThread(records, threadId) {
   if (!threadId) return records;
   const tid = String(threadId);
@@ -519,13 +522,20 @@ function retractionIdOf(record) {
  *  hub's loop, and an attach ran two): mergeCodexRecords' ONE body as a generator that yields every 1 024 records — the sync
  *  mergeCodexRecords drives it to the end at once, mergeCodexRecordsAsync in slices with the loop free between them. The same
  *  records either way (it is the same code). */
+// B-f3f9: how many merges ran on the MAIN thread (the attach's proof counts them; a worker's copy of this module counts its own,
+// never read from here)
+const ON_MAIN_THREAD = (() => { try { return require('worker_threads').isMainThread; } catch { return true; } })();
+const _mergeCounts = { main: 0 };
+function mergeCounts() { return { ..._mergeCounts }; }
 function mergeCodexRecords(historyRecords, liveRecords) {
+  if (ON_MAIN_THREAD) _mergeCounts.main++;
   const g = mergeCodexRecordsSteps(historyRecords, liveRecords);
   let r = g.next();
   while (!r.done) r = g.next();
   return r.value;
 }
 async function mergeCodexRecordsAsync(historyRecords, liveRecords, { sliceMs = 20 } = {}) {
+  if (ON_MAIN_THREAD) _mergeCounts.main++;
   const g = mergeCodexRecordsSteps(historyRecords, liveRecords);
   let t0 = performance.now(), r = g.next();
   while (!r.done) {
@@ -669,9 +679,10 @@ function* mergeCodexRecordsSteps(historyRecords, liveRecords) {
  *  boundedParsed parse — the same tail-only read and line parse), handed back in pages; a missing one, or a pool that is down, the
  *  sync parse — and a parse that goes back on the loop SAYS WHY (L3 cure, 主开发 23:16Z: the paged read's own reason — gone twice,
  *  the lane busy, the worker died, its heap bound, no pool — counted and logged by parseCodexSessionJsonl). */
-async function parseCodexSessionJsonlAsync(threadId) {
+async function parseCodexSessionJsonlAsync(threadId, { fp: known } = {}) {
   let fp = null;
-  try { fp = findCodexSessionJsonlPath(threadId); } catch { fp = null; }
+  if (known !== undefined) fp = known || null;   // B-f3f9: a path this read already looked up (null = not on disk) — never a second walk
+  else { try { fp = findCodexSessionJsonlPath(threadId); } catch { fp = null; } }
   let why = 'its rollout was not found (the thread/read copy is read)';
   if (fp) {
     try {
@@ -683,6 +694,28 @@ async function parseCodexSessionJsonlAsync(threadId) {
   return parseCodexSessionJsonl(threadId, { why, fp });   // the path this read already looked up (null = none): never a second walk
 }
 
+/** B-f3f9: the files a conversation's merged read names — its fork ancestry's rollouts in order, its own last — `files` null when
+ *  one is not on disk (the old road reads its thread/read copy) or there is none (nothing to merge but the live buffer). `fps` =
+ *  every path looked up (id → path | null): the old road reads them from here, never walking the store a second time */
+function codexHistoryFiles(threadId, ancestry) {
+  const files = [], fps = new Map();
+  const pathOf = (id) => { let fp = null; try { fp = findCodexSessionJsonlPath(id) || null; } catch { fp = null; } fps.set(id, fp); return fp; };
+  for (const { id, untilOrdinal } of ancestry || []) {
+    if (!pathOf(id)) return { files: null, fps };
+    files.push({ fp: fps.get(id), threadId: String(id), untilOrdinal: Number.isInteger(untilOrdinal) ? untilOrdinal : null });
+  }
+  if (threadId) {
+    if (!pathOf(threadId)) return { files: null, fps };
+    files.push({ fp: fps.get(threadId), threadId: String(threadId), untilOrdinal: null });
+  }
+  return { files: files.length ? files : null, fps };
+}
+/** B-f3f9: a merged read that gave up is SAID (its reason; the first ten, then every hundredth) — the old road still reads off the loop */
+let _mergedFallbacks = 0;
+function noteMergedFallback(why) {
+  _mergedFallbacks++;
+  if (_mergedFallbacks <= 10 || _mergedFallbacks % 100 === 0) console.warn(`[codex] a conversation's merged history read fell back to the paged parse (${_mergedFallbacks}): ${String(why || 'no reason').slice(0, 200)}`);
+}
 /** THE HUB READS ONE CONVERSATION'S RECORDS AT A TIME (lane resume-all-paced, L3 — measured: a storm of 8 resumed conversations
  *  over 100 MB on a ballasted scratch hub). Off the loop, the attaches no longer wait on each other as the sync read made them
  *  do: all eight parsed and merged AT ONCE — the main heap reached 4.1 GB (eight conversations' records alive together) and the
@@ -765,12 +798,27 @@ class CodexSessionMessages {
       if (typeof wanted === 'function' && !wanted()) return null;
       const threadId = getCodexHistorySessionId(this._session);
       const ancestry = resolveCodexForkAncestry(threadId, this._session?.forkedFrom || []);
+      // B-f3f9: THE WHOLE READ IN THE WORKER — every file of the ancestry and the thread's own read, parsed, cut, tagged and merged,
+      // then the live buffer merged, in the transcript worker's history lane; only the FINAL records cross (in pages), each re-tagged
+      // here with its file's thread. A file it cannot name (a missing rollout: the thread/read copy), a pool that is down, or a refusal
+      // (the heap bound, a snapshot gone twice, the lane busy) ⇒ the steps below, as before (each file paged, the merges in slices).
+      const { files, fps } = codexHistoryFiles(threadId, ancestry);
+      if (files) {
+        const got = await require('./adapters/codex').codexHistoryMergedPagedAsync({ files, liveBuffer: () => this._session?.buffer || '' }, { onFail: noteMergedFallback });
+        if (got && Array.isArray(got.records)) {
+          if (this._all) return this._all;   // the sync road filled it meanwhile
+          for (let i = 0; i < got.records.length; i++) if (got.threads[i]) tagOne(got.records[i], got.threads[i]);
+          this._all = got.records;
+          return this._all;
+        }
+        for (const [id, fp] of fps) if (fp) fps.delete(id);   // a file the worker failed on may have moved (compressed to .zst): looked up again (its kept path)
+      }
       let history = [];
       for (const { id: forkId, untilOrdinal } of ancestry) {
-        const forkHistory = tagRecordThread(cutRecordsAtOrdinal(await parseCodexSessionJsonlAsync(forkId), untilOrdinal), forkId);
+        const forkHistory = tagRecordThread(cutRecordsAtOrdinal(await parseCodexSessionJsonlAsync(forkId, { fp: fps.get(forkId) }), untilOrdinal), forkId);
         if (forkHistory.length) history = await mergeCodexRecordsAsync(history, forkHistory);
       }
-      const currentHistory = threadId ? tagRecordThread(await parseCodexSessionJsonlAsync(threadId), threadId) : [];
+      const currentHistory = threadId ? tagRecordThread(await parseCodexSessionJsonlAsync(threadId, { fp: fps.get(threadId) }), threadId) : [];
       if (currentHistory.length) history = await mergeCodexRecordsAsync(history, currentHistory);
       const live = parseBufferRecords(this._session?.buffer || '');
       const all = await mergeCodexRecordsAsync(history, live);
@@ -982,4 +1030,6 @@ module.exports = {
   tagRecordThread,
   recordThreadOf,
   RECORD_THREAD_KEY,
+  parseBufferRecords,
+  mergeCounts,   // B-f3f9
 };

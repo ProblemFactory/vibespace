@@ -620,6 +620,9 @@ function _setHistoryHeapMbForTest(mb, { soft = true } = {}) { HISTORY_HEAP_MB = 
 // snapshots found gone, one-shot reads, reads that gave up (each with its reason, onFail)
 const _pagedStats = { pages: 0, reads: 0, gone: 0, oneShot: 0, failed: 0 };
 function pagedReadStats() { return { ..._pagedStats }; }
+// B-f3f9: what the merged reads did (a conversation's whole history merged in the worker): pages, reads, snapshots gone, give-ups
+const _mergedStats = { pages: 0, reads: 0, gone: 0, failed: 0 };
+function mergedReadStats() { return { ..._mergedStats }; }
 // A CODEX PARSE ON THE MAIN LOOP IS SAID (L3 cure, 主开发 23:16Z): every one is counted, and logged with its reason and size —
 // the off-loop road failed (gone twice, the lane busy, the worker died, its heap bound, no pool), or a caller read a reader before
 // its off-loop read. The road stays (a missing pool must not lose the history); it stops being invisible.
@@ -656,7 +659,7 @@ function _transcriptPoolGet() {
         poolSize: 2,
         laneOpts: { history: { resourceLimits: { maxOldGenerationSizeMb: HISTORY_HEAP_MB } } },
         inlineRun: runOp,
-        timeouts: { default: 60000, gapInfo: 120000, lineRange: 60000, userTurns: 120000, taskLines: 120000, boundedParsed: 60000, boundedParsedPage: 60000, jsonlTail: 60000, codexThreadMetas: 30000, codexOpenThreads: 15000, locate: 20000 },
+        timeouts: { default: 60000, gapInfo: 120000, lineRange: 60000, userTurns: 120000, taskLines: 120000, boundedParsed: 60000, boundedParsedPage: 60000, codexHistoryMergedPage: 120000, jsonlTail: 60000, codexThreadMetas: 30000, codexOpenThreads: 15000, locate: 20000 },
       });
       if (_poolFails) console.log(`[transcript-worker] the pool is up (try ${_poolFails + 1})`);
     } catch (e) {
@@ -729,6 +732,44 @@ async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PA
   _pagedStats.oneShot++;
   const r = await readJsonlBoundedParsedAsync(fp, { tailOnly });
   return r == null ? said(`${why}; then the one-shot read failed too (both pool workers down, or its own failure)`) : r;
+}
+/** B-f3f9: a codex conversation's WHOLE history read, parsed and MERGED in the transcript worker's `history` lane (its fork
+ *  ancestry's files in order, its own last — `files` = [{fp, threadId, untilOrdinal}]), THEN the live buffer merged last:
+ *  `liveBuffer()` is asked when the history is merged (read as late as the old road read it). The final records come back a page
+ *  at a time (≤ PAGE_LINES records and ≤ PAGE_BYTES of their JSON), each with the thread its file names (`threads`, '' = the live
+ *  buffer's). The history call's deadline grows with the files (60 s each, as the old road's per-file reads had). A snapshot gone
+ *  (another read replaced it) ⇒ asked once more; a refusal (the heap bound, the lane busy, the worker down, no pool) ⇒ null and
+ *  `onFail(why)` — the caller reads the old road. → { records, threads } | null */
+async function codexHistoryMergedPagedAsync({ files = [], liveBuffer = () => '' } = {}, { page = PAGE_LINES, onFail = null } = {}) {
+  const said = (why) => { _mergedStats.failed++; try { onFail?.(why); } catch { } return null; };
+  const pool = _transcriptPoolGet();
+  if (!pool) return said('no transcript pool on this process');
+  const capMb = HISTORY_SOFT_CHECK ? HISTORY_HEAP_MB : 0;
+  const bufferNow = () => { try { return String((typeof liveBuffer === 'function' ? liveBuffer() : liveBuffer) || ''); } catch { return ''; } };
+  let why = null;
+  for (let tries = 0; tries < 2; tries++) {
+    try {
+      const h = await pool.call('codexHistoryMergedPage', { files, capMb }, { timeoutMs: Math.min(600000, 60000 * Math.max(2, files.length)) });
+      if (!h || !h.token) { why = 'the history call answered nothing'; continue; }
+      const records = [], threads = [];
+      let total = Infinity, start = 0, gone = false, first = true;
+      while (start < total) {
+        const r = await pool.call('codexHistoryMergedPage', { token: h.token, start, count: page, maxBytes: PAGE_BYTES, capMb, ...(first ? { liveBuffer: bufferNow() } : {}) });
+        first = false;
+        if (!r || r.gone) { gone = true; _mergedStats.gone++; why = 'its snapshot was gone twice (another read replaced it)'; break; }
+        _mergedStats.pages++;
+        total = r.total;
+        for (let i = 0; i < r.records.length; i++) { records.push(r.records[i]); threads.push(r.tix[i] >= 0 ? r.tids[r.tix[i]] : ''); }
+        start = Number.isInteger(r.next) && r.next > start ? r.next : start + page;
+      }
+      if (!gone) { _mergedStats.reads++; return { records, threads }; }
+    } catch (e) {
+      const code = e && e.code;
+      if (code === 'heap_bound') return said(`the history worker's heap bound (${HISTORY_HEAP_MB} MB): ${e.message}`);
+      return said(code === 'history_busy' ? 'the history lane was busy past its wait' : `the history worker failed (${(e && e.message) || e})`);
+    }
+  }
+  return said(why);
 }
 /** Generic off-loop call (S3: codex discovery ops). Resolves the worker's
  *  result, or the inline fallback's when the pool is down/unavailable — the
@@ -1475,7 +1516,7 @@ class CodexAdapter extends BackendAdapter {
 
 // transcriptPool: the pool itself (test-codex-attach-off-loop ⑤ reads its routing)
 module.exports = { codexTranscriptIndex, transcriptPool: _transcriptPoolGet,
-  pagedReadStats, codexParsesOnLoop, _setHistoryHeapMbForTest,
+  pagedReadStats, codexParsesOnLoop, _setHistoryHeapMbForTest, codexHistoryMergedPagedAsync, mergedReadStats, // B-f3f9
   jsonlGapInfoAsync, readJsonlLineRangeAsync, scanJsonlUserTurnsAsync, readJsonlBoundedParsedAsync, readJsonlBoundedParsedPagedAsync, readJsonlTailAsync, transcriptWorkerCall,
   plainJsonlPath, fileIsZst, ZST_MAX_PLAIN, deriveCodexSessionName, CODEX_ROLLOUT_RE, lastCodexTurnModel, lastCodexTurnEffort, lastCodexTurnContextAsync,
   CODEX_SESSIONS_DIR,

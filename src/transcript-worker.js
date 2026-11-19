@@ -33,6 +33,9 @@ function _codex() { return require('./adapters/codex'); }
 // snapshot holds the tail's LINES, never its parsed records — each page parses its own lines (measured on a 32 MB tail: the lines
 // 35 MB with the string, the records 71 MB — their strings keep slices of it; one worker after four tails: heap 82 MB, not 155).
 let _pageSnap = null;
+// B-f3f9: the merged history of ONE conversation, kept for its pages (codexHistoryMergedPage) — its own snapshot beside the lines'
+let _mergedSnap = null;
+function _dropMergedSnapLater(snap) { clearTimeout(snap.timer); snap.timer = setTimeout(() => { if (_mergedSnap === snap) _mergedSnap = null; }, 30000); if (snap.timer.unref) snap.timer.unref(); }
 function _dropPageSnapLater(snap) { clearTimeout(snap.timer); snap.timer = setTimeout(() => { if (_pageSnap === snap) _pageSnap = null; }, 30000); if (snap.timer.unref) snap.timer.unref(); }
 
 /** one line of a bounded tail → its record, or undefined (blank, unparsable, or a subagent's record when `dropSub`) — boundedParsed's
@@ -87,6 +90,73 @@ function runOp(op, payload = {}) {
       overCap('after a page');
       if (i >= total) { clearTimeout(snap.timer); if (_pageSnap === snap) _pageSnap = null; } else _dropPageSnapLater(snap);
       return { result: { token: snap.token, total, next: i, records } };
+    }
+    case 'codexHistoryMergedPage': {
+      // B-f3f9 (the codex attach's merge off the main thread — card-door-in-chat's storm measure: with the parse in this worker, the
+      // records still crossed and the merges ran on the main thread, so the hub's peak memory before a collection grew with its heap
+      // limit). Three kinds of call on ONE snapshot (_mergedSnap, dropped at the last page or 30 s after the last ask):
+      //  · THE HISTORY (no token): codex-session-store's _ensureParsed steps HERE — each file of the fork ancestry, then the thread's
+      //    own (every one: no cap), read (the bounded tail), parsed (parseTailLine), cut at its fork ordinal, tagged with its thread and
+      //    merged in order. A file a compressed read refuses for good (EZSTBIG / EZSTUNSUPPORTED) reads as nothing, as both old roads
+      //    end it; any other failure throws (the caller reads the old road). → { token, historyCount }
+      //  · THE LIVE BUFFER (token + `liveBuffer`, the first page): merged LAST, the buffer the caller read AFTER the history was
+      //    merged (as late as the old road read it); then pages.
+      //  · A PAGE (token, start, count): a slice of the FINAL records — ≤ `count` records and ≤ `maxBytes` of their JSON (at least
+      //    one) — and per record the thread it came from (the tag is non-enumerable: a structured clone drops it — `tids` + `tix`).
+      // THE HEAP BOUND (`capMb`): after each file, the history, the merge and each page — refused by name (`heap_bound`), dropped.
+      const S = require('./codex-session-store');
+      const capBytes = (Number(payload.capMb) || 0) * 1048576;
+      const overCap = (where) => {
+        if (!capBytes) return;
+        const used = require('v8').getHeapStatistics().used_heap_size;
+        if (used <= capBytes) return;
+        if (_mergedSnap) { clearTimeout(_mergedSnap.timer); _mergedSnap = null; }
+        throw Object.assign(new Error(`this history needs more memory than the history worker's ${payload.capMb} MB bound (${Math.round(used / 1048576)} MB ${where})`), { code: 'heap_bound' });
+      };
+      if (!payload.token) {
+        if (_mergedSnap) { clearTimeout(_mergedSnap.timer); _mergedSnap = null; }   // one conversation at a time: an older read's pages are gone
+        let history = [];
+        for (const f of Array.isArray(payload.files) ? payload.files : []) {
+          let content = '';
+          try { content = _codex().readJsonlBounded(f.fp, { tailOnly: true }); }
+          catch (e) { if (e && (e.code === 'EZSTBIG' || e.code === 'EZSTUNSUPPORTED')) continue; throw e; }
+          const recs = [];
+          for (const line of content.split('\n')) { const msg = parseTailLine(line, false); if (msg !== undefined) recs.push(msg); }
+          content = null;
+          const one = S.tagRecordThread(S.cutRecordsAtOrdinal(recs, f.untilOrdinal), f.threadId || null);
+          if (one.length) history = S.mergeCodexRecords(history, one);
+          overCap('after a file');
+        }
+        const snap = _mergedSnap = { token: `${process.pid}:${Date.now()}:${Math.random().toString(36).slice(2)}`, history, records: null, timer: null };
+        _dropMergedSnapLater(snap);
+        overCap('after the history');
+        return { result: { token: snap.token, historyCount: history.length } };
+      }
+      const snap = _mergedSnap;
+      if (!snap || snap.token !== payload.token) return { result: { gone: true } };
+      if (!snap.records) {
+        if (typeof payload.liveBuffer !== 'string') return { result: { gone: true } };   // a page before the live merge: never answered from half a read
+        snap.records = S.mergeCodexRecords(snap.history, S.parseBufferRecords(payload.liveBuffer));
+        snap.history = null;
+        overCap('after the merge');
+      }
+      const start = Math.max(0, payload.start | 0), count = Math.max(1, payload.count | 0), total = snap.records.length;
+      const maxBytes = Math.max(0, Number(payload.maxBytes) || 0);
+      const records = [], tids = [], tix = [];
+      let i = start, bytes = 0;
+      for (; i < Math.min(total, start + count); i++) {
+        if (maxBytes && i > start && bytes >= maxBytes) break;
+        const r = snap.records[i];
+        if (maxBytes) { try { bytes += JSON.stringify(r).length; } catch { bytes += 1; } }
+        records.push(r);
+        const t = S.recordThreadOf(r);
+        if (!t) { tix.push(-1); continue; }
+        let k = tids.indexOf(t); if (k < 0) { k = tids.length; tids.push(t); }
+        tix.push(k);
+      }
+      overCap('after a page');
+      if (i >= total) { clearTimeout(snap.timer); if (_mergedSnap === snap) _mergedSnap = null; } else _dropMergedSnapLater(snap);
+      return { result: { token: snap.token, total, next: i, records, tids, tix } };
     }
     case '__hold': {
       // TESTS ONLY (safe-fs-worker.js's __sleep, held by the test instead of a clock): this worker waits on payload.sab until the

@@ -74,7 +74,11 @@ const S = require(path.join(REPO, 'src/codex-session-store.js'));
 const { rebuildHistory } = require(path.join(REPO, 'src/normalizers.js'));
 const desc = require(path.join(REPO, 'src/harnesses/codex.js'));
 // the cure round's seams, absent on a tree before it — the suite still runs to its end there (each leg red, never a crash)
-const statsOf = () => (codex.pagedReadStats ? codex.pagedReadStats() : { pages: 0, reads: 0, gone: 0, oneShot: 0, failed: 0 });
+const statsOf = () => {   // B-f3f9: a store's read is the worker's MERGED read now (the paged read its fallback) — both roads counted
+  const p = codex.pagedReadStats ? codex.pagedReadStats() : { pages: 0, reads: 0, gone: 0, oneShot: 0, failed: 0 };
+  const m = codex.mergedReadStats ? codex.mergedReadStats() : { pages: 0, reads: 0, gone: 0, failed: 0 };
+  return { pages: p.pages + m.pages, reads: p.reads + m.reads, gone: p.gone + m.gone, oneShot: p.oneShot, failed: p.failed + m.failed };
+};
 const onLoopOf = () => (codex.codexParsesOnLoop ? codex.codexParsesOnLoop() : { count: 0, recent: [] });
 const setBound = (mb, o) => { if (codex._setHistoryHeapMbForTest) codex._setHistoryHeapMbForTest(mb, o); };
 const AR = (() => { try { return require(path.join(REPO, 'src/attach-read.js')); } catch { return { readOffLoop: async () => false }; } })();   // before the cure: no door — a re-attach read nothing off the loop, nothing acked

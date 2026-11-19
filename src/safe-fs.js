@@ -65,7 +65,7 @@ const LANES = {
   parse: { poolSize: 1, busy: { message: 'another document is being parsed — try again in a moment', code: 'parse_busy' } },
   history: { poolSize: 1, busy: { message: "another conversation's history is being read — try again in a moment", code: 'history_busy' } },
 };
-const OP_LANE = { xlsxSheets: 'parse', boundedParsedPage: 'history' };   // the ops that always run in a lane (a caller may name one: call(op, p, { lane }))
+const OP_LANE = { xlsxSheets: 'parse', boundedParsedPage: 'history', codexHistoryMergedPage: 'history' };   // the ops that always run in a lane (a caller may name one: call(op, p, { lane }))
 const gone = () => Object.assign(new Error('the request was closed before its turn'), { status: 499, code: 'request_gone' });
 
 class SafeFs {
