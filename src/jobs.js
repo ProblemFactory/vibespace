@@ -229,6 +229,9 @@ class JobManager {
     this.ready = false;
     this.events = [];            // ring of {ts, jobId, name, what, verb, alarm?} for injection — read ADDRESSED (updatesFor)
     this.pendingNotifs = new Map(); // conversationId → [{jobId, jobName, text, ts, urgency}] — OFFLINE stash, drained at resume injection
+    // the B-f276 remainder, store (5) cure (主开发 02:33Z (2)): notices the file gave while the job records were HELD (none to judge a clear
+    // by) — they wait for the records' first whole read (never delivered with a cleared job's old words); in memory, never in the file
+    this._unjudged = new WeakSet();
     this.waiters = new Map();    // jobId → [{resolve, timer}] (poll --wait)
     this.ansWaiters = new Map(); // jobId → [{resolve, timer}]
     this._timers = [];
@@ -661,13 +664,21 @@ class JobManager {
    *  whose boot found the records held, kept the old words: nothing judged them again). `boot`: the archive may be read here (the
    *  boot's thread); mid-life only the archive in memory is asked. A rewrite marks the store dirty (written by the next tick). */
   _judgeNotifsIn(list, { boot = false } = {}) {
+    // store (5) cure (2): while the job records or the archive are HELD a clear cannot be judged — the notices wait (marked), judged
+    // at the records' read again (`_judgeNotifs`); a hold that ENDS without a whole read lets them go as they are (nothing to judge by)
+    if (this._recordsHeld()) { for (const n of list) if (n && n.jobId) this._unjudged.add(n); return; }
     for (const n of list) {
       if (!n || !n.jobId) continue;
+      this._unjudged.delete(n);
       const j = this.jobs.get(n.jobId) || ((boot && !this.archive && !this.readOnly) ? this._archiveAtBoot() : (this.archive || [])).find((r) => r && r.id === n.jobId);
       if (j && j.clearedAt && !(Number(n.ts) > Math.max(j.clearedAt, j.reclearedAt || 0)) && (n.text !== CLEARED_TEXT || n.jobName !== CLEARED_TEXT)) { n.jobName = CLEARED_TEXT; n.text = CLEARED_TEXT; this._dirty = true; }
     }
   }
   _judgeNotifs() { for (const list of this.pendingNotifs.values()) this._judgeNotifsIn(list || []); }
+  /** store (5) cure: the job records (jobs.json) or the archive are held — a missing record is UNKNOWN, a clear unjudgeable */
+  _recordsHeld() { return !!(this._unread && (this._unread.store || this._unread.archive)); }
+  /** a notice that waits for the records' first whole read (cure (2)) */
+  _waitsForRecords(n) { return !!n && this._recordsHeld() && this._unjudged.has(n); }
   /** the boot's archive for the notices' judge (its read r3, N1): a throw is said, never the boot's end */
   _archiveAtBoot() { try { return this._loadArchive() || []; } catch (e) { this.d.log('[jobs] the archive could not be read for the notices\' judge:', e && e.message); return []; } }
   _notifsHold(a) {
@@ -1488,7 +1499,9 @@ class JobManager {
   peekNotifs(cid) {
     if (!cid) return [];
     this._judgeHeldView(cid);
-    const q = (this.pendingNotifs.get(cid) || []).slice();
+    // BOTH LAWS (the restack onto 875a42411, 主开发 08:55Z): a notice the held job records cannot judge waits (store (5) cure (2)) — and
+    // while the Task Groups store is held an undecided line stays queued (the release's cure)
+    const q = (this.pendingNotifs.get(cid) || []).filter((n) => !this._waitsForRecords(n));
     const v = typeof this.d.viewerOf === 'function' ? this.d.viewerOf(cid) : undefined;
     return v && v.held ? q.filter((n) => n && (n.ho || this.printableNow(cid, n.jobId, v, { sub: n.sub === true }))) : q;   // THE STORE HELD UNREAD: an undecided line stays queued
   }
@@ -1528,7 +1541,9 @@ class JobManager {
    *  'gone' for a subscriber's copy and never 'owner' for one (`sub`); only an unmarked copy (the owner's) of it is owed. */
   viewVerdict(cid, job, { viewer = undefined, sub = false, fallback = null, parent = undefined } = {}) {
     const rec = job && typeof job === 'object' ? job : this.jobs.get(job) || this.archivedById(job);
-    if (!rec) return sub ? 'gone' : 'owner';
+    // store (5) cure (1), 主开发 02:33Z: while the job records or the archive are HELD a missing record is UNKNOWN — a subscriber's notice
+    // waits (the drain dropped it as «gone» and saved: lost for good), as the gc keeps a cleared record while held
+    if (!rec) return sub ? (this._recordsHeld() ? 'unknown' : 'gone') : 'owner';
     const v = viewer !== undefined ? viewer : typeof this.d.viewerOf === 'function' ? this.d.viewerOf(cid) : undefined;
     if (v === undefined) return fallback && M.ownerLineage(rec, fallback) ? 'owner' : 'subscriber';
     if (!v) return 'unknown';
@@ -1610,8 +1625,8 @@ class JobManager {
     let q = this.pendingNotifs.get(cid);
     if (!q || !q.length) return [];
     const byId = only instanceof Set;
-    if (byId || q.some((n) => n && n.ho)) {
-      const mine = byId ? (n) => only.has(n) : (n) => !(n && n.ho);
+    if (byId || q.some((n) => n && (n.ho || this._waitsForRecords(n)))) {   // store (5) cure (2): a notice that waits for the records stays
+      const mine = byId ? (n) => only.has(n) && !this._waitsForRecords(n) : (n) => !(n && n.ho) && !this._waitsForRecords(n);
       const keep = q.filter((n) => !mine(n));
       q = q.filter(mine);
       if (!q.length) return [];
