@@ -88,26 +88,26 @@ console.log('③ FIELD_FORMS — each kind holds its value in ONE form');
 console.log('④ the page-side JS over a fake DOM');
 /** A fake page of fields by id (one may hold the focus, optionally inside a same-origin frame); a field's value setter takes
  *  what it accepts in its normal form (`norm`), else '' — or keeps its old value (`keep`) — like a browser's sanitizer. */
-function fakePage(fields, { focused = null, inFrame = false, scroll = null } = {}) {
+function fakePage(fields, { focused = null, inFrame = false, scroll = null, cssEscape = null, lies = false } = {}) {
   const events = [];
   const mkWin = () => {
     const proto = {};
     Object.defineProperty(proto, 'value', { get() { return this._v; }, set(v) { const s = String(v); if (s === '' || this._accept(s)) this._v = s === '' ? '' : this._norm(s); else if (!this._keep) this._v = ''; }, configurable: true });
     function Event(type, init) { this.type = type; this.bubbles = !!(init && init.bubbles); }
-    return { HTMLInputElement: { prototype: proto }, Event, CSS: { escape: (x) => String(x).replace(/[^\w-]/g, (c) => '\\' + c) }, scrollX: scroll ? scroll.x : 0, scrollY: scroll ? scroll.y : 0 };
+    return { HTMLInputElement: { prototype: proto }, Event, CSS: { escape: cssEscape || ((x) => String(x).replace(/[^\w-]/g, (c) => '\\' + c)) }, scrollX: scroll ? scroll.x : 0, scrollY: scroll ? scroll.y : 0 };
   };
   const win = mkWin();
   const nodes = {};
   for (const [id, f] of Object.entries(fields)) {
     const r = f.rect || { x: 0, y: 0, width: 0, height: 0 };
-    const node = { id: f.noId ? '' : id, name: f.name || '', _rect: r, getBoundingClientRect: () => ({ left: r.x, top: r.y, width: r.width, height: r.height }), tagName: (f.tag || 'input').toUpperCase(), type: f.kind, readOnly: !!f.readOnly, disabled: !!f.disabled, _v: f.noValue ? undefined : (f.value ?? ''), _accept: f.accept || (() => true), _norm: f.norm || ((x) => x), _keep: !!f.keep, ownerDocument: { defaultView: win }, dispatchEvent(e) { events.push(`${id}:${e.type}`); return true; } };
+    const node = { id: f.noId ? '' : (f.id ?? id), name: f.name || '', _rect: r, getBoundingClientRect: () => ({ left: r.x, top: r.y, width: r.width, height: r.height }), tagName: (f.tag || 'input').toUpperCase(), type: f.kind, readOnly: !!f.readOnly, disabled: !!f.disabled, _v: f.noValue ? undefined : (f.value ?? ''), _accept: f.accept || (() => true), _norm: f.norm || ((x) => x), _keep: !!f.keep, ownerDocument: { defaultView: win }, dispatchEvent(e) { events.push(`${id}:${e.type}`); return true; } };
     Object.setPrototypeOf(node, win.HTMLInputElement.prototype);
     nodes[id] = node;
   }
   // B-7108's probe asks #id, input[name="…"] and input[type="…"] (a field without an id keeps its key in `nodes` only)
   const inputs = () => Object.values(nodes).filter((n) => n.tagName === 'INPUT');
-  const all = (sel) => { let m; if ((m = /^#([\w-]+)$/.exec(sel))) return Object.values(nodes).filter((n) => n.id === m[1]); if ((m = /^input\[(name|type)="([\w.:-]+)"\]$/.exec(sel))) return inputs().filter((n) => (m[1] === 'name' ? n.name : n.type) === m[2]); return null; };
-  const doc = { activeElement: null, querySelectorAll(sel) { const a = all(sel); if (!a) throw new Error('not a selector: ' + sel); return a; }, querySelector(sel) { if (/^#[\w-]+$/.test(sel)) return nodes[sel.slice(1)] || null; if (/^[a-z]+$/i.test(sel)) return null; const a = all(sel); if (a) return a[0] || null; throw new Error('not a selector: ' + sel); } };
+  const all = (sel) => { let m; if (sel[0] === '#') { const raw = sel.slice(1).replace(/\\3([0-9]) /g, '$1').replace(/\\([^])/g, '$1'); return Object.values(nodes).filter((n) => n.id === raw); } if ((m = /^input\[(name|type)="([\w.:-]+)"\]$/.exec(sel))) return inputs().filter((n) => (m[1] === 'name' ? n.name : n.type) === m[2]); return null; };
+  const doc = { activeElement: null, querySelectorAll(sel) { if (lies) return [doc.activeElement]; const a = all(sel); if (!a) throw new Error('not a selector: ' + sel); return a; }, querySelector(sel) { if (lies) return doc.activeElement; if (/^#[\w-]+$/.test(sel)) return nodes[sel.slice(1)] || null; if (/^[a-z]+$/i.test(sel)) return null; const a = all(sel); if (a) return a[0] || null; throw new Error('not a selector: ' + sel); } };
   const focus = (id) => { const n = nodes[id] || null; doc.activeElement = inFrame && n ? { tagName: 'IFRAME', contentDocument: { activeElement: n } } : n; };
   if (focused) focus(focused);
   const ctx = vm.createContext({ document: doc, window: win, JSON });
@@ -225,7 +225,7 @@ async function readBackCensus(readBack) {
   t = await judge(readBack, { verb: 'keyboard type', sel: null, asked: '2027-01-07' }, fakePage({ d: DATE() }, { focused: 'd' }));
   say('keyboard type 2027-01-07 into the focused date field ⇒ the setter, Done', t.r && t.r.code === 0 && t.r.as === 'field_setter' && t.page.nodes.d._v === '2027-01-07', t.r); cost['a keyboard type into a date field (its form)'] = t.d.calls.length;
   t = await judge(readBack, { verb: 'fill', sel: '#d', asked: '01/07/2027' }, fakePage({ d: DATE() }));
-  say('a date fill of 01/07/2027 (the target read) ⇒ refused field_form naming fill #d 2027-01-07', t.r && t.r.code === 1 && t.r.as === 'field_form' && t.r.out.includes('vibespace-browser fill #d 2027-01-07'), t.r);
+  say('a date fill of 01/07/2027 (the target read) ⇒ refused field_form naming fill \'#d\' 2027-01-07 (one shell word: an unquoted #d is a comment)', t.r && t.r.code === 1 && t.r.as === 'field_form' && t.r.out.includes("vibespace-browser fill '#d' 2027-01-07"), t.r);
   t = await judge(readBack, { verb: 'fill', sel: '#d', asked: '2027-02-31' }, fakePage({ d: DATE() }));
   say('a date the field refuses (2027-02-31) ⇒ field_refused, what it holds said', t.r && t.r.code === 1 && t.r.as === 'field_refused' && t.r.out.includes('did not take "2027-02-31" (it holds "")'), t.r);
   t = await judge(readBack, { verb: 'fill', sel: '#d', asked: '2027-02-31' }, fakePage({ d: DATE({ value: '2027-01-01', keep: true }) }));
@@ -247,7 +247,7 @@ async function readBackCensus(readBack) {
   t = await judge(readBack, { verb: 'fill', sel: '#d', asked: '2027-01-07' }, fakePage({ d: DATE() }), { fail: [2] });
   say('(c) the setter\'s OWN run fails ⇒ read_back_unavailable (exit 0, the check to run) — never «refused by the field»', t.r && t.r.note && /\[read_back_unavailable\]$/.test(t.r.note) && /own setter could not be run/.test(t.r.note) && !t.r.code, t.r);
   t = await judge(readBack, { verb: 'fill', sel: '#t', asked: '0' }, fakePage({ t: { kind: 'text' } }), { fail: [1] });
-  say('(c) the probe fails ⇒ a note under the driver\'s answer', t.r && t.r.note && t.r.note.includes('vibespace-browser get value #t'), t.r);
+  say('(c) the probe fails ⇒ a note under the driver\'s answer', t.r && t.r.note && t.r.note.includes("vibespace-browser get value '#t'"), t.r);
   // (d) the whole answer
   t = await judge(readBack, { verb: 'fill', sel: '#d', asked: '2027-01-07' }, fakePage({ d: DATE() }), { pretty: true });
   say('(d) an eval answer printed over several lines is read whole ⇒ Done', t.r && t.r.as === 'field_setter', t.r);
@@ -285,7 +285,7 @@ async function readBackCensus(readBack) {
   { let j = null; try { j = JSON.parse(t.r.out); } catch { /* */ } say('--json ⇒ ONE JSON object: success, the value, via the setter', t.r && t.r.code === 0 && j && j.success === true && j.data.value === '2027-01-07' && j.data.via === 'setter' && t.r.out.trim().split('\n').length === 1, t.r); }
   // ── B-7108: a fill by the @ref of a PART of a native date field (the box's Chrome gives the field no ref of its own) ──
   const DUE = { x: 100, y: 200, width: 160, height: 24 }, MON = { x: 104, y: 202, width: 24, height: 20 };
-  const parts = (due = {}, { part = {}, more = {}, focused = 'due', scroll = null } = {}) => fakePage({ due: DATE({ rect: DUE, ...due }), mon: { tag: 'div', noValue: true, rect: MON, ...part }, ...more }, { focused, scroll });
+  const parts = (due = {}, { part = {}, more = {}, focused = 'due', scroll = null, page = {} } = {}) => fakePage({ due: DATE({ rect: DUE, ...due }), mon: { tag: 'div', noValue: true, rect: MON, ...part }, ...more }, { focused, scroll, ...page });
   const PART = { refs: { '@e7': 'mon' } };
   t = await judge(readBack, { verb: 'fill', sel: '@e7', asked: '2027-01-07' }, parts(), PART);
   say('B-7108 a fill by the Month part\'s @ref (no value the driver reads; the focus on its date field, the part\'s box inside it) ⇒ REFUSED field_part, exit 1, with the recipe: the whole field by its own selector', t.r && t.r.code === 1 && t.r.as === 'field_part' && t.r.out.startsWith('nothing was set: @e7 is one part of a date field') && t.r.out.includes("vibespace-browser fill '#due' 2027-01-07") && t.r.err === '[field_part]\n' && t.page.nodes.due._v === '' && t.d.calls.map((c) => (c.args[0] === 'get' ? c.args.slice(0, 2).join(' ') : c.args[0])).join(' · ') === 'get value · eval · get box', { r: t.r, calls: t.d.calls.map((c) => (c.args[0] === 'get' ? c.args.join(' ') : c.args[0])) });
@@ -315,6 +315,18 @@ async function readBackCensus(readBack) {
   say('B-7108 the part\'s box cannot be read ⇒ not shown to be a part: the note as before', t.r && t.r.note && /\[read_back_unavailable\]$/.test(t.r.note), t.r);
   t = await judge(readBack, { verb: 'type', sel: '@e7', asked: '01072027' }, parts(), PART);
   say('B-7108 a `type` by a part\'s @ref (its keys may set the part) ⇒ not refused: the note as before', t.r && t.r.note && /\[read_back_unavailable\]$/.test(t.r.note), t.r);
+  // B-7108 cure (主开发 03:47Z, the must): the PAGE chooses its ids — one holding a quote, a semicolon and a newline would end
+  // the recipe's quoting and put the page's words in the agent's shell. The id road takes the name road's alphabet; else not used
+  const HOSTILE = "x';touch pwned;'\nb";
+  const clean = (r) => !!r && !/pwned/.test(String(r.out) + String(r.err));
+  t = await judge(readBack, { verb: 'fill', sel: '@e7', asked: '2027-01-07' }, parts({ id: HOSTILE, name: 'dueDate' }), PART);
+  say('B-7108 cure: a HOSTILE id (a quote, a semicolon, a newline) is never put in the recipe — the field is named by its name', t.r && t.r.as === 'field_part' && t.r.out.includes("vibespace-browser fill 'input[name=\"dueDate\"]' 2027-01-07") && clean(t.r), t.r);
+  t = await judge(readBack, { verb: 'fill', sel: '@e7', asked: '2027-01-07' }, parts({ id: HOSTILE }), PART);
+  say('B-7108 cure: a hostile id with no name, the only date field ⇒ named by its kind', t.r && t.r.as === 'field_part' && t.r.out.includes("vibespace-browser fill 'input[type=\"date\"]' 2027-01-07") && clean(t.r), t.r);
+  t = await judge(readBack, { verb: 'fill', sel: '@e7', asked: '2027-01-07' }, parts({ id: HOSTILE }, { more: { other: DATE({ noId: true, rect: { x: 0, y: 400, width: 160, height: 24 } }) } }), PART);
+  say('B-7108 cure: a hostile id, no name, not the only one ⇒ the generic words, nothing of the page in the command', t.r && t.r.as === 'field_part' && t.r.out.includes("'<the field selector>'") && clean(t.r) && t.r.err === '[field_part]\n', t.r);
+  t = await judge(readBack, { verb: 'fill', sel: '@e7', asked: '2027-01-07' }, parts({}, { page: { cssEscape: () => "due';touch pwned;'", lies: true } }), PART);
+  say('B-7108 cure: a page that LIES (its CSS.escape and querySelectorAll replaced) answers a hostile selector ⇒ refused by the second bound here, the generic words', t.r && t.r.as === 'field_part' && t.r.out.includes("'<the field selector>'") && clean(t.r), t.r);
   return { bad, cost };
 }
 ok(JSON.stringify(GRAMMAR.get.attr) === '["selector","name"]' && JSON.stringify(GRAMMAR.get.value) === '["selector"]' && JSON.stringify(GRAMMAR.focus) === '["selector"]' && JSON.stringify(GRAMMAR.eval) === '["script"]',
@@ -329,6 +341,10 @@ REFUSED_CALLS.length = 0;
   ok(Object.keys(cost).length >= 7, `(e) THE COST, measured on the fake — driver runs per read-back: ${Object.entries(cost).map(([k, n]) => `${k} ${n}`).join(' · ')}`, cost);
 }
 
+ok(['#due', '#a\\.b', '#\\31 23', 'input[name="dueDate"]', 'input[type="date"]'].every((x) => RB.recipeSelector(x) === x) && ["#x';touch pwned;'", '#a b', '#a\nb', 'input[name="x";y"]', '#$(id)', '#`id`', 'x'.repeat(201)].every((x) => RB.recipeSelector(x) === null),
+  'B-7108 cure: the recipe takes a page\'s selector only from the bounded alphabet (CSS.escape\'s own output for letters, digits, _ . : -) — a quote, a space, a newline, $( ) or a backquote is refused');
+ok(RB.shellArg('@e7') === '@e7' && RB.shellArg('#d') === "'#d'" && RB.shellArg("a'b") === "'a'\\''b'" && RB.shellArg('input[name="x"]') === `'input[name="x"]'`,
+  'one shell word: plain words as they are, `#d` quoted (unquoted it is a comment), a quote inside closed, escaped and reopened');
 console.log('⑥ WIRING in the shipped CLI');
 const CLI_SRC = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-browser'), 'utf8');
 function wiringFindings(src) {
@@ -399,6 +415,16 @@ const MUT = mutantCopies('read-back', REPO);
   const f = MUT.write('src/browser-read-back.js', anchored(SRC, "    if (!boxInside(driverBox(await call(['get', 'box', plan.sel, '--json'])), o.box, o.scroll)) return null;\n", '', 'B-7108 no box check'), 'no-box');
   const { bad } = await readBackCensus(require(f).readBack);
   ok(bad.some((b) => b.startsWith('B-7108 the focus on ANOTHER date field')), 'CONTROL (a part judged by the FOCUS alone): the focus on another date field is refused as «a part of it» — FAILS ⑤', bad.filter((b) => b.startsWith('B-7108')).slice(0, 2));
+}
+{
+  // B-7108 cure's CONTROL: 449554175's id road — the page's id through CSS.escape alone, the recipe trusting the page's answer
+  const SRC = fs.readFileSync(path.join(REPO, 'src/browser-read-back.js'), 'utf8');
+  const rel = anchored(anchored(SRC, "if(el.id&&/^[A-Za-z0-9_.:-]+$/.test(el.id)&&", 'if(el.id&&', 'B-7108 the release: an id of any characters'), '    const sel = recipeSelector(o.sel);\n', '    const sel = o.sel || null;\n', 'B-7108 the release: the page trusted');
+  const { bad } = await readBackCensus(require(MUT.write('src/browser-read-back.js', rel, 'id-unbounded')).readBack);
+  ok(bad.some((b) => b.startsWith('B-7108 cure: a HOSTILE id')) && bad.some((b) => b.startsWith('B-7108 cure: a page that LIES')), 'CONTROL (449554175\'s id road, both bounds gone): the hostile id and a lying page\'s selector travel into the agent\'s command: FAILS ⑤', bad.filter((b) => b.startsWith('B-7108 cure')).slice(0, 2));
+  const half = anchored(SRC, '    const sel = recipeSelector(o.sel);\n', '    const sel = o.sel || null;\n', 'B-7108 the page trusted');
+  const { bad: bad2 } = await readBackCensus(require(MUT.write('src/browser-read-back.js', half, 'page-trusted')).readBack);
+  ok(bad2.some((b) => b.startsWith('B-7108 cure: a page that LIES')) && !bad2.some((b) => b.startsWith('B-7108 cure: a HOSTILE id')), 'CONTROL (the bound in the page alone): a page that replaces its own CSS.escape and querySelectorAll puts its words in the command — the second bound is load-bearing: FAILS ⑤', bad2.filter((b) => b.startsWith('B-7108')).slice(0, 2));
 }
 {
   const from = "    if (code === 0 && readPlan && !dialogHit && !loopHit && !shotCut && !passkeyHit && !promptHit) {";

@@ -43,7 +43,7 @@ function fieldSetJs(value, target = null, expect = null) {
 // the only one), checked IN the page.
 const PART_KINDS = new Set(['date', 'time', 'datetime-local', 'month', 'week']);
 function partOwnerProbeJs() {
-  return `(()=>{${FOCUSED_JS}if(!el||!el.tagName||el.tagName.toLowerCase()!=='input')return JSON.stringify({tag:null});const kind=String(el.type||'').toLowerCase();const r=el.getBoundingClientRect();const tries=[];if(el.id&&window.CSS&&window.CSS.escape)tries.push('#'+window.CSS.escape(el.id));if(el.name&&/^[A-Za-z0-9_.:-]+$/.test(el.name))tries.push('input[name="'+el.name+'"]');if(/^[a-z-]+$/.test(kind))tries.push('input[type="'+kind+'"]');let sel=null;for(const t of tries){try{if(document.querySelectorAll(t).length===1&&document.querySelector(t)===el){sel=t;break}}catch(e){}}return JSON.stringify({tag:'input',kind,value:typeof el.value==='string'?el.value:null,box:{x:r.left,y:r.top,width:r.width,height:r.height},scroll:{x:window.scrollX||0,y:window.scrollY||0},sel})})()`;
+  return `(()=>{${FOCUSED_JS}if(!el||!el.tagName||el.tagName.toLowerCase()!=='input')return JSON.stringify({tag:null});const kind=String(el.type||'').toLowerCase();const r=el.getBoundingClientRect();const tries=[];if(el.id&&/^[A-Za-z0-9_.:-]+$/.test(el.id)&&window.CSS&&window.CSS.escape)tries.push('#'+window.CSS.escape(el.id));if(el.name&&/^[A-Za-z0-9_.:-]+$/.test(el.name))tries.push('input[name="'+el.name+'"]');if(/^[a-z-]+$/.test(kind))tries.push('input[type="'+kind+'"]');let sel=null;for(const t of tries){try{if(document.querySelectorAll(t).length===1&&document.querySelector(t)===el){sel=t;break}}catch(e){}}return JSON.stringify({tag:'input',kind,value:typeof el.value==='string'?el.value:null,box:{x:r.left,y:r.top,width:r.width,height:r.height},scroll:{x:window.scrollX||0,y:window.scrollY||0},sel})})()`;
 }
 /** The driver's `get box <sel> --json` answer → { x, y, width, height } in CSS px, else null. */
 function driverBox(r) {
@@ -55,6 +55,16 @@ function driverBox(r) {
   }
   return null;
 }
+// B-7108 cure (主开发 03:47Z, the must): a selector the PAGE names goes into a shell command an agent may run, so it comes
+// only from a bounded alphabet. An id or a name of letters, digits, underscore, dot, colon, hyphen is used; any other is not
+// (the recipe falls to the name, the kind, or the generic words). It is checked in the page (partOwnerProbeJs) AND here again:
+// a page may replace RegExp, CSS.escape or querySelectorAll in its own window, so its answer is never trusted alone. The id
+// form allowed here is CSS.escape's own output for that alphabet (\. \: \- and a leading digit as \3N plus a space).
+const RECIPE_SEL_RE = /^(?:#(?:[A-Za-z0-9_-]|\\[.:-]|\\3[0-9] )+|input\[name="[A-Za-z0-9_.:-]+"\]|input\[type="[a-z-]+"\])$/;
+function recipeSelector(sel) { return typeof sel === 'string' && sel.length <= 200 && RECIPE_SEL_RE.test(sel) ? sel : null; }
+/** One shell word for a suggested command: as it is when it holds only plain characters, else single-quoted (a quote inside
+ *  closed, escaped and reopened). A `#selector` unquoted starts a shell comment: the command would run without it. */
+function shellArg(s) { const t = String(s); return /^[A-Za-z0-9_@%+=:,./-]+$/.test(t) ? t : `'${t.split("'").join("'\\''")}'`; }
 /** The part's centre inside the field's box, read in the viewport or in the page (1 px of rounding either way). */
 function boxInside(part, field, scroll) {
   if (!part || !field || !(field.width > 0) || !(field.height > 0)) return false;
@@ -93,7 +103,7 @@ async function readBack({ plan, run, json = false, now = Date.now, budgetMs = RE
   let runs = 0;
   const call = async (args) => { const left = deadline - now(); if (left <= 0) return null; runs++; try { return await run(args, { ms: left }); } catch { return null; } };
   const what = plan.verb === 'fill' ? 'fill' : plan.verb === 'type' ? 'type' : plan.verb;
-  const target = plan.sel ? plan.sel : "<the field's @ref>";
+  const target = plan.sel ? shellArg(plan.sel) : "<the field's @ref>"; // one shell word: `#d` unquoted is a comment
   // ui-words: agent-facing CLI note
   const unavailable = (why) => ({ runs, note: `note: your ${what} ran, but ${why} — check it (vibespace-browser get value ${target}) before you go on [read_back_unavailable]` });
   const answer = (code, as, text, data = null) => (json
@@ -112,9 +122,10 @@ async function readBack({ plan, run, json = false, now = Date.now, budgetMs = RE
     if (o.value === plan.asked || (plan.asked !== '' && form.re.test(plan.asked) && form.norm(o.value) === form.norm(plan.asked))) return { landed: true };
     const inForm = plan.asked === '' || form.re.test(plan.asked);
     const value = plan.asked === '' ? "''" : inForm ? plan.asked : form.example;
-    const run = o.sel ? `vibespace-browser fill '${o.sel}' ${value}` : `vibespace-browser fill '<the field selector>' ${value}`;
+    const sel = recipeSelector(o.sel);
+    const run = sel ? `vibespace-browser fill ${shellArg(sel)} ${value}` : `vibespace-browser fill '<the field selector>' ${value}`;
     // ui-words: agent-facing CLI refusal
-    return answer(1, 'field_part', `nothing was set: ${plan.sel} is one part of a ${o.kind} field, and a fill by one of its parts sets nothing — the field holds ${shown(o.value)}. Fill the whole field by ${o.sel ? 'its own selector' : 'a CSS selector that names the input itself (an @ref of one of its parts never reaches it)'}, in its form ${form.example} (${form.words})${inForm ? '' : ` — your ${shown(plan.asked)} is not in that form`}: ${run} — the field's own setter sets it and reads it back`, { kind: o.kind, value: o.value, field: o.sel || null });
+    return answer(1, 'field_part', `nothing was set: ${plan.sel} is one part of a ${o.kind} field, and a fill by one of its parts sets nothing — the field holds ${shown(o.value)}. Fill the whole field by ${sel ? 'its own selector' : 'a CSS selector that names the input itself (an @ref of one of its parts never reaches it)'}, in its form ${form.example} (${form.words})${inForm ? '' : ` — your ${shown(plan.asked)} is not in that form`}: ${run} — the field's own setter sets it and reads it back`, { kind: o.kind, value: o.value, field: sel });
   };
   let f = null, setVia = null;
   if (plan.sel == null) {
@@ -179,4 +190,4 @@ async function readBack({ plan, run, json = false, now = Date.now, budgetMs = RE
   return answer(0, 'field_differs', `${strict ? '' : 'note: '}${what === 'fill' ? 'filled' : 'typed'} — but the ${strict ? '' : 'focused '}${f.kind} field holds ${holds}, not ${plan.verb === 'fill' ? 'exactly ' : 'a text containing '}${secret ? `the ${plan.asked.length} characters you gave` : shown(plan.asked)} (the page reformatted, cut or moved it)`, { kind: f.kind, value: secret ? null : f.value });
 }
 
-module.exports = { FIELD_FORMS, READ_BACK_TEXT_MAX, PART_KINDS, fieldProbeJs, fieldSetJs, partOwnerProbeJs, evalAnswer, driverRead, driverBox, boxInside, readBack };
+module.exports = { FIELD_FORMS, READ_BACK_TEXT_MAX, PART_KINDS, fieldProbeJs, fieldSetJs, partOwnerProbeJs, evalAnswer, driverRead, driverBox, boxInside, recipeSelector, shellArg, readBack };
