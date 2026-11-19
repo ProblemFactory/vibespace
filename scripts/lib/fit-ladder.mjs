@@ -83,6 +83,8 @@ export const columnFactsSource = (sel) => `(() => {
   const tw = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
   for (let n = tw.nextNode(); n; n = tw.nextNode()) {
     const s = n.textContent, el = n.parentElement; if (!s.trim() || !el || !vis(el)) continue;
+    // text inside a CLOSED fold is not drawn — never judged (its summary is); a fold's words are measured OPEN (checkpoint 61)
+    const fold = el.closest('details'); if (fold && !fold.open && !el.closest('summary')) continue;
     const rects = rangeRects(n); if (!rects.length) continue;
     // an ellipsis drawn INSIDE its own box (the box within the column) whose tip — its own, its parent's or grandparent's title or
     // aria-label — holds the whole words is a deliberate one-line preview, not a cut (a job's last line); without the tip it is

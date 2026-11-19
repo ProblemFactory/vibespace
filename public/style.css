@@ -6226,6 +6226,7 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 /* WHERE THE CLI WAS FOUND (lane cli-shell-truth): one line under the version chip — its own row in the wrapping
    left column; a path may break anywhere */
 .ob-cli-where { flex-basis: 100%; min-width: 0; font-size: 11px; color: var(--text-dim); overflow-wrap: anywhere; word-break: break-word; }
+.ob-backend-id > .ob-cli-where-fold { flex: 1 1 100%; min-width: 0; }   /* checkpoint 61 (the coordinator's word): the census line FOLDED by the plain-words chain takes its OWN full row in the id row, as the line it replaced did — opened, its body wraps at the column, never at its own min-content width (a few glyphs a line) */
 .ob-cli-where-warn { color: var(--yellow); }
 /* the refused create's dialog (cli-missing): what was asked, the sentence, the hint */
 .cli-missing-body { display: flex; flex-direction: column; gap: 8px; font-size: 13px; line-height: 1.5; }
