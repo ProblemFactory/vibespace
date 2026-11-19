@@ -448,7 +448,7 @@ const factNone = (key) => { const v = factRaw(key); return v !== undefined && !(
 const factValue = (key) => { const v = num(factRaw(key)); return Number.isFinite(v) && v >= 0 ? v : factNone(key) ? 0 : PROPOSABLE[key] ? PROPOSABLE[key].def : NaN; };
 // LAW B (the check, 2026-11-15): a hold is LIVE only while the row holds its value — a row the owner changed by hand has no hold
 // here at once (no held line, no «then …», no «End now»), before the hub's `setting-holds` broadcast that ends it arrives
-const factHold = (key) => { try { const h = settingFacts && typeof settingFacts.holdOf === 'function' ? settingFacts.holdOf(key) : null; return h && typeof h === 'object' && Number.isFinite(num(h.value)) && Number.isFinite(num(h.untilAt)) && holdIsLive(h, factValue(key)) ? h : null; } catch { return null; } };
+const factHold = (key) => { try { const h = settingFacts && typeof settingFacts.holdOf === 'function' ? settingFacts.holdOf(key) : null; return h && typeof h === 'object' && Number.isFinite(num(h.value)) && Number.isFinite(num(h.untilAt)) && holdIsLive(h, factRaw(key)) ? h : null; } catch { return null; } };   // cure 2: liveness by the RAW value (a blank is no hold's value)
 /** the hub said what the row holds NOW (a press answered «moved» / «same» / «passed») — the card redraws on it, nothing is pressed again */
 export function noteSettingPresent(key, value) { try { if (settingFacts && typeof settingFacts.present === 'function' && Number.isFinite(num(value))) settingFacts.present(key, num(value)); } catch { /* the next broadcast tells */ } }
 /** the item's proposed change (its action) when it is one of a proposable row, else null — the ONE test every surface asks */

@@ -113,7 +113,7 @@ console.log('③ red controls — a patched copy of the router');
   const src = read('src/routes/persistence.js'), M = mutantCopies('spend-owner', REPO);
   const callP = "    if (refuseSpendRows(req, res, merged)) return; // lane setting-doors pick 0: the spending rows are the owner's press\n";
   const markA = "  const spendWriteWhy = (req) => require('../write-origin.js').ownerPageWhy(req);   // null = the owner's page\n";
-  const cmpA = "const same = (k) => Object.hasOwn(cur, k) === Object.hasOwn(nxt, k) && JSON.stringify(cur[k]) === JSON.stringify(nxt[k]);";
+  const cmpA = "const same = (k) => Object.hasOwn(cur, k) === Object.hasOwn(nxt, k) && (JSON.stringify(cur[k]) === JSON.stringify(nxt[k]) || (nothing(k, cur[k]) && nothing(k, nxt[k])));";   // B-0a33 cure 2: a cap's null and blank are one «nothing»
   ok(src.includes(callP) && src.includes(markA) && src.includes(cmpA), 'the anchors the controls patch are in this tree');
   const run = async (patched, tag, go) => { const P = M.load('src/routes/persistence.js', patched, tag); const h = await hub(P, `mut-${tag}`); await send(h, 'PATCH', '/api/settings', { [DAY]: 800, [HOUR]: 30 }, ownerPageHeaders(h.base)); const r = await go(h); return { r, s: h.read() }; };
   const noPatch = await run(src.replace(callP, ''), 'no-patch-fence', (h) => send(h, 'PATCH', '/api/settings', { [DAY]: 9999 }, { Authorization: 'Bearer vsst_fixture_agent' }));

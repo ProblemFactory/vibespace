@@ -1112,7 +1112,10 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   const spendRowsTouched = (req, next) => {
     if (!spendWriteWhy(req)) return [];
     const cur = readSettings() || {}, nxt = next && typeof next === 'object' ? next : {};
-    const same = (k) => Object.hasOwn(cur, k) === Object.hasOwn(nxt, k) && JSON.stringify(cur[k]) === JSON.stringify(nxt[k]);
+    // B-0a33 cure 2: a cap's stored null and blank are the SAME «nothing» — a credentialed write that re-sends an old null (now stored
+    // blank) changed no row, and is never refused for it
+    const nothing = (k, v) => SPEND_CAP_KEYS.has(k) && (v === null || v === '');
+    const same = (k) => Object.hasOwn(cur, k) === Object.hasOwn(nxt, k) && (JSON.stringify(cur[k]) === JSON.stringify(nxt[k]) || (nothing(k, cur[k]) && nothing(k, nxt[k])));
     return [...new Set([...Object.keys(cur), ...Object.keys(nxt)])].filter((k) => isSpendRow(k) && !same(k));
   };
   const SPEND_REFUSED_BY = { bearer: 'a request carrying a bearer token (an agent, a job, an automation key)', 'no-browser': 'a request with no mark of the owner\'s page (neither Sec-Fetch-Site nor this instance\'s own Origin)' };

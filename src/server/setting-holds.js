@@ -60,8 +60,10 @@ function create({ dataDir, readSettings, patchSettings, broadcast = () => { }, u
   // — refused, read 0 (as budgetLimits reads it), never the default; its «before» is BLANK, so a return writes it back as it was. null
   // stays «absent — the row's default» (a sparse store), the only value a return drops
   const noNumber = (v) => !(Number.isFinite(AS.NUM(v)) && AS.NUM(v) >= 0);
+  const rawOf = (s, key) => (s && Object.prototype.hasOwnProperty.call(s, key) ? s[key] : undefined);   // cure 2: what liveness reads (AS.holdIsLive)
+  const said = (raw) => (raw === undefined ? 'its default' : noNumber(raw) ? 'none' : raw);   // a row's raw value in a journal line
   const stored = (key) => { const s = readSettings() || {}; return Object.prototype.hasOwnProperty.call(s, key) ? (s[key] === null ? '' : s[key]) : null; };
-  const valueIn = (s, key) => { const has = !!s && Object.prototype.hasOwnProperty.call(s, key), v = has ? s[key] : null; return NUM(v) != null ? v : has && AS.PROPOSABLE[key] && noNumber(v) ? 0 : has && AS.PROPOSABLE[key] ? AS.NUM(v) : AS.PROPOSABLE[key] ? AS.PROPOSABLE[key].def : null; };
+  const valueIn = (s, key) => { const has = !!s && Object.prototype.hasOwnProperty.call(s, key), v = has ? s[key] : null; return NUM(v) != null && v >= 0 ? v : has && AS.PROPOSABLE[key] && noNumber(v) ? 0 : has && AS.PROPOSABLE[key] ? AS.NUM(v) : AS.PROPOSABLE[key] ? AS.PROPOSABLE[key].def : null; };
   const presentOf = (key) => valueIn(readSettings() || {}, key);
   const backOf = (key, h) => (h.before == null ? (AS.PROPOSABLE[key] ? AS.PROPOSABLE[key].def : null) : h.before);
   const disarm = (key) => { const t = timers.get(key); if (t) clearTimer(t); timers.delete(key); };
@@ -85,16 +87,16 @@ function create({ dataDir, readSettings, patchSettings, broadcast = () => { }, u
    *  longer the hold's ends its hold here. The store's own writes (the press, the return) are not a hand's. */
   function noteSettingsWrite(next) {
     if (ownWrite) return;
-    for (const key of Object.keys(holds)) { const cur = valueIn(next || {}, key); if (!AS.holdIsLive(holds[key], cur)) endChangedByHand(key, cur, 'when the hand\'s write landed'); }
+    for (const key of Object.keys(holds)) { const raw = rawOf(next || {}, key); if (!AS.holdIsLive(holds[key], raw)) endChangedByHand(key, said(raw), 'when the hand\'s write landed'); }
   }
   /** the LIVE hold of a row (law B) with its lasting value (law A) — the agent's ask route judges against it; null = none */
-  function holdOf(key) { const h = holds[key]; if (!h || !AS.holdIsLive(h, presentOf(key))) return null; return { ...h, lasting: AS.lastingOf(key, h) }; }
+  function holdOf(key) { const h = holds[key]; if (!h || !AS.holdIsLive(h, rawOf(readSettings() || {}, key))) return null; return { ...h, lasting: AS.lastingOf(key, h) }; }
 
   /** THE RETURN (the moment, or «End now»): back to «before» — only a LIVE hold; one the hand moved has already ended. */
   async function returnHold(key, why) {
     const h = holds[key]; if (!h) return { ok: true, none: true };
-    const cur = presentOf(key);
-    if (!AS.holdIsLive(h, cur)) { endChangedByHand(key, cur, why === 'end' ? 'End now' : 'its moment'); return { ok: true, returned: false, changedByHand: true, value: cur }; }
+    const cur = presentOf(key), raw = rawOf(readSettings() || {}, key);
+    if (!AS.holdIsLive(h, raw)) { endChangedByHand(key, said(raw), why === 'end' ? 'End now' : 'its moment'); return { ok: true, returned: false, changedByHand: true, value: cur }; }   // cure 2: a return never writes over a value it did not write
     try { write({ [key]: h.before }); }   // null = the row's default (a sparse store drops it)
     catch (e) {
       const msg = e && e.message;
@@ -129,11 +131,12 @@ function create({ dataDir, readSettings, patchSettings, broadcast = () => { }, u
   async function take({ key, value, untilRel = null, untilAt = null, shown }) {
     if (!AS.isProposable(key)) return { ok: false, status: 400, code: 'not-proposable', error: `${key} is not a row a press may change; ${AS.LINK(key)}` };
     const present = presentOf(key);
-    if (NUM(Number(shown)) == null || Number(shown) !== present) return { ok: false, status: 409, code: 'moved', present, error: `it is ${present} now` };
-    if (holds[key] && !AS.holdIsLive(holds[key], present)) endChangedByHand(key, present, 'a press');   // law B's belt: the hand write's hook ends it first
+    const presentNone = noNumber(rawOf(readSettings() || {}, key)) && rawOf(readSettings() || {}, key) !== undefined;   // cure 2: «none», never 0, in what the press answers
+    if (NUM(Number(shown)) == null || Number(shown) !== present) return { ok: false, status: 409, code: 'moved', present, ...(presentNone ? { presentNone } : {}), error: `it is ${presentNone ? 'none' : present} now` };
+    if (holds[key] && !AS.holdIsLive(holds[key], rawOf(readSettings() || {}, key))) endChangedByHand(key, said(rawOf(readSettings() || {}, key)), 'a press');   // law B's belt: the hand write's hook ends it first
     const prior = holds[key] ? { ...holds[key] } : null;   // LIVE (law B) — its «before» is the row's lasting value (law A)
     const v = AS.pressVerdict({ type: AS.TYPE, key, value, untilRel, untilAt }, { present, now: now(), lasting: prior ? AS.lastingOf(key, prior) : undefined });
-    if (!v.press) return { ok: false, status: 409, code: v.why, present, ...(v.lasting != null ? { lasting: v.lasting } : {}), error: v.why === 'raise-over-hold' ? `${value} is above ${v.lasting}, the value before the hold — a lasting raise needs its «until»` : v.why === 'raise-needs-until' ? 'a raise is always time-boxed — this one names no «until»' : v.why === 'passed' ? 'the moment has passed' : v.why };
+    if (!v.press) return { ok: false, status: 409, code: v.why, present, ...(presentNone ? { presentNone } : {}), ...(v.lasting != null ? { lasting: v.lasting } : {}), ...(prior && prior.before != null && noNumber(prior.before) ? { lastingNone: true } : {}), error: v.why === 'raise-over-hold' ? `${value} is above ${v.lasting}, the value before the hold — a lasting raise needs its «until»` : v.why === 'raise-needs-until' ? 'a raise is always time-boxed — this one names no «until»' : v.why === 'passed' ? 'the moment has passed' : v.why };
     tries.delete(key);   // a new press: the old hold's failed returns are no longer counted
     if (v.untilAt != null) {   // TIMED: the hold on disk FIRST; a second press keeps the value it replaces as `pending` until its write lands
       holds[key] = { key, value: v.value, before: prior ? prior.before : stored(key), untilAt: v.untilAt, at: now(), ...(prior ? { pending: present } : {}) };   // 4: the FIRST «before» kept
@@ -178,9 +181,9 @@ function create({ dataDir, readSettings, patchSettings, broadcast = () => { }, u
         log(`[setting-holds] dropped at start: ${k} (${why.key})`);
         delete holds[k]; changed = true; continue;
       }
-      const cur = presentOf(k);
+      const cur = rawOf(readSettings() || {}, k);   // cure 2: the RAW stored value decides liveness
       if (h.pending !== undefined) { if (NUM(h.pending) === cur) h.value = h.pending; delete h.pending; changed = true; }   // a second press that never landed: the hold stands on the old value
-      if (!AS.holdIsLive(h, cur)) { log(`[setting-holds] ${k}: the row holds ${cur}, not the hold's ${h.value} (changed while the hub was down, or a first press that never landed) — the hold ended; it will not go back`); delete holds[k]; changed = true; continue; }
+      if (!AS.holdIsLive(h, cur)) { log(`[setting-holds] ${k}: the row holds ${said(cur)}, not the hold's ${h.value} (changed while the hub was down, or a first press that never landed) — the hold ended; it will not go back`); delete holds[k]; changed = true; continue; }
       arm(k);
     }
     if (changed) await save();   // the store as kept — the next start does not say it again

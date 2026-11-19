@@ -3264,22 +3264,26 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
       // THE CURE (主开发 04:23Z, round wrhah7kp5's MUST): the Settings page saves the WHOLE file by POST — a person's cleared cap is
       // stored BLANK there too, and no later internal patch (another row's write, a timed raise and its return) drops it
       const refusedSaid = (st) => { const L = A.budgetLimits((k) => st[k]); const v = A.authorizeUnattendedSpend({ reason: 'auto-resume', identity: IDg, state: A.emptyBudget(), limits: L }); return !v.ok && v.why === 'hour-cap' && v.capUnset === true && /no cap is set for unattended turns per identity per hour/.test(v.detail); };
-      const pageRun = async (pmod, { file = null } = {}) => {
+      // persistence.js keeps ONE module-level router: a second setup() of the same module adds handlers that never answer — every
+      // page run takes its OWN copy of the module (byte-identical: `same`), as the mutant copies are
+      const freshPR = (tag = 'page-real') => require(MUT.write('src/routes/persistence.js', read('src/routes/persistence.js'), tag, { same: true }));
+      const pageRun = async (pmod, { file = null, shmod = null, wireNote = false } = {}) => {
         const express = require(path.join(REPO, 'node_modules/express')), http = require('node:http');
         const dir = tmpdir('vs-spend-5g-page-');
         if (file) fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify(file));
-        const notices = [];
-        const router = pmod.setup({ dataDir: dir, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => null, getMounts: () => null, getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { } });
+        const notices = [], logs = [], late = { H: null };
+        const router = pmod.setup({ dataDir: dir, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => null, getMounts: () => null, getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: (data) => { if (wireNote && late.H) late.H.noteSettingsWrite(data); } });   // server.js: a write tells the holds
         const app = express(); app.use(express.json()); app.use(router);
         const srv = await new Promise((res) => { const sv = app.listen(0, '127.0.0.1', () => res(sv)); });
-        const send = (method, body, headers = { 'sec-fetch-site': 'same-origin' }) => new Promise((res) => { const rq = http.request({ host: '127.0.0.1', port: srv.address().port, path: '/api/settings', method, headers: { 'content-type': 'application/json', ...headers } }, (r) => { r.resume(); r.on('end', () => res(r.statusCode)); }); rq.end(JSON.stringify(body)); });
+        const send = (method, body, headers = { 'sec-fetch-site': 'same-origin' }, at = '/api/settings') => new Promise((res) => { const rq = http.request({ host: '127.0.0.1', port: srv.address().port, path: at, method, headers: { 'content-type': 'application/json', ...headers } }, (r) => { r.resume(); r.on('end', () => res(r.statusCode)); }); rq.end(JSON.stringify(body)); });
         const disk = () => JSON.parse(fs.readFileSync(path.join(dir, 'settings.json'), 'utf8'));
-        const SHm = require(path.join(REPO, 'src/server/setting-holds.js'));
-        const H = SHm.create({ dataDir: dir, readSettings: () => router.readSettings(), patchSettings: (q) => router.patchSettings(q), broadcast: (m) => notices.push(m), now: () => 1_900_000_000_000, writer: { dirty: () => { }, durable: async () => true }, setTimer: () => ({}), clearTimer: () => { } });
-        return { router, send, disk, H, notices, close: () => new Promise((r) => srv.close(r)) };
+        const SHm = shmod || require(path.join(REPO, 'src/server/setting-holds.js'));
+        const H = SHm.create({ dataDir: dir, readSettings: () => router.readSettings(), patchSettings: (q) => router.patchSettings(q), broadcast: (m) => notices.push(m), log: (m) => logs.push(String(m)), now: () => 1_900_000_000_000, writer: { dirty: () => { }, durable: async () => true }, setTimer: () => ({}), clearTimer: () => { } });
+        late.H = H;
+        return { router, send, disk, H, notices, logs, close: () => new Promise((r) => srv.close(r)) };
       };
       {
-        const pg = await pageRun(require(path.join(REPO, 'src/routes/persistence.js')));
+        const pg = await pageRun(freshPR());
         const posted = await pg.send('POST', { [HOURK]: null, 'spend.unattendedPerIdentityDay': 90, 'ui.someRow': 1 });   // the page: the whole file, the cleared field null
         const afterPost = pg.disk();
         pg.router.patchSettings({ 'ui.anotherRow': 2 });   // (1) a patch of another row (a plugin's write, a boot migration)
@@ -3297,7 +3301,7 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
       {
         // a cap's NULL already on disk (an older build, a hand edit): a patch of another row never drops it, and (b) a tool's PATCH of an
         // unrelated row is not refused for a spend row nobody touched (the stored null is not rewritten under its feet)
-        const pg = await pageRun(require(path.join(REPO, 'src/routes/persistence.js')), { file: { [HOURK]: null, 'ui.someRow': 1 } });
+        const pg = await pageRun(freshPR(), { file: { [HOURK]: null, 'ui.someRow': 1 } });
         pg.router.patchSettings({ 'ui.anotherRow': 2 });
         const afterPatch = pg.disk();
         const tool = await pg.send('PATCH', { 'ui.someRow': 3 }, { authorization: 'Bearer agent-key' });
@@ -3315,8 +3319,50 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
         if (!m1.err) { const pg = await pageRun(m1.mod); await pg.send('POST', { [HOURK]: null }); const d1 = pg.disk(); await pg.close(); ok('§5g (3) CONTROL: without the POST\'s blank the cleared cap is stored NULL — the leg above goes red', d1[HOURK] === null, JSON.stringify(d1)); } else ok('§5g (3) CONTROL: the POST copy loads', false, m1.err);
         const m2 = mutantModule('src/routes/persistence.js', [[PATCHI, 'if (v === null) delete merged[k]; }']]);   // stale-pins: kept (the OLD line is the copy compiled back in, never an anchor)
         if (!m2.err) { const pg = await pageRun(m2.mod, { file: { [HOURK]: null, 'ui.someRow': 1 } }); pg.router.patchSettings({ 'ui.anotherRow': 2 }); const d2 = pg.disk(); await pg.close(); ok('§5g (3) CONTROL: with every null dropped, another row\'s patch removes the cap — the default 30 again, in silence — RED', !(HOURK in d2) && A.budgetLimits((k) => d2[k]).perIdentityHour === 30, JSON.stringify(d2)); } else ok('§5g (3) CONTROL: the patch copy loads', false, m2.err);
-        const m3 = mutantModule('src/routes/persistence.js', [[PATCHB, '    const merged = blankCaps({ ...current, ...patch });']]);
-        if (!m3.err) { const pg = await pageRun(m3.mod, { file: { [HOURK]: null, 'ui.someRow': 1 } }); const st = await pg.send('PATCH', { 'ui.someRow': 3 }, { authorization: 'Bearer agent-key' }); await pg.close(); ok('§5g (3) CONTROL (b): a PATCH that rewrites the stored null refuses the tool\'s unrelated PATCH (403, a spend row nobody touched) — RED', st === 403, String(st)); } else ok('§5g (3) CONTROL: the PATCH copy loads', false, m3.err);
+        // (b) has two guards since cure 2 — the PATCH never rewrites a stored null it does not carry, and the owner check reads null ≡ blank
+        // for a cap: the copy compiles BOTH away (one alone stays green, the other holds)
+        const m3 = mutantModule('src/routes/persistence.js', [[PATCHB, '    const merged = blankCaps({ ...current, ...patch });'], ["(JSON.stringify(cur[k]) === JSON.stringify(nxt[k]) || (nothing(k, cur[k]) && nothing(k, nxt[k])))", 'JSON.stringify(cur[k]) === JSON.stringify(nxt[k])']]);
+        if (!m3.err) { const pg = await pageRun(m3.mod, { file: { [HOURK]: null, 'ui.someRow': 1 } }); const st = await pg.send('PATCH', { 'ui.someRow': 3 }, { authorization: 'Bearer agent-key' }); await pg.close(); ok('§5g (3) CONTROL (b): a PATCH that rewrites the stored null, under an owner check that tells null from blank, refuses the tool\'s unrelated PATCH (403, a spend row nobody touched) — RED', st === 403, String(st)); } else ok('§5g (3) CONTROL: the PATCH copy loads', false, m3.err);
+      }
+      // CURE 2 (主开发 04:51Z, round wk9kvj528 — THE LAW): a hold is live only while the row's RAW stored value is exactly what it wrote. THE
+      // SCENE: a hold LOWERED the hour cap to 0 until a time; the person clears the field by hand (the page's POST stores the blank) — the
+      // hold ends «changed by hand» and its return writes nothing over the person's «nothing»
+      {
+        const lawRun = async ({ shmod = null, wireNote = true } = {}) => {
+          const pg = await pageRun(freshPR('page-law'), { shmod, wireNote });
+          const took = await pg.H.take({ key: HOURK, value: 0, untilRel: 3600e3, shown: 30 });   // an agent's «lower to 0 for an hour», pressed
+          const held = pg.disk()[HOURK];
+          const posted = await pg.send('POST', { ...pg.disk(), [HOURK]: null });   // the owner clears the field by hand
+          const r = await pg.H.returnHold(HOURK, 'moment');
+          const d = pg.disk(); await pg.close();
+          return { took: !!(took && took.ok), held, posted, r, d, list: pg.H.list(), logs: pg.logs };
+        };
+        const a = await lawRun({ wireNote: true }), b = await lawRun({ wireNote: false });
+        ok('§5g (3) CURE 2 (the law): a hold at 0, then the page\'s POST of the cleared field — the write\'s note ends the hold «changed by hand (none)»; its moment writes nothing: the disk holds the blank, refused and said',
+          a.took && a.held === 0 && a.posted === 200 && a.d[HOURK] === '' && refusedSaid(a.d) && a.list.length === 0 && a.logs.some((l) => /changed by hand \(none\)/.test(l)) && (a.r.none || a.r.changedByHand), JSON.stringify({ ...a, logs: a.logs.slice(-3) }));
+        ok('§5g (3) …and with no write note at all, the return itself reads the RAW value: the blank is not the 0 it wrote — no write over it, the blank stays, refused and said',
+          b.took && b.r.changedByHand === true && b.d[HOURK] === '' && refusedSaid(b.d), JSON.stringify({ r: b.r, d: b.d }));
+        const SHSRC = read('src/server/setting-holds.js'), LIVE = "    if (!AS.holdIsLive(h, raw)) { endChangedByHand(key, said(raw)";
+        ok('§5g (3) setup: the return\'s raw liveness is in setting-holds once', SHSRC.split(LIVE).length === 2);
+        const mr2 = mutantModule('src/server/setting-holds.js', [[LIVE, "    if (!AS.holdIsLive(h, cur)) { endChangedByHand(key, said(raw)"]]);
+        if (!mr2.err) { const c = await lawRun({ shmod: mr2.mod, wireNote: false }); ok('§5g (3) CONTROL: with liveness read through valueIn (a blank reads 0 = the hold\'s value), the return writes «before» back — the cap is absent, the default 30 runs again in silence — RED', !(HOURK in c.d) && A.budgetLimits((k) => c.d[k]).perIdentityHour === 30, JSON.stringify(c.d)); } else ok('§5g (3) CONTROL: the setting-holds copy loads', false, mr2.err);
+      }
+      // CURE 2 (with it): the config import's blank rule (its RED copy), and a credentialed whole-file POST that re-sends an OLD stored null
+      {
+        const importOf = (settings) => ({ file: { app: 'vibespace-config', sections: { settings } }, sections: ['settings'] });
+        const imp = await pageRun(freshPR('page-import')); const st = await imp.send('POST', importOf({ [HOURK]: null, 'ui.someRow': 1 }), undefined, '/api/config/import'); const di = imp.disk(); await imp.close();
+        ok('§5g (3) CURE 2: a config import whose settings part clears the hour cap stores it BLANK — refused and said', st === 200 && di[HOURK] === '' && refusedSaid(di), JSON.stringify({ st, di }));
+        const PSRC2 = read('src/routes/persistence.js'), IMPB = "typeof file.sections.settings === 'object') blankCaps(file.sections.settings);";
+        ok('§5g (3) setup: the import\'s blank rule is in persistence.js once', PSRC2.split(IMPB).length === 2);
+        const mi = mutantModule('src/routes/persistence.js', [[IMPB, "typeof file.sections.settings === 'object') void 0;"]]);
+        if (!mi.err) { const g = await pageRun(mi.mod); await g.send('POST', importOf({ [HOURK]: null }), undefined, '/api/config/import'); const dg = g.disk(); await g.close(); ok('§5g (3) CONTROL: without the import\'s blank the cleared cap is imported NULL — the leg above goes red', dg[HOURK] === null, JSON.stringify(dg)); } else ok('§5g (3) CONTROL: the import copy loads', false, mi.err);
+        const cp = await pageRun(freshPR('page-cred'), { file: { [HOURK]: null, 'ui.someRow': 1 } });
+        const sc = await cp.send('POST', { [HOURK]: null, 'ui.someRow': 3 }, { authorization: 'Bearer agent-key' }); const dc = cp.disk(); await cp.close();
+        ok('§5g (3) CURE 2: a credentialed whole-file POST that re-sends the OLD stored null of a cap is not refused for a row it did not change (a cap\'s null and blank are the same «nothing»)', sc === 200 && dc['ui.someRow'] === 3 && (dc[HOURK] === '' || dc[HOURK] === null), JSON.stringify({ sc, dc }));
+        const SAME = "(JSON.stringify(cur[k]) === JSON.stringify(nxt[k]) || (nothing(k, cur[k]) && nothing(k, nxt[k])))";
+        ok('§5g (3) setup: the owner check\'s null ≡ blank rule is in persistence.js once', PSRC2.split(SAME).length === 2);
+        const ms = mutantModule('src/routes/persistence.js', [[SAME, 'JSON.stringify(cur[k]) === JSON.stringify(nxt[k])']]);
+        if (!ms.err) { const g = await pageRun(ms.mod, { file: { [HOURK]: null, 'ui.someRow': 1 } }); const s2 = await g.send('POST', { [HOURK]: null, 'ui.someRow': 3 }, { authorization: 'Bearer agent-key' }); await g.close(); ok('§5g (3) CONTROL: with null and blank told apart, that POST is refused 403 for a spend row nobody touched — RED', s2 === 403, String(s2)); } else ok('§5g (3) CONTROL: the owner-check copy loads', false, ms.err);
       }
     }
     const m = mutantModule('src/spend-authorizer.js', [["      if (!Number.isFinite(n) || n < 0) { unset.push(field); return 0; }\n", "      if (!Number.isFinite(n) || n < 0) return v === null || (typeof v === 'string' && !v.trim()) ? 0 : dflt;\n"]]);

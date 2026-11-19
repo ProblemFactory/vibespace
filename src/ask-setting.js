@@ -68,7 +68,10 @@ function parseUntil(spec, { now = Date.now(), tzOffsetMin = -new Date(now).getTi
 /** A HOLD IS LIVE ONLY WHILE THE ROW HOLDS ITS VALUE (主开发's law B after the check): a row the owner changed by hand has no hold —
  *  for every reader at once. `pending` = the value a SECOND timed press is replacing, until its settings write lands (a crash
  *  between keeps the hold live on the old value, never stranded). PURE: the store, the card and Settings ask THIS. */
-const holdIsLive = (h, present) => !!h && typeof h === 'object' && Number.isFinite(NUM(present)) && (NUM(h.value) === NUM(present) || (h.pending !== undefined && NUM(h.pending) === NUM(present)));
+// B-0a33 cure 2 (主开发 04:51Z, THE LAW): a hold is live only while the row's RAW stored value is EXACTLY what the hold wrote (its value,
+// or a pending second press's): a blank, a null, a text or another number was changed by hand. Callers pass the RAW value — the 0
+// reading of a no-number row is for what a card shows and the press verdict, never for liveness
+const holdIsLive = (h, raw) => !!h && typeof h === 'object' && typeof raw === 'number' && Number.isFinite(raw) && (raw === NUM(h.value) || (h.pending !== undefined && raw === NUM(h.pending)));
 /** WHILE A HOLD IS LIVE, THE ROW'S LASTING VALUE IS THE HOLD'S «BEFORE» (law A) — null = the row's default. */
 const lastingOf = (key, h) => (h && h.before != null ? (Number.isFinite(NUM(h.before)) && NUM(h.before) >= 0 ? NUM(h.before) : 0) : PROPOSABLE[key] ? PROPOSABLE[key].def : NaN);   // B-0a33 cure: a «before» holding no number (blank) lasts as 0 — «no limit is set», never the default
 

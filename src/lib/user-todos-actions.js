@@ -394,10 +394,10 @@ export function inboxModel(app) {
       if (r && r.code === 'moved') { showToast(t('It changed meanwhile — look again'), { duration: 9000 }); return false; }
       // worded BY ITS CODE in the page's language (the check's words-6: never the hub's English sentence inside zh / ja)
       const said = {
-        same: () => t('It is already {value} — nothing to change', { value: num(r.present) }),
+        same: () => t('It is already {value} — nothing to change', { value: r.presentNone ? t('none') : num(r.present) }),   // cure 2: «none» over a blank, never 0
         passed: () => t('That moment ({time}) has passed — change it on the row', { time: Number.isFinite(num(a.untilAt)) ? untilClock(num(a.untilAt), t) : '' }),
         'raise-needs-until': () => t('A raise needs its «until» — change it on the row'),
-        'raise-over-hold': () => t('{value} would stay above {back}, the value before the hold — a raise needs its «until»; change it on the row', { value: card.value, back: num(r.lasting) }),
+        'raise-over-hold': () => t('{value} would stay above {back}, the value before the hold — a raise needs its «until»; change it on the row', { value: card.value, back: r.lastingNone ? t('none') : num(r.lasting) }),
         'not-durable': () => t('the hold could not be written to disk, so nothing changed'),
         'write-failed': () => t('the setting could not be written, so nothing changed'),
         spend_row_owner_only: () => t('only your own page can change it — nothing changed'),

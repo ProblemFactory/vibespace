@@ -422,6 +422,17 @@ console.log('⑧ THE CARD\'S WORDS against what the press sends — the REAL row
     const html = R.settingCardHtml(item({ value: 2000, was: 1200, untilRel: 2 * 3600e3 }), t);
     ok(R.holdWords(DAY, t, { now: NOW }) === '' && !ci.held && ci.heldWords === '' && ci.back === 1200 && !html.includes('ut-sc-held') && ci.vol.prop.includes('1200') && !ci.vol.prop.includes('800'), `${lang}: after a HAND change no word of the hold is drawn — no Settings line, no held line, the proposal goes back to the hand's 1200 (never «then 800»)`, { holdWords: R.holdWords(DAY, t, { now: NOW }), prop: ci.vol.prop });
     delete facts.holds[DAY]; facts.values[DAY] = 800;
+    // B-0a33 cure 2 (主开发 04:51Z): a row the store holds with NO NUMBER (blank) — the card says «none» (never the default, never 0) and any
+    // value over it is a raise; a hold whose «before» is blank says «then none»; a hold at 0 under a row cleared by hand is NO hold (raw liveness)
+    facts.values[DAY] = '';
+    const cn = card({ value: 400, was: 0, untilRel: T6 }), noneW = t('none');
+    ok(cn.nowWords.includes(noneW) && !cn.nowWords.includes('800') && !/(^|\D)0(\D|$)/.test(cn.nowWords) && !!cn.button && cn.button.raise, `${lang}: over a BLANK row the card says «${cn.nowWords}» — «${noneW}», never the default or 0 — and 400 is a raise`, { now: cn.nowWords, button: cn.button });
+    facts.values[DAY] = 400; facts.holds[DAY] = { key: DAY, value: 400, before: '', untilAt: NOW + 3 * 3600e3, at: NOW };
+    const hw = R.holdWords(DAY, t, { now: NOW });
+    ok(hw.includes(noneW) && !hw.includes('800'), `${lang}: a hold whose «before» is blank says «then ${noneW}» on the Settings line`, hw);
+    facts.values[DAY] = ''; facts.holds[DAY] = { key: DAY, value: 0, before: 30, untilAt: NOW + 3 * 3600e3, at: NOW };
+    ok(R.holdWords(DAY, t, { now: NOW }) === '', `${lang}: a hold at 0 under a row cleared by hand is NO hold — the raw blank is not the 0 it wrote`, R.holdWords(DAY, t, { now: NOW }));
+    delete facts.holds[DAY]; facts.values[DAY] = 800;
   }
   // the press posts exactly what the card names: the action's value and its «until» AS IS (never re-derived from the ask's instant)
   const acts = read('src/lib/user-todos-actions.js');

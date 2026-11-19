@@ -763,14 +763,16 @@ console.log('㉔ AN OLD AGENT\'S FRAME, SAID FOR REAL (B-0a33 cure (c)) — the 
     const W = world('antigravity', { dataDir: dir, guard, mod, overCap: true });   // the agy advert serves no «remove»: an agent too old to give a frame back
     const gid = (await W.eng.sendToAgent({ from: A, to: X, text: 'hello', wake: false })).group.id;
     await W.eng.post({ group: gid, from: A, text: 'held behind the turn', wake: true });
-    W.deliver.noteQueueItems(X, [{ id: 'q1', kind: 'peer', from: 'alpha' }], { fresh: true }); W.settle('queued');
+    W.deliver.noteQueueItems(X, [{ id: 'q1' }], { fresh: true }); W.settle('queued');   // bound as ⑪ binds (the earliest unseen item)
     settings['spend.unattendedPerIdentityHour'] = 0;   // the cap lowered below what waits
     W.deliver.queuedEntries(X);   // a sweep: ageOut → rejudge → the real pullQueued
-    return filed.filter((f) => f.it && typeof f.it.itemKey === 'string' && f.it.itemKey.startsWith('spend-unheld:'));
+    const got = filed.filter((f) => f.it && typeof f.it.itemKey === 'string' && f.it.itemKey.startsWith('spend-unheld:'));
+    got.why = { notes: W.money.notes.slice(-4), entries: W.deliver.queuedEntries(X), filed: filed.map((f) => f.it && f.it.itemKey) };   // what a red names
+    return got;
   };
   const got = await run(DELIVER);
   ok('㉔ a frame waiting in an agent that serves no «remove», the cap lowered below it: the REAL pullQueued answers no-remove and the REAL guard files ONE For-you line, under the conversation it waits behind',
-    got.length === 1 && /could not be held: its agent is too old to give a queued message back/.test(got[0].it.text) && got[0].it.sessionName === 'Spending', JSON.stringify(got.map((g) => ({ key: g.key, text: g.it.text, itemKey: g.it.itemKey }))));
+    got.length === 1 && /could not be held: its agent is too old to give a queued message back/.test(got[0].it.text) && got[0].it.sessionName === 'Spending', JSON.stringify({ got: got.map((g) => ({ key: g.key, text: g.it.text, itemKey: g.it.itemKey })), why: got.why }));
   const dsrc = read('src/server/conversation-deliver.js'), NR = "return 'no-remove';";
   ok('㉔ setup: pullQueued\'s «no-remove» is in the ladder once', dsrc.split(NR).length === 2);
   const NoNR = mutantCopies('queued-wake-nr', REPO).load('src/server/conversation-deliver.js', dsrc.replace(NR, 'return false;'), 'no-remove-false');
@@ -791,9 +793,9 @@ console.log('㉕ A SETTINGS WRITE ASKS AGAIN (B-0a33 cure (d)) — the re-judge 
   };
   const r = run(QWm);
   ok('㉕ a frame over the cap is asked back ONCE for what it is (bound: one ask); a sweep asks nothing more; a settings write (`fresh`) asks it once more', r.afterBind === 1 && r.afterSweep === 1 && r.afterWrite === 2, JSON.stringify(r));
-  const qsrc = read('src/server/queued-wakes.js'), FR = 'if (!fresh && e.pulled && (';
+  const qsrc = read('src/server/queued-wakes.js'), FR = 'if (!fresh && !again && e.pulled && (';
   ok('㉕ setup: the re-judge\'s fresh test is in queued-wakes once', qsrc.split(FR).length === 2);
-  const NoFresh = mutantCopies('queued-wake-fresh', REPO).load('src/server/queued-wakes.js', qsrc.replace(FR, 'if (e.pulled && ('), 'no-fresh');
+  const NoFresh = mutantCopies('queued-wake-fresh', REPO).load('src/server/queued-wakes.js', qsrc.replace(FR, 'if (!again && e.pulled && ('), 'no-fresh');
   ok('㉕ CONTROL: a re-judge that ignores `fresh` never asks again after a settings write (㉕ can go red)', run(NoFresh).afterWrite === 1, JSON.stringify(run(NoFresh)));
 }
 
