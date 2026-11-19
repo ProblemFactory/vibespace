@@ -495,7 +495,7 @@ try {
     const said = [];
     const late = (ms) => ({ argv: [process.execPath, '-e', `setTimeout(() => require('http').createServer((q, s) => s.end('ok')).listen(${P}, '127.0.0.1'), ${ms})`] });
     let goneUrl = null; // B-74f5: the address the user's unpublish took down — the change check's stand-in looks find it gone, every other one answering
-    const mkF = (JM = JobManager) => { const F = new JM({ ...deps, dataDir: pdir, getPorts: () => pf, publishWaitMs: 20000, publishRecheckMs: 500, urlGraceMs: 0, urlAnswers: async (u) => u !== goneUrl }); F.init(); const orig = F._notifyOwner.bind(F); F._notifyOwner = (job, ev) => { said.push(ev.what); return orig(job, ev); }; return F; };
+    const mkF = (JM = JobManager) => { const F = new JM({ ...deps, dataDir: pdir, getPorts: () => pf, publishWaitMs: 20000, publishRecheckMs: 500, urlGraceMs: 0, urlRelookMs: 0, urlAnswers: async (u) => u !== goneUrl }); F.init(); const orig = F._notifyOwner.bind(F); F._notifyOwner = (job, ev) => { said.push(ev.what); return orig(job, ev); }; return F; };
     const F = mkF();
     const cr = F.create({ kind: 'service', name: 'late-web', cmd: late(2500), ports: [P], publish: true, restart: 'never', owner }, caller);
     ok(!cr.error, 'publish leg: a --keep-up --port --publish service is created', cr.error);
