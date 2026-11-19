@@ -100,8 +100,8 @@ function create({ resumeLine, seams, getStashHandover, spendGuard = null, identi
     // MUST 3 (主开发 12:46Z): it was ALREADY running (a page resumed it under another id) — no hand-over, no «had been ended»
     // sentence into a live agent, no resumed mark: the claim goes back and the words ride the live roads
     if (r.already === true) { sh.releaseWake(cid, claim); return { ok: true, outcome: 'running', sessionId: r.sessionId, already: true, why: 'it was already running — the words ride its next turn' }; }
-    // MUST 2: the kept record GOES now it runs (a later end on purpose must never read «a restart ended it»)
-    try { if (typeof seams.dropKept === 'function') await seams.dropKept(key); } catch (e) { log(`[delivery-wake] ${cid}: its kept record could not be dropped — ${(e && e.message) || e}`); }
+    // the kept record is NOT dropped here (主开发 2026-11-19 03:25Z, replacing MUST 2's drop): a reopen that answered is registration —
+    // the copy goes at the hand-over turn's end (boot-restore consumeKeptOf) or by the stopped list's live check; a failed turn keeps it
     // the POSTING mark goes on the entry, durably, before the frame can land (a hard kill now ⇒ «maybe delivered» at the boot)
     try { if (typeof seams.markPosting === 'function') seams.markPosting(cid); } catch (e) { log(`[delivery-wake] ${cid}: the posting mark could not be written — ${(e && e.message) || e}`); }
     const ho = await sh.handOverWake(cid, claim, { reason: entry.spendReason, tail: D.FRAME_TAIL, lead: peer ? D.peerLead(entry.fromName) : '', from: entry.fromName || null, card: entry.cardText || null });

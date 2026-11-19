@@ -277,8 +277,8 @@ console.log('⑥ THE ONE END RECORD\'s contract (主开发 14:51Z): the one boun
   const CIDR = 'e2e00000-0000-4000-8000-0000000000e7';
   fs.writeFileSync(path.join(M2, 'cw-8-1794880000008.json.stopped'), JSON.stringify({ backend: 'claude', backendSessionId: CIDR, name: 'Ranked', status: 'stopped', stoppedAt: 1000, stopReason: 'ended', endedBy: { kind: 'person', actorId: null, name: null } }));
   fs.writeFileSync(path.join(M2, 'cw-9-1794880000009.json.stopped'), JSON.stringify({ backend: 'claude', backendSessionId: CIDR, name: 'Ranked', status: 'stopped', stoppedAt: 9000, stopReason: 'dead-socket-at-boot' }));
-  const mk = (Mx, meta) => Mx.create({ rootDir: ROOT, PORT: 0, BUFFERS_DIR: BUF, META_DIR: meta, SOCKETS_DIR: SOCK, DTACH_CMD: 'dtach', NODE_CMD: process.execPath, CHAT_WRAPPER: '',
-    activeSessions: new Map(), sessionCounterRef: { value: 0 }, attachToDtach: () => { }, setupSessionPty: () => { }, readSessionMeta: () => ({}), writeSessionMeta: () => { }, deleteSessionMeta: () => { },
+  const mk = (Mx, meta, live = new Map()) => Mx.create({ rootDir: ROOT, PORT: 0, BUFFERS_DIR: BUF, META_DIR: meta, SOCKETS_DIR: SOCK, DTACH_CMD: 'dtach', NODE_CMD: process.execPath, CHAT_WRAPPER: '',
+    activeSessions: live, sessionCounterRef: { value: 0 }, attachToDtach: () => { }, setupSessionPty: () => { }, readSessionMeta: () => ({}), writeSessionMeta: () => { }, deleteSessionMeta: () => { },
     broadcastToSession: () => { }, broadcastActiveSessions: () => { }, refreshWebuiPids: () => { }, sbNoteServerOp: () => { }, getHosts: () => null, getDialBridge: () => null, getExitProxy: () => null, note: () => { } });
   const M3 = path.join(ROOT, 'meta3'); fs.cpSync(M2, M3, { recursive: true });   // the RED's world, copied BEFORE the real run (a losing copy's file is deleted)
   const ranked = ((await mk(BR, M2).stoppedSessions()).find((r) => r.backendSessionId === CIDR) || {});
@@ -288,16 +288,54 @@ console.log('⑥ THE ONE END RECORD\'s contract (主开发 14:51Z): the one boun
   const MUTR = mutantCopies('end-record-rank', REPO).load('src/server/boot-restore.js', src.replace(RK, 'const endRank = () => 0;'), 'no-rank');
   const unranked = ((await mk(MUTR, M3).stoppedSessions()).find((r) => r.backendSessionId === CIDR) || {});
   ok(unranked.stopReason === 'dead-socket-at-boot', 'RED: without the rank the newer restart copy wins — the end is forgotten', unranked);
-  // CONSUMED at the ONE create road (memory and file), only when the create made it live
+  // THE CREATE ROAD CONSUMES NOTHING (主开发 2026-11-19 03:17Z — the manager stack restacked onto int411 met B-a5a4 (2)): a kept
+  // copy and its end record leave only through the consume at a turn that RAN well (consumeKeptOf) or the stopped list's live
+  // check — never at registration, never on a turn that failed (B-a5a4's first round lost a failed resume's copy that way)
+  const RAN = { type: 'result', subtype: 'success', is_error: false };
+  const FAILED = { type: 'result', subtype: 'error_during_execution', is_error: true, errors: ['No conversation found with session ID'] };
+  const wc = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8');
+  const LIVE = 'activeSessions.set(id, session);\n', NAMED = 'session._webuiId = id;';
+  if (wc.split(LIVE).length !== 2 || wc.indexOf(NAMED, wc.indexOf(LIVE)) < 0) throw new Error('anchor missing: the create road');
+  // the create road's code (its comments aside) between where the create makes it live and the id it is given: no consume of a kept copy
+  const createRoadConsumes = (text, Mx) => { const a = text.indexOf(LIVE), seg = text.slice(a, text.indexOf(NAMED, a)).split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+    return /consume|dropKept|keptStopped/.test(seg) || typeof Mx.consumeEnded === 'function'; };
+  // A RESUME THAT FAILS: an end on purpose kept its record; the create road makes the conversation live; its turn fails; it leaves
+  const resumeThatFails = async (Mx, dir, cid, sock) => {
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `${sock}.json.stopped`), live = new Map(), inst = mk(Mx, dir, live);
+    // THIS boot's own record (an earlier boot's file would be asked the transcript question — not this leg's matter)
+    await inst.keepEnded(sock, { backend: 'claude', mode: 'chat', backendSessionId: cid, name: 'Resumed', cwd: '/tmp' }, { kind: 'person', actorId: null, name: null });
+    const before = !!(await inst.stoppedSessions()).find((r) => r.backendSessionId === cid && r.stopReason === 'ended') && fs.existsSync(file);
+    const s = { backend: 'claude', mode: 'chat', claudeSessionId: cid, backendSessionId: cid };
+    live.set('sess-r', s);   // the create road: live again
+    const planted = typeof Mx.consumeEnded === 'function' ? await Mx.consumeEnded(`claude:${cid}`) : null;   // a create road's consume (only the RED's module has one)
+    const atTurn = await inst.consumeKeptOf(s, FAILED);   // its turn FAILED
+    live.delete('sess-r');   // the failed resume's process left
+    await new Promise((r) => setTimeout(r, 50));   // a consume's unlink is not awaited (the old leg's wait)
+    const row = (await inst.stoppedSessions()).find((r) => r.backendSessionId === cid) || null;
+    return { before, planted, atTurn, row: row && { stopReason: row.stopReason, endedBy: row.endedBy || null }, file: fs.existsSync(file) };
+  };
+  const kept = await resumeThatFails(BR, path.join(ROOT, 'meta5'), 'e2e00000-0000-4000-8000-0000000000ee', 'cw-16-1794880000016');
+  ok(!createRoadConsumes(wc, BR) && kept.before && kept.planted === null && kept.atTurn === null && kept.row && kept.row.stopReason === 'ended' && kept.row.endedBy && kept.row.endedBy.kind === 'person' && kept.file,
+    'THE CREATE ROAD CONSUMES NOTHING: a resume that FAILS keeps the copy and its end record — listed again «ended» by a person, its file kept (ws-create holds no consume, boot-restore exports none)', kept);
+  // the RED: the create road's consume PUT BACK (the stack's piece 3 as it was: ws-create calls the module's consumeEnded, which
+  // drops the kept copy, memory and file) — its plant proven first (it consumed at registration), then the copy and record are lost
+  const PUT = "if (data.resume && data.resumeId && !data.fork) { try { require('./server/boot-restore.js').consumeEnded(`${backend}:${data.resumeId}`); } catch { } }\n";
+  const RET = '  return { migrateLegacyHomeProjects, restoreSessions, restoreAgentdPipeSessions,', EXP = 'module.exports = { create,';
+  if (src.split(RET).length !== 2 || src.split(EXP).length !== 2) throw new Error('anchor missing: the module\'s answer or exports');
+  const MUTC = mutantCopies('create-road-consume', REPO).load('src/server/boot-restore.js', src.replace(RET, '  liveConsume = async (key) => { await loadKept(); const e = keptStopped.get(String(key || \'\')); if (!e) return false; keptStopped.delete(String(key || \'\')); fs.unlink(keptFile(e.sockFile), () => { }); return true; };\n' + RET)
+    .replace(EXP, 'let liveConsume = null;\nfunction consumeEnded(key) { return liveConsume ? liveConsume(key) : Promise.resolve(false); }\n' + EXP + ' consumeEnded,'), 'consume-at-create');
+  const lost = await resumeThatFails(MUTC, path.join(ROOT, 'meta6'), 'e2e00000-0000-4000-8000-0000000000ef', 'cw-17-1794880000017');
+  ok(createRoadConsumes(wc.replace(LIVE, LIVE + '          ' + PUT), BR) && lost.before && lost.planted === true && !lost.row && !lost.file,
+    'RED: the create road\'s consume put back — it consumed at registration (the plant took), and the failed resume LOST the copy and its end record', lost);
+  // the ONE consume: a turn that RAN on the live conversation — memory and file; nothing kept ⇒ null
   active.set('sess-k', session({ backendSessionId: 'e2e00000-0000-4000-8000-0000000000e8', sockName: 'cw-10-1794880000010', name: 'Consumed' }));
   await ops().endConversation({ sessionId: 'sess-k' }, { kind: 'human', actBy: 'person@sign-in' });
   const had = !!(await rowOf('e2e00000-0000-4000-8000-0000000000e8'));
-  const gone = await api.consumeKept('claude:e2e00000-0000-4000-8000-0000000000e8');
-  await new Promise((r) => setTimeout(r, 50));
-  const wc = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8');
-  ok(had && gone === true && !(await rowOf('e2e00000-0000-4000-8000-0000000000e8')) && !fs.existsSync(path.join(META, 'cw-10-1794880000010.json.stopped')) && (await api.consumeKept('claude:none')) === false
-    && /activeSessions\.set\(id, session\);\n(.*\n){2}.*if \(data\.resume && data\.resumeId && !data\.fork\) \{ try \{ require\('\.\/server\/boot-restore\.js'\)\.consumeEnded\(`\$\{backend\}:\$\{data\.resumeId\}`\); \} catch \{ \} \}/.test(wc) && typeof BR.consumeEnded === 'function',
-    'CONSUMED at the ONE create road (ws-create, right where the create makes it live — a person\'s resume too): memory and file; nothing kept ⇒ false', { had, gone });
+  const gone = await api.consumeKeptOf({ backend: 'claude', mode: 'chat', claudeSessionId: 'e2e00000-0000-4000-8000-0000000000e8', backendSessionId: 'e2e00000-0000-4000-8000-0000000000e8' }, RAN);
+  ok(had && gone === 'cw-10-1794880000010' && !(await rowOf('e2e00000-0000-4000-8000-0000000000e8')) && !fs.existsSync(path.join(META, 'cw-10-1794880000010.json.stopped'))
+    && (await api.consumeKeptOf({ backend: 'claude', claudeSessionId: 'e2e00000-0000-4000-8000-00000000none' }, RAN)) === null,
+    'the end record leaves with its copy at a turn that RAN on the live conversation (boot-restore consumeKeptOf): memory and file; nothing kept ⇒ null', { had, gone });
   // 主开发 15:31Z must 2 — a PAIRED MACHINE's end: the row carries its machine (never a local row), the ageing leaves it alone
   active.set('sess-h', session({ backendSessionId: 'e2e00000-0000-4000-8000-0000000000eb', sockName: 'cw-13-1794880000013', name: 'Remote', cwd: '/home/far', host: 'box-9' }));
   await ops().endConversation({ sessionId: 'sess-h' }, { kind: 'human', actBy: 'person@sign-in' });
@@ -314,9 +352,9 @@ console.log('⑥ THE ONE END RECORD\'s contract (主开发 14:51Z): the one boun
   const M4 = path.join(ROOT, 'meta4'); fs.mkdirSync(M4, { recursive: true });
   fs.writeFileSync(path.join(M4, 'cw-15-1794880000015.json.stopped'), JSON.stringify({ backend: 'claude', backendSessionId: 'e2e00000-0000-4000-8000-0000000000ed', status: 'stopped', stoppedAt: 1, stopReason: 'ended' }));
   const fresh = mk(BR, M4);
-  const c0 = await fresh.consumeKept('claude:e2e00000-0000-4000-8000-0000000000ed');
+  const c0 = await fresh.consumeKeptOf({ backend: 'claude', claudeSessionId: 'e2e00000-0000-4000-8000-0000000000ed' }, RAN);
   await new Promise((r) => setTimeout(r, 30));
-  ok(c0 === true && !fs.existsSync(path.join(M4, 'cw-15-1794880000015.json.stopped')) && src.includes('`${file}.${process.pid}.${++endTmpSeq}.tmp`'),
+  ok(c0 === 'cw-15-1794880000015' && !fs.existsSync(path.join(M4, 'cw-15-1794880000015.json.stopped')) && src.includes('`${file}.${process.pid}.${++endTmpSeq}.tmp`'),
     'the consume waits for the store\'s first load (an earlier boot\'s record is consumed, its file gone); the temp file\'s name is unique per write', { c0 });
   const cwp = fs.readFileSync(path.join(REPO, 'data/bin/codex-chat-wrapper.js'), 'utf8');
   ok(cwp.includes("      if (listed.complete !== true && meta.queueReadAt !== undefined) { delete meta.queueReadAt; scheduleMeta(); }   // THE ONE END RECORD: a PARTIAL read is no read") && cwp.indexOf('delete meta.queueReadAt') < cwp.indexOf('publishQueue(items, { fresh: listed.complete === true });'),

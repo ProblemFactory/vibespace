@@ -1781,9 +1781,9 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           if (session._browserPinOwed && session._browserKey) {
             try { const kq = require('./server/browser-keeper.js').keeper(); if (kq && typeof kq.owedPending === 'function' && !kq.owedPending(session._browserKey) && !kq.held()) { const pq = kq.pinFor(session._browserKey); session._browserProfileId = pq ? pq.profileId : null; session._browserPinOrigin = pq ? pq.origin : null; session._browserCap = typeof kq.capOf === 'function' ? kq.capOf(session._browserKey) : session._browserCap; session._browserPinOwed = null; } } catch (e) { console.warn(`[browser] ${id}: its owed pin's answer was not taken — ${e && e.message}`); }
           }
-          // THE ONE END RECORD (主开发 2026-11-17 14:51Z): the ONE create road — the moment a create made a conversation live again (a
-          // person's resume too) the record of its last end is consumed, memory and file (src/server/boot-restore.js consumeEnded)
-          if (data.resume && data.resumeId && !data.fork) { try { require('./server/boot-restore.js').consumeEnded(`${backend}:${data.resumeId}`); } catch { } }
+          // THE ONE END RECORD meets B-a5a4 (2) (主开发's ruling 2026-11-19 03:17Z): the create road consumes NOTHING — a kept copy and
+          // its end record leave only at a turn that RAN well (src/server/boot-restore.js consumeKeptOf, server.js noteTurnEnd) or by
+          // the stopped list's live check; never at registration: a resume that fails keeps both (B-a5a4's first round lost them)
           session._webuiId = id;
           // B-8dcf item two: what the person's own settings file met at this start (the adapter's `settingsNotes`, read off the argv the hub
           // builds — local and remote alike, nothing reads the file) — SAID by name, once per start, where the person looks, with its door;

@@ -26,6 +26,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { scratchDir } from './scratch.mjs';
+import { mutantCopies } from './mutant-copy.mjs';
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -52,7 +53,7 @@ const AGENT = { stopReason: 'ended', stoppedAt: T0 - 60e3, endedBy: { kind: 'age
 let seq = 0;
 
 /** the rig: the REAL ladder + park + hand-over + line + start; ONE manual clock for the park; `live` = the conversations running */
-function rig(name, { dir = null, kept = {}, grants = {}, archived = new Set(), cap = null, limit = null, reopenHold = null, facts = {}, stated = {}, limitOf = null, refuseHandOver = false, already = new Set(), jobs = null, noDrop = false, postHook = null, backendOf = {}, rows = null, held = {} } = {}) {
+function rig(name, { dir = null, kept = {}, grants = {}, archived = new Set(), cap = null, limit = null, reopenHold = null, facts = {}, stated = {}, limitOf = null, refuseHandOver = false, already = new Set(), jobs = null, mod = DWO, postHook = null, backendOf = {}, rows = null, held = {} } = {}) {
   const dataDir = dir || path.join(ROOT, name + '-' + (++seq));
   fs.mkdirSync(dataDir, { recursive: true });
   const c = { now: T0, timers: [] };
@@ -75,7 +76,7 @@ function rig(name, { dir = null, kept = {}, grants = {}, archived = new Set(), c
   R.jm = typeof jobs === 'function' ? jobs(R) : null;
   R.view = SH.create({ activeSessions: sessions, getDeliver: () => R.deliver, getJobs: () => R.jm, broadcastSessions: () => { }, renderMsgStash: AR.renderMsgStash, renderNotifStash: JM_MODEL.renderNotifStash, debounceMs: 5, log: { log() { }, warn() { } }, now: () => c.now, dataDir });
   R.line = RL.createResumeLine({ start: (e) => (e.payload && typeof e.payload.run === 'function' ? e.payload.run(e) : { ok: false, why: 'no start' }), log: () => { } });
-  R.orch = DWO.create({
+  R.orch = mod.create({
     resumeLine: R.line, getStashHandover: () => R.view, now: () => c.now,
     seams: {
       keyOf: (cid) => ({ sessionKey: `${backendOf[cid] || 'claude'}:${cid}` }),
@@ -83,7 +84,8 @@ function rig(name, { dir = null, kept = {}, grants = {}, archived = new Set(), c
       factsOf: async (key) => { const c = key.slice(key.indexOf(':') + 1); R.calls.push('kept'); const k = R.kept[c] || null; return { goal: 'none', timerMark: null, queue: 0, mode: 'chat', cwd: '/w', hostId: null, kept: !!k, stopReason: (k && k.stopReason) || null, stoppedAt: (k && k.stoppedAt) || null, endedBy: (k && k.endedBy) || null, accountId: (k && k.accountId) || null, ...(facts[c] || {}) }; },
       heldAccountOf: (key) => held[key.slice(key.indexOf(':') + 1)] || null,
       configAccountOf: (key) => stated[key.slice(key.indexOf(':') + 1)] || null,
-      dropKept: noDrop ? undefined : async (key) => { const c = key.slice(key.indexOf(':') + 1); R.calls.push('dropKept'); const had = c in R.kept; delete R.kept[c]; return had; },
+      // no real wake drops a kept record since 主开发's 2026-11-19 03:25Z ruling: this seam only SEES ⑧'s RED (the drop put back)
+      dropKept: async (key) => { const c = key.slice(key.indexOf(':') + 1); R.calls.push('dropKept'); const had = c in R.kept; delete R.kept[c]; return had; },
       isArchived: (key) => R.archived.has(key.slice(key.indexOf(':') + 1)),
       rowOf: (backend) => (rows && Object.hasOwn(rows, backend) ? rows[backend] : { headless: true, resumeContinues: 'goal' }),
       reopen: async (item, o) => {
@@ -286,29 +288,42 @@ console.log('⑦ money: a delivery keeps piece 4\'s refusals — a goal runs man
   ok(C.reopens.length === 1 && C.notes.length === 1, '⑦ RED CONTROL: the same delivery with NO goal resumes it — one resume, ONE charge (the goal is what kept it waiting)', { reopens: C.reopens.length, notes: C.notes.length });
 }
 
-console.log('⑧ the kept record goes on a resume — a later end on purpose is never «a restart ended it»');
+console.log('⑧ the kept record is NOT dropped at the reopen (主开发 2026-11-19 03:25Z) — a later end on purpose is still never «a restart ended it»');
 {
   const X = cidOf(50);
-  const R = rig('kept-goes', { kept: { [X]: RESTART } });
+  const R = rig('kept-stays', { kept: { [X]: RESTART } });
   R.result(X, 'jb-hourly', 'hourly digest', 'digest one');
   await R.at(10);
-  ok(R.reopens.length === 1 && R.calls.includes('dropKept') && !(X in R.kept), 'resumed by a delivery ⇒ its kept restart record is DROPPED', { calls: R.calls, kept: Object.keys(R.kept) });
-  R.live.delete(X); R.sessions.delete('w-' + X);   // the manager ends it (today no record is written; piece 4's cure writes «ended»)
+  ok(R.reopens.length === 1 && !R.calls.includes('dropKept') && R.kept[X] === RESTART, 'resumed by a delivery ⇒ its kept restart record is NOT dropped at the reopen (a reopen that answered is registration: a hand-over turn that fails keeps its copy)', { calls: R.calls, kept: Object.keys(R.kept) });
+  delete R.kept[X];   // the hand-over turn RAN: boot-restore consumeKeptOf takes the copy at its end (server.js noteTurnEnd; test-dead-socket-keeps-chat-meta holds it)
+  R.live.delete(X); R.sessions.delete('w-' + X);   // the manager ends it — first with no record…
   R.result(X, 'jb-hourly', 'hourly digest', 'digest two');
   await R.at(20);
-  R.kept[X] = AGENT;   // …and with piece 4's record
+  R.kept[X] = AGENT;   // …and with its end record (piece 3's keepEnded)
   R.result(X, 'jb-hourly', 'hourly digest', 'digest three');
   await R.at(30);
   ok(R.reopens.length === 1 && R.wakes.filter((w) => w.cid === X && (w.code === 'ended_unknown' || w.code === 'ended_on_purpose')).length === 2,
-    'ended by the manager, the UNGRANTED hourly job waits — with no record (unknown) and with piece 4\'s «ended» record alike', R.wakes.filter((w) => w.cid === X));
+    'ended by the manager, the UNGRANTED hourly job waits — with no record (unknown) and with its «ended» record alike', R.wakes.filter((w) => w.cid === X));
+  // ended on purpose BEFORE the hand-over turn ended (the copy still kept): its own record outranks the restart's copy (boot-restore
+  // endRank; test-end-obeys-verdict holds it) — the ungranted job waits, «a restart ended it» is never read
+  const Z = cidOf(58);
+  const E = rig('ended-before-turn-end', { kept: { [Z]: RESTART } });
+  E.result(Z, 'jb-hourly', 'hourly digest', 'digest one');
+  await E.at(10);
+  E.live.delete(Z); E.sessions.delete('w-' + Z); E.kept[Z] = AGENT;
+  E.result(Z, 'jb-hourly', 'hourly digest', 'digest two');
+  await E.at(20);
+  ok(E.reopens.length === 1 && E.wakes.some((w) => w.cid === Z && w.code === 'ended_on_purpose'), 'an end on purpose before the hand-over turn ended: its record stands over the restart copy — the UNGRANTED job WAITS (never resumed again as «a restart ended it»)', E.wakes.filter((w) => w.cid === Z));
+  // ⑧ RED: the drop PUT BACK at the reopen (piece 7's MUST 2 as it was), on the posting mark's own line (line numbers kept)
+  const DWSRC = fs.readFileSync(path.join(REPO, 'src/server/delivery-wake.js'), 'utf8');
+  const AT = '    // the POSTING mark goes on the entry, durably, before the frame can land';
+  if (DWSRC.split(AT).length !== 2) throw new Error('anchor missing: the posting mark');
+  const MUTW = mutantCopies('wake-drop-put-back', REPO).load('src/server/delivery-wake.js', DWSRC.replace(AT, "    try { if (typeof seams.dropKept === 'function') await seams.dropKept(key); } catch { } " + AT.trim()), 'drop-at-reopen');
   const Y = cidOf(57);
-  const C = rig('kept-stays', { kept: { [Y]: RESTART }, noDrop: true });
+  const C = rig('drop-put-back', { kept: { [Y]: RESTART }, mod: MUTW });
   C.result(Y, 'jb-hourly', 'hourly digest', 'digest one');
   await C.at(10);
-  C.live.delete(Y); C.sessions.delete('w-' + Y);
-  C.result(Y, 'jb-hourly', 'hourly digest', 'digest two');
-  await C.at(20);
-  ok(C.reopens.length === 2, '⑧ RED CONTROL: a resume that leaves the restart record behind resumes the ended-on-purpose conversation AGAIN for the ungranted job — the drop is what keeps it waiting', { reopens: C.reopens.length });
+  ok(C.reopens.length === 1 && C.calls.includes('dropKept') && !(Y in C.kept), '⑧ RED CONTROL: the drop put back at the reopen — it ran (the plant took) and the kept copy is GONE at registration, before any turn ran', { calls: C.calls, kept: Object.keys(C.kept) });
 }
 
 console.log('⑨ a wake into a conversation that already runs');

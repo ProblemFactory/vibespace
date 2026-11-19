@@ -274,8 +274,6 @@ const deliveryWakeSeams = { keyOf: endedKeyOf, factsOf: (key) => resumeFactsOf(k
   heldAccountOf: (key) => { const k = String(key); try { return require('../routes/sessions').heldAccountOf(k.slice(0, k.indexOf(':')), k.slice(k.indexOf(':') + 1)); } catch { return null; } },
   // the wake entry's POSTING mark, durable before its hand-over can land (conversation-deliver markEndedPosting — 14:26Z)
   markPosting: (cid) => (deliver && typeof deliver.markEndedPosting === 'function' ? deliver.markEndedPosting(cid) : false),
-  // MUST 2: the kept record goes once a delivery resumed it (boot-restore dropKept — what the sessions sweep does at its next pass)
-  dropKept: (key) => (typeof resumeRoad.dropKept === 'function' ? resumeRoad.dropKept(key) : false),
   // rule 3 (every wake is SEEN): the resumed session carries the line its window shows and the System panel's row repeats
   noteResumed: (sid, line) => { const s = activeSessions && activeSessions.get(sid); if (!s) return; s._resumedBy = line; if (typeof broadcastActiveSessions === 'function') broadcastActiveSessions(); },
   isArchived: isArchivedKey, rowOf: resumeRowOf, reopen: (item, o) => (typeof resumeRoad.reopen === 'function' ? resumeRoad.reopen(item, o) : Promise.resolve({ ok: false, why: 'this server cannot resume conversations yet (still booting) — try again in a moment' })) };

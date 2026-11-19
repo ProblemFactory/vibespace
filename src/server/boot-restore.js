@@ -469,16 +469,6 @@ async function endFactsBefore(session, webuiId, { boundMs = END_READ_MS, read = 
     goalStatus: goalStated ? (wm.goalStatus ? String(wm.goalStatus).slice(0, 40) : wm.goal ? 'active' : null) : null,
     queueRead, queueCount: queueRead ? wm.queue.length : null };
 }
-/** CONSUMED AT THE ONE CREATE ROAD (the contract): the moment a create made the conversation live again (a person's resume too) its
- *  kept record leaves — memory and file. `key` = `<backend>:<resumable id>`. → true | false (none kept) */
-async function consumeKept(key) {
-  await loadKept();   // the store's first load first: a resume in the first seconds after a boot must not leave an old file to come back
-  const k = String(key || ''), e = keptStopped.get(k);
-  if (!e) return false;
-  keptStopped.delete(k);
-  fs.unlink(keptFile(e.sockFile), () => { });
-  return true;
-}
 /** THE KEPT RECORD of an ended conversation (the manager design's piece 4 — its READER; piece 3 owns the writer of an end's
  *  record): `backend:id` → {sockFile, meta, id} or null — this boot's copy and, loaded once, the earlier boots'. The resume verb
  *  judges it (src/server/resume-line.js keptFacts): what the record does not state is UNKNOWN. */
@@ -486,17 +476,6 @@ async function keptRecordOf(key) {
   await loadKept();
   const e = keptStopped.get(String(key || ''));
   return e ? { sockFile: e.sockFile, meta: e.meta, id: e.id } : null;
-}
-/** THE KEPT RECORD GOES once its conversation runs again (the manager design's piece 7, 主开发 12:46Z MUST 2): a delivery that
- *  resumed it drops it at once — as stoppedSessions does at its next sweep — so a later end on purpose is never read as «a
- *  restart ended it». → true when a record was dropped. */
-async function dropKept(key) {
-  await loadKept();
-  const e = keptStopped.get(String(key || ''));
-  if (!e) return false;
-  keptStopped.delete(String(key || ''));
-  fs.unlink(keptFile(e.sockFile), () => { });
-  return true;
 }
 async function stoppedSessions() {
   await loadKept();
@@ -1210,16 +1189,11 @@ async function readoptOrphanKeeperSessions() {
   if (adopted) { refreshWebuiPids(); broadcastActiveSessions(); }
 }
 
-  liveConsume = consumeKept;   // the ONE create road (src/ws-create.js) consumes through the module's consumeEnded
   return { migrateLegacyHomeProjects, restoreSessions, restoreAgentdPipeSessions,
     readoptOrphanKeeperSessions, probeSockets, probeFacts, reprobePending, probePending: () => new Map([...pendingProbes].map(([f, p]) => [f, [...p.q]])),
     stoppedSettled: () => Promise.all([...settling]), // the kept metas' transcript answers (settleStopped) — a test's wait
-    keepEnded, endFactsBefore, consumeKept, // lane end-obeys-verdict: the ONE end record — its one read before the kill, its writer, its consume
-    stoppedSessions, keptRecordOf, dropKept, // THE READ-BACK: the kept metas as /api/sessions' stopped rows (routes/sessions, server.js); one conversation's record (the resume verb — piece 4 reads it)
+    keepEnded, endFactsBefore, // lane end-obeys-verdict: the ONE end record — its one read before the kill, its writer (it leaves with the kept copy: consumeKeptOf below, or the stopped list's live check — 主开发 2026-11-19 03:17Z)
+    stoppedSessions, keptRecordOf, // THE READ-BACK: the kept metas as /api/sessions' stopped rows (routes/sessions, server.js); one conversation's record (the resume verb — piece 4 reads it)
     consumeKeptOf }; // B-a5a4 (2): a turn ended on a live session — its conversation's kept copy goes at once (server.js noteTurnEnd)
 }
-/** THE ONE CREATE ROAD's consume (the one end record's contract): src/ws-create.js calls it the moment a create made a conversation
- *  live again — the running boot instance's consumeKept (none created yet ⇒ nothing kept, false). */
-let liveConsume = null;
-function consumeEnded(key) { try { return liveConsume ? liveConsume(key) : Promise.resolve(false); } catch { return Promise.resolve(false); } }
-module.exports = { create, heldOriginOf, persistNoStart, resumeIdOf, turnRan, pairedSession, STOP_DEAD_SOCKET, STOP_ENDED, consumeEnded }; // r5: the two held-origin helpers are PURE over a meta + store (test-codex-pool §R17b)
+module.exports = { create, heldOriginOf, persistNoStart, resumeIdOf, turnRan, pairedSession, STOP_DEAD_SOCKET, STOP_ENDED }; // r5: the two held-origin helpers are PURE over a meta + store (test-codex-pool §R17b)
