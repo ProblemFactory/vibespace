@@ -494,6 +494,7 @@ function handleEvent(line, from = null) {
     // the slug agy NAMES (lane agy-status-bar-facts) — set on EVERY init (lane agy-wall-signal r4): a set-model to Default restarts
     // agy, and an init that names none must not leave the PREVIOUS process's model as this one's (the wall's servedModel)
     meta.agy = { ...(meta.agy || {}), model: typeof init.model === 'string' && init.model ? init.model.slice(0, 200) : null };
+    scheduleMeta();   // the init's facts are WRITTEN by the init (ckpt61 hosted red): a restart's adoptConversation returns early (the same conversation) and the spawn's own write fires 200 ms after the spawn — an init later than that (a node start on a loaded runner) left the meta naming the OLD process's model
     adoptConversation(ev.conversation_id, resumeId && ev.conversation_id === resumeId ? 'load' : (resumeId ? 'new' : 'new'));
     return;
   }
