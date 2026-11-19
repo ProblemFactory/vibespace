@@ -59,7 +59,7 @@ for (const [file, text] of sources) for (const m of text.matchAll(tRe)) { let k;
 
 /** The census of every table over a set of sentences: a sentence goes to the FIRST table that claims it (machine, then ui). */
 function census(ws) {
-  const out = TABLES.map(({ scope, T }) => ({ scope, T, rows: new Map(T.NEEDS.map((r) => [r.id, { row: r, sentences: [], files: new Set() }])), non: [], unclaimed: [] }));
+  const out = TABLES.map(({ scope, T }) => ({ scope, T, rows: new Map(T.NEEDS.map((r) => [r.id, { row: r, sentences: [], files: new Set() }])), non: [], owed: [], unclaimed: [] }));
   for (const [s, files] of ws) {
     let taken = false;
     for (const c of out) {
@@ -67,7 +67,9 @@ function census(ws) {
       const r = c.T.needOf(s);
       if (r) { const e = c.rows.get(r.id); e.sentences.push(s); for (const f of files) for (const g of [].concat((r.door.via && r.door.via[f]) || f)) e.files.add(g); taken = true; break; }
       const n = c.T.notNeedOf(s);
-      if (n) { c.non.push({ s, why: n.why }); taken = true; break; }
+      if (n) { c.non.push({ s, why: n.why, row: n }); taken = true; break; }
+      const o = typeof c.T.owedOf === 'function' ? c.T.owedOf(s) : null;   // 主开发 2026-11-19 00:44Z: a door OWED (B-d073) is counted apart from a non-need
+      if (o) { c.owed.push({ s, family: o.family, row: o }); taken = true; break; }
     }
     if (taken) continue;
     const first = out.find((c) => c.T.inNet(s));
@@ -89,9 +91,23 @@ for (const c of C) {
     console.log(`  · [${c.scope}] ${e.row.id} — ${e.row.need} — ${e.sentences.length} sentence(s) — ${door}`);
   }
   console.log(`  · [${c.scope}] not needs: ${c.non.length} (${[...new Set(c.non.map((x) => x.why))].length} reasons)`);
+  if (c.T.DOORS_OWED) console.log(`  · [${c.scope}] DOORS OWED (B-d073, words unchanged by ruling): ${c.owed.length} sentence(s) in ${c.T.DOORS_OWED.length} row(s) — ${c.owed.map((x) => '«' + x.s.slice(0, 48) + '»').join(' · ')}`);
   ok(c.unclaimed.length === 0, `[${c.scope}] every sentence its net catches is claimed — by a row or a non-need with its reason (${caught})`, c.unclaimed.slice(0, 12));
   ok([...c.rows.values()].every((e) => e.sentences.length > 0), `[${c.scope}] every row claims at least one sentence of the tree (no dead row)`, [...c.rows.values()].filter((e) => !e.sentences.length).map((e) => e.row.id));
   ok(c.T.NEEDS.every((r) => (!!r.door.present + !!r.door.none + !!r.door.deferred) === 1), `[${c.scope}] every row has exactly one door verdict (present / none / deferred)`);
+  // 主开发 2026-11-19 00:44Z: a NON-NEED row whose sentence is gone is red (a dead reason would hide the next sentence it happens to match);
+  // the DOORS OWED are a count of debts: each claims a live sentence, and the count only falls
+  if (c.scope === 'ui') {
+    // dead = no sentence the tree says matches it (the path net's claims and the need net's alike: every t() / tr() / i18nKey() literal)
+    const ALL = [...words.keys()];
+    const deadNon = (T) => T.NOT_NEEDS.filter((r) => !ALL.some((x) => r.match.test(x))).map((r) => r.why.slice(0, 70));
+    ok(deadNon(c.T).length === 0, '[ui] every non-need row claims at least one sentence of the tree (no dead reason)', deadNon(c.T));
+    const PLANT = { why: 'PLANTED — a reason whose sentence is gone', match: /^A sentence no file says any more$/ };
+    const planted = { ...c.T, NOT_NEEDS: [...c.T.NOT_NEEDS, PLANT] };
+    ok(planted.NOT_NEEDS.includes(PLANT) && deadNon(planted).length === deadNon(c.T).length + 1 && deadNon(planted).some((w) => w.startsWith('PLANTED')), 'CONTROL: a planted non-need row whose sentence is gone is RED by its reason (the plant is in the table first)');
+    const OWED_CEILING = 4;   // 主开发's ruling (a), 2026-11-18 23:33Z — bulk-resume's Close hint and toast, the Integrations window's two Test lines; it only falls
+    ok(Array.isArray(c.T.DOORS_OWED) && c.T.DOORS_OWED.length <= OWED_CEILING && c.T.DOORS_OWED.every((r) => r.family === 'B-d073' && c.owed.some((x) => x.row === r)), `[ui] the doors owed are a count of debts apart from the non-needs: ${c.T.DOORS_OWED ? c.T.DOORS_OWED.length : 0} ≤ ${OWED_CEILING}, each of family B-d073, each claiming a live sentence`, (c.T.DOORS_OWED || []).filter((r) => !c.owed.some((x) => x.row === r)).map((r) => r.why.slice(0, 60)));
+  }
   // lane ui-needs-a-button pick 5: THE UI TABLE ENDS WITH NO DEFERRED ROW — every caught sentence a door, a none with its reason, or a non-need
   if (c.scope === 'ui') ok(c.T.NEEDS.every((r) => !r.door.deferred) && !('DEFERRED' in c.T), '[ui] no deferred row is left in the ui table (every caught sentence: a door, a none with its reason, or a non-need)', c.T.NEEDS.filter((r) => r.door.deferred).map((r) => r.id));
   else ok(c.T.NEEDS.filter((r) => r.door.deferred).every((r) => r.door.deferred === c.T.DEFERRED), `[${c.scope}] every deferred door names its owner («${c.T.DEFERRED}»)`);
@@ -549,6 +565,9 @@ function shapeReader({ follow = null, read = null } = {}) {
     // words said only under a condition (no door: the need is WHERE they are said)
     // a For-you item (the hub filed its words): its door is the item's own — the registry row's (`opens`) or its bucket's
     item(f, S, sh) { const A = fileOf('src/lib/user-todos-actions.js'); if (!A) return { ok: false, why: 'no user-todos-actions.js' }; if (sh.opens) { const rd = A.nodes.find((n) => n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.id.name === 'ROW_DOORS' && n.init && n.init.type === 'ObjectExpression'); const q = rd && propOf(rd.init, sh.opens); if (!q || !liveRun(q.value)) return { ok: false, why: `ROW_DOORS.${sh.opens} is missing or empty` }; const R = fileOf(f); return (R.byCallee.get('doorOf') || []).length ? { ok: true } : { ok: false, why: 'the surface never draws the row\'s declared door (doorOf)' }; } if (sh.bucket) { const ifs = A.nodes.filter((n) => n.type === 'IfStatement' && new RegExp(`^key === '${sh.bucket}'$`).test(srcOf(n.test))); return ifs.length && ifs.every((n) => n.consequent.type === 'BlockStatement' ? n.consequent.body.length && containsCall(n.consequent) : containsCall(n.consequent)) ? { ok: true } : { ok: false, why: `the «${sh.bucket}» bucket has no live door` }; } return { ok: false, why: 'an item shape names its door (opens / bucket)' }; },
+    // 主开发 2026-11-19 00:44Z: a need WITH its door present as the row's LINK inside its own words — the element that says it (or a
+    // carrier sh.words) is drawn through sh.link (toastWordsInto: a settings link in the words drawn as its door, on that line)
+    link(f, S, sh) { for (const c of calls(f, sh.link)) { const a = c.arguments[0]; const b = a && a.type === 'Identifier' ? bindingOf(a) : null; const init = b && b.decl && b.decl.init; if (init && hits(init, S, sh.words)) return { ok: true }; } return { ok: false, why: `no ${sh.link}(el, …) draws the line that says it — its link would read as plain text` }; },
     guard(f, S, sh) { for (const site of carriers(f, S, sh.words)) for (const a of ancestors(site)) if ((a.type === 'IfStatement' || a.type === 'ConditionalExpression') && srcOf(a.test).includes(sh.guard)) return { ok: true }; return { ok: false, why: `the sentence is said outside «${sh.guard}»` }; },
   };
   const shapesOf = (row) => { const sh = row.door && row.door.present && row.door.present.shape; return (Array.isArray(sh) ? sh : [sh || 'line']).map((x) => (typeof x === 'string' ? { kind: x } : { kind: Object.keys(x).find((k) => k in SHAPE), ...x })); };
@@ -583,6 +602,8 @@ const PLANTS = [
   ['remove-failed', 'src/lib/desktop-app-launcher.js', 'run: () => { rclose(); removeRegistered(row, { forget: true, onDone }); } }', 'run: () => { } }', '«Forget it» with its handler emptied'],
   ['mount-offline', 'src/lib/sidebar-mounts.js', "ctx.body.prepend(needLine({ words: tr('“{name}” is offline — a mount works once it is connected.', { name: h.name }), tone: 'off', cls: 'mounts-offline-need', doors: [pairDoor(this.app, h, { kind: 'secondary' })] }));",
     "ctx.body.prepend(needLine({ words: '', tone: 'off', cls: 'mounts-offline-need', doors: [pairDoor(this.app, h, { kind: 'secondary' })] })); ctx.body.firstChild.title = tr('“{name}” is offline — a mount works once it is connected.', { name: h.name });", 'the need words moved into the line\'s title, the marker kept'],
+  // 主开发 2026-11-19 00:44Z: the batch refusal's link is its door — drawn as plain text, the line has no door
+  ['resume-batch-cap', 'src/lib/bulk-resume.js', '        toastWordsInto(why, why.textContent);', '        void why;', 'the batch refusal drawn as plain text (toastWordsInto taken off: its link would read as an address, not a door)'],
 ];
 for (const [id, f, a, b, what] of PLANTS) {
   const s0 = sources.get(f) || '';
@@ -1325,7 +1346,7 @@ console.log('⑥ THE NEED-WORD NET (reader #5: a sentence that says something fa
   const DEBT = Array.isArray(DEBT_FILE.list) ? DEBT_FILE.list : [];
   const SHAPES = (DEBT_FILE.shapes || []).map((x) => new RegExp(x));
   const needDebtOf = (s) => { const p = String(s).slice(0, 64); return DEBT.includes(p) ? p : SHAPES.find((r) => r.test(String(s))) || null; };
-  const claimedBy = (s) => TABLES.some(({ T }) => T.needOf(s) || T.notNeedOf(s));
+  const claimedBy = (s) => TABLES.some(({ T }) => T.needOf(s) || T.notNeedOf(s) || (typeof T.owedOf === 'function' && T.owedOf(s)));
   const needNet = (ws) => {
     const out = { caught: 0, claimed: 0, debt: new Set(), fresh: [] };
     if (!UI.NET.need) return { ...out, fresh: [{ s: 'the ui table has no NEED net (NET.need)' }] };
