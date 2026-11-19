@@ -20,11 +20,16 @@ const INDEX_TTL_MS = 30e3;
 const SELF_TTL_MS = 60e3;
 const MAX_LIST = 14;
 const MAX_PROBES = 40;
+/* B-0f3d (lane bl-tests-a, after B-08d5): a PROBE (a recent conversation's folder, a Task Group's folder) that did not answer inside the
+   budget — a stale or hung storage mount — is not asked again for this long: the listing a person typed is never held by it, and a hung
+   mount is not asked (a file worker held up to its deadline) on every keystroke */
+const PROBE_LATE_MS = 30e3;
 
 function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '..', '..'), dataDir = null, mounts = () => [], now = Date.now } = {}) {
   const listCache = new Map();   // abs → { at, entry }
   const indexCache = new Map();  // key → { at, dirs, links, p }
   let selfCache = { at: 0, v: null, p: null };
+  const lateProbes = new Map();  // abs → when its probe ran out of the budget (PROBE_LATE_MS)
   const dataRoot = dataDir || path.join(repoDir, 'data');
 
   async function listDirs(abs, { files = false, pkg = false } = {}) {
@@ -112,15 +117,28 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
         const skip = [...me.roots, ...mountRows.map((m) => m.path)];
         idx = await index([...new Set(roots)], skip);
       }
-      const pr = probes.length ? (await call('dirSlice', { dirs: [], probes })).probes : [];
-      return { me, listed, idx, pr };
+      return { me, listed, idx };
     })();
     const got = await Promise.race([work, deadline]);
-    let me, listed = [], idx = null, pr = [];
+    let me, listed = [], idx = null, pr = [], probesLate = false;
     if (got === 'late') { partial = true; me = selfCache.v || { home, roots: [repoDir, dataRoot] }; work.catch(() => {}); }
-    else ({ me, listed, idx, pr } = got);
+    else ({ me, listed, idx } = got);
+    // B-0f3d: the PROBES race what is left of the SAME budget on their own — a probe that hangs (a stale mount) never throws the finished
+    // listing away (the reply was partial with nothing listed, so an existing healthy folder typed by hand read as not answered); the
+    // reply says `probesLate` (the field marks none of them asked), and a late probe is skipped for PROBE_LATE_MS
+    if (got !== 'late' && probes.length) {
+      const t1 = now();
+      const ask = probes.filter((p) => !(lateProbes.has(p) && t1 - lateProbes.get(p) < PROBE_LATE_MS));
+      if (ask.length < probes.length) probesLate = true;
+      if (ask.length) {
+        const pw = call('dirSlice', { dirs: [], probes: ask }).then((r) => (r && r.probes) || []);
+        const pg = await Promise.race([pw, deadline]);
+        if (pg === 'late') { probesLate = true; for (const p of ask) lateProbes.set(p, now()); pw.catch(() => {}); }
+        else { pr = pg; for (const p of ask) lateProbes.delete(p); }
+      }
+    }
     const listing = PC.sliceListing({ home, machine: null, dirs: listed, probes: pr, index: idx && idx.dirs ? idx : null, mounts: mountRows, q: fuzzy });
-    return { listing, self: me, took: now() - t0, partial: partial || !!(idx && idx.partial) };
+    return { listing, self: me, took: now() - t0, partial: partial || !!(idx && idx.partial), ...(probesLate ? { probesLate: true } : {}) };
   }
 
   return { slice, self, _caches: { listCache, indexCache } };

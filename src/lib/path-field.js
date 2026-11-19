@@ -368,7 +368,9 @@ export function pathField(input, opts = {}) {
       W.L.machine = h || null;
       if (d.listing.nondirs) Object.assign(W.L.nondirs = W.L.nondirs || {}, d.listing.nondirs);
       if (d.self) W.self = d.self;
-      W.asked = W.asked || new Map(); for (const p of probe) W.asked.set(p, Date.now());
+      // B-0f3d: probes that ran out of the machine's budget (a hung mount) are NOT marked asked — never «known absent» (a 新建 chip for a
+      // folder that may well be there); they are asked again later
+      if (!d.probesLate) { W.asked = W.asked || new Map(); for (const p of probe) W.asked.set(p, Date.now()); }
     }
     W.error = (d && d.error) || (d ? '' : t('the machine did not answer'));
     W.unreachable = (d && d.unreachable) || null;
