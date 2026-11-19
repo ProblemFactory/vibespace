@@ -415,6 +415,7 @@ export default {
   "Show the notices": "展开通知",
   "Acknowledge every finished job here that you have not looked at yet — the red count drops, nothing is deleted": "把这里所有已结束、你还没看过的任务标为已看——红色计数会降下来，不会删除任何东西",
   "Could not mark them seen": "无法标为已看",
+  "This job is the running VibeSpace: it is not stopped here": "这个任务就是正在运行的 VibeSpace：不在这里停止它",
   "Unknown event": "未知事件",
   "Unknown events / new fields on known records (harness records VibeSpace does not recognize)": "未知事件 / 已知记录上的新字段（VibeSpace 不认识的 harness 记录）",
   "{n} unknown events / new fields": "{n} 个未知事件 / 新字段",

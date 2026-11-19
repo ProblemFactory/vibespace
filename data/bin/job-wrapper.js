@@ -614,7 +614,7 @@ async function forceScope(why) {
   // WHOLE — neither the manager's kill nor the kernel's cgroup.kill: the job's own processes by force, one by one (identity re-read)
   const kept = keptTest(), list = procsOrNull(scopeDir);
   const held = list === null ? keptInScope() : kept ? list.filter((p) => kept(p)).length : 0;   // its read r1 (S1): a list unread is no proof the hub is not there
-  if (held) { sayKept(held, 'its kill'); for (const p of scopeRows() || []) killNow(p); return; }
+  if (held) { sayKept(held, 'its kill', list === null); for (const p of scopeRows() || []) killNow(p); return; }
   await scopeKill('SIGKILL');
   if (procsOf(scopeDir).length) { try { fs.writeFileSync(path.join(scopeDir, 'cgroup.kill'), '1'); } catch { } } // no manager answered: the kernel's own
 }
@@ -704,7 +704,15 @@ let stopTree = [];
 // the reap — a Stop racing the job's own end, a signal to us while we drained: whoever held that pid since got the job's stop,
 // recorded «mainBy wrapper»)
 const mainLive = () => !!child && !exited && child.exitCode === null && child.signalCode === null;
-const termMain = (p, sig) => { if (termed.has(termKey(p)) || !mainLive()) return false; termed.set(termKey(p), { at: Date.now(), pass: 'stop' }); try { process.kill(child.pid, sig); return true; } catch { return false; } };
+// B-2c5c, round wwa7r2uc1 (THE MAIN DOOR): the main asks the SAME kept test as every other door — a main that IS the hub (VibeSpace
+// started AS this job: its command became the hub — by its pid file or its shape) is never signalled: the stop is refused by name in
+// the job's log, and the job is not said ended (it ends when the hub ends)
+const HUB_MAIN_WORDS = 'this job is the running VibeSpace: it is not stopped here';
+const mainKept = () => { if (!mainLive()) return false; const k = keptTest(); return !!(k && k(child.pid)); };
+let mainKeptSaid = 0, refusedAt = 0;
+const sayMainKept = (sig) => { if (mainKeptSaid++) return; try { fs.writeSync(logFd, Buffer.from(`\n[job-wrapper] stop: ${sig} refused — ${HUB_MAIN_WORDS} (its main process is the VibeSpace hub, started as this job)\n`)); } catch { } };
+const killMain = () => { if (mainKept()) { sayMainKept('SIGKILL'); return false; } try { child.kill('SIGKILL'); return true; } catch { return false; } };
+const termMain = (p, sig) => { if (termed.has(termKey(p)) || !mainLive()) return false; if (mainKept()) { sayMainKept(sig); return false; } termed.set(termKey(p), { at: Date.now(), pass: 'stop' }); try { process.kill(child.pid, sig); return true; } catch { return false; } };
 // round 10: the manager's kill of the scope is a delivery too — recorded, once per stop step (r9 sent a natural end's leftovers
 // their SIGTERM by it unrecorded: a stop while they drained SIGTERMed them again)
 let scopeSent = 0;
@@ -728,6 +736,9 @@ let stopBy = '', heard = null, mainBy = '';
 // flight (a service's leftovers stopped with it — never kept, unsaid: heavy ㉒, 1 pair in 12). Said in the job's log
 function onStop(sig, at, by) {
   if (stopping) return;
+  // B-2c5c (THE MAIN DOOR): the main IS the hub — the stop is refused whole: nothing here is the stop's (what the hub runs is the hub's,
+  // its keeper ours); its intent is not taken up again at the end (`refusedAt`)
+  if (mainKept()) { sayMainKept(sig); refusedAt = Math.max(refusedAt, at); return; }
   stopping = sig; stopAt = at; stopBy = by;
   markStopping(by);
   // round 9: A SIGNAL GOES TO A PROVEN IDENTITY, NEVER ASSUMED DELIVERED — the engine's group signal reached what is in OUR group
@@ -754,7 +765,8 @@ function onStop(sig, at, by) {
   // the engine's intent carries the tree it read BEFORE its signal (ours here may come after the main's children were re-parented)
   const fromIntent = by === 'engine' || by === 'intent' || by === 'alone' || by === 'alone-hub' ? intentTree() : { rows: [], cut: false };
   const keyed = new Map([...fromIntent.rows, ...tree.rows].filter((r) => r[2] !== process.pid && !(child && r[0] === child.pid) && !ko.some((x) => x[0] === r[0])).map((r) => [termKey(r), r]));
-  stopTree = [...keyed.values()];
+  const kt = keptTest();   // small 3: a hub BOOTING inside the job (not yet in server.pid) outside our group is held out by its shape, with what it runs
+  stopTree = [...keyed.values()].filter((r) => !(kt && kt(r[0])));
   let treeHeard = 0;
   for (const r of stopTree) if (termOnce(r)) treeHeard++;
   const treeCut = tree.cut || fromIntent.cut;
@@ -768,7 +780,7 @@ function onStop(sig, at, by) {
     // heard the stop with us (the engine signals it) — its grace runs from the stop; a SERVICE's processes that left the group
     // (its mark) hear it NOW, with the main — round 6 signalled them only once the main ended, against what was left of the grace
     if (keeps) for (const p of escapedOf()) termOnce(p);
-    const t = setTimeout(() => { graceUp = true; if (exited) return; if (!forced) forced = `it did not end${on} in ${stopMs / 1000} s — its process group was killed`; try { child.kill('SIGKILL'); } catch { } }, left); t.unref?.();
+    const t = setTimeout(() => { graceUp = true; if (exited) return; if (!forced) forced = `it did not end${on} in ${stopMs / 1000} s — its process group was killed`; killMain(); }, left); t.unref?.();
     return;
   }
   const t = setTimeout(() => { if (!exited) forceScope(`it did not end${on} in ${stopMs / 1000} s — its scope was killed`); }, left); t.unref?.();
@@ -790,9 +802,19 @@ for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => {
  *  holders and the other jobs' wrappers); this wrapper is the root. [[pid, starttime]], starttime 0 = that pid whatever its start */
 function keptOutHere() {
   const out = [];
-  try { const p = Number(String(fs.readFileSync(path.join(__dirname, '..', 'server.pid'), 'utf8')).trim()); if (p > 1 && p !== process.pid) out.push([p, 0]); } catch { }
+  try { const f = path.join(__dirname, '..', 'server.pid'), p = Number(String(fs.readFileSync(f, 'utf8')).trim()); if (p > 1 && p !== process.pid && startedBy(p, fs.statSync(f).mtimeMs)) out.push([p, 0]); } catch { }   // small 1: a STALE file's pid is no hub
   try { const s = JSON.parse(fs.readFileSync(path.join(ctlDir, 'stop.json'), 'utf8')); if (Array.isArray(s.keepOut)) for (const x of s.keepOut.slice(0, 512)) if (Array.isArray(x) && Number(x[0]) > 1) out.push([Number(x[0]), Number(x[1]) || 0]); } catch { }
   return out;
+}
+/** B-2c5c (主开发's small 1): a STALE <data>/server.pid — its pid now another process, started AFTER the file was written — names no
+ *  hub: its root is kept only when its process started no later than the file's own time (to the second: /proc/stat's boot time is
+ *  whole seconds); a start that cannot be read keeps it (never dropped on a guess) */
+function startedBy(pid, atMs) {
+  const st = Number((statOf(pid) || [])[19]);
+  if (!(st > 0)) return true;
+  let btime = 0;
+  try { btime = Number((/^btime (\d+)$/m.exec(fs.readFileSync('/proc/stat', 'utf8')) || [])[1]) || 0; } catch { }
+  return !btime || btime * 1000 + st * 10 <= atMs + 1000;   // starttime in USER_HZ (100 a second, /proc's fixed unit)
 }
 /** B-2c5c: WHAT NO STOP OF THIS JOB ENDS, BY THE PARENT CHAIN — the kept-out roots (keptOutHere: the hub of <data>/server.pid and what
  *  the engine's intent names) and everything under them. → (pid) => true when kept (memoised for this call's rows), or null */
@@ -830,9 +852,11 @@ function keptInScope() {
 }
 let keptSaid = false;
 /** B-2c5c: said ONCE in the job's log — the scope is not killed whole, and why */
-function sayKept(n, what) {
+function sayKept(n, what, unread = false) {
   if (keptSaid) return; keptSaid = true;
-  try { fs.writeSync(logFd, Buffer.from(`[job-wrapper] ${what}: its scope holds ${n} process${n === 1 ? '' : 'es'} no stop of this job ends — the VibeSpace hub started inside this job, or what it runs — so the scope is never killed whole: the job's own processes are ended one by one, the hub's left alone\n`)); } catch { }
+  // small 2: a list that cannot be read ends nothing — said so, never «ended one by one»
+  const how = unread ? 'and its list could not be read: nothing of it was ended — what the job started may still run' : 'so the scope is never killed whole: the job\'s own processes are ended one by one, the hub\'s left alone';
+  try { fs.writeSync(logFd, Buffer.from(`[job-wrapper] ${what}: its scope holds ${n} process${n === 1 ? '' : 'es'} no stop of this job ends — the VibeSpace hub started inside this job, or what it runs — ${how}\n`)); } catch { }
 }
 /** B-c134: the tree the engine read before its signal, from its intent — rows [pid, start, pgid, comm] (each proven again at the act) */
 function intentTree() {
@@ -870,7 +894,10 @@ async function drainScope() {
   // step (the table), waited on to the stop's one clock, then by force; never counted as the scope's
   const tl = stopping ? stopTree.filter(same) : [];
   if (tl.length) { while (tl.some(same) && Date.now() < deadline) await nap(25); for (const p of tl) killNow(p); }
-  return { ...(left ? { left: { n: left, ...(still ? { force: true } : {}) } } : {}), scopeEmpty: !own().length };
+  // small 2: the END measured on a list that READS — an unread one is no «empty»: the job reads ended, said «could not be read: may
+  // still run», and the engine reaps the scope (scopeEmpty false)
+  const fin = procsOrNull(scopeDir), unread = fin === null;
+  return { ...(left ? { left: { n: left, ...(still ? { force: true } : {}) } } : {}), scopeEmpty: !unread && !fin.filter((p) => !(kept && kept(p))).length, ...(unread ? { scopeUnread: true } : {}) };
 }
 // A RUNG WITHOUT A SCOPE (rlimit-data, none — a fleet pod): what the job left is what still runs in OUR process group (the job
 // is our child in it; what it put in the background stays there) — a task's stopped and said, a service's kept and named by
@@ -964,7 +991,7 @@ async function ended(code, signal) {
   // round 7: the stop in flight, whatever ran first. Round 8: the intent is a stop the engine MEANT — its group signal reaches us
   // too: waited a little; heard ⇒ the engine's (our handler said so); not heard ⇒ nobody delivered it — we do, the grace from now
   if (!stopping) {
-    const s = stopIntent();
+    const s0 = stopIntent(), s = s0 && s0.at > refusedAt ? s0 : null;   // B-2c5c: a stop refused while the hub was the main is no stop at its end
     if (s) { await new Promise((res) => { heard = res; setTimeout(res, Math.min(500, stopMs / 2)); }); heard = null; } // (a held timer: nothing else keeps us alive now)
     if (s && !stopping) onStop(s.sig, Date.now(), 'intent');
   }
@@ -975,10 +1002,10 @@ async function ended(code, signal) {
   const drained = scoped() ? await drainScope() : await drainGroup();
   const named = memory.cause === 'oom-bound' ? ` — stopped: used more than ${memory.mb >= 1024 ? Math.round(memory.mb / 102.4) / 10 + ' GB' : memory.mb + ' MB'} (${memory.how})`
     : memory.cause === 'oom' ? ` — killed: out of memory (${memory.how})` : '';
-  const end = drained.left ? ` — ${leftWords(drained.left)}` : forced ? ` — stopped by force: ${forced}` : '';
+  const end = (drained.left ? ` — ${leftWords(drained.left)}` : forced ? ` — stopped by force: ${forced}` : '') + (drained.scopeUnread ? ' — its scope\'s list could not be read: what it started may still run' : '');
   if (VAL) { const f = flushMask(); if (f.length) writeLog(f); } // …and what came on the pipes after the exit event, masked
   try { fs.writeSync(logFd, Buffer.from(`\n[job-wrapper] exit code=${code} signal=${signal || ''}${named}${end}\n`)); } catch { }
-  writeExit({ code, signal: signal || null, endedAt: Date.now(), memory, ...(stopping ? { stop: stopping, stopBy, ...(mainBy ? { mainBy } : {}) } : {}), ...(forced ? { forced: `stopped by force: ${forced}` } : {}), ...(drained.left ? { left: drained.left } : {}), ...(scoped() ? { scopeEmpty: drained.scopeEmpty } : {}) });
+  writeExit({ code, signal: signal || null, endedAt: Date.now(), memory, ...(stopping ? { stop: stopping, stopBy, ...(mainBy ? { mainBy } : {}) } : {}), ...(forced ? { forced: `stopped by force: ${forced}` } : {}), ...(drained.left ? { left: drained.left } : {}), ...(scoped() ? { scopeEmpty: drained.scopeEmpty, ...(drained.scopeUnread ? { scopeUnread: true } : {}) } : {}) });
   process.exit(code === null ? 143 : code);
 }
 // THE START (protocol 3): the values first — drained from OUR fd 3 (a socket the hub wrote and ended) on a non-blocking handle

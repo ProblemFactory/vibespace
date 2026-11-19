@@ -150,6 +150,7 @@ async function jobAction(app, j, act, refresh) {
   if (act === 'rm' && r?.logsPending) showToast(t('Removed. Its log files are still being deleted in the background.')); // lane job-logs-sweep: the record is gone; the remover finishes off the main thread (never beside an error)
   if (act === 'rm' && r?.logsKept === 'running') showToast(t('Removed. One of its runs is still running; its log files are deleted 14 days after it ends.')); // round 2: the ✕'s promise is true or not made
   if (act === 'rm' && r?.logsKept === 'unjudgeable') showToast(t('Removed. One of its runs could not be checked; its log files are deleted once VibeSpace can tell it has ended.'));
+  if (r?.code === 'hub-is-main') r.error = t('This job is the running VibeSpace: it is not stopped here');   // B-2c5c: the job IS this VibeSpace — its stop refused by name, in the reader's language
   if (r?.error) showToast(r.error, { error: true });
   refresh?.();
 }

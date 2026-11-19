@@ -735,7 +735,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       done();
       const res = await Promise.all(n.jobs.map((j) => fetchJson(`/api/jobs/${encodeURIComponent(j.id)}/stop`, { method: 'POST' }).then((a) => ({ j, a }), () => ({ j, a: null }))));
       const bad = res.filter((x) => !x.a || x.a.error);
-      if (bad.length) showToast(t('Could not stop {n} of these background jobs: {error}', { n: bad.length, error: (bad[0].a && bad[0].a.error) || t('no answer') }), { type: 'error' });
+      if (bad.length) showToast(t('Could not stop {n} of these background jobs: {error}', { n: bad.length, error: (bad[0].a && bad[0].a.code === 'hub-is-main' ? t('This job is the running VibeSpace: it is not stopped here') : bad[0].a && bad[0].a.error) || t('no answer') }), { type: 'error' });
       else showToast(res.length === 1 ? t('Stopping 1 background job') : t('Stopping {n} background jobs', { n: res.length }));   // a stop is asked: each ends within its grace
     };
     ids = new Set(n.jobs.map((j) => j.id));

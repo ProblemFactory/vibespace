@@ -515,14 +515,14 @@ console.log('§10 B-2c5c — the job\'s stop never ends a hub that runs inside i
     const calls = [];
     const env = { scopeDir: '/fake/scope', keptTest: () => (scope.hub ? (p) => String(p) === '4100' : null), procsOf: () => scope.procs.slice(), procsOrNull: () => (scope.unread ? null : scope.procs.slice()), keptInScope: () => scope.inside || 0,
       scopeRows: () => scope.procs.filter((p) => p !== '4100').map((p) => [Number(p), 1, 1]), killNow: (r) => { calls.push('kill ' + r[0]); return true; },
-      scopeKill: async (sig) => { calls.push('scope ' + sig); return true; }, sayKept: (n, w) => calls.push(`said ${n} ${w}`),
+      scopeKill: async (sig) => { calls.push('scope ' + sig); return true; }, sayKept: (n, w, u) => calls.push(`said ${n} ${w}${u ? ' unread' : ''}`),
       fs: { writeFileSync: (f) => calls.push('write ' + path.basename(f)) }, path };
     const f = new Function(...Object.keys(env), `let forced = null; ${fnOf(src, 'async function forceScope(why) {')}\nreturn forceScope;`)(...Object.values(env));   // eslint-disable-line no-new-func
     return f('it did not end').then(() => calls);
   };
   const withHub = await forceOf(W, { hub: true, procs: ['4100', '4200'] }), noHub = await forceOf(W, { hub: false, procs: ['4200'] }), blind = await forceOf(W, { hub: true, unread: true, inside: 1, procs: [] });
-  ok(withHub.join() === 'said 1 its kill,kill 4200' && noHub[0] === 'scope SIGKILL' && blind.join() === 'said 1 its kill', 'the wrapper\'s forced end of a scope that holds the hub: never the manager\'s kill nor cgroup.kill — the job\'s process killed alone, said; a list that cannot be read is no proof the hub is gone (its cgroup file says it is there: nothing whole); a scope without it is killed whole as before', { withHub, noHub, blind });
-  const GUARD = "  if (held) { sayKept(held, 'its kill'); for (const p of scopeRows() || []) killNow(p); return; }\n";
+  ok(withHub.join() === 'said 1 its kill,kill 4200' && noHub[0] === 'scope SIGKILL' && blind.join() === 'said 1 its kill unread', 'the wrapper\'s forced end of a scope that holds the hub: never the manager\'s kill nor cgroup.kill — the job\'s process killed alone, said; a list that cannot be read is no proof the hub is gone (its cgroup file says it is there: nothing whole); a scope without it is killed whole as before', { withHub, noHub, blind });
+  const GUARD = "  if (held) { sayKept(held, 'its kill', list === null); for (const p of scopeRows() || []) killNow(p); return; }\n";
   const wx = await forceOf(anchored(W, GUARD, '', 'force-scope-hub-cut'), { hub: true, procs: ['4100', '4200'] });
   ok(wx.includes('scope SIGKILL'), 'CONTROL (the guard cut, in a copy): the manager kills the WHOLE scope — the hub with it — RED', wx);
   // the manager's scope signal when the list cannot be read: never while the hub lives in the scope (its own cgroup file)
@@ -589,11 +589,135 @@ console.log('§10 B-2c5c — the job\'s stop never ends a hub that runs inside i
   ok(job2 > 0 && wk.job === false && wk.hub === true && wk.hubKid === true && shapes.abs === true && shapes.rel === true && shapes.other === false && shapes.relElsewhere === false && shapes.shell === false && shapes.gone === false,
     'the WRAPPER\'s hub test over real processes: the job\'s own process is the job\'s (the walk stops at the wrapper itself), the hub and what it runs are kept; a hub of this checkout is known by its argv (its server.js by path, or server.js with the checkout as cwd) — another script, server.js elsewhere, a shell, a gone pid are not', { wk, shapes });
   ok(ctl.job === true && ctl.abs === false, 'CONTROLS (each cut, in a copy): without the wrapper\'s own stop the job\'s process reads as the hub\'s (no stop ends it); without the argv\'s path a hub booting by its absolute path is not known — each RED', ctl);
-  ok(/!sent\.has\(id\.pid\) && !this\._hubsOwn\(id\.pid, ownW\) && PI\.aliveIdentity\(id\) === true/.test(JS) && /found = marked\.filter\(\(id\) => !this\._hubsOwn\(id\.pid, ownW\)\)/.test(JS) && (JS.match(/ownOf\(await this\._scopeProcs\(scope\)\)/g) || []).length === 2 && /const ownOf = \(ps\) => ps && ps\.filter\(\(x\) => !this\._hubsOwn\(x, ownW\)\);/.test(JS)
+  ok(/const hubs = this\._hubTest\(ownW\); for \(const id of ids\) if \(id && !sent\.has\(id\.pid\) && !hubs\(id\.pid\) && PI\.aliveIdentity\(id\) === true/.test(JS) && /hubs = this\._hubTest\(ownW\), found = marked\.filter\(\(id\) => !hubs\(id\.pid\)\)/.test(JS) && (JS.match(/ownOf\(await this\._scopeProcs\(scope\)\)/g) || []).length === 2 && /const ownOf = \(ps\) => \{ const hubs = this\._hubTest\(ownW\); return ps && ps\.filter\(\(x\) => !hubs\(x\)\); \};/.test(JS)
     && /if \(r === 'hub'\) \{ run\._scopeEmpty = true; return this\._reapSaid\(job, run, scope, r, k\.out\); \}/.test(JS) && /else if \(r === 'hub'\) said\(this\._hubScopeWords\(ko\)\)/.test(JS)
-    && /scan\(\)\.filter\(\(id\) => !sent\.has\(id\.pid\) && !this\._hubsOwn\(id\.pid, ownW\)\)/.test(JS) && /\.\.\.\(hubInGroup \? \{ hub: true \} : \{\}\)/.test(JS) && /alone = !!this\._ctlJson\(job, run, 'stopping\.json'\) \|\| hubInGroup;/.test(JS)
+    && /const hubsL = this\._hubTest\(ownW\), late = sent\.size \? scan\(\)\.filter\(\(id\) => !sent\.has\(id\.pid\) && !hubsL\(id\.pid\)\)/.test(JS) && /\.\.\.\(hubInGroup \? \{ hub: true \} : \{\}\)/.test(JS) && /alone = !!this\._ctlJson\(job, run, 'stopping\.json'\) \|\| hubInGroup;/.test(JS)
     && /engine \? \(s\.alone \? \(s\.hub \? 'alone-hub' : 'alone'\) : 'engine'\)/.test(W) && /by === 'engine' \|\| by === 'intent' \|\| by === 'alone' \|\| by === 'alone-hub' \? intentTree\(\)/.test(W),
   'WIRING: the clear of kept processes (both walks) and the stop of a doubted run never signal the hub\'s (its mark is the job\'s); the reap and the stop ladder take a scope killed around the hub as done, said; a hub in the job\'s group makes the intent say `alone` + `hub` and the wrapper signals the job\'s processes itself (the read\'s M3)');
+  // ── (f) round wwa7r2uc1 — THE MAIN DOOR: a hub that IS the job's main process (VibeSpace started AS the job: its command became the
+  // hub, the job's wrapper its parent). The wrapper's main door asks the SAME kept test as every other door — compiled from its source
+  // over a stand-in /proc (the wrapper 4500, its main 4501 a hub of this checkout by its argv; the wrapper 4600, its main 4601 a shell
+  // — the job's own); nothing is signalled (process.kill and the handle's kill are recorders)
+  stat(4500, 'node', 4100, 100); stat(4501, 'node', 4500, 101); stat(4502, 'node', 4500, 104); stat(4600, 'node', 4100, 102); stat(4601, 'sh', 4600, 103);
+  PROC10[4501] = [`node\0${D10}/server.js\0`, '/']; PROC10[4502] = ['node\0.\0', D10]; PROC10[4601] = ['sh\0-c\0sleep 30\0', D10];   // 4502: a hub run as `node .` — known by its pid file only
+  const keptFor = (src, wrapperPid, ko) => new Function('keptOutHere', 'hubShaped', 'nodeOrUnknown', 'keptByChain', 'process', `${fnOf(src, 'function keptTest() {')}\nreturn keptTest;`)(() => ko, shapedOf(src), () => true, (p, k, o) => PI10.keptByChain(p, k, { ...o, procRoot: PR }), { pid: wrapperPid });   // eslint-disable-line no-new-func
+  const DOOR0 = 'const HUB_MAIN_WORDS = ', DOOR1 = 'const termMain = (p, sig) => {';
+  const doorOf = (src, mainPid, wrapperPid, ko = []) => {
+    const calls = [], log = [];
+    const i = src.indexOf(DOOR0), j = src.indexOf('\n', src.indexOf(DOOR1));
+    if (i < 0 || j < i) throw new Error('the main door is not found');
+    const env = { mainLive: () => true, keptTest: keptFor(src, wrapperPid, ko), child: { pid: mainPid, kill: (s) => { calls.push('kill ' + s); return true; } }, fs: { writeSync: (fd, b) => log.push(String(b)) }, logFd: 9,
+      termed: new Map(), termKey: ([p, st]) => `${p}:${st}`, process: { pid: wrapperPid, kill: (p, s) => { calls.push(`signal ${p} ${s}`); } } };
+    const d = new Function(...Object.keys(env), `${src.slice(i, j)}\nreturn { termMain, killMain };`)(...Object.values(env));   // eslint-disable-line no-new-func
+    const t = d.termMain([mainPid, 101, 4500], 'SIGTERM'), k = d.killMain();
+    return { t, k, calls: calls.join(), log: log.join('') };
+  };
+  const hubMain = doorOf(W, 4501, 4500), hubMainPid = doorOf(W, 4502, 4500, [[4502, 0]]), jobMain = doorOf(W, 4601, 4600);
+  const TERMK = 'if (mainKept()) { sayMainKept(sig); return false; } ', KILLK = "const killMain = () => { if (mainKept()) { sayMainKept('SIGKILL'); return false; } ";
+  const tCut = doorOf(anchored(W, TERMK, '', 'main-door-term-cut'), 4501, 4500), kCut = doorOf(anchored(W, KILLK, 'const killMain = () => { ', 'main-door-kill-cut'), 4501, 4500);
+  ok(hubMain.t === false && hubMain.k === false && hubMain.calls === '' && (hubMain.log.match(/this job is the running VibeSpace: it is not stopped here/g) || []).length === 1 && hubMainPid.t === false && hubMainPid.calls === ''
+    && jobMain.t === true && jobMain.calls === 'signal 4601 SIGTERM,kill SIGKILL' && jobMain.log === '',
+  'THE MAIN DOOR (wrapper): a main that IS the hub (a hub of this checkout by its argv while it boots, or by its pid file alone — run as `node .`) is never signalled — neither the stop\'s SIGTERM nor the grace\'s SIGKILL — refused by name in the job\'s log, once; a job\'s own main hears both', { hubMain, hubMainPid, jobMain });
+  ok(tCut.calls === 'signal 4501 SIGTERM' && kCut.calls === 'kill SIGKILL', 'CONTROLS (each door\'s kept test cut alone, in a copy): the stop\'s SIGTERM reaches the hub that is the main; the grace\'s SIGKILL reaches it — each RED', { tCut, kCut });
+  // the stop REFUSED WHOLE while the main is the hub (nothing here is the stop's), and its intent not taken up again at the end
+  ok(/function onStop\(sig, at, by\) \{\n  if \(stopping\) return;\n(?:  \/\/[^\n]*\n)+  if \(mainKept\(\)\) \{ sayMainKept\(sig\); refusedAt = Math\.max\(refusedAt, at\); return; \}\n  stopping = sig;/.test(W)
+    && /const s0 = stopIntent\(\), s = s0 && s0\.at > refusedAt \? s0 : null;/.test(W) && /its process group was killed`; killMain\(\); \}, left\);/.test(W) && !/child\.kill\('SIGKILL'\)/.test(W.slice(W.indexOf('const killMain = ')) .replace(/^const killMain = [^\n]*\n/, '')),
+  'WIRING: the wrapper\'s stop is refused whole while its main is the hub (before it marks itself stopping), that refused intent is no stop at the end, and the grace\'s kill of the main goes through the main door only');
+  // (g) THE MAIN DOOR (engine): its parent IS the run's wrapper by its stamp — every road refuses by name before anything changes. A
+  // REAL engine over a stand-in wrapper (a sleep of ours, its identity stamped as pid.json); every signal the engine would send is
+  // RECORDED (proc-identity's signalIdentity swapped for the leg — nothing is signalled), the kill doors wrapped to see who calls them
+  const JSRC10 = JS, sent10 = [], realSig = PI10.signalIdentity;
+  const standIn = spawn('sleep', ['120'], { stdio: 'ignore' }); await new Promise((r) => setTimeout(r, 100));
+  const wid = PI10.identityOf(standIn.pid); mine.push(wid);
+  let seq10 = 0;
+  const scene = async (Mod, tag, act) => {
+    const dd = path.join(D, 'main-door-' + tag); fs.mkdirSync(dd, { recursive: true });
+    const J = new Mod.JobManager({ dataDir: dd, broadcast() { }, notifyUser() { return { ok: true }; }, log: () => { }, apiBase: 'http://127.0.0.1:9', memoryRungs: [], hubParentPid: wid.pid });
+    J.init();
+    const T = Date.now() - 60000, kind = act === 'timeout' ? 'task' : 'service';
+    const job = { id: 'jb-2c5c' + String(++seq10).padStart(4, '0'), kind, name: 'vibespace-restart', state: 'up', desiredUp: kind === 'service', createdAt: T, cmd: { argv: ['node', 'server.js'] },
+      owner: { createdBy: 'user', groupsSnapshot: [] }, access: { view: 'session', control: 'session' }, runs: [{ startedAt: T }], ...(act === 'timeout' ? { timeoutMs: 1000 } : {}) };
+    J.jobs.set(job.id, job);
+    const ctl = J._ctlDir(job, T); fs.mkdirSync(ctl, { recursive: true });
+    fs.writeFileSync(path.join(ctl, 'pid.json'), JSON.stringify({ pid: wid.pid, starttime: wid.starttime, bootId: wid.bootId, argvHash: '0', startedAt: T }));
+    const doors = [];
+    for (const k of ['_termRun', '_killGroup', '_escalate']) { const f = J[k]; J[k] = function (...a) { doors.push(k); return f.apply(this, a); }; }
+    let answer = null;
+    if (act === 'stop') answer = J.stop(job);
+    else if (act === 'force') answer = J.stop(job, { force: true });
+    else if (act === 'rm') answer = J.rm(job, { stop: true });
+    else if (act === 'term') answer = J._termRun(job, job.runs[0]);
+    else if (act === 'group') answer = J._killGroup(job, 'SIGKILL');
+    else if (act === 'escalate') answer = J._escalate(job, null, 'it did not end', job.runs[0]);
+    else if (act === 'timeout') { await J._sweep(); answer = { termAt: !!job._termAt }; }
+    await new Promise((r) => setTimeout(r, 60));   // the run log's append (off the loop)
+    let runLog = ''; try { runLog = fs.readFileSync(path.join(ctl, 'current.log'), 'utf8'); } catch { }
+    const out = { answer, doors: doors.join(), desiredUp: job.desiredUp, stopRequested: !!job._stopRequested, termAt: !!job._termAt, listed: J.jobs.has(job.id), intent: fs.existsSync(path.join(ctl, 'stop.json')), said: runLog.includes('this job is the running VibeSpace: it is not stopped here') };
+    for (const t of job._killSteps || []) clearTimeout(t);   // a kill step a control armed: never fired after the leg
+    J.shutdown(); return out;
+  };
+  const ENTRY = "    { const run0 = job.runs && job.runs[job.runs.length - 1]; if (this._runLive(job, run0) && this._hubIsMain(job, run0)) return this._hubMainRefusal(job, run0, force ? 'a forced stop' : 'the stop'); }\n";
+  const TRG = "    if (this._hubIsMain(job, run)) { this._hubMainRefusal(job, run, job._timedOut ? 'its time limit' : job._untilHit ? 'its until-marker' : 'the stop'); delete job._stopRequested; return false; }\n";
+  const KGG = "    if (this._hubIsMain(job, run0)) { this._hubMainRefusal(job, run0, sig === 'SIGKILL' ? 'its kill' : 'the stop'); return false; }   // B-2c5c: THE MAIN DOOR\n";
+  const ESG = "    if (this._hubIsMain(job, run)) { this._hubMainRefusal(job, run, 'its kill'); return false; }   // B-2c5c: THE MAIN DOOR — never its scope, never its wrapper\n";
+  const TOG = "        if (this._hubIsMain(job, run)) this._hubMainRefusal(job, run, 'its time limit');   // B-2c5c: THE MAIN DOOR — no grace, no kill step\n        else { this._termRun(job, run); job._termAt = job._termAt || now(); this._armKillStep(job, run, this._runScope(job, run)); }\n";
+  const RMG = "    if (alive && stop) { const s = this.stop(job, { force: false }); if (s && s.code === 'hub-is-main') return s; }   // B-2c5c: never removed while it runs as this hub\n";
+  ok([ENTRY, TRG, KGG, ESG, TOG, RMG].every((x) => JSRC10.split(x).length === 2), 'control setup: the engine\'s six main-door guards are found once each');
+  const JM10 = require(path.join(ROOT, 'src/jobs.js'));
+  const cut = (anchor, to, tag) => MJ.load('src/jobs.js', anchored(JSRC10, anchor, to, tag), tag);
+  let g = {};
+  PI10.signalIdentity = (id, sig, o = {}) => { sent10.push(`${sig} ${id && id.pid}${o.group ? ' group' : ''}`); return { ok: true }; };
+  try {
+    g = { stop: await scene(JM10, 'stop', 'stop'), force: await scene(JM10, 'force', 'force'), rm: await scene(JM10, 'rm', 'rm'), term: await scene(JM10, 'term', 'term'), group: await scene(JM10, 'group', 'group'),
+      escalate: await scene(JM10, 'esc', 'escalate'), timeout: await scene(JM10, 'tmo', 'timeout') };
+    g.sentReal = sent10.splice(0).join();
+    g.x = { stop: await scene(cut(ENTRY, '', 'main-door-entry-cut'), 'stopx', 'stop'), term: await scene(cut(TRG, '', 'main-door-term-cut2'), 'termx', 'term'), group: await scene(cut(KGG, '', 'main-door-group-cut'), 'grpx', 'group'),
+      escalate: await scene(cut(ESG, '', 'main-door-esc-cut'), 'escx', 'escalate'), timeout: await scene(cut(TOG, "        this._termRun(job, run); job._termAt = job._termAt || now(); this._armKillStep(job, run, this._runScope(job, run));\n", 'main-door-timeout-cut'), 'tmox', 'timeout'),
+      rm: await scene(cut(RMG, "    if (alive && stop) this.stop(job, { force: false });\n", 'main-door-rm-cut'), 'rmx', 'rm') };
+    g.sentCut = sent10.splice(0).join();
+  } finally { PI10.signalIdentity = realSig; }
+  const refused = (r) => !!r && r.answer && r.answer.code === 'hub-is-main' && r.answer.error === 'this job is the running VibeSpace: it is not stopped here' && r.said && !r.intent;
+  ok(refused(g.stop) && g.stop.doors === '' && g.stop.desiredUp === true && !g.stop.stopRequested && refused(g.force) && g.force.doors === '' && refused(g.rm) && g.rm.listed
+    && g.term.answer === false && !g.term.intent && g.term.said && g.group.answer === false && g.escalate.answer === false && g.escalate.doors === '_escalate' && g.timeout.answer.termAt === false && g.timeout.said && g.sentReal === '',
+  'THE MAIN DOOR (engine): its parent is the run\'s wrapper by its stamp — the stop, a forced stop and rm --stop answer «this job is the running VibeSpace: it is not stopped here» (hub-is-main) before anything changes (no intent, no kill door, the service not marked down, the record kept); the term, group and scope doors and the time limit refuse too; said in the run\'s log; NOTHING signalled', g);
+  ok(!g.x.stop.answer.error && g.x.stop.desiredUp === false && g.x.term.intent && g.x.term.doors.includes('_killGroup') && g.x.group.answer === true && g.x.escalate.doors.includes('_killGroup') && g.x.timeout.termAt === true && g.x.rm.listed === false && /SIGKILL/.test(g.sentCut),
+  'CONTROLS (each guard cut ALONE, in a copy): the press is taken (the service marked down); the term door writes the intent and calls the group door; the group door SIGKILLs; the scope door calls the group door; the time limit arms its kill step; rm --stop removes the running record — each RED', g.x);
+  ok(/if \(this\._hubIsMain\(job, run\)\) \{ this\._hubMainRefusal\(job, run, 'its until-marker'\); return; \} this\._termRun\(job, run\);/.test(JSRC10) && /const st = this\._readStamp\(job\), parent = Number\(this\.d\.hubParentPid\) \|\| process\.ppid;/.test(JSRC10),
+  'WIRING: the until-marker\'s timer asks the main door before its stop; the engine\'s parent is the process\'s own (a suite\'s stand-in only by `hubParentPid`)');
+  try { standIn.kill('SIGKILL'); } catch { }
+  // (h) SMALLS — (1) a STALE <data>/server.pid: its pid started AFTER the file's own time names no hub (a recycled pid)
+  const SPF = fnOf(W, 'function startedBy(pid, atMs) {');
+  const startedOf = (src, st) => new Function('statOf', 'fs', `${src}\nreturn startedBy;`)(() => (st == null ? null : Array.from({ length: 22 }, (_, k) => (k === 19 ? String(st) : '0'))), { readFileSync: () => 'cpu 1 2 3\nbtime 1000\n' });   // eslint-disable-line no-new-func
+  const koOf = (src, mtimeMs, st) => new Function('fs', 'path', '__dirname', 'process', 'ctlDir', 'startedBy', `${fnOf(src, 'function keptOutHere() {')}\nreturn keptOutHere;`)(
+    { readFileSync: (f) => { if (String(f).endsWith('server.pid')) return '4700\n'; throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); }, statSync: () => ({ mtimeMs }) }, path, path.join(D10, 'data', 'bin'), { pid: 4500 }, path.join(D10, 'ctl'), startedOf(SPF, st))();   // eslint-disable-line no-new-func
+  // the boot at 1000 s; the process started 5 s after it (st 500 ticks): a file written at 1006 s keeps it, one written at 1002 s does not
+  const fresh = koOf(W, 1006000, 500), stale = koOf(W, 1002000, 500), edge = koOf(W, 1004500, 500), unreadable = koOf(W, 1002000, null);
+  const staleX = koOf(anchored(W, ' && startedBy(p, fs.statSync(f).mtimeMs)) out.push([p, 0]);', ') out.push([p, 0]);', 'server-pid-stale-cut'), 1002000, 500);
+  ok(JSON.stringify(fresh) === '[[4700,0]]' && JSON.stringify(stale) === '[]' && JSON.stringify(edge) === '[[4700,0]]' && JSON.stringify(unreadable) === '[[4700,0]]',
+    'small 1: a <data>/server.pid whose process started no later than the file\'s own time (to the second) is the hub\'s root; a pid that started AFTER the file (recycled) is not; a start that cannot be read keeps it', { fresh, stale, edge, unreadable });
+  ok(JSON.stringify(staleX) === '[[4700,0]]', 'CONTROL (the start check cut, in a copy): a stale file\'s recycled pid is kept as the hub — what runs under it is never stopped — RED', staleX);
+  // (2) a scope list that CANNOT be read while the hub is inside: nothing is ended, and the end is not «empty» — said
+  const drainOf = async (src) => {
+    const env = { keptTest: () => (p) => String(p) === '4100', procsOf: () => [], procsOrNull: () => null, rung: { policy: true }, keeperSaid: null, keeper: null, child: null, nap: async () => { }, isKeeper: () => false,
+      stopping: 'SIGTERM', keeps: false, statOf: () => null, bootId: () => 'b', scopeRows: () => null, termOnce: () => false, scopeTerm: async () => false, stopAt: 0, stopMs: 1, forceScope: async () => { }, stopTree: [], same: () => false, scopeDir: '/fake/scope' };
+    return new Function(...Object.keys(env), `${fnOf(src, 'async function drainScope() {')}\nreturn drainScope;`)(...Object.values(env))();   // eslint-disable-line no-new-func
+  };
+  const FIN = "  const fin = procsOrNull(scopeDir), unread = fin === null;\n  return { ...(left ? { left: { n: left, ...(still ? { force: true } : {}) } } : {}), scopeEmpty: !unread && !fin.filter((p) => !(kept && kept(p))).length, ...(unread ? { scopeUnread: true } : {}) };\n";
+  const dr = await drainOf(W), drx = await drainOf(anchored(W, FIN, "  return { ...(left ? { left: { n: left, ...(still ? { force: true } : {}) } } : {}), scopeEmpty: !own().length };\n", 'drain-unread-cut'));
+  const sayOf = (src) => { const out = []; const f = new Function('fs', 'logFd', `let keptSaid = false; ${fnOf(src, 'function sayKept(n, what, unread = false) {')}\nreturn sayKept;`)({ writeSync: (fd, b) => out.push(String(b)) }, 9); return (n, w, u) => { f(n, w, u); return out.join(''); }; };   // eslint-disable-line no-new-func
+  const wordsU = sayOf(W)(1, 'its kill', true), wordsK = sayOf(W)(1, 'its kill', false);
+  ok(dr.scopeEmpty === false && dr.scopeUnread === true && /could not be read: nothing of it was ended — what the job started may still run/.test(wordsU) && !/ended one by one/.test(wordsU) && /ended one by one/.test(wordsK)
+    && /\(drained\.scopeUnread \? ' — its scope\\'s list could not be read: what it started may still run' : ''\)/.test(W) && /\.\.\.\(drained\.scopeUnread \? \{ scopeUnread: true \} : \{\}\)/.test(W),
+  'small 2: a scope list that cannot be read while the hub is inside ends nothing — the end is NOT «empty» (the engine reaps it), the job\'s log says «could not be read: … may still run», never «ended one by one»', { dr, wordsU });
+  ok(drx.scopeEmpty === true, 'CONTROL (the end measured as before, in a copy): an unread list reads as an EMPTY scope — the job reads ended while what it started may still run — RED', drx);
+  // (3) a hub BOOTING inside the job (not yet in server.pid) and outside the wrapper's group: the wrapper's own stop tree holds it out
+  ok(/  const kt = keptTest\(\);[^\n]*\n  stopTree = \[\.\.\.keyed\.values\(\)\]\.filter\(\(r\) => !\(kt && kt\(r\[0\]\)\)\);/.test(W),
+    'small 3 (WIRING): the wrapper\'s stop tree (its own walk and the engine\'s intent) skips what the kept test holds — a hub booting outside its group by its shape, and what it runs (the test itself: (e) above)');
+  // (4) the engine's hub test, memoised one pass at a time
+  let walks = 0; const memo = JM10.JobManager.prototype._hubTest.call({ _hubsOwn: (p) => { walks++; return Number(p) === 1; } }, 0);
+  const answers = [memo(5), memo(5), memo('5'), memo(1), memo(1)].join();
+  ok(answers === 'false,false,false,true,true' && walks === 2 && (JSRC10.match(/this\._hubsOwn\(/g) || []).length === 1,
+    'small 4: the engine\'s hub test walks each pid ONCE a pass (a memo, as the wrapper\'s keptTest) — and every pass asks it through that memo (no bare walk left)', { answers, walks });
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

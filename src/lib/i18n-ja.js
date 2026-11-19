@@ -415,6 +415,7 @@ export default {
   "Show the notices": "お知らせを表示",
   "Acknowledge every finished job here that you have not looked at yet — the red count drops, nothing is deleted": "ここにある、まだ見ていない終了済みジョブをすべて既読にします — 赤い件数が減るだけで、何も削除されません",
   "Could not mark them seen": "既読にできませんでした",
+  "This job is the running VibeSpace: it is not stopped here": "このジョブは実行中の VibeSpace そのものです。ここでは停止しません",
   "Unknown event": "不明なイベント",
   "Unknown events / new fields on known records (harness records VibeSpace does not recognize)": "不明なイベント / 既知レコードの新フィールド（VibeSpace が認識できないハーネスのレコード）",
   "{n} unknown events / new fields": "不明なイベント / 新フィールド {n} 件",

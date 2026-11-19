@@ -147,6 +147,8 @@ const REAP_READ_MS = 2000;
 const REAP_TRIES = 12;
 // THE LADDER's last rung (round 7): a wrapper still there WEDGE_MS after its scope was killed is killed with its group
 const WEDGE_MS = 3000;
+// B-2c5c, round wwa7r2uc1 (THE MAIN DOOR): the words of a stop refused because the job's main process IS this hub
+const HUB_MAIN_WORDS = 'this job is the running VibeSpace: it is not stopped here';
 const pause = (ms) => new Promise((res) => setTimeout(res, ms));
 /** the typed held record for a stash entry, from the ladder's own answer */
 function heldOf(r, reason) {
@@ -1527,6 +1529,8 @@ class JobManager {
     return stamp.bootId === bootId() && PI.aliveIdentity(stamp) === true; // pid+starttime+bootId, and not a zombie
   }
   _killGroup(job, sig) { // handle-kill with act-time re-verification (B-16d9 law)
+    const run0 = job.runs && job.runs[job.runs.length - 1];
+    if (this._hubIsMain(job, run0)) { this._hubMainRefusal(job, run0, sig === 'SIGKILL' ? 'its kill' : 'the stop'); return false; }   // B-2c5c: THE MAIN DOOR
     const stamp = this._readStamp(job);
     if (!this._verifyAlive(stamp)) return false;
     // B-2c5c: a hub started by hand inside the job may sit in the job's PROCESS GROUP — the group signal would reach this hub: the
@@ -1611,6 +1615,24 @@ class JobManager {
   }
   /** B-2c5c r2: the wrapper pid a run's pid.json names (0 when none) — the stop of its hub test */
   _runWrapper(job, run) { const s = run ? this._ctlJson(job, run, 'pid.json') : null; return Number(s && s.pid) || 0; }
+  /** B-2c5c, round wwa7r2uc1 (THE MAIN DOOR): this hub IS the run's main process — VibeSpace started AS the job (a restart run as a
+   *  Background Work job: its command became this hub, its wrapper our parent). No stop of that job is the engine's to make: it would end
+   *  the VibeSpace everyone uses. Proven, never guessed: our parent is the run's wrapper by its stamp (pid, start, boot — alive) */
+  _hubIsMain(job, run) {
+    if (!run || run.endedAt) return false;
+    const st = this._readStamp(job), parent = Number(this.d.hubParentPid) || process.ppid;   // d.hubParentPid: a fast suite's stand-in parent
+    return !!st && Number(st.pid) === parent && this._verifyAlive(st);
+  }
+  /** B-2c5c (THE MAIN DOOR): the refusal by name — said once a run and a road in the run's own log and the hub's; the job is not said
+   *  stopped or ended (no stop asked, no grace, no kill step) */
+  _hubMainRefusal(job, run, what = 'the stop') {
+    const said = this._hubMainSaid || (this._hubMainSaid = new WeakMap()), roads = said.get(run) || new Set();
+    if (run && !roads.has(what)) { roads.add(what); said.set(run, roads); this.d.log(`[jobs] ${job.id}: ${what} refused — ${HUB_MAIN_WORDS}`); this._runLogLine(this._runLogFile(job), `[jobs] ${what}: refused — ${HUB_MAIN_WORDS}`); }
+    return { error: HUB_MAIN_WORDS, code: 'hub-is-main' };
+  }
+  /** B-2c5c (主开发's small 4): the hub test for ONE pass — memoised per pid, as the wrapper's keptTest is (a pass asks it of every
+   *  process of a scope or of the job's mark: each walk read the same chain again) */
+  _hubTest(wrapper = 0) { const memo = new Map(); return (pid) => { const p = Number(pid); if (!memo.has(p)) memo.set(p, this._hubsOwn(p, wrapper)); return memo.get(p); }; }
   /** B-2c5c: does this hub live in `scope`? Its OWN cgroup (/proc/self/cgroup, read once a life — a process never changes its cgroup
    *  by itself; `d.hubCgroup` = a fast suite's) is the scope's or under it */
   async _hubInScope(scope) {
@@ -1630,7 +1652,7 @@ class JobManager {
     for (let pass = 0; pass < 3; pass++) {
       const pids = await this._scopeProcs(scope);
       if (pids === null) { out.hub = { killed, kept, unread: true }; out.code = 'its list did not answer'; return pass ? 'refused' : 'unread'; }
-      const own = pids.filter((p) => !this._hubsOwn(p, wrapper));
+      const hubs = this._hubTest(wrapper), own = pids.filter((p) => !hubs(p));   // small 4: one memo a pass
       kept = pids.length - own.length; left = own.length;
       if (!own.length || pass === 2) break;
       for (const p of own) { const id = PI.identityOf(p); if (id && PI.signalIdentity(id, 'SIGKILL', { what: `a process of job scope ${scope.unit}` }).ok) killed++; }
@@ -1688,6 +1710,7 @@ class JobManager {
   _escalate(job, scope, why, forRun) {
     if (forRun && !this._runLive(job, forRun)) return false;
     const run = forRun || (job.runs && job.runs[job.runs.length - 1]);
+    if (this._hubIsMain(job, run)) { this._hubMainRefusal(job, run, 'its kill'); return false; }   // B-2c5c: THE MAIN DOOR — never its scope, never its wrapper
     const said = (what) => { if (why && run && !run.endedAt) job._forced = { run: run.startedAt, words: `stopped by force: ${why} — ${what}` }; };
     if (!scope || !scope.dir) { const hit = this._killGroup(job, 'SIGKILL'); if (hit) said('its process group was killed'); return hit; }
     const k = job._scopeKilled && job._scopeKilled.unit === scope.unit ? job._scopeKilled : null;
@@ -1708,6 +1731,9 @@ class JobManager {
    *  pid.json: the engine signals the wrapper's GROUP, so the wrapper may handle its child's end before its own signal handler
    *  runs — the intent tells it a stop is in flight all the same (a service's leftovers are stopped with it, not kept) */
   _termRun(job, run) {
+    // B-2c5c, round wwa7r2uc1 (THE MAIN DOOR): the job's main IS this hub — no intent, no signal: refused by name (a stop asked before
+    // its stamp existed is no longer asked: the job is not said stopping)
+    if (this._hubIsMain(job, run)) { this._hubMainRefusal(job, run, job._timedOut ? 'its time limit' : job._untilHit ? 'its until-marker' : 'the stop'); delete job._stopRequested; return false; }
     if (run && !run.endedAt) {
       // round 10: A STOP GOES ONCE — a wrapper already delivering a stop step itself (its stopping.json: its own stop, an agent's
       // signal to it; or the drain of what its ended job left) is signalled ALONE, the intent saying so — it delivers the rest
@@ -1861,12 +1887,12 @@ class JobManager {
     const grace = this._graceMs(), scope = this._runScope(job, run), until = now() + grace, ownW = this._runWrapper(job, run);   // B-2c5c r2: the run's own wrapper ends the hub test's walk
     const recorded = (l.pids || []).map(([pid, starttime]) => ({ pid, starttime, bootId: l.boot || '' }));
     const sent = new Map(); // pid → identity: every process its SIGTERM reached (a pid is never an identity — B-1cc6: read and proven by the one module)
-    const term = (ids) => { for (const id of ids) if (id && !sent.has(id.pid) && !this._hubsOwn(id.pid, ownW) && PI.aliveIdentity(id) === true) { sent.set(id.pid, id); PI.signalIdentity(id, 'SIGTERM'); } };   // B-2c5c: never the hub's
+    const term = (ids) => { const hubs = this._hubTest(ownW); for (const id of ids) if (id && !sent.has(id.pid) && !hubs(id.pid) && PI.aliveIdentity(id) === true) { sent.set(id.pid, id); PI.signalIdentity(id, 'SIGTERM'); } };   // B-2c5c: never the hub's
     let n = 0, force = false, blind = false, seen = null;
     if (scope && scope.dir) {
       // round 6: a read past its bound is no reason to skip the grace — SIGTERM BLIND to what the run recorded (the wrapper names
       // a kept scope's processes too), the read retried through the grace, what it then lists SIGTERMed as it appears
-      const ownOf = (ps) => ps && ps.filter((x) => !this._hubsOwn(x, ownW));   // B-2c5c: what the hub runs inside the scope is not the run's
+      const ownOf = (ps) => { const hubs = this._hubTest(ownW); return ps && ps.filter((x) => !hubs(x)); };   // B-2c5c: what the hub runs inside the scope is not the run's (small 4: one memo a pass)
       let pids = ownOf(await this._scopeProcs(scope));
       if (pids) term(pids.map((p) => PI.identityOf(p))); else { blind = true; term(recorded); }
       n = Math.max(pids ? pids.length : 0, sent.size);
@@ -1903,7 +1929,7 @@ class JobManager {
       while (live.length && now() < until) { await pause(50); live = live.filter((id) => PI.aliveIdentity(id) === true); }
       // round 9: the second walk only after a grace something lived through — nothing signalled, nothing could fork since: the
       // first walk's answer stands (never two walks back to back on the event loop)
-      const late = sent.size ? scan().filter((id) => !sent.has(id.pid) && !this._hubsOwn(id.pid, ownW)) : []; // forked during the grace: by force with the rest — B-2c5c r1 (S2): never the hub's
+      const hubsL = this._hubTest(ownW), late = sent.size ? scan().filter((id) => !sent.has(id.pid) && !hubsL(id.pid)) : []; // forked during the grace: by force with the rest — B-2c5c r1 (S2): never the hub's
       for (const id of late) sent.set(id.pid, id);
       live.push(...late.filter((id) => PI.aliveIdentity(id) === true));
       n = sent.size;
@@ -2013,7 +2039,7 @@ class JobManager {
     const scope = this._runScope(job, run);
     const ownW = this._runWrapper(job, run);   // B-2c5c r2: the run's own wrapper ends the hub test's walk
     const killed = scope && scope.dir ? await this._within(this._killScope(scope, {}, ownW), this.d.reapReadMs ?? REAP_READ_MS) : null;
-    const marked = PI.membersOf({ mark: `VIBESPACE_JOB_ID=${job.id}` }), scan = marked.scan || {}, found = marked.filter((id) => !this._hubsOwn(id.pid, ownW));   // B-2c5c: a hub started inside the job carries its mark
+    const marked = PI.membersOf({ mark: `VIBESPACE_JOB_ID=${job.id}` }), scan = marked.scan || {}, hubs = this._hubTest(ownW), found = marked.filter((id) => !hubs(id.pid));   // B-2c5c: a hub started inside the job carries its mark
     for (const id of found) PI.signalIdentity(id, 'SIGTERM');
     const until = now() + this._graceMs();
     let live = [...found];
@@ -2905,8 +2931,9 @@ class JobManager {
       if (stamp) this._listenRead(job, stamp); // lane artifacts-services: the port it serves (async, ≤ 1 read / job / 30 s)
       // timeout — its SIGTERM and its words once per run (round 6: the kill step bound to it)
       if (job.kind === 'task' && job.timeoutMs && run && !run.endedAt && !job._timedOut && now() - run.startedAt > job.timeoutMs) {
-        job._timedOut = true; this._termRun(job, run); job._termAt = job._termAt || now();
-        this._armKillStep(job, run, this._runScope(job, run));
+        job._timedOut = true;
+        if (this._hubIsMain(job, run)) this._hubMainRefusal(job, run, 'its time limit');   // B-2c5c: THE MAIN DOOR — no grace, no kill step
+        else { this._termRun(job, run); job._termAt = job._termAt || now(); this._armKillStep(job, run, this._runScope(job, run)); }
       }
       // THE LADDER (round 7) — a run SIGTERMed by a stop, a timeout or an until-marker: EVERY TICK while THAT run lives, a kill
       // step after its SIGTERM, _escalate — its scope (once), then a wrapper still there WEDGE_MS later with its group. Round 6
@@ -2989,7 +3016,7 @@ class JobManager {
         this._event(job, 'until-marker hit — completing after grace');
         const grace = Number(process.env.VIBESPACE_JOBS_GRACE_MS) || 30_000; // env knob: tests shrink the until-grace
         const steps = job._killSteps || (job._killSteps = new Set()); // round 6: bound to ITS run — a new run disarms it (_spawn)
-        const t = setTimeout(() => { steps.delete(t); if (!this._runLive(job, run)) return; this._termRun(job, run); job._termAt = job._termAt || now(); this._armKillStep(job, run, this._runScope(job, run)); }, grace);
+        const t = setTimeout(() => { steps.delete(t); if (!this._runLive(job, run)) return; if (this._hubIsMain(job, run)) { this._hubMainRefusal(job, run, 'its until-marker'); return; } this._termRun(job, run); job._termAt = job._termAt || now(); this._armKillStep(job, run, this._runScope(job, run)); }, grace);
         t.unref?.(); steps.add(t);
       }
     } catch { }
@@ -3430,6 +3457,9 @@ class JobManager {
   }
   stop(job, { force } = {}) {
     if (this.readOnly) return { error: 'registry is read-only in this process' };
+    // B-2c5c, round wwa7r2uc1 (THE MAIN DOOR): the job's main process IS this hub — refused by name before anything changes (the job is
+    // not said stopping, its service not marked down); the press and the agent's stop are answered with the words
+    { const run0 = job.runs && job.runs[job.runs.length - 1]; if (this._runLive(job, run0) && this._hubIsMain(job, run0)) return this._hubMainRefusal(job, run0, force ? 'a forced stop' : 'the stop'); }
     delete job._startAfterStop;   // B-cac2: a stop pressed after a remembered start (or a restart) means stopped — it starts no more
     if (job.kind === 'service' || job.kind === 'cron') { job.desiredUp = false; }
     job._stopRequested = true;
@@ -3536,7 +3566,7 @@ class JobManager {
     if (this.readOnly) return { error: 'registry is read-only in this process' };
     const alive = this._verifyAlive(this._readStamp(job));
     if (alive && !stop && !orphan) return { error: `${job.id} is still running — vibespace-job rm ${job.id} --stop (kill then remove), or --orphan to abandon the live process (tracked nowhere after that)` };
-    if (alive && stop) this.stop(job, { force: false });
+    if (alive && stop) { const s = this.stop(job, { force: false }); if (s && s.code === 'hub-is-main') return s; }   // B-2c5c: never removed while it runs as this hub
     if (alive && orphan) this.d.log(`[jobs] ${job.id} ORPHANED by request — live pid abandoned`);
     const last = job.runs && job.runs[job.runs.length - 1];
     if (last && last.endedAt) this._clearKept(job, last).catch(() => { }); // round 5: a removed service keeps nothing running
