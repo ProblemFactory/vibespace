@@ -189,6 +189,34 @@ console.log('— the budget: a row over it steps down and SAYS so —');
   ok('…and the budget it used (own 1200, the room, the effective one)', pv.budget.own === 1200 && pv.budget.effective <= 1200 && pv.used <= pv.budget.effective, pv.budget);
 }
 
+console.log('— B-4a9f: a stepped row\'s «over the injection budget» note is CHARGED inside the plan — its own words never push it past the budget —');
+{
+  const { anchored } = await import('./scratch.mjs');
+  // the index level of MEMO, bare (a group that CHOSE index, under the default budget) — then a budget it fits bare, never with its note
+  const { m: m0 } = fresh();
+  const t0 = m0.create({ title: 'I', ctx: [{ path: MEMO, note: 'desk', tell: 'index' }] });
+  const I = m0.contextPreview(t0.id, {}).rows[0].bytes;
+  // a SWEEP of budgets around it (never one guessed byte count): the plan's used bytes stay within the budget unless the row
+  // already rests at the floor (只说明 — nothing lower to step to); the release, somewhere in the sweep, keeps a level its note overflows
+  const run = (Manager, budget) => { const { m } = fresh({ Manager, getSetting: (k) => (k === 'tasks.contextIndexBytes' ? budget : undefined) }); const t = m.create({ title: 'C', ctx: [{ path: MEMO, note: 'desk', tell: 'contents' }] }); return m.contextPreview(t.id, {}); };
+  const budgets = Array.from({ length: 60 }, (_, i) => Math.max(1, I - 60 + i * 4));
+  const cur = budgets.map((b) => ({ b, pv: run(TaskGroupManager, b) }));
+  const overCur = cur.filter(({ pv }) => pv.used > pv.budget.effective && pv.rows[0].level !== 'note');
+  const stepped = cur.filter(({ pv }) => pv.rows[0].level !== pv.rows[0].chosen);
+  ok(`at every budget of the sweep (${budgets[0]}–${budgets[budgets.length - 1]} B) the plan's used bytes stay within it, unless the row rests at the floor (只说明) — the row (its contents never fit) steps down at every one`,
+    overCur.length === 0 && stepped.length === budgets.length, overCur.map(({ b, pv }) => ({ b, used: pv.used, level: pv.rows[0].level })));
+  // …and the charge is EXACT (never «≤» by over-charging): the first budget of the sweep that keeps «file names + key files» is
+  // within one step (4 B) of that row's printed bytes, its note included
+  const firstKeep = cur.find(({ pv }) => pv.rows[0].level === 'index');
+  ok('the charged bytes ARE the shown bytes: the first budget that keeps the stepped level is within one step of its printed size (the note counted once, exactly)', !!firstKeep && firstKeep.b >= firstKeep.pv.rows[0].bytes && firstKeep.b - firstKeep.pv.rows[0].bytes < 4 && firstKeep.pv.rows[0].bytes > I, firstKeep && { b: firstKeep.b, bytes: firstKeep.pv.rows[0].bytes, I });   // the suite's ok is NAME-first
+  const src = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src/task-groups.js'), 'utf8');
+  const relSrc = anchored(src, "    const plan = TC.planRows(items.map((m) => ({ kind: m.kind, chosen: m.chosen, cost: cost(m) })), budget);", "    const plan = TC.planRows(items.map((m) => ({ kind: m.kind, chosen: m.chosen, cost: (lvl, left) => bare(at(m, lvl, left)) })), budget);", 'the bare cost');
+  const MC = mutantCopies('tgc-b4a9f', path.join(path.dirname(new URL(import.meta.url).pathname), '..'));
+  const RelM = MC.load('src/task-groups.js', relSrc, 'bare').TaskGroupManager;
+  const overRel = budgets.map((b) => ({ b, pv: run(RelM, b) })).filter(({ pv }) => pv.used > pv.budget.effective && pv.rows[0].level !== 'note');
+  ok(`CONTROL — the release's bare cost (the note not charged): at ${overRel.length} budget(s) of the same sweep a row ABOVE the floor carries its note past the budget`, overRel.length > 0, overRel.slice(0, 3).map(({ b, pv }) => ({ b, used: pv.used, level: pv.rows[0].level })));
+}
+
 console.log('— the 10 KiB law: tools / rules first, then the table, within the room —');
 {
   const { m } = fresh();   // the default budget (10 KB) — the inline room is the binding one

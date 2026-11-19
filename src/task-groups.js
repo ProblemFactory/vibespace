@@ -1060,19 +1060,30 @@ class TaskGroupManager {
       if (!m.cache.has(lvl)) m.cache.set(lvl, this._rowAt(m.it.row, m.it.x, lvl, { cap, shown: m.shown, from: m.it.from }));
       return m.cache.get(lvl);
     };
-    const plan = TC.planRows(items.map((m) => ({ kind: m.kind, chosen: m.chosen, cost: (lvl, left) => { const r = at(m, lvl, left); return Number.isFinite(r.bytes) ? r.bytes : r.need != null ? r.need : Infinity; } })), budget);
+    const bare = (r) => (Number.isFinite(r.bytes) ? r.bytes : r.need != null ? r.need : Infinity);
+    // the «[over the injection budget: …]» words a folder / file row stepped down to `level` carries — ONE builder for the cost
+    // and the render (B-4a9f: the note's own bytes were not charged, so a plan's used bytes could pass the budget it respected)
+    const stepSaid = (m, from, level, need, left) => {
+      const over = m.kind === 'dir' && !!(at(m, from, left) || {}).over;   // the chosen level's own render says it (never a second walk that could have moved)
+      const why = need != null ? `${TELL_WORDS[from]} need ${kb(need)}, ${kb(left)} was left` : `${TELL_WORDS[from]} ${over ? `cover more than ${WALK_CAP} files` : 'cannot be told whole'}`;
+      return ` [over the injection budget: ${why} — told as ${TELL_WORDS[level]} instead${level === 'note' ? `; \`vibespace-task ${gid}show --full\` lists every file` : ''}]`;
+    };
+    const withSaid = (lines, said) => [lines[0].replace(/:$/, '') + said + (lines.length > 1 ? ':' : ''), ...lines.slice(1)];
+    const cost = (m) => (lvl, left) => {
+      const r = at(m, lvl, left), b = bare(r);
+      if (!Number.isFinite(b) || lvl === m.chosen || !(m.kind === 'dir' || m.kind === 'file') || !Array.isArray(r.lines) || !r.lines.length) return b;
+      const n = bare(at(m, m.chosen, left));   // planRows' own `need` (the chosen level's cost, at the same bytes left)
+      const said = stepSaid(m, m.chosen, lvl, Number.isFinite(n) ? n : null, left);
+      return b + Buffer.byteLength(withSaid(r.lines, said)[0], 'utf-8') - Buffer.byteLength(r.lines[0], 'utf-8');   // the step-down note, CHARGED
+    };
+    const plan = TC.planRows(items.map((m) => ({ kind: m.kind, chosen: m.chosen, cost: cost(m) })), budget);
     const out = [], rowsOut = [];
     items.forEach((m, i) => {
       const p = plan[i];
       const { row, x, from } = m.it;
       const r = at(m, p.level, p.left);
       let lines = r.lines;
-      if (p.from && (m.kind === 'dir' || m.kind === 'file')) {
-        const over = m.kind === 'dir' && this._walk(x.abs).over;
-        const why = p.need != null ? `${TELL_WORDS[p.from]} need ${kb(p.need)}, ${kb(p.left)} was left` : `${TELL_WORDS[p.from]} ${over ? `cover more than ${WALK_CAP} files` : 'cannot be told whole'}`;
-        const said = ` [over the injection budget: ${why} — told as ${TELL_WORDS[p.level]} instead${p.level === 'note' ? `; \`vibespace-task ${gid}show --full\` lists every file` : ''}]`;
-        lines = [lines[0].replace(/:$/, '') + said + (lines.length > 1 ? ':' : ''), ...lines.slice(1)];
-      }
+      if (p.from && (m.kind === 'dir' || m.kind === 'file')) lines = withSaid(lines, stepSaid(m, p.from, p.level, p.need, p.left));
       out.push(...lines);
       rowsOut.push({ row, x, from, level: p.level, chosen: m.chosen, need: p.need, left: p.left, files: r.files == null ? null : r.files, bytes: Buffer.byteLength(lines.join('\n'), 'utf-8') + 1, ...(m.kind === 'ref' ? { ref: true } : {}) });
     });
