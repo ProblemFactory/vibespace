@@ -1883,7 +1883,8 @@ function create({
       stuckIds.add(id);
       try { log.warn && log.warn(`[groups] the boot warm-up could not read the log of group ${id} within ${Math.round(warmReadBoundMs / 1000)} s — its unread counts say «not counted yet» until the read lands; the other groups go on`); } catch { }
       rd.then((v) => { stuckIds.delete(id); countFrom(id, v.records, lastAt, cl); }, () => { stuckIds.delete(id); })
-        .then(() => { if (coldAsked.has(id) && !(coldIds && coldIds.size)) { coldAsked.delete(id); announce([id], null, null, { pending: false }); } });
+        .then(() => { if (coldAsked.has(id) && !(coldIds && coldIds.size)) { coldAsked.delete(id); announce([id], null, null, { pending: false }); } })
+        .catch((e) => { try { log.warn && log.warn(`[groups] counting group ${id} after its late warm read failed: ${(e && e.message) || e} — the next reader counts it`); } catch { } });   // its read's own S1: never an unheard rejection
     };
     try { coldIds = new Set(Object.keys(all())); } catch { coldIds = null; }   // the groups of the start (a later one is never cold)
     (async () => {
