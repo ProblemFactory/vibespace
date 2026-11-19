@@ -95,6 +95,7 @@ export default {
   "the tab's own picture — its window's picture again in a moment": "このタブ自身の画面 — まもなくウィンドウの画面に戻ります",
   "This tab is behind another tab in its window: press this tab in the browser’s own tab strip, or Bring it forward": "このタブはウィンドウ内の別のタブの後ろにあります：ブラウザ自身のタブ列でこのタブを押すか、「前面に出す」を押してください",
   "the tab's last own picture — it does not answer, and its window shows another tab in front": "このタブ自身の最後の画面 — 応答がなく、そのウィンドウの前面には別のタブがあります",
+  "The agent’s tab is not responding — its last picture is shown; it did not answer when asked (a busy or hung page). This view updates as soon as it answers": "エージェントのタブが応答しません — 最後の画面を表示しています。問い合わせにも応答しませんでした（ページが混んでいるか止まっています）。応答があり次第この表示は更新されます",
   "Waiting for this tab’s window to appear on the display — showing the page’s own picture of it meanwhile": "このタブのウィンドウがディスプレイに現れるのを待っています — その間はページ自身の画面を表示します",
   "This tab could not be shown as a window — showing the page’s own picture of it": "このタブをウィンドウとして表示できませんでした — ページ自身の画面を表示しています",
   "the page's picture — this conversation's window could not be told apart on the display": "ページの画面 — この会話のウィンドウをディスプレイ上で見分けられませんでした",

@@ -1327,11 +1327,14 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
   function setBackground(relay, id, state = 'hidden', why = '') {
     const b = relay.bg;
     if (b.state === state && b.targetId === id) return;
-    b.state = state; b.targetId = id; b.since = now();
+    // the owner's live-picture unit, its read (M1): the HUB says whether this tab's own picture was polled before it stopped
+    // answering (a hidden tab that hung) — the view keeps that last picture on every road (a hand back, a reconnect, a new pane)
+    const polled = state === 'unresponsive' && b.targetId === id && (b.state === 'hidden' || !!b.polled);
+    b.state = state; b.targetId = id; b.since = now(); b.polled = polled;
     if (b.pollTimer) { clearInterval(b.pollTimer); b.pollTimer = null; }
     if (state === 'unresponsive') {
       log.log?.(`[browser-live] ${relay.key}: the tab on show (${String(id).slice(0, 8)}) sends no picture and does not answer (${String(why).slice(0, 80)}) — a busy or hung page; said on the view, asked again every ${Math.max(5000, bgSilenceMs) / 1000} s`);
-      relay.lastBg = JSON.stringify({ type: 'tab-background', targetId: id, since: b.since, state, pollMs: 0 });
+      relay.lastBg = JSON.stringify({ type: 'tab-background', targetId: id, since: b.since, state, pollMs: 0, polled });
       broadcast(relay, relay.lastBg);
       return;
     }
@@ -1345,7 +1348,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     const b = relay.bg;
     if (!b.state) return;
     const id = b.targetId;
-    b.state = null; b.targetId = null; b.checkedAt = 0; b.frameTimes = [];
+    b.state = null; b.targetId = null; b.checkedAt = 0; b.frameTimes = []; b.polled = false;
     if (b.pollTimer) { clearInterval(b.pollTimer); b.pollTimer = null; }
     relay.lastBg = null;
     log.log?.(`[browser-live] ${relay.key}: the tab ${String(id || '').slice(0, 8)} is no longer a silent background tab (${why})`);

@@ -156,7 +156,7 @@ console.log("§4 the bar's words — literal t() keys with zh + ja");
   const keys = [...Object.values(PIC.SOURCE_WORDS), "the page's picture — this conversation's window could not be told apart on the display", 'Connecting to the browser window…', 'The browser window is not available'];
   const missing = keys.filter((k) => !live.includes(`t(${JSON.stringify(k)})`) && !live.includes(`t('${k.replace(/'/g, "\\'")}')`));
   ok(!missing.length, `every source phrase is a LITERAL t() in the live view (${keys.length})`, missing);
-  const untranslated = [...keys, 'Chrome asks you to sign in — in its window below', 'Take over and type the username and password into Chrome’s sheet — the agent never sees them', 'This tab is behind another tab in its window: press this tab in the browser’s own tab strip, or Bring it forward'].filter((k) => !zh[k] || !ja[k]);
+  const untranslated = [...keys, 'Chrome asks you to sign in — in its window below', 'Take over and type the username and password into Chrome’s sheet — the agent never sees them', 'This tab is behind another tab in its window: press this tab in the browser’s own tab strip, or Bring it forward', 'The agent’s tab is not responding — its last picture is shown; it did not answer when asked (a busy or hung page). This view updates as soon as it answers'].filter((k) => !zh[k] || !ja[k]);
   ok(!untranslated.length, 'every one has zh + ja', untranslated);
   ok(/\{ const pw = pictureWords\(\); if \(pw\) modeBadge\.title = `\$\{modeBadge\.title\} · \$\{pw\}`; \}/.test(live), "the badge's tooltip carries the source (the bar itself unchanged)");
 }
@@ -584,13 +584,19 @@ console.log('§10 the picture the view says it shows, in ONE window (the owner\'
   const PICs = MCp.load('src/browser-picture.js', anchored(psrc, SETTLE, '', 'no-settle'), 'no-settle');
   const rs = PICs.pictureForView(PICs.pictureSourceOf({ launch: 'attach', state: 'ready', displaySession: { id: 'ds-1' } }), { bg: null, shownWhy: 'background-tab', clearedAt: T0, now: T0 + 1 });
   ok(psrc.split(SETTLE).length === 2 && rs.source === PIC.PICTURE_X, `RED (the copy without the settle): the window at once (${rs.source}) — a 2–3 s flap flips the two pictures`);
-  // 主开发's ruling S4: a hidden tab that then stops answering keeps ITS last own picture — a tab unresponsive from the start keeps the window
-  const u1 = PIC.pictureForView(X, { bg: { targetId: 'TAB-A', state: 'unresponsive' }, shownWhy: 'background-tab' }), u2 = PIC.pictureForView(X, { bg: { targetId: 'TAB-A', state: 'unresponsive' }, shownWhy: 'attach' });
-  const STUCK = "  if (bg && bg.state === 'unresponsive' && bg.targetId && (shownWhy === 'background-tab' || shownWhy === 'background-settle' || shownWhy === 'background-stuck')) return { source: PICTURE_SCREENCAST, why: 'background-stuck', words: SOURCE_WORDS['background-stuck'], displaySession: null };\n";
+  // 主开发's ruling S4 + its read (M1): a hidden tab that then stops answering keeps ITS last own picture — the HUB says it (`polled`),
+  // so a hand back ('attach' shown), a reconnect or a new pane keep it too; a tab unresponsive from the start (never polled) keeps the window
+  const stuckBg = { targetId: 'TAB-A', state: 'unresponsive', polled: true };
+  const u1 = PIC.pictureForView(X, { bg: stuckBg, shownWhy: 'attach' }), u0 = PIC.pictureForView(X, { bg: stuckBg, shownWhy: null }), u2 = PIC.pictureForView(X, { bg: { targetId: 'TAB-A', state: 'unresponsive' }, shownWhy: 'background-tab' }), u3 = PIC.pictureForView(X, { bg: stuckBg, driving: true });
+  const STUCK = "  if (bg && bg.state === 'unresponsive' && bg.targetId && bg.polled === true) return { source: PICTURE_SCREENCAST, why: 'background-stuck', words: SOURCE_WORDS['background-stuck'], displaySession: null };\n";
   const PICu = MCp.load('src/browser-picture.js', anchored(psrc, STUCK, '', 'no-stuck'), 'no-stuck');
-  const ur = PICu.pictureForView(PICu.pictureSourceOf({ launch: 'attach', state: 'ready', displaySession: { id: 'ds-1' } }), { bg: { targetId: 'TAB-A', state: 'unresponsive' }, shownWhy: 'background-tab' });
-  ok(u1.why === 'background-stuck' && u1.source === PIC.PICTURE_SCREENCAST && u2 === X && psrc.split(STUCK).length === 2 && ur.source === PIC.PICTURE_X,
-    `a hidden tab that stops answering keeps its last own picture (${u1.why}); unresponsive from the start keeps the window (${u2.source}); RED (the copy without the rule): the window — its front tab under the stuck tab's name (${ur.source})`);
+  const ur = PICu.pictureForView(PICu.pictureSourceOf({ launch: 'attach', state: 'ready', displaySession: { id: 'ds-1' } }), { bg: stuckBg, shownWhy: 'attach' });
+  ok(u1.why === 'background-stuck' && u0.why === 'background-stuck' && u2 === X && u3 === X && psrc.split(STUCK).length === 2 && ur.source === PIC.PICTURE_X,
+    `a polled tab that stops answering keeps its last own picture after a hand back (${u1.why}) and on a new pane (${u0.why}); never polled keeps the window (${u2.source}); a takeover drives the window (${u3.source}); RED (the copy without the rule): the window — its front tab under the stuck tab's name (${ur.source})`);
+  // the hub's record says it, and the page keeps it (pins)
+  const bsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8');
+  ok(bsrc.includes("const polled = state === 'unresponsive' && b.targetId === id && (b.state === 'hidden' || !!b.polled);") && bsrc.includes("pollMs: 0, polled });") && bsrc.includes('b.frameTimes = []; b.polled = false;')
+    && fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8').includes(", polled: m.polled === true }"), 'PIN: the hub\'s unresponsive record says `polled` (a hidden tab that hung), replayed to a late viewer; the view keeps it on its verdict');
   // the live view's wiring (pins): the picture reads the hub's verdict; the verdict and a takeover / handback re-judge it; a
   // one-window row says the blanks it folds
   const live = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
@@ -599,7 +605,7 @@ console.log('§10 the picture the view says it shows, in ONE window (the owner\'
     && live.includes("else if (st.bg && st.bg.state === 'hidden') { st.bgClearedAt = Date.now(); clearTimeout(st.bgSettleTimer); st.bgSettleTimer = setTimeout(() => renderPicture(), BG_SETTLE_MS + 50); }")
     && live.includes("renderWatchLine(); renderPicture(); // the owner's report 2026-11-19") && live.includes("renderPicture(); // the owner's report 2026-11-19: a takeover drives the window"),
     'PIN: the view\'s picture is pictureForView over the hub\'s background verdict, re-judged when the verdict or the takeover moves');
-  ok(live.includes("text = xOn() ? t('This tab is behind another tab in its window: press this tab in the browser’s own tab strip, or Bring it forward')"), 'PIN: a takeover on the DRAWN window says where to press, never whose the tab in front is (主开发\'s law 3, ruling S3)');
+  ok(live.includes("text = xOn() && xp.status === 'connected' ? t('This tab is behind another tab in its window: press this tab in the browser’s own tab strip, or Bring it forward')"), 'PIN: a takeover on the DRAWN window says where to press, never whose the tab in front is (主开发\'s law 3, ruling S3)');
   // its read's M1–M3 (pins): the width fold keeps the blanks' count; a ticket that lands after the picture left the window mounts
   // nothing; a new socket and another browser start with no verdict
   ok(live.includes("for (const d of dividers) d.style.display = d.dataset.group === 'blanks' ||")

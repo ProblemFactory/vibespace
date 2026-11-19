@@ -82,7 +82,9 @@ function pictureForView(v, { bg = null, driving = false, shownWhy = null, cleare
   if (!isX(v) || driving) return v;
   if (bg && bg.state === 'hidden' && bg.targetId) return { source: PICTURE_SCREENCAST, why: 'background-tab', words: SOURCE_WORDS['background-tab'], displaySession: null };
   // 主开发's ruling S4 (21:52Z): a hidden tab that then stops answering keeps ITS last own picture — never its window's front tab
-  if (bg && bg.state === 'unresponsive' && bg.targetId && (shownWhy === 'background-tab' || shownWhy === 'background-settle' || shownWhy === 'background-stuck')) return { source: PICTURE_SCREENCAST, why: 'background-stuck', words: SOURCE_WORDS['background-stuck'], displaySession: null };
+  // its read (M1): the HUB says it (`polled`: this tab's own picture was polled before it stopped answering) — never the view's own
+  // memory, which a hand back, a reconnect or a new pane loses
+  if (bg && bg.state === 'unresponsive' && bg.targetId && bg.polled === true) return { source: PICTURE_SCREENCAST, why: 'background-stuck', words: SOURCE_WORDS['background-stuck'], displaySession: null };
   if ((shownWhy === 'background-tab' || shownWhy === 'background-settle') && clearedAt > 0 && now - clearedAt < settleMs) return { source: PICTURE_SCREENCAST, why: 'background-settle', words: SOURCE_WORDS['background-settle'], displaySession: null };
   return v;
 }

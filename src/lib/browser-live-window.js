@@ -679,7 +679,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       labels: { starting: t('Connecting to the browser window…'), unavailable: t('The browser window is not available') },
       autoReconnect: true, admit: admitX,
       mayFocus: () => drivesKeyboard() && !ky.yielded, // the caret goes to the window only while THIS view drives (never behind the person's work)
-      onStatus: (s) => { xp.status = s; if (s === 'connected') syncX(); },
+      onStatus: (s) => { xp.status = s; if (s === 'connected') syncX(); renderWatchLine(); }, // the takeover's sentence follows a DRAWN window
     });
     view.bar.style.display = 'none'; // the live view's own bar is THE bar (the shell's status / Paste live on in the view; Ctrl+V pastes)
     xp.view = view;
@@ -1621,12 +1621,13 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       btn = t('Back to the agent’s tab'); act = () => watchTab(null);
     } else if (st.bg && st.bg.state === 'unresponsive') {
       // B-d635 (userW's inc-murizo36-ecri): a tab that sends no picture and does not answer is SAID — never a blank canvas with no words
-      text = driving ? t('This tab is not responding — no picture, and it did not answer when asked (a busy or hung page). Reload it, or switch to another tab') : t('The agent’s tab is not responding — no picture, and it did not answer when asked (a busy or hung page). This view updates as soon as it answers');
+      // its read (S1): a hidden tab that hung keeps its LAST picture on the view — the words say that picture, never «no picture»
+      text = driving ? t('This tab is not responding — no picture, and it did not answer when asked (a busy or hung page). Reload it, or switch to another tab') : st.bg.polled ? t('The agent’s tab is not responding — its last picture is shown; it did not answer when asked (a busy or hung page). This view updates as soon as it answers') : t('The agent’s tab is not responding — no picture, and it did not answer when asked (a busy or hung page). This view updates as soon as it answers');
     } else if (st.bg) {
       const row = (st.tabRow && st.tabRow.rows || []).find((x) => x.targetId === String(st.bg.targetId || '').toUpperCase() || x.active);
       // 主开发's law (3) + ruling S3 (21:52Z): a takeover shows the WINDOW as it is — the sentence names where to press, never whose
       // the tab in front is (it may be another tab of the same agent); only while the window is DRAWN (its read's nit)
-      if (driving) { text = xOn() ? t('This tab is behind another tab in its window: press this tab in the browser’s own tab strip, or Bring it forward') : t('This tab is in the background of its window and paints nothing — bring it forward to see it live (a new picture every half second meanwhile)'); if (row) { btn = t('Bring it forward'); act = () => tabAct('switch', row); } }
+      if (driving) { text = xOn() && xp.status === 'connected' ? t('This tab is behind another tab in its window: press this tab in the browser’s own tab strip, or Bring it forward') : t('This tab is in the background of its window and paints nothing — bring it forward to see it live (a new picture every half second meanwhile)'); if (row) { btn = t('Bring it forward'); act = () => tabAct('switch', row); } }
       else text = t('The agent’s tab is in the background of its window — a new picture every half second; take over and bring it forward to see it live');
     }
     const want = text ? '' : 'none';
@@ -2226,8 +2227,8 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   function onMessage(m) {
     switch (m.type) {
       case 'hello':
+        st.bg = null; st.bgClearedAt = 0; clearTimeout(st.bgSettleTimer); // its read's M3: the verdict was the old socket's — the hub replays a live one after hello (reset FIRST: unmountX re-renders the line)
         xp.ticket = null; xp.asking = false; xp.failed = null; unmountX(); // lane browser-x-in-window: the old socket's ticket died with it — asked again below
-        st.bg = null; st.bgClearedAt = 0; clearTimeout(st.bgSettleTimer); // its read's M3: the verdict was the old socket's — the hub replays a live one after hello
         st.mode = m.mode || 'watch'; st.holder = m.holder || null; st.viewers = m.viewers || 1; st.target = m.target || null;
         st.you = m.you || null; st.mine = !!m.mine; st.modeSince = Number(m.since) || 0;
         st.remotePlatform = typeof m.platform === 'string' ? m.platform : null; // lane live-input: the browser's OS (⌘ chords are translated for a non-Mac one)
@@ -2366,7 +2367,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       case 'tab-background':
         // 主开发's law (1): the clear's moment is kept — the window returns only once it has held (BG_SETTLE_MS, no flap)
         if (m.targetId) st.bgClearedAt = 0; else if (st.bg && st.bg.state === 'hidden') { st.bgClearedAt = Date.now(); clearTimeout(st.bgSettleTimer); st.bgSettleTimer = setTimeout(() => renderPicture(), BG_SETTLE_MS + 50); }
-        st.bg = m.targetId ? { targetId: String(m.targetId), since: Number(m.since) || Date.now(), state: m.state === 'unresponsive' ? 'unresponsive' : 'hidden' } : null; // B-d635: or a tab that never answers
+        st.bg = m.targetId ? { targetId: String(m.targetId), since: Number(m.since) || Date.now(), state: m.state === 'unresponsive' ? 'unresponsive' : 'hidden', polled: m.polled === true } : null; // B-d635: or a tab that never answers
         renderWatchLine(); renderPicture(); // the owner's report 2026-11-19: the picture follows the verdict (the tab's own, while hidden)
         break;
       case 'tabs':
