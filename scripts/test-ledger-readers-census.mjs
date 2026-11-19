@@ -100,17 +100,16 @@ console.log('④ the measurement — this tree\'s walker and ledger, CLEAN and D
     ok(raw(D.shard) === 7 && raw(D.shard) !== Number(tot(D.uh).split(' ')[0]), `CONTROL: a reader that summed the shard's raw lines would read ${raw(D.shard)} requests for 5 — what this census exists to keep out`);
   } finally {
     // B-f2cb: every UsageHistory here writes its cursors through the ONE store writer, on its own paced thread — the folder is
-    // removed only once no write of a file under it is pending or in flight (the writer's own fact, asked a bounded COUNT of
-    // times; the bound only ends a wait that never comes), and the writer has forgotten those files — never a race with a
-    // rename landing inside the folder mid-remove (ENOTEMPTY after every check had passed)
+    // removed only once that writer has written what it owes under it: flushSync of those files (the writer's own door — the
+    // write in flight lands first, then what is owed; what UsageHistory.flushCursors does), never a race with a rename landing
+    // inside the folder mid-remove (ENOTEMPTY after every check had passed). The files waited for are COUNTED (the clean and
+    // the doubled ledgers' cursors: two — a wait over none would be vacuous), then forgotten (no later write of them)
     const SW = require(path.join(REPO, 'src/store-writer.js')).storeWriter();
     const ours = () => SW.stats().map((x) => x.file).filter((f) => typeof f === 'string' && f.startsWith(tmp + path.sep));
-    let waited = 0;
-    while (waited < 600 && ours().some((f) => SW.pending(f))) { waited++; await new Promise((r) => setTimeout(r, 10)); }
-    const stillOwed = ours().filter((f) => SW.pending(f));
+    const mine = ours(), fl = SW.flushSync(mine), owed = ours().filter((f) => SW.pending(f));
     for (const f of ours()) SW.forget(f);
-    ok(!stillOwed.length, `the measurement's folder goes only when the store writer owes nothing under it (${stillOwed.length} owed after ${waited} look(s))`, stillOwed);
-    fs.rmSync(tmp, { recursive: true, force: true });
+    ok(mine.length === 2 && fl.left.length === 0 && !owed.length, `the measurement's folder goes only once the store writer owes nothing under it — ${mine.length} cursors file(s) flushed (${fl.written.length} written now, ${fl.left.length} left, ${owed.length} owed)`, { mine: mine.map((f) => path.relative(tmp, f)), left: fl.left, owed });
+    fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });   // (a backstop only: the flush above is the cure)
   }
 }
 
