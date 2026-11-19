@@ -2579,6 +2579,30 @@ export function rerunRecord({ sha, suite, lane, first, again, at = Date.now(), h
   return { at, sha, host, suite, lane: String(lane), first: { ms: first.ms, load: first.load, tail: [first.lines[1] || '', first.lines[2] || ''].join('\n').split('\n').filter((x) => /^\s*✗ /.test(x)).slice(0, 3).map((x) => x.trim().slice(0, 200)) }, again: { ok: again.ok, ms: again.ms, load: again.load } };
 }
 export const rerunSaid = (tag, suite, first, again, file) => `  [${tag}] RERUN LEDGER ${suite}: red (load ${(first.load || []).join('→')}) → ${again.ok ? 'GREEN — FLAKY, counted' : 'red again'} (load ${(again.load || []).join('→')}) — ${file}`;
+// THE RERUN LEDGERS ARE BOUNDED (B-3bbe — data/ci-fast/reruns.jsonl and <markers>/reruns.jsonl were appended with no
+// bound; pruneFailLogs bounds the fail logs only). ONE door for both tiers: append the line, then keep the lines of the
+// newest RERUNS_KEEP commits — a commit dated by its NEWEST line (an old commit re-run now is new), as pruneMarkers and
+// pruneFailLogs keep theirs; a ledger line with no sha is one group («nosha»); a line that is not the ledger's own (not
+// JSON, no suite) is never touched. The file is rewritten (tmp + rename) only when a commit falls out: one commit past the
+// bound at a time, rare. → the number of lines removed
+export const RERUNS_KEEP = 30;
+export function boundReruns(file, keep = RERUNS_KEEP) {
+  let text = ''; try { text = fs.readFileSync(file, 'utf-8'); } catch { return 0; }
+  const lines = text.split('\n').filter((l) => l !== '');
+  const groupOf = (l) => { try { const o = JSON.parse(l); return o && typeof o === 'object' && typeof o.suite === 'string' ? (typeof o.sha === 'string' && o.sha ? o.sha : 'nosha') : null; } catch { return null; } };
+  const groups = lines.map(groupOf), newest = new Set();
+  for (let i = groups.length - 1; i >= 0; i--) if (groups[i] !== null && !newest.has(groups[i]) && newest.size < keep) newest.add(groups[i]);
+  const kept = lines.filter((l, i) => groups[i] === null || newest.has(groups[i]));
+  if (kept.length === lines.length) return 0;
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, kept.join('\n') + '\n'); fs.renameSync(tmp, file);
+  return lines.length - kept.length;
+}
+export function appendRerun(file, rec, { keep = RERUNS_KEEP } = {}) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.appendFileSync(file, JSON.stringify(rec) + '\n');
+  return boundReruns(file, keep);
+}
 // A FAIL-LOG DIR IS BOUNDED (B-c327 — data/ci-fast/fail-logs grew by every red run's whole output and nothing removed a
 // file; <markers>/fail-logs the same). Like pruneMarkers: the files of the newest FAIL_LOGS_KEEP commits stay (a commit's
 // time = its newest file's mtime, so a try-2 log keeps its try-1 and its hang report beside it); every other commit's
@@ -4365,7 +4389,7 @@ export async function runFastLanes(plan, { lanes = 1, keepGoing = false, run, af
         // …and the row is still NAMED red (batch 24's reader): its first try was red and its retry judged nothing — never dropped
         if (cut2) { reds.push(s.name); log(`  · ${s.name}: red on its first try; its retry was stopped — ${cut2} is red`); break; }
         if (failDir) writeFailLog(failDir, sha, s, again, 2);
-        if (ledger) { try { fs.mkdirSync(path.dirname(ledger), { recursive: true }); fs.appendFileSync(ledger, JSON.stringify(rerunRecord({ sha, suite: s.name, lane, first: r, again })) + '\n'); } catch (e) { log(`  · rerun ledger not written: ${e && e.message}`); } }
+        if (ledger) { try { appendRerun(ledger, rerunRecord({ sha, suite: s.name, lane, first: r, again })); } catch (e) { log(`  · rerun ledger not written: ${e && e.message}`); } }
         log(rerunSaid('ci', s.name, r, again, ledger || '(no ledger)'));
         if (again.ok) { flaky.push(s.name); timings.push({ name: s.name, ms: again.ms, lane: String(lane) }); noteSkips(s, again, 2); continue; }
       }
@@ -4767,7 +4791,7 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
           // THE RERUN LEDGER (q-038 ④): one rerun, ONE line per rerun in <markers>/reruns.jsonl — the suite, both
           // outcomes, both loads, the first run's last lines — so a flake is counted across runs, never laundered
           const line = rerunRecord({ sha, suite: s.name, lane, first, again });
-          try { fs.mkdirSync(d, { recursive: true }); fs.appendFileSync(path.join(d, 'reruns.jsonl'), JSON.stringify(line) + '\n'); } catch (e) { console.log(`  · rerun ledger not written: ${e && e.message}`); }
+          try { appendRerun(path.join(d, 'reruns.jsonl'), line); } catch (e) { console.log(`  · rerun ledger not written: ${e && e.message}`); }
           console.log(rerunSaid('ci:heavy', s.name, first, again, path.join(d, 'reruns.jsonl')));
         }
         if (r.ok && r.skips) skippedLegs.push({ name: s.name, n: r.skips.n, first: r.skips.first, file: keepSkipLog(s, r, tried) });

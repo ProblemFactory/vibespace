@@ -41,6 +41,7 @@ import { fileURLToPath } from 'node:url';
 import { SUITES, EXCLUDED, censusFindings, listSuiteFiles, heavyBlocker, machineGlobalFixtures, defaultLockPath, killedFromOutside, OUTSIDE_SIGNALS, scratchOrphans, judgeScratch, liveScratchPaths, SCRATCH_ROOT_RE, REAP_NAMES, reapReport, reapByHand, scratchRootsOf, ROOT_ENV, argvScratchRoots, PRODUCT_ROOT_RE, FAST_DISQUALIFIERS, FAST_MAX_MS, fastRuleFindings, FAST_SUM_CAP_MS, FALSE_ROW_RATIO, falseFastRows, fastTimesRecord, fastTimesPath, judgeFastReadings, falseRowLine, stripComments } from './ci.mjs';
 import { pathToFileURL } from 'node:url';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { anchored } from './scratch.mjs';
 import { callArgs } from './lib/check.mjs'; // B-1388: a helper's Nth argument (the swap census's argument scanner)
 import { GIT_REDIRECTORS, gitEnvFrom } from './git-env.mjs';
 import { REPO, GIT_ENV, ok, tmpDirs, mktmp, git, makeRepo, commit, STUB_SLICE, stubGateRepo, writeMarker, report } from './ci-gate-kit.mjs'; // the shared kit (lane fast-tier-ratchet: the gate is seven ≤ 10 s parts)
@@ -891,6 +892,33 @@ console.log('\n§2i a red names its legs: every ✗ line before the tail; the fa
       && left.includes(`${shaOf(1)}.test-planted.1.log`) && left.includes(`${shaOf(1)}.test-planted.2.hang.json`) && left.includes('README') && left.includes(`${shaOf(0)}.dir.1.log`) && left.length === K + 2 + 2,
       `pruneFailLogs keeps the newest ${K} commits' files (an old commit with a newer try stays whole), removes the rest, never a name that is not the runner's (README, a directory)`, { gone, left: left.length });
     okd(CI.pruneFailLogs(path.join(pd, 'none')).length === 0 && CI.pruneFailLogs(pd).length === 0, '…a dir that does not exist prunes nothing, and a second prune finds nothing more', gone);
+  }
+  // B-3bbe: the RERUN LEDGERS are bounded too — appendRerun appends, then keeps the newest RERUNS_KEEP commits' lines (a commit
+  // dated by its newest line), a no-sha line one group, a line not the ledger's own never touched; CONTROL: a copy without the
+  // bound (the release's plain append) keeps every commit
+  {
+    const K = CI.RERUNS_KEEP, sh = (i) => (0xb0000000 + i).toString(16);
+    const L = (i, suite = 'test-rr-a') => JSON.stringify({ sha: sh(i), host: 'h', suite, lane: '1' });
+    const plant = (f) => { const ls = []; for (let i = 0; i < K + 4; i++) { ls.push(L(i)); if (i === 2) ls.push('a hand note, not the ledger\'s own'); } ls.push(L(1, 'test-rr-late')); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, ls.join('\n') + '\n'); };
+    const rec = { sha: 'c0ffee00', host: 'h', suite: 'test-rr-new', lane: '2' };
+    const commitsIn = (f) => new Set(fs.readFileSync(f, 'utf-8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l).sha; } catch { return null; } }).filter(Boolean));
+    const f = path.join(mktmp('reruns'), 'data', 'reruns.jsonl'); plant(f);
+    const removed = CI.appendRerun(f, rec);
+    const left = fs.readFileSync(f, 'utf-8').split('\n').filter(Boolean), cs = commitsIn(f);
+    okd(removed === 5 && cs.size === K && cs.has('c0ffee00') && cs.has(sh(1)) && ![0, 2, 3, 4, 5].some((i) => cs.has(sh(i))) && left.includes('a hand note, not the ledger\'s own') && left.filter((l) => l.includes(sh(1))).length === 2,
+      `appendRerun keeps the newest ${K} commits' lines (an old commit re-run late stays whole), removes the rest, never a line that is not the ledger's own`, JSON.stringify({ removed, commits: cs.size }));
+    okd(CI.appendRerun(f, { ...rec, sha: sh(K + 3) }) === 0 && commitsIn(f).size === K, '…a line of a commit already kept removes nothing', String(commitsIn(f).size));
+    const fn = path.join(mktmp('reruns-nosha'), 'reruns.jsonl'); for (let i = 0; i < K + 2; i++) CI.appendRerun(fn, { sha: '', host: 'h', suite: 'test-rr-nosha', lane: '1' });
+    okd(fs.readFileSync(fn, 'utf-8').split('\n').filter(Boolean).length === K + 2, '…lines with no sha are ONE group (nosha), kept whole while it is among the newest', 'nosha');
+    const SRC0 = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
+    const MR = mutantCopies('ci-reruns-bound', REPO);
+    const mut = await import(pathToFileURL(MR.write('scripts/ci.mjs', anchored(SRC0, '  return boundReruns(file, keep);\n', '  return 0;\n', 'B-3bbe: the bound cut'), 'no-bound', { esm: true })).href);
+    const fm = path.join(mktmp('reruns-mut'), 'reruns.jsonl'); plant(fm);
+    okd(mut.appendRerun(fm, rec) === 0 && commitsIn(fm).size === K + 5, `CONTROL: a copy of ci.mjs without the bound keeps every commit (${commitsIn(fm).size} > ${K}) — the leg above is red without the change`, String(commitsIn(fm).size));
+    for (const c of copiesCensus(MR.files, MR.dir, REPO, { minCopies: 1, label: 'reruns bound: ' })) ok(c.pass, c.name, c.pass ? undefined : c.detail);
+    ok(/if \(ledger\) \{ try \{ appendRerun\(ledger, rerunRecord\(\{ sha, suite: s\.name, lane, first: r, again \}\)\); \}/.test(SRC0)
+      && /try \{ appendRerun\(path\.join\(d, 'reruns\.jsonl'\), line\); \}/.test(SRC0) && !/appendFileSync\(ledger/.test(SRC0) && !/appendFileSync\(path\.join\(d, 'reruns\.jsonl'\)/.test(SRC0),
+      'WIRING: both tiers append their rerun lines through appendRerun (the fast ledger and <markers>/reruns.jsonl), no plain append left');
   }
   const SRC = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
   ok(/\n {4}const pruned = pruneFailLogs\(hangDir\);/.test(SRC) && /\n {4}pruneMarkers\(dir\);\n {4}pruneFailLogs\(path\.join\(d, 'fail-logs'\)\);[^\n]*\n {4}return \{ noVerdict: '', file \};/.test(SRC),
