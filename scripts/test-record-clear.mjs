@@ -630,8 +630,8 @@ console.log('\nB-20b6 «Clear content…» says the archived job records it coul
 // B-20b6: «Clear content…» SAYS the archived job records it could not reach — the job store's `archiveUnread` rides the seam and both
 // routes to the dialog (it showed «Content cleared» alone while the archived copies kept their words)
 {
-  const ARCH = 'archived job records could not be reached, so their words were not cleared — clear them again when the archive reads (after a restart, or once the storage answers again)';
-  const ERR = 'the archived job records could not be reached — clear it again when the archive reads (after a restart, or once the storage answers again)';
+  const ARCH = 'archived job records could not be reached, so their words were not cleared; clear them again when the archive reads (after a restart, or once the storage answers again)';
+  const ERR = 'this record may be among the archived job records, which could not be reached; clear it again when the archive reads (after a restart, or once the storage answers again)';
   const jmOf = (unread) => ({ ready: true, clearJobs: (ids) => ({ cleared: ids.slice(), already: [], unknown: [], refused: [], ...(unread ? { archiveUnread: 'archived records could not be reached, so their words were not cleared' } : {}) }) });
   const SEAM = require(path.join(ROOT, 'src/server/record-clear.js'));
   const RCS = SEAM.create({ getJobs: () => jmOf(true), log: () => { } }), RCP = SEAM.create({ getJobs: () => jmOf(false), log: () => { } });
@@ -652,10 +652,20 @@ console.log('\nB-20b6 «Clear content…» says the archived job records it coul
   ok(a1 && a1.code === 200 && a1.archiveUnread === true && a2 && a2.code === 200 && a2.archiveUnread === true, 'B-20b6: both clear routes answer archiveUnread (they cut the answer to {ok, cleared, already…})', { a1, a2 });
   const UI = fs.readFileSync(path.join(ROOT, 'src/lib/record-clear-ui.js'), 'utf8');
   ok(UI.includes("if (r.archiveUnread) showToast(done1 + ' — ' + t('" + ARCH + "'), { type: 'error' }); else showToast(done1);") && UI.includes("const arch = archiveUnread ? ' — ' + t('" + ARCH + "') : '';") && UI.includes('if (r.archiveUnread) archiveUnread = true;')
-    && !UI.includes("if (archiveUnread) showToast(") && !UI.includes("if (r.archiveUnread) showToast(t('"),
+    && !UI.includes("if (archiveUnread) showToast(") && !UI.includes("if (r.archiveUnread) showToast(t('"),   // stale-pins: kept — absence checks: the two separate toasts are gone
     'B-20b6 (主开发 04:08Z (3)): the dialog says it in ONE line with its «cleared» — one record or a batch — and says when to clear again (after a restart, or once the storage answers)');
   ok(UI.includes("case 'archive_unread': return t('" + ERR + "');"), 'B-20b6 (1): the dialog words the archive\'s refusal of a single clear by its code');
   for (const lang of ['zh', 'ja']) { const T = fs.readFileSync(path.join(ROOT, `src/lib/i18n-${lang}.js`), 'utf8'); ok(T.includes(JSON.stringify(ARCH) + ':') && T.includes(JSON.stringify(ERR) + ':'), `B-20b6: both sentences have their ${lang} rows`); }
+  // its read (smalls r1, M1): the zh rows call the archive by the panel's word, 归档 («已归档») — never 存档
+  { const T = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-zh.js'), 'utf8'); const valOf = (k) => { const i = T.indexOf(JSON.stringify(k) + ':'); if (i < 0) return ''; const j = T.indexOf('\n', i); return T.slice(i + JSON.stringify(k).length + 1, j); };
+    const zA = valOf(ARCH), zE = valOf(ERR);
+    ok(!!zA && !!zE && zA.includes('归档') && zE.includes('归档') && !zA.includes('存档') && !zE.includes('存档'), 'B-20b6: the zh rows say 归档 (the panel\'s word for archived) and never 存档', { zA, zE }); }
+  // its read (smalls r1, N1 + N4): the BATCH road answers an archive-only id as the single road does, and both batch toasts carry the
+  // archive's words (`+ arch`)
+  ok(UI.includes("    else if (unknown.length) note(r.archiveUnread ? 'archive_unread' : 'not_found');")
+    && UI.includes("showToast(t('{n} cleared · {m} could not be cleared: {why}', { n: cleared, m: missed, why }) + arch, { type: 'error' });")
+    && UI.includes("showToast((cleared ? t('{n} cleared', { n: cleared }) : t('Already cleared')) + arch, arch ? { type: 'error' } : undefined);"),
+  'B-20b6: a batch\'s archive-only id is answered by the archive\'s words (never «no such record»), and both batch toasts carry them');
   // (1) 主开发 04:08Z: a SINGLE clear of a record that stands only in the held archive answers the ARCHIVE's refusal (503), never «no such record»
   const jmGone = { ready: true, clearJobs: (ids) => ({ cleared: [], already: [], unknown: ids.slice(), refused: [], archiveUnread: 'archived records could not be reached' }) };
   const one1 = await SEAM.create({ getJobs: () => jmGone, log: () => { } }).clear({ kind: 'job', id: 'jb-0000a003' }, { caller: OWNER });

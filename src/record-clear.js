@@ -169,7 +169,7 @@ const REFUSALS = Object.freeze({
   job_token: { status: 403, why: 'a job token cannot clear records — ask the user to clear it, or clear it from the session that wrote it' },
   not_found: { status: 404, why: 'no such record' },
   // B-20b6's smalls (主开发 04:08Z (1)): a record that stands only in a HELD archive is no «no such record» — the archive could not be read
-  archive_unread: { status: 503, why: 'the archived job records could not be reached — clear it again when the archive reads (after a restart, or once the storage answers again)' },
+  archive_unread: { status: 503, why: 'this record may be among the archived job records, which could not be reached; clear it again when the archive reads (after a restart, or once the storage answers again)' },
   pending_fork: { status: 409, why: 'this session is a fork that has no conversation of its own yet — send it one message first, then clear what it wrote' },
   not_yours: { status: 403, why: 'an agent may clear only what its own session wrote — ask the user to clear this one (right-click it → Clear content…)' },
   ambiguous: { status: 409, why: 'several entries share that time — pass the entry\'s id (vibespace-task show prints it)' },

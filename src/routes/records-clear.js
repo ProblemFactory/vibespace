@@ -5,7 +5,7 @@
  *   POST /api/records/clear       {kind, id, groupId?, sessionKey?}
  *     → {ok:true, cleared: 0|1, already: 0|1, archiveUnread?: true} | {error, code} by NAME:   (B-20b6: archiveUnread = a job's archived records could not be reached, their words not cleared)
  *       agent_forbidden 403 · bad_items / bad_kind 400 · not_found 404 ·
- *       ambiguous 409 · unavailable 503 · failed 500
+ *       ambiguous 409 · unavailable 503 · archive_unread 503 (a job id found only in the held archive) · failed 500
  *   POST /api/records/clear-many  {items: [{kind, id, groupId?, sessionKey?}…] (1..200)}
  *     → {ok:true, cleared: n, already: n, unknown: [{kind, id}], refused: [{kind, id, code, error}], archiveUnread?: true}
  *       — every KNOWN record the owner named is cleared; an unknown one is NAMED,

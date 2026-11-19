@@ -40,7 +40,7 @@ const SHOW_MAX = 8; // rows the dialog lists by name; the rest are counted
 export function clearErrorText(code, fallback = '') {
   switch (code) {
     case 'not_found': return t('no such record');
-    case 'archive_unread': return t('the archived job records could not be reached — clear it again when the archive reads (after a restart, or once the storage answers again)');   // B-20b6's smalls (1)
+    case 'archive_unread': return t('this record may be among the archived job records, which could not be reached; clear it again when the archive reads (after a restart, or once the storage answers again)');   // B-20b6's smalls (1)
     case 'unavailable': return t('the records are not available right now — try again in a moment');
     case 'TASK_GROUPS_UNREAD': return t("Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.");   // THE STORE HELD UNREAD (lane bl-windows): the hold (503) in the page's words — never «try again in a moment» for a damaged file
     case 'failed': return t('it could not be saved — nothing was changed');
@@ -149,7 +149,7 @@ export async function clearRecords(rows) {
     if (!r || !r.ok) { showToast(t('Could not clear: {why}', { why: clearErrorText(r ? r.code : 'unreachable', r && r.error) }), { type: 'error' }); return { ok: false, cleared: 0 }; }
     // B-20b6: said, never a silent «cleared» — and in ONE line with it (主开发 04:08Z (3): two toasts side by side read as two events)
     const done1 = r.cleared ? t('Content cleared') : t('Already cleared');
-    if (r.archiveUnread) showToast(done1 + ' — ' + t('archived job records could not be reached, so their words were not cleared — clear them again when the archive reads (after a restart, or once the storage answers again)'), { type: 'error' }); else showToast(done1);
+    if (r.archiveUnread) showToast(done1 + ' — ' + t('archived job records could not be reached, so their words were not cleared; clear them again when the archive reads (after a restart, or once the storage answers again)'), { type: 'error' }); else showToast(done1);
     return { ok: true, cleared: r.cleared || 0 };
   }
   let cleared = 0, answered = 0, missed = 0, why = '', archiveUnread = false;
@@ -163,11 +163,11 @@ export async function clearRecords(rows) {
     const refused = r.refused || [], unknown = r.unknown || [];
     missed += refused.length + unknown.length;
     if (refused.length) note(refused[0].code, refused[0].error);
-    else if (unknown.length) note('not_found');
+    else if (unknown.length) note(r.archiveUnread ? 'archive_unread' : 'not_found');   // B-20b6 smalls, its read (N1): the batch road answers as the single one
   }
   if (!answered) { showToast(t('Could not clear: {why}', { why }), { type: 'error' }); return { ok: false, cleared: 0 }; }
   // B-20b6: the archived records left uncleared ride the SAME line (主开发 04:08Z (3))
-  const arch = archiveUnread ? ' — ' + t('archived job records could not be reached, so their words were not cleared — clear them again when the archive reads (after a restart, or once the storage answers again)') : '';
+  const arch = archiveUnread ? ' — ' + t('archived job records could not be reached, so their words were not cleared; clear them again when the archive reads (after a restart, or once the storage answers again)') : '';
   if (missed) showToast(t('{n} cleared · {m} could not be cleared: {why}', { n: cleared, m: missed, why }) + arch, { type: 'error' });
   else showToast((cleared ? t('{n} cleared', { n: cleared }) : t('Already cleared')) + arch, arch ? { type: 'error' } : undefined);
   return { ok: true, cleared };
