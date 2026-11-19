@@ -172,7 +172,7 @@ import { patchPasskeyButtons } from './browser-proposal-card.js'; // lane passke
 import { passkeyWords } from '../browser-passkey.js'; // lane browser-passkey: a page waiting for a passkey — ONE button, Cancel (PURE words) // lane site-reset: the navigation loop, keyed + patched in place
 import { displayFactOf, displayFactText } from './browser-display-words.js'; // lane headless-fallback: a headless browser (no desktop session) says so under the bar
 import { enterSubmits } from './chat-enter-keys.js';
-import { pictureSourceOf, pictureForView } from '../browser-picture.js'; // lane browser-x-in-window (B2): THE picture source verdict (PURE — the keeper's own)
+import { pictureSourceOf, pictureForView, BG_SETTLE_MS } from '../browser-picture.js'; // lane browser-x-in-window (B2): THE picture source verdict (PURE — the keeper's own)
 import { deskDoorOf, deskDoorStuck } from '../browser-picture.js'; // lane desktop-x-seat-browser: the raw fallback's door (PURE); deskDoorStuck = the .367 seam
 import { createXpraView, keyInputOf, workerUrlFor, streamUrl as xStreamUrl } from './xpra-view.js'; // lane browser-x-in-window: the desktop app window's view draws the browser's OWN window
 import { bufferRefresh as xBufferRefresh, focusPacket as xFocusPacket } from './xpra-proto.js'; // lane browser-x-in-window: a repaint after a resize, the window's focus at a takeover
@@ -632,6 +632,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     'no-display-session': () => t("the page's picture — the browser's display session is gone"),
     'not-running': () => t("the page's picture"),
     'background-tab': () => t("the tab's own picture, a new one every half second — its window shows another tab in front"),
+    'background-settle': () => t("the tab's own picture — its window's picture again in a moment"),
     untold: () => t("the page's picture — this conversation's window could not be told apart on the display"),
   };
   const xOn = () => !!xp.view;
@@ -644,7 +645,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     const pid = (r && r.profileId) || (st.target && st.target.profileId) || null;
     const rec = pid && app._browserProfiles && app._browserProfiles.browsers ? app._browserProfiles.browsers[pid] : null;
     // the owner's report 2026-11-19: a hidden background tab's OWN picture (the hub polls it), never its window's front tab
-    return pictureForView(pictureSourceOf(rec || null), { bg: st.bg, driving: st.mode === 'takeover' && st.mine && st.connected });
+    return pictureForView(pictureSourceOf(rec || null), { bg: st.bg, driving: st.mode === 'takeover' && st.mine && st.connected, shownWhy: st.pictureSource && st.pictureSource.why, clearedAt: st.bgClearedAt || 0, now: Date.now() });
   }
   /** The source in WORDS for the badge's tooltip: X ⇒ the window; X wanted but this window not told ⇒ said so; else the why. */
   function pictureWords() {
@@ -722,11 +723,11 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     const v = pictureNow();
     const was = st.pictureSource && st.pictureSource.source;
     st.pictureSource = v;
-    if (v.source !== 'x') { xp.ticket = null; xp.failed = null; unmountX(); if (was !== v.source) renderMode(); return; }
+    if (v.source !== 'x') { xp.ticket = null; xp.failed = null; unmountX(); if (was !== v.source) { renderMode(); renderWatchLine(); } return; }
     if (xp.view && xp.ds !== v.displaySession) { xp.ticket = null; unmountX(); } // a new display session (the browser started again)
     const failedHere = xp.failed && xp.failed.ds === v.displaySession && Date.now() - xp.failed.at < X_RETRY_MS;
     if (!xp.ticket && !xp.asking && st.connected && !failedHere) { xp.asking = true; send({ type: 'x-ticket' }); }
-    if (was !== v.source) renderMode();
+    if (was !== v.source) { renderMode(); renderWatchLine(); }   // the takeover's sentence names the window it shows
   }
   function onXTicket(m) {
     xp.asking = false;
@@ -1615,7 +1616,8 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       text = driving ? t('This tab is not responding — no picture, and it did not answer when asked (a busy or hung page). Reload it, or switch to another tab') : t('The agent’s tab is not responding — no picture, and it did not answer when asked (a busy or hung page). This view updates as soon as it answers');
     } else if (st.bg) {
       const row = (st.tabRow && st.tabRow.rows || []).find((x) => x.targetId === String(st.bg.targetId || '').toUpperCase() || x.active);
-      if (driving) { text = t('This tab is in the background of its window and paints nothing — bring it forward to see it live (a new picture every half second meanwhile)'); if (row) { btn = t('Bring it forward'); act = () => tabAct('switch', row); } }
+      // 主开发's law (3): a takeover shows the WINDOW as it is — the tab in front is no tab of the agent's: the first press is not a guess
+      if (driving) { text = st.pictureSource && st.pictureSource.source === 'x' ? t('This tab is behind another tab in its window — the tab in front is not the agent’s: press the agent’s tab in the browser’s own tab strip, or Bring it forward') : t('This tab is in the background of its window and paints nothing — bring it forward to see it live (a new picture every half second meanwhile)'); if (row) { btn = t('Bring it forward'); act = () => tabAct('switch', row); } }
       else text = t('The agent’s tab is in the background of its window — a new picture every half second; take over and bring it forward to see it live');
     }
     const want = text ? '' : 'none';
@@ -2352,6 +2354,8 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       }
       // lane browser-windows (U0b): the tab on show paints nothing (a background tab of its window) — or it does again
       case 'tab-background':
+        // 主开发's law (1): the clear's moment is kept — the window returns only once it has held (BG_SETTLE_MS, no flap)
+        if (m.targetId) st.bgClearedAt = 0; else if (st.bg && st.bg.state === 'hidden') { st.bgClearedAt = Date.now(); clearTimeout(st.bgSettleTimer); st.bgSettleTimer = setTimeout(() => renderPicture(), BG_SETTLE_MS + 50); }
         st.bg = m.targetId ? { targetId: String(m.targetId), since: Number(m.since) || Date.now(), state: m.state === 'unresponsive' ? 'unresponsive' : 'hidden' } : null; // B-d635: or a tab that never answers
         renderWatchLine(); renderPicture(); // the owner's report 2026-11-19: the picture follows the verdict (the tab's own, while hidden)
         break;
