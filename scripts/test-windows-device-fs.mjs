@@ -28,8 +28,10 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 // B-8390: the base tree is ON MASTER — 3452dce38 (2.369.203), never the lane's own 296a748f (no master ancestor held it:
 // a full checkout read it only by luck, a push gate only). The three files the legs read there, against 296a748f's: client.js
-// byte-identical; remote-fs.js adds one method (runScript); agentd.js lacks the lane's worker pool — the old-agent legs judge
-// an op REFUSED by platform and `sh`, which the pool never touched (proven by one heavy run: the line's PROVE)
+// byte-identical; remote-fs.js adds one method (runScript); agentd.js = 296a748f's with its inline worker pool moved to
+// ./worker-pool.js (2.369.202 — bundled from THIS tree by rel(), the same API) and exitDaemon added — the old-agent legs judge
+// an op REFUSED by platform and `sh` (the base agent says neither fs-portable nor posixShells), which neither touches. To be
+// proven by the integrator's heavy run (the line's PROVE)
 const BASE = '3452dce38';
 // mirror-green-207: the Actions checkout is depth 1, so BASE is not there. Every leg that needs the base tree SKIPs by
 // name (counted apart, never as a pass: the 2.369.164 r2 rule) and every leg on this tree still runs.
