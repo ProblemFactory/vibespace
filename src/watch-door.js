@@ -88,7 +88,7 @@ function fileNotice() {
   }
   try {
     const it = noticeItem();
-    const r = todos.add(NOTICE_KEY, { origin: 'server', kind: 'notice', urgency: 'high', by: 'agent', sessionName: 'VibeSpace', text: it.text, detail: it.detail, i18n: it.i18n });
+    const r = todos.add(NOTICE_KEY, { origin: 'server', kind: 'notice', urgency: 'high', by: 'agent', sessionName: 'File watches', text: it.text, detail: it.detail, i18n: it.i18n });
     state.itemId = (r && (r.id || (r.item && r.item.id))) || null;
     state.lastFiledAt = now(); state.filesDue = false; state.gapSaid = false; state.filed++;
   } catch (e) { state.filesDue = true; log(`[watch] the For-you notice of the watch limit was not filed — ${e && e.message}; it is tried again while the limit lasts`); }   // (主开发 01:35Z, 5) retried: the next refusal, the probe, configure()

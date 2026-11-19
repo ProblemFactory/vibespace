@@ -8540,6 +8540,7 @@ export default {
   "{mount} is in RAM: {used} of {size} GB used — files there count as memory.": "{mount} 在内存里：已用 {used} / {size} GB——放在那里的文件都算内存。",
   "A conversation that started its own Chrome was told to use vibespace-browser, which keeps profiles off RAM and reports their size.": "自己启动了 Chrome 的对话已被告知改用 vibespace-browser——它把配置目录放在内存之外，并报告其大小。",
   "Nothing was stopped. This item resolves itself when memory falls below 80%.": "没有停止任何进程。内存降到 80% 以下时，这一条会自动结束。",
+  "File watches": "文件监视",
   "The system’s limit of file watches is reached — VibeSpace follows files more slowly until it is raised": "系统的文件监视数量已到上限——在调高之前，VibeSpace 跟踪文件会慢一些",
   "Linux gives each user a fixed number of file watches ({limit}), and all of them are in use.": "Linux 给每个用户的文件监视数量是固定的（{limit}），现在已经全部用完。",
   "VibeSpace keeps working: it checks the files it follows every few seconds at most, instead of being told at once.": "VibeSpace 照常工作：它改为最多每隔几秒检查一次所跟踪的文件，而不是在文件变化时立刻得到通知。",

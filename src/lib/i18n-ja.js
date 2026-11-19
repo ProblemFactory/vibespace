@@ -8539,6 +8539,7 @@ export default {
   "{mount} is in RAM: {used} of {size} GB used — files there count as memory.": "{mount} はメモリ上にあります：{used} / {size} GB 使用中 — そこに置いたファイルはメモリとして数えられます。",
   "A conversation that started its own Chrome was told to use vibespace-browser, which keeps profiles off RAM and reports their size.": "独自に Chrome を起動した会話には vibespace-browser を使うよう伝えました — プロファイルをメモリ外に置き、そのサイズを報告します。",
   "Nothing was stopped. This item resolves itself when memory falls below 80%.": "何も停止していません。メモリが 80% を下回るとこの項目は自動的に解決します。",
+  "File watches": "ファイル監視",
   "The system’s limit of file watches is reached — VibeSpace follows files more slowly until it is raised": "システムのファイル監視数が上限に達しました — 上限を上げるまで、VibeSpace によるファイルの追跡は遅くなります",
   "Linux gives each user a fixed number of file watches ({limit}), and all of them are in use.": "Linux ではユーザーごとのファイル監視数が決まっています（{limit}）。そのすべてが使用中です。",
   "VibeSpace keeps working: it checks the files it follows every few seconds at most, instead of being told at once.": "VibeSpace は動作を続けます。変更の通知を受ける代わりに、追跡するファイルを遅くとも数秒ごとに確認します。",
