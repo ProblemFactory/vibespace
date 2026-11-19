@@ -589,24 +589,26 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   const heldLifts = new Set();
   // 主开发 03:35Z (round wm6qxcqcw, its MUST): the hold is TOLD ONCE in For you — the person's own surface says why every agent browser
   // waits (the journal alone told nobody); one item a hold, resolved at the read
-  const HELD_NOTICE = 'VibeSpace cannot read {file}, the file of your browser profiles, right now ({code}) — so the agent browsers wait. Nothing is written over it, and VibeSpace reads it again by itself.';
+  const HELD_NOTICE = 'VibeSpace cannot read {file}, the file of your browser profiles, right now — so the agent browsers wait. Nothing is written over it, and VibeSpace reads it again by itself.';
+  const HELD_ITEM_KEY = 'browser-registry-held';   // its read r2 (S1): ONE identity in the store — a re-file (a later run, new words) is the same item
   const HELD_DETAIL = 'If this stays: the file is {path} — check that VibeSpace can read it (its storage answers, its permissions), or put back a copy from a backup; VibeSpace reads it again by itself.';   // its read r1 (S2): the way out when a read again cannot fix it
-  let heldItemId = null;
+  let heldItemId = null, heldItemTorn = false;
+  // its read r2 (S4): TORN bytes never lift by themselves (a read again finds the same bytes) — the item asks the person (an action,
+  // high); a failed read (the storage, the permissions) may answer again by itself — a notice. A hold that turns torn re-files it raised.
   function fileHeldNotice() {
-    if (heldItemId) return;
-    const code = (heldReg && heldReg.code) || 'unreadable';
-    const text = HELD_NOTICE.replace('{file}', STORE_FILE).replace('{code}', code);
+    const torn = !!(heldReg && heldReg.state === 'corrupt');
+    if (heldItemId && torn === heldItemTorn) return;
+    const text = HELD_NOTICE.replace('{file}', STORE_FILE);   // its read r2 (S3): no raw code in the words (a torn file's is an English phrase)
     if (!userTodos || typeof userTodos.add !== 'function') { log.warn?.(`[browser] ${text} (no For-you store is wired, so only this journal says so)`); return; }
-    // its read r1 (M3): an item a previous run filed and never closed (it stopped while held) is THIS hold's item — no second one
-    const had = openHeldNotices()[0]; if (had) { heldItemId = had.id; return; }
-    try { const it = userTodos.add('browser', { origin: 'browser', kind: 'notice', urgency: 'normal', by: 'agent', text, detail: DET_TEXT(), sessionName: 'Agent browser', i18n: { text: { key: HELD_NOTICE, params: { file: STORE_FILE, code } }, detail: [{ key: HELD_DETAIL, params: { path: storeFile } }] } }); heldItemId = it && typeof it.id === 'string' ? it.id : null; }
+    // its read r1 (M3) / r2 (S1): filed under ONE item key — a previous run's open item IS this item (the store matches the key, a re-file updates it)
+    try { const it = userTodos.add('browser', { origin: 'browser', kind: torn ? 'action' : 'notice', urgency: torn ? 'high' : 'normal', by: 'agent', text, detail: DET_TEXT(), sessionName: 'Agent browser', itemKey: HELD_ITEM_KEY, i18n: { text: { key: HELD_NOTICE, params: { file: STORE_FILE } }, detail: [{ key: HELD_DETAIL, params: { path: storeFile } }] } }); heldItemId = it && typeof it.id === 'string' ? it.id : null; heldItemTorn = torn; }
     catch (e) { log.warn?.(`[browser] the held registry's For-you notice was not filed (${e && e.message})`); }
   }
   const DET_TEXT = () => HELD_DETAIL.replace('{path}', storeFile);
-  /** the open held-registry notices in For you (a previous run's included — found by their words' key) */
+  /** the open held-registry notices in For you (a previous run's included — found by the item key) */
   function openHeldNotices() {
     if (!userTodos || typeof userTodos.forSession !== 'function') return [];
-    try { return (userTodos.forSession('browser') || []).filter((i) => i && i.status === 'open' && i.i18n && i.i18n.text && i.i18n.text.key === HELD_NOTICE); } catch { return []; }
+    try { return (userTodos.forSession('browser') || []).filter((i) => i && i.status === 'open' && i.itemKey === HELD_ITEM_KEY); } catch { return []; }
   }
   /** its read r1 (M3): a load that READ closes every held notice still open — a previous run's that stopped while held too */
   function closeStaleHeldNotices() {
@@ -614,12 +616,12 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     for (const it of openHeldNotices()) { try { userTodos.setStatus(it.id, 'done', 'agent'); } catch (e) { log.warn?.(`[browser] a held-registry notice was not closed (${e && e.message})`); } }
   }
   function resolveHeldNotice() {
-    const id = heldItemId; heldItemId = null;
+    const id = heldItemId; heldItemId = null; heldItemTorn = false;
     if (!id || !userTodos || typeof userTodos.setStatus !== 'function') return;
     try { const it = typeof userTodos.get === 'function' ? userTodos.get(id) : null; if (!it || it.status === 'open') userTodos.setStatus(id, 'done', 'agent'); } catch (e) { log.warn?.(`[browser] the held registry's For-you notice was not resolved (${e && e.message})`); }
   }
   function holdRegistry(a) {
-    heldReg = { code: a.code, why: a.why, at: (heldReg && heldReg.at) || now() };
+    heldReg = { code: a.code, why: a.why, state: a.state || null, at: (heldReg && heldReg.at) || now() };
     if (!heldSaid) { heldSaid = true; fileHeldNotice(); log.warn?.(`[browser] ${STORE_FILE} could not be read (${a.code}: ${a.why}) — HELD: no profile is shown, nothing is written over it, every act that would record is refused by name, and it is read again off the main loop`); }
     heldRetrySoon();
   }
@@ -644,7 +646,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const read = await p; heldP = null;
     if (!heldReg || heldStopped) return;
     const a = SR.storeAnswer(read, { valid: REG_VALID });
-    if (a.state === 'unreadable' || a.state === 'corrupt') { heldReg.code = a.code; heldMissingAt = 0; return; }
+    if (a.state === 'unreadable' || a.state === 'corrupt') { heldReg.code = a.code; heldReg.state = a.state; heldMissingAt = 0; fileHeldNotice(); return; }   // r2 (S4): turned torn ⇒ raised
     if (a.state === 'missing' && !heldMissingAt) { heldMissingAt = now(); return; }
     const was = heldReg;
     heldReg = null; heldMissingAt = 0;   // its read r3 (N19): the backoff and the said-once reset only once a load RETURNED (below)
@@ -655,6 +657,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     try { loadFrom(read); } catch (e) { reg = B.normalizeRegistry(null); heldReg = was; log.warn?.(`[browser] ${STORE_FILE}: the read's load failed: ${e && e.message} — held again`); holdRegistry({ code: 'load-threw', why: String((e && e.message) || e) }); return; }   // the READ answer — no second read (r3 N19: a half-loaded registry is not kept while held)
     heldTries = 0; heldSaid = false; heldSaveSaid = false;
     resolveHeldNotice();   // round wm6qxcqcw: the notice the hold filed goes with it
+    if (!heldReg) closeStaleHeldNotices();   // its read r2 (S2): …and one a previous run left open — after the load RETURNED (a load that threw held again above)
     // its read r2 (S3): the creates the hold owed are judged FIRST — before the owed boot and the waiters (an agent's command in that
     // window found no pin and took a temporary browser; a pin made in it was overwritten)
     if (!heldReg) { try { judgeOwedPins(); } catch (e) { log.warn?.(`[browser] the pins the creates owed after the read: ${e && e.message}`); } }
@@ -669,6 +672,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   function load() {
     let read; try { read = { text: fs.readFileSync(storeFile, 'utf8') }; } catch (error) { read = { error }; }
     loadFrom(read);
+    if (!heldReg) closeStaleHeldNotices();   // its read r1 (M3) / r2 (S2): a boot that READ closes a held notice a previous run left open — after the load returned
   }
   /** the load over one read's answer (the boot's, or the read again's — the remainder of B-f276, 主开发 00:38Z): a read that FAILED, or
    *  bytes that are not a registry, HOLD the store — the registry is EMPTY in memory because it is UNREAD: nothing is written over the
@@ -681,7 +685,6 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const a = SR.storeAnswer(read, { valid: REG_VALID });
     if (a.state === 'data') { rawDoc = a.value; reg = B.normalizeRegistry(rawDoc); }
     else { reg = B.normalizeRegistry(null); if (a.state !== 'missing') holdRegistry(a); }
-    if (!heldReg) closeStaleHeldNotices();   // its read r1 (M3): read — no held notice stays open (a previous run's included)
     // verify r7 (T1): one token ⇒ one entry — what the load's dedupe dropped is said (once) and in the ledger (each)
     { const dd = rawDoc && rawDoc.dirHosts ? B.dirHostsDeduped(rawDoc.dirHosts) : []; if (dd.length) { dirty = true; for (const x of dd) lineageLedger('deduped-at-load', { dir: x.key, keptAs: x.keptAs }); log.warn?.(`[browser] the launch-host lineage of ${dd.length === 1 ? dd[0].key : dd.length + ' directories'} dropped at load — the same marker token under another path (kept under ${dd.length === 1 ? dd[0].keptAs : 'the newest'})${dd.length === 1 ? '' : ' — each of: ' + dd.slice(0, 3).map((x) => x.key).join(', ') + (dd.length > 3 ? `, … +${dd.length - 3} more` : '')}`); } }
     // lane profile-lock-roll (L1): the hostname that WROTE the file (its last save, by whichever pod) — captured BEFORE this

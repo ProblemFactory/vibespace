@@ -4727,7 +4727,7 @@ export default {
   "stale": "長期未使用",
   "kept": "保持",
   "Agent browser": "エージェントブラウザ",
-  "VibeSpace cannot read {file}, the file of your browser profiles, right now ({code}) — so the agent browsers wait. Nothing is written over it, and VibeSpace reads it again by itself.": "VibeSpace はいま {file}（ブラウザープロファイルのファイル、{code}）を読めないため、エージェントブラウザは待機しています。上書きはしません。VibeSpace が自動で読み直します。",
+  "VibeSpace cannot read {file}, the file of your browser profiles, right now — so the agent browsers wait. Nothing is written over it, and VibeSpace reads it again by itself.": "VibeSpace はいま {file}（ブラウザープロファイルのファイル）を読めないため、エージェントブラウザは待機しています。上書きはしません。VibeSpace が自動で読み直します。",
   "If this stays: the file is {path} — check that VibeSpace can read it (its storage answers, its permissions), or put back a copy from a backup; VibeSpace reads it again by itself.": "このままの場合：ファイルは {path} です — VibeSpace が読めるか（ストレージが応答しているか、権限）を確認するか、バックアップからコピーを戻してください。VibeSpace が自動で読み直します。",
   "Sweep now": "今すぐスイープ",
   "{n} unregistered director(ies)": "未登録ディレクトリ {n} 件",
