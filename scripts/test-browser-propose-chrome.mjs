@@ -256,9 +256,33 @@ try {
   await cdp('Page.reload', {}); await waitApp(); await sleep(800);
   check('③ the chat attaches on the phone', await attach(sid));
   await waitFor(`!!document.querySelector('${CARD}')`, 20000);
-  const phone = await evalJs(`(() => { const c = document.querySelector('${CARD}'); if (!c) return null; c.scrollIntoView({ block: 'center' }); const vw = window.innerWidth; const r = c.getBoundingClientRect(); const over = [...c.querySelectorAll('*')].filter((e) => { const q = e.getBoundingClientRect(); return q.width > 0 && (q.right > vw + 0.5 || q.left < -0.5 || e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).overflowX !== 'visible'); }).map((e) => e.className || e.tagName); const none = c.querySelector('.chat-browser-proposal-none'); const rows = (() => { if (!none) return 0; const rg = document.createRange(); rg.selectNodeContents(none); return new Set([...rg.getClientRects()].filter((q) => q.width > 0.5).map((q) => Math.round(q.top))).size; })(); return { vw, card: { left: r.left, right: r.right, width: r.width }, over, rows, buttons: [...c.querySelectorAll('button')].filter((b) => b.offsetParent).length }; })()`);
+  // ckpt61 hosted cure (bl-browser-a): the card's buttons read BY KIND — a decision (Approve / Reject, the actions row) or the
+  // no-switch line's own doors (ui-needs-a-button pick 3, browser-profiles-19: «Install a browser plugin…», «Agent browser…»)
+  const phoneProbe = () => evalJs(`(() => { const c = document.querySelector('${CARD}'); if (!c) return null; c.scrollIntoView({ block: 'center' }); const vw = window.innerWidth; const r = c.getBoundingClientRect(); const over = [...c.querySelectorAll('*')].filter((e) => { const q = e.getBoundingClientRect(); return q.width > 0 && (q.right > vw + 0.5 || q.left < -0.5 || e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).overflowX !== 'visible'); }).map((e) => e.className || e.tagName); const none = c.querySelector('.chat-browser-proposal-none'); const rows = (() => { if (!none) return 0; const rg = document.createRange(); rg.selectNodeContents(none); return new Set([...rg.getClientRects()].filter((q) => q.width > 0.5).map((q) => Math.round(q.top))).size; })(); return { vw, card: { left: r.left, right: r.right, width: r.width }, over, rows, buttons: [...c.querySelectorAll('button')].filter((b) => b.offsetParent).length, decisions: [...c.querySelectorAll('.chat-browser-proposal-approve, .chat-browser-proposal-reject')].filter((b) => b.offsetParent).length, actionsShown: (() => { const a = c.querySelector('.chat-browser-proposal-actions'); return !!a && !!a.offsetParent && getComputedStyle(a).display !== 'none'; })(), shown: [...c.querySelectorAll('button')].filter((b) => b.offsetParent).map((b) => ({ door: b.dataset.door || null, label: b.textContent, inDoors: !!b.closest('.chat-browser-proposal-none-doors'), right: Math.round(b.getBoundingClientRect().right) })) }; })()`);
+  const phone = await phoneProbe();
   check('③ nothing of the card is wider than the 390 px screen, and nothing inside it scrolls sideways', phone && phone.vw <= 390 && phone.card.right <= phone.vw + 0.5 && phone.card.left >= -0.5 && phone.over.length === 0, phone);
-  check('③ its sentence wraps, and no button shows', phone && phone.rows > 1 && phone.buttons === 0, phone);
+  // THE LAW (主开发 20:31Z, ckpt61's hosted red): the unavailable card shows NO decision button and its sentence wraps; the only
+  // buttons are the no-switch line's own two doors, by name, inside its doors element, each fitting the card; a real press on
+  // each opens its dialog (the old leg counted every button: 2 since 2aa089967 drew the doors — the product is right)
+  const DOORS3 = [['browser-plugin', 'Install a browser plugin…', true], ['agent-browser', 'Agent browser…', true]];
+  check('③ its sentence wraps, and NO decision button shows (no Approve, no Reject, the actions row hidden)', phone && phone.rows > 1 && phone.decisions === 0 && phone.actionsShown === false, phone);
+  check('③ the only buttons are the no-switch line\'s own two doors, by name, inside its doors element, within the card', phone && JSON.stringify(phone.shown.map((b) => [b.door, b.label, b.inDoors])) === JSON.stringify(DOORS3) && phone.shown.every((b) => b.right <= phone.card.right + 0.5), phone && phone.shown);
+  const DOORS_SEL = `${CARD} .chat-browser-proposal-none-doors`;
+  const pressPlugin = await realClick(`${DOORS_SEL} [data-door="browser-plugin"]`);
+  const pluginOpen = pressPlugin && await waitFor("!!document.getElementById('plugin-install-dialog')", 10000);
+  check('③ a real press on «Install a browser plugin…» opens the plugin install dialog', pluginOpen, { pressPlugin, miss: lastMiss });
+  await evalJs("(() => { const d = document.getElementById('plugin-install-dialog'); if (d && d._shell) d._shell.door(); return true; })()");
+  await waitFor("!document.getElementById('plugin-install-dialog')", 5000);
+  const pressAgent = await realClick(`${DOORS_SEL} [data-door="agent-browser"]`);
+  const agentOpen = pressAgent && await waitFor("[...window.app.wm.windows.values()].some((w) => w.type === 'browser-profiles')", 10000);
+  check('③ a real press on «Agent browser…» opens the Agent browser window', agentOpen, { pressAgent, miss: lastMiss });
+  await evalJs("(() => { for (const [id, w] of [...window.app.wm.windows]) if (w.type === 'browser-profiles') window.app.wm.closeWindow(id); return true; })()");
+  // RED CONTROL: the same probe on this card with its decision row forced visible (the open state's Approve) reads it — the
+  // decision count can fail; then the card is put back as it was
+  const forced = await evalJs(`(() => { const c = document.querySelector('${CARD}'); const a = c && c.querySelector('.chat-browser-proposal-actions'); const ap = c && c.querySelector('.chat-browser-proposal-approve'); if (!a || !ap) return null; const was = [a.style.display, ap.style.display]; a.style.display = ''; ap.style.display = ''; window.__vsWas3 = was; return true; })()`);
+  const ctl = forced ? await phoneProbe() : null;
+  await evalJs(`(() => { const c = document.querySelector('${CARD}'); const w = window.__vsWas3; if (c && w) { c.querySelector('.chat-browser-proposal-actions').style.display = w[0]; c.querySelector('.chat-browser-proposal-approve').style.display = w[1]; } delete window.__vsWas3; return true; })()`);
+  check('③ CONTROL: the same probe on the card with its decision row forced visible reads a decision button and the row shown — RED for the law', !!ctl && ctl.decisions >= 1 && ctl.actionsShown === true, ctl);
   await shot('proposal-card-phone', CARD);
   await cdp('Emulation.setDeviceMetricsOverride', { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false });
   await cdp('Page.reload', {}); await waitApp(); await sleep(800);
