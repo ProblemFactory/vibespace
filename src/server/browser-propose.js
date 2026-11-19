@@ -74,6 +74,7 @@ function create({ keeper, feedCard = null, userTodos = null, sessionKeyFor = nul
   }
   const unsub = typeof keeper.onProposal === 'function' ? keeper.onProposal((entry) => show(entry)) : null;
 
+  const APPROVE_LAND_MS = 20000;   // the census cure: how long an approve's run waits for its approval to land
   // ── the runner ──
   const running = new Map(); // proposal id → the run in flight (ONE per proposal)
   /** THE USER's Approve: the PURE step (actor, state, the digest of the card that was pressed), then the run. */
@@ -81,7 +82,13 @@ function create({ keeper, feedCard = null, userTodos = null, sessionKeyFor = nul
     if (running.has(String(id))) return { ok: false, code: 'proposal_state', error: 'this proposal is already running' };
     const st = keeper.stepProposal(id, { event: 'approve', by, shown });
     if (!st.ok) return st;
-    const job = run(st.entry, { pressed }).catch((e) => log.warn?.(`[browser-propose] ${id}: the run threw — ${e && e.message}`)).finally(() => running.delete(String(id)));
+    // lane lg-store-writes, the census cure ((b)): the run (it clears a site — it cannot be undone) starts over an approval ON DISK —
+    // not landed at the bound ⇒ it waits for the landing (bounded); still not on disk ⇒ the proposal fails by name, nothing cleared
+    const notYet = () => keeper.stepProposal(id, { event: 'fail', outcome: { code: 'not-on-disk', step: 'starting', error: 'the approval is not on disk yet (the storage has not written it) — nothing was cleared; approve again once it answers' } });
+    const go = st.landed === false
+      ? (typeof keeper.whenLanded === 'function' ? keeper.whenLanded({ timeoutMs: APPROVE_LAND_MS }) : Promise.resolve({ landed: false })).then((L) => (L && L.landed ? run(st.entry, { pressed }) : notYet()))
+      : run(st.entry, { pressed });   // landed: the run starts in this run, as before
+    const job = go.catch((e) => log.warn?.(`[browser-propose] ${id}: the run threw — ${e && e.message}`)).finally(() => running.delete(String(id)));
     running.set(String(id), job);
     return { ok: true, started: true, proposal: SW.proposalCardBlock(st.entry) };
   }

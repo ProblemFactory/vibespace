@@ -125,6 +125,11 @@ function writeJsonAtomic(file, obj) {
 const SWEEP_PIECE_MS = 250;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const namedError = (code, msg, extra = {}) => { const e = new Error(msg); e.code = code; Object.assign(e, extra); return e; };
+/** THE LAUNCH RECORD ON DISK BEFORE CHROME (the census cure, 主开发 2026-11-19 08:56Z — the hunt's finding 6): a launch stamps THIS
+ *  machine's name on the record (stampLaunchHost — the lineage the next start reads to judge the profile's lock) and lands it
+ *  synchronously (commitSync, under the writer's bound) before Chrome writes its lock into the folder; not landed ⇒ refused by name,
+ *  nothing started (a kill after Chrome's lock and before the record would leave a lock the next pod on another name refuses) */
+const LAUNCH_NOT_ON_DISK = 'its launch record (this machine\'s name on the profile, which the next start reads to judge the profile\'s lock) is not on disk yet — the storage has not written it, so nothing was started; try again in a moment';
 
 let installed = null;
 /** The ONE keeper of this process (ws-create asks for the conversation's pin
@@ -852,6 +857,9 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
    *  inside a batch the batch's one commit lands. → whether it is on disk (false: held past the bound or failed — owed, said) */
   let batchSync = false;
   function commitSync() { if (batchDepth > 0) { batchDirty = true; batchSync = true; return true; } commit(); return landNow(); }
+  /** the census cure ((b) — a word to a person follows the save): a proposal's card is shown over a record ON DISK — landed now,
+   *  or the card rides the landing (never a card whose press would find nothing after a kill) */
+  function cardOnLanding(entry, what, landed = commitSync()) { if (landed) emitProposal(entry); else rideLanding(() => emitProposal(entry), { what, timeoutMs: null }); }   // `landed`: a caller that already landed its record passes the answer
 
   // ── views ──
   /** The daemon namespace of a profile's browser: `vs-<profileId>` — or, for a
@@ -2709,6 +2717,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   // → the wiring's notice), and NO heal runs while it stands (`userStoppedRec` — a named gate, never a budget hit). It ends
   // with the record: a conversation's next browser command starts a NEW record (its own act, `startedBy` its verb, no stamp).
   const USER_STOPPED_NOTE = 'you stopped its display window — the next browser command starts it again';
+  const STOP_LAND_MS = 10000;   // the census cure: how long a person's display stop waits for its stamp to land before the teardown
   const userStoppedRec = (rec) => !!(rec && rec.userStopped && rec.userStopped.by === 'user');
   /** The desktop keeper's hook: the person stopped display session `displayId` of `profileId`'s browser (the route's
    *  `why: 'user'` — the window's Stop, a second ✕, the Desktop list's Close). → the stamped record's view | null. */
@@ -2723,8 +2732,13 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const holders = B.attachedHolders(leasesOn(rec.profileId));
     log.log?.(`[browser] ${rec.profileId} "${label}": the person stopped its display window (${displayId}) — its Chrome goes with it and is NOT started again by itself (user-stopped); ${holders.length} holding conversation(s) told: their next browser command starts it`);
     emitLease({ kind: 'browser-user-stopped', profileId: rec.profileId, label, holders, displayId, local: true });
-    commitSync();
-    return browserView(rec);
+    const landed = commitSync();
+    const view = browserView(rec);
+    // the census cure ((b) — 主开发 09:18Z: a step after the save that cannot be undone): the desktop keeper tears the display down
+    // (its Chrome dies with it) right after this save — not on disk at the bound ⇒ the teardown waits for the stamp's landing
+    // (bounded): a kill after the teardown never leaves a browser the person stopped without its stamp (the boot would heal it)
+    if (!landed) return { ...view, landing: whenLanded({ timeoutMs: STOP_LAND_MS }) };
+    return view;
   }
   /** The desktop keeper's reader: who holds the browser whose display record is `displayId` — the conversations attached
    *  to its profile, and the person's stop while it stands for THAT display (a newer start's display carries none). */
@@ -3491,6 +3505,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
         sayDisplay(rec.display, `ephemeral ${profileId} "${p.label}"`);
         rec.cli = await cliNow(); // verify r2 (H1): the CLI this launch runs — every later call of this browser runs that version
         cliKeptByLaunch(rec); // B-7a30: the keeper's own act — that file is the answer, kept now
+        if (!commitSync()) { rec.state = 'failed'; rec.endedAt = now(); rec.lastError = LAUNCH_NOT_ON_DISK; commit(); throw namedError('launch_not_on_disk', LAUNCH_NOT_ON_DISK); }   // the census cure (finding 6): the stamped lineage on disk before Chrome
         const r = await rt.launch(null, { idleMs: launchIdle, headed: null, extraEnv: { ...env0, ...rec.display.env } });
         if (!r.ok) {
           const text = (r.stderr || r.error || r.stdout || '').trim().slice(0, 300);
@@ -4716,6 +4731,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       const stamp0 = F.dirLaunchStamp(p.dir); // r5 MAJOR 1 (iii): the directory before this launch
       rec.cli = await cliNow(); // verify r2 (H1): the CLI this launch runs — every later call of this browser runs that version
       cliKeptByLaunch(rec); // B-7a30: the keeper's own act — that file is the answer, kept now
+      if (!commitSync()) throw failed('launch_not_on_disk', LAUNCH_NOT_ON_DISK);   // the census cure (finding 6): the stamped lineage on disk before Chrome
       const r = await rt.launch(ns, { dir: p.dir, idleMs: 0, headed: headed0, extraEnv: { ...vendorEnv, ...providerEnv, ...rec.display.env }, argvPrefix });   // the .197 integration: the provider pair + the display fact's env (last: DISPLAY / XAUTHORITY are the machine's)
       if (!r.ok) {
         const text = (r.stderr || r.error || r.stdout || '').trim().slice(0, 300);
@@ -5022,7 +5038,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     rec.launchEnv = { AGENT_BROWSER_IDLE_TIMEOUT_MS: '0' };
     rec.cli = await cliNow(); // the CLI every later call of this browser runs (it attaches; it never launches)
     cliKeptByLaunch(rec); // B-7a30: the keeper's own act — that file is the answer, kept now
-    commit();
+    if (!commitSync()) throw await refused('launch_not_on_disk', LAUNCH_NOT_ON_DISK);   // the census cure (finding 6): the stamped lineage on disk before Chrome
     const engineArgs = engineLaunch && Array.isArray(engineLaunch.args) ? ENG.engineArgs(engineLaunch) : []; // lane engine-plugin: the engine's own arguments, censused by the builder (lane engine-spi-egress: + the keeper's proxy arguments when wrapped)
     if (rec.tailnet && rec.tailnet.arg) engineArgs.push(rec.tailnet.arg);
     if (rec.proxyRoad && rec.proxyRoad.arg) engineArgs.push(rec.proxyRoad.arg, ENG.PROXY_UDP_ARG); // B-8b87 (+ 14:25Z: the WebRTC policy beside it — UDP only through a proxy): the profile's proxy — its forwarder's loopback port, IN through the builder // lane tailnet-names: the keeper's tailnet PAC (never on an engine's launch) — IN through the builder
@@ -6881,8 +6897,10 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       catch (e) {
         log.warn?.(`[browser] profile ${id} "${rec.label}": its folder could not be moved from ${scratchDir} (${e.message}) — the record goes again; the conversation's browser keeps its folder`);
         reg.profiles = reg.profiles.filter((x) => x.id !== id);
-        commitSync();   // the moved2 census: the record's removal LANDS before its grant row goes (a kill between never leaves a record nobody may use)
-        try { const g = grantsOf(); if (g) g.remove('browser-profile', id, 'user'); } catch { /* the row of a gone record admits nobody */ }
+        // the moved2 census: the record's removal LANDS before its grant row goes (a kill between never leaves a record nobody may use) —
+        // the census cure ((b)): not landed at the bound ⇒ the row goes AT the landing, never before it
+        const dropRow = () => { try { const g = grantsOf(); if (g) g.remove('browser-profile', id, 'user'); } catch { /* the row of a gone record admits nobody */ } };
+        if (commitSync()) dropRow(); else rideLanding(dropRow, { what: `profile ${id}'s failed adoption`, timeoutMs: null });
         // (the moved2 cure 3: a late failure is BROADCAST — commit() above republishes the list without it — and said in the log line)
         return { moved: false, error: `could not move ${scratchDir} to ${target}: ${e.message}` };
       }
@@ -7621,7 +7639,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const prior = [...reg.blocked].reverse().find((b) => mineOn(b) && b.proposal) || null;
     const cv = SW.claimVerdict({ existing: prior, tier: v.value.tier });
     if (cv === 'same' || cv === 'rejected') {
-      if (cv === 'rejected') { const st = SW.proposalStep(prior.proposal, { event: 'told' }); if (st.ok) { prior.proposal = st.next; commitSync(); emitProposal(prior); } }
+      if (cv === 'rejected') { const st = SW.proposalStep(prior.proposal, { event: 'told' }); if (st.ok) { prior.proposal = st.next; cardOnLanding(prior, 'a rejected claim told'); } }
       log.log?.(`[browser] ${browserKey || '?'} claims blocked on ${v.value.host} again — ${cv === 'same' ? 'the proposal ' + prior.id + ' stands (' + prior.proposal.state + ')' : 'the user rejected ' + prior.id + ' (told now)'}`);
       return { claim: { ...prior }, text: SW.blockedText(prior), hint: SW.siteHintFor(reg.siteHints, prior.host), proposal: { ...prior.proposal }, duplicate: cv === 'same', rejected: cv === 'rejected' };
     }
@@ -7639,10 +7657,10 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     // proposal to make room for a claim; one that must still go (50 undecided) is SAID: its listeners hear `dropped`
     const kept = SW.blockedKeep([...reg.blocked.filter((b) => !(mineOn(b) && !b.proposal)), entry]);
     reg.blocked = kept.keep;
-    commitSync();
+    const claimLanded = commitSync();
     for (const d of kept.dropped) if (d.proposal && SW.blockedRank(d) >= 2) { log.warn?.(`[browser] the claim store is full — proposal ${d.id} (${d.proposal.state}, ${d.host}) was dropped to make room`); emitProposal({ ...d, dropped: true }); }
     log.log?.(`[browser] ${browserKey || '?'} claims blocked on ${v.value.host}${why ? ' (' + why + ')' : ''}, suggests tier ${v.value.tier}${proposal ? ` — proposal ${entry.id}: ${proposal.plan.kind}${proposal.plan.why ? ' (' + proposal.plan.why + ')' : ''}` : ''}`);
-    if (proposal) emitProposal(entry);
+    if (proposal) cardOnLanding(entry, 'a blocked claim\'s card', claimLanded);   // the census cure ((b)): the card over a claim on disk
     return { claim: v.value, text: SW.blockedText(v.value), hint: SW.siteHintFor(reg.siteHints, v.value.host), ...(proposal ? { proposal: { ...proposal } } : {}) };
   }
   /** lane browser-propose: the facts the PLAN reads about THIS conversation's browser — its named profile (a lease it
@@ -7675,9 +7693,11 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const v = SW.proposalStep(e.proposal, { ...ev, at: ev.at || now() });
     if (!v.ok) return v;
     e.proposal = v.next;
-    commitSync();
-    emitProposal(e);
-    return { ok: true, entry: { ...e, proposal: { ...e.proposal } } };
+    const landed = commitSync();
+    // the census cure ((b)): the card over a step on disk, and the step answers its landing — an APPROVE not on disk runs nothing
+    // until it is (browser-propose waits: its run clears a site's stored login, which cannot be undone)
+    cardOnLanding(e, 'a proposal\'s step', landed);
+    return { ok: true, entry: { ...e, proposal: { ...e.proposal } }, ...(landed ? {} : { landed: false, notOnDisk: true }) };
   }
   /** A field of the proposal record that is NOT a transition (the For-you item it filed). */
   function noteProposal(id, patch = {}) {
@@ -7926,7 +7946,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const prior = [...reg.siteResets].reverse().find(mine) || null;
     const cv = SW.siteResetClaimVerdict({ existing: prior });
     if (cv === 'same' || cv === 'rejected') {
-      if (cv === 'rejected') { const st = SW.proposalStep(prior.proposal, { event: 'told' }); if (st.ok) { prior.proposal = st.next; commitSync(); emitProposal(prior); } }
+      if (cv === 'rejected') { const st = SW.proposalStep(prior.proposal, { event: 'told' }); if (st.ok) { prior.proposal = st.next; cardOnLanding(prior, 'a rejected site reset told'); } }
       return { ok: true, entry: { ...prior, proposal: { ...prior.proposal } }, duplicate: cv === 'same', rejected: cv === 'rejected' };
     }
     const who = siteResetHolders(p.id);
@@ -7936,10 +7956,10 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const entry = { id, at: now(), browserKey: browserKey || null, sessionId: sessionId || null, profileId: p.id, host: h, url: proposal.url, by: 'agent', proposal };
     const kept = SW.blockedKeep([...reg.siteResets, entry]);
     reg.siteResets = kept.keep;
-    commitSync();
+    const resetLanded = commitSync();
     for (const d of kept.dropped) if (d.proposal && SW.blockedRank(d) >= 2) { log.warn?.(`[browser] the site-reset store is full — proposal ${d.id} (${d.proposal.state}, ${d.host}) was dropped to make room`); emitProposal({ ...d, dropped: true }); }
     log.log?.(`[browser] ${browserKey || '?'} proposes clearing ${h}'s stored login in the shared profile ${p.id} ("${label}") — proposal ${id}, ${who.holders} conversation(s)${who.human ? ' + the user\'s own tab' : ''}`);
-    emitProposal(entry);
+    cardOnLanding(entry, 'a site reset\'s card', resetLanded);   // the census cure ((b)): the card over a proposal on disk
     return { ok: true, entry: { ...entry, proposal: { ...proposal } }, duplicate: false, rejected: false };
   }
   /** Open `url` in THIS lease's own tab of profile `profileId` (the switch's re-open, for one lease): `tab new` under the

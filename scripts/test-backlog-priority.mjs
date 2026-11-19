@@ -213,6 +213,9 @@ const call = (method, p, body) => {
   const req = { headers: { authorization: 'Bearer vsst_test' }, query: {}, body: body || {} };
   const res = { json: (o) => { out = o; return res; }, status: (c) => { code = c; return res; } };
   routes[`${method} ${p}`](req, res);
+  // lane lg-store-writes, the census cure (the hunt's finding 2): every writing backlog verb answers once task-groups.json holds it —
+  // a route not answered in its own run is answered when the suite lands the writer's owed writes, LOUDLY
+  if (out === undefined) { const r = require('../src/store-writer.js').storeWriter().flushSync(); if (r.left && r.left.length) throw new Error(`the store writer left owed writes: ${JSON.stringify(r.left)}`); }
   return { out, code };
 };
 tasks.update(g.id, { backlog: [] });
@@ -254,6 +257,8 @@ const twoSessionRoutes = (mod) => {
     let out, code = 200;
     const res = { json: (o) => { out = o; return res; }, status: (c) => { code = c; return res; } };
     r[`${method} ${p}`]({ headers: { authorization: `Bearer ${tok}` }, query: {}, body: body || {} }, res);
+    // the census cure (finding 2): a writing backlog verb answers once task-groups.json holds it — the owed writes land, LOUDLY
+    if (out === undefined) { const w = require('../src/store-writer.js').storeWriter().flushSync(); if (w.left && w.left.length) throw new Error(`the store writer left owed writes: ${JSON.stringify(w.left)}`); }
     return { out, code };
   };
 };

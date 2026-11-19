@@ -334,6 +334,7 @@ class TaskGroupManager {
     // `isLiveKey(key)` (server.js: a running conversation) keeps an archived one in its groups until it ends
     this._isLiveKey = typeof isLiveKey === 'function' ? isLiveKey : () => false;
     this._archLive = new Set();
+    this._archOwed = new Set();   // the census cure (finding 3): archived keys whose unbind is not on disk yet — kept OUT of the baseline
     this._archSeen = null;
     if (typeof readUserState === 'function') { try { const st = readUserState(); this._archSeen = new Set((st && Array.isArray(st.archivedSessions) ? st.archivedSessions : []).map(String)); } catch { this._archSeen = new Set(); } }
     // THE STORE HELD UNREAD: `unreadNotice` = { say(words) → a handle | null (the For-you door; null/throw = not up yet — said at
@@ -569,16 +570,18 @@ class TaskGroupManager {
   _save({ boot = false } = {}) {
     if (this._unread) return false; // HELD unread: task-groups.json is never written over (THE STORE HELD UNREAD)
     this._rev = (this._rev || 0) + 1;
+    let landed = { ok: true, why: null };   // the census cure ((b)): a BOOT save answers its landing — its caller's failure branch reads it
     try {
       const W = this._writer();
       // an act is URGENT by the writer's own flag (the U4/U5 cure: no durable() asked here — the route that answers waits
       // through persisted())
       W.dirty(this._file, { name: 'task-groups.write', rank: 0, urgent: !boot, produce: () => JSON.stringify(this._docForDisk(), null, 2), onWritten: (ok, e) => this._storeWritten(ok, e) });
-      if (boot) { const r = W.flushSync([this._file]); const miss = r.left.find((x) => x.file === this._file); if (miss) console.warn(`[tasks] task-groups.json not on disk at the boot (${miss.why}) — kept in memory, the store writer retries`); }
+      if (boot) { const r = W.flushSync([this._file]); const miss = r.deferred ? { why: 'the hub is stopping — its exit flush writes it next' } : r.left.find((x) => x.file === this._file); if (miss) landed = { ok: false, why: miss.why }; if (miss) console.warn(`[tasks] task-groups.json not on disk at the boot (${miss.why}) — kept in memory, the store writer retries`); }
     } catch (e) { console.warn(`[tasks] save failed: ${e.message}`); }
     // Keep every context folder's generated TASK.md in lockstep with the
     // store (content-compare guard makes this a no-op for unchanged tasks)
     for (const t of Object.values(this._state.tasks)) this._syncTaskMd(t);
+    return landed;
   }
 
   /** a store write's outcome (the writer's onWritten): a failure said once until one lands */
@@ -1320,7 +1323,12 @@ class TaskGroupManager {
       t.ctx = m.rows;
       rep.groups++; rep.rows += m.rows.length; rep.folders += m.folders; rep.notes += m.notes; rep.merged += m.merged; rep.nonRecursive += m.nonRecursive;
     }
-    if (rep.groups) { this._save({ boot: true }); this._notify(); }   // lane lg-store-writes U5: the boot migration's rows are on disk when it returns (the ledger records it next)
+    if (rep.groups) {   // lane lg-store-writes U5: the boot migration's rows are on disk when it returns (the ledger records it next)
+      const L = this._save({ boot: true }); this._notify();
+      // the census cure ((b), B-a09e's class): rows not on disk at the bound ⇒ the migration THROWS by name — not recorded, and the
+      // runner holds the migrations after it (EVSNOTONDISK, the order law); the next boot migrates again (idempotent: ctx set ⇒ skipped)
+      if (!L.ok) throw Object.assign(new Error(`task-groups.json: the migrated context rows are in memory and not on disk yet (${L.why}) — not recorded, the migration runs again at the next boot`), { code: 'EVSNOTONDISK' });
+    }
     return rep;
   }
 
@@ -2708,20 +2716,16 @@ class TaskGroupManager {
   remove(id) {
     this._refuseUnread('deleting a Task Group'); // THE STORE HELD UNREAD: refused BY NAME before anything moves
     this.get(id); // throws if missing
+    // THE BASE'S ORDER (the release is the oracle — the census cure, 主开发 2026-11-19 08:56Z, the hunt's finding 4): the cleanup in
+    // the other stores FIRST, then the record. A kill before the record lands brings the group back WITHOUT its visibility row (the
+    // safe side: it admits nobody new); the reversed order (the cleanup riding the landing) could leave a row and a folder that a
+    // group made again under the same id would inherit.
+    // its archived Activity log goes with it (first: a failed delete keeps the group, never orphaned words)
+    if (archivableId(id)) fs.rmSync(path.join(this._archiveRoot, id), { recursive: true, force: true });
     delete this._state.tasks[id];
+    try { const g = this._grants(); if (g) g.remove('group-visibility', String(id), 'user'); } catch { /* the row of a gone group admits nobody */ }   // lane grants-unify
     this._legacy.delete(id);
     this._save();
-    // lane lg-store-writes (the moved2 cure 2 — THE STEP THAT CANNOT BE UNDONE RIDES THE LANDING, no roll back): its archived Activity
-    // log and its visibility grant go once task-groups.json no longer holds the group — a kill first brings the group back WITH
-    // them. The route's reply waits its bound (persisted): not landed yet ⇒ said, and the rest follows by itself at the landing
-    require('./store-writer.js').ride(this._writer(), this._file, () => {
-      // the moved2 cure 3: an id is made from the title and the date — a group made AGAIN under this id while the removal rode its
-      // landing owns the row and the Activity folder now: the old removal touches neither
-      if (this._state.tasks[id]) return;
-      // its archived Activity log goes with it (after the record: a failed delete leaves words on disk, never a group without them)
-      if (archivableId(id)) { try { fs.rmSync(path.join(this._archiveRoot, id), { recursive: true, force: true }); } catch (e) { console.warn(`[tasks] the archived Activity log of removed group ${id} was not deleted (${(e && e.code) || e}) — left on disk`); } }
-      try { const g = this._grants(); if (g) g.remove('group-visibility', String(id), 'user'); } catch { /* the row of a gone group admits nobody */ }   // lane grants-unify
-    }, { what: 'a group\'s removal', timeoutMs: null });
     this._notify(id);
   }
   /** this store's owed write waited for (a named wait — test-store-write-census WAITS): {ok, why} — under the writer's own bound
@@ -2744,6 +2748,9 @@ class TaskGroupManager {
     const t = this.get(id);
     const key = String(sessionKey || '');
     if (!key) throw new Error('sessionKey required');
+    // the census cure (finding 3): a conversation bound AGAIN after its archive stays — an unbind still owed for it is not retried
+    // (it re-enters the baseline: the person's later act wins)
+    if (this._archOwed && this._archOwed.delete(key) && this._archSeen) this._archSeen.add(key);
     if (!t.sessions.includes(key)) {
       t.sessions.push(key);
       t.updatedAt = Date.now();
@@ -2796,13 +2803,19 @@ class TaskGroupManager {
       let live = false; try { live = !!this._isLiveKey(k); } catch { live = false; }
       if (!live) { this._archLive.delete(k); due.push(k); }
     }
-    if (!due.length) return [];
-    const changed = this.unbindKeys(due).changed;
+    if (!due.length && !this._archOwed.size) return [];
+    const changed = due.length ? this.unbindKeys(due).changed : [];
     // lane lg-store-writes U5 (the move's hunt, D): the user-state file holding the archive list — THIS pass's baseline — is already
-    // written (synchronously, before this hook); the unbind is waited for under the writer's own bound (the moved2 cure 3: never a
-    // ten-minute hold of the main thread) — landed, a kill after it never leaves an archived conversation a member for good; HELD past
-    // the bound it stays owed (said) and the writer lands it. The larger cure (the baseline inside task-groups.json) is not this one's.
-    if (changed.length) this._landNow('the archived conversations\' unbind');
+    // written (synchronously, before this hook); the unbind is landed SYNCHRONOUSLY, under the writer's own bound (law D: never an
+    // unbounded hold of the main thread). THE FAILURE BRANCH STOPS THE BASELINE (the census cure, 主开发 2026-11-19 08:56Z — the hunt's
+    // finding 3): an unbind not on disk at the bound (held, failed, or deferred by the exit) keeps its keys OUT of the baseline — the
+    // next pass sees them as new again and lands again, until the disk holds it; never «done» for an unbind the disk does not hold.
+    if (changed.length || this._archOwed.size) {
+      const L = this._landNow('the archived conversations\' unbind');
+      if (L.ok) this._archOwed.clear();
+      else for (const k of due) this._archOwed.add(k);
+    }
+    for (const k of this._archOwed) this._archSeen.delete(k);
     return changed;
   }
 
@@ -3264,7 +3277,12 @@ class TaskGroupManager {
     }
     // the deferred-save census (its Task Groups pass): the config import writes other stores (credentials, hosts, the password) right after
     // this section — the groups LAND first (bounded), as the release's synchronous save did
-    if (n) { this._save(); this._landNow('a config import'); this._notify(); }
+    if (n) {
+      this._save(); const L = this._landNow('a config import'); this._notify();
+      // the census cure ((b)): the groups land before the import writes the other stores — not on disk at the bound ⇒ THROWS by name
+      // (the import stops there and says so; the groups stay in memory and the writer lands them)
+      if (!L.ok) throw Object.assign(new Error(`the imported Task Groups are not on disk yet (${L.why}) — the import stopped before the other stores; import again once the storage answers`), { code: 'EVSNOTONDISK' });
+    }
     return n;
   }
 }

@@ -17,7 +17,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { mutantCopies } from './mutant-copy.mjs';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
@@ -351,7 +351,9 @@ console.log('— ⑤ controls: patched copies the gates above must turn red');
   ok(allList !== src && (!ba.ok || 'use' in ba.body), 'control (b): a body that sends a list for "All my conversations" is caught by ①\'s body assertion', ba);
   const ks = read('src/server/browser-keeper.js');
   // lane grants-unify: the list is judged (rowFromUse) BEFORE the record lands — the mutant judges it after the record is committed
-  const late = ks.replace("    const useRow = use != null ? rowFromUse(use, { knownKeys, label: v.value.label }) : B.rowForCreate(owner, { conversationOf: conversationOfKey });   // lane grants-unify\n", '').replace("    reg.profiles.push(rec);\n    if (!legacy) bornWithRow(rec, useRow, by); else bornWithRow(rec, { to: [{ kind: 'everyone' }], except: [] }, by);   // lane grants-unify: the list is the store's row\n    commitSync();", "    reg.profiles.push(rec);\n    commitSync();\n    const useRow = use != null ? rowFromUse(use, { knownKeys, label: rec.label }) : B.rowForCreate(owner, { conversationOf: conversationOfKey });\n    bornWithRow(rec, useRow, by);");
+  // lane lg-store-writes (the census cure's gate): both plants through anchored() — the second anchor had moved (the create's commit()
+  // since the U5b cure) and a plain replace that missed left a copy that threw a ReferenceError instead of judging the list late
+  const late = anchored(anchored(ks, "    const useRow = use != null ? rowFromUse(use, { knownKeys, label: v.value.label }) : B.rowForCreate(owner, { conversationOf: conversationOfKey });   // lane grants-unify\n", '', 'the list judged before the record'), "    reg.profiles.push(rec);\n    if (!legacy) bornWithRow(rec, useRow, by); else bornWithRow(rec, { to: [{ kind: 'everyone' }], except: [] }, by);   // lane grants-unify: the list is the store's row\n    commit();", "    reg.profiles.push(rec);\n    commit();\n    const useRow = use != null ? rowFromUse(use, { knownKeys, label: rec.label }) : B.rowForCreate(owner, { conversationOf: conversationOfKey });\n    bornWithRow(rec, useRow, by);", 'the record minted before the list');
   ok(late !== ks, 'control (c): the patch (the list judged AFTER the record is minted) applies');
   const Kl = MUT.load('src/server/browser-keeper.js', late, 'late');
   const D = path.join(ROOT, 'data-c');

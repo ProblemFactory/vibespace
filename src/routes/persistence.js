@@ -1358,7 +1358,9 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     apply('layouts', (d) => { if (d && typeof d === 'object') writeLayouts(d); });
     apply('userState', (d) => { if (d && typeof d === 'object') writeUserState(d, { whole: true }); });   // lane sidebar-echo-order r10: a person's import is an ACT at its time — an act made before it, re-sent after, does not land over it
     apply('bookmarks', (d) => { if (Array.isArray(d)) { writeBookmarks(d); broadcast({ type: 'bookmarks-updated', bookmarks: d }); } });
-    apply('tasks', (d) => { if (d && typeof d === 'object') getTasks?.()?.importBundle?.(d); });
+    // lane lg-store-writes, the census cure ((b)): the groups not on disk at the bound stop the import before the other stores — said
+    try { apply('tasks', (d) => { if (d && typeof d === 'object') getTasks?.()?.importBundle?.(d); }); }
+    catch (e) { if (e && e.code === 'EVSNOTONDISK') return res.status(503).json({ error: e.message, applied, notOnDisk: true }); throw e; }
     let pricingSkipped = [];
     apply('pricing', (d) => { if (d && typeof d === 'object') { const uh = getUsageHistory?.(); uh?.setPricing?.(d); pricingSkipped = uh?.lastCatalogSkips?.() || []; } });
     // lane cli-update-needs-nothing: a row the export marked as Claude Code's own price is not imported as yours — said here, by key

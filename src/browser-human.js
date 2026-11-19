@@ -47,7 +47,7 @@ const TAB_REF_RE = /^(?:t\d{1,4}|[0-9A-Fa-f]{32})$/;
 /** Every refusal `browseYourselfVerdict` can answer, in its order (the census and the STATUS rows read this). */
 const REFUSAL_CODES = Object.freeze(['not-found', 'not_attachable', 'remote_profile', 'not_ours', 'backend_unavailable', 'browser_restarting', 'profile_locked', 'browser_unstable', 'cap']);
 /** Launch-time refusals `start()` throws — passed through with their own words, never re-worded. */
-const LAUNCH_CODES = Object.freeze(['backend_no_key', 'fence_refused', 'launch_failed', 'profile_locked', 'browser_closed', 'backend_seat_taken', 'backend_seat_ceiling', 'browser_no_cdp', 'cap']);
+const LAUNCH_CODES = Object.freeze(['backend_no_key', 'fence_refused', 'launch_failed', 'profile_locked', 'browser_closed', 'backend_seat_taken', 'backend_seat_ceiling', 'browser_no_cdp', 'cap', 'launch_not_on_disk']);   // + launch_not_on_disk (lane lg-store-writes, the census cure: the launch record not on disk — nothing started)
 /** An act's typing / scrolling burst ends after this long without its kind of input (the recorder writes ONE entry). */
 const TYPE_IDLE_MS = 1200;
 const WHEEL_IDLE_MS = 700;

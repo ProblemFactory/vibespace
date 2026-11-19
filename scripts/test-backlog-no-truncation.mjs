@@ -114,9 +114,15 @@ const target = tasks.get(g.id).backlog[3];
 const rc = post({ claim: target.id });
 check('claim echoes the item by id', rc.out && rc.out.item && rc.out.item.id === target.id && rc.out.item.claimedBy.includes('claude:sess1'), JSON.stringify(rc.out).slice(0, 200));
 // the U4/U5 cure (主开发's as-if-must): a claim is NOT answered while task-groups.json does not hold it (two agents are never
-// both told they own a row) — answered once the writer landed it; an add answers in its own run (it only adds)
+// both told they own a row) — answered once the writer landed it; the census cure (主开发 2026-11-19 08:56Z, the hunt's finding 2): an
+// ADD too — every writing verb answers once the row is on disk (a parked row is never lost in silence)
 check('a CLAIM is answered only once task-groups.json holds it (not in the route\'s own run; answered when the store landed)', rc.inRun === false && !!rc.out && JSON.parse(fs.readFileSync(path.join(tmp, 'task-groups.json'), 'utf8')).tasks[g.id].backlog.find((b) => b.id === target.id).claimedBy.includes('claude:sess1'), { inRun: rc.inRun });
-check('an ADD answers in its own run (it gives the caller a row nobody else holds — never waits on the disk)', r.inRun === true && r2.inRun === true, { add: r.inRun, add2: r2.inRun });
+{
+  const disk = () => { try { return Object.values(JSON.parse(fs.readFileSync(path.join(tmp, 'task-groups.json'), 'utf8')).tasks).find((t) => t.id === g.id).backlog; } catch { return []; } };
+  check('an ADD is answered only once task-groups.json holds its row (the census cure, finding 2: not in the route\'s own run; «parked» is never said for a row a kill would lose)', r.inRun === false && r2.inRun === false && disk().some((b) => b.id === r.out.item.id) && disk().some((b) => b.id === r2.out.item.id), { add: r.inRun, add2: r2.inRun });
+  const rd = post({ done: r2.out.item.id });
+  check('a DONE is answered only once task-groups.json holds it (the census cure, finding 2: a resolved row never comes back open in silence)', rd.inRun === false && rd.out && rd.out.success === true && disk().find((b) => b.id === r2.out.item.id)?.status === 'done', { inRun: rd.inRun, out: rd.out && rd.out.success });
+}
 
 // (3b) B-31d7 (2026-09-26, B-4ffb stored twice): the store keeps an item's ONE LINE to 500 characters
 // (CAPS.backlogItem) and its detail to 6000. A 600-character title was stored CLIPPED, the identity

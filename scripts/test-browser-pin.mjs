@@ -797,6 +797,36 @@ console.log('— ⑤ the routes (in-process express) and the shipped vibespace-b
   const RmK = mutantCopies('browser-pin-ride', path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')).load('src/server/browser-keeper.js', anchored(kSrc, RM_RIDE, 'Promise.resolve({ landed: true, value: (ran = step()) })   /* MUTANT: the step runs at the act */', 'the removal rides the landing'), 'ride-ignored');
   const rmX = await rmLeg(RmK, 'red');
   ok(rmX.before.dropped === 1 && rmX.before.onDisk, 'CONTROL (a copy whose step runs at the act): the passkeys are DROPPED while the disk still holds the record — a kill now leaves a profile without them (red)', rmX.before);
+  // THE CENSUS CURE (主开发 2026-11-19 08:56Z — the hunt's finding 6): a launch stamps THIS machine's name on its record (the lineage
+  // the next start reads to judge the profile's lock) and LANDS it before Chrome writes its lock into the folder — the storage
+  // refusing the registry ⇒ the start is REFUSED by name (launch_not_on_disk) and nothing is launched. The three stamping roads
+  // (start, attachStart, the ephemeral launch) carry the same landing; the leg drives start(). RED (anchored): its landing skipped
+  const launchLeg = async (Kmod, tag) => {
+    const { k5 } = await scene(Kmod, 'launch-' + tag);
+    const key = path.resolve(k5.storeFile), W = SWb.storeWriter(); W.flushSync([key]);
+    const id = k5._reg().profiles.find((x) => x.label === 'U5b Team').id;
+    const tmps = [`${key}.tmp-${process.pid}-w`, `${key}.tmp-${process.pid}`]; for (const t of tmps) fs.mkdirSync(t, { recursive: true });   // the storage refuses: its write FAILS (EISDIR)
+    let code = null, st = null; try { st = await k5.start(id); } catch (e) { code = (e && e.code) || String(e && e.message); }
+    const rec = k5._reg().browsers[id] || null;
+    const out = { code, state: rec ? rec.state : null, pid: rec ? rec.pid : null, ready: !!(st && st.state === 'ready') };
+    for (const t of tmps) fs.rmSync(t, { recursive: true, force: true });
+    try { if (out.ready) await k5.stop(id); } catch { }
+    try { k5.shutdown(); } catch { }
+    W.flushSync();
+    return out;
+  };
+  const lnOk = await launchLeg(K, 'real');
+  ok(lnOk.code === 'launch_not_on_disk' && lnOk.state === 'failed' && !lnOk.pid && !lnOk.ready, 'FINDING 6: a start whose stamped launch record cannot land is REFUSED by name (launch_not_on_disk) — the record failed, NO browser launched (no lock of this machine left in the folder ahead of its lineage)', lnOk);
+  const LAND_START = "      if (!commitSync()) throw failed('launch_not_on_disk', LAUNCH_NOT_ON_DISK);";
+  ok((kSrc.match(/if \(!commitSync\(\)\) (?:throw|\{ rec\.state = 'failed')[^\n]*'launch_not_on_disk'/g) || []).length === 3, 'FINDING 6: all three stamping roads (start, attachStart, the ephemeral launch) land the record before Chrome, refused by name');
+  const LAND_ATTACH = "    if (!commitSync()) throw await refused('launch_not_on_disk', LAUNCH_NOT_ON_DISK);";
+  const LAND_EPH = "        if (!commitSync()) { rec.state = 'failed'; rec.endedAt = now(); rec.lastError = LAUNCH_NOT_ON_DISK; commit(); throw namedError('launch_not_on_disk', LAUNCH_NOT_ON_DISK); }";
+  const owedSrc = anchored(anchored(anchored(kSrc, LAND_START, "      commit();   // MUTANT: the record left owed when Chrome starts", 'the start lands its launch record first'),
+    LAND_ATTACH, "    commit();   // MUTANT: the record left owed when Chrome starts", 'the attach start lands its launch record first'),
+    LAND_EPH, "        commit();   // MUTANT: the record left owed when Chrome starts", 'the ephemeral launch lands its record first');
+  const NoLandK = mutantCopies('browser-pin-launch', path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')).load('src/server/browser-keeper.js', owedSrc, 'launch-owed');
+  const lnX = await launchLeg(NoLandK, 'red');
+  ok(lnX.code !== 'launch_not_on_disk' && (lnX.ready || !!lnX.pid), 'CONTROL (a copy whose start leaves the record owed): the browser LAUNCHES while the disk does not hold this machine\'s name on it (red)', lnX);
   SWb.storeWriter().flushSync();
 }
 

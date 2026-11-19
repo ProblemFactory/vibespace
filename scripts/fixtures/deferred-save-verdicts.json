@@ -3,18 +3,22 @@
   "key": "jobs · src/agent-routes.js · setupAgentRoutes > route:POST /api/agent/jobs/:ref/:act · _save()",
   "verdict": "waits",
   "why": "access and notify both answer through a.jm.persisted() after _touch+_save — the agent is told only once both files landed (or notOnDisk is said).",
-  "at": "src/agent-routes.js:return void a.jm.persisted((saved) => { try { require('./store-writer.js').identityAtExit(res); res.json({ success: true, access: job.access, ...(saved ? {} : { notOnDisk: true }) }); } catch { } });   // an authority change: answered once on disk"
+  "at": "src/agent-routes.js:return void a.jm.persisted((saved) => { try { require('./store-writer.js').identityAtExit(res); res.json({ success: true, access: job.access, ...(saved ? {} : { notOnDisk: true }) }); } catch { } });   // an authority change: answered once on disk",
+  "branch": "(saved ? {} : { notOnDisk: true",
+  "stops": "the agent's «done»: it says not on disk"
  },
  {
   "key": "jobs · src/jobs.js · JobManager.init · _save()",
-  "verdict": "sync",
-  "why": "The recovered skeletons are written and waited for (_onDisk) before adopt/replay runs (its _onDisk result is not checked; boot goes on); line 258 is the plain 2 s paced tick with nothing after it."
+  "verdict": "sync-last",
+  "why": "the skeletons said once; jobs start as released"
  },
  {
   "key": "jobs · src/jobs.js · JobManager.shutdown · _save()",
   "verdict": "rides",
   "why": "The one irreversible step after the exit save, removing the engine lock, runs only on jobs.json's landing (_unlockWhenLanded, cleared in _storeWritten); outside an exit both files are _onDisk-waited first.",
-  "at": "src/jobs.js:if (this._unlockWhenLanded) { this._unlockWhenLanded = false; this._unlockNow(); }"
+  "at": "src/jobs.js:if (this._unlockWhenLanded) { this._unlockWhenLanded = false; this._unlockNow(); }",
+  "crash": "the lock stays held; the next engine waits it out",
+  "readers": "none: the hub is ending"
  },
  {
   "key": "jobs · src/jobs.js · JobManager._unreadRetry · _dirty = true",
@@ -45,13 +49,17 @@
   "key": "jobs · src/jobs.js · JobManager.clearJobs · _dirty = true",
   "verdict": "waits",
   "why": "The clear answers only through record-clear's whenStored (jm.persisted); the cleared asks' waits/For-you resolve ride the landing; the spill/stash/For-you redactions run the person's way (more cleared), never a false done.",
-  "at": "src/server/record-clear.js:st.persisted((ok) => {"
+  "at": "src/server/record-clear.js:st.persisted((ok) => {",
+  "branch": "src/server/record-clear.js:if (!saved && res.ok) res.notOnDisk = true;",
+  "stops": "the clear's «done»: it says not on disk"
  },
  {
   "key": "jobs · src/jobs.js · JobManager.clearJobs · _save()",
   "verdict": "waits",
   "why": "Same act as the _dirty row: urgent _save, the cleared asks ride (this._ride), the reply waits for jm.persisted through record-clear's whenStored.",
-  "at": "src/server/record-clear.js:st.persisted((ok) => {"
+  "at": "src/server/record-clear.js:st.persisted((ok) => {",
+  "branch": "src/server/record-clear.js:if (!saved && res.ok) res.notOnDisk = true;",
+  "stops": "the clear's «done»: it says not on disk"
  },
  {
   "key": "jobs · src/jobs.js · JobManager._deliverTo · _dirty = true",
@@ -72,7 +80,9 @@
   "key": "jobs · src/jobs.js · JobManager._onRetryEvent · _save()",
   "verdict": "rides",
   "why": "the park's copy leaves msg-retry.json at the notifications' landing (_taken)",
-  "at": "src/jobs.js:_taken() { return { taken: true, ride: (step) => this._ride(this.notifsFile"
+  "at": "src/jobs.js:_taken() { return { taken: true, ride: (step) => this._ride(this.notifsFile",
+  "crash": "the entry stays parked in msg-retry.json until the landing",
+  "readers": "none: the listener answers taken, read at the landing"
  },
  {
   "key": "jobs · src/jobs.js · JobManager._notifyLogPush · _dirty = true",
@@ -83,19 +93,25 @@
   "key": "jobs · src/jobs.js · JobManager.subscribe · _save()",
   "verdict": "waits",
   "why": "subscribe is not a paced verb: the agent route answers it through a.jm.persisted() (the shared tail).",
-  "at": "src/agent-routes.js:a.jm.persisted((saved) => { try { require('./store-writer.js').identityAtExit(res); res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true, ...(act === 'rm' ? { code: 'finishes-on-landing' } : {}) }) }); } catch { } });   // lane lg-store-writes U4: the act's answer waits for the store (the loop never does); a write not landed is SAID in the answer, the act stays applied in memory and the writer retries"
+  "at": "src/agent-routes.js:a.jm.persisted((saved) => { try { require('./store-writer.js').identityAtExit(res); res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true, ...(act === 'rm' ? { code: 'finishes-on-landing' } : {}) }) }); } catch { } });   // lane lg-store-writes U4: the act's answer waits for the store (the loop never does); a write not landed is SAID in the answer, the act stays applied in memory and the writer retries",
+  "branch": "(saved ? {} : { notOnDisk: true",
+  "stops": "the agent's «done»: it says not on disk"
  },
  {
   "key": "jobs · src/jobs.js · JobManager.unsubscribe · _save()",
   "verdict": "waits",
   "why": "Answered through a.jm.persisted() like subscribe.",
-  "at": "src/agent-routes.js:a.jm.persisted((saved) => { try { require('./store-writer.js').identityAtExit(res); res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true, ...(act === 'rm' ? { code: 'finishes-on-landing' } : {}) }) }); } catch { } });   // lane lg-store-writes U4: the act's answer waits for the store (the loop never does); a write not landed is SAID in the answer, the act stays applied in memory and the writer retries"
+  "at": "src/agent-routes.js:a.jm.persisted((saved) => { try { require('./store-writer.js').identityAtExit(res); res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true, ...(act === 'rm' ? { code: 'finishes-on-landing' } : {}) }) }); } catch { } });   // lane lg-store-writes U4: the act's answer waits for the store (the loop never does); a write not landed is SAID in the answer, the act stays applied in memory and the writer retries",
+  "branch": "(saved ? {} : { notOnDisk: true",
+  "stops": "the agent's «done»: it says not on disk"
  },
  {
   "key": "jobs · src/jobs.js · JobManager.announce · _save()",
   "verdict": "waits",
   "why": "its reply waits when its copy was only stashed (the rate floor)",
-  "at": "src/agent-routes.js:if (r.landing) delete r.landing;"
+  "at": "src/agent-routes.js:if (r.landing) delete r.landing;",
+  "branch": "src/agent-routes.js:    if (r.landing) delete r.landing;\n    a.jm.persisted((saved) => { try { require('./store-writer.js').identityAtExit(res); res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true",
+  "stops": "the agent's «done»: it says not on disk"
  },
  {
   "key": "jobs · src/jobs.js · JobManager._judgeHeldView · _saveNotifs()",
@@ -116,7 +132,9 @@
   "key": "jobs · src/jobs.js · JobManager.restoreNotifs · _saveNotifs()",
   "verdict": "rides",
   "why": "the hand-over drops its kept copy at the put-back's landing",
-  "at": "src/server/stash-handover.js:jm.afterNotifsLanded(() => {"
+  "at": "src/server/stash-handover.js:jm.afterNotifsLanded(() => {",
+  "crash": "the hand-over keeps its copy; the next start puts it back",
+  "readers": "none: the entries are read at the next drain"
  },
  {
   "key": "jobs · src/jobs.js · JobManager.drainNotifs · _saveNotifs()",
@@ -172,12 +190,16 @@
   "key": "jobs · src/jobs.js · JobManager._waitFor · _save()",
   "verdict": "waits",
   "why": "The wait's only reply is the start/create answer, which goes through persisted(); boot/cron/vault callers reply nothing and the wait is re-judged at every boot.",
-  "at": "src/server/jobs-wiring.js:jm.persisted((saved) => { try { require('../store-writer.js').identityAtExit(res); res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true, ...(act === 'rm' || act === 'answer' ? { code: 'finishes-on-landing' } : {}) }) }); } catch { } });   // the moved2 cure 2: a removal / an answer not landed finishes by itself at the landing (said by its code)   // lane lg-store-writes U4: the act's answer waits for the store (the loop never does); a write not landed is SAID"
+  "at": "src/server/jobs-wiring.js:jm.persisted((saved) => { try { require('../store-writer.js').identityAtExit(res); res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true, ...(act === 'rm' || act === 'answer' ? { code: 'finishes-on-landing' } : {}) }) }); } catch { } });   // the moved2 cure 2: a removal / an answer not landed finishes by itself at the landing (said by its code)   // lane lg-store-writes U4: the act's answer waits for the store (the loop never does); a write not landed is SAID",
+  "branch": "(saved ? {} : { notOnDisk: true",
+  "stops": "the person's «done»: it says not on disk"
  },
  {
   "key": "jobs · src/jobs.js · JobManager._spawn · _save()",
   "verdict": "sync",
-  "why": "The run's intent (2238) is waited by _onDisk before any child exists — not landed => no child, refused by name; 2275 records that refusal and throws (an error answered, nothing spawned)."
+  "why": "The run's intent (2238) is waited by _onDisk before any child exists — not landed => no child, refused by name; 2275 records that refusal and throws (an error answered, nothing spawned).",
+  "branch": "if (!intent.ok) {",
+  "stops": "the run's child: never started over an intent the disk lacks"
  },
  {
   "key": "jobs · src/jobs.js · JobManager._adoptAndReplay · _dirty = true",
@@ -187,7 +209,9 @@
  {
   "key": "jobs · src/jobs.js · JobManager._finalizeRun · _save()",
   "verdict": "rides",
-  "why": "the end's For-you item and the owner's message ride the ended run's landing"
+  "why": "the end's For-you item and the owner's message ride the ended run's landing",
+  "crash": "a kill re-judges the end at boot and says it once",
+  "readers": "none: the For-you item and message come last"
  },
  {
   "key": "jobs · src/jobs.js · JobManager._startAskedAtStop > say · _save()",
@@ -207,66 +231,90 @@
  {
   "key": "jobs · src/jobs.js · JobManager._cronTick · _save()",
   "verdict": "sync",
-  "why": "the fired slot lands before the next tick (_onDisk); a missed one-shot's notices ride"
+  "why": "the fired slot lands before the next tick (_onDisk); a missed one-shot's notices ride",
+  "branch": "if (!L.ok) { this._cronHeld = L.why || 'not on disk'; return; }",
+  "stops": "every next fire until the fired slot is on disk"
  },
  {
   "key": "jobs · src/jobs.js · JobManager._gc · _dirty = true",
   "verdict": "rides",
-  "why": "the log folders ride the removal's landing; owed removals keep their logs in the sweep"
+  "why": "the log folders ride the removal's landing; owed removals keep their logs in the sweep",
+  "crash": "the run folders stay; the next gc removes them",
+  "readers": "the logs sweep keeps an owed removal's folders"
  },
  {
   "key": "jobs · src/jobs.js · JobManager._gc · _save()",
   "verdict": "rides",
-  "why": "the log folders ride the removal's landing; owed removals keep their logs in the sweep"
+  "why": "the log folders ride the removal's landing; owed removals keep their logs in the sweep",
+  "crash": "the run folders stay; the next gc removes them",
+  "readers": "the logs sweep keeps an owed removal's folders"
  },
  {
   "key": "jobs · src/jobs.js · JobManager.create · _save()",
   "verdict": "waits",
   "why": "The child is spawned only after _spawn's _onDisk; the create answer goes through persisted() on both doors.",
-  "at": "src/agent-routes.js:a.jm.persisted((saved) => { try { require('./store-writer.js').identityAtExit(res); res.json({ machine: hubMachine, where: where.words,  success: true, job: jobWhen(r.job), renamed: r.renamed, notify, ...(r.vaultWait ? { vaultWait: r.vaultWait } : {}), ...(saved ? {} : { notOnDisk: true }) }); } catch (e) { answerCreateFailed(res, e); } });   // lane lg-store-writes U4: the answer waits for the store, never the loop; a throw while it is built is answered 500 create-failed by the wrapper's own helper (B-70f9: every throw answered)   // lane vault-job-road r2: a scheduled job whose fires would wait for their vault values"
+  "at": "src/agent-routes.js:a.jm.persisted((saved) => { try { require('./store-writer.js').identityAtExit(res); res.json({ machine: hubMachine, where: where.words,  success: true, job: jobWhen(r.job), renamed: r.renamed, notify, ...(r.vaultWait ? { vaultWait: r.vaultWait } : {}), ...(saved ? {} : { notOnDisk: true }) }); } catch (e) { answerCreateFailed(res, e); } });   // lane lg-store-writes U4: the answer waits for the store, never the loop; a throw while it is built is answered 500 create-failed by the wrapper's own helper (B-70f9: every throw answered)   // lane vault-job-road r2: a scheduled job whose fires would wait for their vault values",
+  "branch": "(saved ? {} : { notOnDisk: true",
+  "stops": "the agent's «done»: it says not on disk"
  },
  {
   "key": "jobs · src/jobs.js · JobManager.stop · _save()",
   "verdict": "waits",
   "why": "The stop answers through persisted() (notOnDisk said when it did not land); the SIGTERM precedes the landing, so after a kill an unlanded stop's service is replayed per its old record — the reply never said done.",
-  "at": "src/server/jobs-wiring.js:jm.persisted((saved) => { try { require('../store-writer.js').identityAtExit(res); res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true, ...(act === 'rm' || act === 'answer' ? { code: 'finishes-on-landing' } : {}) }) }); } catch { } });   // the moved2 cure 2: a removal / an answer not landed finishes by itself at the landing (said by its code)   // lane lg-store-writes U4: the act's answer waits for the store (the loop never does); a write not landed is SAID"
+  "at": "src/server/jobs-wiring.js:jm.persisted((saved) => { try { require('../store-writer.js').identityAtExit(res); res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true, ...(act === 'rm' || act === 'answer' ? { code: 'finishes-on-landing' } : {}) }) }); } catch { } });   // the moved2 cure 2: a removal / an answer not landed finishes by itself at the landing (said by its code)   // lane lg-store-writes U4: the act's answer waits for the store (the loop never does); a write not landed is SAID",
+  "branch": "(saved ? {} : { notOnDisk: true",
+  "stops": "the person's «done»: it says not on disk"
  },
  {
   "key": "jobs · src/jobs.js · JobManager.start · _save()",
   "verdict": "waits",
   "why": "Every spawn waits its intent (_onDisk); the start answers through persisted() on both doors.",
-  "at": "src/server/jobs-wiring.js:jm.persisted((saved) => { try { require('../store-writer.js').identityAtExit(res); res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true, ...(act === 'rm' || act === 'answer' ? { code: 'finishes-on-landing' } : {}) }) }); } catch { } });   // the moved2 cure 2: a removal / an answer not landed finishes by itself at the landing (said by its code)   // lane lg-store-writes U4: the act's answer waits for the store (the loop never does); a write not landed is SAID"
+  "at": "src/server/jobs-wiring.js:jm.persisted((saved) => { try { require('../store-writer.js').identityAtExit(res); res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true, ...(act === 'rm' || act === 'answer' ? { code: 'finishes-on-landing' } : {}) }) }); } catch { } });   // the moved2 cure 2: a removal / an answer not landed finishes by itself at the landing (said by its code)   // lane lg-store-writes U4: the act's answer waits for the store (the loop never does); a write not landed is SAID",
+  "branch": "(saved ? {} : { notOnDisk: true",
+  "stops": "the person's «done»: it says not on disk"
  },
  {
   "key": "jobs · src/jobs.js · JobManager.setMemory · _save()",
   "verdict": "waits",
   "why": "Applies from the next run only (nothing irreversible); the answer goes through persisted() on both doors.",
-  "at": "src/server/jobs-wiring.js:jm.persisted((saved) => { try { require('../store-writer.js').identityAtExit(res); res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true, ...(act === 'rm' || act === 'answer' ? { code: 'finishes-on-landing' } : {}) }) }); } catch { } });   // the moved2 cure 2: a removal / an answer not landed finishes by itself at the landing (said by its code)   // lane lg-store-writes U4: the act's answer waits for the store (the loop never does); a write not landed is SAID"
+  "at": "src/server/jobs-wiring.js:jm.persisted((saved) => { try { require('../store-writer.js').identityAtExit(res); res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true, ...(act === 'rm' || act === 'answer' ? { code: 'finishes-on-landing' } : {}) }) }); } catch { } });   // the moved2 cure 2: a removal / an answer not landed finishes by itself at the landing (said by its code)   // lane lg-store-writes U4: the act's answer waits for the store (the loop never does); a write not landed is SAID",
+  "branch": "(saved ? {} : { notOnDisk: true",
+  "stops": "the person's «done»: it says not on disk"
  },
  {
   "key": "jobs · src/jobs.js · JobManager.rm · _dirty = true",
   "verdict": "rides",
-  "why": "clearKept and resolveJobAsk run inside this._ride(this.file, 'the removal'); the reply waits (persisted). No logs pass runs in this run (a LATER pass while the write is still held reads the same memory keep set — shared cure with _gc)."
+  "why": "clearKept and resolveJobAsk run inside this._ride(this.file, 'the removal'); the reply waits (persisted). No logs pass runs in this run (a LATER pass while the write is still held reads the same memory keep set — shared cure with _gc).",
+  "crash": "the record comes back whole with its processes and asks",
+  "readers": "none: the reply waits its bound and says not yet"
  },
  {
   "key": "jobs · src/jobs.js · JobManager.rm · _save()",
   "verdict": "rides",
-  "why": "Same line as the _dirty row: the removal's irreversible steps ride the landing, the reply waits persisted()."
+  "why": "Same line as the _dirty row: the removal's irreversible steps ride the landing, the reply waits persisted().",
+  "crash": "the record comes back whole with its processes and asks",
+  "readers": "none: the reply waits its bound and says not yet"
  },
  {
   "key": "jobs · src/jobs.js · JobManager.ask · _save()",
   "verdict": "rides",
-  "why": "the For-you item and the owner's note ride the panel's landing"
+  "why": "the For-you item and the owner's note ride the panel's landing",
+  "crash": "no For-you item was filed; the job asks again",
+  "readers": "none: the step re-checks the panel is still pending"
  },
  {
   "key": "jobs · src/jobs.js · JobManager.withdrawAsk · _save()",
   "verdict": "rides",
-  "why": "the answers file, the wait and the For-you item ride the withdraw's landing"
+  "why": "the answers file, the wait and the For-you item ride the withdraw's landing",
+  "crash": "the panel comes back pending; the job withdraws again",
+  "readers": "none: the wait wakes inside the step"
  },
  {
   "key": "jobs · src/jobs.js · JobManager.answerPanel · _save()",
   "verdict": "rides",
-  "why": "The answers.jsonl mirror, the waiters, the For-you resolve and the owner notice all run inside this._ride(this.file, 'the panel's answer'); the 3619 save is inside that step; the reply waits persisted()."
+  "why": "The answers.jsonl mirror, the waiters, the For-you resolve and the owner notice all run inside this._ride(this.file, 'the panel's answer'); the 3619 save is inside that step; the reply waits persisted().",
+  "crash": "the panel comes back pending; the person answers again",
+  "readers": "none: the wait wakes inside the step"
  },
  {
   "key": "task-groups · src/task-groups.js · TaskGroupManager.constructor · _save()",
@@ -280,61 +328,79 @@
  },
  {
   "key": "task-groups · src/task-groups.js · TaskGroupManager.migrateContextRows · _save()",
-  "verdict": "waits",
+  "verdict": "sync",
   "why": "A boot migration: the save is flushed synchronously (boot:true) and the runner also lands every store the migrations dirtied (landStores) before it stamps the ledger.",
-  "at": "src/task-groups.js:if (rep.groups) { this._save({ boot: true }); this._notify(); }   // lane lg-store-writes U5: the boot migration's rows are on disk when it returns (the ledger records it next)"
+  "branch": "if (!L.ok) throw Object.assign(new Error(`task-groups.json: the migrated context rows",
+  "stops": "the migration's record and the migrations after it",
+  "at": "src/task-groups.js:if (boot) { const r = W.flushSync([this._file]);"
  },
  {
   "key": "task-groups · src/task-groups.js · TaskGroupManager.create · _save()",
   "verdict": "waits",
   "why": "the agent's answer waits for the store (answerOnDisk; the panel's onDisk)",
-  "at": "src/agent-routes.js:return answerOnDisk(res, { success: true, group: brief(tasks.view(t.id)) });"
+  "at": "src/agent-routes.js:return answerOnDisk(res, { success: true, group: brief(tasks.view(t.id)) });",
+  "branch": "src/agent-routes.js:res.json(saved ? body : { ...body, notOnDisk: true });",
+  "stops": "the agent's «done»: it says not on disk"
  },
  {
   "key": "task-groups · src/task-groups.js · TaskGroupManager.update · _save()",
   "verdict": "waits",
-  "why": "a claim, the group-admin update and unbind answer once on disk; a backlog ADD answers in its run (its row is the caller's alone — test-backlog-no-truncation's law)",
-  "at": "src/agent-routes.js:(claim !== undefined ? answerOnDisk : (r0, b0) => r0.json(b0))(res, {"
+  "why": "every writing backlog verb, a claim, the group-admin update and unbind answer once on disk",
+  "at": "src/agent-routes.js:    answerOnDisk(res, {\n      success: true,\n      backlog: sortBacklog(",
+  "branch": "src/agent-routes.js:res.json(saved ? body : { ...body, notOnDisk: true });",
+  "stops": "the agent's «done»: it says not on disk"
  },
  {
   "key": "task-groups · src/task-groups.js · TaskGroupManager.remove · _save()",
-  "verdict": "rides",
-  "why": "The archived Activity-log rmSync and the group-visibility grant removal run inside store-writer ride() at the landing (and skip a group made again under the id); the DELETE route's reply waits through onDisk."
+  "verdict": "none",
+  "why": "cleanup first, then the record"
  },
  {
   "key": "task-groups · src/task-groups.js · TaskGroupManager.bind · _save()",
   "verdict": "waits",
   "why": "the group-admin bind and the automation verb answer once the store holds it",
-  "at": "src/agent-routes.js:return answerOnDisk(res, { success: true, group: brief(tasks.view(bind.id)) });"
+  "at": "src/agent-routes.js:return answerOnDisk(res, { success: true, group: brief(tasks.view(bind.id)) });",
+  "branch": "src/agent-routes.js:res.json(saved ? body : { ...body, notOnDisk: true });",
+  "stops": "the agent's «done»: it says not on disk"
  },
  {
   "key": "task-groups · src/task-groups.js · TaskGroupManager.unbindKeys · _save()",
   "verdict": "waits",
-  "why": "Every road waits for the landing: both unbind routes (onDisk / answerOnDisk), noteArchived through the bounded _landNow, and the archived-members migration through landStores before the ledger (its archive file is written first).",
-  "at": "src/server/task-groups-wiring.js:try { onDisk(res, { success: true, task: tasks.unbind(req.params.id, req.body?.sessionKey) }); }"
+  "why": "both unbind routes answer once on disk; noteArchived keeps an unlanded unbind out of its baseline",
+  "at": "src/server/task-groups-wiring.js:try { onDisk(res, { success: true, task: tasks.unbind(req.params.id, req.body?.sessionKey) }); }",
+  "branch": "src/server/task-groups-wiring.js:res.json(saved ? body : { ...body, notOnDisk: true, ...(notYet || {}) });",
+  "stops": "the «done», and noteArchived's baseline"
  },
  {
   "key": "task-groups · src/task-groups.js · TaskGroupManager.addProgress · _save()",
   "verdict": "waits",
   "why": "the progress note's answer waits for the store (answerOnDisk)",
-  "at": "src/agent-routes.js:    answerOnDisk(res, { success: true, progress: t.progress.slice(-3).map(taskEntryAnswer)"
+  "at": "src/agent-routes.js:    answerOnDisk(res, { success: true, progress: t.progress.slice(-3).map(taskEntryAnswer)",
+  "branch": "src/agent-routes.js:res.json(saved ? body : { ...body, notOnDisk: true });",
+  "stops": "the agent's «done»: it says not on disk"
  },
  {
   "key": "task-groups · src/task-groups.js · TaskGroupManager.clearProgress · _save()",
   "verdict": "waits",
   "why": "The clear's answer (owner route and agent progress-redact) is sent only from whenStored → tasks.persisted(); the archive month files are cleared before the record (safe order).",
-  "at": "src/server/record-clear.js:st.persisted((ok) => {"
+  "at": "src/server/record-clear.js:st.persisted((ok) => {",
+  "branch": "src/server/record-clear.js:if (!saved && res.ok) res.notOnDisk = true;",
+  "stops": "the clear's «done»: it says not on disk"
  },
  {
   "key": "task-groups · src/task-groups.js · TaskGroupManager.importFromFile · _save()",
   "verdict": "waits",
   "why": "POST /api/tasks/import answers through onDisk (bounded landing, notOnDisk said).",
-  "at": "src/server/task-groups-wiring.js:try { onDisk(res, { success: true, task: tasks.importFromFile(req.body?.path) }); }"
+  "at": "src/server/task-groups-wiring.js:try { onDisk(res, { success: true, task: tasks.importFromFile(req.body?.path) }); }",
+  "branch": "src/server/task-groups-wiring.js:res.json(saved ? body : { ...body, notOnDisk: true, ...(notYet || {}) });",
+  "stops": "the person's «done»: it says not on disk"
  },
  {
   "key": "task-groups · src/task-groups.js · TaskGroupManager.importBundle · _save()",
   "verdict": "sync",
-  "why": "the groups land before the import writes other stores (_landNow)"
+  "why": "the groups land before the import writes other stores (_landNow)",
+  "branch": "if (!L.ok) throw Object.assign(new Error(`the imported Task Groups",
+  "stops": "the import's other stores (the import stops, said)"
  },
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > load · dirty = true",
@@ -344,7 +410,9 @@
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > saveNow · save()",
   "verdict": "sync",
-  "why": "save() is landed at once by landNow() (a bounded named wait; a held write refuses the caller by name) - its one caller (moveDirLineage) lets the Forget rename the directory only on a landed save."
+  "why": "save() is landed at once by landNow() (a bounded named wait; a held write refuses the caller by name) - its one caller (moveDirLineage) lets the Forget rename the directory only on a landed save.",
+  "branch": "return save() && landNow();",
+  "stops": "answers its landing to the lineage move"
  },
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > commit · save()",
@@ -359,13 +427,17 @@
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > commitSync · commit()",
   "verdict": "sync",
-  "why": "the helper: commit, then the bounded landing (landNow)"
+  "why": "the helper: commit, then the bounded landing (landNow)",
+  "branch": "commit(); return landNow();",
+  "stops": "answers its landing to its caller"
  },
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > createProfile · commit()",
   "verdict": "waits",
   "why": "the user's and the agent's create answer once the record landed (landedOf)",
-  "at": "src/routes/browser.js:return landedOf(k).then((L) => res.json({ profile: created,"
+  "at": "src/routes/browser.js:return landedOf(k).then((L) => res.json({ profile: created,",
+  "branch": "src/routes/browser.js:...(L && L.landed ? {} : FINISHES)",
+  "stops": "the person's «done»: it says it finishes on landing"
  },
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > launchBuildOf · dirty = true",
@@ -395,18 +467,22 @@
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > removeProfile · commit()",
   "verdict": "rides",
-  "why": "grant row, marked config, passkeys, listeners, the engine's mark and the machine's folder ride the landing; the Forget lands it at once"
+  "why": "grant row, marked config, passkeys, listeners, the engine's mark and the machine's folder ride the landing; the Forget lands it at once",
+  "crash": "the record comes back whole with its passkeys and folder",
+  "readers": "the routes wait the landing; a second press finds it gone"
  },
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > updateProfileNow · commitSync()",
-  "verdict": "sync",
-  "why": "a person's or agent's act lands before its reply or next step (commitSync)"
+  "verdict": "sync-last",
+  "why": "its act's last step: the release's own synchronous save"
  },
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > clearPin · commit()",
   "verdict": "waits",
   "why": "Its answering callers (DELETE profile and Forget with unpin) await the removal's landing, which carries these pin clears; the boot's healDanglingPins answers nobody and re-heals next boot.",
-  "at": "src/routes/browser.js:const u = unpin ? unpinProfile(req.params.id) : { cleared: 0, sessions: [] };"
+  "at": "src/routes/browser.js:const u = unpin ? unpinProfile(req.params.id) : { cleared: 0, sessions: [] };",
+  "branch": "src/routes/browser.js:...(L && !L.landed ? FINISHES : {})",
+  "stops": "the person's «done»: it says it finishes on landing"
  },
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > closeLeaseSession · commit()",
@@ -415,18 +491,18 @@
  },
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > setPin · commitSync()",
-  "verdict": "sync",
-  "why": "a person's or agent's act lands before its reply or next step (commitSync)"
+  "verdict": "sync-last",
+  "why": "its act's last step: the release's own synchronous save"
  },
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > restorePin · commitSync()",
-  "verdict": "sync",
-  "why": "a person's or agent's act lands before its reply or next step (commitSync)"
+  "verdict": "sync-last",
+  "why": "its act's last step: the release's own synchronous save"
  },
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > copyPin · commitSync()",
-  "verdict": "sync",
-  "why": "a person's or agent's act lands before its reply or next step (commitSync)"
+  "verdict": "sync-last",
+  "why": "its act's last step: the release's own synchronous save"
  },
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > stampGroupCap · commit()",
@@ -435,8 +511,8 @@
  },
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > setCap · commitSync()",
-  "verdict": "sync",
-  "why": "a person's or agent's act lands before its reply or next step (commitSync)"
+  "verdict": "sync-last",
+  "why": "its act's last step: the release's own synchronous save"
  },
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > markEphemeralGone · dirty = true",
@@ -451,12 +527,18 @@
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > moveDirLineage · dirty = true",
   "verdict": "sync",
-  "why": "The re-key mark is landed by saveNow() on the next statement (the Forget renames only on ok); the roll-back mark after a refusal is followed by nothing - the directory is not moved."
+  "why": "The re-key mark is landed by saveNow() on the next statement (the Forget renames only on ok); the roll-back mark after a refusal is followed by nothing - the directory is not moved.",
+  "branch": "if (!saveNow()) { reg.dirHosts = before;",
+  "stops": "the directory's move",
+  "at": "src/server/browser-keeper.js:function saveNow() { return save() && landNow(); }"
  },
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > moveDirLineage · saveNow()",
   "verdict": "sync",
-  "why": "Bounded synchronous landing before the caller renames the directory; a held or deferred write refuses the Forget by name (nothing moved)."
+  "why": "Bounded synchronous landing before the caller renames the directory; a held or deferred write refuses the Forget by name (nothing moved).",
+  "branch": "if (!saveNow()) { reg.dirHosts = before;",
+  "stops": "the directory's move",
+  "at": "src/server/browser-keeper.js:function saveNow() { return save() && landNow(); }"
  },
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > takeRebound · commit()",
@@ -481,12 +563,16 @@
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > userStoppedDisplay · dirty = true",
   "verdict": "sync",
-  "why": "the person's stop lands before the display is torn down (commitSync)"
+  "why": "the person's stop lands before the display is torn down (commitSync)",
+  "branch": "if (!landed) return { ...view, landing: whenLanded({ timeoutMs: STOP_LAND_MS }) };",
+  "stops": "the display's teardown, until the stamp lands (bounded)"
  },
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > userStoppedDisplay · commitSync()",
   "verdict": "sync",
-  "why": "a person's or agent's act lands before its reply or next step (commitSync)"
+  "why": "a person's or agent's act lands before its reply or next step (commitSync)",
+  "branch": "if (!landed) return { ...view, landing: whenLanded({ timeoutMs: STOP_LAND_MS }) };",
+  "stops": "the display's teardown, until the stamp lands (bounded)"
  },
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > setClosed · dirty = true",
@@ -730,8 +816,8 @@
  },
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > newChild · commitSync()",
-  "verdict": "sync",
-  "why": "a person's or agent's act lands before its reply or next step (commitSync)"
+  "verdict": "sync-last",
+  "why": "its act's last step: the release's own synchronous save"
  },
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > dropChild · commit()",
@@ -741,37 +827,49 @@
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > adoptScratch · commit()",
   "verdict": "rides",
-  "why": "The folder move and the kept entry's end ride the new record's landing (rideLanding 6616) and the route waits for it. Residue (rare): on a failed move the record's removal (6623) is queued while its grant row is already removed and the route answers adopt_failed - a kill there leaves a folderless record no list admits."
+  "why": "The folder move and the kept entry's end ride the new record's landing (rideLanding 6616) and the route waits for it. Residue (rare): on a failed move the record's removal (6623) is queued while its grant row is already removed and the route answers adopt_failed - a kill there leaves a folderless record no list admits.",
+  "crash": "the folder moves only at the landing; a kill keeps it",
+  "readers": "a start is refused while the adoption rides (adopt_pending)"
  },
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > adoptScratch · commitSync()",
   "verdict": "sync",
-  "why": "a person's or agent's act lands before its reply or next step (commitSync)"
+  "why": "a person's or agent's act lands before its reply or next step (commitSync)",
+  "branch": "if (commitSync()) dropRow(); else rideLanding(dropRow",
+  "stops": "the failed adoption's grant row removal, until the record lands"
  },
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > keepEgress · commitSync()",
-  "verdict": "sync",
-  "why": "a person's or agent's act lands before its reply or next step (commitSync)"
+  "verdict": "sync-last",
+  "why": "its act's last step: the release's own synchronous save"
  },
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > moveProxyPassword · save()",
   "verdict": "sync",
-  "why": "the answer waits for the landing (landNow); a FAILED write puts the row back (not_written), a held one says it finishes by itself"
+  "why": "the answer waits for the landing (landNow); a FAILED write puts the row back (not_written), a held one says it finishes by itself",
+  "branch": "...(landed ? {} : { notOnDisk: true, code: 'finishes-on-landing' })",
+  "stops": "the answer's «done»: it says it finishes on landing"
  },
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > switchBackend · commitSync()",
   "verdict": "sync",
-  "why": "a person's or agent's act lands before its reply or next step (commitSync)"
+  "why": "a person's or agent's act lands before its reply or next step (commitSync)",
+  "branch": "src/server/browser-keeper.js:      if (!commitSync()) throw failed('launch_not_on_disk', LAUNCH_NOT_ON_DISK);",
+  "stops": "the new backend's launch (start lands its record first)"
  },
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > blocked · commitSync()",
   "verdict": "sync",
-  "why": "a person's or agent's act lands before its reply or next step (commitSync)"
+  "why": "a person's or agent's act lands before its reply or next step (commitSync)",
+  "branch": "src/server/browser-keeper.js:  function cardOnLanding(entry, what, landed = commitSync()) { if (landed) emitProposal(entry); else rideLanding(",
+  "stops": "the proposal's card to the person, until the claim lands"
  },
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > stepProposal · commitSync()",
   "verdict": "sync",
-  "why": "a person's or agent's act lands before its reply or next step (commitSync)"
+  "why": "a person's or agent's act lands before its reply or next step (commitSync)",
+  "branch": "src/server/browser-keeper.js:  function cardOnLanding(entry, what, landed = commitSync()) { if (landed) emitProposal(entry); else rideLanding(",
+  "stops": "the card, and an approve's run (it waits for landing)"
  },
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > noteProposal · commit()",
@@ -807,12 +905,16 @@
   "key": "browser-keeper · src/server/browser-keeper.js · create > saveLoginFenceState · commit()",
   "verdict": "waits",
   "why": "The fill types the vault value only after keeper.whenLanded (FENCE_LAND_MS) - not on disk = nothing typed, said by its code; a fence clear is fail-closed (an old fence back = more scrubbing).",
-  "at": "src/server/browser-dialogs.js:if (keeper && typeof keeper.whenLanded === 'function') {"
+  "at": "src/server/browser-dialogs.js:if (keeper && typeof keeper.whenLanded === 'function') {",
+  "branch": "src/server/browser-dialogs.js:(L && L.landed ? null : { ok: false, code: 'login_fence_not_on_disk'",
+  "stops": "the login fill: nothing typed"
  },
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > proposeSiteReset · commitSync()",
   "verdict": "sync",
-  "why": "a person's or agent's act lands before its reply or next step (commitSync)"
+  "why": "a person's or agent's act lands before its reply or next step (commitSync)",
+  "branch": "src/server/browser-keeper.js:  function cardOnLanding(entry, what, landed = commitSync()) { if (landed) emitProposal(entry); else rideLanding(",
+  "stops": "the proposal's card to the person, until it lands"
  },
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > openInLease · commit()",
@@ -821,18 +923,18 @@
  },
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > clearBlocked · commitSync()",
-  "verdict": "sync",
-  "why": "a person's or agent's act lands before its reply or next step (commitSync)"
+  "verdict": "sync-last",
+  "why": "its act's last step: the release's own synchronous save"
  },
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > addSiteHint · commitSync()",
-  "verdict": "sync",
-  "why": "a person's or agent's act lands before its reply or next step (commitSync)"
+  "verdict": "sync-last",
+  "why": "its act's last step: the release's own synchronous save"
  },
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > dropSiteHint · commitSync()",
-  "verdict": "sync",
-  "why": "a person's or agent's act lands before its reply or next step (commitSync)"
+  "verdict": "sync-last",
+  "why": "its act's last step: the release's own synchronous save"
  },
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > endMarked · dirty = true",
@@ -878,18 +980,52 @@
   "key": "browser-keeper · src/server/browser-keeper.js · create > reshapeStore · commit()",
   "verdict": "sync",
   "why": "A migration's reshape is landed by landedOrThrow() before the runner records it (EVSNOTONDISK otherwise, the later migrations held).",
-  "at": "src/server/browser-keeper.js:const landedOrThrow = () => { if (!landNow()) throw"
+  "at": "src/server/browser-keeper.js:const landedOrThrow = () => { if (!landNow()) throw",
+  "branch": "src/server/browser-keeper.js:const landedOrThrow = () => { if (!landNow()) throw",
+  "stops": "the migration's record and the migrations after it"
  },
  {
   "key": "jobs · src/server/jobs-wiring.js · create > route:POST /api/jobs/seen · _save()",
   "verdict": "waits",
   "why": "the answer waits for the store (persisted)",
-  "at": "src/server/jobs-wiring.js:res.json({ success: true, requested: ids.length, acked: acked.length, ids: acked, ...(saved ? {} : { notOnDisk: true }) })"
+  "at": "src/server/jobs-wiring.js:res.json({ success: true, requested: ids.length, acked: acked.length, ids: acked, ...(saved ? {} : { notOnDisk: true }) })",
+  "branch": "(saved ? {} : { notOnDisk: true",
+  "stops": "the person's «done»: it says not on disk"
  },
  {
   "key": "jobs · src/server/jobs-wiring.js · create > route:POST /api/jobs/:id/:act · _save()",
   "verdict": "waits",
   "why": "the answer waits for the store (persisted)",
-  "at": "src/server/jobs-wiring.js:res.json({ success: true, changed, ack: M.ackState(job), ...(saved ? {} : { notOnDisk: true }) })"
+  "at": "src/server/jobs-wiring.js:res.json({ success: true, changed, ack: M.ackState(job), ...(saved ? {} : { notOnDisk: true }) })",
+  "branch": "(saved ? {} : { notOnDisk: true",
+  "stops": "the person's «done»: it says not on disk"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > cardOnLanding · commitSync()",
+  "verdict": "sync",
+  "why": "a told proposal's card over a record on disk",
+  "branch": "if (landed) emitProposal(entry); else rideLanding(",
+  "stops": "the card to the person, until the record lands"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > start · commitSync()",
+  "verdict": "sync",
+  "why": "the launch record on disk before Chrome",
+  "branch": "if (!commitSync()) throw failed('launch_not_on_disk', LAUNCH_NOT_ON_DISK);",
+  "stops": "Chrome's launch: refused by name"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > attachStart · commitSync()",
+  "verdict": "sync",
+  "why": "the launch record on disk before Chrome",
+  "branch": "if (!commitSync()) throw await refused('launch_not_on_disk', LAUNCH_NOT_ON_DISK);",
+  "stops": "Chrome's launch: refused by name"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > startEphemeral · commitSync()",
+  "verdict": "sync",
+  "why": "the launch record on disk before Chrome",
+  "branch": "if (!commitSync()) { rec.state = 'failed'; rec.endedAt = now(); rec.lastError = LAUNCH_NOT_ON_DISK; commit(); throw namedError('launch_not_on_disk'",
+  "stops": "Chrome's launch: refused by name"
  }
 ]

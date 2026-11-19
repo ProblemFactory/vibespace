@@ -260,6 +260,8 @@ class JobManager {
       this._load();
       this._loadNotifs();
       this.announceOwedWakes();   // B-6721: what a stopped hub left owed a wake — the stash view arms each one's chain
+      // B-ef97: the recovered skeletons, on disk before anything else runs — not landed at the bound, _onDisk SAYS it once and the
+      // jobs start as the release starts them (主开发 2026-11-19 09:18Z: a failing disk must not also stop a person's jobs)
       if (this._skeletonsOwed) { this._skeletonsOwed = false; this._save({ storeOnly: true }); this._onDisk(this.file, 'the recovered skeletons'); }   // B-ef97: the recovered skeletons, on disk before anything else runs — jobs.json ALONE (a notifications file that did not load is not written over here)
       this._bootAt = now(); // this server generation's start: a run begun before it was an older generation's (update window)
       this._adoptAndReplay();
@@ -3466,6 +3468,9 @@ class JobManager {
   }
   async _cronTick() {
     if (this.readOnly) return;
+    // the census cure ((b)): a fired slot not on disk HOLDS the next fires (a slot fired twice is money): this tick lands it first,
+    // and fires nothing while the disk does not hold it (a kill would re-fire every slot fired over a store that never landed)
+    if (this._cronHeld) { const L0 = this._onDisk(this.file, 'a held schedule\'s slot'); if (!L0.ok) return; this._cronHeld = null; }
     for (const job of this.jobs.values()) {
       if (job.kind !== 'cron' || !job.desiredUp) continue;
       try {
@@ -3504,7 +3509,8 @@ class JobManager {
         this._touch(job);
         // the moved2 census (its jobs pass): the slot it fired for is ON DISK before the next tick — a synchronous landing (bounded):
         // the fire cannot ride (a spawn waits on its own intent), so the release's window after a fire stays this short, never paced
-        this._save(); this._onDisk(this.file, 'a schedule\'s next time');
+        this._save(); const L = this._onDisk(this.file, 'a schedule\'s next time');
+        if (!L.ok) { this._cronHeld = L.why || 'not on disk'; return; }   // the census cure ((b)): the next fires wait for this slot
       } catch (e) { this.d.log(`[jobs] cron fire failed for ${job.id}:`, e.message); }
     }
   }

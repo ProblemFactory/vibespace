@@ -1395,7 +1395,8 @@ app.get('/api/agent/task', function taskShowRoute(req, res) {
 // row): those answer once task-groups.json holds them, on the writer's synchronous road (bounded 20 s, under the CLI's 30 s;
 // not landed ⇒ notOnDisk in the answer — the act stays applied in memory and the writer retries). The deferred-save census (lane
 // lg-store-writes, 主开发 03:00Z): the group-admin create and bind and a progress note wait too — «done» is never said for what a kill
-// would lose; a backlog ADD keeps its own law (it answers in its run: the row is the caller's alone — test-backlog-no-truncation).
+// would lose; and (the census cure, 主开发 2026-11-19 08:56Z — the hunt's finding 2) EVERY writing backlog verb: a parked row is never
+// lost in silence.
 function answerOnDisk(res, body) {
   if (typeof tasks.persisted !== 'function') return void res.json(body);
   tasks.persisted((saved) => { try { require('./store-writer.js').identityAtExit(res); res.json(saved ? body : { ...body, notOnDisk: true }); } catch { } });
@@ -1585,9 +1586,10 @@ app.post('/api/agent/task-backlog', function taskBacklogRoute(req, res) {
       const n = backlogNudge(updated.backlog, key, { threshold: nudgeThreshold(raw) });
       if (n) nudge = { text: nudgeText(n, String(req.query?.group || req.body?.group || '').trim() ? `--group ${gid} ` : ''), owned: n.owned, stale: n.stale, threshold: n.threshold };
     }
-    // the U4/U5 cure: a CLAIM answers once on disk (a claim lost at a kill would let a second agent claim the row); every other backlog
-    // verb answers in its own run — an ADD gives the caller a row nobody else holds (test-backlog-no-truncation's law; the census row says it)
-    (claim !== undefined ? answerOnDisk : (r0, b0) => r0.json(b0))(res, {
+    // EVERY writing verb answers once task-groups.json holds it (the census cure, 主开发 2026-11-19 08:56Z — the hunt's finding 2: an add
+    // told «parked» and lost at a kill was lost in silence; a done / drop / edit / unclaim came back undone). A CLAIM always did (two agents
+    // are never both told they own a row). Not landed inside the bound ⇒ the answer says notOnDisk; the act stays and the writer retries.
+    answerOnDisk(res, {
       success: true,
       backlog: sortBacklog(updated.backlog.filter((b) => b.status === 'open')).map(taskItemAnswer),   // verify r4 F1: through the belt
       ...(acted ? { item: taskItemAnswer(acted), others: (acted.claimedBy || []).filter((k) => k !== key), alreadyMine } : {}),

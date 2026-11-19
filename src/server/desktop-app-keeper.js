@@ -438,7 +438,7 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
   }
   async function stop(id, opts = {}) {
     const ro = store.apps[id] ? null : remoteOf(id);
-    if (!ro) { userStoppedDisplay(store.apps[id], opts); return machine.stop(id, opts); }
+    if (!ro) { const waits = userStoppedDisplay(store.apps[id], opts); if (waits.length) await Promise.all(waits); return machine.stop(id, opts); }   // lane lg-store-writes, the census cure: the browser keeper's stamp lands (bounded) before the teardown
     const r = await acc().call(ro.hostId, 'stop', { id, why: opts.why || 'user', ...(opts.force === true ? { force: true } : {}) }); // B-04da ④
     ingestOne(ro.hostId, r.app);
     return remoteGet(id) || r.app;
@@ -446,8 +446,10 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
   /** lane browser-display-holders: a PERSON's stop (the window's Stop, the second ✕, the Desktop list's Close — the route's
    *  `why: 'user'`) of a live browser's display session is told to the browser keeper before the teardown starts. */
   function userStoppedDisplay(rec, opts) {
-    if (!rec || !M.isDisplayForBrowser(rec) || !M.isLiveState(rec.state) || !opts || opts.why !== 'user') return;
-    for (const fn of displayStopListeners) { try { fn({ profileId: rec.forBrowser, displayId: rec.id, by: 'user' }); } catch (e) { log.warn?.(`[desktop] ${rec.id}: the browser keeper was not told of the person's stop (${e.message})`); } }
+    const waits = [];   // the census cure: a listener whose record is not on disk yet answers `landing` — the teardown waits for it (bounded by the listener)
+    if (!rec || !M.isDisplayForBrowser(rec) || !M.isLiveState(rec.state) || !opts || opts.why !== 'user') return waits;
+    for (const fn of displayStopListeners) { try { const r = fn({ profileId: rec.forBrowser, displayId: rec.id, by: 'user' }); if (r && r.landing && typeof r.landing.then === 'function') waits.push(r.landing.catch(() => null)); } catch (e) { log.warn?.(`[desktop] ${rec.id}: the browser keeper was not told of the person's stop (${e.message})`); } }
+    return waits;
   }
   /** lane e2b (§E2.2): the window's pinned pixel size — the machine's record writer (a paired machine's through its `pin` op). */
   function setPin(id, pin) {

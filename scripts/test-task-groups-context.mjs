@@ -436,67 +436,73 @@ console.log('— the bundle and the export —');
   const SyncTG = mutantCopies('task-groups-u5', path.resolve(path.dirname(fileURLToPathU5(import.meta.url)), '..')).load('src/task-groups.js', tgSrc.replace(aW, "  _writer() { return { dirty: (f, o) => fs.writeFileSync(f, o.produce()), durable: async () => true, pending: () => false, flushSync: () => ({ written: [], left: [] }) }; }"), 'sync-save');
   const r = scene(SyncTG.TaskGroupManager, 'red');
   ok('U5 CONTROL: the old synchronous save (the writer bypassed) ⇒ task-groups.json is written on the main thread at the change — the first check above would be red', !r.unchanged);
-  // THE MOVED2 CURE 2 (主开发's ruling — THE STEP THAT CANNOT BE UNDONE RIDES THE LANDING, no roll back): a group's removal is TAKEN
-  // (out of memory, its store marked); its archived Activity log and its grant go only once task-groups.json has LANDED — by
-  // themselves when the storage answers late; a kill first leaves the old record (the group back, with its log). A writer
-  // stand-in whose landing is HELD once armed (afterLanding keeps the steps; `land()` = the storage answers). RED: a copy whose
-  // step runs at the act (its plant asserted by anchored())
-  const rmScene = (Mgr, tag) => {
-    const d = path.join(root, 'u5-rm-' + tag); fs.mkdirSync(d, { recursive: true });
+  // A writer stand-in whose landing is HELD once armed: flushSync leaves the file (said), afterLanding keeps its steps; `land()` = the
+  // storage answers (the file written — the steps are run only when the scene says so: a kill between the rename and the step)
+  const heldWriter = () => {
     const st = { armed: false, steps: [] }, owed = new Map();
-    const W = { dirty: (f, o) => owed.set(f, o), durable: () => Promise.resolve(!st.armed), pending: (f) => owed.has(f),
+    const W = { st, owed, dirty: (f, o) => owed.set(f, o), durable: () => Promise.resolve(!st.armed), pending: (f) => owed.has(f),
       flushSync: (files) => { const left = []; for (const f of files || [...owed.keys()]) { const o = owed.get(f); if (!o) continue; if (st.armed) { left.push({ file: f, name: o.name, why: 'held by the storage at the bound (a stand-in)' }); continue; } fs.writeFileSync(f, o.produce()); owed.delete(f); } return { written: [], left, ms: 0 }; },
       afterLanding: (file, step) => { if (!st.armed && !owed.has(file)) { const value = step(); return Promise.resolve({ landed: true, value }); } st.steps.push(step); return new Promise(() => { }); } };
+    return W;
+  };
+  const plainWriter = () => ({ dirty() { }, durable: () => Promise.resolve(true), pending: () => false, flushSync: () => ({ written: [], left: [], ms: 0 }) });
+  // THE CENSUS CURE (主开发 2026-11-19 08:56Z, the hunt's finding 4): THE BASE'S ORDER BACK — a group's removal cleans the other stores
+  // FIRST (its archived Activity log, its visibility row), then the record (the release is the oracle). A kill before the record lands
+  // brings the group back WITHOUT them (the safe side); the record landed and the process killed before anything else ran leaves
+  // NOTHING a group made again under the same id would inherit. RED (anchored): the chain's reversed order (the cleanup riding the landing)
+  const rmScene = (Mgr, tag) => {
+    const d = path.join(root, 'u5-rm-' + tag); fs.mkdirSync(d, { recursive: true });
+    const W = heldWriter();
     const m = new Mgr({ dataDir: d, homeDir: home, writer: W });
     const t = m.create({ title: 'u5 removal' });
     W.flushSync();   // the group on disk
     const arch = path.join(m._archiveRoot, t.id); fs.mkdirSync(arch, { recursive: true }); fs.writeFileSync(path.join(arch, 'log.jsonl'), '{"note":"kept words"}\n');
-    st.armed = true;
+    W.st.armed = true;
     let err = null; try { m.remove(t.id); } catch (e) { err = e; }
-    let inMemory = false; try { m.get(t.id); inMemory = true; } catch { inMemory = false; }
-    const before = { err: err ? err.code || err.message : null, inMemory, archive: fs.existsSync(arch) };
-    // A START before the landing (a kill first): the disk still holds the group — and its Activity log is still there
-    const m2 = new Mgr({ dataDir: d, homeDir: home, writer: { dirty() { }, durable: () => Promise.resolve(true), pending: () => false, flushSync: () => ({ written: [], left: [], ms: 0 }) } });
-    let atStart = false; try { m2.get(t.id); atStart = true; } catch { atStart = false; }
-    st.armed = false; W.flushSync(); const xs = st.steps; st.steps = []; for (const x of xs) x();   // the storage answers
-    return { ...before, atStart, archiveAfter: fs.existsSync(arch) };
+    const atAct = { err: err ? err.code || err.message : null, archive: fs.existsSync(arch) };
+    // A START before the record lands (a kill first): the disk still holds the group
+    let atStart = false; try { new Mgr({ dataDir: d, homeDir: home, writer: plainWriter() }).get(t.id); atStart = true; } catch { atStart = false; }
+    // the record LANDS — and the process dies before anything else runs (a riding step never runs)
+    W.st.armed = false; W.flushSync(); W.st.steps = [];
+    const m2 = new Mgr({ dataDir: d, homeDir: home, writer: plainWriter() });
+    let gone = false; try { m2.get(t.id); } catch { gone = true; }
+    const t2 = m2.create({ title: 'u5 removal' });
+    return { ...atAct, atStart, gone, sameId: t2.id === t.id, inherited: fs.existsSync(path.join(m2._archiveRoot, t2.id, 'log.jsonl')) };
   };
   const rmOk = rmScene(TaskGroupManager, 'real');
-  ok('THE STEP RIDES THE LANDING: a group\'s removal not landed yet is TAKEN (never refused, never rolled back) and its archived Activity log is still on disk — a start before the landing finds the group, WITH its log', !rmOk.err && !rmOk.inMemory && rmOk.archive && rmOk.atStart, rmOk);
-  ok('…and when the storage answers, the archived Activity log goes by itself (the step, once, at the landing)', !rmOk.archiveAfter, rmOk);
-  // THE MOVED2 CURE 3 (主开发's read wjd3u2jue): an id is made from the title and the date — a group removed while the storage is
-  // held and made AGAIN with the same title gets the SAME id; when the old removal lands, its step leaves the NEW group's visibility
-  // row and Activity folder alone. RED (anchored): a copy without that guard deletes both
-  const remakeScene = (Mgr, tag) => {
-    const d = path.join(root, 'u5-remake-' + tag); fs.mkdirSync(d, { recursive: true });
-    const st = { armed: false, steps: [] }, owed = new Map();
-    const W = { dirty: (f, o) => owed.set(f, o), durable: () => Promise.resolve(!st.armed), pending: (f) => owed.has(f),
-      flushSync: (files) => { const left = []; for (const f of files || [...owed.keys()]) { const o = owed.get(f); if (!o) continue; if (st.armed) { left.push({ file: f, name: o.name, why: 'held (a stand-in)' }); continue; } fs.writeFileSync(f, o.produce()); owed.delete(f); } return { written: [], left, ms: 0 }; },
-      afterLanding: (file, step) => { if (!st.armed && !owed.has(file)) { const value = step(); return Promise.resolve({ landed: true, value }); } st.steps.push(step); return new Promise(() => { }); } };
-    const m = new Mgr({ dataDir: d, homeDir: home, writer: W });
-    const t = m.create({ title: 'u5 remake' });
-    W.flushSync();
-    st.armed = true;
-    m.remove(t.id);
-    const t2 = m.create({ title: 'u5 remake' });
-    const arch = path.join(m._archiveRoot, t2.id); fs.mkdirSync(arch, { recursive: true }); fs.writeFileSync(path.join(arch, 'log.jsonl'), '{"note":"the new group\'s words"}\n');
-    let vis = null; try { m._setVisibility(t2.id, { externalVisibility: 'visible' }); vis = true; } catch (e) { vis = String(e && e.message); }
-    const rows = () => { try { const g = m._grants(); return g ? g.rowsFor('group-visibility', String(t2.id)).length : null; } catch { return null; } };
-    const rowsBefore = rows();
-    st.armed = false; W.flushSync(); const xs = st.steps; st.steps = []; for (const x of xs) x();   // the OLD removal lands
-    let stands = false; try { m.get(t2.id); stands = true; } catch { stands = false; }
-    return { sameId: t2.id === t.id, vis, rowsBefore, rowsAfter: rows(), archive: fs.existsSync(arch), stands };
+  ok('THE BASE\'S ORDER (finding 4): a removal cleans its archived Activity log at the act, before the record — a start before the record lands finds the group back WITHOUT it (the safe side)', !rmOk.err && !rmOk.archive && rmOk.atStart, rmOk);
+  ok('…and the record landed with a kill right after it: a group made again under the SAME id inherits no Activity log (nothing outlives the record)', rmOk.gone && rmOk.sameId && !rmOk.inherited, rmOk);
+  const BASE_RM = "    if (archivableId(id)) fs.rmSync(path.join(this._archiveRoot, id), { recursive: true, force: true });\n    delete this._state.tasks[id];\n";
+  const RideRm = mutantCopies('task-groups-ride', path.resolve(path.dirname(fileURLToPathU5(import.meta.url)), '..')).load('src/task-groups.js', anchored(tgSrc, BASE_RM, "    delete this._state.tasks[id];\n    require('./store-writer.js').ride(this._writer(), this._file, () => { if (archivableId(id)) fs.rmSync(path.join(this._archiveRoot, id), { recursive: true, force: true }); });   // MUTANT: the chain's reversed order\n", 'the removal cleans first'), 'rm-rides');
+  const rmX = rmScene(RideRm.TaskGroupManager, 'red');
+  ok('CONTROL (a copy whose cleanup rides the record\'s landing — the reversed order): the record lands, the step never runs, and a group made again under the same id INHERITS the old Activity log (red)', rmX.sameId && rmX.inherited, rmX);
+  // THE CENSUS CURE (the hunt's finding 3): the archived conversations' unbind is landed SYNCHRONOUSLY (under the writer's bound) and
+  // its FAILURE BRANCH STOPS THE BASELINE — a pass whose unbind the disk does not hold keeps its keys out of it; the next pass lands
+  // it. A conversation bound AGAIN meanwhile stays (the person's later act wins). RED (anchored): a copy without the failure branch
+  const archScene = (Mgr, tag, { rebind = false } = {}) => {
+    const d = path.join(root, 'u5-arch-' + tag); fs.mkdirSync(d, { recursive: true });
+    const W = heldWriter(), st = { archivedSessions: [] };
+    const m = new Mgr({ dataDir: d, homeDir: home, writer: W, readUserState: () => st, isLiveKey: () => false });
+    const t = m.create({ title: 'u5 archive' }); m.bind(t.id, 'claude:arch1'); W.flushSync();
+    const disk = () => JSON.parse(fs.readFileSync(path.join(d, 'task-groups.json'), 'utf8')).tasks[t.id].sessions;
+    W.st.armed = true;
+    const first = m.noteArchived(['claude:arch1']);
+    const held = { first, member: disk().includes('claude:arch1'), inBaseline: !!(m._archSeen && m._archSeen.has('claude:arch1')) };
+    W.st.armed = false;
+    if (rebind) m.bind(t.id, 'claude:arch1');
+    m.noteArchived(['claude:arch1']);   // the next user-state write
+    // (the stand-in never lands by itself: only what the pass itself landed is on disk here)
+    return { ...held, memberAfter: disk().includes('claude:arch1'), memberInMemory: m.get(t.id).sessions.includes('claude:arch1'), owedAfter: W.pending(path.join(d, 'task-groups.json')), inBaselineAfter: !!(m._archSeen && m._archSeen.has('claude:arch1')) };
   };
-  const rmk = remakeScene(TaskGroupManager, 'real');
-  ok('THE MOVED2 CURE 3: a group removed while the storage is held and made again under the SAME id keeps its visibility row and Activity folder when the old removal lands', rmk.sameId && rmk.stands && rmk.archive && (rmk.rowsBefore === null || rmk.rowsAfter === rmk.rowsBefore), rmk);   // the visibility row: where this scene has a grants store
-  const GUARD_TG = "      if (this._state.tasks[id]) return;\n";
-  const RmkTG = mutantCopies('task-groups-remake', path.resolve(path.dirname(fileURLToPathU5(import.meta.url)), '..')).load('src/task-groups.js', anchored(tgSrc, GUARD_TG, '', 'the removal step leaves a group made again alone'), 'remake-unguarded');
-  const rmkX = remakeScene(RmkTG.TaskGroupManager, 'red');
-  ok('CONTROL (a copy without the guard): the old removal deletes the NEW group\'s Activity folder and visibility row (red)', rmkX.sameId && !rmkX.archive, rmkX);
-  const RIDE_TG = "    require('./store-writer.js').ride(this._writer(), this._file, () => {";
-  const RmTG = mutantCopies('task-groups-ride', path.resolve(path.dirname(fileURLToPathU5(import.meta.url)), '..')).load('src/task-groups.js', anchored(tgSrc, RIDE_TG, "    ((w, f, step) => step())(this._writer(), this._file, () => {   // MUTANT: the step runs at the act", 'the group removal rides the landing'), 'ride-ignored');
-  const rmX = rmScene(RmTG.TaskGroupManager, 'red');
-  ok('CONTROL (a copy whose step runs at the act): the archived Activity log is DELETED while nothing is on disk — a start finds the group without its log (red)', rmX.atStart && !rmX.archive, rmX);
+  const ar = archScene(TaskGroupManager, 'real');
+  ok('FINDING 3: an archived conversation\'s unbind HELD past the bound keeps its key OUT of the baseline (never «done» for an unbind the disk does not hold)', Array.isArray(ar.first) && ar.first.length === 1 && ar.member && !ar.inBaseline, ar);
+  ok('…and the next pass lands it: the disk no longer holds the member, nothing owed, the key in the baseline', !ar.memberAfter && !ar.owedAfter && ar.inBaselineAfter, ar);
+  const arB = archScene(TaskGroupManager, 'rebind', { rebind: true });
+  ok('…a conversation bound AGAIN meanwhile stays a member (the owed unbind is not retried over the person\'s later act)', arB.memberInMemory && arB.inBaselineAfter, arB);
+  const FAIL_BR = "      else for (const k of due) this._archOwed.add(k);\n";
+  const NoBranch = mutantCopies('task-groups-arch', path.resolve(path.dirname(fileURLToPathU5(import.meta.url)), '..')).load('src/task-groups.js', anchored(tgSrc, FAIL_BR, '', 'the unbind\'s failure branch stops the baseline'), 'arch-nobranch');
+  const arX = archScene(NoBranch.TaskGroupManager, 'red');
+  ok('CONTROL (a copy without the failure branch): the held unbind\'s key enters the baseline at once and the next pass lands nothing — the member is still on disk (red)', arX.inBaseline && arX.memberAfter, arX);
 }
 
 { const rEnd = require('../src/store-writer.js').storeWriter().flushSync(); if (rEnd.left && rEnd.left.length) ok('the store writer\'s owed writes land before the scratch root goes', false, rEnd.left); }   // lane lg-store-writes U5 (loud: the U4/U5 cure, should 6)

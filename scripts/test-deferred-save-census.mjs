@@ -7,47 +7,31 @@
 //   rides — what cannot be undone after this save runs in a step riding the landing (store-writer afterLanding / ride)
 //   none  — nothing that cannot be undone follows in this run or its reply (why, in six words at most)
 //   sync  — this site's save stays synchronous for the release (a bounded landing before what follows)
+//   sync-last — «sync, nothing follows» (主开发 09:18Z): a synchronous save that is the last thing its act does (the release's own)
 // ① a call site with NO row is RED by name; ② a row whose function no longer calls a save is RED (the list only tells the truth);
 // ③ the verdict is of the closed set, `none` says why in ≤ 6 words; ④ the verdict is CHECKED against the code (rides: a ride call
 // in the function or at its `at`; sync: a synchronous landing; waits: the waiting door named by `at`); ⑤ RED controls, each
 // planted through scratch.mjs anchored(): a new save site, a row taken out, a rides row whose ride call is gone.
+// THE CENSUS LEARNS (主开发 2026-11-19 08:56Z, after the hunt over the census found nine): (a) a save call is never its own
+// landing — the sync pattern holds no save call (`saveNow`, `_saveNotifs`); (b) a sync or waits row NAMES ITS FAILURE BRANCH
+// (`branch`: the text where the landing's answer is tested — in the function, or `file:text` — and `stops`: what it withholds),
+// and the suite checks the branch is there, tests a landing's answer and stops what follows (throws, returns, keeps it owed, or
+// says not on disk); (c) a rides row says why its loss at a crash is harmless (`crash`) and that no reader of the same run
+// depends on what it defers (`readers`); (d) machinery behind a save (a re-merge that reads the file and replays calls) is not a
+// call site — the census cannot see it; a unit that brings one names it as a site of its own (kb); (e) a why is the row's OWN
+// law — it never borrows another suite's (no suite named in it).
 // Run: node scripts/test-deferred-save-census.mjs
 import fs from 'node:fs';
 import path from 'node:path';
-import { deferredSaveSites, siteOfFile, rowKeyOf } from './deferred-save-census.mjs';
+import { deferredSaveSites, siteOfFile, rowKeyOf, judgeRows } from './deferred-save-census.mjs';
 import { anchored } from './scratch.mjs';
 import { checker } from './lib/check.mjs';
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const { ok, report } = checker();
 
-const VERDICTS = new Set(['waits', 'rides', 'none', 'sync']);
-const RIDE_RE = /\b(?:_ride|rideLanding|ride|afterLanding|afterNotifsLanded)\(/;
-const SYNC_RE = /\b(?:landNow|_onDisk|_landNow|flushSync|saveNow|_saveNotifs|commitSync)\(/;
 const ROWS = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/deferred-save-verdicts.json'), 'utf8'));
-
-/** the census's judgement of a site list against the rows → {missing, dead, bad, wrong} (each a list of keys / reasons) */
-function judge(sites, rows) {
-  const byKey = new Map();
-  for (const s of sites) { const k = rowKeyOf(s); if (!byKey.has(k)) byKey.set(k, []); byKey.get(k).push(s); }
-  const rowOf = new Map(rows.map((r) => [r.key, r]));
-  const missing = [...byKey.keys()].filter((k) => !rowOf.has(k));
-  const dead = rows.filter((r) => !byKey.has(r.key)).map((r) => r.key);
-  const bad = [], wrong = [];
-  for (const r of rows) {
-    if (!VERDICTS.has(r.verdict)) { bad.push(`${r.key}: «${r.verdict}» is not a verdict (waits / rides / none / sync)`); continue; }
-    const why = String(r.why || '').trim();
-    if (!why) bad.push(`${r.key}: no why`);
-    if (r.verdict === 'none' && why.split(/\s+/).length > 6) bad.push(`${r.key}: «none» says why in six words at most («${why}»)`);
-    const s = byKey.get(r.key); if (!s) continue;
-    const text = s.map((x) => x.fnText).join('\n');
-    const atOk = () => { const [f, ...rest] = String(r.at || '').split(':'); const needle = rest.join(':'); try { return !!f && !!needle && fs.readFileSync(path.join(REPO, f), 'utf8').includes(needle); } catch { return false; } };
-    if (r.verdict === 'rides' && !(RIDE_RE.test(text) || (r.at && atOk()))) wrong.push(`${r.key}: «rides» but its function has no ride call${r.at ? ` and «${r.at}» is not in the tree` : ''}`);
-    if (r.verdict === 'sync' && !(SYNC_RE.test(text) || (r.at && atOk()))) wrong.push(`${r.key}: «sync» but its function has no synchronous landing${r.at ? ` and «${r.at}» is not in the tree` : ''}`);
-    if (r.verdict === 'waits' && !(r.at && atOk())) wrong.push(`${r.key}: «waits» names no door that waits («at»: file:fixed text${r.at ? ` — «${r.at}» is not in the tree` : ''})`);
-  }
-  return { missing, dead, bad, wrong };
-}
+const judge = (sites, rows) => judgeRows(REPO, sites, rows);
 
 console.log('① ② ③ ④ every call site of a deferred store\'s save carries ONE verdict, checked against the code');
 const sites = deferredSaveSites(REPO);
@@ -75,13 +59,26 @@ console.log('⑤ RED controls (each plant through anchored())');
   const j3 = judge(sites, ROWS.filter((r) => r !== gone));
   ok(!!(gone && j3.missing.includes(gone.key)), 'CONTROL (a row taken out of the table): its call site is RED by name', gone && gone.key);
   // (c) a «rides» row whose ride call is gone (a copy of the file with the ride taken out of that function)
-  const rideRow = ROWS.find((r) => r.verdict === 'rides' && r.key.startsWith('task-groups · src/task-groups.js · TaskGroupManager.remove'));
-  const tsrc = fs.readFileSync(path.join(REPO, 'src/task-groups.js'), 'utf8');
-  const RA = "    require('./store-writer.js').ride(this._writer(), this._file, () => {";
-  const unridden = anchored(tsrc, RA, "    ((w, f, step) => step())(this._writer(), this._file, () => {   // CONTROL: the step at the act", 'the group removal rides the landing');
-  const s4 = sites.filter((s) => s.file !== 'src/task-groups.js').concat(siteOfFile(REPO, 'src/task-groups.js', { src: unridden }));
+  const rideRow = ROWS.find((r) => r.verdict === 'rides' && r.key.startsWith('jobs · src/jobs.js · JobManager.answerPanel'));
+  const jsrc = fs.readFileSync(path.join(REPO, 'src/jobs.js'), 'utf8');
+  const RA = "    this._ride(this.file, 'the panel\\'s answer', () => {";
+  const unridden = anchored(jsrc, RA, "    ((f, w, step) => step())(this.file, 'the panel\\'s answer', () => {   // CONTROL: the step at the act", 'the panel\'s answer rides the landing');
+  const s4 = sites.filter((s) => s.file !== 'src/jobs.js').concat(siteOfFile(REPO, 'src/jobs.js', { src: unridden }));
   const j4 = judge(s4, ROWS);
   ok(!!(rideRow && j4.wrong.some((w) => w.startsWith(rideRow.key))), 'CONTROL (a «rides» row whose function lost its ride call): ④ is RED by name', j4.wrong.slice(0, 3));
+  // (d) THE CENSUS LEARNS (b): a «sync» row whose failure branch is gone — a copy of the keeper whose start lands its record
+  // and IGNORES the answer — is RED by name (a landing whose answer nobody reads holds nothing)
+  const ksrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+  const KB = "      if (!commitSync()) throw failed('launch_not_on_disk', LAUNCH_NOT_ON_DISK);";
+  const ignored = anchored(ksrc, KB, "      commitSync();   // CONTROL: the landing's answer ignored", 'the start\'s failure branch');
+  const s5 = sites.filter((s) => s.file !== 'src/server/browser-keeper.js').concat(siteOfFile(REPO, 'src/server/browser-keeper.js', { src: ignored }));
+  const j5 = judge(s5, ROWS);
+  ok(j5.wrong.some((w) => w.startsWith('browser-keeper · src/server/browser-keeper.js · create > start · commitSync()') && /\(b\)/.test(w)), 'CONTROL (b) (a «sync» row whose failure branch is gone — the landing\'s answer ignored): RED by name', j5.wrong.slice(0, 3));
+  // (e) THE CENSUS LEARNS (c) and (e): a «rides» row without its crash / readers reasons, and a why that borrows a suite's law
+  const r6 = ROWS.map((r) => (r === rideRow ? { ...r, crash: '', readers: '' } : r.verdict === 'none' && r === ROWS.find((x) => x.verdict === 'none') ? { ...r, why: 'as test-something says' } : r));
+  const j6 = judge(sites, r6);
+  ok(j6.bad.some((b) => b.startsWith(rideRow.key) && /\(c\)/.test(b)), 'CONTROL (c) (a «rides» row that does not say why its loss at a crash is harmless): RED by name', j6.bad.slice(0, 3));
+  ok(j6.bad.some((b) => /borrows a suite's law/.test(b)), 'CONTROL (e) (a why that names a suite): RED by name', j6.bad.slice(0, 3));
 }
 
 report();

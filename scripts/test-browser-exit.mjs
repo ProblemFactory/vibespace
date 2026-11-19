@@ -136,6 +136,9 @@ fs.mkdirSync(path.join(ROOT, 'home'), { recursive: true });
 const fake = writeFakeAgentBrowser(path.join(ROOT, 'bin'), path.join(ROOT, 'ab-state'));
 process.on('exit', () => { fake.reap(); for (const s of [checkSrv, upstream, cdpSrv]) { try { s.close(); } catch { } } try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } });
 const K = require('../src/server/browser-keeper.js');
+// lane lg-store-writes (B-0248 U5b, met at the census cure's gate): the registry is the store writer's — a read of the STORE file
+// lands what the writer still owes first, LOUDLY (a landing that left a write throws)
+const landed = () => { const r = require('../src/store-writer.js').storeWriter().flushSync(); if (r.left && r.left.length) throw new Error(`the store writer left owed writes: ${JSON.stringify(r.left)}`); };
 const PL = require('../src/server/browser-proxy-logins.js');
 const settings = {};
 const vault = { locked: false, entries: new Map(), state() { return this.locked ? 'locked' : 'unlocked'; }, secretPut(n, v) { if (this.locked) return { ok: false, code: 'key-unreadable:vault_locked' }; this.entries.set(n, Buffer.from(v)); return { ok: true }; }, secretGet(n) { return this.locked ? { ok: false, code: 'key-unreadable:vault_locked' } : { ok: true, value: this.entries.has(n) ? Buffer.from(this.entries.get(n)) : null }; }, secretDrop(n) { this.entries.delete(n); return { ok: true }; }, secretNames() { return [...this.entries.keys()].map((name) => ({ name })); }, noteUse() { return { receipt: null }; } };
@@ -158,12 +161,12 @@ const k = mkK();
   ok(!!(!rN.ok && rN.code === 'exit_no_proxy' && /another road/.test(rN.error) && /by hand/.test(rN.error) && seen.connects.length === 0), 'a profile with NO proxy of its own ⇒ refused by name — its browser may leave by another road, a direct check could state an exit it does not use; the hand entry named; no request', rN);
   reset();
   const r1 = await k.exitCheck(pP.id, { tlsConnect: PLAIN });
-  const after1 = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'browser-profiles.json'), 'utf8')).profiles.find((x) => x.id === pP.id);   // the STORE, not a view
+  const after1 = JSON.parse((landed(), fs).readFileSync(path.join(ROOT, 'data', 'browser-profiles.json'), 'utf8')).profiles.find((x) => x.id === pP.id);   // the STORE, not a view
   ok(!!(r1.ok && r1.read.publicIp === '203.0.113.9' && r1.read.country === 'JP' && r1.read.timezone === 'Asia/Tokyo' && seen.connects.length === 1 && seen.requests.length === 1 && after1 && !('egress' in after1)),
     'a person\'s press ⇒ ONE request through the profile\'s own proxy, the three facts read — and NOTHING kept until the confirm', { r1, egress: after1.egress });
   const kp = await k.keepEgress(pP.id, { ...r1.read, source: 'measured' });
   const bad = await k.keepEgress(pP.id, { country: 'JP', timezone: 'JST', source: 'typed' });
-  const after2 = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'browser-profiles.json'), 'utf8')).profiles.find((x) => x.id === pP.id);
+  const after2 = JSON.parse((landed(), fs).readFileSync(path.join(ROOT, 'data', 'browser-profiles.json'), 'utf8')).profiles.find((x) => x.id === pP.id);
   ok(!!(kp.ok && after2.egress && after2.egress.publicIp === '203.0.113.9' && after2.egress.timezone === 'Asia/Tokyo' && after2.egress.source === 'measured' && after2.egress.checkedAt > 0 && !bad.ok && bad.code === 'exit_timezone_invalid' && after2.egress.timezone === 'Asia/Tokyo'),
     'the confirm keeps it on the profile under the hand-over\'s names (checkedAt, source: measured); a typed abbreviation (JST) refused at the field — the kept one unchanged', { kept: after2.egress, bad: bad.code });
   // a credentialed proxy while the vault is locked ⇒ the launch's own refusal, no request
@@ -181,7 +184,7 @@ const k = mkK();
   const callers = execFileSync('git', ['-C', REPO, 'grep', '-l', 'requestThrough(', '--', 'src'], { encoding: 'utf8' }).trim().split('\n').filter(Boolean).sort();
   ok(JSON.stringify(callers) === JSON.stringify(['src/server/browser-exit-check.js', 'src/server/browser-keeper.js']), 'the product holds exactly ONE caller of the request (src/server/browser-keeper.js — the press road) besides its own module', callers);
   // 主开发 17:04Z M1 — A KEPT EXIT BELONGS TO THE ROAD IT WAS KEPT FOR: every change of the proxy forgets it, said in the answer
-  const store = (id) => JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'browser-profiles.json'), 'utf8')).profiles.find((x) => x.id === id);
+  const store = (id) => JSON.parse((landed(), fs).readFileSync(path.join(ROOT, 'data', 'browser-profiles.json'), 'utf8')).profiles.find((x) => x.id === id);
   const keepTyped = (id) => k.keepEgress(id, { country: 'JP', timezone: 'Asia/Tokyo', source: 'typed' });
   const pF = k.createProfile({ label: 'Forget', proxy: proxyUrl });
   keepTyped(pF.id); const same = k.updateProfile(pF.id, { proxy: proxyUrl });
@@ -194,7 +197,7 @@ const k = mkK();
   const KF = mutant('src/server/browser-keeper.js', "      if ((np.value !== (p.proxy || null) || nc.value !== (p.proxyCredential || null)) && p.egress) { delete p.egress; changed.exitForgotten = true; }\n", '');
   const kF = KF.create({ dataDir: path.join(ROOT, 'data-forget-red'), homeDir: path.join(ROOT, 'home'), env: () => ({ PATH: PATH_ENV, HOME: path.join(ROOT, 'home') }), serverSetting: (x) => settings[x], liveKeys: () => new Set(), install: false, tickMs: 3600e3, log: { log() { }, warn() { }, error() { } }, hostKnown: () => false, userTodos: { add: () => ({ id: 'u1' }) }, proxyLogins: pl });
   const pR = kF.createProfile({ label: 'Red', proxy: proxyUrl }); kF.keepEgress(pR.id, { country: 'JP', source: 'typed' }); kF.updateProfile(pR.id, { proxy: '' });
-  ok(!!JSON.parse(fs.readFileSync(path.join(ROOT, 'data-forget-red', 'browser-profiles.json'), 'utf8')).profiles.find((x) => x.id === pR.id).egress, 'RED: a keeper without the forget — the old exit outlives the proxy it was kept for (the leg above goes red on it)');
+  ok(!!JSON.parse((landed(), fs).readFileSync(path.join(ROOT, 'data-forget-red', 'browser-profiles.json'), 'utf8')).profiles.find((x) => x.id === pR.id).egress, 'RED: a keeper without the forget — the old exit outlives the proxy it was kept for (the leg above goes red on it)');
   kF.shutdown?.();
   // M2 — A RUNNING BROWSER IS MEASURED ONLY THROUGH THE ROAD IT RUNS ON (its own forwarder = this proxy WITH this login)
   const pS = k.createProfile({ label: 'Running', proxy: proxyUrl });
