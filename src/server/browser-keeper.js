@@ -3671,7 +3671,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    * agent's own CDP; it cannot inject the opener rule without corrupting the agent's target map — its safety property, never
    * ANOTHER holder's window, still holds).
    */
-  async function openOwnTab(p, holderKey, { url = '', ns = null, opts = {}, pin = [], fallback = true, json = false, timeout = 30000 } = {}) {
+  async function openOwnTab(p, holderKey, { url = '', ns = null, opts = {}, pin = [], fallback = true, json = false, timeout = 30000, _again = false } = {}) {
     const rec = p ? reg.browsers[p.id] : null;
     const VP = () => require('./browser-viewport.js');
     let made = null;
@@ -3778,6 +3778,12 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         }
         return { ok: true, targetId: id, window: 'own', windowId: made.windowId, intoWindow: !made.remade && made.windowId != null && !!made.inWindow, remade: !!made.remade, rung: made.rung || null, strays: made.strays || null, json }; // verify r3: the RUNG that landed is named; the strays ride once
       }
+      // B-0cee (an agent's report, fb-61e4794124): the new tab itself GONE before its bind — the holder's window closed between the
+      // create and the `tab <id>` (the browser's target list answers without it) ⇒ the keeper asks ONCE more itself, as its refusal
+      // told the agent to (a window of its own that is gone gets a new one). A tab that still lives when its bind failed (the
+      // B-19a9 stall), an unread list, or a second loss is refused as before
+      let tabGone = false;
+      if (fallback && !_again) { let tl = null; try { tl = await (typeof readTargets === 'function' ? readTargets(rec.cdpUrl) : VP().browserTargets(rec.cdpUrl)); } catch { tl = null; } tabGone = !!(tl && tl.ok && Array.isArray(tl.targets) && !tl.targets.some((t) => String(t.targetId || '').toUpperCase() === id)); }
       try { await (typeof closeTargetFn === 'function' ? closeTargetFn(rec.cdpUrl, id) : require('./browser-viewport.js').closeTarget(rec.cdpUrl, id)); } catch { /* the next start ends it */ }
       // verify r5 ③ (MEASURED on the product's Chrome, 30/30 per mode): a bind that fails — the user closed the holder's window
       // between the create and the `tab <id>` ("No tab with label …") — fell to the binary's own `tab new`, which lands in the
@@ -3786,6 +3792,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       // opened, the same `tab new` once more re-asks the window (gone ⇒ a new window of its own) — never the shared fallback
       if (fallback) { log.log?.(`[browser] ${holderKey} on ${p ? p.id : '?'}: its new tab ${id.slice(0, 8)} could not be bound to its session (${execWhy(b)}) — closed, refused window_busy (bind_failed), never the browser's last window`); made = { ok: false, code: 'window_busy', why: 'bind_failed', error: `your new tab could not be bound to your session (${execWhy(b)}) — nothing opened; run the same \`tab new\` once more (a window of yours that is gone gets a new one)` }; }
       else made = { ok: false, error: `its new window could not be bound to its session (${execWhy(b)})` };
+      if (tabGone && made && made.why === 'bind_failed') { log.log?.(`[browser] ${holderKey} on ${p ? p.id : '?'}: its new tab ${id.slice(0, 8)} went away with its window before the bind — asked once more (B-0cee)`); return openOwnTab(p, holderKey, { url, ns, opts, pin, fallback, json, timeout, _again: true }); }
     }
     if (made && made.code === 'window_busy') return { ok: false, code: 'window_busy', why: made.why || 'ladder', targetId: null, window: 'own', error: made.error }; // verify r2 T1: a living window is never traded for the browser's last window (another holder's)
     if (made && /timed out/i.test(String(made.error || '')) && p) noteAnswer(reg.browsers[p.id], p, false, 'a window open'); // lane browser-unresponsive: an ask that did not answer

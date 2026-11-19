@@ -11,7 +11,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
-import { deadPort } from './scratch.mjs';
+import { deadPort, anchored } from './scratch.mjs';
 import { withUse } from './grant-fixtures.mjs';   // lane grants-unify: a hand-built record's list mirrored from its pre-unify owner
 const DEAD_CDP = await deadPort(); // the fake's cdp-url: a port the kernel just released, never a fixed one (§81)
 
@@ -392,6 +392,25 @@ console.log('— ④ the real routes + keeper: a job gets its own lease + window
   ok(KSRC.includes(WAIT_LINE), 'control "the attach does not wait for its close": its needle is in the shipped keeper');
   const pre = await closeThenAttach(MK.load('src/server/browser-keeper.js', KSRC.replace(WAIT_LINE, ''), 'no-close-wait'), 'prefix');
   ok(pre.attachFirst && pre.t2State === 'closed' && !pre.rooted && pre.rebinds > 0, 'control "the attach does not wait for its close" (the pre-fix keeper): the SAME hand interleave goes RED — the re-attach binds first, the late close shuts the NEW window\'s tab and marks it lost, the next verb rebinds a fresh root', pre);
+  // B-0cee (an agent's report, fb-61e4794124; test-browser-windows c32 is its heavy cell): the holder's window closed between the
+  // create and the bind (every tab of it gone, the binary knows no such tab) ⇒ the keeper asks ONCE more itself: a window of its
+  // own, said — never the shared fallback, never the agent's hand. The release refused window_busy (bind_failed); the agent repeated it
+  const bindGone = async (Kmod, tag) => {
+    const kx = mk(Kmod, { dataDir: path.join(O, 'data-b0cee-' + tag) }); await kx._facts.probeVersion();
+    const px = kx.createProfile({ label: 'B0 ' + tag }); await kx.attach({ profileId: px.id, browserKey: KA, sessionId: 'x-b0-' + tag });
+    const NS = B.sessionNameFor(px.id);
+    const act = async (u) => { try { const r = await kx.agentTabAct({ browserKey: KA, argv: ['tab', 'new', u] }); return r && r.ok === false ? { ok: false, code: r.code || null, why: r.why || null } : { ok: true, r }; } catch (e) { return { ok: false, code: e.code || null, why: e.why || null }; } };
+    const first = await act('https://b0.example/1');
+    model.onCreated = (tid) => { const w = model.targets.get(tid).windowId; for (const [id, t] of [...model.targets]) if (t.windowId === w && t.state !== 'closed') { closeTab(id); fakeRemove(NS, id); } };
+    const n0 = model.openWindowCalls;
+    const r = await act('https://b0.example/2'); const hookLeft = typeof model.onCreated === 'function'; model.onCreated = null;
+    try { kx.shutdown(); } catch { }
+    return { first: first.ok, hookFired: !hookLeft, ok: r.ok, code: r.code || null, why: r.why || null, shared: !!(r.r && r.r.opened && r.r.opened.window === 'shared'), note: (r.r && r.r.noteCode) || null, newWindows: model.openWindowCalls - n0 };
+  };
+  const b0 = await bindGone(K, 'tree');
+  ok(JSON.stringify(b0) === JSON.stringify({ first: true, hookFired: true, ok: true, code: null, why: null, shared: false, note: 'tab_new_window', newWindows: 1 }), 'B-0cee: the holder\'s window closed between the create and the bind ⇒ the keeper asks once more itself — the tab opens in a NEW window of its own, said (tab_new_window), never shared, nothing for the agent to repeat', b0);
+  const b0r = await bindGone(MK.load('src/server/browser-keeper.js', anchored(KSRC, 'return openOwnTab(p, holderKey, { url, ns, opts, pin, fallback, json, timeout, _again: true }); }', '}', 'B-0cee the release: no second ask'), 'no-bind-retry'), 'release');
+  ok(JSON.stringify(b0r) === JSON.stringify({ first: true, hookFired: true, ok: false, code: 'window_busy', why: 'bind_failed', shared: false, note: null, newWindows: 0 }), 'CONTROL (the release): the same scene is refused window_busy (bind_failed) — the agent repeats `tab new` by hand (fb-61e4794124) — RED', b0r);
   for (const row of copiesCensus(MK.files, MK.dir, REPO, { minCopies: 1 })) ok(row.pass, row.name, row.detail);
 }
 

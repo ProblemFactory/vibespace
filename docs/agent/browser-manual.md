@@ -619,16 +619,19 @@ vibespace-browser blocked --url <u> [--why <code>] [--evidence <text>] [--tier 2
   yours is closed for you. "Your window" is the one VibeSpace stamped on your
   lease; a lease without a stamp takes the window of your CURRENT tab (then it
   is stamped). While the user drives any window of the browser (a takeover, or
-  browsing it himself) VibeSpace never minimizes or raises a window to place
-  your tab: a `tab new` whose opener fails on every tab of yours answers
-  `window_busy` naming him (`why: user_driving`) — that holds even when his
-  takeover begins in the middle of your `tab new`. When he hands the browser
-  back you are TOLD, free, with your next turn ("the user handed … back — the
-  `tab new` refused while he drove can run now"): run it once more then, no
-  polling. A new tab of yours that could not be bound to your session (your
-  window closed under it) is also `window_busy` (`why: bind_failed`) — never
-  a tab in another conversation's window; the same `tab new` once more opens
-  a new window of your own.
+  the user browsing it in person) VibeSpace never minimizes or raises a window
+  to place your tab: a `tab new` whose opener fails on every tab of yours
+  answers `window_busy` naming the user (`why: user_driving`) — that holds even
+  when the user's takeover begins in the middle of your `tab new`. When the
+  user hands the browser back you are TOLD, free, with your next turn ("the
+  user handed … back — the `tab new` refused while the user drove can run
+  now"): run it once more then, no polling. A new tab of yours whose window
+  closed under it before it was bound to your session opens, on the same
+  `tab new`, in a new window of your own (VibeSpace asks once more itself, and
+  says so) — never a tab in another conversation's window. Only a bind that
+  failed on a tab that still lives, or a second loss, is `window_busy`
+  (`why: bind_failed`); the same `tab new` once more then opens a new window
+  of your own.
   Nobody waits for anybody: there is no "one conversation at a time" any more
   (your commands and another conversation's run side by side — your own
   commands still run one after another, so a long `wait` of yours delays only
