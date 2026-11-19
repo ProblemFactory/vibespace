@@ -97,6 +97,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { AsyncLocalStorage } = require('async_hooks');
 const { createChannelStore } = require('../channel-store.js');
+const { clientSwapStep } = require('../client-swap-step.js');   // B-166e part 2's rule (PURE) — B-e40d's storage mounts say a swap by it too
 const { createChannelRegistry, ChannelError } = require('../channels/index.js');
 const { identityOf, identityMismatch, heldIdentity, mismatchSentence, namelessSentence, cancelledSentence, stampIdentity } = require('../channel-identity.js');   // verify r5: whose account a consent may land on; r6: the held identity read off the token it holds, a nameless consent; r7: a cancelled consent; lane slack-grid-identity: the one stamp rule
 const caps = require('../channel-caps.js');
@@ -447,30 +448,6 @@ function atYouView(en) {
 }
 const COALESCE_MAX_SECONDS = 600;
 
-/** B-166e part 2 (主开发 2026-11-19 00:42Z, the shape ruled): A PRESET'S CLIENT-SWAP MEMO IS WHAT WAS SAID — the client in force
- *  at the last check (`to`), the accounts NAMED in an item for that client (`named`), whether that item is open (`open`). PURE:
- *  (the memo, the client in force, the COUNTED accounts not on it) → the memo after and the one act:
- *   1. the client in force differs from the memo's: a NEW SWAP — the memo starts again for this client with nobody named (an
- *      item still open for the old client is superseded);
- *   2. owed = those not on the client in force who are not yet named: if any, ONE item — the open one redrawn, else a new one —
- *      listing ALL who must act now, and they are named;
- *   3. nobody left to act and the item open: it closes; the named stay named.
- *  So a swap is said once however many it touches; one already named who comes back is not said twice; one never named
- *  (disabled or dead AT the swap) is said once when back; a revert is simply a new swap. → { memo, act, supersede } with act
- *  'file' | 'redraw' | 'close' | 'none'. */
-function clientSwapStep(memo, to, need) {
-  const same = !!memo && memo.to === to;
-  const m = { to, named: same && Array.isArray(memo.named) ? [...new Set(memo.named.map(String))] : [], open: same ? memo.open === true : false };
-  const supersede = !same && !!(memo && memo.open === true);
-  const ids = [...new Set((need || []).map(String))];
-  const owed = ids.filter((id) => !m.named.includes(id));
-  let act = 'none';
-  if (owed.length) { act = m.open ? 'redraw' : 'file'; for (const id of owed) m.named.push(id); m.open = true; }
-  else if (ids.length && m.open) act = 'redraw';   // the open item follows who must act now (one fewer: re-authorized)
-  else if (!ids.length && m.open) { act = 'close'; m.open = false; }
-  m.named.sort();
-  return { memo: m, act, supersede };
-}
 
 function create(deps = {}) {
   const {
@@ -7573,7 +7550,7 @@ function create(deps = {}) {
    *  label): ONE For-you item «N account(s) still signed in with the old one», its door the Re-authorize of the first (by label).
    *  THE MEMO IS WHAT WAS SAID (the 2026-11-19 00:42Z ruling): `clientSwaps[row|key] = {to, named, itemId, sig}` on the adapters
    *  store — the client in force at the last check, the accounts named in an item for it, the item, the words last drawn; the
-   *  rule is the PURE `clientSwapStep` above (its table: test-channels-gmail-shape ㉗ (1c)). Counted: enabled accounts with a
+   *  rule is the PURE `clientSwapStep` (src/client-swap-step.js — its table: test-channels-gmail-shape ㉗ (1c)). Counted: enabled accounts with a
    *  live sign-in whose token names a client (a token minted before the B-166e rule names none). NOTHING is judged while the
    *  vault is locked; a preset with a sign-in the check cannot read, or a withdrawn preset, is left as it stands. Run at a
    *  presets reload / the vault's event, the boot, and every door that changes who is counted (a sign-in landing, a remove, an

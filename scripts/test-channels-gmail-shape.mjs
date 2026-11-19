@@ -2750,7 +2750,7 @@ console.log('\n㉗ (1b) B-166e part 2 cure: the client in force kept at the clos
 //    last check, the accounts NAMED for it, whether the item is open; `clientSwapStep` is PURE). Every sequence of the earlier
 //    rounds is a row: the steps (the client in force, the COUNTED accounts not on it; «dismiss» = the person closed the item)
 //    and what is said at each (file / redraw / close / none, «+S» = an open item of another client superseded). RED CONTROLS
-//    (an engine copy through the anchored helper, its own row red): the names kept across a swap (THE MUST in its last coat) ·
+//    (a copy of the rule's module through the anchored helper, its own row red): the names kept across a swap (THE MUST in its last coat) ·
 //    no supersede · a closed item never filed again (one never named, back later, never told) · no close at nobody left.
 console.log('\n㉗ (1c) B-166e part 2 cure 2: the memo is what was said — the rule\'s table');
 {
@@ -2783,16 +2783,16 @@ console.log('\n㉗ (1c) B-166e part 2 cure 2: the memo is what was said — the 
   for (const r of real) ok(r.ok, `㉗ (1c) ${r.what}: ${J(r.got.acts)} — named ${J(r.got.named)}`, J(r.got));
   // a locked vault: nothing judged, nothing changed — the engine's guard (㉗ (1b) «the vault LOCKED», with its control); a restart and
   // the memo's persistence: ㉗ (1) «said ONCE a swap … a restart» and «the memo persists» — never reached by the rule itself
-  const ESRC1 = engineSource(REPO);
+  const RSRC1 = fs.readFileSync(path.join(REPO, 'src/client-swap-step.js'), 'utf8');
   const MR = mutantCopies('chan-gmail-rule', REPO);
   const PL = [
-    ['names-kept', [["  const m = { to, named: same && Array.isArray(memo.named) ? [...new Set(memo.named.map(String))] : [], open: same ? memo.open === true : false };", "  const m = { to, named: memo && Array.isArray(memo.named) ? [...new Set(memo.named.map(String))] : [], open: same ? memo.open === true : false };"]], 'the skeptic\'s scene', 'with the names kept across a swap the REAL swap to B says nothing to Y (the must in its last coat)'],
-    ['no-supersede', [["  const supersede = !same && !!(memo && memo.open === true);", "  const supersede = false;"]], 'back to A before anyone acts', 'without the supersede the old client\'s item stays open after the revert'],
-    ['never-file-again', [["  if (owed.length) { act = m.open ? 'redraw' : 'file';", "  if (owed.length) { act = m.open || m.named.length ? 'redraw' : 'file';"]], 'X disabled AT the swap, back after the item closed', 'a closed item never filed again: one never named, back later, is never told'],
-    ['no-close', [["  else if (!ids.length && m.open) { act = 'close'; m.open = false; }", ""]], 'X named, disabled, back', 'without the close the item stays open with nobody left to act'],
+    ['names-kept', [["  const m = { to, named: same && Array.isArray(memo.named) ? [...new Set(memo.named.map(String))] : [], open: same ? memo.open === true : false };", "  const m = { to, named: memo && Array.isArray(memo.named) ? [...new Set(memo.named.map(String))] : [], open: same ? memo.open === true : false };"]], 'the skeptic\'s scene', 'with the names kept across a swap the REAL swap to B says nothing to Y (the must in its last coat)'],   // stale-pins: kept — re-pointed: the rule's own module src/client-swap-step.js (RSRC1)
+    ['no-supersede', [["  const supersede = !same && !!(memo && memo.open === true);", "  const supersede = false;"]], 'back to A before anyone acts', 'without the supersede the old client\'s item stays open after the revert'],   // stale-pins: kept — re-pointed: the rule's own module src/client-swap-step.js (RSRC1)
+    ['never-file-again', [["  if (owed.length) { act = m.open ? 'redraw' : 'file';", "  if (owed.length) { act = m.open || m.named.length ? 'redraw' : 'file';"]], 'X disabled AT the swap, back after the item closed', 'a closed item never filed again: one never named, back later, is never told'],   // stale-pins: kept — re-pointed: the rule's own module src/client-swap-step.js (RSRC1)
+    ['no-close', [["  else if (!ids.length && m.open) { act = 'close'; m.open = false; }", ""]], 'X named, disabled, back', 'without the close the item stays open with nobody left to act'],   // stale-pins: kept — re-pointed: the rule's own module src/client-swap-step.js (RSRC1)
   ];
   for (const [tag, pairs, row, words] of PL) {
-    const C = MR.load('src/server/channels-engine.js', anchoredCopy(ESRC1, pairs, `㉗ (1c) ${tag}`), tag);
+    const C = MR.load('src/client-swap-step.js', anchoredCopy(RSRC1, pairs, `㉗ (1c) ${tag}`), tag);   // the rule's own PURE module (B-e40d moved it out of the engine; the engine and the storage mounts share it)
     const r = table(C.clientSwapStep).find((x) => x.what.startsWith(row));
     ok(!!r && r.ok === false, `㉗ (1c) RED CONTROL (${tag}): ${words} — the row «${row}…» red`, J(r && r.got));
   }

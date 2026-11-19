@@ -1635,7 +1635,7 @@ console.log('⑨ THE OUTBOX POINTER\'S DOOR (lane ui-needs-a-button pick 6 — �
   } finally { try { if (u) u.stop(); } catch { } fs.rmSync(dir, { recursive: true, force: true }); }
   // THE ACT — source pins: src/lib/user-todos-actions.js imports need-line.js (unimportable unbuilt); the row renderer draws off doorOf
   const ACT = src('src/lib/user-todos-actions.js');
-  ok(/const ROW_DOORS = \{ outbox: \(\) => app\.openChannelOutbox\?\.\(\) \};/.test(ACT) && /const rd = rowDoorOf\(item\);\s*\n\s*if \(rd\) \{ close\(\); ROW_DOORS\[rd\.opens\]\(item\); return; \}/.test(ACT) && /\|\| !!rowDoorOf\(item\)\n/.test(ACT),
+  ok(/const ROW_DOORS = \{ outbox: \(\) => app\.openChannelOutbox\?\.\(\)(?: \};|, )/.test(ACT) && /const rd = rowDoorOf\(item\);\s*\n\s*if \(rd\) \{ close\(\); ROW_DOORS\[rd\.opens\]\(item\); return; \}/.test(ACT) && /\|\| !!rowDoorOf\(item\)\n/.test(ACT),
     'the act: the jump opens THE Outbox (app.openChannelOutbox, no filter — its census opens on what waits) for an item whose row declares the door; isDoor says so (a tap on the row\'s body opens it too)');
   ok(/if \(e\.target\.closest\('\.ut-door'\)\) \{ const rec = byId\(id\); if \(rec\) jump\(rec\.sessionKey, rec\); return; \}/.test(src('src/lib/user-todos-panel.js')),
     'the tray: a press on «Open the Outbox» is THE door (model.jump) — the popup, the mini inbox, the phone sheet and the chat card share rowClick');

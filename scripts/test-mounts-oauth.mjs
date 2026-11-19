@@ -390,6 +390,88 @@ console.log('§4 THE MINTED CLIENT (B-e40d): a preset swapped under the same key
   ok(gm.mintedClient.id === swapped.clientId, 'a Gmail re-authorize (its PATCH with a token) names the client its sign-in used');
   GMAIL.update(gm, { token: tok('rt-g3') }, () => {}, mm);
   ok(!('mintedClient' in gm), 'a PATCH with a token no sign-in of this hub minted names none (the old minted client never outlives its token)');
+  // §5 THE CLIENT-SWAP NOTICE (B-e40d's remainder — B-166e part 2's shape for the storage mounts, its rule shared:
+  // src/client-swap-step.js): ONE For-you item per preset key naming the mounts still on a replaced client, its door the first's
+  // Re-authorize; it follows who is left and resolves itself. The real MountManager facts → the real mount-for-you producer → a
+  // real For-you store (a scratch dir); only the presets stand in.
+  console.log('§5 THE CLIENT-SWAP NOTICE (B-e40d): a replaced preset client is said in For you, with its door');
+  {
+    const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
+    const MP = require(path.join(REPO, 'src/server/mount-for-you.js')), FA = require(path.join(REPO, 'src/foryou-actions.js'));
+    const store = (tag) => { const d = path.join(ROOT, 'todos-' + tag); fs.mkdirSync(d, { recursive: true }); return new UserTodoManager({ dataDir: d, onChange: () => {}, expirySweepMs: 0 }); };
+    const rec = (id, name, mintedId, extra = {}) => ({ id, name, type: 'drive', clientPreset: 'org1', tokenEnc: mm._enc(tok('rt-' + id)), ...(mintedId ? { mintedClient: { id: mintedId, key: 'org1', sealed: mm._enc(S_M) } } : {}), ...extra });
+    const keepS = mm._state.mounts, keepSw = mm._state.clientSwaps, keepOn = mm.onClientSwaps;
+    // the sequence: A, B, D on the old client (C names none, Own has its own) → the swap → A re-authorized → B (the door) removed
+    const run = async (P, u) => {
+      const fy = P.create({ getUserTodos: () => u, mountCount: () => mm._state.mounts.length, onReopen: () => { mm.clientSwapCheck().catch(() => { }); } });   // as the wiring hands it
+      const open = () => u.forSession([P.ITEM_KEY]).filter((i) => i.status === 'open' && i.i18n && i.i18n.text && i.i18n.text.key === P.SWAP);
+      const at = {};
+      mm.onClientSwaps = (gs, memos) => fy.clientSwaps(gs, memos);
+      mm._state.clientSwaps = {};
+      mm._state.mounts = [rec('sw-a', 'Alpha', ORG1), rec('sw-b', 'Beta', ORG1), rec('sw-c', 'Gamma', null), rec('sw-d', 'Delta', ORG1), rec('sw-own', 'Own', ORG1, { clientId: 'own.apps.googleusercontent.com', clientSecretEnc: mm._enc('own-secret') })];
+      use([g('org1', S_M)]); await mm.clientSwapCheck(); at.before = open().map((i) => i.id);
+      use([swapped]); await mm.clientSwapCheck(); at.swap = open().map((i) => ({ id: i.id, n: i.i18n.text.params.n, text: i.text, detail: i.detail, action: i.action, door: FA.doorOf(i) }));
+      at.memo = JSON.parse(fs.readFileSync(mm._file, 'utf8')).clientSwaps;
+      mm._state.clientSwaps = at.memo; await mm.clientSwapCheck(); at.restart = open().map((i) => i.id);   // a restart: the memo read back from disk, the boot's check
+      mm._driveAuth = { token: tok('rt-sw-a2'), client: { clientId: swapped.clientId, clientSecret: S_N } };
+      DRIVE.writeToken(mm._state.mounts[0], tok('rt-sw-a2'), mm); mm._driveAuth = null;
+      await mm.clientSwapCheck(); at.reauth = open().map((i) => ({ id: i.id, n: i.i18n.text.params.n, detail: i.detail, door: i.action.mountId }));
+      fy.removed(mm._state.mounts.find((x) => x.id === 'sw-b')); at.afterRemovedHook = open().length;
+      mm._state.mounts = mm._state.mounts.filter((x) => x.id !== 'sw-b');
+      await mm.clientSwapCheck(); at.removed = open().map((i) => ({ id: i.id, n: i.i18n.text.params.n, detail: i.detail, door: i.action.mountId }));
+      return { at, open, u };
+    };
+    try {
+      const { at, open, u } = await quietA(() => run(MP, store('swap')));
+      const s0 = at.swap[0] || {};
+      ok(at.before.length === 0, 'the preset names the client the mounts were minted under: nothing is said');
+      ok(at.swap.length === 1 && s0.n === 3 && /the preset «org1» signs in with another OAuth client now — 3 mount\(s\) still on the old one/.test(s0.text) && /: Alpha, Beta, Delta\./.test(s0.detail) && !/Gamma|Own/.test(s0.detail) && s0.action.type === 'mount-reauth' && s0.action.mountId === 'sw-a',
+        'ANOTHER client under the key: ONE For-you item names the mounts still on the old client (Alpha, Beta, Delta — never one that names no client, never one with its own), its door the first by name', at.swap);
+      ok(!!s0.door && s0.door.opens === 'storage' && /Re-authorize/.test(s0.door.verb), 'its door is the registry row\'s (opens the storage Re-authorize — src/lib/user-todos-actions.js ROW_DOORS `storage`)', s0.door);
+      ok(!!at.memo && !!at.memo.org1 && at.memo.org1.to === swapped.clientId && at.memo.org1.itemId === s0.id && at.memo.org1.named.join() === 'sw-a,sw-b,sw-d' && JSON.stringify(at.restart) === JSON.stringify([s0.id]), 'what was said is kept on disk (the memo: the client in force, the mounts named, the item) — after a restart (the memo read back, the boot\'s check) the same ONE item, never a second', { memo: at.memo, restart: at.restart });
+      const r1 = at.reauth[0] || {};
+      ok(at.reauth.length === 1 && r1.id === s0.id && r1.n === 2 && /: Beta, Delta\./.test(r1.detail) && r1.door === 'sw-b', 'one re-authorized under the new client: the SAME item names who is left (Beta, Delta), its door moves to the next', at.reauth);
+      const m1 = at.removed[0] || {};
+      ok(at.afterRemovedHook === 1 && at.removed.length === 1 && m1.id === s0.id && m1.n === 1 && /: Delta\./.test(m1.detail) && m1.door === 'sw-d', 'the mount its door named REMOVED: the item is not closed by the removal — the next check names who is left (Delta), its door moves', at.removed);
+      mm._driveAuth = { token: tok('rt-sw-d2'), client: { clientId: swapped.clientId, clientSecret: S_N } };
+      DRIVE.writeToken(mm._state.mounts.find((x) => x.id === 'sw-d'), tok('rt-sw-d2'), mm); mm._driveAuth = null;
+      await quietA(() => mm.clientSwapCheck());
+      ok(open().length === 0 && u.get(s0.id).status !== 'open', 'the last one re-authorized: the item resolves itself');
+      mm._state.clientSwaps = {};
+      u.setStatus(s0.id, 'open', 'user');   // the person's ↺ — NO check is asked here: the store's reopen asks it (onReopen)
+      await new Promise((r) => setImmediate(r));
+      ok(u.get(s0.id).status !== 'open', 'a swap item RE-OPENED is judged at once (the store says the reopen, the check runs by itself): with no memo holding it, it closes again (known by its words\' key)');
+      // THE KEY WITHDRAWN while its item is open: no client to re-authorize under — the item closes, its memo goes
+      mm._state.mounts = [rec('sw-w', 'Withdrawn', ORG1)]; mm._state.clientSwaps = {};
+      use([swapped]); await quietA(() => mm.clientSwapCheck());
+      const wOpen = open().length;
+      use([g('channels', S_A)]); await quietA(() => mm.clientSwapCheck());
+      ok(wOpen === 1 && open().length === 0 && !('org1' in (mm._state.clientSwaps || {})), 'the key WITHDRAWN while its item is open: the item closes (its door could not do what it says) and its memo goes — the mounts keep their minted client, the hub\'s log names them', { wOpen, memos: mm._state.clientSwaps });
+      // NO KEY and the explicit key of the SAME preset are ONE group (the single / default preset): one item names both
+      use([g('default', S_M)]); mm._state.clientSwaps = {};
+      const DEF = 'default.apps.googleusercontent.com';
+      mm._state.mounts = [rec('sw-p', 'Plain', DEF, { clientPreset: null }), rec('sw-q', 'Keyed', DEF, { clientPreset: 'default' })];
+      use([{ key: 'default', label: 'Default', clientId: 'replaced-default.apps.googleusercontent.com', clientSecret: S_N }]); await quietA(() => mm.clientSwapCheck());
+      const one = open();
+      ok(one.length === 1 && one[0].i18n.text.params.n === 2 && /: Keyed, Plain\./.test(one[0].detail), 'a mount with NO key and one keyed to the same (default) preset are ONE group: one item names both', one.map((i) => [i.text, i.detail]));
+      // RED control (a patched COPY of the producer, its plant first): the removal closes the swap item like the mount's own items
+      const fsrc = fs.readFileSync(path.join(REPO, 'src/server/mount-for-you.js'), 'utf8'), fanchor = "filter((x) => x && !isSwap(x) && ((x.facts && x.facts.mountId === m.id)";
+      ok(fsrc.includes(fanchor), 'RED control, its plant first: the removal of a mount leaves a client-swap item to the check');
+      const MP0 = M.load('src/server/mount-for-you.js', anchored(fsrc, fanchor, "filter((x) => x && ((x.facts && x.facts.mountId === m.id)", 'removal-closes-swap'), 'removal-closes-swap');   // stale-pins: kept — the RED control's plant is the base's road on purpose
+      const red = await quietA(() => run(MP0, store('swap-red')));
+      ok(red.at.afterRemovedHook === 0 && red.at.removed.length === 0, 'RED control: a removal that closes the swap item leaves Delta, still on the old client, told by NOTHING (the item closed, the memo named it already)', red.at.removed);
+      // THE WIRING (the hub's real lines): the producer handed over, the store's reopen, the presets reload and the boot's check;
+      // the door's client chain: ROW_DOORS `storage` → app.openMountReauth → the sidebar's openMountReauth (the shared client-switch
+      // Re-authorize under the preset's NOW client — Drive and Gmail alike)
+      const wire = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8'), acts = fs.readFileSync(path.join(REPO, 'src/lib/user-todos-actions.js'), 'utf8');
+      const appSrc = fs.readFileSync(path.join(REPO, 'src/lib/app.js'), 'utf8'), side = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-mounts.js'), 'utf8');
+      ok(wire.includes('onClientSwaps: (g, memos) => fy.clientSwaps(g, memos)') && wire.includes('onReopen: () => { mounts.clientSwapCheck().catch(() => { }); }') && wire.includes('sharedPresets().onChange(() => { mounts.clientSwapCheck().catch(() => { }); })') && /\} mounts\.clientSwapCheck\(\)\.catch\(\(\) => \{ \}\); \} \/\/ B-e40d/.test(wire),
+        'the hub wires it: the producer, the store\'s reopen, the presets reload and the boot\'s check (src/server/mounts-plugins-wiring.js)');
+      ok(/const ROW_DOORS = \{[^\n]*\bstorage: \(item\) => app\.openMountReauth\?\.\(/.test(acts) && appSrc.includes('openMountReauth(id) { return this.sidebar?.openMountReauth?.(id); }') && side.includes('async openMountReauth(id) {')
+        && side.includes('this._showClientSwitchReauthDialog(m, m, { type: m.type, start: { clientPreset: m.clientPreset || undefined }, client: { clientPreset: m.clientPreset || \'\' } }, presets);') && side.includes('this._providersSeen = d.providers'),
+        'the door\'s client chain: ROW_DOORS storage → app.openMountReauth → the sidebar\'s openMountReauth — the client-switch Re-authorize under the preset\'s NOW client (its rows read though the Storage tab never drew)');
+    } finally { mm._state.mounts = keepS; mm._state.clientSwaps = keepSw; mm.onClientSwaps = keepOn; if (keepOn === undefined) delete mm.onClientSwaps; mm._driveAuth = null; }
+  }
   mm._driveAuth = null; mm.gmail._auth = null; MountManager._mintedSaid = null;
   CP.setSharedPresets(null);
 }

@@ -788,7 +788,7 @@ export function installSidebarMounts(Sidebar) {
     // lane dc-mount-client: the storage providers' CLIENT cells — src/mount-providers/<id>.js `client`, published once
     // by GET /api/mounts (`providers`) and cached with the panel's data. Every word, field, widget and rule below reads
     // a row; nothing here names a provider (test-architecture §78 family `mount`).
-    _providerRows() { return this._mountsData?.providers || []; },
+    _providerRows() { return this._mountsData?.providers || this._providersSeen || []; },   // (B-e40d: For you's door may come before the Storage tab ever drew)
     _providerRow(type) {
       const rows = this._providerRows();
       return rows.find((r) => r.id === (type || rows.find((x) => x.default)?.id)) || {};
@@ -856,6 +856,26 @@ export function installSidebarMounts(Sidebar) {
         return { product: label, signin: label };
       }
       return { product: n.product || m?.type, signin: n.signin || m?.type };
+    },
+
+    // B-e40d: FOR YOU's DOOR for a mount still on a replaced preset client (src/server/mount-for-you.js clientSwaps): its own
+    // Re-authorize — a Drive-backed one's guided sign-in (minted under the preset's NEW client), a Gmail one's Edit dialog
+    // (its sign-in lives there); a mount that is gone says so
+    async openMountReauth(id) {
+      let d = null;
+      try { d = await api('/api/mounts'); } catch (e) { showToast(tr('Could not read the storage list: {error}', { error: (e && e.message) || String(e) })); return; }
+      if (d && Array.isArray(d.providers)) this._providersSeen = d.providers;   // the rows' cells, though the Storage tab never drew
+      const m = ((d && d.mounts) || []).find((x) => x && x.id === id) || null;
+      if (!m) { showToast(tr('That storage is no longer here')); return; }
+      // the sign-in under the client its preset names NOW: the shared client-switch Re-authorize (Drive: drive-token with the
+      // client; Gmail: one PATCH with the token — its row's clientSwitch rule), else the plain Re-authorize, else its Edit dialog
+      if (this._providerRow(m.type).clientSwitch && !m.parentId) {
+        let presets = []; try { presets = (await api('/api/mounts/drive-defaults')).presets || []; } catch { }
+        this._showClientSwitchReauthDialog(m, m, { type: m.type, start: { clientPreset: m.clientPreset || undefined }, client: { clientPreset: m.clientPreset || '' } }, presets);
+        return;
+      }
+      if (this._isDriveBacked(m)) { this._showDriveReauthDialog(m); return; }
+      await this._showEditMountDialog(m);
     },
 
     // Re-authorize an EXISTING Drive mount/credential whose token died. Same

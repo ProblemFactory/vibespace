@@ -137,6 +137,7 @@ const HELPERS = Object.freeze([
   ['src/egress-fence.js', 'the address verdict and one fenced request to an owner-configured address; nothing kept between calls'],
   ['src/cache-bounds.js', 'PURE: no fs, no clock, nothing at module level — the ceilings, and eviction and slab classes acting on the map or slab their CALLER owns'],
   ['src/fixture-guard.js', 'PURE: the one declaration of what a test fixture looks like'],
+  ['src/client-swap-step.js', 'PURE, imports nothing: the client-swap rule (what was said, the client in force, who must act → the act) the channel accounts and the storage mounts share'],
 ].map(([path, why]) => Object.freeze({ path, why })));
 const HELPER = 'helper';
 const HELPER_SET = new Set(HELPERS.map((h) => h.path));

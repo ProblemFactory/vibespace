@@ -1045,6 +1045,7 @@ class MountManager {
     for (const dir of new Set([this._cacheDirOf(m), m.cacheOld].filter(Boolean))) this._dropCacheDir(m, dir, { removing: true });
     this._save();
     this._notify();
+    this.clientSwapCheck().catch(() => { });   // B-e40d: a removed mount is no longer counted on its preset's old client
   }
 
   /**
@@ -1116,6 +1117,7 @@ class MountManager {
     }
     this._save();
     this._notify();
+    this.clientSwapCheck().catch(() => { });   // B-e40d: a renamed mount, or one moved to another preset key, is said as it is now
     // Auto-remount after an edit — a FAILED remount must reach the row (the
     // swallowed catch here was why an unwritable path change looked like a
     // successful save; no-silent-failure rule).
@@ -2777,6 +2779,7 @@ class MountManager {
    *  saved again (a re-paste) keeps the client it already names — only another token clears it. */
   static setMinted(m, x, tok) {
     const mc = MountManager.mintClientOf(m, x, tok);
+    if (x && typeof x.clientSwapCheck === 'function') x.clientSwapCheck().catch(() => { });   // B-e40d: who is counted may change (it runs after this save's code)
     if (mc) { m.mintedClient = mc; return; }
     let prev = null; try { const se = MountManager._sealedTokenOf(m); prev = se ? MountManager._rtOf(x._dec(se)) : null; } catch { prev = null; }
     if (!m.clientId && m.mintedClient && prev && prev === MountManager._rtOf(tok)) return;
@@ -2819,6 +2822,7 @@ class MountManager {
     if (!rec || rec.clientId || !['drive', 'gmail'].includes(rec.type) || !mc || typeof mc.id !== 'string' || !mc.id || mc.id.length > 300 || typeof mc.secret !== 'string' || !mc.secret || mc.secret.length > 500) return false;
     rec.mintedClient = { id: mc.id, key: rec.clientPreset || null, sealed: x._enc(mc.secret) };
     x._save();
+    x.clientSwapCheck?.().catch(() => { });   // B-e40d: a restored mount on a replaced client is said
     return true;
   }
   /** THE CLIENT A REFRESH USES for a preset-backed record: the preset's values while they name the client the token was
@@ -2842,6 +2846,43 @@ class MountManager {
     if (unreadable) { console.log(`[mounts] ${who}: the sealed copy of the client its token was minted under (${String(minted).slice(0, 12)}…) cannot be opened — it refreshes with the ${kw}; re-authorize it`); return; }
     console.log(`[mounts] ${who}: the ${kw} ${preset ? 'now names another OAuth client' : 'is gone'} — this mount keeps the client its token was minted under (${String(minted).slice(0, 12)}…); re-authorize it to move it`);
   }
+  /** B-e40d's remainder — THE CLIENT-SWAP NOTICE (B-166e part 2's shape, for the storage mounts). Per preset key: the client
+   *  in force (`to` — the preset under the key, '' when it is withdrawn: nothing is said then, the mounts keep their minted
+   *  client and the hub's log names them) and the mounts still on ANOTHER client — holders (no parent; a submount refreshes
+   *  through its parent) whose row takes a minted client, with no own client, that NAME a minted client other than `to`. A
+   *  record that names none (from before the rule, not proven yet) is not counted. Plaintext ids only: no vault is asked.
+   *  → [{ key, preset (its label, else its key), to, need: [{ id, name }] }]. */
+  clientSwapFacts() {
+    const groups = new Map();
+    for (const m of this._state.mounts) {
+      if (!m || m.parentId || m.clientId || !rowFor(this, m).mintedClient?.(m)) continue;
+      // the key the record RESOLVES to (no key: the single / default preset — the same one as an explicit key for it: ONE group)
+      const pc = MountManager._driveClient({ clientPreset: m.clientPreset || null });
+      const key = m.clientPreset || (pc && pc.key) || '';
+      let g = groups.get(key);
+      if (!g) { g = { key, preset: (pc && (pc.label || pc.key)) || key, to: pc && pc.clientId ? String(pc.clientId) : '', need: [] }; groups.set(key, g); }
+      const minted = m.mintedClient && typeof m.mintedClient.id === 'string' ? m.mintedClient.id : '';
+      if (g.to && minted && minted !== g.to) g.need.push({ id: m.id, name: MountManager.lentName(m) || m.id });
+    }
+    return [...groups.values()];
+  }
+  /** Say it now: the facts → the producer (`onClientSwaps`, wired to src/server/mount-for-you.js clientSwaps) → the memos it
+   *  hands back (`_state.clientSwaps` — WHAT WAS SAID per key, B-166e's memo), saved when they changed. One check running, at
+   *  most one queued (a burst coalesces — no timer). Asked at the boot, a presets reload, and every door that changes who is
+   *  counted (a token saved, a client adopted, a record removed or imported). */
+  clientSwapCheck() {
+    if (this._swapQueued) return this._swapQueued;
+    const run = (this._swapChain || Promise.resolve()).then(() => { this._swapQueued = null; return this._clientSwapCheckNow(); });
+    this._swapQueued = run;
+    this._swapChain = run.catch(() => { });
+    return run;
+  }
+  _clientSwapCheckNow() {
+    if (typeof this.onClientSwaps !== 'function') return;
+    const was = this._state.clientSwaps && typeof this._state.clientSwaps === 'object' && !Array.isArray(this._state.clientSwaps) ? this._state.clientSwaps : {};
+    const next = this.onClientSwaps(this.clientSwapFacts(), was);
+    if (next && typeof next === 'object' && JSON.stringify(next) !== JSON.stringify(was)) { this._state.clientSwaps = next; this._save(); }
+  }
   /** (`sealed`, not «…Enc»: in a mount record a «…Enc» name is a secret a PERSON writes in a page field — the convention
    *  test-write-only-secrets holds every one of them to; the minted secret is the hub's own — no page field, never in config
    *  or the list (test-mounts-oauth §4); the owner's export carries it like the record's other secrets (_mintedExport).)
@@ -2859,6 +2900,7 @@ class MountManager {
     if (same) return false;
     holder.mintedClient = { id: String(used.clientId), key: holder.clientPreset || null, sealed: this._enc(String(used.clientSecret)) };
     this._save();
+    this.clientSwapCheck().catch(() => { });   // B-e40d: a mount that names its client now is counted
     return true;
   }
   /** B-e40d: a backend probe ANSWERED (rclone listed) while the token ITS env carried was SPENT — rclone refreshed it with the

@@ -184,6 +184,9 @@ const ROWS = Object.freeze([
   // nothing deleted; a person's press: the owner's page only); the item resolves itself when the file reads, is gone or is set aside
   { type: 'queued-file-unread', identity: null, producer: 'src/server/queued-file-for-you.js', waits: false, answer: 'reply', card: 'inbox-window', handled: true, chat: true, kind: 'check', scope: 'group', checkAgain: i18nKey('Rename the unreadable file aside now — nothing is deleted, and the record of waiting messages is written again'), checkLabel: i18nKey('Set it aside'),
     checkRoute: '/api/queued-wakes/set-aside', checkSaid: { done: i18nKey('Set aside — the record of waiting messages is written again'), none: i18nKey('The file reads again — nothing to set aside'), failed: i18nKey('Could not set the file aside') } },
+  // B-e40d's remainder: a REPLACED preset client — ONE item per preset key naming the Drive / Gmail mounts still on the old client;
+  // its door opens the first mount's Re-authorize (the client's ROW_DOORS `storage`); the item follows who is left and resolves itself
+  { type: 'mount-reauth', identity: null, producer: 'src/server/mount-for-you.js', waits: false, answer: 'reply', card: 'none', handled: true, chat: true, kind: 'check', scope: 'group', door: Object.freeze({ opens: 'storage', verb: i18nKey('Re-authorize…'), title: i18nKey('Open the first mount\'s Re-authorize — sign in again under the preset\'s new client') }) },
   { type: 'browser-restart', identity: null, producer: 'src/server/browser-keeper.js', waits: false, answer: 'reply', card: 'inbox-window', handled: true, chat: true, kind: 'check', scope: 'group' },
   // the base's two browser cards (int358: lanes browser-surfaces + browser-login, after this registry's own base — int360 seam (e)):
   // filed under the browser's group key, drawn on the row by proposalAskHtml, answered by their own Approve / Reject; merged by
