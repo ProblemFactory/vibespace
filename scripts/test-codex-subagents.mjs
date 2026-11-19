@@ -552,8 +552,8 @@ const out = {};
   const sbSrc = read('src/lib/sidebar.js'), wbSrc = read('src/lib/sidebar-workbench.js');
   ok(!/localStorage\.setItem\(['"]agentKindFilter/.test(sbSrc) && /localStorage\.removeItem\(AGENT_KIND_FILTER_KEY\)/.test(sbSrc) && /sessionStorage\.getItem\(AGENT_KIND_FILTER_KEY\)/.test(sbSrc) && /this\._agentKindFilter = agentKindFilterAtLoad\(storedKind\)/.test(sbSrc),
     'WIRING: the sidebar never PERSISTS a kind choice (sessionStorage only) and drops the legacy localStorage key at load — a one-click ALL/↳ can no longer flood every later load');
-  ok(/passesAgentKindFilter\(s, this\._agentKindFilter\)/.test(sbSrc) && /sidebar-kind-hint/.test(sbSrc) && /tr\('Main conversations only'\)/.test(sbSrc),
-    'WIRING: the local list filters through the ONE predicate, and a non-primary view says so in words with the way back');
+  ok(/kindFilter: this\._agentKindFilter \|\| null/.test(sbSrc) && /kindPass: !ctx\.kindFilter \|\| passesAgentKindFilter\(s, ctx\.kindFilter\)/.test(sbSrc) && /sidebar-kind-hint/.test(sbSrc) && /tr\('Main conversations only'\)/.test(sbSrc),
+    'WIRING: the local list filters through the ONE predicate (B-b842: the list\'s row facts carry it — _listFilterCtx reads the filter, _listRowFacts asks it), and a non-primary view says so in words with the way back');
   ok((wbSrc.match(/passesAgentKindFilter\(s, this\._agentKindFilter\)/g) || []).length >= 3 && /agentKind: s\.agentKind \|\| 'primary',\n\s*sourceKind: s\.sourceKind/.test(wbSrc),
     'WIRING: every remote zone (Recent count, Recent/History list, cross-host search) applies the same filter, and a remote card keeps its agent identity');
   // ── a sub-agent that lives ONLY on a remote host is reachable and disclosed ──

@@ -13,6 +13,7 @@ import { installSidebarColumn } from './sidebar-column.js'; // lane duo-build-1:
 import { installSidebarTasks } from './sidebar-tasks.js';
 import { openRefreshLive, REFRESH_ICON } from './refresh-live.js'; // lane refresh-live-sessions: the list's ⋯ menu entry 「刷新所有活着的会话」
 import { isStoppedBy, filterWords as stoppedFilterWords, stillWalled } from '../stopped-by.js'; // lane auto-resume-bulk: the «因限额/过载停止 (N)» filter + the menu's count
+import { locateVerdict } from '../locate-verdict.js'; // B-b842: the sessions list's ONE filter predicate — the list draws what it shows, Locate names what drops a row
 import { setAutoResumeForAll, openResumeStoppedDialog } from './bulk-resume.js'; // lane auto-resume-bulk: the two bulk acts
 import { UI_ICONS } from './icons.js';
 import { createBarFold } from './bar-fold.js'; // lane ui-controls-and-bugs: the filter row folds through THE chrome-bar fold
@@ -575,19 +576,53 @@ class Sidebar {
     return false;
   }
 
-  /** THE LOCATE FACTS (lane think-tools-phone, 主开发 2026-11-17): the sessions list's own filters as facts about ONE conversation, for
-   *  the PURE verdict (src/locate-verdict.js) — the same matchers `_renderInner` filters with, read in its order. */
+  /** THE LOCATE FACTS (lane think-tools-phone, 主开发 2026-11-17): the sessions list's own facts about ONE conversation, for the PURE
+   *  verdict (src/locate-verdict.js) — built by the SAME builder the list filters every row with (B-b842: `_listRowFacts`). */
   _locateFacts(sessionId) {
     const s = (this._allSessions || []).find((x) => x.sessionId === sessionId);
     if (!s) return { present: false };
-    const term = (document.getElementById('session-filter')?.value || '').toLowerCase();
+    return this._listRowFacts(s, this._listFilterCtx((document.getElementById('session-filter')?.value || '').toLowerCase()));
+  }
+
+  /** THE LIST'S FILTER SETTINGS, read once per pass (B-b842): the search words, the agent / location / kind filters, the «stopped by
+   *  a limit or overload» pill, the tab, the status filter and the quick view — what every row is judged against. */
+  _listFilterCtx(term) {
     return {
-      present: true, term, matchesTerm: !term || sessionMatchesFilter(s, term),
-      backend: s.backend || 'claude', backendFilter: [...this._backendFilter], host: s.host || 'local', hostFilter: [...this._hostFilter],
-      kindPass: !this._agentKindFilter || passesAgentKindFilter(s, this._agentKindFilter),
-      archived: !!this.isArchived(s), showArchived: this._statusFilter.has('archived'), status: s.status, statusFilter: [...this._statusFilter],
-      activeView: this._activeView || null,
+      term, backendFilter: [...this._backendFilter], hostFilter: [...this._hostFilter], kindFilter: this._agentKindFilter || null,
+      stoppedOnly: !!this._stoppedOnly, tasksTab: this._activeTab === 'tasks', showArchived: this._statusFilter.has('archived'),
+      statusFilter: [...this._statusFilter], activeView: this._activeView || null,
     };
+  }
+
+  /** ONE ROW'S FACTS for the verdict (B-b842): the same matchers the list always used — the search box's (shared with the remote
+   *  zones), the agent kind's, the stopped pill's — each asked only when its filter is on. */
+  _listRowFacts(s, ctx) {
+    return {
+      present: true, term: ctx.term, matchesTerm: !ctx.term || sessionMatchesFilter(s, ctx.term),
+      backend: s.backend || 'claude', backendFilter: ctx.backendFilter, host: s.host || 'local', hostFilter: ctx.hostFilter,
+      kindPass: !ctx.kindFilter || passesAgentKindFilter(s, ctx.kindFilter), stoppedOnly: ctx.stoppedOnly, stoppedBy: ctx.stoppedOnly ? isStoppedBy(s) : false,
+      tasksTab: ctx.tasksTab, archived: !!this.isArchived(s), showArchived: ctx.showArchived, status: s.status, statusFilter: ctx.statusFilter,
+      activeView: ctx.activeView,
+    };
+  }
+
+  /** THE SESSIONS LIST'S FILTERS — ONE PREDICATE (B-b842, 主开发 2026-11-19): every row is judged by the PURE verdict Locate says
+   *  (src/locate-verdict.js) over `_listRowFacts`; the rows it shows are the list. The counts the hints read come from the same
+   *  verdicts: `searched` — what the search and the filters before the status filter leave (B-54d9 N5); `archivedHid` — the
+   *  archived rows the default filter hides (never on the Tasks board); `statusLeft` — what is left after the status filter and
+   *  Archived, before a quick view (null on the Tasks board, which has neither). */
+  _filterSessions(term) {
+    const ctx = this._listFilterCtx(term);
+    const sessions = [];
+    let searched = 0, archivedHid = 0, statusLeft = ctx.tasksTab ? null : 0;
+    for (const s of this._allSessions || []) {
+      const v = locateVerdict(this._listRowFacts(s, ctx));
+      if (v.show) sessions.push(s);
+      if (v.show || v.why === 'archived' || v.why === 'status' || v.why === 'view') searched++;
+      if (v.why === 'archived' && !ctx.tasksTab) archivedHid++;
+      if (statusLeft !== null && (v.show || v.why === 'view')) statusLeft++;
+    }
+    return { sessions, searched, statusLeft, archivedHid };
   }
 
   /** A locate verdict's NAME in the words the list's own controls show — the filter menu's rows (Live / Stopped…, an agent's
@@ -609,6 +644,7 @@ class Sidebar {
     else if (why === 'backend') { this._backendFilter = new Set(); this._saveListFilters(); this._activeView = null; if (btn('backend-filter')) this._updateBackendFilterBtn(btn('backend-filter')); }
     else if (why === 'host') { this._hostFilter = new Set(); this._saveListFilters(); this._activeView = null; }
     else if (why === 'kind') { this._showAllAgentKinds(); return; }
+    else if (why === 'stopped') { this._stoppedOnly = false; this._renderStoppedQuickTab?.(); }   // the pill's own press (B-b842)
     else if (why === 'archived' || why === 'status') {
       if (why === 'archived') this._statusFilter.add('archived'); else for (const x of ['live', 'tmux', 'external', 'stopped']) this._statusFilter.add(x);
       this._saveListFilters();
@@ -908,15 +944,11 @@ class Sidebar {
     box.appendChild(btn);
   }
 
-  /** The stopped sessions a press of the pill shows: the list's own filters (text, backend, host, agent kind, archived). */
+  /** The stopped sessions a press of the pill shows: the list's ONE predicate with the pill on (B-b842 — it was a third hand copy
+   *  of the chain); on the Tasks board, which the pill never narrows, the stopped rows the board shows. */
   _stoppedUnderFilters() {
-    const f = (document.getElementById('session-filter')?.value || '').toLowerCase();
-    const showArchived = this._statusFilter && this._statusFilter.has('archived');
-    const nonArch = new Set([...(this._statusFilter || [])]); nonArch.delete('archived');   // _render's status filter and quick view, as it applies them
-    const statusOk = (s) => (showArchived ? (this.isArchived(s) || this._statusFilter.has(s.status)) : (!this.isArchived(s) && (nonArch.size >= 4 || nonArch.has(s.status))));
-    return (this._allSessions || []).filter((s) => isStoppedBy(s) && statusOk(s) && (!this._activeView || s.status === this._activeView)
-      && (!f || sessionMatchesFilter(s, f)) && !(this._backendFilter.size > 0 && !this._backendFilter.has(s.backend || 'claude'))
-      && !(this._hostFilter.size > 0 && !this._hostFilter.has(s.host || 'local')) && (!this._agentKindFilter || passesAgentKindFilter(s, this._agentKindFilter)));
+    const ctx = { ...this._listFilterCtx((document.getElementById('session-filter')?.value || '').toLowerCase()), stoppedOnly: true };
+    return (this._allSessions || []).filter((s) => isStoppedBy(s) && locateVerdict(this._listRowFacts(s, ctx)).show);
   }
 
   _renderAgentKindQuickTabs() {
@@ -1093,11 +1125,13 @@ class Sidebar {
    *  the person opens the conversation by hand. THE NAME IS THE KEY, NOT THE STATUS (r4): the conversation of a nameless
    *  window may be running (the resume-all's late answers started it in a session no window shows), stopped, tmux or
    *  external — r3 narrowed to Stopped and hid the running row. The person's status filter is theirs and is not touched; a
-   *  quick view (LIVE / STOP…) goes back to ALL. Exactly one row shown ⇒ it is marked (`door-found`, kept across the list's
+   *  quick view (LIVE / STOP…) goes back to ALL, and so does the «stopped by a limit or overload» pill (B-b842: it hid every
+   *  namesake no wall stopped). Exactly one row shown ⇒ it is marked (`door-found`, kept across the list's
    *  re-renders until the search changes) and scrolled to. → that row's sessionId, else null. */
   showSessionsNamed(query = '') {
     if (this._activeTab !== 'folders') { this._activeTab = 'folders'; this._updateTabs(); }
     this._activeView = null;
+    this._stoppedOnly = false;   // a quick narrowing like the quick view (B-b842) — the pill redraws with the list
     this._mobileDrilldown = null; // the phone's list, not one folder's drill-down
     const q = String(query || '');
     const f = document.getElementById('session-filter');
@@ -1492,58 +1526,14 @@ class Sidebar {
 
   _renderInner() {
     const f = (document.getElementById('session-filter')?.value || '').toLowerCase();
-    let sessions = this._allSessions;
-
-    // Text filter
-    if (f) sessions = sessions.filter(s => sessionMatchesFilter(s, f)); // ONE matcher, shared with the remote zones
-
-    // Backend / agent filter
-    if (this._backendFilter.size > 0) {
-      sessions = sessions.filter(s => this._backendFilter.has(s.backend || 'claude'));
-    }
-    if (this._hostFilter.size > 0) {
-      sessions = sessions.filter(s => this._hostFilter.has(s.host || 'local'));
-    }
-    if (this._agentKindFilter) {
-      sessions = sessions.filter(s => passesAgentKindFilter(s, this._agentKindFilter));
-    }
-    // lane auto-resume-bulk: «因限额/过载停止 (N)» — only the sessions a usage wall or an overloaded model stopped
-    if (this._stoppedOnly && this._activeTab !== 'tasks') sessions = sessions.filter((s) => isStoppedBy(s));   // never the Tasks board (below)
-
-    const searched = sessions.length; let statusLeft = null, archivedHid = 0; // the rows the search and the other filters leave, before the status filter (B-54d9 N5)
-    // Archive filter: hide archived sessions unless 'archived' filter is on
-    const showArchived = this._statusFilter.has('archived');
-    if (this._activeTab === 'tasks') {
-      // Tasks tab organizes Task-Group membership — a group's sessions are often
-      // stopped, so it must NOT be narrowed by the live/stopped status filter or
-      // the quick-view tabs (that hid tagged sessions). Only hide archived unless
-      // the archived filter is on. Task View has its OWN status filter (per-view).
-      if (!showArchived) sessions = sessions.filter(s => !this.isArchived(s));
-    } else {
-      if (showArchived) {
-        // When archived filter is on, show only archived (plus any other enabled statuses for non-archived)
-        sessions = sessions.filter(s => {
-          if (this.isArchived(s)) return true;
-          return this._statusFilter.has(s.status);
-        });
-      } else {
-        // Hide archived sessions, then apply status filter
-        const withArchived = sessions.length; // archived matches are said as ARCHIVED, never as the person's filter (B-54d9 cure)
-        sessions = sessions.filter(s => !this.isArchived(s));
-        archivedHid = withArchived - sessions.length;
-        // Status filter (apply only when not all 4 non-archived statuses are selected)
-        const nonArchivedFilters = new Set([...this._statusFilter]);
-        nonArchivedFilters.delete('archived');
-        if (nonArchivedFilters.size < 4) {
-          sessions = sessions.filter(s => nonArchivedFilters.has(s.status));
-        }
-      }
-      statusLeft = sessions.length; // after the person's status filter (and Archived), before a quick view (B-54d9 N5)
-      // Quick tab view: narrow down to a single status
-      if (this._activeView) {
-        sessions = sessions.filter(s => s.status === this._activeView);
-      }
-    }
+    // THE LIST'S FILTERS ARE ONE PREDICATE (B-b842): the search box → the agent / location / kind filters → «stopped by a limit or
+    // overload» (lane auto-resume-bulk; never the Tasks board) → archived → the status filter → the quick view, every row judged by
+    // the verdict Locate says (`_filterSessions` — src/locate-verdict.js), and the counts the hints read from the same verdicts
+    // (B-54d9 N5). The Tasks tab organizes Task-Group membership — a group's sessions are often stopped, so only Archived narrows it
+    // there (Task View has its OWN status filter, per view).
+    const filtered = this._filterSessions(f);
+    let sessions = filtered.sessions;
+    const { searched, statusLeft, archivedHid } = filtered;
     const door = f && this._doorQuery === f && statusLeft != null;
     this._statusHid = door ? searched - statusLeft - archivedHid : 0; // what the person's status filter hides of the door's search…
     this._archivedHid = door ? archivedHid : 0; // …and what is hidden because it is archived (the default filter hides Archived)

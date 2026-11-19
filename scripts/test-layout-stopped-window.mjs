@@ -724,6 +724,12 @@ await section('§8 r4 «Open the session list» opens ALL with the search — th
     const D = W.app.sidebar = mkSb([LIVE, OLDVAN, OTHER]); input.value = '';
     press('win-new-5', 'sessions');
     ok(J([...D.handed].sort()) === J(['cw-13', 'old-2']) && D._doorFound === null && D.cards.every((c) => !c.cls.includes('door-found')), '§8 …two rows of the name: both shown, NEITHER marked — the person picks', { handed: D.handed, found: D._doorFound });
+    // B-b842 (lane lg-recovery): the «stopped by a limit or overload» pill is a quick narrowing like the quick view — the door turns it
+    // off too. PLANT FIRST: with the pill on, the list searched by the name hides both namesakes (no wall stopped either)
+    const E = W.app.sidebar = mkSb([LIVE, OLDVAN, OTHER]); E._stoppedOnly = true; E._activeTab = 'folders'; input.value = VAN; E._render();
+    const planted = [...(E.handed || ['(no list)'])];
+    input.value = ''; press('win-new-5', 'sessions');
+    ok(J(planted) === J([]) && E._stoppedOnly === false && J([...E.handed].sort()) === J(['cw-13', 'old-2']), '§8 …the stopped pill is a quick narrowing too: on, it hid both namesakes (the plant); the door turns it off and both are shown', { planted, handed: E.handed, pill: E._stoppedOnly });
   } finally { document.getElementById = gid; }
   const SB = read('src/lib/sidebar.js'), SR = read('src/lib/sidebar-render.js'), LY = read('src/lib/layout.js');
   ok(/if \(this\._doorFound && s\.sessionId === this\._doorFound\) card\.classList\.add\('door-found'\);/.test(SR) && /oninput = \(\) => \{\n\s*this\._doorFound = null;/.test(SB) && /\n    if \(!enabled \|\| filters\.length <= 1\) return;/.test(SB) && /\.session-item-card\.door-found \{/.test(read('public/style.css')), '§8 …the mark is kept across the list\'s re-renders (the ONE card builder) until the search changes; the quick tabs are as the person set them (r3\'s forced row gone)');

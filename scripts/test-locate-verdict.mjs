@@ -5,9 +5,16 @@
 // server, no browser): the product's own functions read off the source and run over models of the list and the rail.
 //   ① THE VERDICT (src/locate-verdict.js): each reason in its place, the first filter that drops the row named, a collapsed
 //      folder is no reason, every reason but «not in the list» has a door
-//   ② THE VERDICT ≡ THE LIST: sidebar.js `_locateFacts` + the verdict agree with `_renderInner`'s own filters, run on the same
-//      fake list, over every combination of the seven filters; every door makes progress (shows the row or moves to a LATER
-//      reason). RED CONTROLS: a verdict that forgets the status filter's «all four» rule, a list without its location filter
+//   ② THE LIST FILTERS WITH THE VERDICT (B-b842, 主开发 2026-11-19 — ONE predicate): `_renderInner` keeps no filter chain of its
+//      own (it lists what sidebar.js `_filterSessions` shows, and `_filterSessions` judges every row with the verdict over
+//      `_listRowFacts`, the builder Locate's `_locateFacts` uses too); the real `_filterSessions` and Locate's facts, run on fake
+//      lists over the eight filters and both tabs, agree with the list's rules STATED here (the release's chain as a person
+//      reads it, plus the stopped pill: rows, the first filter that drops one, and the counts the hints read); every door makes
+//      progress; the pill's count (`_stoppedUnderFilters`) is the same predicate with the pill on. RED CONTROLS: a verdict without
+//      the status filter, a verdict without its «all four» rule (seen only on a row of no known status), row facts that forget
+//      the stopped pill.
+//      (It replaced an oracle that sliced `_renderInner`'s own filter block out of the source: a second copy held equal by a test
+//      that could not see a filter it was never told of — the stopped pill.)
 //   ③ ONE SHOW DOOR: no `_railGo(` in src/ but the rail's own items and `_railShow`'s switch; the program callers go through
 //      `_railShow`. RED CONTROL: the release's focusJobsPanel line put back
 //   ④ LOCATE ON A MODEL OF THE RAIL AND THE LIST (the real `_railShow` / `_railGo` and the real Locate, read off the source): from
@@ -29,7 +36,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const read = (p) => fs.readFileSync(path.join(REPO, p), 'utf-8');
-const { LOCATE_WORDS, locateVerdict, NON_ARCHIVED } = require(path.join(REPO, 'src/locate-verdict.js'));
+const { LOCATE_WORDS, LOCATE_ORDER, locateVerdict, NON_ARCHIVED } = require(path.join(REPO, 'src/locate-verdict.js'));
 const { CARD_TO_WINDOW } = require(path.join(REPO, 'scripts/lib/session-menu-parity.js'));
 let pass = 0, fail = 0;
 const ok = (c, msg, extra) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (extra ? '\n      ' + extra : '')); } };
@@ -48,9 +55,9 @@ function methodText(src, head) {
 const asFunction = (text) => text.replace(/^(async\s+)?(\w+)\s*\(/, (m, a, n) => `${a || ''}function ${n}(`);
 
 const SIDEBAR = read('src/lib/sidebar.js'), RAIL = read('src/lib/sidebar-rail.js'), LIFE = read('src/lib/session-lifecycle.js');
-const ORDER = ['search', 'backend', 'host', 'kind', 'archived', 'status', 'view'];
+const ORDER = ['search', 'backend', 'host', 'kind', 'stopped', 'archived', 'status', 'view'];
 const FOUR = ['live', 'tmux', 'external', 'stopped'];
-const SHOWN = { present: true, term: '', matchesTerm: true, backend: 'claude', backendFilter: [], host: 'local', hostFilter: [], kindPass: true, archived: false, showArchived: false, status: 'live', statusFilter: FOUR, activeView: null };
+const SHOWN = { present: true, term: '', matchesTerm: true, backend: 'claude', backendFilter: [], host: 'local', hostFilter: [], kindPass: true, stoppedOnly: false, stoppedBy: false, tasksTab: false, archived: false, showArchived: false, status: 'live', statusFilter: FOUR, activeView: null };
 
 console.log('① THE VERDICT: each reason in its place, the first filter that drops the row');
 {
@@ -63,11 +70,16 @@ console.log('① THE VERDICT: each reason in its place, the first filter that dr
     [{ statusFilter: ['stopped'] }, 'status'], [{ statusFilter: [] }, 'status'], [{ status: 'stopped', statusFilter: FOUR }, true],
     [{ activeView: 'stopped' }, 'view'], [{ activeView: 'live' }, true], [{ collapsedFolder: true, folderFarBelow: true }, true],
     [{ term: 'zz', matchesTerm: false, archived: true, activeView: 'stopped' }, 'search'], [{ backendFilter: ['codex'], kindPass: false, archived: true }, 'backend'],
+    // B-b842: the stopped pill (never on the Tasks board) and the Tasks board (only Archived narrows it)
+    [{ stoppedOnly: true }, 'stopped'], [{ stoppedOnly: true, stoppedBy: true }, true], [{ stoppedOnly: true, tasksTab: true }, true],
+    [{ kindPass: false, stoppedOnly: true }, 'kind'], [{ stoppedOnly: true, archived: true, statusFilter: ['stopped'] }, 'stopped'],
+    [{ tasksTab: true, statusFilter: ['stopped'], activeView: 'stopped' }, true], [{ tasksTab: true, archived: true }, 'archived'], [{ tasksTab: true, archived: true, showArchived: true }, true],
   ];
   const bad = rows.filter(([o, want]) => { const v = V(o); return want === true ? v.show !== true : (v.show !== false || v.why !== want); });
   ok(!bad.length, `${rows.length} rows: every reason where the list puts it, the FIRST filter that drops the row named, a row in a collapsed or far folder shown`, bad.map(([o]) => J(o) + ' → ' + J(V(o))).join(' | '));
   ok(V({ term: 'Zz', matchesTerm: false }).term === 'Zz' && V({ statusFilter: ['live'], status: 'stopped' }).name === 'stopped' && V({ activeView: 'live', status: 'tmux' }).name === 'live' && V({ backendFilter: ['codex'] }).name === 'claude' && V({ hostFilter: ['h1'] }).name === 'local',
     'the reason carries what the sentence names: the words searched, the status, the view, the agent, the location');
+  ok(J(LOCATE_ORDER) === J(ORDER) && Object.isFrozen(LOCATE_ORDER), `the module's order is the list's: ${ORDER.join(' → ')}`, J(LOCATE_ORDER));
   ok(J(Object.keys(LOCATE_WORDS).sort()) === J(['absent', ...ORDER].sort()) && !('folder' in LOCATE_WORDS) && Object.isFrozen(LOCATE_WORDS),
     'one sentence per reason — and none for a folder (a collapsed folder is opened, never a reason)');
   ok(ORDER.every((k) => typeof LOCATE_WORDS[k].door === 'string' && LOCATE_WORDS[k].door.length > 3) && LOCATE_WORDS.absent.door === null,
@@ -75,66 +87,112 @@ console.log('① THE VERDICT: each reason in its place, the first filter that dr
   ok(NON_ARCHIVED === FOUR.length, `the status filter narrows only below all ${FOUR.length} non-archived statuses (the list's own rule)`);
 }
 
-console.log('② THE VERDICT ≡ THE LIST\'S OWN FILTERS (sidebar.js _renderInner, run on the same fake list)');
+console.log('② THE LIST FILTERS WITH THE VERDICT (B-b842): one predicate — sidebar.js _filterSessions judges every row with it, Locate reads the same facts');
 {
-  const a = SIDEBAR.indexOf('  _renderInner() {'), from = SIDEBAR.indexOf("    const f = (document.getElementById('session-filter')", a), to = SIDEBAR.indexOf('    // Rail panel tabs dispatch BEFORE', a);
-  const FILTERS = from > a && to > from ? SIDEBAR.slice(from, to) : '';
-  ok(['sessionMatchesFilter(s, f)', 'this._backendFilter', 'this._hostFilter', 'passesAgentKindFilter(s, this._agentKindFilter)', "this._statusFilter.has('archived')", 'nonArchivedFilters.size < 4', 'this._activeView'].every((k) => FILTERS.includes(k)),
-    `_renderInner's filter block is found and holds the seven filters (${FILTERS.length} chars) — the oracle is the list's own code`);
+  const RI = methodText(SIDEBAR, '  _renderInner() {'), FS = methodText(SIDEBAR, '  _filterSessions(term) {'), LF = methodText(SIDEBAR, '  _locateFacts(sessionId) {'), RF = methodText(SIDEBAR, '  _listRowFacts(s, ctx) {');
+  // (a) THE WIRING — the list keeps no chain of its own
+  const OWN = ['sessionMatchesFilter(', 'passesAgentKindFilter(', 'isStoppedBy(', 'this._backendFilter.has(', 'this._hostFilter.has(', 'nonArchivedFilters', '=== this._activeView', 'this.isArchived('];   // stale-pins: kept — an ABSENCE census: the release chain's matchers, which _renderInner must no longer hold
+  ok(/const filtered = this\._filterSessions\(f\);\n\s*let sessions = filtered\.sessions;/.test(RI) && OWN.every((k) => !RI.includes(k)), `_renderInner lists what _filterSessions shows and holds no matcher of its own (${OWN.length} named) — the second copy of the chain is gone`, OWN.filter((k) => RI.includes(k)).join(' · '));
+  ok(/const v = locateVerdict\(this\._listRowFacts\(s, ctx\)\);/.test(FS) && /if \(v\.show\) sessions\.push\(s\);/.test(FS) && /for \(const s of this\._allSessions \|\| \[\]\)/.test(FS), '_filterSessions judges EVERY row with the verdict over _listRowFacts and lists exactly what it shows');
+  ok(/return this\._listRowFacts\(s, this\._listFilterCtx\(/.test(LF), 'Locate\'s facts come from the SAME builder (_locateFacts → _listRowFacts over _listFilterCtx)');
+  ok(['sessionMatchesFilter(s, ctx.term)', 'passesAgentKindFilter(s, ctx.kindFilter)', 'isStoppedBy(s)', 'this.isArchived(s)'].every((k) => RF.includes(k)), 'the row facts ask the list\'s own matchers: the search box\'s, the agent kind\'s, the stopped pill\'s, Archived');
+  const SU = methodText(SIDEBAR, '  _stoppedUnderFilters() {');
+  ok(/stoppedOnly: true \};/.test(SU) && /isStoppedBy\(s\) && locateVerdict\(this\._listRowFacts\(s, ctx\)\)\.show/.test(SU) && !/sessionMatchesFilter\(|_statusFilter|_activeView|_backendFilter|_hostFilter/.test(SU), 'the pill\'s count (_stoppedUnderFilters) is the same predicate with the pill on — no third copy of the chain');
+  // (b) THE BEHAVIOUR, against the list's rules STATED here: the release's chain as a person reads it (the search box, the agent,
+  // the location, the kind, the stopped pill — never on the Tasks board —, then the Tasks board narrows by Archived alone;
+  // elsewhere Archived / the status filter, narrowing only below all four / the quick view), with the counts the hints read
+  const SPEC = (fk, term) => {
+    let ss = fk._allSessions, drop = null;
+    const step = (why, keep) => { const before = ss.some((x) => x.sessionId === 'c1'); ss = ss.filter(keep); if (before && !drop && !ss.some((x) => x.sessionId === 'c1')) drop = why; };
+    if (term) step('search', (x) => x._match);
+    if (fk._backendFilter.size) step('backend', (x) => fk._backendFilter.has(x.backend || 'claude'));
+    if (fk._hostFilter.size) step('host', (x) => fk._hostFilter.has(x.host || 'local'));
+    if (fk._agentKindFilter) step('kind', (x) => x._kind);
+    if (fk._stoppedOnly && fk._activeTab !== 'tasks') step('stopped', (x) => x._stopped);
+    const searched = ss.length; let statusLeft = null, archivedHid = 0;
+    const showArchived = fk._statusFilter.has('archived');
+    if (fk._activeTab === 'tasks') { if (!showArchived) step('archived', (x) => !x._arch); }
+    else {
+      if (showArchived) step('status', (x) => x._arch || fk._statusFilter.has(x.status));
+      else {
+        const n0 = ss.length; step('archived', (x) => !x._arch); archivedHid = n0 - ss.length;
+        const on = new Set(fk._statusFilter); on.delete('archived');
+        if (on.size < 4) step('status', (x) => on.has(x.status));
+      }
+      statusLeft = ss.length;
+      if (fk._activeView) step('view', (x) => x.status === fk._activeView);
+    }
+    return { ids: ss.map((x) => x.sessionId).join(), rows: ss, searched, statusLeft, archivedHid, drop };
+  };
   const env = { term: '' };
   const doc = { getElementById: (id) => (id === 'session-filter' ? { get value() { return env.term; }, set value(v) { env.term = v; } } : null) };
-  const match = (s) => !!s._match, kind = (s, k) => !k || !!s._kind;
-  const scope = ['document', 'sessionMatchesFilter', 'passesAgentKindFilter', 'localStorage', 'sessionStorage', 'getBackendMeta', 'tr'];
+  const scope = ['document', 'sessionMatchesFilter', 'passesAgentKindFilter', 'isStoppedBy', 'locateVerdict', 'localStorage', 'sessionStorage', 'getBackendMeta', 'tr'];
   const store = { setItem() {}, getItem: () => null };
-  const args = [doc, match, kind, store, store, (b) => ({ label: b }), (s) => s];
-  const listOf = (filters) => new Function(...scope, filters + '\n    return sessions;')
-  const LIST = listOf(FILTERS);
-  const bind = (head) => new Function(...scope, 'return ' + asFunction(methodText(SIDEBAR, head)))(...args);
+  const argsWith = (verdict) => [doc, (x) => !!x._match, (x, k) => !k || !!x._kind, (x) => !!x._stopped, verdict, store, store, (bk) => ({ label: bk }), (t) => t];
+  const bindText = (text, verdict = locateVerdict) => new Function(...scope, 'return ' + asFunction(text))(...argsWith(verdict));
+  const bind = (head, verdict) => bindText(methodText(SIDEBAR, head), verdict);
   const FACTS = bind('  _locateFacts(sessionId) {'), DOOR = bind('  _locateDoor(why) {'), ALLKINDS = bind('  _showAllAgentKinds() {');
-  const fakeOf = (st) => ({ _allSessions: [st.s], _backendFilter: new Set(st.bf), _hostFilter: new Set(st.hf), _agentKindFilter: st.kf, _statusFilter: new Set(st.sf), _activeTab: 'folders', _activeView: st.av,
-    isArchived: (x) => !!x._arch, _updateBackendFilterBtn() {}, _updateFilterBtn() {}, _saveListFilters() {}, _render() {}, _renderAgentKindQuickTabs() {}, _showAllAgentKinds() { return ALLKINDS.call(this); } });
-  const listed = (fake, list = LIST) => list.call(fake, ...args).some((x) => x.sessionId === 'c1');
+  const CTX = bind('  _listFilterCtx(term) {'), ROWF = bindText(RF), FILTER = bind('  _filterSessions(term) {'), PILL = bindText(SU);
+  const fakeOf = (st, m = {}) => ({ _allSessions: st.more ? [st.more[0], st.s, ...st.more.slice(1)] : [st.s], _backendFilter: new Set(st.bf), _hostFilter: new Set(st.hf), _agentKindFilter: st.kf, _stoppedOnly: st.so, _statusFilter: new Set(st.sf), _activeTab: st.tab, _activeView: st.av,
+    _listFilterCtx: CTX, _listRowFacts: m.rowFacts || ROWF, _filterSessions: m.filter || FILTER,
+    isArchived: (x) => !!x._arch, _updateBackendFilterBtn() {}, _updateFilterBtn() {}, _saveListFilters() {}, _render() {}, _renderAgentKindQuickTabs() {}, _renderStoppedQuickTab() {}, _renderQuickTabs() {}, _showAllAgentKinds() { return ALLKINDS.call(this); } });
+  const MORE = [{ sessionId: 'c0', _match: true, backend: 'codex', host: 'h1', _kind: false, _arch: false, status: 'tmux', _stopped: true },
+    { sessionId: 'c2', _match: false, _kind: true, _arch: true, status: 'stopped', _stopped: false }, { sessionId: 'c3', _match: true, _kind: true, _arch: false, status: 'external', _stopped: true }];
   const states = [];
-  for (const [term, m, backend, bf, host, hf, kf, kp, arch, sf, status, av] of cartesian(['', 'zz'], [true, false], [undefined, 'codex'], [[], ['claude'], ['codex']], [undefined, 'h1'], [[], ['local']],
-    [null, 'primary'], [true, false], [false, true], [FOUR, [...FOUR, 'archived'], ['live'], ['live', 'archived'], []], ['live', 'stopped'], [null, 'live'])) {
-    states.push({ term, s: { sessionId: 'c1', _match: m, backend, host, _kind: kp, _arch: arch, status }, bf, hf, kf, sf, av });
+  for (const [[term, m], [backend, bf], [host, hf], [kf, kp], arch, sf, status, av, so, stopped, tab] of cartesian([['', true], ['zz', true], ['zz', false]], [[undefined, []], [undefined, ['claude']], [undefined, ['codex']], ['codex', ['codex']]],
+    [[undefined, []], [undefined, ['local']], ['h1', ['local']]], [[null, true], ['primary', true], ['primary', false]], [false, true], [FOUR, [...FOUR, 'archived'], ['live'], ['live', 'archived'], []], ['live', 'stopped'], [null, 'live'],
+    [false, true], [false, true], ['folders', 'tasks'])) {
+    states.push({ term, s: { sessionId: 'c1', _match: m, backend, host, _kind: kp, _arch: arch, status, _stopped: stopped }, more: MORE, bf, hf, kf, so, sf, av, tab });
   }
-  const run = (verdict, list = LIST) => {
+  const run = ({ verdict = locateVerdict, filter = FILTER, rowFacts = ROWF, first = false } = {}) => {   // first: a control stops at its first disagreement
     let n = 0, shown = 0, bad = null; const whys = new Set();
     for (const st of states) {
-      env.term = st.term; const fake = fakeOf(st);
-      const v = verdict(FACTS.call(fake, 'c1')), l = listed(fake, list);
+      env.term = st.term; const fk = fakeOf(st, { filter, rowFacts });
+      const want = SPEC(fk, st.term), got = filter.call(fk, st.term), v = verdict(FACTS.call(fk, 'c1'));   // Locate's own road: the search words read from the box
       n++; if (v.show) shown++; else whys.add(v.why);
-      if (!!v.show !== l && !bad) bad = { st: { ...st, s: undefined, ...st.s }, v, listed: l };
+      const ids = got.sessions.map((x) => x.sessionId).join(), inList = want.rows.some((x) => x.sessionId === 'c1');
+      const pill = st.pill === false ? null : PILL.call(fk).map((x) => x.sessionId).join(), wantPill = st.pill === false ? null : SPEC({ ...fk, _stoppedOnly: true }, st.term).rows.filter((x) => x._stopped).map((x) => x.sessionId).join();
+      const agree = ids === want.ids && got.searched === want.searched && got.statusLeft === want.statusLeft && got.archivedHid === want.archivedHid && !!v.show === inList && (v.show || v.why === want.drop) && pill === wantPill;
+      if (!agree && !bad && (bad = { st: { ...st, s: undefined, more: undefined, ...st.s }, want: { ...want, rows: undefined }, got: { ids, searched: got.searched, statusLeft: got.statusLeft, archivedHid: got.archivedHid }, v, pill, wantPill }) && first) break;
     }
     return { n, shown, whys, bad };
   };
-  const R = run(locateVerdict);
-  ok(!R.bad, `over ${R.n} states of the seven filters the verdict says «shown» exactly when the list draws the row (${R.shown} shown)`, R.bad && J(R.bad));
+  const R = run();
+  ok(!R.bad, `over ${R.n} states (the eight filters, both tabs, four rows a list) the list draws the rows the rules say in their order, with the same counts; Locate (reading the search box) says «shown» exactly then — else the FIRST filter that drops it; the pill counts what a press shows (${R.shown} shown)`, R.bad && J(R.bad));
   ok(R.shown > 0 && R.shown < R.n && ORDER.every((k) => R.whys.has(k)), `…and the matrix reaches every reason (${[...R.whys].join(', ')})`);
-  // every door makes progress: pressed, the row shows or the next reason is a LATER one — a present row shows within seven presses
+  // every door makes progress: pressed, the row shows or the next reason is a LATER one — a present row shows within the order's length
   let worst = 0, stuck = null;
   for (const st of states) {
-    env.term = st.term; const fake = fakeOf({ ...st, bf: [...st.bf], hf: [...st.hf], sf: [...st.sf] });
-    let v = locateVerdict(FACTS.call(fake, 'c1')), presses = 0;
-    while (!v.show && presses < 8) {
-      DOOR.call(fake, v.why); presses++;
-      const next = locateVerdict(FACTS.call(fake, 'c1'));
+    env.term = st.term; const fk = fakeOf({ ...st, bf: [...st.bf], hf: [...st.hf], sf: [...st.sf] });
+    let v = locateVerdict(FACTS.call(fk, 'c1')), presses = 0;
+    while (!v.show && presses < ORDER.length + 1) {
+      DOOR.call(fk, v.why); presses++;
+      const next = locateVerdict(FACTS.call(fk, 'c1'));
       if (!next.show && ORDER.indexOf(next.why) <= ORDER.indexOf(v.why)) { stuck = stuck || { st: J({ ...st, s: undefined, ...st.s }), why: v.why, next: next.why }; break; }
       v = next;
     }
-    if (!v.show && !stuck) stuck = { st: J({ ...st, s: undefined, ...st.s }), why: v.why, presses };
-    if (!listed(fake) && v.show && !stuck) stuck = { st: J({ ...st, s: undefined, ...st.s }), door: 'the verdict says shown, the list does not draw it' };
+    if (!v.show && !stuck) stuck = { st: J({ ...st, s: undefined, more: undefined, ...st.s }), why: v.why, presses };
+    if (v.show && !FILTER.call(fk, env.term).sessions.some((x) => x.sessionId === 'c1') && !stuck) stuck = { st: J({ ...st, s: undefined, ...st.s }), door: 'the verdict says shown, the list does not draw it' };
     worst = Math.max(worst, presses);
   }
   ok(!stuck && worst <= ORDER.length, `every door shows the row or moves it to a LATER reason; every present row is shown within ${worst} presses, and the list then draws it`, stuck && J(stuck));
-  // RED CONTROLS: the oracle must be able to disagree
-  const forgetsFour = (f) => { const v = locateVerdict(f); return (!v.show && v.why === 'status' && !f.showArchived && f.statusFilter.filter((x) => x !== 'archived').length >= 0) ? { show: true } : v; };
-  const C1 = run(forgetsFour);
-  ok(!!C1.bad, `RED CONTROL: a verdict that never says «hidden by the status filter» disagrees with the list (${C1.bad ? J(C1.bad.v) + ' vs listed ' + C1.bad.listed : 'NOT CAUGHT'})`);
-  const noHost = FILTERS.replace(/if \(this\._hostFilter\.size > 0\) \{[\s\S]*?\n    \}\n/, '');
-  const C2 = noHost !== FILTERS ? run(locateVerdict, listOf(noHost)) : { bad: null };
-  ok(noHost !== FILTERS && !!C2.bad, 'RED CONTROL: a list without its location filter disagrees with the verdict');
+  // RED CONTROLS: the stated rules must be able to disagree with the product
+  const noStatus = (fx) => { const v = locateVerdict(fx); return (!v.show && v.why === 'status') ? { show: true } : v; };
+  const C1 = run({ verdict: noStatus, filter: bind('  _filterSessions(term) {', noStatus), first: true });
+  ok(!!C1.bad, `RED CONTROL: a verdict without the status filter — the list (it filters with it) and Locate both disagree with the rules (${C1.bad ? 'listed ' + C1.bad.got.ids + ' vs ' + C1.bad.want.ids : 'NOT CAUGHT'})`);
+  // THE «ALL FOUR» RULE (the status filter narrows only below all four non-archived statuses) changes nothing for a row of one of the
+  // four — it is seen only on a row whose status the list does not know: kept while all four are on, dropped once the person narrows
+  const VSRC = read('src/locate-verdict.js'), VSRC0 = VSRC.replace('on.length < NON_ARCHIVED && ', '');
+  const always = VSRC0 !== VSRC ? new Function('module', VSRC0 + '\nreturn module.exports;')({ exports: {} }).locateVerdict : null;
+  const unknown = cartesian([FOUR, ['live'], [...FOUR, 'archived']], [false, true], ['folders', 'tasks']).map(([sf, arch, tab]) => ({ term: '', s: { sessionId: 'c1', _match: true, _kind: true, _arch: arch, status: undefined, _stopped: false }, more: MORE, bf: [], hf: [], kf: null, so: false, sf, av: null, tab, pill: false }));
+  const keep = states.splice(0, states.length, ...unknown);
+  const U = run(), C3 = always ? run({ verdict: always, filter: bind('  _filterSessions(term) {', always) }) : { bad: null };
+  states.splice(0, states.length, ...keep);
+  ok(!U.bad && U.shown > 0 && U.shown < U.n, `a row of no known status: kept while all four are on, dropped once the person narrows — the list and Locate agree with the rules (${U.shown} of ${U.n} shown)`, U.bad && J(U.bad));
+  ok(!!always && !!C3.bad, 'RED CONTROL: a verdict without its «all four» rule (it always narrows) drops that row while all four are on — the rules disagree', C3.bad && J(C3.bad.want));
+  const RF0 = RF.replace('stoppedBy: ctx.stoppedOnly ? isStoppedBy(s) : false', 'stoppedBy: true');
+  const C2 = RF0 !== RF ? run({ rowFacts: bindText(RF0), first: true }) : { bad: null };
+  ok(RF0 !== RF && !!C2.bad, 'RED CONTROL: row facts that forget the stopped pill (the release\'s blind spot — every row «stopped») disagree with the rules', C2.bad && J(C2.bad.want));
 }
 
 console.log('③ ONE SHOW DOOR: a program never goes through the rail\'s re-click');
@@ -251,7 +309,7 @@ const RELEASE_LOCATE = `locateSessionInSidebar(backendSessionId) {
     `a row hidden by the search box: one toast naming the words searched, with its door «Clear search», and the list stays open (${J(h)})`);
   Wh.actions[0].run(); await Wh.drain();
   ok(J(Wh.doors) === J(['search']) && Wh.flashes === 1 && Wh.toasts.length === 1, '…the door clears the search and the row is located and flashed, no second toast');
-  for (const [why, o] of [['archived', { archived: true }], ['status', { statusFilter: ['stopped'] }], ['view', { activeView: 'stopped' }], ['kind', { kindPass: false }]]) {
+  for (const [why, o] of [['archived', { archived: true }], ['status', { statusFilter: ['stopped'] }], ['view', { activeView: 'stopped' }], ['kind', { kindPass: false }], ['stopped', { stoppedOnly: true }]]) {
     const Wx = world({ open: true, tab: 'folders', facts: { ...SHOWN, ...o } });
     const x = await press(LOCATE, Wx);
     ok(x.open && x.toasts.length === 1 && Wx.actions.length === 1 && Wx.actions[0].label === LOCATE_WORDS[why].door, `a row hidden by «${why}»: said once with its door «${LOCATE_WORDS[why].door}», the list open`, J(x));
