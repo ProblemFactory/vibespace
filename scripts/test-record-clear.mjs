@@ -23,6 +23,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { anchored } from './scratch.mjs';
 
 const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -625,6 +626,7 @@ console.log('⑥ negative controls — each rule broken on a copy goes red');
 }
 
 // ── ⑦ the census ──
+console.log('\nB-20b6 «Clear content…» says the archived job records it could not reach');
 // B-20b6: «Clear content…» SAYS the archived job records it could not reach — the job store's `archiveUnread` rides the seam and both
 // routes to the dialog (it showed «Content cleared» alone while the archived copies kept their words)
 {
@@ -639,7 +641,7 @@ console.log('⑥ negative controls — each rule broken on a copy goes red');
   const SSRC = fs.readFileSync(path.join(ROOT, 'src/server/record-clear.js'), 'utf8');
   const CARRY = '      if (r.archiveUnread) res.archiveUnread = true;';
   ok(SSRC.split(CARRY).length === 2, 'control setup: the seam\'s carry is found once');
-  const RX = M.load('src/server/record-clear.js', SSRC.replace(CARRY, '      /* MUTANT: not carried */'), 'b20b6-no-carry').create({ getJobs: () => jmOf(true), log: () => { } });
+  const RX = M.load('src/server/record-clear.js', anchored(SSRC, CARRY, '      /* MUTANT: not carried */', 'b20b6-no-carry'), 'b20b6-no-carry').create({ getJobs: () => jmOf(true), log: () => { } });
   const ox = await RX.clear({ kind: 'job', id: 'jb-0000a001' }, { caller: OWNER });
   ok(ox.ok && !ox.archiveUnread, 'CONTROL (the carry cut, in a copy): the clear answers «cleared» alone — the archived words left uncleared are never said — RED', ox);
   const routes = new Map(), app = { post: (p, h) => routes.set(p, h) };

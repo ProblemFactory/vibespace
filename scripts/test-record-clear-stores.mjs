@@ -607,6 +607,16 @@ console.log('§4 Background Work');
     ok(own.length > 20 && own.every((k) => Object.prototype.hasOwnProperty.call(b, k)) && b._unread && b._unread.archive === null, `the bare manager carries every field the constructor gives (${own.length}) — the unread marks clearJobs reads among them`);
     ok(!Object.prototype.hasOwnProperty.call(proto, '_unread'), 'CONTROL (the manager made from the prototype alone, the train\'s red): it has no unread marks — clearJobs threw on them');
   }
+  { // B-20b6: the REAL clearJobs with its archive HELD, through the REAL seam — the flag reaches the clear's answer (the dialog says it)
+    const RM = require(path.join(ROOT, JB_REL)), b = bareManager(RM);
+    Object.assign(b, { d: { broadcast() {}, log() {} }, readOnly: false, ready: true, jobs: new Map(), events: [], pendingNotifs: new Map(), archive: [], _dirty: false });
+    b._loadArchive = () => []; b._writeArchive = () => ({ ok: true }); b._rewriteSpills = () => {}; b._save = () => {};
+    b._unread.archive = { code: 'EACCES', why: 'the read failed', at: Date.now() };
+    b.jobs.set('jb-0000dd02', jobRec('jb-0000dd02', { name: 'nightly report' }));
+    const seam = ORCH.create({ getJobs: () => b, log: () => {} });
+    const r = await seam.clear({ kind: 'job', id: 'jb-0000dd02' }, { caller: { role: 'owner' } });
+    ok(r.ok && r.cleared === 1 && r.archiveUnread === true, 'B-20b6: the REAL clearJobs with its archive held answers through the REAL seam that archived records were not reached (archiveUnread) — the key the dialog reads', r);
+  }
   ok(realBare.out.cleared.length === 1 && realBare.stash[0].text === CT, 'the same bare drive on the REAL module: the notify reminder\'s held text is the sentence (the control\'s baseline)', realBare.stash);
   const preBare = bare(PRE);
   ok(preBare.out.cleared.length === 1 && has(preBare.stash[0].text) && preBare.stash[0].jobName === CT, 'NEGATIVE CONTROL: with the announced-only rewrite the held notification keeps the marker (the name went, the words stayed) — the stash leg above would go red', preBare.stash);

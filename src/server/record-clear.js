@@ -14,7 +14,7 @@
  *     status         sessionKey + id (the history entry's ms `at`)
  *     job            id (jb-…) — a cron parent takes its runs; then the job's For-you items
  *     group-message  groupId + id (the record's vendorId)
- *   → {ok, cleared, already, unknown:[{kind, id}], refused:[{kind, id, code, why, status}], ambiguous:[…]}
+ *   → {ok, cleared, already, unknown:[{kind, id}], refused:[{kind, id, code, why, status}], ambiguous:[…], archiveUnread?: true (B-20b6)}
  *
  * Items are grouped by STORE CONTAINER (one Task Group, one session key, one
  * agent group, all todos, all jobs) so a batch is ONE atomic write and ONE
