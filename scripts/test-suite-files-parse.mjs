@@ -154,13 +154,29 @@ console.log('\n§3 A RED CONTROL THAT BUILDS NOTHING FAILS BY NAME (B-0d3e) — 
   // file whose count falls is never red (many lanes merge suites into one train) — its stale row is only said. Every
   // mutant copy written through scripts/mutant-copy.mjs fails by name besides when its copy equals the file (all its
   // anchors gone); anchored() fails by name on each one.
-  const LISTED = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts', 'fixtures', 'unanchored-controls.json'), 'utf-8')).files || {};
+  // THE RATCHET HOLDS BY ITSELF (主开发 2026-11-18 23:33Z — the 2.369.411 block's 166 were counted in once): a count may FALL,
+  // never RISE without a backlog row's id beside it. Every count lives under a row — `rows: { "B-xxxx": { why, files } }` —
+  // and a file's cap is the largest count any row gives it; a plain `files` map (a number with no row id), a row whose id is
+  // no B-xxxx or whose why is empty, and a live count above every row's cap are each RED by name.
+  const ROW_ID = /^B-[0-9a-f]{4}$/;
+  const capsOf = (fx) => {
+    const caps = {}, bad = [];
+    if (fx && fx.files && Object.keys(fx.files).length) bad.push(`a plain «files» map (${Object.keys(fx.files).length} counts with no row id beside them)`);
+    for (const [id, g] of Object.entries((fx && fx.rows) || {})) {
+      if (!ROW_ID.test(id) || !g || typeof g.files !== 'object' || String(g.why || '').trim().length < 20) { bad.push(`row «${id}» (an id B-xxxx, its files and a why of 20+ characters)`); continue; }
+      for (const [f, n] of Object.entries(g.files)) caps[f] = Math.max(caps[f] || 0, Number(n) || 0);
+    }
+    return { caps, bad };
+  };
+  const UFX = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts', 'fixtures', 'unanchored-controls.json'), 'utf-8'));
+  const { caps: LISTED, bad: UBAD } = capsOf(UFX);
+  ok(!UBAD.length, `every count of scripts/fixtures/unanchored-controls.json stands under a backlog row's id (${Object.keys(UFX.rows || {}).join(', ')})${UBAD.length ? ` — NO ROW ID: ${UBAD.join(' | ')}` : ''}`);
   const per = Object.fromEntries(Object.entries(EDITS).map(([f, e]) => [f, e.length]));
   const total = Object.values(per).reduce((a, b) => a + b, 0);
   const judge = (p, listed) => ({ added: Object.entries(p).filter(([f, n]) => n > (listed[f] || 0)).map(([f]) => f), fell: Object.keys(listed).filter((f) => (p[f] || 0) < listed[f]) });
   const j = judge(per, LISTED);
   ok(total > 1000 && Object.keys(per).length > 200, `${total} unanchored control edits in ${Object.keys(per).length} scripts (non-vacuous: the walk reads the tree)`);
-  ok(!j.added.length, `the unanchored control edits only fall (the list ${Object.values(LISTED).reduce((a, b) => a + b, 0)} in ${Object.keys(LISTED).length} files)`, j.added.length ? j.added.slice(0, 6).map((f) => `${f}: ${per[f]} > ${LISTED[f] || 0} — a new edit: ${EDITS[f].slice(0, 2).map((e) => `line ${e.line} ${e.text}`).join(' · ')} — build it with anchored() from scripts/scratch.mjs, or raise the row "${f}": ${per[f]} in scripts/fixtures/unanchored-controls.json with its why`) : undefined);
+  ok(!j.added.length, `the unanchored control edits never rise without a row's id beside it (the list ${Object.values(LISTED).reduce((a, b) => a + b, 0)} in ${Object.keys(LISTED).length} files)`, j.added.length ? j.added.slice(0, 6).map((f) => `${f}: ${per[f]} > ${LISTED[f] || 0} — a new edit: ${EDITS[f].slice(0, 2).map((e) => `line ${e.line} ${e.text}`).join(' · ')} — build it with anchored() from scripts/scratch.mjs, or raise its count to ${per[f]} under YOUR backlog row\'s id in scripts/fixtures/unanchored-controls.json «rows» (a plain number is refused)`) : undefined);
   if (j.fell.length) console.log(`    (${j.fell.length} listed file(s) now carry fewer — not red; lower their rows when convenient: ${j.fell.slice(0, 8).join(', ')}${j.fell.length > 8 ? ', …' : ''})`);
   // THE CONTROLS — the door, the guard, the walk, the one-way rule
   const T = 'const x = 1;\nconst y = 2;\n';
@@ -185,15 +201,23 @@ console.log('\n§3 A RED CONTROL THAT BUILDS NOTHING FAILS BY NAME (B-0d3e) — 
   ok(nA === 1 && nB === 0 && nC === 0 && nD === 2, `CONTROL: the walk finds a replace-then-load (1), never an anchored() edit (0) nor a read that feeds no loader (0), and each link of a chain bound once and loaded (2) — ${[nA, nB, nC, nD].join(' / ')}`);
   const jA = judge({ 'test-new.mjs': 1, 'test-old.mjs': 3 }, { 'test-old.mjs': 3 }), jB = judge({ 'test-old.mjs': 1 }, { 'test-old.mjs': 3 });
   ok(jA.added.join() === 'test-new.mjs' && !jB.added.length && jB.fell.join() === 'test-old.mjs', 'CONTROL: a file that ADDS an unanchored edit is red by name; one whose count falls is only said (the one-way rule)');
+  const cA = capsOf({ files: { 'test-a.mjs': 2 } }), cB = capsOf({ rows: { 'X-1': { why: 'a row id that is no backlog id at all', files: { 'test-a.mjs': 2 } } } });
+  const cC = capsOf({ rows: { 'B-0001': { why: '', files: { 'test-a.mjs': 2 } } } });
+  const cD = capsOf({ rows: { 'B-0001': { why: 'the first list of this census, counted in once', files: { 'test-a.mjs': 2 } }, 'B-0002': { why: 'a unit that raised one file under its own row', files: { 'test-a.mjs': 3 } } } });
+  ok(cA.bad.length === 1 && /plain «files»/.test(cA.bad[0]) && cB.bad.length === 1 && cC.bad.length === 1 && !cD.bad.length && cD.caps['test-a.mjs'] === 3
+    && judge({ 'test-a.mjs': 4 }, cD.caps).added.join() === 'test-a.mjs' && !judge({ 'test-a.mjs': 3 }, cD.caps).added.length && judge({ 'test-a.mjs': 1 }, cD.caps).fell.join() === 'test-a.mjs',
+    'CONTROL: a count with no row id beside it (a plain «files» map, an id that is no B-xxxx, a row with no why) is RED by name; a file\'s cap is the largest count any row gives it — one over it is a rise (red), at it is held, under it is a fall (said)');
   // THE ANCHOR HELPERS (the row's «every helper that builds a control from an anchor»): a function whose own parameter is
   // an anchor and whose body reaches a loader FAILS BY NAME — it throws, or it builds through anchored(). The ones that
   // answer null or an unpatched copy instead are listed in scripts/fixtures/anchor-helpers.json, ONE-WAY like the edits:
   // a file that adds one is red by name (a new helper takes scratch.mjs anchored()); a fall is said.
-  const HLISTED = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts', 'fixtures', 'anchor-helpers.json'), 'utf-8')).files || {};
+  const HFX = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts', 'fixtures', 'anchor-helpers.json'), 'utf-8'));
+  const { caps: HLISTED, bad: HBAD } = capsOf(HFX);
+  ok(!HBAD.length, `every count of scripts/fixtures/anchor-helpers.json stands under a backlog row's id (${Object.keys(HFX.rows || {}).join(', ')})${HBAD.length ? ` — NO ROW ID: ${HBAD.join(' | ')}` : ''}`);
   const hper = Object.fromEntries(Object.entries(HELPERS).map(([f, h]) => [f, h.length]));
   const htotal = Object.values(hper).reduce((a, b) => a + b, 0), hj = judge(hper, HLISTED);
   console.log(`    ${htotal} anchor helper(s) in ${Object.keys(hper).length} script(s) answer null or an unpatched copy when their anchor moves (the controls below prove the walk finds one)`);
-  ok(!hj.added.length, `the anchor helpers that do not fail by name only fall (the list ${Object.values(HLISTED).reduce((a, b) => a + b, 0)} in ${Object.keys(HLISTED).length} files)${hj.added.length ? ` — ${hj.added.slice(0, 6).map((f) => `${f}: ${hper[f]} > ${HLISTED[f] || 0} — ${HELPERS[f].map((h) => `line ${h.line} ${h.name}`).join(', ')}`).join(' | ')} — build it through scripts/scratch.mjs anchored() (it throws «ANCHOR GONE» by the control's name); live ${JSON.stringify(hper)}` : ''}`);
+  ok(!hj.added.length, `the anchor helpers that do not fail by name never rise without a row's id beside it (the list ${Object.values(HLISTED).reduce((a, b) => a + b, 0)} in ${Object.keys(HLISTED).length} files)${hj.added.length ? ` — ${hj.added.slice(0, 6).map((f) => `${f}: ${hper[f]} > ${HLISTED[f] || 0} — ${HELPERS[f].map((h) => `line ${h.line} ${h.name}`).join(', ')}`).join(' | ')} — build it through scripts/scratch.mjs anchored() (it throws «ANCHOR GONE» by the control's name), or raise its count under YOUR backlog row's id in scripts/fixtures/anchor-helpers.json «rows»; live ${JSON.stringify(hper)}` : ''}`);
   if (hj.fell.length) console.log(`    (${hj.fell.length} listed file(s) now carry fewer helpers — not red; lower their rows when convenient: ${hj.fell.slice(0, 8).join(', ')}${hj.fell.length > 8 ? ', …' : ''})`);
   // a listed helper that stays on purpose says why («<file>#<name>»: a control skipped by name on a base without its line, or a caller that names the anchor)
   const HWHY = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts', 'fixtures', 'anchor-helpers.json'), 'utf-8')).why || {};

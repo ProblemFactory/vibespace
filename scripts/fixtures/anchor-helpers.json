@@ -1,28 +1,33 @@
 {
- "//": "B-0d3e (lane lg-leak-census): per script, the anchor helpers (a function whose own parameter is an anchor and whose body reaches a loader — a suite's cut / swap / mutantOf / patch) that neither throw nor build through scripts/scratch.mjs anchored(): when the anchor moves they answer null or an unpatched copy. ONE-WAY (test-suite-files-parse §3): a file that adds one is red by name; a fall is only said. A helper that already fails by name through a wrapper the walk cannot see (test-channel-touch's anchorMissing(tag, file) — «mutation anchor missing: <tag> (<file>)») stays listed with its `why` row. A converted helper THROWS: the first moved anchor stops its suite and the controls after it get no verdict — red by name, the trade ruling B took (test-design-model's helpers keep their per-rule red on purpose, said in their rows).",
- "files": {
-  "test-boot-phase.mjs": 1,
-  "test-browser-stuck.mjs": 1,
-  "test-browser-unresponsive.mjs": 1,
-  "test-cdp-census.mjs": 1,
-  "test-channel-outbox.mjs": 2,
-  "test-channel-send-files.mjs": 1,
-  "test-channel-touch.mjs": 10,
-  "test-conversation-ops.mjs": 1,
-  "test-cpu-capture-live.mjs": 1,
-  "test-design-model.mjs": 3,
-  "test-loop-hold.mjs": 3,
-  "test-mount-starting.mjs": 1,
-  "test-pool-auto.mjs": 2,
-  "test-reset-credit-verdict.mjs": 2,
-  "test-still-press.mjs": 1,
-  "test-stream-op.mjs": 1,
-  "test-user-state-echo.mjs": 2,
-  "test-vault-job-model.mjs": 1,
-  "test-vault-run-model.mjs": 1,
-  "test-vault-run.mjs": 2,
-  "test-vault-standing-request.mjs": 1,
-  "test-voice-proxy.mjs": 1
+ "//": "B-0d3e (lane lg-leak-census): per script, the anchor helpers (a function whose own parameter is an anchor and whose body reaches a loader — a suite's cut / swap / mutantOf / patch) that neither throw nor build through scripts/scratch.mjs anchored(): when the anchor moves they answer null or an unpatched copy. ONE-WAY (test-suite-files-parse §3): a file that adds one is red by name; a fall is only said. A helper that already fails by name through a wrapper the walk cannot see (test-channel-touch's anchorMissing(tag, file) — «mutation anchor missing: <tag> (<file>)») stays listed with its `why` row. A converted helper THROWS: the first moved anchor stops its suite and the controls after it get no verdict — red by name, the trade ruling B took (test-design-model's helpers keep their per-rule red on purpose, said in their rows). A COUNT NEVER RISES WITHOUT A BACKLOG ROW'S ID BESIDE IT: every count stands under `rows` — { \"B-xxxx\": { \"why\": …, \"files\": { … } } } — a file's cap is the largest count any row gives it; a unit that must raise one adds (or extends) a row under its own backlog id; a plain number with no row id is red.",
+ "rows": {
+  "B-0d3e": {
+   "why": "the list B-0d3e brought (lane lg-leak-census): 35 at fe1d59c41, 38 on 2.369.410, 40 with the 2.369.411 block's units counted in once (test-vault-run's patch, test-vault-standing-request's mutant)",
+   "files": {
+    "test-boot-phase.mjs": 1,
+    "test-browser-stuck.mjs": 1,
+    "test-browser-unresponsive.mjs": 1,
+    "test-cdp-census.mjs": 1,
+    "test-channel-outbox.mjs": 2,
+    "test-channel-send-files.mjs": 1,
+    "test-channel-touch.mjs": 10,
+    "test-conversation-ops.mjs": 1,
+    "test-cpu-capture-live.mjs": 1,
+    "test-design-model.mjs": 3,
+    "test-loop-hold.mjs": 3,
+    "test-mount-starting.mjs": 1,
+    "test-pool-auto.mjs": 2,
+    "test-reset-credit-verdict.mjs": 2,
+    "test-still-press.mjs": 1,
+    "test-stream-op.mjs": 1,
+    "test-user-state-echo.mjs": 2,
+    "test-vault-job-model.mjs": 1,
+    "test-vault-run-model.mjs": 1,
+    "test-vault-run.mjs": 2,
+    "test-vault-standing-request.mjs": 1,
+    "test-voice-proxy.mjs": 1
+   }
+  }
  },
  "why": {
   "test-boot-phase.mjs#mutant": "its caller reds by the control's name with «(anchor moved)» in the reds it prints",
