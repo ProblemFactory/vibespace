@@ -14,9 +14,11 @@
  *     and a listener that throws is caught and said once — no callback of the door can end the process.
  *   · THE POLLERS ARE BOUNDED (主开发 01:30Z, 2): hundreds of refused watches never become hundreds of pollers hammering the
  *     hub's small thread pool — at most LIMITS.running polls run at once (the rest wait their turn), at most LIMITS.inflight
- *     file calls are in flight across ALL of them (each stat / readdir waits for a slot), and the active cadence slows as the
- *     pollers grow (cadenceFor: ACTIVE_MS × ⌈pollers / POLLERS_PER_STEP⌉, never under ACTIVE_MS, never over CADENCE_MAX_MS — the
- *     timer's gap; past 32 polls a tick also waits its turn for the running and in-flight bounds).
+ *     file calls are in flight across ALL of them (each stat / readdir waits for a slot — 2: never more than HALF the runtime's
+ *     default pool of 4, so a wedged mount's stats can never hold every thread; see LIMITS), and the active cadence slows as the
+ *     pollers grow (cadenceFor: ACTIVE_MS × ⌈pollers / POLLERS_PER_STEP⌉, never under ACTIVE_MS, never over CADENCE_MAX_MS up to
+ *     320 pollers — the timer's gap; above, the TOTAL tick rate is held at TICKS_PER_S_MAX; past 32 polls a tick also waits its
+ *     turn for the running and in-flight bounds).
  *   · THE LIMIT IS SAID, AND NEVER FLAPS (主开发 01:30Z, 1): the system's limit of watches reached (ENOSPC) is said ONCE in the
  *     journal and ONCE to the person — one For-you notice (en, zh, ja) with the limit's name and the one command that raises
  *     it (on a container, that it is raised on the host — never a command; no claim about who holds the watches) — and LIFTED only when the limit has stayed clear: LIMITS.liftArms watches armed IN A ROW and LIMITS.liftQuietMs since
@@ -36,7 +38,16 @@ const ACTIVE_MS = 250;      // the poll's cadence while the target changes (with
 const QUIET_MS = 2000;      // …backed off to this while it is quiet (doubling from the active cadence)
 const POLLERS_PER_STEP = 16;   // every this many pollers slow the active cadence by one more ACTIVE_MS
 const POLL_ENTRIES = 32;    // a folder's poll reads at most this many entries a tick
-const LIMITS = { running: 32, inflight: 4, liftArms: 3, liftQuietMs: 10 * 60e3, probeMs: 5 * 60e3, fileGapMs: 60 * 60e3 };   // read at call time (the suite's controls move them)
+// THE IN-FLIGHT CAP IS AT MOST HALF THE THREAD POOL (主开发 2026-11-19 09:53Z): every async file call runs on the runtime's thread
+// pool — 4 threads by default (the hub raises its own to 32 in server.js's first lines, unless the environment sets one) — and a
+// stat on a wedged mount never returns: were the door to hold the whole pool, EVERY async file call of the process would wait
+// (the hub-freeze class). The cap is 2 — and never more than half of THIS process's pool (a pool of 2 set in the environment
+// gives 1), read once at load (its fresh reader's N3)
+const POOL = Number(process.env.UV_THREADPOOL_SIZE) > 0 ? Math.floor(Number(process.env.UV_THREADPOOL_SIZE)) : 4;
+// THE DECLARED LIMITS, written ONCE: the live LIMITS and resetForTest() both copy them, so a suite reads the shipped values (its
+// fresh reader's M1: a second copy in the reset let a declared 4 ship under a green suite)
+const DEFAULT_LIMITS = Object.freeze({ running: 32, inflight: Math.min(2, Math.max(1, Math.floor(POOL / 2))), liftArms: 3, liftQuietMs: 10 * 60e3, probeMs: 5 * 60e3, fileGapMs: 60 * 60e3, adoptRetryMs: Object.freeze([0, 1000, 5000, 30000]) });
+const LIMITS = { ...DEFAULT_LIMITS, adoptRetryMs: [...DEFAULT_LIMITS.adoptRetryMs] };   // read at call time (the suite's controls move them)
 const NOTICE_KEY = 'watch-limit';
 const LIMIT_NAME = 'fs.inotify.max_user_watches';
 const LIMIT_FILE = '/proc/sys/fs/inotify/max_user_watches';
@@ -76,10 +87,17 @@ function noticeItem({ container = inContainer(), current = limitNow() } = {}) {
   const text = 'The system’s limit of file watches is reached — VibeSpace follows files more slowly until it is raised';
   return { text, detail: rows.map(fill).join('\n'), i18n: { text: { key: i18nKey('The system’s limit of file watches is reached — VibeSpace follows files more slowly until it is raised'), params: {} }, detail: rows } };
 }
-/** PURE: the active cadence for `n` pollers — slower as they grow, never past CADENCE_MAX_MS: «every few seconds at most» (the
- *  notice's own words) stays true however many poll (its reader's N4). */
+/** PURE: the active cadence for `n` pollers — slower as they grow, never past CADENCE_MAX_MS up to 320 pollers (the notice's
+ *  «every few seconds at most», its reader's N4); ABOVE 320 it grows past 5 s so the total stays ≤ TICKS_PER_S_MAX — the notice's
+ *  sentence then stops being exact; KEPT by the coordinator's ruling (2026-11-19 19:22Z: 320 refused watches at once is far past
+ *  anything met). */
 const CADENCE_MAX_MS = 5000;
-const cadenceFor = (n) => Math.min(CADENCE_MAX_MS, ACTIVE_MS * Math.max(1, Math.ceil((Number(n) || 0) / POLLERS_PER_STEP)));
+// …and above 320 pollers the cadence grows again (主开发 09:53Z, 3): in a steady state the TOTAL tick rate stays at most
+// TICKS_PER_S_MAX (n / cadence ≤ 64 a second; a new poll ticks once at once, an old one takes the new cadence at its next tick);
+// at 320 pollers both rules give 5 s, below it the step rule is larger or equal. NOTE: two wedged targets now hold both
+// in-flight slots, and every door poll of the process waits behind them — the trade the pool law chose
+const TICKS_PER_S_MAX = 64;
+const cadenceFor = (n) => { const k = Number(n) || 0; return Math.max(Math.min(CADENCE_MAX_MS, ACTIVE_MS * Math.max(1, Math.ceil(k / POLLERS_PER_STEP))), Math.ceil(k * 1000 / TICKS_PER_S_MAX)); };
 
 function fileNotice() {
   if (state.itemId) return;
@@ -153,12 +171,18 @@ function adoptOpen() {
   if (!state.limited) { state.limited = true; state.code = 'ENOSPC'; state.lastRefusalAt = now(); state.armsInRow = 0; log('[watch] a watch-limit notice from before the restart is kept until watches have been set again for a while'); armProbe(); }
   return true;
 }
-// the store's later turns: the next loop turn (the hub's boot has made it by then), then a few more, each timer unref'd
-const ADOPT_RETRY_MS = Object.freeze([0, 1000, 5000, 30000]);
+// the store's later turns (LIMITS.adoptRetryMs, the gaps): the next loop turn (the hub's boot has made it by then), then a few
+// more, each timer unref'd; the LAST try's failure is said once in the journal (主开发 09:53Z, 2) — never a silent give-up
 let adoptTimer = null;
 function adoptSoon(k) {
-  if (adoptTimer || k >= ADOPT_RETRY_MS.length) return;
-  adoptTimer = setTimeout(() => { adoptTimer = null; if (!adoptOpen()) adoptSoon(k + 1); else if (state.limited && !state.itemId) fileNotice(); }, ADOPT_RETRY_MS[k]);
+  const gaps = LIMITS.adoptRetryMs;
+  if (adoptTimer || k >= gaps.length) return;
+  adoptTimer = setTimeout(() => {
+    adoptTimer = null;
+    if (adoptOpen()) { if (state.limited && !state.itemId) fileNotice(); return; }
+    if (k + 1 < gaps.length) { adoptSoon(k + 1); return; }
+    log('[watch] the For-you store did not answer during the start — a watch-limit notice left open before the restart, if any, was not looked for; it stays until it is cleared by hand');
+  }, gaps[k]);
   if (adoptTimer.unref) adoptTimer.unref();
 }
 /** Hand the door the For-you store (the system-resource notices' module, at boot). A limit already met files its notice now. */
@@ -256,8 +280,8 @@ function resetForTest() {
   if (state.probe) clearTimeout(state.probe);
   if (adoptTimer) { clearTimeout(adoptTimer); adoptTimer = null; }
   gen++; Object.assign(state, fresh()); runWait.length = 0; slotWait.length = 0;
-  Object.assign(LIMITS, { running: 32, inflight: 4, liftArms: 3, liftQuietMs: 10 * 60e3, probeMs: 5 * 60e3, fileGapMs: 60 * 60e3 });
+  Object.assign(LIMITS, { ...DEFAULT_LIMITS, adoptRetryMs: [...DEFAULT_LIMITS.adoptRetryMs] });
   todosOf = () => null; log = (line) => { try { console.warn(line); } catch { } }; now = () => Date.now(); probeFs = fs; containerOverride = null; limitNow = readLimit;
 }
 
-module.exports = { watch, configure, status, noticeItem, cadenceFor, resetForTest, LIMITS, ACTIVE_MS, QUIET_MS, CADENCE_MAX_MS, POLLERS_PER_STEP, POLL_ENTRIES, NOTICE_KEY, LIMIT_NAME, raiseCmd };
+module.exports = { watch, configure, status, noticeItem, cadenceFor, resetForTest, LIMITS, DEFAULT_LIMITS, ACTIVE_MS, QUIET_MS, CADENCE_MAX_MS, TICKS_PER_S_MAX, POLLERS_PER_STEP, POLL_ENTRIES, NOTICE_KEY, LIMIT_NAME, raiseCmd };

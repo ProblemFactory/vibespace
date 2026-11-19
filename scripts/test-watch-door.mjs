@@ -4,7 +4,7 @@
 // conversation's transcript from a retry TIMER, fs.watch threw ENOSPC, nothing caught it).
 //   §1 THE DOOR (src/watch-door.js) with stand-in fs modules — no real watch is armed, no real limit touched (主开发 01:30Z: the
 //      notice never flaps — lifted only after 3 arms in a row and 10 quiet minutes, at most one item an hour, CONTROL the hotfix's
-//      rule flaps; the pollers bounded — at most 4 file calls in flight across all, counted by the stand-in, CONTROL unbounded):
+//      rule flaps; the pollers bounded — at most LIMITS.inflight (2: half the default thread pool) file calls in flight across all, counted by the stand-in, CONTROL unbounded):
 //      a refused watch (ENOSPC) is a bounded poll that still calls the listener; a watcher whose 'error' fires after it was
 //      armed is swapped to the poll, never an uncaught 'error'; a listener that throws is caught; the limit is said ONCE
 //      (journal + ONE For-you notice in en, its zh / ja rows in the dictionaries) and LIFTED when a watch arms again; close()
@@ -21,6 +21,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { EventEmitter } from 'node:events';
+import { spawnSync } from 'node:child_process';
 import { scratchHome, anchored } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
 import { stripComments } from './ci.mjs';
@@ -283,8 +284,90 @@ console.log('§1b the block\'s follow (its readers\' S1 / S3 / N4 / N8 / N9 / N1
     const c = back.error ? null : await n10(back);
     ok(!!c && c.peak > 32, `CONTROL (the stale turn handed to the new state, as this unit's first cure had it${back.error ? ` — NOT BUILT: ${back.error}` : ''}): ${c && c.peak} at once — over the bound`, c);
   }
+  { // (主开发 09:53Z, 1) THE IN-FLIGHT CAP IS AT MOST HALF THE THREAD POOL: a child with the runtime's default pool (UV_THREADPOOL_SIZE=4)
+    // polls six refused watches through a stand-in whose stat NEVER returns on its own — it opens a FIFO nobody writes, which holds a
+    // REAL pool thread (a wedged mount's stat). With the door's cap, two are stuck and a file call of the child's own still answers;
+    // CONTROL: the cap at 4 — four threads stuck, the child's own call waits (the hub-freeze class). The FIFOs are opened for writing
+    // at the end, so every stuck thread returns before the child exits
+    const mk = spawnSync('mkfifo', ['--version'], { stdio: 'ignore' });
+    if (mk.status !== 0 && mk.error) console.log('  ⊘ SKIP the thread-pool leg — no mkfifo on this machine');
+    else {
+      const PD = path.join(HOME, 'pool'); fs.mkdirSync(PD, { recursive: true });
+      const KIDP = path.join(PD, 'kid-pool.cjs');
+      fs.writeFileSync(KIDP, [
+        "'use strict';",
+        "const fs = require('fs'), path = require('path');",
+        "const [door, dir, cap, n] = process.argv.slice(2);",
+        "const WD = require(door); WD.configure({ log: () => {} });   // a fresh process: the DECLARED limits (no reset)",
+        "if (cap !== 'default') WD.LIMITS.inflight = Number(cap);",
+        "const fifos = Array.from({ length: Number(n) }, (_, i) => path.join(dir, 'fifo' + i));",
+        "let started = 0;",
+        "const stuck = { ...fs, watch() { const e = new Error('ENOSPC'); e.code = 'ENOSPC'; throw e; }, promises: { stat: async () => { const f = fifos[started++ % fifos.length]; const h = await fs.promises.open(f, 'r'); await h.close(); return { isDirectory: () => false, size: 1, mtimeMs: 1 }; }, readdir: async () => [] } };",
+        "const ws = fifos.map((_, i) => WD.watch(path.join(dir, 'p' + i), () => {}, { fs: stuck }));",
+        "const turn = () => new Promise((r) => setTimeout(r, 10));",
+        "(async () => {",
+        "  for (let i = 0; i < 100 && started < Math.min(fifos.length, WD.LIMITS.inflight); i++) await turn();",
+        "  let answered = false; fs.promises.stat(__filename).then(() => { answered = true; }, () => { answered = true; });",
+        "  for (let i = 0; i < 100 && !answered; i++) await turn();",
+        "  process.stdout.write(JSON.stringify({ started, answered, cap: WD.LIMITS.inflight }) + '\\n');",
+        "  const held = []; for (const f of fifos) { try { held.push(fs.openSync(f, 'r+')); } catch { } }   // O_RDWR: a writer at once (never ENXIO), kept until the exit so a late open never blocks",
+        "  for (const w of ws) w.close();",
+        "  process.exit(0);",
+        "})();",
+      ].join('\n'));
+      const runPool = (cap) => {
+        const dir = fs.mkdtempSync(path.join(PD, `c${cap}-`)), n = 6;
+        const made = Array.from({ length: n }, (_, i) => spawnSync('mkfifo', [path.join(dir, 'fifo' + i)]).status === 0);
+        if (!made.every(Boolean)) return { mkfifo: 'failed', made };
+        const r = spawnSync(process.execPath, [KIDP, path.join(REPO, 'src/watch-door.js'), dir, String(cap), String(n)], { encoding: 'utf8', timeout: 20000, env: { PATH: process.env.PATH, UV_THREADPOOL_SIZE: '4' } });
+        let out = null; try { out = JSON.parse(String(r.stdout || '').trim().split('\n').pop()); } catch { out = { raw: String(r.stdout || '').slice(0, 200), err: String(r.stderr || '').slice(0, 300) }; }
+        return { ...out, status: r.status, signal: r.signal };   // a child that had to be killed (its exit hung on a pool thread) is red
+      };
+      const dflt = runPool('default'), four = runPool(4);
+      ok(WD.DEFAULT_LIMITS.inflight === 2 && WD.LIMITS.inflight === 2 && !!dflt && dflt.cap === 2 && dflt.started === 2 && dflt.answered === true && dflt.status === 0 && !dflt.signal,
+        `THE POOL (主开发 09:53Z, 1): with the door's cap (${dflt && dflt.cap}) a wedged stat holds ${dflt && dflt.started} of the 4 pool threads — a file call of the process's own still answers`, dflt);
+      ok(!!four && four.cap === 4 && four.started === 4 && four.answered === false && four.status === 0 && !four.signal,
+        `CONTROL (the cap at 4, the whole default pool): ${four && four.started} threads stuck — the process's own file call waits (the hub-freeze class)`, four);
+    }
+  }
+  { // (主开发 09:53Z, 2) THE LAST ADOPTION TRY'S FAILURE IS SAID — never a silent give-up
+    const lastTry = async (D) => {
+      D.resetForTest(); const said = [];
+      Object.assign(D.LIMITS, { adoptRetryMs: [0, 5, 5] });
+      D.configure({ getUserTodos: () => { throw new ReferenceError('no store yet'); }, log: (l) => said.push(l), container: false });
+      await until(() => said.some((l) => /did not answer during the start/.test(l)), 40, 10);
+      const out = { lines: said.filter((l) => /did not answer during the start/.test(l)).length };
+      D.resetForTest();
+      return out;
+    };
+    const l = await lastTry(WD);
+    ok(l.lines === 1, 'the store that never answers during the start: after the last adoption try, ONE journal line says the old notice was not looked for', l);
+    const cut = mutant("    log('[watch] the For-you store did not answer during the start", "    void ('[watch] the For-you store did not answer during the start", 'the last try line cut');
+    const c = cut.error ? null : await lastTry(cut);
+    ok(!!c && c.lines === 0, `CONTROL (the line cut${cut.error ? ` — NOT BUILT: ${cut.error}` : ''}): the give-up is silent`, c);
+  }
+  { // (主开发 09:53Z, 4) THE TAILER KEEPS NO SECOND POLL — by behaviour: the door refuses (fs.watch throws ENOSPC), the tailer arms on
+    // an existing folder; the door's poll is closed (its pollers back to 0) and the tailer's own poll carries the folder
+    const TSRC = fs.readFileSync(path.join(REPO, 'src/workflow-usage-tailer.js'), 'utf8');
+    const tailerRun = (mod) => {
+      WD.resetForTest(); WD.configure({ log: () => {} });
+      const dir = fs.mkdtempSync(path.join(TMP, 'tail-'));
+      const saved = fs.watch; fs.watch = () => { throw enospc(); };
+      let t = null, out = null;
+      try { t = mod.createWorkflowTailer({ dir, onRecord: () => {}, pollMs: 60000 }); out = { armed: t.armed(), pollers: WD.status().pollers, ownPoll: !!t._state.poll, watcher: t._state.watcher }; }
+      finally { fs.watch = saved; try { t && t.stop(); } catch { } WD.resetForTest(); }
+      return out;
+    };
+    const real = tailerRun(require(path.join(REPO, 'src/workflow-usage-tailer.js')));
+    ok(!!real && real.armed && real.pollers === 0 && real.ownPoll && real.watcher === null, 'N8 by behaviour: the door refuses, the tailer arms — the door\'s poll is closed (0 pollers) and the tailer\'s own poll carries the folder', real);
+    let ct = null; try { ct = M.load('src/workflow-usage-tailer.js', anchored(TSRC, '      if (st.watcher && st.watcher.polled) { st.watcher.close(); st.watcher = null; }', '', 'the tailer\'s close cut'), 'tailer-no-close'); } catch (e) { ct = { error: String((e && e.message) || e).slice(0, 160) }; }
+    const c = ct.error ? null : tailerRun(ct);
+    ok(!!c && c.pollers === 1, `CONTROL (the tailer's close cut${ct.error ? ` — NOT BUILT: ${ct.error}` : ''}): the door's poll stays beside the tailer's own (${c && c.pollers} poller)`, c);
+  }
   { // N4 «every few seconds at most» stays true however many poll; N9 a filing that keeps failing is said ONCE a limit
-    ok(WD.cadenceFor(1e6) === WD.CADENCE_MAX_MS && WD.CADENCE_MAX_MS <= 5000 && WD.cadenceFor(1) === WD.ACTIVE_MS, `N4 the cadence is capped at ${WD.CADENCE_MAX_MS} ms (a million pollers) — the notice's «every few seconds at most» holds`, { big: WD.cadenceFor(1e6) });
+    const NS = [1, 16, 17, 200, 319, 320, 321, 640, 5000, 1e6], rate = NS.map((n) => n * 1000 / WD.cadenceFor(n));
+    ok(WD.cadenceFor(1) === WD.ACTIVE_MS && WD.cadenceFor(320) === WD.CADENCE_MAX_MS && WD.CADENCE_MAX_MS <= 5000 && NS.filter((n) => n <= 320).every((n) => WD.cadenceFor(n) <= WD.CADENCE_MAX_MS) && WD.cadenceFor(640) === 10000 && rate.every((r) => r <= WD.TICKS_PER_S_MAX + 1e-9),
+      `N4 the cadence: never over ${WD.CADENCE_MAX_MS} ms up to 320 pollers («every few seconds at most»), and above it the TOTAL tick rate held at ${WD.TICKS_PER_S_MAX} a second (主开发 09:53Z, 3: 640 pollers ⇒ ${WD.cadenceFor(640)} ms; a million ⇒ ${WD.cadenceFor(1e6)} ms)`, { NS, cad: NS.map((n) => WD.cadenceFor(n)), rate });
     WD.resetForTest(); const said = [];
     const T = todosStub(); T.add = () => { throw new Error('the store is busy'); };
     WD.configure({ getUserTodos: () => T, log: (l) => said.push(l), container: false });
