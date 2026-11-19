@@ -8,6 +8,7 @@ import { createRequire } from 'node:module';
 import net from 'node:net';
 import crypto from 'node:crypto';
 import { mutantCopies } from './mutant-copy.mjs';
+import { anchored } from './scratch.mjs';   // a control's edit through its anchor (mutant-copy imports scratch.mjs already: no new side effect)
 const REPO_ROOT = path.resolve(new URL('..', import.meta.url).pathname);
 const require = createRequire(import.meta.url);
 const { runMigrations } = require('../src/migration-runner.js');
@@ -82,7 +83,7 @@ try {
       const runSrc = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src/migration-runner.js'), 'utf8');
       const aHold = "    if (held) { results.push({ id: m.id, status: 'held', why: held }); continue; }\n";
       ok(runSrc.split(aHold).length === 2, 'U5b cure ANCHOR: the runner\'s hold');
-      const NoHold = mutantCopies('migrations-order', path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')).load('src/migration-runner.js', runSrc.replace(aHold, ''), 'no-hold');
+      const NoHold = mutantCopies('migrations-order', path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')).load('src/migration-runner.js', anchored(runSrc, aHold, '', 'mig-no-hold'), 'no-hold');
       const ranM = [], lm = path.join(tmp, 'ledger-order-red.json');
       NoHold.runMigrations({ ledgerPath: lm, migrations: orderMigs(ranM), log: () => { }, warn: () => { }, landStores: () => [] });
       ok(ranM.length === 1 && !!appliedOf(lm)['ord-reader'], 'U5b cure CONTROL: a runner without the hold runs the reader after a write not on disk AND records it — the check above would be red', { ranM, applied: appliedOf(lm) });

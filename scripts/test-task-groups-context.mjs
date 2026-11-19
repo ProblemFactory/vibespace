@@ -433,7 +433,7 @@ console.log('— the bundle and the export —');
   const tgSrc = fs.readFileSync(path.join(path.dirname(fileURLToPathU5(import.meta.url)), '..', 'src/task-groups.js'), 'utf8');
   const aW = "  _writer() { return this._writerDep || require('./store-writer.js').storeWriter(); }";
   ok('U5 ANCHOR: the store\'s one writer line', tgSrc.split(aW).length === 2);
-  const SyncTG = mutantCopies('task-groups-u5', path.resolve(path.dirname(fileURLToPathU5(import.meta.url)), '..')).load('src/task-groups.js', tgSrc.replace(aW, "  _writer() { return { dirty: (f, o) => fs.writeFileSync(f, o.produce()), durable: async () => true, pending: () => false, flushSync: () => ({ written: [], left: [] }) }; }"), 'sync-save');
+  const SyncTG = mutantCopies('task-groups-u5', path.resolve(path.dirname(fileURLToPathU5(import.meta.url)), '..')).load('src/task-groups.js', anchored(tgSrc, aW, "  _writer() { return { dirty: (f, o) => fs.writeFileSync(f, o.produce()), durable: async () => true, pending: () => false, flushSync: () => ({ written: [], left: [] }) }; }", 'tg-sync-save'), 'sync-save');
   const r = scene(SyncTG.TaskGroupManager, 'red');
   ok('U5 CONTROL: the old synchronous save (the writer bypassed) ⇒ task-groups.json is written on the main thread at the change — the first check above would be red', !r.unchanged);
   // A writer stand-in whose landing is HELD once armed: flushSync leaves the file (said), afterLanding keeps its steps; `land()` = the

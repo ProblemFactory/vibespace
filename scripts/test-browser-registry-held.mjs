@@ -304,6 +304,7 @@ console.log('§6 its reads r2 (N17) + r3 (N19): a load that THROWS at the read h
     await flush();
     const out = { held0, heldAfter: k.held(), words: String(k.heldWords() || ''), lifts };
     try { k.shutdown(); } catch { }
+    try { require(path.join(ROOT, 'src/store-writer.js')).storeWriter().flushSync(); } catch { }   // lane lg-store-writes (as §1 and §2): the owed boot's commit rides the store writer — it LANDS before the file is read (8 setImmediates were a race: red in one zone, 47fd700ed)
     out.file = (() => { try { return JSON.parse(fs.readFileSync(F, 'utf8')).profiles.length; } catch (e) { return '(' + (e.code || 'unparsed') + ')'; } })();
     return out;
   };
