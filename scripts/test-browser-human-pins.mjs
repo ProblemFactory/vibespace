@@ -311,10 +311,11 @@ console.log('— ⑤ B-b56d: the person’s open that the browser’s own sign-i
   const iVerdict = nav.indexOf('HM.openSignInVerdict({ why, stuck: stuckSource(key) })'), iFail = nav.indexOf("the user's ${v.act} did not go through"), iThrow = nav.indexOf("throw namedError('nav_failed', why)");
   ok(nav && iVerdict > 0 && iVerdict < iFail && iFail < iThrow && /if \(sheet\) \{[^\n]*return \{ ok: true, act: v\.act, url: v\.url \|\| null, signIn: sheet/.test(nav),
     'B-b56d: the keeper\'s navigateHuman reads the verdict BEFORE it says «did not go through» and answers {ok, signIn} — the tab kept (no unadopt), no nav_failed', { iVerdict, iFail, iThrow });
-  // RED CONTROL — the base's keeper (no verdict) reaches the failure line with the same facts: it proves its plant first
+  // RED CONTROL, ON THE SOURCE TEXT (the keeper is not run here: the heavy (g2) leg runs it) — the base's navigateHuman (no verdict): it proves its plant first
   const baseNav = anchored(nav, /      let sheet = null; if \(stuckSource\)[^\n]*\n      if \(sheet\) \{[^\n]*\n/, '', 'b56d-keeper-no-verdict');   // scratch.mjs anchored(): a moved line fails BY NAME
   ok(nav.length > 0 && baseNav.length < nav.length && !/openSignInVerdict/.test(baseNav) && /did not go through/.test(baseNav), 'CONTROL plant: the copy is the keeper\'s navigateHuman with the verdict\'s two lines taken out (what 2.369.412 runs)');
-  ok(!/signIn: sheet/.test(baseNav) && /throw namedError\('nav_failed', why\)/.test(baseNav), 'CONTROL (B-b56d): without the verdict the same open throws nav_failed — the person read «Could not open it» while the browser asked them to sign in (RED for the leg above)');
+  const legOn = (src) => { const a = src.indexOf('HM.openSignInVerdict({ why, stuck: stuckSource(key) })'), b = src.indexOf("the user's ${v.act} did not go through"), c = src.indexOf("throw namedError('nav_failed', why)"); return !!src && a > 0 && a < b && b < c && /if \(sheet\) \{[^\n]*return \{ ok: true, act: v\.act, url: v\.url \|\| null, signIn: sheet/.test(src); };
+  ok(legOn(nav) && !legOn(baseNav) && !/signIn: sheet/.test(baseNav) && /throw namedError\('nav_failed', why\)/.test(baseNav), 'CONTROL (B-b56d, the source text): the leg\'s own predicate holds on the keeper and FAILS on the copy without the verdict, whose text goes on to throw nav_failed — the person read «Could not open it» while the browser asked them to sign in (RED for the leg above)');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -116,8 +116,8 @@ async function watchOver(Dm) {
   w.noteActiveTab(tgt, 'T2');
   ok(JSON.stringify((w.otherSiteFramesFor(tgt) || {}).origins) === '["https://other.example.org"]', 'the tab moved (T2) ⇒ its own frame is said, and only it');
   w.noteActiveTab(tgt, 'T1');
-  ch.browserEvent('Target.targetInfoChanged', { targetInfo: { targetId: 'F1', type: 'iframe', parentFrameId: 'T1', url: 'https://login.example.co.uk/s', title: '', attached: false } }); await sleep(40);
-  ok(JSON.stringify((w.otherSiteFramesFor(tgt) || {}).origins) === '["https://login.example.co.uk","https://deep.example.com"]', 'targetInfoChanged: the frame navigated ⇒ its new origin is said');
+  ch.browserEvent('Target.targetInfoChanged', { targetInfo: { targetId: 'F1', type: 'iframe', parentFrameId: 'T1', url: 'https://login.example.org/s', title: '', attached: false } }); await sleep(40);
+  ok(JSON.stringify((w.otherSiteFramesFor(tgt) || {}).origins) === '["https://login.example.org","https://deep.example.com"]', 'targetInfoChanged: the frame navigated ⇒ its new origin is said');
   ch.browserEvent('Target.targetDestroyed', { targetId: 'F1' }); await sleep(40);
   ok(w.otherSiteFramesFor(tgt) === null, 'targetDestroyed: the frame went ⇒ nothing said (its child F3 is placed by no root any more ⇒ not said either)');
   ok(!ch.calls.some((m) => m.method === 'Target.attachToTarget' && /^F/.test(String(m.params && m.params.targetId))), 'the watch never attaches to a frame target to say it (no session, no call into the frame)');

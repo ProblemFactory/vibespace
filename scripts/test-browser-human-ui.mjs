@@ -492,6 +492,10 @@ else {
   // a display and a runner without one judge the same. (g2) THE DISPLAY ROAD first (the browser's own sheet, the true words, a picture);
   // (g1) THE DRIVER ROAD after it (the form — its law 8 ends by killing this suite's own hub, so it runs last)
   const SITE0 = `http://127.0.0.1:${CP}`;
+  // the road is the profile's RECORD (launch + display session: pictureSourceOf's own facts), never L.x().source — the person's
+  // window keeps the page's picture by design (renderPicture returns before it sets a source when H). Declared HERE, where both
+  // roads — (g2) and (g1) — see it (the round w890up8gp must: (g1) called it out of scope)
+  const recOf = (pid) => `(() => { const b = window.app && window.app._browserProfiles && window.app._browserProfiles.browsers; const r = b ? b[${JSON.stringify(pid)}] : null; return r ? { launch: r.launch || null, ds: r.displaySession && r.displaySession.id ? String(r.displaySession.id) : null, state: r.state || null } : null; })()`;
   console.log('— (g2) the DISPLAY road: «alone-x» started with the hub\'s default (a display here ⇒ the attach road, the X picture)');
   const mkX = await api('POST', '/api/browser/profiles', { label: 'alone-x' });
   const PIDX = mkX.json && mkX.json.profile ? mkX.json.profile.id : null;
@@ -500,9 +504,6 @@ else {
     await AX.ev(`window.app.browseYourself(${JSON.stringify(PIDX)}, { label: 'alone-x' }); true`);
     const liveX = await until(() => AX.h('if (!L) return null; const s = L.state(); return s.mode === "takeover" && s.mine && s.frames >= 1 ? true : null;').catch(() => null), 60000, 200);
     const onAttach = journal.split('\n').some((l) => l.includes(`${PIDX} "alone-x" started on the ATTACH road`));
-    // the road is the profile's RECORD (launch + display session: pictureSourceOf's own facts), never L.x().source — the person's
-    // window keeps the page's picture by design (renderPicture returns before it sets a source when H)
-    const recOf = (pid) => `(() => { const b = window.app && window.app._browserProfiles && window.app._browserProfiles.browsers; const r = b ? b[${JSON.stringify(pid)}] : null; return r ? { launch: r.launch || null, ds: r.displaySession && r.displaySession.id ? String(r.displaySession.id) : null, state: r.state || null } : null; })()`;
     const recX = liveX ? await until(() => AX.ev(recOf(PIDX)).then((r) => (r && r.launch ? r : null)).catch(() => null), 10000, 200) : null;
     if (!liveX) ok(false, 'the person browses "alone-x"');
     else if (!onAttach || !recX || recX.launch !== 'attach' || !recX.ds) skip(`(g2) the display road: this machine started «alone-x» on the driver road (launch ${recX ? recX.launch : 'unknown'}${recX && recX.ds ? '' : ', no display session'}${onAttach ? '' : ', no «started on the ATTACH road» line'}) — no display here; the box with xpra judges it`);
@@ -537,7 +538,7 @@ else {
     await A.ev(`window.app.browseYourself(${JSON.stringify(PID2)}, { label: 'alone' }); true`);
     const liveA = await until(() => A.h('if (!L) return null; const s = L.state(); return s.mode === "takeover" && s.mine && s.frames >= 1 ? true : null;').catch(() => null), 60000, 200);
     const recA = liveA ? await until(() => A.ev(recOf(PID2)).then((r) => (r && r.launch ? r : null)).catch(() => null), 10000, 200) : null;
-    ok(!!liveA && !journal.split('\n').some((l) => l.includes(`${PID2} "alone" started on the ATTACH road`)) && !!recA && recA.launch !== 'attach', `(g1) «alone» runs on the DRIVER road (started headless on purpose; its record's launch ${recA ? recA.launch : '?'}) — the form's road on every machine`, JSON.stringify(srcA));
+    ok(!!liveA && !journal.split('\n').some((l) => l.includes(`${PID2} "alone" started on the ATTACH road`)) && !!recA && recA.launch !== 'attach', `(g1) «alone» runs on the DRIVER road (started headless on purpose; its record's launch ${recA ? recA.launch : '?'}) — the form's road on every machine`, JSON.stringify(recA));
     if (ok(!!liveA, 'the person browses "alone" — its browser launched by their press, no conversation holds it (the watch is the person\'s)')) {
       // the close's rule (c): A RAW PRESS AT A COORDINATE checks the top element at that point FIRST — a counted step that says what
       // stands there; a press whose point another element covers is not made (and the leg goes red by name)

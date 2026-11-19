@@ -550,8 +550,9 @@ try {
         const XS = SITE.replace('127.0.0.1', 'idp.example.com');
         const XO = new URL(XS).origin;
         await run(['open', `${SITE}/xframed?src=${encodeURIComponent(XS + '/xsignin')}`]);
-        await run(['wait', '1500']);
-        const loaded = await run(['eval', "(document.getElementById('got') || {}).textContent || ''"]);
+        // the frame's hello reaching the page, waited for (bounded) — a slow box is never read as «the frame never loaded»
+        const loaded = (await until(async () => { const r = await run(['eval', "(document.getElementById('got') || {}).textContent || ''"]); return /idp\.example\.com/.test(r.out) ? r : null; }, 20000, 300))
+          || await run(['eval', "(document.getElementById('got') || {}).textContent || ''"]);
         ok(/idp\.example\.com/.test(loaded.out), 'B-5f2e: the stand-in ran — the frame from another site LOADED (its hello reached the page)', { out: loaded.out.trim() });
         const heard = w.cdpRecv.filter((x) => x.frame && /\/xsignin/.test(String(x.frame.url || '')));
         console.log('B-5f2e ROUND 2 ' + JSON.stringify(heard.slice(0, 4).map((x) => x.frame)));
