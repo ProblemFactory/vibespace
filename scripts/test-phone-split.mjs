@@ -294,8 +294,8 @@ console.log('⑨ closure F13 on phone-six\'s painter: a title-less window is nam
   ok(icon.threw === null && icon.label === KW, `⑨ …and its full name — the head's accessible name when it folds to the icon — is the kind's words too («${icon.label}»)`, icon);
   const FULL = "    const full = win ? windowWords(win) : t('No window');\n";
   const NAME = "    const name = win ? (headName(win.title) || windowKindWords(win.type)) : t('No window');\n";
-  const fullBare = anchored(MN, FULL, "    const full = win ? (String(win.title || '').split(' — ')[0].trim() || t('Window')) : t('No window');\n", 'F13 full name put back to the bare word');
-  const nameBare = anchored(MN, NAME, "    const name = win ? (headName(win.title) || t('Window')) : t('No window');\n", 'F13 short name put back to the bare word');
+  const fullBare = anchored(MN, FULL, "    const full = win ? (String(win.title || '').split(' — ')[0].trim() || t('Window')) : t('No window');\n", 'F13 full name put back to the bare word');   // stale-pins: kept — the RED control plants the bare word back
+  const nameBare = anchored(MN, NAME, "    const name = win ? (headName(win.title) || t('Window')) : t('No window');\n", 'F13 short name put back to the bare word');   // stale-pins: kept — the RED control plants the bare word back
   const rf = paint(fullBare, false), rfk = paint(fullBare, true);
   ok(rf.threw === null && rf.label === 'Window' && rfk.title === 'Window', `⑨ CONTROL: the full-name line put back to the bare word ⇒ the leg reads Window (its accessible name «${rf.label}», its hover «${rfk.title}»)`, { rf, rfk });
   const rn = paint(nameBare, true);
