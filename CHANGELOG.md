@@ -30,6 +30,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A terminal conversation, or one whose harness reports too little, is a person's to end, unless the key opened it (then --force ends it).
 
 ### Fixed
+- On a paired machine, a key helper named in the project's Claude settings or in your own settings file is now seen at a start, as on this machine.
 - A «file watches» notice still open when VibeSpace restarts now clears itself once watches work again, instead of staying for good.
 - A removed spend ledger, or an older copy put back, no longer resets the count of turns nobody typed in silence: For you says it, and it is counted.
 - An agent filling a date by the ref of one of its parts (Month, Day, Year) is now refused with how to fill the whole field; it used to set nothing and go on.

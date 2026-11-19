@@ -2688,7 +2688,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
         return;
       }
       if (msg.op === 'probe-cli') {
-        machineProbes.cliFacts({}).then(
+        machineProbes.cliFacts({ helper: msg.helper && typeof msg.helper === 'object' ? { cwd: msg.helper.cwd, ownFile: msg.helper.ownFile } : null }).then(   // B-77ed: a start's files
           (facts) => mux.control({ op: 'probe-result', id: msg.id, facts }),
           (e) => mux.control({ op: 'probe-result', id: msg.id, error: e.message }));
         return;

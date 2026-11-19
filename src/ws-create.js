@@ -129,7 +129,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
   // (a stuck mount: the race below frees the START at the bound, never the libuv threadpool thread a hung open holds — named in the kb)
   const readHelperFactOf = async ({ hostId, backend, creds, env, cwd = null, ownFile = null, sink = null }) => {
     const row = creds && creds.keyHelper;
-    if (hostId) return BILLPICK.remoteHelperFact(await hosts.backendStatus(hostId), backend);
+    if (hostId) return BILLPICK.remoteHelperFact(await hosts.backendStatus(hostId, { helper: { cwd, ownFile } }), backend);   // B-77ed: the start's files on ITS machine
     const file = BILLPICK.settingsFileOf(row, { creds, env, home: (env && env.HOME) || os.homedir() });
     if (!file) return null;
     // cure 2 (主开发 11:18Z): every file the CLI reads a helper from on this machine — its config dir's, the project's two, the person's own

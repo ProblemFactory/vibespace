@@ -1356,18 +1356,18 @@ class HostManager {
   }
 
   /** Backend status on a host (mirrors local /api/backend-status shape). */
-  async backendStatus(id) {
+  async backendStatus(id, { helper = null } = {}) {   // B-77ed: `helper` = a start's { cwd, ownFile } — its files read by the one rule
     const h = this.get(id);
     // R1: op-first (shared machine-probes via probe-cli); ssh script fallback.
     try {
       const dm = await this.deviceBounded(id, 6000);
-      const r = await dm.probeCli();
+      const r = await dm.probeCli(helper);
       const f = r?.facts;
-      if (f?.claude) {
+      if (f?.claude && (!helper || typeof f.claude.startHelper === 'string')) {   // B-77ed: an agent older than the start's answer falls to the shell rung below
         return {
           claude: { installed: !!f.claude.installed, ...(f.claude.version ? { version: f.claude.version } : {}),
             loggedIn: !!f.claude.loggedIn, ...(f.claude.loginMethod ? { loginMethod: f.claude.loginMethod } : {}),
-            ...(f.claude.keyHelper ? { keyHelper: true } : {}), ...(f.claude.keyHelperUnread === true ? { keyHelperUnread: true } : {}) },
+            ...(f.claude.keyHelper ? { keyHelper: true } : {}), ...(f.claude.keyHelperUnread === true ? { keyHelperUnread: true } : {}), ...(typeof f.claude.startHelper === 'string' ? { startHelper: f.claude.startHelper } : {}) },
           codex: { installed: !!f.codex.installed, ...(f.codex.version ? { version: f.codex.version } : {}), loggedIn: !!f.codex.loggedIn },
         };
       }
@@ -1391,7 +1391,7 @@ class HostManager {
       // merged settings carry apiKeyHelper, valid creds or not). The elif
       // ladder above hides the helper the moment OAuth creds exist, so the
       // dialog said "logged in" while every session billed via the helper.
-      + require('./helper-fact.js').SSH_HELPER_RUNG   // B-bc9f: the third state on this road too («unread»), src/helper-fact.js
+      + (helper ? require('./helper-fact.js').sshHelperRungFor(helper) : require('./helper-fact.js').SSH_HELPER_RUNG)   // B-bc9f: the third state on this road too («unread»); B-77ed: a start's files
       + '[ -f "$HOME/.codex/auth.json" ] && echo "codex-login|yes" || echo "codex-login|no"';
     const out = await this._hostShell(h, probe, { timeoutMs: 10000 });
     const st = { claude: {}, codex: {} };
@@ -1402,6 +1402,7 @@ class HostManager {
       else if (k === 'claude-helper') { st.claude.keyHelper = v === 'yes'; if (v === 'unread') st.claude.keyHelperUnread = true; }
       else if (k === 'codex-login') st.codex.loggedIn = v === 'yes';
     }
+    if (helper && !out.split('\n').some((l) => l.startsWith('claude-helper|'))) st.claude.keyHelperUnread = true;   // B-77ed: the start's rung always answers — no line (a cut answer) cannot be read
     return st;
   }
 

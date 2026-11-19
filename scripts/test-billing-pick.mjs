@@ -541,17 +541,17 @@ function withLadder(src, tag, { same = false } = {}) {
  *  answers (`answer` false: the device link and the ssh probe both fail) — or the ssh probe answers `sshOut` */
 function hostsStub({ helper = true, answer = true, sshOut = null, hang = false, owner = null, keeper = null } = {}) {
   const me = {
-    _onFact: () => { }, asked: [],
+    _onFact: () => { }, asked: [], helpers: [],
     get: (id) => (id === 'h-2' ? { id: 'h-2', name: 'build-box', host: 'build-box.lan', transport: 'ssh' } : null),
     deviceBounded: async () => {
       if (hang) return new Promise(() => { });   // a device that never answers
       if (!answer || sshOut !== null) throw new Error('device link lost');
-      return { probeCli: async () => ({ facts: { claude: { installed: true, version: '2.1.322', loggedIn: true, loginMethod: 'oauth', ...(helper ? { keyHelper: true } : {}) }, codex: { installed: false, loggedIn: false } } }) };
+      return { probeCli: async (h) => ({ facts: { claude: { installed: true, version: '2.1.322', loggedIn: true, loginMethod: 'oauth', ...(helper ? { keyHelper: true } : {}), ...(h ? { startHelper: helper ? 'named' : 'none' } : {}) }, codex: { installed: false, loggedIn: false } } }) };   // (an agent of B-77ed: asked about a start, it answers it)
     },
     _hostShell: async (h, script) => { if (String(script).includes('__VS_DIR_OK__')) return '__VS_DIR_OK__'; if (sshOut !== null) return sshOut; throw new Error('ssh: no route to host'); },
     homeDir: async () => '/home/u', conversationOwner: () => owner, findKeeperFor: async () => keeper, accountsStatus: async () => ({}), invalidateDiscovery: () => { },
   };
-  me.backendStatus = async (id) => { me.asked.push(id); try { return await HostManager.prototype.backendStatus.call(me, id); } finally { me._onFact(); } };
+  me.backendStatus = async (id, opts) => { me.asked.push(id); me.helpers.push(opts && opts.helper); try { return await HostManager.prototype.backendStatus.call(me, id, opts); } finally { me._onFact(); } };
   return new Proxy(me, { get: (t, k) => (k in t ? t[k] : (typeof k === 'string' && k !== 'then' && /^[a-z]/.test(k) ? async () => null : undefined)) });
 }
 const remoteCreate = withLadder(SRC, 'remote-road', { same: true }); // the real module behind the ssh ladder, on purpose (B-0d3e)
@@ -736,6 +736,115 @@ console.log('— ⑨ THE THIRD STATE ON A PAIRED MACHINE (B-bc9f): one rule for 
   const PROBES_ST = "    return st.isFile() && st.size <= SETTINGS_READ_MAX ? { text: fs.readFileSync(file, 'utf-8') } : { text: null };";
   ok(PROBES_SRC.split(PROBES_ST).length === 2 && !PROBES_SRC.includes('fs.openSync('), 'the probe stats the file before it reads it (a FIFO is never opened — a blocking open would hold the agent; the FIFO leg above would never end)');
   put(JSON.stringify({ apiKeyHelper: '/usr/local/bin/key-helper' }));
+}
+
+console.log('— ⑨b B-77ed: a paired machine reads the START\'s files — the CLI\'s config dirs, the project\'s two, the person\'s own — by the one rule');
+{
+  const put = (how) => {
+    fs.rmSync(SETTINGS, { recursive: true, force: true });
+    if (how === 'missing') return;
+    if (how === 'folder') return void fs.mkdirSync(SETTINGS);
+    if (how === 'fifo') return void execFileSync('mkfifo', [SETTINGS]);
+    fs.writeFileSync(SETTINGS, how);
+  };
+  const HF = require(path.join(REPO, 'src/helper-fact.js')), PROBES = require(path.join(REPO, 'src/machine-probes.js'));
+  const PROBES_SRC = read('src/machine-probes.js'), BP_SRC = read('src/billing-pick.js'), HOSTS_SRC = read('src/hosts.js');
+  const BOX = { id: 'h-2', name: 'build-box', host: 'build-box.lan', transport: 'ssh' };
+  const runRung = (rung, env = {}) => execFileSync('sh', ['-c', `${rung}true`], { env: { HOME, PATH: '/usr/bin:/bin', ...env }, encoding: 'utf8', timeout: 10000 });
+  // a paired machine whose agent answers the start (the REAL probe), or an agent too old to (its facts carry no startHelper): then
+  // the shell rung over the same start decides
+  const askDevice = async (start, { probes = PROBES, HM = HostManager, bp = BP, old = false, env = {} } = {}) => bp.remoteHelperFact(await HM.prototype.backendStatus.call({ get: () => BOX,
+    deviceBounded: async () => ({ probeCli: async (h) => { const facts = await probes.cliFacts({ claudeCmd: '/nonexistent-claude', codexCmd: '/nonexistent-codex', helper: old ? null : h }); return { facts }; } }),
+    _hostShell: async (h, s) => `claude|yes|2.1.322\n${runRung(HF.sshHelperRungFor(start), env)}codex|no|\ncodex-login|no` }, 'h-2', { helper: start }), 'claude');
+  const askShell = async (start, env = {}) => {
+    let script = '';
+    const st = await HostManager.prototype.backendStatus.call({ get: () => BOX, deviceBounded: async () => { throw new Error('device link lost'); },
+      _hostShell: async (h, s) => { script = s; return `claude|yes|2.1.322\n${runRung(HF.sshHelperRungFor(start), env)}codex|no|\ncodex-login|no`; } }, 'h-2', { helper: start });
+    return { fact: BP.remoteHelperFact(st, 'claude'), carried: script.includes(HF.sshHelperRungFor(start)) };
+  };
+  const byHub = async (extraArgs = FILE) => { const x = await drive(wsCreate, { accountId: 'sub-a1', extraArgs }); return saidKind(x, 'billing') ? true : saidKind(x, 'billingUnread') ? null : false; };
+  put(JSON.stringify({ theme: 'dark' }));   // the CLI's own settings file names none: only the start's other files decide
+  const PROJ = path.join(CWD, '.claude'), projFile = path.join(PROJ, 'settings.json'), localFile = path.join(PROJ, 'settings.local.json'), ownRel = 'own-77ed.json', ownFile = path.join(CWD, ownRel);
+  fs.mkdirSync(PROJ, { recursive: true });
+  const clear = () => { for (const f of [projFile, localFile, ownFile]) fs.rmSync(f, { force: true }); };
+  const NAMES = JSON.stringify({ apiKeyHelper: '/usr/local/bin/project-helper' });
+  const CASES = [
+    ['the project file names a helper', () => fs.writeFileSync(projFile, NAMES), FILE, true],
+    ['the project\'s settings.local.json names one', () => fs.writeFileSync(localFile, NAMES), FILE, true],
+    ['the person\'s own file (relative to the cwd) names one', () => fs.writeFileSync(ownFile, NAMES), ['--settings', ownRel], true],
+    ['the project file is not JSON, with an unquoted key', () => fs.writeFileSync(projFile, '{ apiKeyHelper: "/x" }'), FILE, null],
+    ['the project file names none', () => fs.writeFileSync(projFile, JSON.stringify({ theme: 'light' })), FILE, false],
+  ];
+  for (const [what, plant, args, want] of CASES) {
+    clear(); plant();
+    const start = { cwd: CWD, ownFile: args[1] };
+    const hub = await byHub(args), dev = await askDevice(start), sh = await askShell(start), old = await askDevice(start, { old: true });
+    ok(hub === want && dev === want && sh.carried && sh.fact === want && old === want, `${what}: this machine's create, a paired machine's probe, its ssh rung — and an agent too old to answer the start (the rung decides) — all read ${want}`, { hub, dev, ssh: sh.fact, old });
+  }
+  clear();
+  // the paths placed on THAT machine: a relative cwd is its home's; a path it cannot place is «cannot be read», never «none»
+  const relProj = path.join(HOME, 'rel-77ed', '.claude'); fs.mkdirSync(relProj, { recursive: true }); fs.writeFileSync(path.join(relProj, 'settings.json'), NAMES);
+  ok((await askDevice({ cwd: 'rel-77ed' })) === true && (await askShell({ cwd: 'rel-77ed' })).fact === true, 'a relative cwd is placed under that machine\'s home (as a remote cd places it): its project\'s helper is seen, by the probe and the rung');
+  fs.rmSync(path.join(HOME, 'rel-77ed'), { recursive: true, force: true });
+  ok((await askDevice({ cwd: '/a\nb' })) === null && (await askShell({ cwd: '/a\nb' })).fact === null, 'a cwd that cannot be placed (a newline): «cannot be read» — billing wins, never «none»');
+  // THE CONFIG DIRS: a CLAUDE_CONFIG_DIR the CLI reads (the probe's own env; the rung's shell) names a helper the home file does not
+  const CCD = scratchDir('bpick-77ed-ccd'); fs.writeFileSync(path.join(CCD, 'settings.json'), NAMES);
+  const ccd0 = process.env.CLAUDE_CONFIG_DIR; process.env.CLAUDE_CONFIG_DIR = CCD;
+  let devC; try { devC = await askDevice({ cwd: CWD }); } finally { if (ccd0 === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = ccd0; }
+  const shC = await askShell({ cwd: CWD }, { CLAUDE_CONFIG_DIR: CCD });
+  ok(devC === true && shC.fact === true, 'a CLAUDE_CONFIG_DIR whose settings name a helper: the probe (its env) and the rung (its shell) both read named', { devC, shC: shC.fact });
+  // ITS SECOND READ: the LOGIN shell's config dir (only in a profile — the CLI starts under `sh -lc`), a login shell that fails,
+  // a FIFO in the project, a stalled read at the bound, a `~` cwd, a cut answer
+  const PROF = path.join(HOME, '.profile'), LCCD = scratchDir('bpick-77ed-lccd'); fs.writeFileSync(path.join(LCCD, 'settings.json'), NAMES);
+  fs.writeFileSync(PROF, `export CLAUDE_CONFIG_DIR=${LCCD}\n`); PROBES.forgetLoginDir();
+  const devL = await askDevice({ cwd: CWD }), shL = await askShell({ cwd: CWD });
+  ok(devL === true && shL.fact === true, 'a CLAUDE_CONFIG_DIR set only in the login profile (the CLI starts under sh -lc): the probe and the rung both read named', { devL, shL: shL.fact });
+  const MLOGIN = M.load('src/machine-probes.js', anchored(PROBES_SRC, ", login || ''])", '])', 'probe-no-login-dir'), 'probe-no-login-dir'); MLOGIN.forgetLoginDir();
+  ok((await askDevice({ cwd: CWD }, { probes: MLOGIN })) === false, 'RED CONTROL (the probe without the login shell\'s dir): «none» while the CLI would read the helper');
+  const HNOLOGIN = M.load('src/helper-fact.js', anchored(read('src/helper-fact.js'), " + ccdWord('$vs_ccd')", '', 'rung-no-login-dir'), 'rung-no-login-dir');
+  ok(BP.remoteHelperFact({ claude: { installed: true, ...(runRung(HNOLOGIN.sshHelperRungFor({ cwd: CWD })).includes('claude-helper|yes') ? { keyHelper: true } : {}) } }, 'claude') === false, 'RED CONTROL (the rung without the login shell\'s dir): «none» likewise');
+  fs.writeFileSync(PROF, 'exit 3\n'); PROBES.forgetLoginDir();
+  ok((await askDevice({ cwd: CWD })) === null && (await askShell({ cwd: CWD })).fact === null, 'a login shell that fails: «cannot be read» on both roads, never «none»');
+  fs.rmSync(PROF, { force: true }); PROBES.forgetLoginDir();
+  fs.rmSync(projFile, { force: true }); execFileSync('mkfifo', [projFile]);
+  ok((await byHub()) === null && (await askDevice({ cwd: CWD, ownFile: FILE[1] })) === null && (await askShell({ cwd: CWD, ownFile: FILE[1] })).fact === null, 'a FIFO where the project file goes: «cannot be read» on all three roads (nothing waits on it)');
+  fs.rmSync(projFile, { force: true });
+  // a stuck mount: each read is held (and let go after the legs — a held read stays the ONE read in flight for its file, so the
+  // starts after it would only join it)
+  const stalls = [], stuck = () => new Promise((r) => stalls.push(r));
+  const firstStuck = await PROBES.startHelperFact({ cwd: CWD }, { readOff: stuck, boundMs: 60 });
+  for (let i = 0; i < 100 && !stalls.length; i++) await new Promise((r) => setTimeout(r, 20));   // (the bound may answer before the login shell does)
+  const readsHeld = stalls.length;
+  ok(firstStuck === 'unread' && readsHeld >= 3, 'a read that never ends (a stuck mount): the start answers «cannot be read» at its bound', { firstStuck, readsHeld });
+  const secondStuck = await PROBES.startHelperFact({ cwd: CWD }, { readOff: stuck, boundMs: 60 });
+  ok(secondStuck === 'unread' && stalls.length === readsHeld, 'a second start while those reads hang JOINS them: no new read of a file already in flight (one held thread per file, never one per start)', { secondStuck, reads: stalls.length, readsHeld });
+  for (const r of stalls) r({ missing: true });
+  await new Promise((r) => setImmediate(r));   // the held reads end: the next start reads afresh
+  const tilde = path.join(HOME, 'tilde-77ed', '.claude'); fs.mkdirSync(tilde, { recursive: true }); fs.writeFileSync(path.join(tilde, 'settings.json'), NAMES);
+  ok((await askDevice({ cwd: '~/tilde-77ed' })) === true && (await askShell({ cwd: '~/tilde-77ed' })).fact === true, 'a `~/…` cwd is placed under that machine\'s home on both roads');
+  fs.rmSync(path.join(HOME, 'tilde-77ed'), { recursive: true, force: true });
+  const cut = BP.remoteHelperFact(await HostManager.prototype.backendStatus.call({ get: () => BOX, deviceBounded: async () => { throw new Error('device link lost'); }, _hostShell: async () => 'claude|yes|2.1.322\n' }, 'h-2', { helper: { cwd: CWD } }), 'claude');
+  ok(cut === null, 'a start\'s answer cut short (no claude-helper line — a dial run that timed out): «cannot be read», never «none»', cut);
+  // THE WIRING: the client sends the start with its ask; the agent hands it to the probe
+  const { DeviceManager } = require(path.join(REPO, 'src/agentd/client.js'));
+  const dmS = Object.create(DeviceManager.prototype); let sentOp = null; dmS._request = (pl) => { sentOp = pl; return Promise.resolve({}); };
+  await dmS.probeCli({ cwd: '/home/u/proj', ownFile: 'own.json' });
+  ok(sentOp && sentOp.op === 'probe-cli' && sentOp.helper && sentOp.helper.cwd === '/home/u/proj' && sentOp.helper.ownFile === 'own.json', 'the client\'s probe-cli carries the start (its cwd and own file)', sentOp);
+  ok(read('src/agentd/agentd.js').includes("machineProbes.cliFacts({ helper: msg.helper && typeof msg.helper === 'object' ? { cwd: msg.helper.cwd, ownFile: msg.helper.ownFile } : null })"), 'the agent hands the op\'s start to the probe');
+  const hs = hostsStub({ helper: false }); fs.writeFileSync(projFile, NAMES); await makeCreate(remoteCreate, { hosts: hs }).create(R({ accountId: 'sub-a1', extraArgs: FILE }));
+  ok(hs.helpers.length === 1 && hs.helpers[0] && hs.helpers[0].cwd === '/home/u/proj' && hs.helpers[0].ownFile === FILE[1], 'a remote create asks its machine about THIS start: the cwd and the person\'s own file ride the backend-status ask', hs.helpers);
+  // RED CONTROLS (anchored, each proving its plant)
+  fs.writeFileSync(projFile, NAMES);
+  const homeOnly = M.load('src/machine-probes.js', anchored(PROBES_SRC, ".concat(base ? [path.join(base, '.claude', 'settings.json'), path.join(base, '.claude', 'settings.local.json')] : [], own ? [own] : [])", '', 'probe-dirs-only'), 'probe-dirs-only');
+  ok((await askDevice({ cwd: CWD, ownFile: FILE[1] }, { probes: homeOnly })) === false, 'RED CONTROL (the probe reading the config dirs only, as before B-77ed): the project\'s helper is missed — «none» while this machine says named');
+  const noStart = M.load('src/billing-pick.js', anchored(BP_SRC, "  if (typeof r.startHelper === 'string') return r.startHelper === 'named' ? true : r.startHelper === 'none' ? false : null;", '', 'start-fact-unread'), 'start-fact-unread');
+  ok((await askDevice({ cwd: CWD, ownFile: FILE[1] }, { bp: noStart })) === false, 'RED CONTROL (remoteHelperFact without the start\'s fact): the same «none»');
+  const oldReturns = M.load('src/hosts.js', anchored(HOSTS_SRC, "      if (f?.claude && (!helper || typeof f.claude.startHelper === 'string')) {", '      if (f?.claude) {', 'old-agent-answers'), 'old-agent-answers'); // stale-pins: kept — the control plants the device road as B-bc9f left it
+  ok((await askDevice({ cwd: CWD, ownFile: FILE[1] }, { HM: oldReturns.HostManager, old: true })) === false, 'RED CONTROL (an old agent\'s home-only answer taken as the start\'s): the project\'s helper missed — it failed open');
+  const noAsk = withLadder(anchored(SRC, 'await hosts.backendStatus(hostId, { helper: { cwd, ownFile } })', 'await hosts.backendStatus(hostId)', 'create-asks-no-files'), 'create-asks-no-files'); // stale-pins: kept — the control plants the create as B-bc9f left it
+  const hs2 = hostsStub({ helper: false }); await makeCreate(noAsk, { hosts: hs2 }).create(R({ accountId: 'sub-a1', extraArgs: FILE }));
+  ok(hs2.helpers.length === 1 && !hs2.helpers[0], 'RED CONTROL (the create asking without the start\'s files): its machine is never told the cwd or the person\'s file');
+  clear(); put(JSON.stringify({ apiKeyHelper: '/usr/local/bin/key-helper' }));
 }
 
 console.log('— ⑥ RED CONTROLS');

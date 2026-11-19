@@ -23,12 +23,12 @@ const path = require('path');
 const { execFile } = require('child_process');
 const crypto = require('crypto'); // lane cli-self-measure: the CLI binary's sha256 (cliBinary)
 const { cliVersionOf } = require('./cli-caps.js'); // PURE: the one version spelling the long-lived-token gate reads
-const { helperFactOfText, SETTINGS_READ_MAX } = require('./helper-fact.js'); // PURE: a settings file's key-helper fact — the hub's own rule (B-bc9f)
+const { helperFactOfText, SETTINGS_READ_MAX, combinedFact } = require('./helper-fact.js'); // PURE: a settings file's key-helper fact — the hub's own rule (B-bc9f)
 
 // windowsHide (lane win-run-hide-console): `claude --version` on a Windows device is a console program the console-less
 // daemon starts — without it, a console window per probe
 const exec = (cmd, args, timeout = 5000) => new Promise((resolve) => {
-  try { execFile(cmd, args, { encoding: 'utf-8', timeout, windowsHide: true }, (err, stdout) => resolve(err ? null : String(stdout || ''))); }
+  try { const c = execFile(cmd, args, { encoding: 'utf-8', timeout, windowsHide: true }, (err, stdout) => resolve(err ? null : String(stdout || ''))); try { if (c.stdin) { c.stdin.on('error', () => { }); c.stdin.end(); } } catch { } }   // stdin closed (listened: a child gone first is no EPIPE): nothing a probe runs waits on it (B-77ed: a login profile reading stdin)
   catch { resolve(null); }
 });
 
@@ -57,7 +57,7 @@ function readJson(p) { try { return JSON.parse(fs.readFileSync(p, 'utf-8')); } c
 const HELPER_ROW = { setting: 'apiKeyHelper', file: 'settings.json' };
 /** ~/.claude/settings.json, bounded as this machine's start bounds its read (src/ws-create.js readOneFact): a regular file of at
  *  most SETTINGS_READ_MAX bytes — else it cannot be read (it is stat'd first: a FIFO or a folder is never opened); no such file =
- *  missing. (That start also reads CLAUDE_CONFIG_DIR's file, the project's two and the person's own; a paired machine's are not) */
+ *  missing. (A start's other files — CLAUDE_CONFIG_DIR's, the project's two, the person's own — are startHelperFact's, B-77ed) */
 function settingsRead(file) {
   try {
     const st = fs.statSync(file);
@@ -65,6 +65,74 @@ function settingsRead(file) {
   } catch (e) { return e && e.code === 'ENOENT' ? { missing: true } : { text: null }; }
 }
 const helperFact = () => helperFactOfText(settingsRead(path.join(os.homedir(), '.claude', HELPER_ROW.file)), HELPER_ROW);
+/** B-77ed: a START's settings file, read OFF the agent's loop (the hub hands the paths: a conversation's folder may sit on a slow
+ *  mount) — opened non-blocking (a FIFO holds nothing), a regular file of at most SETTINGS_READ_MAX bytes, ENOENT = missing */
+async function settingsReadOff(file) {
+  let fh = null;
+  try {
+    fh = await fs.promises.open(file, fs.constants.O_RDONLY | (fs.constants.O_NONBLOCK || 0));
+    const st = await fh.stat();
+    return st.isFile() && st.size <= SETTINGS_READ_MAX ? { text: await fh.readFile('utf8') } : { text: null };
+  } catch (e) { return e && e.code === 'ENOENT' ? { missing: true } : { text: null }; } finally { try { if (fh) await fh.close(); } catch { } }
+}
+const START_FACT_MS = 5000;   // the whole start answer: past it, «cannot be read» (billing wins) — the hub's own bound is 8 s
+let loginDirMemo = null;      // the login shell's CLAUDE_CONFIG_DIR (the CLI on this machine starts under `sh -lc`), asked at most once a minute
+async function loginConfigDir() {
+  if (process.platform === 'win32') return '';
+  if (loginDirMemo && Date.now() - loginDirMemo.at < 60000) return loginDirMemo.dir;
+  const out = await exec('sh', ['-lc', 'printf "\\n__VS_CCD__%s\\n" "$CLAUDE_CONFIG_DIR"'], 3000);
+  const i = out == null ? -1 : out.lastIndexOf('\n__VS_CCD__');
+  const dir = i < 0 ? null : out.slice(i + 11).split('\n')[0].trim();
+  loginDirMemo = { at: Date.now(), dir };   // an unanswered login shell (null ⇒ cannot be read) is remembered too: no 3 s a start
+  return dir;
+}
+/** a hub-handed path placed on THIS machine (its own path rules: `~`, a relative path from `base`, a Windows drive) — null when it
+ *  cannot be placed (then that file is «cannot be read», never «none») */
+function placeOf(p, base) {
+  if (typeof p !== 'string' || !p.trim() || /[\0\n]/.test(p)) return null;
+  let s = p.trim();
+  if (s === '~' || s.startsWith('~/') || s.startsWith('~\\')) s = path.join(os.homedir(), s.slice(1));
+  if (path.isAbsolute(s)) return path.normalize(s);
+  return base ? path.join(base, s) : null;
+}
+/** ONE READ IN FLIGHT PER FILE across starts (as the hub's readOneFactOnce): a start that finds a read of the same file pending
+ *  joins it — a hung open on a stuck mount holds ONE libuv thread, never one more per start */
+const startReads = new Map();
+const readOffOnce = (file, readOff = settingsReadOff) => {
+  const had = startReads.get(file);
+  if (had) return had;
+  const p = readOff(file).finally(() => startReads.delete(file));
+  startReads.set(file, p);
+  return p;
+};
+/** B-77ed: a START's fact on this machine — the files the hub's own start reads, by the one rule, over the UNION of the config
+ *  dirs the CLI may use (~/.claude, this process's CLAUDE_CONFIG_DIR, the login shell's — a non-absolute one cannot be placed),
+ *  the start's project files and the person's own (the hub hands the cwd — a relative one is the home's, as a remote `cd`
+ *  places it — and the file); a file that cannot be placed or read counts «cannot be read» while the others are still read
+ *  (a helper named anywhere wins) → 'named' | 'none' | 'unread'. Off the loop, bounded by START_FACT_MS; only the verdict
+ *  word leaves this machine. (`o` = a suite's seams: the reader, the bound) */
+async function startHelperFact({ cwd = null, ownFile = null } = {}, o = {}) {
+  const given = (v) => typeof v === 'string' && v.trim() !== '';
+  const readOff = o.readOff || settingsReadOff, bound = Number(o.boundMs) > 0 ? Number(o.boundMs) : START_FACT_MS;
+  const work = (async () => {
+    const base = given(cwd) ? placeOf(cwd, os.homedir()) : null, own = given(ownFile) ? placeOf(ownFile, base) : null;
+    const unplaced = (given(cwd) && !base) || (given(ownFile) && !own);
+    const login = await loginConfigDir();
+    const dirs = [path.join(os.homedir(), '.claude')], dirsUnread = login === null;
+    let badDir = false;
+    for (const d of [String(process.env.CLAUDE_CONFIG_DIR || '').trim(), login || '']) { if (!d) continue; if (path.isAbsolute(d)) dirs.push(path.normalize(d)); else badDir = true; }
+    const files = [...new Set(dirs)].map((d) => path.join(d, HELPER_ROW.file)).concat(base ? [path.join(base, '.claude', 'settings.json'), path.join(base, '.claude', 'settings.local.json')] : [], own ? [own] : []);
+    const facts = await Promise.all(files.map(async (p) => helperFactOfText(await readOffOnce(p, readOff), HELPER_ROW)));
+    if (unplaced || dirsUnread || badDir) facts.push(null);   // what could not be placed or asked: cannot be read
+    const f = combinedFact(facts);
+    return f === true ? 'named' : f === null ? 'unread' : 'none';
+  })();
+  let timer = null;
+  const late = new Promise((r) => { timer = setTimeout(() => r('unread'), bound); if (timer.unref) timer.unref(); });
+  try { return await Promise.race([work.catch(() => 'unread'), late]); } finally { clearTimeout(timer); }
+}
+/** (a suite's seam: forget the login shell's answer) */
+const forgetLoginDir = () => { loginDirMemo = null; };
 function statMtime(p) { try { return Math.floor(fs.statSync(p).mtimeMs / 1000); } catch { return null; } }
 
 function which(cmd) {
@@ -127,8 +195,9 @@ function finishLoginLadder(r) {
  * @param {object} [o] {claudeCmd, codexCmd} resolved command overrides (the
  *   server passes its boot-resolved absolute paths; the daemon resolves PATH).
  */
-async function cliFacts({ claudeCmd = 'claude', codexCmd = 'codex' } = {}) {
+async function cliFacts({ claudeCmd = 'claude', codexCmd = 'codex', helper = null } = {}) {
   const out = { platform: process.platform, claude: {}, codex: {} };
+  const startP = helper && typeof helper === 'object' ? startHelperFact(helper) : null;   // B-77ed: begun at once, beside the --version runs (the hub's bound is 8 s)
   for (const [key, cmd] of [['claude', claudeCmd], ['codex', codexCmd]]) {
     const p = which(cmd);
     const b = out[key];
@@ -144,6 +213,7 @@ async function cliFacts({ claudeCmd = 'claude', codexCmd = 'codex' } = {}) {
   const login = await claudeLoginFacts();
   Object.assign(out.claude, login);
   if (out.claude.machineLoginState === null) delete out.claude.machineLoginState;
+  if (startP) out.claude.startHelper = await startP;   // B-77ed: asked for a start (its cwd and own file)
   out.codex.loggedIn = fs.existsSync(path.join(os.homedir(), '.codex', 'auth.json'));
   return out;
 }
@@ -247,4 +317,4 @@ async function cliBinaryIdentity(cmd) {
   try { const real = await fs.promises.realpath(p); const st = await fs.promises.stat(real); return { path: real, cmd: p, size: st.size, identity: `${st.dev}:${st.ino}:${st.size}:${Math.round(st.mtimeMs)}:${Math.round(st.ctimeMs)}` }; } catch { return null; }
 }
 
-module.exports = { cliFacts, credsFacts, classifyInstall, which, cliVersion, cliBinary, cliBinaryIdentity, realCliRefusal, sayNotRun };
+module.exports = { cliFacts, credsFacts, classifyInstall, which, cliVersion, cliBinary, cliBinaryIdentity, realCliRefusal, sayNotRun, startHelperFact, forgetLoginDir };
