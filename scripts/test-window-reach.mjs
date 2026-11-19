@@ -286,8 +286,14 @@ console.log('§6 THE PIXEL ROAD — plan, visibility, points (fixtures from the 
   // fb-bc200800e0 (lane bl-windows): a verb with no point of its own on a display a viewer sized smaller than the window ⇒ the click's reason
   const k2 = R.pointOnDisplay({ x: 5, y: 5 }, { rootW: 2, rootH: 2 }), kOn = R.pointOnDisplay({ x: 40, y: 40 }, { rootW: 1920, rootH: 1200 }), kNeg = R.pointOnDisplay({ x: -3, y: 4 }, { rootW: 1920, rootH: 1200 });
   const kW = R.pointOnDisplay({ x: 5, y: 5 }, { rootW: 2, rootH: 2 }, { act: 'the wheel is' });
-  ok(!k2.ok && k2.code === 'outside_window' && /the display is 2x2 since a viewer attached — smaller than the window: keys are not sent/.test(k2.why) && /the wheel is not sent/.test(kW.why) && kOn.ok && !kNeg.ok && R.pointOnDisplay({ x: 5, y: 5 }).ok && R.pointOnDisplay(null, { rootW: 2, rootH: 2 }).ok,
-    'pointOnDisplay: a point off a 2x2 display (or left of / above it) ⇒ outside_window (the click\'s own «since a viewer attached», what is not sent named); on the display, no geometry, no point ⇒ no claim', k2);
+  ok(!k2.ok && k2.code === 'outside_window' && /the display is 2x2 since a viewer attached — smaller than the window: keys are not sent/.test(k2.why) && /the wheel is not sent/.test(kW.why) && kOn.ok && kNeg.ok && R.pointOnDisplay({ x: 5, y: 5 }).ok && R.pointOnDisplay(null, { rootW: 2, rootH: 2 }).ok,
+    'pointOnDisplay: a point at or past a 2x2 display\'s far edge ⇒ outside_window (the click\'s own «since a viewer attached», what is not sent named); on the display, LEFT OF / ABOVE it (a window dragged partly off the left: on screen — the click\'s rule), no geometry, no point ⇒ no claim', k2);
+  // the read of the cure: the far edge EXACTLY (x == width refused, width - 1 on it), above it no claim, and the viewer blamed only when the
+  // display is SMALLER than the window (a window moved partly off a display that holds it keeps its keys and its wheel)
+  const D = { rootW: 1920, rootH: 1200 }, WIN = { w: 1000, h: 800 };
+  const edges = [R.pointOnDisplay({ x: 4, y: -3 }, D).ok, R.pointOnDisplay({ x: 1920, y: 4 }, D).ok, R.pointOnDisplay({ x: 4, y: 1200 }, D).ok, R.pointOnDisplay({ x: 1919, y: 1199 }, D).ok,
+    R.pointOnDisplay({ x: 1950, y: 20 }, D, { win: WIN }).ok, R.pointOnDisplay({ x: 20, y: 20 }, { rootW: 2, rootH: 2 }, { win: { w: 800, h: 600 } }).ok, R.pointOnDisplay({ x: 20, y: 1300 }, { rootW: 1920, rootH: 1200 }, { win: { w: 400, h: 1500 } }).ok];
+  ok(JSON.stringify(edges) === '[true,false,false,true,true,false,false]', 'pointOnDisplay: above the display no claim; x = width and y = height refused, (width-1, height-1) on it; with the window\'s size, a point past the edge of a display that HOLDS the window makes no claim (moved off, no viewer to blame), a display smaller than the window on that axis is refused', edges);
   const popup = R.pixelPlan([{ ...chrome[0] }, { id: 7, cls: 'Google-chrome', x: 1900, y: 2200, w: 400, h: 300, mapped: true }, { id: 8, cls: 'Google-chrome', x: 0, y: 0, w: 15, h: 15, mapped: true }]);
   ok(popup.origin.x === 20 && popup.w === 2280 && popup.h === 2480 && popup.members.some((m) => m.id === 7), 'a popup below-right extends the image; the ORIGIN stays the main window\'s top-left (a popup never shifts the coordinates)');
   ok(!R.pixelPlan([]).ok && R.visibilityVerdict({ perWindow: true, plan: R.pixelPlan([]) }).code === 'window_not_visible', 'no window yet ⇒ nothing to read or act on in pixels');
@@ -574,6 +580,8 @@ console.log('lane e2c: launchModeVerdict beside the mode set');
   const sessions = new Map([['w-K', { agentToken: 'vsst_K', claudeSessionId: CIDK, backendSessionId: CIDK, backend: 'claude', name: 'signer', mode: 'chat' }]]);
   const acts = [];
   let geo = { ok: true, w: 2, h: 2 };
+  const WIN0 = [{ id: 9, title: 'Sign-in', cls: 'app', x: 0, y: 0, w: 10, h: 10, mapped: true }];
+  let wins = WIN0;
   const snap = { apps: [], nodes: [{ ref: '@e1', pid: 4343, path: [0], role: 'entry', name: 'Email', actions: [], editable: false, states: ['editable', 'focusable'], bounds: { x: 1, y: 1, w: 8, h: 4 } }], census: { nodes: 1 }, unreadable: [], truncated: false, budget: 400, callTimeoutMs: 1, ms: 1, nodesPerSec: 1 };   // editable by STATE, no EditableText (a web page's field): focused through the tree, then KEYS
   const wt = { ...WT,
     probeInputBackends: async () => ({ rows: [], injection: { backend: 'xtest' }, ours: true }),
@@ -587,7 +595,7 @@ console.log('lane e2c: launchModeVerdict beside the mode set');
     injectScroll: async () => { acts.push('scroll'); return { ok: true, did: { verb: 'scroll', direction: 'down', by: 3, backend: 'xtest' } }; },
   };
   const keeperK = { listApps: () => [...records.values()], get: (id) => records.get(id) || null, sessionPids: () => [4343], x11EnvFor: () => ({ DISPLAY: ':78' }),
-    windows: async () => ({ ok: true, windows: [{ id: 9, title: 'Sign-in', cls: 'app', x: 0, y: 0, w: 10, h: 10, mapped: true }] }) };
+    windows: async () => ({ ok: true, windows: wins }) };
   const mk = (M, sub) => M.create({ keeper: keeperK, dataDir: path.join(dir, sub), env: () => ({}), activeSessions: sessions, wt, bins: { xdotool: '/bin/true', gdbus: null }, log: { warn() {}, log() {} }, procExe: () => null });
   const tryAct = async (E, f, body) => { try { return await E.act(rec.id, f, body); } catch (e) { return { code: e.code, why: String(e.message) }; } };
   async function scene(M, sub) {
@@ -604,6 +612,13 @@ console.log('lane e2c: launchModeVerdict beside the mode set');
     out.keys = await tryAct(E, f, { verb: 'type', text: 'abc' }); out.chord = await tryAct(E, f, { verb: 'key', chord: 'Return' }); out.wheel = await tryAct(E, f, { verb: 'scroll', direction: 'down' }); out.pxActs = acts.slice();
     geo = { ok: true, w: 1920, h: 1200 }; acts.length = 0;
     out.wide = await tryAct(E, f, { verb: 'type', text: 'abc' }); out.wideActs = acts.slice();
+    // the read of the cure: a window whose corner is LEFT OF / ABOVE a 2x2 display (a dialog wider than its parent, centred) — judged at
+    // its VISIBLE corner + 20 px: refused; a window moved partly off the RIGHT of a display that holds it: keys and wheel as before
+    wins = [{ id: 9, title: 'Sign-in', cls: 'app', x: -100, y: -100, w: 400, h: 300, mapped: true }]; geo = { ok: true, w: 2, h: 2 }; acts.length = 0;
+    out.neg = await tryAct(E, f, { verb: 'type', text: 'abc' }); out.negActs = acts.slice();
+    wins = [{ id: 9, title: 'Sign-in', cls: 'app', x: 1910, y: 0, w: 1000, h: 800, mapped: true }]; geo = { ok: true, w: 1920, h: 1200 }; acts.length = 0;
+    out.offKeys = await tryAct(E, f, { verb: 'type', text: 'abc' }); out.offWheel = await tryAct(E, f, { verb: 'scroll', direction: 'down' }); out.offActs = acts.slice();
+    wins = WIN0;
     E.shutdown();
     return out;
   }
@@ -613,11 +628,14 @@ console.log('lane e2c: launchModeVerdict beside the mode set');
   ok(cur.wheel.code === 'outside_window' && /the wheel is not sent/.test(cur.wheel.why), '…and a scroll without --at (its point the window\'s centre) the same — no wheel sent (found beside the row)', cur.wheel);
   ok(cur.refKeys.code === 'outside_window' && JSON.stringify(cur.refActs) === '[]', '…`type` with a ref and the keys flag (the feedback\'s own call: focused through the tree, then keys) is refused the same way — never «typed N characters»', { refKeys: cur.refKeys, acts: cur.refActs });
   ok(cur.wide && cur.wide.ok === true && JSON.stringify(cur.wideActs) === '["type-keys"]', '…on a display that holds the window (1920x1200) the keys are typed as before', { wide: cur.wide, acts: cur.wideActs });
+  ok(cur.neg && cur.neg.code === 'outside_window' && JSON.stringify(cur.negActs) === '[]', '…a window whose corner is left of / above a 2x2 display is judged at its VISIBLE corner + 20 px: refused, no key sent (its raw corner would never be past the far edge)', { neg: cur.neg, acts: cur.negActs });
+  ok(cur.offKeys && cur.offKeys.ok === true && cur.offWheel && cur.offWheel.ok === true && JSON.stringify(cur.offActs) === '["type-keys","scroll"]', '…a window moved partly off the RIGHT of a display that holds it (1920x1200, the window 1000x800): its keys and its wheel go as before — never a viewer blamed that never attached', { keys: cur.offKeys, wheel: cur.offWheel, acts: cur.offActs });
   const esrc = fs.readFileSync(path.join(REPO, 'src/server/window-targets-engine.js'), 'utf8');
   const relSrc = anchored(esrc, /\n *(?:if \(pt && pt\.coords === 'window-centre'\) )?await displayHolds\(rec, px, [^\n]*/g, '', 'the display checks', { count: 3 });
   const rel = await scene(MUT.load('src/server/window-targets-engine.js', relSrc, 'nokeyscheck'), 'release');
-  ok(rel.keys && rel.keys.ok === true && rel.pxActs.includes('type-keys') && rel.chord && rel.chord.ok === true && rel.refOk === true && JSON.stringify(rel.refActs) === '["focus","type-keys"]', 'CONTROL — the release\'s road (the checks taken out): `type @ref` focuses the field and «types» (the feedback\'s own call), `type` and `key` answer ok — into a 2x2 display', { keys: rel.keys && (rel.keys.ok || rel.keys.code), refActs: rel.refActs, acts: rel.pxActs });
+  ok(rel.keys && rel.keys.ok === true && rel.pxActs.includes('type-keys') && rel.chord && rel.chord.ok === true && rel.refOk === true && JSON.stringify(rel.refActs) === '["focus","type-keys"]' && rel.wheel && rel.wheel.ok === true, 'CONTROL — the release\'s road (the checks taken out): `type @ref` focuses the field and «types» (the feedback\'s own call), `type`, `key` and the scroll without a point answer ok — into a 2x2 display', { keys: rel.keys && (rel.keys.ok || rel.keys.code), refActs: rel.refActs, acts: rel.pxActs });
   for (const r0 of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 9 })) ok(r0.pass, '§11 tree: ' + r0.name, r0.pass ? undefined : r0.detail);
+  ok(/const keysPointOf = \(px, lease\) => \{ const r = dialogWindow\(px, lease\) \|\| \(px && px\.plan && px\.plan\.main\) \|\| null; return r \? visiblePoint\(r\) : null; \};/.test(esrc), 'only a point the PLAN gives is judged (a dialog\'s window, else the main window\'s) — with no main, mainFocus\'s tree-bounds fallback (the toolkit\'s coordinates, never the X root\'s) makes no claim');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

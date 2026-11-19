@@ -473,15 +473,20 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   }
   /** fb-bc200800e0 (lane bl-windows): a verb with no point of its own (type, key, a scroll without --at) on a display a viewer
    *  sized smaller than the window — refused by the click's own reason (pointOf's outside_window) before anything is sent, never
-   *  answered «typed». The point: a showing dialog's top-left (it is focused by its X window), else the main frame's corner + 20 px */
+   *  answered «typed». The point: the VISIBLE corner (clamped to the display's 0) of a showing dialog (it is focused by its X window),
+   *  else of the main frame, + 20 px — with the window's size: refused only when the display is smaller than the window on that axis */
   async function displayHolds(rec, px, point, who, verb, act) {
     if (!px.plan || !point || !capsOf(rec).geometry) return;
     const geo = await wt.displayGeometry({ bins: px.bins, xenv: px.xenv });
     if (!geo || !geo.ok) return;
-    const v = R.pointOnDisplay(point, { rootW: geo.w, rootH: geo.h }, { act });
+    const v = R.pointOnDisplay(point, { rootW: geo.w, rootH: geo.h }, { act, win: Number(point.w) > 0 && Number(point.h) > 0 ? { w: Number(point.w), h: Number(point.h) } : null });
     if (!v.ok) { audit({ ...who, verb, by: 'inject', ok: false, code: v.code }); throw namedError(v.code, v.why, { display: { w: geo.w, h: geo.h } }); }
   }
-  const keysPointOf = (px, lease) => { const dw = dialogWindow(px, lease); return dw ? { x: dw.x, y: dw.y } : mainFocus(px, lease); };
+  // …only a point the PLAN gives (a showing dialog's window, else the main window's — with no main no claim is made: mainFocus's
+  // fallback is tree bounds, the toolkit's coordinates, never the X root's): its VISIBLE corner (a corner left of / above the display
+  // clamped to 0) + 20 px, with the window's size (the viewer is blamed only when the display is smaller than the window)
+  const visiblePoint = (r) => ({ x: Math.max(Number(r.x) || 0, 0) + Math.min(20, Math.floor((Number(r.w) || 0) / 2)), y: Math.max(Number(r.y) || 0, 0) + Math.min(20, Math.floor((Number(r.h) || 0) / 2)), w: Number(r.w) || 0, h: Number(r.h) || 0 });
+  const keysPointOf = (px, lease) => { const r = dialogWindow(px, lease) || (px && px.plan && px.plan.main) || null; return r ? visiblePoint(r) : null; };
   /** A pixel of the screenshot (window coordinates) → the display point, through the plan (no plan ⇒ the point as given). */
   async function pointOf(rec, px, at, who, verb) {
     if (!px.plan) return { x: at.x, y: at.y, coords: 'display' };
@@ -1304,7 +1309,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
         const at = parseAt(body.at);
         if (!at) throw namedError('bad-request', '--at needs `x,y` (integers: a pixel of `vibespace-window screenshot`)');
         pt = await pointOf(rec, px, at, who, 'scroll');
-      } else if (px.plan && px.plan.main) pt = { x: px.plan.main.x + Math.floor(px.plan.main.w / 2), y: px.plan.main.y + Math.floor(px.plan.main.h / 2), coords: 'window-centre' };
+      } else if (px.plan && px.plan.main) pt = { x: px.plan.main.x + Math.floor(px.plan.main.w / 2), y: px.plan.main.y + Math.floor(px.plan.main.h / 2), w: px.plan.main.w, h: px.plan.main.h, coords: 'window-centre' };
       if (pt && pt.coords === 'window-centre') await displayHolds(rec, px, pt, who, 'scroll', 'the wheel is');   // fb-bc200800e0 (found beside it): a scroll at the centre of a window its display cannot hold
       held();
       const r = await injecting((signal) => wt.injectScroll({ bins: px.bins, xenv: px.xenv, x: pt ? pt.x : null, y: pt ? pt.y : null, direction: body.direction, by: body.by == null ? 3 : Number(body.by), signal, python }));

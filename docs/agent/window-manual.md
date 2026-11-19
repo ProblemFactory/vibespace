@@ -314,9 +314,13 @@ A point outside the image — or off the display (a window taller than the
 screen of the person viewing it) — is refused **`outside_window`**, never
 clamped to the edge. **`type`, `key` and a `scroll` without `--at` the
 same:** when a viewer's attach sized the display smaller than the window (a
-display read as 2x2), they are refused **`outside_window`** — «the display is
-WxH since a viewer attached» — and nothing is sent: never answered as typed
-while nothing reaches the field. Ask the person to resize the window (or pin
+display read as 2x2), so the point those verbs aim at (20 px into the visible
+part of the window's main frame or of a showing dialog, a scroll's centre)
+lies at or past the display's far edge, they are refused **`outside_window`**
+— «the display is WxH since a viewer attached» — and nothing is sent: never
+answered as typed while nothing reaches the field. A window partly left of or
+above the screen, or moved partly off a display large enough to hold it,
+keeps taking keys and the wheel. Ask the person to resize the window (or pin
 its size), then try again.
 
 **Where the PNG lands.** Without `--out` it goes to

@@ -448,13 +448,18 @@ function mapPoint(plan, at, { rootW = null, rootH = null } = {}) {
 
 /** A DISPLAY THAT CANNOT TAKE INPUT (fb-bc200800e0, lane bl-windows — an agent's feedback: a click answered «the display is 2x2
  *  since a viewer attached», and 22 characters typed as keys answered success while the field stayed empty). The POLICY, the click's
- *  own reason for the verbs with no point of their own: the window's point those verbs aim at (`point`, a display point — the main
- *  frame's corner + 20 px, a dialog's top-left, a scroll's centre) must be ON the display a viewer sized; else outside_window, and
- *  nothing is sent. `act` names what is not sent. No geometry ⇒ no claim. */
-function pointOnDisplay(point, { rootW = null, rootH = null } = {}, { act = 'keys are' } = {}) {
+ *  own reason for the verbs with no point of their own: the window's point those verbs aim at (`point`, a display point — the
+ *  visible corner of the main frame or of a showing dialog + 20 px, a scroll's centre) must not lie at or past the display's FAR
+ *  edge (its width / height) — the click's own rule (mapPoint): a point left of or above the display makes no claim (a window
+ *  dragged partly off the left: on screen, its keys taken as before). With the window's size (`win`), the refusal is the VIEWER's
+ *  only when the display is smaller than the window on that axis — a window moved partly off a display that could hold it takes its
+ *  keys and its wheel as before (X clamps the pointer inside it); else outside_window, and nothing is sent. `act` names what is not
+ *  sent. No geometry ⇒ no claim. */
+function pointOnDisplay(point, { rootW = null, rootH = null } = {}, { act = 'keys are', win = null } = {}) {
   if (!point) return { ok: true };
-  const x = Number(point.x), y = Number(point.y);
-  if (x < 0 || y < 0 || (Number(rootW) > 0 && x >= Number(rootW)) || (Number(rootH) > 0 && y >= Number(rootH))) return refuse('outside_window', `the display is ${rootW}x${rootH} since a viewer attached — smaller than the window: ${act} not sent; ask the user to resize the window (or pin its size)`);
+  const x = Number(point.x), y = Number(point.y), rw = Number(rootW), rh = Number(rootH);
+  const smaller = (root, side) => !(win && Number(win[side]) > 0) || root < Number(win[side]);   // no size known ⇒ the click's rule alone
+  if ((rw > 0 && x >= rw && smaller(rw, 'w')) || (rh > 0 && y >= rh && smaller(rh, 'h'))) return refuse('outside_window', `the display is ${rootW}x${rootH} since a viewer attached — smaller than the window: ${act} not sent; ask the user to resize the window (or pin its size)`);
   return { ok: true };
 }
 
