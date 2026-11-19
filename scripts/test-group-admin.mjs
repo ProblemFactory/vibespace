@@ -40,12 +40,16 @@ setupAgentRoutes({
   readUserState: () => userState,
 });
 
+// B-55dc (the membership answer costs the main loop no file call): an agent route may decide on a READ membership answer —
+// it answers AFTER an awaited read (the deciding door), so a caller waits for the reply itself and never reads it at once.
+// Each caller → a promise of { code, out }, resolved when the route gives its reply.
 function call(body) {
-  let out, code = 200;
-  const req = { headers: { authorization: 'Bearer vsst_test' }, query: {}, body };
-  const res = { json: (o) => { out = o; return res; }, status: (c) => { code = c; return res; } };
-  routes['POST /api/agent/group-admin'](req, res);
-  return { code, out };
+  return new Promise((resolve) => {
+    let code = 200;
+    const req = { headers: { authorization: 'Bearer vsst_test' }, query: {}, body };
+    const res = { json: (o) => { resolve({ code, out: o }); return res; }, status: (c) => { code = c; return res; } };
+    routes['POST /api/agent/group-admin'](req, res);
+  });
 }
 
 let failed = 0;
@@ -55,22 +59,22 @@ const check = (name, cond, extra) => {
 };
 
 // gate 1: setting off
-let r = call({ list: true });
+let r = await call({ list: true });
 check('setting off → 403 with guidance', r.code === 403 && /disabled/.test(r.out.error));
 
 // gate 2: setting on, not designated
 settings['agents.allowGroupManagement'] = true;
-r = call({ list: true });
+r = await call({ list: true });
 check('not designated → 403 naming the session key', r.code === 403 && r.out.error.includes('claude:abc-123'));
 
 // designated → verbs work
 userState = { sessionConfigs: { 'claude:abc-123': { groupManager: true } } };
-r = call({ list: true });
+r = await call({ list: true });
 check("list works when designated", r.code === 200 && Array.isArray(r.out.groups), JSON.stringify(r));
 
 const ctxDir = path.join(os.homedir(), '.vs-test-ctx');
 check("the context folder is minted under the suite's own home, never the person's", os.homedir() === HOME && ctxDir.startsWith(tmp + path.sep));
-r = call({ create: { title: 'War room', objective: 'Test initiative', contextDir: ctxDir, folders: [path.join(os.homedir(), 'work')] } });
+r = await call({ create: { title: 'War room', objective: 'Test initiative', contextDir: ctxDir, folders: [path.join(os.homedir(), 'work')] } });
 check('create returns the group', r.code === 200 && r.out.group?.title === 'War room');
 const gid = r.out.group.id;
 const g = tasks.view(gid);   // lane task-group-context: the store's view — contextDir / folders DERIVED from the Context table's rows
@@ -79,66 +83,67 @@ check('contextDir + folders stored (as the Context rows they mean)', g.contextDi
 check('create audited in activity log', (g.progress || []).some((p) => /group created by manager agent/.test(p.note) && p.session === 'claude:abc-123'));
 
 // path allowlist (default root = ~)
-r = call({ create: { title: 'Evil', contextDir: '/etc' } });
+r = await call({ create: { title: 'Evil', contextDir: '/etc' } });
 check('contextDir outside roots rejected', r.code === 400 && /must be under/.test(r.out.error));
 settings['agents.groupManagementRoots'] = '/srv/allowed';
-r = call({ update: { id: gid, contextDir: path.join(os.homedir(), 'x') } });
+r = await call({ update: { id: gid, contextDir: path.join(os.homedir(), 'x') } });
 check('custom roots enforced on update', r.code === 400 && /must be under/.test(r.out.error));
 settings['agents.groupManagementRoots'] = '~';
 
 // update + bind + unbind
-r = call({ update: { id: gid, objective: 'Updated objective', archived: false } });
+r = await call({ update: { id: gid, objective: 'Updated objective', archived: false } });
 check('update works', r.code === 200 && tasks.get(gid).objective === 'Updated objective');
-r = call({ bind: { id: gid, sessionKey: 'claude:other-999' } });
+r = await call({ bind: { id: gid, sessionKey: 'claude:other-999' } });
 check('bind another session', r.code === 200 && tasks.get(gid).sessions.includes('claude:other-999'));
-r = call({ bind: { id: gid } });
+r = await call({ bind: { id: gid } });
 check('bind defaults to self', r.code === 200 && tasks.get(gid).sessions.includes('claude:abc-123'));
-r = call({ unbind: { id: gid, sessionKey: 'claude:other-999' } });
+r = await call({ unbind: { id: gid, sessionKey: 'claude:other-999' } });
 check('unbind works', r.code === 200 && !tasks.get(gid).sessions.includes('claude:other-999'));
 check('every op audited', (tasks.get(gid).progress || []).filter((p) => p.note.startsWith('[group-admin]')).length >= 4);
 
 // no delete verb exists
-r = call({ delete: { id: gid } });
+r = await call({ delete: { id: gid } });
 check('unknown verb → 400', r.code === 400);
 
 // ── 2.152.0: manager scope = ALL groups (user directive) ──────────────────
 // A manager may target ANY group with explicit --group on REGULAR verbs, even
 // one it does not belong to; non-managers keep the belonging enforcement.
 function callRoute(route, { query = {}, body = {} } = {}) {
-  let out, code = 200;
-  const req = { headers: { authorization: 'Bearer vsst_test' }, query, body };
-  const res = { json: (o) => { out = o; return res; }, status: (c) => { code = c; return res; } };
-  routes[route](req, res);
-  return { code, out };
+  return new Promise((resolve) => {   // B-55dc: resolved by the route's reply (above)
+    let code = 200;
+    const req = { headers: { authorization: 'Bearer vsst_test' }, query, body };
+    const res = { json: (o) => { resolve({ code, out: o }); return res; }, status: (c) => { code = c; return res; } };
+    routes[route](req, res);
+  });
 }
 // the manager session is NOT in this group (bound to nobody, folders elsewhere)
-r = call({ create: { title: 'Foreign group' } });
+r = await call({ create: { title: 'Foreign group' } });
 const foreignId = r.out.group.id;
-call({ unbind: { id: foreignId } }); // ensure self not bound (create doesn't bind, but be explicit)
-r = callRoute('POST /api/agent/task-progress', { body: { group: foreignId, note: 'manager cross-group note' } });
+await call({ unbind: { id: foreignId } }); // ensure self not bound (create doesn't bind, but be explicit)
+r = await callRoute('POST /api/agent/task-progress', { body: { group: foreignId, note: 'manager cross-group note' } });
 check('manager: progress into a NON-belonged group via --group', r.code === 200,
   JSON.stringify(r.out));
 check('cross-group note attributed + stored', (tasks.get(foreignId).progress || []).some((p) => p.note === 'manager cross-group note' && p.session === 'claude:abc-123'));
-r = callRoute('POST /api/agent/task-progress', { body: { group: 'T-nonexistent', note: 'x' } });
+r = await callRoute('POST /api/agent/task-progress', { body: { group: 'T-nonexistent', note: 'x' } });
 check('manager: unknown group id → 404 with group-list pointer', r.code === 404 && /group-list/.test(r.out.error), JSON.stringify(r.out));
 userState = {}; // de-designate → belonging enforcement returns
-r = callRoute('POST /api/agent/task-progress', { body: { group: foreignId, note: 'nope' } });
+r = await callRoute('POST /api/agent/task-progress', { body: { group: foreignId, note: 'nope' } });
 check('non-manager: explicit non-belonged group still 403', r.code === 403, JSON.stringify(r.out));
 userState = { sessionConfigs: { 'claude:abc-123': { groupManager: true } } };
 
 // ── 2.152.0: the manager LEARNS its powers in injected context ────────────
-r = callRoute('GET /api/agent/prompt-context', {});
+r = await callRoute('GET /api/agent/prompt-context', {});
 check('prompt-context teaches the manager block once', r.code === 200 && /vibespace-group-manager/.test(r.out.context) && /group-list/.test(r.out.context), (r.out.context || '').slice(0, 120));
-r = callRoute('GET /api/agent/prompt-context', {});
+r = await callRoute('GET /api/agent/prompt-context', {});
 check('manager block is one-shot (not re-sent)', r.code === 200 && !/vibespace-group-manager/.test(r.out.context || ''));
 // per-turn reminder carries a manager clause
 settings['agents.perTurnToolReminder'] = true;
-r = callRoute('GET /api/agent/prompt-context', {});
+r = await callRoute('GET /api/agent/prompt-context', {});
 check('per-turn reminder names the manager powers', /Group MANAGER/.test(r.out.context || ''), (r.out.context || '').slice(0, 200));
 // a NON-manager session gets neither
 delete session._mgrIntroSeen; delete session._toolsIntroSeen;
 userState = {};
-r = callRoute('GET /api/agent/prompt-context', {});
+r = await callRoute('GET /api/agent/prompt-context', {});
 check('non-manager gets no manager teaching', !/vibespace-group-manager|Group MANAGER/.test(r.out.context || ''), (r.out.context || '').slice(0, 200));
 
 fs.rmSync(tmp, { recursive: true, force: true });

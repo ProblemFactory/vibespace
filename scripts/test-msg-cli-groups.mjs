@@ -610,6 +610,50 @@ console.log('§2 the routes over the REAL engine + store + ladder');
     const jb = await jobLeg(AR, 'r5-job');
     ok(jb.create === '409:bad-member' && /a fork that has not announced its own conversation id yet/.test(jb.sentence) && !jb.ownerIsParent && jb.postedOnParent === 0 && jb.parentCreates === '200:ok',
       `a PENDING fork's job creation ⇒ 409 bad-member by name — no job owned by the parent, no billed notification on the parent; the parent's own creation stands (${JSON.stringify(jb)})`);
+    // B-55dc ⋈ B-70f9 (lg-text-legs-3, the -moved2 meeting; 主开发 23:42Z: one leg that throws on the SECOND entry and reads the
+    // named reply): the create route is entered AGAIN once the creator's membership was READ — readMembership defers the first
+    // entry while tasks.membershipRead's promise is open. A throw on the second entry is answered by name (500 create-failed,
+    // B-70f9's sentence) because the re-entry goes through the same door (answersEveryThrow). RED: a copy whose re-entry calls
+    // the bare handler — the throw goes nowhere (an unhandled rejection) and no reply ever comes. No clock: the leg ends on the
+    // reply or on that rejection, whichever comes.
+    async function reentryLeg(ARmod, name) {
+      const dir = path.join(ROOT, name); fs.mkdirSync(dir, { recursive: true });
+      const ss = new Map([['w-R', { claudeSessionId: 'c-reentry', backend: 'claude', name: 'reentry', mode: 'chat', cwd: '/tmp', agentToken: 'vsst_R', createdAt: 1 }]]);
+      const dl = DELIVER.create({ dataDir: dir, activeSessions: ss, serverSetting: () => undefined,
+        peerMsg: { findPeer: () => null, postToPeer: async () => ({ ok: false }), postChannelEvent: async () => ({ ok: false }) },
+        emitPeerCard: () => {}, authorizeSpend: () => ({ ok: true, identity: { key: 'slot-1' } }), noteSpend: () => {}, releaseSpend: () => {} });
+      const jm = new JobManager({ dataDir: dir, broadcast() {}, notifyUser() {}, log() {}, deliverToConversation: () => ({ ok: true }), groupNotifyFor: () => null, notifyGlobal: () => true });
+      jm.init();
+      let creates = 0, reads = 0;
+      jm.create = () => { creates++; throw new Error('the store refused on the second entry'); };
+      const tasks = { groupsForSession: () => [], _persistRescueLine: () => '', backlogNudgeFor: () => '', get: () => null,
+        membershipRead: () => { reads++; return reads === 1 ? new Promise((z) => setImmediate(z)) : null; } };   // the first ask: still being read
+      const rts = {}; const ap = { get: (p, h) => { rts['GET ' + p] = h; }, post: (p, h) => { rts['POST ' + p] = h; }, put() {}, delete() {}, use() {} };
+      ARmod.setupAgentRoutes({ app: ap, activeSessions: ss, tasks,
+        sessionStatus: { consumeNotices: () => [], get: () => null, rekey() {} }, SessionStatusManager: { renderNotices: () => '' }, userTodos: {}, sessionStatusKey: (x, id) => 'claude:' + (x.claudeSessionId || id), serverSetting: () => undefined,
+        integrationEnabled: () => true, scheduleCtxSync() {}, remoteCtxBaseFor: () => null, readUserState: () => ({}), getJobs: () => jm, deliver: dl, getGroups: () => null });
+      const stray = []; let onRej = null; const warn = console.warn; console.warn = () => {};
+      try {
+        const reply = await new Promise((resolve) => {
+          onRej = (e) => { stray.push(String((e && e.message) || e)); resolve(null); };
+          process.on('unhandledRejection', onRej);
+          let status = 200;
+          rts['POST /api/agent/jobs']({ headers: { authorization: 'Bearer vsst_R' }, body: { kind: 'cron', name: 'reentry-job', schedule: { everyMs: 3600000 }, action: { type: 'notify', text: 'tick' } }, query: {}, params: {} },
+            { headersSent: false, status(x) { status = x; return this; }, json(o) { this.headersSent = true; resolve({ status, body: o }); return this; } });
+        });
+        return { reply, reads, creates, stray };
+      } finally { process.off('unhandledRejection', onRej); console.warn = warn; jm.shutdown(); for (const t of jm._timers) clearInterval(t); try { dl.flush(); } catch {} }
+    }
+    const re = await reentryLeg(AR, 'b55-reentry');
+    ok(re.reply && re.reply.status === 500 && re.reply.body.code === 'create-failed' && /^the job create failed on the hub: the store refused on the second entry/.test(re.reply.body.error) && re.reads === 1 && re.creates === 1 && re.stray.length === 0,
+      `B-55dc ⋈ B-70f9: a throw on the create route's SECOND entry (after the membership read) is answered by name — ${re.reply ? re.reply.status + ' ' + re.reply.body.code : 'no reply'} (${JSON.stringify(re)})`);
+    const RE = 'readMembership(req, res, answersEveryThrow(jobsCreateRoute), a.session, a.sessionId)';
+    const MR = mutantCopies('msg-cli-reentry', REPO);   // the plant proves itself: a copy that changes nothing fails by name
+    const ARbare = MR.load('src/agent-routes.js', arsrc5.replace(RE, 'readMembership(req, res, jobsCreateRoute, a.session, a.sessionId)'), 'reentry-bare');
+    const reRed = await reentryLeg(ARbare, 'b55-reentry-red');
+    ok(reRed.reply === null && reRed.creates === 1 && reRed.stray.some((m) => /the store refused on the second entry/.test(m)),
+      `RED CONTROL: the re-entry through the bare handler — the throw is an unhandled rejection, no reply ever comes (${JSON.stringify(reRed)})`);
+    for (const c of copiesCensus(MR.files, MR.dir, REPO, { minCopies: 1, label: 'B-55dc re-entry control: ' })) ok(c.pass, c.name, c.detail);
     const JC = "  const own = ownConversationIdOf(s);\n  return {\n    conversationId: own.cid, borrowed: own.cid ? null : (own.why === FORK_PENDING ? own.why : null),";
     ok(arsrc5.split(JC).length === 2, 'jobsCaller reads the caller\'s conversation through ownConversationIdOf, once (the control reads the raw status key)');
     const ARj = M5.load('src/agent-routes.js', arsrc5.replace(JC, "  return {\n    conversationId: key.startsWith('webui:') ? null : key.slice(key.indexOf(':') + 1), borrowed: null,"), 'jobscaller-raw');
