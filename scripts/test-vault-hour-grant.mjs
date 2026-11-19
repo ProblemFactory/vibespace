@@ -190,19 +190,31 @@ const clockRe = (strs, ...at) => new RegExp(strs.map((x, i) => reEsc(x) + (i < a
 const clockIs = (strs, ...at) => new RegExp(`^${clockRe(strs, ...at).source}$`);
 // r8: a page as small as a row and a chip need (createElement / createTextNode, className, textContent, innerHTML, title, append)
 class Txt { constructor(s) { this.nodeType = 3; this.data = String(s); } get textContent() { return this.data; } }
+// bl-vault-ckpt61-hosted-cure (主开发's read, the MUST): the page edge has the surface the SHIPPED dialog uses on every road the
+// dialog legs take — the row's own `el` / append / textContent / setAttribute / addEventListener, and need-line's needLine
+// (appendChild, dataset — the judge-off road every dialog here takes: the suite never turns the judge on). Need-line's other
+// roads (its door button, sayOnLine: classList, remove, contains, attributes) are given too but not driven by these legs.
+// A node keeps its parent (remove / contains / parentNode as a page has them)
 class El {
-  constructor(tag) { this.nodeType = 1; this.tagName = String(tag).toUpperCase(); this.children = []; this.className = ''; this.dataset = {}; this.attrs = {}; this.title = ''; this.hidden = false; this.style = {}; this.innerHTML = ''; this.ls = {}; }
-  append(...ns) { for (const n of ns) this.children.push(typeof n === 'string' ? new Txt(n) : n); }
-  set textContent(v) { this.children = v === '' || v == null ? [] : [new Txt(v)]; }
+  constructor(tag) { this.nodeType = 1; this.tagName = String(tag).toUpperCase(); this.children = []; this.className = ''; this.dataset = {}; this.attrs = {}; this.title = ''; this.hidden = false; this.style = {}; this.innerHTML = ''; this.ls = {}; this.parentNode = null; }
+  append(...ns) { for (const n of ns) this.appendChild(typeof n === 'string' ? new Txt(n) : n); }
+  appendChild(n) { if (n && n.parentNode && typeof n.parentNode.removeChild === 'function') n.parentNode.removeChild(n); this.children.push(n); if (n && typeof n === 'object') n.parentNode = this; return n; }
+  removeChild(n) { const i = this.children.indexOf(n); if (i >= 0) { this.children.splice(i, 1); n.parentNode = null; } return n; }
+  remove() { if (this.parentNode) this.parentNode.removeChild(this); }
+  contains(n) { for (let x = n; x; x = x.parentNode) if (x === this) return true; return false; }
+  get classList() { const el = this, list = () => String(el.className || '').split(/\s+/).filter(Boolean); return { contains: (c) => list().includes(c), add: (...cs) => { el.className = [...new Set([...list(), ...cs])].join(' '); }, remove: (...cs) => { el.className = list().filter((x) => !cs.includes(x)).join(' '); }, toggle: (c, on) => { const has = list().includes(c), want = on === undefined ? !has : !!on; if (want !== has) { if (want) el.className = [...list(), c].join(' '); else el.className = list().filter((x) => x !== c).join(' '); } return want; } }; }
+  set textContent(v) { for (const c of this.children) if (c && typeof c === 'object') c.parentNode = null; this.children = v === '' || v == null ? [] : [new Txt(v)]; }
   get textContent() { return this.children.map((c) => c.textContent).join(''); }
   setAttribute(k, v) { this.attrs[k] = String(v); }
+  getAttribute(k) { return Object.prototype.hasOwnProperty.call(this.attrs, k) ? this.attrs[k] : null; }
+  removeAttribute(k) { delete this.attrs[k]; }
   addEventListener(t, f) { (this.ls[t] = this.ls[t] || []).push(f); }   // r11: the dialog's own handlers (`fire` runs them)
   fire(t) { for (const f of this.ls[t] || []) f({ type: t, target: this }); }
   querySelector() { return null; }
   querySelectorAll() { return []; }
 }
 const walk = (n, out = []) => { if (n && n.nodeType === 1) { out.push(n); for (const c of n.children) walk(c, out); } return out; };
-async function onPage(fn) { const had = globalThis.document; globalThis.document = { createElement: (t) => new El(t), createTextNode: (s) => new Txt(s) }; try { return await fn(); } finally { if (had === undefined) delete globalThis.document; else globalThis.document = had; } }
+async function onPage(fn, Page = El) { const had = globalThis.document; globalThis.document = { createElement: (t) => new Page(t), createTextNode: (s) => new Txt(s) }; try { return await fn(); } finally { if (had === undefined) delete globalThis.document; else globalThis.document = had; } }
 // r10 (主开发's acceptance of r9 — the «谁可以用…» dialog's Save): THE DIALOG'S SAVE as planOf / doSave build it
 // (src/lib/vault-use-row.js), over the picker's PURE model — the stored row drawn (rowToPick), the picks, the 除了 the picker
 // shows (`exceptSaved`; a member picked itself leaves it), `pickToRow` with the stored 除了 (`held`), each member's scopes by
@@ -261,7 +273,7 @@ const WROW = (w) => ({ id: w.e.id, store: 'secrets', kind: 'api-key', label: 'TT
 /** «谁可以用…» opened on the entry's row as the Vault window has it (the door's rowFacts) → the page: pick / type / save (the
  *  Save's doSave, through the unsaved guard's road) / the posts / the words / the preview. `answers` = the 验证是你 prompts in
  *  turn (true: the second password given; false: cancelled; none left: given). */
-async function openDialog(w, roster, { answers = [] } = {}) {
+async function openDialog(w, roster, { answers = [], page = El, soft = false } = {}) {
   const M = await dialogModule();
   const P = {
     now: () => w.now(), t: tEN, posts: [], toasts: [], asked: 0, closed: 0, refreshed: 0, reveal: false, shell: null, opts: null, pp: null, answers: [...answers],
@@ -287,11 +299,15 @@ async function openDialog(w, roster, { answers = [] } = {}) {
     },
   };
   globalThis.__vurPage = P;
-  const open = !!(M && typeof M.showUseGrantDialog === 'function') && await onPage(() => { M.showUseGrantDialog({ ...WROW(w), run: w.door.rowFacts(WROW(w)) }, { app: null, refresh: () => { P.refreshed++; } }); return !!P.opts; });
+  // bl-vault-ckpt61-hosted-cure: an open that throws fails the leg BY NAME with its error (leg() prints «threw: …») — only the
+  // named open leg asks `soft` (ok:false WITH the error, judged and printed by that leg)
+  let openErr = null;
+  const open = !!(M && typeof M.showUseGrantDialog === 'function') && await onPage(() => { M.showUseGrantDialog({ ...WROW(w), run: w.door.rowFacts(WROW(w)) }, { app: null, refresh: () => { P.refreshed++; } }); return !!P.opts; }, page).catch((e) => { if (!soft) throw e; openErr = String((e && e.stack) || e).split('\n').slice(0, 3).join(' | '); return false; });
   const find = (cls) => (P.shell ? walk(P.shell) : []).find((e) => new RegExp(`(^|\\s)${cls}(\\s|$)`).test(e.className)) || null;
   const pp = () => P.pp || { st: { sel: [], ex: [] }, o: {} };
   return {
-    ok: open, error: (M && M.error) || null,
+    ok: open, error: (M && M.error) || openErr,
+    els: () => (P.shell ? walk(P.shell) : []),
     pick: (fn) => onPage(() => { pp().st.sel = fn(pp().st.sel.slice()).map(String); if (pp().o.onChange) pp().o.onChange(); }),
     type: (cls, v) => onPage(() => { const e = find(cls); if (!e) return; e.value = v; e.fire(e.tagName === 'SELECT' ? 'change' : 'input'); }),
     save: () => onPage(async () => (P.opts && P.opts.unsaved && typeof P.opts.unsaved.save === 'function' ? P.opts.unsaved.save() : null)),
@@ -896,6 +912,25 @@ for (const K of ['local', 'cluster']) {
     globalThis.__vurPage = keep;
     ok(/t is not a function/.test(String(ctl)), 'RED control (ckpt61): with the page edge a clock only, the same bundle does NOT load — by name («t is not a function»)', ctl);
   }
+  // bl-vault-ckpt61-hosted-cure (主开发's read, the MUST): THE DIALOG OPENS — drawn to its end on the road every dialog leg below
+  // takes (the judge off: need-line's line with its words, then the footer's Save the open draws LAST); a dialog that fails to
+  // open is THIS red, by name with its error (each dialog leg then fails by name too: «threw: …»). Its control, judged only when
+  // the dialog opened here: the page edge's elements without appendChild (the one method the cure added that these roads
+  // call — need-line's line cannot take its words) ⇒ the same dialog does NOT open, by name
+  await leg('the dialog OPENS', async () => {
+    const w = await world();
+    const R = ROSTER([['cid-o', 'Opal']]);
+    const d = await openDialog(w, R, { soft: true });
+    const els = d.els();
+    const line = els.find((e) => e.classList.contains('need-line'));
+    const saveBtn = els.find((e) => e.tagName === 'BUTTON' && e.classList.contains('vw-use-save'));
+    ok(!!(d.ok === true && !d.error && line && line.dataset.tone === 'off' && line.textContent === 'The policy judge is off — these words are kept for when you turn it on.' && line.parentNode && saveBtn && saveBtn.textContent === 'Save'), 'r11 page edge: «谁可以用…» OPENS as it ships — drawn to its end (the judge-off need line «The policy judge is off — these words are kept for when you turn it on.», then the footer\'s Save)', { ok: d.ok, error: d.error, line: line ? { tone: line.dataset.tone, text: line.textContent } : null, save: !!saveBtn });
+    class NoAppendChild extends El { }
+    NoAppendChild.prototype.appendChild = undefined;   // the elements the page creates, without the method the cure added
+    NoAppendChild.prototype.append = function (...ns) { for (const n of ns) this.children.push(typeof n === 'string' ? new Txt(n) : n); };
+    const c = d.ok === true ? await openDialog(await world(), R, { page: NoAppendChild, soft: true }) : null;
+    ok(!!(c && c.ok === false && /appendChild is not a function/.test(String(c.error))), 'RED control (ckpt61): with the page\'s elements lacking appendChild, the same dialog does NOT open — by name («appendChild is not a function»); judged only when the dialog opened above', c ? { ok: c.ok, error: c.error } : 'not judged: the dialog did not open on the full page edge either');
+  });
   console.log('ⓐ (r11, MAJOR) A TASK GROUP MEMBER IS KNOWN BY ITS PRINCIPAL — the dialog itself (src/lib/vault-use-row.js as it ships)');
   await leg('ⓐ the Task Group member', async () => {
     const C = 'cid-left-out', D = 'cid-d', T1 = 'cid-team-1', G = 'g-team', MONTH = 30 * 86400e3;
