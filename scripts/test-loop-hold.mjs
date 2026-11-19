@@ -665,6 +665,55 @@ function judge12(x, truth) {
   return x.ms <= truth + 1 + (x.waitMs > 0 ? x.waitMs : 0) && (x.msHi || x.ms) + 40 >= truth && (x.msHi || x.ms) < 3 * truth
     && (excused12(x) ? x.samples >= 1 && !NOT_SAMPLED.includes(x.verdict) : x.verdict === LH.V.js);
 }
+console.log('⑫a B-f534 — after the exit mark the watchdog connects to nothing (the REAL thread, in this process)');
+{
+  // The same witness, two real holds of this thread ON THE CPU: before its exitMark() the watchdog asks the hold (the sample's
+  // own first call runs here — counted, never a clock): THE CONTROL; after it, the same hold is asked NOTHING (the watchdog reads
+  // EXITING before every connect). The mark found no session held (nothing in flight between the holds) and so waited for none
+  const SFW = require(path.join(REPO, 'src/server/sync-fs-witness.js'));
+  const W8 = require(path.join(REPO, 'src/server/sync-fs-witness-worker.js'));
+  let evals = 0; const gopd = Object.getOwnPropertyDescriptor;
+  Object.getOwnPropertyDescriptor = function (o, k) { if (o === Error && k === 'prepareStackTrace') evals++; return gopd.call(Object, o, k); };
+  const W = SFW.create({ rootDir: REPO, armed: true, readMountinfo: () => '', fresh: true, beatMs: 20, holdMs: 100, noAnswerMs: 50, liveMs: 60000, censusEveryMs: 0,
+    log: { warn() {}, log() {}, error() {}, info() {} }, holdsOptions: { eluEveryMs: 50, eluBeforeMs: 500 } }).start({ installHook: false });
+  let before = null, after = null, mark = null, hs = [], tries = 0, seenAtMark = [];
+  // ONE spin, its length in STEPS (never a clock): until `asks` samples ran here, or `n` steps. Warmed first, so both measured
+  // spins run the same compiled loop. THE CONTROL spins until the watchdog's first ask runs here; after the mark the spin runs
+  // as many steps again, doubling until the witness itself records a hold past the bar (its own beats, at most five tries) —
+  // a hold the watchdog would have asked — and every one of those steps is asked nothing
+  const spinFor = (n, asks) => { const e0 = evals; let i = 0; for (; i < n && (asks === 0 || evals - e0 < asks); i++) { } return { steps: i, asked: evals - e0 }; };
+  const pastBar = () => ((W.holds() && W.holds().report().holds) || []).filter((h) => h.ms >= 100);
+  try {
+    for (let k = 0; k < 20; k++) spinFor(2e5, 0);   // the loop compiled before anything is measured
+    await new Promise((r) => setTimeout(r, 800));   // the watchdog's thread up, its first checks done
+    before = spinFor(4e9, 1);                         // CONTROL: on the CPU until the watchdog's ask runs here
+    await new Promise((r) => setTimeout(r, 300));     // that hold over, nothing in flight
+    mark = W.exitMark();
+    seenAtMark = pastBar().map((h) => JSON.stringify(h)); const seen0 = seenAtMark.length;
+    after = { steps: 0, asked: 0 };
+    for (let n = Math.max(1, before.steps); tries < 5 && pastBar().length === seen0; n *= 2) {
+      tries++; const r = spinFor(n, 0); after.steps += r.steps; after.asked += r.asked;
+      await new Promise((r2) => setTimeout(r2, 300));   // its record written
+    }
+    hs = (W.holds() && W.holds().report().holds) || [];
+  } finally { Object.getOwnPropertyDescriptor = gopd; try { W.stop(); } catch { } }
+  const fresh = hs.filter((h) => h.ms >= 100 && !seenAtMark.includes(JSON.stringify(h))), unasked = fresh.filter((h) => !h.samples);   // ONLY the holds recorded after the mark
+  ok(!!before && before.asked >= 1 && !!after && after.asked === 0 && !!mark && mark.held === 0 && mark.left === 0 && fresh.length >= 1 && unasked.length === fresh.length,
+    `⑫a before the exit mark the watchdog asked this thread (${before && before.asked} sample ran here after ${before && before.steps} steps); after it, ${after && after.steps} steps on the CPU in ${tries} tr${tries === 1 ? 'y' : 'ies'} — a hold the witness recorded past the bar (${unasked.map((h) => h.ms + ' ms').join(', ') || 'NONE'}) — were asked ${after && after.asked} times; the mark found ${mark && mark.held} sessions held`, { before, after, tries, mark, holds: hs.map((h) => ({ ms: h.ms, samples: h.samples })) });
+  // THE ORDER THE PAIR RESTS ON (source pins — the fast tier cannot force the 20 ms window of a NATIVE hold at an exit, where the
+  // residual lived: test-loop-hold-live's legs 5 and (7) sweep it): the watchdog counts up BEFORE its connect and reads EXITING
+  // after; counts down AFTER a disconnect; answers the memory ask first, then `exiting`; the main thread stores EXITING BEFORE it
+  // reads the count, and waits only on the count, at most SESSION_MS + 5 ms on the monotonic clock
+  const WSRC = fs.readFileSync(path.join(REPO, 'src/server/sync-fs-witness-worker.js'), 'utf8'), MSRC = fs.readFileSync(path.join(REPO, 'src/server/sync-fs-witness.js'), 'utf8');
+  const order = (src, ...parts) => { let at = -1; for (const p of parts) { const i = src.indexOf(p, at + 1); if (i < 0 || i <= at) return false; at = i; } return true; };
+  ok(order(WSRC, 'heldUp();', 'if (exitingNow()) { heldDown(); return false; }', 'sess = new inspector.Session(); sess.connectToMainThread();')
+    && order(WSRC, 'sess.disconnect(); heldDown(); return true; }') && order(WSRC, 'if (s0) { openSessions.delete(q); try { s0.disconnect(); } catch { } heldDown(); }')
+    && order(WSRC, 'if (answerMemory(msg, parentPort)) return;', "if (msg && msg.ev === 'exiting') { for (const q of [...openSessions]) closeSession(q); return; }")
+    && order(MSRC, 'Atomics.store(I, EXIT_SLOT, 1);', 'let n = Atomics.load(NI, HELD_SLOT);', "worker.postMessage({ ev: 'exiting' })", 'const until = mono() + LH.SESSION_MS + 5;', 'Atomics.wait(NI, HELD_SLOT, n, left)'),
+    '⑫a the order the pair rests on: the watchdog counts up before its connect and reads EXITING after it, counts down after each disconnect, answers the memory ask before `exiting`; the main thread stores EXITING before it reads the count and waits on the count alone, at most SESSION_MS + 5 ms');
+  ok(SFW.EXIT_SLOT === W8.EXIT_SLOT && SFW.HELD_SLOT === W8.HELD_SLOT && SFW.EXIT_SLOT === 7 && SFW.HELD_SLOT === 7,
+    '⑫a the two threads name the same slots (the live slot\'s [7] = exiting, the note slot\'s [7] = the sessions held)');
+}
 console.log('⑫ round 5 — the monotonic clock, by behaviour (a date step inside a real hold)');
 {
   const SFW = require(path.join(REPO, 'src/server/sync-fs-witness.js'));

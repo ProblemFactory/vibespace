@@ -71,6 +71,16 @@ const P = sab ? new Uint8Array(sab, SLOT_INTS * 4 + SLOT_FLOATS * 8, SLOT_PATH) 
 // the main thread's NOTE slot (src/server/sync-fs-witness.js): [seqlock, count, bytes, beat when written, ENTERED, beat at
 // entry, -, -] + the monotonic time it was written + the answer's bytes
 const NI = noteSab ? new Int32Array(noteSab, 0, 8) : null, NF = noteSab ? new Float64Array(noteSab, 32, 1) : null, NB = noteSab ? new Uint8Array(noteSab, 40) : null;
+// B-f534: NO SESSION ACROSS A STOP — I[EXIT_SLOT] = the main thread is exiting (IT writes, at its 'exit'); NI[HELD_SLOT] = how many
+// inspector sessions to it THIS thread holds right now (counted up BEFORE a connect, down AFTER its disconnect). The order makes
+// the pair safe: this thread counts up, then reads EXITING; the main thread stores EXITING, then reads the count — one of the two
+// always sees the other (sequentially consistent Atomics), so an exit never meets a session neither side knew of
+const EXIT_SLOT = 7, HELD_SLOT = 7;
+const openSessions = new Set();   // the asks whose kept session is still open (closed by its answer, its SESSION_MS timer or the exit)
+const exitingNow = () => !!I && Atomics.load(I, EXIT_SLOT) === 1;
+// THIS thread is the count's ONE writer (the main thread only reads it), so a load and a store make each step
+const heldUp = () => { if (NI) Atomics.store(NI, HELD_SLOT, Atomics.load(NI, HELD_SLOT) + 1); };
+const heldDown = () => { if (NI) { Atomics.store(NI, HELD_SLOT, Math.max(0, Atomics.load(NI, HELD_SLOT) - 1)); Atomics.notify(NI, HELD_SLOT); } };
 const PI = profileSab ? new Int32Array(profileSab, 0, 4) : null, PB = profileSab ? new Uint8Array(profileSab, 16) : null;
 // the main thread's own beat GAPS ≥ hold − beat, a ring written by its beat ([count] + {end, gap} pairs, monotonic ms) —
 // nothing is lost between two of this thread's checks however late it is (the read-then-acknowledge race of round 2 is gone)
@@ -187,16 +197,19 @@ let inflight = null;   // THE one ask in flight — a hold's or the profile's, n
  *     the note slot), and no session exists across an exit (measured, Node 22 and 24: the debugger line is gone);
  *   · ON THE CPU: the session stays until the answer, at most SESSION_MS (a JavaScript answer comes in single-digit ms) —
  *     only so that an ask the held code cannot even ENTER (its stack within a frame of the limit) is told by the session's
- *     own RangeError: «the stack was nearly full», never «no JavaScript frame». The residual, said in the kb: an exit within
- *     SESSION_MS of an ask while the main thread computes in NATIVE code (a long JSON.parse) prints Node's debugger line. */
+ *     own RangeError: «the stack was nearly full», never «no JavaScript frame». An exit inside those SESSION_MS (it printed
+ *     Node's debugger line — B-f534) now finds the main thread's 'exit' asking this thread to close the session and waiting
+ *     for it, at most SESSION_MS + 5 ms (src/server/sync-fs-witness.js exitMark): after its mark nothing connects at all. */
 function post(q, keep) {
   if (!inspector || !NI) return false;
+  heldUp();   // B-f534: counted BEFORE the connect, EXITING read AFTER it — an exiting main thread is never connected to
+  if (exitingNow()) { heldDown(); return false; }
   let sess = null;
   try {
     sess = new inspector.Session(); sess.connectToMainThread();
     q.postedAt = mono();   // THE POST (after the connect): an answer's latency is measured from here
-    if (!keep) { sess.post('Runtime.evaluate', { expression: LH.SAMPLE_EXPR, silent: true }); sess.disconnect(); return true; }
-    q.sess = sess;
+    if (!keep) { sess.post('Runtime.evaluate', { expression: LH.SAMPLE_EXPR, silent: true }); sess.disconnect(); heldDown(); return true; }
+    q.sess = sess; openSessions.add(q);
     sess.post('Runtime.evaluate', { expression: LH.SAMPLE_EXPR, silent: true }, (err, r) => {
       if (!q.sess) return;   // closed under it: its answer comes through the note slot
       const ex = r && r.exceptionDetails, e = ex && ex.exception;
@@ -208,9 +221,9 @@ function post(q, keep) {
     });
     const t = setTimeout(() => closeSession(q), LH.SESSION_MS); t.unref?.();
     return true;
-  } catch { try { if (sess) sess.disconnect(); } catch { } q.sess = null; return false; }
+  } catch { try { if (sess) sess.disconnect(); } catch { } if (q.sess) openSessions.delete(q); q.sess = null; heldDown(); return false; }
 }
-function closeSession(q) { const s0 = q.sess; q.sess = null; if (s0) { try { s0.disconnect(); } catch { } } }
+function closeSession(q) { const s0 = q.sess; q.sess = null; if (s0) { openSessions.delete(q); try { s0.disconnect(); } catch { } heldDown(); } }
 /** the note slot, read whole or not at all (the seqlock) */
 function readNote() {
   if (!NI) return null;
@@ -769,10 +782,11 @@ if (parentPort && sab) {
   startCensus(censusEveryMs);   // unit loop-day-report M3: the census starts with the watchdog
   parentPort.on('message', (msg) => {
     if (answerMemory(msg, parentPort)) return; // the memory census (src/worker-memory.js)
+    if (msg && msg.ev === 'exiting') { for (const q of [...openSessions]) closeSession(q); return; }   // B-f534: the main thread is exiting and waits for this
     if (msg && msg.ev === 'profile') startProfile(msg);   // law L: the owner pressed «Profile the server for 10 minutes»
     if (msg && msg.ev === 'capture') startCapture(msg);   // commit 3: a CPU capture — the trigger's or the owner's door
     if (msg && msg.ev === 'census-take') takeCensus(msg);   // M3: the hour's census, taken (and started again)
   });
 }
 
-module.exports = { kernelWords, check, GAPS, SYSCALLS, SLOT_INTS, SLOT_FLOATS, SLOT_PATH, FLAG_SAMPLING, FLAG_DEBUGGER, FLAG_HEAP_HIGH, FLAG_KNOWN };
+module.exports = { kernelWords, check, GAPS, SYSCALLS, SLOT_INTS, SLOT_FLOATS, SLOT_PATH, EXIT_SLOT, HELD_SLOT, FLAG_SAMPLING, FLAG_DEBUGGER, FLAG_HEAP_HIGH, FLAG_KNOWN };

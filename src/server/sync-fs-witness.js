@@ -62,10 +62,16 @@ const REFUSAL = 'refused: a synchronous fs call on a storage mount from the main
 
 // the live slot's SharedArrayBuffer: Int32 [0 seq, 1 fn index, 2 path bytes, 3 heartbeat, 4 in flight, 5 store index + 1,
 // 6 flags (1 sampling on, 2 a debugger port open, 4 heap used past PROFILE_HEAP_SHARE of its limit, 8 the setting KNOWN
-// — all read HERE, on the main thread: inspector.url() in a worker is always undefined), 7 the watchdog's acknowledgement
-// of the largest beat gap] · Float64 [startedAt, the last beat's time, the main thread's OWN largest beat gap since the
+// — all read HERE, on the main thread: inspector.url() in a worker is always undefined), 7 EXITING (B-f534: stored HERE at
+// the process's 'exit', read by the watchdog before every connect)] · Float64 [startedAt, the last beat's time, the main thread's OWN largest beat gap since the
 // watchdog last acknowledged (a hold exists only when the main thread's own beats say so)] · path
 const SLOT_INTS = 8, SLOT_FLOATS = 3, SLOT_PATH = 1024;
+const EXIT_SLOT = 7, HELD_SLOT = 7;   // B-f534: the live slot's [7] = this thread is exiting (it writes) · the note slot's [7] = sessions the watchdog holds (it writes)
+// B-f534: ONE 'exit' listener for the process, whatever the number of witnesses a suite makes (never one listener each: past ten,
+// Node warns of a leak) — each live witness's exitMark is in this set from its watchdog's start to its stop
+const EXIT_MARKS = new Set();
+let exitHooked = false;
+function onProcessExit() { for (const f of [...EXIT_MARKS]) { try { f(); } catch { } } }
 const FLAG_SAMPLING = 1, FLAG_DEBUGGER = 2, FLAG_HEAP_HIGH = 4, FLAG_KNOWN = 8;
 const NOTE_BYTES = 16 * 1024, PROFILE_BYTES = 64 * 1024, GAPS = 16;
 /** EVERY LENGTH FROM A CLOCK THAT CANNOT STEP: the process's monotonic clock (uv_hrtime — the SAME clock on the watchdog
@@ -291,8 +297,9 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
   // leaves: the watchdog closed its session as it posted), `z` (the sample's ENTERED cell + the beat count then — plain
   // stores, no call) and `b` (this slot: the beat count at I[3])
   // the note slot: [seqlock, count, bytes, beat (−1 = written inside the beat itself), ENTERED, beat at entry, the sample's
-  // OWN RUN in µs (commit 3: its first instruction → its note — the capture sums what its asks cost this thread), -] +
-  // the monotonic time of the sample's first instruction + the bytes; THIS thread is its ONE writer, one sample at a time (the watchdog keeps ONE ask
+  // OWN RUN in µs (commit 3: its first instruction → its note — the capture sums what its asks cost this thread), the count of
+  // inspector sessions the watchdog holds (B-f534: [7], the WATCHDOG its one writer)] + the monotonic time of the sample's first
+  // instruction + the bytes; THIS thread writes the rest, one sample at a time (the watchdog keeps ONE ask
   // in flight; a sample never runs inside another — the inspector drains its queue one message after another)
   const noteSab = new SharedArrayBuffer(40 + NOTE_BYTES), NI = new Int32Array(noteSab, 0, 8), NF = new Float64Array(noteSab, 32, 1), NB = new Uint8Array(noteSab, 40);
   const Z = new Int32Array(noteSab, 16, 2);
@@ -388,14 +395,36 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
         worker.on('error', (e) => { workerGone = true; try { log.warn?.(`[sync-fs] the watchdog thread stopped — ${e && e.message}; the witness keeps its post-mortem`); } catch { } });
         worker.on('exit', () => { workerGone = true; });
         worker.unref();
+        EXIT_MARKS.add(exitMark); if (!exitHooked) { exitHooked = true; process.once('exit', onProcessExit); }   // B-f534: the stop leaves no watchdog session behind
       } catch (e) { try { log.warn?.(`[sync-fs] no watchdog thread (${e && e.message}) — the witness keeps its post-mortem`); } catch { } }
     }
     return api;
   }
-  function stop() { clearInterval(timer); clearInterval(beat); try { worker && worker.terminate(); } catch { } try { holds && holds.stop(); } catch { } LB.setHook(null); }
+  /** B-f534: NO SESSION ACROSS A STOP. Node prints «Waiting for the debugger to disconnect…» when the process exits with an
+   *  inspector session attached — the watchdog keeps one up to SESSION_MS while it asks this thread ON THE CPU. At the 'exit'
+   *  (every exit that runs its listeners: the signal's shutdown, an uncaught exception's, any process.exit) THIS thread marks EXITING
+   *  (the watchdog reads it before every connect), then reads how many sessions the watchdog holds; none (the usual exit) ⇒
+   *  nothing is waited. One or more ⇒ it asks the watchdog to close them and waits for the count to reach 0 — at most
+   *  SESSION_MS + 5 ms, the session's own bound; a starved watchdog past that leaves Node's one line, as before. */
+  let exitSeen = null;
+  function exitMark() {
+    if (!worker || workerGone || exitSeen) return exitSeen;
+    Atomics.store(I, EXIT_SLOT, 1);
+    let n = Atomics.load(NI, HELD_SLOT);
+    const held = n;
+    if (n > 0) {
+      try { worker.postMessage({ ev: 'exiting' }); } catch { }
+      const until = mono() + LH.SESSION_MS + 5;   // the monotonic clock itself (never a suite's injected `now`)
+      while (n > 0) { const left = until - mono(); if (left <= 0) break; try { Atomics.wait(NI, HELD_SLOT, n, left); } catch { break; } n = Atomics.load(NI, HELD_SLOT); }
+    }
+    exitSeen = { held, left: n };
+    return exitSeen;
+  }
+  function stop() { clearInterval(timer); clearInterval(beat); EXIT_MARKS.delete(exitMark); try { worker && worker.terminate(); } catch { } try { holds && holds.stop(); } catch { } LB.setHook(null); }
 
   const api = {
-    start, stop, refresh, heldIn, hook, counts,
+    start, stop, refresh, heldIn, hook, counts, exitMark,
+    exitSeen: () => exitSeen,   // B-f534: what the exit found ({held, left} sessions) — a suite reads it in a later 'exit' listener
     roots: () => roots.slice(),
     arm: (v = true) => { isArmed = !!v; },
     /** server.js, once telemetry / the settings / the mounts registry exist (the boot trace started the witness earlier). */
@@ -466,4 +495,4 @@ function bootSetting(dataDir, readFile = (p) => fs.readFileSync(p, 'utf8')) {
   try { const v = JSON.parse(text)[SAMPLING_SETTING]; return v === false ? false : true; } catch { return null; }
 }
 
-module.exports = { create, bootSetting, heldWithin, loopHeldMs, callWords, heldLine, guardError, REFUSAL, SETTING, SAMPLING_SETTING, RING_KEEP, RING_MS, HELD_MS, EPISODE_MS, LIVE_MS, ROOTS_EVERY_MS, ROOT_MEMO_MAX, ROOT_MEMO_PATH_MAX, SLOT_INTS, SLOT_FLOATS, SLOT_PATH, FLAG_SAMPLING, FLAG_DEBUGGER, FLAG_HEAP_HIGH, FLAG_KNOWN };
+module.exports = { create, bootSetting, heldWithin, loopHeldMs, callWords, heldLine, guardError, REFUSAL, SETTING, SAMPLING_SETTING, RING_KEEP, RING_MS, HELD_MS, EPISODE_MS, LIVE_MS, ROOTS_EVERY_MS, ROOT_MEMO_MAX, ROOT_MEMO_PATH_MAX, SLOT_INTS, SLOT_FLOATS, SLOT_PATH, FLAG_SAMPLING, FLAG_DEBUGGER, FLAG_HEAP_HIGH, FLAG_KNOWN, EXIT_SLOT, HELD_SLOT };
