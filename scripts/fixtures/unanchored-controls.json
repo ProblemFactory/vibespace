@@ -214,7 +214,7 @@
   "test-grants-store.mjs": 2,
   "test-groups-sweep-on-change.mjs": 1,
   "test-harness-contract.mjs": 7,
-  "test-harness-spawn.mjs": 13,
+  "test-harness-spawn.mjs": 16,
   "test-helper-ask.mjs": 31,
   "test-inbox-reply-ui.mjs": 2,
   "test-inbox-reply.mjs": 5,
