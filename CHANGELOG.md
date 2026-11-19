@@ -189,12 +189,16 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The storage access boxes no longer point below at a Connect button that sits above them.
 - Mounting a folder from an offline machine now says it is offline first, with its pairing command.
 - In a Claude chat, a second Rewind to here waits for the first one's answer, and a message sent in that first minute comes back to the box.
+- A website sign-in left behind by a page in a conversation's Agent browser (it went elsewhere) now ends at once with its For you item; it stayed 10 minutes.
+- A running Codex conversation's Agent steps in its Properties now show the plan it is working through; they were always empty.
 
 ### Security
 - A cluster install can let only its ingress reach each user's VibeSpace (networkPolicy.ingress, off until tried on a test cluster).
 - On browsers older than mid-2025, a chat link written with a crafted title can no longer run code.
 - An agent can no longer change the limits on turns nobody typed or the judge's daily spend cap: only your own page can; an agent that tries is told to ask you.
 - With sign-in off, Settings › Spending says that anything reaching VibeSpace could still change those limits, with a button to set a password.
+- When you take over a conversation's Agent browser, what you type into a website's sign-in boxes stays in them; it used to go to the page.
+- A live view of a conversation's Agent browser opened with an agent's or a key's token can no longer answer a website's sign-in.
 
 ## 2.369.410 — 2026-11-18
 
