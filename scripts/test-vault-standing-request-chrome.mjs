@@ -9,7 +9,8 @@
 //      ONE card in For you — its words (who, the command, until you revoke it) and its TWO answers «允许（常驻）» / «拒绝»; the
 //      owner's Allow (验证是你) ⇒ two segments run with NO card
 //   ③ THE VAULT ROW: the chip «Transcriber · 命令 python3 transcribe.py · agent 申请 · HH:MM ✕»; 「谁可以用…」 explains «主机» and
-//      offers «不知道怎么填？让 agent 自己申请。»
+//      offers «不知道怎么填？让 agent 自己申请。» in plain words — the agent asks for exactly this grant; no command, no CLI name in the
+//      sentence (ui-plain-words pick 4 took them out; bl-vault-ckpt61-hosted-cure restated the leg)
 //   ④ THE CARD'S «总是（这条命令）»: a run of ANOTHER script draws its card with the button and its plain words; Always (验证是你)
 //      ⇒ the next run of it goes with no card; the chip says «卡片上的总是»
 //   ⑤ THE PHONE (390 px): a second standing card and the Vault row at phone width
@@ -53,7 +54,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, anchored } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
@@ -212,7 +213,12 @@ try {
   await A.shot('vsr-2-vault-row-desktop.png');
   await A.evalJs(`(() => { const r = ${LIST_ROW(LABEL)}; const b = r && r.querySelector('.vw-use-grant'); if (b) b.click(); return !!b; })()`);
   const dlg = await A.until(`(() => { const d = document.getElementById('vault-use-grant'); if (!d) return null; const w = d.querySelector('.vw-use-hosts-what'), a = d.querySelector('.vw-use-ask-agent'), c = d.querySelector('.vw-use-cmds'), h = d.querySelector('.vw-use-hosts'); return w && a ? { what: w.textContent, ask: a.textContent, cmds: c ? c.textContent : '', order: !!(h && (h.compareDocumentPosition(a) & Node.DOCUMENT_POSITION_FOLLOWING) && (w.compareDocumentPosition(h) & Node.DOCUMENT_POSITION_FOLLOWING)) } : null; })()`, { timeout: 6000 });
-  check('「谁可以用…」 says what a 主机 is (e.g. api.openai.com), and «不知道怎么填？让 agent 自己申请。» naming the request sits right under the host field; the command member is kept', !!dlg && /主机就是命令带着它连去的地方/.test(dlg.what) && /api\.openai\.com/.test(dlg.what) && /不知道怎么填？让 agent 自己申请。/.test(dlg.ask) && /--standing/.test(dlg.ask) && new RegExp(`${reEsc(PYN)} transcribe\\.py（保留）`).test(dlg.cmds) && dlg.order === true, dlg);
+  // bl-vault-ckpt61-hosted-cure (the hosted proof of checkpoint 61, ac70cf7ee): the hint is PLAIN WORDS since ui-plain-words pick 4
+  // (1714e3f61, vault-grants-3) — the agent asks for exactly this grant, one card to allow; NO command and NO CLI name in the sentence.
+  // The leg pins the sentence as drawn and the ABSENCE of a flag / a CLI name (it pinned «--standing» there before)
+  const askPlain = (ask) => /不知道怎么填？让 agent 自己申请。/.test(ask) && /它会发给你一张卡片，正好是这条授权，你点允许即可——命令它自己知道。/.test(ask) && !/--[a-z]|vibespace-[a-z]/.test(ask);
+  check('RED control (ckpt61): the same hint with a command back in its sentence (the shape before pick 4) is refused', !!dlg && !askPlain(anchored(dlg.ask, '它会发给你一张卡片', '它会用 vibespace-vault request --standing 申请，发给你一张卡片', 'ckpt61: a command back in the hint')), dlg && dlg.ask);
+  check('「谁可以用…」 says what a 主机 is (e.g. api.openai.com), and «不知道怎么填？让 agent 自己申请。» — in plain words, the agent asks for exactly this grant, NO command and no CLI name — sits right under the host field; the command member is kept', !!dlg && /主机就是命令带着它连去的地方/.test(dlg.what) && /api\.openai\.com/.test(dlg.what) && askPlain(dlg.ask) && new RegExp(`${reEsc(PYN)} transcribe\\.py（保留）`).test(dlg.cmds) && dlg.order === true, dlg);
   await A.evalJs(`(() => { const a = document.querySelector('#vault-use-grant .vw-use-ask-agent'); if (a) a.scrollIntoView({ block: 'center' }); return true; })()`);
   await sleep(200);
   await A.shot('vsr-3-who-may-use-dialog-desktop.png');
