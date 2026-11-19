@@ -391,8 +391,10 @@ const ROW = `(() => {
   // press opens Settings at that setting. RED CONTROLS: the same rule over the note without its door, and over the old menu-path words.
   const legF = (r) => !!r && r.on && /judged once: is it an answer to it\?/.test(r.words || '') && !/Settings ›/.test(r.note || '') && !!r.door && r.door.label === 'How long after…' && !!r.door.title && !r.off;
   ok(legF(r1), 'F desk: ticked ⇒ the note says what is judged, once — no menu path in its words — and its own line carries the «How long after…» door to the window\'s setting; the plugin on ⇒ no off line', r1);
-  await pg.press('.chan-af-infer-note .need-doors [data-door="settings:channels.replyInferHours"]');
+  const pressed = await pg.press('.chan-af-infer-note .need-doors [data-door="settings:channels.replyInferHours"]');
+  const landed = await pg.until(`(window.__settingsOpened || []).length > 0`, 20);
   const opened = await pg.ev(`(window.__settingsOpened || []).slice(-1)[0] || null`);
+  ok(pressed !== null && pressed !== false && landed, 'F desk: the door was found and pressed, and Settings was asked to open', { pressed, landed });
   ok(!!opened && opened.search === 'Judge a plain reply to an agent\'s message for (hours)' && opened.search === r1.door.title, 'F desk: a REAL press on that door opens Settings searched for the setting\'s own label («Judge a plain reply to an agent\'s message for (hours)»)', opened);
   ok(legF(r1) && !legF({ ...r1, door: null }) && !legF({ ...r1, note: r1.note + ' How long after the agent\'s message: Settings › Channels.' }), 'F desk RED CONTROLS: the rule fails on the note without its door (a page with no Settings door — the hosted red) and on the old words with the menu path');
   ok(!r0.chip && r1.chip && r1.chip[0] === 'live' && r1.chip[1] === 'judged: live', 'lane judged-watch-state: unticked ⇒ no chip; ticked ⇒ «judged: live»', [r0.chip, r1.chip]);
