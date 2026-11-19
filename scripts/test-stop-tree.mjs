@@ -550,23 +550,48 @@ console.log('§10 B-2c5c — the job\'s stop never ends a hub that runs inside i
   };
   const gIn = groupOf(JS, true), gOut = groupOf(JS, false);
   const GS = '    return PI.signalIdentity(stamp, sig, { group: !inGroup, what: `job ${job.id}` }).ok;';
-  const gx = groupOf(anchored(JS, GS, '    return PI.signalIdentity(stamp, sig, { group: true, what: `job ${job.id}` }).ok;', 'group-signal-hub-cut'), true);
+  const gx = groupOf(anchored(JS, GS, '    return PI.signalIdentity(stamp, sig, { group: true, what: `job ${job.id}` }).ok;', 'group-signal-hub-cut'), true);   // stale-pins: kept — the control plants the older group signal in a copy
   ok(gIn.join() === 'said,SIGTERM group=false,tree group=true,SIGKILL group=false' && gOut.join() === 'SIGTERM group=true,tree group=false,SIGKILL group=true',
     'the engine\'s stop of a job whose process group holds this hub: the wrapper ALONE hears it (said once), a SIGKILL ends the whole tree by identity (the group\'s members too, the hub\'s pruned); otherwise the group as before', { gIn, gOut });
   ok(gx.includes('SIGTERM group=true'), 'CONTROL (the group signal back, in a copy): the job\'s group signal reaches the hub — RED', gx);
   // (d) the engine's one test, by the REAL parent chain: this process (the stand-in hub) and its own child are the hub's; pid 1 is not
-  const JM = require(path.join(ROOT, 'src/jobs.js')).JobManager, own = (pid, wrappers = []) => JM.prototype._hubsOwn.call({ _wrappersHeld: () => wrappers }, pid);
+  const JM = require(path.join(ROOT, 'src/jobs.js')).JobManager, own = (pid, wrappers = [], wrapper = 0) => JM.prototype._hubsOwn.call({ _wrappersHeld: () => wrappers }, pid, wrapper);
   const kid = spawn('sleep', ['30'], { stdio: 'ignore' });
   await new Promise((r) => setTimeout(r, 100));
   const wrap = spawn('sh', ['-c', 'sleep 30; true'], { stdio: 'ignore' });   // a stand-in job wrapper (ours) and its job's process
   await new Promise((r) => setTimeout(r, 150));
   let jobKid = 0; try { jobKid = Number(String(fs.readFileSync(`/proc/${wrap.pid}/task/${wrap.pid}/children`, 'utf8')).trim().split(/\s+/)[0]) || 0; } catch { }
   const kidOwn = own(kid.pid), selfOwn = own(process.pid), initOwn = own(1), jobOwn = jobKid ? own(jobKid, [[wrap.pid, 0]]) : null, jobNoStop = jobKid ? own(jobKid, []) : null;
+  // its read r2 (R1): `kid` stands for ANOTHER job's wrapper the hub spawned (it sits in this job's scope once the hub runs inside it): with
+  // THIS job's wrapper named it is the hub's; with every held wrapper as the stop (r1's form) it read as this job's — killed with it
+  const otherOwn = own(kid.pid, [[kid.pid, 0], [wrap.pid, 0]], wrap.pid), otherR1 = own(kid.pid, [[kid.pid, 0], [wrap.pid, 0]]), jobOwnW = jobKid ? own(jobKid, [], wrap.pid) : null;
   try { kid.kill('SIGKILL'); } catch { } try { if (jobKid) process.kill(jobKid, 'SIGKILL'); } catch { } try { wrap.kill('SIGKILL'); } catch { }
+  ok(otherOwn === true && otherR1 === false && jobOwnW === false, 'the engine\'s _hubsOwn with the run\'s OWN wrapper: another job\'s wrapper the hub spawned stays the hub\'s (r1\'s every-held-wrapper stop read it as this job\'s — CONTROL, RED); this job\'s process is the job\'s', { otherOwn, otherR1, jobOwnW });
   ok(selfOwn && kidOwn && !initOwn && jobKid > 0 && jobOwn === false && jobNoStop === true, 'the engine\'s _hubsOwn: the hub and a process it started are the hub\'s; a JOB\'s process (under its wrapper, which the hub spawned) is the job\'s — the walk stops at the wrapper (without that stop it read as the hub\'s: the read\'s M1); pid 1 is not', { selfOwn, kidOwn, initOwn, jobOwn, jobNoStop });
-  ok(/!sent\.has\(id\.pid\) && !this\._hubsOwn\(id\.pid\) && PI\.aliveIdentity\(id\) === true/.test(JS) && /found = marked\.filter\(\(id\) => !this\._hubsOwn\(id\.pid\)\)/.test(JS) && (JS.match(/ownOf\(await this\._scopeProcs\(scope\)\)/g) || []).length === 2
+  // (e) its read r2 (R6): the WRAPPER's own test — compiled from its source, over REAL processes this suite started: the suite is the hub
+  // (the server.pid root), `wrap2` (sh, ours) the wrapper, its child the job's process; and hubShaped over real node processes
+  const wrap2 = spawn('sh', ['-c', 'sleep 30; true'], { stdio: 'ignore' }), hubKid2 = spawn('sleep', ['30'], { stdio: 'ignore' });   // the wrapper stand-in; a process the «hub» (this suite) runs
+  await new Promise((r) => setTimeout(r, 300));
+  let job2 = 0; try { job2 = Number(String(fs.readFileSync(`/proc/${wrap2.pid}/task/${wrap2.pid}/children`, 'utf8')).trim().split(/\s+/)[0]) || 0; } catch { }
+  // hubShaped over a STAND-IN /proc table (no process named like the hub is started here — test-architecture §57 keeps hub boots in
+  // scripts/hub-boot.mjs): its argv and its cwd, as the kernel would answer them
+  const D10 = path.join(D, 'hub10'), PROC10 = { 1001: [`node\0${D10}/server.js\0`, '/'], 1002: ['node\0server.js\0', D10], 1003: [`node\0${D10}/other.js\0`, D10], 1004: ['node\0server.js\0', '/var/empty'], 1005: ['sh\0-c\0sleep 30\0', D10] };
+  const fs10 = { readFileSync: (f) => { const m = /^\/proc\/(\d+)\/cmdline$/.exec(f); if (!m || !PROC10[m[1]]) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); return PROC10[m[1]][0]; },
+    readlinkSync: (f) => { const m = /^\/proc\/(\d+)\/cwd$/.exec(f); if (!m || !PROC10[m[1]]) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); return PROC10[m[1]][1]; } };
+  const shapedOf = (src) => new Function('fs', 'path', 'CHECKOUT', 'SERVER_JS', `${fnOf(src, 'function hubShaped(pid) {')}\nreturn hubShaped;`)(fs10, path, D10, path.join(D10, 'server.js'));   // eslint-disable-line no-new-func
+  const keptOf = (src, shaped) => new Function('keptOutHere', 'hubShaped', 'nodeOrUnknown', 'keptByChain', 'process', `${fnOf(src, 'function keptTest() {')}\nreturn keptTest();`)(() => [[process.pid, 0]], shaped, () => true, PI10.keptByChain, { pid: wrap2.pid });   // eslint-disable-line no-new-func
+  const sh = shapedOf(W), shapes = { abs: sh(1001), rel: sh(1002), other: sh(1003), relElsewhere: sh(1004), shell: sh(1005), gone: sh(1006) };
+  const k2 = keptOf(W, () => false), wk = { job: job2 ? k2(job2) : null, hub: k2(process.pid), hubKid: k2(hubKid2.pid) };
+  const STOPW = 'stop = new Set([process.pid]);';
+  const wkx = keptOf(anchored(W, STOPW, 'stop = null;', 'wrapper-kept-no-stop'), () => false), shx = shapedOf(anchored(W, '  if (args.includes(SERVER_JS)) return true;\n', '', 'hub-shaped-abs-cut'));
+  const ctl = { job: job2 ? wkx(job2) : null, abs: shx(1001) };
+  try { hubKid2.kill('SIGKILL'); } catch { } try { if (job2) process.kill(job2, 'SIGKILL'); } catch { } try { wrap2.kill('SIGKILL'); } catch { }
+  ok(job2 > 0 && wk.job === false && wk.hub === true && wk.hubKid === true && shapes.abs === true && shapes.rel === true && shapes.other === false && shapes.relElsewhere === false && shapes.shell === false && shapes.gone === false,
+    'the WRAPPER\'s hub test over real processes: the job\'s own process is the job\'s (the walk stops at the wrapper itself), the hub and what it runs are kept; a hub of this checkout is known by its argv (its server.js by path, or server.js with the checkout as cwd) — another script, server.js elsewhere, a shell, a gone pid are not', { wk, shapes });
+  ok(ctl.job === true && ctl.abs === false, 'CONTROLS (each cut, in a copy): without the wrapper\'s own stop the job\'s process reads as the hub\'s (no stop ends it); without the argv\'s path a hub booting by its absolute path is not known — each RED', ctl);
+  ok(/!sent\.has\(id\.pid\) && !this\._hubsOwn\(id\.pid, ownW\) && PI\.aliveIdentity\(id\) === true/.test(JS) && /found = marked\.filter\(\(id\) => !this\._hubsOwn\(id\.pid, ownW\)\)/.test(JS) && (JS.match(/ownOf\(await this\._scopeProcs\(scope\)\)/g) || []).length === 2 && /const ownOf = \(ps\) => ps && ps\.filter\(\(x\) => !this\._hubsOwn\(x, ownW\)\);/.test(JS)
     && /if \(r === 'hub'\) \{ run\._scopeEmpty = true; return this\._reapSaid\(job, run, scope, r, k\.out\); \}/.test(JS) && /else if \(r === 'hub'\) said\(this\._hubScopeWords\(ko\)\)/.test(JS)
-    && /scan\(\)\.filter\(\(id\) => !sent\.has\(id\.pid\) && !this\._hubsOwn\(id\.pid\)\)/.test(JS) && /\.\.\.\(hubInGroup \? \{ hub: true \} : \{\}\)/.test(JS) && /alone = !!this\._ctlJson\(job, run, 'stopping\.json'\) \|\| hubInGroup;/.test(JS)
+    && /scan\(\)\.filter\(\(id\) => !sent\.has\(id\.pid\) && !this\._hubsOwn\(id\.pid, ownW\)\)/.test(JS) && /\.\.\.\(hubInGroup \? \{ hub: true \} : \{\}\)/.test(JS) && /alone = !!this\._ctlJson\(job, run, 'stopping\.json'\) \|\| hubInGroup;/.test(JS)
     && /engine \? \(s\.alone \? \(s\.hub \? 'alone-hub' : 'alone'\) : 'engine'\)/.test(W) && /by === 'engine' \|\| by === 'intent' \|\| by === 'alone' \|\| by === 'alone-hub' \? intentTree\(\)/.test(W),
   'WIRING: the clear of kept processes (both walks) and the stop of a doubted run never signal the hub\'s (its mark is the job\'s); the reap and the stop ladder take a scope killed around the hub as done, said; a hub in the job\'s group makes the intent say `alone` + `hub` and the wrapper signals the job\'s processes itself (the read\'s M3)');
 }

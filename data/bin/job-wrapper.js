@@ -801,13 +801,19 @@ function keptTest() {
   // <data>/server.pid (it writes it once it listens, seconds into its boot) is named by its SHAPE — this checkout's server.js (M4); the
   // server.pid root counts only while it is a hub (a stale file's pid may be another process now)
   const shaped = new Map(), isHub = (p) => { if (!shaped.has(p)) shaped.set(p, hubShaped(p)); return shaped.get(p); };
-  const ko = keptOutHere().filter(([p, st]) => st || isHub(Number(p)));
+  // its read r2 (R3): the server.pid root (start 0) is dropped only when it is PROVEN not a hub — not node at all (a recycled pid); a
+  // hub run as pm2 / `node .` / a relative path keeps it
+  const ko = keptOutHere().filter(([p, st]) => st || isHub(Number(p)) || nodeOrUnknown(Number(p)));
   const keep = new Map(ko.map(([p, st]) => [Number(p), Number(st) || 0])), memo = new Map(), stop = new Set([process.pid]);
   return (pid) => { const p = Number(pid); if (!memo.has(p)) memo.set(p, keptByChain(p, keep, { stop, isRoot: isHub })); return memo.get(p); };
 }
 /** B-2c5c r1 (M4): a process that IS a VibeSpace hub of this checkout — `node …/server.js` by its argv (the checkout's own path, or
  *  `server.js` run from the checkout as its cwd). The wrapper lives at <checkout>/data/bin */
 const CHECKOUT = path.resolve(__dirname, '..', '..'), SERVER_JS = path.join(CHECKOUT, 'server.js');
+/** B-2c5c r2 (R3): is this pid's executable node — or unknown (its link unreadable: kept, never dropped on a guess)? */
+function nodeOrUnknown(pid) {
+  try { return /node/i.test(path.basename(fs.readlinkSync(`/proc/${pid}/exe`))); } catch { return true; }
+}
 function hubShaped(pid) {
   let args = [];
   try { args = fs.readFileSync(`/proc/${pid}/cmdline`, 'latin1').split('\0'); } catch { return false; }
