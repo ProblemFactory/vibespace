@@ -747,7 +747,7 @@ console.log('§10 B-2c5c — the job\'s stop never ends a hub that runs inside i
   // CONTROL (the refusal cut, in a copy): the stop goes on (marked — the stub stops the rest there)
   const onStopOf = (src, kept) => {
     const seen = [];
-    const env = { mainKept: () => kept, sayMainKept: (sig) => seen.push('said ' + sig), markStopping: () => { throw new Error('MARKED'); } };
+    const env = { seen, mainKept: () => kept, sayMainKept: (sig) => seen.push('said ' + sig), markStopping: () => { throw new Error('MARKED'); } };
     const f = new Function(...Object.keys(env), `let stopping = null, stopAt = 0, stopBy = '', refusedAt = 0; ${fnOf(src, 'function onStop(sig, at, by) {')}\nreturn (s, a, b) => { try { onStop(s, a, b); } catch (e) { seen.push(e.message); } return { seen: seen.join(), stopping, refusedAt }; };`)(...Object.values(env));   // eslint-disable-line no-new-func
     return f('SIGTERM', 1234, 'signal');
   };
