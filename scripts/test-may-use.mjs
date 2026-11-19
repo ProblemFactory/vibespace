@@ -38,7 +38,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -554,7 +554,7 @@ console.log('— ⑱ the section\'s ref is made once at the WINDOW\'s scope, nev
   const atWindow = (sp) => { const r = sp.indexOf('  const render = () => {'); return r > 0 && sp.split(REF).length === 2 && sp.indexOf(REF) < r && sp.split(MOUNT).length === 2 && sp.indexOf(MOUNT) > r && !/mountMayUse\(app, \(\) =>/.test(sp); };   // stale-pins: kept — the release's form, named on purpose (an absence check / the RED control's plant)
   ok(atWindow(SP), '⑱ mountMayUse is handed mayUseRef, made once beside findSession / refKey before render() — no arrow made inside a render is kept for the window\'s life');
   const OLD = 'winInfo._mayUse = mountMayUse(app, () => { const x = findSession(); return x ? { sessionKey: refKey, webuiId: x.webuiId || null } : null; });';   // stale-pins: kept — the release's form, named on purpose (an absence check / the RED control's plant)
-  const planted = SP.split(MOUNT).length === 2 ? SP.replace(MOUNT, OLD) : null;
+  const planted = anchored(SP, MOUNT, OLD, 'ref-in-render');
   ok(!!planted && planted.includes(OLD) && !planted.includes(MOUNT), '⑱ CONTROL plant: the mount stands once, and the copy makes its ref inside render as the release did');
   ok(!!planted && atWindow(planted) === false, '⑱ RED CONTROL: a ref made inside render (the leak) is caught');
 }
@@ -567,7 +567,7 @@ console.log('— ⑲ the asked scroll lands on the section ON the page at the fr
   ok(lands(SP), '⑲ the frame callback looks the section up in the body, scrolls it only when connected, and clears the focus flag only after the scroll');
   const NOW = '      if (winInfo._mayUseFocus) scrollToMayUse();\n';   // render's own line (onMayUsePainted holds the same words)
   const OLD = "      if (winInfo._mayUseFocus) { winInfo._mayUseFocus = false; requestAnimationFrame(() => { try { muSec.scrollIntoView({ block: 'start' }); } catch { } }); }\n";   // stale-pins: kept — the release's form, named on purpose (an absence check / the RED control's plant)
-  const planted = SP.split(NOW).length === 2 ? SP.replace(NOW, OLD) : null;
+  const planted = anchored(SP, NOW, OLD, 'flag-first');
   ok(!!planted && planted.includes(OLD) && !planted.includes(NOW), '⑲ CONTROL plant: the render\'s call stands once, and the copy clears the flag first and scrolls the captured section');
   ok(!!planted && lands(planted) === false, '⑲ RED CONTROL: the release\'s order (the flag cleared before the frame, the captured section scrolled) is caught');
 }
@@ -579,7 +579,7 @@ console.log('— ⑳ a Task Group is named from the HUB\'s answer first (facts.g
   const NAME = "const own = view && view.facts && Array.isArray(view.facts.groups) ? view.facts.groups.find((g) => g && String(g.id) === String(id)) : null; if (own && own.name) return String(own.name);";
   const fromAnswer = (s) => s.split(NAME).length === 2 && s.split('groupNameOf(app, r.groupId, st.data)').length === 2 && s.split('groupNameOf(app, p.id, st.data)').length === 2 && s.split('groupNameOf: (id) => groupNameOf(app, id, st.data)').length === 2;
   ok(fromAnswer(SEC), '⑳ groupNameOf reads the answer\'s own groups before the sidebar, and every row\'s call hands it the answer (how a row admits, an exception\'s name, a granted account)');
-  const planted = SEC.split(NAME).length === 2 ? SEC.replace(NAME, '') : null;
+  const planted = anchored(SEC, NAME, '', 'sidebar-alone');
   ok(!!planted && !planted.includes(NAME), '⑳ CONTROL plant: the answer-first lookup stands once, and the copy asks the sidebar alone');
   ok(!!planted && fromAnswer(planted) === false, '⑳ RED CONTROL: a section that names a group from the sidebar alone (the box run: a just-made group drawn by its id) is caught');
 }
@@ -591,7 +591,7 @@ console.log('— ㉑ the asked scroll lands AFTER the answer is drawn: the flag 
   const after = (sp, sec) => { const r = sp.indexOf('  const render = () => {'); return r > 0 && sp.split(HOLD).length === 2 && sp.split(ASK).length === 2 && sp.indexOf(ASK) < r
     && sp.split('mountMayUse(app, mayUseRef, { onPainted: onMayUsePainted })').length === 2 && sec.split("    paint();\n    try { if (typeof onPainted === 'function') onPainted(); } catch { }").length === 2 && sec.includes('painted: () => !!(st.data || st.error),'); };
   ok(after(SP, SEC), '㉑ the flag is cleared only once the answer is drawn; the section calls its onPainted after each paint; Properties hands it a window-scope onMayUsePainted that lands the asked scroll');
-  const planted = SP.split(HOLD).length === 2 ? SP.replace(HOLD, 'winInfo._mayUseFocus = false;') : null;
+  const planted = anchored(SP, HOLD, 'winInfo._mayUseFocus = false;', 'clear-at-scroll');
   ok(!!planted && !planted.includes(HOLD), '㉑ CONTROL plant: the held clear stands once, and the copy clears the flag at the first scroll');
   ok(!!planted && after(planted, SEC) === false, '㉑ RED CONTROL: a flag cleared at the first scroll (before the answer is drawn: the box run, the section 63 px down) is caught');
 }
