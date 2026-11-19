@@ -742,6 +742,7 @@ const ROUTE_ROWS = {
   peekNotifs: 'STASH — the conversation\'s OWN held notifications, keyed by its id; only _stashNotif writes them, for a delivery _notifyOwner addressed (owner / subscriber)',
   drainNotifs: 'STASH — the same store, taken by identity', spillNotifs: 'STASH — the same items written to the conversation\'s own read file',
   addressedNow: 'PUSH',   // r3: the parked-notification drain asks the predicate per item
+  printableNow: 'PUSH',   // lane bl-windows (the Task Groups store held unread): the parked drain's per-item judge — THE view verdict, and a held view keeps an undecided line unprinted
   claimNotifs: 'STASH — the same items, claimed by identity (the carry stamp, through carry.claim) while the answer that rendered them waits for its confirm; nothing is shown or taken — the confirm, the next answer or the claim\'s bound releases them',   // .390 train seam (report-mark-on-ack's hook-route call)
 };
 // the held-notification item literals of a source: every `{…}` whose OWN keys include jobId, jobName, text and held (any order,

@@ -46,12 +46,14 @@ function createStore({ app, wss, WS_OPEN, activeSessions, grants, persistenceRou
     // THE STORE HELD UNREAD (lane bl-windows 2026-11-18): task-groups.json could not be read — the person is told ONCE by a For-you
     // notice (origin server, «This machine»), lifted when the store reads again. `userTodos` is a getter: server.js builds the
     // For-you store later than this one, so a hold at the boot is said once it exists (the store tries again; a throw = not yet)
+    // itemKey 'store': ONE item per (key, store) — a second held start finds the open one (user-todos' producer identity), never a second
     unreadNotice: {
-      say: (w) => { const td = userTodos(); if (!td) return null; const it = td.add('task-groups-unread', { origin: 'server', kind: 'notice', urgency: 'high', by: 'agent', sessionName: 'Task Groups', text: w.text, detail: w.detail, i18n: w.i18n }); return it && it.id ? it.id : null; },
+      say: (w) => { const td = userTodos(); if (!td) return null; const it = td.add('task-groups-unread', { origin: 'server', kind: 'notice', urgency: 'high', by: 'system', sessionName: 'Task Groups', itemKey: 'store', text: w.text, detail: w.detail, i18n: w.i18n }); return it && it.id ? it.id : null; },
       lift: (id) => { const td = userTodos(); if (!td || !id) return; const open = td.idsWhere((i) => i.id === id && i.status === 'open'); if (open.length) td.setStatusMany(open, 'done', 'system'); }, // only an OPEN one (a person's dismissal stays theirs)
       closeOpen: () => { const td = userTodos(); if (!td) throw new Error('the For-you store is not up yet'); const open = td.idsWhere((i) => i.sessionKey === 'task-groups-unread' && i.status === 'open'); if (open.length) td.setStatusMany(open, 'done', 'system'); },   // a held boot's notice, when a later start reads
     },
   });
+  require('../grant-model.js').setGroupsHeld(() => tasks.isHeldUnread());   // THE STORE HELD UNREAD: the grant model's doors judge a held store's groups UNKNOWN (lane bl-windows)
   const taskFanout = require('./task-fanout.js').create({ list: () => tasks.list(), send: (json) => wss.clients.forEach((c) => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } }) }); // lane task-group-fanout: the ONE tasks-updated broadcaster ({epoch, base, seq} — a client off `base` re-fetches)
   return { tasks, taskFanout };
 }
@@ -61,7 +63,7 @@ function createStore({ app, wss, WS_OPEN, activeSessions, grants, persistenceRou
 function mountRoutes({ app, tasks, taskFanout, activeSessions, sameToken, serverSetting, sessionStatusKey, spendGuard }) {
   // THE STORE HELD UNREAD (lane bl-windows): every Task Groups route but the list answers a held store BY NAME (503, TASK_GROUPS_UNREAD)
   // before it reads a group (never «not found» for a store that is held, not empty); the list answers none, with `unread` saying why
-  app.use('/api/tasks', (req, res, next) => { const held = req.method === 'GET' && (req.path === '/' || req.path === '') ? null : tasks.unreadRefusal?.('this request'); if (held) return res.status(503).json({ error: held, code: 'TASK_GROUPS_UNREAD' }); next(); });
+  app.use('/api/tasks', (req, res, next) => { const held = req.method === 'GET' && (req.path === '/' || req.path === '') ? null : tasks.unreadRefusal?.('this request'); if (held) return res.status(503).json({ error: held, code: 'TASK_GROUPS_UNREAD', unread: tasks.unreadState() }); next(); });
   app.get('/api/tasks', (req, res) => { const at = taskFanout.mark(); const unread = tasks.unreadState?.() || null; res.json({ tasks: tasks.list(), ...at, ...(unread ? { unread } : {}) }); }); require('./task-context-routes.js').mount(app, { tasks, serverSetting }); // lane task-group-context: the Context table's preview + path probe (no new line — the size ratchet)
   app.post('/api/tasks', (req, res) => {
     try { res.json({ success: true, task: tasks.create(req.body || {}) }); }

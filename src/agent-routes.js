@@ -340,7 +340,7 @@ function drainNotifsUnderCap(jm, deliver, cid, ahead, log = console.log, carry =
   // the jobs engine's PARKED notifications (the ladder's retry park) ride this digest too, in the store's own shape
   // lane jobs-addressed-push r3: a parked copy is judged at the drain like a stashed one (THE predicate, jm.addressedNow) and a
   // subscriber's says so (`sub` — its line «(subscribed)», the owner's brackets inert: renderNotifStash)
-  const parked = (deliver ? parkedOf(deliver, cid, true) : []).filter((e) => typeof jm.addressedNow !== 'function' || jm.addressedNow(cid, ((e._retry && e._retry.meta) || {}).jobId));
+  const parked = (deliver ? parkedOf(deliver, cid, true) : []).filter((e) => typeof jm.addressedNow !== 'function' || (typeof jm.printableNow === 'function' ? jm.printableNow(cid, ((e._retry && e._retry.meta) || {}).jobId) : jm.addressedNow(cid, ((e._retry && e._retry.meta) || {}).jobId)));   // THE STORE HELD UNREAD (lane bl-windows): a parked line only a group proves stays parked while held
   const parkedItems = parked.map((e) => { const m = e._retry.meta || {}; return { jobId: m.jobId || null, jobName: m.jobName || m.jobId || null, text: (m.ev && m.ev.what) || '', ts: Number(e._retry.firstAt) || Number(e.ts) || 0, urgency: m.urgency || 'low', held: { kind: 'retrying', attempts: (e._retry.attempts || []).length }, ...(m.sub ? { sub: true } : {}) }; });
   const waiting = [...stashed, ...parkedItems].sort((a, b) => (Number(a.ts) || 0) - (Number(b.ts) || 0));
   if (!waiting.length) return '';
@@ -653,7 +653,9 @@ app.get('/api/agent/task-context', function taskContextRoute(req, res) {
     if (readTurnSigs(req, res, taskContextRoute, s, injectGroups)) return;   // lane task-group-fanout: the Context read, off the loop
     // lane report-mark-on-ack: every mark this answer would move is STAGED and moves when the hook confirms it carried it
     const carry = openCarry(s, { owner: key, route: 'SessionStart', turn: 'session start', confirm: TC.confirmable(req), sent: TC.sentAt(req), store: carryOutstanding });
-    let context = '';
+    // THE STORE HELD UNREAD (lane bl-windows): one line — the agent never runs as «in no group» in silence; FIRST, so every fit test
+    // below counts it (a line added after them was cut by capInline from the tail: the group report's class, 2026-09-23)
+    let context = (typeof tasks.unreadHookLine === 'function' && tasks.unreadHookLine()) || '';
     const B = (t) => Buffer.byteLength(String(t), 'utf-8');
     // r7: a once-per-session teaching rides only when it fits WHOLE beside what is committed (the pending preamble
     // rides above it) — else it waits for the first prompt-context and is NOT stamped seen
@@ -696,7 +698,7 @@ app.get('/api/agent/task-context', function taskContextRoute(req, res) {
       // r7: beside a 3 000-char preamble the 6.4 KB intro crossed the cap — its tail (the last tools' teaching) was
       // cut and it was stamped seen; now it waits for the first prompt when it does not fit whole.
       const intro = sessionToolsIntro(enabledTools(), { browserVariant: s._browserVariant, browserSet: browserSetFacts(s), browserDisplay: browserDisplayFacts(s), fileTools: fileToolsOf(s) });
-      if (intro && fitsHere(intro)) { context = intro; carry.stage('tools-intro', () => { s._toolsIntroSeen = true; }); }
+      if (intro && fitsHere(intro)) { context = context ? context + '\n\n' + intro : intro; carry.stage('tools-intro', () => { s._toolsIntroSeen = true; }); }
       else if (intro) console.log(`[inject] ${key}: the tools intro (${B(intro)} B) waits for the first prompt — it does not fit the ${Math.max(0, INLINE_CAP - INLINE_TAIL_MARGIN - pendingPreambleBytes(s))} B left under the inline cap beside the user's preamble`);
     }
     // Designated Group MANAGER: teach the admin verbs ONCE — whichever route
@@ -824,6 +826,8 @@ app.get('/api/agent/prompt-context', function promptContextRoute(req, res) {
     const rescueLine = tasks._persistRescueLine();
     const rescueReserve = () => (parts.some((p) => p.includes('persisted-output')) ? 0 : B(rescueLine) + 2);
     let tailHeld = carry.againBytes;   // bytes of the tail producers decided so far and not yet in `parts` (+ the «sent again» line's, lane report-mark-on-ack)
+    const heldLine = typeof tasks.unreadHookLine === 'function' ? tasks.unreadHookLine() : null;   // THE STORE HELD UNREAD (lane bl-windows): its room HELD like a tail producer's — every fit below counts it
+    if (heldLine) tailHeld += B(heldLine) + 2;
     const committed = () => B(parts.join('\n\n')) + pendingPreambleBytes(s) + (extraBlock ? B(extraBlock) + 2 : 0) + rescueReserve() + tailHeld;
     const roomLeft = () => Math.max(0, INLINE_CAP - INLINE_TAIL_MARGIN - committed());
     const fits = (text) => B(text) + 2 <= INLINE_CAP - INLINE_TAIL_MARGIN - committed();
@@ -1156,6 +1160,7 @@ app.get('/api/agent/prompt-context', function promptContextRoute(req, res) {
       const body = [extra, std, backlogNudge].filter(Boolean).join('\n');
       if (body) outParts.push(`<vibespace-reminder>${body}</vibespace-reminder>`);
     }
+    if (heldLine) outParts.unshift(heldLine);   // THE STORE HELD UNREAD: the same one line at every prompt while held — before the report's fit test (it counts it)
     // NEXT-TURN GROUP REPORTS (design-communication-panel §22 D2): every agent
     // group this conversation is in that has news since its last report
     // yields ONE report — on the next turn of ANY origin (lane stash-any-turn,

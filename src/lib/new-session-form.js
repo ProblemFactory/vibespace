@@ -507,7 +507,7 @@ export function installNewSessionForm(App) {
         const folder = (this.sidebar?._folderPaths?.(g) || [])[0] || '';
         const small = sheet ? `<small>${escHtml([folder, t('{n} session(s)', { n: members(g) })].filter(Boolean).join(' · '))}</small>` : '';
         return `<button type="button" class="ns-tg-item${i >= 0 ? ' on' : ''}" role="option" aria-selected="${i >= 0}" data-tg="${escHtml(g.id)}"><span class="ns-tg-ord">${i >= 0 ? i + 1 : ''}</span><span class="tvg-dot" style="--g-color:${escHtml(this.sidebar?.getTaskColor?.(g) || g.color || '')}"></span><span class="ns-tg-it"><span>${escHtml(groupName(g))}</span>${small}</span>${sheet ? `<span class="ns-tg-tick" aria-hidden="true">${i >= 0 ? '✓' : ''}</span>` : ''}</button>`;
-      }).join('') || `<div class="ns-pv-via dim">${escHtml(t('No Task Groups yet'))}</div>`;
+      }).join('') || `<div class="ns-pv-via dim">${escHtml(app.sidebar && app.sidebar._tasksUnread ? t("Task Groups cannot be read right now — For you says why") : t('No Task Groups yet'))}</div>`;   // THE STORE HELD UNREAD: the hold, never «none»
       menu.innerHTML = (sheet ? `<div class="ns-sheet-h"><span><b>${escHtml(t('Task Groups'))}</b> · ${escHtml(t('several, in the order tapped'))}</span><button type="button" data-tg-done>${escHtml(tc('sheet', 'Done'))}</button></div>` : '') + items;
     };
     draw();

@@ -718,7 +718,7 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
       }
       tgSec.appendChild(lbl);
     }
-    if (!(sidebar._tasks || []).filter(t => !t.archived).length) tgSec.insertAdjacentHTML('beforeend', `<div class="empty-hint">${escHtml(t('No Task Groups yet'))}</div>`);
+    if (!(sidebar._tasks || []).filter(t => !t.archived).length) tgSec.insertAdjacentHTML('beforeend', `<div class="empty-hint">${escHtml(sidebar._tasksUnread ? t("Task Groups cannot be read right now — For you says why") : t('No Task Groups yet'))}</div>`);
 
     // ── Agent permissions: Group manager delegation (issue #21) ──
     // Double-gated: this per-session toggle AND the global setting

@@ -122,7 +122,14 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
     viewerOf: (cid) => {
       try {
         if (!cid) return null;
+        // THE STORE HELD UNREAD (lane bl-windows): its Task Groups UNKNOWN — a view of no record (`live: false`, so nothing is refused
+        // as «in no group») MARKED held: the owner's lines are proven by its id; a line only a group could prove is KEPT and not
+        // printed (jobs.js printableNow) until the lift judges it
         const { addressableId } = require('../claude-lock-capture.js');
+        if (taskGroups && typeof taskGroups.unreadState === 'function' && taskGroups.unreadState()) {   // …with the live session's identity (an owner by session)
+          if (activeSessions) for (const [id, s] of activeSessions) if (addressableId(s) === cid) return { live: false, held: true, conversationId: cid, sessionId: id, sessionCreatedAt: s.createdAt || 0, groups: new Set() };
+          return { live: false, held: true, conversationId: cid, groups: new Set() };
+        }
         if (activeSessions) for (const [id, s] of activeSessions) {
           if (addressableId(s) !== cid) continue;
           const groups = taskGroups && typeof sessionStatusKey === 'function' ? taskGroups.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }) : [];

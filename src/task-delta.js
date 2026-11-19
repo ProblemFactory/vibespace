@@ -219,4 +219,11 @@ function applyStatusDelta(map, msg) {
   return out;
 }
 
-module.exports = { sentOf, groupChange, applyGroupPatch, applyTasksDelta, mirrorVerdict, fetchVerdict, frameStep, touches, metaChanged, statusChange, applyStatusDelta };
+/** THE STORE HELD UNREAD (lane bl-windows): a list answer carrying `unread` (the hub could not read task-groups.json) keeps the
+ *  page's mirror HELD — never loaded-and-empty → 'held' | 'load' */
+function listVerdict(data) { return data && data.unread ? 'held' : 'load'; }
+/** what a window showing ONE Task Group draws → 'show' | 'held' (the hold's words: the window STAYS) | 'loading' | 'gone' (closed —
+ *  only a mirror LOADED whole without the group: a held one never closes a window as «deleted elsewhere») */
+function windowVerdict(task, { loaded = false, unread = null } = {}) { return task ? 'show' : unread ? 'held' : !loaded ? 'loading' : 'gone'; }
+
+module.exports = { sentOf, groupChange, applyGroupPatch, applyTasksDelta, mirrorVerdict, fetchVerdict, frameStep, touches, metaChanged, statusChange, applyStatusDelta, listVerdict, windowVerdict };

@@ -412,6 +412,10 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (typeof taskInfo !== 'function') return undefined;
     try { return taskInfo(String(id)) || null; } catch (e) { log.warn?.(`[browser] the Task Group list could not be read (${id}) — ${e && e.message}`); return undefined; }
   };
+  /** THE STORE HELD UNREAD (lane bl-windows): a group the lookup could not answer because the store is HELD — its words, else null */
+  const heldTaskWords = (id) => { try { if (typeof taskInfo === 'function') taskInfo(String(id)); } catch (e) { if (e && e.code === 'TASK_GROUPS_UNREAD') return String(e.message); } return null; };
+  /** a NEW group row of a «who may use» patch: known / unknown — or, while the Task Group store is held, refused BY THE HOLD'S WORDS */
+  const knownTaskOrHeld = (tid) => { const f = taskFacts(tid); if (f === undefined) { const w = heldTaskWords(tid); if (w) throw namedError('TASK_GROUPS_UNREAD', w); } return f !== null; };
   /** "who may use" in log words (never a name — keys and ids) */
   const whoWords = (p) => { const U = B.whoMayUse(p); if (!U || U.mode === 'all') return 'all conversations'; if (U.mode !== 'only') return 'an owner shape this release cannot judge'; return 'only ' + (U.who.map((w) => (w.kind === 'session' ? w.id : 'Task Group ' + w.id)).join(', ') || 'nobody'); };
   const sampleEvery = guardSampleMs || limits.GUARD_SAMPLE_MS;
@@ -1376,7 +1380,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    *  route) — THE write's verdict over an empty record, so a create says the same refusals a PATCH says. Throws by name. */
   function rowFromUse(use, { knownKeys = null, label = '' } = {}) {
     const known = new Set(Array.isArray(knownKeys) ? knownKeys : []);
-    const uv = B.usePatchVerdict({ profile: { id: 'bp-00000000', label: String(label || ''), grantUse: { to: [{ kind: 'everyone' }], except: [] } }, use, knownTask: (tid) => taskFacts(tid) !== null, knownKey: (bk) => known.has(bk), conversationOf: conversationOfKey });
+    const uv = B.usePatchVerdict({ profile: { id: 'bp-00000000', label: String(label || ''), grantUse: { to: [{ kind: 'everyone' }], except: [] } }, use, knownTask: knownTaskOrHeld, knownKey: (bk) => known.has(bk), conversationOf: conversationOfKey });
     if (!uv.ok) throw namedError(uv.code, uv.error);
     return uv.row;
   }
@@ -1535,7 +1539,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       const bv = B.useBaseVerdict(p, patch.base);
       if (!bv.ok) throw namedError(bv.code, bv.error, { added: bv.added || [], removed: bv.removed || [] });
       const known = knownKeysOf(p, opts.knownKeys);
-      const v = B.usePatchVerdict({ profile: p, use: patch.use, knownTask: (tid) => taskFacts(tid) !== null, knownKey: (bk) => known.has(bk), conversationOf: conversationOfKey });
+      const v = B.usePatchVerdict({ profile: p, use: patch.use, knownTask: knownTaskOrHeld, knownKey: (bk) => known.has(bk), conversationOf: conversationOfKey });
       if (!v.ok) throw namedError(v.code, v.error);
       const wasStamp = B.useStamp(p), was = B.useDigestOf(p);
       const next = { ...p, grantUse: { to: v.row.to, except: v.row.except } };

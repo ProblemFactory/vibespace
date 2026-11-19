@@ -122,7 +122,7 @@ const vaultUseFacts = (caller) => {
     if (!s || s.isTmuxView || !caller || require('../claude-lock-capture.js').addressableId(s) !== caller.conversationId) continue;   // fork-safe: a pending fork shares its parent's id and is never picked
     let groupIds = [], groupsUnreadable = false;
     const tasks = getTasks && getTasks();
-    if (tasks && sessionStatusKey) { try { groupIds = tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }).map((g) => g.id); } catch { groupsUnreadable = true; } }
+    if (tasks && sessionStatusKey) { try { groupIds = tasks.groupIdsForGrant({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }); } catch { groupsUnreadable = true; } }   // a HELD store throws: UNREADABLE, never «in no group» (lane bl-windows)
     return { conversationKeys: require('../grant-model.js').conversationKeysOf(s, s._webuiId || id), groupIds, groupsUnreadable };
   }
   return { conversationKeys: caller && caller.conversationId ? [caller.conversationId] : [] };
@@ -190,7 +190,7 @@ require('../routes/vault.js').registerVaultRoutes(app, { vault, activeSessions, 
 // (src/server/automation-engine.js over PURE src/automation-keys.js), audited, and stops while the vault is locked
 // lane key-grant-everyone r2: a read that failed is SAID (`unreadable`) — the caller's groups judge a Task Group «除了», and []
 // would admit the conversation the owner left out of All agents (the engine refuses groups_unreadable instead)
-const automationGroupsRead = (s, id) => { const tasks = getTasks && getTasks(); if (!tasks || !sessionStatusKey) return { ids: [], unreadable: true }; try { return { ids: tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }).map((g) => g.id), unreadable: false }; } catch { return { ids: [], unreadable: true }; } };
+const automationGroupsRead = (s, id) => { const tasks = getTasks && getTasks(); if (!tasks || !sessionStatusKey) return { ids: [], unreadable: true }; try { return { ids: tasks.groupIdsForGrant({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }), unreadable: false }; } catch { return { ids: [], unreadable: true }; } };
 const automationGroupsOf = (s, id) => automationGroupsRead(s, id).ids;
 // lane automation-open-limits (the q-048 verify's M2): an open's limits judge the EFFECTIVE open — what it names, else the
 // account store's default and the instance's default model (the typed accessor ws-create's ladder reads)
@@ -1108,7 +1108,7 @@ function createSessionMessages(session, sessionId) {
         if (!hit) return { ids: [], unreadable: false, live: false };
         try {
           const key = sessionStatusKey ? sessionStatusKey(hit, hitId) : null;
-          return { ids: (tasks.groupsForSession({ sessionKey: key, cwd: hit.cwd, initialGroupId: hit._initialGroupId, initialGroupIds: hit._initialGroupIds }) || []).map((g) => g.id), unreadable: false };
+          return { ids: tasks.groupIdsForGrant({ sessionKey: key, cwd: hit.cwd, initialGroupId: hit._initialGroupId, initialGroupIds: hit._initialGroupIds }), unreadable: false };   // a HELD store throws: unreadable (lane bl-windows)
         } catch (e) { console.warn(`[browser] the Task Group list could not be read for ${bk} — ${e && e.message}`); return { ids: [], unreadable: true }; }
       },
       // lane grants-unify: "Who can use it" names a conversation by its CONVERSATION id in the ONE grants store — a browser
@@ -1127,6 +1127,7 @@ function createSessionMessages(session, sessionId) {
       taskInfo: (id) => {
         const tasks = getTasks ? getTasks() : null;
         if (!tasks) return null;
+        { const held = typeof tasks.unreadRefusal === 'function' ? tasks.unreadRefusal('a Task Group row') : null; if (held) { const e = new Error(held); e.code = 'TASK_GROUPS_UNREAD'; throw e; } }   // THE STORE HELD UNREAD (lane bl-windows): the hold's words, never «that group no longer exists»
         try { const t = tasks.get(String(id)); return t ? { title: String(t.title || ''), archived: !!t.archived } : null; }
         catch (e) { if (/not found/i.test(String(e && e.message))) return null; throw e; }
       },
@@ -1137,7 +1138,7 @@ function createSessionMessages(session, sessionId) {
       const tasks = getTasks ? getTasks() : null;
       if (!tasks || !s) return [];
       const key = sessionStatusKey ? sessionStatusKey(s, id) : null;
-      return (tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }) || []).map((g) => g.id);
+      return tasks.groupIdsForGrant({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds });   // a HELD store throws: its callers say groupsUnreadable (lane bl-windows)
     };
     let browserEnvMemo;
     // the pin route re-points a RUNNING session's indirection through the
@@ -1289,7 +1290,7 @@ function createSessionMessages(session, sessionId) {
       logins: browserLogins, // lane browser-login: the owner's save-login card's door
       getJobs: () => (getJobs ? getJobs() : null),
       bindingsLookup: (cid) => (jobBindings ? jobBindings.lookup(cid) : ''),
-      tasksForConversation: (cid) => { const tasks = getTasks ? getTasks() : null; return tasks ? (tasks.groupsForSession({ sessionKey: cid }) || []).map((g) => g.id) : []; },
+      tasksForConversation: (cid) => { const tasks = getTasks ? getTasks() : null; return tasks ? tasks.groupIdsForGrant({ sessionKey: cid }) : []; },   // a HELD store throws: the job's caller says groupsUnreadable (lane bl-windows)
       dialogs: browserDialogs,
       // lane browser-propose step 3: the proposal runner (created below, after the handback announcer it tells through) —
       // the routes reach it through this delegate: a claim's card + item, the user's Approve / Reject, a rejection told once

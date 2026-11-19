@@ -465,6 +465,29 @@ export function scratchHome(name, fsArg, dirs = ['.claude/projects', '.claude/se
   return home;
 }
 
+/** B-0d3e: THE ONE DOOR FOR A RED CONTROL'S EDIT. `src` with `anchor` (a string, or a RegExp) replaced by `to` (a string
+ *  or a replacer). The anchor must be in `src` exactly `count` times (1 by default; `count: 'any'` = at least once):
+ *  anything else THROWS BY NAME — «ANCHOR GONE» / «ANCHOR NOT UNIQUE: n times» with the control's name and the anchor's
+ *  first characters — so a control never builds nothing in silence, and the red says which product line moved.
+ *  A string anchor's `to` is literal; a RegExp anchor's string `to` reads `$1` as String.prototype.replace does; a replacer
+ *  is called once per match as replace calls it (match, …groups, offset, string), whatever `count` is. A RegExp that can
+ *  match the empty string is refused by name (it would "match" between every character); a sticky flag is ignored. */
+export function anchored(src, anchor, to, name, { count = 1 } = {}) {
+  const text = String(src);
+  const label = `${name ? `«${name}»: ` : ''}${String(anchor instanceof RegExp ? anchor : JSON.stringify(anchor)).slice(0, 80)}`;
+  let n, all = null;
+  if (anchor instanceof RegExp) {
+    all = new RegExp(anchor.source, anchor.flags.replace(/[gy]/g, '') + 'g');
+    if (new RegExp(`(?:${anchor.source})`, anchor.flags.replace(/[gy]/g, '')).test('') || [...text.matchAll(all)].some((m) => m[0] === '')) throw new Error(`ANCHOR MATCHES NOTHING ${label} — a RegExp anchor that can match the empty string marks no product line`);
+    n = [...text.matchAll(all)].length;
+  } else n = anchor === '' ? 0 : text.split(String(anchor)).length - 1;
+  if (!n) throw new Error(`ANCHOR GONE ${label} — the control's anchor is not in the source (move it with the product line)`);
+  if (count !== 'any' && n !== count) throw new Error(`ANCHOR NOT UNIQUE ${label} — ${n} times, the control expects ${count}`);
+  if (all) return count === 1 ? text.replace(new RegExp(anchor.source, anchor.flags.replace(/[gy]/g, '')), to) : text.replace(all, to);
+  const rep = typeof to === 'function' ? to : () => to;
+  return count === 1 ? text.replace(String(anchor), rep) : text.replaceAll(String(anchor), rep);
+}
+
 /** A suite's synthetic conversation id: `e2e00000-0000-4000-8000-<12 hex>`.
  *  Nothing else may mint one — the walk and discovery both refuse this family
  *  wherever it lands, which is the only guard that still works when the

@@ -5,7 +5,7 @@ import { t as tr } from './i18n.js';
 import { valueWord } from './value-words.js'; // lane ui-language: the board's state / urgency words live in the ONE door
 import { mergePendingBind, pendingBindVerdict, sweepPendingBinds } from './fork-groups.js';
 import { folderOf, insideFolder } from '../task-membership.js'; // PURE (lane open-task-binds): THE folder rule, the server's groupsForSession asks the same one
-import { applyTasksDelta, applyStatusDelta, frameStep, fetchVerdict, metaChanged } from '../task-delta.js'; // PURE (lane task-group-fanout): a broadcast is a DELTA in the hub's order
+import { applyTasksDelta, applyStatusDelta, frameStep, fetchVerdict, metaChanged, listVerdict } from '../task-delta.js'; // PURE (lane task-group-fanout): a broadcast is a DELTA in the hub's order
 import { pressResumeGroup } from './resume-pacer.js'; // lane resume-all-paced (L1): the group's button paces its resumes
 
 /**
@@ -81,6 +81,9 @@ export function installSidebarTasks(SidebarClass) {
   const hold = (list, msg) => { list.push(msg); if (list.length > HELD_MAX) list.shift(); };
 
   proto._onTasksDelta = function(msg, { replayed = false } = {}) {
+    // THE STORE HELD UNREAD: a frame after the hold (the lift's notify) asks the list again — and a frame landing while a
+    // fetch is in flight asks once more after it (that fetch may have been answered before the lift: held for ever else)
+    if (this._tasksUnread) { if (this._tasksFetching) this._tasksAskAgain = true; else this._fetchTasks(); return; }
     this._tasksHeld = this._tasksHeld || [];
     const step = frameStep(this._tasksMark, msg, { replayed });
     // an unordered frame (a suite's synthetic one) / a REPLAYED frame that still does not follow: a fetch covers it, the
@@ -326,6 +329,11 @@ export function installSidebarTasks(SidebarClass) {
       // lane task-group-fanout: …in the hub's order — the answer says where it sits ({epoch, seq}); it is dropped only when
       // a broadcast NEWER than it is already in the mirror, and the frames held while it was in flight are replayed after it
       if ((this._tasksGen || 0) !== gen && fetchVerdict(this._tasksMark, data) === 'drop') { this._tasksLoaded = true; this._tasksLoadErr = null; return; }
+      // THE STORE HELD UNREAD (lane bl-windows — 主开发 00:41Z MUST 3; AFTER the order guard above: nothing writes the mirror before it): the hub could not read task-groups.json — its empty list is NOT «no
+      // Task Groups»: the mirror stays HELD (never loaded-and-empty), so no Task Group / Task log window closes itself as «deleted
+      // elsewhere», no open refuses as «not found», no layout is pruned; the board says the hold; the lift's broadcast fetches again
+      if (listVerdict(data) === 'held') { this._tasksUnread = data.unread; this._tasks = []; this._tasksMark = null; if ((this._tasksHeld || []).splice(0).length) this._tasksAskAgain = true; this._tasksLoaded = false; this._tasksLoadErr = null; this._afterTasksChange({ type: 'tasks-updated', local: true, refetch: true }); return; }
+      this._tasksUnread = null;
       this._tasksGen = (this._tasksGen || 0) + 1;
       this._tasks = Array.isArray(data.tasks) ? data.tasks : [];
       this._tasksMark = { loaded: true, epoch: Number(data.epoch) || 0, seq: Number(data.seq) || 0 };
@@ -340,7 +348,12 @@ export function installSidebarTasks(SidebarClass) {
         this._tasksLoadWarned = true; // once per page — the reconnect retry is silent
         try { showToast(tr('Couldn’t load Task Groups — retrying on reconnect'), { type: 'error' }); } catch { }
       }
-    } finally { this._tasksFetching = false; }
+    } finally {
+      this._tasksFetching = false;
+      // a frame came while this fetch was out (the held branch of _onTasksDelta, or frames held across a held answer — the lift's,
+      // maybe): ask once more, held or not (an answer that loaded may predate that frame)
+      if (this._tasksAskAgain) { this._tasksAskAgain = false; this._fetchTasks(); }
+    }
   };
 
   proto._taskById = function(id) { return (this._tasks || []).find(t => t.id === id) || null; };
@@ -394,6 +407,7 @@ export function installSidebarTasks(SidebarClass) {
         // timeout) used to render a message that told the user — and the
         // engineer reading the report — NOTHING. Always name the status, and
         // leave a telemetry breadcrumb so it is diagnosable after the fact.
+        if (data && data.code === 'TASK_GROUPS_UNREAD') { showToast(tr("Task Groups cannot be read right now — nothing was recorded. For you says why and what to do."), { type: 'error' }); if (!this._tasksUnread) this._fetchTasks(); return null; }   // THE STORE HELD UNREAD: worded HERE, in the person's language (主开发 00:41Z (c)); the mirror learns the hold
         const detail = data.error || (raw && !raw.startsWith('<') ? raw.slice(0, 120) : '');
         showToast(`${tr('Task Group operation failed')} (HTTP ${res.status}${detail ? ' — ' + detail : ''})`, { type: 'error' });
         try { track('error', `task-api-${res.status}`, `${method} ${url}`); } catch { }
@@ -633,8 +647,9 @@ export function installSidebarTasks(SidebarClass) {
       pop.appendChild(row);
     }
     if (!tasks.length) {
-      const hint = document.createElement('div'); hint.className = 'empty-hint'; hint.textContent = tr('No Task Groups yet');
+      const hint = document.createElement('div'); hint.className = 'empty-hint'; hint.textContent = this._tasksUnread ? tr("Task Groups cannot be read right now — For you says why") : tr('No Task Groups yet');   // THE STORE HELD UNREAD: the hold, never «none»
       pop.appendChild(hint);
+      if (this._tasksUnread) return;   // …and nothing offers to create over it
     }
     const createRow = document.createElement('div'); createRow.className = 'session-detail-group-create';
     createRow.textContent = tr('+ New task');
@@ -854,6 +869,8 @@ export function installSidebarTasks(SidebarClass) {
       ]);
     };
     list.appendChild(addCard);
+    // THE STORE HELD UNREAD (lane bl-windows): every session would read «Untagged» — the hold is said above them
+    if (this._tasksUnread) { const hold = document.createElement('div'); hold.className = 'empty-hint task-board-unread'; hold.textContent = tr("Task Groups cannot be read right now — For you says why"); list.appendChild(hold); }
     if (!tagged.length && !untagged.length && !untaggedStopped) {
       const empty = document.createElement('div');
       empty.className = 'empty-hint task-view-empty';
@@ -921,7 +938,9 @@ export function installSidebarTasks(SidebarClass) {
       if (data?.task) { this._upsertTaskLocal(data.task); showToast(tr('Imported: {title}', { title: data.task.title })); this.app.openTaskDetail(data.task.id); }
     };
     addRow.append(addCard, importCard);
-    this.listEl.appendChild(addRow);
+    // THE STORE HELD UNREAD: the board says the hold where it would say «no groups», and offers no create / import over it
+    if (this._tasksUnread) { const hold = document.createElement('div'); hold.className = 'empty-hint task-board-unread'; hold.textContent = tr("Task Groups cannot be read right now — For you says why"); this.listEl.appendChild(hold); }
+    else this.listEl.appendChild(addRow);
 
     for (const task of this._taskBoardOrder()) {
       const keys = this._getTaskSessionKeys(task, sessions);

@@ -208,7 +208,7 @@ function create({ grants = null, dataDir = null } = {}) {
     const k = GM.principalKey(e);
     const own = r.to.filter((x) => GM.principalKey(x) === k);
     if (!own.length) return false;
-    return GM.admits([{ door: DOORS.watch, resource: String(res), to: own, except: exceptFor(own[0], r.except) }], { conversationKey: String(cid), groupIds: groups }).ok;
+    return GM.admits([{ door: DOORS.watch, resource: String(res), to: own, except: exceptFor(own[0], r.except) }], { conversationKey: String(cid), groupIds: groups, ...(GM.groupsHeld() ? { groupsUnreadable: true } : {}) }).ok;   // THE STORE HELD UNREAD (lane bl-windows): a held store's groups UNKNOWN
   }
   /** Any exception on the rows that decide one conversation's reach (the wake path re-asks reach only then). */
   function anyReachExcept(resList) { return resList.some((res) => rowOf(DOORS.reach, res).except.length > 0); }

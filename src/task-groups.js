@@ -56,11 +56,20 @@ const STORE_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && 
 const UNREAD_TEXT = "Task Groups cannot be read right now — {file} in VibeSpace's data folder could not be read ({code})"; // ui-words: an English KEY — the client words it through t() where the For-you item is drawn (zh / ja rows)
 const UNREAD_DETAIL = "It is kept exactly as it is: nothing writes it. Until it reads, Task Groups are not shown and nothing is recorded — an agent's progress line or a parked row is refused, and the agent is told. VibeSpace reads it again every few minutes and at every start; check the storage that holds the data folder."; // ui-words: an English KEY (zh / ja rows)
 const UNREAD_REFUSAL = "Task Groups: {act} was refused — {file} in VibeSpace's data folder could not be read ({code}); it is kept exactly as it is and read again every few minutes. Until it reads, Task Groups are not shown and nothing is recorded.";
+// THE WAY OUT FOR DAMAGED BYTES (主开发 00:41Z (a)): bytes that do not parse or are not the store's shape never read better by
+// themselves — the store stays HELD (never set aside and started empty by itself: an empty store agents then write into is worse
+// than a stop) and the words name the door: a backup put in its place is read within minutes; a file moved aside needs a restart
+// (a start then judges an absent file: no Task Groups)
+const UNREAD_TEXT_DAMAGED = "Task Groups cannot be read — {file} in VibeSpace's data folder is damaged"; // ui-words: an English KEY (zh / ja rows) — no {code}: a damaged file's «code» is an English why
+const UNREAD_DETAIL_DAMAGED = "It is kept exactly as it is: nothing writes it, and it will not read better by itself. Put a backup of it in its place (read within minutes), or move it aside and restart VibeSpace — a start then finds no file and begins with no Task Groups. Until then Task Groups are not shown and nothing is recorded."; // ui-words: an English KEY (zh / ja rows)
+const UNREAD_REFUSAL_DAMAGED = "Task Groups: {act} was refused — {file} in VibeSpace's data folder is damaged; it is kept exactly as it is. Put a backup in its place, or move it aside and restart VibeSpace. Until then nothing is recorded.";
+const damagedOf = (u) => !!u && (u.why === 'did not parse' || u.why === 'not the expected shape');
 const fillWords = (t, p) => t.replace(/\{(\w+)\}/g, (m, k) => (k in p ? String(p[k]) : m));
 /** the person's words while the store is held (the For-you notice, once) → {text, detail, i18n} */
 function unreadNoticeWords(u) {
   const p = { file: u.file, code: u.code };
-  return { text: fillWords(UNREAD_TEXT, p), detail: fillWords(UNREAD_DETAIL, p), i18n: { text: { key: UNREAD_TEXT, params: p }, detail: [{ key: UNREAD_DETAIL, params: p }] } };
+  const [T, D] = damagedOf(u) ? [UNREAD_TEXT_DAMAGED, UNREAD_DETAIL_DAMAGED] : [UNREAD_TEXT, UNREAD_DETAIL];
+  return { text: fillWords(T, p), detail: fillWords(D, p), i18n: { text: { key: T, params: p }, detail: [{ key: D, params: p }] } };
 }
 const crypto = require('crypto');
 const os = require('os');
@@ -431,16 +440,25 @@ class TaskGroupManager {
     this._unreadRetrySoon();
   }
   /** → whether the store is held (and what it is: { file, code, why, at }) — the routes' and the board's question */
-  unreadState() { return this._unread ? { ...this._unread } : null; }
+  unreadState() { return this._unread ? { ...this._unread, damaged: damagedOf(this._unread) } : null; }
+  /** → whether the store is held, without a copy (the grant model asks it at every judgment of a live agent) */
+  isHeldUnread() { return !!this._unread; }
+  /** THE MEMBERSHIP A GRANT IS JUDGED ON (主开发 00:41Z MUST 1): the ids of groupsForSession — or, while the store is HELD, a THROW by
+   *  name (code TASK_GROUPS_UNREAD): an empty list there reads as «in no Task Group» (an «All agents except G» row admits G's own; a
+   *  lease kept to G is detached). Every grant reader already maps a throw to UNREADABLE (the grant model refuses an undecided
+   *  group and keeps what it holds). groupsForSession itself stays non-throwing (its many plain readers). */
+  groupIdsForGrant(args) { this._refuseUnread('judging a grant by Task Group'); return (this.groupsForSession(args) || []).map((g) => g.id); }
+  /** the ONE line an agent's hook injection carries while the store is held (主开发 00:41Z (b)) — else null: never «in no group» in silence */
+  unreadHookLine() { const u = this._unread; return u ? `VibeSpace: Task Groups cannot be read right now — ${u.file} in VibeSpace's data folder ${damagedOf(u) ? 'is damaged' : 'could not be read'} (${u.code}). This conversation's Task Groups are UNKNOWN, not empty: their context is not shown and vibespace-task is refused until the store reads again.` : null; }
   /** an act that would record something, while the store is held: REFUSED BY NAME (code TASK_GROUPS_UNREAD) — the route answers it */
   _refuseUnread(act) {
     if (!this._unread) return;
-    const e = new Error(fillWords(UNREAD_REFUSAL, { act, file: this._unread.file, code: this._unread.code }));
+    const e = new Error(this.unreadRefusal(act));
     e.code = 'TASK_GROUPS_UNREAD';
     throw e;
   }
   /** → the refusal's words while held (else null) — for a caller that answers instead of throwing (the agent routes) */
-  unreadRefusal(act) { return this._unread ? fillWords(UNREAD_REFUSAL, { act, file: this._unread.file, code: this._unread.code }) : null; }
+  unreadRefusal(act) { return this._unread ? fillWords(damagedOf(this._unread) ? UNREAD_REFUSAL_DAMAGED : UNREAD_REFUSAL, { act, file: this._unread.file, code: this._unread.code }) : null; }
   /** the person is told ONCE (a For-you notice); a door not up yet (the boot builds it later) is tried again at the next read */
   _sayUnread() {
     if (!this._unread || this._unreadSaid || !this._unreadNotice) return;
@@ -2861,10 +2879,10 @@ class TaskGroupManager {
     return { version: 1, tasks: Object.values(this._state.tasks), ...(Object.keys(archive).length ? { archive } : {}) };
   }
   /** an imported group's archive months, MERGED into this instance's (by id, a cleared copy wins, time order), one tmp + rename per month */
-  _importArchive(id, months) {
+  _importArchive(id, months, read = null) {
     if (!archivableId(id) || !months || typeof months !== 'object') return;
-    const have = new Map(); // every month read FIRST (strict): one that could not be read refuses the import before any month is written
-    for (const [m, text] of Object.entries(months)) if (/^\d{4}-\d{2}$/.test(m) && typeof text === 'string') have.set(m, this._monthEntries(id, m + '.ndjson', { strict: true }));
+    const have = read instanceof Map ? read : new Map(); // every month read FIRST (strict): one that could not be read refuses the import before any month is written — importBundle hands the months it read for ALL groups (never read twice)
+    if (!(read instanceof Map)) for (const [m, text] of Object.entries(months)) if (/^\d{4}-\d{2}$/.test(m) && typeof text === 'string') have.set(m, this._monthEntries(id, m + '.ndjson', { strict: true }));
     for (const [m, text] of Object.entries(months)) {
       if (!/^\d{4}-\d{2}$/.test(m) || typeof text !== 'string') continue;
       const byId = new Map(have.get(m).map((p) => [p.id, p]));
@@ -2884,11 +2902,14 @@ class TaskGroupManager {
   importBundle(bundle) {
     this._refuseUnread('an import'); // THE STORE HELD UNREAD: refused BY NAME before anything moves
     const items = Array.isArray(bundle?.tasks) ? bundle.tasks : [];
+    // every group's archived months read STRICTLY first (主开发 00:41Z (e)): one that could not be read refuses the import before ANY group is applied — and what was read is what the loop merges (never a second read that could fail half-way)
+    const pre = new Map();
+    for (const raw of items) { if (!raw || typeof raw !== 'object' || typeof raw.id !== 'string' || !/^T-[\w-]{1,60}$/.test(raw.id) || !archivableId(raw.id)) continue; const months = bundle.archive && bundle.archive[raw.id]; if (!months || typeof months !== 'object') continue; const have = new Map(); for (const [m, text] of Object.entries(months)) if (/^\d{4}-\d{2}$/.test(m) && typeof text === 'string') have.set(m, this._monthEntries(raw.id, m + '.ndjson', { strict: true })); pre.set(raw.id, have); }
     let n = 0;
     for (const raw of items) {
       if (!raw || typeof raw !== 'object' || typeof raw.id !== 'string' || !/^T-[\w-]{1,60}$/.test(raw.id)) continue;
       const now = Date.now();
-      this._importArchive(raw.id, bundle.archive && bundle.archive[raw.id]);
+      { const rd = pre.get(raw.id); pre.delete(raw.id); this._importArchive(raw.id, bundle.archive && bundle.archive[raw.id], rd); }   // taken ONCE: the same id twice reads again after the first wrote
       this._legacy.delete(raw.id);   // the imported record is whole — no held old fields of a replaced one
       this._state.tasks[raw.id] = {
         id: raw.id,

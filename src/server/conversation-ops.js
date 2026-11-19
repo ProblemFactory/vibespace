@@ -421,6 +421,7 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
       for (const [from, to] of [['backend', 'backend'], ['mode', 'mode'], ['name', 'name'], ['model', 'model'], ['effort', 'effort'], ['permission', 'permissionMode'], ['task', 'taskId'], ['pool', 'accountId']]) if (args[from] != null) spec[to] = args[from];
       // --task: the Task Group is one the CALLER belongs to — conversations.bind's own rule (lane open-task-binds: the open now
       // writes the same membership a bind does, so it asks what a bind asks)
+      if (spec.taskId) { const held = O().tasksUnread ? O().tasksUnread('opening a conversation in a Task Group') : null; if (held) return { ok: false, code: 'TASK_GROUPS_UNREAD', why: held }; }   // THE STORE HELD UNREAD (lane bl-windows): by its name, never «not in that Task Group»
       if (spec.taskId && !(caller.groups || []).includes(spec.taskId)) return { ok: false, code: 'not_granted', reach: 'member', callerMistake: true, why: 'the calling conversation is not in that Task Group' };   // B-3190 follow-up r2: its own cause on the For-you card (no grant cures it)
       const birthBy = spec.taskId ? { name: caller.name || caller.sessionKey || caller.conversationId, key: keyId, session: caller.sessionKey || null } : null;
       const r = await O().openConversation(spec, byOf(caller, keyId), { birthBy });

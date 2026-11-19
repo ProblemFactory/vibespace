@@ -1138,7 +1138,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
           groups: Object.keys(state?.sessionGroups || {}).length,
         },
         bookmarks: { count: (bookmarks || []).length },
-        tasks: { count: (getTasks?.()?.list?.() || []).length },
+        tasks: { count: (getTasks?.()?.list?.() || []).length, ...(getTasks?.()?.unreadState?.() ? { unread: true } : {}) },   // THE STORE HELD UNREAD (lane bl-windows): never «0 groups» for a store that cannot be read
         pricing: (() => {
           const p = getUsageHistory?.()?.pricingTable?.() || {};
           return { count: Object.keys(p.tiers || {}).length + Object.keys(p.accounts || {}).length };

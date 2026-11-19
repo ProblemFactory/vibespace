@@ -41,6 +41,7 @@ export function clearErrorText(code, fallback = '') {
   switch (code) {
     case 'not_found': return t('no such record');
     case 'unavailable': return t('the records are not available right now — try again in a moment');
+    case 'TASK_GROUPS_UNREAD': return t("Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.");   // THE STORE HELD UNREAD (lane bl-windows): the hold (503) in the page's words — never «try again in a moment» for a damaged file
     case 'failed': return t('it could not be saved — nothing was changed');
     case 'ambiguous': return t('several entries share that time — reopen the window and try again');
     case 'unreachable': return t('server unreachable');
