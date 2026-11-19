@@ -282,12 +282,14 @@ console.log('a re-pair retires the older installs of the SAME hub, after the new
     return { log, calls: () => { try { return fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((l) => { const i = l.indexOf(' '); return { at: Number(l.slice(0, i)), line: l.slice(i + 1) }; }); } catch { return []; } } };
   };
   const agentArgv = ['-e', 'setInterval(() => {}, 1e6)', 'vibespace-device'];
-  const fakeAgent = () => { const c = spawn(process.execPath, agentArgv, { stdio: 'ignore', detached: true }); c.unref(); pids.push(c.pid); return c.pid; };
+  // B-8475: the installer stops a lock's pid only when it is an agent OF THAT ROOT (root_of_pid reads /proc/<pid>/environ) — so a
+  // fake agent carries its root as a real installed one does (its plist / unit sets both), never the runner's own environment
+  const fakeAgent = (root, home) => { const c = spawn(process.execPath, agentArgv, { stdio: 'ignore', detached: true, env: { PATH: process.env.PATH, HOME: home, VIBESPACE_DEVICE_ROOT: root, VIBESPACE_AGENTD_ROOT: root } }); c.unref(); pids.push(c.pid); return c.pid; };
   const innocent = () => { const c = spawn('sleep', ['600'], { stdio: 'ignore', detached: true }); c.unref(); pids.push(c.pid); return c.pid; };
   const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
   const SIB = { A: 'device@192.0.2.10', B: 'device@198.51.100.7', C: 'device@192.0.2.20', D: 'device@203.0.113.5', E: 'device@old.invalid' };
   const keyOf = (n) => n.replace(/[^A-Za-z0-9.-]/g, '-');
-  const world = (tag) => {
+  const world = (tag, { foreign = {} } = {}) => {   // foreign: { <sibling key>: a root } — that sibling's agent runs with ANOTHER root
     const h = path.join(S, `home-${tag}`), vs = path.join(h, '.vibespace');
     const sibs = {};
     for (const [k, n] of Object.entries(SIB)) {
@@ -295,7 +297,7 @@ console.log('a re-pair retires the older installs of the SAME hub, after the new
       const dial = { url: `ws://${n.slice(7)}:3456/api/device-dial?device=icdev`, token: 'vsdt_' + k.toLowerCase().repeat(43) };
       if (k === 'A' || k === 'B' || k === 'C') dial.hub = HUB; else if (k === 'D') dial.hub = OTHER_HUB;
       fs.writeFileSync(path.join(st, 'dial.json'), JSON.stringify(dial), { mode: 0o600 });
-      const pid = k === 'C' ? innocent() : fakeAgent();
+      const pid = k === 'C' ? innocent() : fakeAgent(foreign[k] || path.join(vs, n), h);
       fs.writeFileSync(path.join(st, 'agentd.lock'), String(pid));
       let item;
       if (k === 'B') { item = path.join(h, '.config', 'systemd', 'user', `vibespace-device-${keyOf(n)}.service`); }
@@ -319,7 +321,7 @@ console.log('a re-pair retires the older installs of the SAME hub, after the new
   const calls = w.stub.calls();
   const st = (() => { try { return JSON.parse(fs.readFileSync(path.join(w.root, 'state', 'dial-status.json'), 'utf8')); } catch { return {}; } })();
   ok(r.code === 0 && /✓ vibespace device agent running/.test(r.out), 'R-1: the install completes (the dial check, the daemon up)', r.out.slice(-900));
-  console.log('    · the install said:\n' + r.out.split('\n').filter((l) => /^(→ (retired|older installs|kept)|    device@)/.test(l)).map((l) => '      ' + l).join('\n'));
+  console.log('    · the install said:\n' + r.out.split('\n').filter((l) => /^(→ (retired|older installs|kept)|    device@|  ⚠)/.test(l)).map((l) => '      ' + l).join('\n'));
   ok(JSON.parse(fs.readFileSync(path.join(w.root, 'state', 'dial.json'), 'utf8')).hub === HUB, 'R-2: the new install\'s dial.json carries the hub id the check learned');
   const retiredLine = `→ retired 3 older installs of this hub: ${SIB.A}, ${SIB.C}, ${SIB.B} (kept under ~/.vibespace; their launch items moved to ~/.vibespace/disabled-launchagents/)`;
   ok(r.out.split('\n').includes(retiredLine) && r.out.indexOf(retiredLine) > r.out.indexOf('✓ vibespace device agent running'), 'R-3: the install SAYS it: «→ retired 3 older installs of this hub: <the dirs> (kept under ~/.vibespace; their launch items moved to …/disabled-launchagents/)» — after the daemon is up', r.out.slice(-900));
@@ -335,6 +337,20 @@ console.log('a re-pair retires the older installs of the SAME hub, after the new
   const unknownLine = `    ${SIB.E} — stop it with: launchctl bootout gui/$(id -u)/cc.vibespace.device.${keyOf(SIB.E)}; kill $(cat ~/.vibespace/${SIB.E}/state/agentd.lock)`;
   ok(fs.existsSync(w.sibs.E.item) && alive(w.sibs.E.pid) && !calls.some((c) => c.line.includes(keyOf(SIB.E))) && r.out.includes('→ older installs I cannot attribute, not touched:\n' + unknownLine + '\n'), 'R-10: an install whose hub is UNKNOWN (pre-change) is not touched — LISTED with its exact stop command', r.out.slice(-700));
   ok(DP.agentdDials.has('icdev') && fs.existsSync(path.join(w.root, 'state', 'dial.json')), 'R-11: the new install stays dialed in');
+  // R-8b (B-8475's rule, beside R-8): a lock whose pid is an agent of ANOTHER root (a recreated container's fresh pids) is never
+  // stopped — A's lock names an agent whose environment names another root; B's names its own agent and is stopped as in R-8.
+  // Linux only, as the suite is: the installer reads an agent's root from /proc/<pid>/environ (without /proc its old rule stands)
+  {
+    await stopRoot(w);
+    const other = path.join(S, 'home-elsewhere', '.vibespace', 'device@192.0.2.99'); fs.mkdirSync(other, { recursive: true });
+    const wf = world('foreign', { foreign: { A: other } });
+    const rf = await installIn(wf);
+    const warn = `  ⚠ ${SIB.A}'s lock names pid ${wf.sibs.A.pid}, an agent of another root (${other}) — not stopped`;
+    const goneB = await waitFor(() => !alive(wf.sibs.B.pid), 10000);
+    console.log('    · the install said:\n' + rf.out.split('\n').filter((l) => /^(→ (retired|older installs|kept)|    device@|  ⚠)/.test(l)).map((l) => '      ' + l).join('\n'));
+    ok(rf.code === 0 && rf.out.split('\n').includes(warn) && alive(wf.sibs.A.pid) && !!goneB && !fs.existsSync(wf.sibs.A.item) && fs.existsSync(path.join(dis(wf), path.basename(wf.sibs.A.item))), 'R-8b: an agent of ANOTHER root at a sibling\'s lock pid survives and the install says so («⚠ <sibling>\'s lock names pid <pid>, an agent of another root (<root>) — not stopped»); the sibling whose agent is its own is stopped (R-8); A is still retired (its launch item moved aside)', { code: rf.code, warned: rf.out.includes('an agent of another root'), A: alive(wf.sibs.A.pid), B: alive(wf.sibs.B.pid), out: rf.out.slice(-700) });
+    await stopRoot(wf);   // ② (learn) restarts the first world's daemon itself — it stops that root first in any case
+  }
 
   // ② the daemon learns its hub at its first ACCEPTED dial (an older install learns it when it next dials in): the new root's
   // dial.json without `hub`, the daemon restarted, the hub's own device client says hello (src/agentd/client.js, `hub`)
