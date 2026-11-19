@@ -95,6 +95,10 @@ const KNOWN_KEEPER = {
   copyPin: { why: 'a fork\'s COPY of a pin: a preference carried, never an authorization', order: ['reg.pins[toKey] = '], never: ['B.rowWithConversation(', 'writeUseRow(', 'p.owner =', 'reg.leases'] },
   // the .196 integration (lane-browser-key's late key): the spawn's WITNESSED pick restored under a late key — a preference
   // like copyPin's, so it writes the pin alone: never an owner (a witness widens nothing), never a lease
+  // the B-f276 remainder, its read r3 (S9): THE OWED ROAD — a create the held registry could not judge, judged at the read by the keeper
+  // itself (it moved in from ws-create: a moved door is a door to re-judge): the create's ONE verdict (the form's mayAttachAtCreate in
+  // it), then a fork's COPY or the setPin road (whose user pick writes the list through addConversation) — never a list write of its own
+  judgeOwedPin: { why: 'a pin a create owed to the held registry\'s read: the create\'s own verdict, then copyPin (a fork) or setPin — never its own list write', order: ['pinVerdictForCreate({ facts: f, hint: owed.hint || null, formGroups:', 'copyPin(String(f.forkParentKey), browserKey)', 'setPin(browserKey, pin.profileId, { origin: pin.origin, remote: !!owed.remote })'], never: ['B.rowWithConversation(', 'writeUseRow(', 'p.owner =', 'reg.pins[', 'reg.leases', 'addConversation('] },
   restorePin: { why: 'the late key restores the pick its spawn WITNESSED at the start: a preference, never an owner, never a lease', order: ['B.isPinWitness(witness)', 'reg.pins[browserKey] = '], never: ['B.rowWithConversation(', 'writeUseRow(', 'p.owner =', 'reg.leases', 'addConversation('] },
   ensureEphemeral: { why: 'a conversation\'s OWN managed browser: the record it leases is the one whose owner is its key', order: ["isEph(x) && x.owner.id === bk", "owner: { kind: 'conversation', id: bk }", 'reg.leases.push(l)'] },
   updateProfileNow: { why: 'the PATCH: a remote key is never a known key, the list is judged by usePatchVerdict, then written through the ONE writer, then the leases re-judged', order: ['knownKeysOf(p, opts.knownKeys)', 'B.usePatchVerdict(', 'writeUseRow(p, v.row', 'rejudgeLeases('] },

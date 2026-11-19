@@ -1354,13 +1354,16 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 const pinFacts = { explicit: data.browserProfileId || '', priorKey: prior, forkParentKey, taskGroupDefault, resume: !!(data.resume && data.resumeId), fork: !!data.fork };
                 const hint = data.spawnOriginHint && typeof data.spawnOriginHint === 'object' ? data.spawnOriginHint.browserProfile : null;
                 const formGroups = Array.isArray(data.taskIds) ? spawnGroups : null;
-                pin = typeof kp.pinVerdictForCreate === 'function' ? kp.pinVerdictForCreate({ facts: pinFacts, hint, formGroups }) : kp.pinForCreate(pinFacts);
+                pin = kp.pinVerdictForCreate({ facts: pinFacts, hint, formGroups });
                 // the B-f276 remainder (bl-jobs): a HELD profile registry names no profile — the pin is never «no longer exists»: this
                 // create OWES its pin to the registry's read (its read r2, M3: keyed by the conversation's browser key in the keeper,
                 // carried by the conversation's record for a restart — never a live session's closure), judged by the same verdict
                 if (pin.held) {
                   console.warn(`[browser] ${id}: ${pin.refused} — its pin is judged once the registry reads`);
-                  pinOwed = { facts: pinFacts, hint: hint || null, formGroups, remote: !!data.hostId, groupFacts: { cwd, hostId: data.hostId || null, initialGroupId: spawnGroups[0] || null, initialGroupIds: spawnGroups } };
+                  // its read r3 (S8): the defaults AT THE START ride the facts — the instance default's raw setting and the Task Group's cap
+                  // (both readable without the registry), judged with them later (a default reaches a conversation only at its start)
+                  const gf = { cwd, hostId: data.hostId || null, initialGroupId: spawnGroups[0] || null, initialGroupIds: spawnGroups };
+                  pinOwed = { facts: { ...pinFacts, instanceRef: typeof kp.instanceDefaultRef === 'function' ? kp.instanceDefaultRef() : undefined }, hint: hint || null, formGroups, remote: !!data.hostId, groupFacts: gf, cap: typeof kp.taskGroupCapFor === 'function' ? kp.taskGroupCapFor(gf) : null, at: Date.now() };
                   pin = { profileId: '', dir: null, origin: 'harness', held: true };
                 }
                 else if (pin.formRefused) console.warn(`[browser] ${id}: the New Session pick ${pin.formRefused} is not open to this conversation (${pin.refused}) — starting without it`);
@@ -1728,6 +1731,12 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
 
           session._cwdRecreated = cwdRecreated; // B-7812: prompt-context tells the agent once
           activeSessions.set(id, session);
+          // the B-f276 remainder, its read r3 (M4): a pin this create OWED may have been judged while it was still spawning (the read
+          // landed in its awaits: the keeper's hook found no session holding the key) — the session takes the keeper's answer now and
+          // its record keeps no facts to re-judge; still owed (held), the hook finds it from here on
+          if (session._browserPinOwed && session._browserKey) {
+            try { const kq = require('./server/browser-keeper.js').keeper(); if (kq && typeof kq.owedPending === 'function' && !kq.owedPending(session._browserKey) && !kq.held()) { const pq = kq.pinFor(session._browserKey); session._browserProfileId = pq ? pq.profileId : null; session._browserPinOrigin = pq ? pq.origin : null; session._browserCap = typeof kq.capOf === 'function' ? kq.capOf(session._browserKey) : session._browserCap; session._browserPinOwed = null; } } catch (e) { console.warn(`[browser] ${id}: its owed pin's answer was not taken — ${e && e.message}`); }
+          }
           session._webuiId = id;
           // B-8dcf item two: what the person's own settings file met at this start (the adapter's `settingsNotes`, read off the argv the hub
           // builds — local and remote alike, nothing reads the file) — SAID by name, once per start, where the person looks, with its door;

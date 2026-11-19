@@ -1531,17 +1531,19 @@ function createSessionMessages(session, sessionId) {
       // lane engine-spi-egress L3 round 3: a boot migration that marks records for THIS boot (the one that moves the removed anti-bot
       // backend's records — STEPPED when its proof's hash streams) is waited for first: the order law — nothing is adopted before it judged
       let gate = null; try { gate = require('./migrations.js').beforeBrowserBoot(); } catch { gate = null; }
+      // B-f276 r3 (S7): a restored conversation's owed pin — owed BEFORE the boot (judged first in it, the registry loaded after the gate)
+      queueMicrotask(() => { try { for (const [, s] of activeSessions) if (s && s._browserKey && s._browserPinOwed) browserKeeper.owePin?.(s._browserKey, { ...s._browserPinOwed, restored: true }); } catch (e) { console.warn('[browser] restored owed pins —', e && e.message); } });   // after the hook below, before the boot
       let heldBoot = false;
       Promise.resolve(gate).catch(() => null).then(() => browserKeeper.boot())
         .then((r) => { if (r && r.held) { heldBoot = true; console.warn('[browser] boot: the profile registry is held — the steps after the boot run once it reads'); try { browserKeeper.onReadAgain?.(() => afterBoot()); } catch { } return; } if (r && (r.droppedLeases || r.browsers)) console.log(`[browser] boot: ${r.droppedLeases} orphaned lease(s) dropped, ${r.browsers} browser(s) adopted`); })
         .catch((e) => console.warn('[browser] boot reconciliation failed:', e && e.message))
-        .then(() => { reOweRestored(); if (!heldBoot) return afterBoot(); });
+        .then(() => { if (!heldBoot) return afterBoot(); });
       // the B-f276 remainder (bl-jobs): the steps after the keeper's boot — run once it judged its registry; on a HELD registry they
       // wait for its read (each read the held, EMPTY registry as «gone»: a pin cleared, a kept folder removed, a trace session ended)
       // the B-f276 remainder, its read r2 (M3 / N11): a pin a create OWED to the held registry's read is judged in the keeper, keyed by
       // the conversation's browser key — the live session holding that key takes it as its copy (the chip, Session properties) and
       // its record says it (the facts it owed cleared); a conversation restored by a restart before the read owes it again (its record
-      // carries the facts): judged at once when the registry reads by then, else at its read
+      // carries the facts — owed before the keeper's boot, above): judged first in the boot when the registry reads, else at its read
       try {
         browserKeeper.onOwedPin?.((key, res) => {
           for (const [, s] of activeSessions) {
@@ -1554,7 +1556,6 @@ function createSessionMessages(session, sessionId) {
           }
         });
       } catch (e) { console.warn('[browser] the owed pins\' session copies are not wired —', e && e.message); }
-      const reOweRestored = () => { try { for (const [, s] of activeSessions) if (s && s._browserKey && s._browserPinOwed) browserKeeper.owePin?.(s._browserKey, s._browserPinOwed); } catch (e) { console.warn('[browser] the pins restored conversations owed were not owed again —', e && e.message); } };
       const afterBoot = () => Promise.resolve()
         // owner ruling A: a live session pinned BEFORE the ruling still has its indirection naming the profile's directory —
         // put back on its own browser (the pin stays: it is the default attachment now, opened through the keeper)

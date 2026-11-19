@@ -75,11 +75,13 @@ const rawMint = () => B.mintBrowserKey(crypto.randomBytes(4).toString('hex'));
 /** The B-f276 remainder, its read r2 (S5): an OWED start record (`browserPinAtStart: { owed, at }` — a keyless create the held profile
  *  registry could not judge) → the pin witness the create's own verdict makes of it now (the keeper's `pinVerdictForCreate`: the
  *  ladder, the hint's downgrade, the form's verdict); a fork's = its parent's row verbatim (as the keyless fork's spawn records it);
- *  nothing picked = the empty witness (no landing on the default the person has by now). The group cap is read now. */
+ *  nothing picked = the empty witness (no landing on the default the person has by now). The group cap and the instance default are the
+ *  ones the create read at its start (r3 S8). */
 function owedWitness(k, w) {
   const o = (w.owed && typeof w.owed === 'object') ? w.owed : {}, f = (o.facts && typeof o.facts === 'object') ? o.facts : {};
   const at = Number(w.at) >= 0 ? Math.min(Number(w.at), Date.now()) : 0;
-  let cap = null; try { cap = typeof k.taskGroupCapFor === 'function' ? k.taskGroupCapFor(o.groupFacts || {}) : null; } catch { cap = null; }
+  // its read r3 (S8): the cap and the instance default AT THE START (carried in the owed facts) — never the values by the late key's day
+  let cap = null; if (o.cap !== undefined) cap = Number.isInteger(o.cap) ? o.cap : null; else { try { cap = typeof k.taskGroupCapFor === 'function' ? k.taskGroupCapFor(o.groupFacts || {}) : null; } catch { cap = null; } }
   let pin = { profileId: '', origin: 'harness' };
   try { if (typeof k.pinVerdictForCreate === 'function') pin = k.pinVerdictForCreate({ facts: f, hint: o.hint || null, formGroups: Array.isArray(o.formGroups) ? o.formGroups : null }); } catch { pin = { profileId: '', origin: 'harness' }; }
   if (pin.profileId && pin.origin === 'conversation' && f.fork && f.forkParentKey && typeof k.pinFor === 'function') {
