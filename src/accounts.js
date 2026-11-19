@@ -81,11 +81,8 @@ function localFacetOf(caps, now = Date.now()) {
   return { local: { state: l.state, ...(startedAt ? { elapsedMin: Math.max(0, Math.floor((now - startedAt) / 60e3)) } : {}), ...(l.state === 'checking' && Number(l.lateAt) && now >= Number(l.lateAt) ? { late: true } : {}), typicalMin: Math.max(1, Math.round((Number(l.typicalMs) || 300e3) / 60e3)), ...(Number(l.killAt) && startedAt ? { boundMin: Math.round((Number(l.killAt) - startedAt) / 60e3) } : {}), ...(l.reason && l.reason.code ? { reason: String(l.reason.code), observation: String(l.reason.observation || ''), ...(l.reason.version ? { reasonVersion: String(l.reason.version).slice(0, 20) } : {}), ...(l.reason.machine ? { reasonMachine: String(l.reason.machine) } : {}) } : {}) } };
 }
 
-/** (B-ba7d) the name an account is SHOWN by: a key added without a name was once named «API key …<its tail>» (add()) — that tail never
- *  leaves in a NAME (a name travels in every list, push, session payload and usage row): such a stored name reads «API key» */
-function publicNameOf(a) { const n = String((a && a.name) || ''); return a && a.tail && n === 'API key …' + a.tail ? 'API key' : n; }
-/** (B-ba7d) a name STORED elsewhere (the usage ledger's events, written before the rename) in the old default shape «API key …<8>» → «API key» */
-function maskDefaultKeyName(name) { const n = String(name == null ? '' : name); return /^API key …\S{8}$/.test(n) ? 'API key' : n; }
+// (B-ba7d) the name an account is SHOWN by, and a stored name's mask — ONE function each (src/key-names.js; usage-history asks it too)
+const { publicNameOf, maskDefaultKeyName } = require('./key-names.js');
 
 class AccountManager {
   constructor({ dataDir, onChange, onSessionLinks, platform = process.platform, oatFixture = null, mintFixture = null }) {
@@ -2528,7 +2525,7 @@ class AccountManager {
     }
     let key = null, keyNo = null;
     try { key = this._dec(a.keyEnc); } catch (e) { if (isKeyRefusal(e)) keyNo = e; }
-    if (!key) throw keyNo ? Object.assign(new Error(`account key unavailable (${publicNameOf(a)}) — ${keyNo.message}`), { code: keyNo.code }) : new Error('account key unavailable (decryption failed): ' + a.name); // O1: the key file's refusal, said
+    if (!key) throw keyNo ? Object.assign(new Error(`account key unavailable (${publicNameOf(a)}) — ${keyNo.message}`), { code: keyNo.code }) : new Error('account key unavailable (decryption failed): ' + publicNameOf(a)); // O1: the key file's refusal, said; the account by its public name (B-ee0a smalls)
     return { id: a.id, name: a.name, tail: a.tail, kind: 'api', localEnv: { ANTHROPIC_API_KEY: key }, secret: { var: 'ANTHROPIC_API_KEY', value: key } };
   }
 

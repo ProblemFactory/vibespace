@@ -6,15 +6,24 @@ import { fetchJson } from './utils.js';
 
 let last = { accounts: {}, cliKey: null, providers: {} };
 let inflight = null;
+// ONE ASK A PUSH (B-ee0a smalls — the sync-read law: each ask reads the CLI's file synchronously on the hub's main loop): a key added,
+// replaced or removed and a provider re-keyed each push accounts-updated; the page asks again only after such a push — every other
+// reader (the roster's refresh, the app's) takes the last GOOD read. A refused or failed read is never kept as read.
+let pushes = 0;      // accounts pushes seen
+let readFor = -1;    // the push count the last good read answered for
+/** an accounts push arrived (src/lib/app.js): the next ask reads again */
+export function notePush() { pushes++; }
 
-/** ask the person's read once (coalesced) → { accounts: { [id]: tail }, cliKey } (the last good answer on a refusal) */
+/** ask the person's read once (coalesced; reused until the next push) → { accounts: { [id]: tail }, cliKey } (the last good answer
+ *  on a refusal) */
 export function askTails() {
-  if (!inflight) {
-    inflight = fetchJson('/api/accounts/tails', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
-      .then((r) => { if (r && r.ok && r.tails && typeof r.tails === 'object') last = { accounts: { ...(r.tails.accounts || {}) }, cliKey: typeof r.tails.cliKey === 'string' ? r.tails.cliKey : null, providers: { ...(r.tails.providers || {}) } }; return last; })
-      .catch(() => last)
-      .finally(() => { inflight = null; });
-  }
+  if (inflight) return inflight;
+  if (readFor === pushes) return Promise.resolve(last);
+  const at = pushes;
+  inflight = fetchJson('/api/accounts/tails', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+    .then((r) => { if (r && r.ok && r.tails && typeof r.tails === 'object') { last = { accounts: { ...(r.tails.accounts || {}) }, cliKey: typeof r.tails.cliKey === 'string' ? r.tails.cliKey : null, providers: { ...(r.tails.providers || {}) } }; readFor = at; } return last; })
+    .catch(() => last)
+    .finally(() => { inflight = null; });
   return inflight;
 }
 

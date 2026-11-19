@@ -359,6 +359,13 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   const live = acctOf(ACCT_LINES);
   const rows = ['pv-ds1', 'acct-w1', 'acct-gone', null].map((id) => live({ _accountId: id }, ACCTS));
   ok(eq(rows, [{ accountName: 'DeepSeek', accountTail: null }, { accountName: 'Work', accountTail: null }, { accountName: 'API key', accountTail: null }, { accountName: null, accountTail: null }]), 'the live payload names a provider conversation by its record (DeepSeek — and NO key tail, B-ba7d: the page lays the person\'s read on), an account by its own name, an id that is gone by the fallback word — both meanings of the meeting kept, in that order', rows);
+  // …and its SECOND copy (GET /api/active — src/routes/sessions.js, read by any credential): its own two lines, run as they stand
+  // (B-ee0a smalls — the B-ba7d fix had no leg): the same names, NO key tail
+  const ACCT_LINES2 = fs.readFileSync(path.join(REPO, 'src/routes/sessions.js'), 'utf8').split('\n').filter((l) => /^\s*account(Name: s\._accountId \?|Tail: )/.test(l));
+  if (ACCT_LINES2.length !== 2) throw new Error('the anchor of the second account-name leg (GET /api/active: accountName / accountTail) is not in the source as two lines');
+  const live2 = new Function('s', 'ctx', 'return {\n' + ACCT_LINES2.join('\n') + '\n};');   // each line's own comment ends at its newline
+  const rows2 = ['pv-ds1', 'acct-w1', 'acct-gone', null].map((id) => live2({ _accountId: id }, { accounts: ACCTS }));
+  ok(eq(rows2, rows), 'GET /api/active\'s copy says the same: a provider by its record, an account by its shown name, the fallback word, nothing for none — and NO key tail', rows2);
   const OLD_NAME = "accounts.nameShownOf(s._accountId) || accounts.providerRecordOf?.(s._accountId)?.label || 'API key'";
   if (ACCT_LINES[0].split(OLD_NAME).length !== 2) throw new Error('the anchor of the account-name control is not in the source once');
   const rows0 = acctOf([ACCT_LINES[0].replace(OLD_NAME, "accounts.nameShownOf(s._accountId) || 'API key'"), ACCT_LINES[1]])({ _accountId: 'pv-ds1' }, ACCTS);   // stale-pins: kept — the control's REPLACEMENT is the checkpoint's line, gone from the product on purpose
@@ -718,6 +725,15 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   const badgeC = H.get('claude').billingIdentity({ _accountId: ds.id }, { accounts: am, withHost: (x) => x, poolAuth: (x) => x });
   const badgeX = H.get('codex').billingIdentity({ _accountId: lab.id }, { accounts: am, withHost: (x) => x, poolAuth: (x) => x });
   ok(badgeC.source === 'api-other' && badgeC.name === 'DeepSeek' && !('tail' in badgeC) && badgeC.accountId === ds.id && badgeX.source === 'api-other' && !('tail' in badgeX) && badgeX.name === 'Lab', 'the badge of a provider session: its name and its account id (NO key tail — B-ba7d: the page lays the person\'s read on), pay-per-use (api-other) — on Claude Code AND on Codex (the first cut said «API key» / «ChatGPT»)', { badgeC, badgeX });
+  // the PLAIN API key's badge (B-ee0a smalls — the B-ba7d fix had no leg): its shown name and account id, NO key tail; a key added
+  // without a name reads «API key»
+  const apiT = ['Rb', '5d', 'Wq7n'].join('');
+  const apiAcc = am.add({ name: 'Console', key: ['sk-ant-', 'api03-', 'p'.repeat(30), apiT].join('') });
+  const anonAcc = am.add({ key: ['sk-ant-', 'api03-', 'q'.repeat(30), ['Mt', '2k', 'Yh4s'].join('')].join('') });
+  const badgeA = H.get('claude').billingIdentity({ _accountId: apiAcc.id }, { accounts: am, withHost: (x) => x, poolAuth: (x) => x });
+  const badgeN = H.get('claude').billingIdentity({ _accountId: anonAcc.id }, { accounts: am, withHost: (x) => x, poolAuth: (x) => x });
+  ok(badgeA.source === 'api-key' && badgeA.name === 'Console' && badgeA.accountId === apiAcc.id && !('tail' in badgeA) && !JSON.stringify(badgeA).includes(apiT) && badgeN.name === 'API key' && !('tail' in badgeN),
+    'the badge of a plain API-key conversation: its shown name and account id, NO key tail; a key added without a name reads «API key»', { badgeA, badgeN });
   // (MAJOR 4) codex's home is seeded ONCE: a real sessions folder found there (a link that once failed) keeps its transcripts
   fs.rmSync(path.join(homeX, 'sessions'), { force: true });
   fs.mkdirSync(path.join(homeX, 'sessions')); fs.writeFileSync(path.join(homeX, 'sessions', 'rollout-kept.jsonl'), '{}');

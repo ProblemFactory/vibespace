@@ -90,7 +90,8 @@ const OWNERS = Object.freeze([
     // run-reads (B-403e): KEPT, with its reason (follow-up 5) — src/loop-hold.js instrumentTrim passes the helper's frames when a
     // caller follows (INSTRUMENT_FILES), so a hold is booked on its CALLER (the pass, a record, a broadcast, a store's write); it
     // keeps them only for a stack that is the helper's ALONE (no caller of ours: its memo-drop microtask) — THIS rule books that to money
-    rules: [name('account-(?:pool-auto|usage-routes|models|tails)|run-reads'), but('usage-', 'walker'),
+    rules: [name('account-(?:pool-auto|usage-routes|models|tails)|run-reads|key-names'),   // key-names (B-ee0a smalls): the default key name's ONE function, PURE
+       but('usage-', 'walker'),
       lead('quota|spend|auto-resume|auto-cli|reset-credit|reading|ledger|stash|provider|providers|model-providers|model-family|wait|park-step|record-lateness|slot-transitions|sealed-orders|window-stamp|weekly-lanes-unfold|plan-names|claude-plan-catalog|login-expiry|cost-segments|catalog-pricing|rate-limit-capture|otel-truth|stream-wall|queued-wakes|conversation-deliver|refresh-note|fixture-ledger-purge|agy-turn-usage|cli-usage-door|door-reads|after-turn-read|stopped-by|bulk-resume'),
       name(`codex-(?:${CODEX_MONEY})|oat-(?:file-sync|identity|identity-model|shape-routes)`), new RegExp(`^src/harnesses/(?:${QUOTA_HARNESS})\\.js$`)] },
   { id: 'workspace', words: 'the workspace: tasks, agent groups, For you, grants, automation, artifact rows, the design and doc registries, the decision engine, voice, feedback',

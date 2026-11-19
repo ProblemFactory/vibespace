@@ -62,8 +62,9 @@ globalThis.fetch = async (url, opts = {}) => {
   const answer = (body, status = 200) => ({ ok: status < 400, status, statusText: '', json: async () => body });
   if (u === '/api/accounts' && (!opts.method || opts.method === 'GET')) return answer({ ...am.list(), subscription: {}, cliKey: {} });
   if (u === '/api/accounts/tails' && opts.method === 'POST') {   // B-ba7d: the person's read (src/routes/account-tails.js); B-ee0a: { hostId } ⇒ that machine's CLI-key tail
-    if (globalThis.__tailsRefused) return answer({ ok: false, code: 'human_only' }, 403);
     const b = (() => { try { return JSON.parse(opts.body || '{}'); } catch { return {}; } })();
+    if (!b.hostId) globalThis.__tailsAsks = (globalThis.__tailsAsks || 0) + 1;   // the accounts' read asked (B-ee0a smalls: one a push)
+    if (globalThis.__tailsRefused) return answer({ ok: false, code: 'human_only' }, 403);
     return b.hostId ? answer({ ok: true, tails: { hostCliKey: globalThis.__hostTail ?? null } }) : answer({ ok: true, tails: am.keyTails() });
   }
   if (u === '/api/accounts/default' && opts.method === 'POST') {
@@ -222,6 +223,7 @@ console.log('⑤ negative controls');
   const T = await import(path.join(REPO, 'src/lib/account-tails.js'));
   const TAIL = ['Wm3', 'k8Pz', 'Q'].join('');   // the last 8 of a key built at runtime
   const kid = am.add({ name: 'Console', key: ['sk-ant-', 'api03-', 'j'.repeat(30), TAIL].join('') }).id;
+  T.notePush();   // the hub pushes accounts-updated on an add (B-ee0a smalls: the page asks again only after a push)
   const want = am.keyTails().accounts[kid];
   const bare = await fetchJson('/api/accounts');
   const laid = await T.accountsWithTails();
@@ -257,6 +259,29 @@ console.log('⑤ negative controls');
   const Tx = await import(pathToFileURL(TM.write('src/lib/account-tails.js', anchored(TS, LAY, '  // CONTROL: the lay-on cut', 'the page without the lay-on'), 'no-lay')).href);
   ok('CONTROL: the page without the lay-on shows no tail on the API-key row though the person\'s read answered it ⇒ the legs above go RED', !('tail' in row(await Tx.accountsWithTails())));
   for (const r of copiesCensus(TM.files, TM.dir, REPO, { minCopies: 1 })) ok(r.name, r.pass, r.detail);
+}
+
+// B-ee0a smalls: ONE tails ask a PUSH (each ask is a synchronous read of the CLI's file on the hub's main loop): the app's push asks,
+// every other reader (the roster's refresh, the app's own) takes that read; a refused read is never kept — the next reader asks
+{
+  const onePush = async (T) => {
+    globalThis.__tailsAsks = 0;
+    await Promise.all([T.askTails(), T.askTails()]); const first = globalThis.__tailsAsks;
+    await T.askTails(); await T.accountsWithTails(); const reused = globalThis.__tailsAsks;
+    T.notePush(); await Promise.all([T.askTails(), T.accountsWithTails()]); await T.accountsWithTails(); const afterPush = globalThis.__tailsAsks;
+    globalThis.__tailsRefused = true; T.notePush(); await T.askTails(); globalThis.__tailsRefused = false; await T.askTails(); const afterRefusal = globalThis.__tailsAsks;
+    return { first, reused, afterPush, afterRefusal };
+  };
+  const r1 = await onePush(await import(pathToFileURL(path.join(REPO, 'src/lib/account-tails.js')).href + '?onepush'));   // a fresh page
+  const APP2 = read('src/lib/app.js');
+  ok('ONE tails ask a push: two at once are one, the roster\'s refresh and a later reader take the last good read, a push asks once more, a refused read is asked again; the app notes each accounts push before it asks',
+    r1.first === 1 && r1.reused === 1 && r1.afterPush === 2 && r1.afterRefusal === 4 && APP2.includes('        notePush();\n        askTails().then('), r1);
+  const OTS = read('src/lib/account-tails.js');
+  const GATE1 = '  if (readFor === pushes) return Promise.resolve(last);\n';
+  const OM = mutantCopies('manage-agents-onepush', REPO);
+  const r0 = await onePush(await import(pathToFileURL(OM.write('src/lib/account-tails.js', anchored(OTS, GATE1, '', 'the page that asks at every read'), 'every-read')).href));
+  ok('CONTROL: the page that asks at every read (no push gate) asks again for the roster\'s refresh ⇒ the leg above goes RED', r0.reused > r0.first, r0);
+  for (const r of copiesCensus(OM.files, OM.dir, REPO, { minCopies: 1 })) ok(r.name, r.pass, r.detail);
 }
 
 // B-ee0a: A PAIRED machine's CLI-key tail — its accounts-status answer carries none; the REAL page helper lays the person's read on

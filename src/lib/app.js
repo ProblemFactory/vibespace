@@ -24,7 +24,7 @@ import { ChatView } from './chat-view.js';
 import { createReconnectQueue } from './reconnect-queue.js';
 import { Resizer } from './resizer.js';
 import { anchorFixedPopup, drawnAnchorRect, api, configureToasts, registerSettingLinks, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog, applyUiPrefs, uiScale, setInstanceUrl, markTyped, wasTyped, announceModal } from './utils.js';
-import { askTails, withTails } from './account-tails.js'; // B-ba7d: the accounts list carries no key tail — the person's read lays it on
+import { askTails, withTails, notePush } from './account-tails.js'; // B-ba7d: the accounts list carries no key tail — the person's read lays it on
 import { t, tc, resolveLang } from './i18n.js';
 import { stampAt as when, clockOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { themeWord, modelOptions } from './value-words.js'; // lane ui-language: a theme key in the reader's words (the walk's window-manager-9)
@@ -376,7 +376,9 @@ class App {
       if (msg.type === 'accounts-updated' && Array.isArray(msg.accounts)) {
         this._accounts = { ...(this._accounts || {}), accounts: accountRowsOf(withTails(msg)), ...accountDefaultsOf(msg) };
         // B-ba7d: the push carries no key tail — the person's last read is laid on, and asked again (coalesced: one ask in flight) — a
-        // key added, a key replaced, a provider re-keyed: the next draw reads the new tail, never the old one
+        // key added, a key replaced, a provider re-keyed: the next draw reads the new tail, never the old one. ONE ask a push: the
+        // roster's refresh below takes this read (B-ee0a smalls — each ask is a synchronous read of the CLI's file on the hub)
+        notePush();
         askTails().then(() => { if (this._accounts && Array.isArray(this._accounts.accounts)) this._accounts = { ...this._accounts, accounts: withTails({ accounts: this._accounts.accounts }).accounts }; try { this._agentsRefreshHook?.(); } catch {} }); // every harness's default field (agent-meta) + the providers' rows (lane lg-providers U5)
         // Live-re-render an OPEN Manage Agents surface — without this the
         // roster only updated on the next manual reopen, so adding an account

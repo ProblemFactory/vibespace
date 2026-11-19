@@ -19,6 +19,7 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const { globalUsageKeyOf } = require('./backend-caps.js'); // PURE: the machine login's ledger key per harness
+const { maskDefaultKeyName } = require('./key-names.js'); // PURE (B-ba7d): a stored name in the old default «API key …<tail>» shape → «API key»
 const { runUsageWalk } = require('./usage-walker.js');
 const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
 const CB = require('./cache-bounds.js'); // PURE: the ledger's hot window + byte ceiling + the cold columns (B-9428)
@@ -2264,7 +2265,7 @@ class UsageHistory {
       if (!dimMeta.account[acctKey]) {
         const live = ev.acct ? this._resolveAccount(ev.acct) : null;
         dimMeta.account[acctKey] = {
-          name: ev.acct ? ((x) => (/^API key …\S{8}$/.test(String(x)) ? 'API key' : x))(live?.name || ev.aname || ev.acct) : (ev.be === 'codex' ? 'Codex CLI login' : 'Claude CLI login'),   // B-ba7d: an event stored under the old default name «API key …<tail>» never answers it
+          name: ev.acct ? maskDefaultKeyName(live?.name || ev.aname || ev.acct) : (ev.be === 'codex' ? 'Codex CLI login' : 'Claude CLI login'),   // B-ba7d: an event stored under the old default name «API key …<tail>» never answers it
           type: ev.atype || (ev.acct ? 'unknown' : 'global'),
           be: ev.be || 'claude',
           tail: null,   // B-ba7d: no key tail in a usage row (the page lays the person's read on)

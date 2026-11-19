@@ -1133,6 +1133,24 @@ console.log('㉑ a whole credential with no vault: the person\'s only');
   const noStrip = atPatched('  facts.cliKey = { present: !!facts.cliKey.present };\n', '', 'the tail keeper without the strip');
   const kept = noStrip.keepHostCliTail('host-ctl', { cliKey: { present: true, tail: HT } });
   ok(ctl.status === 200 && !!ctl.json && ctl.json.key === KEY && JSON.stringify(kept).includes(HT), 'CONTROLS: the reveal without the person check hands a conversation\'s credential the whole key; the tail keeper without its strip leaves the tail in the answer ⇒ both legs above go RED', { ctl: ctl.status, kept: kept.cliKey });
+  // B-ba7d's FIXES THAT HAD NO LEG (主开发 03:16Z smalls): the write answers, the import's mask, the status route's count by type
+  const nT = ['Vc', '8s', 'Kd1x'].join('');
+  const nKey = ['sk-ant-', 'api03-', 'n'.repeat(30), nT].join('');
+  const wAdd = a.add({ key: nKey }), wAgain = a.add({ key: nKey }), wRen = a.rename(wAdd.id, 'Team'), wMail = a.setEmail(wAdd.id, 'team@example.test');
+  const answers = JSON.stringify([wAdd, wAgain, wRen, wMail]);
+  ok(wAdd.name === 'API key' && wAgain.existing === true && wRen.name === 'Team' && wMail.email === 'team@example.test' && !answers.includes(nT) && !/"tail"/.test(answers),
+    'the write answers (add, the same key again, rename, setEmail) carry no key tail, nor one in a name (a key added without a name is «API key»)', [wAdd, wAgain, wRen, wMail]);
+  const iT = ['Gh', '7u', 'Ns3e'].join('');
+  const iKey = ['sk-ant-', 'api03-', 'i'.repeat(30), iT].join('');
+  const imp = a.importBundle({ accounts: [{ id: 'acct-ee0a01', name: 'API key …' + iKey.slice(-8), key: iKey, backend: 'claude' }] });
+  const impRow = (a.list().accounts || []).find((x) => x.id === 'acct-ee0a01');
+  ok(imp.imported === 1 && !!impRow && impRow.name === 'API key' && !JSON.stringify(a.list()).includes(iT), 'an export made before the rename brings back no «API key …<tail>»: the imported record is named «API key» (the import\'s mask)', { imp, name: impRow && impRow.name });
+  const sapp = express();
+  require(path.join(ROOT, 'src/server/backend-status-route.js')).create({ app: sapp, machineProbes: { cliFacts: async () => ({ claude: { loggedIn: false }, codex: {} }) }, accounts: a, claudeCmd: 'claude', codexCmd: 'codex' });
+  const ss = await new Promise((r) => { const x = sapp.listen(0, '127.0.0.1', () => r(x)); });
+  let stat = null; try { stat = await (await fetch(`http://127.0.0.1:${ss.address().port}/api/backend-status`)).json(); } finally { ss.close(); }
+  const apiRows = (a.list().accounts || []).filter((x) => (x.backend || 'claude') === 'claude' && !x.pooled && x.type === 'api').length;
+  ok(!!stat && stat.claude.namedLoggedIn === apiRows && apiRows >= 3, 'the backend status (the REAL route over the REAL store) counts an API-key account by its TYPE — an API-key-only machine never reads «not logged in»', { named: stat && stat.claude.namedLoggedIn, apiRows });
 }
 
 fs.rmSync(dir, { recursive: true, force: true });
