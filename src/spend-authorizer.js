@@ -119,6 +119,10 @@ const SPEND_REASONS = Object.freeze({
   // their own message the moment that turn ends — the hand-over's own machinery, run by the turn end instead of a click;
   // declared beside its producer (src/server/stash-handover.js, the auto path)
   'stash-retry': { turn: true, what: 'the waiting notices that did not fit a prompt, posted when its turn ended' },
+  // B-6721: the notices that waited while their conversation was not running, posted once it runs again (the stash view's wake
+  // chain — the hand-over's own machinery, run because the conversation came back; declared beside its producer
+  // src/server/stash-handover.js, the auto path)
+  'stash-reachable': { turn: true, what: 'the waiting notices posted once the conversation could take them' },
   // lane owner-press-attended r2 (the acceptance's seam with wake-approve-card): a person's «Deliver» on a HELD channel
   // digest (the decide door — already a person door there, personVerdict) is attended; the boot and timer flushes stay
   // `channel-message`. Declared HERE first; its ONE site is wired by wake-approve-card — test-spend-paths §2b's DEFERRED

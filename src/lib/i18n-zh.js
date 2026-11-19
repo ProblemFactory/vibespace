@@ -5144,6 +5144,8 @@ export default {
   "Background jobs keep running: {n}": "后台任务仍在运行：{n} 个",
   "Background Work notifications for this conversation were dropped — {cap} were already waiting, the most it keeps": "这个对话的后台任务通知被丢弃了 — 已有 {cap} 条在等，这是上限",
   "{n} dropped, never delivered (from: {jobs}). The {cap} still waiting reach the agent with its next turn; the Background Work panel lists them.": "丢弃 {n} 条，从未送达（来自：{jobs}）。仍在等的 {cap} 条会在 agent 的下一轮送达；后台任务面板列出了它们。",
+  "Background Work notices are waiting — this conversation was not running when they came": "有后台任务通知在等 — 它们到达时这个对话没有在运行",
+  "VibeSpace hands them to the agent as soon as the conversation runs again — or open the conversation and send anything: they ride your message. The Background Work panel lists them.": "对话一旦重新运行，VibeSpace 就会把它们交给 agent — 也可以打开这个对话随便发一句：它们会随你的消息一起送达。后台任务面板列出了它们。",
   "Reply with \"{label}\"": "用「{label}」回复",
   "For you · reply to #{id}": "待你处理 · 回复 #{id}",
   "Not from an agent session — nothing to reply to": "不是来自 agent 会话 — 没有可回复的对象",
@@ -12425,6 +12427,7 @@ export default {
   "a window control request the user sent from a desktop-app window (wake now)": "你从桌面应用窗口发出的窗口控制请求（立即唤醒）",
   "the user handed a conversation its waiting notices now": "你立即交给对话的等待中通知",
   "the waiting notices that did not fit a prompt, posted when its turn ended": "没放进提示词、在轮次结束时补送的等待中通知",
+  "the waiting notices posted once the conversation could take them": "对话能接收时补送的等待中通知",
   "a held channel digest the user chose to deliver now": "你选择立即送达的暂扣渠道摘要",
   "the resume of every conversation a usage limit or an overloaded model stopped": "恢复所有因用量上限或模型过载而停下的会话",   // lane auto-resume-bulk (lg-recovery U2): the bulk resume's producer words — a refusal of the batch names it
   "Not handed over — turns nobody typed are switched off for {account}. The notices keep waiting.": "没有交出去——{account} 的无人输入轮次已关闭。这些通知继续等待。",

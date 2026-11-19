@@ -5975,16 +5975,16 @@ await section(async () => {
   const redBy93 = (src, re) => door93(src, 'src/jobs.js').some((p) => re.test(p));
   // EVERY FILER BY ORIGIN (r3, claim r2-0 (a)): the six callers above are counted by name — a second filer of a FIELDS origin
   // (a planted src/server/ghost-jobs.js) stayed green; the filers of origin 'jobs' are a closed set too
-  const FILERS93 = { 'src/server/jobs-wiring.js': 2 };
+  const FILERS93 = { 'src/server/jobs-wiring.js': 3 };   // B-6721: + noticeWakeWaiting (the «notices wait» item)
   const filers93 = (files) => { const got = {}; for (const [f, src] of files) for (const l of src.split('\n')) if (!/^\s*(\/\/|\*)/.test(l) && /origin:\s*'jobs'/.test(l)) got[f] = (got[f] || 0) + 1; return JSON.stringify(got) === JSON.stringify(FILERS93) ? [] : Object.keys(got).filter((f) => got[f] !== FILERS93[f]).concat(Object.keys(FILERS93).filter((f) => !got[f])); };
   const files93 = doorFiles93.map((f) => [f, read(f)]);   // r5: every file that can hold a store (src/ .js/.mjs/.cjs, server.js, data/bin)
   const bad93 = filers93(files93);
-  ok(!bad93.length, `§93 the filers of origin 'jobs' are EXACTLY src/server/jobs-wiring.js ×2 (notifyUser + noticeDropped)${bad93.length ? ' — got: ' + bad93.join(', ') : ''}`);
+  ok(!bad93.length, `§93 the filers of origin 'jobs' are EXACTLY src/server/jobs-wiring.js ×3 (notifyUser + noticeDropped + noticeWakeWaiting)${bad93.length ? ' — got: ' + bad93.join(', ') : ''}`);
   // THE KEY HOLDER (lane job-notify-user r6, accept-r5 unverified 0 + 3 — lifted-key-filer.cjs): the store keeps its filer keys
   // in a module WeakMap (FILER_KEYS — r5's public `this._filerKeys` was lifted by any module holding the store, which then filed
   // origin 'jobs' frameless) and the ONE filer holds its key: a `.filerKey(` call, a `filerKey:` hand-on, a FILER_KEYS /
   // `_filerKeys` read anywhere else is red by name (src/feedback-model.js's filerKey is a feedback mark's — another function)
-  const KEYS93 = [['src/server/jobs-wiring.js', "userTodos.filerKey('jobs')", 1], ['src/server/jobs-wiring.js', 'filerKey: forYouKey', 2], ['src/server/mounts-plugins-wiring.js', "require('../feedback-model.js').filerKey(row, feedbackFilerKeyOf)", 1]];
+  const KEYS93 = [['src/server/jobs-wiring.js', "userTodos.filerKey('jobs')", 1], ['src/server/jobs-wiring.js', 'filerKey: forYouKey', 3], ['src/server/mounts-plugins-wiring.js', "require('../feedback-model.js').filerKey(row, feedbackFilerKeyOf)", 1]];
   const KEY93 = /\.filerKey\s*\(|\bfilerKey\s*:|\bFILER_KEYS\b|\b_filerKeys\b|\[\s*['"`]_?filerKeys?['"`]\s*\]/;
   const keyHolders93 = (files) => {
     const got = new Map(), bad = [];

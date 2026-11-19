@@ -5143,6 +5143,8 @@ export default {
   "Background jobs keep running: {n}": "バックグラウンドジョブは動き続けています：{n} 件",
   "Background Work notifications for this conversation were dropped — {cap} were already waiting, the most it keeps": "この会話のバックグラウンド作業の通知が破棄されました — すでに上限の {cap} 件が待っていました",
   "{n} dropped, never delivered (from: {jobs}). The {cap} still waiting reach the agent with its next turn; the Background Work panel lists them.": "{n} 件を破棄し、届けていません（送信元：{jobs}）。待っている {cap} 件はエージェントの次のターンで届きます。バックグラウンド作業パネルに一覧があります。",
+  "Background Work notices are waiting — this conversation was not running when they came": "バックグラウンド作業の通知が待っています — 届いたときこの会話は動いていませんでした",
+  "VibeSpace hands them to the agent as soon as the conversation runs again — or open the conversation and send anything: they ride your message. The Background Work panel lists them.": "会話がふたたび動き出したら VibeSpace がエージェントに渡します — 会話を開いて何か送れば、そのメッセージと一緒に届きます。バックグラウンド作業パネルに一覧があります。",
   "Reply with \"{label}\"": "「{label}」で返信",
   "For you · reply to #{id}": "あなた宛て · #{id} への返信",
   "Not from an agent session — nothing to reply to": "エージェントセッションからではありません — 返信先がありません",
@@ -12424,6 +12426,7 @@ export default {
   "a window control request the user sent from a desktop-app window (wake now)": "デスクトップアプリのウィンドウからあなたが送った操作リクエスト（今すぐ起こす）",
   "the user handed a conversation its waiting notices now": "あなたが会話に今すぐ渡した待機中の通知",
   "the waiting notices that did not fit a prompt, posted when its turn ended": "プロンプトに収まらず、ターン終了時に送った待機中の通知",
+  "the waiting notices posted once the conversation could take them": "会話が受け取れるようになったときに送った待機中の通知",
   "a held channel digest the user chose to deliver now": "あなたが今すぐ届けることにした保留中のチャネル要約",
   "the resume of every conversation a usage limit or an overloaded model stopped": "使用上限やモデルの過負荷で止まったすべての会話の再開",   // lane auto-resume-bulk (lg-recovery U2): the bulk resume's producer words — a refusal of the batch names it
   "Not handed over — turns nobody typed are switched off for {account}. The notices keep waiting.": "渡せませんでした——{account} では誰も入力していないターンがオフです。通知は待ち続けます。",

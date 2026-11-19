@@ -154,6 +154,9 @@ const HUB_MAIN_WORDS = 'this job is the running VibeSpace: it is not stopped her
 // B-2c5c (主开发 01:57Z): the errnos of a scope list that no longer EXISTS — read as an EMPTY scope (data/bin/job-wrapper.js holds the same set)
 const GONE_LIST = new Set(['ENOENT', 'ENOTDIR', 'ENODEV']);
 const pause = (ms) => new Promise((res) => setTimeout(res, ms));
+// B-6721: the held kinds a stash entry is OWED A WAKE for (wakeOwed): the conversation was NOT RUNNING, or the 30 s floor held it —
+// never 'not-reachable' (an agent alive that did not take it: the retry park's bound already spent; its may-have-landed copies too)
+const WAKE_OWED_KINDS = ['not-running', 'rate-floor'];
 /** the typed held record for a stash entry, from the ladder's own answer */
 function heldOf(r, reason) {
   const kind = M.heldKind(r, reason);
@@ -255,6 +258,7 @@ class JobManager {
       }
       this._load();
       this._loadNotifs();
+      this.announceOwedWakes();   // B-6721: what a stopped hub left owed a wake — the stash view arms each one's chain
       if (this._skeletonsOwed) { this._skeletonsOwed = false; this._save({ storeOnly: true }); }   // B-ef97: the recovered skeletons, on disk before anything else runs — jobs.json ALONE (a notifications file that did not load is not written over here)
       this._bootAt = now(); // this server generation's start: a run begun before it was an older generation's (update window)
       this._adoptAndReplay();
@@ -1665,8 +1669,49 @@ class JobManager {
     }
     try { this.d.broadcast('jobs-updated', { drained: cid }); } catch { }
     try { this.d.onStash?.(cid); } catch { }
+    this.wakeSettled(cid);   // B-6721: what was owed a wake left the stash (a hand-over, the person's prompt) — For you's line about it goes
     return q;
   }
+  /** B-6721 (fb-708fa798a0: a one-shot fired while its conversation was not running — stashed at 08:30, the conversation was
+   *  resumed at 09:18 and heard nothing until a prompt hours later): THE NOTICES OWED A WAKE — stashed because the
+   *  conversation was NOT RUNNING, or held by the 30 s floor (B-2fa2, merged: a floored distinct event fires at its bound) —
+   *  never one the spend ceiling, the owner's switch or a next-turn hold keeps, never an alive agent's refusal (the retry
+   *  park's bound is spent: `not-reachable`) and never a copy that may have landed. The stash view (src/server/stash-handover.js)
+   *  hands them over once the conversation is running and idle; while it is away For you says they wait. */
+  wakeOwed(cid) {
+    if (!cid || !this.pendingNotifs.get(cid)) return [];
+    // the queue read as it is (never peekNotifs: its held-view judge can stash, and this is asked from the stash hooks)
+    return (this.pendingNotifs.get(cid) || []).filter((n) => n && !n.ho && n.held && WAKE_OWED_KINDS.includes(n.held.kind) && !n.held.maybeDelivered && !this._waitsForRecords(n));
+  }
+  /** B-6721: the conversation is away and a notice that could not reach it waits — said in For you ONCE A WAITING EPISODE (the
+   *  wiring files one item per conversation and never reopens one filed since the oldest waiting notice came — a person's
+   *  dismissal stands); a floored one is no such case (it goes in seconds). → the item id | null */
+  /** B-6721: For you was told for this conversation (now, or at For you's read — the wiring's deferred filing): its close asks the store */
+  noteWakeSaid(cid) { if (cid) (this._wakeSaid || (this._wakeSaid = new Set())).add(cid); }
+  sayWakeWaiting(cid) {
+    const owed = this.wakeOwed(cid).filter((n) => n.held.kind !== 'rate-floor');
+    if (!owed.length || typeof this.d.noticeWakeWaiting !== 'function') return null;
+    try {
+      const id = this.d.noticeWakeWaiting({ cid, since: Math.min(...owed.map((n) => Number(n.ts) || now())) }) || null;
+      if (id) this.noteWakeSaid(cid);
+      return id;
+    } catch (e) { this.d.log(`[jobs] ${cid}: the «notices wait» For-you item was not filed — ${e && e.message}`); return null; }
+  }
+  /** B-6721: nothing owed a wake is left — For you's «notices wait» for this conversation is over (done, by the agent). Asked of
+   *  the store only for a conversation this run said it for, or once per conversation per run (an item an earlier run filed) */
+  wakeSettled(cid) {
+    if (!cid || this.wakeOwed(cid).length || typeof this.d.resolveWakeWaiting !== 'function') return;
+    const said = this._wakeSaid || (this._wakeSaid = new Set()), looked = this._wakeLooked || (this._wakeLooked = new Set());
+    if (!said.has(cid) && looked.has(cid)) return;
+    said.delete(cid); looked.add(cid);
+    try { this.d.resolveWakeWaiting(cid); } catch (e) { this.d.log(`[jobs] ${cid}: the «notices wait» For-you item was not closed — ${e && e.message}`); }
+  }
+  /** B-6721 (the read's must: the view is built at module load, the notices are read here, after listen — its own boot walk
+   *  saw an empty store): each conversation OWED A WAKE is announced through the stash hook once the notices are read */
+  announceOwedWakes() { let n = 0; for (const cid of [...this.pendingNotifs.keys()]) if (this.wakeOwed(cid).length) { n++; try { this.d.onStash?.(cid); } catch { } } return n; }
+  /** B-6721 (its read: the engine's floor counts a delivery that LANDED — the park's R5): a hand-over that carried this engine's
+   *  notices to the conversation stamps the 30 s floor and the duplicate window, as a post of its own would */
+  noteHandedOver(cid, text) { if (cid && text) this._stampNotifyFloor(cid, String(text)); }
   /** ACKNOWLEDGE a terminal one-shot (triage §13): `by` ∈ notified |
    *  agent-read | user-opened. The FIRST acknowledgement wins (the instant the
    *  archive clock starts from); a record that is not a terminal one-shot is
