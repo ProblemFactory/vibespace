@@ -5,7 +5,6 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ## 2.369.411 — 2026-11-18
 
 ### Added
-- When you browse a profile yourself and a site asks you to sign in, VibeSpace shows its sign-in form in your window, as it does while an agent drives.
 - Manage agents → Add a third-party model…: Claude Code on DeepSeek, Kimi, GLM or MiniMax, Codex on OpenRouter or your own service, with your own key.
 - Settings → Default browser engine offers «Download kernel» for an engine whose kernel is missing or unreadable, with progress and why a download was refused.
 - For you now says when a storage stopped answering and was disconnected (it reconnects by itself), and when files written meanwhile were moved aside.
