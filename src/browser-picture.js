@@ -74,8 +74,9 @@ const isX = (v) => !!v && v.source === PICTURE_X;
  *  keeps the window too: nothing is polled for it. */
 /** 主开发's law (1), 21:1xZ: no flap between the two pictures — the journal showed hidden, «paints again», hidden within 2 s. A
  *  hidden verdict switches at once; its clear returns the window only once it has held BG_SETTLE_MS (the tab's live page picture
- *  meanwhile — it paints again); a takeover returns the window at once. */
-const BG_SETTLE_MS = 3000;
+ *  meanwhile — it paints again); a takeover returns the window at once. Its read (M2): the hub says «hidden» again only after
+ *  BACKGROUND_SILENCE_MS (2 s) without a frame, judged on a 1 s tick, then a CDP ask — the settle outlasts that: 2 s + 2 × 1 s. */
+const BG_SETTLE_MS = 4000;
 function pictureForView(v, { bg = null, driving = false, shownWhy = null, clearedAt = 0, now = Date.now(), settleMs = BG_SETTLE_MS } = {}) {
   if (!isX(v) || driving) return v;
   if (bg && bg.state === 'hidden' && bg.targetId) return { source: PICTURE_SCREENCAST, why: 'background-tab', words: SOURCE_WORDS['background-tab'], displaySession: null };
