@@ -71,11 +71,18 @@ const REFUSAL_WORDS = Object.freeze({
   'model-none': i18nKey('Pick a model first — the test asks the provider with it'),
   'in-flight': i18nKey('A test of this provider is running already'),
   'managed-helper': i18nKey('This machine’s managed Claude settings ({where}) set a key helper, a credential or an address (or what they set could not be told) — the test would send a credential across, so it does not run. Ask the administrator'),   // 主开发 23:45Z
-  'windows-policy-unread': i18nKey('VibeSpace could not read the Windows policy for Claude Code ({where}), so the test does not run — it cannot tell whether that policy would send a credential to this provider. Try again in a moment'),   // the Windows helper absent, failing or over its bound (主开发 00:42Z)
+  'windows-policy-absent': i18nKey('VibeSpace could not find or start the Windows helper that reads the Windows policy for Claude Code ({where}), so the test does not run — it cannot tell whether that policy would send a credential to this provider'),   // absent or unable to start: no retry promised (主开发 01:46Z)
+  'windows-policy-unread': i18nKey('VibeSpace could not read the Windows policy for Claude Code ({where}), so the test does not run — it cannot tell whether that policy would send a credential to this provider. Try again in a moment'),   // the Windows helper failing, over its bound, or answering what it cannot read (主开发 00:42Z)
   changed: i18nKey('The key or the address changed while it was being tested — test it again'),   // lane lg-providers chain cure (its delta read, D2)
   human_only: i18nKey('Only a person on this page can run a test'),
   cross_site: i18nKey('Only a person on this page can run a test'),
 });
+/** THE WORDS A PERSON READS FOR A REFUSED TEST, at EITHER page door (the wizard's row, the roster's toast — 主开发 01:46Z: never a
+ *  bare «{where}»): the code's own words with the file filled, else the hub's own text, else `fallback`. `tr` = the page's t(). */
+function refusalWords(x, tr, fallback) {
+  const words = (x && x.code && Object.prototype.hasOwnProperty.call(REFUSAL_WORDS, x.code) && REFUSAL_WORDS[x.code]) || (x && x.error) || fallback;
+  return tr(String(words), { where: String((x && x.where) || '') });
+}
 /** The child's output as a person may read it: the key (and any piece of it ≥ 8 characters) replaced, every secret shape
  *  masked by `redactSecrets` (handed in — src/secret-shapes.js), control characters gone, cut to DETAIL_MAX. */
 function redact(text, key, redactSecrets = (s) => s) {
@@ -89,4 +96,4 @@ function redact(text, key, redactSecrets = (s) => s) {
   return t.length > DETAIL_MAX ? t.slice(-DETAIL_MAX) : t;   // the END of the output: where the CLIs put their error
 }
 
-module.exports = { VENDOR_OWN_HOSTS, addressVerdict, TIMEOUT_MS, OUT_MAX, DETAIL_MAX, classify, VERDICT_WORDS, REFUSAL_WORDS, redact };
+module.exports = { VENDOR_OWN_HOSTS, addressVerdict, TIMEOUT_MS, OUT_MAX, DETAIL_MAX, classify, VERDICT_WORDS, REFUSAL_WORDS, refusalWords, redact };

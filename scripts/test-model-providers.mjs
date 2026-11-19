@@ -42,7 +42,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import Module, { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs';   // the page doors' controls: ESM copies beside the real files
 import { anchored } from './scratch.mjs';   // the tree's control helper (an anchor gone or not unique fails by name)
 const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -731,14 +732,75 @@ console.log('⑮ the provider test: a FAKE CLI, empty homes, a third party only,
   fresh();
   const mh2 = await mhRunner.runProviderTest(P.ok.id, 'claude', { by: 'human' });
   ok(!mh1.ok && mh1.code === 'managed-helper' && /managed-settings\.json$/.test(String(mh1.where)) && /\{where\}/.test(PTM.REFUSAL_WORDS['managed-helper']) && !!PTM.REFUSAL_WORDS['windows-policy-unread'] && !/administrator/i.test(PTM.REFUSAL_WORDS['windows-policy-unread'])
-    && read('src/routes/providers.js').includes("...(r.where ? { where: String(r.where).slice(0, 160) } : {})") && read('src/lib/provider-roster.js').includes("{ where: (x && x.where) || '' }")
+    && read('src/routes/providers.js').includes("...(where ? { where } : {})") && read('src/lib/provider-roster.js').includes('showToast(testToastWords(x), {')
     && mhRan === null && mhKeyReads === 0 && !!PTM.REFUSAL_WORDS['managed-helper'] && mh2.ok && report() !== null && keyReads === 1,
     'the machine\'s managed Claude settings set a key helper: the test is refused by name (managed-helper), the FILE named (the route passes it on, the roster\'s toast says it; the Windows policy unread has its own words), NOTHING spawned and the vault key NEVER read; the managed file gone, the SAME runner tests again (its slot was freed)', { mh1, mh2: mh2.verdict, mhKeyReads, keyReads });
   fs.writeFileSync(path.join(MDIR, 'managed-settings.json'), JSON.stringify({ apiKeyHelper: '/opt/org/key-helper' }));
   fresh();
   const ptrPatched = (pairs) => { let s = fs.readFileSync(PTRF, 'utf-8'); for (const [from, to] of pairs) s = anchored(s, from, to, 'the Test without its managed check'); const m = new Module(PTRF); m.filename = PTRF; m.paths = Module._nodeModulePaths(path.dirname(PTRF)); m._compile(s, PTRF); return m.exports; };   // compiled in memory beside the real file (this block runs before the suite's runnerMutant)
-  const mhx = await mk(ptrPatched([["      if (h.creds.keyHelper) { const mh = await MANAGED.managedHelperFact({ dir: managedDir }); if (mh.named !== false) return { ok: false, code: mh.cause === 'windows-unread' ? 'windows-policy-unread' : 'managed-helper', where: mh.where }; }\n", '']]), { managedDir: MDIR }).runProviderTest(P.ok.id, 'claude', { by: 'human' });
+  const mhx = await mk(ptrPatched([["      if (h.creds.keyHelper) { const mh = await MANAGED.managedHelperFact({ dir: managedDir, ...(managedOpts || {}) }); if (mh.named !== false) return { ok: false, code: mh.cause === 'windows-absent' ? 'windows-policy-absent' : mh.cause === 'windows-unread' ? 'windows-policy-unread' : 'managed-helper', where: mh.where }; }\n", '']]), { managedDir: MDIR }).runProviderTest(P.ok.id, 'claude', { by: 'human' });
   ok(mhx.ok && report() !== null, 'CONTROL: the test without the managed-settings check spawns the CLI under the managed helper ⇒ the leg above goes RED', mhx.verdict);
+  // THE TEST'S WINDOWS VERDICTS (the cure2 read: no leg drove them): a STAND-IN reg.exe by its full path through the Test's
+  // `managedOpts` seam (never the box's own): the helper absent or unable to start ⇒ windows-policy-absent; failing ⇒
+  // windows-policy-unread; a policy value whose JSON does not parse ⇒ managed-helper (the administrator's) — the key named, nothing
+  // spawned, the vault key never read
+  {
+    const RDIR = fs.mkdtempSync(path.join(TDIR, 'reg-'));
+    const standReg = (name, body, mode = 0o755) => { const f = path.join(RDIR, name); fs.writeFileSync(f, '#!/bin/sh\n' + body + '\n', { mode }); return f; };
+    const NOKEY = "echo 'ERROR: The system was unable to find the specified registry key or value.' >&2; exit 1";
+    const BAD = JSON.stringify({ apiKeyHelper: '/opt/org/key-helper' }).slice(0, -1) + ',}';   // a trailing comma: not JSON
+    const winOpts = (regExe) => ({ platform: 'linux', wsl: true, drvfsDir: NO_MDIR, reg: { regExe, env: {}, boundMs: 4000 } });
+    const cases = { absent: path.join(RDIR, 'no-such', 'reg.exe'), noStart: standReg('noexec.exe', 'exit 0', 0o644), failing: standReg('fail.exe', 'exit 5'),
+      malformed: standReg('bad.exe', `case "$2" in HKLM*) printf '\\r\\nHKEY_LOCAL_MACHINE\\\\SOFTWARE\\\\Policies\\\\ClaudeCode\\r\\n    Settings    REG_SZ    %s\\r\\n\\r\\n' '${BAD}';; *) ${NOKEY};; esac`) };
+    const got = {};
+    for (const [k, regExe] of Object.entries(cases)) { fresh(); keyReads = 0; const r = await mk(PTR, { managedOpts: winOpts(regExe), providers: counting }).runProviderTest(P.ok.id, 'claude', { by: 'human' }); got[k] = { code: r.code, where: r.where, ran: report() !== null, keyReads }; }
+    ok(got.absent.code === 'windows-policy-absent' && got.noStart.code === 'windows-policy-absent' && got.failing.code === 'windows-policy-unread' && got.malformed.code === 'managed-helper'
+      && Object.values(got).every((g) => /HKLM/.test(String(g.where)) && !g.ran && g.keyReads === 0),
+      'the Test\'s Windows verdicts: the helper absent or unable to start ⇒ its own words with no retry (windows-policy-absent), failing ⇒ could not read (windows-policy-unread), a policy value that does not parse ⇒ the administrator\'s (managed-helper) — HKLM named, nothing spawned, the key never read', got);
+  }
+  // (主开发 01:46Z) EACH TEST DOOR NAMES THE FILE — never a literal «{where}»: the route fills its own text (and hands `where`), the
+  // roster's toast and the wizard's row word it with the file (en, zh, ja carry the placeholder)
+  {
+    const rapp = express(); rapp.use(express.json());
+    const MF = '/etc/claude-code/managed-settings.json';
+    require(path.join(ROOT, 'src/routes/providers.js')).registerProviderRoutes(rapp, { providers: tstore, tester: { runProviderTest: async () => ({ ok: false, code: 'managed-helper', where: MF }) } });
+    const rs = await new Promise((r) => { const x = rapp.listen(0, '127.0.0.1', () => r(x)); });
+    try {
+      const rr = await fetch(`http://127.0.0.1:${rs.address().port}/api/providers/${encodeURIComponent(P.ok.id)}/test`, { method: 'POST', headers: { 'Sec-Fetch-Site': 'same-origin', 'Content-Type': 'application/json' }, body: JSON.stringify({ harness: 'claude' }) });
+      const rb = await rr.json();
+      ok(rr.status === 409 && rb.code === 'managed-helper' && rb.where === MF && rb.error.includes(MF) && !rb.error.includes('{where}'),
+        'the route\'s Test door names the file: its own text filled (no «{where}» left) and `where` handed on', rb);
+    } finally { rs.close(); }
+  }
+  // EACH PAGE TEST DOOR, DRIVEN (the cure2 read: a leg at each door, not a text pin): the REAL wizard row's words (`errorWords`) and
+  // the REAL roster toast's (`testToastWords`) for a refusal naming its source — the source said, no «{where}» left; the ONE words
+  // function both call (`refusalWords`) through the zh and ja dictionaries likewise. CONTROLS (ESM copies beside the real files,
+  // anchored()): the wizard row worded without the file, the toast without the refusal's words ⇒ RED
+  {
+    const MF = '/etc/claude-code/managed-settings.json';
+    const CODES = ['managed-helper', 'windows-policy-absent', 'windows-policy-unread'];
+    const refused = (code) => ({ ok: false, code, where: code === 'managed-helper' ? MF : 'HKLM\\SOFTWARE\\Policies\\ClaudeCode' });
+    const said = (s, r) => typeof s === 'string' && s.includes(r.where) && !s.includes('{where}');
+    const WZ = await import(pathToFileURL(path.join(ROOT, 'src/lib/provider-wizard.js')).href);
+    const RO = await import(pathToFileURL(path.join(ROOT, 'src/lib/provider-roster.js')).href);
+    ok(CODES.every((c) => said(WZ.errorWords(refused(c)), refused(c)) && said(RO.testToastWords(refused(c)), refused(c))) && RO.testToastWords({ ok: true, verdict: 'ok' }) === PTM.VERDICT_WORDS.ok
+      && read('src/lib/provider-roster.js').includes('showToast(testToastWords(x), {'),
+      'each page Test door, driven: the wizard row\'s words and the roster toast\'s name the source for every refusal that carries one — no «{where}» left (the toast shows these words)', CODES.map((c) => WZ.errorWords(refused(c)).slice(0, 70)));
+    const dictOf = async (f) => (await import(pathToFileURL(path.join(ROOT, f)).href)).default;
+    const trOf = (d) => (s, p) => (Object.prototype.hasOwnProperty.call(d, s) ? d[s] : s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k] !== undefined ? String(p[k]) : m));
+    const zhja = [];
+    for (const [lang, f] of [['zh', 'src/lib/i18n-zh.js'], ['ja', 'src/lib/i18n-ja.js']]) { const d = await dictOf(f); for (const c of CODES) zhja.push({ lang, c, s: PTM.refusalWords(refused(c), trOf(d), 'failed'), has: Object.prototype.hasOwnProperty.call(d, PTM.REFUSAL_WORDS[c]) }); }
+    ok(zhja.length === 6 && zhja.every((x) => x.has && said(x.s, refused(x.c)) && x.s !== PTM.refusalWords(refused(x.c), trOf({}), 'failed')),
+      'the words both doors share, through the zh and ja dictionaries: each refusal translated, its source in it, no «{where}» left', zhja.filter((x) => !(x.has && said(x.s, refused(x.c)))).map((x) => x.lang + ' ' + x.c));
+    const PM = mutantCopies('model-providers-doors', ROOT);
+    const WSRC = read('src/lib/provider-wizard.js'), RSRC = read('src/lib/provider-roster.js');
+    const wizCut = await import(pathToFileURL(PM.write('src/lib/provider-wizard.js', anchored(WSRC, "refusalWords(r, t, 'Something went wrong')", "t((r && REFUSAL_WORDS[r.code]) || (r && r.error) || 'Something went wrong')", 'the wizard row without the file'), 'wiz-no-where')).href);
+    const rosCut = await import(pathToFileURL(PM.write('src/lib/provider-roster.js', anchored(RSRC, "refusalWords(x, t, 'failed')", "t((x && x.error) || 'failed')", 'the toast without the refusal words'), 'toast-no-words')).href);
+    const mh = refused('managed-helper');
+    ok(!said(wizCut.errorWords(mh), mh) && !said(rosCut.testToastWords(mh), mh),
+      'CONTROLS: the wizard row worded without the file, the toast without the refusal\'s words ⇒ the door legs go RED', [wizCut.errorWords(mh).slice(0, 70), rosCut.testToastWords(mh)]);
+    for (const r of copiesCensus(PM.files, PM.dir, ROOT, { minCopies: 2 })) ok(r.name, r.pass, r.detail);
+  }
   // A NEW KEY WHILE A TEST RUNS (the chain cure's read, R2): the run tested the OLD key — its verdict is not written onto the new one
   const midRun = slowRunner.runProviderTest(P.slow.id, 'claude', { by: 'human' });
   await tstore.rekey(P.slow.id, 'sk-third-party-rekeyed-midrun-2718');

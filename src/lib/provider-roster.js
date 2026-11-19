@@ -4,7 +4,7 @@
 // /api/providers (src/routes/providers.js); this file draws and asks, it decides nothing.
 import { t } from './i18n.js';
 import { agoText, createModalShell, escHtml, fetchJson, showConfirmDialog, showContextMenu, showInputDialog, showToast } from './utils.js';
-import { VERDICT_WORDS, REFUSAL_WORDS } from '../provider-test-model.js';
+import { VERDICT_WORDS, refusalWords } from '../provider-test-model.js';
 import { KEY_ERRORS, conversationsOn } from '../model-providers.js';
 import { openAccountModelsDialog } from './account-models.js';
 import { nameHelpers } from './browser-who-dialog.js';   // the name a conversation wears in the sidebar (the remove confirm names it so)
@@ -24,6 +24,9 @@ export function runningOnWords(rows, providerId) {
 /** THE REMOVE CONFIRM — ONE for both doors: the roster's Remove… (`p` = the provider's row, { id, label }) and the Vault window's
  *  Remove of «Model provider key · <name>» (`p` = its row, { entry: 'provider:<id>', label }: the provider is named by the part
  *  after the kind, never «Model provider key · …» as a name); `rows` = namedLiveRows(app) → { title, message, confirm } */
+/** the Test's toast words (exported: the Test door's leg drives it): the verdict's words, or the refusal's with the file filled
+ *  (refusalWords — the wizard's row says the same) */
+export const testToastWords = (x) => (x && x.ok ? t(VERDICT_WORDS[x.verdict] || x.verdict) : refusalWords(x, t, 'failed'));
 export function providerRemoveWords(p, rows) {
   const vaultRow = !!p && typeof p.entry === 'string' && p.entry.startsWith('provider:');
   const id = vaultRow ? p.entry.slice('provider:'.length) : String((p && p.id) || '');
@@ -89,7 +92,7 @@ export async function renderProviderRows(body, backend, { refresh = () => { }, s
     el.querySelector('.acct-provider-more').onclick = (e) => {
       const b = e.currentTarget.getBoundingClientRect();
       showContextMenu(b.left, b.bottom + 4, [
-        { label: t('Test'), action: async () => { if (el.dataset.testing) return; el.dataset.testing = '1'; showToast(t('Testing…')); const x = await send(`/api/providers/${encodeURIComponent(p.id)}/test`, 'POST', { harness: backend }); showToast(x && x.ok ? t(VERDICT_WORDS[x.verdict] || x.verdict) : t(REFUSAL_WORDS[x && x.code] || (x && x.error) || 'failed', { where: (x && x.where) || '' }), { type: x && x.ok && x.verdict === 'ok' ? 'info' : 'error' }); delete el.dataset.testing; refresh(); } },
+        { label: t('Test'), action: async () => { if (el.dataset.testing) return; el.dataset.testing = '1'; showToast(t('Testing…')); const x = await send(`/api/providers/${encodeURIComponent(p.id)}/test`, 'POST', { harness: backend }); showToast(testToastWords(x), { type: x && x.ok && x.verdict === 'ok' ? 'info' : 'error' }); delete el.dataset.testing; refresh(); } },
         { label: t('Models…'), action: () => openAccountModelsDialog({ accountId: p.id, name: p.label }) },
         { label: t('Rename…'), action: async () => { const n = await showInputDialog({ title: t('Rename'), label: t('Name'), value: p.label }); if (n == null) return; const x = await send(`/api/providers/${encodeURIComponent(p.id)}`, 'PATCH', { label: n }); if (!x || !x.ok) showToast(words(x), { type: 'error' }); refresh(); } },
         { label: t('New key…'), action: async () => { const k = await askKey(p.id, p.label); if (!k) return; const x = await send(`/api/providers/${encodeURIComponent(p.id)}/key`, 'POST', { key: k }); showToast(x && x.ok ? t('The new key is kept in the vault') : words(x), { type: x && x.ok ? 'info' : 'error' }); refresh(); } },

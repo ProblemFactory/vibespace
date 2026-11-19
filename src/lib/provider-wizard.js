@@ -10,7 +10,7 @@ import { t } from './i18n.js';
 import { createModalShell, escHtml, fetchJson } from './utils.js';
 import { enterSubmits } from './chat-enter-keys.js';   // an Enter that is not an IME's commit (test-enter-census)
 import { REGION_WORDS, KEY_ERRORS, MODEL_ERRORS, FIT_WORDS, WIRES, fits } from '../model-providers.js';
-import { VERDICT_WORDS, REFUSAL_WORDS } from '../provider-test-model.js';
+import { VERDICT_WORDS, REFUSAL_WORDS, refusalWords } from '../provider-test-model.js';
 import { BACKEND_META, getBackendMeta } from './agent-meta.js';
 
 const harnessName = (h) => getBackendMeta(h)?.label || h;
@@ -19,8 +19,10 @@ const WIRE_WORDS = Object.freeze({ 'anthropic-messages': 'Anthropic Messages (/v
 const wireFor = (h) => WIRES.find((w) => (fits({ kind: 'self-hosted', wire: w })[h] || {}).ok) || WIRES[0];
 const post = (url, body, method = 'POST') => fetchJson(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
 /** a refusal's words: by field (the record's codes, the model rows' codes), else the door's sentence — each a dictionary key */
-const codeWords = (c) => t(KEY_ERRORS[c] || MODEL_ERRORS[c] || REFUSAL_WORDS[c] || c);
-const errorWords = (r) => (r && Array.isArray(r.errors) && r.errors.length ? r.errors.map((e) => codeWords(e.code)).join(' · ') : (r && r.code && (REFUSAL_WORDS[r.code] || KEY_ERRORS[r.code]) ? codeWords(r.code) : t((r && r.error) || 'Something went wrong')));
+const codeWords = (c, params = {}) => t(KEY_ERRORS[c] || MODEL_ERRORS[c] || REFUSAL_WORDS[c] || c, params);
+// a refused answer's words (exported: the Test door's leg drives it): a key error by its code, else the Test's refusal words with the
+// file filled (refusalWords — the roster's toast says the same), else the hub's own text
+export const errorWords = (r) => (r && Array.isArray(r.errors) && r.errors.length ? r.errors.map((e) => codeWords(e.code)).join(' · ') : (r && r.code && KEY_ERRORS[r.code] ? codeWords(r.code) : refusalWords(r, t, 'Something went wrong')));
 const fitLine = (fit, h) => (fit && fit.ok ? '' : t(FIT_WORDS[fit && fit.code] || FIT_WORDS.wire, { harness: harnessName(h) }));
 
 export async function openProviderWizard({ backend, onDone = null } = {}) {   // backend: the roster it was opened from (always named by the caller)

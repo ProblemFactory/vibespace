@@ -24,9 +24,10 @@
  * through the Windows helper (reg.exe by the CLI's own absolute path, both keys at once: a child with a time bound, no shell, its
  * output read as data; on WSL the admin sources apply only when one opts in — wslInheritsWindowsSettings — and HKCU only with its own);
  * no policy ⇒ the start
- * runs; a policy that sets a helper, a credential or an address ⇒ refused like a managed file; the helper absent, failing or over
- * its bound ⇒ refused in ITS OWN words (VibeSpace could not read the Windows policy — no administrator is named). A native Windows
- * hub is judged the same way.
+ * runs; a policy that sets a helper, a credential or an address ⇒ refused like a managed file; a value that does not parse ⇒ the
+ * administrator's to fix (cannot tell, as a managed file that does not parse); the helper failing, over its bound or answering what
+ * it cannot read ⇒ refused in ITS OWN words (VibeSpace could not read the Windows policy — no administrator is named); the helper
+ * absent or unable to start (WSL interop off) ⇒ its own words with no retry promised. A native Windows hub is judged the same way.
  *
  * EVERY READ IS BOUNDED (as ws-create's own settings reader): opened non-blocking (a FIFO never holds a start), a regular file under
  * 1 MiB, ONE of each read in flight across starts (a file's, the folder's stat / statfs / listing, each policy query), the whole answer
@@ -50,22 +51,63 @@ const REG_MS = 5000;   // per key, as the CLI bounds it; both keys asked AT ONCE
 const REG_MAX = 2 * 1024 * 1024;   // the CLI's own output cap
 /** the Windows helper by the CLI's OWN absolute path (it never searches PATH: a service PATH or appendWindowsPath=false has none) */
 const regExeOf = (platform, env) => (platform === 'win32' ? path.win32.join(String((env && (env.SystemRoot || env.SYSTEMROOT || env.windir)) || 'C:\\Windows'), 'System32', 'reg.exe') : '/mnt/c/Windows/System32/reg.exe');
-// THE ENV RULE NAMES ONLY CREDENTIALS AND ROUTES (主开发 00:42Z): a managed env name refuses when it carries an Anthropic or cloud
-// credential, or sends the CLI's requests elsewhere — a model name, a log switch or a cloud switch set off is neither
-// (the names read from the CLI 2.1.322's own credential and route lists)
-const ENV_CREDENTIALS = Object.freeze(new Set(['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_CUSTOM_HEADERS', 'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CODE_SESSIONS_OAUTH_TOKEN',
-  'CLAUDE_CODE_OAUTH_REFRESH_TOKEN', 'ANTHROPIC_FOUNDRY_API_KEY', 'ANTHROPIC_FOUNDRY_AUTH_TOKEN', 'ANTHROPIC_AWS_API_KEY', 'ANTHROPIC_IDENTITY_TOKEN', 'ANTHROPIC_IDENTITY_TOKEN_FILE',
-  'ANTHROPIC_GOOGLE_CLOUD_AUTH', 'AWS_BEARER_TOKEN_BEDROCK', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN', 'GOOGLE_APPLICATION_CREDENTIALS']));
-const ENV_ROUTES = Object.freeze(new Set(['ANTHROPIC_BASE_URL', 'CLAUDE_CODE_API_BASE_URL', 'ANTHROPIC_UNIX_SOCKET', 'ANTHROPIC_BEDROCK_BASE_URL', 'ANTHROPIC_VERTEX_BASE_URL', 'ANTHROPIC_FOUNDRY_BASE_URL',
-  'ANTHROPIC_FOUNDRY_RESOURCE', 'ANTHROPIC_AWS_BASE_URL', 'ANTHROPIC_GOOGLE_CLOUD_BASE_URL', 'ANTHROPIC_BEDROCK_MANTLE_BASE_URL']));
+// THE ENV RULE (主开发 00:42Z «only credentials and routes»; 01:46Z «against the bundle's own, whole»): a managed env name refuses when
+// it decides WHERE the CLI's requests go, WHO can read them, or WHAT credential they carry. The list is the CLI 2.1.322's OWN: the set
+// of connection names it strips from a settings source it cannot verify (`lu` in its bundle — its proxy and TLS-trust names, its cloud
+// switches and addresses, its credentials and credential files, the config and home folders it reads a login from), WHOLE and in its
+// order, its spreads written out; and three it keeps in its other lists (its proxy set's two CLAUDE_CODE_ proxies, the sessions
+// token, the Google Cloud auth). TRUST names count by themselves: a managed CA (or the TLS check off) lets whoever holds that CA read
+// every request, the provider's key in it — an organisation's inspecting proxy named in the managed env, in the hub's own
+// environment (the CLI inherits it), or on the network with no proxy name at all. Matched as the CLI matches them: in ANY case. A
+// counted name refuses WHATEVER its value — an EMPTY value is copied over the spawn's own too (a blanked provider token or address
+// lets the CLI fall back to another login or to Anthropic's address) — except the seven cloud switches, a route only when ON.
+const CLI_CONNECTION_NAMES = Object.freeze([
+  // ...us (its network names: proxies, TLS trust, the client certificate)
+  'HTTPS_PROXY', 'HTTP_PROXY', 'NO_PROXY', 'SSL_CERT_FILE', 'SSL_CERT_DIR', 'ALL_PROXY', 'NPM_CONFIG_HTTPS_PROXY', 'NPM_CONFIG_HTTP_PROXY', 'NPM_CONFIG_PROXY',
+  'NODE_EXTRA_CA_CERTS', 'CLAUDE_CODE_CERT_STORE', 'CLAUDE_CODE_DISABLE_LOOPED_CROSS_CERT_DROP', 'CLAUDE_CODE_DISABLE_SELF_NAMED_CERT_DROP', 'CLAUDE_CODE_CLIENT_CERT',
+  'CLAUDE_CODE_CLIENT_KEY', 'CLAUDE_CODE_CLIENT_KEY_PASSPHRASE', 'NODE_TLS_REJECT_UNAUTHORIZED', 'BUN_TLS_REFUSE_DISTRUSTED_KEYS',
+  'CLAUDE_CODE_PROXY_RESOLVES_HOSTS', 'CLAUDE_CODE_ENABLE_PROXY_AUTH_HELPER', 'CLAUDE_CODE_PROXY_AUTH_HELPER_TTL_MS', 'API_FORCE_IDLE_TIMEOUT', 'ANTHROPIC_UNIX_SOCKET',
+  'CLAUDE_CODE_DISABLE_HTTPS_AGENT_KEEPING', 'NODE_OPTIONS',
+  // ...UM (the cloud switches and their resources)
+  'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY', 'CLAUDE_CODE_USE_ANTHROPIC_AWS', 'CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD', 'CLAUDE_CODE_USE_MANTLE',
+  'CLAUDE_CODE_USE_GATEWAY', 'ANTHROPIC_FOUNDRY_RESOURCE', 'ANTHROPIC_VERTEX_PROJECT_ID', 'ANTHROPIC_AWS_WORKSPACE_ID', 'ANTHROPIC_GOOGLE_CLOUD_PROJECT',
+  'ANTHROPIC_GOOGLE_CLOUD_LOCATION', 'ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID', 'CLOUD_ML_REGION',
+  // ...MV (the addresses, with ...oc and ...ls: the artifacts' and the memory service's)
+  'ANTHROPIC_BASE_URL', '_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL', 'ANTHROPIC_BEDROCK_BASE_URL', 'ANTHROPIC_VERTEX_BASE_URL', 'ANTHROPIC_FOUNDRY_BASE_URL', 'ANTHROPIC_AWS_BASE_URL',
+  'ANTHROPIC_GOOGLE_CLOUD_BASE_URL', 'ANTHROPIC_BEDROCK_MANTLE_BASE_URL', 'CLAUDE_CODE_ARTIFACTS_API_BASE_URL', 'CLAUDE_CODE_ARTIFACTS_API_TOKEN', 'CLAUDE_CODE_ARTIFACT_ASSET_BASE_URL',
+  'CLAUDE_CODE_ARTIFACT_LIVE_BASE_URL', 'CLAUDE_CODE_ARTIFACT_SYNC_BASE_URL', 'CLAUDE_CODE_ARTIFACT_VIEWER_BASE_URL', 'CLAUDE_CODE_MEMORY_API_BASE_URL', 'CLAUDE_CODE_MEMORY_API_TOKEN',
+  'AWS_ENDPOINT_URL_STS', 'AWS_ENDPOINT_URL', 'AWS_ENDPOINT_URL_SSO', 'AWS_ENDPOINT_URL_SSO_OIDC', 'AWS_ENDPOINT_URL_BEDROCK', 'AWS_ENDPOINT_URL_BEDROCK_RUNTIME',
+  // ...Iun, ...hn, ...IUr (the cloud SDKs' credentials, credential files and metadata addresses)
+  'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN', 'AWS_PROFILE', 'AWS_CONFIG_FILE', 'AWS_SHARED_CREDENTIALS_FILE', 'GOOGLE_APPLICATION_CREDENTIALS', 'GOOGLE_CLOUD_PROJECT',
+  'AWS_CONTAINER_CREDENTIALS_FULL_URI', 'AWS_CONTAINER_CREDENTIALS_RELATIVE_URI', 'AWS_CONTAINER_AUTHORIZATION_TOKEN', 'AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE',
+  'AWS_EC2_METADATA_SERVICE_ENDPOINT', 'AWS_EC2_METADATA_SERVICE_ENDPOINT_MODE', 'AWS_WEB_IDENTITY_TOKEN_FILE', 'AWS_ROLE_ARN', 'GCE_METADATA_HOST', 'GCE_METADATA_ROOT', 'GCE_METADATA_IP',
+  'METADATA_SERVER_DETECTION', 'CLOUDSDK_CONFIG', 'GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES', 'GCLOUD_PROJECT', 'CLAUDE_CODE_CUSTOM_OAUTH_URL',
+  // ...aO (the Anthropic and cloud keys and tokens)
+  'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN', 'AWS_BEARER_TOKEN_BEDROCK', 'ANTHROPIC_FOUNDRY_API_KEY', 'ANTHROPIC_FOUNDRY_AUTH_TOKEN', 'ANTHROPIC_AWS_API_KEY',
+  // the logins, the federation profile and the folders a login is read from
+  'CLAUDE_CODE_API_BASE_URL', 'CLAUDE_CODE_OAUTH_REFRESH_TOKEN', 'CLAUDE_CODE_OAUTH_SCOPES', 'CLAUDE_CODE_OAUTH_CLIENT_ID', 'CLAUDE_CODE_SESSION_ACCESS_TOKEN', 'CLAUDE_SESSION_INGRESS_TOKEN_FILE',
+  'CLAUDE_CODE_ENVIRONMENT_KIND', 'CLAUDE_CODE_REMOTE_SESSION_ID', 'ANTHROPIC_FEDERATION_RULE_ID', 'ANTHROPIC_ORGANIZATION_ID', 'ANTHROPIC_WORKSPACE_ID', 'ANTHROPIC_SERVICE_ACCOUNT_ID',
+  'ANTHROPIC_IDENTITY_TOKEN', 'ANTHROPIC_IDENTITY_TOKEN_FILE', 'ANTHROPIC_SCOPE', 'ANTHROPIC_PROFILE', 'ANTHROPIC_CONFIG_DIR', 'CLAUDE_CODE_FEDERATION_CACHE_DIR', 'HOME', 'XDG_CONFIG_HOME',
+  'APPDATA', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH', 'PROGRAMDATA', 'ALLUSERSPROFILE', 'ANTHROPIC_CUSTOM_HEADERS', 'CLAUDE_CODE_HOST_CREDS_FILE', 'CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST',
+  'CLAUDE_CODE_HOST_AUTH_ENV_VAR', 'CLAUDE_CONFIG_DIR', 'CLAUDE_SECURESTORAGE_CONFIG_DIR', 'CLAUDE_CODE_REMOTE_SETTINGS_PATH', 'CLAUDE_CODE_MANAGED_SETTINGS_PATH',
+  'CLAUDE_CODE_DISABLE_ADMIN_ENV_UNION', 'CLAUDE_CODE_MOCK_REMOTE_SETTINGS', 'USE_LOCAL_OAUTH', 'USE_STAGING_OAUTH', 'CLAUDE_LOCAL_OAUTH_API_BASE', 'CLAUDE_LOCAL_OAUTH_APPS_BASE',
+  'CLAUDE_LOCAL_OAUTH_CONSOLE_BASE', 'CLAUDE_BRIDGE_BASE_URL', 'CLAUDE_BRIDGE_OAUTH_TOKEN', 'CLAUDE_BRIDGE_SESSION_INGRESS_URL', 'CLAUDE_REMOTE_TOOLS_BRIDGE_URL', 'CLAUDE_CODE_GB_BASE_URL']);
+const ENV_OTHER_NAMES = Object.freeze(['CLAUDE_CODE_HTTPS_PROXY', 'CLAUDE_CODE_HTTP_PROXY', 'CLAUDE_CODE_SESSIONS_OAUTH_TOKEN', 'ANTHROPIC_GOOGLE_CLOUD_AUTH']);
+// NOT COUNTED, each for its reason (the rest of the CLI's list counts): it neither sends a request elsewhere, nor lets another read it,
+// nor carries a credential
+const ENV_NOT_COUNTED = Object.freeze({
+  NO_PROXY: 'narrows where a proxy is used', NPM_CONFIG_HTTPS_PROXY: "npm's own (plugin installs), never the model's requests", NPM_CONFIG_HTTP_PROXY: "npm's own", NPM_CONFIG_PROXY: "npm's own",
+  API_FORCE_IDLE_TIMEOUT: 'a connection timing', CLAUDE_CODE_DISABLE_HTTPS_AGENT_KEEPING: 'a connection timing', CLAUDE_CODE_PROXY_AUTH_HELPER_TTL_MS: 'a connection timing',
+});
 const ENV_SWITCHES = Object.freeze(new Set(['CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY', 'CLAUDE_CODE_USE_ANTHROPIC_AWS', 'CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD',
   'CLAUDE_CODE_USE_MANTLE', 'CLAUDE_CODE_USE_GATEWAY']));   // a route only when ON
-const switchedOff = (v) => /^(?:|0|false|no|off)$/i.test(String(v).trim());
-/** the first env name that carries a credential or a route → name | null */
+const ENV_NAMES = Object.freeze(new Set([...CLI_CONNECTION_NAMES, ...ENV_OTHER_NAMES].filter((n) => !Object.prototype.hasOwnProperty.call(ENV_NOT_COUNTED, n) && !ENV_SWITCHES.has(n))));
+const switchedOff = (v) => v === false || v === 0 || /^(?:|0|false|no|off)$/i.test(String(v == null ? '' : v).trim());
+/** the first managed env name that decides where a request goes, who reads it or what credential it carries → name | null */
 function envHit(env) {
   for (const [k, v] of Object.entries(env || {})) {
-    if (v == null || String(v) === '') continue;
-    if (ENV_CREDENTIALS.has(k) || ENV_ROUTES.has(k) || (ENV_SWITCHES.has(k) && !switchedOff(v))) return k;
+    const n = String(k).toUpperCase();
+    if (ENV_SWITCHES.has(n) ? !switchedOff(v) : ENV_NAMES.has(n)) return k;
   }
   return null;
 }
@@ -106,17 +148,23 @@ function regQuery(key, { exec = execFile, regExe, env = process.env, boundMs = R
         const out = String(stdout || '');
         if (err) {
           if (err.code === 'ENOENT') return resolve({ failed: 'absent' });
+          // cannot be started at all (WSL interop off, /mnt/c mounted noexec): as lasting as an absent helper — no retry helps
+          if (err.code === 'EACCES' || err.code === 'ENOEXEC') return resolve({ failed: 'cannot-start' });
           if (err.killed || err.signal) return resolve({ failed: 'timeout' });
           if (err.code === 1 || /unable to find the specified registry key or value/i.test(String(stderr || '') + out)) return resolve({ none: true });   // reg.exe: no such key or value
           return resolve({ failed: 'error' });
         }
-        // the value's name in any case (as the CLI matches it), the WHOLE rest of the output its data (a value may span lines)
-        const m = /^[ \t]+settings[ \t]+REG_(?:SZ|EXPAND_SZ)[ \t]+([\s\S]*)$/im.exec(out);
-        const data = m ? m[1].trim() : '';
+        // exit 0 = the value IS there: its name in any case (as the CLI matches it), a string type, the WHOLE rest of the output its
+        // data (a value may span lines). Another type, or a reply the parser cannot read (mis-encoded) = CANNOT TELL — never no policy
+        // (主开发 01:46Z: the could-not-read words); a string value whose JSON does not parse = the ADMINISTRATOR's to fix (the
+        // cannot-tell words, as a managed file that does not parse — retrying never mends it)
+        const m = /^[ \t]+settings[ \t]+(REG_\w+)[ \t]*([\s\S]*)$/im.exec(out);
+        if (!m || !/^REG_(?:SZ|EXPAND_SZ)$/i.test(m[1])) return resolve({ failed: 'unparsable' });
+        const data = m[2].trim();
         if (!data) return resolve({ none: true });
-        try { return resolve({ set: JSON.parse(data) }); } catch { return resolve({ failed: 'unparsable' }); }
+        try { return resolve({ set: JSON.parse(data) }); } catch { return resolve({ malformed: true }); }
       });
-    } catch (e) { resolve({ failed: e && e.code === 'ENOENT' ? 'absent' : 'error' }); }
+    } catch (e) { resolve({ failed: e && e.code === 'ENOENT' ? 'absent' : e && (e.code === 'EACCES' || e.code === 'ENOEXEC') ? 'cannot-start' : 'error' }); }
   }));
 }
 
@@ -161,38 +209,57 @@ async function folderFact(root, fsp, opts = {}) {
   return null;
 }
 
+/** does an ADMIN Windows source (HKLM, the Windows managed file) arm the WSL chain? As the CLI reads it (gGs + ix): absent or null =
+ *  disarmed, true / "true" = armed, false / "false" = disarmed — ANY OTHER value is «unreadable», and the CLI then arms it (fails closed:
+ *  `B = w !== "disarmed"`) — so do we */
+function armsWsl(doc) {
+  const v = doc && typeof doc === 'object' ? doc.wslInheritsWindowsSettings : undefined;
+  if (v === undefined || v === null) return false;
+  return !(v === false || v === 'false');
+}
+
 /** THE WINDOWS POLICY (on Windows, and from WSL), as the CLI applies it: HKLM and HKCU asked AT ONCE. On WSL the admin sources (HKLM, the
- *  DrvFs managed folder) apply only when one of them opts in (`wslInheritsWindowsSettings: true`), HKCU only with its OWN opt-in; on
- *  Windows all apply. A value that does not parse = the administrator's to fix (cannot tell); the helper absent, failing or late =
- *  VibeSpace could not read it (its own words). → a fact | null */
-async function windowsPolicyFact({ wsl, drvfsDir, fsp, reg = {}, platform, env = process.env }) {
+ *  DrvFs managed folder) apply only when one of them opts in (`wslInheritsWindowsSettings`, armed as the CLI arms it: armsWsl), HKCU
+ *  only with BOTH that admin opt-in and its OWN true (the CLI's double opt-in); on Windows all apply. (The CLI also sets HKCU aside
+ *  when HKLM or an admin file has content — judged here anyway: a refusal it would not make, never a start it would leak.) A value
+ *  that does not parse = the administrator's to fix (cannot tell); the helper failing or late = VibeSpace could not read it (its own
+ *  words); absent or unable to start = its own words, no retry. → a fact | null */
+async function windowsPolicyFact({ wsl, drvfsDir, fsp, reg = {}, platform, env = process.env, phase = {} }) {
+  // the outer bound, if it ends in here, answers the Windows read's own verdict, naming what it waits on (a key, then the DrvFs folder)
+  phase.at = 'windows'; phase.where = POLICY_KEYS[0];
   const regExe = reg.regExe || regExeOf(platform, reg.env || env);
-  const [hklm, hkcu] = await Promise.all(POLICY_KEYS.map((key) => regQuery(key, { ...reg, regExe })));
-  const unread = (q, key) => (q.failed === 'unparsable' ? { named: null, where: key, cause: 'unreadable' } : { named: null, where: key, cause: 'windows-unread', why: q.failed });
-  if (hklm.failed) return unread(hklm, POLICY_KEYS[0]);
+  const pending = new Set(POLICY_KEYS);
+  const [hklm, hkcu] = await Promise.all(POLICY_KEYS.map((key) => regQuery(key, { ...reg, regExe }).then((q) => { pending.delete(key); if (pending.size) phase.where = [...pending][0]; return q; })));
+  // a value that does not parse: the administrator's (cannot tell); the helper ABSENT or unable to start: its own words (no retry
+  // promised); failing, over its bound, or answering what it cannot read: «could not read»
+  const unread = (q, key) => (q.malformed ? { named: null, where: key, cause: 'unreadable' }
+    : { named: null, where: key, cause: q.failed === 'absent' || q.failed === 'cannot-start' ? 'windows-absent' : 'windows-unread', why: q.failed });
+  if (hklm.failed || hklm.malformed) return unread(hklm, POLICY_KEYS[0]);
   const drvDocs = [];
   if (wsl) {
+    phase.where = drvfsDir || WIN_DRVFS_DIR;
     const drv = await folderDocs(drvfsDir || WIN_DRVFS_DIR, fsp, { anyFs: true });   // the C: drive WSL mounts (9p): the machine's own disk
     if (drv.fact) return drv.fact;   // a DrvFs file that cannot be read: cannot tell
     drvDocs.push(...drv.docs);
   }
-  const adminOptIn = !wsl || (hklm.set && hklm.set.wslInheritsWindowsSettings === true) || drvDocs.some((d) => d.doc && d.doc.wslInheritsWindowsSettings === true);
+  const adminOptIn = !wsl || armsWsl(hklm.set) || drvDocs.some((d) => armsWsl(d.doc));
   if (adminOptIn) {
     if (hklm.set) { const j = judge(hklm.set); if (j) return { ...j, where: POLICY_KEYS[0] }; }
     for (const d of drvDocs) { const j = judge(d.doc); if (j) return { ...j, where: d.where }; }
   }
-  if (hkcu.failed) return unread(hkcu, POLICY_KEYS[1]);
-  if (hkcu.set && (!wsl || hkcu.set.wslInheritsWindowsSettings === true)) { const j = judge(hkcu.set); if (j) return { ...j, where: POLICY_KEYS[1] }; }
+  if (hkcu.failed || hkcu.malformed) return unread(hkcu, POLICY_KEYS[1]);
+  const cuOwn = !!hkcu.set && (hkcu.set.wslInheritsWindowsSettings === true || hkcu.set.wslInheritsWindowsSettings === 'true');
+  if (hkcu.set && (!wsl || (adminOptIn && cuOwn))) { const j = judge(hkcu.set); if (j) return { ...j, where: POLICY_KEYS[1] }; }
   return null;
 }
 
-async function factOf({ platform, dir, macPrefs, fsp, wsl, drvfsDir, reg }) {
+async function factOf({ platform, dir, macPrefs, fsp, wsl, drvfsDir, reg, phase = {} }) {
   const isWsl = typeof wsl === 'boolean' ? wsl : (platform === 'linux' && !dir ? await wslOf(fsp) : false);
   const root = dir || DIRS[platform] || DIRS.linux;
   const own = await folderFact(root, fsp);
   if (own) return own;
   if (isWsl || platform === 'win32') {
-    const win = await windowsPolicyFact({ wsl: isWsl, drvfsDir, fsp, reg, platform });
+    const win = await windowsPolicyFact({ wsl: isWsl, drvfsDir, fsp, reg, platform, phase });
     if (win) return win;
   }
   if (platform === 'darwin' && macPrefs) {
@@ -219,23 +286,29 @@ async function wslOf(fsp) {
 /** → { named, where, cause } within `boundMs` (no answer in time = cannot tell) */
 function managedHelperFact({ platform = process.platform, dir = null, macPrefs = MAC_PREFS, fsp = fs.promises, wsl = null, drvfsDir = null, reg = {}, boundMs = MANAGED_FACT_MS } = {}) {
   let timer = null;
-  const late = new Promise((r) => { timer = setTimeout(() => r({ named: null, where: dir || DIRS[platform] || DIRS.linux, cause: 'timeout' }), boundMs); timer.unref?.(); });
-  return Promise.race([factOf({ platform, dir, macPrefs, fsp, wsl, drvfsDir, reg }).catch(() => ({ named: null, where: dir || DIRS[platform] || DIRS.linux, cause: 'unreadable' })), late]).finally(() => clearTimeout(timer));
+  const phase = { at: 'files' };
+  const root = dir || DIRS[platform] || DIRS.linux;
+  // the bound ending while the WINDOWS read is pending is THAT read's verdict (could not read the Windows policy) — never the
+  // administrator's words for the Linux folder
+  const late = new Promise((r) => { timer = setTimeout(() => r(phase.at === 'windows' ? { named: null, where: phase.where || POLICY_KEYS[0], cause: 'windows-unread', why: 'timeout' } : { named: null, where: root, cause: 'timeout' }), boundMs); timer.unref?.(); });
+  return Promise.race([factOf({ platform, dir, macPrefs, fsp, wsl, drvfsDir, reg, phase }).catch(() => ({ named: null, where: root, cause: 'unreadable' })), late]).finally(() => clearTimeout(timer));
 }
 
 /** the words a person reads (English t() keys; {provider} = the provider's name, {where} = the file or source) */
 const MANAGED_HELPER_WORDS = Object.freeze({
   named: '{provider} cannot start on this machine: its managed Claude settings ({where}) set a key helper, a credential or an address, which the Claude Code CLI applies over the settings VibeSpace passes — a credential would cross between the organization and {provider}. Ask the administrator to take it out of the managed settings, or use an account of that organization',
   unread: '{provider} cannot start on this machine: what its managed Claude settings set could not be told ({where}) — a managed key helper or credential would go to {provider}. Ask the administrator, or use an account of that organization',
-  // the Windows helper absent, failing or over its bound: ITS OWN words — nothing an administrator of an organization is needed for
+  // the Windows helper absent, unable to start, failing or over its bound: ITS OWN words — nothing an administrator of an organization
+  // is needed for; ABSENT or UNABLE TO START (WSL interop off): no retry promised (it will not appear by waiting)
+  windowsAbsent: '{provider} cannot start on this machine: VibeSpace could not find or start the Windows helper that reads the Windows policy for Claude Code ({where}), so it cannot tell whether that policy would send a credential to {provider}. Start the conversation on another account',
   windowsUnread: '{provider} cannot start on this machine yet: VibeSpace could not read the Windows policy for Claude Code ({where}), so it cannot tell whether that policy would send a credential to {provider}. Try again in a moment; if it keeps happening, start the conversation on another account',
 });
 
 /** a create's refusal frame fields for a fact that is not `false` */
 function refusalOf(fact, provider) {
-  const words = fact && fact.named === true ? MANAGED_HELPER_WORDS.named : fact && fact.cause === 'windows-unread' ? MANAGED_HELPER_WORDS.windowsUnread : MANAGED_HELPER_WORDS.unread;
+  const words = fact && fact.named === true ? MANAGED_HELPER_WORDS.named : fact && fact.cause === 'windows-absent' ? MANAGED_HELPER_WORDS.windowsAbsent : fact && fact.cause === 'windows-unread' ? MANAGED_HELPER_WORDS.windowsUnread : MANAGED_HELPER_WORDS.unread;
   const params = { provider: String(provider || 'This provider').slice(0, 80), where: String((fact && fact.where) || '').slice(0, 160) };
   return { code: 'provider-managed-helper', message: words.replace(/\{(provider|where)\}/g, (m, k) => params[k]), i18n: { key: words, params } };
 }
 
-module.exports = { DIRS, MANAGED_FACT_MS, POLICY_KEYS, ENV_CREDENTIALS, ENV_ROUTES, ENV_SWITCHES, envHit, managedHelperFact, MANAGED_HELPER_WORDS, refusalOf };
+module.exports = { DIRS, MANAGED_FACT_MS, POLICY_KEYS, CLI_CONNECTION_NAMES, ENV_OTHER_NAMES, ENV_NOT_COUNTED, ENV_SWITCHES, ENV_NAMES, envHit, armsWsl, managedHelperFact, MANAGED_HELPER_WORDS, refusalOf };

@@ -33,7 +33,7 @@ const EXIT_DRAIN_MS = 2000;   // after the leader exits, how long its pipes may 
 
 function create({ providers, harnessOf = (id) => require('../harnesses').get(id), harnesses = () => require('../harnesses').list(),
   cliFor = async () => null, agentEnv = () => ({}), credentialEnvNames = (ds) => require('../harness-env.js').credentialEnvNames(ds),
-  redactSecrets = (s) => require('../secret-shapes.js').redactSecrets(s), spawnImpl = spawn, managedDir = null,
+  redactSecrets = (s) => require('../secret-shapes.js').redactSecrets(s), spawnImpl = spawn, managedDir = null, managedOpts = null,
   scratchRoot = os.tmpdir(), timeoutMs = PT.TIMEOUT_MS, drainMs = EXIT_DRAIN_MS, now = () => Date.now(), log = (m) => console.log(m) } = {}) {
   const inFlight = new Set();
   /** the child's env: sanitized, every credential name gone, every harness home a fresh empty folder, the plan on top */
@@ -76,7 +76,7 @@ function create({ providers, harnessOf = (id) => require('../harnesses').get(id)
       // the machine's MANAGED Claude settings set a key helper or an Anthropic credential or address (or what they set cannot be told):
       // the empty homes do not reach them, the CLI applies them over the settings the test passes, and the organisation's credential
       // would go to the provider — refused by name
-      if (h.creds.keyHelper) { const mh = await MANAGED.managedHelperFact({ dir: managedDir }); if (mh.named !== false) return { ok: false, code: mh.cause === 'windows-unread' ? 'windows-policy-unread' : 'managed-helper', where: mh.where }; }
+      if (h.creds.keyHelper) { const mh = await MANAGED.managedHelperFact({ dir: managedDir, ...(managedOpts || {}) }); if (mh.named !== false) return { ok: false, code: mh.cause === 'windows-absent' ? 'windows-policy-absent' : mh.cause === 'windows-unread' ? 'windows-policy-unread' : 'managed-helper', where: mh.where }; }
       const k = providers.keyOf(p.id);   // the key is read only AFTER the managed check (its reader's note: never opened for a test that cannot run)
       if (!k.ok || !k.value) return { ok: false, code: k.ok ? 'no-key' : k.code };
       let cmd = null;

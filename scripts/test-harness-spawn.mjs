@@ -560,8 +560,8 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   const mRemote = await mstart(mdir({ 'managed-settings.json': HELPER }), { backend: 'claude', accountId: ds.id, hostId: 'host-box-1' });
   ok(mRemote.x.spawned.length === 0 && mRemote.err && mRemote.err.code !== 'provider-managed-helper' && /runs on this machine only/.test(mRemote.err.message), 'a provider start aimed at a paired machine is refused by ITS reason (this machine only for now), not by the hub\'s managed settings', mRemote.err);
   // THE WINDOWS POLICY (主开发 00:42Z, WSL — a native Windows hub judged the same): ONE read-only query per key through the Windows
-  // helper on PATH — a STAND-IN reg.exe here (never the real one): no policy ⇒ runs; a policy setting a helper ⇒ refused naming the
-  // Windows policy; the helper absent, failing or over its bound ⇒ refused in ITS OWN words (no administrator named)
+  // helper by the CLI's own ABSOLUTE path — a STAND-IN reg.exe handed by its full path here (never the real one): no policy ⇒ runs; a
+  // policy setting a helper ⇒ refused naming the Windows policy; the helper absent, failing or over its bound ⇒ refused in ITS OWN words
   const regDir = (body) => { const d = fs.mkdtempSync(path.join(scratchDir('hspawn-reg'), 'r-')); fs.writeFileSync(path.join(d, 'reg.exe'), '#!/bin/sh\n' + body + '\n', { mode: 0o755 }); return d; };
   const NOKEY = "echo 'ERROR: The system was unable to find the specified registry key or value.' >&2; exit 1";
   const row = (hive, json, name = 'Settings') => `printf '\\r\\nHKEY_${hive}\\\\SOFTWARE\\\\Policies\\\\ClaudeCode\\r\\n    ${name}    REG_SZ    %s\\r\\n\\r\\n' '${json}'`;
@@ -577,18 +577,76 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   const wSet = await winFact('linux', regSet), wNoOpt = await winFact('linux', regNoOpt), wNone = await winFact('linux', regNone), wFail = await winFact('linux', regFail), wSlow = await winFact('linux', regSlow);
   const wAbsent = await winFact('linux', mdir({})), wNative = await winFact('win32', regNoOpt), wLower = await winFact('linux', regLower);
   const wCuOwn = await winFact('linux', regCuOwn), wCuNoOpt = await winFact('linux', regCuNoOpt);
+  // HKCU on WSL: the CLI's DOUBLE opt-in — the admin chain armed (HKLM's own opt-in, nothing else set there) AND HKCU's own true
+  const wCuBoth = await winFact('linux', policy(JSON.stringify({ wslInheritsWindowsSettings: true }), JSON.stringify({ wslInheritsWindowsSettings: true, env: { ANTHROPIC_AUTH_TOKEN: ['org', 'cu', 'token'].join('-') } })));
   const wDrv = await MANAGED.managedHelperFact({ platform: 'linux', wsl: true, dir: EMPTY, drvfsDir: mdir({ 'managed-settings.json': OPT_HELPER }), reg: { regExe: path.join(regNone, 'reg.exe'), env: {}, boundMs: 400 } });
   ok(wSet.named === true && /HKLM/.test(wSet.where) && wNoOpt.named === false && wNative.named === true && wNone.named === false && wLower.named === true
-    && wCuOwn.named === true && /HKCU/.test(wCuOwn.where) && wCuNoOpt.named === false
+    && wCuOwn.named === false && wCuBoth.named === true && /HKCU/.test(wCuBoth.where) && wCuNoOpt.named === false
     && wFail.named === null && wFail.cause === 'windows-unread' && wFail.why === 'error' && wSlow.named === null && wSlow.why === 'timeout' && wAbsent.named === null && wAbsent.why === 'absent'
     && wDrv.named === true && /managed-settings\.json$/.test(wDrv.where),
-    'the Windows policy as the CLI applies it: on WSL HKLM / the DrvFs folder only when one opts in (wslInheritsWindowsSettings), HKCU only with its own opt-in, the value name in any case; a native Windows hub applies them all; failing / over its bound / absent ⇒ «cannot read the Windows policy»',
-    { wSet: wSet.named, wNoOpt: wNoOpt.named, wNative: wNative.named, wLower: wLower.named, wCuOwn: wCuOwn.named, wCuNoOpt: wCuNoOpt.named, wFail: wFail.why, wSlow: wSlow.why, wAbsent: wAbsent.why, wDrv: wDrv.named });
+    'the Windows policy as the CLI applies it: on WSL HKLM / the DrvFs folder only when one opts in (wslInheritsWindowsSettings), HKCU only with that admin opt-in AND its own (its own alone ⇒ runs), the value name in any case; a native Windows hub applies them all; failing / over its bound / absent ⇒ «cannot read the Windows policy»',
+    { wSet: wSet.named, wNoOpt: wNoOpt.named, wNative: wNative.named, wLower: wLower.named, wCuOwn: wCuOwn.named, wCuBoth: wCuBoth.named, wCuNoOpt: wCuNoOpt.named, wFail: wFail.why, wSlow: wSlow.why, wAbsent: wAbsent.why, wDrv: wDrv.named });
   const wWords = MANAGED.refusalOf(wFail, 'DeepSeek');
   const dicts = ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js'].map((f) => fs.readFileSync(path.join(REPO, f), 'utf8'));
   ok(wWords.i18n.key === MANAGED.MANAGED_HELPER_WORDS.windowsUnread && /could not read the Windows policy/.test(wWords.message) && !/administrator/i.test(wWords.message) && /HKLM/.test(wWords.i18n.params.where)
     && dicts.every((d) => d.includes(JSON.stringify(MANAGED.MANAGED_HELPER_WORDS.windowsUnread) + ':')),
     'the Windows helper failing is said in ITS OWN words — VibeSpace could not read the Windows policy (named), no administrator door — in en, zh and ja', wWords.message);
+  // (主开发 01:46Z) THE OPT-IN AS THE CLI ARMS IT (gGs + ix, read from the bundle): an admin value that is neither absent nor false —
+  // «yes», a number — is «unreadable» and ARMS the chain (the CLI fails closed); "false" disarms; HKCU needs its own true (and the admin's)
+  const armYes = await winFact('linux', policy(JSON.stringify({ wslInheritsWindowsSettings: 'yes', apiKeyHelper: '/opt/org/key-helper' })));
+  const armFalse = await winFact('linux', policy(JSON.stringify({ wslInheritsWindowsSettings: 'false', apiKeyHelper: '/opt/org/key-helper' })));
+  const cuYes = await winFact('linux', policy(null, JSON.stringify({ wslInheritsWindowsSettings: 'yes', apiKeyHelper: '/opt/org/key-helper' })));
+  ok(armYes.named === true && armFalse.named === false && cuYes.named === false && MANAGED.armsWsl({ wslInheritsWindowsSettings: 1 }) === true && MANAGED.armsWsl({}) === false,
+    'the WSL opt-in as the CLI arms it: an unreadable admin value («yes») arms the chain (refused), «false» disarms it (runs), HKCU applies only with its own true', { armYes: armYes.named, armFalse: armFalse.named, cuYes: cuYes.named });
+  // CANNOT TELL, never «no policy»: the helper exits 0 with a value of another type, or with a reply the parser cannot read
+  const regDword = regDir(`case "$2" in HKLM*) printf '\\r\\nHKEY_LOCAL_MACHINE\\\\SOFTWARE\\\\Policies\\\\ClaudeCode\\r\\n    Settings    REG_DWORD    0x1\\r\\n\\r\\n';; *) ${NOKEY};; esac`);
+  const regGarble = regDir(`case "$2" in HKLM*) printf '\\377\\376garbled';; *) ${NOKEY};; esac`);
+  const wDword = await winFact('linux', regDword), wGarble = await winFact('linux', regGarble);
+  ok(wDword.named === null && wDword.cause === 'windows-unread' && wGarble.named === null && wGarble.cause === 'windows-unread',
+    'the helper answering a value of another type or a reply it cannot read ⇒ «could not read the Windows policy» (refused), never no policy', { wDword: wDword.cause, wGarble: wGarble.cause });
+  // a STRING value whose JSON does not parse is the ADMINISTRATOR's to fix (the cure2 read, S1): the cannot-tell words, as a managed
+  // file that does not parse — never «try again» (retrying never mends it)
+  const regBad = policy(JSON.stringify({ apiKeyHelper: '/opt/org/key-helper' }).slice(0, -1) + ',}');
+  const wBad = await winFact('linux', regBad), wBadWords = MANAGED.refusalOf(wBad, 'DeepSeek');
+  ok(wBad.named === null && wBad.cause === 'unreadable' && /HKLM/.test(wBad.where) && wBadWords.i18n.key === MANAGED.MANAGED_HELPER_WORDS.unread && !/try again/i.test(wBadWords.message),
+    'a policy value whose JSON does not parse ⇒ the administrator\'s words (cannot tell, HKLM named), never a retry', { cause: wBad.cause, where: wBad.where });
+  // the helper ABSENT: its own words — no retry promised (it does not appear by waiting)
+  const wAbsentWords = MANAGED.refusalOf(wAbsent, 'DeepSeek');
+  // UNABLE TO START (WSL interop off, /mnt/c noexec ⇒ EACCES / ENOEXEC) is as lasting as absent: the same words, no retry
+  const regNoExec = regDir('exit 0'); fs.chmodSync(path.join(regNoExec, 'reg.exe'), 0o644);
+  const wNoExec = await winFact('linux', regNoExec);
+  ok(wNoExec.named === null && wNoExec.cause === 'windows-absent' && wNoExec.why === 'cannot-start', 'the Windows helper unable to start (not executable) ⇒ the absent words (no retry), never «try again»', wNoExec);
+  ok(wAbsent.cause === 'windows-absent' && wAbsentWords.i18n.key === MANAGED.MANAGED_HELPER_WORDS.windowsAbsent && !/try again/i.test(wAbsentWords.message) && !/administrator/i.test(wAbsentWords.message)
+    && dicts.every((d) => d.includes(JSON.stringify(MANAGED.MANAGED_HELPER_WORDS.windowsAbsent) + ':')),
+    'the Windows helper ABSENT is said in its own words, no retry promised, no administrator (en, zh, ja)', wAbsentWords.message);
+  // THE OUTER BOUND ending while the Windows read is pending is THAT read's verdict — never the administrator's words for the Linux folder
+  const wOuter = await MANAGED.managedHelperFact({ platform: 'linux', wsl: true, dir: EMPTY, drvfsDir: DRV, boundMs: 1500, reg: { regExe: path.join(regSlow, 'reg.exe'), env: {}, boundMs: 4000 } });
+  // …and NAMES what it waited on: the DrvFs folder hanging (its stat never answers) after both keys answered
+  const DRV_HANG = path.join(mdir({}), 'hung-drvfs');
+  const hangFsp = { ...fs.promises, stat: (p) => (p === DRV_HANG ? new Promise(() => {}) : fs.promises.stat(p)) };
+  const wHang = await MANAGED.managedHelperFact({ platform: 'linux', wsl: true, dir: EMPTY, drvfsDir: DRV_HANG, fsp: hangFsp, boundMs: 1500, reg: { regExe: path.join(regNone, 'reg.exe'), env: {}, boundMs: 4000 } });
+  ok(wOuter.named === null && wOuter.cause === 'windows-unread' && wOuter.why === 'timeout' && /HKLM/.test(wOuter.where) && wHang.named === null && wHang.cause === 'windows-unread' && wHang.where === DRV_HANG,
+    'the outer bound ending inside the Windows read answers «could not read the Windows policy» (its own verdict), naming what it waited on — a key, or the DrvFs folder', { wOuter, wHang });
+  // (C) THE ENV RULE IS THE CLI'S OWN LIST, WHOLE (the cure2 read, S2/S3): its connection names (`lu` — 138 once its spreads are
+  // written out) count but the seven named with a reason, plus its other lists' four; the seven switches only when ON. A proxy, a CA
+  // (whoever holds it reads the request), TLS checks off, the client certificate, the first-party switch, the federation profile, a
+  // login folder — each refuses; in ANY case; WHATEVER the value (an empty one blanks the spawn's own)
+  const CL = MANAGED.CLI_CONNECTION_NAMES, NC = Object.keys(MANAGED.ENV_NOT_COUNTED);
+  const hits = ['HTTPS_PROXY', 'NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'CLAUDE_CODE_CERT_STORE', 'CLAUDE_CODE_CLIENT_CERT', '_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL', 'ANTHROPIC_PROFILE', 'ANTHROPIC_CONFIG_DIR',
+    'ANTHROPIC_FEDERATION_RULE_ID', 'ANTHROPIC_ORGANIZATION_ID', 'CLAUDE_CONFIG_DIR', 'HOME', 'CLAUDE_CODE_SESSION_ACCESS_TOKEN', 'CLAUDE_CODE_HTTPS_PROXY'].filter((n) => MANAGED.envHit({ [n]: 'x' }) !== n);
+  ok(CL.length === 138 && new Set(CL).size === 138 && MANAGED.ENV_NAMES.size === 128 && NC.length === 7 && NC.every((n) => CL.includes(n)) && [...MANAGED.ENV_SWITCHES].every((n) => CL.includes(n))
+    && CL.every((n) => MANAGED.ENV_NAMES.has(n) || NC.includes(n) || MANAGED.ENV_SWITCHES.has(n)) && hits.length === 0
+    && MANAGED.envHit({ NODE_TLS_REJECT_UNAUTHORIZED: '0' }) === 'NODE_TLS_REJECT_UNAUTHORIZED' && MANAGED.envHit({ https_proxy: 'http://p.example.test' }) === 'https_proxy'
+    && MANAGED.envHit({ anthropic_base_url: 'https://gw.example.test' }) === 'anthropic_base_url' && MANAGED.envHit({ Https_Proxy: 'http://p.example.test' }) === 'Https_Proxy'
+    && MANAGED.envHit({ ANTHROPIC_AUTH_TOKEN: '' }) === 'ANTHROPIC_AUTH_TOKEN' && MANAGED.envHit({ ANTHROPIC_BASE_URL: '' }) === 'ANTHROPIC_BASE_URL' && MANAGED.envHit({ CLAUDE_CODE_USE_VERTEX: '' }) === null
+    && MANAGED.envHit({ NO_PROXY: 'localhost', NPM_CONFIG_PROXY: 'http://npm.example.test', API_FORCE_IDLE_TIMEOUT: '30000', ANTHROPIC_MODEL: 'x', DISABLE_TELEMETRY: '1' }) === null,
+    'the env rule is the CLI\'s own list of connection names, whole: 138 names, every one counted but the seven named with their reasons and the switches (ON only); a proxy, a CA, TLS checks off, the client certificate, the first-party switch, the federation profile, a login folder refuse — in any case, an EMPTY value too; NO_PROXY, npm\'s proxy, a timing, a model name do not',
+    { hits, len: CL.length, nc: NC.length });
+  // NAMED CONTROL FOR THE OPT-IN GATE: the reader without it (every Windows policy applied on WSL) refuses a native-only policy
+  const OPTIN = '  const adminOptIn = !wsl || armsWsl(hklm.set) || drvDocs.some((d) => armsWsl(d.doc));';
+  const MANAGED_NOGATE = M.load('src/managed-claude-settings.js', anchored(MSRC, OPTIN, '  const adminOptIn = true;   // CONTROL: no opt-in gate', 'the reader without its WSL opt-in gate'), 'managed-nogate');
+  const gateCtl = await MANAGED_NOGATE.managedHelperFact({ platform: 'linux', wsl: true, dir: EMPTY, drvfsDir: DRV, reg: { regExe: path.join(regNoOpt, 'reg.exe'), env: {}, boundMs: 400 } });
+  ok(gateCtl.named === true, 'CONTROL: the reader without its WSL opt-in gate refuses a native-only Windows policy on WSL ⇒ the «no opt-in ⇒ runs» leg goes RED', gateCtl);
   // ONE OF EACH READ IN FLIGHT (主开发 00:42Z): two starts at once share the folder's stat, statfs and listing — never one per start
   const calls = { stat: 0, statfs: 0, readdir: 0 };
   const slowFsp = { stat: async () => { calls.stat++; await new Promise((r) => setTimeout(r, 40)); return { isDirectory: () => true }; }, statfs: async () => { calls.statfs++; return { type: 0xef53 }; }, readdir: async () => { calls.readdir++; return []; }, open: async () => { const e = new Error('none'); e.code = 'ENOENT'; throw e; } };
