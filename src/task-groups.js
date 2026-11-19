@@ -2234,10 +2234,10 @@ class TaskGroupManager {
    *  but the settle below; a first read that FAILS calls here too (`v` undefined, cure r2), for that settle alone. */
   /** B-16d7: another machine's real folders moved (its discovery's R facts, src/hosts.js) — the groups each one adds or takes are
    *  named and the change fans out (onChange: the exit re-judge, the roster), as a landed realpath of this machine's own does */
-  hostRealMoved(pairs) { for (const [c, r] of Array.isArray(pairs) ? pairs : []) if (typeof c === 'string' && typeof r === 'string') this._memberMoved('realpath', c, r); }
-  _memberMoved(op, p, v) {
+  hostRealMoved(pairs, hostId = null) { for (const [c, r] of Array.isArray(pairs) ? pairs : []) if (typeof c === 'string' && typeof r === 'string') this._memberMoved('realpath', c, r, hostId); }   // the pairs' machine (B-06de × B-16d7)
+  _memberMoved(op, p, v, host = null) {   // `host`: the machine whose real folder moved (none = the hub's own, member-facts)
     const pend = this._mmPending || (this._mmPending = { real: [] });
-    if (op === 'realpath' && v != null && v !== p) pend.real.push([p, v]);   // a symlinked cwd: the groups its realpath ADDS are named at the flush
+    if (op === 'realpath' && v != null && v !== p) pend.real.push([p, v, host]);   // a symlinked cwd: the groups its realpath ADDS are named at the flush
     if (this._mmTimer) return;
     this._mmTimer = setImmediate(() => {
       this._mmTimer = null;
@@ -2246,10 +2246,10 @@ class TaskGroupManager {
       const moved = new Set(this._movedIds || []); this._movedIds = null;
       // a symlinked cwd's realpath can only ADD the groups whose folders hold the real path and not the cwd — named, never
       // «every group» (the readers' should: a null signal pushed every group's delta to every page)
-      for (const [cwd, rp] of reals) {
+      for (const [cwd, rp, host] of reals) {
         for (const t of Object.values((this._state && this._state.tasks) || {})) {
           if (!t || typeof t !== 'object' || t.archived) continue;
-          const fo = this.foldersOf(t);
+          const fo = this.memberFoldersOf(t).filter((f) => folderOnHost(f, host));   // B-06de × B-16d7 (the meeting, LAW): only the rows on THAT machine — a far machine's moved folder never names a hub row's group, nor the hub's a far row's
           if (fo.some((f) => insideFolder(rp, f)) && !fo.some((f) => insideFolder(cwd, f))) moved.add(t.id);
         }
       }

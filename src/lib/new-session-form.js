@@ -538,7 +538,7 @@ export function installNewSessionForm(App) {
       const picked = this._nsTaskIds();
       const items = (this.sidebar?._taskBoardOrder?.() || []).filter((g) => !g.archived || picked.includes(g.id)).map((g) => {
         const i = picked.indexOf(g.id);
-        const folder = (this.sidebar?._folderPaths?.(g) || [])[0] || '';
+        const folder = this.sidebar?._folderLabel ? this.sidebar._folderLabel((this.sidebar?._folderPaths?.(g) || [])[0] || '') : ((this.sidebar?._folderPaths?.(g) || [])[0] || '');   // B-06de: another machine's row by its name
         const small = sheet ? `<small>${escHtml([folder, t('{n} session(s)', { n: members(g) })].filter(Boolean).join(' · '))}</small>` : '';
         return `<button type="button" class="ns-tg-item${i >= 0 ? ' on' : ''}" role="option" aria-selected="${i >= 0}" data-tg="${escHtml(g.id)}"><span class="ns-tg-ord">${i >= 0 ? i + 1 : ''}</span><span class="tvg-dot" style="--g-color:${escHtml(this.sidebar?.getTaskColor?.(g) || g.color || '')}"></span><span class="ns-tg-it"><span>${escHtml(groupName(g))}</span>${small}</span>${sheet ? `<span class="ns-tg-tick" aria-hidden="true">${i >= 0 ? '✓' : ''}</span>` : ''}</button>`;
       }).join('') || `<div class="ns-pv-via dim">${escHtml(app.sidebar && app.sidebar._tasksUnread ? t("Task Groups cannot be read right now — For you says why") : t('No Task Groups yet'))}</div>`;   // THE STORE HELD UNREAD: the hold, never «none»

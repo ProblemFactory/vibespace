@@ -515,8 +515,15 @@ for (const [tag, [, , leg, what]] of Object.entries(PATCHES)) {
     ok(!!red && red.board === true && red.server === false, `RED CONTROL: the page's rule keeping the hub's real path for every row (the page before) — another machine's conversation: the board says member, the server not — ${JSON.stringify(red)}`);
     // B-16d7: another machine's conversation matched by ITS OWN machine's real folder (its discovery's R fact) — the live row
     // carries it (hostRealCwd), the store reads the same per-host map (hostRealOf): the board ≡ the server, BOTH member
+    // THE MEETING B-16d7 × B-06de (lane bl-windows, line 59 moved onto int413): a HUB row gathers only the hub's conversations — another
+    // machine's real folder matches that machine's OWN row (`host::/path`), so for these legs the group names the far machine's folder
+    const keepCtx = tg._state.tasks['T-bd'].ctx;
+    tg._state.tasks['T-bd'].ctx = [{ path: `host-dial-far::${D}`, tags: ['discover'] }]; tg._save();
     const farLive = { ...mergedFar, hostRealCwd: realW };
-    const boardHR = (row) => TM.membershipCwds({ cwd: row.cwd, realCwd: row.realCwd, hostRealCwd: row.hostRealCwd, host: row.host }).some((c) => TM.insideFolder(c, rec));
+    // the BOARD half by the page's REAL rule on the SAME row the server judges (the move check's must 3): the far machine's own row —
+    // folderOnHost first, then the folder test over the page's cwds (membershipCwds with the machine's real folder)
+    const recFar = { path: rec.path, recursive: true, host: 'host-dial-far' };
+    const boardHR = (row) => TM.folderOnHost(recFar, row.host) && TM.membershipCwds({ cwd: row.cwd, realCwd: row.realCwd, hostRealCwd: row.hostRealCwd, host: row.host }).some((c) => TM.insideFolder(c, recFar));
     const keepHR = tg._hostRealOf;
     tg._hostRealOf = (h, c) => (h === 'host-dial-far' && c === linked ? realW : null);
     const hr = { board: boardHR(farLive), server: serverSays(farLive) };
@@ -524,14 +531,20 @@ for (const [tag, [, , leg, what]] of Object.entries(PATCHES)) {
     const hr0 = { board: boardHR(farLive), server: tg.groupsForSession({ sessionKey: 'claude:bd-hr0', cwd: linked, hostId: 'host-dial-far' }).some((t) => t.id === 'T-bd') };
     tg._hostRealOf = keepHR;
     // the map moved (a sweep said the real folder): the store names the group it adds and fans the change out (onChange: the
-    // exit re-judge, the roster) — the sites that kept a «not member» answer re-judge
+    // exit re-judge, the roster) — the sites that kept a «not member» answer re-judge. THE LAW (the move check's must 2): a moved real
+    // folder names ONLY the groups whose row is on THAT machine — a hub-only group (T-hub, the hub row D) is never named by the far
+    // machine's pair, the far row's group (T-bd) is; and the mirror (the hub's own realpath move: T-hub named, T-bd not)
+    tg._state.tasks['T-hub'] = { id: 'T-hub', title: 'hub', kind: 'task', createdAt: 2, sessions: [], ctx: [{ path: D, tags: ['discover'] }], progress: [] }; tg._save();
     const keepNotify = tg._notify; let notified = null;
+    const namedBy = async (move) => { notified = null; move(); for (let k = 0; k < 4 && notified === null; k++) await new Promise((r) => setImmediate(r)); return notified || []; };
     tg._notify = (ids) => { notified = ids; };
-    tg.hostRealMoved([[linked, realW]]);
-    for (let k = 0; k < 4 && notified === null; k++) await new Promise((r) => setImmediate(r));
+    const farNamed = await namedBy(() => tg.hostRealMoved([[linked, realW]], 'host-dial-far'));
+    const hubNamed = await namedBy(() => tg._memberMoved('realpath', linked, realW));   // the hub's own realpath (member-facts' road: no machine)
     tg._notify = keepNotify;
-    ok(Array.isArray(notified) && notified.includes('T-bd'), `B-16d7: a machine's real folder that moved names the group it adds (${JSON.stringify(notified)})`);
-    ok(hr.board === true && hr.server === true, `B-16d7: another machine's conversation at a link whose target is the group's folder, by ITS machine's real folder: the board AND the server say member — ${JSON.stringify(hr)}`);
+    delete tg._state.tasks['T-hub'];
+    tg._state.tasks['T-bd'].ctx = keepCtx; tg._save();
+    ok(farNamed.includes('T-bd') && !farNamed.includes('T-hub') && hubNamed.includes('T-hub') && !hubNamed.includes('T-bd'), `B-16d7 × B-06de: a machine's real folder that moved names the group it adds ON THAT MACHINE only — the far pair names T-bd (its own row), never T-hub (a hub row); the hub's own move names T-hub, never T-bd (far ${JSON.stringify(farNamed)} · hub ${JSON.stringify(hubNamed)})`);
+    ok(hr.board === true && hr.server === true, `B-16d7: another machine's conversation at a link whose target is the group's folder, by ITS machine's real folder — on that machine's OWN row (B-06de: a hub row gathers the hub's only): the board AND the server say member — ${JSON.stringify(hr)}`);
     ok(hr0.board === true && hr0.server === false, `RED CONTROL (the store reading no machine-resolved folder, as released): the board says member, the server not ⇒ RED — ${JSON.stringify(hr0)}`);
   }
   // the row builder's guard: a row that names another machine is never stamped with the hub's real path

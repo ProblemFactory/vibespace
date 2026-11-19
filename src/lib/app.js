@@ -2032,7 +2032,9 @@ class App {
     const out = []; const seen = new Set();
     for (const tg of this._nsGroups?.() || []) { // lane new-session-form: every group picked, in the order picked
       const add = (path, tip) => { if (path && !seen.has(path)) { seen.add(path); out.push({ path, tip, color: tg.color || '', group: tg.id }); } };
-      for (const f of tg.folders || []) {
+      // B-06de cure: the group's folders ON the machine chosen (a hub row on This machine, `h1::/p` → /p on h1) — never the raw
+      // `host::/path` as a chip (the wire's folders keep the row's own spelling)
+      for (const f of (this.sidebar?._folderPathsOn ? this.sidebar._folderPathsOn(tg, hostId || null) : tg.folders) || []) {
         const rec = this.sidebar._folderRec(f);
         add(rec.path, t('Task Group folder ({name})', { name: tg.title }));
         if (rec.recursive && !hostId) {
@@ -2093,6 +2095,9 @@ class App {
     // when the list lands (below), and its rows follow it then.
     const b = backend || 'claude';
     const hostSel = document.getElementById('input-host');
+    // B-06de cure: a machine the select does not list YET (the first open of a page: its list lands later) gets a provisional row —
+    // a Create pressed before the list lands starts ON that machine, never on This machine by default
+    if (hostSel && hostId && ![...hostSel.options].some((o) => o.value === hostId)) { const o = document.createElement('option'); o.value = hostId; o.textContent = this.sidebar?._hostNameOf?.(hostId) || hostId; hostSel.appendChild(o); }
     if (hostSel) hostSel.value = hostId || '';
     this._nsHostPicked = false; // set by the person's own pick in the host row (below) — the list's landing keeps it
     // Task Groups — a new session can start "in" SEVERAL (lane new-session-form: the right column's 任务组 chips, in the
@@ -2262,6 +2267,9 @@ class App {
         // back — a pick in the first moments became This machine, its field and footer with it); gone from the list ⇒ the open's
         hostSel.value = this._nsHostPicked ? was : (hostId || '');
         if (hostSel.selectedIndex < 0) hostSel.value = hostId || '';
+        // B-06de cure: a list that landed WITHOUT the machine this dialog was opened on (a failed fetch lists only Local) keeps its
+        // provisional row — a Create never falls to This machine for it
+        if (hostId && !this._nsHostPicked && hostSel.value !== hostId) { if (![...hostSel.options].some((o) => o.value === hostId)) { const o = document.createElement('option'); o.value = hostId; o.textContent = this.sidebar?._hostNameOf?.(hostId) || hostId; hostSel.appendChild(o); } hostSel.value = hostId; this._updateAcctRow?.(); }
         if (hostSel.value !== was) this._refillNewSessionRows(); // the machine landed only now — a programmatic set fires no `change`
         // both terminal and chat supported on remote hosts (chat = ssh -T pipe)
         // switching host re-sources the path list + autocomplete target

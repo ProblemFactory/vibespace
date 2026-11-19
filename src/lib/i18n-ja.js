@@ -11486,6 +11486,16 @@ export default {
   "Description / standing instructions": "説明／常駐指示", // lane task-group-context
   "told word for word to every member conversation — the one home of this group's rules": "メンバーの会話すべてに一字一句そのまま伝えます —— このグループのルールの唯一の置き場所", // lane task-group-context
   "What this group is for, and the rules every conversation in it follows…": "このグループの目的と、グループ内のすべての会話が守るルール……", // lane task-group-context
+  "A whole machine cannot be a Task Group folder \u2014 add a folder inside it.": "マシン全体はタスクグループのフォルダにできません — その中のフォルダを追加してください。",
+  "On a machine that is not paired any more ({id}): it gathers no conversation until the row names a paired machine": "もうペアリングされていないマシン上です（{id}）：この行がペアリング済みのマシンを指すまで、会話を集めません",
+  "Gathers no conversation: a whole machine is not a Task Group folder": "会話を集めません：マシン全体はタスクグループのフォルダではありません",
+  "1 conversation on {machine} is in a folder of this name: not gathered": "{machine} 上の 1 件の会話がこの名前のフォルダにあります：集められていません",
+  "{n} conversations on {machine} are in a folder of this name: not gathered": "{machine} 上の {n} 件の会話がこの名前のフォルダにあります：集められていません",
+  "Add {machine}'s folder": "{machine} のフォルダを追加",
+  "{n} conversation(s) on another machine are in a folder this group names but not gathered \u2014 a folder row gathers its own machine's only.": "別のマシン上の {n} 件の会話がこのグループの挙げるフォルダにありますが、集められていません — フォルダの行は自分のマシンの会話だけを集めます。",
+  "Point this row at {machine}": "この行を {machine} に向ける",
+  "The machines list cannot be read right now, so this Task Group's folder on another machine was not opened \u2014 nothing was started.": "いまマシン一覧を読めないため、このタスクグループの別マシン上のフォルダは開きませんでした — 何も開始していません。",
+  "This Task Group's first folder is on a machine that is not paired any more ({id}) \u2014 nothing was opened. Point the folder at a paired machine in the group's Context table.": "このタスクグループの最初のフォルダは、もうペアリングされていないマシン上にあります（{id}）— 何も開いていません。グループの Context 表で、フォルダをペアリング済みのマシンに向けてください。",
   "Context table": "Context 表", // lane task-group-context
   "every row tells the agent its path and note; 「Tell the agent」 sets only how deep. A relative path resolves against the row above's folder, then the group's first folder, then home.": "どの行もエージェントにパスと説明を伝えます。「エージェントに伝える」は深さだけを決めます。相対パスは上の行のフォルダー、次にグループの最初のフォルダー、最後にホームを基準に解決します。", // lane task-group-context
   "Note (for people and the agent)": "説明（人にもエージェントにも）", // lane task-group-context

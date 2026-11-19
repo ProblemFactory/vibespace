@@ -116,4 +116,10 @@ function folderOnHost(f, host) {
   return h === null ? !onOtherMachine(host) : onOtherMachine(host) && String(host) === h;
 }
 
-module.exports = { folderOf, insideFolder, onOtherMachine, membershipCwds, birthBindVerdict, membersWithout, memberFolders, folderOnHost };
+/** B-06de — is `p` a machine's WHOLE disk (`/`, `/.`, `h1::/`, `h1::/./`)? Such a folder row gathers nothing (folderOf trims «/» to
+ *  nothing), and gathering every conversation of a machine would put all of them under the group's grants: never a discover row.
+ *  Linear — each repeat takes ONE slash (a `(\/+…)+` shape backtracked exponentially on a long run of slashes). */
+const ROOT_ROW = /^(?:[^:/\s]+::)?(?:\/\.?)+$/;
+function isRootRow(p) { return ROOT_ROW.test(String(p == null ? '' : p).trim()); }
+
+module.exports = { folderOf, insideFolder, onOtherMachine, membershipCwds, birthBindVerdict, membersWithout, memberFolders, folderOnHost, isRootRow };

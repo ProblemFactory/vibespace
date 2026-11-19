@@ -2962,7 +2962,7 @@ class HostManager {
     const moved = [];
     for (const [c, r] of m) if (prev.get(c) !== r) moved.push([c, r]);
     for (const [c, r] of prev) if (m.get(c) !== r) moved.push([c, r]);
-    if (moved.length && typeof this.onRealCwdsMoved === 'function') { try { this.onRealCwdsMoved(moved); } catch { } }
+    if (moved.length && typeof this.onRealCwdsMoved === 'function') { try { this.onRealCwdsMoved(moved, id); } catch { } }   // + THE MACHINE (B-06de × B-16d7: a moved real folder names only the groups whose row is on that machine)
   }
   realCwdOf(id, cwd) {
     if (!id || typeof cwd !== 'string') return null;

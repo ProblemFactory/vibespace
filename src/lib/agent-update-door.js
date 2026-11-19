@@ -24,12 +24,16 @@ export function hostRowOf(ref, hosts = []) {
   const list = Array.isArray(hosts) ? hosts : [];
   return list.find((h) => h && h.id === key) || null;
 }
+/** Manage agents › Machines — the ONE page-side write of the dialog's tab key outside the dialog (B-06de's doors call it too). */
+export function openMachinesTab({ app = globalThis.app } = {}) {
+  try { localStorage.setItem('vibespace.agentsTab', 'machines'); } catch { /* the tab falls back to Accounts */ }
+  if (app && typeof app._showAgentsDialog === 'function') app._showAgentsDialog();
+}
 /** Open the door: the pairing sheet of that machine, or Manage agents › Machines. → the target opened. */
 export function openAgentUpdate(ref, { app = globalThis.app } = {}) {
   const row = hostRowOf(ref, app && app.sidebar && app.sidebar._hostsData && app.sidebar._hostsData.hosts);
   if (agentDoorTarget(row) === 'pairing' && app && app.sidebar && typeof app.sidebar._showDevicePairDialog === 'function') { app.sidebar._showDevicePairDialog(row); return 'pairing'; }
-  try { localStorage.setItem('vibespace.agentsTab', 'machines'); } catch { /* the tab falls back to Accounts */ }
-  if (app && typeof app._showAgentsDialog === 'function') app._showAgentsDialog();
+  openMachinesTab({ app });
   return 'machines';
 }
 export const agentUpdateLabel = () => t('Update its agent…');

@@ -1,10 +1,13 @@
-import { escHtml, showConfirmDialog, showToast, autoTaskColor, showContextMenu, markLanded } from './utils.js';
+import { escHtml, showConfirmDialog, showToast, autoTaskColor, showContextMenu, markLanded, fetchJson } from './utils.js';
 import { t, tc } from './i18n.js';
 import { techFoldHtml } from './plain-words.js'; // lane ui-plain-words: the budget's rule under ONE fold
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { mountTaskLog } from './task-log.js'; // the Backlog / 活动记录 tabs ARE the log viewer
 import { touches, metaChanged, windowVerdict } from '../task-delta.js'; // PURE (lane task-group-fanout): what a tasks-updated delta moved
 import { blurCommits, afterPointerUp } from './blur-commit.js'; // a box saves when left, after the release
+import { isRootRow } from '../task-membership.js'; // PURE: B-06de — a machine's whole disk is never a discover row (one linear test)
+import { overlayLastRuns } from './mounts-live.js'; // B-06de: a fresh machines list keeps the pushed last runs
+import { openMachinesTab } from './agent-update-door.js'; // B-06de: Manage agents › Machines (its tab key's one writer)
 import { pathField } from './path-field.js'; // lane path-field's component — the Context table's path cells, the export file
 import { KEY_FILES } from '../task-context.js'; // PURE: the Context table's default key files (the store's rules)
 import { principalPicker, rosterFromApp } from './principal-picker.js'; // lane grants-unify: the «除了» row of the visibility
@@ -110,6 +113,23 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
   let byRow = new Map();
   const unresolved = new Map(); // row key → the typed text that did not take (it stays in its box, saying 未生效)
   let preview = null;         // the last GET /api/tasks/:id/context answer
+  let lostNow = [];           // B-06de cure (MUST 2): this paint's conversations on another machine in a hub row's folder, not gathered
+  const openMachines = () => openMachinesTab({ app: sidebar.app });
+  // B-06de cure (the read's M2): the machines a row names are read FRESH when the table shows one (the sidebar's list is fetched
+  // once a page): a machine paired or removed since is said as it is NOW — the table repaints when the list changed
+  let hostsAskedAt = 0, closed = false;   // `closed`: set by onClose — an answer landing after the window closed paints nothing
+  const freshHosts = () => {
+    if (Date.now() - hostsAskedAt < 5000) return;
+    hostsAskedAt = Date.now();
+    const key = (d) => (d && Array.isArray(d.hosts) ? JSON.stringify(d.hosts.map((h) => [h && h.id, h && h.name])) : null);   // «no list» is not «an empty list»
+    fetchJson('/api/hosts').then((d) => {
+      if (closed || !d || !Array.isArray(d.hosts)) return;
+      const was = key(sidebar._hostsData);
+      try { overlayLastRuns(d.hosts, sidebar._lastRunSeen); } catch { }   // a run pushed while this list was on its way stays shown (the Machines panel's rule)
+      sidebar._hostsData = d;
+      if (key(d) !== was && state.tab === 'settings') renderSettings();
+    }).catch(() => { });
+  };
   let previewSeq = 0, previewTimer = null;
   let settingsDirty = false;
 
@@ -197,11 +217,43 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     if (x && VIA[x.via] && VIA[x.via]()) resWords.push(VIA[x.via]());
     if (kind === 'missing') resWords.push(t('Not found right now'));
     else if (kind === 'blocked') resWords.push(t('Its storage is not answering'));
-    else if (kind === 'remote') resWords.push(t('On the machine {host}: told only to conversations opened there', { host: x.host || '' }));
+    else if (kind === 'remote') {
+      // B-06de cure (WITH IT): the machine by its NAME; an id the machines list does not hold is said as such, with its door (a list
+      // not here yet says the id, never «not paired»)
+      const nm = sidebar._hostNameOf ? sidebar._hostNameOf(x.host) : null;
+      if (nm || !sidebar._hostsData) resWords.push(t('On the machine {host}: told only to conversations opened there', { host: nm || x.host || '' }));
+      else resWords.push(t('On a machine that is not paired any more ({id}): it gathers no conversation until the row names a paired machine', { id: x.host || '' }));
+    }
+    if (x && isRootRow(x.abs)) resWords.push(t('Gathers no conversation: a whole machine is not a Task Group folder'));   // B-06de: a root row — said whether or not it was ticked
     res.textContent = resWords.join(' · ');
     if (unresolved.has(rowKeyOf(r))) { res.textContent = t('Not applied: {path} was not found — the row keeps {old}', { path: unresolved.get(rowKeyOf(r)), old: r.path }); res.classList.add('ctx-warn'); }
     const plan = document.createElement('div'); plan.className = 'ctx-plan';
     pc.append(res, plan);
+    if (kind === 'remote' && x && x.host && sidebar._hostsData && !(sidebar._hostNameOf && sidebar._hostNameOf(x.host))) {
+      const door = document.createElement('button'); door.type = 'button'; door.className = 'task-detail-link ctx-door'; door.textContent = t('Machines'); door.onclick = openMachines;
+      res.append(' ', door);
+    }
+    // B-06de cure (主开发 08:04Z MUST 2): conversations on ANOTHER machine in a folder of this row's spelling that the group does not
+    // gather (the machine-scoped rule; before it, a bare row gathered them) — said on the row, with the one press that puts it right
+    for (const o of lostNow.filter((o) => x && o.path === x.abs && kind !== 'remote' && Array.isArray(r.tags) && r.tags.includes('discover'))) {
+      const name = (sidebar._hostNameOf && sidebar._hostNameOf(o.host)) || o.host;
+      const line = document.createElement('div'); line.className = 'ctx-res ctx-warn ctx-lost';
+      const words = document.createElement('span');
+      words.textContent = o.n === 1 ? t('1 conversation on {machine} is in a folder of this name: not gathered', { machine: name }) : t('{n} conversations on {machine} are in a folder of this name: not gathered', { n: o.n, machine: name });
+      const add = document.createElement('button'); add.type = 'button'; add.className = 'task-detail-link ctx-door';
+      const repoint = kind === 'missing' && lostNow.filter((q) => q.path === o.path).length === 1 && !(sidebar._hubSessionsIn && sidebar._hubSessionsIn(o.path));   // one machine only (another's loss stays said), and no conversation of THIS machine gathered by the row (they would leave in silence)
+      add.textContent = repoint ? t('Point this row at {machine}', { machine: name }) : t("Add {machine}'s folder", { machine: name });
+      add.onclick = () => {
+        const p = `${o.host}::${o.path}`;
+        // a hub row NOT FOUND here (written from that machine's Files before the rule) is RE-POINTED in place — its note, tell, tags
+        // and place kept (the group's first folder stays first); else the one add door (_taskAddFolder: an existing row of that
+        // spelling gets its «Discover sessions» back, never a duplicate)
+        if (repoint && !(sidebar._hubSessionsIn && sidebar._hubSessionsIn(o.path))) { const rows = rowsOf(), j = rowKeysOf(rows).indexOf(rk); if (j >= 0 && !rows.some((q) => !q.ref && q.path === p)) { rows[j] = { ...rows[j], path: p, tags: (rows[j].tags || []).filter((g) => g !== 'notes') }; writeRows(rows); return; } }   // a remote row holds no notes folder
+        sidebar._taskAddFolder(task.id, p);
+      };
+      line.append(words, ' ', add);
+      pc.appendChild(line);
+    }
     row.appendChild(pc);
     const pf = makePathField(input, {
       at: i, key: rk, was,
@@ -219,6 +271,8 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
         rows[j] = { ...rows[j], path: text };
         // the verbs follow the kind (POC v2.1): a file never auto-joins nor holds the notes
         if (info.isFile) rows[j].tags = (rows[j].tags || []).filter((g) => g !== 'discover' && g !== 'notes');
+        else if (isRootRow(text)) rows[j].tags = (rows[j].tags || []).filter((g) => g !== 'discover');   // B-06de: a whole machine never auto-joins (the row says so)
+        if (/^[^:/\s]+::\//.test(text)) rows[j].tags = (rows[j].tags || []).filter((g) => g !== 'notes');   // B-06de: ONE rule — another machine's row holds no notes folder (notesDir reads the hub's rows)
         writeRows(rows);
       },
     });
@@ -298,8 +352,8 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
       rows[i] = { ...rows[i], tags: [...cur] };
       writeRows(rows);
     };
-    chip('discover', t('Discover sessions'), tags.includes('discover'), { disabled: isFile, title: t('Conversations started in this folder (or below it) join this group') }).onclick = () => toggle('discover');
-    chip('notes', t('Agents keep notes here'), tags.includes('notes'), { disabled: isFile, title: t("This group's shared memory: agents write their notes here (one row); its .vibespace/TASK.md mirrors the group") }).onclick = () => toggle('notes');
+    chip('discover', t('Discover sessions'), tags.includes('discover'), { disabled: isFile || (isRootRow(x && x.abs) && !tags.includes('discover')), title: t('Conversations started in this folder (or below it) join this group') }).onclick = () => toggle('discover');
+    chip('notes', t('Agents keep notes here'), tags.includes('notes'), { disabled: isFile || (kind === 'remote' && !tags.includes('notes')), title: t("This group's shared memory: agents write their notes here (one row); its .vibespace/TASK.md mirrors the group") }).onclick = () => toggle('notes');
     chip('readonly', t('Agents may not change it'), tags.includes('readonly')).onclick = () => toggle('readonly');
     const share = chip('share', t('Other groups may reference it'), !!r.share, { title: t('Another Task Group can take this row into its own Context table') });
     share.onclick = () => { const rows = rowsOf(); rows[i] = { ...rows[i], share: r.share ? null : 'ro' }; writeRows(rows); };
@@ -470,6 +524,8 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     table.appendChild(headRow);
     const rows = task.ctx || [];
     const keys = rowKeysOf(rows);
+    lostNow = sidebar._lostByMachine ? sidebar._lostByMachine(task, sidebar._allSessions || []) : [];
+    if (lostNow.length || (task.ctxRes || []).some((x) => x && x.kind === 'remote')) freshHosts();
     rows.forEach((r, i) => (r.ref ? refRow(table, r, i) : pathRow(table, r, i, keys[i], was, _ae)));
     if (!rows.length) {
       const empty = document.createElement('div'); empty.className = 'empty-hint';
@@ -498,10 +554,10 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
         const text = String(info.text || '').trim() || info.path;
         unresolved.delete('+add');
         const next = rowsOf();
-        next.push({ path: text, note: '', tell: null, tags: info.isFile ? [] : ['discover'], share: null });
+        next.push({ path: text, note: '', tell: null, tags: info.isFile || isRootRow(text) ? [] : ['discover'], share: null });
         addPf.set('', { commit: true });   // r6: the add row is RESET — its box empty, its line the empty-box hint (never the added path's facts)
         writeRows(next);
-        showToast(t('Added row {n}: {path} · told 「{level}」{tags} (change it on the row)', { n: next.length, path: text, level: TELL_LABEL[info.isFile ? 'contents' : 'index'](), tags: info.isFile ? '' : ' · ' + t('Discover sessions') }));
+        showToast(t('Added row {n}: {path} · told 「{level}」{tags} (change it on the row)', { n: next.length, path: text, level: TELL_LABEL[info.isFile ? 'contents' : 'index'](), tags: info.isFile || isRootRow(text) ? '' : ' · ' + t('Discover sessions') }));
       },
     });
     if (unresolved.has('+add')) { addWarn = document.createElement('div'); addWarn.className = 'ctx-res ctx-warn'; addWarn.textContent = t('Not applied: {path} was not found', { path: unresolved.get('+add') }); addWrap.appendChild(addWarn); }
@@ -760,13 +816,21 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     const head = document.createElement('div'); head.className = 'task-detail-label';
     head.innerHTML = `${escHtml(t('Members'))}<span class="task-detail-hint">${escHtml(t('{n} conversations · ★ = a standing conversation (it sorts first in the sidebar)', { n: keys.length }))}</span>`;
     host.appendChild(head);
+    // B-06de cure (the read's S6): the rule change's loss is said where the members are listed too — one line, the door to the table
+    const lostN = sidebar._lostKeys ? sidebar._lostKeys(task, all).size : 0;   // distinct conversations (nested rows count one once)
+    if (lostN) {
+      const line = document.createElement('div'); line.className = 'task-detail-hint ctx-warn ctx-lost';
+      line.append(t('{n} conversation(s) on another machine are in a folder this group names but not gathered — a folder row gathers its own machine\'s only.', { n: lostN }), ' ');
+      const go = document.createElement('button'); go.type = 'button'; go.className = 'task-detail-link ctx-door'; go.textContent = t('Context table'); go.onclick = () => setTab('settings');
+      line.appendChild(go); host.appendChild(line);
+    }
     const startRow = document.createElement('div'); startRow.className = 'task-detail-member-start';
     const start = document.createElement('button'); start.className = 'task-detail-btn task-detail-primary';
     const firstFolder = sidebar._folderPaths(task)[0] || '';
     start.textContent = t('+ Start a conversation here');
-    start.onclick = () => app.showNewSessionDialog({ taskId, ...(typeof sidebar._firstFolder === 'function' ? sidebar._firstFolder(task) : { cwd: firstFolder || undefined }) });   // B-06de: another machine's row opens there
+    start.onclick = () => sidebar._openGroupSession(task);   // B-06de cure: ONE door — its row's machine, a machine not paired any more refused by name
     const startHint = document.createElement('span'); startHint.className = 'task-detail-hint';
-    startHint.textContent = firstFolder ? t('New Session with 「{name}」 selected, its folder = {path}', { name: task.title, path: tilde(firstFolder, home()) }) : t('New Session with 「{name}」 selected', { name: task.title });
+    startHint.textContent = firstFolder ? t('New Session with 「{name}」 selected, its folder = {path}', { name: task.title, path: /::\//.test(firstFolder) && sidebar._folderLabel ? sidebar._folderLabel(firstFolder) : tilde(firstFolder, home()) }) : t('New Session with 「{name}」 selected', { name: task.title });
     startRow.append(start, startHint);
     host.appendChild(startRow);
     const list = document.createElement('div'); list.className = 'task-detail-sessions';
@@ -858,7 +922,7 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
   const onOrderChange = () => { try { render(); } catch {} };
   app.settings?.on?.('tasks.autoStyleOrder', onOrderChange);
   const prevClose = winInfo.onClose;
-  winInfo.onClose = () => { app.ws.offGlobal(onTasksMsg); app.settings?.off?.('tasks.autoStyleOrder', onOrderChange); viewer?.destroy(); destroyFields(); ro?.disconnect(); clearTimeout(previewTimer); prevClose?.(); };
+  winInfo.onClose = () => { closed = true; app.ws.offGlobal(onTasksMsg); app.settings?.off?.('tasks.autoStyleOrder', onOrderChange); viewer?.destroy(); destroyFields(); ro?.disconnect(); clearTimeout(previewTimer); prevClose?.(); };
 
   return winInfo;
 }

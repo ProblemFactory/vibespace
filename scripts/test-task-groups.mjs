@@ -297,9 +297,73 @@ console.log('⑥ B-06de: a Task Group folder row matches conversations of ITS OW
     && /folderHost = e\.dataTransfer\.getData\('application\/x-file-host'\)/.test(ST) && /this\._taskAddFolder\(task\.id, folderHost \? `\$\{folderHost\}::\$\{folderPath\}` : folderPath\)/.test(ST)
     && /const groupHost = hosts\.size === 1 \? \[\.\.\.hosts\]\[0\] : '';/.test(SR) && /const linkPath = groupHost \? `\$\{groupHost\}::\$\{stripCwdHostLabel\(cwd\)\}` : cwd;/.test(SR),
     'the write doors: Files «Add to task» (the machine taken WITH the path), a folder dragged from another machine\'s Files, the sidebar folder-group link (another machine\'s row only when EVERY session of the group is that machine\'s — a shared home\'s hub group stays the hub\'s)');
+  // B-06de cure (主开发 08:04Z MUST 1): every New Session opened FROM a group goes through ONE door, sidebar-tasks _openGroupSession —
+  // the one showNewSessionDialog with a taskId is its own (the folder from _firstFolder: another machine's row opens on THAT machine)
   const nsCalls = ['src/lib/sidebar-tasks.js', 'src/lib/task-detail.js', 'src/lib/sidebar.js', 'src/lib/sidebar-render.js', 'src/lib/app.js'].flatMap((f) => [...read(f).matchAll(/showNewSessionDialog\(\{([^\n]*?)\}\)/g)].map((m) => ({ f, args: m[1] }))).filter((c) => /taskId/.test(c.args) && !/\} = \{/.test(c.args));   // the calls, never the method's own definition
-  const nsBad = nsCalls.filter((c) => /_folderPaths\(/.test(c.args) || (/\bcwd\b/.test(c.args) && !/_firstFolder\(/.test(c.args)));
-  ok(nsCalls.length >= 3 && nsBad.length === 0, `every New Session opened FROM a group (${nsCalls.length} calls) takes its folder through _firstFolder (another machine's row opens on that machine) — never the literal row as a hub cwd`, nsBad);
+  const doorCalls = ['src/lib/sidebar-tasks.js', 'src/lib/task-detail.js'].flatMap((f) => [...read(f).matchAll(/_openGroupSession\((?:t|g|task)\)/g)].map(() => f));
+  ok(nsCalls.length === 1 && nsCalls[0].f === 'src/lib/sidebar-tasks.js' && /^ \.\.\.first, \.\.\.extra, taskId: task\.id $/.test(nsCalls[0].args) && /proto\._openGroupSession = async function\(task, extra = \{\}\) \{\n\s*const first = this\._firstFolder\(task\);/.test(ST) && doorCalls.length === 4,
+    `every New Session opened FROM a group (${doorCalls.length} doors: the group menu, the flat view's plus, the card's plus, the group window's «Start a conversation here») goes through _openGroupSession — the ONE dialog call with a taskId, its folder from _firstFolder`, { nsCalls, doorCalls });
+  // …BEHAVIOUR (the methods evaluated from their source, as ④): a gone machine refused by name (nothing opened), an unreadable machines
+  // list refused, a paired one opens ON it; MUST 2: the rule change's loss counted per hub row and machine; WITH IT: a machine's root
+  // never written (all three doors meet in _taskAddFolder), another machine's row written as its own, the folders ON one machine
+  let cure = null, cureErr = null;
+  try {
+    const line = (re) => (ST.match(re) || [])[1];
+    const bodyAfter = (marker) => { const i = src.indexOf(marker); if (i < 0) return null; const j = src.indexOf('{', i + marker.length); let d = 0; for (let k = j; k < src.length; k++) { if (src[k] === '{') d++; else if (src[k] === '}' && --d === 0) return src.slice(j, k + 1); } return null; };   // the body's brace AFTER the signature (a default `= {}` in it is no body)
+    const ctxCopyL = line(/\n  const ctxCopy = (\(t\) => .+);\n/), ctxRowOfL = line(/\n  const ctxRowOf = (\(t, rows, folderPath\) => .+);\n/);
+    const M2 = ['_sessionFolderMatch = function(s, folderRecs)', '_memberFolderRecs = function(task)', '_getTaskSessionKeys = function(task, allSessions)', '_firstFolder = function(task)', '_lostByMachine = function(task, allSessions, withKeys = false)', '_lostKeys = function(task, allSessions)', '_hubSessionsIn = function(p)', '_folderPathsOn = function(task, host = null)', '_hostNameOf = function(id)', '_folderLabel = function(p)', '_taskAddFolder = function(id, folderPath)'];
+    const methods = M2.map((m) => `${m.slice(0, m.indexOf(' = '))}: ${m.slice(m.indexOf(' = ') + 3)} ${body('proto.' + m)}`).join(',\n');
+    const io = { toasts: [], opened: [], updates: [], hosts: null };
+    const mk2 = new Function('folderOf', 'insideFolder', 'stripCwdHostLabel', 'membershipCwds', 'memberFolders', 'folderOnHost', 'onOtherMachine', 'fetchJson', 'showToast', 'tr', 'localStorage', 'isRootRow',
+      `const ctxCopy = ${ctxCopyL}; const ctxRowOf = ${ctxRowOfL}; return { _folderRec: ${recLine}, ${methods}, _openGroupSession: async function(task, extra = {}) ${bodyAfter('proto._openGroupSession = async function(task, extra = {})')}, _getSessionStateKey: (s) => s.sessionKey, _getLegacySessionId: () => null, _tasks: [] };`);
+    const sb2 = mk2(M.folderOf, M.insideFolder, (c) => String(c || '').replace(/^[^:]+: (?=\/)/, ''), M.membershipCwds, M.memberFolders, M.folderOnHost, M.onOtherMachine,
+      async () => io.hosts, (m, o) => io.toasts.push({ m, type: o && o.type }), (s, v) => (v ? s.replace(/\{(\w+)\}/g, (x, k) => String(v[k])) : s), { setItem() { } }, M.isRootRow);
+    sb2.app = { showNewSessionDialog: (o) => { io.opened.push(o); return 'opened'; }, openTaskDetail() { }, _showAgentsDialog() { } };
+    sb2._hostsData = { hosts: [{ id: 'h1', name: 'Build box' }] };
+    const w0 = world(TaskGroupManager), task0 = w0.tgm.list().find((x) => x.id === w0.g.id);
+    const hubPath = sb2._memberFolderRecs(task0).find((f) => f.host == null).path;
+    const SESS = [
+      { sessionKey: 'claude:hub1', cwd: path.join(HUBW, 'x') }, { sessionKey: 'claude:h1same', cwd: 'h1: ' + path.join(HUBW, 'x'), host: 'h1' }, { sessionKey: 'claude:h1same2', cwd: 'h1: ' + path.join(HUBW, 'z'), host: 'h1' },
+      { sessionKey: 'claude:h1app', cwd: 'h1: /srv/app/y', host: 'h1' }, { sessionKey: 'claude:h2app', cwd: 'h2: /srv/app/y', host: 'h2' },
+    ];
+    cure = { lost: sb2._lostByMachine(task0, SESS), hubPath, on: { hub: sb2._folderPathsOn(task0, null), local: sb2._folderPathsOn(task0, 'local'), h1: sb2._folderPathsOn(task0, 'h1'), h2: sb2._folderPathsOn(task0, 'h2') }, label: [sb2._folderLabel('h1::/srv/app'), sb2._folderLabel('h9::/x'), sb2._folderLabel('/srv')] };
+    // the root: refused at the one meeting point (said); another machine's folder written as its row
+    sb2._taskById = () => ({ id: 'T-x', ctx: [], ctxRes: [] }); sb2._taskUpdate = (id, p) => { io.updates.push(p); return p; };
+    for (const p of ['h1::/', '/', 'h1:://', 'h1::/srv/x']) sb2._taskAddFolder('T-x', p);
+    cure.add = { updates: io.updates.map((u) => u.ctx.map((r) => `${r.path}|${r.tags.join(',')}`)), toasts: io.toasts.map((x) => x.type) };
+    // MUST 1: the group whose FIRST row is h1's — h1 gone ⇒ refused; the list unreadable ⇒ refused; h1 paired ⇒ opened ON h1
+    const w1 = world(TaskGroupManager); w1.tgm.update(w1.g.id, { ctx: [{ path: 'h1::/srv/app', note: 'h1 app', tags: ['discover'] }, { path: HUBW, note: 'hub', tags: ['discover'] }] });
+    const task1 = w1.tgm.list().find((x) => x.id === w1.g.id);
+    io.toasts.length = 0;
+    io.hosts = { hosts: [{ id: 'h2' }] }; const gone = await sb2._openGroupSession(task1);
+    io.hosts = { error: 'unreachable' }; const unread = await sb2._openGroupSession(task1);
+    io.hosts = { hosts: [{ id: 'h1' }] }; const paired = await sb2._openGroupSession(task1, { prompt: 'p' });
+    cure.open = { gone, unread, paired, opened: io.opened, toasts: io.toasts.map((x) => x.m.slice(0, 40)) };
+    // the read's M1: THE LIVE CHIPS (app.js _taskCwdSuggestions, from its source) take the group's folders ON the machine chosen
+    const AP = read('src/lib/app.js'), mi = AP.indexOf('  _taskCwdSuggestions(hostId) {');
+    const chipBody = mi < 0 ? null : (() => { const j = AP.indexOf('{', mi + '  _taskCwdSuggestions(hostId)'.length); let d = 0; for (let k = j; k < AP.length; k++) { if (AP[k] === '{') d++; else if (AP[k] === '}' && --d === 0) return AP.slice(j, k + 1); } return null; })();
+    const chipsOf = new Function('t', 'membershipCwds', 'insideFolder', `return function(hostId) ${chipBody};`)((s) => s, M.membershipCwds, M.insideFolder);
+    const appStub = { _nsGroups: () => [{ ...task1, title: 'Mixed', color: '' }], sidebar: Object.assign(sb2, { _allSessions: [] }) };
+    cure.chips = { hub: chipsOf.call(appStub, '').map((c) => c.path), h1: chipsOf.call(appStub, 'h1').map((c) => c.path), h2: chipsOf.call(appStub, 'h2').map((c) => c.path) };
+    // the read's S2: the fallback (a PATCH's answer before its delta: rows and resolutions not aligned) still names the machine
+    { const wN = world(TaskGroupManager); wN.tgm.update(wN.g.id, { ctx: [{ path: HUBW, note: 'hub', tags: ['discover'] }, { path: path.join(HUBW, 'x'), note: 'nested', tags: ['discover'] }, { path: 'h1::/srv/app', note: 'h1 app', tags: ['discover'] }] });
+      const tN = wN.tgm.list().find((x) => x.id === wN.g.id); cure.perRow = sb2._lostByMachine(tN, SESS).reduce((k, o) => k + o.n, 0); cure.lostKeys = sb2._lostKeys(tN, SESS).size; }
+    cure.root = ['/', '/.', 'h1::/', 'h1::/./', '/srv', 'h1::/srv', 'h1::' + '/'.repeat(5000) + 'x'].map((p) => M.isRootRow(p));   // an exponential test would hang the suite here (red by its timeout) — no clock asked
+    cure.fallback = [sb2._firstFolder({ id: 'T-f', ctx: [{ path: 'x' }], ctxRes: [], folders: ['h1::/srv/app'] }), sb2._firstFolder({ id: 'T-l', ctx: [{ path: 'x' }], ctxRes: [], folders: ['local::/srv/l'] }), sb2._firstFolder({ id: 'T-r', ctx: [{ path: 'x' }], ctxRes: [], folders: ['h1::/'] })];
+    sb2._allSessions = SESS; cure.hubIn = [sb2._hubSessionsIn(cure.hubPath), sb2._hubSessionsIn('/srv/app')]; sb2._allSessions = [];
+  } catch (e) { cureErr = e.stack || e.message; }
+  ok(!!cure && same(cure.lost, [{ path: cure.hubPath, host: 'h1', n: 2 }]), 'MUST 2: the rule change\'s loss is COUNTED per hub row and machine — h1\'s two conversations in the hub row\'s spelling (not gathered any more), never the hub\'s own, h1\'s under its own row, or h2\'s outside the hub row', { cure, cureErr });
+  ok(!!cure && same(cure.on, { hub: [cure.hubPath], local: [cure.hubPath], h1: ['/srv/app'], h2: [] }) && same(cure.label, ['Build box: /srv/app', 'h9: /x', '/srv']), 'WITH IT: the group\'s folders ON one machine (a chip, a base) — the hub\'s rows for the hub, `h1::/srv/app` → /srv/app on h1, none on h2; a row as a person reads it says its machine by name, never the raw `host::/path`', cure && { on: cure.on, label: cure.label });
+  ok(!!cure && same(cure.add, { updates: [['h1::/srv/x|discover']], toasts: ['warn', 'warn', 'warn'] }), 'WITH IT: a machine\'s ROOT (h1::/, /, h1:://) is never written — said where the person pressed (the three doors meet in _taskAddFolder); another machine\'s folder is written as ITS row', cure && cure.add);
+  ok(!!cure && same(cure.chips, { hub: [cure.hubPath], h1: ['/srv/app'], h2: [] }) && !JSON.stringify(cure.chips).includes('::') && same(cure.fallback, [{ cwd: '/srv/app', hostId: 'h1' }, { cwd: '/srv/l', hostId: 'local' }, { cwd: '/', hostId: 'h1' }]) && same(cure.hubIn, [true, false]) && cure.perRow === 3 && cure.lostKeys === 2 && cure.root.join() === 'true,true,true,true,false,false,false',
+    'the read\'s M1 + S2: the LIVE New Session chips (app.js _taskCwdSuggestions, its source) are the group\'s folders ON the machine chosen — the hub row on This machine, /srv/app on h1, none on h2, never a raw `host::/path`; a first folder the fallback carries raw still opens on ITS machine (the fallback parses the row); the Members line counts DISTINCT conversations (2); a machine\'s whole disk is said by ONE linear test (a 5000-slash row answers)', cure && { chips: cure.chips, fallback: cure.fallback, lostKeys: cure.lostKeys, root: cure.root, perRow: cure.perRow, hubIn: cure.hubIn });
+  { const TD = read('src/lib/task-detail.js'), APs = read('src/lib/app.js');
+    ok(/const repoint = kind === 'missing' && lostNow\.filter\(\(q\) => q\.path === o\.path\)\.length === 1 && !\(sidebar\._hubSessionsIn && sidebar\._hubSessionsIn\(o\.path\)\);/.test(TD) && /fetchJson\('\/api\/hosts'\)\.then\(\(d\) => \{\n\s*if \(closed \|\| !d/.test(TD) && /winInfo\.onClose = \(\) => \{ closed = true;/.test(TD)
+      && /if \(hostId && !this\._nsHostPicked && hostSel\.value !== hostId\) \{[^\n]*hostSel\.value = hostId; this\._updateAcctRow\?\.\(\); \}/.test(APs) && /chip\('notes', [^\n]*\{ disabled: isFile \|\| \(kind === 'remote' && !tags\.includes\('notes'\)\),/.test(TD)
+      && /if \(\/\^\[\^:\/\\s\]\+::\\\/\/\.test\(text\)\) rows\[j\]\.tags = \(rows\[j\]\.tags \|\| \[\]\)\.filter\(\(g\) => g !== 'notes'\);/.test(TD) && /if \(repoint && !\(sidebar\._hubSessionsIn && sidebar\._hubSessionsIn\(o\.path\)\)\) \{ const rows = rowsOf\(\)[^\n]*tags: \(rows\[j\]\.tags \|\| \[\]\)\.filter\(\(g\) => g !== 'notes'\)/.test(TD),
+      'the delta reads\' pins: a hub row is RE-POINTED only when one machine\'s loss is on it and no conversation of This machine sits there; a machines answer landing after the window closed paints nothing; the dialog keeps the machine it was opened on when the list lands without it; another machine\'s row takes no notes (its chip can only be turned off; a typed `host::` path and the re-point drop it; the press re-checks This machine\'s members)'); }
+  ok(!!cure && cure.open.gone === null && cure.open.unread === null && cure.open.paired === 'opened' && same(cure.open.opened, [{ cwd: '/srv/app', hostId: 'h1', prompt: 'p', taskId: cure.open.opened[0] && cure.open.opened[0].taskId }]) && cure.open.toasts.length === 2,
+    'MUST 1: a group whose first row is on a machine NOT PAIRED any more opens NOTHING (said by name), an unreadable machines list the same; paired, it opens ON that machine at the row\'s path', cure && cure.open);
   ok(!!keys && same(keys.firstFolder, { cwd: '/srv/app', hostId: 'h1' }), 'a New Session from a group whose first folder is `h1::/srv/app` opens ON h1 at /srv/app (never a hub session with the literal row as its cwd)', keys && keys.firstFolder);
 }
 
@@ -311,7 +375,7 @@ console.log('⑤ the wiring pins + THE CENSUS (one folder rule, one bind writer)
   ok(/const \{ birthBindVerdict \} = require\('\.\.\/task-membership\.js'\);/.test(ops) && /for \(const groupId of v\.groupIds\) \{[^\n]*\n\s*try \{\n\s*bindConversation\(\{ webuiId: id \}, groupId,/.test(ops) && /\{ birthBy \}\);/.test(ops) && /if \(s && s\._birthBind && birthBy\) s\._birthBind\.by = birthBy;/.test(ops),
     'conversation-ops: the verdict is the PURE one, the bind is bindConversation (the owner\'s route\'s writer), the verb hands who bound it to the headless create');
   ok((ops.match(/\[automation\] session \$\{/g) || []).length === 1 && (ops.match(/boundNote\(/g) || []).length === 2, 'ONE spelling of the automation bind line (boundNote — conversations.bind and the --task open)');
-  ok(/import \{ folderOf, insideFolder, membershipCwds, memberFolders, folderOnHost \} from '\.\.\/task-membership\.js';/.test(read('src/lib/sidebar-tasks.js')) && /import \{ insideFolder, membershipCwds \} from '\.\.\/task-membership\.js';/.test(read('src/lib/app.js'))
+  ok(/import \{ folderOf, insideFolder, membershipCwds, memberFolders, folderOnHost, onOtherMachine, isRootRow \} from '\.\.\/task-membership\.js';/.test(read('src/lib/sidebar-tasks.js')) && /import \{ insideFolder, membershipCwds \} from '\.\.\/task-membership\.js';/.test(read('src/lib/app.js'))
     && /const \{ folderOf, insideFolder, membersWithout, onOtherMachine, memberFolders, folderOnHost \} = require\('\.\/task-membership\.js'\);/.test(read('src/task-groups.js')), 'the store, the panel and the New Session chips import THE folder rule (lane task-group-fanout: + THE unbind rule; B-df5f: + THE hub-real-path rule, membershipCwds / onOtherMachine)');
   // THE CENSUS: a Task Group folder file (it reads a group's folders) never hand-rolls the prefix test
   const HAND = /startsWith\(\s*[\w$.]*\.path\s*\+\s*'\/'\s*\)/;

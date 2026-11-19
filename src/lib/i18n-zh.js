@@ -11487,6 +11487,16 @@ export default {
   "Description / standing instructions": "说明 / 常驻指令", // lane task-group-context
   "told word for word to every member conversation — the one home of this group's rules": "逐字注入每个成员对话，是规则唯一的家", // lane task-group-context
   "What this group is for, and the rules every conversation in it follows…": "这个任务组做什么，以及组里每个对话都要遵守的规则……", // lane task-group-context
+  "A whole machine cannot be a Task Group folder \u2014 add a folder inside it.": "整台机器不能作为任务组文件夹——请添加它里面的一个文件夹。",
+  "On a machine that is not paired any more ({id}): it gathers no conversation until the row names a paired machine": "在一台已不再配对的机器上（{id}）：在这一行指向已配对的机器之前，它不收集任何对话",
+  "Gathers no conversation: a whole machine is not a Task Group folder": "不收集任何对话：整台机器不是任务组文件夹",
+  "1 conversation on {machine} is in a folder of this name: not gathered": "{machine} 上有 1 个对话位于同名文件夹中：未被收集",
+  "{n} conversations on {machine} are in a folder of this name: not gathered": "{machine} 上有 {n} 个对话位于同名文件夹中：未被收集",
+  "Add {machine}'s folder": "添加 {machine} 的文件夹",
+  "{n} conversation(s) on another machine are in a folder this group names but not gathered \u2014 a folder row gathers its own machine's only.": "另一台机器上有 {n} 个对话位于本组列出的文件夹中，但未被收集——文件夹行只收集它自己机器上的对话。",
+  "Point this row at {machine}": "把这一行改到 {machine}",
+  "The machines list cannot be read right now, so this Task Group's folder on another machine was not opened \u2014 nothing was started.": "现在读不到机器列表，所以没有打开这个任务组在另一台机器上的文件夹——什么都没有启动。",
+  "This Task Group's first folder is on a machine that is not paired any more ({id}) \u2014 nothing was opened. Point the folder at a paired machine in the group's Context table.": "这个任务组的第一个文件夹在一台已不再配对的机器上（{id}）——什么都没有打开。请在该组的上下文表里把文件夹改到一台已配对的机器上。",
   "Context table": "上下文表", // lane task-group-context
   "every row tells the agent its path and note; 「Tell the agent」 sets only how deep. A relative path resolves against the row above's folder, then the group's first folder, then home.": "每一行都会告诉 agent：路径 + 说明；「告诉 agent」只决定说多深。相对路径按上一行的文件夹解析（再按任务组的第一个文件夹、家目录）", // lane task-group-context
   "Note (for people and the agent)": "说明（给人也给 agent 看）", // lane task-group-context

@@ -1,10 +1,11 @@
-import { escHtml, createPopover, showContextMenu, showInputDialog, showConfirmDialog, showToast, taskGroupColor, seqTaskColor, stripCwdHostLabel } from './utils.js';
+import { escHtml, createPopover, showContextMenu, showInputDialog, showConfirmDialog, showToast, taskGroupColor, seqTaskColor, stripCwdHostLabel, fetchJson } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { track } from './telemetry-client.js';
 import { t as tr } from './i18n.js';
 import { valueWord } from './value-words.js'; // lane ui-language: the board's state / urgency words live in the ONE door
 import { mergePendingBind, pendingBindVerdict, sweepPendingBinds } from './fork-groups.js';
-import { folderOf, insideFolder, membershipCwds, memberFolders, folderOnHost } from '../task-membership.js'; // PURE (lane open-task-binds): THE folder rule, the server's groupsForSession asks the same one
+import { openMachinesTab } from './agent-update-door.js'; // B-06de: Manage agents › Machines (its tab key's one writer)
+import { folderOf, insideFolder, membershipCwds, memberFolders, folderOnHost, onOtherMachine, isRootRow } from '../task-membership.js'; // PURE (lane open-task-binds): THE folder rule, the server's groupsForSession asks the same one
 import { applyTasksDelta, applyStatusDelta, frameStep, fetchVerdict, metaChanged, listVerdict } from '../task-delta.js'; // PURE (lane task-group-fanout): a broadcast is a DELTA in the hub's order
 import { pressResumeGroup } from './resume-pacer.js'; // lane resume-all-paced (L1): the group's button paces its resumes
 
@@ -484,13 +485,39 @@ export function installSidebarTasks(SidebarClass) {
    *  (never a hub session with the literal `host::/path` as its cwd); none ⇒ {} */
   proto._firstFolder = function(task) {
     const f = this._memberFolderRecs(task)[0];
-    return f ? { cwd: f.path, ...(f.host ? { hostId: f.host } : {}) } : {};
+    return f ? { cwd: (folderOf(f.path) || { path: f.path }).path, ...(f.host ? { hostId: f.host } : {}) } : {};   // the fallback names the machine too (_memberFolderRecs); a glob tail is no cwd
+  };
+  /** B-06de cure (主开发 08:04Z MUST 1) — EVERY New Session opened from a group: a first folder that names a machine NOT PAIRED any more
+   *  (removed, or paired again under a new id) never opens anywhere else — the dialog would fall to This machine with the folder of
+   *  the same name prefilled (a billed conversation on the hub). Refused BY NAME where the person pressed, with the door to Machines
+   *  and the group's own Context table (re-point the row); nothing is opened, nothing prefilled. A machines list that cannot be read
+   *  refuses the same way (said as such). */
+  proto._openGroupSession = async function(task, extra = {}) {
+    const first = this._firstFolder(task);
+    if (first.hostId) {
+      let d = null; try { d = await fetchJson('/api/hosts'); } catch { d = null; }
+      const unread = !d || d.error || d.held || !Array.isArray(d.hosts);
+      if (unread || !d.hosts.some((h) => h && h.id === first.hostId)) {
+        const msg = unread ? tr('The machines list cannot be read right now, so this Task Group\'s folder on another machine was not opened — nothing was started.')
+          : tr('This Task Group\'s first folder is on a machine that is not paired any more ({id}) — nothing was opened. Point the folder at a paired machine in the group\'s Context table.', { id: first.hostId });
+        showToast(msg, { type: 'warn', duration: 12000, actions: [
+          { label: tr('Machines'), run: () => openMachinesTab({ app: this.app }) },
+          { label: tr('Context table'), run: () => this.app.openTaskDetail?.(task.id, { tab: 'settings' }) },
+        ] });
+        return null;
+      }
+    }
+    return this.app.showNewSessionDialog({ ...first, ...extra, taskId: task.id });
   };
   const ctxCopy = (t) => (t.ctx || []).map((r) => (r.ref ? { ...r } : { ...r, tags: [...(r.tags || [])] }));
   const ctxRowOf = (t, rows, folderPath) => rows.findIndex((r, i) => !r.ref && (r.path === folderPath || ((t.ctxRes || [])[i] || {}).abs === folderPath));
   proto._taskAddFolder = function(id, folderPath) {
     const t = this._taskById(id);
     if (!t || !folderPath) return;
+    // B-06de cure (WITH IT): a machine's ROOT (`R::/`, or the hub's `/`) gathers no conversation — the folder rule trims «/» to
+    // nothing (a whole disk gathering every conversation on it would put all of them under the group's grants): never written,
+    // said where the person pressed (the three doors meet here: Files «Add to task», a drag, the sidebar link)
+    if (isRootRow(folderPath)) { showToast(tr('A whole machine cannot be a Task Group folder — add a folder inside it.'), { type: 'warn' }); return; }
     const rows = ctxCopy(t);
     const i = ctxRowOf(t, rows, folderPath);
     if (i >= 0) { if (rows[i].tags.includes('discover')) return; rows[i].tags.push('discover'); }
@@ -539,7 +566,58 @@ export function installSidebarTasks(SidebarClass) {
   /** B-06de: a group's folder rows FOR MEMBERSHIP, machine-scoped (task-membership memberFolders over the answer's ctx rows +
    *  their resolution — the server's list); an answer without the table keeps the old folders (the hub's) */
   proto._memberFolderRecs = function(task) {
-    return task && Array.isArray(task.ctx) && Array.isArray(task.ctxRes) && task.ctxRes.length === task.ctx.length ? memberFolders(task.ctx, task.ctxRes) : ((task && task.folders) || []).map(this._folderRec);   // a PATCH's answer (new ctx, the old resolutions) waits for its delta
+    if (task && Array.isArray(task.ctx) && Array.isArray(task.ctxRes) && task.ctxRes.length === task.ctx.length) return memberFolders(task.ctx, task.ctxRes);
+    // the read's S2: the fallback's raw `host::/path` still names its machine (never a hub rec with the literal as its path) — parsed
+    // BEFORE folderOf, which trims a root `h1::/` to `h1::`
+    return ((task && task.folders) || []).map((f) => {
+      const raw = typeof f === 'string' ? f : f && f.path, m = /^([^:/\s]+)::(\/.*)$/.exec(String(raw || ''));
+      if (!m) return this._folderRec(f);
+      const p2 = m[2].replace(/\/{2,}/g, '/');   // folded like memberFolders' (an interior `//` too)
+      const r = folderOf(typeof f === 'string' ? p2 : { ...f, path: p2 });
+      return { path: r ? r.path : '/', recursive: r ? r.recursive : true, host: m[1] };
+    }).filter(Boolean);   // a PATCH's answer (new ctx, the old resolutions) waits for its delta
+  };
+
+  /** B-06de cure (主开发 08:04Z MUST 2) — THE RULE CHANGE'S LOSS, SAID WHERE THE PERSON LOOKS AT THE GROUP: before the machine-scoped
+   *  rule a hub folder row gathered another machine's conversations by SPELLING (Files «Add to task», a drag and the sidebar link
+   *  wrote a bare path for another machine's folder); now only the hub's. → [{ path, host, n }]: per hub folder row of `task` and
+   *  machine, the conversations on that machine whose folder is inside a folder of the row's spelling and that the group does NOT
+   *  gather. The Context table says them on the row, with the one press that puts it right (that machine's own row). */
+  proto._lostByMachine = function(task, allSessions, withKeys = false) {
+    const hubRows = this._memberFolderRecs(task).filter((f) => f.host == null);
+    const all = allSessions || this._allSessions || [], out = [];
+    if (!hubRows.length || !all.length) return out;
+    const keys = this._getTaskSessionKeys(task, all);
+    for (const s of all) {
+      if (!s || !onOtherMachine(s.host) || keys.has(this._getSessionStateKey(s)) || keys.has(s.sessionId)) continue;
+      const cwds = membershipCwds({ cwd: stripCwdHostLabel(s.cwd), realCwd: s.realCwd, hostRealCwd: s.hostRealCwd, host: s.host });   // the page's one rule's facts (B-16d7: that machine's own real folder too)
+      for (const f of hubRows) {
+        if (!cwds.some((c) => insideFolder(c, f))) continue;
+        let o = out.find((x) => x.path === f.path && x.host === String(s.host));
+        if (o) o.n++; else { o = { path: f.path, host: String(s.host), n: 1 }; out.push(o); }
+        if (withKeys) (o.keys || (o.keys = [])).push(this._getSessionStateKey(s));
+      }
+    }
+    return out;
+  };
+  /** does any conversation of THIS machine sit inside `p`? (a hub row re-pointed at another machine would drop them — the delta read) */
+  proto._hubSessionsIn = function(p) { return (this._allSessions || []).some((s) => s && !onOtherMachine(s.host) && membershipCwds({ cwd: stripCwdHostLabel(s.cwd), realCwd: s.realCwd, host: s.host }).some((c) => insideFolder(c, { path: p }))); };
+  /** the distinct conversations the rule change left out of `task` (nested hub rows count one conversation once) */
+  proto._lostKeys = function(task, allSessions) { const s = new Set(); for (const o of this._lostByMachine(task, allSessions, true)) for (const k of o.keys || []) s.add(k); return s; };
+  /** B-06de cure (WITH IT): the group's folders AS PATHS ON ONE MACHINE (`host`: none / '' / 'local' = the hub) — the hub's rows for
+   *  the hub, `R::/x` → `/x` for machine R. A chip, a base, the folder that follows a picked group: never the raw `host::/path` */
+  proto._folderPathsOn = function(task, host = null) {
+    return this._memberFolderRecs(task).filter((f) => folderOnHost(f, host)).map((f) => (folderOf(f.path) || { path: f.path }).path);   // a glob tail is no chip
+  };
+  /** a paired machine's NAME by its id; null when the machines list is not here or does not hold it */
+  proto._hostNameOf = function(id) {
+    const h = (this._hostsData?.hosts || []).find((x) => x && x.id === id);
+    return h ? (h.name || h.id) : null;
+  };
+  /** a folder row AS A PERSON READS IT: `R::/x` → «<R's name>: /x» (its id when the list does not name it) */
+  proto._folderLabel = function(p) {
+    const m = /^([^:/\s]+)::(\/.*)$/.exec(String(p || ''));
+    return m ? `${this._hostNameOf(m[1]) || m[1]}: ${m[2]}` : String(p || '');
   };
 
   proto._getTaskSessionKeys = function(task, allSessions) {
@@ -712,7 +790,7 @@ export function installSidebarTasks(SidebarClass) {
     const items = [
       { label: tr('Details…'), action: () => this.app.openTaskDetail(taskId) },
       { label: tr('Backlog & activity…'), action: () => this.app.openTaskLog(taskId, { tab: 'activity' }) },
-      { label: tr('New session in this task…'), action: () => this.app.showNewSessionDialog({ ...this._firstFolder(t), taskId }) },
+      { label: tr('New session in this task…'), action: () => this._openGroupSession(t) },   // B-06de cure: a gone machine refused by name
       { label: tr('Rename'), action: async () => {
         const n = await showInputDialog({ title: tr('Rename Task Group'), label: tr('Title'), value: t.title, confirmText: tr('Rename') });
         if (n && n.trim() && n.trim() !== t.title) this._taskUpdate(taskId, { title: n.trim() });
@@ -878,7 +956,7 @@ export function installSidebarTasks(SidebarClass) {
         ...groupsAll.map(g => ({
           label: g.title,
           style: (() => { const c = this.getTaskColor(g); return c ? `box-shadow: inset 3px 0 0 ${c}` : ''; })(),
-          action: () => this.app.showNewSessionDialog({ ...this._firstFolder(g), taskId: g.id }),   // B-06de: another machine's first folder opens there
+          action: () => this._openGroupSession(g),   // B-06de: another machine's first folder opens there — a gone machine refused by name
         })),
         ...(groupsAll.length ? [{ separator: true }] : []),
         { label: tr('No group'), action: () => this.app.showNewSessionDialog({}) },
@@ -1014,12 +1092,12 @@ export function installSidebarTasks(SidebarClass) {
       const plusBtn = document.createElement('button');
       plusBtn.className = 'folder-add-btn';
       plusBtn.textContent = '+';
-      plusBtn.title = tr('New session in this task') + (this._folderPaths(task)[0] ? ` (${this._folderPaths(task)[0]})` : '');   // the row as written (another machine's `host::/path` says its machine)
+      plusBtn.title = tr('New session in this task') + (this._folderPaths(task)[0] ? ` (${this._folderLabel(this._folderPaths(task)[0])})` : '');   // B-06de: another machine's row says its machine by name («<name>: /path»), never `host::/path`
       plusBtn.onclick = (e) => {
         e.stopPropagation();
         // Reuse the normal dialog PRE-FILLED (user confirms all params):
         // cwd defaults to the first auto-include folder, task pre-selected.
-        this.app.showNewSessionDialog({ ...this._firstFolder(task), taskId: task.id });   // B-06de: its machine too
+        this._openGroupSession(task);   // B-06de: its machine too — a gone machine refused by name
       };
       header.appendChild(plusBtn);
 
