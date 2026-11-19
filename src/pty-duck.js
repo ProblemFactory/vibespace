@@ -1,5 +1,6 @@
 'use strict';
-// PURE (imports nothing) THE node-pty DUCK's listener half — ONE implementation
+const { utf8Stream } = require('./utf8-stream.js'); // B-b968: ONE UTF-8 decoder per byte stream (PURE)
+// PURE (imports only the PURE src/utf8-stream.js) THE node-pty DUCK's listener half — ONE implementation
 // for every non-node-pty bridge that reaches setupSessionPty (B-ae4b).
 //
 // node-pty's own `onData`/`onExit` keep a SET of listeners and hand each
@@ -51,7 +52,8 @@ function ptyListeners({ hold = 0 } = {}) {
  *  one-slot literal. Takes over `handle.onData`/`handle.onExit`. */
 function pipePtyShim(handle) {
   const data = ptyListeners(), exit = ptyListeners();
-  handle.onData = (buf) => data.emit(typeof buf === 'string' ? buf : buf.toString('utf-8'));
+  const decode = utf8Stream((s) => data.emit(s));   // B-b968: a 64 KiB pump chunk or a link frame that ends inside a character holds its bytes
+  handle.onData = (buf) => decode(buf);
   handle.onExit = (code) => exit.emit({ exitCode: code ?? 0 });
   return {
     _pipe: true,                    // no dtach behind it: the ONE healer refuses to "re-attach" (kill) it (B-b675)

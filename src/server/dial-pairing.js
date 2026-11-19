@@ -8,6 +8,7 @@ const path = require('path');
 
 const { mk } = require('./lazy.js');
 const { ptyListeners } = require('../pty-duck'); // the node-pty duck's listener SET (B-ae4b)
+const { utf8Stream } = require('../utf8-stream.js'); // B-b968: a session re-attached through this machine's own agent: its pty OUTPUT decoded as ONE stream
 
 const DF = require('../dial-facts.js');
 const PT = require('../pairing-token.js'); // verify-r3: THE ONE DOOR of a pairing token (mint, hash, compare)
@@ -374,7 +375,8 @@ async function ensureAgentdOnHost(hostId) {
 // callback.
 function daemonPtyShim(handle) {
   const data = ptyListeners(), exits = ptyListeners();
-  handle.onData = (buf) => data.emit(buf.toString('utf-8'));
+  const decode = utf8Stream((s) => data.emit(s));   // B-b968: a frame that ends inside a character (zh / ja: three bytes) holds its bytes
+  handle.onData = (buf) => decode(buf);
   handle.onExit = (code) => exits.emit({ exitCode: code });
   return {
     _daemon: true,

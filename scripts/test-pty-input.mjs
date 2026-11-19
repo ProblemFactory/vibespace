@@ -10,10 +10,13 @@
 //      in a write of its own).
 //   ③ the wiring: agentd.js makes one ptyInput per pty session and its onData writes through it; no per-frame decode is left
 //      (a text pin: the real daemon's pty road is the heavy suites').
+//   ④ B-b968: the SAME rule (src/utf8-stream.js, SHARED) on the hub's pty OUTPUT (the real daemonPtyShim over a stand-in handle,
+//      every cut; CONTROL: the release's per-frame shim ⇒ U+FFFD) and on the device chat tail's read edge (a text pin).
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { checker } from './lib/check.mjs';
+import { anchored } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const { ok, report } = checker();
@@ -60,4 +63,38 @@ ok(/const \{ ptyInput \} = require\('\.\/pty-input\.js'\);/.test(src)
   && /if \(sx\) \{ try \{ sx\.input\(buf\); \} catch \{ \} mux\.credit\(chan, buf\.length\); return; \}/.test(src)
   && !/sx\.proc\.write\(buf\.toString\(/.test(src),   // stale-pins: kept — an absence check (the release's per-frame decode is gone)
   'agentd.js makes ONE ptyInput per pty session and its onData writes through it; no per-frame decode of session input is left');
+
+// ④ B-b968: the SAME rule on the hub's side — a session re-attached through this machine's own agent (src/server/dial-pairing.js
+// daemonPtyShim), this machine's pipe sessions (src/pty-duck.js pipePtyShim) and every device's chat tail read edge (agentd.js
+// session-events-watch) decode ONE stream through src/utf8-stream.js (PURE: the global TextDecoder)
+console.log('④ the re-attached terminal, the pipe sessions and the chat tail decode one stream (src/utf8-stream.js)');
+const { utf8Stream } = require(path.join(REPO, 'src/utf8-stream.js'));
+const { ptyListeners } = require(path.join(REPO, 'src/pty-duck.js'));
+const DP_SRC = fs.readFileSync(path.join(REPO, 'src/server/dial-pairing.js'), 'utf-8');
+const shimOf = (src) => {   // the real daemonPtyShim, cut out of its file by its own lines (a moved line THROWS by name, never a silent pass)
+  const a = src.indexOf('function daemonPtyShim(handle) {'); const b = a < 0 ? -1 : src.indexOf('\n}\n', a);
+  if (a < 0 || b < 0) throw new Error('daemonPtyShim: the function is not where the leg reads it (move the leg with it)');
+  return new Function('ptyListeners', 'utf8Stream', src.slice(a, b + 2) + '\nreturn daemonPtyShim;')(ptyListeners, utf8Stream);
+};
+const viaShim = (shim) => (write) => { const h = { pid: 1 }; const p = shim(h); p.onData(write); return (buf) => h.onData(buf); };
+const hub = cuts(viaShim(shimOf(DP_SRC)));
+ok(hub.bad.length === 0 && hub.ones === true && hub.partial === true && twoSessions(viaShim(shimOf(DP_SRC))) === true, `the re-attach shim (a session through this machine's own agent) over a stand-in handle: all ${hub.cutsTried} two-frame cuts, one-byte frames and a partial character give the text back whole; two terminals each keep their own character`, hub.bad);
+const RELEASE_SHIM_LINE = "  handle.onData = (buf) => data.emit(buf.toString('utf-8'));\n"; // stale-pins: kept — the control plants the release's line
+const NOW_SHIM_LINES = "  const decode = utf8Stream((s) => data.emit(s));   // B-b968: a frame that ends inside a character (zh / ja: three bytes) holds its bytes\n  handle.onData = (buf) => decode(buf);\n";
+ok(DP_SRC.split(NOW_SHIM_LINES).length === 2, 'the anchor of the control «the release\'s shim» is in dial-pairing.js once');
+const hubRel = cuts(viaShim(shimOf(anchored(DP_SRC, NOW_SHIM_LINES, RELEASE_SHIM_LINE, 'release-shim'))));
+ok(hubRel.bad.length > 0 && hubRel.ones === false, 'CONTROL (the release\'s shim: each output frame decoded on its own): the cuts turn into U+FFFD — RED', hubRel.bad.length);
+ok(cuts(utf8Stream).bad.length === 0 && /const \{ utf8Stream \} = require\('\.\.\/utf8-stream\.js'\);/.test(fs.readFileSync(path.join(REPO, 'src/agentd/pty-input.js'), 'utf-8')) && /function ptyInput\(write\) \{ return utf8Stream\(write\); \}/.test(fs.readFileSync(path.join(REPO, 'src/agentd/pty-input.js'), 'utf-8')), 'ONE rule for every edge: src/utf8-stream.js gives the text back whole, and the device\'s pty input IS it');
+ok(/const \{ utf8Stream \} = require\('\.\.\/utf8-stream\.js'\);/.test(src) && /t = \{ pos: st2\.size, buf: '', mm: null, ops: \[\], dec: null \};/.test(src) && /\(t\.dec \|\|= utf8Stream\(\(s\) => \{ t\.buf \+= s; \}\)\)\(buf\);/.test(src) && !/t\.buf \+= buf\.toString\(/.test(src),   // stale-pins: kept — an absence check (the read edge's per-chunk decode is gone)
+  'the chat tail\'s read edge (session-events-watch): ONE decoder per tail — a read that ends inside a character holds its bytes for the next read; no per-chunk decode is left');
+ok(/const \{ utf8Stream \} = require\('\.\.\/utf8-stream\.js'\);/.test(DP_SRC) && !/handle\.onData = \(buf\) => data\.emit\(buf\.toString\(/.test(DP_SRC), 'the re-attach shim requires the one rule and decodes no frame on its own');   // stale-pins: kept — an absence check
+// the PIPE sessions (this machine's chat road R6: the device pumps .out in 64 KiB chunks at any byte, the link splits at its window)
+const { pipePtyShim } = require(path.join(REPO, 'src/pty-duck.js'));
+const PD_SRC = fs.readFileSync(path.join(REPO, 'src/pty-duck.js'), 'utf-8');
+const pipeOf = (src) => { const a = src.indexOf('function pipePtyShim(handle) {'); const b = a < 0 ? -1 : src.indexOf('\n}\n', a); if (a < 0 || b < 0) throw new Error('pipePtyShim: the function is not where the leg reads it'); return new Function('ptyListeners', 'utf8Stream', src.slice(a, b + 2) + '\nreturn pipePtyShim;')(ptyListeners, utf8Stream); };
+const pipe = cuts(viaShim(pipePtyShim));
+ok(pipe.bad.length === 0 && pipe.ones === true && pipe.partial === true && twoSessions(viaShim(pipePtyShim)) === true, `the PIPE shim (src/pty-duck.js, this machine's chat sessions): all ${pipe.cutsTried} cuts, one-byte frames and a partial character whole; two sessions each their own`, pipe.bad);
+const pipeRel = cuts(viaShim(pipeOf(anchored(PD_SRC, "  const decode = utf8Stream((s) => data.emit(s));   // B-b968: a 64 KiB pump chunk or a link frame that ends inside a character holds its bytes\n  handle.onData = (buf) => decode(buf);\n", "  handle.onData = (buf) => data.emit(typeof buf === 'string' ? buf : buf.toString('utf-8'));\n", 'release-pipe-shim')))); // stale-pins: kept — the control plants the release's line
+ok(pipeRel.bad.length > 0 && pipeRel.ones === false, 'CONTROL (the release\'s pipe shim: each chunk decoded on its own): the cuts turn into U+FFFD — RED', pipeRel.bad.length);
+ok(JSON.stringify(feed(utf8Stream, [Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('a')])) === JSON.stringify(['\uFEFF', 'a']) && JSON.stringify(feed(utf8Stream, ['ready'])) === JSON.stringify(['ready']), 'a leading byte-order mark is KEPT (as the per-frame decode kept it), and a string is handed on as it is');
 report();

@@ -332,6 +332,7 @@ if (process.argv.includes('--discovery-snapshot-child')) {
 const net = require('net');
 const { Mux, PROTO_VERSION } = require('./mux.js');
 const AR = require('./attach-roads.js'); // B-beaf: the pipe pump and the terminal road stop when the link holds them back
+const { utf8Stream } = require('../utf8-stream.js');   // B-b968: the chat tail's read edge decodes ONE stream (a character cut by a read)
 const { ptyInput } = require('./pty-input.js');   // B-5019: one UTF-8 decoder per pty session (a character split across frames)
 // PURE (bundled): the ONE spawn-env sanitizer the orchestrator's agentEnv()
 // also is — every daemon child and every daemon re-exec is born from
@@ -2095,17 +2096,17 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
                   if (!t) {
                     // start at NOW: history replay is the transcript service's
                     // job; this stream is the LIVE feed only
-                    t = { pos: st2.size, buf: '', mm: null, ops: [] };
+                    t = { pos: st2.size, buf: '', mm: null, ops: [], dec: null };
                     st.tails.set(sid, t);
                     continue;
                   }
-                  if (st2.size <= t.pos) { t.pos = Math.min(t.pos, st2.size); continue; }
+                  if (st2.size <= t.pos) { if (st2.size < t.pos) { t.buf = ''; t.dec = null; } t.pos = Math.min(t.pos, st2.size); continue; }   // B-b968: a file replaced (shorter) starts a new stream
                   const want = Math.min(st2.size - t.pos, 1024 * 1024);
                   const buf = Buffer.alloc(want);
                   let fd = null;
                   try { fd = fs.openSync(outFp, 'r'); fs.readSync(fd, buf, 0, want, t.pos); } catch { continue; } finally { if (fd != null) try { fs.closeSync(fd); } catch { } }
                   t.pos += want;
-                  t.buf += buf.toString('utf8');
+                  (t.dec ||= utf8Stream((s) => { t.buf += s; }))(buf);   // B-b968: a read that ends inside a character holds its bytes for the next read
                   const lines = t.buf.split('\n');
                   t.buf = lines.pop(); // partial tail carries over
                   if (!t.mm) {

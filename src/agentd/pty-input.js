@@ -5,13 +5,10 @@
 // inside a character writes only what is whole (nothing at all for a frame of one partial character). A stray lead byte
 // (an 8-bit Meta key, a non-UTF-8 sender) is held until the next frame and then written as U+FFFD — the release wrote it at
 // once; the 1–3 bytes held when a session ends are dropped (no dec.end(): nothing reads a dead pty). DEVICE tier (the
-// daemon bundle); requires nothing of ours.
-const { StringDecoder } = require('string_decoder');
+// daemon bundle). B-b968: the rule itself is src/utf8-stream.js (SHARED) — the hub's pty OUTPUT and the chat tail read it too.
+const { utf8Stream } = require('../utf8-stream.js');
 
 /** → (buf) => void: decode `buf` as the NEXT bytes of one byte stream and hand `write` only whole characters. */
-function ptyInput(write) {
-  const dec = new StringDecoder('utf8');
-  return (buf) => { const s = dec.write(buf); if (s) write(s); };
-}
+function ptyInput(write) { return utf8Stream(write); }
 
 module.exports = { ptyInput };
