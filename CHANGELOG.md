@@ -51,6 +51,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Conversations and background jobs now start below VibeSpace's CPU priority, so a busy build yields to the page; see Session Properties, turn off in Settings.
 - A conversation on another machine no longer joins a Task Group through a symbolic link on the server's disk; only its folder as written counts.
 - Your channel messages are kept in a folder only your own account on this computer can open; only your channel sign-ins are locked in the vault.
+- Settings → Plugins: an installed plugin's Update… and Uninstall… are now in its row's ⋯ menu, so the plugin's name keeps its room.
 - On a phone the For you button shows a single number; on a wider screen its numbers fold into one when the window's name needs the room.
 - A Background Work job says which machine it runs on; an agent on another machine asking for a folder this one lacks is refused at once.
 - Ending or archiving a conversation that still runs background jobs shows a notice naming them, with Stop these too.
@@ -89,7 +90,6 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A pooled account whose subscription stopped now opens Manage Agents from For you, where its Re-check or its setting is.
 - Once Spending allows automatic turns, the Credits chip's tip in the usage popup says they still run while the account bills paid overage.
 - For you items filed before this update keep their earlier words, in Chinese and Japanese too; the new words and buttons come when an item is filed again.
-- Settings → Plugins: an installed plugin's Update… and Uninstall… are now in its row's ⋯ menu, so the plugin's name keeps its room.
 
 ### Fixed
 - On a busy machine, VibeSpace no longer freezes for up to half a minute at startup while it checks which agent programs are running.
