@@ -156,7 +156,7 @@ const ROWS = [
   ["src/routes/editor.js", "registerEditorRoutes > route:POST /api/editor/signal", 2, "guarded", "filePath / signalPath come straight from the POST body (normally the CLI's Ctrl+G temp file, but unchecked — any path)"],
   ["src/routes/files.js", "remoteToLocalTmp", 3, "local-only", "hit.tmp / v0.tmp sit in a mkdtemp dir under os.tmpdir() ('webui-remote-') this function made for a remote preview pull"],
   ["src/routes/files.js", "route:POST /api/upload", 3, "local-only", "lane chat-attachments-persist: 5 → 3 — the remote branch reads and unlinks its multer temp asynchronously now; file.path / f.path are multer temp files under the hub's own temp folder (src/server/hub-tmp.js: <tmp>/vibespace-<uid>-<data hash>/uploads, B-3767); the dest-side ops already go through SafeFs"],
-  ["src/routes/files.js", "route:POST /api/archive/extract-entry", 3, "local-only", "rTmp / tmpDir are mkdtemp dirs under os.tmpdir() ('webui-archive-') made by this route"],
+  ["src/routes/files.js", "route:POST /api/archive/extract-entry", 5, "local-only", "rTmp / tmpDir are mkdtemp dirs under os.tmpdir() ('webui-archive-') made by this route (ckpt61 cure 3: + its two new refusals remove tmpDir — a reader that never started, a write that failed)"],
   ["src/routes/files.js", "writeExtractJournal", 2, "local-only", "EXTRACT_JOURNAL = <checkout>/data/extract-journal.json (+ .tmp)"],
   ["src/routes/files.js", "crossHostTransfer > isDir", 1, "guarded", "safePath(src) = the local source a person picked in a cross-host copy/move (POST body)"],
   ["src/routes/files.js", "crossHostTransfer > exists", 1, "guarded", "safePath(dest) = the local destination a person picked in a cross-host copy/move (POST body)"],

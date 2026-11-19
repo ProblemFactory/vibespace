@@ -359,9 +359,11 @@ try {
     // second press tries again — with the log write allowed, and with it REFUSED (the status answers the mark from memory).
     // RED, each half alone: the status's fallback out (the write refused ⇒ no mark), the in-flight check's «failed at once» out (the
     // write refused ⇒ the press refused), the failure neither written nor kept (no mark, the press refused)
-    const OPSF = path.join(T, 'ops-full.cjs'), ROOT = path.join(T, 'ops-root');
-    fs.mkdirSync(path.join(ROOT, 'scripts'), { recursive: true }); fs.mkdirSync(path.join(ROOT, 'data'), { recursive: true });
-    fs.writeFileSync(path.join(ROOT, 'scripts', 'update.sh'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    // EACH RUN ITS OWN ROOT (cure 4: one shared data/update.log carried a run's state into the next — «a recent log with no mark»
+    // answered the next run's FIRST press «already», so its start never failed and the reds after it judged nothing)
+    const OPSF = path.join(T, 'ops-full.cjs');
+    let rootN = 0;
+    const freshRoot = () => { const R = path.join(T, `ops-root-${++rootN}`); fs.mkdirSync(path.join(R, 'scripts'), { recursive: true }); fs.mkdirSync(path.join(R, 'data'), { recursive: true }); fs.writeFileSync(path.join(R, 'scripts', 'update.sh'), '#!/bin/sh\nexit 0\n', { mode: 0o755 }); return R; };
     fs.writeFileSync(OPSF, [
       "const fs = require('fs'); const [opsPath, root, refuse] = process.argv.slice(2); const routes = {};",
       "if (refuse === '1') { const ra = fs.promises.appendFile; fs.promises.appendFile = async function (p, ...a) { if (String(p).endsWith('update.log')) { const e = new Error('EMFILE: the leg refuses the write'); e.code = 'EMFILE'; throw e; } return ra.call(this, p, ...a); }; }",
@@ -381,7 +383,7 @@ try {
     ].join('\n'));
     const opsRun = (opsPath, refuse) => new Promise((resolve) => {
       let out = '', err = '', c;
-      try { c = CP.spawn('sh', ['-c', 'ulimit -n 128 && exec "$0" "$@"', process.execPath, OPSF, opsPath, ROOT, refuse ? '1' : '0'], { stdio: ['ignore', 'pipe', 'pipe'] }); } catch (e) { resolve({ code: null, err: String(e) }); return; }
+      try { c = CP.spawn('sh', ['-c', 'ulimit -n 128 && exec "$0" "$@"', process.execPath, OPSF, opsPath, freshRoot(), refuse ? '1' : '0'], { stdio: ['ignore', 'pipe', 'pipe'] }); } catch (e) { resolve({ code: null, err: String(e) }); return; }
       c.on('error', (e) => { err += String(e); });
       if (c.stdout) c.stdout.on('data', (d) => { out += d; });
       if (c.stderr) c.stderr.on('data', (d) => { err += d; });
@@ -398,11 +400,40 @@ try {
     const kInflight = view(await opsRun(MC.write('src/server/ops-routes.js', anchored(opsSrc, INFLIGHT, ') return res.json({ success: true, already: true });', 'update-inflight'), 'red-update-inflight'), true));
     const said = (v) => /could not be started \(EMFILE\)/.test(v.log) && /__UPDATE_EXIT:127\s*$/.test(v.log);
     ok([kOk, kRef].every((v) => v.code === 0 && v.full === 'EMFILE' && v.posted && said(v) && v.running === false && v.already === false)
+      && [kSilent, kNoFallback, kInflight].every((v) => v.code === 0 && v.full === 'EMFILE' && /\[update\] the update could not be started: EMFILE/.test(v.err))   // each red's first start REALLY failed
       && kSilent.code === 0 && !/__UPDATE_EXIT:/.test(kSilent.log) && kSilent.already === true
       && kNoFallback.code === 0 && !/__UPDATE_EXIT:/.test(kNoFallback.log)
       && kInflight.code === 0 && said(kInflight) && kInflight.already === true,
       `the self-update's start failing at once (a full table, one handle free before each call): the dialog's log says «${(kOk.log.match(/could not be started \([^)]*\)/) || ['—'])[0]}» and ends with its mark (${(kOk.log.match(/__UPDATE_EXIT:\d+/) || ['none'])[0]} ⇒ «Update failed»), nothing running, a second press tries again — the log write allowed and REFUSED alike (refused: ${(kRef.log.match(/__UPDATE_EXIT:\d+/) || ['no mark'])[0]} from memory, already ${kRef.already}); the process alive; RED each half: the failure neither written nor kept ⇒ no mark + the press refused (${kSilent.already}); the status's fallback out ⇒ ${/__UPDATE_EXIT:/.test(kNoFallback.log) ? 'a mark' : 'no mark'}; the in-flight check's «failed at once» out ⇒ the press refused (${kInflight.already})`,
       { kOk, kRef, kSilent, kNoFallback, kInflight });
+
+    // ④l THE STREAM LAW (cure 3; pinned with its reds in cure 4 — a closed must has a leg): any stream the hub opens on the copy and
+    // archive roads has its error listener before anything that can throw (a full table fails its open on a later tick: unheard, the
+    // hub ended). The order is read in the route's own source: a reader that never started is refused BEFORE any stream is made, the
+    // local reader is heard before it is counted or piped, the write stream before the pipe, the archive entry's out stream at its
+    // creation (before its reader starts), and a reader that never started is refused before its pipe. RED: the guard removed, the
+    // write stream's order reverted, the out stream's listener removed — each flips its own claim
+    const streamClaims = (src) => {
+      const at = (needle, from = 0) => src.indexOf(needle, from);
+      const r0 = at('else reader = fs.createReadStream(safePath(src));'), g = at('if (!reader) return res.status(503)', r0), rl = at("reader.on('error', () => { });", r0), rc = at('count(reader);', r0);
+      const w0 = at('const w = fs.createWriteStream(part);'), we = at("w.on('error', reject);", w0), wp = at('reader.pipe(w);', w0);
+      const o0 = at('const outStream = fs.createWriteStream(outPath);'), oe = at("outStream.on('error'", o0), sp = at('const child = spawn(cmd, args', o0), cg = at('if (!child.stdout)', o0), cp = at('child.stdout.pipe(outStream);', o0);
+      return {
+        'a reader that never started is refused before any stream is made': r0 >= 0 && g > r0 && g < rc && at('createWriteStream(part)', r0) > g && at("spawn('ssh'", r0) > g,
+        'the local reader heard before it is counted or piped': rl > r0 && rl < rc,
+        'the write stream heard before the pipe': w0 >= 0 && we > w0 && wp > we,
+        'the archive entry out stream heard at its creation': o0 >= 0 && oe > o0 && oe < sp,
+        'an archive reader that never started refused before its pipe': sp > 0 && cg > sp && cg < cp,
+      };
+    };
+    const filesSrc = fs.readFileSync(path.join(REPO, 'src/routes/files.js'), 'utf8'), sGreen = streamClaims(filesSrc);
+    const sReds = [
+      ['the reader guard removed', 'a reader that never started is refused before any stream is made', streamClaims(anchored(filesSrc, /\n {2}if \(!reader\) return res\.status\(503\)[^\n]*/, '', 'stream-guard'))],
+      ['the write stream order reverted', 'the write stream heard before the pipe', streamClaims(anchored(filesSrc, "const w = fs.createWriteStream(part); w.on('error', reject); w.on('finish', resolve); reader.on('error', reject); reader.pipe(w);", "const w = fs.createWriteStream(part); reader.pipe(w); w.on('error', reject); w.on('finish', resolve); reader.on('error', reject);", 'stream-order'))],
+      ['the out stream listener removed', 'the archive entry out stream heard at its creation', streamClaims(anchored(filesSrc, "  outStream.on('error', (e) => { outErr = outErr || e; });\n", '', 'stream-out'))],
+    ].map(([what, claim, r]) => [what, claim, r[claim] === false && Object.entries(r).filter(([k, v]) => k !== claim && !v).length === 0]);
+    ok(Object.values(sGreen).every(Boolean) && sReds.every(([, , flipped]) => flipped),
+      `the stream law on the copy and archive roads: ${Object.entries(sGreen).map(([k, v]) => `${k} ${v ? '✓' : '✗'}`).join(' · ')}; RED each flips only its own claim: ${sReds.map(([w, , f]) => `${w} ${f}`).join(' · ')}`, { sGreen, sReds });
 
     // ④j THE CLASS (cure 2: every module the HUB loads, every form of a start): the hub's module set is DERIVED — the require graph
     // from server.js, never a typed list — and in each, every start is read: a bare spawn / fork / execFile destructured from
@@ -448,6 +479,18 @@ try {
       code(false);
       return out.join('');
     }
+    // deferred(text): is a function body (an arrow's or a `function`'s) still open at the end of `text`? (its code runs later)
+    function deferred(text) {
+      const stack = [];
+      for (let k = 0; k < text.length; k++) {
+        const ch = text[k];
+        if (ch === '{') { const pre = text.slice(Math.max(0, k - 160), k); stack.push(/=>\s*$/.test(pre) || /\bfunction\b[^{};]*$/.test(pre) ? 'fn' : 'block'); }
+        else if (ch === '}') stack.pop();
+      }
+      return stack.includes('fn');
+    }
+    // blockAt(text, k): the text of the block whose `{` is at k (to its matching `}`)
+    function blockAt(text, k) { let depth = 0, e = k; for (; e < text.length; e++) { if (text[e] === '{') depth++; else if (text[e] === '}') { depth--; if (!depth) break; } } return text.slice(k, e + 1); }
     const CPQ = `require\\(\\s*['"](?:node:)?child_process['"]\\s*\\)`;
     // sitesOf(rel, raw) → [{ site, form, v, handed, bad }]: every start in a file, judged
     function sitesOf(rel, raw) {
@@ -483,7 +526,16 @@ try {
             first = t.index; break;
           }
         }
-        out.push({ site, form: c.form, v, bad: c.form === 'execFile' ? first >= 0 : (!v || lis < 0 || (first >= 0 && first < lis)) });
+        // THE KILL LAW (cure 4): a catch in the start's OWN flow (no function opened between the start and it — a callback runs later,
+        // when a failed start's handle is gone) that signals a child names a real pid on that line: a start that failed in the same
+        // tick has no pid, and its kill went to whatever that slot held (0: the hub's own process group)
+        const killNoPid = [];
+        for (const m of win.matchAll(/\bcatch\s*(?:\([^)]*\))?\s*\{/g)) {
+          if (deferred(win.slice(0, m.index))) continue;
+          const body = blockAt(win, m.index + m[0].length - 1);
+          for (const t of body.matchAll(/\b([A-Za-z_$][\w$]*)\.kill\(/g)) { if (t[1] === 'process') continue; const ls = body.lastIndexOf('\n', t.index) + 1, le = body.indexOf('\n', t.index); if (!new RegExp(`\\b${t[1].replace(/\$/g, '\\$')}\\.pid\\b`).test(body.slice(ls, le < 0 ? undefined : le))) killNoPid.push(t[1]); }
+        }
+        out.push({ site, form: c.form, v, killNoPid, bad: killNoPid.length > 0 || (c.form === 'execFile' ? first >= 0 : (!v || lis < 0 || (first >= 0 && first < lis))) });
       }
       return out;
     }
@@ -527,6 +579,7 @@ try {
       'an execFile, its stdin unguarded': "const { execFile } = require('child_process');\nfunction f() { const c = execFile('x', [], () => {}); c.stdin.end('y'); }",
       'a stdio slot read first': "const { spawn } = require('child_process');\nfunction f() { const x = spawn('x', [], { stdio: ['ignore', 'ignore', 'ignore', 'pipe'] }); x.stdio[3].on('data', () => {}); x.on('error', () => {}); }",
       'a pipe handed on before the listener': "const { spawn } = require('child_process');\nfunction f(r) { const w = spawn('x', [], { stdio: 'pipe' }); r.pipe(w.stdin); w.on('error', () => {}); }",
+      'a catch that signals a child with no pid check': "const { spawn } = require('child_process');\nfunction f() { let c; try { c = spawn('x', []); c.on('error', () => {}); more(); } catch (e) { c.kill('SIGTERM'); } }",
       'a listener of ANOTHER child of the same name': "const { spawn } = require('child_process'); const fs = require('fs');\nfunction f(r) { const w = spawn('x', [], { stdio: 'pipe' }); r.pipe(w.stdin); }\nfunction g() { const w = fs.createWriteStream('p'); w.on('error', () => {}); }",
       'a start behind a «/*» in a string and a comment': "const { spawn } = require('child_process');\nconst ROUTE = '/files/*'; // a route /api/x/* serves it\nfunction f() { const c = spawn('x', [], { stdio: 'pipe' }); c.stdout.on('data', () => {}); }\n// */",
     };
@@ -534,6 +587,7 @@ try {
       'a start in a comment': "const { spawn } = require('child_process');\n// spawn(cmd) — its child.stdout.on(...) before c.on('error') would be the fault\nfunction f() { const c = spawn('x', [], { stdio: 'pipe' }); c.on('error', () => {}); if (c.stdout) c.stdout.on('data', () => {}); }",
       'a child handed on': "const { spawn } = require('child_process');\nfunction f(ran) { return new Promise((r) => { ran(spawn('x', [], { stdio: 'ignore' }), r); }); }",
       'a try-guarded pipe': "const cp = require('child_process');\nfunction f() { const c = cp.execFile('x', [], () => {}); if (c.stdin) c.stdin.on('error', () => {}); try { c.stdin.end('y'); } catch { } }",
+      'a kill in a later callback (the failed start\'s handle is gone by then)': "const { spawn } = require('child_process');\nfunction f() { const c = spawn('x', []); c.on('error', () => {}); setTimeout(() => { try { c.kill(); } catch { c.kill('SIGKILL'); } }, 10); }",
       'pipes listed in an array': "const cp = require('child_process');\nfunction f() { const c = cp.spawn('x', []); for (const p of [c.stdin, c.stdout]) if (p) p.destroy(); c.on('error', () => {}); }",
     };
     const reds = [
@@ -542,7 +596,8 @@ try {
       ['the self-update (no listener)', sitesOf('src/server/ops-routes.js', anchored(rd('src/server/ops-routes.js'), /\n {4}child\.on\('error', \(e\) => \{\n/, '\n    child.on(\'exit\', (e) => {\n', 'class-ops')).filter((x) => x.bad).length],
       ['the local daemon start (no listener)', sitesOf('src/agentd/client.js', anchored(rd('src/agentd/client.js'), /\n {4}child\.on\('error', \(e\) => \{ this\._log\([^\n]*/, '', 'class-daemon')).filter((x) => x.bad).length],
       ['the desktop session X server (no listener: its display slot read first)', sitesOf('src/vnc.js', anchored(rd('src/vnc.js'), /\n {6}x\.on\('error', \(e\) => \{ console\.warn\(`\[vnc\][^\n]*/, '', 'class-vnc')).filter((x) => x.bad).length],
-      ['the single-file copy writer (no listener; the later `const w` is another child)', sitesOf('src/routes/files.js', anchored(rd('src/routes/files.js'), "      w.on('error', (e) => { wErr = e; });\n", '', 'class-copy-writer')).filter((x) => x.bad).length - FOUNDING.pipeFirst['src/routes/files.js']],
+      ['the single-file copy writer (no listener; the later `const w` is another child)', sitesOf('src/routes/files.js', anchored(rd('src/routes/files.js'), "      w.on('error', (e) => { wErr = e; });\n", '', 'class-copy-writer')).filter((x) => x.bad && x.v === 'w').length],
+      ['the folder copy catch (a child signalled with no pid check)', sitesOf('src/routes/files.js', anchored(rd('src/routes/files.js'), 'Number.isInteger(c.pid) && c.pid > 0 && ', '', 'class-copy-kill')).some((x) => x.killNoPid && x.killNoPid.length) ? 1 : 0],
       ['the cache count (its pipe first)', sitesOf('src/mounts.js', anchored(rd('src/mounts.js'), "      c.on('error', end); c.on('close', end);\n      if (c.stdout) c.stdout.on(", "      c.stdout.on(", 'class-cache-count')).filter((x) => x.bad).length],
     ];
     const kept = Object.entries(keep).map(([w, src]) => [w, sitesOf('kept.js', src).filter((x) => x.bad).length]);

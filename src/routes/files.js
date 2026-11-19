@@ -1324,7 +1324,10 @@ async function crossHostTransfer(req, res, { move }) {
       if (move) { if (srcHost) await inst.remove(srcHost, src); else fs.rmSync(safePath(src), { recursive: true, force: true }); }
       return res.json({ success: true, dest: destPath });
     } catch (e) {
-      for (const c of [srcChild, destChild]) { try { if (c && c.exitCode === null && c.signalCode === null) c.kill('SIGTERM'); } catch {} }   // ckpt61 cure 3: a side that failed never leaves the other running
+      // ckpt61 cure 3: a side that failed never leaves the other running — cure 4 (THE KILL LAW): only a child this request STARTED
+      // and holds is signalled: a real pid beside the two codes (a start that failed in this same tick has none yet: its kill went to
+      // whatever that slot held — 0 is the hub's own process group)
+      for (const c of [srcChild, destChild]) { try { if (c && Number.isInteger(c.pid) && c.pid > 0 && c.exitCode === null && c.signalCode === null) c.kill('SIGTERM'); } catch {} }
       if (stageLocal) { try { fs.rmSync(stageLocal, { recursive: true, force: true }); } catch {} }
       return res.status(400).json({ error: e.message });
     }
