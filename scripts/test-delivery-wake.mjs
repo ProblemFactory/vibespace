@@ -68,7 +68,7 @@ console.log('①b how it ended decides (the owner\'s narrowed rule; the grant on
   ok(r3.ok && r3.rule === 'granted' && r3.jobs[0] === 'jb-nightly', '…the same schedule WITH the grant resumes it — and names the granting job', r3);
   ok(!r4.ok && /coordinator/.test(r4.why) && r4b.ok && r4b.rule === 'granted', 'an AGENT-ended conversation: its job WITHOUT the grant waits (the agent named), WITH it resumes — a person\'s end and an agent\'s alike', { r4, r4b });
   ok(!r5.ok && r5.code === 'ended_unknown' && !r6.ok, 'no record waits even for a granted job (unknown is not a restart); a PEER\'s wake never resumes an on-purpose end', { r5, r6 });
-  const swapped = SRC.replace("if (h.kind === 'restart') return { ok: true, rule: 'restart', jobs: [] };", "if (h.kind === 'restart' || h.kind === 'person') return { ok: true, rule: 'restart', jobs: [] };");
+  const swapped = anchored(SRC, "if (h.kind === 'restart') return { ok: true, rule: 'restart', jobs: [] };", "if (h.kind === 'restart' || h.kind === 'person') return { ok: true, rule: 'restart', jobs: [] };", 'test-delivery-wake L71');
   const m = swapped !== SRC ? require(M.write('src/delivery-wake.js', swapped, 'restart-road-for-person')) : null;
   ok(!!m && m.endedRule(m.endedHow({ stopReason: 'ended', endedBy: { kind: 'person' } }), plain).ok === true, '①b RED CONTROL: the restart road applied to a person\'s end resumes the schedule that has no grant — the kind is what keeps it waiting', m && m.endedRule(m.endedHow({ stopReason: 'ended', endedBy: { kind: 'person' } }), plain));
   const rows = D.wakeChoiceRows([{ id: 'a', label: 'weekly', schedule: '0 9 * * 1', nextFireAt: 300 }, { id: 'b', label: 'build' }, { id: 'c', label: 'nightly', schedule: '0 2 * * *', nextFireAt: 100, grant: true }]);
@@ -114,7 +114,7 @@ console.log('③ THE GATE, in order, before anything spawns');
   ok(spend.go === false && spend.code === 'spend' && /12 unattended/.test(spend.why), '3. the spend probe refuses ⇒ refused by its own words', spend);
   const noProbe = D.gate({ ended: rst, identity: id, limit: { usable: true }, probe: null });
   ok(noProbe.go === false && noProbe.code === 'spend', '…no probe answer is a refusal (fail closed)', noProbe);
-  const swapped = SRC.replace(/(  if \(limit && limit\.usable === false\)[^\n]*\n)(  if \(!probe[^\n]*\n)/, '$2$1');
+  const swapped = anchored(SRC, /(  if \(limit && limit\.usable === false\)[^\n]*\n)(  if \(!probe[^\n]*\n)/, '$2$1', 'test-delivery-wake L117');
   const m = swapped !== SRC ? require(M.write('src/delivery-wake.js', swapped, 'probe-first')) : null;
   ok(!!m && m.gate({ ended: rst, identity: id, limit: { usable: false, blockedUntil: 5 }, probe: { ok: false, reason: 'cap' } }).code === 'spend', '③ RED CONTROL: a copy that asks the probe before the limit answers «spend» for an account at its limit — the order is what says until when', m && m.gate({ ended: rst, identity: id, limit: { usable: false, blockedUntil: 5 }, probe: { ok: false } }));
 }

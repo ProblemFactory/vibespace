@@ -17,7 +17,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { mutantCopies } from './mutant-copy.mjs';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const CF = require(path.join(REPO, 'src/conversation-facts.js'));
@@ -99,7 +99,7 @@ console.log('① the end obeys the verdict');
   const src = fs.readFileSync(path.join(REPO, 'src/server/conversation-ops.js'), 'utf8');
   const NEEDLE = '    if (!v.endable) { const ref = CF.refusalOf(v); return { ...ref, why: ref.why + teach, target: label }; }';
   ok(src.split(NEEDLE).length === 2, 'the verdict\'s refusal is in the end verb once (the mutation anchor)');
-  const M = MUT.load('src/server/conversation-ops.js', src.replace(NEEDLE, '    void v;'), 'verdict-cleared');
+  const M = MUT.load('src/server/conversation-ops.js', anchored(src, NEEDLE, '    void v;', 'verdict-cleared'), 'verdict-cleared');
   const red = world({ s: session({ _turn: 'running' }), ops: M });
   const rr = await red.call({ target: CID });
   ok(rr.ok && red.ended.length === 1, 'RED CONTROL the verdict switched off: the mid-turn end goes THROUGH — the legs above would be red', rr);
@@ -285,7 +285,7 @@ console.log('⑥ THE ONE END RECORD\'s contract (主开发 14:51Z): the one boun
   ok(ranked.stopReason === 'ended', 'AN END OUTRANKS A RESTART: a newer restart\'s copy of the same conversation never turns «ended» back into «a restart ended it»', ranked);
   const RK = "const endRank = (m) => (m && m.stopReason === STOP_ENDED ? 1 : 0);";
   if (src.split(RK).length !== 2) throw new Error('anchor missing: the rank');
-  const MUTR = mutantCopies('end-record-rank', REPO).load('src/server/boot-restore.js', src.replace(RK, 'const endRank = () => 0;'), 'no-rank');
+  const MUTR = mutantCopies('end-record-rank', REPO).load('src/server/boot-restore.js', anchored(src, RK, 'const endRank = () => 0;', 'no-rank'), 'no-rank');
   const unranked = ((await mk(MUTR, M3).stoppedSessions()).find((r) => r.backendSessionId === CIDR) || {});
   ok(unranked.stopReason === 'dead-socket-at-boot', 'RED: without the rank the newer restart copy wins — the end is forgotten', unranked);
   // THE CREATE ROAD CONSUMES NOTHING (主开发 2026-11-19 03:17Z — the manager stack restacked onto int411 met B-a5a4 (2)): a kept
@@ -323,8 +323,8 @@ console.log('⑥ THE ONE END RECORD\'s contract (主开发 14:51Z): the one boun
   const PUT = "if (data.resume && data.resumeId && !data.fork) { try { require('./server/boot-restore.js').consumeEnded(`${backend}:${data.resumeId}`); } catch { } }\n";
   const RET = '  return { migrateLegacyHomeProjects, restoreSessions, restoreAgentdPipeSessions,', EXP = 'module.exports = { create,';
   if (src.split(RET).length !== 2 || src.split(EXP).length !== 2) throw new Error('anchor missing: the module\'s answer or exports');
-  const MUTC = mutantCopies('create-road-consume', REPO).load('src/server/boot-restore.js', src.replace(RET, '  liveConsume = async (key) => { await loadKept(); const e = keptStopped.get(String(key || \'\')); if (!e) return false; keptStopped.delete(String(key || \'\')); fs.unlink(keptFile(e.sockFile), () => { }); return true; };\n' + RET)
-    .replace(EXP, 'let liveConsume = null;\nfunction consumeEnded(key) { return liveConsume ? liveConsume(key) : Promise.resolve(false); }\n' + EXP + ' consumeEnded,'), 'consume-at-create');
+  const MUTC = mutantCopies('create-road-consume', REPO).load('src/server/boot-restore.js', anchored(anchored(src, RET, '  liveConsume = async (key) => { await loadKept(); const e = keptStopped.get(String(key || \'\')); if (!e) return false; keptStopped.delete(String(key || \'\')); fs.unlink(keptFile(e.sockFile), () => { }); return true; };\n' + RET, 'consume-at-create'),
+    EXP, 'let liveConsume = null;\nfunction consumeEnded(key) { return liveConsume ? liveConsume(key) : Promise.resolve(false); }\n' + EXP + ' consumeEnded,', 'consume-at-create'), 'consume-at-create');
   const lost = await resumeThatFails(MUTC, path.join(ROOT, 'meta6'), 'e2e00000-0000-4000-8000-0000000000ef', 'cw-17-1794880000017');
   ok(createRoadConsumes(wc.replace(LIVE, LIVE + '          ' + PUT), BR) && lost.before && lost.planted === true && !lost.row && !lost.file,
     'RED: the create road\'s consume put back — it consumed at registration (the plant took), and the failed resume LOST the copy and its end record', lost);

@@ -14,6 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { mutantCopies } from './mutant-copy.mjs';
+import { anchored } from './scratch.mjs';   // a red control's edit fails BY NAME when its anchor moves (RULES: a new red control is anchored)
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const CF = require(path.join(REPO, 'src/conversation-facts.js'));
@@ -163,7 +164,7 @@ function unknownLegs(M) {
   const src = fs.readFileSync(path.join(REPO, 'src/conversation-facts.js'), 'utf8');
   const NEEDLE = "const unknown = (code, label, fact) => add(code + '_unknown', `${label} unknown (${whyOf(r, fact)})`);";
   ok(src.split(NEEDLE).length === 2, 'the mutation anchor (the unknown branch) is in the module once');
-  const M = MUT.load('src/conversation-facts.js', src.replace(NEEDLE, 'const unknown = () => {};'), 'unknown-not-busy');
+  const M = MUT.load('src/conversation-facts.js', anchored(src, NEEDLE, 'const unknown = () => {};', 'unknown-not-busy'), 'unknown-not-busy');
   const redNames = (Mx) => unknownLegs(Mx).filter((l) => !l.good).map((l) => l.name).sort();
   const VIA_HELPER = ['turn unknown (terminal mode)', 'background unknown (not read since the restart)', 'background unknown (an old wrapper)', 'held prompts unknown (no wrapper file)',
     'timers unknown (an old wrapper)', 'asks unknown', 'goal unknown', 'continue unknown', 'handover unknown', 'jobs unknown', 'a turn value nobody defined'].sort();
@@ -175,7 +176,7 @@ function unknownLegs(M) {
   ]) {
     ok(src.split(needle).length === 2, `the mutation anchor for «${leg}» is in the module once`);
     const repl = needle.startsWith('      add(') ? '      void 0;' : '    if (false) add(\'job_unknown\',';
-    const Mx = MUT.load('src/conversation-facts.js', src.replace(needle, repl), 'off-' + leg.replace(/\W+/g, '-').slice(0, 30));
+    const Mx = MUT.load('src/conversation-facts.js', anchored(src, needle, repl, 'test-conversation-facts L178'), 'off-' + leg.replace(/\W+/g, '-').slice(0, 30));
     ok(JSON.stringify(redNames(Mx)) === JSON.stringify([leg]), `CONTROL its line switched off: EXACTLY «${leg}» goes red`, redNames(Mx));
   }
 }
@@ -241,7 +242,7 @@ const known = { capsOf: () => KEEPS, turnOf: () => 'idle', turnKnown: (s) => s.m
   const src = fs.readFileSync(path.join(REPO, 'src/server/conversation-facts.js'), 'utf8');
   const NEEDLE = "        if (Number.isFinite(m.value) && m.value > 0) row.memBytes = m.value;\n        else { row.memBytes = null; row.memBytesWhy = (m.value && typeof m.value.why === 'string' && m.value.why) || WHY.noProcess; }";
   ok(src.split(NEEDLE).length === 2, 'the gone-tree rule is in the builder once (the mutation anchor)');
-  const M = MUT.load('src/server/conversation-facts.js', src.replace(NEEDLE, '        row.memBytes = Number.isFinite(m.value) ? m.value : 0;'), 'gone-is-zero');
+  const M = MUT.load('src/server/conversation-facts.js', anchored(src, NEEDLE, '        row.memBytes = Number.isFinite(m.value) ? m.value : 0;', 'gone-is-zero'), 'gone-is-zero');
   const red = await M.create({ activeSessions: new Map([['sess-1', fakeChat('G')]]), keyOf: () => KEY_A, ...known, memOf: async () => ({ why: CF.WHY.noProcess }) }).list();
   ok(red.conversations[0].memBytes === 0, 'CONTROL a builder that takes a gone tree as 0 prints 0 — the leg above would be red', red.conversations[0].memBytes);
   const remote = await COL.create({ activeSessions: new Map([['sess-1', { ...fakeChat('R'), host: 'mac' }]]), keyOf: () => KEY_A, ...known }).list();
@@ -340,7 +341,7 @@ const known = { capsOf: () => KEEPS, turnOf: () => 'idle', turnKnown: (s) => s.m
   const src = fs.readFileSync(path.join(REPO, 'src/server/conversation-ops.js'), 'utf8');
   const NEEDLE = '        if (self || (v && v.ok)) rows.push(self ? { ...r, self: true } : beltRow(r)); else beyond++;';
   ok(src.split(NEEDLE).length === 2, 'the list\'s reach filter is in the handler once (the mutation anchor)');
-  const RED = MUT.load('src/server/conversation-ops.js', src.replace(NEEDLE, '        rows.push(self ? { ...r, self: true } : beltRow(r));'), 'no-reach-filter');
+  const RED = MUT.load('src/server/conversation-ops.js', anchored(src, NEEDLE, '        rows.push(self ? { ...r, self: true } : beltRow(r));', 'no-reach-filter'), 'no-reach-filter');
   const leak = await RED.automationVerbs({ activeSessions: sessions, listFacts })['conversations.list']({}, { caller, keyId: 'k1', reach: ({ conversationId }) => ({ ok: conversationId === 'e2e00000-0000-4000-8000-0000000000a1' }) });
   ok(leak.conversations.length === 3, 'CONTROL a handler without the reach filter hands an «opened» key all three — the leg above would be red', leak.conversations.length);
   const AK = require(path.join(REPO, 'src/automation-keys.js'));
@@ -368,14 +369,14 @@ console.log('D · the musts of the acceptance, each with its red control');
   const judge = (Mx, recs) => { const st = Mx.factsFresh(); for (const r of recs) Mx.factsStep(st, r, 1); return Mx.trackedFacts(st, K); };
   const init = (v) => (v === undefined ? { type: 'system', subtype: 'init' } : { type: 'system', subtype: 'init', claude_code_version: v });
   const cron = { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'CronCreate', input: {} }] } };
-  const mut = (needle, repl, tag) => { if (srcCF.split(needle).length !== 2) throw new Error('anchor missing: ' + tag); return MUTD.load('src/conversation-facts.js', srcCF.replace(needle, repl), tag); };
+  const mut = (needle, repl, tag) => { if (srcCF.split(needle).length !== 2) throw new Error('anchor missing: ' + tag); return MUTD.load('src/conversation-facts.js', anchored(srcCF, needle, repl, 'test-conversation-facts L371'), tag); };
   // MUST 1 — a newer CLI the tree has not measured reads unknown; RED: the span's upper bound dropped (today's «at least»)
   const m1 = mut("versionCmp(v, LEVEL_MEASURED_FROM) >= 0 && versionCmp(v, LEVEL_MEASURED_TO) <= 0;", 'versionCmp(v, LEVEL_MEASURED_FROM) >= 0;', 'no-upper-bound');
   ok(judge(CF, [init('2.1.999')]).background === null && Array.isArray(judge(m1, [init('2.1.999')]).background), 'MUST 1 a newer unmeasured CLI: unknown here; RED: with only a lower bound (the wrapper\'s old rule) it reads «no background work»');
   // MUST 2 — the cron tool; RED: the one-name list with no timer-like rule (today's)
   const A2 = "const TIMER_TOOLS = Object.freeze(['ScheduleWakeup', 'CronCreate']);", B2 = 'const TIMERISH = /cron|schedul|wake|remind/i;';
   if (srcCF.split(A2).length !== 2 || srcCF.split(B2).length !== 2) throw new Error('anchor missing: one-timer-name');
-  const m2 = MUTD.load('src/conversation-facts.js', srcCF.replace(A2, "const TIMER_TOOLS = Object.freeze(['ScheduleWakeup']);").replace(B2, 'const TIMERISH = /$^/;'), 'one-timer-name');
+  const m2 = MUTD.load('src/conversation-facts.js', anchored(anchored(srcCF, A2, "const TIMER_TOOLS = Object.freeze(['ScheduleWakeup']);", 'one-timer-name'), B2, 'const TIMERISH = /$^/;', 'one-timer-name'), 'one-timer-name');
   ok(judge(CF, [init('2.1.312'), cron]).timersWhy === CF.WHY.timerSet && judge(m2, [init('2.1.312'), cron]).timers === 'none-seen', 'MUST 2 a CronCreate call holds the timer reason; RED: the one-name list reads it «none seen»');
   // MUST 3 — an init that states no version; RED: the version taken only from an init that carries it, not a change
   const m3 = mut("    const v = typeof rec.claude_code_version === 'string' ? rec.claude_code_version.slice(0, 32) : '';\n    if (st.cli !== v) { st.cli = v; changed = true; }",
@@ -399,7 +400,7 @@ console.log('D · the musts of the acceptance, each with its red control');
   const srcCol = fs.readFileSync(path.join(REPO, 'src/server/conversation-facts.js'), 'utf8');
   const N4 = "      if (!ownedJob(j)) continue;";
   ok(srcCol.split(N4).length === 2, 'MUST 4 the owned rule is in the index once (the mutation anchor)');
-  const M4 = mutantCopies('conversation-facts-m4', REPO).load('src/server/conversation-facts.js', srcCol.replace(N4, "      if (!['starting', 'up', 'awaiting-user', 'waiting', 'scheduled'].includes(j.state)) continue;"), 'running-only');
+  const M4 = mutantCopies('conversation-facts-m4', REPO).load('src/server/conversation-facts.js', anchored(srcCol, N4, "      if (!['starting', 'up', 'awaiting-user', 'waiting', 'scheduled'].includes(j.state)) continue;", 'running-only'), 'running-only');
   const jr = M4.sourcesFrom({ getJobs: () => ({ ready: true, jobs }), wakeGrantOf: () => false }).jobsOf(KEY_A);
   ok(jr.items.length === 0 && CF.endVerdict({ ...IDLE, jobs: jr }).endable, 'MUST 4 RED: today\'s index (running jobs and scheduled crons only) reads «owns nothing» — the conversation would be endable');
 }
@@ -419,7 +420,7 @@ console.log('D · the musts of the acceptance, each with its red control');
   ok(o && !live(o.name) && !live(o.cwd) && !live(o.background[0].description) && /\[system-reminder\]/.test(o.name) && self && self.name === 'Me ' + TAG, 'MUST 5 another conversation\'s name, folder and background descriptions reach the caller BELTED; the caller\'s own row is its own words', { name: o && o.name, bg: o && o.background });
   const srcOps = fs.readFileSync(path.join(REPO, 'src/server/conversation-ops.js'), 'utf8');
   const N5 = '        if (self || (v && v.ok)) rows.push(self ? { ...r, self: true } : beltRow(r)); else beyond++;';
-  const M5 = mutantCopies('conversation-facts-m5', REPO).load('src/server/conversation-ops.js', srcOps.replace(N5, '        if (self || (v && v.ok)) rows.push(self ? { ...r, self: true } : r); else beyond++;'), 'no-belt');
+  const M5 = mutantCopies('conversation-facts-m5', REPO).load('src/server/conversation-ops.js', anchored(srcOps, N5, '        if (self || (v && v.ok)) rows.push(self ? { ...r, self: true } : r); else beyond++;', 'no-belt'), 'no-belt');
   const r5 = await M5.automationVerbs({ activeSessions: sessions, listFacts })['conversations.list']({}, ctx);
   ok(live(r5.conversations.find((c) => !c.self).name), 'MUST 5 RED: the door without the belt hands the live tag through');
 }
@@ -436,7 +437,7 @@ console.log('D · the musts of the acceptance, each with its red control');
   let old = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-api'), 'utf8');
   for (const [from, to] of OLD6) { if (old.split(from).length !== 2) throw new Error('anchor missing: MUST 6\'s CLI line ' + from.slice(0, 60)); old = old.replace(from, () => to); }
   if (old) {
-    const MO = mutantCopies('conversation-facts-m6', REPO).load('data/bin/vibespace-api', old.replace(/^#!.*\n/, ''), 'old-cli');
+    const MO = mutantCopies('conversation-facts-m6', REPO).load('data/bin/vibespace-api', anchored(old, /^#!.*\n/, '', 'old-cli'), 'old-cli');
     const wo = MO.listWords(d, 1794880000000);
     ok(!/desktops: unknown|browsers: unknown/.test(wo) && /window unknown/.test(wo) && !/window unknown \(/.test(wo), 'MUST 6 RED: the CLI before MUST 6 (today\'s file with its three lines as they were) prints no line for the unknown desktops and browsers, and «window unknown» with no why', wo);
   }
@@ -504,7 +505,7 @@ console.log('E · round two: the boot proof, the set as seen, owned jobs, the fi
   const ND = "  if (x.state === 'D') return no('the process its file names is stuck in an uninterruptible wait');\n";
   const NS = "  if (x.selfStartMs + (x.ticks - x.selfTicks) * (1000 / USER_HZ) > m.startedAt + ADOPT_SLOP_MS) return no('its pid now names a process that started after the file was written');\n";
   if (srcCF.split(ND).length !== 2 || srcCF.split(NS).length !== 2) throw new Error('anchor missing: the proof lines');
-  const mD = MUTE.load('src/conversation-facts.js', srcCF.replace(ND, ''), 'no-state-look'), mS = MUTE.load('src/conversation-facts.js', srcCF.replace(NS, ''), 'no-start-look');
+  const mD = MUTE.load('src/conversation-facts.js', anchored(srcCF, ND, '', 'no-start-look'), 'no-state-look'), mS = MUTE.load('src/conversation-facts.js', anchored(srcCF, NS, '', 'no-start-look'), 'no-start-look');
   ok(P(mD, meta, reading(BIRTH - 400, 'D')).pid === 4242 && P(mS, meta, reading(BIRTH + 60000)).pid === 4242, 'MUST 1 RED: without the state look a stuck process is adopted; without the start look a recycled pid is');
 }
 {
@@ -562,7 +563,7 @@ console.log('E · round two: the boot proof, the set as seen, owned jobs, the fi
   const srcCol = fs.readFileSync(path.join(REPO, 'src/server/conversation-facts.js'), 'utf8');
   const N3 = "  const ownedJob = (j) => j.state === 'unverified' || (j.state === 'down' ? j.desiredUp === true : !TERMINAL_STATES.has(j.state));";
   if (srcCol.split(N3).length !== 2) throw new Error('anchor missing: the owned rule');
-  const M3 = mutantCopies('conversation-facts-r2-owned', REPO).load('src/server/conversation-facts.js', srcCol.replace(N3, "  const ownedJob = (j) => j.state === 'unverified' || j.desiredUp === true || !TERMINAL_STATES.has(j.state);"), 'round-one-owned');
+  const M3 = mutantCopies('conversation-facts-r2-owned', REPO).load('src/server/conversation-facts.js', anchored(srcCol, N3, "  const ownedJob = (j) => j.state === 'unverified' || j.desiredUp === true || !TERMINAL_STATES.has(j.state);", 'round-one-owned'), 'round-one-owned');
   const j3 = M3.sourcesFrom({ getJobs: () => ({ ready: true, jobs: parkedOnly }), wakeGrantOf: () => false }).jobsOf(KEY_A);
   ok(j3.items.map((x) => x.id).sort().join() === 'cs,ps' && !CF.endVerdict({ ...IDLE, jobs: j3 }).endable, 'MUST 3 RED: round one\'s rule counts the stopped cron and the parked service — the conversation could never be ended', j3.items);
   // small: an OWNER-LESS run from a store recovery makes every job count unknown (it may be anyone's)
@@ -573,7 +574,7 @@ console.log('E · round two: the boot proof, the set as seen, owned jobs, the fi
   ok(c4.jobs === null && /recovered from the store with no owner/.test(c4.jobsWhy) && c4.busy.some((x) => x.code === 'job_unknown'), 'an owner-less job skeleton from a store recovery: the job fact is UNKNOWN (said), never a known zero', { jobs: c4.jobs, why: c4.jobsWhy, busy: c4.busy });
   const NO = '      if (!cid) { if (isSkeleton(j)) by.ownerless++; continue; }';
   if (srcCol.split(NO).length !== 2) throw new Error('anchor missing: the owner-less count');
-  const MO = mutantCopies('conversation-facts-r2-ownerless', REPO).load('src/server/conversation-facts.js', srcCol.replace(NO, '      if (!cid) continue;'), 'ownerless-skipped');
+  const MO = mutantCopies('conversation-facts-r2-ownerless', REPO).load('src/server/conversation-facts.js', anchored(srcCol, NO, '      if (!cid) continue;', 'ownerless-skipped'), 'ownerless-skipped');
   const jo = MO.sourcesFrom({ getJobs: () => ({ ready: true, jobs: skel }), wakeGrantOf: () => false }).jobsOf(KEY_A);
   ok(jo && jo.items && jo.items.length === 0 && CF.endVerdict({ ...IDLE, jobs: jo }).endable, 'RED: skipping the owner-less run reads a KNOWN zero — endable');
 }
@@ -624,7 +625,7 @@ console.log('E · round two: the boot proof, the set as seen, owned jobs, the fi
   const srcCS = fs.readFileSync(path.join(REPO, 'src/server/stdout/claude-stream-json.js'), 'utf8');
   const N4 = '          if (firstSeen) try { brainRef?.noteConvFacts?.(session, msg); } catch';
   if (srcCS.split(N4).length !== 2) throw new Error('anchor missing: the first-seen step');
-  const today = await two(mutantCopies('conversation-facts-r2-seen', REPO).load('src/server/stdout/claude-stream-json.js', srcCS.replace(N4, '          try { brainRef?.noteConvFacts?.(session, msg); } catch'), 'every-record'));
+  const today = await two(mutantCopies('conversation-facts-r2-seen', REPO).load('src/server/stdout/claude-stream-json.js', anchored(srcCS, N4, '          try { brainRef?.noteConvFacts?.(session, msg); } catch', 'every-record'), 'every-record'));
   ok(today.device === 't1' && today.window === '', 'MUST 4 RED: today\'s parse steps every record — the lagging «empty» overwrites the running task (a wrong «owns nothing» for that window)', today);
 }
 {
@@ -638,9 +639,9 @@ console.log('E · round two: the boot proof, the set as seen, owned jobs, the fi
   const NT = '  const timerish = tools.find((n) => !TIMER_TOOLS.includes(n) && !NON_TIMER_TOOLS.includes(n) && TIMERISH.test(ownToolName(n)));';
   const NR = 'const TIMERISH = /cron|schedul|wake|remind/i;';
   if (srcCF.split(NT).length !== 2 || srcCF.split(NR).length !== 2) throw new Error('anchor missing: the look-alike');
-  const mt = mutantCopies('conversation-facts-r2-like', REPO).load('src/conversation-facts.js', srcCF.replace(NT, '  const timerish = tools.find((n) => !TIMER_TOOLS.includes(n) && TIMERISH.test(n));'), 'round-one-like');
+  const mt = mutantCopies('conversation-facts-r2-like', REPO).load('src/conversation-facts.js', anchored(srcCF, NT, '  const timerish = tools.find((n) => !TIMER_TOOLS.includes(n) && TIMERISH.test(n));', 'round-one-like'), 'round-one-like');
   ok(tl(mt, 'CronList').timers === null && tl(mt, 'mcp__scheduler__list_items').timers === null, 'RED: round one\'s look-alike reads a cron LIST, and a server\'s name, as «may set a timer» — unknown for good');
-  const mr = mutantCopies('conversation-facts-r2-remind', REPO).load('src/conversation-facts.js', srcCF.replace(NR, 'const TIMERISH = /$^/;'), 'no-look-alike');
+  const mr = mutantCopies('conversation-facts-r2-remind', REPO).load('src/conversation-facts.js', anchored(srcCF, NR, 'const TIMERISH = /$^/;', 'no-look-alike'), 'no-look-alike');
   ok(tl(CF, 'RemindMeLater').timers === null && tl(mr, 'RemindMeLater').timers === 'none-seen', 'the look-alike leg\'s own RED: with no look-alike rule an unknown RemindMeLater reads «none seen»');
 }
 {
@@ -742,7 +743,7 @@ console.log('F · the task records and the background asks: the wrapper records,
   // RED: the hub without the subtraction
   const NB = '  else if (st && !st.old && (doubt = bgDoubt(st))) { out.background = null; out.backgroundWhy = doubt; }\n';
   if (srcCF.split(NB).length !== 2) throw new Error('anchor missing: the subtraction');
-  const mF = mutantCopies('conversation-facts-r2-tasks', REPO).load('src/conversation-facts.js', srcCF.replace(NB, ''), 'no-subtraction');
+  const mF = mutantCopies('conversation-facts-r2-tasks', REPO).load('src/conversation-facts.js', anchored(srcCF, NB, '', 'no-subtraction'), 'no-subtraction');
   const w2 = judge(mF, [init, started('a1', 'local_agent'), set('a1'), set()]);
   ok(Array.isArray(w2.t.background) && w2.t.background.length === 0 && CF.endVerdict(row(w2.t)).endable, 'RED: without the hub\'s subtraction the omission window reads «no background work» — endable while the work runs');
 }
@@ -754,7 +755,7 @@ console.log('G · round three: one bound for the tasks, the measured census repl
   const row = (t) => ({ ...IDLE, background: t.background, backgroundWhy: t.backgroundWhy });
   const srcCF = fs.readFileSync(path.join(REPO, 'src/conversation-facts.js'), 'utf8');
   const MUTG = mutantCopies('conversation-facts-r3', REPO);
-  const mut = (needle, repl, tag) => { if (srcCF.split(needle).length !== 2) throw new Error('anchor missing: ' + tag); return MUTG.load('src/conversation-facts.js', srcCF.replace(needle, repl), tag); };
+  const mut = (needle, repl, tag) => { if (srcCF.split(needle).length !== 2) throw new Error('anchor missing: ' + tag); return MUTG.load('src/conversation-facts.js', anchored(srcCF, needle, repl, 'test-conversation-facts L757'), tag); };
   const init = (v = '2.1.322') => ({ type: 'system', subtype: 'init', claude_code_version: v });
   const started = (id, kind = 'local_bash') => ({ type: 'system', subtype: 'task_started', task_id: id, task_type: kind, is_backgrounded: true });
   // MUST 1 — ONE bound (the kinds nested in each task), about a thousand; at the bound the OLDEST task leaves, counted (主开发 13:56Z)
@@ -819,7 +820,7 @@ console.log('G · round three: one bound for the tasks, the measured census repl
   const srcCol = fs.readFileSync(path.join(REPO, 'src/server/conversation-facts.js'), 'utf8');
   const NS = '      if (!cid) { if (isSkeleton(j)) by.ownerless++; continue; }';
   if (srcCol.split(NS).length !== 2) throw new Error('anchor missing: the skeleton count');
-  const mS = mutantCopies('conversation-facts-r3-skel', REPO).load('src/server/conversation-facts.js', srcCol.replace(NS, "      if (!cid) { if (j && j.state === 'unverified') by.ownerless++; continue; }"), 'any-ownerless');
+  const mS = mutantCopies('conversation-facts-r3-skel', REPO).load('src/server/conversation-facts.js', anchored(srcCol, NS, "      if (!cid) { if (j && j.state === 'unverified') by.ownerless++; continue; }", 'any-ownerless'), 'any-ownerless');
   ok(!!mS.sourcesFrom({ getJobs: () => ({ ready: true, jobs: person }), wakeGrantOf: () => false }).jobsOf(KEY_B).why, 'MUST 3 RED: round two\'s rule (any owner-less unverified job) makes every conversation\'s job fact unknown until the person resolves theirs');
   // SMALL — known-empty from «no init seen» only when nothing else was seen either
   const fresh = CF.trackedFacts(CF.factsFresh(), K);

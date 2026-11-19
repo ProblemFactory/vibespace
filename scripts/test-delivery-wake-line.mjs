@@ -25,7 +25,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
-import { scratchDir } from './scratch.mjs';
+import { scratchDir, anchored } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
 
 const require = createRequire(import.meta.url);
@@ -318,7 +318,7 @@ console.log('⑧ the kept record is NOT dropped at the reopen (主开发 2026-11
   const DWSRC = fs.readFileSync(path.join(REPO, 'src/server/delivery-wake.js'), 'utf8');
   const AT = '    // the POSTING mark goes on the entry, durably, before the frame can land';
   if (DWSRC.split(AT).length !== 2) throw new Error('anchor missing: the posting mark');
-  const MUTW = mutantCopies('wake-drop-put-back', REPO).load('src/server/delivery-wake.js', DWSRC.replace(AT, "    try { if (typeof seams.dropKept === 'function') await seams.dropKept(key); } catch { } " + AT.trim()), 'drop-at-reopen');
+  const MUTW = mutantCopies('wake-drop-put-back', REPO).load('src/server/delivery-wake.js', anchored(DWSRC, AT, "    try { if (typeof seams.dropKept === 'function') await seams.dropKept(key); } catch { } " + AT.trim(), 'drop-at-reopen'), 'drop-at-reopen');
   const Y = cidOf(57);
   const C = rig('drop-put-back', { kept: { [Y]: RESTART }, mod: MUTW });
   C.result(Y, 'jb-hourly', 'hourly digest', 'digest one');

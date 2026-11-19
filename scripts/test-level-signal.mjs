@@ -18,6 +18,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { mutantCopies } from './mutant-copy.mjs';
+import { anchored } from './scratch.mjs';   // a red control's edit fails BY NAME when its anchor moves (RULES: a new red control is anchored)
 import { writeStandIn } from './claude-catalog-stand-in.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -46,7 +47,7 @@ console.log('A · the PURE finder (src/claude-model-catalog.js levelSignalAt)');
   const src = fs.readFileSync(path.join(REPO, 'src/claude-model-catalog.js'), 'utf8');
   const N = '    if (m) return from + m.index;\n';
   if (src.split(N).length !== 2) throw new Error('anchor missing: the finder');
-  const mA = mutantCopies('level-signal-a', REPO).load('src/claude-model-catalog.js', src.replace(N, '    return i;\n'), 'any-mention');
+  const mA = mutantCopies('level-signal-a', REPO).load('src/claude-model-catalog.js', anchored(src, N, '    return i;\n', 'any-mention'), 'any-mention');
   ok(mA.levelSignalAt(MENTION) >= 0, 'RED: a finder that takes any mention calls a build that merely names the signal «declared»');
 }
 
@@ -91,7 +92,7 @@ console.log('B · the catalog\'s ONE read of the binary carries the fact (src/se
   // RED: the early return as it was — after a boot the binary in use, read by an older reader, is never read once more
   const NE = '    if (st.key === key && l.current === key && l.binaries[key] && l.binaries[key].reader === CMC.READER_VERSION && !l.binaries[key].retry) return l.binaries[key];';
   if (src.split(NE).length !== 2) throw new Error('anchor missing: the early return');
-  const mB = mutantCopies('level-signal-b', REPO).load('src/server/cli-model-catalog.js', src.replace(NE, '    if (st.key === key && l.current === key && !(l.binaries[key] && l.binaries[key].retry)) return l.binaries[key];'), 'boot-skips-reread');   // stale-pins: kept — the RED control re-creates the release's early return on purpose
+  const mB = mutantCopies('level-signal-b', REPO).load('src/server/cli-model-catalog.js', anchored(src, NE, '    if (st.key === key && l.current === key && !(l.binaries[key] && l.binaries[key].retry)) return l.binaries[key];', 'boot-skips-reread'), 'boot-skips-reread');   // stale-pins: kept — the RED control re-creates the release's early return on purpose
   const d3b = path.join(dir, 'data3b'); fs.mkdirSync(d3b);
   fs.writeFileSync(path.join(d3b, CAT.LEDGER), JSON.stringify({ ...led, binaries: { [k]: { ...led.binaries[k], reader: 2, level: undefined } } }));
   mB.boot({ dataDir: d3b, event: () => { }, log: () => { } });
@@ -132,11 +133,11 @@ console.log('C · the hub\'s judgment: the span is the FLOOR (src/conversation-f
   const src = fs.readFileSync(path.join(REPO, 'src/conversation-facts.js'), 'utf8');
   const N = '    if (d === true) out.background = [];\n    else {';
   if (src.split(N).length !== 2) throw new Error('anchor missing: the floor');
-  const mC = mutantCopies('level-signal-c', REPO).load('src/conversation-facts.js', src.replace(N, '    {'), 'span-only');
+  const mC = mutantCopies('level-signal-c', REPO).load('src/conversation-facts.js', anchored(src, N, '    {', 'span-only'), 'span-only');
   ok(mC.trackedFacts(st('2.1.323'), { ...K, levelDeclared: () => true }).background === null, 'RED: the span alone reads a declaring 2.1.323 «unknown» — the feature off from the first build above the span');
   const NF = "  else if (!(/^\\d+(\\.\\d+)*/.test(st.cli) && versionCmp(st.cli, LEVEL_MEASURED_TO) > 0)) { out.background = null; out.backgroundWhy = `its CLI version ${st.cli} is not measured for background tasks (measured ${LEVEL_MEASURED_FROM}–${LEVEL_MEASURED_TO})`; }   // BELOW the floor: nothing ever measured it — never asked\n";
   if (src.split(NF).length !== 2) throw new Error('anchor missing: below the floor');
-  const mF = mutantCopies('level-signal-floor', REPO).load('src/conversation-facts.js', src.replace(NF, ''), 'below-floor-asked');
+  const mF = mutantCopies('level-signal-floor', REPO).load('src/conversation-facts.js', anchored(src, NF, '', 'below-floor-asked'), 'below-floor-asked');
   ok(Array.isArray(mF.trackedFacts(st('2.1.200'), { ...K, levelDeclared: () => true }).background), 'RED: without the floor\'s branch a 2.1.200 build whose binary declares the signal reads «owns nothing» — on a build nothing ever measured');
 }
 
