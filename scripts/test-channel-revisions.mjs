@@ -583,10 +583,10 @@ console.log('⑧ B-43bc: a member still being read is read first — the wake an
   // each member its own Task Groups answer: `read` (in G) · `unread` (being read; `carry`: it still carries G, the group it
   // knew) · `out` (read: not in G); a `stuck` member's read never lands (the bound passes, or its path waits a back-off)
   const mkWorld2 = (ENGM, tag, init, { bound = null } = {}) => {
-    const st = { m: Object.fromEntries(Object.entries(init).map(([c, v]) => [c, { ...v }])), said: [] };
+    const st = { m: Object.fromEntries(Object.entries(init).map(([c, v]) => [c, { ...v }])), said: [], logged: [], warned: [] };
     const roster = () => Object.entries(st.m).map(([cid, v]) => ({ cid, name: cid, groups: v.state === 'read' || (v.state === 'unread' && v.carry) ? ['G'] : [], ...(v.state === 'unread' ? { groupsUnread: true } : {}) }));
     const readMembership = async (cids) => { let n = 0; for (const [cid, v] of Object.entries(st.m)) { if (Array.isArray(cids) && !cids.includes(cid)) continue; if (v.state !== 'unread' || v.stuck) continue; v.state = 'read'; n++; } return n; };
-    const log = { log() {}, warn: (m) => { st.said.push(String(m)); }, error() {} };
+    const log = { log: (m) => { st.logged.push(String(m)); }, warn: (m) => { st.said.push(String(m)); st.warned.push(String(m)); }, error() {} };
     return { st, w: mkEngine(ENGM, path.join(ROOT, tag), { roster, readMembership, log, heldBound: bound }) };
   };
   const toCount = (w, cid) => w.delivered.filter((d) => d.cid === cid).length;
@@ -807,24 +807,100 @@ console.log('⑧ B-43bc: a member still being read is read first — the wake an
     `L1 RESTATED: the group's row and a via row, agent-1 being read and not carrying the group — the group's pending row (${rv.pending}) and the kept via row both lead to agent-1: m8 handed to it ONCE in all (${rv.m8} record), m7 once, the pending row cleared`, J(rv));
   ok(rvR.m8 === 2, `RED CONTROL: the receiver's mark cut — the group's pending row hands agent-1 the message it already has: ${rvR.m8} records`, J(rvR));
 
-  // THE MARK'S OWN EVICTION IS SAID (a name past its bound forgets its oldest — one line, then one a look at most)
-  async function markBoundLeg(ENGM, tag) {
-    const { st, w } = mkWorld2(ENGM, tag, { 'agent-1': { state: 'read' }, 'agent-2': { state: 'out' } }, { bound: { handedPer: 1 } });
+  // THE MARK'S BOUND FITS IT (the smalls of round w13lgr9dm): a name past its bound forgets the oldest record NOTHING WAITS
+  // FOR — routine in a busy conversation, said as such (a journal line, never a warning), the last count said when the
+  // window has passed (at the mark's next write — the engine's clock; a one-shot timer is the backstop); a record still
+  // waiting (here: the group's pending row) is never the one forgotten while another can go
+  async function forgetLeg(ENGM, tag) {
+    const { st, w } = mkWorld2(ENGM, tag, { 'agent-1': { state: 'read' }, 'agent-2': { state: 'out' } }, { bound: { handedPer: 1, sayMs: 60e3 } });
     await w.eng.pass(A, { force: true });
-    await w.eng.setGrain(A, { kind: 'conversation', convId: OPS }, { access: [acc(GRP)], watchers: [VIA('agent-1')] });
-    const [m7, m8] = w.tail(OPS).slice(-2);
-    await w.eng.onFresh(w.recOf(), OPS, [m7], { origin: 'test' });
-    await w.eng.onFresh(w.recOf(), OPS, [m8], { origin: 'test' });   // each name holds one record: m7 is forgotten — SAID
-    const out = { said: st.said.filter((m) => m.includes('the hand-over mark passed its bound (1 records a name')).length, handed: [recs(w, 'agent-1', m7), recs(w, 'agent-1', m8)] };
+    for (const c of [OPS, ANN]) await w.eng.setGrain(A, { kind: 'conversation', convId: c }, { access: [acc(GRP)], watchers: [VIA('agent-1')] });
+    const [m6, m7, m8] = w.tail(OPS).slice(-3);
+    for (const r of [m6, m7, m8]) await w.eng.onFresh(w.recOf(), OPS, [r], { origin: 'test' });   // each name holds one: m6, then m7 forgotten — nothing waits for them
+    const first = st.logged.filter((m) => m.includes('the hand-over mark forgot')).length;
+    w.clock.advance(61e3);   // the window passes; the evictions have stopped
+    await w.eng.onFresh(w.recOf(), ANN, w.tail(ANN).slice(-1), { origin: 'test' });   // the mark's next write (new names: nothing forgotten) says the last count
+    const lines = st.logged.filter((m) => m.includes('the hand-over mark forgot'));
+    const out = { first, lines: lines.length, last: (/forgot (\d+) record/.exec(lines[lines.length - 1] || '') || [])[1] || null, routine: lines.every((m) => m.includes('nothing waits for any more — routine')), warned: st.warned.filter((m) => m.includes('the hand-over mark')).length, handed: [m6, m7, m8].map((r) => recs(w, 'agent-1', r)) };
     await w.eng.stop();
     return out;
   }
-  const mb = await markBoundLeg(ENG, 'mark-bound');
-  const HANDED_SAY = '  function sayHandedOver(n) {\n';
-  ok(src.split(HANDED_SAY).length === 2, 'control setup: the mark\'s eviction line is present once');
-  const mbR = await markBoundLeg(MUT.load('src/server/channels-engine.js', src.replace(HANDED_SAY, HANDED_SAY + '    return;\n'), 'silent-mark'), 'mark-bound-red');
-  ok(mb.said === 1 && J(mb.handed) === '[1,1]', `the hand-over mark's own eviction is SAID — one line (${mb.said}) when a name past its bound forgets its oldest record`, J(mb));
-  ok(mbR.said === 0, `RED CONTROL: a silent mark forgets and says nothing (${mbR.said})`, J(mbR));
+  const fg = await forgetLeg(ENG, 'mark-forget');
+  ok(fg.first === 1 && fg.lines === 2 && fg.last === '3' && fg.routine && fg.warned === 0 && J(fg.handed) === '[1,1,1]',
+    `the mark's routine forgetting is SAID as what it is — a journal line, never a warning (${fg.warned}); the first at once, the LAST count (${fg.last}) when the window ends (${fg.lines} lines)`, J(fg));
+  const SAY_LATER = '    for (const kind of Object.keys(forgot)) { const f = forgot[kind]; if (f.n && now() - f.at >= HANDED_SAY_MS) sayForgotNow(kind); }\n';
+  ok(src.split(SAY_LATER).length === 2, 'control setup: the last count\'s line at the next write is present once');
+  const fgR = await forgetLeg(MUT.load('src/server/channels-engine.js', src.replace(SAY_LATER, ''), 'no-last-count'), 'mark-forget-red');
+  ok(fgR.lines === 1, `RED CONTROL: without the last count's line the stopped burst's count is never said (${fgR.lines} line; the backstop timer is a minute away)`, J(fgR));
+
+  // the scene with a mark of ONE record a name: the group's pending row still holds m8 when agent-1 is handed m7 — the
+  // mark forgets m7 (nothing waits for it), never m8, so the pending row's carry still finds m8 handed
+  async function waitingLeg(ENGM, tag) {
+    const { st, w } = mkWorld2(ENGM, tag, { 'agent-1': { state: 'read', stuck: true }, 'agent-2': { state: 'out' } }, { bound: { handedPer: 1 } });
+    await w.eng.pass(A, { force: true });
+    await w.eng.setGrain(A, { kind: 'conversation', convId: OPS }, { access: [acc(GRP)], watchers: [{ principal: GRP }, VIA('agent-1')] });
+    const [m7, m8] = w.tail(OPS).slice(-2);
+    st.m['agent-1'].state = 'unread';
+    await w.eng.onFresh(w.recOf(), OPS, [m8], { origin: 'test' });
+    st.m['agent-1'].state = 'read';
+    await w.eng.membershipChanged();
+    await w.eng.onFresh(w.recOf(), OPS, [m7], { origin: 'test' });
+    const out = { m8: recs(w, 'agent-1', m8), m7: recs(w, 'agent-1', m7), warned: st.warned.filter((m) => m.includes('STILL WAITING')).length };
+    await w.eng.stop();
+    return out;
+  }
+  const wt = await waitingLeg(ENG, 'mark-waiting');
+  const OLDEST_FREE = '        for (const id of m.keys()) if (!wait.has(id)) { victim = id; break; }   // the oldest record nothing waits for\n';
+  ok(src.split(OLDEST_FREE).length === 2, 'control setup: the mark\'s choice of what nothing waits for is present once');
+  const wtR = await waitingLeg(MUT.load('src/server/channels-engine.js', src.replace(OLDEST_FREE, ''), 'oldest-forgotten'), 'mark-waiting-red');
+  ok(wt.m8 === 1 && wt.m7 === 1 && wt.warned === 0, `a mark of ONE record a name forgets m7, never m8 the group's pending row still holds — m8 handed ONCE (${wt.m8}), nothing waiting forgotten`, J(wt));
+  ok(wtR.m8 === 2 && wtR.warned >= 1, `RED CONTROL: a mark that forgets its oldest whatever waits forgets m8 — the pending row hands it TWICE (${wtR.m8}), said as a warning`, J(wtR));
+
+  // L1 RESTATED — THE OTHER ORDER: the pending carry first (the next message's batch comes before the read's signal), the
+  // kept re-run after it — the receiver's mark leaves the kept message out
+  async function otherOrderLeg(ENGM, tag) {
+    const { st, w } = mkWorld2(ENGM, tag, { 'agent-1': { state: 'read', stuck: true }, 'agent-2': { state: 'out' } });
+    await w.eng.pass(A, { force: true });
+    await w.eng.setGrain(A, { kind: 'conversation', convId: OPS }, { access: [acc(GRP)], watchers: [{ principal: GRP }, VIA('agent-1')] });
+    const [m7, m8] = w.tail(OPS).slice(-2);
+    st.m['agent-1'].state = 'unread';
+    await w.eng.onFresh(w.recOf(), OPS, [m8], { origin: 'test' });   // the group's pending row; the via row kept
+    st.m['agent-1'].state = 'read';   // the read lands — its signal not yet run
+    await w.eng.onFresh(w.recOf(), OPS, [m7], { origin: 'test' });   // the next batch FIRST: the group's carry hands agent-1 m8
+    const first = recs(w, 'agent-1', m8);
+    await w.eng.membershipChanged();   // then the kept re-run: m8 again for the via row
+    const out = { first, m8: recs(w, 'agent-1', m8), m7: recs(w, 'agent-1', m7) };
+    await w.eng.stop();
+    return out;
+  }
+  const oo = await otherOrderLeg(ENG, 'receiver-other-order');
+  const ooR = await otherOrderLeg(MUT.load('src/server/channels-engine.js', src.replace(RECEIVER, '    return false;\n'), 'no-receiver-mark-2'), 'receiver-other-order-red');
+  ok(oo.first === 1 && oo.m8 === 1 && oo.m7 === 1, `L1 RESTATED, THE OTHER ORDER: the group's pending carry hands agent-1 m8 first (${oo.first}); the kept re-run after it hands nothing more — m8 ONCE in all (${oo.m8} record)`, J(oo));
+  ok(ooR.m8 === 2, `RED CONTROL: the receiver's mark cut — the kept re-run hands m8 again: ${ooR.m8} records`, J(ooR));
+
+  // THE SCOPE DIGEST'S HISTORY ROW COUNTS WHAT IT HANDED: o1 reached agent-1 through the group's wake, o2 did not; the
+  // account digest carries o2 only, and its row on the conversation says 1
+  async function scopeRowLeg(ENGM, tag) {
+    const w = mkEngine(ENGM, path.join(ROOT, tag), { roster: () => [{ cid: 'agent-1', name: 'Worker', groups: ['G'] }, { cid: 'agent-2', name: 'Other', groups: [] }] });
+    await w.eng.pass(A, { force: true });
+    await w.eng.setGrain(A, { kind: 'account' }, { access: [acc(AGENT)], watchers: [{ principal: AGENT, notify: 'digest', digestMinutes: 30 }] });
+    await w.eng.setGrain(A, { kind: 'conversation', convId: OPS }, { access: [acc(GRP)], watchers: [{ principal: GRP }] });
+    const [o1, o2] = w.tail(OPS).slice(-2);
+    await w.eng.onFresh(w.recOf(), OPS, [o1], { origin: 'test' });   // the group's wake hands o1 to agent-1; the account digest parks o1
+    await w.eng.setGrain(A, { kind: 'conversation', convId: OPS }, { access: [acc(GRP)], watchers: [] });
+    await w.eng.onFresh(w.recOf(), OPS, [o2], { origin: 'test' });   // only the digest parks o2
+    const f = await w.eng.flushScope(A, 'account', null, 'agent:agent-1');
+    const rows = (((w.eng.store.index.live()[`${A}/${OPS}`] || {}).stats || {}).wakes || []).filter((x) => x && x.digest).map((x) => x.n);
+    const out = { ok: !!(f && f.ok), n: f && f.n, rows, o1: recs(w, 'agent-1', o1), o2: recs(w, 'agent-1', o2), pending: ((w.eng.store.index.live()[`${A}/${OPS}`] || {}).pending || []).length };
+    await w.eng.stop();
+    return out;
+  }
+  const sr = await scopeRowLeg(ENG, 'scope-row');
+  const ROW_N = '          e2.stats.wakes.push({ ...wk, n: h.carried.hits.length + h.carried.elided });';
+  ok(src.split(ROW_N).length === 2, 'control setup: the scope digest\'s history row is present once');
+  const srR = await scopeRowLeg(MUT.load('src/server/channels-engine.js', src.replace(ROW_N, '          e2.stats.wakes.push({ ...wk, n: h.carried.ids.size + h.carried.elided });'), 'row-counts-ids'), 'scope-row-red');   // stale-pins: kept (the row as it counted before)
+  ok(sr.ok && sr.n === 1 && J(sr.rows) === '[1]' && sr.o1 === 1 && sr.o2 === 1 && sr.pending === 0, `the scope digest carries only o2 (o1 the receiver already had) and its history row on the conversation counts what it HANDED (${J(sr.rows)}); its pending rows cleared`, J(sr));
+  ok(J(srR.rows) === '[2]', `RED CONTROL: a row counting the carried ids says ${J(srR.rows)} for one record handed`, J(srR));
 
   // the DIGEST's hold and its bound — reactions on what agent-1 SENT here, while its Task Groups are being read
   async function digestLeg(ENGM, tag) {

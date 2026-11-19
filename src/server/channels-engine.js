@@ -521,7 +521,8 @@ function create(deps = {}) {
     readMembership = null,
     // B-43bc third cure (L4): the kept deliveries' bound — `{convs, perConv}` (default 200 conversations × 50 each); past it a
     // kept delivery is dropped and SAID; and the hand-over mark's — `{handedPer, handedKeys}` (default 200 records a name,
-    // 2 000 names), its eviction SAID too. A suite narrows them to reach a bound with a few records.
+    // 2 000 names; it forgets only what nothing waits for, and says so), `sayMs` its line's window (default 30 s). A suite
+    // narrows them to reach a bound with a few records.
     heldBound = null,
     // lane R5 (drain rule 18): the PER-SECOND bucket runs on a PHYSICAL clock —
     // the vendor meters requests in real time, whatever the engine's logical
@@ -5713,15 +5714,37 @@ function create(deps = {}) {
   const HANDED_PER = Math.max(1, Math.floor(Number(heldBound && heldBound.handedPer) || 200));
   const HANDED_KEYS = Math.max(1, Math.floor(Number(heldBound && heldBound.handedKeys) || 2000));
   const handed = new Map();   // `${adapterId}/${convId}\u0000${pk}` | `${adapterId}/${convId}\u0000→${cid}` → Map(record id → at)
-  // the mark's OWN eviction is SAID: the first time, then at most one line a HELD_LOOK_MS with the count since the last
-  let handedForgot = 0, handedSaidAt = 0;
-  function sayHandedOver(n) {
-    handedForgot += n;
+  // THE MARK'S BOUND FITS IT (主开发 19:42Z, the smalls of round w13lgr9dm): a name past its bound forgets the oldest record
+  // NOTHING WAITS FOR any more — no kept wake, no owed record, no pending row of this conversation holds it, so no road can
+  // bring it back; that is routine in a busy conversation and SAID as such (`log.log`). Only a name holding nothing but
+  // waiting records forgets one of those — the one case a road could hand it again — and that is a WARNING. Each kind says
+  // its first line at once, then at most one a `HANDED_SAY_MS` with the count since the last; the last count is said when
+  // the window ends (a one-shot timer), so a burst that stops is never left unsaid.
+  const HANDED_SAY_MS = Math.max(1, Math.floor(Number(heldBound && heldBound.sayMs) || HELD_LOOK_MS));
+  const forgot = { routine: { n: 0, at: 0, timer: null }, waiting: { n: 0, at: 0, timer: null } };
+  function sayForgotNow(kind) {
+    const f = forgot[kind];
+    if (f.timer) { clearTimeout(f.timer); f.timer = null; }
+    if (!f.n) return;
+    const n = f.n; f.n = 0; f.at = now();
+    if (kind === 'routine') log.log(`[channels] the hand-over mark forgot ${n} record(s) nothing waits for any more — routine in a busy conversation (${HANDED_PER} records a name, ${HANDED_KEYS} names); no road can bring them back`);
+    else log.warn(`[channels] the hand-over mark forgot ${n} record(s) STILL WAITING (a kept wake, an owed record or a pending row holds them) — every record of the name past its bound was waiting; a road that brings one of them back could hand it again`);
+  }
+  function sayForgot(kind, n) {
+    const f = forgot[kind];
+    f.n += n;
     const t = now();
-    if (handedSaidAt && t - handedSaidAt < HELD_LOOK_MS) return;
-    handedSaidAt = t;
-    log.warn(`[channels] the hand-over mark passed its bound (${HANDED_PER} records a name, ${HANDED_KEYS} names) — ${handedForgot} oldest forgotten since the last line; a road that brings one of them back could hand it again`);
-    handedForgot = 0;
+    if (!f.at || t - f.at >= HANDED_SAY_MS) { sayForgotNow(kind); return; }
+    if (!f.timer && !stopped) { f.timer = setTimeout(() => { f.timer = null; sayForgotNow(kind); }, Math.max(1, HANDED_SAY_MS - (t - f.at))); if (f.timer.unref) f.timer.unref(); }
+  }
+  /** The record ids a road can still bring to this conversation: its kept wakes, its owed records, its pending rows. */
+  function waitingIds(adapterId, convId) {
+    const key = `${adapterId}/${convId}`, out = new Set();
+    const h = heldUnread.get(key); if (h) for (const id of h.wake.keys()) out.add(String(id));
+    const o = owed.get(key); if (o && o.recs) for (const id of o.recs.keys()) out.add(String(id));
+    let en = null; try { en = store.index.peek(key); } catch { en = null; }
+    for (const p of (en && Array.isArray(en.pending) ? en.pending : [])) if (p && p.record && p.record.id !== undefined && p.record.id !== null) out.add(String(p.record.id));
+    return out;
   }
   function wasHanded(adapterId, convId, pk, h) {
     const m = handed.get(`${adapterId}/${convId}\u0000${pk}`);
@@ -5738,11 +5761,34 @@ function create(deps = {}) {
     const k = `${adapterId}/${convId}\u0000${pk}`;
     const m = handed.get(k) || new Map();
     for (const h of hits || []) { const id = h && h.record ? h.record.id : null; if (id === null || id === undefined) continue; m.delete(String(id)); m.set(String(id), t); }
-    let gone = 0;
-    while (m.size > HANDED_PER) { m.delete(m.keys().next().value); gone++; }
+    let routine = 0, waiting = 0;
+    if (m.size > HANDED_PER) {
+      const wait = waitingIds(adapterId, convId);
+      while (m.size > HANDED_PER) {
+        let victim = null;
+        for (const id of m.keys()) if (!wait.has(id)) { victim = id; break; }   // the oldest record nothing waits for
+        if (victim === null) { victim = m.keys().next().value; waiting++; } else routine++;
+        m.delete(victim);
+      }
+    }
     handed.delete(k); handed.set(k, m);
-    while (handed.size > HANDED_KEYS) { const [, m0] = handed.entries().next().value; handed.delete(handed.keys().next().value); gone += m0.size; }
-    if (gone) sayHandedOver(gone);
+    while (handed.size > HANDED_KEYS) {
+      // a whole name goes: the oldest of the first few holding nothing a road waits for, else the oldest (said as waiting)
+      let vk = null, tried = 0;
+      for (const [k0, m0] of handed) {
+        if (k0 === k) continue;
+        if (++tried > 16) break;
+        const c0 = k0.slice(0, k0.indexOf('\u0000')), i0 = c0.indexOf('/');
+        const wait0 = waitingIds(c0.slice(0, i0), c0.slice(i0 + 1));
+        if (![...m0.keys()].some((id) => wait0.has(id))) { vk = k0; break; }
+      }
+      if (vk === null) { const [k0, m0] = handed.entries().next().value; vk = k0; waiting += m0.size; } else routine += handed.get(vk).size;
+      handed.delete(vk);
+    }
+    if (routine) sayForgot('routine', routine);
+    if (waiting) sayForgot('waiting', waiting);
+    // the evictions stopped: a count left from the last window is said at the next write past it (the timer is the backstop)
+    for (const kind of Object.keys(forgot)) { const f = forgot[kind]; if (f.n && now() - f.at >= HANDED_SAY_MS) sayForgotNow(kind); }
   }
   function markHandedTo(adapterId, convId, cid, hits, t) { if (cid) markHanded(adapterId, convId, `→${cid}`, hits, t); }
   /** THE WAKE'S AUDIENCE STILL BEING READ (the cure's should): only the members THIS conversation's watchers can depend on —
@@ -8619,7 +8665,7 @@ function create(deps = {}) {
           if (!e2) continue;
           healP2(e2);
           clearCarried(e2, pk, h.eff, h.carried);
-          e2.stats.wakes.push({ ...wk, n: h.carried.ids.size + h.carried.elided });
+          e2.stats.wakes.push({ ...wk, n: h.carried.hits.length + h.carried.elided });   // B-43bc smalls: what THIS digest handed here (a record the receiver already had is left out — its row cleared, never counted)
           e2.stats.wakes = F.pruneLedger(e2.stats.wakes, t);
           noteDelivered(e2, h.carried.hits, target.cid, t);   // THE LEDGER DOOR — the digest road (lane channel-recall-engine-leg): EVERY conversation the digest carried (was: single-conversation wakes only — a recall after a digest said nothing)
         }
@@ -9351,6 +9397,7 @@ function create(deps = {}) {
     if (offSwapReopen) { try { offSwapReopen(); } catch {} }   // B-166e: the client-swap item's reopen listener
     if (timer) { clearInterval(timer); timer = null; }
     if (heldDigestTimer) { clearInterval(heldDigestTimer); heldDigestTimer = null; }
+    for (const f of Object.values(forgot)) if (f.timer) { clearTimeout(f.timer); f.timer = null; }   // B-43bc smalls: the mark's forget lines
     if (heldTimer) { clearInterval(heldTimer); heldTimer = null; }   // B-43bc cure: the kept deliveries' look (memory: a restart forgets it)
     if (owedTimer) { clearInterval(owedTimer); owedTimer = null; }   // lane judged-watch-state: the owed look (what is owed is memory — a restart forgets it)
     // P2: a window that never fired keeps its hits PENDING on the index (they
