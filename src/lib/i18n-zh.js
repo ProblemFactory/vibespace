@@ -13384,7 +13384,7 @@ export default {
   "Username on that machine": "那台机器上的用户名",
   "10.0.0.5 or gpu01.example.com": "10.0.0.5 或 gpu01.example.com",
   "The machine’s IP address or hostname.": "这台机器的 IP 地址或主机名。",
-  "Usually 22 — leave as-is unless told otherwise.": "一般是 22——没人特别交代就不用改。",
+  "Leave empty for 22, or for the port the hub’s ssh config gives that name.": "留空表示 22，或 hub 的 ssh config 为该名称指定的端口。",
   "How to log in": "登录方式",
   "The SSH keys already on this server": "这台服务器上已有的 SSH 密钥",
   "VibeSpace’s own key (recommended)": "VibeSpace 自己的密钥（推荐）",

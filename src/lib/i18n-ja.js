@@ -13383,7 +13383,7 @@ export default {
   "Username on that machine": "そのマシンでのユーザー名",
   "10.0.0.5 or gpu01.example.com": "10.0.0.5 または gpu01.example.com",
   "The machine’s IP address or hostname.": "マシンの IP アドレスまたはホスト名。",
-  "Usually 22 — leave as-is unless told otherwise.": "通常は 22 です — 特に指示がなければそのままで。",
+  "Leave empty for 22, or for the port the hub’s ssh config gives that name.": "空欄なら 22、またはハブの ssh config がその名前に指定するポートを使います。",
   "How to log in": "ログイン方法",
   "The SSH keys already on this server": "このサーバーにある既存の SSH 鍵",
   "VibeSpace’s own key (recommended)": "VibeSpace 専用の鍵（推奨）",

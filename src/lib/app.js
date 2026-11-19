@@ -2255,7 +2255,7 @@ class App {
         for (const h of d?.hosts || []) {
           const o = document.createElement('option');
           // dial devices have no user@host — show them as a device
-          o.value = h.id; o.textContent = h.transport === 'dial' ? `${h.name} (${t('device')})` : `${h.name} (${h.user}@${h.host})`;
+          o.value = h.id; o.textContent = h.transport === 'dial' ? `${h.name} (${t('device')})` : `${h.name} (${h.user ? h.user + '@' : ''}${h.host})`;
           hostSel.appendChild(o);
         }
         // a machine the person picked while this list was in flight STAYS picked (ci-355-red: the landing put the open's machine

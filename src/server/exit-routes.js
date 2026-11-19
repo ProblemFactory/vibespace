@@ -273,6 +273,15 @@ app.post('/api/hosts', async (req, res) => {
     let old = null;
     if (b.replaces) { try { old = hosts.get(String(b.replaces)); } catch { old = null; } }
     if (old && old.transport === 'dial') old = null;
+    // B-2ca0: is the address an ALIAS of this hub's ssh config? Asked here (ssh -G: it connects to nothing), never taken from the body
+    delete b.viaConfig;
+    delete b.sshConfig;
+    if (b.transport !== 'dial' && b.host) {
+      const a = await hosts.resolveAlias(b.host).catch(() => null);
+      const v = require('../hosts.js').configVerdict(a, b, require('os').homedir());   // B-2ca0: pure (its read 2: driven by a leg)
+      if (v.refuse) throw new Error(v.refuse);
+      b.user = v.user; b.port = v.port; if (v.viaConfig) { b.viaConfig = true; b.sshConfig = v.sshConfig; }
+    }
     const id = hosts.add({ ...b, replaces: old ? old.id : null });
     if (old) { try { await removeHost(old); } catch (e) { console.warn('[hosts] the replaced machine stays — its removal failed:', e && e.message); } }   // the add stands
     bcastAll({ type: 'hosts-updated' });

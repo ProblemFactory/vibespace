@@ -21,6 +21,32 @@ const { REMOTE_PRELUDE, nodeFinder } = require('./remote-shell.js');
 const { parseReceiptLines } = require('./harness-config'); // CFG| receipt lines from the shipped helper (design-harness-settings §6)
 const { usageBearerOk, usageBearerRefusal } = require('./login-expiry.js'); // PURE: THE USAGE BEARER LAW (B-5e0d — the host rungs follow the local ladder's rule)
 const { execFile } = require('child_process');
+/** B-2ca0: the port words and the destination of a record — module functions (sshArgs / sshCmd are also called with a stand-in
+ *  `this`): an ssh-config entry (`viaConfig`) keeps its own Port when none was typed (null) and its own User when none was given */
+const portArgsOf = (h) => (h && h.viaConfig && h.port == null ? [] : ['-p', String((h && h.port) || 22)]);   // its read 2: a TYPED port (22 too) always wins; only a port left empty is the config's
+const destOf = (h) => (h && h.viaConfig && !h.user ? String(h.host) : `${h.user}@${h.host}`);
+/** B-2ca0: the add route's verdict over resolveAlias's answer `a` and the form's `body` → { viaConfig, port, user, sshConfig, refuse }.
+ *  A CONFIGURED name (an alias, or an entry with its own Port / User) is `viaConfig`; a port left EMPTY is the config's (null) — a
+ *  typed one (22 too) is the person's; a blank user is the config's only where the entry names one (else «user required»: ssh would
+ *  dial as the hub's own user); `sshConfig` = what ssh resolves (the SFTP road reads no ssh config). Pure. */
+function configVerdict(a, body, home = '') {
+  const user = String((body && body.user) || '').trim(), portIn = body && body.port != null ? String(body.port).trim() : '';
+  const configured = !!(a && a.configured);
+  if (!user && !(configured && !a.userIsDefault)) return { refuse: 'user required' };
+  const idf = a && a.identityFile ? String(a.identityFile).replace(/^~(?=\/)/, home) : null;
+  return { viaConfig: configured, user, port: configured && !portIn ? null : (Number(portIn) || 22),
+    ...(configured ? { sshConfig: { host: a.hostname, user: a.user, port: a.port || 22, identityFile: idf } } : {}) };
+}
+/** B-2ca0: `ssh -G <name>`'s output (one «key value» line each, lower-case keys, the first one wins) → { alias, hostname, user, port } */
+// ssh's DEFAULT identity files: `ssh -G` lists them when an entry names none — then the entry names no key (its read 3)
+const SSH_DEFAULT_IDS = new Set(['id_rsa', 'id_ecdsa', 'id_ecdsa_sk', 'id_ed25519', 'id_ed25519_sk', 'id_xmss', 'id_dsa'].map((k) => '~/.ssh/' + k));
+function parseSshG(text, name) {
+  const kv = Object.create(null), ids = [];
+  for (const line of String(text || '').split('\n')) { const m = /^(\S+)\s+(.*)$/.exec(line.trim()); if (!m) continue; if (m[1].toLowerCase() === 'identityfile') ids.push(m[2]); if (!(m[1].toLowerCase() in kv)) kv[m[1].toLowerCase()] = m[2]; }
+  const named = ids.every((f) => SSH_DEFAULT_IDS.has(f)) ? null : ids.find((f) => !SSH_DEFAULT_IDS.has(f));
+  if (!kv.hostname) return null;
+  return { alias: kv.hostname.toLowerCase() !== String(name).toLowerCase(), hostname: kv.hostname, user: kv.user || null, port: Number(kv.port) || null, identityFile: named || null };
+}
 const { serviceEnv, SSH_ENV_KEEP } = require('./agent-env.js');
 const { claimJsonls, cwdToProjectDir } = require('./session-store');
 const { nameFromUserLine, interpretDiscoveryLines, synthesizeDiscoveryLines, isZstPath, isZstBuffer, ZSTD_MAGIC } = require('./discovery-facts');
@@ -620,7 +646,7 @@ class HostManager {
     return true;
   }
 
-  add({ name, user, host, port, keyPath, privateKey, transport, deviceId, dialTokenHash, replaces = null }) {
+  add({ name, user, host, port, keyPath, privateKey, transport, deviceId, dialTokenHash, replaces = null, viaConfig = false, sshConfig = null }) {
     // DIAL host (graduation slice B): a paired dial-out device promoted to a
     // full machine — no ssh fields; every data path rides deviceForDial.
     if (transport === 'dial') {
@@ -634,14 +660,16 @@ class HostManager {
       return id;
     }
     if (!host) throw new Error('host required');
-    if (!user) throw new Error('user required');
+    if (!user && !viaConfig) throw new Error('user required');   // B-2ca0: an alias of the hub's ssh config may leave its User to the config
+    if (String(host).startsWith('-') || String(user || '').startsWith('-')) throw new Error('the address and the user may not start with «-»');   // B-2ca0 (its read): never an ssh option
     const id = 'host-' + crypto.randomBytes(4).toString('hex');
     const hasKeyText = !!(privateKey && String(privateKey).trim());
     const rec = {
       id,
       name: String(name || host).slice(0, 60),
-      user: String(user), host: String(host),
-      port: Number(port) || 22,
+      user: String(user || ''), host: String(host),
+      port: viaConfig && (port == null || port === '') ? null : (Number(port) || 22),   // B-2ca0: null = the ssh config's port
+      ...(viaConfig ? { viaConfig: true, ...(sshConfig ? { sshConfig } : {}) } : {}),   // B-2ca0: the address is an ALIAS of the hub's ssh config (the add route asked ssh -G)
       keyPath: null,
       // honest key provenance for the UI (real report: an IMPORTED private key
       // was labeled 'using VibeSpace key'): imported = user pasted/uploaded it;
@@ -751,6 +779,8 @@ class HostManager {
     const hosts = [];
     for (const h of bundle.hosts) {
       const rec = { ...h };
+      if (rec.sshConfig) delete rec.sshConfig;   // B-2ca0: what ANOTHER hub's ssh config resolved is not this hub's (the SFTP road reads it)
+      if (rec.transport !== 'dial' && String(rec.host || '').startsWith('-')) { warnings.push(`${rec.name || h.id}: skipped — its address starts with «-»`); continue; }
       // lane grants-unify: a bundle from before the unify asks each time under `exit.run.ask` — carried to `exit.ask` (the
       // field the reader reads) so an import never runs without asking what used to ask; its lists ride `bundle.grants`
       // (or are mapped from those records) through the exit manager's importLists — never read from here
@@ -795,7 +825,7 @@ class HostManager {
    *  unrelated sessions), and long-lived pipes pin the master forever. */
   sshArgs(h, { tty = false, reverse = null, multiplex = false } = {}) {
     if (h && h.transport === 'dial') throw new Error(`"${h.name}" is a dial-out device — it has no ssh; this operation must ride the device link`);
-    const args = [...SSH_BASE_OPTS, '-p', String(h.port || 22), ...this._tailnetOpts(h)];
+    const args = [...SSH_BASE_OPTS, ...portArgsOf(h), ...this._tailnetOpts(h)];
     if (h.keyPath) args.push('-i', h.keyPath, '-o', 'IdentitiesOnly=yes');
     if (multiplex && cmUsable(this)) {
       args.push('-o', 'ControlMaster=auto', '-o', `ControlPath=${path.join(this._cmDir, '%C')}`, '-o', 'ControlPersist=600');
@@ -806,7 +836,7 @@ class HostManager {
     // BEFORE the destination so option parsing is unambiguous. Bind failures
     // (port in use) only warn — the session still runs, tools just degrade.
     if (reverse) args.push('-R', reverse);
-    args.push(`${h.user}@${h.host}`);
+    args.push(destOf(h));
     return args;
   }
 
@@ -820,14 +850,38 @@ class HostManager {
   /** ssh option STRING for tools that take a transport command (rsync -e):
    *  everything sshArgs adds except the destination. */
   sshCmd(h) {
-    const args = [...SSH_BASE_OPTS, '-p', String(h.port || 22), ...this._tailnetOpts(h)];
+    const args = [...SSH_BASE_OPTS, ...portArgsOf(h), ...this._tailnetOpts(h)];
     if (h.keyPath) args.push('-i', h.keyPath, '-o', 'IdentitiesOnly=yes');
     // rsync transports are short-lived per-op — ride the shared master too (unless its folder was refused)
     if (cmUsable(this)) args.push('-o', 'ControlMaster=auto', '-o', `ControlPath=${path.join(this._cmDir, '%C')}`, '-o', 'ControlPersist=600');
     return 'ssh ' + args.map((a) => (/[\s"']/.test(a) ? JSON.stringify(a) : a)).join(' ');
   }
 
-  dest(h) { return `${h.user}@${h.host}`; }
+  /** B-2ca0: an ALIAS of the hub's ssh config (`viaConfig`) keeps the config's own Port and User unless the person set them — the
+   *  release always said `-p 22` and `user@`, which OVERRIDE the config (an entry on port 2222 was dialled on 22, its User replaced).
+   *  A port left EMPTY at the add is stored null — the config's; a typed one (22 too) is the person's (round 3). */
+  _portArgs(h) { return portArgsOf(h); }
+  dest(h) { return destOf(h); }
+  /** B-2ca0: is `host` an ALIAS of the hub's ssh config? One bounded `ssh -G` child — it prints the configuration ssh WOULD use and
+   *  connects to nothing (a `Match exec` of the hub's config runs, as on every ssh road). → { alias, configured, userIsDefault, hostname,
+   *  user, port, identityFile } (alias: the resolved hostname is not the name typed;
+   *  configured: alias, or the entry sets a port / user of its own) | null (no answer, a
+   *  name that is not a plain host word — never an option) */
+  resolveAlias(host, { ms = 5000 } = {}) {
+    const name = String(host || '');
+    if (!name || name.startsWith('-') || /\s/.test(name)) return Promise.resolve(null);
+    return new Promise((resolve) => {
+      execFile('ssh', ['-G', name], { env: this.sshEnv(), timeout: ms }, (err, out) => {
+        const g = err ? null : parseSshG(out, name);
+        if (!g) return resolve(null);
+        // its read: an entry with NO HostName still configures the name (`Host gpu01.example.com` + `Port 2222`) — configured = it
+        // resolves elsewhere, or its port or user is not ssh's default (22, the hub's own user)
+        let me = ''; try { me = os.userInfo().username; } catch { }
+        const userIsDefault = !g.user || g.user === me;
+        resolve({ ...g, userIsDefault, configured: g.alias || (g.port != null && g.port !== 22) || !userIsDefault });
+      });
+    });
+  }
 
   /** A TAILNET NAME WITHOUT THE SYSTEM RESOLVER (lane tailscale-plugin-pod-dns): the tunnel plugin never takes over
    *  the container's DNS, so `<host>.<tailnet>.ts.net` is answered by the plugin's own peer table (nameLookup — wired
@@ -3236,4 +3290,4 @@ HostManager.prototype.bootstrap = function (id, onEvent) {
   });
 };
 
-module.exports = { HostManager, USAGE_HARVEST_LIMITS, usageScanBound, codexOpenRolloutsShell, killPidShell, installAgentdScript, installAgentdAnswer, feedStdin, sshRefusal, unreachableError, refusalBody };
+module.exports = { HostManager, USAGE_HARVEST_LIMITS, usageScanBound, codexOpenRolloutsShell, killPidShell, installAgentdScript, installAgentdAnswer, feedStdin, sshRefusal, unreachableError, refusalBody, parseSshG, configVerdict };

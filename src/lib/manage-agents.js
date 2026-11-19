@@ -2955,7 +2955,7 @@ export function installManageAgents(App, ctx = {}) {
           const dot = live == null ? '' : `<span class="agents-mach-dot${live ? '' : ' off'}${drs && (drs.state === 'refused' || drs.state === 'auth-fail') ? ' err' : ''}" data-tip="${escHtml([dialWords, dialHistoryText(drs)].filter(Boolean).join(' · '))}"></span>`;
           const pill = hostQuotaPillHtml(this._hostOwnUsage?.[h.id]); // the tightest bucket, through bucketView (lane reset-unproven)
           const kept = signinChipHtml(Object.hasOwn(signins, h.id) ? signins[h.id] : null); // lane desktop-vnc-remember: 「登录已记住」
-          sum.innerHTML = `${dot}<span class="agents-mach-name">${escHtml(h.name)}</span><span class="agents-machine-sub">${escHtml(h.transport === 'dial' ? t('device') : `${h.user}@${h.host}`)}</span>${kept}${pill}`;
+          sum.innerHTML = `${dot}<span class="agents-mach-name">${escHtml(h.name)}</span><span class="agents-machine-sub">${escHtml(h.transport === 'dial' ? t('device') : `${h.user ? h.user + '@' : ''}${h.host}`)}</span>${kept}${pill}`;
           // the summary's SECOND line: the dial state's words + who can use it as an exit (textContent — names are the user's)
           {
             const l2 = document.createElement('span');

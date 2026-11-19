@@ -825,10 +825,11 @@ export function installSidebarMounts(Sidebar) {
       ctx.inputs.fromHost?.addEventListener('change', () => {
         const h = (this._hostsData?.hosts || []).find(x => x.id === ctx.inputs.fromHost.value);
         if (!h) return;
-        ctx.inputs.sshHost.value = h.host;
-        ctx.inputs.sshUser.value = h.user;
-        ctx.inputs.sshPort.value = String(h.port || 22);
-        if (h.keyPath) ctx.inputs.keyPath.value = h.keyPath;
+        const c = h.sshConfig || {};   // B-2ca0 (its read 2): rclone's sftp reads no ssh config — an ssh-config entry gives what ssh resolves
+        ctx.inputs.sshHost.value = c.host || h.host;
+        ctx.inputs.sshUser.value = h.user || c.user || '';
+        ctx.inputs.sshPort.value = String(h.port || c.port || 22);
+        if (h.keyPath || c.identityFile) ctx.inputs.keyPath.value = h.keyPath || c.identityFile;
         if (!ctx.inputs.name.value) ctx.inputs.name.value = h.name.toLowerCase().replace(/[^\w-]+/g, '-') + '-files';
       });
     },
@@ -1103,7 +1104,7 @@ export function installSidebarMounts(Sidebar) {
       const dotTip = isDial
         ? [dialWords, dialHistoryText(rs)].filter(Boolean).join(' · ') + (rs.state === 'refused' && h.dial?.lastRefusal?.from ? ` · ${tr('from {addr}', { addr: h.dial.lastRefusal.from })}` : '')
         : face.dotTip;
-      const nameTip = isDial ? tr('Dial-out device — it connects TO this instance over a websocket (no ssh)') : `${h.user}@${h.host}:${h.port}`;
+      const nameTip = isDial ? tr('Dial-out device — it connects TO this instance over a websocket (no ssh)') : `${h.user ? h.user + '@' : ''}${h.host}${h.port == null ? '' : ':' + h.port}`;   // B-2ca0: a port left to the ssh config is not said
       const badge = isDial
         ? `<span class="mounts-badge${rs.state === 'connected' ? '' : ' mounts-badge-red'}" title="${escHtml(tr('Dial-out device — it connects TO this instance over a websocket (no ssh)'))}">${escHtml(rs.state === 'connected' ? tr('DEVICE') : rs.state === 'auth-fail' ? tr('KEY REFUSED') : rs.state === 'refused' ? tr('REFUSED') : tr('OFFLINE'))}</span>`
         : face.badge;
@@ -1228,7 +1229,7 @@ export function installSidebarMounts(Sidebar) {
           : h.keySource === 'app' ? tr('using VibeSpace key')
           : h.keySource === 'default' ? tr('using system ssh keys')
           : (h.keyPath ? tr('using stored key') : ''); // pre-2.153.4 records: provenance unknown
-        sub.textContent = `${h.user}@${h.host}${h.port !== 22 ? ':' + h.port : ''}${keyLabel ? ' · ' + keyLabel : ''}`;
+        sub.textContent = `${h.user ? h.user + '@' : ''}${h.host}${h.port != null ? (h.port !== 22 ? ':' + h.port : '') : (h.sshConfig && h.sshConfig.port && h.sshConfig.port !== 22 ? ':' + h.sshConfig.port : '')}${keyLabel ? ' · ' + keyLabel : ''}`;   // its read 3: a port the ssh config gives is said
       }
       row.append(top, sub);
       // lane-pairing ⑥: the exit lists' summary (every machine — a record with no `exit` reads nobody / nobody through
@@ -1453,8 +1454,8 @@ export function installSidebarMounts(Sidebar) {
           const base = v.remotePath.split('/').filter(Boolean).pop() || 'files';
           const r = await api('/api/mounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
             type: 'sftp', name: `${h.name}: ${base}`,
-            sshHost: h.host, sshUser: h.user, sshPort: h.port || 22,
-            keyPath: h.keyPath || undefined, sshPath: v.remotePath,
+            sshHost: (h.sshConfig && h.sshConfig.host) || h.host, sshUser: h.user || (h.sshConfig && h.sshConfig.user) || undefined, sshPort: h.port || (h.sshConfig && h.sshConfig.port) || 22,   // B-2ca0: rclone reads no ssh config
+            keyPath: h.keyPath || (h.sshConfig && h.sshConfig.identityFile) || undefined, sshPath: v.remotePath,
           }) });
           if (!await this._connectNewMount(r.id, close)) return;
           close(); showToast(tr('Storage connected')); this._renderMounts();
@@ -1781,7 +1782,7 @@ export function installSidebarMounts(Sidebar) {
         { key: 'name', label: tr('Name'), placeholder: 'gpu-01', value: again ? again.name : '', hint: tr('Any label you like — how this machine shows in your lists.') },
         { key: 'user', label: tr('Username on that machine'), placeholder: 'ubuntu', value: again ? again.user : '' },
         { key: 'host', label: tr('Address'), placeholder: tr('10.0.0.5 or gpu01.example.com'), value: again ? again.host : '', hint: tr('The machine’s IP address or hostname.') },
-        { key: 'port', label: tr('Port'), value: again ? String(again.port || 22) : '22', hint: tr('Usually 22 — leave as-is unless told otherwise.') },
+        { key: 'port', label: tr('Port'), value: again && again.port != null ? String(again.port) : '', placeholder: '22', hint: tr('Leave empty for 22, or for the port the hub’s ssh config gives that name.') },   // B-2ca0: a port only when typed
         { key: 'keyChoice', label: tr('How to log in'), type: 'select', options: [
           ['default', tr('The SSH keys already on this server')],
           ['app', hd.key.exists ? tr('VibeSpace’s own key (recommended)') : tr('Create a key for VibeSpace (recommended)')],
@@ -2442,7 +2443,7 @@ export function installSidebarMounts(Sidebar) {
       startBtn.onclick = async () => {
         startBtn.disabled = true; startBtn.textContent = tr('Installing…');
         overlay.querySelector('.bs-log-wrap').open = true; // show the log live
-        appendLog(`$ connecting to ${h.user}@${h.host}…`);
+        appendLog(`$ connecting to ${h.user ? h.user + '@' : ''}${h.host}…`);
         try {
           const r = await api(`/api/hosts/${h.id}/bootstrap`, { method: 'POST' });
           Object.assign(state, r.steps); paint();
