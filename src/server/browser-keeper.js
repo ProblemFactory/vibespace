@@ -589,14 +589,29 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   const heldLifts = new Set();
   // 主开发 03:35Z (round wm6qxcqcw, its MUST): the hold is TOLD ONCE in For you — the person's own surface says why every agent browser
   // waits (the journal alone told nobody); one item a hold, resolved at the read
-  const HELD_NOTICE = 'VibeSpace cannot read {file}, the file of your browser profiles, right now — so the agent browsers wait. Nothing is lost and nothing is written over it; VibeSpace reads it again by itself.';
+  const HELD_NOTICE = 'VibeSpace cannot read {file}, the file of your browser profiles, right now ({code}) — so the agent browsers wait. Nothing is written over it, and VibeSpace reads it again by itself.';
+  const HELD_DETAIL = 'If this stays: the file is {path} — check that VibeSpace can read it (its storage answers, its permissions), or put back a copy from a backup; VibeSpace reads it again by itself.';   // its read r1 (S2): the way out when a read again cannot fix it
   let heldItemId = null;
   function fileHeldNotice() {
     if (heldItemId) return;
-    const text = HELD_NOTICE.replace('{file}', STORE_FILE);
+    const code = (heldReg && heldReg.code) || 'unreadable';
+    const text = HELD_NOTICE.replace('{file}', STORE_FILE).replace('{code}', code);
     if (!userTodos || typeof userTodos.add !== 'function') { log.warn?.(`[browser] ${text} (no For-you store is wired, so only this journal says so)`); return; }
-    try { const it = userTodos.add('browser', { origin: 'browser', kind: 'notice', urgency: 'normal', by: 'agent', text, sessionName: 'Agent browser', i18n: { text: { key: HELD_NOTICE, params: { file: STORE_FILE } } } }); heldItemId = it && typeof it.id === 'string' ? it.id : null; }
+    // its read r1 (M3): an item a previous run filed and never closed (it stopped while held) is THIS hold's item — no second one
+    const had = openHeldNotices()[0]; if (had) { heldItemId = had.id; return; }
+    try { const it = userTodos.add('browser', { origin: 'browser', kind: 'notice', urgency: 'normal', by: 'agent', text, detail: DET_TEXT(), sessionName: 'Agent browser', i18n: { text: { key: HELD_NOTICE, params: { file: STORE_FILE, code } }, detail: [{ key: HELD_DETAIL, params: { path: storeFile } }] } }); heldItemId = it && typeof it.id === 'string' ? it.id : null; }
     catch (e) { log.warn?.(`[browser] the held registry's For-you notice was not filed (${e && e.message})`); }
+  }
+  const DET_TEXT = () => HELD_DETAIL.replace('{path}', storeFile);
+  /** the open held-registry notices in For you (a previous run's included — found by their words' key) */
+  function openHeldNotices() {
+    if (!userTodos || typeof userTodos.forSession !== 'function') return [];
+    try { return (userTodos.forSession('browser') || []).filter((i) => i && i.status === 'open' && i.i18n && i.i18n.text && i.i18n.text.key === HELD_NOTICE); } catch { return []; }
+  }
+  /** its read r1 (M3): a load that READ closes every held notice still open — a previous run's that stopped while held too */
+  function closeStaleHeldNotices() {
+    if (heldReg || !userTodos || typeof userTodos.setStatus !== 'function') return;
+    for (const it of openHeldNotices()) { try { userTodos.setStatus(it.id, 'done', 'agent'); } catch (e) { log.warn?.(`[browser] a held-registry notice was not closed (${e && e.message})`); } }
   }
   function resolveHeldNotice() {
     const id = heldItemId; heldItemId = null;
@@ -666,6 +681,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const a = SR.storeAnswer(read, { valid: REG_VALID });
     if (a.state === 'data') { rawDoc = a.value; reg = B.normalizeRegistry(rawDoc); }
     else { reg = B.normalizeRegistry(null); if (a.state !== 'missing') holdRegistry(a); }
+    if (!heldReg) closeStaleHeldNotices();   // its read r1 (M3): read — no held notice stays open (a previous run's included)
     // verify r7 (T1): one token ⇒ one entry — what the load's dedupe dropped is said (once) and in the ledger (each)
     { const dd = rawDoc && rawDoc.dirHosts ? B.dirHostsDeduped(rawDoc.dirHosts) : []; if (dd.length) { dirty = true; for (const x of dd) lineageLedger('deduped-at-load', { dir: x.key, keptAs: x.keptAs }); log.warn?.(`[browser] the launch-host lineage of ${dd.length === 1 ? dd[0].key : dd.length + ' directories'} dropped at load — the same marker token under another path (kept under ${dd.length === 1 ? dd[0].keptAs : 'the newest'})${dd.length === 1 ? '' : ' — each of: ' + dd.slice(0, 3).map((x) => x.key).join(', ') + (dd.length > 3 ? `, … +${dd.length - 3} more` : '')}`); } }
     // lane profile-lock-roll (L1): the hostname that WROTE the file (its last save, by whichever pod) — captured BEFORE this

@@ -220,13 +220,13 @@ console.log('§5 its reads r2 + r3: a create the held registry could not judge O
   const BOOTL = "    if (bootOwed) { bootOwed = false; try { await boot(); } catch (e) { log.warn?.(`[browser] the boot's path after the read failed: ${e && e.message}`); } }\n";
   const BOOTJ = "    if (owedPins.size) { try { judgeOwedPins(); }";
   const FORK = "      if (pin.profileId && pin.origin === 'conversation' && f.fork && f.forkParentKey && f.forkParentKey !== browserKey) out = copyPin(";
-  const KEEP = "    if (owed && owed.restored && pinFor(browserKey)) {", HINT = "pin = pinVerdictForCreate({ facts: f, hint: owed.hint || null,", CAPV = "owed.cap !== undefined ? { value: owed.cap } : {}";
+  const KEEP = "    if (owed && owed.restored && pinFor(browserKey)", HINT = "pin = pinVerdictForCreate({ facts: f, hint: owed.hint || null,", CAPV = "owed.cap !== undefined ? { value: owed.cap } : {}";
   const FORMV = 'formGroups: Array.isArray(owed.formGroups) ? owed.formGroups : null })';
   ok([JUDGE, BOOTL, BOOTJ, FORK, KEEP, HINT, CAPV, FORMV].every((x) => KSRC.split(x).length === 2), 'control setup: the read\'s judge, the owed boot, the boot\'s judge, the fork\'s copy, the restored keep, the hint and the start\'s cap are found once');
   const mut = (pairs, tag) => MJ.load('src/server/browser-keeper.js', pairs.reduce((t, [a, b]) => anchored(t, a, b, tag), KSRC), tag);
   const ox = await owedScene(mut([[JUDGE, ''], [BOOTJ, '    if (false) { try { judgeOwedPins(); }']], 'owed-not-judged'), 'owed-not-judged');
   const of = await owedScene(mut([[FORK, '      if (false) out = copyPin(']], 'owed-no-fork-copy'), 'owed-no-fork-copy');
-  const okp = await owedScene(mut([[KEEP, '    if (false) {']], 'owed-no-restored-keep'), 'owed-no-restored-keep');
+  const okp = await owedScene(mut([[KEEP, '    if (false']], 'owed-no-restored-keep'), 'owed-no-restored-keep');
   const oh = await owedScene(mut([[HINT, 'pin = pinVerdictForCreate({ facts: f, hint: null,'], [CAPV, '{}']], 'owed-no-hint-no-cap'), 'owed-no-hint-no-cap');
   const oa = await owedScene(mut([[JUDGE, ''], [BOOTL, BOOTL + JUDGE]], 'owed-after-boot'), 'owed-after-boot');
   const of2 = await owedScene(mut([[FORMV, 'formGroups: null })']], 'owed-no-form'), 'owed-no-form');
@@ -310,7 +310,7 @@ console.log('§7 round wm6qxcqcw (主开发 03:35Z): the hold is TOLD once in Fo
   const mk = (Mod, d, H, extra = {}) => Mod.create({ dataDir: d, homeDir: H, env: () => ({ HOME: H }), serverSetting: () => undefined, install: false, log: quiet, unreadRetry: { firstMs: 15, maxMs: 30 }, ...extra });
   const dirOf = (name) => { const d = path.join(D, name), H = path.join(d, 'home'); fs.mkdirSync(H, { recursive: true }); return { d, H, F: path.join(d, 'browser-profiles.json') }; };
   // (MUST) ONE For-you item when the hold begins — origin browser, under «Agent browser», its words keyed (zh / ja) — resolved at the read
-  const NOTICE_KEY = "VibeSpace cannot read {file}, the file of your browser profiles, right now — so the agent browsers wait. Nothing is lost and nothing is written over it; VibeSpace reads it again by itself.";
+  const NOTICE_KEY = "VibeSpace cannot read {file}, the file of your browser profiles, right now ({code}) — so the agent browsers wait. Nothing is written over it, and VibeSpace reads it again by itself.";
   const noticeScene = async (Mod, name) => {
     const { d, H, F } = dirOf(name); plant(F, BODY);
     const items = [], done = [];
@@ -332,6 +332,27 @@ console.log('§7 round wm6qxcqcw (主开发 03:35Z): the hold is TOLD once in Fo
     'the hold is told ONCE in For you (origin browser, under «Agent browser», its words keyed with the file named) — and that item is resolved at the read', n1);
   ok(n1x.filed === 0 && n1x.done === '', 'CONTROL (no filing, no resolving, in a copy): the hold tells the person nothing — every agent browser stops unsaid — RED', n1x);
   for (const lang of ['zh', 'ja']) ok(fs.readFileSync(path.join(ROOT, `src/lib/i18n-${lang}.js`), 'utf8').includes(JSON.stringify(NOTICE_KEY) + ':'), `the notice has its ${lang} row`);
+  // its read r1 (M3): a run that STOPPED while held left its notice open — the next start that reads the file closes it; one that is
+  // held again takes it as this hold's (no second item), and closes it at the read
+  const staleScene = async (Mod, name, { held }) => {
+    const { d, H, F } = dirOf(name); if (held) plant(F, BODY); else fs.writeFileSync(F, BODY);
+    const items = [{ id: 'it-old', status: 'open', i18n: { text: { key: NOTICE_KEY, params: { file: 'browser-profiles.json' } } } }], added = [];
+    const userTodos = { forSession: () => items, get: (id) => items.find((i) => i.id === id) || null, add: (sk, o) => { added.push(o); const it = { id: 'it-new' + added.length, status: 'open', ...o }; items.push(it); return it; }, setStatus: (id, st) => { const it = items.find((i) => i.id === id); if (it) it.status = st; } };
+    const k = mk(Mod, d, H, { userTodos });
+    const h = k.held();
+    if (held) { let lifts = 0; k.onReadAgain(() => { lifts++; }); await k.boot().catch(() => null); await lift(k, F, BODY, () => lifts > 0); }
+    const out = { held: h, oldStatus: items[0].status, added: added.length };
+    try { k.shutdown(); } catch { }
+    return out;
+  };
+  const STALE = '    if (!heldReg) closeStaleHeldNotices();', REUSE = '    const had = openHeldNotices()[0]; if (had) { heldItemId = had.id; return; }';
+  ok(KSRC.split(STALE).length === 2 && KSRC.split(REUSE).length === 2, 'control setup: the stale notice\'s close and its reuse are found once');
+  const st1 = await staleScene(require(path.join(ROOT, 'src/server/browser-keeper.js')), 'stale-read', { held: false });
+  const st2 = await staleScene(require(path.join(ROOT, 'src/server/browser-keeper.js')), 'stale-held', { held: true });
+  const st1x = await staleScene(MJ.load('src/server/browser-keeper.js', anchored(KSRC, STALE, '', 'stale-close-cut'), 'stale-close-cut'), 'stale-read-cut', { held: false });
+  const st2x = await staleScene(MJ.load('src/server/browser-keeper.js', anchored(KSRC, REUSE, '', 'stale-reuse-cut'), 'stale-reuse-cut'), 'stale-held-cut', { held: true });
+  ok(!st1.held && st1.oldStatus === 'done' && st1.added === 0 && st2.held && st2.added === 0 && st2.oldStatus === 'done', 'a notice a previous run left open: closed by a start that reads the file; taken as this hold\'s by a start held again (no second item) and closed at the read', { st1, st2 });
+  ok(st1x.oldStatus === 'open' && st2x.added === 1, 'CONTROLS: without the close it stays open over a registry that reads (the person told a hold that is over); without the reuse a second item is filed — each RED', { st1x, st2x });
   // (1) a RESUME's explicit pick while held, then a restart still held: the restored owe is NEWER than the file's pin — judged, never the
   //     file's older pin kept over the person's newer pick; (2) a restored FORK is judged after its owed parent
   const PA = 'bk-00004444', FK = 'bk-00005555', KX = 'bk-00006666';
