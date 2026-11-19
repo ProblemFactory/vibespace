@@ -59,6 +59,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { anchored } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const M = require('../src/job-model.js');
@@ -1205,9 +1206,11 @@ leg('§3 REAL ㊺ A STOP GOES ONCE — a process that cleans up 0.3 s on its fir
   const rungs = [...(realOf('prlimit') ? ['rlimit-data'] : []), ...(userSystemd ? ['cgroup'] : [])];
   if (!rungs.length) { skip++; ok.say('  - SKIP the stop-goes-once leg: neither prlimit nor a user systemd here'); return; }
   const SIGPROC = (f) => `const fs=require('fs'),f=${JSON.stringify(f)},log=(s)=>fs.appendFileSync(f,Date.now()+' '+s+'\\n');let g=false;for(const s of ['SIGINT','SIGTERM','SIGHUP'])process.on(s,()=>{log(s);if(g){log('hard-exit');process.exit(143)}g=true;setInterval(()=>{if(fs.existsSync(f+'.release')){log('graceful-exit');process.exit(0)}},10)});console.log('ready');setInterval(()=>{},1000)`;
-  const one = async (rung, how) => {
+  const one = async (rung, how, { stall = 0, release = 'wrapper' } = {}) => {
     const dir = scratch(), f = path.join(dir, 'proc.signals'), calls = path.join(dir, 'systemctl.calls'), prog = path.join(dir, 'proc.js');
     fs.writeFileSync(prog, SIGPROC(f));
+    // B-c865 control: a wrapper slow to handle its stop (a stall IN the window — never load): its handler runs `stall` ms late
+    if (stall) fs.writeFileSync(path.join(dir, 'bin', 'job-wrapper.js'), anchored(WRAPPER_SRC, 'function onStop(sig, at, by) {\n  if (stopping) return;\n', `function onStop(sig, at, by) {\n  if (stopping) return;\n  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${Number(stall)});\n`, 'B-c865 control: a wrapper slow to handle its stop'));
     if (rung === 'cgroup') fake(dir, 'systemctl', `printf '%s\\n' "$*" >> ${calls}\nexec ${CTL} "$@"`);
     // round 11: ITS CLEANUP ENDS ON THE LEG'S WORD (f.release), never 0.3 s after its signal — the second stop lands while it
     // provably cleans up (the runner's load sent it after the cleanup: the wrapper gone, the leg's own kill threw ESRCH); the
@@ -1221,7 +1224,11 @@ leg('§3 REAL ㊺ A STOP GOES ONCE — a process that cleans up 0.3 s on its fir
     const stopLines = () => { try { return (fs.readFileSync(lastRun(j).log, 'utf8').match(/\[job-wrapper\] stop: /g) || []).length; } catch { return 0; } };
     const wrapperOnly = (sig) => { if (E._verifyAlive(st)) process.kill(st.pid, sig); }; // the wrapper ALONE, its identity proven (it waits on the cleanup)
     let second = null;
-    if (how === 'twice') { E.stop(j); await until(() => heard().length, 30000, 5); second = E.stop(j); } // the second press: the engine's answer, nothing sent
+    // B-c865 (red on master .371 / .388, green on retry): the cleanup is released once the WRAPPER has handled the stop (its own
+    // «stop:» line), never the moment the main heard the group's signal — on a loaded runner the wrapper's handler ran after the
+    // main had ended: its main read gone (mainBy null, .371), its scope already removed and the manager's kill asked of it (.388);
+    // the main heard ONE SIGTERM and ended 0 every time (`release: 'main'` = the leg's old order, the control's)
+    if (how === 'twice') { E.stop(j); await until(() => heard().length && (release === 'main' || stopLines() > 0), 30000, 5); second = E.stop(j); } // the second press: the engine's answer, nothing sent
     else if (how === 'agent-person') { wrapperOnly('SIGINT'); await until(() => heard().length, 30000, 5); E.stop(j); await sleep(500); } // the engine signals the wrapper alone; a stop already heard writes no line — a floor for its handler, never a ceiling
     else { await until(() => heard().length, 30000, 5); if (how === 'drain-engine') E.stop(j); else wrapperOnly('SIGTERM'); await until(() => stopLines() > 0, 30000, 5); } // mid-cleanup; the wrapper's own «stop:» line — it heard the second stop
     fs.writeFileSync(f + '.release', ''); // the cleanup ends
@@ -1235,6 +1242,14 @@ leg('§3 REAL ㊺ A STOP GOES ONCE — a process that cleans up 0.3 s on its fir
   };
   const R = await Promise.all(rungs.flatMap((r) => ['twice', 'agent-person', 'drain-engine', 'drain-alone'].map((how) => one(r, how))));
   const want = { twice: ['SIGTERM', 'engine', 'engine'], 'agent-person': ['SIGINT', 'signal', 'wrapper'], 'drain-engine': ['SIGTERM', 'alone', 'ended'], 'drain-alone': ['SIGTERM', 'signal', 'ended'] };
+  { // B-c865: THE SAME STOP WITH A WRAPPER 0.6 s LATE TO HANDLE IT — the leg's order holds (green); the old order is the runner's red
+    const rc = rungs[rungs.length - 1]; // the cgroup rung where there is one (its scope is what the .388 red asked to kill)
+    const [slowNew, slowOld] = await Promise.all([one(rc, 'twice', { stall: 600 }), one(rc, 'twice', { stall: 600, release: 'main' })]);
+    ok(slowNew.heard === 'SIGTERM,graceful-exit' && slowNew.code === 0 && slowNew.stopBy === 'engine' && slowNew.mainBy === 'engine' && !slowNew.scopeKills,
+      `B-c865: ${slowNew.rung}, Stop pressed twice with a wrapper 0.6 s late to handle it — the release waits for its «stop:» line: heard ${slowNew.heard}, mainBy ${slowNew.mainBy}, scope-wide kills ${slowNew.scopeKills}`, slowNew);
+    ok(slowOld.heard === 'SIGTERM,graceful-exit' && slowOld.code === 0 && (slowOld.mainBy !== 'engine' || slowOld.scopeKills > 0),
+      `CONTROL (B-c865): the leg's OLD order (released the moment the main heard the signal) against that slow wrapper is the runner's red — the main ended before the wrapper read it: mainBy ${slowOld.mainBy}, scope-wide kills ${slowOld.scopeKills}; still ONE SIGTERM, code 0 (no second signal in the product)`, slowOld);
+  }
   for (const r of R) {
     const [sig, by, main] = want[r.how];
     ok(r.heard === `${sig},graceful-exit` && r.code === 0 && r.stopBy === by && r.mainBy === main && !r.scopeKills && (r.how !== 'twice' || /^already stopping \(\d+ s left\)$/.test(r.already || '')),
