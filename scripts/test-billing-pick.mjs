@@ -346,6 +346,29 @@ const merged = (o, x) => !o.why && o.at === path.join(BUF, `${x.id}.settings`) &
   ok(WF.WRAPPER_FILE_KINDS.includes('settings') && !fs.existsSync(at), 'B-e7c0 the end paths take the merged file: removeWrapperFiles (the kill, the exit teardown, a duplicate retired at boot) removes <id>.settings', at);
 }
 
+// B-e7c0 OWED (主开发 09:30Z): the person's OWN file over the bound (SETTINGS_READ_MAX) and one whose read FAILS are unread
+// themselves — never merged: set aside, said, no merged file written
+{
+  helperOn(true);
+  const settingsFiles = () => new Set(fs.readdirSync(BUF).filter((n) => n.endsWith('.settings')));
+  const scene = async (what, prep, undo = () => { }) => {
+    const before = settingsFiles();
+    prep();
+    let x = null;
+    try { x = await drive(wsCreate, { accountId: 'sub-a1', extraArgs: ['--settings', OWN] }); } finally { undo(); }
+    const l = lineOf(x), written = [...settingsFiles()].filter((n) => !before.has(n));
+    return { what, ok: !l.why && neutralized(l) && !l.line.includes(OWN) && !l.line.join(' ').includes(OWN_MARK) && written.length === 0 && saidKind(x, 'billing') + saidKind(x, 'billingUnread') === 1, written, notes: x.notices.map((n) => n.key), settings: l.settings || l.why };
+  };
+  const over = await scene('over the bound', () => fs.writeFileSync(OWN, JSON.stringify({ ...PERSON, pad: 'x'.repeat(BP.SETTINGS_READ_MAX) })));
+  ok(over.ok, 'B-e7c0 a person\'s own settings file OVER the read bound (SETTINGS_READ_MAX): unread, never merged — the file set aside, said, no merged file written', over);
+  if (typeof process.getuid === 'function' && process.getuid() === 0) skip('B-e7c0 an own file whose read fails (run as root, a chmod cannot refuse)');
+  else {
+    const failed = await scene('a read that fails', () => { fs.writeFileSync(OWN, JSON.stringify(PERSON)); fs.chmodSync(OWN, 0o000); }, () => fs.chmodSync(OWN, 0o600));
+    ok(failed.ok, 'B-e7c0 a person\'s own settings file whose READ FAILS (no permission): unread, never merged — set aside, said, no merged file written', failed);
+  }
+  fs.writeFileSync(OWN, JSON.stringify(PERSON));
+}
+
 console.log('— ③ the DAEMON PIPE road (agentd.localPipeSessions)');
 {
   const x = await drive(wsCreate, { accountId: 'sub-a1' }, { pipe: true });

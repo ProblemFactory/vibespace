@@ -41,6 +41,8 @@
  *     (and it names no helper itself), it is MERGED instead — a copy with every route / credential name of the tree's own list
  *     and the cloud credential commands dropped (said by name), the override applied last, written to <buffers>/<id>.settings
  *     (0600). A paired machine, a provider's start, a file that is no JSON object or names a helper itself: set aside, as above.
+ *     The machine's fact UNREAD (null) with the person's own file read whole: MERGED too — billing still wins (the override last,
+ *     every route / credential name dropped; ruled 2026-11-19 09:30Z); an own file over SETTINGS_READ_MAX or unreadable is never merged.
  */
 const { namesHelper, helperFactOfText, SETTINGS_READ_MAX } = require('./helper-fact.js');   // B-bc9f: ONE rule with a paired machine's probe
 const ROUTE = require('./claude-route-names.js');
