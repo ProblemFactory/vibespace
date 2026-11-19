@@ -282,6 +282,7 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
     // the base's road (no id) ⇒ no side file read ⇒ [] (the row: «empty on every road»)
     {
       const bdir = path.join(os.homedir(), 'buf'), wid = 'w-b952b', ctid = 'eeeeeeee-0000-4000-8000-0000000b952b';
+      const { anchored } = await import('./scratch.mjs');   // B-0d3e: each red control below throws by name when its product line moves
       fs.mkdirSync(bdir, { recursive: true });
       fs.writeFileSync(path.join(bdir, wid + '.json'), JSON.stringify({ plan: [{ step: 'Read the failing test', status: 'completed' }, { step: 'Write the cure', status: 'inProgress' }, { step: 'Gate it', status: 'pending' }] }));
       const liveS = { backend: 'codex', mode: 'chat', backendSessionId: ctid, cwd, buffer: '' };
@@ -289,7 +290,7 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
       const stepsOf = async (TS) => ((await TS.createTranscriptService({ activeSessions: new Map([[wid, liveS]]), createSessionMessages: mk2, hosts: null }).taskState({ backend: 'codex', sessionId: ctid, cwd })) || {}).todos || [];
       const CALL = 'createSessionMessages(sessionShape(r, live), liveIdOf(live))';
       const got = await stepsOf({ createTranscriptService });
-      const noId = mutantCopies('b952b-no-id', REPO).load('src/transcript-service.js', tsSrc.replace(CALL, () => 'createSessionMessages(sessionShape(r, live))'), 'no-id');
+      const noId = mutantCopies('b952b-no-id', REPO).load('src/transcript-service.js', anchored(tsSrc, CALL, 'createSessionMessages(sessionShape(r, live))', 'no-id'), 'no-id');
       const base = await stepsOf(noId);
       ok(tsSrc.split(CALL).length === 2 && got.length === 3 && got.map((t) => t.status).join(',') === 'completed,in_progress,pending' && got[1].content === 'Write the cure' && base.length === 0,
         `B-952b: a LIVE codex conversation's «Agent steps» (GET /api/session-todos) are its wrapper's plan — ${got.length} steps, their states mapped; RED CONTROL (the reader without the session's id, the base): ${base.length} steps`, { got, base });
@@ -311,7 +312,7 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
       const stepOfFork = async (TS) => (((await TS.createTranscriptService({ activeSessions: twins(), createSessionMessages: mk2, hosts: null }).taskState({ backend: 'codex', sessionId: ctid, cwd, webuiId: fid })) || {}).todos || [])[0]?.content || null;
       const LOOK = "    if (r.webuiId) { const own = activeSessions.get(r.webuiId); if (sameConv(own)) return own; }\n";
       const forkNow = await stepOfFork({ createTranscriptService });
-      const forkBase = tsSrc.split(LOOK).length === 2 ? await stepOfFork(mutantCopies('b952b-first-match', REPO).load('src/transcript-service.js', tsSrc.replace(LOOK, ''), 'first-match')) : 'no anchor';
+      const forkBase = await stepOfFork(mutantCopies('b952b-first-match', REPO).load('src/transcript-service.js', anchored(tsSrc, LOOK, '', 'first-match'), 'first-match'));
       ok(forkNow === 'The fork step' && forkBase === 'The parent step', `B-952b smalls: a codex FORK still on its parent's thread id — the window's own id answers ITS plan («${forkNow}»); RED CONTROL (the first match): «${forkBase}»`, { forkNow, forkBase });
       // …and THE MACHINE THE REQUEST NAMES: a conversation live on m1 and here, on one thread id, m1's inserted first; a request for here
       // (no host) answers here's plan. RED CONTROL: the lookup without the machine
@@ -322,7 +323,7 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
       const stepHere = async (TS) => (((await TS.createTranscriptService({ activeSessions: machines(), createSessionMessages: mk2, hosts: null }).taskState({ backend: 'codex', sessionId: ctid, cwd })) || {}).todos || [])[0]?.content || null;
       const HOSTLINE = "      if (!sameConv(s) || (s.host || null) !== (r.host || null)) continue;\n";
       const hereNow = await stepHere({ createTranscriptService });
-      const hereBase = tsSrc.split(HOSTLINE).length === 2 ? await stepHere(mutantCopies('b952b-any-host', REPO).load('src/transcript-service.js', tsSrc.replace(HOSTLINE, '      if (!sameConv(s)) continue;\n'), 'any-host')) : 'no anchor';
+      const hereBase = await stepHere(mutantCopies('b952b-any-host', REPO).load('src/transcript-service.js', anchored(tsSrc, HOSTLINE, '      if (!sameConv(s)) continue;\n', 'any-host'), 'any-host'));
       ok(hereNow === 'Here' && hereBase === 'On m1', `B-952b smalls: the live lookup takes the MACHINE the request names — here's plan («${hereNow}»); RED CONTROL (any machine): «${hereBase}»`, { hereNow, hereBase });
       // (2) THE SIDE FILE IS READ OFF THE LOOP on the route (Properties refetches at every broadcast; the data folder may be a slow mount):
       // no synchronous read of it on the task-state road. RED CONTROL: the reader left to read it synchronously
@@ -330,14 +331,14 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
         try { const svc = TS.createTranscriptService({ activeSessions: new Map([[wid, liveS]]), createSessionMessages: mk2, hosts: null }); await svc.taskState({ backend: 'codex', sessionId: ctid, cwd }); await svc.status({ backend: 'codex', sessionId: ctid, cwd }); } finally { fs.readFileSync = real; } return n; };
       const LOADS = "  const sideFileOf = async (sm) => { if (sm && typeof sm.loadWrapperMeta === 'function') { try { await sm.loadWrapperMeta(); } catch { } } return sm; };\n";
       const offNow = await syncReads({ createTranscriptService });
-      const offBase = tsSrc.split(LOADS).length === 2 ? await syncReads(mutantCopies('b952b-sync-side', REPO).load('src/transcript-service.js', tsSrc.replace(LOADS, '  const sideFileOf = async (sm) => sm;\n'), 'sync-side')) : -1;
+      const offBase = await syncReads(mutantCopies('b952b-sync-side', REPO).load('src/transcript-service.js', anchored(tsSrc, LOADS, '  const sideFileOf = async (sm) => sm;\n', 'sync-side'), 'sync-side'));
       ok(offNow === 0 && offBase === 2, `B-952b smalls: the side file is read OFF the loop on the task-state AND the status road (${offNow} synchronous reads); RED CONTROL (no async load): ${offBase}`, { offNow, offBase });
       // (3) THE STATUS ROAD ITSELF: a live codex conversation's status() states the model its side file holds. RED CONTROL: no id ⇒ not it
       fs.writeFileSync(path.join(bdir, wid + '.json'), JSON.stringify({ model: 'gpt-stand-in-b952b', plan: [] }));
       const modelOf = async (TS) => ((await TS.createTranscriptService({ activeSessions: new Map([[wid, liveS]]), createSessionMessages: mk2, hosts: null }).status({ backend: 'codex', sessionId: ctid, cwd })) || {}).chatStatus?.model || '';
       const ROAD2 = 'createSessionMessages(sessionShape(r, session), liveIdOf(session))';
       const mNow = await modelOf({ createTranscriptService });
-      const mBase = tsSrc.split(ROAD2).length === 2 ? await modelOf(mutantCopies('b952b-status-no-id', REPO).load('src/transcript-service.js', tsSrc.replace(ROAD2, () => 'createSessionMessages(sessionShape(r, session))'), 'status-no-id')) : 'no anchor';   // stale-pins: kept (the red control rebuilds the road without the id)
+      const mBase = await modelOf(mutantCopies('b952b-status-no-id', REPO).load('src/transcript-service.js', anchored(tsSrc, ROAD2, 'createSessionMessages(sessionShape(r, session))', 'status-no-id'), 'status-no-id'));   // stale-pins: kept (the red control rebuilds the road without the id)
       ok(mNow === 'gpt-stand-in-b952b' && mBase !== 'gpt-stand-in-b952b', `B-952b smalls: the STATUS road — a live codex conversation's status states the model its side file holds («${mNow}»); RED CONTROL (no id): «${mBase}»`, { mNow, mBase });
     }
     // THE ROUTE + THE SERVICE (its read, S1): the route hands every harness its machine; the task-state road asks that machine
