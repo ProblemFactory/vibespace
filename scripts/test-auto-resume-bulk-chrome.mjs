@@ -14,10 +14,11 @@
 // the measured share is driven against the real gather in test-bulk-resume-cost §6 /
 // test-auto-resume-loop §8.
 //   desk 1100 (zh) · four conversations; three hit the wall / the overload ⇒ each card wears its mark
-//     («因用量上限停止 · 上限已重置» / «模型过载 · 停于 HH:MM») with «自动继续：关» beside it; the normal one none;
-//     the filter row's «因用量上限/过载停止 (3)» narrows the list to them and back; a press on one toggle ⇒ «自动继续：开»
-//     (the server + the resume carrier agree); Settings → the auto-resume row: «将开启 3 个会话；已开启 1 个» ⇒
-//     «对所有会话开启自动继续» ⇒ «将开启 0 个会话；已开启 4 个» (every card's toggle on, every carrier written) ⇒
+//     («因用量上限停止 · 上限已重置» / «模型过载 · 停于 HH:MM»), the walled ones with «自动继续：关» beside it (an overload has
+//     no auto-resume to switch: no toggle); the normal one none; the filter row's «因用量上限/过载停止 (3)» narrows the list
+//     to them and back; a press on one toggle ⇒ «自动继续：开 · 这次上限不等待» (its stated reset has passed: on, and waiting
+//     for nothing — the server + the resume carrier agree); Settings → the auto-resume row: «将开启 3 个会话；已开启 1 个» ⇒
+//     «对所有会话开启自动继续» ⇒ «将开启 0 个会话；已开启 4 个» (every walled card's toggle on, every carrier written) ⇒
 //     «全部关闭»; the passive cost line; «恢复所有因用量上限/过载停止的会话 (3)» ⇒ the confirm says the cost FIRST
 //     («≈ $6.12（按 opus-5-5 缓存写入价 $5/M，冷读 1.20 M tokens）» — a cold read is priced as cache WRITES, U2's cost cure, «本机自己的登录：无法估算：本窗口还没有实测比例» —
 //     never a made-up percent) beside «全部恢复 (3)»
@@ -182,7 +183,7 @@ try {
   const press = async (S, ev, sel) => { await centre(ev, sel); return doorOf(S, ev)(sel); };
   const tap = async (S, ev, sel) => { await centre(ev, sel); return doorOf(S, ev)(sel, { touch: true }); };   // centre() scrolls it into view first
   const cardOf = (name) => `[...document.querySelectorAll('#sidebar .session-item-card')].find((c) => (c.querySelector('.session-card-name') || {}).textContent === ${JSON.stringify(name)})`;
-  const marks = `(() => Object.fromEntries(${JSON.stringify(NAMES)}.map((n) => { const c = ${cardOf('__N__').replace('"__N__"', 'n')}; if (!c) return [n, null]; const m = c.querySelector('.sess-stopped-chip'); const t = c.querySelector('.sess-stopped-autoresume'); const tx = m && m.querySelector('.chip-text'); const cr = c.getBoundingClientRect(), xr = tx ? tx.getBoundingClientRect() : null; return [n, { card: true, mark: tx ? tx.textContent : '', tip: m ? m.dataset.tip || '' : '', toggle: t ? t.querySelector('.chip-text').textContent : '', visible: !!xr && xr.width > 20 && getComputedStyle(tx).display !== 'none' && tx.scrollWidth <= tx.clientWidth + 1, inside: !!xr && xr.left >= cr.left && xr.right <= cr.right + 1, toggleIn: !!t && t.getBoundingClientRect().right <= cr.right + 1 }]; })))()`;
+  const marks = `(() => Object.fromEntries(${JSON.stringify(NAMES)}.map((n) => { const c = ${cardOf('__N__').replace('"__N__"', 'n')}; if (!c) return [n, null]; const m = c.querySelector('.sess-stopped-chip'); const t = c.querySelector('.sess-stopped-autoresume'); const tx = m && m.querySelector('.chip-text'); const cr = c.getBoundingClientRect(), xr = tx ? tx.getBoundingClientRect() : null; return [n, { card: true, mark: tx ? tx.textContent : '', tip: m ? m.dataset.tip || '' : '', toggle: t ? t.querySelector('.chip-text').textContent : '', pressed: t ? t.getAttribute('aria-pressed') : null, visible: !!xr && xr.width > 20 && getComputedStyle(tx).display !== 'none' && tx.scrollWidth <= tx.clientWidth + 1, inside: !!xr && xr.left >= cr.left && xr.right <= cr.right + 1, toggleIn: !!t && t.getBoundingClientRect().right <= cr.right + 1 }]; })))()`;
   const pill = `(() => { const b = document.querySelector('#stopped-quick-tabs .stopped-quick-tab'); return b ? { text: b.textContent, active: b.classList.contains('active'), w: Math.round(b.getBoundingClientRect().width) } : null; })()`;
   const listed = `[...document.querySelectorAll('#sidebar .session-item-card .session-card-name')].map((n) => n.textContent).filter((n) => ${JSON.stringify(NAMES)}.includes(n)).sort()`;
   const dialogFacts = `(() => { const o = document.getElementById('resume-stopped-dialog'); if (!o) return null; const d = o.querySelector('.dialog').getBoundingClientRect();
@@ -220,12 +221,19 @@ try {
   await press(D.S, D.ev, '#stopped-quick-tabs .stopped-quick-tab');
   const all4 = await until(() => D.ev(`(() => { const l = ${listed}; return l.length === 4 ? l : null; })()`), 5000, 150);
   check('desk: …a second press shows everything again', !!all4, await D.ev(listed));
-  // one card's toggle
+  // one card's toggle — THE WORDS FOR THIS STOP (the hosted red of 2.369.411's prep run 2, placed by lane lg-recovery): the
+  // fixture's wall states a reset two minutes BEFORE the stop (resetsAt now − 120 s; the mark says «上限已重置»), so turning
+  // auto-continue on arms nothing (auto-resume.js setEnabled arms only a reset still ahead) and the card says it is on but not
+  // waiting for this limit (the card never promises a continue that cannot happen — stopped-by.js stoppedChipWords
+  // with waiting false, on the press and on the list's restatement alike); an overload has no auto-resume to switch (liveFactOf:
+  // autoResume null), so its card draws no toggle. These legs pinned the bare «自动继续：开» (a TIMED wait's words) and a toggle on
+  // the overloaded card, which the card has not drawn on this train since U1: red on every machine, first run on the hosted shard.
+  const ON_PASSED = '自动继续：开 · 这次上限不等待';
   await press(D.S, D.ev, `JS:${cardOf(NAMES[0])}.querySelector('.sess-stopped-autoresume')`);
-  const tg1 = await until(() => D.ev(`(() => { const m = ${marks}; return m[${JSON.stringify(NAMES[0])}].toggle === '自动继续：开' ? m[${JSON.stringify(NAMES[0])}] : null; })()`), 5000, 150);
+  const tg1 = await until(() => D.ev(`(() => { const m = ${marks}; return m[${JSON.stringify(NAMES[0])}].toggle === ${JSON.stringify(ON_PASSED)} && m[${JSON.stringify(NAMES[0])}].pressed === 'true' ? m[${JSON.stringify(NAMES[0])}] : null; })()`), 5000, 150);
   const srvOn = await until(() => D.ev(`fetch('/api/sessions/stopped').then((r) => r.json()).then((j) => j.counts && j.counts.on === 1 ? j.counts : null)`), 8000, 250);
   const carrierA = await D.ev(`(app.sidebar.getSessionConfig((app.sidebar._allSessions || []).find((s) => s.backendSessionId === ${JSON.stringify(SIDS[0])})) || {}).autoResume === true`);
-  check('desk: a press on «自动继续：关» ⇒ «自动继续：开» — the server agrees (1 on) and the resume carrier is written', !!tg1 && !!srvOn && srvOn.total === 4 && carrierA === true, { tg1, srvOn, carrierA });
+  check(`desk: a press on «自动继续：关» ⇒ «${ON_PASSED}» (pressed; its reset has passed — on, waiting for nothing) — the server agrees (1 on) and the resume carrier is written`, !!tg1 && !!srvOn && srvOn.total === 4 && carrierA === true, { tg1, srvOn, carrierA });
 
   // Settings → the auto-resume row
   await D.ev(`(app._settingsUI.open({ category: 'Spending' }), true)`);
@@ -238,9 +246,9 @@ try {
   const afterOn = await until(() => D.ev(`(() => { const c = (document.querySelector('.auto-resume-bulk-counts') || {}).textContent; return c === '将开启 0 个会话；已开启 4 个' ? c : null; })()`), 10000, 200);
   const toastOn = await until(() => D.ev(`window.__toastTexts().find((x) => /开启了自动继续/.test(x)) || null`), 5000, 150);
   check(`desk: «对所有会话开启自动继续» ⇒ «${afterOn}», the toast «${toastOn}»`, afterOn === '将开启 0 个会话；已开启 4 个' && /^又为 3 个会话开启了自动继续✕?$/.test(String(toastOn)), { afterOn, toastOn, toasts: await D.ev('window.__toastTexts()') });
-  const togglesOn = await until(() => D.ev(`(() => { const m = ${marks}; return [0, 1, 2].every((k) => m[${JSON.stringify(NAMES)}[k]].toggle === '自动继续：开') ? m : null; })()`), 8000, 200);
+  const togglesOn = await until(() => D.ev(`(() => { const m = ${marks}; return [0, 1].every((k) => m[${JSON.stringify(NAMES)}[k]].toggle === ${JSON.stringify(ON_PASSED)} && m[${JSON.stringify(NAMES)}[k]].pressed === 'true') && m[${JSON.stringify(NAMES[2])}].toggle === '' && m[${JSON.stringify(NAMES[3])}].toggle === '' ? m : null; })()`), 8000, 200);
   const carriers = await D.ev(`${JSON.stringify(SIDS)}.map((sid) => (app.sidebar.getSessionConfig((app.sidebar._allSessions || []).find((s) => s.backendSessionId === sid)) || {}).autoResume)`);
-  check('desk: every mark\'s toggle now reads «自动继续：开» (one broadcast) and every resume carrier says on', !!togglesOn && carriers.every((x) => x === true), { carriers, m: togglesOn || await D.ev(marks) });
+  check(`desk: every walled card's toggle now reads «${ON_PASSED}», pressed (one broadcast); the overloaded and the normal card draw none; every resume carrier says on`, !!togglesOn && carriers.every((x) => x === true), { carriers, m: togglesOn || await D.ev(marks) });
   await press(D.S, D.ev, '.auto-resume-bulk .auto-resume-all-off');
   const afterOff = await until(() => D.ev(`(() => { const c = (document.querySelector('.auto-resume-bulk-counts') || {}).textContent; return c === '将开启 4 个会话；已开启 0 个' ? c : null; })()`), 10000, 200);
   check(`desk: «全部关闭» ⇒ «${afterOff}»`, afterOff === '将开启 4 个会话；已开启 0 个');

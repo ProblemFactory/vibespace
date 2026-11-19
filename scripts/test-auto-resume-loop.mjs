@@ -1388,7 +1388,8 @@ if (!probe) {
 
 // ── §8 THE BULK RESUME (lane auto-resume-bulk, .349 — a fleet power user's dozens of wall-stopped sessions) ─────────
 // «恢复所有因用量/过载停止的会话»: ONE owner press, N billed continues. Driven through the REAL module and the REAL
-// spend guard (scratch ledger) over stub channels: ONE authorization names the whole batch, the continues go out PACED
+// spend guard (scratch ledger) over stub channels: ONE authorization names the whole batch at the press and each continue is
+// asked again on its own before its deliver (the U2 cure's law 1), the continues go out PACED
 // and earliest-stop-first through the harness's verb, a wall that has not reset is SKIPPED and said, the pre-fire gate
 // decides each one at its moment. THE OWNER'S RULING 2026-11-18 (B): the press is the person's own act — ATTENDED: no
 // hold, no stamp, the account's room untouched. A batch no door pressed is the gated twin: a refusal resumes NONE
@@ -1409,6 +1410,7 @@ if (!probe) {
     const active = new Map(Object.entries(sessions));
     const sent = [], cleared = [];
     let batchCalls = 0, batchItems = 0, listChanges = 0;
+    const calls = [];   // EVERY ask of the authorizer: which items, how many, for which reason (the press's, then each continue's own)
     const ar = mod.create({
       dataDir: dir, activeSessions: active, serverSetting: () => undefined, log: () => { },
       resumeVerb: () => ({ form: 'message', deliver: (session, text, d) => d.sendChatInput(session, text) }),
@@ -1416,7 +1418,7 @@ if (!probe) {
       fireIdentity: (id, s) => (s && s._slot ? { key: s._slot, name: s._slot } : null),
       beforeFire: async (id, s) => { if (s._onGate) s._onGate.call(s, ar); return s._gate !== false; },
       wallVerdict: (id, s) => s._verdict || null,
-      authorizeSpendBatch: authorize === 'absent' ? null : (items, reason) => { batchCalls++; batchItems = items.length; if (authorize) return authorize(items); return guard.authorizeBatch({ reason, items: items.map((it) => ({ session: it.session, sessionId: it.id, identity: it.identity })) }); },
+      authorizeSpendBatch: authorize === 'absent' ? null : (items, reason) => { batchCalls++; batchItems = items.length; calls.push({ ids: items.map((it) => it.id).join(), n: items.length, reason }); if (authorize) return authorize(items); return guard.authorizeBatch({ reason, items: items.map((it) => ({ session: it.session, sessionId: it.id, identity: it.identity })) }); },
       noteBatchSpend: (id, s, identity, hold, reason) => guard.note({ reason, identity, hold }),
       releaseSpend: (id, s, hold) => guard.release({ hold }),
       clearStopped: (id, s) => { s._stoppedBy = null; cleared.push(id); },
@@ -1426,7 +1428,7 @@ if (!probe) {
     const settle = async (rec) => { for (let i = 0; i < 200 && rec && !rec.done; i++) { await new Promise((r) => setTimeout(r, 15)); rec = ar.batchStatus(rec.batchId); } return rec; };
     const stamps = () => { const b = guard.snapshot().budget; return Object.values(b.identities || {}).flat().filter((x) => x && (x.reason === 'bulk-resume' || x.reason === 'auto-resume')).length; };
     const tally = () => (guard.snapshot().budget.attended || []).filter((x) => x && x.reason === 'bulk-resume').length;
-    return { ar, guard, active, sent, cleared, settle, stamps, tally, counts: () => ({ batchCalls, batchItems, listChanges }) };
+    return { ar, guard, active, sent, cleared, settle, stamps, tally, counts: () => ({ batchCalls, batchItems, listChanges, calls }) };
   };
   const S = (slot, stoppedBy, extra = {}) => ({ backend: 'claude', mode: 'chat', name: extra.name || slot, _slot: slot, _stoppedBy: stoppedBy, pty: {}, _isStreaming: false, ...extra });
   const quota = (agoH, resetIn = -0.1) => ({ kind: 'quota', at: NOW0 - agoH * H, resetsAt: NOW0 + resetIn * H, said: "You've hit your limit" });
@@ -1445,11 +1447,18 @@ if (!probe) {
   ok('§8 a SECOND press while it runs is refused by name (in-flight) — never a second batch', w.ar.resumeBatch().why === 'in-flight');
   rec = await w.settle(rec);
   const c = w.counts();
-  ok('§8 ONE authorization for the whole batch (one call, naming all 4)', c.batchCalls === 1 && c.batchItems === 4, JSON.stringify(c));
+  // THE ASKS AS THEY ARE NOW (the hosted red of 2.369.411's prep run 2, placed by 主开发 2026-11-19 00:53Z): the U2 cure asks the
+  // authorizer AGAIN before EACH continue (主开发's law 1 — what the account became while the batch ran), so the press's ONE
+  // authorization is followed by one single-item ask per continue that reaches its deliver; this leg pinned the old one-call shape.
+  // gateNo's gate still reads a wall: it is skipped BEFORE its re-ask, so it is never asked again
+  ok('§8 ONE authorization at the press for the whole batch (all 4, earliest first), then EACH delivered continue asked again on its own (q1, ov, q2 — one item each, the press\'s reason); gateNo, skipped at its gate, is not asked again', w.sent.length === 3 && c.calls.length === 1 + w.sent.length && c.calls[0].ids === 'q1,ov,q2,gateNo' && c.calls[0].n === 4 && c.calls.slice(1).map((x) => x.ids).join('|') === w.sent.map((x) => x.id).join('|') && c.calls.slice(1).every((x) => x.n === 1) && c.calls.every((x) => x.reason === 'bulk-resume'), JSON.stringify(c));
   ok('§8 the continues went out EARLIEST STOP FIRST, one at a time, through the harness verb (q1, ov, q2)', w.sent.map((x) => x.id).join() === 'q1,ov,q2', JSON.stringify(w.sent.map((x) => x.id)));
   const gaps = w.sent.slice(1).map((x, i) => x.at - w.sent[i].at);
   ok(`§8 PACED: every gap ≥ the pace (${PACE} ms) — never a storm`, gaps.length === 2 && gaps.every((g) => g >= PACE - 5), JSON.stringify(gaps));
-  ok('§8 an overload is continued with ITS words, a wall with the usage-limit words', w.sent.find((x) => x.id === 'ov').text === CONTINUE_PROMPT_OVERLOAD && w.sent.find((x) => x.id === 'q1').text === CONTINUE_PROMPT);
+  // a wall's continue is the module's own usage-limit words (bulkPromptFor — a string of the continue's form); CONTINUE_PROMPT is
+  // the object of its PARTS, so the old `=== CONTINUE_PROMPT` was false by construction (red since the leg was written)
+  const QUOTA_WORDS = arMod.bulkPromptFor('quota', null);
+  ok('§8 an overload is continued with ITS words, a wall with the usage-limit words (q1 and q2: the module\'s bulkPromptFor, a continue of the release\'s form; never the overload\'s)', typeof QUOTA_WORDS === 'string' && IS_CONTINUE(QUOTA_WORDS) && QUOTA_WORDS !== CONTINUE_PROMPT_OVERLOAD && w.sent.find((x) => x.id === 'ov').text === CONTINUE_PROMPT_OVERLOAD && w.sent.find((x) => x.id === 'q1').text === QUOTA_WORDS && w.sent.find((x) => x.id === 'q2').text === QUOTA_WORDS, JSON.stringify(w.sent.map((x) => ({ id: x.id, text: String(x.text).slice(0, 90) }))));
   ok('§8 the gate that still reads a wall SKIPS that one and says until when (never retried blindly)', rec.skipped.some((s) => s.id === 'gateNo' && s.why === 'walled' && s.until === NOW0 + H), JSON.stringify(rec.skipped));
   ok('§8 the outcome: resumed 3 · skipped 3 · refused none · nothing undelivered', rec.done && rec.resumed.length === 3 && rec.skipped.length === 3 && !rec.refused && !rec.failed.length, JSON.stringify(rec));
   ok('§8 ATTENDED (the owner\'s ruling 2026-11-18): the 3 delivered continues wrote NO ledger stamp and held nothing — 3 in the attended tally', w.stamps() === 0 && w.tally() === 3 && w.guard.snapshot().holdsOpen === 0, JSON.stringify({ stamps: w.stamps(), tally: w.tally(), open: w.guard.snapshot().holdsOpen }));
