@@ -49,7 +49,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { execFileSync, execFile, spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -822,7 +822,7 @@ console.log('⑧ round 5 (final) — THE SHELL SAYS WHERE; THE SPAWN IS ALWAYS A
   let ctl = null;
   if (NEW_DOOR.test(dsrc)) {
     try {
-      const out = await esbuild.build({ stdin: { contents: dsrc.replace(NEW_DOOR, RELEASE_DOOR), resolveDir: path.join(REPO, 'src/lib'), sourcefile: 'cli-missing-dialog.release.js', loader: 'js' }, bundle: true, format: 'cjs', platform: 'node', write: false, logLevel: 'silent',
+      const out = await esbuild.build({ stdin: { contents: anchored(dsrc, NEW_DOOR, RELEASE_DOOR, 'B-3d6a: the release\'s door in place of the machine door'), resolveDir: path.join(REPO, 'src/lib'), sourcefile: 'cli-missing-dialog.release.js', loader: 'js' }, bundle: true, format: 'cjs', platform: 'node', write: false, logLevel: 'silent',
         plugins: [{ name: 'stubs', setup(b) { b.onResolve({ filter: /^\.\/(utils|i18n)\.js$/ }, (a) => ({ path: path.basename(a.path), namespace: 'stub' })); b.onLoad({ filter: /.*/, namespace: 'stub' }, (a) => ({ contents: stubs[a.path], loader: 'js' })); } }] });
       const f = path.join(DIR, 'cli-missing-dialog.release.cjs'); fs.writeFileSync(f, out.outputFiles[0].text); ctl = require(f);
     } catch { ctl = null; }
