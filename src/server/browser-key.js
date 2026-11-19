@@ -179,6 +179,9 @@ function create({ browserEnv = () => null, keeper = () => null, activeSessions =
     // the spawn's pin ladder: the conversation's own pin (a kept key) > the Task Group default > the instance default
     let pin = { profileId: '', dir: null, origin: 'harness' };
     const k = kp();
+    // the B-f276 remainder (bl-jobs): a HELD profile registry mints NO key — its pin ladder would read the conversation's pick as
+    // «no longer exists» and write the key without it (the person's logins lost to a temporary browser): refused by name, asked again
+    if (k && typeof k.held === 'function' && k.held()) return refused(session, f.id, { ok: false, code: 'store_unread', why: 'store_unread', error: k.heldWords() });
     const groupFacts = { cwd: session.cwd || null, hostId: session.host || null, initialGroupId: session._initialGroupId || null, initialGroupIds: session._initialGroupIds || null };
     // verify r2: A DEFAULT REACHES A CONVERSATION ONLY AT ITS START. The ladder above is read NOW; the spawn read it at
     // the start — and a default the user set to a narrowed profile in between walked in through this key (reproduced).

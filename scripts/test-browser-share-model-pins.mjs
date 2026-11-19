@@ -20,7 +20,7 @@ const ok = (c, n, extra) => { if (typeof n !== 'string') throw new TypeError('ok
 console.log('②a the fork\'s pin (wiring pin)');
 {
     const wsc = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8');
-    ok(/data\.fork && forkParentKey && forkParentKey !== bk\.key\) \{[\s\S]{0,900}copyPin\(forkParentKey, bk\.key\)/.test(wsc), 'WIRING PIN: ws-create copies the parent\'s pin onto a fork\'s new key on the fork branch');
+    ok(/data\.fork && forkParentKey && forkParentKey !== bk\.key(?: && !pin\.held)?\) \{[\s\S]{0,900}copyPin\(forkParentKey, bk\.key\)/.test(wsc), 'WIRING PIN: ws-create copies the parent\'s pin onto a fork\'s new key on the fork branch');
 }
 
 console.log('② U4 the schema\'s browser.maxRunning (source pin)');

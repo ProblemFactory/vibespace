@@ -338,6 +338,7 @@ function create(ctx, slot) {
     const plan = BB.downloadPlan({ version: v, buildsRoot: buildsRoot() });
     if (!plan.ok) throw namedError(plan.code, plan.error);
     ensureLoaded();
+    if (typeof ctx.refuseIfHeld === 'function') ctx.refuseIfHeld('removing a Chrome build');   // the B-f276 remainder: a HELD registry names no profile choosing it, no browser running it
     if (!fs.existsSync(plan.targetDir)) throw namedError('browser_build_missing', `Chrome ${v} is not on this computer`);
     if (!witnessOf(v)) throw namedError('build_not_downloaded', `Chrome ${v} was installed by hand (its folder has no ${BB.WITNESS_FILE}) — VibeSpace removes only the builds it downloaded`);
     if (installState.running && isMine(ROW.id) && cbState.version === v) throw namedError('install_running', `Chrome ${v} is being downloaded right now`);

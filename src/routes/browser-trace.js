@@ -95,7 +95,7 @@ function refuseHost(req, res) {
   return true;
 }
 const STATUS = {
-  'not-found': 404, 'bad-request': 400, 'unsupported-host': 400, unavailable: 503, internal: 500,
+  'not-found': 404, 'bad-request': 400, 'unsupported-host': 400, unavailable: 503, internal: 500, store_unread: 503,   // store_unread: the B-f276 remainder (the profile registry held)
   // B-8b87 round 3: an edit's proxy refusals by name (the creation's route has the same rows) — never a 500 for a refusal
   proxy_cloud_browser: 400, proxy_off_machine: 400, bad_proxy: 400, bad_proxy_credential: 400, bad_proxy_inline_credential: 400,
   // the trace

@@ -615,7 +615,7 @@ let work, solo, shop;
     ok(lr.leftAfterRestart && lr.take && lr.take.adopted === true && lr.marked && lr.adoptedAfterRestart.includes('C0C0000000000000000000000000002D') && lr.closed.includes('tab close C0C0000000000000000000000000002D'),
       'verify r3: the orphan state crosses a RESTART — a conversation that left before it is still marked when he takes its tab after it (its return binds a new tab), and the tab he took is still his after the next restart (his Close closes it)', lr);
     const rsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
-    const rn1 = "    try { rawDoc = JSON.parse(fs.readFileSync(storeFile, 'utf8')); reg = B.normalizeRegistry(rawDoc); }"; // (lane profile-lock-roll verify r7: the raw document is kept for the token dedupe's report)
+    const rn1 = "    if (a.state === 'data') { rawDoc = a.value; reg = B.normalizeRegistry(rawDoc); }"; // (lane profile-lock-roll verify r7: the raw document is kept for the token dedupe's report)
     const rn2 = 'adopted: Array.isArray(r.adopted) ? r.adopted.slice() : [], fresh: null';
     ok(rsrc.includes(rn1) && rsrc.includes(rn2), 'the restart needles (the controls below remove each layer)');
     const Kr1 = M.load('src/server/browser-keeper.js', rsrc.replace(rn1, rn1.replace('; }', '; reg.leftTabs = {}; }')), 'left-not-loaded');

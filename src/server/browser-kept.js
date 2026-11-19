@@ -108,6 +108,7 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
   function liveOf(bk) {
     const k = kp();
     if (!k || typeof k.ephemeralFor !== 'function') return true;
+    if (typeof k.held === 'function' && k.held()) return true;   // the B-f276 remainder: a HELD registry knows no browser — treated live (nothing removed under it)
     try { const e = k.ephemeralFor(bk); return !!(e && (e.live || e.state === 'starting')); } catch { return true; }
   }
   /** Does a LIVE SESSION carry this key right now (its conversation runs, even while its browser is stopped)? Asked at
@@ -461,6 +462,9 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
    */
   function sweep() {
     if (sweeping) return sweeping;
+    // the B-f276 remainder (bl-jobs): while the profile registry is HELD the kept sweep reads nothing as «gone» — no pass (a folder a
+    // named profile holds, a running browser's caches); the keeper's read runs the boot's steps, this boot sweep among them
+    { const k = kp(); if (k && typeof k.held === 'function' && k.held()) { log.warn?.('[browser-kept] the sweep waits — the profile registry is held'); return Promise.resolve({ held: true }); } }
     sweeping = (async () => {
       const t0 = now();
       const s = load();

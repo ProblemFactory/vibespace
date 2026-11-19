@@ -841,8 +841,12 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     bc({ type: 'browser-housekeeping-updated', forgotten: row });
     return { ok: true, removed: r.removed, from: p.dir, to, ledger: row, ...(m ? { machine: m } : {}) };
   }
+  /** the B-f276 remainder (bl-jobs): while the profile registry is HELD (unread) nothing here may read its emptiness as «no profile
+   *  names this folder» — Housekeeping listed EVERY named profile's folder as an orphan, Forget moved it aside, Delete removed it */
+  const refuseIfKeeperHeld = () => { if (keeper && typeof keeper.held === 'function' && keeper.held()) throw namedError('store_unread', keeper.heldWords()); };
   /** `forget` an orphan directory (no record): verdict on the path → rename → ledger. */
   function forgetOrphan(dir) {
+    refuseIfKeeperHeld();
     const v = T.orphanPathVerdict({ dir, base: abBase });
     if (!v.ok) throw namedError(v.code, v.error);
     let real = null; try { real = fs.realpathSync(dir); } catch { throw namedError('not-found', `${dir} does not exist`); }
@@ -877,6 +881,7 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
   /** Adopt an orphan directory in place (migration step 3's "label the ones worth keeping"). */
   function adoptOrphan({ dir, label }) {
     if (!keeper) throw namedError('unavailable', 'no keeper');
+    refuseIfKeeperHeld();
     const v = T.orphanPathVerdict({ dir, base: abBase });
     if (!v.ok) throw namedError(v.code, v.error);
     const r = keeper.adoptDirectory({ label, dir, legacy: false, owner: { kind: 'instance', id: null } });
@@ -896,12 +901,14 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
       let markers = []; try { markers = fs.readdirSync(full).filter((x) => T.PROFILE_MARKERS.includes(x)); } catch { markers = []; }
       rows.push({ name: n.name, isDir: true, markers, mtime: dirMtime(full) });
     }
+    refuseIfKeeperHeld();   // the B-f276 remainder: no folder is an orphan of an UNREAD registry
     const registered = keeper ? keeper._reg().profiles.map((p) => p.dir).filter(Boolean) : [];
     const cands = T.orphanCandidates({ names: rows, registeredDirs: registered, base: abBase, now: now() });
     const sizes = await duBatch(cands.map((c) => c.dir));
     return { base: abBase, orphans: cands.map((c) => ({ ...c, bytes: sizes[c.dir] ?? null })) };
   }
   async function housekeeping() {
+    refuseIfKeeperHeld();   // the B-f276 remainder: the panel says the hold, never an empty list of profiles
     const reg = keeper ? keeper._reg() : { profiles: [], leases: [], browsers: {} };
     const scope = T.sweepScope(reg.profiles);
     const sizes = await duBatch(scope.map((p) => p.dir).filter(Boolean));
@@ -961,6 +968,8 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     try {
       ensureOpenLoaded();
       const reg = keeper ? keeper._reg() : { leases: [] };
+      // the B-f276 remainder: a HELD registry names no lease — every session left open would END («restart») while its browser lives on
+      if (keeper && typeof keeper.held === 'function' && keeper.held()) throw Object.assign(new Error('the profile registry is held — the sessions left open stay open until it reads'), { quiet: true });
       for (const [k, o] of [...openSessions.entries()]) {
         if (!o.fromDisk) continue;
         const held = (reg.leases || []).some((l) => l.browserKey === o.browserKey && (o.profileId ? l.profileId === o.profileId : (typeof keeper.isEphemeral === 'function' && keeper.isEphemeral(l.profileId))));

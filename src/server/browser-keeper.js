@@ -61,6 +61,10 @@ const path = require('path');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 const B = require('../browser-profiles.js');
+const SR = require('../store-read.js');   // the remainder of B-f276 (bl-jobs): a registry read that FAILED is no answer — HELD, never written over
+/** a registry the store-read law calls data: a plain object with its profiles list (a parse that is not one is CORRUPT — it was a silent
+ *  EMPTY registry, then written over the file) */
+const REG_VALID = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && Array.isArray(v.profiles);
 const GS = require('./grants-store.js'); // lane grants-unify: "Who can use it" is a row of the ONE grants store
 const BIdle = require('../browser-idle.js'); // lane browser-swiftshader-cpu: a browser nobody watches and nobody drives paints nothing
 const J = require('../browser-job-principal.js'); // lane jobs-browser: a Background Work job's browser handle + its release rule
@@ -142,7 +146,7 @@ function keeper() { return installed; }
  *                    never admitted, never added to a list (identity verify r2, 2026-09-28); default none
  *   facts / runtime / limits / log / now / tickMs / guardSampleMs — injectable for the gate
  */
-function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast = null, serverSetting = () => undefined, proxyLogins = null /* B-8b87: src/server/browser-proxy-logins.js — a profile proxy's login, read by the forwarder alone */,
+function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} of the held registry's read again (a suite's fast clock) */, dataDir, homeDir = os.homedir(), env = () => ({}), broadcast = null, serverSetting = () => undefined, proxyLogins = null /* B-8b87: src/server/browser-proxy-logins.js — a profile proxy's login, read by the forwarder alone */,
   // B-7a30 unit 1': the CLI judge's one file check (injectable: the gate PLACES a stall in it), the doors' bound, the re-judge period
   cliFileFact = null, cliActMs = 5 * 1000, cliEveryMs = 10 * 1000,
   serverNotice = null, getTelemetry = () => null, liveKeys: sessionLiveKeys = () => new Set(), remoteKeys = () => new Set(), userTodos = null,
@@ -579,12 +583,65 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   let timer = null;
   let loaded = false;
   let dirty = false;
+  // ── the remainder of B-f276: the registry HELD (its read failed / its bytes are not a registry) ──
+  const heldRetryMs = { first: (unreadRetry && Number(unreadRetry.firstMs) > 0) ? Number(unreadRetry.firstMs) : 30000, max: (unreadRetry && Number(unreadRetry.maxMs) > 0) ? Number(unreadRetry.maxMs) : 300000 };
+  let heldReg = null, heldSaid = false, heldSaveSaid = false, heldT = null, heldP = null, heldTries = 0, heldMissingAt = 0, heldStopped = false, bootOwed = false;
+  const heldLifts = new Set();
+  function holdRegistry(a) {
+    heldReg = { code: a.code, why: a.why, at: (heldReg && heldReg.at) || now() };
+    if (!heldSaid) { heldSaid = true; log.warn?.(`[browser] ${STORE_FILE} could not be read (${a.code}: ${a.why}) — HELD: no profile is shown, nothing is written over it, every act that would record is refused by name, and it is read again off the main loop`); }
+    heldRetrySoon();
+  }
+  /** the words a person reads while the registry is held */
+  function heldWords() {
+    return heldReg ? `${STORE_FILE} in VibeSpace's data folder could not be read (${heldReg.code}); ${heldP ? 'a read of it is still waiting for the storage to answer, and its answer is used the moment it comes' : 'VibeSpace reads it again every few minutes'}. No profile is lost: nothing is written over it, and the agent browsers wait until it reads.` : null;
+  }
+  function refuseIfHeld(what) { if (!loaded) ensureLoaded(); if (heldReg) throw namedError('store_unread', `${what}: ${heldWords()}`); }   // loaded first: the hold is known
+  function heldRetrySoon() {
+    if (heldT || heldStopped) return;
+    const n = ++heldTries;
+    heldT = setTimeout(() => { heldT = null; heldRetry().catch((e) => { log.warn?.(`[browser] ${STORE_FILE} read again failed: ${e && e.message}`); heldRetrySoon(); }); }, SR.retryDelay(n, { firstMs: heldRetryMs.first, maxMs: heldRetryMs.max }));
+    heldT.unref?.();
+  }
+  /** one read again, OFF the loop: the next try armed FIRST, ONE read in flight (a hung read keeps its one thread; its answer is judged
+   *  when it comes), «missing» right after an unreadable answer read once more; read, the registry loads and the boot's path runs once */
+  async function heldRetry() {
+    if (!heldReg) return;
+    heldRetrySoon();
+    if (heldP) return;
+    const p = heldP = fs.promises.readFile(storeFile, 'utf8').then((text) => ({ text }), (error) => ({ error }));
+    const read = await p; heldP = null;
+    if (!heldReg || heldStopped) return;
+    const a = SR.storeAnswer(read, { valid: REG_VALID });
+    if (a.state === 'unreadable' || a.state === 'corrupt') { heldReg.code = a.code; heldMissingAt = 0; return; }
+    if (a.state === 'missing' && !heldMissingAt) { heldMissingAt = now(); return; }
+    const was = heldReg;
+    heldReg = null; heldMissingAt = 0; heldTries = 0; heldSaid = false; heldSaveSaid = false;
+    if (heldT) { clearTimeout(heldT); heldT = null; }
+    loadFrom(read);   // the READ answer — no second read; the boot's lineage pass runs over it
+    log.warn?.(`[browser] ${STORE_FILE} read again (held since ${new Date(was.at).toISOString()}, ${was.code}): ${a.state === 'data' ? `${reg.profiles.length} profile(s)` : 'the file is GONE — the registry starts empty'}`);
+    reclaimFolderNotices();
+    if (bootOwed) { bootOwed = false; try { await boot(); } catch (e) { log.warn?.(`[browser] the boot's path after the read failed: ${e && e.message}`); } }
+    for (const fn of heldLifts) { try { await fn(); } catch (e) { log.warn?.(`[browser] a wait for the registry failed: ${e && e.message}`); } }
+    notify();
+  }
   let fileHost = null; // lane profile-lock-roll: the hostname the registry file was last saved under (read at load)
 
   function load() {
+    let read; try { read = { text: fs.readFileSync(storeFile, 'utf8') }; } catch (error) { read = { error }; }
+    loadFrom(read);
+  }
+  /** the load over one read's answer (the boot's, or the read again's — the remainder of B-f276, 主开发 00:38Z): a read that FAILED, or
+   *  bytes that are not a registry, HOLD the store — the registry is EMPTY in memory because it is UNREAD: nothing is written over the
+   *  file (the release's first save wrote the empty registry over every profile, run record, pin, lease, lineage row and login fence),
+   *  every act that would record is refused by name (`store_unread`), every sweep that would read an absence as «gone» waits, and the
+   *  file is read again off the loop; read, the boot's path runs once over what it READ. Torn bytes HOLD too (never set aside into an
+   *  empty, writable registry: an empty registry here DELETES folders — the kept sweep, Housekeeping, a build's removal) */
+  function loadFrom(read) {
     let rawDoc = null;
-    try { rawDoc = JSON.parse(fs.readFileSync(storeFile, 'utf8')); reg = B.normalizeRegistry(rawDoc); }
-    catch (e) { if (e.code !== 'ENOENT') log.warn?.(`[browser] ${STORE_FILE} unreadable (${e.message}) — starting from an empty registry; the old file is left in place`); reg = B.normalizeRegistry(null); }
+    const a = SR.storeAnswer(read, { valid: REG_VALID });
+    if (a.state === 'data') { rawDoc = a.value; reg = B.normalizeRegistry(rawDoc); }
+    else { reg = B.normalizeRegistry(null); if (a.state !== 'missing') holdRegistry(a); }
     // verify r7 (T1): one token ⇒ one entry — what the load's dedupe dropped is said (once) and in the ledger (each)
     { const dd = rawDoc && rawDoc.dirHosts ? B.dirHostsDeduped(rawDoc.dirHosts) : []; if (dd.length) { dirty = true; for (const x of dd) lineageLedger('deduped-at-load', { dir: x.key, keptAs: x.keptAs }); log.warn?.(`[browser] the launch-host lineage of ${dd.length === 1 ? dd[0].key : dd.length + ' directories'} dropped at load — the same marker token under another path (kept under ${dd.length === 1 ? dd[0].keptAs : 'the newest'})${dd.length === 1 ? '' : ' — each of: ' + dd.slice(0, 3).map((x) => x.key).join(', ') + (dd.length > 3 ? `, … +${dd.length - 3} more` : '')}`); } }
     // lane profile-lock-roll (L1): the hostname that WROTE the file (its last save, by whichever pod) — captured BEFORE this
@@ -654,6 +711,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   const humansForDisk = () => Object.fromEntries([...humans.values()].map((h) => [h.profileId, { key: h.key, profileId: h.profileId, since: h.since, launched: !!h.launched, ownTab: h.ownTab || null, adopted: Array.isArray(h.adopted) ? h.adopted.slice(-32) : [], state: h.state === 'driving' ? 'driving' : 'away', awaySince: h.awaySince || 0 }]));
   function ensureLoaded() { if (!loaded) { load(); warmCliVersions(); cliBoot(); reclaimFolderNotices(); } }
   function save() {
+    if (heldReg) { if (!heldSaveSaid) { heldSaveSaid = true; log.warn?.(`[browser] a ${STORE_FILE} write was refused: the file could not be read, and nothing is written over it until it reads`); } return false; }   // the B-f276 remainder: FIRST
     reg.humans = humansForDisk(); // BROWSE YOURSELF verify r1 (H4): mirrored at every write (the Map stays the truth)
     reg.host = os.hostname(); // lane profile-lock-roll (L1): the file names the machine that wrote it — the next pod's legacy witness
     // lane grants-unify: a record's `grantUse` is the grants store's row mirrored in memory — never written here
@@ -1134,6 +1192,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    * profiles` lists it too); an adopted directory keeps its path.
    */
   function createProfile(input = {}, { owner = null, dir = null, legacy = false, createdBy = null, use = null, knownKeys = null, by = 'user', builds = null, engine = null, id: mintedId = null, clonedFrom = null } = {}) {
+    refuseIfHeld('creating a profile');   // the B-f276 remainder: refused by name while the registry is held (nothing minted, nothing written)
     ensureLoaded();
     const v = B.validateProfileInput(input, { existing: named(), control, mediation: mediationOn() });
     if (!v.ok) throw namedError(v.code, v.error, v.why ? { why: v.why } : {});
@@ -1649,6 +1708,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   /** lane S2: clear ONE conversation's pin because its profile is going (or is already gone) — with `cleared`, the
    *  entry keeps the mark `{id, label, at}` the browser fact reads ("work was deleted — its pin was cleared"). */
   function clearPin(browserKey, { cleared = null } = {}) {
+    refuseIfHeld('clearing a pin');   // the B-f276 remainder: refused by name while the registry is held (nothing minted, nothing written)
     ensureLoaded();
     const bk = String(browserKey || '');
     if (!B.isBrowserKey(bk)) return false;
@@ -1926,6 +1986,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    */
   function pinForCreate({ explicit = '', priorKey = '', forkParentKey = '', taskGroupDefault = '', resume = false, fork = false } = {}) {
     ensureLoaded();
+    // the B-f276 remainder: a held registry names no profile — never «no longer exists» (the ladder wrote a null pin into the session):
+    // the create keeps the session's pin fields untouched and its first browser command refuses by name
+    if (heldReg) return { profileId: '', dir: null, origin: 'harness', held: true, refused: `the profile registry is held — ${heldWords()}` };
     const prior = priorKey ? (pinFor(priorKey)?.profileId || '') : '';
     const forkParent = forkParentKey ? (pinFor(forkParentKey)?.profileId || '') : '';
     const pick = B.pinForCreate({ explicit, prior, forkParent, taskGroup: taskGroupDefault, instanceDefault: instanceDefault(), resume, fork });
@@ -1973,6 +2036,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    * of the group never reaches a running conversation, nor its resume). No group default ⇒ nothing stamped.
    */
   function stampGroupCap(browserKey, facts = {}, { value = undefined } = {}) {
+    if (heldReg) return null;   // the B-f276 remainder: the conversation's own stamp is unread — never re-stamped from the group's live value
     ensureLoaded();
     const bk = B.parentKeyOf(browserKey);
     if (!B.isBrowserKey(bk)) return capFor(bk);
@@ -1991,6 +2055,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   }
   /** Set (1..6) or clear (null) a conversation's explicit cap — a USER act; the digest broadcast carries it to every window. Clearing goes back to the default it STARTED with. */
   function setCap(browserKey, cap) {
+    refuseIfHeld('the browser cap');   // the B-f276 remainder: refused by name while the registry is held (nothing minted, nothing written)
     ensureLoaded();
     const bk = B.parentKeyOf(browserKey);
     if (!B.isBrowserKey(bk)) throw namedError('bad-request', 'a cap needs a conversation\'s browser key');
@@ -3024,6 +3089,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   /** The census over THIS machine's daemons (the tick, every orphanScanMs; the boot, once after adoption) and each
    *  paired machine's stopped record whose daemon still answers (through `browser-serve`, capability-gated). */
   function orphanCensus(seenBy, t = now(), { force = false } = {}) {
+    if (heldReg) return Promise.resolve(null);   // the B-f276 remainder: a held registry names no record — every daemon would read «unkept» and be ENDED
     if (orphanRun) return orphanRun;
     if (!force && t - lastOrphanScan < orphanScanMs) return Promise.resolve(null);
     lastOrphanScan = t;
@@ -3247,6 +3313,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    * name this conversation's browser.
    */
   async function ensureEphemeral({ browserKey, sessionId = null, envPairs = null, sessionName = '', variant = null, resume = null } = {}) {
+    refuseIfHeld('a conversation\'s browser');   // the B-f276 remainder: refused by name while the registry is held (nothing minted, nothing written)
     // lane browser-resume B: `resume` = 'user' (the Resume button: NOT a command — no verb stamps, the tabs reopen) |
     // 'agent' (`vibespace-browser resume`: a command that asks for its kept tabs) | null (a page verb's start)
     ensureLoaded();
@@ -4576,6 +4643,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    *  hub restart an OPEN item is taken back: its browser still alive ⇒ held again (a later put-back, stop or death ends it),
    *  its browser gone ⇒ resolved now. Known by its words' key (FOLDER_LOST_WORDS.text). */
   function reclaimFolderNotices() {
+    if (heldReg) return;   // the B-f276 remainder: no live record is known — every «folder not put back» notice would close (it runs at the read)
     if (!userTodos || typeof userTodos.openItems !== 'function') return;
     let open = [];
     try { open = userTodos.openItems(); } catch { return; }
@@ -4654,6 +4722,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   /** A display-only session whose browser record no longer names it (a crash between the two writes, a record replaced) is
    *  stopped: its lifetime is the record's. The desktop keeper's live list, filtered by kind — cheap, once per tick. */
   function reconcileDisplays() {
+    if (heldReg) return;   // the B-f276 remainder: no live record is known — every attach-road Chrome's display would be stopped
     if (!displayKeeper || typeof displayKeeper.liveRecords !== 'function') return;
     let recs = [];
     try { recs = displayKeeper.liveRecords() || []; } catch { return; }
@@ -6350,6 +6419,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   /** The job's handle under its owner's key (src/browser-job-principal.js): found, else minted — a child handle tagged
    *  `job` (reaped by the job's end, never by its owner's: a running job carries it). One per (job, owner key). */
   function jobHandleFor({ ownerKey, jobId } = {}) {
+    refuseIfHeld('a job\'s browser');   // the B-f276 remainder: refused by name while the registry is held (nothing minted, nothing written)
     ensureLoaded();
     if (!B.isBrowserKey(ownerKey) || !jobId) throw namedError('bad-request', 'a job handle needs its owner\'s browser key and the job id');
     const have = J.jobHandleOf(reg.children, jobId, ownerKey);
@@ -6506,6 +6576,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   /** A child handle for a sub-agent (§3.7 / D23): `bk-<parent>.<n>`, recorded
    *  under the parent so the parent's teardown reaps it. */
   function newChild({ browserKey, sessionId = null } = {}) {
+    refuseIfHeld('a helper\'s browser');   // the B-f276 remainder: refused by name while the registry is held (nothing minted, nothing written)
     ensureLoaded();
     if (!B.isBrowserKey(browserKey)) throw namedError('bad-request', 'a child handle needs its parent\'s browser key');
     const n = B.nextChildN(reg.children, browserKey);
@@ -6546,6 +6617,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    * path, borrowed). Refused with the reason when the move cannot happen.
    */
   function adoptScratch({ label, scratchDir, owner = null, createdBy = null, use = null, knownKeys = null } = {}) {
+    refuseIfHeld('adopting a browser folder');   // the B-f276 remainder: refused by name while the registry is held (nothing minted, nothing written)
     ensureLoaded();
     const v = B.validateProfileInput({ label }, { existing: named() });
     if (!v.ok) throw namedError(v.code, v.error);
@@ -6810,7 +6882,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   // rv-browser F7 (lane dc-browser-installs): the slot is src/server/browser-installs.js and each installable is a row its
   // own file declares (browser-cli-install.js, browser-builds-keeper.js — one INSTALLERS line
   // each); this keeper hands them what they read (its later consts and its reassigned lets at call time) and names no kind.
-  const installs = BI.create({ dataDir, installDir, installTimeoutMs, egressResolve, env, hereTag, log, namedError, notify, now, usableExe, whichOnPath, writeJsonAtomic, bf, bfPath, cliFolderOf, cliPin, installedCliOf, runningClis, browsing, buildsFor, buildsHere, engineFactOf, engineRowsView, chromeBuildsResolve, commit, ensureLoaded, healing, homeDir, humans, isEph, isLocalRec, isMediated, keptDirFor, keptStore, mediator, named, profile, pview, readDirMajor, reopenLeaseTabs, start, stop, stopping, switching, userTodos,
+  const installs = BI.create({ refuseIfHeld /* the B-f276 remainder: a build's removal reads the registry's choices */, dataDir, installDir, installTimeoutMs, egressResolve, env, hereTag, log, namedError, notify, now, usableExe, whichOnPath, writeJsonAtomic, bf, bfPath, cliFolderOf, cliPin, installedCliOf, runningClis, browsing, buildsFor, buildsHere, engineFactOf, engineRowsView, chromeBuildsResolve, commit, ensureLoaded, healing, homeDir, humans, isEph, isLocalRec, isMediated, keptDirFor, keptStore, mediator, named, profile, pview, readDirMajor, reopenLeaseTabs, start, stop, stopping, switching, userTodos,
     get cliPrefix() { return cliPrefix; }, get cliWitnessOf() { return cliWitnessOf; }, get isMusl() { return isMusl; }, get inputsView() { return inputsView; },
     get reg() { return reg; }, get dirty() { return dirty; }, set dirty(v) { dirty = v; }, get inFlightReader() { return inFlightReader; },
     get cliGen() { return cliGen; }, set cliGen(v) { cliGen = v; }, get cliMemo() { return cliMemo; }, set cliMemo(v) { cliMemo = v; } });
@@ -7271,6 +7343,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    *  why, what evidence, which tier it suggests). Bounded; one per
    *  (conversation, host). The server never manufactures one. */
   function blocked({ url, why = '', evidence = '', tier = null, browserKey = null, sessionId = null, profileId = null, sessionName = '', remote = false } = {}) {
+    refuseIfHeld('a blocked page\'s report');   // the B-f276 remainder: refused by name while the registry is held (nothing minted, nothing written)
     ensureLoaded();
     // the words a card draws from the agent (its code, what it saw, the conversation's name that becomes a profile's
     // label) lose every character that is not drawn or reorders a line — what the user reads above Approve is what
@@ -7461,6 +7534,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   /** lane vault-login (Shape S, r32): read/write persisted tab fences (`{targetId, urlAtFill, origin, at, browserKey?}`) & scrub entry names through the ONE registry writer (zero login identity, secret bytes, or digests on disk). */
   function loginFenceStateOf(profileId) {
     ensureLoaded();
+    refuseIfHeld('a login fence');   // the B-f276 remainder: the fences are unread — never «none» (every caller fails CLOSED on a throw)
     const pid = String(profileId || '');
     const st = reg.loginFences && reg.loginFences[pid];
     if (!st || typeof st !== 'object') return { fences: [], scrubs: [] };
@@ -7636,6 +7710,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   /** Per-site memory (§7.4 / §7.6 rule 2): a claim keyed by EXACT host, with
    *  who made it; `tier` is legal only while `backend` is null. */
   function addSiteHint(h = {}) {
+    refuseIfHeld('a site hint');   // the B-f276 remainder: refused by name while the registry is held (nothing minted, nothing written)
     ensureLoaded();
     const v = SW.siteHintVerdict({ ...h, at: now(), providerIds: providerIds() });
     if (!v.ok) throw namedError(v.code, v.error);
@@ -7809,6 +7884,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    *  after restoreSessions so `liveKeys` is final. */
   async function boot() {
     ensureLoaded();
+    // the B-f276 remainder: on a HELD registry the boot's path judges NOTHING (its reconcile retired, adoptAll skipped, the orphan census
+    // ENDED every daemon it could not name, the first commit wrote the empty registry over the file) — it runs once at the read
+    if (heldReg) { bootOwed = true; log.warn?.(`[browser] the boot's reconcile, adoption and orphan census wait for ${STORE_FILE} to read`); return { held: true, droppedLeases: 0, browsers: 0, humans: 0 }; }
     const r = reconcile({ graceMs: 0 });
     await r.retired;
     await adoptAll();
@@ -7828,6 +7906,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   // ── the tick: carrier grace, idle, the resource REPORT ──
   async function tick() {
     ensureLoaded();
+    if (heldReg) return;   // the B-f276 remainder: nothing is judged on a held registry
     warmCliVersions(); // verify r3 (Y1): the row's sync readers see a replaced binary's version within a tick
     const t = now();
     const r = reconcile({ graceMs: B.LEASE_DROP_GRACE_MS });
@@ -7915,7 +7994,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   }
   function stopTimer() { if (timer) clearInterval(timer); timer = null; }
   /** Timers only — the browsers SURVIVE a VibeSpace exit by design (adopted next boot). */
-  function shutdown() { stopTimer(); if (cliTimer) { clearInterval(cliTimer); cliTimer = null; } if (cliNoteTimer) { clearTimeout(cliNoteTimer); cliNoteTimer = null; } disk.stop(); try { bf.stop?.(); } catch { /* B-0b8c: the version ladder's rung is this keeper's to end */ } if (dirty || sweepDirty) { sweepDirty = false; save(); } installs.shutdown(); /* keeper-sweep-yields K1: what the walk deferred (sweepDirty) is written at the stop too */ /* lane chrome-builds-download: an in-process download ends with its keeper (the marker stays: the next keeper judges it) — lane dc-browser-installs: the running row's own shutdown */ try { keptStore()?.shutdown?.(); } catch { /* lane browser-resume: the kept store's throttled tab list is flushed with its feeder */ } try { mediator?.shutdown?.(); } catch { /* P6: the proxy is this keeper's to end */ } try { const ents = [...egressProxies.values()]; egressProxies.clear(); for (const e of ents) e.px.close().catch(() => {}); } catch { /* the egress proxies are this keeper's to end (r2: a surviving browser's port is re-bound by the next keeper's adoption) */ } }
+  function shutdown() { heldStopped = true; if (heldT) { clearTimeout(heldT); heldT = null; } stopTimer(); if (cliTimer) { clearInterval(cliTimer); cliTimer = null; } if (cliNoteTimer) { clearTimeout(cliNoteTimer); cliNoteTimer = null; } disk.stop(); try { bf.stop?.(); } catch { /* B-0b8c: the version ladder's rung is this keeper's to end */ } if (dirty || sweepDirty) { sweepDirty = false; save(); } installs.shutdown(); /* keeper-sweep-yields K1: what the walk deferred (sweepDirty) is written at the stop too */ /* lane chrome-builds-download: an in-process download ends with its keeper (the marker stays: the next keeper judges it) — lane dc-browser-installs: the running row's own shutdown */ try { keptStore()?.shutdown?.(); } catch { /* lane browser-resume: the kept store's throttled tab list is flushed with its feeder */ } try { mediator?.shutdown?.(); } catch { /* P6: the proxy is this keeper's to end */ } try { const ents = [...egressProxies.values()]; egressProxies.clear(); for (const e of ents) e.px.close().catch(() => {}); } catch { /* the egress proxies are this keeper's to end (r2: a surviving browser's port is re-bound by the next keeper's adoption) */ } }
   const ensureTimer = () => { if (Object.values(reg.browsers).some(B.isLiveBrowser) || reg.leases.length || inputs.size || pending.size || humans.size) startTimer(); };
   const attachTimed = async (a) => { const r = await attach(a); ensureTimer(); return r; };
 
@@ -8282,7 +8361,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     cliPin, cliFactReady, rejudgeClis /* B-7a30: the CLI judge's pass (the gate awaits it) */, _cliNow: () => cliNow() /* B-7a30: the launch's bounded stamp (the gate places a stall in it) */, _reattached: () => reattached, // cliFacts + installCli: the CLI row, in ...installs.api
     ...installs.api, // rv-browser F7 (lane dc-browser-installs): every install row's own routes (lane chrome-builds-download (design 004): Download another build…) // lane browser-admin 2b: the browser CLI VibeSpace drives (verify r3: cliFactReady = the doors' fact, the candidates asked first)
     machineDisplay, machineDisplayCached, noDisplayMode, headedSetting, // lane headless-fallback (+ H5: the stored window preference, for Settings' fact line): this machine's display now (a fresh probe — Settings' read-only line) + the no-display setting
-    reshapeStore: (fn) => { ensureLoaded(); const r = fn(reg); commit(); return r; }, // MIGRATIONS ONLY (2026-09-runaway-parks-void): reshape the in-memory registry, then the ONE atomic save
+    reshapeStore: (fn) => { ensureLoaded(); refuseIfHeld('a migration of the profile registry'); const r = fn(reg); commit(); return r; }, // MIGRATIONS ONLY (2026-09-runaway-parks-void): reshape the in-memory registry, then the ONE atomic save
     diskOf: (id) => { ensureLoaded(); return disk.diskOf(profile(id)); }, _disk: disk, // lane browser-disk-sample: THE disk fact (the panel row, GET /api/browser/profiles)
     usageOf: (id) => { const l = live.get(id); return l ? { ...l } : null; }, // 2026-09-25: the Browser panel's memory cell (memBytes + memMetric, over)
     // takeover C3 (design-browser-takeover §5): the managed ephemeral browser + the ceiling's count seam
@@ -8350,7 +8429,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     lineageKeyOf, moveDirLineage, // verify r8 (T2 ②): the product's own move of a directory (a Forget) carries its lineage
 
     // lane browser-resume (§3.9): the relay's tab list of a conversation's own browser, the CDP read at a stop, the store
-    profileDirRegistered: (dir) => { ensureLoaded(); return !!dir && named().some((p) => p.dir && !p.host && (B.sameDir(p.dir, dir) || F.sameRealDir(p.dir, dir) !== false)); }, // lane browser-resume: a kept directory a named profile registered in place is never removed by the kept store — verify F1: by REAL identity, unknown ⇒ registered (fail closed)
+    held: () => { if (!loaded) ensureLoaded(); return !!heldReg; }, heldWords, onReadAgain: (fn) => { heldLifts.add(fn); return () => heldLifts.delete(fn); },   // the B-f276 remainder
+    profileDirRegistered: (dir) => { ensureLoaded(); refuseIfHeld('is this folder a profile\'s'); return !!dir && named().some((p) => p.dir && !p.host && (B.sameDir(p.dir, dir) || F.sameRealDir(p.dir, dir) !== false)); }, // lane browser-resume: a kept directory a named profile registered in place is never removed by the kept store — verify F1: by REAL identity, unknown ⇒ registered (fail closed)
     noteTabs, captureKeptTabs: (profileId, seenBy) => { const pp = profile(String(profileId || '')); return captureKeptTabs(pp, pp ? reg.browsers[pp.id] : null, seenBy || 'a read'); }, keptStore: () => keptStore(),
     // lane browser-resume B (§3.9, ruling 2): Resume, the reopen, the hand-back's two halves
     factsMoved: () => { for (const fn of changeListeners) { try { fn(); } catch (e) { log.warn?.(`[browser] change listener failed: ${e && e.message}`); } } }, // lane B: the kept store moved a fact (no registry write)

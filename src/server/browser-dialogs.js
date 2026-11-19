@@ -4546,7 +4546,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const explicitTarget = targetId || extractArgvTab(argv);
     if (!fencesLive(w)) {   // (lane chrome-157, round 32: until the fences are re-armed every road answers from the record)
       if (keeper && typeof keeper.loginFenceStateOf === 'function') {
-        let st = null; try { st = keeper.loginFenceStateOf(pid); } catch { st = null; }
+        // the B-f276 remainder (bl-jobs): the fences of a HELD registry are unread — the verb is refused (it read «none»: fail OPEN)
+        let st = null; try { st = keeper.loginFenceStateOf(pid); } catch (e) { if (e && e.code === 'store_unread') return { ok: false, code: 'store_unread', error: e.message }; st = null; }
         const fences = st && Array.isArray(st.fences) ? st.fences : [];
         if (fences.length) {
           const bk = parentKey(target && target.browserKey);

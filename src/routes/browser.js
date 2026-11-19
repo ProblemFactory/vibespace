@@ -193,6 +193,7 @@ function refuseHost(req, res) {
 }
 const STATUS = { // lane browser-profile-clone: the copy's refusals by name
   // B-8b87 cure: a profile proxy's refusals by name (a person's page words them by code — never a 500 for a refusal)
+  store_unread: 503,   // the B-f276 remainder: the profile registry is held (unread)
   proxy_cloud_browser: 400, proxy_off_machine: 400, bad_proxy_credential: 400, bad_proxy_inline_credential: 400, proxy_unusable: 409, proxy_password_in_profile: 409, proxy_scheme_unsupported: 409, proxy_external_browser: 409, egress_proxy_missing: 409, proxy_credential_unreadable: 423,
   'bad-size': 400, size_out_of_bounds: 400, not_your_window: 403, // lane launch-picture-size: a fixed picture size refused by name
   source_not_found: 404, source_same_machine_only: 409, source_leased: 409, source_still_running: 409, source_no_folder: 409, clone_too_big: 413, clone_failed: 500, clone_unsupported_platform: 400, clone_agent_too_old: 400,
@@ -380,6 +381,9 @@ const ID_RE = /^bp-[0-9a-f]{8}$/;
 function keeperOr503(res) {
   const k = ctx?.keeper || null;
   if (!k) res.status(503).json({ error: 'browser profiles are not available on this server', code: 'unavailable' });
+  // the B-f276 remainder (bl-jobs): while the profile registry is HELD (unread) every browser route answers by name — never an
+  // empty registry read as «no such profile», never an act recorded over the held file
+  else if (typeof k.held === 'function' && k.held()) { res.status(503).json({ error: k.heldWords(), code: 'store_unread', unread: k.heldWords() }); return null; }
   return k;
 }
 /** A live session's conversation identity + Task Groups (asked NOW — membership is judged at every command). A store
@@ -1579,6 +1583,7 @@ function unpinProfile(profileId) {
 function healDanglingPins() {
   const k = ctx && ctx.keeper;
   if (!k) return 0;
+  if (typeof k.held === 'function' && k.held()) return 0;   // the B-f276 remainder: a held registry names no profile — never «deleted»
   let n = 0;
   for (const [id, s] of (ctx.activeSessions || new Map())) {
     if (!s || !s._browserKey || !s._browserProfileId || k.profile(s._browserProfileId)) continue;

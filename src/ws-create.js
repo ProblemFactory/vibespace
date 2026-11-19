@@ -1345,7 +1345,10 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 // the Task-Group rung asks the store with the facts a create has (cwd + the dialog's taskId)
                 const taskGroupDefault = kp.taskGroupDefaultFor({ cwd, hostId: data.hostId || null, initialGroupId: spawnGroups[0] || null, initialGroupIds: spawnGroups });
                 pin = kp.pinForCreate({ explicit: data.browserProfileId || '', priorKey: prior, forkParentKey, taskGroupDefault, resume: !!(data.resume && data.resumeId), fork: !!data.fork });
-                if (pin.refused) console.warn(`[browser] ${id}: ${pin.refused} — starting ephemeral`);
+                // the B-f276 remainder (bl-jobs): a HELD profile registry names no profile — the pin is never «no longer exists»: the
+                // session keeps the pin it has (nothing re-pinned, nothing written), its first browser command refuses by name
+                if (pin.held) { console.warn(`[browser] ${id}: ${pin.refused} — the conversation keeps its pin as it was`); pin = { profileId: session._browserProfileId || '', dir: null, origin: session._browserPinOrigin || 'harness', held: true }; }
+                else if (pin.refused) console.warn(`[browser] ${id}: ${pin.refused} — starting ephemeral`);
                 // B-6b6d r3 for this knob: the New Session dialog sends the value it
                 // filled in on the user's behalf (the group's / the instance default)
                 // as an EXPLICIT string, so the ladder can only read it as 'chosen';
@@ -1401,11 +1404,11 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               // becomes its record now, ORIGIN kept — that is what makes the
               // `conversation` rung answer on the next resume (and a fork's copy
               // stick to the fork, not to its parent).
-              if (pin.profileId && pin.origin !== 'conversation') {
+              if (pin.profileId && pin.origin !== 'conversation' && !pin.held) {
                 // identity verify r2 (2026-09-28): a REMOTE spawn's explicit pick never writes the conversation into "Who can use
                 // it" — a session on another machine never reaches this machine's browser (the pin itself stays a preference)
                 try { require('./server/browser-keeper.js').keeper()?.setPin(bk.key, pin.profileId, { origin: pin.origin, remote: !!data.hostId }); } catch { }
-              } else if (pin.profileId && data.fork && forkParentKey && forkParentKey !== bk.key) {
+              } else if (pin.profileId && data.fork && forkParentKey && forkParentKey !== bk.key && !pin.held) {
                 // VERIFY S5 (2026-09-26) MAJOR: a FORK's key is NEW and the 'conversation' rung above is the PARENT's pin —
                 // copied into the keeper under the fork's key (the parent's `by`/`at` verbatim: no laundering), else the
                 // fork's Session properties say "Pinned: work" while its bare commands open a temporary browser (the pin

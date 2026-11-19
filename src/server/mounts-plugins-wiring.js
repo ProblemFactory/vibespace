@@ -1531,15 +1531,21 @@ function createSessionMessages(session, sessionId) {
       // lane engine-spi-egress L3 round 3: a boot migration that marks records for THIS boot (the one that moves the removed anti-bot
       // backend's records — STEPPED when its proof's hash streams) is waited for first: the order law — nothing is adopted before it judged
       let gate = null; try { gate = require('./migrations.js').beforeBrowserBoot(); } catch { gate = null; }
+      let heldBoot = false;
       Promise.resolve(gate).catch(() => null).then(() => browserKeeper.boot())
-        .then((r) => { if (r && (r.droppedLeases || r.browsers)) console.log(`[browser] boot: ${r.droppedLeases} orphaned lease(s) dropped, ${r.browsers} browser(s) adopted`); })
+        .then((r) => { if (r && r.held) { heldBoot = true; console.warn('[browser] boot: the profile registry is held — the steps after the boot run once it reads'); try { browserKeeper.onReadAgain?.(() => afterBoot()); } catch { } return; } if (r && (r.droppedLeases || r.browsers)) console.log(`[browser] boot: ${r.droppedLeases} orphaned lease(s) dropped, ${r.browsers} browser(s) adopted`); })
         .catch((e) => console.warn('[browser] boot reconciliation failed:', e && e.message))
+        .then(() => { if (!heldBoot) return afterBoot(); });
+      // the B-f276 remainder (bl-jobs): the steps after the keeper's boot — run once it judged its registry; on a HELD registry they
+      // wait for its read (each read the held, EMPTY registry as «gone»: a pin cleared, a kept folder removed, a trace session ended)
+      const afterBoot = () => Promise.resolve()
         // owner ruling A: a live session pinned BEFORE the ruling still has its indirection naming the profile's directory —
         // put back on its own browser (the pin stays: it is the default attachment now, opened through the keeper)
         .then(() => { try { const n = require('../routes/browser').convertPinnedDirs(); if (n) console.log(`[browser] boot: ${n} session(s) pinned before owner ruling A no longer hand their own browser the profile's directory`); } catch (e) { console.warn('[browser] pin conversion failed:', e && e.message); } })
         .then(() => { try { const n = require('../routes/browser').healDanglingPins(); if (n) console.log(`[browser] boot: ${n} conversation pin(s) named a deleted profile — cleared`); } catch (e) { console.warn('[browser] dangling-pin heal failed:', e && e.message); } }) // lane S2: no conversation keeps a pin on a profile that is gone
         .then(() => { try { after?.(); } catch (e) { console.warn('[browser] post-boot step failed:', e && e.message); } }) // P5: the recorder taps only browsers the keeper has judged
         .then(() => { try { const ks = browserKeeper.keptStore?.(); if (ks) ks.boot(); } catch (e) { console.warn('[browser] kept-browser sweep failed:', e && e.message); } }); // lane browser-resume: the kept browsers' boot sweep (ends, the size bound) after every record is judged
+      ;
     } catch (e) { console.warn('[browser] boot reconciliation failed:', e && e.message); }
   }
 
