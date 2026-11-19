@@ -947,16 +947,18 @@ const _homeBefore = process.env.HOME, _codexHomeBefore = process.env.CODEX_HOME;
   ].join(''));
 
   const hx = require(path.join(REPO, 'src/harnesses/codex.js'));
-  ok(hx.store.lastTurnEffort(TID) === 'ultra' && hx.store.lastTurnModel(TID) === 'gpt-6-astra',
+  // the descriptor's two continuity hooks answer a PROMISE since lane resume-all-paced L2 (the rollout read off the loop) — awaited
+  const lastE = await hx.store.lastTurnEffort(TID), lastM = await hx.store.lastTurnModel(TID);
+  ok(lastE === 'ultra' && lastM === 'gpt-6-astra',
     'the codex DESCRIPTOR answers "what did this conversation last run at" (its presence IS the declaration — no second caps boolean to drift)',
-    JSON.stringify([hx.store.lastTurnEffort(TID), hx.store.lastTurnModel(TID)]));
+    JSON.stringify([lastE, lastM]));
   ok(typeof hx.store.lastTurnModel === 'function' && typeof hx.store.lastTurnEffort === 'function',
     'codex declares BOTH knobs (its rollout writes a turn_context per turn)');
 
   // THE LADDER, exactly as ws-create composes it: no explicit value, resume,
   // the instance default that caused the incident.
-  const ePick = resumeSpawnPick({ explicit: undefined, conversation: hx.store.lastTurnEffort(TID), instanceDefault: 'xhigh', resume: true, hasSource: true });
-  const mPick = resumeSpawnPick({ explicit: undefined, conversation: hx.store.lastTurnModel(TID), instanceDefault: 'gpt-5.6-sol', resume: true, hasSource: true });
+  const ePick = resumeSpawnPick({ explicit: undefined, conversation: lastE, instanceDefault: 'xhigh', resume: true, hasSource: true });
+  const mPick = resumeSpawnPick({ explicit: undefined, conversation: lastM, instanceDefault: 'gpt-5.6-sol', resume: true, hasSource: true });
   ok(ePick.value === 'ultra' && ePick.origin === 'conversation' && mPick.value === 'gpt-6-astra',
     'the ladder resolves BOTH twins off the rollout (STANDING SWEEP: effort and model move together)', JSON.stringify([ePick, mPick]));
 

@@ -1345,6 +1345,7 @@ function registerWsHandler(wss, ctx) {
           // back from it (src/server/session-broadcast.js), and the verdict taken after the waits replays it or ships the slab.
           // The kept copies' preload (a restore's) is waited for here too, never between the join and the verdict
           let waitedFor = null;   // the session whose kept copies were waited for before the join (r4)
+          let reSm = null;        // a RE-ATTACH's reader, read off the loop in this pending window (lane resume-all-paced L3 P1)
           {
             const s0 = activeSessions.get(data.sessionId);
             if (s0 && s0.mode === 'chat') {
@@ -1352,6 +1353,10 @@ function registerWsHandler(wss, ctx) {
               s0.clients.set(ws, { cols: 120, rows: 30, caps: clientCaps(data), pending: true }); attachedSessions.add(data.sessionId);
               if (s0._keptLoad) { try { await s0._keptLoad; } catch { } }
               await warmTaskStateFor(s0);
+              // lane resume-all-paced L3 P1 on THIS rule (every wait of an attach here, never between the join and the verdict): a
+              // RE-ATTACH (the history loaded) reads its codex history off the loop now, acked while it waits; the attach below keeps
+              // this reader. A first attach reads after its harness's warm (below — a missing rollout is written there first)
+              if (s0._historyLoaded) { reSm = createSessionMessages(s0, data.sessionId); await readOffLoop(reSm, { label: data.sessionId, ack: () => { try { ws.send(JSON.stringify({ type: 'attach-ack', sessionId: data.sessionId, progress: null, queued: true })); } catch { } } }); }
               const left = activeSessions.get(data.sessionId) !== s0 || ws.readyState === 2 || ws.readyState === 3;   // replaced / ended, or the socket closing
               if (left && s0.clients.get(ws)?.pending) s0.clients.delete(ws);
               if (ws.readyState === 2 || ws.readyState === 3) break;   // closing / closed during the waits: nothing to attach to
@@ -1377,7 +1382,7 @@ function registerWsHandler(wss, ctx) {
                 catch (e) { console.error('remote jsonl fetch failed:', e.message); }
               }
               if (session._keptLoad && session !== waitedFor) { try { await session._keptLoad; } catch { } } // the copies' kept pictures, read off the loop at the restore (r6) — waited for before the join (B-299b A2 r4) unless the session was replaced meanwhile
-              const sm = createSessionMessages(session, data.sessionId);
+              const sm = reSm && session === waitedFor ? reSm : createSessionMessages(session, data.sessionId);   // a re-attach's reader read before the join
               // Initialize normalizer from full JSONL + buffer history on first attach.
               // Can't use total===0: PTY output via processLive may have populated the
               // normalizer with partial buffer data before any client connected.
@@ -1431,11 +1436,14 @@ function registerWsHandler(wss, ctx) {
                   break;
                 }
               }
-              // P1 (lane resume-all-paced L3 cure, 主开发 23:16Z): A RE-ATTACH IS AN ATTACH — a reload, a reconnect, a second device: the
+              // P1 (lane resume-all-paced L3 cure, 主开发 23:16Z): A RE-ATTACH IS AN ATTACH — read in the pending window above (B-299b's
+              // rule); an attach that kept that reader awaits nothing here (from the join to the send stays synchronous — a failed
+              // pending read falls back to the reader's own road, counted and said «ON THE MAIN LOOP»). This call reads for a reader built
+              // after the waits (a session replaced meanwhile, a remote one whose history landed during its fetch). A reload, a reconnect, a second device: the
               // history is loaded, but this reader is a fresh one and its chat status below would parse the whole rollout ON THE LOOP
               // (master's storm frame, one open conversation after another). It reads off the loop first, acked while it waits; a reader
               // that has read already (the first attach above) answers at once.
-              await readOffLoop(sm, { label: data.sessionId, ack: () => { try { ws.send(JSON.stringify({ type: 'attach-ack', sessionId: data.sessionId, progress: null, queued: true })); } catch { } } });
+              if (sm !== reSm) await readOffLoop(sm, { label: data.sessionId, ack: () => { try { ws.send(JSON.stringify({ type: 'attach-ack', sessionId: data.sessionId, progress: null, queued: true })); } catch { } } });
               // Recover goal state from wrapper meta (populated by thread/goal/get on startup)
               if (!session._goal) {
                 const wMeta = sm.wrapperMeta?.() || {};

@@ -132,7 +132,7 @@ console.log('— ④ THE WIRING');
 {
   const ws = read('src/ws-handler.js');
   const i = ws.indexOf('await readOffLoop(sm, { bulk: bulkRead'), j = ws.indexOf('await rebuildHistory(session, data.sessionId, sm.raw()');   // L3: through src/attach-read.js readOffLoop (sm.rawAsync)
-  ok(i > 0 && j > i && ws.lastIndexOf('const sm = createSessionMessages(session, data.sessionId);', i) > 0 && /await sm\.rawAsync\(\{ bulk \}\)/.test(read('src/attach-read.js')), 'the live attach (ws-handler) awaits sm.rawAsync() (src/attach-read.js readOffLoop) before rebuildHistory reads sm.raw()');
+  ok(i > 0 && j > i && ws.lastIndexOf('const sm = reSm && session === waitedFor ? reSm : createSessionMessages(session, data.sessionId);', i) > 0 && /await sm\.rawAsync\(\{ bulk \}\)/.test(read('src/attach-read.js')), 'the live attach (ws-handler) awaits sm.rawAsync() (src/attach-read.js readOffLoop) before rebuildHistory reads sm.raw()');
   const st = new S.CodexSessionMessages(sess('c'), 'w-c', { buffersDir }), tsv = read('src/transcript-service.js');
   ok((tsv.match(/if \(typeof sm\.rawAsync === 'function'\) await sm\.rawAsync\(\);/g) || []).length === 2 && ws.includes("await readOffLoop(sm, { label: `view ${backendSessionId}` });"),
     'the read-only view (ws-handler — the restore opens every stopped conversation as one) and the transcript service\'s view and status await rawAsync first');
@@ -154,7 +154,15 @@ console.log('— ⑥ THE CURE ROUND (主开发 23:16Z): P1 — a re-attach reads
   let sx; try { sx = await during(async () => smX.chatStatus()); } finally { console.warn = cw; }
   const onLoop = onLoopOf(), last = onLoop.recent[onLoop.recent.length - 1] || {};
   ok(onLoop.count === loop0 + 1 && sx.gap > LAW_MS && /before its off-loop read/.test(last.why || '') && warned.some((w) => /ON THE MAIN LOOP/.test(w)), `RED CONTROL — d7a0c4b36's re-attach (the fresh reader asked its status at once): ONE parse on the loop (${sx.gap} ms) — and it is SAID: «${(warned.find((w) => /ON THE MAIN LOOP/.test(w)) || '').slice(0, 110)}…»`);
-  ok(/\n {14}await readOffLoop\(sm, \{ label: data\.sessionId, ack: /.test(WS) && WS.indexOf('await readOffLoop(sm, { label: data.sessionId, ack:') < WS.indexOf('const chatStatus = sm.chatStatus() || {};') && WS.indexOf('if (session._normalizer && !session._historyLoaded) {') < WS.indexOf('await readOffLoop(sm, { label: data.sessionId, ack:'), 'P1 (the wiring) ws-handler\'s attach reads off the loop on EVERY attach — after the first-attach block, at its level, before the chat status — and the view door reads through the same door', { view: /await readOffLoop\(sm, \{ label: `view /.test(WS) });
+  ok(/\n {14}if \(sm !== reSm\) await readOffLoop\(sm, \{ label: data\.sessionId, ack: /.test(WS) && WS.indexOf('await readOffLoop(sm, { label: data.sessionId, ack:') < WS.indexOf('const chatStatus = sm.chatStatus() || {};') && WS.indexOf('if (session._normalizer && !session._historyLoaded) {') < WS.indexOf('await readOffLoop(sm, { label: data.sessionId, ack:'), 'P1 (the wiring) ws-handler\'s attach reads off the loop on EVERY attach — after the first-attach block, at its level, before the chat status — and the view door reads through the same door', { view: /await readOffLoop\(sm, \{ label: `view /.test(WS) });
+  // B-299b's attach rule (r2–r4: every wait of an attach in the PENDING window, never between the join and the verdict) — the
+  // re-attach's read stands there (the restack onto the 2.369.411 block, its adversarial read's S1)
+  ok(WS.indexOf('if (s0._historyLoaded) { reSm = createSessionMessages(s0, data.sessionId); await readOffLoop(reSm, { label: data.sessionId, ack:') > 0   // the wait that waits is the one acked
+    && WS.indexOf('await warmTaskStateFor(s0);') < WS.indexOf('await readOffLoop(reSm,')
+    && WS.indexOf('await readOffLoop(reSm,') < WS.indexOf('const session = activeSessions.get(data.sessionId);   // read AFTER the warm'),
+    'P1 on B-299b\'s rule (the wiring): a re-attach reads its history off the loop in the PENDING window, ACKED while it waits — after the task-state warm, before the session is read again and the socket joins');
+  ok(/\n {14}const sm = reSm && session === waitedFor \? reSm : createSessionMessages\(session, data\.sessionId\);/.test(WS) && /if \(sm !== reSm\) await readOffLoop\(sm, /.test(WS),
+    'P1 on B-299b\'s rule: the attach keeps the reader read in the pending window and awaits nothing for it after the join (from the join to the send stays synchronous)');
 }
 
 clearInterval(iv);
