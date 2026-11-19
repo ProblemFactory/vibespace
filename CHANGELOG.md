@@ -68,6 +68,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - In Diagnostics, a new kind of record from a Codex conversation is no longer counted as Claude Code's, and no longer counted twice.
 - An agent running many commands on a paired machine no longer slows the whole workspace: each command's record is written in the background.
 - The Helm chart no longer restarts an instance busy for a few minutes (a restart ended its conversations); it stops taking new requests until it answers again.
+- Website login form and login card: the two-step code field opens VibeSpace's own list of your vault's two-step codes, instead of the browser's suggestions.
+- A two-step code name that matches nothing in the vault is said under the field right away, not only when you save.
 - On slow storage, putting a browser engine's previous kernel back no longer leaves browser starts and downloads waiting forever; each answers within 30 seconds.
 - A browser engine that asks for -disable-sync with one dash is now treated like the two-dash form: it is left out, so the browser can still sign in to Google.
 - The live view of an idle agent browser that two conversations share no longer stays blank when you open it: it shows its own tab.
@@ -125,8 +127,20 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - In a profile with a proxy, a page’s calls (WebRTC) also go only through the proxy; a call that needs UDP does not connect.
 - A locked vault stops a proxied browser from starting; it never falls back to a direct connection.
 - A cloud browser’s profile does not take a proxy: that browser runs at its vendor, where the proxy cannot reach it.
-- Website login form and login card: the two-step code field opens VibeSpace's own list of your vault's two-step codes, instead of the browser's suggestions.
-- A two-step code name that matches nothing in the vault is said under the field right away, not only when you save.
+- With many past conversations, VibeSpace no longer freezes for about a second every few seconds while a window lists them.
+- When the session list cannot be rebuilt, the sidebar now says it is out of date and offers Retry, instead of quietly showing an old list.
+- An act a machine's Hub automation keeps refusing shows in its Activity as one line with a count, at most hourly, not a new line every minute.
+- Opening or ending a turn of an Antigravity conversation that used helpers no longer freezes VibeSpace for seconds while it looks them up in its store.
+- Opening a long Claude conversation, or keeping its Properties open, no longer freezes VibeSpace for seconds while it reads the task list.
+- Opening a long Antigravity conversation no longer freezes VibeSpace for seconds while it reads the conversation's status.
+- Opening a Claude conversation no longer freezes VibeSpace while it searches every project folder for the conversation's helpers.
+- A long Claude conversation that is still working no longer makes VibeSpace pause each time a window reads it.
+- With a long usage history, VibeSpace no longer freezes for a second or two every half minute while it files new usage.
+- With many past conversations, VibeSpace no longer freezes for seconds every half minute while it checks them for new usage.
+- With many conversations running at once, VibeSpace no longer slows down each time one of them reports its usage.
+- Right after VibeSpace starts, the first usage report of a running conversation no longer freezes it for seconds.
+- After a long pause or a big batch from another machine, VibeSpace no longer freezes while it reads the new usage; the Usage window says it is loading.
+- While mounts, open ports or a desktop app's windows are checked in the background, VibeSpace no longer pauses for a moment each time.
 
 ### Security
 - A cluster install can let only its ingress reach each user's VibeSpace (networkPolicy.ingress, off until tried on a test cluster).
