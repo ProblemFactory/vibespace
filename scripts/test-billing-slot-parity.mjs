@@ -18,7 +18,7 @@ import { trackedFiles } from './tracked-files.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
-const ok = (c, m, extra) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (extra !== undefined ? ' — ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); } };
+const ok = (c, m, extra) => { if (typeof m !== 'string') throw new TypeError('ok(): the leg name is not a string — a swapped call (scripts/lib/check.mjs, B-1747)'); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (extra !== undefined ? ' — ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); } };
 
 export const RESOLVERS = Object.freeze(['fireIdentityFor', 'sessionBillingMember', 'resolveUsageKey', 'validateBillingSlot', 'wallSlotFor', 'rejectionSlotFor', 'requestSlotFor', 'readingSlotFor', 'poolCurrentFor', 'poolMemberOfSession']);
 export const STAGES = Object.freeze(['spend', 'cost', 'readings', 'pool', 'routes', 'pile']);
