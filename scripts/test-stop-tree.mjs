@@ -676,7 +676,7 @@ console.log('§10 B-2c5c — the job\'s stop never ends a hub that runs inside i
     g.sentReal = sent10.splice(0).join();
     g.x = { stop: await scene(cut(ENTRY, '', 'main-door-entry-cut'), 'stopx', 'stop'), term: await scene(cut(TRG, '', 'main-door-term-cut2'), 'termx', 'term'), group: await scene(cut(KGG, '', 'main-door-group-cut'), 'grpx', 'group'),
       escalate: await scene(cut(ESG, '', 'main-door-esc-cut'), 'escx', 'escalate'), timeout: await scene(cut(TOG, "        this._termRun(job, run); job._termAt = job._termAt || now(); this._armKillStep(job, run, this._runScope(job, run));\n", 'main-door-timeout-cut'), 'tmox', 'timeout'),
-      rm: await scene(cut(RMG, "    if (alive && stop) this.stop(job, { force: false });\n", 'main-door-rm-cut'), 'rmx', 'rm') };
+      rm: await scene(cut(RMG, "    if (alive && stop) this.stop(job, { force: false });\n", 'main-door-rm-cut'), 'rmx', 'rm') };   // stale-pins: kept — the control plants the older form in a copy
     g.sentCut = sent10.splice(0).join();
   } finally { PI10.signalIdentity = realSig; }
   const refused = (r) => !!r && r.answer && r.answer.code === 'hub-is-main' && r.answer.error === 'this job is the running VibeSpace: it is not stopped here' && r.said && !r.intent;
@@ -722,7 +722,7 @@ console.log('§10 B-2c5c — the job\'s stop never ends a hub that runs inside i
     return new Function(...Object.keys(env), `${fnOf(src, 'async function drainScope() {')}\nreturn drainScope;`)(...Object.values(env))();   // eslint-disable-line no-new-func
   };
   const FIN = "  const fin = procsOrNull(scopeDir), unread = fin === null;\n  return { ...(left ? { left: { n: left, ...(still ? { force: true } : {}) } } : {}), scopeEmpty: !unread && !fin.filter((p) => !(kept && kept(p))).length, ...(unread ? { scopeUnread: true } : {}) };\n";
-  const dr = await drainOf(W), drx = await drainOf(anchored(W, FIN, "  return { ...(left ? { left: { n: left, ...(still ? { force: true } : {}) } } : {}), scopeEmpty: !own().length };\n", 'drain-unread-cut'));
+  const dr = await drainOf(W), drx = await drainOf(anchored(W, FIN, "  return { ...(left ? { left: { n: left, ...(still ? { force: true } : {}) } } : {}), scopeEmpty: !own().length };\n", 'drain-unread-cut'));   // stale-pins: kept — the control plants the older form in a copy
   const sayOf = (src) => { const out = []; const f = new Function('fs', 'logFd', `let keptSaid = false; ${fnOf(src, 'function sayKept(n, what, unread = false) {')}\nreturn sayKept;`)({ writeSync: (fd, b) => out.push(String(b)) }, 9); return (n, w, u) => { f(n, w, u); return out.join(''); }; };   // eslint-disable-line no-new-func
   const wordsU = sayOf(W)(1, 'its kill', true), wordsK = sayOf(W)(1, 'its kill', false);
   ok(dr.scopeEmpty === false && dr.scopeUnread === true && /could not be read: nothing of it was ended — what the job started may still run/.test(wordsU) && !/ended one by one/.test(wordsU) && /ended one by one/.test(wordsK)
