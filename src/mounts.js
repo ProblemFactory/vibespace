@@ -148,7 +148,7 @@ class MountManager {
   constructor({ dataDir, broadcast, getSetting }) {
     // Gmail-as-a-folder engine (2.134.0) — lazy so plain deployments pay nothing
     const { GmailSync } = require('./gmail-sync');
-    this.gmail = new GmailSync({ presets: () => MountManager.drivePresets(), onProgress: () => this._notify() });
+    this.gmail = new GmailSync({ presets: () => MountManager.drivePresets(), onProgress: () => this._notify(), onClientProven: (id, client, rt) => { try { const m = this._state.mounts.find((x) => x.id === id); if (m && rt && MountManager._rtOf(this._dec(m.tokenEnc)) === rt) this._adoptClient(m, client); } catch { } } });   // B-e40d: adopted only while the record holds the token that refreshed
     this.dataDir = dataDir;
     this.broadcast = broadcast || (() => {});
     this._getSetting = getSetting || (() => undefined);
@@ -600,6 +600,7 @@ class MountManager {
       driveMode: m.driveMode, teamDriveId: m.teamDriveId, rootFolderId: m.rootFolderId, clientPreset: m.clientPreset,
       syncCount: m.syncCount, labelIds: m.labelIds, query: m.query, email: m.email, groupBy: m.groupBy,
       clientSecret: m.clientSecretEnc ? this._dec(m.clientSecretEnc) : undefined,
+      mintedClient: MountManager._mintedExport(m, this),   // B-e40d: the client its token was minted under (sealed again at import)
       // webdav / vibespace
       url: m.url, vendor: m.vendor, user: m.user,
       pass: m.passEnc ? this._dec(m.passEnc) : undefined,
@@ -629,6 +630,7 @@ class MountManager {
       if (this._state.mounts.some(x => x.name === m.name)) continue; // skip dupes
       try {
         const nid = this.add(m);
+        MountManager._mintedImport(this._get(nid), m.mintedClient, this);   // B-e40d: a restored mount keeps its minted client
         if (m.kind === 'credential') this._get(nid).kind = 'credential';
       } catch {}
     }
@@ -1608,7 +1610,7 @@ class MountManager {
       if (r.overflow) return 'unknown';   // the output passed the bound: the child was ended (as execFile did) — no proof either way
       if (r.timedOut) return 'hung';
       if (String(r.stdout || '').length >= PROBE_OUT_MAX) return 'unknown';   // past the old road's 1 MB bound: the release's verdict — execFile ENDED the child with ERR_CHILD_PROCESS_STDIO_MAXBUFFER, which carries no `killed` flag (measured: killed undefined), so it read 'unknown' too, never 'hung' (unless its stderr named a timeout or an auth word: now 'unknown' there too)
-      if (r.code === 0) return 'ok';
+      if (r.code === 0) { this._adoptProbed(m, env); return 'ok'; }   // B-e40d: an answer on a spent token proves the client ITS env carried
       const s = String(r.stderr || '');
       if (/ETIMEDOUT/.test(s)) return 'hung';
       // "unauthenticated"/"invalid_grant"/"InvalidAuthenticationToken" are
@@ -2729,6 +2731,132 @@ class MountManager {
     if (m.clientPreset) return presets.find((c) => c.key === m.clientPreset) || null;
     return presets.length === 1 ? presets[0] : presets.find((c) => c.key === 'default') || null;
   }
+  /** B-e40d (B-166e's rule — src/channels/gmail.js refreshClientOf — for the storage mounts): a Google refresh token answers
+   *  only to the OAuth client it was MINTED under, and a preset-backed Drive / Gmail record stores only the preset KEY. So a
+   *  record names the client its token was minted under (`mintedClient {id, key, sealed}`, the secret sealed with
+   *  .mounts-key like every secret of the record). Taken from the SIGN-IN that minted the token — Drive's startDriveAuth or
+   *  gmail-sync's startAuth keeps the client it used (kept a day after the flow ends — keepSignIn: a Save after the flow's 10
+   *  minutes, or after another sign-in began), and the saved token is that sign-in's when their refresh tokens match —
+   *  never guessed from the key at save time (a swap between the sign-in and Save, a withdrawn key whose sign-in fell to
+   *  another preset, an import from another instance). A token no sign-in of this hub minted (or one from before a restart)
+   *  names none here: its first proven-good refresh adopts the client (_adoptClient). A record with its own client names
+   *  none. → the field or null. */
+  static mintClientOf(m, x, tok) {
+    if (!m || m.clientId || !tok) return null;
+    const c = MountManager.signInOf(x, tok);
+    return c ? { id: c.clientId, key: m.clientPreset || null, sealed: x._enc(c.clientSecret) } : null;
+  }
+  /** The client a sign-in of THIS hub minted `tok` under ({clientId, clientSecret}), or null: the live Drive / Gmail flow whose
+   *  token has the same refresh token, else the one kept a day after its flow ended (keepSignIn). */
+  static signInOf(x, tok) {
+    const rt = MountManager._rtOf(tok);
+    if (!rt) return null;
+    for (const f of [x && x._driveAuth, x && x.gmail && x.gmail._auth]) {
+      if (f && f.token && f.client && f.client.clientId && f.client.clientSecret && MountManager._rtOf(f.token) === rt) return { clientId: String(f.client.clientId), clientSecret: String(f.client.clientSecret) };
+    }
+    const { signInClient } = require('./gmail-sync');
+    return signInClient(x && x._driveSignIns, rt) || signInClient(x && x.gmail && x.gmail._signIns, rt);
+  }
+  /** A Connect dialog's picker BEFORE Save (a transient token — the shared drives, the labels): the client its sign-in minted
+   *  it under when the preset under the key now names another (a swap between the sign-in and Save), else the preset's. */
+  static pickerClient(x, tok, clientPreset) {
+    const pc = MountManager._driveClient({ clientPreset: clientPreset || null });
+    const si = MountManager.signInOf(x, tok);
+    return si && (!pc || String(pc.clientId) !== si.clientId) ? si : pc;
+  }
+  /** The refresh token inside a token's JSON text, or null. */
+  static _rtOf(tok) { try { const t = JSON.parse(String(tok)); return t && typeof t.refresh_token === 'string' && t.refresh_token ? t.refresh_token : null; } catch { return null; } }
+  /** Set (or clear) a record's minted client for a token about to be saved — called BEFORE its tokenEnc is written. No key at
+   *  all when none is known (a record's shape is unchanged for every record this rule does not touch); the SAME refresh token
+   *  saved again (a re-paste) keeps the client it already names — only another token clears it. */
+  static setMinted(m, x, tok) {
+    const mc = MountManager.mintClientOf(m, x, tok);
+    if (mc) { m.mintedClient = mc; return; }
+    let prev = null; try { prev = m.tokenEnc ? MountManager._rtOf(x._dec(m.tokenEnc)) : null; } catch { prev = null; }
+    if (!m.clientId && m.mintedClient && prev && prev === MountManager._rtOf(tok)) return;
+    delete m.mintedClient;
+  }
+  /** The minted client opened ({clientId, clientSecret}), or null: none named — or its sealed secret cannot be opened, which
+   *  is never silent (the hub's log says it once: the mount refreshes with the preset; re-authorize it). A LOCKED vault (the
+   *  key sealed by the second password) is no unreadable copy: the copy opened before is used — a running Gmail worker, whose
+   *  token is in memory, refreshes on — and nothing is said. */
+  static mintedOf(m, x) {
+    const mc = m && !m.clientId && m.mintedClient && typeof m.mintedClient === 'object' && typeof m.mintedClient.id === 'string' && m.mintedClient.id ? m.mintedClient : null;
+    if (!mc) return null;
+    let sec = null, locked = false;
+    try { sec = typeof mc.sealed === 'string' && mc.sealed ? x._dec(mc.sealed) : null; } catch (e) { sec = null; locked = /vault_locked/.test(String((e && e.reason) || '')); }
+    const opened = MountManager._mintedOpen || (MountManager._mintedOpen = new Map()), ck = `${mc.id}|${mc.sealed}`;
+    if (typeof sec === 'string' && sec) { opened.delete(ck); opened.set(ck, sec); while (opened.size > 64) opened.delete(opened.keys().next().value); return { clientId: mc.id, clientSecret: sec }; }
+    if (locked) { const kept = opened.get(ck); return kept ? { clientId: mc.id, clientSecret: kept } : null; }
+    MountManager.sayMinted(m, mc.id, null, true);
+    return null;
+  }
+  /** The export carries the minted client like the record's other secrets (plaintext — the caller seals the bundle under the
+   *  export passphrase); the import seals it again under this instance's key (_mintedImport). */
+  static _mintedExport(m, x) {
+    const mc = MountManager.mintedOf(m, x);
+    return mc ? { id: mc.clientId, key: (m.mintedClient && m.mintedClient.key) || null, secret: mc.clientSecret } : undefined;
+  }
+  static _mintedImport(rec, mc, x) {
+    if (!rec || rec.clientId || !['drive', 'gmail'].includes(rec.type) || !mc || typeof mc.id !== 'string' || !mc.id || mc.id.length > 300 || typeof mc.secret !== 'string' || !mc.secret || mc.secret.length > 500) return false;
+    rec.mintedClient = { id: mc.id, key: rec.clientPreset || null, sealed: x._enc(mc.secret) };
+    x._save();
+    return true;
+  }
+  /** THE CLIENT A REFRESH USES for a preset-backed record: the preset's values while they name the client the token was
+   *  minted under (a rotated SECRET is the preset's — it reaches every mount, as before); the MINTED client when the preset
+   *  under the key now names ANOTHER client, or is gone (the 2026-10-23 fleet outage: the presets were replaced under the
+   *  same keys and every refresh was refused for hours); a token saved before this rule names none — the preset's. */
+  static refreshClient(m, x) {
+    const pc = MountManager._driveClient(m);
+    const mc = MountManager.mintedOf(m, x);
+    if (mc && (!pc || String(pc.clientId) !== mc.clientId)) { MountManager.sayMinted(m, mc.clientId, pc && pc.clientId); return { ...mc, minted: true }; }
+    return pc;
+  }
+  /** Said ONCE per record and pair (the hub's log): the preset under its key now names another client (or none), so this mount
+   *  keeps the client its token was minted under — re-authorize it to move it (deploy/README.md: before deleting a replaced client). */
+  static sayMinted(m, minted, preset, unreadable = false) {
+    const k = `${m && m.id}|${minted}|${unreadable ? 'unreadable' : preset || '-'}`;
+    const said = MountManager._mintedSaid || (MountManager._mintedSaid = new Set());
+    if (said.has(k)) return;
+    said.add(k);
+    const who = MountManager.lentName(m) || (m && m.id), kw = m && m.clientPreset ? `preset «${m.clientPreset}»` : 'instance\'s default preset';
+    if (unreadable) { console.log(`[mounts] ${who}: the sealed copy of the client its token was minted under (${String(minted).slice(0, 12)}…) cannot be opened — it refreshes with the ${kw}; re-authorize it`); return; }
+    console.log(`[mounts] ${who}: the ${kw} ${preset ? 'now names another OAuth client' : 'is gone'} — this mount keeps the client its token was minted under (${String(minted).slice(0, 12)}…); re-authorize it to move it`);
+  }
+  /** (`sealed`, not «…Enc»: in a mount record a «…Enc» name is a secret a PERSON writes in a page field — the convention
+   *  test-write-only-secrets holds every one of them to; the minted secret is the hub's own — no page field, never in config
+   *  or the list (test-mounts-oauth §4); the owner's export carries it like the record's other secrets (_mintedExport).)
+   *  B-e40d: ADOPT the client a proven-good refresh used — a token no flow of this hub minted names none (its first good
+   *  refresh adopts it, as B-166e's channel accounts do), and a secret rotated under the SAME client follows into the sealed
+   *  copy (never a stale one). The minted client is the truth: a refresh under ANOTHER id never re-names it. Preset-backed
+   *  Drive / Gmail records only (written on the credential holder — a child's token is its parent's). → whether it wrote. */
+  _adoptClient(rec, used) {
+    const holder = rec && rec.parentId ? this._state.mounts.find((x) => x.id === rec.parentId) : rec;
+    if (!holder || holder.clientId || !['drive', 'gmail'].includes(holder.type) || !used || !used.clientId || !used.clientSecret) return false;
+    const mc = holder.mintedClient && typeof holder.mintedClient === 'object' ? holder.mintedClient : null;
+    if (mc && mc.id !== String(used.clientId)) return false;
+    let same = false; try { same = !!mc && this._dec(mc.sealed) === String(used.clientSecret); } catch { same = false; }
+    if (same) return false;
+    holder.mintedClient = { id: String(used.clientId), key: holder.clientPreset || null, sealed: this._enc(String(used.clientSecret)) };
+    this._save();
+    return true;
+  }
+  /** B-e40d: a backend probe ANSWERED (rclone listed) while the token ITS env carried was SPENT — rclone refreshed it with the
+   *  client that SAME env carried: adopt that one, never a client worked out again after the run (a preset swapped during the
+   *  probe is not recorded), and only while the record still holds the token the probe ran with. → whether it wrote. */
+  _adoptProbed(m, env) {
+    try {
+      let t = null; try { t = JSON.parse(String((env && env.RCLONE_CONFIG_VS_TOKEN) || '')); } catch { t = null; }
+      const e = t ? (typeof t.expiry === 'number' ? t.expiry : Date.parse(t.expiry || '') || 0) : 0;
+      if (!t || !t.refresh_token || !(e > 0 && e < Date.now() - 60e3)) return false;
+      // the RECORD that holds the token: a submount's parent — never _connOf's merged copy, which no write reaches
+      const holder = m && m.parentId ? this._state.mounts.find((x) => x.id === m.parentId) : m;
+      let cur = null; try { cur = holder && holder.tokenEnc ? MountManager._rtOf(this._dec(holder.tokenEnc)) : null; } catch { cur = null; }
+      if (cur !== t.refresh_token) return false;
+      return this._adoptClient(holder, { clientId: env.RCLONE_CONFIG_VS_CLIENT_ID, clientSecret: env.RCLONE_CONFIG_VS_CLIENT_SECRET });
+    } catch { return false; }
+  }
 
   static _driveMode(v) {
     return ['mydrive', 'shared-with-me', 'shared-drive'].includes(v) ? (v === 'mydrive' ? null : v) : null;
@@ -2752,7 +2880,7 @@ class MountManager {
       JSON.parse(tok); // validate
       env = rcloneEnv({ RCLONE_CONFIG_VS_TYPE: 'drive', RCLONE_CONFIG_VS_TOKEN: tok, RCLONE_CONFIG_VS_SCOPE: 'drive' });
       let cid = clientId, csec = clientSecret;
-      if (!cid) { const pc = MountManager._driveClient({ clientPreset: clientPreset || null }); if (pc) { cid = pc.clientId; csec = pc.clientSecret; } }
+      if (!cid) { const pc = MountManager.pickerClient(this, tok, clientPreset); if (pc) { cid = pc.clientId; csec = pc.clientSecret; } }   // B-e40d: its sign-in's client after a swap
       if (cid) { env.RCLONE_CONFIG_VS_CLIENT_ID = cid; if (csec) env.RCLONE_CONFIG_VS_CLIENT_SECRET = csec; }
     }
     return new Promise((resolve, reject) => {
@@ -2777,10 +2905,11 @@ class MountManager {
         clientPreset: m.clientPreset || null,
         clientId: m.clientId || null,
         clientSecret: m.clientSecretEnc ? this._dec(m.clientSecretEnc) : null,
+        id, name: MountManager.lentName(m) || id, minted: MountManager.mintedOf(m, this),   // B-e40d: a labels read that refreshed adopts too
       });
     }
     if (!token) throw new Error('token required');
-    return this.gmail.listLabels({ token: String(token).trim(), clientId, clientSecret, clientPreset });
+    return this.gmail.listLabels({ token: String(token).trim(), clientId, clientSecret, clientPreset, minted: MountManager.signInOf(this, String(token).trim()) });   // B-e40d: its sign-in's client after a swap
   }
 
   _mountGmail(id) {
@@ -2793,6 +2922,9 @@ class MountManager {
       clientPreset: m.clientPreset || null,
       clientId: m.clientId || null,
       clientSecret: m.clientSecretEnc ? this._dec(m.clientSecretEnc) : null,
+      // B-e40d: the client its token was minted under (gmail-sync uses it when the preset under the key names another) — read
+      // AT EACH REFRESH, never a copy taken at start: a client adopted while this worker runs is the one its next refresh uses
+      name: MountManager.lentName(m) || id, minted: () => MountManager.mintedOf(this._state.mounts.find((x) => x.id === id), this),
       syncCount: m.syncCount, labelIds: m.labelIds, query: m.query, groupBy: m.groupBy,
     });
     m.desired = 'mounted';
@@ -2860,7 +2992,8 @@ class MountManager {
     if (clientId && clientSecret) authArgs.push(String(clientId), String(clientSecret));
     authArgs.push('--auth-no-open-browser');
     const child = spawn(this.rcloneBin(), authArgs, { env: rcloneEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
-    const st = { child, url: null, token: null, error: null, buf: '', startedAt: Date.now() };
+    // B-e40d: the client this sign-in mints under — a token saved from it names THAT client (MountManager.mintClientOf)
+    const st = { child, url: null, token: null, error: null, buf: '', startedAt: Date.now(), client: clientId && clientSecret ? { clientId: String(clientId), clientSecret: String(clientSecret) } : null };
     this._driveAuth = st;
     const onData = (d) => {
       st.buf += d.toString();
@@ -3016,6 +3149,7 @@ class MountManager {
     this._driveAuthGen = (this._driveAuthGen || 0) + 1;   // B-e783 r2: a press still sweeping its orphans spawns nothing
     const st = this._driveAuth;
     if (st) { clearTimeout(st.timer); try { st.child.kill(); } catch {} }
+    if (st && st.token) require('./gmail-sync').keepSignIn((this._driveSignIns ||= new Map()), st);   // B-e40d: a later Save still names its client
     this._driveAuth = null;
   }
 

@@ -39,28 +39,62 @@ function decodeHeaderWord(s) {
   }).replace(/\?=\s+=\?/g, '?==?');
 }
 
+// B-e40d: a sign-in's minted client OUTLIVES its flow (the flow's 10-minute timer, another sign-in, a Cancel) for a day — a
+// person who picks folders or labels for longer before Save still saves a token that names its client (src/mounts.js
+// MountManager.mintClientOf reads it; the Drive flow keeps its own map). Keyed by a hash of the refresh token, never the
+// token; at most 16 kept, in memory only (a restart forgets: such a token's first good refresh adopts its client).
+const SIGNIN_KEEP_MS = 24 * 3600e3;
+const rtOf = (tok) => { try { const t = JSON.parse(String(tok)); return t && typeof t.refresh_token === 'string' && t.refresh_token ? t.refresh_token : null; } catch { return null; } };
+const rtKey = (rt) => crypto.createHash('sha256').update(String(rt)).digest('hex');
+function keepSignIn(map, st) {
+  const rt = rtOf(st && st.token), c = st && st.client;
+  if (!map || !rt || !c || !c.clientId || !c.clientSecret) return;
+  const now = Date.now();
+  for (const [k, v] of map) if (now - v.at > SIGNIN_KEEP_MS) map.delete(k);
+  map.delete(rtKey(rt));
+  map.set(rtKey(rt), { client: { clientId: String(c.clientId), clientSecret: String(c.clientSecret) }, at: now });
+  while (map.size > 16) map.delete(map.keys().next().value);
+}
+function signInClient(map, rt) {
+  const v = map && rt ? map.get(rtKey(rt)) : null;
+  return v && Date.now() - v.at <= SIGNIN_KEEP_MS ? v.client : null;
+}
+
 class GmailSync {
-  constructor({ presets, onProgress } = {}) {
+  constructor({ presets, onProgress, onClientProven } = {}) {
     this._presets = presets || (() => []);
     this._onProgress = onProgress || (() => { });
+    this._onClientProven = onClientProven || (() => { });   // B-e40d: a refresh that worked proves its client (MountManager adopts it)
     this._workers = new Map(); // mount id → worker
     this._auth = null;         // one guided OAuth flow at a time (like drive)
+    this._signIns = new Map(); // B-e40d: a sign-in's minted client, kept a day after its flow ends (keepSignIn)
   }
 
   // ── OAuth (loopback + paste-back, mirrors the Drive flow UX) ──
 
-  _client({ clientId, clientSecret, clientPreset } = {}) {
+  _client({ id = null, name = null, clientId, clientSecret, clientPreset, minted = null } = {}) {
     if (clientId && clientSecret) return { clientId, clientSecret };
+    // the record's minted client is READ HERE, each refresh (src/mounts.js _mountGmail hands a reader): one adopted while the
+    // worker runs is used at once
+    if (typeof minted === 'function') { try { minted = minted(); } catch { minted = null; } }
     const list = this._presets();
     const pick = clientPreset ? list.find((c) => c.key === clientPreset)
       : (list.length === 1 ? list[0] : list.find((c) => c.key === 'default'));
+    // B-e40d: the record names the client its token was MINTED under (src/mounts.js MountManager.mintedOf) — a refresh
+    // keeps that client when the preset under the key now names ANOTHER one, or is gone (the 2026-10-23 outage); while the
+    // preset names the same client its values are used, each refresh (a rotated secret reaches the mount at once)
+    if (minted && minted.clientId && minted.clientSecret && (!pick || String(pick.clientId) !== String(minted.clientId))) {
+      const k = `${id}|${minted.clientId}|${pick ? pick.clientId : '-'}`;
+      if (!(this._mintedSaid || (this._mintedSaid = new Set())).has(k)) { this._mintedSaid.add(k); console.log(`[gmail-sync] ${name || id || 'a Gmail mount'}: the ${clientPreset ? `preset «${clientPreset}»` : 'instance\'s default preset'} ${pick ? 'now names another OAuth client' : 'is gone'} — it keeps the client its token was minted under; re-authorize it to move it`); }
+      return { clientId: minted.clientId, clientSecret: minted.clientSecret };
+    }
     if (pick) return { clientId: pick.clientId, clientSecret: pick.clientSecret };
     throw new Error('Gmail needs an OAuth client — pick a preset or provide a custom client id/secret (there is no built-in fallback client for Gmail)');
   }
 
   startAuth(opts = {}) {
     this.cancelAuth();
-    const client = this._client(opts);
+    const client = this._client({ clientId: opts.clientId, clientSecret: opts.clientSecret, clientPreset: opts.clientPreset });   // the request's own fields only
     const state = crypto.randomBytes(12).toString('hex');
     const st = { client, state, url: null, token: null, error: null, server: null, startedAt: Date.now() };
     this._auth = st;
@@ -129,6 +163,7 @@ class GmailSync {
     if (!st) return;
     try { st.server?.close(); } catch { }
     clearTimeout(st.timer);
+    if (st.token) keepSignIn(this._signIns, st);   // B-e40d: a later Save still names its client
     this._auth = null;
   }
 
@@ -213,6 +248,7 @@ class GmailSync {
     if (!r.ok) throw new Error('token refresh failed: ' + (d.error_description || d.error || r.status) + (d.error === 'invalid_grant' ? ' — re-authorize this Gmail mount' : ''));
     w.tok.access_token = d.access_token;
     w.tok.expiry = Date.now() + (d.expires_in || 3600) * 1000;
+    if (w.cfg && w.cfg.id && !w.stopped) { try { this._onClientProven(w.cfg.id, client, w.tok.refresh_token); } catch { } }   // a stopped worker proves nothing
     return d.access_token;
   }
 
@@ -454,4 +490,4 @@ class GmailSync {
   }
 }
 
-module.exports = { GmailSync };
+module.exports = { GmailSync, keepSignIn, signInClient };

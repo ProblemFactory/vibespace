@@ -227,10 +227,17 @@ live (the Integrations window, the storage and channel sign-in dialogs, every
 consumer's next request) and logs ONE line naming which keys were added,
 removed or rotated — never a value. A file that cannot be parsed keeps the
 previous presets in effect and is reported (log + the Integrations window);
-it never takes the instance down. A mount stores only a preset's KEY, so a
+it never takes the instance down. A mount stores a preset's KEY, so a
 rotated secret reaches every mount (a running rclone mount at its next
 remount) and a withdrawn key is reported by name, never silently replaced by
-another client.
+another client. A Google Drive or Gmail mount also keeps the OAuth client its
+token was minted under (a Google refresh token answers to no other): when a
+DIFFERENT client is put under the same key, or the key is withdrawn, the mount
+goes on refreshing with its own client and the hub's log says so once per
+mount it mounts or checks. A mount set up before this, or from a pasted token,
+learns its client at its first successful refresh. Before you delete a replaced
+client at Google, re-authorize each Drive and Gmail mount set up under that key
+(the log names the ones it has met), or it stops at its next refresh.
 
 ### A new user inherits them; per-user blocks are overrides
 

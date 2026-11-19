@@ -44,6 +44,7 @@ module.exports = {
       email: cfg.email ? String(cfg.email) : null,
       mode: 'ro', // read-only archive by design
     });
+    x.constructor.setMinted(m, x, tok);   // B-e40d: the client the sign-in minted this token under (a preset swapped under the key later keeps it)
   },
   update(m, patch, setIf, x) {
     // Scope changes (filter/count) must FORCE A RESEED: the persisted
@@ -57,7 +58,7 @@ module.exports = {
     if (patch.labelIds !== undefined) m.labelIds = String(patch.labelIds || '');
     if (patch.query !== undefined) m.query = String(patch.query || '');
     if (patch.clientPreset !== undefined) m.clientPreset = patch.clientPreset ? String(patch.clientPreset) : null;
-    if (patch.token) { JSON.parse(String(patch.token).trim()); m.tokenEnc = x._enc(String(patch.token).trim()); }
+    if (patch.token) { JSON.parse(String(patch.token).trim()); x.constructor.setMinted(m, x, String(patch.token).trim()); m.tokenEnc = x._enc(String(patch.token).trim()); }   // B-e40d: a re-authorize names the client its sign-in minted under
     return scopeChanged ? 'reseed' : undefined;
   },
   // the CLIENT cells (lane dc-mount-client): pure data GET /api/mounts publishes once (`providers`); src/lib/sidebar-mounts.js

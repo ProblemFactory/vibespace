@@ -76,6 +76,7 @@ module.exports = {
       clientPreset: cfg.clientPreset ? String(cfg.clientPreset) : null,
       clientSecretEnc: cfg.clientSecret ? x._enc(cfg.clientSecret) : null,
     });
+    x.constructor.setMinted(m, x, tok);   // B-e40d: the client the sign-in minted this token under (a preset swapped under the key later keeps it)
   },
   child(m, cfg, p, x) {
     m.driveFolder = String(cfg.driveFolder || '').replace(/^\/+|\/+$/g, '');
@@ -101,6 +102,7 @@ module.exports = {
       let tok = String(patch.token).trim();
       const jm = tok.match(/\{[\s\S]*\}/); if (jm) tok = jm[0];
       JSON.parse(tok); // validate
+      x.constructor.setMinted(m, x, tok);   // B-e40d: a new token names the client its sign-in minted it under (or none: adopted at its first good refresh)
       m.tokenEnc = x._enc(tok);
     }
   },
@@ -110,9 +112,10 @@ module.exports = {
     env[P('SCOPE')] = 'drive';
     if (m.clientId) { env[P('CLIENT_ID')] = m.clientId; if (m.clientSecretEnc) env[P('CLIENT_SECRET')] = x._dec(m.clientSecretEnc); }
     else {
-      // Instance-preset client (admin-injected env; record stores only the
-      // preset KEY — see drivePresets). Never persisted app-side.
-      const pc = x.constructor._driveClient(m);
+      // Instance-preset client (admin-injected env; record stores the preset KEY — see drivePresets — and, B-e40d, the
+      // client its token was minted under, sealed: `mintedClient`, used when the preset under the key names another).
+      // B-e40d: the preset's values while they name the client the token was minted under, else the minted client
+      const pc = x.constructor.refreshClient(m, x);
       if (pc) { env[P('CLIENT_ID')] = pc.clientId; env[P('CLIENT_SECRET')] = pc.clientSecret; }
     }
     // Cloud-side SCOPE of the mount (2.131.0): shared-with-me / a Shared
@@ -139,6 +142,7 @@ module.exports = {
     return { clientId, clientSecret };
   },
   writeToken(holder, tok, x) {
+    x.constructor.setMinted(holder, x, tok);   // B-e40d: a re-authorize (applyDriveToken) names the client its sign-in minted under
     holder.tokenEnc = x._enc(tok);
   },
   // the CLIENT cells (lane dc-mount-client): pure data GET /api/mounts publishes once (`providers`); src/lib/sidebar-mounts.js
