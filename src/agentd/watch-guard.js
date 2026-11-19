@@ -2,7 +2,7 @@
 /**
  * THE DEVICE AGENT'S WATCHES NEVER END IT (主开发 2026-11-19, found by the readers of the hub's watch hotfix). An fs.watch can
  * fail AFTER it was armed (the machine's limit of file watches), and an 'error' event with no listener ends the process.
- * Every watcher the agent arms goes through armWatch: the listener is on it at once. A watch LOST (an error after arming, a
+ * Every watcher the agent arms goes through armWatch / armWatches (every root of a feature at once): the listener is on it at once. A watch LOST (an error after arming, a
  * refusal at arming for any cause but a missing folder) is closed and dropped from its feature's list, and the feature falls
  * back to a SWEEP — its own kick every sweepMs (the hub has no sweep of its own for these pushes) — said ONCE per feature for
  * the agent's PROCESS (the said-set lives as long as the process). A lost root watch is armed again only at the next link
@@ -31,17 +31,34 @@ function sweep(ctx, list, onChange) {
   list.sweep = (ctx.setInterval || setInterval)(() => { if (!list.ended) { try { onChange(); } catch { } } }, ctx.sweepMs || SWEEP_MS);
   try { list.sweep.unref && list.sweep.unref(); } catch { }
 }
-function lost(ctx, list, onChange, what, text) {
+function lost(ctx, list, onChange, what, text, slot = what) {   // slot: what is said once a process (the cap line has its own)
   if (list.ended) return;
   const { log, said } = ctx;
-  if (said && !said.has(what)) { said.add(what); try { log(`${what}: ${text} — it falls back to a sweep every ${Math.round((ctx.sweepMs || SWEEP_MS) / 1000)} s`); } catch { } }
+  if (said && !said.has(slot)) { said.add(slot); try { log(`${what}: ${text} — it falls back to a sweep every ${Math.round((ctx.sweepMs || SWEEP_MS) / 1000)} s`); } catch { } }
   sweep(ctx, list, onChange);
+}
+/** THE FEATURE'S WALK (主开发 05:35Z): ONE breadth-first queue and ONE budget for every root of the feature (the list) — the
+ *  roots' own watches first (armWatches), then their folders depth by depth, so an earlier root never leaves a later one
+ *  unwatched. Past the cap the folders left out are counted and the line names the first of them, said once when the walk ends. */
+function walkOf(ctx, list, onChange, what) {
+  if (list.walk) return list.walk;
+  const w = { queue: [], qi: 0, pumping: false, cap: ctx.walkCap || WALK_CAP, left: 0, first: null };
+  w.pump = () => {
+    if (w.pumping) return;
+    w.pumping = true;
+    try { while (w.qi < w.queue.length) w.queue[w.qi++](); } finally {
+      w.pumping = false; w.queue.length = 0; w.qi = 0;
+      if (w.left) { const n = w.left, first = w.first; w.left = 0; w.first = null; lost(ctx, list, onChange, what, `its watches reached ${w.cap} folders, the most it keeps; at least ${n} folder(s) past it are not watched — the first: ${first}`, `${what}:cap`); }
+    }
+  };
+  list.walk = w;
+  return w;
 }
 /** Linux: the tree walked here — one plain watch per folder (a symbolic link is not followed), each in a try with its own
  *  listener; a 'rename' looks at the entry it names; a folder that is gone drops its watch and every watch under it. */
-function armTree(ctx, list, root, onChange, what) {
+function armTree(ctx, list, root, onChange, what, { defer = false } = {}) {
   const { fs } = ctx;
-  const cap = ctx.walkCap || WALK_CAP;   // counted over the FEATURE's list (every root of it): one budget of the user's watches
+  const walk = walkOf(ctx, list, onChange, what);   // counted over the FEATURE's list (every root of it): one budget of the user's watches
   const byDir = new Map();   // folder → { w, ino } (its inode when armed: a folder made again under the same name is another)
   const kids = new Map();    // folder → the set of its watched subfolders (a drop walks the folder's own, never the whole map)
   const parentOf = (dir) => { const i = dir.lastIndexOf('/'); return i > 0 ? dir.slice(0, i) : '/'; };
@@ -61,10 +78,8 @@ function armTree(ctx, list, root, onChange, what) {
   };
   const dropOne = (dir, w) => { const e = byDir.get(dir); if (e && e.w === w) unhook(dir, e); };   // one watcher's own error: that watch alone
   const gone = (e) => !!e && (e.code === 'ENOENT' || e.code === 'ENOTDIR');
-  // THE WALK IS BREADTH-FIRST: every shallow folder is armed before any deeper one, so the cap's slots go to the folders where new
-  // transcripts appear (a project's own), never to the first project's deep session folders
-  const queue = []; let qi = 0, pumping = false;
-  const pump = () => { if (pumping) return; pumping = true; try { while (qi < queue.length) scan(queue[qi++]); } finally { pumping = false; queue.length = 0; qi = 0; } };
+  // THE WALK IS BREADTH-FIRST (the feature's queue): every shallow folder is armed before any deeper one, so the cap's slots go to
+  // the folders where new transcripts appear (a project's own), never to the first project's deep session folders
   const scan = (dir) => {
     if (list.ended) return;
     let ents;
@@ -77,7 +92,7 @@ function armTree(ctx, list, root, onChange, what) {
   };
   const named = (dir, name) => {   // a 'rename' names ONE entry: look at it alone (a busy folder never pays a whole readdir per file)
     if (list.ended) return;
-    if (name == null) { queue.push(dir); pump(); return; }
+    if (name == null) { walk.queue.push(() => scan(dir)); walk.pump(); return; }
     const p = `${dir}/${name}`;
     let st = null;
     try { st = fs.lstatSync(p); } catch (e) {
@@ -96,9 +111,9 @@ function armTree(ctx, list, root, onChange, what) {
     if ((had && had.ino != null && st.ino != null && had.ino !== st.ino) || (!had && kids.has(p))) drop(p);   // made again before its event was read (or after its own watch ended): the old watches are dead
     add(p, dir, st.ino);
   };
-  const add = (dir, parent = null, ino0 = null) => {
+  const add = (dir, parent = null, ino0 = null, { pump = true } = {}) => {
     if (list.ended || byDir.has(dir)) return null;
-    if (list.length >= cap) { lost(ctx, list, onChange, what, `its watches reached ${cap} folders, the most it keeps; the ones past it under ${top} are not watched`); return null; }
+    if (list.length >= walk.cap) { walk.left++; if (!walk.first) walk.first = dir; if (!walk.pumping) walk.pump(); return null; }   // past the feature's budget: counted, the first named when the walk ends (a folder made later: at once)
     let ino = ino0;
     if (ino == null) { try { ino = fs.statSync(dir).ino; } catch { } }   // BEFORE the watch: a folder replaced between the two is re-armed at its next event, never kept
     let w;
@@ -109,14 +124,14 @@ function armTree(ctx, list, root, onChange, what) {
     w.on('error', (e) => { dropOne(dir, w); if (!gone(e)) lost(ctx, list, onChange, what, `the watch on ${dir} ended (${why(e)})`); });
     byDir.set(dir, { w, ino }); list.push(w);
     if (parent != null) { let s = kids.get(parent); if (!s) kids.set(parent, (s = new Set())); s.add(dir); }
-    queue.push(dir); pump();
+    walk.queue.push(() => scan(dir)); if (pump) walk.pump();
     return w;
   };
   const top = String(root).replace(/\/+$/, '') || '/';
   let rs = null;
   try { rs = fs.statSync(top); } catch (e) { if (!gone(e)) lost(ctx, list, onChange, what, `the watch on ${top} could not be armed (${why(e)})`); return null; }
   if (!rs.isDirectory()) return null;   // the feeds watch folders; a file at the root is not one
-  return add(top, null, rs.ino);
+  return add(top, null, rs.ino, { pump: !defer });
 }
 function armWatch(ctx, list, dir, onChange, what) {
   if (list.ended) return null;   // a feature ended on purpose arms nothing more
@@ -141,10 +156,19 @@ function armWatch(ctx, list, dir, onChange, what) {
   list.push(w);
   return w;
 }
+/** every root of a feature at once (主开発 05:35Z): on the tree road the roots' own watches first, then ONE breadth-first walk over all
+ *  of them with the feature's budget; macOS / Windows arm each root as before. → one answer per root (a watcher or null) */
+function armWatches(ctx, list, dirs, onChange, what) {
+  const platform = ctx.platform || process.platform;
+  if (platform === 'darwin' || platform === 'win32') return dirs.map((d) => armWatch(ctx, list, d, onChange, what));
+  const out = dirs.map((d) => (list.ended ? null : armTree(ctx, list, d, onChange, what, { defer: true })));
+  if (!list.ended) walkOf(ctx, list, onChange, what).pump();
+  return out;
+}
 function endWatches(ctx, list) {
   if (!list) return;
   list.ended = true;
   if (list.sweep) { try { (ctx.clearInterval || clearInterval)(list.sweep); } catch { } list.sweep = null; }
   for (const w of list.splice(0)) { try { w.close(); } catch { } }
 }
-module.exports = { armWatch, endWatches, SWEEP_MS, WALK_CAP };
+module.exports = { armWatch, armWatches, endWatches, SWEEP_MS, WALK_CAP };

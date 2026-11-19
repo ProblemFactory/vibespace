@@ -737,7 +737,7 @@ const { reExecArgv, repointCurrent, handOver, listenWithRetry } = require('./ree
 // lane win-device-boot-hidden: the daemon's OWN launch on Windows — the console look + the logon task (PURE rules + texts)
 const HS = require('./hidden-start.js');
 const LH = require('./lock-holder.js'); // B-8475: whose agent a live pid in the lock is
-const { armWatch, endWatches } = require('./watch-guard.js'); // every watch the agent arms carries its 'error' listener at once; a lost watch falls back to a sweep
+const { armWatches, endWatches } = require('./watch-guard.js'); // every watch the agent arms carries its 'error' listener at once; a lost watch falls back to a sweep
 const WATCH = { fs, log: (m) => log(m), said: new Set() };
 // THE RE-EXEC — the one site that starts this daemon's successor: the self-upgrade (beginUpgrade) and the console
 // self-heal at the start (lane win-device-boot-hidden). Each caller hands `reExecArgv(<script>)` (the script + EVERY
@@ -2056,10 +2056,8 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
             const watches = [];
             // .codex/sessions joined in R4: rollout growth drives BOTH codex
             // discovery freshness and the push-triggered usage harvest
-            for (const d of [path.join(home, '.claude', 'sessions'), path.join(home, '.claude', 'projects'),
-              path.join(process.env.CODEX_HOME || path.join(home, '.codex'), 'sessions')]) {
-              armWatch(WATCH, watches, d, kick, 'discovery-watch');
-            }
+            armWatches(WATCH, watches, [path.join(home, '.claude', 'sessions'), path.join(home, '.claude', 'projects'),   // every root at once: one budget, one walk
+              path.join(process.env.CODEX_HOME || path.join(home, '.codex'), 'sessions')], kick, 'discovery-watch');
             watches.clearKick = () => { if (timer) { clearTimeout(timer); timer = null; } }; // its pending kick dies with the link (U1)
             this._discoWatch = watches;
           }
@@ -2202,10 +2200,8 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
             const kick = () => { if (timer) return; timer = setTimeout(() => { timer = null; runWalk(); }, 1500); };
             st.kick = kick;
             st.clearKick = () => { if (timer) { clearTimeout(timer); timer = null; } };
-            for (const d of [path.join(home, '.claude', 'projects'),
-              path.join(process.env.CODEX_HOME || path.join(home, '.codex'), 'sessions')]) {
-              armWatch(WATCH, st.watches, d, kick, 'usage-events-watch');
-            }
+            armWatches(WATCH, st.watches, [path.join(home, '.claude', 'projects'),   // every root at once: one budget, one walk
+              path.join(process.env.CODEX_HOME || path.join(home, '.codex'), 'sessions')], kick, 'usage-events-watch');
             runWalk(); // initial drain so the subscriber starts complete
           }
           mux.control({ op: 'usage-events-watching', id: msg.id });

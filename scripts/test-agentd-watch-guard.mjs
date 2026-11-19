@@ -20,8 +20,9 @@
 //      one — is armWatch's own, carries its 'error' listener in the same statement, or is a named row; the hub's watch door
 //      is required by no module of the closure.
 //   §5 the wiring in agentd.js.
-//   CONTROLS (18): no listener · no sweep · endWatches without its close loop · the arm-time catch removed · the tree's
-//      catch removed · the walk without its cap · no inode check · the walk depth-first · the folder's own event ignored · the store's dead watch kept · the reconnect without its lost check · a planted destructured watch ·
+//   CONTROLS (20): no listener · no sweep · endWatches without its close loop · the arm-time catch removed · the tree's
+//      catch removed · the walk without its cap · no inode check · the walk depth-first · the folder's own event ignored ·
+//      each root walked in turn · the later folder's pump dropped · the store's dead watch kept · the reconnect without its lost check · a planted destructured watch ·
 //      an inline required one · an alias · one destructured from the fs binding · a recursive one with its listener · a
 //      second bare watch in a named row's file · a watch-door require.
 // Run: node scripts/test-agentd-watch-guard.mjs
@@ -185,10 +186,10 @@ const treeFs = (tree, { refuse = new Set(), unreadable = new Set() } = {}) => {
   const big = () => ({ h: { proj: Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`s${i}`, {}])) } });
   const F = treeFs(big()), T = fakeTimers(), lines = [], list = [];
   WG.armWatch(ctxOf(F, T, lines, { platform: 'linux', walkCap: 5 }), list, '/h/proj', () => { }, 'discovery-watch');
-  ok(list.length === 5 && lines.length === 1 && lines[0] === 'discovery-watch: its watches reached 5 folders, the most it keeps; the ones past it under /h/proj are not watched — it falls back to a sweep every 60 s' && T.live.size === 1,
+  ok(list.length === 5 && lines.length === 1 && lines[0] === 'discovery-watch: its watches reached 5 folders, the most it keeps; at least 5 folder(s) past it are not watched — the first: /h/proj/s4 — it falls back to a sweep every 60 s' && T.live.size === 1,
     'THE CAP: a feature past the cap (5 here) arms that many watches and no more — said ONCE, and the 60 s sweep stands in', { n: list.length, lines });
   ok(WG.WALK_CAP === 2048 && /const WALK_CAP = 2048;/.test(GUARD_SRC), 'the cap is a number stated in the code: 2048 watches a feature (every root of it)');
-  const MC = modOf(anchored(GUARD_SRC, "    if (list.length >= cap) { lost(ctx, list, onChange, what, `its watches reached ${cap} folders, the most it keeps; the ones past it under ${top} are not watched`); return null; }\n", '', 'walk-without-cap'));
+  const MC = modOf(anchored(GUARD_SRC, "    if (list.length >= walk.cap) { walk.left++; if (!walk.first) walk.first = dir; if (!walk.pumping) walk.pump(); return null; }   // past the feature's budget: counted, the first named when the walk ends (a folder made later: at once)\n", '', 'walk-without-cap'));
   const lc = [];
   MC.armWatch(ctxOf(treeFs(big()), fakeTimers(), [], { platform: 'linux', walkCap: 5 }), lc, '/h/proj', () => { }, 'discovery-watch');
   ok(lc.length === 10, 'CONTROL: the walk without its cap arms every folder (10 for a cap of 5) — RED', lc.length);
@@ -229,7 +230,7 @@ const treeFs = (tree, { refuse = new Set(), unreadable = new Set() } = {}) => {
   const lb = [];
   WG.armWatch(ctxOf(treeFs(deep()), fakeTimers(), [], { platform: 'linux', walkCap: 4 }), lb, '/h/p', () => { }, 'discovery-watch');
   ok(lb.map((w) => w.dir).sort().join() === '/h/p,/h/p/a,/h/p/b,/h/p/c', 'BREADTH-FIRST: under a cap of 4 the shallow folders take the slots (a, b, c) before the first project\'s deep ones', lb.map((w) => w.dir));
-  const MB = modOf(anchored(GUARD_SRC, '    queue.push(dir); pump();\n    return w;\n', '    scan(dir);\n    return w;\n', 'walk-depth-first')); // stale-pins: kept — the control plants the walk as it was
+  const MB = modOf(anchored(GUARD_SRC, '    walk.queue.push(() => scan(dir)); if (pump) walk.pump();\n    return w;\n', '    scan(dir);\n    return w;\n', 'walk-depth-first')); // stale-pins: kept — the control plants the walk as it was
   const lbd = [];
   MB.armWatch(ctxOf(treeFs(deep()), fakeTimers(), [], { platform: 'linux', walkCap: 4 }), lbd, '/h/p', () => { }, 'discovery-watch');
   ok(lbd.map((w) => w.dir).sort().join() === '/h/p,/h/p/a,/h/p/a/d1,/h/p/a/d1/d2', 'CONTROL: the walk depth-first spends the slots on the first project\'s deep folders (b and c unwatched) — RED', lbd.map((w) => w.dir));
@@ -254,6 +255,37 @@ const treeFs = (tree, { refuse = new Set(), unreadable = new Set() } = {}) => {
   emitSafely(le.find((w) => w.dir === '/h/proj/a'), ENOSPC());
   FE.tree.h.proj.a = { y: {} }; FE.remake('/h/proj/a'); re.cb('rename', 'a');
   ok(xe.closed && le.some((w) => w.dir === '/h/proj/a') && le.some((w) => w.dir === '/h/proj/a/y') && !le.some((w) => w.dir === '/h/proj/a/x'), 'a folder made again AFTER its own watch ended: its old subfolders\' dead watches go, the new folder and its subfolder armed', le.map((w) => w.dir));
+}
+{
+  // EVERY ROOT OF A FEATURE AT ONCE (主开发 05:35Z): one budget and one breadth-first walk over all the roots — an earlier root that
+  // fills the budget never leaves a later root unwatched, and the line names what was left out
+  const two = () => ({ h: { a: { a1: {}, a2: {}, a3: {}, a4: {}, a5: {} }, b: { b1: {} } } });
+  const T2 = fakeTimers(), l2 = [], lines2 = [];
+  WG.armWatches(ctxOf(treeFs(two()), T2, lines2, { platform: 'linux', walkCap: 3 }), l2, ['/h/a', '/h/b'], () => { }, 'discovery-watch');
+  ok(l2.map((w) => w.dir).sort().join() === '/h/a,/h/a/a1,/h/b' && lines2.length === 1 && lines2[0] === 'discovery-watch: its watches reached 3 folders, the most it keeps; at least 5 folder(s) past it are not watched — the first: /h/a/a2 — it falls back to a sweep every 60 s' && T2.live.size === 1,
+    'two roots under one budget of 3: BOTH roots watched first, then the walk breadth-first over both; one line names how many were left out and the first of them', { dirs: l2.map((w) => w.dir), lines: lines2 });
+  const l3 = [], lines3 = [], ctx3 = ctxOf(treeFs(two()), fakeTimers(), lines3, { platform: 'linux', walkCap: 3 });
+  for (const d of ['/h/a', '/h/b']) WG.armWatch(ctx3, l3, d, () => { }, 'discovery-watch');   // the release's loop: one root walked whole, then the next
+  ok(!l3.some((w) => w.dir === '/h/b'), 'CONTROL (each root armed and walked in turn, as the agent did): the first root fills the budget and the second root has NO watch — RED', l3.map((w) => w.dir));
+  const lm = []; WG.armWatches(ctxOf(standIn(), fakeTimers(), [], { platform: 'darwin' }), lm, ['/h/a', '/h/b'], () => { }, 'discovery-watch');
+  ok(lm.length === 2 && lm.every((w) => w.recursive), 'macOS / Windows: armWatches arms each root with node\'s own recursive watch, as before');
+}
+{
+  // its read (round 2): A FOLDER MADE LATER past the budget is said and swept AT ONCE; the cap line has its OWN said-once slot
+  const F = treeFs({ h: { p: { a: {}, b: {} } } }), T = fakeTimers(), lines = [], list = [];
+  const root = WG.armWatch(ctxOf(F, T, lines, { platform: 'linux', walkCap: 3 }), list, '/h/p', () => { }, 'discovery-watch');
+  ok(list.length === 3 && !lines.length && T.live.size === 0, 'setup: the walk fits the budget exactly (3), nothing said, no sweep');
+  F.tree.h.p.c = {}; root.cb('rename', 'c');
+  ok(!list.some((w) => w.dir === '/h/p/c') && lines.length === 1 && lines[0] === 'discovery-watch: its watches reached 3 folders, the most it keeps; at least 1 folder(s) past it are not watched — the first: /h/p/c — it falls back to a sweep every 60 s' && T.live.size === 1,
+    'a folder made LATER past the budget: the line names it and the sweep starts AT ONCE (never at a later walk)', { lines, sweeps: T.live.size });
+  const MP = modOf(anchored(GUARD_SRC, ' if (!walk.pumping) walk.pump(); return null; }   // past', ' return null; }   // past', 'later-folder-unsaid'));
+  const F2 = treeFs({ h: { p: { a: {}, b: {} } } }), T2 = fakeTimers(), l2 = [], li2 = [];
+  const r2 = MP.armWatch(ctxOf(F2, T2, l2, { platform: 'linux', walkCap: 3 }), li2, '/h/p', () => { }, 'discovery-watch');
+  F2.tree.h.p.c = {}; r2.cb('rename', 'c');
+  ok(!l2.length && T2.live.size === 0, 'CONTROL: the past-cap road without its pump — the later folder is neither said nor swept — RED');
+  const F3 = treeFs({ h: { p: { a: { deep: {} }, b: {}, c: {} } } }, { unreadable: new Set(['/h/p/a']) }), T3 = fakeTimers(), l3 = [];
+  WG.armWatch(ctxOf(F3, T3, l3, { platform: 'linux', walkCap: 3 }), [], '/h/p', () => { }, 'discovery-watch');
+  ok(l3.length === 2 && /could not be read/.test(l3[0]) && /reached 3 folders/.test(l3[1]), 'an earlier loss (an unreadable folder) said first never hides the cap line: it has its own said-once slot', l3);
 }
 {
   const dir = scratch('watch-guard'); fs.rmSync(dir, { recursive: true, force: true }); fs.mkdirSync(path.join(dir, 'proj', 'sub'), { recursive: true });
@@ -383,8 +415,8 @@ ok(doorRequires(walk((rel) => rel === 'src/agentd/agentd.js' ? AD + "\nconst WD 
 
 console.log('§5 the wiring');
 ok(!watchSites(AD).length, 'agentd.js arms no watch of its own (no fs binding\'s watch among its tokens)');
-ok(/const \{ armWatch, endWatches \} = require\('\.\/watch-guard\.js'\);/.test(AD) && /const WATCH = \{ fs, log: \(m\) => log\(m\), said: new Set\(\) \};/.test(AD), 'the guard is required once, with the agent\'s own log and ONE said-set for the process');
-ok((AD.match(/armWatch\(WATCH, watches, d, kick, 'discovery-watch'\);/g) || []).length === 1 && (AD.match(/armWatch\(WATCH, st\.watches, d, kick, 'usage-events-watch'\);/g) || []).length === 1, 'both feeds arm through it, each with its own kick as the sweep: discovery-watch and usage-events-watch');
+ok(/const \{ armWatches, endWatches \} = require\('\.\/watch-guard\.js'\);/.test(AD) && /const WATCH = \{ fs, log: \(m\) => log\(m\), said: new Set\(\) \};/.test(AD), 'the guard is required once, with the agent\'s own log and ONE said-set for the process');
+ok(AD.includes("armWatches(WATCH, watches, [path.join(home, '.claude', 'sessions'), path.join(home, '.claude', 'projects'),   // every root at once: one budget, one walk\n              path.join(process.env.CODEX_HOME || path.join(home, '.codex'), 'sessions')], kick, 'discovery-watch');") && AD.includes("armWatches(WATCH, st.watches, [path.join(home, '.claude', 'projects'),   // every root at once: one budget, one walk\n              path.join(process.env.CODEX_HOME || path.join(home, '.codex'), 'sessions')], kick, 'usage-events-watch');") && !/\barmWatch\(WATCH/.test(AD), 'both feeds arm every root at once through it (one budget, one walk), each with its own kick as the sweep: discovery-watch and usage-events-watch');
 ok(AD.includes('endWatches(WATCH, this._discoWatch);') && AD.includes('endWatches(WATCH, st.watches);'), 'the link\'s end ends both feeds through endWatches (their sweeps stop with the link)');
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
