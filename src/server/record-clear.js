@@ -155,7 +155,7 @@ function create({ tasks = null, userTodos = null, sessionStatus = null, getJobs 
     if (!r.ok) return r;
     if (r.refused.length) { const x = r.refused[0]; return { ok: false, code: x.code, why: x.why, status: x.status }; }
     if (r.ambiguous.length) return { ok: false, ...pick(RC.refuse('ambiguous')) };
-    if (r.unknown.length) return { ok: false, ...pick(RC.refuse('not_found')) };
+    if (r.unknown.length) return { ok: false, ...pick(RC.refuse(r.archiveUnread ? 'archive_unread' : 'not_found')) };   // B-20b6's smalls (1): an id only in a held archive is the archive's refusal
     return { ok: true, cleared: r.cleared, already: r.already, ids: r.ids, ...(r.archiveUnread ? { archiveUnread: true } : {}) };
   }
 
