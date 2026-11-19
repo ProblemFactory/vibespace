@@ -151,7 +151,7 @@ console.log('§2 the census — no fs.watch of the hub\'s code outside the door'
   walk('src'); files.push('server.js');
   // (its readers' 6) the census also sees fs.watchFile, a watch required inline, and a destructured watch
   const BARE = /\bfs\.watch(File)?\s*\(|=\s*fs\.watch(File)?\b|\bfs\.promises\.watch\s*\(|\bfsp\.watch\s*\(|require\(\s*['"](?:node:)?fs(?:\/promises)?['"]\s*\)\.watch(File)?\b|\{[^}]*\bwatch(File)?\b[^}]*\}\s*=\s*(?:require\(\s*['"](?:node:)?fs(?:\/promises)?['"]\s*\)|fs\b|fsp\b)/;
-  // EXEMPT BY NAME (主开发 01:35Z / 01:40Z — the device agent's SIGNED bundle stays byte for byte in a hub hotfix): src/desktop-serve.js
+  // EXEMPT BY NAME (主开发 01:35Z / 01:40Z — the hotfix never touched the device agent's SIGNED bundle): src/desktop-serve.js
   // and src/opencode-events.js ride that bundle (each watch in a try WITH its error listener — neither can end the hub; the lane's
   // caller src/opencode-serve.js rides it too, so no hub-only file can hand the door in), beside the device agent's own src/agentd/
   const SHARED = ['src/desktop-serve.js', 'src/opencode-events.js'];
@@ -163,12 +163,30 @@ console.log('§2 the census — no fs.watch of the hub\'s code outside the door'
   const PLANTS = ["const w = fs.watch(dir, () => {});", "fs.watchFile(f, () => {});", "const w = require('fs').watch(dir);", "const { watch } = require('node:fs'); watch(dir);", "const { readFileSync, watch } = fs;"];
   const planted = PLANTS.map((src, i) => bareIn([[`src/server/planted-${i}.js`, src]]).length);
   ok(planted.every((n) => n === 1), `CONTROL: each planted bare watch is red by name (a call, watchFile, an inline require, two destructurings): ${planted.join(' ')}`, planted);
-  { // the release's object (§75: guarded — a depth-1 checkout has no e3754d9cd; the leg then says SKIP by name)
-    let rel = null; try { rel = Object.fromEntries(SHARED.map((r) => [r, require('node:child_process').execFileSync('git', ['-C', REPO, 'show', `e3754d9cd:${r}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })])); } catch { rel = null; }
+  { // THE DEVICE AGENT ASKED NOTHING OF THIS DOOR — restated for the train (主开发 2026-11-19 09:03Z: a train signs its bundle again,
+    // so one release's bytes are no law). What holds in every tree: the door's file is NOT among the device bundle's inputs — read
+    // from the bundle's OWN input list, package.json's build:agentd through esbuild's metafile (test-architecture §107's build) — and
+    // the two shared files that keep their own watches ARE (the reason they are exempt), each with its watch's error listener
+    const esbuild = require('esbuild');
+    const script = (JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8')).scripts || {})['build:agentd'] || '';
+    const m = /esbuild src\/agentd\/agentd\.js ([^&]*?)--outfile=/.exec(script), flags = m ? m[1] : '';
+    const external = [...flags.matchAll(/--external:(\S+)/g)].map((x) => x[1]);
+    let inputs = null, why = null;
+    try {
+      const r = await esbuild.build({ entryPoints: [path.join(REPO, 'src/agentd/agentd.js')], absWorkingDir: REPO, bundle: true, platform: 'node', external, preserveSymlinks: /--preserve-symlinks/.test(flags), write: false, metafile: true, logLevel: 'silent' });
+      inputs = Object.keys(r.metafile.inputs);
+    } catch (e) { why = String((e && e.message) || e).slice(0, 200); }
+    const DOOR_FILE = 'src/watch-door.js';
+    const judge = (list) => ({ door: list.filter((k) => k === DOOR_FILE), shared: SHARED.filter((r) => list.includes(r)) });
+    const j = inputs ? judge(inputs) : null;
     const errOn = SHARED.filter((r) => /\.on\??\.?\(\s*'error'/.test(fs.readFileSync(path.join(REPO, r), 'utf8')));
-    if (!rel) console.log(`  ⊘ SKIP the device agent's bundle files against the release — no git object of e3754d9cd in this checkout (a depth-1 clone)`);
-    else { const same = SHARED.filter((r) => rel[r] === fs.readFileSync(path.join(REPO, r), 'utf8'));
-      ok(same.length === SHARED.length && errOn.length === SHARED.length, `the device agent's bundle files are the release's byte for byte (${same.join(', ')}) — no new signature for a hub hotfix — and each keeps its watch's error listener`, { same, errOn }); } }
+    ok(!!m && !!j && inputs.length > 50 && j.door.length === 0 && j.shared.length === SHARED.length && errOn.length === SHARED.length,
+      `the device agent asked nothing of the watch door: ${DOOR_FILE} is not among the device bundle's ${inputs ? inputs.length : '?'} inputs (its own list: package.json's build:agentd through esbuild's metafile); the two shared files that keep their own watches are (${j ? j.shared.join(', ') : '–'}), each with its watch's error listener`,
+      { why, buildAgentd: !!m, door: j && j.door, shared: j && j.shared, errOn });
+    const planted = j ? judge([...inputs, DOOR_FILE]) : null, dropped = j ? judge(inputs.filter((k) => k !== SHARED[0])) : null;
+    ok(!!planted && planted.door.length === 1 && !!dropped && dropped.shared.length === SHARED.length - 1,
+      'CONTROL: an input list holding the door\'s file is red by name, and one without a shared file no longer holds the exemption\'s reason', { planted: planted && planted.door, dropped: dropped && dropped.shared });
+  }
   const sites = ['src/server/stdout/claude-stream-json.js', 'src/workflow-usage-tailer.js', 'src/server/cluster-presets.js'];
   const through = sites.filter((rel) => /\bWD\.watch\b/.test(fs.readFileSync(path.join(REPO, rel), 'utf8')));
   ok(through.length === sites.length, `the three hub-only watch sites of the release read the door (${through.join(', ')}); desktop-serve.js and opencode-events.js exempt by name (the device agent's bundle)`, sites.filter((s) => !through.includes(s)));
