@@ -1010,6 +1010,10 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   // broadcast carry the SAME `spend` (budgetLimits over what the server now holds, a CAP_MAX clamp included — the 2.309.0
   // cache law: the invalidation pushes the RESULT), so every tab's «in force now» has ONE source (a tab kept saying its
   // own last echo, 50, after another device raised the cap to 100)
+  // B-0a33 (3) (the follow-up ruling): a PERSON'S request that sets a spending CAP to nothing stores nothing — never the default.
+  // Stored BLANK (no number: refused, said), not null — so a timed raise's «before» (src/server/setting-holds.js) keeps it, while
+  // the internal door's null (patchSettings) stays «the row's default», which that return writes for a row at its default
+  const SPEND_CAP_KEYS = new Set(require('../spend-authorizer.js').CAP_SETTING_KEYS);
   function spendOf(data) { try { return require('../spend-authorizer.js').budgetLimits((k) => (data || {})[k]); } catch { return null; } }
   function writeSettings(data) {
     ensureDir(dataDir);
@@ -1044,7 +1048,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   router.patchSettings = (patch) => {
     if (!patch || typeof patch !== 'object') throw new Error('patchSettings: expected an object');
     const merged = { ...readSettings(), ...patch };
-    for (const [k, v] of Object.entries(merged)) { if (v === null) delete merged[k]; }
+    for (const [k, v] of Object.entries(merged)) { if (v === null) delete merged[k]; }   // the internal door: a null is the row's DEFAULT (setting-holds' return to an absent «before») — a person's «nothing» is the PATCH's (blank)
     writeSettings(merged);
     return true;
   };
@@ -1136,7 +1140,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     const patch = req.body;
     if (!patch || typeof patch !== 'object') return res.status(400).json({ error: 'Expected object' });
     const merged = { ...current, ...patch };
-    for (const [k, v] of Object.entries(merged)) { if (v === null) delete merged[k]; }
+    for (const [k, v] of Object.entries(merged)) { if (v === null) { if (SPEND_CAP_KEYS.has(k)) merged[k] = ''; else delete merged[k]; } }   // B-0a33 (3): a cap set to nothing stays nothing — stored blank (refused, said), never the default restored in silence
     const refused = setAsideExitUrl(req, merged); // the exit check: a person's refused address set aside, said — the rest lands
     if (refuseEngineRows(req, res, merged)) return; // lane engine-spi-egress L1b (V3) — r2: the file the patch would leave
     if (refuseSpendRows(req, res, merged)) return; // lane setting-doors pick 0: the spending rows are the owner's press

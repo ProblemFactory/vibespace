@@ -199,7 +199,7 @@ export const ROWS = [
   ['src/server/search-index.js', 'own-tree', 5, null, CLI],
   ['src/server/session-stdout.js', 'own-tree', 15, null, PROC],   // lg-recovery U1 cure +1: patchSessionMeta reads its own meta file OFF the loop   // lane hub-loop-stalls commit 2 round 3 (law 3) +1: the meta directory listed ONCE per process (knownOnDisk — a file's first version is a fact of the disk)
   ['src/server/spawn-priority.js', 'own-tree', 1, null, 'B-460d: the nice program in FIXED local system dirs (/usr/bin, /bin, /usr/local/bin, /opt/homebrew/bin) — one look per process, never a user path'],
-  ['src/server/spend-guard.js', 'own-tree', 1, null, DATA],
+  ['src/server/spend-guard.js', 'own-tree', 3, null, DATA], // B-3b0f follow-up +1: an unreadable ledger re-reads itself through fs.promises (async, once a minute, never a sync read of a file a mount just failed); r2 +1: an async lstat first — what is not a regular file (a FIFO) is never opened
   ['src/server/stash-handover.js', 'own-tree', 1, null, DATA],
   ['src/server/tls.js', 'exempt', 5, null, 'data/tls (its own store: state.json, the Tailscale certificate) + the operator’s VIBESPACE_TLS_CERT / _KEY files — boot config, never a mount'],
   ['src/server/unexpected-exit.js', 'own-tree', 1, null, CLI],

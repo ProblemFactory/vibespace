@@ -204,16 +204,25 @@ const LOAD_RETENTION = Object.freeze({
 /** PURE. Normalise the four numbers, whatever the settings store holds.
  *  0 is an EXPLICIT choice ("no unattended turns on this axis at all"), which
  *  is why it is not replaced by the default — the same clamp0 convention the
- *  Stop nudge's own thresholds use. A negative/garbage value is not a choice
- *  and falls back. */
+ *  Stop nudge's own thresholds use. A cap that holds no number (blank, null, a
+ *  text, a negative number, a boolean) is NO cap: 0 and `unset` — refused and
+ *  said (the coordinator's ruling, 2026-11-18); only an absent setting is the
+ *  default. noticePct keeps its fallback. */
 function budgetLimits(get = () => undefined) {
-  const unset = [];   // B-0a33 (3): the caps whose setting is there and EMPTY (null / blank) — still 0, said as «no cap is set»
+  const unset = [];   // B-0a33 (3): the caps whose setting is there and is NO NUMBER — 0, said as «no limit is set»
   const num = (key, dflt, hi, field = null) => {
     let v;
     try { v = get(key); } catch { v = undefined; }
-    // B-0a33 (3) (the owner's word via 主开发 2026-11-17): A NULL OR BLANK CAP STAYS A REFUSAL — never the default, never
-    // a silent 0: it is 0 here (every turn nobody typed refused) and named in `unset`, so the refusal says «no cap is set»
-    if (field && (v === null || (typeof v === 'string' && !v.trim()))) { unset.push(field); return 0; }
+    // B-0a33 (3) (the owner's word via 主开发 2026-11-17; the follow-up ruling 2026-11-18, «by the recommendation»): A CAP
+    // THAT IS NOT A NUMBER IS NOT A CAP — null, blank, a text, a negative number, a boolean: 0 here (every turn nobody typed
+    // refused) and named in `unset`, so the refusal says «no limit is set — set a number»; never a default number. Only an
+    // ABSENT setting (undefined — nobody set one) is the default. A number written as text («30») is that number.
+    if (field) {
+      if (v === undefined) return dflt;
+      const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN;
+      if (!Number.isFinite(n) || n < 0) { unset.push(field); return 0; }
+      return Math.min(hi, Math.round(n));
+    }
     // A BOOLEAN IS NEVER A CAP. `Number(true)` is 1, so a settings reader that
     // answers `true` to everything (a harness stub, a corrupted store) would
     // silently set every ceiling to ONE unattended turn — a value nobody chose,
@@ -233,7 +242,9 @@ function budgetLimits(get = () => undefined) {
   };
   return unset.length ? { ...out, unset } : out;
 }
-/** PURE (B-0a33 (3)). Is this cap field set EMPTY (null / blank) in these limits? */
+/** B-0a33 (3): the three settings that are caps — the ones a write may set to nothing (null is kept: «no limit is set»). */
+const CAP_SETTING_KEYS = Object.freeze(['spend.unattendedPerIdentityHour', 'spend.unattendedPerIdentityDay', 'spend.unattendedPerInstanceDay']);
+/** PURE (B-0a33 (3)). Is this cap field set to NO NUMBER (null, blank, a text, a negative number, a boolean) in these limits? */
 const capUnset = (limits, field) => !!(limits && Array.isArray(limits.unset) && limits.unset.includes(field));
 
 /** PURE. An empty ledger. */
@@ -297,6 +308,19 @@ function pressesOf(state, { now = Date.now() } = {}) {
     byAccount: rows.filter((t) => !isPressRow(t) && t.press === p.press).map((t) => ({ key: t.key || null, name: t.name || t.key || null, n: Number(t.count) || 1 })),
   })).sort((a, b) => b.at - a.at);
 }
+/** PURE (B-0a33 (2), the readers' round). A frame waiting in an agent too old to give a queued message back: it cannot be held,
+ *  and may run past a cap lowered below it (or while the ledger cannot be read). ONE For-you line per frame, said here. */
+const UNHELD_WORDS = Object.freeze({
+  cap: Object.freeze(['A message waiting behind «{conversation}» could not be held: its agent is too old to give a queued message back, so it may run past the limit for turns nobody typed.', 'A waiting message could not be held: its agent is too old to give a queued message back, so it may run past the limit for turns nobody typed.']),
+  ledger: Object.freeze(['A message waiting behind «{conversation}» could not be held: its agent is too old to give a queued message back, so it may run while the record of turns nobody typed cannot be read.', 'A waiting message could not be held: its agent is too old to give a queued message back, so it may run while the record of turns nobody typed cannot be read.']),
+  door: 'Restart that conversation so it runs on this VibeSpace’s agent — then a waiting message can be held.',
+});
+function unheldI18n(why, { conversation = '' } = {}) {
+  const row = UNHELD_WORDS[why === 'ledger' ? 'ledger' : 'cap'];
+  const c = conversation ? String(conversation).slice(0, 120) : '';
+  return { text: { key: row[c ? 0 : 1], params: c ? { conversation: c } : {} }, detail: [{ key: UNHELD_WORDS.door }] };
+}
+
 /** PURE. "job-notification ×9, auto-resume ×3" — the top producers, most first. */
 function producersText(counts, { top = 3 } = {}) {
   const rows = Object.entries(counts || {}).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]).slice(0, top);
@@ -685,7 +709,7 @@ function authorizeUnattendedSpend({
   // which refusalText prints as nothing at all). A window full of HOLDS alone has
   // no oldest stamp — its retryAfter is 0, never `0 + HOUR_MS` (a 1970 instant the
   // client would say as «free now», lane owner-press-attended r2).
-  const unsetSaid = (what, field) => `no cap is set for ${what} (the setting is empty) — every unattended turn is refused until a number is set in its row of Settings → Spending: ${SL.settingLink(SPEND_ROW_KEYS[field])}`;   // B-0a33 (3); lane login-request-card (the links unit's owed row link): the row, as its link
+  const unsetSaid = (what, field) => `no cap is set for ${what} (the setting holds no number) — every unattended turn is refused until a number is set in its row of Settings → Spending: ${SL.settingLink(SPEND_ROW_KEYS[field])}`;   // B-0a33 (3); lane login-request-card (the links unit's owed row link): the row, as its link
   // `need` / `instanceNeed` (lane auto-resume-bulk, the signature above): a cap holds what a batch WILL spend
   const n = Math.max(1, Math.floor(Number(need)) || 1);
   const nAll = Math.max(n, Math.floor(Number(instanceNeed)) || n);
@@ -1067,7 +1091,7 @@ module.exports = {
   authorizeUnattendedBatch, // lane auto-resume-bulk: ONE authorization for N turns (the resume of every wall-stopped session)
   SPEND_REASONS, BUDGET_DEFAULTS, HOUR_MS, DAY_MS, MAX_STAMPS, CAP_MAX, stampCap, OVERAGE_STALE_MS,
   LOAD_RETENTION, RESERVE_TTL_MS, RESERVE_CAP, RESERVATION_WAIT_MAX_MS,
-  budgetLimits, capUnset, waitingOverCap, emptyBudget, pruneBudget, mergeBudget, spendCounts, stampAt, countAt, waitingStamp, waitingRids, waitingBehind, stampReason, producerCounts, producersText, notePressRow, notePressEnd, pressesOf,
+  budgetLimits, capUnset, CAP_SETTING_KEYS, UNHELD_WORDS, unheldI18n, waitingOverCap, emptyBudget, pruneBudget, mergeBudget, spendCounts, stampAt, countAt, waitingStamp, waitingRids, waitingBehind, stampReason, producerCounts, producersText, notePressRow, notePressEnd, pressesOf,
   pendingCounts, reservePending, releasePending, renewPending, expirePending,
   overageState, overageAllowed, overageText, spendControlState,
   authorizeUnattendedSpend, noteUnattendedSpend, returnReservation, reservationState, refusalText, refusalI18n, refusalRow, noticeText,

@@ -77,7 +77,7 @@ function noticeExpiry(about, now = Date.now()) {
  *        inbox is created further down the boot (TDZ otherwise).
  * @param deps.log                console.log
  */
-function create({ dataDir, serverSetting = () => undefined, identityOf = null, readCacheFor = null, credentialStateOf = null, getUserTodos = () => null, log = () => { }, schedule = (fn, ms) => { const t = setTimeout(fn, ms); if (t && t.unref) t.unref(); return t; }, unschedule = (t) => clearTimeout(t) } = {}) {
+function create({ dataDir, serverSetting = () => undefined, identityOf = null, readCacheFor = null, credentialStateOf = null, getUserTodos = () => null, log = () => { }, schedule = (fn, ms) => { const t = setTimeout(fn, ms); if (t && t.unref) t.unref(); return t; }, unschedule = (t) => clearTimeout(t) , readLedgerSync = null, readLedgerAsync = null} = {}) {
   const file = path.join(dataDir, 'spend-budget.json');
   let state = A.emptyBudget();
   let nudge = {};   // sessionKey -> {at, n, everSeenStatus} (the Stop nudge's PERSISTED cooldown)
@@ -85,12 +85,21 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
   // read error) used to start an EMPTY budget — the count restarted and unattended turns were authorized as if none had
   // been spent; and the next persist renamed that empty ledger OVER the file, so one restart made it permanent. Now ENOENT
   // (nothing spent yet) is told apart from UNREADABLE: unreadable ⇒ every unattended reason is refused by name
-  // ('ledger-unreadable'), the file is never written over, and it is read again at most once a LEDGER_RECHECK_MS — it
-  // reads again ⇒ its stamps and the ones made meanwhile both count; it is gone (the owner removed it) ⇒ the count starts over
+  // ('ledger-unreadable'), the file is never written over, and it is read again by ITSELF once a LEDGER_RECHECK_MS (the
+  // readers' round: an unref'd timer — an idle hub un-sticks within a minute of the repair, a clock that steps back changes
+  // nothing — and that re-read is ASYNC, never a synchronous read on the main loop of the file a sick mount just failed) —
+  // it reads again ⇒ its stamps and the ones made meanwhile both count; it is gone (the owner removed it) ⇒ the count starts over
   let unreadable = null;     // {error, since} while the file is there and cannot be read
-  let recheckAt = 0;
-  // the ONE read of the file (the load and the re-read): its text, `missing` (ENOENT), or the error that kept it unread
-  const readText = () => { try { return { text: fs.readFileSync(file, 'utf-8') }; } catch (e) { return e && e.code === 'ENOENT' ? { missing: true } : { error: String((e && e.code) || 'read failed') }; } };
+  let recheckTimer = null;
+  const syncRead = typeof readLedgerSync === 'function' ? readLedgerSync : (f) => fs.readFileSync(f, 'utf-8');   // the seams: a suite's EACCES never depends on who runs it
+  // (r2, the follow-up's read S4) the default re-read never opens what is not a regular file — a FIFO in the ledger's place would
+  // hold the read (and a thread of the pool) for ever; it is unreadable, by name
+  const asyncRead = typeof readLedgerAsync === 'function' ? readLedgerAsync
+    : async (f) => { const st = await fs.promises.lstat(f); if (!st.isFile()) throw Object.assign(new Error('not a regular file'), { code: 'not a regular file' }); return fs.promises.readFile(f, 'utf-8'); };
+  let readInFlight = false;   // (r2) ONE re-read at a time: a read a hung mount holds is never joined by another
+  const readError = (e) => (e && e.code === 'ENOENT' ? { missing: true } : { error: String((e && e.code) || 'read failed') });
+  // the boot's ONE read of the file (sync, as the release): its text, `missing` (ENOENT), or the error that kept it unread
+  const readText = () => { try { return { text: syncRead(file) }; } catch (e) { return readError(e); } };
   const parseLedger = (t) => {
     if (t.text === undefined) return t;
     let raw; try { raw = JSON.parse(t.text); } catch { return { error: 'not JSON' }; }
@@ -101,7 +110,6 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
   const loaded = parseLedger(readText());
   if (loaded.error) {
     unreadable = { error: loaded.error, since: Date.now() };
-    recheckAt = unreadable.since;
     log(`[spend] data/spend-budget.json could not be read (${loaded.error}) — unattended turns are refused until it reads again or is removed; it is not written over`);
   }
   {
@@ -121,11 +129,15 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
       if (raw.nudge && typeof raw.nudge === 'object') nudge = raw.nudge;
     }
   }
-  /** B-3b0f: read an unreadable ledger again (bounded). true when it reads again or is gone — the refusal ends. */
-  function recheckLedger(now) {
-    if (!unreadable || now - recheckAt < LEDGER_RECHECK_MS) return false;
-    recheckAt = now;
-    const r = parseLedger(readText());
+  /** B-3b0f: read an unreadable ledger again — ASYNC (the readers' round). → true when it reads again or is gone (the
+   *  refusal ends; the ledger is written at once), false while it still cannot be read. */
+  async function recheckLedger(now = Date.now()) {
+    if (!unreadable || readInFlight) return false;
+    let t;
+    readInFlight = true;
+    try { t = { text: await asyncRead(file) }; } catch (e) { t = readError(e); } finally { readInFlight = false; }
+    if (!unreadable) return false;   // another re-read settled it meanwhile
+    const r = parseLedger(t);
     if (r.error) { unreadable.error = r.error; return false; }
     // stamps made meanwhile (an attended press, a carried frame) are KEPT beside the file's: a stamp is never dropped (a frame
     // carried meanwhile may then count twice — its file stamp and its fresh one — for a day: the safe direction)
@@ -136,7 +148,16 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     log(r.raw ? '[spend] data/spend-budget.json reads again — unattended turns are counted and allowed again' : '[spend] data/spend-budget.json was removed — the count starts over from the turns since the hub started');
     unreadable = null;
     try { const ut = getUserTodos(); if (ut && typeof ut.idsWhere === 'function') for (const id of ut.idsWhere((i) => i && i.itemKey === LEDGER_ITEM && i.status === 'open')) ut.setStatus(id, 'done', 'agent'); } catch { }   // its notice is no longer true
+    if (recheckTimer) { try { unschedule(recheckTimer); } catch { } recheckTimer = null; }
+    persist();
     return true;
+  }
+  /** the self-recheck: armed while the ledger cannot be read, one re-read per LEDGER_RECHECK_MS (unref'd), never two at once */
+  function armRecheck() {
+    if (!unreadable || recheckTimer) return;
+    // (r2, S4) re-armed at every tick, never only when the read settled: a read that never settles (a hung mount) no longer
+    // ends the self-recheck — the next tick finds it in flight and waits for it, and a read that settles is the repair's
+    recheckTimer = schedule(() => { recheckTimer = null; recheckLedger().catch(() => false); if (unreadable) armRecheck(); }, LEDGER_RECHECK_MS);
   }
   const spoke = new Map();   // journal dedup: `${reason}|${key}|${why}` -> {at, more, line, timer} (`more` = refusals the window swallowed)
   // r2 (measured: five refusals in a minute ⇒ ONE line, and with no later refusal the other four were never journaled):
@@ -156,7 +177,6 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
   let lastHoldLog = 0;
   let timer = null;
   const writeNow = () => {
-    if (unreadable) recheckLedger(Date.now());
     if (unreadable) {   // B-3b0f: never written over while it cannot be read — the empty count must not become the record
       if (!unreadable.saidWrite) { unreadable.saidWrite = true; log('[spend] data/spend-budget.json is not written while it cannot be read'); }
       return;
@@ -268,7 +288,6 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
    *  effects of a refusal (journal + telemetry + inbox) happen here, once. */
   function authorize({ reason, session = null, sessionId = null, sessionName = null, cid = null, identity: identityHint = null, hold: takeHold = true, now = Date.now() } = {}) {
     sweepHolds(now);
-    if (recheckLedger(now)) persist();
     const identity = identityFor(session, identityHint);
     const key = identity && identity.key;
     const v = A.authorizeUnattendedSpend({
@@ -448,7 +467,10 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
   /** Charge a spend that actually happened. The identity is the one
    *  `authorize()` resolved and put on its verdict — see identityFor; `hold` is
    *  the reservation that verdict opened, converted here into the stamp. */
-  function note({ reason = null, identity: identityHint = null, session = null, hold = null, reservation = null, carried = false, drain = false, ended = false, behind = null, press = null, now = Date.now() } = {}) {   // carried: a queued frame's reservation CONVERTED (round 3) — marked; durable like any spend (the guard's debounce, round 4)   // drain: a stash drain never stamps   // reservation: a queued frame's id (lane queued-is-not-woke) — its unit taken once, returnable by release
+  function note({ reason = null, identity: identityHint = null, session = null, hold = null, reservation = null, carried = false, drain = false, ended = false, behind = null, press = null, unheld = null, now = Date.now() } = {}) {   // carried: a queued frame's reservation CONVERTED (round 3) — marked; durable like any spend (the guard's debounce, round 4)   // drain: a stash drain never stamps   // reservation: a queued frame's id (lane queued-is-not-woke) — its unit taken once, returnable by release
+    // B-0a33 (2), the readers' round: queued-wakes could not hold this waiting frame (its agent serves no «remove») — no stamp
+    // changes; the person is told ONCE per frame, under the conversation it waits behind
+    if (unheld && reservation) { fileUnheld(String(reservation), unheld, now, behind); return null; }
     sweepHolds(now);
     // convert, never double-count: the stamp below IS this hold's outcome
     if (hold) pending = A.releasePending(pending, hold);
@@ -477,6 +499,20 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
       fileInbox(text, `Reason of the latest turn: ${reason || 'unattended'}\nScope: ${r.warn.scope}\nUsed: ${r.warn.used} of ${r.warn.limit}\n\nThe limit, to raise or lower it: vibespace://settings/${A.warnRowOf(r.warn)}`, 'normal', noticeExpiry(r.warn.scope, now));   // lane setting-doors pick 1: the warning names its row
     }
     return r.warn;
+  }
+
+  function fileUnheld(rid, why, now, behind = null) {
+    const sig = `unheld|${rid}`;
+    if (Number(state.notices[sig]) > 0) return;
+    let wb = null;
+    for (const list of Object.values(state.identities || {})) for (const t of list || []) if (t && t.rid === rid && t.wb) wb = t.wb;
+    // (r2, S3) the stamp is not there while the ledger cannot be read — the caller names the conversation it waits behind
+    if (!wb && behind && behind.key) wb = { key: String(behind.key).slice(0, 200), name: String(behind.name || '').slice(0, 120) };
+    const i18n = A.unheldI18n(why, { conversation: wb && wb.name ? wb.name : '' });
+    const text = (wb && wb.name ? `A message waiting behind «${wb.name}» could not be held` : 'A waiting message could not be held') + `: its agent is too old to give a queued message back, so it may run ${why === 'ledger' ? 'while the record of turns nobody typed cannot be read' : 'past the limit for turns nobody typed'}.`;
+    const filed = fileInbox(text, `Reservation: ${rid}\nRestart that conversation so it runs on this VibeSpace’s agent — then a waiting message can be held.`, 'normal', noticeExpiry('refusal', now), i18n, wb && wb.key ? { key: wb.key } : null, `spend-unheld:${rid}`);   // (r2) its own item per frame — never merged by its words
+    if (filed) { state.notices[sig] = now; persist(); }
+    log(`[spend] a waiting frame (${rid}) could not be held — its agent serves no remove; ${filed ? 'said in For you' : 'For you not reachable'}`);
   }
 
   /** GIVE BACK an authorization that did not become a turn — the ladder's
@@ -520,8 +556,9 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     persist();
   }
 
+  armRecheck();   // B-3b0f, the readers' round: an unreadable ledger re-reads itself (async, unref'd, once a minute)
   return {
-    authorize, authorizeBatch, previewBatch, notePress, notePressEnd, pressesToday, renewHolds, note, release, overageFor, spendControlFor, nudgeRec, noteNudge, flush,
+    authorize, authorizeBatch, previewBatch, notePress, notePressEnd, pressesToday, renewHolds, note, release, recheckLedger, overageFor, spendControlFor, nudgeRec, noteNudge, flush,
     reservationState: (rid) => A.reservationState(state, rid),   // lane queued-is-not-woke round 3: 'converted' | 'reserved' | null
     // B-0a33 round 1: queued-wakes ends the ones no live entry holds. B-0a33 (2): the answer also carries `overCap` (read
     // lazily) — the waiting reservations no cap holds now: server.js wires this ONE function into the ladder, so the
@@ -545,6 +582,11 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
 // once, before the running turn can end and let its wrapper run them past a cap just lowered. One registry for the process.
 const limitsListeners = new Set();
 function onLimitsWritten(fn) { limitsListeners.add(fn); return () => limitsListeners.delete(fn); }
-function noteLimitsWritten(prev, next) { for (const fn of [...limitsListeners]) { try { fn(prev || null, next || null); } catch { } } }
+function noteLimitsWritten(prev, next) {
+  // (r2, the follow-up's read S1) only a write that MOVED the limits re-judges the waiting frames: every settings write (an
+  // autosave of any row) used to ask every waiting frame back out again — each ask a sidecar read on the main thread
+  try { if (prev && next && JSON.stringify(prev) === JSON.stringify(next)) return; } catch { }
+  for (const fn of [...limitsListeners]) { try { fn(prev || null, next || null); } catch { } }
+}
 
 module.exports = { create, onLimitsWritten, noteLimitsWritten, REFUSE_LOG_MS, REFUSE_INBOX_MS, INBOX_KEY, NOTICE_TTL_MS, LEDGER_RECHECK_MS, noticeExpiry };

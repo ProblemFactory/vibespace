@@ -1370,15 +1370,16 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   // reservationState: the guard's word before any marked copy; stashHas: a handed-back frame's words still wait (round 4)
   const queued = require('./queued-wakes.js').create({ dataDir, noteSpend, releaseSpend, reservationState, waitingReservations, waitingOverCap, pull: (cid, item, holder) => pullQueued(cid, item, holder), stashHas: (cid, ref) => (stash[cid] || []).some((e) => e && e.ref === ref), log });
   // B-0a33 (2): a settings write that moved the caps re-judges the frames already waiting AT ONCE (src/routes/persistence.js)
-  require('./spend-guard.js').onLimitsWritten(() => { try { queued.rejudge(); } catch (e) { log('[deliver] re-judging the waiting frames failed:', e.message); } });
+  require('./spend-guard.js').onLimitsWritten(() => { try { queued.rejudge({ fresh: true }); } catch (e) { log('[deliver] re-judging the waiting frames failed:', e.message); } });
   /** B-0a33: TAKE A WAITING FRAME BACK OUT of its wrapper's queue — the wrapper's own `remove` verb (the person's queue edit);
    *  the wrapper hands the words back (a mode-less peer_message_result) and queued-wakes' hand-back road stashes them. Only the
-   *  process that holds it, only a wrapper whose own advert serves `remove`. false = not asked. */
+   *  process that holds it, only a wrapper whose own advert serves `remove`. → true (asked) | 'no-remove' (the process that
+   *  holds it is here and too old to serve `remove`) | false (not asked now: no process here, or another one). */
   function pullQueued(cid, item, holder) {
     const rpc = findRpcPeer(cid);
     if (!rpc || !item) return false;
     if (holder && rpc.wc && rpc.wc.pid && String(rpc.wc.pid) !== String(holder)) return false;   // another process: never its queue
-    if (!(Array.isArray(rpc.wc.queueVerbs) && rpc.wc.queueVerbs.includes('remove'))) return false;
+    if (!(Array.isArray(rpc.wc.queueVerbs) && rpc.wc.queueVerbs.includes('remove'))) return 'no-remove';
     try { rpc.s.pty.write(JSON.stringify({ type: 'queue-op', op: 'remove', id: String(item) }) + '\n'); return true; }
     catch (e) { log('[deliver] taking a queued frame back out failed: ' + e.message); return false; }
   }

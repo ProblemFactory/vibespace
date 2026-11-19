@@ -336,11 +336,12 @@ const HELD_WHY = Object.freeze({
   'rate-floor': 'they were paced by the 30 s per-conversation floor',
   'paced': 'they were held for the wake pace — delivered now',   // lane paced-wake-retry: a parked wake's frame
   'spend-cap': 'the spending ceiling held them',
+  'spend-ledger': 'the record of turns nobody typed could not be read, so they were held',   // B-0a33 (2) r2: the ledger's own reason, never the cap's
   'wrapper-no-steer': 'this agent’s process predates mid-turn notifications',
   'off': 'auto-notify was off for this conversation',
 });
 /** the why-key of a held record: its kind, except a may-have-landed one (verify r2) — the hand-over card must say a repeat is possible */
-function heldKeyOf(held) { return held && typeof held === 'object' ? (held.maybeDelivered === true ? 'maybe-delivered' : held.kind || null) : null; }
+function heldKeyOf(held) { return held && typeof held === 'object' ? (held.maybeDelivered === true ? 'maybe-delivered' : held.kind === 'spend-cap' && held.why === 'ledger-unreadable' ? 'spend-ledger' : held.kind || null) : null; }
 function heldWhyOf(kinds) {
   const ks = [...new Set((Array.isArray(kinds) ? kinds : []).filter((k) => HELD_WHY[k]))];
   if (!ks.length) return null;

@@ -127,9 +127,10 @@ console.log('\n§1 the pure decision (src/spend-authorizer.js)');
   // A settings reader that answers `true` to everything (a harness stub, a
   // corrupted store) would set every ceiling to ONE by coercion — a value
   // nobody chose. Only a number is a number.
+  // …and since B-0a33's follow-up ruling (2026-11-18) a cap that is no number is NO cap: refused and said, never a default either
   const boolLim = A.budgetLimits(() => true);
-  ok('§1 a BOOLEAN is never a cap (Number(true) === 1 must not become the ceiling)',
-    boolLim.perIdentityHour === 30 && boolLim.perIdentityDay === 200 && boolLim.perInstanceDay === 800, JSON.stringify(boolLim));
+  ok('§1 a BOOLEAN is never a cap (Number(true) === 1 must not become the ceiling) — it is «no limit is set»: every turn nobody typed refused, never the default',
+    boolLim.perIdentityHour === 0 && boolLim.perIdentityDay === 0 && boolLim.perInstanceDay === 0 && JSON.stringify(boolLim.unset) === '["perIdentityHour","perIdentityDay","perInstanceDay"]', JSON.stringify(boolLim));
 
   // The mechanism legs below pin the ARITHMETIC of a cap, so they hand the
   // authorizer an explicit fixture (the 2026-09-08 numbers) instead of
@@ -1799,10 +1800,12 @@ console.log('\n§3f B-3b0f: an unreadable ledger refuses every unattended turn b
     fs.writeFileSync(LF(dir, 'spend-budget.json'), JSON.stringify({ v: 1, budget: { v: 1, identities: { 'sub-a': [now - 60e3, now - 50e3] }, instance: [now - 60e3, now - 50e3], notices: {} }, nudge: {} }));
     const g3inbox = [], g3logs = [];
     const g3 = mk(guardMod, world((f) => fs.mkdirSync(f)), g3inbox, g3logs);   // (a fresh world for the directory below)
-    ok('§3f the re-read is bounded: inside LEDGER_RECHECK_MS of the failure the file is not read again',
+    ok('§3f NO SYNCHRONOUS RE-READ: a repaired file is not read inside authorize (the readers\' round) — still refused until the guard\'s own async re-read',
       g.authorize({ reason: 'auto-resume', identity: ID, now: now + 30e3 }).why === 'ledger-unreadable' && guardMod.LEDGER_RECHECK_MS === 60e3);
+    const reread = await g.recheckLedger();
     const back = g.authorize({ reason: 'auto-resume', identity: ID, now: now + 70e3 });
-    ok('§3f REPAIRED: past the bound the file reads again — its two stamps count (2 this hour), the turn is allowed, the refusal ends',
+    ok('§3f REPAIRED: the async re-read finds it — its two stamps count (2 this hour), the turn is allowed, the refusal ends',
+      reread === true &&
       back.ok === true && back.counts.hour === 2 && g.snapshot().ledgerUnreadable === null && /reads again/.test(logs.join('\n')), JSON.stringify({ ok: back.ok, why: back.why, hour: back.counts && back.counts.hour }));
     ok('§3f …and the press made while it was unreadable is KEPT beside the file\'s stamps (a stamp is never dropped)',
       Object.values(g.snapshot().attended || {}).reduce((a, b) => a + (Number(b) || 0), 0) === 1, JSON.stringify(g.snapshot().attended));
@@ -1816,6 +1819,7 @@ console.log('\n§3f B-3b0f: an unreadable ledger refuses every unattended turn b
     g3.flush();
     ok('§3f …the flush writes nothing (no rename onto the directory, no stranded .tmp)', fs.statSync(g3._file).isDirectory() && !fs.existsSync(g3._file + '.tmp'));
     fs.rmSync(g3._file, { recursive: true, force: true });
+    await g3.recheckLedger();
     const d3b = g3.authorize({ reason: 'stop-nudge', identity: ID, now: Date.now() + 61e3 });
     ok('§3f REMOVED by the owner: past the bound the count starts over — allowed, said in the journal, and the file is written again',
       d3b.ok === true && /was removed — the count starts over/.test(g3logs.join('\n')) && (g3.release({ hold: d3b.hold }), g3.flush(), fs.statSync(g3._file).isFile()), JSON.stringify({ why: d3b.why, logs: g3logs.slice(-2) }));
@@ -1834,26 +1838,59 @@ console.log('\n§3f B-3b0f: an unreadable ledger refuses every unattended turn b
     mkS().authorize({ reason: 'auto-resume', identity: ID, now });
     mkS().authorize({ reason: 'auto-resume', identity: ID, now: now + 1000 });   // ← a restart, still unreadable
     const open1 = (store.snapshot().open || []).filter((i) => i.itemKey === 'spend-ledger-unreadable');
-    const g = mkS();
+    // IT UN-STICKS BY ITSELF (the readers' round): an idle hub — no unattended ask, no write — re-reads on its own timer
+    const timers = [];
+    const g = guardMod.create({ dataDir: dir, serverSetting: () => undefined, getUserTodos: () => store, log: () => { }, schedule: (fn, ms) => { const t = { fn, ms }; timers.push(t); return t; }, unschedule: (t) => { const i = timers.indexOf(t); if (i >= 0) timers.splice(i, 1); } });
+    const armed = timers.length === 1 && timers[0].ms === guardMod.LEDGER_RECHECK_MS;
+    timers.shift().fn();   // a minute passes, still torn: it re-arms
+    for (let i = 0; i < 20 && !timers.length; i++) await tick(5);
+    const rearmed = timers.length === 1;
     fs.writeFileSync(LF(dir, 'spend-budget.json'), JSON.stringify({ v: 1, budget: { v: 1, identities: {}, instance: [], notices: {} }, nudge: {} }));
-    g.authorize({ reason: 'auto-resume', identity: ID, now: Date.now() + 70e3 });
+    timers.shift().fn();   // the next minute: the repaired file reads
+    for (let i = 0; i < 40 && g.snapshot().ledgerUnreadable; i++) await tick(5);
     const open2 = (store.snapshot().open || []).filter((i) => i.itemKey === 'spend-ledger-unreadable');
     store.stop();
     ok('§3f the notice is ONE For-you item across a restart (its own itemKey), and the file reading again RESOLVES it — never a stale «refused» standing for 6 h',
       open1.length === 1 && open2.length === 0, JSON.stringify({ open1: open1.length, open2: open2.length }));
+    ok('§3f IT UN-STICKS BY ITSELF: while unreadable the guard arms its own re-read (one timer, LEDGER_RECHECK_MS, re-armed while still torn) — an idle hub recovers within a minute of the repair; a timer, so a clock that steps back changes nothing',
+      armed && rearmed && g.snapshot().ledgerUnreadable === null && timers.length === 0, JSON.stringify({ armed, rearmed, left: timers.length }));
+  }
+  {   // (r2, the follow-up's read S4) A READ THAT NEVER SETTLES (a hung mount) never ends the self-recheck, and is never joined
+    const runHung = async (mod) => {
+      const dir = world((f) => fs.writeFileSync(f, TORN));
+      const timers = []; let reads = 0;
+      mod.create({ dataDir: dir, serverSetting: () => undefined, getUserTodos: () => null, log: () => { },
+        schedule: (fn, ms) => { const t = { fn, ms }; timers.push(t); return t; }, unschedule: (t) => { const i = timers.indexOf(t); if (i >= 0) timers.splice(i, 1); },
+        readLedgerAsync: () => { reads++; return new Promise(() => { }); } });
+      const out = [];
+      for (let k = 0; k < 3; k++) { const t = timers.shift(); if (t) t.fn(); await tick(5); out.push({ reads, armed: timers.length }); }
+      return out;
+    };
+    const r = await runHung(guardMod);
+    ok('§3f (r2) A READ THAT NEVER SETTLES: the self-recheck stays armed at every tick, and the read in flight is never joined by a second (a hung mount\'s threads are not piled up)',
+      r.every((x) => x.reads === 1 && x.armed === 1), JSON.stringify(r));
+    const m = mutantModule('src/server/spend-guard.js', [['recheckTimer = schedule(() => { recheckTimer = null; recheckLedger().catch(() => false); if (unreadable) armRecheck(); }, LEDGER_RECHECK_MS);', 'recheckTimer = schedule(() => { recheckTimer = null; recheckLedger().catch(() => false).then(() => { if (unreadable) armRecheck(); }); }, LEDGER_RECHECK_MS);']]);
+    ok('§3f (r2) CONTROL: the re-arm only after the read settled (the follow-up\'s first form) in a copy (the patch hit)', !m.err && m.hits === 1, m.err || '');
+    if (!m.err) { const rm = await runHung(m.mod); ok('§3f (r2) CONTROL: with it, one read that never settles ENDS the self-recheck — no timer is left armed — RED', rm[0].armed === 0, JSON.stringify(rm)); }
+    // what is not a regular file (a FIFO in the ledger's place would hold the read for ever) is unreadable by name, never opened
+    const dir = tmpdir('vs-spend-3f-notfile-');
+    fs.mkdirSync(LF(dir, 'spend-budget.json'), { recursive: true });
+    const gd = guardMod.create({ dataDir: dir, serverSetting: () => undefined, getUserTodos: () => null, log: () => { }, schedule: () => null });
+    await gd.recheckLedger();
+    ok('§3f (r2) the default re-read never opens what is not a regular file: it stays unreadable, named «not a regular file»', gd.snapshot().ledgerUnreadable && gd.snapshot().ledgerUnreadable.error === 'not a regular file', JSON.stringify(gd.snapshot().ledgerUnreadable));
   }
   {
     const dir = tmpdir('vs-spend-3f-none-');
     const v = mk(guardMod, dir, [], []).authorize({ reason: 'auto-resume', identity: ID, now });
     ok('§3f NO FILE (ENOENT) is a first start, not a failure: allowed, nothing said', v.ok === true && v.why === null);
   }
-  // (5) A READ ERROR that is not ENOENT (a file the hub may not read)
-  {
-    const dir = world((f) => { fs.writeFileSync(f, '{}'); fs.chmodSync(f, 0); });
-    let readable = true; try { fs.readFileSync(LF(dir, 'spend-budget.json')); } catch { readable = false; }
-    const v = mk(guardMod, dir, [], []).authorize({ reason: 'auto-resume', identity: ID, now });
-    ok('§3f a file the hub may not read (EACCES) refuses by name' + (readable ? ' — SKIPPED: this user reads a mode-0 file' : ''), readable || (v.why === 'ledger-unreadable' && /EACCES/.test(v.detail)), v.detail);
-    try { fs.chmodSync(LF(dir, 'spend-budget.json'), 0o600); } catch { }
+  // (5) A READ ERROR that is not ENOENT (a file the hub may not read) — through the guard's read SEAM, never chmod (the readers'
+  // round: a mode-0 file is readable by root, so the old leg could pass by skipping — a skip is not a pass)
+  for (const code of ['EACCES', 'EIO']) {
+    const dir = world((f) => fs.writeFileSync(f, '{"v":1,"budget":{"v":1,"identities":{},"instance":[],"notices":{}}}'));
+    const g = guardMod.create({ dataDir: dir, serverSetting: () => undefined, getUserTodos: () => null, log: () => { }, schedule: () => null, readLedgerSync: () => { throw Object.assign(new Error(code), { code }); } });
+    const v = g.authorize({ reason: 'auto-resume', identity: ID, now });
+    ok(`§3f a file the hub may not read (${code}, through the read seam) refuses by name`, v.why === 'ledger-unreadable' && new RegExp(code).test(v.detail), v.detail);
   }
   // (6) THE WORDS: rendered through the client's own renderer, en / zh / ja — no count line (there is none), the ledger door;
   // and the hand-over toast says it in words, never the bare `why`
@@ -3107,14 +3144,14 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
     const settings = { 'spend.unattendedPerIdentityHour': 30, 'spend.unattendedPerIdentityDay': 2000, 'spend.unattendedPerInstanceDay': 10000, ...caps };
     const producers = {}, files = {};
     const writer = { dirty: (file, o) => { producers[file] = o.produce; } };
-    const W = { dir, settings, ran: [], stash: [], backs: [], logs: [], queue: {}, pulls: [], serves };
+    const W = { dir, settings, ran: [], stash: [], backs: [], logs: [], queue: {}, pulls: [], serves, inbox: [] };
     W.now = () => CLOCK; W.setClock = (t) => { CLOCK = t; }; W.adv = (ms) => { CLOCK += ms; };
-    W.mkG = () => gMod.create({ dataDir: dir, serverSetting: (k) => settings[k], identityOf: () => IDg, getUserTodos: () => null, log: () => { }, schedule: () => null, unschedule: () => { } });
+    W.mkG = () => gMod.create({ dataDir: dir, serverSetting: (k) => settings[k], identityOf: () => IDg, getUserTodos: () => ({ add: (k, i) => { W.inbox.push({ key: k, ...i }); return { id: 'ut-' + W.inbox.length }; } }), log: () => { }, schedule: () => null, unschedule: () => { } });
     const stashFn = (pe, w) => W.stash.push(w.text);
     // the stand-in wrapper: its queue per conversation; `remove` takes the item out and hands the words back (mode-less)
     W.pull = (cid, item, holder) => {
       W.pulls.push(item);
-      if (!W.serves) return false;
+      if (!W.serves) return 'no-remove';   // its process is here and too old to serve «remove»
       const q = W.queue[cid] || [];
       const i = q.findIndex((x) => x.id === item);
       if (i < 0) return true;   // gone: it ran (the wrapper answers 'gone', nothing comes back)
@@ -3152,9 +3189,9 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
   };
   // ── (3) A NULL OR BLANK CAP STAYS A REFUSAL, SAID AS ITSELF ──
   {
-    const rows = [null, '', '  ', undefined, 0, -1].map((x) => { const L = A.budgetLimits(() => x); return [x, L.perIdentityHour, (L.unset || []).includes('perIdentityHour')]; });
-    ok('§5g (3) budgetLimits: null / blank are 0 AND named unset; no setting (undefined) is the default; an explicit 0 is a 0 (not unset); garbage (-1) falls back as before',
-      JSON.stringify(rows) === JSON.stringify([[null, 0, true], ['', 0, true], ['  ', 0, true], [undefined, 30, false], [0, 0, false], [-1, 30, false]]), JSON.stringify(rows));
+    const rows = [null, '', '  ', undefined, 0, -1, 'abc', true, false, 'off', '30', 12].map((x) => { const L = A.budgetLimits(() => x); return [x, L.perIdentityHour, (L.unset || []).includes('perIdentityHour')]; });
+    ok('§5g (3) budgetLimits — A CAP THAT IS NOT A NUMBER IS NOT A CAP (the follow-up ruling): null, blank, a negative number, a text, a boolean are 0 AND named unset; only NO setting (undefined) is the default; an explicit 0 is a 0; «30» written as text is 30',
+      JSON.stringify(rows) === JSON.stringify([[null, 0, true], ['', 0, true], ['  ', 0, true], [undefined, 30, false], [0, 0, false], [-1, 0, true], ['abc', 0, true], [true, 0, true], [false, 0, true], ['off', 0, true], ['30', 30, false], [12, 12, false]]), JSON.stringify(rows));
     const L = A.budgetLimits((k) => (k === 'spend.unattendedPerIdentityHour' ? null : undefined));
     const v = A.authorizeUnattendedSpend({ reason: 'auto-resume', identity: IDg, state: A.emptyBudget(), limits: L });
     ok('§5g (3) a null hour cap REFUSES (never the default 30) and the refusal says «no cap is set», not «set to 0»', v.ok === false && v.why === 'hour-cap' && v.capUnset === true && /no cap is set for unattended turns per identity per hour/.test(v.detail) && !/set to 0/.test(v.detail), v.detail);
@@ -3174,12 +3211,64 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
         && /switched off/.test(SSm.handOverRefusalWords({ code: 'spend_refused', why: 'hour-cap', cap: 0, identity: IDg }, (k, p) => String(k).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] !== undefined ? String(p[x]) : m)), {}).text), toast.text);
     const keys = [...A.REFUSAL_WORDS['cap-unset'], ...A.REFUSAL_WORDS['cap-unset-instance'], A.DOOR_WORDS.unset, A.DOOR_LINK_WORDS.unset, 'Not handed over — no limit is set for turns nobody typed on {account}: set a number in its row: {link}. The notices keep waiting.', 'Not handed over — no limit is set for turns nobody typed on this instance: set a number in its row: {link}. The notices keep waiting.', 'none — every turn nobody typed is held until a number is set'];
     ok('§5g (3) every new sentence is in zh and ja', keys.every((k) => ZH.has(k) && JA.has(k)), keys.filter((k) => !ZH.has(k) || !JA.has(k)).join(' | '));
-    const m = mutantModule('src/spend-authorizer.js', [["    if (field && (v === null || (typeof v === 'string' && !v.trim()))) { unset.push(field); return 0; }\n", '']]);
+    // A REQUEST THAT SETS A CAP TO NOTHING STORES NOTHING (the follow-up ruling): the REAL settings router — a PATCH {cap: null}
+    // from the owner's page stores it BLANK (refused, said), never removes the key so the default comes back. THE PORT'S MEETING
+    // (2.369.411's setting-holds): the server's own patchSettings keeps its door's contract — a null is the row's DEFAULT, what a
+    // timed raise's return writes for a row that was at its default (else every turn nobody typed would be refused at the return)
+    const routerRun = async (pmod) => {
+      const express = require(path.join(REPO, 'node_modules/express'));
+      const http = require('node:http');
+      const dir = tmpdir('vs-spend-5g-patch-');
+      const router = pmod.setup({ dataDir: dir, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => null, getMounts: () => null, getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { } });
+      router.patchSettings({ 'spend.unattendedPerIdentityHour': 9, 'spend.unattendedPerIdentityDay': 90 });
+      const app = express(); app.use(express.json()); app.use(router);
+      const srv = await new Promise((res) => { const sv = app.listen(0, '127.0.0.1', () => res(sv)); });
+      const patch = (body) => new Promise((res) => { const rq = http.request({ host: '127.0.0.1', port: srv.address().port, path: '/api/settings', method: 'PATCH', headers: { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' } }, (r) => { r.resume(); r.on('end', res); }); rq.end(JSON.stringify(body)); });   // the owner's page (setting-doors pick 0 refuses any other)
+      await patch({ 'spend.unattendedPerIdentityHour': null, 'ui.someOtherRow': null });
+      const afterHttp = JSON.parse(fs.readFileSync(path.join(dir, 'settings.json'), 'utf8'));
+      router.patchSettings({ 'spend.unattendedPerIdentityDay': null });
+      const afterAct = JSON.parse(fs.readFileSync(path.join(dir, 'settings.json'), 'utf8'));
+      await new Promise((r) => srv.close(r));
+      return { afterHttp, afterAct };
+    };
+    // the meeting's scene: the REAL setting-holds over the REAL router — a timed raise of the hour cap from its default, then its return
+    const HOURK = 'spend.unattendedPerIdentityHour';
+    const holdRun = async (pmod) => {
+      const dirH = tmpdir('vs-spend-5g-hold-');
+      const rH = pmod.setup({ dataDir: dirH, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => null, getMounts: () => null, getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { } });
+      const SHm = require(path.join(REPO, 'src/server/setting-holds.js'));
+      const H = SHm.create({ dataDir: dirH, readSettings: () => rH.readSettings(), patchSettings: (p) => rH.patchSettings(p), now: () => 1_900_000_000_000, writer: { dirty: () => { }, durable: async () => true }, setTimer: () => ({}), clearTimer: () => { } });
+      const took = await H.take({ key: HOURK, value: 50, untilRel: 3600e3, shown: 30 });
+      const during = A.budgetLimits((k) => rH.readSettings()[k]).perIdentityHour;
+      await H.returnHold(HOURK, 'moment');
+      const after = { ...rH.readSettings() };
+      return { took: !!(took && took.ok), during, after, L: A.budgetLimits((k) => after[k]) };
+    };
+    {
+      const { afterHttp, afterAct } = await routerRun(require(path.join(REPO, 'src/routes/persistence.js')));
+      const L = A.budgetLimits((k) => afterAct[k]);
+      ok('§5g (3) THE REAL ROUTER: a PATCH {hour cap: null} from the owner\'s page STORES nothing — blank, read «no limit is set» (refused), never the default; another row\'s null still removes it; the server\'s own patchSettings({day cap: null}) is its door\'s «the row\'s default» (the key removed)',
+        afterHttp['spend.unattendedPerIdentityHour'] === '' && afterHttp['spend.unattendedPerIdentityDay'] === 90 && !Object.prototype.hasOwnProperty.call(afterAct, 'spend.unattendedPerIdentityDay') && L.perIdentityHour === 0 && L.perIdentityDay === A.BUDGET_DEFAULTS.perIdentityDay && JSON.stringify(L.unset) === '["perIdentityHour"]'
+        && !Object.prototype.hasOwnProperty.call(afterHttp, 'ui.someOtherRow'), JSON.stringify({ afterHttp, afterAct }));
+      // (r2, N4) THE ROUTER'S OWN RED COPY: the PATCH's cap rule back to «a null removes the key»
+      const mr = mutantModule('src/routes/persistence.js', [["if (SPEND_CAP_KEYS.has(k)) merged[k] = ''; else delete merged[k];", 'delete merged[k];']]);
+      ok('§5g (3) CONTROL: the PATCH\'s cap rule back to the release in a copy (the patch hit)', !mr.err && mr.hits === 1, mr.err || '');
+      if (!mr.err) { const rm = await routerRun(mr.mod); const Lr = A.budgetLimits((k) => rm.afterHttp[k]); ok('§5g (3) CONTROL: with it, the PATCH REMOVES the cap — the default 30 comes back in silence — RED', !('spend.unattendedPerIdentityHour' in rm.afterHttp) && Lr.perIdentityHour === 30, JSON.stringify(rm.afterHttp)); }
+      // THE MEETING: a timed raise of a cap at its default returns to the default — never «no limit is set»
+      const hr = await holdRun(require(path.join(REPO, 'src/routes/persistence.js')));
+      ok('§5g (3) THE PORT\'S MEETING (setting-holds): a timed raise of the hour cap from its default (30 → 50) RETURNS to the default — the key removed through patchSettings, the cap 30 again, never «no limit is set» (every turn nobody typed refused)',
+        hr.took && hr.during === 50 && !Object.prototype.hasOwnProperty.call(hr.after, HOURK) && hr.L.perIdentityHour === 30 && !hr.L.unset, JSON.stringify(hr));
+      const mh = mutantModule('src/routes/persistence.js', [["{ if (v === null) delete merged[k]; }   // the internal door", "{ if (v === null && !SPEND_CAP_KEYS.has(k)) delete merged[k]; }   // the internal door"]]);
+      ok('§5g (3) CONTROL: the follow-up\'s first rule (patchSettings keeps a cap\'s null) in a copy (the patch hit)', !mh.err && mh.hits === 1, mh.err || '');
+      if (!mh.err) { const hm = await holdRun(mh.mod); ok('§5g (3) CONTROL: with it, the raise\'s return STORES null — the hour cap reads «no limit is set», every turn nobody typed refused — RED', hm.took && hm.after[HOURK] === null && hm.L.perIdentityHour === 0 && JSON.stringify(hm.L.unset) === '["perIdentityHour"]', JSON.stringify(hm)); }
+    }
+    const m = mutantModule('src/spend-authorizer.js', [["      if (!Number.isFinite(n) || n < 0) { unset.push(field); return 0; }\n", "      if (!Number.isFinite(n) || n < 0) return v === null || (typeof v === 'string' && !v.trim()) ? 0 : dflt;\n"]]);
     ok('§5g (3) CONTROL: the release\'s reading re-applied to a copy (the patch hit)', !m.err && m.hits === 1, m.err || '');
     if (!m.err) {
       const Lm = m.mod.budgetLimits((k) => (k === 'spend.unattendedPerIdentityHour' ? null : undefined));
       const vm = m.mod.authorizeUnattendedSpend({ reason: 'auto-resume', identity: IDg, state: m.mod.emptyBudget(), limits: Lm });
-      ok('§5g (3) CONTROL: with it, a null cap is a SILENT 0 — «switched off … its limit is 0», no «no cap is set» — RED', Lm.perIdentityHour === 0 && !Lm.unset && /switched off/.test(m.mod.refusalI18n(vm, {}).text.key) && !/no cap is set/.test(vm.detail));
+      const Lg = m.mod.budgetLimits((k) => (k === 'spend.unattendedPerIdentityHour' ? 'abc' : undefined));
+      ok('§5g (3) CONTROL: with it, a null cap is a SILENT 0 — «switched off … its limit is 0», no «no cap is set» — and a text cap reads the DEFAULT 30 (the release) — RED', Lm.perIdentityHour === 0 && !Lm.unset && /switched off/.test(m.mod.refusalI18n(vm, {}).text.key) && !/no cap is set/.test(vm.detail) && Lg.perIdentityHour === 30);
     }
   }
   // ── (2) A CAP LOWERED BELOW WHAT ALREADY WAITS ──
@@ -3200,9 +3289,15 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
     const W = mkWorld({ 'spend.unattendedPerIdentityHour': 5 }, { serves: false });
     for (let i = 0; i < 3; i++) W.send('c1', 'n' + i);
     W.settings['spend.unattendedPerIdentityHour'] = 1;
-    W.q.rejudge(); W.q.rejudge();
-    ok('§5g (2) an agent that serves no «remove»: nothing is lost or returned; said ONCE per frame in the journal («could not be asked back out now»), asked again later',
-      W.stash.length === 0 && W.counts().promisedHour === 3 && W.logs.filter((l) => /could not be asked back out now/.test(l)).length === 2, JSON.stringify(W.logs));
+    for (let i = 0; i < 5; i++) W.q.rejudge();
+    const unheld = W.inbox.filter((x) => x.i18n && /could not be held/.test(x.i18n.text.key));
+    ok('§5g (2) an agent that serves no «remove»: nothing is lost or returned; said ONCE per frame in the journal, and ONCE per frame WHERE THE PERSON LOOKS (a For-you line: it may run past the limit) — five sweeps, two lines',
+      W.stash.length === 0 && W.counts().promisedHour === 3 && W.logs.filter((l) => /could not be asked back out now/.test(l)).length === 2 && unheld.length === 2 && unheld.every((x) => /past the limit/.test(x.i18n.text.key)), JSON.stringify({ logs: W.logs, inbox: W.inbox.map((x) => x.text) }));
+    ok('§5g (2) PACED: five sweeps ask each frame ONCE (2 asks — never one sidecar read per frame per sweep)', W.pulls.length === 2, JSON.stringify(W.pulls));
+    const { dictEntries } = await import('./i18n-extract.mjs');
+    const ZH = new Map([...dictEntries(read('src/lib/i18n-zh.js'))].map((e) => [e.key, e.value])), JA = new Map([...dictEntries(read('src/lib/i18n-ja.js'))].map((e) => [e.key, e.value]));
+    const UK = [...A.UNHELD_WORDS.cap, ...A.UNHELD_WORDS.ledger, A.UNHELD_WORDS.door];
+    ok('§5g (2) …the For-you line\'s words are in zh and ja', UK.every((k) => ZH.has(k) && JA.has(k)), UK.filter((k) => !ZH.has(k) || !JA.has(k)).join(' | '));
   }
   // THE WIRING: a settings write reaches the REAL ladder (server.js's own wiring: the verdict rides waitingReservations),
   // which writes the wrapper's own remove verb for the bound item; the wrapper's answer is HELD in the stash — said as the
@@ -3260,13 +3355,13 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
     W.q.noteQueue('c1', W.queue.c1.map((x) => ({ id: x.id, kind: 'peer' })), '4242', { fresh: true });   // its item binds now
     ok('§5g (2) a frame not yet bound when the cap drops is asked back out the MOMENT its item binds (no 60 s pause for a take-back never sent)',
       pulledBefore === 0 && W.pulls.length === 1 && W.stash.length === 1 && W.stash[0] === 'u0', JSON.stringify({ pulledBefore, pulls: W.pulls, stash: W.stash }));
-    const m = mutantModule('src/server/queued-wakes.js', [['      delete e.pulled;   // never asked ⇒ no pause', '      e.pulled.asked = false;   // never asked ⇒ no pause']]);
-    ok('§5g (2) CONTROL: the pause kept for a take-back never sent, in a copy (the patch hit)', !m.err && m.hits === 1, m.err || '');
+    const m = mutantModule('src/server/queued-wakes.js', [['if (!fresh && !again && e.pulled && (e.pulled.asked ? e.pulled.sig === base : e.pulled.sig === seen)) continue;', 'if (!fresh && e.pulled) continue;']]);
+    ok('§5g (2) CONTROL: a frame marked once never asked again, in a copy (the patch hit)', !m.err && m.hits === 1, m.err || '');
     if (!m.err) {
       const Wm = mkWorld({ 'spend.unattendedPerIdentityHour': 5 }, { qMod: m.mod });
       Wm.sendUnbound('c1', 'u0'); Wm.settings['spend.unattendedPerIdentityHour'] = 0; Wm.q.rejudge();
       Wm.q.noteQueue('c1', Wm.queue.c1.map((x) => ({ id: x.id, kind: 'peer' })), '4242', { fresh: true });
-      ok('§5g (2) CONTROL: with it, the bound frame is NOT asked for 60 s — the turn may end and run it past the cap — RED', Wm.pulls.length === 0 && Wm.stash.length === 0);
+      ok('§5g (2) CONTROL: with it, the frame that binds is NEVER asked — the turn may end and run it past the cap — RED', Wm.pulls.length === 0 && Wm.stash.length === 0);
     }
   }
   {   // B-3b0f × (2): the ledger unreadable after a restart — no wait can be judged, every waiting frame is held
@@ -3274,8 +3369,74 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
     for (let i = 0; i < 3; i++) W.send('c1', 'r' + i);
     W.restart({ tornLedger: true });
     W.q.noteQueue('c1', W.queue.c1.map((x) => ({ id: x.id, kind: 'peer' })), '4242', { fresh: true });   // the attach's queue-resync
-    ok('§5g (2) × B-3b0f: after a restart the ledger cannot be read — every frame still waiting is taken back out (held, never run uncounted)',
-      W.g.snapshot().ledgerUnreadable !== null && JSON.stringify(W.g.waitingOverCap()) === '["*"]' && W.stash.length === 3 && W.queue.c1.length === 0, JSON.stringify({ stash: W.stash, left: W.queue.c1.length }));
+    for (let i = 0; i < 5; i++) W.q.rejudge();
+    ok('§5g (2) × B-3b0f: after a restart the ledger cannot be read — every frame still waiting is taken back out (held, never run uncounted), and said with THAT reason («the record … cannot be read»), never «a spending cap is now lower»',
+      W.g.snapshot().ledgerUnreadable !== null && JSON.stringify(W.g.waitingOverCap()) === '["*"]' && W.stash.length === 3 && W.queue.c1.length === 0 && W.backs.filter((r) => r === QWm.PULL_WHY_LEDGER).length === 3 && !W.backs.includes(QWm.PULL_WHY), JSON.stringify({ stash: W.stash, left: W.queue.c1.length, backs: W.backs }));
+    ok('§5g (2) × B-3b0f PACED: five more sweeps while the ledger stays unreadable ask nothing again (3 asks in all)', W.pulls.length === 3, JSON.stringify(W.pulls));
+  }
+  // ── r2 (the follow-up's own reader): the SHOULDs of a few lines ──
+  {   // S2 — AN ASK THAT DID NOT LAND is asked ONCE more: a newer listing still holds the item, a pause after the ask
+    const runLost = (qMod = QWm) => {
+      const W = mkWorld({ 'spend.unattendedPerIdentityHour': 5 }, { qMod });
+      W.send('c1', 'k0'); W.send('c1', 'k1');
+      W.pull = (cid, item) => { W.pulls.push(item); return true; };   // the wrapper never reads it: the item stays listed
+      W.settings['spend.unattendedPerIdentityHour'] = 1;
+      W.q.rejudge();
+      for (let i = 0; i < 4; i++) W.q.rejudge();   // paced: no second ask inside the pause
+      const inPause = W.pulls.length;
+      W.adv(2 * MIN); W.q.noteQueue('c1', W.queue.c1.map((x) => ({ id: x.id, kind: 'peer' })), '4242', { fresh: true });   // a newer listing still holds it
+      W.q.rejudge();
+      const again = W.pulls.length;
+      W.adv(2 * MIN); W.q.noteQueue('c1', W.queue.c1.map((x) => ({ id: x.id, kind: 'peer' })), '4242', { fresh: true });
+      for (let i = 0; i < 3; i++) W.q.rejudge();
+      return { inPause, again, after: W.pulls.length };
+    };
+    const r = runLost();
+    ok('§5g (2) r2 AN ASK THAT DID NOT LAND (the wrapper never read it): paced inside the pause, asked ONCE more when a newer listing still holds the item — never at every sweep after',
+      r.inPause === 1 && r.again === 2 && r.after === 2, JSON.stringify(r));
+    const m = mutantModule('src/server/queued-wakes.js', [['      const again = !!(e.pulled && e.pulled.asked && !e.pulled.again', '      const again = false && !!(e.pulled && e.pulled.asked && !e.pulled.again']]);
+    ok('§5g (2) r2 CONTROL: the second ask removed from a copy (the follow-up\'s first form) (the patch hit)', !m.err && m.hits === 1, m.err || '');
+    if (!m.err) { const rm = runLost(m.mod); ok('§5g (2) r2 CONTROL: with it, a lost ask is NEVER asked again — the frame runs at the turn end past the lowered cap — RED', rm.again === 1, JSON.stringify(rm)); }
+  }
+  {   // S3 — while the ledger cannot be read, the old-agent line still NAMES the conversation the frame waits behind; one item per frame
+    const W = mkWorld({ 'spend.unattendedPerIdentityHour': 5 }, { serves: false });
+    for (let i = 0; i < 2; i++) {
+      const v = W.g.authorize({ reason: 'peer-message', identity: IDg, now: W.now() });
+      const e = W.q.noteWritten('c1', { charged: { reason: 'peer-message', identity: IDg, hold: v.hold }, text: 'w' + i, holder: '4242', waitKey: 'claude:c1', peerName: 'release-notes' });
+      W.q.answer(e.id, { mode: 'queued' });
+      (W.queue.c1 = W.queue.c1 || []).push({ id: 'it-' + e.id, text: 'w' + i });
+    }
+    W.restart({ tornLedger: true });
+    W.q.noteQueue('c1', W.queue.c1.map((x) => ({ id: x.id, kind: 'peer' })), '4242', { fresh: true });
+    for (let i = 0; i < 3; i++) W.q.rejudge();
+    const lines = W.inbox.filter((x) => x.i18n && /could not be held/.test(x.i18n.text.key));
+    ok('§5g (2) r2 THE LEDGER UNREADABLE: the old-agent line still names the conversation the frame waits behind («release-notes», filed under its key), ONE item per frame (its own itemKey — never merged by its words)',
+      lines.length === 2 && lines.every((x) => x.key === 'claude:c1' && x.i18n.text.params && x.i18n.text.params.conversation === 'release-notes' && /record of turns nobody typed cannot be read/.test(x.i18n.text.key)) && new Set(lines.map((x) => x.itemKey)).size === 2 && lines.every((x) => /^spend-unheld:/.test(x.itemKey || '')),
+      JSON.stringify(lines.map((x) => ({ key: x.key, itemKey: x.itemKey, p: x.i18n && x.i18n.text.params }))));
+  }
+  {   // (1) THE RIGHT REASON, WHOLE — the hand-over card says the ledger's reason for what the ledger held, never the cap's
+    const SSh = require(path.join(REPO, 'src/stash-summary.js'));
+    const k = SSh.heldKeyOf({ kind: 'spend-cap', why: 'ledger-unreadable', capHeld: true }), kc = SSh.heldKeyOf({ kind: 'spend-cap', why: 'cap-lowered', capHeld: true });
+    const { dictEntries } = await import('./i18n-extract.mjs');
+    const ZH = new Map([...dictEntries(read('src/lib/i18n-zh.js'))].map((e) => [e.key, e.value])), JA = new Map([...dictEntries(read('src/lib/i18n-ja.js'))].map((e) => [e.key, e.value]));
+    ok('§5g (2) r2 THE RIGHT REASON ON THE CARD: what the ledger held says «the record of turns nobody typed could not be read» (zh/ja); a lowered cap keeps «the spending ceiling held them»',
+      k === 'spend-ledger' && /record of turns nobody typed could not be read/.test(SSh.HELD_WHY[k]) && SSh.HELD_WHY[kc] === 'the spending ceiling held them' && ZH.has(SSh.HELD_WHY[k]) && JA.has(SSh.HELD_WHY[k]), JSON.stringify({ k, kc }));
+  }
+  {   // S1 — ONLY A WRITE THAT MOVED THE LIMITS re-judges (an autosave of any other row asks nothing back out)
+    const runSig = (gm) => {
+      let calls = 0;
+      const off = gm.onLimitsWritten(() => { calls++; });
+      const L1 = A.budgetLimits((k) => ({ 'spend.unattendedPerIdentityHour': 5 })[k]), L1b = A.budgetLimits((k) => ({ 'spend.unattendedPerIdentityHour': 5 })[k]), L2 = A.budgetLimits((k) => ({ 'spend.unattendedPerIdentityHour': 2 })[k]);
+      gm.noteLimitsWritten(L1, L1b); const same = calls;
+      gm.noteLimitsWritten(L1, L2); const moved = calls;
+      off();
+      return { same, moved };
+    };
+    const r = runSig(guardMod);
+    ok('§5g (2) r2 ONLY A MOVE RE-JUDGES: a settings write that leaves the limits as they were signals nothing; one that moves them signals', r.same === 0 && r.moved === 1, JSON.stringify(r));
+    const m = mutantModule('src/server/spend-guard.js', [['  try { if (prev && next && JSON.stringify(prev) === JSON.stringify(next)) return; } catch { }\n', '']]);
+    ok('§5g (2) r2 CONTROL: the move test removed from a copy (the patch hit)', !m.err && m.hits === 1, m.err || '');
+    if (!m.err) { const rm = runSig(m.mod); ok('§5g (2) r2 CONTROL: with it, every settings write re-judges every waiting frame — RED', rm.same === 1, JSON.stringify(rm)); }
   }
   {
     const m = mutantModule('src/server/queued-wakes.js', [["    if (!verdict) return 0;\n    let rids = [];", "    if (true) return 0;\n    let rids = [];"]]);

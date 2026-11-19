@@ -60,6 +60,7 @@ const LIVE_MAX_AGE_MS = 7 * 24 * 3600 * 1000;   // round 4: a live entry kept at
 const PULL_RETRY_MS = 60 * 1000;   // a take-back nobody answered is asked again after this
 const PULL_WHY = 'held — a spending cap is now lower than the messages waiting; it rides the conversation\'s next turn';
 const UNREAD_RECHECK_MS = 60 * 1000;   // B-e3fe: an unreadable msg-queued.json is read again at most this often (the spend ledger's LEDGER_RECHECK_MS)
+const PULL_WHY_LEDGER = 'held — the record of turns nobody typed cannot be read, so none may run; it rides the conversation\'s next turn';   // the readers' round: the RIGHT reason
 
 const digestOf = (text) => crypto.createHash('sha256').update(String(text || '')).digest('hex').slice(0, 24);
 const idsOf = (items) => (Array.isArray(items) ? items.map((it) => (it && typeof it === 'object' ? it.id : it)).filter((x) => typeof x === 'string' && x) : []);
@@ -203,9 +204,10 @@ function create({ dataDir, noteSpend = null, releaseSpend = null, reservationSta
     const g = { id: e.id, cid: e.cid, bind: [e.bind[0]], holder: e.holder || null, reason: e.reason || null, identity: e.identity || null, at: now(), why: String(why || '').slice(0, 120), digest: e.digest, text: stashed ? null : e.text, fromName: e.fromName || null, kind: e.kind, stashed: !!stashed, seenSeq: listed ? m.idsSeq : 0, pulledAt: 0 };
     gone = [...gone.filter((x) => x.id !== e.id), g].slice(-MAX_ENTRIES);
     // its process's queue lists it right now: it still waits there — taken back out at once (it does not run)
-    if (listed) { g.pulledAt = now(); if (pullSafely(e.cid, g.bind[0], g.holder)) log(`[queued] ${e.cid}: ${e.id}, given up (${g.why}), still waits in its agent's queue — asked back out, it does not run`); }
+    if (listed) { g.pulledAt = now(); if (pullSafely(e.cid, g.bind[0], g.holder) === true) log(`[queued] ${e.cid}: ${e.id}, given up (${g.why}), still waits in its agent's queue — asked back out, it does not run`); }
   }
-  const pullSafely = (cid, item, holder) => { if (typeof pull !== 'function' || !item) return false; try { return pull(cid, item, holder || null) === true; } catch (err) { log('[queued] taking a frame back out failed:', err.message); return false; } };
+  // → true (asked) | 'no-remove' (its process is here and serves no «remove» — an older agent) | false (not asked now)
+  const pullSafely = (cid, item, holder) => { if (typeof pull !== 'function' || !item) return false; try { const r = pull(cid, item, holder || null); return r === true ? true : r === 'no-remove' ? 'no-remove' : false; } catch (err) { log('[queued] taking a frame back out failed:', err.message); return false; } };
   /** B-0a33 (1): the given-up frames of `cid` against what its process says now (a queue listing, a turn start). */
   function watchGone(cid) {
     if (!gone.length) return;
@@ -219,7 +221,7 @@ function create({ dataDir, noteSpend = null, releaseSpend = null, reservationSta
       if (m.ids.has(g.bind[0])) {
         // STILL WAITING where the hub gave up on it: it does not run — taken back out (its words come back: noteHandedBack)
         if (g.seenSeq !== m.idsSeq) { g.seenSeq = m.idsSeq; changed = true; }
-        if (!g.pulledAt || t - g.pulledAt >= PULL_RETRY_MS) { g.pulledAt = t; changed = true; if (pullSafely(cid, g.bind[0], g.holder)) log(`[queued] ${cid}: ${g.id}, given up (${g.why}), still waits in its agent's queue — asked back out, it does not run`); }
+        if (!g.pulledAt || t - g.pulledAt >= PULL_RETRY_MS) { g.pulledAt = t; changed = true; if (pullSafely(cid, g.bind[0], g.holder) === true) log(`[queued] ${cid}: ${g.id}, given up (${g.why}), still waits in its agent's queue — asked back out, it does not run`); }
       } else if (g.seenSeq && m.startSeq > g.seenSeq && m.idsSeq > m.startSeq) {
         // it LEFT that queue after a turn started there: it ran — counted where it ran (its unit's instant moves to the run)
         gone = gone.filter((x) => x !== g); changed = true;
@@ -232,7 +234,7 @@ function create({ dataDir, noteSpend = null, releaseSpend = null, reservationSta
   /** B-0a33 (2): A CAP LOWERED BELOW WHAT ALREADY WAITS. The guard names the waiting reservations no cap holds now (the newest
    *  first); each one bound to its wrapper's queue item is TAKEN BACK OUT (see PULL_WHY's head). One that cannot be (no item
    *  known yet, no wrapper here that serves `remove`) is asked again at the next sweep, and said once. → how many were asked */
-  function rejudge() {
+  function rejudge({ fresh = false } = {}) {   // fresh: a settings write — every waiting frame over a cap is asked again
     const verdict = typeof waitingOverCap === 'function' ? waitingOverCap : typeof waitingReservations === 'function' ? () => { const r = waitingReservations(); return r && Array.isArray(r.overCap) ? r.overCap : []; } : null;   // the guard's answer carries it
     if (!verdict) return 0;
     let rids = [];
@@ -244,14 +246,27 @@ function create({ dataDir, noteSpend = null, releaseSpend = null, reservationSta
     let n = 0, changed = false;
     for (const e of entries) {
       if (!live(e) || !e.reserved || !(all || over.has(String(e.id)))) continue;
-      if (e.pulled && t - Number(e.pulled.at || 0) < PULL_RETRY_MS) continue;
-      e.pulled = { at: t, asked: true }; changed = true;   // marked BEFORE the ask: the wrapper's answer may arrive inside it
+      // PACED (the readers' round): a frame is asked back ONCE for what it is now — its item in its process; again only when
+      // that changes (its item binds, its process changes), when its process speaks again after it could not be asked, or on
+      // a settings write (`fresh`) — never at every sweep (each ask reads its wrapper's sidecar on the main thread)
+      const m = mirrorOf(e.cid);
+      const base = `${e.bind[0] || ''}|${e.holder || ''}`;
+      const seen = `${base}|${m.idsSeq}`;
+      // (r2, the follow-up's read S2) AN ASK THAT DID NOT LAND (the line lost to a re-attach, a restart before the wrapper read
+      // it): a listing NEWER than the ask that still holds its item, a pause after it, asks ONCE more — never at every sweep
+      const again = !!(e.pulled && e.pulled.asked && !e.pulled.again && t - (Number(e.pulled.at) || 0) >= PULL_RETRY_MS && m.ids && e.bind[0] && m.ids.has(e.bind[0])
+        && (e.pulled.boot !== boot || m.idsSeq > (Number(e.pulled.seq) || 0)));
+      if (!fresh && !again && e.pulled && (e.pulled.asked ? e.pulled.sig === base : e.pulled.sig === seen)) continue;
+      e.pulled = { at: t, asked: true, sig: base, why: all ? 'ledger' : 'cap', seq: m.idsSeq, boot, ...(again ? { again: true } : {}) }; changed = true;   // marked BEFORE the ask: the wrapper's answer may arrive inside it
       const asked = pullSafely(e.cid, e.bind[0] || null, e.holder);
-      if (asked) { e.pulled.asked = true; n++; continue; }
-      delete e.pulled;   // never asked ⇒ no pause: asked again the moment it can be (its bind, its attach)
-      if (!e.pullSaid) { e.pullSaid = true; log(`[queued] ${e.cid}: ${e.id} waits past a spending cap lowered below it and could not be asked back out now (${e.bind.length ? 'no agent here serves «remove» for it' : 'its queue item is not known yet'}) — asked again at the next sweep`); }
+      if (asked === true) { n++; continue; }
+      e.pulled.asked = false; e.pulled.sig = seen;   // not asked: tried again when its item binds or its process speaks
+      // SAID TO THE PERSON (the readers' round): its process is here and is too old to give a queued message back — it may run
+      // past the cap: ONE For-you line per frame (the guard files it under the conversation it waits behind)
+      if (asked === 'no-remove' && !e.unheldSaid && noteSpend) { e.unheldSaid = true; try { noteSpend({ reason: e.reason || 'peer-message', identity: e.identity || null, hold: null, reservation: e.id, unheld: all ? 'ledger' : 'cap', behind: e.waitKey ? { key: e.waitKey, name: e.peerName || '' } : null }); } catch (err) { log('[queued] saying a frame that cannot be held failed:', err.message); } }
+      if (!e.pullSaid) { e.pullSaid = true; log(`[queued] ${e.cid}: ${e.id} waits ${all ? 'while the record of turns nobody typed cannot be read' : 'past a spending cap lowered below it'} and could not be asked back out now (${e.bind.length ? 'no agent here serves «remove» for it' : 'its queue item is not known yet'}) — asked again at the next sweep`); }
     }
-    if (n) log(`[queued] ${n} waiting frame(s) asked back out of their agent's queue — a spending cap is now lower than what waits; they ride their conversation's next turn`);
+    if (n) log(`[queued] ${n} waiting frame(s) asked back out of their agent's queue — ${all ? 'the record of turns nobody typed cannot be read' : 'a spending cap is now lower than what waits'}; they ride their conversation's next turn`);
     if (changed) persist();
     return n;
   }
@@ -322,6 +337,7 @@ function create({ dataDir, noteSpend = null, releaseSpend = null, reservationSta
       reason: charged && charged.reason ? charged.reason : null, identity: charged && charged.identity ? { key: charged.identity.key, name: charged.identity.name || charged.identity.key } : null,
       mark: mark && mark.gid ? { gid: mark.gid, upTo: Number(mark.upTo) } : null, since: Number.isFinite(since) ? since : null, peerName, holder: holder || null,
       idsAtWrite: m.ids ? [...m.ids] : null, bind: [], startsAt: m.starts, endsAt: m.ends,
+      waitKey: waitKey || null,   // (r2, S3) the conversation it waits behind — the old-agent line names it even while the ledger cannot be read
     };
     if (charged && noteSpend) {
       try { noteSpend({ reason: charged.reason || 'peer-message', identity: charged.identity || null, hold: charged.hold || null, session: charged.session || null, reservation: e.id, behind: waitKey ? { key: waitKey, name: peerName || '' } : null }); e.reserved = true; }
@@ -421,8 +437,9 @@ function create({ dataDir, noteSpend = null, releaseSpend = null, reservationSta
     // B-0a33 (2): a frame taken back for a lowered cap is HELD — said as the spending ceiling's in the stash, and kept there
     // past the stash's cap (bounded by PER_CONVERSATION_MAX): never dropped
     const capHeld = !!(e.pulled && e.pulled.asked);
-    try { if (typeof stash === 'function' && e.text) stash(publicOf(e), { text: e.text, fromName: e.fromName, kind: e.kind, ref: REF + e.id, ...(capHeld ? { held: { kind: 'spend-cap', why: 'cap-lowered', capHeld: true } } : {}) }); } catch (err) { log('[queued] the hand-back stash failed:', err.message); }
-    handBack(e, capHeld ? PULL_WHY : (reason || 'handed back'));   // B-0a33 (2): a take-back says why it was held (asked = marked before the ask)
+    const ledgerHeld = capHeld && e.pulled.why === 'ledger';   // the readers' round: the RIGHT reason is said
+    try { if (typeof stash === 'function' && e.text) stash(publicOf(e), { text: e.text, fromName: e.fromName, kind: e.kind, ref: REF + e.id, ...(capHeld ? { held: { kind: 'spend-cap', why: ledgerHeld ? 'ledger-unreadable' : 'cap-lowered', capHeld: true } } : {}) }); } catch (err) { log('[queued] the hand-back stash failed:', err.message); }
+    handBack(e, capHeld ? (ledgerHeld ? PULL_WHY_LEDGER : PULL_WHY) : (reason || 'handed back'));   // B-0a33 (2): a take-back says why it was held (asked = marked before the ask)
     return true;
   }
   /** The stash HANDED a held-back frame's words to a turn (its `drained` event names the ref): that record is read now. */
@@ -513,4 +530,4 @@ function create({ dataDir, noteSpend = null, releaseSpend = null, reservationSta
   };
 }
 
-module.exports = { create, digestOf, FILE, STORE_NAME, STATES, MAX_ENTRIES, PER_CONVERSATION_MAX, REF, REPEAT_HEAD, RESTASHED_MAX_AGE_MS, LIVE_MAX_AGE_MS, PULL_RETRY_MS, PULL_WHY, UNREAD_RECHECK_MS };
+module.exports = { create, digestOf, FILE, STORE_NAME, STATES, MAX_ENTRIES, PER_CONVERSATION_MAX, REF, REPEAT_HEAD, RESTASHED_MAX_AGE_MS, LIVE_MAX_AGE_MS, PULL_RETRY_MS, PULL_WHY, UNREAD_RECHECK_MS, PULL_WHY_LEDGER };
