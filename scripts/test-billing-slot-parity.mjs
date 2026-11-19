@@ -3,7 +3,7 @@
 // is this conversation billing» over the transition record (src/slot-transitions.js), retiring the pile of resolvers one
 // consumer at a time — the way the three-tier table asks for facts about a machine: a census that makes a one-sided edit red.
 //
-// (a) THE CENSUS (this leg; the lane's census file lists every line). Every call of the nineteen names
+// (a) THE CENSUS (this leg; the lane's census file lists every line). Every call of the resolvers (55 names since the census cure 2)
 //     below in the tracked source (src/ + server.js, git ls-files) is a DECLARED ROW — (resolver, file, enclosing function,
 //     stage, count). A call the table does not name is red BY NAME (a new consumer of a resolver the programme retires must
 //     say its stage); a row the tree no longer has is red (a dead row: the census shrinks as stages land). The stages, money
@@ -23,9 +23,20 @@ const ok = (c, m, extra) => { if (typeof m !== 'string') throw new TypeError('ok
 export const RESOLVERS = Object.freeze(['fireIdentityFor', 'sessionBillingMember', 'resolveUsageKey', 'validateBillingSlot', 'wallSlotFor', 'rejectionSlotFor', 'requestSlotFor', 'readingSlotFor', 'poolCurrentFor', 'poolMemberOfSession',
   // the census cure (主开发 2026-11-19 04:09Z, round w02ucwmzf): the list was not whole — the held member, whose credit, the engine's
   // wrappers, the provider models' own, and the pool's current member (the default a spawn and a fallback read)
-  'heldPoolMemberFor', 'creditIdentityFor', 'wallKeyFor', 'poolMemberOfSessionFor', 'liveQuotaKeyFor', 'usageCacheKeyFor', 'linkMemberOf', 'accountOfSession', 'poolCurrent']);
+  'heldPoolMemberFor', 'creditIdentityFor', 'wallKeyFor', 'poolMemberOfSessionFor', 'liveQuotaKeyFor', 'usageCacheKeyFor', 'linkMemberOf', 'accountOfSession', 'poolCurrent',
+  // the census cure 2 (主开发 2026-11-19 05:27Z / 05:43Z (a)): every function whose return its callers USE as the billing account (the member,
+  // slot or identity a spend, a reading or a spawn is filed under), found by THE NET below and followed up until only consumers call
+  // them — a spawn's member, the default's fallback, the spend identity through the guard (its verdict) and auto-resume, the credit's
+  // identity, the reading's slot, the billing chip. «name@file» = a generic name read in that file only; «spendGuard.authorize» = the
+  // guard's verdict called through its own handle (another handle is the alias gap)
+  'poolDefaultOf', '_resolveHomeSpawn', 'resolveForSpawn', 'poolChooserForModel', 'fallbackDefaultTarget', '_wallScope', 'cliTarget', 'identityOf@src/server/spend-guard.js',
+  'identityFor@src/server/spend-guard.js', 'fireIdentity@src/server/auto-resume.js', 'identityFor@src/server/auto-resume.js', 'setConversationPin', 'resetCreditOffer',
+  'writeResetCredit', 'writeCodexReading', 'demoteWalledAccount', 'refreshCodexForPerson', 'resetCreditPreview', 'projectionBillingIndex', 'claudeBillingIdentity',
+  'codexBillingIdentity', 'poolAuth@src/harnesses/claude.js', 'poolAuth@src/harnesses/codex.js', 'billingIdentity@server.js', 'sessionAuth', 'spendGuard.authorize',
+  'authorizeSpend', 'spendGuard.authorizeBatch', 'authorizeSpendBatch', 'stoppedRows', 'stoppedPlan', 'writeSnap@src/server/usage-pool-engine.js', 'billingIndex@src/server/auto-cli-loop.js',
+  'chooseDefault@src/accounts.js', 'authorize@src/server/spend-guard.js', 'authorizeBatch@src/server/spend-guard.js']);
 export const STAGES = Object.freeze(['spend', 'cost', 'readings', 'pool', 'routes', 'pile']);
-// [resolver, file, enclosing function, stage, calls] — derived by THIS suite's own scan (146 calls: the ten 66, the census cure's nine 80); the census file names each line
+// [resolver, file, enclosing function, stage, calls] — derived by THIS suite's own scan (218 calls: the ten 66, the census cure's nine 80, the cure 2's net 72); the census file names each line
 export const ROWS = Object.freeze([
   ['poolCurrentFor', 'src/server/usage-attribution.js', 'recordUsageAttribution', 'cost', 1],
   ['poolMemberOfSession', 'src/server/usage-attribution.js', 'recordUsageAttribution', 'cost', 1],
@@ -160,6 +171,70 @@ export const ROWS = Object.freeze([
   ['poolCurrent', 'src/server/usage-pool-engine.js', 'setConversationPin', 'pool', 1],
   ['poolCurrent', 'src/server/usage-pool-engine.js', 'sweepNonMemberLinks', 'pool', 1],
   ['poolCurrent', 'src/ws-create.js', 'createBody', 'spend', 1],   // the account a created conversation is bound to
+  // ── the census cure 2 (主开发 2026-11-19 05:27Z / 05:43Z): the answers' own calls, every one a row ──
+  ['_resolveHomeSpawn', 'src/accounts.js', 'resolveForSpawn', 'pile', 1],
+  ['_wallScope', 'src/server/usage-pool-engine.js', 'beforeAutoResumeFire', 'spend', 1],
+  ['_wallScope', 'src/server/usage-pool-engine.js', 'holdRemoved', 'pool', 1],
+  ['_wallScope', 'src/server/usage-pool-engine.js', 'onWalledTurn', 'readings', 1],
+  ['_wallScope', 'src/server/usage-pool-engine.js', 'sessionWallVerdict', 'readings', 1],
+  ['authorizeSpendBatch', 'src/server/auto-resume.js', 'resumeBatch', 'spend', 2],
+  ['authorizeSpend', 'src/server/auto-resume.js', 'spendOk', 'spend', 1],   // auto-resume charges the continue to the verdict's identity
+  ['authorizeSpend', 'src/server/conversation-deliver.js', 'attemptRetry', 'spend', 1],
+  ['authorizeSpend', 'src/server/conversation-deliver.js', 'deliverToConversation', 'spend', 1],
+  ['authorizeSpend', 'src/server/worker-dispatch.js', 'dispatch', 'spend', 1],
+  ['billingIdentity@server.js', 'server.js', 'sessionAuth', 'pile', 1],
+  ['billingIndex@src/server/auto-cli-loop.js', 'src/server/auto-cli-loop.js', 'tick', 'readings', 1],
+  ['chooseDefault@src/accounts.js', 'src/accounts.js', '_healPoolsAfterRemoval', 'pool', 1],
+  ['cliTarget', 'src/routes/provider-models.js', 'cliDoor', 'routes', 1],
+  ['demoteWalledAccount', 'src/server/usage-pool-engine.js', 'onWalledTurn', 'readings', 1],
+  ['fallbackDefaultTarget', 'src/server/account-usage-routes.js', '(module)', 'routes', 1],
+  ['fallbackDefaultTarget', 'src/server/account-usage-routes.js', 'chooseDefault', 'pile', 1],
+  ['fallbackDefaultTarget', 'src/server/usage-pool-engine.js', 'memberRemoved', 'pool', 1],
+  ['fallbackDefaultTarget', 'src/server/usage-pool-engine.js', 'poolChooserForModel', 'pile', 3],
+  ['fireIdentity@src/server/auto-resume.js', 'src/server/auto-resume.js', 'identityFor', 'pile', 1],
+  ['identityFor@src/server/auto-resume.js', 'src/server/auto-resume.js', 'attemptFire', 'spend', 1],
+  ['identityFor@src/server/auto-resume.js', 'src/server/auto-resume.js', 'deliver', 'spend', 1],
+  ['identityFor@src/server/auto-resume.js', 'src/server/auto-resume.js', 'resumeBatch', 'spend', 2],
+  ['identityFor@src/server/auto-resume.js', 'src/server/auto-resume.js', 'stoppedRows', 'pile', 1],
+  ['identityFor@src/server/spend-guard.js', 'src/server/spend-guard.js', 'authorize', 'pile', 1],
+  ['identityFor@src/server/spend-guard.js', 'src/server/spend-guard.js', 'authorizeBatch', 'pile', 1],
+  ['identityFor@src/server/spend-guard.js', 'src/server/spend-guard.js', 'note', 'spend', 1],
+  ['identityFor@src/server/spend-guard.js', 'src/server/spend-guard.js', 'previewBatch', 'spend', 1],
+  ['identityOf@src/server/spend-guard.js', 'src/server/spend-guard.js', 'identityFor', 'pile', 1],
+  ['poolAuth@src/harnesses/claude.js', 'src/harnesses/claude.js', 'claudeBillingIdentity', 'pile', 1],
+  ['poolAuth@src/harnesses/codex.js', 'src/harnesses/codex.js', 'codexBillingIdentity', 'pile', 1],
+  ['poolDefaultOf', 'src/server/usage-pool-engine.js', 'recordCodexQuotaSignal', 'readings', 4],
+  ['projectionBillingIndex', 'src/server/auto-cli-loop.js', 'billingIndex', 'pile', 1],
+  ['projectionBillingIndex', 'src/server/usage-pool-engine.js', 'projectionRereadFor', 'readings', 1],
+  ['refreshCodexForPerson', 'src/routes/reset-credit.js', 'registerResetCreditRoutes', 'routes', 1],
+  ['resetCreditOffer', 'server.js', 'resetCreditOffer', 'pile', 1],
+  ['resetCreditOffer', 'src/server/auto-resume.js', 'armIfEnabled', 'spend', 1],
+  ['resetCreditPreview', 'src/routes/reset-credit.js', 'registerResetCreditRoutes', 'routes', 1],
+  ['resetCreditPreview', 'src/server/usage-pool-engine.js', 'consumeResetCreditFor', 'spend', 1],
+  ['resolveForSpawn', 'src/server/cli-models-door.js', 'listOnce', 'readings', 1],   // a model-list probe spawned under the account
+  ['resolveForSpawn', 'src/server/cli-usage-door.js', 'readOnce', 'readings', 1],   // a usage probe spawned under the account
+  ['resolveForSpawn', 'src/server/permission-rules.js', 'runOracle', 'spend', 1],   // the account the permission oracle's billed check runs under
+  ['resolveForSpawn', 'src/ws-create.js', 'createBody', 'spend', 1],   // the account a created conversation spawns under
+  ['sessionAuth', 'server.js', 'activeSessionsPayload', 'routes', 1],
+  ['sessionAuth', 'src/routes/sessions.js', 'setup', 'routes', 1],
+  ['setConversationPin', 'src/server/account-usage-routes.js', '(module)', 'routes', 1],
+  ['spendGuard.authorizeBatch', 'server.js', 'authorizeSpendBatch', 'pile', 1],
+  ['spendGuard.authorize', 'server.js', 'authorizeSpend', 'pile', 2],
+  ['spendGuard.authorize', 'src/agent-routes.js', 'dispatcher', 'spend', 1],
+  ['spendGuard.authorize', 'src/agent-routes.js', 'setupAgentRoutes', 'spend', 1],
+  ['spendGuard.authorize', 'src/server/conversation-ops.js', 'openConversation', 'spend', 1],
+  ['spendGuard.authorize', 'src/server/stash-handover.js', 'handOverGroups', 'spend', 1],
+  ['spendGuard.authorize', 'src/server/usage-pool-engine.js', 'writeResetCredit', 'pile', 1],
+  ['spendGuard.authorize', 'src/server/usage-pool-engine.js', 'writeResetCreditViaHelper', 'spend', 1],
+  ['stoppedPlan', 'src/server/auto-resume.js', 'resumeBatch', 'spend', 1],
+  ['stoppedPlan', 'src/server/bulk-resume-routes.js', 'stopped', 'routes', 1],   // the bulk dialog's plan for the page
+  ['stoppedRows', 'src/server/auto-resume.js', 'stoppedPlan', 'pile', 1],
+  ['writeCodexReading', 'src/server/usage-pool-engine.js', 'onResetCreditHelperDone', 'readings', 1],
+  ['writeCodexReading', 'src/server/usage-pool-engine.js', 'writeResetCreditViaHelper', 'spend', 1],
+  ['writeCodexReading', 'src/server/usage-pool-engine.js', 'writeSnap', 'pile', 1],
+  ['writeResetCredit', 'src/server/usage-pool-engine.js', 'consumeResetCreditFor', 'spend', 1],
+  ['writeResetCredit', 'src/server/usage-pool-engine.js', 'resetCreditRung', 'spend', 1],
+  ['writeSnap@src/server/usage-pool-engine.js', 'src/server/usage-pool-engine.js', 'recordCodexQuotaSignal', 'readings', 2],
 ]);
 
 const KW = new Set(['if', 'for', 'while', 'switch', 'catch', 'function', 'return', 'else', 'try']);
@@ -204,26 +279,56 @@ function enclosing(L, i, before) {
   return '(module)';
 }
 /** THE CENSUS over `files` (repo-relative) read through `readOf` → Map key «resolver|file|caller» → count */
-export function census(files, readOf) {
+// THE FORMS A CALL TAKES (主开发 2026-11-19 05:27Z): a plain call, an optional call, call / apply, and a bind (the bound function
+// is the resolver's answer handed on) are each a call of the name. A resolver given as «name@file» is a GENERIC name read only in
+// that file (its own module's closure or dependency, e.g. the spend guard's identityFor).
+export const CALL_FORMS = Object.freeze(['(', '?.(', '.call(', '.apply(', '.bind(']);
+// THE GAPS, said (a call the scan cannot see — each is found by reading, not here):
+//   · an ALIAS in a variable — `const f = poolCurrentFor; f(x)`: the alias's calls are no row (the name's own reference is no call);
+//   · an arrow whose body starts on the NEXT line — `const pick = (s) =>\n  poolCurrent(s)`: the call is a row, filed under the
+//     function around the arrow (a head without a brace on its line is no enclosing head);
+//   · an arrow assigned to a FIELD — `o.pick = (s) => poolCurrent(s)`: the same, filed under the function around it.
+export const GAPS = Object.freeze(['an alias of a resolver in a variable', 'an arrow whose body starts on the next line (filed under the function around it)', 'an arrow assigned to a field (filed under the function around it)']);
+// ONE regex pass per file says which names it holds (a substring search per name and form, per file, cost seconds)
+const NAMES_RE = new Map();
+export function namesIn(text, names) {
+  let re = NAMES_RE.get(names);
+  if (!re) {
+    const alt = [...new Set(names.map((e) => String(e).split('@')[0]))].sort((a, b) => b.length - a.length).map((n) => n.replace(/[.$]/g, '\\$&')).join('|');
+    re = new RegExp(`(?<![\\w$])(${alt})(?:\\(|\\?\\.\\(|\\.call\\(|\\.apply\\(|\\.bind\\()`, 'g');
+    NAMES_RE.set(names, re);
+  }
+  const out = new Set();
+  for (const m of String(text).matchAll(re)) out.add(m[1]);
+  return out;
+}
+export function census(files, readOf, names = RESOLVERS) {
   const out = new Map();
   for (const f of files) {
     let text = ''; try { text = readOf(f); } catch { continue; }
-    if (!RESOLVERS.some((n) => text.includes(n + '('))) continue;
+    const here = names.map((e) => [String(e).split('@')[0], e, String(e).includes('@') ? String(e).slice(String(e).indexOf('@') + 1) : null]).filter(([, , only]) => !only || only === f);
+    // only the names this file holds, in only the forms it holds (a file with one name is read for that one — the scan's cost)
+    const found = namesIn(text, names);
+    const present = here.filter(([n]) => found.has(n)).map(([n, e]) => [n, e, CALL_FORMS.filter((form) => text.includes(n + form))]).filter(([, , forms]) => forms.length);
+    if (!present.length) continue;
     const L = text.split('\n');
     L.forEach((line, i) => {
       const t = line.trimStart();
       if (t.startsWith('//') || t.startsWith('*')) return;
-      for (const n of RESOLVERS) {
-        let at = line.indexOf(n + '(');
-        while (at >= 0) {
-          const before = line.slice(0, at);
-          const isDef = /function\s+$/.test(before) || (i >= 0 && new RegExp('^\\s*' + n + '\\s*\\([^)]*\\)\\s*\\{').test(line) && before.trim() === '');
-          const word = at > 0 && /[\w$]/.test(line[at - 1]);
-          if (!isDef && !word) {
-            const k = `${n}|${f}|${enclosing(L, i, before)}`;
-            out.set(k, (out.get(k) || 0) + 1);
+      for (const [n, e, forms] of present) {
+        if (!line.includes(n)) continue;
+        for (const form of forms) {
+          let at = line.indexOf(n + form);
+          while (at >= 0) {
+            const before = line.slice(0, at);
+            const isDef = form === '(' && (/function\s+$/.test(before) || (new RegExp('^\\s*' + n.replace(/[$]/g, '\\$') + '\\s*\\([^)]*\\)\\s*\\{').test(line) && before.trim() === ''));
+            const word = at > 0 && /[\w$]/.test(line[at - 1]);
+            if (!isDef && !word) {
+              const k = `${e}|${f}|${enclosing(L, i, before)}`;
+              out.set(k, (out.get(k) || 0) + 1);
+            }
+            at = line.indexOf(n + form, at + 1);
           }
-          at = line.indexOf(n + '(', at + 1);
         }
       }
     });
@@ -233,7 +338,7 @@ export function census(files, readOf) {
 const declared = () => { const m = new Map(); for (const [n, f, enc, , c] of ROWS) m.set(`${n}|${f}|${enc}`, (m.get(`${n}|${f}|${enc}`) || 0) + c); return m; };
 const diff = (have, want) => ({ fresh: [...have].filter(([k, c]) => (want.get(k) || 0) < c).map(([k, c]) => `${k} ×${c - (want.get(k) || 0)}`), dead: [...want].filter(([k, c]) => (have.get(k) || 0) < c).map(([k, c]) => `${k} ×${c - (have.get(k) || 0)}`) });
 
-console.log('§a THE BILLING-SLOT CENSUS — every call of the ten resolvers is a declared row with its stage');
+console.log(`§a THE BILLING-SLOT CENSUS — every call of the ${RESOLVERS.length} resolvers is a declared row with its stage (the forms: ${CALL_FORMS.map((f) => 'name' + f).join(' ')}; the gaps: ${GAPS.join(' · ')})`);
 const files = [...trackedFiles(ROOT, 'src'), 'server.js'].filter((f) => f.endsWith('.js'));
 const TEXT = new Map();   // one read per file: the controls below re-read nothing
 const read = (f) => { if (!TEXT.has(f)) TEXT.set(f, fs.readFileSync(path.join(ROOT, f), 'utf8')); return TEXT.get(f); };
@@ -265,6 +370,11 @@ ok(total >= 60, `the census reads the tree, not nothing (${total} calls)`);
   const removed = (f) => (f === 'src/server/usage-attribution.js' ? read(f).replace('accounts.poolCurrentFor(', 'accounts.poolCurrentForGone(') : read(f));
   const dr = diff(census(scope('src/server/usage-attribution.js'), removed), want);
   ok(dr.dead.length === 1 && /^poolCurrentFor\|src\/server\/usage-attribution\.js\|recordUsageAttribution ×1$/.test(dr.dead[0]), 'CONTROL: a consumer that left (the cost record moved off the link) shows as a dead row until the table says so', dr);
+  // the forms a call takes (主开发 05:27Z): an optional call, call / apply and a bind of a resolver are each a row — red by name
+  const formsPlant = '\nfunction plantedForms(s) {\n  const a = wallSlotFor?.(s);\n  const b = poolCurrent.call(null, s._accountId);\n  const c = sessionBillingMember.bind(null, s);\n  return [a, b, c];\n}\n';
+  const df = diff(census(scope(ENG), (f) => (f === ENG ? read(f) + formsPlant : read(f))), want);
+  const wantForms = [`wallSlotFor|${ENG}|plantedForms ×1`, `poolCurrent|${ENG}|plantedForms ×1`, `sessionBillingMember|${ENG}|plantedForms ×1`];
+  ok(df.fresh.length === 3 && wantForms.every((x) => df.fresh.includes(x)), 'CONTROL: an optional call, a call() and a bind() of a resolver are each a fresh row, red by name', df.fresh);
 }
 
 console.log('§b THE RESOLVERS ARE WHOLE — a function that reads as an answer and asks a resolver IS one (主开发 2026-11-19 04:09Z)');
@@ -275,7 +385,7 @@ console.log('§b THE RESOLVERS ARE WHOLE — a function that reads as an answer 
 // A helper named plainly is not read here — but its call of a resolver is a fresh row of §a, by name.
 export const ANSWER_NAME = /^(?:\w*(?:Slot|Member|Identity|Key)For|\w*MemberOf\w*|accountOf\w*|poolCurrent\w*|\w*BillingMember|validateBillingSlot|resolveUsageKey)$/;
 export const NOT_RESOLVERS = Object.freeze({});   // name → why (none today: every such function that asks a resolver answers the account)
-const declaredName = (n) => RESOLVERS.includes(n) || Object.prototype.hasOwnProperty.call(NOT_RESOLVERS, n);
+const declaredName = (n) => RESOLVERS.some((e) => String(e).split('@')[0] === n) || Object.prototype.hasOwnProperty.call(NOT_RESOLVERS, n);
 const strip = (t) => String(t).replace(STR, '""').replace(/\/\/.*$/, '');
 function bodyOf(L, i) {   // a definition's body: its line through the matching close brace (an expression arrow: its own line)
   let depth = 0, started = false; const out = [];
@@ -287,7 +397,7 @@ function bodyOf(L, i) {   // a definition's body: its line through the matching 
   }
   return out.join('\n');
 }
-export function answerDefs(files, readOf, resolvers = RESOLVERS) {
+export function answerDefs(files, readOf, resolvers = [...new Set(RESOLVERS.map((e) => String(e).split('@')[0]).filter((n) => /^[\w$]+$/.test(n)))]) {
   const out = [];
   for (const f of files) {
     let text = ''; try { text = readOf(f); } catch { continue; }
@@ -312,7 +422,7 @@ export function engineExports(text) {   // the names create()'s returned object 
   const undeclaredDefs = (ds) => ds.filter((d) => !declaredName(d.name)).map((d) => `${d.name} (${d.file}:${d.line}, asks ${d.calls.join(', ')})`);
   const defs = answerDefs(files, read);
   ok(undeclaredDefs(defs).length === 0, `every function that reads as an answer and asks a resolver is declared (${defs.length} found, ${new Set(defs.map((d) => d.name)).size} names)`, undeclaredDefs(defs));
-  ok(RESOLVERS.filter((n) => n !== 'poolMemberOfSession' && n !== 'poolCurrentFor' && n !== 'validateBillingSlot' && n !== 'poolCurrent' && n !== 'resolveUsageKey').every((n) => defs.some((d) => d.name === n)),
+  ok(['heldPoolMemberFor', 'creditIdentityFor', 'wallKeyFor', 'poolMemberOfSessionFor', 'liveQuotaKeyFor', 'usageCacheKeyFor', 'linkMemberOf', 'accountOfSession'].every((n) => defs.some((d) => d.name === n)),
     'the mechanical read finds every declared wrapper itself (a resolver that asks a resolver)', RESOLVERS.filter((n) => !defs.some((d) => d.name === n)));
   const ex = engineExports(read(ENGF)), exAns = ex.filter((n) => ANSWER_NAME.test(n));
   ok(ex.length > 100 && exAns.length >= 8 && exAns.every(declaredName), `every name the pool engine exports that reads as an answer is declared (${exAns.length} of ${ex.length} exports)`, exAns.filter((n) => !declaredName(n)));
@@ -324,6 +434,180 @@ export function engineExports(text) {   // the names create()'s returned object 
   const { anchored } = await import('./scratch.mjs');
   const exPlanted = engineExports(anchored(read(ENGF), '\n  return {\n    _vsuPending,', '\n  return {\n    plantedSlotFor, _vsuPending,', 'census cure: a planted export'));
   ok(exPlanted.includes('plantedSlotFor') && exPlanted.filter((n) => ANSWER_NAME.test(n)).filter((n) => !declaredName(n)).join() === 'plantedSlotFor', 'CONTROL: a planted export that reads as an answer is RED by name', exPlanted.filter((n) => ANSWER_NAME.test(n) && !declaredName(n)));
+}
+
+console.log('§c THE RAW KEYS AT READING SITES — a reading filed under an account id read straight off the conversation (主开发 2026-11-19 05:27Z)');
+// They call no resolver, so no census sees them: each such site is a DECLARED ROW — its file, its anchor (the line's own text, found
+// exactly once), its stage and its reason. A row whose anchor moved or left is red (the table follows the tree).
+export const RAW_KEYS = Object.freeze([
+  ['src/usage-routes.js', "keep(session._accountId || '__global_codex__', readCodexWrapperRateLimit(id), 'codex-rate-limits');", 'readings', 'a live codex conversation\'s wrapper limits are filed under its OWN account id: a POOLED one lands under the POOL\'s id, not under the member its process holds (liveQuotaKeyFor says the member) — the product cure is B-87fd\'s next unit'],
+  ['src/usage-routes.js', "if ((m.backend || 'claude') === 'codex' && m.backendSessionId) map[m.backendSessionId] = m.accountId || null;", 'readings', 'the codex thread → account map, read from the conversations\' meta files as stored (a pooled one stores the pool id): the rollout limits it keys land under it — the same cure'],
+  ['src/server/stream-wall.js', 'const key = session._accountId || null;', 'readings', 'a usage wall the stream named is written under the conversation\'s own account id — harmless today: that harness has no pool'],
+  ['src/usage-history.js', 'map[sid] = { acct: m.accountId || m._accountId || null,', 'cost', 'the history\'s session → account map from the meta files (whose records a session\'s cost is filed under): the account id as stored — not yet followed to its end'],
+]);
+{
+  const count = (text, a) => String(text).split(a).length - 1;
+  const rawOf = (rows, readOf) => rows.map(([f, a]) => ({ f, a, n: count(readOf(f), a) }));
+  const r = rawOf(RAW_KEYS, read);
+  ok(r.every((x) => x.n === 1) && RAW_KEYS.every(([, , st, why]) => STAGES.includes(st) && typeof why === 'string' && why.length > 40), `every raw-key row's anchor is in its file exactly once, with a known stage and its reason (${RAW_KEYS.length} rows)`, r.filter((x) => x.n !== 1).map((x) => `${x.f} ×${x.n}: ${x.a.slice(0, 60)}`));
+  const { anchored } = await import('./scratch.mjs');
+  const moved = rawOf(RAW_KEYS, (f) => (f === 'src/server/stream-wall.js' ? anchored(read(f), 'const key = session._accountId || null;', 'const key = (session && session._accountId) || null;', 'raw keys: a rewritten line') : read(f)));
+  ok(moved.filter((x) => x.n !== 1).length === 1 && moved.find((x) => x.n !== 1).f === 'src/server/stream-wall.js', 'CONTROL: a raw-key line rewritten (its anchor gone) is red by its file — the row follows the tree', moved.filter((x) => x.n !== 1));
+}
+
+console.log('§d THE NET — every function that calls a resolver is classified ONCE: it answers (a resolver), it only consumes, or it is a resolver\'s own inner closure (主开发 2026-11-19 05:27Z / 05:43Z)');
+// No name matching: the enclosing function §a prints for every row is looked up in the three lists; one in none is red BY NAME. A
+// function whose return its callers USE as the billing account is a resolver (its calls rows, and so on up); a report, a verdict or a
+// roster that only ECHOES it is a CONSUMER with its reason and the fields of its return that carry an account (checked in §e); a
+// resolver's own inner closure (its answer leaves only through that resolver) is INNER. The name filter of §b stays as a second look.
+export const INNER = Object.freeze({
+  "leavingTo": {"of": "resetCreditPreview", "file": "src/server/usage-pool-engine.js", "why": "Closure inside resetCreditPreview (a resolver): returns {to, inFlight} with to = poolCurrent, feeding the preview's restartPending row."},
+  "link": {"of": "poolMemberOfSession", "file": "src/accounts.js", "why": "Already decided INNER: closure in poolMemberOfSession returning poolCurrentFor(poolId, key), the member the session's link names."},
+  "poolDefault": {"of": "sessionAuth", "file": "server.js", "why": "Already decided INNER: property IIFE inside poolAuth returning the name of poolCurrent(a.id), the pool's current member."},
+});
+export const CONSUMERS = Object.freeze({
+  "(module)": {"file": "src/server/account-usage-routes.js", "fields": [], "why": "Module-level route handlers: poolCurrent before/after, setConversationPin and the default chooser go into HTTP answers; nothing is returned."},
+  "_healPoolsAfterRemoval": {"file": "src/accounts.js", "fields": [], "why": "Re-points pool defaults and session links off a deleted member; poolCurrent only picks a link's fallback target; returns nothing."},
+  "_poolLoginCandidates": {"file": "src/accounts.js", "fields": ["id", "name"], "why": "Returns the pool's login candidates [{id, name}] (members plus poolCurrent's target), a membership set for login and token checks."},
+  "activeSessionsPayload": {"file": "server.js", "fields": ["accountId", "accountName", "accountTail", "auth", "poolPin"], "why": "Builds the session list rows for the page (an array); sessionAuth's billing chip rides each row's auth field as display, never a spend's account."},
+  "armIfEnabled": {"file": "src/server/auto-resume.js", "fields": ["cause"], "why": "Arms an auto-resume wait; resetCreditOffer only decorates the arm card's notice, and the arm record returned echoes the caller's cause."},
+  "attach": {"file": "src/server/stdout/claude-stream-json.js", "fields": [], "why": "Stream parser: prices each assistant usage record under resolveUsageKey and notes it live; the function itself returns nothing."},
+  "attemptFire": {"file": "src/server/auto-resume.js", "fields": [], "why": "Fires one auto-resume continue on identityFor's slot (check, authorize and charge happen inside); returns only a boolean fired/not."},
+  "attemptRetry": {"file": "src/server/conversation-deliver.js", "fields": [], "why": "retries a held delivery through the spend authorizer; returns nothing — the identity stays inside the retry"},
+  "beforeAutoResumeFire": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Pre-fire gate: sessionBillingMember and _wallScope pick the probe target and the verdict scope; it returns only a boolean go/no-go."},
+  "cacheFactsOf": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Returns prompt-cache facts (TTL, lost, inFlight); usageCacheKeyFor only reads overage state and linkMemberOf only yields the lost boolean."},
+  "claudeSideEffects": {"file": "src/server/session-brain.js", "fields": [], "why": "Device-feed twin of the stream parser: prices each usage record under resolveUsageKey and notes it live; returns nothing."},
+  "cliDoor": {"file": "src/routes/provider-models.js", "fields": null, "why": "Builds the CLI-models door handler; cliTarget's account keys the listing request inside it, and the factory hands back only the handler.", "gap": "Returns an Express request handler (a closure); its outcome is an HTTP response, not a value any caller reads."},
+  "consumeResetCreditFor": {"file": "src/server/usage-pool-engine.js", "fields": ["preview"], "why": "The manual reset-credit use: spends via writeResetCredit on resetCreditPreview's key inside; its return echoes that preview for the route."},
+  "createBody": {"file": "src/ws-create.js", "fields": [], "why": "The create path spawns on resolveForSpawn's account and stamps the held member on the session; the async body returns nothing."},
+  "crossMoveNow": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Decides one cross-provider move; sessionBillingMember/poolCurrentFor give its currentId, and it returns only {moved, why}."},
+  "deliver": {"file": "src/server/auto-resume.js", "fields": [], "why": "attemptFire's post-gate closure: re-resolves identityFor, authorizes and charges the continue inside; returns only a boolean delivered."},
+  "deliverToConversation": {"file": "src/server/conversation-deliver.js", "fields": ["identity"], "why": "delivers a message after the spend check; a refusal's object echoes the verdict's identity for the refusal's words and the stash"},
+  "dispatch": {"file": "src/server/worker-dispatch.js", "fields": [], "why": "the worker dispatch's spend check before it sends; returns {ok, code, error} — no account in its return"},
+  "dispatcher": {"file": "src/agent-routes.js", "fields": null, "why": "the agent routes' dispatcher: its sends ask the guard; it returns the dispatcher itself", "gap": "it returns the dispatcher object (its methods close over the authorizer), not a value whose fields can be named"},
+  "ensureSessionPoolLink": {"file": "src/accounts.js", "fields": [], "why": "Re-points a session's pool link; poolCurrentFor only feeds the slot ledger's from field, and it returns the link's file path."},
+  "evaluateOnHost": {"file": "src/accounts.js", "fields": ["dirEmail"], "why": "Usability verdict for an account on a machine; poolCurrent only checks a pool has a target; dirEmail names a mismatched dir login in a refusal."},
+  "gatherPlan": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Plans which conversations may move onto a member; the billing member only gates the provider check; returns sids and skip reasons."},
+  "handOverGroups": {"file": "src/server/stash-handover.js", "fields": [], "why": "the group hand-over's spend check per group; returns {ok, code, error} and counts — the verdict's identity is said in words only"},
+  "handleResetCreditResult": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Settles a reset-credit answer; liveQuotaKeyFor names the attempt's key for the lookup and the ladder walk; returns nothing."},
+  "heldPoolUnknown": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Returns a boolean (the held member's origin is unknown): a gate that refuses money moves, never the member itself."},
+  "holdRemoved": {"file": "src/server/usage-pool-engine.js", "fields": ["to"], "why": "Parks a removed member's conversation; heldPoolMemberFor/poolCurrent/_wallScope only gate the act; to is the verdict's parking target."},
+  "linkHold": {"file": "src/server/usage-pool-engine.js", "fields": ["on", "linked", "held", "via", "viaId", "soonest", "rejector"], "why": "Returns the link member's own quotaVerdictFor verdict when blocked; its callers read only usable/blockedUntil/reason to re-arm or hold."},
+  "list": {"file": "src/accounts.js", "fields": null, "why": "The account roster: each pool row echoes poolCurrent as current/currentName for menus and the page; a roster, not a spend's account.", "gap": "The member rides two levels down (accounts[i].current / currentName) beside default*Id fields named per harness at run time, and list() has dozens of readers."},
+  "listOnce": {"file": "src/server/cli-models-door.js", "fields": [], "why": "Lists a CLI's models under resolveForSpawn's spawn env for the account; returns only the store's save promise, no account."},
+  "logControlProbe": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Appends one probe-log line whose sessionKey field is resolveUsageKey(session), a journal write; returns nothing."},
+  "markLimitBannerNow": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "The slot resolvers pick which cache file a limit banner's wall mark is written on and the wall signal's key; returns nothing."},
+  "maybePoolAutoSwitchForPool": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Decides and applies a pool's per-conversation and default switches from the resolved current members; returns nothing."},
+  "memberRemoved": {"file": "src/server/usage-pool-engine.js", "fields": ["pool", "removed", "moved", "stayed", "held", "defaultMoved"], "why": "Evicts conversations off removed members; its report echoes each one's member (moved[].from, stayed[].on, held[].on) for the route and suites."},
+  "migrateManualPools": {"file": "src/accounts.js", "fields": ["id", "name", "priority"], "why": "One-shot reshape: returns [{id, name, priority}] with poolCurrent seeded first in each new priority order, an ordering not a spend's account."},
+  "note": {"file": "src/server/spend-guard.js", "fields": ["identity"], "why": "Records a spend under identityFor's slot in the ledger; returns only the budget warning, which echoes that identity for the notice."},
+  "noteLateFact": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Stores usageCacheKeyFor(session) on a held late fact so its replay can compare readings, a write; returns nothing."},
+  "noteModelRequest": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Writes linkMemberOf(session) to session._lastRequestMember (where the prompt cache lives), a write; returns nothing."},
+  "noteOatFileGen": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Stamps session._oatFileGen with wallSlotFor(session).key and the token file's generation, a write; returns nothing."},
+  "notePoolAuthFailure": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Acts on an auth failure of the member poolCurrentFor names (marks it, may move the conversation, logs); returns nothing."},
+  "noteTurnAsk": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Records the model family under requestSlotFor(session).key in session._turnAsks, a write; returns nothing."},
+  "onMemberReadingFresh": {"file": "src/server/usage-pool-engine.js", "fields": ["member", "pools", "skipped"], "why": "Member-wake pass: fireIdentityFor decides which armed continues fire; its report echoes skipped[].landsOn and the member for the journal."},
+  "onRecord": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Workflow tailer callback: prices a sub-agent usage record under resolveUsageKey(session) and notes it live; returns nothing."},
+  "onResetCreditHelperDone": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Helper answer: writes the post-consume reading through writeCodexReading and settles the attempt by its key; returns nothing."},
+  "onResetCreditSentRecord": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "liveQuotaKeyFor finds the reset-credit attempt to mark as sent, a write that starts the cooldown; returns nothing."},
+  "onWalledTurn": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Walled-turn handler: demotes the walled account, arms auto-resume from the verdict on _wallScope, runs the pool switch; returns nothing."},
+  "openConversation": {"file": "src/server/conversation-ops.js", "fields": ["identity"], "why": "an automation's open asks the guard; a refusal returns the verdict itself, echoing its identity to the opener's words"},
+  "pathBudgetVerdict": {"file": "src/server/channels-engine.js", "fields": [], "why": "Returns {ok, used, lim, why}; accountOfSession's answer appears only as words inside the refusal sentence (display)."},
+  "pickLiveProbeSession": {"file": "src/server/usage-pool-engine.js", "fields": null, "why": "Picks a live session to probe through; liveQuotaKeyFor only matches sessions to the target's identity group; callers re-resolve its key.", "gap": "Returns a live session object (the whole mutable session record), not an answer object; no fixed field carries the resolver's answer."},
+  "poolAlternativeFor": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Returns a boolean (can the pool move this conversation now); the current member is only the decision's input."},
+  "previewBatch": {"file": "src/server/spend-guard.js", "fields": ["refusedSlots", "overageBilled"], "why": "Previews a bulk resume: identityFor groups items by slot; refusedSlots/overageBilled name accounts for the dialog and plan skips, no charge."},
+  "probeUsageForAccountKey": {"file": "src/server/usage-pool-engine.js", "fields": ["target"], "why": "resolveUsageKey only selects which live session to ask; the detail's target is the window guard's write target from guardReadingTarget."},
+  "probeUsageViaSession": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Returns the parsed get_usage reply or null; resolveUsageKey only labels the timeout/unparsed probe-log lines."},
+  "projectionRereadFor": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Returns a burn projection (inMs, label, band, fam); the billing index only names which conversations' families to project."},
+  "pushSealedOrders": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Pushes the pool's ranked sealed orders (currentId = poolCurrent) to the device daemon, a write; returns nothing."},
+  "quotaVerdictFor": {"file": "src/server/usage-pool-engine.js", "fields": ["on", "linked", "held", "via", "viaId", "soonest", "rejector"], "why": "The quota verdict: on/linked/held echo sessionBillingMember for the journal and tests; callers decide on usable/blockedUntil, never file a spend."},
+  "readOnce": {"file": "src/server/cli-usage-door.js", "fields": ["key"], "why": "Runs one on-demand usage read in resolveForSpawn's spawn env; returns {ok, key, ...} where key echoes its input account id."},
+  "recordCodexQuotaSignal": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Writes codex readings, notes walls and runs credit rungs; poolDefaultOf is only compared around the switch; returns nothing."},
+  "recordRateLimitEventNow": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "The slot resolvers pick where a reading or rejection is written and stamp session._turnReadingSlot; returns nothing."},
+  "recordUsageAttribution": {"file": "src/server/usage-attribution.js", "fields": [], "why": "Writes the conversation's resolved member (poolMemberOfSession or poolCurrentFor) into the attribution ledger; returns nothing."},
+  "registerProviderModelRoutes": {"file": "src/routes/provider-models.js", "fields": [], "why": "Registers routes whose handlers send accountOfSession's account in the HTTP menu answer (display); the registrar returns nothing."},
+  "registerResetCreditRoutes": {"file": "src/routes/reset-credit.js", "fields": [], "why": "Registers the reset-credit routes; resetCreditPreview's and refreshCodexForPerson's answers go out as HTTP JSON; returns nothing."},
+  "requestHeldRestart": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Returns a boolean (a cold restart was asked); heldPoolMemberFor versus poolCurrent only decides whether to send it."},
+  "resetCreditCarriers": {"file": "src/server/usage-pool-engine.js", "fields": null, "why": "Lists live sessions able to carry a reset credit for key; liveQuotaKeyFor only filters them by the key's identity group.", "gap": "Returns an array of live session objects (whole mutable records); callers take a carrier's _webuiId, so no fixed answer field exists."},
+  "resetCreditRung": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Returns an outcome word (consumed, asked, skipped, switch-first); creditIdentityFor only names the credit for the act."},
+  "resumeBatch": {"file": "src/server/auto-resume.js", "fields": ["refused", "skipped"], "why": "Bulk resume: charges each continue on identityFor's slot inside; returns the batch status, whose refused/skipped rows name accounts in words."},
+  "runOracle": {"file": "src/server/permission-rules.js", "fields": [], "why": "Runs a local oracle CLI in resolveForSpawn's spawn env; its result (exit code, streams, json) names the oracle, not an account."},
+  "scheduleWallProbe": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Arms the wall probe timer; sessionBillingMember picks the member to probe inside the timer; returns nothing."},
+  "sessionWallVerdict": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Returns {usable, blockedUntil, reason} trimmed from quotaVerdictFor on _wallScope; the verdict's account fields are dropped."},
+  "setPoolTarget": {"file": "src/accounts.js", "fields": ["id", "current", "name"], "why": "Re-points the pool default; poolCurrent/poolCurrentFor only feed the ledger's from rows; it returns its input target echoed as current."},
+  "setup": {"file": "src/routes/sessions.js", "fields": [], "why": "Registers the session routes; /api/active puts sessionAuth's billing chip in each row (display); setup itself returns nothing."},
+  "setupAgentRoutes": {"file": "src/agent-routes.js", "fields": null, "why": "the stop-nudge route asks the guard before it nudges; the answer is a response, nothing returned", "gap": "route setup: the verdict goes into an HTTP response, not a return whose fields can be named"},
+  "spendOk": {"file": "src/server/auto-resume.js", "fields": [], "why": "auto-resume's spend check before a continue: asks the guard and returns true / false — the charge is noted inside, nothing handed on"},
+  "stopped": {"file": "src/server/bulk-resume-routes.js", "fields": null, "why": "the bulk resume's GET route: hands the stopped plan to the page — the rows' identities are the page's words", "gap": "a route handler: the plan (its rows carry each identity) goes into the HTTP response, not a return"},
+  "sweepNonMemberLinks": {"file": "src/server/usage-pool-engine.js", "fields": ["pool", "removed", "moved", "stayed", "held", "defaultMoved"], "why": "Runs memberRemoved for each pool with stale links; returns the array of those reports, which echo members for the journal and suites."},
+  "tick": {"file": "src/server/auto-cli-loop.js", "fields": [], "why": "the auto-cli loop's tick reads the member → sessions index to choose due reads; returns nothing"},
+  "turnAskedFamily": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Returns a boolean (did this turn ask key for the family); requestSlotFor's key is only compared against it."},
+  "unplacedOf": {"file": "src/accounts.js", "fields": ["member", "name"], "why": "Returns the UNPLACED mark (the deleted member; the conversation bills nobody); poolCurrent only checks whether it was re-placed."},
+  "updatePool": {"file": "src/accounts.js", "fields": ["id", "members", "priority", "unplaced"], "why": "Returns the stored pool record; poolCurrent only decides whether the default must be re-pointed after a membership change."},
+  "walkLadderAfterCredit": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Runs the switch rung and notes a wall signal keyed by liveQuotaKeyFor(s), a decision and a write; returns nothing."},
+  "writeResetCreditViaHelper": {"file": "src/server/usage-pool-engine.js", "fields": ["identity"], "why": "Helper-path credit spend: writeCodexReading files the read-first reading; the returned identity is the guard's echo of the input key."},
+});
+{
+  const ENGF = 'src/server/usage-pool-engine.js';
+  const base = new Set(RESOLVERS.map((e) => String(e).split('@')[0]));
+  const isListed = (name) => base.has(name) || Object.prototype.hasOwnProperty.call(CONSUMERS, name) || Object.prototype.hasOwnProperty.call(INNER, name);
+  const enclosingOf = (m) => [...new Set([...m.keys()].map((k) => k.split('|')[2]))];
+  const unclassified = (m) => enclosingOf(m).filter((e) => !isListed(e));
+  ok(unclassified(have).length === 0, `every function that calls a resolver is classified once — ${enclosingOf(have).length} functions: ${enclosingOf(have).filter((e) => base.has(e)).length} answer, ${enclosingOf(have).filter((e) => e in CONSUMERS).length} consume, ${enclosingOf(have).filter((e) => e in INNER).length} inner`, unclassified(have));
+  const twice = [...Object.keys(CONSUMERS), ...Object.keys(INNER)].filter((n, i, a) => base.has(n) || a.indexOf(n) !== i);
+  ok(twice.length === 0, 'no function is in two lists', twice);
+  const callersNow = new Set(enclosingOf(have));
+  const dead = [...Object.keys(CONSUMERS), ...Object.keys(INNER)].filter((n) => !callersNow.has(n));
+  ok(dead.length === 0, 'every consumer and inner row still calls a resolver (no dead reason)', dead);
+  ok(Object.values(CONSUMERS).every((c) => typeof c.why === 'string' && c.why.length > 40 && (Array.isArray(c.fields) || (c.fields === null && typeof c.gap === 'string' && c.gap.length > 20))) && Object.values(INNER).every((x) => base.has(x.of) && typeof x.why === 'string'),
+    'every consumer names its reason and the fields of its return that carry an account (or says why that search is not mechanical); every inner closure names its resolver');
+  // CONTROLS
+  const pickPlant = '\nfunction pick(s) { return poolCurrent(s._accountId); }\n';
+  const pm = unclassified(census(scope(ENGF), (f) => (f === ENGF ? read(f) + pickPlant : read(f))));
+  ok(pm.length === 1 && pm[0] === 'pick', 'CONTROL: a planted plainly named wrapper («pick», returning the pool\'s current) is red by name', pm);
+  const moved = 'gatherPlan';   // a consumer moved to answering, without its callers' rows
+  const dm = diff(census(files, read, [...RESOLVERS, moved]), want);
+  ok(moved in CONSUMERS && dm.fresh.length > 0 && dm.fresh.every((x) => x.startsWith(moved + '|')), 'CONTROL: a consumer moved to answering without its callers\' rows is red (its calls are fresh rows, by name)', dm.fresh);
+}
+
+console.log('§e THE ECHO LEG — a consumer\'s reason is CHECKED: no field of its return that carries an account is read into a spend, a reading\'s file name or a spawn\'s account (主开发 2026-11-19 05:43Z)');
+// For each consumer with fields: each call of it, the variable its result is bound to on that line, and the next 40 lines — a read of
+// one of those fields (off the variable, or off the call itself) on a line that names a SINK is red BY NAME («an echo used as the
+// billing account»). The sinks are the stage words in code: a spend (the guard's authorize / noteSpend / a credit's consume / the cost
+// record), a reading's file name (the usage cache's writer, its cacheDir), a spawn's account (resolveForSpawn, setPoolTarget, an
+// _accountId assignment). THE GAPS, said: a consumer whose return is not a plain object (fields null: its row says why); a read in
+// another function than the call's, or past 40 lines; a destructured field.
+export const SINK = /\b(?:authorize|authorizeBatch|authorizeSpend|writeCacheObject|writeUsageCacheForKey|setPoolTarget|resolveForSpawn|consumeResetCreditFor|recordUsageAttribution|noteSpend)\s*\(|\b_accountId\s*=[^=]|\bcacheDir\s*:/;
+export function echoHits(files, readOf, consumers = CONSUMERS) {
+  const hits = [];
+  const withF = Object.keys(consumers).filter((k) => Array.isArray(consumers[k].fields) && consumers[k].fields.length);
+  const esc = (x) => String(x).replace(/[$]/g, '\\$');
+  for (const f of files) {
+    let text = ''; try { text = readOf(f); } catch { continue; }
+    const L = text.split('\n');
+    const found = namesIn(text, withF);
+    for (const [name, c] of Object.entries(consumers)) {
+      const n = name.split('@')[0];
+      if (!found.has(n) || !Array.isArray(c.fields) || !c.fields.length) continue;
+      L.forEach((line, i) => {
+        if (!line.includes(n + '(')) return;
+        const at = line.indexOf(n + '('); if (at < 0 || (at > 0 && /[\w$]/.test(line[at - 1]))) return;
+        const v = (line.match(new RegExp(`(?:const|let|var)\\s+(\\w+)\\s*=[^;]*\\b${esc(n)}\\(`)) || [])[1];
+        const reads = (l) => c.fields.some((fl) => (v && new RegExp(`\\b${v}\\??\\.${fl}\\b`).test(l)) || new RegExp(`${esc(n)}\\([^)]*\\)\\??\\.${fl}\\b`).test(l));
+        for (let j = i; j < Math.min(L.length, i + 40); j++) if (reads(L[j]) && SINK.test(L[j])) { hits.push(`${name} (${f}:${j + 1}): ${L[j].trim().slice(0, 90)}`); break; }
+      });
+    }
+  }
+  return hits;
+}
+{
+  const withFields = Object.entries(CONSUMERS).filter(([, c]) => Array.isArray(c.fields) && c.fields.length);
+  const eh = echoHits(files, read);
+  ok(eh.length === 0, `no consumer's account field is read into a spend, a reading's file name or a spawn's account («an echo used as the billing account») — ${withFields.length} consumers with fields, ${Object.values(CONSUMERS).filter((c) => c.fields === null).length} stated gaps`, eh);
+  const [cn, cc] = withFields.find(([, c]) => files.includes(c.file));
+  const plantE = `\nfunction plantedEcho(s) { const r = ${cn.split('@')[0]}(s); usageWrite.writeCacheObject({ cacheDir: 'x', key: r.${cc.fields[0]} }); }\n`;
+  const ep = echoHits([cc.file], (f) => read(f) + plantE);
+  ok(ep.length === 1 && ep[0].startsWith(cn + ' ('), `CONTROL: a planted read of ${cn}()'s «${cc.fields[0]}» into a reading's file name is red by name`, ep);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
