@@ -2026,8 +2026,31 @@ console.log('\n㉕ B-8edd: a sign-in that landed and nobody connected is a For-y
 {
   const J = JSON.stringify;
   const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
-  const realST = globalThis.setTimeout;
-  const fastAsk = (on, to = 5) => { globalThis.setTimeout = on ? ((fn, ms, ...a) => realST(fn, ms === 60e3 && /askLanded/.test(String(fn)) ? to : ms, ...a)) : realST; };
+  const realST = globalThis.setTimeout, realCT = globalThis.clearTimeout;
+  // THE ASK TIMERS AS FACTS (the B-166e smalls' cure, 主开发 04:31Z: a wait is the fact it waits for, never a bound): every
+  // compressed ask timer is recorded, DONE when it fired (its callback returned: askLanded files synchronously) or was cleared
+  // (a Connect, a newer landing) — a leg judges when every one is done, never after a guessed sleep
+  const askTimers = [];
+  const fastAsk = (on, to = 5) => {
+    globalThis.setTimeout = on ? ((fn, ms, ...a) => {
+      if (!(ms === 60e3 && /askLanded/.test(String(fn)))) return realST(fn, ms, ...a);
+      const rec = { done: false, h: null };
+      rec.h = realST((...x) => { try { return fn(...x); } finally { rec.done = true; } }, to, ...a);
+      askTimers.push(rec);
+      return rec.h;
+    }) : realST;
+  };
+  globalThis.clearTimeout = (h) => { for (const r of askTimers) if (r.h === h) r.done = true; return realCT(h); };   // restored in the section's finally
+  // every armed ask timer fired or cleared (each ends within its own compressed minute); a wait that reaches the 4 s guard is
+  // COUNTED, and one leg at the section's end says none did — a stuck timer reds by name, never drifts the suite's time
+  const tally = { waits: 0, guarded: 0, armMiss: [] };   // NOT «quiet»: that name is the suite's silent logger the rigs pass to the engine
+  const asksQuiet = async () => {
+    const t0 = Date.now(); tally.waits++;
+    while (askTimers.some((r) => !r.done) && Date.now() - t0 < 4000) await sleep(2);
+    if (askTimers.some((r) => !r.done)) tally.guarded++;
+    for (let i = askTimers.length - 1; i >= 0; i--) if (askTimers[i].done) askTimers.splice(i, 1);   // the done ones leave
+  };
+  try {
   const CRIGS = [];
   async function landedRig(tag, E = ENG, { email = null } = {}) {
     const dir = path.join(ROOT, `landed-${tag}`); fs.mkdirSync(dir, { recursive: true });
@@ -2036,10 +2059,14 @@ console.log('\n㉕ B-8edd: a sign-in that landed and nobody connected is a For-y
     const todos = new UserTodoManager({ dataDir: dir, expirySweepMs: 0, now });
     const e2 = E.create({ dataDir: dir, env: {}, now, broadcast: () => {}, integrations, fetch: v2.fetchFn, log: quiet, userTodos: todos, ...FAST_PACE });
     CRIGS.push(e2);
-    const signIn = async ({ wait = 40, to = 5 } = {}) => {
+    const signIn = async ({ wait = true, to = 5, armed = true } = {}) => {
       const r = await e2.startOAuth({ kind: 'gmail' });
+      const n0 = askTimers.length;
       fastAsk(true, to);
-      try { await get(`${r.flow.redirectUri}/?state=${new URL(r.url).searchParams.get('state')}&code=auth-code-landed`); await sleep(wait); } finally { fastAsk(false); }
+      try { await get(`${r.flow.redirectUri}/?state=${new URL(r.url).searchParams.get('state')}&code=auth-code-landed`); } finally { fastAsk(false); }
+      // the landing armed its ask INSIDE the compressed window (the wrapper saw it) — or, for the no-arming control, armed none
+      if (askTimers.length !== n0 + (armed ? 1 : 0)) tally.armMiss.push({ tag, armed, got: askTimers.length - n0 });
+      if (wait) await asksQuiet();   // the landing armed its ask (the minute compressed to `to`): judged once it fired
       return { flowId: r.flowId, startedAt: clock };
     };
     const asks = () => todos.openItems().filter((i) => i.action && i.action.type === 'channel-connect');
@@ -2077,25 +2104,24 @@ console.log('\n㉕ B-8edd: a sign-in that landed and nobody connected is a For-y
   await L.e2.connect('gmail', { flowId: s2.flowId });
   ok(L.asks().length === 0 && L.todos.get(a2[0].id).status === 'done', 'Connect resolves the item (the account is made)', J(L.asks()));
   // a Connect inside the minute files nothing (the minute compressed to 300 ms; Connect at once)
-  // an ABSENCE is judged after the compressed minute has surely passed; a PRESENCE (the red controls) is polled to a deadline
-  const settle = async (count, wantSome) => { const t0 = Date.now(); for (;;) { if (wantSome && count() >= 1) return count(); if (Date.now() - t0 >= (wantSome ? 4000 : 450)) return count(); await sleep(25); } };
-  const quickRun = async (E, tag, { wantSome = false } = {}) => {
+  // an ABSENCE and a PRESENCE alike are judged once every ask timer is DONE (fired or cleared) — never after a guessed sleep
+  const settle = async (count) => { await asksQuiet(); return count(); };
+  const quickRun = async (E, tag) => {
     const Q = await landedRig(tag, E);
-    const q1 = await Q.signIn({ wait: 0, to: 300 });
+    const q1 = await Q.signIn({ wait: false, to: 300 });
     await Q.e2.connect('gmail', { flowId: q1.flowId });
-    return settle(() => Q.asks().length, wantSome);
+    return settle(() => Q.asks().length);
   };
   ok(await quickRun(ENG, 'quick') === 0, 'a Connect inside the minute files nothing (the person was there)');
   // the person signs in AGAIN (the wrong account) inside the minute: ONE item, for the NEWER sign-in; and a newer one
   // CONNECTED inside the minute leaves no item for the one it replaced
-  const twoRun = async (E, tag, { connect = false, wantSome = false } = {}) => {
+  const twoRun = async (E, tag, { connect = false } = {}) => {
     const T = await landedRig(tag, E);
-    const a = await T.signIn({ wait: 0, to: 300 });
+    const a = await T.signIn({ wait: false, to: 300 });
     clock += 1000;
-    const b = await T.signIn({ wait: 0, to: 300 });
+    const b = await T.signIn({ wait: false, to: 300 });
     if (connect) await T.e2.connect('gmail', { flowId: b.flowId });
-    await settle(() => T.asks().length, wantSome);
-    if (!connect) await sleep(100);   // two landings: let the newer one's minute pass too before judging ONE item
+    await settle(() => T.asks().length);   // two landings: the newer one's minute has passed too (its timer is done) before ONE item is judged
     return { asks: T.asks().map((x) => x.action.flowId), a: a.flowId, b: b.flowId };
   };
   const two = await twoRun(ENG, 'two'), twoC = await twoRun(ENG, 'two-connected', { connect: true });
@@ -2129,7 +2155,7 @@ console.log('\n㉕ B-8edd: a sign-in that landed and nobody connected is a For-y
   const ESRC2 = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
   const engNoAsk = ML.load('src/server/channels-engine.js', ESRC2.replace("require('./channels-auth.js')", `require(${JSON.stringify(authNoAsk)})`), 'no-ask');
   const C = await landedRig('control', engNoAsk);
-  await C.signIn({ wait: 60 });
+  await C.signIn({ armed: false });
   ok(C.asks().length === 0 && C.e2.oauthStatus(null, { kind: 'gmail' }).done === true, 'RED CONTROL: without the arming line the landed sign-in waits unsaid (the release\'s silence) — the leg above is red on it', J(C.todos.openItems()));
   const BAIL = '    if (landedAfter(p).length) return;   // a NEWER landed sign-in of its type owns the item (the one the person made last)\n';
   const ENDOLD = "    if (p.ok) { for (const q of landedBefore(p)) endLandedAsk(q, 'a newer sign-in of its type landed'); landedAskLater(p); }   // B-8edd: the newest landing is the one asked about\n";
@@ -2139,11 +2165,11 @@ console.log('\n㉕ B-8edd: a sign-in that landed and nobody connected is a For-y
   ok([BAIL, ENDOLD, GUARD, SWEEP, CONNOLD].every((x) => ASRC2.split(x).length === 2), 'control setup: the bail, the landing\'s and Connect\'s ends of the older asks, the pending guard and the restart sweep are present once each');
   const engOf = (src, tag) => ML.load('src/server/channels-engine.js', ESRC2.replace("require('./channels-auth.js')", `require(${JSON.stringify(ML.write('src/server/channels-auth.js', src, tag))})`), tag);
   const engFan = engOf(ASRC2.replace(BAIL, "    for (const q of pendingFlows.values()) if (q !== p && q.kind === p.kind) endLandedAsk(q, 'a newer sign-in of its type landed');\n").replace(ENDOLD, '    if (p.ok) landedAskLater(p);\n').replace(CONNOLD, ''), 'fan-out');
-  const twoF = await twoRun(engFan, 'two-fan', { connect: true, wantSome: true });
+  const twoF = await twoRun(engFan, 'two-fan', { connect: true });
   ok(J(twoF.asks) === J([twoF.a]), 'RED CONTROL (the row\'s first commit): its fan-out let the OLDER timer file «finish connecting» for the sign-in the person replaced and connected over', J(twoF));
   const CONNOWN = "    endLandedAsk(p, 'it was connected');   // B-8edd: and every older landed sign-in of its type — the person chose this one\n";
   ok(ASRC2.split(CONNOWN).length === 2, 'control setup: Connect\'s end of its own ask is present once');
-  const q1 = await quickRun(engOf(ASRC2.replace(GUARD, ' || '), 'no-guard'), 'quick-noguard'), q2 = await quickRun(engOf(ASRC2.replace(CONNOWN, ''), 'no-connect-end'), 'quick-noconnend'), q3 = await quickRun(engOf(ASRC2.replace(GUARD, ' || ').replace(CONNOWN, ''), 'neither'), 'quick-neither', { wantSome: true });
+  const q1 = await quickRun(engOf(ASRC2.replace(GUARD, ' || '), 'no-guard'), 'quick-noguard'), q2 = await quickRun(engOf(ASRC2.replace(CONNOWN, ''), 'no-connect-end'), 'quick-noconnend'), q3 = await quickRun(engOf(ASRC2.replace(GUARD, ' || ').replace(CONNOWN, ''), 'neither'), 'quick-neither');
   ok(q1 === 0 && q2 === 0 && q3 === 1, 'DEFENCE IN DEPTH (a red control): Connect ending its own ask OR the pending guard alone keeps the quick leg green; with both removed an item follows a Connect for an account already made — the quick leg is red on it', JSON.stringify({ noGuard: q1, noConnectEnd: q2, neither: q3 }));
   // a RESTART: the pending sign-ins (memory) are gone — their open items are resolved at the next start
   const rs = async (E, tag) => {
@@ -2159,7 +2185,9 @@ console.log('\n㉕ B-8edd: a sign-in that landed and nobody connected is a For-y
   const rsFix = await rs(ENG, 'restart'), rsPre = await rs(engOf(ASRC2.replace(SWEEP, '  try { if (false) for (const id of userTodos.idsWhere('), 'no-sweep'), 'restart-pre');
   ok(rsFix.id && rsFix.status === 'done' && rsPre.id && rsPre.status === 'open', 'a restart resolves the open «finish connecting» items (the sign-ins did not survive it); RED CONTROL: without the sweep the item stayed, its button opening an empty dialog', J({ fix: rsFix, pre: rsPre }));
   for (const x of copiesCensus(ML.files, ML.dir, REPO, { minCopies: 10, label: '㉕ ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
+  ok(tally.guarded === 0 && tally.armMiss.length === 0 && tally.waits >= 8, `㉕ every wait ended on its facts — every ask timer fired or was cleared (${tally.waits} waits, ${tally.guarded} at the 4 s guard), and every sign-in armed its ask inside the compressed window (the no-arming control none)`, J(tally));
   for (const e2 of CRIGS) { try { e2.stop(); } catch {} }
+  } finally { globalThis.clearTimeout = realCT; }
 }
 
 // ── ㉖ B-166e (the 2026-10-23 fleet Gmail outage: the company presets were replaced under the SAME keys, Desktop → Web, and
