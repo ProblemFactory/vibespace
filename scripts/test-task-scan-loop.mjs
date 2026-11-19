@@ -13,6 +13,9 @@
 //     conversation's task state lists nothing and starts nothing (RED: cadb07780's transcript warm); the route hands every harness its machine
 //  ⑤b (B-a60e) a codex conversation WITH a rollout: its find walks the sessions tree once, then the kept path (0 listings a
 //     call, status() too); the file gone ⇒ walked again; RED the release's find in a copy ⇒ every call walks
+//      and its owed legs (主开发 04:23Z), each with a RED copy: a MOVED rollout comes back in one walk; an AGED .zst (59 s kept,
+//      61 s walked again, a plain rollout elsewhere found); the cap (a copy scaled to 2); the status road through a store copy whose
+//      finder keeps nothing
 //  ⑥ (A4) chatStatus probes no project folder · ⑦ (A5) the merge parses the buffer lines it gained, against the release's merge
 //     planted back (an append, a split line, a mid-line trim, a kept map landing late; each guard's mutant RED)
 //  ⑦b (the cure) the position indexes the merges keep are counted in the transcript tails' census row (RED: cadb07780's row)
@@ -256,6 +259,65 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
       const tw = await twin(AD), twr = await twin(ADt);
       ok(tw.first === zfile && tw.got === pfile && tw.n === 0 && twr.first === zfile && twr.got === zfile,
         `a kept .jsonl.zst and then its plain twin: the plain wins (${path.basename(String(tw.got))}) with ${tw.n} listings; RED (no twin check): ${path.basename(String(twr.got))}`);
+      // OWED (主开发 04:23Z, B-a60e TAKEN at block line 180) — (a) a MOVED rollout: gone from its kept folder, present in another date
+      // folder ⇒ the new path comes back (one walk), then kept; RED (the kept path returned without its existsSync) ⇒ the old path
+      const tid4 = 'eeeeeeee-0000-4000-8000-0000000a60e4', mdir2 = path.join(csess, '2026', '07', '03'); fs.mkdirSync(mdir2, { recursive: true });
+      const mfile = path.join(rdir, `rollout-2026-07-02T00-00-02-${tid4}.jsonl`), mfile2 = path.join(mdir2, path.basename(mfile));
+      const moved = async (A) => {
+        fs.writeFileSync(mfile, '{}\n'); const m0 = A.findCodexSessionJsonlPath(tid4); fs.renameSync(mfile, mfile2);
+        let m1 = null, m2 = null; const n1 = await listing(async () => { m1 = A.findCodexSessionJsonlPath(tid4); }), n2 = await listing(async () => { m2 = A.findCodexSessionJsonlPath(tid4); });
+        const nWalk = await listing(async () => { A.findCodexSessionJsonlPath('eeeeeeee-0000-4000-8000-0000000a60ff'); });   // ONE walk of the same tree (a thread with no rollout is never kept)
+        fs.rmSync(mfile2, { force: true }); return { m0, m1, m2, n1, n2, nWalk };
+      };
+      const STILL = '  if (fs.existsSync(k.fp)) return k.fp;\n  CODEX_PATH_KEPT.delete(threadId);\n  return null;\n';
+      const mv = await moved(AD), mvr = await moved(mutantCopies('a60e-no-still', REPO).load('src/adapters/codex.js', anchored(adSrc, STILL, '  return k.fp;\n', 'a60e-no-still'), 'no-still'));
+      ok(mv.m0 === mfile && mv.m1 === mfile2 && mv.n1 > 0 && mv.n1 === mv.nWalk && mv.m2 === mfile2 && mv.n2 === 0 && mvr.m1 === mfile,
+        `a MOVED rollout (another date folder): the new path comes back (${mv.n1} listings = one walk's ${mv.nWalk}), then kept (${mv.n2}); RED (the kept path never asked again): the old path (${path.basename(path.dirname(String(mvr.m1)))})`);
+      // (b) an AGED compressed rollout: a kept .jsonl.zst past its minute is walked again, and a plain rollout of the thread written in
+      // ANOTHER folder is found (the walk's own order: a plain file first); RED (no age check) ⇒ the .zst stays for good
+      const tid5 = 'eeeeeeee-0000-4000-8000-0000000a60e5', pdir5 = path.join(csess, '2026', '07', '05'); fs.mkdirSync(pdir5, { recursive: true });
+      const zf5 = path.join(rdir, `rollout-2026-07-02T00-00-03-${tid5}.jsonl.zst`), pf5 = path.join(pdir5, `rollout-2026-07-05T00-00-00-${tid5}.jsonl`);
+      const aged = async (A) => {
+        fs.writeFileSync(zf5, 'zst'); const first = A.findCodexSessionJsonlPath(tid5); fs.writeFileSync(pf5, '{}\n');
+        const early = A.findCodexSessionJsonlPath(tid5);   // inside its minute: the kept .zst (the plain one is not its twin)
+        const realNow = Date.now; let got = null, n = 0, before = null, nBefore = 0;
+        try {
+          Date.now = () => realNow() + 59000;   // inside its minute (CODEX_ZST_KEPT_MS 60 s): still the kept .zst, no walk
+          nBefore = await listing(async () => { before = A.findCodexSessionJsonlPath(tid5); });
+          Date.now = () => realNow() + 61000;   // past it: the clock moved, not waited
+          n = await listing(async () => { got = A.findCodexSessionJsonlPath(tid5); });
+        } finally { Date.now = realNow; }
+        fs.rmSync(pf5, { force: true }); fs.rmSync(zf5, { force: true }); return { first, early, before, nBefore, got, n };
+      };
+      const AGE = '    if (Date.now() - k.at > CODEX_ZST_KEPT_MS) { CODEX_PATH_KEPT.delete(threadId); return null; }   // a minute old: walked again\n';
+      const ag = await aged(AD), agr = await aged(mutantCopies('a60e-no-age', REPO).load('src/adapters/codex.js', anchored(adSrc, AGE, '', 'a60e-no-age'), 'no-age'));
+      ok(adSrc.split('const CODEX_ZST_KEPT_MS = 60_000;').length === 2 && ag.first === zf5 && ag.early === zf5 && ag.before === zf5 && ag.nBefore === 0 && ag.got === pf5 && ag.n > 0 && agr.got === zf5,
+        `a kept .jsonl.zst: at 59 s still kept (${ag.nBefore} listings), past its minute walked again (${ag.n} listings) and the plain rollout in another folder found (${path.basename(String(ag.got))}); RED (no age check): ${path.basename(String(agr.got))} for good`);
+      // (c) THE CAP (CODEX_PATH_KEPT_MAX 4096, pinned; a copy scaled to 2): the oldest kept path goes first and is walked again, the
+      // newest stays kept; RED (the copy without the drop) ⇒ nothing goes
+      const CAPL = 'const CODEX_PATH_KEPT_MAX = 4096;', DROP = '  if (CODEX_PATH_KEPT.size > CODEX_PATH_KEPT_MAX) CODEX_PATH_KEPT.delete(CODEX_PATH_KEPT.keys().next().value);\n';
+      const capIds = ['eeeeeeee-0000-4000-8000-0000000a60e6', 'eeeeeeee-0000-4000-8000-0000000a60e7', 'eeeeeeee-0000-4000-8000-0000000a60e8'];
+      const capFiles = capIds.map((t, i) => path.join(rdir, `rollout-2026-07-02T00-00-1${i}-${t}.jsonl`));
+      const capOf = async (src, tag) => {
+        const A = mutantCopies(tag, REPO).load('src/adapters/codex.js', src, tag);
+        capFiles.forEach((f) => fs.writeFileSync(f, '{}\n')); capIds.forEach((t) => A.findCodexSessionJsonlPath(t));
+        const nOld = await listing(async () => { A.findCodexSessionJsonlPath(capIds[0]); }), nNew = await listing(async () => { A.findCodexSessionJsonlPath(capIds[2]); });
+        capFiles.forEach((f) => fs.rmSync(f, { force: true })); return { nOld, nNew };
+      };
+      const cap2 = anchored(adSrc, CAPL, 'const CODEX_PATH_KEPT_MAX = 2;', 'a60e-cap-2');
+      const cg = await capOf(cap2, 'a60e-cap'), cr = await capOf(anchored(cap2, DROP, '', 'a60e-cap-no-drop'), 'a60e-cap-r');
+      ok(adSrc.split(CAPL).length === 2 && cg.nOld > 0 && cg.nNew === 0 && cr.nOld === 0,
+        `the kept paths are bounded (4096; a copy scaled to 2): the oldest goes first and is walked again (${cg.nOld} listings), the newest stays kept (${cg.nNew}); RED (no drop): the oldest still kept (${cr.nOld})`);
+      // (d) THE STATUS ROAD ITSELF: status() through a fresh service a call, its reader from a copy of the codex store whose finder keeps
+      // no path (the store's require wired to that copy) ⇒ every status walks; the green above: 0 / 0
+      const MCs = mutantCopies('a60e-status-red', REPO);
+      const noKept = MCs.write('src/adapters/codex.js', anchored(adSrc, KEPT, '', 'a60e-status-no-kept'), 'status-no-kept');
+      const csSrcA = fs.readFileSync(path.join(REPO, 'src/codex-session-store.js'), 'utf8');
+      const CSr = MCs.load('src/codex-session-store.js', anchored(csSrcA, "require('./adapters/codex')", `require(${JSON.stringify(noKept)})`, 'a60e-status-red', { count: 'any' }), 'status-red');
+      fs.writeFileSync(rfile, JSON.stringify({ timestamp: T0, type: 'session_meta', payload: { id: tid2 } }) + '\n');
+      const nSr = []; for (let i = 0; i < 2; i++) { const svc = createTranscriptService({ activeSessions: new Map(), createSessionMessages: (s0) => new CSr.CodexSessionMessages(s0, undefined, { buffersDir: path.join(os.homedir(), 'buf') }), hosts: null }); nSr.push(await listing(async () => { await svc.status(cref2); })); }
+      fs.rmSync(rfile, { force: true });
+      ok(nS[0] === 0 && nS[1] === 0 && nSr.every((x) => x > 0), `status() of a codex conversation with a rollout: ${nS.join(' / ')} listings (the kept path); RED (the store's finder keeps no path): ${nSr.join(' / ')} — every status walks`);
     }
     // …and NO EXTRA WALK UNDER IT (the 2.369.412 checkpoint's red: status() made 162 listings against the 108 allowed — 216 is the RED
     // control's count): the off-loop read's fallback REUSES its own lookup of a missing rollout, so status() walks the store no more
