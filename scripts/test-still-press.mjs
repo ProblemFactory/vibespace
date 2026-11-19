@@ -12,11 +12,14 @@
 //   ⑤ THE CENSUS — every HEAVY suite (ci.mjs's rows) that presses by coordinates outside THE still door (a literal
 //      'mousePressed' / a touchStart dispatch): a RATCHET — the frozen ledger of direct sites per suite may only shrink; a new
 //      or a grown one is RED by name, one that moved onto the door lowers its row (RED controls: a planted press, a converted suite)
+//   ⑥ B-4f03 — realClicker's options: the measure source over a stand-in page (each scroll mode, the aim, the expression, the
+//      refusals) and the door driven over a scripted page (the options reach the page, the press at the aim, uncover once a call)
 // Run: node scripts/test-still-press.mjs
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { STILL_MOVERS, stillVerdict, landingVerdict, stillLookSource, stillPresser } from './scratch.mjs';
+import { STILL_MOVERS, stillVerdict, landingVerdict, stillLookSource, stillPresser, realClickMeasureSource, realClicker } from './scratch.mjs';
+import vm from 'node:vm';
 import { SUITES } from './ci.mjs';
 const t0 = Date.now();
 let pass = 0, fail = 0;
@@ -144,7 +147,7 @@ console.log('⑤ THE CENSUS — heavy suites that press by coordinates outside T
   'test-dialog-yield-chrome': 1, 'test-doc-window': 5, 'test-docx-viewer': 2, 'test-draft-focus-chrome': 1,
   'test-duo-layout': 2, 'test-exit-hop-chrome': 1, 'test-exit-late-chrome': 3, 'test-exit-slow-chrome': 3,
   'test-feedback-ui': 1, 'test-fold-ux': 2, 'test-foryou-honest-chrome': 2, 'test-gear-menu': 3, 'test-helper-ask-ui': 1,
-  'test-inbox-reply-ui': 4, 'test-inbox-window-ui': 3, 'test-layout-placeholder-ui': 2, 'test-login-expiry': 1,
+  'test-inbox-reply-ui': 4, 'test-inbox-window-ui': 2, 'test-layout-placeholder-ui': 2, 'test-login-expiry': 1,
   'test-machine-app-chrome': 2, 'test-mobile-back-chrome': 2, 'test-mobile-gaps': 4, 'test-mobile-select': 4,
   'test-office-desktop': 2, 'test-page-link-ui': 1, 'test-parked-ask-ui': 1,
   'test-path-field-chrome': 1, 'test-peer-card-fold-ui': 2, 'test-phone-composer-chrome': 1, 'test-phone-desktop-sync': 5,
@@ -155,7 +158,7 @@ console.log('⑤ THE CENSUS — heavy suites that press by coordinates outside T
   'test-tab-close-confirm-ui': 1, 'test-task-detail-chrome': 2, 'test-taskbar-group-ui': 5, 'test-terminal-zoom-select': 2,
   'test-title-chips-ui': 1, 'test-toast-pass-through': 2, 'test-toolbar-resize': 1, 'test-tray-voice-phone': 2,
   'test-ui-scale': 2, 'test-update-dialog': 2, 'test-vault-paste-chrome': 3,
-  'test-voice-chrome': 3, 'test-voice-follow-chrome': 2, 'test-voice-teach-chrome': 2, 'test-wake-approve-card-chrome': 1,
+  'test-voice-chrome': 3, 'test-voice-follow-chrome': 2, 'test-voice-teach-chrome': 2,
   'test-webhook-section-place': 1, 'test-window-binding': 4, 'test-window-drag-ui': 3,
   };
   const census = (read) => { const now = {}; for (const n of SUITES.filter((s) => s.tier === 'heavy').map((s) => s.name)) { const src = read(n); if (src == null) continue; const k = sitesIn(src); if (k) now[n] = k; } return now; };
@@ -173,6 +176,70 @@ console.log('⑤ THE CENSUS — heavy suites that press by coordinates outside T
   const first = Object.keys(LEDGER)[0];
   const converted = judge(census((n) => (n === first ? (readReal(n) || '').replace(/['"]mousePressed['"]/g, "'pressed-by-the-door'").replace(/type:\s*['"]touchStart['"]/g, "type: 'door'") : readReal(n))), LEDGER);
   ok(converted.shrank.length === 1 && converted.shrank[0].startsWith(first + ': 0 now'), `RED CONTROL: a suite converted onto the door with its row unlowered ⇒ named (${first})`, converted.shrank);
+}
+
+// ⑥ B-4f03 (lane bl-tests-e): realClicker's MEASURE — the three last copies' needs as options of the one door. The page half is a
+// PURE source (scripts/scratch.mjs realClickMeasureSource), run here over a stand-in page (vm): which scroll it asks, where it aims
+console.log('⑥ B-4f03: the door\'s measure — an EXPRESSION target, the three scroll modes, the aim in from the left');
+{
+  const page = (rect, { found = true, viaExpr = false } = {}) => {
+    const scrolls = [], el = { tagName: 'BUTTON', className: 'x', scrollIntoView: (o) => scrolls.push(o.block), contains: () => false,
+      getBoundingClientRect: () => ({ ...rect, right: rect.left + rect.width, bottom: rect.top + rect.height }) };
+    const ctx = { document: { querySelector: () => (found && !viaExpr ? el : null), elementFromPoint: () => el }, window: {}, innerHeight: 800, innerWidth: 1280, THE_EL: el };
+    return { ctx, el, scrolls, run: (src) => new vm.Script(src).runInNewContext(ctx) };
+  };
+  const IN = { left: 100, top: 300, width: 300, height: 40 }, OUT = { left: 100, top: -30, width: 300, height: 40 };
+  const BELOW = { left: 100, top: 780, width: 300, height: 40 }, RIGHT = { left: 1100, top: 300, width: 300, height: 40 };
+  const a = page(IN), ra = a.run(realClickMeasureSource('.b'));
+  ok(ra && ra.hits && ra.x === 250 && ra.y === 320 && a.scrolls.join() === 'center' && a.ctx.window.__vsRealClickEl === a.el, 'the default is the door as it was: centred scroll, aimed at the centre, the element kept for the still look', { ra, scrolls: a.scrolls });
+  const b = page(IN); b.run(realClickMeasureSource('.b', { scroll: 'nearest' }));
+  ok(b.scrolls.join() === 'nearest', 'scroll: \'nearest\' asks the least move (a row in a list)', b.scrolls);
+  const c = page(IN); c.run(realClickMeasureSource('.b', { scroll: 'if-needed' }));
+  const d = page(OUT); d.run(realClickMeasureSource('.b', { scroll: 'if-needed' }));
+  const d2 = page(BELOW); d2.run(realClickMeasureSource('.b', { scroll: 'if-needed' }));
+  const d3 = page(RIGHT); d3.run(realClickMeasureSource('.b', { scroll: 'if-needed' }));
+  ok(c.scrolls.length === 0 && d.scrolls.join() === 'center' && d2.scrolls.join() === 'center' && d3.scrolls.join() === 'center', 'scroll: \'if-needed\' scrolls a target wholly in view NOT at all (a press that scrolls its own target moves it); one out past the top, the bottom or the right edge to the centre', { inView: c.scrolls, top: d.scrolls, bottom: d2.scrolls, right: d3.scrolls });
+  const e = page(IN), re = e.run(realClickMeasureSource('.b', { aimLeft: 40 }));
+  const f = page({ ...IN, width: 50 }), rf = f.run(realClickMeasureSource('.b', { aimLeft: 40 }));
+  ok(re.x === 140 && rf.x === 125, 'aimLeft: 40 px in from the left edge; a target narrower than twice that is aimed at its centre', { wide: re.x, narrow: rf.x });
+  const g = page(IN, { viaExpr: true }), rg = g.run(realClickMeasureSource('(THE_EL)'));
+  const h = page(IN, { viaExpr: true }), rh = h.run(realClickMeasureSource('THE_EL'));
+  ok(rg && rg.hits && rh === null, 'a target that starts with «(» is an EXPRESSION evaluated in the page; any other string is a selector (here it finds nothing)', { expr: rg, selector: rh });
+  let threw = [];
+  for (const o of [{ scroll: 'middle' }, { aimLeft: -1 }, { aimLeft: '40' }]) { try { realClickMeasureSource('.b', o); } catch (x) { threw.push(x.message.slice(0, 40)); } }
+  ok(threw.length === 3, 'an unknown scroll or an aim that is no number ≥ 0 is refused by name', threw);
+}
+
+// ⑥b the DOOR itself over a scripted page (B-4f03, the read's should: the source legs alone let a realClicker that dropped its
+// options, the aim's override or the once-a-call rule pass) — the evalJs answers by what each source asks
+{
+  const drive = async ({ measures, unders, uncover = null, opts = {} }) => {
+    const asked = [], sent = [], logs = []; let m = 0, u = 0;
+    const LOOK = { found: true, rect: [100, 300, 300, 40], x: 250, y: 320, hits: true, under: 'button.b', disabled: false, movers: [] };
+    const SEEN = { down: { mine: true, what: 'button.b' }, up: { mine: true, what: 'button.b' }, click: { mine: true, what: 'button.b' } };
+    const evalJs = async (s) => {
+      if (s.startsWith('window.__vsStillSeen')) return SEEN;
+      if (s.includes('__vsStillSeen = {')) return true;
+      if (s.includes('const e = window.__vsRealClickEl; if (!e || !e.isConnected)')) return LOOK;
+      if (s.includes('hit = document.elementFromPoint(') && s.includes('const e = window.__vsRealClickEl, hit')) return unders[Math.min(u++, unders.length - 1)];
+      asked.push(s); return measures[Math.min(m++, measures.length - 1)];
+    };
+    const RC = realClicker({ evalJs, cdp: async (meth, p) => { sent.push(`${p.type}@${Math.round(p.x)},${Math.round(p.y)}`); }, log: (l) => logs.push(l) });
+    let n = 0;
+    const r = await RC('.b', { ...opts, ...(uncover ? { uncover: async () => { n++; } } : {}) });
+    return { r, asked, sent, logs, uncovers: n, reaimed: RC.reaimed };
+  };
+  const HIT = { x: 250, y: 320, hits: true, hit: 'BUTTON.b' }, COVERED = { x: 250, y: 320, hits: false, hit: 'DIV.global-toast' };
+  const A = await drive({ measures: [HIT], unders: [{ hits: true }], opts: { scroll: 'nearest', aimLeft: 40 } });
+  ok(A.r === true && A.asked[0].includes("block: 'nearest'") && A.asked[0].includes('Math.min(q.width / 2, 40)') && A.sent.includes('mousePressed@140,320'), 'the options REACH the page (the measure asks the nearest scroll and the aim) and the press lands at the aim from the still look\'s rect (140, 320), never its centre', A);
+  const B = await drive({ measures: [HIT], unders: [{ hits: true }] });
+  ok(B.r === true && B.asked[0].includes("block: 'center'") && B.sent.includes('mousePressed@250,320'), 'no option: the door as it was — the centred scroll, the press at the still look\'s centre', B);
+  const C = await drive({ measures: [COVERED, HIT, HIT], unders: [{ hits: false, hit: 'DIV.global-toast' }, { hits: true }], uncover: true });
+  ok(C.r === true && C.uncovers === 1 && C.asked.length === 3, 'uncover runs ONCE a call: covered at the measure it clears and measures again; covered again at the press it re-aims without a second clear', C);
+  const D = await drive({ measures: [HIT, HIT], unders: [{ hits: false, hit: 'DIV.global-toast' }, { hits: true }], uncover: true });
+  ok(D.r === true && D.uncovers === 1 && D.reaimed && D.reaimed.uncovered === true && D.logs.some((l) => /covered at press time by DIV\.global-toast — the suite's uncover ran once/.test(l)), 'covered at the press: the suite\'s uncover runs, the point is measured again, and the log says a cover was cleared (never «it moved»)', D);
+  const E = await drive({ measures: [COVERED], unders: [{ hits: true }] });
+  ok(E.r === false && E.sent.length === 0, 'covered and no uncover hook: no press, as before', E);
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass}) — ${Date.now() - t0} ms`);

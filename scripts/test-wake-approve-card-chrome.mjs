@@ -295,19 +295,8 @@ async function connect(target) {
   // STANDS (scrolled only when it is not wholly in view — a press that scrolls its own target moves it under the pointer, and
   // the press arm rightly refuses that: measured here, a second 'center' scroll moved a centred Approve by 40 px), the pointer
   // moved there, what is UNDER it asked, pressed only if it is the target (one re-aim when it moved between the two)
-  const realClick = async (sel) => {
-    const MEASURE = `(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; let q = e.getBoundingClientRect(); if (q.top < 0 || q.bottom > innerHeight || q.left < 0 || q.right > innerWidth) { e.scrollIntoView({ block: 'center' }); q = e.getBoundingClientRect(); } return q.width && q.height ? { x: q.left + q.width / 2, y: q.top + q.height / 2 } : null; })()`;
-    for (let aim = 0; aim < 2; aim++) {
-      const r = await evalJs(MEASURE); if (!r) return false;
-      await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: r.x, y: r.y });
-      const hits = await evalJs(`(() => { const e = document.querySelector(${JSON.stringify(sel)}), h = document.elementFromPoint(${r.x}, ${r.y}); return !!e && !!h && (h === e || e.contains(h)); })()`);
-      if (!hits) continue;
-      await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: r.x, y: r.y, button: 'left', clickCount: 1 });
-      await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: r.x, y: r.y, button: 'left', clickCount: 1 });
-      return true;
-    }
-    return false;
-  };
+  const RC = SCR.realClicker({ evalJs, cdp });   // B-4f03: THE door — scrolled only when not wholly in view (scroll: 'if-needed')
+  const realClick = (sel) => RC(sel, { scroll: 'if-needed' });
   /** THE PERSON'S PRESS: the target brought into view, a rest past the press arm's ARM_MS (a button that just MOVED under the
    *  pointer answers nothing — the arm's law), then ONE real press where it stands → {pressed, toast, miss} */
   const restThenPress = async (sel) => {

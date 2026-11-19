@@ -173,6 +173,27 @@ export async function evalInBlankTab(cdpPort, expression, { ms = 15000 } = {}) {
   }
 }
 
+/** THE MEASURE, PURE (B-4f03, lane bl-tests-e — the three last copies' needs, folded into the one door): realClicker's page half
+ *  as a string. `sel` = a selector, or an EXPRESSION (a string that starts with «(», evaluated in the page — pairing-ui-harness's
+ *  text matches). `scroll` = 'center' (the default) | 'nearest' (the least move: a row in a list) | 'if-needed' (centred ONLY when
+ *  the target is not wholly in view — a press that scrolls its own target moves it under the pointer: test-wake-approve-card-
+ *  chrome measured a second centre scroll move a centred Approve by 40 px and the press arm rightly refused it). `aimLeft` = aim
+ *  that many px in from the target's left edge, the centre when it is narrower than twice that (a row's centre may hold its own buttons). The
+ *  element is kept as window.__vsRealClickEl for the still look, the under-the-pointer ask and the landing arm. */
+export function realClickMeasureSource(sel, { scroll = 'center', aimLeft = null } = {}) {
+  const s = String(sel);
+  const target = s.startsWith('(') ? s : `document.querySelector(${JSON.stringify(s)})`;
+  const SCROLL = {
+    center: "e.scrollIntoView({ block: 'center' });",
+    nearest: "e.scrollIntoView({ block: 'nearest' });",
+    'if-needed': "{ const p = e.getBoundingClientRect(); if (p.top < 0 || p.bottom > innerHeight || p.left < 0 || p.right > innerWidth) e.scrollIntoView({ block: 'center' }); }",
+  };
+  if (!Object.hasOwn(SCROLL, scroll)) throw new Error(`realClick: scroll is center / nearest / if-needed (got ${JSON.stringify(scroll)})`);
+  if (aimLeft != null && !(Number.isFinite(aimLeft) && aimLeft >= 0)) throw new Error(`realClick: aimLeft is a number of px ≥ 0 (got ${JSON.stringify(aimLeft)})`);
+  const aim = aimLeft == null ? 'q.left + q.width / 2' : `q.left + Math.min(q.width / 2, ${aimLeft})`;
+  return `(() => { const desc = (h) => (h ? h.tagName + '.' + String(h.className).slice(0, 60) : null); const e = ${target}; if (!e) return null; ${SCROLL[scroll]} const q = e.getBoundingClientRect(); const x = ${aim}, y = q.top + q.height / 2; window.__vsRealClickEl = e; const hit = document.elementFromPoint(x, y); return { x, y, w: q.width, h: q.height, hit: desc(hit), hits: !!hit && (hit === e || e.contains(hit)) }; })()`;
+}
+
 /** A REAL CLICK AS ONE ACT (int358 — test-channel-jump ② was red 4 runs of 7 on the 2.369.358 train): a suite's real click
  *  MEASURED its element, then pressed where it HAD been; rows that move while an agent's turn lands (the card grows, the
  *  chat's tail pin scrolls it) put a NEIGHBOUR under the pointer, and the product rightly opened the neighbour. This door
@@ -180,35 +201,43 @@ export async function evalInBlankTab(cdpPort, expression, { ms = 15000 } = {}) {
  *  (document.elementFromPoint) is the measured one or inside it; a target that moved is re-aimed ONCE and said in the log;
  *  still not under the pointer ⇒ no press (false; `realClick.lastMiss` says why). `realClick.reaimed` = the last re-aim.
  *  `evalJs(expr)` = the suite's Runtime.evaluate (returnByValue); `cdp(method, params)` = its socket; `beforePress` = a
- *  test hook between the measure and the press (a RED control's scripted late shift). */
+ *  test hook between the measure and the press (a RED control's scripted late shift). B-4f03: `scroll` / `aimLeft` / an
+ *  EXPRESSION target (realClickMeasureSource above); `uncover` = the suite's own hook, run ONCE a call when another element
+ *  covers the target's point (its toasts), then the point is measured again. */
 export function realClicker({ evalJs, cdp, log = (line) => console.log(line) }) {
   const desc = 'const desc = (h) => (h ? h.tagName + \'.\' + String(h.className).slice(0, 60) : null);';
-  const MEASURE = (sel) => `(() => { ${desc} const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; e.scrollIntoView({ block: 'center' }); const q = e.getBoundingClientRect(); const x = q.left + q.width / 2, y = q.top + q.height / 2; window.__vsRealClickEl = e; const hit = document.elementFromPoint(x, y); return { x, y, w: q.width, h: q.height, hit: desc(hit), hits: !!hit && (hit === e || e.contains(hit)) }; })()`;
+  const MEASURE = (sel, o) => realClickMeasureSource(sel, o);
   const UNDER = (x, y) => `(() => { ${desc} const e = window.__vsRealClickEl, hit = document.elementFromPoint(${x}, ${y}); return { hit: desc(hit), hits: !!e && e.isConnected && !!hit && (hit === e || e.contains(hit)) }; })()`;
   const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
   // B-8b8c (lane dialog-press): the same door's two halves — it waits while its target MOVES (THE still verdict: its rect on
   // two looks a frame apart, a running box-moving transition on it or an ancestor), then checks where the press LANDED. A
   // disabled or covered target is not waited on (a suite may press one on purpose; the re-aim below handles a cover).
   const ARM_REAL = `(() => { ${desc} const e = window.__vsRealClickEl; const S = window.__vsStillSeen = { down: null, up: null, click: null }; const rec = { down: (ev) => ({ mine: !!e && (ev.target === e || e.contains(ev.target)), what: desc(ev.target) }), up: (ev) => { if (!e || !e.isConnected) return { gone: true }; const h = document.elementFromPoint(ev.clientX, ev.clientY); return { mine: !!h && (h === e || e.contains(h)), what: desc(h) }; }, click: (ev) => ({ mine: !!e && (ev.target === e || e.contains(ev.target)), anc: !!e && ev.target !== e && typeof ev.target.contains === 'function' && ev.target.contains(e), what: desc(ev.target) }) }; const on = (type, key) => { const f = (ev) => { if (!S[key]) S[key] = rec[key](ev); document.removeEventListener(type, f, true); }; document.addEventListener(type, f, true); }; on('pointerdown', 'down'); on('pointerup', 'up'); on('click', 'click'); return true; })()`;
-  const realClick = async (sel, { beforePress = null, stillMs = 3000 } = {}) => {
+  const realClick = async (sel, { beforePress = null, stillMs = 3000, scroll = 'center', aimLeft = null, uncover = null } = {}) => {
     realClick.lastMiss = null; realClick.reaimed = null; realClick.landed = null;
-    let r = await evalJs(MEASURE(sel));
+    const mo = { scroll, aimLeft };
+    let uncovered = false;
+    const clearOnce = async (at) => { if (!uncover || uncovered) return false; uncovered = true; await uncover(at); return true; };
+    let r = await evalJs(MEASURE(sel, mo));
+    if (r && !r.hits && await clearOnce(r)) r = await evalJs(MEASURE(sel, mo));
     if (!r || !r.hits) { realClick.lastMiss = r; return false; }
     {
       const t0 = Date.now(); let prev = null, look = null, v = 'moving';
       while (Date.now() - t0 < stillMs) { look = await evalJs(stillLookSource('JS:window.__vsRealClickEl')); v = stillVerdict(prev, look); if (v !== 'moving') break; prev = look; await sleep(40); }
       if (v === 'moving') { realClick.lastMiss = { ...r, why: `it never held still in ${stillMs} ms${look && look.movers && look.movers.length ? ` (moving: ${look.movers.join(', ')})` : ''}` }; log(`  [realClick] ${sel}: ${realClick.lastMiss.why} — no press`); return false; }
-      if (look && look.found) r = { ...r, x: look.x, y: look.y };
+      if (look && look.found) r = { ...r, ...(aimLeft == null ? { x: look.x, y: look.y } : { x: look.rect[0] + Math.min(look.rect[2] / 2, aimLeft), y: look.rect[1] + look.rect[3] / 2 }) };
     }
     if (beforePress) await beforePress(r);
     for (let aim = 0; ; aim++) {
       await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: r.x, y: r.y });
       const u = await evalJs(UNDER(r.x, r.y));
       if (u && u.hits) break;
+      const cleared = aim === 0 ? await clearOnce(u) : false;
       if (aim === 1) { realClick.lastMiss = { ...r, atPress: u, why: 'still not under the pointer after one re-aim' }; log(`  [realClick] ${sel}: still not under the pointer after one re-aim (${u && u.hit}) — no press`); return false; }
-      const r2 = await evalJs(MEASURE(sel));
-      realClick.reaimed = { from: { x: Math.round(r.x), y: Math.round(r.y) }, under: u && u.hit, to: r2 ? { x: Math.round(r2.x), y: Math.round(r2.y) } : null };
-      log(`  [realClick] ${sel}: it moved between the measure and the press — at (${Math.round(r.x)}, ${Math.round(r.y)}) the pointer was over ${u && u.hit}; re-aimed once at ${r2 ? `(${Math.round(r2.x)}, ${Math.round(r2.y)})` : 'nothing (gone)'}`);
+      const r2 = await evalJs(MEASURE(sel, mo));
+      realClick.reaimed = { from: { x: Math.round(r.x), y: Math.round(r.y) }, under: u && u.hit, to: r2 ? { x: Math.round(r2.x), y: Math.round(r2.y) } : null, ...(cleared ? { uncovered: true } : {}) };
+      if (cleared) log(`  [realClick] ${sel}: covered at press time by ${u && u.hit} — the suite's uncover ran once; measured again at ${r2 ? `(${Math.round(r2.x)}, ${Math.round(r2.y)})` : 'nothing'}`);
+      else log(`  [realClick] ${sel}: it moved between the measure and the press — at (${Math.round(r.x)}, ${Math.round(r.y)}) the pointer was over ${u && u.hit}; re-aimed once at ${r2 ? `(${Math.round(r2.x)}, ${Math.round(r2.y)})` : 'nothing (gone)'}`);
       if (!r2 || !r2.hits) { realClick.lastMiss = r2; return false; }
       r = r2;
     }

@@ -60,7 +60,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, takeCspReports, CHROME_STORE } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, takeCspReports, CHROME_STORE, realClicker } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs'; // ⑳'s RED CONTROL: the patched copy lives outside the checkout
 import { buildPatchedBundle } from './pairing-ui-harness.mjs'; // …built into a client bundle the control page is served
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (never the machine-global :7/5901 — test-architecture §57)
@@ -293,20 +293,16 @@ const shot = async (P, name, sel) => {
     console.log(`    (screenshot ${name}.png)`);
   } catch (e) { console.log(`    (screenshot ${name} failed: ${e.message})`); }
 };
-// A REAL click on the element `sel` names: scrolled into view, the point PROVEN to hit it
-// (a toast over it clears once and retries — a covered point would be an outside click).
+// A REAL click on the element `sel` names through THE door (B-4f03, lane bl-tests-e: scripts/scratch.mjs realClicker — the still
+// look, the point proven at press time, one re-aim, the landing checked), ONE door per PAGE (two sign-ins): scrolled to the
+// NEAREST edge, aimed 40 px in from the row's left (a row's centre may hold its own buttons), a toast over it cleared once
+// (never the toast that holds the target — ⑲'s Undo presses are inside one).
+const doors = new WeakMap();
 const realClick = async (P, sel) => {
-  for (let k = 0; k < 2; k++) {
-    const r = await P.evalJs(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; e.scrollIntoView({ block: 'nearest' }); const q = e.getBoundingClientRect(); const x = q.left + Math.min(q.width / 2, 40), y = q.top + q.height / 2; const hit = document.elementFromPoint(x, y); return { x, y, hits: !!hit && (hit === e || e.contains(hit)) }; })()`);
-    if (!r) return false;
-    if (!r.hits) { await P.evalJs(`document.querySelectorAll('#global-toasts > .global-toast').forEach((el) => el.remove()); true`); continue; }
-    await P.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: r.x, y: r.y });
-    await P.cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: r.x, y: r.y, button: 'left', buttons: 1, clickCount: 1 });
-    await P.cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: r.x, y: r.y, button: 'left', buttons: 0, clickCount: 1 });
-    await sleep(120);
-    return true;
-  }
-  return false;
+  if (!doors.has(P)) doors.set(P, realClicker({ evalJs: P.evalJs, cdp: P.cdp }));
+  const ok = await doors.get(P)(sel, { scroll: 'nearest', aimLeft: 40, uncover: () => P.evalJs(`document.querySelectorAll('#global-toasts > .global-toast').forEach((el) => { if (!el.contains(window.__vsRealClickEl)) el.remove(); }); true`) });   // a toast that HOLDS the target (its Undo) stays
+  if (ok) await sleep(120);
+  return ok;
 };
 const WIN = `[...app.wm.windows.values()].find((w) => w.type === 'inbox')`;
 const ST = `(${WIN})?._inbox?.state`;

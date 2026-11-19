@@ -12,7 +12,7 @@ import { execSync, execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, realClicker } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 export const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 export const CHROME = [process.env.VS_CHROME, '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => p && fs.existsSync(p));   // (lane chrome-157: VS_CHROME names another Chrome — a Chrome for Testing build the runner has — as test-tailnet-reach-chrome reads it)
@@ -116,29 +116,24 @@ process.stdin.on('end', () => process.exit(0));
       await sleep(60);
     };
     const type = async (s) => { await cdp('Input.insertText', { text: s }); await sleep(120); };
-    /** A REAL click on `sel`: scrolled into view, the point PROVEN to hit it (a toast over it is cleared once). */
-    // lane race-sweep (B-6b74 — test-pair-dialog-ui F7's control, 1/10 on 2 cpus): a press WAITS FOR ITS PLACE — the target's
-    // point is read again at each look until it is the target itself (≤ ms; a toast over it is removed); the old two quick looks
-    // returned false on a dialog still laying out and the press never happened (no command, then a TypeError three lines on)
-    // lane chrome-157 (the .397 mirror's one red on a Chrome 157 runner): a real click made right after a viewport change (a
-    // device-metrics override, the sidebar toggled) could hit-test the element and then press where it no longer was — the
-    // layout still settling. The element's rect must read the SAME on three readings in a row before the point is taken — each
-    // reading at the next animation frame OR 50 ms, whichever comes first (a page that paints no frames — measured: one leg of
-    // test-exit-access-ui read 1 frame in 2 s — still settles) — BOUNDED (SETTLE_MS): a rect that never settles is said with its
-    // numbers and the click is not made (the caller's leg goes red), never a hang; never a retry of a click that was made
-    const SETTLE_MS = 4000;   // (margin: a BACKGROUND tab paints no frames — measured on 157 without this harness's --disable-background-timer-throttling, its timers tick about once a second and three readings take ≈ 2 s)
+    /** A REAL click on `sel` (a selector, or an EXPRESSION that starts with «(») through THE door (B-4f03, lane bl-tests-e:
+     *  scripts/scratch.mjs realClicker — the still look, the point proven at press time, one re-aim, the landing checked):
+     *  scrolled to the NEAREST edge, aimed 40 px in from its left, a toast over it cleared once a call (`uncover`).
+     *  It WAITS FOR ITS PLACE (lane race-sweep, B-6b74 — test-pair-dialog-ui F7's control): a target not yet the element at
+     *  its point is asked again for ≤ ms; absent at once ⇒ false at once, as before; a target that never holds still within
+     *  SETTLE_MS (lane chrome-157: a viewport change still laying out) ⇒ said and not pressed; a press that was MADE is never
+     *  made again. A HIDDEN page is brought to the front first: a background tab advances no animation, so the door's still
+     *  look would read its transition as running for ever (measured on test-vault-use-grants-chrome ⑦, 2.369.410's hosted run);
+     *  a visible page is left as the suite put it. The toast `uncover` clears is never one that holds the target (an Undo). */
+    const SETTLE_MS = 4000;
+    const RC = realClicker({ evalJs, cdp });
+    const clearToasts = () => evalJs(`document.querySelectorAll('#global-toasts > .global-toast').forEach((el) => { if (!el.contains(window.__vsRealClickEl)) el.remove(); }); true`);   // a toast that HOLDS the target (an Undo) stays
     const realClick = async (sel, ms = 8000) => {
+      try { if (await evalJs(`document.visibilityState === 'hidden'`)) await cdp('Page.bringToFront'); } catch { }   // only a HIDDEN page: a visible one keeps the suite's world
       for (const t0 = Date.now(); ; await sleep(100)) {
-        if (Date.now() - t0 > ms) return false;
-        const r = await evalJs(`new Promise((res) => { const e = (${sel.startsWith('(') ? sel : `document.querySelector(${JSON.stringify(sel)})`}); if (!e) return res(null); e.scrollIntoView({ block: 'nearest' }); const key = () => { const q = e.getBoundingClientRect(); return [q.left, q.top, q.width, q.height].map((v) => Math.round(v * 10) / 10).join(','); }; const seen = [key()], t0 = performance.now(); let done = false; const end = (v) => { if (!done) { done = true; res(v); } }; setTimeout(() => end({ settled: false, frames: seen.length, rects: seen.slice(-4), why: 'no settle in ${SETTLE_MS} ms' }), ${SETTLE_MS + 250}); const next = () => { let fired = false; const go = () => { if (fired) return; fired = true; tick(); }; requestAnimationFrame(go); setTimeout(go, 50); }; const tick = () => { if (done) return; seen.push(key()); const n = seen.length; if (n >= 3 && seen[n - 1] === seen[n - 2] && seen[n - 2] === seen[n - 3]) { const q = e.getBoundingClientRect(); const x = q.left + Math.min(q.width / 2, 40), y = q.top + q.height / 2; const hit = document.elementFromPoint(x, y); return end({ x, y, hits: !!hit && (hit === e || e.contains(hit)), settled: true, frames: n }); } if (performance.now() - t0 > ${SETTLE_MS}) return end({ settled: false, frames: n, rects: seen.slice(-4), why: 'still moving' }); next(); }; next(); })`);
-        if (!r) return false;
-        if (!r.settled) { console.log(`  · realClick: ${sel.slice(0, 100)} — its rect did not settle (${r.why}; ${r.frames} readings; the last rects ${(r.rects || []).join(' | ')}) — the click was NOT made`); return false; }
-        if (!r.hits) { await evalJs(`document.querySelectorAll('#global-toasts > .global-toast').forEach((el) => el.remove()); true`); continue; }
-        await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: r.x, y: r.y });
-        await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: r.x, y: r.y, button: 'left', buttons: 1, clickCount: 1 });
-        await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: r.x, y: r.y, button: 'left', buttons: 0, clickCount: 1 });
-        await sleep(150);
-        return true;
+        if (await RC(sel, { scroll: 'nearest', aimLeft: 40, stillMs: SETTLE_MS, uncover: clearToasts })) { await sleep(150); return true; }
+        const miss = RC.lastMiss;
+        if (RC.landed || miss === null || /never held still/.test((miss && miss.why) || '') || Date.now() - t0 > ms) return false;
       }
     };
     return { sock, cdp, evalJs, waitFor, waitApp, key, type, realClick, errors, requests, on: (fn) => listeners.push(fn) };

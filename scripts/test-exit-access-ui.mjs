@@ -242,7 +242,8 @@ try {
   // THE RECT CENSUS at 860 / 360
   await P.cdp('Emulation.setDeviceMetricsOverride', { width: 860, height: 760, deviceScaleFactor: 1, mobile: false });
   await sleep(300);
-  // lane dialog-yield: P is a BACKGROUND tab here (P2 opened in front) and a background tab renders nothing — no resize reaches
+  // lane dialog-yield: P may be a BACKGROUND tab here (P2 opened in front; since B-4f03 a press on P through the harness's door
+  // brings P to the front when it is hidden) and a background tab renders nothing — no resize reaches
   // the page; the exit dialog is a FORM window that re-fits inside the viewport on it (an overlay was laid out by CSS alone). P
   // renders for the census — in front while the page is 860 px wide (the viewport's own switch settles at this size) — then
   // P2 goes back in front: the legs after it run in the suite's world as before

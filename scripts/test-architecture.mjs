@@ -7764,15 +7764,13 @@ await section(async () => {
 // pressing where it HAD been; rows that move while a turn lands put a NEIGHBOUR under the pointer (test-channel-jump ②, red 4
 // runs of 7 on the .358 train). The door is scripts/scratch.mjs realClicker (measure, hold still, the point proven at press
 // time, re-aim once, the landing checked). A suite's realClick is a thin wrapper over it; a realClick that dispatches its own
-// mouse events is a COPY and is red — except the three named below, each with what the door lacks (folding them grows the
-// door in scratch.mjs, which every chrome suite imports). A named exception whose copy is gone is red too (drop its row).
-console.log('\n§108 one real-click door (B-4f03): a realClick that presses by itself is a copy — red outside the named exceptions');
+// mouse events is a COPY and is red. The three named exceptions it began with (each with what the door lacked) are folded
+// (B-4f03, .413): the door grew their needs as options. A named exception whose copy is gone is red too (drop its row).
+console.log('\n§108 one real-click door (B-4f03): a realClick that presses by itself is a copy — red (no named exception is left)');
 await section(async () => {
-  const COPIES_KEPT = Object.freeze({
-    'pairing-ui-harness.mjs': 'an EXPRESSION target (a selector that starts with «(»), a wait for the element to appear (≤ ms) and the rect settled on THREE readings a frame or 50 ms apart (lane chrome-157: a background tab paints no frames) — the door reads a CSS selector and two looks 40 ms apart',
-    'test-wake-approve-card-chrome.mjs': 'it scrolls ONLY when the target is not wholly in view — measured there: a second centre scroll moved a centred Approve by 40 px under the pointer and the press arm rightly refused it; the door always scrolls to the centre',
-    'test-inbox-window-ui.mjs': 'one door per PAGE over two sign-ins, scrolled to the NEAREST edge and aimed 40 px in from the row\'s left (a row\'s centre may hold its own buttons) — the door scrolls to the centre and aims at the centre',
-  });
+  // B-4f03 (lane bl-tests-e, .413): the last three copies are folded — the door took their needs as options (realClickMeasureSource:
+  // an EXPRESSION target, scroll 'nearest' / 'if-needed', aimLeft; `uncover` a call's own toast clear). A copy is red with no exception.
+  const COPIES_KEPT = Object.freeze({});
   // a binding, a declaration, an assignment to a property (P.realClick = …), an object key (realClick: …) or a method
   const DEF108 = /(?:(?<![\w$.])(?:(?:const|let|var)\s+realClick\s*=|(?:async\s+)?function\s+realClick\s*\(|realClick\s*:\s*(?:async\b|function\b|\()|async\s+realClick\s*\()|\.realClick\s*=(?!=))/g;
   // a definition's text: its own line and every line indented deeper (a closing brace at its own depth included)
