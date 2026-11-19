@@ -672,12 +672,16 @@ try {
     // slot and 「全部标为已看」 keeps its own — read both rects before the press, again after it
     const rectsOf = `(() => { const r = (sel) => { const e = document.querySelector(sel); if (!e) return null; const q = e.getBoundingClientRect(); return [Math.round(q.left), Math.round(q.top), Math.round(q.width), Math.round(q.height)]; }; return { seen: r(${JSON.stringify(bSel + ' > .ut-band-bar > .ut-seen-all')}), fold: r(${JSON.stringify(bSel + ' > .ut-band-bar > .ut-fold')}) }; })()`;
     // THE POINT IS THE TOGGLE (the 2.369.410 train's hosted red, 主开发 15:10Z — a probe on the runner): a global toast («Marked
-    // done · Undo», ⑭'s marks) may stand over the open panel's right side — the release's behaviour too (this suite's guarded door
-    // says so) — and a raw press there lands on the toast's Undo, OUTSIDE the panel, whose outside rule hides it. So the toast
-    // stack is cleared the way this suite's own door clears it BEFORE the point is read, and the point is CHECKED — its top element
-    // is the toggle inside the panel — a counted step that says what stands there; the three presses below stay raw at that point
+    // done · Undo», ⑭'s marks) stood over the open panel's right side and a raw press there landed on the toast's Undo, OUTSIDE the
+    // panel, whose outside rule hid it. B-7a51 CURED IT: the stack avoids the OPEN panel (above it when there is room, else beside it
+    // on its left) — so the toasts are NOT cleared any more: three more real ones are raised (server notices, the page's own toast
+    // door) while the panel is open, none may meet the panel, and the point is CHECKED — its top element is the toggle inside the
+    // panel; the three presses below stay raw at that point
     const topAt = (x, y) => `(() => { const e = document.elementFromPoint(${x}, ${y}); if (!e) return { fold: false, what: 'nothing' }; const t = e.closest('.global-toast'); const inPanel = !!e.closest('#user-todos-popup'); return { fold: !!e.closest('.ut-fold') && inPanel, what: t ? 'a toast: ' + (e.className || e.tagName) + ' «' + t.textContent.trim().slice(0, 60) + '»' : (inPanel ? 'in the panel: ' : 'outside the panel: ') + (e.className || e.tagName) }; })()`;
-    await evalJs(`document.querySelectorAll('#global-toasts > .global-toast').forEach((el) => el.remove()); true`);
+    await evalJs(`(() => { for (let k = 0; k < 3; k++) for (const h of app.ws.globalHandlers) { try { h({ type: 'server-notice', key: 'b7a51-' + k + '-' + Date.now(), level: 1, text: 'B-7a51 stand-in notice ' + (k + 1) }); } catch { } } return true; })()`);
+    await sleep(900);   // the stack's placement runs on its next frame (and again as each toast lands)
+    const clear15 = await evalJs(`(() => { const p = document.getElementById('user-todos-popup').getBoundingClientRect(); const st = document.getElementById('global-toasts'); const seen = !!st && getComputedStyle(st).visibility !== 'hidden'; const ts = seen ? [...st.querySelectorAll(':scope > .global-toast')].map((t) => t.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0) : []; return { toasts: ts.length, meet: ts.filter((r) => r.left < p.right && r.right > p.left && r.top < p.bottom && r.bottom > p.top).length, out: ts.filter((r) => r.left < 0 || r.right > innerWidth || r.top < 0 || r.bottom > innerHeight).length }; })()`);
+    check(`B-7a51: ${clear15 && clear15.toasts} toast(s) seen while the panel is open (at 1280 there is room beside it) — none stands on the panel (${clear15 && clear15.meet} meet it), none off screen (${clear15 && clear15.out})`, !!clear15 && clear15.toasts >= 3 && clear15.meet === 0 && clear15.out === 0, clear15);
     const fb = await evalJs(`(() => { const f = document.querySelector(${JSON.stringify(bSel + ' .ut-fold')}); f.scrollIntoView({ block: 'nearest' }); const q = f.getBoundingClientRect(); return { x: q.left + q.width / 2, y: q.top + q.height / 2 }; })()`);
     // RED CONTROL — IT PROVES ITSELF FIRST (主开发 15:21Z, the runner: the first plant never stood at the point — .global-toast's
     // entrance animation (toast-in, a transform) made the planted box the containing block of its fixed button, so the point still

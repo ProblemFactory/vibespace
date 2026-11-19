@@ -11,7 +11,8 @@
 //   §3 the taskbar at a small screen (src/lib/taskbar-fit.js stripHidden / wheelScroll / switcherForm + TILE_MIN_PX = the
 //      stylesheet's tile floor)
 //   §4 the cascade that buries nothing (src/lib/window-min-size.js cascadeBox)
-//   §5 the desktop tier's toast spot (src/lib/utils.js toastDeskSpot)
+//   §5 the desktop tier's toast spot (src/lib/utils.js toastDeskSpot) + B-7a51: the stack beside the OPEN For-you panel
+//      (toastBesidePanel; the panel in _toastAvoid, its open / close re-placing the stack, a toast press no outside press)
 //   §6 the wiring — every door asks its rule (source pins over the comment-stripped files), acceptance r2 included: the
 //      compact list's rows carry the desktop's doors and take a window's drop, the «+N» list is placed by menuPlace, the
 //      resize's release, the brand observer's lifetime, the narrow-title observer's own field; acceptance r3: ONE spring
@@ -30,6 +31,18 @@ const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const read = (rel) => fs.readFileSync(path.join(repo, rel), 'utf8');
 const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/[^\n]*/g, '$1');
+// B-7a51: the stack beside the OPEN For-you panel (viewport px in; the stack's CSS right out, layout px) — [name, got, want]
+const besideTable = (f) => {
+  const panel = { left: 900, right: 1270, top: 80, bottom: 740 }, over = { left: 920, right: 1270, top: 600, bottom: 744, width: 350, height: 144 };
+  return [
+    ['a stack over the open panel stands 8 px left of it', f({ rect: over, panel, vw: 1280 }), { right: 388 }],
+    ['…in layout px at a 1.25 UI scale', f({ rect: over, panel, vw: 1280, scale: 1.25 }), { right: 310.4 }],
+    ['a stack clear of the panel keeps its place', f({ rect: { ...over, left: 400, right: 750 }, panel, vw: 1280 }), null],
+    ['a stack below the panel keeps its place', f({ rect: { ...over, top: 745, bottom: 889 }, panel, vw: 1280 }), null],
+    ['no open panel ⇒ its place', f({ rect: over, panel: null, vw: 1280 }), null],
+    ['no room on the panel\'s left ⇒ its place (never off screen)', f({ rect: over, panel: { ...panel, left: 300 }, vw: 1280 }), null],
+  ];
+};
 if (!fs.existsSync(path.join(repo, 'src/lib/build-version.js'))) { console.error('  ✗ src/lib/build-version.js missing — run `npm run build` first'); process.exit(1); }
 const MUT = mutantCopies('desksmall', repo);
 const copies = [];
@@ -258,6 +271,11 @@ console.log('§5 the desktop tier\'s toast spot (utils.js toastDeskSpot)');
   const s3 = toastDeskSpot({ rect: toast, avoid: [{ left: 0, right: 951, top: 60, bottom: 545 }], topY: 41, vh: 585 });
   ok(toastDeskSpot({ rect: toast, avoid: [menu], topY: 41, vh: 585 }) === null && same(s1, { bottom: 159 }) && same(s2, { bottom: 421 }) && s3 === null,
     'toastDeskSpot: clear ⇒ its own place; over the composer ⇒ it rises 8 px above it; over the composer then a menu ⇒ above both; no room under the toolbar ⇒ its own place', { s1, s2, s3 });
+  // B-7a51 (the 2.369.410 train's K41: three «Marked done · Undo» toasts across the open For-you panel's band bar — a press for
+  // «26 more — expand» landed on a toast's Undo, outside the panel, and the panel closed): the OPEN panel is in the avoid list,
+  // and a stack that still meets it (no room above it) stands BESIDE it, on its left — toastBesidePanel's table
+  const { toastBesidePanel } = await import('../src/lib/utils.js');
+  ok(besideTable(toastBesidePanel).every(([, g, w]) => same(g, w)), 'toastBesidePanel: a stack over the open panel stands 8 px left of it (÷ the UI scale); clear of it, below it, no panel or no room on its left ⇒ its place', besideTable(toastBesidePanel).filter(([, g, w]) => !same(g, w)));
 }
 
 // ── §6 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -382,6 +400,18 @@ console.log('§6 the wiring — every door asks its rule');
     && !keyed(U.replace(' if (isMenuKey(e)) _menuOwnKeyAt = Date.now(); }, true);', ' }, true);'), VCSS),
     'CONTROL: the checkpoint\'s shapes and the reader\'s finds — a key-opened menu that takes no focus, a close that leaves the focus nowhere, a redrawn menu that forgets its opener, a pointer press painting a row, a page-long document listener of the menu\'s own (103af4972: the block checkpoint\'s red), the first focus skipping an off row for a live one, the guard counting fields only (its round ① ②), the guard judging the opener alone (the person\'s menu key in a field took no focus — 09:53Z), the menu key never stamped, its stamp never consumed — are each refused');
   ok(/if \(shown && !_toastTier\(\) && !_openModalDialog\(\)\) \{ _placeDeskToasts\(stack\); return; \}/.test(U) && /const rect = stack\.getBoundingClientRect\(\);\n  const desk = toastDeskSpot\(\{ rect, avoid: _toastAvoid\(rect\),/.test(U), 'the desktop tier\'s toast stack (anchored or centred) is placed off every open menu and composer');
+  const PANEL = strip(read('src/lib/user-todos-panel.js'));
+  const yields = (u, panelSrc) => /const up = toastDeskSpot\(\{ rect: r2, avoid: \[\.\.\._toastAvoid\(r2\), fr\], topY, vh: window\.innerHeight, scale: uiScale\(\) \}\);/.test(u)
+    && /const beside = up \? null : toastBesidePanel\(\{ rect: r2, panel: fr, vw: window\.innerWidth, scale: uiScale\(\) \}\);/.test(u)
+    && /const r3 = stack\.getBoundingClientRect\(\), there = toastDeskSpot\(\{ rect: r3, avoid: \[\.\.\._toastAvoid\(r3\), fr\],[^\n]*\n\s+if \(there\) \{ stack\.style\.top = 'auto'; stack\.style\.bottom = there\.bottom \+ 'px'; \}/.test(u)
+    && /\} else stack\.style\.visibility = 'hidden';/.test(u) && /if \(stack && stack\.style\.visibility === 'hidden'\) stack\.style\.visibility = '';/.test(u)
+    && /if \(fy\) _toastWatch\.observe\(fy, \{ attributes: true, attributeFilter: \['class', 'style'\] \}\);/.test(u)
+    && /document\.querySelectorAll\('\.context-menu, \.taskbar-context-menu, \[data-popover\], \.ut-announce'\)/.test(u)
+    && /ignore: \(t\) => !!t\?\.closest\?\.\('[^']*#global-toasts[^']*'\)/.test(panelSrc);
+  ok(yields(U, PANEL), 'B-7a51: a stack still meeting the OPEN For-you panel rises above it (clear of everything else) when there is room, else stands beside it and off what stands there, else yields (hidden while the panel is open, shown again at the next placement); the panel\'s open / close re-places it; the panel is no obstacle in the general list (a stack that cannot clear it is never sent back onto a composer); a toast press is no press outside the panel');
+  ok(!yields(U.replace("} else stack.style.visibility = 'hidden';", '}'), PANEL) && !yields(U.replace("if (fy) _toastWatch.observe(fy,", "if (false) _toastWatch.observe(fy,"), PANEL)
+    && !yields(U.replace("      if (there) { stack.style.top = 'auto'; stack.style.bottom = there.bottom + 'px'; }\n", ''), PANEL)
+    && !yields(U, PANEL.replace('.context-menu, #global-toasts, #record-clear-dialog', '.context-menu, #record-clear-dialog')), 'CONTROL: no yield when there is no room, the panel\'s open never re-placing the stack, the beside place never checked against the chrome there, a toast press closing the panel — each is refused');   // stale-pins: kept (the base's text, planted)
 }
 
 // ── §7 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -413,6 +443,8 @@ console.log('§7 controls — each rule\'s base form, on its own table');
   ok(typingTable(mtFields.menuOpenerTyping).filter(([, g, w]) => g !== w).length === 3, 'CONTROL menuOpenerTyping counting fields and frames only (the base\'s guard — its round ②): a desktop\'s canvas, a stream\'s video, the live browser view lose their keys to the menu (RED)');
   const mkNoBack = await patched('src/lib/menu-place.js', [["  if (key === 'Escape') return v({ close: true, back: true });", "  if (key === 'Escape') return v({ close: true });"]], 'keys-no-back');
   ok(keyTable(mkNoBack.menuKeyStep).filter(([, g, w]) => !same(g, w)).length >= 2, 'CONTROL menuKeyStep whose Escape leaves the focus nowhere (RED)');
+  const tbNoMeet = await patched('src/lib/utils.js', [['  if (!meets || panel.left - gap - rect.width < 0) return null;', '  if (panel.left - gap - rect.width < 0) return null;']], 'beside-any');
+  ok(besideTable(tbNoMeet.toastBesidePanel).filter(([, g, w]) => !same(g, w)).length >= 2, 'CONTROL toastBesidePanel moving a stack that meets no panel: a stack clear of the panel, or below it, is pushed aside (RED)');
   const msSlid = await patched('src/lib/window-min-size.js', [['  if (covered(first) <= cover) return first;', '  return first;']], 'cascade-slid');
   const r = cascadeRun(msSlid.cascadeBox, { w: 1020, h: 555 }, { w: 700, h: 500 });
   ok(r.buried.some((x) => x > 0.2), `CONTROL cascadeBox = the slid slot (the base): an earlier title bar is buried (${r.buried.map((x) => Math.round(x * 100)).join(' / ')} %) (RED)`);

@@ -908,7 +908,7 @@ export function installUserTodos(app) {
   onOutsidePress(popup, (e) => hidePopup(e?.type === 'blur' ? 'frame' : 'outside'), {
     exclude: [btn, mBtn],
     // a row's own menu (right-click → Clear content…) and the confirm dialog it opens are ABOVE the panel too
-    ignore: (t) => !!t?.closest?.('.ut-mini-popover, .win-inbox-badge, .context-menu, #record-clear-dialog, .chat-img-overlay'),   // B-51dd: a reply picture shown full size is not a press outside
+    ignore: (t) => !!t?.closest?.('.ut-mini-popover, .win-inbox-badge, .context-menu, #global-toasts, #record-clear-dialog, .chat-img-overlay'),   // B-51dd: a reply picture shown full size is not a press outside; B-7a51: nor a press on a toast (its Undo, its ✕)
     nested: false, once: false,
   });
   // Escape closes the popup / phone sheet (verifier r2). This is a PERSISTENT

@@ -625,6 +625,16 @@ export function toastDeskSpot({ rect = null, avoid = [], topY = 0, vh = 0, scale
   const hard = all.filter((a) => !a.soft);
   return hard.length < all.length ? place(hard) || null : null;
 }
+/** B-7a51 — THE STACK YIELDS TO THE OPEN FOR-YOU PANEL. PURE: a stack `rect` that still meets the panel `panel` after
+ *  toastDeskSpot (no room above it under the toolbar: a tall panel, several toasts) stands BESIDE it, on its left, `gap` px clear
+ *  → { right } (the stack's CSS right, layout px: ÷ `scale`); null = it meets no panel, or there is no room on the panel's left
+ *  either (then its place — never off screen). Viewport px in, like toastDeskSpot. */
+export function toastBesidePanel({ rect = null, panel = null, vw = 0, scale = 1, gap = 8 } = {}) {
+  if (!rect || !panel || !(rect.width > 0) || !(rect.height > 0) || !(panel.right > panel.left) || !(panel.bottom > panel.top) || !(vw > 0)) return null;
+  const meets = rect.left < panel.right && rect.right > panel.left && rect.top < panel.bottom && rect.bottom > panel.top;
+  if (!meets || panel.left - gap - rect.width < 0) return null;
+  return { right: (vw - panel.left + gap) / (scale || 1) };
+}
 /** THE ONE LIST of a window's own interactive chrome that transient attention UI never stands on (lane needs-card-tail r14 —
  *  the r13 acceptance: the For-you announce's first card over Session 10's Send, the toasts above it clear of the composer):
  *  every composer, every attention strip (chat-view's `.chat-attn-dock`), a window's title-bar buttons. The global toasts
@@ -703,7 +713,9 @@ export function chromeAvoidRects(x0, x1, over = () => false) {
   return out;
 }
 /** what the desktop tier's stack must not stand on: every open menu / float, THE window chrome it would meet (chromeAvoidRects in
- *  its own column) and the For-you announce's stack (`.ut-announce`, no popover since lane needs-card-tail r11) — viewport px */
+ *  its own column) and the For-you announce's stack (`.ut-announce`, no popover since lane needs-card-tail r11) — viewport px.
+ *  (THE OPEN For-you panel has its own step after these — _placeDeskToasts, B-7a51: a tall obstacle in this list would send a stack
+ *  that cannot clear it back to its own place, onto a composer it used to rise above.) */
 function _toastAvoid(sr = null) { // (`sr`: the stack's rect its placement already read)
   if (!sr) { const st = document.getElementById('global-toasts'); sr = st ? st.getBoundingClientRect() : null; }
   return [...avoidRects(document.querySelectorAll('.context-menu, .taskbar-context-menu, [data-popover], .ut-announce'), (el) => el.id === 'global-toasts' || !!el.closest('#global-toasts')),
@@ -737,8 +749,28 @@ function _placeDeskToasts(stack) {
   const rect = stack.getBoundingClientRect();
   const desk = toastDeskSpot({ rect, avoid: _toastAvoid(rect), topY: tr && tr.height ? tr.bottom : 0, vh: window.innerHeight, scale: uiScale() });
   if (desk) { stack.style.top = 'auto'; stack.style.bottom = desk.bottom + 'px'; }
+  // B-7a51 — THE OPEN FOR-YOU PANEL IS NO PLACE FOR A TOAST (K41: an Undo over «… more — expand», the press outside the panel closed
+  // it). A stack that still meets the open panel: ABOVE it, clear of everything else too, when there is room; else BESIDE it on its
+  // left (toastBesidePanel) and off whatever stands there; else it YIELDS — hidden while the panel is open (its toasts stay in the
+  // notification history; the panel's close re-places it). A stack that meets no panel is placed exactly as before.
+  const fy = document.getElementById('user-todos-popup');
+  const fr = fy && !fy.classList.contains('hidden') && fy.getClientRects().length ? fy.getBoundingClientRect() : null;
+  const r2 = fr ? stack.getBoundingClientRect() : null;
+  if (r2 && r2.left < fr.right && r2.right > fr.left && r2.top < fr.bottom && r2.bottom > fr.top) {
+    const topY = tr && tr.height ? tr.bottom : 0;
+    const up = toastDeskSpot({ rect: r2, avoid: [..._toastAvoid(r2), fr], topY, vh: window.innerHeight, scale: uiScale() });   // (meeting the panel, null = no room)
+    const beside = up ? null : toastBesidePanel({ rect: r2, panel: fr, vw: window.innerWidth, scale: uiScale() });
+    if (up) { stack.style.top = 'auto'; stack.style.bottom = up.bottom + 'px'; }
+    else if (beside) {
+      stack.style.left = 'auto'; stack.style.transform = 'none'; stack.style.right = beside.right + 'px';
+      const r3 = stack.getBoundingClientRect(), there = toastDeskSpot({ rect: r3, avoid: [..._toastAvoid(r3), fr], topY, vh: window.innerHeight, scale: uiScale() });
+      if (there) { stack.style.top = 'auto'; stack.style.bottom = there.bottom + 'px'; }
+    } else stack.style.visibility = 'hidden';
+  }
   if (!_toastWatch) { _toastWatch = new MutationObserver(_queueToastPlace); _toastWatch.observe(document.body, { childList: true }); }
   _toastWatch.observe(stack, { childList: true });
+  // …and the panel opening or closing (a persistent element: its class and its place change, never the body's children) re-places it
+  if (fy) _toastWatch.observe(fy, { attributes: true, attributeFilter: ['class', 'style'] });
 }
 const _toastTier = () => { try { return matchMedia(VC_PHONE_MEDIA).matches || isTouchDevice(); } catch { return false; } }; // int355: the phone paths' ONE media list (duo-build-1's law, test-viewport-class)
 /** the dialog of the topmost open app modal (createModalShell's overlay or the static #dialog-overlay), else null */
@@ -773,6 +805,7 @@ function _placeToastStack() {
 }
 function _placeToastStackNow() {
   const stack = document.getElementById('global-toasts');
+  if (stack && stack.style.visibility === 'hidden') stack.style.visibility = '';   // B-7a51: a stack that yielded to the open For-you panel shows again unless the desk step hides it once more
   const shown = !!stack && stack.isConnected && stack.children.length > 0;
   const live = shown && !stack.classList.contains('gt-anchored');
   const dlg = live ? _openModalDialog() : null;
