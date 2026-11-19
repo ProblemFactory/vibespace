@@ -813,6 +813,44 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
   if (DDs) ok(c3 && c3.fz && c3.fz.ok && J(c3.a) === J([TB]), 'CONTROL (the stamp trusted alone): A\'s viewer shows B\'s page in B\'s window — the cell heavy hidden-paint e guards — RED', c3);
   ok(un && un.fz && un.fz.ok && J(un.a) === J([TA]) && un.hiddenA === 1, 'B-1626 cure 4: a window Chrome did not report at the freeze is UNKNOWN — read again at the thaw, A\'s viewer shows A\'s page (never a blank on every later visit)', un);
   if (DDu) ok(c4 && c4.fz && c4.fz.ok && J(c4.a) === J([]) && c4.hiddenA === 2, 'CONTROL (cure 3\'s rule: an unread window is «not yours»): A\'s front stays owed — the live view blank on this visit and every later one — RED', c4);
+  // ═══ the IDLE PAINT STOP UNDER A RUNNING VERB (an agent's feedback 2026-11-18: a fresh profile's first open of a large web app
+  //     left its tab busy ~2 min, the person saw a crashed page; opening the sign-in page again recovered it at once) — PLACED over
+  //     the real watch on a stand-in browser (a loaded page: no navigation in flight), its clock the leg's own ═══
+  {
+    const BIdle = require('../src/browser-idle.js');
+    const ipLeg = async (Dmod) => {
+      const SI = await standIn(); const PID = 'bp-0000c23b'; let clock = 1795000000000;
+      const D = Dmod.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: SI.url }), holdsDialogsFor: () => true }, log: quiet, now: () => clock, leaseCountOf: () => 1 });
+      const verdict = () => { const f = D.paintFacts(PID); return f ? BIdle.idlePaintVerdict({ enabled: true, viewers: 0, lastVerbAt: f.lastVerbAt, now: clock, busy: f.busy, frozen: f.frozen }) : null; };
+      try {
+        await D.arm(PID, { budgetMs: 3000 });
+        const opened = await until(() => !!D.paintFacts(PID), 3000);
+        D.verbStarted(KA, { profileId: PID, verb: 'open' });                       // the agent's `open` — still running…
+        clock += BIdle.IDLE_PAINT_MS + 1000;                                          // …past the idle bound, its page loaded
+        const underVerb = verdict();
+        D.verbEnded(KA, { profileId: PID });                                          // the verb ends now
+        clock += 10000; const tenAfter = verdict();                                   // 10 s after its END
+        clock += BIdle.IDLE_PAINT_MS; const pastEnd = verdict();                      // the idle bound after its end
+        D.verbStarted(KB, { profileId: PID, verb: 'click' });                         // a verb whose CLI crashed: no end ever comes
+        clock += 5 * 60 * 1000 + 1000; const crashed = verdict();                     // past the watch's own bound on a /resolve without its audit
+        return { opened, underVerb, tenAfter, pastEnd, crashed };
+      } finally { try { D.shutdown(); } catch { /* */ } await SI.close(); }
+    };
+    const RUNANCH = ' || !!w.thawing || verbRunningOn(profileId), frozenAt:';
+    const ENDANCH = '{ if (!browserKey) return; if (profileId && watches.get(String(profileId))) watches.get(String(profileId)).lastVerbAt = now();';
+    if (!dsrc.includes(RUNANCH)) ok(false, 'the anchor of the control «idle paint: a running verb is busy» is not in the source (src/server/browser-dialogs.js)');
+    if (!dsrc.includes(ENDANCH)) ok(false, 'the anchor of the control «idle paint: the clock restarts at a verb\'s end» is not in the source (src/server/browser-dialogs.js)');
+    const DDr = dsrc.includes(RUNANCH) ? M.load('src/server/browser-dialogs.js', dsrc.replace(RUNANCH, ' || !!w.thawing, frozenAt:'), 'ip-release-busy') : null; // stale-pins: kept — the release's busy, planted back as this control's mutant
+    const DDe = dsrc.includes(ENDANCH) ? M.load('src/server/browser-dialogs.js', dsrc.replace(ENDANCH, '{ if (!browserKey) return;'), 'ip-no-end-stamp') : null;
+    const [ip, ipRel, ipEnd] = await Promise.all([ipLeg(DD), DDr ? ipLeg(DDr) : null, DDe ? ipLeg(DDe) : null]);
+    ok(ip.opened && ip.underVerb && ip.underVerb.act === null && ip.underVerb.why === 'busy',
+      'the idle paint stop: a page with a verb STILL RUNNING on its browser (31 s after the verb started, its page loaded) is never frozen under it — the verdict reads «busy»', ip.underVerb);
+    ok(ip.tenAfter && ip.tenAfter.act === null && ip.tenAfter.why === 'recent' && ip.pastEnd && ip.pastEnd.act === 'freeze',
+      '…and the idle clock restarts when the verb ENDS: 10 s after its end it is «recent», the idle bound after its end it stops drawing (nobody watches, nobody drives)', { tenAfter: ip.tenAfter, pastEnd: ip.pastEnd });
+    ok(ip.crashed && ip.crashed.act === 'freeze', 'a verb whose CLI crashed (a /resolve with no audit) holds the stop off no longer than the watch\'s own bound on it (5 min)', ip.crashed);
+    if (ipRel) ok(ipRel.underVerb && ipRel.underVerb.act === 'freeze', 'CONTROL (the release\'s busy: a running verb not counted): the page is FROZEN under the agent\'s own verb 31 s after it started — the reported two-minute busy tab — RED', ipRel.underVerb);
+    if (ipEnd) ok(ipEnd.tenAfter && ipEnd.tenAfter.act === 'freeze', 'CONTROL (the clock stamped only at a verb\'s start): 10 s after a long verb ENDED the page is frozen as if idle since its start — RED', ipEnd.tenAfter);
+  }
 }
 
 // ═══ ④ THE WORDS ═════════════════════════════════════════════════════════════

@@ -1007,7 +1007,10 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const w = watches.get(String(profileId || ''));
     if (!w || w.state !== 'open') return null;
     const loading = [...w.targets.values()].some((e) => e.navSince > 0);
-    return { frozen: w.paint === 'frozen', lastVerbAt: w.lastVerbAt || w.bornAt || 0, busy: w.open.size > 0 || loading || !!w.thawing, frozenAt: w.frozenAt || 0, fronts: (w.fronts || []).length, hidden: w.hiddenFronts ? w.hiddenFronts.size : 0, title: [...w.targets.values()].map((e) => e.title).find(Boolean) || null };
+    // (a verb of any holder still RUNNING on this browser is busy: the idle stop never freezes a page under a verb — an agent's
+    // feedback 2026-11-18: a fresh profile's first open of a large web app froze 30 s after its verb STARTED and waited out the
+    // verb's own timeout, ~2 min, with nothing said; the next verb's thaw recovered it at once)
+    return { frozen: w.paint === 'frozen', lastVerbAt: w.lastVerbAt || w.bornAt || 0, busy: w.open.size > 0 || loading || !!w.thawing || verbRunningOn(profileId), frozenAt: w.frozenAt || 0, fronts: (w.fronts || []).length, hidden: w.hiddenFronts ? w.hiddenFronts.size : 0, title: [...w.targets.values()].map((e) => e.title).find(Boolean) || null };
   }
   /** Every tab of the browser FROZEN (measured: the only act that stops an Xvfb window drawing — IDLE_PAINT_PROOF). The tabs
    *  in front are remembered: a frozen page is hidden, and only its tab strip shows it again (thawPaint). */
@@ -1372,7 +1375,15 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const w = profileId ? watches.get(String(profileId)) : null;
     if (w && verb && ST.loopActing(verb)) { w.commands.push(now()); if (w.commands.length > LOOP_COMMANDS_KEEP) w.commands.splice(0, w.commands.length - LOOP_COMMANDS_KEEP); }
   }
-  function verbEnded(browserKey, { profileId = null } = {}) { if (!browserKey) return; const r = running.get(browserKey); if (!r) return; const on = { ...(r.on || {}) }; if (profileId && on[String(profileId)]) { const o = on[String(profileId)]; if (o.n <= 1) delete on[String(profileId)]; else on[String(profileId)] = { n: o.n - 1, at: o.at, verb: o.verb || null }; } if (r.n <= 1) running.delete(browserKey); else running.set(browserKey, { n: r.n - 1, at: r.at, on }); }
+  // (the idle paint clock restarts when a verb ENDS — it was stamped only at its start, so a long verb's end read as long idle)
+  function verbEnded(browserKey, { profileId = null } = {}) { if (!browserKey) return; if (profileId && watches.get(String(profileId))) watches.get(String(profileId)).lastVerbAt = now(); const r = running.get(browserKey); if (!r) return; const on = { ...(r.on || {}) }; if (profileId && on[String(profileId)]) { const o = on[String(profileId)]; if (o.n <= 1) delete on[String(profileId)]; else on[String(profileId)] = { n: o.n - 1, at: o.at, verb: o.verb || null }; } if (r.n <= 1) running.delete(browserKey); else running.set(browserKey, { n: r.n - 1, at: r.at, on }); }
+  /** Is a verb of ANY holder running on this browser now (between its /resolve and its /audit — a crashed CLI's forgotten past
+   *  VERB_RUNNING_MAX_MS)? The idle paint stop reads it (paintFacts' `busy`). */
+  function verbRunningOn(profileId) {
+    const pid = String(profileId || ''), t = now();
+    for (const r of running.values()) { const o = r && r.on ? r.on[pid] : null; if (o && o.n > 0 && t - (Number(o.at) || 0) <= VERB_RUNNING_MAX_MS) return true; }
+    return false;
+  }
   function verbRunning(browserKey) { const r = running.get(browserKey); if (!r) return false; if (now() - r.at > VERB_RUNNING_MAX_MS) { running.delete(browserKey); return false; } return r.n > 0; }
 
   /** Rule 6: a dialog that opened while a holder of this browser ran NO verb ⇒ ONE free next-turn notice (never a wake). */
