@@ -78,6 +78,8 @@ const PRODUCERS = {
   'src/server/unexpected-exit.js': { origin: 'agent', scope: 'conversation', types: [] },
   'src/exit-proxy.js': { origin: 'machines', scope: 'conversation', types: ['exit-run-ask'] },
   'src/server/memory-pressure-watch.js': { origin: 'server', scope: 'group', types: [] },
+  'src/watch-door.js': { origin: 'server', scope: 'group', types: [], why: 'hotfix 2.369.411 (lane bl-loop-b): the machine\'s limit of file watches — ONE notice per limit episode, at most one an hour, under the `watch-limit` key (filed through memory-pressure-watch configure()); its words name the command that raises the limit, it files no action type' },
+  'src/server/task-groups-wiring.js': { origin: 'server', scope: 'group', types: [], why: 'hotfix 2.369.411 (lane bl-windows): the Task Groups store held unread — ONE notice per hold of the store, under the `task-groups-unread` key; it only informs, no action type' },
   'src/server/ledger-shape-notice.js': { origin: 'server', scope: 'group', types: [], why: 'lane ledger-dedup-law F4: the growth alarm\'s notices (one per machine × file, the hold folder, a hold\'s file) under the `usage-ledger` key — no action' },
   'src/plugins/frp.js': { origin: 'plugin', scope: 'group', types: [] },
   'src/server/decision-engine.js': { origin: 'plugin', scope: 'group', types: [] },
