@@ -645,7 +645,9 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     const pid = (r && r.profileId) || (st.target && st.target.profileId) || null;
     const rec = pid && app._browserProfiles && app._browserProfiles.browsers ? app._browserProfiles.browsers[pid] : null;
     // the owner's report 2026-11-19: a hidden background tab's OWN picture (the hub polls it), never its window's front tab
-    return pictureForView(pictureSourceOf(rec || null), { bg: st.bg, driving: st.mode === 'takeover' && st.mine && st.connected, shownWhy: st.pictureSource && st.pictureSource.why, clearedAt: st.bgClearedAt || 0, now: Date.now() });
+    // its read's S3: a view WATCHING a tab judges THAT tab — a polled watch is a hidden tab of its window; a live one is in front
+    const bgNow = st.watch ? (st.watch.mode === 'polling' ? { targetId: st.watch.targetId, state: 'hidden' } : null) : st.bg;
+    return pictureForView(pictureSourceOf(rec || null), { bg: bgNow, driving: st.mode === 'takeover' && st.mine && st.connected, shownWhy: st.pictureSource && st.pictureSource.why, clearedAt: st.bgClearedAt || 0, now: Date.now() });
   }
   /** The source in WORDS for the badge's tooltip: X ⇒ the window; X wanted but this window not told ⇒ said so; else the why. */
   function pictureWords() {
@@ -731,6 +733,9 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   }
   function onXTicket(m) {
     xp.asking = false;
+    // its read's M2: a ticket that lands after the view's picture left the window (a hidden verdict meanwhile, a hub follow, a late
+    // look) mounts NOTHING — the window would draw its front tab under the tab's own name again
+    if (!st.pictureSource || st.pictureSource.source !== 'x') { xp.ticket = null; return; }
     if (!m || !m.ok) {
       xp.failed = { why: (m && m.why) || 'refused', ds: st.pictureSource && st.pictureSource.displaySession, at: Date.now() }; xp.ticket = null; unmountX(); renderMode();
       // hotfix cure r1/r2: the window of the tab on show is WAITED FOR (said) or could not be told (said) — the page's own picture of
@@ -1555,7 +1560,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       const f = tabRowFold({ rows: st.tabRow.rows, widths, avail: tabRow.clientWidth - 12 - divPx, endPx: tabRowQuit.style.display === 'none' ? 0 : tabRowQuit.offsetWidth + 6, morePx: 44, watchedRef: st.watch ? st.watch.targetId : null }); // live-watch-polish G3: the watched chip never folds
       st.tabFolded = f.folded;
       for (const c of chips) c.style.display = f.folded.includes(c.dataset.target) ? 'none' : '';
-      for (const d of dividers) d.style.display = st.tabRow.rows.some((r) => r.group === d.dataset.group && !f.folded.includes(r.targetId)) ? '' : 'none';
+      for (const d of dividers) d.style.display = d.dataset.group === 'blanks' || st.tabRow.rows.some((r) => r.group === d.dataset.group && !f.folded.includes(r.targetId)) ? '' : 'none';   // the one-window row's «+N blank» stays said (its read's M1)
       tabRowMore.style.display = f.folded.length ? '' : 'none';
       tabRowMore.textContent = '▾+' + f.folded.length;
       tabRowMore.title = t('{n} more tab(s) of this browser', { n: f.folded.length });
@@ -2218,6 +2223,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     switch (m.type) {
       case 'hello':
         xp.ticket = null; xp.asking = false; xp.failed = null; unmountX(); // lane browser-x-in-window: the old socket's ticket died with it — asked again below
+        st.bg = null; st.bgClearedAt = 0; clearTimeout(st.bgSettleTimer); // its read's M3: the verdict was the old socket's — the hub replays a live one after hello
         st.mode = m.mode || 'watch'; st.holder = m.holder || null; st.viewers = m.viewers || 1; st.target = m.target || null;
         st.you = m.you || null; st.mine = !!m.mine; st.modeSince = Number(m.since) || 0;
         st.remotePlatform = typeof m.platform === 'string' ? m.platform : null; // lane live-input: the browser's OS (⌘ chords are translated for a non-Mac one)
@@ -2349,7 +2355,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
         if (m.refused) { const why = watchRefusalWords({ refused: m.refused, why: m.why, error: m.error }, t); showToast(t('Could not show that tab: {why}', { why }), { type: 'error' }); }
         if (m.targetId) st.watch = { targetId: String(m.targetId), mode: m.mode === 'polling' ? 'polling' : 'screencast', pending: !!m.pending, title: st.watch && st.watch.targetId === String(m.targetId) ? st.watch.title : '' };
         else { if (st.watch && m.ended) showToast(t('Back on the agent’s tab — the tab you watched is gone'), { duration: 3000 }); st.watch = null; }
-        renderTabRow(); renderWatchLine();
+        renderTabRow(); renderWatchLine(); renderPicture(); // its read's S3: a watch moves the picture's verdict
         break;
       }
       // lane browser-windows (U0b): the tab on show paints nothing (a background tab of its window) — or it does again
@@ -2403,7 +2409,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   }
   function switchTo(profileRef) {
     st.profileRef = profileRef || '';
-    st.error = null; st.target = null; // the next hello names the pane (MULTIVIEW: a strip tab may name a helper's browser or EPHEMERAL_REF)
+    st.error = null; st.target = null; st.bg = null; st.bgClearedAt = 0; clearTimeout(st.bgSettleTimer); // the next hello names the pane (its read's M3: no verdict carried to another browser) (MULTIVIEW: a strip tab may name a helper's browser or EPHEMERAL_REF)
     if (st.stopped || st.hollow) { st.stopped = false; st.stoppedHow = null; st.hollow = false; renderMode(); } // a new pane has no last frame to grey
     st.pkRelay = null; st.prRelay = null; st.pkPid = null; st.frames = 0; st.url = ''; st.tabs = []; st.tabsStale = tabsStaleStep(st.tabsStale, 'switch'); st.tabOwners = {}; st.tabTitles = {}; st.tabNames = {}; st.tabWindows = {}; st.tabLeases = []; st.tabActs.clear(); st.console = []; st.running = false; st.reconnects = 0;
     st.fit = null; st.fitSent = null; st.navAt = 0; st.lastFrameAt = 0; st.openAt = 0; st.picture = 'ok'; st.pictureStale = false; root.classList.remove('picture-stale'); renderFit(); setZoom(ZOOM_NONE); // lane S4: a new pane has its own size and picture
