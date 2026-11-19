@@ -56,7 +56,7 @@ console.log('— ① the line: per cell {l1, l2}');
 {
   const L = M.rowLine(P.personal, x(P.personal));
   ok(L.name.l1 === 'personal-life' && L.name.chips[0].key === 'browser' && L.name.chips[0].fixed && L.state.l1 === 'in use' && L.state.l2.text === '1 conversation uses it' && !L.state.l2.tone, 'personal-life: the name, the browser chip first (whole), "in use" + its ONE secondary', L);
-  ok(L.usage.l1 === BT.bytesText(1.2 * GB) && L.usage.l2.map((p) => p.text).join(' · ') === '88 action(s)' && L.primary && L.primary.id === 'browse' && L.primary.open && L.primary.label === 'Open your browsing window', 'its size on l1 (never cut), "88 action(s)" on l2 (no recordings word when none), the primary is "Open your browsing window" while he browses it', L.usage);
+  ok(L.usage.l1 === BT.bytesText(1.2 * GB) && L.usage.l2.map((p) => p.text).join(' · ') === '88 action(s)' && L.primary && L.primary.id === 'browse' && L.primary.open && L.primary.label === 'Open your browsing window', 'its size on l1 (never cut), "88 action(s)" on l2 (no recordings word when none), the primary is "Open your browsing window" while the person browses it', L.usage);
   const Lm = M.rowLine(P.market, x(P.market));
   ok(Lm.name.chips.map((c) => c.key).join(',') === 'browser,launch-host' && Lm.state.l2.text === 'last used 12 h ago' && Lm.usage.l2.map((p) => p.text).join(' · ') === '13 action(s) · 2 recording(s)' && Lm.primary.label === 'Browse yourself', 'the 40-character name: chips browser · its machine; "last used 12 h ago"; "13 action(s) · 2 recording(s)"; Browse yourself', Lm);
   const Ls = M.rowLine(P.sales, x(P.sales, { stuck: STUCK }));

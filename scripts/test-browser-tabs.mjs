@@ -25,7 +25,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import { createRequire } from 'node:module';
-import { scratch, deadPort } from './scratch.mjs';
+import { scratch, deadPort, anchored } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { judgeInChild, LINEAR_BOUND } from './work-meter.mjs';
 const DEAD_CDP = await deadPort(); // the fake's cdp-url: a port the kernel just released, never a fixed one (§81)
@@ -838,18 +838,17 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
     };
     const RUNANCH = ' || !!w.thawing || verbRunningOn(profileId), frozenAt:';
     const ENDANCH = '{ if (!browserKey) return; if (profileId && watches.get(String(profileId))) watches.get(String(profileId)).lastVerbAt = now();';
-    if (!dsrc.includes(RUNANCH)) ok(false, 'the anchor of the control «idle paint: a running verb is busy» is not in the source (src/server/browser-dialogs.js)');
-    if (!dsrc.includes(ENDANCH)) ok(false, 'the anchor of the control «idle paint: the clock restarts at a verb\'s end» is not in the source (src/server/browser-dialogs.js)');
-    const DDr = dsrc.includes(RUNANCH) ? M.load('src/server/browser-dialogs.js', dsrc.replace(RUNANCH, ' || !!w.thawing, frozenAt:'), 'ip-release-busy') : null; // stale-pins: kept — the release's busy, planted back as this control's mutant
-    const DDe = dsrc.includes(ENDANCH) ? M.load('src/server/browser-dialogs.js', dsrc.replace(ENDANCH, '{ if (!browserKey) return;'), 'ip-no-end-stamp') : null;
-    const [ip, ipRel, ipEnd] = await Promise.all([ipLeg(DD), DDr ? ipLeg(DDr) : null, DDe ? ipLeg(DDe) : null]);
+    // each control is built through scripts/scratch.mjs anchored() (B-0d3e): an anchor gone or spelled twice THROWS BY NAME
+    const DDr = M.load('src/server/browser-dialogs.js', anchored(dsrc, RUNANCH, ' || !!w.thawing, frozenAt:', 'idle paint: a running verb is busy'), 'ip-release-busy'); // stale-pins: kept — the release's busy, planted back as this control's mutant
+    const DDe = M.load('src/server/browser-dialogs.js', anchored(dsrc, ENDANCH, '{ if (!browserKey) return;', 'idle paint: the clock restarts at a verb\'s end'), 'ip-no-end-stamp');
+    const [ip, ipRel, ipEnd] = await Promise.all([ipLeg(DD), ipLeg(DDr), ipLeg(DDe)]);
     ok(ip.opened && ip.underVerb && ip.underVerb.act === null && ip.underVerb.why === 'busy',
       'the idle paint stop: a page with a verb STILL RUNNING on its browser (31 s after the verb started, its page loaded) is never frozen under it — the verdict reads «busy»', ip.underVerb);
     ok(ip.tenAfter && ip.tenAfter.act === null && ip.tenAfter.why === 'recent' && ip.pastEnd && ip.pastEnd.act === 'freeze',
       '…and the idle clock restarts when the verb ENDS: 10 s after its end it is «recent», the idle bound after its end it stops drawing (nobody watches, nobody drives)', { tenAfter: ip.tenAfter, pastEnd: ip.pastEnd });
     ok(ip.crashed && ip.crashed.act === 'freeze', 'a verb whose CLI crashed (a /resolve with no audit) holds the stop off no longer than the watch\'s own bound on it (5 min)', ip.crashed);
-    if (ipRel) ok(ipRel.underVerb && ipRel.underVerb.act === 'freeze', 'CONTROL (the release\'s busy: a running verb not counted): the page is FROZEN under the agent\'s own verb 31 s after it started — the reported two-minute busy tab — RED', ipRel.underVerb);
-    if (ipEnd) ok(ipEnd.tenAfter && ipEnd.tenAfter.act === 'freeze', 'CONTROL (the clock stamped only at a verb\'s start): 10 s after a long verb ENDED the page is frozen as if idle since its start — RED', ipEnd.tenAfter);
+    ok(ipRel.underVerb && ipRel.underVerb.act === 'freeze', 'CONTROL (the release\'s busy: a running verb not counted): the page is FROZEN under the agent\'s own verb 31 s after it started — the reported two-minute busy tab — RED', ipRel.underVerb);
+    ok(ipEnd.tenAfter && ipEnd.tenAfter.act === 'freeze', 'CONTROL (the clock stamped only at a verb\'s start): 10 s after a long verb ENDED the page is frozen as if idle since its start — RED', ipEnd.tenAfter);
   }
 }
 

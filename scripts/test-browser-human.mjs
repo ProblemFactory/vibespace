@@ -16,8 +16,8 @@
 //      profile an agent runs ⇒ no second launch, and the agent is NOT paused (its /resolve answers, no takeover event, no
 //      card, no notice — the owner's 2); the address row (open / back / forward / reload / tab) under HIS session only,
 //      `file:` / `chrome:` refused by name; Close ⇒ his tabs close under his session, the browser stays, the idle clock
-//      starts; Quit ⇒ the browser stops, he ends `stopped`; the keep (a fake clock): he launched ⇒ 12 h, the browser never
-//      idles out meanwhile, then `left`; he joined ⇒ 10 min; a narrowing of "Who can use it", Delete…, a backend switch
+//      starts; Quit ⇒ the browser stops, the person ends `stopped`; the keep (a fake clock): the person launched ⇒ 12 h, the browser never
+//      idles out meanwhile, then `left`; the person joined ⇒ 10 min; a narrowing of "Who can use it", Delete…, a backend switch
 //      (a proposal), a mediated profile (no grant for his key — a spy on the mediator), the ceiling, the refusals;
 //      CONTROL: a keeper copy whose idle clock reads the leases only stops the browser under his page;
 //   ②b the REAL bridge over a fake upstream: `?browse=` resolves his target; the window his press opened takes the
@@ -832,7 +832,7 @@ let work, solo, shop;
   const ld = leaseEvents.length;
   let de = null; try { await k.releaseAll(shop.id); } catch (e) { de = e; }
   ok(de && de.code === 'browsing_yourself' && /browsing “Shop” yourself/.test(de.message) && /Close/.test(de.message) && k.humanOf(shop.id) && k.browserOf(shop.id).state === 'ready' && k.leasesOn(shop.id).some((l) => l.browserKey === KB) && !leaseEvents.slice(ld).some((e) => e.kind === 'human-end' || e.kind === 'detach'),
-    'verify r1 (H4): Delete… (releaseAll) while he browses it himself is REFUSED BY NAME (`browsing_yourself`: "press Close … first") before anything is released — his page, the browser and the conversation\'s lease untouched', { code: de && de.code, msg: de && de.message });
+    'verify r1 (H4): Delete… (releaseAll) while the person browses it is REFUSED BY NAME (`browsing_yourself`: "press Close … first") before anything is released — the person\'s page, the browser and the conversation\'s lease untouched', { code: de && de.code, msg: de && de.message });
   // …his Close, then Delete… goes through (the conversation released, the browser stopped)
   await k.closeHuman(HP);
   const rel = await k.releaseAll(shop.id);
