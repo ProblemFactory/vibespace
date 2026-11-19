@@ -183,7 +183,11 @@ function mkWorld({ dir = null, healthy = true, ignoreWorkedFlag = false, arModul
     if (a) a.resetsAt = Date.now() - GRACE_MS - 1000;
     const before = fired.length;
     ar.tick(Date.now());
-    await new Promise((r) => setTimeout(r, 20));   // the pre-fire gate is async
+    // B-b4af: the pre-fire gate is async — waited for by its OWN settle (the in-flight flag attemptFire raises before the gate
+    // and drops once the continue is delivered or refused), a bounded COUNT of looks, never a fixed 20 ms: a slower gate read
+    // as «no fire», and a frozen clock (§4h) was restored under a gate still deciding — it then judged two minutes early and
+    // re-armed for the NEXT member's reset (the row's red-then-green on the runner)
+    for (let k = 0; k < 600 && session._arFiring; k++) await new Promise((r) => setTimeout(r, 5));
     return fired.length > before;
   };
   return w;
@@ -895,6 +899,40 @@ if (!probe) {
   ok('…never a re-arm for the NEXT member\'s reset at the fire (the incident: «re-armed at fire: … via <next member>/5h»)', !lines.some((l) => /re-armed at fire/.test(l)), lines.filter((l) => /re-armed/.test(l)).join(' | '));
 }
 {
+  // B-b4af PLACED: the gate HELD past the old 20 ms (the world's real beforeAutoResumeFire waits for the leg's word). CONTROL —
+  // the old shape (tick, 20 ms, read): it reads NO fire while the gate still decides, and its clock is the real one by the time
+  // the gate runs (the row's red). THE NEW tickFire waits for the gate's own settle through the same hold: the continue lands on
+  // the member whose window just landed. (No ms bound judges either: the hold ends on the leg's word.)
+  const plant = () => {
+    const w = mkWorld(), realNow = Date.now, RU = Math.floor(realNow() / 1000) + 120, T = (RU + 60) * 1000 + 300, far = RU + 100 * 60;
+    w.writeCache(w.LINK, { fetchedAt: realNow() - 60000, source: 'cli-usage', fiveHour: { utilization: 1, status: 'limited', resetsAt: far }, sevenDay: { utilization: 0.4, resetsAt: w.R7 } });
+    w.writeCache(w.FISH, { fetchedAt: realNow() - 60000, source: 'cli-usage', fiveHour: { utilization: 1, status: 'limited', resetsAt: far + 600 }, sevenDay: { utilization: 0.4, resetsAt: w.R7 } });
+    w.writeCache(w.SPARE, { fetchedAt: realNow() - 60000, source: 'cli-usage', fiveHour: { utilization: 0.99, resetsAt: RU }, sevenDay: { utilization: 0.36, resetsAt: w.R7 } });
+    w.ar.armIfEnabled(w.SID, w.session, (RU + 60) * 1000, '5h 1% < 10%');
+    let open = null; const held = new Promise((r) => { open = r; }); let entered = 0;
+    const real = w.eng.beforeAutoResumeFire;
+    w.eng.beforeAutoResumeFire = async (...a) => { entered++; await held; return real.apply(w.eng, a); };
+    return { w, realNow, T, open: () => open(), entered: () => entered };
+  };
+  const P0 = plant(), cap0 = capture();
+  Date.now = () => P0.T;
+  let oldDid = null, enteredOld = 0;
+  try {
+    const a = P0.w.ar._armed.get(P0.w.SID); if (a) a.resetsAt = Date.now() - GRACE_MS - 1000;
+    const before = P0.w.fired.length; P0.w.ar.tick(Date.now()); await new Promise((r) => setTimeout(r, 20)); oldDid = P0.w.fired.length > before; enteredOld = P0.entered();
+  } finally { Date.now = P0.realNow; }
+  P0.open();
+  for (let k = 0; k < 600 && P0.w.session._arFiring; k++) await new Promise((r) => setTimeout(r, 5));   // (the late gate settles — on the real clock now)
+  const lines0 = cap0.done();
+  ok('B-b4af CONTROL: with the gate held past its 20 ms, the OLD tick shape reads NO fire (the gate had been entered) — the leg\'s red in that window', oldDid === false && enteredOld >= 1, JSON.stringify({ oldDid, enteredOld, late: lines0.filter((l) => /re-armed/.test(l)).slice(0, 2) }));
+  const P1 = plant(), cap1 = capture();
+  Date.now = () => P1.T;
+  let did = false;
+  try { const p = P1.w.tickFire(); await new Promise((r) => setImmediate(r)); P1.open(); did = await p; } finally { Date.now = P1.realNow; }
+  const lines1 = cap1.done();
+  ok('B-b4af: the NEW tickFire waits for the gate\'s own settle through the same hold — the continue lands on the member whose window just landed, no re-arm', did === true && P1.entered() >= 1 && P1.w.linkNow() === P1.w.SPARE && P1.w.fired.length === 1 && !lines1.some((l) => /re-armed at fire/.test(l)), JSON.stringify({ did, entered: P1.entered(), link: P1.w.nameOf(P1.w.linkNow()), fired: P1.w.fired.length }));
+}
+{
   // THE GATE PROBES THE MEMBER IT IS MOVING TO (R4): the switch runs BEFORE the probe target is read
   const eng = read('src/server/usage-pool-engine.js');
   const body = (() => { const i = eng.indexOf('async function beforeAutoResumeFire(id, session) {'); return i < 0 ? '' : eng.slice(i, eng.indexOf('\n}\n', i)); })();
@@ -957,7 +995,7 @@ if (!probe) {
     const cap = capture();
     Date.now = () => T;
     let did = false;
-    try { for (const x of [w.SID, ...w.more.map((m) => m.sid)]) { const a = w.ar._armed.get(x); if (a) a.resetsAt = T - GRACE_MS - 1000; } const b = w.fired.length; w.ar.tick(T); await new Promise((r) => setTimeout(r, probeDelay ? probeDelay + 300 : 40)); did = w.fired.length > b; } finally { Date.now = realNow; }
+    try { for (const x of [w.SID, ...w.more.map((m) => m.sid)]) { const a = w.ar._armed.get(x); if (a) a.resetsAt = T - GRACE_MS - 1000; } const b = w.fired.length; w.ar.tick(T); const ids = [w.SID, ...w.more.map((m) => m.sid)]; for (let k = 0; k < 600 && ids.some((x) => (w.sessions.get(x) || {})._arFiring); k++) await new Promise((r) => setTimeout(r, 5)); did = w.fired.length > b; } finally { Date.now = realNow; }   // (B-b4af: each gate waited for by its own settle, never probeDelay + 300 / 40 ms)
     cap.done();
     const res = { did, link: w.nameOf(w.am.poolCurrentFor(w.P, w.SID)), probed: w.probed.slice(), firedOn: w.firedOn.slice(), lines: cap.lines ? cap.lines.slice() : [] };
     w.end();
