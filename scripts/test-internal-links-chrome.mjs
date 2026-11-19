@@ -103,16 +103,29 @@ const press = async (sel) => {
 };
 const shot = async (name) => { if (!SHOTS) return; fs.mkdirSync(SHOTS, { recursive: true }); const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, `${name}.png`), Buffer.from(r.data, 'base64')); console.log(`    · picture ${name}.png`); };
 const linkSel = (key) => `.chat-vs-link[data-vs-ref="claude:${key}"]`;
-let A_SID = null;
+let A_SID = null, A_SRV = null; // A's conversation id, and its SERVER id (its window's ChatView carries it from the attach's answer on)
 /** the talker's window (A — the links are in its chat) in front on the desktop on show: a window a press opened (C, D's history) lands ON TOP of it
  *  (the first claim, 2026-11-17: five presses «covered» by C's window) */
 const frontA = async () => {
   // a menu left open by an earlier step closes the person's way (Escape); A's window — by its conversation, whatever its desktop tag — is
   // REVEALED through the go-to door (goToWinId raises it; the second claim's try 1 found wm.focusWindow a no-op while the page still
-  // counted A as focused, C's window over A's chat)
-  await evalJs(`(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); const ws = [...app.sessions.keys()].filter((k) => app.wm.windows.get(k)?._openSpec?.backendSessionId === ${JSON.stringify(A_SID)}); const dm = app.desktopManager; const w = ws.find((k) => (app.wm.windows.get(k)._desktopId || dm.activeDesktopId) === dm.activeDesktopId) || ws[0]; if (w) app.goToWinId(w); return !!w; })()`);
+  // counted A as focused, C's window over A's chat). A's window is found by EITHER key: its conversation id under
+  // `_openSpec.backendSessionId` — which a window attached by its server id carries only once the page's identity merge has filled it —
+  // or its SERVER id (the ChatView's sessionId, from the attach's answer). The box run at the candidate (2026-11-19 23:04Z): found by the
+  // first key only, the lookup came back EMPTY right after C's open, A was never raised and C — raised once, at its birth — lay over
+  // D's link for five seconds (the red control's «plant not armed» was the same empty lookup). Never silent: a raise by the server id
+  // alone, or no window at all, is said (once per state).
+  const r = await evalJs(`(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); const dm = app.desktopManager, ks = [...app.sessions.keys()];
+    const bySid = ks.filter((k) => app.wm.windows.get(k)?._openSpec?.backendSessionId === ${JSON.stringify(A_SID)}), bySrv = ks.filter((k) => app.sessions.get(k)?.sessionId === ${JSON.stringify(A_SRV)});
+    const ws = bySid.length ? bySid : bySrv; const w = ws.find((k) => (app.wm.windows.get(k)._desktopId || dm.activeDesktopId) === dm.activeDesktopId) || ws[0];
+    if (w) app.goToWinId(w); return { w: w || null, bySid: bySid.length, bySrv: bySrv.length, specSid: w ? (app.wm.windows.get(w)?._openSpec?.backendSessionId ?? null) : null }; })()`);
+  const note = !r || !r.w ? 'NO window of A under either key (its conversation id, its server id) — A is NOT raised'
+    : r.bySid ? '' : `A's window ${r.w} found by its SERVER id only — its _openSpec.backendSessionId is ${JSON.stringify(r.specSid)}, not A's conversation id (yet)`;
+  if (note !== frontNoted) { frontNoted = note; if (note) console.error(`  [frontA] ${note}`); }
   await sleep(400);
+  return r;
 };
+let frontNoted = '';
 /** the BASE's press on a link (kept for the red control below): A raised ONCE, a bounded wait for the link under its point, then the
  *  still door's press — never raising A again (the release's hosted red: C's window rose after the one raise and covered the link) */
 const pressLinkOnce = async (sel) => {
@@ -151,11 +164,17 @@ const pressLink = async (sel, { tries = 4 } = {}) => {
  *  frames: nothing it started can rise after the next leg's raise of A */
 const openDone = (sid, srv) => until(`(() => { const k = [...app.sessions.keys()].find((w) => app.wm.windows.get(w)?._openSpec?.backendSessionId === ${JSON.stringify(sid)}${srv ? ` || app.sessions.get(w)?.sessionId === ${JSON.stringify(srv)}` : ''}); const el = k && app.wm.windows.get(k)?.element; return !!el && !!el.querySelector('.chat-message-list') && new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(true)))); })()`, { timeout: 15000 });
 /** the red control's plant: ONE late raise of C's window, 450 ms after A's next raise (after frontA's 400 ms, before the press) — what the
- *  hosted runner did once on its own; armed through the go-to door, restored after it fires */
-const armLateRaise = (cSid, cSrv) => evalJs(`(() => { const find = (sid, srv) => [...app.sessions.keys()].find((k) => app.wm.windows.get(k)?._openSpec?.backendSessionId === sid || (srv && app.sessions.get(k)?.sessionId === srv));
-  const aWin = find(${JSON.stringify(A_SID)}), cWin = find(${JSON.stringify(cSid)}, ${JSON.stringify(cSrv)}); if (!aWin || !cWin) return null;
-  const prev = app.goToWinId; app.goToWinId = function (id) { const r = prev.call(app, id); if (id === aWin) { app.goToWinId = prev; setTimeout(() => prev.call(app, cWin), 450); } return r; };
-  return { aWin, cWin }; })()`);
+ *  hosted runner did once on its own; armed through the go-to door, restored after it fires. Each window found by EITHER key (its
+ *  conversation id, its server id — frontA's rule); → { armed: true, aWin, cWin, a, c } or { armed: false, a, c, wins } — a plant that
+ *  cannot arm says which window it did not find, with every session window's two keys */
+const armLateRaise = (cSid, cSrv) => evalJs(`(() => { const ks = [...app.sessions.keys()];
+  const by = (sid, srv) => { const b = ks.find((k) => app.wm.windows.get(k)?._openSpec?.backendSessionId === sid) || null, v = srv ? ks.find((k) => app.sessions.get(k)?.sessionId === srv) || null : null; return { win: b || v, bySid: !!b, bySrv: !!v }; };
+  const a = by(${JSON.stringify(A_SID)}, ${JSON.stringify(A_SRV)}), c = by(${JSON.stringify(cSid)}, ${JSON.stringify(cSrv || null)});
+  if (!a.win || !c.win) return { armed: false, a, c, wins: ks.map((k) => ({ k, sid: app.wm.windows.get(k)?._openSpec?.backendSessionId ?? null, srv: app.sessions.get(k)?.sessionId ?? null })) };
+  const aWin = a.win, cWin = c.win, prev = app.goToWinId; app.goToWinId = function (id) { const r = prev.call(app, id); if (id === aWin) { app.goToWinId = prev; setTimeout(() => prev.call(app, cWin), 450); } return r; };
+  return { armed: true, aWin, cWin, a, c }; })()`);
+const plantSaid = (pl) => pl && pl.armed ? `armed — A's window ${pl.aWin} (by ${pl.a.bySid ? 'its conversation id' : 'its server id'}), C's window ${pl.cWin} (by ${pl.c.bySid ? 'its conversation id' : 'its server id'})`
+  : `the plant did NOT arm — ${!pl ? 'nothing read' : [!pl.a.win && 'no window of A', !pl.c.win && 'no window of C'].filter(Boolean).join(' and ')} under either key`;
 const active = () => evalJs('app.desktopManager.activeDesktopId');
 const winsOf = (sid) => evalJs(`[...app.sessions.keys()].filter((w) => { const s = app.wm.windows.get(w)?._openSpec; return s && s.backendSessionId === ${JSON.stringify(sid)}; }).map((w) => ({ w, desk: app.wm.windows.get(w)._desktopId || null }))`);
 const toasts = () => evalJs(`[...document.querySelectorAll('.global-toast, .toast')].map((t) => t.textContent.trim())`);
@@ -181,7 +200,7 @@ try {
     return { sid: run && run.sid, srv: (frames0.find((m) => m && m.type === 'created' && m.reqId === reqId) || {}).sessionId };
   };
   const B = await create('Links B', 'b'), C = await create('Links C', 'c'), A = await create('Links A', 'a');
-  A_SID = A.sid;
+  A_SID = A.sid; A_SRV = A.srv;
   check('three live conversations through the real spawn path, each with its own id', !!(B.sid && C.sid && A.sid && B.srv && C.srv && A.srv) && new Set([B.sid, C.sid, A.sid]).size === 3, { B, C, A });
   const D1 = await active();
   const D2 = await evalJs(`(async () => { const id = app.desktopManager.createDesktop('Desktop 2'); return typeof id === 'string' ? id : (app.desktopManager.desktops.at(-1) || {}).id; })()`);
@@ -232,12 +251,16 @@ try {
   // and before the press. The BASE's press (A raised once, never again) is covered and fails, and what covers D's link is C's WINDOW
   // (named by its id and title, never «A's own list over its link» — the skeptic's risk ruled out); the new pressLink below, armed the
   // same way, raises A again and presses (the D leg itself)
-  const armed0 = await armLateRaise(C.sid, C.srv);
-  const oldPress = await pressLinkOnce(linkSel(SID_D));
-  const cover = await evalJs(COVERED_BY(linkSel(SID_D)));
-  check(`RED CONTROL: C's window raised late — the BASE's press on D's link is covered and fails (${oldPress}), and what covers it is C's window (${cover && cover.win ? `${cover.win} «${cover.title}»` : JSON.stringify(cover)})`, !!armed0 && oldPress === false && !!cover && cover.win === armed0.cWin && /Links C/.test(cover.title || ''), { armed0, oldPress, cover });
+  const plant0 = await armLateRaise(C.sid, C.srv);
+  check(`RED CONTROL's plant (a late raise of C's window): ${plantSaid(plant0)}`, !!(plant0 && plant0.armed), plant0);
+  if (plant0 && plant0.armed) {
+    const oldPress = await pressLinkOnce(linkSel(SID_D));
+    const cover = await evalJs(COVERED_BY(linkSel(SID_D)));
+    check(`RED CONTROL: C's window raised late — the BASE's press shape (A raised once, never again) on D's link is covered and fails (${oldPress}), and what covers it is C's window (${cover && cover.win ? `${cover.win} «${cover.title}»` : JSON.stringify(cover)})`, oldPress === false && !!cover && cover.win === plant0.cWin && /Links C/.test(cover.title || ''), { plant0, oldPress, cover });
+  }
   await evalJs(`document.querySelectorAll('.context-menu').forEach((m) => m.remove()); true`);
-  check('the late raise is armed again for the D leg below (the new press must meet it)', !!(await armLateRaise(C.sid, C.srv)));
+  const plant1 = await armLateRaise(C.sid, C.srv);
+  check(`the late raise of C is planted again for the D leg below (the new press must meet it): ${plantSaid(plant1)}`, !!(plant1 && plant1.armed), plant1);
   check('D (ended, no window): the press opens «在这里恢复» · «查看历史记录» at the link — nothing started', (await pressLink(linkSel(SID_D))) === true && JSON.stringify(await (async () => { for (let i = 0; i < 30; i++) { const l = await menuLabels(); if (l.length) return l; await sleep(100); } return menuLabels(); })()) === JSON.stringify(['在这里恢复', '查看历史记录']) && stubRuns().length === runs0,
     { menu: await menuLabels(), runs: stubRuns().length - runs0 });
   await shot('zh-press-ended-menu');
