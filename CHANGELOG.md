@@ -90,6 +90,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A pooled account whose subscription stopped now opens Manage Agents from For you, where its Re-check or its setting is.
 - Once Spending allows automatic turns, the Credits chip's tip in the usage popup says they still run while the account bills paid overage.
 - For you items filed before this update keep their earlier words, in Chinese and Japanese too; the new words and buttons come when an item is filed again.
+- The resume dialog's closing notice, the Integrations card's Test line and the hand-over refusal now carry their own button or link instead of a menu path.
 
 ### Fixed
 - On a busy machine, VibeSpace no longer freezes for up to half a minute at startup while it checks which agent programs are running.
@@ -133,6 +134,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A running Codex conversation's Agent steps in its Properties now show the plan it is working through; they were always empty.
 - An app or desktop install no longer says it ended without recording its exit while it is still running (seen on Ubuntu 26.04).
 - When an agent's new tab loses its window before it is ready, VibeSpace opens it in a new window of the agent's own; it used to ask the agent to run it again.
+- While a conversation waits for its folder's storage to come up, VibeSpace says what it is waiting for instead of «taking unusually long».
 - When a desktop app's saved login cannot be written to disk, the app is told it was not saved instead of being told it was.
 - An Unlock button pressed right after the page loads now always opens the vault; it no longer does nothing or asks for the password while already unlocked.
 - After a restart, Resume all no longer calls a folder gone when its machine or storage mount waits for the vault or is not up; it asks you to unlock first.
@@ -193,7 +195,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The storage access boxes no longer point below at a Connect button that sits above them.
 - Mounting a folder from an offline machine now says it is offline first, with its pairing command.
 - In a Claude chat, a second Rewind to here waits for the first one's answer, and a message sent in that first minute comes back to the box.
-- While a conversation waits for its folder's storage to come up, VibeSpace says what it is waiting for instead of «taking unusually long».
+- Messages waiting behind an agent's running turn are no longer lost when VibeSpace cannot read their record after a restart: it is not written over.
+- A quota reading another machine made for an account it holds is no longer labelled «own /usage panel»: the usage popup names the machine that read it.
+- When an agent program is not found on a paired machine, the dialog's button now opens that machine in Manage agents › Machines.
 
 ### Security
 - A cluster install can let only its ingress reach each user's VibeSpace (networkPolicy.ingress, off until tried on a test cluster).
