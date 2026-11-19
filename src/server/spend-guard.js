@@ -34,8 +34,10 @@
 // pool already asks, and our own ledger. scripts/test-vendor-whitelist.mjs
 // must stay unchanged by this module.
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const A = require('../spend-authorizer.js');
+const PI = require('../proc-identity.js');   // B-ef83: a pid is never an identity — the lock's holder is proven by its start tick
 
 function writeJsonAtomic(file, obj) {
   fs.writeFileSync(file + '.tmp', JSON.stringify(obj));
@@ -50,6 +52,25 @@ const LEDGER_ITEM = 'spend-ledger-unreadable';   // B-3b0f: the notice's identit
 /** a DECLARED human-visible string is a KEY (scripts/i18n-extract.mjs collects i18nKey(…) beside t(…)) — B-23c3's notice */
 const i18nKey = (str) => str;
 const RESET_ITEM = 'spend-ledger-reset';         // B-23c3: the record of turns nobody typed went (removed, or an older copy put back)
+// B-ef83: ONE HUB PROCESS KEEPS THE LEDGER. Two hub processes on one data folder (a restart whose old process is still ending, a
+// second server started by hand) each kept their own count from the same file — each allowed the caps in full, and each wrote its
+// own count over the other's. The keeper holds data/spend-budget.lock ({pid, host, ident: src/proc-identity.js identityOf, at}); a
+// process that meets a LIVE holder never writes the ledger and starts no unattended turn, by name ('ledger-held-elsewhere'), and
+// asks again until the lock is its own — then reads the record the other kept. A holder is live while proc-identity proves its
+// pid is still the process the lock recorded (a recycled pid, a reboot, a zombie: gone); a holder nothing can prove (another
+// machine on a shared folder, no /proc and no ps) is live while its heartbeat — the lock's mtime, touched every LOCK_BEAT_MS — is fresh.
+const LOCK_RETRY_MS = 5 * 1000;           // the holder is most often the previous hub, still ending: asked again this often
+const LOCK_BEAT_MS = 30 * 1000;           // the keeper's heartbeat (async, unref'd)
+const LOCK_STALE_MS = 3 * LOCK_BEAT_MS;   // a holder only its heartbeat can vouch for is gone past this silence
+const HELD_ITEM = 'spend-ledger-held';    // the For-you item while another process keeps the ledger (resolved when it is this one's)
+const heldLocks = new Map();   // lock file → the token of the guard that keeps it — removed at exit when it still holds that token (ONE listener)
+let exitHooked = false;
+function releaseAtExit(f, token) {
+  heldLocks.set(f, token);
+  if (exitHooked) return;
+  exitHooked = true;
+  process.on('exit', () => { for (const [x, tok] of heldLocks) { try { const h = JSON.parse(fs.readFileSync(x, 'utf-8')); if (h && h.token === tok) fs.unlinkSync(x); } catch { } } });
+}
 const WAIT_CAPS = Object.freeze({ 'hour-cap': 1, 'day-cap': 1, 'instance-cap': 1 });   // B-0a33 round 1: the caps waiting frames can hold             // the same inbox row login-expiry-watch files under
 // WHAT A NOTICE IS ABOUT DECIDES WHEN IT DIES (2.369.152, "SPEND NOTICES LIVED
 // FOREVER AS ACTIONS"): every inbox item this module files carries the end of
@@ -80,9 +101,90 @@ function noticeExpiry(about, now = Date.now()) {
  *        inbox is created further down the boot (TDZ otherwise).
  * @param deps.log                console.log
  */
-function create({ dataDir, serverSetting = () => undefined, identityOf = null, readCacheFor = null, credentialStateOf = null, getUserTodos = () => null, log = () => { }, schedule = (fn, ms) => { const t = setTimeout(fn, ms); if (t && t.unref) t.unref(); return t; }, unschedule = (t) => clearTimeout(t) , readLedgerSync = null, readLedgerAsync = null} = {}) {
+function create({ dataDir, serverSetting = () => undefined, identityOf = null, readCacheFor = null, credentialStateOf = null, getUserTodos = () => null, log = () => { }, schedule = (fn, ms) => { const t = setTimeout(fn, ms); if (t && t.unref) t.unref(); return t; }, unschedule = (t) => clearTimeout(t) , readLedgerSync = null, readLedgerAsync = null, lockSchedule = null, lockUnschedule = null } = {}) {
+  // B-ef83: the LOCK's own timers (its heartbeat and its retry), apart from the guard's — a suite that counts the guard's timers
+  // never meets them
+  const lsched = typeof lockSchedule === 'function' ? lockSchedule : (fn, ms) => { const t = setTimeout(fn, ms); if (t && t.unref) t.unref(); return t; };
+  const lunsched = typeof lockUnschedule === 'function' ? lockUnschedule : (t) => clearTimeout(t);
   const file = path.join(dataDir, 'spend-budget.json');
   const markerFile = path.join(dataDir, 'spend-budget.born.json');   // B-23c3: the ledger's birth and its last write, beside it
+  // B-ef83: THE LOCK FIRST — a process that does not keep the ledger never judges it, never writes it, starts no unattended turn
+  const lockFile = path.join(dataDir, 'spend-budget.lock');
+  let heldBy = null;          // {pid, host, since} while another live hub process keeps the ledger
+  let lockOurs = false, lockTimer = null, beatTimer = null, staleTaken = null;
+  // THIS guard's lock: a token of its own (two guards of one process, or two containers whose hubs are both pid 1 with one hostname,
+  // never take each other's lock for their own) and its pid space (a pid's identity proves a holder only inside the same one)
+  const myToken = require('crypto').randomBytes(9).toString('hex');
+  let myNs = null; try { myNs = fs.readlinkSync('/proc/self/ns/pid'); } catch { myNs = null; }
+  // A HEARTBEAT IS JUDGED BY THIS PROCESS'S CLOCK: a lock is silent when its mtime has not CHANGED for LOCK_STALE_MS of this clock
+  // (another machine's clock may be ahead or behind — an absolute mtime proves nothing across machines)
+  let seen = null;   // {text, mtime, since}
+  const silentFor = (text, mtime, now) => {
+    if (!seen || seen.text !== text || seen.mtime !== mtime) { seen = { text, mtime, since: now }; return false; }
+    return now - seen.since > LOCK_STALE_MS;
+  };
+  const holderLive = (h, text, mtime, now) => {
+    const silent = silentFor(text, mtime, now);
+    if (!h || typeof h !== 'object') return !silent;                 // content that does not read (a hand edit, an O_EXCL write in flight): live while it beats
+    if (h.token && h.token === myToken) return false;                // this guard's own
+    const pid = Number(h.pid);
+    if (!Number.isInteger(pid) || pid <= 0) return !silent;
+    // proc-identity proves a holder only in THIS pid space on THIS machine: the very process the lock recorded (true), gone /
+    // recycled / a zombie (false), unprovable (null). Another machine or another pid space: only its heartbeat can say it lives
+    const here = (!h.host || h.host === os.hostname()) && !!h.ns && !!myNs && h.ns === myNs;
+    if (!here) return !silent;
+    const alive = PI.aliveIdentity(h.ident && typeof h.ident === 'object' ? { ...h.ident, pid } : { pid });
+    if (alive === null) return !silent;
+    if (alive && pid === process.pid) return false;                  // this very process, another guard of it (its token differs): taken
+    return alive;
+  };
+  const takeLock = (now = Date.now()) => {
+    const mine = JSON.stringify({ pid: process.pid, host: os.hostname(), ns: myNs, token: myToken, ident: PI.identityOf(process.pid), at: now });
+    for (let i = 0; i < 3; i++) {
+      const tmp = `${lockFile}.${process.pid}-${myToken}-${i}.tmp`;
+      try {
+        fs.writeFileSync(tmp, mine, { mode: 0o644 });   // readable by every user of the folder: another user's process can see it is held
+        try { fs.linkSync(tmp, lockFile); return { took: true }; }   // created WHOLE
+        catch (le) {
+          if (!le || le.code === 'EEXIST') throw le;
+          // a folder with no hard links (EPERM / ENOTSUP / EXDEV): created exclusively and written — a reader meeting it half-written
+          // judges it by its heartbeat, never as gone
+          const fd = fs.openSync(lockFile, 'wx', 0o644);
+          try { fs.writeSync(fd, mine); } finally { fs.closeSync(fd); }
+          return { took: true };
+        } finally { try { fs.unlinkSync(tmp); } catch { } }
+      } catch (e) {
+        if (!e || e.code !== 'EEXIST') return { took: false, error: String((e && e.code) || 'lock failed') };
+        let text = null, mt = 0;
+        try { text = fs.readFileSync(lockFile, 'utf-8'); mt = fs.statSync(lockFile).mtimeMs; }
+        catch (e2) { if (e2 && e2.code === 'ENOENT') continue; return { took: false, holder: { unreadable: String(e2.code || 'unreadable') } }; }   // there and not readable: HELD, never stale
+        let h = null; try { h = JSON.parse(text); } catch { h = null; }
+        if (holderLive(h, text, mt, now)) return { took: false, holder: h || { torn: true } };
+        // STALE: set aside under a name of this guard's own and read back — the very lock judged is the one removed (a fresh lock
+        // another process made meanwhile is put back; if a third took the place meanwhile, the put-back fails and that fresh
+        // lock's own heartbeat finds it no longer names it), then taken over and said
+        const aside = `${lockFile}.stale-${process.pid}-${myToken}-${i}`;
+        try { fs.renameSync(lockFile, aside); } catch { continue; }
+        let got = null; try { got = fs.readFileSync(aside, 'utf-8'); } catch { }
+        if (got !== text) { try { fs.linkSync(aside, lockFile); } catch { } }
+        try { fs.unlinkSync(aside); } catch { }
+        if (got === text) { staleTaken = h || { torn: true }; seen = null; }
+      }
+    }
+    return { took: false, holder: { contended: true } };   // three rounds lost to other takers: held, asked again
+  };
+  const heldOf = (h, now) => ({ pid: Number(h && h.pid) || null, host: (h && h.host) ? String(h.host).slice(0, 120) : null, since: now });
+  {
+    const now0 = Date.now();
+    const lk = takeLock(now0);
+    if (lk.took) {
+      lockOurs = true; releaseAtExit(lockFile, myToken);
+      if (staleTaken) log(`[spend] data/spend-budget.lock named a process that is gone (pid ${staleTaken.pid || '?'}${staleTaken.host ? ' on ' + staleTaken.host : ''}) — this process keeps the ledger now`);
+    } else if (lk.holder) {
+      heldBy = heldOf(lk.holder, now0);
+      log(`[spend] data/spend-budget.json is kept by another VibeSpace process on this data folder (pid ${heldBy.pid || '?'}${heldBy.host ? ' on ' + heldBy.host : ''}) — this one never writes it and starts no turn nobody typed until the lock is its own (asked again every ${LOCK_RETRY_MS / 1000} s)`);
+    } else log(`[spend] data/spend-budget.lock could not be made (${lk.error}) — this process keeps the ledger without it`);
+  }
   let state = A.emptyBudget();
   let nudge = {};   // sessionKey -> {at, n, everSeenStatus} (the Stop nudge's PERSISTED cooldown)
   // B-3b0f: THE LEDGER FAILS CLOSED ON ITS OWN RECORD. A file that is there and cannot be read (torn JSON, a directory, a
@@ -133,6 +235,9 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
       if (raw.nudge && typeof raw.nudge === 'object') nudge = raw.nudge;
     }
   }
+  // B-ef83: a process that does not keep the ledger counts only what it notes MEANWHILE — the file is the keeper's; at the takeover it
+  // is read again and these stamps merged beside it (never the file twice)
+  if (heldBy) { state = A.emptyBudget(); nudge = {}; }
   // B-23c3: A FIRST START IS TOLD APART FROM A RECORD THAT WENT. ENOENT read as «nothing spent yet» made a first boot, an rm, a
   // cleanup script and a restore without the file look the same: the count of turns nobody typed went back to zero in silence. The
   // MARKER beside the ledger (data/spend-budget.born.json: {born, seq, resets, lastReset}) is written with every ledger write, and the
@@ -148,6 +253,10 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
   let resetWriteOwed = false;
   let noticeTimer = null, lastNoticeTry = 0;
   const iso = (ms) => (Number.isFinite(Number(ms)) && Math.abs(Number(ms)) < 8.64e15 ? new Date(Number(ms)).toISOString() : String(ms));
+  const markerOf = (m) => ({ born: Number(m.born) || null, seq: Math.max(0, Math.floor(Number(m.seq)) || 0), resets: Math.max(0, Math.floor(Number(m.resets)) || 0), lastReset: m.lastReset || null, noticeOwed: m.noticeOwed || null,
+    // B-ef83: `counted` null = the record counted no turn; ABSENT (undefined) = a marker with no count at all (written before this
+    // field, or by hand) — it proves no loss
+    counted: !('counted' in m) ? undefined : m.counted && Number(m.counted.newestAt) > 0 && Number(m.counted.until) > 0 ? { newestAt: Number(m.counted.newestAt), until: Number(m.counted.until) } : null });
   const readMarker = () => {
     let t; try { t = syncRead(markerFile); } catch (e) { return e && e.code === 'ENOENT' ? { missing: true } : { error: String((e && e.code) || 'read failed') }; }
     let m; try { m = JSON.parse(t); } catch { return { error: 'not JSON' }; }
@@ -173,10 +282,19 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
   // the notice is FILED when the store answers (at boot it does not: it is built later) — tried at each authorize (once a minute at
   // most), on a minute's timer, and kept in the marker (noticeOwed) so a restart before any of those files it at the next boot
   const fileResetNotice = (now = Date.now()) => {
-    if (!resetNotice) return;
+    if (!resetNotice || heldBy) return;   // B-ef83: only the keeper of the ledger speaks for it
     lastNoticeTry = now;
     const r = resetNotice;
-    if (!fileInbox(r.text, r.detail, 'high', null, r.i18n, null, RESET_ITEM)) return;
+    // B-ef83: THE NOTICE HAS AN END, as every spend notice: it dies with what it is about — the instant the last turn it lost stops
+    // counting in every window. A notice whose turns no longer count by the time the store can take it is not filed: it is untrue
+    const until = Number(r.until) || 0;
+    if (until && until <= now) {
+      log('[spend] the reset of the record of turns nobody typed is no longer said — the turns it lost no longer count in any window');
+      resetNotice = null;
+      if (marker && marker.noticeOwed) { marker = { ...marker, noticeOwed: null }; writeMarker(); }
+      return;
+    }
+    if (!fileInbox(r.text, r.detail, 'high', until || null, r.i18n, null, RESET_ITEM)) return;
     resetNotice = null;
     if (noticeTimer) { try { unschedule(noticeTimer); } catch { } noticeTimer = null; }
     if (marker && marker.noticeOwed) { marker = { ...marker, noticeOwed: null }; writeMarker(); }
@@ -187,7 +305,10 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
   };
   function ledgerReset(kind, facts = {}, now = Date.now()) {
     const prev = marker || {};
-    marker = { born: Number(prev.born) || now, seq: Math.max(seq, Number(prev.seq) || 0), resets: (Number(prev.resets) || 0) + 1, lastReset: { at: now, kind, ...facts }, noticeOwed: null };
+    const until = Number(prev.counted && prev.counted.until) || null;   // B-ef83: the last lost turn stops counting then — the notice's end
+    // B-ef83: what the record counts NOW (the loss taken: nothing, or the older copy's) — the record a crash before the ledger's
+    // write leaves beside a missing ledger proves no second loss, so no second notice
+    marker = { born: Number(prev.born) || now, seq: Math.max(seq, Number(prev.seq) || 0), resets: (Number(prev.resets) || 0) + 1, lastReset: { at: now, kind, ...facts }, noticeOwed: null, counted: A.countedOf(state, now) };
     seq = marker.seq;
     const n = marker.resets;
     log(kind === 'removed'
@@ -195,32 +316,61 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
       : kind === 'unnumbered'
         ? `[spend] data/spend-budget.json carries no write number (a VibeSpace before the marker wrote it, or a copy from before it was put back) — the turns nobody typed counted after it may not be in it; reset #${n} of this record, said in For you`
         : `[spend] data/spend-budget.json is an OLDER copy (write ${facts.fileSeq} of ${facts.lastSeq}) — the turns nobody typed counted after it are not in it; reset #${n} of this record, said in For you`);
-    resetNotice = noticeOf(kind === 'removed' ? 'removed' : 'older', n);
-    marker.noticeOwed = { kind: kind === 'removed' ? 'removed' : 'older', n, at: now };
+    resetNotice = { ...noticeOf(kind === 'removed' ? 'removed' : 'older', n), until };
+    marker.noticeOwed = { kind: kind === 'removed' ? 'removed' : 'older', n, at: now, until };
     resetWriteOwed = true;
     return marker;
   }
   // the record the ledger meets at load (and again when an unreadable ledger reads again): older, unnumbered, or as written
+  // B-ef83 (主开发's law 2026-11-19 19:20Z: A RESET NOTICE ONLY FOR A REAL LOSS): a write number below the marker's, or none, is
+  // not a loss by itself — an older build writes no number (a downgrade and back), a marker repaired by hand can name any. A loss
+  // is a turn that still counts which the marker recorded and the ledger does not hold (A.countLost) — whatever the numbers say:
+  // a ledger NEWER than its marker that lacks the marker's turns is a reset whose marker never landed (a crash between the boot's
+  // two writes), said once now; anything else is said in the journal only, and the ledger is numbered on
   const judgeAgainstMarker = (raw, now, facts = {}) => {
-    if (!raw || !marker || !(marker.seq > 0)) return false;
+    if (!raw || !marker) return false;
     const fileSeq = seqOf(raw);
-    if (fileSeq === null) { ledgerReset('unnumbered', facts, now); return true; }
-    if (fileSeq < marker.seq) { ledgerReset('older', { fileSeq, lastSeq: marker.seq, ...facts }, now); return true; }
+    if (A.countLost(marker.counted, raw.budget || raw, now)) {
+      if (fileSeq === null) ledgerReset('unnumbered', facts, now);
+      else if (fileSeq < marker.seq) ledgerReset('older', { fileSeq, lastSeq: marker.seq, ...facts }, now);
+      else ledgerReset('removed', { fileSeq, lastSeq: marker.seq, ...facts }, now);
+      return true;
+    }
+    if (fileSeq !== null && fileSeq >= marker.seq) return false;
+    const why = marker.counted === undefined ? 'its marker records no count to compare' : 'every turn nobody typed that still counts is in it';
+    log(fileSeq === null
+      ? `[spend] data/spend-budget.json carries no write number (an older VibeSpace wrote it, or a copy from before the marker) — ${why}: nothing is lost, it is numbered on`
+      : `[spend] data/spend-budget.json is write ${fileSeq} of ${marker.seq} — ${why}: nothing is lost, it is numbered on`);
+    seq = Math.max(seq, Number(marker.seq) || 0);
+    return false;
+  };
+  // the ledger GONE: a loss only when the marker recorded a turn that still counts (a crash between the boot's two writes leaves the
+  // marker's own record of the restarted count — nothing — beside a missing ledger)
+  const judgeGone = (facts, now) => {
+    if (marker && A.countLost(marker.counted, null, now)) { ledgerReset('removed', facts, now); return true; }
+    const why = !marker ? (facts.markerError ? `its marker cannot be read (${facts.markerError})` : 'no marker stands beside it') : marker.counted === undefined ? 'its marker records no count to compare' : 'its marker records no turn nobody typed that still counts';
+    log(`[spend] data/spend-budget.json was removed — the count starts over; ${why}: no turn that still counts is lost, so For you is not told`);
+    if (marker) seq = Math.max(seq, Number(marker.seq) || 0);
     return false;
   };
   {
     const mk = readMarker();   // read even while the ledger cannot be: its history must outlive B-3b0f's road
-    if (mk.mark) marker = { born: Number(mk.mark.born) || null, seq: Math.max(0, Math.floor(Number(mk.mark.seq)) || 0), resets: Math.max(0, Math.floor(Number(mk.mark.resets)) || 0), lastReset: mk.mark.lastReset || null, noticeOwed: mk.mark.noticeOwed || null };
-    if (mk.error) { markerUnreadable = mk.error; log(`[spend] data/spend-budget.born.json could not be read (${mk.error}) — it is held: not written until it reads again, never read as empty and written over (a removed ledger is still told by it being there)`); }
-    if (loaded.missing && (mk.mark || mk.error)) ledgerReset('removed', mk.error ? { markerError: mk.error } : {});
-    else if (loaded.raw) judgeAgainstMarker(loaded.raw, Date.now());
-    // a notice an earlier boot owed (the store never took it): owed still
-    if (!resetNotice && marker && marker.noticeOwed && marker.noticeOwed.kind) resetNotice = noticeOf(marker.noticeOwed.kind, Number(marker.noticeOwed.n) || marker.resets || 1);
+    if (mk.mark) marker = markerOf(mk.mark);
+    if (mk.error) { markerUnreadable = mk.error; log(`[spend] data/spend-budget.born.json could not be read (${mk.error}) — it is held: not written until it reads again, never read as empty and written over`); }
+    if (!heldBy) judgeLoaded(loaded, mk, Date.now());   // B-ef83: judged by the keeper only — at the takeover when another keeps it now
+  }
+  // the ledger as met (at boot, or at the takeover from another process) judged against its marker; an owed notice taken up
+  function judgeLoaded(ld, mk, now) {
+    if (ld.missing && mk.mark) judgeGone({}, now);
+    else if (ld.missing && mk.error) judgeGone({ markerError: mk.error }, now);
+    else if (ld.raw) judgeAgainstMarker(ld.raw, now);
+    // a notice an earlier boot owed (the store never took it): owed still, with its end
+    if (!resetNotice && marker && marker.noticeOwed && marker.noticeOwed.kind) resetNotice = { ...noticeOf(marker.noticeOwed.kind, Number(marker.noticeOwed.n) || marker.resets || 1), until: Number(marker.noticeOwed.until) || null };
   }
   /** B-3b0f: read an unreadable ledger again — ASYNC (the readers' round). → true when it reads again or is gone (the
    *  refusal ends; the ledger is written at once), false while it still cannot be read. */
   async function recheckLedger(now = Date.now()) {
-    if (!unreadable || readInFlight) return false;
+    if (!unreadable || readInFlight || heldBy) return false;   // B-ef83: only the keeper reads the record again
     let t;
     readInFlight = true;
     try { t = { text: await asyncRead(file) }; } catch (e) { t = readError(e); } finally { readInFlight = false; }
@@ -236,7 +386,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     if (r.raw) {
       log('[spend] data/spend-budget.json reads again — unattended turns are counted and allowed again');
       if (!judgeAgainstMarker(r.raw, now, { afterUnreadable: true })) seq = Math.max(seq, seqOf(r.raw) || 0);   // B-23c3: a repair from an older copy is said too
-    } else ledgerReset('removed', { afterUnreadable: true }, now);   // B-23c3: the owner's door (B-3b0f) — said and counted, never silent
+    } else judgeGone({ afterUnreadable: true }, now);   // B-23c3: the owner's door (B-3b0f) — said and counted when it lost a turn that counts
     resetWriteOwed = false;   // the recheck road writes at once below (persist)
     fileResetNotice(); armNoticeRetry();
     unreadable = null;
@@ -270,6 +420,10 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
   let lastHoldLog = 0;
   let timer = null;
   const writeNow = () => {
+    if (heldBy) {   // B-ef83: another process keeps the ledger — this one's count is not the record, and never written over it
+      if (!heldBy.saidWrite) { heldBy.saidWrite = true; log('[spend] data/spend-budget.json is not written by this process while another keeps it'); }
+      return;
+    }
     if (unreadable) {   // B-3b0f: never written over while it cannot be read — the empty count must not become the record
       if (!unreadable.saidWrite) { unreadable.saidWrite = true; log('[spend] data/spend-budget.json is not written while it cannot be read'); }
       return;
@@ -277,7 +431,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     try {
       seq += 1;
       writeJsonAtomic(file, { v: 1, seq, budget: state, nudge });
-      marker = { born: (marker && marker.born) || Date.now(), seq, resets: (marker && marker.resets) || 0, lastReset: (marker && marker.lastReset) || null, noticeOwed: (marker && marker.noticeOwed) || null };
+      marker = { born: (marker && marker.born) || Date.now(), seq, resets: (marker && marker.resets) || 0, lastReset: (marker && marker.lastReset) || null, noticeOwed: (marker && marker.noticeOwed) || null, counted: A.countedOf(state) };   // B-ef83: what this write counts
       writeMarker();   // B-23c3: after the ledger — a crash between leaves the ledger AHEAD of the marker, never behind
     }
     catch (e) { log('[spend] persist failed: ' + e.message); }
@@ -287,9 +441,9 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
 
   const limits = () => A.budgetLimits(serverSetting);
   // B-0a33 (2) × B-3b0f: while the ledger cannot be read no wait can be judged — '*' = every waiting frame is held
-  const overCapNow = (now) => (unreadable ? ['*'] : A.waitingOverCap(state, limits(), now));
+  const overCapNow = (now) => (heldBy ? [] : unreadable ? ['*'] : A.waitingOverCap(state, limits(), now));   // B-ef83: a process that does not keep the ledger judges no waiting frame (the keeper counted them) — none pulled
   const overagePolicy = () => (serverSetting('spend.allowOverageTurns') === true ? 'allow' : 'refuse');
-  const ledgerFact = () => (unreadable ? { unreadable: true, error: unreadable.error } : null);   // B-3b0f, handed to every layer (the batch too)
+  const ledgerFact = () => (heldBy ? { held: true, pid: heldBy.pid, host: heldBy.host } : unreadable ? { unreadable: true, error: unreadable.error } : null);   // B-3b0f / B-ef83, handed to every layer (the batch too)
 
   /** Retire the holds whose producer never came back. THE COUNT IS A CENSUS,
    *  not garbage collection: a hold that timed out is a site that authorized a
@@ -393,7 +547,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
       reason, identity, state, limits: limits(),
       overage: overageFor(key), overagePolicy: overagePolicy(),
       credential: credentialFor(key), spendControl: spendControlFor(key),
-      pending, ledger: unreadable ? { unreadable: true, error: unreadable.error } : null, now,
+      pending, ledger: ledgerFact(), now,
     });
     // AN "ALLOWED" ANSWER HOLDS ITS SLOT (r5). The caller carries `hold` back
     // to `note()` (it became a turn) or to `release()` (it did not); an answer
@@ -455,7 +609,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     const wait = promisedHere > 0 && behind.length ? behind[0] : null;
     // THE KEY IS THE PLACE (follow-up 2): the account, the cap, the conversation the frames wait behind — never the oldest frame
     // (a queue that drains one frame a turn would mint a new key, and a new notice, at every carry)
-    const inboxSig = wait ? `inbox|${key || '?'}|${v.why}|at|${wait.key || '?'}` : v.why === 'ledger-unreadable' ? 'inbox|*|ledger-unreadable' : `inbox|${key || '?'}|${v.why}`;   // B-3b0f: ONE notice for the instance, not one per account
+    const inboxSig = wait ? `inbox|${key || '?'}|${v.why}|at|${wait.key || '?'}` : v.why === 'ledger-unreadable' || v.why === 'ledger-held-elsewhere' ? `inbox|*|${v.why}` : `inbox|${key || '?'}|${v.why}`;   // B-3b0f: ONE notice for the instance, not one per account
     const lastInbox = Number(state.notices[inboxSig]) || 0;
     // THE SEAM WITH LAWS 2 + 3 (shape C — 主开发 2026-11-13 15:30Z): while a «messages waiting» For-you item stands for the
     // conversation these frames wait behind (src/server/wait-watch.js, the same key `<backend>:<cid>`), IT speaks: the spending
@@ -469,12 +623,13 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
       const filed = fileInbox(text,
         `Reason: ${reason}\nIdentity: ${identity ? identity.name : 'unknown'}\nRefusal: ${v.why}\n`
         + (v.why === 'ledger-unreadable' ? `The ledger data/spend-budget.json could not be read (${unreadable ? unreadable.error : '?'}): no count can be said, so none run until it reads again or is removed.\n\n`   // B-3b0f
+          : v.why === 'ledger-held-elsewhere' ? `Another VibeSpace process on this data folder keeps the ledger data/spend-budget.json (pid ${heldBy ? heldBy.pid : '?'}${heldBy && heldBy.host ? ' on ' + heldBy.host : ''}): this one counts none, so none run until that process ends (or data/spend-budget.lock is removed, if none runs).\n\n`   // B-ef83
           : `Unattended turns used: ${v.counts.hour}/${v.limits.perIdentityHour} this hour, ${v.counts.day}/${v.limits.perIdentityDay} today `
           + `(instance ${v.counts.instanceDay}/${v.limits.perInstanceDay}).\n\n`)
         + (wait ? `${promisedHere} of them are messages waiting behind running turns — in ${behind.slice(0, 3).map((b) => `«${b.name || '?'}»`).join(', ')}${behind.length > 3 ? ` and ${behind.length - 3} more` : ''}. They run when that turn ends, or when you stop it there.\n\n` : '')
         + 'These ceilings bound every turn VibeSpace starts without you — the auto-continue after a usage limit, the Stop bookkeeping nudge, '
         + `Background Work notifications and messages from other sessions. ${A.spendRowOf(v) ? `Adjust this one in Settings → Spending — vibespace://settings/${A.spendRowOf(v)} — or act on the account named above.` : 'Adjust them in Settings → Spending, or act on the account named above.'}`,   // lane setting-doors pick 1: the row, as its link
-        v.why === 'overage-in-use' || v.why === 'ledger-unreadable' ? 'high' : 'normal', noticeExpiry('refusal', now), A.refusalI18n(v, { sessionName: convName, behind }), wait && wait.key ? { key: wait.key } : null, v.why === 'ledger-unreadable' ? LEDGER_ITEM : null);   // B-3b0f: ONE item across restarts, resolved when the file reads again
+        v.why === 'overage-in-use' || v.why === 'ledger-unreadable' || v.why === 'ledger-held-elsewhere' ? 'high' : 'normal', noticeExpiry('refusal', now), A.refusalI18n(v, { sessionName: convName, behind }), wait && wait.key ? { key: wait.key } : null, v.why === 'ledger-unreadable' ? LEDGER_ITEM : v.why === 'ledger-held-elsewhere' ? HELD_ITEM : null);   // B-3b0f: ONE item across restarts, resolved when the file reads again
       if (filed) { state.notices[inboxSig] = now; persist(); }
     }
     return v;
@@ -591,7 +746,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     const r = A.noteUnattendedSpend(state, { identity, at: now, limits: limits(), reason, rid: reservation, carried: !!carried, drain: !!drain, ended: !!ended, behind, press });
     state = r.state;
     persist();   // round 4: a reservation and a conversion are as durable as any spent turn — the guard's own debounce, never a write inside the send call or the carry callback
-    if (r.warn) {
+    if (r.warn && !heldBy) {   // B-ef83: never a warning from a count that is not the record
       const text = A.noticeText(r.warn);
       log(`[spend] ${text}`);
       try { global.__vsEvent?.('spend-budget-notice', `${r.warn.scope}:${r.warn.pct}`); } catch { }
@@ -655,11 +810,73 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     persist();
   }
 
+  // B-ef83: the keeper's heartbeat (async, unref'd) — it also finds a lock that no longer names this process (taken by another
+  // after a long stall, or removed by hand) and acts on it
+  function armBeat() {
+    if (!lockOurs || beatTimer) return;
+    beatTimer = lsched(() => {
+      beatTimer = null;
+      fs.promises.readFile(lockFile, 'utf-8').then((t) => {
+        let h = null; try { h = JSON.parse(t); } catch { h = null; }
+        if (!h || h.token !== myToken) return lockLost(h);
+        const at = new Date(); return fs.promises.utimes(lockFile, at, at);
+      }).catch((e) => { if (e && e.code === 'ENOENT') return lockLost(null); }).finally(() => { if (lockOurs) armBeat(); });
+    }, LOCK_BEAT_MS);
+  }
+  function lockLost(h) {
+    lockOurs = false;
+    if (!h) {   // removed (or unreadable) while this process keeps the ledger: taken again — its record is still the record, never read again
+      const lk = takeLock();
+      if (lk.took) { lockOurs = true; log('[spend] data/spend-budget.lock was removed — this process, which keeps the ledger, made it again'); return; }
+      h = lk.holder || { contended: true };
+    }
+    heldBy = heldOf(h, Date.now());
+    // the record is the other's now: what this process notes from here on is its own delta (a write still pending is not written —
+    // at most half a second of stamps, which the other process's count does not hold)
+    state = A.emptyBudget(); nudge = {};
+    log(`[spend] data/spend-budget.lock names another VibeSpace process now (pid ${heldBy.pid || '?'}) — this one stops writing the ledger and starts no turn nobody typed until the lock is its own`);
+    armLockRetry();
+  }
+  function armLockRetry() {
+    if (!heldBy || lockTimer) return;
+    lockTimer = lsched(() => { lockTimer = null; lockAgain(); if (heldBy) armLockRetry(); }, LOCK_RETRY_MS);
+  }
+  /** B-ef83: ask for the lock again; taken ⇒ the record the other process kept IS the record: read again (beside the stamps made
+   *  here meanwhile), judged against its marker, written. → true when this process keeps the ledger now */
+  function lockAgain(now = Date.now()) {
+    if (lockOurs) return true;
+    staleTaken = null;
+    const lk = takeLock(now);
+    if (!lk.took) { if (lk.holder) heldBy = { ...heldOf(lk.holder, now), since: heldBy ? heldBy.since : now, saidWrite: heldBy ? heldBy.saidWrite : false }; return false; }
+    const was = heldBy;
+    heldBy = null; lockOurs = true; releaseAtExit(lockFile, myToken);
+    if (lockTimer) { try { lunsched(lockTimer); } catch { } lockTimer = null; }
+    log(`[spend] this process keeps data/spend-budget.json now${was ? ` (the process that kept it, pid ${was.pid || '?'}, ended)` : ''}${staleTaken ? ` — its lock named a process that is gone (pid ${staleTaken.pid || '?'})` : ''}: the record is read again, and turns nobody typed are counted and allowed`);
+    const ld = parseLedger(readText());
+    if (ld.error) { unreadable = { error: ld.error, since: now }; log(`[spend] data/spend-budget.json could not be read (${ld.error}) — unattended turns are refused until it reads again or is removed; it is not written over`); armRecheck(); }
+    else if (ld.raw) {
+      if (unreadable) { unreadable = null; if (recheckTimer) { try { unschedule(recheckTimer); } catch { } recheckTimer = null; } }   // it reads now
+      state = A.mergeBudget(A.pruneBudget(ld.raw.budget || ld.raw, now, A.LOAD_RETENTION), state);   // the file + the delta noted meanwhile
+      if (ld.raw.nudge && typeof ld.raw.nudge === 'object') nudge = { ...ld.raw.nudge, ...nudge };
+      seq = Math.max(seq, seqOf(ld.raw) || 0);
+    }
+    const mk = readMarker();
+    markerUnreadable = null;
+    if (mk.mark) marker = markerOf(mk.mark);
+    if (mk.error) markerUnreadable = mk.error;
+    judgeLoaded(ld, mk, now);
+    try { const ut = getUserTodos(); if (ut && typeof ut.idsWhere === 'function') for (const id of ut.idsWhere((i) => i && i.itemKey === HELD_ITEM && i.status === 'open')) ut.setStatus(id, 'done', 'agent'); } catch { }   // its notice is no longer true
+    armBeat();
+    if (!unreadable) flush();
+    fileResetNotice(); armNoticeRetry();
+    return true;
+  }
+  if (heldBy) armLockRetry(); else armBeat();
   armRecheck();   // B-3b0f, the readers' round: an unreadable ledger re-reads itself (async, unref'd, once a minute)
   if (resetWriteOwed) { resetWriteOwed = false; flush(); }   // B-23c3: the record a reset left is written at once — the next boot reads it whole
   fileResetNotice(); armNoticeRetry();
   return {
-    authorize, authorizeBatch, previewBatch, notePress, notePressEnd, pressesToday, renewHolds, note, release, recheckLedger, overageFor, spendControlFor, nudgeRec, noteNudge, flush,
+    authorize, authorizeBatch, previewBatch, notePress, notePressEnd, pressesToday, renewHolds, note, release, recheckLedger, lockAgain, overageFor, spendControlFor, nudgeRec, noteNudge, flush,
     reservationState: (rid) => A.reservationState(state, rid),   // lane queued-is-not-woke round 3: 'converted' | 'reserved' | null
     // B-0a33 round 1: queued-wakes ends the ones no live entry holds. B-0a33 (2): the answer also carries `overCap` (read
     // lazily) — the waiting reservations no cap holds now: server.js wires this ONE function into the ladder, so the
@@ -672,6 +889,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
       chargesUnhinted, holdsOpen: A.expirePending(pending, Date.now()).live.length, holdsExpired,
       ledgerUnreadable: unreadable ? { error: unreadable.error, since: unreadable.since } : null,   // B-3b0f
       ledgerResets: marker ? marker.resets : 0, ledgerLastReset: marker ? marker.lastReset : null, ledgerSeq: seq,   // B-23c3
+      ledgerHeldBy: heldBy ? { pid: heldBy.pid, host: heldBy.host, since: heldBy.since } : null,   // B-ef83
       // lane owner-press-attended: the presses the ceiling neither refused nor counted, by reason (the last 24 h)
       attended: A.producerCounts(A.pruneBudget(state, Date.now(), A.LOAD_RETENTION).attended),
     }),
@@ -691,4 +909,4 @@ function noteLimitsWritten(prev, next) {
   for (const fn of [...limitsListeners]) { try { fn(prev || null, next || null); } catch { } }
 }
 
-module.exports = { create, onLimitsWritten, noteLimitsWritten, REFUSE_LOG_MS, REFUSE_INBOX_MS, INBOX_KEY, NOTICE_TTL_MS, LEDGER_RECHECK_MS, noticeExpiry };
+module.exports = { create, onLimitsWritten, noteLimitsWritten, REFUSE_LOG_MS, REFUSE_INBOX_MS, INBOX_KEY, NOTICE_TTL_MS, LEDGER_RECHECK_MS, noticeExpiry, LOCK_RETRY_MS, LOCK_BEAT_MS, LOCK_STALE_MS, HELD_ITEM };

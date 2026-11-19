@@ -2008,7 +2008,7 @@ console.log('\n§3g B-23c3: a first start is silent; a removed ledger or an olde
     fs.rmSync(LF(d2, 'spend-budget.json'));
     const { anchored } = await import('./scratch.mjs');
     let gm = null, err = null;
-    try { gm = require(MUT.write('src/server/spend-guard.js', anchored(read('src/server/spend-guard.js'), "    if (loaded.missing && (mk.mark || mk.error)) ledgerReset('removed', mk.error ? { markerError: mk.error } : {});", "    if (false) ledgerReset('removed', {});", 'B-23c3: the marker never read'))); } catch (e) { err = e.message; }
+    try { gm = require(MUT.write('src/server/spend-guard.js', anchored(read('src/server/spend-guard.js'), "    if (ld.missing && mk.mark) judgeGone({}, now);", "    if (false) judgeGone({}, now);", 'B-23c3: the marker never read'))); } catch (e) { err = e.message; }
     ok('§3g CONTROL: a copy whose load never reads the marker (the patch is anchored, it hit)', !!gm && !err, err || '');
     if (gm) {
       const inbox = [], logs = []; const g = mk(gm, d2, inbox, logs);
@@ -2042,14 +2042,16 @@ console.log('\n§3g B-23c3: a first start is silent; a removed ledger or an olde
     ok('§3g a torn ledger REPAIRED FROM AN OLDER COPY: it reads again, and the older copy is SAID and COUNTED (the release\'s road was silent)',
       back === true && resets(inbox).length === 1 && /older copy/i.test(resets(inbox)[0].text) && g.snapshot().ledgerLastReset.kind === 'older' && logs.some((l) => /OLDER copy \(write 1 of 2\)/.test(l)), JSON.stringify([back, resets(inbox).map((x) => x.text), logs.slice(-3)]));
   }
-  // (7) A LEDGER WITH NO WRITE NUMBER while the marker has one (a VibeSpace before the marker wrote it, or a copy from before it): its own words
+  // (7) A LEDGER WITH NO WRITE NUMBER that LACKS a turn the marker counted (a copy from before the marker, put back): its own words.
+  //     B-ef83 (主开发 19:20Z: a reset notice only for a REAL loss): no number alone is no loss — §3h (2) holds the CURRENT one silent
   {
     const d5 = tmpdir('vs-spend-3g-unnumbered-');
     const g1 = mk(guardMod, d5, [], []); g1.note({ reason: 'auto-resume', identity: ID, now }); g1.flush();
     const L = JSON.parse(fs.readFileSync(LF(d5, 'spend-budget.json'), 'utf8')); delete L.seq;
+    g1.note({ reason: 'auto-resume', identity: ID, now: now + 1000 }); g1.flush();   // a turn the copy does not hold
     fs.writeFileSync(LF(d5, 'spend-budget.json'), JSON.stringify(L));
     const inbox = [], logs = []; const g = mk(guardMod, d5, inbox, logs);
-    ok('§3g a ledger with NO WRITE NUMBER under a numbered marker: said in its own words (no number to compare), counted, the notice filed',
+    ok('§3g a ledger with NO WRITE NUMBER that lacks a turn its marker counted: said in its own words, counted, the notice filed',
       resets(inbox).length === 1 && g.snapshot().ledgerLastReset.kind === 'unnumbered' && logs.some((l) => /carries no write number/.test(l)), JSON.stringify(logs));
   }
   // (8) AN UNREADABLE MARKER beside a readable ledger: said at load and HELD (the store-read law) — never set aside, never read as empty and written over
@@ -2078,6 +2080,230 @@ console.log('\n§3g B-23c3: a first start is silent; a removed ledger or an olde
     ok('§3g a reset whose notice the store could not take (no store at boot): OWED in the marker, and the next boot files it',
       gNo.snapshot().ledgerResets === 1 && owed && owed.kind === 'removed' && owed.n === 1 && resets(inbox).length === 1 && resets(inbox)[0].i18n.detail[0].params.n === 1
         && !JSON.parse(fs.readFileSync(LF(d7, 'spend-budget.born.json'), 'utf8')).noticeOwed, JSON.stringify([owed, resets(inbox).length]));
+  }
+}
+
+// ── §3h B-ef83: ONE HUB PROCESS KEEPS THE LEDGER — and A RESET NOTICE ONLY FOR A REAL LOSS ──────────
+// Two hub processes on one data folder each kept their own count from the same file (each allowed the caps in full, each wrote over
+// the other's). The keeper holds data/spend-budget.lock; a LIVE holder (its pid answers with the identity it wrote) makes this process
+// refuse every unattended turn by name and never write the ledger; a gone one is taken over, said. With it, 主开发's law (19:20Z): a
+// reset is said only when a turn that still counts was lost — never for a crash between the boot's two writes, a downgrade to an
+// older build and back, or a marker repaired by hand — and its notice ENDS when the last lost turn stops counting.
+console.log('\n§3h B-ef83: one hub process keeps the ledger; a reset notice only for a real loss, and it ends');
+{
+  const LF = path.join;
+  const ID = { key: 'sub-a', name: 'A' };
+  const cp = require('node:child_process');
+  const kids = [];
+  // a live process of this suite's own: it ends when the suite's pipe to it closes (never an orphan when the suite is killed)
+  const liveKid = () => { const c = cp.spawn(process.execPath, ['-e', "process.stdin.on('end', () => process.exit(0)); process.stdin.resume(); setInterval(() => {}, 1e6)"], { stdio: ['pipe', 'ignore', 'ignore'] }); kids.push(c); return c; };
+  const ended = (c) => new Promise((res) => { if (c.exitCode !== null || c.signalCode) return res(); c.once('exit', () => res()); try { c.stdin.end(); } catch { } c.kill('SIGTERM'); });
+  const PI = require(path.join(REPO, 'src/proc-identity.js'));
+  const NS = (() => { try { return fs.readlinkSync('/proc/self/ns/pid'); } catch { return null; } })();
+  const store = (inbox) => ({ add: (key, item) => { const it = { key, id: 'ut-' + (inbox.length + 1), status: 'open', ...item }; inbox.push(it); return { id: it.id }; }, idsWhere: (f) => inbox.filter((i) => f(i)).map((i) => i.id), setStatus: (id, st) => { const i = inbox.find((x) => x.id === id); if (i) i.status = st; } });
+  // no timers unless a leg asks for them (a guard's heartbeat and retries are a leg's own business)
+  const mk = (mod, dir, inbox, logs, extra = {}) => mod.create({ dataDir: dir, serverSetting: () => undefined, getUserTodos: () => store(inbox), log: (...a) => logs.push(a.join(' ')), schedule: () => 0, unschedule: () => { }, lockSchedule: () => 0, lockUnschedule: () => { }, ...extra });
+  const lockOf = (pid, ident, { host = os.hostname(), ns = NS } = {}) => JSON.stringify({ pid, host, ns, ident, at: Date.now() });
+  const resets = (inbox) => inbox.filter((i) => i.itemKey === 'spend-ledger-reset');
+  const said = (logs) => logs.some((l) => /reset #\d+ of this record/.test(l));
+  const now = Date.now();
+  const { anchored } = await import('./scratch.mjs');
+  const SG = read('src/server/spend-guard.js');
+  const copyOf = (from, to, why) => { try { return require(MUT.write('src/server/spend-guard.js', anchored(SG, from, to, why))); } catch (e) { return { err: e.message }; } };
+  try {
+    // (a) A LIVE HOLDER: another process's lock (its pid answers with the identity it wrote) — refused by name, never written
+    const dA = tmpdir('vs-spend-3h-held-');
+    { const g0 = mk(guardMod, dA, [], []); g0.note({ reason: 'auto-resume', identity: ID, now }); g0.flush(); }
+    const kid = liveKid();
+    fs.writeFileSync(LF(dA, 'spend-budget.lock'), lockOf(kid.pid, PI.identityOf(kid.pid)));
+    const before = fs.readFileSync(LF(dA, 'spend-budget.json'), 'utf8'), markerBefore = fs.readFileSync(LF(dA, 'spend-budget.born.json'), 'utf8');
+    const inboxA = [], logsA = [], timers = [];
+    const gA = mk(guardMod, dA, inboxA, logsA, { lockSchedule: (fn, ms) => { timers.push({ fn, ms }); return timers.length; } });
+    const vA = gA.authorize({ reason: 'auto-resume', identity: ID, now: now + 1000 });
+    gA.note({ reason: 'notify', identity: ID, now: now + 1100 }); gA.flush();
+    ok('§3h a LIVE HOLDER of data/spend-budget.lock (another process, its identity answering): every unattended turn is refused BY NAME (ledger-held-elsewhere), said once in For you (urgent, its own item) and the journal',
+      vA.ok === false && vA.why === 'ledger-held-elsewhere' && inboxA.filter((i) => i.itemKey === guardMod.HELD_ITEM).length === 1 && inboxA.find((i) => i.itemKey === guardMod.HELD_ITEM).urgency === 'high'
+        && gA.snapshot().ledgerHeldBy && gA.snapshot().ledgerHeldBy.pid === kid.pid && logsA.some((l) => /kept by another VibeSpace process on this data folder \(pid \d+/.test(l)), JSON.stringify([vA.why, gA.snapshot().ledgerHeldBy, logsA.slice(0, 3)]));
+    ok('§3h …this process NEVER writes the ledger nor its marker while held (their bytes after a note and a flush are the keeper\'s), and it judges no waiting frame (the keeper counted them — none pulled)',
+      fs.readFileSync(LF(dA, 'spend-budget.json'), 'utf8') === before && fs.readFileSync(LF(dA, 'spend-budget.born.json'), 'utf8') === markerBefore && gA.waitingOverCap().length === 0
+        && logsA.some((l) => /not written by this process while another keeps it/.test(l)));
+    ok('§3h …and it asks again on its own (a timer of LOCK_RETRY_MS)', timers.some((t) => t.ms === guardMod.LOCK_RETRY_MS), JSON.stringify(timers.map((t) => t.ms)));
+    // (b) THE TAKEOVER: the keeper wrote its last record and ended — the lock is this process's, and the record the other kept IS the record
+    // the keeper's LAST record: one more turn it counted (a stamp as it writes them, half a second after the first)
+    const theirs = JSON.parse(before);
+    const one = (list) => (Array.isArray(list) && list.length ? [...list, typeof list[0] === 'number' ? now + 500 : { ...list[0], at: now + 500 }] : list);
+    const kept = { ...theirs.budget, instance: one(theirs.budget.instance), identities: { ...theirs.budget.identities, [ID.key]: one(theirs.budget.identities[ID.key]) } };
+    fs.writeFileSync(LF(dA, 'spend-budget.json'), JSON.stringify({ ...theirs, seq: (theirs.seq || 1) + 1, budget: kept }));
+    await ended(kid);
+    const tookA = gA.lockAgain(now + 2000);
+    const vA2 = gA.authorize({ reason: 'auto-resume', identity: ID, now: now + 2100 });
+    const lockNow = JSON.parse(fs.readFileSync(LF(dA, 'spend-budget.lock'), 'utf8'));
+    ok('§3h THE KEEPER ENDED: the lock is taken over (it names this process), the held item resolved, unattended turns allowed again — counted from the keeper\'s record PLUS the one noted meanwhile, never the file twice (3)',
+      tookA === true && lockNow.pid === process.pid && gA.snapshot().ledgerHeldBy === null && vA2.ok === true && (vA2.counts ? vA2.counts.day === 3 : false)
+        && inboxA.find((i) => i.itemKey === guardMod.HELD_ITEM).status === 'done' && logsA.some((l) => /keeps data\/spend-budget\.json now \(the process that kept it, pid \d+, ended\)/.test(l)),
+      JSON.stringify([tookA, lockNow.pid, vA2.ok, vA2.counts, logsA.slice(-2)]));
+    // (c) A RECYCLED NUMBER: a live pid whose identity is NOT the one the lock wrote — the lock is a dead one's: taken over at once, said
+    const dC = tmpdir('vs-spend-3h-recycled-');
+    const kidC = liveKid();
+    const idC = PI.identityOf(kidC.pid);
+    fs.writeFileSync(LF(dC, 'spend-budget.lock'), lockOf(kidC.pid, idC ? { ...idC, starttime: Number(idC.starttime) + 12345 } : null));
+    const logsC = []; const gC = mk(guardMod, dC, [], logsC);
+    ok('§3h a lock naming a LIVE pid with ANOTHER identity (the number given to another process): taken over at once, said — never a block for good',
+      gC.snapshot().ledgerHeldBy === null && JSON.parse(fs.readFileSync(LF(dC, 'spend-budget.lock'), 'utf8')).pid === process.pid && gC.authorize({ reason: 'auto-resume', identity: ID, now }).ok === true
+        && logsC.some((l) => /named a process that is gone \(pid \d+/.test(l)), JSON.stringify(logsC.slice(0, 2)));
+    // (d) A DEAD HOLDER (its process ended without its exit): taken over at once
+    const dD = tmpdir('vs-spend-3h-dead-');
+    const kidD = liveKid();
+    const identD = PI.identityOf(kidD.pid); await ended(kidD);
+    fs.writeFileSync(LF(dD, 'spend-budget.lock'), lockOf(kidD.pid, identD));
+    const gD = mk(guardMod, dD, [], []);
+    ok('§3h a lock whose process is GONE: taken over at once', gD.snapshot().ledgerHeldBy === null && JSON.parse(fs.readFileSync(LF(dD, 'spend-budget.lock'), 'utf8')).pid === process.pid);
+    // (e) ANOTHER MACHINE on a shared folder: live while its heartbeat (the lock's mtime) is fresh; gone past LOCK_STALE_MS of silence
+    const dE = tmpdir('vs-spend-3h-host-');
+    fs.writeFileSync(LF(dE, 'spend-budget.lock'), lockOf(4242, null, { host: 'another-machine.example', ns: 'pid:[1]' }));
+    const t0E = Date.now();
+    const gE = mk(guardMod, dE, [], []);
+    const heldE = !!gE.snapshot().ledgerHeldBy;
+    const soonE = gE.lockAgain(t0E + 1000);   // its mtime unchanged, but not for long: held
+    const beatAt = new Date(Date.now() - 3600e3); fs.utimesSync(LF(dE, 'spend-budget.lock'), beatAt, beatAt);   // it BEATS (its mtime changes — whatever its clock says)
+    const beatE = gE.lockAgain(t0E + guardMod.LOCK_STALE_MS + 5000);
+    const tookE = gE.lockAgain(t0E + 2 * guardMod.LOCK_STALE_MS + 10000);   // silent past LOCK_STALE_MS of THIS clock since its last beat
+    ok('§3h a lock of ANOTHER MACHINE is judged by its heartbeat on THIS clock: held while its mtime changes (an old timestamp from a slow clock still beats), taken over once it has not changed for LOCK_STALE_MS',
+      heldE && soonE === false && beatE === false && tookE === true && gE.snapshot().ledgerHeldBy === null, JSON.stringify([heldE, soonE, beatE, tookE]));
+    // (f) THE KEEPER'S OWN HEARTBEAT finds a lock that no longer names it — it stops writing at once
+    const dF = tmpdir('vs-spend-3h-lost-');
+    const tF = [];
+    const gF = mk(guardMod, dF, [], [], { lockSchedule: (fn, ms) => { tF.push({ fn, ms }); return tF.length; } });
+    const kidF = liveKid();
+    fs.writeFileSync(LF(dF, 'spend-budget.lock'), lockOf(kidF.pid, PI.identityOf(kidF.pid)));
+    const beatF = tF.find((t) => t.ms === guardMod.LOCK_BEAT_MS);
+    if (beatF) beatF.fn();
+    for (let i = 0; i < 200 && !gF.snapshot().ledgerHeldBy; i++) await new Promise((r) => setTimeout(r, 25));
+    ok('§3h the keeper\'s HEARTBEAT finds the lock naming another live process: it stops keeping the ledger (refused by name) and asks again',
+      !!beatF && !!gF.snapshot().ledgerHeldBy && gF.authorize({ reason: 'auto-resume', identity: ID, now }).why === 'ledger-held-elsewhere', JSON.stringify([!!beatF, gF.snapshot().ledgerHeldBy]));
+    // (g) RED: a copy that never sees a live holder (the release: no lock) — the second process counts its own and writes over the keeper's
+    const red = copyOf("    if (holderLive(h, text, mt, now)) return { took: false, holder: h || { torn: true } };", "    if (false) return { took: false, holder: h || { torn: true } };", 'B-ef83: no live holder seen');
+    ok('§3h CONTROL: the anchored copy (no live holder seen) is built', !red.err, red.err || '');
+    if (!red.err) {
+      const dG = tmpdir('vs-spend-3h-red-');
+      { const g0 = mk(guardMod, dG, [], []); g0.note({ reason: 'auto-resume', identity: ID, now }); g0.flush(); }
+      const kidG = liveKid();
+      fs.writeFileSync(LF(dG, 'spend-budget.lock'), lockOf(kidG.pid, PI.identityOf(kidG.pid)));
+      const b4 = fs.readFileSync(LF(dG, 'spend-budget.json'), 'utf8');
+      const gG = mk(red, dG, [], []);
+      const vG = gG.authorize({ reason: 'auto-resume', identity: ID, now: now + 1000 }); gG.note({ reason: 'auto-resume', identity: ID, now: now + 1000 }); gG.flush();
+      ok('§3h CONTROL: that copy allows the turn beside a live keeper and writes over its record (RED: two counts on one file)', vG.ok === true && fs.readFileSync(LF(dG, 'spend-budget.json'), 'utf8') !== b4);
+    }
+    // (h) THE EXIT releases the lock: a real hub-like process that keeps a ledger and exits leaves no lock behind
+    const dH = tmpdir('vs-spend-3h-exit-');
+    cp.execFileSync(process.execPath, ['-e', `const g = require(${JSON.stringify(path.join(REPO, 'src/server/spend-guard.js'))}).create({ dataDir: ${JSON.stringify(dH)} }); if (!require('fs').existsSync(${JSON.stringify(LF(dH, 'spend-budget.lock'))})) process.exit(3); process.exit(0);`], { stdio: 'ignore', timeout: 20000 });
+    ok('§3h a process that kept the ledger and EXITED leaves no lock (released at its exit)', !fs.existsSync(LF(dH, 'spend-budget.lock')));
+    // (i) A LOCK THAT IS THERE AND CANNOT BE READ (another user's, mode 000): HELD — never judged gone
+    if (typeof process.getuid === 'function' && process.getuid() === 0) console.log('  · §3h (i) SKIP: root reads a mode-000 file');
+    else {
+      const dI = tmpdir('vs-spend-3h-unreadable-');
+      fs.writeFileSync(LF(dI, 'spend-budget.lock'), lockOf(4243, null)); fs.chmodSync(LF(dI, 'spend-budget.lock'), 0o000);
+      const gI = mk(guardMod, dI, [], []);
+      const heldI = gI.snapshot().ledgerHeldBy, vI = gI.authorize({ reason: 'auto-resume', identity: ID, now });
+      fs.chmodSync(LF(dI, 'spend-budget.lock'), 0o644);
+      ok('§3h a lock that is there and CANNOT BE READ (another user\'s): held — refused by name, never set aside', !!heldI && vI.why === 'ledger-held-elsewhere' && fs.existsSync(LF(dI, 'spend-budget.lock')), JSON.stringify([heldI, vI.why]));
+    }
+    // (l) THE LOCK REMOVED BY HAND while this process keeps the ledger: made again at the next heartbeat — its record is still the
+    // record, never read again (no stamp counted twice)
+    const dL = tmpdir('vs-spend-3h-removed-lock-');
+    const tL = [];
+    const gL = mk(guardMod, dL, [], [], { lockSchedule: (fn, ms) => { tL.push({ fn, ms }); return tL.length; } });
+    gL.note({ reason: 'auto-resume', identity: ID, now }); gL.flush();
+    fs.rmSync(LF(dL, 'spend-budget.lock'));
+    const beatL = tL.find((t) => t.ms === guardMod.LOCK_BEAT_MS);
+    if (beatL) beatL.fn();
+    for (let i = 0; i < 200 && !fs.existsSync(LF(dL, 'spend-budget.lock')); i++) await new Promise((r) => setTimeout(r, 25));
+    const vL = gL.authorize({ reason: 'auto-resume', identity: ID, now: now + 1000 });
+    ok('§3h the lock REMOVED BY HAND while this process keeps the ledger: made again at the heartbeat, the count unchanged (1, never the file merged twice)',
+      !!beatL && fs.existsSync(LF(dL, 'spend-budget.lock')) && JSON.parse(fs.readFileSync(LF(dL, 'spend-budget.lock'), 'utf8')).pid === process.pid && vL.ok === true && vL.counts && vL.counts.day === 1, JSON.stringify([!!beatL, vL.ok, vL.counts]));
+
+    // ── THE LAW: A RESET NOTICE ONLY FOR A REAL LOSS ──
+    // (1) A CRASH BETWEEN THE BOOT'S TWO WRITES, both orders. A: the marker (the reset said, the count restarted) landed, the
+    // ledger's at-once write did not — the next boot meets a missing ledger beside a marker that counts nothing: SILENT
+    const d1 = tmpdir('vs-spend-3h-crashA-');
+    { const g0 = mk(guardMod, d1, [], []); g0.note({ reason: 'auto-resume', identity: ID, now }); g0.flush(); }
+    const M0 = fs.readFileSync(LF(d1, 'spend-budget.born.json'), 'utf8');
+    fs.rmSync(LF(d1, 'spend-budget.json'));
+    const in1 = []; mk(guardMod, d1, in1, []);
+    ok('§3h (1) the real loss first: a removed ledger whose marker counted a turn that still counts — said once (reset #1)', resets(in1).length === 1);
+    const L1 = fs.readFileSync(LF(d1, 'spend-budget.json'), 'utf8');
+    fs.rmSync(LF(d1, 'spend-budget.json'));   // ← the crash: the reset's marker is on disk, the ledger's write never landed
+    const in1b = [], lg1b = []; const g1b = mk(guardMod, d1, in1b, lg1b);
+    ok('§3h (1) CRASH, order A (the marker landed, the ledger did not): the next boot says NOTHING — no second notice, still reset #1',
+      resets(in1b).length === 0 && !said(lg1b) && g1b.snapshot().ledgerResets === 1 && lg1b.some((l) => /was removed — the count starts over; its marker records no turn nobody typed that still counts/.test(l)), JSON.stringify(lg1b));
+    const redGone = copyOf("    if (marker && A.countLost(marker.counted, null, now)) { ledgerReset('removed', facts, now); return true; }", "    if (marker) { ledgerReset('removed', facts, now); return true; }", 'B-ef83: the release\'s rule (a marker beside no ledger = removed)');
+    if (!redGone.err) {
+      const d1r = tmpdir('vs-spend-3h-crashA-red-');
+      fs.writeFileSync(LF(d1r, 'spend-budget.born.json'), fs.readFileSync(LF(d1, 'spend-budget.born.json'), 'utf8'));
+      const in1r = []; mk(redGone, d1r, in1r, []);
+      ok('§3h (1) CONTROL: with the release\'s rule the same disk files a SECOND, false notice (RED)', resets(in1r).length === 1);
+    } else ok('§3h (1) CONTROL built', false, redGone.err);
+    // order B: the reset's ledger landed (the count restarted), its marker did not — the old marker counts a turn the ledger lacks:
+    // the loss the crash hid is said ONCE, now
+    const d1B = tmpdir('vs-spend-3h-crashB-');
+    fs.writeFileSync(LF(d1B, 'spend-budget.born.json'), M0);   // the marker from before the reset
+    fs.writeFileSync(LF(d1B, 'spend-budget.json'), L1);       // the reset's ledger (the restarted count)
+    const in1B = [], lg1B = []; const g1B = mk(guardMod, d1B, in1B, lg1B);
+    ok('§3h (1) CRASH, order B (the ledger landed, the marker did not): the loss the crash hid is said ONCE now (reset #1, removed) — never missed',
+      resets(in1B).length === 1 && g1B.snapshot().ledgerResets === 1 && g1B.snapshot().ledgerLastReset.kind === 'removed', JSON.stringify([resets(in1B).length, g1B.snapshot().ledgerLastReset, lg1B.slice(-2)]));
+    // (2) A DOWNGRADE TO AN OLDER BUILD AND BACK: the older build writes no number (and never the marker), but its record is CURRENT —
+    // it holds every turn the marker counted and its own: SILENT, numbered on
+    const d2 = tmpdir('vs-spend-3h-downgrade-');
+    { const g0 = mk(guardMod, d2, [], []); g0.note({ reason: 'auto-resume', identity: ID, now }); g0.flush(); }
+    const M2 = fs.readFileSync(LF(d2, 'spend-budget.born.json'), 'utf8');
+    { const g0 = mk(guardMod, d2, [], []); g0.note({ reason: 'auto-resume', identity: ID, now: now + 1000 }); g0.flush(); }   // the older build's turn
+    const L2 = JSON.parse(fs.readFileSync(LF(d2, 'spend-budget.json'), 'utf8')); delete L2.seq;
+    fs.writeFileSync(LF(d2, 'spend-budget.json'), JSON.stringify(L2)); fs.writeFileSync(LF(d2, 'spend-budget.born.json'), M2);   // as the older build left them
+    const in2 = [], lg2 = []; const g2 = mk(guardMod, d2, in2, lg2);
+    g2.note({ reason: 'auto-resume', identity: ID, now: now + 2000 }); g2.flush();
+    ok('§3h (2) a DOWNGRADE and back (no write number, but every counted turn in it): SILENT — no notice, no reset; the journal says it, and it is numbered on',
+      resets(in2).length === 0 && !said(lg2) && g2.snapshot().ledgerResets === 0 && lg2.some((l) => /carries no write number .* every turn nobody typed that still counts is in it: nothing is lost/.test(l))
+        && JSON.parse(fs.readFileSync(LF(d2, 'spend-budget.json'), 'utf8')).seq > JSON.parse(M2).seq, JSON.stringify(lg2));
+    const redNum = copyOf("    if (A.countLost(marker.counted, raw.budget || raw, now)) {", "    if (fileSeq === null || fileSeq < marker.seq || A.countLost(marker.counted, raw.budget || raw, now)) {", 'B-ef83: the release\'s rule (the write number decides)');
+    if (!redNum.err) {
+      const d2r = tmpdir('vs-spend-3h-downgrade-red-');
+      fs.writeFileSync(LF(d2r, 'spend-budget.json'), JSON.stringify(L2)); fs.writeFileSync(LF(d2r, 'spend-budget.born.json'), M2);
+      const in2r = []; mk(redNum, d2r, in2r, []);
+      ok('§3h (2) CONTROL: with the release\'s rule the same files say «an older copy was put back» (RED: a false notice)', resets(in2r).length === 1);
+    } else ok('§3h (2) CONTROL built', false, redNum.err);
+    // (3) A MARKER REPAIRED BY HAND after an unreadable boot (a guess at its number, no count): SILENT
+    const d3 = tmpdir('vs-spend-3h-repaired-');
+    { const g0 = mk(guardMod, d3, [], []); g0.note({ reason: 'auto-resume', identity: ID, now }); g0.flush(); }
+    fs.writeFileSync(LF(d3, 'spend-budget.born.json'), '{"born":');   // torn
+    { const g0 = mk(guardMod, d3, [], []); g0.note({ reason: 'auto-resume', identity: ID, now: now + 1000 }); g0.flush(); }   // a boot with the marker held
+    fs.writeFileSync(LF(d3, 'spend-budget.born.json'), JSON.stringify({ born: now - 9e6, seq: 99, resets: 0 }));   // repaired by hand: a guess
+    const in3 = [], lg3 = []; const g3 = mk(guardMod, d3, in3, lg3);
+    ok('§3h (3) a MARKER REPAIRED BY HAND (write 2 of a guessed 99, no count recorded): SILENT — the journal says it proves no loss',
+      resets(in3).length === 0 && !said(lg3) && lg3.some((l) => /is write \d+ of 99 — its marker records no count to compare: nothing is lost/.test(l)), JSON.stringify(lg3));
+    if (!redNum.err) {
+      const d3r = tmpdir('vs-spend-3h-repaired-red-');
+      fs.writeFileSync(LF(d3r, 'spend-budget.json'), fs.readFileSync(LF(d3, 'spend-budget.json'), 'utf8'));
+      fs.writeFileSync(LF(d3r, 'spend-budget.born.json'), JSON.stringify({ born: now - 9e6, seq: 99, resets: 0 }));
+      const in3r = []; mk(redNum, d3r, in3r, []);
+      ok('§3h (3) CONTROL: with the release\'s rule the hand-repaired marker files «an older copy» (RED: a false notice)', resets(in3r).length === 1);
+    }
+    // (END) THE NOTICE ENDS when the last lost turn stops counting: its expiresAt is that instant; owed past it, it is not filed
+    const dN = tmpdir('vs-spend-3h-end-');
+    const at = now - 23 * 3600e3;
+    { const g0 = mk(guardMod, dN, [], []); g0.note({ reason: 'auto-resume', identity: ID, now: at }); g0.flush(); }
+    const MN = JSON.parse(fs.readFileSync(LF(dN, 'spend-budget.born.json'), 'utf8'));
+    fs.rmSync(LF(dN, 'spend-budget.json'));
+    const inN = []; mk(guardMod, dN, inN, []);
+    ok('§3h (END) the reset\'s notice carries its END: the instant its last lost turn stops counting (a day past it)',
+      resets(inN).length === 1 && MN.counted && resets(inN)[0].expiresAt === MN.counted.until && MN.counted.until === at + 24 * 3600e3, JSON.stringify([MN.counted, resets(inN)[0] && resets(inN)[0].expiresAt]));
+    const dN2 = tmpdir('vs-spend-3h-end2-');
+    fs.writeFileSync(LF(dN2, 'spend-budget.born.json'), JSON.stringify({ born: now - 9e7, seq: 3, resets: 1, noticeOwed: { kind: 'removed', n: 1, at: now - 9e7, until: now - 1000 } }));
+    fs.writeFileSync(LF(dN2, 'spend-budget.json'), JSON.stringify({ v: 1, seq: 3, budget: { v: 1, identities: {}, instance: [], notices: {}, attended: [] } }));
+    const inN2 = [], lgN2 = []; mk(guardMod, dN2, inN2, lgN2);
+    ok('§3h (END) a notice OWED past its end (the store never took it in time) is not filed — untrue by then — and is cleared from the marker',
+      resets(inN2).length === 0 && !JSON.parse(fs.readFileSync(LF(dN2, 'spend-budget.born.json'), 'utf8')).noticeOwed && lgN2.some((l) => /no longer said — the turns it lost no longer count/.test(l)), JSON.stringify(lgN2));
+  } finally {
+    for (const c of kids) { try { c.stdin.end(); } catch { } try { if (c.exitCode === null && !c.signalCode) c.kill('SIGKILL'); } catch { } }
   }
 }
 

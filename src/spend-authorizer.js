@@ -350,6 +350,29 @@ function pruneBudget(state, now = Date.now(), limits = null) {
   return { v: 1, identities, instance: keep(s.instance), notices, attended };
 }
 
+/** PURE (B-ef83, 主开发's law 2026-11-19 19:20Z: A RESET NOTICE ONLY FOR A REAL LOSS). What a ledger COUNTS that a lost copy would
+ *  take with it: its newest stamp (`newestAt`) and the instant its last counting stamp stops counting in every window (`until`:
+ *  a day past a stamp's last instant; a waiting reservation's own bound) — null when it holds no stamp. The marker beside the
+ *  ledger keeps it at every write; a ledger met at load is a LOSS only when it lacks a stamp that still counts. */
+function countedOf(state, now = Date.now()) {
+  const s = state && typeof state === 'object' ? state : emptyBudget();
+  let newestAt = 0, until = 0;
+  const lists = [Array.isArray(s.instance) ? s.instance : [], ...Object.values(s.identities || {}).filter(Array.isArray)];
+  for (const list of lists) for (const t of list) {
+    newestAt = Math.max(newestAt, stampAt(t));
+    until = Math.max(until, waitingStamp(t) ? stampAt(t) + RESERVATION_WAIT_MAX_MS : lastStampAt(t) + DAY_MS);
+  }
+  return newestAt > 0 && until > now ? { newestAt, until } : null;
+}
+/** PURE (B-ef83). Did a ledger LOSE turns that still count? `counted` = the marker's record of the last write (countedOf), `budget`
+ *  = the ledger as met (null: gone). A loss = a stamp the marker knew, still counting `now`, that the ledger does not hold — its
+ *  newest stamp is older than the marker's. No record (an older marker, a hand-written one) proves nothing: no loss is said. */
+function countLost(counted, budget, now = Date.now()) {
+  if (!counted || !(Number(counted.newestAt) > 0) || !(Number(counted.until) > now) || Number(counted.newestAt) > now + 60 * 1000) return false;
+  const have = budget ? countedOf(budget, -Infinity) : null;   // the ledger's own newest stamp, whatever its age
+  return !have || have.newestAt < Number(counted.newestAt);
+}
+
 /** PURE (B-3b0f). Two ledgers as one — the file's, read again, and the stamps made while it could not be read: every
  *  stamp of both is kept (the file's first, then the newer ones; never deduplicated — counting one twice is the safe side). */
 function mergeBudget(a, b) {
@@ -702,6 +725,9 @@ function authorizeUnattendedSpend({
   if (isAttended(reason)) return { ok: true, attended: true, why: null, detail: null, retryAfter: 0, counts, inFlight, limits: L, reason, identity: identity || null };
   // B-3b0f: THE LEDGER COULD NOT BE READ — a count that restarted from nothing is not a count, so no cap below can be
   // judged; every unattended turn is refused BY NAME until the file reads again or is removed (spend-guard `ledger`)
+  // B-ef83: ANOTHER HUB PROCESS HOLDS THE LEDGER (its lock, data/spend-budget.lock): this process's count is not the count — two
+  // processes each counting their own would allow a cap twice — so it starts none, by name, until the lock is its own
+  if (ledger && ledger.held) return no('ledger-held-elsewhere', `another VibeSpace process on this data folder (pid ${String(ledger.pid || '?').slice(0, 12)}${ledger.host ? ' on ' + String(ledger.host).slice(0, 60) : ''}) keeps the record of unattended turns (data/spend-budget.json) — this one counts none, so none run`);
   if (ledger && ledger.unreadable) return no('ledger-unreadable', `the record of unattended turns (data/spend-budget.json) could not be read (${String(ledger.error || 'unreadable').slice(0, 120)}) — none can be counted, so none run`);
   // THE HOLD IS PART OF THE SUM. `retryAfter` still speaks only of STAMPS: a
   // hold settles when its producer answers, not on a window boundary, so
@@ -963,6 +989,7 @@ const REFUSAL_WORDS = Object.freeze({
   'spend-control-reached': Object.freeze(['VibeSpace held {producer} in «{conversation}»: {account} has reached its spend control, so its requests are refused — a turn on it would buy nothing.', 'VibeSpace held {producer}: {account} has reached its spend control, so its requests are refused — a turn on it would buy nothing.']),
   'identity-unknown': Object.freeze(['VibeSpace held {producer} in «{conversation}»: it could not tell which account the turn would bill.', 'VibeSpace held {producer}: it could not tell which account the turn would bill.']),
   'overage-in-use': Object.freeze(['VibeSpace held {producer} in «{conversation}»: {account} is billing paid overage, and turns nobody typed are refused while real money is spent. {next}', 'VibeSpace held {producer}: {account} is billing paid overage, and turns nobody typed are refused while real money is spent. {next}']),
+  'ledger-held-elsewhere': Object.freeze(['VibeSpace held {producer} in «{conversation}»: another VibeSpace process on this data folder keeps its record of turns nobody typed, so this one counts none and starts none.', 'VibeSpace held {producer}: another VibeSpace process on this data folder keeps its record of turns nobody typed, so this one counts none and starts none.']),   // B-ef83
   'ledger-unreadable': Object.freeze(['VibeSpace held {producer} in «{conversation}»: its record of turns nobody typed could not be read, so it counts none and starts none.', 'VibeSpace held {producer}: its record of turns nobody typed could not be read, so it counts none and starts none.']),   // B-3b0f
   'unknown-reason': Object.freeze(['VibeSpace refused a turn nobody typed in «{conversation}»: «{producer}» is not a declared reason.', 'VibeSpace refused a turn nobody typed: «{producer}» is not a declared reason.']),
   other: Object.freeze(['VibeSpace held {producer} in «{conversation}»: the spend ceiling refused it ({why}).', 'VibeSpace held {producer}: the spend ceiling refused it ({why}).']),
@@ -996,6 +1023,7 @@ const DOOR_WORDS = Object.freeze({
   waiting: 'Open the conversation they wait behind: they run when its turn ends, or when you stop that turn there. Raising the limits in Settings → Spending would let more turns run meanwhile.',   // B-0a33 round 1
   unset: 'A limit left empty refuses every turn nobody typed until it is set: set a number in Settings → Spending. Turns you type, and the buttons you press that say «starts a turn», are never counted.',   // B-0a33 (3)
   ledger: 'This is VibeSpace failing closed, not a limit: the hub could not read data/spend-budget.json. Turns nobody typed start again within a minute of the file reading again — repair it, or remove it to start the count over. The limits in Settings → Spending cannot help here.',   // B-3b0f
+  held: 'This is VibeSpace failing closed, not a limit: another VibeSpace process on this data folder holds data/spend-budget.lock. Turns nobody typed start again once that process ends — stop it, or remove the lock file if no other VibeSpace runs on this folder. The limits in Settings → Spending cannot help here.',   // B-ef83
   wiring: 'This is VibeSpace failing closed, not a limit: the Usage window lists the accounts and the hub log’s [spend] lines name the conversation — the limits in Settings → Spending cannot help here.',
 });
 // lane setting-doors pick 1 (2026-11-14): a refusal that names a value names where to change it — THE ROW, as its link
@@ -1018,7 +1046,7 @@ function spendRowOf(v) {
 function spendRowLink(v) { const row = spendRowOf(v); return row ? SL.settingLink(row) : ''; }
 /** PURE. The ceiling an 80 % warning is about. */
 function warnRowOf(warn) { return warn ? SPEND_ROW_KEYS[warn.scope === 'hour' ? 'perIdentityHour' : warn.scope === 'instance' ? 'perInstanceDay' : 'perIdentityDay'] : null; }
-const ROW_DOOR = Object.freeze({ 'hour-cap': 'spending', 'day-cap': 'spending', 'instance-cap': 'spending', 'switched-off': 'spending', 'switched-off-instance': 'spending', 'cap-unset': 'unset', 'cap-unset-instance': 'unset', 'overage-in-use': 'overage', 'identity-cannot-serve': 'usage', 'spend-control-reached': 'vendor', 'identity-unknown': 'wiring', 'ledger-unreadable': 'ledger', 'unknown-reason': 'wiring', other: 'wiring' });
+const ROW_DOOR = Object.freeze({ 'hour-cap': 'spending', 'day-cap': 'spending', 'instance-cap': 'spending', 'switched-off': 'spending', 'switched-off-instance': 'spending', 'cap-unset': 'unset', 'cap-unset-instance': 'unset', 'overage-in-use': 'overage', 'identity-cannot-serve': 'usage', 'spend-control-reached': 'vendor', 'identity-unknown': 'wiring', 'ledger-unreadable': 'ledger', 'ledger-held-elsewhere': 'held', 'unknown-reason': 'wiring', other: 'wiring' });
 const SPENT_ROWS = 6;
 const CAP_OF = Object.freeze({ 'hour-cap': ['perIdentityHour', 'hour'], 'day-cap': ['perIdentityDay', 'day'], 'instance-cap': ['perInstanceDay', 'instance'] });
 /** a producer as words: a declared reason says its `what` in the viewer's language; a legacy stamp says so */
@@ -1049,7 +1077,7 @@ function refusalI18n(v, { sessionName = null, behind = null } = {}) {
   const c = v.counts || {};
   const detail = [{ key: LINE_WORDS.held, params: { producer, reason: String(v.reason == null ? '?' : v.reason).slice(0, 80) } }];
   detail.push(account ? { key: LINE_WORDS.account, params: { account } } : { key: LINE_WORDS.accountUnknown });
-  if (row === 'ledger-unreadable') { /* B-3b0f: no count can be said — the ledger they live in could not be read */ }
+  if (row === 'ledger-unreadable' || row === 'ledger-held-elsewhere') { /* B-3b0f / B-ef83: no count can be said — the ledger they live in could not be read, or another process keeps it */ }
   else if (account && v.counts) detail.push({ key: LINE_WORDS.counts, params: { hour: c.hour || 0, hourCap: Number(L.perIdentityHour) || 0, day: c.day || 0, dayCap: Number(L.perIdentityDay) || 0, instance: c.instanceDay || 0, instanceCap: Number(L.perInstanceDay) || 0 } });
   else if (v.counts) detail.push({ key: LINE_WORDS.countsInstance, params: { instance: c.instanceDay || 0, instanceCap: Number(L.perInstanceDay) || 0 } });   // r3: identity-unknown kept «(instance 7/800)» only in English
   // r3: what the English line says as «(+N in flight)» — the holds a cap sums with the stamps (a cap reached by holds alone
@@ -1091,7 +1119,7 @@ module.exports = {
   authorizeUnattendedBatch, // lane auto-resume-bulk: ONE authorization for N turns (the resume of every wall-stopped session)
   SPEND_REASONS, BUDGET_DEFAULTS, HOUR_MS, DAY_MS, MAX_STAMPS, CAP_MAX, stampCap, OVERAGE_STALE_MS,
   LOAD_RETENTION, RESERVE_TTL_MS, RESERVE_CAP, RESERVATION_WAIT_MAX_MS,
-  budgetLimits, capUnset, CAP_SETTING_KEYS, UNHELD_WORDS, unheldI18n, waitingOverCap, emptyBudget, pruneBudget, mergeBudget, spendCounts, stampAt, countAt, waitingStamp, waitingRids, waitingBehind, stampReason, producerCounts, producersText, notePressRow, notePressEnd, pressesOf,
+  budgetLimits, capUnset, CAP_SETTING_KEYS, UNHELD_WORDS, unheldI18n, waitingOverCap, emptyBudget, pruneBudget, mergeBudget, countedOf, countLost, spendCounts, stampAt, countAt, waitingStamp, waitingRids, waitingBehind, stampReason, producerCounts, producersText, notePressRow, notePressEnd, pressesOf,
   pendingCounts, reservePending, releasePending, renewPending, expirePending,
   overageState, overageAllowed, overageText, spendControlState,
   authorizeUnattendedSpend, noteUnattendedSpend, returnReservation, reservationState, refusalText, refusalI18n, refusalRow, noticeText,

@@ -112,6 +112,7 @@ console.log('③ THE CENSUS — every product sentence that names a place in Set
     // lane lg-recovery's bulk resume (the checkpoint cure, 主开发 2026-11-18 22:14Z): its door line names a ROW and carries its link
     // (bulk-resume.js capDoorWords — spendRowLink); the three that named only the SECTION left with B-d073 (lane bl-accounts): the Close toast's door reopens the dialog, its hint's door is the dialog's own «Stop the rest», the lead carries the overage row's link
     { file: 'src/spend-authorizer.js', re: /^\s+ledger: 'This is VibeSpace failing closed, not a limit/, why: 'B-3b0f\'s unreadable-ledger door: «the limits in Settings → Spending cannot help here» — no value of the person\'s to change, so no row, by design' },
+    { file: 'src/spend-authorizer.js', re: /^\s+held: 'This is VibeSpace failing closed, not a limit/, why: 'B-ef83\'s held-ledger door: «the limits in Settings → Spending cannot help here» — another process keeps the ledger; no value of the person\'s to change, so no row, by design' },
   ];
   const rows = [];
   for (const f of files) {
