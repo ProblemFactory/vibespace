@@ -9513,8 +9513,8 @@ function create(deps = {}) {
   // proposal's approve / redirect press carries the ones recorded at filing (a parent removed since must not run the call); an
   // ended conversation keeps the recorded ones
   // B-4852: an ENDED one re-reads its recorded OWN groups' ancestors NOW (a parent removed since no longer counts); a read that throws
-  // judges own groups alone — never the wider lineage recorded at filing
-  const lineageNowOf = (ctx) => { if (typeof lineageOf !== 'function') return ctx; let inh = []; try { inh = (lineageOf(Array.isArray(ctx.groups) ? ctx.groups.map(String) : []) || []).map(String); } catch { inh = []; } return { ...ctx, inheritedGroups: inh }; };
+  // is UNKNOWN (a parent's grant undecided, refused by name; the own groups still judged) — never the wider lineage recorded at filing
+  const lineageNowOf = (ctx) => { if (typeof lineageOf !== 'function') return ctx; let inh = []; try { inh = (lineageOf(Array.isArray(ctx.groups) ? ctx.groups.map(String) : []) || []).map(String); } catch { inh = null; } return { ...ctx, inheritedGroups: inh }; };   // a read that throws is UNKNOWN (null ⇒ unreadable), never «no parents» (主开发 07:59Z, the seventh site)
   function apiTierFor(ctx, cred) { const live = ctx && ctx.kind === 'agent' ? liveGroupsOf(ctx.id) : null; return ACL.effectiveApi(live ? { ...ctx, groups: live.groups, inheritedGroups: live.inherited } : ctx && ctx.kind === 'agent' ? lineageNowOf(ctx) : ctx, String(cred || ''), apiGrants()); }
   /** A Channels account as a raw-API credential: its kind, its adapter's DECLARED raw-API row (`api`), its label, its
    *  bearer, the account's meter. `null` = no such account. */

@@ -561,6 +561,18 @@ console.log('⑥ lane lg-group-parents: THE LINEAGE — parents[] by the ONE wri
     const g13 = s13.grantGroupsOf(unreadIds), plain13 = s13.grantGroupsOf([C13.id]);
     ok(g13.ids.unread === true && g13.inherited.unread === true && same(g13.inherited, [P13.id]) && Object.keys(g13.inherited).length === 1 && !plain13.ids.unread && !plain13.inherited.unread && same(plain13.inherited, [P13.id]), 'the restack\'s carry: a membership still being read hands an UNREAD lineage (the flag on both lists, never enumerable); a read one hands none', { ids: g13.ids.unread, inherited: g13.inherited.unread });
   }
+  // the release's hold (2.369.411) meets the chain: while the store is HELD unread, grantGroupsOf answers the hold BY NAME (a parent's
+  // members unknown, never «no parents»); once read, the lineage as before
+  {
+    const s14 = freshStore();
+    const P14 = s14.create({ title: 'P14' }), C14 = s14.create({ title: 'C14', parents: [P14.id] });
+    const before14 = s14.grantGroupsOf([C14.id]);
+    s14._unread = { file: 'task-groups.json', code: 'EIO', why: 'could not be read' };   // the boot read FAILED: the store is held
+    let e14 = null; try { s14.grantGroupsOf([C14.id]); } catch (e) { e14 = e; }
+    s14._unread = null;
+    const after14 = s14.grantGroupsOf([C14.id]);
+    ok(same(before14.inherited, [P14.id]) && !!e14 && e14.code === 'TASK_GROUPS_UNREAD' && same(after14.inherited, [P14.id]), 'the hold meets the lineage: while the store is held, grantGroupsOf is refused BY NAME (TASK_GROUPS_UNREAD — a parent\'s members unknown, never «no parents»); read, the lineage as before', { code: e14 && e14.code });
+  }
   // CONTROL: the writer without its cycle check writes the cycle
   const MZ = mutantCopies('task-groups-parents', ROOT);
   try {

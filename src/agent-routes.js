@@ -2136,7 +2136,7 @@ function channelPrincipal(s, id) {
   let inheritedGroups = [];
   try { inheritedGroups = tasks.grantGroupsOf(myGroups).inherited; } catch { inheritedGroups = null; }   // the restack's cure: a lineage that cannot be read is UNKNOWN (the channel facts read null as groupsUnreadable), never «no parents»
   return {
-    kind: 'agent', id: cid || `webui:${id}`, name: s.name || null, groups: myGroups, ...(require('./server/groups-hold.js').fact()),   // THE STORE HELD UNREAD (lane bl-windows): the hub's fact, for the channel judges inheritedGroups,
+    kind: 'agent', id: cid || `webui:${id}`, name: s.name || null, groups: myGroups, inheritedGroups, ...(require('./server/groups-hold.js').fact()),   // THE STORE HELD UNREAD (lane bl-windows): the hub's fact, for the channel judges
     // lane chat-needs-you-card: the CONVERSATION's own key — a request the engine files under 'channels' names it (`about`),
     // so its chat draws the card; never part of a stored principal (every record builds its own {kind, id, name})
     sessionKey: (() => { try { return sessionStatusKey(s, id); } catch { return `webui:${id}`; } })(),

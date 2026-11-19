@@ -2722,6 +2722,9 @@ class TaskGroupManager {
   /** THE ONE READER the grant doors take a caller's groups from: `groups` (records or ids — groupsForSession's answer) →
    *  `{ ids, inherited }` = its own group ids and their ancestors (grant-model `groupIds` / `inheritedGroupIds`). */
   grantGroupsOf(groups) {
+    // the release's hold (2.369.411) meets B-91a7: while the store is HELD unread, a parent's members are UNKNOWN by name — refused as
+    // groupIdsForGrant refuses (TASK_GROUPS_UNREAD), never «no parents» (every caller maps the throw to unreadable)
+    this._refuseUnread('judging a grant by Task Group (its parent groups)');
     const ids = [...new Set((Array.isArray(groups) ? groups : []).map((g) => String(g && typeof g === 'object' ? g.id : g)).filter((x) => x && x !== 'undefined' && x !== 'null'))];
     const out = { ids, inherited: this.ancestorsOf(ids) };
     // B-55dc meets B-91a7 (the restack): a membership still being READ under-includes its ancestors too — the drawing door's
