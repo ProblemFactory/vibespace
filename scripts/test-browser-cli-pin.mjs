@@ -322,8 +322,21 @@ console.log('— ⑤ the client words (en / zh / ja) + the panel wiring');
   const zh = (await import('../src/lib/i18n-zh.js')).default, ja = (await import('../src/lib/i18n-ja.js')).default;
   const t = (k2, p) => { let s = k2; if (p) s = s.replace(/\{(\w+)\}/g, (m, x) => (p[x] !== undefined ? String(p[x]) : m)); return s; };
   const base = { table: '0.38.1', record: V.CLI_PIN_RECORD, npm: true, install: {} };
-  const drift = W.cliRowWords({ ...base, choice: { mode: 'path' }, onPath: { version: '0.39.2' } }, t);
-  ok(drift.text === 'agent-browser: 0.38.1 (measured) · on PATH: 0.39.2 — drifts' && drift.warn && drift.offer === 'install' && W.cliOfferLabel('install', t) === 'Install the measured version…', 'the row: "agent-browser: 0.38.1 (measured) · on PATH: 0.39.2 — drifts" + Install the measured version…', drift);
+  // ckpt61 hosted cure (bl-browser-a): the drift row in the CURRENT words of the plain-words closure (4e4c25a84 renamed the keys
+  // on purpose — «Browser driver: …, tested with VibeSpace · Installed: … — not the tested one»), pinned as drawn AND by the
+  // i18n KEYS the model emits (a rename then fails here by key, not only by its rendered sentence), AND its facts: the tested
+  // version and the installed one named, a warning, one act — install — whose button label is unchanged
+  const DRIFT_KEYS = ['Browser driver: {version}, tested with VibeSpace', 'Installed: {version} — not the tested one'];
+  const rowOf = (onPath, tt = t) => { const keys = []; const r = W.cliRowWords({ ...base, choice: { mode: 'path' }, onPath: { version: onPath } }, (k2, p) => { keys.push(k2); return tt(k2, p); }); return { r, keys }; };
+  const driftLaw = ({ r, keys }) => !!r && r.text === 'Browser driver: 0.38.1, tested with VibeSpace · Installed: 0.39.2 — not the tested one' && DRIFT_KEYS.every((k2) => keys.includes(k2))
+    && r.text.includes('0.38.1') && r.text.includes('0.39.2') && r.warn === true && r.offer === 'install' && r.version === '0.38.1';
+  const driftRow = rowOf('0.39.2'); const drift = driftRow.r;
+  ok(driftLaw(driftRow) && W.cliOfferLabel('install', t) === 'Install the measured version…', 'the row: "Browser driver: 0.38.1, tested with VibeSpace · Installed: 0.39.2 — not the tested one" (its two keys emitted) — it names the tested version and the installed one, warns, its one act is install: Install the measured version…', { drift, keys: driftRow.keys });
+  // RED CONTROLS: the same law on a row that does NOT drift (PATH = the tested version), and on the row drawn in the retired
+  // words (a t that says the keys as 2.369.411 did) — each fails it
+  const OLD = { 'Browser driver: {version}, tested with VibeSpace': 'agent-browser: {version} (measured)', 'Installed: {version} — not the tested one': 'on PATH: {version} — drifts' };
+  const same = rowOf('0.38.1'), old = rowOf('0.39.2', (k2, p) => t(OLD[k2] || k2, p));
+  ok(!driftLaw(same) && same.r.warn === false && same.r.offer === null && !driftLaw(old) && old.r.text === 'agent-browser: 0.38.1 (measured) · on PATH: 0.39.2 — drifts', 'CONTROL: the law fails a row that does not drift (no warning, no act) and the row in the retired words — RED for both', { same: same.r, old: old.r.text });
   ok(W.cliRowWords({ ...base, choice: { mode: 'path' }, onPath: { version: '0.38.1' } }, t).offer === null && W.cliRowWords({ ...base, choice: { mode: 'path' }, onPath: { version: '0.39.2' }, installedTable: true }, t).offer === 'use-pinned'
     && W.cliRowWords({ ...base, choice: { mode: 'pinned', version: '0.38.1' }, pinned: { version: '0.38.1', installed: true }, onPath: { version: '0.39.2' } }, t).offer === 'use-path'
     && W.cliRowWords({ ...base, choice: { mode: 'pinned' }, pinned: { version: '0.38.1', installed: false }, onPath: { version: '0.39.2' } }, t).warn
