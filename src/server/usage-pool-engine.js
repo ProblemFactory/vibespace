@@ -6222,11 +6222,7 @@ function onMemberReadingFresh(memberId, why = 'reading', { at = Date.now(), plac
   const out = { member: memberId || null, why, acted: false, reason: null, detail: null, pools: [], fired: [], skipped: [] };
   try {
     if (!memberId || typeof memberId !== 'string') { out.reason = 'no-member'; return out; }
-    // a fresh reading of its own window IS the evidence that re-admits a lapsed member — the deferred-save census (lane lg-store-writes,
-    // hunt 3's (e)): the accounts store hears it once that READING is on disk (it rides its landing; at once where nothing is owed) — a
-    // kill first never leaves a member re-admitted on a reading the file never held. Every road (the cli panel, a refresh, the session
-    // rung, the auto-cli loop) comes through here
-    try { const f = path.join(USAGE_CACHE_DIR, memberId.replace(/[^\w.-]/g, '_') + '.json'); usageWrite.afterLanded(f, () => { try { memberServeLapsed(memberId); } catch { } }); } catch { }
+    try { memberServeLapsed(memberId); } catch { } // a fresh reading of its own window IS the evidence that re-admits a lapsed member — at once
     let snap = null;
     try { snap = usageWrite.readCacheJson(path.join(USAGE_CACHE_DIR, memberId.replace(/[^\w.-]/g, '_') + '.json'), { via: RR }); } catch { }
     // PLACEABLE (lane cli-self-measure, acceptance r1 law G3): the member's READING did not change — its ELIGIBILITY did (the hub's own
@@ -6677,7 +6673,7 @@ function noteMemberServeFailure(memberId, info = {}, { source = 'a turn', backen
  *  LAPSED member only, a PHASE-ONLY refusal (its org does not differ) whose window NO other account holds re-anchors the
  *  account's window witness + guard anchor on the panel's window — journaled once (a re-anchored window agrees from then
  *  on) — and the caller writes the reading as verified, which is the evidence that re-admits it. → true when re-anchored. */
-async function reanchorLapsedMember(key, idv) {   // async (the moved2 cure 2): its two sidecars are written OFF the loop and awaited before the caller writes the reading that names the window
+function reanchorLapsedMember(key, idv) {
   try {
     if (!memberServeLapsed(key) || !idv || !idv.refused || idv.org === 'differ' || idv.phase !== 'differ' || (idv.matched || []).length) return false;
     const pw = idv.panelWindow || {};
@@ -6689,8 +6685,8 @@ async function reanchorLapsedMember(key, idv) {   // async (the moved2 cure 2): 
     // WHO ANSWERED (lane oat-identity-fix-r2): the folder's login, or our token file in it
     const producer = (() => { try { const i = accounts.readSubCreds(key); return i && i.oatFile ? 'oat:' + (Number(i.oatFileGen) > 0 ? Number(i.oatFileGen) : '?') : 'login'; } catch { return null; } })();
     const stamp = { sevenDay, fiveHour: null, scoped, at: now, source: 'api', verifiedAt: now, verifiedBy: 'renewal-panel', n: 1, sessionId: null };
-    if (!(await windowStamp.writeWindowStamp(USAGE_CACHE_DIR, key, stamp, producer, { offLoop: true }))) return false; // the ONE writer (null = the folder could not be read: nobody can tell)
-    if (!(await usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key), { sevenDay, scoped, at: now, sessionId: null, source: 'renewal-panel', n: 1, ring: [], ringAt: now }, { offLoop: true }))) return false;   // the deferred-save census: not landed inside its bound ⇒ not re-anchored (the next panel asks again), never a reanchor on bytes still queued
+    if (!windowStamp.writeWindowStamp(USAGE_CACHE_DIR, key, stamp, producer)) return false; // the ONE writer (null = the folder could not be read: nobody can tell)
+    usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key), { sevenDay, scoped, at: now, sessionId: null, source: 'renewal-panel', n: 1, ring: [], ringAt: now });
     _ownWin = null; _ownWinAt = 0;
     try { oatIdentity.onReanchor(key, { window: stamp, source: 'renewal-panel', independent: producer === 'login' }); } catch { } // lane oat-identity-fix (verify r1 F6)
     console.log(`[usage] window re-anchored: ${nameOf(key)} was lapsed and its /usage panel answered with a NEW weekly window ${readingLag.windowFingerprint(stamp)} (was ${readingLag.windowFingerprint(idv.apiWindow || { sevenDay: null, fiveHour: null, scoped: {} })}) that no other account holds — a renewal; both window sidecars re-anchored on it`);

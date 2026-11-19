@@ -78,23 +78,8 @@ function readCacheObject(cacheDir, key) {
  *  first. Each throws exactly as the raw call it replaces did (a caller keeps its own try). */
 // `via` (U6.2): a reader with run-reads' shape — readText(file) / readdir(dir) — the hub's pool passes src/run-reads.js (B-403e:
 // one ask per file per synchronous run); the module never requires it (it is bundled into the device agent)
-// R1 (U6.5): a reading handed to the store writer and not landed yet is THE reading — answered FIRST, before `via` (run-reads'
-// memo: never memoized) and before the file; a listing names a pending file not on disk yet
-function readCacheJson(file, { via = null } = {}) { const t = _hub ? _hub.pendingText(file) : null; if (t != null) return JSON.parse(t); return JSON.parse(via ? via.readText(file) : fs.readFileSync(file, 'utf-8')); }
-function listCacheDir(dir, { via = null } = {}) {
-  let names = null, err = null;
-  try { names = via ? via.readdir(dir) : fs.readdirSync(dir); } catch (e) { err = e; }
-  const extra = _hub ? _hub.pendingIn(dir) : [];
-  if (!names) { if (extra.length && err && err.code === 'ENOENT') return extra; throw err; }
-  for (const n of extra) if (!names.includes(n)) names = [...names, n];
-  return names;
-}
-
-// ── U6.5 (lane lg-store-writes, B-0248): THE HUB'S HOOK. The readings' write off the main thread lives in
-// src/server/usage-cache-hub.js (hub-only — the device agent never carries it); the server's boot fills this hook:
-// { pendingText(file), pendingIn(dir), handOff(file, call, out, opts) }. Empty ⇒ the synchronous write, as before.
-let _hub = null;
-function useHub(hub) { _hub = hub || null; }
+function readCacheJson(file, { via = null } = {}) { return JSON.parse(via ? via.readText(file) : fs.readFileSync(file, 'utf-8')); }
+function listCacheDir(dir, { via = null } = {}) { return via ? via.readdir(dir) : fs.readdirSync(dir); }
 
 // ── lifting a stored object into the typed model ────────────────────────────
 
@@ -472,17 +457,16 @@ function atomicWrite(file, text) {
  *                                complete list — see `retireUnnamedScopes`.
  * @returns {{ok:boolean, why?:string, errors?:string[], limits?:Array, file?:string}}
  */
-/** THE MERGE, PURE (lane lg-store-writes, B-0248 U6.5): the stored reading `storedObj` (the pending copy or the file — the
- *  caller's read) and a producer's call → {ok, out, merged, prevObj, prevSet, measuredLanes, seenResets, at} or {ok:false, why,
- *  errors}. No write, no callback, no line said (`quiet`: a replay over a newer base says nothing) — writeCacheObject persists
- *  and says; the store writer's re-merge (R2) replays a pending call over the file's own reading through it. */
-function mergeCacheObject(storedObj, { cacheDir, key, obj, set = null, measuredAt = null, source = null, familyOf = null, backend = null, onRefuse = null, replace = false, authoritativeScopes = null, absentWindows = null, passiveAnswer = null, stated = null, refused = null, refusalMarks = null }, { quiet = false } = {}) {
+function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, source = null, familyOf = null, backend = null, onRefuse = null, replace = false, authoritativeScopes = null, absentWindows = null, passiveAnswer = null, stated = null, refused = null, refusalMarks = null }) {
+  if (!cacheDir || !key) return { ok: false, why: 'no cacheDir/key' };
+  const file = cacheFileFor(cacheDir, key);
   const at = Number(measuredAt) || Number(obj && obj.fetchedAt) || Date.now();
   // THE FILE IS READ FIRST, because the lift below needs it: a legacy snapshot
   // is ONE reading spread over a carry-forward of everything else, and only the
   // file can say which halves are which (carryUnmeasuredLimits).
   // (r5) a REPLACE reads it too, for the stored record's word on itself only (carryStamps below) — never its numbers
-  let prevObj = null;
+  let prevObj = null, storedObj = null;
+  try { storedObj = JSON.parse(fs.readFileSync(file, 'utf-8')) || null; } catch { storedObj = null; }
   if (!replace) prevObj = storedObj;
   let prevSet = quotaModel.makeLimitSet({ identity: key });
   if (prevObj) {
@@ -492,7 +476,7 @@ function mergeCacheObject(storedObj, { cacheDir, key, obj, set = null, measuredA
       // A file already on disk being malformed must NEVER block a new reading —
       // that would make one bad write permanent. Drop its limits, say so, and
       // let this write re-establish the canonical half.
-      if (!quiet) { try { console.warn('[usage-write] stored limits for', key, 'are malformed — rebuilding from this reading:', vPrev.errors.join('; ')); } catch { } }
+      try { console.warn('[usage-write] stored limits for', key, 'are malformed — rebuilding from this reading:', vPrev.errors.join('; ')); } catch { }
       prevSet = quotaModel.makeLimitSet({ identity: key });
     }
   }
@@ -537,7 +521,12 @@ function mergeCacheObject(storedObj, { cacheDir, key, obj, set = null, measuredA
     return !pw || quotaModel.windowClaimKey(pw) !== quotaModel.windowClaimKey(w);
   })()) witnesses = Object.fromEntries(Object.entries(quotaModel.liveWitnesses(witnesses, at)).map(([k, e]) => [k, { ...e, n: 0 }]));
   const vNext = quotaModel.validateLimitSet(next);
-  if (!vNext.ok) return { ok: false, why: `refusing to write ${key}: the producer's limit set is malformed`, errors: vNext.errors };
+  if (!vNext.ok) {
+    const why = `refusing to write ${key}: the producer's limit set is malformed`;
+    try { console.error('[usage-write]', why, vNext.errors.join('; ')); } catch { }
+    try { onRefuse && onRefuse(why, vNext.errors); } catch { }
+    return { ok: false, why, errors: vNext.errors };
+  }
   // THE RAW PAIR (lane account-reset-door): the stored reading vs THE LANES THIS WRITE MEASURED. r3: A PRODUCER NAMES THEM —
   // `stated` = every lane it stated in this write, at whatever number (lane keys, or its OWN reading — a panel's parse, an
   // OAuth answer — never a spread of the file: a sibling's bucket it carried is not this account's reading), `refused` = the
@@ -598,33 +587,11 @@ function mergeCacheObject(storedObj, { cacheDir, key, obj, set = null, measuredA
   // freshest at t", the producers own that decision (the sibling fan-out
   // deliberately withholds it), and the repair writes an identity-only remnant
   // whose entire point is that NOTHING on it claims to be a reading.
-  return { ok: true, out, merged, prevObj, prevSet, measuredLanes, seenResets, at, nextSet: next };
-}
-
-function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, source = null, familyOf = null, backend = null, onRefuse = null, replace = false, authoritativeScopes = null, absentWindows = null, passiveAnswer = null, stated = null, refused = null, refusalMarks = null }) {
-  if (!cacheDir || !key) return { ok: false, why: 'no cacheDir/key' };
-  const file = cacheFileFor(cacheDir, key);
-  // THE FILE IS READ FIRST, because the lift needs it — R1 (lane lg-store-writes U6.5): the reading handed to the store writer
-  // and not landed yet comes first (readCacheJson), so the next event merges over it, never over the older file
-  let storedObj = null;
-  try { storedObj = readCacheJson(file) || null; } catch { storedObj = null; }
-  const m = mergeCacheObject(storedObj, { cacheDir, key, obj, set, measuredAt, source, familyOf, backend, onRefuse, replace, authoritativeScopes, absentWindows, passiveAnswer, stated, refused, refusalMarks });
-  if (!m.ok) {
-    try { console.error('[usage-write]', m.why, (m.errors || []).join('; ')); } catch { }
-    try { onRefuse && onRefuse(m.why, m.errors); } catch { }
-    return { ok: false, why: m.why, errors: m.errors };
-  }
-  const { out, merged, prevObj, prevSet, measuredLanes, seenResets, at } = m;
-  // THE HUB (U6.5): the store writer's thread writes it; the call is kept AS MERGED for the re-merge — its typed set after the
-  // carry, the lanes it measured, its marks (src/server/usage-cache-hub.js clones them)
-  if (_hub) _hub.handOff(file, { at, args: { cacheDir, key, obj, set: m.nextSet, measuredAt: at, source, familyOf, backend, replace, absentWindows, passiveAnswer, stated: measuredLanes.filter((x) => !x.refused).map((x) => x.lane), refused, refusalMarks } }, out);
-  else {
-    try {
-      fs.mkdirSync(cacheDir, { recursive: true });
-      atomicWrite(file, JSON.stringify(out));
-    } catch (e) {
-      return { ok: false, why: 'write failed: ' + e.message };
-    }
+  try {
+    fs.mkdirSync(cacheDir, { recursive: true });
+    atomicWrite(file, JSON.stringify(out));
+  } catch (e) {
+    return { ok: false, why: 'write failed: ' + e.message };
   }
   // …or the change a DIRECT writer saw and left unsaid (the shipped statusline: `windowChangeUnsaid`) — said here
   // once when the merged set agrees with it, and the marker never outlives this write. A marker belongs to the key
@@ -659,28 +626,8 @@ function writeReading({ cacheDir, key, set, extras = null, source = null, family
  *  same atomicity, and the write-path census would otherwise have to allow
  *  arbitrary writers into the directory to serve them. Never `.json` — every
  *  usage-cache scanner filters on that suffix. */
-function writeSidecar(cacheDir, name, payload, { offLoop = false } = {}) {
+function writeSidecar(cacheDir, name, payload) {
   if (/\.json$/.test(String(name))) throw new Error('a usage-cache sidecar must not end in .json — every scanner would pick it up');
-  // lane lg-store-writes (the move's hunt, B1 — LAW II): a sidecar is NEVER DEFERRED — another process reads it raw (the statusline,
-  // data/bin/vibespace-usage: a reading judged against the window it names). The moved2 cure 2: not deferred is not «synchronous on
-  // the main loop» — a caller that CAN wait asks `offLoop`: at the hub the bytes go to the store writer's thread and the PROMISE
-  // resolves at their landing (true) or at its bound (false), and the caller AWAITS it before it tells anything else (the renewal
-  // re-anchor: before the reading that names the window is written). Every other caller writes AT ONCE on this thread — they
-  // cannot wait, named: a rate-limit event's handler (usage-pool-engine noteApiDerivedWindow), the synchronous repairs
-  // (reading-repair repairCachesByWindow / repairSidecarsByApiPhase), a process with no writer (the device agent, a script)
-  if (offLoop && _hub && typeof _hub.ride === 'function') {
-    const file = path.join(cacheDir, name);
-    _hub.handOff(file, null, typeof payload === 'string' ? payload : JSON.stringify(payload), { sidecar: true });
-    return _hub.ride(file, () => true, { timeoutMs: SIDECAR_LAND_MS }).then((r) => !!(r && r.landed), () => false);
-  }
-  if (offLoop) return Promise.resolve(writeSidecar(cacheDir, name, payload));
-  // ONE ROAD PER FILE (the deferred-save census, hunt 3's (d)): a sidecar whose bytes are still QUEUED at the hub (an offLoop write not
-  // landed yet) takes the same queue — the newest bytes replace the queued ones; a synchronous write beside them would be landed over
-  // by the older queued copy
-  if (_hub && typeof _hub.pendingText === 'function' && typeof _hub.handOff === 'function' && _hub.pendingText(path.join(cacheDir, name)) != null) {
-    _hub.handOff(path.join(cacheDir, name), null, typeof payload === 'string' ? payload : JSON.stringify(payload), { sidecar: true });
-    return true;
-  }
   try {
     fs.mkdirSync(cacheDir, { recursive: true });
     atomicWrite(path.join(cacheDir, name), typeof payload === 'string' ? payload : JSON.stringify(payload));
@@ -688,19 +635,8 @@ function writeSidecar(cacheDir, name, payload, { offLoop = false } = {}) {
   } catch { return false; }
 }
 
-const SIDECAR_LAND_MS = 20000;   // an offLoop sidecar's wait for its landing (the moved2 cure 2) — under the CLI's 30 s call budget
-/** THE STEP THAT CANNOT BE UNDONE RIDES THE READING'S LANDING (lane lg-store-writes, the moved2 cure 2 — store-writer afterLanding,
- *  the ONE helper): `step` runs once the hub's pending copy of `file` is on disk; no hub ⇒ the reading was written at once, the step
- *  runs now (the move's hunt, B3: a verified panel clears a member's lapse in the accounts store only on its reading's landing) */
-function afterLanded(file, step, { timeoutMs = null } = {}) {   // `timeoutMs`: a reply's bound (the promise says {landed:false} then; the step still rides)
-  if (_hub && typeof _hub.ride === 'function') return _hub.ride(file, step, { timeoutMs });
-  let v = null; try { v = step(); } catch { }
-  return Promise.resolve({ landed: true, value: v });
-}
-
 module.exports = {
-  afterLanded,
-  cacheFileFor, isCacheFileName, readCacheObject, readCacheJson, listCacheDir, useHub, mergeCacheObject,
+  cacheFileFor, isCacheFileName, readCacheObject, readCacheJson, listCacheDir,
   backendOfCacheObject, liftCacheObject, limitsOfCache,
   writeCacheObject, writeReading, writeSidecar,
   carryUnmeasuredLimits, retireUnnamedScopes, markPlanAbsent, windowChangeOf, onWindowChange, PASSIVE_WITNESSES, onReading, onVendorReset, noteVendorResets, noteDirectWrite, onLanesRead, lanesReadAt,

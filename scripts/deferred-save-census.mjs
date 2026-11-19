@@ -5,7 +5,7 @@
 //   jobs           src/jobs.js `this._save(` / `this._saveNotifs(` / `this._dirty = true`; elsewhere `<jm>._save(` / `<jm>._saveNotifs(`
 //   task-groups    src/task-groups.js `this._save(`; elsewhere `<tasks>._save(`
 //   browser-keeper src/server/browser-keeper.js `commit(` / `commitSync(` / `save(` / `saveNow(` / `dirty = true` / `sweepDirty = true`
-//   usage-cache    `writeCacheObject(` / `writeReading(` / `writeSidecar(` / `writeWindowStamp(` anywhere (the hub hands them off)
+// (the usage readings left the census with the usage cache's move: 主开发 2026-11-19 08:56Z — their synchronous road is the release's)
 // → [{store, file, line, scope, call}] — the census suite (test-deferred-save-census) holds ONE verdict per (store, file, scope, call).
 import fs from 'node:fs';
 import path from 'node:path';
@@ -16,7 +16,6 @@ const keyName = (k) => (!k ? '?' : k.type === 'Identifier' ? k.name : k.type ===
 const objName = (o) => (!o ? '' : o.type === 'ThisExpression' ? 'this' : o.type === 'Identifier' ? o.name : o.type === 'MemberExpression' ? `${objName(o.object)}.${keyName(o.property)}` : '');
 const JM_NAMES = /(^|\.)(jm|jobs|jobManager|JM)$/;
 const TG_NAMES = /(^|\.)(tasks|tg|taskGroups|tgm)$/;
-const USAGE_CALLS = new Set(['writeCacheObject', 'writeReading', 'writeSidecar', 'writeWindowStamp']);
 
 /** the deferred-save call sites of one file */
 export function siteOfFile(repo, rel, { acorn = null, src: given = null } = {}) {
@@ -51,7 +50,6 @@ export function siteOfFile(repo, rel, { acorn = null, src: given = null } = {}) 
     const c = n.callee;
     if (c.type === 'Identifier') {
       if (rel === 'src/server/browser-keeper.js' && (c.name === 'commit' || c.name === 'commitSync' || c.name === 'save' || c.name === 'saveNow')) add('browser-keeper', n, parents, `${c.name}()`);
-      if (USAGE_CALLS.has(c.name)) add('usage-cache', n, parents, `${c.name}()`);
       return;
     }
     if (c.type !== 'MemberExpression' || c.computed) return;
@@ -62,10 +60,8 @@ export function siteOfFile(repo, rel, { acorn = null, src: given = null } = {}) 
       else if (JM_NAMES.test(obj)) add('jobs', n, parents, `${prop}()`);
       else if (TG_NAMES.test(obj) && prop === '_save') add('task-groups', n, parents, '_save()');
     }
-    if (USAGE_CALLS.has(prop)) add('usage-cache', n, parents, `${prop}()`);
   });
-  // a definition is not a call site: the writer functions' own bodies keep their inner recursion out of the census
-  return out.filter((s) => !(s.store === 'usage-cache' && (rel === 'src/usage-cache-write.js' || rel === 'src/window-stamp.js') && /^(writeCacheObject|writeReading|writeSidecar|writeWindowStamp)\b/.test(s.scope)));
+  return out;
 }
 
 /** every deferred-save call site of the tree */

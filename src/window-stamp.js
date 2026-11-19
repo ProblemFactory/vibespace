@@ -33,14 +33,13 @@ function readWindowStamp(cacheDir, key) {
 
 /** THE ONE WRITER. `producer` is mandatory (see above; undefined or malformed ⇒ throws). The stamp's own `producer` /
  *  `login` fields are never trusted: the producer is the argument, the carry is computed here. → true when written. */
-function writeWindowStamp(cacheDir, key, stamp, producer, { offLoop = false } = {}) {
+function writeWindowStamp(cacheDir, key, stamp, producer) {
   if (producer === undefined) throw new Error('a .window- stamp names its producer: login | oat:<gen> | repair:<source> | null (nobody can tell)');
   if (!isWindowProducer(producer)) throw new Error('not a .window- producer: ' + String(JSON.stringify(producer)).slice(0, 60));
   if (!key || !stamp || typeof stamp !== 'object' || Array.isArray(stamp)) throw new Error('a .window- stamp is an object on a key');
   const { producer: _p, login: _l, ...rest } = stamp;
   const carried = producer === 'login' ? null : identityCarry(readWindowStamp(cacheDir, key));
-  // `offLoop` (lane lg-store-writes, the moved2 cure 2): a caller that can wait — the write off the main loop, a PROMISE of true at its landing
-  return require('./usage-cache-write.js').writeSidecar(cacheDir, windowSidecarName(key), { ...rest, producer, ...(carried ? { login: carried } : {}) }, { offLoop });
+  return require('./usage-cache-write.js').writeSidecar(cacheDir, windowSidecarName(key), { ...rest, producer, ...(carried ? { login: carried } : {}) });
 }
 
 module.exports = { readWindowStamp, writeWindowStamp, isWindowProducer };

@@ -619,11 +619,6 @@ function storeWriter() {
 function bootKeeper({ log = console } = {}) {
   const w = storeWriter();
   w.startKeeper();
-  // lane lg-store-writes, B-0248 U6.5: THE SERVER'S BOOT hands the usage readings' writes (data/usage-cache) to this writer —
-  // the cache module is shared with the device agent and requires no writer; run-reads' dropRun goes with it (a hand-off and
-  // a landing drop the pool's per-run memo). A process that never boots a server (a suite driving the pool in process, a
-  // script) keeps the synchronous write unless it injects (the module's own legs do)
-  try { require('./server/usage-cache-hub.js').useStoreWriter(w, { dropRun: require('./run-reads.js').dropRun }); } catch (e) { try { log.warn?.(`[store-write] the usage readings' writes stay on the main thread: ${e.message}`); } catch { } }
   if (GRACE.refused) { try { log.warn?.(`[store-write] ${GRACE.refused}`); } catch { } }
   return w;
 }

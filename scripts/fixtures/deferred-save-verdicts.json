@@ -269,32 +269,6 @@
   "why": "The answers.jsonl mirror, the waiters, the For-you resolve and the owner notice all run inside this._ride(this.file, 'the panel's answer'); the 3619 save is inside that step; the reply waits persisted()."
  },
  {
-  "key": "usage-cache · src/quota-model-migrate.js · backfillLimits · writeCacheObject()",
-  "verdict": "waits",
-  "why": "A boot migration's replace-mode stamp (replace fires no callback); the runner lands every store the migrations dirtied (landStores → flushSync) before it stamps the ledger, and the archive line after it is only the old copy.",
-  "at": "src/migration-runner.js:if (ranNow.length && typeof landStores === 'function') {"
- },
- {
-  "key": "usage-cache · src/rate-limit-capture.js · captureRateLimitEvent · writeCacheObject()",
-  "verdict": "none",
-  "why": "steps follow the event, not file"
- },
- {
-  "key": "usage-cache · src/reading-repair.js · _writeCacheAtomic · writeCacheObject()",
-  "verdict": "none",
-  "why": "replace repair; reruns at boot, hourly"
- },
- {
-  "key": "usage-cache · src/reading-repair.js · repairCachesByWindow · writeWindowStamp()",
-  "verdict": "none",
-  "why": "sync at boot; ledger waits landing"
- },
- {
-  "key": "usage-cache · src/reading-repair.js · repairSidecarsByApiPhase · writeWindowStamp()",
-  "verdict": "none",
-  "why": "sync write; hourly repair re-judges it"
- },
- {
   "key": "task-groups · src/task-groups.js · TaskGroupManager.constructor · _save()",
   "verdict": "none",
   "why": "boot flushSync; TASK.md re-derived at boot"
@@ -361,39 +335,6 @@
   "key": "task-groups · src/task-groups.js · TaskGroupManager.importBundle · _save()",
   "verdict": "sync",
   "why": "the groups land before the import writes other stores (_landNow)"
- },
- {
-  "key": "usage-cache · src/usage-routes.js · setupUsage > ingestPassiveUsage · writeCacheObject()",
-  "verdict": "none",
-  "why": "settle write; marker re-said idempotently"
- },
- {
-  "key": "usage-cache · src/usage-routes.js · setupUsage > refreshViaCliPanel · writeWindowStamp()",
-  "verdict": "sync",
-  "why": "written at once; a sidecar with queued bytes takes their queue (one road per file)",
-  "at": "src/usage-cache-write.js:ONE ROAD PER FILE"
- },
- {
-  "key": "usage-cache · src/usage-routes.js · setupUsage > refreshViaCliPanel · writeCacheObject()",
-  "verdict": "rides",
-  "why": "the lapse clears at the reading's landing (afterLanded)"
- },
- {
-  "key": "usage-cache · src/usage-routes.js · setupUsage > route:POST /api/usage/refresh · writeCacheObject()",
-  "verdict": "rides",
-  "why": "the lapse clears at the reading's landing (onMemberReadingFresh)",
-  "at": "src/server/usage-pool-engine.js:usageWrite.afterLanded(f, () => { try { memberServeLapsed(memberId); } catch { } });"
- },
- {
-  "key": "usage-cache · src/usage-routes.js · setupUsage > route:POST /api/usage/refresh > deviceLegG · writeCacheObject()",
-  "verdict": "waits",
-  "why": "the device answer waits for the host reading's landing",
-  "at": "src/usage-routes.js:() => true, { timeoutMs: 20000 })"
- },
- {
-  "key": "usage-cache · src/usage-routes.js · setupUsage > summarizeCodexRateLimits · writeCacheObject()",
-  "verdict": "none",
-  "why": "passive write-through; GET answers summary only"
  },
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > load · dirty = true",
@@ -940,12 +881,6 @@
   "at": "src/server/browser-keeper.js:const landedOrThrow = () => { if (!landNow()) throw"
  },
  {
-  "key": "usage-cache · src/server/cli-usage-door.js · createCliUsageDoor > readOnce · writeReading()",
-  "verdict": "waits",
-  "why": "the person's Re-check is answered once the reading landed",
-  "at": "src/server/cli-usage-door.js:usageWrite.afterLanded(usageWrite.cacheFileFor(cacheDir, id), () => true, { timeoutMs: 20000 })"
- },
- {
   "key": "jobs · src/server/jobs-wiring.js · create > route:POST /api/jobs/seen · _save()",
   "verdict": "waits",
   "why": "the answer waits for the store (persisted)",
@@ -956,50 +891,5 @@
   "verdict": "waits",
   "why": "the answer waits for the store (persisted)",
   "at": "src/server/jobs-wiring.js:res.json({ success: true, changed, ack: M.ackState(job), ...(saved ? {} : { notOnDisk: true }) })"
- },
- {
-  "key": "usage-cache · src/server/stream-wall.js · createStreamWallRoad > onRecord · writeCacheObject()",
-  "verdict": "none",
-  "why": "wall replays at attach; count durable"
- },
- {
-  "key": "usage-cache · src/server/usage-pool-engine.js · create > writeUsageCacheForKey · writeCacheObject()",
-  "verdict": "rides",
-  "why": "the lapse clears at the reading's landing (onMemberReadingFresh)",
-  "at": "src/server/usage-pool-engine.js:usageWrite.afterLanded(f, () => { try { memberServeLapsed(memberId); } catch { } });"
- },
- {
-  "key": "usage-cache · src/server/usage-pool-engine.js · create > noteApiDerivedWindow · writeWindowStamp()",
-  "verdict": "sync",
-  "why": "written at once; a sidecar with queued bytes takes their queue (one road per file)",
-  "at": "src/usage-cache-write.js:ONE ROAD PER FILE"
- },
- {
-  "key": "usage-cache · src/server/usage-pool-engine.js · create > noteApiDerivedWindow · writeSidecar()",
-  "verdict": "sync",
-  "why": "written at once; a sidecar with queued bytes takes their queue (one road per file)",
-  "at": "src/usage-cache-write.js:ONE ROAD PER FILE"
- },
- {
-  "key": "usage-cache · src/server/usage-pool-engine.js · create > writeCodexReading · writeCacheObject()",
-  "verdict": "none",
-  "why": "steps use the snapshot, not file"
- },
- {
-  "key": "usage-cache · src/server/usage-pool-engine.js · create > markLimitBannerNow · writeCacheObject()",
-  "verdict": "none",
-  "why": "steps follow the banner, not file"
- },
- {
-  "key": "usage-cache · src/server/usage-pool-engine.js · create > reanchorLapsedMember · writeWindowStamp()",
-  "verdict": "waits",
-  "why": "The offLoop .window- write is awaited and its answer checked: not landed within the 20 s bound ⇒ return false, nothing re-anchored and the panel stays refused.",
-  "at": "src/server/usage-pool-engine.js:if (!(await windowStamp.writeWindowStamp(USAGE_CACHE_DIR, key, stamp, producer, { offLoop: true }))) return false; // the ONE writer (null = the folder could not be read: nobody can tell)"
- },
- {
-  "key": "usage-cache · src/server/usage-pool-engine.js · create > reanchorLapsedMember · writeSidecar()",
-  "verdict": "waits",
-  "why": "the reanchor goes on only once both sidecars landed (awaited offLoop)",
-  "at": "src/server/usage-pool-engine.js:if (!(await usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key)"
  }
 ]

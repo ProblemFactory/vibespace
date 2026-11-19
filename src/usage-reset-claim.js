@@ -48,11 +48,8 @@ function at(dataDir, { known = null, nameOf = null } = {}) {
     const mine = (e) => !!e && !!e.cacheDir && path.resolve(path.dirname(String(e.cacheDir))) === path.resolve(dataDir);
     try {
       const W = require('./usage-cache-write.js');
-      // the deferred-save census (its usage pass): a claim settles on a reading that is ON DISK — the store hears it at that reading's
-      // landing (at once where nothing is owed), never before (a reading held in its no-replay state could land after the claim's end)
-      const atLanding = (e, fn) => { try { if (typeof W.afterLanded === 'function' && e.key) W.afterLanded(W.cacheFileFor(e.cacheDir, e.key), fn); else fn(); } catch { fn(); } };
-      W.onLanesRead((e) => { if (mine(e)) atLanding(e, () => { try { st.noteLanesRead(e.key, e.lanes); } catch { } }); });
-      W.onVendorReset((e) => { if (mine(e)) atLanding(e, () => { try { st.noteResetSeen(e.key, e.resets, { name: st.nameOf(e.key) }); } catch { } }); });
+      W.onLanesRead((e) => { if (mine(e)) { try { st.noteLanesRead(e.key, e.lanes); } catch { } } });
+      W.onVendorReset((e) => { if (mine(e)) { try { st.noteResetSeen(e.key, e.resets, { name: st.nameOf(e.key) }); } catch { } } });
     } catch { }
   }
   const s = _byFile.get(file);

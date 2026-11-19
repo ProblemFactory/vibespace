@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // test-deferred-save-census — lane lg-store-writes, B-0248 (主开发 03:00Z: THE CLASS BECOMES A CENSUS, A RED TEST, NOT A HUNT).
 // For every store this chain DEFERS (src/store-writer.js writes it later: jobs.json + job-notifications.json, task-groups.json,
-// browser-profiles.json, the usage readings and their sidecars), EVERY CALL SITE of its save — found mechanically
+// browser-profiles.json — the usage readings went back to their synchronous road, 主开发 2026-11-19 08:56Z), EVERY CALL SITE of its save — found mechanically
 // (scripts/deferred-save-census.mjs) — carries ONE verdict of a closed set (scripts/fixtures/deferred-save-verdicts.json):
 //   waits — the reply to the person / agent waits for the landing (persisted, onDisk, whenLanded, a removal's landing)
 //   rides — what cannot be undone after this save runs in a step riding the landing (store-writer afterLanding / ride)
@@ -22,7 +22,7 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const { ok, report } = checker();
 
 const VERDICTS = new Set(['waits', 'rides', 'none', 'sync']);
-const RIDE_RE = /\b(?:_ride|rideLanding|ride|afterLanding|afterNotifsLanded|afterLanded)\(/;
+const RIDE_RE = /\b(?:_ride|rideLanding|ride|afterLanding|afterNotifsLanded)\(/;
 const SYNC_RE = /\b(?:landNow|_onDisk|_landNow|flushSync|saveNow|_saveNotifs|commitSync)\(/;
 const ROWS = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/deferred-save-verdicts.json'), 'utf8'));
 
@@ -53,7 +53,7 @@ console.log('① ② ③ ④ every call site of a deferred store\'s save carries
 const sites = deferredSaveSites(REPO);
 const j = judge(sites, ROWS);
 const byStore = {}; for (const s of sites) byStore[s.store] = (byStore[s.store] || 0) + 1;
-ok(sites.length > 200 && Object.keys(byStore).length === 4, `the mechanical list: ${sites.length} call sites over the four deferred stores ${JSON.stringify(byStore)}`, byStore);
+ok(sites.length > 200 && Object.keys(byStore).length === 3, `the mechanical list: ${sites.length} call sites over the three deferred stores ${JSON.stringify(byStore)}`, byStore);
 ok(!j.missing.length, `① every call site has a row (${ROWS.length} rows) — a site with no row is RED by name`, j.missing.slice(0, 20));
 ok(!j.dead.length, '② every row names a function that still calls a save — the list only tells the truth', j.dead.slice(0, 20));
 ok(!j.bad.length, '③ every verdict is of the closed set (waits / rides / none / sync); «none» says why in six words at most', j.bad.slice(0, 20));
