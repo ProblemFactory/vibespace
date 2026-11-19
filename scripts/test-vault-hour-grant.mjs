@@ -232,7 +232,10 @@ const saveAs = (w, body, reauthed) => (typeof w.door.saveRow === 'function' ? w.
 // real picker MODEL maps it — the dialog's own pickToRow / rowToPick), the reveal window (the test answers the 验证是你 prompt,
 // or cancels it); the page's clock is the world's. A base tree's dialog runs the same way — its RED is by name. Each dialog its own
 // page record (`openDialog` points the page edge at it — one dialog in use at a time).
-globalThis.__vurPage = { now: () => Date.now() };
+// bl-vault-ckpt61-hosted-cure: the page edge answers t AT THE BUNDLE'S LOAD, not only once a dialog opens — the row imports
+// need-line.js (ui-needs-a-button, 3aeac2835), which reaches settings-schema.js, whose table calls t when its module loads; a
+// page edge with a clock only failed every dialog leg at the import («globalThis.__vurPage.t is not a function»)
+globalThis.__vurPage = { now: () => Date.now(), t: tEN };
 class PageDate extends Date { constructor(...a) { if (a.length) super(...a); else super(globalThis.__vurPage.now()); } static now() { return globalThis.__vurPage.now(); } }
 globalThis.__vurPageDate = PageDate;
 let DLG = null;
@@ -880,6 +883,19 @@ for (const K of ['local', 'cluster']) {
     // (Ⓨb's dictionary half — the zh sentence of the stale-grant refusal: MOVED to the fast scripts/test-vault-hour-grant-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
     ok(!!(win2.a && win2.a.ok && ad.ok && r2.code === 'hosts_required' && r2.principal === `conversation:${CID}` && words === KEY && nar && (nar.scopes || []).some((sc) => sc.host === 'b.example')), 'Ⓨb a refusal that remains — the hub holds b.example for Narrator, written since the dialog opened — never says «Name the hosts Narrator may use it for»: «这个授权在对话框打开期间变了 — 关掉再打开一次» (nothing written; b.example kept) — its words: the fast …-pins', { r2: r2 && { code: r2.code, principal: r2.principal }, words });
   });
+  // bl-vault-ckpt61-hosted-cure: THE DIALOG LOADS AS IT SHIPS, its imports included — a load that fails is ONE red by name, never
+  // the dialog legs' silent defaults (saved null, no post, no words); its control: the page edge as it was (a clock only) ⇒ the
+  // same bundle does not load, by name
+  {
+    const M0 = await dialogModule();
+    ok(!M0.error && typeof M0.showUseGrantDialog === 'function', 'r11 page edge: the dialog bundle LOADS as it ships — need-line → settings-schema call t at load, and the page edge answers it before the first import', M0.error);
+    const keep = globalThis.__vurPage;
+    globalThis.__vurPage = { now: () => Date.now() };   // the page edge before the cure: a clock only
+    let ctl = null;
+    try { await import(pathToFileURL(path.join(ROOT, 'vault-use-row.bundle.mjs')).href + '?ctl=' + Date.now()); } catch (e) { ctl = String((e && e.message) || e); }
+    globalThis.__vurPage = keep;
+    ok(/t is not a function/.test(String(ctl)), 'RED control (ckpt61): with the page edge a clock only, the same bundle does NOT load — by name («t is not a function»)', ctl);
+  }
   console.log('ⓐ (r11, MAJOR) A TASK GROUP MEMBER IS KNOWN BY ITS PRINCIPAL — the dialog itself (src/lib/vault-use-row.js as it ships)');
   await leg('ⓐ the Task Group member', async () => {
     const C = 'cid-left-out', D = 'cid-d', T1 = 'cid-team-1', G = 'g-team', MONTH = 30 * 86400e3;
