@@ -2022,6 +2022,7 @@ class MountManager {
 
   async _healthSweep() {
     if (this._sweepBusy) return;
+    try { const { pruneSignIns } = require('./gmail-sync'); pruneSignIns(this._driveSignIns); pruneSignIns(this.gmail && this.gmail._signIns); } catch { }   // B-e40d: a sign-in's client leaves at its day's end
     this._sweepBusy = true;
     try {
       for (const m of [...this._state.mounts]) {
@@ -2742,7 +2743,7 @@ class MountManager {
    *  names none here: its first proven-good refresh adopts the client (_adoptClient). A record with its own client names
    *  none. → the field or null. */
   static mintClientOf(m, x, tok) {
-    if (!m || m.clientId || !tok) return null;
+    if (!m || m.clientId || !tok || (m.type && !rowFor(x, m).mintedClient?.(m))) return null;   // only a record whose ROW takes a minted client (drive, gmail, an rclone Drive under a preset)
     const c = MountManager.signInOf(x, tok);
     return c ? { id: c.clientId, key: m.clientPreset || null, sealed: x._enc(c.clientSecret) } : null;
   }
@@ -2764,6 +2765,8 @@ class MountManager {
     const si = MountManager.signInOf(x, tok);
     return si && (!pc || String(pc.clientId) !== si.clientId) ? si : pc;
   }
+  /** A record's sealed token: a Drive / Gmail record's `tokenEnc`, an rclone-type Drive record's `paramsEnc.token`. */
+  static _sealedTokenOf(m) { return (m && (m.tokenEnc || (m.paramsEnc && typeof m.paramsEnc.token === 'string' ? m.paramsEnc.token : null))) || null; }
   /** The refresh token inside a token's JSON text, or null. */
   static _rtOf(tok) { try { const t = JSON.parse(String(tok)); return t && typeof t.refresh_token === 'string' && t.refresh_token ? t.refresh_token : null; } catch { return null; } }
   /** Set (or clear) a record's minted client for a token about to be saved — called BEFORE its tokenEnc is written. No key at
@@ -2772,24 +2775,36 @@ class MountManager {
   static setMinted(m, x, tok) {
     const mc = MountManager.mintClientOf(m, x, tok);
     if (mc) { m.mintedClient = mc; return; }
-    let prev = null; try { prev = m.tokenEnc ? MountManager._rtOf(x._dec(m.tokenEnc)) : null; } catch { prev = null; }
+    let prev = null; try { const se = MountManager._sealedTokenOf(m); prev = se ? MountManager._rtOf(x._dec(se)) : null; } catch { prev = null; }
     if (!m.clientId && m.mintedClient && prev && prev === MountManager._rtOf(tok)) return;
     delete m.mintedClient;
   }
   /** The minted client opened ({clientId, clientSecret}), or null: none named — or its sealed secret cannot be opened, which
    *  is never silent (the hub's log says it once: the mount refreshes with the preset; re-authorize it). A LOCKED vault (the
-   *  key sealed by the second password) is no unreadable copy: the copy opened before is used — a running Gmail worker, whose
-   *  token is in memory, refreshes on — and nothing is said. */
-  static mintedOf(m, x) {
+   *  key sealed by the second password) is no unreadable copy: nothing is said, `why.locked` tells the caller, and the MANAGER
+   *  keeps no opened copy — the lock reaches every reader; only a running worker holds the copy it opened (mintedReader), as it
+   *  holds its token. */
+  static mintedOf(m, x, why = null) {
     const mc = m && !m.clientId && m.mintedClient && typeof m.mintedClient === 'object' && typeof m.mintedClient.id === 'string' && m.mintedClient.id ? m.mintedClient : null;
     if (!mc) return null;
     let sec = null, locked = false;
     try { sec = typeof mc.sealed === 'string' && mc.sealed ? x._dec(mc.sealed) : null; } catch (e) { sec = null; locked = /vault_locked/.test(String((e && e.reason) || '')); }
-    const opened = MountManager._mintedOpen || (MountManager._mintedOpen = new Map()), ck = `${mc.id}|${mc.sealed}`;
-    if (typeof sec === 'string' && sec) { opened.delete(ck); opened.set(ck, sec); while (opened.size > 64) opened.delete(opened.keys().next().value); return { clientId: mc.id, clientSecret: sec }; }
-    if (locked) { const kept = opened.get(ck); return kept ? { clientId: mc.id, clientSecret: kept } : null; }
+    if (typeof sec === 'string' && sec) return { clientId: mc.id, clientSecret: sec };
+    if (locked) { if (why) { why.locked = true; why.id = mc.id; } return null; }
     MountManager.sayMinted(m, mc.id, null, true);
     return null;
+  }
+  /** B-e40d: a running Gmail worker's READER of its record's minted client — read at EACH refresh (a client adopted while the
+   *  worker runs is used at once). The copy it last opened is held ON THE WORKER (in this closure — as the worker holds its
+   *  token), so a locked vault stops no running worker; it is used only while the record still names that client. */
+  static mintedReader(x, id) {
+    let held = null;
+    return () => {
+      const why = {};
+      const r = MountManager.mintedOf(x._state.mounts.find((y) => y.id === id), x, why);
+      if (r) { held = r; return r; }
+      return why.locked && held && held.clientId === why.id ? held : null;
+    };
   }
   /** The export carries the minted client like the record's other secrets (plaintext — the caller seals the bundle under the
    *  export passphrase); the import seals it again under this instance's key (_mintedImport). */
@@ -2833,7 +2848,8 @@ class MountManager {
    *  Drive / Gmail records only (written on the credential holder — a child's token is its parent's). → whether it wrote. */
   _adoptClient(rec, used) {
     const holder = rec && rec.parentId ? this._state.mounts.find((x) => x.id === rec.parentId) : rec;
-    if (!holder || holder.clientId || !['drive', 'gmail'].includes(holder.type) || !used || !used.clientId || !used.clientSecret) return false;
+    const ruled = !!(holder && rowFor(this, holder).mintedClient?.(holder));   // the record's ROW declares it takes a minted client
+    if (!holder || holder.clientId || !ruled || !used || !used.clientId || !used.clientSecret) return false;
     const mc = holder.mintedClient && typeof holder.mintedClient === 'object' ? holder.mintedClient : null;
     if (mc && mc.id !== String(used.clientId)) return false;
     let same = false; try { same = !!mc && this._dec(mc.sealed) === String(used.clientSecret); } catch { same = false; }
@@ -2852,7 +2868,7 @@ class MountManager {
       if (!t || !t.refresh_token || !(e > 0 && e < Date.now() - 60e3)) return false;
       // the RECORD that holds the token: a submount's parent — never _connOf's merged copy, which no write reaches
       const holder = m && m.parentId ? this._state.mounts.find((x) => x.id === m.parentId) : m;
-      let cur = null; try { cur = holder && holder.tokenEnc ? MountManager._rtOf(this._dec(holder.tokenEnc)) : null; } catch { cur = null; }
+      let cur = null; try { const se = MountManager._sealedTokenOf(holder); cur = se ? MountManager._rtOf(this._dec(se)) : null; } catch { cur = null; }
       if (cur !== t.refresh_token) return false;
       return this._adoptClient(holder, { clientId: env.RCLONE_CONFIG_VS_CLIENT_ID, clientSecret: env.RCLONE_CONFIG_VS_CLIENT_SECRET });
     } catch { return false; }
@@ -2924,7 +2940,7 @@ class MountManager {
       clientSecret: m.clientSecretEnc ? this._dec(m.clientSecretEnc) : null,
       // B-e40d: the client its token was minted under (gmail-sync uses it when the preset under the key names another) — read
       // AT EACH REFRESH, never a copy taken at start: a client adopted while this worker runs is the one its next refresh uses
-      name: MountManager.lentName(m) || id, minted: () => MountManager.mintedOf(this._state.mounts.find((x) => x.id === id), this),
+      name: MountManager.lentName(m) || id, minted: MountManager.mintedReader(this, id),
       syncCount: m.syncCount, labelIds: m.labelIds, query: m.query, groupBy: m.groupBy,
     });
     m.desired = 'mounted';

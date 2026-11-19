@@ -121,7 +121,9 @@ console.log('§4 THE MINTED CLIENT (B-e40d): a preset swapped under the same key
   const S_M = 'GOC' + 'SPX-mounts-minted-MMMMMMMMMMMMMMMMMMMM', S_N = 'GOC' + 'SPX-mounts-swapped-NNNNNNNNNNNNNNNNNNN', S_R = 'GOC' + 'SPX-mounts-rotsame-RRRRRRRRRRRRRRRRRRR', S_Z = 'GOC' + 'SPX-mounts-fallbk-ZZZZZZZZZZZZZZZZZZZZ';
   const ORG1 = 'org1.apps.googleusercontent.com', swapped = { key: 'org1', label: 'org1', clientId: 'replaced.apps.googleusercontent.com', clientSecret: S_N };
   const DRIVE = require(path.join(REPO, 'src/mount-providers/drive.js')), GMAIL = require(path.join(REPO, 'src/mount-providers/gmail.js'));
-  const tok = (rt) => JSON.stringify({ access_token: 'a', refresh_token: rt, expiry: '2026-11-18T00:00:00Z' });   // spent: a probe that answers refreshed
+  const SPENT = new Date(Date.now() - 2 * 3600e3).toISOString();   // two hours ago, whatever the run's date: a probe that answers had to refresh
+  const tok = (rt) => JSON.stringify({ access_token: 'a', refresh_token: rt, expiry: SPENT });
+  const RCLONE = require(path.join(REPO, 'src/mount-providers/rclone.js')), GS = require(path.join(REPO, 'src/gmail-sync.js'));
   const rcl = (m, P = DRIVE) => { const e = {}; P.rclone(m, e, (k) => 'VS_' + k, (x) => x, mm); return `${e.VS_CLIENT_ID}|${e.VS_CLIENT_SECRET}`; };
   const sealed = (m) => (m.mintedClient ? `${m.mintedClient.id}|${mm._dec(m.mintedClient.sealed)}` : 'none');
   const quietLog = (fn) => { const l = console.log; console.log = () => {}; try { return fn(); } finally { console.log = l; } };
@@ -161,14 +163,55 @@ console.log('§4 THE MINTED CLIENT (B-e40d): a preset swapped under the same key
     mm._driveAuth = { token: tok('rt-z3'), client: { clientId: ORG1, clientSecret: S_M } }; DRIVE.update(z, { token: tok('rt-z3') }, () => {}, mm); mm._driveAuth = null;
     const had3 = sealed(z); DRIVE.writeToken(z, tok('rt-z4'), mm);
     ok(had === `${ORG1}|${S_M}` && !afterUpdate && had3 === `${ORG1}|${S_M}` && !('mintedClient' in z), 'a NEW token no sign-in names clears the old minted client — on Drive\'s update and on its re-authorize road (writeToken) alike', { had, afterUpdate, had3 }); }
-  // a LOCKED vault (the key sealed by the second password) is no unreadable copy: the copy opened before is used, nothing is said
-  { const lk = { ...d, id: 'drv-lock', name: 'locked one' };
-    const first = MountManager.mintedOf(lk, mm);
+  // a LOCKED vault (the key sealed by the second password) is no unreadable copy: nothing is said; the WORKER's reader keeps the
+  // copy it opened (as the worker keeps its token) and the manager keeps none — the lock reaches every other reader
+  { const lk = { ...d, id: 'drv-lock', name: 'locked one' }; mm._state.mounts.push(lk);
+    const read = MountManager.mintedReader(mm, 'drv-lock'), first = read();
     const saidL = []; const l2 = console.log; console.log = (...x) => saidL.push(x.join(' '));
     const dec0 = mm._dec;
     mm._dec = (blob) => { if (blob === lk.mintedClient.sealed) throw Object.assign(new Error('the vault is locked'), { reason: 'key-unreadable:vault_locked' }); return dec0.call(mm, blob); };
-    let kept; try { kept = MountManager.mintedOf(lk, mm); } finally { delete mm._dec; console.log = l2; }
-    ok(!!first && !!kept && kept.clientId === first.clientId && kept.clientSecret === first.clientSecret && saidL.length === 0, 'a LOCKED vault: the minted client opened before is used (a running Gmail worker refreshes on) and nothing is said — a lock is no unreadable copy', { saidL }); }
+    const why = {}; let held, bare, other;
+    try { held = read(); bare = MountManager.mintedOf(lk, mm, why); other = MountManager.mintedReader(mm, 'drv-lock')(); }
+    finally { delete mm._dec; console.log = l2; mm._state.mounts = mm._state.mounts.filter((x) => x.id !== 'drv-lock'); }
+    ok(!!first && !!held && held.clientId === first.clientId && held.clientSecret === first.clientSecret && bare === null && why.locked === true && other === null && saidL.length === 0,
+      'a LOCKED vault: the running worker\'s reader keeps the copy it opened (as it keeps its token) and nothing is said; the manager keeps NONE — mintedOf and a reader that never opened it answer null', { saidL, bare, other }); }
+  // SEALED FIRST: with the vault locked, a token pasted on any road is refused BEFORE the record's minted client changes
+  { const zl = { type: 'drive', clientPreset: 'org1', tokenEnc: mm._enc(tok('rt-zl')), mintedClient: { id: ORG1, key: 'org1', sealed: mm._enc(S_M) } };
+    const gl = { type: 'gmail', clientPreset: 'org1', tokenEnc: mm._enc(tok('rt-gl')), mintedClient: { id: ORG1, key: 'org1', sealed: mm._enc(S_M) } };
+    const enc0 = mm._enc; const refused = [];
+    mm._enc = () => { throw Object.assign(new Error('the vault is locked'), { reason: 'key-unreadable:vault_locked' }); };
+    try {
+      for (const [n, f] of [['drive update', () => DRIVE.update(zl, { token: tok('rt-zl2') }, () => {}, mm)], ['drive writeToken', () => DRIVE.writeToken(zl, tok('rt-zl3'), mm)], ['gmail PATCH', () => GMAIL.update(gl, { token: tok('rt-gl2') }, () => {}, mm)]]) {
+        try { f(); refused.push(n + ': not refused'); } catch { refused.push(n); }
+      }
+    } finally { delete mm._enc; }
+    ok(refused.join() === 'drive update,drive writeToken,gmail PATCH' && sealed(zl) === `${ORG1}|${S_M}` && sealed(gl) === `${ORG1}|${S_M}`, 'SEALED FIRST: with the vault locked a pasted token is refused on Drive\'s update, its re-authorize road and Gmail\'s PATCH — BEFORE the record\'s minted client changes (it still names it)', refused); }
+  // an rclone-type Drive record (rcloneType drive, its token in its params) is under the same rule
+  { use([g('org1', S_M)]); mm._driveAuth = { token: tok('rt-rc'), client: { clientId: ORG1, clientSecret: S_M } };
+    const rc = { id: 'rc-drive', type: 'rclone', rcloneType: 'drive', name: 'rclone drive', clientPreset: 'org1', paramsEnc: {} };
+    RCLONE.writeToken(rc, tok('rt-rc'), mm); mm._driveAuth = null;
+    const rce = () => { const e = {}; RCLONE.rclone(rc, e, (k) => 'VS_' + k, 'VS', mm); return `${e.VS_CLIENT_ID}|${e.VS_CLIENT_SECRET}`; };
+    use([swapped]);
+    const out = quietLog(rce);
+    delete rc.mintedClient; mm._state.mounts.push(rc);
+    let adopted = false; try { adopted = mm._adoptClient(rc, { clientId: ORG1, clientSecret: S_M }); } finally { mm._state.mounts = mm._state.mounts.filter((x) => x.id !== 'rc-drive'); }
+    const own = { type: 'rclone', rcloneType: 'drive', paramsEnc: {} }; mm._driveAuth = { token: tok('rt-rc2'), client: { clientId: ORG1, clientSecret: S_M } }; RCLONE.writeToken(own, tok('rt-rc2'), mm); mm._driveAuth = null;
+    ok(out === `${ORG1}|${S_M}` && adopted === true && sealed(rc) === `${ORG1}|${S_M}` && !('mintedClient' in own), 'an rclone-type Drive record: its re-authorize names the sign-in\'s client, its rclone env keeps it after the swap, a proven refresh adopts it; one with no preset (its own params client) names none', { out, adopted, own: 'mintedClient' in own }); }
+  // the sign-in memory's bounds: sixteen at most (the oldest leaves), a day each — gone at a read past it and at the 60 s sweep
+  { const mem = new Map();
+    for (let i = 0; i < 17; i++) GS.keepSignIn(mem, { token: tok(`rt-mem-${i}`), client: { clientId: ORG1, clientSecret: S_M } });
+    const evicted = GS.signInClient(mem, 'rt-mem-0'), newest = GS.signInClient(mem, 'rt-mem-16'), size16 = mem.size;
+    const ents = [...mem.values()]; ents[0].at = Date.now() - 24 * 3600e3 - 1000; ents[1].at = Date.now() - 24 * 3600e3 - 1000;   // rt-mem-1 and rt-mem-2: a day and a second old
+    const atRead = GS.signInClient(mem, 'rt-mem-1'), afterRead = mem.size, pruned = GS.pruneSignIns(mem);
+    ok(evicted === null && !!newest && size16 === 16 && atRead === null && afterRead === 15 && pruned === 1 && mem.size === 14 && ![...mem.keys()].some((k) => k.includes('rt-mem')),
+      'the sign-in memory keeps at most SIXTEEN (the oldest leaves) for a DAY each: an entry past its day is gone at a read and at a prune; keyed by a hash, never the token', { size16, afterRead, pruned, size: mem.size });
+    const drv = (mm._driveSignIns ||= new Map()), gml = mm.gmail._signIns, age = (mp) => { const k = [...mp.keys()].pop(); mp.get(k).at = Date.now() - 24 * 3600e3 - 1000; return k; };   // the entry just kept: a day and a second old
+    GS.keepSignIn(drv, { token: tok('rt-old-d'), client: { clientId: ORG1, clientSecret: S_M } }); const kd = age(drv);
+    GS.keepSignIn(gml, { token: tok('rt-new-g'), client: { clientId: ORG1, clientSecret: S_M } }); const kn = [...gml.keys()].pop();   // kept FIRST: a later keep prunes the aged one itself
+    GS.keepSignIn(gml, { token: tok('rt-old-g'), client: { clientId: ORG1, clientSecret: S_M } }); const kg = age(gml);
+    const keepM = mm._state.mounts; mm._state.mounts = [];
+    try { await mm._healthSweep(); } finally { mm._state.mounts = keepM; }
+    ok(!drv.has(kd) && !gml.has(kg) && gml.has(kn) && kn !== kg, 'the hub\'s 60 s mount sweep drops a sign-in\'s client at its day\'s end — the Drive and the Gmail memory alike (no new timer); a fresh one stays'); }
   // a Gmail sign-in takes only the request's client fields: a `minted` in its body never picks the client
   { use([g('org1', S_M)]);
     await mm.gmail.startAuth({ clientPreset: 'org1', minted: { clientId: 'body.apps.googleusercontent.com', clientSecret: 'body-secret' } });
@@ -228,8 +271,9 @@ console.log('§4 THE MINTED CLIENT (B-e40d): a preset swapped under the same key
     // a FRESH token (rclone refreshed nothing) proves no client; a probe that never ran rclone proves none
     const fresh = { id: 'drv-fresh', type: 'drive', name: 'fresh', tokenEnc: mm._enc(JSON.stringify({ access_token: 'a', refresh_token: 'rt-f', expiry: new Date(Date.now() + 3600e3).toISOString() })), clientPreset: 'org1' };
     mm._state.mounts.push(fresh); use([g('org1', S_M)]);
+    const ranBefore = ran.length;
     await probe(fresh);
-    ok(!fresh.mintedClient, 'a probe answered on a FRESH token (rclone refreshed nothing) adopts nothing');
+    ok(ran.length === ranBefore + 1 && !fresh.mintedClient, 'a probe that really RAN (its rclone answered «listed») on a FRESH token (rclone refreshed nothing) adopts nothing', ran.length - ranBefore);
     mm._rcloneFor = () => { throw new Error('unreadable extra params'); };
     try { fresh.tokenEnc = mm._enc(tok('rt-f')); await probe(fresh); } finally { delete mm._rcloneFor; }
     ok(!fresh.mintedClient, 'a probe that never ran rclone (its env could not be built: «ok» with no proof) adopts nothing');
@@ -324,7 +368,7 @@ console.log('§4 THE MINTED CLIENT (B-e40d): a preset swapped under the same key
       mm.gmail._onClientProven('g-work', { clientId: ORG1, clientSecret: S_M }, 'rt-other');
       ok(!recW.mintedClient, 'a refresh of a token the record no longer holds adopts nothing');
       // RED control (a patched copy of mounts.js, its plant first): the worker handed a COPY of the minted client at start
-      const anchorW = '      name: MountManager.lentName(m) || id, minted: () => MountManager.mintedOf(this._state.mounts.find((x) => x.id === id), this),';
+      const anchorW = '      name: MountManager.lentName(m) || id, minted: MountManager.mintedReader(this, id),';
       ok(msrc4.includes(anchorW), 'RED control, its plant first: _mountGmail hands the worker a reader of the record');
       const MW = M.load('src/mounts.js', anchored(msrc4, anchorW, '      name: MountManager.lentName(m) || id, minted: MountManager.mintedOf(m, this),', 'worker-copy'), 'worker-copy');
       mm.gmail.stop('g-work'); sent.length = 0;
@@ -333,6 +377,14 @@ console.log('§4 THE MINTED CLIENT (B-e40d): a preset swapped under the same key
       await refresh(w); use([swapped]); await refresh(w);
       ok(sealed(recW) === `${ORG1}|${S_M}` && sent[0] === ORG1 && sent[1] === swapped.clientId, 'RED control: a worker that keeps the copy it was handed at start adopts, then refreshes with the SWAPPED client after the swap — the outage, for every Gmail mount mounted at the deploy', sent);
     } finally { mm.gmail.stop('g-work'); delete mm.gmail._loop; globalThis.fetch = fetch0; mm._state.mounts = mm._state.mounts.filter((x) => x.id !== 'g-work'); } }
+  // THE LABELS READ (the picker over a saved record): its refresh that worked adopts the client too — the real listGmailLabels →
+  // gmail-sync listLabels → _accessToken; only the token endpoint and the labels answer stand in
+  { const recL = { id: 'g-lab', name: 'mail-labels', type: 'gmail', mode: 'ro', tokenEnc: mm._enc(tok('rt-lab')), clientPreset: 'org1' };
+    mm._state.mounts.push(recL); use([g('org1', S_M)]);
+    const fetch0 = globalThis.fetch, asked = [];
+    globalThis.fetch = async (url, o) => { asked.push(String(url).includes('oauth2') ? 'token' : 'labels'); return { ok: true, status: 200, json: async () => (String(url).includes('oauth2') ? { access_token: 'at', expires_in: 3600 } : { labels: [{ id: 'INBOX', name: 'INBOX', type: 'system' }] }) }; };
+    let labels = null; try { labels = await mm.listGmailLabels({ id: 'g-lab' }); } finally { globalThis.fetch = fetch0; mm._state.mounts = mm._state.mounts.filter((x) => x.id !== 'g-lab'); }
+    ok(asked.join() === 'token,labels' && Array.isArray(labels) && labels.length === 1 && sealed(recL) === `${ORG1}|${S_M}`, 'a LABELS read over a saved record whose refresh worked adopts its client (listGmailLabels hands gmail-sync the record\'s id)', { asked, n: labels && labels.length }); }
   mm.gmail._auth = { token: tok('rt-g2'), client: { clientId: swapped.clientId, clientSecret: S_N } };
   GMAIL.update(gm, { token: tok('rt-g2') }, () => {}, mm);
   ok(gm.mintedClient.id === swapped.clientId, 'a Gmail re-authorize (its PATCH with a token) names the client its sign-in used');

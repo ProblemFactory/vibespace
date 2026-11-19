@@ -12,6 +12,7 @@ module.exports = {
                           // a backend another row adopts (drive / onedrive / the cloud list) normalizes to that row
   s3Backend: (m) => m.rcloneType === 's3',
   oauthBacked: (m, MM) => MM.OAUTH_BACKENDS.includes(m.rcloneType),
+  mintedClient: (m) => m.rcloneType === 'drive' && !!m.clientPreset,   // B-e40d: a raw rclone Drive record under a preset (its own params client otherwise)
   rootMayBeDenied: (m, MM) => MM.BUCKETY_BACKENDS.has(m.rcloneType),   // bucket-scoped keys can't list the root
   label: (m) => `${m.rcloneType}:${m.remotePath || ''}`,
   config(m, out, dec, x) {
@@ -81,7 +82,7 @@ module.exports = {
     // as a fallback for records imported before this).
     if (m.rcloneType === 'drive') {
       if (m.clientPreset) {
-        const pc = x.constructor._driveClient({ clientPreset: m.clientPreset });
+        const pc = x.constructor.refreshClient(m, x);   // B-e40d: the preset while it names the client the token was minted under, else that client
         if (pc) { env[P('CLIENT_ID')] = pc.clientId; env[P('CLIENT_SECRET')] = pc.clientSecret; }
       }
       if (m.rootFolderId) env[P('ROOT_FOLDER_ID')] = m.rootFolderId;
@@ -99,7 +100,9 @@ module.exports = {
   writeToken(holder, tok, x) {
     if (holder.rcloneType !== 'drive') throw new Error('Not an OAuth cloud connection');
     holder.paramsEnc = holder.paramsEnc || {};
-    holder.paramsEnc.token = x._enc(tok);
+    const enc = x._enc(tok);   // B-e40d: sealed FIRST, then the client its sign-in minted the token under (as drive.js's writeToken)
+    x.constructor.setMinted(holder, x, tok);
+    holder.paramsEnc.token = enc;
   },
   // the CLIENT cells (lane dc-mount-client): pure data GET /api/mounts publishes once (`providers`); src/lib/sidebar-mounts.js
   // renders the sidebar row, the Connect / submount / Edit dialogs and the re-authorize words from them — it names no provider

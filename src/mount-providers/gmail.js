@@ -11,6 +11,7 @@ module.exports = {
   presetClient: { idAlone: false },   // D2: a custom client is its id AND its secret
   filesystem: false,      // no fuse mount to probe, shadow or remount — the worker owns the folder
   rclone: false,          // needs no rclone binary
+  mintedClient: () => true,   // B-e40d: a preset-backed record names the OAuth client its token was minted under (gmail-sync _client)
   labels: true,           // the labels picker (listGmailLabels)
   syncStateFile: '.vibespace-gmail-state.json',   // dropped on a scope change (update() answers 'reseed')
   label: (m) => 'Gmail' + (m.email ? `: ${m.email}` : '') + (m.query ? ` (${m.query})` : ''),
@@ -58,7 +59,7 @@ module.exports = {
     if (patch.labelIds !== undefined) m.labelIds = String(patch.labelIds || '');
     if (patch.query !== undefined) m.query = String(patch.query || '');
     if (patch.clientPreset !== undefined) m.clientPreset = patch.clientPreset ? String(patch.clientPreset) : null;
-    if (patch.token) { JSON.parse(String(patch.token).trim()); x.constructor.setMinted(m, x, String(patch.token).trim()); m.tokenEnc = x._enc(String(patch.token).trim()); }   // B-e40d: a re-authorize names the client its sign-in minted under
+    if (patch.token) { const t = String(patch.token).trim(); JSON.parse(t); const enc = x._enc(t); x.constructor.setMinted(m, x, t); m.tokenEnc = enc; }   // sealed FIRST: a locked vault refuses before the client changes   // B-e40d: a re-authorize names the client its sign-in minted under
     return scopeChanged ? 'reseed' : undefined;
   },
   // the CLIENT cells (lane dc-mount-client): pure data GET /api/mounts publishes once (`providers`); src/lib/sidebar-mounts.js

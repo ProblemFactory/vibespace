@@ -46,18 +46,26 @@ function decodeHeaderWord(s) {
 const SIGNIN_KEEP_MS = 24 * 3600e3;
 const rtOf = (tok) => { try { const t = JSON.parse(String(tok)); return t && typeof t.refresh_token === 'string' && t.refresh_token ? t.refresh_token : null; } catch { return null; } };
 const rtKey = (rt) => crypto.createHash('sha256').update(String(rt)).digest('hex');
+/** Drop every entry past its day (the hub's 60 s mount sweep asks, src/mounts.js _healthSweep — an entry leaves at its day's end,
+ *  never only at the next sign-in). → how many left. */
+function pruneSignIns(map, now = Date.now()) {
+  let n = 0;
+  if (map) for (const [k, v] of map) if (!v || now - v.at > SIGNIN_KEEP_MS) { map.delete(k); n++; }
+  return n;
+}
 function keepSignIn(map, st) {
   const rt = rtOf(st && st.token), c = st && st.client;
   if (!map || !rt || !c || !c.clientId || !c.clientSecret) return;
   const now = Date.now();
-  for (const [k, v] of map) if (now - v.at > SIGNIN_KEEP_MS) map.delete(k);
+  pruneSignIns(map, now);
   map.delete(rtKey(rt));
   map.set(rtKey(rt), { client: { clientId: String(c.clientId), clientSecret: String(c.clientSecret) }, at: now });
   while (map.size > 16) map.delete(map.keys().next().value);
 }
 function signInClient(map, rt) {
-  const v = map && rt ? map.get(rtKey(rt)) : null;
-  return v && Date.now() - v.at <= SIGNIN_KEEP_MS ? v.client : null;
+  const k = map && rt ? rtKey(rt) : null, v = k ? map.get(k) : null;
+  if (v && Date.now() - v.at > SIGNIN_KEEP_MS) { map.delete(k); return null; }   // past its day: gone
+  return v ? v.client : null;
 }
 
 class GmailSync {
@@ -490,4 +498,4 @@ class GmailSync {
   }
 }
 
-module.exports = { GmailSync, keepSignIn, signInClient };
+module.exports = { GmailSync, keepSignIn, signInClient, pruneSignIns };

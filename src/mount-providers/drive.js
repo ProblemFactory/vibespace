@@ -14,6 +14,7 @@ module.exports = {
   driveModeDefault: 'mydrive',
   sharedDrives: true,     // listSharedDrives (`rclone backend drives`)
   oauthBacked: () => true,
+  mintedClient: () => true,   // B-e40d: a preset-backed record names the OAuth client its token was minted under (MountManager.refreshClient)
   // ONE Google Drive: a raw rclone record / add of this backend normalizes to this row
   adopts: (rcloneType) => rcloneType === 'drive',
   fromRclone(cfg) {
@@ -102,8 +103,9 @@ module.exports = {
       let tok = String(patch.token).trim();
       const jm = tok.match(/\{[\s\S]*\}/); if (jm) tok = jm[0];
       JSON.parse(tok); // validate
-      x.constructor.setMinted(m, x, tok);   // B-e40d: a new token names the client its sign-in minted it under (or none: adopted at its first good refresh)
-      m.tokenEnc = x._enc(tok);
+      const enc = x._enc(tok);   // B-e40d: sealed FIRST — a locked vault refuses here, before the record's client changes
+      x.constructor.setMinted(m, x, tok);   // a new token names the client its sign-in minted it under (or none: adopted at its first good refresh)
+      m.tokenEnc = enc;
     }
   },
   rclone(m, env, P, R, x) {
@@ -142,8 +144,9 @@ module.exports = {
     return { clientId, clientSecret };
   },
   writeToken(holder, tok, x) {
-    x.constructor.setMinted(holder, x, tok);   // B-e40d: a re-authorize (applyDriveToken) names the client its sign-in minted under
-    holder.tokenEnc = x._enc(tok);
+    const enc = x._enc(tok);   // B-e40d: sealed FIRST — a locked vault refuses here, before the record's client changes
+    x.constructor.setMinted(holder, x, tok);   // a re-authorize (applyDriveToken) names the client its sign-in minted under
+    holder.tokenEnc = enc;
   },
   // the CLIENT cells (lane dc-mount-client): pure data GET /api/mounts publishes once (`providers`); src/lib/sidebar-mounts.js
   // renders the sidebar row, the Connect / submount / Edit dialogs and the re-authorize words from them — it names no provider
