@@ -141,6 +141,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Right after VibeSpace starts, the first usage report of a running conversation no longer freezes it for seconds.
 - After a long pause or a big batch from another machine, VibeSpace no longer freezes while it reads the new usage; the Usage window says it is loading.
 - While mounts, open ports or a desktop app's windows are checked in the background, VibeSpace no longer pauses for a moment each time.
+- An unwatched agent browser no longer stops drawing a page while the agent's command on it still runs (a large site's first load could hang ~2 minutes).
 
 ### Security
 - A cluster install can let only its ingress reach each user's VibeSpace (networkPolicy.ingress, off until tried on a test cluster).
