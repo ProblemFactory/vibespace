@@ -1618,6 +1618,11 @@ This file is the engineers' record of every release: the lanes, the verification
 - A MACHINE WHOSE MANAGED CLAUDE SETTINGS SET A KEY HELPER, OR AN ANTHROPIC CREDENTIAL OR ADDRESS (主开发 23:45Z, as if a must; the fact read from the CLI 2.1.322 bundle — the sources merge user, project, local, flag, policy, later overriding earlier, and every source's `env` is copied over the spawn's): a provider start on Claude Code and the provider Test are refused by name before anything spawns, the CLI would otherwise send the organisation's credential to the provider's address. New src/managed-claude-settings.js (the CLI's own managed folders and drop-ins, the env block, bounded reads, «cannot tell» refuses). Legs + RED controls in test-harness-spawn and test-model-providers; red controls for the provider's notice words; the family-names census row names test-harness-spawn.
 - The resume popover leaves a provider row OUT when a stopped card carries another machine (the grey disabled row and its hint are gone); when that provider is the conversation's own saved pick, its row stays by its name with one line naming the refusal (never «Custom…» with a raw pv- id).
 
+
+
+### bl-ci — the secret scan refuses a range it cannot resolve (the test kit's scan check, 2026-11-19)
+- `scripts/secret-scan.mjs --range=<a>..<b>`: a base that is not a commit in the checkout (a remote sha never fetched) used to fall back to the lone-tip reading, `<b> --not --remotes`. Over a clone whose remote-tracking refs hold every commit, that reads nothing, so an unresolvable range answered CLEAN, exit 0, and a push hook handed one would pass anything. Now EITHER end that is not a commit here is a git error: exit 2, named, «NOT a clean verdict» (an unknown tip already was). test-secret-scan ⑤: the base and the two-ended unknown tip are refused by name; CONTROL, the scanner with the old fallback put back reads the kit's shape clean (a published tip whose history carries a token). test-ci-gate-push ROUND 4 (c): the same unfetched-remote push is now blocked at the hook's secret scan (exit 2) before any tier; the path listing's own guard and its NEG are judged with the fixture's scanner stood in as clean.
+
 ## 2.369.410 — 2026-11-18
 
 ### bl-mail B-2f6c — a Gmail re-authorize after a Disconnect never read the mail added to known threads
