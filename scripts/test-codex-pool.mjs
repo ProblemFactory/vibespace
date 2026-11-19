@@ -193,10 +193,55 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
   ok('usage-meter: codex account chips exclude pools (a pool is not a quota holder — same rule as claudeSubs)', /billingRow\(a\.backend\)\.usage === 'codexAccounts' && a\.type === 'subscription'\)/.test(read('src/lib/usage-meter.js')));
   {
     // B-87fd: a pool files no reading of its own — 'auto' with a codex POOL as the default reads its CURRENT member's bucket (the
-    // accounts list's `current`), the reading and the estimate both; the pool's own id is never the bucket's key
-    const umB = read('src/lib/usage-meter.js');
-    ok('usage-meter: \'auto\' with a codex POOL as the default reads the pool\'s CURRENT member (reading + estimate), never a bucket under the pool\'s id',
-      /const codexDefKey = codexDefRow && codexDefRow\.type === 'pooled' \? \(codexDefRow\.current \|\| null\) : codexDefId;/.test(umB) && count(umB, /cBuckets\[codexDefKey\]/g) === 3 && !/cBuckets\[codexDefId\]/.test(umB));   // stale-pins: kept (the gone key)
+    // accounts list's `current`). 主开发's ruling (22:06Z): THE METER NAMES THE MEMBER THE NEXT CONVERSATION WILL USE AND SAYS IT
+    // HAS NO READING YET — never another account's numbers under that name, and no estimate. The REAL meter drawn over a page stub
+    // (test-usage-predict ⑪'s harness): a pool P (A, B) as the default moved to B, which never ran, while A at its wall (100 %) is
+    // the freshest reading anywhere (the server's overall); a SUBSCRIPTION default with no reading, outside a pool: the same rule
+    const UM_REL = 'src/lib/usage-meter.js';
+    const drawCodex = async (mod, { def, cur = null }) => {
+      const els = {}; const soft = (o) => new Proxy(o, { get: (t, k) => (k in t ? t[k] : (typeof k === 'symbol' ? undefined : () => null)) });
+      const el = (id) => (els[id] = els[id] || soft({ id, innerHTML: '', classList: { toggle() { }, add() { }, remove() { }, contains: () => false }, style: { setProperty() { }, removeProperty() { } }, dataset: {}, appendChild() { }, remove() { }, closest: () => null, querySelector: () => null, querySelectorAll: () => [], addEventListener() { }, setAttribute() { }, getAttribute: () => null }));
+      const keep = { document: globalThis.document, raf: globalThis.requestAnimationFrame, caf: globalThis.cancelAnimationFrame, gcs: globalThis.getComputedStyle, mm: globalThis.matchMedia };
+      globalThis.requestAnimationFrame = () => 0; globalThis.cancelAnimationFrame = () => { }; globalThis.getComputedStyle = () => ({ getPropertyValue: () => '' }); globalThis.matchMedia = () => ({ matches: false, addEventListener() { } });
+      globalThis.document = { getElementById: (id) => el(id), querySelectorAll: () => [], querySelector: () => null, addEventListener() { }, createElement: () => el('made-' + Math.random()), body: el('body'), documentElement: el('html') };
+      try {
+        class App { }
+        mod.installUsageMeter(App, {});
+        const nowS = Math.floor(Date.now() / 1000);
+        const wall = { fetchedAt: Date.now() - 60e3, source: 'codex-rate-limits', fiveHour: { utilization: 1, resetsAt: nowS + 2 * 3600 }, sevenDay: { utilization: 1, resetsAt: nowS + 3 * 86400 } };
+        const est = { estimated: true, anchorAt: Date.now() - 600e3, asOf: Date.now(), scopedWeekly: [], fiveHour: { utilization: 1, resetsAt: nowS + 2 * 3600 }, sevenDay: { utilization: 1, resetsAt: nowS + 3 * 86400 }, provisional: null };
+        const ids = { A: 'cxs-meter-a', B: 'cxs-meter-b', P: 'pool-meter-p' };
+        const accounts = [{ id: ids.A, name: 'Cx Alpha', backend: 'codex', type: 'subscription' }, { id: ids.B, name: 'Cx Beta', backend: 'codex', type: 'subscription' },
+          { id: ids.P, name: 'Cx Pool', backend: 'codex', type: 'pooled', pooled: true, members: [ids.A, ids.B], current: cur ? ids[cur] : null }];
+        const app = new App();
+        Object.assign(app, { _accounts: { accounts, defaultAccountId: null, defaultCodexAccountId: def ? ids[def] : null }, _usageGlobal: {}, _usageAcctSel: 'auto', _usageAcctSelCodex: 'auto', _accountUsage: {},
+          _codexAccountUsage: { [ids.A]: wall }, _usageCodexGlobal: {}, _codexRateLimit: wall, _rateLimit: null,
+          _usageEstimates: { [ids.A]: est, __global_codex__: est }, _resetClaims: {}, _usageLogins: {}, settings: { get: () => 'manual' }, _usageRowsHtml: null, _usageSecHtml: null, _usageChipHtml: null });
+        app._renderUsage();
+        const txt = (h) => String(h || '').replace(/<[^>]+>/g, ' ').replace(/&[a-z]+;/g, ' ').replace(/\s+/g, ' ').trim();
+        const popup = txt((els['usage-popup'] || {}).innerHTML), taskbar = String((els['taskbar-usage'] || {}).innerHTML || '');
+        const title = popup.split(' Auto ')[0];   // the section's own title, before the switcher's chips (which name every account)
+        return { popup, title, taskbar, full: /100% used/.test(popup) || /: 100%/.test(taskbar), none: /No usage captured yet for this account/.test(popup), est: /est \d+%/.test(popup + ' ' + taskbar) };
+      } finally {
+        globalThis.document = keep.document; globalThis.requestAnimationFrame = keep.raf; globalThis.cancelAnimationFrame = keep.caf; globalThis.getComputedStyle = keep.gcs; globalThis.matchMedia = keep.mm;
+      }
+    };
+    const UM = await import(path.join(REPO, UM_REL));
+    let mP = null, mPA = null, mS = null, m0 = null, mErr = null;
+    try { mP = await drawCodex(UM, { def: 'P', cur: 'B' }); mPA = await drawCodex(UM, { def: 'P', cur: 'A' }); mS = await drawCodex(UM, { def: 'B' }); m0 = await drawCodex(UM, { def: null }); } catch (e) { mErr = e.message; }
+    ok('usage-meter: a codex POOL default moved to B (no reading yet) while A sits at its wall — the meter names B and says it has NO READING YET: never A\'s 100 % under B\'s name, no estimate',
+      !mErr && mP && /Cx Beta/.test(mP.title) && mP.none && !mP.full && !mP.est, mErr || JSON.stringify(mP && { popup: mP.popup.slice(0, 400), full: mP.full, est: mP.est }));
+    ok('usage-meter: …the pool on A (its own reading) shows A\'s numbers under A\'s name', !mErr && mPA && /Cx Alpha/.test(mPA.title) && mPA.full, mErr || JSON.stringify(mPA && mPA.popup.slice(0, 300)));
+    ok('usage-meter: a SUBSCRIPTION default with no reading (outside a pool) — the same rule: named, no reading yet, never another account\'s numbers',
+      !mErr && mS && /Cx Beta/.test(mS.title) && mS.none && !mS.full && !mS.est, mErr || JSON.stringify(mS && mS.popup.slice(0, 300)));
+    ok('usage-meter: …with NO default set, \'auto\' keeps the freshest reading under the plain «Codex» label (no account named)', !mErr && m0 && m0.full && /Codex/.test(m0.title) && !/Cx (Alpha|Beta)/.test(m0.title), mErr || JSON.stringify(m0 && m0.popup.slice(0, 300)));
+    const { anchored } = await import('./scratch.mjs');
+    let mRed = null, rErr = null;
+    try {
+      const f = MUTCP.write(UM_REL, anchored(read(UM_REL), "      codex = codexDefId ? ((codexDefKey && cBuckets[codexDefKey]) || null) : this._codexRateLimit;", "      codex = (codexDefKey && cBuckets[codexDefKey]) ? cBuckets[codexDefKey] : this._codexRateLimit;", 'B-87fd: the fallback put back'), 'meter-fallback', { esm: true });   // stale-pins: kept (the RED copy plants the release's fallback line on purpose)
+      mRed = await drawCodex(await import(f), { def: 'P', cur: 'B' });
+    } catch (e) { rErr = e.message; }
+    ok('usage-meter RED: a copy with the fallback put back shows A\'s 100 % under B\'s name — the leg sees it', !rErr && mRed && /Cx Beta/.test(mRed.title) && mRed.full, rErr || JSON.stringify(mRed && mRed.popup.slice(0, 300)));
   }
   ok('session-card ⚙ account list: a pool row names its target (was "— API …undefined")', /\(a\.pooled \|\| a\.type === 'pooled'\) \? a\.name \+ \(a\.currentName \? ` → \$\{a\.currentName\}` : ' · ' \+ tr\('pool'\)\)/.test(read('src/lib/session-card.js')));
   ok('session-props billing row: pooled / codex-subscription / codex-cli are labeled, never "Unknown"', /a\.source === 'pooled' \? t\('Pooled account — \{name\}'/.test(read('src/lib/session-props.js')) && /a\.source === 'codex-subscription' \? t\('ChatGPT account — \{name\}'/.test(read('src/lib/session-props.js')) && /a\.source === 'codex-cli' \? t\('ChatGPT login \(the machine’s own\)'\)/.test(read('src/lib/session-props.js')));

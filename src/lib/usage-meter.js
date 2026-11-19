@@ -371,7 +371,12 @@ export function installUsageMeter(App, ctx = {}) {
     let codex, codexLabel = 'Codex', codexNote = '';
     if (cSel === 'auto') {
       const defAcct = codexDefKey ? codexSubs.find(a => a.id === codexDefKey) : null;
-      codex = (codexDefKey && cBuckets[codexDefKey]) ? cBuckets[codexDefKey] : this._codexRateLimit;
+      // B-87fd (主开发's ruling 2026-11-19 22:06Z): THE METER NAMES THE ACCOUNT THE NEXT CONVERSATION WILL USE (a pool's: its current
+      // member) and shows ITS reading only — with none yet it says so, never another account's numbers under that name (the
+      // server's overall reading is the freshest of ANY account: right after a pool moves off a member at its wall, that member's
+      // 100 % under the new one's name), and no estimate either. Only with NO default set does 'auto' show the freshest reading,
+      // under the plain «Codex» label (no account named)
+      codex = codexDefId ? ((codexDefKey && cBuckets[codexDefKey]) || null) : this._codexRateLimit;
       codexLabel = defAcct ? defAcct.name : 'Codex';
       if (defAcct) codexNote = t('Default account · refreshes as its sessions run');
     } else if (cSel === '__global_codex__') {
@@ -385,7 +390,7 @@ export function installUsageMeter(App, ctx = {}) {
     // Dead-reckoned overlay for the selected codex identity (P1 — same
     // estimator, codex-prefixed identities; keys match codexAccounts)
     let cEstSel = null;
-    if (cSel === 'auto') cEstSel = (codexDefKey && cBuckets[codexDefKey]) ? estimates[codexDefKey] : estimates.__global_codex__;
+    if (cSel === 'auto') cEstSel = codexDefId ? ((codexDefKey && cBuckets[codexDefKey]) ? estimates[codexDefKey] || null : null) : estimates.__global_codex__;
     else cEstSel = estimates[cSel] || null;
     const cEstPop = popupEst(cEstSel);
     const hasSwitch = claudeSubs.length > 0;
