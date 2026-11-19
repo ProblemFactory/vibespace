@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { anchored } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -730,7 +731,7 @@ console.log('⑨ a draft is never a message (lane gmail-draft-not-a-message)');
   const NOW = '  return FRAME_LIVE_RE.test(text);\n', OLD = "  return new RegExp(FRAME_TAG_RE.source, 'iu').test(text);\n";   // stale-pins: kept — the RED control PLANTS the old line back (the text the hotfix removed)
   ok(SRC.split(NOW).length === 2, 'control setup: the cured line is present once');
   const MH = mutantCopies('chan-record-carries-frame', REPO);
-  const RO = MH.load('src/channel-record.js', SRC.replace(NOW, OLD), 'built-per-call');
+  const RO = MH.load('src/channel-record.js', anchored(SRC, NOW, OLD, 'built-per-call'), 'built-per-call');   // the anchored door: a moved line throws by name
   const builtOld = counted(() => { for (let i = 0; i < N; i++) { RO.carriesFrame(framed); RO.carriesFrame(clean); } });
   ok(builtOld === 2 * N, `RED CONTROL: the copy with the old line back builds one expression per call (${builtOld} over ${2 * N} calls)`);
   // (2) no state between calls
