@@ -175,7 +175,12 @@ export function unanchoredEdits(src, { ast: given = null } = {}) {
  *  One whose body neither throws, nor calls scratch.mjs `anchored()`, nor reports through the suite's own check (`ok` /
  *  `check` / `assert` — «CONTROL (tag): the patch applies») answers null or an unpatched copy when its anchor
  *  moves: the control builds nothing and the suite reds on a sentence that names no anchor (test-channels-slack-send's
- *  cut, 2026-11-18) — or stays green. → [{ line, name }] of the helpers that do NOT fail by name. */
+ *  cut, 2026-11-18) — or stays green. → [{ line, name }] of the helpers that do NOT fail by name.
+ *  B-287c (lane bl-tests-e): a fail counts only when it is ABOUT the anchor. A throw: it stands under an `if` / `?:` / `&&` /
+ *  `||` whose test is the anchor's edit or test. A check: the same, or what it JUDGES (its first argument that is not a message)
+ *  is one — the anchor's edit or test, a comparison of one, or a variable whose value is one (`const m = src.replace(from, to)`
+ *  ⇒ `ok(m !== src, …)`). A message naming the anchor tests nothing; an unrelated throw (a missing file) or check
+ *  (`ok(true, 'loaded')`) no longer lets a helper that answers null pass. anchored() stays the door (it fails by name itself). */
 export function anchorHelpers(src, { ast: given = null } = {}) {
   if (!/\.(?:replace|replaceAll|split)\(/.test(src) || !/(?:\.load|\.write|_compile|runIn\w*Context|compileFunction|writeFileSync|new Function)\s*\(/.test(src)) return [];
   let ast = given;
@@ -186,13 +191,15 @@ export function anchorHelpers(src, { ast: given = null } = {}) {
   const FN = new Set(['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression']);
   const LOADER = /(?:^|\.)(?:load|write|_compile|runInThisContext|runInNewContext|runInContext|compileFunction|writeFileSync)$|^require$/;
   const params = (fn) => { const out = new Set(); for (let q of fn.params) { if (q.type === 'AssignmentPattern') q = q.left; if (q.type === 'Identifier') out.add(q.name); } return out; };
-  const found = new Map();
+  const found = new Map(), anchorsOf = new Map();
+  const isEditCall = (n) => n.type === 'CallExpression' && n.callee.type === 'MemberExpression' && !n.callee.computed && /^(?:replace|replaceAll|split)$/.test(n.callee.property.name || '') && n.arguments[0] && n.arguments[0].type === 'Identifier';
   walk(ast, (n, anc) => {
-    if (n.type !== 'CallExpression' || n.callee.type !== 'MemberExpression' || n.callee.computed || !/^(?:replace|replaceAll|split)$/.test(n.callee.property.name || '')) return;
+    if (!isEditCall(n)) return;
     const a = n.arguments[0];
-    if (!a || a.type !== 'Identifier') return;
     for (let i = anc.length - 1; i >= 0; i--) {
       if (!FN.has(anc[i].type) || !params(anc[i]).has(a.name)) continue;
+      if (!anchorsOf.has(anc[i])) anchorsOf.set(anc[i], new Set());
+      anchorsOf.get(anc[i]).add(a.name);
       if (!found.has(anc[i])) { const up = anc[i - 1]; found.set(anc[i], (anc[i].id && anc[i].id.name) || (up && up.type === 'VariableDeclarator' && up.id.type === 'Identifier' && up.id.name) || (up && up.type === 'Property' && up.key && (up.key.name || up.key.value)) || (up && up.type === 'AssignmentExpression' && text(up.left).slice(0, 40)) || '(anonymous)'); }
       break;
     }
@@ -200,9 +207,34 @@ export function anchorHelpers(src, { ast: given = null } = {}) {
   const out = [];
   for (const [fn, name] of found) {
     let loads = false, names = false;
+    // THE EVIDENCE of this helper's anchor (B-287c): its anchor parameters, and every variable whose value IS one of their edits or
+    // tests — the edit call, a chain off it (`.join(to)`, `.length`), a test of the anchor (`src.includes(from)`, `from.test(src)`),
+    // or a comparison of one — never a value that was merely HANDED an edit (`MUT.write(…, src.replace(from, to))`)
+    const ev = new Set(anchorsOf.get(fn) || []);
+    const TESTS = /^(?:includes|indexOf|lastIndexOf|search|match|matchAll|test|startsWith|endsWith)$/;
+    const ofAnchor = (n) => {
+      if (!n) return false;
+      if (n.type === 'Identifier') return ev.has(n.name);
+      if (n.type === 'BinaryExpression' || n.type === 'LogicalExpression') return ofAnchor(n.left) || ofAnchor(n.right);
+      if (n.type === 'UnaryExpression') return ofAnchor(n.argument);
+      if (n.type === 'MemberExpression') return ofAnchor(n.object);
+      if (n.type !== 'CallExpression' || n.callee.type !== 'MemberExpression' || n.callee.computed) return false;
+      if (isEditCall(n) && ev.has(n.arguments[0].name)) return true;
+      if (TESTS.test(n.callee.property.name || '') && (n.arguments.some((g) => g.type === 'Identifier' && ev.has(g.name)) || (n.callee.object.type === 'Identifier' && ev.has(n.callee.object.name)))) return true;
+      return ofAnchor(n.callee.object);
+    };
     walk(fn.body, (x) => {
-      if (x.type === 'ThrowStatement') names = true;
-      else if (x.type === 'CallExpression' && (/(?:^|\.)anchored$/.test(text(x.callee)) || /^(?:ok|check|assert|expect)\w*$|^assert\.\w+$/.test(text(x.callee)))) names = true;
+      if (x.type === 'VariableDeclarator' && x.id.type === 'Identifier' && x.init && ofAnchor(x.init)) ev.add(x.id.name);
+      else if (x.type === 'AssignmentExpression' && x.left.type === 'Identifier' && ofAnchor(x.right)) ev.add(x.left.name);
+    });
+    // a fail is ABOUT the anchor when it stands under a test of it; a check also when what it JUDGES — its first argument that is
+    // not a message (a string, a template, a string concatenation: `ok(name, cond)` and `ok(cond, name)` alike) — is one
+    const isMessage = (g) => g.type === 'TemplateLiteral' || (g.type === 'Literal' && typeof g.value === 'string') || (g.type === 'BinaryExpression' && g.operator === '+' && (isMessage(g.left) || isMessage(g.right)));
+    const underTest = (anc) => anc.some((q) => ((q.type === 'IfStatement' || q.type === 'ConditionalExpression') && ofAnchor(q.test)) || (q.type === 'LogicalExpression' && ofAnchor(q.left)));
+    walk(fn.body, (x, anc) => {
+      if (x.type === 'ThrowStatement') { if (underTest(anc)) names = true; }
+      else if (x.type === 'CallExpression' && /(?:^|\.)anchored$/.test(text(x.callee))) names = true;
+      else if (x.type === 'CallExpression' && /^(?:ok|check|assert|expect)\w*$|^assert\.\w+$/.test(text(x.callee))) { const judged = x.arguments.find((g) => !isMessage(g)); if ((judged && ofAnchor(judged)) || underTest(anc)) names = true; }
       else if (x.type === 'CallExpression' && LOADER.test(text(x.callee))) loads = true;
       else if (x.type === 'ImportExpression' || (x.type === 'NewExpression' && /^(?:Function|vm\.Script|Script)$/.test(text(x.callee)))) loads = true;
     });

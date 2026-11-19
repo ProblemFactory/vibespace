@@ -235,7 +235,8 @@ console.log('\n§3 A RED CONTROL THAT BUILDS NOTHING FAILS BY NAME (B-0d3e) — 
     && !fNew.bad.length && fNew.caps['test-a.mjs'] === 3 && !fFell.bad.length && fFile.bad.length === 1 && /test-b\.mjs 1 > its pin 0/.test(fFile.bad[0]),
     'CONTROL: THE FOUNDING ROW IS FALL-ONLY — raised above its pin in place is RED by name (and a file it never had), the same rise as a NEW row under its own id holds, a fall holds');
   // THE ANCHOR HELPERS (the row's «every helper that builds a control from an anchor»): a function whose own parameter is
-  // an anchor and whose body reaches a loader FAILS BY NAME — it throws, or it builds through anchored(). The ones that
+  // an anchor and whose body reaches a loader FAILS BY NAME — it throws or checks ABOUT the anchor (B-287c: under a test of it,
+  // or judging its edit / test), or it builds through anchored(). The ones that
   // answer null or an unpatched copy instead are listed in scripts/fixtures/anchor-helpers.json, ONE-WAY like the edits:
   // a file that adds one is red by name (a new helper takes scratch.mjs anchored()); a fall is said.
   const HFX = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts', 'fixtures', 'anchor-helpers.json'), 'utf-8'));
@@ -258,6 +259,24 @@ console.log('\n§3 A RED CONTROL THAT BUILDS NOTHING FAILS BY NAME (B-0d3e) — 
   const hD = H("function swap(a, b) { return require(MUT.write('src/x.js', anchored(src.replace('k', 'k'), a, b, 'swap'), 'swap')); }");
   const hE = H("const patch = (from, to, tag) => { const m = src.replace(from, to); ok(m !== src, `CONTROL (${tag}): the patch applies`); return MUT.load('src/x.js', m, tag); };");
   ok(hA === 1 && hB === 0 && hC === 0 && hD === 0 && hE === 0, `CONTROL: the helper walk finds a cut that answers null (1), never one that throws by name (0), one whose body reaches no loader (0), one that builds through anchored() (0) nor one that reports through the suite's check (0) — ${[hA, hB, hC, hD, hE].join(' / ')}`);
+  // B-287c (lane bl-tests-e): «fails by name» is a throw or a check ABOUT the anchor — the old walk counted ANY throw or check in the
+  // body, so an unrelated one let a helper that answers null pass. The plants wanting 1 are that hole (each read 0 under «any»);
+  // the plants wanting 0 guard against narrowing too far (a check that judges the anchor, a throw under a test of its edit's
+  // result, a throw under a `?:` on it, a check under a `||` on it)
+  const PLANTS287 = [
+    ['an unrelated throw', 1, "const cut = (from, to) => { if (!fs.existsSync(f)) throw new Error('no file ' + f); if (src.split(from).length !== 2) return null; return MUT.load('src/x.js', src.replace(from, to), 't'); };"],
+    ['an unrelated check', 1, "const cut = (from, to) => { ok(fs.existsSync(f), 'the file is there'); return MUT.load('src/x.js', src.replace(from, to), 't'); };"],
+    ['a check that judges the anchor', 0, "const cut = (from, to) => { ok(src.includes(from), `CONTROL: the anchor ${from} is there`); return MUT.load('src/x.js', src.replace(from, to), 't'); };"],
+    ['a throw under a test of its edit\'s result', 0, "const cut = (from, to) => { const parts = src.split(from); if (parts.length !== 2) throw new Error('moved'); return MUT.load('src/x.js', parts.join(to), 't'); };"],
+    ['a throw under a ?: on the anchor', 0, "const cut = (from, to) => (src.split(from).length === 2 ? MUT.load('src/x.js', src.replace(from, to), 't') : (() => { throw new Error('moved'); })());"],
+    ['a check under a || on the anchor', 0, "const cut = (from, to) => { src.includes(from) || ok(false, 'moved'); return MUT.load('src/x.js', src.replace(from, to), 't'); };"],
+    ['a check naming the anchor only in its message (a template)', 1, "const cut = (from, to) => { ok(fs.existsSync(f), `the anchor ${from}`); return MUT.load('src/x.js', src.replace(from, to), 't'); };"],
+    ['a check naming the anchor only in its message (a concatenation)', 1, "const cut = (from, to) => { ok(fs.existsSync(f), 'the anchor ' + from); return MUT.load('src/x.js', src.replace(from, to), 't'); };"],
+    ['a throw naming the anchor under an unrelated test', 1, "const cut = (from, to) => { if (!fs.existsSync(f)) throw new Error('no file for ' + from); return MUT.load('src/x.js', src.replace(from, to), 't'); };"],
+    ['a check judging a value merely HANDED the edit', 1, "const cut = (from, to) => { const p = MUT.write('src/x.js', src.replace(from, to), 't'); ok(fs.existsSync(p), 'written'); return require(p); };"],
+  ];
+  const got287 = PLANTS287.map(([n, want, body]) => [n, want, H(body)]);
+  ok(got287.every(([, want, got]) => got === want), `CONTROL (B-287c): each plant is judged by what it is about — ${got287.map(([n, want, got]) => `${n} ${got}${got === want ? '' : ` (want ${want})`}`).join(' · ')}`);
 }
 
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass} passed${fail ? `, ${fail} failed` : ''})`);
