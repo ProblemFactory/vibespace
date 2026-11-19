@@ -2933,8 +2933,8 @@ console.log('— §18 a soft move of a warm mid-turn conversation waits for its 
     }
     // NEGATIVE CONTROL ②: without the boundary's force the closed gate swallows the first stop.
     const mutG = mutate('src/server/usage-pool-engine.js', 'softgate', [[
-      'maybePoolAutoSwitchForPool(session._accountId, force || now != null ? { ...(force ? { force: true } : {}), ...(now != null ? { now } : {}) } : undefined);',
-      'maybePoolAutoSwitchForPool(session._accountId, now != null ? { now } : undefined); // PRE-FIX: the stop is an ordinary kick',
+      'maybePoolAutoSwitchForPool(session._accountId, force || now != null || only ? { ...(force ? { force: true } : {}), ...(now != null ? { now } : {}), ...(only ? { only } : {}) } : undefined);',
+      'maybePoolAutoSwitchForPool(session._accountId, now != null || only ? { ...(now != null ? { now } : {}), ...(only ? { only } : {}) } : undefined); // PRE-FIX: the stop is an ordinary kick (B-f4a1: still its own conversation only)',
     ]]);
     ok('§18 (a) GATE CONTROL: the patch hit the product source', mutG.hit === true, mutG.why || '');
     if (mutG.hit) {

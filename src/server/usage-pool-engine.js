@@ -102,6 +102,7 @@ const { harnessSetting, harnessDeclares } = (injectedHarnessSetting && injectedH
   ? { harnessSetting: injectedHarnessSetting, harnessDeclares: injectedHarnessDeclares }
   : require('./harness-config-sync').accessorsFor({ serverSetting, harnesses });
 const _poolAutoLast = new Map(); // poolId → ts of the last default SWITCH: every un-forced pass waits 10 s after one (B-37f9: what it always was — «last DECISION» since 2.266.1 named the kicks' gate below)
+const _poolDecisions = new Map(); // B-f4a1: poolId → { session, pool } — each conversation's own decision and the pool's default decision, COUNTED (a seam the legs read: a stop is one decision, never S)
 const _poolEvalAt = new Map(); // B-37f9: poolId → ts of the last EVALUATION (any pass past the pool's own guards) — the per-record KICKS' gate
 const _poolGateHeld = new Map(); // B-37f9: poolId → kicks the gate held (a count the legs read; a held kick decides nothing)
 const _poolKickTrail = new Map(); // B-37f9: poolId → the ONE re-run a held kick arms for the gate's opening (no record's decision is lost)
@@ -6053,7 +6054,10 @@ function maybePoolAutoSwitch(session, { stop = false, now = null, force: forced 
     // A STOP ENDS THE TURN'S READING PIN (P1, law 1: «EVERY road that ends a turn ends its pins») — the CLI's idle, the attach
     // reconcile and an exit reach here, and noteTurnEnd is not the only end a turn has (a reading after the result re-made it)
     if (stop && !conversationInTurn({ isStreaming: session._isStreaming, turnState: session._turnState })) { session._turnReadingSlot = null; session._turnAsks = null; }
-    maybePoolAutoSwitchForPool(session._accountId, force || now != null ? { ...(force ? { force: true } : {}), ...(now != null ? { now } : {}) } : undefined);
+    // B-f4a1 (the owner's word 2026-11-18 14:48 PT): A STOP RE-DECIDES ONLY ITS OWN CONVERSATION — never the whole pool (S stops
+    // cost S² decisions, each a full pass). Every other road into the pass keeps the whole pool (named in the unit's line).
+    const only = stop && session._webuiId ? session._webuiId : null;
+    maybePoolAutoSwitchForPool(session._accountId, force || now != null || only ? { ...(force ? { force: true } : {}), ...(now != null ? { now } : {}), ...(only ? { only } : {}) } : undefined);
   } catch { }
 }
 /** The conversation's turn state went IDLE (claude `system/session_state_changed`,
@@ -7752,7 +7756,7 @@ function poolKickRerun(poolId) {
   _poolKickTrail.delete(poolId);
   try { maybePoolAutoSwitchForPool(poolId, { kick: true }); } catch { }
 }
-function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, rosters = null, kick = false } = {}) {
+function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, rosters = null, kick = false, only = null } = {}) {
   try {
     if (!poolId) return;
     const a = accounts.get(poolId);
@@ -7852,6 +7856,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
       if (!poolCaps.planC) break; // plan-C per-session links need the backend's material path
       if (capsOf(s2.backend || 'claude').hotSwitch === 'impossible') continue; // it holds its member for life — no per-session link
       if (s2._accountId !== poolId || s2.host) continue;
+      if (only && sid !== only) continue; // B-f4a1 (the owner's word 2026-11-18): A STOP RE-DECIDES ONLY ITS OWN CONVERSATION — the other S−1 keep their decisions until their own stop, a reading, a member's change or the tick
       const pr = _passGen === passGen ? passReads.get(sid) : null; // this pass's own read of the link (K1), while no other pass ran
       let linkCur = null;
       if (pr) linkCur = pr.linkCur; else try { linkCur = accounts.poolCurrentFor(poolId, sid); } catch { }
@@ -7911,6 +7916,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
       return dp ? (dp.reason === 'pin-exhausted' ? { ...dp, reason: dp.autoReason, pinExhausted: true } : dp) : decidePoolSwitch({ currentId: curFor, members, readCache: viewFor, ...providerIn(a, s2), nowSec: nowSecOf(now), proactive: hot, hot, pessimism: darkTaintedAccounts(now), exclude: rejected, readLogin, membership, priority, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, warm, explain: true, roster }); // R2: every listed member named when blocked (the evaluation's ONE roster)
       };
       const ds = decideSession();
+      { const t = _poolDecisions.get(poolId) || { session: 0, pool: 0 }; t.session++; _poolDecisions.set(poolId, t); }   // B-f4a1: counted
       // a MOVE the claim decided is said too (lane account-reset-door r2, MUST 8): the same decision over the bare reading stays
       const moveByClaim = ds && ds.to && ds.to !== linkCur ? claimDecided(ds.to, () => { const b = decideSession(); return (b && b.to) || curFor; }) : null;
       if (!ds || !ds.to) {
@@ -8034,6 +8040,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
     // PROACTIVE hold: an 'edf' jump still waits while any follower's cache is
     // warm (the warmest names it) — only the soft-band defer is gone, so `inTurn`
     // is deliberately not computed here.
+    if (only && hasOwnPoolLink(poolId, only)) return; // B-f4a1: a conversation with its own link stopped — its decision was the one above; the default's is not its own
     let defaultWarm = null, defaultWarmSid = null;
     for (const [sid, s] of activeSessions) {
       if (s._accountId !== poolId || hasOwnPoolLink(poolId, sid)) continue;
@@ -8049,6 +8056,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
     const defaultView = defaultWarm ? readCache : (id) => projectCacheAhead(readCache(id), burnOf(id), nowSecOf(now), PROJECTION_LEAD_SEC);
     const decideDefault = () => decidePoolSwitch({ currentId, members, readCache: defaultView, nowSec: nowSecOf(now), proactive: hot, hot, ...providerIn(a, null), offer: false, pessimism: darkTaintedAccounts(now), readLogin, membership, priority, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, warm: defaultWarm, explain: true, roster }); // R2: every listed member named when blocked (the evaluation's ONE roster)
     const d = decideDefault();
+    { const t = _poolDecisions.get(poolId) || { session: 0, pool: 0 }; t.pool++; _poolDecisions.set(poolId, t); }   // B-f4a1: counted
     const defaultByClaim = d && d.to && d.to !== currentId ? claimDecided(d.to, () => { const b = decideDefault(); return (b && b.to) || currentId; }) : null; // MUST 8: the pool's own move, said when the claim decided it
     if (!d) return;
     if (d.to || !['stuck', 'no-members', 'no-settleable', 'all-lapsed', 'all-logins-expired'].includes(d.reason)) poolBlockedTodoEnd(poolId); // the pool can serve again (r3)
@@ -8255,7 +8263,7 @@ function maybeStopOnFallback(session, id, from, to) {
     oatIdentity, oatIdentityAttach, oatRebind, oatAnswer, tokenSpentBy, tokenGenOf, readingRoad, oatRoadOf, // lane oat-identity-postcheck: the long-lived token's identity post-check (the account routes wire its store hook + the re-bind door + the owner's answer); tokenGenOf = WHICH token a reading was produced with (lane oat-identity-fix)
     sessionBillingMember, wallKeyFor, rejectionSlotFor, readingSlotFor, memberLoginState, accountCredentialState, healthyPoolMembers, switchCandidates, poolReadLogin, slotTransitions, nearArmVeto, armCauseFor, fireIdentityFor, demoteWalledAccount, wallCount, sessionWalledMembers,
     _wallRing, _sessionWalls, _sessionWallLanes, noteSessionWall, WALL_RING_MS, SESSION_WALL_MS, // wall-ground-truth + token-slot + session-wall seams (test-auto-resume §11, test-auto-resume-loop)
-    _poolAutoLast, _poolSwitchAt, _poolEvalAt, _poolGateHeld, _poolKickTrail, poolKickRerun, // the gates (10s) + dwell belt (180s) are WALL-CLOCK: a suite winds them back instead of sleeping through them; the held count and the trailing re-run (B-37f9) are what a leg reads
+    _poolAutoLast, _poolSwitchAt, _poolEvalAt, _poolGateHeld, _poolKickTrail, poolKickRerun, _poolDecisions, // the gates (10s) + dwell belt (180s) are WALL-CLOCK: a suite winds them back instead of sleeping through them; the held count and the trailing re-run (B-37f9) are what a leg reads
     sessionModelFor, sweepUsageAnchors, usageCacheKeyFor,
     usageIdentityAccountIds, usageIdentityGroups, usageIdentityGroupsCached,
     writeUsageCacheForKey, clearSealedOrders, pushSealedOrders,
