@@ -13,7 +13,7 @@
 // base 160045063's files).
 // ⑦ lane plugin-update-button: the REAL plugins-ui.js in a fake DOM — a plugin that can update has «Update…» (B-db5d: a row of
 // the row's «⋯» menu with Uninstall…, never inline), an uploaded / hand-placed one says how instead, the press posts /update and
-// says «already up to date»; the chip's menu has no Update (RED: the base 63f59d572's file; the checkpoint f6ad84f50's).
+// says «already up to date»; the chip's menu has no Update (RED: the base 63f59d572's file; anchored copies of the checkpoint's row).
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -194,7 +194,8 @@ console.log('⑥ the consent dialogs open with their own body text (.dialog-intr
 // B-db5d (the owner, 2026-11-18, on this row at a narrow width: «更新 卸载应该收进...里»): Update… and Uninstall… are ROWS OF THE
 // ROW'S «⋯» MENU at every width — the walk opens the «⋯» as a person does and presses its rows (Update… first; NO Update row for
 // an uploaded file or a hand-placed folder; Uninstall… asks its confirm); a plugin with settings keeps its ⚙ on the row. RED
-// CONTROL 2 = the checkpoint f6ad84f50's file (the two buttons inline, the ⚙ counted into the «⋯»).
+// CONTROLS 2–4 = anchored copies of this tree's file: the checkpoint's row (the two buttons inline, the ⚙ counted into the «⋯»), an
+// in-flight Update… with no why, a refusal that keeps the in-flight why.
 console.log('⑦ a plugin that can update has «Update…» in its row\'s «⋯» (B-db5d: with «Uninstall…», never inline); one that cannot says how; the chip has no Update');
 {
   const esbuild = require(path.join(repo, 'node_modules/esbuild'));
@@ -287,7 +288,7 @@ console.log('⑦ a plugin that can update has «Update…» in its row\'s «⋯�
       let during = null;
       if (item) { const going = item.action(); const d = (menuOf(rowOf(id)) || []).find((i) => i.label === 'Update…'); during = d ? (d.off || 'live') : 'absent'; await going; await tick(); }   // the «⋯» reopened mid-press
       const again = (menuOf(rowOf(id)) || []).find((i) => i.label === 'Update…');
-      return { pressed: !!item, during, calls: W.calls.filter(([u]) => /\/update$/.test(u)), toasts: [...W.toasts], pressableAfter: !!(again && typeof again.action === 'function' && !again.off) };
+      return { pressed: !!item, during, calls: W.calls.filter(([u]) => /\/update$/.test(u)), toasts: [...W.toasts], pressableAfter: !!(again && typeof again.action === 'function' && !again.off), titleAfter: again ? again.title : null };
     };
     const pgit = await press('kit.git'), ppath = await press('kit.path'), prel = await press('kit.release');
     // the menu's Uninstall… asks its confirm (refused here: nothing is deleted)
@@ -312,7 +313,7 @@ console.log('⑦ a plugin that can update has «Update…» in its row\'s «⋯�
     inFlight: w.pgit.during === 'Updating kit.git…',
     unchanged: J(w.pgit.calls) === J([['/api/plugins/manifests/kit.git/update', 'POST']]) && w.pgit.toasts.some(([m, k]) => m === 'kit.git is already up to date (0.1.5)' && k === 'info') && !w.pgit.toasts.some(([m]) => /^Updated /.test(m)),
     changed: w.ppath.toasts.some(([m]) => m === 'Updated kit.path to 0.1.5') && !w.ppath.toasts.some(([m]) => /up to date/.test(m)),
-    refused: w.prel.toasts.some(([m, k]) => m === 'the release has no .vsp asset' && k === 'error') && w.prel.pressableAfter === true,
+    refused: w.prel.toasts.some(([m, k]) => m === 'the release has no .vsp asset' && k === 'error') && w.prel.pressableAfter === true && w.prel.titleAfter === '',   // the in-flight why is cleared with the refusal
     oneDoor: w.menu.includes('Show capabilities…') && !w.menu.some((l) => /^Update/.test(l)),
   });
   const w = await walk(now, 'now'), v = verdict(w);
@@ -324,7 +325,7 @@ console.log('⑦ a plugin that can update has «Update…» in its row\'s «⋯�
   ok(v.inFlight, `⑦ B-db5d: while the update runs, the «⋯»'s Update… is an OFF row that says why — «${w.pgit.during}» (never «not available»)`);
   ok(v.unchanged, `⑦ the press posts /api/plugins/manifests/kit.git/update and, the ref still at its commit (unchanged), toasts ${J(w.pgit.toasts.map(([m]) => m))}`);
   ok(v.changed, `⑦ a new package toasts «Updated … to …» (${J(w.ppath.toasts.map(([m]) => m))})`);
-  ok(v.refused, `⑦ a refusal toasts the server's error and the «⋯»'s Update… is pressable again (${J(w.prel.toasts)}, pressable after: ${w.prel.pressableAfter})`);
+  ok(v.refused, `⑦ a refusal toasts the server's error and the «⋯»'s Update… is pressable again, its in-flight why cleared (${J(w.prel.toasts)}, pressable after: ${w.prel.pressableAfter}, title after: ${J(w.prel.titleAfter)})`);
   ok(v.oneDoor, `⑦ ONE door: the chip's menu lists ${J(w.menu)} — no Update`);
   const b0 = (() => { try { return execFileSync('git', ['-C', repo, 'show', '63f59d572:src/lib/plugins-ui.js'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; } })();
   if (b0 === null) console.log('  SKIP ⑦ RED CONTROL — the base object 63f59d572 is not in this clone');
@@ -333,15 +334,20 @@ console.log('⑦ a plugin that can update has «Update…» in its row\'s «⋯�
     const red = Object.entries(vb).filter(([, x]) => !x).map(([k]) => k);
     ok(['updatable', 'zip', 'hand', 'unchanged', 'oneDoor'].every((k) => red.includes(k)), `⑦ RED CONTROL: the base 63f59d572 fails the same walk — ${red.join(', ')} (its kit.git row: ${J(wb.rows['kit.git'].buttons)}; its chip menu: ${J(wb.menu)})`);
   }
-  // B-db5d RED CONTROL: the checkpoint f6ad84f50's row — Update… / Uninstall… drawn inline, the ⚙ of a plugin with settings
-  // folded by the count into a «⋯» (the frequent door hidden, the rare ones shown: the owner's picture)
-  const b1 = (() => { try { return execFileSync('git', ['-C', repo, 'show', 'f6ad84f50:src/lib/plugins-ui.js'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; } })();
-  if (b1 === null) console.log('  SKIP ⑦ B-db5d RED CONTROL — the checkpoint object f6ad84f50 is not in this clone');
-  else {
-    const wc = await walk(b1, 'checkpoint'), vc = verdict(wc);
+  // B-db5d RED CONTROLS — anchored copies of THIS tree's file (scratch.mjs anchored: a moved line throws by name; never a git object a
+  // shallow clone lacks — a skip is no red): (1) THE CHECKPOINT'S ROW — the cluster not always-folded (Update… / Uninstall… inline,
+  // the ⚙ of a plugin with settings counted into the «⋯»); (2) an in-flight Update… whose title says nothing (its OFF row would read
+  // «not available»); (3) a refusal that leaves the in-flight why on the row
+  const { anchored } = await import('./scratch.mjs');
+  const runRed = async (name, from, to, keys) => {
+    const code = anchored(now, from, to, name);
+    const wc = await walk(code, name.replace(/\W+/g, '-').slice(0, 24)), vc = verdict(wc);
     const red = Object.entries(vc).filter(([, x]) => !x).map(([k]) => k);
-    ok(['updatable', 'zip', 'hand', 'gearInline', 'unchanged'].every((k) => red.includes(k)), `⑦ B-db5d RED CONTROL: the checkpoint f6ad84f50 fails the same walk — ${red.join(', ')} (its kit.path row: ${J(wc.rows['kit.path'].buttons)}, its ⋯: ${J(wc.rows['kit.path'].menu)})`);
-  }
+    ok(keys.every((k) => red.includes(k)), `⑦ B-db5d RED CONTROL (${name}): the same walk goes red on ${keys.join(', ')} (red: ${red.join(', ')})`);
+  };
+  await runRed('the checkpoint row', " actions.dataset.railFold = 'always';", '', ['updatable', 'zip', 'hand', 'gearInline', 'unchanged']);
+  await runRed('an in-flight Update with no why', "            upd.title = t('Updating {id}…', { id: p.id });", '', ['inFlight']);
+  await runRed('a refusal keeping the in-flight why', "if (rr?.error) { upd.disabled = false; upd.title = ''; showToast(rr.error, { type: 'error' }); return; }", "if (rr?.error) { upd.disabled = false; showToast(rr.error, { type: 'error' }); return; }", ['refused']);
 }
 
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass} passed)`);

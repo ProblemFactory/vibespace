@@ -1,0 +1,333 @@
+{
+ "_": "B-db5d (the coordinator's law, 2026-11-19 04:47Z): an installed plugin row's NAME lines per width — measured by bl-chat-b's walk (a scratch hub of each built tree, the stand-in «Custom Browser Kernel (consent.kernel)» installed from Git, ON, one setting): the rail at sidebar 200/260/280/320 on a 1280 page and 260 at 1440, the phone dialog at 280/320/390/768, en + zh. before = the checkpoint f6ad84f50 (Update… / Uninstall… inline); nineEm = B-db5d 7e6402597 (the 9 em name basis: the law was read on its 390); after = the 16 em cure. Judged by scripts/lib/fit-ladder.mjs linesGrew in test-ui-fit ②.",
+ "before": [
+  {
+   "lang": "en",
+   "label": "rail-sidebar200-1280",
+   "nameLines": 4,
+   "controlsUnder": true
+  },
+  {
+   "lang": "en",
+   "label": "rail-sidebar260-1280",
+   "nameLines": 3,
+   "controlsUnder": true
+  },
+  {
+   "lang": "en",
+   "label": "rail-sidebar280-1280",
+   "nameLines": 2,
+   "controlsUnder": true
+  },
+  {
+   "lang": "en",
+   "label": "rail-sidebar320-1280",
+   "nameLines": 2,
+   "controlsUnder": true
+  },
+  {
+   "lang": "en",
+   "label": "rail-sidebar260-1440",
+   "nameLines": 3,
+   "controlsUnder": true
+  },
+  {
+   "lang": "en",
+   "label": "dialog-280",
+   "nameLines": 2,
+   "controlsUnder": true
+  },
+  {
+   "lang": "en",
+   "label": "dialog-320",
+   "nameLines": 1,
+   "controlsUnder": true
+  },
+  {
+   "lang": "en",
+   "label": "dialog-390",
+   "nameLines": 1,
+   "controlsUnder": true
+  },
+  {
+   "lang": "en",
+   "label": "dialog-768",
+   "nameLines": 1,
+   "controlsUnder": false
+  },
+  {
+   "lang": "zh",
+   "label": "rail-sidebar200-1280",
+   "nameLines": 4,
+   "controlsUnder": true
+  },
+  {
+   "lang": "zh",
+   "label": "rail-sidebar260-1280",
+   "nameLines": 3,
+   "controlsUnder": true
+  },
+  {
+   "lang": "zh",
+   "label": "rail-sidebar280-1280",
+   "nameLines": 2,
+   "controlsUnder": true
+  },
+  {
+   "lang": "zh",
+   "label": "rail-sidebar320-1280",
+   "nameLines": 2,
+   "controlsUnder": true
+  },
+  {
+   "lang": "zh",
+   "label": "rail-sidebar260-1440",
+   "nameLines": 3,
+   "controlsUnder": true
+  },
+  {
+   "lang": "zh",
+   "label": "dialog-280",
+   "nameLines": 2,
+   "controlsUnder": true
+  },
+  {
+   "lang": "zh",
+   "label": "dialog-320",
+   "nameLines": 1,
+   "controlsUnder": true
+  },
+  {
+   "lang": "zh",
+   "label": "dialog-390",
+   "nameLines": 1,
+   "controlsUnder": true
+  },
+  {
+   "lang": "zh",
+   "label": "dialog-768",
+   "nameLines": 1,
+   "controlsUnder": false
+  }
+ ],
+ "nineEm": [
+  {
+   "lang": "en",
+   "label": "rail-sidebar200-1280",
+   "nameLines": 4,
+   "controlsUnder": true
+  },
+  {
+   "lang": "en",
+   "label": "rail-sidebar260-1280",
+   "nameLines": 3,
+   "controlsUnder": true
+  },
+  {
+   "lang": "en",
+   "label": "rail-sidebar280-1280",
+   "nameLines": 2,
+   "controlsUnder": true
+  },
+  {
+   "lang": "en",
+   "label": "rail-sidebar320-1280",
+   "nameLines": 2,
+   "controlsUnder": true
+  },
+  {
+   "lang": "en",
+   "label": "rail-sidebar260-1440",
+   "nameLines": 3,
+   "controlsUnder": true
+  },
+  {
+   "lang": "en",
+   "label": "dialog-280",
+   "nameLines": 2,
+   "controlsUnder": true
+  },
+  {
+   "lang": "en",
+   "label": "dialog-320",
+   "nameLines": 1,
+   "controlsUnder": true
+  },
+  {
+   "lang": "en",
+   "label": "dialog-390",
+   "nameLines": 3,
+   "controlsUnder": false
+  },
+  {
+   "lang": "en",
+   "label": "dialog-768",
+   "nameLines": 1,
+   "controlsUnder": false
+  },
+  {
+   "lang": "zh",
+   "label": "rail-sidebar200-1280",
+   "nameLines": 4,
+   "controlsUnder": true
+  },
+  {
+   "lang": "zh",
+   "label": "rail-sidebar260-1280",
+   "nameLines": 3,
+   "controlsUnder": true
+  },
+  {
+   "lang": "zh",
+   "label": "rail-sidebar280-1280",
+   "nameLines": 2,
+   "controlsUnder": true
+  },
+  {
+   "lang": "zh",
+   "label": "rail-sidebar320-1280",
+   "nameLines": 2,
+   "controlsUnder": true
+  },
+  {
+   "lang": "zh",
+   "label": "rail-sidebar260-1440",
+   "nameLines": 3,
+   "controlsUnder": true
+  },
+  {
+   "lang": "zh",
+   "label": "dialog-280",
+   "nameLines": 2,
+   "controlsUnder": true
+  },
+  {
+   "lang": "zh",
+   "label": "dialog-320",
+   "nameLines": 1,
+   "controlsUnder": true
+  },
+  {
+   "lang": "zh",
+   "label": "dialog-390",
+   "nameLines": 3,
+   "controlsUnder": false
+  },
+  {
+   "lang": "zh",
+   "label": "dialog-768",
+   "nameLines": 1,
+   "controlsUnder": false
+  }
+ ],
+ "after": [
+  {
+   "lang": "en",
+   "label": "rail-sidebar200-1280",
+   "nameLines": 4,
+   "controlsUnder": true
+  },
+  {
+   "lang": "en",
+   "label": "rail-sidebar260-1280",
+   "nameLines": 2,
+   "controlsUnder": true
+  },
+  {
+   "lang": "en",
+   "label": "rail-sidebar280-1280",
+   "nameLines": 2,
+   "controlsUnder": true
+  },
+  {
+   "lang": "en",
+   "label": "rail-sidebar320-1280",
+   "nameLines": 2,
+   "controlsUnder": true
+  },
+  {
+   "lang": "en",
+   "label": "rail-sidebar260-1440",
+   "nameLines": 2,
+   "controlsUnder": true
+  },
+  {
+   "lang": "en",
+   "label": "dialog-280",
+   "nameLines": 2,
+   "controlsUnder": true
+  },
+  {
+   "lang": "en",
+   "label": "dialog-320",
+   "nameLines": 1,
+   "controlsUnder": true
+  },
+  {
+   "lang": "en",
+   "label": "dialog-390",
+   "nameLines": 1,
+   "controlsUnder": true
+  },
+  {
+   "lang": "en",
+   "label": "dialog-768",
+   "nameLines": 1,
+   "controlsUnder": false
+  },
+  {
+   "lang": "zh",
+   "label": "rail-sidebar200-1280",
+   "nameLines": 4,
+   "controlsUnder": true
+  },
+  {
+   "lang": "zh",
+   "label": "rail-sidebar260-1280",
+   "nameLines": 2,
+   "controlsUnder": true
+  },
+  {
+   "lang": "zh",
+   "label": "rail-sidebar280-1280",
+   "nameLines": 2,
+   "controlsUnder": true
+  },
+  {
+   "lang": "zh",
+   "label": "rail-sidebar320-1280",
+   "nameLines": 2,
+   "controlsUnder": true
+  },
+  {
+   "lang": "zh",
+   "label": "rail-sidebar260-1440",
+   "nameLines": 2,
+   "controlsUnder": true
+  },
+  {
+   "lang": "zh",
+   "label": "dialog-280",
+   "nameLines": 2,
+   "controlsUnder": true
+  },
+  {
+   "lang": "zh",
+   "label": "dialog-320",
+   "nameLines": 1,
+   "controlsUnder": true
+  },
+  {
+   "lang": "zh",
+   "label": "dialog-390",
+   "nameLines": 1,
+   "controlsUnder": true
+  },
+  {
+   "lang": "zh",
+   "label": "dialog-768",
+   "nameLines": 1,
+   "controlsUnder": false
+  }
+ ]
+}

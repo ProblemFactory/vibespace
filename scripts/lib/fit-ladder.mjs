@@ -109,3 +109,16 @@ export const columnFactsSource = (sel) => `(() => {
 })()`;
 /** A column READS when nothing in its facts is a fault. */
 export const columnReads = (f) => !!f && !f.sideways && !f.wrapped.length && !f.cut.length && !f.clipped.length && !f.squeezed.length && !f.midWord.length;
+
+/** B-db5d (the coordinator's law, 2026-11-19 04:47Z): AT NO WIDTH OF THE LADDER DOES A NAME STAND ON MORE LINES THAN IT DID AT THE
+ *  CHECKPOINT — the controls go under the name before the name is squeezed. PURE over two measured walks ([{ lang, label, nameLines }],
+ *  label = the host and the width): → the widths where `after` draws the name on more lines than `before` (and the widths `after` never
+ *  measured — a ladder width left out is no pass). */
+export function linesGrew(before = [], after = []) {
+  const key = (r) => `${r.lang} ${r.label}`;
+  const was = new Map(before.filter((r) => r && Number.isFinite(r.nameLines)).map((r) => [key(r), r.nameLines]));
+  const now = new Map(after.filter((r) => r && Number.isFinite(r.nameLines)).map((r) => [key(r), r.nameLines]));
+  const out = [];
+  for (const [k, b] of was) { const a = now.get(k); if (a == null) out.push({ at: k, before: b, after: null }); else if (a > b) out.push({ at: k, before: b, after: a }); }
+  return out;
+}

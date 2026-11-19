@@ -109,7 +109,7 @@ function makeSwitch(on, { disabled = false, label, onChange }) {
 }
 /** one list row: icon dot · name + description [+ a readout line] · chip · switch · [install] · ⚙ — `fact` is a READOUT
  *  (a drawn element, not a control: the LLM plugin's money today, lane decision-spend-readout), under the description */
-function pluginRow({ id, label, description, tone, chip, chipTitle, onChip, sw, install, gear, fact = null }) {
+function pluginRow({ id, label, description, tone, chip, chipTitle, onChip, sw, install, gear, fact = null, installed = false }) {
   // lane ui-phone-and-fit M2: THE RAIL ROW (rail-row.js) — dot · the name (+ its description, + a readout) · the controls
   // (the status chip — the plugin's entry when it is a button, so it never folds and is never cut —, the switch, [install], ⚙)
   const c = document.createElement(onChip ? 'button' : 'span');
@@ -118,6 +118,10 @@ function pluginRow({ id, label, description, tone, chip, chipTitle, onChip, sw, 
   const dot = Object.assign(document.createElement('span'), { className: 'plugin-dot' + (tone === 'ok' ? ' ok' : tone === 'warn' ? ' warn' : tone === 'err' ? ' err' : '') });
   const row = railRow({ className: 'plugin-row', lead: dot, name: label, nameClass: 'plugin-row-name', desc: description || '', descClass: 'plugin-row-desc', mainClass: 'plugin-row-main', main: [fact], controls: [c, sw, install, gear] });
   row.dataset.plugin = id;
+  // B-db5d (the coordinator's law, 04:47Z): an INSTALLED row's name (its id in brackets: long by construction) keeps its room — where
+  // the name and the controls do not fit on one line, the controls take their own line UNDER it (style.css .plugin-row-installed);
+  // the built-in rows keep their look
+  if (installed) row.classList.add('plugin-row-installed');
   row.querySelector('.rail-row-main').title = description || '';
   return row;
 }
@@ -403,7 +407,7 @@ export function installPluginsUI(App) {
         else if (!p.install || p.install.source === 'zip') { fact = document.createElement('div'); fact.className = 'plugin-row-fact plugin-update-how'; fact.textContent = p.install ? t('Installed from an uploaded file — upload the new .vsp through Install plugin…') : t('Placed by hand — reinstall it through Install plugin… to make it updatable'); }
         const from = p.install && p.install.source === 'git' ? [p.install.ref ? `@${p.install.ref}` : '', p.install.sha ? p.install.sha.slice(0, 12) : ''].filter(Boolean).join(' ') : '';
         rows.appendChild(pluginRow({ id: p.id, label: p.label && p.label !== p.id ? `${p.label} (${p.id})` : p.id, description: p.description || '', tone, chip, chipTitle: [p.version, from, why].filter(Boolean).join(' · '), onChip,
-          sw, install: actions, gear: this._pluginGear(p.id, p.label || p.id), fact }));
+          sw, install: actions, gear: this._pluginGear(p.id, p.label || p.id), fact, installed: true }));
       }
       parent.appendChild(sec);
     };

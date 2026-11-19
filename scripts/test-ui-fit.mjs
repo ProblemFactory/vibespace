@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { clientSources, checkLabelSites, stackingRules, railPanels } from './ui-fit-census.mjs';
+import { linesGrew } from './lib/fit-ladder.mjs';
 import { cssRules, selectorList, lastCompound } from './lib/css-rules.mjs';
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -86,6 +87,18 @@ check('② CONTROL: a sheet that draws the cluster again (the checkpoint\'s `.pl
 const noEmptyMenu = (row) => /const menuRows = rest\.flatMap\(\(c\) => \(c\.tagName === 'BUTTON' \? \[c\] : \[\.\.\.c\.querySelectorAll\('button'\)\]\)\);\n\s+if \(menuRows\.length\) \{/.test(row);
 check('② B-db5d: a «⋯» is drawn only when its menu has a row — a folded group with no button gives none (never a menu that opens empty)', noEmptyMenu(ROW));
 check('② CONTROL: the rail row that drew a «⋯» for any fold (if (folded.size)) is refused', !noEmptyMenu(ROW.replace('if (menuRows.length) {', 'if (folded.size) {')));
+// B-db5d — THE NAME KEEPS ITS ROOM (the coordinator's law, 04:47Z: at no width of the ladder does a plugin's NAME stand on more lines
+// than at the checkpoint; the controls go UNDER the name before it is squeezed): an INSTALLED row (plugins-ui marks it; its name
+// carries the id in brackets) gives the name block a 16 em basis, so where name and controls do not fit on one line the controls
+// take their own line. The MEASURED walks (bl-chat-b's pics-db5d.mjs over each built tree — the checkpoint f6ad84f50, B-db5d's 9 em
+// row, the cure — at the rail's 200 / 260 / 280 / 320 (+1440) and the phone dialog's 280 / 320 / 390 / 768, en + zh) are kept in
+// scripts/fixtures/plugin-row-name-lines.json; PURE fit-ladder linesGrew judges them; the rule and its mark are pinned.
+const NL = JSON.parse(read('scripts/fixtures/plugin-row-name-lines.json'));
+const roomRule = (css, plug) => /\n\.rail-row\.plugin-row-installed > \.rail-row-main \{ flex-basis: 16em; \}/.test(css) && /if \(installed\) row\.classList\.add\('plugin-row-installed'\);/.test(plug) && /fact, installed: true \}\)\);/.test(plug);
+check(`② B-db5d: at every width of the ladder an installed plugin's name stands on no more lines than at the checkpoint (${NL.after.length} widths measured; grew: ${JSON.stringify(linesGrew(NL.before, NL.after))})`, NL.after.length >= 18 && linesGrew(NL.before, NL.after).length === 0, linesGrew(NL.before, NL.after));
+check(`② CONTROL: B-db5d's 9 em row (the measured walk the law was read on) is caught — the name grew at ${linesGrew(NL.before, NL.nineEm).map((g) => g.at).join(', ')}`, linesGrew(NL.before, NL.nineEm).length >= 1);
+check('② B-db5d: the installed row\'s rule and its mark stand (the 16 em basis; plugins-ui marks only the installed rows)', roomRule(STYLE, PLUG));
+check('② CONTROL: the 9 em basis back (the rule gone) or the mark gone is refused', !roomRule(STYLE.replace('\n.rail-row.plugin-row-installed > .rail-row-main { flex-basis: 16em; }', ''), PLUG) && !roomRule(STYLE, PLUG.replace("  if (installed) row.classList.add('plugin-row-installed');\n", '')));
 check('② railRow folds more than ROW_INLINE_MAX controls into ONE «⋯» (the PURE rowActionsFold) whose rows are their own words',
   /import \{ rowActionsFold, ROW_INLINE_MAX \} from '\.\/row-fold-model\.js'/.test(ROW) && /rowActionsFold\(/.test(ROW) && /showContextMenu\(/.test(ROW) && /max = ROW_INLINE_MAX/.test(ROW));
 // the census: the classes rail renderers give a BUTTON, and the rules that would cut its words

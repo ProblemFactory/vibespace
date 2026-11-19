@@ -5772,6 +5772,7 @@ html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock.cad-open { max
    cut — it wraps inside itself only when it alone is wider than the line). Gate: test-ui-fit ② + test-ui-fit-chrome. ── */
 .rail-row { display: flex; flex-wrap: wrap; align-items: center; column-gap: 8px; row-gap: 4px; min-width: 0; }
 .rail-row > .rail-row-main { flex: 1 1 9em; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 0.5em; }
+.rail-row.plugin-row-installed > .rail-row-main { flex-basis: 16em; }   /* B-db5d (the coordinator's law): an INSTALLED plugin's name — its id in brackets — never stands on more lines than with the four buttons inline: where it and the controls do not fit on one line, the controls go UNDER it (a 390 phone drew the name on three lines beside chip · switch · ⚙ · ⋯) */
 .rail-row > .rail-row-main > div { flex: 1 1 100%; min-width: 0; } /* a row made by rule still reads as its PARTS (the reader's must-fix: «dev-serverdown»): inline parts — a job's name and its state — keep a gap and wrap whole; a block part (a plugin's name, its words) has its own line */
 .rail-row-name { overflow-wrap: break-word; word-break: normal; min-width: 0; }
 .rail-row > .rail-row-ctl { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 4px 6px; margin-left: auto; max-width: 100%; min-width: 0; }
