@@ -68,6 +68,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - If the desktop apps' record file can't be read, VibeSpace no longer overwrites it; opening or stopping an app says why until it reads again.
 - When For you cannot read its saved list, it now says so and changes nothing until the list reads again, instead of starting empty.
 - A paired machine that fails a key check, either way, no longer shows as connected: its dot and badge turn red and its line says what to do.
+- A Background Work notice that arrived while its conversation was not running now reaches it once the conversation runs again; For you says it waits meanwhile.
 
 ### Security
 - A machine on SSH now switches to its own connection by itself only through an address you set or published, never one VibeSpace put on the relay by itself.

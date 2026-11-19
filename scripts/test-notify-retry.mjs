@@ -23,7 +23,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { scratchDir } from './scratch.mjs';
+import { scratchDir, anchored } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -1933,6 +1933,180 @@ console.log('\n§W wiring pins');
     await turnEnd(R);
     const line = (j.notifyLog || []).find((l) => l && l.parked);
     ok(R.posts.length === 0 && line && /the delivery check failed/.test(line.reason || '') && !/can no longer view/.test(line.reason || ''), '(r5) a check that THREW is journalled as such — «the delivery check failed», never «can no longer view»', JSON.stringify(line));
+  }
+}
+
+// ── B-6721: A STASHED WAKE WAKES ITS CONVERSATION ONCE IT RUNS AGAIN, OR FOR YOU SAYS IT WAITS ──────────────────────────────
+// (fb-708fa798a0, measured in the journal: a one-shot fired at 08:30 while its conversation was not running — «no live inbox …
+// pid-gone», stashed; the conversation was resumed at 09:18 and heard nothing until a prompt hours later.) THE REAL ladder, THE
+// REAL jobs engine, THE REAL stash view: the conversation STOPPED (no live session, its pid gone), then BACK (a live session of
+// it, a live registration, idle) — the view hears a live session as the hub's payload does (`summaryFor`, built for every one).
+console.log('\n§B-6721 a notice stashed while its conversation was not running: For you says it waits; the conversation back ⇒ ONE hand-over');
+{
+  const SHSRC = fs.readFileSync(path.join(REPO, 'src/server/stash-handover.js'), 'utf8');
+  const MB = mutantCopies('ntr-b6721', REPO);
+  const wakeRig = (name) => {
+    const R = rig(name, { pid: 99999999 });   // the incident: the CLI's pid gone
+    R.sessions.delete('w1');                  // …and no live session of it: the conversation STOPPED
+    const filed = [], resolved = [], scheduled = [];
+    let view = null;
+    const jm = new JobManager({ dataDir: R.dir, log: (...a) => R.logs.push(a.join(' ')), broadcast: () => { }, notifyUser: () => { }, onStash: () => { if (view) view.changed(); },
+      deliverToConversation: (cid, text, opts) => R.deliver.deliverToConversation(cid, text, opts), onRetry: (fn) => R.deliver.onRetry(fn), peerReachable: (cid) => R.deliver.peerReachable(cid),
+      noticeWakeWaiting: (o) => { filed.push(o); return 'ut-wait-1'; }, resolveWakeWaiting: (cid) => { resolved.push(cid); return 1; } });
+    const job = { id: 'jb-bbbb2222', kind: 'task', name: 'ticket-window-watch', state: 'done', owner: { conversation: { id: R.cid } }, access: { view: 'all', control: 'session' }, runs: [] };
+    jm.jobs.set(job.id, job);
+    const mk = (mod) => { view = mod.create({ activeSessions: R.sessions, getDeliver: () => R.deliver, getJobs: () => jm, broadcastSessions: () => { }, renderMsgStash, renderNotifStash: JM_MODEL.renderNotifStash, debounceMs: 5, log: { log: (...a) => R.logs.push(a.join(' ')), warn() { } }, now: () => R.now(), schedule: (fn, ms) => { scheduled.push({ fn, ms }); return null; }, wakeBootGraceMs: 0 }); return view; };
+    const run = async () => { const xs = scheduled.splice(0); for (const x of xs) await x.fn(); await sleep(20); };
+    const comeBack = () => {   // the conversation resumed: a live session of it, a LIVE registration, its CLI idle and taking frames
+      R.sessions.set('w1', R.session);
+      fs.writeFileSync(path.join(R.reg, `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: R.cid, messagingSocketPath: path.join(R.dir, 'inbox.sock'), name: 'Owner', version: '2.1.281' }));
+      R.session._isStreaming = false; R.setAnswer(async () => ({ ok: true, phase: 'written' }));
+    };
+    const broadcast = () => { if (view) view.summaryFor(R.session); };   // the hub's payload, built for every live session
+    return { ...R, jm, job, filed, resolved, scheduled, run, comeBack, mk, broadcast, view: () => view };
+  };
+  const fire = async (W, what) => { W.jm._notifyOwner(W.job, { what }); await sleep(20); };
+  // (a) THE INCIDENT
+  {
+    const W = wakeRig('b6721-incident'); W.mk(SH);
+    await fire(W, 'fired: the ticket window opens in 1 h');
+    const q0 = W.jm.peekNotifs(W.cid);
+    ok(q0.length === 1 && q0[0].held && q0[0].held.kind === 'not-running' && W.scheduled.length === 1 && W.scheduled[0].ms === 5000, '(a) B-6721: stashed not-running (the incident) — ONE check armed (5 s)', JSON.stringify({ q: q0.map((n) => n.held), s: W.scheduled.map((x) => x.ms) }));
+    await W.run();
+    ok(W.filed.length === 1 && W.filed[0].cid === W.cid && W.posts.length === 0 && W.scheduled.length === 0,
+      '(a) …the conversation AWAY (no live session): For you says the notices wait (once), nothing posted, and the chain ENDS — nothing polls a stopped conversation', JSON.stringify({ filed: W.filed, posts: W.posts.length, s: W.scheduled.map((x) => x.ms) }));
+    W.broadcast(); await sleep(20);
+    ok(W.scheduled.length === 0, '(a) …a payload built while it is still away arms nothing');
+    W.comeBack(); W.broadcast(); await sleep(5);
+    ok(W.scheduled.length === 1 && W.scheduled[0].ms === 5000, '(a) …a LIVE session of it (the resume) arms its chain at once', JSON.stringify(W.scheduled.map((x) => x.ms)));
+    await W.run();
+    ok(W.posts.length === 1 && /that were waiting for this conversation/.test(W.posts[0]) && /ticket window opens in 1 h/.test(W.posts[0]) && W.jm.peekNotifs(W.cid).length === 0,
+      '(a) …back, idle: ONE post — the frame carries the notice — the stash empty', JSON.stringify({ posts: W.posts.map((x) => x.slice(0, 160)) }));
+    ok(W.ledger.length === 1 && W.ledger[0].reason === 'stash-reachable' && W.resolved.includes(W.cid) && W.scheduled.length === 0 && W.filed.length === 1,
+      '(a) …billed ONCE under its OWN reason (stash-reachable), For you\'s item closed, no chain left, nothing filed again', JSON.stringify({ ledger: W.ledger, resolved: W.resolved, s: W.scheduled.length }));
+  }
+  // (a) the hand-over is a delivery for the engine's 30 s floor (its read: two billed posts inside 30 s otherwise) — the stamp
+  // is the HAND-OVER's (taken after it, never the attempt's own earlier stamp)
+  const floorRun = async (mod) => {
+    const W = wakeRig('b6721-floorstamp-' + Math.random().toString(36).slice(2, 6)); W.mk(mod);
+    await fire(W, 'fired while stopped');
+    await W.run(); W.comeBack(); W.broadcast(); await sleep(15);
+    const t0 = Date.now();
+    await W.run();
+    const rate = W.jm._notifyRate.get(W.cid);
+    return { posts: W.posts.length, stamped: !!(rate && rate.ts >= t0), rate };
+  };
+  {
+    const f = await floorRun(SH);
+    ok(f.posts === 1 && f.stamped, '(a) …the engine\'s 30 s floor counts the hand-over (stamped AT it, as a post of its own)', JSON.stringify(f));
+    const SHnoStamp = MB.load('src/server/stash-handover.js', anchored(SHSRC, "      if (tookJobs.length && jm && typeof jm.noteHandedOver === 'function') { try { jm.noteHandedOver(cid, frame); } catch { } }   // B-6721: the engine's 30 s floor counts this delivery\n", '', 'B-6721: the floor not stamped'), 'sh-nostamp');
+    const fr = await floorRun(SHnoStamp);
+    ok(fr.posts === 1 && !fr.stamped, 'RED control: without the stamp the floor still reads the ATTEMPT\'s older stamp (two billed posts could land inside 30 s)', JSON.stringify(fr));
+  }
+  // (a) THE RESTORE ROAD (the delta read's must): a wake that LANDED leaves the conversation quiet at the newest notice it carried — a
+  // frame the wrapper hands back restores those entries (still owed) and no fresh chain re-posts them
+  const restoreRun = async (mod) => {
+    const W = wakeRig('b6721-restore-' + Math.random().toString(36).slice(2, 6)); W.mk(mod);
+    await fire(W, 'fired while stopped');
+    await W.run(); W.comeBack(); W.broadcast(); await sleep(5); await W.run();
+    const back = W.view().restoreHandedOver(W.cid, W.posts[0], { kind: 'notification' });
+    await sleep(30);
+    return { posts: W.posts.length, back, owed: W.jm.wakeOwed(W.cid).length, armed: W.scheduled.length };
+  };
+  {
+    const r = await restoreRun(SH);
+    ok(r.posts === 1 && r.back >= 1 && r.owed >= 1 && r.armed === 0, '(a) …the frame handed back RESTORES the notice (still owed) and nothing re-arms — no second billed post', JSON.stringify(r));
+    const SHnoHanded = MB.load('src/server/stash-handover.js', anchored(SHSRC, "        quiet(cid, 'handed', handed);\n", "        wakeQuiet.delete(cid);\n", 'B-6721: no quiet after a wake that landed'), 'sh-nohanded');
+    const rr = await restoreRun(SHnoHanded);
+    ok(rr.back >= 1 && rr.armed >= 1, 'RED control: without the quiet after a wake that landed, the restored entries arm a fresh chain (the billed loop the read found)', JSON.stringify(rr));
+  }
+  // (a) RED: the resume road cut (summaryFor arms nothing) — the conversation back hears nothing: the incident
+  {
+    const SHnoLive = MB.load('src/server/stash-handover.js', anchored(SHSRC, "    noteLive(cid);   // B-6721: a live session of a conversation owed a wake (a resume, a restore) arms its chain — the payload is built for every live session\n", '', 'B-6721: the resume road cut'), 'sh-nolive');
+    const W = wakeRig('b6721-red'); W.mk(SHnoLive);
+    await fire(W, 'fired: the ticket window opens in 1 h');
+    await W.run(); W.comeBack(); W.broadcast(); await sleep(5); await W.run();
+    ok(W.posts.length === 0 && W.jm.peekNotifs(W.cid).length === 1, 'RED control: without the resume road the conversation back hears nothing (the incident: the stash waits for a prompt)', JSON.stringify({ posts: W.posts.length }));
+  }
+  // (b) B-2fa2 (merged): a FLOORED distinct notice fires at its bound — the conversation live, no For-you item
+  {
+    const W = wakeRig('b6721-floor'); W.mk(SH); W.comeBack();
+    await fire(W, 'first: delivered at once');
+    await fire(W, 'second: inside the floor');
+    const q = W.jm.peekNotifs(W.cid);
+    ok(W.posts.length === 1 && q.length === 1 && q[0].held.kind === 'rate-floor' && W.scheduled.length === 1, '(b) B-2fa2: a second, distinct notice inside the 30 s floor is stashed rate-floor and its check armed', JSON.stringify({ posts: W.posts.length, held: q.map((n) => n.held), s: W.scheduled.length }));
+    await W.run();
+    ok(W.posts.length === 1 && W.scheduled.length === 1 && W.scheduled[0].ms >= 29000, '(b) …the first look waits the ladder\'s floor out (never two posts inside it)', JSON.stringify(W.scheduled.map((x) => x.ms)));
+    await W.advance(31 * 1000);
+    await W.run();
+    ok(W.posts.length === 2 && /second: inside the floor/.test(W.posts[1]) && W.jm.peekNotifs(W.cid).length === 0 && W.filed.length === 0, '(b) …and fires at its bound — never left for a prompt; no For-you item (never away)', JSON.stringify({ posts: W.posts.length, filed: W.filed.length }));
+  }
+  // (c) a notice the SPEND CEILING held, alone, waits for the person as before — no chain
+  {
+    const W = wakeRig('b6721-spend'); W.mk(SH);
+    W.jm._stashNotif(W.cid, W.job, { what: 'held by the ceiling' }, 'spend', { held: { kind: 'spend-cap' } });
+    await sleep(20);
+    ok(W.scheduled.length === 0 && W.filed.length === 0, '(c) a notice the spend ceiling held, alone, arms no wake (the person\'s word stands)', JSON.stringify(W.scheduled.length));
+  }
+  // (d) AT BOOT: the engine reads its notices after listen — its announce arms each owed conversation (the view was built before)
+  {
+    const W = wakeRig('b6721-boot'); W.mk(SH);   // the view built at module load, over an engine that has read nothing yet
+    W.jm._notifsAnswer({ state: 'data', value: { [W.cid]: [{ jobId: W.job.id, jobName: W.job.name, text: 'fired while the hub was down', ts: Date.now() - 60000, urgency: 'low', held: { kind: 'not-running' } }] } });   // the boot's read (_loadNotifs' answer): no hook
+    await sleep(20);
+    ok(W.jm.wakeOwed(W.cid).length === 1 && W.scheduled.length === 0, '(d) the notices read at boot arm nothing by themselves (the view\'s own boot walk saw an empty store — the read\'s must)', JSON.stringify({ owed: W.jm.wakeOwed(W.cid).length, s: W.scheduled.length }));
+    const n = W.jm.announceOwedWakes(); await sleep(20);
+    ok(n === 1 && W.scheduled.length === 1, '(d) the engine\'s boot announce (after its notices are read) arms the owed conversation\'s chain', JSON.stringify({ n, s: W.scheduled.length }));
+    const JSRC = fs.readFileSync(path.join(REPO, 'src/jobs.js'), 'utf8');
+    ok(/this\._loadNotifs\(\);\n\s+this\.announceOwedWakes\(\);/.test(JSRC), '(d) …and init() announces right after it reads the notices (the writable engine\'s road)');
+  }
+  // (e) the person's prompt drains it first: For you's item closed; the conversation back is armed for nothing
+  {
+    const W = wakeRig('b6721-prompt'); W.mk(SH);
+    await fire(W, 'fired: drained by a prompt');
+    await W.run();
+    const text = AR.drainNotifsUnderCap(W.jm, W.deliver, W.cid, 0, () => { });   // a prompt with room for the digest (9600 B ahead = none: the cap's leg)
+    ok(/drained by a prompt/.test(text) && W.resolved.includes(W.cid), '(e) the person\'s prompt carries it and For you\'s item is closed', JSON.stringify({ text: String(text).slice(0, 120), resolved: W.resolved }));
+    W.comeBack(); W.broadcast(); await sleep(5);
+    ok(W.posts.length === 0 && W.scheduled.length === 0, '(e) …the conversation back: nothing owed, nothing armed', JSON.stringify({ posts: W.posts.length, s: W.scheduled.length }));
+  }
+  // (f) A REFUSAL ENDS THE CHAIN and it stays quiet (the fresh read's must: the hand-over's own changed() re-armed a 5 s loop)
+  const refusedRun = async (mod) => {
+    const W = wakeRig('b6721-refused-' + Math.random().toString(36).slice(2, 6)); W.mk(mod);
+    await fire(W, 'fired while stopped');
+    await W.run();
+    W.comeBack(); W.setRefuse('hour-cap'); W.broadcast(); await sleep(5);
+    await W.run(); await sleep(30);
+    const afterRefusal = W.scheduled.length;
+    W.broadcast(); await sleep(20);
+    return { W, afterRefusal, afterBroadcast: W.scheduled.length };
+  };
+  {
+    const { W, afterRefusal, afterBroadcast } = await refusedRun(SH);
+    ok(W.posts.length === 0 && W.authorized.filter((r) => r === 'stash-reachable').length === 1 && afterRefusal === 0 && afterBroadcast === 0 && W.jm.peekNotifs(W.cid).length === 1,
+      '(f) a spend refusal ENDS the chain: one ask, nothing posted, nothing re-armed — by the store\'s own hook or a later payload — until something new comes; the notice waits for the prompt', JSON.stringify({ asked: W.authorized, afterRefusal, afterBroadcast }));
+    await fire(W, 'a newer one');   // something NEW: armed again (the floor of the engine may stash it — it is owed either way)
+    ok(W.scheduled.length === 1, '(f) …a NEWER owed notice arms it again', JSON.stringify(W.scheduled.length));
+  }
+  // (f) …and a RESUME lifts a refusal's quiet (the delta read's must: the quiet outlived the session — stop then resume heard nothing)
+  const resumeRun = async (mod) => {
+    const { W } = await refusedRun(mod);
+    W.sessions.delete('w1');   // stopped
+    const s2 = { ...W.session, _isStreaming: false };
+    W.sessions.set('w2', s2); W.setRefuse(null);   // resumed: a NEW live session of the conversation
+    W.view().summaryFor(s2); await sleep(5);
+    return { armed: W.scheduled.length };
+  };
+  {
+    const r = await resumeRun(SH);
+    ok(r.armed === 1, '(f) …a RESUME (a new live session of it) lifts the refusal\'s quiet and arms the chain', JSON.stringify(r));
+    const SHsameQuiet = MB.load('src/server/stash-handover.js', anchored(SHSRC, "(q.why === 'away' || q.wid !== wid)", "q.why === 'away'", 'B-6721: only away lifted by a session'), 'sh-samequiet');
+    const rr = await resumeRun(SHsameQuiet);
+    ok(rr.armed === 0, 'RED control: a quiet only a session after AWAY lifts — the resume after a refusal hears nothing (the incident again)', JSON.stringify(rr));
+  }
+  {
+    const SHloud = MB.load('src/server/stash-handover.js', anchored(SHSRC, "    if (q && newestOf(owed) <= q.at && !(wid != null && (q.why === 'away' || q.wid !== wid))) return false;\n", '', 'B-6721: no quiet after an ending'), 'sh-loud');
+    const { afterRefusal, afterBroadcast } = await refusedRun(SHloud);
+    ok(afterRefusal + afterBroadcast > 0, 'RED control: without the quiet a refused wake is armed again at once (the 5 s loop the read found)', JSON.stringify({ afterRefusal, afterBroadcast }));
   }
 }
 

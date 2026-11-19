@@ -107,7 +107,7 @@ const GROUP_LATE_MS = 60 * 1000;
  *  does not export (it is on create()'s result), so every press in production was refused «not wired». An unwired door refuses,
  *  and says so once (scripts/test-spend-paths §2c: every injected guard is passed at every construction site). */
 
-function create({ activeSessions, getDeliver = () => null, getJobs = () => null, getGroups = () => null, getChannels = () => null, broadcastSessions = () => {}, renderMsgStash, renderNotifStash, log = console, debounceMs = 300, now = () => Date.now(), schedule = (fn, ms) => { const t = setTimeout(fn, ms); if (t && t.unref) t.unref(); return t; }, dataDir = null, getSendUserInput = () => null, getSpendGuard = () => null, groupHandedWaitMs = GROUP_HANDED_WAIT_MS } = {}) {
+function create({ activeSessions, getDeliver = () => null, getJobs = () => null, getGroups = () => null, getChannels = () => null, broadcastSessions = () => {}, renderMsgStash, renderNotifStash, log = console, debounceMs = 300, now = () => Date.now(), schedule = (fn, ms) => { const t = setTimeout(fn, ms); if (t && t.unref) t.unref(); return t; }, dataDir = null, getSendUserInput = () => null, getSpendGuard = () => null, groupHandedWaitMs = GROUP_HANDED_WAIT_MS, wakeBootGraceMs = 60 * 1000 } = {}) {
   const cidOf = (s) => (s && (s.backendSessionId || s.claudeSessionId)) || null;
   const jobsReady = () => { try { const jm = getJobs(); return jm && typeof jm.peekNotifs === 'function' ? jm : null; } catch { return null; } };
   let seq = 0;
@@ -179,6 +179,7 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
   function summaryFor(s) {
     const cid = cidOf(s);
     if (!cid) return null;
+    noteLive(cid);   // B-6721: a live session of a conversation owed a wake (a resume, a restore) arms its chain — the payload is built for every live session
     try {
       const both = entriesOf(cid);
       const groups = groupEntriesOf(s);
@@ -211,11 +212,99 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
   }
   { const d0 = getDeliver(); if (d0 && typeof d0.onTurnEnd === 'function') d0.onTurnEnd(async (cid) => { const a = typeof d0.takeArmedHandover === 'function' ? d0.takeArmedHandover(cid) : null; if (a) await runArmed(cid, a.why); }); }
 
+  // ── B-6721: A STASHED WAKE WAKES ITS CONVERSATION ONCE IT RUNS AGAIN, OR FOR YOU SAYS IT WAITS ─────────────────────────────
+  // (fb-708fa798a0, measured in the journal: a one-shot fired at 08:30 while its conversation was not running — «no live
+  // inbox … pid-gone», stashed; the conversation was resumed at 09:18 and heard nothing until a prompt hours later: the
+  // stash waits for a prompt, and nobody typed one.) A conversation OWED A WAKE (the jobs engine's `wakeOwed`: stashed
+  // not-running, or held by the 30 s floor — B-2fa2) gets ONE chain of LOCAL checks (no vendor, nothing posted while away):
+  //   · a live, reachable, idle session ⇒ THE AUTOMATIC HAND-OVER (`handOver(wid, { auto: 'reachable' })` — the turn end's
+  //     exactly-once road: one in flight per conversation, its entries claimed, its record kept) under its OWN reason
+  //     `stash-reachable`, its own words; the jobs engine's floor counts it;
+  //   · a live session not yet taking frames (its CLI starting) ⇒ the next step (5 s, 30 s, 1, 2, 5, 10 min); a turn running ⇒
+  //     a look every 30 s (its end, or a later look, carries it);
+  //   · AWAY (no live session) ⇒ For you says the notices wait (`sayWakeWaiting` — once a waiting episode) and the chain ENDS:
+  //     it is armed again when a live session of the conversation is seen (`summaryFor`, built for every live session — a
+  //     resume, a restore) or a write of either store owes it again; nothing polls a conversation that is gone;
+  //   · a refusal (the spend ceiling, a next-turn hold, nothing waiting) ⇒ the chain ENDS, said in the journal (the notices
+  //     ride the next prompt, as before).
+  // A conversation whose check is RUNNING is never armed again from a hook (`wakeBusy`), and a chain that ENDED stays QUIET
+  // (`wakeQuiet`: why, and the newest owed notice it saw) — the hand-over's own changed() re-armed a fresh step-0 chain on every
+  // refusal (the fresh read's must: a 5 s loop with no end). A quiet conversation is armed again only by something NEW: a notice
+  // newer than the one it saw, or — after AWAY — a live session of it (a refusal is never retried while nothing changed).
+  const WAKE_STEPS_MS = [5 * 1000, 30 * 1000, 60 * 1000, 2 * 60 * 1000, 5 * 60 * 1000, 10 * 60 * 1000];
+  const WAKE_BUSY_STEP = 1;   // a turn running: the 30 s step
+  const wakeChains = new Map();   // cid → { step }: the conversation's next check is scheduled (no words: a cid and a step)
+  const wakeBusy = new Set();     // cid: its check is running
+  const wakeQuiet = new Map();    // cid → { why: 'away' | 'refused', at }: its chain ended; `at` = the newest owed notice it saw
+  const owedOf = (cid) => { const jm = jobsReady(); try { return jm && !jm.readOnly && typeof jm.wakeOwed === 'function' ? jm.wakeOwed(cid) : []; } catch { return []; } };   // a read-only engine's drain writes nothing: never armed
+  const newestOf = (owed) => owed.reduce((m, n) => Math.max(m, Number(n && n.ts) || 0), 0);
+  /** may a hook arm this conversation now? — something owed, no chain, no check running, and nothing that ENDED it unchanged:
+   *  a quiet conversation is lifted by a NEWER owed notice, or by a live session it did not see (after AWAY any live session; after a
+   *  refusal or a wake that landed, a NEW one — a resume: the read's must, a refusal's quiet outlived the session) */
+  function mayArm(cid, wid = null) {
+    if (!cid || closed || wakeChains.has(cid) || wakeBusy.has(cid)) return false;
+    const owed = owedOf(cid);
+    if (!owed.length) return false;
+    const q = wakeQuiet.get(cid);
+    if (q && newestOf(owed) <= q.at && !(wid != null && (q.why === 'away' || q.wid !== wid))) return false;
+    wakeQuiet.delete(cid);
+    return true;
+  }
+  function armOwedWakes(fromStep = 0) {
+    const jm = jobsReady();
+    if (closed || !jm || !(jm.pendingNotifs instanceof Map)) return;
+    for (const cid of jm.pendingNotifs.keys()) if (mayArm(cid)) armWake(cid, fromStep);
+  }
+  /** a payload built for a session: only a session IN the map arms (the hub builds one for every live session — a resume, a restore) */
+  function noteLive(cid) { const wid = widOf(cid); if (wid != null && mayArm(cid, wid)) armWake(cid, 0); }
+  const quiet = (cid, why, at = newestOf(owedOf(cid))) => wakeQuiet.set(cid, { why, at, wid: widOf(cid) });
+  const bootAt = now();
+  const BOOT_GRACE_MS = wakeBootGraceMs;   // a session the boot re-attaches late (a keeper's, a device's) is not AWAY in the boot's first minute
+  function armWake(cid, step, ms = null) {
+    if (wakeChains.has(cid)) return;   // ONE chain a conversation
+    wakeChains.set(cid, { step });
+    schedule(() => { wakeChains.delete(cid); tryWake(cid, step).catch((e) => log.warn?.(`[stash] ${cid}: a wake check failed — ${(e && e.message) || e}`)); },
+      ms != null ? ms : WAKE_STEPS_MS[Math.min(step, WAKE_STEPS_MS.length - 1)]);
+  }
+  async function tryWake(cid, step) {
+    if (closed || wakeBusy.has(cid)) return;
+    wakeBusy.add(cid);
+    let next = null;   // [step, ms] — armed AFTER the check, never from a hook inside it
+    try {
+      const jm = jobsReady();
+      if (!owedOf(cid).length) { wakeQuiet.delete(cid); try { if (jm && jm.wakeSettled) jm.wakeSettled(cid); } catch { } return; }
+      const d = getDeliver(), wid = widOf(cid), s = wid != null ? activeSessions.get(wid) : null;
+      if ((!d || !s) && now() - bootAt < BOOT_GRACE_MS) { next = [step + 1, null]; return; }   // the boot's first minute: sessions still attaching
+      if (!d || !s) { try { if (jm && jm.sayWakeWaiting) jm.sayWakeWaiting(cid); } catch { } quiet(cid, 'away'); return; }   // AWAY: said once, the chain ends
+      if (typeof d.peerReachable === 'function' && !d.peerReachable(cid)) { next = [step + 1, null]; return; }   // live, not taking frames yet
+      if (s._isStreaming) { next = [WAKE_BUSY_STEP, null]; return; }
+      const floor = Number(d.RETRY_FLOOR_MS) || 30 * 1000;
+      const since = typeof d.sincePost === 'function' ? d.sincePost(cid) : Infinity;
+      if (since < floor) { next = [step, Math.min(floor, floor - since)]; return; }   // the ladder's floor: never two posts inside it (a clock stepped back never lengthens the wait)
+      const handed = newestOf(owedOf(cid));
+      const r = await handOver(wid, { auto: 'reachable' });
+      if (r && r.ok) {
+        log.log?.(`[stash] ${cid}: ${r.delivered} waiting notice(s) were posted as a message once the conversation could take them (hand-over ${r.id}, lane ${r.lane || '?'})`);
+        // QUIET at the newest notice this wake carried (the read's must: a frame the wrapper hands back RESTORES those entries — still
+        // owed — and a fresh chain re-posted, billed, every ~30 s); a NEWER notice, or a new session, lifts it
+        quiet(cid, 'handed', handed);
+        if (owedOf(cid).some((n) => (Number(n && n.ts) || 0) > handed)) next = [0, null]; else { try { if (jm && jm.wakeSettled) jm.wakeSettled(cid); } catch { } }
+        return;
+      }
+      if (r && (r.code === 'unreachable' || r.code === 'in_flight')) { next = [step + 1, null]; return; }
+      log.log?.(`[stash] ${cid}: the notices waiting for the conversation were not handed over — ${(r && r.code) || 'unknown'}: ${(r && r.error) || ''} (they ride its next prompt; nothing retries them until something changes)`);
+      quiet(cid, 'refused');
+    } finally {
+      wakeBusy.delete(cid);
+      if (next && !closed) armWake(cid, next[0], next[1]);
+    }
+  }
+
   let timer = null;
   /** A store changed: re-publish the session list once per burst. */
   function changed() {
     if (timer) return;
-    timer = setTimeout(() => { timer = null; try { broadcastSessions(); } catch (e) { log.warn?.(`[stash] re-publish failed: ${(e && e.message) || e}`); } }, debounceMs);
+    timer = setTimeout(() => { timer = null; armOwedWakes(); try { broadcastSessions(); } catch (e) { log.warn?.(`[stash] re-publish failed: ${(e && e.message) || e}`); } }, debounceMs);   // B-6721: a write that owes a wake arms its conversation's chain — once per burst
     if (timer.unref) timer.unref();
   }
 
@@ -380,6 +469,7 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
       const tookParked = shownParked.length && typeof d.retryTake === 'function' ? d.retryTake(cid, new Set(shownParked), { via: 'hand-over', lane: r.lane || null }).map((e) => ({ source: 'agent', kind: e.kind, fromName: e.fromName || null, text: e.text, ts: e.firstAt, held: { kind: 'not-reachable', attempts: (e.attempts || []).length } })) : [];
       const tookMsg = [...tookParked, ...tookStashed];
       const tookJobs = jobsText && jm ? jm.drainNotifs(cid, new Set(jobs)) : [];
+      if (tookJobs.length && jm && typeof jm.noteHandedOver === 'function') { try { jm.noteHandedOver(cid, frame); } catch { } }   // B-6721: the engine's 30 s floor counts this delivery
       // the exact frame the ladder wrote (headed as a notification) — the wrapper echoes it verbatim, and equality is
       // what makes a frame OURS (verify r3: a tag alone is a string a peer can write)
       delivered.set(id, { cid, msg: tookMsg, jobs: tookJobs, at: now(), text: vibespaceNoticeText(frame) });
@@ -405,7 +495,9 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
     const { text, n } = prep;
     // R3 (lane notify-retry): the AUTO hand-over runs at a turn end for what that prompt's context could not carry —
     // its own declared reason, spelled literally beside the user's (the spend census reads the literal)
-    const frame = auto
+    const frame = auto === 'reachable'   // B-6721: the conversation can take them now — everything the stash holds (a hand-over carries all)
+      ? `VibeSpace delivers the ${n} notice(s) that were waiting for this conversation (hand-over ${id}):\n\n${text}`
+      : auto
       ? `VibeSpace delivers the ${n} notice(s) that did not fit your previous prompt's context (hand-over ${id}):\n\n${text}`
       : `The user handed over the ${n} notice(s) that were waiting for your next turn (hand-over ${id}):\n\n${text}`;
     // r2: the ATTENDED reason only on the door's press (write-origin isPress) — a hand-over nobody pressed is the gated twin
@@ -414,7 +506,9 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
       let r = null;
       const cardText = S.handoverCardText(n, text, { why: prep.why });   // 2026-09-28: the card carries the notices behind an expander (handoverFacts), not the count alone; R4: its head says why they waited
       try {
-        r = !isPress(pressed)
+        r = auto === 'reachable'   // B-6721: the wake of a conversation that can take its notices now — its own declared reason
+          ? await d.deliverToConversation(cid, frame, { kind: 'notification', spendReason: 'stash-reachable', fromName: FROM_NAME, cardText })
+          : !isPress(pressed)
           ? await d.deliverToConversation(cid, frame, { kind: 'notification', spendReason: 'stash-retry', fromName: FROM_NAME, cardText })
           : await d.deliverToConversation(cid, frame, { kind: 'notification', spendReason: 'stash-handover', fromName: FROM_NAME, cardText });
       } catch (e) { r = { ok: false, reason: (e && e.message) || String(e) }; }
@@ -704,6 +798,7 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
     });
   }
 
+  armOwedWakes(1);   // B-6721: AT BOOT — what a stopped hub left owed a wake is looked at from the 30 s step (restored sessions attach first)
   return { waitingAll, summaryFor, billedFor, reachableFor, changed, handOver, claimForWake, handOverWake, releaseWake, handOverGroups, groupInFlight: (cid) => groupInflight.has(cid), refreshLive, register, entriesOf, restoreHandedOver, redactDelivered, close, settle, isClosed: () => closed, inFlight: (cid) => inflight.has(cid), inFlightCount: () => inflight.size, _delivered: delivered };
 }
 

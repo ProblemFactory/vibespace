@@ -90,6 +90,37 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
         },
       });
     },
+    // B-6721: Background Work notices are WAITING because their conversation was not running — ONE For-you item per conversation
+    // (its own itemKey), filed ONCE A WAITING EPISODE: an item filed since the oldest waiting notice came — open, or set aside by
+    // the person — is left as it is (never reopened under them); the words name no job (nothing of a job lives in the item for
+    // a «Clear content…» to miss — the Background Work panel lists them); closed by the agent once nothing owed a wake is left
+    noticeWakeWaiting: function noticeWakeWaiting({ cid, since = 0 }) {
+      // B-6721 meets B-44f3 (the move onto c72bbedd2): For you HELD UNREAD — nothing is filed into a store that cannot be read; the
+      // item is filed AT THE READ if the conversation still owes a wake then (the engine notes it said, so its close finds it)
+      if (userTodos.isHeldUnread?.()) { userTodos.whenRead(() => { const owes = (jm.wakeOwed(cid) || []).some((n) => n && n.held && n.held.kind !== 'rate-floor'); if (owes && noticeWakeWaiting({ cid, since })) jm.noteWakeSaid(cid); }, 'the «notices wait» item'); return null; }
+      const key = `jobs-wake-waiting:${cid}`;
+      const had = userTodos.idsWhere((i) => i.itemKey === key).map((id) => userTodos.get(id)).filter(Boolean);
+      const same = had.find((i) => i.status === 'open' || Number(i.createdAt) >= Number(since));
+      if (same) return same.id;
+      let sessName = null;
+      if (activeSessions) for (const s of activeSessions.values()) { if ((s.claudeSessionId || s.backendSessionId) === cid) { sessName = s.name || null; break; } }
+      const it = userTodos.add(`claude:${cid}`, {
+        origin: 'jobs', kind: 'notice', urgency: 'normal', by: 'agent', filerKey: forYouKey, itemKey: key,
+        sessionName: sessName ? `${sessName} · Background Work` : 'Background Work',
+        i18n: {
+          text: { key: 'Background Work notices are waiting — this conversation was not running when they came' },
+          detail: [{ key: 'VibeSpace hands them to the agent as soon as the conversation runs again — or open the conversation and send anything: they ride your message. The Background Work panel lists them.' }],
+        },
+      });
+      return (it && it.id) || null;
+    },
+    resolveWakeWaiting: function resolveWakeWaiting(cid) {
+      // B-44f3's law here too: For you held unread — the close runs AT THE READ, if nothing is owed a wake then
+      if (userTodos.isHeldUnread?.()) { userTodos.whenRead(() => { if (!(jm.wakeOwed(cid) || []).length) resolveWakeWaiting(cid); }, 'the «notices wait» item\'s close'); return 0; }
+      const ids = userTodos.idsWhere((i) => i.itemKey === `jobs-wake-waiting:${cid}` && i.status === 'open');
+      for (const id of ids) { try { userTodos.setStatus(id, 'done', 'agent'); } catch (e) { log('[jobs] For-you resolve failed:', e.message); } }
+      return ids.length;
+    },
     log, getTelemetry, // optional: an archive write failure names itself (jobs-archive-write-failed)
     // B-44f3: For you held unread — the close is refused by name; it runs again at the read (the ask's item never reopens over an answered panel)
     resolveJobAsk: (jobId, opts) => { try { return userTodos.resolveByJob(jobId, opts); } catch (e) { if (e && e.code === 'todos-unread' && typeof userTodos.whenRead === 'function') { userTodos.whenRead(() => { try { userTodos.resolveByJob(jobId, opts); } catch (e2) { log('[jobs] inbox resolve failed at the read:', e2.message); } }, "a job's answered ask"); log(`[jobs] ${jobId}: its For-you ask closes once For you reads its list`); return 0; } log('[jobs] inbox resolve failed:', e.message); return 0; } },
