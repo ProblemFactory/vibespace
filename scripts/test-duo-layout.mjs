@@ -329,15 +329,24 @@ try {
 
   console.log('② the desktop fold ladder (a mouse): boot 951×585 with two chat windows, fold / unfold without a reload');
   await device(951, 585, { mouse: true }); await load(); await attachBoth(); await putDraft();
+  // B-16a9: a short view's fold lands from the strip host's ResizeObserver: waited for (bounded) before the boot is read, so the
+  // rows below and the int373 control's out-of-sight rows are read on ONE settled layout, never across the fold
+  const folded16 = await waitFor(`(() => { const d = document.querySelector('.window.window-active .chat-attn-dock'); return !!d && d.classList.contains('cad-short'); })()`, 3000);
   const boot = await evalJs(ROWS);
   // int373 (主开发's road 1): the one-column dock (the owner's accepted design, lane foryou-dock-layout) is two lines — 63 px under the
   // runner's DejaVu — and a 400-px-tall active window then shows ONE message at the boot, its top ~1 px under the list's edge (the
   // list's own scroll cuts it: no cover), where the old dock left two. The leg says what is true — at least one message on show and
-  // nothing over what the list shows (`bad`, the B-1d40 measure); `whole` stays in the JSON as a fact. The short-window dock is a follow-up
+  // nothing over what the list shows (`bad`, the B-1d40 measure); `whole` stays in the JSON as a fact. The short-window dock is B-16a9's (92f4d48fd): its leg follows the control below
   check('the boot: two windows, the active one\'s transcript shows at least one message and nothing over what the list shows (under DejaVu at 951×585 the one-column dock\'s 28 px leaves ONE message on show, its top ~1 px under the list\'s edge)', boot.rows >= 1 && !boot.bad.length, boot);
   { const out = await evalJs(OUT_OF_SIGHT);
     check(`CONTROL (int373): a row the list has scrolled out of sight is SKIPPED by name, never sampled — ${out.length} such row(s) at the boot (${out.join(', ')}), ROWS skipped exactly them and judged none of them`,
       out.length >= 1 && JSON.stringify(out) === JSON.stringify(boot.skipped) && !boot.bad.length, { out, skipped: boot.skipped, bad: boot.bad }); }
+  // B-16a9 (the row's goal; lane bl-tests-chrome): THE DUO BOOT KEEPS TWO MESSAGES. Read from two measurements under the runner's
+  // DejaVu: int373 at this very boot (the old 35-px dock left TWO messages on show, the one-column dock's 63 px left ONE) and
+  // 92f4d48fd (the short view's one row is 35 px). The 400-px window is under SHORT_VIEW_PX (450): its strip folds (cad-short)
+  { const dock = await evalJs(`(() => { const d = document.querySelector('.window.window-active .chat-attn-dock'); if (!d) return null; const b = d.getBoundingClientRect(); return { short: d.classList.contains('cad-short'), h: Math.round(b.height), viewH: d._viewH ? Math.round(d._viewH) : null }; })()`);
+    console.log(`    the boot's strip (B-16a9): ${JSON.stringify(dock)} · folded within the wait: ${folded16} · rows ${boot.rows}, whole ${boot.whole}, list ${JSON.stringify(boot.list)}`);
+    check('the boot (B-16a9): the active window\'s attention strip is the short view\'s ONE row (cad-short) and its transcript keeps TWO messages on show, nothing over them', !!dock && dock.short && boot.rows >= 2 && !boot.bad.length, { dock, folded16, boot }); }
   let step = 0;
   for (const [w, h, pose] of LADDER) {
     step++;
