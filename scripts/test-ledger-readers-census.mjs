@@ -98,7 +98,20 @@ console.log('④ the measurement — this tree\'s walker and ledger, CLEAN and D
     const ing = R.ingestRemoteEvents('h1', 'box', [1, 2, 3, 4, 4, 5, 5].map(ev).join('\n') + '\n');
     ok(ing && ing.appended === 5 && ing.duplicates === 2, `#20 a remote machine's doubled batch (7 rows, 5 ids) lands ONCE (${ing && ing.appended} appended, ${ing && ing.duplicates} refused)`);
     ok(raw(D.shard) === 7 && raw(D.shard) !== Number(tot(D.uh).split(' ')[0]), `CONTROL: a reader that summed the shard's raw lines would read ${raw(D.shard)} requests for 5 — what this census exists to keep out`);
-  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+  } finally {
+    // B-f2cb: every UsageHistory here writes its cursors through the ONE store writer, on its own paced thread — the folder is
+    // removed only once no write of a file under it is pending or in flight (the writer's own fact, asked a bounded COUNT of
+    // times; the bound only ends a wait that never comes), and the writer has forgotten those files — never a race with a
+    // rename landing inside the folder mid-remove (ENOTEMPTY after every check had passed)
+    const SW = require(path.join(REPO, 'src/store-writer.js')).storeWriter();
+    const ours = () => SW.stats().map((x) => x.file).filter((f) => typeof f === 'string' && f.startsWith(tmp + path.sep));
+    let waited = 0;
+    while (waited < 600 && ours().some((f) => SW.pending(f))) { waited++; await new Promise((r) => setTimeout(r, 10)); }
+    const stillOwed = ours().filter((f) => SW.pending(f));
+    for (const f of ours()) SW.forget(f);
+    ok(!stillOwed.length, `the measurement's folder goes only when the store writer owes nothing under it (${stillOwed.length} owed after ${waited} look(s))`, stillOwed);
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 }
 
 console.log('⑤ red controls (patched sources — never the tree)');
