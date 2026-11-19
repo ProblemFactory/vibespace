@@ -28,6 +28,12 @@ export function readingSource(source, { corroborated = undefined, t = (s) => s }
   switch (s) {
     case 'on-demand':
       return { key: 'panel', label: t('own /usage panel'), tip: t("Read by running Claude's own /usage for this account's credentials — the account names itself.") };
+    // B-ff9d: a /usage panel read on ANOTHER machine — for an account that machine holds (hid:aid), or for that machine's own
+    // login (B-87fd U3's 'on-demand-remote', said verbatim until here): never «own /usage panel»
+    case 'on-demand-held':
+      return { key: 'remote-panel', label: t('/usage panel on the machine that holds it'), tip: t("Read for this account through the machine that holds it, with the credentials kept there — the account names itself.") };
+    case 'on-demand-remote':
+      return { key: 'remote-panel', label: t("/usage panel of that machine's own login"), tip: t("Read by running Claude's own /usage on that machine, for the login it signed in with.") };
     case 'control':
       return { key: 'control', label: t('own session'), tip: t("A live session on this account's credentials answered a usage request.") };
     case 'passive':

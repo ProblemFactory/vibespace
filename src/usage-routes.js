@@ -473,10 +473,14 @@ const _hostUsage = {};
 // checked FIRST — the plain host pattern would otherwise swallow these files
 // and pollute _hostUsage with bogus host keys.
 const _hostAcctUsage = {};
+// B-ff9d: a host-held file written before 2.369.411 stamped its read 'on-demand' (this hub's own panel). Every 'on-demand' in such a
+// file — at the top or on a limit a later merge kept — was one of the two held legs' reads, so it is read as 'on-demand-held' (the
+// file keeps its bytes until its next write)
+const heldSource = (snap) => { if (snap && typeof snap === 'object') { if (snap.source === 'on-demand') snap.source = 'on-demand-held'; if (Array.isArray(snap.limits)) for (const l of snap.limits) if (l && l.source === 'on-demand') l.source = 'on-demand-held'; } return snap; };
 try {
   for (const f of fs.readdirSync(USAGE_CACHE_DIR)) {
     const ma = /^host-([\w-]+)-(sub-[\w-]+)\.json$/.exec(f);
-    if (ma) { try { _hostAcctUsage[ma[1] + ':' + ma[2]] = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, f), 'utf-8')); } catch {} continue; }
+    if (ma) { try { _hostAcctUsage[ma[1] + ':' + ma[2]] = heldSource(JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, f), 'utf-8'))); } catch {} continue; }
     const m = /^host-([\w-]+)\.json$/.exec(f);
     if (m) { try { _hostUsage[m[1]] = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, f), 'utf-8')); } catch {} }
   }
@@ -993,12 +997,12 @@ app.post('/api/usage/refresh', async (req, res) => {
       };
       deviceLeg().then((u) => {
         _onDemandUsageAt[tkey] = Date.now();
-        u.source = 'on-demand';
+        u.source = 'on-demand-held'; // B-ff9d: a reading another machine made, for an account it HOLDS — never this hub's own /usage panel
         u.scopedFetchedAt = Date.now();
         _hostAcctUsage[hid + ':' + aid] = { ...u, name: acctMeta2.name, email: acctMeta2.email };
         usageWrite.writeCacheObject({
           cacheDir: USAGE_CACHE_DIR, key: 'host-' + hid.replace(/[^\w-]/g, '_') + '-' + aid,
-          obj: _hostAcctUsage[hid + ':' + aid], source: 'on-demand', familyOf: familyOfScopedBucket, backend: 'claude',
+          obj: _hostAcctUsage[hid + ':' + aid], source: 'on-demand-held', familyOf: familyOfScopedBucket, backend: 'claude',
           // enumerating producer (r5) — see refreshViaCliPanel
           authoritativeScopes: authoritativeScopesOf(u), absentWindows: quotaModel.absentWindowsOf(u),
         });
@@ -1008,14 +1012,14 @@ app.post('/api/usage/refresh', async (req, res) => {
         if (!token) return res.json({ error: 'no currently-valid login for this account on the host — run a session on it there first' });
         _fetchOAuthUsage(token, (u) => {
           if (!u) return res.json({ error: 'refresh failed (rate-limited or offline) — kept last-known' });
-          u.source = 'on-demand';
+          u.source = 'on-demand-held'; // B-ff9d: a reading another machine made, for an account it HOLDS — never this hub's own /usage panel
           u.scopedFetchedAt = Date.now();
           _fetchOAuthRoles(token, (org) => {
             if (org) Object.assign(u, org);
             _hostAcctUsage[hid + ':' + aid] = { ...u, name: acctMeta2.name, email: acctMeta2.email };
         usageWrite.writeCacheObject({
           cacheDir: USAGE_CACHE_DIR, key: 'host-' + hid.replace(/[^\w-]/g, '_') + '-' + aid,
-          obj: _hostAcctUsage[hid + ':' + aid], source: 'on-demand', familyOf: familyOfScopedBucket, backend: 'claude',
+          obj: _hostAcctUsage[hid + ':' + aid], source: 'on-demand-held', familyOf: familyOfScopedBucket, backend: 'claude',
           // enumerating producer (r5) — see refreshViaCliPanel
           authoritativeScopes: authoritativeScopesOf(u), absentWindows: quotaModel.absentWindowsOf(u),
         });

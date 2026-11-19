@@ -627,7 +627,7 @@ function establishedWindows(anchorFiles, { roster = null } = {}) {
     for (const r of f.rows) {
       if (!r) continue;
       accts.set(r.accountId || '__global__', (accts.get(r.accountId || '__global__') || 0) + 1);
-      if (r.source !== 'on-demand') continue;
+      if (r.source !== 'on-demand' && r.source !== 'on-demand-held') continue;   // B-ff9d: a held account's panel read on its machine is that account's own panel reading (it was stamped 'on-demand' before)
       const ra = r.buckets?.sevenDay?.resetsAt;
       if (ra) _tallyPhase(buckets, ra, r.fetchedAt);
       for (const s of (Array.isArray(r.buckets?.scopedWeekly) ? r.buckets.scopedWeekly : [])) {

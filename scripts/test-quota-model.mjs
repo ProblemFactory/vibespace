@@ -25,7 +25,7 @@ import { createRequire } from 'module';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 
 const require = createRequire(import.meta.url);
@@ -3454,6 +3454,45 @@ console.log('\n㉒ a reset that LANDED is shown reset (unconfirmed); a member on
   ok(r4.short.some((x) => x.startsWith('manage-agents.js: 2 ')), `㉒g RED: the host pill read raw is NAMED: ${JSON.stringify(r4.short)}`);
   const r5 = census22({ ...TEXTS22, 'usage-meter.js': TEXTS22['usage-meter.js'] + '\nconst late = `${Math.round(rl.sevenDay.utilization * 100)}% used`;\n' });
   ok(r5.offenders.length === 1 && /usage-meter\.js:\d+: const late/.test(r5.offenders[0]), `㉒g RED: a NEW raw reader outside the allowlist is named by file:line: ${JSON.stringify(r5.offenders)}`);
+}
+
+// ㉓ B-ff9d (lane bl-accounts): A READING ANOTHER MACHINE MADE IS NAMED AS SUCH — a host-HELD account's ⟳ (hid:aid: the device's quota
+// leg and its token fallback) is stamped 'on-demand-held', never 'on-demand' (this hub's own /usage panel); the host's own login stays
+// 'on-demand-remote'; the words say which machine read it; reading-repair's window tally counts a held read as the account's own panel
+// reading (as it counted it while it was stamped 'on-demand') and still not the host's own login.
+console.log('\n㉓ B-ff9d — a host-held account\'s reading is named as read on the machine that holds it');
+{
+  const { anchored } = await import('./scratch.mjs');
+  const routes = fs.readFileSync(path.join(ROOT, 'src/usage-routes.js'), 'utf8');
+  const held = (routes.match(/\bu\.source = 'on-demand-held'/g) || []).length + (routes.match(/obj: _hostAcctUsage\[hid \+ ':' \+ aid\], source: 'on-demand-held'/g) || []).length;
+  const heldOld = (routes.match(/obj: _hostAcctUsage\[hid \+ ':' \+ aid\], source: 'on-demand',/g) || []).length;   // stale-pins: kept — a deliberate «gone» count: the old stamp must be absent
+  ok(held === 4 && heldOld === 0, `㉓ the two host-held legs (the device's and its token fallback) stamp 'on-demand-held' at the snapshot and the write (${held} of 4; ${heldOld} left as 'on-demand')`);
+  ok((routes.match(/u\.source = 'on-demand-remote'/g) || []).length === 2, "㉓ …the host's own login stays 'on-demand-remote' (both its legs)");
+  // the reader's should (a file written before the fix): the boot loader reads a host-held file's 'on-demand' as held, top and per limit
+  const hsm = routes.match(/const heldSource = \(snap\) => \{[^\n]*\};/);
+  const heldSource = hsm ? new Function('return ' + hsm[0].replace(/^const heldSource = /, '').replace(/;$/, ''))() : null;
+  const old = { source: 'on-demand', limits: [{ source: 'on-demand' }, { source: 'remote-statusline' }] };
+  ok(!!heldSource && heldSource(old) === old && old.source === 'on-demand-held' && old.limits[0].source === 'on-demand-held' && old.limits[1].source === 'remote-statusline'
+    && /_hostAcctUsage\[ma\[1\] \+ ':' \+ ma\[2\]\] = heldSource\(JSON\.parse\(/.test(routes) && heldSource(null) === null,
+    "㉓ a host-held file written before the fix (stamped 'on-demand', at the top and on a limit) is read at boot as 'on-demand-held'; another source is untouched");
+  const S = await import(path.join(ROOT, 'src/lib/usage-source.js'));
+  const own = S.readingSource('on-demand'), hd = S.readingSource('on-demand-held'), rm = S.readingSource('on-demand-remote');
+  ok(own.key === 'panel' && hd.key === 'remote-panel' && rm.key === 'remote-panel' && hd.label !== own.label && rm.label !== own.label && !/^on-demand/.test(hd.label) && !/^on-demand/.test(rm.label),
+    `㉓ the words: «${own.label}» (this hub) · «${hd.label}» (a held account) · «${rm.label}» (that machine's own login) — none verbatim, none «own /usage panel»`);
+  const zh = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-ja.js'), 'utf8');
+  ok([hd.label, hd.tip, rm.label, rm.tip].every((k) => zh.includes(`  ${JSON.stringify(k)}:`) && ja.includes(`  ${JSON.stringify(k)}:`)), '㉓ …each in zh and ja');
+  // the window tally: five held readings of one 7d phase establish the account's window; RED: the tally as before the stamp moved
+  const RR = require(path.join(ROOT, 'src/reading-repair.js'));
+  const T = 1789318800, rowsOf = (source) => [{ name: 'anchors-acct-h.ndjson', rows: Array.from({ length: 6 }, (_, i) => ({ accountId: 'acct-h', source, fetchedAt: (T - 86400 * 3 + i * 3600) * 1000, buckets: { sevenDay: { resetsAt: T } } })) }];
+  const wHeld = RR.establishedWindows(rowsOf('on-demand-held')), wRemote = RR.establishedWindows(rowsOf('on-demand-remote')), wOwn = RR.establishedWindows(rowsOf('on-demand'));
+  ok(wHeld.size === 1 && wOwn.size === 1 && wRemote.size === 0, `㉓ the window tally counts a held read as the account's own panel reading (as while it was stamped 'on-demand'), and still not a host's own login (${wHeld.size} / ${wOwn.size} / ${wRemote.size})`);
+  const MQ = mutantCopies('quota-ff9d', ROOT);
+  const RRsrc = fs.readFileSync(path.join(ROOT, 'src/reading-repair.js'), 'utf8');
+  const RRold = MQ.load('src/reading-repair.js', anchored(RRsrc, "      if (r.source !== 'on-demand' && r.source !== 'on-demand-held') continue;", "      if (r.source !== 'on-demand') continue;", 'ff9d: the tally before the stamp moved'), 'ff9d-old-tally');   // stale-pins: kept — the RED copy plants the old tally
+  ok(RRold.establishedWindows(rowsOf('on-demand-held')).size === 0, '㉓ RED: a copy whose tally reads only \'on-demand\' loses the held account\'s window once its reads are stamped held');
+  const Sold = anchored(fs.readFileSync(path.join(ROOT, 'src/lib/usage-source.js'), 'utf8'), "    case 'on-demand-held':\n", "    case 'on-demand-held-gone':\n", 'ff9d: no held case');
+  const Sm = await import(pathToFileURL(MQ.write('src/lib/usage-source.js', Sold, 'ff9d-no-held', { esm: true })).href);
+  ok(Sm.readingSource('on-demand-held').key === 'other' && Sm.readingSource('on-demand-held').label === 'on-demand-held', '㉓ RED: a copy without the held case says the held reading VERBATIM («on-demand-held») — the words above are the case\'s');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
