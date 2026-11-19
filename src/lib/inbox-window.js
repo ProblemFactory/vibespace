@@ -461,7 +461,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     const id = st.selected;
     const it = id ? model.byId(id) : null;
     if (!it) {
-      if (st.cur) { stash(st.cur); st.cur.el.remove(); st.cur = null; }
+      if (st.cur) { stash(st.cur); st.cur.pics.dispose(); st.cur.el.remove(); st.cur = null; }   // B-51dd hosted cure: a pane that leaves leaves the picture registry (its words with it)
       paneNone.style.display = '';
       paneNone.textContent = !model.loaded ? t('Loading…') : (st.display.length ? t('Select an item to read it here.') : '');
       paneNone.style.display = paneNone.textContent ? '' : 'none';
@@ -469,7 +469,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     }
     paneNone.style.display = 'none';
     if (!st.cur || st.cur.id !== id) {
-      if (st.cur) { stash(st.cur); st.cur.el.remove(); }
+      if (st.cur) { stash(st.cur); st.cur.pics.dispose(); st.cur.el.remove(); }
       // design 009: the pane's item changed HERE — its one-click Install (and an Allow / Approve) arms from now; render()'s
       // stamp ran before holdSelection could move the selection (a pane opened onto an item stayed unarmed: every press refused)
       if (st.armId !== id) { st.armId = id; st.armAt = performance.now(); }
@@ -979,7 +979,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
   document.addEventListener('visibilitychange', () => armRead(), { signal }); // a hidden page reads nothing: the clock stops, and starts afresh on return
   root.addEventListener('focusin', () => armRead(), { signal }); // the person came into the window: the notice shown starts being read
   root.addEventListener('focusout', () => setTimeout(armRead, 0), { signal }); // …and left it (activeElement settles after the event)
-  signal?.addEventListener('abort', () => { stash(st.cur); clearTimeout(readClock); });
+  signal?.addEventListener('abort', () => { stash(st.cur); if (st.cur) st.cur.pics.dispose(); clearTimeout(readClock); });   // the window closed: its pane's box leaves the picture registry
 
   /** The door for an OPEN window (a user's ⤢ / menu): select the item, apply the scope, re-sort (a new open). */
   const show = ({ itemId: id = null, sessionKey: key = null, scope = null } = {}) => {

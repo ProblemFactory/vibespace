@@ -10,13 +10,14 @@
 // redraws on any change to its pictures (the tray and the window may show the same item); a ✕ removes ITS picture (by
 // identity, never by a stale index). Every chip is DOM nodes (the image by its .src, never markup).
 //
-// replyPictures({ box, ta, id, store, t, backend }) → { strip, btn, input, camera, draw }
+// replyPictures({ box, ta, id, store, t, backend }) → { strip, btn, input, camera, draw, dispose }
 //   backend = the asking conversation's harness, or a function answering it (backendOfKey) — its row's picture limits
 //             judge each picture (batch 20 cure: a codex ask takes the phone photo a claude one cannot)
 //   box   = the element a drop lands on; ta = the textarea a paste lands in
 //   store = the model's Map (item id → [{base64, mediaType, dataUrl, name}]); id = the item's
 //   strip (the chips, hidden while empty) · btn (the picture button) · input + camera.input (hidden file inputs) — the
-//   caller places them
+//   caller places them, in the turn that made them · dispose() = the box left the page (releaseBoxesIn(root): every box
+//   inside root — the tray's form, it holds rows, not the returned object)
 import { createImageDoor, refusalText, heldOf } from './image-attach.js';
 import { imageLimitsOf, harnessOfRecord } from '../backend-caps.js';   // batch 20 cure: the numbers are the conversation's HARNESS row
 import { cameraDoor, sheetRow } from './chat-input.js';   // THE camera door (lane phone-take-photo) and the sheet's row
@@ -24,9 +25,29 @@ import { UI_ICONS } from './icons.js';
 import { showToast, showImageOverlay, showContextMenu } from './utils.js';
 
 const hasFiles = (e) => { const types = e.dataTransfer && e.dataTransfer.types; return !!types && Array.from(types).includes('Files'); };
-// every live box per item: a change to an item's pictures redraws all of them (a box that left the DOM drops out)
-const boxesOf = new Map();   // item id → Set(draw)
-const redrawAll = (id) => { for (const d of [...(boxesOf.get(id) || [])]) d(); };
+// every live box per item: a change to an item's pictures redraws all of them. A BOX THAT LEAVES THE PAGE LEAVES THIS
+// REGISTRY (B-51dd hosted cure — a For-you pane dropped while its item's pictures never changed again stayed reachable
+// from here, and the item's words with it, after the record was cleared): its owner disposes it where it leaves (the
+// For-you window's pane drop, rebuild and close: dispose(); the tray's one fold exit, every rows-leave stash, a row its
+// reconciler drops and a rebuilt popup: releaseBoxesIn), and every draw — and every For-you snapshot's render and chat
+// card pass (sweepBoxes) — first SWEEPS the boxes no longer on the page: the second belt, for a road that leaves without
+// its owner's word (a band or a notice group redrawn, the mini inbox closed, a card dropped)
+const boxesOf = new Map();   // item id → Set(entry) — entry = { box, paint, settled }
+const unlist = (id, e) => { const s = boxesOf.get(id); if (!s) return; s.delete(e); if (!s.size) boxesOf.delete(id); };
+// settled = the turn that made the box has ended (both owners place it in that turn): from then on, off the page = left
+const sweep = () => { for (const [id, s] of [...boxesOf]) for (const e of [...s]) if (e.settled && !e.box.isConnected) unlist(id, e); };
+const redrawAll = (id) => { sweep(); for (const e of [...(boxesOf.get(id) || [])]) e.paint(); };
+
+/** THE SECOND BELT AT A BROADCAST: a clear draws no reply box, so the For-you snapshot's render (the tray's apply) and the
+ *  chat card's pass sweep after they drew — a box their rows took off the page leaves the registry then, not at a later draw */
+export function sweepBoxes() { sweep(); }
+
+/** Every reply box `root` is or holds leaves the registry (call it BEFORE the nodes leave — a detached subtree is still
+ *  searched, so after is fine too). The tray's disposal: it keeps rows, never the object replyPictures returned. */
+export function releaseBoxesIn(root) {
+  if (!root) return;
+  for (const [id, s] of [...boxesOf]) for (const e of [...s]) if (e.box === root || (typeof root.contains === 'function' && root.contains(e.box))) unlist(id, e);
+}
 
 /** The harness of the conversation a For-you item belongs to: its key names it (`<harness>:<id>`), or — a page-only key
  *  (`webui:<id>`) — the live session row that holds it. null = not known (then no number judges a picture here; the route
@@ -76,14 +97,15 @@ export function replyPictures({ box, ta, id, store, t, backend = null }) {
     c.append(img, x);
     return c;
   };
-  let shown = false;   // the box has been on the page — once it leaves, it stops listening
-  const draw = () => {
-    if (box.isConnected) shown = true;
-    else if (shown) { boxesOf.get(id)?.delete(draw); return; }
+  const entry = { box, paint: null, settled: false };
+  entry.paint = () => {
+    if (entry.settled && !box.isConnected) { unlist(id, entry); return; }   // a box that left the page stops listening
     const l = list(); strip.replaceChildren(...l.map(chip)); strip.hidden = !l.length;
   };
+  const draw = () => { sweep(); entry.paint(); };
   if (!boxesOf.has(id)) boxesOf.set(id, new Set());
-  boxesOf.get(id).add(draw);
+  boxesOf.get(id).add(entry);
+  queueMicrotask(() => { entry.settled = true; });
   const door = createImageDoor({
     held: () => heldOf(list()),
     onAdd: (p) => setList([...list(), p]),
@@ -126,7 +148,7 @@ export function replyPictures({ box, ta, id, store, t, backend = null }) {
     door.add([...e.dataTransfer.files]);
   });
   draw();
-  return { strip, btn, input, camera, draw };
+  return { strip, btn, input, camera, draw, dispose: () => unlist(id, entry) };
 }
 
 /** after a sent reply: remove exactly the pictures it carried (one added while the send was in flight stays), redraw */

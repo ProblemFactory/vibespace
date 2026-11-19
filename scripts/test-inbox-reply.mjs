@@ -1116,10 +1116,10 @@ const reopenBig = async (routeFile, capsAfterMs) => {
 }
 console.log('§10b the reply boxes take a picture (wiring census, both surfaces + the model + the chat\'s card)');
 {
-  const files = { panel: 'src/lib/user-todos-panel.js', win: 'src/lib/inbox-window.js', act: 'src/lib/user-todos-actions.js', rp: 'src/lib/reply-pictures.js', row: 'src/lib/user-todos-row.js', cr: 'src/lib/chat-renderers.js', lay: 'src/lib/inbox-window-layout.js' };
+  const files = { panel: 'src/lib/user-todos-panel.js', win: 'src/lib/inbox-window.js', act: 'src/lib/user-todos-actions.js', rp: 'src/lib/reply-pictures.js', row: 'src/lib/user-todos-row.js', cr: 'src/lib/chat-renderers.js', lay: 'src/lib/inbox-window-layout.js', card: 'src/lib/chat-needs-card.js' };
   const src = Object.fromEntries(Object.entries(files).map(([k, f]) => [k, read(f)]));
-  const judge = ({ panel, win, act, rp, row, cr, lay }) => ({
-    panelBox: /const pics = replyPictures\(\{ box, ta, id: i\.id, store: model\.pictures, t, backend: \(\) => backendOfKey\(i\.sessionKey\) \}\);/.test(panel) && /box\.append\(pics\.input, pics\.camera\.input\);/.test(panel),
+  const judge = ({ panel, win, act, rp, row, cr, lay, card }) => ({
+    panelBox: /const key = i\.sessionKey;[^\n]*\n\s+const pics = replyPictures\(\{ box, ta, id: i\.id, store: model\.pictures, t, backend: \(\) => backendOfKey\(key\) \}\);/.test(panel) && /box\.append\(pics\.input, pics\.camera\.input\);/.test(panel),
     panelSend: /const pics = chip \? \[\] : \(model\.pictures\.get\(id\) \|\| \[\]\);/.test(panel) && /if \(\(!body && !pics\.length\) \|\| row\.dataset\.sending === '1'\) return;/.test(panel) && /const sent = await model\.postReply\(id, body, replyOpts\);/.test(panel),
     chipSays: /t\('\{label\} sent — the \{n\} picture\(s\) in the reply box were not sent'/.test(panel) && /t\('\{label\} sent — the \{n\} picture\(s\) in the reply box were not sent'/.test(win),
     overlayInside: /#record-clear-dialog, \.chat-img-overlay'\)/.test(panel),
@@ -1129,10 +1129,17 @@ console.log('§10b the reply boxes take a picture (wiring census, both surfaces 
     model: /const pictures = new Map\(\);/.test(act) && /boardOf, drafts, pictures,/.test(act) && /body: JSON\.stringify\(images \? \{ text, images \} : \{ text \}\)/.test(act) && /if \(images\) dropSentPictures\(pictures, id, pics\);/.test(act) && /r\.code === 'bad_image' && r\.picture \? pictureRefusalText\(\[r\.picture\], t\)/.test(act),
     door: /import \{ createImageDoor, refusalText, heldOf \} from '\.\/image-attach\.js';/.test(rp) && /held: \(\) => heldOf\(list\(\)\),/.test(rp) && /if \(!cd \|\| \(cd\.getData && cd\.getData\('text\/plain'\)\)\) return;/.test(rp) && /it\.kind === 'file'/.test(rp)
       && /box\.addEventListener\('drop', \(e\) => \{[\s\S]{0,160}e\.preventDefault\(\); e\.stopPropagation\(\);/.test(rp) && /input\.accept = 'image\/\*';\s*input\.multiple = true;/.test(rp) && /const camera = cameraDoor\(\(shot\) => door\.add\(\[shot\]\)\);/.test(rp),
-    identity: /setList\(list\(\)\.filter\(\(q\) => q !== p\)\)/.test(rp) && /const redrawAll = \(id\) => \{ for \(const d of \[\.\.\.\(boxesOf\.get\(id\) \|\| \[\]\)\]\) d\(\); \};/.test(rp) && /filter\(\(p\) => !\(sent \|\| \[\]\)\.includes\(p\)\)/.test(rp),
+    identity: /setList\(list\(\)\.filter\(\(q\) => q !== p\)\)/.test(rp) && /const redrawAll = \(id\) => \{ sweep\(\); for \(const e of \[\.\.\.\(boxesOf\.get\(id\) \|\| \[\]\)\]\) e\.paint\(\); \};/.test(rp) && /filter\(\(p\) => !\(sent \|\| \[\]\)\.includes\(p\)\)/.test(rp),
     // XSS: the only markup the strip writes is the constant icon; a picture is drawn by its .src, its name by alt / textContent
     noMarkup: (rp.match(/\.innerHTML\s*=/g) || []).length === 1 && /btn\.innerHTML = UI_ICONS\.image;/.test(rp) && /img\.src = p\.dataUrl;/.test(rp),
     inUse: /\|\| !!box\.querySelector\('\.ut-reply-pic-item'\);/.test(row),
+    // B-51dd hosted cure: a box that leaves the page leaves the picture registry — the window's pane drop / rebuild / close
+    // dispose it; the tray releases it at its one fold exit, every rows-leave stash, a dropped row and a rebuilt popup
+    leaves: (win.match(/stash\(st\.cur\); st\.cur\.pics\.dispose\(\); st\.cur\.el\.remove\(\);/g) || []).length === 2 && /stash\(st\.cur\); if \(st\.cur\) st\.cur\.pics\.dispose\(\);/.test(win)
+      && /releaseBoxesIn\(box\);\n\s+box\.remove\(\);/.test(panel) && /    releaseBoxesIn\(el\);/.test(panel) && /drop: releaseBoxesIn,/.test(panel) && /releaseBoxesIn\(popup\); popup\.replaceChildren\(\);/.test(panel)
+      && /for \(const r of existing\.values\(\)\) \{ if \(drop\) drop\(r\); r\.remove\(\); \}/.test(row),
+    // …and the second belt at a broadcast: the tray's snapshot render and the chat card's pass sweep after they drew
+    sweeps: /annRefresh\(\);[^\n]*\n\s+sweepBoxes\(\);/.test(panel) && /sweep: sweepBoxes,/.test(panel) && /this\.app\.foryouRows\?\.arm\?\.\(view\._messageList\);\n\s+this\.app\.foryouRows\?\.sweep\?\.\(\);/.test(card) && /export function sweepBoxes\(\) \{ sweep\(\); \}/.test(rp),
     // the conversation's card of a For-you reply draws the pictures it carried (the plain bubble's media card)
     render: /if \(inboxReply\) return this\._renderInboxReply\(msg, inboxReply, content\);/.test(cr) && /content\.filter\(\(b\) => b && b\.type === 'image' && !b\.gone && b\.data\)\.map\(\(b\) => imageMediaHtml\(/.test(cr),
     words: /const said = replyWords\(i\.reply, t, REPLY_SNIPPET\);/.test(row) && /Number\(i\.reply\.pictures\) > 0 \? t\('\{n\} picture\(s\)'/.test(lay),
@@ -1155,6 +1162,163 @@ console.log('§10b the reply boxes take a picture (wiring census, both surfaces 
   ok(!judge({ ...src, panel: src.panel.replace('const pics = chip ? [] : (model.pictures.get(id) || []);', 'const pics = model.pictures.get(id) || [];') }).panelSend, 'RED: an option chip carrying the box\'s pictures unsaid');
   ok(!judge({ ...src, rp: src.rp.replace("if (!cd || (cd.getData && cd.getData('text/plain'))) return;", 'if (!cd) return;') }).door, 'RED: a paste of a spreadsheet range (text + a picture of it) turned into a picture');
   ok(!judge({ ...src, rp: src.rp.replace('setList(list().filter((q) => q !== p))', 'setList(list().slice(1))') }).identity, 'RED: a ✕ that removes by position');
+  { const w = src.win.replace('stash(st.cur); st.cur.pics.dispose(); st.cur.el.remove(); }\n', 'stash(st.cur); st.cur.el.remove(); }\n'), p = src.panel.replace('drop: releaseBoxesIn,', '');   // stale-pins: kept (the planted copy's text — gone from the product on purpose)
+    ok(w !== src.win && !judge({ ...src, win: w }).leaves, 'RED: the window\'s pane rebuild dropping its box with no dispose (the hosted red\'s road) — the plant stands (the copy differs)');
+    ok(p !== src.panel && !judge({ ...src, panel: p }).leaves, 'RED: the tray\'s reconciler dropping a row with its box still listed — the plant stands (the copy differs)');
+    const c = src.card.replace('    this.app.foryouRows?.sweep?.();', '');
+    ok(c !== src.card && !judge({ ...src, card: c }).sweeps, 'RED: a chat card pass that drops a row with an open box and sweeps nothing — the plant stands (the copy differs)'); }
+}
+console.log('§10c a reply box that LEAVES the page leaves the picture registry (B-51dd hosted cure — a dropped For-you pane kept its item\'s words reachable after a clear)');
+{
+  // THE REAL MODULE, its five sibling imports stubbed (the registry is all this drives), over a page of plain nodes; what
+  // is reachable is asked of the heap itself: a WeakRef to the pane (it holds the item's words) and to the item, after GC
+  const v8 = require('node:v8'), vm = require('node:vm');
+  v8.setFlagsFromString('--expose-gc');
+  const gc = vm.runInNewContext('gc');
+  const tick = () => new Promise((r) => setImmediate(r));
+  let PAGE = null;
+  class El {   // what the module touches: createElement, append / insertBefore / replaceChildren / remove, isConnected, contains
+    constructor(tag) { this.tag = tag; this.kids = []; this.up = null; this.style = {}; this.hidden = false; this.classList = { add() { }, remove() { } }; }
+    get isConnected() { let n = this; while (n.up) n = n.up; return n === PAGE; }
+    append(...xs) { for (const x of xs) { x.remove(); x.up = this; this.kids.push(x); } }
+    insertBefore(x) { this.append(x); }
+    replaceChildren(...xs) { for (const x of this.kids) x.up = null; this.kids = []; this.append(...xs); }
+    remove() { if (this.up) { this.up.kids.splice(this.up.kids.indexOf(this), 1); this.up = null; } }
+    contains(x) { for (let n = x; n; n = n.up) if (n === this) return true; return false; }
+    setAttribute() { }
+    addEventListener() { }
+  }
+  PAGE = new El('page');
+  const STUBS = {
+    './image-attach.js': "export const createImageDoor = () => ({ add() {} }); export const refusalText = () => ''; export const heldOf = () => '';",
+    '../backend-caps.js': "export const imageLimitsOf = () => null; export const harnessOfRecord = () => 'claude';",
+    './chat-input.js': 'export const cameraDoor = () => ({ input: {}, row: () => null }); export const sheetRow = () => ({});',
+    './icons.js': "export const UI_ICONS = { image: '<svg></svg>' };",
+    './utils.js': 'export const showToast = () => {}; export const showImageOverlay = () => {}; export const showContextMenu = () => {};',
+  };
+  const asUrl = (code) => 'data:text/javascript;base64,' + Buffer.from(code).toString('base64');
+  let copyN = 0;
+  const load = async (code) => {
+    let m = code;
+    for (const [spec, stub] of Object.entries(STUBS)) { const q = `from '${spec}'`; if (!m.includes(q)) return null; m = m.split(q).join(`from '${asUrl(stub)}'`); }
+    if (/from '\.\.?\//.test(m)) return null;
+    return import(asUrl(`${m}\n// copy ${copyN++}`));
+  };
+  // ONE SCENE PER MODULE COPY, every copy's scene in step: the drops of all copies, ONE collection, the reads; the
+  // broadcast sweep, ONE collection; the next draw, ONE collection — six full GCs for the live module, six planted copies
+  // and the checkpoint's (a GC per copy cost the suite a second)
+  const refsOf = (h) => ({ pane: new WeakRef(h.pane), item: new WeakRef(h.item) });
+  const gone = (r) => r.pane.deref() === undefined && r.item.deref() === undefined;
+  const scene = (M) => {
+    const store = new Map(), t = (k) => k, out = {}, H = {}, R = {};
+    // a box as an owner makes it: a pane holding its item's words → the box → its field, placed in the turn that made it
+    const make = (id, words, { place = true } = {}) => {
+      const item = { words }, pane = new El('div'), box = new El('div'), ta = new El('textarea');
+      pane.words = words; pane.append(box); box.append(ta);
+      const pics = M.replyPictures({ box, ta, id, store, t, backend: () => (item.words ? null : null) });
+      box.append(pics.strip, pics.btn);
+      if (place) PAGE.append(pane);
+      return { item, pane, box, pics };
+    };
+    return {
+      out,
+      place() { H.a = make('i-a', 'word-a'); H.z = make('i-z', 'word-z'); H.c = make('i-c', 'word-c'); H.d = make('i-d', 'word-d'); H.y = make('i-y', 'word-y'); H.k = make('i-k', 'word-k'); },
+      // (1) THE WINDOW'S ROAD: a pane leaves (dispose, then its nodes) and the item's pictures never change again; (3) THE
+      // TRAY'S ROAD: releaseBoxesIn(the row) before a row leaves, releaseBoxesIn(the box) at the fold; beside them the
+      // measure's own control, a box that left with NO word from its owner — no draw runs before the collection; a box
+      // that STAYS (k) keeps listening through all of it (a release that took more than its root goes red there)
+      leave() {
+        R.a = ((h) => { if (h.pics.dispose) h.pics.dispose(); h.pane.remove(); return refsOf(h); })(H.a);
+        R.y = ((h) => { h.pane.remove(); return refsOf(h); })(H.y);
+        R.c = ((h) => { if (M.releaseBoxesIn) M.releaseBoxesIn(h.pane); h.pane.remove(); return refsOf(h); })(H.c);
+        R.d = ((h) => { if (M.releaseBoxesIn) M.releaseBoxesIn(h.box); h.box.remove(); h.pane.remove(); return refsOf(h); })(H.d);
+        for (const k of ['a', 'y', 'c', 'd']) delete H[k];
+      },
+      read1() { out.disposeFrees = gone(R.a); out.releaseFrees = gone(R.c) && gone(R.d); out.heldUntilADraw = !gone(R.y); },
+      // (2) THE SECOND BELT AT A BROADCAST: sweepBoxes() (the tray's snapshot render, a card pass) — no draw
+      broadcast() { if (M.sweepBoxes) M.sweepBoxes(); },
+      readB() { out.broadcastFrees = gone(R.y); },
+      // (2b) THE SECOND BELT AT A DRAW: z leaves with no word, then a box of another item is drawn
+      draw() { R.z = ((h) => { h.pane.remove(); return refsOf(h); })(H.z); delete H.z; H.b = make('i-b', 'word-b'); },
+      read2() {
+        out.sweepFrees = gone(R.z);
+        // k's item changes only NOW (a redraw sweeps too — earlier it would have freed y for the broadcast leg)
+        store.set('i-k', [{ name: 'k.png', dataUrl: 'data:,' }]); M.dropSentPictures(store, 'i-k', []);
+        out.keptListening = H.k.pics.strip.kids.length === 1;
+      },
+      // (4) WHAT STAYS KEEPS LISTENING: the item's two boxes (the tray's and the window's) redraw on a change; a box made OFF
+      // the page and placed in the same turn (the window's buildItem) survives a sweep that ran before its placement;
+      // (5) a disposed box draws no more (its owner said it left)
+      async stays() {
+        H.e1 = make('i-e', 'word-e'); H.e2 = make('i-e', 'word-e');
+        H.f = make('i-f', 'word-f', { place: false }); H.b.pics.draw(); PAGE.append(H.f.pane);
+        await tick();
+        const pic = { name: 'p.png', dataUrl: 'data:,' };
+        store.set('i-e', [pic]); store.set('i-f', [pic]);
+        M.dropSentPictures(store, 'i-e', []); M.dropSentPictures(store, 'i-f', []);
+        out.liveRedraw = H.e1.pics.strip.kids.length === 1 && H.e2.pics.strip.kids.length === 1 && H.f.pics.strip.kids.length === 1;
+        if (H.e2.pics.dispose) H.e2.pics.dispose();
+        store.set('i-e', [pic, pic]); M.dropSentPictures(store, 'i-e', []);
+        out.disposedQuiet = H.e1.pics.strip.kids.length === 2 && H.e2.pics.strip.kids.length === 1;
+        for (const k of Object.keys(H)) { if (M.releaseBoxesIn) M.releaseBoxesIn(H[k].pane); H[k].pane.remove(); delete H[k]; }
+      },
+    };
+  };
+  const hadDoc = 'document' in globalThis, docWas = globalThis.document;
+  globalThis.document = { createElement: (tag) => new El(tag) };
+  try {
+    const rpSrc = read('src/lib/reply-pictures.js');
+    const live = await load(rpSrc);
+    ok(!!live && typeof live.replyPictures === 'function' && typeof live.releaseBoxesIn === 'function', 'the module loads with its five sibling imports stubbed (every relative import replaced)');
+    // RED controls, each a planted copy whose plant is proven first (the anchor found once, the copy differs)
+    const plant = (from, to) => { const n = rpSrc.split(from).length - 1; return n === 1 ? rpSrc.split(from).join(to) : null; };
+    const reds = [
+      ['dispose() that does nothing', 'dispose: () => unlist(id, entry)', 'dispose: () => {}', (R) => !R.disposeFrees && R.sweepFrees && R.releaseFrees],
+      ['no sweep at a draw', 'const sweep = () => { for (const [id, s] of [...boxesOf]) for (const e of [...s]) if (e.settled && !e.box.isConnected) unlist(id, e); };', 'const sweep = () => {};', (R) => !R.sweepFrees && R.disposeFrees && R.releaseFrees],
+      ['releaseBoxesIn that releases nothing', "  for (const [id, s] of [...boxesOf]) for (const e of [...s]) if (e.box === root || (typeof root.contains === 'function' && root.contains(e.box))) unlist(id, e);\n", '', (R) => !R.releaseFrees && R.disposeFrees && R.sweepFrees],
+      ['releaseBoxesIn that releases every box (more than its root)', "if (e.box === root || (typeof root.contains === 'function' && root.contains(e.box))) unlist(id, e);", 'unlist(id, e);', (R) => !R.keptListening && R.releaseFrees],
+      ['no sweep at a broadcast (sweepBoxes does nothing)', 'export function sweepBoxes() { sweep(); }', 'export function sweepBoxes() { }', (R) => !R.broadcastFrees && R.sweepFrees && R.disposeFrees],
+      ['a sweep with no settle guard (a box made off the page dropped before its placement)', 'if (e.settled && !e.box.isConnected) unlist(id, e); };', 'if (!e.box.isConnected) unlist(id, e); };', (R) => !R.liveRedraw],
+    ];
+    const copies = [];
+    for (const [name, from, to, red] of reds) {
+      const code = plant(from, to);
+      ok(code !== null && code !== rpSrc, `PLANT: ${name} — its anchor stands once in the module, the copy differs`);
+      const M = code ? await load(code) : null;
+      ok(!!M, `PLANT: ${name} — the planted copy loads`);
+      if (M) copies.push({ name, M, red });
+    }
+    let base = '';
+    try { base = require('node:child_process').execFileSync('git', ['show', 'c671a1fc5:src/lib/reply-pictures.js'], { cwd: REPO, encoding: 'utf8', maxBuffer: 16 << 20 }); } catch { base = ''; }
+    const B = base ? await load(base) : null;
+    if (!base) console.log('  · SKIP: the checkpoint c671a1fc5 is not in this clone — the planted reds still run');
+    const all = [...(live ? [{ name: 'live', M: live }] : []), ...copies, ...(B ? [{ name: 'checkpoint', M: B }] : [])].map((v) => ({ ...v, s: scene(v.M) }));
+    const collect = async () => { for (let i = 0; i < 2; i++) { await tick(); gc(); } };   // a macrotask ends the job that made the WeakRefs, then a full GC
+    for (const v of all) v.s.place();
+    await tick();   // every box settled (past the turn that made it)
+    for (const v of all) v.s.leave();
+    await collect();
+    for (const v of all) v.s.read1();
+    for (const v of all) v.s.broadcast();
+    await collect();
+    for (const v of all) v.s.readB();
+    for (const v of all) v.s.draw();
+    await collect();
+    for (const v of all) v.s.read2();
+    for (const v of all) await v.s.stays();
+    const L = all.length && all[0].name === 'live' ? all[0].s.out : {};
+    ok(L.heldUntilADraw === true, 'CONTROL (the measure): a box that left with no word from its owner and no draw since is still reachable — the heap judge sees a held box', L);
+    ok(L.disposeFrees === true, 'the For-you window\'s road: a pane dropped with dispose() is collected, its item\'s words with it — though the item\'s pictures never change again (the hosted red)', L);
+    ok(L.broadcastFrees === true, 'the second belt at a broadcast: sweepBoxes() (the tray\'s snapshot render, a card pass) frees a box that left without its owner\'s word — no draw needed (a clear draws none)', L);
+    ok(L.sweepFrees === true, 'the second belt at a draw: the next draw (a box of another item) sweeps a box that left without its owner\'s word — collected', L);
+    ok(L.releaseFrees === true && L.keptListening === true, 'the tray\'s road: releaseBoxesIn(the row) before it leaves, releaseBoxesIn(the box) at the fold — both collected; a box that stays on the page still redraws', L);
+    ok(L.liveRedraw === true && L.disposedQuiet === true, 'what stays keeps listening: the item\'s two boxes redraw on a change, a box placed in the turn that made it survives a sweep before its placement; a disposed box draws no more', L);
+    for (const v of all.filter((x) => x.red)) ok(v.red(v.s.out), `RED CONTROL: ${v.name} — the leg goes red where it should, and only there`, v.s.out);
+    const C = all.find((x) => x.name === 'checkpoint');
+    if (C) ok(!C.s.out.disposeFrees && !C.s.out.sweepFrees && !C.s.out.releaseFrees && C.s.out.heldUntilADraw, 'RED: the checkpoint c671a1fc5\'s module (the hosted red) keeps a dropped pane reachable — no dispose, no sweep, no release', C.s.out);
+  } finally {
+    if (hadDoc) globalThis.document = docWas; else delete globalThis.document;
+  }
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

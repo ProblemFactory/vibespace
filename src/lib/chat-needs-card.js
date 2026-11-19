@@ -231,6 +231,7 @@ export class NeedsCards {
     this._roomCheck(); // the room a hold borrowed: its card folded, resolved or gone ⇒ given back (round 5, #3)
     // what the pass showed or hid moved the Allows below it: re-stamped where they now are — THIS list's (press-arm)
     this.app.foryouRows?.arm?.(view._messageList);
+    this.app.foryouRows?.sweep?.(); // B-51dd hosted cure: a card or row this pass dropped with an open reply box leaves the picture registry
     if (view._pinned && placed && !hold) view._scrollToBottom?.();
   }
 

@@ -262,7 +262,7 @@ console.log('⑤ THE PICTURE RULE (B-c9ed: no size, type, empty-file check on an
     const cvSrc = read('src/lib/chat-view.js'), rpSrc = read('src/lib/reply-pictures.js'), upSrc = read('src/lib/user-todos-panel.js'), iwSrc = read('src/lib/inbox-window.js');
     ok('WIRING: the composer\'s door judges with ITS conversation\'s harness (chat-view hands the backend in); the For-you boxes with the asking conversation\'s (its key, else its live row)',
       /limits: \(\) => imageLimitsOf\(this\._getBackend\(\)\),/.test(ci) && /getBackend: \(\) => \(this\._getSessionIds\(\) \|\| \{\}\)\.backend \|\| null,/.test(cvSrc)
-      && /limits: \(\) => imageLimitsOf\(typeof backend === 'function' \? backend\(\) : backend\),/.test(rpSrc) && /backend: \(\) => backendOfKey\(i\.sessionKey\)/.test(upSrc) && /return backendOfKey\(it && it\.sessionKey\);/.test(iwSrc));
+      && /limits: \(\) => imageLimitsOf\(typeof backend === 'function' \? backend\(\) : backend\),/.test(rpSrc) && /const key = i\.sessionKey;[^\n]*\n\s+const pics = replyPictures\(\{[^\n]*backend: \(\) => backendOfKey\(key\)/.test(upSrc) && /return backendOfKey\(it && it\.sessionKey\);/.test(iwSrc));
     const a = rpSrc.indexOf('export function backendOfKey('), e = rpSrc.indexOf('\n}\n', a);
     const backendOfKey = new Function('harnessOfRecord', `${rpSrc.slice(a + 'export '.length, e + 2)}\nreturn backendOfKey;`)(req('../src/backend-caps.js').harnessOfRecord);   // the ONE rule a row without a harness reads by (cure 2)
     const rows = [{ webuiId: 'sess-9', backend: 'codex' }, { webuiId: 'sess-8' }];

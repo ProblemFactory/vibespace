@@ -41,7 +41,7 @@ import { filesCard } from './phone-files.js'; // lane phone-files-door: the 文�
 import { navOneBadge } from './title-chips.js'; // lane phone-titlebar-title: the phone bar's ONE-badge form
 import { BACK_DISMISS_EVENT } from './back-guard.js'; // lane mobile-back-guard: the phone's back closes this sheet through hidePopup
 import { pressVerdict, armAfterLayout } from './press-arm.js'; // verify-r6 V1: an Allow counts only once it sat still where it was read
-import { replyPictures, backendOfKey } from './reply-pictures.js'; // B-51dd: a reply box takes a picture (button · paste · drop) through THE picture door
+import { replyPictures, backendOfKey, releaseBoxesIn, sweepBoxes } from './reply-pictures.js'; // B-51dd: a reply box takes a picture (button · paste · drop) through THE picture door
 import { applySecretBox, submitSecretBox } from './vault-paste-box.js'; // lane vault-paste-request: an agent's request for a secret — its paste box's presses + state
 import { onVaultFacts, showUnlock, showSetup } from './vault-unlock.js'; // … the box says a locked vault by name (live), its 解锁… is THE unlock dialog
 
@@ -292,6 +292,7 @@ export function installUserTodos(app) {
       const ta = box.querySelector('textarea');
       if (row && ta && ta.value) drafts.set(row.dataset.id, ta.value);
     }
+    releaseBoxesIn(el);   // B-51dd hosted cure: …and its boxes leave the picture registry (every caller drops `el`'s rows next)
   };
   /** The popup = the tabs + ONE page (the inbox or the history). */
   const showPage = (page) => {
@@ -349,9 +350,10 @@ export function installUserTodos(app) {
   /** Bring `container`'s rows (after `head`, when given) to `entries`, keyed by
    *  data-id. A node moves only when it is out of place — never the common case
    *  while the layout is append-only (moving a focused textarea would blur it). */
+  // B-51dd hosted cure: the reconciler's `drop` takes a row no longer listed — and its open box — out of the picture registry
   const reconcileRows = (container, entries, head = null, ctx = rowCtx, { arm = true } = {}) => {
     reconcileKeyed(container, entries, {
-      head, isRow: (c) => c.classList.contains('ut-item'), create: (e) => renderRow(e, ctx), patch: (row, e) => patchRow(row, e, ctx),
+      head, isRow: (c) => c.classList.contains('ut-item'), create: (e) => renderRow(e, ctx), patch: (row, e) => patchRow(row, e, ctx), drop: releaseBoxesIn,
     });
     if (arm) armExitButtons(); // the chat's needs cards arm their own list, once, after a pass that changed one (round 4, #3)
     container.querySelectorAll(':scope > .ut-item .ut-live-dot').forEach((d) => patchDot(d)); // lane foryou-folds: a band row's running dot (a new / re-drawn row starts unpainted)
@@ -627,7 +629,8 @@ export function installUserTodos(app) {
       ta.value = drafts.get(i.id) || '';
       if (ta.value) markTyped(ta);   // the person's own words (a draft holds only what a reply box held), carried into the rebuilt box: they still hold a stale page's reload
       // B-51dd: the item's pictures (kept across a fold) above the field, the picture button beside Send
-      const pics = replyPictures({ box, ta, id: i.id, store: model.pictures, t, backend: () => backendOfKey(i.sessionKey) });   // batch 20 cure: its conversation's harness limits
+      const key = i.sessionKey;   // B-51dd hosted cure: the closure keeps the KEY, never the item — the snapshot's words outlived a clear in it
+      const pics = replyPictures({ box, ta, id: i.id, store: model.pictures, t, backend: () => backendOfKey(key) });   // batch 20 cure: its conversation's harness limits
       box.insertBefore(pics.strip, box.querySelector(':scope > .voice-field') || ta);
       box.insertBefore(pics.btn, box.querySelector(':scope > .ut-reply-send'));
       box.append(pics.input, pics.camera.input);
@@ -644,7 +647,9 @@ export function installUserTodos(app) {
     const row = rowOf(box);
     const ta = box.querySelector('textarea');
     if (row && ta && ta.value && !sent) drafts.set(row.dataset.id, ta.value); else if (row) drafts.delete(row.dataset.id);
-    // B-51dd: a folded box keeps its pictures (model.pictures); a sent reply removed the ones it carried (postReply)
+    // B-51dd: a folded box keeps its pictures (model.pictures); a sent reply removed the ones it carried (postReply) —
+    // the BOX leaves the picture registry with the page (hosted cure: a box kept there kept its row's words reachable)
+    releaseBoxesIn(box);
     box.remove();
     row?.dispatchEvent(new CustomEvent('ut-box-left', { bubbles: true }));
   };
@@ -792,6 +797,7 @@ export function installUserTodos(app) {
     primaryKey, // lane needs-card-tail r10: the attention dock's «View all» scopes the For-you window as the mini inbox's ⤢ does
     arm: (root) => armExitButtons(root), // acceptance round 2: a card the accordion opened shows its Allow just now — armed afresh (round 4: its list's only)
     stash: stashDrafts, // round 3 (#4): a card's typed reply is a draft before its words are replaced
+    sweep: sweepBoxes, // B-51dd hosted cure: a card pass that dropped a row with an open box takes it out of the picture registry
     fold: (box) => foldBox(box), // …and a box kept on an answered card folds (its text a draft) when the person leaves it — THE one exit
     // lane needs-card-tail r15 (its own 700 px shot: a late run's strip grew under a stack placed a moment before — the card
     // stood on the strip's clock line until the next 1 s tick): a window's own controls changed size ⇒ the stack and the toasts
@@ -868,7 +874,7 @@ export function installUserTodos(app) {
     noticeFilter = readFilter(); // …read afresh from the device on every open (another tab may have chosen), then HELD (renderNotices)
     // a fresh open re-sorts (the layout is append-only only WHILE open) and
     // builds a fresh skeleton; a closed popup keeps nothing but the drafts
-    if (!popup.classList.contains('hidden')) { layout = null; popup.replaceChildren(); popup.scrollTop = 0; } // lane foryou-folds: an open starts at the FIRST screen (the persistent element kept the last open's scroll)
+    if (!popup.classList.contains('hidden')) { layout = null; releaseBoxesIn(popup); popup.replaceChildren(); popup.scrollTop = 0; } // lane foryou-folds: an open starts at the FIRST screen (the persistent element kept the last open's scroll)
     renderPanel();
     // Anchor to the button's CURRENT position — customize mode can move it to
     // any bar, so the old fixed bottom-right CSS pointed nowhere.
@@ -1691,6 +1697,7 @@ export function installUserTodos(app) {
     }
     renderBtn(); renderPanel(); renderMini(); scheduleBadges(); renderHome();
     annRefresh(); // the announce's cards and flashes follow the store (answered anywhere ⇒ gone; expired ⇒ said)
+    sweepBoxes(); // B-51dd hosted cure: a reply box this snapshot's renders took off the page leaves the picture registry now
   };
 
   // THE MODEL'S THREE BROADCASTS (§9 — the subscriptions, the reconnect resync and

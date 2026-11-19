@@ -950,8 +950,9 @@ function patchVolatile(el, p) {
  *  new one is created, a child no longer listed is removed, and a node MOVES
  *  only when it is out of place (never the common case while a layout is
  *  append-only — moving a focused textarea would blur it).
- *  opts = {head, isRow(el), keyOf(el), idOf(entry), create(entry), patch(el, entry)} */
-export function reconcileKeyed(container, entries, { head = null, isRow, keyOf = (el) => el.dataset.id, idOf = (e) => e.item.id, create, patch }) {
+ *  opts = {head, isRow(el), keyOf(el), idOf(entry), create(entry), patch(el, entry), drop(el)?} — drop: told of each
+ *  child about to be removed (the tray: its reply box leaves the picture registry, B-51dd hosted cure) */
+export function reconcileKeyed(container, entries, { head = null, isRow, keyOf = (el) => el.dataset.id, idOf = (e) => e.item.id, create, patch, drop = null }) {
   const existing = new Map();
   for (const c of container.children) if (isRow(c)) existing.set(keyOf(c), c);
   let prev = head;
@@ -964,5 +965,5 @@ export function reconcileKeyed(container, entries, { head = null, isRow, keyOf =
     if (row !== slot) container.insertBefore(row, slot);
     prev = row;
   }
-  for (const r of existing.values()) r.remove();
+  for (const r of existing.values()) { if (drop) drop(r); r.remove(); }
 }

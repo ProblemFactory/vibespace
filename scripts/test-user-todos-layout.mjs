@@ -79,7 +79,7 @@ console.log('④ WIRING PIN: the panel uses the layout while the popup is visibl
 const panel = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-panel.js'), 'utf8');
 ok(/from '\.\/user-todos-layout\.js'/.test(panel), 'the panel imports the PURE layout');
 ok(/if \(popup\.classList\.contains\('hidden'\)\) \{ layout = null; dropRows\(\); return; \}/.test(panel) && /\n\s*layout = layout \? nextLayout\(layout, todos\) : openLayout\(gs\);/.test(panel), 'visible ⇒ nextLayout/openLayout; hidden ⇒ the layout is dropped so the next open re-sorts (and, lane-redact verify r7, the rows with it — a closed popup holds none)');
-ok(/if \(!popup\.classList\.contains\('hidden'\)\) \{ layout = null; popup\.replaceChildren\(\); popup\.scrollTop = 0; \}/.test(panel), '…and every OPEN starts from a fresh sorted layout — at the top (lane foryou-folds: the first screen) (a close by Esc / outside tap never ran renderPanel, so the old layout used to survive into the next open)');
+ok(/if \(!popup\.classList\.contains\('hidden'\)\) \{ layout = null; releaseBoxesIn\(popup\); popup\.replaceChildren\(\); popup\.scrollTop = 0; \}/.test(panel), '…and every OPEN starts from a fresh sorted layout — at the top (lane foryou-folds: the first screen) (a close by Esc / outside tap never ran renderPanel, so the old layout used to survive into the next open); its reply boxes leave the picture registry first (B-51dd hosted cure)');
 ok(/entriesFor\(layout, todos\)/.test(panel) && /ut-item-inplace/.test(fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-row.js'), 'utf8')), 'rows are rendered from the layout, a resolved one in place with the ut-item-inplace class (THE row renderer)');
 ok(/todos\.resolved\.filter\(\(i\) => !inPlace\.has\(i\.id\)\)/.test(panel), 'the "Recently resolved" tail skips rows still holding their slot above');
 
@@ -1925,7 +1925,7 @@ console.log('㉘ THE ANNOUNCE IS THE TOAST, GROWN (lane needs-card-tail r11 — 
     showToast: (m, o) => { calls.toast.push({ m, o }); return node(); }, nameFor: () => 'ops', wordsOf: (i) => i.text, jump() {}, // (B-99f7: the arrival's option rides the same reader)
     byId: (id) => [...S.todos.open, ...S.todos.resolved].find((i) => i.id === id),
     btn: { classList: { remove() {}, add: () => { calls.pulse++; } } }, announce: (i) => { calls.announce.push(i.id); },
-    renderBtn() {}, renderPanel() {}, renderMini() {}, scheduleBadges() {}, renderHome() {}, annRefresh() {}, forgetReachPicks() {},
+    renderBtn() {}, renderPanel() {}, renderMini() {}, scheduleBadges() {}, renderHome() {}, annRefresh() {}, forgetReachPicks() {}, sweepBoxes() {},
     document: { querySelectorAll: () => [] }, window: { innerWidth: 1280, innerHeight: 800 },
   };
   let apply = null;
@@ -2033,7 +2033,7 @@ console.log('㉛ THE ANNOUNCE YIELDS TO THE OWNER\'S OWN ACT (lane needs-card-ta
   const pop = { classList: cl(new Set(['hidden'])), replaceChildren() {}, scrollTop: 0 };
   const T = run(slice('  const togglePopup = (anchor) => {', '  btn.onclick = () => togglePopup(btn);'), 'togglePopup', {
     notePopupHide() {}, popup: pop, tab: '', bands: null, noticesOpen: false, noticeOrder: null, noticeFilter: null, readFilter: () => null, layout: null,
-    renderPanel() {}, anchorFixedPopup() {}, armExitButtons() {}, annYield: () => { yields++; } });
+    renderPanel() {}, anchorFixedPopup() {}, armExitButtons() {}, releaseBoxesIn() {}, annYield: () => { yields++; } });
   let y1 = -1, y2 = -1;
   if (T.togglePopup) { T.togglePopup({}); y1 = yields; T.togglePopup({}); y2 = yields; }
   ok(!!T.togglePopup && y1 === 1 && y2 === 1, `RED-able (r13 — 3b8602717: the open left the stack standing over the tray): the tray OPENED takes the announce's cards (${y1} yield), its close takes none (${y2 - y1})`, T.threw || { y1, y2 });
