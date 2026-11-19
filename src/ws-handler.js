@@ -1356,7 +1356,7 @@ function registerWsHandler(wss, ctx) {
               // lane resume-all-paced L3 P1 on THIS rule (every wait of an attach here, never between the join and the verdict): a
               // RE-ATTACH (the history loaded) reads its codex history off the loop now, acked while it waits; the attach below keeps
               // this reader. A first attach reads after its harness's warm (below — a missing rollout is written there first)
-              if (s0._historyLoaded) { reSm = createSessionMessages(s0, data.sessionId); await readOffLoop(reSm, { label: data.sessionId, wanted: () => ws.readyState === WS_OPEN, ack: () => { try { ws.send(JSON.stringify({ type: 'attach-ack', sessionId: data.sessionId, progress: null, queued: true })); } catch { } } }); }
+              if (s0._historyLoaded) { reSm = createSessionMessages(s0, data.sessionId); await readOffLoop(reSm, { label: data.sessionId, wanted: () => ws.readyState === WS_OPEN && activeSessions.get(data.sessionId) === s0, ack: () => { try { ws.send(JSON.stringify({ type: 'attach-ack', sessionId: data.sessionId, progress: null, queued: true })); } catch { } } }); }
               const left = activeSessions.get(data.sessionId) !== s0 || ws.readyState === 2 || ws.readyState === 3;   // replaced / ended, or the socket closing
               if (left && s0.clients.get(ws)?.pending) s0.clients.delete(ws);
               if (ws.readyState === 2 || ws.readyState === 3) break;   // closing / closed during the waits: nothing to attach to

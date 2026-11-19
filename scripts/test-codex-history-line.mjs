@@ -16,7 +16,9 @@
 //      S2 a history past the worker's bound — no one-shot read, the parse on the loop counted and said; S5 a page bounded in bytes
 //      THE ORDERING LAW, driven (主开发 02:22Z): a codex RE-ATTACH's read waits in the line inside the PENDING window — a stamped frame never
 //      reaches the new socket ahead of its `attached` (RED CONTROL: the read after the join); a CLOSED socket's read is dropped before it
-//      starts (RED CONTROL: no `wanted`)
+//      starts (RED CONTROL: no `wanted`); 03:16Z: the held frame arrives EXACTLY ONCE, in the verdict's replay (RED: twice); a read whose
+//      conversation ENDED or was REPLACED while it waited is dropped (RED: the socket alone); a droppable read is never the reader's shared
+//      memo (RED: shared)
 import fs from 'node:fs';
 import path from 'node:path';
 import v8 from 'node:v8';
@@ -229,10 +231,10 @@ console.log('— ⑥ THE CURE ROUND (主开发 23:16Z): every attach reads off t
     const wshSrc = read('src/ws-handler.js');
     const MCW = mutantCopies('codex-reattach', REPO);
     const PREAD = wshSrc.split('\n').find((l) => l.includes('if (s0._historyLoaded) { reSm = createSessionMessages(s0, data.sessionId); await readOffLoop(reSm,')) || '';
-    const POST = 'if (sm !== reSm) await readOffLoop(sm, ', WANTED = 'wanted: () => ws.readyState === WS_OPEN, ';
+    const POST = 'if (sm !== reSm) await readOffLoop(sm, ', WANTED = 'wanted: () => ws.readyState === WS_OPEN && activeSessions.get(data.sessionId) === s0, ';
     const plantW = (tag, edits) => { let t = wshSrc; for (const [x, y] of edits) { if (!x || t.split(x).length !== 2) throw new Error(`(${tag}): an anchor is not ONE site: ${String(x).slice(0, 70)}`); t = t.replace(x, () => y); } return MCW.load('src/ws-handler.js', t, tag); };
     const queued = async () => { for (let k = 0; k < 400; k++) { const w = S.readsWaiting(); if (w.person >= 1) return true; await sleep(5); } return false; };
-    const scene = async (WSH, n, { close = false } = {}) => {
+    const scene = async (WSH, n, { close = false, end = false, replace = false } = {}) => {
       const { broadcastToSession } = SB.createSessionBroadcast({ event() { }, log: { warn() { } } });
       const sid = `w-order-${n}`, sessions = new Map(), made = [];
       const ctx = new Proxy({ activeSessions: sessions, WS_OPEN: 1, BUFFERS_DIR: buffersDir, SOCKETS_DIR: buffersDir, fs, path, os, telemetry: { record() { } }, serverNotice() { }, activeSessionsPayload: () => [], resizeSessionToMin() { },
@@ -245,34 +247,68 @@ console.log('— ⑥ THE CURE ROUND (主开发 23:16Z): every attach reads off t
         const h = {}, frames = [];
         const sock = { readyState: 1, bufferedAmount: 0, send: (t) => frames.push(JSON.parse(t)), on: (ev, fn) => { h[ev] = fn; }, ping() { }, terminate() { }, close() { } };
         wss.clients.add(sock); on.connection(sock);
-        const c = { sock, h, frames, attach: async () => { await h.message(JSON.stringify({ type: 'attach', sessionId: sid })); for (let k = 0; k < 1500 && !attachedOf(c) && sock.readyState === 1; k++) await sleep(2); } };
+        const c = { sock, h, frames, attach: async (extra = {}) => { await h.message(JSON.stringify({ type: 'attach', sessionId: sid, ...extra })); for (let k = 0; k < 1500 && !attachedOf(c) && sock.readyState === 1 && sessions.has(sid); k++) await sleep(2); } };
         return c;
       };
       const session = { backend: 'codex', mode: 'chat', backendSessionId: SID, cwd: '/srv/stand-in', buffer: '', name: 'order ' + n, clients: new Map(), _normalizer: createMessageManager('codex', sid), _historyLoaded: true, _normEpoch: 1788550000000 };
       sessions.set(sid, session);
       const c1 = connect(); await c1.attach();
+      // the session's op ring exists (a first stamped frame) and the re-attaching page names the seq it holds: the verdict can REPLAY
+      broadcastToSession(session, sid, { type: 'msg', sessionId: sid, probe: 'before' });
+      const S0 = SB.opRingOf(session).seq;
       let rel; const hold = S.oneReadAtATime(() => new Promise((r) => { rel = r; }));
       await sleep(5);
       const c2 = connect(), made0 = made.length, reads0 = statsOf().reads;
-      const pa = c2.attach();
+      const pa = c2.attach({ caps: ['op-seq'], sinceSeq: S0, sinceEpoch: session._normEpoch });
       const waited = await queued();
       if (close) { c2.sock.readyState = 3; try { c2.h.close && c2.h.close(); } catch { } }
+      else if (end) sessions.delete(sid);   // the conversation ended while the read waited
+      else if (replace) sessions.set(sid, { ...session, clients: new Map(), name: 'order ' + n + ' (replaced)' });   // …or a new session took its id
       else { broadcastToSession(session, sid, { type: 'msg', sessionId: sid, probe: 'stamped' }); broadcastToSession(session, sid, { type: 'subagent-message', sessionId: sid, probe: 'unstamped' }); }
       rel(); await hold; await pa; await sleep(30);
       const i2 = c2.frames.findIndex((f) => f.type === 'attached'), pAt = c2.frames.findIndex((f) => f.probe === 'stamped');
+      const att = attachedOf(c2), inReplay = (Array.isArray(att && att.replay) ? att.replay : []).filter((f) => f && f.probe === 'stamped').length, asFrames = c2.frames.filter((f) => f.probe === 'stamped').length;
       const r2 = made[made0] || null;
-      return { waited, c1: !!attachedOf(c1), attached: i2 >= 0, probeAhead: pAt >= 0 && (i2 < 0 || pAt < i2), unstamped: c2.frames.some((f) => f.probe === 'unstamped'), probeSeen: c1.frames.some((f) => f.probe === 'stamped'),
-        read: statsOf().reads - reads0, readerFilled: !!(r2 && r2._all), c2: c2.frames.map((f) => f.type).slice(0, 8) };
+      return { waited, c1: !!attachedOf(c1), attached: i2 >= 0, probeAhead: pAt >= 0 && (i2 < 0 || pAt < i2), held: !!att && att.slab === 'held', inReplay, asFrames, unstamped: c2.frames.some((f) => f.probe === 'unstamped'), probeSeen: c1.frames.some((f) => f.probe === 'stamped'),
+        read: statsOf().reads - reads0, readerFilled: !!(r2 && r2._all), freshFilled: !!(made[made0 + 1] && made[made0 + 1]._all), readers: made.length - made0, c2: c2.frames.map((f) => f.type).slice(0, 8) };
     };
     const now = await scene(require(path.join(REPO, 'src/ws-handler.js')), 1);
-    ok(now.waited && now.c1 && now.attached && now.probeSeen && !now.probeAhead && now.unstamped,
-      'THE ORDERING LAW, driven (the real ws-handler, a codex RE-ATTACH whose read waited in the one-read line): the STAMPED frame broadcast meanwhile reached the socket already attached and NOT the new one ahead of its `attached`; the UNSTAMPED one reached it (its pending entry)', now);
+    ok(now.waited && now.c1 && now.attached && now.probeSeen && !now.probeAhead && now.unstamped && now.held && now.inReplay === 1 && now.asFrames === 0,
+      'THE ORDERING LAW, driven (the real ws-handler, a codex RE-ATTACH whose read waited in the one-read line): the STAMPED frame broadcast meanwhile reached the socket already attached; the new one received it EXACTLY ONCE — in its verdict\'s replay (`attached`, slab «held»), never as a frame ahead of it; the UNSTAMPED one reached it live (its pending entry)', now);
     const late = await scene(plantW('read-after-join', [[PREAD + '\n', ''], [POST, 'await readOffLoop(sm, ']]), 2);
-    ok(late.waited && late.attached && late.probeAhead, 'RED CONTROL (the read after the join — the restack\'s first placement): the stamped frame reached the new socket AHEAD of its `attached`', late);
+    ok(late.waited && late.attached && late.probeAhead && late.inReplay + late.asFrames === 2, 'RED CONTROL (the read after the join — the restack\'s first placement): the stamped frame reached the new socket AHEAD of its `attached`, and again in its replay — TWICE', late);
     const gone = await scene(require(path.join(REPO, 'src/ws-handler.js')), 3, { close: true });
     ok(gone.waited && !gone.attached && gone.read === 0 && !gone.readerFilled, 'A CLOSED SOCKET\'S READ IS DROPPED BEFORE IT STARTS: the socket closed while its read waited in the line ⇒ its turn read nothing (no paged read, its reader unfilled) and nothing was attached', gone);
     const all = await scene(plantW('no-wanted', [[WANTED, '']]), 4, { close: true });
     ok(all.waited && all.read >= 1 && all.readerFilled, `RED CONTROL (no \`wanted\` — the restack's tip): the closed socket's read ran anyway (${all.read} paged read) and filled a reader nobody will use`, all);
+    // …and A READ WHOSE CONVERSATION ENDED (or was replaced) WHILE IT WAITED is dropped too (主开发 03:16Z): its turn reads nothing
+    const ended = await scene(require(path.join(REPO, 'src/ws-handler.js')), 5, { end: true });
+    ok(ended.waited && !ended.attached && ended.read === 0 && !ended.readerFilled, 'A READ WHOSE CONVERSATION ENDED WHILE IT WAITED IS DROPPED BEFORE IT STARTS: no paged read, its reader unfilled, nothing attached', ended);
+    const sockOnly = await scene(plantW('socket-only', [[WANTED, 'wanted: () => ws.readyState === WS_OPEN, ']]), 6, { end: true });   // stale-pins: kept (the red control rebuilds the socket-only want)
+    ok(sockOnly.waited && sockOnly.read >= 1 && sockOnly.readerFilled, `RED CONTROL (the socket alone — the follow-up's tip): the ended conversation's read ran anyway (${sockOnly.read} paged read)`, sockOnly);
+    // …and a conversation REPLACED while the read waited (a new session under the same id): the stale read is dropped, and the attach
+    // goes on with a fresh reader of the new session, read once. RED CONTROL: the socket alone ⇒ the stale read runs too (two reads)
+    const repl = await scene(require(path.join(REPO, 'src/ws-handler.js')), 7, { replace: true });
+    ok(repl.waited && repl.attached && !repl.readerFilled && repl.freshFilled && repl.read === 1, `A CONVERSATION REPLACED WHILE ITS READ WAITED: the stale read dropped, the attach went on with a fresh reader of the new session (${repl.read} paged read)`, repl);
+    const replSock = await scene(plantW('socket-only-replace', [[WANTED, 'wanted: () => ws.readyState === WS_OPEN, ']]), 8, { replace: true });   // stale-pins: kept (the red control rebuilds the socket-only want)
+    ok(replSock.waited && replSock.attached && replSock.readerFilled && replSock.read === 2, `RED CONTROL (the socket alone): the replaced conversation's stale read ran too (${replSock.read} paged reads)`, replSock);
+    // A READ THAT MAY BE DROPPED IS NEVER THE READER'S SHARED MEMO (主开发 03:16Z): one reader, the line held; a read whose `wanted` is false
+    // at its turn and a second caller WITHOUT a want both wait — the second gets the records, never the dropped read's nothing.
+    // RED CONTROL: the store whose dropped job is the shared memo (the follow-up's tip) — the second caller gets nothing
+    const memoScene = async (CS) => {
+      let relM; const holdM = CS.oneReadAtATime(() => new Promise((r) => { relM = r; }));
+      await sleep(5);
+      const R = new CS.CodexSessionMessages(small('memo'), 'w-memo', { buffersDir });
+      let want = true;
+      const pa = R.rawAsync({ wanted: () => want }), pb = R.rawAsync();
+      want = false; relM(); await holdM;
+      const [ra, rb] = await Promise.all([pa, pb]);
+      return { a: ra === null ? null : 'records', b: Array.isArray(rb) ? rb.length : rb };
+    };
+    const csSrc = read('src/codex-session-store.js'), SHARE = "    if (typeof wanted === 'function') return job;\n";
+    const m1 = await memoScene(S);
+    const m0 = csSrc.split(SHARE).length === 2 ? await memoScene(MCW.load('src/codex-session-store.js', csSrc.replace(SHARE, ''), 'memo-shared')) : null;
+    ok(m1.a === null && typeof m1.b === 'number' && m1.b > 0 && !!m0 && m0.b === null, `A READ THAT MAY BE DROPPED IS NEVER THE READER'S SHARED MEMO: the dropped read answered nothing, the second caller on the same reader its ${m1.b} records; RED CONTROL (the dropped job shared): the second caller got nothing`, { m1, m0 });
   }
 }
 }

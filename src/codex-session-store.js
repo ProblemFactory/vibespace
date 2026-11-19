@@ -758,7 +758,7 @@ class CodexSessionMessages {
     // index (src/search-index-worker.js), which then skips it — codex conversations must stay searchable.
     if (this._all) return Promise.resolve(this._all);
     if (this._rawAsync) return this._rawAsync;
-    this._rawAsync = oneReadAtATime(async () => {
+    const job = oneReadAtATime(async () => {
       if (this._all) return this._all;   // the sync road filled it while this one waited its turn
       // A READ NOBODY WILL USE IS DROPPED BEFORE IT STARTS (主开发 02:22Z, the restack's follow-up): `wanted` is asked when this read's
       // turn comes — a socket closed while it waited (a reload storm queues reads nobody will use) frees the line at once, unread
@@ -776,7 +776,12 @@ class CodexSessionMessages {
       const all = await mergeCodexRecordsAsync(history, live);
       if (!this._all) this._all = all;
       return this._all;
-    }, { bulk }).finally(() => { this._rawAsync = null; });
+    }, { bulk });
+    // A READ THAT MAY BE DROPPED IS NEVER THE READER'S SHARED MEMO (主开发 03:16Z, the follow-up's third item): a job carrying `wanted` can
+    // end as nothing — a second caller joining it would get that nothing though it wanted the records. Such a job is its caller's
+    // alone; a later caller starts its own (queued behind it, and answered at once from `_all` if the first one read)
+    if (typeof wanted === 'function') return job;
+    this._rawAsync = job.finally(() => { this._rawAsync = null; });
     return this._rawAsync;
   }
 
