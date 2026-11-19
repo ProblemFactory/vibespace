@@ -1395,6 +1395,7 @@ class JobManager {
     if (n) this.d.log(`[jobs] ${cid}: ${n} oldest waiting notification(s) fell off the ${NOTIF_STASH_CAP}-entry cap (${dropped.map((e) => `${e.jobId} ${new Date(Number(e.ts) || 0).toISOString()}${e.held && e.held.maybeDelivered ? ' — a may-have-landed copy, gave way first' : ''}`).join('; ')}) — never delivered (channel-jump verify r6: an eviction is said)`);
     if (n) this._sayDropped(cid, n, dropped);
     this.pendingNotifs.set(cid, q);
+    if ((held || heldOf(null, reason) || {}).kind === 'not-running') (this._stoppedThisRun || (this._stoppedThisRun = new Set())).add(cid);   // B-6721: the EVENT For you is told of (the notice just stashed — never the queue's tail after the cap)
     if (stampLast) job.lastNotify = { ts: now(), lane: 'stash', ok: true, reason: reason || null };
     this._notifyLogPush(job, { lane: 'stash', ok: false, reason: reason || 'not reachable', to: String(cid).slice(0, 8) });
     this.d.log(`[jobs] notify → stashed for ${cid} (${reason || 'not reachable'})`);
@@ -1538,6 +1539,7 @@ class JobManager {
     this._saveNotifs(); this._dirty = true;
     this.d.log(`[jobs] ${cid}: ${gone.length} held notification(s) of job(s) it can no longer view — dropped at the drain, never printed (${[...new Set(gone.map((n) => n.jobId))].join(', ')})`);
     try { this.d.broadcast('jobs-updated', { drained: cid }); } catch { }
+    this.wakeSettled(cid);   // B-6721 (the round's should): the drop may leave nothing owed — For you's «notices wait» goes with it
   }
   /** r5 — THE VIEW VERDICT: the ONE answer the push, the drain and the ladder's retry share to «may this conversation be told of
    *  this job NOW», judged by what the server knows of it now (the wiring's `viewerOf`):
@@ -1689,6 +1691,11 @@ class JobManager {
   /** B-6721: For you was told for this conversation (now, or at For you's read — the wiring's deferred filing): its close asks the store */
   noteWakeSaid(cid) { if (cid) (this._wakeSaid || (this._wakeSaid = new Set())).add(cid); }
   sayWakeWaiting(cid) {
+    // A FOR-YOU ITEM MARKS AN EVENT, NOT A STATE FOUND AT BOOT (主开发's ruling, round wdtmcza5y — measured on the owner's hub: 3
+    // conversations held a not-running notice, two of them a month old): only a conversation a notice was stashed for WHILE THIS
+    // HUB RAN (stopped then) is said — the item then counts every notice waiting there; what a boot finds waits where it waits
+    // today (the Background Work panel) and is still handed over when the conversation runs again
+    if (!this._stoppedThisRun || !this._stoppedThisRun.has(cid)) return null;
     const owed = this.wakeOwed(cid).filter((n) => n.held.kind !== 'rate-floor');
     if (!owed.length || typeof this.d.noticeWakeWaiting !== 'function') return null;
     try {
@@ -1700,7 +1707,9 @@ class JobManager {
   /** B-6721: nothing owed a wake is left — For you's «notices wait» for this conversation is over (done, by the agent). Asked of
    *  the store only for a conversation this run said it for, or once per conversation per run (an item an earlier run filed) */
   wakeSettled(cid) {
-    if (!cid || this.wakeOwed(cid).length || typeof this.d.resolveWakeWaiting !== 'function') return;
+    if (!cid || this.wakeOwed(cid).length) return;
+    if (this._stoppedThisRun && !(this.pendingNotifs.get(cid) || []).length) this._stoppedThisRun.delete(cid);   // the queue EMPTY (a claimed entry may come back): the event is over (the set stays bounded)
+    if (typeof this.d.resolveWakeWaiting !== 'function') return;
     const said = this._wakeSaid || (this._wakeSaid = new Set()), looked = this._wakeLooked || (this._wakeLooked = new Set());
     if (!said.has(cid) && looked.has(cid)) return;
     said.delete(cid); looked.add(cid);

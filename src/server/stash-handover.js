@@ -177,9 +177,11 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
    *  is on its way (another client's click); `held` = what one hand-over would leave; `reachable` = a hand-over exists
    *  AND has something to carry (lane group-report-card: group messages alone are not handed over — no button). */
   function summaryFor(s) {
-    const cid = cidOf(s);
+    // B-6721 (the cure's fresh read, ALSO CURED): a PENDING FORK carries its parent's id — its strip offered the parent's stash and its
+    // «Hand over» billed the parent's notices from the fork's window; the fact is the session's OWN conversation's, or none
+    const cid = ownCidOf(s);
     if (!cid) return null;
-    noteLive(cid);   // B-6721: a live session of a conversation owed a wake (a resume, a restore) arms its chain — the payload is built for every live session
+    noteLive(cid);   // B-6721: a live session of a conversation owed a wake (a resume, a restore) arms its chain — the payload is built for every live session; a pending fork (its parent's id) never
     try {
       const both = entriesOf(cid);
       const groups = groupEntriesOf(s);
@@ -193,10 +195,9 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
   // this conversation (its notices did not fit the prompt), it runs now as ONE message under 'stash-retry' — unless a
   // post landed within the ladder's floor, in which case it waits the floor out and re-checks (idle, live, something
   // still waiting; a turn running again re-arms for its own end). Refusals are logged; the stash is untouched.
-  function widOf(cid) { try { for (const [wid, x] of activeSessions) if (cidOf(x) === cid) return wid; } catch { } return null; }
   async function runArmed(cid, why, deferred = false) {
     const d = getDeliver();
-    const wid = widOf(cid);
+    const wid = ownWidOf(cid);   // B-6721: by the ladder's predicate (a pending fork listed before its live parent was picked)
     const s = wid != null ? activeSessions.get(wid) : null;
     if (!d || !s) return;
     const floor = Number(d.RETRY_FLOOR_MS) || 30 * 1000;
@@ -236,6 +237,11 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
   const wakeChains = new Map();   // cid → { step }: the conversation's next check is scheduled (no words: a cid and a step)
   const wakeBusy = new Set();     // cid: its check is running
   const wakeQuiet = new Map();    // cid → { why: 'away' | 'refused', at }: its chain ended; `at` = the newest owed notice it saw
+  // THE WAKE'S SESSION BY THE LADDER'S PREDICATE (主开发's round wdtmcza5y, the must): a PENDING FORK carries its parent's id —
+  // never the parent's window (addressableId: «never a pending fork»); its payload arms nothing, its window is never checked
+  // nor handed over (else a fork kept a stopped parent's chain stepping out to every 10 minutes for as long as it stayed pending)
+  const ownCidOf = (s) => addressableId(s);
+  function ownWidOf(cid) { try { for (const [wid, x] of activeSessions) if (ownCidOf(x) === cid) return wid; } catch { } return null; }
   const owedOf = (cid) => { const jm = jobsReady(); try { return jm && !jm.readOnly && typeof jm.wakeOwed === 'function' ? jm.wakeOwed(cid) : []; } catch { return []; } };   // a read-only engine's drain writes nothing: never armed
   const newestOf = (owed) => owed.reduce((m, n) => Math.max(m, Number(n && n.ts) || 0), 0);
   /** may a hook arm this conversation now? — something owed, no chain, no check running, and nothing that ENDED it unchanged:
@@ -256,8 +262,8 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
     for (const cid of jm.pendingNotifs.keys()) if (mayArm(cid)) armWake(cid, fromStep);
   }
   /** a payload built for a session: only a session IN the map arms (the hub builds one for every live session — a resume, a restore) */
-  function noteLive(cid) { const wid = widOf(cid); if (wid != null && mayArm(cid, wid)) armWake(cid, 0); }
-  const quiet = (cid, why, at = newestOf(owedOf(cid))) => wakeQuiet.set(cid, { why, at, wid: widOf(cid) });
+  function noteLive(cid) { const wid = ownWidOf(cid); if (wid != null && mayArm(cid, wid)) armWake(cid, 0); }
+  const quiet = (cid, why, at = newestOf(owedOf(cid))) => wakeQuiet.set(cid, { why, at, wid: ownWidOf(cid) });
   const bootAt = now();
   const BOOT_GRACE_MS = wakeBootGraceMs;   // a session the boot re-attaches late (a keeper's, a device's) is not AWAY in the boot's first minute
   function armWake(cid, step, ms = null) {
@@ -273,7 +279,7 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
     try {
       const jm = jobsReady();
       if (!owedOf(cid).length) { wakeQuiet.delete(cid); try { if (jm && jm.wakeSettled) jm.wakeSettled(cid); } catch { } return; }
-      const d = getDeliver(), wid = widOf(cid), s = wid != null ? activeSessions.get(wid) : null;
+      const d = getDeliver(), wid = ownWidOf(cid), s = wid != null ? activeSessions.get(wid) : null;
       if ((!d || !s) && now() - bootAt < BOOT_GRACE_MS) { next = [step + 1, null]; return; }   // the boot's first minute: sessions still attaching
       if (!d || !s) { try { if (jm && jm.sayWakeWaiting) jm.sayWakeWaiting(cid); } catch { } quiet(cid, 'away'); return; }   // AWAY: said once, the chain ends
       if (typeof d.peerReachable === 'function' && !d.peerReachable(cid)) { next = [step + 1, null]; return; }   // live, not taking frames yet
@@ -291,6 +297,9 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
         if (owedOf(cid).some((n) => (Number(n && n.ts) || 0) > handed)) next = [0, null]; else { try { if (jm && jm.wakeSettled) jm.wakeSettled(cid); } catch { } }
         return;
       }
+      // the frame WRITTEN and then the post failed (a write-phase timeout): it may have landed — the chain ENDS (the round's should: a
+      // second post 30 s later is a second billed turn for one notice); the notices ride the next prompt, as a refusal's do
+      if (r && r.code === 'unreachable' && ((r.phase === 'write' && r.error === 'timeout') || r.unanswered === true)) { log.log?.(`[stash] ${cid}: the hand-over's frame was written but the post did not complete (phase write) — it may have reached the agent: not posted again; the notices ride its next prompt`); quiet(cid, 'refused'); return; }
       if (r && (r.code === 'unreachable' || r.code === 'in_flight')) { next = [step + 1, null]; return; }
       log.log?.(`[stash] ${cid}: the notices waiting for the conversation were not handed over — ${(r && r.code) || 'unknown'}: ${(r && r.error) || ''} (they ride its next prompt; nothing retries them until something changes)`);
       quiet(cid, 'refused');
@@ -404,7 +413,7 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
   async function handOver(webuiId, { auto = false, pressed = null } = {}) {
     const s = activeSessions && activeSessions.get(String(webuiId));
     if (!s) return { ok: false, code: 'no_session', error: 'no such live session' };
-    const cid = cidOf(s);
+    const cid = ownCidOf(s);   // B-6721: a pending fork (its parent's id) has no conversation of its own yet — never the parent's hand-over
     if (!cid) return { ok: false, code: 'no_conversation', error: 'this session has no conversation yet' };
     if (closed) return { ok: false, code: 'restarting', error: 'the server is restarting — the notices keep waiting for the agent’s next turn' };
     const cur = inflight.get(cid);
@@ -457,7 +466,7 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
       if (!r || !r.ok) {
         if (r && r.refused === 'spend') return { ok: false, code: 'spend_refused', id, error: r.reason || 'the spend ceiling refused this turn', why: r.why || null, retryAfter: r.retryAfter || 0, identity: r.identity || null, cap: r.cap == null ? null : r.cap, ...(r.capUnset ? { capUnset: true } : {}) };
         if (r && (r.refused === 'wrapper-no-steer' || r.refused === 'no-wake')) return { ok: false, code: 'held_for_next_turn', id, error: r.reason || 'held for the conversation’s next prompt' };
-        return { ok: false, code: 'unreachable', id, error: (r && r.reason) || 'the agent could not be reached — the notices keep waiting for its next turn' };
+        return { ok: false, code: 'unreachable', id, error: (r && r.reason) || 'the agent could not be reached — the notices keep waiting for its next turn', phase: (r && r.phase) || null, unanswered: !!(r && r.unanswered) };   // B-6721: a frame written before a timeout, or a device's post sent and never answered, may have landed
       }
       // DELIVERED: take exactly what went out; what arrived meanwhile keeps waiting
       const tookStashed = shownStashed.length ? d.drainStash(cid, new Set(shownStashed)) : [];
