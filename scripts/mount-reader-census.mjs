@@ -50,7 +50,7 @@ export const ROWS = [
   ['src/desktop-serve.js', 'own-tree', 14, null, DATA], // lane hub-fuse-sync-guard −1: the catalog's two program-path checks are ONE (execHere: a storage-mount path is listed as it reads) // +2 lane remoteapp-r1b: a RemoteApp session's own app.log re-read at its teardown (stat + read) for the password-shape scrub; +2 lane app-display-notify-sink: the app's notification journal (stat + read) in its own 0700 portal dir; +1 lane remoteapp-r1a: the tail of a RemoteApp session's own app.log (why it ended)
   ['src/device-audit.js', 'own-tree', 2, null, `${DATA} — lane device-act-audit: the hub's device-act audit ring (data/device-audit.jsonl: the backwards tail read; B-48a4: the size before an append is the store writer's thread's, −1)`],
   ['src/device-mount.js', 'exempt', 7, null, 'the device pull mount: /proc scans + its own mount point (its owner’s liveness); B-1ea6 +2: the stale-daemon pre-clean reads /proc async (readdir + cmdline, the stat of a match, the cmdline again at the signal) where it read it sync'],
-  ['src/discovery-facts.js', 'own-tree', 5, null, PROC],
+  ['src/discovery-facts.js', 'own-tree', 7, null, `${PROC}; B-16d7 +2: realCwdsOf — a listed conversation's cwd resolved (realpath + the stat of its result) ONLY in the device's discovery-snapshot CHILD process, async, 1 s each and 3 s in all (a hung mount ends with the child; the agent's loop never reads it)`],
   ['src/exit-proxy.js', 'user-path', 9, 'DOOR\\.blocked\\(', 'an exit-run transfer’s local side: refused by name (transfer_failed)'],
   ['src/fixture-ledger-purge.js', 'own-tree', 6, null, CLI],
   ['src/gmail-sync.js', 'own-tree', 2, null, DATA],

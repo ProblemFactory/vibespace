@@ -2725,7 +2725,9 @@ class HostManager {
       if (!s || typeof s.cwd !== 'string' || m.size >= 500) continue;
       if (typeof s.hostRealCwd === 'string') m.set(s.cwd, s.hostRealCwd);
       // an answer that says NO real folder at all (a rung without the fact: the ssh one on a host with no timeout, the device's
-      // inline fallback, a probe past its budget) keeps the last one for a cwd it still lists — no membership flap between sweeps
+      // inline fallback, a budget spent before its first folder) keeps the last one for a cwd it still lists — no membership flap
+      // between sweeps. An answer that says ANY — every resolved folder is said, a no-link one as itself — is the whole truth: a
+      // listed cwd it does not name (past its budget) loses its real folder until a sweep names it again
       else if (!said && prev.has(s.cwd)) m.set(s.cwd, prev.get(s.cwd));
     }
     this._realCwds.set(id, m);
@@ -2765,12 +2767,13 @@ class HostManager {
     }
     // One round trip: alive lock files + all project JSONLs (path, mtime, size)
     const script = `
-      # R = B-16d7: THIS machine's real path of a cwd it lists (a symlinked folder), only when it differs — bounded (timeout 2
-      # where it exists), stdin closed; both branches written out (no command kept in a variable: zsh never splits one)
-      # (once per distinct cwd in a pipeline, only within 4 s of the scan's start (both loops share it), each under «timeout -k 1 2» — none where the
-      # host has no timeout: an unbounded cd into a dead mount would hold the whole list; a path with a control character never)
+      # R = B-16d7: THIS machine's real path of a cwd it lists — EVERY resolved one (equal: no link), the same list as the device's
+      # (discovery-facts cwdsToResolve: live locks' and listed heads' cwds; an escaped JSON spelling, a relative path, a control
+      # character never); stdin closed, no command kept in a variable (zsh never splits one)
+      # (once per distinct cwd in a pipeline, only within 4 s of the scan's start (both loops share it), each under «timeout -k 1 2»;
+      # none where the host has no timeout: an unbounded cd into a dead mount would hold the whole list)
       vs_t0=$(date +%s); vs_seen='|'; command -v timeout >/dev/null 2>&1 && vs_to=1 || vs_to=
-      vs_real() { [ -n "$1" ] && [ -n "$vs_to" ] || return 0; case "$vs_seen" in *"|$1|"*) return 0 ;; esac; vs_seen="$vs_seen$1|"; [ $(( $(date +%s) - vs_t0 )) -lt 4 ] || return 0; case "$1" in *[[:cntrl:]]*) return 0 ;; esac; vs_r=$(timeout -k 1 2 sh -c 'cd -P -- "$1" 2>/dev/null && pwd -P' _ "$1" </dev/null 2>/dev/null); case "$vs_r" in ''|*[[:cntrl:]]*) return 0 ;; esac; [ "$vs_r" != "$1" ] && printf 'R %s\\t%s\\n' "$1" "$vs_r"; return 0; }
+      vs_real() { [ -n "$1" ] && [ -n "$vs_to" ] || return 0; case "$vs_seen" in *"|$1|"*) return 0 ;; esac; vs_seen="$vs_seen$1|"; [ $(( $(date +%s) - vs_t0 )) -lt 4 ] || return 0; case "$1" in /*) ;; *) return 0 ;; esac; case "$1" in *[[:cntrl:]]*|*\\\\*) return 0 ;; esac; vs_r=$(timeout -k 1 2 sh -c 'cd -P -- "$1" 2>/dev/null && pwd -P' _ "$1" </dev/null 2>/dev/null); case "$vs_r" in ''|*[[:cntrl:]]*) return 0 ;; esac; printf 'R %s\\t%s\\n' "$1" "$vs_r"; return 0; }
       find "$HOME"/.claude/sessions -maxdepth 1 -name '*.json' 2>/dev/null | while read -r f; do
         pid=$(basename "$f" .json)
         kill -0 "$pid" 2>/dev/null && { echo "LOCK $(cat "$f")"; vs_real "$(grep -o '"cwd":"[^"]*"' "$f" 2>/dev/null | head -n 1 | cut -d'"' -f4)"; }

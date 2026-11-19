@@ -194,8 +194,9 @@ console.log('B-16d7 a remote conversation\'s real folder resolved by ITS OWN mac
   const rowOf = (out) => (DFx.interpretDiscoveryLines(out, { hostId: 'h-2', hostName: 'box', claimJsonls }) || [])[0] || {};
   const withR = rowOf(base + '\nR /home/u/link\t/srv/nfs/proj');
   ok(withR.cwd === '/home/u/link' && withR.hostRealCwd === '/srv/nfs/proj' && withR.realCwd === undefined, 'an R fact gives the row the path ITS machine resolved — as `hostRealCwd`, never the hub\'s `realCwd`');
-  ok(rowOf(base).hostRealCwd === undefined && rowOf(base + '\nR /home/u/link\t/home/u/link').hostRealCwd === undefined && rowOf(base + '\nR /home/u/link\trel/x').hostRealCwd === undefined && rowOf(base + '\nR /other\t/srv/x').hostRealCwd === undefined,
-    'no R, an R equal to the cwd, a relative one, or one for another folder: no hostRealCwd');
+  ok(rowOf(base).hostRealCwd === undefined && rowOf(base + '\nR /home/u/link\trel/x').hostRealCwd === undefined && rowOf(base + '\nR /other\t/srv/x').hostRealCwd === undefined,
+    'no R, a relative one, or one for another folder: no hostRealCwd');
+  ok(rowOf(base + '\nR /home/u/link\t/home/u/link').hostRealCwd === '/home/u/link', 'an R equal to the cwd: a RESOLVED folder that is no link — the row says its own path (a link replaced by a folder leaves the hub\'s map)');
   const synth = DFx.synthesizeDiscoveryLines({ locks: [], jsonls: [{ projDir: '-home-u-link', file: '0f0e0d0c-0b0a-4908-8706-050403020100.jsonl', size: 10, mtimeMs: 1795000000000, headCwd: '/home/u/link' }], codexRollouts: [], codexOpen: [], realCwds: [['/home/u/link', '/srv/nfs/proj'], ['/x\ty', '/z']] });
   ok(synth.includes('R /home/u/link\t/srv/nfs/proj') && !synth.includes('/x\ty') && rowOf(synth).hostRealCwd === '/srv/nfs/proj', 'the device road: the snapshot\'s realCwds become R lines (a tab or a newline in a path never forges a line), the same interpreter reads them');
   // the page's rule: another machine's conversation is matched by ITS machine's real path, the hub's by the hub's
@@ -219,14 +220,32 @@ console.log('B-16d7 a remote conversation\'s real folder resolved by ITS OWN mac
   const shells = ['sh', 'bash', 'zsh'].filter((sh) => spawnSync('sh', ['-c', `command -v ${sh}`], { encoding: 'utf8' }).status === 0);
   const said = shells.map((sh) => spawnSync(sh, ['-c', `${fnText}\nvs_real "$1"; vs_real "$2"; vs_real "$1"`, 'x', T16 + '/link', fs.realpathSync(T16) + '/real dir'], { encoding: 'utf8', env: { PATH: '/usr/bin:/bin' } }).stdout);
   const T16r = fs.realpathSync(T16);   // (a scratch root under a symlinked TMPDIR resolves too)
-  ok(shells.length >= 2 && said.every((o) => o === `R ${T16}/link\t${T16r}/real dir\n`), `the ssh road: a symlinked cwd prints ONE R line with its real path (asked twice: once), a real folder none — in every shell here (${shells.join(', ')})`, said);
+  ok(shells.length >= 2 && said.every((o) => o === `R ${T16}/link\t${T16r}/real dir\nR ${T16r}/real dir\t${T16r}/real dir\n`), `the ssh road: every resolved cwd prints ONE R line (asked twice: once) — a link its real path, a folder itself — in every shell here (${shells.join(', ')})`, said);
   const noTo = spawnSync('sh', ['-c', `${fnText}\nvs_to=; vs_real "$1"`, 'x', T16 + '/link'], { encoding: 'utf8', env: { PATH: '/usr/bin:/bin' } }).stdout, ctl = spawnSync('sh', ['-c', `${fnText}\nvs_real "$1"`, 'x', T16 + '/link\nLOCK {}'], { encoding: 'utf8', env: { PATH: '/usr/bin:/bin' } }).stdout;
   ok(noTo === '' && ctl === '', 'a host with no timeout resolves nothing (an unbounded cd into a dead mount would hold the list); a path with a control character never prints (no forged LOCK line)', { noTo, ctl });
   ok(HS.includes('kill -0 "$pid" 2>/dev/null && { echo "LOCK $(cat "$f")"; vs_real ') && HS.includes('        vs_real "$(printf \'%s\' "$vs_hc" | cut -d\'"\' -f4)"'), 'the script asks it for every live lock\'s cwd and every listed head cwd');
   // THE DEVICE ROAD: the snapshot resolves its folders in its child, at most 200, and hands them on the result
   const AG = fs.readFileSync(new URL('../src/agentd/agentd.js', import.meta.url), 'utf8');
-  const cds = AG.slice(AG.indexOf('function computeDiscoverySnapshot()'), AG.indexOf('async function realCwdsOf('));
-  ok(AG.includes('      snap.realCwds = await realCwdsOf(snap);') && !/realpath/.test(cds) && AG.includes('codexOpen: snap.codexOpen || [], realCwds: snap.realCwds || [] });') && AG.includes("fs.promises.realpath(c).catch(() => null)"), 'the device: the real folders are resolved ONLY in the snapshot\'s child, off the loop and bounded (the snapshot itself — the inline fallback — resolves none), and ride the discovery result');
+  const cds = AG.slice(AG.indexOf('function computeDiscoverySnapshot()'), AG.indexOf("if (process.argv.includes('--discovery-snapshot-child')) {"));
+  ok(AG.includes("      snap.realCwds = await require('../discovery-facts').realCwdsOf(snap);") && !/realpath/.test(cds) && AG.includes('codexOpen: snap.codexOpen || [], realCwds: snap.realCwds || [] });'), 'the device: the real folders are resolved ONLY in the snapshot\'s child, off the loop and bounded (the snapshot itself — the inline fallback — resolves none), and ride the discovery result');
+  // THE PARITY LAW (主开发's round wz421di05): ONE tree, BOTH roads — the real script's vs_real and the real device resolver
+  // (discovery-facts realCwdsOf, what the snapshot's child runs) — say the same R lines. The tree: a link, a folder, a link into
+  // a nested folder, a missing folder, a file, a relative path, an escaped JSON spelling, and a codex head that is a link
+  const TP = scratch('disc-16d7-parity');
+  fs.mkdirSync(TP + '/a', { recursive: true }); fs.mkdirSync(TP + '/b/sub', { recursive: true }); fs.writeFileSync(TP + '/f', 'x');
+  fs.symlinkSync(TP + '/a', TP + '/l'); fs.symlinkSync(TP + '/b/sub', TP + '/l2'); fs.symlinkSync(TP + '/b', TP + '/lc');
+  const snapP = { locks: [{ cwd: TP + '/l' }], jsonls: [{ headCwd: TP + '/a' }, { headCwd: TP + '/n' }, { headCwd: TP + '/l2' }, { headCwd: TP + '/f' }, { headCwd: 'rel/x' }, { headCwd: TP + '/esc\\u00e9' }, { headCwd: TP + '/l' }], codexRollouts: [{ headCwd: TP + '/lc' }] };
+  const scriptLines = (cwds) => spawnSync('sh', ['-c', `${fnText}\nfor c in "$@"; do vs_real "$c"; done`, 'x', ...cwds], { encoding: 'utf8', env: { PATH: '/usr/bin:/bin' } }).stdout.split('\n').filter(Boolean).sort();
+  const asScript = [...snapP.locks.map((l) => l.cwd), ...snapP.jsonls.map((j) => j.headCwd)];   // what the script reads: the live locks' and the listed heads' cwds
+  const deviceLines = async (DFm) => DFm.synthesizeDiscoveryLines({ realCwds: await DFm.realCwdsOf(snapP) }).split('\n').filter((l) => l.startsWith('R ')).sort();
+  const devP = await deviceLines(DFx), scrP = scriptLines(asScript);
+  ok(devP.length === 3 && JSON.stringify(devP) === JSON.stringify(scrP), `ONE tree, both roads, the same R lines (${devP.length}: the link (a lock's and a head's: once), the folder, the nested link; never the missing folder, the file, the relative path, the escaped spelling, the codex head)`, { device: devP, script: scrP });
+  // RED CONTROL: the device road resolving codex heads too (as 60b02509b did) — a codex conversation's membership would flip with the transport
+  const dfSrc = fs.readFileSync(new URL('../src/discovery-facts.js', import.meta.url), 'utf8');
+  const DFc = require(MUT.write('src/discovery-facts.js', dfSrc.replace("...(snap?.jsonls || []).map((j) => j && j.headCwd)]) {", "...(snap?.jsonls || []).map((j) => j && j.headCwd), ...(snap?.codexRollouts || []).map((r) => r && r.headCwd)]) {"), 'codex-on-device'));   // stale-pins: kept — the control plants the device road with codex heads (60b02509b)
+  const devC = await deviceLines(DFc);
+  ok(JSON.stringify(devC) !== JSON.stringify(scrP) && devC.some((l) => l.startsWith(`R ${TP}/lc\t`)), 'CONTROL (the device road resolving codex heads, as 60b02509b did): the two roads disagree on one tree ⇒ RED', devC);
+  fs.rmSync(TP, { recursive: true, force: true });
   // the hub: ONE map per host from its discovery answer, read by the store and the live row
   const { HostManager } = require('../src/hosts.js');
   const HM = new HostManager({ dataDir: scratch('disc-16d7-hosts') });
@@ -240,6 +259,8 @@ console.log('B-16d7 a remote conversation\'s real folder resolved by ITS OWN mac
   ok(kept === '/srv/nfs/proj' && HM.realCwdOf('h-2', '/home/u/link') === null && HM.realCwdOf('h-2', '/y') === '/srv/y' && movedSaid.length === 1 && movedSaid[0].includes('/y→/srv/y') && movedSaid[0].includes('/home/u/link→/srv/nfs/proj'),
     'an answer that says no real folder keeps the last one (no membership flap between sweeps); one with facts that omits it drops it; what moved is told to the store (both the added and the dropped)', { kept, movedSaid });
   ok(fs.readFileSync(new URL('../src/hosts.js', import.meta.url), 'utf8').includes("    try { if (this._realCwds) this._realCwds.delete(id); } catch { }"), 'a removed machine\'s real folders go with it');
+  HM._noteRealCwds('h-2', [{ cwd: '/y', hostRealCwd: '/y', sessionId: 'c' }]);   // the link at /y replaced by a folder: the answer says it as itself
+  ok(HM.realCwdOf('h-2', '/y') === '/y', 'a link replaced by a folder: the answer says the folder as itself, the old real folder leaves (never kept for good)');
   let threw = null; try { HM.realCwdOf('h-gone', '/a'); HM.hostRealFieldsOf({ host: 'h-gone', cwd: '/a' }); } catch (e) { threw = e.message; }
   ok(threw === null, 'an unknown or removed machine: the reader answers none, never throws (the live payload calls it for every remote row)', threw);
   ok(fs.readFileSync(new URL('../src/lib/sidebar.js', import.meta.url), 'utf8').includes("  hostRealCwd: { digest: (v) => v || '' },") && fs.readFileSync(new URL('../server.js', import.meta.url), 'utf8').includes('      host: s.host || null, hostRealCwd: hosts.hostRealFieldsOf(s).hostRealCwd,'),

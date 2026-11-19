@@ -727,7 +727,7 @@ function interpretDiscoveryLines(out, { hostId, hostName, claimJsonls }) {
       // B-16d7: «R <cwd>\t<real>» — the machine's OWN real path of a cwd it lists (a symlinked folder); the hub never resolves
       // another machine's path itself (task-groups _realHere): this is the only road one reaches it
       const t = line.indexOf('\t');
-      if (t > 2) { const c = line.slice(2, t), r = line.slice(t + 1).replace(/\r$/, ''); if (c && r.startsWith('/') && r !== c && !realOf.has(c)) realOf.set(c, r); }
+      if (t > 2) { const c = line.slice(2, t), r = line.slice(t + 1).replace(/\r$/, ''); if (c && r.startsWith('/') && !realOf.has(c)) realOf.set(c, r); }   // (equal = resolved, no link)
     } else if (line.startsWith('H ')) {
       const t = line.indexOf('\t');
       const m = t > 2 && line.slice(t + 1).match(/^"cwd":"([^"]*)"/);
@@ -857,12 +857,43 @@ function interpretDiscoveryLines(out, { hostId, hostName, claimJsonls }) {
     }
     sessions.push(card);
   }
-  // B-16d7: a row whose cwd THAT machine resolved to another real path carries it — `hostRealCwd`, never the page's `realCwd`
+  // B-16d7: a row whose cwd THAT machine resolved carries it — `hostRealCwd` (equal to the cwd: resolved, no link), never the page's `realCwd`
   // (that one is the HUB's own stamp, src/sessions-assemble.js); task-membership membershipCwds reads it for another machine
   for (const s of sessions) { const r = s.cwd ? realOf.get(s.cwd) : null; if (r) s.hostRealCwd = r; }
   return sessions;
 }
 
+
+/** B-16d7: THE CWDS A MACHINE RESOLVES — ONE list for both roads (主开发's round wz421di05, the parity law): every live lock's
+ *  cwd and every listed head cwd (the ssh script's vs_real reads the same two; codex heads on NEITHER road). A cwd whose JSON
+ *  spelling holds an escape (a backslash) is resolved on neither: its row keeps the H rule's raw spelling, so a decoded real
+ *  folder would never match it. Absolute only, at most 200 distinct. */
+function cwdsToResolve(snap) {
+  const out = [];
+  for (const c of [...(snap?.locks || []).map((l) => l && l.cwd), ...(snap?.jsonls || []).map((j) => j && j.headCwd)]) {
+    if (typeof c !== 'string' || !c.startsWith('/') || c.includes('\\') || /[\x00-\x1f\x7f]/.test(c) || out.includes(c) || out.length >= 200) continue;
+    out.push(c);
+  }
+  return out;
+}
+/** B-16d7: THE DEVICE'S RESOLVER — run ONLY in the discovery snapshot's child process (agentd.js), off the loop and bounded: each
+ *  folder 1 s, all of them 3 s. Every RESOLVED folder is said, its real path equal or not (an equal one tells the hub the folder
+ *  is no link — a link replaced by a folder leaves the hub's map); a folder that does not answer, or one past the budget, says
+ *  nothing. → [[cwd, real], …] — the ssh script's vs_real prints the same «R <cwd>\t<real>» for the same list. */
+async function realCwdsOf(snap, { eachMs = 1000, budgetMs = 3000, fsp = fs.promises } = {}) {
+  const out = [], end = Date.now() + budgetMs;
+  for (const c of cwdsToResolve(snap)) {
+    const left = end - Date.now();
+    if (left <= 0) break;
+    let t = null;
+    // (a folder, as the script's «cd -P» needs one: a cwd that is a file resolves on neither road)
+    const work = (async () => { const r = await fsp.realpath(c); return (await fsp.stat(r)).isDirectory() ? r : null; })().catch(() => null);
+    const r = await Promise.race([work, new Promise((res) => { t = setTimeout(() => res(null), Math.min(eachMs, left)); })]);
+    clearTimeout(t);
+    if (typeof r === 'string' && r.startsWith('/') && !/[\x00-\x1f\x7f]/.test(r)) out.push([c, r]);
+  }
+  return out;
+}
 
 /**
  * synthesizeDiscoveryLines — device SNAPSHOT (raw facts) → the LOCK/J/H/N/TT/T/
@@ -895,6 +926,7 @@ function synthesizeDiscoveryLines(snap) {
 }
 
 module.exports = {
+  cwdsToResolve, realCwdsOf, // B-16d7: one list for both roads, the device's bounded resolver
   extractTailIds, nameFromUserRecord, nameFromUserLine, nameFromText, titleFromRecord, titleFromText, titleLinesOf, TITLE_NEEDLE, TITLE_HEAD_BYTES, TITLE_TAIL_BYTES, pidLooksClaude, interpretDiscoveryLines, synthesizeDiscoveryLines, NAME_MAX,
   // S3 (codex facts + zstd rollouts)
   deriveCodexSessionName, nameFromCodexUserLine,
