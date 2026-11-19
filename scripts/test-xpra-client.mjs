@@ -797,14 +797,25 @@ console.log('§3 the view under the fake DOM (xpra-view.js): both clipboard bran
   wk.feed(['lost-window', 1]);
   ok(A.view.stage.children.length === 0 && A.view.status.textContent === 'The application closed its window', 'the last window going ⇒ its element removed, the chip says the application closed its window');
   const before = FakeWorker.instances.length;
+  // B-54a9: THE LADDER ON A CLOCK THE LEG DRIVES — while the leg holds it, a timer the shell's ladder arms (a ladder delay and
+  // its own callback, «if (!closed) connect()») runs at once and is COUNTED; every other timer keeps its real delay. The first
+  // rung is waited for by its fact (the new worker), never a 1.3 s sleep raced against a 1 s timer; after dispose the count of
+  // rungs armed is the verdict (none), never a 1.3 s sleep to see nothing happen
+  const realSetTimeout = globalThis.setTimeout, LADDER = new Set(S.RECONNECT_LADDER);
+  let rungs = 0;
+  globalThis.setTimeout = function (fn, wait, ...a) { if (LADDER.has(wait) && typeof fn === 'function' && /connect\(\)/.test(String(fn))) { rungs++; return realSetTimeout(fn, 0, ...a); } return realSetTimeout(fn, wait, ...a); };
   wk.feed(['disconnect', 'server shutdown']);
   ok(A.view.status.textContent === 'Connection lost: server shutdown' && A.view.status.style.color === 'var(--red, #e55)' && A.statuses.slice(-1)[0] === 'disconnected', 'a server disconnect: "Connection lost: <its reason>" in red');
-  await sleep(1300);
-  ok(FakeWorker.instances.length === before + 1, 'the shell\'s ladder reconnects on its first rung (~1 s) while the picture is wanted');
-  A.view.dispose();
-  const n = FakeWorker.instances.length;
-  await sleep(1300);
-  ok(FakeWorker.instances.length === n && FakeWorker.instances[n - 1].terminated, 'dispose terminates the worker and nothing reconnects');
+  let rungsAtDispose = -1, n = -1;
+  try {
+    await until(() => FakeWorker.instances.length === before + 1);
+    ok(FakeWorker.instances.length === before + 1 && rungs === 1, `the shell's ladder reconnects on its first rung while the picture is wanted (${rungs} rung armed — its 1 s on the leg's clock)`);
+    A.view.dispose();
+    n = FakeWorker.instances.length; rungsAtDispose = rungs;
+    for (let k = 0; k < 5; k++) await new Promise((r) => setImmediate(r));   // (any rung dispose left armed would have run by now: it runs at once)
+    await sleep(0);
+  } finally { globalThis.setTimeout = realSetTimeout; }
+  ok(FakeWorker.instances.length === n && FakeWorker.instances[n - 1].terminated && rungs === rungsAtDispose, `dispose terminates the worker and nothing reconnects (no rung armed after it: ${rungs - rungsAtDispose})`);
   // the SECURE branch: the API takes the copy; a refused write falls to the chip; the Paste chip reads the API
   const written = [];
   let writeOk = true;
