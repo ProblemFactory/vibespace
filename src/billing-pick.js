@@ -44,7 +44,7 @@
  *     The machine's fact UNREAD (null) with the person's own file read whole: MERGED too — billing still wins (the override last,
  *     every route / credential name dropped; ruled 2026-11-19 09:30Z); an own file over SETTINGS_READ_MAX or unreadable is never merged.
  */
-const { namesHelper, helperFactOfText, SETTINGS_READ_MAX, projectSettingsFilesOf, combinedFact } = require('./helper-fact.js');   // B-bc9f: ONE rule with a paired machine's probe
+const { namesHelper, helperFactOfText, SETTINGS_READ_MAX, startFilesOf, nodeAt, combinedFact } = require('./helper-fact.js');   // B-bc9f: ONE rule with a paired machine's probe
 const ROUTE = require('./claude-route-names.js');
 
 /** does this spawn set the machine's key helper aside? `creds` = the harness's creds row, `account` = what
@@ -59,7 +59,7 @@ function setsHelperAside({ creds = null, account = null, linked = null } = {}) {
 
 /** the settings FILE whose helper the rule sets aside on THIS machine: the CLI's config dir (its descriptor's `homeEnvVar` in the
  *  spawn's env — CLAUDE_CONFIG_DIR — else ~/.claude) + the row's file. The project's own files and the person's own file are read
- *  beside it (projectSettingsFilesOf). Not read: the machine's managed settings (they outrank the inline flag: a helper there is NOT
+ *  beside it (startFilesOf, src/helper-fact.js: ONE placement for every road). Not read: the machine's managed settings (they outrank the inline flag: a helper there is NOT
  *  set aside, and the notice may then be wrong — named in the unit's line). */
 function settingsFileOf(row, { creds = null, env = {}, home = '' } = {}) {
   if (!row || typeof row.file !== 'string' || !row.file) return null;
@@ -70,7 +70,7 @@ function settingsFileOf(row, { creds = null, env = {}, home = '' } = {}) {
 
 /** THE OTHER FILES THE CLI READS A HELPER FROM and ONE start's fact over them: src/helper-fact.js (B-77ed — the one list a paired
  *  machine's probe and its ssh rung read too) */
-/** B-e7c0: the person's own settings FILE as the CLI reads it — absolute, or under the conversation's cwd (projectSettingsFilesOf's rule, src/helper-fact.js) — or null */
+/** B-e7c0: the person's own settings FILE as the CLI reads it — absolute, or under the conversation's cwd (a «~/» one: the literal file under the cwd — one of the two the helper fact reads, src/helper-fact.js startFilesOf) — or null */
 function ownSettingsPathOf(cwd, ownFile = null) {
   const base = typeof cwd === 'string' && cwd.startsWith('/') ? cwd.replace(/\/+$/, '') : '';
   const f = typeof ownFile === 'string' ? ownFile.trim() : '';
@@ -135,4 +135,4 @@ function helperNotice({ name, account, accountId, host = null, hostId = null, pr
   return { key: noticeKey(accountId, hostId), words, params, text };
 }
 
-module.exports = { setsHelperAside, settingsFileOf, projectSettingsFilesOf, ownSettingsPathOf, ownSettingsOf, MERGE_DROPS_KEYS, combinedFact, namesHelper, localHelperFact, remoteHelperFact, SETTINGS_READ_MAX, HELPER_SET_ASIDE, noticeKey, helperNotice };
+module.exports = { setsHelperAside, settingsFileOf, startFilesOf, nodeAt, ownSettingsPathOf, ownSettingsOf, MERGE_DROPS_KEYS, combinedFact, namesHelper, localHelperFact, remoteHelperFact, SETTINGS_READ_MAX, HELPER_SET_ASIDE, noticeKey, helperNotice };

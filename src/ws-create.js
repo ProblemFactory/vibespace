@@ -133,11 +133,13 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
     const file = BILLPICK.settingsFileOf(row, { creds, env, home: (env && env.HOME) || os.homedir() });
     if (!file) return null;
     // cure 2 (主开发 11:18Z): every file the CLI reads a helper from on this machine — its config dir's, the project's two, the person's own
-    const files = [file, ...BILLPICK.projectSettingsFilesOf(cwd, ownFile)];
+    const placed = BILLPICK.startFilesOf({ cwd, ownFile }, BILLPICK.nodeAt(path, (env && env.HOME) || os.homedir()));   // B-77ed: ONE placement for every road
+    const files = [file, ...placed.files];
     const reads = await Promise.all(files.map((f) => readOneFactOnce(f, row)));
     const own = BILLPICK.ownSettingsPathOf(cwd, ownFile), k = own ? files.indexOf(own) : -1;
     if (sink) sink.text = k >= 0 ? reads[k].text : null;   // B-e7c0: the person's own file's text, for THIS start (a late read lands after it moved on)
-    return BILLPICK.combinedFact(reads.map((x) => x.fact));
+    const facts = reads.map((x) => x.fact);
+    return BILLPICK.combinedFact(placed.unplaced ? facts.concat([null]) : facts);
   };
   // ONE READ IN FLIGHT PER FILE across starts (cure 2, its readers' should): a start that finds a read of the same file still pending
   // joins it — a hung open on a stuck mount holds ONE threadpool thread, never one more per start; the entry leaves when the read ends

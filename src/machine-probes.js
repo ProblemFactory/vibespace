@@ -23,7 +23,7 @@ const path = require('path');
 const { execFile } = require('child_process');
 const crypto = require('crypto'); // lane cli-self-measure: the CLI binary's sha256 (cliBinary)
 const { cliVersionOf } = require('./cli-caps.js'); // PURE: the one version spelling the long-lived-token gate reads
-const { helperFactOfText, SETTINGS_READ_MAX, combinedFact } = require('./helper-fact.js'); // PURE: a settings file's key-helper fact — the hub's own rule (B-bc9f)
+const { helperFactOfText, SETTINGS_READ_MAX, combinedFact, startFilesOf, nodeAt } = require('./helper-fact.js'); // PURE: a settings file's key-helper fact — the hub's own rule (B-bc9f)
 
 // windowsHide (lane win-run-hide-console): `claude --version` on a Windows device is a console program the console-less
 // daemon starts — without it, a console window per probe
@@ -77,23 +77,21 @@ async function settingsReadOff(file) {
 }
 const START_FACT_MS = 5000;   // the whole start answer: past it, «cannot be read» (billing wins) — the hub's own bound is 8 s
 let loginDirMemo = null;      // the login shell's CLAUDE_CONFIG_DIR (the CLI on this machine starts under `sh -lc`), asked at most once a minute
+let loginDirAsk = null, loginDirGen = 0;   // ONE login shell in flight: starts that find it asking join it (as the file reads do)
 async function loginConfigDir() {
   if (process.platform === 'win32') return '';
   if (loginDirMemo && Date.now() - loginDirMemo.at < 60000) return loginDirMemo.dir;
-  const out = await exec('sh', ['-lc', 'printf "\\n__VS_CCD__%s\\n" "$CLAUDE_CONFIG_DIR"'], 3000);
-  const i = out == null ? -1 : out.lastIndexOf('\n__VS_CCD__');
-  const dir = i < 0 ? null : out.slice(i + 11).split('\n')[0].trim();
-  loginDirMemo = { at: Date.now(), dir };   // an unanswered login shell (null ⇒ cannot be read) is remembered too: no 3 s a start
-  return dir;
-}
-/** a hub-handed path placed on THIS machine (its own path rules: `~`, a relative path from `base`, a Windows drive) — null when it
- *  cannot be placed (then that file is «cannot be read», never «none») */
-function placeOf(p, base) {
-  if (typeof p !== 'string' || !p.trim() || /[\0\n]/.test(p)) return null;
-  let s = p.trim();
-  if (s === '~' || s.startsWith('~/') || s.startsWith('~\\')) s = path.join(os.homedir(), s.slice(1));
-  if (path.isAbsolute(s)) return path.normalize(s);
-  return base ? path.join(base, s) : null;
+  if (loginDirAsk) return loginDirAsk;
+  const gen = loginDirGen;
+  const ask = (async () => {
+    const out = await exec('sh', ['-lc', 'printf "\\n__VS_CCD__%s\\n" "$CLAUDE_CONFIG_DIR"'], 3000);
+    const i = out == null ? -1 : out.lastIndexOf('\n__VS_CCD__');
+    const dir = i < 0 ? null : out.slice(i + 11).split('\n')[0].trim();
+    if (gen === loginDirGen) loginDirMemo = { at: Date.now(), dir };   // an unanswered login shell (null ⇒ cannot be read) is remembered too: no 3 s a start; an answer asked before a forget writes nothing
+    return dir;
+  })().finally(() => { if (loginDirAsk === ask) loginDirAsk = null; });
+  loginDirAsk = ask;
+  return ask;
 }
 /** ONE READ IN FLIGHT PER FILE across starts (as the hub's readOneFactOnce): a start that finds a read of the same file pending
  *  joins it — a hung open on a stuck mount holds ONE libuv thread, never one more per start */
@@ -112,16 +110,14 @@ const readOffOnce = (file, readOff = settingsReadOff) => {
  *  (a helper named anywhere wins) → 'named' | 'none' | 'unread'. Off the loop, bounded by START_FACT_MS; only the verdict
  *  word leaves this machine. (`o` = a suite's seams: the reader, the bound) */
 async function startHelperFact({ cwd = null, ownFile = null } = {}, o = {}) {
-  const given = (v) => typeof v === 'string' && v.trim() !== '';
   const readOff = o.readOff || settingsReadOff, bound = Number(o.boundMs) > 0 ? Number(o.boundMs) : START_FACT_MS;
   const work = (async () => {
-    const base = given(cwd) ? placeOf(cwd, os.homedir()) : null, own = given(ownFile) ? placeOf(ownFile, base) : null;
-    const unplaced = (given(cwd) && !base) || (given(ownFile) && !own);
+    const placed = startFilesOf({ cwd, ownFile }, nodeAt(path, os.homedir())), unplaced = placed.unplaced;   // ONE placement for every road (src/helper-fact.js)
     const login = await loginConfigDir();
     const dirs = [path.join(os.homedir(), '.claude')], dirsUnread = login === null;
     let badDir = false;
     for (const d of [String(process.env.CLAUDE_CONFIG_DIR || '').trim(), login || '']) { if (!d) continue; if (path.isAbsolute(d)) dirs.push(path.normalize(d)); else badDir = true; }
-    const files = [...new Set(dirs)].map((d) => path.join(d, HELPER_ROW.file)).concat(base ? [path.join(base, '.claude', 'settings.json'), path.join(base, '.claude', 'settings.local.json')] : [], own ? [own] : []);
+    const files = [...new Set(dirs)].map((d) => path.join(d, HELPER_ROW.file)).concat(placed.files);
     const facts = await Promise.all(files.map(async (p) => helperFactOfText(await readOffOnce(p, readOff), HELPER_ROW)));
     if (unplaced || dirsUnread || badDir) facts.push(null);   // what could not be placed or asked: cannot be read
     const f = combinedFact(facts);
@@ -132,7 +128,7 @@ async function startHelperFact({ cwd = null, ownFile = null } = {}, o = {}) {
   try { return await Promise.race([work.catch(() => 'unread'), late]); } finally { clearTimeout(timer); }
 }
 /** (a suite's seam: forget the login shell's answer) */
-const forgetLoginDir = () => { loginDirMemo = null; };
+const forgetLoginDir = () => { loginDirMemo = null; loginDirAsk = null; loginDirGen++; };
 function statMtime(p) { try { return Math.floor(fs.statSync(p).mtimeMs / 1000); } catch { return null; } }
 
 function which(cmd) {

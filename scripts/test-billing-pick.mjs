@@ -467,7 +467,7 @@ console.log('— ⑤ SAID ONCE, where the person looks');
     ok(fileKept(lineOf(w)) && saidKind(w, 'billing') + saidKind(w, 'billingUnread') === 0 && w.reads.includes(path.join(PROJ, 'settings.json')) && w.reads.includes(path.join(PROJ, 'settings.local.json')),
       'no helper in ANY file the CLI reads (the machine\'s, the project\'s two, the person\'s own): the person\'s file applies whole — all four read', w.reads);
     // RED: the tip before cure 2 (the machine's file alone): a project helper under a pick leaves the person's file whole — the helper bills
-    const ONLY = '    const files = [file, ...BILLPICK.projectSettingsFilesOf(cwd, ownFile)];';
+    const ONLY = '    const files = [file, ...placed.files];';
     ok(SRC.split(ONLY).length === 2, 'setup: the files the fact reads are ONE list (the control edits it)');
     const machineOnly = M.load('src/ws-create.js', SRC.replace(ONLY, '    const files = [file];'), 'machine-file-only');
     fs.writeFileSync(path.join(PROJ, 'settings.json'), JSON.stringify({ apiKeyHelper: '/opt/proj-helper' }));
@@ -593,9 +593,9 @@ const helperSaid = (x) => x.notices.filter((n) => n.key.startsWith('billing-pick
     // THE PAIRED-MACHINE GUARD, its red control: a remote start made to read THIS machine's files (planted) still never merges — the
     // guard holds; with the guard removed too, the person's values ride the REMOTE line inline (the file road is this machine's only)
     helperOn(true); fs.writeFileSync(OWN, JSON.stringify(PERSON));   // THIS machine names a helper; the person's file as the other legs have it
-    const REMOTE_READ = '    if (hostId) return BILLPICK.remoteHelperFact(await hosts.backendStatus(hostId), backend);';
+    const REMOTE_READ = '    if (hostId) return BILLPICK.remoteHelperFact(await hosts.backendStatus(hostId, { helper: { cwd, ownFile } }), backend);';   // (B-77ed: the remote ask hands the start)
     const GUARD = ' && !data.hostId && !onProvider ? BILLPICK.ownSettingsOf(ownRead.text) : null;';
-    const planted = anchored(SRC, REMOTE_READ, '    if (hostId && false) return BILLPICK.remoteHelperFact(await hosts.backendStatus(hostId), backend);', 'B-e7c0 a remote start reads this machine (planted)');
+    const planted = anchored(SRC, REMOTE_READ, '    if (hostId && false) return BILLPICK.remoteHelperFact(await hosts.backendStatus(hostId, { helper: { cwd, ownFile } }), backend);', 'B-e7c0 a remote start reads this machine (planted)');
     const withGuard = withLadder(planted, 'e7c0-remote-guarded'), noGuard = withLadder(anchored(planted, GUARD, ' && !onProvider ? BILLPICK.ownSettingsOf(ownRead.text) : null;', 'B-e7c0 the paired-machine guard removed'), 'e7c0-remote-unguarded');
     const rgx = await makeCreate(withGuard, { hosts: hostsStub({ helper: true }) }).create(R({ accountId: 'sub-a1', extraArgs: ['--settings', OWN] }));
     const rux = await makeCreate(noGuard, { hosts: hostsStub({ helper: true }) }).create(R({ accountId: 'sub-a1', extraArgs: ['--settings', OWN] }));
@@ -823,6 +823,70 @@ console.log('— ⑨b B-77ed: a paired machine reads the START\'s files — the 
   const tilde = path.join(HOME, 'tilde-77ed', '.claude'); fs.mkdirSync(tilde, { recursive: true }); fs.writeFileSync(path.join(tilde, 'settings.json'), NAMES);
   ok((await askDevice({ cwd: '~/tilde-77ed' })) === true && (await askShell({ cwd: '~/tilde-77ed' })).fact === true, 'a `~/…` cwd is placed under that machine\'s home on both roads');
   fs.rmSync(path.join(HOME, 'tilde-77ed'), { recursive: true, force: true });
+  // ── THE CURE OF ROUND w38ycpn6z ──
+  // THE MUST: the rung's text runs the same under sh, bash and zsh — no command kept in a variable (zsh never splits one)
+  const hasShell = (sh) => { try { return execFileSync('sh', ['-c', `command -v ${sh}`], { encoding: 'utf8', env: { PATH: '/usr/bin:/bin' } }).trim() !== ''; } catch { return false; } };
+  const rungIn = (sh, rung) => { try { return execFileSync(sh, ['-c', `${rung}true`], { env: { HOME, PATH: '/usr/bin:/bin' }, encoding: 'utf8', timeout: 10000 }); } catch (e) { return String((e && e.stdout) || '') + '(exit ' + (e && e.status) + ')'; } };
+  const START_RUNG = HF.sshHelperRungFor({ cwd: CWD, ownFile: FILE[1] });
+  clear(); fs.rmSync(PROF, { force: true });
+  const shells = ['sh', 'bash', 'zsh'].filter(hasShell), rungSaid = shells.map((sh) => `${sh}: ${(rungIn(sh, START_RUNG).match(/claude-helper\|\w+/) || ['(no line)'])[0]}`);
+  ok(rungSaid.length >= 2 && rungSaid.every((x) => x.endsWith('claude-helper|none')), `the start's rung, no helper planted anywhere: «none» in every shell here (${rungSaid.join(' · ')})`, rungSaid);
+  if (shells.includes('zsh') && hasShell('timeout')) {
+    const VAR_FORM = M.load('src/helper-fact.js', anchored(read('src/helper-fact.js'), /    \+ `if command -v timeout >\/dev\/null 2>&1; then vs_ccd_out=\$\(timeout 3 sh \$\{ask\}\) \|\| vs_kh_all="\$vs_kh_all unread"; `\n    \+ `else vs_ccd_out=\$\(sh \$\{ask\}\) \|\| vs_kh_all="\$vs_kh_all unread"; fi; `\n/,
+      '    + `if command -v timeout >/dev/null 2>&1; then vs_lsh="timeout 3 sh"; else vs_lsh="sh"; fi; `\n    + `vs_ccd_out=$($vs_lsh ${ask}) || vs_kh_all="$vs_kh_all unread"; `\n', 'rung-command-in-a-variable'), 'rung-command-in-a-variable');
+    const vz = rungIn('zsh', VAR_FORM.sshHelperRungFor({ cwd: CWD, ownFile: FILE[1] })), vs = rungIn('sh', VAR_FORM.sshHelperRungFor({ cwd: CWD, ownFile: FILE[1] }));
+    ok(/claude-helper\|unread/.test(vz) && /claude-helper\|none/.test(vs), 'RED CONTROL (the command kept in a variable, as 18b7851ab had it): «none» under sh, «cannot be read» under zsh — every start there would set the person\'s file aside', { zsh: vz.slice(-60), sh: vs.slice(-60) });
+  } else ok(true, '(no zsh or no timeout on this machine: the variable form\'s control cannot show here — said, not skipped silently)');
+  // (1) ONE PLACEMENT: this machine's start, the probe and the rung place the start's files by ONE helper — a parity table
+  const placedSh = (start) => { const { files, unplaced } = HF.startFilesOf(start, HF.shellAt); return { files: files.map((w) => path.posix.normalize(execFileSync('sh', ['-c', `printf '%s' ${w}`], { env: { HOME, PATH: '/usr/bin:/bin' }, encoding: 'utf8' }))), unplaced }; };   // (the shell's spelling read lexically: '//' and 'p/../' as node joins them)
+  const placedJs = (start) => { const r = HF.startFilesOf(start, HF.nodeAt(path, HOME)); return { files: r.files.map((f) => path.posix.normalize(f)), unplaced: r.unplaced }; };   // (both roads join literally — the kernel resolves; compared lexically)
+  const ROWS = [{ cwd: '/srv/p', ownFile: 'own.json' }, { cwd: '/srv/p/', ownFile: '/etc/own.json' }, { cwd: '~/p', ownFile: '../o.json' }, { cwd: '~' }, { cwd: 'p', ownFile: 'sub/o.json' }, { cwd: '/srv/p', ownFile: '~/own.json' }, { cwd: null, ownFile: 'own.json' }, { cwd: '/a\nb' }, { cwd: '/srv/p', ownFile: '~' }, { cwd: '/srv/p', ownFile: '~bob/own.json' }, { cwd: null, ownFile: '~/own.json' }];
+  const par = ROWS.map((r) => { const a = placedJs(r), b = placedSh(r); return { r, same: JSON.stringify(a) === JSON.stringify(b), a, b }; });
+  ok(par.every((x) => x.same), `ONE placement: the node roads (this machine, the probe) and the rung place every start alike (${ROWS.length} rows: absolute, a trailing /, ~, a relative cwd, a ~/ own file (OWN_TILDE = ${HF.OWN_TILDE}: both files), ~ and ~name, an own file with no cwd, a newline)`, par.filter((x) => !x.same));
+  // the probe on a Windows device places `~\…` as its own tilde (its path module), the rung refuses a backslash (a POSIX shell)
+  const W32 = HF.startFilesOf({ cwd: 'C:\\p', ownFile: '~\\own.json' }, HF.nodeAt(path.win32, 'C:\\Users\\u')), W32c = HF.startFilesOf({ cwd: '~\\proj' }, HF.nodeAt(path.win32, 'C:\\Users\\u'));
+  ok(JSON.stringify(W32.files) === JSON.stringify(['C:\\p\\.claude/settings.json', 'C:\\p\\.claude/settings.local.json', 'C:\\Users\\u\\own.json', 'C:\\p\\~\\own.json']) && !W32.unplaced && W32c.files[0] === 'C:\\Users\\u\\proj\\.claude/settings.json' && HF.startFilesOf({ cwd: '/srv/p', ownFile: '~\\own.json' }, HF.shellAt).unplaced,
+    'a Windows device: an own file «~\\…» is judged over both files (under its home, and literal under the cwd), a cwd «~\\…» under its home; the rung (a POSIX shell) cannot place a backslash', { W32, W32c });
+  ok(read('src/ws-create.js').includes("BILLPICK.startFilesOf({ cwd, ownFile }, BILLPICK.nodeAt(path, (env && env.HOME) || os.homedir()))") && PROBES_SRC.includes('startFilesOf({ cwd, ownFile }, nodeAt(path, os.homedir()))') && read('src/helper-fact.js').includes('const { files: words, unplaced } = startFilesOf(start, shellAt);'),
+    'all three roads call it: this machine\'s start (ws-create), the device probe (machine-probes), the rung\'s builder (helper-fact)');
+  // THE TILDE RULE (主开发 09:31Z): an own file `~/…` reaches the CLI unexpanded; the fact is judged over BOTH files it could open —
+  // under that machine's home and the literal `<cwd>/~/…` — on all three roads
+  const TOWN = '~/own-77ed-t.json', homeOwn = path.join(HOME, 'own-77ed-t.json'), litDir = path.join(CWD, '~'), litOwn = path.join(litDir, 'own-77ed-t.json');
+  const tclear = () => { fs.rmSync(homeOwn, { force: true }); fs.rmSync(litDir, { recursive: true, force: true }); };
+  const three = async () => ({ hub: await byHub(['--settings', TOWN]), dev: await askDevice({ cwd: CWD, ownFile: TOWN }), sh: (await askShell({ cwd: CWD, ownFile: TOWN })).fact });
+  const TCASES = [
+    ['only the LITERAL <cwd>/~/ file names a helper', () => { fs.mkdirSync(litDir, { recursive: true }); fs.writeFileSync(litOwn, NAMES); }, true],
+    ['only the HOME\'s file names a helper', () => fs.writeFileSync(homeOwn, NAMES), true],
+    ['neither file exists', () => { }, false],
+    ['the literal one is not JSON (the home\'s names none)', () => { fs.mkdirSync(litDir, { recursive: true }); fs.writeFileSync(litOwn, '{ apiKeyHelper: 1 }'); fs.writeFileSync(homeOwn, JSON.stringify({ theme: 'x' })); }, null],
+  ];
+  for (const [what, plant, want] of TCASES) {
+    clear(); tclear(); plant();
+    const got = await three();
+    ok(got.hub === want && got.dev === want && got.sh === want, `an own file «~/…» — ${what}: this machine's start, the probe and the rung all read ${want}`, got);
+  }
+  tclear(); fs.mkdirSync(litDir, { recursive: true }); fs.writeFileSync(litOwn, NAMES);
+  const ONE_TILDE = M.load('src/helper-fact.js', anchored(read('src/helper-fact.js'), ' if (base) files.push(at.under(base, s)); else unplaced = true; }', ' }', 'own-tilde-home-only'), 'own-tilde-home-only');
+  ok(BP.remoteHelperFact({ claude: { installed: true, ...(runRung(ONE_TILDE.sshHelperRungFor({ cwd: CWD, ownFile: TOWN })).includes('claude-helper|yes') ? { keyHelper: true } : {}) } }, 'claude') === false, 'RED CONTROL (a «~/…» own file read under the home only): the literal file\'s helper is missed — «none» ⇒ RED');
+  tclear(); clear();
+  // (2) ONE login shell in flight: two starts at once ask it once
+  const LCOUNT = path.join(HOME, 'login-count');
+  fs.writeFileSync(PROF, `echo x >> ${JSON.stringify(LCOUNT)}\n`); fs.rmSync(LCOUNT, { force: true }); PROBES.forgetLoginDir();
+  await Promise.all([PROBES.startHelperFact({ cwd: CWD }), PROBES.startHelperFact({ cwd: CWD }), PROBES.startHelperFact({ cwd: CWD })]);
+  const asked = fs.existsSync(LCOUNT) ? fs.readFileSync(LCOUNT, 'utf8').split('\n').filter(Boolean).length : 0;
+  ok(asked === 1, `three starts at once: the login shell is asked ONCE (${asked}), the others join it`);
+  fs.rmSync(PROF, { force: true }); fs.rmSync(LCOUNT, { force: true }); PROBES.forgetLoginDir();
+  // (3) A HOSTILE NAME through sh over a scratch tree: a single quote, a dollar with parentheses, a backtick, a space — read as
+  // the path it is, nothing in it runs
+  const HOSTILE = path.join(HOME, "it's $(touch RAN-1) `touch RAN-2` a b"), RUNAT = scratchDir('bpick-77ed-runat');
+  fs.mkdirSync(path.join(HOSTILE, '.claude'), { recursive: true }); fs.writeFileSync(path.join(HOSTILE, '.claude', 'settings.json'), NAMES);
+  const inSh = (rung, sh = 'sh') => execFileSync(sh, ['-c', `${rung}true`], { cwd: RUNAT, env: { HOME, PATH: '/usr/bin:/bin' }, encoding: 'utf8', timeout: 10000 });
+  const hostileSaid = shells.map((sh) => `${sh}: ${(inSh(HF.sshHelperRungFor({ cwd: HOSTILE }), sh).match(/claude-helper\|\w+/) || ['(no line)'])[0]}`);
+  ok(hostileSaid.every((x) => x.endsWith('claude-helper|yes')) && !fs.readdirSync(RUNAT).some((f) => f.startsWith('RAN-')), `a folder named with a quote, $( ), a backtick and spaces: its project's helper is seen in every shell here, and nothing in its name ran (${hostileSaid.join(' · ')})`, { said: hostileSaid, ran: fs.readdirSync(RUNAT) });
+  const DQ_RUNG = M.load('src/helper-fact.js', anchored(read('src/helper-fact.js'), "const shq = (s) => `'${String(s).replace(/'/g, `'\\\\''`)}'`;", 'const shq = (s) => JSON.stringify(String(s));', 'rung-double-quoted'), 'rung-double-quoted');
+  let hostileDq = ''; try { hostileDq = inSh(DQ_RUNG.sshHelperRungFor({ cwd: HOSTILE })); } catch (e) { hostileDq = String((e && e.stdout) || ''); }
+  ok(!/claude-helper\|yes/.test(hostileDq) || fs.readdirSync(RUNAT).some((f) => f.startsWith('RAN-')), 'RED CONTROL (the paths double-quoted): the name\'s $( ) and backtick RUN and the helper is missed ⇒ RED', { said: hostileDq.trim(), ran: fs.readdirSync(RUNAT) });
+  fs.rmSync(HOSTILE, { recursive: true, force: true }); fs.rmSync(RUNAT, { recursive: true, force: true });
   const cut = BP.remoteHelperFact(await HostManager.prototype.backendStatus.call({ get: () => BOX, deviceBounded: async () => { throw new Error('device link lost'); }, _hostShell: async () => 'claude|yes|2.1.322\n' }, 'h-2', { helper: { cwd: CWD } }), 'claude');
   ok(cut === null, 'a start\'s answer cut short (no claude-helper line — a dial run that timed out): «cannot be read», never «none»', cut);
   // THE WIRING: the client sends the start with its ask; the agent hands it to the probe
@@ -835,7 +899,7 @@ console.log('— ⑨b B-77ed: a paired machine reads the START\'s files — the 
   ok(hs.helpers.length === 1 && hs.helpers[0] && hs.helpers[0].cwd === '/home/u/proj' && hs.helpers[0].ownFile === FILE[1], 'a remote create asks its machine about THIS start: the cwd and the person\'s own file ride the backend-status ask', hs.helpers);
   // RED CONTROLS (anchored, each proving its plant)
   fs.writeFileSync(projFile, NAMES);
-  const homeOnly = M.load('src/machine-probes.js', anchored(PROBES_SRC, ".concat(base ? [path.join(base, '.claude', 'settings.json'), path.join(base, '.claude', 'settings.local.json')] : [], own ? [own] : [])", '', 'probe-dirs-only'), 'probe-dirs-only');
+  const homeOnly = M.load('src/machine-probes.js', anchored(PROBES_SRC, '.concat(placed.files)', '', 'probe-dirs-only'), 'probe-dirs-only');
   ok((await askDevice({ cwd: CWD, ownFile: FILE[1] }, { probes: homeOnly })) === false, 'RED CONTROL (the probe reading the config dirs only, as before B-77ed): the project\'s helper is missed — «none» while this machine says named');
   const noStart = M.load('src/billing-pick.js', anchored(BP_SRC, "  if (typeof r.startHelper === 'string') return r.startHelper === 'named' ? true : r.startHelper === 'none' ? false : null;", '', 'start-fact-unread'), 'start-fact-unread');
   ok((await askDevice({ cwd: CWD, ownFile: FILE[1] }, { bp: noStart })) === false, 'RED CONTROL (remoteHelperFact without the start\'s fact): the same «none»');
