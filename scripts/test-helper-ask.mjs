@@ -1987,5 +1987,114 @@ async function jsonlLeg(consumer) {
   check('㉒ CONTROL (the release\'s read: the whole buffer, the offset at the file\'s end): the line read mid-write is DROPPED — RED', b.all.includes('jl-1') && b.all.includes('jl-3') && !b.all.includes('jl-2'), b);
 }
 
+console.log('㉓ (the JSONL watcher, its next) the helper\'s last records are read at its end; a record both roads carry is told ONCE');
+async function jsonlNextLeg(consumer, { lateWait = 100, refuseWatch = false } = {}) {   // refuseWatch: every fs.watch refused (ENOSPC) — the watch door's POLL stands in   // lateWait: the count of 10 ms waits for (f) — a control that cannot tell it waits less
+  const WDm = require(path.join(REPO, 'src/watch-door.js')), graceFns = [], fsWatch0 = fs.watch;
+  if (refuseWatch) { WDm.resetForTest(); fs.watch = () => { throw Object.assign(new Error('ENOSPC: the stand-in refuses every watch'), { code: 'ENOSPC' }); }; }
+  const home0 = process.env.HOME, jnHome = scratch('helper-ask-jsonl-next');
+  const csSrc = read('src/server/stdout/claude-stream-json.js');
+  const engine = { _vsuPending: new Map(), resolveUsageKey: () => '__global__', usageEstimator: { noteLive() {} }, modelsMatch: () => false, servedDefinesModel: () => false, rerouteAnnouncedBy: () => null };
+  for (const part of (/const \{([^}]*)\} = engine;/.exec(csSrc) || ['', ''])[1].split(',')) {
+    const name = part.split(':')[0].replace(/\/\/.*$/, '').trim();
+    if (/^[A-Za-z_$][\w$]*$/.test(name) && !(name in engine)) engine[name] = () => {};
+  }
+  const activeSessions = new Map();
+  const { attach } = consumer.create({
+    activeSessions, engine, CLAUDE_STREAM_TYPES: new Set(['system', 'assistant', 'user', 'result', 'control_request', 'control_response', 'control_cancel_request']), _seenStreamTypes: new Set(),
+    USAGE_SCANNER_PATH: path.join(jnHome, 'none'), checkClaudeGoalStatus() {}, noteModelSeen() {}, sbSeenFirst: () => true, hosts: null, usageHistory: null, pagesRef: { current: null },
+  });
+  const bcast = [];
+  const helpers = { feedLive: N.feedLive, broadcastToSession: (x, id, m) => bcast.push(m), broadcastActiveSessions() {}, readSessionMeta: () => ({}), writeSessionMeta() {}, updateSessionTodos() {}, applyTaskToolUpdate() {}, emitTaskListTodos() {} };
+  const id = 'sess-jn', sid = '1f0e0d0c-0b0a-4908-8706-050403020101', agentId = 'agjn1', tu = 'toolu_jn1';
+  const s = { mode: 'chat', backend: 'claude', name: 'jn', cwd: '/home/u/jn', host: null, claudeSessionId: sid, backendSessionId: sid, sockName: 'cw-jn', buffer: '', createdAt: Date.now(), _webuiId: id, _taskRecords: {} };
+  s._normalizer = new MessageManager(id);
+  activeSessions.set(id, s);
+  const { cwdToProjectDir } = require(path.join(REPO, 'src/session-store.js'));
+  const jnDir = path.join(jnHome, '.claude', 'projects', cwdToProjectDir('/home/u/jn'), sid, 'subagents'); fs.mkdirSync(jnDir, { recursive: true });
+  const jnFile = path.join(jnDir, `agent-${agentId}.jsonl`);
+  const recOf = (n, text) => ({ type: 'assistant', uuid: `jn-${n}`, message: { id: `mn-${n}`, role: 'assistant', content: [{ type: 'text', text }] } });
+  const sysOf = (n) => ({ type: 'system', subtype: 'informational', uuid: `jn-${n}`, content: 'a record the file reader does not tell' });
+  const line = (o) => JSON.stringify(o) + '\n', onStream = (o) => h.data(JSON.stringify({ ...o, parent_tool_use_id: tu }) + '\n');
+  fs.writeFileSync(jnFile, line(recOf(1, 'one')));
+  const h = { data: null, onData(cb) { h.data = cb; }, onExit() {} };
+  const warn = console.warn; console.warn = () => {};
+  const said = (u) => bcast.filter((m) => m.type === 'subagent-message' && m.message && m.message.uuid === u).length;
+  const until = async (f, n = 300) => { for (let k = 0; k < n && !f(); k++) await new Promise((res) => setTimeout(res, 10)); };   // (a count: until the watch has told it)
+  const saidMid = (mid) => bcast.filter((m) => m.type === 'subagent-message' && m.message && m.message.message && m.message.message.id === mid).length;
+  const PH = '00000000-0000-0000-0000-000000000001';   // the stdout placeholder uuid (src/message-manager.js recordKey)
+  const r = {}, st0 = global.setTimeout;
+  process.env.HOME = jnHome;   // the watcher finds the file under os.homedir() — a scratch home, never the real one
+  try {
+    attach(s, id, h, helpers);
+    s._startSubagentWatcher(tu, agentId);
+    await until(() => said('jn-1'));
+    fs.appendFileSync(jnFile, line(recOf(2, 'two')));   // (a) the FILE tells first, then the stream carries the same record
+    await until(() => said('jn-2'));
+    r.twoFirst = said('jn-2');   // (the file told it first)
+    onStream(recOf(2, 'two'));
+    onStream(recOf(3, 'three')); fs.appendFileSync(jnFile, line(recOf(3, 'three')));   // (b) the STREAM tells first (the road that was guarded)
+    fs.appendFileSync(jnFile, line(sysOf(4)) + line(recOf(5, 'five')));   // (c) a record the file reader passes over, then one it tells
+    await until(() => said('jn-5'));
+    onStream(sysOf(4));   // …the stream carries the passed-over one: it is the stream's to tell
+    r.two = said('jn-2'); r.three = said('jn-3'); r.sys = said('jn-4'); r.buf2 = ((s.subagentBuffers && s.subagentBuffers.get(tu)) || []).filter((m) => m.uuid === 'jn-2').length;
+    // (e) two stream records carrying the PLACEHOLDER uuid (no record's name): both are told
+    onStream({ ...recOf('p1', 'placeholder one'), uuid: PH, message: { id: 'mp-1', role: 'assistant', content: [{ type: 'text', text: 'one' }] } });
+    onStream({ ...recOf('p2', 'placeholder two'), uuid: PH, message: { id: 'mp-2', role: 'assistant', content: [{ type: 'text', text: 'two' }] } });
+    r.ph = [saidMid('mp-1'), saidMid('mp-2')].join();
+    // (d) THE END: the helper writes its last record, and its end is told on stdout before the watch has told that record
+    fs.appendFileSync(jnFile, line(recOf(6, 'the last words')));
+    global.setTimeout = (f, ms, ...a) => { const tm = st0(f, ms, ...a); if (tm && tm.unref) tm.unref(); if (ms >= 1000 && ms < 60000) graceFns.push(f); return tm; };   // (the end's grace timers never hold the suite; the grace's close kept to run at once)
+    try { h.data(JSON.stringify({ type: 'system', subtype: 'task_notification', task_id: agentId, tool_use_id: tu, status: 'completed', summary: 'done' }) + '\n'); } finally { global.setTimeout = st0; }
+    r.atEnd = said('jn-6'); r.watching = !!(s.subagentWatchers && s.subagentWatchers.has(tu));
+    await new Promise((res) => setTimeout(res, 80));
+    r.after = said('jn-6');
+    fs.appendFileSync(jnFile, line(recOf(7, 'written a moment after the end')));   // (f) the transcript a moment after the end was told
+    await until(() => said('jn-7'), lateWait);
+    r.late = said('jn-7');
+    if (refuseWatch) { r.pollersBefore = WDm.status().pollers; for (const f of graceFns) { try { f(); } catch { } } r.pollersAfter = WDm.status().pollers; }   // the grace ends: the poll is closed
+  } finally {
+    if (refuseWatch) { fs.watch = fsWatch0; WDm.resetForTest(); }
+    global.setTimeout = st0;
+    process.env.HOME = home0;
+    console.warn = warn;
+    activeSessions.delete(id);
+    try { for (const w of (s.subagentWatchers || new Map()).values()) { if (w && w.retry) clearTimeout(w.retry); if (w && w.watcher && w.watcher.close) w.watcher.close(); } } catch {}
+  }
+  return r;
+}
+{
+  const a = await jsonlNextLeg(consumerMod);
+  check('㉓ (a) the file told a record first, then the stream carried it: told ONCE (one card line, one buffered copy)', a.twoFirst === 1 && a.two === 1 && a.buf2 === 1, a);
+  check('㉓ (b) the stream told a record first, then the file held it: told once', a.three === 1, a);
+  check('㉓ (c) a record the file reader passes over (not a message) is still the stream\'s to tell: told once', a.sys === 1, a);
+  check('㉓ (d) the helper\'s last record, written before its end was told on stdout, is told AT the end, once', a.atEnd === 1 && a.after === 1 && a.watching === false, a);
+  check('㉓ (e) two stream records carrying the placeholder uuid (it names no record): BOTH are told', a.ph === '1,1', a);
+  check('㉓ (f) a record written a moment AFTER the end was told is still told (the watch stays a short while)', a.late === 1, a);
+  // THE MOVE ONTO 2.369.413 (主开发 09:40Z, owed): the watcher is the watch door's handle — with every watch refused (ENOSPC) the
+  // door's POLL stands in, and the end's last read, its grace and its close hold for it too: the records still told, the poll ended
+  const ap = await jsonlNextLeg(consumerMod, { refuseWatch: true });
+  check('㉓ (g) the watch door\'s poll in place of a watch: the end\'s last read, the late record and once-only telling hold; the grace\'s close ENDS the poll', ap.atEnd === 1 && ap.after === 1 && ap.late === 1 && ap.two === 1 && ap.pollersBefore >= 1 && ap.pollersAfter === ap.pollersBefore - 1, ap);
+  const MJN = mutantCopies('helper-ask-jsonl-next', REPO);
+  const csSrc = read('src/server/stdout/claude-stream-json.js');
+  const oneSided = anchored(csSrc, "                if (told.has(msg.uuid)) continue;   // the JSONL watcher told this record first: it is told ONCE (the dedupe both ways)\n", '', 'jsonl-dedupe-one-sided');
+  const b = await jsonlNextLeg(MJN.load('src/server/stdout/claude-stream-json.js', oneSided, 'jsonl-dedupe-one-sided'));
+  check('㉓ CONTROL (the dedupe one-sided, as released: the stream never asks what the file told): the record is told TWICE — RED', b.two === 2 && b.buf2 === 2 && b.three === 1, b);
+  const graceAt = csSrc.indexOf('        if (entry.read) entry.read();\n        if (entry.watcher && entry.read) {'), graceEnd = csSrc.indexOf('        } else if (entry.watcher) entry.watcher.close();\n');
+  check('㉓ (the controls\' anchors: the last read and its grace)', graceAt > 0 && graceEnd > graceAt);
+  const closeNow = (keepRead) => csSrc.slice(0, graceAt) + (keepRead ? '        if (entry.read) entry.read();\n' : '') + '        if (entry.watcher) entry.watcher.close();\n' + csSrc.slice(graceEnd + '        } else if (entry.watcher) entry.watcher.close();\n'.length);
+  const c = await jsonlNextLeg(MJN.load('src/server/stdout/claude-stream-json.js', closeNow(false), 'jsonl-no-last-read'), { lateWait: 30 });
+  check('㉓ CONTROL (the watch closed at the end with no read, as released): the helper\'s last records never reach the live view — RED', c.atEnd === 0 && c.after === 0 && c.late === 0 && c.watching === false, c);
+  const e = await jsonlNextLeg(MJN.load('src/server/stdout/claude-stream-json.js', closeNow(true), 'jsonl-no-grace'), { lateWait: 30 });
+  check('㉓ CONTROL (one read at the end, then the watch closed at once): a record written a moment after the end is lost — RED', e.atEnd === 1 && e.late === 0, e);
+  const phAsked = anchored(csSrc, "const toldUuid = (u) => typeof u === 'string' && u !== '' && !/-0{11,}1?$/.test(u);", "const toldUuid = (u) => typeof u === 'string' && u !== '';", 'jsonl-placeholder-asked');
+  const f = await jsonlNextLeg(MJN.load('src/server/stdout/claude-stream-json.js', phAsked, 'jsonl-placeholder-asked'));
+  check('㉓ CONTROL (the placeholder uuid asked and marked like a record\'s): the second placeholder record is swallowed — RED', f.ph === '1,0', f);
+  check('㉓ the placeholder rule is the normalizer\'s own (src/message-manager.js recordKey)', read('src/message-manager.js').includes("if (u && !/-0{11,}1?$/.test(u)) return 'u:' + u;"));
+  const markFirst = anchored(csSrc, "              if (msg.type !== 'user' && msg.type !== 'assistant' && msg.type !== 'result') continue;\n",
+    "              if (msg.uuid) emitted.add(msg.uuid);\n              if (msg.type !== 'user' && msg.type !== 'assistant' && msg.type !== 'result') continue;\n", 'jsonl-mark-before-filter');   // stale-pins: kept — the control plants the release's order (the mark before the filter)
+  const d = await jsonlNextLeg(MJN.load('src/server/stdout/claude-stream-json.js', markFirst, 'jsonl-mark-before-filter'));
+  check('㉓ CONTROL (the file reader marking what it passes over, as released, under the two-way dedupe): the stream\'s record is swallowed — RED', d.sys === 0 && d.two === 1, d);
+}
+
 console.log(`\n${failed ? '✗' : 'ALL PASS'} (${passed} passed${failed ? `, ${failed} failed` : ''})`);
 process.exit(failed ? 1 : 0);

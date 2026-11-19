@@ -36,6 +36,10 @@ const { cwdToProjectDir, findSessionJsonlPath } = require('../../session-store')
 const { feedPeerCard, seedHelperView, noteHelperResults } = require('../../normalizers'); // the rebuild-gated peer-card writer (same gate as feedLive); seedHelperView = a helper view created after its ask gets it (lane S1)
 // The CLI's control-channel records: never routed to a helper's view ALONE, whatever tags they carry (lane S1 verify r2, M2).
 const CONTROL_RECORD_TYPES = new Set(['control_request', 'control_response', 'control_cancel_request']);
+// a sub-agent record's uuid that names THAT record — never the stdout PLACEHOLDER (…-000000000001, src/message-manager.js recordKey's
+// rule: many stdout records carry it while their JSONL copies carry the real one); only such a uuid is asked or marked as told
+const toldUuid = (u) => typeof u === 'string' && u !== '' && !/-0{11,}1?$/.test(u);
+const SUBAGENT_LAST_READ_MS = 3000;   // after a helper's end is told: the watch stays this long (a transcript written a moment later), then one more read
 const bypassAutoAllow = require('../../server/bypass-auto-allow'); // (spelled from src/ like every require here) lane bypass-no-prompts: under bypassPermissions a can_use_tool is answered at the door
 const { ClaudeCodeAdapter } = require('../../adapters/claude-code.js');
 const { isTurnState, turnStateEffect, noteTurnFlight, noteRequestSent, sendsRequest, noteSubRequestSent, sendsSubRequest } = require('../../turn-state.js');
@@ -336,8 +340,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
             if (!trimmed) continue;
             try {
               const msg = JSON.parse(trimmed);
-              if (msg.uuid && emitted.has(msg.uuid)) continue; // already sent via stream-json
-              if (msg.uuid) emitted.add(msg.uuid);
+              if (toldUuid(msg.uuid) && emitted.has(msg.uuid)) continue; // already sent via stream-json
               if (msg.type !== 'user' && msg.type !== 'assistant' && msg.type !== 'result') continue;
               browserHelpers.observe(session, msg, toolUseId); // MULTIVIEW §4: the sub-agent's own JSONL carries its `new-child` call too
               // Buffer + broadcast
@@ -345,6 +348,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
               session.subagentBuffers.get(toolUseId).push(msg);
               noteHelperResults(session, msg); // verify r3: the helper's tool_result for an ASKED call settles the parent's ask (the table's result rows)
               broadcastToSession(session, id, { type: 'subagent-message', sessionId: id, parentToolUseId: toolUseId, message: msg });
+              if (toldUuid(msg.uuid)) emitted.add(msg.uuid);   // marked once TOLD: a record passed over here, or one whose telling threw, is still the stream's
               // Normalize for subagent viewers
               if (!session._subNormalizers) session._subNormalizers = new Map();
               if (!session._subNormalizers.has(toolUseId)) {
@@ -363,14 +367,24 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
       // bounded poll instead, said once; the helper's records keep arriving; nothing here can throw
       const watcher = WD.watch(watchFile, () => { const e = session.subagentWatchers.get(toolUseId); if (e) e.lastActivity = Date.now(); readNewLines(); });
       session.subagentWatchers.set(toolUseId, { watcher, lastActivity: Date.now() });
+      session.subagentWatchers.get(toolUseId).read = readNewLines;   // THE LAST READ at the helper's end (stopSubagentWatcher)
     };
 
     const stopSubagentWatcher = (toolUseId) => {
       const entry = session.subagentWatchers.get(toolUseId);
       if (entry) {
-        if (entry.watcher) entry.watcher.close();
+        // THE LAST READ (B-b968's edge, its next): the helper's last records may not be told yet when its end is — read at once,
+        // keep the watch SUBAGENT_LAST_READ_MS more (a transcript written a moment later; unref'd, never holding the process),
+        // then read once more and close; a session gone by then is read no more
         if (entry.retry) clearTimeout(entry.retry);
         session.subagentWatchers.delete(toolUseId);
+        if (entry.read) entry.read();
+        if (entry.watcher && entry.read) {
+          const w = entry.watcher, last = entry.read;
+          try { if (w.unref) w.unref(); } catch { }
+          const t = setTimeout(() => { try { if (activeSessions.has(id)) last(); } finally { try { w.close(); } catch { } } }, SUBAGENT_LAST_READ_MS);
+          if (t.unref) t.unref();
+        } else if (entry.watcher) entry.watcher.close();
       }
     };
     // restoreSessions re-arms watchers for agents that span a restart via
@@ -1479,9 +1493,11 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
             const ptuid = msg.parent_tool_use_id;
             if (ptuid) {
               // Mark uuid as emitted (for dedup with JSONL watcher)
-              if (msg.uuid) {
+              if (toldUuid(msg.uuid)) {   // (a placeholder uuid names no record: never asked, never marked)
                 if (!session.subagentEmittedUuids.has(ptuid)) session.subagentEmittedUuids.set(ptuid, new Set());
-                session.subagentEmittedUuids.get(ptuid).add(msg.uuid);
+                const told = session.subagentEmittedUuids.get(ptuid);
+                if (told.has(msg.uuid)) continue;   // the JSONL watcher told this record first: it is told ONCE (the dedupe both ways)
+                told.add(msg.uuid);
               }
               // Buffer
               if (!session.subagentBuffers.has(ptuid)) session.subagentBuffers.set(ptuid, []);
