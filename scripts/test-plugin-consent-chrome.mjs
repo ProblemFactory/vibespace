@@ -20,7 +20,8 @@
 //     ⇒ its row draws neither «更新…» nor «卸载…»: chip · switch · the ⚙'s unseen place · ONE «⋯», all inside the row and the
 //     viewport at 1000 × 600 on one line, the name not squeezed; a REAL press on the «⋯» opens 更新… then 卸载…; the chip's menu
 //     has no 更新; a real press on a path-installed plugin's «⋯» → «更新…» with nothing new at its source says «… 已是最新（0.1.0）».
-//     PNG <prefix>-row.png = the planted plugin's row, <prefix>-more-menu.png = its «⋯» open.
+//     PNG <prefix>-row.png = the planted plugin's row, <prefix>-more-menu.png = its «⋯» open. B-6944: the same Update by KEYBOARD
+//     ALONE — Enter on the focused «⋯» opens the menu with the focus on «更新…», the arrows move, Escape gives the focus back, Enter updates.
 // On 160045063 (the base — run this file on a `git archive` copy) ③ ④ ⑤ ⑥ are RED, in both variants (15 rows); on 63f59d572
 // ⑨ is RED (no 更新… on the row, 更新 in the chip's menu, the press finds no button); on f6ad84f50 (B-db5d's checkpoint) ⑨ is RED
 // (更新… / 卸载… drawn inline, no «⋯» on the row).
@@ -253,6 +254,8 @@ await step('⑨', async () => {
   const pressedMore = await realClick(`${row} .rail-row-more`);
   const opened = await waitFor(`(() => { const its = [...document.querySelectorAll('.context-menu > .context-menu-item')]; window.__pcMore = its.map((x) => x.textContent.trim()); return its.length > 0; })()`, 8000);
   const moreMenu = await evalJs('window.__pcMore || null');
+  const ptrFocus = await evalJs(`!!document.activeElement && !!document.activeElement.closest('.context-menu')`);
+  check(`⑨ B-6944: a POINTER's menu takes no focus (the focus stays where the press left it: in the menu ${ptrFocus})`, ptrFocus === false, ptrFocus);
   if (opened) await shot('more-menu');
   check(`⑨ B-db5d: a real press on the row's «⋯» opens «更新…» first, then «卸载…» (${J(moreMenu)})`, !!pressedMore && opened && J(moreMenu) === J(['更新…', '卸载…']), { pressedMore, miss: realClick.lastMiss, moreMenu });
   await evalJs(`(() => { document.querySelectorAll('.context-menu').forEach((p) => p.remove()); return true; })()`);
@@ -264,6 +267,25 @@ await step('⑨', async () => {
   const said = await waitFor(`[...document.querySelectorAll('.global-toast')].some((x) => x.textContent.includes('${HID} 已是最新（0.1.0）'))`, 20000);
   const toasts = await evalJs(`[...document.querySelectorAll('.global-toast')].map((x) => x.textContent.trim())`);
   check(`⑨ a real press on the «⋯» then its «更新…», nothing new at the source, says «${HID} 已是最新（0.1.0）» (${J(toasts)})`, !!pm && !!pressed && said, { pm, pressed, miss: realClick.lastMiss, toasts });
+  // B-6944 — THE KEYBOARD ALONE (the readers of B-db5d: Update… / Uninstall… were native buttons a Tab reached; in the «⋯» a
+  // keyboard-only person reached no row): the path plugin's «⋯» focused (a script focus stands in for the Tabs), Enter opens the menu
+  // WITH THE FOCUS ON «更新…», ArrowDown reaches «卸载…», ArrowUp comes back, Escape closes it and gives the focus back to the «⋯»;
+  // Enter again, then Enter on «更新…» updates — the toast says so. No pointer event in any of it.
+  const KC = { Enter: 13, Escape: 27, ArrowDown: 40, ArrowUp: 38 };
+  const key = async (k) => { await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: k, code: k, windowsVirtualKeyCode: KC[k], nativeVirtualKeyCode: KC[k], ...(k === 'Enter' ? { text: '\r', unmodifiedText: '\r' } : {}) }); await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code: k, windowsVirtualKeyCode: KC[k], nativeVirtualKeyCode: KC[k] }); await sleep(150); };
+  const focusNow = () => evalJs(`(() => { const a = document.activeElement; return a ? { text: (a.textContent || '').trim(), role: a.getAttribute('role'), more: a === document.querySelector('${hrow} .rail-row-more'), inMenu: !!a.closest('.context-menu'), menu: !!document.querySelector('.context-menu') } : null; })()`);   // more: THE «⋯» that opened it
+  await evalJs(`(() => { document.querySelectorAll('.context-menu, #global-toasts > .global-toast').forEach((e) => e.remove()); const b = document.querySelector('${hrow} .rail-row-more'); if (b) b.focus(); return !!b && document.activeElement === b; })()`);
+  await key('Enter');
+  const k1 = await focusNow();
+  await key('ArrowDown'); const k2 = await focusNow();
+  await key('ArrowUp'); const k3 = await focusNow();
+  await key('Escape'); const k4 = await focusNow();
+  check(`⑨ B-6944: by keyboard alone — Enter on the «⋯» opens its menu with the focus on «更新…» (${J(k1)}), ArrowDown reaches «卸载…» (${k2 && k2.text}), ArrowUp comes back (${k3 && k3.text}), Escape closes it and the focus is the «⋯» again (${J(k4)})`,
+    !!k1 && k1.inMenu && k1.role === 'menuitem' && k1.text === '更新…' && !!k2 && k2.text === '卸载…' && !!k3 && k3.text === '更新…' && !!k4 && !k4.menu && k4.more, { k1, k2, k3, k4 });
+  await key('Enter'); const k5 = await focusNow();
+  await key('Enter');
+  const saidK = await waitFor(`[...document.querySelectorAll('.global-toast')].some((x) => x.textContent.includes('${HID} 已是最新（0.1.0）'))`, 20000);
+  check(`⑨ B-6944: …and Enter on «更新…» updates — «${HID} 已是最新（0.1.0）» said, no pointer used (${J(k5)})`, !!k5 && k5.text === '更新…' && saidK, { k5, toasts: await evalJs(`[...document.querySelectorAll('.global-toast')].map((x) => x.textContent.trim())`) });
 });
 check('no page exceptions', pageErrors.length === 0, pageErrors.slice(0, 3));
 console.log(fail ? `✗ ${fail} failed, ${pass} passed` : `ALL PASS (${pass})`);

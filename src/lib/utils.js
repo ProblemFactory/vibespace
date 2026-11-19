@@ -1,6 +1,6 @@
 import { t } from './i18n.js';
 import { ago as pageAgo, markAgo } from './page-time.js'; // lane ui-language: the ONE formatter of a time a person reads
-import { menuPlace } from './menu-place.js'; // PURE (lane desktop-small P2-3): THE ONE placement of a menu inside the viewport
+import { menuPlace, menuKeyStep } from './menu-place.js'; // PURE (lane desktop-small P2-3): THE ONE placement of a menu inside the viewport
 import { metric } from './telemetry-client.js';
 import { pressCloses, pressPhase, tapVerdict, shouldCloseOnBlur } from './outside-press.js';
 import { NATIVE_PRESS_SELECTOR, PRESS_CHROME_SELECTOR, effectiveUserSelect, pointOnText, pressTargetClass, longPressVerdict, selectionCloses, selectStartAllowed, trustedContextMenu } from './press-select.js';
@@ -1288,10 +1288,18 @@ export function createPopover(anchor, className, opts = {}) {
  *   its button, measured unstyled)
  */
 export function showContextMenu(x, y, items, className = 'context-menu', { up = false, extraClass = '', placesItself = false } = {}) {
+  // B-6944: what opened it (the focus goes back there) and whether a KEY led to it — read BEFORE the same-class sweep: a menu that
+  // redraws itself while the keys stand in it (the billing menu when the host's answer lands) keeps its opener and the row in focus
+  const held = [...document.querySelectorAll('.' + className.split(' ')[0])].find((p) => p.contains(document.activeElement));
+  const opener = held ? (held._menuOpener || null) : document.activeElement;
+  const keep = held ? (document.activeElement.textContent || '').trim() : null;
+  const fromKey = !!held || Date.now() - _menuKeyAt < MENU_KEY_MS;
   // Remove existing menus of same class
   document.querySelectorAll('.' + className.split(' ')[0]).forEach(p => p.remove());
   const pop = document.createElement('div');
   pop.className = className;
+  pop.setAttribute('role', 'menu');
+  pop._menuOpener = opener;
   if (extraClass) pop.classList.add(...String(extraClass).split(/\s+/).filter(Boolean));
   pop.dataset.popover = '1'; // global Escape handler closes anything tagged
   pop.style.position = 'fixed';
@@ -1314,6 +1322,7 @@ export function showContextMenu(x, y, items, className = 'context-menu', { up = 
       const cap = document.createElement('div');
       cap.className = className + '-caption';
       if (item.captionHtml != null) cap.innerHTML = item.captionHtml; else cap.textContent = String(item.caption);   // captionHtml: the caller escHtml's every part
+      cap.setAttribute('role', 'presentation');   // B-6944: words, no stop (a reader still reads them)
       if (item.title) cap.title = item.title;
       if (item.style) cap.style.cssText = item.style;
       return cap;
@@ -1322,12 +1331,14 @@ export function showContextMenu(x, y, items, className = 'context-menu', { up = 
     const row = document.createElement('div');
     // the desktop doors' proven markup, now every menu's: `.disabled` (the state every reader keys on) + .door-label / .door-why
     row.className = className + '-item ' + className + '-off disabled';
+    row.setAttribute('role', 'menuitem'); row.setAttribute('aria-disabled', 'true'); row.tabIndex = -1; row.dataset.menuStop = '1';   // B-6944: an OFF row is a stop the keys reach (its words and why read) — Enter presses nothing
     const name = document.createElement('span'); name.className = 'door-label';
     if (item.labelHtml != null) name.innerHTML = item.labelHtml; else name.textContent = item.label;
     const why = document.createElement('span'); why.className = 'door-why'; why.textContent = String(item.off);
+    why.id = `menu-why-${++_menuWhySeq}`; row.setAttribute('aria-describedby', why.id);   // the row's why, read with it
     row.append(name, why);
     if (item.offDoor && item.offDoor.label) {
-      const b = document.createElement('button'); b.type = 'button'; b.className = className + '-off-door'; b.textContent = item.offDoor.label;
+      const b = document.createElement('button'); b.type = 'button'; b.className = className + '-off-door'; b.textContent = item.offDoor.label; b.tabIndex = -1; b.dataset.menuStop = '1';   // its door IS a stop
       b.onclick = (e) => { e.stopPropagation(); pop.remove(); item.offDoor.action?.(); };
       row.appendChild(b);
     }
@@ -1338,9 +1349,10 @@ export function showContextMenu(x, y, items, className = 'context-menu', { up = 
   for (const item of items) {
     const words = wordRow(item);
     if (words) { pop.appendChild(words); continue; }
-    if (item.separator) { const sep = document.createElement('div'); sep.className = className + '-separator'; pop.appendChild(sep); continue; }
+    if (item.separator) { const sep = document.createElement('div'); sep.className = className + '-separator'; sep.setAttribute('role', 'separator'); pop.appendChild(sep); continue; }
     const el = document.createElement('div');
     el.className = className + '-item' + (item.disabled ? ' disabled' : '');
+    menuStop(el, !item.disabled);
     if (item.style) el.style.cssText = item.style;
     if (item.children?.length) {
       // Submenu item: hover to expand. Since 2026-09-28 a parent may carry the same
@@ -1352,14 +1364,17 @@ export function showContextMenu(x, y, items, className = 'context-menu', { up = 
       else el.textContent = item.label + ' \u25B8';
       if (item.title) el.title = item.title;
       el.style.position = 'relative';
+      el.setAttribute('aria-haspopup', 'menu'); el.setAttribute('aria-expanded', 'false');
       const sub = document.createElement('div');
       sub.className = className;
+      sub.setAttribute('role', 'menu');
       sub.style.cssText = 'position:absolute;left:100%;top:-4px;display:none;z-index:99999';
       for (const child of item.children) {
         const words = wordRow(child);   // a caption / an off row in a submenu too (the window's Scale ▸, Stored logins ▸)
         if (words) { sub.appendChild(words); continue; }
         const ce = document.createElement('div');
         ce.className = className + '-item' + (child.disabled ? ' disabled' : '');
+        menuStop(ce, !child.disabled);
         // labelHtml: see the top-level item note below — callers MUST escHtml
         // every interpolated string.
         if (child.labelHtml != null) ce.innerHTML = child.labelHtml;
@@ -1378,6 +1393,7 @@ export function showContextMenu(x, y, items, className = 'context-menu', { up = 
       // report: 右键菜单不会考虑超出屏幕)
       const showSub = () => {
         sub.style.display = '';
+        el.setAttribute('aria-expanded', 'true');
         requestAnimationFrame(() => {
           const r = sub.getBoundingClientRect();
           if (r.right > window.innerWidth && !sub.style.right) { sub.style.left = 'auto'; sub.style.right = '100%'; }
@@ -1385,8 +1401,9 @@ export function showContextMenu(x, y, items, className = 'context-menu', { up = 
           if (overflowY > 0) sub.style.top = `${-4 - overflowY - 4}px`; // top is relative to the parent row (initial -4px)
         });
       };
+      el._showSub = showSub;   // B-6944: ArrowRight / Enter on the row opens it from the keyboard
       el.addEventListener('mouseenter', showSub);
-      el.addEventListener('mouseleave', () => { sub.style.display = 'none'; });
+      el.addEventListener('mouseleave', () => { if (sub.contains(document.activeElement)) return; sub.style.display = 'none'; el.setAttribute('aria-expanded', 'false'); });   // (the keys stand in it: it stays)
       // Touch: no hover exists — tap the parent row to open the submenu.
       // Only opens (never toggles closed): emulated mouseenter on tap may have
       // already shown it, and a toggle would immediately re-hide it.
@@ -1414,8 +1431,49 @@ export function showContextMenu(x, y, items, className = 'context-menu', { up = 
     }
     pop.appendChild(el);
   }
+  armMenuKeys(pop, { opener, fromKey, keep });   // B-6944: the keys of this menu (and the focus, when a key led to it)
   placeMenu(pop, x, y, { up, placesItself });
   return pop;
+}
+/** B-6944 — THE KEYS OF AN OPEN MENU (PURE menu-place.js menuKeyStep decides): armed by showContextMenu just before its
+ *  placement; a menu a KEY led to takes the focus at its first live row once it stands placed (a microtask: placeMenu shows it) */
+function armMenuKeys(pop, { opener = null, fromKey = false, keep = null } = {}) {
+  // a menu a KEY opened takes the focus at its first live row; Up / Down / Home
+  // / End move among the live rows of the menu holding the focus (an off row and a caption are skipped — their words are read),
+  // Enter / Space press, ArrowRight / Enter open a submenu and ArrowLeft leaves it, Escape (and Tab) close it and give the focus back
+  // to what opened it. A pointer's menu is unchanged: it takes no focus, and a key it never hears changes nothing.
+  const stopsOf = (level) => [...level.querySelectorAll(':scope > [data-menu-stop], :scope > * > [data-menu-stop]')];
+  const giveBack = () => { if (opener && opener !== document.body && opener.isConnected && typeof opener.focus === 'function') opener.focus({ preventScroll: true }); };
+  pop.addEventListener('keydown', (e) => {
+    const cur = document.activeElement;
+    const level = (cur && pop.contains(cur) && cur.closest('[role="menu"]')) || pop;
+    const stops = stopsOf(level), at = stops.indexOf(cur), row = at >= 0 ? stops[at] : null;
+    if (e.repeat && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); return; }   // a held Enter on the opener never presses the first row
+    const st = menuKeyStep({ key: e.key, at, count: stops.length, parent: !!row && row.getAttribute('aria-haspopup') === 'menu', inSub: level !== pop, off: !!row && row.getAttribute('aria-disabled') === 'true' });
+    if (!st) return;
+    if (e.key !== 'Tab') e.preventDefault();   // Tab: the focus goes back to the opener and moves on from there
+    e.stopPropagation();
+    if (st.close) { pop.remove(); if (st.back) giveBack(); return; }
+    if (st.leave) { const host = level.parentElement; level.style.display = 'none'; if (host) { host.setAttribute('aria-expanded', 'false'); host.focus({ preventScroll: true }); } return; }
+    if (st.open) { row._showSub?.(); const sub = row.querySelector(':scope > [role="menu"]'); const first = sub && stopsOf(sub)[0]; if (first) first.focus({ preventScroll: true }); return; }
+    if (st.press) { row.click(); if (!pop.isConnected && (!document.activeElement || document.activeElement === document.body)) giveBack(); return; }
+    if (st.focus != null && stops[st.focus]) stops[st.focus].focus({ preventScroll: true });
+  });
+  // …never from a field being typed in (a menu that opens while a person types leaves the caret where it is)
+  const typing = _editable(opener) || (!!opener && opener.tagName === 'IFRAME');
+  // a redrawn menu puts the focus back on the row it was on (by its words), else its first live row
+  if (fromKey && !typing) queueMicrotask(() => { if (!pop.isConnected) return; const all = stopsOf(pop); const live = all.filter((r) => r.getAttribute('aria-disabled') !== 'true'); const at = (keep && all.find((r) => (r.textContent || '').trim() === keep)) || live[0] || all[0]; if (at) at.focus({ preventScroll: true }); });
+}
+/** B-6944: a menu row that is a STOP for the keys (a live row) — role menuitem, focusable by script; a dead one is aria-disabled */
+function menuStop(el, live) { el.setAttribute('role', 'menuitem'); el.tabIndex = -1; el.dataset.menuStop = '1'; if (!live) el.setAttribute('aria-disabled', 'true'); }   // a dead row is a stop too (read, never pressed)
+// B-6944: did a KEY lead to the menu that opens now? A gesture key (Enter / Space on a focused button, an arrow, a shortcut — never
+// plain typing in a field: isGestureKey) within MENU_KEY_MS; a pointer press takes it back — one pair of capture listeners for the
+// page's life (a menu a timer opens long after a key takes no focus)
+const MENU_KEY_MS = 1000;
+let _menuKeyAt = 0, _menuWhySeq = 0;
+if (typeof document !== 'undefined' && document && typeof document.addEventListener === 'function') {
+  document.addEventListener('keydown', (e) => { if (isGestureKey(e, _editable(e.target))) _menuKeyAt = Date.now(); }, true);
+  document.addEventListener('pointerdown', () => { _menuKeyAt = 0; }, true);
 }
 
 /** A MENU IS BOUNDED BY THE SCREEN (lane ui-controls-and-bugs, 主开发's width-sweep rule 4, 2026-11-13) — THE ONE placement of

@@ -5,7 +5,7 @@
 // release legs are scripts/test-window-drag.mjs §2 (f)).
 //   §1 the release + the recovery (src/lib/drag-end.js releaseBox / reachable / insideBox / releasePoint) + the resize's
 //      release (resizeRelease — acceptance r2 ③)
-//   §2 the one placement of a menu (src/lib/menu-place.js menuPlace) — and of an OPEN one (`keep`: it keeps its top, capped at
+//   §2 the one placement of a menu (+ B-6944: THE MENU'S KEYS, menuKeyStep's table; §6 the keyboard wiring of showContextMenu) (src/lib/menu-place.js menuPlace) — and of an OPEN one (`keep`: it keeps its top, capped at
 //      the foot; `maxW`: never wider than the viewport — lane desktop-doors-table r4; `scrolled`: a wheeled one keeps its
 //      offset, its cap lifted only as far as its rows stay — r5)
 //   §3 the taskbar at a small screen (src/lib/taskbar-fit.js stripHidden / wheelScroll / switcherForm + TILE_MIN_PX = the
@@ -140,6 +140,30 @@ const menuTable = (mp) => [
 }
 
 // ── §3 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// B-6944 (the readers of B-db5d: a plugin's Update… / Uninstall… moved from native buttons into a «⋯» menu whose rows a keyboard
+// could not reach — every showContextMenu menu was so): THE MENU'S KEYS, PURE menu-place.js menuKeyStep — [name, got, want]
+const keyTable = (step) => {
+  const v = (o) => ({ focus: null, press: false, open: false, leave: false, close: false, back: false, ...o });
+  return [
+    ['ArrowDown from none ⇒ the first row', step({ key: 'ArrowDown', at: -1, count: 3 }), v({ focus: 0 })],
+    ['ArrowDown moves on', step({ key: 'ArrowDown', at: 0, count: 3 }), v({ focus: 1 })],
+    ['ArrowDown from the last wraps to the first', step({ key: 'ArrowDown', at: 2, count: 3 }), v({ focus: 0 })],
+    ['ArrowUp from none ⇒ the last row', step({ key: 'ArrowUp', at: -1, count: 3 }), v({ focus: 2 })],
+    ['ArrowUp from the first wraps to the last', step({ key: 'ArrowUp', at: 0, count: 3 }), v({ focus: 2 })],
+    ['Home ⇒ the first, End ⇒ the last', [step({ key: 'Home', at: 2, count: 3 }), step({ key: 'End', at: 0, count: 3 })], [v({ focus: 0 }), v({ focus: 2 })]],
+    ['Enter and Space press the focused row', [step({ key: 'Enter', at: 1, count: 3 }), step({ key: ' ', at: 1, count: 3 })], [v({ focus: 1, press: true }), v({ focus: 1, press: true })]],
+    ['Enter with no row focused presses nothing', step({ key: 'Enter', at: -1, count: 3 }), null],
+    ['Enter / Space on an OFF row press nothing (it is reached and read, never pressed)', [step({ key: 'Enter', at: 1, count: 3, off: true }), step({ key: ' ', at: 1, count: 3, off: true })], [v({ focus: 1 }), v({ focus: 1 })]],
+    ['Enter / ArrowRight on a row with a submenu OPEN it', [step({ key: 'Enter', at: 0, count: 2, parent: true }), step({ key: 'ArrowRight', at: 0, count: 2, parent: true })], [v({ focus: 0, open: true }), v({ focus: 0, open: true })]],
+    ['ArrowRight on a plain row is no key of the menu', step({ key: 'ArrowRight', at: 0, count: 2 }), null],
+    ['ArrowLeft in a submenu leaves it; at the top level it is nothing', [step({ key: 'ArrowLeft', at: 0, count: 2, inSub: true }), step({ key: 'ArrowLeft', at: 0, count: 2 })], [v({ leave: true }), null]],
+    ['Escape closes and gives the focus back; Tab too (and moves on)', [step({ key: 'Escape', at: 1, count: 3 }), step({ key: 'Tab', at: 1, count: 3 })], [v({ close: true, back: true }), v({ close: true, back: true })]],
+    ['a menu with no live row: the arrows do nothing, Escape still closes', [step({ key: 'ArrowDown', at: -1, count: 0 }), step({ key: 'Escape', at: -1, count: 0 })], [null, v({ close: true, back: true })]],
+    ['a key that is not the menu\'s passes', step({ key: 'a', at: 0, count: 3 }), null],
+  ];
+};
+{ const bad = keyTable(MP.menuKeyStep).filter(([, g, w]) => !same(g, w)); ok(typeof MP.menuKeyStep === 'function' && bad.length === 0, 'B-6944 menuKeyStep: Up / Down wrap, Home / End, Enter / Space press, Enter / ArrowRight open a submenu and ArrowLeft leaves it, Escape and Tab close with the focus back; nothing else is the menu\'s', bad.map(([n]) => n)); }
+
 console.log('§3 the taskbar at a small screen (taskbar-fit.js)');
 {
   ok(TF.TILE_MIN_PX === 90 && /\.taskbar-item \{[^}]*min-width: 90px;/.test(read('public/style.css')), 'the tile floor is 90 px — taskbar-fit.js TILE_MIN_PX = style.css .taskbar-item min-width (P2-2: 60 px, a label of one or two characters)');
@@ -282,6 +306,25 @@ console.log('§6 the wiring — every door asks its rule');
   ok(/this\._narrowTitleRO = new ResizeObserver/.test(W) && !/this\._titleRO\b/.test(W), 'the narrow-title observer has its own field (`_titleRO` is the tab-group mixin\'s split-tail observer — sharing it silenced the split tail: test-split-ux)');
   const SU = read('src/lib/settings-ui.js');
   ok(/dialog\.append\(header, searchWrap, body, foot\);/.test(SU) && /\.settings-foot \{/.test(SC), 'P3-3 the Settings window: its save rule at its foot (the nav is its own column already)');
+  // B-6944: every showContextMenu menu is a keyboard's — ARIA roles, the live rows the stops (off rows / captions skipped, read),
+  // the keys through menuKeyStep, the focus taken only when a KEY opened it from no text field, and given back on close
+  const VCSS = read('public/viewers.css');
+  const keyed = (u, css) => /pop\.setAttribute\('role', 'menu'\);\n\s+pop\._menuOpener = opener;/.test(u)
+    && /function menuStop\(el, live\) \{ el\.setAttribute\('role', 'menuitem'\); el\.tabIndex = -1; el\.dataset\.menuStop = '1'; if \(!live\) el\.setAttribute\('aria-disabled', 'true'\); \}/.test(u)
+    && /row\.setAttribute\('role', 'menuitem'\); row\.setAttribute\('aria-disabled', 'true'\); row\.tabIndex = -1; row\.dataset\.menuStop = '1';/.test(u) && /row\.setAttribute\('aria-describedby', why\.id\);/.test(u)
+    && /menuStop\(el, !item\.disabled\);/.test(u) && /menuStop\(ce, !child\.disabled\);/.test(u)
+    && /const st = menuKeyStep\(\{ key: e\.key, at, count: stops\.length, parent: [^\n]*inSub: level !== pop, off: [^\n]*\}\);/.test(u)
+    && /armMenuKeys\(pop, \{ opener, fromKey, keep \}\);\s*\n\s*placeMenu\(pop, x, y, \{ up, placesItself \}\);/.test(u)
+    && /const held = \[\.\.\.document\.querySelectorAll\('\.' \+ className\.split\(' '\)\[0\]\)\]\.find\(\(p\) => p\.contains\(document\.activeElement\)\);/.test(u) && /const opener = held \? \(held\._menuOpener \|\| null\) : document\.activeElement;/.test(u)
+    && /const typing = _editable\(opener\) \|\| \(!!opener && opener\.tagName === 'IFRAME'\);/.test(u) && /if \(fromKey && !typing\) queueMicrotask\(/.test(u)
+    && /if \(st\.close\) \{ pop\.remove\(\); if \(st\.back\) giveBack\(\); return; \}/.test(u)
+    && /document\.addEventListener\('keydown', \(e\) => \{ if \(isGestureKey\(e, _editable\(e\.target\)\)\) _menuKeyAt = Date\.now\(\); \}, true\);/.test(u) && /document\.addEventListener\('pointerdown', \(\) => \{ _menuKeyAt = 0; \}, true\);/.test(u)
+    && /\.context-menu-item:focus-visible, \.taskbar-context-menu-item:focus-visible \{ background: var\(--bg-hover\);/.test(css) && /\.context-menu-item:focus, \.taskbar-context-menu-item:focus \{ outline: none; \}/.test(css);
+  ok(keyed(U, VCSS), 'B-6944: showContextMenu is a keyboard\'s menu — role menu / menuitem, every row a stop (an off row aria-disabled with its why described: read, never pressed), the keys through menuKeyStep, the focus taken only when a gesture key led to it a moment ago (never from a field being typed in or a frame), given back on Escape / Tab, kept on its row when the menu redraws itself; only the KEYS\' row is drawn (a pointer\'s look unchanged)');
+  ok(!keyed(U.replace('if (fromKey && !typing) queueMicrotask(', 'if (false) queueMicrotask('), VCSS) && !keyed(U.replace("if (st.close) { pop.remove(); if (st.back) giveBack(); return; }", 'if (st.close) { pop.remove(); return; }'), VCSS)
+    && !keyed(U.replace("const opener = held ? (held._menuOpener || null) : document.activeElement;", 'const opener = document.activeElement;'), VCSS)
+    && !keyed(U, VCSS.replace('.context-menu-item:focus-visible, .taskbar-context-menu-item:focus-visible { background: var(--bg-hover);', '.context-menu-item:focus { background: var(--bg-hover);')),
+    'CONTROL: the checkpoint\'s shapes and the reader\'s finds — a key-opened menu that takes no focus, a close that leaves the focus nowhere, a redrawn menu that forgets its opener, a pointer press painting a row — are each refused');
   ok(/if \(shown && !_toastTier\(\) && !_openModalDialog\(\)\) \{ _placeDeskToasts\(stack\); return; \}/.test(U) && /const rect = stack\.getBoundingClientRect\(\);\n  const desk = toastDeskSpot\(\{ rect, avoid: _toastAvoid\(rect\),/.test(U), 'the desktop tier\'s toast stack (anchored or centred) is placed off every open menu and composer');
 }
 
@@ -302,6 +345,12 @@ console.log('§7 controls — each rule\'s base form, on its own table');
   ok(!same(tfNoCut.stripHidden({ tiles: Array.from({ length: 8 }, (_, i) => ({ id: 'w' + i, left: i * 92 - 60, width: 90 })), width: 500 }).hidden, ['w0', 'w6', 'w7']), 'CONTROL stripHidden counting a cut tile as shown: the «+N» list misses it (RED)');
   const deNoCut = await patched('src/lib/drag-end.js', [['export function resizeRelease(box, ws, dir = \'\', keep = RELEASE_KEEP, min = null) {\n', 'export function resizeRelease(box, ws, dir = \'\', keep = RELEASE_KEEP, min = null) {\n  if (box) return { ...box, moved: false };\n']], 'resize-no-release');
   ok(resizeTable(deNoCut.resizeRelease).filter(([, g, w]) => !same(g, w)).length >= 3, 'CONTROL no resize release (round 1): a north edge past the top keeps the bar out (RED)');
+  const mkNoWrap = await patched('src/lib/menu-place.js', [["  if (key === 'ArrowDown') return v({ focus: i < 0 ? 0 : (i + 1) % count });", "  if (key === 'ArrowDown') return v({ focus: i < 0 ? 0 : Math.min(i + 1, count - 1) });"]], 'keys-no-wrap');
+  ok(keyTable(mkNoWrap.menuKeyStep).filter(([, g, w]) => !same(g, w)).length >= 1, 'CONTROL menuKeyStep that stops at the last row: ArrowDown never wraps (RED)');
+  const mkPressOff = await patched('src/lib/menu-place.js', [["return off ? v({ focus: i }) : parent ?", "return parent ?"]], 'keys-press-off');
+  ok(keyTable(mkPressOff.menuKeyStep).filter(([, g, w]) => !same(g, w)).length >= 1, 'CONTROL menuKeyStep that presses an off row (RED)');
+  const mkNoBack = await patched('src/lib/menu-place.js', [["  if (key === 'Escape') return v({ close: true, back: true });", "  if (key === 'Escape') return v({ close: true });"]], 'keys-no-back');
+  ok(keyTable(mkNoBack.menuKeyStep).filter(([, g, w]) => !same(g, w)).length >= 2, 'CONTROL menuKeyStep whose Escape leaves the focus nowhere (RED)');
   const msSlid = await patched('src/lib/window-min-size.js', [['  if (covered(first) <= cover) return first;', '  return first;']], 'cascade-slid');
   const r = cascadeRun(msSlid.cascadeBox, { w: 1020, h: 555 }, { w: 700, h: 500 });
   ok(r.buried.some((x) => x > 0.2), `CONTROL cascadeBox = the slid slot (the base): an earlier title bar is buried (${r.buried.map((x) => Math.round(x * 100)).join(' / ')} %) (RED)`);

@@ -53,3 +53,29 @@ export function panelPlace({ wantLeft = 0, containerW = 0, natW = 0, minW = 0, m
   const left = Math.max(0, Math.min(wantLeft, containerW - w - pad));
   return { left, maxW: Math.min(maxW, Math.max(w, containerW - left - pad)) };
 }
+
+/** B-6944 — A MENU A KEYBOARD CAN USE (PURE; the readers of B-db5d: a plugin's Update… / Uninstall… moved from native buttons a Tab
+ *  reached into a «⋯» menu whose rows were blocks with a click only — a keyboard-only person opened the menu and could reach no row,
+ *  and every showContextMenu menu was so). The keys of an OPEN menu whose live rows are `count` stops, the focused one at `at` (-1 =
+ *  none yet): ArrowDown / ArrowUp move (wrapping), Home / End go to the first / last; Enter and Space press the focused row (on a
+ *  row with a submenu — `parent` — they open it, as ArrowRight does); ArrowLeft in a submenu (`inSub`) leaves it for its row;
+ *  Escape closes the menu and gives the focus BACK to what opened it; Tab does too and lets the focus move on from there. An OFF row
+ *  (`off`) IS a stop — the keys reach it and a screen reader reads its words and its why (the ARIA menu pattern keeps a disabled
+ *  item focusable) — but Enter / Space on it press nothing; a caption is no stop.
+ *  → { focus: index | null, press, open, leave, close, back } — every flag false but the one the key means; null = not a key of the
+ *  menu (let it pass). */
+export function menuKeyStep({ key = '', at = -1, count = 0, parent = false, inSub = false, off = false } = {}) {
+  const v = (o) => ({ focus: null, press: false, open: false, leave: false, close: false, back: false, ...o });
+  if (key === 'Escape') return v({ close: true, back: true });
+  if (key === 'Tab') return v({ close: true, back: true });
+  if (!(count > 0)) return null;
+  const i = at >= 0 && at < count ? at : -1;
+  if (key === 'ArrowDown') return v({ focus: i < 0 ? 0 : (i + 1) % count });
+  if (key === 'ArrowUp') return v({ focus: i < 0 ? count - 1 : (i - 1 + count) % count });
+  if (key === 'Home') return v({ focus: 0 });
+  if (key === 'End') return v({ focus: count - 1 });
+  if (key === 'ArrowRight') return parent && i >= 0 ? v({ focus: i, open: true }) : null;
+  if (key === 'ArrowLeft') return inSub ? v({ leave: true }) : null;
+  if ((key === 'Enter' || key === ' ') && i >= 0) return off ? v({ focus: i }) : parent ? v({ focus: i, open: true }) : v({ focus: i, press: true });
+  return null;
+}
