@@ -56,7 +56,7 @@ export function panelPlace({ wantLeft = 0, containerW = 0, natW = 0, minW = 0, m
 
 /** B-6944 — A MENU A KEYBOARD CAN USE (PURE; the readers of B-db5d: a plugin's Update… / Uninstall… moved from native buttons a Tab
  *  reached into a «⋯» menu whose rows were blocks with a click only — a keyboard-only person opened the menu and could reach no row,
- *  and every showContextMenu menu was so). The keys of an OPEN menu whose live rows are `count` stops, the focused one at `at` (-1 =
+ *  and every showContextMenu menu was so). The keys of an OPEN menu whose STOPS — every row, an OFF one too — are `count`, the focused one at `at` (-1 =
  *  none yet): ArrowDown / ArrowUp move (wrapping), Home / End go to the first / last; Enter and Space press the focused row (on a
  *  row with a submenu — `parent` — they open it, as ArrowRight does); ArrowLeft in a submenu (`inSub`) leaves it for its row;
  *  Escape closes the menu and gives the focus BACK to what opened it; Tab does too and lets the focus move on from there. An OFF row

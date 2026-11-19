@@ -120,9 +120,9 @@ function pluginRow({ id, label, description, tone, chip, chipTitle, onChip, sw, 
   const dot = Object.assign(document.createElement('span'), { className: 'plugin-dot' + (tone === 'ok' ? ' ok' : tone === 'warn' ? ' warn' : tone === 'err' ? ' err' : '') });
   const row = railRow({ className: 'plugin-row', lead: dot, name: label, nameClass: 'plugin-row-name', desc: description || '', descClass: 'plugin-row-desc', mainClass: 'plugin-row-main', main: [fact], controls: [c, sw, install, gear] });
   row.dataset.plugin = id;
-  // B-db5d (the coordinator's law, 04:47Z): an INSTALLED row's name (its id in brackets: long by construction) keeps its room — where
-  // the name and the controls do not fit on one line, the controls take their own line UNDER it (style.css .plugin-row-installed);
-  // the built-in rows keep their look
+  // B-db5d (the coordinator's law, 04:47Z): an INSTALLED row's name keeps its room — its label alone since the plain-words unit (the
+  // id on hover), a label a plugin chooses and may make long — where the name and the controls do not fit on one line, the controls
+  // take their own line UNDER it (style.css .plugin-row-installed); the built-in rows keep their look
   if (installed) row.classList.add('plugin-row-installed');
   row.querySelector('.rail-row-main').title = description || '';
   if (idTip) row.querySelector('.plugin-row-name').title = idTip; // lane ui-plain-words: the name shows, the id stays in its tooltip

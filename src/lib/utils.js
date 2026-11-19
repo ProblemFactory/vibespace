@@ -1440,12 +1440,14 @@ export function showContextMenu(x, y, items, className = 'context-menu', { up = 
   return pop;
 }
 /** B-6944 — THE KEYS OF AN OPEN MENU (PURE menu-place.js menuKeyStep decides): armed by showContextMenu just before its
- *  placement; a menu a KEY led to takes the focus at its first live row once it stands placed (a microtask: placeMenu shows it) */
+ *  placement; a menu a KEY led to takes the focus at its first STOP once it stands placed (a microtask: placeMenu shows it) */
 function armMenuKeys(pop, { opener = null, fromKey = false, keep = null } = {}) {
-  // a menu a KEY opened takes the focus at its first live row; Up / Down / Home
-  // / End move among the live rows of the menu holding the focus (an off row and a caption are skipped — their words are read),
-  // Enter / Space press, ArrowRight / Enter open a submenu and ArrowLeft leaves it, Escape (and Tab) close it and give the focus back
-  // to what opened it. A pointer's menu is unchanged: it takes no focus, and a key it never hears changes nothing.
+  // a menu a KEY opened takes the focus at its first STOP — an OFF row first is that stop (read with its why), never skipped for
+  // the live row behind it (its round: the plugin's «⋯» while an update runs — Update… off, then Uninstall…: the Enter that opened
+  // it landed on Uninstall…). Up / Down / Home / End move among the STOPS of the menu holding the focus — every row, an off one too
+  // (reached and read, Enter / Space on it press nothing); a caption is no stop. Enter / Space press, ArrowRight / Enter open a
+  // submenu and ArrowLeft leaves it, Escape (and Tab) close it and give the focus back to what opened it. A pointer's menu is
+  // unchanged: it takes no focus, and a key it never hears changes nothing.
   const stopsOf = (level) => [...level.querySelectorAll(':scope > [data-menu-stop], :scope > * > [data-menu-stop]')];
   const giveBack = () => { if (opener && opener !== document.body && opener.isConnected && typeof opener.focus === 'function') opener.focus({ preventScroll: true }); };
   pop.addEventListener('keydown', (e) => {
@@ -1463,12 +1465,24 @@ function armMenuKeys(pop, { opener = null, fromKey = false, keep = null } = {}) 
     if (st.press) { row.click(); if (!pop.isConnected && (!document.activeElement || document.activeElement === document.body)) giveBack(); return; }
     if (st.focus != null && stops[st.focus]) stops[st.focus].focus({ preventScroll: true });
   });
-  // …never from a field being typed in (a menu that opens while a person types leaves the caret where it is)
-  const typing = _editable(opener) || (!!opener && opener.tagName === 'IFRAME');
-  // a redrawn menu puts the focus back on the row it was on (by its words), else its first live row
-  if (fromKey && !typing) queueMicrotask(() => { if (!pop.isConnected) return; const all = stopsOf(pop); const live = all.filter((r) => r.getAttribute('aria-disabled') !== 'true'); const at = (keep && all.find((r) => (r.textContent || '').trim() === keep)) || live[0] || all[0]; if (at) at.focus({ preventScroll: true }); });
+  // …never from where a person's keys go (menuOpenerTyping: a field, a frame, a desktop's or a live browser's view — a menu that
+  // opens while a person types leaves the focus where it is)
+  const typing = menuOpenerTyping(opener);
+  // a redrawn menu puts the focus back on the row it was on (by its words), else on its first STOP
+  if (fromKey && !typing) queueMicrotask(() => { if (!pop.isConnected) return; const all = stopsOf(pop); const at = (keep && all.find((r) => (r.textContent || '').trim() === keep)) || all[0]; if (at) at.focus({ preventScroll: true }); });
 }
-/** B-6944: a menu row that is a STOP for the keys (a live row) — role menuitem, focusable by script; a dead one is aria-disabled */
+/** B-6944 ② (its round — THE TYPING GUARD counted fields only). PURE over the element holding the focus when a menu opens: do a
+ *  person's KEYS go there? A field (the caret), a frame, or a VIEW that takes keys — a desktop's picture (noVNC's canvas, a stream's
+ *  video) or the live browser view's own root: a menu opened by code within a second of a character typed there took the focus
+ *  and the characters after it. Then the menu takes no focus. */
+export function menuOpenerTyping(el) {
+  if (!el) return false;
+  if (_editable(el)) return true;
+  const tag = String(el.tagName || '').toUpperCase();
+  return tag === 'IFRAME' || tag === 'CANVAS' || tag === 'VIDEO' || !!(el.classList && typeof el.classList.contains === 'function' && el.classList.contains('browser-live'));
+}
+/** B-6944: a menu row that is a STOP for the keys — role menuitem, focusable by script; a live row presses, an OFF one (aria-disabled)
+ *  is a stop too: reached and read with its why, never pressed */
 function menuStop(el, live) { el.setAttribute('role', 'menuitem'); el.tabIndex = -1; el.dataset.menuStop = '1'; if (!live) el.setAttribute('aria-disabled', 'true'); }   // a dead row is a stop too (read, never pressed)
 // B-6944: did a KEY lead to the menu that opens now? A gesture key (Enter / Space on a focused button, an arrow, a shortcut — never
 // plain typing in a field: isGestureKey) within MENU_KEY_MS; a pointer press takes it back — `_menuKeyAt`, stamped by the page's two
