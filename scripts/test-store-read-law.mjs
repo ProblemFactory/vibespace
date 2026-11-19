@@ -539,7 +539,7 @@ console.log('§5 job-notifications.json (src/jobs.js) — every job notice still
   ok(r.stableWords, 'its read r2 (S1): the item\'s words carry no time — a restart\'s re-filing during the same hold matches the open item by its words (ONE item a hold)');
   ok(r.rmCode === 'notifs-unread' && r.rmKept, 'its read r2 (M2): removing a CLEARED job while the file is held is refused by name — the record that judges its waiting notices stays', { rmCode: r.rmCode, rmKept: r.rmKept });
   const MERGE = '        const mine = merge ? (this.pendingNotifs.get(cid) || []).filter((n) => !list.includes(n)) : [];\n';
-  const CLEAR = "        for (const n of list) { const j = this.jobs.get(n.jobId) || (n.jobId && !merge && !this.archive && !this.readOnly ? (this._loadArchive() || []) : (this.archive || [])).find((r) => r && r.id === n.jobId); if (j && j.clearedAt && !(Number(n.ts) > Math.max(j.clearedAt, j.reclearedAt || 0))) { n.jobName = CLEARED_TEXT; n.text = CLEARED_TEXT; } }\n";
+  const CLEAR = "        for (const n of list) { const j = this.jobs.get(n.jobId) || (n.jobId && !merge && !this.archive && !this.readOnly ? this._archiveAtBoot() : (this.archive || [])).find((r) => r && r.id === n.jobId); if (j && j.clearedAt && !(Number(n.ts) > Math.max(j.clearedAt, j.reclearedAt || 0)) && (n.text !== CLEARED_TEXT || n.jobName !== CLEARED_TEXT)) { n.jobName = CLEARED_TEXT; n.text = CLEARED_TEXT; this._dirty = true; } }   // its read r3 (N6): the rewrite is written by the next tick\n";
   ok(JSRC.split(MERGE).length === 2 && JSRC.split(CLEAR).length === 2, 'control setup: the anchors of the controls «the merge» and «the clear at the merge» are in jobs.js');
   const rm = await scene(MJ.load('src/jobs.js', JSRC.replace(MERGE, '        const mine = [];   /* MUTANT: no merge */\n'), 'no-merge'), 'notifs-no-merge');
   ok(rm.old.length === 1, 'CONTROL (no merge, in a copy): the notice filed for conv-old while held is LOST at the read (the file\'s list replaced it)', rm.old);
@@ -568,6 +568,46 @@ console.log('§5 job-notifications.json (src/jobs.js) — every job notice still
     const lost = filedT.filter((n) => n && n.fact === 'notifs-lost');
     ok(lost.length === 1 && lost[0].words && lost[0].words.params && lost[0].words.params.file === asides[0], 'its read r2 (S2): the read again that found torn bytes SAYS the waiting notices were lost, naming the copy kept aside — never only a journal line', lost.map((n) => n.words));
     J.shutdown();
+  }
+  // its read r3: (M1) a read again that hangs keeps its ONE slot until it settles — no second read per try (a thread of the pool
+  // each); (S1) the read waits while the job records that judge its notices are held; (S2) the hourly gc keeps a CLEARED record
+  // while the notices are held (its record judges them)
+  {
+    const SLOT = '    const read = await p; clearTimeout(tm);\n', JUDGE = "    if (this._unread.store || this._unread.archive) { if (this._notifsP === p) this._notifsP = null;", GCK = '          if (this._notifsUnread && job.clearedAt) continue;';
+    ok(JSRC.split(SLOT).length === 2 && JSRC.split(JUDGE).length === 2 && JSRC.split(GCK).length === 2, 'control setup: the anchors of the r3 controls are in jobs.js');
+    const r3 = async (Mod, name) => {
+      const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
+      const F = path.join(d, 'job-notifications.json'); plant(F, body);
+      const J = new Mod.JobManager({ dataDir: d, broadcast() { }, notifyUser() { return { ok: true }; }, resolveNotice() { }, log: () => { }, logsSweep: { bootDelayMs: 3600e3 }, unreadRetry: { readMs: 20 } });
+      J.init();
+      // (M1) the read hangs
+      const prf = fs.promises.readFile; let calls = 0, fail = null; const hung = new Promise((_, rj) => { fail = rj; });
+      fs.promises.readFile = function (f, ...a) { if (String(f) === F) { calls++; return calls === 1 ? hung : prf.call(this, f, ...a); } return prf.call(this, f, ...a); };
+      const keep = setInterval(() => { }, 1000);
+      let whileHung = 0;
+      try {
+        const first = J._notifsRetry(); await new Promise((r) => setTimeout(r, 60));   // past the bound: said, still waited for
+        await J._notifsRetry(); whileHung = calls;                                     // no second read while it hangs
+        fail(Object.assign(new Error('the read failed'), { code: 'EACCES' })); await first;   // it settles — unreadable: the hold stands
+      } finally { fs.promises.readFile = prf; clearInterval(keep); }
+      // (S1) the records are held: a readable notices file is not merged
+      const lifted0 = !J._notifsUnread;
+      let waitedForRecords = null;
+      if (!lifted0) { J._unread.store = { code: 'EACCES', at: Date.now() }; unplant(F, body); J._notifsMissingAt = 0; await J._notifsRetry(); waitedForRecords = !!J._notifsUnread; J._unread.store = null; }
+      // (S2) the gc while held: a cleared, long-ended task is kept
+      J._notifsUnread = J._notifsUnread || { code: 'EACCES', at: Date.now() };
+      J.jobs.set('jb-0n000077', { id: 'jb-0n000077', kind: 'task', name: 'x', state: 'done', clearedAt: 5, owner: {}, access: { view: 'session', control: 'session' }, runs: [{ endedAt: 1 }] });
+      await J._gc({ now: Date.now() });
+      const gcKept = J.jobs.has('jb-0n000077');
+      J._notifsUnread = null; J.shutdown();
+      return { whileHung, waitedForRecords, gcKept };
+    };
+    const g = await r3(require(path.join(ROOT, 'src/jobs.js')), 'notifs-r3');
+    ok(g.whileHung === 1 && g.waitedForRecords === true && g.gcKept, 'its read r3: a hung read keeps its one slot (no second read per try — M1), the read waits while the job records are held (S1), the gc keeps a cleared record while the notices are held (S2)', g);
+    const gx = await r3(MJ.load('src/jobs.js', JSRC.replace(SLOT, '    this._notifsP = null; const read = await p; clearTimeout(tm);   /* MUTANT: the slot freed at once */\n'), 'r3-slot'), 'notifs-r3-slot');
+    const gj = await r3(MJ.load('src/jobs.js', JSRC.replace(JUDGE, '    if (false) { if (this._notifsP === p) this._notifsP = null;'), 'r3-judge'), 'notifs-r3-judge');
+    const gg = await r3(MJ.load('src/jobs.js', JSRC.replace(GCK, '          /* MUTANT: gc as before */'), 'r3-gc'), 'notifs-r3-gc');
+    ok(gx.whileHung === 2 && gj.waitedForRecords === false && !gg.gcKept, 'CONTROLS (each cure cut alone, in a copy): a second read starts while the first hangs; the notices are merged while their records are held; the gc removes the cleared record', { gx, gj, gg });
   }
   // its read r2 (M1): a clear made while the file was HELD, then a restart — the NEXT boot reads the file whole and judges it by the
   // record's clearedAt (in jobs.json); the release judged only at a read again in the same process
