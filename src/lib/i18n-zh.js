@@ -9209,6 +9209,8 @@ export default {
   "Proves Dropline accepts the key and names its account — not that this page may use a microphone.": "证明 Dropline 接受这个 key 并说出它的账号——不证明这个页面能用麦克风。",
   "Connect with Fish Audio": "用 Fish Audio 连接",
   "Disconnected here — Fish Audio keeps the permission until you remove it at fish.audio": "已在这里断开——Fish Audio 那边的授权要到 fish.audio 移除才会撤销",
+  "A Fish Audio client id saved here (by an earlier Connect, or typed) hides this cluster's Dropline settings": "这里保存的 Fish Audio 客户端 ID（之前的连接写入的，或手动填写的）挡住了这个集群的 Dropline 设置",
+  "Use the cluster's settings": "改用集群的设置",
   "Your Dropline sign-in has expired — connect again": "Dropline 登录已过期，重新连接",
   "Connecting needs an https address: turn on Tailscale HTTPS, or paste a Dropline key": "连接需要 https 地址：开启 Tailscale HTTPS，或直接粘贴 Dropline key",
   "This instance has no https address — ask the person who runs it to set VIBESPACE_PUBLIC_URL (an https address), or paste a Dropline key": "这个实例没有 https 地址——请运行它的人设置 VIBESPACE_PUBLIC_URL（一个 https 地址），或直接粘贴 Dropline key",

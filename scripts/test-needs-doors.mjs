@@ -1276,6 +1276,24 @@ if (CL) {
     ok(/renderConnectRow\(box, DROPLINE_CONNECT, st, rerender, \{ app \}\)/.test(VT) && /renderConnectRow\(box, v\.connect, st, \(\) => refresh\(v\.id\), \{ app \}\)/.test(IWS) && /renderVoiceSheet\([\s\S]{0,120}app: this \}\)/.test(PU) && !/t\('[^']*Services › Integrations/.test(VT + PU),   // stale-pins: kept — a «gone» check: the old words must stay out
       'plugins-integrations-13: both surfaces hand the app to the Connect block (its door is drawn on the voice sheet AND the Integrations card); no wrong menu path in the key link or the chip\'s title');
   }
+  // B-1e9a cure: the person's row hides the cluster's Dropline settings (an earlier Connect saved its own client id there) — the
+  // Connect block SAYS it, with the ONE press that heals it: PUT /api/integrations/<row> {use:'cluster'}, then a redraw
+  {
+    const puts = []; let redrawn = 0;
+    FETCH = async (url, o) => { puts.push([String(url), o && o.method, o && o.body ? JSON.parse(o.body) : null]); return { ok: true, status: 200, json: async () => ({ ok: true }) }; };
+    const decl = { label: 'Connect', words: { shadowed: 'An earlier Connect hides the cluster settings' }, whys: { 'self-hosted': 'x' } };
+    const box = DOC.createElement('div');
+    OCR.renderConnectRow(box, decl, { presetShadowed: 'dropline', connectVia: 'relay', account: {} }, () => { redrawn++; }, {});
+    const sh = box.querySelector('.oauth-connect-shadow-words'), use = box.querySelector('.oauth-use-cluster');
+    if (use) use.click();
+    await new Promise((r) => setTimeout(r, 5));   // the press's PUT and its redraw
+    const plain = DOC.createElement('div');
+    OCR.renderConnectRow(plain, decl, { presetShadowed: null, connectVia: 'relay', account: {} }, () => {}, {});
+    ok(!!sh && /hides the cluster settings/.test(sh.textContent) && !!use && puts.length === 1 && puts[0][0] === '/api/integrations/dropline' && puts[0][1] === 'PUT' && JSON.stringify(puts[0][2]) === '{"use":"cluster"}' && redrawn === 1
+      && !plain.querySelector('.oauth-use-cluster'),
+      'B-1e9a cure: a person\'s row hiding the cluster\'s settings is SAID on the Connect block with its one press — «Use the cluster\'s settings» = PUT /api/integrations/dropline {use:"cluster"}, then a redraw; with nothing hidden there is no such press', { puts, redrawn, words: sh && sh.textContent });
+    FETCH = async () => { throw new Error('no fetch in this leg'); };
+  }
   // browser-profiles-4: the browser list's needs said ONCE, each with its door's target — the chosen cloud browser's own card
   {
     const rows = [{ id: 'chromium', control: { ok: true } }, { id: 'cloud:browserbase', control: { ok: true } }, { id: 'cloud:kernel', control: { ok: true } }, { id: 'local-window', control: { ok: false, code: 'provider_needs_consent' } }];

@@ -837,10 +837,10 @@ console.log('§7 fleet.json browserEngine — the cluster layer, the override, b
   const relayLess = async (mod, tag) => {
     const st = mk({ VIBESPACE_INTEGRATION_DROPLINE_CLIENTID: CID }, tag), w = startWorld(mod, st);
     const plan = w.door.callbackPlan(), why = w.door.connectWhy(), r = await w.door.start({});
-    return { via: plan.via, redirectUri: plan.redirectUri, why, ok: r.ok, code: r.connectWhy || null, message: r.message || '', regs: w.regs() };
+    return { via: plan.via, redirectUri: plan.redirectUri, why, ok: r.ok, code: r.connectWhy || null, routeCode: r.why || null, message: r.message || '', regs: w.regs() };
   };
   const rl = await relayLess(DO, 'norelay');
-  ok(rl.via === null && rl.redirectUri === null && rl.why === 'preset-no-relay' && rl.ok === false && rl.code === 'preset-no-relay' && /Dropline preset a relayUrl \(or the fleet a relay page\)/.test(rl.message) && rl.regs === 0,
+  ok(rl.via === null && rl.redirectUri === null && rl.why === 'preset-no-relay' && rl.ok === false && rl.code === 'preset-no-relay' && rl.routeCode === 'preset-no-relay' && /Dropline preset a relayUrl \(or the fleet a relay page\)/.test(rl.message) && rl.regs === 0,
     'B-1e9a: a fleet preset with a client id and NO relay page (none of its own, none of the fleet\'s) ⇒ no Connect (never the pod\'s own https for the fleet\'s client), nothing registered, the reason «preset-no-relay» names the preset\'s relayUrl (or the fleet\'s page) — words true on every deploy road', rl);
   // …the FLEET's sign-in relay page (fleet.json relayUrl; here the chart's last-release env form) serves a preset that names none
   const FR = 'https://fleet-relay.example.test/relay/';
@@ -851,9 +851,48 @@ console.log('§7 fleet.json browserEngine — the cluster layer, the override, b
   };
   const fr = await fleetRelay(DO, 'fleetrelay');
   ok(fr.via === 'relay' && fr.redirectUri === FR && fr.ok === true && fr.regs === 0, 'B-1e9a: a preset client with no relay page of its own takes the FLEET\'s sign-in relay page (the one road every integration reads) — Connect runs there, nothing registered', fr);
-  const noFleet = M.load('src/server/dropline-oauth.js', anchored(DOSRC, "preset.relayUrl || fleet || ''", "preset.relayUrl || ''", 'B-1e9a: the fleet relay page not read'), 'dl-nofleet');   // stale-pins: kept — a RED control: the pre-B-1e9a relay pick restored on purpose
+  const noFleet = M.load('src/server/dropline-oauth.js', anchored(DOSRC, "relayPick({ fleet: String(safeCall(() => (st && typeof st.fleetRelayUrl === 'function' ? st.fleetRelayUrl() : ''), '') || ''), preset:", "relayPick({ fleet: '', preset:", 'B-1e9a: the fleet relay page not read'), 'dl-nofleet');
   const frr = await fleetRelay(noFleet, 'fleetrelay-red');
   ok(frr.via === null && frr.ok === false, 'RED control: without the fleet\'s page that preset is refused although the fleet has a relay page', frr);
+  // B-1e9a cure (主开发's must): the fleet's page goes through THE OWNING RULE (consent-road relayPick) — a plain-http fleet page is
+  // NO page: the Connect refuses by name (preset-no-relay), never handing http to the vendor as the redirect
+  const httpFleet = async (mod, tag) => {
+    const st = mk({ VIBESPACE_INTEGRATION_DROPLINE_CLIENTID: CID, VIBESPACE_OAUTH_RELAY_URL: 'http://fleet-relay.example.test/relay/' }, tag), w = startWorld(mod, st);
+    const plan = w.door.callbackPlan(), r = await w.door.start({});
+    return { via: plan.via, redirectUri: plan.redirectUri, ok: r.ok, code: r.why || null, regs: w.regs() };
+  };
+  const hf = await httpFleet(DO, 'httpfleet');
+  ok(hf.via === null && hf.redirectUri === null && hf.ok === false && hf.code === 'preset-no-relay' && hf.regs === 0, 'B-1e9a cure: a PLAIN-HTTP fleet relay page is no page by the owning rule — the Connect refuses by name (preset-no-relay), nothing registered, never http handed to the vendor', hf);
+  const rawFleet = M.load('src/server/dropline-oauth.js', anchored(DOSRC, "      ? relayPick({ fleet: String(safeCall(() => (st && typeof st.fleetRelayUrl === 'function' ? st.fleetRelayUrl() : ''), '') || ''), preset: String(preset.relayUrl || '') }).url\n", "      ? (String(preset.relayUrl || '') || String(safeCall(() => st.fleetRelayUrl(), '') || ''))\n", 'B-1e9a cure: the fleet page read raw (a second copy of the rule)'), 'dl-rawfleet');   // stale-pins: kept — a RED control: the raw read restored on purpose
+  const hfr = await httpFleet(rawFleet, 'httpfleet-red');
+  ok(hfr.via === 'relay' && /^http:\/\//.test(hfr.redirectUri || ''), 'RED control: the fleet page read RAW (a second copy of the rule) hands the vendor a plain-http redirect', hfr);
+  // B-1e9a cure: a LOCKED vault at Connect over an apiKey-only preset — the sealed tokens file is read by start(): refused BY NAME
+  // (vault-locked) — the parent answered an unnamed 500 with the store's raw sentence (the RED below)
+  const lockedAt = async (mod, tag) => {
+    const st = mk({ VIBESPACE_INTEGRATION_DROPLINE_APIKEY: KEY }, tag); let regs = 0;
+    const tokens = { read: () => { throw Object.assign(new Error('the vault is locked'), { code: 'vault_locked' }); }, write: () => { throw Object.assign(new Error('the vault is locked'), { code: 'vault_locked' }); }, clear: () => { } };
+    const door = mod.create({ client: { register: async () => ({ clientId: 'selfreg' + 'Client0' + (++regs) }), authorizeUrl: () => 'https://consent.example.test/' }, flows: { begin: async () => ({ flowId: 'f1', consentUrl: 'u' }) }, integrations: () => st, instanceUrl: () => 'https://hub.example.ts.net', tokens });
+    let r; try { r = await door.start({}); } catch (e) { r = { threw: e.code || e.message }; }
+    return { ok: r.ok, code: r.why || r.threw || null, regs };
+  };
+  const la = await lockedAt(DO, 'lockedat');
+  ok(la.ok === false && la.code === 'vault-locked' && la.regs === 0, 'B-1e9a cure: a locked vault at Connect over an apiKey-only preset ⇒ refused by name (vault-locked), nothing registered', la);
+  const rawRead = M.load('src/server/dropline-oauth.js', anchored(DOSRC, "    try { rec = tokens.read() || {}; } catch (e) { if (locked(e)) return LOCKED; throw e; }\n", "    rec = tokens.read() || {};\n", 'B-1e9a cure: the raw read of the sealed file'), 'dl-rawread');   // stale-pins: kept — a RED control: the parent's raw read restored on purpose
+  const lar = await lockedAt(rawRead, 'lockedat-red');
+  ok(lar.code === 'vault_locked' && lar.regs === 0, 'RED control: the raw read (the parent) throws the store\'s own error — an unnamed refusal (the route\'s 500), not the card\'s vault-locked', lar);
+  // B-1e9a cure: an instance that Connected over an apiKey-only preset BEFORE the fix keeps the person's row {clientId} — the door
+  // NAMES it (presetShadowed → the card's one press), and the store's «use the cluster's settings» heals it
+  const shadow = (mod, tag, env, ownVals) => { const st = mk(env, tag); if (ownVals) st.setIntegration('dropline', ownVals); return { st, door: startWorld(mod, st).door }; };
+  const sh1 = shadow(DO, 'shadow', { VIBESPACE_INTEGRATION_DROPLINE_APIKEY: KEY }, { clientId: 'oldClient' + '0001' });
+  const named = sh1.door.presetShadowed(); sh1.st.useClusterDefault('dropline');
+  const healed = sh1.door.presetShadowed(), back = sh1.st.resolveIntegration('dropline');
+  const ownKey = shadow(DO, 'shadow-own', { VIBESPACE_INTEGRATION_DROPLINE_APIKEY: KEY }, { apiKey: ['dl', 'ownKey' + 'Xyz789'].join('_') }).door.presetShadowed();
+  const noPre = shadow(DO, 'shadow-none', {}, { clientId: 'oldClient' + '0002' }).door.presetShadowed();
+  ok(named === 'dropline' && healed === null && back.source === 'cluster' && (back.values || {}).apiKey === KEY && ownKey === null && noPre === null,
+    'B-1e9a cure: the person\'s row {clientId} over a preset is NAMED (presetShadowed = the row) and «use the cluster\'s settings» heals it (the cluster\'s key resolves again); the person\'s own key, or no preset, is no such case', { named, healed, back: back.source, ownKey, noPre });
+  const anyRow = M.load('src/server/dropline-oauth.js', anchored(DOSRC, " && typeof st.presetsFor === 'function' && st.presetsFor(KIND).length > 0 ? KIND : null;", " ? KIND : null;", 'B-1e9a cure: shadow without asking for a preset'), 'dl-anyrow');
+  const nr = shadow(anyRow, 'shadow-none-red', {}, { clientId: 'oldClient' + '0003' }).door.presetShadowed();
+  ok(nr === 'dropline', 'RED control: without the preset check a person\'s own client id on a pod with NO preset would be offered «use the cluster\'s settings»', { nr });
   const noBranch = M.load('src/server/dropline-oauth.js', anchored(DOSRC, "    if (c.preset && !c.relayUrl) return { redirectUri: null, via: null, presetNoRelay: true, ...c };\n", '', 'B-1e9a: the relay-less preset branch removed'), 'dl-nobranch');
   const rr = await relayLess(noBranch, 'norelay-red');
   ok(rr.via === 'own-https' && rr.ok === true, 'RED control: without the branch the fleet\'s client is sent to the pod\'s own https (the vendor would refuse the callback)', rr);
@@ -871,6 +910,16 @@ console.log('§7 fleet.json browserEngine — the cluster layer, the override, b
     c.disconnect();
     return { afterSignIn, afterDisconnect: { access: !!(tok && tok.access), kept: tok && tok.registeredClientId, connected: c.connected() } };
   };
+  // B-1e9a cure: a Disconnect while the vault is LOCKED refuses by name — never the sealed file cleared blind (the registration with it)
+  const lockedDisc = (mod) => {
+    let cleared = 0, wrote = 0;
+    const tokens = { read: () => { throw Object.assign(new Error('the vault is locked'), { code: 'vault_locked' }); }, write: () => { wrote++; }, clear: () => { cleared++; } };
+    const c = mod.create({ tokens, fetchImpl: async () => ({ ok: true, json: async () => ({}) }), log: quiet.log });
+    let code = null; try { c.disconnect(); } catch (e) { code = e.code || e.message; }
+    return { code, cleared, wrote };
+  };
+  const ld = lockedDisc(DC);
+  ok(ld.code === 'vault-locked' && ld.cleared === 0 && ld.wrote === 0, 'B-1e9a cure: a Disconnect while the vault is locked ⇒ refused by name (vault-locked) — the sealed sign-in and the kept registration untouched', ld);
   const cy = await carry(DC);
   ok(cy.afterSignIn.access && cy.afterSignIn.kept === 'selfregClient01' && !cy.afterDisconnect.access && cy.afterDisconnect.kept === 'selfregClient01' && cy.afterDisconnect.connected === false,
     'B-1e9a: the real client — the sign-in keeps the hub\'s registered client beside the pair; Disconnect forgets the sign-in (not connected) and keeps the registration', cy);
@@ -878,9 +927,12 @@ console.log('§7 fleet.json browserEngine — the cluster layer, the override, b
   const noCarry = M.load('src/server/dropline-client.js', anchored(DCSRC, ", registeredClientId: (pairNow() || {}).registeredClientId || null });", " });", 'B-1e9a: the sign-in drops the registration'), 'dl-nocarry');
   const cyr = await carry(noCarry);
   ok(!cyr.afterSignIn.kept, 'RED control: a sign-in that does not carry the registration loses the hub\'s client (the next Connect would register another)', cyr);
-  const oldDisc = M.load('src/server/dropline-client.js', anchored(DCSRC, "if (p.registeredClientId) tokens.write({ registeredFor: p.registeredFor || null, registeredClientId: p.registeredClientId }); else tokens.clear();", "tokens.clear();", 'B-1e9a: Disconnect clears the registration'), 'dl-olddisc');
+  const oldDisc = M.load('src/server/dropline-client.js', anchored(DCSRC, "    if (p.registeredClientId) tokens.write({ registeredFor: p.registeredFor || null, registeredClientId: p.registeredClientId }); else tokens.clear();", "    tokens.clear();", 'B-1e9a: Disconnect clears the registration'), 'dl-olddisc');
   const cyd = await carry(oldDisc);
   ok(cyd.afterSignIn.kept === 'selfregClient01' && !cyd.afterDisconnect.kept, 'RED control: the old Disconnect (clear everything) drops the registration — a new vendor client at the next Connect', cyd);
+  const blindDisc = M.load('src/server/dropline-client.js', anchored(DCSRC, "    if (pairLocked) throw lockedError();", "    if (false) throw lockedError();", 'B-1e9a cure: a locked Disconnect not refused'), 'dl-blinddisc');
+  const ldr = lockedDisc(blindDisc);
+  ok(ldr.code === null && ldr.cleared === 1, 'RED control: a Disconnect that does not refuse while locked clears the sealed file blind', ldr);
   quiet.lines.length = 0; empty.stop?.();
 }
 

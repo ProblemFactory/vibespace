@@ -26,6 +26,21 @@ const WHY_DOORS = Object.freeze({ 'self-hosted': (app) => ({ also: httpsAuto(app
 export function renderConnectRow(box, decl, st, rerender, { app = null } = {}) {
   const a = (st && st.account) || {};
   const W = decl.words || {};
+  // B-1e9a cure: the person's row hides the cluster's settings (an earlier Connect saved its own client id there) — said, with
+  // the ONE press that heals it: the store's «use the cluster's settings» (PUT /api/integrations/<row> {use:'cluster'})
+  if (st && st.presetShadowed && W.shadowed) {
+    const sh = el('div', 'plugin-cfg-row oauth-connect-shadow');
+    const sw = el('div', 'plugin-detail plugin-cfg-warn oauth-connect-shadow-words', t(W.shadowed));
+    const use = el('button', 'mounts-btn oauth-use-cluster', t('Use the cluster\'s settings'));
+    use.onclick = async () => {
+      use.disabled = true;
+      const r = await fetchJson(`/api/integrations/${encodeURIComponent(st.presetShadowed)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ use: 'cluster' }) });
+      if (!r || r.error) { showToast((r && (r.message || r.error)) || t('Failed'), { type: 'error' }); use.disabled = false; return; }   // fetchJson answers null when the hub is unreachable
+      rerender();
+    };
+    sh.append(sw, use);
+    box.appendChild(sh);
+  }
   const row = el('div', 'plugin-cfg-row oauth-connect');
   const words = el('div', 'plugin-detail oauth-connect-words');
   if (a.tier === 'oauth' && a.state === 'connected') {
@@ -34,7 +49,7 @@ export function renderConnectRow(box, decl, st, rerender, { app = null } = {}) {
     const off = el('button', 'mounts-btn oauth-disconnect', t('Disconnect'));
     off.onclick = async () => {
       off.disabled = true;
-      try { await call(decl.disconnect, {}); showToast(t(W.disconnected)); rerender(); } catch (e) { showToast(e.message, { type: 'error' }); off.disabled = false; }
+      try { await call(decl.disconnect, {}); showToast(t(W.disconnected)); rerender(); } catch (e) { showToast(e.code === 'vault-locked' ? t('The vault is locked — unlock it first (Unlock… at the top of the page; For you names what is waiting on it)') : e.message, { type: 'error' }); off.disabled = false; }
     };
     row.append(words, off);
     box.appendChild(row);
@@ -79,7 +94,9 @@ export function renderConnectRow(box, decl, st, rerender, { app = null } = {}) {
     } catch (e) {
       try { if (tab) tab.close(); } catch { }
       words.className = 'plugin-detail plugin-cfg-warn oauth-connect-words';
-      if (e.code === 'needs-https') sayWhy(); else words.textContent = e.message;
+      if (e.code === 'needs-https' || e.code === 'preset-no-relay') sayWhy();   // B-1e9a cure: the relay-less fleet client is a why of its own
+      else if (e.code === 'vault-locked') words.textContent = t('The vault is locked — unlock it first (Unlock… at the top of the page; For you names what is waiting on it)');
+      else words.textContent = e.message;
       go.disabled = false;
     }
   };

@@ -9208,6 +9208,8 @@ export default {
   "Proves Dropline accepts the key and names its account — not that this page may use a microphone.": "Dropline がキーを受け付け、そのアカウント名を返すことを確かめます——このページがマイクを使えることまでは確かめません。",
   "Connect with Fish Audio": "Fish Audio で接続",
   "Disconnected here — Fish Audio keeps the permission until you remove it at fish.audio": "ここでは解除しました——Fish Audio 側の許可は fish.audio で削除するまで残ります",
+  "A Fish Audio client id saved here (by an earlier Connect, or typed) hides this cluster's Dropline settings": "ここに保存された Fish Audio クライアント ID（以前の接続によるもの、または手入力）が、このクラスターの Dropline 設定を隠しています",
+  "Use the cluster's settings": "クラスターの設定を使う",
   "Your Dropline sign-in has expired — connect again": "Dropline のサインインが期限切れです——もう一度接続してください",
   "Connecting needs an https address: turn on Tailscale HTTPS, or paste a Dropline key": "接続には https のアドレスが必要です：Tailscale HTTPS をオンにするか、Dropline のキーを貼り付けてください",
   "This instance has no https address — ask the person who runs it to set VIBESPACE_PUBLIC_URL (an https address), or paste a Dropline key": "このインスタンスには https のアドレスがありません — 運用している人に VIBESPACE_PUBLIC_URL（https のアドレス）を設定してもらうか、Dropline のキーを貼り付けてください",

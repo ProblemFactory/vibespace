@@ -99,7 +99,7 @@ const TEST_KINDS = Object.freeze(['credential-exchange', 'shape-only', 'reachabi
 const REDIRECT_KEYS = Object.freeze(['console', 'refusal', 'create', 'clientTypes', 'loopback', 'also', 'selfRegisters', 'vendor']);
 const REDIRECT_ALSO = Object.freeze(['drive']);
 /** lane dropline-connect-door: a `connect` block's words and its `connectWhy` codes — closed sets (checkRow) */
-const CONNECT_WORDS = Object.freeze(['expired', 'finish', 'done', 'disconnected']);
+const CONNECT_WORDS = Object.freeze(['expired', 'finish', 'done', 'disconnected', 'shadowed']);
 const CONNECT_WHYS = Object.freeze(['self-hosted', 'operator', 'preset-no-relay']);
 /** design 012: how an account of a bindsPerAccount row signs in when it is not the row's OAuth client. */
 const SIGNIN_KINDS = Object.freeze(['paste']);
@@ -371,6 +371,7 @@ const ROWS = Object.freeze([
         finish: i18nKey('Finish the sign-in in the new tab (Fish Audio mails you a code)…'),
         done: i18nKey('Dropline connected'),
         disconnected: i18nKey('Disconnected here — Fish Audio keeps the permission until you remove it at fish.audio'),
+        shadowed: i18nKey('A Fish Audio client id saved here (by an earlier Connect, or typed) hides this cluster\'s Dropline settings'),
       },
       whys: {
         'self-hosted': i18nKey('Connecting needs an https address: turn on Tailscale HTTPS, or paste a Dropline key'),

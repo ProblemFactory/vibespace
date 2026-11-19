@@ -221,7 +221,13 @@ function create({ integrations = null, pluginOn = () => true, base = DROPLINE_BA
   /** Disconnect: the pair is forgotten HERE (Fish Audio keeps the grant until the person removes it at fish.audio) */
   // B-1e9a (the read): the sign-in goes; a client this hub REGISTERED over a cluster preset stays (a public client, no secret) —
   // «one client per deployment»: the next Connect reuses it instead of registering another at the vendor
-  function disconnect() { if (tokens) { const p = pairNow() || {}; if (p.registeredClientId) tokens.write({ registeredFor: p.registeredFor || null, registeredClientId: p.registeredClientId }); else tokens.clear(); } return { ok: true }; }
+  function disconnect() {
+    if (!tokens) return { ok: true };
+    const p = pairNow() || {};
+    if (pairLocked) throw lockedError();   // B-1e9a cure: a LOCKED vault refuses by name — never the sealed file cleared blind (the kept registration with it)
+    if (p.registeredClientId) tokens.write({ registeredFor: p.registeredFor || null, registeredClientId: p.registeredClientId }); else tokens.clear();
+    return { ok: true };
+  }
   function account() {
     if (credentialOf().key) return { tier: 'key', state: 'connected', name: null, team: null };
     const p = pairNow();

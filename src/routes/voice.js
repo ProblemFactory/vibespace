@@ -10,7 +10,7 @@
 //                            | {error:<voiceWords code>, retryAfter?} with the vendor's status (429 keeps Retry-After)
 // P1 (lane voice-p1-oauth-teach) — every route below is the OWNER's (an agent's vsst_/jbt_ bearer is refused 403: a
 // sign-in and a press on 加入词库 / 发送 are the person's own acts):
-//   POST /api/voice/oauth/start {origin}   → {ok, url, flowId, via} | 409 {error:'needs-https'}   (the card opens url in a NEW TAB;
+//   POST /api/voice/oauth/start {origin}   → {ok, url, flowId, via} | 409 {error:'needs-https'|'preset-no-relay'} | 423 {error:'vault-locked'}   (the card opens url in a NEW TAB;
 //                                            never gated on the plugin's switch: a person connects first, switches on after)
 //   GET  /api/voice/oauth/flow/:id         → {done, ok, error}                                     (the card's wait for the landing)
 //   POST /api/voice/oauth/disconnect       → {ok}   (forgotten here; Fish Audio keeps the grant until removed at fish.audio)
@@ -32,7 +32,7 @@ function create({ client, prefs = () => ({}), oauth = null, teach = null, log = 
   const status = () => {
     const p = prefs() || {};
     const c = (p.config) || {};
-    return { on: !!p.enabled && client.connected(), enabled: !!p.enabled, connected: client.connected(), vaultLocked: !!(client.locked && client.locked()), language: VM.languageOf(c.language), account: client.account ? client.account() : null, teach: c.teach === true, context: c.context === true, connectVia: oauth ? oauth.callbackPlan().via : null, connectWhy: oauth ? oauth.connectWhy() : 'self-hosted' };
+    return { on: !!p.enabled && client.connected(), enabled: !!p.enabled, connected: client.connected(), vaultLocked: !!(client.locked && client.locked()), language: VM.languageOf(c.language), account: client.account ? client.account() : null, teach: c.teach === true, context: c.context === true, connectVia: oauth ? oauth.callbackPlan().via : null, connectWhy: oauth ? oauth.connectWhy() : 'self-hosted', presetShadowed: oauth && typeof oauth.presetShadowed === 'function' ? oauth.presetShadowed() : null };
   };
   const owner = (fn) => async (req, res) => {
     if (isAgentBearer(req)) return res.status(403).json({ error: 'human-triggered only', code: 'agent_forbidden' });
@@ -41,7 +41,7 @@ function create({ client, prefs = () => ({}), oauth = null, teach = null, log = 
   if (oauth) {
     router.post('/api/voice/oauth/start', owner(async (b) => {
       const r = await oauth.start({ origin: typeof b.origin === 'string' ? b.origin.slice(0, 300) : '' });
-      if (!r.ok) throw Object.assign(new Error(r.message || r.why), { status: 409, code: r.why });   // the words of the row's connect.whys
+      if (!r.ok) throw Object.assign(new Error(r.message || r.why), { status: r.why === 'vault-locked' ? 423 : 409, code: r.why });   // the words of the row's connect.whys (B-1e9a cure: a locked vault 423, as the client's own)
       return r;
     }));
     router.get('/api/voice/oauth/flow/:id', owner(async (b, req) => {

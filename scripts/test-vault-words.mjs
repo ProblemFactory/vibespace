@@ -144,7 +144,7 @@ const ROWS = {
   'src/server/engine-distribution.js': [['the Plugin Git credential is sealed in the locked vault', 'person', 'the kernel download\'s refusal after its anonymous try was refused (round 2: the credential is optional — the engine record\'s failure, the card, a first use\'s / the fleet\'s For-you detail)']],
   'src/lib/manage-agents.js': [[K1N, 'person', 'the accounts window\'s key-unreadable reason']],
   'src/lib/oat-shape-dialog.js': [[K1N, 'person', 'the guided door\'s answer to a locked vault (lane oat-add-door: its Unlock… door rides the toast)']],
-  'src/lib/oauth-connect-row.js': [[K1N, 'person', 'an OAuth plugin row whose sign-in is sealed']],
+  'src/lib/oauth-connect-row.js': [[K1N, 'person', 'an OAuth plugin row whose sign-in is sealed — its Unlock note, a Connect and a Disconnect refused while locked (B-1e9a cure)', { count: 3 }]],
   'src/lib/vault-reveal.js': [[K1N, 'person', 'the Vault window\'s reveal refused while locked']],
   'src/voice-model.js': [[K1N, 'person', 'voice input while the Dropline sign-in is sealed']],
   'src/lib/vault-window.js': [['The vault is locked — Unlock… above shows what it holds', 'person', 'the Vault window\'s own note (its header\'s Unlock… is the door)']],
@@ -161,6 +161,7 @@ const ROWS = {
     ['the Dropline sign-in opens after the owner unlocks it', 'both', 'the voice pair\'s sign-in sealed'],
     ['the vault is locked', 'match', 'recognises the sealed pair\'s refusal (its own error, the row above, says both)'],
   ],
+  'src/server/dropline-oauth.js': [['the Dropline sign-in opens after the owner unlocks it', 'both', 'a Dropline Connect refused while its sealed tokens file is locked (B-1e9a cure — the card words it with its own sentence)']],
   'src/server/desktop-access.js': [['the vault is locked — unlock it first', 'both', 'a person\'s remember-sign-in door refused (the page words it with machine-desktop\'s sentence)']],
   'src/job-notice.js': [
     ['waiting for the vault — it is locked; the owner has the unlock item', 'agent', 'a service\'s publish notice to its agent (the agent is told the owner already has it)'],
