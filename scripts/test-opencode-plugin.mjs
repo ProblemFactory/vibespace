@@ -162,7 +162,7 @@ console.log('— ③ a REAL keeper driven by the plugin record');
   // same rule over that argv with the host 0.0.0.0, and with no --hostname, fails.
   const loopbackOnly = (a) => Array.isArray(a) && a.filter((x) => x === '--hostname').length === 1 && a[a.indexOf('--hostname') + 1] === '127.0.0.1';
   ok('…and it asked the serve to listen on LOOPBACK ONLY (--hostname 127.0.0.1, once)', loopbackOnly(spawnArgs[0]), spawnArgs[0]);
-  ok('RED CONTROL: that rule fails on the argv with the host 0.0.0.0, and with no --hostname', !loopbackOnly((spawnArgs[0] || []).map((x) => (x === '127.0.0.1' ? '0.0.0.0' : x))) && !loopbackOnly((spawnArgs[0] || []).filter((x, i, a) => x !== '--hostname' && a[i - 1] !== '--hostname')));
+  ok('RED CONTROL: that rule fails on the argv with the host 0.0.0.0, and with no --hostname', loopbackOnly(spawnArgs[0]) && !loopbackOnly((spawnArgs[0] || []).map((x) => (x === '127.0.0.1' ? '0.0.0.0' : x))) && !loopbackOnly((spawnArgs[0] || []).filter((x, i, a) => x !== '--hostname' && a[i - 1] !== '--hostname')));
   const pid1 = facts.state().pid;
   ok('…the record is on disk for the next boot to reuse', fs.existsSync(path.join(dir, 'opencode-serve.json')) && JSON.parse(fs.readFileSync(path.join(dir, 'opencode-serve.json'), 'utf8')).pid === pid1);
   ok('…and discovery now returns the store (the whole point of the service)', (await facts.discover({})).length > 0);
