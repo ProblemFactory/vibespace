@@ -449,14 +449,23 @@ async function scene6(Dm, { stop = 'end', road = 'screencast', agentFirst = fals
 // test-browser-human-ui (g) is green on the box — the legs that need the hook are not run while it is off, BY NAME and counted
 const HOOK6 = D.PERSON_SIGNIN_HOOK === true;
 if (!HOOK6) {
-  console.log(`  ⊘ SKIP ⑥ B-b56d — ${26} legs of the person's sign-in hook: it is OUT of this release (PERSON_SIGNIN_HOOK false, the coordinator's order 2026-11-18 23:56Z; it ships only once test-browser-human-ui (g) is green on the box)`);
+  const SELF6 = read('scripts/test-browser-prompts.mjs'); // the legs not run, COUNTED from this file's own text (never typed)
+  const between = (from, to) => { const a = SELF6.indexOf(from), b = SELF6.indexOf(to, a + 1); return a >= 0 && b > a ? SELF6.slice(a, b) : ''; };
+  const N6 = [between('if (HOOK6) {\nconst s6 = await scene6(D);', '\n}\n{ // the person\'s window\'s two lines'), between('if (HOOK6) {\n{ // LAW 8', '\n}\nfs.rmSync(ROOT')].reduce((n, r) => n + (r.match(/\bok\(/g) || []).length, 0);
+  if (!N6) throw new Error('B-b56d OUT: the hook legs\' blocks were not found in this file — the count would be a guess');
+  console.log(`  ⊘ SKIP ⑥ B-b56d — ${N6} legs of the person's sign-in hook: it is OUT of this release (PERSON_SIGNIN_HOOK false, the coordinator's order 2026-11-18 23:56Z; it ships only once test-browser-human-ui (g) is green on the box)`);
   const o6 = await scene6(D, { stop: 'window' });
   ok(!o6.window.fe && o6.noWindow.fetch === 0, 'B-b56d OUT: the person browses with a window open and the watch arms NO sign-in hook (Fetch never enabled) — the release before B-b56d', o6.window);
+  ok(o6.window.state === null, 'B-b56d OUT (the second reader): the person\'s window state says nothing with a window open — no bound\'s line, no «cannot see sign-in requests» line', o6.window.state);
+  const m6 = await scene6(D, { agentFirst: true, windowsAtMove: 1 });
+  ok(m6.moved.cwa.some((x) => x.id === 'M1' && x.r === 'Default') && !m6.moved.form, 'B-b56d OUT (the third reader): a sign-in a conversation\'s watch held is handed back to Chrome (Default) when the person takes the browser — even with a window of the person open', m6.moved);
   const dsrcO = read('src/server/browser-dialogs.js'); const SWITCH = 'const PERSON_SIGNIN_HOOK = false;';
   if (dsrcO.split(SWITCH).length !== 2) throw new Error('B-b56d OUT control setup: the switch line is not found once in src/server/browser-dialogs.js');
   const MO = mutantCopies('uiprompts-b56d-out', REPO);
   const on6 = await scene6(MO.load('src/server/browser-dialogs.js', dsrcO.replace(SWITCH, 'const PERSON_SIGNIN_HOOK = true;'), 'hook-on'), { stop: 'window' });
-  ok(on6.window.fe && on6.window.fe.handleAuthRequests === true, 'CONTROL (B-b56d OUT): the same watch with the switch ON arms the hook — the switch is what holds it off (RED for the leg above)', on6.window);
+  ok(on6.window.fe && on6.window.fe.handleAuthRequests === true && on6.window.state && on6.window.state.hook && on6.window.state.hook.armed === true, 'CONTROL (B-b56d OUT): the same watch with the switch ON arms the hook and says so — the switch is what holds both off (RED for the two legs above)', on6.window);
+  const onM = await scene6(MO.load('src/server/browser-dialogs.js', dsrcO.replace(SWITCH, 'const PERSON_SIGNIN_HOOK = true;'), 'hook-on-move'), { agentFirst: true, windowsAtMove: 1 });
+  ok(onM.moved.cwa.length === 0 && onM.moved.form && onM.moved.form.type === 'http-auth', 'CONTROL (B-b56d OUT): with the switch ON the held sign-in stays for the person\'s form (RED for the hand-back leg above)', onM.moved);
   for (const c of copiesCensus(MO.files, MO.dir, REPO, { label: '⑥ OUT control: ' })) ok(c.pass, c.name, c.detail);
 }
 if (HOOK6) {
@@ -495,11 +504,13 @@ ok(s6.fy6.length === 0, 'B-b56d (its read): the person\'s own browsing files NO 
   await wu.arm(PID6, { by: 'person' });
   const none = wu.personPromptStateOf(HK6); wu.personWindows(PID6, 1); const unw = wu.personPromptStateOf(HK6);
   ok(none === null && unw && unw.hook && unw.hook.armed === false && unw.hook.why === 'unwatched' && ST.personPromptLines(unw, tFor('en')).hook, 'B-b56d (its read, S3): no open watch while a window of the person shows the browser ⇒ «cannot see sign-in requests» is said (beside the passkey line, never hidden by it); with no window open, nothing', { none, unw });
+  wu.shutdown();
+}
+}
+{ // the person's window's two lines and the kernel / connecting words — PURE, no hook needed (they run whatever the switch)
   const lw6 = read('src/lib/browser-live-window.js');
   ok((lw6.match(/if \(prLine\) drawPrLines\(prLine\);/g) || []).length === 2 && /\n {6}if \(prLine\) drawPrLines\(prLine\);/.test(lw6) && /\} else if \(prLine\) drawPrLines\(prLine\);/.test(lw6) && /const prl = H && !d && !stuck && !blind && !pkElse \? personPromptLines/.test(lw6), '…the window draws BOTH sign-in lines (the bound, the hook) in the passkey «unknown» branch too (the cure: the bound\'s line was missing there)');
   ok(ST.personPromptLines({ hook: { armed: false, why: 'kernel', x: false } }, tFor('en')).hook === null && ST.personPromptLines({ hook: { armed: null, why: 'connecting' } }, tFor('en')).hook === null, 'B-b56d (its read): a kernel (its own road) and a watch still connecting draw no standing line — only a refused hook and no watch at all are said');
-  wu.shutdown();
-}
 }
 { // its read (M1): THE PERSON TYPES INTO THE FORM — the window always drives its own tab, so the keys belong to the page unless a box is the
   // window's OWN: the address row and (B-b56d) the sign-in form's two boxes, in each of the four keyboard handlers (keys, paste, input, focus)
