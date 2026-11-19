@@ -86,6 +86,7 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     cwd: ref.cwd || '',
     host: ref.host || null,
     memo: ref.memo && typeof ref.memo === 'object' ? ref.memo : null,   // ONE REQUEST, ONE READ (lane resume-all-paced L3 cure)
+    webuiId: typeof ref.webuiId === 'string' && ref.webuiId ? ref.webuiId : null,   // B-952b smalls: the window's OWN conversation (a fork's)
   });
   // B-952b: a LIVE conversation's reader gets the session's own id (its key in activeSessions — the webui id the hub spawned its
   // wrapper with): the wrapper's side file is BUFFERS_DIR/<that id>.json (codex: its plan — the Properties «Agent steps» — its
@@ -102,13 +103,21 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     return sm;
   };
 
+  // B-952b smalls (主开发 03:40Z): the conversation the request NAMES first (`webuiId` — Properties sends it), then the first match ON
+  // THE MACHINE the request names. While a fork shares its parent's thread id the one Properties window of that conversation key shows
+  // the row the sidebar lists first (the newer one); the other routes name no webui id and take the first match
   const liveSession = (r) => {
+    const sameConv = (s) => !!s && (s.backend || 'claude') === r.backend && (s.backendSessionId || s.claudeSessionId) === r.sessionId;
+    if (r.webuiId) { const own = activeSessions.get(r.webuiId); if (sameConv(own)) return own; }
     for (const [, s] of activeSessions) {
-      if ((s.backend || 'claude') !== r.backend) continue;
-      if ((s.backendSessionId || s.claudeSessionId) === r.sessionId) return s;
+      if (!sameConv(s) || (s.host || null) !== (r.host || null)) continue;
+      return s;
     }
     return null;
   };
+  // B-952b smalls: a reader's side file read OFF the loop before an answer reads it (every reader that keeps one has the loader:
+  // claude's, codex's and the ACP reader — antigravity, opencode)
+  const sideFileOf = async (sm) => { if (sm && typeof sm.loadWrapperMeta === 'function') { try { await sm.loadWrapperMeta(); } catch { } } return sm; };
 
   /** A live session whose normalizer already holds the FULL history — the
    *  only case where the server's in-memory view beats re-reading the file
@@ -233,7 +242,7 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
       return viaDev;
     }
     await taskWarmOf(r); // B-299b A2: the task-tool scan (claude) is read off the loop before taskState answers
-    const sm = readerFor(r, session);
+    const sm = await sideFileOf(readerFor(r, session));
     if (typeof sm.rawAsync === 'function') await sm.rawAsync(); // lane resume-all-paced (L2): a store that reads its records off the loop does so first (codex)
     if (typeof sm.prepare === 'function') await sm.prepare(); // S9: a serve-backed reader (opencode stopped conversation) loads here — LOUD on failure, a user opened it
     const chatStatus = sm.chatStatus();
@@ -256,7 +265,7 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     const lastCopy = !hostFetchError && fromTranscript && r.host && hosts?.linkState?.(r.host) === 'offline' ? 'the machine does not answer' : null;   // …and so is one whose LAST COPY hosts served (an ssh failure with a cache)
     await taskWarmOf(r); // B-299b A2: GET /api/session-todos (a Properties window re-asks at every broadcast) — the scan off the loop
     const live = liveSession(r);
-    const sm = createSessionMessages(sessionShape(r, live), liveIdOf(live));   // B-952b: the live session's id — its wrapper's side file holds codex's plan
+    const sm = await sideFileOf(createSessionMessages(sessionShape(r, live), liveIdOf(live)));   // B-952b: the live session's id — its wrapper's side file holds codex's plan, read off the loop
     if (typeof sm.prepare === 'function') await sm.prepare(); // S9: a serve-backed reader (opencode stopped conversation) loads here — LOUD on failure, a user opened it
     const st = sm.taskState() || {};
     return hostFetchError || lastCopy ? { ...st, hostFetchError: hostFetchError || lastCopy, ...(lastCopy ? { hostOffline: true } : {}) } : st;   // hostOffline: the page words it in the reader's language

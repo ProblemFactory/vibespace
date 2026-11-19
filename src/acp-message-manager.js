@@ -790,12 +790,25 @@ class AcpSessionMessages {
   tail(n = 50) { this._ensureParsed(); return this._all.slice(-n); }
   slice(offset, limit) { this._ensureParsed(); return this._all.slice(offset, offset + limit); }
   get isStreaming() { return !!this.wrapperMeta()?.streaming; }
-  wrapperMeta() {
+  /** B-952b smalls (its read): the sidecar read OFF the loop, as claude's and codex's readers do — wrapperMeta() then answers from it */
+  async loadWrapperMeta() {
     if (this._wrapperMeta !== undefined) return this._wrapperMeta;
+    const wid = this._sidecarId();
+    if (!this._buffersDir || !wid) { this._wrapperMeta = null; return null; }
+    try { this._wrapperMeta = JSON.parse(await fs.promises.readFile(path.join(this._buffersDir, `${wid}.json`), 'utf-8')); } catch { this._wrapperMeta = null; }
+    return this._wrapperMeta;
+  }
+  /** The sidecar's name — ONE line both reads use (the sync one and the off-loop one). */
+  _sidecarId() {
     // the sidecar is named by the SESSION's id: a caller that knows only the conversation (the Resume's own
     // GET /api/session-messages?withStatus=1, by conversation id) hands the live session, which carries it (lane
     // agy-harness-fixes-2: a resumed agy chat's chip said «default» — its boot records not yet in the hub's journal)
     const wid = this._sessionId || this._session?._webuiId || null;
+    return wid;
+  }
+  wrapperMeta() {
+    if (this._wrapperMeta !== undefined) return this._wrapperMeta;
+    const wid = this._sidecarId();
     if (!this._buffersDir || !wid) { this._wrapperMeta = null; return null; }
     try { this._wrapperMeta = JSON.parse(fs.readFileSync(path.join(this._buffersDir, `${wid}.json`), 'utf-8')); }
     catch { this._wrapperMeta = null; }

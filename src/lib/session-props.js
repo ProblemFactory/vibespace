@@ -870,7 +870,7 @@ export function openSessionProps(app, sessionRef, { syncId, section = null } = {
     if (stepsHeld) stepList.style.minHeight = stepsHeld + 'px';
     stepSec.appendChild(stepList);
     const rid = s.backendSessionId || s.sessionId;
-    fetch(`/api/session-todos?backend=${encodeURIComponent(s.backend || 'claude')}&backendSessionId=${encodeURIComponent(rid)}&cwd=${encodeURIComponent(s.cwd || '')}${s.host ? `&host=${encodeURIComponent(s.host)}` : ''}`)
+    fetch(`/api/session-todos?backend=${encodeURIComponent(s.backend || 'claude')}&backendSessionId=${encodeURIComponent(rid)}&cwd=${encodeURIComponent(s.cwd || '')}${s.host ? `&host=${encodeURIComponent(s.host)}` : ''}${s.webuiId ? `&webuiId=${encodeURIComponent(s.webuiId)}` : ''}`)   // B-952b smalls: the window's own conversation (a fork still on its parent's thread id)
       .then(r => {
         if (!r.ok) throw new Error(`${r.status} ${r.statusText || 'request failed'}`);
         return r.json();

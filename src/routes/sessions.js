@@ -742,7 +742,7 @@ function setup(ctx) {
       // the machine for EVERY harness (hostId is a parameter, never a branch); the service decides what it is asked for: a harness
       // whose task state reads its transcript (the descriptor's taskStateFromTranscript — claude) is asked of that machine, another's
       // state (codex: the wrapper's side file) is read here, as the release did — never a local thread start (B-952b: codex's empty steps)
-      const st = await transcripts.taskState({ backend: b, sessionId: rid, cwd, host: host || null });
+      const st = await transcripts.taskState({ backend: b, sessionId: rid, cwd, host: host || null, webuiId: typeof req.query.webuiId === 'string' ? req.query.webuiId : null });   // B-952b smalls: the window's own conversation
       res.json({ todos: st.todos || [], ...(st.hostFetchError ? { hostFetchError: String(st.hostFetchError) } : {}), ...(st.hostOffline ? { hostOffline: true } : {}) });   // B-5cf8: an unreachable machine is said, never «no steps»
     } catch (e) { res.json({ todos: [], error: (e && e.message) || String(e) }); }
   });

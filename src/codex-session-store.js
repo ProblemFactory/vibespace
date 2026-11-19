@@ -795,6 +795,15 @@ class CodexSessionMessages {
     return !!meta?.streaming;
   }
 
+  /** B-952b (its smalls, 主开发 03:40Z): the side file read OFF the loop — a route's refetch (Properties, at every broadcast) on a
+   *  data folder that may sit on a slow mount; wrapperMeta() then answers from what this read. → the meta | null */
+  async loadWrapperMeta() {
+    if (this._wrapperMeta !== undefined) return this._wrapperMeta;
+    if (!this._buffersDir || !this._sessionId) { this._wrapperMeta = null; return null; }
+    try { this._wrapperMeta = JSON.parse(await fs.promises.readFile(path.join(this._buffersDir, `${this._sessionId}.json`), 'utf-8')); } catch { this._wrapperMeta = null; }
+    return this._wrapperMeta;
+  }
+
   wrapperMeta() {
     if (this._wrapperMeta !== undefined) return this._wrapperMeta;
     if (!this._buffersDir || !this._sessionId) {

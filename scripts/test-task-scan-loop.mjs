@@ -302,6 +302,43 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
       const gotC = await todosC({ createTranscriptService }), baseC = await todosC(noId);
       ok(gotC.length === 1 && gotC[0].content === 'Ship the restated leg' && !baseC.some((t) => t.content === 'Ship the restated leg'),
         `B-952b, claude on the same road: a LIVE claude conversation's task state comes from its wrapper's side file first, as the attach's does (the wrapper's one todo); RED CONTROL (no id): the transcript's alone (${baseC.length} todos, none the wrapper's)`, { gotC, baseC });
+      // B-952b SMALLS (主开发 03:40Z) — (1) THE WINDOW'S OWN CONVERSATION FIRST: a codex fork still on its parent's thread id, both live;
+      // the Properties request names the fork's own id ⇒ the fork's plan, never the parent's. RED CONTROL: the first-match lookup
+      const pid = 'w-b952b-parent', fid = 'w-b952b-fork';
+      fs.writeFileSync(path.join(bdir, pid + '.json'), JSON.stringify({ plan: [{ step: 'The parent step', status: 'pending' }] }));
+      fs.writeFileSync(path.join(bdir, fid + '.json'), JSON.stringify({ plan: [{ step: 'The fork step', status: 'inProgress' }] }));
+      const twins = () => new Map([[pid, { ...liveS }], [fid, { ...liveS }]]);
+      const stepOfFork = async (TS) => (((await TS.createTranscriptService({ activeSessions: twins(), createSessionMessages: mk2, hosts: null }).taskState({ backend: 'codex', sessionId: ctid, cwd, webuiId: fid })) || {}).todos || [])[0]?.content || null;
+      const LOOK = "    if (r.webuiId) { const own = activeSessions.get(r.webuiId); if (sameConv(own)) return own; }\n";
+      const forkNow = await stepOfFork({ createTranscriptService });
+      const forkBase = tsSrc.split(LOOK).length === 2 ? await stepOfFork(mutantCopies('b952b-first-match', REPO).load('src/transcript-service.js', tsSrc.replace(LOOK, ''), 'first-match')) : 'no anchor';
+      ok(forkNow === 'The fork step' && forkBase === 'The parent step', `B-952b smalls: a codex FORK still on its parent's thread id — the window's own id answers ITS plan («${forkNow}»); RED CONTROL (the first match): «${forkBase}»`, { forkNow, forkBase });
+      // …and THE MACHINE THE REQUEST NAMES: a conversation live on m1 and here, on one thread id, m1's inserted first; a request for here
+      // (no host) answers here's plan. RED CONTROL: the lookup without the machine
+      const mid = 'w-b952b-m1', hid = 'w-b952b-here';
+      fs.writeFileSync(path.join(bdir, mid + '.json'), JSON.stringify({ plan: [{ step: 'On m1', status: 'pending' }] }));
+      fs.writeFileSync(path.join(bdir, hid + '.json'), JSON.stringify({ plan: [{ step: 'Here', status: 'pending' }] }));
+      const machines = () => new Map([[mid, { ...liveS, host: 'm1' }], [hid, { ...liveS }]]);
+      const stepHere = async (TS) => (((await TS.createTranscriptService({ activeSessions: machines(), createSessionMessages: mk2, hosts: null }).taskState({ backend: 'codex', sessionId: ctid, cwd })) || {}).todos || [])[0]?.content || null;
+      const HOSTLINE = "      if (!sameConv(s) || (s.host || null) !== (r.host || null)) continue;\n";
+      const hereNow = await stepHere({ createTranscriptService });
+      const hereBase = tsSrc.split(HOSTLINE).length === 2 ? await stepHere(mutantCopies('b952b-any-host', REPO).load('src/transcript-service.js', tsSrc.replace(HOSTLINE, '      if (!sameConv(s)) continue;\n'), 'any-host')) : 'no anchor';
+      ok(hereNow === 'Here' && hereBase === 'On m1', `B-952b smalls: the live lookup takes the MACHINE the request names — here's plan («${hereNow}»); RED CONTROL (any machine): «${hereBase}»`, { hereNow, hereBase });
+      // (2) THE SIDE FILE IS READ OFF THE LOOP on the route (Properties refetches at every broadcast; the data folder may be a slow mount):
+      // no synchronous read of it on the task-state road. RED CONTROL: the reader left to read it synchronously
+      const syncReads = async (TS) => { let n = 0; const real = fs.readFileSync; fs.readFileSync = function (p0, ...x) { if (typeof p0 === 'string' && p0.endsWith(wid + '.json')) n++; return real.call(this, p0, ...x); };
+        try { const svc = TS.createTranscriptService({ activeSessions: new Map([[wid, liveS]]), createSessionMessages: mk2, hosts: null }); await svc.taskState({ backend: 'codex', sessionId: ctid, cwd }); await svc.status({ backend: 'codex', sessionId: ctid, cwd }); } finally { fs.readFileSync = real; } return n; };
+      const LOADS = "  const sideFileOf = async (sm) => { if (sm && typeof sm.loadWrapperMeta === 'function') { try { await sm.loadWrapperMeta(); } catch { } } return sm; };\n";
+      const offNow = await syncReads({ createTranscriptService });
+      const offBase = tsSrc.split(LOADS).length === 2 ? await syncReads(mutantCopies('b952b-sync-side', REPO).load('src/transcript-service.js', tsSrc.replace(LOADS, '  const sideFileOf = async (sm) => sm;\n'), 'sync-side')) : -1;
+      ok(offNow === 0 && offBase === 2, `B-952b smalls: the side file is read OFF the loop on the task-state AND the status road (${offNow} synchronous reads); RED CONTROL (no async load): ${offBase}`, { offNow, offBase });
+      // (3) THE STATUS ROAD ITSELF: a live codex conversation's status() states the model its side file holds. RED CONTROL: no id ⇒ not it
+      fs.writeFileSync(path.join(bdir, wid + '.json'), JSON.stringify({ model: 'gpt-stand-in-b952b', plan: [] }));
+      const modelOf = async (TS) => ((await TS.createTranscriptService({ activeSessions: new Map([[wid, liveS]]), createSessionMessages: mk2, hosts: null }).status({ backend: 'codex', sessionId: ctid, cwd })) || {}).chatStatus?.model || '';
+      const ROAD2 = 'createSessionMessages(sessionShape(r, session), liveIdOf(session))';
+      const mNow = await modelOf({ createTranscriptService });
+      const mBase = tsSrc.split(ROAD2).length === 2 ? await modelOf(mutantCopies('b952b-status-no-id', REPO).load('src/transcript-service.js', tsSrc.replace(ROAD2, () => 'createSessionMessages(sessionShape(r, session))'), 'status-no-id')) : 'no anchor';   // stale-pins: kept (the red control rebuilds the road without the id)
+      ok(mNow === 'gpt-stand-in-b952b' && mBase !== 'gpt-stand-in-b952b', `B-952b smalls: the STATUS road — a live codex conversation's status states the model its side file holds («${mNow}»); RED CONTROL (no id): «${mBase}»`, { mNow, mBase });
     }
     // THE ROUTE + THE SERVICE (its read, S1): the route hands every harness its machine; the task-state road asks that machine
     // only for a harness whose task state reads its transcript (claude) — a codex conversation on m1 is answered here, as the
@@ -328,7 +365,7 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
     const R0 = require(path.join(REPO, 'src/routes/sessions.js'));
     const cGreen = await routeOf(R0, 'codex'), clGreen = await routeOf(R0, 'claude');
     const cRed = await routeOf(mutantCopies('a2-route-gate-r', REPO).load('src/routes/sessions.js', rsrc.replace(TSREQ, () => `const { createTranscriptService } = require(${JSON.stringify(tsNoGate)});`), 'no-gate-route'), 'codex');
-    ok(tsSrc.split(GATE).length === 2 && rsrc.split(TSREQ).length === 2 && rsrc.includes('cwd, host: host || null });') && cGreen.asked === '' && cGreen.todos.length === 0 && cGreen.n === 0 && !cGreen.ran && clGreen.asked === 'm1:taskState:claude' && clGreen.todos[0]?.content === 'held on m1' && cRed.asked.includes('m1:taskState:codex'),
+    ok(tsSrc.split(GATE).length === 2 && rsrc.split(TSREQ).length === 2 && rsrc.includes('sessionId: rid, cwd, host: host || null, webuiId:') && cGreen.asked === '' && cGreen.todos.length === 0 && cGreen.n === 0 && !cGreen.ran && clGreen.asked === 'm1:taskState:claude' && clGreen.todos[0]?.content === 'held on m1' && cRed.asked.includes('m1:taskState:codex'),
       `GET /api/session-todos on m1: a codex conversation answered here as the release did (${cGreen.todos.length} steps; asked of m1: «${cGreen.asked}»; ${cGreen.n} listings, nothing started); a claude one asked of m1 (${clGreen.asked}); RED (no descriptor rule — dec3d0da0): the codex one asked of m1 (${cRed.asked})`, { cGreen, clGreen, cRed });
     // its TAKEN verdict (small 1): the machine rule reads the descriptor's OWN field (taskStateFromTranscript), never the warm hook
     // as a second meaning — a codex store that gains a warm stays answered here; one that DECLARES the field is asked of m1. RED: a
