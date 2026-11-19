@@ -10,6 +10,11 @@
 // right-to-left. MEASURED (b48937610, Claude Code + Codex on the hub's shell PATH, 375 px phone): the Codex row drew
 // Re-check · Log in · Update · Rules & checks — 362 px in a 352 px section, sideways overflow.
 // The desktop row (the desktop class: ≥ 1024 px, or a fine pointer ≥ 769 px) is never asked — every button, byte for byte.
+// A CONTROL THAT ALWAYS FOLDS (B-db5d — the owner, 2026-11-18, on a manifest plugin's row at a narrow width, its name broken over
+// three lines beside chip · switch · Update… · Uninstall… · «⋯»: «更新 卸载应该收进...里»): an item's own `always` field puts it in
+// the «…» menu at EVERY width — it never stands inline and never counts toward the maximum (so it never pushes another control
+// out), and it opens the «…» like a count fold (charged once). A primary control never folds, so an item both `primary` and
+// `always` is REFUSED BY NAME (the verdict throws, naming its key) — never a silent pick of one of the two.
 import { barLayout } from './live-bar-layout.js';
 
 /** At most this many action buttons stand in a phone row; the rest are the «…» menu's. */
@@ -18,24 +23,31 @@ const OPENED = '\u0000opened';
 
 /**
  * rowActionsFold({ items, widthPx, gapPx, moreW, max }) → { shown, folded, need, fits }
- *   items   — [{ key, px, primary? }] in DOM order; `px` = the button's natural width (an item with px ≤ 0 is absent).
+ *   items   — [{ key, px, primary?, always? }] in DOM order; `px` = the button's natural width (an item with px ≤ 0 is absent);
+ *             `always` = the item is the «…» menu's at every width (uncounted; with `primary` ⇒ throws by name).
  *   widthPx — the width the strip may take (the row's content box: on a phone the strip wraps onto its own line).
  *   gapPx   — the strip's column gap; moreW — the «…» button's width.
  * shown / folded are keys in DOM order; need = the width the verdict occupies («…» included when anything folds);
  * fits = need ≤ widthPx (false only when the primary actions alone exceed the row).
  */
 export function rowActionsFold({ items = [], widthPx = 0, gapPx = 0, moreW = 0, max = ROW_INLINE_MAX } = {}) {
-  const list = (Array.isArray(items) ? items : []).filter((it) => it && it.key != null && Number(it.px) > 0)
+  const all = (Array.isArray(items) ? items : []).filter((it) => it && it.key != null && Number(it.px) > 0);
+  const both = all.find((it) => it.primary && it.always);
+  if (both) throw new Error(`rowActionsFold: «${both.key}» is primary AND always-fold — a primary control never folds`);
+  // ALWAYS: in the «…» before anything is counted — no inline control at all (it neither counts nor pushes another out)
+  const always = new Set(all.filter((it) => it.always).map((it) => String(it.key)));
+  const list = all.filter((it) => !always.has(String(it.key)))
     .map((it, i) => ({ key: String(it.key), px: Number(it.px), priority: it.primary ? 0 : 1, i }));
   const cap = Math.max(1, Math.floor(Number(max) || ROW_INLINE_MAX));
   const width = Math.max(0, Number(widthPx) || 0);
   // THE COUNT: beyond `cap` the items fold in barLayout's own order (higher priority first, ties right-to-left)
   const order = list.slice().sort((a, b) => b.priority - a.priority || b.i - a.i);
-  const byCount = new Set(order.slice(0, Math.max(0, list.length - cap)).map((it) => it.key));
+  const byCount = new Set([...always, ...order.slice(0, Math.max(0, list.length - cap)).map((it) => it.key)]);
   const kept = list.filter((it) => !byCount.has(it.key)).map(({ key, px, priority }) => ({ key, px, priority }));
-  // THE WIDTH: barLayout over what is left. A «…» the count already opened is charged exactly as barLayout charges one —
-  // the count-folded items stand in as ONE placeholder wider than the row that folds before anything else
+  // THE WIDTH: barLayout over what is left. A «…» the count (or an always item) already opened is charged exactly as barLayout
+  // charges one — the folded items stand in as ONE placeholder wider than the row that folds before anything else
   const v = barLayout({ widthPx: width, gapPx, overflowPx: moreW, items: byCount.size ? [...kept, { key: OPENED, px: width + 1, priority: Number.MAX_SAFE_INTEGER }] : kept });
   const folded = new Set([...byCount, ...v.overflow]);
-  return { shown: list.filter((it) => !folded.has(it.key)).map((it) => it.key), folded: list.filter((it) => folded.has(it.key)).map((it) => it.key), need: v.need, fits: v.need <= width };
+  const keys = all.map((it) => String(it.key));   // DOM order, the always items in their places
+  return { shown: keys.filter((k) => !folded.has(k)), folded: keys.filter((k) => folded.has(k)), need: v.need, fits: v.need <= width };
 }

@@ -56,7 +56,7 @@ check('② the rail row\'s main keeps its parts apart: a wrapping flex with a ga
 check('② CONTROL: the shape the reader caught (the main a plain block — 419127b57) is red', !(() => { const r = cssRules('.rail-row > .rail-row-main { flex: 1 1 9em; min-width: 0; }').find((x) => x.sel === '.rail-row > .rail-row-main'); return !!r && /display: flex/.test(r.body) && /column-gap/.test(r.body); })());
 check('② the button bar: words take 12 em, buttons wrap WHOLE to the next line — and the Agents panel\'s status rows wear it by selector',
   has('.btn-bar, .rail-panel .agent-actions', 'flex-wrap: wrap') && has('.btn-bar > .btn-bar-text', 'flex: 1 1 12em') && has('.btn-bar > :is(button, .btn-bar-group), .rail-panel .agent-actions > button', 'flex: 0 0 auto', 'white-space: nowrap'));
-const offRows = (src) => /const rows = rest\.flatMap\(\(c\) => \(c\.tagName === 'BUTTON' \? \[c\] : \[\.\.\.c\.querySelectorAll\('button'\)\]\)\);/.test(src) && /rows\.map\(\(c\) => \(c\.disabled \? \{ label: labelOf\(c\), off: c\.title \|\| t\('not available'\) \} : \{ label: labelOf\(c\), title: c\.title \|\| '', action: \(\) => c\.click\(\) \}\)\)/.test(src) && !/showToast|disabled: false/.test(src);
+const offRows = (src) => /const menuRows = rest\.flatMap\(\(c\) => \(c\.tagName === 'BUTTON' \? \[c\] : \[\.\.\.c\.querySelectorAll\('button'\)\]\)\);/.test(src) && /const rows = menuRows;/.test(src) && /rows\.map\(\(c\) => \(c\.disabled \? \{ label: labelOf\(c\), off: c\.title \|\| t\('not available'\) \} : \{ label: labelOf\(c\), title: c\.title \|\| '', action: \(\) => c\.click\(\) \}\)\)/.test(src) && !/showToast|disabled: false/.test(src);
 check('② the «⋯» of a rail row lists a folded GROUP as its buttons; a control that cannot act is an OFF row that says why ON the row (ui-controls\' rule, 2.369.402) — never a toast, never a silent nothing', offRows(ROW));
 check('② CONTROL: the toast form (a live row whose press toasts its tip, dd3b18e0a\'s) is refused', !offRows(ROW.replace(/rows\.map\(\(c\) => \(c\.disabled \? [^\n]*\)\)\);/, "rows.map((c) => ({ label: labelOf(c), title: c.title || '', disabled: false, action: () => { if (c.disabled) showToast(c.title); else c.click(); } })));")));
 const keeperRule = (src) => /const keeper = \(c\) => c\.getAttribute\?\.\('aria-hidden'\) === 'true';/.test(src) && /const acts = list\.filter\(\(c\) => !keeper\(c\)\);/.test(src)
@@ -71,10 +71,21 @@ const rcloneCard = (src, css) => /warn\.className = 'mounts-env-card mounts-rclo
 check('② the Remote column\'s set-up card (no rclone) is a button bar — its sentence wraps, «安装 rclone» wraps WHOLE — in the person\'s language', rcloneCard(MOUNTS_SRC, STYLE));
 check('② CONTROL: the card the runner drew (a space-between row, an English one-line preview) is refused', !rcloneCard(MOUNTS_SRC.replace("warn.className = 'mounts-env-card mounts-rclone-warn btn-bar';", "warn.className = 'mounts-env-card mounts-rclone-warn';"), STYLE));
 const columnRules = (css) => /\.rail-panel :is\(\.ob-warn, \.ob-ok, \.ob-bad, \.ob-ver\) \{ overflow-wrap: anywhere; \}/.test(css)
-  && /\.rail-row > \.rail-row-ctl > \[aria-hidden="true"\] \{ display: none; \}/.test(css)
-  && /\.plugin-row \.rail-row-ctl > \.plugin-row-actions \{ display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; \}/.test(css);
-check('② the rail column\'s refusals and receipts break anywhere (a path or a variable name has no break of its own — every such line, not one site), a place-keeper keeps no place, and a plugin\'s Update… / Uninstall… keep their gap inside the controls group', columnRules(STYLE));
-check('② CONTROL: the sheet without those three rules is refused', !columnRules(STYLE.replace('.rail-panel :is(.ob-warn, .ob-ok, .ob-bad, .ob-ver) { overflow-wrap: anywhere; }', '')));
+  && /\.rail-row > \.rail-row-ctl > \[aria-hidden="true"\] \{ display: none; \}/.test(css);
+check('② the rail column\'s refusals and receipts break anywhere (a path or a variable name has no break of its own — every such line, not one site), and a place-keeper keeps no place', columnRules(STYLE));
+check('② CONTROL: the sheet without those rules is refused', !columnRules(STYLE.replace('.rail-panel :is(.ob-warn, .ob-ok, .ob-bad, .ob-ver) { overflow-wrap: anywhere; }', '')));
+// B-db5d (the owner, 2026-11-18, a manifest plugin's row at a narrow width: «更新 卸载应该收进...里»): the row's Update… / Uninstall…
+// cluster ALWAYS folds — the control says it (data-rail-fold="always"), railRow hands it to the PURE model as `always` (uncounted,
+// so the ⚙ keeps its place), and no rule of the sheet draws that cluster inline any more
+const alwaysFold = (plug, row, css) => /actions\.className = 'plugin-row-actions'; actions\.dataset\.railFold = 'always';/.test(plug)
+  && /always: c\.dataset\?\.railFold === 'always' \}\)\), widthPx: 1e9, max \}\);/.test(row) && !/\.plugin-row-actions\b/.test(css);   // stale-pins: kept (a deliberate absence: no rule draws the cluster)
+check('② B-db5d: a manifest plugin\'s Update… / Uninstall… cluster always folds into the row\'s «⋯» (data-rail-fold="always" → rowActionsFold `always`), and no rule draws it inline', alwaysFold(PLUG, ROW, STYLE));
+check('② CONTROL: the checkpoint f6ad84f50\'s row (the cluster counted like any control — the ⚙ folded, the two buttons inline) is refused', !alwaysFold(PLUG.replace(" actions.dataset.railFold = 'always';", ''), ROW, STYLE)
+  && !alwaysFold(PLUG, ROW.replace(", always: c.dataset?.railFold === 'always'", ''), STYLE));
+check('② CONTROL: a sheet that draws the cluster again (the checkpoint\'s `.plugin-row .rail-row-ctl > .plugin-row-actions` rule) is refused', !alwaysFold(PLUG, ROW, STYLE + '\n.plugin-row .rail-row-ctl > .plugin-row-actions { display: flex; gap: 6px; }\n'));
+const noEmptyMenu = (row) => /const menuRows = rest\.flatMap\(\(c\) => \(c\.tagName === 'BUTTON' \? \[c\] : \[\.\.\.c\.querySelectorAll\('button'\)\]\)\);\n\s+if \(menuRows\.length\) \{/.test(row);
+check('② B-db5d: a «⋯» is drawn only when its menu has a row — a folded group with no button gives none (never a menu that opens empty)', noEmptyMenu(ROW));
+check('② CONTROL: the rail row that drew a «⋯» for any fold (if (folded.size)) is refused', !noEmptyMenu(ROW.replace('if (menuRows.length) {', 'if (folded.size) {')));
 check('② railRow folds more than ROW_INLINE_MAX controls into ONE «⋯» (the PURE rowActionsFold) whose rows are their own words',
   /import \{ rowActionsFold, ROW_INLINE_MAX \} from '\.\/row-fold-model\.js'/.test(ROW) && /rowActionsFold\(/.test(ROW) && /showContextMenu\(/.test(ROW) && /max = ROW_INLINE_MAX/.test(ROW));
 // the census: the classes rail renderers give a BUTTON, and the rules that would cut its words

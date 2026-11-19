@@ -339,7 +339,8 @@ export function installPluginsUI(App) {
         const chip = !p.valid ? t('invalid') : !p.enabled ? t('disabled') : p.server ? ({ running: t('running'), starting: t('starting…'), crashed: t('crashed — restarting'), parked: t('parked after repeated crashes') }[p.state] || p.state || '') : t('enabled');
         const tone = !p.valid ? 'err' : p.enabled ? (p.state === 'running' || !p.server ? 'ok' : 'warn') : '';
         const why = [...(p.errors || []), p.lastError, p.notice, clientErr ? t('Client module error: {error}', { error: clientErr }) : ''].filter(Boolean).join(' · ');
-        // the chip opens what the plugin offers (its windows, what it may do) — actions, never settings; Update is the row's own button
+        // the chip opens what the plugin offers (its windows, what it may do) — actions, never settings; Update… / Uninstall… are rows of
+        // the row's own «⋯» menu (B-db5d), never of this one
         const onChip = (ev) => {
           const rect = ev.currentTarget.getBoundingClientRect();
           showContextMenu(rect.left, rect.bottom + 2, [
@@ -369,19 +370,25 @@ export function installPluginsUI(App) {
           showToast(t('Uninstalled {id} (moved to trash)', { id: p.id }));
           this.pluginClient?.refresh?.(); render();
         };
-        // lane plugin-update-button (the owner, 2026-11-02: Update lived only in the status chip's menu — the owner saw none): an action
-        // the person must take is a LABELLED CONTROL on the row. A recorded source that can update (git / path / github-release)
-        // ⇒ «Update…» beside Uninstall… (one cluster in the row's [install] slot); an uploaded file or a hand-placed folder ⇒ no
-        // button (never a greyed one) — the row's fact line says how instead
-        const actions = document.createElement('div'); actions.className = 'plugin-row-actions';
+        // UPDATE… AND UNINSTALL… ARE ROWS OF THE ROW'S «⋯» MENU, AT EVERY WIDTH (B-db5d — the owner, 2026-11-18, on this row at a
+        // narrow width, its name broken over three lines beside chip · switch · Update… · Uninstall… · «⋯»: «更新 卸载应该收进...里»).
+        // The cluster carries data-rail-fold="always" (rail-row.js → the PURE row-fold-model `always`): it never stands inline and
+        // never counts, so the ⚙ stays in its own place as on every other plugin row (the coordinator's choice, named to the owner).
+        // What stays of lane plugin-update-button (2026-11-02: Update lived only in the status chip's menu and the owner saw none):
+        // an action is never ONLY in the status chip's menu, and the «⋯» rows carry their own words. A recorded source that can
+        // update (git / path / github-release) ⇒ «Update…» first; an uploaded file or a hand-placed folder ⇒ NO Update row (never an
+        // off one) — the row's fact line says how instead; then «Uninstall…» with its confirm. Each row presses its button.
+        const actions = document.createElement('div'); actions.className = 'plugin-row-actions'; actions.dataset.railFold = 'always';
         if (p.install && p.install.source !== 'zip') {
           const upd = document.createElement('button');
           upd.className = 'mounts-btn plugin-install plugin-update'; upd.textContent = t('Update…');
+          upd.dataset.railLabel = t('Update…');   // its «⋯» row keeps its words while the title says why it is off (rail-row labelOf reads data-rail-label first)
           upd.onclick = async () => {
             upd.disabled = true;
+            upd.title = t('Updating {id}…', { id: p.id });   // B-db5d: an in-flight Update… is an OFF row of the «⋯» that says why (rail-row reads the title)
             showToast(t('Updating {id}…', { id: p.id }));
             const rr = await fetchJson(`/api/plugins/manifests/${encodeURIComponent(p.id)}/update`, { method: 'POST' });
-            if (rr?.error) { upd.disabled = false; showToast(rr.error, { type: 'error' }); return; }
+            if (rr?.error) { upd.disabled = false; upd.title = ''; showToast(rr.error, { type: 'error' }); return; }
             const version = rr.plugin?.version || '';
             showToast(rr.unchanged ? t('{id} is already up to date ({version})', { id: p.id, version }) : t('Updated {id} to {version}', { id: p.id, version }));
             this.pluginClient?.refresh?.(); render();

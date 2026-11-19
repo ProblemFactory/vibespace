@@ -5791,20 +5791,13 @@ html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock.cad-open { max
 .plugin-list { display: flex; flex-direction: column; gap: 2px; margin-bottom: 10px; }
 .plugin-row { padding: 8px; border-radius: var(--radius); border: 1px solid transparent; }  /* lane ui-phone-and-fit M2: the plugin row IS a rail row (rail-row.js) — the grid areas that left the name ~75 px are gone */
 .plugin-row:hover { background: var(--bg-hover, color-mix(in srgb, var(--text) 5%, transparent)); }
-.plugin-row > .plugin-dot { grid-area: dot; }
-.plugin-row-main { grid-area: main; min-width: 0; }
+.plugin-row-main { min-width: 0; }
 .plugin-row-name { font-size: 12px; font-weight: 600; }
 .plugin-row-desc { font-size: 10px; color: var(--text-secondary); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .plugin-row-fact { margin-top: 2px; font-size: 10px; color: var(--text-secondary); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; } /* lane decision-spend-readout: the LLM plugin's money today — a readout, not a control; it WRAPS (the desk rail is ~75 px wide: an ellipsis would hide the money) */
 .plugin-row-fact.is-near-cap, .settings-row-fact.is-near-cap { color: var(--red, #e55); } /* ≥ 90 % of the day's cap */
 .settings-spend-producer { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; } .settings-spend-producer .settings-row-fact { margin-top: 0; flex: 1 1 auto; } .settings-spend-producer .settings-link-btn { margin-top: 0; }
-.plugin-row > .plugin-sw { grid-area: sw; }
-.plugin-row > .plugin-gear { grid-area: gear; }
-.plugin-row > .plugin-chip { grid-area: chip; justify-self: start; }
-.plugin-row > .plugin-install { grid-area: inst; justify-self: end; }
-.plugin-row > .plugin-row-actions { grid-area: inst; justify-self: end; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; } /* lane plugin-update-button: a manifest plugin's Update… + Uninstall… in the one [install] slot */
-.plugin-row .rail-row-ctl > .plugin-row-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; } /* pick 1's rail row puts the cluster in its controls group: Update… and Uninstall… keep their 6-px gap (the adversarial read: they touched) */
-.plugin-row:has(> .plugin-row-actions > .plugin-update) { grid-template-areas: "dot main sw gear" ". chip chip chip" ". inst inst inst"; } /* two buttons in the [install] slot widened the switch / ⚙ columns and broke the name per letter in the ~200 px rail (measured) — the cluster takes its own line across the name column */
+/* B-db5d: a manifest plugin's Update… / Uninstall… cluster is always the row's «⋯» menu (rail-row data-rail-fold="always") — it is never drawn in the row, so it has no rule here; the old grid areas of the row's controls went with the rail row */
 .plugin-manifests-head { flex-wrap: wrap; }
 .plugin-chip { max-width: 100%; font-size: 10px; padding: 1px 7px; border-radius: 999px; border: none; color: var(--text-secondary); background: color-mix(in srgb, var(--text-secondary) 12%, transparent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: inherit; }
 button.plugin-chip { cursor: pointer; }
@@ -5845,7 +5838,6 @@ button.plugin-chip-primary { white-space: normal; overflow: visible; text-overfl
 .bbuild-download { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 6px 0 2px; }
 .bbuild-download-btn .bwho-answer-head { font-weight: normal; color: inherit; }
 button.plugin-chip.plugin-chip-primary { border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent); border-radius: var(--radius-sm); padding: 3px 10px; font-size: 11px; }
-.plugin-row:not(:has(> .plugin-install)) > button.plugin-chip.plugin-chip-primary { grid-column: 2 / -1; }   /* the door reads whole in the narrow rail */
 .settings-link-row .settings-row-control { display: flex; gap: 6px; align-items: center; }
 
 /* ── Plugin config rows (2.141.2: tailscale mode + up-flags) ── */

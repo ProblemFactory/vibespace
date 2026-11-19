@@ -15,13 +15,15 @@
 //   ⑥ the browser-engine bullet's zh sentence names the program VibeSpace starts as a profile's browser
 //   ⑦ Cancel closes it and the switch is off again
 //   ⑧ the read-only variant (the chip's «查看能力…») — ③ ④ ⑤ again
-//   ⑨ lane plugin-update-button (the owner, 2026-11-02: no Update on the row — it lived only in the chip's menu): the planted
-//     plugin carries a GIT install record (ref main, the owner's shape) ⇒ its row shows «更新…» beside «卸载…», both inside the
-//     row and the viewport at 1000 × 600, the switch and the name not squeezed (read through the rail row since the .408 train:
-//     one controls group; nothing folds — the ⚙'s unseen place is no control); the chip's menu has no 更新; a real press on a path-installed plugin's «更新…» with
-//     nothing new at its source says «… 已是最新（0.1.0）». PNG <prefix>-row.png = the planted plugin's row.
+//   ⑨ lane plugin-update-button (the owner, 2026-11-02: no Update on the row — it lived only in the chip's menu) + B-db5d (the
+//     owner, 2026-11-18: «更新 卸载应该收进...里»): the planted plugin carries a GIT install record (ref main, the owner's shape)
+//     ⇒ its row draws neither «更新…» nor «卸载…»: chip · switch · the ⚙'s unseen place · ONE «⋯», all inside the row and the
+//     viewport at 1000 × 600 on one line, the name not squeezed; a REAL press on the «⋯» opens 更新… then 卸载…; the chip's menu
+//     has no 更新; a real press on a path-installed plugin's «⋯» → «更新…» with nothing new at its source says «… 已是最新（0.1.0）».
+//     PNG <prefix>-row.png = the planted plugin's row, <prefix>-more-menu.png = its «⋯» open.
 // On 160045063 (the base — run this file on a `git archive` copy) ③ ④ ⑤ ⑥ are RED, in both variants (15 rows); on 63f59d572
-// ⑨ is RED (no 更新… on the row, 更新 in the chip's menu, the press finds no button).
+// ⑨ is RED (no 更新… on the row, 更新 in the chip's menu, the press finds no button); on f6ad84f50 (B-db5d's checkpoint) ⑨ is RED
+// (更新… / 卸载… drawn inline, no «⋯» on the row).
 // PNGs: PLUGIN_CONSENT_PNG_DIR (default: the scratch root) <prefix>-consent.png / <prefix>-readonly.png, prefix =
 // PLUGIN_CONSENT_SHOT_PREFIX (default 'run'). This box's own fonts (the zh words need a CJK face; the runner's DejaVu has none).
 // Requires google-chrome (SKIP without). Run: node scripts/test-plugin-consent-chrome.mjs
@@ -217,41 +219,51 @@ await step('⑨', async () => {
   check('⑨ a second plugin installs through the page from a folder (source path)', inst?.plugin?.id === HID, inst);
   await evalJs(`(() => { const b = [...document.querySelectorAll('.plugin-manifests-head .mounts-btn')].find((x) => ['重新扫描', 'Rescan'].includes(x.textContent.trim())); if (b) b.click(); return !!b; })()`);
   await waitFor(`!!document.querySelector('.plugin-row[data-plugin="${HID}"]')`, 15000);
-  // RE-READ THROUGH THE RAIL ROW (the .408 prep mirror: ui-phone-and-fit pick 1 rebuilt the plugins rows — rail-row.js: dot · the
-  // name block · ONE controls group; the switch, the cluster and the ⚙ live in `.rail-row-ctl`, no longer the row's grid columns,
-  // so `:scope > .plugin-sw` found nothing and the leg threw). The laws stay: «更新…» beside «卸载…» in one cluster, both drawn
-  // inside the row and the viewport on one line, the name and the switch not squeezed by the cluster; + nothing folds here (the
-  // ⚙'s unseen place is no control — counted, it folded into a «⋯» whose menu was empty)
+  // B-db5d (the owner, 2026-11-18, this row at a narrow width — its name broken over three lines beside chip · switch · 更新… ·
+  // 卸载… · «⋯»: «更新 卸载应该收进...里»): Update… and Uninstall… are ROWS OF THE ROW'S «⋯» MENU at every width (rail-row
+  // data-rail-fold="always" → the PURE row-fold-model `always`). The row reads dot · the name block · chip · switch · the ⚙'s unseen
+  // place (this plugin has nothing to configure: no control) · «⋯»; the controls stand side by side inside the row and the
+  // viewport, the name at its 9 em basis or the controls on their own line; a REAL press on the «⋯» opens 更新… then 卸载…; a real
+  // press on the path plugin's «⋯» → «更新…» with nothing new at its source says «… 已是最新（0.1.0）». (Through the rail row since
+  // the .408 train: one controls group.)
   const M = await evalJs(`(() => {
     const row = document.querySelector('${row}'); if (!row) return null;
     row.scrollIntoView({ block: 'center' });
     const R = (e) => { if (!e) return null; const r = e.getBoundingClientRect(); return { t: r.top, b: r.bottom, l: r.left, r: r.right, w: r.width, h: r.height }; };
-    const ctl = row.querySelector(':scope > .rail-row-ctl'), main = row.querySelector(':scope > .rail-row-main'), box = row.querySelector('.plugin-row-actions');
-    const btns = box ? [...box.querySelectorAll('button')].map((b) => ({ text: b.textContent.trim(), cls: b.className, disabled: b.disabled, vis: getComputedStyle(b).visibility, ...R(b) })) : [];
-    const kids = ctl ? [...ctl.children].map((k) => ({ cls: String(k.className), seen: getComputedStyle(k).visibility === 'visible', ...R(k) })) : [];
-    return { row: R(row), ctl: R(ctl), main: R(main), basis: main ? 9 * parseFloat(getComputedStyle(main).fontSize) : 0, box: box && { inCtl: box.parentElement === ctl, ...R(box) }, btns, kids,
-      more: !!row.querySelector('.rail-row-more'), gap: ctl ? parseFloat(getComputedStyle(ctl).columnGap) || 0 : 0, vw: innerWidth, vh: innerHeight };
+    const ctl = row.querySelector(':scope > .rail-row-ctl'), main = row.querySelector(':scope > .rail-row-main');
+    const kids = ctl ? [...ctl.children].map((k) => ({ cls: String(k.className), text: k.textContent.trim(), seen: getComputedStyle(k).visibility === 'visible' && getComputedStyle(k).display !== 'none', ...R(k) })) : [];
+    return { row: R(row), ctl: R(ctl), main: R(main), basis: main ? 9 * parseFloat(getComputedStyle(main).fontSize) : 0, kids,
+      inline: [...row.querySelectorAll('button')].map((b) => b.textContent.trim()).filter((x) => /^(更新|卸载|Update|Uninstall)/.test(x)), cluster: !!row.querySelector('.plugin-row-actions'),
+      gap: ctl ? parseFloat(getComputedStyle(ctl).columnGap) || 0 : 0, vw: innerWidth, vh: innerHeight };
   })()`);
-  if (M) { // the row's PNG first — on the base (no cluster) it is the «before»
+  if (M) { // the row's PNG first — on the checkpoint (the two buttons inline) it is the «before»
     const pad = 6, x = Math.max(0, M.row.l - pad), y = Math.max(0, M.row.t - pad);
     try { const { data } = await cdp('Page.captureScreenshot', { format: 'png', clip: { x, y, width: Math.min(M.vw - x, M.row.w + 2 * pad), height: Math.min(M.vh - y, M.row.h + 2 * pad), scale: 1 } }); const f = path.join(SHOTS, `${PREFIX}-row.png`); fs.writeFileSync(f, Buffer.from(data, 'base64')); console.log(`  (shot: ${f})`); } catch { }
   }
-  const upd = M?.btns.find((b) => b.text === '更新…'), un = M?.btns.find((b) => b.text === '卸载…');
-  check(`⑨ the git-installed plugin's row shows «更新…» beside «卸载…» in one actions cluster, in the row's controls (${J(M?.btns.map((b) => b.text))})`, !!upd && !!un && !!M.box?.inCtl && M.btns.indexOf(upd) < M.btns.indexOf(un) && /\bplugin-update\b/.test(upd.cls) && !upd.disabled, M);
-  check(`⑨ nothing folds on this row — chip · switch · the cluster, and the ⚙'s unseen place (no «⋯»: ${J(M?.kids.map((k) => k.cls.split(' ').pop() + (k.seen ? '' : ' (unseen)')))})`, !!M && !M.more && M.kids.some((k) => /plugin-gear-none/.test(k.cls) && !k.seen), M && M.kids);
+  const kidsSaid = J((M?.kids || []).map((k) => k.cls.split(' ').pop() + (k.seen ? '' : ' (unseen)')));
+  check(`⑨ B-db5d: the git-installed plugin's row draws neither «更新…» nor «卸载…» (inline: ${J(M?.inline)}); its controls end in ONE «⋯» (${kidsSaid})`, !!M && M.inline.length === 0 && !M.cluster && /\brail-row-more\b/.test((M.kids.at(-1) || {}).cls || ''), M);
+  check(`⑨ the ⚙'s place-keeper (nothing to configure) is no control — not drawn, not folded (${kidsSaid})`, !!M && M.kids.some((k) => /plugin-gear-none/.test(k.cls) && !k.seen), M && M.kids);
   const seen = (M?.kids || []).filter((k) => k.seen && k.w > 0);
   const sameLine = (a, b) => Math.min(a.b, b.b) - Math.max(a.t, b.t) > 2;   // their boxes overlap vertically: one line (centred items have different tops)
   const tight = seen.length >= 3 && seen.every((k, i) => i === 0 || !sameLine(k, seen[i - 1]) || (k.l - seen[i - 1].r >= 2 && k.l - seen[i - 1].r <= M.gap + 0.5));
-  const apart = !!upd && !!un && un.l - upd.r >= 4;   // the cluster's own gap (the adversarial read: they were drawn touching)
-  check(`⑨ the cluster squeezes neither the switch nor the name — the controls side by side on a line (gaps 2–${M && M.gap} px), «更新…» and «卸载…» apart (${upd && un ? (un.l - upd.r).toFixed(1) : '?'} px), the name at its 9 em basis or the controls on their own line (name ${M && M.main && M.main.w.toFixed(0)} px of ${M && M.basis.toFixed(0)})`, !!M && !!M.main && tight && apart && (M.main.w >= M.basis - 0.5 || M.ctl.t >= M.main.b - 0.5), M && { main: M.main, ctl: M.ctl, kids: M.kids });
-  const inside = (b) => !!b && b.w > 0 && b.h > 0 && b.vis === 'visible' && b.l >= M.row.l - 0.5 && b.r <= M.row.r + 0.5 && b.t >= M.row.t - 0.5 && b.b <= M.row.b + 0.5 && b.l >= 0 && b.r <= M.vw && b.t >= 0 && b.b <= M.vh;
-  check(`⑨ both buttons are drawn inside the row and the 1000 × 600 viewport, on one line (更新… ${upd ? `${upd.l.toFixed(0)},${upd.t.toFixed(0)} ${upd.w.toFixed(0)}×${upd.h.toFixed(0)}` : 'absent'}; 卸载… ${un ? `${un.l.toFixed(0)},${un.t.toFixed(0)}` : 'absent'})`, inside(upd) && inside(un) && Math.abs(upd.t - un.t) <= 1, M);
+  check(`⑨ the controls squeeze nothing — side by side on a line (gaps 2–${M && M.gap} px), the name at its 9 em basis or the controls on their own line (name ${M && M.main && M.main.w.toFixed(0)} px of ${M && M.basis.toFixed(0)})`, !!M && !!M.main && tight && (M.main.w >= M.basis - 0.5 || M.ctl.t >= M.main.b - 0.5), M && { main: M.main, ctl: M.ctl, kids: M.kids });
+  const inside = (b) => !!b && b.w > 0 && b.h > 0 && b.l >= M.row.l - 0.5 && b.r <= M.row.r + 0.5 && b.t >= M.row.t - 0.5 && b.b <= M.row.b + 0.5 && b.l >= 0 && b.r <= M.vw && b.t >= 0 && b.b <= M.vh;
+  check(`⑨ every control is drawn inside the row and the 1000 × 600 viewport, on one line (${seen.map((k) => `${k.cls.split(' ').pop()} ${k.l.toFixed(0)},${k.t.toFixed(0)}`).join(' · ')})`, seen.length >= 3 && seen.every(inside) && seen.every((k) => sameLine(k, seen[0])), M);
+  // the «⋯» AS A PERSON PRESSES IT (a real press: the top element at its point is the button)
+  const pressedMore = await realClick(`${row} .rail-row-more`);
+  const opened = await waitFor(`(() => { const its = [...document.querySelectorAll('.context-menu > .context-menu-item')]; window.__pcMore = its.map((x) => x.textContent.trim()); return its.length > 0; })()`, 8000);
+  const moreMenu = await evalJs('window.__pcMore || null');
+  if (opened) await shot('more-menu');
+  check(`⑨ B-db5d: a real press on the row's «⋯» opens «更新…» first, then «卸载…» (${J(moreMenu)})`, !!pressedMore && opened && J(moreMenu) === J(['更新…', '卸载…']), { pressedMore, miss: realClick.lastMiss, moreMenu });
+  await evalJs(`(() => { document.querySelectorAll('.context-menu').forEach((p) => p.remove()); return true; })()`);
   const hrow = `.plugin-row[data-plugin="${HID}"]`;
   await evalJs(`(() => { const r = document.querySelector('${hrow}'); if (r) r.scrollIntoView({ block: 'center' }); return !!r; })()`);
-  const pressed = await realClick(`${hrow} .plugin-update`);
+  const pm = await realClick(`${hrow} .rail-row-more`);
+  const tagU = await waitFor(`(() => { const i = [...document.querySelectorAll('.context-menu > .context-menu-item')].find((x) => x.textContent.trim() === '更新…'); if (i) i.dataset.pc = 'upd'; return !!i; })()`, 8000);
+  const pressed = tagU ? await realClick('[data-pc="upd"]') : false;
   const said = await waitFor(`[...document.querySelectorAll('.global-toast')].some((x) => x.textContent.includes('${HID} 已是最新（0.1.0）'))`, 20000);
   const toasts = await evalJs(`[...document.querySelectorAll('.global-toast')].map((x) => x.textContent.trim())`);
-  check(`⑨ a real press on «更新…» with nothing new at the source says «${HID} 已是最新（0.1.0）» (${J(toasts)})`, !!pressed && said, { pressed, miss: realClick.lastMiss, toasts });
+  check(`⑨ a real press on the «⋯» then its «更新…», nothing new at the source, says «${HID} 已是最新（0.1.0）» (${J(toasts)})`, !!pm && !!pressed && said, { pm, pressed, miss: realClick.lastMiss, toasts });
 });
 check('no page exceptions', pageErrors.length === 0, pageErrors.slice(0, 3));
 console.log(fail ? `✗ ${fail} failed, ${pass} passed` : `ALL PASS (${pass})`);

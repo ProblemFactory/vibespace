@@ -11,9 +11,9 @@
 // prove them (each row says why); the design docs keep their FILE names (history) — RED: a planted user-visible string.
 // ⑥ lane plugin-consent-layout: both consent bodies open with `.dialog-intro` and the list of powers has its own rule (RED: the
 // base 160045063's files).
-// ⑦ lane plugin-update-button: the REAL plugins-ui.js in a fake DOM — a plugin that can update has «Update…» beside Uninstall…,
-// an uploaded / hand-placed one says how instead, the press posts /update and says «already up to date»; the chip's menu has
-// no Update (RED: the base 63f59d572's file).
+// ⑦ lane plugin-update-button: the REAL plugins-ui.js in a fake DOM — a plugin that can update has «Update…» (B-db5d: a row of
+// the row's «⋯» menu with Uninstall…, never inline), an uploaded / hand-placed one says how instead, the press posts /update and
+// says «already up to date»; the chip's menu has no Update (RED: the base 63f59d572's file; the checkpoint f6ad84f50's).
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -183,31 +183,35 @@ console.log('⑥ the consent dialogs open with their own body text (.dialog-intr
 }
 
 // ⑦ lane plugin-update-button (the owner, 2026-11-02, asked to press Update on the Custom Browser Kernel row: «有问题，看聊天» —
-// his screenshot showed name · switch · ⚙ · 「运行中」 · 「卸载…」 and no Update; it lived ONLY in the status chip's menu, and a
-// status chip reads as a badge). AN ACTION THE PERSON MUST TAKE IS A LABELLED CONTROL ON THE ROW. The REAL plugins-ui.js,
+// the owner's screenshot showed name · switch · ⚙ · 「运行中」 · 「卸载…」 and no Update; it lived ONLY in the status chip's menu, and a
+// status chip reads as a badge). The lane's answer was a labelled control on the row (since B-db5d: a row of the row's «⋯»). The REAL plugins-ui.js,
 // esbuild-bundled with its imports stubbed (utils: fetchJson / showToast / showContextMenu recorded; i18n: the English words),
-// renders the manifest list into a fake DOM: git / path / github-release installs ⇒ «Update…» beside Uninstall… in one cluster;
+// renders the manifest list into a fake DOM: git / path / github-release installs ⇒ «Update…» with Uninstall… (B-db5d: the «⋯» rows);
 // a zip install ⇒ no Update button (never a greyed one) + «upload the new .vsp»; a hand-placed folder ⇒ «placed by hand»; a press
 // posts /update and toasts «already up to date» on `unchanged: true`, «Updated … to …» otherwise, the server's error on a
 // refusal (the button pressable again); the chip's menu lists no Update (ONE door). RED CONTROL = the base 63f59d572's file
 // through the same walk (SKIP by name when the object is absent). The row's layout at 1000 × 600 zh: test-plugin-consent-chrome ⑨.
-console.log('⑦ a plugin that can update has a labelled «Update…» on its row; one that cannot says how; the chip has no Update');
+// B-db5d (the owner, 2026-11-18, on this row at a narrow width: «更新 卸载应该收进...里»): Update… and Uninstall… are ROWS OF THE
+// ROW'S «⋯» MENU at every width — the walk opens the «⋯» as a person does and presses its rows (Update… first; NO Update row for
+// an uploaded file or a hand-placed folder; Uninstall… asks its confirm); a plugin with settings keeps its ⚙ on the row. RED
+// CONTROL 2 = the checkpoint f6ad84f50's file (the two buttons inline, the ⚙ counted into the «⋯»).
+console.log('⑦ a plugin that can update has «Update…» in its row\'s «⋯» (B-db5d: with «Uninstall…», never inline); one that cannot says how; the chip has no Update');
 {
   const esbuild = require(path.join(repo, 'node_modules/esbuild'));
   const { pathToFileURL } = await import('node:url');
   const { mutantCopies } = await import('./mutant-copy.mjs');
   const MUT = mutantCopies('plugins-grammar', repo);
-  const W = globalThis.__pu = { calls: [], toasts: [], menus: [] };
+  const W = globalThis.__pu = { calls: [], toasts: [], menus: [], confirms: [] };
   const STUBS = {
     './utils.js': `const W = globalThis.__pu;
       export const createModalShell = () => { throw new Error('no modal in this leg'); }; export const freshKey = (k) => k;
       export const fetchJson = (u, o) => W.fetchJson(u, o); export const showToast = (m, o) => { W.toasts.push([m, (o && o.type) || 'info']); };
-      export const showConfirmDialog = async () => false; export const showContextMenu = (x, y, items) => { W.menus.push(items); };
+      export const showConfirmDialog = async (o) => { W.confirms.push(o && o.title); return false; }; export const showContextMenu = (x, y, items) => { W.menus.push(items); };
       export const escHtml = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); export const copyText = async () => {};`,
     './i18n.js': 'export const t = (s, p) => String(s).replace(/\\{(\\w+)\\}/g, (m, k) => (p && k in p ? String(p[k]) : m));',
     './agent-meta.js': 'export const BACKEND_META = {};',
     './voice-plugin-card.js': 'export const renderVoiceSheet = () => {};',
-    './settings-schema.js': 'export const pluginCategoryOf = () => null; export const SETTINGS_SCHEMA = {};',
+    './settings-schema.js': "export const pluginCategoryOf = (id) => (id === 'kit.path' ? 'plugin.kit' : null); export const SETTINGS_SCHEMA = {};",   // kit.path has settings: its ⚙ is a real button (B-db5d: it stays inline)
     './decision-readout.js': 'export const decisionLineOf = () => null, paintDecisionLine = () => {}, liveDecisionLine = () => null;',
     '../plugin-cred-state.js': 'export const pluginGitCredOf = () => null;',
   };
@@ -229,6 +233,7 @@ console.log('⑦ a plugin that can update has a labelled «Update…» on its ro
     getBoundingClientRect() { return { left: 0, top: 0, right: 0, bottom: 0 }; }
     all() { return [this, ...this.children.flatMap((c) => c.all())]; }
     get isConnected() { return true; }
+    click() { return this.onclick ? this.onclick({ currentTarget: this, stopPropagation() { }, preventDefault() { } }) : undefined; }
   }
   globalThis.document = { createElement: (tag) => new El(tag) };
   const SHA = 'a'.repeat(40);
@@ -267,43 +272,59 @@ console.log('⑦ a plugin that can update has a labelled «Update…» on its ro
     await app.openPluginsDialog({ container: root });
     const rowOf = (id) => root.all().find((e) => e.className.split(/\s+/).includes('plugin-row') && e.dataset.plugin === id) || null;   // the rail row: 'rail-row plugin-row'
     const buttons = (row) => (row ? row.all().filter((e) => e.tagName === 'BUTTON') : []);
-    const named = (row, label) => buttons(row).find((e) => e.textContent === label) || null;
+    // B-db5d: THE «⋯» AS A PERSON PRESSES IT — the row's own more button; its menu = the rows showContextMenu was handed (a row's
+    // action presses its button: what the button does is what the row does)
+    const menuOf = (row) => { const more = row && row.all().find((e) => /\brail-row-more\b/.test(e.className)); if (!more) return null; W.menus.length = 0; more.onclick({ stopPropagation() { } }); return W.menus[0] || []; };
     const rows = {};
     for (const { id } of ROWS) {
-      const row = rowOf(id), upd = named(row, 'Update…'), un = named(row, 'Uninstall…'), box = upd && upd.parentNode;
-      rows[id] = { buttons: buttons(row).map((e) => e.textContent), update: !!upd, cluster: !!(upd && un && box === un.parentNode && box !== row && box.children.indexOf(upd) < box.children.indexOf(un)),
+      const row = rowOf(id), menu = menuOf(row);
+      rows[id] = { buttons: buttons(row).map((e) => e.textContent), inline: buttons(row).some((e) => e.textContent === 'Update…' || e.textContent === 'Uninstall…'), menu: menu ? menu.map((i) => i.label) : null,
         fact: (row && row.all().find((e) => /\bplugin-row-fact\b/.test(e.className)) || {}).textContent || null };
     }
     const press = async (id) => {
       W.calls.length = 0; W.toasts.length = 0;
-      const b = named(rowOf(id), 'Update…');
-      if (b) { await b.onclick(); await tick(); }
-      return { pressed: !!b, calls: W.calls.filter(([u]) => /\/update$/.test(u)), toasts: [...W.toasts], disabledAfter: b ? b.disabled : null };
+      const item = (menuOf(rowOf(id)) || []).find((i) => i.label === 'Update…' && typeof i.action === 'function');
+      let during = null;
+      if (item) { const going = item.action(); const d = (menuOf(rowOf(id)) || []).find((i) => i.label === 'Update…'); during = d ? (d.off || 'live') : 'absent'; await going; await tick(); }   // the «⋯» reopened mid-press
+      const again = (menuOf(rowOf(id)) || []).find((i) => i.label === 'Update…');
+      return { pressed: !!item, during, calls: W.calls.filter(([u]) => /\/update$/.test(u)), toasts: [...W.toasts], pressableAfter: !!(again && typeof again.action === 'function' && !again.off) };
     };
     const pgit = await press('kit.git'), ppath = await press('kit.path'), prel = await press('kit.release');
+    // the menu's Uninstall… asks its confirm (refused here: nothing is deleted)
+    W.calls.length = 0; W.confirms.length = 0;
+    const un = (menuOf(rowOf('kit.zip')) || []).find((i) => i.label === 'Uninstall…' && typeof i.action === 'function');
+    if (un) { await un.action(); await tick(); }
+    const puninstall = { pressed: !!un, confirms: [...W.confirms], deletes: W.calls.filter(([, m]) => m === 'DELETE').length };
     W.menus.length = 0;
     const chip = rowOf('kit.git') && rowOf('kit.git').all().find((e) => /\bplugin-chip\b/.test(e.className));
     if (chip && chip.onclick) chip.onclick({ currentTarget: chip, stopPropagation() { } });
-    return { rows, pgit, ppath, prel, menu: (W.menus[0] || []).map((i) => i.label) };
+    return { rows, pgit, ppath, prel, puninstall, menu: (W.menus[0] || []).map((i) => i.label) };
   };
   const ZIP_WORDS = 'Installed from an uploaded file — upload the new .vsp through Install plugin…';
   const HAND_WORDS = 'Placed by hand — reinstall it through Install plugin… to make it updatable';
   const verdict = (w) => ({
-    updatable: ['kit.git', 'kit.path', 'kit.release'].every((id) => w.rows[id].update && w.rows[id].cluster),
-    zip: !w.rows['kit.zip'].update && w.rows['kit.zip'].fact === ZIP_WORDS,
-    hand: !w.rows['kit.hand'].update && w.rows['kit.hand'].fact === HAND_WORDS,
+    // B-db5d: Update… then Uninstall… are the row's «⋯» rows (never inline buttons); a source that cannot update has NO Update row
+    updatable: ['kit.git', 'kit.path', 'kit.release'].every((id) => J(w.rows[id].menu) === J(['Update…', 'Uninstall…']) && !w.rows[id].inline),
+    zip: J(w.rows['kit.zip'].menu) === J(['Uninstall…']) && !w.rows['kit.zip'].inline && w.rows['kit.zip'].fact === ZIP_WORDS,
+    hand: J(w.rows['kit.hand'].menu) === J(['Uninstall…']) && !w.rows['kit.hand'].inline && w.rows['kit.hand'].fact === HAND_WORDS,
+    gearInline: w.rows['kit.path'].buttons.includes('⚙') && !(w.rows['kit.path'].menu || []).includes('Open settings'),
+    uninstall: w.puninstall.pressed && J(w.puninstall.confirms) === J(['Uninstall plugin']) && w.puninstall.deletes === 0,
+    inFlight: w.pgit.during === 'Updating kit.git…',
     unchanged: J(w.pgit.calls) === J([['/api/plugins/manifests/kit.git/update', 'POST']]) && w.pgit.toasts.some(([m, k]) => m === 'kit.git is already up to date (0.1.5)' && k === 'info') && !w.pgit.toasts.some(([m]) => /^Updated /.test(m)),
     changed: w.ppath.toasts.some(([m]) => m === 'Updated kit.path to 0.1.5') && !w.ppath.toasts.some(([m]) => /up to date/.test(m)),
-    refused: w.prel.toasts.some(([m, k]) => m === 'the release has no .vsp asset' && k === 'error') && w.prel.disabledAfter === false,
+    refused: w.prel.toasts.some(([m, k]) => m === 'the release has no .vsp asset' && k === 'error') && w.prel.pressableAfter === true,
     oneDoor: w.menu.includes('Show capabilities…') && !w.menu.some((l) => /^Update/.test(l)),
   });
   const w = await walk(now, 'now'), v = verdict(w);
-  ok(v.updatable, `⑦ git / path / github-release installs: «Update…» beside «Uninstall…» in one cluster (${['kit.git', 'kit.path', 'kit.release'].map((id) => `${id}: ${J(w.rows[id].buttons)}`).join(' · ')})`);
-  ok(v.zip, `⑦ a zip install: no Update button, the row says «${w.rows['kit.zip'].fact}» (${J(w.rows['kit.zip'].buttons)})`);
-  ok(v.hand, `⑦ a hand-placed folder: no Update button, the row says «${w.rows['kit.hand'].fact}» (${J(w.rows['kit.hand'].buttons)})`);
+  ok(v.updatable, `⑦ B-db5d: git / path / github-release installs: the row's «⋯» lists «Update…» then «Uninstall…», neither drawn on the row (${['kit.git', 'kit.path', 'kit.release'].map((id) => `${id}: row ${J(w.rows[id].buttons)}, ⋯ ${J(w.rows[id].menu)}`).join(' · ')})`);
+  ok(v.zip, `⑦ a zip install: the «⋯» has NO Update row (only ${J(w.rows['kit.zip'].menu)}), the row says «${w.rows['kit.zip'].fact}» (row ${J(w.rows['kit.zip'].buttons)})`);
+  ok(v.hand, `⑦ a hand-placed folder: the «⋯» has NO Update row (only ${J(w.rows['kit.hand'].menu)}), the row says «${w.rows['kit.hand'].fact}» (row ${J(w.rows['kit.hand'].buttons)})`);
+  ok(v.gearInline, `⑦ B-db5d: a plugin with settings keeps its ⚙ ON the row, never in the «⋯» (kit.path: row ${J(w.rows['kit.path'].buttons)}, ⋯ ${J(w.rows['kit.path'].menu)})`);
+  ok(v.uninstall, `⑦ B-db5d: the «⋯»'s «Uninstall…» asks its confirm (${J(w.puninstall.confirms)}) and, refused, deletes nothing (${w.puninstall.deletes} DELETE)`);
+  ok(v.inFlight, `⑦ B-db5d: while the update runs, the «⋯»'s Update… is an OFF row that says why — «${w.pgit.during}» (never «not available»)`);
   ok(v.unchanged, `⑦ the press posts /api/plugins/manifests/kit.git/update and, the ref still at its commit (unchanged), toasts ${J(w.pgit.toasts.map(([m]) => m))}`);
   ok(v.changed, `⑦ a new package toasts «Updated … to …» (${J(w.ppath.toasts.map(([m]) => m))})`);
-  ok(v.refused, `⑦ a refusal toasts the server's error and the button is pressable again (${J(w.prel.toasts)}, disabled after: ${w.prel.disabledAfter})`);
+  ok(v.refused, `⑦ a refusal toasts the server's error and the «⋯»'s Update… is pressable again (${J(w.prel.toasts)}, pressable after: ${w.prel.pressableAfter})`);
   ok(v.oneDoor, `⑦ ONE door: the chip's menu lists ${J(w.menu)} — no Update`);
   const b0 = (() => { try { return execFileSync('git', ['-C', repo, 'show', '63f59d572:src/lib/plugins-ui.js'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; } })();
   if (b0 === null) console.log('  SKIP ⑦ RED CONTROL — the base object 63f59d572 is not in this clone');
@@ -311,6 +332,15 @@ console.log('⑦ a plugin that can update has a labelled «Update…» on its ro
     const wb = await walk(b0, 'base'), vb = verdict(wb);
     const red = Object.entries(vb).filter(([, x]) => !x).map(([k]) => k);
     ok(['updatable', 'zip', 'hand', 'unchanged', 'oneDoor'].every((k) => red.includes(k)), `⑦ RED CONTROL: the base 63f59d572 fails the same walk — ${red.join(', ')} (its kit.git row: ${J(wb.rows['kit.git'].buttons)}; its chip menu: ${J(wb.menu)})`);
+  }
+  // B-db5d RED CONTROL: the checkpoint f6ad84f50's row — Update… / Uninstall… drawn inline, the ⚙ of a plugin with settings
+  // folded by the count into a «⋯» (the frequent door hidden, the rare ones shown: the owner's picture)
+  const b1 = (() => { try { return execFileSync('git', ['-C', repo, 'show', 'f6ad84f50:src/lib/plugins-ui.js'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; } })();
+  if (b1 === null) console.log('  SKIP ⑦ B-db5d RED CONTROL — the checkpoint object f6ad84f50 is not in this clone');
+  else {
+    const wc = await walk(b1, 'checkpoint'), vc = verdict(wc);
+    const red = Object.entries(vc).filter(([, x]) => !x).map(([k]) => k);
+    ok(['updatable', 'zip', 'hand', 'gearInline', 'unchanged'].every((k) => red.includes(k)), `⑦ B-db5d RED CONTROL: the checkpoint f6ad84f50 fails the same walk — ${red.join(', ')} (its kit.path row: ${J(wc.rows['kit.path'].buttons)}, its ⋯: ${J(wc.rows['kit.path'].menu)})`);
   }
 }
 

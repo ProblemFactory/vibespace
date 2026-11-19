@@ -8,8 +8,11 @@
 //   .rail-row-ctl    the controls, one group, pushed right; each control keeps its whole width (a chip that is a button is
 //                    never cut — it wraps inside itself only when it alone is wider than the line)
 // More than ROW_INLINE_MAX controls: the rest fold into ONE «⋯» whose rows are their own words (the PURE count rule of
-// row-fold-model.js — a primary control never folds). Gate: test-ui-fit (fast) ② + test-ui-fit-chrome (every rail panel at 260
-// and 200 px: no word broken inside itself, nothing wider than its box, every control on one line).
+// row-fold-model.js — a primary control never folds). A control carrying data-rail-fold="always" is the «⋯» menu's at every
+// width and never counts (B-db5d: a manifest plugin's Update… / Uninstall… — the owner: «更新 卸载应该收进...里»); the model
+// refuses one that is also primary, by name. A row with nothing folded has NO «⋯». Gate: test-ui-fit (fast) ② +
+// test-ui-fit-chrome (every rail panel at 260 and 200 px: no word broken inside itself, nothing wider than its box, every control
+// on one line).
 import { rowActionsFold, ROW_INLINE_MAX } from './row-fold-model.js';
 import { showContextMenu } from './utils.js';
 import { t } from './i18n.js';
@@ -24,7 +27,8 @@ const labelOf = (c) => (c.dataset?.railLabel || c.getAttribute?.('aria-label') |
  *   row       an existing element to fill (its children are replaced) — else a new <div>
  *   lead      a node before the name (a dot, a glyph, an icon)
  *   name/desc strings (a name node is built with `nameClass`, a description with `descClass`); or `main` = nodes of your own
- *   controls  nodes in their order; a control carrying data-rail-primary never folds
+ *   controls  nodes in their order; a control carrying data-rail-primary never folds; one carrying data-rail-fold="always" always
+ *             does (a GROUP — a <div> of buttons — folds as its buttons, one menu row each, in their order)
  */
 export function railRow({ row = null, className = '', lead = null, name = null, nameClass = '', desc = '', descClass = '', main = null, mainClass = '', controls = [], max = ROW_INLINE_MAX } = {}) {
   const r = row || el('div');
@@ -41,16 +45,18 @@ export function railRow({ row = null, className = '', lead = null, name = null, 
   // switch · Update/Uninstall · the unseen ⚙) and folded into a «⋯» whose menu was EMPTY.
   const keeper = (c) => c.getAttribute?.('aria-hidden') === 'true';
   const acts = list.filter((c) => !keeper(c));
-  const v = rowActionsFold({ items: acts.map((c, i) => ({ key: String(i), px: 1, primary: c.dataset?.railPrimary === '1' })), widthPx: 1e9, max });
+  const v = rowActionsFold({ items: acts.map((c, i) => ({ key: String(i), px: 1, primary: c.dataset?.railPrimary === '1', always: c.dataset?.railFold === 'always' })), widthPx: 1e9, max });
   const folded = new Set(v.folded);
   list.forEach((c) => { if (keeper(c) || !folded.has(String(acts.indexOf(c)))) ctl.appendChild(c); });
-  if (folded.size) {
+  const rest = acts.filter((_, i) => folded.has(String(i)));
+  // a folded GROUP holding no button gives no row: a «⋯» is drawn only when its menu has a row (never a menu that opens empty)
+  const menuRows = rest.flatMap((c) => (c.tagName === 'BUTTON' ? [c] : [...c.querySelectorAll('button')]));
+  if (menuRows.length) {
     const more = el('button', 'rail-row-more'); more.type = 'button'; more.textContent = '⋯'; more.title = t('More'); more.setAttribute('aria-label', t('More'));
-    const rest = acts.filter((_, i) => folded.has(String(i)));
     // the reader's minor: a folded GROUP (a <div> of buttons — the manifest plugin's Update · Uninstall) is its BUTTONS, one row
     // each; a control that cannot act is an OFF row that says WHY on the row (utils.js showContextMenu's `off` — ui-controls'
     // rule since 2.369.402: a row works, or it is a caption, or it is off with its why), never a toast, never a silent nothing
-    const rows = rest.flatMap((c) => (c.tagName === 'BUTTON' ? [c] : [...c.querySelectorAll('button')]));
+    const rows = menuRows;
     more.onclick = (e) => { e.stopPropagation(); const b = more.getBoundingClientRect(); showContextMenu(b.left, b.bottom + 2, rows.map((c) => (c.disabled ? { label: labelOf(c), off: c.title || t('not available') } : { label: labelOf(c), title: c.title || '', action: () => c.click() }))); };
     ctl.appendChild(more);
   }

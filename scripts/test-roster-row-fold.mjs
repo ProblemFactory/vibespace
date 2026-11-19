@@ -7,6 +7,9 @@
 //     FIT still fold beyond three (the count); three that do not fit fold by width right-to-left; the primary never folds;
 //     the «…» charged once, exactly (the boundary px); a width sweep is monotone. Four patched copies are each RED by name:
 //     no count cap (barLayout alone), no width step, a «…» the count opened charged nothing, a primary that folds.
+//     B-db5d (the owner on a manifest plugin's row: «更新 卸载应该收进...里»): an item's `always` field — the «…» menu's at every
+//     width, uncounted, opening the «…» like a count fold; primary + always refused by name. Three more patched copies RED by
+//     name: the field ignored, an always item counted toward the maximum, the refusal dropped.
 //   ② THE RENDERER'S WIRING — src/lib/manage-agents.js: every status row that holds buttons is handed to foldRowByTier with
 //     the tier's reader (r2: the fold follows the CURRENT tier — the Agents form outlives a phone ↔ desktop crossing, so ONE
 //     verdict reads app.isMobile on every pass, on the row's width change and on viewport-switch's vs-viewport-class; the
@@ -64,6 +67,18 @@ const judge = (M) => {
   T('the primary never folds — even as the rightmost button the count takes the last NON-primary', { items: [R, U, C, L], widthPx: 400 }, { shown: ['recheck', 'update', 'login'], folded: ['rules'], fits: true, need: 248 });
   T('an absent button (px 0 — hidden) is neither shown, folded nor counted', { items: [R, L, U, { key: 'rules', px: 0 }], widthPx: 400 }, { shown: ['recheck', 'login', 'update'], folded: [], fits: true, need: 208 });
   T('a row narrower than the primary + «…»: every foldable button folds and the verdict says it does not fit', { items: [R, L, U, C], widthPx: 60 }, { shown: ['login'], folded: ['recheck', 'update', 'rules'], fits: false, need: 96 });
+  // B-db5d — A CONTROL THAT ALWAYS FOLDS (the owner on a manifest plugin's row: «更新 卸载应该收进...里»): `always` = the «…» menu's
+  // at every width, never counted, never pushing another control out; it opens the «…» like a count fold (charged once)
+  const X = { key: 'more-only', px: 150, always: true };
+  T('B-db5d: an ALWAYS control folds though the row is wide and three stand — the «…» charged its width + one gap', { items: [R, L, U, X], widthPx: 1000 }, { shown: ['recheck', 'login', 'update'], folded: ['more-only'], fits: true, need: 248 });
+  T('B-db5d: an always control is no inline control — in the MIDDLE it pushes none of the three out', { items: [R, X, L, U], widthPx: 1000 }, { shown: ['recheck', 'login', 'update'], folded: ['more-only'], fits: true, need: 248 });
+  T('B-db5d: alone beside one control it still opens the «…» (nothing is counted out)', { items: [L, X], widthPx: 1000 }, { shown: ['login'], folded: ['more-only'], fits: true, need: 96 });
+  T('B-db5d: four others + an always control — the count still takes the last non-primary of the FOUR', { items: [R, L, U, C, X], widthPx: 1000 }, { shown: ['recheck', 'login', 'update'], folded: ['rules', 'more-only'], fits: true, need: 248 });
+  T('B-db5d: always + a narrow row — the width folds further, right-to-left, the «…» charged once', { items: [R, L, U, X], widthPx: 200 }, { shown: ['recheck', 'login'], folded: ['update', 'more-only'], fits: true, need: 178 });
+  T('B-db5d: an absent always control (px 0) opens nothing', { items: [R, L, { key: 'more-only', px: 0, always: true }], widthPx: 1000 }, { shown: ['recheck', 'login'], folded: [], fits: true, need: 138 });
+  // …and a primary that is also always is REFUSED BY NAME (a primary control never folds) — never a silent pick of one of the two
+  try { M.rowActionsFold({ items: [R, { key: 'both-ways', px: 40, primary: true, always: true }], widthPx: 1000, gapPx: 6, moreW: 34 }); bad.push('B-db5d refusal: a primary AND always control was taken'); }
+  catch (e) { if (!/«both-ways» is primary AND always-fold/.test(String(e && e.message))) bad.push('B-db5d refusal: refused without its name — ' + String(e && e.message)); }
   // the sweep: a wider row never folds more; at most three stand; a verdict that fits occupies no more than the row
   let prev = Infinity, sweepBad = null;
   for (let w = 0; w <= 500 && !sweepBad; w++) {
@@ -82,6 +97,9 @@ const MUTANTS = [
   ['no width step (the count alone)', 'barLayout({ widthPx: width,', 'barLayout({ widthPx: 1e9,'],
   ['a «…» the count opened is charged nothing', "items: byCount.size ? [...kept, { key: OPENED, px: width + 1, priority: Number.MAX_SAFE_INTEGER }] : kept", 'items: kept'],
   ['the primary folds like any other button', 'priority: it.primary ? 0 : 1', 'priority: 1'],
+  ['B-db5d: the always field ignored (counted like any control)', 'const always = new Set(all.filter((it) => it.always).map((it) => String(it.key)));', 'const always = new Set();'],
+  ['B-db5d: an always control counts toward the maximum', 'list.length - cap', '(list.length + always.size) - cap'],
+  ['B-db5d: a primary AND always control taken silently', '  if (both) throw new Error(', '  if (false) throw new Error('],
 ];
 for (const [name, from, to] of MUTANTS) {
   if (!MODEL_SRC.includes(from)) { ok(false, `CONTROL (${name}): the patch site is gone from ${MODEL}`, from); continue; }
