@@ -195,6 +195,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - In Properties, a running conversation's Agent steps now match its chat: Codex shows its plan (always empty before), Claude its current steps.
 - A sub-agent's message read while it was still being written is no longer lost from the sub-agent's view.
 - A folder already showing a machine's folder (or inside or around one) is refused by name; of two such rows already there, one says so and waits.
+- A Claude conversation started on this machine with your own settings file and a picked subscription keeps that file's hooks and permission rules.
 - A picture you paste, pick or take in a chat is checked at once: an empty file, a HEIC, a non-picture or one too large for the model is refused with its reason.
 - A subscription you pick now pays on a machine whose Claude settings name an apiKeyHelper; the helper's key used to pay. Its first start says so.
 - A session's own auto-continue choice now survives a VibeSpace restart instead of falling back to the default.
@@ -234,7 +235,6 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The storage access boxes no longer point below at a Connect button that sits above them.
 - Mounting a folder from an offline machine now says it is offline first, with its pairing command.
 - In a Claude chat, a second Rewind to here waits for the first one's answer, and a message sent in that first minute comes back to the box.
-- A Claude conversation started on this machine with your own settings file and a picked subscription keeps that file's hooks and permission rules.
 
 ### Security
 - A cluster install can let only its ingress reach each user's VibeSpace (networkPolicy.ingress, off until tried on a test cluster).
