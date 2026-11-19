@@ -486,7 +486,8 @@ for (const lang of ['en', 'zh', 'ja']) {
 }
 // ═══ (g) B-b56d — THE OWNER'S RULING B (2026-11-18): THE PERSON BROWSES ALONE, A SITE ASKS FOR A SIGN-IN ⇒ VIBESPACE'S FORM IN THEIR WINDOW ═══
 console.log('— (g) B-b56d: a profile only the person browses; a stand-in site asks for an HTTP sign-in ⇒ the form in their window, Sign in and Cancel');
-{
+if (!require('../src/server/browser-dialogs.js').PERSON_SIGNIN_HOOK) skip("(g) B-b56d, every leg: the person's sign-in hook is OUT of this release (PERSON_SIGNIN_HOOK false, the coordinator's order 2026-11-18 23:56Z) — (g) runs again when the hook is back, and proves it on the box");
+else {
   const mk = await api('POST', '/api/browser/profiles', { label: 'alone' });
   const PID2 = mk.json && mk.json.profile ? mk.json.profile.id : null;
   const A = await page({ lang: 'en' });

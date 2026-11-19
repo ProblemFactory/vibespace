@@ -445,6 +445,21 @@ async function scene6(Dm, { stop = 'end', road = 'screencast', agentFirst = fals
   out.refusedAtBound = { cwa: cwa().filter((x) => x.id === 'A6').map((x) => x.r), endedSame: JSON.stringify(wp.personPromptStateOf(HK6).ended) === endedBefore, evs: ev6.filter((e) => e.kind === 'prompt-ended').length - endedEvs };
   return end();
 }
+// B-b56d OUT (the coordinator, 2026-11-18 23:56Z): the person's sign-in hook is OFF in this release (PERSON_SIGNIN_HOOK) until
+// test-browser-human-ui (g) is green on the box — the legs that need the hook are not run while it is off, BY NAME and counted
+const HOOK6 = D.PERSON_SIGNIN_HOOK === true;
+if (!HOOK6) {
+  console.log(`  ⊘ SKIP ⑥ B-b56d — ${26} legs of the person's sign-in hook: it is OUT of this release (PERSON_SIGNIN_HOOK false, the coordinator's order 2026-11-18 23:56Z; it ships only once test-browser-human-ui (g) is green on the box)`);
+  const o6 = await scene6(D, { stop: 'window' });
+  ok(!o6.window.fe && o6.noWindow.fetch === 0, 'B-b56d OUT: the person browses with a window open and the watch arms NO sign-in hook (Fetch never enabled) — the release before B-b56d', o6.window);
+  const dsrcO = read('src/server/browser-dialogs.js'); const SWITCH = 'const PERSON_SIGNIN_HOOK = false;';
+  if (dsrcO.split(SWITCH).length !== 2) throw new Error('B-b56d OUT control setup: the switch line is not found once in src/server/browser-dialogs.js');
+  const MO = mutantCopies('uiprompts-b56d-out', REPO);
+  const on6 = await scene6(MO.load('src/server/browser-dialogs.js', dsrcO.replace(SWITCH, 'const PERSON_SIGNIN_HOOK = true;'), 'hook-on'), { stop: 'window' });
+  ok(on6.window.fe && on6.window.fe.handleAuthRequests === true, 'CONTROL (B-b56d OUT): the same watch with the switch ON arms the hook — the switch is what holds it off (RED for the leg above)', on6.window);
+  for (const c of copiesCensus(MO.files, MO.dir, REPO, { label: '⑥ OUT control: ' })) ok(c.pass, c.name, c.detail);
+}
+if (HOOK6) {
 const s6 = await scene6(D);
 ok(s6.noWindow.fetch === 0, 'B-b56d (law 6): the person browses with NO window of theirs open — no hook at all (a browser nobody watches changes nothing)', s6.noWindow);
 ok(s6.window.fe && s6.window.fe.handleAuthRequests === true && s6.window.fe.patterns.length === 1 && s6.window.fe.patterns[0].resourceType === 'Document' && s6.window.fe.patterns[0].requestStage === 'Request' && s6.window.chooser === 0 && s6.window.perm === 0 && s6.window.state.hook && s6.window.state.hook.armed === true,
@@ -484,6 +499,7 @@ ok(s6.fy6.length === 0, 'B-b56d (its read): the person\'s own browsing files NO 
   ok((lw6.match(/if \(prLine\) drawPrLines\(prLine\);/g) || []).length === 2 && /\n {6}if \(prLine\) drawPrLines\(prLine\);/.test(lw6) && /\} else if \(prLine\) drawPrLines\(prLine\);/.test(lw6) && /const prl = H && !d && !stuck && !blind && !pkElse \? personPromptLines/.test(lw6), '…the window draws BOTH sign-in lines (the bound, the hook) in the passkey «unknown» branch too (the cure: the bound\'s line was missing there)');
   ok(ST.personPromptLines({ hook: { armed: false, why: 'kernel', x: false } }, tFor('en')).hook === null && ST.personPromptLines({ hook: { armed: null, why: 'connecting' } }, tFor('en')).hook === null, 'B-b56d (its read): a kernel (its own road) and a watch still connecting draw no standing line — only a refused hook and no watch at all are said');
   wu.shutdown();
+}
 }
 { // its read (M1): THE PERSON TYPES INTO THE FORM — the window always drives its own tab, so the keys belong to the page unless a box is the
   // window's OWN: the address row and (B-b56d) the sign-in form's two boxes, in each of the four keyboard handlers (keys, paste, input, focus)
@@ -528,6 +544,7 @@ ok(s6.fy6.length === 0, 'B-b56d (its read): the person\'s own browsing files NO 
   ok(blk && /prLine\.ended\.line/.test(blk) && /prLine\.hook\.line/.test(blk) && (blk.match(/textContent = /g) || []).length === 2 && !/innerHTML/.test(blk) && /st\.prEnded = m\.ended && typeof m\.ended === 'object'/.test(lsrc6) && /pass\.value = ''; if \(H\) user\.value = '';/.test(lsrc6),
     'B-b56d (law 3): the person\'s window draws both lines as TEXT (textContent, never innerHTML) from its relay record', blk.length);
 }
+if (HOOK6) {
 { // LAW 8 (主开发 15:42Z): THE HUB'S TURN ON A PAUSED PAGE LOAD — the round trip over the real watch on an idle loop (median and worst
   // of a stated count, printed: numbers, never a bound), and with a stall PLACED in the loop inside the continue's window (Atomics.wait:
   // the thread sleeps, no load): the request is continued once the loop turns again — never failed, never dropped
@@ -581,7 +598,7 @@ ok(s6.fy6.length === 0, 'B-b56d (its read): the person\'s own browsing files NO 
   const cut = (needle, repl) => { if (dsrc6.split(needle).length !== 2) throw new Error(`B-b56d control setup: the anchor ${JSON.stringify(needle.slice(0, 70))} is not found once in src/server/browser-dialogs.js`); return dsrc6.replace(needle, repl); };
   const WIN = "    if ((personViews.get(w.profileId) || 0) > 0) return true;\n";
   const RESYNC = "    if (w.mode === 'person') { const e = w.targets.get(rec.targetId); if (e && e.sid && e.enabled) syncTabFetchMode(w, e); }";
-  const KEEP = "      if (rec.type === 'http-auth' && w.authReq.has(rec.id) && !w.kernel && (personViews.get(w.profileId) || 0) > 0) continue;";
+  const KEEP = "      if (PERSON_SIGNIN_HOOK && rec.type === 'http-auth' && w.authReq.has(rec.id) && !w.kernel && (personViews.get(w.profileId) || 0) > 0) continue;";
   const M6 = mutantCopies('uiprompts-b56d', REPO);
   const c1 = await scene6(M6.load('src/server/browser-dialogs.js', cut("    if (w.mode !== 'person') return true;\n" + WIN, "    if (w.mode !== 'person') return true;\n    return false;\n"), 'person-never'), { stop: 'window' });
   ok(!c1.window.fe, 'CONTROL (B-b56d): the base\'s rule (the person\'s watch never hooks a sign-in) — a window of the person open, and no hook (RED for the leg above)', c1.window);
@@ -592,6 +609,7 @@ ok(s6.fy6.length === 0, 'B-b56d (its read): the person\'s own browsing files NO 
   const c4 = await scene6(M6.load('src/server/browser-dialogs.js', cut(KEEP, ''), 'hand-back'), { agentFirst: true, windowsAtMove: 1 });
   ok(c4.moved.cwa.some((x) => x.id === 'M1' && x.r === 'Default'), 'CONTROL (B-b56d): the base\'s hand-back gives the held sign-in to Chrome even with the person\'s window open (RED for the leg above)', c4.moved.cwa);
   for (const c of copiesCensus(M6.files, M6.dir, REPO, { label: '⑥ B-b56d controls: ' })) ok(c.pass, c.name, c.detail);
+}
 }
 fs.rmSync(ROOT, { recursive: true, force: true });
 console.log(`\n${pass} passed, ${fail} failed`);

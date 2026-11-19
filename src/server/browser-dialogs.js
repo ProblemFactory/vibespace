@@ -125,6 +125,11 @@ const KERNEL_GONE_CODES = Object.freeze(['no_such_request', 'no_such_surface', '
 const KERNEL_PROBE_MS = 2000; // VibeSpace.getVersion — standard Chrome refuses it in ms (-32601); a socket that never answers is today's road
 
 const ANSWERED_KEEP = 32;
+/** B-b56d OUT (the coordinator, 2026-11-18 23:56Z — the owner's decision stands: built, ships only proven): THE PERSON'S SIGN-IN HOOK
+ *  IS OFF in this release. Its heavy leg (test-browser-human-ui (g)) was red on the box; until that leg is green there, the
+ *  person's own watch arms NO HTTP sign-in hook (the release before B-b56d: Chrome's own handling). Everything else of the unit
+ *  stays and is unreachable without the hook. Turned back on by this one line, with its suites' legs, once (g) is proven. */
+const PERSON_SIGNIN_HOOK = false;
 const AUTH_FETCH_MODES = new Set(['doc-auth', 'all-auth', 'fill-auth']); // B-b56d: the Fetch modes that hook an HTTP sign-in
 const ENDED_SHOW_MS = 60 * 60 * 1000; // B-b56d (its read, S2): a sign-in cancelled at its bound is said in the person's window for an hour at most
 const OUTCOMES_KEEP = 16;
@@ -977,7 +982,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   async function toPerson(w) {
     const tabs = [...w.targets.values()].filter((e) => e.sid);
     for (const rec of [...w.prompts.values()]) {
-      if (rec.type === 'http-auth' && w.authReq.has(rec.id) && !w.kernel && (personViews.get(w.profileId) || 0) > 0) continue; // B-b56d: a window of the person shows it — the person answers it there
+      if (PERSON_SIGNIN_HOOK && rec.type === 'http-auth' && w.authReq.has(rec.id) && !w.kernel && (personViews.get(w.profileId) || 0) > 0) continue; // B-b56d: a window of the person shows it — the person answers it there
       const ar = w.authReq.get(rec.id); if (ar) { w.authReq.delete(rec.id); await call(w, 'Fetch.continueWithAuth', { requestId: ar.requestId, authChallengeResponse: { response: 'Default' } }, ar.sid || null); } dropPrompt(w, rec, 'person');
     }
     await Promise.all(tabs.map(async (e) => {
@@ -1291,7 +1296,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
    *  `x`: the browser is on the X road (Chrome's own sheet stands in its window there). */
   function personPromptStateOf(browserKey) {
     const bk = String(browserKey || '');
-    if (!/^hu-/.test(bk)) return null;
+    if (!/^hu-/.test(bk) || !PERSON_SIGNIN_HOOK) return null; // B-b56d OUT: no hook, so nothing to say beside the prompt fact
     let pid = null; try { pid = HM().profileOfHumanKey(bk); } catch { pid = null; }
     if (!pid) return null;
     const views = (personViews.get(String(pid)) || 0) > 0;
@@ -3557,6 +3562,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   function authHookOn(w, e) {
     if (!w || w.kernel) return false;
     if (w.mode !== 'person') return true;
+    if (!PERSON_SIGNIN_HOOK) return false; // B-b56d OUT: the person's watch arms no sign-in hook in this release
     if ((personViews.get(w.profileId) || 0) > 0) return true;
     const rec = e ? w.prompts.get(e.targetId) : null;
     return !!(rec && rec.type === 'http-auth' && w.authReq.has(rec.id));
@@ -5806,6 +5812,7 @@ const FENCED_DIALOG_WORDS = 'a dialog of a page VibeSpace keeps fenced (a vault 
 function agentDialogOf(d) { return d && d.fencedAt ? { ...d, message: FENCED_DIALOG_WORDS, title: '', defaultValue: '', fields: [], url: d.fencedAt.urlAtFill, ...(d.frameOrigin !== undefined ? { frameOrigin: d.origin || '' } : {}) } : d; }
 
 module.exports = {
+  PERSON_SIGNIN_HOOK, // B-b56d OUT: the person's sign-in hook's one switch (the legs read it)
   agentDialogOf, FENCED_DIALOG_WORDS,   // lane chrome-157 (round 32): the agent's view of a dialog on a fenced tab (pure)
   create,
   holdersOfKeeper,
