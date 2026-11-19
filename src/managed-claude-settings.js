@@ -55,7 +55,7 @@ const regExeOf = (platform, env) => (platform === 'win32' ? path.win32.join(Stri
 // it decides WHERE the CLI's requests go, WHO can read them, or WHAT credential they carry. The list is the CLI 2.1.322's OWN: the set
 // of connection names it strips from a settings source it cannot verify (`lu` in its bundle — its proxy and TLS-trust names, its cloud
 // switches and addresses, its credentials and credential files, the config and home folders it reads a login from), WHOLE and in its
-// order, its spreads written out; and three it keeps in its other lists (its proxy set's two CLAUDE_CODE_ proxies, the sessions
+// order, its spreads written out; and four it keeps in its other lists (its proxy set's two CLAUDE_CODE_ proxies, the sessions
 // token, the Google Cloud auth). TRUST names count by themselves: a managed CA (or the TLS check off) lets whoever holds that CA read
 // every request, the provider's key in it — an organisation's inspecting proxy named in the managed env, in the hub's own
 // environment (the CLI inherits it), or on the network with no proxy name at all. Matched as the CLI matches them: in ANY case. A
@@ -94,9 +94,11 @@ const CLI_CONNECTION_NAMES = Object.freeze([
   'CLAUDE_LOCAL_OAUTH_CONSOLE_BASE', 'CLAUDE_BRIDGE_BASE_URL', 'CLAUDE_BRIDGE_OAUTH_TOKEN', 'CLAUDE_BRIDGE_SESSION_INGRESS_URL', 'CLAUDE_REMOTE_TOOLS_BRIDGE_URL', 'CLAUDE_CODE_GB_BASE_URL']);
 const ENV_OTHER_NAMES = Object.freeze(['CLAUDE_CODE_HTTPS_PROXY', 'CLAUDE_CODE_HTTP_PROXY', 'CLAUDE_CODE_SESSIONS_OAUTH_TOKEN', 'ANTHROPIC_GOOGLE_CLOUD_AUTH']);
 // NOT COUNTED, each for its reason (the rest of the CLI's list counts): it neither sends a request elsewhere, nor lets another read it,
-// nor carries a credential
+// nor carries a credential. (npm's three proxy names COUNT — 主开发 02:49Z: when ALL_PROXY is set without the four names the CLI's
+// request proxy reads, it hands its axios client back to that client's own env resolution — `Mt.defaults.proxy=n?void 0:!1` — and
+// such resolvers read the npm names.)
 const ENV_NOT_COUNTED = Object.freeze({
-  NO_PROXY: 'narrows where a proxy is used', NPM_CONFIG_HTTPS_PROXY: "npm's own (plugin installs), never the model's requests", NPM_CONFIG_HTTP_PROXY: "npm's own", NPM_CONFIG_PROXY: "npm's own",
+  NO_PROXY: 'narrows where a proxy is used',
   API_FORCE_IDLE_TIMEOUT: 'a connection timing', CLAUDE_CODE_DISABLE_HTTPS_AGENT_KEEPING: 'a connection timing', CLAUDE_CODE_PROXY_AUTH_HELPER_TTL_MS: 'a connection timing',
 });
 const ENV_SWITCHES = Object.freeze(new Set(['CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY', 'CLAUDE_CODE_USE_ANTHROPIC_AWS', 'CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD',
@@ -248,6 +250,7 @@ async function windowsPolicyFact({ wsl, drvfsDir, fsp, reg = {}, platform, env =
     for (const d of drvDocs) { const j = judge(d.doc); if (j) return { ...j, where: d.where }; }
   }
   if (hkcu.failed || hkcu.malformed) return unread(hkcu, POLICY_KEYS[1]);
+  // DELIBERATELY wider than the CLI's `=== true` (it also takes "true", as the CLI's schema coerces it): wider only refuses more
   const cuOwn = !!hkcu.set && (hkcu.set.wslInheritsWindowsSettings === true || hkcu.set.wslInheritsWindowsSettings === 'true');
   if (hkcu.set && (!wsl || (adminOptIn && cuOwn))) { const j = judge(hkcu.set); if (j) return { ...j, where: POLICY_KEYS[1] }; }
   return null;
@@ -300,7 +303,8 @@ const MANAGED_HELPER_WORDS = Object.freeze({
   unread: '{provider} cannot start on this machine: what its managed Claude settings set could not be told ({where}) — a managed key helper or credential would go to {provider}. Ask the administrator, or use an account of that organization',
   // the Windows helper absent, unable to start, failing or over its bound: ITS OWN words — nothing an administrator of an organization
   // is needed for; ABSENT or UNABLE TO START (WSL interop off): no retry promised (it will not appear by waiting)
-  windowsAbsent: '{provider} cannot start on this machine: VibeSpace could not find or start the Windows helper that reads the Windows policy for Claude Code ({where}), so it cannot tell whether that policy would send a credential to {provider}. Start the conversation on another account',
+  // …and says what a person can do (主开发 02:49Z): on WSL, let it run Windows programs, then start again
+  windowsAbsent: '{provider} cannot start on this machine: VibeSpace could not find or start the Windows helper (reg.exe) that reads the Windows policy for Claude Code ({where}), so it cannot tell whether that policy would send a credential to {provider}. On WSL, turn on running Windows programs (WSL interop) and start it again; or start the conversation on another account',
   windowsUnread: '{provider} cannot start on this machine yet: VibeSpace could not read the Windows policy for Claude Code ({where}), so it cannot tell whether that policy would send a credential to {provider}. Try again in a moment; if it keeps happening, start the conversation on another account',
 });
 

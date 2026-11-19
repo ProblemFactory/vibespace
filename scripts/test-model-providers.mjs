@@ -772,6 +772,18 @@ console.log('⑮ the provider test: a FAKE CLI, empty homes, a third party only,
         'the route\'s Test door names the file: its own text filled (no «{where}» left) and `where` handed on', rb);
     } finally { rs.close(); }
   }
+  // …and with NO place to name (主开发 02:49Z): the route's own text says the sentence WITHOUT its parentheses — never «()»
+  {
+    const rapp = express(); rapp.use(express.json());
+    require(path.join(ROOT, 'src/routes/providers.js')).registerProviderRoutes(rapp, { providers: tstore, tester: { runProviderTest: async () => ({ ok: false, code: 'windows-policy-unread' }) } });
+    const rs = await new Promise((r) => { const x = rapp.listen(0, '127.0.0.1', () => r(x)); });
+    try {
+      const rr = await fetch(`http://127.0.0.1:${rs.address().port}/api/providers/${encodeURIComponent(P.ok.id)}/test`, { method: 'POST', headers: { 'Sec-Fetch-Site': 'same-origin', 'Content-Type': 'application/json' }, body: JSON.stringify({ harness: 'claude' }) });
+      const rb = await rr.json();
+      ok(rr.status === 409 && rb.code === 'windows-policy-unread' && !('where' in rb) && /Windows policy for Claude Code, so the test/.test(rb.error) && !/\(\s*\)|\{where\}/.test(rb.error),
+        'the route\'s text with NO place to name: the sentence without its parentheses (never «()»), no `where` handed', rb);
+    } finally { rs.close(); }
+  }
   // EACH PAGE TEST DOOR, DRIVEN (the cure2 read: a leg at each door, not a text pin): the REAL wizard row's words (`errorWords`) and
   // the REAL roster toast's (`testToastWords`) for a refusal naming its source — the source said, no «{where}» left; the ONE words
   // function both call (`refusalWords`) through the zh and ja dictionaries likewise. CONTROLS (ESM copies beside the real files,
@@ -792,6 +804,14 @@ console.log('⑮ the provider test: a FAKE CLI, empty homes, a third party only,
     for (const [lang, f] of [['zh', 'src/lib/i18n-zh.js'], ['ja', 'src/lib/i18n-ja.js']]) { const d = await dictOf(f); for (const c of CODES) zhja.push({ lang, c, s: PTM.refusalWords(refused(c), trOf(d), 'failed'), has: Object.prototype.hasOwnProperty.call(d, PTM.REFUSAL_WORDS[c]) }); }
     ok(zhja.length === 6 && zhja.every((x) => x.has && said(x.s, refused(x.c)) && x.s !== PTM.refusalWords(refused(x.c), trOf({}), 'failed')),
       'the words both doors share, through the zh and ja dictionaries: each refusal translated, its source in it, no «{where}» left', zhja.filter((x) => !(x.has && said(x.s, refused(x.c)))).map((x) => x.lang + ' ' + x.c));
+    // NO PLACE TO NAME (主开发 02:49Z): said WITHOUT its parentheses — never «()» / «（）» — at both page doors and in zh and ja
+    const bare = (s) => typeof s === 'string' && s.length > 20 && !/\(\s*\)|（\s*）|\{where\}/.test(s);
+    const noWhere = (c) => ({ ok: false, code: c });
+    const bareAll = [];
+    for (const c of CODES) bareAll.push(WZ.errorWords(noWhere(c)), RO.testToastWords(noWhere(c)));
+    for (const f of ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js']) { const d = await dictOf(f); for (const c of CODES) bareAll.push(PTM.refusalWords(noWhere(c), trOf(d), 'failed')); }
+    ok(bareAll.length === 12 && bareAll.every(bare) && PTM.fillWhere('A ({where}) B', '') === 'A B' && PTM.fillWhere('甲（{where}）乙', '') === '甲乙' && PTM.fillWhere('A ({where}) B', 'x') === 'A (x) B',
+      'a refusal with no place to name is said without its parentheses at both page doors, in en, zh and ja — never «()»', bareAll.filter((s) => !bare(s)).slice(0, 3));
     const PM = mutantCopies('model-providers-doors', ROOT);
     const WSRC = read('src/lib/provider-wizard.js'), RSRC = read('src/lib/provider-roster.js');
     const wizCut = await import(pathToFileURL(PM.write('src/lib/provider-wizard.js', anchored(WSRC, "refusalWords(r, t, 'Something went wrong')", "t((r && REFUSAL_WORDS[r.code]) || (r && r.error) || 'Something went wrong')", 'the wizard row without the file'), 'wiz-no-where')).href);

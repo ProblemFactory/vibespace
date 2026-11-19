@@ -616,9 +616,9 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   const regNoExec = regDir('exit 0'); fs.chmodSync(path.join(regNoExec, 'reg.exe'), 0o644);
   const wNoExec = await winFact('linux', regNoExec);
   ok(wNoExec.named === null && wNoExec.cause === 'windows-absent' && wNoExec.why === 'cannot-start', 'the Windows helper unable to start (not executable) ⇒ the absent words (no retry), never «try again»', wNoExec);
-  ok(wAbsent.cause === 'windows-absent' && wAbsentWords.i18n.key === MANAGED.MANAGED_HELPER_WORDS.windowsAbsent && !/try again/i.test(wAbsentWords.message) && !/administrator/i.test(wAbsentWords.message)
+  ok(wAbsent.cause === 'windows-absent' && wAbsentWords.i18n.key === MANAGED.MANAGED_HELPER_WORDS.windowsAbsent && !/try again/i.test(wAbsentWords.message) && !/administrator/i.test(wAbsentWords.message) && /WSL interop/.test(wAbsentWords.message)
     && dicts.every((d) => d.includes(JSON.stringify(MANAGED.MANAGED_HELPER_WORDS.windowsAbsent) + ':')),
-    'the Windows helper ABSENT is said in its own words, no retry promised, no administrator (en, zh, ja)', wAbsentWords.message);
+    'the Windows helper ABSENT is said in its own words — what a person can do (on WSL, turn on running Windows programs), no bare retry, no administrator (en, zh, ja)', wAbsentWords.message);
   // THE OUTER BOUND ending while the Windows read is pending is THAT read's verdict — never the administrator's words for the Linux folder
   const wOuter = await MANAGED.managedHelperFact({ platform: 'linux', wsl: true, dir: EMPTY, drvfsDir: DRV, boundMs: 1500, reg: { regExe: path.join(regSlow, 'reg.exe'), env: {}, boundMs: 4000 } });
   // …and NAMES what it waited on: the DrvFs folder hanging (its stat never answers) after both keys answered
@@ -628,19 +628,21 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   ok(wOuter.named === null && wOuter.cause === 'windows-unread' && wOuter.why === 'timeout' && /HKLM/.test(wOuter.where) && wHang.named === null && wHang.cause === 'windows-unread' && wHang.where === DRV_HANG,
     'the outer bound ending inside the Windows read answers «could not read the Windows policy» (its own verdict), naming what it waited on — a key, or the DrvFs folder', { wOuter, wHang });
   // (C) THE ENV RULE IS THE CLI'S OWN LIST, WHOLE (the cure2 read, S2/S3): its connection names (`lu` — 138 once its spreads are
-  // written out) count but the seven named with a reason, plus its other lists' four; the seven switches only when ON. A proxy, a CA
+  // written out) count but the four named with a reason, plus its other lists' four; the seven switches only when ON. npm's three
+  // proxy names COUNT (主开发 02:49Z: the CLI's axios client falls back to its own env resolution, which reads them). A proxy, a CA
   // (whoever holds it reads the request), TLS checks off, the client certificate, the first-party switch, the federation profile, a
   // login folder — each refuses; in ANY case; WHATEVER the value (an empty one blanks the spawn's own)
   const CL = MANAGED.CLI_CONNECTION_NAMES, NC = Object.keys(MANAGED.ENV_NOT_COUNTED);
   const hits = ['HTTPS_PROXY', 'NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'CLAUDE_CODE_CERT_STORE', 'CLAUDE_CODE_CLIENT_CERT', '_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL', 'ANTHROPIC_PROFILE', 'ANTHROPIC_CONFIG_DIR',
     'ANTHROPIC_FEDERATION_RULE_ID', 'ANTHROPIC_ORGANIZATION_ID', 'CLAUDE_CONFIG_DIR', 'HOME', 'CLAUDE_CODE_SESSION_ACCESS_TOKEN', 'CLAUDE_CODE_HTTPS_PROXY'].filter((n) => MANAGED.envHit({ [n]: 'x' }) !== n);
-  ok(CL.length === 138 && new Set(CL).size === 138 && MANAGED.ENV_NAMES.size === 128 && NC.length === 7 && NC.every((n) => CL.includes(n)) && [...MANAGED.ENV_SWITCHES].every((n) => CL.includes(n))
+  ok(CL.length === 138 && new Set(CL).size === 138 && MANAGED.ENV_NAMES.size === 131 && NC.length === 4 && !NC.some((n) => /^NPM_CONFIG_/.test(n)) && NC.every((n) => CL.includes(n)) && [...MANAGED.ENV_SWITCHES].every((n) => CL.includes(n))
     && CL.every((n) => MANAGED.ENV_NAMES.has(n) || NC.includes(n) || MANAGED.ENV_SWITCHES.has(n)) && hits.length === 0
     && MANAGED.envHit({ NODE_TLS_REJECT_UNAUTHORIZED: '0' }) === 'NODE_TLS_REJECT_UNAUTHORIZED' && MANAGED.envHit({ https_proxy: 'http://p.example.test' }) === 'https_proxy'
     && MANAGED.envHit({ anthropic_base_url: 'https://gw.example.test' }) === 'anthropic_base_url' && MANAGED.envHit({ Https_Proxy: 'http://p.example.test' }) === 'Https_Proxy'
     && MANAGED.envHit({ ANTHROPIC_AUTH_TOKEN: '' }) === 'ANTHROPIC_AUTH_TOKEN' && MANAGED.envHit({ ANTHROPIC_BASE_URL: '' }) === 'ANTHROPIC_BASE_URL' && MANAGED.envHit({ CLAUDE_CODE_USE_VERTEX: '' }) === null
-    && MANAGED.envHit({ NO_PROXY: 'localhost', NPM_CONFIG_PROXY: 'http://npm.example.test', API_FORCE_IDLE_TIMEOUT: '30000', ANTHROPIC_MODEL: 'x', DISABLE_TELEMETRY: '1' }) === null,
-    'the env rule is the CLI\'s own list of connection names, whole: 138 names, every one counted but the seven named with their reasons and the switches (ON only); a proxy, a CA, TLS checks off, the client certificate, the first-party switch, the federation profile, a login folder refuse — in any case, an EMPTY value too; NO_PROXY, npm\'s proxy, a timing, a model name do not',
+    && ['NPM_CONFIG_HTTPS_PROXY', 'NPM_CONFIG_HTTP_PROXY', 'NPM_CONFIG_PROXY', 'npm_config_https_proxy'].every((n) => MANAGED.envHit({ [n]: 'http://npm.example.test' }) === n)
+    && MANAGED.envHit({ NO_PROXY: 'localhost', API_FORCE_IDLE_TIMEOUT: '30000', ANTHROPIC_MODEL: 'x', DISABLE_TELEMETRY: '1' }) === null,
+    'the env rule is the CLI\'s own list of connection names, whole: 138 names, every one counted but the four named with their reasons and the switches (ON only); a proxy (npm\'s three too), a CA, TLS checks off, the client certificate, the first-party switch, the federation profile, a login folder refuse — in any case, an EMPTY value too; NO_PROXY, a timing, a model name do not',
     { hits, len: CL.length, nc: NC.length });
   // NAMED CONTROL FOR THE OPT-IN GATE: the reader without it (every Windows policy applied on WSL) refuses a native-only policy
   const OPTIN = '  const adminOptIn = !wsl || armsWsl(hklm.set) || drvDocs.some((d) => armsWsl(d.doc));';
