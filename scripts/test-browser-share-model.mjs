@@ -1163,7 +1163,7 @@ console.log('— the list\'s controls: each rule removed in a patched copy turns
   const dH = path.join(ROOT, 'data-ctl-h'); fs.mkdirSync(dH, { recursive: true });
   const kH = mkKeeper(K, { dataDir: dH, remoteKeys: () => new Set() });
   const pH = kH.createProfile({ label: 'Ctl H' }, { owner: { kind: 'only', who: [{ kind: 'session', id: KA }] } });
-  const TRreal = M.load('src/routes/browser-trace.js', tsrcH, 'remote-key-row-real');
+  const TRreal = M.load('src/routes/browser-trace.js', tsrcH, 'remote-key-row-real', { same: true }); // the real module beside its patched twin, on purpose (B-0d3e)
   for (const [mod, tag] of [[TRreal, 'real'], [TRh, 'mut']]) mod.setup({ keeper: kH, trace, activeSessions: active, bindings, releaseProfile: (id) => R.releaseProfile(id), unpinProfile: (id) => R.unpinProfile(id), notice: () => { }, keyForPickedSession: (id) => R.keyForPickedSession(id), tag });
   const srvHr = await serve(TRreal.router), srvH = await serve(TRh.router);
   const jHr = jAt(`http://127.0.0.1:${srvHr.address().port}`), jH = jAt(`http://127.0.0.1:${srvH.address().port}`);

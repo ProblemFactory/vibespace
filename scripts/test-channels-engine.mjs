@@ -6663,9 +6663,9 @@ console.log('\nconsent: a vendor declares its consent row; the engine + route na
   ok(engSrcC.split(LIST).length === 2 && engSrcC.split(JUDGE).length === 2 && routeSrcC.split(PAGE).length === 2, 'consent: the patch sites exist once each (the list line, the engine\'s row judge, the route\'s row page)');
   // (the vendor-neutral census of the engine, the routes and the loopback: MOVED to the fast scripts/test-channels-engine-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
   const withFake = engSrcC.replace(LIST, 'const REAL_ADAPTERS = Object.freeze([...VendorList.MANIFESTS.map(adapterOf), globalThis.__VS_CONSENT_FAKE]);');
-  const roundTrip = async (tag, engText, routeText) => {
+  const roundTrip = async (tag, engText, routeText, { routeSame = false } = {}) => {   // routeSame: the real routes file on purpose (B-0d3e)
     const ENGC = MUTE.load('src/server/channels-engine.js', engText, `consent-${tag}`);
-    const RTC = MUTE.load('src/routes/channels.js', routeText, `consent-route-${tag}`);
+    const RTC = MUTE.load('src/routes/channels.js', routeText, `consent-route-${tag}`, { same: routeSame });
     const dir = path.join(ROOT, `consent-${tag}`);
     fs.mkdirSync(dir, { recursive: true });
     const quietC = { log() {}, warn() {}, error() {} };
@@ -6699,7 +6699,7 @@ console.log('\nconsent: a vendor declares its consent row; the engine + route na
     srv.close();
     return out;
   };
-  const real = await roundTrip('real', withFake, routeSrcC);
+  const real = await roundTrip('real', withFake, routeSrcC, { routeSame: true });
   const r0 = real.start ? real.start.state : '';
   ok(!real.err && /^fc1\.[a-f0-9]{8,64}\.\d+~/.test(r0) && real.start.back.startsWith(`http://127.0.0.1:`) && new URL(real.start.back).pathname === `/api/channels/oauth/cb/${CK}`,
     `consent: Connect on the fake vendor signs ITS state shape with the engine's generic key and sends the browser to its landing (${real.err || r0.slice(0, 24)}…)`, real.err);
@@ -6713,7 +6713,7 @@ console.log('\nconsent: a vendor declares its consent row; the engine + route na
   ok(real.lark && real.lark.status === 400 && /data-landing="failed"/.test(real.lark.body) && /Lark/.test(real.lark.body) && !/<script/.test(real.lark.body),
     'consent: Lark declares its landing — a made-up state answers Lark\'s own page (400, not connected, no close script)', `${real.lark && real.lark.status} ${real.lark && real.lark.body.slice(0, 160)}`);
   exchanged.length = 0;
-  const judged = await roundTrip('slack-judge', withFake.replace(JUDGE, "const v = require('../channels/slack-manifest.js').stateVerdict(state, {"), routeSrcC);
+  const judged = await roundTrip('slack-judge', withFake.replace(JUDGE, "const v = require('../channels/slack-manifest.js').stateVerdict(state, {"), routeSrcC, { routeSame: true });
   ok(!judged.err && judged.land && judged.land.status === 400 && /data-fc="bad-shape"/.test(judged.land.body) && exchanged.length === 0 && !(judged.status && judged.status.ok),
     'consent CONTROL: the same copy with the pre-lane Slack judge restored in oauthLanding refuses the fake vendor\'s state (bad-shape) — nothing exchanged', JSON.stringify(judged.land || judged.err).slice(0, 300));
   exchanged.length = 0;
