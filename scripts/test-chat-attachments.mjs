@@ -31,7 +31,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 import { pathToFileURL, fileURLToPath } from 'node:url';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const HOME = scratch('cap-home'); fs.mkdirSync(HOME, { recursive: true });
@@ -484,6 +484,18 @@ console.log('⑩ the sync-fs guard + RED controls');
   for (let i = 0; i < 200 && nolimit.api.stats().asked < 8; i++) await sleep(5);
   await sleep(5); open(); await Promise.all(all); nolimit.close();
   ok(max > ROUTES.MAX_AT_ONCE, 'RED CONTROL: a route with no limit runs every reading at once — what the LAW 4 leg catches', { max });
+}
+// ── B-a09e: THE LINK IS ON DISK BEFORE THE FIRST FILE IS PLACED ──────────────────────────────────────────────────────────
+// The upload route (src/routes/files.js) writes the folder's link through the store writer: it is written and AWAITED (durable)
+// before the copy loop — a crash between them leaves a link with no files, never files with no link (Settings' Remove door would
+// offer them as gone). RED (anchored): the release's order (the link after the loop) is named.
+{
+  const FILES = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src/routes/files.js'), 'utf8');
+  const linkFirst = (t) => { const a = t.indexOf('lf = CA.writeLink('), d = t.indexOf("await require('../store-writer.js').storeWriter().durable(lf)"), loop = t.indexOf('    for (let i = 0; i < req.files.length; i++) {', a); return a > 0 && d > a && loop > d; };
+  ok(linkFirst(FILES), 'B-a09e: the upload writes the folder\'s link and AWAITS its landing before it places the first file');
+  const LOOP = '    for (let i = 0; i < req.files.length; i++) {\n      const file = req.files[i];\n      const name = rename(names[i]);';
+  const late = anchored(FILES, "      if (lf) { try { await require('../store-writer.js').storeWriter().durable(lf); } catch { /* said by the writer; the boot's sweep writes the link again */ } }\n", '', 'the link awaited before the files');
+  ok(!linkFirst(late) && FILES.includes(LOOP), 'B-a09e CONTROL (the link not awaited before the loop, in a copy of the text): the order check is red');
 }
 S1.close();
 console.log(`\n${fail ? '✗' : '✓'} test-chat-attachments: ${pass} passed, ${fail} failed`);

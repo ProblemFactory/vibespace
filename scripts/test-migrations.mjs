@@ -475,7 +475,11 @@ try {
     const drain = () => eng.store.adapters.update(() => { });   // the serialized door — the stamp's write is queued behind it
     const res9 = m9.runLocalMigrations().find((r) => r.id === '2026-09-channel-credential-key');
     await drain();
-    ok(res9?.status === 'ran' && disk().find((r) => r.id === 'gmail').credentialKey === 'cluster:org1', 'a legacy gmail record is stamped with the integration\'s CURRENT key (cluster:org1) through the engine\'s door', JSON.stringify({ res9, disk: disk().map((r) => [r.id, r.credentialKey]) }));
+    // B-a09e: a STEPPED migration — «started» at the boot, recorded in the ledger once its write LANDED (the drain lands after it)
+    const led9 = () => { try { return JSON.parse(fs.readFileSync(path.join(d9, 'migrations.json'), 'utf-8')).applied || {}; } catch { return {}; } };
+    await new Promise((r) => setImmediate(r));
+    ok(res9?.status === 'started' && !!led9()['2026-09-channel-credential-key'], 'B-a09e: the stamp is a STEPPED migration — «started» at the boot, recorded once adapters.json holds the stamp', JSON.stringify({ res9, applied: !!led9()['2026-09-channel-credential-key'] }));
+    ok(disk().find((r) => r.id === 'gmail').credentialKey === 'cluster:org1', 'a legacy gmail record is stamped with the integration\'s CURRENT key (cluster:org1) through the engine\'s door', JSON.stringify({ res9, disk: disk().map((r) => [r.id, r.credentialKey]) }));
     ok(!('credentialKey' in disk().find((r) => r.id === 'fake-poll')), 'a record with no integration row is left alone');
     ok(disk().find((r) => r.id === 'gmail:0badcafe').credentialKey === 'cluster:channels', 'an already-stamped further account keeps ITS key');
     ok(eng.adapterRecords().adapters.find((r) => r.id === 'gmail').credentialKey === 'cluster:org1', 'the LIVE record carries the stamp (an adapter built from now on reads it)');
@@ -502,7 +506,7 @@ try {
     const e12 = ENG.create({ dataDir: d12, env: {}, integrations: s12, log: quiet });
     const res12 = create({ rootDir: root12, homeDir: scratchHomeDir, serverNotice: () => { }, channels: e12 }).runLocalMigrations().find((r) => r.id === '2026-09-channel-credential-key');
     await e12.store.adapters.update(() => { });
-    ok(res12?.status === 'ran' && !('credentialKey' in JSON.parse(fs.readFileSync(path.join(d12, 'channels', 'adapters.json'), 'utf-8')).adapters[0]), 'a record whose integration resolves to nothing is left unstamped (it keeps following the row\'s pick) and the run succeeds');
+    ok(res12?.status === 'started' && !('credentialKey' in JSON.parse(fs.readFileSync(path.join(d12, 'channels', 'adapters.json'), 'utf-8')).adapters[0]), 'a record whose integration resolves to nothing is left unstamped (it keeps following the row\'s pick) and the run succeeds');
     // ── verifier r1: THE TOKEN'S OWN EVIDENCE WINS ──
     // A Gmail token records the preset key it was exchanged under
     // (`clusterKey`; null = the user's own values); the stamp names THAT
@@ -532,7 +536,7 @@ try {
     const res13 = create({ rootDir: root13, homeDir: scratchHomeDir, serverNotice: () => { }, channels: e13 }).runLocalMigrations().find((r) => r.id === '2026-09-channel-credential-key');
     await e13.store.adapters.update(() => { });
     const k13 = Object.fromEntries(JSON.parse(fs.readFileSync(path.join(d13, 'channels', 'adapters.json'), 'utf-8')).adapters.map((r) => [r.id, r.credentialKey || null]));
-    ok(res13?.status === 'ran' && k13.gmail === 'cluster:org1', `the token's OWN client wins: an org1-minted token is stamped cluster:org1 although the row's pick is channels (${JSON.stringify(k13)})`);
+    ok(res13?.status === 'started' && k13.gmail === 'cluster:org1', `the token's OWN client wins: an org1-minted token is stamped cluster:org1 although the row's pick is channels (${JSON.stringify(k13)})`);
     ok(k13['gmail:00000001'] === 'cluster:channels' && k13['gmail:00000002'] === 'cluster:channels' && k13['gmail:00000003'] === 'cluster:channels' && k13['gmail:00000004'] === 'cluster:channels', 'a token naming `own` with no values saved, a withdrawn preset, no token, an undecryptable token ⇒ the row\'s pick (what refreshed them until now)');
     ok(k13.lark === 'cluster:tA', 'a Lark token names nothing ⇒ the row\'s pick');
     // the report names the evidence per record (the [migrate] line prints it)
@@ -592,8 +596,9 @@ try {
     const m15 = create({ rootDir: root15, homeDir: scratchHomeDir, serverNotice: () => { }, channels: e15 });
     const res15 = m15.runLocalMigrations().find((r) => r.id === ID);
     await e15.inlineLegacyClient(e15.adapterRecords().adapters.find((x) => x.id === 'gmail'));   // the in-flight copy (single-flight: THIS call returns it)
+    const lg15 = await waitLedger(d15, ID);   // B-a09e: a STEPPED migration — recorded once every copy LANDED
     const g15 = disk(d15).find((x) => x.id === 'gmail');
-    ok(res15?.status === 'ran' && g15.credentialKey === 'custom' && g15.credential.appId === 'own.apps.googleusercontent.com', 'the legacy `own` account now names `custom` with the saved client id ON its record', JSON.stringify({ res15, key: g15.credentialKey, cred: g15.credential && g15.credential.appId }));
+    ok(res15?.status === 'started' && !!lg15.applied && g15.credentialKey === 'custom' && g15.credential.appId === 'own.apps.googleusercontent.com', 'the legacy `own` account now names `custom` with the saved client id ON its record', JSON.stringify({ res15, key: g15.credentialKey, cred: g15.credential && g15.credential.appId }));
     ok(ch15.dec(g15.credential.appSecretEnc) === OWN_SECRET, 'the secret is RE-SEALED under `.channels-key` (it opens with the channels key)…');
     let openedByIntegrationsKey = true; try { ib15.dec(g15.credential.appSecretEnc); } catch { openedByIntegrationsKey = false; }
     ok(!openedByIntegrationsKey && !fs.readFileSync(path.join(d15, 'channels', 'adapters.json'), 'utf-8').includes(OWN_SECRET), '…and NOT under `.integrations-key` (a new seal, not a copied blob); no plaintext on disk');
@@ -1468,8 +1473,9 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     finally { console.log = origLog; }
     const line = lines.find((l) => /\[migrate\] channels-aggregated-im:/.test(l)) || '';
     let counts = null; try { counts = JSON.parse(line.slice(line.indexOf('{'))); } catch { }
-    ok(resA && resA.status === 'ran' && counts && counts.hot === 1 && counts.cleared === 1 && counts.readStamped === 0 && Array.isArray(counts.linked) && counts.linked.length === 0, 'the boot line reports the rows the migration changes (hot 1, cleared 1) — not the zeros of a report filled a microtask later', line);
-    ok(resA && resA.report && resA.report.hot === 1 && resA.report.cleared === 1, 'the same counts ride the ledger\'s report row', JSON.stringify(resA && resA.report));
+    ok(resA && resA.status === 'started' && counts && counts.hot === 1 && counts.cleared === 1 && counts.readStamped === 0 && Array.isArray(counts.linked) && counts.linked.length === 0, 'the boot line reports the rows the migration changes (hot 1, cleared 1) — not the zeros of a report filled a microtask later', line);
+    const lgA = await waitLedger(dA, ID);   // B-a09e: a STEPPED migration — recorded (its report beside it) once the index LANDED
+    ok(!!lgA.applied && lgA.report && lgA.report.hot === 1 && lgA.report.cleared === 1, 'the same counts ride the ledger\'s report row (B-a09e: written once the index holding them landed)', JSON.stringify(lgA));
     await eA.store.index.update(() => { });   // the write queued by the run lands ahead of anything after it
     const lA = eA.store.index.live();
     ok(lA['fake-poll/t1'].refresh && lA['fake-poll/t1'].refresh.every === 30 && !('tracked' in lA['fake-poll/t1']) && !lA['fake-poll/t2'].refresh && lA['fake-poll/t2'].readAt === 3, 'the edits that landed are exactly the counted ones (t1 hot + cleared, t2 untouched)');
@@ -1536,7 +1542,8 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     let resA;
     try { resA = runOnly(create({ rootDir: rA, homeDir: scratchHomeDir, serverNotice: () => { }, channels: eA }), rA).find((x) => x.id === ID); }
     finally { console.log = origLog; }
-    ok(resA && resA.status === 'ran' && resA.report && resA.report.conversations === 1 && resA.report.accounts === 1 && resA.report.patterns === 1 && resA.report.grantsRenamed === 2 && resA.report.pendingTagged === 3, 'the run reports the rows it changes: 1 conversation, 1 account, 1 rule, 2 grants renamed, 3 pending tagged (two hits + the elided count)', JSON.stringify(resA && resA.report));
+    const lgW = await waitLedger(dA, ID);   // B-a09e: a STEPPED migration — recorded (its report beside it) once the lifted index LANDED
+    ok(resA && resA.status === 'started' && !!lgW.applied && lgW.report && lgW.report.conversations === 1 && lgW.report.accounts === 1 && lgW.report.patterns === 1 && lgW.report.grantsRenamed === 2 && lgW.report.pendingTagged === 3, 'the run reports the rows it changes: 1 conversation, 1 account, 1 rule, 2 grants renamed, 3 pending tagged (two hits + the elided count)', JSON.stringify(resA && resA.report));
     await eA.store.index.update(() => { });
     const ix = eA.store.index.snapshot();
     const c1 = ix.conversations['fake-poll/c1'], c2 = ix.conversations['fake-poll/c2'];
@@ -3587,5 +3594,40 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
 }
+// ── B-a09e: A MIGRATION WHOSE STORE WRITE IS DEFERRED IS A STEPPED ONE (the census) ──────────────────────────────────────
+// Every migration body in src/server/migrations.js that holds a report's `.write` (an engine's queued store write) RETURNS the promise
+// of it landing — the runner records it then; never a write that only gets a .catch (recorded before it lands). RED (anchored): the
+// stamp's old body (the write not returned) is named.
+{
+  const { anchored } = await import('./scratch.mjs');
+  const MIG = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src/server/migrations.js'), 'utf8');
+  const steppedCensus = (src) => {
+    const bad = [];
+    const parts = src.split(/\n {6}id: '/).slice(1);
+    for (const part of parts) {
+      const id = part.slice(0, part.indexOf("'"));
+      const body = part.split(/\n {4}\},?\n/)[0];
+      if (!/\brep\.write\b/.test(body)) continue;
+      if (!/return Promise\.resolve\(rep\.write\)\.then\(/.test(body) || /rep\.write\.catch\(/.test(body)) bad.push(id);   // stale-pins: kept — a deliberate absence check (no body only catches its write)
+    }
+    return bad;
+  };
+  const badNow = steppedCensus(MIG);
+  ok(badNow.length === 0 && /return Promise\.resolve\(rep\.write\)\.then\(/.test(MIG), 'B-a09e census: every migration holding a report\'s queued write RETURNS the promise of its landing (a stepped migration) — none is recorded before its write lands', badNow);
+  const RET = "        return Promise.resolve(rep.write).then(() => ({ stamped: rep.stamped.length, skipped: rep.skipped.length }));\n";
+  const planted = anchored(MIG, RET, "        rep.write.catch(() => { });   // MUTANT: the release's road — recorded before the write lands\n", 'the stamp returns its landing');
+  ok(steppedCensus(planted).includes('2026-09-channel-credential-key'), 'B-a09e CONTROL (the stamp\'s write not returned, in a copy of the text): the census names it', steppedCensus(planted));
+}
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
+/** B-a09e: a STEPPED migration's ledger row — polled on the scratch folder's own migrations.json (bounded: 10 s) until the runner
+ *  records it at its write's landing → { applied, report } (both undefined when it never did) */
+async function waitLedger(dataDir, id) {
+  const read = () => { try { return JSON.parse(fs.readFileSync(path.join(dataDir, 'migrations.json'), 'utf-8')); } catch { return {}; } };
+  for (let i = 0; i < 500; i++) {
+    const l = read();
+    if (l.applied && l.applied[id]) return { applied: l.applied[id], report: l.reports && l.reports[id] };
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  return { applied: undefined, report: undefined };
+}

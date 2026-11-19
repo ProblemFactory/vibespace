@@ -474,16 +474,34 @@ console.log('§5 VIBESPACE\'S OWN RECORD (B-9a2e + B-3d90 item 2): what VibeSpac
       const left = cut(SRS, "    else if (typeof raw === 'string') {", "    else if (false) {", 'src/server/sent-record.js', 'badoff');
       const lsc = left && healScene(left);
       ok('CONTROL (a file not a record turns the record off, as before): nothing is kept aside, nothing written — the leg goes RED', !!lsc && lsc.unread === true && lsc.files.length === 0, lsc);
-      const held = cut(SRS, ", onWritten: (ok) => { if (ok) bad = null; } });", " });", 'src/server/sent-record.js', 'heldbad');
+      const held = cut(SRS, ", onWritten: (ok) => { if (ok) { bad = null; badOwed = false; if (persistHeld) { persistHeld = false; persist(); } } } });", " });", 'src/server/sent-record.js', 'heldbad');   // B-a09e: the onWritten also lets a held write through
       const hsc = held && healScene(held);
       ok('CONTROL (the damaged text held for the run): it is still produced after its write — the leg goes RED', !!hsc && hsc.held === '{"v":1,"byConv":{ broken', hsc);
+      // B-a09e: the record is never written over the damaged file before its copy is ON DISK — a .bad write that FAILS holds the record's
+      // write (the damaged bytes stay where they are, never only in memory); the copy's landing lets it through. RED: a copy without the hold
+      const badFirst = (M) => {
+        const bw = [], cbs = [];
+        const s = M.create({ dataDir: '/sent-record-suite', writer: { dirty: (f, o) => { bw.push(f.split('/').pop()); if (o.onWritten) cbs.push([f, o.onWritten]); } }, readFile: () => '{"v":1,"byConv":{ broken', now: () => T0 });
+        s.note({ conv: 'conv-b', text: 'hello there', kind: 'typed', at: T0 });
+        const before = bw.slice(), bad = cbs.find(([f]) => f.endsWith('.bad'));
+        if (bad) bad[1](false, Object.assign(new Error('no space'), { code: 'ENOSPC' }));
+        const afterFail = bw.slice();
+        if (bad) bad[1](true, null);
+        return { before, afterFail, after: bw.slice() };
+      };
+      const bf = badFirst(SR);
+      ok('B-a09e: the record is not written over the damaged file while its copy is owed (a failed copy holds it); the copy landing lets it through', bf.before.join() === 'sent-record.json.bad' && bf.afterFail.join() === 'sent-record.json.bad' && bf.after.includes('sent-record.json'), bf);
+      const noHold = cut(SRS, "    if (badOwed) { persistHeld = true; return; }   // B-a09e: the damaged file's copy first\n", '', 'src/server/sent-record.js', 'nohold');
+      const bfx = noHold && badFirst(noHold);
+      ok('CONTROL (a copy without the hold): the record is queued over the damaged file before its copy landed — the leg goes RED', !!bfx && bfx.before.includes('sent-record.json'), bfx);
       SP.setSource((conv) => (conv === 'th-h' ? [SP.rowOf(POSE2, 'peer', T0)] : null));
       const noRoute = cut(CMS, ": (recorded || inferred.via);", ": inferred.via;", 'src/codex-message-manager.js', 'noroute');
       const nr = noRoute && noRoute.userItemOf({ type: 'message', role: 'user', content: [{ type: 'input_text', text: POSE2 }] }, { conv: 'th-h', at: T0 + 20000 });
       const nrRow = nr && personRow({ role: 'user', content: nr.content, ...nr.stamps });
       ok('CONTROL (the frame reader ignores the record\'s route): the peer\'s words with VibeSpace\'s head read as VibeSpace\'s notice — the leg goes RED', !!nrRow && nrRow.why === 'notice', { nr, nrRow });
       // a v1 record only: valid JSON that is not one is kept aside too
-      const v2 = SR.create({ dataDir: '/sent-record-suite', writer: { dirty: (f, o) => v2w.push(f.split('/').pop()) }, readFile: () => '{"v":2,"byConv":{}}', now: () => T0 });
+      // (B-a09e: the stand-in writer LANDS the kept-aside copy at once — the record is written only after it)
+      const v2 = SR.create({ dataDir: '/sent-record-suite', writer: { dirty: (f, o) => { v2w.push(f.split('/').pop()); if (/\.bad$/.test(f) && o && typeof o.onWritten === 'function') o.onWritten(true); } }, readFile: () => '{"v":2,"byConv":{}}', now: () => T0 });
       v2.note({ conv: 'conv-v', text: 'hello there', kind: 'typed', at: T0 });
       ok('…JSON that is not a v1 record (a later version, an array) is kept aside too, never written over unseen', v2w.join() === 'sent-record.json.bad,sent-record.json' && !v2.isUnread(), v2w);
       const nov1 = cut(SRS, "    if (!j || j.v !== 1 || !j.byConv || typeof j.byConv !== 'object' || Array.isArray(j.byConv)) throw", "    if (false) throw", 'src/server/sent-record.js', 'nov1');

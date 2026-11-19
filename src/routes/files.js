@@ -664,6 +664,14 @@ router.post('/api/upload', uploadFiles, async (req, res) => {
     // anywhere else an upload replaces a same-named file, as it always did
     const names = req.files.map((f, i) => clientNames[i] || f.originalname);
     const rename = !keptFrom ? (n) => n : await freeTops(names, async (top) => { const p = path.resolve(destRoot, top); if (p !== destRoot && !p.startsWith(destRoot + path.sep)) return false; try { return !!(await sfs(req).call('exists', { path: p })).exists; } catch { return false; } });
+    if (keptFrom) {   // THE LINK beside the files: which conversation they belong to — it outlives the hub's session record
+      // B-a09e: the link is ON DISK before the first file is placed (its write is the store writer's): a crash between them leaves a
+      // link with no files (nothing to offer for removal), never files with no link (Settings' Remove door would offer them as gone)
+      const live = req.app.locals.activeSessions && req.app.locals.activeSessions.get(conv);
+      let lf = null;
+      try { lf = CA.writeLink(path.dirname(path.dirname(destRoot)), conv, live ? { backend: live.backend || 'claude', tx: live.backendSessionId || live.claudeSessionId || null } : {}); } catch { }
+      if (lf) { try { await require('../store-writer.js').storeWriter().durable(lf); } catch { /* said by the writer; the boot's sweep writes the link again */ } }
+    }
     for (let i = 0; i < req.files.length; i++) {
       const file = req.files[i];
       const name = rename(names[i]);
@@ -688,10 +696,6 @@ router.post('/api/upload', uploadFiles, async (req, res) => {
       results.push({ name, path: dest, size: file.size });
     }
     noteChatUploads(req, results);
-    if (keptFrom) {   // THE LINK beside the files: which conversation they belong to — it outlives the hub's session record
-      const live = req.app.locals.activeSessions && req.app.locals.activeSessions.get(conv);
-      try { CA.writeLink(path.dirname(path.dirname(destRoot)), conv, live ? { backend: live.backend || 'claude', tx: live.backendSessionId || live.claudeSessionId || null } : {}); } catch { }
-    }
     res.json({ success: true, files: results, ...(keptFrom ? { keptWithConversation: true, keptFrom, dir: destRoot } : {}) });
   } catch (err) {
     // Clean up remaining multer temp files on failure (they leaked in /tmp)

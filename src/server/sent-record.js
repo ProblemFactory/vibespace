@@ -31,7 +31,7 @@ function create({ dataDir, writer = null, readFile = null, log = () => { }, now 
   const storeWriter = () => writer || require('../store-writer.js').storeWriter();
   const byConv = new Map();   // insertion order = the order of the last send (a send moves its conversation to the end)
   const enc = new Map();      // a conversation's rows as JSON, kept until its next send: a send re-encodes ONE conversation (the batch's readers)
-  let unread = false, raw = null, encodes = 0;
+  let unread = false, raw = null, encodes = 0, badOwed = false, persistHeld = false;   // B-a09e: the damaged file's copy owed / a write held behind it
   try {
     raw = typeof readFile === 'function' ? readFile(file) : require('fs').readFileSync(file, 'utf8');
     const j = JSON.parse(raw);
@@ -46,7 +46,10 @@ function create({ dataDir, writer = null, readFile = null, log = () => { }, now 
       // its own) and a fresh record starts; before, the record stayed off in every run with one boot line as its only sign
       byConv.clear();
       let bad = raw;   // dropped once written (the readers: a damaged file's text is not held for the rest of the run)
-      try { storeWriter().dirty(file + '.bad', { name: STORE_NAME_BAD, debounceMs: 0, allowEmpty: true, produce: () => bad || '', onWritten: (ok) => { if (ok) bad = null; } }); log(`[sent-record] ${file} is not a record (${(e && e.message) || e}) — kept as ${FILE}.bad, a fresh record starts`); }
+      // B-a09e: the record is never written over the damaged file before its copy is ON DISK (badOwed holds persist(); the copy's
+      // landing lets a held write through) — a .bad write that fails keeps the damaged file as it is, never only in memory
+      badOwed = true;
+      try { storeWriter().dirty(file + '.bad', { name: STORE_NAME_BAD, debounceMs: 0, allowEmpty: true, produce: () => bad || '', onWritten: (ok) => { if (ok) { bad = null; badOwed = false; if (persistHeld) { persistHeld = false; persist(); } } } }); log(`[sent-record] ${file} is not a record (${(e && e.message) || e}) — kept as ${FILE}.bad, a fresh record starts`); }
       catch (e2) { unread = true; log(`[sent-record] ${file} is not a record and could not be kept aside (${(e2 && e2.message) || e2}) — nothing is written over it in this run`); }
     } else { unread = true; log(`[sent-record] ${file} could not be read (${(e && (e.code || e.message)) || e}) — nothing is written over it in this run`); }
   }
@@ -58,6 +61,7 @@ function create({ dataDir, writer = null, readFile = null, log = () => { }, now 
   const evictOldest = () => { const k = byConv.keys().next().value; byConv.delete(k); enc.delete(k); };
   function persist() {
     if (unread) return;   // a store that has not read its file never writes it
+    if (badOwed) { persistHeld = true; return; }   // B-a09e: the damaged file's copy first
     try { storeWriter().dirty(file, { name: STORE_NAME, debounceMs: 200, allowEmpty: true, produce: produceAll }); }
     catch (e) { log('[sent-record] the record was not handed to the store writer:', e && e.message); }
   }

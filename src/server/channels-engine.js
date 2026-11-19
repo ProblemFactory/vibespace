@@ -6634,7 +6634,9 @@ function create(deps = {}) {
     }
     const write = Promise.all([
       stamp.length ? store.adapters.update(() => { for (const r of adapterRecords().adapters) if (!P.REACTION_POLICIES.includes(r.reactionPolicy)) r.reactionPolicy = 'propose'; }) : Promise.resolve(),
-      resets.length ? store.index.update(() => { for (const k of resets) { const en = store.index.live()[k]; if (en && en.convCaps) en.convCaps = { ...en.convCaps, at: 0 }; } }) : Promise.resolve(),
+      // B-a09e: the index's part settles once it is ON DISK (its ordering write); not landed ⇒ rejects: the migration runs again next boot
+      resets.length ? store.index.update(() => { for (const k of resets) { const en = store.index.live()[k]; if (en && en.convCaps) en.convCaps = { ...en.convCaps, at: 0 }; } })
+        .then(() => store.index.durable()).then((ok) => { if (!ok) throw new Error('index.json is not on disk yet (the storage held or refused the write): the migration runs again next boot'); }) : Promise.resolve(),
     ]);
     return { write, stamped: stamp, reset: resets.length };
   }

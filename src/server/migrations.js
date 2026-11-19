@@ -466,10 +466,9 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
           return;
         }
         const rep = eng.stampCredentialKeys();
-        // The shared runner is synchronous (the daemon bundles it), so the stamp's
-        // store write is not awaited here: the live records carry the key at once and
-        // the engine logs a failed write; the next adapters.json write persists it
-        // (verifier r1 low, accepted with this reason).
+        // B-a09e — A MIGRATION WHOSE STORE WRITE IS DEFERRED IS A STEPPED ONE: it returns the promise of its LANDED write and the
+        // runner records it when that write lands (src/migration-runner.js's stepped road) — a crash before then leaves it
+        // unrecorded and the next boot stamps again (idempotent); a write that fails is a failed run, retried next boot.
         // Say what happened even when it is nothing — a repair nobody can see
         // ran is a repair nobody can verify ran. Each stamped row names its
         // EVIDENCE (`token` = the client the token itself recorded; `row-pick`
@@ -478,6 +477,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         // Deliberately NO serverNotice: no token moved and nothing was
         // archived — each account gained the name of the client it already
         // used. The Communication panel shows it on the row.
+        return Promise.resolve(rep.write).then(() => ({ stamped: rep.stamped.length, skipped: rep.skipped.length }));
       },
     },
     {
@@ -494,12 +494,19 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
           return;
         }
         const rep = eng.inlineLegacyClients();
-        // The shared runner is synchronous: the copies land through the engine's
-        // serialized door (client first, stamp after); a failed write is logged
-        // by the engine and the record keeps `own` — served and retried reader-side.
-        rep.write.catch((err) => console.error(`[migrate] channel-custom-client-inline: a copy's write failed (the record keeps 'own' and is retried when read): ${(err && err.message) || err}`));
+        // The copies land through the engine's serialized door (client first, stamp after). B-a09e: a STEPPED migration — recorded
+        // once every copy LANDED; a copy whose write failed (or whose plan failed by then) fails the run: the record keeps `own`
+        // (served and retried reader-side) and the migration runs again next boot.
         console.log('[migrate] channel-custom-client-inline:', JSON.stringify({ copied: rep.copied, failed: rep.failed.map((f) => ({ id: f.id, code: f.code })), skipped: rep.skipped }));
-        if (rep.failed.length) throw new Error(`the saved client could not be moved onto ${rep.failed.map((f) => `${f.id} (${f.code}: ${f.why})`).join('; ')} — retried next boot`);
+        // A plan that failed fails the run AT ONCE, by name (never recorded); the other copies' writes go on through the door.
+        if (rep.failed.length) {
+          Promise.resolve(rep.write).catch((err) => console.error(`[migrate] channel-custom-client-inline: a copy's write failed (the record keeps 'own' and is retried when read): ${(err && err.message) || err}`));
+          throw new Error(`the saved client could not be moved onto ${rep.failed.map((f) => `${f.id} (${f.code}: ${f.why})`).join('; ')} — retried next boot`);
+        }
+        return Promise.resolve(rep.write).then((rs) => {
+          const late = (rs || []).filter((r) => r && r.ok === false);
+          if (late.length) throw new Error(`the saved client could not be moved onto ${late.map((r) => r.code).join(', ')} — retried next boot`);
+        });
       },
     },
     {
@@ -524,10 +531,11 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         // verify, 2026-09-26: the report was filled a microtask late and the
         // boot line said zeros on every instance).
         const rep = eng.migrateAggregated();
-        rep.write.catch((err) => console.error(`[migrate] channels-aggregated-im: the queued write failed after the plan was counted (${(err && err.message) || err}) — the rows keep \`tracked\` until a boot with a writable store; discovery clears the field and they are then cadenced by activity`));
+        // B-a09e: a STEPPED migration — recorded once its index and adapters writes LANDED (both durable); a failed write fails the run
+        // (retried next boot: the rows keep `tracked` until a boot with a writable store).
         const counts = { hot: rep.hot.length, readStamped: rep.readStamped, cleared: rep.cleared, linked: rep.linked };
         console.log('[migrate] channels-aggregated-im:', JSON.stringify(counts));
-        return { hot: counts.hot, readStamped: counts.readStamped, cleared: counts.cleared, linked: counts.linked.length };
+        return Promise.resolve(rep.write).then(() => ({ hot: counts.hot, readStamped: counts.readStamped, cleared: counts.cleared, linked: counts.linked.length }));
       },
     },
     {
@@ -548,10 +556,11 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         // rows it changes) and queued through the serialized door; a store
         // that refuses writes THROWS — a failed run, retried next boot
         const rep = eng.migrateGrants();
-        rep.write.catch((err) => console.error(`[migrate] channels-access-watchers: the queued write failed after the plan was counted (${(err && err.message) || err}) — every reader still lifts the old shape; the next write to a record lifts it in place`));
+        // B-a09e: a STEPPED migration — recorded once the lifted index is ON DISK; a write that fails (or is held past the writer's
+        // bound) fails the run: every reader still lifts the old shape, and the migration runs again next boot
         const counts = { conversations: rep.conversations, accounts: rep.accounts, patterns: rep.patterns, grantsRenamed: rep.grantsRenamed, pendingTagged: rep.pendingTagged };
         console.log('[migrate] channels-access-watchers:', JSON.stringify(counts));
-        return counts;
+        return Promise.resolve(rep.write).then(() => counts);
       },
     },
     {
@@ -566,10 +575,11 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
           return;
         }
         const rep = eng.migrateThreads();
-        rep.write.catch((err) => console.error(`[migrate] channel-threads-derive: the queued write failed after the plan was counted (${(err && err.message) || err}) — an absent reaction policy reads 'propose' and a stale verdict is re-resolved on open anyway`));
+        // B-a09e: a STEPPED migration — recorded once its adapters and index writes are ON DISK; a write that fails fails the run
+        // (an absent reaction policy reads 'propose' and a stale verdict is re-resolved on open meanwhile) and it runs again next boot
         const counts = { stamped: rep.stamped.length, reset: rep.reset };
         console.log('[migrate] channel-threads-derive:', JSON.stringify(counts));
-        return counts;
+        return Promise.resolve(rep.write).then(() => counts);
       },
     },
     {

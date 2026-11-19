@@ -2776,6 +2776,11 @@ function create(engineCtx) {
     return { ok: true, estimate: { ...est, conversations: convs.length, covered, sampled: !!(est.sampled || covered < convs.length) }, expectedWakesPerDay: F.expectedWakesPerDay({ notify: how, digestMinutes, matchedPerDay: est.matchedPerDay, dailyWakeCap }) };
   }
 
+  /** B-a09e — A MIGRATION'S INDEX WRITE SETTLES ON DISK: the index's ordering write (`durable()`: the writer writes it now; true once
+   *  it landed). Not landed (held past the writer's bound, or failed and still owed) ⇒ the write REJECTS: the stepped migration is
+   *  a failed run, not recorded, and runs again next boot (each is idempotent) — never recorded over bytes the disk does not hold. */
+  const indexOnDisk = () => store.index.durable().then((ok) => { if (!ok) throw new Error('index.json is not on disk yet (the storage held or refused the write): the migration runs again next boot'); });
+
   /**
    * THE MIGRATION (`2026-09-channels-aggregated-im`, run through
    * src/server/migrations.js): a conversation the owner TRACKED keeps being
@@ -2815,7 +2820,7 @@ function create(engineCtx) {
         if (p.read && !(Number(en.readAt) > 0)) en.readAt = t;
         if (p.clear) delete en.tracked;
       }
-    }) : Promise.resolve();
+    }).then(indexOnDisk) : Promise.resolve();   // B-a09e: the write settles once the index holding the plan is ON DISK (the migration records itself then)
     const ad = linkPlan.length ? store.adapters.update(() => {
       for (const rec of adapterRecords().adapters) if (linkPlan.includes(rec.id) && !(Number(rec.linkedAt) > 0)) rec.linkedAt = t;
     }) : Promise.resolve();
@@ -2879,7 +2884,7 @@ function create(engineCtx) {
       for (const id of accts) { const g = (ix.accountAssignments || {})[id]; if (g) liftGrainInPlace(ix, g, 'account'); }
       for (const id of pats) { const g = (ix.patternAssignments || {})[id]; if (g) liftGrainInPlace(ix, g, 'pattern'); }
       for (const g of Array.isArray(ix.accountGrants) ? ix.accountGrants : []) if (g && g.origin === 'assignment') g.origin = 'access';
-    }) : Promise.resolve();
+    }).then(indexOnDisk) : Promise.resolve();   // B-a09e: settles once the lifted index is ON DISK (the migration records itself then)
     return { ...report, write };
   }
 
