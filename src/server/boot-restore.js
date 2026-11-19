@@ -1095,6 +1095,10 @@ async function readoptOrphanKeeperSessions() {
   let files = [];
   try { files = fs.readdirSync(META_DIR).filter((f) => f.endsWith('.json.orphan')); } catch { return; }
   if (!files.length) return;
+  // the B-f276 remainder's cure (主开发 23:20Z, its audit): while hosts.json is HELD no orphan's machine can be named — its one caller
+  // (server.js, the boot's 8 s timer) WAITS for the read (the get threw here: the boot's one pass ended, and a later resume killed
+  // the still-running remote agent it would adopt); a pass run while held anyway adopts nothing
+  if (hosts.held && hosts.held()) return;
   const { execFile } = require('child_process');
   const sshOut = (h, script) => new Promise((resolve) => {
     execFile('ssh', [...hosts.sshArgs(h, { multiplex: true }), '--', script],

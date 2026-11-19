@@ -251,6 +251,7 @@ async function admitDial(deviceId, facts, socket) {
  *  mounts torn down, vsht_ token file gone, live stream destroyed. The token
  *  hash dies with the host record itself. */
 async function unpairDialDevice(deviceId) {
+  if (hosts.held && hosts.held()) throw Object.assign(new Error(`un-pairing a device: ${hosts.unreadWords()}`), { code: 'hosts-unread', status: 503 });   // the B-f276 remainder's belt: no half teardown over a held list
   // B-4d71: its token's TOMBSTONE — the device's next dial (at once for a device dialed in now: its link ends below; an offline
   // one whenever it comes back) is told «retired» with the proof, and its own agent removes its start and ends
   // (the HOST token's hash keys the proof: read before dropHostToken below. A vault locked now is never asked — that would file

@@ -30,14 +30,17 @@ const shownEl = (el) => !!(el && el.isConnected && el.getClientRects().length > 
 /** Terminal, host-aware (like Files): with remote hosts registered, a menu at the pressed control picks where the
  *  shell runs; with none, a local shell at once. ONE implementation — the button and its ⋯ row. */
 async function openTerminalFrom(app, anchor) {
-  let hostsList = [];
-  try { const d = await fetchJson('/api/hosts'); hostsList = d?.hosts || []; } catch { }
-  if (!hostsList.length) return app.openShellTerminal();
+  let hostsList = [], held = null;
+  try { const d = await fetchJson('/api/hosts'); hostsList = d?.hosts || []; held = (d && d.unread) || null; } catch { }
+  // the B-f276 remainder's cure (主开发 23:20Z): a HELD list is no «no machines» — the menu opens with Local and the hold's words,
+  // never a local shell in place of the machine the person meant
+  if (!hostsList.length && !held) return app.openShellTerminal();
   const at = shownEl(anchor) ? anchor : document.getElementById('toolbar-more');
   const r = shownEl(at) ? at.getBoundingClientRect() : { left: 8, bottom: 40 };
   showContextMenu(r.left, r.bottom + 4, [
     { label: t('Local'), action: () => app.openShellTerminal() },
     ...hostsList.map((h) => ({ label: h.name, action: () => app.openShellTerminal(undefined, { hostId: h.id }) })),
+    ...(held ? [{ caption: t('Your paired machines cannot be read right now — nothing is lost; they come back here when they read.') }] : []),   // a fact: a caption row
   ]);
 }
 

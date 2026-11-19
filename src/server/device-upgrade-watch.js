@@ -108,7 +108,7 @@ function trustedItemOf({ machine, from, to, keyIds = [], by = null }) {
   return { text: fill(T, p), detail: [fill(D1, p), fill(D2, p)].join('\n'), i18n: { text: { key: T, params: p }, detail: [{ key: D1, params: p }, { key: D2, params: p }] } };
 }
 
-function create({ userTodos = null, dataDir, log = () => {}, now = () => Date.now(), bcast = () => {}, tickMs = 30000, goneAfterMs = GONE_AFTER_MS, alerts = null } = {}) {
+function create({ userTodos = null, dataDir, log = () => {}, now = () => Date.now(), bcast = () => {}, tickMs = 30000, goneAfterMs = GONE_AFTER_MS, alerts = null, held = () => false } = {}) {
   const file = path.join(dataDir, 'device-upgrades.json');
   let ledger = {}; // hostKey → { machine, from, to, at, lost, itemId, text }
   let gone = {}; // hostKey → { machine, to, at (the upgrade began), pending, filedFor, itemId, text } (lane win-upgrade-pipe)
@@ -232,11 +232,19 @@ function create({ userTodos = null, dataDir, log = () => {}, now = () => Date.no
     if (had) { log(`[device-upgrade] ${g.machine}: dialled in again — the never-came-back item is resolved`); try { bcast(); } catch { } }
     return had;
   }
+  let heldUntil = now();   // the B-f276 remainder: the last sweep that met the hold (its silence is not the device's) — and its read r2 (N10): from this
+  // process's start (a device cannot dial a hub that is down, nor one restarted meanwhile until it re-dials)
   /** A device silent goneAfterMs after its upgrade began: ONE item per (machine, version). */
   function sweep() {
+    // the B-f276 remainder's cure (主开发 23:20Z): while the paired machines cannot be read, a device's dials are answered «wait»
+    // (a 503) — its silence is the hub's, not the device's: nothing is judged (no «rerun its install command»), the next sweep after
+    // the read judges it
+    try { if (held()) { heldUntil = now(); return false; } } catch { }
     let changed = false;
     for (const g of Object.values(gone)) {
-      if (!g || !g.pending || now() - Number(g.at || 0) < goneAfterMs) continue;
+      // its read S2: the silence is counted from the hold's END — the first sweep after the read races the device's own re-dial
+      // (a healthy device told «rerun its install command», and that version's one telling spent)
+      if (!g || !g.pending || now() - Math.max(Number(g.at || 0), heldUntil) < goneAfterMs) continue;
       g.pending = false; changed = true;
       if (g.filedFor === g.to) { log(`[device-upgrade] ${g.machine}: silent again after its upgrade to ${g.to} began — already told the user for this version`); continue; }
       g.filedFor = g.to;

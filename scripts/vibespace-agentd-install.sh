@@ -275,7 +275,8 @@ ln -sfn "$ROOT/$VER" "$ROOT/current"
 # THE DIAL CHECK (lane-pairing ⑤): the daemon's own dial, ONE attempt carrying a probe header — the server checks
 # the token and answers 200 WITHOUT registering the device. A failure prints its class by name + the remedy and
 # exits BEFORE the host token, dial.json or the launchd / systemd unit are written (exit 10 dns · 11 tls · 12
-# unreachable · 13 not a VibeSpace dial endpoint · 14 refused by the server · 15 other). --no-check skips it.
+# unreachable · 13 not a VibeSpace dial endpoint · 14 refused by the server · 15 other · 16 the hub cannot read its
+# paired machines right now: a wait — run the same command again in a few minutes). --no-check skips it.
 if [ -n "$DIAL_URL" ] && [ -z "$NO_CHECK" ]; then
   DHOST=$(printf '%s' "$DIAL_URL" | sed -E 's|^[a-z]+://([^/?]+).*|\1|')
   echo "→ checking that this device can dial ${DHOST}…"
@@ -284,6 +285,10 @@ if [ -n "$DIAL_URL" ] && [ -z "$NO_CHECK" ]; then
   CHECK_RC=$?
   set -e
   printf '%s\n' "$CHECK_OUT" | sed 's/^/  /'
+  if [ "$CHECK_RC" -eq 16 ]; then
+    echo "… nothing was installed yet — $DHOST cannot read its paired machines right now; run this same command again in a few minutes"
+    exit "$CHECK_RC"
+  fi
   if [ "$CHECK_RC" -ne 0 ]; then
     echo "✗ nothing was installed — the device cannot dial $DHOST: $(printf '%s' "$CHECK_OUT" | head -1)"
     exit "$CHECK_RC"

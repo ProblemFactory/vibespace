@@ -2857,7 +2857,8 @@ export function installManageAgents(App, ctx = {}) {
       const myGen = ++refreshGen;
       const stale = () => myGen !== refreshGen;
       let hostsList = [];
-      try { const hd = await fetchJson('/api/hosts'); hostsList = hd?.hosts || []; } catch {}
+      let hostsHeld = false;   // the B-f276 remainder's cure: a HELD list is no «no machines yet» — the Machines tab says the hold
+      try { const hd = await fetchJson('/api/hosts'); hostsList = hd?.hosts || []; hostsHeld = !!(hd && hd.unread); } catch {}
       if (stale() || surface.signal.aborted) return;
       renderCtl?.abort(); renderCtl = new AbortController(); // the rows this pass replaces let go of their listeners before it draws
       this._agentsHostsList = hostsList; // the refresh-all fan-out reads this
@@ -2920,7 +2921,10 @@ export function installManageAgents(App, ctx = {}) {
           // (picks 3–6): a press that cannot open the form SAYS why on this line (fetchJson never throws: null = unreachable, {error})
           const sbHost = this.sidebar && typeof this.sidebar._showAddHostDialog === 'function' ? this.sidebar : null;
           const addSsh = sbHost ? { label: t('Add an SSH machine…'), kind: 'primary', door: 'add-ssh-host', run: async () => { const hd = await fetchJson('/api/hosts'); if (hd && hd.key) { sayOnLine(noneLine, ''); sbHost._showAddHostDialog(hd); return; } sayOnLine(noneLine, t('Could not open it: {why}', { why: hd && hd.error ? String(hd.error) : t('Could not reach the server') })); } } : null;
-          const noneLine = body.appendChild(needLine({ words: t('No machines yet — add an SSH machine or pair a device.'), cls: 'empty-hint', doors: [addSsh, pairDoor(this, null, { kind: 'secondary' })] }));
+          const noneLine = body.appendChild(!hostsHeld ? needLine({ words: t('No machines yet — add an SSH machine or pair a device.'), cls: 'empty-hint', doors: [addSsh, pairDoor(this, null, { kind: 'secondary' })] })
+            : needLine({ words: t('VibeSpace cannot read its paired machines right now, so none are listed. Nothing is lost: they come back here when they read (it tries again every few minutes); changes to machines wait until then.'), tone: 'info', cls: 'empty-hint' }));
+          // ↑ the B-f276 remainder meets lane ui-needs-a-button: a HELD machines list says why none are listed — no door (a change to the
+          // machines waits for the read), never «No machines yet»
         }
         // Accordion: one collapsible card per host; the ssh/dial probe runs
         // LAZILY on first expand (opening the dialog no longer fans probes to

@@ -147,6 +147,10 @@ export function installSidebarWorkbench(Sidebar) {
       this._hostsDataLoading = true;
       fetch('/api/hosts').then(r => r.json()).then(d => {
         if (!Array.isArray(d?.hosts)) throw new Error(d?.error || 'bad /api/hosts response');
+        // the B-f276 remainder's cure (主开发 23:20Z): a list that arrives with the HOLD's mark (`unread`: hosts.json cannot be read) is
+        // no roster — never cached (the person's machine picks are kept, no «no longer exists» toast); asked again after the backoff
+        if (d.unread) { this._hostsHeld = true; this._hostsDataFailAt = Date.now(); return; }
+        this._hostsHeld = false;
         this._hostsData = d;
         this._hostsDataFailAt = 0;
         // re-render when hosts are known OR a remote selection is pending —

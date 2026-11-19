@@ -1,3 +1,4 @@
+const i18nKey = (k) => k;   // marks a dictionary key (the i18n check reads it) — the B-f276 remainder's held-stop notice
 /**
  * WebSocket connection handler — terminal/chat I/O, session create/attach/kill,
  * state sync, layout sync, tmux attach, permission/interrupt control.
@@ -533,7 +534,9 @@ function registerWsHandler(wss, ctx) {
       // under vibespace-remote-keeper — killing the local pipeline no
       // longer kills it. Stop it remotely (best-effort, async) and bust
       // the host's discovery cache so the sidebar updates on next poll.
-      if (session.host && hosts) {
+      // the B-f276 remainder's cure (主开发 23:20Z): while the paired machines cannot be read, the remote stop is OWED — said to the
+      // person by name now (never «ended» in silence while the agent there runs on), and run once the machines read (hosts.whenRead)
+      const remoteStop = () => { if (session.host && hosts) {
         try {
           const h = hosts.get(session.host);
           if (h.transport === 'dial') {
@@ -594,7 +597,11 @@ function registerWsHandler(wss, ctx) {
             setTimeout(() => { try { hosts.invalidateDiscovery(session.host); } catch {} }, 2000);
           }
         } catch {}
-      }
+      } };
+      if (session.host && hosts && typeof hosts.held === 'function' && hosts.held()) {
+        notifyKillHeld(session.hostName || session.host);
+        if (typeof hosts.whenRead === 'function') hosts.whenRead(remoteStop, `the remote stop of conversation ${data.sessionId}`);
+      } else remoteStop();
       // 'exited' silently broke terminate-from-sidebar.
       broadcastToSession(session, data.sessionId, { type: 'exited', sessionId: data.sessionId, reason: 'terminated' });
       try { reply({ type: 'killed', sessionId: requestedKillId, resolvedId: data.sessionId, ok: true }); } catch {}
@@ -639,6 +646,14 @@ function registerWsHandler(wss, ctx) {
       console.warn(`[remote] ssh kill on ${hostName}: pid ${m[1]} — ${m[2]}, not signalled`);
       try { ctx.serverNotice?.(`kill-withheld:${hostName}:${m[1]}`, w.text, { level: 'warn', i18n: w.i18n }); } catch { }
     }
+  };
+  // the B-f276 remainder's cure: a Terminate while the paired machines cannot be read — the stop there is owed, said by name
+  const notifyKillHeld = (hostName) => {
+    try {
+      ctx.serverNotice?.(`kill-held:${hostName}`,
+        `The session on ${hostName} is not stopped yet — VibeSpace cannot read its paired machines right now; it stops it there as soon as they read (a VibeSpace restart before then forgets it: stop it again).`,
+        { level: 'warn', i18n: { key: i18nKey('The session on {machine} is not stopped yet — VibeSpace cannot read its paired machines right now; it stops it there as soon as they read (a VibeSpace restart before then forgets it: stop it again).'), params: { machine: String(hostName) } } });
+    } catch { }
   };
   const notifyKillUnconfirmed = (hostName) => {
     try {

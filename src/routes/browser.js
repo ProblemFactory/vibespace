@@ -2651,7 +2651,7 @@ router.get('/api/agent/browser/providers', async (req, res) => {
   try { builds = typeof k.buildsFor === 'function' ? B0.buildsView(await k.buildsFor(h)) : null; } catch { builds = null; }
   if (builds && builds.ok) builds = { ok: true, missing: builds.missing, cut: builds.cut, builds: builds.builds }; // no root path for an agent
   try { const c = typeof k.cliFacts === 'function' ? await k.cliFacts() : null; cli = c ? { table: c.table, mode: c.choice.mode, chosen: c.choice.version || null, inUse: c.inUse.version || null, inUsePinned: !!c.inUse.pinned, onPath: c.onPath.version || null, pinnedInstalled: c.pinned ? !!c.pinned.installed : null, drift: c.drift || null } : null; } catch { cli = null; }
-  res.json({ providers: B.providerRows({ host: h, desktopConsent: typeof k.desktopConsent === 'function' ? k.desktopConsent() : undefined }), host: h, hostKnown: h ? k.hostKnown(h) : true, builds, cli });
+  res.json({ providers: B.providerRows({ host: h, desktopConsent: typeof k.desktopConsent === 'function' ? k.desktopConsent() : undefined }), host: h, ...(h && typeof k.machinesHeld === 'function' && k.machinesHeld() ? { hostKnown: null, held: k.machinesHeld() } : { hostKnown: h ? k.hostKnown(h) : true }), builds, cli });   // the B-f276 remainder (H25): held = unknown, never «not paired»
 });
 router.post('/api/agent/browser/new', (req, res) => {
   const k = keeperOr503(res); if (!k) return;

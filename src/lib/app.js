@@ -1064,6 +1064,9 @@ class App {
     ].filter(Boolean);
     if (sensRows.length) sensWrap.append(...sensRows);
     else sensWrap.append(Object.assign(document.createElement('div'), { className: 'cfg-sens-none chat-status-dim', textContent: t('There is no sensitive data to export right now.') }));
+    // the B-f276 remainder (H15) meets lane ui-needs-a-button: a HELD machines list is SAID on its own line (no row: what is unread
+    // does not exist to export) — never «no hosts», never silence
+    if (!sens.hosts && sens.hostsUnread) sensWrap.append(needLine({ words: t('the paired machines cannot be read right now — an export now carries none'), tone: 'info', cls: 'cfg-sens-hosts-held' }));
     if (!sens.vsPassword && typeof this._showPasswordDialog === 'function') sensWrap.append(needLine({ words: t('No VibeSpace password is set.'), tone: 'info', cls: 'cfg-sens-pass', doors: [{ label: t('Set a password…'), kind: 'secondary', door: 'set-password', run: () => this._showPasswordDialog() }] }));
     const passRow = document.createElement('div');
     passRow.className = 'cfg-pass-row hidden';
@@ -2263,6 +2266,9 @@ class App {
           o.value = h.id; o.textContent = h.transport === 'dial' ? `${h.name} (${t('device')})` : `${h.name} (${h.user ? h.user + '@' : ''}${h.host})`;
           hostSel.appendChild(o);
         }
+        // the B-f276 remainder's cure (主开发 23:20Z): a HELD list keeps the machine this open names (and the person's pick) as an
+        // option worded as unread — never a silent This machine; the create meets the hold by name while it lasts
+        if (d && d.unread) for (const id of new Set([hostId, was].filter(Boolean))) { const o = document.createElement('option'); o.value = id; o.textContent = `${id} (${t('cannot be read right now')})`; hostSel.appendChild(o); }
         // a machine the person picked while this list was in flight STAYS picked (ci-355-red: the landing put the open's machine
         // back — a pick in the first moments became This machine, its field and footer with it); gone from the list ⇒ the open's
         hostSel.value = this._nsHostPicked ? was : (hostId || '');

@@ -1061,6 +1061,8 @@ class SettingsUI {
         btn.disabled = true;
         const hd = await fetchJson('/api/hosts');
         const hosts = (hd && hd.hosts) || [];
+        // B-54b7 (the B-f276 remainder's cure, 主开发 23:20Z): a list held unread is no «none registered» — the hold is said
+        if (hd && hd.unread) { addLine({ tone: 'dim', text: t('VibeSpace cannot read its paired machines right now, so none are listed. Nothing is lost: they come back here when they read (it tries again every few minutes); changes to machines wait until then.') }); btn.disabled = false; return; }
         if (!hosts.length) { addLine({ tone: 'dim', text: t('No other machines registered.') }); return; }
         // the root verdict (src/server-root.js), ONCE above the hosts: this server wrote none of what follows
         const own = await (this._cliConfigPromise || Promise.resolve(null)).catch(() => null);

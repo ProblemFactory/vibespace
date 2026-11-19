@@ -377,7 +377,12 @@ export function installSidebarMounts(Sidebar) {
       d.mountTokens = mt?.tokens || [];
       this._machineMountsData = mm?.mounts || []; // push AND pull mounts, keyed by hostId (B-f3e8)
       this._mountsData = d;
-      this._hostsData = hd;
+      // B-54b7 (the B-f276 remainder's cure, 主开发 23:20Z): a list that arrives with the HOLD's mark (`unread`: hosts.json /
+      // machine-mounts.json cannot be read) is no roster — never cached as one (the Recent/History machine picks read this cache:
+      // an empty held list would wipe them); the panel says WHY it is empty, and no mount reads as «on a removed machine»
+      const hostsHeld = !!(hd && hd.unread), mountsHeld = !!(mm && mm.unread);
+      if (!hostsHeld) this._hostsData = hd;
+      this._hostsHeld = hostsHeld;   // the pair dialog says the hold before its button (and the route refuses it by name)
       // B-a31a: a refresh keeps the place the person scrolled to — both scrollers, as Sidebar._render keeps them (2.228.3)
       const scrollers = [this.listEl, this.listEl.closest && this.listEl.closest('.sidebar-section')].filter(Boolean), keepScroll = scrollers.map((el) => el.scrollTop);
       // verifier #2: a key answer leaves with its machine (removed here, or replaced by «Add it again with a key…»)
@@ -395,6 +400,9 @@ export function installSidebarMounts(Sidebar) {
         const hlist = document.createElement('div');
         hlist.className = 'mounts-list';
         hlist.appendChild(this._buildLocalMachineRow());
+        if (hostsHeld || mountsHeld) hlist.appendChild(Object.assign(document.createElement('div'), { className: 'empty-hint empty-hint-inline mounts-held-hint',
+          textContent: hostsHeld ? tr('VibeSpace cannot read its paired machines right now, so none are listed. Nothing is lost: they come back here when they read (it tries again every few minutes); changes to machines wait until then.')
+            : tr('VibeSpace cannot read the machines’ mounts right now, so none are listed. Nothing is lost: they come back here when they read (it tries again every few minutes); changes to mounts wait until then.') }));
         // ONE machine model (B-f3e8): every machine — ssh host or dial-out
         // device — is a host record rendered by the SAME builder; its mounts
         // (both directions) are children keyed by hostId.
@@ -411,7 +419,7 @@ export function installSidebarMounts(Sidebar) {
       // Orphan mounts: mounts whose machine was removed (or none listed).
       // Without this they'd be invisible AND unmanageable (review finding).
       const liveHostIds = new Set(hd.hosts.map((h) => h.id));
-      const orphans = this._machineMountsData.filter((m) => !liveHostIds.has(m.hostId));
+      const orphans = hostsHeld ? [] : this._machineMountsData.filter((m) => !liveHostIds.has(m.hostId)); // held: no machine is known, none is «removed»
       if (orphans.length) {
         const olist = document.createElement('div');
         olist.className = 'mounts-list';
@@ -1424,8 +1432,9 @@ export function installSidebarMounts(Sidebar) {
     // Pick a machine to mount a folder onto (from the folder right-click, where
     // no host is chosen yet). One machine → straight to the mount dialog.
     async _showHostMountPicker(folder) {
-      let hosts = [];
-      try { hosts = (await api('/api/hosts')).hosts || []; } catch {}
+      let hosts = [], held = false;
+      try { const hd = await api('/api/hosts'); hosts = hd.hosts || []; held = !!hd.unread; } catch {}
+      if (held) { showToast(tr('VibeSpace cannot read its paired machines right now, so none are listed. Nothing is lost: they come back here when they read (it tries again every few minutes); changes to machines wait until then.'), { type: 'error' }); return; }   // the B-f276 remainder's cure: a held list is no «no machines yet»
       if (!hosts.length) { showToast(tr('No remote machines yet — add one in the Remote tab'), { type: 'error' }); return; }
       if (hosts.length === 1) return this._showHostMountDialog(hosts[0], folder);
       this._mountsDialog(tr('Mount this folder onto a machine'), [
@@ -2390,7 +2399,14 @@ export function installSidebarMounts(Sidebar) {
         stp.dataset.dialState = rs.state;
         stp.textContent = dialStateText(rs);
         body.appendChild(stp);
-      } else {
+      }
+      if (this._hostsHeld) {   // the B-f276 remainder's cure: the hold is said before the button — the route refuses a pairing while it lasts
+        const hn = document.createElement('p');
+        hn.className = 'agents-note device-pair-held';
+        hn.textContent = tr('VibeSpace cannot read its paired machines right now — pairing waits until it can (it reads them again by itself).');   // its read r2 (N15): the dialog's own words
+        body.appendChild(hn);
+      }
+      if (!existing) {
         const note = document.createElement('p');
         note.className = 'agents-note';
         note.textContent = tr('For machines you can’t ssh into (a laptop, a Mac at home): the device dials OUT to this instance over a websocket, so it works behind NAT with nothing to expose. Nothing to install first — the installer brings its own Node when the machine has none.');
@@ -2523,7 +2539,8 @@ export function installSidebarMounts(Sidebar) {
           // the plain rotation the message just described)
           if (e && e.code === 'link_gone' && keepLbl) { keepBox.checked = false; keepLbl.style.display = 'none'; if (keepNote) keepNote.style.display = 'none'; }
           syncName('route'); // the route's answer is SHOWN to the user (the message below) — it counts as seen
-          const msg = e && e.code === 'bad_base' ? tr('That is not an address VibeSpace can dial')
+          const msg = e && e.code === 'hosts-unread' ? tr('VibeSpace cannot read its paired machines right now — nothing was paired or changed. Try again in a few minutes (it reads them again by itself).')
+            : e && e.code === 'bad_base' ? tr('That is not an address VibeSpace can dial')
             : e && e.code === 'already_paired' ? tr('"{name}" was paired a moment ago — in another window, or by another user. Nothing was created. To replace that pairing, press "Replace its pairing".', { name })
             : e && e.code === 'name_case_taken' ? tr('"{name}" differs from the paired device "{twin}" only in upper / lower case — VibeSpace treats them as one name. Pick another name, or give "{twin}" a new command from the pairing icon on its row.', { name, twin: (e.body && e.body.twin) || '' })
             // verify-r6 P1: the link the owner asked to keep is gone / is another one — nothing was minted

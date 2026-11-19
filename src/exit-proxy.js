@@ -204,6 +204,9 @@ class ExitProxyManager {
   conversationKeyOf(session, sessionId) { const cid = addressableId(session); return cid ? String(cid) : `webui:${sessionId}`; }
   _hosts() { try { return this.hosts.list?.() || []; } catch { return []; } }
   _raw(hostId) { try { return this.hosts.get(hostId); } catch { return null; } }
+  /** the B-f276 remainder's cure (主开发 23:20Z, its audit H17 / H23): while hosts.json is HELD a machine is UNKNOWN, never «no such
+   *  machine» — the person's dialog, the hub-act «Always» and the agent's verbs are refused by name (503 hosts-unread) */
+  _refuseIfHeld() { if (this.hosts && typeof this.hosts.held === 'function' && this.hosts.held()) throw namedError('hosts-unread', this.hosts.unreadWords()); }
   /** The rows of a machine's two lists (the grants store; no store ⇒ none ⇒ nobody — fail closed). */
   _rowsOf(hostId) {
     const g = this._grants();
@@ -222,6 +225,7 @@ class ExitProxyManager {
     try {
       const g = this._grants();
       if (!g) return 0;
+      if (this.hosts && typeof this.hosts.held === 'function' && this.hosts.held()) return 0;   // the B-f276 remainder's belt: a HELD list removed no machine
       const ids = new Set(this._hosts().map((h) => String(h.id)));
       const gone = g.rowsOfDoor('exit').filter((r) => !ids.has(String(r.resource).replace(/:(use|run)$/, '')));
       if (!gone.length) return 0;
@@ -397,6 +401,7 @@ class ExitProxyManager {
   }
   /** GET /api/hosts/:id/exit-access — drawn FRESH by the dialog (never the row's broadcast copy; mirror-193). */
   view(hostId, { roster = null } = {}) {
+    this._refuseIfHeld();
     const h = this._raw(hostId);
     if (!h) throw namedError('not-found', 'no such machine');
     const listed = this._hosts().find((x) => x.id === hostId) || h;
@@ -425,6 +430,7 @@ class ExitProxyManager {
    * stopped, settled}` | throws a named error (the route maps the code).
    */
   async setAccess(hostId, body, { by = 'user' } = {}) {
+    this._refuseIfHeld();
     const h = this._raw(hostId);
     if (!h) throw namedError('not-found', 'no such machine');
     const cur = this.accessOf(h);
@@ -510,6 +516,7 @@ class ExitProxyManager {
   // ── the agent's side ──────────────────────────────────────────────────────
   /** The machines THIS conversation may use (either grant) — never another principal, never a name. */
   listFor(session, sessionId) {
+    this._refuseIfHeld();
     const ctx = this.ctxFor(session, sessionId);
     const out = [];
     for (const h of this._hosts()) {
@@ -522,6 +529,7 @@ class ExitProxyManager {
   /** Resolve + judge. A named ref resolves over EVERY machine (so a refusal names the grant it lacks, never
    *  "no such machine"); a bare ref over the machines open to this caller for `grant`. */
   _judge(session, sessionId, ref, grant) {
+    if (this.hosts && typeof this.hosts.held === 'function' && this.hosts.held()) return { refusal: { code: 'hosts-unread', error: this.hosts.unreadWords() } };
     const ctx = this.ctxFor(session, sessionId);
     const all = this._hosts();
     const pool = (ref == null || ref === '') ? all.filter((h) => E.exitVerdict(this.accessOf(this._raw(h.id) || h), grant, ctx).ok) : all;

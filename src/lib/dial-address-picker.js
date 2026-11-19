@@ -182,6 +182,7 @@ export function dialReasonText(reason) {
     case 'timeout': return t('timed out');
     case 'unreachable': return t('no route');
     case 'not-vibespace': return t('not a VibeSpace address');
+    case 'held': return t('this VibeSpace could not read its paired machines then');
     default: return t('unknown');
   }
 }
@@ -251,6 +252,6 @@ export function dialHistoryLine(e) {
   if (e && e.outcome === 'connected') return t('{time} · connected', { time });
   if (e && e.outcome === 'lost') return t('{time} · link ended', { time });
   const code = String((e && e.code) || '');
-  const reason = code === 'refused-token-mismatch' ? 'token-mismatch' : code === 'refused-no-pairing' ? 'no-pairing' : ['dns', 'tls', 'refused-connect', 'timeout', 'unreachable'].includes(code) ? code : (code === 'not-ws' || /^http-\d{3}$/.test(code)) ? 'not-vibespace' : 'other';
+  const reason = code === 'refused-token-mismatch' ? 'token-mismatch' : code === 'refused-no-pairing' ? 'no-pairing' : ['dns', 'tls', 'refused-connect', 'timeout', 'unreachable'].includes(code) ? code : (code === 'not-ws' || /^http-\d{3}$/.test(code)) ? 'not-vibespace' : code === 'held' ? 'held' : 'other';
   return t('{time} · failed ({reason})', { time, reason: dialReasonText(reason) });
 }

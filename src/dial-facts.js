@@ -23,13 +23,16 @@ const CANDIDATE_KINDS = Object.freeze(['origin', 'relay', 'tailscale', 'lan', 'p
 const BASE_REFUSALS = Object.freeze(['scheme', 'host', 'port', 'path', 'query', 'empty']);
 /** The daemon's failure classes (§4.2) — CLOSED; `http-<status>` is the one parameterised family. */
 const DIAL_FAIL_CODES = Object.freeze(['dns', 'tls', 'not-ws', 'refused-connect', 'timeout', 'unreachable', 'reset',
-  'refused-token-mismatch', 'refused-no-pairing', 'refused-no-device-id', 'refused-duplicate-device', 'refused-retired', 'refused-unknown', 'closed-before-hello', 'lost', 'other']);
+  'refused-token-mismatch', 'refused-no-pairing', 'refused-no-device-id', 'refused-duplicate-device', 'refused-retired', 'refused-unknown', 'closed-before-hello', 'lost', 'other',
+  // the B-f276 remainder's cure (主开发 23:20Z): the hub answered 503 `hosts-unread` — it cannot read its paired machines right now;
+  // a WAIT (nothing about this device changed, the hub reads them again within minutes), never «not a VibeSpace» nor «pair again»
+  'held']);
 /** The server's named refusals at the upgrade (the X-VibeSpace-Dial-Refusal header). */
 const DIAL_REFUSAL_CODES = Object.freeze(['token-mismatch', 'no-pairing', 'no-device-id', 'duplicate-device', 'retired']);   // retired: B-4d71 (an unpaired device's own token, with the proof)
 /** THE row's states (§4.6), in the order they are judged. */
 const DIAL_ROW_STATES = Object.freeze(['auth-fail', 'connected', 'refused', 'silent', 'never', 'unknown']);
 /** The closed reasons the row words (§11.2). */
-const DIAL_REASONS = Object.freeze(['token-mismatch', 'no-pairing', 'duplicate-device', 'dns', 'tls', 'refused-connect', 'timeout', 'unreachable', 'not-vibespace', 'other']);
+const DIAL_REASONS = Object.freeze(['token-mismatch', 'no-pairing', 'duplicate-device', 'dns', 'tls', 'refused-connect', 'timeout', 'unreachable', 'not-vibespace', 'held', 'other']);   // held: the B-f276 remainder's cure (its read N5)
 const DUP_NOTE_MS = 10 * 60 * 1000; // a duplicate seen within this long is still on the row
 const BOOT_RE = /^[0-9a-f]{8,32}$/;    // the daemon's per-process boot id (x-vibespace-daemon-boot)
 const UP_LOST_MS = 2000;       // an upgrade that lived at least this long then closed is the link's END, not a failed dial
@@ -325,6 +328,8 @@ function dialFailureOf(err, { up = false, upMs = 0 } = {}) {
       if (DIAL_REFUSAL_CODES.includes(ref)) return { code: `refused-${ref}`, detail: said || ref, status };
       return { code: 'refused-unknown', detail: said || 'HTTP 401 with no reason (a server older than this device)', status };
     }
+    // ui-words: the device's journal line and the install check's terminal line (English, as every dial detail) — the page words a code
+    if (status === 503 && body && body.code === 'hosts-unread') return { code: 'held', detail: said || 'the hub cannot read its paired machines right now', status };
     if (status >= 100 && status <= 599) return { code: `http-${status}`, detail: said || `HTTP ${status}`, status };
     return { code: 'other', detail: detail || 'upgrade refused', status: status || undefined };
   }
@@ -428,12 +433,13 @@ const dur = (ms) => {
 function dialLogLine({ outcome, code, detail, attempt, delay, url, failedBefore, upMs } = {}) {
   if (outcome === 'connected') return `dial-out connected: ${url}${failedBefore ? ` (after ${failedBefore} failed attempt${failedBefore === 1 ? '' : 's'})` : ''}`;
   if (outcome === 'lost') return `dial-out lost after ${dur(upMs)} — retry in ${delay}ms`;
+  if (code === 'held') return `dial-out waits — the hub cannot read its paired machines right now: ${clean(detail)} (attempt ${attempt}, retry in ${delay}ms)`;
   if (String(code).startsWith('refused-') && code !== 'refused-connect') return `dial-out refused — ${String(code).slice('refused-'.length)}: ${clean(detail)} (attempt ${attempt}, retry in ${delay}ms)`;
   return `dial-out failed — ${code}: ${clean(detail)} (attempt ${attempt}, retry in ${delay}ms)`;
 }
 
 // ── ⑤ --dial-check ──────────────────────────────────────────────────────────
-const CHECK_EXITS = Object.freeze({ ok: 0, dns: 10, tls: 11, reach: 12, 'not-vibespace': 13, refused: 14, other: 15 });
+const CHECK_EXITS = Object.freeze({ ok: 0, dns: 10, tls: 11, reach: 12, 'not-vibespace': 13, refused: 14, other: 15, held: 16 });
 /** `{ok, code, detail, host, deviceId, serverVersion, status, hub}` → `{exit, lines:[…]}` (the installer prints them; an ok
  *  check from a hub that names itself adds `hub id: vh-…` — the installer reads it into dial.json, lane mac-repair-retires-stale). */
 function dialCheckLines({ ok = false, code = 'other', detail = '', host = '', deviceId = '', serverVersion = '', status = 0, hub = '' } = {}) {
@@ -444,6 +450,7 @@ function dialCheckLines({ ok = false, code = 'other', detail = '', host = '', de
   if (code === 'dns') return { exit: CHECK_EXITS.dns, lines: [`dial-check failed — dns: ${d}`, `→ this device cannot resolve ${bare}. In the pairing dialog pick another address (a LAN or Tailscale IP) and generate a new command.`] };
   if (code === 'tls') return { exit: CHECK_EXITS.tls, lines: [`dial-check failed — tls: ${d}`, `→ ${h} does not speak TLS (wss://) — or its certificate is not trusted here. Pick the http/ws address, or fix the certificate.`] };
   if (['refused-connect', 'timeout', 'unreachable', 'reset'].includes(code)) return { exit: CHECK_EXITS.reach, lines: [`dial-check failed — ${code}: ${d}`, `→ nothing answers at ${h} from this network. Is VibeSpace running there, and is this device on a network that reaches it? Pick another address.`] };
+  if (code === 'held') return { exit: CHECK_EXITS.held, lines: [`dial-check waits — held: ${d}`, `→ ${h} is a VibeSpace that cannot read its paired machines right now (it reads them again within minutes). Nothing was installed and nothing about this device changed there — run this same command again in a few minutes.`] };
   if (code === 'not-ws' || isStatusCode(code)) return { exit: CHECK_EXITS['not-vibespace'], lines: [`dial-check failed — ${code}: ${d}`, `→ ${h} answered, but not as a VibeSpace dial endpoint (status ${Number(status) || String(code).replace(/^http-/, '') || '?'}). A relay with no backend, a proxy page, or the wrong port.`] };
   if (code === 'refused-token-mismatch' || code === 'refused-no-pairing' || code === 'refused-no-device-id' || code === 'refused-retired' || code === 'refused-unknown') return { exit: CHECK_EXITS.refused, lines: [`dial-check failed — ${code}: ${d}`, '→ generate a new command in the pairing dialog and run that one.'] };
   return { exit: CHECK_EXITS.other, lines: [`dial-check failed — other: ${d || code}`] };
@@ -605,6 +612,7 @@ function dialReasonOf(code) {
   if (c === 'token-mismatch' || c === 'no-pairing' || c === 'duplicate-device') return c;
   if (['dns', 'tls', 'refused-connect', 'timeout', 'unreachable'].includes(c)) return c;
   if (c === 'not-ws' || isStatusCode(c)) return 'not-vibespace';
+  if (c === 'held') return 'held';   // the hub could not read its paired machines then (its read N5: the row said «unknown»)
   return 'other';
 }
 /**

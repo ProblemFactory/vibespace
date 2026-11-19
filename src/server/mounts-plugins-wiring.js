@@ -558,6 +558,10 @@ app.post(['/api/device/dial-pair', '/api/agentd/dial-pair'], async (req, res) =>
     if (!deviceId) return res.status(400).json({ error: 'the device name has no letters, digits, - or _ left', code: 'bad_name' });
     // verify-r5 A1: THE NAME VERDICT, here, before anything is published, minted or cut — the dialog's note judged its
     // own copy of the list (two windows / a device that came online raced it)
+    // the B-f276 remainder's cure (主开发 23:20Z): while hosts.json is HELD the list is empty because it is UNREAD — the verdict would
+    // tell the person a paired device «is no longer paired (it was removed)»: refused by name, nothing published, minted or cut
+    const heldNow = () => (hosts.held && hosts.held() ? res.status(503).json({ error: `pairing a device: ${hosts.unreadWords()}`, code: 'hosts-unread', deviceId }) : null);
+    if (heldNow()) return;
     const nv = DF.pairRequestVerdict({ deviceId, expect: req.body?.expect === 'new' ? 'new' : req.body?.expect === 'existing' ? 'existing' : null, hosts: hosts.list() });
     if (!nv.ok) return res.status(409).json({ error: nv.error, code: nv.code, deviceId, ...(nv.code === 'already_paired' ? { online: !!nv.online } : {}), ...(nv.twin ? { twin: nv.twin } : {}) }); // verify-r5 A3: + name_case_taken {twin}
     // Double-NAT pairing (B-5c1e): when THIS instance is itself behind NAT, viaRelay publishes the instance's OWN
@@ -581,6 +585,7 @@ app.post(['/api/device/dial-pair', '/api/agentd/dial-pair'], async (req, res) =>
     // deleted the record and orphaned the still-running device daemon)
     // verify-r5 A1: …and AGAIN here, synchronous with the mint — the relay publish above awaited, and a second window's
     // Create could have minted this name meanwhile
+    if (heldNow()) return;   // the same, after the relay's await
     const nv2 = DF.pairRequestVerdict({ deviceId, expect: req.body?.expect === 'new' ? 'new' : req.body?.expect === 'existing' ? 'existing' : null, hosts: hosts.list() });
     if (!nv2.ok) return res.status(409).json({ error: nv2.error, code: nv2.code, deviceId, ...(nv2.code === 'already_paired' ? { online: !!nv2.online } : {}), ...(nv2.twin ? { twin: nv2.twin } : {}) });
     const existed = !!hosts.findByDeviceId(deviceId);
@@ -648,7 +653,7 @@ app.post(['/api/device/dial-pair', '/api/agentd/dial-pair'], async (req, res) =>
 //    daemon is never asked). Human-triggered (the Machines card's "Dial history…"), never on render.
 app.get('/api/hosts/:id/dial-status', async (req, res) => {
   let h;
-  try { h = hosts.get(req.params.id); } catch { return res.status(404).json({ error: 'no such machine', code: 'not-found' }); }
+  try { h = hosts.get(req.params.id); } catch (e) { return e && e.code === 'hosts-unread' ? res.status(503).json({ error: `the machine's dial history: ${e.message}`, code: e.code }) : res.status(404).json({ error: 'no such machine', code: 'not-found' }); }   // the B-f276 remainder (H19): unknown, never «no such machine»
   if (!h.deviceId) return res.status(404).json({ error: 'this machine does not dial in', code: 'not-found' });
   if (!agentdDials.get(h.deviceId)) return res.status(503).json({ error: `"${h.name || h.id}" is offline — its daemon is not dialed in`, code: 'offline' });
   try {

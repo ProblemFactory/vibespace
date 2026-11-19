@@ -148,7 +148,10 @@ class MachineMounts {
     const nPush = ingest(hmF, (m) => ({ ...m, dir: 'push' }));
     const nPull = ingest(dvF, (m) => ({
       id: m.id, dir: 'pull',
-      hostId: this.hosts.findByDeviceId?.(m.deviceId)?.id || ('host-dial-' + String(m.deviceId || '').replace(/[^\w-]/g, '')),
+      // the B-f276 remainder (H10, its read S1): while hosts.json is HELD no device can be looked up — the key is derived as the
+      // pairing minted it: a graduated ssh machine's device id is `grad-<its host id>`, a pure dial device's host is `host-dial-<id>`
+      // (a wait wrote machine-mounts.json anyway and the one-time ingest never ran again: every pull mount was lost)
+      hostId: (this.hosts.held?.() ? null : this.hosts.findByDeviceId?.(m.deviceId)?.id) || (/^grad-/.test(String(m.deviceId || '')) ? String(m.deviceId).slice(5) : 'host-dial-' + String(m.deviceId || '').replace(/[^\w-]/g, '')),
       remotePath: m.remotePath, mountpoint: m.mountpoint, createdAt: m.createdAt,
     }));
     if (nPush === null && nPull === null) return;
@@ -669,7 +672,7 @@ class MachineMounts {
   async remount(id) {
     const rec = this._state.mounts.find((m) => m.id === id);
     if (!rec) throw MW.refusal('unknown_mount');
-    if (!this._online(rec.hostId)) throw MW.refusal('machine_offline_start');
+    if (!this._online(rec.hostId)) throw this.hosts.held?.() ? Object.assign(new Error(`mounting again: ${this.hosts.unreadWords()}`), { code: 'hosts-unread', status: 503 }) : MW.refusal('machine_offline_start');   // the B-f276 remainder (H21): held, not offline — beside B-af94's coded refusal (the move onto 921c0de17)
     if (rec.dir === 'push') {
       // a push mount manually umounted ON the machine (or torn by a reboot):
       // the raw token is unrecoverable (hashed at rest), so re-creating with
@@ -692,6 +695,10 @@ class MachineMounts {
     const i = this._state.mounts.findIndex((m) => m.id === id);
     if (i < 0) throw MW.refusal('unknown_mount');
     const rec = this._state.mounts[i];
+    // the B-f276 remainder's cure (主开发 23:20Z, its audit H5): a PUSH mount's unmount runs ON its machine — while hosts.json is HELD
+    // that machine cannot be reached, and the remote unmount was swallowed while the token was revoked and the record dropped (a dead
+    // mount left on the machine, nothing said): refused by name, nothing changed
+    if (rec.dir !== 'pull' && this.hosts.held?.()) throw Object.assign(new Error(`removing a mount on a machine: ${this.hosts.unreadWords()}`), { code: 'hosts-unread', status: 503 });
     if (rec.dir === 'pull') {
       const live = this._live.get(id);
       if (live) { try { await live.teardown(); } catch { } this._live.delete(id); }

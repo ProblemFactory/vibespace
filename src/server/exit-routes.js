@@ -49,7 +49,7 @@ async function notDurable(res) {
   res.status(503).json({ error: `the change is kept, but hosts.json is not on disk yet (${w.why === 'queued' ? `queued behind ${w.ahead || 'other'} write(s)` : w.code || w.why || 'the storage did not answer'}) — the hub keeps trying; a restart before it lands would lose it`, code: 'not_durable' });
   return true;
 }
-const STATUS = { not_granted: 403, excepted: 403, ask_denied: 403, ask_changed: 409, ask_expired: 403, ask_unfiled: 409, groups_unreadable: 409, fork_pending: 409, ask_pending: 409, no_machine: 404, no_exits: 404, ambiguous: 400, offline: 503, run_failed: 502, spawn_failed: 502, bad_command: 400, unknown_shape: 409, conversation_gone: 410, remote_session: 409,
+const STATUS = { 'hosts-unread': 503, not_granted: 403, excepted: 403, ask_denied: 403, ask_changed: 409, ask_expired: 403, ask_unfiled: 409, groups_unreadable: 409, fork_pending: 409, ask_pending: 409, no_machine: 404, no_exits: 404, ambiguous: 400, offline: 503, run_failed: 502, spawn_failed: 502, bad_command: 400, unknown_shape: 409, conversation_gone: 410, remote_session: 409,
   // lane exit-transfer: pull / push refusals
   too_big: 413, not_a_file: 409, local_path_refused: 403, exists: 409, hash_mismatch: 502, transfer_failed: 502, bad_path: 400, target_busy: 409,
   // lane device-allow-flags: the machine's OWN allow list refused it (the sentence names the flag + the re-run)
@@ -58,7 +58,7 @@ const STATUS = { not_granted: 403, excepted: 403, ask_denied: 403, ask_changed: 
 const agentFail = (res, e) => res.status(STATUS[e && e.code] || 400).json({ error: (e && e.message) || 'failed', code: (e && e.code) || 'failed', ...(e && e.grant ? { grant: e.grant } : {}), ...(e && e.has ? { has: e.has } : {}), ...(e && e.spawnError ? { spawnError: e.spawnError, interpreter: e.interpreter || null, platform: e.platform || null, exitCode: e.exitCode } : {}) });
 app.get('/api/agent/exit', (req, res) => {
   const e = agentOr401(req, res); if (!e) return;
-  res.json({ exits: exitProxy.listFor(e[1], e[0]) });
+  try { res.json({ exits: exitProxy.listFor(e[1], e[0]) }); } catch (x) { agentFail(res, x); }   // the B-f276 remainder: a held list is 503 hosts-unread, never «no exits»
 });
 app.post('/api/agent/exit/use', async (req, res) => {
   const e = agentOr401(req, res); if (!e) return;
@@ -109,7 +109,7 @@ app.post('/api/agent/exit/push', async (req, res) => {
   } catch (err) { agentFail(res, err); try { if (!req.readableEnded) req.resume(); } catch { } } // the unread rest is drained; the CLI stops on the answer
 });
 // ── the user's side (cookie) ──
-const COOKIE_STATUS = { 'not-found': 404, list_changed: 409, bad_mode: 400, bad_grant: 400, bad_principal: 400, empty_list: 400, too_many: 400, except_conflicts: 400, except_unnamed: 409, not_written: 500, store_unreadable: 409, 'session-gone': 410, human_only: 403, ask_unknown: 404, ask_settled: 409, ask_changed: 409, ask_expired: 410, conversation_gone: 410 };
+const COOKIE_STATUS = { 'hosts-unread': 503, 'not-found': 404, list_changed: 409, bad_mode: 400, bad_grant: 400, bad_principal: 400, empty_list: 400, too_many: 400, except_conflicts: 400, except_unnamed: 409, not_written: 500, store_unreadable: 409, 'session-gone': 410, human_only: 403, ask_unknown: 404, ask_settled: 409, ask_changed: 409, ask_expired: 410, conversation_gone: 410 };
 const cookieFail = (res, e) => res.status(COOKIE_STATUS[e && e.code] || 400).json({ error: (e && e.message) || 'failed', code: (e && e.code) || 'failed', ...(e && e.added ? { added: e.added, removed: e.removed } : {}), ...(e && e.grant ? { grant: e.grant } : {}) });
 app.get('/api/exits', (req, res) => res.json({ exits: exitProxy.list() }));
 app.post('/api/hosts/:id/allow-exit', (req, res) => res.status(410).json({ error: 'use PATCH /api/hosts/:id/exit-access — exit access is two lists now', code: 'retired' }));
@@ -162,6 +162,7 @@ app.patch('/api/hosts/:id/exit-access', async (req, res) => {
 app.get('/api/hosts/:id/exit-runs', (req, res) => {
   if (isAnyBearer(req)) return res.status(403).json({ error: 'the machine\'s command history is the user\'s — an agent sees only its own (vibespace-exit runs)', code: 'human_only' });
   let h = null;
+  if (hosts.held && hosts.held()) return res.status(503).json({ error: `the machine's command history: ${hosts.unreadWords()}`, code: 'hosts-unread' });   // the B-f276 remainder (H18): unknown, never «no such machine»
   try { h = hosts.get(req.params.id); } catch { }
   if (!h) return res.status(404).json({ error: 'no such machine', code: 'not-found' });
   const platform = h.dial && h.dial.lastAccept && typeof h.dial.lastAccept.platform === 'string' ? h.dial.lastAccept.platform : null;
@@ -178,6 +179,7 @@ app.get('/api/hosts/:id/device-acts', (req, res) => {
   if (!hosts.deviceAudit) return res.status(503).json({ error: 'the device-act audit is not wired on this server', code: 'no_audit' });
   if (isAnyBearer(req)) return res.status(403).json({ error: 'what the hub did on a machine is the user\'s to read — an agent reads its own acts (vibespace-remote audit)', code: 'human_only' });
   let h = null;
+  if (req.params.id !== 'local' && hosts.held && hosts.held()) return res.status(503).json({ error: `what the hub did on a machine: ${hosts.unreadWords()}`, code: 'hosts-unread' });   // the B-f276 remainder (H18)
   if (req.params.id === 'local') h = { id: 'local', name: 'this machine' }; else { try { h = hosts.get(req.params.id); } catch { } }
   if (!h) return res.status(404).json({ error: 'no such machine', code: 'not-found' });
   const q = req.query || {};
@@ -201,6 +203,7 @@ app.get('/api/agent/remote/audit', (req, res) => {
   if (since.bad) return res.status(400).json({ error: 'since is a duration: 90s, 15m, 2h, 3d', code: 'bad_since' });
   let hostId = null;
   if (q.machine) {
+    if (hosts.held && hosts.held()) return res.status(503).json({ error: `the machine "${String(q.machine).slice(0, 80)}": ${hosts.unreadWords()}`, code: 'hosts-unread' });   // the B-f276 remainder (H24): unknown, never «no machine here»
     const m = String(q.machine).toLowerCase();
     const list = (() => { try { return hosts.list(); } catch { return []; } })();
     const hit = list.find((h) => h.id === q.machine) || list.find((h) => String(h.name || '').toLowerCase() === m) || null;

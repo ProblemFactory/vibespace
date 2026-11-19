@@ -134,6 +134,10 @@ if (-not $NoCheck) {
   try { $checkOut = & $nodeExe "$current\vibespace-device.js" --dial-check $Dial 2>&1; $checkRc = $LASTEXITCODE }
   finally { Remove-Item Env:VIBESPACE_DIAL_TOKEN -ErrorAction SilentlyContinue }
   $checkOut | ForEach-Object { Write-Host "  $_" }
+  if ($checkRc -eq 16) {
+    Write-Host "... nothing was installed yet - ${dhost} cannot read its paired machines right now; run this same command again in a few minutes"
+    exit $checkRc
+  }
   if ($checkRc -ne 0) {
     Write-Host "x nothing was installed - the device cannot dial ${dhost}: $(@($checkOut)[0])"
     exit $checkRc

@@ -16,6 +16,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const SR = require('./store-read.js'); // remainder of B-f276 (bl-jobs): a read that FAILED is no answer — held, never written over
+const READ_MS = 60_000;   // the B-f276 remainder's cure: a read again that does not answer in this long is let go (the next try reads afresh)
 const crypto = require('crypto');
 const SOCK = require('./sock-path.js');   // B-3767 unit 2: THE folder verdict (ensureSocketDir) for the ssh control folder
 const { REMOTE_PRELUDE, nodeFinder } = require('./remote-shell.js');
@@ -365,10 +366,11 @@ class HostManager {
   }
   /** the words a person reads while hosts.json is held (the machines list, a refused change) */
   unreadWords() {
-    return this._unread ? `hosts.json in VibeSpace's data folder could not be read (${this._unread.code}); VibeSpace reads it again every few minutes. No machine is lost: nothing is written over it, and changes to machines wait until it reads.` : null;
+    // its read r2 (S5): while a read of it has not answered, the words say so (no new read starts then)
+    return this._unread ? `hosts.json in VibeSpace's data folder could not be read (${this._unread.code}); ${this._hungP ? 'a read of it is still waiting for the storage to answer, and its answer is used the moment it comes' : 'VibeSpace reads it again every few minutes'}. No machine is lost: nothing is written over it, and changes to machines wait until it reads.` : null;
   }
   _refuseIfUnread(what) {
-    if (this._unread) throw Object.assign(new Error(`${what}: ${this.unreadWords()}`), { code: 'hosts-unread', status: 503 });
+    if (this._unread) throw this._heldError(what);
   }
   _unreadRetrySoon() {
     if (this._unreadT || this._unreadStopped) return;
@@ -382,9 +384,28 @@ class HostManager {
     if (!this._unread) return;
     this._unreadRetrySoon();   // its read r1 (M2): the next try is armed FIRST (jobs.js's order) — a try that meets one in flight, or a read that fails, never ends the tries
     if (this._unreadP) return;
+    // its read S3: ONE let-go read at most — a read that hangs keeps its thread of the pool (32), so a new read per try ran it dry in
+    // about 2.5 h (every async fs / dns / crypto of the hub stalled): no new read until the let-go one answers (the tries stay armed)
+    if (this._hungP) { if (!this._hungSaid) { this._hungSaid = true; console.warn('[hosts] hosts.json: the read let go still hangs — no new read is started until it answers'); } return; }
     const mine = this._unreadSeq = (this._unreadSeq || 0) + 1;   // its read r2 (X2): only the NEWEST try may lift the hold — r3 (Y3): counted once a try READS (a meeting makes no read stale)
     const p = this._unreadP = fs.promises.readFile(this._file, 'utf-8').then((text) => ({ text }), (error) => ({ error }));
-    const read = await p; this._unreadP = null;
+    // the cure (主开发 23:20Z): the read has a DEADLINE — past READ_MS a read that has not answered is SAID (once) and let go as the
+    // try's own: its answer is JUDGED WHEN IT COMES (its read r2, S5 — a dropped late answer kept slow storage held for ever), and no
+    // second read starts while it hangs (its read r1, S3: one thread of the pool, never one per try)
+    let tm = null;
+    const read = await Promise.race([p, new Promise((r) => { tm = setTimeout(() => r({ slow: true }), this._readMs || READ_MS); tm.unref?.(); })]);
+    clearTimeout(tm);
+    if (this._unreadP === p) this._unreadP = null;
+    if (read && read.slow) {
+      this._hungP = p;
+      p.then((late) => { if (this._hungP !== p) return; this._hungP = null; this._hungSaid = false; if (this._unread && !this._unreadStopped && mine === this._unreadSeq) this._unreadJudge(late, mine).catch((e) => console.warn('[hosts] hosts.json: a late answer could not be judged:', e && e.message)); });
+      if (!this._slowSaid) { this._slowSaid = true; console.warn(`[hosts] hosts.json: a read again has not answered in ${(this._readMs || READ_MS) / 1000} s — its answer is used when it comes; no second read starts meanwhile`); }
+      return;
+    }
+    return this._unreadJudge(read, mine);
+  }
+  /** one read's answer while held (a try's, or a late one's) — lifts the hold, or keeps it */
+  async _unreadJudge(read, mine) {
     if (!this._unread) return;
     let a = SR.storeAnswer(read, { valid: (v) => !!v && typeof v === 'object' && !Array.isArray(v) });
     if (a.state === 'unreadable') { this._unread.code = a.code; this._unreadMissingAt = 0; return; }
@@ -440,21 +461,33 @@ class HostManager {
     const dh = (h) => { const v = h.deviceId ? this.dialHealthOf?.(h) : null; return v ? { dialHealth: v } : {}; };
     // lane device-node-version: `runtime` = the node its agent runs on, judged against the floor table (src/device-runtime.js)
     const DR = require('./device-runtime.js');
-    return this._state.hosts.map(h => (h.transport === 'dial'
+    const out = this._state.hosts.map(h => (h.transport === 'dial'
       ? { ...h, dialTokenHash: undefined, online: !!this.dialOnline?.(h.deviceId), ...up(h), ...dh(h), runtime: DR.runtimeRow(h) }
       // graduated ssh machine (B-6640): expose the upgrade + live-dial state
       // (hash stays redacted like pure-dial records)
       : { ...h, dialTokenHash: undefined, ...(h.deviceId ? { graduated: true, dialLive: !!this.dialOnline?.(h.deviceId) } : {}), ...up(h), ...dh(h), runtime: DR.runtimeRow(h) }));
+    // the B-f276 remainder's cure (主开发 23:20Z, (a)): a HELD list is empty because it is UNREAD — it carries the hold's words (`held`,
+    // not enumerated: the JSON is unchanged); every caller is a row of scripts/test-hosts-held-census.mjs
+    if (this._unread) Object.defineProperty(out, 'held', { value: this.unreadWords() });
+    return out;
   }
 
   get(id) {
+    // the B-f276 remainder's cure (主开发 23:20Z, (a) ONE reply while held): a HELD store answers a lookup «unknown, by name» —
+    // never «not found» (ten callers read the held, empty list as a machine GONE: test-hosts-held-census holds every caller's row)
+    if (this._unread) throw this._heldError();
     const h = this._state.hosts.find(x => x.id === id);
     if (!h) throw new Error('host not found');
     return h;
   }
+  /** (a) «is the store held?» — the one question every caller of a lookup asks before reading an absence as «gone» */
+  held() { return !!this._unread; }
+  _heldError(what) { return Object.assign(new Error(what ? `${what}: ${this.unreadWords()}` : this.unreadWords()), { code: 'hosts-unread', status: 503 }); }
 
   /** The host record a dialed-in device belongs to (deviceId = wire identity). */
   findByDeviceId(deviceId) {
+    // (a) «is it paired?» while HELD answers «unknown, by name» (hosts-unread) — never «not paired» (null read as «unpaired»)
+    if (this._unread) throw this._heldError();
     // Pure-dial first (existing behavior), else a GRADUATED ssh record
     // (B-6640: an ssh machine that also dials out carries deviceId +
     // dialTokenHash on its ssh record — dial-in auth and the dial-in hooks
@@ -3001,7 +3034,11 @@ class HostManager {
    *              use; absence of evidence is not evidence of absence).
    *  Deliberately never probes — this runs inside estimator/pool decisions. */
   linkState(id) {
-    const h = this.get(id);
+    // the B-f276 remainder's cure (主开发 23:20Z, its audit H3): while HELD no machine can be reached (every dial is held off, every
+    // connect meets the hold) — 'offline', so the pool's dark-source defense stays ON (get threw here, and usage-pool-engine's
+    // darkSources swallowed it: an EMPTY dark list while remote machines kept spending)
+    if (this._unread) return 'offline';
+    let h; try { h = this.get(id); } catch { return 'unknown'; }   // ALSO CURED: a removed machine's id threw the same way (one removed source emptied the whole list)
     if (!h) return 'unknown';
     try {
       if (h.transport === 'dial' || h.deviceId) {
@@ -3018,7 +3055,9 @@ class HostManager {
   /** The single owning host of a conversation per the location index, or
    *  null (unknown/ambiguous). Claims from since-removed hosts are ignored. */
   conversationOwner(sessionId) {
-    try { return this.convIndex.ownerHost(sessionId, (hid) => !!this.get(hid)); } catch { return null; }
+    // the B-f276 remainder's cure: a HELD list keeps every claim («unknown», never «gone»); a removed machine's claim is FILTERED
+    // (get threw «host not found» inside the filter, so one removed machine's old claim made the whole answer null)
+    try { return this.convIndex.ownerHost(sessionId, (hid) => { if (this._unread) return true; try { return !!this.get(hid); } catch { return false; } }); } catch { return null; }
   }
 
   /** B-16d7: THE REAL FOLDERS OF A MACHINE'S CONVERSATIONS, as THAT machine resolved them (discovery's R fact → a row's

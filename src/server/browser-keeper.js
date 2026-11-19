@@ -347,6 +347,9 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   // are injectable for the gate; unwired ⇒ every remote act refuses by name.
   const acc = () => access || require('./browser-access.js').access();
   const knownHost = (h) => (typeof hostKnown === 'function' ? !!hostKnown(h) : acc().hostKnown(h));
+  // the B-f276 remainder's cure (主开发 23:20Z): a profile kept on a paired machine while the machines cannot be read is UNAVAILABLE by name —
+  // never «not paired any more: pair it again» (a person who followed it minted a new pairing and ended the device's live link)
+  const machinesHeld = () => { try { const a = acc(); return typeof a.held === 'function' ? a.held() : null; } catch { return null; } };
   /** A record whose process is NOT on this machine (a paired host's daemon)
    *  or is nobody's to signal (an external browser over CDP): never pid-
    *  checked, never sampled, never signalled here. */
@@ -1262,6 +1265,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     // P4: the ROW said a paired machine may run it; whether the id names one
     // is this instance's host registry's answer (refused by name, never a
     // silent local fallback)
+    if (v.value.host && machinesHeld()) throw namedError('host_unavailable', `the paired machines cannot be read right now — ${machinesHeld()}`);
     if (v.value.host && !knownHost(v.value.host)) throw namedError('unsupported-host', `${JSON.stringify(v.value.host)} is not a paired machine on this instance — pair it first (Remote → Pair a device), or leave host empty for this machine`);
     const id = mintedId || mintId(); // lane browser-profile-clone: the clone mints the id (its directory's name) before the copy
     // The directory is OURS only for a row that owns one, on THIS machine: a
@@ -5494,6 +5498,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       const h0 = p ? humans.get(p.id) || null : null;
       const running = Object.values(reg.browsers).filter(B.isLiveBrowser).length + othersNow().length;
       // lane remote-profile-start: a paired machine's profile is browsed through the same start() (`hostKnown`: refused only for a machine no longer paired)
+      if (p && p.host && machinesHeld()) throw namedError('host_unavailable', `the paired machines cannot be read right now — ${machinesHeld()}`);   // the B-f276 remainder's cure: never «pair it again»
       const v = HM.browseYourselfVerdict({ profile: p ? { ...p, ephemeral: isEph(p) } : null, row: p ? rowOf(p.provider) : null, hostKnown: p && p.host ? knownHost(p.host) : true, control: p && !isEph(p) && !p.host ? control(p.provider, { host: null }) : null,
         switching: !!p && switching.has(p.id), closed: p ? closedRefusalOf(p.id) : null, live: B.isLiveBrowser(rec), human: h0 ? { state: h0.state, alive: h0.state === 'driving' && !!(h0.input && h0.input.takenBy) && viewerAliveOf(h0.input.takenBy.viewerId) } : null,
         running, cap: machineCap() });
@@ -8565,7 +8570,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     setFor, tell, resolveFor, newChild, dropChild, jobHandleFor, findJobHandle, jobOf, releaseJob, audit, adoptScratch, auditFile: path.join(dataDir, AUDIT_FILE),
     reconcile, adoptAll, boot, tick, startTimer, shutdown, orphanCensus,
     // P4 (§7.3): the paired-machine question the routes ask before a create is judged
-    hostKnown: knownHost, isLocalRec, probeCdp, desktopConsent,
+    hostKnown: knownHost, machinesHeld, isLocalRec, probeCdp, desktopConsent,
     // P4 second half (§7.4 / §7.5): the switch, its view, the chip, seats, the agent's claims, per-site memory, the lease's last URL
     switchBackend, switcherView, chipFor, choicesFor: (id) => { const p = profile(id); return p && !isEph(p) ? backendFactFor(p).choices : []; }, seatStates, runningOf, blocked, blockedFor, clearBlocked, addSiteHint, dropSiteHint, siteHints, noteLeaseUrl, readDirMajor, keys: () => keysOf(),
     onProposal, proposalEntry, stepProposal, noteProposal, proposalsFor, proposalOthers, openInLease,

@@ -1,3 +1,4 @@
+const i18nKey = (k) => k;   // marks a dictionary key (the i18n check reads it) — the B-f276 remainder's held refusals
 /**
  * WS 'create' handler (拆分P2): the session-CREATE case family — new session /
  * resume / fork, local + remote (ssh/dial/daemon pipe), account resolution,
@@ -376,6 +377,13 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             try {
               const local = !!SP.isLocalConversation(data.resumeId); // the descriptor's answer (claude: ~/.claude/projects/*/<id>.jsonl)
               if (!local) {
+                // the B-f276 remainder's cure (主开发 23:20Z, its audit H4): while hosts.json is HELD no paired machine can be named — the
+                // conversation is not on this machine, so it is NOT resumed here (the cache scan's get threw into a bare catch and the
+                // resume ran locally: «No conversation found», or a second conversation forked on this machine); refused by name
+                if (hosts.held && hosts.held()) {
+                  ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, code: 'hosts-unread', message: `This conversation is not on this machine (a paired machine may hold it), and ${hosts.unreadWords()}`, i18n: { key: i18nKey('VibeSpace cannot read its paired machines right now — nothing was started. Open it again in a few minutes (it reads them again by itself).') } }));
+                  return;
+                }
                 const cacheRoot = path.join(__dirname, '..', 'data', 'remote-jsonl');
                 const cacheRel = harness.store.remoteFind(data.resumeId).cacheRel; // where hosts.fetchTranscript caches this harness's transcript
                 const owners = [];
@@ -1504,7 +1512,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           if (data.hostId && hosts && sessionMode === 'terminal') {
             let h;
             try { h = hosts.get(data.hostId); }
-            catch { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: 'Unknown host: ' + data.hostId })); return; } // the request named (lane phone-resume-keeps-layout r4 N2: a bare error ended no create on the page)
+            catch (e) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, ...(e && e.code === 'hosts-unread' ? { code: e.code, message: e.message, i18n: { key: i18nKey('VibeSpace cannot read its paired machines right now — nothing was started. Open it again in a few minutes (it reads them again by itself).') } } : { message: 'Unknown host: ' + data.hostId }) })); return; } // the request named (lane phone-resume-keeps-layout r4 N2: a bare error ended no create on the page)
             const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
             // B-69ec THE REMOTE TWIN: a CLI's terminal runs the program THAT machine's login shell found (src/server/remote-cli.js);
             // it holds none ⇒ refused by name before anything starts; it could not be asked ⇒ the prelude decides, as before
@@ -1533,7 +1541,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // wrapper's appended flags land as harmless sh -lc positionals.
             let h;
             try { h = hosts.get(data.hostId); }
-            catch { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: 'Unknown host: ' + data.hostId })); return; } // the request named (lane phone-resume-keeps-layout r4 N2: a bare error ended no create on the page)
+            catch (e) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, ...(e && e.code === 'hosts-unread' ? { code: e.code, message: e.message, i18n: { key: i18nKey('VibeSpace cannot read its paired machines right now — nothing was started. Open it again in a few minutes (it reads them again by itself).') } } : { message: 'Unknown host: ' + data.hostId }) })); return; } // the request named (lane phone-resume-keeps-layout r4 N2: a bare error ended no create on the page)
             const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
             // ── B-4058 writer sweep script, SHARED by the ssh AND dial resume
             // paths (audit #11/#47 — it was ssh-only, so a device-side orphan

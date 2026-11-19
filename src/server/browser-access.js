@@ -44,7 +44,7 @@ function access() {
   return installed || {
     call: async () => { const e = new Error('the browser access layer is not wired on this instance'); e.code = 'host_unavailable'; throw e; },
     forwardCdp: async () => { const e = new Error('the browser access layer is not wired on this instance'); e.code = 'host_unavailable'; throw e; },
-    hostKnown: () => false, closeForward: () => false, forwards: () => [],
+    hostKnown: () => false, held: () => null, closeForward: () => false, forwards: () => [],
   };
 }
 
@@ -156,7 +156,9 @@ function create({ hosts = null, env = () => ({}), homeDir = undefined, local = n
   function listForwards() { return [...forwards.values()].map((f) => ({ hostId: f.hostId, remotePort: f.remotePort, localPort: f.localPort, connections: f.sockets.size, refs: f.refs })); }
   function shutdown() { for (const k of [...forwards.keys()]) closeForward(k, { force: true }); }
 
-  const layer = { call, forwardCdp, closeForward, forwards: listForwards, hostKnown, isLocal, shutdown, _local: localOf };
+  /** the B-f276 remainder's cure: the paired machines cannot be read right now → the hold's words (a held list is never «not paired») */
+  const held = () => (hosts && typeof hosts.unreadWords === 'function' && hosts.unreadWords()) || null;
+  const layer = { call, forwardCdp, closeForward, forwards: listForwards, hostKnown, held, isLocal, shutdown, _local: localOf };
   if (install) installed = layer;
   return layer;
 }

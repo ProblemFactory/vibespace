@@ -1470,7 +1470,9 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
       const hosts = getHosts?.();
       const idx = getConvIndex?.();
       if (!hosts || !idx) return null;
-      const hid = idx.ownerHost(cid, (id) => { try { return !!hosts.get(id); } catch { return false; } });
+      // the B-f276 remainder's cure (主开发 23:20Z): a HELD machines list answers «unknown», never «gone» — the claim stands, the
+      // remote rung meets the hold by name and the stash keeps the message (it was told «not running» on the local rung's miss)
+      const hid = idx.ownerHost(cid, (id) => { try { return !!hosts.get(id); } catch (e) { return !!(e && e.code === 'hosts-unread'); } });
       return hid && hid !== 'local' ? hid : null;
     } catch { return null; }
   }

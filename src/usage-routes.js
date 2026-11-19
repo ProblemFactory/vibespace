@@ -989,7 +989,7 @@ app.post('/api/usage/refresh', async (req, res) => {
       if (!/^sub-[\w-]{1,40}$/.test(aid)) return res.status(400).json({ error: 'bad account id' });
       const tkey = 'host:' + hid + ':' + aid;
       if (Date.now() - (_onDemandUsageAt[tkey] || 0) < 60000) return res.json({ throttled: true });
-      let hMeta2; try { hMeta2 = hosts.get(hid); } catch { return res.status(404).json({ error: 'unknown host' }); }
+      let hMeta2; try { hMeta2 = hosts.get(hid); } catch (e) { return e && e.code === 'hosts-unread' ? res.status(503).json({ error: e.message, code: e.code }) : res.status(404).json({ error: 'unknown host' }); }   // the B-f276 remainder (H20)
       const acctMeta2 = (accounts.list().accounts || []).find((x) => x.id === aid);
       if (!acctMeta2) return res.status(404).json({ error: 'unknown account' });
       // Throttle is stamped only AFTER a probe actually reached the host
@@ -1046,7 +1046,7 @@ app.post('/api/usage/refresh', async (req, res) => {
       return;
     }
     if (Date.now() - (_onDemandUsageAt['host:' + hid] || 0) < 60000) return res.json({ throttled: true });
-    let hMeta; try { hMeta = hosts.get(hid); } catch { return res.status(404).json({ error: 'unknown host' }); }
+    let hMeta; try { hMeta = hosts.get(hid); } catch (e) { return e && e.code === 'hosts-unread' ? res.status(503).json({ error: e.message, code: e.code }) : res.status(404).json({ error: 'unknown host' }); }   // the B-f276 remainder (H20): unknown, never «unknown host»
     const deviceLegG = async () => {
       const dm = await hosts.device(hid);
       // B-5e0d: as the held account's leg above. An agent older than the law, refused by the hub's own first look, is never

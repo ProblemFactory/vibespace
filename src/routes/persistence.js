@@ -1247,7 +1247,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
         vsPassword: !!auth?.enabled,
         claudeCreds: fs.existsSync(CLAUDE_CREDS),
         codexCreds: fs.existsSync(CODEX_CREDS),
-        hosts: (getHosts?.()?.list?.() || []).length,
+        hosts: (getHosts?.()?.list?.() || []).length, hostsUnread: (getHosts?.()?.held?.() && getHosts().unreadWords()) || null,   // the B-f276 remainder (H15): a held list is no «no hosts»
         mounts: (getMounts?.()?.list?.() || []).length,
         accounts: (getAccounts?.()?.list?.()?.accounts || []).length,
         secondPassword: (() => { const g = req.app && req.app.locals ? req.app.locals.vaultGate : null; return !!g && g.state() !== 'not_set_up'; })(), // lane vault-contents-window r2: the dialog asks for it

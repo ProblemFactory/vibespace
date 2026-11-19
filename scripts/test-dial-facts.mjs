@@ -24,6 +24,7 @@
 // (w) verify-r6 P1: a requested push downgraded to a rotation / pushed to another link ⇒ red.
 // (s) verify-r5 G1: the picker built on a mini DOM with r4 F3's line reverted checks the LOOPBACK row on a 127.0.0.1 server ⇒ red.
 // Run: node scripts/test-dial-facts.mjs
+import { anchored } from './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -319,6 +320,12 @@ console.log('③ dialFailureOf');
   eq(DF.dialFailureOf(R(401, 'something-new', '')).code, 'refused-unknown', 'an unknown refusal header ⇒ refused-unknown (closed set)');
   eq(DF.dialFailureOf(R(404, null, 'Not Found')).code, 'http-404', 'any other status ⇒ http-<status>');
   eq(DF.dialFailureOf(R(502, null, '')).code, 'http-502', '502 (a relay with no backend) ⇒ http-502');
+  // the B-f276 remainder's cure (主开发 23:20Z): the hub's HOLD (503 `hosts-unread` — it cannot read its paired machines) is a WAIT by name
+  const held = DF.dialFailureOf(R(503, null, JSON.stringify({ code: 'hosts-unread', error: 'this VibeSpace cannot read its paired machines right now and reads them again within minutes' })));
+  eq([held.code, held.status], ['held', 503], '503 + body code hosts-unread ⇒ held (a wait, not http-503)');
+  ok(/cannot read its paired machines/.test(held.detail), 'the hub\'s words ride the held detail', held.detail);
+  eq(DF.dialFailureOf(R(503, null, '')).code, 'http-503', 'a 503 WITHOUT the hold\'s mark (a relay, a proxy) stays http-503');
+  ok(/^dial-out waits — the hub cannot read its paired machines right now: /.test(DF.dialLogLine({ outcome: 'failed', code: 'held', detail: held.detail, attempt: 3, delay: 15000 })), 'the device\'s log line words the hold as a wait');
   eq(DF.dialFailureOf(E('ECONNRESET'), { up: true, upMs: 800 }).code, 'closed-before-hello', 'an upgrade that closed within 2 s ⇒ closed-before-hello');
   eq(DF.dialFailureOf(null, { up: true, upMs: 3 * 3600e3 }).code, 'lost', 'an upgrade that lived ≥ 2 s then closed ⇒ lost (the link\'s end)');
   const long = DF.dialFailureOf(E('EWHATEVER', 'x'.repeat(5000) + '\u0000\u0007'));
@@ -326,7 +333,7 @@ console.log('③ dialFailureOf');
   ok(!/vsdt_[a-f0-9]{8}/.test(DF.dialFailureOf(E('EWHATEVER', 'token vsdt_0123456789abcdef leaked')).detail), 'a token never rides a detail');
   const hostile = DF.dialFailureOf(R(401, 'token-mismatch', 'x'.repeat(10 * 1024)));
   ok(hostile.detail.length <= 200, 'a 10 KiB hostile body reduces to ≤ 200 chars (attack 20)');
-  ok(DF.DIAL_FAIL_CODES.includes('refused-token-mismatch') && DF.DIAL_FAIL_CODES.includes('refused-retired') && DF.DIAL_FAIL_CODES.length === 16, 'the closed code set (16 since B-4d71: refused-retired)');
+  ok(DF.DIAL_FAIL_CODES.includes('refused-token-mismatch') && DF.DIAL_FAIL_CODES.includes('refused-retired') && DF.DIAL_FAIL_CODES.includes('held') && DF.DIAL_FAIL_CODES.length === 17, 'the closed code set (16 since B-4d71: refused-retired; 17 since the B-f276 remainder: held)');
 }
 console.log('③ headers');
 {
@@ -393,8 +400,10 @@ console.log('⑤ dialCheckLines');
     [{ code: 'refused-token-mismatch', detail: 'the dial token does not match', host: 'h:1' }, 14, /generate a new command in the pairing dialog/],
     [{ code: 'refused-no-pairing', host: 'h:1' }, 14, /generate a new command/],
     [{ code: 'other', detail: 'weird', host: 'h:1' }, 15, /other: weird/],
+    [{ code: 'held', status: 503, detail: 'cannot read its paired machines', host: 'h:1' }, 16, /^dial-check waits — held: [^]*h:1 is a VibeSpace that cannot read its paired machines right now[^]*run this same command again in a few minutes/],
   ];
   for (const [inp, exit, re] of T) { const o = DF.dialCheckLines(inp); ok(o.exit === exit && re.test(o.lines.join('\n')), `${inp.ok ? 'ok' : inp.code} ⇒ exit ${exit}`, o); }
+  ok(!/not as a VibeSpace|pairing dialog/.test(DF.dialCheckLines({ code: 'held', status: 503, host: 'h:1' }).lines.join('\n')), 'the held check never says «not a VibeSpace» nor sends the person to the pairing dialog');
 }
 
 // ── THE row state ──
@@ -490,6 +499,7 @@ console.log('B9 duplicateDialVerdict (verify-r1: two daemons on one pairing) + t
   const f = DF.dialFailureOf(R);
   ok(f.code === 'refused-duplicate-device' && /pair this machine under its own name/.test(f.detail) && f.status === 401, 'the daemon classifies the 401 as refused-duplicate-device with the sentence', f);
   eq(DF.dialReasonOf('refused-duplicate-device'), 'duplicate-device', 'the row reason is duplicate-device');
+  eq([DF.dialReasonOf('held'), DF.DIAL_REASONS.includes('held')], ['held', true], 'the B-f276 remainder (its read N5): a dial met while the hub held its machines is the row reason «held», never «unknown»');
   ok(/^dial-out refused — duplicate-device: pair this machine/.test(DF.dialLogLine({ outcome: 'failed', code: f.code, detail: f.detail, attempt: 3, delay: 5000 })), 'the daemon log line names it');
   ok(DF.refusalSentence('duplicate-device', 'mac').length <= DF.DETAIL_MAX, 'the sentence for a short id fits the 200-char detail (the way out comes first so a cut never loses it)');
   const now = 1_000_000_000;
@@ -900,6 +910,14 @@ console.log('controls (patched copies)');
   ok(w !== src, '(w) the patch applies');
   const W6 = M.load('src/dial-facts.js', w, 'pushdowngrade');
   ok(!W6.inPlacePushVerdict({ existed: true, live: false, requested: true, shownSince: 20 }).refuse && W6.inPlacePushVerdict({ existed: true, live: true, requested: true, shownSince: 20, liveSince: 45 }).push === true, 'CONTROL (w): the pre-P1 verdict rotates a device the owner asked to keep and pushes to a link the sheet never showed — the P1 cells go red');
+  // (h) the B-f276 remainder's cure: a classifier without the hold's class — the hub's 503 reads http-503, the install check says
+  //     «not as a VibeSpace dial endpoint … the wrong port»
+  const hh = anchored(src, "    if (status === 503 && body && body.code === 'hosts-unread') return { code: 'held', detail: said || 'the hub cannot read its paired machines right now', status };\n", '', 'dial-facts-held-cut');
+  ok(hh !== src, '(h) the patch applies');
+  const HH = M.load('src/dial-facts.js', hh, 'noheld');
+  const R503 = Object.assign(new Error('x'), { code: 'UPGRADE_REFUSED', status: 503, refusal: null, body: JSON.stringify({ code: 'hosts-unread', error: 'cannot read its paired machines' }) });
+  const hf = HH.dialFailureOf(R503);
+  ok(hf.code === 'http-503' && /not as a VibeSpace dial endpoint/.test(HH.dialCheckLines({ ...hf, host: 'h:1' }).lines.join('\n')) && DF.dialFailureOf(R503).code === 'held', 'CONTROL (h): without the held class the hub\'s hold reads «not a VibeSpace dial endpoint» at the install check');
   // (e) B9: a verdict that never refuses (the pre-B9 rule: a newcomer always replaces)
   const e = src.replace("if (current.alive === true) return { action: 'refuse', why: 'duplicate' };", '');
   ok(e !== src, '(e) the patch applies');

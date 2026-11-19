@@ -86,7 +86,9 @@ const stripSlash = (p) => { const s = String(p || '').trim(); return s.length > 
    field said «在 host-dial-build-box-01 上找：» — the first paint ran before the list came, and the id was the fallback) */
 const HOSTS = { names: null, p: null };
 const hostNamesLoaded = () => {
-  if (!HOSTS.names && !HOSTS.p) HOSTS.p = fetchJson('/api/hosts').then((d) => { HOSTS.names = Object.fromEntries(((d && d.hosts) || []).map((h) => [h.id, h.name])); }, () => { HOSTS.p = null; });
+  // the B-f276 remainder's cure (met with ui-plain-words storage-4's helper): a HELD list (`unread`) is not kept as the names —
+  // asked again at a name 30 s later
+  if (!HOSTS.names && !HOSTS.p && !(Date.now() - (HOSTS.heldAt || 0) < 30000)) HOSTS.p = fetchJson('/api/hosts').then((d) => { if (d && d.unread) { HOSTS.heldAt = Date.now(); HOSTS.p = null; return; } HOSTS.names = Object.fromEntries(((d && d.hosts) || []).map((h) => [h.id, h.name])); }, () => { HOSTS.p = null; });
   return HOSTS.names ? Promise.resolve() : HOSTS.p || Promise.resolve();
 };
 const hostName = (hk) => {

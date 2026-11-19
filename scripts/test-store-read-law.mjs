@@ -51,7 +51,7 @@ console.log('§1 hosts.json (src/hosts.js) — every paired machine and its dial
     return { held, listedWhileHeld, refused: refused ? { code: refused.code, msg: String(refused.message) } : null, kept, back: H.list().map((h) => h.id).join(), words: H.unreadWords ? H.unreadWords() : null, cacheKept, ranWhileHeld, ranAfter: ran.length, lifts: lifts.length, imp: imp && { skipped: !!imp.skipped, threw: imp.threw || null, warned: (imp.warnings || []).some((w) => /^the machines were not imported — hosts\.json/.test(w)) } };
   };
   const r = await scene({ HostManager: require(path.join(ROOT, 'src/hosts.js')).HostManager }, 'hosts-held');
-  ok(r.held && r.listedWhileHeld === 0 && !!r.refused && r.refused.code === 'hosts-unread' && /^reshaping the machines store: hosts\.json in VibeSpace's data folder could not be read \((EACCES|EISDIR)\); VibeSpace reads it again every few minutes\. No machine is lost: nothing is written over it/.test(r.refused.msg), 'hosts.json whose read FAILS is HELD: no machine shown, a change refused BY NAME (what it was, why, that nothing is lost)', r);
+  ok(r.held && r.listedWhileHeld === 0 && !!r.refused && r.refused.code === 'hosts-unread' && /^reshaping the machines store: hosts\.json in VibeSpace's data folder could not be read \((EACCES|EISDIR)\); VibeSpace reads it again every few minutes\. No machine is lost: nothing is written over it/.test(r.refused.msg), 'hosts.json whose read FAILS is HELD: no machine shown, a change refused BY NAME (what it was, why, that nothing is lost)', r);   // stale-pins: kept (the sentence is composed now — the runtime words are the same while no read waits)
   ok(r.kept && r.back === 'h-0001' && r.words === null, 'nothing was written over hosts.json while held; read again, its machines are back whole and the hold lifts', r);
   ok(r.cacheKept && r.ranWhileHeld === 0 && r.ranAfter === 1 && r.lifts === 1 && r.imp && r.imp.skipped && r.imp.warned && !r.imp.threw,
     'its read r1: while held the boot\'s cache sweep deletes NO machine\'s transcript cache (M1), a sweep that needs the machines waits and runs once they read (S5), the lift redraws every page\'s list (S1), an import skips the machines with its words — never a throw (S3)', r);
@@ -155,6 +155,113 @@ console.log('§1 hosts.json (src/hosts.js) — every paired machine and its dial
   ok(HSRC.split(RACE).length === 2, 'control setup: the anchor of the control «only the newest try lifts» is in hosts.js');
   const rcx = await raceScene(MJ.load('src/hosts.js', HSRC.replace(RACE, '      /* MUTANT: no re-check after the copy */\n'), 'no-race-check'), 'hosts-race-mut');
   ok(!!rcx && (rcx.list === '' || !!rcx.olderErr), 'CONTROL (no re-check after the copy, in a copy): the older try loads the machines list EMPTY over the lifted one (or throws on a hold already gone)', rcx);
+  // the cure (主开发 23:20Z): the SAVE's own guard has its red control (it covers the timers' saves and the stop's flush — removing
+  // only it left every leg green)
+  {
+    const saveH = (Mod, name) => {
+      const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
+      const F = path.join(d, 'hosts.json'); plant(F, body);
+      const H = new Mod.HostManager({ dataDir: d });
+      H._state.hosts.push({ id: 'h-x', name: 'x', transport: 'ssh', host: 'x.invalid', user: 'u' });
+      H._save();
+      const kept = bodyOf(F) === (asRoot ? '(a folder)' : body);
+      clearTimeout(H._unreadT); H._unreadT = null; if (!asRoot) { try { fs.chmodSync(F, 0o644); } catch { } }
+      return kept;
+    };
+    const SAVEH = "    if (this._unread) { if (!this._unreadSaveSaid) { this._unreadSaveSaid = true; console.warn('[hosts] a hosts.json write was refused: the file could not be read, and nothing is written over it until it reads'); } return false; }\n";
+    ok(HSRC.split(SAVEH).length === 2, 'control setup: the anchor of the control «the save\'s guard» is in hosts.js');
+    const k = saveH({ HostManager: require(path.join(ROOT, 'src/hosts.js')).HostManager }, 'hosts-save-guard');
+    const kx = saveH(MJ.load('src/hosts.js', HSRC.replace(SAVEH, '    /* MUTANT: no save guard */\n'), 'hosts-no-save-guard'), 'hosts-save-guard-mut');
+    ok(k && (asRoot || !kx), 'the save itself refuses while held (a timer\'s save, the stop\'s flush); CONTROL (only that guard removed, in a copy): the save WRITES OVER the held file', { k, kx });
+  }
+  // the cure: the lift re-judges reach ONLY for what it read — a read with machines does, an empty lift (the file gone) does not
+  {
+    const reach = async (Mod, name, gone) => {
+      const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
+      const F = path.join(d, 'hosts.json'); plant(F, body);
+      const H = new Mod.HostManager({ dataDir: d }); let n = 0; H.onReachChange = () => { n++; };
+      if (gone) { if (asRoot) fs.rmdirSync(F); else fs.rmSync(F, { force: true }); await H._unreadRetry(); await H._unreadRetry(); }
+      else { unplant(F, body); await H._unreadRetry(); }
+      clearTimeout(H._unreadT); H._unreadT = null; return { lifted: !H.unreadWords(), n };
+    };
+    const RJ = "    if (a.state === 'data') this._reachChanged('hosts.json read');";
+    ok(HSRC.split(RJ).length === 2, 'control setup: the anchor of the control «reach only for what was read» is in hosts.js');
+    const withData = await reach({ HostManager: require(path.join(ROOT, 'src/hosts.js')).HostManager }, 'hosts-reach-data', false);
+    const empty = await reach({ HostManager: require(path.join(ROOT, 'src/hosts.js')).HostManager }, 'hosts-reach-empty', true);
+    const emptyX = await reach(MJ.load('src/hosts.js', HSRC.replace(RJ, "    this._reachChanged('hosts.json read');   /* MUTANT: every lift re-judges */"), 'hosts-reach-every'), 'hosts-reach-empty-mut', true);
+    ok(withData.lifted && withData.n === 1 && empty.lifted && empty.n === 0 && emptyX.lifted && emptyX.n === 1, 'the lift re-judges reach for the machines it READ (once) and never for an empty lift (a prune over it cleared every exit list); CONTROL (every lift re-judges, in a copy): the empty lift re-judges', { withData, empty, emptyX });
+  }
+  // the cure: the read again has a DEADLINE — a read that has not answered is said and let go as the try's own; ONE read at most
+  // (its read S3: each hung read holds a thread of the pool) — no second read while it hangs; and its read r2 (S5): its answer is
+  // JUDGED WHEN IT COMES (a dropped late answer kept slow storage held for ever), the words saying a read waits meanwhile
+  {
+    const HOLDS = { prf: fs.promises.readFile };
+    const deadlineScene = async (Mod, name) => {
+      const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
+      const F = path.join(d, 'hosts.json'); plant(F, body);
+      const H = new Mod.HostManager({ dataDir: d }); H._readMs = 30;
+      let calls = 0, release = null;
+      const hung = new Promise((r) => { release = r; });
+      fs.promises.readFile = function (f, ...a) { if (String(f) === F) { calls++; return calls === 1 ? hung : HOLDS.prf.call(this, f, ...a); } return HOLDS.prf.call(this, f, ...a); };
+      const keep = setInterval(() => { }, 1000);   // the deadline's timer is unref'd (the hub's own loop keeps it): the suite keeps the loop up
+      let out = null;
+      try {
+        await H._unreadRetry();   // its read hangs: said and let go at the deadline
+        const afterHung = { inFlight: !!H._unreadP, held: !!H.unreadWords(), words: String(H.unreadWords() || '') };
+        await H._unreadRetry();   // the read still hangs: no second read
+        const whileHung = calls;
+        release(body); for (let k = 0; k < 6; k++) await new Promise((r) => setImmediate(r));   // the storage answers — late
+        out = { afterHung, whileHung, calls, lifted: !H.unreadWords(), list: H.list().map((h) => h.id).join() };
+      } finally { fs.promises.readFile = HOLDS.prf; clearInterval(keep); clearTimeout(H._unreadT); H._unreadT = null; unplant(path.join(d, 'hosts.json'), body); }
+      return out;
+    };
+    const back = await deadlineScene(require(path.join(ROOT, 'src/hosts.js')), 'hosts-deadline');
+    ok(!!back && back.afterHung.held && !back.afterHung.inFlight && /a read of it is still waiting/.test(back.afterHung.words) && back.whileHung === 1 && back.calls === 1 && back.lifted && back.list === 'h-0001',
+      'a read again that hangs is said and let go at its deadline (the words say a read waits), no second read starts while it hangs (one thread of the pool), and its LATE answer lifts the hold the moment it comes', back);
+    const LATE = "if (this._unread && !this._unreadStopped && mine === this._unreadSeq) this._unreadJudge(late, mine)", CAP = "    if (this._hungP) { if (!this._hungSaid) {";
+    ok(HSRC.split(LATE).length === 2 && HSRC.split(CAP).length === 2, 'control setup: the anchors of the controls «the late answer judged» and «one read at most» are in hosts.js');
+    const backL = await deadlineScene(MJ.load('src/hosts.js', HSRC.replace(LATE, 'if (false) this._unreadJudge(late, mine)'), 'hosts-late-dropped'), 'hosts-deadline-late');
+    ok(!!backL && !backL.lifted && backL.calls === 1, 'CONTROL (the late answer dropped, in a copy): the storage answered, and the hold stands — slow storage is held for ever', backL);
+    const capLine = HSRC.split('\n').find((l) => l.startsWith(CAP));
+    const backC = await deadlineScene(MJ.load('src/hosts.js', HSRC.replace(capLine + '\n', ''), 'hosts-no-cap'), 'hosts-deadline-cap');
+    ok(!!backC && backC.whileHung === 2, 'CONTROL (the one-read cap cut, in a copy): each try while the first read hangs starts ANOTHER read (a thread of the pool each)', backC);
+  }
+  // the cure (主开发 23:20Z): the device-upgrade watch files no «rerun its install command» while the machines are held — the
+  // device's dials are answered «wait» there (its silence is the hub's)
+  {
+    const UW = fs.readFileSync(path.join(ROOT, 'src/server/device-upgrade-watch.js'), 'utf8'), HG = '    try { if (held()) { heldUntil = now(); return false; } } catch { }\n';
+    ok(UW.split(HG).length === 2, 'control setup: the anchor of the control «the watch judges nothing while held» is in device-upgrade-watch.js');
+    const watch = (Mod, name, isHeld) => {
+      const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
+      let t = 1_000_000; const filed = [];
+      const W = Mod.create({ dataDir: d, userTodos: { add: (k, it) => { filed.push(it); return { id: 'it-' + filed.length, text: it.text }; } }, now: () => t, tickMs: 0, held: () => isHeld });
+      W.begun({ hostKey: 'dial:dev-0001', machine: 'build box', from: '1.0.0', to: '1.0.1' });
+      t += Mod.GONE_AFTER_MS + 1000;
+      const r = W.sweep(); try { W.stop && W.stop(); } catch { }
+      return { r, filed: filed.length };
+    };
+    const MW = require(path.join(ROOT, 'src/server/device-upgrade-watch.js'));
+    const h = watch(MW, 'upw-held', true), f = watch(MW, 'upw-free', false);
+    const hx = watch(MJ.load('src/server/device-upgrade-watch.js', UW.replace(HG, '    /* MUTANT: judged while held */\n'), 'upw-no-held'), 'upw-held-mut', true);
+    ok(h.filed === 0 && f.filed === 1 && hx.filed === 1, 'the device-upgrade watch files NOTHING while the machines are held (a silent device after its upgrade began is judged after the read) and files as before otherwise; CONTROL (judged while held, in a copy): «rerun its install command» filed', { h, f, hx });
+    // its read S2: the silence is counted from the hold's END — the first sweep after the read (the device has not re-dialled yet)
+    // files nothing; a device still silent a full window after the read is told
+    const lift = (Mod, name) => {
+      const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
+      let t = 1_000_000, isHeld = true; const filed = [];
+      const W = Mod.create({ dataDir: d, userTodos: { add: (k, it) => { filed.push(it); return { id: 'it-' + filed.length, text: it.text }; } }, now: () => t, tickMs: 0, held: () => isHeld });
+      W.begun({ hostKey: 'dial:dev-0002', machine: 'build box', from: '1.0.0', to: '1.0.1' });
+      t += Mod.GONE_AFTER_MS + 1000; W.sweep();   // held through the whole window
+      isHeld = false; t += 30_000; W.sweep(); const atLift = filed.length;   // the first sweep after the read
+      t += Mod.GONE_AFTER_MS; W.sweep(); const later = filed.length;          // still silent a full window after the read
+      try { W.stop && W.stop(); } catch { }
+      return { atLift, later };
+    };
+    const MAXH = 'now() - Math.max(Number(g.at || 0), heldUntil) < goneAfterMs';
+    ok(UW.split(MAXH).length === 2, 'control setup: the anchor of the control «silence from the hold\'s end» is in device-upgrade-watch.js');
+    const l = lift(MW, 'upw-lift'), lx = lift(MJ.load('src/server/device-upgrade-watch.js', UW.replace(MAXH, 'now() - Number(g.at || 0) < goneAfterMs'), 'upw-from-begin'), 'upw-lift-mut');   // stale-pins: kept (the control plants the release's text in a copy)
+    ok(l.atLift === 0 && l.later === 1 && lx.atLift === 1, 'its read S2: the first sweep after the read files nothing (the silence is counted from the hold\'s end) and a device silent a full window after it is told; CONTROL (counted from the upgrade\'s start, in a copy): the healthy device is told at the lift', { l, lx });
+  }
   // its read r3 (Y1): the hub-act asker's re-judgement (boot + every sweep) on a HELD list ends NOTHING — a stored standing Deny is
   // never rewritten to «ask-over» as «its machine is gone»
   {
