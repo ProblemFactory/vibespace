@@ -28,12 +28,13 @@ export function readingSource(source, { corroborated = undefined, t = (s) => s }
   switch (s) {
     case 'on-demand':
       return { key: 'panel', label: t('own /usage panel'), tip: t("Read by running Claude's own /usage for this account's credentials — the account names itself.") };
-    // B-ff9d: a /usage panel read on ANOTHER machine — for an account that machine holds (hid:aid), or for that machine's own
-    // login (B-87fd U3's 'on-demand-remote', said verbatim until here): never «own /usage panel»
+    // B-ff9d: a read made with ANOTHER machine's credentials — for an account that machine holds (hid:aid), or for that machine's
+    // own login ('on-demand-remote', said verbatim until here): never «own /usage panel». Each has two roads (src/usage-routes.js):
+    // the device agent reads it there, or — when the device does not answer — this hub reads it with the token read from there
     case 'on-demand-held':
-      return { key: 'remote-panel', label: t('/usage panel on the machine that holds it'), tip: t("Read for this account through the machine that holds it, with the credentials kept there — the account names itself.") };
+      return { key: 'remote-panel', label: t('read through the machine that holds it'), tip: t("Read with the credentials the machine that holds this account keeps for it — by that machine, or by this hub with them when that machine does not answer. The account names itself.") };
     case 'on-demand-remote':
-      return { key: 'remote-panel', label: t("/usage panel of that machine's own login"), tip: t("Read by running Claude's own /usage on that machine, for the login it signed in with.") };
+      return { key: 'remote-panel', label: t("that machine's own login"), tip: t("Read with the login that machine signed in with — by that machine, or by this hub with that login's token when the machine does not answer.") };
     case 'control':
       return { key: 'control', label: t('own session'), tip: t("A live session on this account's credentials answered a usage request.") };
     case 'passive':
