@@ -149,9 +149,10 @@ function preparedOf(grant, p) {
 const _facts = new WeakMap();      // ctx → its facts as the model last prepared them (the model answers them again while they are the same)
 const NO_GROUPS = Object.freeze([]);
 // THE TASK GROUPS STORE HELD UNREAD (lane bl-windows): while the hub cannot read task-groups.json every agent's groups are
-// UNKNOWN, never «in no group» (a row «All agents, except Task Group G» would admit G's members) — the grant model's ONE predicate
+// UNKNOWN, never «in no group» (a row «All agents, except Task Group G» would admit G's members) — a FACT the hub's principal
+// carries (`groupsUnreadable`, src/server/groups-hold.js); this pure judge reads only its arguments
 function factsFor(ctx) {
-  const held = ctx.groupsUnreadable === true || GM.groupsHeld();
+  const held = ctx.groupsUnreadable === true;
   const F = GM.prepareFacts({ conversationKey: String(ctx.id), groupIds: Array.isArray(ctx.groups) ? ctx.groups : NO_GROUPS, ...(held ? { groupsUnreadable: true } : {}) }, _facts.get(ctx));
   _facts.set(ctx, F);
   return F;

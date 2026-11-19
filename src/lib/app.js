@@ -1042,7 +1042,7 @@ class App {
       mkRow('layouts', t('Layouts & desktops'), t('{count} layout(s), {desktops} desktop(s), custom grids', { count: s.layouts.count, desktops: s.layouts.desktops })),
       mkRow('userState', t('Session metadata'), t('stars, renames, {groups} group(s), per-session configs', { groups: s.userState.groups })),
       mkRow('bookmarks', t('File bookmarks'), t('{count} bookmark(s)', { count: s.bookmarks.count })),
-      s.tasks?.unread ? mkRow('tasks', t('Task Groups'), t("Task Groups cannot be read right now — For you says why"), { disabled: true }) : mkRow('tasks', t('Task Groups'), t('{count} group(s) incl. backlogs & activity logs', { count: s.tasks?.count || 0 })),   // THE STORE HELD UNREAD: the hold, not «0 groups»; never ticked
+      s.tasks?.unread ? (() => { const row = document.createElement('div'); row.className = 'cfg-row cfg-row-held'; row.innerHTML = `<span class="cfg-row-text"><b>${escHtml(t('Task Groups'))}</b><span>${escHtml(t("Task Groups cannot be read right now, so this backup leaves them out — For you says why"))}</span></span>`; return row; })() : mkRow('tasks', t('Task Groups'), t('{count} group(s) incl. backlogs & activity logs', { count: s.tasks?.count || 0 })),   // THE STORE HELD UNREAD (lane bl-windows — the owner's rule: no greyed control with a hint): the hold as a LINE, no checkbox
       mkRow('pricing', t('Usage pricing table'), t('{count} model rate(s) / account discount(s)', { count: s.pricing?.count || 0 })),
       mkRow('clientPrefs', t('This browser’s preferences'), t('theme, font, language, usage-view choices')),
     );

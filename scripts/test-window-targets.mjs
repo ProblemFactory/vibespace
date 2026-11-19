@@ -1391,7 +1391,7 @@ console.log('§4 the engine over a fake keeper + the routes');
         ok(!!red, `control L${s0.line} (${s0.text} removed ⇒ ${s0.neuter === 'first' ? 'the rows decided before the await' : 'the unchecked lease'}): a race leg goes RED${red ? ` — "${red.slice(0, 90)}"` : ' — NO leg noticed: this site is unpinned'}`);
       }
       // L4 control: the pre-r2 fold (a throwing store read as "no groups")
-      const fold = srcE.replace("catch (e) { unreadable = true; log.warn?.(", "catch (e) { log.warn?.(");
+      const fold = srcE.replace("catch (e) { unreadable = true; if (!(e && e.code === 'TASK_GROUPS_UNREAD') || e.firstOfHold) log.warn?.(", "catch (e) { if (!(e && e.code === 'TASK_GROUPS_UNREAD') || e.firstOfHold) log.warn?.(");   // lane bl-windows: the anchor moved with the line (a held store logs once a hold)
       ok(fold !== srcE, 'control (L4): the patch applies (a store fault folded into "no groups")');
       const Mf = require(MUTW.write('src/server/window-targets-engine.js', fold, 'foldgroups'));
       const Ef = enginesOf(Mf, 'fold');

@@ -1034,6 +1034,11 @@ class JobManager {
         const verdict = this.viewVerdict(sub.conversationId, job, { fallback: as, parent });   // r7: the job IN HAND (a record that left the store is still judged — never a lookup's «owner»)
         if (!M.filterMatches(sub.filter, subPlain)) continue;
         if (verdict === 'refused' || verdict === 'gone') { this.d.log(`[jobs] ${job.id}: subscriber ${sub.conversationId} can no longer view it — not told (no message, no wake, no stash)`); continue; }
+        if (verdict === 'groups-unread') {   // THE STORE HELD UNREAD (lane bl-windows): its own kind and words — the store, never «not running»
+          this._stashNotif(sub.conversationId, job, subEv, 'held: the Task Groups store cannot be read — judged when it reads', { stampLast: false, held: { kind: 'groups-unread' }, mark: !M.ownerLineage(job, as) });
+          this.d.log(`[jobs] ${job.id}: subscriber ${sub.conversationId} — the Task Groups store cannot be read, its view is unknown: held for the drain (no wake), judged when the store reads`);
+          continue;
+        }
         if (verdict === 'unknown') {
           this._stashNotif(sub.conversationId, job, subEv, 'held: no live record proves its view — judged at the turn that would print it', { stampLast: false, held: { kind: 'not-running' }, mark: !M.ownerLineage(job, as) });
           this.d.log(`[jobs] ${job.id}: subscriber ${sub.conversationId} has no live record and the group store does not show it a member — held for the drain (no wake)`);
@@ -1171,6 +1176,7 @@ class JobManager {
       const verdict = this._retryVerdicts && this._retryVerdicts.get(entry.id);
       if (this._retryVerdicts) this._retryVerdicts.delete(entry.id);
       const why = extra.threw ? 'the delivery check failed — not delivered (withheld)'
+        : verdict === 'groups-unread' ? 'the Task Groups store cannot be read — held until it reads, judged then'
         : verdict === 'unknown' ? 'no live record proves its view — held for its next turn, judged there'
           : verdict === 'gone' ? 'nothing of the job remains — not delivered'
             : 'the subscriber can no longer view the job — not delivered';
@@ -1359,6 +1365,8 @@ class JobManager {
    *             ask; `fallback` = the caller as the subscription knows it decides the role there)
    *   'refused' a LIVE record that may not view the job
    *   'unknown' no live record and nothing proves view — the line is HELD; the drain judges it at the turn that would print it
+   *   'groups-unread' (lane bl-windows) the Task Groups store cannot be read and no role proves view without a group — HELD and
+   *             never printed until a verdict after the lift decides it (the wiring's viewerOf answers a view marked `held`)
    *   'gone'    a SUBSCRIBER's marked copy of a job of which nothing remains (no live record, no archive record — the archive
    *             record proves view as the pull reads it); an unmarked copy (the owner's, a lineage creator's) of such a job is owed
    *  `viewer` given (the drain's): that caller, or null for «no live record». The PUSH (`_notifyOwner`), the DRAIN
@@ -1375,15 +1383,14 @@ class JobManager {
     if (!v) return 'unknown';
     const role = M.addressedTo(rec, v, parent !== undefined ? parent : this._cronParentOf(rec));
     if (role) return role;
-    return v.live ? 'refused' : 'unknown';
+    return v.live ? 'refused' : v.held ? 'groups-unread' : 'unknown';   // lane bl-windows: a held view (the Task Groups store unreadable) no role proves — its OWN verdict
   }
   /** THE STORE HELD UNREAD (lane bl-windows): may the drain PRINT this line now — owed, or undecided with no record of the
    *  conversation (as before); while the Task Groups store is held (`viewer.held`, the wiring's viewerOf) an undecided line is
    *  KEPT, never printed: only a group could prove it, and the groups are unknown until the lift judges it */
   printableNow(cid, jobId, viewer = undefined, { sub = false } = {}) {
-    const v = viewer !== undefined ? viewer : typeof this.d.viewerOf === 'function' ? this.d.viewerOf(cid) : undefined;
-    const r = this.viewVerdict(cid, jobId, { viewer: v, sub });
-    return r === 'unknown' ? !(v && v.held) : r !== 'refused' && r !== 'gone';
+    const r = this.viewVerdict(cid, jobId, { viewer, sub });
+    return r !== 'refused' && r !== 'gone' && r !== 'groups-unread';
   }
   /** an owed verdict (either role) */
   static owed(verdict) { return verdict === 'owner' || verdict === 'subscriber'; }
@@ -1404,10 +1411,11 @@ class JobManager {
     if (!meta.subscriber) return true;
     const verdict = this.viewVerdict(cid, meta.jobId, { sub: !!meta.sub });
     if (JobManager.owed(verdict)) return true;   // r6: an owed copy leaves no memo (the ladder delivers or fells it — the memo is for a drop's journal line)
+    const heldView = verdict === 'groups-unread';   // THE STORE HELD UNREAD (lane bl-windows): the verdict names it
     (this._retryVerdicts || (this._retryVerdicts = new Map())).set(entry && entry.id, verdict);
-    if (verdict === 'unknown') {
+    if (verdict === 'unknown' || heldView) {
       const target = this.jobs.get(meta.jobId) || this.archivedById(meta.jobId) || { id: meta.jobId, name: meta.jobName || meta.jobId };
-      this._stashNotif(cid, target, { what: (meta.ev && meta.ev.what) || meta.jobName, at: (meta.ev && meta.ev.at) || (entry && entry.firstAt) }, 'held: no live record proves its view — judged at the turn that would print it', { stampLast: false, held: { kind: 'not-running' }, mark: !!meta.sub });
+      this._stashNotif(cid, target, { what: (meta.ev && meta.ev.what) || meta.jobName, at: (meta.ev && meta.ev.at) || (entry && entry.firstAt) }, heldView ? 'held: the Task Groups store cannot be read — judged when it reads' : 'held: no live record proves its view — judged at the turn that would print it', { stampLast: false, held: { kind: heldView ? 'groups-unread' : 'not-running' }, mark: !!meta.sub });
     }
     return false;
   }

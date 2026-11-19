@@ -198,6 +198,7 @@ export function heldText(digest, { t, cid = null } = {}) {
   else if (kind === 'off') why = tr('auto-notify is off for this conversation');
   else if (kind === 'wrapper-no-steer') why = tr('this session’s agent predates notification steering, so a delivery now would queue a billed turn; delivered with the conversation’s next prompt') + ' · ' + tr('Restart this session to receive notifications without a billed turn');
   else if (kind === 'not-running') why = tr('the conversation was not running; delivered when it next resumes');
+  else if (kind === 'groups-unread') why = tr("VibeSpace cannot read its Task Groups right now — these wait for the Task Groups store; judged at the conversation’s next turn once it reads");   // THE STORE HELD UNREAD (lane bl-windows): its own words on the strip
   else if (kind === 'retrying') why = tr('the agent did not accept it at once; posted again when its turn ends');
   else if (kind === 'not-reachable') why = tr('the agent did not accept it (busy or unreachable); delivered with the conversation’s next prompt or a hand-over');
   else why = tr('the conversation has no live inbox right now; delivered when it next resumes');

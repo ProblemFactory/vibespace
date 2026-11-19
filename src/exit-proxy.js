@@ -157,7 +157,7 @@ class ExitProxyManager {
     let groupIds = [], unreadable = false, unread = false;
     if (groups && typeof this.groupsOf === 'function') {
       try { const gs = this.groupsOf(s, sessionId) || []; groupIds = gs.map((g) => String(g && typeof g === 'object' ? g.id : g)); if (gs.unread) { unreadable = true; unread = true; } }
-      catch (e) { unreadable = true; this.log(`group membership unreadable for ${sessionId}: ${e.message}`); }
+      catch (e) { unreadable = true; if (!(e && e.code === 'TASK_GROUPS_UNREAD') || e.firstOfHold) this.log(`group membership unreadable for ${sessionId}: ${e.message}`); }   // a held store: one line a hold (lane bl-windows)
     }
     // lane grants-unify: the same keys in the grant model's ONE spelling (the conversation id; `webui:<id>` before it has one)
     const conversationKeys = keys.map(GM.keyFromSessionKey).filter(Boolean);

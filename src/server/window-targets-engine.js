@@ -345,7 +345,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   function ctxOf(facts) {
     const s = (facts && sessionsMap().get(facts.sessionId)) || (facts && facts.session) || {};
     let groupIds = [], unreadable = false;
-    if (typeof groupsOf === 'function') { try { const gs = groupsOf(s, facts.sessionId) || []; groupIds = gs.map((g) => String(g && typeof g === 'object' ? g.id : g)); if (gs.unread) unreadable = true; /* B-55dc: still being read ⇒ the lease is KEPT, a verb refused by name */ } catch (e) { unreadable = true; log.warn?.(`[window] group membership unreadable for ${facts.sessionId}: ${e.message}`); } }
+    if (typeof groupsOf === 'function') { try { const gs = groupsOf(s, facts.sessionId) || []; groupIds = gs.map((g) => String(g && typeof g === 'object' ? g.id : g)); if (gs.unread) unreadable = true; /* B-55dc: still being read ⇒ the lease is KEPT, a verb refused by name */ } catch (e) { unreadable = true; if (!(e && e.code === 'TASK_GROUPS_UNREAD') || e.firstOfHold) log.warn?.(`[window] group membership unreadable for ${facts.sessionId}: ${e.message}`); } }   // a held store: one line a hold (lane bl-windows)
     const sessionKeys = keysOf(s, facts.sessionId);
     return { sessionKeys, conversationKeys: sessionKeys.map(R.sessionKeyNow).filter(Boolean), groupIds, ...(unreadable ? { unreadable: true } : {}) };   // verify r6: a borrowed id is not a key · lane grants-unify: + the ONE spelling
   }

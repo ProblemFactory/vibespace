@@ -413,7 +413,7 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
     const hit = findSession(target || caller.conversationId);
     if (!hit) return { ok: false, code: 'not_found', why: 'no live conversation by that id', target: target || null };
     const [s, id] = hit;
-    const v = reach({ conversationId: idOf(s), webuiId: id, groups: groupsOfLive(s, id) });   // ONE rule: opener / self / the grant's reach (B-3190)
+    const v = reach({ conversationId: idOf(s), webuiId: id, groups: groupsOfLive(s, id), ...require('./groups-hold.js').fact() });   // + the hub's hold (lane bl-windows): a reach «… except G» never admits a target whose groups are unknown   // ONE rule: opener / self / the grant's reach (B-3190)
     if (!v || !v.ok) return { ok: false, code: (v && v.code) || 'not_granted', why: (v && v.why) || 'the key does not reach that conversation', target: s.name || target || null, ...(v && v.reach ? { reach: v.reach } : {}) };   // lane key-instance-scope: the refusal names the grant's reach
     return { ok: true, s, id };
   }
@@ -477,7 +477,7 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
       }
       const label = f.name || args.target;
       if (!f.sessionKey) return { ok: false, code: 'pending', why: 'the conversation has not reported its id yet — poll conversations.status, then archive', target: label };
-      const v = reach({ conversationId: f.conversationId, webuiId: f.id, groups: f.groups });
+      const v = reach({ conversationId: f.conversationId, webuiId: f.id, groups: f.groups, ...require('./groups-hold.js').fact() });
       if (!v || !v.ok) return { ok: false, code: (v && v.code) || 'not_granted', why: (v && v.why) || 'the key does not reach that conversation', target: label, ...(v.reach ? { reach: v.reach } : {}) };
       const asks = (asksOf(f.sessionKey) || []).map((i) => i && i.id).filter(Boolean);
       if (asks.length && !args.resolveAsks) return { ok: false, code: 'asks_open', why: `${asks.length} open For-you ask${asks.length === 1 ? '' : 's'} of that conversation (${asks.join(', ')}) — the owner answers them, or pass resolveAsks`, asks, target: label };

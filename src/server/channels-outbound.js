@@ -257,7 +257,7 @@ function create(engineCtx) {
     let live = null;
     try { live = (liveSessions() || []).find((x) => x && x.cid === String(d.id)) || null; } catch { live = null; }
     const groups = live ? (Array.isArray(live.groups) ? live.groups.slice() : []) : (Array.isArray(p.drafterGroups) ? p.drafterGroups.slice() : []);
-    return stillSees({ kind: 'agent', id: String(d.id), name: d.name || null, groups, msgLevelFor: () => 'none' }, p.adapterId, scopeConvOf(p));
+    return stillSees({ kind: 'agent', id: String(d.id), name: d.name || null, groups, ...(live ? require('./groups-hold.js').fact() : {}), msgLevelFor: () => 'none' }, p.adapterId, scopeConvOf(p));   // the hold rides only groups read NOW (a recorded list is not the store's)
   }
   /**
    * WHAT WAITS IN AN AGENT'S NEXT-TURN STASH IS RE-JUDGED WHEN IT IS READ (lane channel-threads verify r3, IDENTITY —
@@ -293,7 +293,7 @@ function create(engineCtx) {
       if (!M.has('live')) { let live = null; try { live = (liveSessions() || []).find((x) => x && x.cid === String(cid)) || null; } catch { live = null; } M.set('live', live); }
       const live = M.get('live');
       const groups = live ? (Array.isArray(live.groups) ? live.groups.slice() : []) : (Array.isArray(a.groups) ? a.groups.map(String) : []);
-      const ctx = { kind: 'agent', id: String(cid), name: null, groups, msgLevelFor: () => 'none' };
+      const ctx = { kind: 'agent', id: String(cid), name: null, groups, ...(live ? require('./groups-hold.js').fact() : {}), msgLevelFor: () => 'none' };   // the hold rides only groups read NOW
       const gk = groups.join('\u0000');
       const seesKey = (adapterId, convId) => {
         const mk = `${gk}\u0001${adapterId}\u0001${convId === null ? '' : convId}`;

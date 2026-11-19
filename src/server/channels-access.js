@@ -371,9 +371,9 @@ function create(engineCtx) {
     };
     return (cid, groups = []) => {
       if (!root || !cid) return false;
-      if (root.kind !== 'agent' && !CG.wakeAdmits(res, root, { cid, groups })) return false;
+      if (root.kind !== 'agent' && !CG.wakeAdmits(res, root, { cid, groups, ...require('./groups-hold.js').fact() })) return false;
       if (!reachAsked()) return true;
-      try { return ACL.canSee(reachFor({ kind: 'agent', id: String(cid), name: null, groups, msgLevelFor: () => 'none' }, rk, en).level); } catch { return false; }
+      try { return ACL.canSee(reachFor({ kind: 'agent', id: String(cid), name: null, groups, ...require('./groups-hold.js').fact(), msgLevelFor: () => 'none' }, rk, en).level); } catch { return false; }
     };
   }
   /** A grain's stored watcher for key `pk` — a fan-out key (`everyone:*><cid>`) answers the stored All row as that
@@ -386,7 +386,7 @@ function create(engineCtx) {
     if (!root) return null;
     // a member that left its group (lane grants-unify: or that the owner LEFT OUT of this notification) waits for nothing
     const res = holder.grainRes || (holder.key ? CG.RES.conversation(holder.key) : null);
-    const tg = res ? fanTargets().find((x) => x.cid === fan.cid && CG.wakeAdmits(res, root.principal, { cid: x.cid, groups: x.groups })) : null;
+    const tg = res ? fanTargets().find((x) => x.cid === fan.cid && CG.wakeAdmits(res, root.principal, { cid: x.cid, groups: x.groups, ...require('./groups-hold.js').fact() })) : null;
     return tg ? F.fanWatcher(root, tg.cid, tg.name) : null;
   }
   /** Is THIS item the watcher of principal `pk`? */

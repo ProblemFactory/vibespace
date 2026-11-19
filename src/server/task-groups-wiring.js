@@ -53,7 +53,7 @@ function createStore({ app, wss, WS_OPEN, activeSessions, grants, persistenceRou
       closeOpen: () => { const td = userTodos(); if (!td) throw new Error('the For-you store is not up yet'); const open = td.idsWhere((i) => i.sessionKey === 'task-groups-unread' && i.status === 'open'); if (open.length) td.setStatusMany(open, 'done', 'system'); },   // a held boot's notice, when a later start reads
     },
   });
-  require('../grant-model.js').setGroupsHeld(() => tasks.isHeldUnread());   // THE STORE HELD UNREAD: the grant model's doors judge a held store's groups UNKNOWN (lane bl-windows)
+  require('./groups-hold.js').setHeld(() => tasks.isHeldUnread());   // THE STORE HELD UNREAD (lane bl-windows): the hub's fact the roster doors hand their verdicts
   const taskFanout = require('./task-fanout.js').create({ list: () => tasks.list(), send: (json) => wss.clients.forEach((c) => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } }) }); // lane task-group-fanout: the ONE tasks-updated broadcaster ({epoch, base, seq} — a client off `base` re-fetches)
   // B-fcc7 (read 6): a TASK.md skipped while a machine's pull folder was away (isPathShadowed) is written once the pull is up again —
   // the cloud storages' mounts-updated does it for theirs

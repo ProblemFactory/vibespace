@@ -462,7 +462,13 @@ class TaskGroupManager {
    *  name (code TASK_GROUPS_UNREAD): an empty list there reads as «in no Task Group» (an «All agents except G» row admits G's own; a
    *  lease kept to G is detached). Every grant reader already maps a throw to UNREADABLE (the grant model refuses an undecided
    *  group and keeps what it holds). groupsForSession itself stays non-throwing (its many plain readers). */
-  groupIdsForGrant(args) { this._refuseUnread('judging a grant by Task Group'); return (this.groupsForSession(args) || []).map((g) => g.id); }
+  groupIdsForGrant(args, reader = 'grant') {
+    // ONE LOG LINE A HOLD (主开发's follow): the refusal is thrown at every call (every list broadcast, every verb) — the FIRST of a hold
+    // is marked `firstOfHold`, and the grant readers log only that one
+    // …PER READER (`reader`: the logging callers name themselves — a silent reader never takes another's one line)
+    if (this._unread) { try { this._refuseUnread('judging a grant by Task Group'); } catch (e) { const said = this._grantSaid || (this._grantSaid = new Map()), k = String(reader); if (said.get(k) !== this._unread.at) { said.set(k, this._unread.at); e.firstOfHold = true; } throw e; } }
+    return (this.groupsForSession(args) || []).map((g) => g.id);
+  }
   /** the ONE line an agent's hook injection carries while the store is held (主开发 00:41Z (b)) — else null: never «in no group» in silence */
   unreadHookLine() { const u = this._unread; return u ? `VibeSpace: Task Groups cannot be read right now — ${u.file} in VibeSpace's data folder ${damagedOf(u) ? 'is damaged' : 'could not be read'} (${u.code}). This conversation's Task Groups are UNKNOWN, not empty: their context is not shown and vibespace-task is refused until the store reads again.` : null; }
   /** an act that would record something, while the store is held: REFUSED BY NAME (code TASK_GROUPS_UNREAD) — the route answers it */

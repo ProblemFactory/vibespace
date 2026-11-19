@@ -5642,7 +5642,7 @@ function create(deps = {}) {
     const mayHear = (cid) => {
       if (!reach.has(cid)) {
         let ok = false;
-        try { ok = ACL.canSee(reachFor({ kind: 'agent', id: cid, name: null, groups: groupsOfSession(cid), msgLevelFor: () => 'none' }, rec, en).level); } catch { ok = false; }
+        try { ok = ACL.canSee(reachFor({ kind: 'agent', id: cid, name: null, groups: groupsOfSession(cid), ...require('./groups-hold.js').fact(), msgLevelFor: () => 'none' }, rec, en).level); } catch { ok = false; }
         reach.set(cid, ok);
       }
       return reach.get(cid);
@@ -6148,7 +6148,7 @@ function create(deps = {}) {
     const en = store.index.live()[`${rec.id}/${convId}`];
     // REACH FIRST (the reaction digest's rule): the note is news FROM the conversation — an agent whose access the owner
     // removed since the wake hears nothing more from here
-    const mayHear = (cid) => { try { return ACL.canSee(reachFor({ kind: 'agent', id: cid, name: null, groups: groupsOfSession(cid), msgLevelFor: () => 'none' }, rec, en).level); } catch { return false; } };
+    const mayHear = (cid) => { try { return ACL.canSee(reachFor({ kind: 'agent', id: cid, name: null, groups: groupsOfSession(cid), ...require('./groups-hold.js').fact(), msgLevelFor: () => 'none' }, rec, en).level); } catch { return false; } };
     for (const d of due) {
       if (!mayHear(d.cid)) continue;
       const text = Rev.recallNoteText({ account: peerName(String(rec.label || rec.id), 80) || '', conversation: peerName(String((en && en.title) || convId), 120) || '', at: d.at });

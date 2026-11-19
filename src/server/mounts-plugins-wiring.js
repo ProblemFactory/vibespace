@@ -18,7 +18,8 @@ const { mk } = require('./lazy.js');
 // THE SEAM 2.369.411 × .412 (lane bl-windows, 主开发 07:55Z): the membership a GRANT is judged on — while the Task Groups store is
 // HELD the release's reader throws by name (TASK_GROUPS_UNREAD: unreadable, never «in no group»); else the train's read WITH the machine
 // (hostId), carrying B-55dc's «still being read» flag (memberIds — a reply marked unread is unknown too). Never an empty fallback.
-const grantMemberIds = (tasks, a) => (typeof tasks.isHeldUnread === 'function' && tasks.isHeldUnread() ? tasks.groupIdsForGrant(a) : tasks.memberIds(a));
+// `reader`: the follow's one log line a hold, per reader (groupIdsForGrant marks the first throw of a hold for each)
+const grantMemberIds = (tasks, a, reader) => (typeof tasks.isHeldUnread === 'function' && tasks.isHeldUnread() ? tasks.groupIdsForGrant(a, reader) : tasks.memberIds(a));
 
 function create({ app, server, rootDir, HOST, PORT, BUFFERS_DIR, PERMISSION_MODES,
   auth, wss, WS_OPEN, bcastAll, serverSetting, mountTokens, persistenceRouter, instanceUrl,
@@ -1167,10 +1168,10 @@ function createSessionMessages(session, sessionId) {
         if (!hit) return { ids: [], unreadable: false, live: false };
         try {
           const key = sessionStatusKey ? sessionStatusKey(hit, hitId) : null;
-          const ids = grantMemberIds(tasks, { sessionKey: key, cwd: hit.cwd, hostId: hit.host || null, initialGroupId: hit._initialGroupId, initialGroupIds: hit._initialGroupIds });   // a HELD store throws: unreadable (lane bl-windows)
+          const ids = grantMemberIds(tasks, { sessionKey: key, cwd: hit.cwd, hostId: hit.host || null, initialGroupId: hit._initialGroupId, initialGroupIds: hit._initialGroupIds }, 'browser-key');   // a HELD store throws: unreadable (lane bl-windows)
           // B-55dc: an answer still being read is UNREADABLE here — the keeper then KEEPS a lease (undecided) and refuses a new one
           return { ids: [...ids], unreadable: !!ids.unread };
-        } catch (e) { console.warn(`[browser] the Task Group list could not be read for ${bk} — ${e && e.message}`); return { ids: [], unreadable: true }; }
+        } catch (e) { if (!(e && e.code === 'TASK_GROUPS_UNREAD') || e.firstOfHold) console.warn(`[browser] the Task Group list could not be read for ${bk} — ${e && e.message}`); return { ids: [], unreadable: true }; }   // a held store: one line a hold (lane bl-windows)
       },
       // lane grants-unify: "Who can use it" names a conversation by its CONVERSATION id in the ONE grants store — a browser
       // key → the keys its conversation answers to (the live session carrying it: its own id, a pending fork's webui key;
@@ -1199,7 +1200,7 @@ function createSessionMessages(session, sessionId) {
       const tasks = getTasks ? getTasks() : null;
       if (!tasks || !s) return [];
       const key = sessionStatusKey ? sessionStatusKey(s, id) : null;
-      return grantMemberIds(tasks, { sessionKey: key, cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds });   // a HELD store throws: its callers say groupsUnreadable; B-55dc's flag rides the ids (lane bl-windows seam)
+      return grantMemberIds(tasks, { sessionKey: key, cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }, 'browser');   // a HELD store throws: its callers say groupsUnreadable; B-55dc's flag rides the ids (lane bl-windows seam)
     };
     let browserEnvMemo;
     // the pin route re-points a RUNNING session's indirection through the

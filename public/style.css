@@ -4519,6 +4519,9 @@ label.cfg-row {
 }
 .cfg-row:hover { background: var(--hover-overlay); }
 .cfg-row.disabled { opacity: 0.45; cursor: default; }
+/* the Task Groups store held unread (lane bl-windows): a LINE, no checkbox — set with the rows' text (the box's 13 px + the 9 px gap), never pressable */
+div.cfg-row-held { display: flex; padding: 6px 8px 6px 30px; min-width: 0; cursor: default; }
+div.cfg-row-held:hover { background: none; }
 .cfg-row input[type="checkbox"] { margin-top: 2px; flex-shrink: 0; accent-color: var(--accent); }
 .cfg-row-text { display: flex; flex-direction: column; gap: 1px; font-size: 12px; }
 .cfg-row-text b { color: var(--text); font-weight: 600; }

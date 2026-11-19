@@ -2109,7 +2109,11 @@ function usePatchVerdict({ profile, use, knownTask = () => false, knownKey = () 
   const convOfCur = new Map(curRows.filter((w) => w.kind === 'session' && w.conversationKey).map((w) => [w.id, w.conversationKey]));
   const entryOf = (r) => {
     if (r.kind === 'task') {
-      if (!had.has('task:' + r.id) && !knownTask(r.id)) return { refusal: { ok: false, code: 'unknown_task', error: `there is no Task Group ${r.id}`, taskId: r.id } };
+      // `knownTask` answers true / false — or a REFUSAL of its own (lane bl-windows: the Task Groups store held unread — the hold's
+      // words, a value through this pure verdict, never a throw out of its callback)
+      const known = had.has('task:' + r.id) ? true : knownTask(r.id);
+      if (known && typeof known === 'object') { if (known.refusal) return { refusal: { ...known.refusal, ok: false, taskId: r.id } }; return { refusal: { ok: false, code: 'unknown_task', error: `there is no Task Group ${r.id}`, taskId: r.id } }; }   // any other object is no «known»
+      if (!known) return { refusal: { ok: false, code: 'unknown_task', error: `there is no Task Group ${r.id}`, taskId: r.id } };
       return { entry: { kind: 'group', id: r.id }, wire: { kind: 'task', id: r.id } };
     }
     if (r.session !== undefined) return { refusal: { ok: false, code: 'bad-request', error: 'a picked session must be resolved to its conversation before the list is written' } };

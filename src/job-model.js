@@ -864,6 +864,7 @@ const NOTIF_TAIL = Object.freeze({
   'spend-cap': 'These were held by the spending ceiling for turns nobody typed.',
   'wrapper-no-steer': 'These were held because this process predates mid-turn notifications.',
   'off': 'These were held while auto-notify was off.',
+  'groups-unread': 'These waited while VibeSpace could not read its Task Groups — judged when the store read again.',
 });
 // THE DETAIL RIDES THE TAIL (notify-retry verify r2): a not-reachable entry says WHICH way it got here — the server stopped
 // while it was on the wire (a repeat is possible), the park's cap, the hour of retries — the one sentence read "did not
@@ -1035,7 +1036,9 @@ function lastLineOf(text, max = 200) {
 // serves — the stash at once, "arrived while this conversation was not running"); 'not-reachable' is RESERVED for
 // an agent that was alive and did not accept the message (the retry park exhausted, or a remote daemon miss);
 // 'retrying' = parked in the ladder's retry park (the fact's kind, never a stash entry's).
-const HELD_KINDS = ['spend-cap', 'rate-floor', 'not-reachable', 'not-running', 'retrying', 'off', 'wrapper-no-steer'];
+// lane bl-windows (the Task Groups store held unread): 'groups-unread' = a line only a Task Group could prove, held while the store
+// cannot be read — its own kind and words (never «not running»), judged when the store reads
+const HELD_KINDS = ['spend-cap', 'rate-floor', 'not-reachable', 'not-running', 'retrying', 'off', 'wrapper-no-steer', 'groups-unread'];
 /** PURE. Type a stash reason from the ladder's own answer + the engine's text. */
 function heldKind(r, reason) {
   if (r && r.refused === 'spend') return 'spend-cap';

@@ -438,7 +438,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   /** THE STORE HELD UNREAD (lane bl-windows): a group the lookup could not answer because the store is HELD — its words, else null */
   const heldTaskWords = (id) => { try { if (typeof taskInfo === 'function') taskInfo(String(id)); } catch (e) { if (e && e.code === 'TASK_GROUPS_UNREAD') return String(e.message); } return null; };
   /** a NEW group row of a «who may use» patch: known / unknown — or, while the Task Group store is held, refused BY THE HOLD'S WORDS */
-  const knownTaskOrHeld = (tid) => { const f = taskFacts(tid); if (f === undefined) { const w = heldTaskWords(tid); if (w) throw namedError('TASK_GROUPS_UNREAD', w); } return f !== null; };
+  const knownTaskOrHeld = (tid) => { const f = taskFacts(tid); if (f === undefined) { const w = heldTaskWords(tid); if (w) return { refusal: { code: 'TASK_GROUPS_UNREAD', error: w } }; } return f !== null; };   // a refusal VALUE the pure verdict returns (主开发's follow), never a throw through its callback
   /** "who may use" in log words (never a name — keys and ids) */
   const whoWords = (p) => { const U = B.whoMayUse(p); if (!U || U.mode === 'all') return 'all conversations'; if (U.mode !== 'only') return 'an owner shape this release cannot judge'; return 'only ' + (U.who.map((w) => (w.kind === 'session' ? w.id : 'Task Group ' + w.id)).join(', ') || 'nobody'); };
   const sampleEvery = guardSampleMs || limits.GUARD_SAMPLE_MS;

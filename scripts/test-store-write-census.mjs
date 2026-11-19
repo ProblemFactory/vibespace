@@ -1101,22 +1101,32 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
       ok(vG.ok === false && vG.code === 'groups_unreadable' && keeps, '⑨ …a lease kept to «only Task Group G» meets a held store: groups_unreadable — the keeper KEEPS it (rejudgeLeases\' undecided rule, read from browser-keeper.js), never detached', { code: vG.code, keeps });
       ok(vGRel.ok === false && vGRel.code === 'not_granted', '⑨ CONTROL — the release\'s reader: not_granted, the lease DETACHED (its tab closed) for a store that only could not be read', vGRel);
       const grant = { principal: { kind: 'everyone', id: '*' }, except: [{ kind: 'group', id: 'T-a1' }], scope: { kind: 'adapter', id: 'a1' }, level: 'visible' };
-      let chHeld, chRead;
-      try {
-        GM.setGroupsHeld(() => held.isHeldUnread());
-        chHeld = ACL.principalApplies({ kind: 'agent', id: CID, name: null, groups: [] }, grant);
-        GM.setGroupsHeld(() => read.isHeldUnread());
-        chRead = ACL.principalApplies({ kind: 'agent', id: CID, name: null, groups: ['T-a1'] }, grant);
-      } finally { GM.setGroupsHeld(null); }   // the module-wide predicate never outlives its leg
+      // THE HUB'S FACT (src/server/groups-hold.js — 主开发's follow: a pure model holds no settable state): the doors hand it in
+      const GH = require(path.join(REPO, 'src/server/groups-hold.js'));
+      let ghFacts;
+      try { GH.setHeld(() => held.isHeldUnread()); const a = GH.fact(); GH.setHeld(() => read.isHeldUnread()); const b = GH.fact(); GH.setHeld(() => { throw new Error('x'); }); ghFacts = [a, b, GH.fact()]; } finally { GH.setHeld(null); }
+      ok(JS(ghFacts) === JS([{ groupsUnreadable: true }, {}, { groupsUnreadable: true }]) && JS(GH.fact()) === '{}', '⑨ the hub\'s fact (groups-hold): { groupsUnreadable: true } while held, nothing once read, a predicate that throws reads as held (fail closed), nothing with none set', ghFacts);
+      const chHeld = ACL.principalApplies({ kind: 'agent', id: CID, name: null, groups: [], ...ghFacts[0] }, grant);
+      const chRead = ACL.principalApplies({ kind: 'agent', id: CID, name: null, groups: ['T-a1'], ...ghFacts[1] }, grant);
       const chRel = ACL.principalApplies({ kind: 'agent', id: CID, name: null, groups: [] }, grant);
-      ok(chHeld === false && chRead === false && chRel === true, '⑨ …a CHANNEL grant «All agents, except Task Group G» (the real channel-acl): not applied to G\'s conversation while held, nor once read (excepted); CONTROL — the release (no hold handed): applied to it', { chHeld, chRead, chRel });
+      ok(chHeld === false && chRead === false && chRel === true, '⑨ …a CHANNEL grant «All agents, except Task Group G» (the real channel-acl): not applied to G\'s conversation whose principal carries the hold, nor once read (excepted); CONTROL — a principal without the fact (the release): applied to it', { chHeld, chRead, chRel });
       const SJ = readSrc('server.js'), MP = readSrc('src/server/mounts-plugins-wiring.js'), TW = readSrc('src/server/task-groups-wiring.js');
-      // THE SEAM 2.369.411 × .412 (lane bl-windows, 主开发 07:55Z): held ⇒ the release's groupIdsForGrant (throws by name), else the
-      // train's memberIds (with the machine, B-55dc's flag) — server.js inline ×2, mounts-plugins-wiring through ONE helper ×4 + the key-only fifth
-      ok((SJ.match(/groupsOf: \(s, id\) => \{ const a = \{ sessionKey: sessionStatusKey\(s, id\), cwd: s\.cwd, hostId: s\.host \|\| null, [^}]*\}; return tasks\.isHeldUnread\(\) \? tasks\.groupIdsForGrant\(a\) : tasks\.memberIds\(a\); \}/g) || []).length === 2 && !/groupsOf: \(s, id\) => tasks\.groupsForSession\(/.test(SJ)   // stale-pins: kept — a deliberate absence check (the release's reader must not come back)
-        && /^const grantMemberIds = \(tasks, a\) => \(typeof tasks\.isHeldUnread === 'function' && tasks\.isHeldUnread\(\) \? tasks\.groupIdsForGrant\(a\) : tasks\.memberIds\(a\)\);$/m.test(MP) && (MP.match(/grantMemberIds\(tasks, \{/g) || []).length === 4 && (MP.match(/tasks\.groupIdsForGrant\(\{/g) || []).length === 1 && /groupsOf: \(\{ sessionKey, cwd, hostId = null, initialGroupId, initialGroupIds \} = \{\}\) => \{[^\n]*const ids = grantMemberIds\(tasks, a\); if \(ids\.unread\) throw new Error\([^\n]*return tasks\.groupsForSession\(a\); \}/.test(MP) && /require\('\.\.\/grant-model\.js'\)\.setGroupsHeld\(\(\) => tasks\.isHeldUnread\(\)\);/.test(TW)
-        && ['src/channel-acl.js', 'src/channel-filter.js', 'src/server/channels-grants.js'].every((f) => /GM\.groupsHeld\(\)/.test(readSrc(f))) && (readSrc('src/automation-keys.js').match(/GM\.groupsHeld\(\)/g) || []).length === 2,
-        '⑨ …the readers that feed a grant: server.js groupsOf ×2 + the five in mounts-plugins-wiring ask groupIdsForGrant while held (the seam: ×4 through grantMemberIds, the key-only fifth direct); the store hands the GRANT MODEL its hold at boot, and the doors judging a live agent from the roster ask it (channel-acl, channel-filter, channels-grants, the automation reach + use)');
+      // THE SEAM 2.369.411 × .412 (lane bl-windows, 主开发 07:55Z) + THE FOLLOW moved onto it: held ⇒ the release's groupIdsForGrant (throws by
+      // name, its first throw of a hold marked per reader), else the train's memberIds (with the machine, B-55dc's flag) — server.js inline ×2
+      // (readers 'exit' / 'window'), mounts-plugins-wiring through ONE helper ×4 + the may-use hook + the key-only fifth
+      ok((SJ.match(/groupsOf: \(s, id\) => \{ const a = \{ sessionKey: sessionStatusKey\(s, id\), cwd: s\.cwd, hostId: s\.host \|\| null, [^}]*\}; return tasks\.isHeldUnread\(\) \? tasks\.groupIdsForGrant\(a, '(?:exit|window)'\) : tasks\.memberIds\(a\); \}/g) || []).length === 2 && !/groupsOf: \(s, id\) => tasks\.groupsForSession\(/.test(SJ)   // stale-pins: kept — a deliberate absence check (the release's reader must not come back)
+        && /^const grantMemberIds = \(tasks, a, reader\) => \(typeof tasks\.isHeldUnread === 'function' && tasks\.isHeldUnread\(\) \? tasks\.groupIdsForGrant\(a, reader\) : tasks\.memberIds\(a\)\);$/m.test(MP) && (MP.match(/grantMemberIds\(tasks, \{/g) || []).length === 4 && (MP.match(/tasks\.groupIdsForGrant\(\{/g) || []).length === 1
+        && /groupsOf: \(\{ sessionKey, cwd, hostId = null, initialGroupId, initialGroupIds \} = \{\}\) => \{[^\n]*const ids = grantMemberIds\(tasks, a\); if \(ids\.unread\) throw new Error\([^\n]*return tasks\.groupsForSession\(a\); \}/.test(MP)
+        && /require\('\.\/groups-hold\.js'\)\.setHeld\(\(\) => tasks\.isHeldUnread\(\)\);/.test(TW),
+        '⑨ …the readers that feed a grant: server.js groupsOf ×2 + the five in mounts-plugins-wiring ask groupIdsForGrant while held (the seam: ×4 through grantMemberIds, the may-use hook, the key-only fifth direct); the store sets the HUB\'s fact at boot (groups-hold)');
+      const GMsrc = readSrc('src/grant-model.js'), FACT = /require\('\.\/groups-hold\.js'\)\.fact\(\)/g, FACT_AR = /require\('\.\/server\/groups-hold\.js'\)\.fact\(\)/g;
+      const code = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');   // code only — a comment naming the hub's module is no read of it
+      const cnt = (f, re) => (readSrc(f).match(re) || []).length;
+      ok(!/\bsetGroupsHeld\b|\bgroupsHeld\b|groups-hold/.test(GMsrc) && !/^let /m.test(GMsrc) && !['src/channel-acl.js', 'src/channel-filter.js', 'src/automation-keys.js'].some((f) => /groupsHeld|groups-hold/.test(code(readSrc(f)))),
+        '⑨ the PURE models read only their arguments: src/grant-model.js holds no module-level setter or state (the device bundle\'s module is the release\'s), nor do channel-acl, channel-filter and automation-keys ask any hold');
+      ok(cnt('src/server/channels-access.js', FACT) === 3 && cnt('src/server/channels-engine.js', FACT) === 2 && cnt('src/server/channels-outbound.js', FACT) === 2 && cnt('src/server/conversation-ops.js', FACT) === 2 && cnt('src/agent-routes.js', FACT_AR) === 2
+        && /function wakeAdmits\(res, principal, \{ cid, groups = \[\], groupsUnreadable = false \} = \{\}\)/.test(readSrc('src/server/channels-grants.js')),
+        '⑨ …the hub\'s doors that judge a live agent from the roster HAND the fact: the channel principals (channelPrincipal ×2, the engine\'s hear / wake ctx ×2, outbound ×2, access ×1), the two watch wakes, the automation reach\'s two targets');
       // THE REAL READER (automationGroupsRead, evaluated from its source) and the release's spelling of it (anchored) as the control
       const ARline = MP.split('\n').find((l) => l.startsWith('const automationGroupsRead = (s, id) => {'));
       const ARtext = ARline ? ARline.slice('const automationGroupsRead = '.length).replace(/;\s*$/, '') : null;
@@ -1133,17 +1143,16 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
       // THE GRANT MODEL'S PREDICATE at the doors judging a live agent from the roster: the automation reach, channel-filter's rowNames
       const AK = require(path.join(REPO, 'src/automation-keys.js')), CF = require(path.join(REPO, 'src/channel-filter.js'));
       const REACH = [{ door: 'automation-key-reach', resource: 'K-1', to: [{ kind: 'everyone' }], except: [{ kind: 'group', id: 'T-a1' }] }];
-      const reachOf = () => AK.reachVerdict({ keyId: 'K-1', caller: 'aaaaaaaa-1111-4000-8000-0000000000b2', target: { conversationId: CID, groups: [] }, reach: 'instance', reachRows: REACH });
+      const reachOf = (f = {}) => AK.reachVerdict({ keyId: 'K-1', caller: 'aaaaaaaa-1111-4000-8000-0000000000b2', target: { conversationId: CID, groups: [], ...f }, reach: 'instance', reachRows: REACH });
       const ROW = { principal: { kind: 'everyone', id: '*' }, except: [{ kind: 'group', id: 'T-a1' }] };
       const UK = { id: 'ak-000000000001', name: 'dispatch', scopes: ['conversations.rename'], createdAt: 1, createdBy: 'user', revokedAt: null, lastUsedAt: null, digest: 'a'.repeat(64) };
       const UG = { id: 'ag-000000000001', keyId: 'ak-000000000001', subject: 'everyone:*', mode: 'always', at: 1, by: 'user', spentAt: null, use: { door: 'automation-key-use', resource: 'ag-000000000001', to: [{ kind: 'everyone' }], except: [{ kind: 'group', id: 'T-a1' }] } };
-      const useOf = () => AK.useVerdict({ key: UK, grants: [UG], subject: `session:${CID}`, subjectGroups: [], verb: 'conversations.rename', vaultState: 'unlocked' });
-      let akHeld, cfHeld, uHeld;
-      try { GM.setGroupsHeld(() => held.isHeldUnread()); akHeld = reachOf(); cfHeld = CF.rowNames(ROW, { kind: 'agent', id: CID, groups: [] }); uHeld = useOf(); } finally { GM.setGroupsHeld(null); }
-      const uRel = useOf();
-      ok(uHeld.ok === false && uHeld.code === 'groups_unreadable' && uRel.ok === true, '⑨ …an automation key\'s USE «All agents, except G» (the real useVerdict) refuses G\'s conversation as groups_unreadable while held; CONTROL — no hold handed: admitted', { held: uHeld.code, rel: uRel.ok });
-      ok(/return GM\.admits\(\[\{ door: DOORS\.watch, resource: String\(res\), to: own, except: exceptFor\(own\[0\], r\.except\) \}\], \{ conversationKey: String\(cid\), groupIds: groups, \.\.\.\(GM\.groupsHeld\(\) \? \{ groupsUnreadable: true \} : \{\}\) \}\)\.ok;/.test(readSrc('src/server/channels-grants.js')), '⑨ …channels-grants wakeAdmits puts the hold IN the facts its admits judges (the call site — its store is not cheap to stand up here)');
-      const akRel = reachOf(), cfRel = CF.rowNames(ROW, { kind: 'agent', id: CID, groups: [] });
+      const useOf = (u) => AK.useVerdict({ key: UK, grants: [UG], subject: `session:${CID}`, subjectGroups: [], subjectGroupsUnreadable: u, verb: 'conversations.rename', vaultState: 'unlocked' });
+      const akHeld = reachOf(ghFacts[0]), cfHeld = CF.rowNames(ROW, { kind: 'agent', id: CID, groups: [], ...ghFacts[0] }), uHeld = useOf(rHeld ? rHeld.unreadable : false);
+      const uRel = useOf(rRel ? rRel.unreadable : false);
+      ok(uHeld.ok === false && uHeld.code === 'groups_unreadable' && uRel.ok === true, '⑨ …an automation key\'s USE «All agents, except G» (the real useVerdict, handed what the REAL automationGroupsRead said): refused as groups_unreadable while held; CONTROL — the release\'s reader: admitted', { held: uHeld.code, rel: uRel.ok });
+      ok(/return GM\.admits\(\[\{ door: DOORS\.watch, resource: String\(res\), to: own, except: exceptFor\(own\[0\], r\.except\) \}\], \{ conversationKey: String\(cid\), groupIds: groups, \.\.\.\(groupsUnreadable === true \? \{ groupsUnreadable: true \} : \{\}\) \}\)\.ok;/.test(readSrc('src/server/channels-grants.js')), '⑨ …channels-grants wakeAdmits puts the hold IN the facts its admits judges (the call site — its store is not cheap to stand up here)');
+      const akRel = reachOf(), cfRel = CF.rowNames(ROW, { kind: 'agent', id: CID, groups: [] });   // the release: no fact handed
       ok(akHeld.ok === false && cfHeld === false && akRel.ok === true && cfRel === true, '⑨ …an automation key\'s reach «whole VibeSpace except G» and a channel row «All agents except G» (channel-filter rowNames) do not name G\'s conversation while held; CONTROL — no hold handed (the release): both name it', { akHeld: akHeld.code || akHeld.ok, cfHeld, akRel: akRel.ok, cfRel });
     }
     // MUST 2 — jobs-wiring viewerOf answers null while held (UNKNOWN: the line is held for the drain, never refused as «in no group»):
@@ -1239,7 +1248,7 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
         const t3 = start();
         await new Promise((r) => setImmediate(r));
         ok(!t3.unreadState() && items().length === 0, '⑨ (h) …a start that reads closes it');
-      } finally { GM.setGroupsHeld(null); }
+      } finally { require(path.join(REPO, 'src/server/groups-hold.js')).setHeld(null); }   // createStore set the hub's fact
     }
     // (b) the hook's line, (e) the import reads every month first, (f) the row / record-clear words, (g) the two migrations
     {
@@ -1296,6 +1305,52 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
         ok(JS(list.tasks) === '[]' && !!list.unread && list.unread.code === 'EIO' && post.status === 503 && pb.code === 'TASK_GROUPS_UNREAD' && !!pb.unread && prog.status === 503 && held.list().length === 0,
           '⑨ (g) the routes\' guard over a held real store: the list answers `unread`; a create and a progress read answer 503 TASK_GROUPS_UNREAD (with `unread`, for the page) before any group is read', { unread: list.unread, post: post.status, code: pb.code, prog: prog.status });
       } finally { await new Promise((r) => srv.close(r)); }
+    }
+    // ── THE FOLLOW (主开发's five points + the hold out of the pure model) ──
+    {
+      // (3) ONE LOG LINE A HOLD: groupIdsForGrant throws at every call; only the FIRST of a hold is marked for the readers' log
+      const held = heldOver('once', MEMBER);
+      const flagOf = (mgr, reader) => { try { mgr.groupIdsForGrant({ sessionKey: KEY }, reader); return null; } catch (e) { return e && e.code === 'TASK_GROUPS_UNREAD' ? !!e.firstOfHold : 'other'; } };
+      const seq = [flagOf(held), flagOf(held), flagOf(held, 'exit'), flagOf(held, 'exit'), flagOf(held, 'window'), flagOf(held, 'browser-key'), flagOf(held, 'browser'), flagOf(held, 'browser')];
+      const w2 = world('once-again'); fs.writeFileSync(w2.file, MEMBER); const h2 = failing(w2.file, 'EIO', () => make(fresh(), w2.dd)).m;
+      const firstOfNew = flagOf(h2, 'exit');
+      const logs = ['src/exit-proxy.js', 'src/server/window-targets-engine.js', 'src/server/mounts-plugins-wiring.js', 'src/routes/browser.js'].map((f) => (readSrc(f).match(/if \(!\(e && e\.code === 'TASK_GROUPS_UNREAD'\) \|\| e\.firstOfHold\) /g) || []).length);
+      const names = (readSrc('server.js').match(/tasks\.groupIdsForGrant\(a, '(exit|window)'\)/g) || []).length === 2 && /initialGroupIds: hit\._initialGroupIds \}, 'browser-key'\)/.test(readSrc('src/server/mounts-plugins-wiring.js')) && /initialGroupIds: s\._initialGroupIds \}, 'browser'\);/.test(readSrc('src/server/mounts-plugins-wiring.js'));
+      ok(JS(seq) === '[true,false,true,false,true,true,true,false]' && firstOfNew === true && JS(logs) === '[1,1,1,1]' && names, '⑨ follow (3): the grant refusal is thrown at every call but only the FIRST of a hold is marked firstOfHold, PER READER (a silent reader never takes the exit\'s / window\'s / browser\'s one line; another hold marks its own); the four readers that logged at every call name themselves and log that one', { seq, firstOfNew, logs, names });
+      // (4) the who-dialog's pure verdict RETURNS the hold as a refusal value (never a throw out of its callback)
+      const B = require(path.join(REPO, 'src/browser-profiles.js'));
+      const prof = { id: 'bp-00000001', label: 'Desk', grantUse: { to: [{ kind: 'everyone' }], except: [] } };
+      const use = { mode: 'only', who: [{ kind: 'task', id: 'T-a1' }] };
+      const vHold = (() => { try { return B.usePatchVerdict({ profile: prof, use, knownTask: () => ({ refusal: { code: 'TASK_GROUPS_UNREAD', error: 'Task Groups: held (test)' } }), knownKey: () => false, conversationOf: () => null }); } catch (e) { return { threw: e.message }; } })();
+      const vGone = B.usePatchVerdict({ profile: prof, use, knownTask: () => false, knownKey: () => false, conversationOf: () => null });
+      const vObj = B.usePatchVerdict({ profile: prof, use, knownTask: () => ({ something: true }), knownKey: () => false, conversationOf: () => null });
+      const vOk = B.usePatchVerdict({ profile: prof, use, knownTask: () => ({ refusal: { ok: true, code: 'TASK_GROUPS_UNREAD', error: 'x' } }), knownKey: () => false, conversationOf: () => null });
+      ok(vHold.ok === false && vHold.code === 'TASK_GROUPS_UNREAD' && vHold.error === 'Task Groups: held (test)' && vGone.code === 'unknown_task' && vObj.code === 'unknown_task' && vOk.ok === false && /return \{ refusal: \{ code: 'TASK_GROUPS_UNREAD', error: w \} \}/.test(readSrc('src/server/browser-keeper.js')), '⑨ follow (4): the profile\'s «who may use» verdict answers the hold as a refusal VALUE (the keeper\'s knownTask hands it); a group the store does not list stays unknown_task', { vHold, vGone: vGone.code });
+      // (2) a held viewer's line gets its OWN kind and words (journal, strip, tail) — never «a conversation that is not running»
+      const JMm = require(path.join(REPO, 'src/job-model.js'));
+      const { JobManager } = require(path.join(REPO, 'src/jobs.js'));
+      const J = { id: 'j-grp2', name: 'grp', owner: { conversation: { id: 'aaaaaaaa-1111-4000-8000-0000000000b2' }, groupsSnapshot: ['T-a1'] }, access: { view: 'group' }, subscribers: [{ conversationId: CID }] };
+      const stashed = [];
+      const eng = (viewer) => { const e = Object.create(JobManager.prototype); Object.assign(e, { d: { viewerOf: () => viewer, log: () => {}, broadcast: () => {} }, jobs: new Map([[J.id, J]]), archivedById: () => null, _cronParentOf: () => null, _stashNotif: (cid, job, ev, why, o) => stashed.push({ why, kind: o && o.held && o.held.kind }) }); return e; };
+      const entry = { id: 'pk-1', firstAt: 1, meta: { subscriber: true, sub: true, jobId: J.id, jobName: 'grp', ev: { what: 'done', at: 1 } } };
+      const eh = eng({ live: false, held: true, conversationId: CID, groups: new Set() });
+      const owedH = eh.retryOwed(CID, entry), memoH = eh._retryVerdicts.get('pk-1');
+      const en = eng(null); const owedN = en.retryOwed(CID, entry), memoN = en._retryVerdicts.get('pk-1');
+      const tail = JMm.notifTailSentence([{ held: { kind: 'groups-unread' } }]);
+      ok(owedH === false && memoH === 'groups-unread' && JS(stashed.map((x) => x.kind)) === '["groups-unread","not-running"]' && /Task Groups store cannot be read/.test(stashed[0].why) && owedN === false && memoN === 'unknown'
+        && JMm.HELD_KINDS.includes('groups-unread') && /could not read its Task Groups/.test(tail) && /kind === 'groups-unread'\) why = tr\("VibeSpace cannot read its Task Groups right now/.test(readSrc('src/lib/jobs-layout.js')),
+        '⑨ follow (2): a held viewer\'s parked line is held under its OWN kind (groups-unread: the journal, the tail, the strip say the Task Groups store); CONTROL — no record of the conversation: still «not-running»', { stashed, memoH, memoN, tail });
+      // …and THE PUSH ROAD (where most held lines are born): _notifyOwner's subscriber copy under a held view ⇒ groups-unread;
+      // CONTROL: a view of no record that is not held ⇒ not-running, as on the release
+      const pushStash = [];
+      const engP = (viewer) => { const e = Object.create(JobManager.prototype); Object.assign(e, { d: { viewerOf: () => viewer, log: () => {}, broadcast: () => {} }, jobs: new Map([[J.id, J]]), archivedById: () => null, _cronParentOf: () => null, _stashNotif: (cid, job, ev, why, o) => pushStash.push({ cid, kind: o && o.held && o.held.kind, why }) }); return e; };
+      engP({ live: false, held: true, conversationId: CID, groups: new Set() })._notifyOwner({ ...J, kind: 'command', state: 'done' }, { what: 'done' });
+      engP({ live: false, conversationId: CID, groups: new Set() })._notifyOwner({ ...J, kind: 'command', state: 'done' }, { what: 'done' });
+      const subKinds = pushStash.filter((x) => x.cid === CID).map((x) => x.kind);
+      ok(JS(subKinds) === '["groups-unread","not-running"]' && /Task Groups store cannot be read/.test((pushStash.find((x) => x.kind === 'groups-unread') || {}).why || ''), '⑨ follow (2): the PUSH road — a subscriber\'s copy under a held view is stashed under groups-unread; CONTROL: a view of no record that is not held is still not-running', pushStash);
+      // (1) the backup dialog: the hold as a LINE with no checkbox (the owner's rule: no greyed control with a hint)
+      const APP = readSrc('src/lib/app.js'), heldRow = (APP.split('\n').find((l) => l.includes("s.tasks?.unread ? (() => {")) || '');
+      ok(/className = 'cfg-row cfg-row-held'/.test(heldRow) && !/<input|disabled/.test(heldRow) && /so this backup leaves them out/.test(heldRow) && /div\.cfg-row-held \{ display: flex;/.test(readSrc('public/style.css')) && /div\.cfg-row-held:hover \{ background: none; \}/.test(readSrc('public/style.css')), '⑨ follow (1): the backup dialog says the hold as a line (no checkbox, nothing greyed, set with the rows\' text, never pressable) — and the export sends no tasks section (no data-sec box)');
     }
     // RED CONTROL — the release's own _load (its catch read every failure as «no file»), its PLANT PROVEN FIRST
     {
