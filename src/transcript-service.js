@@ -252,12 +252,14 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     let fromTranscript = false; try { fromTranscript = harnessOf(r.backend || 'claude').store?.taskStateFromTranscript === true; } catch { }   // the descriptor's OWN field (its TAKEN verdict: never the warm hook read as a second meaning)
     const viaDev = fromTranscript ? await tryDevice(r, 'taskState', {}) : undefined;
     if (viaDev) return viaDev;
-    if (fromTranscript) await refreshRemote(r);
+    const hostFetchError = fromTranscript ? await refreshRemote(r) : null;   // B-5cf8: the machine that failed is SAID (with its reason), never read as «no steps»
+    const lastCopy = !hostFetchError && fromTranscript && r.host && hosts?.linkState?.(r.host) === 'offline' ? 'the machine does not answer' : null;   // …and so is one whose LAST COPY hosts served (an ssh failure with a cache)
     await taskWarmOf(r); // B-299b A2: GET /api/session-todos (a Properties window re-asks at every broadcast) — the scan off the loop
     const live = liveSession(r);
     const sm = createSessionMessages(sessionShape(r, live), liveIdOf(live));   // B-952b: the live session's id — its wrapper's side file holds codex's plan
     if (typeof sm.prepare === 'function') await sm.prepare(); // S9: a serve-backed reader (opencode stopped conversation) loads here — LOUD on failure, a user opened it
-    return sm.taskState() || {};
+    const st = sm.taskState() || {};
+    return hostFetchError || lastCopy ? { ...st, hostFetchError: hostFetchError || lastCopy, ...(lastCopy ? { hostOffline: true } : {}) } : st;   // hostOffline: the page words it in the reader's language
   }
 
   // S3: the harness descriptor's store.locate owns "where does this

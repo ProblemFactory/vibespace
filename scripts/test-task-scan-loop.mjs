@@ -313,8 +313,8 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
       return { todos: (body && body.todos) || [], asked: asked.join(' '), n, ran: ran(path.join(HOME_FAKE, 'codex-route')) };
     };
     const rsrc = fs.readFileSync(path.join(REPO, 'src/routes/sessions.js'), 'utf8'), TSREQ = "const { createTranscriptService } = require('../transcript-service');";
-    const GATE = "    const viaDev = fromTranscript ? await tryDevice(r, 'taskState', {}) : undefined;\n    if (viaDev) return viaDev;\n    if (fromTranscript) await refreshRemote(r);\n";
-    const tsNoGate = mutantCopies('a2-route-gate', REPO).write('src/transcript-service.js', tsSrc.replace(GATE, () => "    const viaDev = await tryDevice(r, 'taskState', {});\n    if (viaDev) return viaDev;\n    await refreshRemote(r);\n"), 'no-gate');   // stale-pins: kept (dec3d0da0's road, planted back as the RED control)
+    const GATE = "    const viaDev = fromTranscript ? await tryDevice(r, 'taskState', {}) : undefined;\n    if (viaDev) return viaDev;\n    const hostFetchError = fromTranscript ? await refreshRemote(r) : null;";
+    const tsNoGate = mutantCopies('a2-route-gate', REPO).write('src/transcript-service.js', tsSrc.replace(GATE, () => "    const viaDev = await tryDevice(r, 'taskState', {});\n    if (viaDev) return viaDev;\n    const hostFetchError = await refreshRemote(r);"), 'no-gate');   // stale-pins: kept (dec3d0da0's road, planted back as the RED control)
     const R0 = require(path.join(REPO, 'src/routes/sessions.js'));
     const cGreen = await routeOf(R0, 'codex'), clGreen = await routeOf(R0, 'claude');
     const cRed = await routeOf(mutantCopies('a2-route-gate-r', REPO).load('src/routes/sessions.js', rsrc.replace(TSREQ, () => `const { createTranscriptService } = require(${JSON.stringify(tsNoGate)});`), 'no-gate-route'), 'codex');
@@ -337,6 +337,53 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
       const H0 = require(path.join(REPO, 'src/harnesses/claude.js'));
       ok(tsSrc.split(FIELD).length === 2 && H0.store.taskStateFromTranscript === true && warmOnly.asked === '' && declared.asked === 'm1:taskState:codex' && warmRed.asked.includes('m1:taskState:codex'),
         `the machine rule is the descriptor's own field: a codex store with a warm hook alone is answered here («${warmOnly.asked}»), one that declares taskStateFromTranscript is asked of m1 (${declared.asked}); RED (the warm hook read as that meaning): ${warmRed.asked}`, { warmOnly, declared, warmRed });
+    }
+    // B-5cf8 — A MACHINE THAT DOES NOT ANSWER IS SAID, NEVER «NO STEPS»: a claude conversation on m1 whose device link and
+    // transcript fetch both fail used to answer {todos: []} (the service dropped refreshRemote's reason) and Properties read
+    // «The agent hasn't kept a todo list». Now the route carries `hostFetchError` and the page's steps road (its REAL callback,
+    // lifted out of session-props.js and run over a stub DOM) says «Couldn't load the steps from <machine> — <reason>»; a
+    // machine that answers but holds no transcript still says the honest empty line; steps read earlier stay, with the failure
+    // said under them. RED controls (anchored): the release's route answer, the release's service road.
+    {
+      const { anchored } = await import('./scratch.mjs');
+      const WHY = 'ssh: connect to host m1 port 22: Connection timed out';
+      const sidGone = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeee404';   // no transcript of it on this machine
+      const hostsOf = (fetch, link = 'unknown') => ({ deviceBounded: async () => { throw new Error('the device link is down'); }, fetchTranscript: fetch, linkState: () => link });
+      const todosOf = async (R, h, rid) => {
+        R.setup({ activeSessions: new Map(), webuiPids: new Set(), refreshWebuiPids: () => { }, createSessionMessages: mkReader, BUFFERS_DIR: path.join(os.homedir(), 'buf'), PERMISSION_MODES: [], execFileSync, hosts: h, accounts: null, sessionAuth: () => ({}), serverSetting: () => undefined });
+        const layer = R.router.stack.filter((l) => l.route?.path === '/api/session-todos').pop();   // the router is the module's: each setup() adds a layer — THIS setup's is the newest
+        return await new Promise((resolve, reject) => { const res = { json: resolve, status: () => res }; Promise.resolve(layer.route.stack[0].handle({ query: { backend: 'claude', backendSessionId: rid, cwd, host: 'm1' } }, res)).catch(reject); });
+      };
+      const down = hostsOf(async () => { throw new Error(WHY); }, 'offline'), empty = hostsOf(async () => null, 'online'), lastCopy = hostsOf(async () => '/cache/copy.jsonl', 'offline');
+      const R5 = require(path.join(REPO, 'src/routes/sessions.js'));
+      const gone = await todosOf(R5, down, sidGone), none = await todosOf(R5, empty, sidGone), stale = await todosOf(R5, lastCopy, sid);
+      const ROUTE_LINE = "      res.json({ todos: st.todos || [], ...(st.hostFetchError ? { hostFetchError: String(st.hostFetchError) } : {}), ...(st.hostOffline ? { hostOffline: true } : {}) });";
+      const SVC_LINE = "    const hostFetchError = fromTranscript ? await refreshRemote(r) : null;";
+      const routeRel = mutantCopies('b5cf8-route', REPO).load('src/routes/sessions.js', anchored(rsrc, ROUTE_LINE, '      res.json({ todos: st.todos || [] });', 'B-5cf8 the release route answer'), 'b5cf8-route');   // stale-pins: kept (the release's answer, planted back by this control)
+      const tsRel = mutantCopies('b5cf8-svc', REPO).write('src/transcript-service.js', anchored(anchored(tsSrc, SVC_LINE, '    const hostFetchError = null; if (fromTranscript) await refreshRemote(r);', 'B-5cf8 the release service road'), /\n    const lastCopy = [^\n]*/, '\n    const lastCopy = null;', 'B-5cf8 the release had no last-copy word'), 'b5cf8-svc');
+      const svcRel = mutantCopies('b5cf8-svc-r', REPO).load('src/routes/sessions.js', anchored(rsrc, TSREQ, `const { createTranscriptService } = require(${JSON.stringify(tsRel)});`, 'B-5cf8 the route over the release service'), 'b5cf8-svc-route');
+      const redRoute = await todosOf(routeRel, down, sidGone), redSvc = await todosOf(svcRel, down, sidGone);
+      ok(gone.todos.length === 0 && gone.hostFetchError === WHY && none.todos.length === 0 && !('hostFetchError' in none) && stale.todos.length > 0 && stale.hostFetchError === 'the machine does not answer' && stale.hostOffline === true && !('hostOffline' in gone),
+        `B-5cf8 GET /api/session-todos for a claude conversation on m1: the machine does not answer ⇒ {todos: [], hostFetchError: «${gone.hostFetchError}»}; it answers with no transcript ⇒ {todos: []} alone; hosts serves its LAST COPY (ssh failed, a copy kept) ⇒ ${stale.todos.length} steps + «${stale.hostFetchError}»`, { gone, none, stale: { n: stale.todos.length, e: stale.hostFetchError } });
+      ok(!('hostFetchError' in redRoute) && redRoute.todos.length === 0 && !('hostFetchError' in redSvc) && redSvc.todos.length === 0,
+        'B-5cf8 RED CONTROLS: the release\'s route answer, and the release\'s service road (refreshRemote\'s reason dropped), each answer the unreachable machine as {todos: []} — what Properties read as «no steps»', { redRoute, redSvc });
+      // THE PAGE: the steps road's callback, its text lifted out of session-props.js (fails by name when its markers move)
+      const sp = fs.readFileSync(path.join(REPO, 'src/lib/session-props.js'), 'utf8');
+      const at = sp.indexOf('fetch(`/api/session-todos?'), from = sp.indexOf('}).then(d => {', at), to = sp.indexOf('      }).catch((e) => {', from);
+      if (at < 0 || from < 0 || to < 0 || sp.indexOf('fetch(`/api/session-todos?', at + 1) >= 0) throw new Error('B-5cf8: the steps road\'s markers moved in src/lib/session-props.js — move this leg with them');
+      const cb = new Function('d', 'stepList', 'escHtml', 't', 's', 'sidebar', 'document', sp.slice(from + '}).then(d => {'.length, to));
+      const tt = (k, p = {}) => k.replace(/\{(\w+)\}/g, (_, n) => (n in p ? String(p[n]) : `{${n}}`));
+      const esc = (x) => String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const doc = { createElement: () => { const el = { className: '', style: {}, textContent: '', children: [], appendChild: (c) => el.children.push(c), replaceWith: () => { } }; return el; } };
+      const page = (body, host) => { const list = { isConnected: true, style: {}, innerHTML: '', kids: [], appendChild: (c) => list.kids.push(c) }; cb(body, list, esc, tt, { host, backend: 'claude' }, { _hostsData: { hosts: [{ id: 'm1', name: 'Studio Mac' }] } }, doc); return { html: list.innerHTML, kids: list.kids.map((k) => `${k.className}|${k.textContent}`) }; };
+      const pGone = page(gone, 'm1'), pNone = page(none, 'm1'), pStale = page(stale, 'm1'), pLocal = page({ todos: [], error: 'the reader failed' }, null), pHubRead = page({ todos: [], error: 'the reader failed' }, 'm1');
+      ok(pGone.html.includes('usage-warn') && pGone.html.includes(`Couldn’t load the steps from Studio Mac — ${esc(WHY)}`) && !/hasn't kept/.test(pGone.html)
+        && /hasn't kept a todo list/.test(pNone.html) && !pNone.html.includes('usage-warn')
+        && pStale.kids.length > 1 && /^usage-warn\|Couldn’t refresh the steps from Studio Mac — it does not answer\. /.test(pStale.kids[pStale.kids.length - 1]) && pStale.kids[pStale.kids.length - 1].endsWith('These are the last ones read.')
+        && pLocal.html.includes('Couldn’t load the steps — the reader failed') && pHubRead.html.includes('Couldn’t load the steps — the reader failed') && !pHubRead.html.includes('Studio Mac'),
+        'B-5cf8 THE PAGE (the steps road\'s real callback over a stub DOM): the unreachable machine ⇒ «Couldn’t load the steps from Studio Mac — <reason>» (never «hasn\'t kept a todo list»); a machine with no transcript ⇒ the honest empty line; steps read before ⇒ the steps, then «Couldn’t refresh … These are the last ones read.»; a failed read on the hub ⇒ «Couldn’t load the steps — <reason>», never the machine\'s name', { pGone, pNone, pStale: pStale.kids.slice(-2), pLocal });
+      const pRed = page(redRoute, 'm1');
+      ok(/hasn't kept a todo list/.test(pRed.html), 'B-5cf8 RED CONTROL (the release\'s answer through the same page): «The agent hasn\'t kept a todo list» for a machine that did not answer', pRed);
     }
   }
   console.log('⑥ the subagent metas (B-299b A4): chatStatus probes no project folder for a field nothing reads');

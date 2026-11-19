@@ -2874,6 +2874,8 @@ export default {
   "Couldn’t load the status history — {reason}": "状態履歴を読み込めませんでした — {reason}",
   "Couldn’t load the steps from {host} — {reason}": "{host} からステップを読み込めませんでした — {reason}",
   "Couldn’t load the steps — {reason}": "ステップを読み込めませんでした — {reason}",
+  "Couldn’t refresh the steps from {host} — {reason}. These are the last ones read.": "{host} からステップを更新できませんでした — {reason}。前回読み込んだものです。",
+  "it does not answer": "応答がありません",
   "Couldn’t reach this session’s machine to check which accounts it can use — this row is a guess from cached data.": "このセッションのマシンに到達できず、使用可能なアカウントを確認できません——この行はキャッシュデータからの推測です。",
   "Waiting for {name} to come up before starting — this can take up to {s} s.": "{name} の準備ができるのを待ってから開始します — 最大 {s} 秒かかることがあります。",
   "Creating the session is taking unusually long — it may still be in progress; reloading the tab abandons it": "セッションの作成に時間がかかっています——まだ進行中の可能性があります。タブを再読み込みすると中断されます",

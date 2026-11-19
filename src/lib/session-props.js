@@ -869,7 +869,14 @@ export function openSessionProps(app, sessionRef, { syncId, section = null } = {
         if (!stepList.isConnected) return;
         stepList.style.minHeight = '';
         const todos = (d?.todos || []).filter(t => (t.content || t.step || '').trim());
-        stepList.innerHTML = todos.length ? '' : `<div class="empty-hint" style="padding:2px 0">${escHtml(t("The agent hasn't kept a todo list"))}</div>`;
+        // B-5cf8: a machine that did not answer (or a read that failed) is said with its reason — never «hasn't kept a todo list»;
+        // steps read before it stopped answering are shown, with that said under them
+        const failed = d?.hostOffline ? t('it does not answer') : (d?.hostFetchError || d?.error || '');   // a machine that served only its last copy: worded here
+        const hostName = s.host && d?.hostFetchError ? (sidebar._hostsData?.hosts?.find(h => h.id === s.host)?.name || s.host) : '';   // the machine is named only for ITS failure
+        const failLine = (words) => `<div class="usage-warn" style="padding:2px 0">${escHtml(words)}</div>`;
+        stepList.innerHTML = todos.length ? '' : failed
+          ? failLine(hostName ? t('Couldn’t load the steps from {host} — {reason}', { host: hostName, reason: failed }) : t('Couldn’t load the steps — {reason}', { reason: failed }))
+          : `<div class="empty-hint" style="padding:2px 0">${escHtml(t("The agent hasn't kept a todo list"))}</div>`;
         const mkStep = (t) => {
           const li = document.createElement('div');
           li.className = 'session-step ' + (t.status === 'completed' ? 'done' : t.status === 'in_progress' ? 'active' : '');
@@ -894,6 +901,12 @@ export function openSessionProps(app, sessionRef, { syncId, section = null } = {
           stepList.appendChild(toggle);
         }
         for (const t of done.slice(-2)) stepList.appendChild(mkStep(t));
+        if (todos.length && failed) {
+          const warn = document.createElement('div');
+          warn.className = 'usage-warn'; warn.style.padding = '2px 0';
+          warn.textContent = hostName ? t('Couldn’t refresh the steps from {host} — {reason}. These are the last ones read.', { host: hostName, reason: failed }) : t('Couldn’t load the steps — {reason}', { reason: failed });
+          stepList.appendChild(warn);
+        }
       }).catch((e) => {
         // Remote sessions read the steps out of an ssh-fetched transcript — a
         // slow/dead host used to leave this section on 'Loading…' forever.

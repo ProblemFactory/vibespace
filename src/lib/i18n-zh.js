@@ -2874,6 +2874,8 @@ export default {
   "Couldn’t load the status history — {reason}": "无法加载状态历史 — {reason}",
   "Couldn’t load the steps from {host} — {reason}": "无法从 {host} 加载步骤 — {reason}",
   "Couldn’t load the steps — {reason}": "无法加载步骤 — {reason}",
+  "Couldn’t refresh the steps from {host} — {reason}. These are the last ones read.": "无法从 {host} 刷新步骤 — {reason}。这里是上次读到的。",
+  "it does not answer": "它没有响应",
   "Couldn’t reach this session’s machine to check which accounts it can use — this row is a guess from cached data.": "无法连上此会话所在的机器以检查它能使用哪些账号——此行是根据缓存数据的猜测。",
   "Waiting for {name} to come up before starting — this can take up to {s} s.": "正在等待 {name} 就绪后再启动 — 最多可能需要 {s} 秒。",
   "Creating the session is taking unusually long — it may still be in progress; reloading the tab abandons it": "创建会话耗时异常——它可能仍在进行中；刷新此标签页会放弃它",
