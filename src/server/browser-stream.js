@@ -1329,8 +1329,9 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (b.state === state && b.targetId === id) return;
     // the owner's live-picture unit, its read (M1): the HUB says whether this tab's own picture was polled before it stopped
     // answering (a hidden tab that hung) — the view keeps that last picture on every road (a hand back, a reconnect, a new pane)
-    const polled = state === 'unresponsive' && b.targetId === id && (b.state === 'hidden' || !!b.polled);
-    b.state = state; b.targetId = id; b.since = now(); b.polled = polled;
+    const polled = WIN.stuckPolledVerdict({ state, id, prevTargetId: b.targetId, shotOf: b.shotOf });   // its read (S1): a picture OF this tab landed
+    if (b.targetId !== id) b.shotOf = null;
+    b.state = state; b.targetId = id; b.since = now();
     if (b.pollTimer) { clearInterval(b.pollTimer); b.pollTimer = null; }
     if (state === 'unresponsive') {
       log.log?.(`[browser-live] ${relay.key}: the tab on show (${String(id).slice(0, 8)}) sends no picture and does not answer (${String(why).slice(0, 80)}) — a busy or hung page; said on the view, asked again every ${Math.max(5000, bgSilenceMs) / 1000} s`);
@@ -1348,7 +1349,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     const b = relay.bg;
     if (!b.state) return;
     const id = b.targetId;
-    b.state = null; b.targetId = null; b.checkedAt = 0; b.frameTimes = []; b.polled = false;
+    b.state = null; b.targetId = null; b.checkedAt = 0; b.frameTimes = []; b.shotOf = null;
     if (b.pollTimer) { clearInterval(b.pollTimer); b.pollTimer = null; }
     relay.lastBg = null;
     log.log?.(`[browser-live] ${relay.key}: the tab ${String(id || '').slice(0, 8)} is no longer a silent background tab (${why})`);
@@ -1365,6 +1366,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     Promise.resolve().then(() => keeper.captureTabFor(relay.target, id)).catch(() => null).then((r) => {
       b.pollBusy = false;
       if (relays.get(relay.key) !== relay || b.targetId !== id || !r || !r.ok) return;
+      b.shotOf = id;   // a picture OF this tab landed (an unresponsive verdict may then say `polled`)
       const rec = { type: 'frame', data: r.data, metadata: { deviceWidth: Number(r.clientWidth) || 0, deviceHeight: Number(r.clientHeight) || 0, pageScaleFactor: 1, offsetTop: 0, scrollOffsetX: 0, scrollOffsetY: 0, timestamp: now(), polled: 'background' } };
       const text = JSON.stringify(rec);
       notePicture(relay, rec, 'frame');

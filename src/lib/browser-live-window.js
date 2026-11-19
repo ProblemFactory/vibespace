@@ -2228,6 +2228,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     switch (m.type) {
       case 'hello':
         st.bg = null; st.bgClearedAt = 0; clearTimeout(st.bgSettleTimer); // its read's M3: the verdict was the old socket's — the hub replays a live one after hello (reset FIRST: unmountX re-renders the line)
+        renderWatchLine(); // its read (N1): a page-picture view mounts no X — its line is re-rendered here, never left on the old verdict
         xp.ticket = null; xp.asking = false; xp.failed = null; unmountX(); // lane browser-x-in-window: the old socket's ticket died with it — asked again below
         st.mode = m.mode || 'watch'; st.holder = m.holder || null; st.viewers = m.viewers || 1; st.target = m.target || null;
         st.you = m.you || null; st.mine = !!m.mine; st.modeSince = Number(m.since) || 0;

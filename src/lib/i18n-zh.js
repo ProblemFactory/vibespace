@@ -95,7 +95,7 @@ export default {
   "the tab's own picture — its window's picture again in a moment": "该标签页自己的画面 — 稍后回到它所在窗口的画面",
   "This tab is behind another tab in its window: press this tab in the browser’s own tab strip, or Bring it forward": "这个标签页在它所在窗口里另一个标签页的后面：在浏览器自己的标签栏里点这个标签页，或点「提到前面」",
   "the tab's last own picture — it does not answer, and its window shows another tab in front": "该标签页自己的最后一张画面 — 它没有响应，它所在窗口的前面是另一个标签页",
-  "The agent’s tab is not responding — its last picture is shown; it did not answer when asked (a busy or hung page). This view updates as soon as it answers": "agent 的标签页没有响应 — 显示的是它的最后一张画面；询问时它没有回答（页面繁忙或卡住）。它一回答，这里就会更新",
+  "The agent’s tab is not responding — its last picture is shown; it did not answer when asked (a busy or hung page). This view updates as soon as it answers": "agent 的标签页没有响应 — 显示的是它的最后一张画面，询问它也没有回答（页面忙或卡死）。它一回答，这里就会更新",
   "Waiting for this tab’s window to appear on the display — showing the page’s own picture of it meanwhile": "正在等待此标签页的窗口出现在显示上 — 期间显示该页面自身的画面",
   "This tab could not be shown as a window — showing the page’s own picture of it": "无法将此标签页显示为窗口 — 正在显示该页面自身的画面",
   "the page's picture — this conversation's window could not be told apart on the display": "页面画面 — 无法在显示上分辨出本对话的窗口",

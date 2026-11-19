@@ -593,9 +593,25 @@ console.log('§10 the picture the view says it shows, in ONE window (the owner\'
   const ur = PICu.pictureForView(PICu.pictureSourceOf({ launch: 'attach', state: 'ready', displaySession: { id: 'ds-1' } }), { bg: stuckBg, shownWhy: 'attach' });
   ok(u1.why === 'background-stuck' && u0.why === 'background-stuck' && u2 === X && u3 === X && psrc.split(STUCK).length === 2 && ur.source === PIC.PICTURE_X,
     `a polled tab that stops answering keeps its last own picture after a hand back (${u1.why}) and on a new pane (${u0.why}); never polled keeps the window (${u2.source}); a takeover drives the window (${u3.source}); RED (the copy without the rule): the window — its front tab under the stuck tab's name (${ur.source})`);
+  // the hub's `polled`, PURE over its roads (its read's S1/S3): only a picture OF that tab that landed while it stayed on show
+  const WINw = require('../src/browser-windows.js'), SV = WINw.stuckPolledVerdict;
+  const roads = [
+    ['hidden, a poll of A landed, then unresponsive', { state: 'unresponsive', id: 'A', prevTargetId: 'A', shotOf: 'A' }, true],
+    ['said hidden, NO poll landed (a busy page), then unresponsive — the view holds the previous tab\'s frame', { state: 'unresponsive', id: 'A', prevTargetId: 'A', shotOf: null }, false],
+    ['B\'s poll landed, then A unresponsive', { state: 'unresponsive', id: 'A', prevTargetId: 'B', shotOf: 'B' }, false],
+    ['unresponsive from the start', { state: 'unresponsive', id: 'A', prevTargetId: null, shotOf: null }, false],
+    ['hidden (not unresponsive)', { state: 'hidden', id: 'A', prevTargetId: 'A', shotOf: 'A' }, false],
+  ];
+  const wrong = roads.filter(([, a, want]) => SV(a) !== want).map(([n]) => n);
+  const wsrc = fs.readFileSync(path.join(REPO, 'src/browser-windows.js'), 'utf8'), SVL = '  return state === \'unresponsive\' && !!id && prevTargetId === id && shotOf === id;\n';
+  const WINr = MCp.load('src/browser-windows.js', anchored(wsrc, SVL, '  return state === \'unresponsive\' && !!id && prevTargetId === id;\n', 'polled-without-shot'), 'polled-without-shot');
+  ok(!wrong.length && wsrc.split(SVL).length === 2 && WINr.stuckPolledVerdict(roads[1][1]) === true, `the hub's polled over ${roads.length} roads (${wrong.length ? 'WRONG: ' + wrong.join(' | ') : 'all right'}); RED (polled without a landed picture): the said-hidden tab with no picture says polled (${WINr.stuckPolledVerdict(roads[1][1])}) — the previous tab's frame under its name`);
+  // the watch line says the last picture, and 'hello' re-renders it on the new socket's verdict (pins)
+  const live2 = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
+  ok(live2.includes(": st.bg.polled ? t('The agent’s tab is not responding — its last picture is shown; it did not answer when asked (a busy or hung page). This view updates as soon as it answers')") && live2.includes("renderWatchLine(); // its read (N1): a page-picture view mounts no X"), 'PIN: the stuck tab\'s line says its last picture is shown; hello re-renders the line');
   // the hub's record says it, and the page keeps it (pins)
   const bsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8');
-  ok(bsrc.includes("const polled = state === 'unresponsive' && b.targetId === id && (b.state === 'hidden' || !!b.polled);") && bsrc.includes("pollMs: 0, polled });") && bsrc.includes('b.frameTimes = []; b.polled = false;')
+  ok(bsrc.includes("const polled = WIN.stuckPolledVerdict({ state, id, prevTargetId: b.targetId, shotOf: b.shotOf });") && bsrc.includes("pollMs: 0, polled });") && bsrc.includes('b.frameTimes = []; b.shotOf = null;') && bsrc.includes('      b.shotOf = id;   // a picture OF this tab landed')
     && fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8').includes(", polled: m.polled === true }"), 'PIN: the hub\'s unresponsive record says `polled` (a hidden tab that hung), replayed to a late viewer; the view keeps it on its verdict');
   // the live view's wiring (pins): the picture reads the hub's verdict; the verdict and a takeover / handback re-judge it; a
   // one-window row says the blanks it folds

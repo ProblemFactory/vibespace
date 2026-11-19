@@ -446,10 +446,17 @@ function watchRefusalWords({ refused = '', why = '', error = '' } = {}, tIn) {
   }
 }
 
+/** The owner's live-picture unit, its reads (M1 + S1): an `unresponsive` verdict says `polled` only when a picture OF THAT TAB landed
+ *  (the hub's poll of it succeeded: `shotOf`) while it was the same tab on show — never a tab merely said hidden, whose last frame on the
+ *  view may still be the previous tab's. PURE: (state, id, prevTargetId, shotOf) → boolean. */
+function stuckPolledVerdict({ state = null, id = null, prevTargetId = null, shotOf = null } = {}) {
+  return state === 'unresponsive' && !!id && prevTargetId === id && shotOf === id;
+}
+
 module.exports = {
   WINDOWS_PROOF, ownWindowParams, windowCreateParams, instanceOf, hasOwnWindow, windowMates,
   TAB_LABELS_MAX, withTabLabel, labelTargetOf, withLabelsOnRows,
-  WATCH_FIRST_FRAME_MS, WATCH_POLL_MS, watchModeVerdict, TAB_CLICK_ACTS, tabClickVerdict, BACKGROUND_SILENCE_MS, UNRESPONSIVE_MS,
+  stuckPolledVerdict, WATCH_FIRST_FRAME_MS, WATCH_POLL_MS, watchModeVerdict, TAB_CLICK_ACTS, tabClickVerdict, BACKGROUND_SILENCE_MS, UNRESPONSIVE_MS,
   ONE_WINDOW_PER_HOLDER, OPENER_ANCHORS_MAX, OPENER_PROOF, BACKGROUND_PAINT_PROOF, windowIdOf, windowCensus, multiWindowHolders,
   ANCHOR_PROBE_MS, RUNG2_TRIES, STRAYS_NOTE, RUNG2_CREATE, rung2Plan, strayWindowsOf, // verify r4: the plan takes {viewers, driven}; the create is a background one // verify r3: the anchor probe, rung 2's tries + plan (the window-state cycle off a real display), the strays said once // verify r1 T2 ⑧ + r2 T1: one window per holder, the measured opener table, the census of the red cell
   DRIVE_ENDED_NOTICE_KIND, driveEndedNotice, driveEndedText, renderDriveEndedNotice, // verify r5 ②: the refused holders told, free, when the user's drive ends
