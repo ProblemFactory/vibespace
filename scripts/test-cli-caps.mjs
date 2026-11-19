@@ -287,27 +287,74 @@ if (!fs.existsSync(COMMITTED)) {
   ok('the fixture names no path, machine or person (the notes are the measurement\'s own words)', !!F && !/\/(var|home|tmp|opt|root|Users|run)\/|@|\.local\b|\.lan\b/.test(JSON.stringify(F)));
 }
 
+// env names set for one call and put back (B-ec25: under VS_NO_REAL_CLI=1 a probe starts only THE stand-in CLAUDE_CMD names)
+const withEnv = async (vars, fn) => {
+  const keep = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]));
+  for (const [k, v] of Object.entries(vars)) { if (v == null) delete process.env[k]; else process.env[k] = v; }
+  try { return await fn(); } finally { for (const [k, v] of Object.entries(keep)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } }
+};
+
 // ── ⑦ the probe the gate reads (verify r1 F9) ──
 console.log('⑦ machine-probes.cliVersion over fake #! binaries');
 {
   const P = require(path.join(REPO, 'src/machine-probes.js'));
   const fake = (name, body) => { const p = path.join(tmp, name); fs.writeFileSync(p, '#!/bin/sh\n' + body + '\n', { mode: 0o755 }); return p; };
-  const warn = await P.cliVersion(fake('claude-warn', "echo 'Warning: an update is available'; echo '2.1.300 (Claude Code)'"));
+  const ver = (f, probes = P) => withEnv({ CLAUDE_CMD: f }, () => probes.cliVersion(f));   // each fake named as the stand-in (B-ec25)
+  const warn = await ver(fake('claude-warn', "echo 'Warning: an update is available'; echo '2.1.300 (Claude Code)'"));
   ok('a warning line BEFORE the number is skipped: the upgrade (2.1.300) is seen', warn === '2.1.300 (Claude Code)' && C.cliVersionOf(warn) === '2.1.300', JSON.stringify(warn));
-  const plain = await P.cliVersion(fake('claude-plain', "echo '2.1.296 (Claude Code)'"));
+  const plain = await ver(fake('claude-plain', "echo '2.1.296 (Claude Code)'"));
   ok('…the plain answer reads as before', plain === '2.1.296 (Claude Code)', JSON.stringify(plain));
-  const junk = await P.cliVersion(fake('claude-junk', "echo 'Claude Code'; echo 'build: nightly'"));
+  const junk = await ver(fake('claude-junk', "echo 'Claude Code'; echo 'build: nightly'"));
   ok('an answer with no version line says \'unparsed\' (a KNOWN CLI nobody measured — never "no answer")', junk === 'unparsed', JSON.stringify(junk));
-  const dead = await P.cliVersion(fake('claude-fails', 'exit 3'));
+  const dead = await ver(fake('claude-fails', 'exit 3'));
   ok('a binary that fails says null (no answer: the gate keeps the last known version)', dead === null, JSON.stringify(dead));
   const SRCP = fs.readFileSync(path.join(REPO, 'src/machine-probes.js'), 'utf8');
   const A = ".find((l) => cliVersionOf(l)) || 'unparsed'";
   if (SRCP.includes(A)) {
     const f = path.join(tmp, 'machine-probes-r1.js');
     fs.writeFileSync(f, SRCP.replace("return v.split('\\n').map((l) => l.trim())" + A + ';', "return v.trim().split('\\n')[0];").replace("require('./cli-caps.js')", `require(${JSON.stringify(CAPS)})`));
-    const r1 = await require(f).cliVersion(path.join(tmp, 'claude-warn'));
+    const r1 = await ver(path.join(tmp, 'claude-warn'), require(f));
     ok('RED CONTROL: the r1 probe (line 1 only) reads the warning, never the upgrade', r1 === 'Warning: an update is available' && C.cliVersionOf(r1) === null, JSON.stringify(r1));
   } else ok('⑦ anchor present in src/machine-probes.js', false, A);
+}
+
+// ── ⑧ NO SELF-FOUND AGENT CLI UNDER THE FLAG (B-ec25, lane bl-tests-e) ──
+// machine-probes is the door of the hub's --version reads (the long-lived-token clock's tick 20 s after boot, GET
+// /api/backend-status): under VS_NO_REAL_CLI=1 it starts only THE stand-in the env names. Argv-recording stubs; the
+// CONTROL first (the flag unset: the same binary IS started), so an empty record under the flag is the guard.
+console.log('⑧ B-ec25: machine-probes starts no agent CLI it found by itself under VS_NO_REAL_CLI=1 — only THE stand-in the env names');
+{
+  const P = require(path.join(REPO, 'src/machine-probes.js'));
+  const REC = path.join(tmp, 'ec25-argv.log');
+  const stub = (name) => { const p = path.join(tmp, name); fs.writeFileSync(p, `#!/bin/sh\nprintf '%s %s\\n' '${name}' "$*" >> '${REC}'\necho '2.1.300 (Claude Code)'\n`, { mode: 0o755 }); return p; };
+  const CL = stub('ec25-claude'), OTHER = stub('ec25-other'), CX = stub('ec25-codex');
+  const runs = () => { try { return fs.readFileSync(REC, 'utf8').trim().split('\n').filter(Boolean); } catch { return []; } };
+  const fresh = () => fs.rmSync(REC, { force: true });
+  const said = [], log0 = console.log;
+  console.log = (...a) => { said.push(a.join(' ')); log0(...a); };
+  try {
+    fresh();
+    const ctl = await withEnv({ VS_NO_REAL_CLI: null, CLAUDE_CMD: null }, () => P.cliVersion(CL));
+    ok(`RED CONTROL (first): the flag unset, cliVersion STARTS the binary it was handed (${runs().join(' · ') || 'none'})`, ctl === '2.1.300 (Claude Code)' && runs().join('|') === 'ec25-claude --version', JSON.stringify(ctl));
+    fresh();
+    const v0 = await withEnv({ VS_NO_REAL_CLI: '1', CLAUDE_CMD: null }, () => P.cliVersion(CL));
+    ok('under VS_NO_REAL_CLI=1 with no CLAUDE_CMD, cliVersion starts nothing and answers null (no answer: the gate keeps the last known version)', v0 === null && runs().length === 0, JSON.stringify([v0, runs()]));
+    ok('…said by name, once', said.filter((l) => l === '[cli-probe] claude --version not run: VS_NO_REAL_CLI=1 and no CLAUDE_CMD names a stand-in').length === 1, JSON.stringify(said));
+    const f0 = await withEnv({ VS_NO_REAL_CLI: '1', CLAUDE_CMD: null, CODEX_CMD: null, HOME: tmp }, () => P.cliFacts({ claudeCmd: CL, codexCmd: CX }));
+    ok('cliFacts under the flag: both CLIs found, neither started — installed, no version, the words why', runs().length === 0 && f0.claude.installed === true && f0.claude.version === null && /^not run: VS_NO_REAL_CLI=1 and no CLAUDE_CMD/.test(f0.claude.notRun || '') && f0.codex.installed === true && f0.codex.version === null && /^not run: VS_NO_REAL_CLI=1 and no CODEX_CMD/.test(f0.codex.notRun || ''), JSON.stringify([runs(), f0.claude, f0.codex]));
+    const v1 = await withEnv({ VS_NO_REAL_CLI: '1', CLAUDE_CMD: CL }, () => P.cliVersion(CL));
+    ok('THE stand-in the env names still runs under the flag', v1 === '2.1.300 (Claude Code)' && runs().join('|') === 'ec25-claude --version', JSON.stringify([v1, runs()]));
+    fresh();
+    const v2 = await withEnv({ VS_NO_REAL_CLI: '1', CLAUDE_CMD: OTHER }, () => P.cliVersion(CL));
+    ok('a named stand-in never unlocks ANOTHER binary: CLAUDE_CMD names one stub, the probe is handed another ⇒ nothing started', v2 === null && runs().length === 0, JSON.stringify([v2, runs()]));
+    const PB = path.join(tmp, 'ec25-pathbin'); fs.mkdirSync(PB, { recursive: true });
+    fs.writeFileSync(path.join(PB, 'claude'), `#!/bin/sh\nprintf '%s %s\\n' 'path-claude' "$*" >> '${REC}'\necho '2.1.300 (Claude Code)'\n`, { mode: 0o755 });
+    const v3 = await withEnv({ VS_NO_REAL_CLI: '1', CLAUDE_CMD: 'claude', PATH: `${PB}:${process.env.PATH}` }, () => P.cliVersion('claude'));
+    ok('CLAUDE_CMD=claude (the bare default name) names no stand-in — the `claude` PATH finds (the very file the name resolves to) is NOT started', v3 === null && runs().length === 0, JSON.stringify([v3, runs()]));
+    const LN = path.join(tmp, 'ec25-link'); try { fs.unlinkSync(LN); } catch { } fs.symlinkSync(CL, LN);
+    const v4 = await withEnv({ VS_NO_REAL_CLI: '1', CLAUDE_CMD: LN }, () => P.cliVersion(CL));
+    ok('a stand-in named through a SYMLINK is the same file ⇒ it runs (the realpath decides, not the spelling)', v4 === '2.1.300 (Claude Code)' && runs().join('|') === 'ec25-claude --version', JSON.stringify([v4, runs()]));
+  } finally { console.log = log0; }
 }
 
 console.log(fail ? `${fail} FAILED (${pass} passed${skip ? `, ${skip} skipped` : ''})` : `ALL PASS (${pass}${skip ? `, ${skip} skipped` : ''})`);

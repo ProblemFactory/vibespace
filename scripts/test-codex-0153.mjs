@@ -324,6 +324,7 @@ console.log('— ⑤ thread/read fallback for a thread with NO rollout (0.153 pa
   const reads = () => rpc().filter((m) => m.method === 'thread/read').length;
   TR._resetForTests();
   TR.configure({ codexCmd: fake, enabled: true });
+  const cxWas = process.env.CODEX_CMD; process.env.CODEX_CMD = fake;   // B-ec25: under VS_NO_REAL_CLI=1 only THE named stand-in starts — this fake is it
   const { HARNESSES } = require(path.join(REPO, 'src/harnesses/index.js'));
   const warm = HARNESSES.codex.store.warmTranscript;
   ok(typeof warm === 'function', 'the codex descriptor declares store.warmTranscript (the S3 pre-read hook claude already had)');
@@ -339,6 +340,13 @@ console.log('— ⑤ thread/read fallback for a thread with NO rollout (0.153 pa
   TR.configure({ enabled: false });
   ok(await warm(OTHER, '/w', {}) === false && reads() === 2, 'disabled (no codex on this box) → no spawn, honest false');
   TR.configure({ enabled: true });
+  { // B-ec25: under the flag a codex NO env names is never started by a view (a scratch hub's self-found binary) — the same fake
+    const flagWas = process.env.VS_NO_REAL_CLI; process.env.VS_NO_REAL_CLI = '1'; delete process.env.CODEX_CMD;
+    const got = await warm('ec25-thread-' + process.pid, '/w', {});
+    ok(got === false && reads() === 2, 'B-ec25: under VS_NO_REAL_CLI=1 with no CODEX_CMD the view starts NO app-server (false, no spawn) — the line before shows the named fake does');
+    if (flagWas === undefined) delete process.env.VS_NO_REAL_CLI; else process.env.VS_NO_REAL_CLI = flagWas;
+  }
+  if (cxWas === undefined) delete process.env.CODEX_CMD; else process.env.CODEX_CMD = cxWas;
   // timeout: a shim that never answers is killed and rejects within the bound
   const dead = path.join(dir, 'dead-codex');
   fs.writeFileSync(dead, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} -e "setInterval(()=>{},1e3)"\n`, { mode: 0o755 });

@@ -12,6 +12,7 @@ const { execFile, execFileSync } = require('child_process');
 const { createAdapterRegistry } = require('../adapters');
 const { createCliCmds } = require('./cli-cmd.js');
 const { capsOf, setVerifiedCap } = require('../backend-caps');
+const { realCliRefusal } = require('../machine-probes'); // B-ec25: no self-found agent CLI is started under VS_NO_REAL_CLI=1
 
 /** THE predicate "this harness's STORE is broken", or null. Module scope on
  *  purpose: /api/home (harnessAvailability) and the live harness-store-updated
@@ -132,6 +133,8 @@ const CODEX_LINUX_SANDBOX_CMD = resolveCmd('codex-linux-sandbox');
 const CODEX_SANDBOX_SUPPORTED = true;
 function probeCodexSandbox(registry) {
   if (process.platform !== 'linux' || !CODEX_CMD) return;
+  const notRun = realCliRefusal('codex', { cmd: CODEX_CMD });   // B-ec25: assumed supported, as before any probe answers
+  if (notRun) { console.log(`[cli-probe] codex sandbox -- true ${notRun} (the sandbox is assumed supported)`); return; }
   execFile(CODEX_CMD, ['sandbox', '--', 'true'], { timeout: 20000, env: { ...process.env, CODEX_HOME: process.env.CODEX_HOME || path.join(os.homedir(), '.codex') } }, (err) => {
     const ok = !err;
     const ad = registry.get('codex');
@@ -304,7 +307,9 @@ let PERMISSION_MODES = ['default', 'acceptEdits', 'auto', 'bypassPermissions', '
 // dynamic-workflow orchestration), appended as a pseudo-level client-side.
 let EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
 let CLAUDE_SUPPORTS_NAME = false;
-try {
+const HELP_NOT_RUN = CLAUDE_CMD ? realCliRefusal('claude', { cmd: CLAUDE_CMD }) : null;   // B-ec25: the modes, levels and --name support keep the defaults above
+if (HELP_NOT_RUN) console.log(`[cli-probe] claude --help ${HELP_NOT_RUN} (permission modes, effort levels and --name support keep their defaults)`);
+else try {
   const help = execFileSync(CLAUDE_CMD, ['--help'], { encoding: 'utf-8', timeout: 5000 });
   const permMatch = help.match(/--permission-mode.*choices:\s*(.+)\)/);
   if (permMatch) {

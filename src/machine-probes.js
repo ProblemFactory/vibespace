@@ -31,6 +31,26 @@ const exec = (cmd, args, timeout = 5000) => new Promise((resolve) => {
   catch { resolve(null); }
 });
 
+/** NO REAL AGENT CLI UNDER THE FLAG (B-ec25, lane bl-tests-e): VS_NO_REAL_CLI=1 (every lane env, acceptance run, the test
+ *  machine) means a probe here never STARTS an agent CLI the process found by itself (a PATH lookup, the resolver's
+ *  /usr/local/bin, /usr/bin) — a scratch hub booted with no stand-in ran the real binaries' --help / --version / sandbox
+ *  probes. Only THE stand-in the env NAMES runs: `<ID>_CMD` (CLAUDE_CMD, CODEX_CMD), set, not the bare default name, and
+ *  the command the probe would start resolves to that same file (a named stand-in never unlocks another binary).
+ *  The flag alone decides (never the hub's temp root: the Actions heavy jobs run the installed claude on purpose).
+ *  → null (the probe may run) or the words that say why it did not; src/server/cli-env.js's boot probes ask it too. */
+function realCliRefusal(id, { env = process.env, cmd } = {}) {
+  if (!env || env.VS_NO_REAL_CLI !== '1') return null;
+  const name = `${String(id).toUpperCase().replace(/-/g, '_')}_CMD`;
+  const standIn = env[name];
+  if (!standIn || standIn === String(id)) return `not run: VS_NO_REAL_CLI=1 and no ${name} names a stand-in`;
+  const fileOf = (c) => { const s = c ? String(c) : ''; const p = s ? which(s.includes('/') && !path.isAbsolute(s) ? path.resolve(s) : s) : null; return p ? ((classifyInstall(p) || {}).binPath || p) : null; };   // the realpath through classifyInstall's own read (no new fs site)
+  const run = fileOf(cmd);
+  return run && run === fileOf(standIn) ? null : `not run: VS_NO_REAL_CLI=1 and ${cmd || '(no command)'} is not the ${name} stand-in`;
+}
+const _saidNotRun = new Set();
+/** the one journal line per probe that was not run (said once per process: a 15-min tick never floods the journal) */
+function sayNotRun(probe, why) { if (_saidNotRun.has(probe)) return; _saidNotRun.add(probe); console.log(`[cli-probe] ${probe} ${why}`); }
+
 function readJson(p) { try { return JSON.parse(fs.readFileSync(p, 'utf-8')); } catch { return null; } }
 function statMtime(p) { try { return Math.floor(fs.statSync(p).mtimeMs / 1000); } catch { return null; } }
 
@@ -99,6 +119,8 @@ async function cliFacts({ claudeCmd = 'claude', codexCmd = 'codex' } = {}) {
     b.cmdPath = p;
     b.install = classifyInstall(p);
     if (!p) { b.installed = false; b.version = null; continue; }
+    const notRun = realCliRefusal(key, { cmd: p });   // B-ec25: found, never started — the version unknown, said by name
+    if (notRun) { b.installed = true; b.version = null; b.notRun = notRun; sayNotRun(`${key} --version`, notRun); continue; }
     const v = await exec(p, ['--version']);
     b.installed = v !== null;
     b.version = v ? v.trim().split('\n')[0] : null;
@@ -175,9 +197,11 @@ async function credsFacts() {
  *  skipped — pool-oat-materialize verify r1 F9), 'unparsed' when it answered
  *  and no line does, null when it did not answer. The hub's long-lived-token
  *  gate asks it for the claude it spawns (src/server/oat-file-sync.js). */
-async function cliVersion(cmd) {
+async function cliVersion(cmd, { id = 'claude' } = {}) {
   const p = which(cmd);
   if (!p) return null;
+  const notRun = realCliRefusal(id, { cmd: p });   // B-ec25: the oat tick's read — «no answer», the last known version stands
+  if (notRun) { sayNotRun(`${id} --version`, notRun); return null; }
   const v = await exec(p, ['--version']);
   if (!v || !v.trim()) return null;
   return v.split('\n').map((l) => l.trim()).find((l) => cliVersionOf(l)) || 'unparsed';
@@ -208,4 +232,4 @@ async function cliBinaryIdentity(cmd) {
   try { const real = await fs.promises.realpath(p); const st = await fs.promises.stat(real); return { path: real, cmd: p, size: st.size, identity: `${st.dev}:${st.ino}:${st.size}:${Math.round(st.mtimeMs)}:${Math.round(st.ctimeMs)}` }; } catch { return null; }
 }
 
-module.exports = { cliFacts, credsFacts, classifyInstall, which, cliVersion, cliBinary, cliBinaryIdentity };
+module.exports = { cliFacts, credsFacts, classifyInstall, which, cliVersion, cliBinary, cliBinaryIdentity, realCliRefusal, sayNotRun };

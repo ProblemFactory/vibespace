@@ -199,7 +199,9 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
     const tid = 'eeeeeeee-0000-4000-8000-00000000c0de', cref = { backend: 'codex', sessionId: tid, cwd };
     // the reader's OWN listings (chatStatus finds the rollout, as the release did): what status() may make, and no more
     const nReader = await listing(async () => { mkReader({ backend: 'codex', backendSessionId: tid, cwd, buffer: '' }).chatStatus(); });
-    const scene = async (TS, cmd) => {
+    // B-ec25: under VS_NO_REAL_CLI=1 a view starts only THE codex CODEX_CMD names — each stand-in here is named for its own scene
+    const scene = async (TS, cmd) => { const cxWas = process.env.CODEX_CMD; process.env.CODEX_CMD = cmd; try { return await sceneOf(TS, cmd); } finally { if (cxWas === undefined) delete process.env.CODEX_CMD; else process.env.CODEX_CMD = cxWas; } };
+    const sceneOf = async (TS, cmd) => {
       CTR._resetForTests(); CTR.configure({ codexCmd: cmd, enabled: true });
       const svc = TS.createTranscriptService({ activeSessions: new Map(), createSessionMessages: mkReader, hosts: null });
       let ans = null;
@@ -304,8 +306,10 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
       R.setup({ activeSessions: new Map(), webuiPids: new Set(), refreshWebuiPids: () => { }, createSessionMessages: mkReader, BUFFERS_DIR: path.join(os.homedir(), 'buf'), PERMISSION_MODES: [], execFileSync, hosts, accounts: null, sessionAuth: () => ({}), serverSetting: () => undefined });
       const layer = R.router.stack.find((l) => l.route?.path === '/api/session-todos');
       asked.length = 0; CTR._resetForTests(); CTR.configure({ codexCmd: standIn('codex-route'), enabled: true });
+      const cxWas = process.env.CODEX_CMD; process.env.CODEX_CMD = path.join(HOME_FAKE, 'codex-route');   // B-ec25: the named stand-in
       let body = null;
       const n = await listing(async () => { body = await new Promise((resolve, reject) => { const res = { json: resolve, status: () => res }; Promise.resolve(layer.route.stack[0].handle({ query: { backend, backendSessionId: backend === 'codex' ? tid : sid, cwd, host: 'm1' } }, res)).catch(reject); }); });
+      if (cxWas === undefined) delete process.env.CODEX_CMD; else process.env.CODEX_CMD = cxWas;
       return { todos: (body && body.todos) || [], asked: asked.join(' '), n, ran: ran(path.join(HOME_FAKE, 'codex-route')) };
     };
     const rsrc = fs.readFileSync(path.join(REPO, 'src/routes/sessions.js'), 'utf8'), TSREQ = "const { createTranscriptService } = require('../transcript-service');";

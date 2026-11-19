@@ -241,6 +241,9 @@ function _prune() {
  *  the app-server failed — negative-cached for NEG_TTL_MS). Never throws. */
 function warmMissingThread(threadId, { locate, remote = false, codexCmd, timeoutMs } = {}) {
   if (!threadId || remote || !_cfg.enabled || !(codexCmd || _cfg.codexCmd)) return Promise.resolve(false);
+  // B-ec25: viewing a codex conversation with no rollout here starts `codex app-server` — under VS_NO_REAL_CLI=1 only THE
+  // stand-in CODEX_CMD names may be started (a scratch hub found the real binary by itself); else an honest false, said once
+  { const MPR = require('./machine-probes'); const notRun = MPR.realCliRefusal('codex', { cmd: codexCmd || _cfg.codexCmd }); if (notRun) { MPR.sayNotRun('codex app-server (a thread read)', notRun); return Promise.resolve(false); } }
   try { if (typeof locate === 'function' && locate(threadId)) return Promise.resolve(false); } catch { }
   const hit = _cache.get(threadId);
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) return Promise.resolve(true);

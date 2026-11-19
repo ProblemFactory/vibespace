@@ -327,7 +327,10 @@ const GATE9 = (async () => {
   const accounts = { noteCliVersion: (v) => { gate.push(v); return { cli: v, ok: true, changed: false }; }, oatFileCaps: () => ({ cli: null, ok: false }), syncOatFiles: async () => { }, oatFileSettled: async () => { } };
   const OFS = require(path.join(REPO, 'src/server/oat-file-sync.js'));
   const MP = require(path.join(REPO, 'src/machine-probes.js'));
-  const sync = OFS.start({ accounts, machineProbes: MP, claudeCmd: () => reg.current('claude'), onCliVersion: (v) => told.push(v), log: () => { }, bootDelayMs: 1e9, recheckMs: 1e9 });
+  // B-ec25: under VS_NO_REAL_CLI=1 machine-probes starts only THE stand-in CLAUDE_CMD names — each fake here IS this leg's
+  // stand-in, named for its own --version read (the real machine-probes reads it; nothing else reads CLAUDE_CMD at run time)
+  const MPS = { ...MP, cliVersion: async (cmd, o) => { const was = process.env.CLAUDE_CMD; process.env.CLAUDE_CMD = cmd; try { return await MP.cliVersion(cmd, o); } finally { if (was === undefined) delete process.env.CLAUDE_CMD; else process.env.CLAUDE_CMD = was; } } };
+  const sync = OFS.start({ accounts, machineProbes: MPS, claudeCmd: () => reg.current('claude'), onCliVersion: (v) => told.push(v), log: () => { }, bootDelayMs: 1e9, recheckMs: 1e9 });
   let adoptTick = null;
   if (typeof reg.onAdopt === 'function') reg.onAdopt((b) => { if (b === 'claude') adoptTick = sync.tick(); });
   await sync.tick();
@@ -974,6 +977,52 @@ console.log('⑦ mutants of the shell rung (patched copies outside the tree, jud
     ok(`mutant «${label}» ⇒ RED (${red.length} red: ${red.slice(0, 2).join(' | ').slice(0, 160)})`, red.some((n) => want.test(n)), red.join(' | ').slice(0, 300));
   });
   for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 11 })) ok(r.name, r.pass, r.detail); // ④'s 3 + ⑦'s 5 + ⑪'s 3 (batch 63 cure: + the CLI's dir first, + a shorter ask prelude)
+}
+
+// ⑫ NO SELF-FOUND AGENT CLI AT A HUB'S BOOT UNDER THE FLAG (B-ec25, lane bl-tests-e): a scratch hub booted with no stand-in
+// commands ran the binaries it FOUND (claude --help at boot, codex sandbox -- true) whatever VS_NO_REAL_CLI said. The real
+// cli-env create() runs in a child over a stub-only resolver (argv-recording `exit 0` stubs; the child env is built from
+// nothing); the CONTROL first: the flag unset, the same self-found stubs ARE started — so a silent record under the flag is
+// the guard (src/machine-probes.js realCliRefusal), not a stub the resolver never found.
+console.log('⑫ B-ec25: the boot probes start no agent CLI the hub found by itself under VS_NO_REAL_CLI=1 (the real cli-env create, in a child)');
+{
+  const BD = path.join(DIR, 'ec25'), BIN = path.join(BD, 'bin'), REC = path.join(BD, 'argv.log');
+  for (const d of [BIN, path.join(BD, 'home'), path.join(BD, 'root')]) fs.mkdirSync(d, { recursive: true });
+  const stub = (name, out) => fs.writeFileSync(path.join(BIN, name), `#!/bin/sh\nprintf '%s %s\\n' '${name}' "$*" >> '${REC}'\n${out}exit 0\n`, { mode: 0o755 });
+  stub('claude', "printf '  --name <name>  a name for the session\\n'\n");
+  stub('codex', 'exit 1\n');   // its sandbox probe FAILS: an answer read (false) is told from the default (true)
+  const CHILD = path.join(BD, 'boot.cjs');
+  fs.writeFileSync(CHILD, [
+    "const fs = require('fs'), path = require('path');",
+    "const [repo, bin, root, rec] = process.argv.slice(2);",
+    "const said = []; const log0 = console.log; console.log = (...a) => { said.push(a.join(' ')); };",
+    "const resolveCmd = (n) => { const p = path.join(bin, n); try { fs.accessSync(p, fs.constants.X_OK); return p; } catch { return null; } };",
+    "const E = require(path.join(repo, 'src/server/cli-env.js')).create({ rootDir: root, CLAUDE_CMD_RAW: process.env.CLAUDE_CMD || 'claude', CODEX_CMD_RAW: process.env.CODEX_CMD || 'codex', resolveCmd, getOAuthToken: (cb) => cb(null), usagePollingEnabled: () => false, refreshHarnessModels: () => {} });",
+    "const runs = () => { try { return fs.readFileSync(rec, 'utf8'); } catch { return ''; } };",
+    "const guarded = said.some((l) => l.startsWith('[cli-probe] codex sandbox -- true not run'));",
+    "const t0 = Date.now();",
+    "const done = () => { const cx = E.adapterRegistry.get('codex'); log0('RESULT ' + JSON.stringify({ said, supportsName: !!E.adapterRegistry.get('claude').config.supportsName, sandbox: cx && cx.config ? cx.config.codexSandboxSupported : null })); process.exit(0); };",
+    "(function wait() { if (process.platform !== 'linux' || /codex sandbox/.test(runs()) || (guarded && Date.now() - t0 > 300) || Date.now() - t0 > 15000) return setTimeout(done, 50); setTimeout(wait, 25); })();",
+  ].join('\n') + '\n');
+  const boot = (extra) => {
+    fs.rmSync(REC, { force: true });
+    const r = spawnSync(process.execPath, [CHILD, REPO, BIN, path.join(BD, 'root'), REC], { encoding: 'utf8', timeout: 30000, env: { PATH: `${BIN}:/usr/bin:/bin`, HOME: path.join(BD, 'home'), LANG: 'C.UTF-8', ...extra } });
+    const line = String(r.stdout || '').split('\n').find((l) => l.startsWith('RESULT '));
+    let out = null; try { out = JSON.parse(line.slice(7)); } catch { }
+    let runs = ''; try { runs = fs.readFileSync(REC, 'utf8'); } catch { }
+    return { out, runs: runs.trim().split('\n').filter(Boolean).sort(), err: String(r.stderr || '').slice(-300) };
+  };
+  const LINUX = process.platform === 'linux';
+  const BOTH = LINUX ? ['claude --help', 'codex sandbox -- true'] : ['claude --help'];
+  const same = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+  const C = boot({});
+  ok(`RED CONTROL (first): the flag unset, no stand-in named — the boot STARTS the self-found stubs (${C.runs.join(' · ') || 'none'}) and reads their answers (--name support; the failed sandbox)`, !!C.out && same(C.runs, BOTH) && C.out.supportsName === true && C.out.sandbox === !LINUX, C.err || JSON.stringify(C.out));
+  const A = boot({ VS_NO_REAL_CLI: '1' });
+  ok(`under VS_NO_REAL_CLI=1 with no stand-in named, the boot starts NO agent CLI it found (argv record: ${A.runs.length} lines)`, !!A.out && A.runs.length === 0, A.err || A.runs.join(' | '));
+  ok('…each probe says so by name in the journal', !!A.out && A.out.said.includes('[cli-probe] claude --help not run: VS_NO_REAL_CLI=1 and no CLAUDE_CMD names a stand-in (permission modes, effort levels and --name support keep their defaults)') && (!LINUX || A.out.said.includes('[cli-probe] codex sandbox -- true not run: VS_NO_REAL_CLI=1 and no CODEX_CMD names a stand-in (the sandbox is assumed supported)')), JSON.stringify(A.out && A.out.said));
+  ok('…and the defaults stand: no --name support read, the sandbox assumed supported', !!A.out && A.out.supportsName === false && A.out.sandbox === true, JSON.stringify(A.out));
+  const B = boot({ VS_NO_REAL_CLI: '1', CLAUDE_CMD: path.join(BIN, 'claude'), CODEX_CMD: path.join(BIN, 'codex') });
+  ok(`the stand-ins the env NAMES still run under the flag, each once (${B.runs.join(' · ') || 'none'}), and their answers are read (--name support; the failed sandbox)`, !!B.out && same(B.runs, BOTH) && B.out.supportsName === true && B.out.sandbox === !LINUX, B.err || JSON.stringify(B.out));
 }
 
 console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed)' : 'ALL PASS (' + pass + ')'}`);
