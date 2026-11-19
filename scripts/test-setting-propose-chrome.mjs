@@ -12,6 +12,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, stillPresser, ownerPageHeaders, CHROME_STORE } from './scratch.mjs';
+import { waitPageTarget } from './cdp-page-target.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = [process.env.VS_CHROME, '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => p && fs.existsSync(p));
@@ -73,7 +74,7 @@ for (let i = 0; i < 240; i++) { try { const r = await fetch(`${BASE}/api/home`);
 
 const WebSocket = require('ws');
 let target = null;
-for (let i = 0; i < 80 && !target; i++) { try { target = (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json()).find((t) => t.type === 'page'); } catch { await sleep(250); } }
+target = await waitPageTarget(CDP_PORT, { polls: 80, everyMs: 250, child: chrome }); // B-fcae: the one waiter (a miss always waits)
 if (!target) { console.error('  ✗ boot: no chrome page'); process.exit(1); }
 const ws = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
 await new Promise((r) => ws.on('open', r));
