@@ -137,6 +137,12 @@ function create({ rootDir, PORT, BUFFERS_DIR, META_DIR, SOCKETS_DIR, DTACH_CMD,
 // hand-copy them (35 / 10 / 21 assignments, drifting). `transportFacts` = the
 // transport-only fields (socket / keeper / pipe / port) and the per-path rows
 // a path has never restored (kept per path so behaviour is unchanged); they win.
+// the B-f276 remainder (browser-profiles.json, its read r4 S12): a conversation restored LATE — a pipe re-opened, a remote orphan
+// re-adopted, after the keeper's boot owed the restored ones — owes the pin its create could not judge, as those do (idempotent)
+function oweRestoredPin(session) {
+  if (!session || !session._browserKey || !session._browserPinOwed) return;
+  try { require('./browser-keeper.js').keeper()?.owePin?.(session._browserKey, { ...session._browserPinOwed, restored: true }); } catch (e) { console.warn('[browser] a late-restored conversation\'s owed pin —', e && e.message); }
+}
 function sessionFromMeta(meta, transportFacts) {
   return {
     clients: new Map(),
@@ -960,7 +966,7 @@ function restoreAgentdPipeSessions() {
       // the SAME duck as ws-create's R6 create path (it was a verbatim one-slot
       // twin that dropped the liveness stamp — B-ae4b)
       const shim = pipePtyShim(h);
-      activeSessions.set(id, session);
+      activeSessions.set(id, session); oweRestoredPin(session);
       session._webuiId = id;
       setupSessionPty(session, id, shim);
       broadcastActiveSessions();   // lane human-cli (test-architecture §104): a re-opened pipe session reaches the list's ONE notify point — the web and the person's index learn it now, not at the next unrelated broadcast
@@ -1065,7 +1071,7 @@ async function readoptOrphanKeeperSessions() {
     session._normEpoch = Date.now();
     try { session._normalizer.seedCost(costSeedOf(meta.costKept, '')); } catch { } // 2.369.402: the kept cost fold (no buffer here)
     session._normalizer.onOp((op) => broadcastToSession(session, id, { type: 'msg', sessionId: id, ...op }));
-    activeSessions.set(id, session);
+    activeSessions.set(id, session); oweRestoredPin(session);
     session._webuiId = id; // per-session pool link key (plan C) — the id the session is registered under
     session._spawnModel = meta.spawnModel || null; session._pickedModel = meta.pickedModel || null; session._pickedModelAt = meta.pickedModelAt || 0; Object.assign(session, require('./model-ask.js').hydratedFacts(meta)); session._servedViaFallback = restoredFallback(meta); // plan C model ladder survives restarts — and so does the classifier reroute (r3 §7)
     session._msgReachability = meta.msgReachability || null; // Channels v1 per-session reach override survives restarts

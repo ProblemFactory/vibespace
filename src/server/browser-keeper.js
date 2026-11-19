@@ -2040,7 +2040,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const had = owedPins.get(browserKey);
     // a resume while still held carries weaker facts (no pick of its own): it never replaces the create's pick
     if (!had || (owed.facts && owed.facts.explicit)) owedPins.set(browserKey, owed);
-    return { owed: true };
+    return { owed: true, kept: owedPins.get(browserKey) };   // its read r4 (S12): the facts it KEEPS — the record carries those (a resume never records weaker ones)
   }
   function judgeOwedPin(browserKey, owed) {
     owedPins.delete(browserKey);
@@ -2061,6 +2061,9 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       else if (pin.profileId && pin.origin !== 'conversation') out = setPin(browserKey, pin.profileId, { origin: pin.origin, remote: !!owed.remote });
       else if (pin.profileId) out = pinFor(browserKey);   // a resume's own pin (the ladder's conversation rung): kept as it is
     } catch (e) { pin = { ...pin, refused: String(e && e.message) }; }
+    // its read r4 (S13): a verdict that finds the registry HELD judged nothing — the facts are owed again (never a «none» told to the
+    // session, which would clear its record: the pick lost for good)
+    if (pin.held) { owedPins.set(browserKey, owed); return { owed: true, kept: owed }; }
     const res = { pin: out, refused: out ? null : (pin.refused || null), formRefused: pin.formRefused || null };
     try { if (owed && owed.groupFacts && typeof owed.groupFacts === 'object') stampGroupCap(browserKey, owed.groupFacts, owed.cap !== undefined ? { value: owed.cap } : {}); } catch (e) { log.warn?.(`[browser] ${browserKey}: the Task Group's cap after the read was not stamped — ${e && e.message}`); }   // S4
     res.cap = capOf(browserKey);

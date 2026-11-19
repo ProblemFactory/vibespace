@@ -149,10 +149,10 @@ console.log('§4 WIRING: the route door, Housekeeping, a build\'s removal, the s
   // its read r2 (M3 / S5 / N11): the wiring of the OWED pin — the keyed create owes it under its key and its record carries the facts;
   // a keyless create's witness carries them; a restored conversation owes it again; the live session's copy follows the verdict
   const BR = fs.readFileSync(path.join(ROOT, 'src/server/boot-restore.js'), 'utf8');
-  ok(WC.includes("if (pinOwed) { session._browserPinOwed = pinOwed; try { require('./server/browser-keeper.js').keeper()?.owePin?.(bk.key, pinOwed); }") && WC.includes('browserPinOwed: session._browserPinOwed || undefined,')
+  ok(WC.includes("if (pinOwed) { session._browserPinOwed = pinOwed; try { const ko = require('./server/browser-keeper.js').keeper()?.owePin?.(bk.key, pinOwed); if (ko && ko.kept) session._browserPinOwed = ko.kept; }") && WC.includes('browserPinOwed: session._browserPinOwed || undefined,')
     && WC.includes('spawnPinWitness = { owed: pinOwed, at: Date.now() };') && WC.includes('integrationOn && !pin.held)') && WC.includes('kp.pinVerdictForCreate({ facts: pinFacts, hint, formGroups })'),
     'a create while held OWES its pin: under its key (the keeper judges it at the read, whatever became of the session) and in its record; a keyless one in its start witness; both roads judge through ONE verdict');
-  ok(BR.includes("_browserPinOwed: meta.browserPinOwed && typeof meta.browserPinOwed === 'object'") && MP.includes('browserKeeper.owePin?.(s._browserKey, { ...s._browserPinOwed, restored: true })') && MP.indexOf('browserKeeper.owePin?.(s._browserKey, { ...s._browserPinOwed, restored: true })') < MP.indexOf('Promise.resolve(gate).catch(() => null).then(() => browserKeeper.boot())') && MP.includes('browserKeeper.onOwedPin?.((key, res) => {')
+  ok(BR.includes("_browserPinOwed: meta.browserPinOwed && typeof meta.browserPinOwed === 'object'") && (BR.match(/activeSessions\.set\(id, session\); oweRestoredPin\(session\);/g) || []).length === 2 && MP.includes('browserKeeper.owePin?.(s._browserKey, { ...s._browserPinOwed, restored: true })') && MP.indexOf('browserKeeper.owePin?.(s._browserKey, { ...s._browserPinOwed, restored: true })') < MP.indexOf('Promise.resolve(gate).catch(() => null).then(() => browserKeeper.boot())') && MP.includes('browserKeeper.onOwedPin?.((key, res) => {')
     && BK.includes('if (witness && typeof witness === \'object\' && witness.owed && k) witness = owedWitness(k, witness);'),
     'a restart before the read: the restored conversation owes its pin again BEFORE the keeper\'s boot (r3 S7: judged first in it); the live session\'s copy and record follow the verdict; the late key judges an owed witness');
   ok(WC.includes('if (kq && typeof kq.owedPending === \'function\' && !kq.owedPending(session._browserKey) && !kq.held()) {') && WC.indexOf('!kq.owedPending(session._browserKey)') > WC.indexOf('activeSessions.set(id, session);')
@@ -167,7 +167,7 @@ console.log('§4 WIRING: the route door, Housekeeping, a build\'s removal, the s
 console.log('§5 its reads r2 + r3: a create the held registry could not judge OWES its pin — keyed by its browser key, judged right after the read');
 {
   const PARENT = 'bk-0000aaaa', KR = 'bk-0000eeee';   // both pinned to «work» in the file
-  const K1 = 'bk-0000bbbb', KF = 'bk-0000cccc', KW = 'bk-0000dddd', KH = 'bk-0000ffff', KS = 'bk-00001111';
+  const K1 = 'bk-0000bbbb', KF = 'bk-0000cccc', KW = 'bk-0000dddd', KH = 'bk-0000ffff', KS = 'bk-00001111', KG = 'bk-00002222';
   const B0 = JSON.parse(BODY);
   const BODY5 = JSON.stringify({ ...B0, profiles: [...B0.profiles, { id: 'bp-0000b002', label: 'home', provider: 'chromium', dir: '/var/empty/vs-home-profile', createdAt: 2 }],
     pins: { [PARENT]: { profileId: 'bp-0000b001', origin: 'chosen', at: 1, by: 'user' }, [KR]: { profileId: 'bp-0000b001', origin: 'chosen', at: 1, by: 'user' } } });
@@ -187,6 +187,7 @@ console.log('§5 its reads r2 + r3: a create the held registry could not judge O
       k.owePin(KH, { facts: { explicit: 'bp-0000b001', taskGroupDefault: 'bp-0000b001' }, hint: 'task-group' }),   // r3 S10: the dialog's hint downgrades
       k.owePin(KS, { facts: { instanceRef: 'work' }, groupFacts: {}, cap: 1 }),   // r3 S8: the instance default and the cap AT THE START
       k.owePin(KW, { facts: {} }),   // nothing to pick
+      k.owePin(KG, { facts: { explicit: 'bp-0000b001' }, formGroups: ['T-form'] }),   // r4 S14: the New Session FORM's pick — judged by the groups it sent (none admits it here)
     ].map((x) => !!(x && x.owed));
     k.onOwedPin((key, res) => order.push(`${key.slice(-4)}:${res.pin ? res.pin.profileId + '/' + res.pin.origin : 'none'}`));
     k.onReadAgain(() => { order.push('lift'); });
@@ -196,34 +197,65 @@ console.log('§5 its reads r2 + r3: a create the held registry could not judge O
     try { for (let i = 0; i < 300 && !order.includes('lift'); i++) await new Promise((r) => setTimeout(r, 10)); } finally { clearInterval(keep); }
     await flush();
     const pf = (x) => { const v = k.pinFor(x); return v ? `${v.profileId}/${v.origin}/${v.at === 1 ? 'at1' : 'now'}` : null; };
-    Object.assign(out, { k1: pf(K1), kf: pf(KF), parent: pf(PARENT), kr: pf(KR), kh: pf(KH), ks: pf(KS), kw: pf(KW), cap1: k.groupCapOf(K1), capS: k.groupCapOf(KS), order });
+    Object.assign(out, { k1: pf(K1), kf: pf(KF), parent: pf(PARENT), kr: pf(KR), kh: pf(KH), ks: pf(KS), kw: pf(KW), kg: pf(KG), cap1: k.groupCapOf(K1), capS: k.groupCapOf(KS), order });
     try { k.shutdown(); } catch { }
     return out;
   };
   const o = await owedScene(require(path.join(ROOT, 'src/server/browser-keeper.js')), 'owed');
   ok(o.held && o.owe.every(Boolean), 'while held each create OWES its pin', o);
   ok(o.k1 === 'bp-0000b001/chosen/now' && o.cap1 === 2, 'at the read the New Session pick is pinned under the conversation\'s key — though no session was there to ask (r2 M3) — and its Task Group cap is stamped (r2 S4); the resume\'s weaker facts did not replace it', o);
+  ok(o.kg === null, 'r4 S14: the owed road judges the New Session FORM\'s pick by the groups it sent — a pick they do not admit is never pinned (nor added to «Who can use it») at the read', o);
   ok(o.kf === 'bp-0000b001/conversation/at1' && o.kw === null, 'a fork made while held takes its parent\'s pin as the keeper\'s copy (the parent\'s row verbatim — r2 M1r); nothing to pick pins nothing', o);
   ok(o.parent === 'bp-0000b001/chosen/at1' && o.kr === 'bp-0000b002/chosen/now', 'r3 M4: a RESTORED record\'s facts never re-judge a key that has its pin (judged before, or pinned since by the person); a resume\'s own explicit pick still ranks over its pin', o);
   ok(o.kh === 'bp-0000b001/task-group/now' && o.ks === 'bp-0000b001/instance/now' && o.capS === 1, 'r3 S10 / S8: the owed road takes the dialog\'s hint (its value IS the group\'s default: task-group, not chosen); the instance default and the group cap are the START\'s (the setting is empty now, the group\'s cap is 2 now)', o);
   const ri = o.order.indexOf('read-again');
-  ok(ri > 0 && o.order.slice(0, ri).length === 7 && o.order[o.order.length - 1] === 'lift', 'the owed pins are judged right after the read\'s load — BEFORE the owed boot (r2 S3) — and told to the sessions\' copies (r2 N11)', o.order);
+  ok(ri > 0 && o.order.slice(0, ri).length === 8 && o.order[o.order.length - 1] === 'lift', 'the owed pins are judged right after the read\'s load — BEFORE the owed boot (r2 S3) — and told to the sessions\' copies (r2 N11)', o.order);
   const JUDGE = "    if (!heldReg) { try { judgeOwedPins(); } catch (e) { log.warn?.(`[browser] the pins the creates owed after the read: ${e && e.message}`); } }\n";
   const BOOTL = "    if (bootOwed) { bootOwed = false; try { await boot(); } catch (e) { log.warn?.(`[browser] the boot's path after the read failed: ${e && e.message}`); } }\n";
   const BOOTJ = "    if (owedPins.size) { try { judgeOwedPins(); }";
   const FORK = "      if (pin.profileId && pin.origin === 'conversation' && f.fork && f.forkParentKey && f.forkParentKey !== browserKey) out = copyPin(";
   const KEEP = "    if (owed && owed.restored && pinFor(browserKey)) {", HINT = "pin = pinVerdictForCreate({ facts: f, hint: owed.hint || null,", CAPV = "owed.cap !== undefined ? { value: owed.cap } : {}";
-  ok([JUDGE, BOOTL, BOOTJ, FORK, KEEP, HINT, CAPV].every((x) => KSRC.split(x).length === 2), 'control setup: the read\'s judge, the owed boot, the boot\'s judge, the fork\'s copy, the restored keep, the hint and the start\'s cap are found once');
+  const FORMV = 'formGroups: Array.isArray(owed.formGroups) ? owed.formGroups : null })';
+  ok([JUDGE, BOOTL, BOOTJ, FORK, KEEP, HINT, CAPV, FORMV].every((x) => KSRC.split(x).length === 2), 'control setup: the read\'s judge, the owed boot, the boot\'s judge, the fork\'s copy, the restored keep, the hint and the start\'s cap are found once');
   const mut = (pairs, tag) => MJ.load('src/server/browser-keeper.js', pairs.reduce((t, [a, b]) => t.replace(a, b), KSRC), tag);
   const ox = await owedScene(mut([[JUDGE, ''], [BOOTJ, '    if (false) { try { judgeOwedPins(); }']], 'owed-not-judged'), 'owed-not-judged');
   const of = await owedScene(mut([[FORK, '      if (false) out = copyPin(']], 'owed-no-fork-copy'), 'owed-no-fork-copy');
   const okp = await owedScene(mut([[KEEP, '    if (false) {']], 'owed-no-restored-keep'), 'owed-no-restored-keep');
   const oh = await owedScene(mut([[HINT, 'pin = pinVerdictForCreate({ facts: f, hint: null,'], [CAPV, '{}']], 'owed-no-hint-no-cap'), 'owed-no-hint-no-cap');
   const oa = await owedScene(mut([[JUDGE, ''], [BOOTL, BOOTL + JUDGE]], 'owed-after-boot'), 'owed-after-boot');
+  const of2 = await owedScene(mut([[FORMV, 'formGroups: null })']], 'owed-no-form'), 'owed-no-form');
+  ok(of2.kg === 'bp-0000b001/chosen/now', 'CONTROL (the owed road hands no form groups, in a copy): the form\'s pick is pinned as the person\'s own choice — RED (r4 S14)', of2);
   ok(ox.k1 === null && ox.kf === null && of.kf === null && of.k1 === 'bp-0000b001/chosen/now', 'CONTROLS: a read that judges no owed pin leaves the pick and the fork unpinned for good (r2 M3); a judge with no fork copy leaves the fork unpinned (r2 M1r) — each RED', { ox, of });
   ok(okp.parent === 'bp-0000b002/chosen/now' && oh.kh === 'bp-0000b001/chosen/now' && oh.capS === 2, 'CONTROLS: without the restored keep the stale facts REVERT the pin (r3 M4); without the hint the group\'s default reads as the person\'s own pick, and without the start\'s cap the group\'s cap of today is stamped (r3 S10 / S8) — each RED', { okp, oh });
   const ra = oa.order.indexOf('read-again');
   ok(ra === 0, 'CONTROL: the judge moved after the owed boot — the read-again line comes first, the pins after (r3 S10: the «before the owed boot» half) — RED', oa.order);
+  // r4 S13: a restored record owes BEFORE the keeper loads (the wiring's microtask); the boot then finds the registry HELD — the facts
+  // survive to the read and are judged then (a judge before the load met the hold and told «none»: the record cleared, the pick lost)
+  const preScene = async (Mod, name) => {
+    const d = path.join(D, name), H = path.join(d, 'home'); fs.mkdirSync(H, { recursive: true });
+    const F = path.join(d, 'browser-profiles.json'); plant(F, BODY5);
+    const told = [];
+    const k = Mod.create({ dataDir: d, homeDir: H, env: () => ({ HOME: H }), serverSetting: () => undefined, install: false, log: quiet, unreadRetry: { firstMs: 15, maxMs: 30 } });
+    k.onOwedPin((key, res) => told.push(`${key.slice(-4)}:${res.pin ? res.pin.profileId : 'none'}`));
+    const owe = k.owePin(KS, { restored: true, facts: { explicit: 'bp-0000b002' } });   // before ANY load
+    await k.boot().catch(() => null);
+    let lifts = 0; k.onReadAgain(() => { lifts++; });
+    unplant(F, BODY5);
+    const keep = setInterval(() => { }, 1000);
+    try { for (let i = 0; i < 300 && !lifts; i++) await new Promise((r) => setTimeout(r, 10)); } finally { clearInterval(keep); }
+    await flush();
+    const v = k.pinFor(KS); const out = { owed: !!(owe && owe.owed), pin: v ? `${v.profileId}/${v.origin}` : null, told: told.join(' ') };
+    try { k.shutdown(); } catch { }
+    return out;
+  };
+  const LOADED = '    if (loaded && !heldReg) return judgeOwedPin(browserKey, owed);';
+  const HELDG = '    if (pin.held) { owedPins.set(browserKey, owed); return { owed: true, kept: owed }; }';
+  ok(KSRC.split(LOADED).length === 2 && KSRC.split(HELDG).length === 2, 'control setup: the owe\'s deferral and the judge\'s held guard are found once');
+  const pr = await preScene(require(path.join(ROOT, 'src/server/browser-keeper.js')), 'owed-pre-load');
+  const prx = await preScene(mut([[LOADED, '    if (!heldReg) return judgeOwedPin(browserKey, owed);'], [HELDG, '']], 'owed-pre-load-cut'), 'owed-pre-load-cut');   // stale-pins: kept (the control plants r3's judge-at-once shape in a copy)
+  ok(pr.owed && pr.pin === 'bp-0000b002/chosen' && pr.told === '1111:bp-0000b002', 'r4 S13: an owe made BEFORE the keeper loads survives a HELD boot and is judged at the read — told once, with its pin', pr);
+  ok(prx.pin === null && prx.told === '1111:none', 'CONTROL (judged at once before the load, no held guard, in a copy): the verdict meets the hold and tells «none» — the record would be cleared, the pick lost — RED', prx);
+  ok(KSRC.indexOf(BOOTJ) > KSRC.indexOf('  async function boot() {') && KSRC.indexOf(BOOTJ) < KSRC.indexOf('    const r = reconcile({ graceMs: 0 });'), 'r4 S13: the boot judges what restored conversations owe BEFORE its reconcile and adoption (the order, as written)');
   // a KEYLESS create's owed start record → the witness its late key restores (the create's own verdict; the start's cap and default)
   const BKm = require(path.join(ROOT, 'src/server/browser-key.js')), Bp = require(path.join(ROOT, 'src/browser-profiles.js'));
   const d5 = path.join(D, 'owed-witness'), H5 = path.join(d5, 'home'); fs.mkdirSync(H5, { recursive: true }); fs.writeFileSync(path.join(d5, 'browser-profiles.json'), BODY5);

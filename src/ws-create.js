@@ -1408,7 +1408,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               browserKeyMod.applyKey(session, { key: bk.key, env: be, pin });
               // its read r2 (M3): a keyed create the held registry could not judge OWES its pin under its key (judged at the read whatever
               // becomes of this session); the record carries the facts for a restart before then (`browserPinOwed`, re-owed at the boot)
-              if (pinOwed) { session._browserPinOwed = pinOwed; try { require('./server/browser-keeper.js').keeper()?.owePin?.(bk.key, pinOwed); } catch (e) { console.warn(`[browser] ${id}: its owed pin was not registered — ${e && e.message}`); } }
+              if (pinOwed) { session._browserPinOwed = pinOwed; try { const ko = require('./server/browser-keeper.js').keeper()?.owePin?.(bk.key, pinOwed); if (ko && ko.kept) session._browserPinOwed = ko.kept; } catch (e) { console.warn(`[browser] ${id}: its owed pin was not registered — ${e && e.message}`); } }   // r4 S12: the record carries the facts the keeper KEEPS (a resume while held keeps the create's pick)
               // A pin that came from anywhere but this conversation's own record
               // becomes its record now, ORIGIN kept — that is what makes the
               // `conversation` rung answer on the next resume (and a fork's copy
