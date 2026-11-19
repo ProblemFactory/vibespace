@@ -697,6 +697,61 @@ console.log('㉑ AN ENTRY BINDS ITS OWN FRAME (follow-up 2026-11-13: a person\'s
   ok('㉑ the module binds by what the listing says an item IS, and takes the earliest (never `fresh[fresh.length - 1]`)', /e\.bind = \[fresh\[0\]\];/.test(read('src/server/queued-wakes.js')) && !/fresh\[fresh\.length - 1\]/.test(read('src/server/queued-wakes.js')) && /it\.kind && it\.kind !== 'peer'/.test(read('src/server/queued-wakes.js')));
 }
 
+console.log('㉒ AN UNREAD msg-queued.json IS NEVER WRITTEN OVER (B-e3fe) — what it holds is the record until it reads again or is removed');
+// THE ROW: the file was there and could not be read (torn, an I/O error, another shape) ⇒ the reconcile held off, but the
+// first persist() wrote this process's { v:2, entries } over it — the frames it held (their words, their reservations) gone
+const T22 = Date.parse('2026-11-19T03:00:00Z');
+const TORN_QW = '{ "v": 2, "entries": [{ "id": "old-1", "cid": "conv-u", "state": "queued"';   // torn mid-write: unparsable
+const OLD_QW = JSON.stringify({ v: 2, entries: [{ id: 'old-1', cid: 'conv-u', state: 'queued', at: T22 - 60e3, kind: 'peer', text: 'the old frame', digest: 'd-old', bind: ['q-old'], reserved: true, holder: '4141' }] });
+// one hub's queued-wakes over a file it reads through `disk.now` (text; null = removed; 'EIO' = a read error); every write recorded
+const mkUnread = (mod, onDisk) => {
+  let clock = T22;
+  const w = { disk: { now: onDisk }, writes: [], reads: 0, logs: [], adv: (ms) => { clock += ms; } };
+  w.q = mod.create({ dataDir: fs.mkdtempSync(path.join(ROOT, 'qw-unread-')), now: () => clock, writer: { dirty: (file, o) => w.writes.push(o.produce()) },
+    readFile: () => { w.reads++; if (w.disk.now === null) throw Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT' }); if (w.disk.now === 'EIO') throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' }); return w.disk.now; },
+    noteSpend: () => { }, releaseSpend: () => { }, log: (...a) => w.logs.push(a.join(' ')) });
+  return w;
+};
+const unreadFrame = (w, text) => { const e = w.q.noteWritten('conv-u', { charged: { reason: 'peer-message' }, text, holder: '4242' }); w.q.answer(e.id, { mode: 'queued' }); return e; };
+const lastWrite = (w) => (w.writes.length ? JSON.parse(w.writes[w.writes.length - 1]) : null);
+{
+  const QW = require(path.join(REPO, 'src/server/queued-wakes.js'));
+  const S = JSON.stringify;
+  // A — torn at boot: a frame is written and answered (two persists) — nothing is written; said once
+  const a = mkUnread(QW, TORN_QW); const a1 = unreadFrame(a, 'new words 1'); unreadFrame(a, 'new words 2');
+  ok('㉒ A: msg-queued.json torn at boot, two frames written and answered (four persists) — NOTHING is written over it, and the journal says so once',
+    a.writes.length === 0 && a.logs.filter((l) => l.includes('is not written while it cannot be read')).length === 1 && a.q.entriesFor('conv-u').length === 2, S({ writes: a.writes.length, logs: a.logs }));
+  // B — the re-read is bounded: inside UNREAD_RECHECK_MS no read; after it, still torn ⇒ still no write
+  const readsAtBoot = a.reads; a.adv(30e3); unreadFrame(a, 'new words 3'); const readsIn = a.reads;
+  a.adv(QW.UNREAD_RECHECK_MS); unreadFrame(a, 'new words 4');
+  ok('㉒ B: the file is read again at most once a UNREAD_RECHECK_MS (60 s): none 30 s after the failure, one after 90 s — still torn, still not written',
+    QW.UNREAD_RECHECK_MS === 60e3 && readsAtBoot === 1 && readsIn === 1 && a.reads === 2 && a.writes.length === 0, S({ readsAtBoot, readsIn, reads: a.reads, writes: a.writes.length }));
+  // B′ — a clock that steps back never lengthens the wait: the next write reads the file again at once
+  { const b = mkUnread(QW, TORN_QW); b.adv(-3600e3); unreadFrame(b, 'back');
+    ok('㉒ B′: the clock steps back an hour after the failure — the next write reads the file again at once (still torn: still not written), never an hour more of waiting',
+      b.reads === 2 && b.writes.length === 0, S({ reads: b.reads, writes: b.writes.length })); }
+  // C — repaired: it reads again ⇒ what it holds joins this process's entries, and the writes resume with BOTH
+  a.disk.now = OLD_QW; a.adv(QW.UNREAD_RECHECK_MS); unreadFrame(a, 'new words 5');
+  const c = lastWrite(a), cIds = c ? c.entries.map((e) => e.id) : [];
+  ok('㉒ C: the file repaired — at the next write past the bound it reads again: its frame (old-1, its words) and this process\'s five are written together; the journal says it reads again',
+    a.writes.length > 0 && cIds.includes('old-1') && cIds.includes(a1.id) && cIds.length === 6 && c.entries.find((e) => e.id === 'old-1').text === 'the old frame' && a.q.entriesFor('conv-u').some((e) => e.id === 'old-1') && a.logs.some((l) => l.includes('reads again')), S({ cIds, n: a.writes.length }));
+  // D — an I/O error at boot, then the owner removes the file ⇒ the writes resume with this process's entries only
+  const d = mkUnread(QW, 'EIO'); unreadFrame(d, 'd1'); const dHeld = d.writes.length;
+  d.disk.now = null; d.adv(QW.UNREAD_RECHECK_MS); unreadFrame(d, 'd2');
+  const dw = lastWrite(d);
+  ok('㉒ D: a read error at boot ⇒ not written; the file then removed ⇒ the next write past the bound writes this process\'s two frames (the count starts over from what it holds)',
+    dHeld === 0 && !!dw && dw.entries.length === 2 && d.logs.some((l) => l.includes('was removed')), S({ dHeld, dw }));
+  // E — JSON that is no record (another build's shape, a stray value) is unread too — never an empty record to write over
+  const e1 = mkUnread(QW, S({ v: 3, items: [{ id: 'x' }] })); unreadFrame(e1, 'e1');
+  const e2 = mkUnread(QW, 'null'); unreadFrame(e2, 'e2');
+  ok('㉒ E: a file of another shape ({ v:3, items }) or a bare null reads as UNREAD — neither is written over', e1.writes.length === 0 && e2.writes.length === 0, S({ e1: e1.writes, e2: e2.writes }));
+  // F — a file that reads is written at once (the guard never holds a readable record), its frame kept beside the new one
+  const f = mkUnread(QW, OLD_QW); unreadFrame(f, 'f1'); const fw = lastWrite(f);
+  ok('㉒ F: a readable file is written at once, its frame kept beside the new one — the guard holds only what could not be read', !!fw && fw.entries.length === 2 && fw.entries.some((x) => x.id === 'old-1') && f.reads === 1, S({ fw }));
+  ok('㉒ persist() asks stillUnread() before every write, and the boot and the re-read share ONE reader (readHeld)',
+    /function persist\(\) \{\n    if \(stillUnread\(\)\) \{/.test(read('src/server/queued-wakes.js')) && read('src/server/queued-wakes.js').split('readHeld()').length === 3);
+}
+
 console.log('⑩ RED CONTROLS — patched copies: each law-1 rule removed, its leg goes red');
 {
   const MUT = mutantCopies('queued-wake', REPO);
@@ -730,6 +785,21 @@ console.log('⑩ RED CONTROLS — patched copies: each law-1 rule removed, its l
   const s5 = await W5.eng.post({ group: g5, from: A, text: 'still in the queue', wake: true });
   const real5 = G.deliveryOf(W5.eng.get(g5), s5.message, { log: [s5.message] })[0].state, mut5 = NoQ.deliveryOf(W5.eng.get(g5), s5.message, { log: [s5.message] })[0].state;
   ok('⑩ WITHOUT the queued state a record its wrapper holds reads «read by» — the incident\'s second lie (① can go red)', real5 === 'queued' && mut5 === 'handed', JSON.stringify({ real5, mut5 }));
+  // B-e3fe: persist()'s guard removed ⇒ the first write replaces an unreadable msg-queued.json (the row's scene)
+  const qsrc = read('src/server/queued-wakes.js');
+  const GUARD = "    if (stillUnread()) {   // B-e3fe: never written over while it cannot be read\n";
+  ok('⑩ setup: persist() asks stillUnread() once', qsrc.split(GUARD).length === 2);
+  const NoGuard = MUT.load('src/server/queued-wakes.js', qsrc.replace(GUARD, '    if (false) {\n'), 'no-unread-guard');
+  const wg = mkUnread(NoGuard, TORN_QW); unreadFrame(wg, 'new words'); const wgLast = lastWrite(wg);
+  ok('⑩ WITHOUT the guard the torn msg-queued.json is WRITTEN OVER at the first write with this process\'s entry alone — the frame it held is gone (㉒ A can go red)',
+    wg.writes.length > 0 && !!wgLast && wgLast.v === 2 && wgLast.entries.length === 1 && !wg.writes.some((x) => x.includes('old-1')), JSON.stringify({ n: wg.writes.length, wgLast }));
+  // B-e3fe: the join removed ⇒ a file that reads again is written over with this process's entries alone
+  const JOIN = "      entries = [...entries, ...held.entries.filter((e) => !ids.has(e.id))];";
+  ok('⑩ setup: the re-read joins the file\'s entries once', qsrc.split(JOIN).length === 2);
+  const NoJoin = MUT.load('src/server/queued-wakes.js', qsrc.replace(JOIN, '      entries = [...entries];'), 'no-unread-join');
+  const wj = mkUnread(NoJoin, TORN_QW); unreadFrame(wj, 'j1'); wj.disk.now = OLD_QW; wj.adv(60e3); unreadFrame(wj, 'j2'); const wjLast = lastWrite(wj);
+  ok('⑩ WITHOUT the join, the file that reads again is written over with this process\'s two frames alone — old-1 is lost (㉒ C can go red)',
+    !!wjLast && wjLast.entries.length === 2 && !wjLast.entries.some((x) => x.id === 'old-1'), JSON.stringify({ wjLast }));
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

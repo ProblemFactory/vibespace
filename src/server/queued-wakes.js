@@ -59,6 +59,7 @@ const LIVE_MAX_AGE_MS = 7 * 24 * 3600 * 1000;   // round 4: a live entry kept at
 //      a turn started there ⇒ it ran — counted where it ran.
 const PULL_RETRY_MS = 60 * 1000;   // a take-back nobody answered is asked again after this
 const PULL_WHY = 'held — a spending cap is now lower than the messages waiting; it rides the conversation\'s next turn';
+const UNREAD_RECHECK_MS = 60 * 1000;   // B-e3fe: an unreadable msg-queued.json is read again at most this often (the spend ledger's LEDGER_RECHECK_MS)
 
 const digestOf = (text) => crypto.createHash('sha256').update(String(text || '')).digest('hex').slice(0, 24);
 const idsOf = (items) => (Array.isArray(items) ? items.map((it) => (it && typeof it === 'object' ? it.id : it)).filter((x) => typeof x === 'string' && x) : []);
@@ -85,23 +86,56 @@ function create({ dataDir, noteSpend = null, releaseSpend = null, reservationSta
   const publicOf = (e) => ({ id: e.id, cid: e.cid, at: e.at, kind: e.kind, state: e.state, since: e.since, mark: e.mark || null, peerName: e.peerName || null, reserved: !!e.reserved });
 
   // ── boot: what the previous process held ────────────────────────────────
-  let unread = false;   // B-0a33 follow-up: the file was there and could not be read — the reconcile holds off
+  let unread = false;   // B-0a33 follow-up: the file was there and could not be read — the reconcile holds off (and B-e3fe: it is not written)
+  let recheckAt = 0;   // B-e3fe: when the unread file was last read
+  // the ONE reading of the file (the boot, and B-e3fe's re-read while it is unread) — throws when it is not there or not a record.
+  // B-e3fe: JSON that holds no `entries` list (another build's shape, a stray value) is unread too, never an empty record
+  const readHeld = () => {
+    const j = JSON.parse(typeof readFile === 'function' ? readFile(file) : require('fs').readFileSync(file, 'utf8'));
+    if (!j || !Array.isArray(j.entries)) throw new Error('not a queued-wakes record (no entries list)');
+    return {
+      entries: j.entries.filter((e) => e && typeof e.cid === 'string' && typeof e.id === 'string' && STATES.includes(e.state))
+        .map((e) => ({ ...e, bind: Array.isArray(e.bind) ? e.bind.filter((x) => typeof x === 'string') : [], startsAt: 0, endsAt: 0, rebooted: true })),
+      gone: (Array.isArray(j.gone) ? j.gone : []).filter((g) => g && typeof g.cid === 'string' && typeof g.id === 'string' && Array.isArray(g.bind) && typeof g.bind[0] === 'string' && now() - Number(g.at || 0) <= LIVE_MAX_AGE_MS).map((g) => ({ ...g, seenSeq: 0, pulledAt: 0 })).slice(-MAX_ENTRIES),   // a sequence is this process's
+    };
+  };
   try {
-    const raw = typeof readFile === 'function' ? readFile(file) : require('fs').readFileSync(file, 'utf8');
-    const j = JSON.parse(raw);
-    if (j && Array.isArray(j.entries)) {
-      entries = j.entries.filter((e) => e && typeof e.cid === 'string' && typeof e.id === 'string' && STATES.includes(e.state))
-        .filter((e) => { const old = isOld(e, now()); if (old) droppedAtLoad.push(e); return !old; })   // by age (rounds 3–4) — said
-        .map((e) => ({ ...e, bind: Array.isArray(e.bind) ? e.bind.filter((x) => typeof x === 'string') : [], startsAt: 0, endsAt: 0, rebooted: true }));
-    }
-    if (j && Array.isArray(j.gone)) gone = j.gone.filter((g) => g && typeof g.cid === 'string' && typeof g.id === 'string' && Array.isArray(g.bind) && typeof g.bind[0] === 'string' && now() - Number(g.at || 0) <= LIVE_MAX_AGE_MS).map((g) => ({ ...g, seenSeq: 0, pulledAt: 0 })).slice(-MAX_ENTRIES);   // a sequence is this process's
+    const held = readHeld();
+    entries = held.entries.filter((e) => { const old = isOld(e, now()); if (old) droppedAtLoad.push(e); return !old; });   // by age (rounds 3–4) — said
+    gone = held.gone;
   } catch (err) {
     // none (ENOENT), or UNREADABLE: the guard's stamps stand (counted) — never free. B-0a33 follow-up: the two are told apart —
-    // an unreadable or unparsable file holds frames this process cannot see, so the reconcile holds off for its life
-    if (!(err && err.code === 'ENOENT')) { unread = true; log('[queued] msg-queued.json could not be read — its waiting reservations stand (counted, never given up by this process): ' + (err && err.message)); }
+    // an unreadable or unparsable file holds frames this process cannot see, so the reconcile holds off until it reads again
+    if (!(err && err.code === 'ENOENT')) { unread = true; recheckAt = now(); log('[queued] msg-queued.json could not be read — its waiting reservations stand (counted, never given up by this process), and it is not written over: ' + (err && err.message)); }
   }
+  /** B-e3fe: AN UNREAD FILE IS NEVER WRITTEN OVER (the spend ledger's rule, B-3b0f). It holds frames this process cannot see —
+   *  their words, their reservations — and the first write of what this process holds would make one failed read permanent.
+   *  At a write it is read again (at most once a UNREAD_RECHECK_MS): it reads ⇒ what it holds joins this process's entries (by
+   *  id, this process's own kept) and the writes resume; it is gone (the owner removed it) ⇒ the writes resume with this
+   *  process's entries. → true while it still cannot be read */
+  function stillUnread() {
+    if (!unread) return false;
+    const t = now();
+    if (t >= recheckAt && t - recheckAt < UNREAD_RECHECK_MS) return true;   // a clock that stepped back reads it now, never waits longer
+    recheckAt = t;
+    let held = null;
+    try { held = readHeld(); } catch (err) { if (!(err && err.code === 'ENOENT')) return true; }
+    if (held) {
+      const ids = new Set(entries.map((e) => e.id)), gids = new Set(gone.map((g) => g.id));
+      entries = [...entries, ...held.entries.filter((e) => !ids.has(e.id))];   // the old ones leave at the next sweep (ageOut: counted, said)
+      gone = [...held.gone.filter((g) => !gids.has(g.id)), ...gone].slice(-MAX_ENTRIES);
+    }
+    unread = false;
+    log(held ? '[queued] msg-queued.json reads again — what it holds joins this process\'s entries; it is written again' : '[queued] msg-queued.json was removed — it is written again with this process\'s entries');
+    return false;
+  }
+  let saidUnwritten = false;
 
   function persist() {
+    if (stillUnread()) {   // B-e3fe: never written over while it cannot be read
+      if (!saidUnwritten) { saidUnwritten = true; log('[queued] msg-queued.json is not written while it cannot be read — this process\'s entries are kept in memory until it reads again or is removed'); }
+      return;
+    }
     try {
       storeWriter().dirty(file, { name: STORE_NAME, debounceMs: 200, allowEmpty: true, produce: () => JSON.stringify({ v: 2, entries, ...(gone.length ? { gone } : {}) }) });
     } catch (e) { log('[queued] persist failed:', e.message); }
@@ -479,4 +513,4 @@ function create({ dataDir, noteSpend = null, releaseSpend = null, reservationSta
   };
 }
 
-module.exports = { create, digestOf, FILE, STORE_NAME, STATES, MAX_ENTRIES, PER_CONVERSATION_MAX, REF, REPEAT_HEAD, RESTASHED_MAX_AGE_MS, LIVE_MAX_AGE_MS, PULL_RETRY_MS, PULL_WHY };
+module.exports = { create, digestOf, FILE, STORE_NAME, STATES, MAX_ENTRIES, PER_CONVERSATION_MAX, REF, REPEAT_HEAD, RESTASHED_MAX_AGE_MS, LIVE_MAX_AGE_MS, PULL_RETRY_MS, PULL_WHY, UNREAD_RECHECK_MS };
