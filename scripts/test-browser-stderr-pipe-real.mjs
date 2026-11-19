@@ -145,11 +145,16 @@ try {
     ok(K.ok && K.cpid && K.port, 'the child browser launched through the driver on its own config', K.error);
     let cmd = ''; try { cmd = fs.readFileSync(`/proc/${K.cpid}/cmdline`, 'utf8').split('\0').join(' '); } catch { cmd = ''; }
     ok(BE.QUIET_LOG_ARGS.every((q) => cmd.includes(q)), 'its Chrome\'s command line carries --disable-logging --log-level=3', cmd.slice(0, 300));
+    // the box's first run of this leg (2.369.411, int361's row 7 at 691f34c0b): 65 of 65 `eval`s judged missed FROM 0 s while
+    // the child's Chrome was up (launched, its command line read) — a stderr hang answers first and then stops; a judge that misses
+    // from the first ask is the judge's own. Ⓓ now asks the way Ⓑ and Ⓒ do (the suite's measured signal: the stderr hang is
+    // DevTools answering 0 bytes): /json/version on the child's own port, once a second; the first `eval`'s raw answer is SAID in
+    // the closing line (unjudged), so the next run shows what the CLI answers on this road
+    const ev0 = ab(K.env, ['eval', '1+1'], 5000);
     let asks = 0, misses = 0, lastAnswerAt = 0;
-    const answerOf = (out) => { try { return Number(JSON.parse(String(out).trim().split('\n').pop())); } catch { return NaN; } }; // the value itself, never «a 2 somewhere»
-    while (Date.now() - K.t0 < 65000) { asks++; const e = ab(K.env, ['eval', `${asks}*7`], 5000); if (e.ok && answerOf(e.out) === asks * 7) lastAnswerAt = Date.now() - K.t0; else misses++; await sleep(1000); }
-    ok(misses === 0 && asks >= 30 && lastAnswerAt >= 60000, `B-1789 (a regression watch — the pinned driver drains stderr): ${asks} evals over 65 s, each answered with its own value (the last at ${(lastAnswerAt / 1000).toFixed(0)} s) — the child browser keeps answering past 60 s`, { asks, misses, lastAnswerAt });
-    if (K.ok) console.log(`  Ⓓ RAN: a real child browser (Chrome pid ${K.cpid}) on browser-env's own child config — quiet switches on its command line: ${BE.QUIET_LOG_ARGS.every((q) => cmd.includes(q)) ? 'yes' : 'NO'}; ${asks} evals over 65 s, ${misses} missed, the last answer at ${(lastAnswerAt / 1000).toFixed(1)} s`);
+    while (Date.now() - K.t0 < 65000) { asks++; if ((await cdpBytes(K.port)) > 0) lastAnswerAt = Date.now() - K.t0; else misses++; await sleep(1000); }
+    ok(misses === 0 && asks >= 30 && lastAnswerAt >= 60000, `B-1789 (a regression watch — the pinned driver drains stderr): ${asks} DevTools asks over 65 s on the child's own port, each answered (the last at ${(lastAnswerAt / 1000).toFixed(0)} s) — the child browser keeps answering past 60 s`, { asks, misses, lastAnswerAt });
+    if (K.ok) console.log(`  Ⓓ RAN: a real child browser (Chrome pid ${K.cpid}) on browser-env's own child config — quiet switches on its command line: ${BE.QUIET_LOG_ARGS.every((q) => cmd.includes(q)) ? 'yes' : 'NO'}; ${asks} DevTools asks over 65 s, ${misses} missed, the last answer at ${(lastAnswerAt / 1000).toFixed(1)} s; the first \`eval 1+1\` (unjudged): ok ${ev0.ok}, «${String(ev0.out || '').replace(/\s+/g, ' ').trim().slice(0, 120)}»`);
     else console.log('  Ⓓ DID NOT RUN: the child browser never launched (its red line above says why)');
     await end(K);
   }
