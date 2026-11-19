@@ -5,8 +5,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ## 2.369.411 — 2026-11-18
 
 ### Fixed
-- When the machine runs out of file watches, VibeSpace keeps running: what it could not watch is checked every few seconds instead, and For you says so once, with the command that raises the machine's limit.
-- If VibeSpace cannot read the Task Groups file when it starts (a storage hiccup or damaged bytes), it never writes over it: Task Groups wait, nothing new is recorded until the file reads again, and For you says so once.
+- When the machine runs out of file watches, VibeSpace keeps running and checks every few seconds instead; For you says so once, with the command to fix it.
+- If VibeSpace cannot read the Task Groups file at startup, it never writes over it: Task Groups wait until the file reads again, and For you says so once.
 - While an agent searched or listed a large account in Channels, VibeSpace could freeze for a second at a time, many times a minute. It no longer does.
 
 ## 2.369.410 — 2026-11-18
