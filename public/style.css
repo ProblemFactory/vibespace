@@ -8261,7 +8261,7 @@ label.chan-cap-row { cursor: default; }
 .browser-switcher .mounts-btn { white-space: nowrap; flex: 0 0 auto; max-width: 100%; }
 .brsw-empty { font-size: 12px; line-height: 1.45; }
 .brsw-empty:has(> .brsw-actions) { display: flex; flex-direction: column; gap: 8px; } /* BROWSE YOURSELF: the empty line + its ONE button (Open it yourself) */
-.brsw-empty, .brsw-empty-text { min-width: 0; overflow-wrap: anywhere; } /* the empty line's text owns its wrap (主开发 20:39Z, checkpoint 61's hosted red: the zh sentence 3 px wide of its 312 px box at 360 px on the runner's Chrome): it may break anywhere and shrink, so its fit never hangs on one engine's line breaking of mixed Chinese and Latin text */
+.brsw-empty, .brsw-empty-text { min-width: 0; overflow-wrap: anywhere; text-spacing-trim: space-all; text-autospace: no-autospace; } /* the empty line's text owns its wrap (主开发 20:39Z, checkpoint 61's hosted red: the zh sentence 3 px wide of its 312 px box at 360 px on the runner's Chrome 157.0.8103.78, green on 157.0.8103.50; no unbreakable word, so overflow-wrap alone did nothing): no punctuation trimmed or space inserted that the line breaker and the line box could count differently — every fullwidth mark its full width — so its fit never hangs on one engine's handling of mixed Chinese and Latin text */
 .brsw-error { font-size: 12px; line-height: 1.45; color: var(--red, #e55); overflow-wrap: anywhere; }
 
 /* ── agent browser P5 (§4.5 / D35): the action trace — the tool card's strip + expander, the entry dialog (before / after + the overlay), the live view's timeline pane ── */
