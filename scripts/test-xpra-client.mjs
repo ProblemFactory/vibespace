@@ -802,16 +802,16 @@ console.log('§3 the view under the fake DOM (xpra-view.js): both clipboard bran
   // rung is waited for by its fact (the new worker), never a 1.3 s sleep raced against a 1 s timer; after dispose the count of
   // rungs armed is the verdict (none), never a 1.3 s sleep to see nothing happen
   const realSetTimeout = globalThis.setTimeout, LADDER = new Set(S.RECONNECT_LADDER);
-  let rungs = 0;
-  globalThis.setTimeout = function (fn, wait, ...a) { if (LADDER.has(wait) && typeof fn === 'function' && /connect\(\)/.test(String(fn))) { rungs++; return realSetTimeout(fn, 0, ...a); } return realSetTimeout(fn, wait, ...a); };
-  wk.feed(['disconnect', 'server shutdown']);
-  ok(A.view.status.textContent === 'Connection lost: server shutdown' && A.view.status.style.color === 'var(--red, #e55)' && A.statuses.slice(-1)[0] === 'disconnected', 'a server disconnect: "Connection lost: <its reason>" in red');
-  let rungsAtDispose = -1, n = -1;
+  let rungs = 0, rungsAtDispose = -1, n = -1;
   try {
+    globalThis.setTimeout = function (fn, wait, ...a) { if (LADDER.has(wait) && typeof fn === 'function' && /connect\(\)/.test(String(fn))) { rungs++; return realSetTimeout(fn, 0, ...a); } return realSetTimeout(fn, wait, ...a); };
+    wk.feed(['disconnect', 'server shutdown']);
+    ok(A.view.status.textContent === 'Connection lost: server shutdown' && A.view.status.style.color === 'var(--red, #e55)' && A.statuses.slice(-1)[0] === 'disconnected', 'a server disconnect: "Connection lost: <its reason>" in red');
     await until(() => FakeWorker.instances.length === before + 1);
     ok(FakeWorker.instances.length === before + 1 && rungs === 1, `the shell's ladder reconnects on its first rung while the picture is wanted (${rungs} rung armed — its 1 s on the leg's clock)`);
+    rungsAtDispose = rungs;   // (the baseline BEFORE dispose: a rung dispose arms on its own close road is counted — the read's should)
     A.view.dispose();
-    n = FakeWorker.instances.length; rungsAtDispose = rungs;
+    n = FakeWorker.instances.length;
     for (let k = 0; k < 5; k++) await new Promise((r) => setImmediate(r));   // (any rung dispose left armed would have run by now: it runs at once)
     await sleep(0);
   } finally { globalThis.setTimeout = realSetTimeout; }
