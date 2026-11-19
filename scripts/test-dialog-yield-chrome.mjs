@@ -984,8 +984,15 @@ await step('㊱', async () => {
   const SHARE = 'Share a folder onto "box1"', PULL = 'Mount a folder from "box1" into this VibeSpace';
   await evalJs(`(() => { app.sidebar._showHostMountDialog(${h}); app.sidebar._showMachinePullDialog(${h}); return true; })()`);
   await waitFor(`!!${byTitle(SHARE)}?.querySelector('.pf-pick') && !!${byTitle(PULL)}?.querySelector('.pf-pick')`, 10000);
-  const mp = (title) => `${byTitle(title)}?.querySelector('input[placeholder^="default: ~/vibespace-"]')`;
-  await evalJs(`(() => { const a = ${mp(SHARE)}, b = ${mp(PULL)}; a.closest('.path-field').querySelector('.pf-pick').dataset.dy = 'mp-a'; b.closest('.path-field').querySelector('.pf-pick').dataset.dy = 'mp-b'; return true; })()`);
+  // THE FIELD BY ITS IDENTITY (checkpoint 61's hosted red: the plain-words chain reworded both placeholders — src/lib/sidebar-mounts.js
+  // — and the find by their old words came back empty, the step threw before its control): the path field whose key is
+  // 'mounts:mountpoint' (path-field.js draws it into its list's id) inside the form found by its title; an empty find is a NAMED red
+  const mp = (title) => `(() => { const r = ${byTitle(title)}; const l = r && r.querySelector('.path-field .pf-list[id^="pf-list-mounts:mountpoint-"]'); return l ? l.closest('.path-field').querySelector('input') : null; })()`;
+  const found = await evalJs(`(() => { const a = ${mp(SHARE)}, b = ${mp(PULL)}; if (!a || !b) return { share: !!a, pull: !!b }; a.closest('.path-field').querySelector('.pf-pick').dataset.dy = 'mp-a'; b.closest('.path-field').querySelector('.pf-pick').dataset.dy = 'mp-b'; return { share: true, pull: true, same: a === b }; })()`);
+  check(`㊱ each form's «mount point» field found by its identity — the path field keyed 'mounts:mountpoint', inside the form found by its title (share ${found.share}, pull ${found.pull})`, found.share && found.pull && !found.same, found);
+  const oldWords = await evalJs(`[...document.querySelectorAll('input[placeholder^="default: ~/vibespace-"]')].length`);
+  check(`㊱ CONTROL: the base's find by the placeholder's old words comes back EMPTY on this page (${oldWords}) — the field's key, not its words, is what finds it`, oldWords === 0, oldWords);
+  if (!(found.share && found.pull)) { await closeForms(); await evalJs(`(() => { window.fetch = window.__dyMpFetch; delete window.__dyMpFetch; return true; })()`); return; }
   const front = (title) => evalJs(`(() => { const r = ${byTitle(title)}; const w = r && r.closest('.window'); for (const x of app.wm.windows.values()) if (x.element === w) app.wm.revealWindow(x.id); return true; })()`);
   let firstOpened = false;
   for (let i = 0; i < 2 && !firstOpened; i++) { await front(SHARE); await sleep(400); await realClick('[data-dy="mp-a"]'); firstOpened = await waitFor(`document.querySelectorAll('.dialog.pf-picker').length >= 1`, 8000); }
