@@ -457,9 +457,12 @@ console.log('§6 the wiring — every door asks its rule');
     && !/stack\.style\.visibility = 'hidden'/.test(u)   // stale-pins: kept (an absence check: the base's whole-stack yield is gone)
     && /const held = stack \? \[\.\.\.stack\.children\]\.filter\(\(t\) => t\.classList\.contains\('global-toast-held'\)\) : \[\];\s*for \(const t of held\) t\.classList\.remove\('global-toast-held'\);\s*try \{ _placeToastStackNow\(\); \} catch \{\s*\}\s*for \(const t of held\) if \(t\.isConnected && !t\.classList\.contains\('global-toast-held'\)\) _toastShow\(t\);/.test(u)
     && /function _toastHold\(el\) \{\s*clearTimeout\(el\._toastTimer\); el\._toastTimer = null;\s*el\.classList\.add\('global-toast-held'\);\s*if \(!el\._toastBorn && el\._toastKey\) \{ el\._toastJudge = true; _markToastSeen\(el\._toastKey, false\); \}/.test(u)
-    && /function _toastShow\(el\) \{\s*el\.classList\.remove\('global-toast-held'\);\s*_toastRun\(el\);\s*el\._toastDrawn = true;\s*if \(el\._toastJudge\) \{ el\._toastJudge = false; if \(_seenAtShow\(el\._toastRef\)\) _markToastSeen\(el\._toastKey, true\); \}/.test(u)
+    && /function _toastShow\(el\) \{\s*el\.classList\.remove\('global-toast-held'\);\s*_toastRun\(el\);\s*_markDrawn\(el\);\s*if \(el\._toastJudge\) \{ el\._toastJudge = false; if \(_seenAtShow\(el\._toastRef\)\) _markToastSeen\(el\._toastKey, true\); \}/.test(u)
     && /el\._toastKind = \{ type, action: acts\.length > 0, pinned, timed: !!timed \};/.test(u)
-    && /el\._toastTtl = pinned \? 0 : ttl;\s*_placeToastStack\(\); _queueToastPlace\(\);\s*if \(!el\.classList\.contains\('global-toast-held'\)\) \{ _toastRun\(el\); el\._toastDrawn = true; \}\s*el\._toastBorn = true;/.test(u)
+    && /el\._toastTtl = pinned \? 0 : ttl;\s*_placeToastStack\(\); _queueToastPlace\(\);\s*if \(!el\.classList\.contains\('global-toast-held'\)\) \{ _toastRun\(el\); _markDrawn\(el\); \}\s*el\._toastBorn = true;/.test(u)
+    && /const detach = el\.remove\.bind\(el\);\s*el\.remove = \(\) => \{ clearTimeout\(el\._toastTimer\); el\._toastTimer = null; detach\(\); \};/.test(u)
+    && /frame\(\(\) => \{ if \(el\.isConnected && !el\.classList\.contains\('global-toast-held'\)\) el\._toastDrawn = true; \}\);/.test(u)
+    && /el\._toastTimer = setTimeout\(\(\) => \{ el\._toastTimer = null; const st = el\.parentNode; el\.remove\(\);/.test(u)
     && (u.match(/el\.classList\.add\('global-toast-out'\)/g) || []).length === 1
     && /if \(fy\) _toastWatch\.observe\(fy, \{ attributes: true, attributeFilter: \['class', 'style'\] \}\);/.test(u)
     && /if \(fy && !_toastPanelSize && typeof ResizeObserver === 'function'\) \{ _toastPanelSize = new ResizeObserver\(_queueToastPlace\); _toastPanelSize\.observe\(fy\); \}/.test(u)
@@ -484,12 +487,15 @@ console.log('§6 the wiring — every door asks its rule');
     ['what stays left on the panel when nothing fits (its anchored place: the lowest rows)', sub(U, "        if (fr.left + fr.right > window.innerWidth) { stack.style.right = 'auto'; stack.style.left = (8 / uiScale()) + 'px'; }\n", '')],
     ['the newborn offered to the cap (round 2: it went at its birth)', sub(U, ".filter((c) => c !== el && !c.classList", ".filter((c) => !c.classList")],
     ['a toast dropped never drawn left «seen» in the history', sub(U, "    if (!drop._toastDrawn && drop._toastKey) _markToastSeen(drop._toastKey, false);\n", '')],
-    ['a drawn toast never remembered as seen by the cap', sub(U, " { _toastRun(el); el._toastDrawn = true; }", ' _toastRun(el);')],
+    ['a drawn toast never remembered as seen by the cap', sub(U, " { _toastRun(el); _markDrawn(el); }", ' _toastRun(el);')],
+    ['a removal that leaves the toast\'s time running (its timer fired on a detached toast)', sub(U, "  el.remove = () => { clearTimeout(el._toastTimer); el._toastTimer = null; detach(); };\n", '')],
+    ['a toast DRAWN the moment it is born (round 3: the fifth of a burst dropped the first as «seen»)', sub(U, "frame(() => { if (el.isConnected && !el.classList.contains('global-toast-held')) el._toastDrawn = true; });", 'el._toastDrawn = true;')],
+    ['the fade\'s timer untracked (a removal in the fade leaves it running)', sub(U, "    el._toastTimer = setTimeout(() => { el._toastTimer = null; const st = el.parentNode;", "    setTimeout(() => { const st = el.parentNode;")],   // stale-pins: kept (the base's text, planted)
     ['a held toast never drawn again', sub(U, "  for (const t of held) if (t.isConnected && !t.classList.contains('global-toast-held')) _toastShow(t);", '')],
     ['a held toast drawn again without its time (it never expires)', sub(U, '  el.classList.remove(\'global-toast-held\');\n  _toastRun(el);', "  el.classList.remove('global-toast-held');")],
     ['a held toast\'s time still running', sub(U, '  clearTimeout(el._toastTimer); el._toastTimer = null;\n  el.classList.add', '  el.classList.add')],
     ['a toast held at its birth still called seen', sub(U, '  if (!el._toastBorn && el._toastKey) { el._toastJudge = true; _markToastSeen(el._toastKey, false); }\n', '')],
-    ['the time started at birth whatever the placement', sub(U, "  if (!el.classList.contains('global-toast-held')) { _toastRun(el); el._toastDrawn = true; }", '  { _toastRun(el); el._toastDrawn = true; }')],
+    ['the time started at birth whatever the placement', sub(U, "  if (!el.classList.contains('global-toast-held')) { _toastRun(el); _markDrawn(el); }", '  { _toastRun(el); _markDrawn(el); }')],
     ['the panel\'s growth never re-placing the stack', sub(U, "if (fy && !_toastPanelSize && typeof ResizeObserver === 'function')", 'if (false)')],
     ['the panel\'s open never re-placing the stack', sub(U, 'if (fy) _toastWatch.observe(fy,', 'if (false) _toastWatch.observe(fy,')],
     ['the beside place never checked against the chrome there', sub(U, "      if (there) { stack.style.top = 'auto'; stack.style.bottom = there.bottom + 'px'; }\n", '')],
@@ -554,6 +560,7 @@ console.log('§8 THE TOAST\'S STATES, DRIVEN — the real showToast / hold / sho
     install() { now = 0; queue = []; globalThis.setTimeout = (fn, ms = 0) => { const id = ++seq; queue.push({ id, at: now + (Number(ms) || 0), fn }); return id; }; globalThis.clearTimeout = (id) => { queue = queue.filter((q) => q.id !== id); }; },
     advance(ms) { const end = now + ms; for (;;) { queue.sort((a, b) => a.at - b.at || a.id - b.id); const q = queue[0]; if (!q || q.at > end) break; queue.shift(); now = q.at; q.fn(); } now = end; },
     restore() { globalThis.setTimeout = REAL.setTimeout; globalThis.clearTimeout = REAL.clearTimeout; },
+    pending() { return queue.length; },
   };
   // THE DOM STAND-IN: what the toast stack's code touches. A toast is TH px high and as wide as its words (≤ 560 — the stylesheet's
   // cap); the stack stacks its DRAWN toasts (a held one is `display: none` — the rule §6 pins) from its own place (right / bottom
@@ -703,6 +710,38 @@ console.log('§8 THE TOAST\'S STATES, DRIVEN — the real showToast / hold / sho
       return { warnDrawn: drawn(W), timedDrawn: drawn(T), plainHeld: held(P) };
     } finally { clock.restore(); }
   };
+  /** FIVE ERRORS AT ONCE (round 4): a person's press, five errors born in one turn (no panel) — the fifth drops the OLDEST, which
+   *  never reached a frame: its history line UNSEEN; then four errors, a frame, a fifth — the oldest WAS on screen: its line keeps
+   *  the verdict (seen: the press a moment before) */
+  const burstScene = (M) => {
+    clock.install(); store.clear(); page({ panelOpen: false }); arm(M);
+    try {
+      M.noteOwnGesture();
+      const A = [1, 2, 3, 4, 5].map((k) => M.showToast(`a${k} ${LONG}`, { type: 'error' }));
+      clock.advance(20);
+      const once = { dropped: A.filter((t) => !kids().includes(t)).map(tag), a1Line: lineOf('a1') ? !!lineOf('a1').seen : 'none', a5Drawn: drawn(A[4]) };
+      for (const t of kids()) t.remove();
+      store.clear(); M.noteOwnGesture();
+      const B = [1, 2, 3, 4].map((k) => M.showToast(`b${k} ${LONG}`, { type: 'error' }));
+      clock.advance(20);
+      B.push(M.showToast(`b5 ${LONG}`, { type: 'error' }));
+      clock.advance(20);
+      return { once, later: { dropped: B.filter((t) => !kids().includes(t)).map(tag), b1Line: lineOf('b1') ? !!lineOf('b1').seen : 'none' } };
+    } finally { clock.restore(); }
+  };
+  /** EVERY REMOVAL CLEARS ITS TIME (round 4): a toast drawn, its OWNER withdraws it (`.remove()` on what showToast returned) — one
+   *  timer fewer waits; another closed by its ✕ — the same; past their time nothing touches them */
+  const removeScene = (M) => {
+    clock.install(); store.clear(); page({ panelOpen: false }); arm(M);
+    try {
+      const T = M.showToast(`t1 ${LONG}`), X = M.showToast(`x1 ${LONG}`);
+      clock.advance(20);
+      const w0 = clock.pending(); T.remove(); const w1 = clock.pending();
+      X.querySelector('.global-toast-x').onclick({ stopPropagation() {} }); const w2 = clock.pending();
+      let threw = null; try { clock.advance(TTL + 600); } catch (e) { threw = String(e && e.message || e); }
+      return { owner: w0 - w1, close: w1 - w2, gone: !kids().includes(T) && !kids().includes(X), threw };
+    } finally { clock.restore(); }
+  };
   const fresh = (name) => { const f = MUT.write('src/lib/utils.js', read('src/lib/utils.js'), name, { esm: true, same: true }); copies.push(f); return import(pathToFileURL(f).href); };   // a fresh, deliberately UNPATCHED copy of this tree's utils.js: its own stack state
   // every copy is IMPORTED before a scene builds its page: at import a module with a `document` arms its page-long chrome
   // (the instant tooltip's listeners) — the copies load as on a page that has none yet, the scenes' DOM comes after
@@ -713,7 +752,7 @@ console.log('§8 THE TOAST\'S STATES, DRIVEN — the real showToast / hold / sho
     const drop = others[at];
     if (!drop._toastDrawn && drop._toastKey) _markToastSeen(drop._toastKey, false);
     drop.remove();
-  }`, "  for (let k = stack.children.length; k > 4; k--) { const drop = [...stack.children].find((c) => !c.classList.contains('global-toast-pinned') && !c.classList.contains('global-toast-held')) || [...stack.children].find((c) => !c.classList.contains('global-toast-pinned')); if (!drop) break; drop.remove(); }"]], 's8-cap-round2'), law2: await fresh('s8-law2'), law2Red: await patched('src/lib/utils.js', [['  facts.forEach((f, i) => { const rank = (f && f.yields ? 0 : 2) + (f && f.drawn ? 0 : 1); if (rank < best) { best = rank; at = i; } });', '  facts.forEach((f, i) => { const rank = 0; if (rank < best) { best = rank; at = i; } });']], 's8-law2-oldest'), time: await fresh('s8-time'), timeRed: await patched('src/lib/utils.js', [["  clearTimeout(el._toastTimer); el._toastTimer = null;\n  el.classList.add('global-toast-held');", "  el.classList.add('global-toast-held');"]], 's8-time-hold-runs'), smalls: await fresh('s8-smalls') };
+  }`, "  for (let k = stack.children.length; k > 4; k--) { const drop = [...stack.children].find((c) => !c.classList.contains('global-toast-pinned') && !c.classList.contains('global-toast-held')) || [...stack.children].find((c) => !c.classList.contains('global-toast-pinned')); if (!drop) break; drop.remove(); }"]], 's8-cap-round2'), law2: await fresh('s8-law2'), law2Red: await patched('src/lib/utils.js', [['  facts.forEach((f, i) => { const rank = (f && f.yields ? 0 : 2) + (f && f.drawn ? 0 : 1); if (rank < best) { best = rank; at = i; } });', '  facts.forEach((f, i) => { const rank = 0; if (rank < best) { best = rank; at = i; } });']], 's8-law2-oldest'), time: await fresh('s8-time'), timeRed: await patched('src/lib/utils.js', [["  clearTimeout(el._toastTimer); el._toastTimer = null;\n  el.classList.add('global-toast-held');", "  el.classList.add('global-toast-held');"]], 's8-time-hold-runs'), smalls: await fresh('s8-smalls'), burst: await fresh('s8-burst'), burstRed: await patched('src/lib/utils.js', [["frame(() => { if (el.isConnected && !el.classList.contains('global-toast-held')) el._toastDrawn = true; });", 'el._toastDrawn = true;']], 's8-burst-drawn-at-birth'), remove: await fresh('s8-remove'), removeRed: await patched('src/lib/utils.js', [['  el.remove = () => { clearTimeout(el._toastTimer); el._toastTimer = null; detach(); };\n', '']], 's8-remove-time-runs') };
   try {
     const c = capScene(MODS.cap);
     ok(c.heldAll && c.eThere && c.eDrawn && JSON.stringify(c.dropped) === '["p1"]' && c.n === 4 && c.p1Line === false && c.e1Line === true,
@@ -730,6 +769,15 @@ console.log('§8 THE TOAST\'S STATES, DRIVEN — the real showToast / hold / sho
     ok(tmRed.born && tmRed.heldNow && !tmRed.afterHold, 'CONTROL a hold that keeps the timer: the toast expires while it cannot be seen (RED)', tmRed);
     const sm = smallsScene(MODS.smalls);
     ok(sm.warnDrawn && sm.timedDrawn && sm.plainHeld, 'the smalls in the no-room scene: a refusal (warn) and a toast that names a time are DRAWN at once; a plain one is held', sm);
+    const bu = burstScene(MODS.burst);
+    ok(JSON.stringify(bu.once.dropped) === '["a1"]' && bu.once.a1Line === false && bu.once.a5Drawn && JSON.stringify(bu.later.dropped) === '["b1"]' && bu.later.b1Line === true,
+      'FIVE ERRORS AT ONCE (round 4): the fifth drops the OLDEST — never on screen (no frame painted it), its history line UNSEEN; four, a frame, a fifth — the oldest WAS on screen, its line keeps the verdict (seen)', bu);
+    const buRed = burstScene(MODS.burstRed);
+    ok(JSON.stringify(buRed.once.dropped) === '["a1"]' && buRed.once.a1Line === true, 'CONTROL a toast drawn the moment it is born (round 3\'s mark): the burst\'s oldest — never on screen — stays «seen» (RED)', buRed);
+    const rm = removeScene(MODS.remove);
+    ok(rm.owner === 1 && rm.close === 1 && rm.gone && rm.threw === null, 'EVERY REMOVAL CLEARS ITS TIME (round 4): an owner\'s withdrawal and a ✕ each take the toast\'s timer with it; past their time nothing fires on them', rm);
+    const rmRed = removeScene(MODS.removeRed);
+    ok(rmRed.owner === 0 && rmRed.close === 0, 'CONTROL a removal that leaves the time running: the timers of the withdrawn and the closed toast still wait (RED)', rmRed);
   } finally {
     clock.restore();
     for (const [k, d] of Object.entries(SAVED)) { if (d) Object.defineProperty(globalThis, k, d); else delete globalThis[k]; }

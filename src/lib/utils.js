@@ -949,6 +949,10 @@ export function showToast(message, { type = 'info', duration, action, actions, h
   // move it to any bar; mobile hides it → fall back to the centered strip).
   _anchorToastStack(stack);
   const el = document.createElement('div');
+  // EVERY REMOVAL CLEARS ITS TIME (B-7a51 round 4): its ✕, an action, a setting link, the For-you tap, the cap's drop and an OWNER's
+  // withdrawal (`.remove()` on the toast this returns) all end here — a timer (its time, its fade) never fires on a detached toast
+  const detach = el.remove.bind(el);
+  el.remove = () => { clearTimeout(el._toastTimer); el._toastTimer = null; detach(); };
   el.className = `global-toast global-toast-${type}` + (pinned ? ' global-toast-pinned' : '');   // pinned: until its ✕ or its owner takes it away (no timer; the cap never drops it)
   const body = document.createElement('div');
   body.className = 'global-toast-body';
@@ -989,7 +993,7 @@ export function showToast(message, { type = 'info', duration, action, actions, h
   const ttl = duration ?? (secs > 0 ? secs * 1000 : (type === 'error' ? 6000 : (acts.length ? 5000 : 3000)));
   el._toastTtl = pinned ? 0 : ttl;   // pinned: no time at all
   _placeToastStack(); _queueToastPlace();   // P2-1: off the phone composer / an open modal's rows — now, and once the act that showed it is done
-  if (!el.classList.contains('global-toast-held')) { _toastRun(el); el._toastDrawn = true; }   // (held at its birth: its time waits until it is drawn)
+  if (!el.classList.contains('global-toast-held')) { _toastRun(el); _markDrawn(el); }   // (held at its birth: its time waits until it is drawn)
   el._toastBorn = true;
   return el;
 }
@@ -1001,20 +1005,26 @@ export function showToast(message, { type = 'info', duration, action, actions, h
 function _toastRun(el) {
   if (!el._toastTtl || el._toastTimer) return;
   el._toastTimer = setTimeout(() => {
-    el._toastTimer = null;
     el.classList.add('global-toast-out');
-    setTimeout(() => { const st = el.parentNode; el.remove(); if (st && !st.children.length) st.remove(); }, 250);
+    el._toastTimer = setTimeout(() => { el._toastTimer = null; const st = el.parentNode; el.remove(); if (st && !st.children.length) st.remove(); }, 250);   // the fade is its time too: a removal or a hold clears it
   }, el._toastTtl);
+}
+/** B-7a51 round 4 — FIVE ERRORS AT ONCE: a toast is DRAWN for the cap (seen on screen) only once a frame has painted it unheld — one
+ *  dropped in the very turn it was born (the fifth of a burst) never reached the screen: its history line stays unseen */
+function _markDrawn(el) {
+  const frame = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (f) => setTimeout(f, 16);
+  frame(() => { if (el.isConnected && !el.classList.contains('global-toast-held')) el._toastDrawn = true; });
 }
 function _toastHold(el) {
   clearTimeout(el._toastTimer); el._toastTimer = null;
   el.classList.add('global-toast-held');
   if (!el._toastBorn && el._toastKey) { el._toastJudge = true; _markToastSeen(el._toastKey, false); }
+  el.classList.remove('global-toast-out');   // held in its fade: drawn again whole, not faded
 }
 function _toastShow(el) {
   el.classList.remove('global-toast-held');
   _toastRun(el);
-  el._toastDrawn = true;
+  _markDrawn(el);
   if (el._toastJudge) { el._toastJudge = false; if (_seenAtShow(el._toastRef)) _markToastSeen(el._toastKey, true); }
 }
 /** the history entry of a toast (its key: the entry's record time + its words) marked seen / not seen — the B-3f5d field, nothing
