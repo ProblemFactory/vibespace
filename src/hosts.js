@@ -19,7 +19,7 @@ const crypto = require('crypto');
 const SOCK = require('./sock-path.js');   // B-3767 unit 2: THE folder verdict (ensureSocketDir) for the ssh control folder
 const { REMOTE_PRELUDE, nodeFinder } = require('./remote-shell.js');
 const { parseReceiptLines } = require('./harness-config'); // CFG| receipt lines from the shipped helper (design-harness-settings §6)
-const { usageBearerOk } = require('./login-expiry.js'); // PURE: THE USAGE BEARER LAW (B-5e0d — the host rungs follow the local ladder's rule)
+const { usageBearerOk, usageBearerRefusal } = require('./login-expiry.js'); // PURE: THE USAGE BEARER LAW (B-5e0d — the host rungs follow the local ladder's rule)
 const { execFile } = require('child_process');
 const { serviceEnv, SSH_ENV_KEEP } = require('./agent-env.js');
 const { claimJsonls, cwdToProjectDir } = require('./session-store');
@@ -37,8 +37,32 @@ const { pidAliveShellFn } = require('./cli-identity');
  *  refreshed here — the host's own CLI refreshes it). Nothing is sent anywhere by this: it only answers what may be. */
 function remoteUsageBearer(o, whose) {
   if (!o || typeof o !== 'object' || typeof o.accessToken !== 'string' || !o.accessToken) return null;
-  if (!usageBearerOk(o)) throw Object.assign(new Error(`not refreshed — ${whose} holds a long-lived token, never sent as a usage bearer — its usage refreshes when a session uses it`), { code: 'long-lived' });
-  return !o.expiresAt || o.expiresAt > Date.now() + 60000 ? o.accessToken : null;
+  // an EXPIRED login is «no valid login» whatever its shape (a login both expired and without its refresh token is not
+  // named long-lived): the expiry is asked first, as the device's own op asks it
+  if (o.expiresAt && o.expiresAt <= Date.now() + 60000) return null;
+  if (!usageBearerOk(o)) throw usageBearerRefusal(whose);
+  return o.accessToken;
+}
+
+/** B-5e0d: THE PASSIVE USAGE CACHE through the shell — the readings the host's vibespace-usage hook wrote, the files and the
+ *  shape an agent's quota-refresh reply carries ({<file stem>: <reading with fetchedAt>}). Read only for an agent OLDER than
+ *  the usage bearer law once the law refused its login (asked, that agent would send the token itself): file reads, no
+ *  token read, nothing sent; bounded (PASSIVE_PEEK_FILES files, each cut at PASSIVE_PEEK_BYTES). */
+const PASSIVE_PEEK_FILES = 64, PASSIVE_PEEK_BYTES = 65536, PASSIVE_PEEK_MARK = '@@vs-passive@@';
+const PASSIVE_PEEK_SH = 'd="$HOME/.vibespace/usage-cache"; n=0; for f in "$d"/*.json; do [ -f "$f" ] || continue; b=${f##*/}; '
+  + 'case "$b" in __models__*) continue;; esac; n=$((n+1)); [ "$n" -gt ' + PASSIVE_PEEK_FILES + ' ] && break; '
+  + "printf '\\n" + PASSIVE_PEEK_MARK + " %s\\n' \"$b\"; head -c " + PASSIVE_PEEK_BYTES + ' "$f"; done; true';
+/** PURE: the peek's output → {<stem>: reading} (a file that is not a reading with fetchedAt is left out, as the agent leaves it). */
+function passiveOfPeek(raw) {
+  const out = {};
+  for (const part of String(raw || '').split('\n' + PASSIVE_PEEK_MARK + ' ').slice(1)) {
+    const nl = part.indexOf('\n');
+    const name = nl > 0 ? part.slice(0, nl) : '';
+    if (!/^[\w.-]{1,120}\.json$/.test(name) || name.startsWith('__models__')) continue;
+    let j = null; try { j = JSON.parse(part.slice(nl + 1)); } catch { j = null; }
+    if (j && typeof j === 'object' && j.fetchedAt) out[name.slice(0, -5)] = j;
+  }
+  return out;
 }
 
 // THE SSH HARVEST'S LIMITS (B-6ded, list 1) — what the hub takes from one run of the shipped scanner, and the bound that
@@ -2709,6 +2733,13 @@ class HostManager {
     let o = null;
     try { o = JSON.parse(raw).claudeAiOauth || null; } catch { o = null; }
     return remoteUsageBearer(o, 'the account\'s folder on the host');   // B-5e0d: the bearer law (a long-lived token refused by name)
+  }
+
+  /** B-5e0d: the host's PASSIVE usage cache through the shell (PASSIVE_PEEK_SH above) — for an agent older than the usage bearer
+   *  law, which the ⟳ never asks once the law refused its login: the person keeps the reading that cost nothing. */
+  async readRemotePassiveUsage(id) {
+    const h = this.get(id);
+    return passiveOfPeek(await this._hostShell(h, PASSIVE_PEEK_SH, { timeoutMs: 10000 }));
   }
 
   // ── Remote session discovery (lock-first, same algorithm as local) ──

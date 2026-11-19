@@ -518,6 +518,16 @@ for (const [rel, a] of Object.entries(ALLOW)) {
     'RED control (B-5e0d): a refusal by THROW after the law (the passive cache dropped — 10ab66486\'s shape) is red');
   ok(!bearerOrder(anchored(text, "            if (bearerOk) {\n", "            if (true) {\n", 'B-5e0d: the request whatever the shape')),
     'RED control (B-5e0d): the request made whatever the token\'s shape (outside the law) is red');
+  // B-5e0d small 2: the op's answer carries its REASON by name — the long-lived refusal in the reply beside the passive cache,
+  // both no-login errors tagged and carried — so the hub answers the page from it, never a second look through the shell
+  // (the real op is driven in test-device-secret-quota)
+  const reasons = (t) => {
+    const b = t.slice(t.indexOf("msg.op === 'quota-refresh'"), t.indexOf("msg.op === 'probe-cli'"));
+    return (b.match(/\{ refused: 'no-valid-login' \}/g) || []).length === 2 && b.includes("passive, ...(bearerOk ? {} : { refused: 'long-lived' }) });") && b.includes("error: e.message, ...(e.refused ? { refused: e.refused } : {}) });");
+  };
+  ok(reasons(text), 'agentd quota-refresh (B-5e0d): its answer names its reason — «long-lived» beside the passive cache, «no-valid-login» on both no-login errors');
+  ok(!reasons(anchored(text, "error: e.message, ...(e.refused ? { refused: e.refused } : {}) });", 'error: e.message });', 'B-5e0d: the reason dropped from the error answer')),
+    'RED control (B-5e0d): an error answer without its reason (the recorded op) is red');
 }
 for (const rel of ['src/agentd/client.js', 'src/agentd/ws-min.js', 'src/agentd/mux.js']) {
   const text = fs.readFileSync(path.join(REPO, rel), 'utf-8');

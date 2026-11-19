@@ -354,6 +354,7 @@ console.log('\n⑨ backend shape detection is by FIELDS, never by key name');
       // for a DIFFERENT one. Each says which.
       ["server.js", "declares USAGE_CACHE_DIR/USAGE_CACHE_FILE and hands them to the engine + usage routes; its own writes are layouts/session-meta/etc."],
       ["src/agentd/agentd.js", "the DEVICE's own ~/.vibespace/usage-cache, read for the usage-scan op — a machine's own store, and it reaches us only as usage-cache/host-*.json"],
+      ["src/hosts.js", "B-5e0d: READS a paired machine's own ~/.vibespace/usage-cache through the shell (readRemotePassiveUsage, for an agent older than the usage bearer law) — the readings reach us only through usage-routes' merge into the write path; its own writes are its other stores (the hosts store, the ssh keys, the agent install stage, the machine meta files)"],
       ["src/mounts.js", "matched on the identifier cacheDir — the rclone download cache under ~/.cache/vibespace, nothing to do with quota"],
       ["src/server/agent-tool-generators.js", "ensureDir(USAGE_CACHE_DIR) at boot + it GENERATES data/bin/vibespace-status; the statusline tool it ships is the tracked file above"],
       ["src/server/migrations.js", "names this store in the two repair migrations' notes; the writing is reading-repair's"],

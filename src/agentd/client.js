@@ -93,6 +93,14 @@ function stageMark(e, stage) {
 const connectFailure = (e) => stageMark(e, 'connect');
 const gateRefusal = (e) => stageMark(e, 'gate');
 
+/** THE ERROR OF AN AGENT'S ERROR REPLY (`_request` rejects with it): its words, a lost link's code, an op refused by the
+ *  device's own allow flags (code / flag / remedy), and the reason an op named for itself (`refused`, B-5e0d's quota-refresh). */
+function replyError(m) {
+  return Object.assign(new Error(m.error), m.linkLost ? { code: 'link_lost' } : {}, m.op === 'op-refused' ? { code: m.code, flag: m.flag, remedy: m.remedy } : {}, typeof m.refused === 'string' ? { refused: m.refused } : {});
+}
+/** B-5e0d: the quota-refresh op's own reason, by name (a reply or the error of one) — 'long-lived' | 'no-valid-login' | null */
+const quotaReasonOf = (x) => (x && (x.refused === 'long-lived' || x.refused === 'no-valid-login') ? x.refused : null);
+
 class DeviceManager {
   /**
    * @param {object} opts
@@ -749,7 +757,7 @@ class DeviceManager {
     return new Promise((resolve, reject) => {
       conn.pending.set(id, (m) => {
         if (line) this._act(payload, { ...DA.answerOf(m), outHead: DA.outHeadOf(m), ms: Date.now() - t0, ...askFacts(facts) });
-        return m.error ? reject(Object.assign(new Error(m.error), m.linkLost ? { code: 'link_lost' } : {}, m.op === 'op-refused' ? { code: m.code, flag: m.flag, remedy: m.remedy } : {})) : resolve(m);
+        return m.error ? reject(replyError(m)) : resolve(m);
       });
       conn.mux.control({ ...payload, id });
       setTimeout(() => { if (conn.pending.delete(id)) { if (line) this._act(payload, { ok: false, code: 'timeout', ms: Date.now() - t0, ...askFacts(facts) }); reject(new Error(payload.op + ' timeout')); } }, payload.waitMs || payload.timeoutMs || 30000);
@@ -1600,9 +1608,14 @@ class DeviceManager {
     // the caller's own check of the same login file (`lawFirst`, refusing by name) runs before such an agent is asked; an agent
     // WITH the law refuses on its own, makes no request, and still returns its passive cache
     if (!conn.info.capabilities.includes('quota-refresh-bearer-law') && typeof lawFirst === 'function') await lawFirst();
-    const r = await this._request({ op: 'quota-refresh', subDir, humanGated, timeoutMs: 40000 });
+    // B-5e0d: the agent's REASON rides back (`refused`: 'long-lived' beside its reading | 'no-valid-login' on its error, carried
+    // by replyError) — the caller answers by it (the error's `code`, the reading's `refused`), with no second look through the
+    // shell; an agent older than it sends none (the caller looks as before)
+    let r;
+    try { r = await this._request({ op: 'quota-refresh', subDir, humanGated, timeoutMs: 40000 }); }
+    catch (e) { const why = quotaReasonOf(e); if (why && !e.code) e.code = why; throw e; }
     if (r.error) throw new Error(r.error);
-    return { usage: r.usage, roles: r.roles, passive: r.passive || null };
+    return { usage: r.usage, roles: r.roles, passive: r.passive || null, refused: quotaReasonOf(r) };
   }
 
   /** The device's usage walk (R4). `hubCursor` (lane ledger-dedup-law F2) = the cursor map the HUB keeps for this machine:
@@ -1708,4 +1721,4 @@ class DeviceManager {
   stop() { this._foldEndAll(); this._stopped = true; this._conn?.mux?.destroy(); this._conn = null; }   // B-c632: an open fold is said
 }
 
-module.exports = { posixShellRefusal, posixShellFailed, DeviceManager };
+module.exports = { posixShellRefusal, posixShellFailed, replyError, DeviceManager };

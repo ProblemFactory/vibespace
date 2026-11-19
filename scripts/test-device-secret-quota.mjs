@@ -69,6 +69,14 @@ try {
   // a repeat still reports the real problem, not 'throttled'
   let g4 = null; try { await dm.quotaRefresh({ humanGated: true }); } catch (e) { g4 = e.message; }
   check('failed precondition does NOT consume the throttle slot', /no valid token/.test(g4 || ''), g4);
+  // B-5e0d small 2: the op's refusal carries its REASON by name — the hub answers the page from it, with no second look
+  // through the shell — and a LONG-LIVED token (no refresh token beside it) makes no vendor request: the reply says so
+  let g4c = null; try { await dm.quotaRefresh({ humanGated: true }); } catch (e) { g4c = e.code || ('no code: ' + e.message); }
+  check('B-5e0d: the expired login\'s refusal carries its reason by name (no-valid-login)', g4c === 'no-valid-login', g4c);
+  fs.writeFileSync(path.join(fakeHome, '.claude', '.credentials.json'),
+    JSON.stringify({ claudeAiOauth: { accessToken: ['sk', 'ant', 'oat'].join('-') + '-LONGLIVED-FAKE', expiresAt: Date.now() + 3600e3 } }));
+  let ll = null, llErr = null; try { ll = await dm.quotaRefresh({ humanGated: true }); } catch (e) { llErr = e.message; }
+  check('B-5e0d: a long-lived token (no refresh token beside it) → NO vendor request; the reply says «long-lived» by name, no usage, its passive cache beside it', !llErr && !!ll && ll.refused === 'long-lived' && ll.usage === null && !!ll.passive && typeof ll.passive === 'object', llErr || ll);
   // the throttle itself cannot be exercised live without a vendor call
   // (§ban-safety) — its position is pinned structurally: stamp AFTER token
   // validation, BEFORE the request
@@ -85,5 +93,5 @@ try {
   try { execFileSync('sh', ['-c', `pkill -f "${bundle.replace(/[/.]/g, '.')}" 2>/dev/null || true`]); } catch { }
   fs.rmSync(tmp, { recursive: true, force: true });
 }
-console.log(failed ? `FAIL (${failed})` : 'ALL PASS (12)');
+console.log(failed ? `FAIL (${failed})` : 'ALL PASS (15)');
 process.exit(failed ? 1 : 0);

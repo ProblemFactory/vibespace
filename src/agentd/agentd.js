@@ -2630,10 +2630,12 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
             this._quotaAt = this._quotaAt || new Map();
             const at = this._quotaAt.get(credsPath) || 0;
             if (Date.now() - at < 60000) throw new Error('throttled (60s)');
-            let creds; try { creds = JSON.parse(fs.readFileSync(credsPath, 'utf-8')); } catch { throw new Error('no credentials on this machine'); }
+            // B-5e0d: the reply carries its REASON (`refused`) — the hub's page words come from this answer, never a second look
+            // through the shell
+            let creds; try { creds = JSON.parse(fs.readFileSync(credsPath, 'utf-8')); } catch { throw Object.assign(new Error('no credentials on this machine'), { refused: 'no-valid-login' }); }
             const oauth = creds?.claudeAiOauth;
             const token = oauth?.accessToken;
-            if (!token || (oauth.expiresAt && oauth.expiresAt < Date.now() + 60000)) throw new Error('no valid token (expired tokens are never refreshed here)');
+            if (!token || (oauth.expiresAt && oauth.expiresAt < Date.now() + 60000)) throw Object.assign(new Error('no valid token (expired tokens are never refreshed here)'), { refused: 'no-valid-login' });
             // B-5e0d: THE USAGE BEARER LAW (kb-design-lessons §9; login-expiry usageBearerOk's rule, by SHAPE): only the CLI's own
             // login token — a refresh token beside it — is ever this request's Bearer; a long-lived one makes NO vendor request
             // (asked after the expiry: an expired token stays «no valid token», as test-device-secret-quota pins it). The passive
@@ -2673,8 +2675,8 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
                 try { const j = JSON.parse(fs.readFileSync(path.join(cdir, f), 'utf-8')); if (j && j.fetchedAt) passive[f.slice(0, -5)] = j; } catch { }
               }
             } catch { }
-            mux.control({ op: 'quota-result', id: msg.id, usage, roles, passive });
-          } catch (e) { mux.control({ op: 'quota-result', id: msg.id, error: e.message }); }
+            mux.control({ op: 'quota-result', id: msg.id, usage, roles, passive, ...(bearerOk ? {} : { refused: 'long-lived' }) });
+          } catch (e) { mux.control({ op: 'quota-result', id: msg.id, error: e.message, ...(e.refused ? { refused: e.refused } : {}) }); }
         })();
         return;
       }

@@ -380,14 +380,14 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
     const LONG = ['sk', '-ant-oat01-'].join('') + 'HOSTLONGfake_' + 'h5'.repeat(20);
     const LOGIN = ['sk', 'ant', 'oat01'].join('-') + '-HOSTLOGIN-fake', LOGIN_REF = ['sk', 'ant', 'ort01'].join('-') + '-HOSTLOGIN-fake-ref';
     const credsOf = (o) => JSON.stringify({ claudeAiOauth: { expiresAt: Date.now() + 3600e3, subscriptionType: 'max', ...o } });
-    const world = (HM, tag, device = null) => {
-      let file = '';
+    const world = (HM, tag, device = null, { shell = null, UM = usageMod } = {}) => {   // ④k: `shell` answers a script of its own; `UM` a usage module
+      let file = ''; const looks = [];
       const proto = HM.HostManager.prototype;
-      const hosts = { get: (id) => ({ id, name: 'Box ' + tag }), device: async () => { if (device) return device; throw new Error('daemon lacks quota-refresh (capabilities gate)'); }, _hostShell: async () => file };
-      hosts.readRemoteOAuth = proto.readRemoteOAuth.bind(hosts); hosts.readRemoteSubOAuth = proto.readRemoteSubOAuth.bind(hosts);
+      const hosts = { get: (id) => ({ id, name: 'Box ' + tag }), list: () => [{ id: 'box-' + tag, name: 'Box ' + tag }], device: async () => { if (device) return device; throw new Error('daemon lacks quota-refresh (capabilities gate)'); }, _hostShell: async (h, script) => { looks.push(String(script)); return shell ? shell(String(script), file) : file; } };
+      hosts.readRemoteOAuth = proto.readRemoteOAuth.bind(hosts); hosts.readRemoteSubOAuth = proto.readRemoteSubOAuth.bind(hosts); if (proto.readRemotePassiveUsage) hosts.readRemotePassiveUsage = proto.readRemotePassiveUsage.bind(hosts);
       const routes = {};
-      usageMod.setupUsage({
-        app: { get() { }, post(p, fn) { routes[p] = fn; }, put() { }, delete() { }, use() { }, locals: {} },
+      UM.setupUsage({
+        app: { get(p, fn) { routes['GET ' + p] = fn; }, post(p, fn) { routes[p] = fn; }, put() { }, delete() { }, use() { }, locals: {} },
         accounts: am, hosts, usageHistory: null, activeSessions: new Map(),
         serverSetting: () => undefined, ensureDir: (d) => fs.mkdirSync(d, { recursive: true }),
         USAGE_CACHE_FILE: path.join(dataDir, 'usage-cache.json'), USAGE_CACHE_DIR: cacheDir,
@@ -396,7 +396,8 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
         probeUsageForAccountKey: async () => false, onMemberReadingFresh: () => ({}), CLAUDE_CMD: bin,
       });
       const call = (body) => new Promise((resolve) => routes['/api/usage/refresh']({ body, headers: {} }, { status() { return this; }, json: (j) => resolve(j) }));
-      return { setFile: (t) => { file = t; }, call };
+      const view = () => new Promise((resolve) => routes['GET /api/usage']({ query: {}, headers: {} }, { status() { return this; }, set() { return this; }, setHeader() { }, json: (j) => resolve(j) }));   // ④k: the popup's map
+      return { setFile: (t) => { file = t; }, call, looks, view };
     };
     const held = am.createSubscription({ name: 'Held Six' }).id;
     const calls = [], realReq = https.request;
@@ -421,7 +422,7 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
       const jg = await w2.call({ host: 'box-two', account: held });
       ok('§5 ④j B-5e0d: …the CLI\'s own login (a refresh token beside it) is read as before — the one Bearer, the refresh token never sent',
         jg && jg.success === true && calls.length > n1 && calls.slice(n1).every((c) => c.bearer === LOGIN), JSON.stringify({ jg, bearers: calls.slice(n1).map((c) => c.bearer.slice(0, 12)) }));
-      const blind = M.load('src/hosts.js', anchored(HSRC, "  if (!usageBearerOk(o)) throw Object.assign(", "  if (false) throw Object.assign(", 'B-5e0d: the host rungs without the bearer law'), 'hosts-blind');
+      const blind = M.load('src/hosts.js', anchored(HSRC, "  if (!usageBearerOk(o)) throw usageBearerRefusal(whose);", "  if (false) throw usageBearerRefusal(whose);", 'B-5e0d: the host rungs without the bearer law'), 'hosts-blind');
       const w3 = world(blind, 'three');
       w3.setFile(credsOf({ accessToken: LONG }));
       const n2 = calls.length;
@@ -446,6 +447,99 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
       const blindAgent = M.load('src/agentd/client.js', anchored(CSRC, "    if (!conn.info.capabilities.includes('quota-refresh-bearer-law') && typeof lawFirst === 'function') await lawFirst();\n", '', 'B-5e0d: an older agent asked without the law'), 'client-blind');
       const olderR = await viaAgent(blindAgent, ['quota-refresh'], 'older-red');
       ok('RED control: without the client\'s gate an older agent IS asked — it would send the long-lived token as the Bearer itself', olderR.asked === 1, JSON.stringify(olderR));
+      // ④k B-5e0d's SMALLS (主开发's record of the line, 19:21Z): (3) a login both EXPIRED and without its refresh token is «no valid
+      // login», never «long-lived»; (2) an agent WITH the law answers by its OWN REASON (`refused` in its reply: 'long-lived' /
+      // 'no-valid-login') — the page's words come from it, with NO look through the shell; (1) an agent OLDER than the law, refused
+      // by the hub's first look, keeps the person's PASSIVE reading: the same cache files read through the shell (the REAL peek
+      // script, run by sh over a made-up home: file reads only), merged as the agent's reply is merged
+      const NOVALID_G = /^no currently-valid login token on the host/, NOVALID_H = /^no currently-valid login for this account on the host/;
+      const USRC0 = fs.readFileSync(path.join(REPO, 'src/usage-routes.js'), 'utf8');
+      {
+        const w = world(HMreal, 'k3');
+        w.setFile(credsOf({ accessToken: LONG, expiresAt: Date.now() - 1000 }));   // expired AND no refresh token beside it
+        const n = calls.length, jg = await w.call({ host: 'box-k3' }), jh = await w.call({ host: 'box-k3', account: held });
+        ok('§5 ④k B-5e0d small 3: a login both EXPIRED and without its refresh token says «no valid login» (the machine\'s own, and the account it holds) — never «long-lived»; 0 vendor requests',
+          NOVALID_G.test(String(jg.error)) && NOVALID_H.test(String(jh.error)) && calls.length === n, JSON.stringify({ jg, jh, sent: calls.length - n }));
+        const order = M.load('src/hosts.js', anchored(HSRC, "  if (o.expiresAt && o.expiresAt <= Date.now() + 60000) return null;\n  if (!usageBearerOk(o)) throw usageBearerRefusal(whose);\n  return o.accessToken;\n", "  if (!usageBearerOk(o)) throw usageBearerRefusal(whose);\n  return !o.expiresAt || o.expiresAt > Date.now() + 60000 ? o.accessToken : null;\n", 'B-5e0d small 3: the law asked before the expiry (the recorded order)'), 'hosts-order');
+        const wr = world(order, 'k3r');
+        wr.setFile(credsOf({ accessToken: LONG, expiresAt: Date.now() - 1000 }));
+        const jr = await wr.call({ host: 'box-k3r' });
+        ok('RED control: the law asked before the expiry (the recorded order) names the expired login «long-lived»', /long-lived token/.test(String(jr.error)), JSON.stringify(jr));
+      }
+      // the agent's answer as the REAL client takes it: an error reply REJECTS through the client's own replyError (`_request`)
+      const agentSays = (CL, caps, reply, asked) => { const dm = Object.create(CL.DeviceManager.prototype); dm.connect = async () => ({ info: { capabilities: caps } }); dm._request = async (m) => { asked.push(m.op); const a = JSON.parse(JSON.stringify(reply)); if (a.error) throw CL.replyError(a); return a; }; return dm; };
+      const LAW = ['quota-refresh', 'quota-refresh-bearer-law'];
+      const reasoned = async (CL, reply, tag, account = null) => {
+        const asked = [], w = world(HMreal, tag, agentSays(CL, LAW, reply, asked));
+        w.setFile(credsOf({ accessToken: LONG }));
+        const n = calls.length, j = await w.call(account ? { host: 'box-' + tag, account } : { host: 'box-' + tag });
+        return { asked: asked.length, error: String(j.error || ''), looks: w.looks.length, sent: calls.length - n };
+      };
+      {
+        const LONGR = { usage: null, roles: null, passive: {}, refused: 'long-lived' }, NOVR = { error: 'no valid token (expired tokens are never refreshed here)', refused: 'no-valid-login' };
+        const a = await reasoned(CLreal, LONGR, 'k2a'), b = await reasoned(CLreal, LONGR, 'k2b', held), c = await reasoned(CLreal, NOVR, 'k2c'), d = await reasoned(CLreal, NOVR, 'k2d', held);
+        ok('§5 ④k B-5e0d small 2: an agent WITH the law answers by its OWN reason — «long-lived» (its reply\'s `refused`) and «no valid login» (its error\'s) are the page\'s words for the machine\'s login and the account it holds, with NO look through the shell; 0 vendor requests',
+          [a, b, c, d].every((x) => x.asked === 1 && x.looks === 0 && x.sent === 0) && /^not refreshed — the host's login holds a long-lived token/.test(a.error) && /^not refreshed — the account's folder on the host holds a long-lived token/.test(b.error) && NOVALID_G.test(c.error) && NOVALID_H.test(d.error), JSON.stringify({ a, b, c, d }));
+        const deaf = M.load('src/agentd/client.js', anchored(CSRC, "const quotaReasonOf = (x) => (x && (x.refused === 'long-lived' || x.refused === 'no-valid-login') ? x.refused : null);", 'const quotaReasonOf = () => null;', 'B-5e0d small 2: the reason left behind'), 'client-deaf');
+        const cr = await reasoned(deaf, NOVR, 'k2r'), crl = await reasoned(deaf, LONGR, 'k2rl');
+        ok('RED control: the client that leaves the agent\'s reason behind sends the page to a look through the shell (the no-login error and the long-lived reply alike)', cr.looks >= 1 && crl.looks >= 1, JSON.stringify({ cr, crl }));
+        const dropped = M.load('src/agentd/client.js', anchored(CSRC, ", typeof m.refused === 'string' ? { refused: m.refused } : {});", ');', 'B-5e0d small 2: the error reply\'s reason dropped (the read\'s must)'), 'client-dropped');
+        const cd = await reasoned(dropped, NOVR, 'k2rd');
+        ok('RED control: an error reply whose reason the client\'s rejection drops (528c09615\'s shape — the read\'s must) sends the no-login page to a look through the shell', cd.looks >= 1, JSON.stringify(cd));
+        // the stand-in above rejects through the client's replyError: the REAL `_request` must too (the real op + client run in the
+        // heavy test-device-secret-quota) — its one rejection line, pinned; RED: the inline builder before this commit
+        const rejectsThrough = (src) => src.includes('        return m.error ? reject(replyError(m)) : resolve(m);');
+        ok('§5 ④k B-5e0d small 2: the client\'s `_request` rejects an error reply through replyError (the reason kept)', rejectsThrough(CSRC));
+        ok('RED control: the inline rejection (566b9aab8\'s line, no reason kept) is red', !rejectsThrough(anchored(CSRC, '        return m.error ? reject(replyError(m)) : resolve(m);', "        return m.error ? reject(Object.assign(new Error(m.error), m.linkLost ? { code: 'link_lost' } : {})) : resolve(m);", 'B-5e0d: the inline rejection')));
+      }
+      {
+        // the hub's own first look THREW (an older agent asked after it; the host's shell unreachable): never made twice — ONE look
+        // at the login file, the words «isn't responding», on both roads; RED: `_deviceSaid` without the first-look rule looks again
+        const unreach = (UM, tag) => {
+          const asked = [], w = world(HMreal, tag, agentSays(CLreal, ['quota-refresh'], { usage: null, roles: null, passive: {} }, asked), { UM, shell: (script, file) => { if (script.includes('.credentials.json')) throw new Error('ssh: connect to host timed out'); return file; } });
+          return { w, asked };
+        };
+        const once = async (UM, tag, account) => {
+          const { w, asked } = unreach(UM, tag);
+          const j = await w.call(account ? { host: 'box-' + tag, account } : { host: 'box-' + tag });
+          return { asked: asked.length, error: String(j.error || ''), credLooks: w.looks.filter((x) => x.includes('.credentials.json')).length };
+        };
+        const g = await once(usageMod, 'k4g'), h = await once(usageMod, 'k4h', held);
+        ok('§5 ④k B-5e0d: a first look of the hub\'s own that THREW (the host unreachable, an older agent) is never made twice — ONE look at the login file, «isn\'t responding», the agent never asked (the machine\'s login and the account it holds)',
+          [g, h].every((x) => x.asked === 0 && x.credLooks === 1 && /isn’t responding/.test(x.error)), JSON.stringify({ g, h }));
+        const twice = M.load('src/usage-routes.js', anchored(USRC0, "  if (e && (e.code === 'long-lived' || e.firstLook)) return Promise.reject(e);", "  if (e && e.code === 'long-lived') return Promise.reject(e);", 'B-5e0d: the first look made twice'), 'routes-twice');
+        const gr = await once(twice, 'k4r');
+        ok('RED control: without the first-look rule the unreachable host is looked at twice (two 10 s waits)', gr.credLooks === 2, JSON.stringify(gr));
+      }
+      {
+        const pHome = mkd(`vs-probelog-passive-${process.pid}-`), pDir = path.join(pHome, '.vibespace', 'usage-cache');
+        fs.mkdirSync(pDir, { recursive: true });
+        const S = Math.floor(Date.now() / 1000), PAT = Date.now() - 90e3;
+        const reading = { fetchedAt: PAT, source: 'statusline', fiveHour: { utilization: 0.27, status: 'allowed', resetsAt: S + 2 * 3600, asOf: PAT }, sevenDay: { utilization: 0.08, status: 'allowed', resetsAt: S + 3 * 86400, asOf: PAT } };
+        fs.writeFileSync(path.join(pDir, '__global__.json'), JSON.stringify(reading, null, 2));   // a reading spread over lines, as a hook may write it
+        fs.writeFileSync(path.join(pDir, '__models__claude.json'), JSON.stringify({ fetchedAt: PAT, models: [] }));   // never a reading
+        const { execFileSync } = require('node:child_process');   // the peek's script run by a real sh (a made-up home; file reads only)
+        const USRC = fs.readFileSync(path.join(REPO, 'src/usage-routes.js'), 'utf8');
+        const realShell = (script, file) => (script.includes('usage-cache') ? execFileSync('sh', ['-c', script], { env: { HOME: pHome, PATH: '/usr/bin:/bin' }, encoding: 'utf8' }) : file);
+        const olderPassive = async (UM, tag) => {
+          const asked = [], w = world(HMreal, tag, agentSays(CLreal, ['quota-refresh'], { usage: null, roles: null, passive: {} }, asked), { shell: realShell, UM });
+          w.setFile(credsOf({ accessToken: LONG }));
+          const f = path.join(cacheDir, `host-box-${tag}.json`), had = fs.existsSync(f);
+          const n = calls.length, j = await w.call({ host: 'box-' + tag });
+          let got = null; try { got = JSON.parse(fs.readFileSync(f, 'utf8')); } catch { got = null; }
+          const pop = await w.view().then((v) => ((v && v.hosts) || {})['box-' + tag] || null, (e) => ({ viewThrew: String((e && e.message) || e) }));   // the ⟳ popup's map (no restart)
+          return { asked: asked.length, error: String(j.error || ''), sent: calls.length - n, had, got, popup: !!(pop && pop.fiveHour && pop.fiveHour.utilization === 0.27), viewThrew: (pop && pop.viewThrew) || null, peeks: w.looks.filter((x) => x.includes('usage-cache')).length, credLooks: w.looks.filter((x) => x.includes('.credentials.json')).length };
+        };
+        const o = await olderPassive(usageMod, 'k1');
+        ok('§5 ④k B-5e0d small 1: an agent OLDER than the law, refused by the hub\'s first look (never asked), keeps the person\'s PASSIVE reading — the cache read through the shell (one peek, file reads only) is merged as the agent\'s reply is (the machine\'s own bucket, «remote-statusline») and the ⟳ popup shows it at once, the refusal still by name, ONE look at the login file, 0 vendor requests',
+          o.asked === 0 && o.sent === 0 && /^not refreshed — the host's login holds a long-lived token/.test(o.error) && !o.had && !!o.got && o.got.source === 'remote-statusline' && o.got.fiveHour && o.got.fiveHour.utilization === 0.27 && o.popup && o.peeks === 1 && o.credLooks === 1, JSON.stringify({ ...o, got: o.got && { source: o.got.source, fiveHour: o.got.fiveHour } }));
+        const lost = M.load('src/usage-routes.js', anchored(USRC, "return { passive: await hosts.readRemotePassiveUsage(hid).catch(() => null), refused: 'long-lived' };", "return { passive: null, refused: 'long-lived' };", 'B-5e0d small 1: the older agent\'s reading lost'), 'routes-lost');
+        const or = await olderPassive(lost, 'k1r');
+        ok('RED control: without the shell\'s passive read the older agent\'s refusal leaves the person no reading (the recorded line)', or.asked === 0 && !or.got && or.peeks === 0, JSON.stringify({ ...or, got: !!or.got }));
+        const stale = M.load('src/usage-routes.js', anchored(USRC, "            if (kept) { if (k === '__global__') _hostUsage[hid] = kept; else _hostAcctUsage[hid + ':' + k] = heldSource(kept); }\n", '', 'B-5e0d: the popup not told of a merged reading'), 'routes-stale');
+        const os2 = await olderPassive(stale, 'k1s');
+        ok('RED control: a merged reading the popup is not told of shows only after a restart (the file has it, the popup\'s map not)', !!os2.got && !os2.popup, JSON.stringify({ got: !!os2.got, popup: os2.popup }));
+      }
     } finally { https.request = realReq; }
   }
   // RED CONTROLS at the door: the same door over the verdict with ONE check cut — the profile-less token / the unmeasured

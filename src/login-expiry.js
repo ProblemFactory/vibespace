@@ -125,6 +125,12 @@ function oatFileOf(creds) {
 /** May this oauth record's (claudeAiOauth: {accessToken, refreshToken}) access token be the Bearer of a direct usage read?
  *  A LOGIN's: a non-empty access token WITH its refresh token beside it — never one alone (a long-lived token). */
 function usageBearerOk(o) { return !!o && typeof o === 'object' && typeof o.accessToken === 'string' && o.accessToken !== '' && !!o.refreshToken; }
+/** THE LAW'S REFUSAL BY NAME at the host rungs (B-5e0d): `whose` holds a long-lived token — nothing read, nothing sent. ONE
+ *  sentence for both roads that learn it: the hub's own token peek (hosts.js remoteUsageBearer) and the device agent's
+ *  reply that refused on its own (its `refused: 'long-lived'`, usage-routes) — code 'long-lived'. */
+function usageBearerRefusal(whose) {
+  return Object.assign(new Error(`not refreshed — ${whose} holds a long-lived token, never sent as a usage bearer — its usage refreshes when a session uses it`), { code: 'long-lived' });
+}
 /** OURS for row `id`: our materialized file (oatFileOf) whose mark names this row. */
 function oatFileOurs(creds, id) {
   if (!id || !oatFileOf(creds)) return false;
@@ -512,7 +518,7 @@ function materializeVerdict(member, now = Date.now()) {
 }
 
 module.exports = {
-  OAT_FILE_MARK, oatFileOf, oatFileOurs, usageBearerOk, credsRestOf, oatFileMerge, oatFileCurrent, oatShapeOf, storedShapeOf, oatFileBody, materializeVerdict,
+  OAT_FILE_MARK, oatFileOf, oatFileOurs, usageBearerOk, usageBearerRefusal, credsRestOf, oatFileMerge, oatFileCurrent, oatShapeOf, storedShapeOf, oatFileBody, materializeVerdict,
   EXPIRING_MS, NEAR_MS, WARN_STAGES, STAGE_MS, DEAD_STATES, STALE_GRACE_MS, SHORT_SESSION_MS, OAT_ONLY,
   loginState, withOat, ledgerExp, loginUsable, loginSwitchTarget, loginRank, loginBlockReason,
   loginAgeText, loginBucketLabel, loginBlockedPhrase, loginBlockedText, loginWallPhrase,

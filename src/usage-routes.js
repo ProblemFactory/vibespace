@@ -43,7 +43,7 @@ const quotaModel = require('./quota-model.js');
 const { authoritativeScopesOf } = quotaModel;
 
 const probeLog = require('./server/usage-probe-log.js'); // the raw /usage probe ring (2.369.109)
-const { usageBearerOk } = require('./login-expiry.js'); // PURE: THE USAGE BEARER LAW — the CLI's own login token (a refresh token beside it), never a long-lived one (acceptance r3/r4)
+const { usageBearerOk, usageBearerRefusal } = require('./login-expiry.js'); // PURE: THE USAGE BEARER LAW — the CLI's own login token (a refresh token beside it), never a long-lived one (acceptance r3/r4)
 const { unplaceableText, wallDoor } = require('./account-pool-auto.js'); // PURE: the roster's words — ⟳ says the SAME sentence for the same fact (acceptance r3)
 const { probeFailWhy, probeWhyText, probeEligibility, isUnprobeable, notProbedWords, panelAnswerClass, OAT_FOLDER_NO_PANEL } = require('./auto-cli-model.js'); // PURE: may the probe PROVE this row, a failed probe's reason + THE ONE scrub (lane auto-cli-oat-unprobeable)
 // THE PANEL PROBE'S ARGV (B-9b40): `/usage` and no MCP server at all. Measured on
@@ -215,6 +215,17 @@ function _consumeDeviceQuota(r) {
     } catch { }
   }
   return u;
+}
+
+// B-5e0d: THE DEVICE'S OWN REASON answers the ⟳ — a refusal the agent (or the law's first look) made BY NAME is the answer:
+// 'long-lived' goes on to the route's error words; 'no-valid-login' is the token peek's «no login» (null); a first look of the
+// hub's own that THREW (`firstLook`: the law asked before an older agent — an unreachable host) is never made twice; only a
+// device leg that failed otherwise (an older agent's error, a link down, no usable reading) takes the look through the shell.
+const _firstLook = (p) => p.catch((e) => { if (e && typeof e === 'object') e.firstLook = true; throw e; });
+function _deviceSaid(e, peek) {
+  if (e && (e.code === 'long-lived' || e.firstLook)) return Promise.reject(e);
+  if (e && e.code === 'no-valid-login') return Promise.resolve(null);
+  return peek();
 }
 
 // cb(usageObj) on a 200; cb(null) on any failure (caller keeps last-known).
@@ -992,7 +1003,8 @@ app.post('/api/usage/refresh', async (req, res) => {
         const dm = await hosts.device(hid);
         // B-5e0d: an agent older than THE USAGE BEARER LAW would send a long-lived token itself — `lawFirst` (the hub's own peek
         // of the same login file: refused by name, its token unused) runs before such an agent is asked (src/agentd/client.js)
-        const r = await dm.quotaRefresh({ subDir: aid, humanGated: true, lawFirst: () => hosts.readRemoteSubOAuth(hid, aid) });
+        const r = await dm.quotaRefresh({ subDir: aid, humanGated: true, lawFirst: () => _firstLook(hosts.readRemoteSubOAuth(hid, aid)) });
+        if (r && r.refused === 'long-lived') throw usageBearerRefusal('the account\'s folder on the host');   // the agent's own reason
         const u = _consumeDeviceQuota(r);
         if (!u) throw new Error('device refresh returned no usable reading');
         return u;
@@ -1009,7 +1021,7 @@ app.post('/api/usage/refresh', async (req, res) => {
           authoritativeScopes: authoritativeScopesOf(u), absentWindows: quotaModel.absentWindowsOf(u),
         });
         res.json({ success: true, origin: 'device' });
-      }).catch(() => hosts.readRemoteSubOAuth(hid, aid).then((token) => {
+      }).catch((e) => _deviceSaid(e, () => hosts.readRemoteSubOAuth(hid, aid)).then((token) => {
         _onDemandUsageAt[tkey] = Date.now();
         if (!token) return res.json({ error: 'no currently-valid login for this account on the host — run a session on it there first' });
         _fetchOAuthUsage(token, (u) => {
@@ -1037,7 +1049,12 @@ app.post('/api/usage/refresh', async (req, res) => {
     let hMeta; try { hMeta = hosts.get(hid); } catch { return res.status(404).json({ error: 'unknown host' }); }
     const deviceLegG = async () => {
       const dm = await hosts.device(hid);
-      const r = await dm.quotaRefresh({ humanGated: true, lawFirst: () => hosts.readRemoteOAuth(hid) });   // B-5e0d: as the held account's leg above
+      // B-5e0d: as the held account's leg above. An agent older than the law, refused by the hub's own first look, is never
+      // asked — its PASSIVE cache is read through the shell instead (file reads only): the person keeps the reading that cost
+      // nothing, and the refusal still answers by name
+      let lawSaid = null;
+      const r = await dm.quotaRefresh({ humanGated: true, lawFirst: () => _firstLook(hosts.readRemoteOAuth(hid)).catch((e) => { if (e && e.code === 'long-lived') lawSaid = e; throw e; }) })
+        .catch(async (e) => { if (!lawSaid || e !== lawSaid) throw e; return { passive: await hosts.readRemotePassiveUsage(hid).catch(() => null), refused: 'long-lived' }; });
       // B-0f13 read path: the reply carries the host's PASSIVE statusline
       // cache (files the remote vibespace-usage hook wrote — zero vendor
       // calls). Merge fetchedAt-GUARDED into the server-side per-host cache:
@@ -1060,10 +1077,14 @@ app.post('/api/usage/refresh', async (req, res) => {
             const merged = { ...(prev || {}), ...j, source: 'remote-statusline' };
             delete merged.limits; // rebuilt from the merged view by the write path — never inherited from `prev` wholesale
             if (j.corroborated === undefined) delete merged.corroborated; // provenance belongs to the write that made it — the host's own label, if it sent one, describes THIS reading
-            usageWrite.writeCacheObject({ cacheDir: USAGE_CACHE_DIR, key: hkey, obj: merged, measuredAt: j.fetchedAt, source: 'remote-statusline', familyOf: familyOfScopedBucket, backend: 'claude' });
+            const wrote = usageWrite.writeCacheObject({ cacheDir: USAGE_CACHE_DIR, key: hkey, obj: merged, measuredAt: j.fetchedAt, source: 'remote-statusline', familyOf: familyOfScopedBucket, backend: 'claude' });
+            // B-5e0d: the merged reading is the popup's at once — the in-memory host entries are read from disk only at setup
+            const kept = wrote && wrote.ok && wrote.object ? wrote.object : null;
+            if (kept) { if (k === '__global__') _hostUsage[hid] = kept; else _hostAcctUsage[hid + ':' + k] = heldSource(kept); }
           }
         } catch { }
       }
+      if (r && r.refused === 'long-lived') throw lawSaid || usageBearerRefusal('the host\'s login');   // the agent's own reason (or the law's first look)
       const u = _consumeDeviceQuota(r);
       if (!u) throw new Error('device refresh returned no usable reading');
       return u;
@@ -1080,7 +1101,7 @@ app.post('/api/usage/refresh', async (req, res) => {
         authoritativeScopes: authoritativeScopesOf(u), absentWindows: quotaModel.absentWindowsOf(u),
       });
       res.json({ success: true, origin: 'device' });
-    }).catch(() => hosts.readRemoteOAuth(hid).then((token) => {
+    }).catch((e) => _deviceSaid(e, () => hosts.readRemoteOAuth(hid)).then((token) => {
       _onDemandUsageAt['host:' + hid] = Date.now(); // stamp only after the probe reached the host
       if (!token) return res.json({ error: 'no currently-valid login token on the host — log in / run claude there first' });
       _fetchOAuthUsage(token, (u) => {

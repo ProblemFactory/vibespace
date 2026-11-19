@@ -1932,7 +1932,9 @@ export function installManageAgents(App, ctx = {}) {
           err.textContent = '⚠ ' + msg;
           err.title = msg;
           (row.querySelector('.acct-key-main') || row).appendChild(err);
-          return;
+          // B-5e0d: a machine login's ⟳ the law refused may still have brought its sessions' PASSIVE reading (merged by the
+          // route) — that row's usage cell repaints under its error; every other refusal leaves the cell as it was
+          if (!(tg.body.host && !tg.body.account && r && r.error)) return;
         }
         // Success → repaint just this row's usage cell from fresh data (a
         // full refresh() here would wipe the other rows' inline errors).
