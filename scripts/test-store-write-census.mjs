@@ -887,8 +887,8 @@ const STORE_READS = [
   { file: 'src/machine-mounts.js', store: 'machine-mounts.json', state: 'answer', mark: /this\._loadAnswer\(SR\.storeAnswer\(read, \{ valid: STORE_SHAPE \}\)\);/ },   // remainder of B-f276 (bl-jobs, 2.369.411): held — no save, no legacy ingest, no token sweep
   { file: 'src/server/conversation-deliver.js', store: 'msg-retry.json', state: 'debt', why: 'a failed read is «no file»: the park starts empty and its next write overwrites', mark: /try \{ rawText = fs\.readFileSync\(retryFile, 'utf-8'\); \} catch \{ rawText = null; \}/ },
   { file: 'src/server/usage-pool-engine.js', store: 'reset-credit-tries.json', state: 'debt', why: 'a failed read is «no attempts»: the next write overwrites', mark: /try \{ raw = fs\.readFileSync\(RESET_CREDIT_TRIES_FILE, 'utf8'\); \} catch \{ return 0; \}/ },
-  // NAMED WITHOUT A SET-ASIDE (the scan cannot see a store that never sets bytes aside — known ones are rows here): torn or
-  // unreadable = empty, the next save overwrites → lane bl-jobs batch 12 (B-6721 holds that store)
+  // job-notifications.json: torn bytes are set aside through jobs.js asideOf (its read again, off the loop) and an unreadable file is
+  // HELD (the remainder of B-f276 — the row flipped to `answer`; it was named here without a set-aside before)
   // the browser registry (lane bl-jobs, the B-f276 remainder, its read r1 N9): through the store-read law — a failed read and torn bytes HOLD
   { file: 'src/server/browser-keeper.js', store: 'browser-profiles.json', state: 'answer', mark: /if \(a\.state === 'data'\) \{ rawDoc = a\.value; reg = B\.normalizeRegistry\(rawDoc\); \}/ },   // its read r2 (N16): the LOAD's line (the read again's storeAnswer is a second, unrelated match)
   // lane lg-store-writes (主开发 2026-11-20 03:10Z): the desktop app records and the device alerts' ledger — a failed read or torn bytes HOLD (never started empty)

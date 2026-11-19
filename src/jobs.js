@@ -632,11 +632,15 @@ class JobManager {
   }
   _notifsFrom(obj, { merge = false } = {}) {
       for (const [cid, list0] of Object.entries(obj)) {
-        const list = Array.isArray(list0) ? list0.filter((n) => n && typeof n === 'object') : [];   // its read r1 (N2): a torn entry never breaks the merge
+        const list = Array.isArray(list0) ? list0.filter((n) => n && typeof n === 'object' && !Array.isArray(n)) : [];   // its read r1 (N2): a torn entry never breaks the merge
         if (!list.length) continue;
+        // its read r2 (N1): a crafted field never throws here (a throw at boot ended the whole engine): a stamp is a string, a time a number
+        for (const n of list) { if (n.ho != null && typeof n.ho !== 'string') delete n.ho; if (n.ts != null && typeof n.ts !== 'number') n.ts = typeof n.ts === 'string' ? (Number(n.ts) || 0) : 0; }
         // its read r1 (M1): at a read again, an entry of a job CLEARED after it was filed takes the clear's words (as clearJobs and
         // _stashNotif hold them) — the clear ran while the file was held and could not rewrite it
-        if (merge) for (const n of list) { const j = this.jobs.get(n.jobId) || (this.archive || []).find((r) => r && r.id === n.jobId); if (j && j.clearedAt && !(Number(n.ts) > Math.max(j.clearedAt, j.reclearedAt || 0))) { n.jobName = CLEARED_TEXT; n.text = CLEARED_TEXT; } }
+        // its read r2 (M1): at EVERY read — the boot's too: a clear made while the file was held, then a restart, kept the old words (the
+        // record's clearedAt is in jobs.json; an archived record is read from the archive at the boot, the one load the sweep does next)
+        for (const n of list) { const j = this.jobs.get(n.jobId) || (n.jobId && !merge && !this.archive && !this.readOnly ? (this._loadArchive() || []) : (this.archive || [])).find((r) => r && r.id === n.jobId); if (j && j.clearedAt && !(Number(n.ts) > Math.max(j.clearedAt, j.reclearedAt || 0))) { n.jobName = CLEARED_TEXT; n.text = CLEARED_TEXT; } }
         // a hand-over the previous process did not settle (verify r2, the ladder's stash has the same rule): the
         // entries wait again, by name in the log — the shutdown waits for a hand-over in flight, so a stamp here is a
         // process killed mid-post
@@ -648,6 +652,9 @@ class JobManager {
       }
       if (this.releasedAtBoot.length && !this.readOnly) this._saveNotifs();
   }
+  /** its read r2 (M2): a CLEARED job's notices may still wait in the HELD file — the clear reaches them at the read, by the record's
+   *  clearedAt; a record removed meanwhile leaves nothing to judge them by (they came back with the old words): its removal waits */
+  _notifsClearedWords(id) { return `${id}'s content was cleared, and notices of it may still wait in job-notifications.json, which cannot be read right now — remove it once that file reads (VibeSpace reads it again every few minutes)`; }
   _notifsHold(a) {
     this._notifsUnread = { code: a.code, why: a.why, at: (this._notifsUnread && this._notifsUnread.at) || now() };
     this.releasedAtBoot = this.releasedAtBoot || [];
@@ -670,19 +677,30 @@ class JobManager {
     if (!this._notifsUnread) return;
     this._notifsRetrySoon();
     if (this._notifsP) return;
+    // its read r2 (N3): a For-you filing the store refused (full) is asked again at each try, never only once a process
+    if (!this._notifsItem) { const v = this._forYou(null, M.forYouCopy(null, 'notifs-unread', { error: this._notifsUnread.code })); if (v && v.id) this._notifsItem = v.id; }
     const p = this._notifsP = fs.promises.readFile(this.notifsFile, 'utf-8').then((text) => ({ text }), (error) => ({ error }));
-    const read = await p; this._notifsP = null;
-    if (!this._notifsUnread || this._unreadStopped) return;
+    // its read r2 (N5): a read that never settles is let go after READ_AGAIN_MS (said once) — the next try reads afresh
+    const ms = (this.d.unreadRetry && Number(this.d.unreadRetry.readMs) > 0) ? Number(this.d.unreadRetry.readMs) : READ_AGAIN_MS;   // the store's bound
+    let tm = null;
+    const read = await Promise.race([p, new Promise((r) => { tm = setTimeout(() => r({ slow: true }), ms); tm.unref?.(); })]);
+    clearTimeout(tm);
+    if (read && read.slow) { if (this._notifsP === p) this._notifsP = null; if (!this._notifsSlowSaid) { this._notifsSlowSaid = true; this.d.log(`[jobs] job-notifications.json: a read again did not answer in ${ms / 1000} s — let go; the next try reads afresh`); } return; }
+    if (!this._notifsUnread || this._unreadStopped) { if (this._notifsP === p) this._notifsP = null; return; }
     let a = SR.storeAnswer(read, { valid: NOTIFS_SHAPE });
-    if (a.state === 'unreadable') { this._notifsUnread.code = a.code; this._notifsMissingAt = 0; return; }
-    if (a.state === 'missing' && !this._notifsMissingAt) { this._notifsMissingAt = now(); return; }
+    // its read r2 (N2): the one-in-flight slot is held over the copy aside too — a later try never copies the same torn bytes again
+    const done = () => { if (this._notifsP === p) this._notifsP = null; };
+    if (a.state === 'unreadable') { done(); this._notifsUnread.code = a.code; this._notifsMissingAt = 0; return; }
+    if (a.state === 'missing' && !this._notifsMissingAt) { done(); this._notifsMissingAt = now(); return; }
     if (a.state === 'corrupt') {
       const bad = asideOf(this.notifsFile); let to = null;
       if (!this.readOnly) { try { await fs.promises.copyFile(this.notifsFile, bad, fs.constants.COPYFILE_EXCL); to = path.basename(bad); } catch { } }
+      done();
       if (this._unreadStopped || !this._notifsUnread) return;   // its read r1 (N3): the engine ended (or a newer try read) during the copy
       a = SR.afterSetAside(a, to);
       if (a.state === 'unreadable') { this._notifsUnread.code = a.code; return; }
     }
+    done();
     const was = this._notifsUnread, waiting = [...this.pendingNotifs.values()].reduce((k, l) => k + l.length, 0);
     this._notifsUnread = null; this._notifsMissingAt = 0; this._notifsTries = 0; this._notifsUnreadSaid = false; this._notifsSaveSaid = false;
     if (this._notifsT) { clearTimeout(this._notifsT); this._notifsT = null; }
@@ -691,6 +709,8 @@ class JobManager {
     this.d.log(`[jobs] job-notifications.json read again (held since ${new Date(was.at).toISOString()}, ${was.code}): ${a.state === 'data' ? `${now2 - waiting} notice(s) read` : a.setAside ? `torn bytes, kept aside as ${a.setAside}` : 'the file is GONE'} — ${waiting} that waited here kept`);
     this._saveNotifs(); this._dirty = true;
     if (this._notifsItem) { const id = this._notifsItem; this._notifsItem = null; try { this.d.resolveNotice && this.d.resolveNotice(id); } catch { } }   // its read r1 (M2): the item resolved
+    // its read r2 (S2): a read again that found the file GONE or TORN lost what waited in it — said where the person looks, never only in the journal
+    if (a.state !== 'data') this._forYou(null, M.forYouCopy(null, 'notifs-lost', { file: a.setAside || path.basename(this.notifsFile) }));
     for (const cid of this.pendingNotifs.keys()) { try { this.d.onStash?.(cid); } catch { } }   // its read r1 (S1): each conversation's strip and its held count follow
     try { this.d.broadcast('jobs-updated', { notifs: true }); } catch { }
   }
@@ -1042,6 +1062,7 @@ class JobManager {
     const arch = this._loadArchive();
     const i = arch.findIndex((r) => r.id === id);
     if (i < 0) return { error: 'no such archived job' };
+    if (this._notifsUnread && arch[i].clearedAt) return { error: this._notifsClearedWords(id), code: 'notifs-unread' };   // the B-f276 remainder (5), its read r2 (M2)
     const w = this._writeArchive(arch.filter((r) => r.id !== id));
     if (!w.ok) return { error: 'archive write failed: ' + w.error }; // the row stays until its removal is durable
     // lane job-logs-sweep: its dir goes off the main thread; the routes answer the person once it is gone (logsGone, bounded)
@@ -3726,6 +3747,7 @@ class JobManager {
   }
   rm(job, { stop, orphan } = {}) {
     if (this.readOnly) return { error: 'registry is read-only in this process' };
+    if (this._notifsUnread && job && job.clearedAt) return { error: this._notifsClearedWords(job.id), code: 'notifs-unread' };   // the B-f276 remainder (5), its read r2 (M2)
     const alive = this._verifyAlive(this._readStamp(job));
     if (alive && !stop && !orphan) return { error: `${job.id} is still running — vibespace-job rm ${job.id} --stop (kill then remove), or --orphan to abandon the live process (tracked nowhere after that)` };
     if (alive && stop) { const s = this.stop(job, { force: false }); if (s && s.code === 'hub-is-main') return s; }   // B-2c5c: never removed while it runs as this hub
