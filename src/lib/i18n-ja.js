@@ -10167,6 +10167,8 @@ export default {
   "Sealed file key": "暗号化ファイルの鍵", // int317 (the Vault window's Hub secrets)
   "Never shown — VibeSpace uses it itself": "表示しません — VibeSpace 自身が使います", // int317 (the Vault window's Hub secrets)
   "That stored value is never shown — VibeSpace uses it itself": "この保存値は表示しません — VibeSpace 自身が使います", // int317 (the Vault window's Hub secrets)
+  "Only a person on this page can see a whole key — a conversation, job or automation credential cannot": "キー全体を見られるのはこのページにいる人だけです——会話・ジョブ・自動化の資格情報では見られません",
+  "Only a person on this page can see a whole key — this request did not come from the page": "キー全体を見られるのはこのページにいる人だけです——このリクエストはこのページから来ていません",
   "Screen Sharing: name + password": "画面共有：名前 + パスワード", // int317 (the Vault window's Hub secrets)
   "VNC password": "VNC パスワード", // int317 (the Vault window's Hub secrets)
   "What needs me · the bands": "自分が必要なもの · 帯", // lane attention-predicate-shared

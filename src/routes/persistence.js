@@ -17,6 +17,7 @@ const { namedTwinIn } = require('../lib/desktop-record.js'); // PURE (lane layou
 const { noteDupsLeft } = require('../lib/desktop-record.js'); // PURE (r4 K, inc-mw1ogdno-5jny): a desktop's dedup trace never names a window its record lists
 const UO = require('../user-state-ops.js'); // PURE (lane sidebar-echo-order, inc-mwbn2xp8-ks0b): user state by item, in the server's order (stateRev within a life, stateEpoch)
 const { normalizeCustomThemes } = require('../custom-theme-normalize.js'); // PURE (lane cache-warmth-ramp r3): a value a theme derivation superseded is dropped at the store's ONE writer
+const { personOnlyDoor } = require('./account-tails.js');   // B-ee0a: the no-vault export of credentials asks the person verdict first
 const { RETIRED_SETTING_KEYS } = require('../retired-settings.js'); // PURE: the retired settings keys (B-df40 part 1) — one may LEAVE data/settings.json, never re-enter it
 
 const router = express.Router();
@@ -1256,7 +1257,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
       if (gate && gate.state() !== 'not_set_up') {
         const c = await gate.confirm(req, secondPassword, 'vault-export-sensitive');
         if (!c.ok) return res.status(gate.statusOf(c.code)).json({ error: gate.refusalOf(c.code), code: c.code, ...(c.retryInMs ? { retryInMs: c.retryInMs } : {}) });
-      }
+      } else if (!personOnlyDoor(req, res)) return;   // B-ee0a: NO VAULT — whole credentials leave only to a person on this page
       const sens = {};
       if (includeSensitive.includes('vsPassword')) {
         const rec = auth?.exportPasswordRecord?.();

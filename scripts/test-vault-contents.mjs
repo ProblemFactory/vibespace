@@ -261,7 +261,8 @@ console.log('⑧ MUTANTS — each RED');
     ['the window extended by activity', { contentsSrc: C.replace("if (typeof vault.noteUse === 'function') vault.noteUse(ref.store, { by: 'human', door: 'vault-window' });", "if (typeof vault.noteUse === 'function') vault.noteUse(ref.store, { by: 'human', door: 'vault-window' });\n    { const w = windowOf(who, page); if (w) { w.startedAt = now(); w.until = now() + VI.REVEAL_MS; w.startedMono = mono(); } }") }],
     ['the pace forgotten', { contentsSrc: C.replace('const p = VI.paceVerdict(mine, t);', 'const p = { ok: true };').replace('const c = p.ok ? VI.paceVerdict(all, t, VI.REVEAL_PACE_CEILING) : p;', 'const c = p;') }],
     ['a lock that leaves the window open', { contentsSrc: C.replace("if (!(w.until > t) || w.epoch !== ep || !(m - w.startedMono < VI.REVEAL_MS)) windows.delete(k);", "if (!(w.until > t)) windows.delete(k); else w.epoch = ep;").replace("vault.onLock(() => { windows.clear(); });", "vault.onLock(() => { });") }],   // lane vault-manual-and-lock: + the lock's own close
-    ['the account key route without the window (the old road)', { accountsSrc: A.replace("if (gate && gate.state() !== 'not_set_up') {\n    const r = gate.reveal(req, `accounts:${req.params.id}#key`);", "if (false) {\n    const r = gate.reveal(req, `accounts:${req.params.id}#key`);") }],
+    // (B-ee0a: the route's door is src/routes/account-tails.js revealKeyDoorOf — the old road put in its place, in this copy)
+    ['the account key route without the window (the old road)', { accountsSrc: A.replace("const revealKeyDoor = AT.revealKeyDoorOf({ accounts });", "const revealKeyDoor = (req, res) => res.json({ key: accounts.revealKey(req.params.id) });   // MUTANT: the old road") }],
   ];
   for (const [name, m] of mutants) {
     const applied = (m.contentsSrc ? m.contentsSrc !== C : true) && (m.routesSrc ? m.routesSrc !== Rt : true) && (m.accountsSrc ? m.accountsSrc !== A : true);

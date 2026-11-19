@@ -44,6 +44,17 @@ export async function accountsWithTails() {
   return withTails(d, t);
 }
 
+/** a PAIRED machine's accounts-status answer with its CLI-key tail laid on (B-ee0a): the answer carries none; the person's read
+ *  answers the hub's last probe of it (POST /api/accounts/tails { hostId }). A refused or failed ask lays nothing. */
+export async function withHostKeyTail(hostId, r) {
+  if (!hostId || !r || !r.cliKey || !r.cliKey.present) return r;
+  try {
+    const a = await fetchJson('/api/accounts/tails', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hostId }) });
+    const v = a && a.ok && a.tails ? a.tails.hostCliKey : null;
+    return typeof v === 'string' && v ? { ...r, cliKey: { ...r.cliKey, tail: v } } : r;
+  } catch { return r; }
+}
+
 /** the API-key rows of an answer whose tail the page does not know yet (a key added since the last ask) */
 export function tailsMissing(d, t = last) {
   const tails = (t && t.accounts) || {};

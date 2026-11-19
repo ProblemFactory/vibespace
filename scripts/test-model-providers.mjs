@@ -1061,6 +1061,80 @@ console.log('⑳ the key tails: the person\'s read only');
     'the hub serves exactly these two: the accounts list through accountsAnswer, the tails through the person\'s door');
 }
 
+// ── ㉑ A WHOLE CREDENTIAL WITH NO VAULT IS THE PERSON'S (B-ee0a — 主开发 2026-11-19 03:16Z) ─────────────────────────────
+// With no vault set up, the key reveal (GET / POST /api/accounts/:id/key) and the config export's credentials answered a WHOLE
+// credential to any caller. Now the no-vault branch asks the person verdict first: a conversation's / job's / automation's
+// credential and a script with no browser headers of this page are refused BY NAME; a set-up vault's branch is unchanged. A paired
+// machine's CLI-key tail leaves the accounts-status answer for the person's read. The REAL doors (src/routes/account-tails.js
+// revealKeyDoorOf / keepHostCliTail / the tails door; src/routes/persistence.js's export) over the REAL accounts store, a stand-in express.
+console.log('㉑ a whole credential with no vault: the person\'s only');
+{
+  const AT = require(path.join(ROOT, 'src/routes/account-tails.js'));
+  const ED = path.join(dir, 'ee0a'); fs.mkdirSync(ED, { recursive: true });
+  const KEY = ['sk-ant-', 'api03-', 'w'.repeat(30), ['Pn', '6t', 'Jr2d'].join('')].join('');   // built at runtime
+  const a = new AccountManager({ dataDir: fs.mkdtempSync(path.join(ED, 'am-')) });
+  const id = a.add({ name: 'Console', key: KEY }).id;
+  const AGENT = { Authorization: 'Bearer ' + ['vs-sess-', 'e5f6', 'a7b8'].join('') };   // the kind of credential a conversation holds
+  const PAGE = { 'Sec-Fetch-Site': 'same-origin' };   // the person on this page
+  const serve = async (A, gate, fn) => {
+    const app = express(); app.use(express.json());
+    if (gate) app.locals.vaultGate = gate;
+    const door = A.revealKeyDoorOf({ accounts: a });
+    app.get('/api/accounts/:id/key', door); app.post('/api/accounts/:id/key', door);
+    A.registerAccountTailRoutes(app, { accounts: a, providers: null });
+    const s = await new Promise((r) => { const x = app.listen(0, '127.0.0.1', () => r(x)); });
+    const base = `http://127.0.0.1:${s.address().port}`;
+    const hit = async (method, url, headers = {}, body) => { const r = await fetch(base + url, { method, headers: { 'Content-Type': 'application/json', ...headers }, ...(method === 'POST' ? { body: JSON.stringify(body || {}) } : {}) }); const t = await r.text(); let j = null; try { j = JSON.parse(t); } catch { } return { status: r.status, text: t, json: j }; };
+    try { return await fn(hit); } finally { s.close(); }
+  };
+  const K = `/api/accounts/${encodeURIComponent(id)}/key`;
+  const real = await serve(AT, null, async (hit) => ({ agentGet: await hit('GET', K, AGENT), agentPost: await hit('POST', K, AGENT), bare: await hit('POST', K), cross: await hit('POST', K, { 'Sec-Fetch-Site': 'cross-site' }), page: await hit('POST', K, PAGE), pageGet: await hit('GET', K, PAGE) }));
+  const refusedBy = (r, code) => r.status === 403 && !!r.json && r.json.code === code && !r.text.includes(KEY) && r.json.error === AT.CREDENTIAL_DOOR_WORDS[code];
+  ok(refusedBy(real.agentGet, 'credential_person_only') && refusedBy(real.agentPost, 'credential_person_only') && refusedBy(real.bare, 'credential_page_only') && refusedBy(real.cross, 'credential_page_only')
+    && real.page.status === 200 && real.page.json.key === KEY && real.pageGet.status === 200 && real.pageGet.json.key === KEY,
+    'NO VAULT: the key reveal answers the whole key to a person on this page only (POST, and GET) — a conversation\'s credential is refused credential_person_only, a header-less script or another site credential_page_only, BY NAME, the key nowhere in the refusal', { agent: real.agentPost.json, bare: real.bare.json, page: real.page.status });
+  const GATE = { state: () => 'unlocked', reveal: () => ({ ok: false, code: 'reveal_needs_password' }), statusOf: () => 403, refusalOf: () => 'the window first' };
+  const vaulted = await serve(AT, GATE, async (hit) => ({ page: await hit('POST', K, PAGE), agent: await hit('POST', K, AGENT) }));
+  ok(vaulted.page.status === 403 && vaulted.page.json.code === 'reveal_needs_password' && vaulted.agent.json.code === 'reveal_needs_password', 'a SET-UP vault\'s branch is unchanged: its window decides (reveal_needs_password here), never this check', vaulted.page.json);
+  // a PAIRED machine's CLI-key tail (the ask answered: yes)
+  const HT = ['Hq', '3w', 'Zp8c'].join('');
+  const sent = AT.keepHostCliTail('host-ee0a', { platform: 'linux', cliKey: { present: true, tail: HT }, subscription: { loggedIn: false } });
+  const hostAsk = await serve(AT, null, async (hit) => ({ page: await hit('POST', '/api/accounts/tails', PAGE, { hostId: 'host-ee0a' }), agent: await hit('POST', '/api/accounts/tails', AGENT, { hostId: 'host-ee0a' }), other: await hit('POST', '/api/accounts/tails', PAGE, { hostId: 'host-none' }) }));
+  AT.keepHostCliTail('host-ee0a', { cliKey: { present: false } });
+  const cleared = await serve(AT, null, async (hit) => hit('POST', '/api/accounts/tails', PAGE, { hostId: 'host-ee0a' }));
+  ok(!JSON.stringify(sent).includes(HT) && sent.cliKey.present === true && hostAsk.page.json.tails.hostCliKey === HT && Object.keys(hostAsk.page.json.tails).length === 1 && hostAsk.agent.status === 403 && !hostAsk.agent.text.includes(HT)
+    && hostAsk.other.json.tails.hostCliKey === null && cleared.json.tails.hostCliKey === null,
+    'a PAIRED machine\'s CLI-key tail: the accounts-status answer carries none (present kept); the person\'s read answers the last probe\'s ({ hostId } — nothing else read), a conversation\'s credential refused; a machine not probed or whose key is gone answers none', { sent: sent.cliKey, page: hostAsk.page.json, other: hostAsk.other.json });
+  // THE CONFIG EXPORT's credentials with no vault — the REAL route (src/routes/persistence.js), its accounts bundle stood in
+  const P = require(path.join(ROOT, 'src/routes/persistence.js'));
+  P.setup({ dataDir: fs.mkdtempSync(path.join(ED, 'p-')), wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null,
+    getAccounts: () => ({ exportBundle: () => ({ accounts: [{ id, key: KEY }] }), list: () => ({ accounts: [] }) }), getUsageHistory: () => null, onSettingsWrite: () => { } });
+  const expDoor = P.router.stack.find((l) => l.route && l.route.path === '/api/config/export' && l.route.methods.post).route.stack[0].handle;
+  const doExport = (headers) => new Promise((resolve) => {
+    const out = { status: 200, headers: {} };
+    const res = { status(c) { out.status = c; return this; }, set(k, v) { out.headers[k] = v; return this; }, setHeader(k, v) { out.headers[k] = v; }, json(o) { out.body = o; resolve(out); }, send(o) { out.body = o; resolve(out); }, end() { resolve(out); }, get headersSent() { return 'body' in out; } };
+    expDoor({ body: { sections: [], includeSensitive: ['accounts'], passphrase: 'abcd' }, headers, query: {}, params: {}, app: { locals: {} }, socket: {} }, res, () => resolve(out));
+  });
+  const eAgent = await doExport({ authorization: AGENT.Authorization }), eBare = await doExport({}), ePage = await doExport({ 'sec-fetch-site': 'same-origin' });
+  ok(eAgent.status === 403 && eAgent.body.code === 'credential_person_only' && eBare.status === 403 && eBare.body.code === 'credential_page_only' && !JSON.stringify([eAgent.body, eBare.body]).includes(KEY)
+    && ePage.status === 200 && !!ePage.body.sensitive && Array.isArray(ePage.body.sensitive.manifest) && ePage.body.sensitive.manifest.includes('accounts'),
+    'NO VAULT: the config export\'s credentials leave to a person on this page only — a conversation\'s credential and a header-less script refused by name, nothing exported to them', { agent: eAgent.body, bare: eBare.body, page: ePage.status });
+  // the hub's wiring (both doors through these functions) and the page's road
+  const AUR = read('src/server/account-usage-routes.js'), PER = read('src/routes/persistence.js'), VR = read('src/lib/vault-reveal.js');
+  ok(AUR.includes("const revealKeyDoor = AT.revealKeyDoorOf({ accounts });\napp.get('/api/accounts/:id/key', revealKeyDoor);\napp.post('/api/accounts/:id/key', revealKeyDoor);")
+    && AUR.includes('const r = AT.keepHostCliTail(req.params.id, await hosts.accountsStatus(req.params.id));') && PER.includes('} else if (!personOnlyDoor(req, res)) return;')
+    && VR.includes("{ method: 'POST', headers: { ...revealHeaders(), 'Content-Type': 'application/json' }, body: '{}' }"),
+    'the wiring: the hub\'s reveal route IS the door (GET and POST), the accounts-status answer goes through the tail keeper, the export asks the person on its no-vault branch; the page reveals by POST', null);
+  // CONTROLS — each compiled in memory beside the real file, through its anchor
+  const ATF = path.join(ROOT, 'src/routes/account-tails.js');
+  const atPatched = (from, to, name) => { const s = anchored(fs.readFileSync(ATF, 'utf-8'), from, to, name); const m = new Module(ATF); m.filename = ATF; m.paths = Module._nodeModulePaths(path.dirname(ATF)); m._compile(s, ATF); return m.exports; };
+  const noCheck = atPatched("    if (!personOnlyDoor(req, res)) return;\n    res.set('Cache-Control', 'no-store');\n", "    res.set('Cache-Control', 'no-store');\n", 'the reveal without the person check');
+  const ctl = await serve(noCheck, null, async (hit) => hit('POST', K, AGENT));
+  const noStrip = atPatched('  facts.cliKey = { present: !!facts.cliKey.present };\n', '', 'the tail keeper without the strip');
+  const kept = noStrip.keepHostCliTail('host-ctl', { cliKey: { present: true, tail: HT } });
+  ok(ctl.status === 200 && !!ctl.json && ctl.json.key === KEY && JSON.stringify(kept).includes(HT), 'CONTROLS: the reveal without the person check hands a conversation\'s credential the whole key; the tail keeper without its strip leaves the tail in the answer ⇒ both legs above go RED', { ctl: ctl.status, kept: kept.cliKey });
+}
+
 fs.rmSync(dir, { recursive: true, force: true });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

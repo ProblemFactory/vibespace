@@ -44,6 +44,9 @@ export function revealWords(r) {
   if (c === 'not_found') return t('That stored value is not there any more');
   if (c === 'unreadable') return t('That stored value could not be opened');
   if (c === 'not_revealable') return t('That stored value is never shown — VibeSpace uses it itself');
+  // B-ee0a: with no vault set up, the whole key answers only a person on this page (the hub refuses the rest by name)
+  if (c === 'credential_person_only') return t('Only a person on this page can see a whole key — a conversation, job or automation credential cannot');
+  if (c === 'credential_page_only') return t('Only a person on this page can see a whole key — this request did not come from the page');
   return vaultWords(r);
 }
 
@@ -105,7 +108,8 @@ export async function revealValue(id) {
 export async function revealAccountKey(id) {
   if (!revealLeftMs() && vaultFacts()?.state === 'unlocked' && !(await askRevealPassword())) return null;
   for (let i = 0; i < 2; i++) {
-    const r = await fetchJson(`/api/accounts/${encodeURIComponent(id)}/key`, { headers: revealHeaders() });
+    // a POST (B-ee0a): a plain-http page sends no Origin on a GET, and with no vault the hub asks the person verdict
+    const r = await fetchJson(`/api/accounts/${encodeURIComponent(id)}/key`, { method: 'POST', headers: { ...revealHeaders(), 'Content-Type': 'application/json' }, body: '{}' });
     if (r && r.key) { noteRevealLeft(r.leftMs); return r; }
     if (!(r && r.code === 'reveal_needs_password')) return r ? { ...r, error: r.code ? revealWords(r) : r.error } : r;
     forgetReveal();

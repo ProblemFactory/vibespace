@@ -26,7 +26,7 @@ import { needLine, pairDoor, needDoorButton, settingsDoor, sayOnLine } from './n
 import { techFold, techFoldHtml } from './plain-words.js'; // lane ui-plain-words: where a CLI was found folds when nothing is wrong
 import { SETTINGS_SCHEMA } from './settings-schema.js';
 import { markLandedOnSave, carryUnsaved, agoText, api, copyText, createModalShell, escHtml, estDisplayPair, fetchJson, showConfirmDialog, showContextMenu, showInputDialog, showToast, uiScale } from './utils.js';
-import { accountsWithTails } from './account-tails.js'; // B-ba7d: the roster's own read of the accounts, the person's tails laid on
+import { accountsWithTails, withHostKeyTail } from './account-tails.js'; // B-ba7d (B-ee0a: a paired machine's CLI-key tail too): the roster's own read of the accounts, the person's tails laid on
 import { cliWhereWords, remoteCliWhereWords } from './cli-missing-dialog.js'; // lane cli-shell-truth: the census line (where the login shell found each CLI)
 import { track } from './telemetry-client.js';
 import { openPermissionRulesDialog, runLocalOracle } from './permission-rules-view.js';
@@ -2415,7 +2415,7 @@ export function installManageAgents(App, ctx = {}) {
       // Host login identity probed ONCE for both rosters (claude email/key
       // shapes + codex JWT email — 2.188.0).
       let racct = null;
-      if (selectedHost) { try { racct = await fetchJson(`/api/hosts/${encodeURIComponent(selectedHost)}/accounts-status`); } catch {} }
+      if (selectedHost) { try { racct = await withHostKeyTail(selectedHost, await fetchJson(`/api/hosts/${encodeURIComponent(selectedHost)}/accounts-status`)); } catch {} }   // B-ee0a: its CLI-key tail, the person's read
       if (stale() || !body.isConnected) return;
       body.querySelector('.ob-loading')?.remove();
       const actx = { body, selectedHost, hostLabel, done, run, refresh, st, stale, racct };

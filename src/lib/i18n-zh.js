@@ -10168,6 +10168,8 @@ export default {
   "Sealed file key": "加密文件的密钥", // int317 (the Vault window's Hub secrets)
   "Never shown — VibeSpace uses it itself": "从不显示——由 VibeSpace 自己使用", // int317 (the Vault window's Hub secrets)
   "That stored value is never shown — VibeSpace uses it itself": "这条存储的值从不显示——由 VibeSpace 自己使用", // int317 (the Vault window's Hub secrets)
+  "Only a person on this page can see a whole key — a conversation, job or automation credential cannot": "只有本页面上的人能看到完整的密钥——对话、任务或自动化的凭据不能",
+  "Only a person on this page can see a whole key — this request did not come from the page": "只有本页面上的人能看到完整的密钥——这个请求不是来自本页面",
   "Screen Sharing: name + password": "屏幕共享：用户名 + 密码", // int317 (the Vault window's Hub secrets)
   "VNC password": "VNC 密码", // int317 (the Vault window's Hub secrets)
   "What needs me · the bands": "需要我 · 分带", // lane attention-predicate-shared

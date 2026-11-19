@@ -61,7 +61,11 @@ globalThis.fetch = async (url, opts = {}) => {
   const u = String(url);
   const answer = (body, status = 200) => ({ ok: status < 400, status, statusText: '', json: async () => body });
   if (u === '/api/accounts' && (!opts.method || opts.method === 'GET')) return answer({ ...am.list(), subscription: {}, cliKey: {} });
-  if (u === '/api/accounts/tails' && opts.method === 'POST') return globalThis.__tailsRefused ? answer({ ok: false, code: 'human_only' }, 403) : answer({ ok: true, tails: am.keyTails() });   // B-ba7d: the person's read (src/routes/account-tails.js)
+  if (u === '/api/accounts/tails' && opts.method === 'POST') {   // B-ba7d: the person's read (src/routes/account-tails.js); B-ee0a: { hostId } ⇒ that machine's CLI-key tail
+    if (globalThis.__tailsRefused) return answer({ ok: false, code: 'human_only' }, 403);
+    const b = (() => { try { return JSON.parse(opts.body || '{}'); } catch { return {}; } })();
+    return b.hostId ? answer({ ok: true, tails: { hostCliKey: globalThis.__hostTail ?? null } }) : answer({ ok: true, tails: am.keyTails() });
+  }
   if (u === '/api/accounts/default' && opts.method === 'POST') {
     const b = JSON.parse(opts.body || '{}'); posted.push(b);
     try { am.setDefault(b.id || null, b.backend || 'claude'); return answer({ success: true }); } catch (e) { return answer({ error: e.message }, 400); }
@@ -253,6 +257,23 @@ console.log('⑤ negative controls');
   const Tx = await import(pathToFileURL(TM.write('src/lib/account-tails.js', anchored(TS, LAY, '  // CONTROL: the lay-on cut', 'the page without the lay-on'), 'no-lay')).href);
   ok('CONTROL: the page without the lay-on shows no tail on the API-key row though the person\'s read answered it ⇒ the legs above go RED', !('tail' in row(await Tx.accountsWithTails())));
   for (const r of copiesCensus(TM.files, TM.dir, REPO, { minCopies: 1 })) ok(r.name, r.pass, r.detail);
+}
+
+// B-ee0a: A PAIRED machine's CLI-key tail — its accounts-status answer carries none; the REAL page helper lays the person's read on
+// (withHostKeyTail: Manage Agents' host roster «API key …», «Import its key» and the «already imported» compare read it)
+{
+  const T = await import(path.join(REPO, 'src/lib/account-tails.js'));
+  const HT = ['Hx', '4v', 'Lm9q'].join('');
+  globalThis.__hostTail = HT;
+  const st = { cliKey: { present: true }, subscription: {} };
+  const laid = await T.withHostKeyTail('host-1', st);
+  const none = await T.withHostKeyTail('host-1', { cliKey: { present: false } });
+  globalThis.__tailsRefused = true; const refused = await T.withHostKeyTail('host-1', st); globalThis.__tailsRefused = false;
+  globalThis.__hostTail = undefined;
+  const MA = read('src/lib/manage-agents.js');
+  ok('a paired machine\'s CLI-key tail: the person\'s read lays it on the machine\'s answer (a copy — the answer itself untouched); none asked for no key; a refused read lays nothing; the host roster reads through it',
+    laid.cliKey.tail === HT && !('tail' in st.cliKey) && !('tail' in none.cliKey) && !('tail' in refused.cliKey)
+    && MA.includes('racct = await withHostKeyTail(selectedHost, await fetchJson(`/api/hosts/${encodeURIComponent(selectedHost)}/accounts-status`));'), { laid: laid.cliKey, refused: refused.cliKey });
 }
 
 console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed)' : 'ALL PASS (' + pass + ')'}`);
