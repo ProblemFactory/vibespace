@@ -37,7 +37,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
 import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 // lane grants-unify: a conversation's OWN reach rows (its access, the owner's, approved requests) are rows of THE grants store —
@@ -2932,7 +2932,21 @@ async function reauthLeg(E, name, { pure = true } = {}) {
   const c = await reauthLeg(require(engCopy), 'reauth-control');
   ok(c.onRead.every((x) => !x.offered) && c.rows.every(([, o]) => o === false) && c.disk.every((cc) => cc.why === 'send-scope-not-granted'), 'CONTROL: the engine without the invalidation keeps BOTH threads read-only after the re-authorization — on read, in the digest and on disk (the owner\'s incident); the legs above would redden on it', JSON.stringify([c.onRead, c.rows]));
   // wiring pins
-  ok(/if \(r && r\.ok\) await rejudgeConvCaps\(rec, 'connected'\);\s*\n\s*if \(!engineCtx\.stopped\) notify\(\[\]\);/.test(esrc) && /await rejudgeConvCaps\(rec, 're-authorized'\);/.test(esrc) && /await rejudgeConvCaps\(rec, 'disconnected'\);/.test(esrc) && /rejudgeConvCaps\(rec, 'boot'\)/.test(esrc), 'PIN: the consent hook, the switched-client rebind, the disconnect and the boot all re-judge BEFORE their one whole digest');
+  // ckpt61 hosted cure: the pin proves ORDER, not adjacency — the connect path's awaited re-judge comes BEFORE its first whole
+  // digest and no notify / broadcast sits between them (an unrelated, never-awaited line may: B-166e's client-swap recount)
+  const RJ_CONNECTED = "    if (r && r.ok) await rejudgeConvCaps(rec, 'connected');\n", NOTIFY_WHOLE = '    if (!engineCtx.stopped) notify([]);\n';
+  const orderPin = (src) => {
+    const i = src.indexOf(RJ_CONNECTED);
+    if (i < 0 || src.indexOf(RJ_CONNECTED, i + 1) >= 0) return false;
+    const j = src.indexOf(NOTIFY_WHOLE, i + RJ_CONNECTED.length);
+    if (j < 0) return false;
+    const between = src.slice(i + RJ_CONNECTED.length, j);
+    return between.length < 600 && !/notify\(|broadcast\(|bcastAll\(/.test(between);
+  };
+  // CONTROL: the whole digest moved ABOVE the re-judge (the stale verdicts broadcast first) — the pin goes red
+  const movedNotify = anchored(esrc, /(    if \(r && r\.ok\) await rejudgeConvCaps\(rec, 'connected'\);\n)([\s\S]{0,600}?)(    if \(!engineCtx\.stopped\) notify\(\[\]\);\n)/, '$3$1$2', 'ckpt61 pin control: the whole digest above the re-judge');
+  ok(orderPin(esrc) && !orderPin(movedNotify), 'PIN (order, not adjacency): the connect path re-judges BEFORE its one whole digest, nothing broadcast between — RED CONTROL: the digest moved above the re-judge fails it', JSON.stringify({ real: orderPin(esrc), moved: orderPin(movedNotify) }));
+  ok(/await rejudgeConvCaps\(rec, 're-authorized'\);/.test(esrc) && /await rejudgeConvCaps\(rec, 'disconnected'\);/.test(esrc) && /rejudgeConvCaps\(rec, 'boot'\)/.test(esrc), 'PIN: the consent hook, the switched-client rebind, the disconnect and the boot all re-judge BEFORE their one whole digest');
   ok(!/caps\.offers\(c, en(?: && en)?\.convCaps/.test(esrc) && !/convCapsState\(en\.convCaps/.test(esrc), 'PIN: no reader of a cached verdict bypasses `effectiveConvCaps` (views AND send decisions)');
   // THE CONVERSE (verify round, 2026-09-27): a DISCONNECT drops the credential — every conversation of the account flips to
   // read-only on read AND on disk, and a send the composer would have offered a moment earlier is REFUSED BY NAME

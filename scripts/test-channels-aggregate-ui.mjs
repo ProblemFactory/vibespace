@@ -399,6 +399,7 @@ const fsr = await p1.evaljs(`(async () => {
     const out = { typed, heads: [...d.querySelectorAll('.chan-search-sec-head')].map((x) => x.textContent), cov: (d.querySelector('.chan-search-saved .chan-search-cov') || {}).textContent || '', vstat: [...d.querySelectorAll('.chan-search-vstatus')].map((x) => x.textContent), n1: vh(), chips: d.querySelectorAll('.chan-search-vendor .chan-search-chip').length, chip: (d.querySelector('.chan-search-chip') || {}).textContent || '', unknown: [...d.querySelectorAll('.chan-search-vhit b')].map((b) => b.textContent).filter((x) => /尚未同步/.test(x)).length, snippetMarkup: [...d.querySelectorAll('.chan-search-vhit .chan-search-text')].some((x) => /<em>/.test(x.textContent)) };
     out.openAsks = openFull.filter((u) => !u.includes('peek=1')).length; out.openPeeks = openFull.filter((u) => u.includes('peek=1')).length; out.openSaid = openSaid;
     const s1Before = s1.getBoundingClientRect().top + list.scrollTop, s1Rows = s1.querySelectorAll('.chan-search-hit').length;
+    out.saved = s1Rows;   // ckpt61 hosted cure: what section one showed — the coverage line's «nothing saved matched» clause rides it
     const fullBefore = asked.filter((u) => u.includes('/api/channels/search/full')).length;
     list.scrollTop = list.scrollHeight;
     for (let i = 0; i < 80 && vh() === out.n1; i++) await sleep(150);
@@ -421,7 +422,13 @@ const fsr = await p1.evaljs(`(async () => {
   } finally { window.fetch = f0; }
 })()`);
 ok(fsr && !fsr.fail && fsr.typed === 0, '⑪ typing "budget" in the panel\'s filter box asks NO search (V4 — only the press does)', JSON.stringify(fsr));
-ok(fsr && fsr.heads && fsr.heads[0] === '已保存的消息' && /^更早的消息 — 来自.+的搜索$/.test(fsr.heads[1] || '') && /^搜了本机保存的 \d+ 个对话$/.test(fsr.cov), '⑪ the press: section one "已保存的消息" with what it covered, section two "更早的消息 — 来自…的搜索" below it (zh)', JSON.stringify(fsr && { heads: fsr.heads, cov: fsr.cov }));
+// ckpt61 hosted cure (633adcf2e, the plain-words pass): when nothing saved matched and the vendor was asked, section one's line
+// says so BESIDE what it covered («本机保存的消息里没有匹配 · 搜了本机保存的 N 个对话») — both clauses pinned, the coverage
+// clause no longer anchored at the line's start; the «nothing saved» clause required exactly when section one shows no hit
+const covLine = (f) => !!f && /(?:^| · )搜了本机保存的 \d+ 个对话(?: · |$)/.test(f.cov) && (f.saved === 0 ? f.cov.split(' · ').includes('本机保存的消息里没有匹配') : !f.cov.includes('本机保存的消息里没有匹配'));
+ok(!covLine({ cov: '搜了本机保存的 17 个对话', saved: 0 }) && !covLine({ cov: '本机保存的消息里没有匹配', saved: 0 }) && !covLine({ cov: '本机保存的消息里没有匹配 · 搜了本机保存的 17 个对话', saved: 3 }) && covLine({ cov: '本机保存的消息里没有匹配 · 搜了本机保存的 17 个对话', saved: 0 }) && covLine({ cov: '搜了本机保存的 17 个对话', saved: 3 }),
+  '⑪ RED CONTROL of the coverage leg: the release\'s line with no saved hit (the «nothing saved» clause missing), the clause alone (no coverage), and the clause beside saved hits are each refused; the shipped shapes pass');
+ok(fsr && fsr.heads && fsr.heads[0] === '已保存的消息' && /^更早的消息 — 来自.+的搜索$/.test(fsr.heads[1] || '') && covLine(fsr), '⑪ the press: section one "已保存的消息" with what it covered — and, when nothing saved matched and the vendor was asked, that nothing saved matched — section two "更早的消息 — 来自…的搜索" below it (zh)', JSON.stringify(fsr && { heads: fsr.heads, cov: fsr.cov, saved: fsr.saved }));
 ok(fsr && fsr.n1 === 20 && fsr.chips === fsr.n1 && fsr.chip === '未保存在本机' && fsr.unknown >= 1 && !fsr.snippetMarkup && fsr.vstat.some((x) => /又向.+查了全部历史：找到 20 条更早的/.test(x)), '⑪ two pages of the vendor\'s older hits, each chipped 未保存在本机, a conversation never synced named 一个尚未同步的对话, the snippet\'s markup stripped, the status line counts them', JSON.stringify(fsr && { n1: fsr.n1, chips: fsr.chips, chip: fsr.chip, unknown: fsr.unknown, vstat: fsr.vstat }));
 ok(fsr && fsr.n2 > fsr.n1 && fsr.pageAsks >= 1 && fsr.s1Moved === 0 && fsr.s1Same, '⑪ scrolling to the end loads the next page by itself (no "Show more"), section one never moves', JSON.stringify(fsr && { n1: fsr.n1, n2: fsr.n2, pageAsks: fsr.pageAsks, moved: fsr.s1Moved }));
 ok(fsr && fsr.sheet && fsr.sheetTitle && fsr.sheetNote && fsr.found && fsr.openBtn === false && fsr.storedArchive === 0, '⑪ a click opens 这条消息前后 — the found message marked among the vendor\'s records, said not saved, no "open" for a conversation never synced; nothing was stored', JSON.stringify(fsr && { sheet: fsr.sheet, title: fsr.sheetTitle, note: fsr.sheetNote, found: fsr.found, open: fsr.openBtn, stored: fsr.storedArchive }));
@@ -1660,7 +1667,12 @@ ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.start
     if (send) { send.checked = true; send.dispatchEvent(new Event('change', { bubbles: true })); }
     return { before, after, woken: !!dlg.querySelector('.chan-account-woken button') };
   })()`);
-  ok(!pd.fail && pd.before.mode === 'review' && !pd.before.radios.includes('send') && /直接发送功能在这里不可用|不可用|可见性与策略/.test(pd.before.note), 'POLICY DOOR: under review section 2 offers draft only, and the refusal names where to change it', JSON.stringify(pd).slice(0, 600));
+  // ckpt61 hosted cure (2aa089967): inside the Reach & policy dialog the refusal names the Sending policy ROW above it — the refusal
+// words AND that pointer required together; the dead alternatives (不可用, 直接发送功能在这里不可用) gone, so only the shipped words pass
+const policyNote = (note) => /这里不提供直接发送/.test(note) && /要允许直接发送，请修改上方的「发送策略」/.test(note);
+ok(!policyNote('这里不提供直接发送: 这个频道要求任何东西发出前先经审批 — 可见性与策略') && !policyNote('要允许直接发送，请修改上方的「发送策略」。') && !policyNote('直接发送功能在这里不可用') && policyNote('这里不提供直接发送: 这个频道要求任何东西发出前先经审批 — 要允许直接发送，请修改上方的「发送策略」。'),
+  'POLICY DOOR RED CONTROL: the release\'s pointer (the dialog\'s own name), the pointer without the refusal, and a dead alternative are each refused; the shipped note passes');
+ok(!pd.fail && pd.before.mode === 'review' && !pd.before.radios.includes('send') && policyNote(pd.before.note), 'POLICY DOOR: under review section 2 offers draft only, and the refusal names where to change it — the Sending policy row above, inside this dialog', JSON.stringify(pd).slice(0, 600));
   ok(!pd.fail && pd.after.mode === 'direct' && pd.after.source === 'account' && pd.after.same && pd.after.radios.includes('send') && pd.woken, 'POLICY DOOR: Direct picked ⇒ saved on the account and 可以直接回复 is offered IN THE SAME dialog (no reopen); section 3 is the Notify door', JSON.stringify(pd && pd.after));
   const sv = await p1.evaljs(`(async () => { const dlg = document.getElementById('chan-account-reach-dialog'); return (${SAVE_OUTCOME('chan-account-reach-dialog')})([...dlg.querySelectorAll('button')].find((b) => b.textContent.trim() === '保存')); })()`);
   const view = (await api('GET', '/api/channels/adapters/fake-poll/view')).json || {};
