@@ -10,7 +10,11 @@
 //   · failed(X) → failed(X)  nothing: the record counts (`attempts`) and keeps when the cause began (`sinceAt`)
 //   · failed(X) → failed(Y)  ONE «DOWN» notice naming Y
 //   · failed → published     ONE «back UP» notice — only when a DOWN was said in this episode (`said`, sticky)
-//   · none → published       nothing here (a URL that CHANGED is said by the job's own adopt, as before)
+//   · none → published       nothing here (a URL that CHANGED is said by the job's own proven check — urlChangeVerdict)
+// A URL CHANGE IS SAID ONLY WHEN PROVEN (B-74f5 — fb-71b12fb3cd, fb-197c3042ca, fb-9efc35787c: at the 01:14Z restart three
+// conversations were told «public URL CHANGED to tcp://…, the old link no longer works» while the https address kept answering
+// and the tcp one answered nothing): after the restart's grace, the new address answered AND the old one failed. A web address
+// (http / https) read as tcp:// — the http probe misfired while the service or the relay came back — is not the job's until then.
 // THE VAULT CLASS IS NEVER SAID PER JOB: the vault's own For-you item carries it (the owner is the one who can clear it);
 // the job's status says it is waiting for the vault. Nor is THE DROPPED LOGIN (lane frp-token-proof — the relay takes this
 // instance's login and closes it at once: frpc runs without the shared token it still requires): the frp plugin's ONE
@@ -65,8 +69,8 @@ function noticeVerdict({ prev = null, next, url = null, at = 0 } = {}) {
   if (next && next.ok) {
     if (!p || !p.said) return { record: null, notice: null };   // nothing was said ⇒ neither is the recovery
     const to = next.url || null, since = when(p.downAt || p.sinceAt);
-    const what = to && url && to !== url
-      ? `public URL is back UP at a NEW address: ${url} → ${to} (the old link no longer works — share the new one); it was down since ${since}`
+    const what = to && url && to !== url   // B-74f5: never «the old link no longer works» here — the proven check says a change
+      ? `public URL is back UP at ${to} (it was published at ${url}); it was down since ${since}`
       : `public URL ${to || url} is back UP — published again (down since ${since})`;
     return { record: null, notice: { kind: 'recovered', cause: p.cause, what } };
   }
@@ -79,4 +83,23 @@ function noticeVerdict({ prev = null, next, url = null, at = 0 } = {}) {
   return { record, notice: say ? { kind: 'down', cause, what: `public URL ${url} is DOWN — publish failed: ${error} (said once: the next notice is when it is back, or a different cause)` } : null };
 }
 
-module.exports = { causeOf, whyOf, noticeVerdict, CLASSES, VAULT_WAIT, RELAY_WAIT, SAID_PER_JOB };
+const isWeb = (u) => /^https?:\/\//i.test(String(u || ''));
+/** B-74f5: a web address followed by a tcp:// one — the web address stays the job's until the change is proven */
+function keepsWebUrl(from, to) { return isWeb(from) && /^tcp:\/\//i.test(String(to || '')); }
+
+/**
+ * B-74f5 — ONE check of a URL change, made after the restart's grace: from = the job's last URL, to = the relay's new one,
+ * toAnswers / fromAnswers = what one look at each address found
+ * → { say, adopt, again, why }: say = the change is proven (the new answered, the old failed); adopt = the job takes `to`
+ *   (a web address read as tcp:// only when proven); again = look once more later (neither answered yet: the relay may still
+ *   be coming back); why = the journal's words when nothing is said
+ */
+function urlChangeVerdict({ from = null, to = null, toAnswers = false, fromAnswers = true } = {}) {
+  if (!from || !to || from === to) return { say: false, adopt: true, again: false, why: 'no change' };
+  if (toAnswers && !fromAnswers) return { say: true, adopt: true, again: false, why: 'proven' };
+  const adopt = !keepsWebUrl(from, to);
+  if (fromAnswers) return { say: false, adopt, again: false, why: toAnswers ? 'both addresses answer' : 'the old address still answers' };
+  return { say: false, adopt, again: true, why: 'neither address answers yet' };
+}
+
+module.exports = { causeOf, whyOf, noticeVerdict, keepsWebUrl, urlChangeVerdict, CLASSES, VAULT_WAIT, RELAY_WAIT, SAID_PER_JOB };

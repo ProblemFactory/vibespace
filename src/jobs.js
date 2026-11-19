@@ -141,6 +141,7 @@ const ARCHIVE_SWEEP_MS = 5 * 60 * 1000;
 // a judgment — the reap is retried by a later tick). Round 6: A REAP THAT DID NOT FINISH IS ALWAYS RETRIED — whoever started it
 // (the boot, the sweep, a start), by every tick whatever its job's state, REAP_TRIES times; then said once and dropped
 const STOP_GRACE_MS = 10_000;
+const URL_GRACE_MS = 2 * 60 * 1000, URL_CHECK_TRIES = 3, URL_CHECK_EVERY_MS = 30_000, URL_LOOK_MS = 5000; // B-74f5: a URL change is judged after the restart's grace, by a look at both addresses (≤ 3, 30 s apart, 5 s each)
 const REAP_READ_MS = 2000;
 const REAP_TRIES = 12;
 // THE LADDER's last rung (round 7): a wrapper still there WEDGE_MS after its scope was killed is killed with its group
@@ -2207,9 +2208,10 @@ class JobManager {
    *  manager adopted (relayPublished). The down record (`publishDown`, persisted — the repeat came at every restart) follows
    *  src/job-notice.js's verdict; the owner conversation hears a STATE CHANGE only (a cause once, its recovery once). */
   _publishOutcome(job, next) {
-    const v = JN.noticeVerdict({ prev: job.publishDown || null, next, url: job.lastPublicUrl || null, at: now() });
+    const kept = next && next.ok && JN.keepsWebUrl(job.lastPublicUrl, next.url); // B-74f5: a web address read as tcp:// is not said as the address it has now
+    const v = JN.noticeVerdict({ prev: job.publishDown || null, next: kept ? { ...next, url: job.lastPublicUrl } : next, url: job.lastPublicUrl || null, at: now() });
     if (v.record) job.publishDown = v.record; else delete job.publishDown;
-    if (next.ok) this._adoptJobUrl(job, next.url || null, { quiet: !!v.notice }); // a recovery to a NEW address says both in one notice
+    if (next.ok) this._adoptJobUrl(job, next.url || null); // B-74f5: a change is said by its proven check only (a «back UP» names the address it has now)
     else job.publishedUrl = null;
     if (v.notice) this._notifyOwner(job, { what: v.notice.what });
     return { cause: v.record ? v.record.cause : null, attempts: v.record ? v.record.attempts : 0, notice: v.notice };
@@ -2237,7 +2239,7 @@ class JobManager {
   /** The relay can publish again (the vault unlocked): every published service still DOWN re-publishes NOW — not at the next
    *  restart, not after the Ports manager's 5-minute heal backoff. → how many. */
   relayChanged(why) {
-    let n = 0;
+    let n = 0; this._relayAt = now(); // B-74f5: the relay's own restart opens a grace for URL-change checks too
     for (const job of this.jobs.values()) {
       if (job.kind !== 'service' || !job.publish || !job.publishDown || job.state !== 'up' || !(job.ports || []).length) continue;
       this._ensurePublish(job); n++;
@@ -2274,22 +2276,73 @@ class JobManager {
     }, this.d.publishRecheckMs ?? 10_000);
     t.unref?.();
   }
-  /** The job's live URL + its last one (`lastPublicUrl` survives a stop); a URL different from the last one is said. */
-  _adoptJobUrl(job, url, { quiet = false } = {}) {
+  /** The job's live URL + its last one (`lastPublicUrl` survives a stop). B-74f5: a URL different from the last one is SAID only once
+   *  proven (`_checkUrlChange`: after the restart's grace the new address answered and the old one failed); a web address read as
+   *  tcp:// (the http probe misfired while the service or the relay came back) stays the web one until then. */
+  _adoptJobUrl(job, url) {
     const before = job.lastPublicUrl || null;
-    job.publishedUrl = url;
-    if (!url) return;
-    job.lastPublicUrl = url;
-    if (before && before !== url && !quiet) {
+    if (!url) { job.publishedUrl = url; return; }
+    const keep = JN.keepsWebUrl(before, url);
+    job.publishedUrl = keep ? before : url;
+    if (!keep) job.lastPublicUrl = url;
+    if (!before || before === url) { if (job._urlCheck && job._urlCheck.to !== url) job._urlCheck = null; return; } // the web address came back: its tcp read is forgotten
+    if (job._urlCheck && job._urlCheck.from === before && job._urlCheck.to === url) return; // one check per change (the heal sweep adopts it again)
+    this._checkUrlChange(job, before, url, URL_CHECK_TRIES);
+  }
+  /** B-74f5: ONE look at both addresses after the restart's grace (this server's start or the relay's return + URL_GRACE_MS) — JN.urlChangeVerdict says
+   *  whether the change is said; a later change, a teardown or the old address coming back supersedes the check. */
+  _checkUrlChange(job, from, to, tries) {
+    const tok = job._urlCheck = { from, to };
+    const wait = Math.max(0, Math.max(this._bootAt || 0, this._relayAt || 0) + (this.d.urlGraceMs ?? URL_GRACE_MS) - now()) + (tries < URL_CHECK_TRIES ? (this.d.urlCheckEveryMs ?? URL_CHECK_EVERY_MS) : 0);
+    const t = setTimeout(async () => {
+      if (job._urlCheck !== tok || this.jobs.get(job.id) !== job) return;
+      let toOk = false, fromOk = true;
+      try { [toOk, fromOk] = await Promise.all([this._urlAnswers(to), this._urlAnswers(from)]); } catch { toOk = false; fromOk = true; } // a look that threw proves nothing
+      if (job._urlCheck !== tok) return;
+      const v = JN.urlChangeVerdict({ from, to, toAnswers: toOk, fromAnswers: fromOk });
+      if (v.again && tries > 1) { this._checkUrlChange(job, from, to, tries - 1); return; }
+      job._urlCheck = null;
+      if (!v.say) { this.d.log(`[jobs] ${job.id}: a new public URL was not said — ${v.why}`); return; }
+      if (job.lastPublicUrl !== to) { job.lastPublicUrl = to; job.publishedUrl = to; this._touch(job); } // a web address read as tcp://, now proven
       this.d.log(`[jobs] ${job.id} public URL changed`);
-      this._notifyOwner(job, { what: `public URL CHANGED: ${before} → ${url} (the old link no longer works — share the new one)` });
+      this._notifyOwner(job, { what: `public URL CHANGED: ${from} → ${to} (the old link no longer works — share the new one)` });
+    }, wait);
+    t.unref?.();
+  }
+  /** B-74f5: does a public address answer? tcp:// = a TCP connect; http(s):// = one GET / answered below 500 and not the relay's own
+   *  «not found» page (a 404 naming frp). URL_LOOK_MS each; any error is a no. `d.urlAnswers` stands in for it (the suites). */
+  async _urlAnswers(url) {
+    if (typeof this.d.urlAnswers === 'function') return !!(await this.d.urlAnswers(url));
+    let u = null; try { u = new URL(String(url)); } catch { return false; }
+    const ms = this.d.urlLookMs ?? URL_LOOK_MS;
+    if (u.protocol === 'tcp:') {
+      return new Promise((res) => {
+        const s = require('net').connect({ host: u.hostname, port: Number(u.port) });
+        const fin = (ok) => { try { s.destroy(); } catch { } res(ok); };
+        s.once('connect', () => fin(true)); s.once('error', () => fin(false)); s.setTimeout(ms, () => fin(false));
+      });
     }
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+    return new Promise((res) => {
+      let done = false, q = null;
+      const fin = (ok) => { if (done) return; done = true; clearTimeout(guard); try { q && q.destroy(); } catch { } res(ok); };
+      const guard = setTimeout(() => fin(false), ms + 1000); guard.unref?.();
+      try {
+        q = require(u.protocol === 'https:' ? 'https' : 'http').get(u, { timeout: ms, headers: { 'user-agent': 'vibespace-url-check' } }, (r) => {
+          const st = Number(r.statusCode) || 0;
+          if (st !== 404) { fin(st > 0 && st < 500); return; }
+          let body = ''; r.on('data', (d) => { body += d.toString('latin1'); if (body.length > 4096) fin(!/\bfrp\b/i.test(body)); });
+          r.on('end', () => fin(!/\bfrp\b/i.test(body))); r.on('error', () => fin(false));
+        });
+        q.on('timeout', () => fin(false)); q.on('error', () => fin(false));
+      } catch { fin(false); }
+    });
   }
   /** forget = the public name goes too (never on a stop / park: the next start publishes the same name). */
   async _teardownPublish(job, { forget = false } = {}) {
     try {
       const pf = this.d.getPorts && this.d.getPorts();
-      job._pubGen = (job._pubGen || 0) + 1; job._publish = null;
+      job._pubGen = (job._pubGen || 0) + 1; job._publish = null; job._urlCheck = null; // B-74f5: a pending URL check ends with the publish
       delete job.publishDown; // the down episode ends with a deliberate stop / park / refusal (never at a restart: that is when it repeated)
       if (!pf || !job._pfId) return;
       try { await pf.unpublish(job._pfId, { keepName: !forget }); } catch { }

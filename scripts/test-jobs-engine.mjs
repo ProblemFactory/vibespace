@@ -494,7 +494,8 @@ try {
     const pf = new PortForwardManager({ hosts: { list: () => [] }, dataDir: pdir, plugins: fakePlugins, broadcast: () => { }, log: () => { } });
     const said = [];
     const late = (ms) => ({ argv: [process.execPath, '-e', `setTimeout(() => require('http').createServer((q, s) => s.end('ok')).listen(${P}, '127.0.0.1'), ${ms})`] });
-    const mkF = (JM = JobManager) => { const F = new JM({ ...deps, dataDir: pdir, getPorts: () => pf, publishWaitMs: 20000, publishRecheckMs: 500 }); F.init(); const orig = F._notifyOwner.bind(F); F._notifyOwner = (job, ev) => { said.push(ev.what); return orig(job, ev); }; return F; };
+    let goneUrl = null; // B-74f5: the address the user's unpublish took down — the change check's stand-in looks find it gone, every other one answering
+    const mkF = (JM = JobManager) => { const F = new JM({ ...deps, dataDir: pdir, getPorts: () => pf, publishWaitMs: 20000, publishRecheckMs: 500, urlGraceMs: 0, urlAnswers: async (u) => u !== goneUrl }); F.init(); const orig = F._notifyOwner.bind(F); F._notifyOwner = (job, ev) => { said.push(ev.what); return orig(job, ev); }; return F; };
     const F = mkF();
     const cr = F.create({ kind: 'service', name: 'late-web', cmd: late(2500), ports: [P], publish: true, restart: 'never', owner }, caller);
     ok(!cr.error, 'publish leg: a --keep-up --port --publish service is created', cr.error);
@@ -528,12 +529,13 @@ try {
     F.start(job);
     ok(await until(() => !!job.publishedUrl, 20000) && job.publishedUrl === U && !said.length, 'stop → start (a late listener again) republishes the SAME URL — no change notice', JSON.stringify({ u: job.publishedUrl, said }));
     // a URL that changes is said: the user explicitly unpublishes (the name is forgotten), the next start gets a new one
-    await pf.unpublish(job._pfId);
+    goneUrl = U; await pf.unpublish(job._pfId);
     F.stop(job);
     await until(() => job.state !== 'up', 15000);
     F.start(job);
     ok(await until(() => !!job.publishedUrl, 20000) && job.publishedUrl !== U, 'after an explicit unpublish the next start has a NEW URL', job.publishedUrl);
-    ok(said.length === 1 && said[0].includes(U) && said[0].includes(job.publishedUrl) && /CHANGED/.test(said[0]), 'the owner conversation gets ONE notice naming the old and the new URL', JSON.stringify(said));
+    await until(() => said.length >= 1, 5000); // B-74f5: said once the check found the new address answering and the old one gone
+    ok(said.length === 1 && said[0].includes(U) && said[0].includes(job.publishedUrl) && /CHANGED/.test(said[0]), 'the owner conversation gets ONE notice naming the old and the new URL (B-74f5: once the new answered and the old failed)', JSON.stringify(said));
     F.stop(job);
     await until(() => job.state !== 'up', 15000);
     // NEGATIVE CONTROL (patched copy, outside the tree): without the wait the publish probes a port that does not answer yet

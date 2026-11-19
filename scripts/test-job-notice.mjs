@@ -68,7 +68,19 @@ ok(badPre.length >= 4 && badPre.includes(TABLE[0][0]) && badPre.includes(TABLE[3
   const v = play(JN.noticeVerdict, fails(LOCKED, 5));
   ok(v.rec.cause === 'vault_locked' && v.rec.said === false && v.rec.attempts === 5 && JN.whyOf(v.rec) === JN.VAULT_WAIT && /waiting for the vault/.test(JN.whyOf(v.rec)), 'the vault class: counted (5), never said, its status words = waiting for the vault', JSON.stringify(v.rec));
   const nu = play(JN.noticeVerdict, [...fails(UNREACH, 1), { ok: true, url: URL1 }]);
-  ok(nu.said.length === 2 && nu.said[1].kind === 'recovered' && nu.said[1].what.includes(URL0) && nu.said[1].what.includes(URL1) && /NEW address/.test(nu.said[1].what), 'a recovery to a NEW address names both in ONE notice', nu.said[1] && nu.said[1].what);
+  ok(nu.said.length === 2 && nu.said[1].kind === 'recovered' && nu.said[1].what.includes(URL0) && nu.said[1].what.includes(URL1) && !/no longer works|NEW address/.test(nu.said[1].what), 'a recovery to another address names both in ONE notice — never «the old link no longer works» (B-74f5: the proven check says a change)', nu.said[1] && nu.said[1].what);
+  // B-74f5: THE CHANGE CHECK'S VERDICT — said only when the new address answered AND the old one failed; a web address read as tcp:// is
+  // kept unless proven; neither answering ⇒ look again
+  const TCP0 = 'tcp://relay.test:22999', UV = JN.urlChangeVerdict;
+  const rowsU = [
+    ['the incident: https kept answering, the tcp read answers nothing', { from: URL0, to: TCP0, toAnswers: false, fromAnswers: true }, { say: false, adopt: false, again: false }],
+    ['both answer: nothing said, the new web address taken', { from: URL0, to: URL1, toAnswers: true, fromAnswers: true }, { say: false, adopt: true, again: false }],
+    ['proven: the new answered, the old failed', { from: URL0, to: TCP0, toAnswers: true, fromAnswers: false }, { say: true, adopt: true, again: false }],
+    ['neither answers yet (the relay coming back): look again, the web address kept', { from: URL0, to: TCP0, toAnswers: false, fromAnswers: false }, { say: false, adopt: false, again: true }],
+    ['no change', { from: URL0, to: URL0, toAnswers: false, fromAnswers: false }, { say: false, adopt: true, again: false }],
+  ];
+  const badU = rowsU.filter(([, i, w]) => { const v = UV(i); return v.say !== w.say || v.adopt !== w.adopt || v.again !== w.again; }).map(([n]) => n);
+  ok(typeof UV === 'function' && !badU.length && JN.keepsWebUrl(URL0, TCP0) && !JN.keepsWebUrl(TCP0, URL0) && !JN.keepsWebUrl(URL0, URL1), 'B-74f5: urlChangeVerdict — said only when proven; a web address read as tcp:// kept until then; neither answering ⇒ again', JSON.stringify(badU));
   const first = play(JN.noticeVerdict, [...fails(UNREACH, 3), { ok: true, url: URL0 }], null);
   ok(first.said.length === 0, 'a first publish that never had a URL: no DOWN (the creator polls), no recovery either', JSON.stringify(first.said));
   ok(JN.noticeVerdict({ prev: null, next: { ok: true, url: URL0 }, url: URL0 }).notice === null, 'published → published: nothing');
@@ -116,6 +128,7 @@ try {
       if (relay.mode === 'vault') throw LOCKED();
       if (relay.mode === 'unreachable') throw UNREACH(++relay.n);
       if (relay.mode === 'noport') throw NOPORT();
+      if (relay.mode === 'tcp') return { name, remotePort: 22999, proto: 'tcp', url: 'tcp://relay.test:22999' }; // B-74f5: the http probe misfired
       return { name, subdomain: 'vs1785a95b84', proto: 'http', url: URL0 };
     },
     async frpUnpublish() { return { ok: true }; },
@@ -127,9 +140,9 @@ try {
   const said = [], delivered = [];
   const owner = { conversation: { backend: 'claude', id: 'conv-O' }, sessionId: 'sess-O', sessionCreatedAt: 1, createdBy: 'agent', groupsSnapshot: ['T-g'] };
   const ownerCaller = { conversationId: 'conv-O', sessionId: 'sess-O', sessionCreatedAt: 1, groups: new Set(['T-g']) };
-  const mk = (JM, d, ports = pf) => {
+  const mk = (JM, d, ports = pf, extra = {}) => {
     fs.mkdirSync(path.join(d, 'bin'), { recursive: true });
-    const E = new JM({ dataDir: d, broadcast: () => { }, notifyUser: () => { }, log: () => { }, getPorts: () => ports, publishWaitMs: 3000, publishRecheckMs: 60_000,
+    const E = new JM({ dataDir: d, broadcast: () => { }, notifyUser: () => { }, log: () => { }, getPorts: () => ports, publishWaitMs: 3000, publishRecheckMs: 60_000, ...extra,
       deliverToConversation: async (cid, text) => { delivered.push({ cid, text }); return { ok: true, lane: 'message', peerName: 'owner' }; } });
     E.init();
     const orig = E._notifyOwner.bind(E); E._notifyOwner = (job, ev) => { said.push(ev.what); return orig(job, ev); };
@@ -267,6 +280,46 @@ try {
   await pfm._republish(staleRec);
   ok(staleRec.publicUrl === URL0 && L.snapshot(lj).publishState === 'failed' && /waiting for the vault/.test(L.snapshot(lj).publishWhy), 'RED CONTROL ③: without the tell, the relay republished and the job still says NOT published — waiting for the vault (the stale snapshot of record)', JSON.stringify(L.snapshot(lj).publishState));
   stopEngine(L); curM = null;
+
+  // (k) B-74f5 (fb-71b12fb3cd, fb-197c3042ca, fb-9efc35787c): A RESTART'S tcp:// READ OF A WEB SERVICE IS NO URL CHANGE. A published
+  // https service adopted by a fresh engine; the relay's publish answers tcp:// (the http probe misfired while things came back).
+  // The change is judged after the grace by a look at both addresses (a stand-in for the looks: `answering`)
+  {
+    const TCP0 = 'tcp://relay.test:22999', answering = new Set(), lines = [];
+    const scene = async (JM, tag, { grace = 150 } = {}) => {
+      said.length = 0; lines.length = 0;
+      const E = mk(JM, path.join(dir, 'b74f5-' + tag), pf, { urlGraceMs: grace, urlCheckEveryMs: 40, urlAnswers: async (u) => answering.has(u), log: (...a) => lines.push(a.join(' ')) }); cur = E;
+      const bj = { ...job, id: 'jb-b74f5' + tag.slice(0, 3).padEnd(3, '0'), publishDown: undefined, _pfId: undefined, notifyLog: [], subscribers: [], lastPublicUrl: URL0, publishedUrl: URL0 };
+      E.jobs.set(bj.id, bj);
+      relay.mode = 'tcp'; await E._ensurePublish(bj);
+      const atOnce = { said: said.slice(), url: E.snapshot(bj).publishedUrl, last: bj.lastPublicUrl };
+      const t0 = Date.now(); while (!lines.some((l) => l.includes(bj.id) && /public URL (changed|was not said)/.test(l)) && Date.now() - t0 < 3000) await new Promise((r) => setTimeout(r, 15));
+      const out = { atOnce, said: said.slice(), url: E.snapshot(bj).publishedUrl, last: bj.lastPublicUrl, line: lines.find((l) => l.includes(bj.id) && /public URL (changed|was not said)/.test(l)) || null };
+      stopEngine(E); cur = null; relay.mode = 'ok';
+      return out;
+    };
+    answering.clear(); answering.add(URL0); // the incident: the https address keeps answering, the tcp one answers nothing
+    const a = await scene(JobManager, 'kept');
+    ok(a.atOnce.said.length === 0 && a.atOnce.url === URL0 && a.atOnce.last === URL0, 'B-74f5: the restart\'s tcp:// read of an https service says NOTHING at once and the job keeps its https address (show / poll list it)', JSON.stringify(a.atOnce));
+    ok(a.said.length === 0 && a.url === URL0 && a.last === URL0 && /the old address still answers/.test(a.line || ''), 'B-74f5: after the grace the look finds the https address answering ⇒ no «CHANGED», the https address stays, the journal says why', JSON.stringify({ said: a.said, url: a.url, line: a.line }));
+    answering.clear(); answering.add(TCP0); // a real move: the https address gone, the tcp one answering
+    const b = await scene(JobManager, 'moved');
+    ok(b.atOnce.said.length === 0 && b.atOnce.url === URL0, 'B-74f5: inside the restart\'s grace nothing is said even for a real move', JSON.stringify(b.atOnce));
+    ok(b.said.length === 1 && /public URL CHANGED/.test(b.said[0]) && b.said[0].includes(URL0) && b.said[0].includes(TCP0) && b.url === TCP0 && b.last === TCP0, 'B-74f5: after the grace, the new address answering and the old one failing ⇒ ONE «CHANGED» notice, and only then the job takes the tcp address', JSON.stringify({ said: b.said, url: b.url }));
+    answering.clear(); // nothing answers (the relay still coming back): the look is made three times, nothing is said
+    const c = await scene(JobManager, 'quiet');
+    ok(c.said.length === 0 && c.url === URL0 && /neither address answers yet/.test(c.line || ''), 'B-74f5: neither address answering ⇒ looked at again (bounded), nothing said, the https address kept', JSON.stringify({ said: c.said, line: c.line }));
+    // RED CONTROL — the base's adopt (a URL different from the last one is said at once and taken): the incident's false notice
+    const JSb = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf-8');
+    const { mutantCopies: mcB } = await import('./mutant-copy.mjs');
+    const { anchored } = await import('./scratch.mjs');
+    const NOW_HEAD = "  _adoptJobUrl(job, url) {\n    const before = job.lastPublicUrl || null;\n    if (!url) { job.publishedUrl = url; return; }\n    const keep = JN.keepsWebUrl(before, url);\n    job.publishedUrl = keep ? before : url;\n    if (!keep) job.lastPublicUrl = url;\n";
+    const BASE_HEAD = "  _adoptJobUrl(job, url) {\n    const before = job.lastPublicUrl || null;\n    job.publishedUrl = url;\n    if (!url) return;\n    job.lastPublicUrl = url;\n    if (before && before !== url) { this.d.log(`[jobs] ${job.id} public URL changed`); this._notifyOwner(job, { what: `public URL CHANGED: ${before} → ${url} (the old link no longer works — share the new one)` }); return; }\n";   // stale-pins: kept — the base's adopt, written back by this RED control
+    const JMb = mcB('job-notice-b74f5', ROOT).load('src/jobs.js', anchored(JSb, NOW_HEAD, BASE_HEAD, 'B-74f5 control: the base\'s adopt'), 'base-adopt').JobManager;
+    answering.clear(); answering.add(URL0);
+    const r = await scene(JMb, 'base');
+    ok(r.atOnce.said.length === 1 && /public URL CHANGED/.test(r.atOnce.said[0]) && r.atOnce.said[0].includes(TCP0) && r.atOnce.url === TCP0, 'RED CONTROL (B-74f5): the base\'s adopt says «public URL CHANGED … → tcp://…, the old link no longer works» at once while the https address answers (the three reports)', JSON.stringify(r.atOnce));
+  }
 
   // (j) the wiring: the vault's unlock calls relayChanged; the Ports manager's adopt calls relayPublished
   const wiring = fs.readFileSync(path.join(ROOT, 'src/server/mounts-plugins-wiring.js'), 'utf-8');
