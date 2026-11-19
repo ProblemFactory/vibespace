@@ -11,14 +11,16 @@
 //      BEFORE the row changes (entry() outside an update), the clock past a wake's 24 h window, the clock gone back, a judge
 //      label, a damaged row (its key not its own) and a proposal under its own key, a head row moved to another account, a
 //      damaged row whose account id is not a string but spells an account's (the walk drops it), the account disabled, its
-//      record removed and added again, a removal (a whole-map touch) — the kept answer is the walk's, field for
+//      record removed and added again, a held hit planted then pruned by a grain write (prunePending's touch), a record whose
+//      id is a NUMBER and one whose id is NULL with their rows, a removal (a whole-map touch) — the kept answer is the walk's, field for
 //      field (conversations, heads, attention, the candidate keys).
 //   ② THE PRICE: across the row steps the kept read is NOT rebuilt (one build, then a rebuild only where the law says: the
 //      clock gone back, a whole-map touch) and re-reads a handful of rows per read, never the 4 000 of another account.
 //   ③ RED CONTROLS — an engine copy with ONE line gone each; its own step goes red (the kept answer ≠ the walk's): the touch
 //      not kept · the outbox not compared · the clock gone back not rebuilt · the judge's rows not read · the damaged rows not
 //      re-read · cut 2's grouping through String (three lines: a damaged row whose account id spells an account's is kept and
-//      its view throws); and the kept candidates not re-judged — the same answer (every kept key is judged at the read) but a set that
+//      its view throws) · prunePending without its touch (the pruned row stays shown); and the skip of an account key no record
+//      can have (an object / array) — the same answer, red against «never kept»; and the kept candidates not re-judged — the same answer (every kept key is judged at the read) but a set that
 //      only grows (the clock never takes a row out), red against the price.
 // Per-pid scratch (scripts/scratch.mjs).
 import fs from 'node:fs';
@@ -27,9 +29,21 @@ import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
 import { checker } from './lib/check.mjs';
+import { engineSource } from './channels-engine-src.mjs';   // the engine with its families inlined (prunePending lives in channels-access)
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const { ok, report } = checker();
+// THE ANCHORED COPY (RULES «A NEW RED CONTROL IS ANCHORED»): a control's copy is built only when each anchor is in the source
+// EXACTLY once — else it FAILS BY NAME (a moved line never builds a copy that «passes» green)
+const anchoredCopy = (src, pairs, what) => {
+  let out = src;
+  for (const [from, to] of pairs) {
+    const n = out.split(from).length - 1;
+    if (n !== 1) throw new Error(`${what}: its anchor is in the source ${n} time(s), not once — «${String(from).slice(0, 90)}»`);
+    out = out.replace(from, () => to);
+  }
+  return out;
+};
 const ROOT = scratch('chan-first-kept');
 const cleanup = () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch {} };
 process.on('exit', cleanup);
@@ -57,7 +71,9 @@ async function run(E, tag) {
   });
   ix.flush();
   const steps = [];
-  const look = (why) => { let p; try { p = e.firstReadParity(); } catch (err) { steps.push({ why, same: false, threw: String((err && err.message) || err), walkAt: null }); return; } steps.push({ why, same: J(p.kept) === J(p.walk), walkAt: J(p.walk), cands: p.walk.cands.length, builds: p.stats.builds, rechecked: p.stats.rechecked, facts: p.stats.facts, diff: J(p.kept) === J(p.walk) ? null : { kept: p.kept.cands, walk: p.walk.cands, heads: J(p.kept.heads) === J(p.walk.heads) } }); };
+  const touched = [];   // the keys the store's touch signal says a step changed — what its writer and every kept index read
+  ix.onTouch((k) => touched.push(k));
+  const look = (why) => { let p; try { p = e.firstReadParity(); } catch (err) { steps.push({ why, same: false, threw: String((err && err.message) || err), walkAt: null }); return; } steps.push({ why, same: J(p.kept) === J(p.walk), walkAt: J(p.walk), cands: p.walk.cands.length, builds: p.stats.builds, rechecked: p.stats.rechecked, facts: p.stats.facts, objectKeys: p.stats.objectKeys, candKeys: p.walk.cands, touched: touched.splice(0), diff: J(p.kept) === J(p.walk) ? null : { kept: p.kept.cands, walk: p.walk.cands, heads: J(p.kept.heads) === J(p.walk.heads) } }); };
   look('the first read (the build)');
   await ix.update(() => { ix.entry(A, 'own_33').lastAt = T0; });
   look('a row written newest (its account\'s head moves)');
@@ -99,6 +115,18 @@ async function run(E, tag) {
   look('the account removed (its record)');
   await e.store.adapters.update(() => { const ad = e.store.adapters.live(); kept.enabled = true; ad.adapters.push(kept); });
   look('the account added again');
+  await ix.update(() => { ix.entry(A, 'own_9').pending = [{ for: 'agent:ghost', at: T0, vendorId: 'm9' }]; });
+  look('a held hit planted (a candidate by its pending hit only)');
+  touched.length = 0;
+  await e.setGrain(A, { kind: 'account' }, { access: [{ principal: AGENT, authority: 'draft' }] });   // a grain write: prunePending drops the hit nobody waits for
+  look('a grain write prunes that held hit (prunePending — its touch)');
+  const recOf = (id, label) => ({ id, kind: recA().kind, label, enabled: true, options: {}, state: {}, auth: { tokenEnc: null, expiresAt: null, scopes: [] }, lastPass: null, consecutiveFailures: 0 });
+  await e.store.adapters.update(() => { e.store.adapters.live().adapters.push(recOf(7, 'Numbered')); });
+  await ix.update(() => { for (let i = 0; i < 3; i++) Object.assign(ix.entry(7, `n_${i}`), { title: `numbered ${i}`, kind: 'group', lastAt: T0 - i * 1000, unread: 0 }); });
+  look('a record whose id is a NUMBER (7) and its rows (account id 7)');
+  await e.store.adapters.update(() => { e.store.adapters.live().adapters.push(recOf(null, 'Nulled')); });
+  await ix.update(() => { for (let i = 0; i < 3; i++) Object.assign(ix.entry(null, `z_${i}`), { title: `nulled ${i}`, kind: 'group', lastAt: T0 - i * 1000, unread: 0 }); });
+  look('a record whose id is NULL and its rows (account id null)');
   await ix.update((x) => { delete x.conversations[`${A}/own_2`]; });
   look('a removal (a whole-map touch)');
   try { await e.stop(); } catch { }
@@ -111,10 +139,18 @@ const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
 const got = await run(ENG, 'kept');
 for (const s of got) ok(s.same === true, `${s.why}: the kept answer is the walk's (${s.cands} candidates)`, s.diff);
 const steps = got.length;
-ok(steps === 21, `twenty-one steps (${steps})`, got.map((s) => s.why));
+ok(steps === 25, `twenty-five steps (${steps})`, got.map((s) => s.why));
+{
+  const a = got.find((x) => x.why.startsWith('a held hit planted')), b = got.find((x) => x.why.startsWith('a grain write prunes'));
+  ok(!!a && !!b && a.candKeys.includes(`${A}/own_9`) && !b.candKeys.includes(`${A}/own_9`), 'the plant took: own_9 is a candidate by its held hit, and the grain write\'s prune took it out (the walk\'s own candidates)', { planted: a && a.candKeys.includes(`${A}/own_9`), pruned: b && b.candKeys.includes(`${A}/own_9`) });
+  ok(!!b && b.touched.includes(`${A}/own_9`) && !b.touched.includes(null), 'the prune TOUCHED the row it changed (its own key, never the whole map) — what the store\'s writer and every kept index read', b && b.touched.slice(0, 8));
+  const last = got[got.length - 1];
+  ok(last.objectKeys === 0, `the build too (after the whole-map touch, the damaged row still damaged): no account key no record can have (${last.objectKeys})`, last.objectKeys);
+}
+{ const d = got.find((x) => x.why.startsWith('a damaged row whose account id is not a string')); ok(!!d && d.objectKeys === 0, `the damaged row whose account id is an ARRAY is never kept (no record can have it): ${d && d.objectKeys} object keys in the kept heads`, d && d.objectKeys); }
 // every step's plant TOOK: the walk's own answer moved (a step that changed nothing would be a parity leg about nothing)
 const still = got.slice(1).filter((s, i) => s.walkAt === got[i].walkAt).map((s) => s.why);
-ok(still.length === 0, `every step changed the walk's own answer (the plants took; a disabled account's heads read «off»): ${still.length ? still.join(' · ') : 'all twenty-one'}`, still);
+ok(still.length === 0, `every step changed the walk's own answer (the plants took; a disabled account's heads read «off»): ${still.length ? still.join(' · ') : 'all twenty-five'}`, still);
 
 console.log('\n② the price: no rebuild but where the law says, a handful of rows re-read per read');
 const at = (why) => got.find((s) => s.why.startsWith(why));
@@ -140,7 +176,7 @@ const PLANTS = [
 for (const [tag, line, repl, step] of PLANTS) {
   ok(SRC.split(line).length === 2, `control setup (${tag}): the line is present once`);
   if (!step) continue;   // no-mass: judged by the burst below
-  const c = await run(MC.load('src/server/channels-engine.js', SRC.replace(line, repl), tag), `ctl-${tag}`);
+  const c = await run(MC.load('src/server/channels-engine.js', anchoredCopy(SRC, [[line, repl]], `control ${tag}`), tag), `ctl-${tag}`);
   const i = c.findIndex((x) => x.why.startsWith(step)), s = c[i];
   ok(i > 0 && c[i - 1].same === true && s.same === false, `RED CONTROL (${tag}): green up to «${step}…», where the kept answer differs from the walk's — red`, { before: c[i - 1] && c[i - 1].same, at: s });
 }
@@ -148,20 +184,36 @@ for (const [tag, line, repl, step] of PLANTS) {
 {
   const PAIRS = [
     ["    const acct = en.adapterId, e = { a: numOf(en.lastAt), k: String(en.key), mk };   // the RAW value: grouped as the walk groups (byId.get)", "    const acct = String(en.adapterId), e = { a: numOf(en.lastAt), k: String(en.key), mk };"],   // stale-pins: kept (cut 2's grouping, the control's copy)
-    ["        if (!en.unlistedAt) { const acct = en.adapterId, e = { a: numOf(en.lastAt), k: String(en.key), mk };", "        if (!en.unlistedAt && en.adapterId != null) { const acct = String(en.adapterId), e = { a: numOf(en.lastAt), k: String(en.key), mk };"],   // stale-pins: kept (cut 2's grouping, the control's copy)
+    ["        if (!en.unlistedAt && !(en.adapterId !== null && typeof en.adapterId === 'object')) { const acct = en.adapterId, e = { a: numOf(en.lastAt), k: String(en.key), mk };", "        if (!en.unlistedAt && en.adapterId != null) { const acct = String(en.adapterId), e = { a: numOf(en.lastAt), k: String(en.key), mk };"],   // stale-pins: kept (cut 2's grouping, the control's copy)
     ["const arr = firstKept.heads.get(id) || []; const out = []; for (const e of arr) { if (out.length >= FO.HEAD_ROWS) break; const en = liveIx[e.mk]; if (en && !en.unlistedAt && en.adapterId === id) out.push(en); }", "const arr = firstKept.heads.get(String(id)) || []; const out = []; for (const e of arr) { if (out.length >= FO.HEAD_ROWS) break; const en = liveIx[e.mk]; if (en && !en.unlistedAt && String(en.adapterId) === String(id)) out.push(en); }"],   // stale-pins: kept (cut 2's grouping, the control's copy)
   ];
-  ok(PAIRS.every(([now]) => SRC.split(now).length === 2), 'control setup (string-account): the three lines of the grouping are present once each', PAIRS.map(([now]) => SRC.split(now).length - 1));
-  let old = SRC; for (const [now, before] of PAIRS) old = old.replace(now, before);
+  PAIRS.push(["    if (en.adapterId !== null && typeof en.adapterId === 'object') return;   // an object / array: no record can have it (JSON ids are strings, numbers, booleans, null) — never kept", ""]);   // cut 2 had no skip either
+  ok(PAIRS.every(([now]) => SRC.split(now).length === 2), 'control setup (string-account): the four lines of cut 2\'s grouping are present once each', PAIRS.map(([now]) => SRC.split(now).length - 1));
+  const old = anchoredCopy(SRC, PAIRS, 'control string-account');
   const c = await run(MC.load('src/server/channels-engine.js', old, 'string-account'), 'ctl-string-account');
   const i = c.findIndex((x) => x.why.startsWith('a damaged row whose account id is not a string')), s0 = c[i];
   ok(i > 0 && c[i - 1].same === true && s0.same === false, `RED CONTROL (string-account): cut 2's grouping through String — green up to the damaged row, where the kept read keeps it and its view ${s0 && s0.threw ? `throws («${s0.threw}»)` : 'differs'} — red`, { before: c[i - 1] && c[i - 1].same, threw: s0 && s0.threw });
+}
+// THE PRUNE'S TOUCH (主开发 00:36Z): prunePending without its touch — the kept read never sees the hit it dropped
+{
+  const ESRC = engineSource(REPO);
+  const TOUCH = "        store.index.touch(d.key);";
+  const c = await run(MC.load('src/server/channels-engine.js', anchoredCopy(ESRC, [[TOUCH, '']], 'control no-prune-touch'), 'no-prune-touch'), 'ctl-no-prune-touch');
+  const s0 = c.find((x) => x.why.startsWith('a grain write prunes that held hit'));
+  ok(!!s0 && !s0.touched.includes(`${A}/own_9`), 'RED CONTROL (no-prune-touch): prunePending without its touch — the row it changed is never said to the writer or the kept indexes (the kept read\'s own answer cannot show it: it judges every key it holds again), so the leg «the prune TOUCHED the row» goes red', s0 && s0.touched.slice(0, 8));
+}
+// AN ACCOUNT KEY NO RECORD CAN HAVE (an object / array) is never kept
+{
+  const SKIP = "    if (en.adapterId !== null && typeof en.adapterId === 'object') return;   // an object / array: no record can have it (JSON ids are strings, numbers, booleans, null) — never kept";
+  const c = await run(MC.load('src/server/channels-engine.js', anchoredCopy(SRC, [[SKIP, '']], 'control no-skip'), 'no-skip'), 'ctl-no-skip');
+  const d = c.find((x) => x.why.startsWith('a damaged row whose account id is not a string'));
+  ok(!!d && d.same === true && d.objectKeys === 1, `RED CONTROL (no-skip): without the skip the array is kept as a heads key (${d && d.objectKeys}) — the same answer, so the leg that goes red is «the damaged row whose account id is an ARRAY is never kept»`, d && { same: d.same, objectKeys: d.objectKeys });
 }
 // the kept set's pruning is the PRICE, not the answer (every kept key is judged again at the read): its control is the set's size
 {
   const line = "      const again = new Set(fk.facts);";
   ok(SRC.split(line).length === 2, 'control setup (no-recheck): the line is present once');
-  const c = await run(MC.load('src/server/channels-engine.js', SRC.replace(line, '      const again = new Set();'), 'no-recheck'), 'ctl-no-recheck');
+  const c = await run(MC.load('src/server/channels-engine.js', anchoredCopy(SRC, [[line, '      const again = new Set();']], 'control no-recheck'), 'no-recheck'), 'ctl-no-recheck');
   const i = c.findIndex((x) => x.why.startsWith('the clock past'));
   ok(i > 0 && c[i].same === true && c[i].facts >= c[i - 1].facts, `RED CONTROL (no-recheck): the kept set never re-judged keeps the rows the clock ended (${c[i - 1].facts} → ${c[i].facts}) — the same answer, so the leg that goes red is ②'s «the kept candidates are re-judged: the clock alone takes rows out of the kept set»`, c.map((x) => x.facts));
 }
@@ -181,7 +233,7 @@ for (const [tag, line, repl, step] of PLANTS) {
   const k = await burst(ENG, 'burst');
   ok(k.same && k.builds === 1, `a burst of 1 500 moved rows (half the map) is ONE rebuild by the walk (${k.builds}), the same answer`, k);
   const line = "    if (!fk.built || !(t >= fk.t) || fk.dirty.size > (fk.at.size >> 3) + 256) {";
-  const c = await burst(MC.load('src/server/channels-engine.js', SRC.replace(line, '    if (!fk.built || !(t >= fk.t)) {'), 'no-mass-b'), 'burst-ctl');
+  const c = await burst(MC.load('src/server/channels-engine.js', anchoredCopy(SRC, [[line, '    if (!fk.built || !(t >= fk.t)) {']], 'control no-mass'), 'no-mass-b'), 'burst-ctl');
   ok(c.same && c.builds === 0, `RED CONTROL (no-mass): without the rule the burst is 1 500 array moves, no rebuild (${c.builds}) — the same answer, so the leg that goes red is «a burst of 1 500 moved rows (half the map) is ONE rebuild»`, c);
 }
 

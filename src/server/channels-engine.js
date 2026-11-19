@@ -3174,6 +3174,7 @@ function create(deps = {}) {
     if (!en) return;
     if (String(en.key) !== mk) fk.odd.add(mk);
     if (en.unlistedAt) return;   // a null / missing account id is a Map key too: the walk's byId.get finds a record whose id is that
+    if (en.adapterId !== null && typeof en.adapterId === 'object') return;   // an object / array: no record can have it (JSON ids are strings, numbers, booleans, null) — never kept
     const acct = en.adapterId, e = { a: numOf(en.lastAt), k: String(en.key), mk };   // the RAW value: grouped as the walk groups (byId.get)
     let arr = fk.heads.get(acct); if (!arr) fk.heads.set(acct, (arr = []));
     arr.splice(headAt(arr, e), 0, e);
@@ -3191,7 +3192,7 @@ function create(deps = {}) {
         const en = liveIx[mk];
         if (!en) continue;
         if (String(en.key) !== mk) fk.odd.add(mk);
-        if (!en.unlistedAt) { const acct = en.adapterId, e = { a: numOf(en.lastAt), k: String(en.key), mk }; let arr = fk.heads.get(acct); if (!arr) fk.heads.set(acct, (arr = [])); arr.push(e); fk.at.set(mk, { acct, e }); }
+        if (!en.unlistedAt && !(en.adapterId !== null && typeof en.adapterId === 'object')) { const acct = en.adapterId, e = { a: numOf(en.lastAt), k: String(en.key), mk }; let arr = fk.heads.get(acct); if (!arr) fk.heads.set(acct, (arr = [])); arr.push(e); fk.at.set(mk, { acct, e }); }
         if (FO.candidateOf(en, ctx.outbox.get(en.key), t, null)) fk.facts.add(mk);
       }
       for (const arr of fk.heads.values()) arr.sort(headCmp);
@@ -9181,7 +9182,7 @@ function create(deps = {}) {
       const t = now(), recs = adapterRecords(), byId = new Map(recs.adapters.map((r) => [r.id, r])), liveIx = store.index.live(), ctx = viewCtx(t);
       const kept = firstRead(byId, liveIx, ctx), walk = firstReadWalk(byId, liveIx, ctx);
       const shape = (r) => ({ conversations: r.conversations, heads: r.heads, attention: r.attention, cands: r.cands.map((en) => en.key).sort() });
-      return { kept: shape(kept), walk: shape(walk), stats: { ...firstKept.stats, facts: firstKept.facts.size } };
+      return { kept: shape(kept), walk: shape(walk), stats: { ...firstKept.stats, facts: firstKept.facts.size, objectKeys: [...firstKept.heads.keys()].filter((k) => k !== null && typeof k === 'object').length } };
     }),
     clientSwapCheck, clientSwapSettled: () => swapChain,   // B-166e part 2 (1): the gates run the check / await the one a reload, the boot or a door started
     schedulerExact: (adapterId, t = now()) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); return rec ? schedulerScan(rec, t) : null; },
