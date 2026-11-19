@@ -542,7 +542,12 @@ console.log('the cure of batch 6 — THE LAW over a GENERATED corpus: a message 
     () => { const v = rnd(6, LET) + rnd(6, UP); return { core: `x ${v}`, must: [v] }; },           // a letters-only token of mixed case, after the value
     () => { const g = [0, 1, 2, 3].map(() => rnd(4, LET)); return { core: g.join(' '), must: [g[0]], w: g.slice(1) }; },   // an app password: four groups
     () => { const g = [0, 1, 2, 3].map(() => rnd(4, UP + '234567')); return { core: g.join(' '), must: [g[0]], w: g.slice(1) }; },   // a TOTP key in groups
+    // B-34c8 round w7azupbri: a TWO-group code whose second group is lowercase letters with a prose mark, and an app code with a comma
+    // INSIDE — after a STRONG head every group is a must-hide (`strongOnly`: after a session word the prose exception may keep them)
+    () => { const g = [rnd(2, '0123456789') + rnd(2, LET), rnd(4, LET)]; return { core: `${g[0]} ${g[1]}.`, must: [g[0]], w: [g[1]], strongOnly: true }; },
+    () => { const g = [0, 1, 2, 3].map(() => rnd(4, LET)); return { core: `${g[0]} ${g[1]}, ${g[2]} ${g[3]}`, must: [g[0]], w: g.slice(1), strongOnly: true }; },
   ];
+  const strongH = (h) => !/session/i.test(h);   // the corpus's heads: «session» and «test-session-schema» are the weak ones
   const TAILS = [   // what follows: plain words; secrets after a stop, a bracket, a plain word; a SECOND head in every spelling it has
     () => ({ t: '', must: [] }), () => ({ t: ' and the rest of it', must: [] }), () => ({ t: '，然后继续', must: [] }),
     () => { const v = 'Q9' + rnd(8, MIX); return { t: `，${v}`, must: [v] }; },
@@ -586,13 +591,13 @@ console.log('the cure of batch 6 — THE LAW over a GENERATED corpus: a message 
     for (const op of ops) for (const closed of PAIRS[op.trim()] ? [false, true] : [false]) for (const h of HEADS) for (const sep of SEPS) {
       if (stopAtFirst && leaks.length) return { leaks, loose, lines, nonIdem };
       const sh = SHAPES[n0 % SHAPES.length](), tl = TAILS[(n0 * 7 + 3) % TAILS.length](); n0++;
-      const must = [...sh.must, ...tl.must, ...(sh.w && op === '' ? sh.w : [])];
+      const must = [...sh.must, ...tl.must, ...(sh.w && op === '' && (!sh.strongOnly || strongH(h)) ? sh.w : [])];
       one(h + sep + op + sh.core + (closed ? PAIRS[op.trim()] : '') + (h.startsWith('`') ? '`' : '') + tl.t, op, must, {});
     }
     for (const sh0 of only ? [] : SHAPES) for (const tlf of TAILS) for (const h of HEADS) {   // the product of shapes × tails on every head, no opener
       if (stopAtFirst && leaks.length) return { leaks, loose, lines, nonIdem };
       const sh = sh0(), tl = tlf();
-      one(h + ': ' + sh.core + (h.startsWith('`') ? '`' : '') + tl.t, '', [...sh.must, ...tl.must, ...(sh.w || [])], {});
+      one(h + ': ' + sh.core + (h.startsWith('`') ? '`' : '') + tl.t, '', [...sh.must, ...tl.must, ...(sh.w && (!sh.strongOnly || strongH(h)) ? sh.w : [])], {});
     }
     // a MEMBER's mention under a `:` head is kept (the caller names its members) — and every secret after it is still hidden
     for (const h of !only || only === 'mentions' ? HEADS : []) for (const sep of [':', ': ']) for (const tlf of TAILS) { const tl = tlf(), L = `${h}${sep}@beta${tl.t}`; one(L, '@', tl.must, { mentions: ['beta'] }, ['@beta']); if (!stopAtFirst && !SSx.redactSecrets(L, { message: true, mentions: ['beta'] }).text.includes('@beta')) leaks.push({ L: L + ' (the member\'s @ was lost)', op: '@', mo: '' }); }   // r6: the member's @ survives too
@@ -652,7 +657,7 @@ console.log('the cure of batch 6 — THE LAW over a GENERATED corpus: a message 
     'the word after a credential word eats a member (MUST 1)': [c2('const keeps = (c, w) => (w.charCodeAt(0) === 64 && isMention(w, mentions)) ||', 'const keeps = (c, w) => (!takeNext && w.charCodeAt(0) === 64 && isMention(w, mentions)) ||', 'c2-next'), 'mentions', 'next'],
     '«password» in prose eats a member (MUST 1)': [c2('ml = mset && mentionLead(tok, mset);', 'ml = null;', 'c2-r5'), 'mentions', 'r5'],
     'the piece before an inner head kept when plain (MUST 2)': [c2('out += blank + (OPENER_PIECE_RE.test(pre) || !w || keeps(pre, w) ? pre : REDACTED + pre.slice(t));', 'out += blank + (plainChunk(pre) || OPENER_PIECE_RE.test(pre) ? pre : REDACTED);', 'c2-pre'), 'pre', 'pre'],   // stale-pins: kept (the OLD line is the mutant compiled back in, never an anchor)
-    'a group read with its comma': [c2('!(group && groupAt(w, groupN) === group)', '!(group && groupOf(w) === group)', 'c2-group'), 'pre', 'group'],
+    'a group read with its comma': [c2('!(group && groupAt(w, weak ? groupN : 2) === group)', '!(group && groupOf(w) === group)', 'c2-group'), 'pre', 'group'],
   };
   for (const [name, [SSc, only, scene]] of Object.entries(C2)) {
     const rc = judge(SSc, { only }), hit = rc.leaks.find((x) => x.scene === scene);
@@ -665,6 +670,7 @@ console.log('the cure of batch 6 — THE LAW over a GENERATED corpus: a message 
   {
     const MSG = (SSx, L) => SSx.redactSecrets(L, { message: true, mentions: ['beta'] }).text, LINE = (L) => SS.redactSecrets(L).text;
     const val = 'Xk9' + rnd(9, MIX), tok = 'Hx7' + rnd(8, MIX);
+    const s1 = rnd(2, '0123456789') + rnd(2, LET), s2 = rnd(4, LET), s3 = rnd(2, LET) + rnd(2, '0123456789'), s4 = rnd(4, LET), ap = [0, 1, 2, 3].map(() => rnd(4, LET));   // built at runtime
     const CASES = {
       c1: ['(1) a plain word with its comma right after ONE short value is prose — «failed,» kept (groupAt; cured)', 'session: fixed1 failed, retry now', (o) => !o.includes('fixed1') && o.includes(' failed, retry now')],
       c1b: ['(1) …a split code keeps its second group hidden with its comma («5678,» is no plain word)', 'password: 1234 5678, ok', (o) => !o.includes('1234') && !o.includes('5678') && o.endsWith(' ok')],
@@ -676,6 +682,11 @@ console.log('the cure of batch 6 — THE LAW over a GENERATED corpus: a message 
       c5: ['(5) R5 with a possessive after the @ is no mention — the token hidden whole, as the release (the line rule) does', 'I reset the password @beta\'s', (o, L) => !o.includes('beta') && o === LINE(L)],
       c5b: ['(5) …and with a glued ASCII mark after it', `I reset the password @beta:${tok}`, (o, L) => !o.includes(tok) && o === LINE(L)],
       c6: ['(6) a full-width colon after a label of other scripts is left as the release leaves it (the message mode = the line rule)', `密码：${tok}`, (o, L) => o === LINE(L)],
+      // round w7azupbri (主开发's ruling): after a STRONG head every chunk keeps the base's strip and group verdict
+      c7: ['(7) a STRONG head: a two-group code whose second group is lowercase letters with a full stop — BOTH groups hidden', `password: ${s1} ${s2}.`, (o) => !o.includes(s1) && !o.includes(s2)],
+      c7b: ['(7) …the same with a comma and prose after it — both groups hidden, «use it once» kept', `password: ${s3} ${s4}, use it once`, (o) => !o.includes(s3) && !o.includes(s4) && o.endsWith(' use it once')],
+      c7c: ['(7) …an app code with a comma INSIDE — all four groups hidden (the comma no longer resets the group)', `password: ${ap.join(' ').replace(ap[1] + ' ', ap[1] + ', ')}`, (o) => ap.every((x) => !o.includes(x))],
+      c7d: ['(7) …and the measured shape after a strong head: «failed,» is the group\'s there (only a session word keeps it)', 'password: fixed1 failed, retry now', (o) => !o.includes('failed') && o.endsWith(' retry now')],
     };
     for (const [, [name, L, pass]] of Object.entries(CASES)) { const o = MSG(SS, L); ok(pass(o, L), `B-34c8 ${name}`, J({ L, o })); }
     // THE OVER-MASK ORACLE: ordinary chunks (a path with a line number, a URL with a query, a base64 run) in four places — no head; after
@@ -686,13 +697,13 @@ console.log('the cure of batch 6 — THE LAW over a GENERATED corpus: a message 
     const over = [];
     for (const X of ORD) {
       for (const L of [`see ${X} then`]) { const o = MSG(SS, L); if (!(o === LINE(L) && (X.startsWith('aGVs') || o === L))) over.push({ L, o, why: 'no head: not as it was' }); }
-      for (const [L, after] of [[`session: ${val} ${X} and the rest`, val], [`session: 已修好 ${X} 然后 more`, '已修好'], [`session: 已修好，${X} and more`, '已修好'], [`session: fixed1 ${X}, then more`, 'fixed1']]) {
+      for (const [L, after] of [[`session: ${val} ${X} and the rest`, val], [`session: 已修好 ${X} 然后 more`, '已修好'], [`session: 已修好，${X} and more`, '已修好'], [`session: fixed1 ${X}, then more`, 'fixed1'], [`session: fixed1 failed, ${X} and more`, 'fixed1']]) {
         const o = MSG(SS, L), have = chunks(o), want = chunks(L.slice(L.indexOf(after) + after.length)).filter((x) => plainT(x));
         const lost = want.filter((x) => { const at = have.indexOf(x); if (at < 0) return true; have.splice(at, 1); return false; });
         if (lost.length || o.includes(after)) over.push({ L, o, lost });
       }
     }
-    ok(over.length === 0, `B-34c8 THE OVER-MASK ORACLE: ${ORD.length} ordinary chunks × 5 places — every word the stricter rule calls plain stays beside a value, the value itself hidden; with no head the line is as it was${over.length ? ' — ' + over.slice(0, 3).map(J).join(' · ') : ''}`);
+    ok(over.length === 0, `B-34c8 THE OVER-MASK ORACLE: ${ORD.length} ordinary chunks × 6 places — every word the stricter rule calls plain stays beside a value, the value itself hidden; with no head the line is as it was${over.length ? ' — ' + over.slice(0, 3).map(J).join(' · ') : ''}`);
     // RED CONTROLS: each cure compiled back out ⇒ its measured row goes red (a control whose line is gone fails by name)
     const GA = "const groupAt = (c, n = 2) => groupOf(c.length > 16 ? '' : c) || (n >= 2 || !plainChunk(c) ? groupOf(c.length > 16 ? '' : c.replace(/[.,;:!?)\\]}\"'»”’…—–-]+$/, '')) : null);";
     const GL = 'masking = !tail; glued = !prose; }';
@@ -701,6 +712,7 @@ console.log('the cure of batch 6 — THE LAW over a GENERATED corpus: a message 
       ['groupAt strips every chunk\'s comma (cure 2\'s)', GA, "const groupAt = (c) => groupOf(c.length > 16 ? '' : c.replace(/[.,;:!?)\\]}\"'»”’…—–-]+$/, ''));", 'c1'],   // stale-pins: kept (the OLD line is the mutant compiled back in, never an anchor)
       ['the glued rule after any value', GL, 'masking = !tail; glued = true; }', 'c2'],   // stale-pins: kept (the OLD line is the mutant compiled back in, never an anchor)
       ['mentionLead eats the stop', ML, "  return at[0] + (!rest || rest === REDACTED ? rest : REDACTED);", 'c3'],
+      ['every head weak (the prose exception after a password too)', 'const weakHead = (name) => { const ws = nameWords(name); return ', 'const weakHead = (name) => { const ws = nameWords(name); return true || ', 'c7'],
     ]) {
       ok(SRC.split(from).length === 2, `the control «${name}» finds its line`);
       const SSc = M.load('src/secret-shapes.js', SRC.replace(from, to), 'b34c8-' + key), [, L, pass] = CASES[key], o = MSG(SSc, L);
