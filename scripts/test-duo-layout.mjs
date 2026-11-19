@@ -512,7 +512,14 @@ try {
       !!m0 && m0.right <= d0.barL && m0.rows.length === 3 && m0.rows[0].active && /\b2 windows/.test(m0.rows[0].count) && m0.rows[1].name === 'Desk B' && !m0.rows[1].active && /^1 window$/.test(m0.rows[1].count) && /New desktop/.test(m0.rows[2].name) && !m0.rows[2].id && m0.rows.every((r) => r.h >= 44), m0);
     const g0 = await evalJs(GEOM);
     check('⑧ …and WHERE it stands: inside the viewport AND over the conversation column (≤ 480 px, right of the list, left of the bar); every row\'s name visible on screen', inside(g0, { col: true }), g0);
-    check('⑧ …each row\'s window titles under its name, greyed (the two conversations; the explorer)', /^Session \d.* · Session \d/.test(m0.rows[0].titles) && /vs-duo-layout-home|~|Files/.test(m0.rows[1].titles), m0.rows.map((r) => r.titles));
+    // The explorer opens at the hub's HOME and titles its window with that folder, cut from the front past 40 characters
+    // (src/lib/file-explorer.js: wm.setTitle(…, frontTruncate(data.path))). Since the boot helper (aa4b7c7d9) this suite's HOME
+    // lives in its minted root (<root>/home), so the row reads THAT folder — the hosted run read «/tmp/vs-duo-layout-wt-h…/home»;
+    // the leg compares with the suite's own HOME (or the tilde form), never with an old scratch home's spelling.
+    const homeTitled = (s) => { const x = String(s || ''); return x === '~' || x === fakeHome || (x.startsWith('…') && x.length > 1 && fakeHome.endsWith(x.slice(1))); };
+    check('⑧ …the title rule reads THIS suite\'s HOME: the HOME and its front-cut form pass; the old scratch home\'s spelling, another folder of the root and the window\'s first title do not',
+      homeTitled(fakeHome) && homeTitled('…' + fakeHome.slice(-39)) && !homeTitled('/tmp/vs-duo-layout-home-abc123') && !homeTitled(path.join(root, 'stub')) && !homeTitled('File Explorer'));
+    check('⑧ …each row\'s window titles under its name, greyed (the two conversations; the explorer, at the suite\'s HOME)', /^Session \d.* · Session \d/.test(m0.rows[0].titles) && homeTitled(m0.rows[1].titles), { titles: m0.rows.map((r) => r.titles), home: fakeHome });
     { // a long press on a row = the desktop's doors — THE table's (lane desktop-doors-table; was Rename · Delete, no order)
       await holdRow(deskB);
       const dd = await evalJs(DESK_DOORS);
