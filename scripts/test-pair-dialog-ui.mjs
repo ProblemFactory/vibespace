@@ -8,7 +8,9 @@
 //      field's live verdict (a path refused in place, a good address shows its dial URL)
 //   ② Create pairing ⇒ ONE POST carrying the CHOSEN base, and BOTH command URLs on that base; re-open the row's
 //      sheet ⇒ no POST, its head says `never`; Generate a new command ⇒ ONE POST, generation 2, the "previous command
-//      stops working" sentence (attack 16: ten re-opens, zero mints)
+//      stops working" sentence (attack 16: ten re-opens, zero mints). The never row (ui-needs-a-button, machines-6) says its
+//      state SHORT (从未连接) with the sheet's door on its line and the whole sentence in a fold a REAL press opens
+//      (CONTROL: a bundle of the pre-chain row, the whole sentence as its state)
 //   ③ a daemon dialing with the RETIRED token (generation 1) ⇒ the row reads 最近一次拨号：被拒绝（令牌不匹配）… and the
 //      Machines card the same (attack 17); the English page says it in English
 //   · verify-r5 A2: the dialog says what the typed name becomes ("办公室uimac" ⇒ "uimac", "我的电脑" ⇒ a random name)
@@ -140,9 +142,57 @@ try {
   // re-open the row's sheet: no mint, the head says `never`
   await openRemote(P);
   ok(await P.waitFor(`!!${rowOf('host-dial-uimac')}`, 10000), 'the new device has a machine row');
-  const subNever = await P.evalJs(`${rowOf('host-dial-uimac')}.querySelector('.mounts-dial-state').textContent`);
-  ok(/^从未连接 — .* 生成的命令尚未到达本服务器/.test(subNever), 'the row says 从未连接 — the command generated at … has not reached this server', subNever);
+  // lane ui-needs-a-button (machines-6, carried into 2.369.411): an OFFLINE row says its state SHORT, with the pairing sheet's
+  // door on its line, and folds the whole sentence (what to check) under it. The leg reads what a person sees where it is
+  // drawn: the short words, the door in that line above the fold, the fold closed; then a REAL press on the fold's summary
+  // and the whole sentence read from the page once it shows (checkVisibility + a hit test: a closed <details> keeps its
+  // text in the DOM, unseen). The pre-chain row (the whole sentence as the state) is the CONTROL below.
+  const SENT_NEVER = /^从未连接 — .+ 生成的命令尚未到达本服务器（还没运行，或设备无法访问 .+）$/;
+  const neverJs = (id) => `(() => { const r = ${rowOf(id)}; const s = r && r.querySelector('.mounts-dial-state'); if (!s) return null;
+    const vis = (e) => !!e && (typeof e.checkVisibility !== 'function' || e.checkVisibility()) && e.getClientRects().length > 0 && e.getBoundingClientRect().height > 0;
+    const line = s.querySelector(':scope > .need-line'), w = line && line.querySelector(':scope > .need-words'), b = line && line.querySelector(':scope > .need-doors > .need-door');
+    const f = s.querySelector(':scope > details.mounts-errline-details'), sm = f && f.querySelector(':scope > summary'), body = f && f.querySelector(':scope > :not(summary)');
+    let hit = false; if (vis(body)) { body.scrollIntoView({ block: 'nearest' }); const q = body.getBoundingClientRect(); const e = document.elementFromPoint(q.left + Math.min(q.width / 2, 20), q.top + q.height / 2); hit = !!e && body.contains(e); }
+    return { state: s.dataset.dialState, text: s.textContent, words: w ? w.textContent : null, wordsShown: vis(w), lineText: line ? line.textContent : null,
+      door: b ? { label: b.textContent, door: b.dataset.door || '', shown: vis(b), aboveFold: !!f && b.getBoundingClientRect().bottom <= f.getBoundingClientRect().top + 1 } : null,
+      fold: f ? { open: f.open, summary: sm ? sm.textContent : '', shown: vis(body), hit, said: vis(body) ? body.innerText : '' } : null }; })()`;
+  const shortOk = (v) => !!v && v.state === 'never' && v.words === '从未连接' && v.wordsShown && !!v.door && v.door.label === '查看配对命令…' && v.door.door === 'pair:host-dial-uimac' && v.door.shown && v.door.aboveFold
+    && v.lineText === v.words + v.door.label && !!v.fold && v.fold.summary === '检查什么';
+  const vNever = await P.evalJs(neverJs('host-dial-uimac'));
+  ok(shortOk(vNever) && !vNever.fold.open && !vNever.fold.shown, 'the row says 从未连接 SHORT, the door 查看配对命令… on its line above the fold, and 检查什么 folded shut (the whole sentence not shown)', vNever);
+  // the REAL press on 检查什么 — a redraw of the panel (a hosts push) builds the row anew with its fold shut: pressed again, said
+  let vOpen = null;
+  const presses = [];
+  for (let k = 0; k < 3 && !(vOpen && vOpen.fold?.open && vOpen.fold.shown); k++) {
+    if (k) console.log('  · the row was drawn anew after the press (its fold shut) — pressing 检查什么 again');
+    presses.push(await P.realClick(`(${rowOf('host-dial-uimac')}?.querySelector('.mounts-dial-state > details.mounts-errline-details > summary') || null)`));
+    await P.waitFor(`(() => { const f = ${rowOf('host-dial-uimac')}?.querySelector('.mounts-dial-state > details.mounts-errline-details'); return !!f && f.open; })()`, 3000);
+    vOpen = await P.evalJs(neverJs('host-dial-uimac'));
+  }
+  ok(shortOk(vOpen) && vOpen.fold.open && vOpen.fold.shown && vOpen.fold.hit && SENT_NEVER.test(vOpen.fold.said), 'a real press on 检查什么 opens the fold: the whole sentence shows under the short state — 从未连接 — the command generated at … has not reached this server (not run yet, or the device cannot reach …)', { ...vOpen, presses });
+  {
+    // CONTROL: the pre-chain row — a patched copy of src/lib/sidebar-mounts.js that never draws the short state (the whole
+    // sentence on the row, as before machines-6), in a page of its own: the plant shows first, then the leg's reading goes red
+    const MUTN = mutantCopies('pairshort', REPO);
+    const smN = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-mounts.js'), 'utf8');
+    const smNPre = smN.replace('        const shortOff = dialStateShort(rs);', "        const shortOff = '';");
+    ok(smNPre !== smN, 'CONTROL (short state): the patch applies');
+    const QN = await W.openPage({ width: 1280, height: 820, lang: 'zh', bundleText: await buildPatchedBundle(MUTN, 'src/lib/sidebar-mounts.js', smNPre, 'noshort') });
+    await openRemote(QN);
+    await QN.waitFor(`!!${rowOf('host-dial-uimac')}?.querySelector('.mounts-dial-state')`, 10000);
+    const vPre = await QN.evalJs(neverJs('host-dial-uimac'));
+    ok(!!vPre && vPre.state === 'never' && SENT_NEVER.test(vPre.text), 'CONTROL (short state): the planted page draws the pre-chain row — the whole sentence as the row\'s state', vPre);
+    ok(!shortOk(vPre), 'CONTROL (short state): …and the leg\'s reading of it goes red (no short state, no door on its line, no fold)', vPre);
+    await QN.cdp('Page.close').catch(() => {});
+  }
   const b2 = mints(P).length;
+  // the door on the row's line opens THIS machine's pairing sheet (a real press) — it mints nothing either (counted below).
+  // A sheet head already in the page (a closed one not yet gone) is marked first: only a head drawn after the press counts
+  await P.evalJs(`document.querySelectorAll('#device-pair-dialog .device-pair-state').forEach((e) => { e.dataset.pdcBefore = '1'; }); true`);
+  const doorPressed = await P.realClick(`(${rowOf('host-dial-uimac')}?.querySelector('.mounts-dial-state > .need-line > .need-doors > .need-door') || null)`);
+  ok(doorPressed && await P.waitFor(`[...document.querySelectorAll('#device-pair-dialog .device-pair-state')].some((e) => !e.dataset.pdcBefore && e.dataset.dialState === 'never') && document.querySelectorAll('#device-pair-dialog .dap-row').length > 1`, 8000), 'a real press on the line\'s door 查看配对命令… opens THIS machine\'s pairing sheet (its head: never)', { doorPressed, head: await P.evalJs(`[...document.querySelectorAll('#device-pair-dialog .device-pair-state')].map((e) => (e.dataset.pdcBefore ? 'before: ' : '') + e.dataset.dialState + ' ' + e.textContent.slice(0, 40))`) });
+  await P.evalJs(`document.querySelector('#device-pair-dialog .dialog-close')?.click(); true`);
+  await sleep(150);
   for (let k = 0; k < 10; k++) {
     await P.realClick(`(${rowOf('host-dial-uimac')}?.querySelector('.mounts-row-actions button[title^="配对命令"], .mounts-row-actions button[title^="Pairing command"]') || null)`);
     await P.waitFor(`document.querySelectorAll('#device-pair-dialog .dap-row').length > 1`, 8000);
@@ -157,7 +207,7 @@ try {
   // verify-r4 F8: what Generate does to a device that is not dialed in is said BEFORE the button (naive L-generate-before)
   const consNever = await P.evalJs(`document.querySelector('#device-pair-dialog .device-pair-consequence')?.textContent || ''`);
   ok(/^生成新命令会替换 \d\d:\d\d 生成的那条：那条随即失效 — 请在设备上运行新的这条。$/.test(consNever), 'F8: the never-connected sheet says, before 生成新命令, that the command made at <time> stops working', consNever);
-  ok(mints(P).length === b2, 'TEN re-opens of the sheet minted NOTHING (attack 16)', mints(P).length - b2);
+  ok(mints(P).length === b2, 'the line\'s door and TEN re-opens of the sheet minted NOTHING (attack 16)', mints(P).length - b2);
   ok((await W.hostRow('uimac')).dial.generation === 1, '…generation still 1');
   // Generate a new command: ONE mint, generation 2, the sentence
   ok(await P.evalJs(`document.querySelector('#device-pair-dialog .device-pair-go').textContent`) === '生成新命令', 'the sheet\'s button is 生成新命令');
