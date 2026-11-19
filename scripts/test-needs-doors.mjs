@@ -2141,14 +2141,24 @@ console.log('⑩ THE VERIFIER\'S LIST FOR PICKS 3–6 (stored words — the cens
   }
   // EACH LEGACY ROW: its release, its producer, its two rows, filed by no producer now — and an item stored with it says it in zh / ja.
   // «Filed» is a PRODUCER's filing (the census above); a page may still say the sentence by itself (ui-plain-words vault-7: the login
-  // card stopped filing LOGIN_ONLY, the add door's own hint still says it) — reported as saidNow, never red (the move -moved3)
-  for (const [name, e] of Object.entries(LEG)) {
+  // card stopped filing LOGIN_ONLY, the add door's own hint still says it) — said in the row's leg name, never red (the move -moved3)
+  const judgeLegacy = (e) => {
     const params = Object.fromEntries([...String(e.key).matchAll(/\{(\w+)\}/g)].map((m) => [m[1], m[1] === 'account' ? 'UCI Max' : m[1] === 'since' ? '10/8/26, 1:30 PM' : 3]));
     const item = { id: 'ut-1', text: 'x', i18n: { text: { key: e.key, params }, detail: [{ key: e.key, params }] } };
     const say = (dict) => { const said = (l) => UTL.saidLine(l, tOf(dict)); return `${UTL.itemTextOf(item, said)} ${UTL.itemDetailLinesOf(item, said).join(' ')}`; };
     const zh = say(ZH), ja = say(JA);
-    const d = { named: /^2\.\d+\.\d+$/.test(String(e.left)) && typeof e.filedBy === 'string' && fs.existsSync(path.join(REPO, e.filedBy)), rows: has(ZH, e.key) && has(JA, e.key), filedNow: storedNow.has(e.key), saidNow: words.has(e.key), english: sentence.test(zh) || sentence.test(ja) };
-    ok(d.named && d.rows && !d.filedNow && !d.english, `stored words: legacy «${name}» (left in ${e.left}, filed by ${e.filedBy}) — its key keeps its zh and ja rows, no producer files it now, and an item stored with it says it in zh / ja, not English`, { ...d, zh: zh.slice(0, 90), ja: ja.slice(0, 90) });
+    const d = { named: /^2\.\d+\.\d+$/.test(String(e.left)) && typeof e.filedBy === 'string' && fs.existsSync(path.join(REPO, e.filedBy)), rows: has(ZH, e.key) && has(JA, e.key), filedNow: storedNow.has(e.key), saidNow: words.has(e.key), english: sentence.test(zh) || sentence.test(ja), zh: zh.slice(0, 90), ja: ja.slice(0, 90) };
+    return { ...d, pass: d.named && d.rows && !d.filedNow && !d.english };
+  };
+  for (const [name, e] of Object.entries(LEG)) {
+    const d = judgeLegacy(e);
+    ok(d.pass, `stored words: legacy «${name}» (left in ${e.left}, filed by ${e.filedBy}${d.saidNow ? '; a page still says it by itself' : ''}) — its key keeps its zh and ja rows, no producer files it now, and an item stored with it says it in zh / ja, not English`, d);
+  }
+  // CONTROL (the move -moved3, 主开发 04:23Z): a planted legacy row whose sentence a producer FILES now is red by that alone
+  {
+    const filedKey = [...storedNow].find((k) => has(ZH, k) && has(JA, k) && !Object.values(LEG).some((e) => e.key === k));
+    const dp = filedKey ? judgeLegacy({ left: '2.369.410', filedBy: 'src/foryou-actions.js', key: filedKey }) : null;
+    ok(!!dp && dp.filedNow && dp.named && dp.rows && !dp.pass, 'CONTROL: a planted legacy row whose sentence a producer files now is RED (its rows kept, its release named — filed now is enough)', dp && { key: String(filedKey).slice(0, 60), filedNow: dp.filedNow });
   }
   // #4 the overage refusal is a need with its door (a rewording had taken it out of the net): the row, present, its door beside the chip
   const UI = TABLES.find((x) => x.scope === 'ui').T;
