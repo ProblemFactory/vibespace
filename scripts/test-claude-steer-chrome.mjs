@@ -952,9 +952,16 @@ else {
       const reqsAtStop = r.mock.reqs.length, tStop = Date.now();
       r.stop();
       await until(() => /stop settled/.test(r.log()), 15000);
+      await until(() => r.results() >= 2, 15000);   // the follow-up's OWN result: B-28b1's stop-late fact rides it
       await sleep(800);
       const lg = r.log();
-      const out = { reqsAfterStop: r.mock.reqs.length - reqsAtStop, follows: r.follows(), waited: /the window waits for its init/.test(lg), clockLines: lg.split('\n').filter((l) => /bound:|backstop:/.test(l)).length, hookAfterStop: r.hub.calls.filter((c) => c.at > tStop && /prompt-context/.test(c.url)).length };
+      // B-28b1 (TELL, DO NOT PRETEND): nothing else is sent after Stop here — every request after it is a leaked follow-up
+      const leaked = r.mock.reqs.slice(reqsAtStop).map((q) => q.all);
+      const fres = r.recs.filter((x) => x.type === 'result' && x.__at >= tStop).pop() || null;
+      const out = { reqsAfterStop: r.mock.reqs.length - reqsAtStop, leaked, late: lateOf(r.recs), shown: shownOf(r.recs),
+        // the facts the wrapper judges a leak by (stopLateOf): the follow-up result's OWN usage and its answer — printed every run
+        followResult: fres ? { subtype: fres.subtype || null, usage: fres.usage || null, stopLate: fres.webui_stop_late || null } : null,
+        follows: r.follows(), waited: /the window waits for its init/.test(lg), clockLines: lg.split('\n').filter((l) => /bound:|backstop:/.test(l)).length, hookAfterStop: r.hub.calls.filter((c) => c.at > tStop && /prompt-context/.test(c.url)).length };
       await r.end(); return out;
     })(),
     (async () => {
@@ -985,7 +992,9 @@ else {
       return { bubbles: restartReplay(r) };
     })(),
   ]);
-  ok(hookStopReal.reqsAfterStop === 0 && hookStopReal.follows === 1 && hookStopReal.waited && hookStopReal.clockLines === 0, '§A ⑤ the REAL CLI with the product\'s OWN prompt hook (~2.9 s before the follow-up\'s init): the window waited through it, the init was interrupted — NO request after Stop (7df30f96: its 2 s clock closed the window inside the hook and the follow-up was answered)', hookStopReal);
+  console.log(`    §A ⑤ leaked follow-ups (B-28b1): ${hookStopReal.leaked.length} · told ${hookStopReal.late} · shown ${hookStopReal.shown} · the follow-up's result ${S(hookStopReal.followResult)}`);
+  ok(hookStopReal.follows === 1 && hookStopReal.waited && hookStopReal.clockLines === 0 && hookStopReal.hookAfterStop >= 1, '§A ⑤ the REAL CLI with the product\'s OWN prompt hook (~2.9 s before the follow-up\'s init): the window waited through it (no bound / backstop line), the hook ran after Stop, the follow-up\'s init was interrupted (7df30f96: its 2 s clock closed the window inside the hook and the follow-up was answered)', hookStopReal);
+  ok(stopLaw(hookStopReal.leaked, hookStopReal.late, hookStopReal.shown), '§A ⑤ …THE LAW (B-28b1), as ② and ③: no request reached the model after Stop, or the held frame\'s ONE follow-up did and the stop-late fact rides its result and is shown once', hookStopReal);
   const img = Array.isArray(copyReal.bubbles) ? copyReal.bubbles.filter((b) => /IMG-1/.test(b.text)) : [];
   ok(img.length === 1 && img[0].images === 1 && img[0].msgId === 'm-i', '§A ⑥ a 400 KB screenshot held mid-turn, after THE RESTART (the buffer merged with the CLI\'s JSONL, rebuilt): ONE bubble, WITH the image (7df30f96: one bubble, 0 images — its text-only copy hid the record)', copyReal);
   const ed = Array.isArray(editReal.bubbles) ? editReal.bubbles.filter((b) => /MARK-E/.test(b.text)) : [];
@@ -1018,9 +1027,10 @@ else {
   atExit.push(cleanup);
   for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(143); });
   const cap = path.join(capDir, 'cli-got.jsonl'), dlv = path.join(capDir, 'delivered.jsonl');
+  const release8 = path.join(capDir, 'release-longer');   // ⑧: the LONGER turn's tool ends when the leg writes this (the stand-in's STAND_IN_RELEASE_FILE)
   // the CLI the server spawns: answers the boot probes, else the stand-in (a TOOL- turn's Bash works 6 s)
   const launcher = path.join(scratchDir('cst-bin'), 'claude');
-  fs.writeFileSync(launcher, `#!/bin/sh\ncase "$1" in --version) echo "2.1.308 (Claude Code) stand-in"; exit 0;; --help) echo "Usage: claude [options]"; exit 0;; esac\nSTUB_CAPTURE=${S(cap)} STAND_IN_DELIVERED=${S(dlv)} STAND_IN_LONG_MS=6000 exec ${S(process.execPath)} ${S(STAND_IN)} "$@"\n`, { mode: 0o755 });
+  fs.writeFileSync(launcher, `#!/bin/sh\ncase "$1" in --version) echo "2.1.308 (Claude Code) stand-in"; exit 0;; --help) echo "Usage: claude [options]"; exit 0;; esac\nSTUB_CAPTURE=${S(cap)} STAND_IN_DELIVERED=${S(dlv)} STAND_IN_LONG_MS=6000 STAND_IN_RELEASE_FILE=${S(release8)} exec ${S(process.execPath)} ${S(STAND_IN)} "$@"\n`, { mode: 0o755 });
   try { execSync(`git worktree remove --force ${wt}`, { cwd: REPO, stdio: 'ignore' }); } catch { }
   execSync(`git worktree add --detach ${wt} HEAD`, { cwd: REPO, stdio: 'ignore' });
   for (const f of ['src', 'public', 'server.js', 'package.json', 'data/bin']) execSync(`rm -rf ${wt}/${f} && cp -r ${REPO}/${f} ${wt}/${f}`);
@@ -1106,6 +1116,11 @@ else {
   const capFrames = () => (fs.existsSync(cap) ? fs.readFileSync(cap, 'utf8').trim().split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return {}; } }) : []);
   const cliGot = (t) => capFrames().some((f) => f.type === 'user' && S(f).includes(t));
   const delivered = () => (fs.existsSync(dlv) ? fs.readFileSync(dlv, 'utf8').trim().split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return {}; } }) : []);
+  /** ⑧'s evidence on a red: the wrapper's queue records of a message, from every session buffer of the scratch server */
+  const queueRecs = (t) => { const d = path.join(wt, 'data', 'session-buffers'), out = []; let names = []; try { names = fs.readdirSync(d).filter((f) => f.endsWith('.buf')); } catch { }
+    for (const f of names) { let lines = []; try { lines = fs.readFileSync(path.join(d, f), 'utf8').split('\n'); } catch { }
+      for (const l of lines) { if (!l.includes(t)) continue; let x = null; try { x = JSON.parse(l); } catch { continue; } if (/^(queued_input|queue_changed|queue_dropped|queue_settle|input_handover|user)$/.test(x.type)) out.push({ buf: f, type: x.type, state: x.state || null, msgId: x.msg_id || x.webui_msg_id || null, items: Array.isArray(x.items) ? x.items.length : undefined }); } }
+    return out; };
   const focus = (key) => ev(`(() => { const t = window.__${key}._chatInput._textarea; t.focus(); return document.activeElement === t; })()`);
   const key = async (k, modifiers = 0) => {
     await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: k, code: k, windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13, modifiers, ...(modifiers ? {} : { text: '\r' }) });
@@ -1268,7 +1283,8 @@ else {
     await sleep(800);
     // the phone face sends with its Send button (a touch keyboard's Enter is a newline there)
     const phoneIdle = await ev(HINT('v1'));
-    // ⑧ needs this turn alive across a server restart: its tool runs three times as long (LONGER-)
+    // ⑧ needs this turn alive across a server restart: its tool (LONGER-) ends only when the leg RELEASES it, after the page is back
+    // (the stand-in's STAND_IN_RELEASE_FILE) — never a clock: a fixed 18 s tool could end while a loaded runner restarted
     await focus('v1'); await cdp('Input.insertText', { text: 'TOOL-4 LONGER- a phone turn' });
     await realClick('[data-steer-leg="v1"] .chat-send-btn');
     await until(() => streaming('v1'), 10000, 100);
@@ -1286,24 +1302,35 @@ else {
 
     // ⑧ (r2) THE SERVER RESTARTS while PHONE-E is still held, and the page reloads: every message the person sent mid-turn
     // is a record of the conversation — its bubble comes back ONCE, with its last chip
+    const isE = (d) => d.text === 'PHONE-E held with the button';
+    const t8 = Date.now(), dBefore = delivered().filter(isE);
     const restarted = await restartServer();
+    const tBack = Date.now(), dBack = delivered().filter(isE);
     await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/?cb=${Date.now()}-restarted` });
     await until(() => ev('!!(window.app && window.app.ready)'), 45000, 250);
     await ev('window.app.ready.then(() => true)');
     const o1r = await reopen(s1, 'v1', 'steer new');
     await until(async () => (await bubbles('v1', 'PHONE-E')).some((b) => b.chip === 'queued'), 8000, 150);
+    const tReopen = Date.now(), dReopen = delivered().filter(isE);
+    // the evidence a red prints: PHONE-E as the stand-in read it, by its time against the restart, and the wrapper's queue records
+    const ev8 = () => ({ restartMs: tBack - t8, reopenMs: tReopen - t8, delivered: { beforeRestart: dBefore, serverBack: dBack, reopened: dReopen, now: delivered().filter(isE) }, queue: queueRecs('PHONE-E') });
+    // THE PREMISE, asserted (never assumed from a clock): the LONGER turn still runs now — the page says it streams, the leg has not
+    // released it, the stand-in has not read PHONE-E. A broken premise is THIS line, never a misread of the bubble lines below
+    const premise8 = { streaming: await streaming('v1'), released: fs.existsSync(release8), phoneEread: delivered().some(isE) };
+    ok(premise8.streaming && !premise8.released && !premise8.phoneEread, '§B ⑧ PREMISE: the LONGER turn still runs with the page back — held by the leg\'s release, not a clock (a broken premise is said here)', { premise8, ...ev8() });
     const after8 = {};
     for (const t of ['ENTER-B', 'ALT-C', 'STOP-D', 'LAG-G', 'PHONE-E']) after8[t] = await bubbles('v1', t);
     const strip8 = await ev(STRIP('v1'));
     await shot('8-after-restart');
     ok(restarted && o1r && o1r.ok, '§B ⑧ the server restarted mid-turn and the reloaded page reopened the conversation live', { restarted, o1r, journal: journal.slice(-600) });
     ok(S(after8['ENTER-B'].map((b) => b.chip)) === S(['steered']) && S(after8['ALT-C'].map((b) => b.chip)) === S(['steered']) && S(after8['STOP-D'].map((b) => b.chip)) === S(['kept']) && S(after8['LAG-G'].map((b) => b.chip)) === S([null]), '⑧ after the restart each handed message is back ONCE with its last chip — «Steered», «Steered», «Unread when stopped — goes with your next message» — and the one that was held and ran, once with none (eeece327: gone)', after8);
-    ok(S(after8['PHONE-E'].map((b) => b.chip)) === S(['queued']) && strip8.visible && /PHONE-E held with the button/.test(strip8.text), '⑧ …the message STILL HELD across it: its bubble «Queued» and its strip row (the base lost a held bubble the same way)', { phoneE: after8['PHONE-E'], strip8 });
+    ok(S(after8['PHONE-E'].map((b) => b.chip)) === S(['queued']) && strip8.visible && /PHONE-E held with the button/.test(strip8.text), '⑧ …the message STILL HELD across it: its bubble «Queued» and its strip row (the base lost a held bubble the same way)', { phoneE: after8['PHONE-E'], strip8, ...ev8() });
+    fs.writeFileSync(release8, 'released after the reopen\n');   // the LONGER turn's tool may end now
     await waitTurnEnd('v1', 40000);
     await until(() => delivered().some((d) => d.how === 'turn' && d.text === 'PHONE-E held with the button'), 8000, 100);
     await sleep(600);
     const eAfter = await bubbles('v1', 'PHONE-E');
-    ok(S(eAfter.map((b) => b.chip)) === S([null]) && delivered().some((d) => d.how === 'turn' && d.text === 'PHONE-E held with the button'), '⑧ …and when the turn ended it ran — still one bubble', eAfter);
+    ok(S(eAfter.map((b) => b.chip)) === S([null]) && delivered().some((d) => d.how === 'turn' && d.text === 'PHONE-E held with the button'), '⑧ …and when the turn ended it ran — still one bubble', { eAfter, ...ev8() });
     // ⑨ (r5) THE IDLE CHORD ON THE PRODUCT'S COMPOSER — at idle, where Enter is a newline (the expanded editor; chat.enterSends
     // off), Alt+Enter TYPES one at the caret, nothing is sent. Chrome inserts nothing for the chord itself: 6334e9a8 left it to
     // the textarea's default, and the key was dead (the reviewers' bare textarea, here on the real composer)

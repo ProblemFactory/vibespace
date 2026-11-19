@@ -36,6 +36,9 @@
 //   $STAND_IN_POST_MS  how long the model takes to answer after a tool result (default 5) — the window in which a Stop
 //                      finds a frame already TAKEN IN (it rode the tool result: the conversation has it as read)
 // A TOOL- turn whose text also holds `LONGER-` runs its tool three times as long (a turn that outlives a server restart).
+//   $STAND_IN_RELEASE_FILE  set: a LONGER- turn's tool ends only once THAT FILE exists (polled every 50 ms; 180 s at most) — the leg
+//                      releases it AFTER what must happen inside the turn (a server restart and the page back), never a clock.
+//                      Unset: as before.
 //   $STAND_IN_HELPER_MS  how long a BGAGENT- helper works (default $STAND_IN_LONG_MS) — past a Stop, the session stays
 //                      'running' with no idle (the shape a Stop window must not wait on for ever)
 // Its records are VERSION-KEYED (lane claude-steer-inject r3): $STAND_IN_CLI_VERSION (default 2.1.312, the build the R0 table was
@@ -95,6 +98,7 @@ if (FOLLOW_HOLD_UNTIL && !['request', 'answer', 'end'].includes(FOLLOW_HOLD_UNTI
 const FOLLOW_ANSWER_MS = process.env.STAND_IN_FOLLOW_ANSWER_MS ? Number(process.env.STAND_IN_FOLLOW_ANSWER_MS) : null;
 const FOLLOW_HOLD_N = Number(process.env.STAND_IN_FOLLOW_HOLD_INTERRUPTS || 0);
 const FOLLOW_AGENT_TOKENS = Number(process.env.STAND_IN_FOLLOW_AGENT_TOKENS || 0);
+const RELEASE_FILE = process.env.STAND_IN_RELEASE_FILE || '';   // a LONGER- turn's tool ends when this file exists (the leg's release)
 let holdUntil = '';   // B-28b1: no stdin line is read until the follow-up did this (its init placed it)
 const release = (what) => { if (holdUntil && (holdUntil === what || what === 'end')) { holdUntil = ''; setImmediate(readLines); } };
 let holdInterrupts = 0;   // B-28b1: …nor before this many interrupt lines wait
@@ -231,7 +235,7 @@ function begin(f, { follow = false } = {}) {
     const toolId = 'toolu_stand_in_' + turnSeq;
     busy.tool = toolId;
     out({ type: 'assistant', session_id: SID, parent_tool_use_id: null, message: { id: 'msg_stand_in_t' + Date.now(), role: 'assistant', model: 'claude-sonnet-4-5', content: [{ type: 'tool_use', id: toolId, name: 'Bash', input: { command: 'sleep 8', description: 'Sleep 8 seconds' } }] } });
-    busy.timer = setTimeout(() => {
+    const finishTool = () => {
       out({ type: 'user', session_id: SID, parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolId, content: '(Bash completed with no output)', is_error: false }] } });
       busy.tool = null; busy.post = true;
       // every frame that arrived while the tool ran rides THIS tool result into the turn (the CLI's own queue — a
@@ -240,7 +244,12 @@ function begin(f, { follow = false } = {}) {
       for (let i = 0; i < queued.length && !RIDE_MISS;) { const t = textOf(queued[i]); if (/^\s*\//.test(t)) { i++; continue; } took.push(t); queued.splice(i, 1); }
       for (const t of took) delivered('tool_result', t);
       busy.timer = setTimeout(() => { say('done after the tool' + (took.length ? ' — took in: ' + took.join(' | ') : '')); end('success'); }, POST_MS);
-    }, /LONGER-/.test(text) ? LONG_MS * 3 : LONG_MS);
+    };
+    if (RELEASE_FILE && /LONGER-/.test(text)) {
+      const t0 = Date.now(), b = busy;   // an interrupt ends the turn (end() clears the timer; a stale poll finds another busy)
+      const poll = () => { if (busy !== b || b.tool !== toolId) return; if (fs.existsSync(RELEASE_FILE) || Date.now() - t0 > 180000) finishTool(); else b.timer = setTimeout(poll, 50); };
+      busy.timer = setTimeout(poll, 50);
+    } else busy.timer = setTimeout(finishTool, /LONGER-/.test(text) ? LONG_MS * 3 : LONG_MS);
     return;
   }
   if (follow && FOLLOW_REQ_MS !== null) {
