@@ -48,7 +48,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
 
 const require = createRequire(import.meta.url);
@@ -1926,6 +1926,65 @@ console.log('㉑ (B-63f1) the launch ack as the transcript holds it — a text-b
   check('㉑ (the pre-fix patch applied)', pre !== mmSrc);
   const Lp = launches(M21.load('src/message-manager.js', pre, 'pre-b63f1').MessageManager);
   check('㉑ NEGATIVE CONTROL: the pre-fix normalizer (the card\'s JSON) leaves every rebuilt launch card without its helper', Lp.length === acks.length && Lp.every((x) => x.got === null && !x.mapped), Lp);
+}
+
+console.log('㉒ (B-b968\'s edge) the sub-agent JSONL watcher takes WHOLE lines — a line read mid-write waits for its newline');
+async function jsonlLeg(consumer) {
+  const home0 = process.env.HOME, jlHome = scratch('helper-ask-jsonl');
+  const csSrc = read('src/server/stdout/claude-stream-json.js');
+  const engine = { _vsuPending: new Map(), resolveUsageKey: () => '__global__', usageEstimator: { noteLive() {} }, modelsMatch: () => false, servedDefinesModel: () => false, rerouteAnnouncedBy: () => null };
+  for (const part of (/const \{([^}]*)\} = engine;/.exec(csSrc) || ['', ''])[1].split(',')) {
+    const name = part.split(':')[0].replace(/\/\/.*$/, '').trim();
+    if (/^[A-Za-z_$][\w$]*$/.test(name) && !(name in engine)) engine[name] = () => {};
+  }
+  const activeSessions = new Map();
+  const { attach } = consumer.create({
+    activeSessions, engine, CLAUDE_STREAM_TYPES: new Set(['system', 'assistant', 'user', 'result', 'control_request', 'control_response', 'control_cancel_request']), _seenStreamTypes: new Set(),
+    USAGE_SCANNER_PATH: path.join(jlHome, 'none'), checkClaudeGoalStatus() {}, noteModelSeen() {}, sbSeenFirst: () => true, hosts: null, usageHistory: null, pagesRef: { current: null },
+  });
+  const bcast = [];
+  const helpers = { feedLive: N.feedLive, broadcastToSession: (x, id, m) => bcast.push(m), broadcastActiveSessions() {}, readSessionMeta: () => ({}), writeSessionMeta() {}, updateSessionTodos() {}, applyTaskToolUpdate() {}, emitTaskListTodos() {} };
+  const id = 'sess-jl', sid = '0f0e0d0c-0b0a-4908-8706-050403020100', agentId = 'agjl1', tu = 'toolu_jl1';
+  const s = { mode: 'chat', backend: 'claude', name: 'jl', cwd: '/home/u/jl', host: null, claudeSessionId: sid, backendSessionId: sid, sockName: 'cw-jl', buffer: '', createdAt: Date.now(), _webuiId: id, _taskRecords: {} };
+  s._normalizer = new MessageManager(id);
+  activeSessions.set(id, s);
+  const { cwdToProjectDir } = require(path.join(REPO, 'src/session-store.js'));
+  const jlDir = path.join(jlHome, '.claude', 'projects', cwdToProjectDir('/home/u/jl'), sid, 'subagents'); fs.mkdirSync(jlDir, { recursive: true });
+  const jlFile = path.join(jlDir, `agent-${agentId}.jsonl`);
+  const rec = (n, text) => Buffer.from(JSON.stringify({ type: 'assistant', uuid: `jl-${n}`, message: { id: `m-${n}`, role: 'assistant', content: [{ type: 'text', text }] } }) + '\n');
+  const one = rec(1, '第一行'), two = rec(2, '第二行：日本語もここに'), three = rec(3, 'the third line'), cut = two.indexOf(Buffer.from('日')) + 1;   // inside the second line AND inside a character
+  fs.writeFileSync(jlFile, Buffer.concat([one, two.subarray(0, cut)]));
+  const h = { data: null, onData(cb) { h.data = cb; }, onExit() {} };
+  const warn = console.warn; console.warn = () => {};
+  const got = () => bcast.filter((m) => m.type === 'subagent-message').map((m) => m.message);
+  let r = null;
+  process.env.HOME = jlHome;   // the watcher finds the file under os.homedir() — a scratch home, never the real one
+  try {
+    attach(s, id, h, helpers);
+    s._startSubagentWatcher(tu, agentId);
+    const first = got().map((m) => m.uuid);
+    fs.appendFileSync(jlFile, Buffer.concat([two.subarray(cut), three]));   // the rest of the line, then a whole third
+    for (let k = 0; k < 300 && !got().some((m) => m.uuid === 'jl-3'); k++) await new Promise((res) => setTimeout(res, 10));   // (a count: until the third line is read)
+    const m2 = got().find((m) => m.uuid === 'jl-2');
+    r = { first, all: got().map((m) => m.uuid), text2: m2 && m2.message.content[0].text };
+  } finally {
+    process.env.HOME = home0;
+    console.warn = warn;
+    activeSessions.delete(id);
+    try { for (const w of (s.subagentWatchers || new Map()).values()) { if (w && w.retry) clearTimeout(w.retry); if (w && w.watcher && w.watcher.close) w.watcher.close(); } } catch {}
+  }
+  return r;
+}
+{
+  const a = await jsonlLeg(consumerMod);
+  check('㉒ setup: the watcher\'s first read gives the whole first line only (the line being written is not one)', a.first.join() === 'jl-1', a);
+  check('㉒ …the rest of that line arrives: the whole second line is read, its words intact (the cut was inside a character too), then the third', a.all.join() === 'jl-1,jl-2,jl-3' && a.text2 === '第二行：日本語もここに', a);
+  const MJ = mutantCopies('helper-ask-jsonl', REPO);
+  const csSrc = read('src/server/stdout/claude-stream-json.js');
+  const pre = anchored(csSrc, /          const from = offset \+ heldLen;\n[\s\S]*?\n          for \(const line of whole\.toString\('utf-8'\)\.split\('\\n'\)\) \{\n/,
+    "          if (stat.size <= offset) return;\n          const buf = Buffer.alloc(stat.size - offset);\n          const fd = fs.openSync(watchFile, 'r');\n          fs.readSync(fd, buf, 0, buf.length, offset);\n          fs.closeSync(fd);\n          offset = stat.size;\n          for (const line of buf.toString('utf-8').split('\\n')) {\n", 'jsonl-whole-buffer'); // stale-pins: kept — the control plants the release's read
+  const b = await jsonlLeg(MJ.load('src/server/stdout/claude-stream-json.js', pre, 'jsonl-whole-buffer'));
+  check('㉒ CONTROL (the release\'s read: the whole buffer, the offset at the file\'s end): the line read mid-write is DROPPED — RED', b.all.includes('jl-1') && b.all.includes('jl-3') && !b.all.includes('jl-2'), b);
 }
 
 console.log(`\n${failed ? '✗' : 'ALL PASS'} (${passed} passed${failed ? `, ${failed} failed` : ''})`);

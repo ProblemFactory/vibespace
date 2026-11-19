@@ -312,18 +312,26 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
       }
       if (!session.subagentEmittedUuids.has(toolUseId)) session.subagentEmittedUuids.set(toolUseId, new Set());
       const emitted = session.subagentEmittedUuids.get(toolUseId);
-      let offset = 0;
+      let offset = 0, held = [], heldLen = 0;   // held: the bytes of a line still being written — read ONCE and kept until its newline
       // Read existing content first
       const readNewLines = () => {
         try {
           const stat = fs.statSync(watchFile);
-          if (stat.size <= offset) return;
-          const buf = Buffer.alloc(stat.size - offset);
+          const from = offset + heldLen;
+          if (stat.size <= from) return;
+          const buf = Buffer.allocUnsafe(stat.size - from);
           const fd = fs.openSync(watchFile, 'r');
-          fs.readSync(fd, buf, 0, buf.length, offset);
-          fs.closeSync(fd);
-          offset = stat.size;
-          for (const line of buf.toString('utf-8').split('\n')) {
+          let got = 0;
+          try { got = fs.readSync(fd, buf, 0, buf.length, from); } finally { fs.closeSync(fd); }
+          // ONLY WHOLE LINES (B-b968's edge): a line the CLI is still writing is HELD until its newline — it was dropped whole
+          // before (the offset moved past it and its rest never parsed). Each byte is read once (a long line written in many
+          // chunks is held, never read again) and only the new bytes are searched. A newline byte never sits inside a UTF-8
+          // character, so no character is cut either.
+          const chunk = buf.subarray(0, got), nl = chunk.lastIndexOf(0x0a);
+          if (nl < 0) { if (got) { held.push(chunk); heldLen += got; } return; }
+          const whole = Buffer.concat([...held, chunk.subarray(0, nl + 1)]), rest = chunk.subarray(nl + 1);
+          offset += whole.length; held = rest.length ? [rest] : []; heldLen = rest.length;
+          for (const line of whole.toString('utf-8').split('\n')) {
             const trimmed = line.trim();
             if (!trimmed) continue;
             try {
