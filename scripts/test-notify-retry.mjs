@@ -1945,12 +1945,12 @@ console.log('\n§B-6721 a notice stashed while its conversation was not running:
 {
   const SHSRC = fs.readFileSync(path.join(REPO, 'src/server/stash-handover.js'), 'utf8');
   const MB = mutantCopies('ntr-b6721', REPO);
-  const wakeRig = (name) => {
+  const wakeRig = (name, JMc = JobManager) => {   // JMc: a jobs engine (a RED's mutant)
     const R = rig(name, { pid: 99999999 });   // the incident: the CLI's pid gone
     R.sessions.delete('w1');                  // …and no live session of it: the conversation STOPPED
     const filed = [], resolved = [], scheduled = [];
     let view = null;
-    const jm = new JobManager({ dataDir: R.dir, log: (...a) => R.logs.push(a.join(' ')), broadcast: () => { }, notifyUser: () => { }, onStash: () => { if (view) view.changed(); },
+    const jm = new JMc({ dataDir: R.dir, log: (...a) => R.logs.push(a.join(' ')), broadcast: () => { }, notifyUser: () => { }, onStash: () => { if (view) view.changed(); },
       deliverToConversation: (cid, text, opts) => R.deliver.deliverToConversation(cid, text, opts), onRetry: (fn) => R.deliver.onRetry(fn), peerReachable: (cid) => R.deliver.peerReachable(cid),
       noticeWakeWaiting: (o) => { filed.push(o); return 'ut-wait-1'; }, resolveWakeWaiting: (cid) => { resolved.push(cid); return 1; } });
     const job = { id: 'jb-bbbb2222', kind: 'task', name: 'ticket-window-watch', state: 'done', owner: { conversation: { id: R.cid } }, access: { view: 'all', control: 'session' }, runs: [] };
@@ -2022,7 +2022,7 @@ console.log('\n§B-6721 a notice stashed while its conversation was not running:
   }
   // (a) RED: the resume road cut (summaryFor arms nothing) — the conversation back hears nothing: the incident
   {
-    const SHnoLive = MB.load('src/server/stash-handover.js', anchored(SHSRC, "    noteLive(cid);   // B-6721: a live session of a conversation owed a wake (a resume, a restore) arms its chain — the payload is built for every live session\n", '', 'B-6721: the resume road cut'), 'sh-nolive');
+    const SHnoLive = MB.load('src/server/stash-handover.js', anchored(SHSRC, "    noteLive(cid);   // B-6721: a live session of a conversation owed a wake (a resume, a restore) arms its chain — the payload is built for every live session; a pending fork (its parent's id) never\n", '', 'B-6721: the resume road cut'), 'sh-nolive');
     const W = wakeRig('b6721-red'); W.mk(SHnoLive);
     await fire(W, 'fired: the ticket window opens in 1 h');
     await W.run(); W.comeBack(); W.broadcast(); await sleep(5); await W.run();
@@ -2107,6 +2107,107 @@ console.log('\n§B-6721 a notice stashed while its conversation was not running:
     const SHloud = MB.load('src/server/stash-handover.js', anchored(SHSRC, "    if (q && newestOf(owed) <= q.at && !(wid != null && (q.why === 'away' || q.wid !== wid))) return false;\n", '', 'B-6721: no quiet after an ending'), 'sh-loud');
     const { afterRefusal, afterBroadcast } = await refusedRun(SHloud);
     ok(afterRefusal + afterBroadcast > 0, 'RED control: without the quiet a refused wake is armed again at once (the 5 s loop the read found)', JSON.stringify({ afterRefusal, afterBroadcast }));
+  }
+
+  // ── 主开发's round wdtmcza5y on 276cd57c3 ──
+  const rnd = () => Math.random().toString(36).slice(2, 6);
+  // (g) THE MUST: a PENDING FORK carries its parent's id — the wake's session is found by the ladder's predicate (addressableId),
+  // never by the raw id: the fork's payload arms nothing and nothing is posted, even with a registration answering under the
+  // parent's id. RED: the raw lookup — the fork's window carries the stopped parent's chain (and the post goes to whatever the
+  // registry names for the parent's id)
+  const forkRun = async (mod) => {
+    const W = wakeRig('b6721-fork-' + rnd()); W.mk(mod);
+    await fire(W, 'fired while stopped');
+    await W.run();   // AWAY: For you says it, the chain ends
+    const fork = { ...W.session, _forkRequested: true, _forkSourceId: W.cid, name: 'Owner (fork)', _isStreaming: false };
+    W.sessions.set('wf', fork);
+    fs.writeFileSync(path.join(W.reg, `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: W.cid, messagingSocketPath: path.join(W.dir, 'inbox.sock'), name: 'Owner', version: '2.1.281' }));
+    W.setAnswer(async () => ({ ok: true, phase: 'written' }));
+    const fact = W.view().summaryFor(fork); await sleep(5);
+    const armed = W.scheduled.length;
+    for (let i = 0; i < 3 && W.scheduled.length; i++) await W.run();
+    const posts1 = W.posts.length;
+    // …and a NEWER owed notice while the fork is in the map: the chain's own look finds no session of the parent (AWAY) — never
+    // the fork's window, never a post into what answers under the parent's id
+    W.jm._stashNotif(W.cid, W.job, { what: 'a newer one, the fork still pending' }, 'not running', { held: { kind: 'not-running' } });
+    await sleep(20);
+    for (let i = 0; i < 3 && W.scheduled.length; i++) await W.run();
+    return { fact: fact === null, armed, posts1, posts: W.posts.length, billed: W.ledger.length, owed: W.jm.wakeOwed(W.cid).length, hand: (await W.view().handOver('wf')).code };
+  };
+  {
+    const r = await forkRun(SH);
+    ok(r.fact && r.armed === 0 && r.posts === 0 && r.billed === 0 && r.owed === 2 && r.hand === 'no_conversation', '(g) a PENDING FORK carrying an owed (stopped) parent\'s id: its payload arms NOTHING and its strip shows none of the parent\'s stash; a newer owed notice while it is pending posts and bills NOTHING (the chain ends AWAY, never on the fork\'s window — a registration answers under the parent\'s id, as the fork\'s own CLI may); its «Hand over» is no hand-over of the parent\'s', JSON.stringify(r));
+    const SHraw = MB.load('src/server/stash-handover.js', anchored(SHSRC, '  const ownCidOf = (s) => addressableId(s);', '  const ownCidOf = cidOf;', 'B-6721: the wake by the raw id'), 'sh-rawid');
+    const rr = await forkRun(SHraw);
+    ok(rr.armed >= 1, 'RED control: the raw-id lookup — the fork\'s payload arms the stopped parent\'s chain on the fork\'s window (the 5 s … 10 min steps for as long as the fork is pending)', JSON.stringify(rr));
+    // the wake road as 276cd57c3 had it (the chain's own look and the hand-over by the raw id), the payload's note kept: the newer notice
+    const rawRoad = anchored(anchored(SHSRC, '      const d = getDeliver(), wid = ownWidOf(cid), s = wid != null ? activeSessions.get(wid) : null;', '      const d = getDeliver(), wid = (() => { for (const [w, x] of activeSessions) if (cidOf(x) === cid) return w; return null; })(), s = wid != null ? activeSessions.get(wid) : null;', 'B-6721: the chain\'s own look by the raw id'),
+      "    const cid = ownCidOf(s);   // B-6721: a pending fork (its parent's id) has no conversation of its own yet — never the parent's hand-over", '    const cid = cidOf(s);', 'B-6721: the hand-over by the raw id');
+    const rl = await forkRun(MB.load('src/server/stash-handover.js', rawRoad, 'sh-rawlook'));
+    ok(rl.posts > rl.posts1 && rl.billed >= 1, 'RED control: the wake road by the raw id (276cd57c3) — the newer notice is POSTED and BILLED through the fork\'s window into what answers under the parent\'s id (the fork\'s own CLI, when it took the parent\'s id)', JSON.stringify(rl));
+  }
+  // (h) THE RULING: A FOR-YOU ITEM MARKS AN EVENT, NOT A STATE FOUND AT BOOT — the boot's announce of a month-old not-running notice
+  // files NOTHING (the notice waits where it waits); a notice stashed for the stopped conversation WHILE THE HUB RUNS files the
+  // item, counting every notice waiting there (its `since` = the oldest). RED: the engine without the event rule files at boot
+  const bootWave = async (JMc) => {
+    const W = wakeRig('b6721-bootwave-' + rnd(), JMc); W.mk(SH);
+    const old = Date.now() - 31 * 86400e3;
+    W.jm._notifsAnswer({ state: 'data', value: { [W.cid]: [{ jobId: W.job.id, jobName: W.job.name, text: 'fired a month ago', ts: old, urgency: 'low', held: { kind: 'not-running' } }] } });
+    await sleep(20); W.jm.announceOwedWakes(); await sleep(20); await W.run();
+    const atBoot = W.filed.length, armedAfter = W.scheduled.length;
+    await fire(W, 'fired while the hub runs'); await W.run();
+    const filed = W.filed.length, since = filed ? W.filed[filed - 1].since : null;
+    W.comeBack(); W.broadcast(); await sleep(5); await W.run();   // the conversation runs again: what the boot found is still handed over
+    return { atBoot, armedAfter, filed, since, old, handed: W.posts.some((p) => /fired a month ago/.test(p)) };
+  };
+  {
+    const b = await bootWave(JobManager);
+    ok(b.atBoot === 0 && b.armedAfter === 0 && b.filed === 1 && b.since === b.old && b.handed, '(h) the BOOT\'s own announce of a month-old not-running notice files NO For-you item (the chain ends AWAY, quiet); a notice stashed for the stopped conversation while the hub runs files ONE, counting every notice waiting there (since = the oldest); back, the month-old notice is still handed over', JSON.stringify(b));
+    const JSRCh = fs.readFileSync(path.join(REPO, 'src/jobs.js'), 'utf8');
+    const JMboot = MB.load('src/jobs.js', anchored(JSRCh, '    if (!this._stoppedThisRun || !this._stoppedThisRun.has(cid)) return null;\n', '', 'B-6721: a state found at boot said'), 'jobs-bootwave').JobManager;
+    const br = await bootWave(JMboot);
+    ok(br.atBoot === 1, 'RED control: without the event rule the boot files an item for a conversation stopped a month ago (the owner\'s hub: two of three)', JSON.stringify(br));
+  }
+  // (i) THE SHOULD: the drain's judge drops every owed notice (a subscriber's line of a job since deleted) — For you's «notices
+  // wait» is settled there, never left open with nothing waiting. RED: the drop without the settle
+  const dropRun = async (JMc) => {
+    const W = wakeRig('b6721-judgedrop-' + rnd(), JMc); W.mk(SH);
+    const other = { id: 'jb-cccc3333', kind: 'task', name: 'another-watch', state: 'done', owner: { conversation: { id: 'c0ffee00-0000-4000-8000-0000000099aa' } }, access: { view: 'all', control: 'session' }, runs: [] };
+    W.jm.jobs.set(other.id, other);
+    W.jm._stashNotif(W.cid, other, { what: 'a subscriber line' }, 'not running', { held: { kind: 'not-running' }, mark: true });
+    await sleep(20); await W.run();
+    const filed = W.filed.length;
+    W.jm.jobs.delete(other.id);
+    W.jm.peekNotifs(W.cid);   // a drain's read: the judge drops it
+    return { filed, owed: W.jm.wakeOwed(W.cid).length, resolved: W.resolved.includes(W.cid) };
+  };
+  {
+    const d = await dropRun(JobManager);
+    ok(d.filed === 1 && d.owed === 0 && d.resolved, '(i) the drain\'s judge drops the only owed notice (its job deleted): For you\'s item is closed there', JSON.stringify(d));
+    const JSRCi = fs.readFileSync(path.join(REPO, 'src/jobs.js'), 'utf8');
+    const JMdrop = MB.load('src/jobs.js', anchored(JSRCi, "    this.wakeSettled(cid);   // B-6721 (the round's should): the drop may leave nothing owed — For you's «notices wait» goes with it\n", '', 'B-6721: the drop without the settle'), 'jobs-judgedrop').JobManager;
+    const dr = await dropRun(JMdrop);
+    ok(dr.filed === 1 && dr.owed === 0 && !dr.resolved, 'RED control: the drop without the settle leaves the item open with nothing waiting', JSON.stringify(dr));
+  }
+  // (j) THE SHOULD: a hand-over whose frame was WRITTEN and whose post then failed (a write-phase timeout) may have landed — the
+  // chain ENDS (no second billed post 30 s later); the notices ride the next prompt. RED: the chain re-steps
+  const writeRun = async (mod, reason = 'timeout') => {
+    const W = wakeRig('b6721-writephase-' + rnd()); W.mk(mod);
+    await fire(W, 'fired while stopped');
+    await W.run(); W.comeBack();
+    let tries = 0;
+    W.setAnswer(async () => { tries++; return { ok: false, reason, phase: 'write', transient: true, elapsedMs: 5004 }; });
+    W.broadcast(); await sleep(5); await W.run();
+    return { tries, armed: W.scheduled.length, owed: W.jm.wakeOwed(W.cid).length, billed: W.ledger.length };
+  };
+  {
+    const w = await writeRun(SH);
+    ok(w.tries === 1 && w.armed === 0 && w.owed === 1 && w.billed === 0, '(j) a write-phase TIMEOUT (the frame handed to the socket, no verdict) ENDS the chain — one attempt, nothing re-armed; the notice still waits for the next prompt', JSON.stringify(w));
+    const ep = await writeRun(SH, 'EPIPE');
+    ok(ep.tries === 1 && ep.armed >= 1, '(j) …a write that FAILED by its own error (EPIPE: the frame cannot have landed) steps on as before', JSON.stringify(ep));
+    const SHwrite = MB.load('src/server/stash-handover.js', anchored(SHSRC, "      if (r && r.code === 'unreachable' && ((r.phase === 'write' && r.error === 'timeout') || r.unanswered === true)) {", "      if (false) {", 'B-6721: a written frame retried'), 'sh-writephase');
+    const wr = await writeRun(SHwrite);
+    ok(wr.tries === 1 && wr.armed >= 1, 'RED control: without the rule the chain re-steps after a written frame — a second post (a second billed turn) at its next look', JSON.stringify(wr));
   }
 }
 
