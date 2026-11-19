@@ -91,7 +91,7 @@ export function keyStep({ open = false, active = -1 } = {}, key, n = 0) {
 
 /** A read of the names LANDS while the list is open (state = { open, typed — the typing opened or last drew it }): it closes
  *  when the typing opened it and the typed text now settles the choice — a listed name typed in full into a field whose names
- *  were not read yet (a fresh dialog: the typing could not settle it then; the box red of 2.369.411's owed rows). A list a press,
+ *  were not read yet (a fresh dialog: the typing could not settle it then; the box red of 2.369.412's owed rows). A list a press,
  *  the field's mark or a key opened stays open — the person asked to see it. */
 export function closesOnRead({ open = false, typed = false } = {}, names, text = '') {
   return !!open && !!typed && typedSettled(names, text);

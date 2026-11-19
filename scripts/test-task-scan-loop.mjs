@@ -257,7 +257,7 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
       ok(tw.first === zfile && tw.got === pfile && tw.n === 0 && twr.first === zfile && twr.got === zfile,
         `a kept .jsonl.zst and then its plain twin: the plain wins (${path.basename(String(tw.got))}) with ${tw.n} listings; RED (no twin check): ${path.basename(String(twr.got))}`);
     }
-    // …and NO EXTRA WALK UNDER IT (the 2.369.411 checkpoint's red: status() made 162 listings against the 108 allowed — 216 is the RED
+    // …and NO EXTRA WALK UNDER IT (the 2.369.412 checkpoint's red: status() made 162 listings against the 108 allowed — 216 is the RED
     // control's count): the off-loop read's fallback REUSES its own lookup of a missing rollout, so status() walks the store no more
     // than its reader does (two walks: the ancestry, the read). RED CONTROL: the fallback that walks again (three)
     {

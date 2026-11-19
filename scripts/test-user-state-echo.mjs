@@ -870,7 +870,7 @@ const converged = (w, pages) => { const st = slotsOf(w.serverState()); return pa
   //   version in THIS tab (src/lib/app.js 'vibespace.stale-hidden.<v>' in sessionStorage); one tab's memory, not a store of acts
   // + ONE row lane phone-six adds (its recovery port onto .397): src/lib/phone-split-view.js SPLIT_KEY ('vibespace.phoneSplit') —
   //   THIS TAB's side-by-side pair per desktop (sessionStorage: never the layout record, never another device; not a store of acts)
-  // + FOUR rows B-437e's «one life» unit adds (lg-rewind, 2.369.411 block line 87 — the rows it owed, 2026-11-19): src/lib/chat-view.js
+  // + FOUR rows B-437e's «one life» unit adds (lg-rewind, 2.369.412 block line 87 — the rows it owed, 2026-11-19): src/lib/chat-view.js
   //   'vs-rewind:<conversation>' in sessionStorage — THIS TAB's rewind presses still waiting for the CLI's answer, IDS ONLY (message id,
   //   granularity, when): its write, its remove when the answer binds, the sweep of another conversation's day-old entries, and the remove
   //   when the conversation's process ends. PER TAB BY DESIGN: only the tab that pressed holds the request whose answer it may act on

@@ -219,7 +219,7 @@ const STORED_WORDS_LEGACY = Object.freeze({
   'pool-lapsed-off': Object.freeze({ left: '2.369.400', filedBy: 'src/server/usage-pool-engine.js', key: '{account}\'s subscription is no longer active (since {since}): the pool skips it until it answers again — usage refresh is Off in Settings: turn it on to Re-check, or run a turn on it directly' }),
   // closure 3: the paused feedback forward's detail (feedback-forward-model PAUSE_DETAIL, reworded by pick 5) — filed ONCE a pause
   'feedback-pause': Object.freeze({ left: '2.369.400', filedBy: 'src/server/feedback-forward.js', key: 'The telemetry forward target in Settings (Forward diagnostics to a central collector) answered {status} at its feedback door: it takes diagnostics, not agent feedback. The reports stay here, in ⚙ System ▸ Agent feedback… — {n} waiting to be forwarded (past {max} the oldest is dropped). VibeSpace asks the target again once a day and sends them when it takes them.' }),
-  // ui-plain-words' move onto 2.369.411's checkpoint 500911fd9 (-moved3): two sentences 2.369.410 stored that no producer files now —
+  // ui-plain-words' move onto 2.369.412's checkpoint 500911fd9 (-moved3): two sentences 2.369.410 stored that no producer files now —
   // `left` is the release that STORED them (2.369.410: the leg judges a row against the release the tree was cut from, and no
   // version seam moves it)
   'tls-no-tailscale': Object.freeze({ left: '2.369.410', filedBy: 'src/server/tls.js', key: 'No secure address: Tailscale is not running on this machine (or set VIBESPACE_TLS_CERT and VIBESPACE_TLS_KEY to a certificate of your own).' }),
