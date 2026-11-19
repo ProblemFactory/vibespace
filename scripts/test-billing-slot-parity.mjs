@@ -32,11 +32,16 @@ export const RESOLVERS = Object.freeze(['fireIdentityFor', 'sessionBillingMember
   'poolDefaultOf', '_resolveHomeSpawn', 'resolveForSpawn', 'poolChooserForModel', 'fallbackDefaultTarget', '_wallScope', 'cliTarget', 'identityOf@src/server/spend-guard.js',
   'identityFor@src/server/spend-guard.js', 'fireIdentity@src/server/auto-resume.js', 'identityFor@src/server/auto-resume.js', 'setConversationPin', 'resetCreditOffer',
   'writeResetCredit', 'writeCodexReading', 'demoteWalledAccount', 'refreshCodexForPerson', 'resetCreditPreview', 'projectionBillingIndex', 'claudeBillingIdentity',
-  'codexBillingIdentity', 'poolAuth@src/harnesses/claude.js', 'poolAuth@src/harnesses/codex.js', 'billingIdentity@server.js', 'sessionAuth', 'spendGuard.authorize',
+  'codexBillingIdentity', 'poolAuth@src/harnesses/claude.js', 'poolAuth@src/harnesses/codex.js', 'billingIdentity@server.js', 'sessionAuth@server.js', 'sessionAuth@src/routes/sessions.js',
+  // the census cure 3 (主开发 2026-11-19 09:12Z): a resolver HANDED ON under another name is declared where it is received — the
+  // engine's chooser as server.js's poolChooser → ws-create's chooseMember → accounts' opts.chooseMember (the member a new pooled
+  // start bills); and a dependency row or closure that hands the answer on in ITS file (the net reads a caller by name AND file)
+  'poolChooser@src/ws-create.js', 'chooseMember@src/ws-create.js', 'chooseMember@src/accounts.js', 'chooseDefault@src/server/account-usage-routes.js',
+  'fireIdentity@server.js', 'identityOf@src/server/usage-pool-engine.js', 'poolAuth@server.js', 'spendGuard.authorize',
   'authorizeSpend', 'spendGuard.authorizeBatch', 'authorizeSpendBatch', 'stoppedRows', 'stoppedPlan', 'writeSnap@src/server/usage-pool-engine.js', 'billingIndex@src/server/auto-cli-loop.js',
   'chooseDefault@src/accounts.js', 'authorize@src/server/spend-guard.js', 'authorizeBatch@src/server/spend-guard.js']);
 export const STAGES = Object.freeze(['spend', 'cost', 'readings', 'pool', 'routes', 'pile']);
-// [resolver, file, enclosing function, stage, calls] — derived by THIS suite's own scan (218 calls: the ten 66, the census cure's nine 80, the cure 2's net 72); the census file names each line
+// [resolver, file, enclosing function, stage, calls] — derived by THIS suite's own scan (225 calls: the ten 66, the census cure's nine 80, the cure 2's net 72, the cure 3's handed-on names 7); the census file names each line
 export const ROWS = Object.freeze([
   ['poolCurrentFor', 'src/server/usage-attribution.js', 'recordUsageAttribution', 'cost', 1],
   ['poolMemberOfSession', 'src/server/usage-attribution.js', 'recordUsageAttribution', 'cost', 1],
@@ -215,8 +220,8 @@ export const ROWS = Object.freeze([
   ['resolveForSpawn', 'src/server/cli-usage-door.js', 'readOnce', 'readings', 1],   // a usage probe spawned under the account
   ['resolveForSpawn', 'src/server/permission-rules.js', 'runOracle', 'spend', 1],   // the account the permission oracle's billed check runs under
   ['resolveForSpawn', 'src/ws-create.js', 'createBody', 'spend', 1],   // the account a created conversation spawns under
-  ['sessionAuth', 'server.js', 'activeSessionsPayload', 'routes', 1],
-  ['sessionAuth', 'src/routes/sessions.js', 'setup', 'routes', 1],
+  ['sessionAuth@server.js', 'server.js', 'activeSessionsPayload', 'routes', 1],
+  ['sessionAuth@src/routes/sessions.js', 'src/routes/sessions.js', 'setup', 'routes', 1],
   ['setConversationPin', 'src/server/account-usage-routes.js', '(module)', 'routes', 1],
   ['spendGuard.authorizeBatch', 'server.js', 'authorizeSpendBatch', 'pile', 1],
   ['spendGuard.authorize', 'server.js', 'authorizeSpend', 'pile', 2],
@@ -235,7 +240,59 @@ export const ROWS = Object.freeze([
   ['writeResetCredit', 'src/server/usage-pool-engine.js', 'consumeResetCreditFor', 'spend', 1],
   ['writeResetCredit', 'src/server/usage-pool-engine.js', 'resetCreditRung', 'spend', 1],
   ['writeSnap@src/server/usage-pool-engine.js', 'src/server/usage-pool-engine.js', 'recordCodexQuotaSignal', 'readings', 2],
+  // ── the census cure 3 (主开发 2026-11-19 09:12Z): the chooser handed on, its received names' calls ──
+  ['poolChooser@src/ws-create.js', 'src/ws-create.js', 'chooseMember', 'pile', 1],   // ws-create's chooseMember arrow calls the engine's chooser it received
+  ['chooseMember@src/accounts.js', 'src/accounts.js', 'resolveForSpawn', 'pile', 3],   // the member a new pooled start bills
+  ['chooseMember@src/accounts.js', 'src/accounts.js', '_resolveHomeSpawn', 'pile', 1],
+  ['chooseMember@src/accounts.js', 'src/accounts.js', 'activeAlt', 'pile', 1],   // resolveForSpawn's own closure (INNER)
+  ['chooseMember@src/accounts.js', 'src/accounts.js', 'updatePool', 'pool', 1],   // the pool's default pointed at the chooser's pick
 ]);
+
+// THE HOMES (主开发 2026-11-19 09:12Z: the net reads a caller by name AND file): the file(s) where each resolver not scoped by «@file»
+// is DEFINED — a function, a method, an arrow, a dependency row. A same-named function in another file is another function.
+export const HOME = Object.freeze({
+  "fireIdentityFor": ["src/server/usage-pool-engine.js"],
+  "sessionBillingMember": ["src/server/usage-pool-engine.js"],
+  "resolveUsageKey": ["src/server/usage-pool-engine.js"],
+  "validateBillingSlot": ["src/server/usage-pool-engine.js"],
+  "wallSlotFor": ["src/server/usage-pool-engine.js"],
+  "rejectionSlotFor": ["src/server/usage-pool-engine.js"],
+  "requestSlotFor": ["src/server/usage-pool-engine.js"],
+  "readingSlotFor": ["src/server/usage-pool-engine.js"],
+  "poolCurrentFor": ["src/accounts.js"],
+  "poolMemberOfSession": ["src/accounts.js"],
+  "heldPoolMemberFor": ["src/server/usage-pool-engine.js"],
+  "creditIdentityFor": ["src/server/usage-pool-engine.js"],
+  "wallKeyFor": ["src/server/usage-pool-engine.js"],
+  "poolMemberOfSessionFor": ["src/server/usage-pool-engine.js"],
+  "liveQuotaKeyFor": ["src/server/usage-pool-engine.js"],
+  "usageCacheKeyFor": ["src/server/usage-pool-engine.js"],
+  "linkMemberOf": ["src/server/usage-pool-engine.js"],
+  "accountOfSession": ["src/routes/provider-models.js"],
+  "poolCurrent": ["src/accounts.js"],
+  "poolDefaultOf": ["src/server/usage-pool-engine.js"],
+  "_resolveHomeSpawn": ["src/accounts.js"],
+  "resolveForSpawn": ["src/accounts.js"],
+  "poolChooserForModel": ["src/server/usage-pool-engine.js"],
+  "fallbackDefaultTarget": ["src/server/usage-pool-engine.js"],
+  "_wallScope": ["src/server/usage-pool-engine.js"],
+  "cliTarget": ["src/routes/provider-models.js"],
+  "setConversationPin": ["src/server/usage-pool-engine.js"],
+  "resetCreditOffer": ["server.js", "src/server/usage-pool-engine.js"],
+  "writeResetCredit": ["src/server/usage-pool-engine.js"],
+  "writeCodexReading": ["src/server/usage-pool-engine.js"],
+  "demoteWalledAccount": ["src/server/usage-pool-engine.js"],
+  "refreshCodexForPerson": ["src/server/usage-pool-engine.js"],
+  "resetCreditPreview": ["src/server/usage-pool-engine.js"],
+  "projectionBillingIndex": ["src/server/usage-pool-engine.js"],
+  "claudeBillingIdentity": ["src/harnesses/claude.js"],
+  "codexBillingIdentity": ["src/harnesses/codex.js"],
+  "authorizeSpend": ["server.js"],
+  "authorizeSpendBatch": ["server.js"],
+  "stoppedRows": ["src/server/auto-resume.js"],
+  "stoppedPlan": ["src/server/auto-resume.js"],
+});
+const isAnswerAt = (name, file) => RESOLVERS.includes(`${name}@${file}`) || (Object.prototype.hasOwnProperty.call(HOME, name) && HOME[name].includes(file));
 
 const KW = new Set(['if', 'for', 'while', 'switch', 'catch', 'function', 'return', 'else', 'try']);
 const FN = /^\s*(?:async\s+)?function\s+(\w+)\s*\(|^\s*(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?(?:\([^)]*\)|\w+)\s*=>|^\s*(\w+)\s*\([^)]*\)\s*\{\s*(?:\/\/.*)?$|^\s{2,}(\w+)\s*:\s*(?:async\s*)?\(/;
@@ -288,7 +345,7 @@ export const CALL_FORMS = Object.freeze(['(', '?.(', '.call(', '.apply(', '.bind
 //   · an arrow whose body starts on the NEXT line — `const pick = (s) =>\n  poolCurrent(s)`: the call is a row, filed under the
 //     function around the arrow (a head without a brace on its line is no enclosing head);
 //   · an arrow assigned to a FIELD — `o.pick = (s) => poolCurrent(s)`: the same, filed under the function around it.
-export const GAPS = Object.freeze(['an alias of a resolver in a variable', 'an arrow whose body starts on the next line (filed under the function around it)', 'an arrow assigned to a field (filed under the function around it)']);
+export const GAPS = Object.freeze(['an alias of a resolver in a variable (account-usage-routes\' «decide», handed on as chooseMember: its receiver is declared)', 'an arrow whose body starts on the next line (filed under the function around it)', 'an arrow assigned to a field (filed under the function around it)', 'an arrow inside a conditional expression (filed under the function around it — account-usage-routes\' decide, under (module))', 'a resolver handed on through a variable, not its own name (the handed-on leg reads a resolver\'s own name only)']);
 // ONE regex pass per file says which names it holds (a substring search per name and form, per file, cost seconds)
 const NAMES_RE = new Map();
 export function namesIn(text, names) {
@@ -461,12 +518,13 @@ console.log('§d THE NET — every function that calls a resolver is classified 
 // roster that only ECHOES it is a CONSUMER with its reason and the fields of its return that carry an account (checked in §e); a
 // resolver's own inner closure (its answer leaves only through that resolver) is INNER. The name filter of §b stays as a second look.
 export const INNER = Object.freeze({
+  "activeAlt": {"of": "resolveForSpawn", "file": "src/accounts.js", "why": "resolveForSpawn's own closure: the live member a spawn bills when the current one lapsed — its answer leaves only through resolveForSpawn"},
   "leavingTo": {"of": "resetCreditPreview", "file": "src/server/usage-pool-engine.js", "why": "Closure inside resetCreditPreview (a resolver): returns {to, inFlight} with to = poolCurrent, feeding the preview's restartPending row."},
   "link": {"of": "poolMemberOfSession", "file": "src/accounts.js", "why": "Already decided INNER: closure in poolMemberOfSession returning poolCurrentFor(poolId, key), the member the session's link names."},
   "poolDefault": {"of": "sessionAuth", "file": "server.js", "why": "Already decided INNER: property IIFE inside poolAuth returning the name of poolCurrent(a.id), the pool's current member."},
 });
 export const CONSUMERS = Object.freeze({
-  "(module)": {"file": "src/server/account-usage-routes.js", "fields": [], "why": "Module-level route handlers: poolCurrent before/after, setConversationPin and the default chooser go into HTTP answers; nothing is returned."},
+  "(module)": {"file": "src/server/account-usage-routes.js", "fields": [], "why": "module-level route code: poolCurrent before / after, setConversationPin and the default's decide arrow (a conditional arrow the scan files here: it answers, handed to updatePool as chooseMember) go into HTTP answers or the store; nothing returned"},
   "_healPoolsAfterRemoval": {"file": "src/accounts.js", "fields": [], "why": "Re-points pool defaults and session links off a deleted member; poolCurrent only picks a link's fallback target; returns nothing."},
   "_poolLoginCandidates": {"file": "src/accounts.js", "fields": ["id", "name"], "why": "Returns the pool's login candidates [{id, name}] (members plus poolCurrent's target), a membership set for login and token checks."},
   "activeSessionsPayload": {"file": "server.js", "fields": ["accountId", "accountName", "accountTail", "auth", "poolPin"], "why": "Builds the session list rows for the page (an array); sessionAuth's billing chip rides each row's auth field as display, never a spend's account."},
@@ -543,31 +601,42 @@ export const CONSUMERS = Object.freeze({
   "tick": {"file": "src/server/auto-cli-loop.js", "fields": [], "why": "the auto-cli loop's tick reads the member → sessions index to choose due reads; returns nothing"},
   "turnAskedFamily": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Returns a boolean (did this turn ask key for the family); requestSlotFor's key is only compared against it."},
   "unplacedOf": {"file": "src/accounts.js", "fields": ["member", "name"], "why": "Returns the UNPLACED mark (the deleted member; the conversation bills nobody); poolCurrent only checks whether it was re-placed."},
-  "updatePool": {"file": "src/accounts.js", "fields": ["id", "members", "priority", "unplaced"], "why": "Returns the stored pool record; poolCurrent only decides whether the default must be re-pointed after a membership change."},
+  "updatePool": {"file": "src/accounts.js", "fields": [], "why": "writes a pool's members and points its default at the chooser's pick (setPoolTarget); returns the pool record — its config, not a conversation's account"},
   "walkLadderAfterCredit": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Runs the switch rung and notes a wall signal keyed by liveQuotaKeyFor(s), a decision and a write; returns nothing."},
   "writeResetCreditViaHelper": {"file": "src/server/usage-pool-engine.js", "fields": ["identity"], "why": "Helper-path credit spend: writeCodexReading files the read-first reading; the returned identity is the guard's echo of the input key."},
 });
 {
   const ENGF = 'src/server/usage-pool-engine.js';
   const base = new Set(RESOLVERS.map((e) => String(e).split('@')[0]));
-  const isListed = (name) => base.has(name) || Object.prototype.hasOwnProperty.call(CONSUMERS, name) || Object.prototype.hasOwnProperty.call(INNER, name);
-  const enclosingOf = (m) => [...new Set([...m.keys()].map((k) => k.split('|')[2]))];
-  const unclassified = (m) => enclosingOf(m).filter((e) => !isListed(e));
-  ok(unclassified(have).length === 0, `every function that calls a resolver is classified once — ${enclosingOf(have).length} functions: ${enclosingOf(have).filter((e) => base.has(e)).length} answer, ${enclosingOf(have).filter((e) => e in CONSUMERS).length} consume, ${enclosingOf(have).filter((e) => e in INNER).length} inner`, unclassified(have));
+  const rowAt = (T, name, file) => { const r = T[`${name}@${file}`] || T[name]; return r && r.file === file ? r : null; };
+  const isListed = (name, file) => isAnswerAt(name, file) || !!rowAt(CONSUMERS, name, file) || !!rowAt(INNER, name, file);
+  const pairsOf = (m) => [...new Set([...m.keys()].map((k) => { const [, f, e] = k.split('|'); return `${e}|${f}`; }))].map((x) => x.split('|'));
+  const enclosingOf = (m) => [...new Set(pairsOf(m).map(([e]) => e))];
+  const unclassified = (m) => pairsOf(m).filter(([e, f]) => !isListed(e, f)).map(([e, f]) => `${e} (${f})`);
+  ok(unclassified(have).length === 0, `every function that calls a resolver is classified once, by name AND file — ${pairsOf(have).length} functions: ${pairsOf(have).filter(([e, f]) => isAnswerAt(e, f)).length} answer, ${pairsOf(have).filter(([e, f]) => rowAt(CONSUMERS, e, f)).length} consume, ${pairsOf(have).filter(([e, f]) => rowAt(INNER, e, f)).length} inner`, unclassified(have));
   const twice = [...Object.keys(CONSUMERS), ...Object.keys(INNER)].filter((n, i, a) => base.has(n) || a.indexOf(n) !== i);
   ok(twice.length === 0, 'no function is in two lists', twice);
-  const callersNow = new Set(enclosingOf(have));
-  const dead = [...Object.keys(CONSUMERS), ...Object.keys(INNER)].filter((n) => !callersNow.has(n));
+  const callersNow = new Set(pairsOf(have).map(([e, f]) => `${e}|${f}`));
+  const dead = [...Object.entries(CONSUMERS), ...Object.entries(INNER)].filter(([n, r]) => !callersNow.has(`${n.split('@')[0]}|${r.file}`)).map(([n]) => n);
   ok(dead.length === 0, 'every consumer and inner row still calls a resolver (no dead reason)', dead);
   ok(Object.values(CONSUMERS).every((c) => typeof c.why === 'string' && c.why.length > 40 && (Array.isArray(c.fields) || (c.fields === null && typeof c.gap === 'string' && c.gap.length > 20))) && Object.values(INNER).every((x) => base.has(x.of) && typeof x.why === 'string'),
     'every consumer names its reason and the fields of its return that carry an account (or says why that search is not mechanical); every inner closure names its resolver');
   // CONTROLS
   const pickPlant = '\nfunction pick(s) { return poolCurrent(s._accountId); }\n';
   const pm = unclassified(census(scope(ENGF), (f) => (f === ENGF ? read(f) + pickPlant : read(f))));
-  ok(pm.length === 1 && pm[0] === 'pick', 'CONTROL: a planted plainly named wrapper («pick», returning the pool\'s current) is red by name', pm);
+  ok(pm.length === 1 && pm[0] === `pick (${ENGF})`, 'CONTROL: a planted plainly named wrapper («pick», returning the pool\'s current) is red by name', pm);
+  // a same-named function in ANOTHER file is another function (主开发 09:12Z): a consumer's name planted in a file that is not its own
+  const twinPlant = '\nfunction setup(s) { return poolCurrent(s._accountId) ? 1 : 0; }\n';
+  const tw = unclassified(census(scope(ENGF), (f) => (f === ENGF ? read(f) + twinPlant : read(f))));
+  ok(CONSUMERS.setup && CONSUMERS.setup.file !== ENGF && tw.length === 1 && tw[0] === `setup (${ENGF})`, 'CONTROL: a consumer\'s name («setup») defined in another file is red by name and file', tw);
+  // every unscoped resolver has its home, and each home still defines it
+  const defines = (file, name) => read(file).split('\n').some((l) => { const m = FN.exec(l); if (m && m.slice(1).find(Boolean) === name) return true; for (const d of l.matchAll(DEP)) if (d[1] === name) return true; return false; });
+  const unscoped = RESOLVERS.filter((e) => !String(e).includes('@') && !String(e).includes('.'));
+  const homeless = unscoped.filter((n) => !HOME[n] || !HOME[n].length || !HOME[n].every((f) => defines(f, n)));
+  ok(homeless.length === 0 && Object.keys(HOME).every((n) => unscoped.includes(n)), `every resolver not scoped to a file has its HOME, and each home still defines it (${unscoped.length} names)`, homeless);
   const moved = 'gatherPlan';   // a consumer moved to answering, without its callers' rows
   const dm = diff(census(files, read, [...RESOLVERS, moved]), want);
-  ok(moved in CONSUMERS && dm.fresh.length > 0 && dm.fresh.every((x) => x.startsWith(moved + '|')), 'CONTROL: a consumer moved to answering without its callers\' rows is red (its calls are fresh rows, by name)', dm.fresh);
+  ok(!!CONSUMERS[moved] && dm.fresh.length > 0 && dm.fresh.every((x) => x.startsWith(moved + '|')), 'CONTROL: a consumer moved to answering without its callers\' rows is red (its calls are fresh rows, by name)', dm.fresh);
 }
 
 console.log('§e THE ECHO LEG — a consumer\'s reason is CHECKED: no field of its return that carries an account is read into a spend, a reading\'s file name or a spawn\'s account (主开发 2026-11-19 05:43Z)');
@@ -575,9 +644,11 @@ console.log('§e THE ECHO LEG — a consumer\'s reason is CHECKED: no field of i
 // one of those fields (off the variable, or off the call itself) on a line that names a SINK is red BY NAME («an echo used as the
 // billing account»). The sinks are the stage words in code: a spend (the guard's authorize / noteSpend / a credit's consume / the cost
 // record), a reading's file name (the usage cache's writer, its cacheDir), a spawn's account (resolveForSpawn, setPoolTarget, an
-// _accountId assignment). THE GAPS, said: a consumer whose return is not a plain object (fields null: its row says why); a read in
-// another function than the call's, or past 40 lines; a destructured field.
-export const SINK = /\b(?:authorize|authorizeBatch|authorizeSpend|writeCacheObject|writeUsageCacheForKey|setPoolTarget|resolveForSpawn|consumeResetCreditFor|recordUsageAttribution|noteSpend)\s*\(|\b_accountId\s*=[^=]|\bcacheDir\s*:/;
+// _accountId assignment; the guard's own note and release, through its handle or its noteSpend / releaseSpend). ONE HOP is followed:
+// a field renamed into a variable (`const k = r.current`) and that variable read into a sink. THE GAPS, said: a consumer whose return
+// is not a plain object (fields null: its row says why); a read in another function than the call's, or past 40 lines; a
+// destructured field; a second rename.
+export const SINK = /\b(?:authorize|authorizeBatch|authorizeSpend|authorizeSpendBatch|writeCacheObject|writeUsageCacheForKey|setPoolTarget|resolveForSpawn|consumeResetCreditFor|recordUsageAttribution|noteSpend|releaseSpend)\s*\(|\bspendGuard\.(?:note|release)\s*\(|\b_accountId\s*=[^=]|\bcacheDir\s*:/;
 export function echoHits(files, readOf, consumers = CONSUMERS) {
   const hits = [];
   const withF = Object.keys(consumers).filter((k) => Array.isArray(consumers[k].fields) && consumers[k].fields.length);
@@ -593,8 +664,13 @@ export function echoHits(files, readOf, consumers = CONSUMERS) {
         if (!line.includes(n + '(')) return;
         const at = line.indexOf(n + '('); if (at < 0 || (at > 0 && /[\w$]/.test(line[at - 1]))) return;
         const v = (line.match(new RegExp(`(?:const|let|var)\\s+(\\w+)\\s*=[^;]*\\b${esc(n)}\\(`)) || [])[1];
-        const reads = (l) => c.fields.some((fl) => (v && new RegExp(`\\b${v}\\??\\.${fl}\\b`).test(l)) || new RegExp(`${esc(n)}\\([^)]*\\)\\??\\.${fl}\\b`).test(l));
-        for (let j = i; j < Math.min(L.length, i + 40); j++) if (reads(L[j]) && SINK.test(L[j])) { hits.push(`${name} (${f}:${j + 1}): ${L[j].trim().slice(0, 90)}`); break; }
+        const hop = new Set();   // one hop: a field renamed into a variable, then that variable into a sink
+        const reads = (l) => c.fields.some((fl) => (v && new RegExp(`\\b${v}\\??\\.${fl}\\b`).test(l)) || new RegExp(`${esc(n)}\\([^)]*\\)\\??\\.${fl}\\b`).test(l))
+          || [...hop].some((x) => new RegExp(`\\b${x}\\b`).test(l) && !new RegExp(`(?:const|let|var)\\s+${x}\\b`).test(l));
+        for (let j = i; j < Math.min(L.length, i + 40); j++) {
+          if (v) for (const fl of c.fields) { const h = L[j].match(new RegExp(`(?:const|let|var)\\s+(\\w+)\\s*=\\s*${v}\\??\\.${fl}\\b`)); if (h) hop.add(h[1]); }
+          if (reads(L[j]) && SINK.test(L[j])) { hits.push(`${name} (${f}:${j + 1}): ${L[j].trim().slice(0, 90)}`); break; }
+        }
       });
     }
   }
@@ -608,6 +684,46 @@ export function echoHits(files, readOf, consumers = CONSUMERS) {
   const plantE = `\nfunction plantedEcho(s) { const r = ${cn.split('@')[0]}(s); usageWrite.writeCacheObject({ cacheDir: 'x', key: r.${cc.fields[0]} }); }\n`;
   const ep = echoHits([cc.file], (f) => read(f) + plantE);
   ok(ep.length === 1 && ep[0].startsWith(cn + ' ('), `CONTROL: a planted read of ${cn}()'s «${cc.fields[0]}» into a reading's file name is red by name`, ep);
+  const plantH = `\nfunction plantedHop(s) { const r = ${cn.split('@')[0]}(s); const k = r.${cc.fields[0]}; spendGuard.note({ reason: 'x', identity: { key: k } }); }\n`;
+  const eh2 = echoHits([cc.file], (f) => read(f) + plantH);
+  ok(eh2.length === 1 && eh2[0].startsWith(cn + ' ('), `CONTROL: the same field renamed into a variable, then into the guard's own note, is red by name (one hop)`, eh2);
+}
+
+console.log('§f THE HANDED-ON NAMES — a resolver passed BY REFERENCE under another property name is red unless the receiving name is a declared resolver (主开发 2026-11-19 09:12Z)');
+// `poolChooser: poolChooserForModel` hands the engine's chooser to the create; ws-create receives it as poolChooser, hands it on as
+// chooseMember, and accounts calls opts.chooseMember: every received name is declared where it is called. A reference is a
+// property value that ENDS there (`key: name,` / `key: x.name }`), never a call or a test (`x.name ? …`). WHY decideDefaultTarget IS
+// NO RESOLVER: it DECIDES the pool default's next member from the readings and calls no resolver; its answer bills only after the
+// write it feeds (updatePool / setPoolTarget), which poolCurrent then reads — the chooser it is handed through (chooseDefault,
+// chooseMember) is declared.
+export function handedOn(files, readOf, names = RESOLVERS) {
+  const out = [];
+  const ents = names.map((e) => { const full = String(e).split('@')[0]; return { full, last: full.split('.').pop(), only: String(e).includes('@') ? String(e).slice(String(e).indexOf('@') + 1) : null }; });
+  const alt = [...new Set(ents.map((x) => x.last))].sort((a, b) => b.length - a.length).map((n) => n.replace(/[$]/g, '\\$')).join('|');
+  const re = new RegExp(`(?<![\\w$.])([A-Za-z_$][\\w$]*)\\s*:\\s*((?:[A-Za-z_$][\\w$]*\\.)*(?:${alt}))\\s*(?=[,}]|$)`, 'gm');
+  const declared = new Set(ents.map((x) => x.last));
+  for (const f of files) {
+    let text = ''; try { text = readOf(f); } catch { continue; }
+    for (const m of text.matchAll(re)) {
+      const [, key, ref] = m;
+      const last = ref.split('.').pop();
+      if (key === last) continue;   // shorthand-like `name: name` hands on the same name
+      if (!ents.some((x) => x.last === last && (!x.only || x.only === f) && (ref === x.full || ref.endsWith('.' + x.full) || ref === x.last || ref.endsWith('.' + x.last)))) continue;   // that name is no resolver in this file
+      const ls = text.lastIndexOf('\n', m.index) + 1, lineText = text.slice(ls, text.indexOf('\n', m.index) < 0 ? text.length : text.indexOf('\n', m.index));
+      const t = lineText.trimStart(); if (t.startsWith('//') || t.startsWith('*') || lineText.slice(0, m.index - ls).includes('//')) continue;
+      if (!declared.has(key)) out.push(`${f}:${text.slice(0, m.index).split('\n').length} ${key}: ${ref}`);
+    }
+  }
+  return out;
+}
+{
+  const ho = handedOn(files, read);
+  ok(ho.length === 0, 'every resolver handed on under another property name is received under a declared name (its calls are rows where it is received)', ho);
+  const ENGF = 'src/server/usage-pool-engine.js';
+  const hp = handedOn([ENGF], (f) => read(f) + '\nconst plantedDeps = { pickMember: poolCurrentFor, other: 1 };\n');
+  ok(hp.length === 1 && hp[0].endsWith(' pickMember: poolCurrentFor'), 'CONTROL: a resolver planted under another property name («pickMember: poolCurrentFor») is red by name', hp);
+  const hd = handedOn(['server.js'], (f) => read(f), RESOLVERS.filter((e) => e !== 'poolChooser@src/ws-create.js'));
+  ok(hd.some((x) => / poolChooser: poolChooserForModel$/.test(x)), 'CONTROL: the receiving name taken out of the list, server.js\'s poolChooser hand-off is red by name', hd);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
