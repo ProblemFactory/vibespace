@@ -2,7 +2,7 @@
  "//": "B-0d3e (lane lg-leak-census, 主开发's read 2026-11-19 01:11Z): THE FOUNDING ROW IS FALL-ONLY. Each count fixture's founding row (B-0d3e, the list the census brought) is pinned here — its total and each file's count as they stood when the rows were made (2.369.412's block, int411 279706636). test-suite-files-parse §3 reds a founding count above its pin: a rise enters only as a NEW row under the raising unit's own backlog id. A pin is only ever LOWERED (when a founding count falls, lower both).",
  "unanchored-controls": {
   "row": "B-0d3e",
-  "total": 2768,
+  "total": 2766,
   "files": {
    "test-account-pool.mjs": 2,
    "test-account-reset-door.mjs": 2,
@@ -65,7 +65,7 @@
    "test-browser-orphans.mjs": 2,
    "test-browser-panel-model.mjs": 4,
    "test-browser-passkey-chrome.mjs": 2,
-   "test-browser-passkey.mjs": 16,
+   "test-browser-passkey.mjs": 14,
    "test-browser-picture.mjs": 5,
    "test-browser-pin.mjs": 1,
    "test-browser-profile-clone.mjs": 2,

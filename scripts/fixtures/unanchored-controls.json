@@ -65,7 +65,7 @@
     "test-browser-orphans.mjs": 2,
     "test-browser-panel-model.mjs": 4,
     "test-browser-passkey-chrome.mjs": 2,
-    "test-browser-passkey.mjs": 16,
+    "test-browser-passkey.mjs": 14,
     "test-browser-picture.mjs": 5,
     "test-browser-pin.mjs": 1,
     "test-browser-profile-clone.mjs": 2,
