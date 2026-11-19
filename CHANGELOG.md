@@ -131,6 +131,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A website sign-in left behind by a page in a conversation's Agent browser (it went elsewhere) now ends at once with its For you item; it stayed 10 minutes.
 - A running Codex conversation's Agent steps in its Properties now show the plan it is working through; they were always empty.
 - An app or desktop install no longer says it ended without recording its exit while it is still running (seen on Ubuntu 26.04).
+- When an agent's new tab loses its window before it is ready, VibeSpace opens it in a new window of the agent's own; it used to ask the agent to run it again.
 - When a desktop app's saved login cannot be written to disk, the app is told it was not saved instead of being told it was.
 - An Unlock button pressed right after the page loads now always opens the vault; it no longer does nothing or asks for the password while already unlocked.
 - After a restart, Resume all no longer calls a folder gone when its machine or storage mount waits for the vault or is not up; it asks you to unlock first.
@@ -191,7 +192,6 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The storage access boxes no longer point below at a Connect button that sits above them.
 - Mounting a folder from an offline machine now says it is offline first, with its pairing command.
 - In a Claude chat, a second Rewind to here waits for the first one's answer, and a message sent in that first minute comes back to the box.
-- When an agent's new tab loses its window before it is ready, VibeSpace opens it in a new window of the agent's own; it used to ask the agent to run it again.
 
 ### Security
 - A cluster install can let only its ingress reach each user's VibeSpace (networkPolicy.ingress, off until tried on a test cluster).
