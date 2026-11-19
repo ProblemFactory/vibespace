@@ -376,7 +376,8 @@ const newerStop = (a, b) => (msOf(a.stoppedAt) - msOf(b.stoppedAt) || msOf(a.cre
 /** → the sockFile whose copy this unlinked (the older stop of the same conversation), or null */
 // AN END OUTRANKS A RESTART (the one end record's contract, 主开发 2026-11-17 14:51Z): a record whose reason is `ended` (a person's
 // Terminate, an agent's admitted end) stands over a restart's copy of the same conversation, newer or not — a later restart that finds
-// its stale dead socket never turns it back into «a restart ended it»; only the create that makes it live again drops it
+// its stale dead socket never turns it back into «a restart ended it»; it leaves with the kept copy only at a turn that RAN well
+// (consumeKeptOf) or by the stopped list's live check — never at the create (主开发's ruling 2026-11-19 03:17Z)
 const endRank = (m) => (m && m.stopReason === STOP_ENDED ? 1 : 0);
 function keepStopped(sockFile, meta, id) {
   const k = keptKey(sockFile, meta, id), was = keptStopped.get(k);
