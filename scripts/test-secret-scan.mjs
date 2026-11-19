@@ -21,7 +21,7 @@
 //   ④ an allow row suppresses only the finding it overlaps; every match on a line is judged (+ the line-wide control)
 //   ⑤ --range: every commit's added lines (a token added and removed inside the push, named by commit), the full text
 //      of a touched file at its real line, nothing from an untouched file, a lone sha = what no remote-tracking ref
-//      has, a never-fetched base falls back to that, an unknown tip exits 2 (never "clean"), a `++` content line is
+//      has, a never-fetched base or an unknown tip exits 2 BY NAME (never "clean"; the old fallback read the kit's clone clean — CONTROL), a `++` content line is
 //      content; --tree reads every tracked file
 //   ⑥ THE THREE CALLERS census: the pre-push hook (--range, before the bypass and every tier), scripts/ci.mjs's fast
 //      tier (--tree) and the Actions secret-scan workflow (--tree) run scripts/secret-scan.mjs, none carries a
@@ -246,8 +246,24 @@ ok(!q2.json.some((f) => f.file.startsWith('notes/')), '…and nothing outside th
 git(rr, ['update-ref', 'refs/remotes/origin/main', A1]);
 const q3 = cli(rr, [`--range=${A3}`, '--json', '--quiet']);
 ok(q3.json.some((f) => f.file === 'src/t.js' && f.commit === A2) && !q3.json.some((f) => f.file.startsWith('notes/')), 'a lone sha = what no remote-tracking ref has (A1 is published: notes/ is not read)', q3.json);
+// EITHER END NOT A COMMIT HERE IS REFUSED BY NAME (the test kit's scan check, 2026-11-19): a never-fetched base once fell back
+// to the lone-tip reading, which over a clone whose remote-tracking refs hold every commit reads NOTHING — and said clean
 const q4 = cli(rr, [`--range=${'f'.repeat(39)}1..${A3}`, '--json']);
-ok(q4.status === 1 && /never fetched/.test(q4.out) && q4.json.some((f) => f.file === 'src/t.js'), 'a base this checkout never fetched falls back to that reading, and says so', q4.out);
+ok(q4.status === 2 && /the range's base f{39}1 is not a commit in this repository/.test(q4.out) && /NOT a clean verdict/.test(q4.out) && q4.json.length === 0,
+  `a base this checkout never fetched is REFUSED by name — exit 2, never «clean», nothing printed as findings (rc ${q4.status})`, q4.out);
+const q4t = cli(rr, [`--range=${A0}..${'d'.repeat(40)}`, '--json']);
+ok(q4t.status === 2 && /the range's tip d{40} is not a commit in this repository/.test(q4t.out), `…and an unknown TIP in the two-ended form (rc ${q4t.status})`, q4t.out);
+{ // CONTROL (the kit's find, reproduced): the scanner with the old fallback put back, over a range whose base this checkout lacks
+  // and whose tip a remote-tracking ref already holds, answers CLEAN (exit 0) — A2's token in that history unread
+  const NOW_LINE = "  if (m && !has(m[1])) throw gitErr(`the range's base ${m[1]} is not a commit in this repository (a remote sha never fetched?) — a range whose ends are not both commits here is never read as clean: fetch the base, or name the lone tip`);\n";
+  const WAS_LINE = "  if (m && !has(m[1])) { note = `the range's base ${m[1].slice(0, 12)} is not in this checkout (a remote sha never fetched) — scanning what no remote-tracking ref has instead`; m = null; }\n";
+  const fallbackAt = path.join(ROOT, 'secret-scan.fallback.mjs');
+  fs.writeFileSync(fallbackAt, scanSrc.replace(NOW_LINE, WAS_LINE));
+  git(rr, ['update-ref', 'refs/remotes/origin/kit', A3]);   // every commit up to A3 published, as in the kit's clone
+  const was = cli(rr, [`--range=${'f'.repeat(39)}1..${A3}`, '--quiet'], fallbackAt), now = cli(rr, [`--range=${'f'.repeat(39)}1..${A3}`, '--quiet']);
+  git(rr, ['update-ref', '-d', 'refs/remotes/origin/kit']);
+  ok(scanSrc.split(NOW_LINE).length === 2 && was.status === 0 && /scanning what no remote-tracking ref has instead/.test(was.out) && now.status === 2,
+    `CONTROL: with the old fallback put back (its own «scanning what no remote-tracking ref has instead» said) the same range reads CLEAN (rc ${was.status}) though A2 carries a token; the shipped scanner refuses it (rc ${now.status})`, was.out); }
 const q5 = cli(rr, [`--range=${'e'.repeat(40)}`]);
 ok(q5.status === 2 && /NOT a clean verdict/.test(q5.out), `an unknown tip exits 2 — never "clean" (rc ${q5.status})`, q5.out);
 const A4 = commit(rr, { 'src/plus.txt': `++ ${GH3}\n` }, 'A4: a content line that starts with ++');

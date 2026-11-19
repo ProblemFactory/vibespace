@@ -276,15 +276,26 @@ process.exit(fs.existsSync(path.join(repo, 'FAST_RED')) ? 1 : 0);
     const badRefs = `refs/heads/newbranch ${NBTIP} refs/heads/newbranch ${UNFETCHED}\n`;
     ok(spawnSync('git', ['-C', repo, 'diff', '--name-only', `${UNFETCHED}..${NBTIP}`], { encoding: 'utf-8', env: GIT_ENV }).status !== 0,
       'the unfetched-remote-sha range really does fail (the leg below is non-vacuous)');
+    // bl-ci 2026-11-19 (the test kit's scan check): the REAL scanner, copied into this fixture, refuses a range whose base is not a
+    // commit here — exit 2 by name — so the push is BLOCKED at the secret scan, before any tier and before any docs-only verdict
     const r11 = runHookRefs(badRefs);
-    ok(r11.calls.some((c) => c.mode === 'fast'), 'a range git CANNOT read is never treated as docs-only');
-    ok(/could not list the paths/.test(r11.out), '…and it says so out loud (§no-silent-failures), naming the command and git\'s own message');
-    const preQuiet = preFixHook('quietfail', ['  if [ "$rc" != "0" ]; then', '  if false; then']);
-    if (preQuiet) {
-      const r11n = runHookRefs(badRefs, {}, preQuiet);
-      ok(!r11n.calls.some((c) => c.mode === 'fast') && /docs-only/.test(r11n.out),
-        'NEG: without the exit-status check the same push is "docs-only", silently');
-    }
+    ok(r11.status !== 0 && /the secret scan could not read what \S+ publishes \(exit 2\)/.test(r11.out) && /the range's base f{39}1 is not a commit in this repository/.test(r11.out)
+      && !r11.calls.some((c) => c.mode === 'fast') && !/docs-only push/.test(r11.out),   // («NOT treating it as docs-only» is the path listing's own line)
+      'a range git CANNOT read is REFUSED at the secret scan (exit 2, named) — the push is blocked before any tier, never docs-only', r11.out);
+    // THE PATH LISTING'S OWN GUARD, judged with the scanner stood in as clean — the scan's refusal above must not mask it
+    const SCANNER = path.join(repo, 'scripts', 'secret-scan.mjs'), realScanner = fs.readFileSync(SCANNER);
+    fs.writeFileSync(SCANNER, 'process.exit(0);\n');
+    try {
+      const r11b = runHookRefs(badRefs);
+      ok(r11b.calls.some((c) => c.mode === 'fast'), 'a range git CANNOT read is never treated as docs-only (the scanner stood in as clean)');
+      ok(/could not list the paths/.test(r11b.out), '…and it says so out loud (§no-silent-failures), naming the command and git\'s own message');
+      const preQuiet = preFixHook('quietfail', ['  if [ "$rc" != "0" ]; then', '  if false; then']);
+      if (preQuiet) {
+        const r11n = runHookRefs(badRefs, {}, preQuiet);
+        ok(!r11n.calls.some((c) => c.mode === 'fast') && /docs-only/.test(r11n.out),
+          'NEG: without the exit-status check the same push is "docs-only", silently');
+      }
+    } finally { fs.writeFileSync(SCANNER, realScanner); }
   }
 
   // ── ROUND 4 (d): THE .git/ci-green SHORTCUT IS ABOUT THE PUSHED REFS ───

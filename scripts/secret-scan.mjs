@@ -235,8 +235,10 @@ function blobsAt(cwd, rev, paths) {
 
 /**
  * What a push publishes: `a..b` (an existing ref) or a lone `b` (a new branch — what no remote-tracking ref has).
- * Every commit's added lines + the combined diff + the full text at the tip of every file the range touches. A base
- * this checkout never fetched falls back to the lone-tip reading (said in `note`); an unknown tip is a git error.
+ * Every commit's added lines + the combined diff + the full text at the tip of every file the range touches. EITHER END
+ * that is not a commit here — an unknown tip, or a base this checkout never fetched — is a git error (exit 2, never
+ * «clean»). The base once fell back to the lone-tip reading: over a clone whose remote-tracking refs hold every commit
+ * that reads nothing, and an unresolvable range answered CLEAN (the test kit's own scan check found it, 2026-11-19).
  */
 export function scanRange(range, { cwd = process.cwd(), ...opts } = {}) {
   let m = /^([^\s.]+)\.\.([^\s.]+)$/.exec(String(range || '').trim());
@@ -246,7 +248,7 @@ export function scanRange(range, { cwd = process.cwd(), ...opts } = {}) {
   const has = (rev) => spawnSync('git', ['cat-file', '-e', `${rev}^{commit}`], { cwd }).status === 0;
   if (!has(tip)) throw gitErr(`the range's tip ${tip} is not a commit in this repository`);
   let note = null;
-  if (m && !has(m[1])) { note = `the range's base ${m[1].slice(0, 12)} is not in this checkout (a remote sha never fetched) — scanning what no remote-tracking ref has instead`; m = null; }
+  if (m && !has(m[1])) throw gitErr(`the range's base ${m[1]} is not a commit in this repository (a remote sha never fetched?) — a range whose ends are not both commits here is never read as clean: fetch the base, or name the lone tip`);
   const diffFlags = ['--no-color', '--no-ext-diff', '--no-textconv', '-U0'];
   const sel = m ? [`${m[1]}..${m[2]}`] : [tip, '--not', '--remotes'];
   const touched = new Set();
