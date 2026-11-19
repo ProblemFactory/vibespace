@@ -7544,6 +7544,8 @@ function create(deps = {}) {
     return run;
   }
   const CLIENT_SWAP_WORDS = i18nKey('{kind}: the company preset «{preset}» signs in with another client now — {n} account(s) still signed in with the old one; re-authorize each');
+  const SWAP_DONE_WORDS = i18nKey('Closed: none of the accounts this notice counts is still on the old client — a disabled account or a dead sign-in is not counted.');   // the rule's close (nobody owed)
+  const SWAP_STALE_WORDS = i18nKey('Closed: this notice is out of date — the preset names another client since, or no account is left under it.');   // a superseded item's close, and the sweep's (no memo holds it)
   // A REOPENED client-swap item is judged AT ONCE (the store says a reopen: verify-r6 W2) — one no memo holds closes again,
   // the rule's own is read by the rule — never left open with stale words until some later check
   const offSwapReopen = userTodos && typeof userTodos.onStatus === 'function' ? userTodos.onStatus((it, { status } = {}) => { if (status === 'open' && it && it.sessionKey === INBOX_KEY && it.i18n && it.i18n.text && it.i18n.text.key === CLIENT_SWAP_WORDS && !stopped) clientSwapCheck().catch((err) => log.warn(`[channels] client-swap check (a reopen) failed: ${(err && err.message) || err}`)); }) : null;
@@ -7586,6 +7588,26 @@ function create(deps = {}) {
     for (const k of keys.values()) { const bare = k.key.slice(CLUSTER_PREFIX.length); k.preset = k.label ? (byLabel.get(k.label) > 1 ? `${k.label} (${bare})` : k.label) : bare; }
     const close = (id) => { try { const it = userTodos && id ? userTodos.get(id) : null; if (it && it.status === 'open' && it.sessionKey === INBOX_KEY) userTodos.setStatus(id, 'done', RESOLVED_BY); } catch { } };
     const isOpen = (id) => { try { const it = userTodos && id ? userTodos.get(id) : null; return !!(it && it.status === 'open' && it.sessionKey === INBOX_KEY); } catch { return false; } };
+    // B-166e smalls (主开发 2026-11-19 03:35Z): an item this check CLOSES says WHY in one line FIRST — a person who reopened it
+    // sees the reason it closed again, never a silent close. Its own lines stay after it (who was named; an earlier why is
+    // dropped, never stacked); its words and door kept. A refused redraw is said in the journal and the item still closes.
+    // → true when the why was drawn
+    const SWAP_WHYS = new Set([SWAP_DONE_WORDS, SWAP_STALE_WORDS]);
+    const closeWhy = (id, why) => {
+      let drawn = false;
+      try {
+        const it = userTodos && id ? userTodos.get(id) : null;
+        if (it && it.status === 'open' && it.sessionKey === INBOX_KEY && typeof userTodos.redrawItem === 'function' && it.i18n && it.i18n.text && it.action) {
+          const rows = (Array.isArray(it.i18n.detail) ? it.i18n.detail : []).filter((l) => !(l && SWAP_WHYS.has(l.key)));
+          const plain = String(it.detail || '').split('\n').filter((l) => l && !SWAP_WHYS.has(l)).join('\n');
+          const r = userTodos.redrawItem((x) => x.id === id, { text: it.text, detail: plain ? `${why}\n${plain}` : why, i18n: { text: it.i18n.text, detail: [{ key: why, params: {} }, ...rows].slice(0, 12), source: it.i18n.source || INBOX_SOURCE }, action: it.action });
+          drawn = !!(r && r.ok);
+          if (!drawn) log.warn(`[channels] the client-swap item's closing words were refused (${(r && r.code) || 'refused'}) — it closes without them`);
+        }
+      } catch (e) { log.warn(`[channels] the client-swap item's closing words could not be drawn: ${(e && e.message) || e}`); }
+      close(id);
+      return drawn;
+    };
     const next = { ...memos };
     let changed = false;
     for (const [mk, k] of keys) {
@@ -7626,8 +7648,8 @@ function create(deps = {}) {
         if (step.act === 'file' && !itemId) continue;   // nothing was filed (no tray): nobody is named, the memo stands — the next check says it
         // the owed are NAMED only when an item showed them: a redraw refused (the item closed meanwhile) names nobody new
         const named = refused && m && m.to === k.to ? m.named : step.memo.named;
-        if (step.supersede && m && m.itemId && m.itemId !== itemId) close(m.itemId);
-        if (step.act === 'close') close(itemId);
+        if (step.supersede && m && m.itemId && m.itemId !== itemId) closeWhy(m.itemId, SWAP_STALE_WORDS);   // a superseded item says it is out of date
+        if (step.act === 'close' && closeWhy(itemId, k.only ? SWAP_STALE_WORDS : SWAP_DONE_WORDS)) { sig = ''; stuck = ''; }   // no account left: out of date (never «none on the old client»); the why drawn ⇒ a reopen with someone owed is redrawn
         // a preset with NO account left whose item is closed: nothing to remember — its memo leaves the map
         if (k.only && !step.memo.open) { if (mk in next) { delete next[mk]; changed = true; } continue; }
         const after = { to: step.memo.to, named, itemId, sig, ...(stuck ? { stuck } : {}) };
@@ -7644,8 +7666,8 @@ function create(deps = {}) {
     try {
       const held = new Set(Object.values(next).map((x) => x && x.itemId).filter(Boolean));
       const dead = userTodos && typeof userTodos.idsWhere === 'function' ? userTodos.idsWhere((i) => i && i.status === 'open' && i.sessionKey === INBOX_KEY && !held.has(i.id) && i.i18n && i.i18n.text && i.i18n.text.key === CLIENT_SWAP_WORDS) : [];
-      for (const id of dead) close(id);
-    } catch { }
+      for (const id of dead) closeWhy(id, SWAP_STALE_WORDS);
+    } catch (e) { log.warn(`[channels] the client-swap sweep failed: ${(e && e.message) || e} — an item no memo holds stays open until the next check`); }
     if (changed && !stopped) {
       try { await store.adapters.update(() => { store.adapters.live().clientSwaps = next; }); }
       catch (e) { log.warn(`[channels] the client-swap memo was not written: ${(e && e.message) || e} — the next check reads the presets again`); }

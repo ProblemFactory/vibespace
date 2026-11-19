@@ -8714,6 +8714,8 @@ export default {
   "{kind}: the company preset «{preset}» signs in with another client now — {n} account(s) still signed in with the old one; re-authorize each": "{kind}: 会社のプリセット「{preset}」は別のクライアントでサインインするようになりました — {n} 件のアカウントがまだ古いクライアントのままです。1 件ずつ再認可してください",
   "Its OAuth client is another one now. These accounts keep refreshing with the client they signed in with until the vendor deletes it: {labels}.": "OAuth クライアントは別のものになりました。ベンダーが古いクライアントを削除するまで、これらのアカウントはサインインしたときのクライアントで更新を続けます: {labels}。",
   "Re-authorize opens the next one; this item resolves when none is left.": "「再認可」で次のアカウントを開きます。残りがなくなると、この項目は解決します。",
+  "Closed: none of the accounts this notice counts is still on the old client — a disabled account or a dead sign-in is not counted.": "完了：この通知が数えるアカウントで古いクライアントのものはありません（無効なアカウントと失効したサインインは数えません）。",
+  "Closed: this notice is out of date — the preset names another client since, or no account is left under it.": "完了：この通知は古くなりました。プリセットのクライアントがその後変わったか、アカウントが残っていません。",
   "That account is gone": "そのアカウントはもうありません",
   "Memory is {pct}% full ({used} of {limit} GB) — the most is held by {who}": "メモリ使用率 {pct}%（{used} / {limit} GB）— 最も多く使っているのは{who}",
   "Memory is {pct}% full ({used} of {limit} GB)": "メモリ使用率 {pct}%（{used} / {limit} GB）",

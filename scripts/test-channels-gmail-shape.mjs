@@ -2482,7 +2482,7 @@ console.log('\n㉗ B-166e part 2 (1): a company preset\'s client swapped under i
   const PLANTS = [
     ['no-memo', "const step = clientSwapStep(m ? { to: m.to, named: m.named, open: isOpen(m.itemId) } : null, k.to, k.need.map((r) => r.id));", "const step = clientSwapStep(m ? { to: m.to, named: [], open: isOpen(m.itemId) } : null, k.to, k.need.map((r) => r.id));", (c) => c.dismissed.open === 1, 'without the NAMED accounts kept the swap is filed again at the next reload — the item the person dismissed re-opens'],
     ['no-door', "const r = userTodos.redrawItem((x) => x.id === itemId, { text, detail, i18n, action });", "const r = userTodos.redrawItem((x) => x.id === itemId, { text, detail, i18n });", (c) => J(c.one) === J([{ n: 2, door: 'g-alpha', type: 'channel-reauth' }]), 'without the door\'s move the item says «2» and still opens the account already re-authorized'],
-    ['no-close', "        if (step.act === 'close') close(itemId);", "", (c) => c.zero.open === 1, 'without the close the item stays open at zero'],
+    ['no-close', "        if (step.act === 'close' && closeWhy(itemId, k.only ? SWAP_STALE_WORDS : SWAP_DONE_WORDS)) { sig = ''; stuck = ''; }", "", (c) => c.zero.open === 1, 'without the close the item stays open at zero'],
     ['no-blind', "      if (!rd.token) { if (rd.why !== 'never-authenticated') k.blind = true; continue; }", "      if (!rd.token) continue;", (c) => J(c.blind) === J([{ n: 2, door: 'g-alpha', type: 'channel-reauth' }]), 'without the blind rule an unread token counts the preset down (a locked or broken read would resolve it)'],
     ['no-listener', "      if (id === null && (why === 'presets' || why === 'vault') && !stopped) clientSwapCheck().catch((err) => log.warn(`[channels] client-swap check failed: ${(err && err.message) || err}`));", "", (c) => J(c.swap) === J([]), 'without the listener\'s call the reload says nothing'],
   ];
@@ -2538,8 +2538,24 @@ console.log('\n㉗ (1b) B-166e part 2 cure: the client in force kept at the clos
       await E.clientSwapCheck();
       presetsHolder.list = [BP]; integrations.presetsChanged('presets'); await settle(); st.swap = look(); st.swapText = (open()[0] || {}).text || '';
       if (upto === 'swap') return st;
+      // THE SWEEP'S OWN CASES, early: an open client-swap item no memo holds (planted — its text is not the counted words, so
+      // the legs that count the preset's items see none) is closed with the out-of-date why; a sweep that FAILS is said in the
+      // journal (the store's lookup throwing for one check), never swallowed
+      {
+        const orphan = todos.add('channels', { origin: 'channels', kind: 'action', urgency: 'normal', by: 'agent', sessionName: 'Channels', text: 'Gmail: an orphan notice', detail: 'One mail', action: { type: 'channel-reauth', adapterId: 'd-one' },
+          i18n: { text: { key: '{kind}: the company preset «{preset}» signs in with another client now — {n} account(s) still signed in with the old one; re-authorize each', params: { kind: 'Gmail', preset: 'orphan', n: 1 } }, detail: [{ key: 'One mail', params: {} }], source: { key: 'Channels' } } });
+        await E.clientSwapCheck(); await settle();
+        const o = todos.get(orphan && orphan.id) || {};
+        st.orphan = { status: o.status || null, first: String(o.detail || '').split('\n')[0] };
+        const realIdsWhere = todos.idsWhere.bind(todos), sw0 = warns.length;
+        todos.idsWhere = () => { throw new Error('sweep probe'); };
+        try { await E.clientSwapCheck(); await settle(); } finally { todos.idsWhere = realIdsWhere; }
+        st.sweepWarns = warns.slice(sw0).filter((w) => /client-swap sweep failed: sweep probe/.test(w)).length;
+      }
+      if (upto === 'probes') return st;
       const firstId = (open()[0] || {}).id;
-      presetsHolder.list = [CP]; integrations.presetsChanged('presets'); await settle(); st.supersede = { open: look(), memo: memoTo(), text: (open()[0] || {}).text || '', first: (todos.get(firstId) || {}).status || null, items: items().length };
+      presetsHolder.list = [CP]; integrations.presetsChanged('presets'); await settle(); st.supersede = { open: look(), memo: memoTo(), text: (open()[0] || {}).text || '', first: (todos.get(firstId) || {}).status || null, items: items().length, firstWhy: String((todos.get(firstId) || {}).detail || '').split('\n')[0] };
+      if (upto === 'supersede') return st;
       presetsHolder.list = [OLDP]; integrations.presetsChanged('presets'); await settle(); st.revert = { open: open().length, memo: memoTo() };
       presetsHolder.list = [CP]; integrations.presetsChanged('presets'); await settle(); st.again = look();   // back to the client the memo held before the revert
       const s0 = saves; integrations.presetsChanged('presets'); await settle(); st.idleSaves = saves - s0;   // nothing moved
@@ -2562,6 +2578,27 @@ console.log('\n㉗ (1b) B-166e part 2 cure: the client in force kept at the clos
       // THE UNCOUNTED CLOSE (the cure's read): every account still on the old client DISABLED — the item resolves, but the swap
       // is not over: the memo keeps the swap's client; the preset moves on; the accounts back — SAID
       await E.setEnabled('d-two', false); await E.setEnabled('d-three', false); await settle(); st.uncountedClose = { open: open().length, memo: memoTo() };
+      // B-166e smalls (主开发 03:35Z): the rule's close SAYS WHY on the item; a person who REOPENS it while nobody is owed sees it
+      // closed again at once — with that why, never in silence
+      {
+        const mm = E.store.adapters.live().clientSwaps || {}, mk0 = Object.keys(mm)[0], ucId = mk0 ? mm[mk0].itemId : null;
+        const first = (todos.get(ucId) || {}).detail || '';
+        try { todos.setStatus(ucId, 'open', 'user'); } catch { }
+        await settle();
+        const it = todos.get(ucId) || {};
+        st.closeWhy = { sig: (E.store.adapters.live().clientSwaps || {})[mk0] ? E.store.adapters.live().clientSwaps[mk0].sig : null, first: first.split('\n')[0], again: it.status || null, detail: String(it.detail || '').split('\n')[0], whys: String(it.detail || '').split('\n').filter((l) => /^Closed/.test(l)).length, key: ((it.i18n && it.i18n.detail) || [])[0] && it.i18n.detail[0].key, kept: String(it.detail || '').includes('Its OAuth client is another one now') };
+        // the accounts back (already named: nothing said); the person REOPENS the closed item — someone is owed again, so it
+        // stays open and is redrawn with the real words, never left showing «Closed: …» (the memo's sig cleared at the close)
+        // (d-three only: the reopen then wants exactly the words drawn before the close — «1», «Three mail» — so only the
+        // cleared sig redraws them)
+        await E.setEnabled('d-three', true); await settle();
+        try { todos.setStatus(ucId, 'open', 'user'); } catch { }
+        await settle();
+        const it2 = todos.get(ucId) || {};
+        st.reopenOwed = { status: it2.status || null, first: String(it2.detail || '').split('\n')[0] };
+        await E.setEnabled('d-three', false); await settle();   // as it stood: closed, with its why
+      }
+      if (upto === 'closewhy') return st;
       presetsHolder.list = [CP]; integrations.presetsChanged('presets'); await settle(); st.uncountedMoved = { open: open().length, memo: memoTo() };
       await E.setEnabled('d-two', true); await E.setEnabled('d-three', true); await settle(); st.reenabled = look();
       // A REDRAW THE TRAY REFUSES: said once, never tried again until its words change
@@ -2602,13 +2639,14 @@ console.log('\n㉗ (1b) B-166e part 2 cure: the client in force kept at the clos
       // under the preset — its item closes, its memo leaves the map
       const THREE = ['d-one', 'd-two', 'd-three'];
       await E.store.adapters.update(() => { for (const id of THREE) rec(id).credentialKey = 'custom'; }); await E.clientSwapCheck(); await settle();
-      st.moved = { open: open().length, memo: memoTo() };
+      st.moved = { open: open().length, memo: memoTo(), first: String((todos.get(bpId) || {}).detail || '').split('\n')[0] };   // the rule's close with no account left: the out-of-date words
+      if (upto === 'moved') return st;
       // THE PERSON REOPENS that closed item (its memo pruned; its door an account that still exists): the store says the
       // reopen — closed again AT ONCE (no other check runs here)
       try { todos.setStatus(bpId, 'open', 'user'); } catch { }
       const was = (todos.get(bpId) || {}).status || null;
       await settle();
-      st.reopened = { was, after: (todos.get(bpId) || {}).status || null };
+      st.reopened = { was, after: (todos.get(bpId) || {}).status || null, detail: (todos.get(bpId) || {}).detail || '' };
       // back under the preset, still signed in with the old client: a new swap for them — SAID
       await E.store.adapters.update(() => { for (const id of THREE) rec(id).credentialKey = KEY; }); await E.clientSwapCheck(); await settle();
       st.movedBack = look();
@@ -2635,7 +2673,12 @@ console.log('\n㉗ (1b) B-166e part 2 cure: the client in force kept at the clos
   ok(got.full.adds === 2 && got.full.lines === 1 && J(got.fullAfter) === J([{ n: 1, door: 'd-three' }]) && got.fullMemo && got.fullMemo.to === BP.clientId, `㉗ (1b) a FULL tray refuses the new swap's item at two checks: said ONCE (${got.full.lines} line); the tray free again — FILED: «1», its door the one owed, the memo on the new client`, J({ full: got.full, after: got.fullAfter, memo: got.fullMemo }));
   ok(got.fullAgainFiled === 1 && got.fullAgainIdle === 1 && got.fullAgainWithdrawn === 1 && J(got.fullBack) === J([{ n: 1, door: 'd-three' }]), `㉗ (1b) a full tray AGAIN is a new episode, said again: after an item was filed (${got.fullAgainFiled}), after a check with nothing to file (${got.fullAgainIdle}) and after the preset was withdrawn (${got.fullAgainWithdrawn}); the filed item stands`, J({ filed: got.fullAgainFiled, idle: got.fullAgainIdle, withdrawn: got.fullAgainWithdrawn, back: got.fullBack }));
   ok(J(got.refused.tries) === J([1, 1, 2]) && got.refused.lines === 2, `㉗ (1b) a redraw the tray REFUSES is said once and not tried again with the same words (tries ${J(got.refused.tries)}); words that moved are tried again (and said again)`, J(got.refused));
+  ok(got.closeWhy.first === 'Closed: none of the accounts this notice counts is still on the old client — a disabled account or a dead sign-in is not counted.' && got.closeWhy.again === 'done' && got.closeWhy.detail === 'Closed: none of the accounts this notice counts is still on the old client — a disabled account or a dead sign-in is not counted.' && got.closeWhy.key === 'Closed: none of the accounts this notice counts is still on the old client — a disabled account or a dead sign-in is not counted.' && got.closeWhy.whys === 1 && got.closeWhy.kept && got.closeWhy.sig === '', '㉗ (1b) the rule\'s close SAYS WHY on the item, FIRST (one line, keyed for the person\'s language; its own lines kept after it, an earlier why never stacked); a person who reopens it while nobody is owed sees it closed again at once with that why', J(got.closeWhy));
+  ok(got.reopenOwed.status === 'open' && /^Its OAuth client is another one now/.test(got.reopenOwed.first), '㉗ (1b) reopened with someone owed again: it stays open and is REDRAWN with the real words — never left showing «Closed: …»', J(got.reopenOwed));
+  ok(got.supersede.firstWhy === 'Closed: this notice is out of date — the preset names another client since, or no account is left under it.', '㉗ (1b) a superseded item says it is out of date as it closes', J(got.supersede.firstWhy));
+  ok(got.moved.first === 'Closed: this notice is out of date — the preset names another client since, or no account is left under it.', '㉗ (1b) the rule\'s close with NO account left under the preset says the notice is out of date — never «none of the accounts … on the old client»', J(got.moved));
   ok(got.moved.open === 0 && got.moved.memo === null, '㉗ (1b) the last accounts MOVED to another key: nobody left under the preset — its item closes, its memo leaves the map', J(got.moved));
+  ok(got.orphan.status === 'done' && got.orphan.first === 'Closed: this notice is out of date — the preset names another client since, or no account is left under it.' && got.sweepWarns === 1, '㉗ (1b) the sweep closes an open item no memo holds WITH its why (the planted orphan); a sweep that fails is said in the journal (at every check it fails), never swallowed', J({ orphan: got.orphan, warns: got.sweepWarns }));
   ok(got.reopened.was === 'open' && got.reopened.after === 'done', '㉗ (1b) that item REOPENED by the person (its memo pruned, its door an account that still exists): closed again AT ONCE — the store\'s reopen starts the check', J(got.reopened));
   ok(J(got.movedBack) === J([{ n: 1, door: 'd-three' }]), '㉗ (1b) the accounts back under the preset, still on the old client: a new item SAYS them', J(got.movedBack));
   ok(got.allGone.memo === null, '㉗ (1b) the last accounts removed: the preset\'s memo leaves the map', J(got.allGone));
@@ -2652,7 +2695,13 @@ console.log('\n㉗ (1b) B-166e part 2 cure: the client in force kept at the clos
     ['no-full-clear-filed', "            itemId = item && item.id ? item.id : null; sig = want; stuck = ''; fullSaid.delete(mk);", "            itemId = item && item.id ? item.id : null; sig = want; stuck = '';", (c) => c.fullAgainFiled === 0, 'without the filing\'s clear a full tray after a filed item is never said again'],
     ['no-full-clear-idle', "        if (step.act !== 'file') fullSaid.delete(mk);   // nothing to file now: a later full tray is a new episode, said again", "", (c) => c.fullAgainIdle === 0, 'without the clear at a check with nothing to file a full tray after an unfiled episode is never said again'],
     ['no-full-clear-withdrawn', "      if (!k.to) { fullSaid.delete(mk); continue; }   // the preset withdrawn: as it stands (the accounts' own refresh says it); nothing to file", "      if (!k.to) continue;", (c) => c.fullAgainWithdrawn === 0, 'without the clear at a withdrawn preset a full tray after it comes back is never said'],   // stale-pins: kept (the control restores the old line)
-    ['no-sweep', "      for (const id of dead) close(id);", "", (c) => c.reopened.after === 'open', 'without the sweep the reopened item no memo holds stays open for good, its words stale'],
+    ['no-sweep', "      for (const id of dead) closeWhy(id, SWAP_STALE_WORDS);", "", (c) => c.reopened.after === 'open', 'without the sweep the reopened item no memo holds stays open for good, its words stale'],
+    ['no-close-why', "        if (step.act === 'close' && closeWhy(itemId, k.only ? SWAP_STALE_WORDS : SWAP_DONE_WORDS)) { sig = ''; stuck = ''; }", "        if (step.act === 'close') close(itemId);", (c) => c.closeWhy.again === 'done' && c.closeWhy.detail !== 'Closed: none of the accounts this notice counts is still on the old client — a disabled account or a dead sign-in is not counted.', 'without the why the rule closes the reopened item again in silence (its old words left on it)', 'closewhy'],   // stale-pins: kept (the control restores the old line)
+    ['no-sig-clear', "        if (step.act === 'close' && closeWhy(itemId, k.only ? SWAP_STALE_WORDS : SWAP_DONE_WORDS)) { sig = ''; stuck = ''; }", "        if (step.act === 'close') closeWhy(itemId, k.only ? SWAP_STALE_WORDS : SWAP_DONE_WORDS);", (c) => c.reopenOwed.status === 'open' && /^Closed/.test(c.reopenOwed.first), 'without the cleared sig a reopen with someone owed again stays open showing «Closed: …»', 'closewhy'],
+    ['no-only-stale', "closeWhy(itemId, k.only ? SWAP_STALE_WORDS : SWAP_DONE_WORDS)", "closeWhy(itemId, SWAP_DONE_WORDS)", (c) => c.moved.first === 'Closed: none of the accounts this notice counts is still on the old client — a disabled account or a dead sign-in is not counted.', 'without the out-of-date words a close with no account left claims «none of the accounts … on the old client»', 'moved'],
+    ['no-supersede-why', "        if (step.supersede && m && m.itemId && m.itemId !== itemId) closeWhy(m.itemId, SWAP_STALE_WORDS);", "        if (step.supersede && m && m.itemId && m.itemId !== itemId) close(m.itemId);", (c) => c.supersede.firstWhy !== 'Closed: this notice is out of date — the preset names another client since, or no account is left under it.', 'without its why a superseded item closes in silence', 'supersede'],   // stale-pins: kept (the control restores the old line)
+    ['no-sweep-why', "      for (const id of dead) closeWhy(id, SWAP_STALE_WORDS);", "      for (const id of dead) close(id);", (c) => c.orphan.status === 'done' && c.orphan.first !== 'Closed: this notice is out of date — the preset names another client since, or no account is left under it.', 'without its why the sweep closes an item no memo holds in silence', 'probes'],   // stale-pins: kept (the control restores the old line)
+    ['no-sweep-warn', "    } catch (e) { log.warn(`[channels] the client-swap sweep failed: ${(e && e.message) || e} — an item no memo holds stays open until the next check`); }", "    } catch { }", (c) => c.sweepWarns === 0, 'without the warn a failing sweep is swallowed in silence', 'probes'],   // stale-pins: kept (the control restores the old line)
     ['no-reopen-hook', "  const offSwapReopen = userTodos && typeof userTodos.onStatus === 'function' ? userTodos.onStatus(", "  const offSwapReopen = false ? userTodos.onStatus(", (c) => c.reopened.after === 'open', 'without the reopen listener a reopened item waits for some later check'],
     ['no-stuck', "            if (want === stuck) refused = true;   // the tray refused these very words before: said once, never tried again until they change", "            if (false) refused = true;", (c) => c.refused.tries[1] > c.refused.tries[0], 'without the stuck words the refused redraw is tried again at every check'],
     ['no-memo-only', "      keys.set(mk, { key, to: v && v.clientId ? String(v.clientId) : m0.to, kind: '', label: (r && r.clusterLabel) || '', need: [], blind: false, only: true });", "", (c) => c.allGone.open === 1, 'without the memo-only presets the item of a preset whose last account left stays open for ever'],

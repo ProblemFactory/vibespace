@@ -8715,6 +8715,8 @@ export default {
   "{kind}: the company preset «{preset}» signs in with another client now — {n} account(s) still signed in with the old one; re-authorize each": "{kind}：公司预设「{preset}」现在用另一个客户端登录 — 仍有 {n} 个账号用旧客户端登录着；请逐个重新授权",
   "Its OAuth client is another one now. These accounts keep refreshing with the client they signed in with until the vendor deletes it: {labels}.": "它的 OAuth 客户端已换成另一个。在供应商删除旧客户端之前，这些账号仍用登录时的客户端刷新：{labels}。",
   "Re-authorize opens the next one; this item resolves when none is left.": "「重新授权」会打开下一个账号；没有剩下的账号时，这一项自动解决。",
+  "Closed: none of the accounts this notice counts is still on the old client — a disabled account or a dead sign-in is not counted.": "已关闭：这条提示计入的账号都不再使用旧客户端——已停用的账号和已失效的登录不计入。",
+  "Closed: this notice is out of date — the preset names another client since, or no account is left under it.": "已关闭：这条提示已过时——预设的客户端又变了，或者这个预设下已没有账号。",
   "That account is gone": "该账户已不存在",
   "Memory is {pct}% full ({used} of {limit} GB) — the most is held by {who}": "内存已用 {pct}%（{used} / {limit} GB）——占用最多的是{who}",
   "Memory is {pct}% full ({used} of {limit} GB)": "内存已用 {pct}%（{used} / {limit} GB）",
