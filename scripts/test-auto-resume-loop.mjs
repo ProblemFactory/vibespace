@@ -187,7 +187,11 @@ function mkWorld({ dir = null, healthy = true, ignoreWorkedFlag = false, arModul
     // and drops once the continue is delivered or refused), a bounded COUNT of looks, never a fixed 20 ms: a slower gate read
     // as «no fire», and a frozen clock (§4h) was restored under a gate still deciding — it then judged two minutes early and
     // re-armed for the NEXT member's reset (the row's red-then-green on the runner)
-    for (let k = 0; k < 600 && session._arFiring; k++) await new Promise((r) => setTimeout(r, 5));
+    // (at least ONE turn, always: a refusal before the flag rises — canFire's 'same-identity' — still leaves the timers it queued,
+    // the wall probe's setTimeout(0) among them, their turn: §1(d) reads the arm they re-time; the read's MUST)
+    let k = 0;
+    do { await new Promise((r) => setTimeout(r, 5)); } while (session._arFiring && ++k < 600);
+    if (session._arFiring) ok('tickFire: the pre-fire gate settled within its 600 looks (it never did — the race B-b4af is about)', false);
     return fired.length > before;
   };
   return w;
@@ -903,8 +907,8 @@ if (!probe) {
   // the old shape (tick, 20 ms, read): it reads NO fire while the gate still decides, and its clock is the real one by the time
   // the gate runs (the row's red). THE NEW tickFire waits for the gate's own settle through the same hold: the continue lands on
   // the member whose window just landed. (No ms bound judges either: the hold ends on the leg's word.)
-  const plant = () => {
-    const w = mkWorld(), realNow = Date.now, RU = Math.floor(realNow() / 1000) + 120, T = (RU + 60) * 1000 + 300, far = RU + 100 * 60;
+  const plant = (offMs = 300) => {
+    const w = mkWorld(), realNow = Date.now, RU = Math.floor(realNow() / 1000) + 120, T = (RU + 60) * 1000 + offMs, far = RU + 100 * 60;
     w.writeCache(w.LINK, { fetchedAt: realNow() - 60000, source: 'cli-usage', fiveHour: { utilization: 1, status: 'limited', resetsAt: far }, sevenDay: { utilization: 0.4, resetsAt: w.R7 } });
     w.writeCache(w.FISH, { fetchedAt: realNow() - 60000, source: 'cli-usage', fiveHour: { utilization: 1, status: 'limited', resetsAt: far + 600 }, sevenDay: { utilization: 0.4, resetsAt: w.R7 } });
     w.writeCache(w.SPARE, { fetchedAt: realNow() - 60000, source: 'cli-usage', fiveHour: { utilization: 0.99, resetsAt: RU }, sevenDay: { utilization: 0.36, resetsAt: w.R7 } });
@@ -924,13 +928,20 @@ if (!probe) {
   P0.open();
   for (let k = 0; k < 600 && P0.w.session._arFiring; k++) await new Promise((r) => setTimeout(r, 5));   // (the late gate settles — on the real clock now)
   const lines0 = cap0.done();
-  ok('B-b4af CONTROL: with the gate held past its 20 ms, the OLD tick shape reads NO fire (the gate had been entered) — the leg\'s red in that window', oldDid === false && enteredOld >= 1, JSON.stringify({ oldDid, enteredOld, late: lines0.filter((l) => /re-armed/.test(l)).slice(0, 2) }));
+  ok('B-b4af CONTROL: with the gate held past its 20 ms, the OLD tick shape reads NO fire (the gate had been entered), and the late gate — judging on the real clock it was handed back — RE-ARMS for the next member: the row\'s red, both halves', oldDid === false && enteredOld >= 1 && P0.w.fired.length === 0 && lines0.some((l) => /re-armed at fire/.test(l)), JSON.stringify({ oldDid, enteredOld, fired: P0.w.fired.length, late: lines0.filter((l) => /re-armed/.test(l)).slice(0, 2) }));
   const P1 = plant(), cap1 = capture();
   Date.now = () => P1.T;
   let did = false;
-  try { const p = P1.w.tickFire(); await new Promise((r) => setImmediate(r)); P1.open(); did = await p; } finally { Date.now = P1.realNow; }
+  // (the hold is released after a STALL PLACED past the old 20 ms window — a placement, never a verdict bound: a tickFire that
+  // read at 20 ms would read «no fire» here as the control did; the read's MUST)
+  try { const p = P1.w.tickFire(); await new Promise((r) => setTimeout(r, 40)); P1.open(); did = await p; } finally { Date.now = P1.realNow; }
   const lines1 = cap1.done();
   ok('B-b4af: the NEW tickFire waits for the gate\'s own settle through the same hold — the continue lands on the member whose window just landed, no re-arm', did === true && P1.entered() >= 1 && P1.w.linkNow() === P1.w.SPARE && P1.w.fired.length === 1 && !lines1.some((l) => /re-armed at fire/.test(l)), JSON.stringify({ did, entered: P1.entered(), link: P1.w.nameOf(P1.w.linkNow()), fired: P1.w.fired.length }));
+  // THE BOUNDARY, ±1 ms (the triage's frozen-clock reproduction): resetLanded floors the clock (r + 60 <= floor(now / 1000)) —
+  // a fire 1 ms before reset + grace is not landed (no continue, re-armed), at exactly reset + grace and 1 ms after it continues
+  const atOff = async (offMs) => { const P = plant(offMs), cap = capture(); P.open(); Date.now = () => P.T; let d = false; try { d = await P.w.tickFire(); } finally { Date.now = P.realNow; } const ls = cap.done(); return { did: d, link: P.w.nameOf(P.w.linkNow()), spare: P.w.linkNow() === P.w.SPARE, rearmed: ls.some((l) => /re-armed at fire/.test(l)) }; };
+  const bm1 = await atOff(-1), b0 = await atOff(0), bp1 = await atOff(1);
+  ok('B-b4af BOUNDARY: 1 ms BEFORE reset + grace the window has not landed — no continue, re-armed; at exactly reset + grace and 1 ms after, the continue lands on the member whose window landed', bm1.did === false && bm1.rearmed && b0.did === true && b0.spare && bp1.did === true && bp1.spare, JSON.stringify({ bm1, b0, bp1 }));
 }
 {
   // THE GATE PROBES THE MEMBER IT IS MOVING TO (R4): the switch runs BEFORE the probe target is read
