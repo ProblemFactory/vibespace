@@ -633,6 +633,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     'not-running': () => t("the page's picture"),
     'background-tab': () => t("the tab's own picture, a new one every half second — its window shows another tab in front"),
     'background-settle': () => t("the tab's own picture — its window's picture again in a moment"),
+    'background-stuck': () => t("the tab's last own picture — it does not answer, and its window shows another tab in front"),
     untold: () => t("the page's picture — this conversation's window could not be told apart on the display"),
   };
   const xOn = () => !!xp.view;
@@ -688,6 +689,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     winInfo._liveX = view; // the raw handle the heavy suite reads (never the DOM)
     send({ type: 'config', maxFps: wantFps() }); // the page's frames are not drawn here: the bridge's own uses keep their pace
     scheduleReport(); renderMode();
+    renderWatchLine(); // the takeover's sentence names the window only while it is drawn
   }
   function unmountX() {
     if (!xp.view) return;
@@ -696,6 +698,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     xHost.textContent = ''; xHost.style.display = 'none'; canvas.style.display = '';
     send({ type: 'config', maxFps: wantFps() });
     scheduleReport(); renderDeskDoor(); // lane desktop-x-seat-browser r2: the X picture gone — the raw fallback's door is judged again
+    renderWatchLine(); // the takeover's sentence names the window only while it is drawn
   }
   /** The X view's mode follows THE takeover (the keeper's lease, the relay's `mode` records): active only while this view drives. */
   function syncX() {
@@ -1621,8 +1624,9 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       text = driving ? t('This tab is not responding — no picture, and it did not answer when asked (a busy or hung page). Reload it, or switch to another tab') : t('The agent’s tab is not responding — no picture, and it did not answer when asked (a busy or hung page). This view updates as soon as it answers');
     } else if (st.bg) {
       const row = (st.tabRow && st.tabRow.rows || []).find((x) => x.targetId === String(st.bg.targetId || '').toUpperCase() || x.active);
-      // 主开发's law (3): a takeover shows the WINDOW as it is — the tab in front is no tab of the agent's: the first press is not a guess
-      if (driving) { text = st.pictureSource && st.pictureSource.source === 'x' ? t('This tab is behind another tab in its window — the tab in front is not the agent’s: press the agent’s tab in the browser’s own tab strip, or Bring it forward') : t('This tab is in the background of its window and paints nothing — bring it forward to see it live (a new picture every half second meanwhile)'); if (row) { btn = t('Bring it forward'); act = () => tabAct('switch', row); } }
+      // 主开发's law (3) + ruling S3 (21:52Z): a takeover shows the WINDOW as it is — the sentence names where to press, never whose
+      // the tab in front is (it may be another tab of the same agent); only while the window is DRAWN (its read's nit)
+      if (driving) { text = xOn() ? t('This tab is behind another tab in its window: press this tab in the browser’s own tab strip, or Bring it forward') : t('This tab is in the background of its window and paints nothing — bring it forward to see it live (a new picture every half second meanwhile)'); if (row) { btn = t('Bring it forward'); act = () => tabAct('switch', row); } }
       else text = t('The agent’s tab is in the background of its window — a new picture every half second; take over and bring it forward to see it live');
     }
     const want = text ? '' : 'none';

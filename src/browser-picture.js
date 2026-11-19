@@ -49,6 +49,7 @@ const SOURCE_WORDS = Object.freeze({
   'not-running': "the page's picture",
   'background-tab': "the tab's own picture, a new one every half second — its window shows another tab in front",
   'background-settle': "the tab's own picture — its window's picture again in a moment",
+  'background-stuck': "the tab's last own picture — it does not answer, and its window shows another tab in front",
 });
 const RUNNING = new Set(['ready']);
 
@@ -80,6 +81,8 @@ const BG_SETTLE_MS = 4000;
 function pictureForView(v, { bg = null, driving = false, shownWhy = null, clearedAt = 0, now = Date.now(), settleMs = BG_SETTLE_MS } = {}) {
   if (!isX(v) || driving) return v;
   if (bg && bg.state === 'hidden' && bg.targetId) return { source: PICTURE_SCREENCAST, why: 'background-tab', words: SOURCE_WORDS['background-tab'], displaySession: null };
+  // 主开发's ruling S4 (21:52Z): a hidden tab that then stops answering keeps ITS last own picture — never its window's front tab
+  if (bg && bg.state === 'unresponsive' && bg.targetId && (shownWhy === 'background-tab' || shownWhy === 'background-settle' || shownWhy === 'background-stuck')) return { source: PICTURE_SCREENCAST, why: 'background-stuck', words: SOURCE_WORDS['background-stuck'], displaySession: null };
   if ((shownWhy === 'background-tab' || shownWhy === 'background-settle') && clearedAt > 0 && now - clearedAt < settleMs) return { source: PICTURE_SCREENCAST, why: 'background-settle', words: SOURCE_WORDS['background-settle'], displaySession: null };
   return v;
 }
