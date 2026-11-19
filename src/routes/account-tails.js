@@ -18,17 +18,20 @@
  * the config export's sensitive part (src/routes/persistence.js) answered a whole credential to ANY caller. Now their no-vault
  * branch asks `personOnlyDoor` first — the same person verdict: a conversation's, job's or automation's credential is refused by
  * name (credential_person_only), and so is a script that sends no browser headers of this page (credential_page_only). The set-up
- * vault's branch is unchanged (its window, its second password). WHAT THIS DOES NOT STOP: an agent with a shell on a machine with
- * no sign-in and no vault can read the store's files itself — this guards a mistake (a credential handed out by a door), not a
- * machine's own shell. And a PAIRED machine's CLI-key tail (GET /api/hosts/:id/accounts-status) is kept here from the last probe
+ * vault's branch is unchanged (its window, its second password). The config IMPORT's credentials (the sign-in password, the CLI
+ * logins) are written only for the person too (its reader's find, cured in the unit). WHAT THIS DOES NOT STOP: on an instance with
+ * no sign-in, any process that reaches its port can send the headers a browser on the page sends (Sec-Fetch-Site, or an Origin
+ * with a matching X-Forwarded-Host) — a paired machine's conversation through its reverse tunnel to the hub among them — and an
+ * agent with a shell on the hub's machine can read the store's files itself. This guards a door handing a credential out by
+ * MISTAKE (to an agent's token, to a plain script), not a determined caller; a page-minted secret (as the vault window's) would. And a PAIRED machine's CLI-key tail (GET /api/hosts/:id/accounts-status) is kept here from the last probe
  * and answered only to the person's read (`hostCliKey` for `{ hostId }`).
  */
 const { personVerdict } = require('./vault.js');
 
 /** the refusals of a credential door asked by no person (B-ee0a) — the hub's words; the page words its own (src/lib/vault-reveal.js) */
 const CREDENTIAL_DOOR_WORDS = Object.freeze({
-  credential_person_only: 'only a person on this page takes a whole credential out — a conversation, job or automation credential cannot',
-  credential_page_only: 'only a person on this page takes a whole credential out — this request does not come from the page (no browser headers of this page)',
+  credential_person_only: 'only the person, on this VibeSpace page, sees or takes out a whole credential — a conversation, job or automation credential cannot',
+  credential_page_only: 'only the person, on this VibeSpace page, sees or takes out a whole credential',
 });
 /** a no-vault credential door's person check (B-ee0a): true when a person on this page asks; else it answers 403 BY NAME */
 function personOnlyDoor(req, res) {
@@ -78,6 +81,7 @@ function accountsAnswer({ accounts, hosts = null }) {
     subscription: accounts.subscriptionStatus(),
     cliKey: accounts.cliPrimaryKey(),
   };
+  if (typeof accounts.tailsGen === 'function') out.tailsGen = accounts.tailsGen();   // read AFTER the CLI key (a different one just seen moves it)
   // Host id → display name map (2.244.1, real screenshot: the roster's
   // "logged in on host-9a86e4fb" — raw ids leaked whenever the sidebar's
   // hosts data wasn't loaded yet; the server always knows the names)
@@ -104,8 +108,9 @@ function registerAccountTailRoutes(app, { accounts, providers = null }) {
     if (hostId) return res.json({ ok: true, tails: { hostCliKey: hostCliTails.get(hostId) || null } });
     let tails = { accounts: {}, cliKey: null };
     try { tails = accounts.keyTails(); } catch { /* an unreadable store answers none */ }
+    const gen = typeof accounts.tailsGen === 'function' ? accounts.tailsGen() : null;   // read AFTER the tails (the CLI key just read may move it)
     try { tails = { ...tails, providers: Object.fromEntries((providers && typeof providers.thirdParty === 'function' ? providers.thirdParty() : []).filter((p) => p && typeof p.tail === 'string' && p.tail).map((p) => [p.id, p.tail])) }; } catch { tails = { ...tails, providers: {} }; }
-    return res.json({ ok: true, tails });
+    return res.json({ ok: true, tails, ...(gen ? { gen } : {}) });
   });
 }
 

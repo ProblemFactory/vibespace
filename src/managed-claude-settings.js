@@ -235,7 +235,7 @@ async function windowsPolicyFact({ wsl, drvfsDir, fsp, reg = {}, platform, env =
   // a value that does not parse: the administrator's (cannot tell); the helper ABSENT or unable to start: its own words (no retry
   // promised); failing, over its bound, or answering what it cannot read: «could not read»
   const unread = (q, key) => (q.malformed ? { named: null, where: key, cause: 'unreadable' }
-    : { named: null, where: key, cause: q.failed === 'absent' || q.failed === 'cannot-start' ? 'windows-absent' : 'windows-unread', why: q.failed });
+    : { named: null, where: key, cause: q.failed === 'absent' || q.failed === 'cannot-start' ? 'windows-absent' : 'windows-unread', why: q.failed, onWsl: !!wsl });   // onWsl: the words' advice is WSL's or native Windows'
   if (hklm.failed || hklm.malformed) return unread(hklm, POLICY_KEYS[0]);
   const drvDocs = [];
   if (wsl) {
@@ -303,14 +303,15 @@ const MANAGED_HELPER_WORDS = Object.freeze({
   unread: '{provider} cannot start on this machine: what its managed Claude settings set could not be told ({where}) — a managed key helper or credential would go to {provider}. Ask the administrator, or use an account of that organization',
   // the Windows helper absent, unable to start, failing or over its bound: ITS OWN words — nothing an administrator of an organization
   // is needed for; ABSENT or UNABLE TO START (WSL interop off): no retry promised (it will not appear by waiting)
-  // …and says what a person can do (主开发 02:49Z): on WSL, let it run Windows programs, then start again
-  windowsAbsent: '{provider} cannot start on this machine: VibeSpace could not find or start the Windows helper (reg.exe) that reads the Windows policy for Claude Code ({where}), so it cannot tell whether that policy would send a credential to {provider}. On WSL, turn on running Windows programs (WSL interop) and start it again; or start the conversation on another account',
+  // …and says what a person can do (主开发 02:49Z) — by platform (03:35Z): on WSL, let it run Windows programs; on Windows, reg.exe itself
+  windowsAbsent: '{provider} cannot start on this machine: VibeSpace could not find or start the Windows helper (reg.exe) that reads the Windows policy for Claude Code ({where}), so it cannot tell whether that policy would send a credential to {provider}. Turn on running Windows programs in WSL (interop) and start it again, or start the conversation on another account',
+  windowsAbsentNative: '{provider} cannot start on this machine: VibeSpace could not find or start the Windows helper (reg.exe) that reads the Windows policy for Claude Code ({where}), so it cannot tell whether that policy would send a credential to {provider}. Check that Windows’ own reg.exe (in System32) is there and allowed to run, then start it again, or start the conversation on another account',
   windowsUnread: '{provider} cannot start on this machine yet: VibeSpace could not read the Windows policy for Claude Code ({where}), so it cannot tell whether that policy would send a credential to {provider}. Try again in a moment; if it keeps happening, start the conversation on another account',
 });
 
 /** a create's refusal frame fields for a fact that is not `false` */
 function refusalOf(fact, provider) {
-  const words = fact && fact.named === true ? MANAGED_HELPER_WORDS.named : fact && fact.cause === 'windows-absent' ? MANAGED_HELPER_WORDS.windowsAbsent : fact && fact.cause === 'windows-unread' ? MANAGED_HELPER_WORDS.windowsUnread : MANAGED_HELPER_WORDS.unread;
+  const words = fact && fact.named === true ? MANAGED_HELPER_WORDS.named : fact && fact.cause === 'windows-absent' ? (fact.onWsl === false ? MANAGED_HELPER_WORDS.windowsAbsentNative : MANAGED_HELPER_WORDS.windowsAbsent) : fact && fact.cause === 'windows-unread' ? MANAGED_HELPER_WORDS.windowsUnread : MANAGED_HELPER_WORDS.unread;
   const params = { provider: String(provider || 'This provider').slice(0, 80), where: String((fact && fact.where) || '').slice(0, 160) };
   return { code: 'provider-managed-helper', message: words.replace(/\{(provider|where)\}/g, (m, k) => params[k]), i18n: { key: words, params } };
 }

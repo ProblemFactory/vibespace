@@ -623,9 +623,12 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   const regNoExec = regDir('exit 0'); fs.chmodSync(path.join(regNoExec, 'reg.exe'), 0o644);
   const wNoExec = await winFact('linux', regNoExec);
   ok(wNoExec.named === null && wNoExec.cause === 'windows-absent' && wNoExec.why === 'cannot-start', 'the Windows helper unable to start (not executable) ⇒ the absent words (no retry), never «try again»', wNoExec);
-  ok(wAbsent.cause === 'windows-absent' && wAbsentWords.i18n.key === MANAGED.MANAGED_HELPER_WORDS.windowsAbsent && !/try again/i.test(wAbsentWords.message) && !/administrator/i.test(wAbsentWords.message) && /WSL interop/.test(wAbsentWords.message)
-    && dicts.every((d) => d.includes(JSON.stringify(MANAGED.MANAGED_HELPER_WORDS.windowsAbsent) + ':')),
-    'the Windows helper ABSENT is said in its own words — what a person can do (on WSL, turn on running Windows programs), no bare retry, no administrator (en, zh, ja)', wAbsentWords.message);
+  // …BY PLATFORM (主开发 03:35Z): on WSL the advice is WSL's (let it run Windows programs); a native Windows hub's is reg.exe's own
+  const wAbsentNative = await winFact('win32', mdir({})), wAbsentNativeWords = MANAGED.refusalOf(wAbsentNative, 'DeepSeek');
+  ok(wAbsent.cause === 'windows-absent' && wAbsent.onWsl === true && wAbsentWords.i18n.key === MANAGED.MANAGED_HELPER_WORDS.windowsAbsent && !/try again/i.test(wAbsentWords.message) && !/administrator/i.test(wAbsentWords.message) && /in WSL \(interop\)/.test(wAbsentWords.message)
+    && wAbsentNative.cause === 'windows-absent' && wAbsentNative.onWsl === false && wAbsentNativeWords.i18n.key === MANAGED.MANAGED_HELPER_WORDS.windowsAbsentNative && !/WSL/.test(wAbsentNativeWords.message) && /reg\.exe \(in System32\)/.test(wAbsentNativeWords.message)
+    && dicts.every((d) => d.includes(JSON.stringify(MANAGED.MANAGED_HELPER_WORDS.windowsAbsent) + ':') && d.includes(JSON.stringify(MANAGED.MANAGED_HELPER_WORDS.windowsAbsentNative) + ':')),
+    'the Windows helper ABSENT is said in its own words — what a person can do BY PLATFORM (on WSL: turn on running Windows programs; on Windows: reg.exe itself, no word of WSL), no bare retry, no administrator (en, zh, ja)', { wsl: wAbsentWords.message.slice(-120), native: wAbsentNativeWords.message.slice(-120) });
   // THE OUTER BOUND ending while the Windows read is pending is THAT read's verdict — never the administrator's words for the Linux folder
   const wOuter = await MANAGED.managedHelperFact({ platform: 'linux', wsl: true, dir: EMPTY, drvfsDir: DRV, boundMs: 1500, reg: { regExe: path.join(regSlow, 'reg.exe'), env: {}, boundMs: 4000 } });
   // …and NAMES what it waited on: the DrvFs folder hanging (its stat never answers) after both keys answered
@@ -727,13 +730,15 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   ok(badgeC.source === 'api-other' && badgeC.name === 'DeepSeek' && !('tail' in badgeC) && badgeC.accountId === ds.id && badgeX.source === 'api-other' && !('tail' in badgeX) && badgeX.name === 'Lab', 'the badge of a provider session: its name and its account id (NO key tail — B-ba7d: the page lays the person\'s read on), pay-per-use (api-other) — on Claude Code AND on Codex (the first cut said «API key» / «ChatGPT»)', { badgeC, badgeX });
   // the PLAIN API key's badge (B-ee0a smalls — the B-ba7d fix had no leg): its shown name and account id, NO key tail; a key added
   // without a name reads «API key»
-  const apiT = ['Rb', '5d', 'Wq7n'].join('');
-  const apiAcc = am.add({ name: 'Console', key: ['sk-ant-', 'api03-', 'p'.repeat(30), apiT].join('') });
-  const anonAcc = am.add({ key: ['sk-ant-', 'api03-', 'q'.repeat(30), ['Mt', '2k', 'Yh4s'].join('')].join('') });
-  const badgeA = H.get('claude').billingIdentity({ _accountId: apiAcc.id }, { accounts: am, withHost: (x) => x, poolAuth: (x) => x });
-  const badgeN = H.get('claude').billingIdentity({ _accountId: anonAcc.id }, { accounts: am, withHost: (x) => x, poolAuth: (x) => x });
-  ok(badgeA.source === 'api-key' && badgeA.name === 'Console' && badgeA.accountId === apiAcc.id && !('tail' in badgeA) && !JSON.stringify(badgeA).includes(apiT) && badgeN.name === 'API key' && !('tail' in badgeN),
-    'the badge of a plain API-key conversation: its shown name and account id, NO key tail; a key added without a name reads «API key»', { badgeA, badgeN });
+  // (a stand-in store over the REAL name function — this suite's store keeps its keys behind a locked vault)
+  const { publicNameOf } = require(path.join(REPO, 'src/key-names.js'));
+  const apiT = ['Rb', '5d', 'Wq7n'].join(''), anonT = ['Mt', '2k', 'Yh4s'].join('');
+  const PLAIN = { 'acct-plain1': { id: 'acct-plain1', type: 'api', name: 'Console', tail: apiT }, 'acct-anon1': { id: 'acct-anon1', type: 'api', name: 'API key …' + anonT, tail: anonT } };
+  const stAcc = { get: (id) => PLAIN[id] || null, nameShownOf: (id) => (PLAIN[id] ? publicNameOf(PLAIN[id]) : null), providerRecordOf: () => null };
+  const badgeA = H.get('claude').billingIdentity({ _accountId: 'acct-plain1' }, { accounts: stAcc, withHost: (x) => x, poolAuth: (x) => x });
+  const badgeN = H.get('claude').billingIdentity({ _accountId: 'acct-anon1' }, { accounts: stAcc, withHost: (x) => x, poolAuth: (x) => x });
+  ok(badgeA.source === 'api-key' && badgeA.name === 'Console' && badgeA.accountId === 'acct-plain1' && !('tail' in badgeA) && !JSON.stringify(badgeA).includes(apiT) && badgeN.name === 'API key' && !('tail' in badgeN) && !JSON.stringify(badgeN).includes(anonT),
+    'the badge of a plain API-key conversation: its shown name and account id, NO key tail; a record under the old default name «API key …<tail>» reads «API key»', { badgeA, badgeN });
   // (MAJOR 4) codex's home is seeded ONCE: a real sessions folder found there (a link that once failed) keeps its transcripts
   fs.rmSync(path.join(homeX, 'sessions'), { force: true });
   fs.mkdirSync(path.join(homeX, 'sessions')); fs.writeFileSync(path.join(homeX, 'sessions', 'rollout-kept.jsonl'), '{}');

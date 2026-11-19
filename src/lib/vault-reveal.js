@@ -8,6 +8,7 @@ import { t } from './i18n.js';
 import { createModalShell, fetchJson } from './utils.js';
 import { enterSubmits } from './chat-enter-keys.js';
 import { vaultWords, vaultFacts, onVaultFacts, sayVaultWait } from './vault-unlock.js';
+import { credentialDoorWords } from './account-tails.js';   // B-ee0a: the credential doors' refusal words (one function)
 
 let pageSecret = null;   // THIS page's window — memory only
 let revealUntil = 0;     // its end on this page's clock (the hub's own clock is the authority)
@@ -45,8 +46,8 @@ export function revealWords(r) {
   if (c === 'unreadable') return t('That stored value could not be opened');
   if (c === 'not_revealable') return t('That stored value is never shown — VibeSpace uses it itself');
   // B-ee0a: with no vault set up, the whole key answers only a person on this page (the hub refuses the rest by name)
-  if (c === 'credential_person_only') return t('Only a person on this page can see a whole key — a conversation, job or automation credential cannot');
-  if (c === 'credential_page_only') return t('Only a person on this page can see a whole key — this request did not come from the page');
+  const cw = credentialDoorWords(r);
+  if (cw) return cw;
   return vaultWords(r);
 }
 

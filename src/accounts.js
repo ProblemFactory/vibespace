@@ -299,7 +299,15 @@ class AccountManager {
     fs.renameSync(tmp, this._file);
   }
 
-  _notify() { try { this._onChange(this.list()); } catch { } }
+  _notify() { this._tailsN = (this._tailsN || 0) + 1; try { this._onChange(this.list()); } catch { } }   // every store change moves the tails generation (B-ee0a)
+  /** THE TAILS GENERATION (B-ee0a smalls — its reader's MUST: «never a wrong tail»): a word that changes whenever a tail the person's
+   *  read answers MAY have changed — every store change (_notify: a key added, replaced or removed, a provider re-keyed) and the CLI's
+   *  own key seen different on a read of ~/.claude.json (which nothing watches: that read pushes the list then). Unique per hub boot.
+   *  The list (so its push), GET /api/accounts and the person's read carry it; the page reuses a read only for the SAME word. */
+  tailsGen() { return `${this._tailsBoot || (this._tailsBoot = crypto.randomBytes(6).toString('hex'))}:${this._tailsN || 0}`; }
+  /** the CLI's own key's tail as just read: a different one than last seen moves the generation and pushes the list (the first sight
+   *  only remembers) */
+  _noteCliTail(tail) { const t = tail || null; const was = this._cliTailSeen; this._cliTailSeen = t; if (was !== undefined && was !== t) this._notify(); }
   /** A PER-SESSION credential link moved (lane badge-stale, 2026-09-30 — the owner's window said
    *  "全部 → Mat Max" 30+ minutes after the pool engine had moved the conversation to UCI Max).
    *  The link's target IS a fact every client caches: the `active-sessions` payload's
@@ -419,6 +427,7 @@ class AccountManager {
         }
         return base;   // NO key tail (B-ba7d, the owner's decision 2026-11-18): this list and its push reach every client and every agent-readable mirror — the person's read is keyTails() (POST /api/accounts/tails)
       }),
+      tailsGen: this.tailsGen(),   // B-ee0a: the page reuses its read of the tails only for the same word
     };
   }
   /** (B-ba7d) the name an account is SHOWN by (publicNameOf) — null for an unknown id */
@@ -434,10 +443,13 @@ class AccountManager {
   }
   /** the CLI's own primary API key's tail (~/.claude.json primaryApiKey) — null when none; never answered beside the list */
   _cliPrimaryTail() {
+    let tail = null;
     try {
       const pk = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude.json'), 'utf-8'))?.primaryApiKey;
-      return typeof pk === 'string' && /^sk-ant-/.test(pk) ? pk.slice(-8) : null;
-    } catch { return null; }
+      tail = typeof pk === 'string' && /^sk-ant-/.test(pk) ? pk.slice(-8) : null;
+      this._noteCliTail(tail);
+    } catch (e) { tail = null; if (e && e.code === 'ENOENT') this._noteCliTail(null); }   // a torn or unreadable file is no sight (moves nothing)
+    return tail;
   }
 
   // ── Subscription accounts (each = its own securestorage creds dir) ──
@@ -2658,13 +2670,15 @@ class AccountManager {
       const pk = cfg?.primaryApiKey;
       if (typeof pk === 'string' && /^sk-ant-/.test(pk)) {
         const tail = pk.slice(-8);
+        this._noteCliTail(tail);   // B-ee0a: a different CLI key than last seen moves the tails generation (and pushes the list)
         return {   // NO tail beside the list (B-ba7d): `imported` says what the page compared it for; the person's read is keyTails().cliKey
           present: true,
           org: cfg?.oauthAccount?.organizationName || null,
           imported: this._state.accounts.some((a) => a.tail === tail),
         };
       }
-    } catch { }
+      this._noteCliTail(null);   // parsed, no key in it
+    } catch (e) { if (e && e.code === 'ENOENT') this._noteCliTail(null); }   // a torn or unreadable file (a CLI writing it) is no sight: it moves nothing
     return { present: false };
   }
 

@@ -3,26 +3,28 @@
 // and lays the tails onto the rows it already holds. ONE cache for the page; one ask in flight at a time; a refused or failed ask
 // lays nothing (a row then reads «API key» with no characters — never a wrong one).
 import { fetchJson } from './utils.js';
+import { t } from './i18n.js';
 
 let last = { accounts: {}, cliKey: null, providers: {} };
 let inflight = null;
-// ONE ASK A PUSH (B-ee0a smalls — the sync-read law: each ask reads the CLI's file synchronously on the hub's main loop): a key added,
-// replaced or removed and a provider re-keyed each push accounts-updated; the page asks again only after such a push — every other
-// reader (the roster's refresh, the app's) takes the last GOOD read. A refused or failed read is never kept as read.
-let pushes = 0;      // accounts pushes seen
-let readFor = -1;    // the push count the last good read answered for
-/** an accounts push arrived (src/lib/app.js): the next ask reads again */
-export function notePush() { pushes++; }
+// ONE ASK A TAILS GENERATION (B-ee0a smalls — the sync-read law: each ask reads the CLI's file synchronously on the hub's main loop;
+// its reader's MUST: never a wrong tail). The hub's list (GET /api/accounts and its push) carries `tailsGen`, a word that changes
+// whenever a tail MAY have changed (every store change, the CLI's own key seen different — src/accounts.js tailsGen); the person's
+// read answers the word it was read under. A read is reused only for the SAME word; any other word (or none) asks again. A refused
+// or failed read is never kept as read.
+let readGen = null;   // the word the last GOOD read answered under
 
-/** ask the person's read once (coalesced; reused until the next push) → { accounts: { [id]: tail }, cliKey } (the last good answer
- *  on a refusal) */
-export function askTails() {
-  if (inflight) return inflight;
-  if (readFor === pushes) return Promise.resolve(last);
-  const at = pushes;
+/** the person's read for the hub's tails generation `gen` (coalesced; reused only for the same word) → { accounts: { [id]: tail },
+ *  cliKey, providers } (the last good answer on a refusal) */
+export function askTails(gen) {
+  const same = () => gen != null && readGen != null && String(gen) === readGen;
+  if (!inflight && same()) return Promise.resolve(last);
+  if (inflight) return inflight.then(() => (gen == null || same() ? last : askTails(gen)));   // an ask begun under another word: once more
+  // a refused or failed read under a word the last read was NOT taken under lays NOTHING (the tails may have changed — never a wrong one)
+  const failed = () => { if (gen != null && String(gen) !== readGen) { last = { accounts: {}, cliKey: null, providers: {} }; readGen = null; } return last; };
   inflight = fetchJson('/api/accounts/tails', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
-    .then((r) => { if (r && r.ok && r.tails && typeof r.tails === 'object') { last = { accounts: { ...(r.tails.accounts || {}) }, cliKey: typeof r.tails.cliKey === 'string' ? r.tails.cliKey : null, providers: { ...(r.tails.providers || {}) } }; readFor = at; } return last; })
-    .catch(() => last)
+    .then((r) => { if (r && r.ok && r.tails && typeof r.tails === 'object') { last = { accounts: { ...(r.tails.accounts || {}) }, cliKey: typeof r.tails.cliKey === 'string' ? r.tails.cliKey : null, providers: { ...(r.tails.providers || {}) } }; readGen = r.gen != null ? String(r.gen) : null; return last; } return failed(); })
+    .catch(() => failed())
     .finally(() => { inflight = null; });
   return inflight;
 }
@@ -49,8 +51,17 @@ export function withTails(d, t = last) {
 
 /** GET /api/accounts with the person's tails laid on it (the roster's own reads) */
 export async function accountsWithTails() {
-  const [d, t] = await Promise.all([fetchJson('/api/accounts'), askTails()]);
-  return withTails(d, t);
+  const d = await fetchJson('/api/accounts');
+  return withTails(d, await askTails(d && d.tailsGen));   // the list first: its word decides whether the last read still holds
+}
+
+/** a credential door's refusal in the page's words (B-ee0a: the key reveal, the config export and import — the hub refuses by name
+ *  whoever is not the person on this page) → words | null (not such a refusal) */
+export function credentialDoorWords(r) {
+  const c = r && r.code;
+  if (c === 'credential_person_only') return t('Only the person, on this VibeSpace page, can see or take out a whole credential — a conversation, job or automation credential cannot');
+  if (c === 'credential_page_only') return t('Only the person, on this VibeSpace page, can see or take out a whole credential');
+  return null;
 }
 
 /** a PAIRED machine's accounts-status answer with its CLI-key tail laid on (B-ee0a): the answer carries none; the person's read

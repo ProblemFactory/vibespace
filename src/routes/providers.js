@@ -75,14 +75,14 @@ function registerProviderRoutes(app, { providers, tester = null, onChange = () =
     if (!person(req, res)) return;
     const b = req.body || {};
     const r = await providers.add({ preset: b.preset, key: b.key, region: b.region, baseUrl: b.baseUrl, label: b.label, model: b.model, wire: b.wire });
-    if (!r.ok) return refuse(res, r);
+    if (!r.ok) { if (r.code === 'write-failed') changed('add', String(req.params.id || '')); return refuse(res, r); }   // B-ee0a (its delta read): a failed write touched the records (undone, or a new key kept) — the lists move
     changed('add', r.provider.id);
     res.status(201).json({ ok: true, provider: pub(r.provider) });
   }));
   app.post('/api/providers/:id/key', door(async (req, res) => {
     if (!person(req, res)) return;
     const r = await providers.rekey(String(req.params.id), (req.body || {}).key);
-    if (!r.ok) return refuse(res, r);
+    if (!r.ok) { if (r.code === 'write-failed') changed('rekey', String(req.params.id || '')); return refuse(res, r); }   // B-ee0a (its delta read): a failed write touched the records (undone, or a new key kept) — the lists move
     changed('rekey', r.provider.id);
     res.json({ ok: true, provider: pub(r.provider) });
   }));
@@ -90,7 +90,7 @@ function registerProviderRoutes(app, { providers, tester = null, onChange = () =
     if (!person(req, res)) return;
     const b = req.body || {};
     const r = await providers.patch(String(req.params.id), { label: b.label, baseUrl: b.baseUrl, defaultModel: b.defaultModel, wire: b.wire, key: b.key });
-    if (!r.ok) return refuse(res, r);
+    if (!r.ok) { if (r.code === 'write-failed') changed('patch', String(req.params.id || '')); return refuse(res, r); }   // B-ee0a (its delta read): a failed write touched the records (undone, or a new key kept) — the lists move
     changed('patch', r.provider.id);
     res.json({ ok: true, provider: pub(r.provider) });
   }));
@@ -108,7 +108,7 @@ function registerProviderRoutes(app, { providers, tester = null, onChange = () =
   app.delete('/api/providers/:id', door(async (req, res) => {
     if (!person(req, res)) return;
     const r = await providers.remove(String(req.params.id));
-    if (!r.ok) return refuse(res, r);
+    if (!r.ok) { if (r.code === 'write-failed') changed('remove', String(req.params.id || '')); return refuse(res, r); }   // B-ee0a (its delta read): a failed write touched the records (undone, or a new key kept) — the lists move
     changed('remove', r.id);
     res.json({ ok: true, id: r.id, keyDropped: r.keyDropped, ...(r.orphan ? { orphan: true } : {}) });
   }));

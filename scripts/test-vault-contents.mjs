@@ -158,6 +158,9 @@ async function judge(t) {
   if (!(keyAgent.status === 403 && keyAgent.json.code === 'human_only') || plantsIn(keyAgent.raw)) red.push('GET /api/accounts/:id/key with an agent token ⇒ ' + keyAgent.status);
   const keyYes = await t.hit('/api/accounts/e-a/key', { method: 'GET', headers: t.page(t.cookieA, { 'x-vault-page': String(PAGE) }) });
   if (!(keyYes.status === 200 && keyYes.json.key === PLANT.a && plantsIn(keyYes.raw) === 1)) red.push('GET /api/accounts/:id/key inside the window ⇒ ' + keyYes.status + ' ' + keyYes.raw.slice(0, 80));
+  // B-ee0a: the page's road is a POST (a plain-http page sends no Origin on a GET) — the same window, the same answer
+  const keyPost = await t.hit('/api/accounts/e-a/key', { method: 'POST', headers: t.page(t.cookieA, { 'x-vault-page': String(PAGE) }), body: {} });
+  if (!(keyPost.status === 200 && keyPost.json.key === PLANT.a && plantsIn(keyPost.raw) === 1)) red.push('POST /api/accounts/:id/key inside the window ⇒ ' + keyPost.status + ' ' + keyPost.raw.slice(0, 80));
   const mNo = await t.hit('/api/mounts/mnt1/config', { method: 'GET' });
   // lane ui-controls-and-bugs (THE WRITE-ONLY LAW, 主开发's ruling 2026-11-13): a storage secret is HELD — named, never sent — for the owner's cookie too
   if (!(mNo.status === 200 && !('secretKey' in mNo.json) && (mNo.json.held || []).includes('secretKey')) || plantsIn(mNo.raw)) red.push('GET /api/mounts/:id/config without the window ⇒ not held ' + mNo.raw.slice(0, 120));

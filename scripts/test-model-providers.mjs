@@ -738,7 +738,7 @@ console.log('⑮ the provider test: a FAKE CLI, empty homes, a third party only,
   fs.writeFileSync(path.join(MDIR, 'managed-settings.json'), JSON.stringify({ apiKeyHelper: '/opt/org/key-helper' }));
   fresh();
   const ptrPatched = (pairs) => { let s = fs.readFileSync(PTRF, 'utf-8'); for (const [from, to] of pairs) s = anchored(s, from, to, 'the Test without its managed check'); const m = new Module(PTRF); m.filename = PTRF; m.paths = Module._nodeModulePaths(path.dirname(PTRF)); m._compile(s, PTRF); return m.exports; };   // compiled in memory beside the real file (this block runs before the suite's runnerMutant)
-  const mhx = await mk(ptrPatched([["      if (h.creds.keyHelper) { const mh = await MANAGED.managedHelperFact({ dir: managedDir, ...(managedOpts || {}) }); if (mh.named !== false) return { ok: false, code: mh.cause === 'windows-absent' ? 'windows-policy-absent' : mh.cause === 'windows-unread' ? 'windows-policy-unread' : 'managed-helper', where: mh.where }; }\n", '']]), { managedDir: MDIR }).runProviderTest(P.ok.id, 'claude', { by: 'human' });
+  const mhx = await mk(ptrPatched([["      if (h.creds.keyHelper) { const mh = await MANAGED.managedHelperFact({ dir: managedDir, ...(managedOpts || {}) }); if (mh.named !== false) return { ok: false, code: mh.cause === 'windows-absent' ? (mh.onWsl === false ? 'windows-policy-absent-native' : 'windows-policy-absent') : mh.cause === 'windows-unread' ? 'windows-policy-unread' : 'managed-helper', where: mh.where }; }\n", '']]), { managedDir: MDIR }).runProviderTest(P.ok.id, 'claude', { by: 'human' });
   ok(mhx.ok && report() !== null, 'CONTROL: the test without the managed-settings check spawns the CLI under the managed helper ⇒ the leg above goes RED', mhx.verdict);
   // THE TEST'S WINDOWS VERDICTS (the cure2 read: no leg drove them): a STAND-IN reg.exe by its full path through the Test's
   // `managedOpts` seam (never the box's own): the helper absent or unable to start ⇒ windows-policy-absent; failing ⇒
@@ -750,11 +750,11 @@ console.log('⑮ the provider test: a FAKE CLI, empty homes, a third party only,
     const NOKEY = "echo 'ERROR: The system was unable to find the specified registry key or value.' >&2; exit 1";
     const BAD = JSON.stringify({ apiKeyHelper: '/opt/org/key-helper' }).slice(0, -1) + ',}';   // a trailing comma: not JSON
     const winOpts = (regExe) => ({ platform: 'linux', wsl: true, drvfsDir: NO_MDIR, reg: { regExe, env: {}, boundMs: 4000 } });
-    const cases = { absent: path.join(RDIR, 'no-such', 'reg.exe'), noStart: standReg('noexec.exe', 'exit 0', 0o644), failing: standReg('fail.exe', 'exit 5'),
+    const cases = { absent: path.join(RDIR, 'no-such', 'reg.exe'), nativeAbsent: path.join(RDIR, 'no-such-native', 'reg.exe'), noStart: standReg('noexec.exe', 'exit 0', 0o644), failing: standReg('fail.exe', 'exit 5'),
       malformed: standReg('bad.exe', `case "$2" in HKLM*) printf '\\r\\nHKEY_LOCAL_MACHINE\\\\SOFTWARE\\\\Policies\\\\ClaudeCode\\r\\n    Settings    REG_SZ    %s\\r\\n\\r\\n' '${BAD}';; *) ${NOKEY};; esac`) };
     const got = {};
-    for (const [k, regExe] of Object.entries(cases)) { fresh(); keyReads = 0; const r = await mk(PTR, { managedOpts: winOpts(regExe), providers: counting }).runProviderTest(P.ok.id, 'claude', { by: 'human' }); got[k] = { code: r.code, where: r.where, ran: report() !== null, keyReads }; }
-    ok(got.absent.code === 'windows-policy-absent' && got.noStart.code === 'windows-policy-absent' && got.failing.code === 'windows-policy-unread' && got.malformed.code === 'managed-helper'
+    for (const [k, regExe] of Object.entries(cases)) { fresh(); keyReads = 0; const o = k === 'nativeAbsent' ? { platform: 'win32', wsl: false, reg: { regExe, env: {}, boundMs: 4000 } } : winOpts(regExe); const r = await mk(PTR, { managedOpts: o, providers: counting }).runProviderTest(P.ok.id, 'claude', { by: 'human' }); got[k] = { code: r.code, where: r.where, ran: report() !== null, keyReads }; }
+    ok(got.absent.code === 'windows-policy-absent' && got.nativeAbsent.code === 'windows-policy-absent-native' && got.noStart.code === 'windows-policy-absent' && got.failing.code === 'windows-policy-unread' && got.malformed.code === 'managed-helper'
       && Object.values(got).every((g) => /HKLM/.test(String(g.where)) && !g.ran && g.keyReads === 0),
       'the Test\'s Windows verdicts: the helper absent or unable to start ⇒ its own words with no retry (windows-policy-absent), failing ⇒ could not read (windows-policy-unread), a policy value that does not parse ⇒ the administrator\'s (managed-helper) — HKLM named, nothing spawned, the key never read', got);
   }
@@ -790,7 +790,7 @@ console.log('⑮ the provider test: a FAKE CLI, empty homes, a third party only,
   // anchored()): the wizard row worded without the file, the toast without the refusal's words ⇒ RED
   {
     const MF = '/etc/claude-code/managed-settings.json';
-    const CODES = ['managed-helper', 'windows-policy-absent', 'windows-policy-unread'];
+    const CODES = ['managed-helper', 'windows-policy-absent', 'windows-policy-absent-native', 'windows-policy-unread'];
     const refused = (code) => ({ ok: false, code, where: code === 'managed-helper' ? MF : 'HKLM\\SOFTWARE\\Policies\\ClaudeCode' });
     const said = (s, r) => typeof s === 'string' && s.includes(r.where) && !s.includes('{where}');
     const WZ = await import(pathToFileURL(path.join(ROOT, 'src/lib/provider-wizard.js')).href);
@@ -802,7 +802,7 @@ console.log('⑮ the provider test: a FAKE CLI, empty homes, a third party only,
     const trOf = (d) => (s, p) => (Object.prototype.hasOwnProperty.call(d, s) ? d[s] : s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k] !== undefined ? String(p[k]) : m));
     const zhja = [];
     for (const [lang, f] of [['zh', 'src/lib/i18n-zh.js'], ['ja', 'src/lib/i18n-ja.js']]) { const d = await dictOf(f); for (const c of CODES) zhja.push({ lang, c, s: PTM.refusalWords(refused(c), trOf(d), 'failed'), has: Object.prototype.hasOwnProperty.call(d, PTM.REFUSAL_WORDS[c]) }); }
-    ok(zhja.length === 6 && zhja.every((x) => x.has && said(x.s, refused(x.c)) && x.s !== PTM.refusalWords(refused(x.c), trOf({}), 'failed')),
+    ok(zhja.length === 8 && zhja.every((x) => x.has && said(x.s, refused(x.c)) && x.s !== PTM.refusalWords(refused(x.c), trOf({}), 'failed')),
       'the words both doors share, through the zh and ja dictionaries: each refusal translated, its source in it, no «{where}» left', zhja.filter((x) => !(x.has && said(x.s, refused(x.c)))).map((x) => x.lang + ' ' + x.c));
     // NO PLACE TO NAME (主开发 02:49Z): said WITHOUT its parentheses — never «()» / «（）» — at both page doors and in zh and ja
     const bare = (s) => typeof s === 'string' && s.length > 20 && !/\(\s*\)|（\s*）|\{where\}/.test(s);
@@ -810,7 +810,7 @@ console.log('⑮ the provider test: a FAKE CLI, empty homes, a third party only,
     const bareAll = [];
     for (const c of CODES) bareAll.push(WZ.errorWords(noWhere(c)), RO.testToastWords(noWhere(c)));
     for (const f of ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js']) { const d = await dictOf(f); for (const c of CODES) bareAll.push(PTM.refusalWords(noWhere(c), trOf(d), 'failed')); }
-    ok(bareAll.length === 12 && bareAll.every(bare) && PTM.fillWhere('A ({where}) B', '') === 'A B' && PTM.fillWhere('甲（{where}）乙', '') === '甲乙' && PTM.fillWhere('A ({where}) B', 'x') === 'A (x) B',
+    ok(bareAll.length === 16 && bareAll.every(bare) && PTM.fillWhere('A ({where}) B', '') === 'A B' && PTM.fillWhere('甲（{where}）乙', '') === '甲乙' && PTM.fillWhere('A ({where}) B', 'x') === 'A (x) B',
       'a refusal with no place to name is said without its parentheses at both page doors, in en, zh and ja — never «()»', bareAll.filter((s) => !bare(s)).slice(0, 3));
     const PM = mutantCopies('model-providers-doors', ROOT);
     const WSRC = read('src/lib/provider-wizard.js'), RSRC = read('src/lib/provider-roster.js');
@@ -1107,8 +1107,9 @@ console.log('㉑ a whole credential with no vault: the person\'s only');
     'a PAIRED machine\'s CLI-key tail: the accounts-status answer carries none (present kept); the person\'s read answers the last probe\'s ({ hostId } — nothing else read), a conversation\'s credential refused; a machine not probed or whose key is gone answers none', { sent: sent.cliKey, page: hostAsk.page.json, other: hostAsk.other.json });
   // THE CONFIG EXPORT's credentials with no vault — the REAL route (src/routes/persistence.js), its accounts bundle stood in
   const P = require(path.join(ROOT, 'src/routes/persistence.js'));
+  let importCalls = 0;
   P.setup({ dataDir: fs.mkdtempSync(path.join(ED, 'p-')), wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null,
-    getAccounts: () => ({ exportBundle: () => ({ accounts: [{ id, key: KEY }] }), list: () => ({ accounts: [] }) }), getUsageHistory: () => null, onSettingsWrite: () => { } });
+    getAccounts: () => ({ exportBundle: () => ({ accounts: [{ id, key: KEY }] }), importBundle: () => { importCalls++; return { imported: 1, skipped: 0 }; }, list: () => ({ accounts: [] }) }), getUsageHistory: () => null, onSettingsWrite: () => { } });
   const expDoor = P.router.stack.find((l) => l.route && l.route.path === '/api/config/export' && l.route.methods.post).route.stack[0].handle;
   const doExport = (headers) => new Promise((resolve) => {
     const out = { status: 200, headers: {} };
@@ -1119,6 +1120,17 @@ console.log('㉑ a whole credential with no vault: the person\'s only');
   ok(eAgent.status === 403 && eAgent.body.code === 'credential_person_only' && eBare.status === 403 && eBare.body.code === 'credential_page_only' && !JSON.stringify([eAgent.body, eBare.body]).includes(KEY)
     && ePage.status === 200 && !!ePage.body.sensitive && Array.isArray(ePage.body.sensitive.manifest) && ePage.body.sensitive.manifest.includes('accounts'),
     'NO VAULT: the config export\'s credentials leave to a person on this page only — a conversation\'s credential and a header-less script refused by name, nothing exported to them', { agent: eAgent.body, bare: eBare.body, page: ePage.status });
+  // …and the IMPORT's credentials (its reader's find, cured in the unit): written in only for the person — a conversation's
+  // credential or a header-less script never sets the sign-in password or a login
+  const impDoor = P.router.stack.find((l) => l.route && l.route.path === '/api/config/import' && l.route.methods.post).route.stack[0].handle;
+  const doImport = (headers) => new Promise((resolve) => {
+    const out = { status: 200, headers: {} };
+    const res = { status(c) { out.status = c; return this; }, set(k, v) { out.headers[k] = v; return this; }, setHeader(k, v) { out.headers[k] = v; }, json(o) { out.body = o; resolve(out); }, send(o) { out.body = o; resolve(out); }, end() { resolve(out); }, get headersSent() { return 'body' in out; } };
+    impDoor({ body: { file: ePage.body, sections: [], includeSensitive: ['accounts'], passphrase: 'abcd' }, headers, query: {}, params: {}, app: { locals: {} }, socket: {} }, res, () => resolve(out));
+  });
+  const iAgent = await doImport({ authorization: AGENT.Authorization }), iBare = await doImport({}), callsRefused = importCalls, iPage = await doImport({ 'sec-fetch-site': 'same-origin' });
+  ok(iAgent.status === 403 && iAgent.body.code === 'credential_person_only' && iBare.status === 403 && iBare.body.code === 'credential_page_only' && callsRefused === 0 && iPage.status === 200 && importCalls === 1,
+    'the config IMPORT\'s credentials are written in only for a person on this page — a conversation\'s credential and a header-less script refused by name, nothing imported for them', { agent: iAgent.body, bare: iBare.body, page: iPage.status, importCalls });
   // the hub's wiring (both doors through these functions) and the page's road
   const AUR = read('src/server/account-usage-routes.js'), PER = read('src/routes/persistence.js'), VR = read('src/lib/vault-reveal.js');
   ok(AUR.includes("const revealKeyDoor = AT.revealKeyDoorOf({ accounts });\napp.get('/api/accounts/:id/key', revealKeyDoor);\napp.post('/api/accounts/:id/key', revealKeyDoor);")
@@ -1151,6 +1163,47 @@ console.log('㉑ a whole credential with no vault: the person\'s only');
   let stat = null; try { stat = await (await fetch(`http://127.0.0.1:${ss.address().port}/api/backend-status`)).json(); } finally { ss.close(); }
   const apiRows = (a.list().accounts || []).filter((x) => (x.backend || 'claude') === 'claude' && !x.pooled && x.type === 'api').length;
   ok(!!stat && stat.claude.namedLoggedIn === apiRows && apiRows >= 3, 'the backend status (the REAL route over the REAL store) counts an API-key account by its TYPE — an API-key-only machine never reads «not logged in»', { named: stat && stat.claude.namedLoggedIn, apiRows });
+  // the decryption-failure error names the account by its PUBLIC name (a record under the old default name never says its tail)
+  const dT = ['Fw', '4n', 'Xe6r'].join('');
+  const dId = a.add({ name: 'Console', key: ['sk-ant-', 'api03-', 'd'.repeat(30), dT].join('') }).id;
+  const dRec = a._state.accounts.find((x) => x.id === dId); dRec.name = 'API key …' + dRec.tail; dRec.keyEnc = 'not-a-sealed-value';
+  let dErr = ''; try { a.resolveForSpawn(dId); } catch (e) { dErr = String(e && e.message); }
+  ok(/account key unavailable/.test(dErr) && dErr.includes('API key') && !dErr.includes(dT) && !dErr.includes(dRec.tail), 'a key that will not open is named by its PUBLIC name in the error — never the old default «API key …<tail>»', dErr);
+  // THE TAILS GENERATION (its reader's MUST — never a wrong tail): the CLI's own key changed on disk (nothing watches it, nothing
+  // pushes) moves the word the next time the hub reads it — and pushes the list; a store change moves it too; the list, GET
+  // /api/accounts and the person's read carry it (the page reuses a read only under the same word — test-manage-agents)
+  const HOME1 = process.env.HOME; const GH = fs.mkdtempSync(path.join(ED, 'home-'));
+  process.env.HOME = GH;
+  try {
+    const pushedGen = [];
+    const g = new AccountManager({ dataDir: fs.mkdtempSync(path.join(ED, 'g-')), onChange: (l) => pushedGen.push(l.tailsGen) });
+    const cliKey = (t8) => fs.writeFileSync(path.join(GH, '.claude.json'), JSON.stringify({ primaryApiKey: ['sk-ant-', 'api03-', 'z'.repeat(30), t8].join('') }));
+    const C1 = ['Aa', '11', 'Bb22'].join(''), C2 = ['Cc', '33', 'Dd44'].join('');
+    cliKey(C1);
+    const a1 = AT.accountsAnswer({ accounts: g }), a1b = AT.accountsAnswer({ accounts: g });
+    cliKey(C2);
+    const a2 = AT.accountsAnswer({ accounts: g });
+    const gapp = express(); gapp.use(express.json()); AT.registerAccountTailRoutes(gapp, { accounts: g, providers: null });
+    const gs = await new Promise((r) => { const x = gapp.listen(0, '127.0.0.1', () => r(x)); });
+    const readTails = async () => (await fetch(`http://127.0.0.1:${gs.address().port}/api/accounts/tails`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...PAGE }, body: '{}' })).json();
+    let read2 = null, read3 = null, pushedAt3 = 0, pushedAfter3 = 0, a4 = null, pushedAt4 = 0, pushedAfter4 = 0;
+    const C3 = ['Gg', '77', 'Hh88'].join('');
+    try {
+      read2 = await readTails();
+      // the person's read is a sight TOO (its delta read): the CLI key changed, then read by the tails door alone — the word moves and the
+      // list is pushed (the OTHER tabs ask again)
+      cliKey(C3); pushedAt3 = pushedGen.length; read3 = await readTails(); pushedAfter3 = pushedGen.length;
+      // a TORN file (a CLI writing it) is no sight: the word does not move, nothing is pushed
+      fs.writeFileSync(path.join(GH, '.claude.json'), '{"primaryApiKey": "sk-ant-');
+      pushedAt4 = pushedGen.length; a4 = AT.accountsAnswer({ accounts: g }); await readTails(); pushedAfter4 = pushedGen.length;
+    } finally { gs.close(); }
+    const before = g.tailsGen(); g.add({ name: 'New', key: ['sk-ant-', 'api03-', 'y'.repeat(30), ['Ee', '55', 'Ff66'].join('')].join('') }); const afterAdd = g.tailsGen();
+    ok(read3 && read3.gen !== read2.gen && pushedAfter3 === pushedAt3 + 1 && read3.tails.cliKey === C3.slice(-8) && a4 && a4.tailsGen === read3.gen && pushedAfter4 === pushedAt4,
+      'the person\'s read is a sight too: the CLI key changed and read by the tails door alone moves the word and pushes the list (the other tabs ask again); a TORN file moves nothing and pushes nothing', { read2: read2 && read2.gen, read3: read3 && read3.gen, a4: a4 && a4.tailsGen, pushes: [pushedAt3, pushedAfter3, pushedAt4, pushedAfter4] });
+    ok(typeof a1.tailsGen === 'string' && a1.tailsGen === a1b.tailsGen && a2.tailsGen !== a1.tailsGen && pushedGen.includes(a2.tailsGen) && read2 && read2.gen === a2.tailsGen && read2.tails.cliKey === C2.slice(-8)
+      && afterAdd !== before && pushedGen.includes(afterAdd) && !JSON.stringify([a1, a2]).includes(C1) && !JSON.stringify([a1, a2]).includes(C2),
+      'the tails generation: the same while nothing changed; the CLI\'s own key changed on disk moves it at the next read (and pushes the list); a store change moves it; the person\'s read answers the word it was read under — no tail in the list', { a1: a1.tailsGen, a2: a2.tailsGen, read: read2 && read2.gen, pushed: pushedGen.length });
+  } finally { process.env.HOME = HOME1; }
 }
 
 fs.rmSync(dir, { recursive: true, force: true });

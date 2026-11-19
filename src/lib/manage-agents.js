@@ -130,6 +130,12 @@ const foldAnchor = (btn) => (btn.classList.contains(FOLDED) && btn.parentElement
 // stopped being true with codex pools); the billing switcher and the New
 // Session dropdown inline the same comparator — keep them in step.
 const acctTypeRank = (x) => (x.pooled || x.type === 'pooled') ? 0 : (x.type === 'subscription' ? 1 : 2);
+/** a paired machine's CLI key «already imported»? Only when its tail is KNOWN and an account's tail matches it (B-ee0a: an unknown tail —
+ *  a refused read, a hub restarted between the two asks — is never «imported»: the import is offered, and it is idempotent) */
+export function hostKeyImported(accts, cliKey) {
+  const tails = new Set((accts || []).map((a) => a && a.tail).filter((x) => typeof x === 'string' && x));
+  return !!(cliKey && typeof cliKey.tail === 'string' && cliKey.tail && tails.has(cliKey.tail));
+}
 export const rosterSort = (a, b) => acctTypeRank(a) - acctTypeRank(b) || String(a.name || '').localeCompare(String(b.name || ''));
 // Roster row icons (SVG only, never emoji) — shared by both rosters so a
 // pooled account draws the SAME overlapping-circles glyph whatever its
@@ -3240,7 +3246,7 @@ export function installManageAgents(App, ctx = {}) {
     // whenever no named account is starred (a session with no account uses
     // the login of whatever machine it runs on). Not renamable/removable.
     const gDef = !accts.defaultAccountId;
-    const importedTails = new Set(claudeAccts.map(a => a.tail));
+    const hostKeyIn = (k) => hostKeyImported(claudeAccts, k);   // B-ee0a: an UNKNOWN tail is never «already imported» (the import is idempotent)
     let gName, gIdent, gExtraActions = '';
     if (selectedHost) {
       gName = t('CLI login on {host}', { host: escHtml(hostLabel) });
@@ -3281,7 +3287,7 @@ export function installManageAgents(App, ctx = {}) {
         ? (racct.subscription?.loggedIn
             ? `${hEmail}<span class="ob-ok">${t('logged in')}</span>${helperNote}${staleNote}`
             : racct.cliKey?.present
-            ? `<span class="ob-ok">${t('logged in')}</span> <span class="ob-ver">${t('API key')} …${escHtml(racct.cliKey.tail || '')}</span>`
+            ? `<span class="ob-ok">${t('logged in')}</span> <span class="ob-ver">${t('API key')}${racct.cliKey.tail ? ' …' + escHtml(racct.cliKey.tail) : ''}</span>`
             : racct.keyHelper
             ? `<span class="ob-ok">${t('logged in')}</span> <span class="ob-ver">apiKeyHelper</span>`
             : `<span class="ob-warn">${t('not logged in')}</span>`)
@@ -3506,7 +3512,7 @@ export function installManageAgents(App, ctx = {}) {
         // pooling/named accounts made the dual-login dance obsolete, and the
         // audit confirmed zero reachable callers remained.
         if (importable) items.push({
-          label: t('Import CLI key') + ` (…${acct.cliKey.tail || ''})`,
+          label: t('Import CLI key') + (acct.cliKey.tail ? ` (…${acct.cliKey.tail})` : ''),
           action: async () => {
             try { const r2 = await fetchJson('/api/accounts/import-cli', { method: 'POST' }); showToast(t('Imported: {name}', { name: r2.account.name })); } catch { showToast(t('Import failed'), { type: 'error' }); }
             refresh();
@@ -3601,11 +3607,11 @@ export function installManageAgents(App, ctx = {}) {
           // FIRST so the swap can't orphan it. The watcher then polls the
           // host's login state (read-only ssh probe) and brings the Agents
           // surface back once the login lands.
-          const hasKey = racct?.cliKey?.present && !importedTails.has(racct.cliKey.tail);
+          const hasKey = racct?.cliKey?.present && !hostKeyIn(racct.cliKey);
           const okGo = await showConfirmDialog({
             title: t('Switch {host}’s own login?', { host: hostLabel }),
             message: t('This opens claude /login ON {host} and REPLACES that machine’s current CLI login. VibeSpace’s named accounts are untouched — to add a switchable account instead, use “+ Add account…”.', { host: hostLabel })
-              + (hasKey ? ' ' + t('The Console API key currently on it (…{tail}) will be imported into VibeSpace first so it isn’t lost.', { tail: racct.cliKey.tail }) : ''),
+              + (hasKey ? ' ' + (racct.cliKey.tail ? t('The Console API key currently on it (…{tail}) will be imported into VibeSpace first so it isn’t lost.', { tail: racct.cliKey.tail }) : t('The Console API key currently on it will be imported into VibeSpace first so it isn’t lost.')) : ''),
             confirmText: t('Open login terminal'),
           });
           if (!okGo) return;
@@ -3640,8 +3646,8 @@ export function installManageAgents(App, ctx = {}) {
             items.push({ label: t('Refresh quota'), title: t('Confirm identity + quota of {host}’s own login (one on-demand read of its token — never scheduled)', { host: hostLabel }), action: doHostRefresh });
           }
           items.push({ label: t('Log in on {host}…', { host: hostLabel }), title: t('Opens a terminal ON {host} — this login lands on that machine, not in VibeSpace', { host: hostLabel }), action: doHostLogin });
-          if (racct?.cliKey?.present && !importedTails.has(racct.cliKey.tail)) {
-            items.push({ label: t('Import its key'), title: t('Copy the Console key found on {host} (…{tail}) into VibeSpace so any machine can use it', { host: hostLabel, tail: racct.cliKey.tail }), action: doHostImport });
+          if (racct?.cliKey?.present && !hostKeyIn(racct.cliKey)) {
+            items.push({ label: t('Import its key'), title: racct.cliKey.tail ? t('Copy the Console key found on {host} (…{tail}) into VibeSpace so any machine can use it', { host: hostLabel, tail: racct.cliKey.tail }) : t('Copy the Console key found on {host} into VibeSpace so any machine can use it', { host: hostLabel }), action: doHostImport });
           }
           showContextMenu(r.left, r.bottom + 4, items);
         } else if (e.target.closest('.acct-def')) {

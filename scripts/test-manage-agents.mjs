@@ -65,7 +65,9 @@ globalThis.fetch = async (url, opts = {}) => {
     const b = (() => { try { return JSON.parse(opts.body || '{}'); } catch { return {}; } })();
     if (!b.hostId) globalThis.__tailsAsks = (globalThis.__tailsAsks || 0) + 1;   // the accounts' read asked (B-ee0a smalls: one a push)
     if (globalThis.__tailsRefused) return answer({ ok: false, code: 'human_only' }, 403);
-    return b.hostId ? answer({ ok: true, tails: { hostCliKey: globalThis.__hostTail ?? null } }) : answer({ ok: true, tails: am.keyTails() });
+    if (b.hostId) return answer({ ok: true, tails: { hostCliKey: globalThis.__hostTail ?? null } });
+    const tails = am.keyTails();   // read FIRST: the CLI key just read may move the word (as the route does)
+    return answer({ ok: true, tails, gen: am.tailsGen() });
   }
   if (u === '/api/accounts/default' && opts.method === 'POST') {
     const b = JSON.parse(opts.body || '{}'); posted.push(b);
@@ -223,7 +225,6 @@ console.log('⑤ negative controls');
   const T = await import(path.join(REPO, 'src/lib/account-tails.js'));
   const TAIL = ['Wm3', 'k8Pz', 'Q'].join('');   // the last 8 of a key built at runtime
   const kid = am.add({ name: 'Console', key: ['sk-ant-', 'api03-', 'j'.repeat(30), TAIL].join('') }).id;
-  T.notePush();   // the hub pushes accounts-updated on an add (B-ee0a smalls: the page asks again only after a push)
   const want = am.keyTails().accounts[kid];
   const bare = await fetchJson('/api/accounts');
   const laid = await T.accountsWithTails();
@@ -244,7 +245,7 @@ console.log('⑤ negative controls');
   ok('the accounts-updated push (no tail) gets the person\'s last read laid on by the page — the cache keeps showing it', row(pushLaid).tail === want && !JSON.stringify(am.list()).includes(want), row(pushLaid).tail);
   const AP = read('src/lib/app.js'), MAs = read('src/lib/manage-agents.js');
   ok('the page wiring: the app\'s refresh asks the list and the person\'s read together and lays them; its push handler lays the last read and asks again at every push (a re-keyed provider\'s new tail, never the old); the roster\'s own read goes through the same',
-    AP.includes("return Promise.all([fetchJson('/api/accounts'), askTails()]).then(([d0, tl]) => {") && AP.includes('const d = withTails(d0, tl);') && AP.includes('accounts: accountRowsOf(withTails(msg))') && AP.includes('        askTails().then(() => { if (this._accounts && Array.isArray(this._accounts.accounts)) this._accounts = { ...this._accounts, accounts: withTails({ accounts: this._accounts.accounts }).accounts };')
+    AP.includes("return fetchJson('/api/accounts').then((d0) => askTails(d0 && d0.tailsGen).then((tl) => [d0, tl])).then(([d0, tl]) => {") && AP.includes('const d = withTails(d0, tl);') && AP.includes('accounts: accountRowsOf(withTails(msg))') && AP.includes('        askTails(msg.tailsGen).then(() => { if (this._accounts && Array.isArray(this._accounts.accounts)) this._accounts = { ...this._accounts, accounts: withTails({ accounts: this._accounts.accounts }).accounts };')
     && MAs.includes('    try { acct = await accountsWithTails(); } catch {}'));
   const SC2 = read('src/lib/session-card.js'), CV = read('src/lib/chat-view.js'), SPp = read('src/lib/session-props.js'), WN = read('src/lib/window.js');
   ok('the conversation badges carry no key tail (the live payload reaches every client): the page reads the person\'s read by the badge\'s account id — the card, the chat header, Session Properties, the window chip',
@@ -261,27 +262,56 @@ console.log('⑤ negative controls');
   for (const r of copiesCensus(TM.files, TM.dir, REPO, { minCopies: 1 })) ok(r.name, r.pass, r.detail);
 }
 
-// B-ee0a smalls: ONE tails ask a PUSH (each ask is a synchronous read of the CLI's file on the hub's main loop): the app's push asks,
-// every other reader (the roster's refresh, the app's own) takes that read; a refused read is never kept — the next reader asks
+// B-ee0a smalls: ONE tails ask a TAILS GENERATION (each ask is a synchronous read of the CLI's file on the hub's main loop) — and its
+// reader's MUST: never a wrong tail. The list carries the hub's word (am.tailsGen()); a read is reused only under the same word: two
+// asks at once are one, the roster's refresh takes the read, the CLI's own key seen different (nothing pushed it) asks again, a
+// refused read is asked again, an answer with no word asks
 {
-  const onePush = async (T) => {
+  const oneGen = async (T) => {
     globalThis.__tailsAsks = 0;
-    await Promise.all([T.askTails(), T.askTails()]); const first = globalThis.__tailsAsks;
-    await T.askTails(); await T.accountsWithTails(); const reused = globalThis.__tailsAsks;
-    T.notePush(); await Promise.all([T.askTails(), T.accountsWithTails()]); await T.accountsWithTails(); const afterPush = globalThis.__tailsAsks;
-    globalThis.__tailsRefused = true; T.notePush(); await T.askTails(); globalThis.__tailsRefused = false; await T.askTails(); const afterRefusal = globalThis.__tailsAsks;
-    return { first, reused, afterPush, afterRefusal };
+    const g0 = am.tailsGen();
+    await Promise.all([T.askTails(g0), T.askTails(g0)]); const first = globalThis.__tailsAsks;
+    await T.askTails(am.tailsGen()); await T.accountsWithTails(); const reused = globalThis.__tailsAsks;
+    am._noteCliTail(['Zz', 'q9', 'W1x7'].join('')); am._noteCliTail(['Yy', 'p8', 'V2w6'].join(''));   // the CLI's own key seen different — the word moves
+    await T.accountsWithTails(); await T.accountsWithTails(); const afterCli = globalThis.__tailsAsks;
+    globalThis.__tailsRefused = true; am._notify(); await T.accountsWithTails(); globalThis.__tailsRefused = false; await T.accountsWithTails(); const afterRefusal = globalThis.__tailsAsks;
+    await T.askTails(); const noWord = globalThis.__tailsAsks;
+    // an ask IN FLIGHT under an older word (its delta read): the store moves while it is out — the reader of the new word asks once more
+    const pA = T.askTails('an-older-word'); am._notify(); const pB = T.askTails(am.tailsGen()); await Promise.all([pA, pB]); const inflightOther = globalThis.__tailsAsks;
+    return { first, reused, afterCli, afterRefusal, noWord, inflightOther };
   };
-  const r1 = await onePush(await import(pathToFileURL(path.join(REPO, 'src/lib/account-tails.js')).href + '?onepush'));   // a fresh page
+  const r1 = await oneGen(await import(pathToFileURL(path.join(REPO, 'src/lib/account-tails.js')).href + '?onegen'));   // a fresh page
   const APP2 = read('src/lib/app.js');
-  ok('ONE tails ask a push: two at once are one, the roster\'s refresh and a later reader take the last good read, a push asks once more, a refused read is asked again; the app notes each accounts push before it asks',
-    r1.first === 1 && r1.reused === 1 && r1.afterPush === 2 && r1.afterRefusal === 4 && APP2.includes('        notePush();\n        askTails().then('), r1);
+  ok('ONE tails ask a generation: two at once are one, the roster\'s refresh takes the read, the CLI\'s own key seen different asks again (never a wrong tail), a refused read is asked again, no word asks; the app\'s push and refresh pass the list\'s word',
+    r1.first === 1 && r1.reused === 1 && r1.afterCli === 2 && r1.afterRefusal === 4 && r1.noWord === 5 && r1.inflightOther === 7 && APP2.includes('        askTails(msg.tailsGen).then(') && APP2.includes('askTails(d0 && d0.tailsGen)')
+    && APP2.includes("try { this.refreshAccounts?.(); } catch { }   // B-ee0a (its delta read): an accounts push missed while away"), r1);
+  // the credential doors' refusals in the page's words — the reveal, the export and the import dialogs ask ONE function
+  const CW = await import(pathToFileURL(path.join(REPO, 'src/lib/account-tails.js')).href + '?words');
+  ok('the credential doors\' refusals are worded by ONE page function (the reveal, the export and the import dialogs): each code its words, anything else none',
+    /^Only the person, on this VibeSpace page/.test(CW.credentialDoorWords({ code: 'credential_person_only' }) || '') && /^Only the person, on this VibeSpace page/.test(CW.credentialDoorWords({ code: 'credential_page_only' }) || '') && CW.credentialDoorWords({ code: 'x' }) === null
+    && APP2.includes("err.textContent = credentialDoorWords(j) || j.error || t('Export failed');") && APP2.includes("err.textContent = credentialDoorWords(d) || d.error || t('Import failed');") && read('src/lib/vault-reveal.js').includes('const cw = credentialDoorWords(r);'));
   const OTS = read('src/lib/account-tails.js');
-  const GATE1 = '  if (readFor === pushes) return Promise.resolve(last);\n';
-  const OM = mutantCopies('manage-agents-onepush', REPO);
-  const r0 = await onePush(await import(pathToFileURL(OM.write('src/lib/account-tails.js', anchored(OTS, GATE1, '', 'the page that asks at every read'), 'every-read')).href));
-  ok('CONTROL: the page that asks at every read (no push gate) asks again for the roster\'s refresh ⇒ the leg above goes RED', r0.reused > r0.first, r0);
+  const SAME = '  if (!inflight && same()) return Promise.resolve(last);\n';
+  const OM = mutantCopies('manage-agents-onegen', REPO);
+  const r0 = await oneGen(await import(pathToFileURL(OM.write('src/lib/account-tails.js', anchored(OTS, SAME, '  if (!inflight && readGen != null) return Promise.resolve(last);\n', 'the page that reuses a read under any word'), 'any-word')).href));
+  ok('CONTROL: the page that reuses its read under any word keeps the old CLI-key tail after the key changed on disk ⇒ the leg above goes RED', r0.afterCli === r0.reused, r0);
   for (const r of copiesCensus(OM.files, OM.dir, REPO, { minCopies: 1 })) ok(r.name, r.pass, r.detail);
+}
+
+// B-ee0a (its delta read, S3): a paired machine whose tail is UNKNOWN is never «already imported» — the REAL predicate the host roster's
+// «Import its key» and the login swap's import-first step ask; CONTROL: the old Set (a tail-less row's undefined matched an unknown tail)
+{
+  const MA0 = await import(path.join(REPO, 'src/lib/manage-agents.js'));
+  const accts = [{ id: 'sub-1', type: 'subscription' }, { id: 'acct-1', type: 'api', tail: 'Kc4mR8vn' }];
+  const unknown = MA0.hostKeyImported(accts, { present: true }), known = MA0.hostKeyImported(accts, { present: true, tail: 'Kc4mR8vn' }), other = MA0.hostKeyImported(accts, { present: true, tail: 'Zz9yX8wv' });
+  const MAs2 = read('src/lib/manage-agents.js');
+  ok('a paired machine\'s key with an UNKNOWN tail is never «already imported» (its import offered — idempotent); a known tail matching an account is; another is not; both roster doors ask this one predicate',
+    unknown === false && known === true && other === false && MAs2.includes('    const hostKeyIn = (k) => hostKeyImported(claudeAccts, k);') && MAs2.split('!hostKeyIn(racct.cliKey)').length === 3, { unknown, known, other });
+  const OLDP = "  return !!(cliKey && typeof cliKey.tail === 'string' && cliKey.tail && tails.has(cliKey.tail));";
+  const HM = mutantCopies('manage-agents-hostkey', REPO);
+  const MAx = await import(pathToFileURL(HM.write('src/lib/manage-agents.js', anchored(MAs2, OLDP, '  return new Set((accts || []).map((a) => a && a.tail)).has(cliKey && cliKey.tail);', 'the old Set predicate'), 'old-set')).href);   // every tail-less row put undefined in it
+  ok('CONTROL: the predicate as it was (the old Set) reads an unknown tail as «already imported» — the host\'s Console key would be orphaned ⇒ the leg above goes RED', MAx.hostKeyImported(accts, { present: true }) === true);
+  for (const r of copiesCensus(HM.files, HM.dir, REPO, { minCopies: 1 })) ok(r.name, r.pass, r.detail);
 }
 
 // B-ee0a: A PAIRED machine's CLI-key tail — its accounts-status answer carries none; the REAL page helper lays the person's read on

@@ -1313,6 +1313,8 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     if (sections.includes('settings') && file.sections.settings && typeof file.sections.settings === 'object' && refuseEngineRows(req, res, file.sections.settings)) return;
     if (sections.includes('settings') && file.sections.settings && typeof file.sections.settings === 'object' && refuseSpendRows(req, res, file.sections.settings)) return; // lane setting-doors pick 0: all or nothing, as the engine rows
     { const held = sections.includes('tasks') && file.sections.tasks !== undefined ? getTasks?.()?.unreadRefusal?.('an import of Task Groups') : null; if (held) return res.status(503).json({ error: held, code: 'TASK_GROUPS_UNREAD' }); }   // THE STORE HELD UNREAD: refused WHOLE before any section is applied
+    // B-ee0a (its delta read): an import that brings credentials in is the person's — refused WHOLE before any section is written
+    if (includeSensitive.length && file.sensitive && !personOnlyDoor(req, res)) return;
     const applied = [];
     const apply = (name, fn) => {
       if (!sections.includes(name) || file.sections[name] === undefined) return;
@@ -1333,7 +1335,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     const clientPrefs = sections.includes('clientPrefs') ? file.sections.clientPrefs : undefined;
     if (clientPrefs) applied.push('clientPrefs');
 
-    if (includeSensitive.length && file.sensitive) {
+    if (includeSensitive.length && file.sensitive) {   // (the person was asked above, before any section was written — B-ee0a)
       let sens;
       try { sens = decryptSensitive(file.sensitive, passphrase); }
       catch { return res.status(400).json({ error: 'Wrong passphrase (or corrupted file)' }); }

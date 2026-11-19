@@ -24,7 +24,7 @@ import { ChatView } from './chat-view.js';
 import { createReconnectQueue } from './reconnect-queue.js';
 import { Resizer } from './resizer.js';
 import { anchorFixedPopup, drawnAnchorRect, api, configureToasts, registerSettingLinks, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog, applyUiPrefs, uiScale, setInstanceUrl, markTyped, wasTyped, announceModal } from './utils.js';
-import { askTails, withTails, notePush } from './account-tails.js'; // B-ba7d: the accounts list carries no key tail — the person's read lays it on
+import { askTails, withTails, credentialDoorWords } from './account-tails.js'; // B-ba7d: the accounts list carries no key tail — the person's read lays it on
 import { t, tc, resolveLang } from './i18n.js';
 import { stampAt as when, clockOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { themeWord, modelOptions } from './value-words.js'; // lane ui-language: a theme key in the reader's words (the walk's window-manager-9)
@@ -376,10 +376,9 @@ class App {
       if (msg.type === 'accounts-updated' && Array.isArray(msg.accounts)) {
         this._accounts = { ...(this._accounts || {}), accounts: accountRowsOf(withTails(msg)), ...accountDefaultsOf(msg) };
         // B-ba7d: the push carries no key tail — the person's last read is laid on, and asked again (coalesced: one ask in flight) — a
-        // key added, a key replaced, a provider re-keyed: the next draw reads the new tail, never the old one. ONE ask a push: the
-        // roster's refresh below takes this read (B-ee0a smalls — each ask is a synchronous read of the CLI's file on the hub)
-        notePush();
-        askTails().then(() => { if (this._accounts && Array.isArray(this._accounts.accounts)) this._accounts = { ...this._accounts, accounts: withTails({ accounts: this._accounts.accounts }).accounts }; try { this._agentsRefreshHook?.(); } catch {} }); // every harness's default field (agent-meta) + the providers' rows (lane lg-providers U5)
+        // key added, a key replaced, a provider re-keyed: the next draw reads the new tail, never the old one. ONE ask a tails
+        // generation: the push carries its word; the roster's refresh below takes this read (B-ee0a smalls)
+        askTails(msg.tailsGen).then(() => { if (this._accounts && Array.isArray(this._accounts.accounts)) this._accounts = { ...this._accounts, accounts: withTails({ accounts: this._accounts.accounts }).accounts }; try { this._agentsRefreshHook?.(); } catch {} try { this._usageNow?.(); } catch {} });   // B-ee0a: the usage tips redraw with the read too // every harness's default field (agent-meta) + the providers' rows (lane lg-providers U5)
         // Live-re-render an OPEN Manage Agents surface — without this the
         // roster only updated on the next manual reopen, so adding an account
         // (esp. one never logged in) left the page unchanged (inc-msl890ua).
@@ -671,6 +670,7 @@ class App {
       // reconnect (2.219.0 audit: maintenance banner + settings missed
       // changes made while this tab was disconnected)
       fetchJson('/api/maintenance').then((m) => { if (m) this._renderMaintenance?.(m); }).catch(() => {});
+      try { this.refreshAccounts?.(); } catch { }   // B-ee0a (its delta read): an accounts push missed while away — the list's word decides whether the tails are asked again
       try { this.settings?.refetch?.(); } catch {}
       try { this._loadSettingHolds?.(); } catch {} // lane setting-doors pick 2: the holds are a broadcast-only mirror too
       // user-state too (2.223.4 — the userW names/stars/archives blackout):
@@ -1097,7 +1097,7 @@ class App {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ sections, includeSensitive, passphrase, clientPrefs, ...(includeSensitive.length && info.sensitive.secondPassword ? { secondPassword: passRow.querySelector('#cfg-exp-second')?.value || '' } : {}) }),
         });
-        if (!res.ok) { const d = await res.json().catch(() => ({})); err.textContent = d.code === 'TASK_GROUPS_UNREAD' ? t("Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.") : (d.error || t('Export failed')); return; }   // THE STORE HELD UNREAD: the page's own words
+        if (!res.ok) { const d = await res.json().catch(() => ({})); err.textContent = d.code === 'TASK_GROUPS_UNREAD' ? t("Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.") : (credentialDoorWords(d) || d.error || t('Export failed')); return; }   // THE STORE HELD UNREAD: the page's own words
         const blob = await res.blob();
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
@@ -1199,7 +1199,7 @@ class App {
             body: JSON.stringify({ file, sections, includeSensitive, passphrase }),
           });
           const d = await res.json().catch(() => ({}));
-          if (!res.ok) { err.textContent = d.code === 'TASK_GROUPS_UNREAD' ? t("Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.") : (d.error || t('Import failed')); return; }
+          if (!res.ok) { err.textContent = d.code === 'TASK_GROUPS_UNREAD' ? t("Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.") : (credentialDoorWords(d) || d.error || t('Import failed')); return; }
           if (d.clientPrefs) {
             for (const [k, v] of Object.entries(d.clientPrefs)) {
               if (CLIENT_PREF_KEYS.includes(k)) localStorage.setItem(k, v);
@@ -2559,7 +2559,7 @@ class App {
   // login state + importable CLI key; the accounts-updated broadcast keeps the
   // list fresh between refreshes.
   refreshAccounts() {
-    return Promise.all([fetchJson('/api/accounts'), askTails()]).then(([d0, tl]) => {
+    return fetchJson('/api/accounts').then((d0) => askTails(d0 && d0.tailsGen).then((tl) => [d0, tl])).then(([d0, tl]) => {   // B-ee0a: the list's word decides whether the last read holds
       const d = withTails(d0, tl);   // B-ba7d: the list carries no key tail; the person's own read (POST /api/accounts/tails) lays it on
       if (d) this._accounts = { accounts: accountRowsOf(d), ...accountDefaultsOf(d), subscription: d.subscription || {}, cliKey: d.cliKey || {} }; // every harness's default field (agent-meta)
       if (d?.hostNames) this._hostNamesKnown = d.hostNames; // id→name for chips (2.244.1)
