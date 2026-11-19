@@ -131,8 +131,11 @@ export function openSessionProps(app, sessionRef, { syncId, section = null } = {
     const sec = body.querySelector('.session-props-may-use');
     if (!winInfo._mayUseFocus || !sec || !sec.isConnected) return;   // replaced before the frame: the next render's frame lands it
     try { sec.scrollIntoView({ block: 'start' }); } catch { }
-    winInfo._mayUseFocus = false;
+    // the box run (主开发 04:23Z): a scroll before the answer was drawn stopped short (the section 63 px down: the body could not
+    // scroll a «Reading…» section to its top) and nothing scrolled again — the flag holds until the answer is drawn; its paint asks
+    if (winInfo._mayUse && winInfo._mayUse.painted()) winInfo._mayUseFocus = false;
   });
+  const onMayUsePainted = () => { if (winInfo._mayUseFocus) scrollToMayUse(); };   // the section drew an answer: land the asked scroll on it
 
   /** The "Now" value — the CURRENT status record's state, reason (a cleared one in this device's words) and detail. */
   const nowHtml = (s) => statusNowHtml(sidebar.getSessionStatus?.(s));   // lane mask-value-shape r4: the row's markup is module-level (a render leg draws the real one)
@@ -745,7 +748,7 @@ export function openSessionProps(app, sessionRef, { syncId, section = null } = {
     {
       const muSec = section(t('What it may use'));
       muSec.classList.add('session-props-may-use');
-      if (!winInfo._mayUse) winInfo._mayUse = mountMayUse(app, mayUseRef);
+      if (!winInfo._mayUse) winInfo._mayUse = mountMayUse(app, mayUseRef, { onPainted: onMayUsePainted });
       muSec.appendChild(winInfo._mayUse.el);
       if (winInfo._mayUseFocus) scrollToMayUse();
     }

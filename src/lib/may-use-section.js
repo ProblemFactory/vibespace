@@ -29,11 +29,14 @@ import { withoutCreateAccess } from '../new-session-spec.js';
 export const MAY_USE_NARROW_PX = 400;
 const ic = (k) => UI_ICONS[k] || '';
 const quoted = (names) => names.map((n) => t('“{name}”', { name: n })).join(resolveLang() === 'en' ? ', ' : '');
-const groupNameOf = (app, id) => { const g = app.sidebar?._taskById?.(id); return g ? String(g.title || g.name || g.id) : String(id); };
+// a Task Group's name: the HUB's answer first (facts.groups — the store's own title, there the moment the grant is), the sidebar's
+// list only for a group the answer does not hold (the box run, 主开发 04:23Z: a group made a moment before drew by its id — the
+// sidebar had not heard of it yet, while «会话» named it from the answer)
+const groupNameOf = (app, id, view = null) => { const own = view && view.facts && Array.isArray(view.facts.groups) ? view.facts.groups.find((g) => g && String(g.id) === String(id)) : null; if (own && own.name) return String(own.name); const g = app.sidebar?._taskById?.(id); return g ? String(g.title || g.name || g.id) : String(id); };
 
 /** Mount the section for one conversation → { el, refresh(), paint(), destroy() }. `getRef()` → { sessionKey, webuiId } (read
  *  again at each refresh — a conversation that just got its id); a tick writes for the id the HUB names it by (the view's cid). */
-export function mountMayUse(app, getRef) {
+export function mountMayUse(app, getRef, { onPainted = null } = {}) {   // onPainted: after each answer is drawn (Properties lands its asked scroll then)
   const el = document.createElement('div');
   el.className = 'mu-section';
   el.innerHTML = `<div class="ns-pv-via dim">${escHtml(t('Reading what it may use…'))}</div>`;
@@ -47,20 +50,21 @@ export function mountMayUse(app, getRef) {
     if (!st.alive || seq !== st.seq) return;
     if (r && r.ok && r.view) { st.data = r.view; st.error = null; } else st.error = (r && (r.error || r.code)) || t('server unreachable');
     paint();
+    try { if (typeof onPainted === 'function') onPainted(); } catch { }
     try { window.__vsOp?.('may-use-painted', { key: ref.sessionKey }); } catch { }
   }
   const later = () => { clearTimeout(st.timer); st.timer = setTimeout(() => { st.timer = null; if (st.alive && el.isConnected) refresh(); }, 300); };
 
   // ── how a row admits, in words ──
   function how(r) {
-    if (r.state === 'ok') return r.via === 'self' ? t('itself') : r.via === 'group' ? t('through Task Group {name}', { name: quoted([groupNameOf(app, r.groupId)]) }) : t('all agents');
+    if (r.state === 'ok') return r.via === 'self' ? t('itself') : r.via === 'group' ? t('through Task Group {name}', { name: quoted([groupNameOf(app, r.groupId, st.data)]) }) : t('all agents');
     if (r.state === 'request') return t('may ask for it — the request comes to you');   // a reach row at «may request»: never «may see»
     if (r.state === 'excepted') return t('left out — Except: {name}', { name: r.except ? exceptName(r.except) : t('this conversation') });
     if (r.state === 'closed') return t('not open to this conversation');   // B-e630: its door («Who can use it») is on the row
     return r.code === 'groups_unreadable' ? t('unknown — its Task Groups could not be read') : t('cannot be read by this release');
   }
   function exceptName(p) {
-    if (p.kind === 'group') return groupNameOf(app, p.id);
+    if (p.kind === 'group') return groupNameOf(app, p.id, st.data);
     const k = String(p.key || p.id || ''); const bare = k.slice(k.indexOf(':') + 1);
     const s = (app.sidebar?._allSessions || []).find((x) => x.backendSessionId === bare || x.sessionId === bare || x.backendSessionId === k);
     return (s && sessionDisplayName(s)) || t('a conversation not live now');
@@ -109,7 +113,7 @@ export function mountMayUse(app, getRef) {
     const accRows = ch.accounts.map((x) => {
       const a = x.account;
       let top;
-      if (a.state === 'granted') top = grantedAccountHtml(a, { groupNameOf: (id) => groupNameOf(app, id), exceptName, quoted });
+      if (a.state === 'granted') top = grantedAccountHtml(a, { groupNameOf: (id) => groupNameOf(app, id, st.data), exceptName, quoted });
       else if (a.state === 'own' || a.state === 'none') top = tickAccountHtml(a, { ticked: a.state === 'own', words: [t('Given to this conversation itself · {authority} — untick to take it back', { authority: authWords(a.authority) }), t('Not given — tick to let this conversation see it (draft only)')] });
       else top = `<div class="ns-acc" data-acc-row="${escHtml(a.id)}"><span class="ns-acc-n"><span class="ns-chan-k">${escHtml(a.vendor || a.kind)}</span>${escHtml(a.label)}</span><span class="ns-pv-via dim">${escHtml(a.state === 'excepted' ? t('left out — Except: {name}', { name: a.exceptedBy ? exceptName(a.exceptedBy) : t('this conversation') }) : t('unknown — its Task Groups could not be read'))}</span><span class="ns-acc-end">${doorBtn('chan', t('Channels window'), `data-acc="${escHtml(a.id)}"`)}</span></div>`;
       const chanDoor = doorBtn('chan', t('Channels window'), `data-acc="${escHtml(a.id)}"`);
@@ -210,6 +214,7 @@ export function mountMayUse(app, getRef) {
   refresh();
   return {
     el, refresh, paint,
+    painted: () => !!(st.data || st.error),   // an answer (or its refusal) is drawn — the rows stand where a scroll can reach them
     destroy() { st.alive = false; clearTimeout(st.timer); try { sync?.off('grants', '*', onGrant); } catch { } app.ws?.offGlobal?.(onMsg); ro?.disconnect(); },
   };
 }

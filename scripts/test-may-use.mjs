@@ -28,6 +28,8 @@
 //   ⑱–⑲ THE HOSTED CURE (主开发 00:53Z): ⑱ the section's ref is made ONCE at the window's scope (a ref made inside render kept the
 //      first render's DOM alive — test-record-clear-client's heap leg); ⑲ the asked scroll lands on the section on the page at
 //      the frame, the flag cleared only after it (RED: each release form planted back)
+//   ⑳–㉑ THE BOX PROOF'S CURE (主开发 04:23Z): ⑳ a group is named from the hub's answer first (a just-made group drew by its id);
+//      ㉑ the asked scroll lands after the answer is drawn — the flag held until then, the section's paint asks again (RED each)
 //   ⑭ THE RESTACK ONTO 2.369.410: the key lister reads the door's LIVE grants (a once-grant from before a restart is not
 //      listed; RED: a lister over the raw store) — the release's B-3190 follow-up made the key door read them
 //   ⑧ THE FORM'S ROWS BYTE FOR BYTE: src/lib/may-use-rows.js renders what the released form's closures rendered (a frozen copy of
@@ -548,7 +550,7 @@ console.log('— ⑱ the section\'s ref is made once at the WINDOW\'s scope, nev
 {
   const SP = fs.readFileSync(path.join(REPO, 'src/lib/session-props.js'), 'utf8');
   const REF = 'const mayUseRef = () => { const x = findSession(); return x ? { sessionKey: refKey, webuiId: x.webuiId || null } : null; };';
-  const MOUNT = 'winInfo._mayUse = mountMayUse(app, mayUseRef);';
+  const MOUNT = 'winInfo._mayUse = mountMayUse(app, mayUseRef, { onPainted: onMayUsePainted });';
   const atWindow = (sp) => { const r = sp.indexOf('  const render = () => {'); return r > 0 && sp.split(REF).length === 2 && sp.indexOf(REF) < r && sp.split(MOUNT).length === 2 && sp.indexOf(MOUNT) > r && !/mountMayUse\(app, \(\) =>/.test(sp); };   // stale-pins: kept — the release's form, named on purpose (an absence check / the RED control's plant)
   ok(atWindow(SP), '⑱ mountMayUse is handed mayUseRef, made once beside findSession / refKey before render() — no arrow made inside a render is kept for the window\'s life');
   const OLD = 'winInfo._mayUse = mountMayUse(app, () => { const x = findSession(); return x ? { sessionKey: refKey, webuiId: x.webuiId || null } : null; });';   // stale-pins: kept — the release's form, named on purpose (an absence check / the RED control's plant)
@@ -561,13 +563,37 @@ console.log('— ⑲ the asked scroll lands on the section ON the page at the fr
   const SP = fs.readFileSync(path.join(REPO, 'src/lib/session-props.js'), 'utf8');
   const lands = (sp) => { const i = sp.indexOf('const scrollToMayUse = () => requestAnimationFrame(() => {'); if (i < 0) return false; const b = sp.slice(i, sp.indexOf('\n  });', i));
     const q = b.indexOf("body.querySelector('.session-props-may-use')"), c = b.indexOf('sec.isConnected'), sc = b.indexOf('sec.scrollIntoView('), cl = b.indexOf('winInfo._mayUseFocus = false;');
-    return q > 0 && c > q && sc > c && cl > sc && sp.split('if (winInfo._mayUseFocus) scrollToMayUse();').length === 2 && !sp.includes('muSec.scrollIntoView('); };   // stale-pins: kept — the release's form, named on purpose (an absence check / the RED control's plant)
+    return q > 0 && c > q && sc > c && cl > sc && sp.split('      if (winInfo._mayUseFocus) scrollToMayUse();\n').length === 2 && !sp.includes('muSec.scrollIntoView('); };   // stale-pins: kept — the release's form, named on purpose (an absence check / the RED control's plant)
   ok(lands(SP), '⑲ the frame callback looks the section up in the body, scrolls it only when connected, and clears the focus flag only after the scroll');
-  const NOW = 'if (winInfo._mayUseFocus) scrollToMayUse();';
-  const OLD = "if (winInfo._mayUseFocus) { winInfo._mayUseFocus = false; requestAnimationFrame(() => { try { muSec.scrollIntoView({ block: 'start' }); } catch { } }); }";   // stale-pins: kept — the release's form, named on purpose (an absence check / the RED control's plant)
+  const NOW = '      if (winInfo._mayUseFocus) scrollToMayUse();\n';   // render's own line (onMayUsePainted holds the same words)
+  const OLD = "      if (winInfo._mayUseFocus) { winInfo._mayUseFocus = false; requestAnimationFrame(() => { try { muSec.scrollIntoView({ block: 'start' }); } catch { } }); }\n";   // stale-pins: kept — the release's form, named on purpose (an absence check / the RED control's plant)
   const planted = SP.split(NOW).length === 2 ? SP.replace(NOW, OLD) : null;
   ok(!!planted && planted.includes(OLD) && !planted.includes(NOW), '⑲ CONTROL plant: the render\'s call stands once, and the copy clears the flag first and scrolls the captured section');
   ok(!!planted && lands(planted) === false, '⑲ RED CONTROL: the release\'s order (the flag cleared before the frame, the captured section scrolled) is caught');
+}
+
+// ── ⑳–㉑ THE BOX PROOF'S CURE (主开发 04:23Z, the integrator's runs alone on the box): both moving reds were the product drawing early ──
+console.log('— ⑳ a Task Group is named from the HUB\'s answer first (facts.groups), the sidebar\'s list only for a group the answer does not hold');
+{
+  const SEC = fs.readFileSync(path.join(REPO, 'src/lib/may-use-section.js'), 'utf8');
+  const NAME = "const own = view && view.facts && Array.isArray(view.facts.groups) ? view.facts.groups.find((g) => g && String(g.id) === String(id)) : null; if (own && own.name) return String(own.name);";
+  const fromAnswer = (s) => s.split(NAME).length === 2 && s.split('groupNameOf(app, r.groupId, st.data)').length === 2 && s.split('groupNameOf(app, p.id, st.data)').length === 2 && s.split('groupNameOf: (id) => groupNameOf(app, id, st.data)').length === 2;
+  ok(fromAnswer(SEC), '⑳ groupNameOf reads the answer\'s own groups before the sidebar, and every row\'s call hands it the answer (how a row admits, an exception\'s name, a granted account)');
+  const planted = SEC.split(NAME).length === 2 ? SEC.replace(NAME, '') : null;
+  ok(!!planted && !planted.includes(NAME), '⑳ CONTROL plant: the answer-first lookup stands once, and the copy asks the sidebar alone');
+  ok(!!planted && fromAnswer(planted) === false, '⑳ RED CONTROL: a section that names a group from the sidebar alone (the box run: a just-made group drawn by its id) is caught');
+}
+console.log('— ㉑ the asked scroll lands AFTER the answer is drawn: the flag holds until then, and the section\'s paint asks again');
+{
+  const SP = fs.readFileSync(path.join(REPO, 'src/lib/session-props.js'), 'utf8'), SEC = fs.readFileSync(path.join(REPO, 'src/lib/may-use-section.js'), 'utf8');
+  const HOLD = 'if (winInfo._mayUse && winInfo._mayUse.painted()) winInfo._mayUseFocus = false;';
+  const ASK = 'const onMayUsePainted = () => { if (winInfo._mayUseFocus) scrollToMayUse(); };';
+  const after = (sp, sec) => { const r = sp.indexOf('  const render = () => {'); return r > 0 && sp.split(HOLD).length === 2 && sp.split(ASK).length === 2 && sp.indexOf(ASK) < r
+    && sp.split('mountMayUse(app, mayUseRef, { onPainted: onMayUsePainted })').length === 2 && sec.split("    paint();\n    try { if (typeof onPainted === 'function') onPainted(); } catch { }").length === 2 && sec.includes('painted: () => !!(st.data || st.error),'); };
+  ok(after(SP, SEC), '㉑ the flag is cleared only once the answer is drawn; the section calls its onPainted after each paint; Properties hands it a window-scope onMayUsePainted that lands the asked scroll');
+  const planted = SP.split(HOLD).length === 2 ? SP.replace(HOLD, 'winInfo._mayUseFocus = false;') : null;
+  ok(!!planted && !planted.includes(HOLD), '㉑ CONTROL plant: the held clear stands once, and the copy clears the flag at the first scroll');
+  ok(!!planted && after(planted, SEC) === false, '㉑ RED CONTROL: a flag cleared at the first scroll (before the answer is drawn: the box run, the section 63 px down) is caught');
 }
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
