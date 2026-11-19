@@ -20,6 +20,7 @@ const { mk } = require('./lazy.js');
 // (hostId), carrying B-55dc's «still being read» flag (memberIds — a reply marked unread is unknown too). Never an empty fallback.
 // `reader`: the follow's one log line a hold, per reader (groupIdsForGrant marks the first throw of a hold for each)
 const grantMemberIds = (tasks, a, reader) => (typeof tasks.isHeldUnread === 'function' && tasks.isHeldUnread() ? tasks.groupIdsForGrant(a, reader) : tasks.memberIds(a));
+const { personOnlyDoor } = require('../routes/account-tails.js');   // B-ee0a: the no-vault credential doors' ONE person check (the mount config door too)
 
 function create({ deliveryWakeDeps = () => ({}), app, server, rootDir, HOST, PORT, BUFFERS_DIR, PERMISSION_MODES,
   auth, wss, WS_OPEN, bcastAll, serverSetting, mountTokens, persistenceRouter, instanceUrl,
@@ -1140,12 +1141,17 @@ app.post('/api/mounts/:id/unmount', async (req, res) => {
   catch (e) { res.status(400).json(require('../mount-error-words.js').errorBody(e)); }
 });
 // Decrypted connection config for the edit dialog (prefill REAL values —
-// user directive; cookie-authed, single-user instance model)
-app.get('/api/mounts/:id/config', (req, res) => {
-  if (refuseAgentBearer(req, res)) return;   // verify r5: the plaintext client secret — the owner's dialog only
+// user directive; cookie-authed, single-user instance model). ONE answer on GET and on POST (B-ee0a's take, 主开发 08:50Z: the page's
+// road is the POST — a plain-http page sends no Origin on a GET; the GET stays for pages loaded before this build, which it serves on https
+// or localhost only: on plain http such a page's GET is refused until the page reloads — the reload toast says so). With NO vault set
+// up, the person verdict first, as its siblings (the key reveal, the export): a conversation's, job's or automation's credential and
+// a script with no browser headers of this page are refused by name. A set-up vault: its reveal window, as before.
+function mountConfigAnswer(req, res) {
+  res.set('Cache-Control', 'no-store');
   // lane vault-contents-window r2 (verify r1): a set-up vault hands the sealed fields only inside THIS page's reveal window
   // (the Vault window's door: paced, audited `vault-reveal` field '*'); else they come back MASKED (the dialog keeps them)
   const gate = app.locals.vaultGate;
+  if ((!gate || gate.state() === 'not_set_up') && !personOnlyDoor(req, res)) return;   // NO vault: the person only (B-ee0a)
   let masked = false;
   // lane ui-controls-and-bugs: a record whose answer carries no sealed byte (the write-only law drops every secret) asks no
   // reveal — no `vault-reveal` audited, no pace spent for nothing
@@ -1153,6 +1159,14 @@ app.get('/api/mounts/:id/config', (req, res) => {
   if (needs && gate && gate.state() !== 'not_set_up') { const g = gate.revealRecord(req, 'mounts', req.params.id); masked = !g.ok; if (g.code === 'human_only' || g.code === 'cross_site') return res.status(403).json({ error: gate.refusalOf(g.code), code: g.code }); }
   try { res.json(mounts.config(req.params.id, { masked })); }
   catch (e) { res.status(400).json(require('../mount-error-words.js').errorBody(e)); }
+}
+app.get('/api/mounts/:id/config', (req, res) => {
+  if (refuseAgentBearer(req, res)) return;   // verify r5: the plaintext client secret — the owner's dialog only
+  mountConfigAnswer(req, res);
+});
+app.post('/api/mounts/:id/config', (req, res) => {   // the page's road (B-ee0a)
+  if (refuseAgentBearer(req, res)) return;
+  mountConfigAnswer(req, res);
 });
 // D2: a bare client switch beside a held token is refused 409 by name
 // (`client-change-needs-reauth`) — the client lands WITH its token through

@@ -149,7 +149,10 @@ const WORDS = Object.freeze({
   job_secrets_record_unwritable: 'the record of the copies a move makes could not be written — nothing was moved; press again later',
   job_secrets_record_held: 'the record of the copies a move left could not be read just now — nothing was moved; press again in a moment',
 });
-const isAnyBearer = (req) => /^Bearer\s+\S/i.test(String((req.headers && req.headers.authorization) || '')) || typeof (req.body && req.body.token) === 'string';
+// THE one rule that spots a carried credential on an Express route (B-ee0a's take: src/routes/desktop-apps.js and exit-routes asked
+// their own copies): a Bearer, a body token, or a token in the query (?token= / ?vsst= — the stream guard's road; the stream's websocket
+// upgrade reads its raw URL with its own bearerOf, src/server/desktop-stream.js)
+const isAnyBearer = (req) => /^Bearer\s+\S/i.test(String((req.headers && req.headers.authorization) || '')) || typeof (req.body && req.body.token) === 'string' || !!(req.query && (req.query.token != null || req.query.vsst != null));
 const ipOf = (req) => String(req.ip || (req.socket && req.socket.remoteAddress) || '').replace(/^::ffff:/, '') || null;
 
 /** A PERSON on THIS instance's own page — no agent token, and a browser that says it is on this page: the auth middleware
@@ -688,4 +691,4 @@ function vaultGate({ vault, contents, who = () => null }) {
 /** A machine's link-token entry name (src/server/host-tokens.js `entryOf`) — read at the call (the routes load first). */
 const linkEntryOf = (hostKey) => require('../server/host-tokens.js').entryOf(hostKey);
 
-module.exports = { registerVaultRoutes, personVerdict, vaultGate, STATUS, WORDS, VAULT_SLOW_MS, slowLineOf };
+module.exports = { registerVaultRoutes, personVerdict, isAnyBearer, vaultGate, STATUS, WORDS, VAULT_SLOW_MS, slowLineOf };

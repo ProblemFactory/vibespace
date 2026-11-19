@@ -1084,22 +1084,28 @@ console.log('㉑ a whole credential with no vault: the person\'s only');
     A.registerAccountTailRoutes(app, { accounts: a, providers: null });
     const s = await new Promise((r) => { const x = app.listen(0, '127.0.0.1', () => r(x)); });
     const base = `http://127.0.0.1:${s.address().port}`;
-    const hit = async (method, url, headers = {}, body) => { const r = await fetch(base + url, { method, headers: { 'Content-Type': 'application/json', ...headers }, ...(method === 'POST' ? { body: JSON.stringify(body || {}) } : {}) }); const t = await r.text(); let j = null; try { j = JSON.parse(t); } catch { } return { status: r.status, text: t, json: j }; };
+    const hit = async (method, url, headers = {}, body) => { const r = await fetch(base + url, { method, headers: { 'Content-Type': 'application/json', ...headers }, ...(method === 'POST' ? { body: JSON.stringify(body || {}) } : {}) }); const t = await r.text(); let j = null; try { j = JSON.parse(t); } catch { } return { status: r.status, text: t, json: j, cc: r.headers.get('cache-control') }; };
     try { return await fn(hit); } finally { s.close(); }
   };
   const K = `/api/accounts/${encodeURIComponent(id)}/key`;
-  const real = await serve(AT, null, async (hit) => ({ agentGet: await hit('GET', K, AGENT), agentPost: await hit('POST', K, AGENT), bare: await hit('POST', K), cross: await hit('POST', K, { 'Sec-Fetch-Site': 'cross-site' }), page: await hit('POST', K, PAGE), pageGet: await hit('GET', K, PAGE) }));
+  const real = await serve(AT, null, async (hit) => ({ agentGet: await hit('GET', K, AGENT), agentPost: await hit('POST', K, AGENT), bare: await hit('POST', K), cross: await hit('POST', K, { 'Sec-Fetch-Site': 'cross-site' }), page: await hit('POST', K, PAGE), pageGet: await hit('GET', K, PAGE),
+    bareGet: await hit('GET', K), crossGet: await hit('GET', K, { 'Sec-Fetch-Site': 'cross-site' }), queryToken: await hit('POST', K + '?token=' + ['vs', 'ak_', 'q1'].join(''), PAGE) }));   // B-ee0a's take: the kept GET's two rows; a token in the query
   const refusedBy = (r, code) => r.status === 403 && !!r.json && r.json.code === code && !r.text.includes(KEY) && r.json.error === AT.CREDENTIAL_DOOR_WORDS[code];
   ok(refusedBy(real.agentGet, 'credential_person_only') && refusedBy(real.agentPost, 'credential_person_only') && refusedBy(real.bare, 'credential_page_only') && refusedBy(real.cross, 'credential_page_only')
-    && real.page.status === 200 && real.page.json.key === KEY && real.pageGet.status === 200 && real.pageGet.json.key === KEY,
-    'NO VAULT: the key reveal answers the whole key to a person on this page only (POST, and GET) — a conversation\'s credential is refused credential_person_only, a header-less script or another site credential_page_only, BY NAME, the key nowhere in the refusal', { agent: real.agentPost.json, bare: real.bare.json, page: real.page.status });
+    && real.page.status === 200 && real.page.json.key === KEY && real.pageGet.status === 200 && real.pageGet.json.key === KEY
+    && refusedBy(real.bareGet, 'credential_page_only') && refusedBy(real.crossGet, 'credential_page_only') && refusedBy(real.queryToken, 'credential_person_only')
+    && Object.values(real).every((r) => r.cc === 'no-store'),
+    'NO VAULT: the key reveal answers the whole key to a person on this page only (POST, and the GET kept for older pages) — a conversation\'s credential (a Bearer, or a token in the query) is refused credential_person_only, a header-less script or another site credential_page_only on GET and POST, BY NAME, the key nowhere in the refusal; every answer and refusal carries no-store', { agent: real.agentPost.json, bare: real.bare.json, page: real.page.status, cc: Object.values(real).map((r) => r.cc) });
   const GATE = { state: () => 'unlocked', reveal: () => ({ ok: false, code: 'reveal_needs_password' }), statusOf: () => 403, refusalOf: () => 'the window first' };
   const vaulted = await serve(AT, GATE, async (hit) => ({ page: await hit('POST', K, PAGE), agent: await hit('POST', K, AGENT) }));
-  ok(vaulted.page.status === 403 && vaulted.page.json.code === 'reveal_needs_password' && vaulted.agent.json.code === 'reveal_needs_password', 'a SET-UP vault\'s branch is unchanged: its window decides (reveal_needs_password here), never this check', vaulted.page.json);
+  ok(vaulted.page.status === 403 && vaulted.page.json.code === 'reveal_needs_password' && vaulted.agent.json.code === 'reveal_needs_password' && vaulted.page.cc === 'no-store' && vaulted.agent.cc === 'no-store', 'a SET-UP vault\'s branch is unchanged: its window decides (reveal_needs_password here), never this check — and its answers carry no-store too (set before both branches)', vaulted.page.json);
   // a PAIRED machine's CLI-key tail (the ask answered: yes)
   const HT = ['Hq', '3w', 'Zp8c'].join('');
   const sent = AT.keepHostCliTail('host-ee0a', { platform: 'linux', cliKey: { present: true, tail: HT }, subscription: { loggedIn: false } });
   const hostAsk = await serve(AT, null, async (hit) => ({ page: await hit('POST', '/api/accounts/tails', PAGE, { hostId: 'host-ee0a' }), agent: await hit('POST', '/api/accounts/tails', AGENT, { hostId: 'host-ee0a' }), other: await hit('POST', '/api/accounts/tails', PAGE, { hostId: 'host-none' }) }));
+  AT.keepHostCliTail('host-gone', { cliKey: { present: true, tail: HT } }); AT.forgetHostCliTail('host-gone');   // B-ee0a's take: a machine removed takes its kept tail
+  const gone = await serve(AT, null, async (hit) => hit('POST', '/api/accounts/tails', PAGE, { hostId: 'host-gone' }));
+  ok(gone.json.tails.hostCliKey === null && read('src/server/exit-routes.js').includes("try { require('../routes/account-tails.js').forgetHostCliTail(h.id); } catch { }"), 'a machine removed (removeHost — the delete and a machine replaced) takes its kept CLI-key tail with it: the person\'s read answers none (a machine list imported whole, or a probe that lands after the removal, can leave an entry for an id that no longer exists — only ever answered to the person)', gone.json);
   AT.keepHostCliTail('host-ee0a', { cliKey: { present: false } });
   const cleared = await serve(AT, null, async (hit) => hit('POST', '/api/accounts/tails', PAGE, { hostId: 'host-ee0a' }));
   ok(!JSON.stringify(sent).includes(HT) && sent.cliKey.present === true && hostAsk.page.json.tails.hostCliKey === HT && Object.keys(hostAsk.page.json.tails).length === 1 && hostAsk.agent.status === 403 && !hostAsk.agent.text.includes(HT)
@@ -1108,7 +1114,8 @@ console.log('㉑ a whole credential with no vault: the person\'s only');
   // THE CONFIG EXPORT's credentials with no vault — the REAL route (src/routes/persistence.js), its accounts bundle stood in
   const P = require(path.join(ROOT, 'src/routes/persistence.js'));
   let importCalls = 0;
-  P.setup({ dataDir: fs.mkdtempSync(path.join(ED, 'p-')), wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null,
+  const PD = fs.mkdtempSync(path.join(ED, 'p-'));
+  P.setup({ dataDir: PD, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null,
     getAccounts: () => ({ exportBundle: () => ({ accounts: [{ id, key: KEY }] }), importBundle: () => { importCalls++; return { imported: 1, skipped: 0 }; }, list: () => ({ accounts: [] }) }), getUsageHistory: () => null, onSettingsWrite: () => { } });
   const expDoor = P.router.stack.find((l) => l.route && l.route.path === '/api/config/export' && l.route.methods.post).route.stack[0].handle;
   const doExport = (headers) => new Promise((resolve) => {
@@ -1128,19 +1135,72 @@ console.log('㉑ a whole credential with no vault: the person\'s only');
     const res = { status(c) { out.status = c; return this; }, set(k, v) { out.headers[k] = v; return this; }, setHeader(k, v) { out.headers[k] = v; }, json(o) { out.body = o; resolve(out); }, send(o) { out.body = o; resolve(out); }, end() { resolve(out); }, get headersSent() { return 'body' in out; } };
     impDoor({ body: { file: ePage.body, sections: [], includeSensitive: ['accounts'], passphrase: 'abcd' }, headers, query: {}, params: {}, app: { locals: {} }, socket: {} }, res, () => resolve(out));
   });
+  // the IMPORT's order (B-ee0a's take): a refused caller that also names a plain section (bookmarks) writes NOTHING — the check stands
+  // before the first section
+  const doImportB = (headers) => new Promise((resolve) => {
+    const out = { status: 200 };
+    const res = { status(c) { out.status = c; return this; }, set() { return this; }, setHeader() { }, json(o) { out.body = o; resolve(out); }, send(o) { out.body = o; resolve(out); }, end() { resolve(out); }, get headersSent() { return 'body' in out; } };
+    impDoor({ body: { file: { ...ePage.body, sections: { bookmarks: [{ name: 'Planted', url: 'https://example.test/' }] } }, sections: ['bookmarks'], includeSensitive: ['accounts'], passphrase: 'abcd' }, headers, query: {}, params: {}, app: { locals: {} }, socket: {} }, res, () => resolve(out));
+  });
+  const iOrder = await doImportB({ authorization: AGENT.Authorization });
+  ok(iOrder.status === 403 && iOrder.body.code === 'credential_person_only' && !fs.existsSync(path.join(PD, 'bookmarks.json')) && importCalls === 0,
+    'the import\'s ORDER: a conversation\'s credential that names a plain section (bookmarks) beside the credentials is refused WHOLE — no bookmarks file written, nothing imported', { status: iOrder.status, wrote: fs.existsSync(path.join(PD, 'bookmarks.json')) });
+  {   // CONTROL: the person asked only where the credentials are read (below the plain sections) — the refused caller's bookmarks ARE written
+    const PF = path.join(ROOT, 'src/routes/persistence.js');
+    let ps = fs.readFileSync(PF, 'utf-8');
+    ps = anchored(ps, "    if (includeSensitive.length && file.sensitive && !personOnlyDoor(req, res)) return;\n", '', 'the import\'s person check lifted from the top');
+    ps = anchored(ps, '    if (includeSensitive.length && file.sensitive) {   // (the person was asked above', "    if (includeSensitive.length && file.sensitive && !personOnlyDoor(req, res)) return;\n    if (includeSensitive.length && file.sensitive) {   // (the person was asked above", 'the import\'s person check put below the plain sections');
+    const pm = new Module(PF); pm.filename = PF; pm.paths = Module._nodeModulePaths(path.dirname(PF)); pm._compile(ps, PF);
+    const PD2 = fs.mkdtempSync(path.join(ED, 'p2-'));
+    pm.exports.setup({ dataDir: PD2, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => ({ importBundle: () => ({ imported: 0 }), list: () => ({ accounts: [] }) }), getUsageHistory: () => null, onSettingsWrite: () => { } });
+    const imp2 = pm.exports.router.stack.find((l) => l.route && l.route.path === '/api/config/import' && l.route.methods.post).route.stack[0].handle;
+    const o2 = await new Promise((resolve) => {
+      const out = { status: 200 };
+      const res = { status(c) { out.status = c; return this; }, set() { return this; }, setHeader() { }, json(o) { out.body = o; resolve(out); }, send(o) { out.body = o; resolve(out); }, end() { resolve(out); }, get headersSent() { return 'body' in out; } };
+      imp2({ body: { file: { ...ePage.body, sections: { bookmarks: [{ name: 'Planted', url: 'https://example.test/' }] } }, sections: ['bookmarks'], includeSensitive: ['accounts'], passphrase: 'abcd' }, headers: { authorization: AGENT.Authorization }, query: {}, params: {}, app: { locals: {} }, socket: {} }, res, () => resolve(out));
+    });
+    ok(o2.status === 403 && fs.existsSync(path.join(PD2, 'bookmarks.json')), 'CONTROL: the import that asks the person only where the credentials are read writes the refused caller\'s bookmarks first ⇒ the order leg above goes RED', { status: o2.status, wrote: fs.existsSync(path.join(PD2, 'bookmarks.json')) });
+  }
   const iAgent = await doImport({ authorization: AGENT.Authorization }), iBare = await doImport({}), callsRefused = importCalls, iPage = await doImport({ 'sec-fetch-site': 'same-origin' });
   ok(iAgent.status === 403 && iAgent.body.code === 'credential_person_only' && iBare.status === 403 && iBare.body.code === 'credential_page_only' && callsRefused === 0 && iPage.status === 200 && importCalls === 1,
     'the config IMPORT\'s credentials are written in only for a person on this page — a conversation\'s credential and a header-less script refused by name, nothing imported for them', { agent: iAgent.body, bare: iBare.body, page: iPage.status, importCalls });
+  // (1) THE MOUNT CONFIG DOOR with no vault (B-ee0a's take, 主开发 08:50Z): the person verdict as its siblings — its OWN text (the
+  // ONE answer and its two routes, cut from src/server/mounts-plugins-wiring.js as test-vault-contents runs it) in a stand-in app
+  const WIRING = read('src/server/mounts-plugins-wiring.js');
+  const MSTART = WIRING.indexOf('function mountConfigAnswer('), MPOST = WIRING.indexOf("app.post('/api/mounts/:id/config', ", MSTART);
+  const MROUTE = MSTART > 0 && MPOST > MSTART ? WIRING.slice(MSTART, WIRING.indexOf('\n});', MPOST) + 4) : '';
+  const agentRefuse = (req, res) => { if (/^Bearer\s+(vsst_|jbt_)/i.test(String(req.headers.authorization || ''))) { res.status(403).json({ code: 'agent-forbidden' }); return true; } return false; };
+  const CFG = { id: 'mnt1', type: 's3', name: 'Team bucket', accessKey: 'AK', held: ['secretKey'] };
+  const mountServe = async (text, fn) => {
+    const app = express(); app.use(express.json()); app.locals.vaultGate = { state: () => 'not_set_up' };
+    new Function('app', 'mounts', 'refuseAgentBearer', 'personOnlyDoor', text)(app, { revealNeeded: () => true, config: () => CFG }, agentRefuse, AT.personOnlyDoor);
+    const s = await new Promise((r) => { const x = app.listen(0, '127.0.0.1', () => r(x)); });
+    const hit = async (method, headers = {}) => { const r = await fetch(`http://127.0.0.1:${s.address().port}/api/mounts/mnt1/config`, { method, headers: { 'Content-Type': 'application/json', ...headers }, ...(method === 'POST' ? { body: '{}' } : {}) }); const t = await r.text(); let j = null; try { j = JSON.parse(t); } catch { } return { status: r.status, json: j, cc: r.headers.get('cache-control') }; };
+    try { return await fn(hit); } finally { s.close(); }
+  };
+  const AUTOMATION = { Authorization: 'Bearer ' + ['vs', 'ak_', 'm9', 'x2'].join('') };   // an automation key (not refused by the agent-only guard)
+  const mc = await mountServe(MROUTE, async (hit) => ({ bare: await hit('GET'), auto: await hit('GET', AUTOMATION), agent: await hit('GET', { Authorization: 'Bearer ' + ['vss', 't_', 'a1'].join('') }), pagePost: await hit('POST', PAGE), pageGet: await hit('GET', PAGE) }));
+  ok(!!MROUTE && mc.bare.status === 403 && mc.bare.json.code === 'credential_page_only' && mc.auto.status === 403 && mc.auto.json.code === 'credential_person_only' && mc.agent.status === 403
+    && mc.pagePost.status === 200 && mc.pagePost.json.accessKey === 'AK' && mc.pageGet.status === 200 && [mc.bare, mc.auto, mc.pagePost].every((r) => r.cc === 'no-store'),
+    'the MOUNT CONFIG door with no vault: a header-less script refused credential_page_only, an AUTOMATION key credential_person_only (the agent-only guard passed it), a conversation\'s token by its own guard; the person on this page answered (POST, the page\'s road, and GET); no-store', { bare: mc.bare.json, auto: mc.auto.json, post: mc.pagePost.status });
+  const mc0 = await mountServe(anchored(MROUTE, "  if ((!gate || gate.state() === 'not_set_up') && !personOnlyDoor(req, res)) return;", '', 'the mount config answer without the person check'), async (hit) => ({ bare: await hit('GET'), auto: await hit('GET', AUTOMATION) }));
+  ok(mc0.bare.status === 200 && mc0.auto.status === 200, 'CONTROL: the mount config answer without the person check hands the config to a header-less script and an automation key ⇒ the leg above goes RED', { bare: mc0.bare.status, auto: mc0.auto.status });
+  // (5) ONE rule that spots a carried credential: src/routes/vault.js's (it counts ?token= / ?vsst= too); desktop-apps and exit-routes ask it
+  const VJS = read('src/routes/vault.js');
+  ok(VJS.split('const isAnyBearer = ').length === 2 && /req\.query\.token != null \|\| req\.query\.vsst != null/.test(VJS) && read('src/routes/desktop-apps.js').includes("const { isAnyBearer } = require('./vault.js');")
+    && read('src/server/exit-routes.js').includes("const { isAnyBearer } = require('../routes/vault.js');") && !/const isAnyBearer =/.test(read('src/routes/desktop-apps.js') + read('src/server/exit-routes.js')),
+    'ONE rule spots a carried credential (a Bearer, a body token, a token in the query): src/routes/vault.js\'s — desktop-apps and exit-routes ask it, no copy left', null);
   // the hub's wiring (both doors through these functions) and the page's road
   const AUR = read('src/server/account-usage-routes.js'), PER = read('src/routes/persistence.js'), VR = read('src/lib/vault-reveal.js');
-  ok(AUR.includes("const revealKeyDoor = AT.revealKeyDoorOf({ accounts });\napp.get('/api/accounts/:id/key', revealKeyDoor);\napp.post('/api/accounts/:id/key', revealKeyDoor);")
+  ok(AUR.includes("const revealKeyDoor = AT.revealKeyDoorOf({ accounts });\napp.get('/api/accounts/:id/key', revealKeyDoor);   // KEPT for pages loaded before this build") && AUR.includes("\napp.post('/api/accounts/:id/key', revealKeyDoor);")
     && AUR.includes('const r = AT.keepHostCliTail(req.params.id, await hosts.accountsStatus(req.params.id));') && PER.includes('} else if (!personOnlyDoor(req, res)) return;')
-    && VR.includes("{ method: 'POST', headers: { ...revealHeaders(), 'Content-Type': 'application/json' }, body: '{}' }"),
+    && VR.includes("{ method: 'POST', headers: { ...revealHeaders(), 'Content-Type': 'application/json' }, body: '{}' }")
+    && read('src/lib/sidebar-mounts.js').includes("api(`/api/mounts/${m.id}/config`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...revealHeaders() }, body: '{}' })"),   // the mount dialog's road too (its delta read: a GET has no Origin on plain http)
     'the wiring: the hub\'s reveal route IS the door (GET and POST), the accounts-status answer goes through the tail keeper, the export asks the person on its no-vault branch; the page reveals by POST', null);
   // CONTROLS — each compiled in memory beside the real file, through its anchor
   const ATF = path.join(ROOT, 'src/routes/account-tails.js');
   const atPatched = (from, to, name) => { const s = anchored(fs.readFileSync(ATF, 'utf-8'), from, to, name); const m = new Module(ATF); m.filename = ATF; m.paths = Module._nodeModulePaths(path.dirname(ATF)); m._compile(s, ATF); return m.exports; };
-  const noCheck = atPatched("    if (!personOnlyDoor(req, res)) return;\n    res.set('Cache-Control', 'no-store');\n", "    res.set('Cache-Control', 'no-store');\n", 'the reveal without the person check');
+  const noCheck = atPatched("    if (!personOnlyDoor(req, res)) return;\n    try { res.json({ key: accounts.revealKey(req.params.id) }); }", "    try { res.json({ key: accounts.revealKey(req.params.id) }); }", 'the reveal without the person check');
   const ctl = await serve(noCheck, null, async (hit) => hit('POST', K, AGENT));
   const noStrip = atPatched('  facts.cliKey = { present: !!facts.cliKey.present };\n', '', 'the tail keeper without the strip');
   const kept = noStrip.keepHostCliTail('host-ctl', { cliKey: { present: true, tail: HT } });

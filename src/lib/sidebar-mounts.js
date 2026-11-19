@@ -8,6 +8,7 @@ import { t as tr, tc, deviceLocale, resolveLang } from './i18n.js'; // sidebar c
 import { dateOf, clockOf, stampAt as when } from './page-time.js';
 import { techFold } from './plain-words.js'; // lane ui-plain-words: the mechanics fold
 import { api, oauthLinkRow, mountsDialog, wireOAuthConnect, reauthDialog } from './mounts-dialog.js'; // D1: the ONE dialog component (storage + channel accounts)
+import { credentialDoorWords } from './account-tails.js';   // B-ee0a: a credential door's refusal in the page's words
 import { revealHeaders, askRevealPassword } from './vault-reveal.js'; // lane vault-contents-window r2: a set-up vault prefills secrets only inside the reveal window of this page
 import { classifyPrivateKey } from '../ssh-key-format.js'; // shared with the server (CJS pulled into the bundle, like task-color-seq.js)
 import { readSshBlock, formOf, confirmRows, jumpVerdict, jumpTargetOk, MAX_CHARS as SSH_BLOCK_MAX, MAX_LINES as SSH_BLOCK_LINES } from '../ssh-config-block.js'; // B-2ca0 commit 2: a pasted ssh config block (PURE, bundled; the hub's add asks the same jump verdict)
@@ -138,7 +139,7 @@ function secondDialerLine(dh) {
 }
 
 /** lane vault-contents-window r2 (verify r1): outside the reveal window of this page the edit dialog's sealed fields come
- *  back MASKED (GET /api/mounts/:id/config names them in `masked`) — each shows empty under a dotted placeholder and is sent
+ *  back MASKED (POST /api/mounts/:id/config — the GET kept — names them in `masked`) — each shows empty under a dotted placeholder and is sent
  *  only when a new value is typed (empty = keep). → the masked field keys. */
 function maskVaultFields(fields, cfg) {
   const keys = Array.isArray(cfg && cfg.masked) ? cfg.masked : [];
@@ -3223,7 +3224,7 @@ export function installSidebarMounts(Sidebar) {
     // Mint an S3 share link FROM a specific mount (uses that mount's own creds).
     // ── Edit / derive (2.107.0, user request: FishR2-class mounts needed a
     // bucket/path fix with no edit UI; one credential → many mounts) ──
-    // Fields are PREFILLED with the real current connection settings, fetched from GET /api/mounts/:id/config — EXCEPT every
+    // Fields are PREFILLED with the real current connection settings, fetched from POST /api/mounts/:id/config (the GET kept) — EXCEPT every
     // secret (THE WRITE-ONLY LAW, lane ui-controls-and-bugs, 主开发's ruling 2026-11-13): the route names the secrets a record
     // holds (`held`) and never sends one; heldFields() draws them as «已保存» + «替换…» / the OAuth sign-in line.
 
@@ -3247,8 +3248,9 @@ export function installSidebarMounts(Sidebar) {
     async _showEditMountDialog(m) {
       // the connection's current settings (its secrets only NAMED — the write-only law)
       let cfg;
-      try { cfg = await api(`/api/mounts/${m.id}/config`, { headers: revealHeaders() }); }
-      catch (e) { showToast(e.message || tr('Failed to load connection'), { type: 'error' }); return; }
+      // a POST (B-ee0a): a plain-http page sends no Origin on a GET, and with no vault the hub asks the person verdict
+      try { cfg = await api(`/api/mounts/${m.id}/config`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...revealHeaders() }, body: '{}' }); }
+      catch (e) { showToast(credentialDoorWords(e.body) || e.message || tr('Failed to load connection'), { type: 'error' }); return; }
       const name = cfg.name || m.name;
       const { body, close, raised, ready, live } = createModalShell({ id: 'mount-edit-dialog', key: m.id, title: `${tr('Edit')} "${name}"`, bodyClass: 'mounts-dialog-body', escapeToClose: true, unsaved: { save: () => form.onsubmit({ preventDefault() {} }) }, kind: 'form' });
       if (raised) return null;   // raised: the same subject's form, as it was

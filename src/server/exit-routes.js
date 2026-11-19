@@ -22,8 +22,8 @@ function create({ app, rootDir, AGENT_BIN_DIR, activeSessions, auth, wss, WS_OPE
 // "Who can use it" (cookie). Thin: every decision is PURE src/exit-reach.js through the ExitProxyManager. ──
 const E = require('../exit-reach.js');
 const bearerOf = (req) => String((req.headers && req.headers.authorization) || '').replace(/^Bearer\s+/i, '') || String((req.body && req.body.token) || '');
-const isAnyBearer = (req) => /^Bearer\s+\S/i.test(String((req.headers && req.headers.authorization) || '')) || typeof (req.body && req.body.token) === 'string';
 const { personVerdict } = require('../routes/vault.js');   // lane wake-approve-card r3: THE person verdict (the hub-act ask's door — one verdict, never a local copy)
+const { isAnyBearer } = require('../routes/vault.js');   // B-ee0a's take: THE one rule that spots a carried credential (a Bearer, a body token, ?token= / ?vsst=) — never a local copy
 /** The live conversation behind a vsst_ token → [webuiId, session] | null. */
 function exitAgentEntry(req) {
   const token = bearerOf(req);
@@ -373,6 +373,7 @@ async function removeHost(h) {
   // preserve-as-orphan semantics for ssh) — with the host record gone their
   // records become invisible, undeletable orphans (review finding)
   else { try { portForwards.onMachineUnpaired(h.id); } catch { } }
+  try { require('../routes/account-tails.js').forgetHostCliTail(h.id); } catch { }   // B-ee0a's take: its CLI key's kept tail leaves with it
   try { exitProxy.onMachineUnpaired(h.id); } catch { }
   hosts.remove(h.id);
 }

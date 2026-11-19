@@ -603,10 +603,11 @@ console.log('§9 lane C2 — the routes: host, the machine picker, the install r
   // a tightvnc install carries the same guard (the Windows one-time setup is the owner's)
   const tv = await j('/api/desktop/install', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host: 'win-a', what: 'tightvnc', token: 'vsst_x' }) });
   ok(tv.status === 403 && JSON.parse(tv.body).code === 'human_only', 'POST /api/desktop/install what=tightvnc with a body token ⇒ 403 human_only', { status: tv.status, body: tv.body.slice(0, 80) });
-  // CONTROL: the guard's own line names ?vsst= (a copy without it would let an agent token in the query through)
-  const routesSrc = read('src/routes/desktop-apps.js');
+  // CONTROL: the guard's own line names ?vsst= (a copy without it would let an agent token in the query through) — THE one rule
+  // lives in src/routes/vault.js since B-ee0a's take (one copy, not two); desktop-apps asks it
+  const routesSrc = read('src/routes/vault.js');
   const guardLine = routesSrc.split('\n').find((l) => l.includes('const isAnyBearer =')) || '';
-  ok(/req\.query\.vsst != null/.test(guardLine) && /req\.query\.token != null/.test(guardLine), 'CONTROL: isAnyBearer names BOTH ?token= and ?vsst= (the stream guard bearerOf names both; the routes must match)', guardLine.trim().slice(0, 160));
+  ok(/req\.query\.vsst != null/.test(guardLine) && /req\.query\.token != null/.test(guardLine) && read('src/routes/desktop-apps.js').includes("const { isAnyBearer } = require('./vault.js');"), 'CONTROL: isAnyBearer names BOTH ?token= and ?vsst= (the stream guard bearerOf names both; the routes must match) — the one rule, which desktop-apps asks', guardLine.trim().slice(0, 160));
   srv.close();
 }
 

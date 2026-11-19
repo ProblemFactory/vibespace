@@ -49,13 +49,13 @@ function personOnlyDoor(req, res) {
  *  B-ee0a: NO VAULT — the whole key only to a person on this page (a credential or a header-less script refused by name). */
 function revealKeyDoorOf({ accounts }) {
   return (req, res) => {
+    res.set('Cache-Control', 'no-store');   // every answer and refusal of the door, either branch (B-ee0a's take)
     const gate = req.app && req.app.locals ? req.app.locals.vaultGate : null;
     if (gate && gate.state() !== 'not_set_up') {
       const r = gate.reveal(req, `accounts:${req.params.id}#key`);
       return r.ok ? res.json({ key: r.value, leftMs: r.leftMs }) : res.status(gate.statusOf(r.code)).json({ error: gate.refusalOf(r.code), code: r.code, ...(r.retryInMs ? { retryInMs: r.retryInMs } : {}) });
     }
     if (!personOnlyDoor(req, res)) return;
-    res.set('Cache-Control', 'no-store');
     try { res.json({ key: accounts.revealKey(req.params.id) }); }
     catch (e) { res.status(400).json({ error: e.message }); }
   };
@@ -72,6 +72,8 @@ function keepHostCliTail(hostId, facts) {
   facts.cliKey = { present: !!facts.cliKey.present };
   return facts;
 }
+/** a machine removed (src/server/exit-routes.js removeHost): its kept tail leaves with it (B-ee0a's take) */
+function forgetHostCliTail(hostId) { hostCliTails.delete(String(hostId)); }
 
 /** GET /api/accounts' answer — every account row (no key tail), the subscription and CLI-key facts (no tail), the machines'
  *  names, the local verdicts */
@@ -114,4 +116,4 @@ function registerAccountTailRoutes(app, { accounts, providers = null }) {
   });
 }
 
-module.exports = { accountsAnswer, registerAccountTailRoutes, personOnlyDoor, CREDENTIAL_DOOR_WORDS, keepHostCliTail, revealKeyDoorOf };
+module.exports = { accountsAnswer, registerAccountTailRoutes, personOnlyDoor, CREDENTIAL_DOOR_WORDS, keepHostCliTail, forgetHostCliTail, revealKeyDoorOf };

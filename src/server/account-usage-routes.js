@@ -368,7 +368,7 @@ app.post('/api/accounts/default', (req, res) => {
 // reveal the decrypted key on request (the door: src/routes/account-tails.js revealKeyDoorOf — a set-up vault's window, else B-ee0a's
 // person verdict)
 const revealKeyDoor = AT.revealKeyDoorOf({ accounts });
-app.get('/api/accounts/:id/key', revealKeyDoor);
+app.get('/api/accounts/:id/key', revealKeyDoor);   // KEPT for pages loaded before this build (they reveal by GET); the same door, the same verdicts — on https or localhost (on plain http such a page's GET carries no Origin: refused until the page reloads)
 app.post('/api/accounts/:id/key', revealKeyDoor);   // the page's road (B-ee0a): a plain-http page sends no Origin on a GET
 app.patch('/api/accounts/:id', (req, res) => {
   try {

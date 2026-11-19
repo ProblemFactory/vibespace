@@ -450,7 +450,7 @@ router.post('/api/desktop/install', async (req, res) => {
 // ── design 014 D1 (lane desktop-vnc-native): a Windows / macOS machine's WHOLE DESKTOP — people only ──
 /** An agent's token (a Bearer header, a token in the body or the url) is refused by name on every whole-desktop door:
  *  the picture shows everything on that machine's screen, and a command started there runs as its logged-in user. */
-const isAnyBearer = (req) => /^Bearer\s+\S/i.test(String((req.headers && req.headers.authorization) || '')) || typeof (req.body && req.body.token) === 'string' || (req.query && (req.query.token != null || req.query.vsst != null)); // verify r2 L1: ?vsst= too — the stream guard (desktop-stream bearerOf) names it; the routes must match (an agent token in the query is refused, not only in the header / body / ?token=)
+const { isAnyBearer } = require('./vault.js');   // THE one rule that spots a carried credential (a Bearer, a body token, ?token= / ?vsst=) — B-ee0a's take: one copy
 function humanOnly(req, res) {
   if (!isAnyBearer(req)) return false;
   res.status(403).json({ error: 'a machine\'s whole desktop is the owner\'s — an agent token may not view it, run a command on it or set it up', code: 'human_only' });
