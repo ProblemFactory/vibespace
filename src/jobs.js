@@ -1620,8 +1620,17 @@ class JobManager {
    *  the VibeSpace everyone uses. Proven, never guessed: our parent is the run's wrapper by its stamp (pid, start, boot — alive) */
   _hubIsMain(job, run) {
     if (!run || run.endedAt) return false;
-    const st = this._readStamp(job), parent = Number(this.d.hubParentPid) || process.ppid;   // d.hubParentPid: a fast suite's stand-in parent
-    return !!st && Number(st.pid) === parent && this._verifyAlive(st);
+    const latch = this._hubMainRuns || (this._hubMainRuns = new WeakSet());
+    if (latch.has(run)) return true;   // its read (SHOULD 3): proven once, true for this process's life — a wrapper killed later moves our parent, not the fact
+    const st = this._readStamp(job);
+    if (!st || !(Number(st.pid) > 1) || st.bootId !== bootId()) return false;
+    // its read (SHOULD 2): the hub IS the main, or runs UNDER it (a launcher: `./run.sh`, `npm start` — a stop of the launcher ends or
+    // orphans this hub): this process's own parent chain reaches the run's wrapper by its identity (pid + start). A fast suite's stand-in
+    // parent (`d.hubParentPid`) is the one hop it names, proven alive by the stamp
+    const seam = Number(this.d.hubParentPid);
+    const yes = seam ? seam === Number(st.pid) && this._verifyAlive(st) : PI.keptByChain(process.ppid, new Map([[Number(st.pid), Number(st.starttime) || -1]]));
+    if (yes) latch.add(run);
+    return yes;
   }
   /** B-2c5c (THE MAIN DOOR): the refusal by name — said once a run and a road in the run's own log and the hub's; the job is not said
    *  stopped or ended (no stop asked, no grace, no kill step) */
@@ -3013,6 +3022,7 @@ class JobManager {
       // literal substring on capped-length text (no agent regex on the main loop)
       if (buf.toString('utf-8').split('\n').some((l) => l.slice(0, 4096).includes(job.untilOutput))) {
         job._untilHit = true;
+        if (this._hubIsMain(job, run)) { this._hubMainRefusal(job, run, 'its until-marker'); return; }   // B-2c5c: THE MAIN DOOR — never said «completing»
         this._event(job, 'until-marker hit — completing after grace');
         const grace = Number(process.env.VIBESPACE_JOBS_GRACE_MS) || 30_000; // env knob: tests shrink the until-grace
         const steps = job._killSteps || (job._killSteps = new Set()); // round 6: bound to ITS run — a new run disarms it (_spawn)

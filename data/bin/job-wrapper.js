@@ -609,12 +609,14 @@ function scopeKill(sig) { // the manager's own kill of every process of the scop
   });
 }
 async function forceScope(why) {
-  if (!forced) forced = why; // the first kill's why — and every call kills (round 5: a label is never the guard)
   // B-2c5c: a scope that holds what no stop of this job ends (the hub started by hand INSIDE the job, and what it runs) is never killed
   // WHOLE — neither the manager's kill nor the kernel's cgroup.kill: the job's own processes by force, one by one (identity re-read)
   const kept = keptTest(), list = procsOrNull(scopeDir);
   const held = list === null ? keptInScope() : kept ? list.filter((p) => kept(p)).length : 0;   // its read r1 (S1): a list unread is no proof the hub is not there
-  if (held) { sayKept(held, 'its kill', list === null); for (const p of scopeRows() || []) killNow(p); return; }
+  // its read (round wwa7r2uc1, MUST): the end says what was DONE — the job's own processes killed one by one (the hub's left alone), or,
+  // its list unread, nothing (the end says «could not be read: may still run») — never «its scope was killed»
+  if (held) { sayKept(held, 'its kill', list === null); if (list !== null && !forced) forced = why.replace(/its scope was killed$/, 'its own processes were killed one by one (the VibeSpace hub in its scope left alone)'); for (const p of scopeRows() || []) killNow(p); return; }
+  if (!forced) forced = why; // the first kill's why — and every call kills (round 5: a label is never the guard)
   await scopeKill('SIGKILL');
   if (procsOf(scopeDir).length) { try { fs.writeFileSync(path.join(scopeDir, 'cgroup.kill'), '1'); } catch { } } // no manager answered: the kernel's own
 }
@@ -716,7 +718,7 @@ const termMain = (p, sig) => { if (termed.has(termKey(p)) || !mainLive()) return
 // round 10: the manager's kill of the scope is a delivery too — recorded, once per stop step (r9 sent a natural end's leftovers
 // their SIGTERM by it unrecorded: a stop while they drained SIGTERMed them again)
 let scopeSent = 0;
-const scopeTerm = (sig) => { if (scopeSent) return Promise.resolve(false); const inside = keptInScope(); if (inside) { sayKept(inside, 'its stop'); return Promise.resolve(false); } scopeSent = Date.now(); return scopeKill(sig); };   // B-2c5c: never the hub's scope whole
+const scopeTerm = (sig) => { if (scopeSent) return Promise.resolve(false); const inside = keptInScope(); if (inside) { sayKept(inside, 'its stop', true); return Promise.resolve(false); } scopeSent = Date.now(); return scopeKill(sig); };   // B-2c5c: never the hub's scope whole
 // round 10: A STOP GOES ONCE — what this wrapper delivers itself (its own stop step, or the drain of what its ended job left) is
 // said beside its stamp (stopping.json): the engine's stop then signals THIS process alone, the intent saying so (`alone`), and
 // the rest hears it through the one table — never the engine's group signal again on what already heard one (r9: Stop pressed
@@ -802,7 +804,7 @@ for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => {
  *  holders and the other jobs' wrappers); this wrapper is the root. [[pid, starttime]], starttime 0 = that pid whatever its start */
 function keptOutHere() {
   const out = [];
-  try { const f = path.join(__dirname, '..', 'server.pid'), p = Number(String(fs.readFileSync(f, 'utf8')).trim()); if (p > 1 && p !== process.pid && startedBy(p, fs.statSync(f).mtimeMs)) out.push([p, 0]); } catch { }   // small 1: a STALE file's pid is no hub
+  try { const f = path.join(__dirname, '..', 'server.pid'), p = Number(String(fs.readFileSync(f, 'utf8')).trim()); if (p > 1 && p !== process.pid && (startedBy(p, fs.statSync(f).mtimeMs) || hubShaped(p))) out.push([p, 0]); } catch { }   // small 1: a STALE file's pid is no hub (one with a hub's argv is: the clock may have stepped)
   try { const s = JSON.parse(fs.readFileSync(path.join(ctlDir, 'stop.json'), 'utf8')); if (Array.isArray(s.keepOut)) for (const x of s.keepOut.slice(0, 512)) if (Array.isArray(x) && Number(x[0]) > 1) out.push([Number(x[0]), Number(x[1]) || 0]); } catch { }
   return out;
 }
@@ -837,6 +839,7 @@ function nodeOrUnknown(pid) {
   try { return /node/i.test(path.basename(fs.readlinkSync(`/proc/${pid}/exe`))); } catch { return true; }
 }
 function hubShaped(pid) {
+  if (!nodeOrUnknown(pid)) return false;   // its read (SHOULD 6): `tail -f server.js` in the checkout is no hub
   let args = [];
   try { args = fs.readFileSync(`/proc/${pid}/cmdline`, 'latin1').split('\0'); } catch { return false; }
   if (args.includes(SERVER_JS)) return true;
