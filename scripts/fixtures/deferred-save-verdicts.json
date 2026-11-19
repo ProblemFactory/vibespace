@@ -26,11 +26,6 @@
   "why": "records read already on disk"
  },
  {
-  "key": "jobs · src/jobs.js · JobManager._loadNotifs · _saveNotifs()",
-  "verdict": "none",
-  "why": "boot strips stamps; idempotent again"
- },
- {
   "key": "jobs · src/jobs.js · JobManager._archiveAnswer · _dirty = true",
   "verdict": "none",
   "why": "skeleton drop, re-decided at load"
@@ -139,7 +134,10 @@
  {
   "key": "jobs · src/jobs.js · JobManager.drainNotifs · _saveNotifs()",
   "verdict": "sync",
-  "why": "The drain must stay synchronous: the drained text goes out right after (prompt injection, hand-over record persistDelivered); _saveNotifs waits (_onDisk) but discards a not-ok result, so a failed bounded landing + kill re-delivers once (accepted by must 4, 'nothing is put back')."
+  "why": "the drain lands synchronously (bounded) and ANSWERS its landing; the hand-over holds its record and reply behind it",
+  "at": "src/jobs.js:return this._onDisk(this.notifsFile, 'the notifications (a claim, a drain)');",
+  "branch": "src/server/stash-handover.js:      if (tookJobs.length && tookJobs.landed === false && typeof jm.whenNotifsLanded === 'function') {",
+  "stops": "the hand-over's record of delivery and its reply, until the drain lands"
  },
  {
   "key": "jobs · src/jobs.js · JobManager.drainNotifs · _dirty = true",
@@ -317,11 +315,6 @@
   "readers": "none: the wait wakes inside the step"
  },
  {
-  "key": "task-groups · src/task-groups.js · TaskGroupManager.constructor · _save()",
-  "verdict": "none",
-  "why": "boot flushSync; TASK.md re-derived at boot"
- },
- {
   "key": "task-groups · src/task-groups.js · TaskGroupManager._load · _save()",
   "verdict": "none",
   "why": "boot flushSync; legacy file re-migrates"
@@ -401,11 +394,6 @@
   "why": "the groups land before the import writes other stores (_landNow)",
   "branch": "if (!L.ok) throw Object.assign(new Error(`the imported Task Groups",
   "stops": "the import's other stores (the import stops, said)"
- },
- {
-  "key": "browser-keeper · src/server/browser-keeper.js · create > load · dirty = true",
-  "verdict": "none",
-  "why": "load re-derives it every boot"
  },
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > saveNow · save()",
@@ -1027,5 +1015,54 @@
   "why": "the launch record on disk before Chrome",
   "branch": "if (!commitSync()) { rec.state = 'failed'; rec.endedAt = now(); rec.lastError = LAUNCH_NOT_ON_DISK; commit(); throw namedError('launch_not_on_disk'",
   "stops": "Chrome's launch: refused by name"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._notifsFrom · _saveNotifs()",
+  "verdict": "none",
+  "why": "boot strips stamps; idempotent again"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._judgeNotifsIn · _dirty = true",
+  "verdict": "none",
+  "why": "a judged clear; the tick carries"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._notifsRetry · _saveNotifs()",
+  "verdict": "sync",
+  "why": "the held notices read again land before their For-you item is resolved",
+  "branch": "if (L && L.ok) resolveHeld(); else this._ride(this.notifsFile, 'the held notices read again', resolveHeld);",
+  "stops": "the held file's For-you item resolved, until the notices land",
+  "at": "src/jobs.js:return this._onDisk(this.notifsFile, 'the notifications (a claim, a drain)');"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._notifsRetry · _dirty = true",
+  "verdict": "sync",
+  "why": "the held notices read again land before their For-you item is resolved",
+  "branch": "if (L && L.ok) resolveHeld(); else this._ride(this.notifsFile, 'the held notices read again', resolveHeld);",
+  "stops": "the held file's For-you item resolved, until the notices land",
+  "at": "src/jobs.js:return this._onDisk(this.notifsFile, 'the notifications (a claim, a drain)');"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager.retryOwed · _saveNotifs()",
+  "verdict": "rides",
+  "why": "the ladder's parked copy leaves msg-retry.json at the notices' landing (handing)",
+  "at": "src/server/conversation-deliver.js:    leaveParkWhenLanded(dropped, riders);",
+  "crash": "the park keeps its copy until the notices land",
+  "readers": "none: the ladder drops its copy at the landing"
+ },
+ {
+  "key": "task-groups · src/task-groups.js · TaskGroupManager._afterLoad · _save()",
+  "verdict": "none",
+  "why": "boot flushSync; TASK.md re-derived at boot"
+ },
+ {
+  "key": "task-groups · src/task-groups.js · TaskGroupManager.readAgain · _save()",
+  "verdict": "none",
+  "why": "legacy copy; the next read repeats"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > loadFrom · dirty = true",
+  "verdict": "none",
+  "why": "load re-derives it every boot"
  }
 ]

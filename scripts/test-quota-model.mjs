@@ -3474,7 +3474,7 @@ console.log('\n㉓ B-ff9d — a host-held account\'s reading is named as read on
   const heldSource = hsm ? new Function('return ' + hsm[0].replace(/^const heldSource = /, '').replace(/;$/, ''))() : null;
   const old = { source: 'on-demand', limits: [{ source: 'on-demand' }, { source: 'remote-statusline' }] };
   ok(!!heldSource && heldSource(old) === old && old.source === 'on-demand-held' && old.limits[0].source === 'on-demand-held' && old.limits[1].source === 'remote-statusline'
-    && /_hostAcctUsage\[ma\[1\] \+ ':' \+ ma\[2\]\] = heldSource\(JSON\.parse\(/.test(routes) && heldSource(null) === null,
+    && /_hostAcctUsage\[ma\[1\] \+ ':' \+ ma\[2\]\] = heldSource\((?:JSON\.parse\(|usageWrite\.readCacheJson\()/.test(routes) && heldSource(null) === null,
     "㉓ a host-held file written before the fix (stamped 'on-demand', at the top and on a limit) is read at boot as 'on-demand-held'; another source is untouched");
   const S = await import(path.join(ROOT, 'src/lib/usage-source.js'));
   const own = S.readingSource('on-demand'), hd = S.readingSource('on-demand-held'), rm = S.readingSource('on-demand-remote');

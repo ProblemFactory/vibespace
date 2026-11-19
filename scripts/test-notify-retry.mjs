@@ -967,12 +967,17 @@ await (async () => {
   ok(f2.before.stashed === 1 && !f2.before.inFile, 'CONTROL (a copy answering a plain «taken»): the park\'s copy is written OFF msg-retry.json while the jobs store holding it is not on disk — a kill now loses it (red)', f2.before);
   // (2) must 1 — the hand-over's kept copy
   const R = rig('ride-handover'), H = heldWriter(), { jm, job } = mkJm({ JobManager }, R, H.W);
-  const view = SH.create({ activeSessions: R.sessions, getDeliver: () => R.deliver, getJobs: () => jm, broadcastSessions: () => { }, renderMsgStash, renderNotifStash: JM_MODEL.renderNotifStash, debounceMs: 5, dataDir: R.dir, log: { log: (...a) => R.logs.push(a.join(' ')), warn: (...a) => R.logs.push(a.join(' ')) } });
+  const view = SH.create({ handoverLandMs: 30, activeSessions: R.sessions, getDeliver: () => R.deliver, getJobs: () => jm, broadcastSessions: () => { }, renderMsgStash, renderNotifStash: JM_MODEL.renderNotifStash, debounceMs: 5, dataDir: R.dir, log: { log: (...a) => R.logs.push(a.join(' ')), warn: (...a) => R.logs.push(a.join(' ')) } });
   jm._stashNotif(R.cid, job, { what: 'a kept result' }, 'not reachable', { held: { kind: 'not-reachable' } });
   R.setAnswer(async () => ({ ok: true, phase: 'written' }));
   const ho = await view.handOver('w1', { pressed: PRESS });
   const memFile = path.join(R.dir, 'stash-handover.json');
   const mem = () => { try { return JSON.parse(fs.readFileSync(memFile, 'utf-8')); } catch { return {}; } };
+  // THE CENSUS CURE (主开发 19:44Z, the last hunt's finding 11): the drained job notices are NOT on disk (the held writer) ⇒ the hand-over's
+  // reply says so (finishes-on-landing, after its bound) and its record of delivery is NOT written yet — never «delivered» over a drain
+  // a kill would undo (the next start would hand the same notices over again)
+  const memAtReply = mem();
+  ok(ho.ok && ho.notOnDisk === true && ho.code === 'finishes-on-landing' && Object.keys(memAtReply).length === 0, 'FINDING 11: a hand-over whose drained job notices are not on disk says finishes-on-landing, and its record of delivery waits for their landing', { ho, memAtReply });
   const back = view.restoreHandedOver(R.cid, R.posts[R.posts.length - 1], { kind: 'notification' });
   const rec0 = Object.values(mem())[0] || {};
   ok(ho.ok && back === 1 && jm.peekNotifs(R.cid).length === 1 && rec0.jobsOwed === true && (rec0.jobs || []).length === 1,
@@ -994,13 +999,25 @@ await (async () => {
     const KEEP_A = "    rec.jobsOwed = true;\n    if (!jm || typeof jm.afterNotifsLanded !== 'function') return;";
     const SHX = mutantCopies('ntr-ho-drop', REPO).load('src/server/stash-handover.js', anchored(SHSRC, KEEP_A, "    rec.jobs = []; return;   // MUTANT: the copy dropped at the put-back, landed or not", 'the copy waits for the landing'), 'ho-drop-now');
     const Rx = rig('ride-handover-red'), Hx = heldWriter(), { jm: jmx, job: jobx } = mkJm({ JobManager }, Rx, Hx.W);
-    const viewx = SHX.create({ activeSessions: Rx.sessions, getDeliver: () => Rx.deliver, getJobs: () => jmx, broadcastSessions: () => { }, renderMsgStash, renderNotifStash: JM_MODEL.renderNotifStash, debounceMs: 5, dataDir: Rx.dir, log: { log() { }, warn() { } } });
+    const viewx = SHX.create({ handoverLandMs: 30, activeSessions: Rx.sessions, getDeliver: () => Rx.deliver, getJobs: () => jmx, broadcastSessions: () => { }, renderMsgStash, renderNotifStash: JM_MODEL.renderNotifStash, debounceMs: 5, dataDir: Rx.dir, log: { log() { }, warn() { } } });
     jmx._stashNotif(Rx.cid, jobx, { what: 'a kept result' }, 'not reachable', { held: { kind: 'not-reachable' } });
     Rx.setAnswer(async () => ({ ok: true, phase: 'written' }));
     await viewx.handOver('w1', { pressed: PRESS });
     viewx.restoreHandedOver(Rx.cid, Rx.posts[Rx.posts.length - 1], { kind: 'notification' });
     let recx = {}; try { recx = Object.values(JSON.parse(fs.readFileSync(path.join(Rx.dir, 'stash-handover.json'), 'utf-8')))[0] || {}; } catch { }
     ok(!recx.jobsOwed && (recx.jobs || []).length === 0, '(must 1) CONTROL (a copy that drops the kept copy at the put-back): the copy is GONE while the put-back is not on disk — a kill now loses the job notifications (red)', recx);
+  }
+  {   // FINDING 11's RED (anchored): a copy of the hand-over that does not hold — «delivered» and the record of delivery at once, over a drain not on disk
+    const SHSRC11 = fs.readFileSync(path.join(REPO, 'src/server/stash-handover.js'), 'utf-8');
+    const HOLD_A = "      if (tookJobs.length && tookJobs.landed === false && typeof jm.whenNotifsLanded === 'function') {";
+    const SH11 = mutantCopies('ntr-ho-nohold', REPO).load('src/server/stash-handover.js', anchored(SHSRC11, HOLD_A, "      if (false) {   // MUTANT: the reply and the record before the drain lands", 'the hand-over holds behind the drain'), 'ho-no-hold');
+    const R11 = rig('ride-handover-nohold'), H11 = heldWriter(), { jm: jm11, job: job11 } = mkJm({ JobManager }, R11, H11.W);
+    const v11 = SH11.create({ handoverLandMs: 30, activeSessions: R11.sessions, getDeliver: () => R11.deliver, getJobs: () => jm11, broadcastSessions: () => { }, renderMsgStash, renderNotifStash: JM_MODEL.renderNotifStash, debounceMs: 5, dataDir: R11.dir, log: { log() { }, warn() { } } });
+    jm11._stashNotif(R11.cid, job11, { what: 'a kept result' }, 'not reachable', { held: { kind: 'not-reachable' } });
+    R11.setAnswer(async () => ({ ok: true, phase: 'written' }));
+    const ho11 = await v11.handOver('w1', { pressed: PRESS });
+    let m11 = {}; try { m11 = JSON.parse(fs.readFileSync(path.join(R11.dir, 'stash-handover.json'), 'utf-8')); } catch { }
+    ok(ho11.ok && !ho11.notOnDisk && Object.keys(m11).length === 1, 'CONTROL FINDING 11 (a copy that does not hold): «delivered» and the record written at once while the drain is not on disk — red', { ho11, m11: Object.keys(m11).length });
   }
 })();
 

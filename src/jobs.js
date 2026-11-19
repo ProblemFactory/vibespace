@@ -856,8 +856,11 @@ class JobManager {
     if (a.state === 'data') this._notifsFrom(a.value, { merge: true });
     const now2 = [...this.pendingNotifs.values()].reduce((k, l) => k + l.length, 0);
     this.d.log(`[jobs] job-notifications.json read again (held since ${new Date(was.at).toISOString()}, ${was.code}): ${a.state === 'data' ? `${now2 - waiting} notice(s) read` : a.setAside ? `torn bytes, kept aside as ${a.setAside}` : 'the file is GONE'} — ${waiting} that waited here kept`);
-    this._saveNotifs(); this._dirty = true;
-    if (this._notifsItem) { const id = this._notifsItem; this._notifsItem = null; try { this.d.resolveNotice && this.d.resolveNotice(id); } catch { } }   // its read r1 (M2): the item resolved
+    const L = this._saveNotifs(); this._dirty = true;
+    // the census cure ((b), a word to a person follows): the held file's For-you item is resolved once the merged notices are ON DISK —
+    // landed now, or at their landing (never «resolved» over a store the disk does not hold yet)
+    const resolveHeld = () => { if (this._notifsItem) { const id = this._notifsItem; this._notifsItem = null; try { this.d.resolveNotice && this.d.resolveNotice(id); } catch { } } };   // its read r1 (M2): the item resolved
+    if (L && L.ok) resolveHeld(); else this._ride(this.notifsFile, 'the held notices read again', resolveHeld);
     // its read r2 (S2): a read again that found the file GONE or TORN lost what waited in it — said where the person looks, never only in the journal
     if (a.state !== 'data') this._forYou(null, M.forYouCopy(null, 'notifs-lost', { file: a.setAside || path.basename(this.notifsFile) }));
     for (const cid of this.pendingNotifs.keys()) { try { this.d.onStash?.(cid); } catch { } }   // its read r1 (S1): each conversation's strip and its held count follow
@@ -1499,6 +1502,15 @@ class JobManager {
    *  {kind: spend-cap|rate-floor|not-reachable|off, why?, identity?, cap?,
    *  retryAfter?} — the panel summary, the rail tooltip and the affected
    *  conversation's status-bar chip render it in the device's own words. */
+  /** THE STASH MARKS ITS STORE URGENT AT THE STASH (the census cure's hunt, findings 1 and 2 — 主开发 19:44Z: ONE rule at ONE place, no
+   *  caller remembers to): a notice stashed anywhere — a run's end riding its record's landing, a missed one-shot, the rate floor, a
+   *  subscriber of unknown verdict — makes job-notifications.json the writer's NEXT write (rank 0, urgent), never a paced tick's: the
+   *  stash is the notice's only copy, and the boot does not say it again. A held notifications file (bl-jobs' unread hold) is never
+   *  written over. */
+  _notifsUrgent() {
+    if (this.readOnly || this._notifsUnread) return;
+    try { this._writer().dirty(this.notifsFile, { name: 'jobs-notifs.write', rank: 0, urgent: true, produce: () => storeBytes(Object.fromEntries(this.pendingNotifs)) }); } catch (e) { this.d.log('[jobs] notifs save failed:', e.message); }
+  }
   _stashNotif(cid, job, ev, reason, { stampLast = true, held = null, mark = false } = {}) {
     const q = this.pendingNotifs.get(cid) || [];
     // a delivery that was IN FLIGHT when the owner cleared the job stashes here afterwards with the words it
@@ -1511,6 +1523,7 @@ class JobManager {
     if (n) this._sayDropped(cid, n, dropped);
     this.pendingNotifs.set(cid, q);
     if ((held || heldOf(null, reason) || {}).kind === 'not-running') (this._stoppedThisRun || (this._stoppedThisRun = new Set())).add(cid);   // B-6721: the EVENT For you is told of (the notice just stashed — never the queue's tail after the cap)
+    this._notifsUrgent();   // THE STASH MARKS ITS STORE URGENT, here — at the stash, for every caller (the census cure's hunt, findings 1 and 2)
     this._stashes = (this._stashes || 0) + 1;   // a count the acts read (announce: was its copy only stashed?)
     if (stampLast) job.lastNotify = { ts: now(), lane: 'stash', ok: true, reason: reason || null };
     this._notifyLogPush(job, { lane: 'stash', ok: false, reason: reason || 'not reachable', to: String(cid).slice(0, 8) });
@@ -1746,17 +1759,21 @@ class JobManager {
     return () => { if (released) return; released = true; let k = 0; for (const n of mine) if (n.ho === tag) { delete n.ho; k++; } if (k) this._saveNotifs(); };
   }
   /** the notifs file alone, NOW (a claim, a drain — a delivery's bookkeeping never waits for the 2 s save tick). */
+  /** → the notifications' landing {ok, why} (the census cure's hunt, finding 11 — 主开发 19:44Z: the notices save ANSWERS its landing;
+   *  its callers read it: a hand-over holds its record of delivery and its reply behind it) */
   _saveNotifs() {
-    if (this.readOnly) return;
-    if (this._notifsUnread) { if (!this._notifsSaveSaid) { this._notifsSaveSaid = true; this.d.log('[jobs] a job-notifications.json write was refused: the file could not be read, and nothing is written over it until it reads'); } return; }   // the B-f276 remainder
+    if (this.readOnly) return { ok: true, why: null };
+    if (this._notifsUnread) { if (!this._notifsSaveSaid) { this._notifsSaveSaid = true; this.d.log('[jobs] a job-notifications.json write was refused: the file could not be read, and nothing is written over it until it reads'); } return { ok: false, why: 'job-notifications.json is held unread' }; }   // the B-f276 remainder
     // lane lg-store-writes U4: the notifications' bytes go through the store writer — and a claim, a drain, a restore is ON DISK
     // before what follows (verify r2's exactly-once law: the hand-over's stamp is on disk in both stores before the post
     // leaves; a drained entry is never delivered twice after a kill) — _onDisk waits for this one file's write
-    try { const W = this._writer(); W.dirty(this.notifsFile, { name: 'jobs-notifs.write', rank: 0, produce: () => storeBytes(Object.fromEntries(this.pendingNotifs)) }); this._onDisk(this.notifsFile, 'the notifications (a claim, a drain)'); } catch (e) { this.d.log('[jobs] notifs save failed:', e.message); }
+    try { const W = this._writer(); W.dirty(this.notifsFile, { name: 'jobs-notifs.write', rank: 0, produce: () => storeBytes(Object.fromEntries(this.pendingNotifs)) }); return this._onDisk(this.notifsFile, 'the notifications (a claim, a drain)'); } catch (e) { this.d.log('[jobs] notifs save failed:', e.message); return { ok: false, why: e.message }; }
   }
   /** `step` once the notifications as they are NOW are on disk (lane lg-store-writes, the moved2 cure 2: a stash hand-over drops
    *  its kept copy of the originals only on their put-back's landing — _ride) */
   afterNotifsLanded(step) { return this._ride(this.notifsFile, 'the notifications put back', step); }
+  /** the notifications as they are NOW on disk, waited for (bounded) → Promise<{landed}> (the census cure, finding 11: the hand-over) */
+  whenNotifsLanded({ timeoutMs = 20000, what = 'a hand-over\'s drain' } = {}) { return this._ride(this.notifsFile, what, () => true, { timeoutMs }); }
   /** Put drained notifications BACK as themselves (a hand-over's frame came back undelivered — verify r2). An entry already
    *  here — the same object, or the same job at the same instant (a boot putting back a kept copy whose first put-back landed:
    *  the moved2 cure 2) — is never added twice. */
@@ -1791,8 +1808,10 @@ class JobManager {
       for (const n of q) if (n && n.ho) delete n.ho;
     } else this.pendingNotifs.delete(cid);
     // NOTHING IS PUT BACK (the moved2 cure 2, its must 4): two of the drain's callers drain AFTER the text has gone out — the removal
-    // stays, a write that does not land is the writer's to retry (_onDisk says it)
-    this._saveNotifs();
+    // stays, a write that does not land is the writer's to retry (_onDisk says it). The census cure (finding 11): the drained list
+    // CARRIES the drain's landing (`landed`, not enumerable — never in a record) — a hand-over holds what follows behind it
+    const drained = this._saveNotifs();
+    Object.defineProperty(q, 'landed', { value: !!(drained && drained.ok), enumerable: false });
     this._dirty = true;
     // A stash DRAINED into a resume has been read (triage §13 rule 1a): the
     // conversation sees it on its next turn. A stash entry older than the
@@ -4125,17 +4144,18 @@ class JobManager {
     const wrec = { withdrawn: true, version: p.version, ts: now() };
     job.interaction.answers.push(wrec);
     if (job.interaction.answers.length > 50) job.interaction.answers.splice(0, job.interaction.answers.length - 50);   // its read r2: the same cap as an answer's
-    // the moved2 census (主开发 03:00Z; hunt 3's withdrawAsk, named twice): THE STEP RIDES THE LANDING, as answerPanel's — the record in
-    // memory holds the withdraw at once; the stdin-open job's answers file (its wrapper tails it), its wait woken and the For-you item
-    // resolved follow once jobs.json holds it (a kill first leaves the panel open on disk and none of them happened)
+    // THE RELEASE'S ORDER (the census cure's hunt, finding 8 — 主开发 19:44Z: a file ANOTHER PROCESS reads is written first and at once,
+    // the record after): the stdin-open job's answers file (its wrapper tails it) gets the withdraw at the act's own time, OFF the loop
+    // as the release started it — never inside a step that an exit's flush runs and then exits; the record follows. Its wait woken and
+    // the For-you item resolved still ride jobs.json's landing (the moved2 census)
     const run = job.stdinOpen && !self && job.runs && job.runs[job.runs.length - 1];   // 主开发 21:46Z: a stdin-open job reads a withdraw BY ITS OWNER on its stdin — never an echo of its own
     const ctl = run ? this._ctlDir(job, run.startedAt) : null;
+    if (ctl) { try { fs.promises.appendFile(path.join(ctl, 'answers.jsonl'), JSON.stringify(wrec) + '\n').catch(() => { }); } catch { } }   // OFF the loop (test-store-write-census: no new synchronous store write)
     job.interaction.pending = null;
     if (job.state === 'awaiting-user') job.state = 'up';
     this._touch(job, { what: `withdrew its panel #${p.version} (its cause is gone)`, verb: 'answers' });
     this._save();
     this._ride(this.file, 'the panel\'s withdraw', () => {
-      if (ctl) { try { fs.promises.appendFile(path.join(ctl, 'answers.jsonl'), JSON.stringify(wrec) + '\n').catch(() => { }); } catch { } }   // OFF the loop (test-store-write-census: no new synchronous store write)
       this._resolveAns(job);
       try { this.d.resolveJobAsk && this.d.resolveJobAsk(job.id); } catch { }
     });
@@ -4152,19 +4172,21 @@ class JobManager {
     const rec = { ...answers, version: p.version, ts: now() }; // `version` = the panel's own (never the request's spelling)
     job.interaction.answers.push(rec);
     if (job.interaction.answers.length > 50) job.interaction.answers.splice(0, job.interaction.answers.length - 50);
+    // THE RELEASE'S ORDER (the census cure's hunt, finding 7 — 主开发 19:44Z: a file ANOTHER PROCESS reads is written first and at once,
+    // the record after): the wrapper's answers file gets the answer NOW, before the record is handed to the writer — a kill between them
+    // leaves the answer with the child and the panel open on disk (a harmless re-ask), never a closed panel whose child waits for ever
+    const run = job.stdinOpen && job.runs && job.runs[job.runs.length - 1];
+    const ctl = run ? this._ctlDir(job, run.startedAt) : null;
+    if (ctl) { try { fs.appendFileSync(path.join(ctl, 'answers.jsonl'), JSON.stringify(rec) + '\n'); } catch { } } // mirror to the wrapper's answers tail file
     job.interaction.pending = null;
     if (job.state === 'awaiting-user') job.state = 'up';
     this._touch(job, { what: 'the user answered its panel', verb: 'answers' });
     this._save();
     // lane lg-store-writes (the moved2 cure 2 — THE STEP RIDES THE LANDING, no roll back): the record in MEMORY holds the answer at
-    // once (the act is taken: `vibespace-job answers` read through the hub shows it); what cannot be undone rides jobs.json's
-    // landing — the wrapper's answers file (another process reads it at once), the job's wait woken, the For-you item closed, its
-    // owner told. A kill first leaves the question open on disk and none of them happened. The route's reply waits its bound
-    // (persisted): not landed yet ⇒ said, and they follow by themselves at the landing (the moved2 cure 3: the words made true)
-    const run = job.stdinOpen && job.runs && job.runs[job.runs.length - 1];
-    const ctl = run ? this._ctlDir(job, run.startedAt) : null;
+    // once (the act is taken: `vibespace-job answers` read through the hub shows it); the job's wait woken, the For-you item closed,
+    // its owner told ride jobs.json's landing. The route's reply waits its bound (persisted): not landed yet ⇒ said, and they follow
+    // by themselves at the landing (the moved2 cure 3: the words made true)
     this._ride(this.file, 'the panel\'s answer', () => {
-      if (ctl) { try { fs.appendFileSync(path.join(ctl, 'answers.jsonl'), JSON.stringify(rec) + '\n'); } catch { } } // mirror to the wrapper's answers tail file
       this._resolveAns(job);
       try { this.d.resolveJobAsk && this.d.resolveJobAsk(job.id); } catch { } // clear the needs-your-input inbox entry (owner report: it lingered after submit)
       this._notifyOwner(job, { what: 'the user answered its interaction panel — vibespace-job answers ' + job.id });

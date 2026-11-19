@@ -510,7 +510,7 @@ console.log('② the moved stores hand their bytes to the writer by name; nothin
   ok(!bkMoved(bk, be.replace('if (r.deferred || (r.left || []).some((x) => x.file === f)) return null; ', '')), 'NEGATIVE CONTROL (U5b, the cure): browser-env reading an older registry when the owed write did not land (not failing closed) is red');
   ok(!bkMoved(bk.replace('      W.durable(storeKey).catch(() => { });\n', ''), be), 'NEGATIVE CONTROL (U5b, the cure): the registry no longer an act (no durable() — a paced store, up to 30 s late) is red');
   // the migrations' road (U5b, found at its line): a reshape is ON DISK before the next migration reads the file
-  const reshapeLands = (t) => /reshapeStore: \(fn\) => \{ ensureLoaded\(\); const r = fn\(reg\); commit\(\); landedOrThrow\(\); return r; \}/.test(t) && /function saveNow\(\) \{ return save\(\) && landNow\(\); \}/.test(t)
+  const reshapeLands = (t) => /reshapeStore: \(fn\) => \{ ensureLoaded\(\); (?:refuseIfHeld\('a migration of the profile registry'\); )?const r = fn\(reg\); commit\(\); landedOrThrow\(\); return r; \}/.test(t) && /function saveNow\(\) \{ return save\(\) && landNow\(\); \}/.test(t)
     && /const landedOrThrow = \(\) => \{ if \(!landNow\(\)\) throw /.test(t) && /return !r\.deferred && !r\.left\.some\(\(x\) => x\.file === storeKey\)/.test(t);
   ok(reshapeLands(bk), 'the browser keeper\'s reshapeStore (migrations only) lands the registry before it returns, else THROWS by name — the boot\'s next migration (grants-unify) reads the FILE; an exit-deferred flush is not «landed»');
   ok(!reshapeLands(bk.replace('commit(); landedOrThrow(); return r; }', 'commit(); return r; }')), 'NEGATIVE CONTROL (lg-store-writes U5b): a reshape left owed when the next migration reads the file is red');   // stale-pins: kept — a negative control
@@ -1105,6 +1105,7 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
       const back = await m.readAgain();
       ok(back === true && !m.unreadState() && m.list().length === 1 && m.list()[0].title === 'Alpha' && JS(lifted) === JS(['n1']), '⑨ …the read TRIED AGAIN answers: the hold lifts, the groups are back (Alpha, its row and its line), the notice is lifted', { back, groups: m.list().map((g) => g.title), lifted });
       m.addProgress('T-a1', { note: 'after the hold' });
+      { const lw = require('../src/store-writer.js').storeWriter().flushSync(); if (lw.left && lw.left.length) throw new Error(`the store writer left owed writes: ${JSON.stringify(lw.left)}`); }   // lane lg-store-writes (U5 met this leg): the act's write is the store writer's — landed before the file is read, LOUDLY
       const doc = JSON.parse(fs.readFileSync(w.file, 'utf8'));
       ok(doc.tasks['T-a1'].progress.some((p) => p.note === 'kept line') && doc.tasks['T-a1'].progress.some((p) => p.note === 'after the hold') && doc.tasks['T-a1'].backlog.some((b) => b.text === 'kept row'), '⑨ …and recording works again ON the store as it was (its old line and row kept, the new line written)', doc.tasks['T-a1'].progress.map((p) => p.note));
     }

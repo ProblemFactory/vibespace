@@ -519,7 +519,11 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
       let st = O().conversationStatus({ webuiId: r.sessionId });
       for (let t = 0; st.ok && st.pending && t < waitMs; t += 250) { await sleep(250); st = O().conversationStatus({ webuiId: r.sessionId }); }
       if (spec.taskId && typeof O().settleBirthGroups === 'function') O().settleBirthGroups();   // its id is here: the membership lands now (the notify point would, at its next broadcast)
-      return { ...r, ...(st.ok ? { claudeSessionId: st.claudeSessionId, sessionKey: st.sessionKey, pending: st.pending } : {}) };
+      // A REPLY AFTER ITS LANDING (the census cure's hunt, finding 4 — 主开发 19:44Z): an open into a Task Group is answered once
+      // task-groups.json holds the bind (bounded, as conversations.bind's); not yet ⇒ said (`notOnDisk`) — the bind stays applied in
+      // memory and the writer lands it (the birth mark is gone with this process: never «bound» over a bind the disk does not hold)
+      const saved = spec.taskId && typeof O().bindLanded === 'function' ? await O().bindLanded() : true;
+      return { ...r, ...(st.ok ? { claudeSessionId: st.claudeSessionId, sessionKey: st.sessionKey, pending: st.pending } : {}), ...(saved ? {} : { notOnDisk: true }) };
     },
     'conversations.status': (args, ctx) => {
       const t = reached(args.target, ctx);

@@ -139,7 +139,7 @@ export const ROWS = [
   ['src/server/browser-installs.js', 'own-tree', 5, null, DATA],
   ['src/server/browser-keeper.js', 'own-tree', 44, null, DATA], // lane lg-store-writes, the moved2 cure 2: +2 — adoptScratch judges the move's two parents on one filesystem (two stats: the home's ~/.agent-browser and the kept dir's parent) before anything is recorded. the B-f276 remainder (bl-jobs) +1: the held registry read again off the loop (fs.promises.readFile of its own store under data/); B-7a30 unit 1': + the CLI judge's async file check (access + stat — the same CLI files the release's view stat'ed on the loop) and the install's package.json + witness read off the loop; lane tailnet-names: + the person's ~/.agent-browser/config.json (its own proxy wins over the tailnet PAC — the file machine.json is composed from); lane browser-daemon-survives-update: + its own launch's Chrome DevToolsActivePort (the boot's re-own); lane browser-takeover-queue: + data/browser-takeovers.json (the request records); lane engine-args-string: + one line of its OWN config file under data/browser-env/ the driver refused (ownConfigLine — the refusal's words)
   ['src/server/browser-kept.js', 'own-tree', 3, null, DATA],
-  ['src/server/browser-trace.js', 'own-tree', 13, null, DATA],
+  ['src/server/browser-trace.js', 'own-tree', 14, null, DATA],   // lane lg-store-writes, the census cure (finding 6) +1: the Forget's write check of the profile folder's parent (accessSync), before its record leaves
   ['src/server/channel-api-cards.js', 'own-tree', 2, null, DATA],
   ['src/server/channel-api.js', 'own-tree', 3, null, DATA],
   ['src/server/channels-wiring.js', 'own-tree', 3, null, DATA],

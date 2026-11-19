@@ -699,7 +699,18 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   let fileHost = null; // lane profile-lock-roll: the hostname the registry file was last saved under (read at load)
 
   function load() {
-    let read; try { read = { text: fs.readFileSync(storeFile, 'utf8') }; } catch (error) { read = { error }; }
+    // lane lg-store-writes U5b: a keeper made AGAIN in the same process (a suite's; the boot's legacy-adopt migration's private
+    // keeper) lands what the last one still owed before it reads (a hub's boot owes nothing)… and a write still HELD past the
+    // bound is read from the WRITER, never past (the moved2 cure 2's hunt (6): the file without the adopted record, then this
+    // keeper's first save over it) — the owed bytes are the newest state of this file
+    // (the census cure's gate, a meeting with the held store: BEFORE the read — the checkpoint's load reads the file and then hands
+    // its bytes to loadFrom, so a landing inside loadFrom came after the read and a keeper made again read the older file)
+    let owedText = null;
+    try { const W = writerOf(); if (W.pending(storeKey)) { const r = W.flushSync([storeKey]); if ((r && r.deferred) || (r && (r.left || []).some((x) => x.file === storeKey))) owedText = typeof W.owed === 'function' ? W.owed(storeKey) : null; } } catch { }
+    if (owedText != null) log.warn?.(`[browser] ${STORE_FILE}: the last keeper's write is still held by the storage — this load reads the writer's owed copy (the newest state), never the older file`);
+    let read;
+    if (owedText != null) read = { text: owedText };   // the writer's own bytes: whole by construction
+    else { try { read = { text: fs.readFileSync(storeFile, 'utf8') }; } catch (error) { read = { error }; } }
     loadFrom(read);
     if (!heldReg) closeStaleHeldNotices();   // its read r1 (M3) / r2 (S2): a boot that READ closes a held notice a previous run left open — after the load returned
   }
@@ -711,19 +722,9 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
    *  empty, writable registry: an empty registry here DELETES folders — the kept sweep, Housekeeping, a build's removal) */
   function loadFrom(read) {
     let rawDoc = null;
-    // lane lg-store-writes U5b: a keeper made AGAIN in the same process (a suite's; the boot's legacy-adopt migration's private
-    // keeper) lands what the last one still owed before it reads (a hub's boot owes nothing)… and a write still HELD past the
-    // bound is read from the WRITER, never past (the moved2 cure 2's hunt (6): the file without the adopted record, then this
-    // keeper's first save over it) — the owed bytes are the newest state of this file
-    let owedText = null;
-    try { const W = writerOf(); if (W.pending(storeKey)) { const r = W.flushSync([storeKey]); if ((r && r.deferred) || (r && (r.left || []).some((x) => x.file === storeKey))) owedText = typeof W.owed === 'function' ? W.owed(storeKey) : null; } } catch { }
-    if (owedText != null) log.warn?.(`[browser] ${STORE_FILE}: the last keeper's write is still held by the storage — this load reads the writer's owed copy (the newest state), never the older file`);
-    if (owedText != null) { rawDoc = JSON.parse(owedText); reg = B.normalizeRegistry(rawDoc); }   // the writer's own bytes: whole by construction
-    else {
-      const a = SR.storeAnswer(read, { valid: REG_VALID });
-      if (a.state === 'data') { rawDoc = a.value; reg = B.normalizeRegistry(rawDoc); }
-      else { reg = B.normalizeRegistry(null); if (a.state !== 'missing') holdRegistry(a); }
-    }
+    const a = SR.storeAnswer(read, { valid: REG_VALID });
+    if (a.state === 'data') { rawDoc = a.value; reg = B.normalizeRegistry(rawDoc); }
+    else { reg = B.normalizeRegistry(null); if (a.state !== 'missing') holdRegistry(a); }
     // verify r7 (T1): one token ⇒ one entry — what the load's dedupe dropped is said (once) and in the ledger (each)
     { const dd = rawDoc && rawDoc.dirHosts ? B.dirHostsDeduped(rawDoc.dirHosts) : []; if (dd.length) { dirty = true; for (const x of dd) lineageLedger('deduped-at-load', { dir: x.key, keptAs: x.keptAs }); log.warn?.(`[browser] the launch-host lineage of ${dd.length === 1 ? dd[0].key : dd.length + ' directories'} dropped at load — the same marker token under another path (kept under ${dd.length === 1 ? dd[0].keptAs : 'the newest'})${dd.length === 1 ? '' : ' — each of: ' + dd.slice(0, 3).map((x) => x.key).join(', ') + (dd.length > 3 ? `, … +${dd.length - 3} more` : '')}`); } }
     // lane profile-lock-roll (L1): the hostname that WROTE the file (its last save, by whichever pod) — captured BEFORE this

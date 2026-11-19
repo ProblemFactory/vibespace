@@ -1060,8 +1060,8 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   const CLEAR_A = "    if (askGone.length) this._ride(this.file, 'the cleared asks', () => {";
   const lawCl = lawRun(MJ.load('src/jobs.js', anchored(jsrc, CLEAR_A, "    if (askGone.length) ((f, w, step) => step())(this.file, 'the cleared asks', () => { /* MUTANT: the step runs at the act */", 'the cleared asks ride the landing'), 'law-clear-now'), 'mut-clear');
   ok(lawCl.clear.askedBefore === 1, 'CONTROL (a copy whose clear runs its step at the act): the asked job\'s For-you item closes while NOTHING is on disk — red', lawCl.clear);
-  const DRAIN_A = "    // stays, a write that does not land is the writer's to retry (_onDisk says it)\n    this._saveNotifs();\n";
-  const lawDr = lawRun(MJ.load('src/jobs.js', anchored(jsrc, DRAIN_A, "    // stays, a write that does not land is the writer's to retry (_onDisk says it)\n    if (this._writer().pending(this.notifsFile)) this.pendingNotifs.set(cid, [...(this.pendingNotifs.get(cid) || []), ...q]);   // MUTANT: the first cure's put-back\n    this._saveNotifs();\n", 'the drain puts nothing back'), 'law-drain-back'), 'mut-drain');
+  const DRAIN_A = "    // stays, a write that does not land is the writer's to retry (_onDisk says it). The census cure (finding 11): the drained list\n    // CARRIES the drain's landing (`landed`, not enumerable — never in a record) — a hand-over holds what follows behind it\n    const drained = this._saveNotifs();\n";
+  const lawDr = lawRun(MJ.load('src/jobs.js', anchored(jsrc, DRAIN_A, DRAIN_A + "    if (this._writer().pending(this.notifsFile)) this.pendingNotifs.set(cid, [...(this.pendingNotifs.get(cid) || []), ...q]);   // MUTANT: the first cure's put-back\n", 'the drain puts nothing back'), 'law-drain-back'), 'mut-drain');
   ok(lawDr.drain.back === 1, 'CONTROL (a copy that puts a drain not on disk back — the first cure): the text that went out is queued again — red', lawDr.drain);
   // CURE 3: no «unread» item after «gone» was said for the same failure (its note, still being written, lands after)
   {
@@ -1201,13 +1201,13 @@ console.log('§17 B-8bd5: the job that filed a panel withdraws it once its cause
   ok(r.again.ok && /no panel of this job is open/.test(r.again.already || ''), 'B-8bd5: withdrawn twice — answered, nothing changed');
   ok(r.stdin === 1, 'B-8bd5 (主开发 21:46Z): a stdin-open job reads the withdraw on its stdin (the wrapper\'s answers tail file), as it reads an answer', r.stdin);
   const JSRC = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8');
-  // the deferred-save census: the withdraw's resolve and its stdin mirror RIDE its landing (inside the step) — the controls cut them there,
-  // each plant asserted by anchored()
+  // the deferred-save census: the withdraw's resolve RIDES its landing (inside the step); its stdin mirror is written FIRST, at the act's
+  // time (the census cure, finding 8: a file another process reads, the release's order) — the controls cut each, plants asserted by anchored()
   const RES = "      this._resolveAns(job);\n      try { this.d.resolveJobAsk && this.d.resolveJobAsk(job.id); } catch { }\n    });";
   const MJ8 = mutantCopies('jobs-withdraw-8bd5', ROOT);
   const rx = await scene(MJ8.load('src/jobs.js', anchored(JSRC, RES, "      this._resolveAns(job);\n      /* MUTANT: no resolve — the item stays */\n    });", 'the withdraw\'s resolve'), 'no-resolve'), 'jobs-triage-withdraw-mut');
   ok(rx.resolved.length === 0, 'B-8bd5 CONTROL (the withdraw without its resolve, in a copy): the For-you item STAYS open — what the row reported', rx.resolved);
-  const MIR = "      if (ctl) { try { fs.promises.appendFile(path.join(ctl, 'answers.jsonl'), JSON.stringify(wrec) + '\\n').catch(() => { }); } catch { } }";
+  const MIR = "    if (ctl) { try { fs.promises.appendFile(path.join(ctl, 'answers.jsonl'), JSON.stringify(wrec) + '\\n').catch(() => { }); } catch { } }";   // the census cure (finding 8): written FIRST, at the act's time (the release's order) — outside the riding step
   const rm = await scene(MJ8.load('src/jobs.js', anchored(JSRC, MIR, '      /* MUTANT: no stdin mirror */', 'the stdin mirror of a withdraw'), 'no-mirror'), 'jobs-triage-withdraw-mut2');
   ok(rm.stdin === 0, 'B-8bd5 CONTROL (no mirror, in a copy): the stdin-open job never sees the withdraw', rm.stdin);
   for (const rr of copiesCensus(MJ8.files, MJ8.dir, ROOT, { minCopies: 1, label: 'B-8bd5 ' })) ok(rr.pass, rr.name + (rr.pass ? '' : ' — ' + rr.detail));
@@ -1252,6 +1252,23 @@ console.log('§U4 lane lg-store-writes (B-0248): THE STORE\'S SAVE GOES THROUGH 
   a.rec.dirties.length = 0; a.rec.durables.length = 0;
   a.J._dirty = true; a.J._save({ paced: true });   // the 2 s tick
   ok(a.rec.dirties.length === 2 && a.rec.dirties.every((x) => x.rank === undefined && !x.urgent) && a.rec.durables.length === 0, 'U4: the 2 s tick hands both files PACED — no rank, not urgent, no durable()', a.rec.dirties);
+  // THE CENSUS CURE (主开发 19:44Z, the last hunt's findings 1 and 2): A NOTICE STASHED ANYWHERE MARKS ITS STORE URGENT AT THE STASH —
+  // a stashed notice (here: the 2 s tick's paced hand-off already owed) makes job-notifications.json the writer's NEXT write (rank 0,
+  // urgent): never left to the paced tick (a kill before it lost the only copy). RED (anchored): the stash without its mark
+  const stashMark = (JMod, tag) => {
+    const sc = scene(JMod, 'stash-' + tag);
+    sc.rec.dirties.length = 0;
+    sc.J._stashNotif('cid-stash01', sc.job, { what: 'its end', at: Date.now() }, 'a stand-in rate floor');
+    const marks = sc.rec.dirties.filter((x) => x.f === 'job-notifications.json');
+    try { sc.J.shutdown(); } catch { }
+    return { marks, urgent: marks.some((x) => x.rank === 0 && x.urgent && x.name === 'jobs-notifs.write') };
+  };
+  const sm = stashMark({ JobManager }, 'real');
+  ok(sm.urgent, 'THE CENSUS CURE (findings 1, 2): a notice STASHED marks job-notifications.json urgent AT THE STASH (rank 0) — the writer\'s next write, never the paced tick\'s', sm.marks);
+  const MJS = mutantCopies('jobs-stash-urgent', ROOT);
+  const smx = stashMark(MJS.load('src/jobs.js', anchored(fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8'), '    this._notifsUrgent();   // THE STASH MARKS ITS STORE URGENT', '    // MUTANT: no urgent mark   // THE STASH MARKS ITS STORE URGENT', 'the stash marks its store'), 'stash-unmarked'), 'mut');
+  ok(!smx.urgent, 'CONTROL (a stash without its urgent mark, in a copy): nothing hands the notices to the writer at the stash — red', smx.marks);
+  for (const rr of copiesCensus(MJS.files, MJS.dir, ROOT, { minCopies: 1, label: 'stash-urgent ' })) ok(rr.pass, rr.name + (rr.pass ? '' : ' — ' + rr.detail));
   const bytes = JSON.parse(a.rec.owed.get(a.F).produce());
   ok(bytes.length === 1 && bytes[0].name === 'u4 renamed' && !JSON.stringify(bytes).includes('"_'), 'U4: the bytes are the records when the write is due — a later change rides the same write, runtime-only `_` keys never persisted', bytes);
   // a new engine in the same process while the writes are owed: its load lands them first

@@ -81,4 +81,63 @@ console.log('⑤ RED controls (each plant through anchored())');
   ok(j6.bad.some((b) => /borrows a suite's law/.test(b)), 'CONTROL (e) (a why that names a suite): RED by name', j6.bad.slice(0, 3));
 }
 
+console.log('⑥ THE THREE RULES OF THE LAST HUNT (主开发 2026-11-19 19:44Z) — each a standing guard, each with its RED control');
+{
+  /** a method's text: from `  name(` to the next method head at the same indent (a class body) */
+  const methodText = (src, name) => { const a = src.indexOf(`\n  ${name}(`); if (a < 0) return ''; const rest = src.slice(a + 1); const m = /\n  (?:async )?[A-Za-z_$][\w$]*\([^\n]*\) \{[^\n]*\n/.exec(rest.slice(5)); return m ? rest.slice(0, m.index + 5) : rest; };
+  /** an object-literal verb's text: from `'name':` to the next verb key at the same indent */
+  const verbText = (src, name) => { const a = src.indexOf(`'${name}':`); if (a < 0) return ''; const rest = src.slice(a); const m = /\n    '[a-z.]+':/.exec(rest.slice(5)); return m ? rest.slice(0, m.index + 5) : rest; };
+  const JOBS = fs.readFileSync(path.join(REPO, 'src/jobs.js'), 'utf8');
+  // R1 — A NOTICE STASHED ANYWHERE MARKS ITS STORE URGENT AT THE STASH (findings 1, 2): ONE place, no caller remembers to. Every
+  // function that puts notices into pendingNotifs either IS the stash (it marks), lands them itself, or is the load of the file
+  const STASH_EXEMPT = { _notifsFrom: 'the load of the file itself (the boot, a held file read again): nothing new to write' };
+  const rule1 = (src) => {
+    const bad = [];
+    const st = methodText(src, '_stashNotif'), ur = methodText(src, '_notifsUrgent');
+    if (!/this\._notifsUrgent\(\);/.test(st)) bad.push('_stashNotif does not mark the notifications store urgent (this._notifsUrgent())');
+    if (!/dirty\(this\.notifsFile, \{[^}]*rank: 0, urgent: true/.test(ur)) bad.push('_notifsUrgent does not hand job-notifications.json to the writer at rank 0, urgent');
+    for (const m of src.matchAll(/\n  (?:async )?([A-Za-z_$][\w$]*)\([^\n]*\) \{[^\n]*\n/g)) {
+      const name = m[1], t = methodText(src, name);
+      if (!/this\.pendingNotifs\.set\(/.test(t) || name === '_stashNotif' || STASH_EXEMPT[name]) continue;
+      if (!/this\._notifsUrgent\(\)|this\._saveNotifs\(\)|this\._stashNotif\(/.test(t)) bad.push(`${name} puts notices into pendingNotifs with no urgent mark, no landing of its own and no stash`);
+    }
+    return bad;
+  };
+  const r1 = rule1(JOBS);
+  ok(!r1.length, 'R1 a notice stashed anywhere marks its store urgent AT THE STASH — _stashNotif marks (rank 0, urgent); every other filler of pendingNotifs lands, stashes, or is the load', r1);
+  const r1x = rule1(anchored(JOBS, '    this._notifsUrgent();   // THE STASH MARKS ITS STORE URGENT', '    // CONTROL: no urgent mark   // THE STASH MARKS ITS STORE URGENT', 'the stash marks its store'));
+  ok(r1x.some((x) => /_stashNotif does not mark/.test(x)), 'CONTROL R1 (a stash without its urgent mark): RED by name', r1x);
+  // R2 — A FILE ANOTHER PROCESS READS IS WRITTEN FIRST AND AT ONCE, THE RECORD AFTER (findings 7, 8; the release is the oracle): the
+  // job wrapper tails answers.jsonl — every append to it comes before its function's record (this._save) and outside every riding step
+  const OTHERS_READ = [{ file: 'answers.jsonl', reader: 'the job wrapper (data/bin/job-wrapper.js tails it)' }];
+  const rule2 = (src) => {
+    const bad = [];
+    for (const { file } of OTHERS_READ) {
+      for (const m of src.matchAll(/\n  (?:async )?([A-Za-z_$][\w$]*)\([^\n]*\) \{[^\n]*\n/g)) {
+        const name = m[1], t = methodText(src, name);
+        const w = t.indexOf(`'${file}'`); if (w < 0) continue;
+        const sv = t.indexOf('this._save('), rd = t.indexOf('this._ride(');
+        if (sv >= 0 && w > sv) bad.push(`${name}: ${file} is written AFTER the record's save`);
+        if (rd >= 0 && w > rd) bad.push(`${name}: ${file} is written inside (or after) a step riding the landing`);
+      }
+    }
+    return bad;
+  };
+  const r2 = rule2(JOBS);
+  ok(!r2.length && /'answers\.jsonl'/.test(methodText(JOBS, 'answerPanel')) && /'answers\.jsonl'/.test(methodText(JOBS, 'withdrawAsk')), 'R2 a file another process reads (answers.jsonl, the wrapper\'s) is written FIRST and at once — before the record and outside every riding step (answerPanel, withdrawAsk)', r2);
+  const AP = "    if (ctl) { try { fs.appendFileSync(path.join(ctl, 'answers.jsonl'), JSON.stringify(rec) + '\\n'); } catch { } } // mirror to the wrapper's answers tail file\n";
+  const RIDE_AP = "    this._ride(this.file, 'the panel\\'s answer', () => {\n";
+  const r2x = rule2(anchored(anchored(JOBS, AP, '', 'the answer written first'), RIDE_AP, RIDE_AP + AP.replace('    if', '      if'), 'the answer\'s riding step'));
+  ok(r2x.some((x) => /^answerPanel: answers\.jsonl is written (AFTER|inside)/.test(x)), 'CONTROL R2 (the answer written inside the riding step — the chain\'s order): RED by name', r2x);
+  // R3 — A REPLY AFTER ITS LANDING (finding 4): an automation verb that writes a Task Group membership answers once task-groups.json
+  // holds it (bindLanded) or says notOnDisk — conversations.open with a group and conversations.bind
+  const OPS = fs.readFileSync(path.join(REPO, 'src/server/conversation-ops.js'), 'utf8');
+  const rule3 = (src) => ['conversations.open', 'conversations.bind'].filter((v) => { const t = verbText(src, v); return !(/await O\(\)\.bindLanded\(\)/.test(t) && /notOnDisk: true/.test(t)); });
+  const r3 = rule3(OPS);
+  ok(!r3.length, 'R3 a reply after its landing — conversations.open (with a group) and conversations.bind answer once the bind is on disk, or say notOnDisk', r3);
+  const OPEN_L = "      const saved = spec.taskId && typeof O().bindLanded === 'function' ? await O().bindLanded() : true;\n";
+  const r3x = rule3(anchored(OPS, OPEN_L, "      const saved = true;   // CONTROL: the reply before the landing\n", 'the open waits for its bind'));
+  ok(r3x.includes('conversations.open'), 'CONTROL R3 (an open answered before its bind lands): RED by name', r3x);
+}
+
 report();

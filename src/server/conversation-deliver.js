@@ -467,6 +467,17 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
         n++; parked++; touched.add(cid);
       }
     }
+    // THE PARK'S HANDING COPY TOO (the census cure's hunt, finding 9 — 主开发 19:44Z: the clear reaches the parked copy too): an entry
+    // that left the park for the jobs store is still WRITTEN into msg-retry.json until its taker's store lands (`handing`) — the same
+    // matcher rewrites it, so a kill before that landing never brings the cleared words back from the file at the next boot
+    for (const e of handing) {
+      let r = null;
+      try { r = match(e); } catch { r = null; }
+      if (!r || typeof r !== 'object') continue;
+      if (typeof r.text === 'string') { e.text = e.kind === 'notification' ? vibespaceNoticeText(r.text) : r.text; e.cardText = null; }
+      if (typeof r.fromName === 'string') e.fromName = r.fromName;
+      n++; parked++;
+    }
     if (parked) writeRetryNow();
     // a clear is written at once and the conversation's `stash` fact re-published (the strip above its composer
     // draws a peer's NAME — a cleared job's `Background Work · <name>` label must not outlive the clear there)

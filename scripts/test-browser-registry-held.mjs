@@ -59,6 +59,7 @@ console.log('§1 an UNREADABLE registry is HELD — nothing written over it, the
       out.lifted = !(k.held && k.held()); out.profile = !!(k.profile && k.profile('bp-0000b001')); out.lifts = lifts;
     }
     try { k.shutdown(); } catch { }
+    try { require(path.join(ROOT, 'src/store-writer.js')).storeWriter().flushSync(); } catch { }   // lane lg-store-writes (the store writer since U5b met this leg): the owed boot's commit LANDS before the file is read
     out.file = (() => { try { fs.chmodSync(F, 0o644); return JSON.parse(fs.readFileSync(F, 'utf8')).profiles.filter((p) => p && p.id === 'bp-0000b001').length; } catch (e) { return '(' + (e.code || 'unparsed') + ')'; } })();   // the ORIGINAL profile on disk
     out.rewritten = (() => { try { return typeof JSON.parse(fs.readFileSync(F, 'utf8')).host === 'string'; } catch { return false; } })();   // the owed boot's commit stamps the writer
     return out;
@@ -101,6 +102,7 @@ console.log('§1 an UNREADABLE registry is HELD — nothing written over it, the
     const k = MJ.load('src/server/browser-keeper.js', src, name).create({ dataDir: d, homeDir: H, env: () => ({ HOME: H }), serverSetting: () => undefined, install: false, log: quiet, unreadRetry: { firstMs: 3600e3, maxMs: 3600e3 } });
     k.held(); await codeOf(() => k.createProfile({ label: 'new one', provider: 'chromium' }));
     try { k.shutdown(); } catch { }
+    try { require(path.join(ROOT, 'src/store-writer.js')).storeWriter().flushSync(); } catch { }   // lane lg-store-writes: what the keeper handed the writer lands before the file is read (else a save over the held file could hide in the queue)
     return bodyOf(F) === (asRoot ? '(a folder)' : BODY);
   };
   const g1 = await saveScene(anchored(KSRC, cref + '\n', '', 'create-refusal-cut'), 'save-guard-only');

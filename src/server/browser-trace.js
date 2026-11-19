@@ -823,11 +823,18 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     const bytes = sizeCache.get(p.dir) ? sizeCache.get(p.dir).bytes : null;
     let to = null;
     let exists = false; try { exists = fs.statSync(p.dir).isDirectory(); } catch { exists = false; }
-    // verify r8 (T2 ②): the lineage key is asked while the directory still exists; the entry follows the rename (never pruned at the next boot)
-    // verify r9 (T1 ④): the entry is re-keyed AND WRITTEN BEFORE the rename — a refused write refuses the Forget (nothing moved), a
-    // failed rename rolls the key back (S76 / S76b: a crash or an unwritable data/ after the rename left the disk naming the old path)
+    // verify r8 (T2 ②): the lineage key is asked while the directory still exists (the entry follows the rename below)
     const lineageKey = exists && typeof keeper.lineageKeyOf === 'function' ? keeper.lineageKeyOf(p.dir, { retireOf: id }) : '';
-    if (exists) { to = T.forgottenDirName(p.dir, now()); const mv = moveLineageFirst(lineageKey, to, `profile ${id}`); try { fs.renameSync(p.dir, to); } catch (e) { if (mv.moved) { try { keeper.moveDirLineage(mv.key, p.dir); } catch { /* said by the keeper */ } } throw namedError('forget_failed', `could not move ${p.dir} aside (${e.message}) — nothing was removed`); } }
+    // THE RECORD LANDS FIRST, THE RENAME AFTER (the census cure's hunt, finding 6 — 主开发 19:44Z; older than the chain, its window
+    // widened by the writer): the profile's data is never renamed while the record that names it is not on disk (a kill there left the
+    // registry naming a path that no longer exists, an empty Chrome at the next start). A folder whose parent refuses a write is refused
+    // FIRST, nothing removed; the lineage is written under the new name next (verify r9 (T1 ④): a registry that refuses that write
+    // refuses the Forget — nothing moved, the record kept); then the record leaves and lands (bounded); then the rename — riding the
+    // record's landing when it is not on disk yet. A rename that fails AFTER the record is gone leaves the folder where it was, its
+    // lineage moved back, said (Housekeeping lists it) — nothing else is undone.
+    if (exists) { try { fs.accessSync(path.dirname(p.dir), fs.constants.W_OK); } catch (e) { throw namedError('forget_failed', `could not move ${p.dir} aside (${(e && (e.code || e.message)) || e}) — nothing was removed`); } }
+    const dest = exists ? T.forgottenDirName(p.dir, now()) : null;
+    const mv = exists ? moveLineageFirst(lineageKey, dest, `profile ${id}`) : null;   // throws forget_failed (nothing moved) when the registry refuses it
     // lane remote-profile-start: a PAIRED machine's profile has no folder here — its folder THERE is removed by the machine's
     // own op (never a path from here), or the ledger + the answer say what was left
     // verify r1: the record goes FIRST (sync), the machine is asked after with the snapshot (a start never lands between)
@@ -839,15 +846,22 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
       : await keeper.removeOnMachine(id, { profile: p });   // a keeper without the law (a suite's stand-in)
     const why = m ? (m.removed ? `deleted by the user (its folder ${m.dir} on ${m.host} deleted there)` : m.left ? `deleted by the user — ${m.left}` : `deleted by the user (its folder on ${m.host} was already gone)`)
       : exists ? 'forgotten by the user (directory moved aside, never deleted by itself)' : 'forgotten by the user (its directory was already gone)';
-    const row = fileForgotten({ profileId: id, label: p.label, dir: p.dir, to, bytes, why });
     const r = r0 || keeper.removeProfile(id, { unpin, replyMs: 20000 });
-    // the moved2 census (its keeper pass): the folder is already moved aside and the ledger row written (both synchronous, above) — the
-    // record's removal LANDS right after them (bounded), as the release's synchronous save did, never left for the writer's pace
     if (!r0 && typeof keeper.landNow === 'function') { try { keeper.landNow(); } catch { /* said by the reply below */ } }
     const L = L0 || (r && r.landing ? await r.landing : null);
-    log.log?.(`[browser-trace] profile ${id} "${p.label}" forgotten: ${p.dir} → ${to || '(no directory)'} (ledger ${row.id})`);
-    bc({ type: 'browser-housekeeping-updated', forgotten: row });
-    return { ok: true, removed: r.removed, from: p.dir, to, ledger: row, ...(m ? { machine: m } : {}), ...(L && !L.landed ? { notOnDisk: true, code: 'finishes-on-landing' } : {}) };   // never «done» said for a removal still queued (the move's hunt, C)
+    let row = null, left = null;
+    const moveAside = () => {
+      if (exists) {
+        try { fs.renameSync(p.dir, dest); to = dest; }
+        catch (e) { if (mv && mv.moved) { try { keeper.moveDirLineage(mv.key, p.dir); } catch { /* said by the keeper */ } } left = `its folder could not be moved aside (${(e && e.message) || e}) — it stays at ${p.dir}; Housekeeping lists it`; }
+      }
+      row = fileForgotten({ profileId: id, label: p.label, dir: p.dir, to, bytes, why: left ? `forgotten by the user — ${left}` : why });
+      log.log?.(`[browser-trace] profile ${id} "${p.label}" forgotten: ${p.dir} → ${to || '(no directory)'} (ledger ${row.id})`);
+      bc({ type: 'browser-housekeeping-updated', forgotten: row });
+    };
+    if (!L || L.landed) moveAside();
+    else if (typeof keeper.whenLanded === 'function') keeper.whenLanded({ timeoutMs: null }).then((L2) => { if (L2 && L2.landed) { try { moveAside(); } catch (e) { log.warn?.(`[browser-trace] profile ${id}: its folder was not moved aside at the record's landing (${(e && e.message) || e})`); } } });
+    return { ok: true, removed: r.removed, from: p.dir, to, ledger: row, ...(left ? { left } : {}), ...(m ? { machine: m } : {}), ...(L && !L.landed ? { notOnDisk: true, code: 'finishes-on-landing' } : {}) };   // never «done» said for a removal still queued (the move's hunt, C)
   }
   /** the B-f276 remainder (bl-jobs): while the profile registry is HELD (unread) nothing here may read its emptiness as «no profile
    *  names this folder» — Housekeeping listed EVERY named profile's folder as an orphan, Forget moved it aside, Delete removed it */

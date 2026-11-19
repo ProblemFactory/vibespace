@@ -83,6 +83,7 @@ const isAgentBearer = (req) => /^Bearer\s+(vsst_|jbt_)/i.test(String((req.header
 const { pressBearer, pressOf, isPress } = require('../write-origin.js');   // lane owner-press-attended: the hand-over is an ATTENDED door — no bearer of any kind
 const HANDOVER_MAX_ENTRIES = 30;       // conversation-deliver's STASH_CAP — every entry in one message
 const HANDOVER_MAX_BYTES = 12 * 1024;
+const HANDOVER_LAND_MS = 20000;   // the census cure (finding 11): how long a hand-over's reply waits for its drained job notices to land
 /** How long a delivered hand-over's originals are remembered for a frame that comes back. The wrapper's DELIVERY
  *  verdict lands within the ladder's SETTLE_TTL_MS (120 s) — but a frame QUEUED behind a running turn (the steer
  *  refused: a review / compact turn) is handed back by a Stop or a queue removal ANY time before that turn ends,
@@ -107,7 +108,7 @@ const GROUP_LATE_MS = 60 * 1000;
  *  does not export (it is on create()'s result), so every press in production was refused «not wired». An unwired door refuses,
  *  and says so once (scripts/test-spend-paths §2c: every injected guard is passed at every construction site). */
 
-function create({ activeSessions, getDeliver = () => null, getJobs = () => null, getGroups = () => null, getChannels = () => null, broadcastSessions = () => {}, renderMsgStash, renderNotifStash, log = console, debounceMs = 300, now = () => Date.now(), schedule = (fn, ms) => { const t = setTimeout(fn, ms); if (t && t.unref) t.unref(); return t; }, dataDir = null, getSendUserInput = () => null, getSpendGuard = () => null, groupHandedWaitMs = GROUP_HANDED_WAIT_MS, wakeBootGraceMs = 60 * 1000 } = {}) {
+function create({ activeSessions, getDeliver = () => null, getJobs = () => null, getGroups = () => null, getChannels = () => null, broadcastSessions = () => {}, renderMsgStash, renderNotifStash, log = console, debounceMs = 300, now = () => Date.now(), schedule = (fn, ms) => { const t = setTimeout(fn, ms); if (t && t.unref) t.unref(); return t; }, dataDir = null, getSendUserInput = () => null, getSpendGuard = () => null, groupHandedWaitMs = GROUP_HANDED_WAIT_MS, wakeBootGraceMs = 60 * 1000, handoverLandMs = HANDOVER_LAND_MS } = {}) {
   const cidOf = (s) => (s && (s.backendSessionId || s.claudeSessionId)) || null;
   const jobsReady = () => { try { const jm = getJobs(); return jm && typeof jm.peekNotifs === 'function' ? jm : null; } catch { return null; } };
   let seq = 0;
@@ -490,7 +491,7 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
   /** The ladder answered `r` for `frame`: a refusal answers by name (the stash exactly as it was); a delivery drains exactly
    *  what went out and remembers the frame. The CALLER spells its own ladder call — the reason literal on that very line (the
    *  spend census pairs a site with the literal it reads there) — and releases the claims in its `finally`. */
-  function finishHandOver(cid, id, prep, frame, r) {
+  async function finishHandOver(cid, id, prep, frame, r) {   // (async — the census cure's finding 11: its reply may wait for the drained notices' landing)
     const { d, jm, held, shownStashed, shownParked, jobs, jobsText } = prep;
     {
       if (!r || !r.ok) {
@@ -522,9 +523,20 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
         log.log?.(`[stash] ${cid}: hand-over ${id} was on its way when a clear reached its entries — the frame is remembered by its digest only (the words it carried reached the agent as a turn)`);
       }
       forget();
+      // THE HAND-OVER HOLDS ITS RECORD OF DELIVERY AND ITS REPLY BEHIND THE DRAIN'S LANDING (the census cure's hunt, finding 11 —
+      // 主开发 19:44Z): the job notices it drained are not on disk at the writer's bound ⇒ the reply waits for them (bounded); still
+      // not ⇒ the reply says so (finishes-on-landing) and the record of delivery is written at their landing — never «delivered»
+      // over a drain the disk does not hold (a kill would hand the same notices over again)
+      const out = { ok: true, id, delivered: tookMsg.length + tookJobs.length, held, lane: r.lane || null, steered: r.steered === true, remaining: S.summarize(entriesOf(cid)) };
+      if (tookJobs.length && tookJobs.landed === false && typeof jm.whenNotifsLanded === 'function') {
+        // the writer's own bound answers; a timer of our own beside it (a writer that never answers a bound never holds the reply for good;
+        // NOT unref'd: the reply is awaited — an unref'd timer let a process with nothing else alive end with the hand-over unanswered)
+        const L = await Promise.race([jm.whenNotifsLanded({ timeoutMs: handoverLandMs }), new Promise((r) => { setTimeout(() => r({ landed: false }), handoverLandMs + 50); })]);
+        if (!(L && L.landed)) { jm.afterNotifsLanded(() => { persistDelivered(); changed(); }); return { ...out, notOnDisk: true, code: 'finishes-on-landing' }; }
+      }
       persistDelivered();
       changed();
-      return { ok: true, id, delivered: tookMsg.length + tookJobs.length, held, lane: r.lane || null, steered: r.steered === true, remaining: S.summarize(entriesOf(cid)) };
+      return out;
     }
   }
 
@@ -551,7 +563,7 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
           ? await d.deliverToConversation(cid, frame, { kind: 'notification', spendReason: 'stash-retry', fromName: FROM_NAME, cardText })
           : await d.deliverToConversation(cid, frame, { kind: 'notification', spendReason: 'stash-handover', fromName: FROM_NAME, cardText });
       } catch (e) { r = { ok: false, reason: (e && e.message) || String(e) }; }
-      return finishHandOver(cid, id, prep, frame, r);
+      return await finishHandOver(cid, id, prep, frame, r);   // awaited INSIDE the try: the claims are released only after the drain's landing wait
     } finally {
       for (const rel of prep.releases) { try { rel(); } catch { } }
     }
@@ -603,7 +615,7 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
           ? await d.deliverToConversation(cid, frame, { kind: 'notification', spendReason: 'peer-message', fromName, cardText })
           : await d.deliverToConversation(cid, frame, { kind: 'notification', spendReason: 'job-notification', fromName, cardText });
       } catch (e) { r = { ok: false, reason: (e && e.message) || String(e) }; }
-      return finishHandOver(cid, id, prep, frame, r);
+      return await finishHandOver(cid, id, prep, frame, r);   // awaited INSIDE the try: the claims are released only after the drain's landing wait
     } finally {
       for (const rel of prep.releases) { try { rel(); } catch { } }
       const cur = inflight.get(cid); if (cur && cur.id === id) inflight.delete(cid);

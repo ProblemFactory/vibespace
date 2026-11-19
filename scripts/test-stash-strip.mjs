@@ -1821,8 +1821,8 @@ console.log('⑤ negative controls (patched scratch copies)');
   // …and the jobs store's
   const jbsrc = read('src/jobs.js');
   // lane lg-store-writes (the moved2 cure 2): the drain's own write — the lazy copy writes nothing there (through anchored(): its plant first)
-  const anchor8 = "    // stays, a write that does not land is the writer's to retry (_onDisk says it)\n    this._saveNotifs();\n";
-  const LazyNotifs = MUT.load('src/jobs.js', anchored(jbsrc, anchor8, "    // MUTANT: the drain persists lazily\n", 'the drain persists at once'), 'lazy-notifs');
+  const anchor8 = "    // stays, a write that does not land is the writer's to retry (_onDisk says it). The census cure (finding 11): the drained list\n    // CARRIES the drain's landing (`landed`, not enumerable — never in a record) — a hand-over holds what follows behind it\n    const drained = this._saveNotifs();\n";
+  const LazyNotifs = MUT.load('src/jobs.js', anchored(jbsrc, anchor8, "    const drained = { ok: true };   // MUTANT: the drain persists lazily\n", 'the drain persists at once'), 'lazy-notifs');
   {
     const R8 = rig2({ jobsModule: LazyNotifs });
     R8.jm._stashNotif(R8.CID, job('j1', 'nightly'), { what: 'ctl-lazy-job' }, 'not reachable'); R8.jm._save();
@@ -1843,9 +1843,9 @@ console.log('⑤ negative controls (patched scratch copies)');
     ok(f9 && f9.count === 1 && f9.items[0].kind === 'notice' && R9.jm.peekNotifs(R9.CID).length === 0, 'CONTROL the restorer removed: the wrapper\'s ok:false frame is re-stashed as ONE notice — "1 notice" for four, the job result gone from its store (②c can go red)', f9);
   }
   // `held` dropped from the result: the toast hides the rest
-  const anchor10 = "      return { ok: true, id, delivered: tookMsg.length + tookJobs.length, held, lane";
+  const anchor10 = "      const out = { ok: true, id, delivered: tookMsg.length + tookJobs.length, held, lane";   // lane lg-store-writes (the census cure, finding 11): the answer is built once, then sent at the drain's landing
   if (!src.includes(anchor10)) throw new Error('mutation anchor missing: no-held');
-  const NoHeld = MUT.load('src/server/stash-handover.js', src.replace(anchor10, "      return { ok: true, id, delivered: tookMsg.length + tookJobs.length, held: 0, lane"), 'no-held');
+  const NoHeld = MUT.load('src/server/stash-handover.js', src.replace(anchor10, "      const out = { ok: true, id, delivered: tookMsg.length + tookJobs.length, held: 0, lane"), 'no-held');
   {
     const R10 = rig2({ handoverModule: NoHeld });
     for (let i = 0; i < 9; i++) R10.deliver.stashFor(R10.CID, { source: 'channel', kind: 'notification', fromName: 'Channels · Lark', text: 'm' + i + ' ' + 'x'.repeat(1900) });

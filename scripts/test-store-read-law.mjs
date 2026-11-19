@@ -903,8 +903,9 @@ console.log('§5 job-notifications.json (src/jobs.js) — every job notice still
     // (3) each held-save guard alone — the notices' own save, the store's save of the notices, the records' save — on the shutdown's
     //     save and a clear-all (both reach `_save`)
     const G_NOTIFS = "    if (this._notifsUnread) { if (!this._notifsSaveSaid) {";
-    const G_STORE_N = "      if (!this._notifsUnread) timedSync('jobs-notifs.write',";
-    const G_RECORDS = "      if (!this._unread.store) timedSync('jobs.write',";
+    // lane lg-store-writes (the store writer under these guards since U4 met this tip): each guard wraps the writer's hand-off of its file
+    const G_STORE_N = "      if (!this._notifsUnread) {   // the B-f276 remainder: a held notifications file is never written over";
+    const G_RECORDS = "      if (!this._unread.store) {\n";
     ok([G_NOTIFS, G_STORE_N, G_RECORDS].every((x) => JSRC.split(x).length === 2), 'control setup: the three held-save guards are found once each');
     const nbody = JSON.stringify({ 'conv-g': [{ ts: 1, jobId: 'jb-0g000001', text: 'done exit=0 (1m)' }] });
     const guardScene = async (Mod, name, road) => {
@@ -927,8 +928,8 @@ console.log('§5 job-notifications.json (src/jobs.js) — every job notice still
     if (asRoot) rootSkip('CONTROLS job-notifications.json / jobs.json: each held-save guard alone cut, its save writes over the held file');
     else {
       const xN = await guardScene(MJ.load('src/jobs.js', anchored(JSRC, G_NOTIFS, '    if (false) { if (!this._notifsSaveSaid) {', 'srl-891a'), 'g-notifs-cut'), 'notifs-g-save-mut', 'saveNotifs');
-      const xS = await guardScene(MJ.load('src/jobs.js', anchored(JSRC, G_STORE_N, "      if (true) timedSync('jobs-notifs.write',", 'srl-892a'), 'g-store-notifs-cut'), 'notifs-g-shutdown-mut', 'shutdown');
-      const xR = await guardScene(MJ.load('src/jobs.js', anchored(JSRC, G_RECORDS, "      if (true) timedSync('jobs.write',", 'srl-893a'), 'g-records-cut'), 'notifs-g-clear-mut', 'clearAll');
+      const xS = await guardScene(MJ.load('src/jobs.js', anchored(JSRC, G_STORE_N, "      if (true) {   // MUTANT: the guard cut", 'srl-892a'), 'g-store-notifs-cut'), 'notifs-g-shutdown-mut', 'shutdown');
+      const xR = await guardScene(MJ.load('src/jobs.js', anchored(JSRC, G_RECORDS, "      if (true) {   // MUTANT: the guard cut\n", 'srl-893a'), 'g-records-cut'), 'notifs-g-clear-mut', 'clearAll');
       ok(!xN.notifsKept && !xS.notifsKept && xS.recordsKept && !xR.recordsKept && xR.notifsKept, 'CONTROLS (each guard cut ALONE, in a copy): the notices\' own save writes over the held notices; the shutdown\'s save writes over them through the store\'s save; a clear-all writes over the held job records — each RED, the other file kept', { xN, xS, xR });
     }
     // (3) the refused removal of a cleared ARCHIVED job while the notices are held
