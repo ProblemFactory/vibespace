@@ -6,7 +6,8 @@
 // "no pong" close: the keepalive is a protocol ping the browser answers by itself. ② the VNC server is killed (the
 // stream drops, the ladder reconnects through the start gate) and Paste is pressed WHILE it reconnects ⇒ the press is
 // said ("reconnecting — your text is pasted when it is back") and the queued text reaches the desktop's clipboard
-// (read back from the X server with xclip) once the stream is back.
+// (read back from the X server with xclip) once the stream is back. ③ (B-2a93's follow-up) a SECOND drop with a text
+// PLANTED in the clipboard: the press pastes THAT text (no box), queued, and it lands once the stream is back.
 // Per-run singleton display + port (scratch.mjs vncEnv — never the machine-global :7/5901, test-architecture §57).
 import { execSync, execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -126,6 +127,43 @@ const back = await until(async () => { const s = await state(); return s && s.st
 check('the stream comes back (the ladder through the start gate respawns the VNC server)', !!back, await state());
 const landed = await until(() => { try { return execFileSync('xclip', ['-o', '-selection', 'clipboard', '-t', 'UTF8_STRING'], { env: { ...process.env, DISPLAY: VNC_DISPLAY }, timeout: 3000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).includes(TEXT) || null; } catch { return null; } }, 15000, 500);
 check('the QUEUED text reached the desktop\'s clipboard once the stream was back (read back from the X server)', !!landed, { toasts: await A.evalJs('window.__toasts') });
+// B-2a93's follow-up (its readers, 03:40Z): THE CLIPBOARD-WITH-TEXT ROAD HAS ITS OWN LEG (③). The leg above empties the clipboard,
+// so the press that pastes the clipboard's text while the stream reconnects lost the cover it had by accident since 11-17. A text
+// is PLANTED and proven (rule (b)), a second drop is made (a connect resets the ladder, vnc-view's 'connect'), and the planted text
+// is read AGAIN inside the very evaluation that presses (no stream ⇒ no server clipboard update can reach the page between). The
+// press must SAY the reconnect, draw NO box (the DOM: .vnc-paste-box), and land THAT text once the stream is back, within the
+// product's own paste wait (PASTE_WAIT_MS, 30 s). SKIP by name only when this browser keeps no clipboard text at all (the write
+// took, the read-back is ""): any other plant failure is a red that carries both values. Each clipboard call has a 5 s bound.
+const clip = (expr) => `Promise.race([${expr}, new Promise((r) => setTimeout(() => r('ERR timeout'), 5000))])`;
+const TEXT2 = 'vs-dkp-clip-' + process.pid;
+const wrote2 = await A.evalJs(clip(`navigator.clipboard.writeText(${JSON.stringify(TEXT2)}).then(() => true, (e) => 'ERR ' + e.name)`));
+const held2 = await A.evalJs(clip(`navigator.clipboard.readText().then((t) => t, (e) => 'ERR ' + e.name)`));
+const boxNow = () => A.evalJs(`(() => { const w = [...app.wm.windows.values()].find((x) => x._isDesktop); return !!(w && w.content.querySelector('.vnc-paste-box')); })()`);
+if (wrote2 === true && held2 === '') console.log(`  ⚠ SKIP ③ the clipboard-WITH-text press: this browser keeps no clipboard text (the write took, the read-back is "")`);
+else {
+  check(`③ the planted text is in the clipboard before the second drop (write ${JSON.stringify(wrote2)}, read back ${JSON.stringify(held2)})`, wrote2 === true && held2 === TEXT2, { wrote2, held2 });
+  const pids2 = ourXvnc();
+  check(`③ the stream was back after ② and a VNC server of this run is there to drop (${pids2.length})`, !!back && pids2.length >= 1, { back: !!back, pids2 });
+  const box0 = await boxNow();
+  check('③ no paste box is open before the second press (② closed its box with its Send)', box0 === false, box0);
+  await A.evalJs('window.__toasts = []; true');
+  for (const pid of pids2) { try { process.kill(pid, 'SIGKILL'); } catch { } }
+  const down2 = await until(async () => { const s = await state(); return s && s.status !== 'Connected' ? s : null; }, 15000, 100);
+  check('③ a second drop of the stream (the with-text press is made while it reconnects)', !!down2, await state());
+  const pressed2 = await A.evalJs(clip(`navigator.clipboard.readText().then((t) => { if (t !== ${JSON.stringify(TEXT2)}) return 'moved: ' + t; const w = [...app.wm.windows.values()].find((x) => x._isDesktop); w.content.querySelector('.desktop-paste').click(); return true; }, (e) => 'ERR ' + e.name)`));
+  check(`③ the clipboard still held the planted text at the press, and the press was made (${JSON.stringify(pressed2)})`, pressed2 === true, pressed2);
+  const said2 = await until(() => A.evalJs(`window.__toasts.find((t) => /reconnecting — your text is pasted when it is back/.test(t)) || null`), 8000, 100);
+  check('③ the clipboard-WITH-text press while reconnecting is SAID («reconnecting — your text is pasted when it is back»)', !!said2, await A.evalJs('window.__toasts'));
+  const box1 = await boxNow();
+  check('③ …and it drew NO paste box (the DOM, not the toast words)', box1 === false, { box1, toasts: await A.evalJs('window.__toasts') });
+  const back2 = await until(async () => { const s = await state(); return s && s.status === 'Connected' ? s : null; }, 30000, 500);
+  check('③ the stream comes back a second time within the product\'s paste wait (PASTE_WAIT_MS, 30 s)', !!back2, await state());
+  let lastX = null;
+  const landed2 = await until(() => { try { lastX = execFileSync('xclip', ['-o', '-selection', 'clipboard', '-t', 'UTF8_STRING'], { env: { ...process.env, DISPLAY: VNC_DISPLAY }, timeout: 3000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); return lastX.includes(TEXT2) || null; } catch { return null; } }, 15000, 500);
+  check('③ …and THE CLIPBOARD\'s text (never typed in a box) reached the desktop\'s clipboard once the stream was back', !!landed2, landed2 ? undefined : { lastX: lastX && lastX.slice(0, 80), browserClipboard: await A.evalJs(clip(`navigator.clipboard.readText().then((t) => t, (e) => 'ERR ' + e.name)`)), toasts: await A.evalJs('window.__toasts') });
+  const box2 = await boxNow();
+  check('③ …and no paste box at the end either', box2 === false, box2);
+}
 const consoleNoise = await A.evalJs('true');
 void consoleNoise;
 A.close();

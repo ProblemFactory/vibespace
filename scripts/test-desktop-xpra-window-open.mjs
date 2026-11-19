@@ -680,7 +680,7 @@ try {
             let xWindows, xFocus;
             if (!xListed) {
               xListed = true;
-              xWindows = await p1.evalJs(`fetch('/api/desktop/apps/${recB.id}/windows').then((r) => r.json()).then((j) => ({ ok: j.ok, why: j.why || j.error || null, rows: (j.windows || []).map((w) => [w.wid || w.id || null, w.title || '', w.w && w.h ? w.w + 'x' + w.h : '']) }))`).catch((e) => 'unread: ' + e.message);
+              xWindows = await p1.evalJs(`fetch('/api/desktop/apps/${recB.id}/windows', { signal: AbortSignal.timeout(5000) }).then((r) => r.json()).then((j) => ({ ok: j.ok, why: j.why || j.error || null, rows: (j.windows || []).map((w) => [w.wid || w.id || null, w.title || '', w.w && w.h ? w.w + 'x' + w.h : '']) }))`).catch((e) => 'unread: ' + e.message);
               try { xFocus = XDOTOOL && recB.display ? execFileSync(XDOTOOL, ['getwindowfocus', 'getwindowname'], { env: xenvFor(wt, recB), encoding: 'utf8', timeout: 4000 }).trim() : 'no xdotool / display'; } catch (e) { xFocus = 'unread: ' + String(e.message).slice(0, 80); }
             }
             return { tail: keyLog().slice(-12).map((e) => [e.n, e.ty, e.key || e.v || e.to || '']), xWindows, xFocus };
