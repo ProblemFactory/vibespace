@@ -25,10 +25,26 @@ const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 
 const [PORT, CDP_PORT] = await freePorts(2); // per-process (scripts/scratch.mjs) — fixed ports collided across concurrent gates
-const wt = scratch('stage-smoke');
+const wt = scratch('stage-smoke'), home = scratch('stage-smoke-home'), chromeDir = scratch('stage-smoke-chrome');
 let failed = 0;
 const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// B-ddc5 (test-window-menu's shape): the stop is installed BEFORE the worktree add — a signal during the add, the copy or the build no
+// longer kills the suite outright: Node holds it and the stop runs at the first await after them (or at exit, when the signal reached
+// the build's child too); a SIGKILL first still wins
+let srv = null, chrome = null, cleaned = false;
+const cleanup = () => {
+  if (cleaned) return; cleaned = true;
+  try { chrome?.kill('SIGKILL'); } catch {}
+  try { srv?.kill('SIGKILL'); } catch {}
+  // dtach sessions spawned by the throwaway (shell terminal) and every child — ended BY IDENTITY (rooted in the worktree, the home or the profile)
+  for (const r of [wt, home, chromeDir]) { try { endRootedProcesses(r); } catch {} }
+  try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
+  for (const d of [chromeDir, home]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
+};
+process.on('exit', cleanup);
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });   // a gate's timeout ends it too
 
 // ── throwaway server in a worktree ──────────────────────────────────────────
 try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
@@ -40,25 +56,20 @@ for (const f of ['src', 'public', 'server.js']) {
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 execSync('npm run build', { cwd: wt, stdio: 'ignore' });
 
-const home = scratch('stage-smoke-home'); fs.mkdirSync(home, { recursive: true });   // the throwaway hub's own HOME (never the user's — its device daemon root lives under it)
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, HOME: home, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1' }, stdio: 'ignore' });
+fs.mkdirSync(home, { recursive: true }); fs.mkdirSync(chromeDir, { recursive: true });   // the throwaway hub's own HOME (never the user's — its device daemon root lives under it) and Chrome's profile
+// B-ddc5: the hub's env drops the machine user's XDG stores (its children resolve them under the scratch home) and the session
+// bus VARIABLE — the bus itself stays reachable at XDG_RUNTIME_DIR's default socket; the keyring is kept away by
+// --password-store=basic, not by the env;
+// XDG_RUNTIME_DIR stays — the tree's own socket rules read it, keyed by the scratch root (src/agentd/client.js)
+const { DBUS_SESSION_BUS_ADDRESS: _hb, XDG_CONFIG_HOME: _hc, XDG_DATA_HOME: _hd, XDG_CACHE_HOME: _hk, XDG_STATE_HOME: _hs, ...hubBase } = process.env;
+srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...hubBase, ...VNC_ENV, HOME: home, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1' }, stdio: 'ignore' });
 // the EXCLUDED package (2026-11-17): its old reason (PORT=3987 / CDP 9337 hard-coded) was cured long ago (freePorts above); what was left
 // is its cleanup — a `pkill -f <socket path>` per dtach socket, a kill BY PATTERN — now the tree's identity stop (endRootedProcesses
-// over the throwaway worktree), and its Chrome asks no keyring (--password-store=basic, no session bus)
-const { DBUS_SESSION_BUS_ADDRESS: _bus, ...chromeEnv } = process.env;
-const chrome = spawn(CHROME, [...CHROME_STORE, `--headless=new`, `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--password-store=basic',
-  '--disable-background-timer-throttling', `--user-data-dir=${scratch('stage-smoke-chrome')}`, 'about:blank'], { stdio: 'ignore', env: chromeEnv });
+// over the throwaway worktree), and its Chrome asks no keyring (--password-store=basic; the bus variable dropped)
+const { DBUS_SESSION_BUS_ADDRESS: _bus, XDG_CONFIG_HOME: _cfg, ...chromeEnv } = process.env; chromeEnv.HOME = chromeDir;   // its crash handler too lives under the profile (B-ddc5)
+chrome = spawn(CHROME, [...CHROME_STORE, `--headless=new`, `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--password-store=basic',
+  '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore', env: chromeEnv });
 
-const cleanup = () => {
-  try { chrome.kill('SIGKILL'); } catch {}
-  try { srv.kill('SIGKILL'); } catch {}
-  // dtach sessions spawned by the throwaway (shell terminal) — ended BY IDENTITY (every process rooted in the throwaway worktree)
-  for (const r of [wt, home]) { try { endRootedProcesses(r); } catch {} }
-  try { fs.rmSync(home, { recursive: true, force: true }); } catch {}
-  try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
-  try { fs.rmSync(scratch('stage-smoke-chrome'), { recursive: true, force: true }); } catch {}
-};
-process.on('exit', cleanup);
 
 // wait for server
 for (let i = 0; i < 40; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); break; } catch { await sleep(250); } }

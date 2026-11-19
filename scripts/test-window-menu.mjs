@@ -50,7 +50,7 @@ execSync('npm run build', { cwd: wt, stdio: 'ignore' });
 // its Chrome asks no keyring and keeps its files under its profile, and everything it started ends BY IDENTITY at any exit (as its siblings test-stage-preview and
 // test-desktop-reorder): no pattern kill
 fs.mkdirSync(home, { recursive: true }); fs.mkdirSync(chromeDir, { recursive: true });
-// the hub's env: a scratch HOME, and none of the machine user's XDG stores or session bus (its children resolve them under the
+// the hub's env: a scratch HOME, none of the machine user's XDG stores nor the session bus VARIABLE (its children resolve the stores under the
 // scratch home); XDG_RUNTIME_DIR stays — the tree's own socket rules read it, keyed by the scratch root (src/agentd/client.js)
 const { DBUS_SESSION_BUS_ADDRESS: _hb, XDG_CONFIG_HOME: _hc, XDG_DATA_HOME: _hd, XDG_CACHE_HOME: _hk, XDG_STATE_HOME: _hs, ...hubBase } = process.env;
 srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...hubBase, ...VNC_ENV, HOME: home, VIBESPACE_SKIP_AGENT_HOOKS: '1', PORT: String(PORT) }, stdio: 'ignore' });
