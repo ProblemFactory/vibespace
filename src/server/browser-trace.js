@@ -840,13 +840,15 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     // verify r1: the record goes FIRST (sync), the machine is asked after with the snapshot (a start never lands between)
     // lane lg-store-writes (the moved2 cure 2 — THE STEP RIDES THE LANDING): the machine is asked by the keeper's own step, once the
     // record's removal is ON DISK; this answer waits a bounded time (not yet ⇒ said by its code, the folder there follows by itself)
-    const r0 = p.host && typeof keeper.removeOnMachine === 'function' ? keeper.removeProfile(id, { unpin, machine: p, replyMs: 20000 }) : null;
+    // must 3 (主开发 2026-11-19 22:38Z): the removal is told the folder's lineage is this Forget's (written under the new name above) —
+    // its own retire remember would re-key it BACK to the old path before the rename
+    const r0 = p.host && typeof keeper.removeOnMachine === 'function' ? keeper.removeProfile(id, { unpin, machine: p, replyMs: 20000, lineageMoved: exists }) : null;
     const L0 = r0 && r0.landing ? await r0.landing : null;
     const m = !r0 ? null : L0 ? (L0.landed ? (L0.value && L0.value.onMachine ? await L0.value.onMachine : null) : { host: p.host, left: 'asked by itself once the removal is on disk' })
       : await keeper.removeOnMachine(id, { profile: p });   // a keeper without the law (a suite's stand-in)
     const why = m ? (m.removed ? `deleted by the user (its folder ${m.dir} on ${m.host} deleted there)` : m.left ? `deleted by the user — ${m.left}` : `deleted by the user (its folder on ${m.host} was already gone)`)
       : exists ? 'forgotten by the user (directory moved aside, never deleted by itself)' : 'forgotten by the user (its directory was already gone)';
-    const r = r0 || keeper.removeProfile(id, { unpin, replyMs: 20000 });
+    const r = r0 || keeper.removeProfile(id, { unpin, replyMs: 20000, lineageMoved: exists });
     if (!r0 && typeof keeper.landNow === 'function') { try { keeper.landNow(); } catch { /* said by the reply below */ } }
     const L = L0 || (r && r.landing ? await r.landing : null);
     let row = null, left = null;

@@ -1128,6 +1128,38 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
     }
     // the agent routes ask the hold FIRST (never «no Task Group» for a store that is held, not empty)
     ok(/function resolveAgentGroup\(hit, req, res\) \{[\s\S]{0,400}?tasks\.unreadRefusal\('this request'\)[\s\S]{0,200}?res\.status\(503\)\.json\(\{ error: held, code: 'TASK_GROUPS_UNREAD' \}\); return null; \}/.test(readSrc('src/agent-routes.js')), '⑨ the agent routes\' group resolution answers a held store BY NAME (503, TASK_GROUPS_UNREAD) before it looks for the group');
+    // THE MOVED LINE'S MUST 1 (主开发 2026-11-19 22:38Z): a write QUEUED before the hold came back never lands the held, EMPTY store.
+    // The legacy hold (task-groups.json absent, tasks.json unreadable at the boot): a read again answers the old file, its migration
+    // forward QUEUES a save, then the load throws — the catch restores the hold and empties the state. The writer then lands what
+    // it owes: the producer refuses while held (EHELD), so task-groups.json is still ABSENT and the old file is read at the next
+    // try (its groups back). RED (anchored, in a copy): the producer's guard cut — the empty store lands, and the next read again
+    // lifts with ZERO groups (the old file never read again).
+    {
+      const { anchored } = await import('./scratch.mjs');
+      const GUARD = "produce: () => { if (this._unread) throw Object.assign(new Error('task-groups.json is held";
+      ok(readSrc('src/task-groups.js').split(GUARD).length === 2, 'control setup: the producer\'s held guard is found once in task-groups.js');
+      const queuedScene = async (TGM, name) => {
+        const w = world(name); fs.writeFileSync(w.legacy, JSON.stringify(SEED));
+        const { m } = failing(w.legacy, 'EIO', () => make(TGM, w.dd));
+        const held0 = !!m.unreadState() && m.unreadState().file === 'tasks.json';
+        const al = m._afterLoad; m._afterLoad = () => { throw new Error('a stand-in load failure after the migration\'s save was queued'); };
+        const broken = await m.readAgain(); m._afterLoad = al;
+        const heldAgain = !!m.unreadState();
+        const lw = require('../src/store-writer.js').storeWriter().flushSync();   // what the writer owes is landed NOW (a refused one is left, by name)
+        const absent = !fs.existsSync(w.file);
+        const refusedByName = (lw.left || []).some((x) => x.file === w.file && /held/.test(x.why || ''));
+        const back = await m.readAgain();
+        const groups = m.list().map((g) => g.title).join(',');
+        require('../src/store-writer.js').storeWriter().flushSync();
+        const after = fs.existsSync(w.file) ? Object.keys(JSON.parse(fs.readFileSync(w.file, 'utf8')).tasks || {}).join(',') : null;
+        return { held0, broken, heldAgain, absent, refusedByName, back, groups, after };
+      };
+      const q = await queuedScene(fresh(), 'queued-legacy');
+      ok(q.held0 && q.broken === false && q.heldAgain && q.absent && q.refusedByName && q.back === true && q.groups === 'Alpha' && q.after === 'T-a1', '⑨ must 1: a read again of the LEGACY hold whose load throws after its migration QUEUED a save — the writer lands nothing (refused while held, by name): task-groups.json still ABSENT, the old file read at the next try (Alpha back, then written)', q);
+      const MTG = mutantCopies('tg-queued-hold', REPO).load('src/task-groups.js', anchored(readSrc('src/task-groups.js'), GUARD, "produce: () => { if (false) throw Object.assign(new Error('task-groups.json is held", 'tg-no-produce-guard'), 'no-produce-guard').TaskGroupManager;
+      const qx = await queuedScene(MTG, 'queued-legacy-mut');
+      ok(!qx.absent && qx.back === true && qx.groups === '', 'CONTROL (the producer\'s guard cut, in a copy): the queued save lands the EMPTY store over the held file — the next read again lifts with ZERO groups, the old file never read again — RED', qx);
+    }
     // GONE SINCE THE HOLD (the reader's must): a held store whose file is then NOT THERE (a detached mount) stays HELD — no empty store
     {
       const w = world('gone'); fs.writeFileSync(w.file, JSON.stringify(SEED));

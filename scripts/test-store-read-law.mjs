@@ -927,10 +927,43 @@ console.log('§5 job-notifications.json (src/jobs.js) — every job notice still
     ok(gN.notifsKept && gS.notifsKept && gS.recordsKept && gC.notifsKept && gC.recordsKept, 'the notices\' own save, the shutdown\'s save and a clear-all while BOTH files are held write over neither', { gN, gS, gC });
     if (asRoot) rootSkip('CONTROLS job-notifications.json / jobs.json: each held-save guard alone cut, its save writes over the held file');
     else {
-      const xN = await guardScene(MJ.load('src/jobs.js', anchored(JSRC, G_NOTIFS, '    if (false) { if (!this._notifsSaveSaid) {', 'srl-891a'), 'g-notifs-cut'), 'notifs-g-save-mut', 'saveNotifs');
-      const xS = await guardScene(MJ.load('src/jobs.js', anchored(JSRC, G_STORE_N, "      if (true) {   // MUTANT: the guard cut", 'srl-892a'), 'g-store-notifs-cut'), 'notifs-g-shutdown-mut', 'shutdown');
-      const xR = await guardScene(MJ.load('src/jobs.js', anchored(JSRC, G_RECORDS, "      if (true) {   // MUTANT: the guard cut\n", 'srl-893a'), 'g-records-cut'), 'notifs-g-clear-mut', 'clearAll');
-      ok(!xN.notifsKept && !xS.notifsKept && xS.recordsKept && !xR.recordsKept && xR.notifsKept, 'CONTROLS (each guard cut ALONE, in a copy): the notices\' own save writes over the held notices; the shutdown\'s save writes over them through the store\'s save; a clear-all writes over the held job records — each RED, the other file kept', { xN, xS, xR });
+      const xN = await guardScene(MJ.load('src/jobs.js', anchored(anchored(JSRC, G_NOTIFS, '    if (false) { if (!this._notifsSaveSaid) {', 'srl-891a'), "  _notifsBytes() { if (this._notifsUnread) throw", "  _notifsBytes() { if (false) throw", 'srl-891b'), 'g-notifs-cut'), 'notifs-g-save-mut', 'saveNotifs');
+      const xS = await guardScene(MJ.load('src/jobs.js', anchored(anchored(JSRC, G_STORE_N, "      if (true) {   // MUTANT: the guard cut", 'srl-892a'), "  _notifsBytes() { if (this._notifsUnread) throw", "  _notifsBytes() { if (false) throw", 'srl-892b'), 'g-store-notifs-cut'), 'notifs-g-shutdown-mut', 'shutdown');
+      const xR = await guardScene(MJ.load('src/jobs.js', anchored(anchored(JSRC, G_RECORDS, "      if (true) {   // MUTANT: the guard cut\n", 'srl-893a'), "  _recordsBytes() { if (this._unread && this._unread.store) throw", "  _recordsBytes() { if (false) throw", 'srl-893b'), 'g-records-cut'), 'notifs-g-clear-mut', 'clearAll');
+      ok(!xN.notifsKept && !xS.notifsKept && xS.recordsKept && !xR.recordsKept && xR.notifsKept, 'CONTROLS (each save guard cut ALONE — with its file\'s producer guard, the moved line\'s must 1 — in a copy): the notices\' own save writes over the held notices; the shutdown\'s save writes over them through the store\'s save; a clear-all writes over the held job records — each RED, the other file kept', { xN, xS, xR });
+    }
+    // THE MOVED LINE'S MUST 1, ITS CLASS (主开发 2026-11-19 22:38Z): the bytes are made AT the write — a write QUEUED before a hold
+    // came back never lands over the held file. Both files read at the boot, a change of each queued at the writer, then BOTH
+    // holds stand (a stand-in: no road of the engine re-holds after a save today — the producers make it a law, not a fact of
+    // the order); the writer lands what it owes: refused by name (EHELD), both files untouched. RED (anchored, in a copy): the two
+    // producers' guards cut — the queued writes land over the held files.
+    {
+      const P_RECORDS = "  _recordsBytes() { if (this._unread && this._unread.store) throw", P_NOTIFS = "  _notifsBytes() { if (this._notifsUnread) throw";
+      ok([P_RECORDS, P_NOTIFS].every((x) => JSRC.split(x).length === 2), 'control setup: the two producers\' held guards are found once each');
+      const queuedScene = (Mod, name) => {
+        const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
+        const NF = path.join(d, 'job-notifications.json'), JF = path.join(d, 'jobs.json');
+        const jbody = JSON.stringify([{ id: 'jb-0q000001', kind: 'task', name: 'x', state: 'done', owner: {}, access: { view: 'session', control: 'session' }, runs: [] }]);
+        fs.writeFileSync(NF, nbody); fs.writeFileSync(JF, jbody);
+        const J = new Mod.JobManager({ dataDir: d, broadcast() { }, notifyUser() { return { ok: true }; }, resolveNotice() { }, log: () => { }, logsSweep: { bootDelayMs: 3600e3 } });
+        J.init();
+        const read = !J._notifsUnread && !J._unread.store;
+        J.pendingNotifs.set('conv-q', [{ ts: 3, jobId: 'jb-0q000002', text: 'queued before the hold' }]);
+        J.jobs.set('jb-0q000003', { id: 'jb-0q000003', kind: 'task', name: 'queued', state: 'done', owner: {}, access: { view: 'session', control: 'session' }, runs: [] });
+        J._save();   // both files' writes QUEUED at the writer (their bytes not made yet)
+        const hold = { code: 'EIO', why: 'a stand-in hold', at: 1 };
+        J._unread.store = hold; J._notifsUnread = hold;   // …and the holds stand before the writer writes
+        const W = require(path.join(ROOT, 'src/store-writer.js')).storeWriter();
+        const lw = W.flushSync([JF, NF]);
+        const out = { read, notifsKept: fs.readFileSync(NF, 'utf8') === nbody, recordsKept: fs.readFileSync(JF, 'utf8') === jbody, refused: (lw.left || []).filter((x) => /held/.test(x.why || '')).length };
+        J._unread.store = null; J._notifsUnread = null; W.flushSync([JF, NF]);   // the holds lifted: what was owed lands (nothing left for the next scene)
+        clearTimeout(J._unreadT && J._unreadT.store); J.shutdown();
+        return out;
+      };
+      const q = queuedScene(require(path.join(ROOT, 'src/jobs.js')), 'queued-before-hold');
+      ok(q.read && q.notifsKept && q.recordsKept && q.refused === 2, 'must 1\'s class: a write of jobs.json and of job-notifications.json QUEUED before their holds came back is refused at its write (EHELD, by name) — both held files untouched', q);
+      const qx = queuedScene(MJ.load('src/jobs.js', anchored(anchored(JSRC, P_RECORDS, "  _recordsBytes() { if (false) throw", 'srl-qb-a'), P_NOTIFS, "  _notifsBytes() { if (false) throw", 'srl-qb-b'), 'queued-no-producer-guards'), 'queued-before-hold-mut');
+      ok(!qx.notifsKept && !qx.recordsKept, 'CONTROL (the two producers\' guards cut, in a copy): the queued writes land over BOTH held files — RED', qx);
     }
     // (3) the refused removal of a cleared ARCHIVED job while the notices are held
     const RMA = "    if (this._notifsUnread && arch[i].clearedAt) return { error: this._notifsClearedWords(id), code: 'notifs-unread' };";

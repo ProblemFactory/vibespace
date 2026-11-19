@@ -720,11 +720,11 @@ class JobManager {
       if (!this._unread.store) {
         // an act is URGENT by the writer's own flag (the U4/U5 cure: no durable() asked here — its 60 s timer and promise
         // served no answer; the route that answers waits through persisted())
-        W.dirty(this.file, { name: 'jobs.write', ...(paced ? {} : { rank: 0, urgent: true }), produce: () => storeBytes([...this.jobs.values()]), onWritten: (ok, e) => this._storeWritten(ok, e) });
+        W.dirty(this.file, { name: 'jobs.write', ...(paced ? {} : { rank: 0, urgent: true }), produce: () => this._recordsBytes(), onWritten: (ok, e) => this._storeWritten(ok, e) });
       }
       if (storeOnly) return;
       if (!this._notifsUnread) {   // the B-f276 remainder: a held notifications file is never written over
-        W.dirty(this.notifsFile, { name: 'jobs-notifs.write', ...(paced ? {} : { rank: 0, urgent: true }), produce: () => storeBytes(Object.fromEntries(this.pendingNotifs)) });
+        W.dirty(this.notifsFile, { name: 'jobs-notifs.write', ...(paced ? {} : { rank: 0, urgent: true }), produce: () => this._notifsBytes() });
       }
       this._dirty = false;
     } catch (e) { this.d.log('[jobs] save failed:', e.message); }
@@ -1509,7 +1509,7 @@ class JobManager {
    *  written over. */
   _notifsUrgent() {
     if (this.readOnly || this._notifsUnread) return;
-    try { this._writer().dirty(this.notifsFile, { name: 'jobs-notifs.write', rank: 0, urgent: true, produce: () => storeBytes(Object.fromEntries(this.pendingNotifs)) }); } catch (e) { this.d.log('[jobs] notifs save failed:', e.message); }
+    try { this._writer().dirty(this.notifsFile, { name: 'jobs-notifs.write', rank: 0, urgent: true, produce: () => this._notifsBytes() }); } catch (e) { this.d.log('[jobs] notifs save failed:', e.message); }
   }
   _stashNotif(cid, job, ev, reason, { stampLast = true, held = null, mark = false } = {}) {
     const q = this.pendingNotifs.get(cid) || [];
@@ -1758,6 +1758,11 @@ class JobManager {
     let released = false;
     return () => { if (released) return; released = true; let k = 0; for (const n of mine) if (n.ho === tag) { delete n.ho; k++; } if (k) this._saveNotifs(); };
   }
+  /** THE BYTES ARE MADE AT THE WRITE, AND REFUSED WHILE HELD (must 1's class, 主开发 2026-11-19 22:38Z — the hosts.js law): a write
+   *  queued before a hold came back never lands over the held file; the writer keeps it owed, and once the file reads again it
+   *  writes the state READ. jobs.json's and job-notifications.json's every producer goes through these two. */
+  _recordsBytes() { if (this._unread && this._unread.store) throw Object.assign(new Error('jobs.json is held (its read failed) — nothing is written over it until it reads'), { code: 'EHELD' }); return storeBytes([...this.jobs.values()]); }
+  _notifsBytes() { if (this._notifsUnread) throw Object.assign(new Error('job-notifications.json is held (its read failed) — nothing is written over it until it reads'), { code: 'EHELD' }); return storeBytes(Object.fromEntries(this.pendingNotifs)); }
   /** the notifs file alone, NOW (a claim, a drain — a delivery's bookkeeping never waits for the 2 s save tick). */
   /** → the notifications' landing {ok, why} (the census cure's hunt, finding 11 — 主开发 19:44Z: the notices save ANSWERS its landing;
    *  its callers read it: a hand-over holds its record of delivery and its reply behind it) */
@@ -1767,7 +1772,7 @@ class JobManager {
     // lane lg-store-writes U4: the notifications' bytes go through the store writer — and a claim, a drain, a restore is ON DISK
     // before what follows (verify r2's exactly-once law: the hand-over's stamp is on disk in both stores before the post
     // leaves; a drained entry is never delivered twice after a kill) — _onDisk waits for this one file's write
-    try { const W = this._writer(); W.dirty(this.notifsFile, { name: 'jobs-notifs.write', rank: 0, produce: () => storeBytes(Object.fromEntries(this.pendingNotifs)) }); return this._onDisk(this.notifsFile, 'the notifications (a claim, a drain)'); } catch (e) { this.d.log('[jobs] notifs save failed:', e.message); return { ok: false, why: e.message }; }
+    try { const W = this._writer(); W.dirty(this.notifsFile, { name: 'jobs-notifs.write', rank: 0, produce: () => this._notifsBytes() }); return this._onDisk(this.notifsFile, 'the notifications (a claim, a drain)'); } catch (e) { this.d.log('[jobs] notifs save failed:', e.message); return { ok: false, why: e.message }; }
   }
   /** `step` once the notifications as they are NOW are on disk (lane lg-store-writes, the moved2 cure 2: a stash hand-over drops
    *  its kept copy of the originals only on their put-back's landing — _ride) */

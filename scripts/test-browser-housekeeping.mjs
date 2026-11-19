@@ -43,7 +43,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import { createRequire } from 'node:module';
-import { scratch, deadPort } from './scratch.mjs';
+import { scratch, deadPort, anchored } from './scratch.mjs';
+import { mutantCopies } from './mutant-copy.mjs';   // mutant-copy imports scratch.mjs already: no new side effect
 const DEAD_CDP = await deadPort(); // the fake's cdp-url: a port the kernel just released, never a fixed one (§81)
 const require = createRequire(import.meta.url);
 const T = require('../src/browser-trace.js');
@@ -524,6 +525,46 @@ console.log('— ⑤ the real keeper: onLease + addDigest + updateProfile');
 }
 
 // ═══ ⑥ THE CLIENT HALF: the PURE helpers the tool card / the timeline / the panel draw with, and the WIRING PINS ═══
+console.log('— ⑤b the moved line\'s must 3: a Forget\'s four steps carry the lineage to the new name (the real keeper + browser-trace)');
+{
+  // 主开发 2026-11-19 22:38Z (must 3): the census cure (finding 6) put the record's landing BEFORE the rename — and the removal's own
+  // retire remember then found the folder still at its old path, read its marker's token, found the entry under the new name (whose
+  // folder did not exist yet), judged it «moved» and RE-KEYED THE LINEAGE BACK to the old path; the rename then emptied that path
+  // (the next boot prunes it; the folder adopted back has no lineage — test-browser-share-model S75b's very red). The four steps of
+  // a Forget of a launched local profile, the lineage's key read after each: the remember (old path) → the move (the new name) →
+  // the removal (STILL the new name) → the rename (the new name) — and the registry on disk names the new name. RED (anchored, in a
+  // copy): the removal's skip cut — its remember re-keys the entry back, and the disk names the gone path.
+  const REPO3 = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+  const KSRC3 = fs.readFileSync(path.join(REPO3, 'src/server/browser-keeper.js'), 'utf8');
+  const SKIP = "    if (lineageMoved && p.dir) lineageLedger('retire-skipped-forget', { dir: dirKeyOf(p.dir), id });\n    else {\n";
+  ok(KSRC3.split(SKIP).length === 2, 'control setup: the removal\'s skip of a Forget\'s lineage is found once in browser-keeper.js');
+  const walk = async (Kmod, name) => {
+    const D3 = path.join(ROOT, name), H3 = path.join(ROOT, name + '-home'), AB3 = path.join(H3, '.agent-browser'), FD = path.join(AB3, 'vs-forget-walk');
+    fs.mkdirSync(D3, { recursive: true }); fs.mkdirSync(FD, { recursive: true, mode: 0o700 });
+    const rtEnv3 = { FAKE_AB_STATE: AB_STATE, PATH: PATH_ENV, HOME: H3 };
+    const kb = Kmod.create({ dataDir: D3, homeDir: H3, env: () => rtEnv3, broadcast: () => { }, serverSetting: (k) => settings[k], serverNotice: null, getTelemetry: () => null, liveKeys: () => new Set(), runtime: F.createBrowserRuntime({ env: rtEnv3 }), facts: F.createBrowserFacts({ env: rtEnv3 }), log: quiet, now, install: false });
+    const p = kb.adoptDirectory({ label: 'to-forget', dir: FD }).profile;
+    kb._reg().browsers[p.id] = { state: 'ended', pid: null, host: 'pod-prev', hosts: ['pod-prev'] };   // launched here once, ended: its retire remembers
+    const keys = () => Object.keys(kb._reg().dirHosts || {}).filter((k) => k === FD || k.startsWith(FD + '.')).map((k) => (k === FD ? 'old' : 'new')).join('|') || '-';
+    const steps = [];
+    for (const nm of ['lineageKeyOf', 'moveDirLineage', 'removeProfile']) { const f = kb[nm]; kb[nm] = (...a) => { const r = f(...a); steps.push(`${nm}:${keys()}`); return r; }; }
+    const rs = fs.renameSync;
+    fs.renameSync = function (a, b, ...x) { const r = rs.call(this, a, b, ...x); if (String(a) === FD) steps.push(`rename:${keys()}`); return r; };
+    const bt = R.create({ dataDir: D3, homeDir: H3, keeper: kb, bridge: fakeBridge(), serverSetting: (k) => settings[k], broadcast: () => { }, log: quiet, now, execFileImpl: fakeDu, sweepEveryMs: 0 });
+    let fr = null, err = null; try { fr = await bt.forgetProfile(p.id); } catch (e) { err = e && e.message; } finally { fs.renameSync = rs; }
+    require(path.join(REPO3, 'src/store-writer.js')).storeWriter().flushSync();   // the registry's write is the store writer's: landed before the file is read
+    const disk = JSON.parse(fs.readFileSync(path.join(D3, 'browser-profiles.json'), 'utf8'));
+    const onDisk = Object.keys(disk.dirHosts || {}).filter((k) => k === FD || k.startsWith(FD + '.')).map((k) => (k === FD ? 'old' : 'new')).join('|') || '-';
+    try { kb.shutdown(); } catch { }
+    return { err, moved: !!(fr && fr.to) && fs.existsSync(fr.to) && !fs.existsSync(FD), steps: steps.join(' → '), onDisk };
+  };
+  const w = await walk(K, 'forget-walk');
+  ok(!w.err && w.moved && w.steps === 'lineageKeyOf:old → moveDirLineage:new → removeProfile:new → rename:new' && w.onDisk === 'new', 'must 3: a Forget\'s four steps — the remember (old path), the move (new name), the removal (STILL the new name), the rename (the new name) — and the registry ON DISK names the new name', w);
+  const KX = mutantCopies('hk-forget-walk', REPO3).load('src/server/browser-keeper.js', anchored(KSRC3, SKIP, '    {\n', 'hk-no-forget-skip'), 'no-forget-skip');
+  const wx = await walk(KX, 'forget-walk-mut');
+  ok(wx.steps.includes('removeProfile:old') && wx.onDisk === 'old', 'CONTROL (the removal\'s skip cut, in a copy): its retire remember re-keys the lineage BACK to the old path, and the disk names a path the rename emptied — RED', wx);
+}
+
 console.log('— ⑥ the client half: the PURE card helpers, the wiring pins, the i18n census');
 {
   ok(T.bytesText(0) === '0 B' && T.bytesText(1536) === '1.5 KB' && T.bytesText(3 * 1048576) === '3.0 MB' && T.bytesText(2.5 * 1073741824) === '2.50 GB' && T.bytesText(null) === '—' && T.bytesText(-1) === '—', 'bytesText: units, and — for an unmeasured size');

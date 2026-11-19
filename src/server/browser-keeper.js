@@ -683,7 +683,8 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     // its read r1 (N4): a throw in the folder notices never skips the owed boot and the waiters (each step below is caught)
     // its read r2 (N17): a load that THROWS holds the store again (fail closed) — it may have thrown before the registry took the read,
     // and the owed boot would then judge and commit the EMPTY registry (the original harm); the next try reads afresh
-    try { loadFrom(read); } catch (e) { reg = B.normalizeRegistry(null); heldReg = was; log.warn?.(`[browser] ${STORE_FILE}: the read's load failed: ${e && e.message} — held again`); holdRegistry({ code: 'load-threw', why: String((e && e.message) || e) }); return; }   // the READ answer — no second read (r3 N19: a half-loaded registry is not kept while held)
+    try { loadFrom(read); } catch (e) { heldReg = was; reg = B.normalizeRegistry(null);   /* the HOLD FIRST, then the empty registry (must 1's class): every write the load queued refuses from here */
+      log.warn?.(`[browser] ${STORE_FILE}: the read's load failed: ${e && e.message} — held again`); holdRegistry({ code: 'load-threw', why: String((e && e.message) || e) }); return; }   // the READ answer — no second read (r3 N19: a half-loaded registry is not kept while held)
     heldTries = 0; heldSaid = false; heldSaveSaid = false;
     resolveHeldNotice();   // round wm6qxcqcw: the notice the hold filed goes with it
     if (!heldReg) closeStaleHeldNotices();   // its read r2 (S2): …and one a previous run left open — after the load RETURNED (a load that threw held again above)
@@ -806,7 +807,9 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     // caller that must have it ON DISK before what follows (a directory's lineage before its move) asks saveNow().
     try {
       const W = writerOf();
-      W.dirty(storeKey, { name: 'browser-profiles.write', rank: 0, mode: FILE_MODE, makeDir: true, produce: () => JSON.stringify({ ...reg, profiles: reg.profiles.map((x) => { if (!x || typeof x !== 'object' || !('grantUse' in x)) return x; const { grantUse: _u, ...rest } = x; return rest; }) }, null, 2),
+      // must 1's class (主开发 2026-11-19 22:38Z): the bytes are made AT the write — a write queued before the hold came back (a
+      // read again whose load threw) refuses while held (EHELD), never the EMPTY registry over the held file
+      W.dirty(storeKey, { name: 'browser-profiles.write', rank: 0, mode: FILE_MODE, makeDir: true, produce: () => { if (heldReg) throw Object.assign(new Error(`${STORE_FILE} is held (its read failed) — nothing is written over it until it reads`), { code: 'EHELD' }); return JSON.stringify({ ...reg, profiles: reg.profiles.map((x) => { if (!x || typeof x !== 'object' || !('grantUse' in x)) return x; const { grantUse: _u, ...rest } = x; return rest; }) }, null, 2); },
         onWritten: (ok, e) => { if (!ok) log.warn?.(`[browser] could not write ${STORE_FILE}: ${(e && (e.code || e.message)) || 'an error'} — kept in memory, the store writer retries`); } });
       W.durable(storeKey).catch(() => { });
       dirty = false; return true;
@@ -1671,7 +1674,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   }
   /** Removal is refused while anything holds or runs it — a cookie jar is
    *  somebody's login; the directory itself is NEVER deleted by this (D8). */
-  function removeProfile(id, { unpin = false, machine = null, replyMs = null } = {}) {
+  function removeProfile(id, { unpin = false, machine = null, replyMs = null, lineageMoved = false } = {}) {
     ensureLoaded();
     const p = profile(id);
     if (!p) throw namedError('not-found', `no profile ${id}`);
@@ -1686,7 +1689,14 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     // verify r4 (S26b): the DIRECTORY remembers the lineage its record carried — a retired ephemeral's kept directory outlives it
     // verify r8 (T2 ③): a record whose start was REFUSED (`failed` at the door: an adopted backup judged a copy, a stranger's directory)
     // has nothing to remember — its retire never mints into the directory (the launched record's retire remembers as r4 built it)
+    // the moved line's must 3 (主开发 2026-11-19 22:38Z): a FORGET moves the folder itself and has written its lineage under the
+    // new name already (`lineageMoved`) — its retire remember is done; a second one here would find the folder still at its old
+    // path (the record now lands BEFORE the rename) and re-key the lineage BACK to a path the rename then empties (the release
+    // renamed first, so this remember was skipped as gone). The line below is unchanged; its control cuts it whole
+    if (lineageMoved && p.dir) lineageLedger('retire-skipped-forget', { dir: dirKeyOf(p.dir), id });
+    else {
     if (p.dir && reg.browsers[id]) { const rr = reg.browsers[id]; if (rr.state !== 'failed') rememberDir(p.dir, launchHostsFor(rr, p.dir), { retire: true }); else lineageLedger('retire-skipped-refused', { dir: dirKeyOf(p.dir), id }); }
+    }
     const goneRec = reg.profiles.find((x) => x.id === id) || null;
     reg.profiles = reg.profiles.filter((x) => x.id !== id);
     delete reg.browsers[id];

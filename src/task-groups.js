@@ -528,7 +528,8 @@ class TaskGroupManager {
       // THE HOLD LIFTS ONLY AFTER A WHOLE LOAD: the load (its migrations, their saves) runs with the hold down; a throw restores it
       this._unread = null; this._state = state;
       try { if (existed === 'legacy') this._save(); this._afterLoad(true); } // the legacy file migrated forward, as the boot does
-      catch (e) { this._state = { version: 1, tasks: {} }; this._unread = was; this._unreadSaid = said; console.warn(`[tasks] ${was.file} read again but its load failed (${e && e.message}) — STILL HELD`); this._unreadRetrySoon(); return false; }
+      // the HOLD FIRST, then the empty state (must 1): from the hold on, every write this load queued is refused at its write
+      catch (e) { this._unread = was; this._state = { version: 1, tasks: {} }; this._unreadSaid = said; console.warn(`[tasks] ${was.file} read again but its load failed (${e && e.message}) — STILL HELD`); this._unreadRetrySoon(); return false; }
       this._unreadSaid = null; this._unreadTries = 0;
       if (this._unreadT) { clearTimeout(this._unreadT); this._unreadT = null; }
       console.log(`[tasks] ${was.file} read again after ${tries} tr${tries === 1 ? 'y' : 'ies'}: ${Object.keys(this._state.tasks || {}).length} Task Group(s) — the hold is lifted`);
@@ -575,7 +576,10 @@ class TaskGroupManager {
       const W = this._writer();
       // an act is URGENT by the writer's own flag (the U4/U5 cure: no durable() asked here — the route that answers waits
       // through persisted())
-      W.dirty(this._file, { name: 'task-groups.write', rank: 0, urgent: !boot, produce: () => JSON.stringify(this._docForDisk(), null, 2), onWritten: (ok, e) => this._storeWritten(ok, e) });
+      // the cure of the moved line's must 1 (主开发 2026-11-19 22:38Z): the bytes are made AT the write — so a write queued before
+      // a hold was restored (a read again whose load threw) must never land the held, EMPTY store: the producer refuses while
+      // held (EHELD, the hosts.js law) — the writer keeps it owed, and once the store reads again it writes the state READ
+      W.dirty(this._file, { name: 'task-groups.write', rank: 0, urgent: !boot, produce: () => { if (this._unread) throw Object.assign(new Error('task-groups.json is held (its read failed) — nothing is written over it until it reads'), { code: 'EHELD' }); return JSON.stringify(this._docForDisk(), null, 2); }, onWritten: (ok, e) => this._storeWritten(ok, e) });
       if (boot) { const r = W.flushSync([this._file]); const miss = r.deferred ? { why: 'the hub is stopping — its exit flush writes it next' } : r.left.find((x) => x.file === this._file); if (miss) landed = { ok: false, why: miss.why }; if (miss) console.warn(`[tasks] task-groups.json not on disk at the boot (${miss.why}) — kept in memory, the store writer retries`); }
     } catch (e) { console.warn(`[tasks] save failed: ${e.message}`); }
     // Keep every context folder's generated TASK.md in lockstep with the

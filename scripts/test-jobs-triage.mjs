@@ -801,10 +801,11 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   const saveLine = "if (!this._unread.store) {";   // lane lg-store-writes U4: the store's write hold now guards its hand-off to the store writer
   ok([readLine, archLine, saveLine].every((x) => jsrc.split(x).length === 2), 'B-f276 control setup: the two reads and the store\'s write hold are each one line');
   const release = (r, f) => `((r) => (r.state === 'unreadable' && fs.existsSync(${f}) ? { ...r, state: 'corrupt' } : r))(${r})`;   // MUTANT: the release
-  const JMod = MJ.load('src/jobs.js', jsrc
+  // (the moved line's must 1: the release had no producer guard either — the bytes refused while held at the write, cut too)
+  const JMod = MJ.load('src/jobs.js', anchored(jsrc
     .replace(readLine, `this._loadAnswer(${release('SR.storeAnswer(read, { valid: STORE_SHAPE })', 'this.file')});`)
     .replace(archLine, `this._archiveAnswer(${release('SR.storeAnswer(read, { valid: Array.isArray })', 'this.archiveFile')});`)
-    .replace(saveLine, "if (true) {"));
+    .replace(saveLine, "if (true) {"), "  _recordsBytes() { if (this._unread && this._unread.store) throw", "  _recordsBytes() { if (false) throw", 'the release: no producer guard'));
   if (!asRoot) {
   const dX = mkDir('jobs-triage-unread-mut'), XF = path.join(dX, 'jobs.json');
   fs.writeFileSync(XF, body); fs.chmodSync(XF, 0o000);

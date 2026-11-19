@@ -106,7 +106,8 @@ console.log('§1 an UNREADABLE registry is HELD — nothing written over it, the
     return bodyOf(F) === (asRoot ? '(a folder)' : BODY);
   };
   const g1 = await saveScene(anchored(KSRC, cref + '\n', '', 'create-refusal-cut'), 'save-guard-only');
-  const g0 = await saveScene(anchored(anchored(KSRC, cref + '\n', '', 'create-refusal-cut'), SAVEG, '    /* MUTANT: no save guard */', 'save-guard-cut'), 'save-guard-cut');
+  // (the moved line's must 1: the registry's producer refuses while held too — the control cuts it with the save's guard)
+  const g0 = await saveScene(anchored(anchored(anchored(KSRC, cref + '\n', '', 'create-refusal-cut'), SAVEG, '    /* MUTANT: no save guard */', 'save-guard-cut'), 'produce: () => { if (heldReg) throw Object.assign(', 'produce: () => { if (false) throw Object.assign(', 'save-producer-cut'), 'save-guard-cut');
   ok(g1, 'the save\'s held check is its FIRST line: with the create\'s refusal cut, nothing is written over the held file', { g1 });
   if (asRoot) rootSkip('CONTROL the save\'s guard cut too: the new registry is written over the held file'); else ok(!g0, 'CONTROL (the guard cut too, in a copy): the new registry is written over the held file — RED', { g0 });
 }
@@ -313,6 +314,16 @@ console.log('§6 its reads r2 (N17) + r3 (N19): a load that THROWS at the read h
   const f0 = await faultScene(anchored(anchored(anchored(KSRC, HEAD, FAULT, 'load-fault'), REHOLD, '}', 'no-rehold'), 'heldReg = was; ', '', 'no-kept-hold'), 'load-fault-no-rehold', (k, lifts) => lifts > 0);   // the r2-era catch: it only says the throw
   ok(f1.held0 && f1.heldAfter && /load-threw/.test(f1.words) && f1.lifts === 0 && f1.file === 1, 'a load that throws at the read (the read again DID come: its words say load-threw): the store is HELD again, nothing judged, the file keeps its profile', f1);
   ok(f0.lifts === 1 && f0.file === 0, 'CONTROL (no re-hold, in a copy): the owed boot runs over the EMPTY registry and commits it — every profile gone from the file — RED', f0);
+  // THE MOVED LINE'S MUST 1, ITS CLASS (主开发 2026-11-19 22:38Z): the registry's bytes are made AT the write — a load that QUEUES
+  // a save and then throws restores the hold and empties the registry; the queued write is refused while held (EHELD), never the
+  // EMPTY registry over the held file. RED (anchored, in a copy): the producer's guard cut — the empty registry lands.
+  const PRODG = 'produce: () => { if (heldReg) throw Object.assign(';
+  ok(KSRC.split(PRODG).length === 2, 'control setup: the registry producer\'s held guard is found once');
+  const QFAULT = HEAD + "    if (read && typeof read.text === 'string') { save(); throw new Error('a planted load fault after a queued save'); }   /* PLANTED: the load queues a save, then throws */\n";
+  const fq = await faultScene(anchored(KSRC, HEAD, QFAULT, 'load-fault-queued'), 'load-fault-queued', (k) => /load-threw/.test(String(k.heldWords() || '')));
+  const fqx = await faultScene(anchored(anchored(KSRC, HEAD, QFAULT, 'load-fault-queued'), PRODG, 'produce: () => { if (false) throw Object.assign(', 'no-producer-guard'), 'load-fault-queued-mut', (k) => /load-threw/.test(String(k.heldWords() || '')));
+  ok(fq.heldAfter && /load-threw/.test(fq.words) && fq.file === 1, 'must 1\'s class: a read again whose load QUEUED a save and then threw — held again, and the queued write refused while held: the file keeps its profile', fq);
+  ok(fqx.heldAfter && fqx.file === 0, 'CONTROL (the producer\'s guard cut, in a copy): the queued save lands the EMPTY registry over the held file — RED', fqx);
 }
 
 console.log('§7 round wm6qxcqcw (主开发 03:35Z): the hold is TOLD once in For you; the owes after a restart; the guards whose removal harms most');
