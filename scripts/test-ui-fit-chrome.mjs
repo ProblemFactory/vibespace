@@ -154,6 +154,14 @@ await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `(() => { const F =
 const desk = async (w = 1440, h = 900) => { await cdp('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: false }); await cdp('Emulation.setTouchEmulationEnabled', { enabled: false }); await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'hover', value: 'hover' }, { name: 'pointer', value: 'fine' }] }); };
 const phone = async (w = 390, h = 844) => { await cdp('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 3, mobile: true }); await cdp('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 }); await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'hover', value: 'none' }, { name: 'pointer', value: 'coarse' }] }); };
 const load = async () => { await cdp('Page.navigate', { url: ORIGIN + '/' }); await waitFor('!!(window.app && app.ready)', 60000); await evalJs('app.ready.then(() => true)'); await waitFor(`!document.getElementById('loading-screen')`, 30000); await sleep(1200); };
+/** checkpoint 61: every census fold («found by your shell at …») in the open rail column, opened by a REAL press on its summary */
+const openCliFolds = async () => {
+  const n = await evalJs(`(() => { const fs = [...document.querySelectorAll('#all-sessions-list .ob-cli-where-fold')].filter((d) => d.getClientRects().length); fs.forEach((d, k) => { d.querySelector(':scope > summary').dataset.uf = 'cliwhere-' + k; }); return fs.length; })()`);
+  for (let k = 0; k < n; k++) await press(`[data-uf="cliwhere-${k}"]`);
+  await sleep(300);
+  const opened = await evalJs(`[...document.querySelectorAll('#all-sessions-list .ob-cli-where-fold')].filter((d) => d.getClientRects().length && d.open).length`);
+  return { n, opened };
+};
 const press = async (sel) => { const p = await evalJs(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; e.scrollIntoView({ block: 'nearest' }); const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`); if (!p) return false; await evalJs(`(() => { let t = document.elementFromPoint(${p.x}, ${p.y}); while (t && typeof t.click !== 'function') t = t.parentElement; t?.click(); return !!t; })()`); /* what is under the point — an icon's SVG has no click(): its nearest clickable ancestor, the control the person pressed (its first claim: «elementFromPoint(...)?.click is not a function» on a rail door's icon) */ await sleep(300); return true; };
 const openRail = async (id) => {
   for (let k = 0; k < 2; k++) { if (await evalJs(`!!(app.sidebar.isOpen && app.sidebar._activeTab === ${JSON.stringify(id)})`)) break; await press(`.rail-item[data-rail="${id}"]`); await sleep(400); }
@@ -184,6 +192,10 @@ try {
       columns[id] = true;
       await sleep(id === 'agents' || id === 'plugins' || id === 'jobs' ? 2200 : 1200);
       await evalJs(`document.querySelectorAll('.context-menu, #global-toasts > .global-toast').forEach((e) => e.remove()); true`);
+      if (id === 'agents') {   // checkpoint 61: the census line «found by your shell at …» is a FOLD now — measured OPEN, opened by a real press
+        const fo = await openCliFolds();
+        check(`① «agents» at ${w}: the census folds («found by your shell at …») opened by a real press (${fo.opened} of ${fo.n}) — measured OPEN`, fo.n > 0 && fo.opened === fo.n, fo);
+      }
       const f = await evalJs(FIT_FACTS('#all-sessions-list'));
       await shot(`rail-${id}.${w}.png`);
       check(`① «${id}» at a ${w} px sidebar (${sw} px drawn, its column ${f && f.w} px): it reads — ${f ? f.controls + ' controls' : 'no column'}`, reads(f), f);
@@ -191,6 +203,15 @@ try {
       // are on different lines or at least 4 px apart
       const glued = await evalJs(`[...document.querySelectorAll('#all-sessions-list .rail-row-main')].flatMap((m) => { const kids = [...m.children].filter((k) => getComputedStyle(k).display.startsWith('inline') || k.tagName === 'SPAN'); const out = []; for (let i = 1; i < kids.length; i++) { const a = kids[i - 1].getBoundingClientRect(), b = kids[i].getBoundingClientRect(); if (!a.width || !b.width) continue; const same = Math.abs(a.top - b.top) < 3; if (same && b.left - a.right < 4) out.push(kids[i - 1].textContent.slice(0, 20) + '|' + kids[i].textContent.slice(0, 12)); } return out; }).slice(0, 5)`);
       if (id === 'jobs' || glued.length) check(`① «${id}» at ${w}: a row's parts never run together (${glued.length ? glued.join(' · ') : 'name · state apart'})`, glued.length === 0, glued);
+    }
+    if (w === 200) { // CONTROLS (checkpoint 61): a census fold squeezed by a PLANT (2 em wide) — OPEN it faults (squeezed), CLOSED the walk never judges its words
+      await openRail('agents'); await sleep(1500);
+      await evalJs(`(() => { const s = document.createElement('style'); s.id = 'zz-undo-fold'; s.textContent = '.ob-backend-id > .ob-cli-where-fold { flex: 0 0 2em !important; max-width: 2em !important; min-width: 0 !important; }'; document.head.appendChild(s); return true; })()`);
+      const closedF = await evalJs(FIT_FACTS('#all-sessions-list'));
+      const fo = await openCliFolds();
+      const openF = await evalJs(FIT_FACTS('#all-sessions-list'));
+      await evalJs(`document.getElementById('zz-undo-fold')?.remove(); true`);
+      check(`① CONTROL: «agents» at 200 with the census fold planted 2 em wide — OPEN (${fo.opened} of ${fo.n}) it faults (squeezed: ${openF && openF.squeezed.slice(0, 2).join(' · ')}), CLOSED the walk never judges its words (${closedF && closedF.squeezed.length} squeezed)`, fo.n > 0 && fo.opened === fo.n && !!openF && openF.squeezed.length > 0 && !!closedF && closedF.squeezed.length === 0, { fo, open: openF && openF.squeezed, closed: closedF && closedF.squeezed });
     }
     if (w === 200) { // CONTROL: the row's and the bar's wrap undone
       for (const id of ['agents', 'jobs']) {
@@ -258,7 +279,7 @@ try {
   await phone(); await load();
   await evalJs(`app.openEditor(${JSON.stringify(file)}, 'notes.txt'); true`);
   const opened = await waitFor(`!!document.querySelector('.editor-toolbar') && !!document.querySelector('.cm-content')`, 15000);
-  const BAR = `(() => { const bar = document.querySelector('.editor-toolbar'); if (!bar) return null; const kids = [...bar.children].filter((e) => e.getClientRects().length); const rows = new Set(kids.map((e) => Math.round(e.getBoundingClientRect().top))).size; const n = document.querySelector('.code-editor-disk-need'); const shown = !!n && getComputedStyle(n).display !== 'none' && n.getClientRects().length > 0; const r = n && n.getBoundingClientRect(), b = bar.getBoundingClientRect(); return { rows, h: Math.round(b.height), shown, inBar: !!n && bar.contains(n), below: !!r && shown && r.top >= b.bottom - 0.5, doors: n ? n.querySelectorAll('.need-door').length : 0, inside: !!r && r.left >= 0 && r.right <= innerWidth + 0.5, text: n ? n.textContent.trim().slice(0, 80) : '' }; })()`;
+  const BAR = `(() => { const bar = document.querySelector('.editor-toolbar'); if (!bar) return null; const kids = [...bar.children].filter((e) => e.getClientRects().length); const rows = (() => { const rs = kids.map((e) => e.getBoundingClientRect()).sort((a, b) => a.top - b.top); let n = 0, bottom = -Infinity; for (const r of rs) { if (r.top >= bottom - 0.5) { n++; bottom = r.bottom; } else bottom = Math.max(bottom, r.bottom); } return n; })(); const n = document.querySelector('.code-editor-disk-need'); const shown = !!n && getComputedStyle(n).display !== 'none' && n.getClientRects().length > 0; const r = n && n.getBoundingClientRect(), b = bar.getBoundingClientRect(); return { rows, h: Math.round(b.height), shown, inBar: !!n && bar.contains(n), below: !!r && shown && r.top >= b.bottom - 0.5, doors: n ? n.querySelectorAll('.need-door').length : 0, inside: !!r && r.left >= 0 && r.right <= innerWidth + 0.5, text: n ? n.textContent.trim().slice(0, 80) : '' }; })()`;
   const edit = async (txt) => { await evalJs(`(() => { const c = document.querySelector('.cm-content'); c.focus(); document.execCommand('insertText', false, ${JSON.stringify(txt)}); return true; })()`); await sleep(400); };
   const diskChange = async (txt) => { await sleep(1100); fs.writeFileSync(file, txt); await evalJs(`window.dispatchEvent(new Event('focus')); true`); return waitFor(`(() => { const n = document.querySelector('.code-editor-disk-need'); return !!n && getComputedStyle(n).display !== 'none'; })()`, 8000); };
   const gone = () => waitFor(`(() => { const n = document.querySelector('.code-editor-disk-need'); return !n || getComputedStyle(n).display === 'none'; })()`, 8000);
@@ -274,12 +295,18 @@ try {
     check('⑤ …«Keep my changes» pressed: the notice goes and the toolbar is still ONE line', !!kept && !kept.shown && kept.rows === 1, kept);
     await edit('more ');
     const s2 = await diskChange('notes\n\nchanged again\n');
+    const yesBefore = await evalJs(`document.querySelectorAll('.dialog-footer .btn-create').length`);
     await press('.code-editor-disk-need .need-door[data-door="disk-reload"]');
-    const asked = await waitFor(`!!document.querySelector('.dialog-footer .btn-create')`, 8000);
-    if (asked) await press('.dialog-footer .btn-create');
+    // the confirm of the dialog the reload OPENED — the newest one drawn (checkpoint 61: the first .btn-create in the page may be another dialog's)
+    const asked = await waitFor(`[...document.querySelectorAll('.dialog-footer .btn-create')].filter((b) => b.getClientRects().length).length > 0 && document.querySelectorAll('.dialog-footer .btn-create').length > ${yesBefore}`, 8000);
+    if (asked) { await evalJs(`(() => { const b = [...document.querySelectorAll('.dialog-footer .btn-create')].filter((x) => x.getClientRects().length).pop(); b.dataset.uf = 'reload-yes'; return true; })()`); await press('[data-uf="reload-yes"]'); }
     await gone();
     const reloaded = await evalJs(BAR);
-    check('⑤ …«Reload from disk» pressed (and confirmed): the notice goes and the toolbar is still ONE line', s2 && asked && !!reloaded && !reloaded.shown && reloaded.rows === 1, { s2, asked, reloaded });
+    const doc = await evalJs(`(document.querySelector('.cm-content')?.textContent || '')`);
+    check(`⑤ …«Reload from disk» pressed (and confirmed in the dialog it opened): the notice goes, the editor holds the disk's text («${doc.slice(0, 40)}»), and the toolbar is still ONE line`, s2 && asked && !!reloaded && !reloaded.shown && reloaded.rows === 1 && /changed again/.test(doc) && !/more /.test(doc), { s2, asked, reloaded, doc: doc.slice(0, 80) });
+    // CONTROL (checkpoint 61): the measure can fail — a bar made to WRAP (its left part a whole row) reads TWO lines
+    const wrapped = await evalJs(`(() => { const s = document.createElement('style'); s.id = 'zz-wrap-bar'; s.textContent = '.editor-toolbar { flex-wrap: wrap !important; } .editor-toolbar > .editor-toolbar-left { flex-basis: 100% !important; }'; document.head.appendChild(s); const r = ${BAR}; s.remove(); return r; })()`);
+    check(`⑤ CONTROL: the toolbar made to wrap reads ${wrapped && wrapped.rows} lines by the same measure (a child that starts at or below the line's bottom starts a new one)`, !!wrapped && wrapped.rows === 2, wrapped);
     await edit('red ');
     await diskChange('notes\n\nchanged for the control\n');
     const plant = await evalJs(`(() => { const n = document.querySelector('.code-editor-disk-need'), left = document.querySelector('.editor-toolbar .editor-toolbar-left'); if (!n || !left) return null; left.append(n); return true; })()`);
