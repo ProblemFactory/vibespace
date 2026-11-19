@@ -229,8 +229,8 @@ console.log('\n§3 A RED CONTROL THAT BUILDS NOTHING FAILS BY NAME (B-0d3e) — 
   const oldCut = JSON.stringify(mj.added.slice(0, 6).map((f) => `${f}: ${mper[f]} > 0 — a new edit: ${many[f].slice(0, 2).map((e) => `line ${e.line} ${e.text}`).join(' · ')} — build it with anchored() from scripts/scratch.mjs, or raise its count to ${mper[f]} under YOUR backlog row\'s id in scripts/fixtures/unanchored-controls.json «rows» (a plain number is refused)`)).slice(0, 600);
   const printed = []; sayOver(whole, (x) => printed.push(x));
   const named = (s) => Object.keys(many).filter((f) => s.includes(f)).length;
-  ok(whole.length === 9 && whole.every((l, i) => l.startsWith(`test-over-${i}.mjs: 30 > 0 — line 1 `) && l.includes(' · line 30 ')) && printed.length === 9 && named(printed.join('\n')) === 9 && named(oldCut) < 6,
-    `CONTROL: an over-count red names EVERY file, one printed line each with all its items — 9 files over their counts ⇒ ${printed.length} printed lines naming ${named(printed.join('\n'))}; RED (the old edits message: six files, its detail cut at 600 characters) named ${named(oldCut)}, under the six its slice kept`);
+  ok(whole.length === 9 && whole.every((l, i) => l.startsWith(`test-over-${i}.mjs: 30 > 0 — line 1 `) && l.includes(' · line 30 ')) && printed.length === 9 && printed.every((l, i) => l === '      ' + whole[i]) && named(printed.join('\n')) === 9 && named(oldCut) < 6,
+    `CONTROL: an over-count red names EVERY file, one printed line each, whole, with all its items — 9 files over their counts ⇒ ${printed.length} printed lines naming ${named(printed.join('\n'))}; RED (the old edits message: six files, its detail cut at 600 characters) named ${named(oldCut)}, under the six its slice kept`);
   const W19 = 'a why of nineteen c'.slice(0, 19), W20 = 'a why of twenty char'.slice(0, 20), row = (why, files) => ({ why, files });
   const cA = capsOf({ files: { 'test-a.mjs': 2 } }), cB = capsOf({ rows: { 'X-1': row('a row id that is no backlog id at all', { 'test-a.mjs': 2 }) } });
   const cC = capsOf({ rows: { 'B-0001': row(W19, { 'test-a.mjs': 2 }) } }), cC20 = capsOf({ rows: { 'B-0001': row(W20, { 'test-a.mjs': 2 }) } });
