@@ -24,7 +24,7 @@ const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const DIR = scratch('codex-hbound');
 fs.mkdirSync(DIR, { recursive: true });
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (extra !== undefined ? '\n    ' + JSON.stringify(extra).slice(0, 1500) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof n !== 'string') throw new TypeError('ok(cond, name): the name is not a string — the arguments are swapped'); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (extra !== undefined ? '\n    ' + JSON.stringify(extra).slice(0, 1500) : '')); } return !!c; };
 
 // the stand-in rollout: ~3 MB of small codex records (the shape of the attach suite's rig)
 const FP = path.join(DIR, 'rollout-2026-11-16T10-00-00-019a6e00-0000-7000-8000-0000000b0a0d.jsonl');

@@ -28,7 +28,7 @@ const HOME = scratch('codex-line');
 fs.mkdirSync(HOME, { recursive: true });
 process.env.HOME = HOME;   // BEFORE the codex modules load: their sessions root is the scratch HOME's ~/.codex/sessions
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (extra !== undefined ? '\n    ' + JSON.stringify(extra).slice(0, 1500) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof n !== 'string') throw new TypeError('ok(cond, name): the name is not a string — the arguments are swapped'); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (extra !== undefined ? '\n    ' + JSON.stringify(extra).slice(0, 1500) : '')); } return !!c; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const LAW_MS = 250;
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
