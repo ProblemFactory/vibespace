@@ -261,7 +261,7 @@
   "test-notify-retry.mjs": 6,
   "test-oat-add-door.mjs": 2,
   "test-oat-materialize.mjs": 1,
-  "test-oauth-loopback.mjs": 7,
+  "test-oauth-loopback.mjs": 6,
   "test-office-open.mjs": 7,
   "test-opencode-remote.mjs": 1,
   "test-otel-truth.mjs": 2,

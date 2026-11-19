@@ -22,7 +22,7 @@ import v8 from 'node:v8';
 import crypto from 'node:crypto';
 import vm from 'node:vm';
 import { createRequire } from 'node:module';
-import { freePorts } from './scratch.mjs';
+import { freePorts, anchored } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -179,7 +179,8 @@ const quiet = { warn() {}, log() {}, error() {} };
     const NEW = "return Promise.all(sts.map((st) => st.closing || Promise.resolve())).then(() => undefined);";
     ok(src.includes(NEW), 'B-cabe control: its plant is where it claims (stopAll\'s promise line is in src/oauth-loopback.js)');
     const MC = mutantCopies('oauth-loopback-stopall', REPO);
-    const OL0 = src.includes(NEW) ? require(MC.write('src/oauth-loopback.js', src.replace(NEW, 'return undefined;'))) : null;
+    // (the edit goes through anchored(): an anchor that moved THROWS BY NAME — never a copy that controls nothing)
+    const OL0 = require(MC.write('src/oauth-loopback.js', anchored(src, NEW, 'return undefined;', 'B-cabe: the stopAll shape control')));
     for (const c of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 1 })) ok(c.pass, 'tree: ' + c.name, c.pass ? undefined : c.detail);
     const old = OL0 ? OL0.createOAuthLoopback({ log: quiet }) : null;
     const handed = old ? old.stopAll() : 'no copy';
@@ -235,7 +236,7 @@ const quiet = { warn() {}, log() {}, error() {} };
     ok(await portFreed(P_CANCEL), 'B-cabe THE DROP: …and the port is free by the bounded re-ask');
     ok(src.includes(DROP), 'B-cabe THE DROP control: its plant is where it claims (the drop line is in src/oauth-loopback.js)', src.includes(DROP) ? undefined : 'the anchor of the control «the drop» is not in the source');
     const MD = mutantCopies('oauth-loopback-drop', REPO);
-    const OLd = src.includes(DROP) ? require(MD.write('src/oauth-loopback.js', src.replace(DROP, '/* the drop cut out (the control) */'))) : null;
+    const OLd = require(MD.write('src/oauth-loopback.js', anchored(src, DROP, '/* the drop cut out (the control) */', 'B-cabe: the drop control')));   // (through anchored(): a moved anchor throws by name)
     for (const c of copiesCensus(MD.files, MD.dir, REPO, { minCopies: 1, label: 'drop control: ' })) ok(c.pass, c.name, c.pass ? undefined : c.detail);
     const C = OLd ? await heldStop(OLd, P_CANCEL) : { listening: false, began: false, within: true, landedTurn: -1 };
     ok(!!OLd && C.listening && C.began && !C.within, `B-cabe THE DROP CONTROL: a copy without the drop — stopAll()'s promise has NOT landed within ${TURNS} loop turns while the connection is held (landed at ${C.landedTurn < 0 ? 'never, not even in the cleanup after the hold ended' : 'turn ' + C.landedTurn + ', after the hold ended'}) — the drop leg is RED on it`);
