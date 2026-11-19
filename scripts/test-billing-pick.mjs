@@ -543,8 +543,8 @@ console.log('— ⑨ THE THIRD STATE ON A PAIRED MACHINE (B-bc9f): one rule for 
   };
   /** …by the ssh rung: the script backendStatus sends must carry the rung; the rung runs under sh on this HOME; its line is parsed
    *  by backendStatus itself (no CLI runs: the rung only tests and greps a file) */
-  const byShell = async (HM, rung = HF.SSH_HELPER_RUNG) => {
-    const out = execFileSync('sh', ['-c', `${rung}true`], { env: { HOME, PATH: '/usr/bin:/bin' }, encoding: 'utf8', timeout: 5000 });   // (the release's rung exits 2 where grep fails: its lines are read all the same)
+  const byShell = async (HM, rung = HF.SSH_HELPER_RUNG, pathFirst = '') => {
+    const out = execFileSync('sh', ['-c', `${rung}true`], { env: { HOME, PATH: `${pathFirst}/usr/bin:/bin` }, encoding: 'utf8', timeout: 5000 });   // (the release's rung exits 2 where grep fails: its lines are read all the same)
     let script = '';
     const st = await HM.prototype.backendStatus.call({ get: () => BOX, deviceBounded: async () => { throw new Error('device link lost'); }, _hostShell: async (h, s) => { script = s; return `claude|yes|2.1.322\n${out}codex|no|\ncodex-login|no`; } }, 'h-2');
     return { st, carried: script.includes(HF.SSH_HELPER_RUNG), out };
@@ -603,6 +603,25 @@ console.log('— ⑨ THE THIRD STATE ON A PAIRED MACHINE (B-bc9f): one rule for 
   { const sh = await byShell(HostManager); let script = ''; await HostManager.prototype.backendStatus.call({ get: () => BOX, deviceBounded: async () => { throw new Error('device link lost'); }, _hostShell: async (h, s) => { script = s; return ''; } }, 'h-2');
     const greps = script.split('"$HOME/.claude/settings.json" 2>/dev/null').length - 1, guarded = script.split('[ -f "$HOME/.claude/settings.json" ] && grep -q "\\"apiKeyHelper\\"" "$HOME/.claude/settings.json" 2>/dev/null').length - 1;
     ok(sh.carried && greps === 1 && guarded === 1, 'the ssh script greps the settings file only when it is a regular file — the login ladder\'s grep and the rung alike (a FIFO there never holds the probe)', { greps, guarded }); }
+  // THE RUNG NEVER FAILS OPEN (主开发 05:30Z): a regular, readable file grep then cannot READ (an I/O error, a stale network handle —
+  // grep's exit 2) is «cannot be read», never «none». A stand-in grep on the PATH exits 2.
+  put(JSON.stringify({ apiKeyHelper: '/usr/local/bin/key-helper' }));
+  const failBin = path.join(scratchDir('bpick-failgrep'), 'bin'); fs.mkdirSync(failBin, { recursive: true });
+  fs.writeFileSync(path.join(failBin, 'grep'), '#!/bin/sh\nexit 2\n', { mode: 0o755 });
+  const failed = BP.remoteHelperFact((await byShell(HostManager, HF.SSH_HELPER_RUNG, `${failBin}:`)).st, 'claude');
+  ok(failed === null, 'the ssh rung over a file grep cannot read (its exit 2): «cannot be read» — billing wins, never «none»', failed);
+  // the SECOND grep's exit too: the quoted key not found (1), then the bare name's grep cannot read (2)
+  const halfBin = path.join(scratchDir('bpick-halfgrep'), 'bin'); fs.mkdirSync(halfBin, { recursive: true });
+  fs.writeFileSync(path.join(halfBin, 'grep'), '#!/bin/sh\ncase "$2" in *\\"*) exit 1;; *) exit 2;; esac\n', { mode: 0o755 });
+  const half = BP.remoteHelperFact((await byShell(HostManager, HF.SSH_HELPER_RUNG, `${halfBin}:`)).st, 'claude');
+  ok(half === null, 'the quoted key\'s grep finds none (1) and the bare name\'s grep cannot read (2): «cannot be read», never «none»', half);
+  // a login shell that set errexit: the common no-match (exit 1) never ends the probe (its later lines still answer)
+  put(JSON.stringify({ theme: 'dark' }));
+  const strict = execFileSync('sh', ['-c', `set -e; ${HF.SSH_HELPER_RUNG}echo after-the-rung`], { env: { HOME, PATH: '/usr/bin:/bin' }, encoding: 'utf8', timeout: 5000 });
+  ok(strict.includes('after-the-rung') && !strict.includes('claude-helper|'), 'under errexit a file naming none prints nothing and the probe goes on (each grep\'s exit read through ||)', strict);
+  put(JSON.stringify({ apiKeyHelper: '/usr/local/bin/key-helper' }));
+  const RUNG_412 = 'vs_kh="$HOME/.claude/settings.json"; if [ -f "$vs_kh" ] && [ -r "$vs_kh" ]; then if grep -q "\\"apiKeyHelper\\"" "$vs_kh"; then echo "claude-helper|yes"; elif grep -q apiKeyHelper "$vs_kh"; then echo "claude-helper|unread"; fi; elif [ -e "$vs_kh" ]; then echo "claude-helper|unread"; fi; '; // stale-pins: kept — the rung as B-bc9f shipped it, planted
+  ok(BP.remoteHelperFact((await byShell(HostManager, RUNG_412, `${failBin}:`)).st, 'claude') === false, 'RED CONTROL (the rung as B-bc9f shipped it: a grep that fails reads as no match): the same file reads «none» — it failed open');
   const PROBES_ST = "    return st.isFile() && st.size <= SETTINGS_READ_MAX ? { text: fs.readFileSync(file, 'utf-8') } : { text: null };";
   ok(PROBES_SRC.split(PROBES_ST).length === 2 && !PROBES_SRC.includes('fs.openSync('), 'the probe stats the file before it reads it (a FIFO is never opened — a blocking open would hold the agent; the FIFO leg above would never end)');
   put(JSON.stringify({ apiKeyHelper: '/usr/local/bin/key-helper' }));

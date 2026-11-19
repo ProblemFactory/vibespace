@@ -29,10 +29,14 @@ function helperFactOfText({ text = null, missing = false } = {}, row) {
 }
 
 /** the ssh probe's form of it (hosts.backendStatus' fallback rung, no node there): it reads TEXT — the quoted key ⇒ named (an empty
- *  value too: billing wins); the bare name only (an unquoted key, a comment) or a file it cannot read ⇒ cannot be read; a file whose
- *  text never names the setting ⇒ none (a TEXT reading: a key spelled with \u escapes, or a link loop, reads none here) */
+ *  value too: billing wins); the bare name only (an unquoted key, a comment), a file it cannot open or a grep that could not READ
+ *  the file (its exit 2: an I/O error, a stale network handle — never «none») ⇒ cannot be read; a file whose text never names the
+ *  setting ⇒ none (a TEXT reading: a key spelled with \u escapes, or a link loop, reads none here). Each grep's exit is read
+ *  through `||` (a login shell with errexit never ends on a no-match). No size bound: a huge file is read until the start's own
+ *  bound (HELPER_FACT_MS, 8 s), and no answer reads as cannot be read. */
 const SSH_HELPER_RUNG = 'vs_kh="$HOME/.claude/settings.json"; if [ -f "$vs_kh" ] && [ -r "$vs_kh" ]; then '
-  + 'if grep -q "\\"apiKeyHelper\\"" "$vs_kh"; then echo "claude-helper|yes"; elif grep -q apiKeyHelper "$vs_kh"; then echo "claude-helper|unread"; fi; '
+  + 'vs_q=0; grep -q "\\"apiKeyHelper\\"" "$vs_kh" || vs_q=$?; if [ $vs_q -eq 0 ]; then echo "claude-helper|yes"; elif [ $vs_q -ne 1 ]; then echo "claude-helper|unread"; '
+  + 'else vs_b=0; grep -q apiKeyHelper "$vs_kh" || vs_b=$?; if [ $vs_b -ne 1 ]; then echo "claude-helper|unread"; fi; fi; '
   + 'elif [ -e "$vs_kh" ]; then echo "claude-helper|unread"; fi; ';
 
 module.exports = { namesHelper, helperFactOfText, SETTINGS_READ_MAX, SSH_HELPER_RUNG };
