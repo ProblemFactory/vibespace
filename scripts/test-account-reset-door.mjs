@@ -1300,7 +1300,7 @@ const LEGS = {
       return cacheReadCensus(T, { [f]: copy }).bad.length > 0; });
     const pins = {
       oneDoor: !unrowed.length && plantedRed.every(Boolean),
-      switchPassOnTheDoor: /poolBasisRaw\(poolId, \{ pass: true \}\);[^\n]*\n    const readCache = poolReadCache\(poolId, now\); \/\/ THE ONE DOOR/.test(eng),   // the door on the pool's basis, decided again at the pass's start (K1)
+      switchPassOnTheDoor: /poolBasisRaw\(poolId, \{ pass: !only \}\);[^\n]*\n    const readCache = poolReadCache\(poolId, now\); \/\/ THE ONE DOOR/.test(eng),   // B-f4a1 cure: a WHOLE pass decides the flip it finds (a stop's run reads as any reader)   // the door on the pool's basis, decided again at the pass's start (K1)
       sealedOrdersOnTheDoor: /const ownFileReading = poolReadReading\(\{ group: false \}\);/.test(eng) && /readCache: ownFileReading,/.test(eng),
       placementWhenDecided: /claimDecided\(/.test(eng) && /moved onto \$\{nameOf\(ds\.to\)\} on your reset claim/.test(eng),
       wallsByLane: /lane && lanes\.has\(lane\) && m\.delete\(id\)/.test(eng),

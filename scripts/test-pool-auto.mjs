@@ -3236,7 +3236,7 @@ await (async () => {
       const { mutantCopies } = await import('./mutant-copy.mjs');
       const M37 = mutantCopies('pool-gate-37f9', path.resolve('.'));
       const ENG = fs.readFileSync(path.resolve('src/server/usage-pool-engine.js'), 'utf8');
-      const STAMP = "    _poolEvalAt.set(poolId, now);   // B-37f9: THE KICKS' STAMP — this pass evaluates the pool (forced or not)\n";
+      const STAMP = "    if (!only) _poolEvalAt.set(poolId, now);   // B-37f9: THE KICKS' STAMP — this pass evaluates the pool (forced or not); B-f4a1 cure: a run that decided ONE conversation (a stop) does not close the pool's gate — the whole runs stay bounded by the gate and the tick\n";   // B-f4a1 cure: a stop's one-conversation run does not stamp (the line's `if (!only)`)
       const GATE = "    if (kick && !evalGateOpen({ now, last: _poolEvalAt.get(poolId), force })) {\n";
       const okAnchor = ENG.split(STAMP).length === 2 && ENG.split(GATE).length === 2;
       ck('ANCHOR: the kicks\' stamp and the kicks\' gate, each spelled once (a missing anchor builds no control: RED by name)', okAnchor);

@@ -7787,14 +7787,15 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
       return;
     }
     // (lane pool-provider-latents, q-055 M2) a default a deletion left UNPLACED decides FROM its deleted member: its own
-    // provider only (the default never crosses one) — and the per-session pass below still runs for every conversation
+    // provider only (the default never crosses one) — and the per-session pass below still runs for every conversation (a stop's
+    // run, B-f4a1: for its own conversation only)
     const currentId = accounts.poolCurrent(poolId) || accounts.unplacedOf(poolId, null)?.member || null;
     if (!currentId) return;
     // a reset credit just re-opened this member and its post-reset reading is
     // still on the way (r3): the cache's spent mark is the WALL's, not a fact
     // about now — no decision off it until the reading (or 30 s) arrives
     if (resetCreditPendingFor(currentId, now)) return;
-    _poolEvalAt.set(poolId, now);   // B-37f9: THE KICKS' STAMP — this pass evaluates the pool (forced or not)
+    if (!only) _poolEvalAt.set(poolId, now);   // B-37f9: THE KICKS' STAMP — this pass evaluates the pool (forced or not); B-f4a1 cure: a run that decided ONE conversation (a stop) does not close the pool's gate — the whole runs stay bounded by the gate and the tick
     // Capability-gated (P4 slice, src/backend-caps.js): hot only where a
     // live re-read is VERIFIED (codex: experimentally refuted, 2026-08-24 —
     // CODEX_HOME canonicalized at startup + tokens held in process memory);
@@ -7849,7 +7850,10 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
       try { const linkCur = accounts.poolCurrentFor(poolId, sid) || null, cm = sessionBillingMember(s2, poolId); passReads.set(sid, { linkCur, cm }); compared.push(cm.id || linkCur); } catch { }
     }
     _passCompared.set(poolId, [...new Set(compared.filter((x) => typeof x === 'string' && x))].sort());
-    poolBasisRaw(poolId, { pass: true }); // this pool's fact (built again when its compared ids moved); a flip it finds is said here and decided by this pass
+    // B-f4a1 cure (round wpch21jqz MUST): only a WHOLE run decides a flip it finds — a stop's one-conversation run reads the basis as
+    // any other reader does, so a flip found there goes to redecideOnBasis: a forced whole pass in the next turn decides every
+    // conversation and the default on the new basis (the stop's own conversation is decided on it here)
+    poolBasisRaw(poolId, { pass: !only }); // this pool's fact (built again when its compared ids moved); a whole pass says and decides a flip it finds
     const readCache = poolReadCache(poolId, now); // THE ONE DOOR (ROOT 1) on the pool's basis
     for (const [sid, s2] of activeSessions) {
       feedOwedCrossLine(sid, s2); // (q-053 P0b) the line a cross-provider switch owes the RESUMED conversation
@@ -8263,7 +8267,7 @@ function maybeStopOnFallback(session, id, from, to) {
     oatIdentity, oatIdentityAttach, oatRebind, oatAnswer, tokenSpentBy, tokenGenOf, readingRoad, oatRoadOf, // lane oat-identity-postcheck: the long-lived token's identity post-check (the account routes wire its store hook + the re-bind door + the owner's answer); tokenGenOf = WHICH token a reading was produced with (lane oat-identity-fix)
     sessionBillingMember, wallKeyFor, rejectionSlotFor, readingSlotFor, memberLoginState, accountCredentialState, healthyPoolMembers, switchCandidates, poolReadLogin, slotTransitions, nearArmVeto, armCauseFor, fireIdentityFor, demoteWalledAccount, wallCount, sessionWalledMembers,
     _wallRing, _sessionWalls, _sessionWallLanes, noteSessionWall, WALL_RING_MS, SESSION_WALL_MS, // wall-ground-truth + token-slot + session-wall seams (test-auto-resume §11, test-auto-resume-loop)
-    _poolAutoLast, _poolSwitchAt, _poolEvalAt, _poolGateHeld, _poolKickTrail, poolKickRerun, _poolDecisions, // the gates (10s) + dwell belt (180s) are WALL-CLOCK: a suite winds them back instead of sleeping through them; the held count and the trailing re-run (B-37f9) are what a leg reads
+    _poolAutoLast, _poolSwitchAt, _poolEvalAt, _poolGateHeld, _poolKickTrail, poolKickRerun, _poolDecisions, _basisOf, // the gates (10s) + dwell belt (180s) are WALL-CLOCK: a suite winds them back instead of sleeping through them; the held count and the trailing re-run (B-37f9) are what a leg reads
     sessionModelFor, sweepUsageAnchors, usageCacheKeyFor,
     usageIdentityAccountIds, usageIdentityGroups, usageIdentityGroupsCached,
     writeUsageCacheForKey, clearSealedOrders, pushSealedOrders,
