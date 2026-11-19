@@ -1007,6 +1007,46 @@ await (async () => {
     let recx = {}; try { recx = Object.values(JSON.parse(fs.readFileSync(path.join(Rx.dir, 'stash-handover.json'), 'utf-8')))[0] || {}; } catch { }
     ok(!recx.jobsOwed && (recx.jobs || []).length === 0, '(must 1) CONTROL (a copy that drops the kept copy at the put-back): the copy is GONE while the put-back is not on disk — a kill now loses the job notifications (red)', recx);
   }
+  {   // THE MOVED LINE'S MUST 2 (主开发 2026-11-19 22:38Z): while job-notifications.json is HELD the put-back writes nothing — the
+      // writer owes nothing for the file, so its ride answered «landed» at once and the hand-over dropped its kept copy (the notices
+      // in memory only; a restart before the lift lost them). A writer that behaves as the real one (a step on a file it owes nothing
+      // runs at once; an owed one at its landing), a held notifications file, a hand-over whose frame comes back: the kept copy STAYS
+      // while held, rides the lift's own save, and drops only at THAT landing. RED (anchored, in a copy): the wait for the lift cut.
+    const JSRC2 = fs.readFileSync(path.join(REPO, 'src/jobs.js'), 'utf-8');
+    const LIFT_A = "  afterNotifsLanded(step) { if (this._notifsUnread && !this.readOnly) return this._afterNotifsLift(";
+    ok(JSRC2.split(LIFT_A).length === 2, 'control setup: the put-back\'s wait for the lift is found once in jobs.js');
+    const liftWriter = () => {
+      const st = { owed: false, steps: [] };
+      const W = { pending: () => st.owed, dirty() { st.owed = true; }, durable: () => Promise.resolve(!st.owed), whenDurable: () => Promise.resolve(!st.owed), exitStartedAt: () => null, stats: () => [],
+        flushSync: (names) => ({ written: [], left: st.owed ? (names || []).map((f) => ({ file: f, name: 'a store', why: 'held by the storage (a stand-in)' })) : [], ms: 0 }),
+        afterLanding: (file, step) => { if (!st.owed) { const v = step(); return Promise.resolve({ landed: true, value: v }); } st.steps.push(step); return new Promise(() => { }); } };
+      return { W, land: () => { st.owed = false; const xs = st.steps; st.steps = []; for (const x of xs) x(); } };
+    };
+    const heldScene = async (Mod, name) => {
+      const Rh = rig(name), Wh = liftWriter(), { jm: jh, job: jbh } = mkJm(Mod, Rh, Wh.W);
+      jh._notifsHold({ code: 'EIO', why: 'a stand-in i/o error' });   // the boot's read of job-notifications.json failed: HELD (the engine's own hold road)
+      const vh = SH.create({ handoverLandMs: 30, activeSessions: Rh.sessions, getDeliver: () => Rh.deliver, getJobs: () => jh, broadcastSessions: () => { }, renderMsgStash, renderNotifStash: JM_MODEL.renderNotifStash, debounceMs: 5, dataDir: Rh.dir, log: { log() { }, warn() { } } });
+      jh._stashNotif(Rh.cid, jbh, { what: 'a result while held' }, 'not reachable', { held: { kind: 'not-reachable' } });
+      Rh.setAnswer(async () => ({ ok: true, phase: 'written' }));
+      const hoh = await vh.handOver('w1', { pressed: PRESS });
+      const backh = vh.restoreHandedOver(Rh.cid, Rh.posts[Rh.posts.length - 1], { kind: 'notification' });
+      const memh = () => { try { return Object.values(JSON.parse(fs.readFileSync(path.join(Rh.dir, 'stash-handover.json'), 'utf-8')))[0] || {}; } catch { return {}; } };
+      Wh.land(); await sleep(10);   // the writer lands all it owes — nothing for the held file
+      const held = memh();
+      fs.writeFileSync(jh.notifsFile, '{}');   // the storage answers again
+      await jh._notifsRetry();   // the read again lifts the hold; its own save is owed
+      const lifted = { unread: !!jh._notifsUnread, rec: memh() };
+      Wh.land(); await sleep(10);
+      const landed = memh();
+      clearTimeout(jh._notifsT); jh._notifsT = null;
+      return { hoOk: !!(hoh && hoh.ok), backh, heldOwed: held.jobsOwed === true && (held.jobs || []).length === 1, liftedOwed: !lifted.unread && lifted.rec.jobsOwed === true, landedDropped: !landed.jobsOwed && (landed.jobs || []).length === 0 };
+    };
+    const mh = await heldScene({ JobManager }, 'ride-handover-held');
+    ok(mh.hoOk && mh.backh === 1 && mh.heldOwed && mh.liftedOwed && mh.landedDropped, 'must 2: a put-back while job-notifications.json is HELD keeps the hand-over\'s copy (the writer owes nothing for the file — no «landed»), still after the lift until ITS save lands, and drops it only then', mh);
+    const JLX = mutantCopies('ntr-held-lift', REPO).load('src/jobs.js', anchored(JSRC2, LIFT_A, "  afterNotifsLanded(step) { if (false) return this._afterNotifsLift(", 'the put-back waits for the lift'), 'held-no-lift-wait');
+    const mhx = await heldScene(JLX, 'ride-handover-held-red');
+    ok(mhx.hoOk && !mhx.heldOwed, 'CONTROL (the wait for the lift cut, in a copy): the put-back «lands» at once over a held file and the kept copy is GONE while the notices are in memory only — a restart now loses them (red)', mhx);
+  }
   {   // FINDING 11's RED (anchored): a copy of the hand-over that does not hold — «delivered» and the record of delivery at once, over a drain not on disk
     const SHSRC11 = fs.readFileSync(path.join(REPO, 'src/server/stash-handover.js'), 'utf-8');
     const HOLD_A = "      if (tookJobs.length && tookJobs.landed === false && typeof jm.whenNotifsLanded === 'function') {";

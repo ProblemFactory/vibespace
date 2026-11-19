@@ -861,6 +861,8 @@ class JobManager {
     // landed now, or at their landing (never «resolved» over a store the disk does not hold yet)
     const resolveHeld = () => { if (this._notifsItem) { const id = this._notifsItem; this._notifsItem = null; try { this.d.resolveNotice && this.d.resolveNotice(id); } catch { } } };   // its read r1 (M2): the item resolved
     if (L && L.ok) resolveHeld(); else this._ride(this.notifsFile, 'the held notices read again', resolveHeld);
+    // must 2: the steps that waited for the lift (a hand-over's put-back while held) ride THIS save's landing — never before it
+    { const waits = this._notifsLiftWaits || []; this._notifsLiftWaits = []; for (const w of waits) { if (w.done) continue; this._ride(this.notifsFile, w.what, w.step).then((r) => { if (w.done) return; w.done = true; if (w.t) clearTimeout(w.t); w.resolve(r); }, (e) => { if (w.done) return; w.done = true; if (w.t) clearTimeout(w.t); w.resolve({ landed: false, why: (e && e.message) || String(e) }); }); } }
     // its read r2 (S2): a read again that found the file GONE or TORN lost what waited in it — said where the person looks, never only in the journal
     if (a.state !== 'data') this._forYou(null, M.forYouCopy(null, 'notifs-lost', { file: a.setAside || path.basename(this.notifsFile) }));
     for (const cid of this.pendingNotifs.keys()) { try { this.d.onStash?.(cid); } catch { } }   // its read r1 (S1): each conversation's strip and its held count follow
@@ -1776,9 +1778,21 @@ class JobManager {
   }
   /** `step` once the notifications as they are NOW are on disk (lane lg-store-writes, the moved2 cure 2: a stash hand-over drops
    *  its kept copy of the originals only on their put-back's landing — _ride) */
-  afterNotifsLanded(step) { return this._ride(this.notifsFile, 'the notifications put back', step); }
+  afterNotifsLanded(step) { if (this._notifsUnread && !this.readOnly) return this._afterNotifsLift('the notifications put back', step); return this._ride(this.notifsFile, 'the notifications put back', step); }
   /** the notifications as they are NOW on disk, waited for (bounded) → Promise<{landed}> (the census cure, finding 11: the hand-over) */
-  whenNotifsLanded({ timeoutMs = 20000, what = 'a hand-over\'s drain' } = {}) { return this._ride(this.notifsFile, what, () => true, { timeoutMs }); }
+  whenNotifsLanded({ timeoutMs = 20000, what = 'a hand-over\'s drain' } = {}) { if (this._notifsUnread && !this.readOnly) return this._afterNotifsLift(what, () => true, { timeoutMs }); return this._ride(this.notifsFile, what, () => true, { timeoutMs }); }
+  /** THE MOVED LINE'S MUST 2 (主开发 2026-11-19 22:38Z): while job-notifications.json is HELD its save writes nothing — the writer owes
+   *  nothing for the file, and a ride would answer «landed» at once (a hand-over then dropped its kept copy of notices put back in
+   *  memory only; a restart before the lift lost them for good). While held the step WAITS FOR THE LIFT: kept here, ridden on the
+   *  lift's own save (_notifsRetry); a hold that never lifts keeps the copy; a bound (whenNotifsLanded) answers not landed.
+   *  → a promise of the writer's answer ({landed, value}) */
+  _afterNotifsLift(what, step, { timeoutMs = null } = {}) {
+    return new Promise((resolve) => {
+      const w = { what, step, resolve, done: false, t: null };
+      (this._notifsLiftWaits || (this._notifsLiftWaits = [])).push(w);
+      if (timeoutMs != null) { w.t = setTimeout(() => { if (w.done) return; w.done = true; resolve({ landed: false, why: 'job-notifications.json is held unread — it lands once the file reads again' }); }, timeoutMs); w.t.unref?.(); }
+    });
+  }
   /** Put drained notifications BACK as themselves (a hand-over's frame came back undelivered — verify r2). An entry already
    *  here — the same object, or the same job at the same instant (a boot putting back a kept copy whose first put-back landed:
    *  the moved2 cure 2) — is never added twice. */
@@ -1816,7 +1830,10 @@ class JobManager {
     // stays, a write that does not land is the writer's to retry (_onDisk says it). The census cure (finding 11): the drained list
     // CARRIES the drain's landing (`landed`, not enumerable — never in a record) — a hand-over holds what follows behind it
     const drained = this._saveNotifs();
-    Object.defineProperty(q, 'landed', { value: !!(drained && drained.ok), enumerable: false });
+    // must 2's reader: while the file is HELD (its hold starts only at the boot's read) what waits in memory was never in it — a drain
+    // has nothing of the file to land: landed by that fact (the hand-over records its delivery at once; a wait for the lift would only
+    // stall it and, at a restart before the lift, hand the same notices over again)
+    Object.defineProperty(q, 'landed', { value: !!(drained && drained.ok) || !!this._notifsUnread, enumerable: false });
     this._dirty = true;
     // A stash DRAINED into a resume has been read (triage §13 rule 1a): the
     // conversation sees it on its next turn. A stash entry older than the
