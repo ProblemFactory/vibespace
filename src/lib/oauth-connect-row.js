@@ -27,18 +27,32 @@ export function renderConnectRow(box, decl, st, rerender, { app = null } = {}) {
   const a = (st && st.account) || {};
   const W = decl.words || {};
   // B-1e9a cure: the person's row hides the cluster's settings (an earlier Connect saved its own client id there) — said, with
-  // the ONE press that heals it: the store's «use the cluster's settings» (PUT /api/integrations/<row> {use:'cluster'})
+  // the door that heals it: the store's «use the cluster's settings» (PUT /api/integrations/<row> {use:'cluster'}), or — the
+  // cluster offering several with none the default (cure 3: `presetChoices`) — its picker (PUT {clusterKey})
   if (st && st.presetShadowed && W.shadowed) {
     const sh = el('div', 'plugin-cfg-row oauth-connect-shadow');
     const sw = el('div', 'plugin-detail plugin-cfg-warn oauth-connect-shadow-words', t(W.shadowed));
-    const use = el('button', 'mounts-btn oauth-use-cluster', t('Use the cluster\'s settings'));
-    use.onclick = async () => {
-      use.disabled = true;
-      const r = await fetchJson(`/api/integrations/${encodeURIComponent(st.presetShadowed)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ use: 'cluster' }) });
-      if (!r || r.error) { showToast((r && (r.message || r.error)) || t('Failed'), { type: 'error' }); use.disabled = false; return; }   // fetchJson answers null when the hub is unreachable
+    // cure 3: the store's refusal is never shown raw — the card's own sentence, then a redraw (the status draws the picker when
+    // the cluster's settings are several with none the default: `presetChoices`, the store's own pick)
+    const put = async (body, ctl) => {
+      ctl.disabled = true;
+      const r = await fetchJson(`/api/integrations/${encodeURIComponent(st.presetShadowed)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!r) { showToast(t('Server unreachable — nothing was changed'), { type: 'error' }); if (ctl.tagName === 'SELECT') ctl.value = ''; ctl.disabled = false; return; }   // fetchJson answers null when the hub is unreachable; the picker back on its head (the same choice again is a change)
+      if (r.error) showToast(body.clusterKey ? t('Could not update') : t('Could not switch to the cluster default'), { type: 'error' });
       rerender();
     };
-    sh.append(sw, use);
+    const choices = Array.isArray(st.presetChoices) && st.presetChoices.length > 1 ? st.presetChoices : null;
+    let ctl;
+    if (choices) {
+      ctl = el('select', 'plugin-cfg-select oauth-use-cluster-pick');
+      const head = el('option', null, t('Use the cluster\'s settings')); head.value = ''; head.disabled = true; head.selected = true; ctl.appendChild(head);
+      for (const o of choices) { const op = el('option', null, t('Cluster preset · {label}', { label: o.label })); op.value = o.key; ctl.appendChild(op); }
+      ctl.onchange = () => { if (ctl.value) put({ clusterKey: ctl.value }, ctl); };
+    } else {
+      ctl = el('button', 'mounts-btn oauth-use-cluster', t('Use the cluster\'s settings'));
+      ctl.onclick = () => put({ use: 'cluster' }, ctl);
+    }
+    sh.append(sw, ctl);
     box.appendChild(sh);
   }
   const row = el('div', 'plugin-cfg-row oauth-connect');

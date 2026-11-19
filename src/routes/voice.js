@@ -3,9 +3,11 @@
 // PURE context (`ctx`, re-cut here by contextFromClient); the hub adds the token and talks to Dropline through the
 // ONE vendor module (src/server/dropline-client.js). The audio stays in memory (multer memoryStorage, 8 MB cap) for
 // the one request — never on disk, never in a log line.
-//   GET  /api/voice/status   → {on, connected, language, account, connectVia, connectWhy}  (the microphone asks before it
-//                            records; the Connect block — the sheet AND the Integrations card — reads account / connectVia /
-//                            connectWhy: why Connect cannot run here, a code of the registry row's `connect.whys`)
+//   GET  /api/voice/status   → {on, connected, language, account, connectVia, connectWhy, presetShadowed, presetChoices}  (the
+//                            microphone asks before it records; the Connect block — the sheet AND the Integrations card — reads
+//                            account / connectVia / connectWhy: why Connect cannot run here, a code of the registry row's
+//                            `connect.whys`; B-1e9a: presetShadowed = the person's row hiding the cluster's settings, and
+//                            presetChoices = the settings to pick when the cluster has several and no default)
 //   POST /api/voice/dictate  multipart {audio, ctx?, uiLang?} → {text, rewrite, language, request_id}
 //                            | {error:<voiceWords code>, retryAfter?} with the vendor's status (429 keeps Retry-After)
 // P1 (lane voice-p1-oauth-teach) — every route below is the OWNER's (an agent's vsst_/jbt_ bearer is refused 403: a
@@ -32,7 +34,7 @@ function create({ client, prefs = () => ({}), oauth = null, teach = null, log = 
   const status = () => {
     const p = prefs() || {};
     const c = (p.config) || {};
-    return { on: !!p.enabled && client.connected(), enabled: !!p.enabled, connected: client.connected(), vaultLocked: !!(client.locked && client.locked()), language: VM.languageOf(c.language), account: client.account ? client.account() : null, teach: c.teach === true, context: c.context === true, connectVia: oauth ? oauth.callbackPlan().via : null, connectWhy: oauth ? oauth.connectWhy() : 'self-hosted', presetShadowed: oauth && typeof oauth.presetShadowed === 'function' ? oauth.presetShadowed() : null };
+    return { on: !!p.enabled && client.connected(), enabled: !!p.enabled, connected: client.connected(), vaultLocked: !!(client.locked && client.locked()), language: VM.languageOf(c.language), account: client.account ? client.account() : null, teach: c.teach === true, context: c.context === true, connectVia: oauth ? oauth.callbackPlan().via : null, connectWhy: oauth ? oauth.connectWhy() : 'self-hosted', presetShadowed: oauth && typeof oauth.presetShadowed === 'function' ? oauth.presetShadowed() : null, presetChoices: oauth && typeof oauth.presetChoices === 'function' ? oauth.presetChoices() : null };
   };
   const owner = (fn) => async (req, res) => {
     if (isAgentBearer(req)) return res.status(403).json({ error: 'human-triggered only', code: 'agent_forbidden' });

@@ -829,7 +829,7 @@ console.log('§7 fleet.json browserEngine — the cluster layer, the override, b
   ok(ka.started && ka.before === 'cluster:true' && ka.after === 'cluster:true' && ka.regs === 1 && /^selfregClient01$/.test(ka.kept || ''),
     'B-1e9a: an apiKey-only cluster preset — two Connects: ONE registration, the hub\'s client kept beside the tokens, and the cluster\'s key STILL resolves (never the person\'s row over the preset)', ka);
   const DOSRC = fs.readFileSync(path.join(REPO, 'src/server/dropline-oauth.js'), 'utf8');
-  const oldWrite = M.load('src/server/dropline-oauth.js', anchored(DOSRC, "      if (plan.source === 'cluster') tokens.write(", "      if (false) tokens.write(", 'B-1e9a: the person\'s row written over a preset'), 'dl-oldwrite');
+  const oldWrite = M.load('src/server/dropline-oauth.js', anchored(DOSRC, "        if (plan.source !== 'cluster' && st && typeof st.setIntegration === 'function') st.setIntegration(KIND, { clientId });", "        if (st && typeof st.setIntegration === 'function') st.setIntegration(KIND, { clientId });", 'B-1e9a: the person\'s row written over a preset'), 'dl-oldwrite');   // stale-pins: kept — a RED control: the old road (the person's row written over a preset) restored on purpose
   const kr = await keyAfter(oldWrite, 'keyonly-red');
   ok(kr.after !== 'cluster:true', 'RED control: the registration written as the person\'s row (the old road) ⇒ the cluster\'s key no longer resolves after the first Connect', kr);
   // B-1e9a (2): A FLEET CLIENT WITH NO RELAY PAGE — the plan sent the vendor to this pod's own https (a callback the fleet's client
@@ -893,6 +893,87 @@ console.log('§7 fleet.json browserEngine — the cluster layer, the override, b
   const anyRow = M.load('src/server/dropline-oauth.js', anchored(DOSRC, " && typeof st.presetsFor === 'function' && st.presetsFor(KIND).length > 0 ? KIND : null;", " ? KIND : null;", 'B-1e9a cure: shadow without asking for a preset'), 'dl-anyrow');
   const nr = shadow(anyRow, 'shadow-none-red', {}, { clientId: 'oldClient' + '0003' }).door.presetShadowed();
   ok(nr === 'dropline', 'RED control: without the preset check a person\'s own client id on a pod with NO preset would be offered «use the cluster\'s settings»', { nr });
+  // B-1e9a cure 3 (主开发's must — a vendor call whose result cannot be kept is not made): the vault LOCKED and NO tokens file yet
+  // (a fresh instance; after every Disconnect) — the sealed read gives nothing without throwing, so the lock is asked of the
+  // file's writer (writable()) BEFORE the register: refused by name, nothing registered at the vendor
+  const lockedNoFile = async (mod, tag) => {
+    const st = mk({ VIBESPACE_INTEGRATION_DROPLINE_APIKEY: KEY }, tag); let regs = 0;
+    const tokens = { read: () => null, writable: () => false, write: () => { throw Object.assign(new Error('the vault is locked'), { code: 'vault_locked' }); }, clear: () => { } };
+    const door = mod.create({ client: { register: async () => ({ clientId: 'selfreg' + 'Client0' + (++regs) }), authorizeUrl: () => 'https://consent.example.test/' }, flows: { begin: async () => ({ flowId: 'f1', consentUrl: 'u' }) }, integrations: () => st, instanceUrl: () => 'https://hub.example.ts.net', tokens });
+    let r; try { r = await door.start({}); } catch (e) { r = { threw: e.code || e.message }; }
+    return { ok: r.ok, code: r.why || r.threw || null, regs };
+  };
+  const lnf = await lockedNoFile(DO, 'lockednofile');
+  ok(lnf.ok === false && lnf.code === 'vault-locked' && lnf.regs === 0, 'B-1e9a cure 3: LOCKED with no tokens file yet ⇒ the Connect is refused by name (vault-locked) BEFORE the vendor\'s register — register count 0', lnf);
+  const noAsk = M.load('src/server/dropline-oauth.js', anchored(DOSRC, "    if (tokens && typeof tokens.writable === 'function' && !tokens.writable()) return LOCKED;\n", '', 'B-1e9a cure 3: the lock not asked before the register'), 'dl-noask');
+  const lnr = await lockedNoFile(noAsk, 'lockednofile-red');
+  ok(lnr.code === 'vault-locked' && lnr.regs === 1, 'RED control: without the ask the vendor registers a client the locked write then throws away (register count 1)', lnr);
+  // cure 3 (1): a refresh (or any write) that lands DURING the awaited register is kept — the write reads the record again after it
+  const raceAt = async (mod, tag) => {
+    const st = mk({ VIBESPACE_INTEGRATION_DROPLINE_APIKEY: KEY }, tag); let tok = { refreshedAt: 1 };
+    const tokens = { read: () => tok, write: (v) => { tok = v; }, clear: () => { tok = null; } };
+    const door = mod.create({ client: { register: async () => { tok = { ...tok, refreshedAt: 2 }; return { clientId: 'selfreg' + 'Race01' }; }, authorizeUrl: () => 'u' }, flows: { begin: async () => ({ flowId: 'f1', consentUrl: 'u' }) }, integrations: () => st, instanceUrl: () => 'https://hub.example.ts.net', tokens });
+    const r = await door.start({});
+    return { ok: r.ok, refreshedAt: tok.refreshedAt, kept: tok.registeredClientId || null };
+  };
+  const ra = await raceAt(DO, 'race');
+  ok(ra.ok === true && ra.refreshedAt === 2 && ra.kept === 'selfregRace01', 'B-1e9a cure 3: a write landing DURING the register (a refresh) is kept — the registration is written over the record read AFTER the await', ra);
+  const staleCopy = M.load('src/server/dropline-oauth.js', anchored(DOSRC, "        const fresh = tokens.read() || {};", "        const fresh = rec;", 'B-1e9a cure 3: the pre-await copy written back'), 'dl-stalecopy');
+  const rar = await raceAt(staleCopy, 'race-red');
+  ok(rar.refreshedAt === 1 && rar.kept === 'selfregRace01', 'RED control: writing back the copy read BEFORE the await loses the refresh that landed during it', rar);
+  // cure 3 (3): the person's OWN relay page goes through the same page check as every other road (relayPageOf: no loopback host,
+  // no credentials, no query) — it passed an https prefix test alone (the store's own field rule refuses a query, not a loopback host)
+  const OWNPAGE = 'https://own-relay.example.test/relay/';
+  const ownPlan = (mod, tag, page) => { const st = mk({}, tag); st.setIntegration('dropline', { relayUrl: page }); return mod.create({ client: {}, flows: {}, integrations: () => st, instanceUrl: () => '', tokens: {} }).callbackPlan(); };
+  const op = { good: ownPlan(DO, 'own-good', OWNPAGE), v4: ownPlan(DO, 'own-v4', 'https://127.0.0.1/relay/'), name: ownPlan(DO, 'own-name', 'https://localhost/relay/') };
+  ok(op.good.via === 'relay' && op.good.redirectUri === OWNPAGE && op.v4.redirectUri === null && op.name.redirectUri === null, 'B-1e9a cure 3: the person\'s own relay page passes THE page check — a good page is the redirect, a loopback host (127.0.0.1, localhost) is none (no Connect), never handed to the vendor', { good: op.good.redirectUri, v4: op.v4.redirectUri, name: op.name.redirectUri });
+  const prefixOnly = M.load('src/server/dropline-oauth.js', anchored(DOSRC, "      : relayPageOf(String(own.relayUrl || preset.relayUrl || ''));", "      : String(own.relayUrl || '').trim() || relayPageOf(preset.relayUrl);", 'B-1e9a cure 3: the own page by a prefix test alone'), 'dl-prefixonly');   // stale-pins: kept — a RED control: the parent's prefix-test line restored on purpose
+  const opr = ownPlan(prefixOnly, 'own-v4-red', 'https://127.0.0.1/relay/');
+  ok(opr.redirectUri === 'https://127.0.0.1/relay/', 'RED control: the prefix test alone (the parent) hands a loopback page to the vendor as the redirect', { redirectUri: opr.redirectUri });
+  // cure 3 (4): SEVERAL cluster settings and none the default — the store refuses «use the cluster's settings» (no-cluster-default);
+  // the door gives the card the choices instead (presetChoices: the store has no default to give — publicView clusterAvailable false), and a choice heals the row
+  const KEY2 = ['dl', 'clusterKey' + 'Def456'].join('_');
+  const two = JSON.stringify([{ id: 'dropline', key: 'teamA', label: 'Team A', values: { apiKey: KEY } }, { id: 'dropline', key: 'teamB', label: 'Team B', values: { apiKey: KEY2 } }]);
+  const sh2 = shadow(DO, 'shadow-two', { VIBESPACE_INTEGRATIONS: two }, { clientId: 'oldClient' + '0004' });
+  const choices = sh2.door.presetChoices();
+  let refused = null; try { sh2.st.useClusterDefault('dropline'); } catch (e) { refused = e.code; }
+  sh2.st.setClusterKey('dropline', 'teamB');
+  const pickedB = sh2.st.resolveIntegration('dropline'), afterPick = sh2.door.presetChoices();
+  const oneCh = shadow(DO, 'shadow-one', { VIBESPACE_INTEGRATION_DROPLINE_APIKEY: KEY }, { clientId: 'oldClient' + '0005' }).door.presetChoices();
+  ok(JSON.stringify(choices) === JSON.stringify([{ key: 'teamA', label: 'Team A' }, { key: 'teamB', label: 'Team B' }]) && refused === 'no-cluster-default' && pickedB.source === 'cluster' && (pickedB.values || {}).apiKey === KEY2 && afterPick === null && oneCh === null,
+    'B-1e9a cure 3: several cluster settings and none the default ⇒ the press would be refused (no-cluster-default), so the door names the CHOICES (key + label); picking one heals the row (its key resolves); one preset ⇒ no choices (the one press)', { choices, refused, picked: pickedB.source, afterPick, oneCh });
+  // cure 3 (the read): ANY «no default» with several settings draws the picker — a saved choice the cluster no longer provides
+  // ('preset-gone', reached before the ambiguous rung) is refused by the press just the same; the door reads the store's
+  // clusterAvailable, never one of its codes (a stand-in store answering publicView's shape)
+  const TWO = [{ key: 'teamA', label: 'Team A' }, { key: 'teamB', label: 'Team B' }];
+  const goneSt = { resolveIntegration: () => ({ source: 'user', values: { clientId: 'oldClient' + '0006' } }), presetsFor: () => TWO, publicView: () => ({ clusterAvailable: false, clusterWhyCode: 'preset-gone', clusterOptions: TWO }) };
+  const goneOf = (mod) => mod.create({ client: {}, flows: {}, integrations: () => goneSt, instanceUrl: () => '', tokens: {} }).presetChoices();
+  const gone = goneOf(DO);
+  ok(JSON.stringify(gone) === JSON.stringify(TWO), 'B-1e9a cure 3: a saved choice the cluster no longer provides (preset-gone) with several settings ⇒ the choices too — the press would be refused there as well', { gone });
+  const onlyAmb = M.load('src/server/dropline-oauth.js', anchored(DOSRC, "v && !v.clusterAvailable && Array.isArray(v.clusterOptions)", "v && v.clusterWhyCode === 'ambiguous' && Array.isArray(v.clusterOptions)", 'B-1e9a cure 3: the picker for ambiguous only'), 'dl-onlyamb');
+  ok(goneOf(onlyAmb) === null, 'RED control: choices for the ambiguous code alone leave a preset-gone row with the press the store refuses (no door)', { gone: goneOf(onlyAmb) });
+  // …and a store that HAS a default to give (a saved choice among several, still provided) ⇒ no choices: the one press works there
+  const keptSt = { ...goneSt, publicView: () => ({ clusterAvailable: true, clusterWhyCode: null, clusterOptions: TWO }) };
+  const keptOf = (mod) => mod.create({ client: {}, flows: {}, integrations: () => keptSt, instanceUrl: () => '', tokens: {} }).presetChoices();
+  ok(keptOf(DO) === null, 'B-1e9a cure 3: several settings but a default the store can give (a saved choice still provided) ⇒ no choices — the one press heals it', { kept: keptOf(DO) });
+  const anyMany = M.load('src/server/dropline-oauth.js', anchored(DOSRC, "v && !v.clusterAvailable && Array.isArray(v.clusterOptions)", "v && Array.isArray(v.clusterOptions)", 'B-1e9a cure 3: choices whenever several'), 'dl-anymany');
+  ok(Array.isArray(keptOf(anyMany)) && keptOf(anyMany).length === 2, 'RED control: choices whenever there are several would draw a picker where the one press works', { kept: keptOf(anyMany) });
+  // cure 3 (the read): on the person's road a lock landing DURING the register still keeps the registered client id — the
+  // person's row (it needs no vault) is written before the sealed record is read again; the refusal is by name
+  const ownLockMid = async (mod, tag) => {
+    const st = mk({}, tag); let lockedNow = false, regs = 0;
+    const lockedErr = () => Object.assign(new Error('the vault is locked'), { code: 'vault_locked' });
+    const tokens = { read: () => { if (lockedNow) throw lockedErr(); return {}; }, writable: () => !lockedNow, write: () => { if (lockedNow) throw lockedErr(); }, clear: () => { } };
+    const door = mod.create({ client: { register: async () => { lockedNow = true; return { clientId: 'selfreg' + 'Own0' + (++regs) }; }, authorizeUrl: () => 'u' }, flows: { begin: async () => ({ flowId: 'f1', consentUrl: 'u' }) }, integrations: () => st, instanceUrl: () => 'https://hub.example.ts.net', tokens });
+    const r = await door.start({});
+    const v = st.resolveIntegration('dropline');
+    return { ok: r.ok, code: r.why || null, regs, kept: (v.values || {}).clientId || null, source: v.source };
+  };
+  const olm = await ownLockMid(DO, 'own-lockmid');
+  ok(olm.ok === false && olm.code === 'vault-locked' && olm.regs === 1 && olm.kept === 'selfregOwn01' && olm.source === 'user', 'B-1e9a cure 3: the person\'s road — a lock landing DURING the register: refused by name, and the registered client id is KEPT in the person\'s row (a first registration is not lost to the lock)', olm);
+  const readFirst = M.load('src/server/dropline-oauth.js', anchored(anchored(DOSRC, "        if (plan.source !== 'cluster' && st && typeof st.setIntegration === 'function') st.setIntegration(KIND, { clientId });\n", '', 'B-1e9a cure 3: the person\'s row not first'), "        else tokens.write({ ...fresh, registeredFor: plan.redirectUri });", "        else { if (st && typeof st.setIntegration === 'function') st.setIntegration(KIND, { clientId }); tokens.write({ ...fresh, registeredFor: plan.redirectUri }); }", 'B-1e9a cure 3: the person\'s row after the read'), 'dl-readfirst');
+  const olr = await ownLockMid(readFirst, 'own-lockmid-red');
+  ok(olr.code === 'vault-locked' && olr.kept === null, 'RED control: reading the sealed record BEFORE the person\'s row loses the registered client id to a lock landing during the register', olr);
   const noBranch = M.load('src/server/dropline-oauth.js', anchored(DOSRC, "    if (c.preset && !c.relayUrl) return { redirectUri: null, via: null, presetNoRelay: true, ...c };\n", '', 'B-1e9a: the relay-less preset branch removed'), 'dl-nobranch');
   const rr = await relayLess(noBranch, 'norelay-red');
   ok(rr.via === 'own-https' && rr.ok === true, 'RED control: without the branch the fleet\'s client is sent to the pod\'s own https (the vendor would refuse the callback)', rr);
@@ -933,6 +1014,20 @@ console.log('§7 fleet.json browserEngine — the cluster layer, the override, b
   const blindDisc = M.load('src/server/dropline-client.js', anchored(DCSRC, "    if (pairLocked) throw lockedError();", "    if (false) throw lockedError();", 'B-1e9a cure: a locked Disconnect not refused'), 'dl-blinddisc');
   const ldr = lockedDisc(blindDisc);
   ok(ldr.code === null && ldr.cleared === 1, 'RED control: a Disconnect that does not refuse while locked clears the sealed file blind', ldr);
+  // B-1e9a cure 3 (the read): a lock landing between Connect and the LANDING — the code is not exchanged (its pair could not be
+  // written): refused by name before the vendor's token call, the code unspent
+  const landLocked = async (mod) => {
+    let fetched = 0;
+    const tokens = { read: () => null, writable: () => false, write: () => { throw Object.assign(new Error('the vault is locked'), { code: 'vault_locked' }); }, clear: () => { } };
+    const c = mod.create({ tokens, fetchImpl: async () => { fetched++; return { ok: true, status: 200, json: async () => ({ access_token: 'acc-1', refresh_token: 'ref-1', expires_in: 3600 }), text: async () => '' }; }, oauthBase: 'https://oauth.example.test', base: 'https://api.example.test', log: quiet.log });
+    let code = null; try { await c.connectWith({ clientId: 'selfregClient01', code: 'c1', verifier: 'v1', redirectUri: 'https://hub.example.ts.net/cb' }); } catch (e) { code = e.code || e.message; }
+    return { code, fetched };
+  };
+  const ll = await landLocked(DC);
+  ok(ll.code === 'vault-locked' && ll.fetched === 0, 'B-1e9a cure 3: a landing while the vault is locked ⇒ refused by name (vault-locked) BEFORE the code exchange — no token call at the vendor', ll);
+  const blindLand = M.load('src/server/dropline-client.js', anchored(DCSRC, "    if (typeof tokens.writable === 'function' && !tokens.writable()) throw lockedError();\n", '', 'B-1e9a cure 3: the landing does not ask the lock'), 'dl-blindland');
+  const llr = await landLocked(blindLand);
+  ok(llr.fetched === 1, 'RED control: without the ask the code is exchanged at the vendor and the pair then thrown away at the locked write', llr);
   quiet.lines.length = 0; empty.stop?.();
 }
 

@@ -2,7 +2,8 @@
 /**
  * A JSON FILE SEALED THROUGH THE VAULT (lane vault-e2e-password-fix-r2) — the voice sign-in pair (data/dropline-oauth.json,
  * rotated by the hourly refresh) and any small secret-bearing JSON a feature keeps at rest. `sealedJson(file, { dataDir })`
- * answers the plain token file's shape — `{ read, write, clear }` — plus `seal()` (the vault's open hook) and `locked()`:
+ * answers the plain token file's shape — `{ read, write, clear }` — plus `seal()` (the vault's open hook), `locked()` and
+ * `writable()` (B-1e9a cure 3: may a write land now — asked BEFORE spending something whose result must be kept):
  *   · THE VAULT SET UP ⇒ the file is `{"sealed":"vault-v1","entry":"file:<name>","box":"<iv.tag.data>"}` — AES-256-GCM
  *     (src/secret-box.js encWith) under a random 32-byte key that lives ONLY in the vault, as the entry `file:<name>`.
  *     Unlocked ⇒ read and write; LOCKED ⇒ both refuse with `code: 'vault_locked'` (nothing read, nothing written).
@@ -101,7 +102,11 @@ function sealedJson(file, { dataDir = path.dirname(file) } = {}) {
     if (stateOf() !== 'locked') return false;
     try { return readRaw() !== null; } catch { return true; }
   }
-  return { read, write, clear, seal, locked, forget, file };
+  /** B-1e9a cure 3: may a write land NOW? — the answer write() gives on its first line (false = locked), whether or not the
+   *  file exists (with no file a locked read gives nothing): a caller about to spend something it must keep asks first. A NO
+   *  is a refusal like write()'s — NOTED (lockedRefusal: For you names this file among what waits on the vault). */
+  function writable() { if (stateOf() !== 'locked') return true; lockedRefusal(); return false; }
+  return { read, write, clear, seal, locked, forget, writable, file };
 }
 
 module.exports = { sealedJson, MARK, isSealed, lockedError };

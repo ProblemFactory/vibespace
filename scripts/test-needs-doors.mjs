@@ -42,6 +42,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { anchored } from './scratch.mjs';   // B-1e9a cure 3: the Connect block's RED controls
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -1226,6 +1227,9 @@ if (CL) {
       `settings-13 (reader #4 / #13): a row that takes effect at the next load (${path13}) shows «Takes effect after a reload» + «Reload now» once its value differs from the one this PAGE LOADED with — re-judged on the store's change (this page, another client's broadcast); a value moved before Settings was first drawn shows it too`, { s: [s0, s1, s2, s3], l2: l2 && l2.style.display, reloads: RELOADS });
     if (l) l.remove();
     if (l2) l2.remove();
+    // the stores' debounced saves (500 ms after a set) leave with the leg — else their POST /api/settings lands in a LATER leg's
+    // stub (channels-accounts-4 read two of them once the bundling legs after this one moved the clock: B-1e9a's move, the meeting)
+    for (const x of [m, m2, m3]) if (x && x._saveTimer) { clearTimeout(x._saveTimer); x._saveTimer = null; }
     FETCH = async () => { throw new Error('no fetch in this leg'); };
   }
   // settings-13 (verifier #1): the reload lines' store listeners leave with the surface that bound them — a Settings window opened on
@@ -1293,6 +1297,59 @@ if (CL) {
       && !plain.querySelector('.oauth-use-cluster'),
       'B-1e9a cure: a person\'s row hiding the cluster\'s settings is SAID on the Connect block with its one press — «Use the cluster\'s settings» = PUT /api/integrations/dropline {use:"cluster"}, then a redraw; with nothing hidden there is no such press', { puts, redrawn, words: sh && sh.textContent });
     FETCH = async () => { throw new Error('no fetch in this leg'); };
+  }
+  // B-1e9a cure 3 (4): SEVERAL cluster settings and none the default — the block draws the status's CHOICES as its picker (PUT
+  // {clusterKey}, then a redraw), never the one press the store would refuse; a refusal or an unreachable hub is said in the
+  // card's OWN sentence, never the store's English
+  {
+    const OCRSRC = fs.readFileSync(path.join(REPO, 'src/lib/oauth-connect-row.js'), 'utf8');
+    const ocrOf = async (src, tag) => {   // the block bundled alone from a given source (a RED control's copy, built by anchored())
+      const swap = { name: 'ocr-src', setup(b) { b.onLoad({ filter: /oauth-connect-row\.js$/ }, () => ({ contents: src, loader: 'js' })); } };
+      const out = await esbuild.build({ stdin: { contents: "export * as OCR from './oauth-connect-row.js';", resolveDir: path.join(REPO, 'src/lib'), sourcefile: tag + '-entry.js', loader: 'js' }, bundle: true, format: 'esm', write: false, plugins: [stubBuildVersion, swap], logLevel: 'silent', loader: { '.css': 'empty' } });
+      const f = path.join(TMP, tag + '.mjs'); fs.writeFileSync(f, out.outputFiles[0].text);
+      return (await import(pathToFileURL(f).href)).OCR;
+    };
+    const decl = { label: 'Connect', words: { shadowed: 'A saved client id hides the cluster settings' }, whys: { 'self-hosted': 'x' } };
+    const CH = [{ key: 'teamA', label: 'Team A' }, { key: 'teamB', label: 'Team B' }];
+    const STORE_NO = { error: 'cannot use the cluster default for Dropline: the cluster provides 2 presets and none is named as preferred — choose one', code: 'no-cluster-default' };
+    const drive = async (ocr, answer, choices = CH) => {
+      const puts = []; let redrawn = 0;
+      // only THIS leg's calls are its (the moved chain's meeting on 2.369.413's base: another leg's late fetches — /api/hosts, /api/mounts… — land
+      // here): they go on to the stub that stood before this drive, as they did on the base (an answer of ours broke that leg's render)
+      const before0 = FETCH;
+      FETCH = async (url, o) => { if (!String(url).startsWith('/api/integrations/')) return before0(url, o); puts.push([String(url), o && o.method, o && o.body ? JSON.parse(o.body) : null]); if (answer === null) throw new Error('unreachable'); return { ok: true, status: answer.error ? 409 : 200, json: async () => answer }; };
+      const before = new Set(DOC.body.children), toastsBefore = new Set(DOC.body.querySelectorAll('.global-toast-body'));
+      const box = DOC.createElement('div');
+      ocr.renderConnectRow(box, decl, { presetShadowed: 'dropline', presetChoices: choices, connectVia: 'relay', account: {} }, () => { redrawn++; }, {});
+      const pick = box.querySelector('.oauth-use-cluster-pick'), press = box.querySelector('.oauth-use-cluster');
+      const opts = pick ? pick.querySelectorAll('option').map((o) => [o.value, o.textContent]) : [];
+      if (pick) { pick.value = 'teamB'; pick.onchange(); } else if (press) press.click();
+      const fresh = () => DOC.body.querySelectorAll('.global-toast-body').filter((x) => !toastsBefore.has(x)).map((x) => x.textContent);
+      for (let i = 0; i < 20 && !(redrawn || fresh().length); i++) await tick(10);
+      await tick(10);
+      const said = fresh(), after = pick ? pick.value : null;
+      // the toasts this drive made leave the page — each toast, and a stack it made (a later leg reads every toast body there)
+      for (const b of DOC.body.querySelectorAll('.global-toast-body').filter((x) => !toastsBefore.has(x))) if (b.parentNode) Nd.prototype.remove.call(b.parentNode);
+      for (const n of DOC.body.children.filter((c) => !before.has(c))) Nd.prototype.remove.call(n);
+      FETCH = async () => { throw new Error('no fetch in this leg'); };
+      return { pick: !!pick, press: !!press, opts, puts, redrawn, said, after };
+    };
+    const OK = await drive(OCR, { ok: true }), NO = await drive(OCR, STORE_NO), NUL = await drive(OCR, null);
+    ok(OK.pick && !OK.press && OK.opts.length === 3 && OK.opts[0][0] === '' && OK.opts[0][1] === 'Use the cluster\'s settings' && OK.opts[2][0] === 'teamB' && OK.opts[2][1] === 'Cluster preset · Team B'
+      && OK.puts.length === 1 && OK.puts[0][0] === '/api/integrations/dropline' && OK.puts[0][1] === 'PUT' && JSON.stringify(OK.puts[0][2]) === '{"clusterKey":"teamB"}' && OK.redrawn === 1 && !OK.said.length,
+      'B-1e9a cure 3: several cluster settings and none the default ⇒ the Connect block draws them as its PICKER («Use the cluster\'s settings» ▸ «Cluster preset · …»), never the press the store refuses; a choice = PUT /api/integrations/dropline {clusterKey}, then a redraw', OK);
+    ok(NO.said.some((s) => s.includes('Could not update')) && !NO.said.some((s) => /cannot use the cluster default|presets and none/.test(s)) && NO.redrawn === 1
+      && NUL.said.some((s) => s.includes('Server unreachable — nothing was changed')) && NUL.redrawn === 0 && NUL.after === '',
+      'B-1e9a cure 3: a refused choice is the card\'s OWN sentence («Could not update», then a redraw) — never the store\'s English; an unreachable hub says so, redraws nothing and puts the picker back on its head (the same choice again is a change)', { NO: NO.said, NUL: NUL.said, redrawn: [NO.redrawn, NUL.redrawn], after: NUL.after });
+    const PR = await drive(OCR, STORE_NO, null);   // the ONE press (no choices): its refusal in its own words
+    ok(!PR.pick && PR.press && PR.puts.length === 1 && JSON.stringify(PR.puts[0][2]) === '{"use":"cluster"}' && PR.said.some((s) => s.includes('Could not switch to the cluster default')) && !PR.said.some((s) => /cannot use the cluster default/.test(s)) && PR.redrawn === 1,
+      'B-1e9a cure 3: the one press refused ⇒ «Could not switch to the cluster default» (the card\'s words for the press), never the store\'s English, then a redraw', { said: PR.said, puts: PR.puts });
+    const noPick = await ocrOf(anchored(OCRSRC, '    if (choices) {\n', '    if (false) {\n', 'B-1e9a cure 3: the picker not drawn'), 'ocr-nopick');
+    const NP = await drive(noPick, STORE_NO);
+    ok(!NP.pick && NP.press && NP.puts.length === 1 && JSON.stringify(NP.puts[0][2]) === '{"use":"cluster"}', 'RED control: without the picker the block draws the one press the store refuses when the settings are several', { pick: NP.pick, press: NP.press, puts: NP.puts });
+    const rawSaid = await ocrOf(anchored(OCRSRC, "      if (r.error) showToast(body.clusterKey ? t('Could not update') : t('Could not switch to the cluster default'), { type: 'error' });", "      if (r.error) showToast(r.message || r.error, { type: 'error' });", 'B-1e9a cure 3: the store\'s refusal shown raw'), 'ocr-rawsaid');
+    const RS = await drive(rawSaid, STORE_NO);
+    ok(RS.said.some((s) => /cannot use the cluster default/.test(s)), 'RED control: the store\'s refusal shown raw (the parent) puts the store\'s English sentence in the toast', { said: RS.said });
   }
   // browser-profiles-4: the browser list's needs said ONCE, each with its door's target — the chosen cloud browser's own card
   {

@@ -540,6 +540,11 @@ console.log('⑦ THE VOICE PAIR — data/dropline-oauth.json sealed through the 
   let re = null; try { tok.read(); } catch (e) { re = e; }
   let we = null; try { tok.write({ access: 'x' }); } catch (e) { we = e; }
   ok(re && re.code === 'vault_locked' && we && we.code === 'vault_locked' && SJ.isSealed(JSON.parse(fs.readFileSync(file, 'utf8'))), 'LOCKED: read and write refused BY NAME (nothing read, nothing written)');
+  // B-1e9a cure 3: writable() answers write()'s own first line — LOCKED ⇒ false for the sealed file AND for a file not made yet
+  // (whose locked read gives nothing): a Connect asks it before the vendor's register, whose client id it could not keep
+  const notYet = SJ.sealedJson(path.join(d, 'not-made-yet.json'), { dataDir: d });
+  const heard = []; v.onBlocked((s) => heard.push(JSON.stringify(s)));   // the vault's For-you hook: a NO from writable() is a noted refusal
+  ok(tok.writable() === false && notYet.writable() === false && notYet.read() === null && heard.some((s) => s.includes('not-made-yet.json')), 'B-1e9a cure 3: LOCKED ⇒ writable() false — the sealed file and a file not made yet alike (its read gives nothing, no throw) — and the NO is NOTED like write()\'s refusal (For you names the file)', { tok: tok.writable(), notYet: notYet.writable(), heard: heard.length });
   const acct = client.account();
   let be = null; try { await client.me(); } catch (e) { be = e; }
   ok(acct.state === 'vault-locked' && client.locked() && !client.connected() && be && be.code === 'vault-locked' && be.status === 423, 'LOCKED: the voice card reads `vault-locked` (the connect row draws the door), a call answers 423 vault-locked — never "connect your Dropline"', { acct, be: be && be.code });
@@ -547,6 +552,7 @@ console.log('⑦ THE VOICE PAIR — data/dropline-oauth.json sealed through the 
   ok(typeof VR.create === 'function' && /vaultLocked: !!\(client\.locked && client\.locked\(\)\)/.test(fs.readFileSync(path.join(REPO, 'src/routes/voice.js'), 'utf8')) && /status\(423\)\.json\(\{ error: 'vault-locked' \}\)/.test(fs.readFileSync(path.join(REPO, 'src/routes/voice.js'), 'utf8')), 'GET /api/voice/status carries `vaultLocked`; a dictation while locked answers 423 vault-locked (the mic says the vault)');
   // a plaintext file written by an older build is sealed at its first unlocked read
   await v.unlock(PW, {});
+  ok(tok.writable() === true && notYet.writable() === true, 'B-1e9a cure 3: unlocked ⇒ writable() true (both)');
   fs.writeFileSync(file, JSON.stringify({ access: 'dl-old-plain-access', refresh: 'dl-old-plain-refresh' }), { mode: 0o600 });
   const tok2 = SJ.sealedJson(file, { dataDir: d });
   ok(tok2.read().access === 'dl-old-plain-access' && SJ.isSealed(JSON.parse(fs.readFileSync(file, 'utf8'))) && hitsIn(d, ['dl-old-plain-access']).length === 0, 'a plain file restored after the setup: read once, sealed at that read (the plaintext overwritten in place)');

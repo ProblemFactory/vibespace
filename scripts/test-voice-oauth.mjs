@@ -254,6 +254,19 @@ try {
         else ok(`${name}: connectVia ${via}, connectWhy null — and start with the plugin OFF answers the consent URL (a person connects first, switches on after)`, st.connectVia === via && st.connectWhy === null && st.enabled === false && r.status === 200 && b.ok === true && /\/oauth\/authorize\?/.test(b.url), { st, b });
       } finally { s2.close(); }
     }
+    // B-1e9a cure 3 (the read): the status answer CARRIES the door's two names — the Connect block draws the heal press / the
+    // picker only from presetShadowed / presetChoices (a stand-in door answering them)
+    {
+      const hs = hub({ instance: '', source: null, pluginOn: () => false, fileName: 'cw-preset.json' });
+      const doorStub = { ...hs.oauth, presetShadowed: () => 'dropline', presetChoices: () => [{ key: 'teamA', label: 'Team A' }, { key: 'teamB', label: 'Team B' }] };
+      const a3 = express(); a3.use(express.json());
+      a3.use(routes.create({ client: hs.client, prefs: () => ({ enabled: false, config: {} }), oauth: doorStub, log: { log() { }, warn() { } } }));
+      const s3 = a3.listen(0, '127.0.0.1'); await new Promise((r) => s3.on('listening', r));
+      try {
+        const st = await (await fetch(`http://127.0.0.1:${s3.address().port}/api/voice/status`)).json();
+        ok('B-1e9a cure 3: GET /api/voice/status carries presetShadowed and presetChoices (the Connect block\'s heal door reads nothing else)', st.presetShadowed === 'dropline' && JSON.stringify(st.presetChoices) === JSON.stringify([{ key: 'teamA', label: 'Team A' }, { key: 'teamB', label: 'Team B' }]), st);
+      } finally { s3.close(); }
+    }
     ok('CONTROL: the two refusal sentences differ, and only the operator one names VIBESPACE_PUBLIC_URL', WHYS['self-hosted'] !== WHYS.operator && /VIBESPACE_PUBLIC_URL/.test(WHYS.operator) && !/VIBESPACE_PUBLIC_URL/.test(WHYS['self-hosted']) && /Tailscale/.test(WHYS['self-hosted']));
   }
   ok('the door registry: dropline\'s door is what the route consulted (and a bad kind is refused at registration)', (() => { try { doors.register('../x', { landing() { }, page() { } }); return false; } catch { return true; } })());

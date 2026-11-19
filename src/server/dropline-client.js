@@ -206,6 +206,9 @@ function create({ integrations = null, pluginOn = () => true, base = DROPLINE_BA
   }
   /** the landing's code → the pair, WRITTEN, then /v1/me names the account on the card */
   async function connectWith({ clientId, code, verifier, redirectUri }) {
+    // B-1e9a cure 3 (the read): a vendor call whose result cannot be kept is not made — a lock that landed between Connect and
+    // this landing refuses BEFORE the code is exchanged (the pair could not be written); the code stays unspent
+    if (typeof tokens.writable === 'function' && !tokens.writable()) throw lockedError();
     let res;
     // POST https://api.fish.audio/oauth/token (grant_type=authorization_code + the PKCE verifier; no secret)
     try { res = await fetch(`${oauthBase}/oauth/token`, form({ grant_type: 'authorization_code', code, client_id: clientId, redirect_uri: redirectUri, code_verifier: verifier })); } catch (e) { throw new DroplineError('failed', `Fish Audio unreachable: ${e && e.message}`, { status: 502 }); }

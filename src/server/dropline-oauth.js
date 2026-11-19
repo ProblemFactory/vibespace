@@ -101,8 +101,9 @@ function create({ client, flows, integrations = () => null, instanceUrl = () => 
   const sign = (clear) => crypto.createHmac('sha256', key).update(clear).digest('base64url');
   const store = () => { try { return integrations() || null; } catch { return null; } };
   const safeCall = (fn, dflt) => { try { return fn(); } catch { return dflt; } };
-  // B-1e9a cure: the tokens record read for the kept registration — a LOCKED vault is said (`locked`), never read as «none» in silence
-  const readKept = () => { try { return { rec: tokens && typeof tokens.read === 'function' ? tokens.read() : null, locked: false }; } catch (e) { return { rec: null, locked: !!(e && e.code === 'vault_locked') }; } };
+  // B-1e9a: the tokens record read for the kept registration — a locked vault gives none HERE (the plan's client id only); a
+  // Connect asks the lock itself before anything (start(): the sealed file's writable(), cure 3)
+  const readKept = () => { try { return tokens && typeof tokens.read === 'function' ? tokens.read() : null; } catch { return null; } };
   /** the deployment's client: the row's own clientId/relayUrl, else the cluster preset's. B-e0d1: presetsFor answers the
    *  WIRE shape (key + label, never a value), so `presetsFor(KIND)[0].values` was always {}, and «own» was the EFFECTIVE values
    *  (the preset folded in) — `preset` never said true. Now the store's OWN resolution is read by its source: its pick (a
@@ -119,8 +120,7 @@ function create({ client, flows, integrations = () => null, instanceUrl = () => 
     } catch { }
     // B-1e9a: a cluster preset carrying no client (an apiKey-only one) keeps the hub's OWN registration beside its tokens,
     // never as the person's row (that row would outrank the WHOLE preset — its apiKey lost after the first Connect)
-    const keptRead = source === 'cluster' && !preset.clientId ? readKept() : { rec: null, locked: false };
-    const kept = String((keptRead.rec || {}).registeredClientId || '').trim();
+    const kept = String(((source === 'cluster' && !preset.clientId ? readKept() : null) || {}).registeredClientId || '').trim();
     const clientId = String(own.clientId || preset.clientId || kept || '').trim();
     // B-1e9a cure (主开发's must): a fleet client's relay page is picked by THE OWNING RULE — consent-road relayPick({fleet, preset}):
     // the preset's own page › the fleet's (fleet.json relayUrl) › none; a bad address (plain http, a query, a loopback host) is
@@ -128,7 +128,7 @@ function create({ client, flows, integrations = () => null, instanceUrl = () => 
     const fleetClient = !!preset.clientId && !own.clientId;
     const relayUrl = fleetClient
       ? relayPick({ fleet: String(safeCall(() => (st && typeof st.fleetRelayUrl === 'function' ? st.fleetRelayUrl() : ''), '') || ''), preset: String(preset.relayUrl || '') }).url
-      : String(own.relayUrl || '').trim() || relayPageOf(preset.relayUrl);   // a cluster preset's page by the same rule's address check (relayPageOf)
+      : relayPageOf(String(own.relayUrl || preset.relayUrl || ''));   // cure 3: the person's own page too — ONE page check for every relay page (it passed an https prefix test alone)
     return { clientId, relayUrl, preset: fleetClient, source };
   }
   const httpsBase = () => { const u = String((typeof instanceUrl === 'function' ? instanceUrl() : '') || '').replace(/\/+$/, ''); return /^https:\/\/[^/]+$/.test(u) ? u : ''; };
@@ -151,10 +151,14 @@ function create({ client, flows, integrations = () => null, instanceUrl = () => 
     const plan = callbackPlan();
     if (!plan.redirectUri) { const cw = connectWhy(); return { ok: false, why: cw === 'preset-no-relay' ? 'preset-no-relay' : 'needs-https', connectWhy: cw, message: CONNECT_WHYS[cw] }; }   // B-1e9a cure: its own code — «needs-https» would not be true
     // B-1e9a cure: the sealed tokens file is read (and written) here — a LOCKED vault refuses BY NAME on every road (it answered an
-    // unnamed 500 with the store's raw sentence); with no file at all a locked vault reads as empty, so the write after a registration
-    // is the one that meets the lock — refused by name too (that one registration is spent: the vendor's, not a sealed secret)
+    // unnamed 500 with the store's raw sentence); cure 3: the lock is asked first (below), so no registration is made that a locked
+    // write would throw away — the guards on the read and the write remain for a lock that lands during the register
     const locked = (e) => !!(e && e.code === 'vault_locked');
     const LOCKED = { ok: false, why: 'vault-locked', message: 'the vault is locked — the Dropline sign-in opens after the owner unlocks it on this instance\'s page; the owner has already been told (For you names what is waiting on it)' };
+    // B-1e9a cure 3 (主开发's must — a vendor call whose result cannot be kept is not made): the lock is asked BEFORE anything, of
+    // the sealed file's writer (with no file a locked read gives nothing, and a registration would be thrown away at the write);
+    // the guards around the read and the write stay the second line. A store with no writable() (a stand-in) answers as before.
+    if (tokens && typeof tokens.writable === 'function' && !tokens.writable()) return LOCKED;
     let rec;
     try { rec = tokens.read() || {}; } catch (e) { if (locked(e)) return LOCKED; throw e; }
     let clientId = plan.clientId;
@@ -163,11 +167,11 @@ function create({ client, flows, integrations = () => null, instanceUrl = () => 
       clientId = (await client.register({ redirectUri: plan.redirectUri })).clientId;
       const st = store();
       try {
-        if (plan.source === 'cluster') tokens.write({ ...rec, registeredFor: plan.redirectUri, registeredClientId: clientId });   // B-1e9a: over a preset, beside the tokens — never the person's row
-        else {
-          if (st && typeof st.setIntegration === 'function') st.setIntegration(KIND, { clientId });
-          tokens.write({ ...rec, registeredFor: plan.redirectUri });
-        }
+        // the person's row first (it needs no vault: a lock landing during the register still keeps the registered client id)
+        if (plan.source !== 'cluster' && st && typeof st.setIntegration === 'function') st.setIntegration(KIND, { clientId });
+        const fresh = tokens.read() || {};   // cure 3: read AGAIN after the await — a refresh or another write that landed meanwhile is kept
+        if (plan.source === 'cluster') tokens.write({ ...fresh, registeredFor: plan.redirectUri, registeredClientId: clientId });   // B-1e9a: over a preset, beside the tokens — never the person's row
+        else tokens.write({ ...fresh, registeredFor: plan.redirectUri });
       } catch (e) { if (locked(e)) return LOCKED; throw e; }
       log.log?.(`[voice] registered this deployment's Dropline client (callback via ${plan.via})`);
     }
@@ -188,8 +192,9 @@ function create({ client, flows, integrations = () => null, instanceUrl = () => 
     return { ok: !!r.ok, why: r.ok ? null : (r.why || 'failed'), user: r.ok && r.result ? r.result.user || null : null, error: r.ok ? null : (r.error || null) };
   }
   /** B-1e9a cure: an instance that Connected over an apiKey-only preset BEFORE the fix keeps the person's row {clientId} — it
-   *  hides the whole preset (its key unused). This names it (the row's id, for the card's one press: «use the cluster's
-   *  settings» = PUT /api/integrations/<id> {use:'cluster'}); a person's row holding anything more is their own choice. */
+   *  hides the whole preset (its key unused). This names it (the row's id, for the card's door: the one press «use the
+   *  cluster's settings» = PUT /api/integrations/<id> {use:'cluster'}, or the picker of presetChoices below); a person's row
+   *  holding anything more is their own choice. */
   function presetShadowed() {
     const st = store();
     try {
@@ -198,7 +203,19 @@ function create({ client, flows, integrations = () => null, instanceUrl = () => 
       return own.length === 1 && own[0] === 'clientId' && typeof st.presetsFor === 'function' && st.presetsFor(KIND).length > 0 ? KIND : null;
     } catch { return null; }
   }
-  return { start, landing, page: landingHtml, callbackPlan, connectWhy, presetShadowed, sign, flowStatus: (id) => flows.status(id) };
+  /** B-1e9a cure 3: the cluster's settings to choose from when the store has NO default to give (publicView clusterAvailable
+   *  false — several and none preferred, or a saved choice the cluster no longer provides) and offers several: the card draws
+   *  them as its picker (PUT {clusterKey}, which setClusterKey accepts for any of these options) instead of a press the store
+   *  would refuse. Key + label only (the store's wire shape). */
+  function presetChoices() {
+    if (!presetShadowed()) return null;
+    try {
+      const v = store().publicView(KIND);
+      const o = v && !v.clusterAvailable && Array.isArray(v.clusterOptions) ? v.clusterOptions : [];
+      return o.length > 1 ? o.map((x) => ({ key: String(x.key), label: String(x.label || x.key) })) : null;
+    } catch { return null; }
+  }
+  return { start, landing, page: landingHtml, callbackPlan, connectWhy, presetShadowed, presetChoices, sign, flowStatus: (id) => flows.status(id) };
 }
 
 module.exports = { create, connectWhyOf, pkcePair, stateOf, stateVerdict, tokenFile, landingHtml, CALLBACK_PATH, KIND, STATE_TTL_MS };
