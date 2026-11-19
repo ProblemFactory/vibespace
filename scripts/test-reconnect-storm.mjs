@@ -41,6 +41,11 @@
 // within one round trip of the un-hide, its slot cancelled; (f) loadHistory
 // rebuilds (calls minus identical-skips) ≤ the control's.
 //
+// (d) RESTATED (ckpt61 hosted cure, 2.369.412's hosted proof, 主开发 2026-11-19 20:39Z): the block put waits on the
+// attach's path, so «the handler's CPU inside the emit» became the receipt's prefix, not the attach — the leg is now judged
+// on the WHOLE attach (a second preload meter: every continuation from the receipt to the «attached» send, charged to the
+// loop turn it runs in), with a control that it sees the work (the control's Σ ≥ 0.5 µs a KB of the slabs it shipped) and
+// the receipt-only meter as its red control; the sends must spread (≤ the displayed windows in one turn). Its history:
 // (d) THE STORM'S WORK ON THE SERVER'S LOOP (lane reconnect-storm-band, 2.369.272). It
 // used to compare the server's loop-delay max (a 5 ms histogram) to the control's
 // + max(25 %, 25 ms): a wall reading with a literal band, and RED wherever the box was
@@ -308,6 +313,42 @@ WS.prototype.emit = function (ev, data, ...a) { let attach = false; if (ev === '
   if (!open) { open = true; turn++; setImmediate(() => { open = false; }); }
   const c0 = cpu(); try { return e1.call(this, ev, data, ...a); } finally { const c = cpu(); try { fs.appendFileSync(${JSON.stringify(attachLog)}, Date.now() + ' ' + turn + ' ' + ((c.user - c0.user) + (c.system - c0.system)) + '\\n'); } catch {} } }; } } }
 `);
+  // …and (ckpt61 hosted cure, 主开发 2026-11-19 20:39Z) THE WHOLE ATTACH, turn by turn. The block put waits on the attach's
+  // path (B-299b A2's task-state warm before the join, the paced resume's read off the loop): the emit above now ends at the
+  // FIRST wait, so it times the receipt's prefix, not the attach. This meter follows every attach from its receipt to its
+  // «attached» send: every async resource made inside the attach's handler — transitively, through each continuation — is
+  // TAGGED (async_hooks init), each tagged callback's thread CPU is charged to the loop TURN it runs in (a turn = the work
+  // charged before the next check phase: one setImmediate per turn that had attach work — never a spinning loop). Lines:
+  // 'W <ms> <turn> <cpu µs> <attaches charged> <attached sends> <receipts>' per turn; 'S <ms> <turn> <cpu µs of that attach>' at
+  // each «attached» send. The hook is enabled at the first attach (the boot runs without it); the same meter runs in both
+  // variants, so its own cost is in both.
+  const wholeLog = scratch(`rstorm-${variant}-whole`); dirs.add(wholeLog);
+  fs.appendFileSync(preload, `{ const wt = require('worker_threads'); if (wt.isMainThread) { let WS = null; try { WS = require('module').createRequire(process.cwd() + '/server.js')('ws'); } catch {}
+if (WS && WS.prototype && typeof WS.prototype.emit === 'function') { const ah = require('async_hooks');
+const now = typeof process.threadCpuUsage === 'function' ? () => { const c = process.threadCpuUsage(); return c.user + c.system; } : () => { const c = process.cpuUsage(); return c.user + c.system; };
+const tag = new Map(), open = new Map(); let cur = null, quiet = false, cid = null, ccur = null, c0 = 0, wturn = 0, wopen = false, acc = new Map(), sent = 0, recv = 0, hook = null, doneLater = null;
+const flush = () => { wopen = false; let us = 0; for (const v of acc.values()) us += v; try { fs.appendFileSync(${JSON.stringify(wholeLog)}, 'W ' + Date.now() + ' ' + wturn + ' ' + us + ' ' + acc.size + ' ' + sent + ' ' + recv + '\\n'); } catch {} acc = new Map(); sent = 0; recv = 0; };
+const markTurn = () => { if (wopen) return; wopen = true; wturn++; quiet = true; try { setImmediate(flush); } finally { quiet = false; } };
+// work is charged ONLY while its attach is open (from its receipt to its «attached» send): what a resource made inside an
+// attach does after that send (a worker started lazily, a cache's timer) is not the attach's
+const charge = (sid, us) => { if (!open.has(sid)) return; markTurn(); acc.set(sid, (acc.get(sid) || 0) + us); open.set(sid, open.get(sid) + us); };
+const done = (sid) => { if (!open.has(sid)) return; try { fs.appendFileSync(${JSON.stringify(wholeLog)}, 'S ' + Date.now() + ' ' + wturn + ' ' + open.get(sid) + '\\n'); } catch {} open.delete(sid); };
+const arm = () => { if (hook) return; hook = ah.createHook({
+  init(id, type, trigger) { try { if (quiet) return; const sid = cur || tag.get(ah.executionAsyncId()) || tag.get(trigger); if (sid) tag.set(id, sid); } catch {} },
+  before(id) { try { if (cid !== null) return; const sid = tag.get(id); if (sid && open.has(sid)) { cid = id; ccur = sid; c0 = now(); } } catch {} },
+  after(id) { try { if (id !== cid) return; const sid = ccur; cid = null; ccur = null; charge(sid, now() - c0); if (doneLater === sid) { doneLater = null; done(sid); } } catch {} },
+  destroy(id) { try { tag.delete(id); } catch {} } }); hook.enable(); };
+const e1 = WS.prototype.emit;
+WS.prototype.emit = function (ev, data, ...a) { let sid = null; if (ev === 'message' && data && data.length < 65536) { try { const t = String(data); if (/^\\{"type":"attach"[,}]/.test(t)) { const m = /"sessionId":"([^"]+)"/.exec(t); sid = m ? m[1] : 'attach'; } } catch {} }
+  if (!sid || cur !== null || cid !== null) return e1.call(this, ev, data, ...a);
+  arm(); open.set(sid, 0); markTurn(); recv++; cur = sid; const s0 = now();
+  try { return e1.call(this, ev, data, ...a); } finally { cur = null; charge(sid, now() - s0); if (doneLater === sid) { doneLater = null; done(sid); } } };
+const sd = WS.prototype.send;
+WS.prototype.send = function (data, ...a) { const r = sd.call(this, data, ...a);
+  try { if (typeof data === 'string' && data.startsWith('{"type":"attached"')) { const m = /"sessionId":"([^"]+)"/.exec(data.slice(0, 300)); const sid = m && m[1];
+    if (sid && open.has(sid)) { markTurn(); sent++; if (cur === sid || ccur === sid) doneLater = sid; else done(sid); } } } catch {}
+  return r; }; } } }
+`);
   let journal = '';
   const srv = spawn(process.execPath, ['-r', preload, 'server.js'], { cwd: wt, stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stub, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' } });
@@ -497,7 +538,18 @@ WS.prototype.emit = function (ev, data, ...a) { let attach = false; if (ev === '
     const turns = new Map(); for (const r of rows) { const x = turns.get(r.turn) || { n: 0, us: 0 }; x.n++; x.us += r.us; turns.set(r.turn, x); }
     const ts = [...turns.values()];
     return { clock, n: rows.length, early: rows.filter((r) => r.t < connWall + VV.RECONNECT_BASE_MS).length, turns: ts.length, sumUs: rows.reduce((a, r) => a + r.us, 0),
-      maxTurnN: Math.max(0, ...ts.map((x) => x.n)), maxTurnUs: Math.max(0, ...ts.map((x) => x.us)), perTurn: ts.map((x) => x.n) };
+      maxTurnN: Math.max(0, ...ts.map((x) => x.n)), maxTurnUs: Math.max(0, ...ts.map((x) => x.us)), perTurn: ts.map((x) => x.n), firstUs: rows.length ? rows[0].us : 0 };
+  };
+  // THE WHOLE ATTACH over one storm (the meter above): per loop turn the CPU of every attach's work in it — receipts and
+  // continuations alike — and the «attached» sends it made; per attach, its whole CPU from receipt to send
+  const wholeWork = ({ dropWall, endWall }) => {
+    const turns = [], done = [];
+    try { for (const l of fs.readFileSync(wholeLog, 'utf8').split('\n')) { const p = l.split(' '); if (p[0] !== 'W' && p[0] !== 'S') continue; const v = p.slice(1).map(Number); if (!(v[0] >= dropWall && v[0] <= endWall)) continue;
+      if (p[0] === 'W') turns.push({ t: v[0], turn: v[1], us: v[2], n: v[3], sent: v[4], recv: v[5] }); else done.push({ t: v[0], turn: v[1], us: v[2] }); } } catch { }
+    const sends = turns.filter((x) => x.sent > 0);
+    return { turns: turns.length, sumUs: turns.reduce((a, x) => a + x.us, 0), maxTurnUs: Math.max(0, ...turns.map((x) => x.us)),
+      maxTurnSent: Math.max(0, ...turns.map((x) => x.sent)), sendTurns: sends.length, perTurnSent: sends.map((x) => x.sent), done: done.length,
+      doneSumUs: done.reduce((a, x) => a + x.us, 0), firstTurnUs: turns.length ? turns[0].us : 0 };
   };
   const appended = liveTurns();
   await sleep(300); // the preload's 250 ms flush: the append's own reads (none — the harness writes) never land in the window
@@ -507,7 +559,7 @@ WS.prototype.emit = function (ev, data, ...a) { let attach = false; if (ev === '
   await sleep(Math.max(0, s1.endWall + 33000 - Date.now()));
   const gaps = telemetryGaps(s1.dropWall - 200, s1.endWall + 33000);
   const sum = (xs) => Math.round(xs.reduce((a, b) => a + b, 0) * 10) / 10;
-  const result = { storm: s1, gapMax: gaps.length ? Math.max(...gaps) : 0, gaps, loopMax: loopDelay(s1.dropWall, s1.endWall), work: attachWork(s1),
+  const result = { storm: s1, gapMax: gaps.length ? Math.max(...gaps) : 0, gaps, loopMax: loopDelay(s1.dropWall, s1.endWall), work: attachWork(s1), whole: wholeWork(s1),
     // the server's own heartbeat counters over the storm's round(s): a round tainted by a stall > 5 s, a client terminated
     hb: { tainted: telemetryEvents('ws-heartbeat-stall-skip', s1.dropWall - 200, s1.endWall + 33000).length, terminated: telemetryEvents('ws-heartbeat-terminate', s1.dropWall - 200, s1.endWall + 33000).length },
     appended, jsonl: jsonlReads(s1.dropWall, s1.endWall),
@@ -677,7 +729,7 @@ const summarize = (name, r) => {
     hidFirst: Math.min(...hid.map((i) => acks.get(i) ?? 1e9)),
     hidLastAttached: Math.max(...hid.map((i) => att.get(i) ?? -1)),
     rebuilds: r.storm.lh - r.storm.skips + r.storm.resets, lh: r.storm.lh, skips: r.storm.skips, resets: r.storm.resets, catchUps: r.storm.catchUps,
-    gapMax: r.gapMax, gaps: r.gaps, loopMax: r.loopMax, work: r.work, hb: r.hb,
+    gapMax: r.gapMax, gaps: r.gaps, loopMax: r.loopMax, work: r.work, whole: r.whole, hb: r.hb,
     appended: r.appended, jsonlMain: r.jsonl.main, jsonlWorker: r.jsonl.worker, parseBytes: r.parseBytes, parseMs: r.parseMs,
     sendsPerWin: [...Array(19).keys()].map((i) => r.storm.sends.filter((s) => s.i === i).length),
     frames: r.storm.frames, heldApplied: r.storm.heldApplied, heldViews: r.storm.heldViews,
@@ -710,8 +762,24 @@ check(`(c) fix: the 14 hidden windows attached from their queue SLOT (${hiddenQu
 const ms1 = (us) => (us / 1000).toFixed(1);
 check(`(d) fix: rate-limited at the server's own receipts — it handled every re-attach (fix ${F.work.n}/${N}, control ${C.work.n}/${N}), ${F.work.early} of them before the first slot came due at +${VV.RECONNECT_BASE_MS} ms (≤ the ${N_VISIBLE} displayed; control ${C.work.early}), in ${F.work.turns} loop turns [${F.work.perTurn.join(',')}] (control ${C.work.turns} [${C.work.perTurn.join(',')}])`,
   F.work.n === N && C.work.n === N && F.work.early <= N_VISIBLE, { fix: F.work, control: C.work });
-check(`(d) fix: the storm never lands on the server's loop in one piece — its costliest turn ${ms1(F.work.maxTurnUs)} ms (${F.work.maxTurnN} attaches) ≤ ½ the control's whole storm ${ms1(C.work.sumUs)} ms (${F.work.clock === 'threadCpuUsage' ? 'thread' : 'process'} CPU in the attach handlers — a starved box stretches the wall, not the work; ratio ${(F.work.maxTurnUs / Math.max(1, C.work.sumUs)).toFixed(2)}, the control's own costliest turn ${(C.work.maxTurnUs / Math.max(1, C.work.sumUs)).toFixed(2)} of it in ${C.work.turns} turn${C.work.turns === 1 ? '' : 's'}; Σ printed: ${ms1(F.work.sumUs)} vs ${ms1(C.work.sumUs)} ms — the stagger spreads the work, it does not shrink it)`,
-  F.work.n === N && F.work.maxTurnUs * 2 <= C.work.sumUs);
+// (d) THE STORM'S WHOLE WORK (ckpt61 hosted cure, 主开发 2026-11-19 20:39Z): the receipt-only meter above stops at the
+// attach's FIRST wait since the block put waits on its path (B-299b A2's warm, the paced resume's off-loop read) — its 1.9 ms
+// «control storm» on the hosted run could not hold the 12 MB of slabs the control shipped. The whole-attach meter (the
+// preload's second block) follows each attach from its receipt to its «attached» send, every continuation charged to the
+// turn it runs in. ITS CONTROL — it SEES the work: the control's attaches ship their slabs, and building + stringifying +
+// sending them costs CPU in proportion to the bytes (JavaScript does not do it faster than 2 GB/s: SEES_US_PER_KB). RED
+// CONTROL: the receipt-only meter over the same control storm stays under that floor. THEN the leg is judged for real: the
+// fix's costliest turn of whole work ≤ ½ the control's whole storm + the fresh server's first receipt (a one-time cost every
+// fresh server pays in its first turn, whatever the storm), and its «attached» sends spread — at most the displayed windows
+// in one turn. Were the continuations of many attaches to resume in ONE turn (the 2.369.16 stall back), this is red: the product's
+const SEES_US_PER_KB = 0.5;
+const ctlKB = C.frames.bytes / 1024, seesUs = ctlKB * SEES_US_PER_KB;
+check(`(d) the whole-attach meter SEES the work: the control's whole storm ${ms1(C.whole.sumUs)} ms ≥ ${SEES_US_PER_KB} µs a KB of the ${ctlKB.toFixed(0)} KB its attaches shipped (${ms1(seesUs)} ms); every attach completed (fix ${F.whole.done}/${N}, control ${C.whole.done}/${N})`,
+  F.whole.done === N && C.whole.done === N && C.whole.sumUs >= seesUs, { fix: F.whole, control: C.whole, controlKB: Math.round(ctlKB) });
+check(`(d) RED CONTROL: the receipt-only meter (the one the hosted run judged by) reads the same control storm at ${ms1(C.work.sumUs)} ms — under the floor (${ms1(seesUs)} ms): the floor tells a meter that stops at the first wait from one that sees the attach`,
+  C.work.sumUs < seesUs, { receiptOnly: C.work.sumUs, seesUs });
+check(`(d) fix: the storm never lands on the server's loop in one piece — its costliest turn of WHOLE attach work ${ms1(F.whole.maxTurnUs)} ms ≤ ½ the control's whole storm ${ms1(C.whole.sumUs)} ms + the fresh server's first receipt ${ms1(F.work.firstUs)} ms; its «attached» sends in ${F.whole.sendTurns} turns [${F.whole.perTurnSent.join(',')}], at most ${F.whole.maxTurnSent} in one (≤ the ${N_VISIBLE} displayed) — ${F.work.clock === 'threadCpuUsage' ? 'thread' : 'process'} CPU, never a wall reading`,
+  F.whole.done === N && F.whole.maxTurnUs <= C.whole.sumUs / 2 + F.work.firstUs && F.whole.maxTurnSent <= N_VISIBLE && F.whole.sendTurns >= N - N_VISIBLE + 1, { fix: F.whole, control: C.whole });
 check(`(d) the server's own heartbeat counters over both storms: no round tainted by a stall, no client terminated — the incident's failure (fix ${F.hb.tainted}/${F.hb.terminated}, control ${C.hb.tainted}/${C.hb.terminated})`,
   !F.hb.tainted && !F.hb.terminated && !C.hb.tainted && !C.hb.terminated);
 {
