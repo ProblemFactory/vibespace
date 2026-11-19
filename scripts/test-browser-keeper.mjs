@@ -120,7 +120,11 @@ const pfile = path.join(udd, 'DevToolsActivePort');
 const srv = http.createServer((q, r) => { r.setHeader('content-type', 'application/json'); r.end(JSON.stringify({ Browser: 'Chrome/154.0.8037.57', webSocketDebuggerUrl: 'ws://127.0.0.1:' + srv.address().port + '/devtools/browser/fake-0001' })); });
 srv.listen(0, '127.0.0.1', () => setTimeout(() => {
   if (mode === 'ok') fs.writeFileSync(pfile, srv.address().port + '\\n/devtools/browser/fake-0001\\n');
-  if (mode === 'stale') { fs.writeFileSync(pfile, '9\\n/devtools/browser/dead-0001\\n'); const t = new Date(Date.now() - 3600e3); fs.utimesSync(pfile, t, t); }
+  // the stale file WHOLE (lane bl-windows): written aside, backdated, renamed in — never a fresh file for a moment (the launcher reads
+  // mtime and text apart: a poll between a write and its backdate took the dead port 9 — a box-zone red); a stall where the old
+  // window was proves it shut. 'stale-torn' = the old order (write, then backdate) with a stall between: the control
+  if (mode === 'stale') { const tmp = pfile + '.tmp'; fs.writeFileSync(tmp, '9\\n/devtools/browser/dead-0001\\n'); const t = new Date(Date.now() - 3600e3); fs.utimesSync(tmp, t, t); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300); fs.renameSync(tmp, pfile); }
+  if (mode === 'stale-torn') { fs.writeFileSync(pfile, '9\\n/devtools/browser/dead-0001\\n'); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1500); const t = new Date(Date.now() - 3600e3); fs.utimesSync(pfile, t, t); }
 }, 120));
 `, { mode: 0o755 });
 const chromeLog = () => { try { return fs.readFileSync(path.join(STATE, 'chrome.log'), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
@@ -139,6 +143,12 @@ let t = Date.now();
 r = await ATL.spawnChrome({ exe: path.join(FAKE_BIN, 'google-chrome'), argv: [`--user-data-dir=${PD}`], env: baseEnv, profileDir: PD, logFile: path.join(S, 'io.log'), waitMs: 900 });
 const stalePid = chromeLog().pop().pid; await until(() => !alive(stalePid));
 ok(!r.ok && r.code === 'cdp_port_missing' && /stale one/.test(r.error) && Date.now() - t >= 900 && !alive(stalePid), 'stale: a port file older than the spawn is never taken — cdp_port_missing at the deadline, the Chrome it spawned ended', r);
+// CONTROL (lane bl-windows — a race proven by a stall placed in its window, never by the clock): the fixture's OLD order, the
+// file written fresh and backdated only after a stall ⇒ the launcher takes the dead port 9 — the box-zone red's own values
+setMode('stale-torn');
+r = await ATL.spawnChrome({ exe: path.join(FAKE_BIN, 'google-chrome'), argv: [`--user-data-dir=${PD}`], env: baseEnv, profileDir: PD, logFile: path.join(S, 'io.log'), waitMs: 900 });
+const tornPid = chromeLog().pop().pid; try { process.kill(tornPid, 'SIGTERM'); } catch { } await until(() => !alive(tornPid), 5000);
+ok(r.ok === true && r.port === 9 && r.wsPath === '/devtools/browser/dead-0001' && !alive(tornPid), 'CONTROL — the stale file written fresh and backdated after a stall (the fixture\'s old order): the launcher takes the dead port 9 — the leg above writes it whole and runs WITH a stall in that window', { ...r, child: undefined });
 setMode('never');
 r = await ATL.spawnChrome({ exe: path.join(FAKE_BIN, 'google-chrome'), argv: [`--user-data-dir=${PD}`], env: baseEnv, profileDir: PD, logFile: path.join(S, 'io.log'), waitMs: 600 });
 const neverPid = chromeLog().pop().pid; await until(() => !alive(neverPid));
