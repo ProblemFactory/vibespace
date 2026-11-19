@@ -170,7 +170,11 @@ console.log('— ③ THE TAB-RELEASE CENSUS, its route pins and its CONTROLS');
     };
   };
   const RECORDS = { detach: 'the agent\'s detach (its CLI `close`), the UI\'s Detach, a pin that moves, a re-judge (narrowing / verb-time / a Task Group change), Delete…, a conversation found on another machine', dropChild: 'a helper\'s handle dropped', reconcile: 'the tick\'s carrier drop (a conversation that ended, a killed session) and the boot\'s (a restart without it); a helper\'s lease with its parent' };
-  const RELEASE_DECLARED = { '(declaration)': 'the empty registry before the first load', load: 'the normalizer drops only a MALFORMED row — a well-formed lease never leaves at load' };
+  const RELEASE_DECLARED = { '(declaration)': 'the empty registry before the first load',
+    // the B-f276 remainder (bl-jobs, block line 236 — checkpoint 60's red, read one by one against the unit's own law «while the
+    // registry is held no browser is ended for a record nobody could read»): both are a LOAD's bookkeeping, no live tab ends
+    loadFrom: 'the load over one read\'s answer — at the boot it replaces the empty registry; at the read again it replaces the HELD one, which is empty and unread: while held no lease can be recorded (every act that records is refused store_unread; attach finds no profile in it), so no lease is in memory to lose; the normalizer drops only a MALFORMED row',
+    heldRetry: 'a read again whose LOAD THREW: the half-loaded registry (loadFrom is synchronous — nothing attached meanwhile, no tab was bound to it) is put back to the empty, unread one and the store held again; the file keeps every lease and the next try loads it — nothing is stopped or closed' };
   const FORGETS = { removeProfile: 'the record is gone (removal needs no lease and a stopped browser)', stop: 'the browser stopped — every page went with it (a lease held at the stop is marked tabClosed; a key that left before answers the binary\'s own tab_gone, never another tab)', attach: 'the key is back — it holds a lease on its own tab again', adoptOrphan: 'moved into tabClosed first: every left key is marked', noteLeftTab: 'the bound — an evicted key is marked tabClosed first (fail closed, verify r4)' };
   const ENDS = { closeLeaseSession: 'the tab a narrowing took closes under its session — marked when the close went through', stop: 'every lease of a stopped browser is marked (never a switch: it re-opens each lease\'s own tab under its session)' };
   const ENDS_DECLARED = { endHuman: 'THEIR tabs, each by id — never a conversation\'s',

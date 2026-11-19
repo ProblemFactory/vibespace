@@ -41,6 +41,7 @@ console.log('§1 an UNREADABLE registry is HELD — nothing written over it, the
     const out = { held: k.held ? k.held() : false, words: k.heldWords ? String(k.heldWords() || '') : '' };
     out.create = await codeOf(() => k.createProfile({ label: 'new one', provider: 'chromium' }));
     out.registered = await codeOf(() => k.profileDirRegistered('/var/empty/vs-work-profile'));
+    out.attach = await codeOf(() => k.attach({ profileId: 'bp-0000b001', browserKey: 'vs-bk-aaaaaaaaaaaa' }));   // checkpoint 60's cure: by name, never «no profile»
     out.pin = (() => { try { return k.pinForCreate({ priorKey: 'vs-bk-aaaaaaaaaaaa', resume: true }); } catch (e) { return { threw: e && e.code }; } })();
     const b = await k.boot().catch((e) => ({ threw: e && e.message }));
     out.boot = b && b.held ? 'held' : 'ran';
@@ -64,8 +65,15 @@ console.log('§1 an UNREADABLE registry is HELD — nothing written over it, the
   };
   const r = await scene(require(path.join(ROOT, 'src/server/browser-keeper.js')), 'held');
   ok(r.held && /could not be read/.test(r.words), 'browser-profiles.json unreadable at load: HELD, and its words say so', r);
-  ok(r.create === 'store_unread' && r.registered === 'store_unread' && r.pin && r.pin.held === true, 'while held a create is refused by name, «is this folder a profile\'s» answers by name (the kept sweep\'s catch then keeps the folder), the create\'s pin ladder answers «held» — never «no longer exists»', r);
+  ok(r.create === 'store_unread' && r.registered === 'store_unread' && r.attach === 'store_unread' && r.pin && r.pin.held === true, 'while held a create is refused by name, «is this folder a profile\'s» answers by name (the kept sweep\'s catch then keeps the folder), the create\'s pin ladder answers «held» — never «no longer exists»', r);
   ok(r.boot === 'held', 'the boot judges NOTHING on the held registry (no reconcile, no orphan census, no first commit)', r);
+  // checkpoint 60's red cure, ALSO CURED: an ATTACH while held is refused by name — CONTROL: the refusal cut answers «no profile» (a false
+  // answer: the registry is EMPTY because it is unread)
+  const ATT = "    refuseIfHeld('attaching a browser');";
+  ok(KSRC.split(ATT).length === 2, 'control setup: the attach\'s held refusal is found once');
+  const ra = await scene(MJ.load('src/server/browser-keeper.js', anchored(KSRC, ATT, '    /* MUTANT: no held refusal */', 'attach-held-cut'), 'attach-held-cut'), 'held-attach-cut', { lift: false });
+  ok(r.attach === 'store_unread' && ra.attach === 'not-found', 'while held an attach is refused by name (store_unread); CONTROL (the refusal cut, in a copy): «no profile» for a profile that may exist — RED', { attach: r.attach, cut: ra.attach });
+
   if (asRoot) rootSkip('the held file is kept byte for byte (the boot wrote nothing over it)'); else ok(r.keptWhileHeld, 'nothing is written over the held file', r);
   ok(r.lifted && r.profile && r.lifts === 1 && r.file === 1 && r.rewritten, 'read again OFF the loop: the hold lifts, the profile is back, the OWED boot runs (its commit re-saves the file — the writer stamped), the steps after the boot run once (onReadAgain), the file still holds its profile', r);
   // its read r1 (N3a): a copy whose read skips the owed boot — the file is never re-saved by the boot (nothing judged after the read)

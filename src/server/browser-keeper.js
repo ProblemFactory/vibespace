@@ -5197,6 +5197,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
    */
   async function attach({ profile: ref, profileId, browserKey, sessionId = null, taskIds = [], groupsUnreadable = false, alias = '', by = 'agent' } = {}) {
     ensureLoaded();
+    refuseIfHeld('attaching a browser');   // checkpoint 60's red cure, ALSO CURED: while held the registry is EMPTY and unread — «no profile» was a false answer
     const p = profileId ? profile(profileId) : profileByRef(ref);
     if (!p) throw namedError('not-found', `no profile ${profileId || ref}`);
     if (p.ambiguous) throw namedError('ambiguous', `"${ref}" names ${p.ambiguous.length} profiles (${p.ambiguous.join(', ')}) — use the id`);
