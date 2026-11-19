@@ -2801,7 +2801,7 @@ app.post('/api/agent/jobs', answersEveryThrow(async function jobsCreateRoute(req
   // without what it was asked to carry (its --vault values)
   // the manager design's piece 7: the person's grant to wake an ended conversation is never an agent's to write — refused BY NAME
   if (b && b.wakesEndedOwner !== undefined) return res.status(403).json({ error: require('./delivery-wake.js').GRANT_REFUSAL, code: 'wake_grant_person_only' });
-  const known = new Set([...Object.keys(spec).filter((k) => k !== 'owner'), 'token', 'notifyOk', 'stopWithOwner', 'proposeWake']);   // proposeWake: piece 7's --propose-wake (filed once the job exists)
+  const known = new Set([...Object.keys(spec).filter((k) => k !== 'owner'), 'token', 'proposeWake', 'notifyOk', 'stopWithOwner']);   // proposeWake: piece 7's --propose-wake (filed once the job exists)
   // B-70f9 ②: the stored stop-with-conversation flag is RETIRED (0 of 2 950 stored jobs carried it) — an older CLI's `false` passes;
   // asked for, it is refused by name with its door: the notice where a person ends the conversation
   if (b.stopWithOwner === true) return res.status(400).json({ error: '--stop-with-owner was retired: when a person ends or archives a conversation, a notice names the jobs it still runs and «Stop these too» stops them in one press — nothing was created', code: 'retired-flag' });
