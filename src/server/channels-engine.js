@@ -520,7 +520,8 @@ function create(deps = {}) {
     // read of the live members whose membership is still being READ (their roster entry's `groupsUnread`); null = none
     readMembership = null,
     // B-43bc third cure (L4): the kept deliveries' bound — `{convs, perConv}` (default 200 conversations × 50 each); past it a
-    // kept delivery is dropped and SAID. A suite narrows it to reach the bound with a few records.
+    // kept delivery is dropped and SAID; and the hand-over mark's — `{handedPer, handedKeys}` (default 200 records a name,
+    // 2 000 names), its eviction SAID too. A suite narrows them to reach a bound with a few records.
     heldBound = null,
     // lane R5 (drain rule 18): the PER-SECOND bucket runs on a PHYSICAL clock —
     // the vendor meters requests in real time, whatever the engine's logical
@@ -5705,22 +5706,45 @@ function create(deps = {}) {
   // never handed to that watcher again, whichever road brings it back. Memory, as the kept and owed batches it guards (a
   // restart forgets all three; a pending row is durable and leaves at its own hand-over, clearCarried); bounded per watcher
   // and in all, the oldest first.
-  const HANDED_PER = 200, HANDED_KEYS = 2000;
-  const handed = new Map();   // `${adapterId}/${convId}\u0000${pk}` → Map(record id → at)
+  // B-43bc FOURTH cure (主开发 19:23Z — L1 RESTATED: one message starts at most ONE billed turn to one RECEIVING
+  // conversation, whichever watcher row or road carries it): the same map holds a second name a hand-over — the RECEIVER
+  // (`→<cid>`) — read at each site once its target is resolved (`wasHandedTo`) and written with the watcher's name. The
+  // watcher's name still holds a group whose round-robin would pick ANOTHER member for a record the group already handed.
+  const HANDED_PER = Math.max(1, Math.floor(Number(heldBound && heldBound.handedPer) || 200));
+  const HANDED_KEYS = Math.max(1, Math.floor(Number(heldBound && heldBound.handedKeys) || 2000));
+  const handed = new Map();   // `${adapterId}/${convId}\u0000${pk}` | `${adapterId}/${convId}\u0000→${cid}` → Map(record id → at)
+  // the mark's OWN eviction is SAID: the first time, then at most one line a HELD_LOOK_MS with the count since the last
+  let handedForgot = 0, handedSaidAt = 0;
+  function sayHandedOver(n) {
+    handedForgot += n;
+    const t = now();
+    if (handedSaidAt && t - handedSaidAt < HELD_LOOK_MS) return;
+    handedSaidAt = t;
+    log.warn(`[channels] the hand-over mark passed its bound (${HANDED_PER} records a name, ${HANDED_KEYS} names) — ${handedForgot} oldest forgotten since the last line; a road that brings one of them back could hand it again`);
+    handedForgot = 0;
+  }
   function wasHanded(adapterId, convId, pk, h) {
     const m = handed.get(`${adapterId}/${convId}\u0000${pk}`);
     const id = h && h.record ? h.record.id : null;
     return !!(m && id !== null && id !== undefined && m.has(String(id)));
+  }
+  /** THE RECEIVER'S MARK: a record this receiving conversation (`cid`) was already handed on this channel conversation,
+   *  through ANY watcher row or road (false with no receiver). */
+  function wasHandedTo(adapterId, convId, cid, h) {
+    return !!cid && wasHanded(adapterId, convId, `→${cid}`, h);
   }
   function markHanded(adapterId, convId, pk, hits, t) {
     if (!pk) return;
     const k = `${adapterId}/${convId}\u0000${pk}`;
     const m = handed.get(k) || new Map();
     for (const h of hits || []) { const id = h && h.record ? h.record.id : null; if (id === null || id === undefined) continue; m.delete(String(id)); m.set(String(id), t); }
-    while (m.size > HANDED_PER) m.delete(m.keys().next().value);
+    let gone = 0;
+    while (m.size > HANDED_PER) { m.delete(m.keys().next().value); gone++; }
     handed.delete(k); handed.set(k, m);
-    while (handed.size > HANDED_KEYS) handed.delete(handed.keys().next().value);
+    while (handed.size > HANDED_KEYS) { const [, m0] = handed.entries().next().value; handed.delete(handed.keys().next().value); gone += m0.size; }
+    if (gone) sayHandedOver(gone);
   }
+  function markHandedTo(adapterId, convId, cid, hits, t) { if (cid) markHanded(adapterId, convId, `→${cid}`, hits, t); }
   /** THE WAKE'S AUDIENCE STILL BEING READ (the cure's should): only the members THIS conversation's watchers can depend on —
    *  a via row names its member; a group row (or an exception anywhere) can name any member still being read. */
   function unreadAudience(en) {
@@ -8310,7 +8334,7 @@ function create(deps = {}) {
     // the carried rows first (oldest first, as a wake carries held hits); a fresh hit that is also parked rides once
     const all = parked ? [...parked.hits, ...hits.filter((h) => !(h.record && parked.ids.has(h.record.id)))] : hits;
     // B-43bc third cure — L1: the mark, read at the wake site — a record this watcher was already handed rides no stash
-    const fresh = (seen ? all.filter((h) => !(h.record && seen.has(h.record.id))) : all).filter((h) => !wasHanded(rec.id, convId, pk, h));
+    const fresh = (seen ? all.filter((h) => !(h.record && seen.has(h.record.id))) : all).filter((h) => !wasHanded(rec.id, convId, pk, h) && !wasHandedTo(rec.id, convId, target.cid, h));
     const carriedNow = fromPending || parked;
     if (!fresh.length && !(parked && parked.elided)) {
       if (parked) await store.index.update(() => { const e2 = store.index.entry(rec.id, convId, { create: false }); if (!e2) return; healP2(e2); clearCarried(e2, pk, wakeEffOf(e2), parked); }, { durable: true });   // this batch already handed them to that session
@@ -8325,7 +8349,7 @@ function create(deps = {}) {
     try { st = deliver.stashFor(target.cid, { source: 'channel', kind: 'notification', fromName, text, about: stashAbout({ keys: [`${rec.id}/${convId}`], cid: target.cid }) }); }
     catch (err) { log.warn(`[channels] ${rec.id}/${convId}: the next-turn notification for ${pk} could not be stashed: ${(err && err.message) || err}`); if (!fromPending) await keepPending(rec, convId, fresh.filter((h) => !parked || !parked.hits.includes(h)), 0, pk, 'next-turn'); return { ok: false, held: true, why: 'stash-failed' }; }
     if (batch && batch.got) { const g0 = batch.got.get(target.cid) || new Set(); for (const h of fresh) if (h.record && h.record.id) g0.add(h.record.id); batch.got.set(target.cid, g0); }
-    markHanded(rec.id, convId, pk, fresh, now());   // B-43bc third cure — L1: the mark, written at the wake site
+    markHanded(rec.id, convId, pk, fresh, now()); markHandedTo(rec.id, convId, target.cid, fresh, now());   // B-43bc — L1: the mark (both names), written at the wake site
     // the carried rows were handed over — clear those and only those (still on the chain: the next reader sees them gone)
     if (parked) { await store.index.update(() => { const e2 = store.index.entry(rec.id, convId, { create: false }); if (!e2) return; healP2(e2); clearCarried(e2, pk, wakeEffOf(e2), parked); }, { durable: true }); notify([convId]); }
     // THE LEDGER DOOR — the free stash road (lane channel-recall-ledger, B-70d2): the hits reached this conversation, so a
@@ -8512,10 +8536,19 @@ function create(deps = {}) {
         groups.push({ title: humanNameOf(rec, en) || en.id, convId: en.id, hits: pend.hits, elided: pend.elided, ...(via ? { via } : {}) });   // B-c127: the ladder
         held.push({ key: en.key, id: en.id, eff, carried: pend, admit: wakeAdmitOf(en, item, { rec }) });
       }
+      const item0 = { watcher: w, source, patternId };
+      const target = groups.length ? resolveTarget(w, null, null, (cid, gs) => held.every((h) => h.admit(cid, gs))) : { cid: null, why: 'nothing-pending' };   // lane grants-unify: a member that may hear EVERY conversation of the digest
+      // B-43bc fourth cure — L1: the RECEIVER's mark, read once the digest's target is resolved — a record this receiving
+      // conversation was already handed (through any watcher) rides no digest; a conversation left with nothing leaves it
+      if (target.cid) for (let i = groups.length - 1; i >= 0; i--) {
+        const g = groups[i], h = held[i];
+        const keep = g.hits.filter((x) => !wasHandedTo(rec.id, h.id, target.cid, x));
+        if (keep.length === g.hits.length) continue;
+        if (!keep.length && !g.elided) { spent.push({ id: h.id, eff: h.eff, carried: { ids: h.carried.ids, elidedTagged: 0, elidedUntagged: 0 } }); groups.splice(i, 1); held.splice(i, 1); continue; }
+        g.hits = keep; h.carried = { ...h.carried, hits: keep };
+      }
       if (spent.length) await store.index.update(() => { for (const x of spent) { const e2 = store.index.entry(rec.id, x.id, { create: false }); if (!e2) continue; healP2(e2); clearCarried(e2, pk, x.eff, x.carried); } }, { durable: true });
       if (!groups.length) return { ok: false, why: 'nothing-pending' };
-      const item0 = { watcher: w, source, patternId };
-      const target = resolveTarget(w, null, null, (cid, gs) => held.every((h) => h.admit(cid, gs)));   // lane grants-unify: a member that may hear EVERY conversation of the digest
       const why = !target.cid ? target.why : null;
       const pace = target.cid ? F.paceVerdict((w.stats && w.stats.wakes) || [], t, F.digestCap(w)) : { ok: true };
       if (!target.cid || !pace.ok) {
@@ -8569,7 +8602,7 @@ function create(deps = {}) {
           noteDelivered(e2, h.carried.hits, target.cid, t);   // THE LEDGER DOOR — the digest road (lane channel-recall-engine-leg): EVERY conversation the digest carried (was: single-conversation wakes only — a recall after a digest said nothing)
         }
       }, { durable: true }); } catch (err) { log.warn(`[channels] scope digest ${sKey}: the ledger could not take the outcome — the reservation stays counted: ${(err && err.message) || err}`); }
-      if (ok || stashed) for (const h of held) markHanded(rec.id, h.id, pk, h.carried.hits, t);   // B-43bc third cure — L1: the mark, written at the wake site
+      if (ok || stashed) for (const h of held) { markHanded(rec.id, h.id, pk, h.carried.hits, t); markHandedTo(rec.id, h.id, target.cid, h.carried.hits, t); }   // B-43bc — L1: the mark (both names), written at the wake site
       log.log(`[channels] scope digest ${sKey} → ${target.name || target.cid}: ${groups.length} conversation(s), ${n} hit(s) — ${ok ? `delivered via ${r.lane || 'message'}` : `${stashed ? 'stashed for the next turn' : 'held'}: ${(r && r.reason) || 'refused'}`}`);
       notify(held.map((h) => h.key));
       return { ok, stashed, cid: target.cid, n, conversations: groups.length };
@@ -8838,22 +8871,6 @@ function create(deps = {}) {
     const hits = fromPending ? [...freshHits] : [...carried.hits, ...freshHits];
     const newElided = fromPending ? 0 : elided;
     const allElided = fromPending ? carried.elided : elided + carried.elided;
-    // B-43bc third cure — L1: THE MARK, read HERE (the wake site), never by a caller: a record this watcher was already
-    // handed on this conversation — or one this block would carry twice (its pending row and the same record fresh) — goes
-    // once; nothing left ⇒ no wake, the carried rows done
-    {
-      const once = new Set();
-      const had = new Set(hits.filter((h) => { const id = h && h.record ? h.record.id : null; if (id === null || id === undefined) return false; if (once.has(String(id)) || wasHanded(rec.id, convId, pk, h)) return true; once.add(String(id)); return false; }));
-      if (had.size) {
-        freshHits = freshHits.filter((h) => !had.has(h) && !wasHanded(rec.id, convId, pk, h));
-        hits.splice(0, hits.length, ...hits.filter((h) => !had.has(h)));
-        if (!hits.length && !allElided) {
-          await store.index.update(() => { const e2 = store.index.entry(rec.id, convId, { create: false }); if (!e2) return; healP2(e2); clearCarried(e2, pk, eff, carried); }, { durable: true });
-          log.log(`[channels] ${rec.id}/${convId}: ${pk} — ${had.size} record(s) already handed to this watcher; not handed twice`);
-          return { ok: true, deduped: true, cid: null, n: 0 };
-        }
-      }
-    }
     const target = resolveTarget(w, batch, null, wakeAdmitOf(en, item, { rec }));
     // ONE BATCH NEVER BILLS ONE SESSION TWICE (R4): a session this batch
     // already reached through another watcher (a named agent, a group's
@@ -8868,6 +8885,23 @@ function create(deps = {}) {
         return { ok: true, deduped: true, cid: target.cid, n: 0 };
       }
       hits.splice(0, hits.length, ...unseen);
+    }
+    // B-43bc — L1, THE MARK, read HERE (the wake site), never by a caller, once the target is resolved: a record THIS
+    // WATCHER was already handed on this conversation, or one THIS RECEIVING conversation was already handed here through
+    // ANY watcher row or road (the fourth cure, 主开发 19:23Z) — or one this block would carry twice (its pending row and the
+    // same record fresh) — goes once; nothing left ⇒ no wake, the carried rows done
+    {
+      const once = new Set();
+      const had = new Set(hits.filter((h) => { const id = h && h.record ? h.record.id : null; if (id === null || id === undefined) return false; if (once.has(String(id)) || wasHanded(rec.id, convId, pk, h) || wasHandedTo(rec.id, convId, target.cid, h)) return true; once.add(String(id)); return false; }));
+      if (had.size) {
+        freshHits = freshHits.filter((h) => !had.has(h) && !wasHanded(rec.id, convId, pk, h) && !wasHandedTo(rec.id, convId, target.cid, h));
+        hits.splice(0, hits.length, ...hits.filter((h) => !had.has(h)));
+        if (!hits.length && !allElided) {
+          await store.index.update(() => { const e2 = store.index.entry(rec.id, convId, { create: false }); if (!e2) return; healP2(e2); clearCarried(e2, pk, eff, carried); }, { durable: true });
+          log.log(`[channels] ${rec.id}/${convId}: ${pk} — ${had.size} record(s) already handed to this watcher or to ${target.cid || 'its receiver'}; not handed twice`);
+          return { ok: true, deduped: true, cid: target.cid || null, n: 0 };
+        }
+      }
     }
     if (!target.cid) {
       if (!fromPending) await keepPending(rec, convId, freshHits, newElided, pk);
@@ -8957,7 +8991,7 @@ function create(deps = {}) {
       try { const st = deliver.stashFor(target.cid, { source: 'channel', kind: 'notification', fromName, text, about: stashAbout({ keys: [`${rec.id}/${convId}`], cid: target.cid, wake: true }) }); stashed = true; if (st && st.stored === false) log.warn(`[channels] ${target.cid}: ${st.why}`); } catch (err) { log.warn(`[channels] stash failed: ${(err && err.message) || err}`); }
     }
     if ((ok || stashed) && batch && batch.got) { const g0 = batch.got.get(target.cid) || new Set(); for (const h of hits) if (h.record && h.record.id) g0.add(h.record.id); batch.got.set(target.cid, g0); }
-    if (ok || stashed) markHanded(rec.id, convId, pk, hits, t);   // B-43bc third cure — L1: the mark, written at the wake site
+    if (ok || stashed) { markHanded(rec.id, convId, pk, hits, t); markHandedTo(rec.id, convId, target.cid, hits, t); }   // B-43bc — L1: the mark (the watcher's name and the receiver's), written at the wake site
     const words = ok ? { why: null, refused: null } : refusalWords(still, r, 'wake');
     const wk = { ...wk0, ok, lane: ok ? (r.lane || 'message') : (stashed ? 'stash' : 'none'), why: words.why, refused: words.refused };
     try { await store.index.update((ix) => {

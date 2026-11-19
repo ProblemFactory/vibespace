@@ -5137,9 +5137,9 @@ console.log('\n§10c a next-turn watch\'s stored hits ride the free stash at boo
   const k1 = noCarry.mod ? await liveLeg(noCarry.mod) : null;
   ok('§10c CONTROL: without the hit\'s carry the probe answers as on d035f7cfa — the second hit alone, the parked one still pending', k1 && k1.stashed === 1 && J(k1.blocks) === '["F"]' && k1.pending === 1, noCarry.err || J(k1));
   const CARRY_QUEUE = "        track(billedWake({ conv: key }, () => stashHits(rec, en.id, [], { item, pk, carry: true, prefer: cid })));";
-  // (B-43bc third cure: the wake site's hand-over mark is a SECOND lock on this double — the control lifts it too, so it
-  // still shows what the chain alone holds)
-  const STASH_MARK = '    const fresh = (seen ? all.filter((h) => !(h.record && seen.has(h.record.id))) : all).filter((h) => !wasHanded(rec.id, convId, pk, h));\n';
+  // (B-43bc: the wake site's hand-over mark — the watcher's name and the receiver's — is a SECOND lock on this double; the
+  // control lifts it too, so it still shows what the chain alone holds)
+  const STASH_MARK = '    const fresh = (seen ? all.filter((h) => !(h.record && seen.has(h.record.id))) : all).filter((h) => !wasHanded(rec.id, convId, pk, h) && !wasHandedTo(rec.id, convId, target.cid, h));\n';
   const offChain = mutantModule('src/server/channels-engine.js', [[CARRY_QUEUE, "        track(stashHits(rec, en.id, [], { item, pk, carry: true, prefer: cid }));"], [STASH_MARK, '    const fresh = seen ? all.filter((h) => !(h.record && seen.has(h.record.id))) : all;\n']]);   // stale-pins: kept (the control plants the line as it was before the mark)
   const k3 = offChain.mod ? await liveLeg(offChain.mod, { then: 'turn-twice' }) : null;
   ok('§10c CONTROL: the turn\'s carry read OFF the conversation\'s chain hands the parked message over TWICE on two asks in one tick', k3 && k3.stashed === 2 && k3.parkedOut === 2, offChain.err || J(k3));

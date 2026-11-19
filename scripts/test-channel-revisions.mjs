@@ -191,8 +191,10 @@ ok(J(d1.stashedTo) === J(['agent-1']), 'nobody else hears anything (agent-2 was 
 }
 
 // ⑦b the same message carried to the same conversation twice (a re-delivery five minutes on)
-// (B-43bc third cure, L1: one record is handed at most once a WATCHER — the second carry comes by a second watcher, the
-// group agent-1 is a member of, as a scope digest beside a wake does)
+// (B-43bc fourth cure, L1 RESTATED 2026-11-19: one message starts at most ONE billed turn to one RECEIVING conversation,
+// whichever watcher row carries it — the second watcher of the same agent, the group it is a member of, hands NOTHING more.
+// Two ledger rows for one message in one conversation still live in a STORED ledger written before that law: the leg
+// plants the second row, and the recall is still ONE note, the first time)
 async function twiceLeg(ENGM, tag) {
   const w = mkEngine(ENGM, path.join(ROOT, tag), { roster: () => [{ cid: 'agent-1', name: 'Worker', groups: ['G'] }, { cid: 'agent-2', name: 'Other', groups: [] }] });
   await w.eng.pass(A, { force: true });
@@ -202,16 +204,19 @@ async function twiceLeg(ENGM, tag) {
   await w.eng.onFresh(w.recOf(), OPS, [m8], { origin: 'test' });
   w.clock.advance(5 * 60e3);
   await w.eng.setGrain(A, { kind: 'conversation', convId: OPS }, { access: [acc(AGENT), acc(GRP0)], watchers: [{ principal: GRP0 }] });
-  await w.eng.onFresh(w.recOf(), OPS, [m8], { origin: 'test' });
+  await w.eng.onFresh(w.recOf(), OPS, [m8], { origin: 'test' });   // the group's round-robin picks agent-1: it has m8 — nothing handed
+  const handedTwice = w.delivered.length;
+  // the stored ledger of an older release: a second row for m8 in this conversation, five minutes on
+  await w.eng.store.index.update(() => { const e2 = w.eng.store.index.entry(A, OPS, { create: false }); const r0 = e2 && (e2.wokeFor || []).find((x) => x && x.vid === m8.vendorId); if (r0) e2.wokeFor.push({ ...r0, at: Number(r0.at) + 5 * 60e3 }); }, { durable: true });
   const rows = w.woke(OPS).filter((x) => x.vid === m8.vendorId).map((x) => x.at);
   w.recall(m8.vendorId);
   await w.hourLater();
-  const out = { wakes: w.delivered.length, rows, notes: w.notes().map((x) => x.text) };
+  const out = { wakes: w.delivered.length, handedTwice, rows, notes: w.notes().map((x) => x.text) };
   await w.eng.stop();
   return out;
 }
 const t1 = await twiceLeg(ENG, 'twice');
-ok(t1.wakes === 2 && t1.rows.length === 2 && t1.notes.length === 1 && t1.notes[0].includes(iso(Math.min(...t1.rows))), 'a message carried to one conversation TWICE (two ledger rows): its recall is still ONE note — the first wake\'s time', J(t1));
+ok(t1.handedTwice === 1 && t1.wakes === 1 && t1.rows.length === 2 && t1.notes.length === 1 && t1.notes[0].includes(iso(Math.min(...t1.rows))), 'a SECOND watcher of the same agent hands it nothing more (one wake: the receiver\'s mark); a stored ledger with TWO rows for that message (an older release\'s) still recalls ONE note — the first row\'s time', J(t1));
 {
   const src = engineSource(REPO);
   const cut = src.replace('if (!due.some((d) => d.cid === w.cid)) due.push({ cid: w.cid, at: w.at });', 'due.push({ cid: w.cid, at: w.at });');
@@ -585,6 +590,8 @@ console.log('⑧ B-43bc: a member still being read is read first — the wake an
     return { st, w: mkEngine(ENGM, path.join(ROOT, tag), { roster, readMembership, log, heldBound: bound }) };
   };
   const toCount = (w, cid) => w.delivered.filter((d) => d.cid === cid).length;
+  // RECORDS handed (主开发 19:23Z: legs count records, not wakes) — the woken-for ledger's rows of ONE message for ONE receiver
+  const recs = (w, cid, r, conv = OPS) => w.woke(conv).filter((x) => x && x.cid === cid && x.vid === Rev.wokeKeyOf(r.vendorId)).length;
   const handedN = (w, cid) => w.delivered.filter((d) => d.cid === cid).reduce((n, d) => n + Number((/: (\d+) messages?/.exec((d.o && d.o.cardText) || '') || [])[1] || 0), 0);
   const saidKept = (st, kind, cid) => st.said.filter((m) => m.includes(`a ${kind} judged on «still reading» for ${cid} — KEPT`)).length;
   const saidOver = (st, key, what) => st.said.filter((m) => m.includes(`${key}: past the kept bound`) && m.includes(`${what} kept for agent-1 DROPPED`)).length;
@@ -595,13 +602,13 @@ console.log('⑧ B-43bc: a member still being read is read first — the wake an
     const m8 = w.tail(OPS).slice(-1)[0];
     st.m['agent-1'].state = 'unread';
     await w.eng.onFresh(w.recOf(), OPS, [m8], { origin: 'test' });
-    const then = toCount(w, 'agent-1');
+    const then = recs(w, 'agent-1', m8);
     const said = saidKept(st, 'wake', 'agent-1');
     st.m['agent-1'].state = 'read';   // the read lands
     await w.eng.membershipChanged();   // the store's signal (channels-wiring rosterChanged) runs the kept deliveries' look
-    const after = toCount(w, 'agent-1');
+    const after = recs(w, 'agent-1', m8);
     await w.eng.heldPass();   // a second look delivers nothing more
-    const twice = toCount(w, 'agent-1');
+    const twice = recs(w, 'agent-1', m8);
     await w.eng.stop();
     return { then, said, after, twice };
   }
@@ -627,7 +634,7 @@ console.log('⑧ B-43bc: a member still being read is read first — the wake an
   }
   const kw = await keptWakeLeg(ENG, 'kept-wake');
   ok(kw.then === 0 && kw.said === 1 && kw.after === 1 && kw.twice === 1,
-    `a WAKE for a via row whose member is still being read past the bound is KEPT (0 then), SAID once, and reaches it ONCE after the read lands (${kw.after}, ${kw.twice} in all)`, J(kw));
+    `a WAKE for a via row whose member is still being read past the bound is KEPT (0 records then), SAID once, and the message reaches it ONCE after the read lands (${kw.after} record, ${kw.twice} in all)`, J(kw));
   const kn = await keptNoteLeg(ENG, 'kept-note');
   ok(kn.then === 0 && kn.unmarked && kn.said === 1 && kn.after === 1 && kn.twice === 1,
     `a RECALL in that window: no note then, its «noted» mark left UNSET, said once — the note arrives ONCE after the read lands (${kn.after})`, J(kn));
@@ -660,19 +667,19 @@ console.log('⑧ B-43bc: a member still being read is read first — the wake an
     const m8 = w.tail(OPS).slice(-1)[0];
     st.m['agent-1'].state = 'unread';
     await w.eng.onFresh(w.recOf(), OPS, [m8], { origin: 'test' });
-    const then = toCount(w, 'agent-1');
+    const then = recs(w, 'agent-1', m8);
     st.m['agent-1'].state = 'read';
     await w.eng.membershipChanged();
     await w.eng.heldPass();
-    const all = toCount(w, 'agent-1');
+    const all = recs(w, 'agent-1', m8);
     await w.eng.stop();
     return { then, all };
   }
   const ca = await carriesLeg(ENG, 'carries');
-  ok(ca.then === 1 && ca.all === 1, `L1 + L2: a member being read that still CARRIES its group is woken by the group's round-robin, EXACTLY once (${ca.then} then, ${ca.all} in all)`, J(ca));
+  ok(ca.then === 1 && ca.all === 1, `L1 + L2: a member being read that still CARRIES its group is handed the message by the group's round-robin EXACTLY once (${ca.then} record then, ${ca.all} in all)`, J(ca));
   const caM = await carriesLeg(MUT.load('src/server/channels-engine.js', secondForm(src), 'second-form-group-key'), 'carries-second');
   const caR = await carriesLeg(MUT.load('src/server/channels-engine.js', noMark(secondForm(src)), 'second-form-no-mark'), 'carries-red');
-  ok(caM.all === 1 && caR.all === 2, `RED CONTROL: the second form (the group's OWN key kept) with no mark wakes it TWICE (${caR.all}); with the mark at the wake site alone, once (${caM.all})`, J({ caM, caR }));
+  ok(caM.all === 1 && caR.all === 2, `RED CONTROL: the second form (the group's OWN key kept) with no mark hands it TWICE (${caR.all} records); with the mark at the wake site alone, once (${caM.all})`, J({ caM, caR }));
 
   // L2 — the group has NO live member now: its hits are the durable pending row (as on the release) — delivered ONCE, with
   // the group's next hit; nothing kept beside it
@@ -705,22 +712,22 @@ console.log('⑧ B-43bc: a member still being read is read first — the wake an
     const m8 = w.tail(OPS).slice(-1)[0];
     st.m['agent-1'].state = 'unread';
     await w.eng.onFresh(w.recOf(), OPS, [m8], { origin: 'test' });   // agent-2 reached, agent-1 kept
-    const first = [toCount(w, 'agent-1'), toCount(w, 'agent-2')];
+    const first = [recs(w, 'agent-1', m8), recs(w, 'agent-2', m8)];
     st.m['agent-2'].state = 'unread';   // the second member is being read again …
     st.m['agent-1'].state = 'read';   // … when the first member's read lands
     await w.eng.membershipChanged();
     st.m['agent-2'].state = 'read';
     await w.eng.membershipChanged();
     await w.eng.heldPass();
-    const all = [toCount(w, 'agent-1'), toCount(w, 'agent-2')];
+    const all = [recs(w, 'agent-1', m8), recs(w, 'agent-2', m8)];
     await w.eng.stop();
     return { first, all };
   }
   const sl = await secondLeg(ENG, 'second-unread');
-  ok(J(sl.first) === '[0,1]' && J(sl.all) === '[1,1]', `L3: a second member going unread between the first wake and the re-run gets nothing twice — agent-1 once after its read, agent-2 once in all (${J(sl.all)})`, J(sl));
+  ok(J(sl.first) === '[0,1]' && J(sl.all) === '[1,1]', `L3: a second member going unread between the first wake and the re-run gets nothing twice — the message handed to agent-1 once after its read, to agent-2 once in all (${J(sl.all)} records)`, J(sl));
   const slM = await secondLeg(MUT.load('src/server/channels-engine.js', keepsAnew(src), 'keeps-anew'), 'second-anew');
   const slR = await secondLeg(MUT.load('src/server/channels-engine.js', noMark(keepsAnew(src)), 'keeps-anew-no-mark'), 'second-red');
-  ok(J(slR.all) === '[1,2]' && J(slM.all) === '[1,1]', `RED CONTROL: a re-run that keeps anew (the second form) with no mark wakes agent-2 TWICE (${J(slR.all)}); with the mark at the wake site alone, once (${J(slM.all)})`, J({ slM, slR }));
+  ok(J(slR.all) === '[1,2]' && J(slM.all) === '[1,1]', `RED CONTROL: a re-run that keeps anew (the second form) with no mark hands agent-2 the message TWICE (${J(slR.all)} records); with the mark at the wake site alone, once (${J(slM.all)})`, J({ slM, slR }));
 
   // L5 — the read lands and says NOT a member: the kept delivery reaches nobody
   async function wrongLeg(ENGM, tag) {
@@ -734,7 +741,7 @@ console.log('⑧ B-43bc: a member still being read is read first — the wake an
     st.m['agent-1'].state = 'out';   // the read lands: agent-1 left G
     await w.eng.membershipChanged();
     await w.eng.heldPass();
-    const all = toCount(w, 'agent-1');
+    const all = recs(w, 'agent-1', m8);
     await w.eng.stop();
     return { said, all };
   }
@@ -743,8 +750,8 @@ console.log('⑧ B-43bc: a member still being read is read first — the wake an
   const STILL_JUDGE = '    let e = hasVia ? { ...e0, watchers: e0.watchers.filter((it) => F.memberStill(it.watcher, members)) } : e0;\n';
   ok(src.split(STILL_JUDGE).length === 2, 'control setup: the wake-time membership judge (channels-access wakeEffOf) is present once');
   const wrR = await wrongLeg(MUT.load('src/server/channels-engine.js', src.replace(STILL_JUDGE, '    let e = e0;\n'), 'no-member-judge'), 'wrong-recipient-red');
-  ok(wr.said === 1 && wr.all === 0, `L5: kept, said once — then the read lands and says NOT a member: the kept wake reaches nobody (${wr.all})`, J(wr));
-  ok(wrR.all >= 1, `RED CONTROL: without the wake-time membership judge the member the read excludes is woken (${wrR.all})`, J(wrR));
+  ok(wr.said === 1 && wr.all === 0, `L5: kept, said once — then the read lands and says NOT a member: the kept message reaches nobody (${wr.all} records)`, J(wr));
+  ok(wrR.all >= 1, `RED CONTROL: without the wake-time membership judge the member the read excludes is handed it (${wrR.all} records)`, J(wrR));
 
   // L4 — past the bound it is SAID: one line a conversation and member until that member's hold clears
   async function boundLeg(ENGM, tag) {
@@ -772,6 +779,52 @@ console.log('⑧ B-43bc: a member still being read is read first — the wake an
   ok(src.split(SAY_OVER).length === 2, 'control setup: the bound\'s line is present once');
   const bdR = await boundLeg(MUT.load('src/server/channels-engine.js', src.replace(SAY_OVER, SAY_OVER + '    return;\n'), 'silent-bound'), 'kept-bound-red');
   ok(bdR.r1.ann === 0 && bdR.r1.ops === 0 && bdR.handed === 2, `RED CONTROL: a silent bound (the second form) drops the kept deliveries and says nothing (${J(bdR.r1)})`, J(bdR));
+
+  // L1 RESTATED (主开发 19:23Z) — ONE billed turn to one RECEIVING conversation, whichever watcher row or road carries it.
+  // THE SCENE: the group's own row AND agent-1's via row; agent-1 is being read and does not carry the group. The group's
+  // round-robin finds nobody (its DURABLE pending row); the via row is kept; the read lands and the re-run hands agent-1 the
+  // message; the next message's batch carries the group's pending row to the SAME agent — the receiver's mark leaves it out
+  async function receiverLeg(ENGM, tag) {
+    const { st, w } = mkWorld2(ENGM, tag, { 'agent-1': { state: 'read', stuck: true }, 'agent-2': { state: 'out' } });
+    await w.eng.pass(A, { force: true });
+    await w.eng.setGrain(A, { kind: 'conversation', convId: OPS }, { access: [acc(GRP)], watchers: [{ principal: GRP }, VIA('agent-1')] });
+    const [m7, m8] = w.tail(OPS).slice(-2);
+    st.m['agent-1'].state = 'unread';
+    await w.eng.onFresh(w.recOf(), OPS, [m8], { origin: 'test' });
+    const pending = ((w.eng.store.index.live()[`${A}/${OPS}`] || {}).pending || []).filter((p) => p && p.record && p.record.id === m8.id).length;
+    st.m['agent-1'].state = 'read';
+    await w.eng.membershipChanged();   // the kept re-run hands agent-1 m8 (under the via row's name)
+    await w.eng.onFresh(w.recOf(), OPS, [m7], { origin: 'test' });   // the next batch: the group's pending row reaches agent-1 too
+    const out = { pending, m8: recs(w, 'agent-1', m8), m7: recs(w, 'agent-1', m7), left: ((w.eng.store.index.live()[`${A}/${OPS}`] || {}).pending || []).length };
+    await w.eng.stop();
+    return out;
+  }
+  const rv = await receiverLeg(ENG, 'receiver');
+  const RECEIVER = '    return !!cid && wasHanded(adapterId, convId, `→${cid}`, h);\n';
+  ok(src.split(RECEIVER).length === 2, 'control setup: the receiver\'s mark is read through one function, present once');
+  const rvR = await receiverLeg(MUT.load('src/server/channels-engine.js', src.replace(RECEIVER, '    return false;\n'), 'no-receiver-mark'), 'receiver-red');
+  ok(rv.pending === 1 && rv.m8 === 1 && rv.m7 === 1 && rv.left === 0,
+    `L1 RESTATED: the group's row and a via row, agent-1 being read and not carrying the group — the group's pending row (${rv.pending}) and the kept via row both lead to agent-1: m8 handed to it ONCE in all (${rv.m8} record), m7 once, the pending row cleared`, J(rv));
+  ok(rvR.m8 === 2, `RED CONTROL: the receiver's mark cut — the group's pending row hands agent-1 the message it already has: ${rvR.m8} records`, J(rvR));
+
+  // THE MARK'S OWN EVICTION IS SAID (a name past its bound forgets its oldest — one line, then one a look at most)
+  async function markBoundLeg(ENGM, tag) {
+    const { st, w } = mkWorld2(ENGM, tag, { 'agent-1': { state: 'read' }, 'agent-2': { state: 'out' } }, { bound: { handedPer: 1 } });
+    await w.eng.pass(A, { force: true });
+    await w.eng.setGrain(A, { kind: 'conversation', convId: OPS }, { access: [acc(GRP)], watchers: [VIA('agent-1')] });
+    const [m7, m8] = w.tail(OPS).slice(-2);
+    await w.eng.onFresh(w.recOf(), OPS, [m7], { origin: 'test' });
+    await w.eng.onFresh(w.recOf(), OPS, [m8], { origin: 'test' });   // each name holds one record: m7 is forgotten — SAID
+    const out = { said: st.said.filter((m) => m.includes('the hand-over mark passed its bound (1 records a name')).length, handed: [recs(w, 'agent-1', m7), recs(w, 'agent-1', m8)] };
+    await w.eng.stop();
+    return out;
+  }
+  const mb = await markBoundLeg(ENG, 'mark-bound');
+  const HANDED_SAY = '  function sayHandedOver(n) {\n';
+  ok(src.split(HANDED_SAY).length === 2, 'control setup: the mark\'s eviction line is present once');
+  const mbR = await markBoundLeg(MUT.load('src/server/channels-engine.js', src.replace(HANDED_SAY, HANDED_SAY + '    return;\n'), 'silent-mark'), 'mark-bound-red');
+  ok(mb.said === 1 && J(mb.handed) === '[1,1]', `the hand-over mark's own eviction is SAID — one line (${mb.said}) when a name past its bound forgets its oldest record`, J(mb));
+  ok(mbR.said === 0, `RED CONTROL: a silent mark forgets and says nothing (${mbR.said})`, J(mbR));
 
   // the DIGEST's hold and its bound — reactions on what agent-1 SENT here, while its Task Groups are being read
   async function digestLeg(ENGM, tag) {
