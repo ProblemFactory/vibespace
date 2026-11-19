@@ -176,7 +176,7 @@ function unknownLegs(M) {
   ]) {
     ok(src.split(needle).length === 2, `the mutation anchor for «${leg}» is in the module once`);
     const repl = needle.startsWith('      add(') ? '      void 0;' : '    if (false) add(\'job_unknown\',';
-    const Mx = MUT.load('src/conversation-facts.js', anchored(src, needle, repl, 'test-conversation-facts L178'), 'off-' + leg.replace(/\W+/g, '-').slice(0, 30));
+    const Mx = MUT.load('src/conversation-facts.js', anchored(src, needle, repl, 'off-' + leg), 'off-' + leg.replace(/\W+/g, '-').slice(0, 30));
     ok(JSON.stringify(redNames(Mx)) === JSON.stringify([leg]), `CONTROL its line switched off: EXACTLY «${leg}» goes red`, redNames(Mx));
   }
 }
@@ -369,7 +369,7 @@ console.log('D · the musts of the acceptance, each with its red control');
   const judge = (Mx, recs) => { const st = Mx.factsFresh(); for (const r of recs) Mx.factsStep(st, r, 1); return Mx.trackedFacts(st, K); };
   const init = (v) => (v === undefined ? { type: 'system', subtype: 'init' } : { type: 'system', subtype: 'init', claude_code_version: v });
   const cron = { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'CronCreate', input: {} }] } };
-  const mut = (needle, repl, tag) => { if (srcCF.split(needle).length !== 2) throw new Error('anchor missing: ' + tag); return MUTD.load('src/conversation-facts.js', anchored(srcCF, needle, repl, 'test-conversation-facts L371'), tag); };
+  const mut = (needle, repl, tag) => { if (srcCF.split(needle).length !== 2) throw new Error('anchor missing: ' + tag); return MUTD.load('src/conversation-facts.js', anchored(srcCF, needle, repl, tag), tag); };
   // MUST 1 — a newer CLI the tree has not measured reads unknown; RED: the span's upper bound dropped (today's «at least»)
   const m1 = mut("versionCmp(v, LEVEL_MEASURED_FROM) >= 0 && versionCmp(v, LEVEL_MEASURED_TO) <= 0;", 'versionCmp(v, LEVEL_MEASURED_FROM) >= 0;', 'no-upper-bound');
   ok(judge(CF, [init('2.1.999')]).background === null && Array.isArray(judge(m1, [init('2.1.999')]).background), 'MUST 1 a newer unmeasured CLI: unknown here; RED: with only a lower bound (the wrapper\'s old rule) it reads «no background work»');
@@ -505,7 +505,7 @@ console.log('E · round two: the boot proof, the set as seen, owned jobs, the fi
   const ND = "  if (x.state === 'D') return no('the process its file names is stuck in an uninterruptible wait');\n";
   const NS = "  if (x.selfStartMs + (x.ticks - x.selfTicks) * (1000 / USER_HZ) > m.startedAt + ADOPT_SLOP_MS) return no('its pid now names a process that started after the file was written');\n";
   if (srcCF.split(ND).length !== 2 || srcCF.split(NS).length !== 2) throw new Error('anchor missing: the proof lines');
-  const mD = MUTE.load('src/conversation-facts.js', anchored(srcCF, ND, '', 'no-start-look'), 'no-state-look'), mS = MUTE.load('src/conversation-facts.js', anchored(srcCF, NS, '', 'no-start-look'), 'no-start-look');
+  const mD = MUTE.load('src/conversation-facts.js', anchored(srcCF, ND, '', 'no-state-look'), 'no-state-look'), mS = MUTE.load('src/conversation-facts.js', anchored(srcCF, NS, '', 'no-start-look'), 'no-start-look');
   ok(P(mD, meta, reading(BIRTH - 400, 'D')).pid === 4242 && P(mS, meta, reading(BIRTH + 60000)).pid === 4242, 'MUST 1 RED: without the state look a stuck process is adopted; without the start look a recycled pid is');
 }
 {
@@ -755,7 +755,7 @@ console.log('G · round three: one bound for the tasks, the measured census repl
   const row = (t) => ({ ...IDLE, background: t.background, backgroundWhy: t.backgroundWhy });
   const srcCF = fs.readFileSync(path.join(REPO, 'src/conversation-facts.js'), 'utf8');
   const MUTG = mutantCopies('conversation-facts-r3', REPO);
-  const mut = (needle, repl, tag) => { if (srcCF.split(needle).length !== 2) throw new Error('anchor missing: ' + tag); return MUTG.load('src/conversation-facts.js', anchored(srcCF, needle, repl, 'test-conversation-facts L757'), tag); };
+  const mut = (needle, repl, tag) => { if (srcCF.split(needle).length !== 2) throw new Error('anchor missing: ' + tag); return MUTG.load('src/conversation-facts.js', anchored(srcCF, needle, repl, tag), tag); };
   const init = (v = '2.1.322') => ({ type: 'system', subtype: 'init', claude_code_version: v });
   const started = (id, kind = 'local_bash') => ({ type: 'system', subtype: 'task_started', task_id: id, task_type: kind, is_backgrounded: true });
   // MUST 1 — ONE bound (the kinds nested in each task), about a thousand; at the bound the OLDEST task leaves, counted (主开发 13:56Z)

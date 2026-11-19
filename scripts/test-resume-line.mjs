@@ -50,10 +50,10 @@ console.log('— ① TEN AT ONCE: never more than two in flight');
   // RED CONTROL: the constant patched to ten, in a mutant copy of the PURE arithmetic (the ORCH copy beside it requires it)
   const M = mutantCopies('resume-line', REPO);
   const pure = fs.readFileSync(path.join(REPO, 'src/resume-line.js'), 'utf8'), orch = fs.readFileSync(path.join(REPO, 'src/server/resume-line.js'), 'utf8');
-  const patched = anchored(pure, 'const MAX_STARTS = 2;', 'const MAX_STARTS = 10;', 'test-resume-line L52');
+  const patched = anchored(pure, 'const MAX_STARTS = 2;', 'const MAX_STARTS = 10;', 'max-starts-ten');
   ok(patched !== pure, '① (the constant patch applied)');
   const pureCopy = M.write('src/resume-line.js', patched, 'max-ten');
-  const orchCopy = anchored(orch, "require('../resume-line.js')", `require(${JSON.stringify(pureCopy)}, 'test-resume-line L55')`);   // the ORCH copy reads the PATCHED arithmetic
+  const orchCopy = anchored(orch, "require('../resume-line.js')", `require(${JSON.stringify(pureCopy)})`, 'the resume-line ORCH reads the patched copy');   // the ORCH copy reads the PATCHED arithmetic
   ok(orchCopy !== orch, '① (the ORCH copy rewired to the patched arithmetic)');
   const P = require(M.write('src/server/resume-line.js', orchCopy, 'max-ten'));
   const R2 = rig(), line2 = P.createResumeLine({ start: R2.start });

@@ -134,10 +134,10 @@ console.log('— ① END, THEN RESUME: live again, nothing sent, nothing billed'
   // RED CONTROL: the road with a first message (a mutant copy of the PURE resume message; the ORCH copy reads it) ⇒ the probe sees it
   const M = mutantCopies('conv-resume', REPO);
   const pure = fs.readFileSync(path.join(REPO, 'src/inbox-reopen.js'), 'utf8'), orch = fs.readFileSync(path.join(REPO, 'src/server/inbox-reopen.js'), 'utf8');
-  const patched = anchored(pure, 'resume: true, resumeId: conv.id,', "resume: true, resumeId: conv.id, initialPrompt: 'continue',", 'test-conversation-resume L137');
+  const patched = anchored(pure, 'resume: true, resumeId: conv.id,', "resume: true, resumeId: conv.id, initialPrompt: 'continue',", 'first-message');
   ok(patched !== pure, '① (the first-message patch applied)');
   const pureCopy = M.write('src/inbox-reopen.js', patched, 'first-message');
-  const orchCopy = anchored(orch, "require('../inbox-reopen.js')", `require(${JSON.stringify(pureCopy)}, 'test-conversation-resume L140')`);
+  const orchCopy = anchored(orch, "require('../inbox-reopen.js')", `require(${JSON.stringify(pureCopy)})`, 'the inbox-reopen ORCH reads the patched copy');
   ok(orchCopy !== orch, '① (the ORCH copy rewired to the patched message)');
   const W = world({ ir: require(M.write('src/server/inbox-reopen.js', orchCopy, 'first-message')), facts: { 'claude:c-2': CHAT } });
   W.endedOne('claude:c-2');
