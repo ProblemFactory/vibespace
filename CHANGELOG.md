@@ -143,6 +143,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - If VibeSpace restarts while delivering held channel messages, their card now says some may already have reached the agent; you choose to resend or discard.
 - When two agents propose a reply to the same message, each card now names the other, and Approve asks once more before a second reply is sent.
 - A usage wall seen again after a restart no longer reads the Antigravity account a second time.
+- In Files, a machine's mounted folder says the machine is offline (or not mounted right now) instead of showing an empty folder.
 - A picture you paste, pick or take in a chat is checked at once: an empty file, a HEIC, a non-picture or one too large for the model is refused with its reason.
 - A subscription you pick now pays on a machine whose Claude settings name an apiKeyHelper; the helper's key used to pay. Its first start says so.
 - A session's own auto-continue choice now survives a VibeSpace restart instead of falling back to the default.
