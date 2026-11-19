@@ -23,13 +23,16 @@
 //      state: named / none / no file / not JSON; ⑦ a paired machine that names one, none, or does not answer); ⑦ the paired
 //      machine through the real create (its ladder stood in, the REAL hosts.backendStatus over a stub device) and an ADOPTED
 //      process; ⑧ a resume and a fork of a picked conversation; every «nothing said» leg waits on THE FACT (the read settled).
+//   ⑨ THE THIRD STATE ON A PAIRED MACHINE (B-bc9f): every settings-file state through three roads — this machine's create, the
+//      REAL device probe (src/machine-probes.js under the scratch HOME) through the REAL hosts.backendStatus, and the ssh rung run
+//      by sh — the probe answers what the create answers (one rule, src/helper-fact.js); the ssh rung by its text law; RED controls.
 // Run: node scripts/test-billing-pick.mjs
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
-import { scratchDir, scratchHome } from './scratch.mjs';
+import { scratchDir, scratchHome, anchored } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
 
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -61,7 +64,10 @@ console.log('— ① PURE: the rule, the reader, the words');
   }
   ok(CLAUDE_CREDS.keyHelper && CLAUDE_CREDS.keyHelper.setting === 'apiKeyHelper' && CLAUDE_CREDS.keyHelper.file === 'settings.json' && CLAUDE_CREDS.homeEnvVar === 'CLAUDE_CONFIG_DIR',
     'the claude descriptor names the setting and the file of the CLI\'s config dir', CLAUDE_CREDS.keyHelper);
-  ok(read('src/machine-probes.js').includes("'settings.json'))?.apiKeyHelper"), 'the page\'s machine probe reads the SAME setting in the same file (the warning and the rule speak of one helper)');
+  ok(read('src/machine-probes.js').includes(`const HELPER_ROW = { setting: '${CLAUDE_CREDS.keyHelper.setting}', file: '${CLAUDE_CREDS.keyHelper.file}' };`), 'the paired machine\'s probe reads the SAME setting in the same file (the descriptor\'s row; the page\'s warning and the rule speak of one helper)');
+  const HF = require(path.join(REPO, 'src/helper-fact.js'));
+  ok(BP.localHelperFact === HF.helperFactOfText && BP.namesHelper === HF.namesHelper && BP.SETTINGS_READ_MAX === HF.SETTINGS_READ_MAX && HF.SETTINGS_READ_MAX === 1 << 20,
+    'ONE rule (B-bc9f): this machine\'s fact IS src/helper-fact.js\'s, the one a paired machine\'s probe runs (the bound 1 MiB)');
   const fileOf = (env, home) => BP.settingsFileOf(CLAUDE_CREDS.keyHelper, { creds: CLAUDE_CREDS, env, home });
   ok(fileOf({}, '/home/u') === '/home/u/.claude/settings.json' && fileOf({ CLAUDE_CONFIG_DIR: '/cfg/cl/' }, '/home/u') === '/cfg/cl/settings.json'
     && fileOf({ CLAUDE_CONFIG_DIR: '  ' }, '/home/u/') === '/home/u/.claude/settings.json' && fileOf({}, '') === null && BP.settingsFileOf(null, {}) === null,
@@ -463,9 +469,9 @@ const helperSaid = (x) => x.notices.filter((n) => n.key.startsWith('billing-pick
   ok(BP.remoteHelperFact(op, 'claude') === true && BP.remoteHelperFact(opNone, 'claude') === false && BP.remoteHelperFact(ssh, 'claude') === true && BP.remoteHelperFact(sshNone, 'claude') === false
     && BP.remoteHelperFact(sshMute, 'claude') === null && BP.remoteHelperFact(null, 'claude') === null && BP.remoteHelperFact(op, 'codex') === false,
     'the paired machine\'s FIELD: hosts.backendStatus\'s own answer (the probe op\'s facts, and the ssh probe\'s lines) is read as named / none / cannot be read (an empty answer says nothing of the CLI)', { op: op.claude, ssh: ssh.claude, sshMute });
-  const BPSRC = read('src/billing-pick.js'), FIELD = '  return r.keyHelper === true;';
+  const BPSRC = read('src/billing-pick.js'), FIELD = '  if (r.keyHelper === true) return true;';
   ok(BPSRC.split(FIELD).length === 2, 'setup: the paired machine\'s field is read in ONE place');
-  const other = M.load('src/billing-pick.js', BPSRC.replace(FIELD, '  return r.helper === true;'), 'other-field');
+  const other = M.load('src/billing-pick.js', BPSRC.replace(FIELD, '  if (r.helper === true) return true;'), 'other-field');
   ok(other.remoteHelperFact(op, 'claude') === false && other.remoteHelperFact(ssh, 'claude') === false, 'RED CONTROL (a copy of src/billing-pick.js reading another field name): the same answers read «none» where a helper is named — the leg above can go red');
 }
 {
@@ -523,6 +529,83 @@ console.log('— ⑧ A RESUME and A FORK of a picked conversation through the re
     ok(fileKept(lineOf(y)) && lineOf(y).line.includes(RID), `${what} with the person's settings file on a machine that names no helper: the file applies whole`, lineOf(y).line);
     helperOn(true);
   }
+}
+
+console.log('— ⑨ THE THIRD STATE ON A PAIRED MACHINE (B-bc9f): one rule for this machine, the device probe and the ssh rung');
+{
+  const HF = require(path.join(REPO, 'src/helper-fact.js')), PROBES = require(path.join(REPO, 'src/machine-probes.js'));
+  const PROBES_SRC = read('src/machine-probes.js'), HOSTS_SRC = read('src/hosts.js'), BP_SRC = read('src/billing-pick.js');
+  const BOX = { id: 'h-2', name: 'build-box', host: 'build-box.lan', transport: 'ssh' };
+  /** the paired machine's answer by its device: the REAL probe (this scratch HOME is its home) through backendStatus */
+  const byDevice = async (probes, HM) => {
+    const facts = await probes.cliFacts({ claudeCmd: '/nonexistent-claude', codexCmd: '/nonexistent-codex' });
+    return HM.prototype.backendStatus.call({ get: () => BOX, deviceBounded: async () => ({ probeCli: async () => ({ facts }) }), _hostShell: async () => { throw new Error('ssh: not asked'); } }, 'h-2');
+  };
+  /** …by the ssh rung: the script backendStatus sends must carry the rung; the rung runs under sh on this HOME; its line is parsed
+   *  by backendStatus itself (no CLI runs: the rung only tests and greps a file) */
+  const byShell = async (HM, rung = HF.SSH_HELPER_RUNG) => {
+    const out = execFileSync('sh', ['-c', `${rung}true`], { env: { HOME, PATH: '/usr/bin:/bin' }, encoding: 'utf8', timeout: 5000 });   // (the release's rung exits 2 where grep fails: its lines are read all the same)
+    let script = '';
+    const st = await HM.prototype.backendStatus.call({ get: () => BOX, deviceBounded: async () => { throw new Error('device link lost'); }, _hostShell: async (h, s) => { script = s; return `claude|yes|2.1.322\n${out}codex|no|\ncodex-login|no`; } }, 'h-2');
+    return { st, carried: script.includes(HF.SSH_HELPER_RUNG), out };
+  };
+  /** …and this machine's own, as the create reads it: said «billing» = named, «billingUnread» = cannot be read, nothing = none */
+  const byHub = async () => { const x = await drive(wsCreate, { accountId: 'sub-a1', extraArgs: FILE }); return saidKind(x, 'billing') ? true : saidKind(x, 'billingUnread') ? null : false; };
+  const put = (how) => {
+    fs.rmSync(SETTINGS, { recursive: true, force: true });
+    if (how === 'missing') return;
+    if (how === 'folder') return void fs.mkdirSync(SETTINGS);
+    if (how === 'fifo') return void execFileSync('mkfifo', [SETTINGS]);
+    fs.writeFileSync(SETTINGS, how);
+  };
+  const BIG = JSON.stringify({ theme: 'dark', pad: 'x'.repeat(HF.SETTINGS_READ_MAX) });
+  // [the state, the file, this machine's fact (= the device probe's), the ssh rung's fact (its text law)]
+  const STATES = [
+    ['names a helper', JSON.stringify({ apiKeyHelper: '/usr/local/bin/key-helper' }), true, true],
+    ['names none', JSON.stringify({ theme: 'dark' }), false, false],
+    ['no file', 'missing', false, false],
+    ['an EMPTY file', '', false, false],
+    ['an empty helper value (the ssh rung reads the quoted key: billing wins there)', JSON.stringify({ apiKeyHelper: '' }), false, true],
+    ['not JSON, the key quoted in it (the ssh rung: named — billing wins on both)', '{ "apiKeyHelper": ', null, true],
+    ['not JSON, an unquoted key', '{ apiKeyHelper: "/x" }', null, null],
+    ['not JSON, never mentioning a helper (no reading can name one: the ssh rung says none)', '{ "theme": ', null, false],
+    ['JSON but not an object', '[]', null, false],
+    ['a folder where the file goes', 'folder', null, null],
+    ['a FIFO where the file goes (never opened: nothing waits)', 'fifo', null, null],
+    ['a file over 1 MiB naming none (the ssh rung reads text: none)', BIG, null, false],
+  ];
+  const seen = [];
+  for (const [what, how, want, wantSsh] of STATES) {
+    put(how);
+    const hub = await byHub(), dev = BP.remoteHelperFact(await byDevice(PROBES, HostManager), 'claude');
+    const sh = await byShell(HostManager), ssh = BP.remoteHelperFact(sh.st, 'claude');
+    seen.push({ what, hub, dev, ssh });
+    ok(hub === want, `this machine's create, a settings file that is ${what}: the fact reads ${want}`, { hub });
+    ok(dev === hub, `a PAIRED machine's device probe on the same file (${what}): ${hub} — the answer this machine's create gives`, { dev, hub });
+    ok(sh.carried && ssh === wantSsh, `the ssh rung on the same file (${what}): ${wantSsh}${wantSsh === hub ? '' : ` (this machine: ${hub})`}`, { ssh, out: sh.out });
+  }
+  ok(seen.every((s) => s.ssh !== false || s.hub !== true) && seen.filter((s) => s.ssh === false && s.hub === null).every((s) => !/apiKeyHelper/.test(STATES.find((x) => x[0] === s.what)[1])),
+    'the ssh rung\'s law: it never reads «none» where this machine reads a helper, and reads «none» where this machine cannot read only when the file never mentions the setting', seen);
+  // RED CONTROLS (anchored copies): the probe as the release read it, the field not passed, the field not read, the release's rung
+  put('{ "theme": ');
+  const relProbe = M.load('src/machine-probes.js', anchored(PROBES_SRC, '  const helper = helperFact();\n  if (helper === true) r.keyHelper = true; else if (helper === null) r.keyHelperUnread = true;\n',
+    "  try { if (readJson(path.join(home, '.claude', 'settings.json'))?.apiKeyHelper) r.keyHelper = true; } catch { }\n", 'probe-two-states'), 'probe-two-states'); // stale-pins: kept — the control plants the release's line
+  ok(BP.remoteHelperFact(await byDevice(relProbe, HostManager), 'claude') === false && (await byHub()) === null,
+    'RED CONTROL (the probe as the release read it: readJson, true / false): a file that does not parse reads «none» on the paired machine while this machine says it cannot be read — the parity legs above can go red');
+  const noPass = M.load('src/hosts.js', anchored(HOSTS_SRC, ', ...(f.claude.keyHelperUnread === true ? { keyHelperUnread: true } : {})', '', 'unread-not-passed'), 'unread-not-passed');
+  ok(BP.remoteHelperFact(await byDevice(PROBES, noPass.HostManager), 'claude') === false, 'RED CONTROL (backendStatus without the pass-through): the device said it cannot be read and the hub reads «none»');
+  const noRead = M.load('src/billing-pick.js', anchored(BP_SRC, '  return r.keyHelperUnread === true ? null : false;', '  return false;', 'unread-not-read'), 'unread-not-read');
+  ok(noRead.remoteHelperFact(await byDevice(PROBES, HostManager), 'claude') === false, 'RED CONTROL (remoteHelperFact without the third state): «cannot be read» read as «none»');
+  put('folder');
+  const RELEASE_RUNG = 'grep -q "\\"apiKeyHelper\\"" "$HOME/.claude/settings.json" 2>/dev/null && echo "claude-helper|yes"; '; // stale-pins: kept — the release's rung, planted
+  ok(BP.remoteHelperFact((await byShell(HostManager, RELEASE_RUNG)).st, 'claude') === false && BP.remoteHelperFact((await byShell(HostManager)).st, 'claude') === null,
+    'RED CONTROL (the release\'s ssh rung, a folder where the file goes): it reads «none» where the rung now says it cannot be read');
+  { const sh = await byShell(HostManager); let script = ''; await HostManager.prototype.backendStatus.call({ get: () => BOX, deviceBounded: async () => { throw new Error('device link lost'); }, _hostShell: async (h, s) => { script = s; return ''; } }, 'h-2');
+    const greps = script.split('"$HOME/.claude/settings.json" 2>/dev/null').length - 1, guarded = script.split('[ -f "$HOME/.claude/settings.json" ] && grep -q "\\"apiKeyHelper\\"" "$HOME/.claude/settings.json" 2>/dev/null').length - 1;
+    ok(sh.carried && greps === 1 && guarded === 1, 'the ssh script greps the settings file only when it is a regular file — the login ladder\'s grep and the rung alike (a FIFO there never holds the probe)', { greps, guarded }); }
+  const PROBES_ST = "    return st.isFile() && st.size <= SETTINGS_READ_MAX ? { text: fs.readFileSync(file, 'utf-8') } : { text: null };";
+  ok(PROBES_SRC.split(PROBES_ST).length === 2 && !PROBES_SRC.includes('fs.openSync('), 'the probe stats the file before it reads it (a FIFO is never opened — a blocking open would hold the agent; the FIFO leg above would never end)');
+  put(JSON.stringify({ apiKeyHelper: '/usr/local/bin/key-helper' }));
 }
 
 console.log('— ⑥ RED CONTROLS');

@@ -312,7 +312,7 @@ console.log('⑦ machine-probes.cliVersion over fake #! binaries');
   const A = ".find((l) => cliVersionOf(l)) || 'unparsed'";
   if (SRCP.includes(A)) {
     const f = path.join(tmp, 'machine-probes-r1.js');
-    fs.writeFileSync(f, SRCP.replace("return v.split('\\n').map((l) => l.trim())" + A + ';', "return v.trim().split('\\n')[0];").replace("require('./cli-caps.js')", `require(${JSON.stringify(CAPS)})`));
+    fs.writeFileSync(f, SRCP.replace("return v.split('\\n').map((l) => l.trim())" + A + ';', "return v.trim().split('\\n')[0];").replace("require('./cli-caps.js')", `require(${JSON.stringify(CAPS)})`).replace("require('./helper-fact.js')", `require(${JSON.stringify(path.join(REPO, 'src/helper-fact.js'))})`));   // (B-bc9f: the probe requires the PURE helper-fact too)
     const r1 = await ver(path.join(tmp, 'claude-warn'), require(f));
     ok('RED CONTROL: the r1 probe (line 1 only) reads the warning, never the upgrade', r1 === 'Warning: an update is available' && C.cliVersionOf(r1) === null, JSON.stringify(r1));
   } else ok('⑦ anchor present in src/machine-probes.js', false, A);

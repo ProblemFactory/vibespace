@@ -151,7 +151,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
     try {
       fh = await fs.promises.open(file, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
       const st = await fh.stat();
-      return st.isFile() && st.size <= 1 << 20 ? BILLPICK.localHelperFact({ text: await fh.readFile('utf8') }, row) : null;
+      return st.isFile() && st.size <= BILLPICK.SETTINGS_READ_MAX ? BILLPICK.localHelperFact({ text: await fh.readFile('utf8') }, row) : null;
     } catch (e) { return e && e.code === 'ENOENT' ? BILLPICK.localHelperFact({ missing: true }, row) : null; } finally { try { await fh?.close(); } catch { } }
   };
   const readHelperFact = (o) => {

@@ -1,6 +1,6 @@
 'use strict';
 /**
- * A SUBSCRIPTION PICK (OR A THIRD-PARTY PROVIDER) SETS THE MACHINE'S KEY HELPER ASIDE — PURE, imports nothing; CJS so the create, the suites and the
+ * A SUBSCRIPTION PICK (OR A THIRD-PARTY PROVIDER) SETS THE MACHINE'S KEY HELPER ASIDE — PURE, imports only the PURE src/helper-fact.js; CJS so the create, the suites and the
  * dictionary check share ONE spelling (unit «billing pick alive», ruled by 主开发 2026-11-18 01:45Z).
  *
  * A helper named in the Claude settings of the machine the CLI runs on (`apiKeyHelper` in ~/.claude/settings.json) OUTRANKS
@@ -38,6 +38,7 @@
  *     billing wins and the words say so; not named ⇒ the file applies whole, as on the release (nothing is set aside — a
  *     helper the person's own file names is that file's own word). A start without such a file never waits on the fact.
  */
+const { namesHelper, helperFactOfText, SETTINGS_READ_MAX } = require('./helper-fact.js');   // B-bc9f: ONE rule with a paired machine's probe
 
 /** does this spawn set the machine's key helper aside? `creds` = the harness's creds row, `account` = what
  *  accounts.resolveForSpawn answered (null = the CLI's own login), `linked` = the picked account id that resolved to the
@@ -73,34 +74,19 @@ function projectSettingsFilesOf(cwd, ownFile = null) {
 /** ONE start's fact over every file read: a helper named in ANY ⇒ true; else one that cannot be read ⇒ null (billing wins); else false */
 const combinedFact = (facts) => (facts.some((f) => f === true) ? true : facts.some((f) => f !== false) ? null : false);
 
-/** does a settings object name a helper the CLI would use? (the file's JSON, parsed; anything else = no) */
-function namesHelper(settings, row) {
-  const key = row && typeof row.setting === 'string' ? row.setting : '';
-  if (!key || !settings || typeof settings !== 'object' || Array.isArray(settings)) return false;
-  const v = settings[key];
-  return typeof v === 'string' ? v.trim() !== '' : !!v;
-}
 
-/** THE FACT, on this machine: the CLI's settings file as read (`text`; `missing` = no such file) → true (a helper is named) /
- *  false (the file names none, is empty, or there is no file) / null (it cannot be read: not JSON, not an object, a read that failed)
- *  A PAIRED machine's fact is its device probe's (src/machine-probes.js claudeLoginFacts — keyHelper true / false): that probe has no
- *  third state, so a file there that does not parse reads as naming none (named in the cure's line; the ssh fallback rung reads the
- *  key's text, so an EMPTY value there reads as named — billing wins) */
-function localHelperFact({ text = null, missing = false } = {}, row) {
-  if (missing) return false;
-  if (typeof text !== 'string') return null;
-  if (!text.trim()) return false;   // an EMPTY file names nothing (its reader's m4: never «cannot be read»)
-  let o;
-  try { o = JSON.parse(text); } catch { return null; }
-  if (!o || typeof o !== 'object' || Array.isArray(o)) return null;
-  return namesHelper(o, row);
-}
+/** THE FACT, on this machine: the CLI's settings file as read (`text`; `missing` = no such file) → true / false / null — the ONE rule
+ *  of src/helper-fact.js, which a paired machine's device probe runs too (B-bc9f) */
+const localHelperFact = helperFactOfText;
 /** THE FACT, on a paired machine: its backend status (hosts.backendStatus — the probe op's facts, or the ssh probe's lines) →
- *  true (`keyHelper: true`) / false (it answered, naming none) / null (no answer: nothing, or a row that says nothing of the CLI) */
+ *  true (`keyHelper: true`) / false (it answered, naming none) / null (`keyHelperUnread: true` — its settings file cannot be read,
+ *  by the same rule; or no answer: nothing, or a row that says nothing of the CLI). An agent older than B-bc9f says no third state:
+ *  there a file that does not parse still reads as naming none until its signed update (the ssh rung's text reading: helper-fact.js) */
 function remoteHelperFact(status, backend) {
   const r = status && typeof status === 'object' && backend ? status[backend] : null;
   if (!r || typeof r !== 'object' || typeof r.installed !== 'boolean') return null;
-  return r.keyHelper === true;
+  if (r.keyHelper === true) return true;
+  return r.keyHelperUnread === true ? null : false;
 }
 
 /** the person's words (English t() keys; {name} = the conversation, {account} = the picked subscription, {host} = the machine) */
@@ -124,4 +110,4 @@ function helperNotice({ name, account, accountId, host = null, hostId = null, pr
   return { key: noticeKey(accountId, hostId), words, params, text };
 }
 
-module.exports = { setsHelperAside, settingsFileOf, projectSettingsFilesOf, combinedFact, namesHelper, localHelperFact, remoteHelperFact, HELPER_SET_ASIDE, noticeKey, helperNotice };
+module.exports = { setsHelperAside, settingsFileOf, projectSettingsFilesOf, combinedFact, namesHelper, localHelperFact, remoteHelperFact, SETTINGS_READ_MAX, HELPER_SET_ASIDE, noticeKey, helperNotice };

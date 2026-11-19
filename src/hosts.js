@@ -1162,7 +1162,7 @@ class HostManager {
         return {
           claude: { installed: !!f.claude.installed, ...(f.claude.version ? { version: f.claude.version } : {}),
             loggedIn: !!f.claude.loggedIn, ...(f.claude.loginMethod ? { loginMethod: f.claude.loginMethod } : {}),
-            ...(f.claude.keyHelper ? { keyHelper: true } : {}) },
+            ...(f.claude.keyHelper ? { keyHelper: true } : {}), ...(f.claude.keyHelperUnread === true ? { keyHelperUnread: true } : {}) },
           codex: { installed: !!f.codex.installed, ...(f.codex.version ? { version: f.codex.version } : {}), loggedIn: !!f.codex.loggedIn },
         };
       }
@@ -1177,7 +1177,7 @@ class HostManager {
       // JSON-escaped as \"…\") can't false-positive.
       + 'if grep -q accessToken "$HOME/.claude/.credentials.json" 2>/dev/null; then echo "claude-login|yes|oauth"; '
       + 'elif grep -q "\\"primaryApiKey\\"" "$HOME/.claude.json" 2>/dev/null; then echo "claude-login|yes|console-key"; '
-      + 'elif grep -q "\\"apiKeyHelper\\"" "$HOME/.claude/settings.json" 2>/dev/null; then echo "claude-login|yes|key-helper"; '
+      + 'elif [ -f "$HOME/.claude/settings.json" ] && grep -q "\\"apiKeyHelper\\"" "$HOME/.claude/settings.json" 2>/dev/null; then echo "claude-login|yes|key-helper"; '   // B-bc9f: a regular file only (a FIFO never holds the probe)
       + 'elif command -v security >/dev/null 2>&1 && security find-generic-password -s "Claude Code-credentials" >/dev/null 2>&1; then echo "claude-login|yes|keychain"; '
       + 'else echo "claude-login|no"; fi; '
       // apiKeyHelper as an INDEPENDENT flag (2.191.0, real CW-H200 mixup): the
@@ -1186,7 +1186,7 @@ class HostManager {
       // merged settings carry apiKeyHelper, valid creds or not). The elif
       // ladder above hides the helper the moment OAuth creds exist, so the
       // dialog said "logged in" while every session billed via the helper.
-      + 'grep -q "\\"apiKeyHelper\\"" "$HOME/.claude/settings.json" 2>/dev/null && echo "claude-helper|yes"; '
+      + require('./helper-fact.js').SSH_HELPER_RUNG   // B-bc9f: the third state on this road too («unread»), src/helper-fact.js
       + '[ -f "$HOME/.codex/auth.json" ] && echo "codex-login|yes" || echo "codex-login|no"';
     const out = await this._hostShell(h, probe, { timeoutMs: 10000 });
     const st = { claude: {}, codex: {} };
@@ -1194,7 +1194,7 @@ class HostManager {
       const [k, v, ver] = line.split('|');
       if (k === 'claude' || k === 'codex') { st[k].installed = v === 'yes'; if (ver) st[k].version = ver.trim(); }
       else if (k === 'claude-login') { st.claude.loggedIn = v === 'yes'; if (ver) st.claude.loginMethod = ver.trim(); }
-      else if (k === 'claude-helper') st.claude.keyHelper = v === 'yes';
+      else if (k === 'claude-helper') { st.claude.keyHelper = v === 'yes'; if (v === 'unread') st.claude.keyHelperUnread = true; }
       else if (k === 'codex-login') st.codex.loggedIn = v === 'yes';
     }
     return st;

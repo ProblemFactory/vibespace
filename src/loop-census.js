@@ -113,6 +113,7 @@ const OWNERS = Object.freeze([
       name('attach-read'),   // lane resume-all-paced L3: every attach reads a codex history off the loop, acked while it waits (ws-handler)
       name('billing-pick'),   // unit «billing pick alive»: a subscription pick sets the machine's key helper aside (PURE; the create)
       name('utf8-stream'),   // B-b968: ONE UTF-8 decoder per terminal / conversation output stream (PURE; pty-duck, the re-attach shim, the agent's chat tail)
+      name('helper-fact'),   // B-bc9f: a Claude settings file's key-helper fact — ONE rule for the create and a paired machine's probe (PURE)
       name('managed-claude-settings'),   // lane lg-providers (主开发 23:45Z): does the machine's managed Claude settings set a key helper, credential or address (the create, the provider Test)
       name('usage-walker|design-fs|window-live-wiring|exit-call|exit-facts|unexpected-exit|account-material|login-shell|remote-cli|login-state|conversation-ops|sessions|sessions-(?:assemble|sweep|sweep-worker)|session-(?:brain|stdout|store|schema)|desktop-(?:access|backends|display|fit|pin|serve|stream|viewers|webrtc)')] },
 ].map((o) => Object.freeze({ ...o, rules: Object.freeze(o.rules) })));

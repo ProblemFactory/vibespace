@@ -14,7 +14,7 @@
  * in-process by the server for its own machine (shared implementation, no
  * socket transit — CS amendment #2).
  *
- * Deliberately bundle-safe: fs/os/path/child_process only. NOTHING here may
+ * Deliberately bundle-safe: node builtins and the PURE cli-caps / helper-fact only. NOTHING here may
  * originate a vendor API call (§ban-safety whitelist — probes read FILES).
  */
 const fs = require('fs');
@@ -23,6 +23,7 @@ const path = require('path');
 const { execFile } = require('child_process');
 const crypto = require('crypto'); // lane cli-self-measure: the CLI binary's sha256 (cliBinary)
 const { cliVersionOf } = require('./cli-caps.js'); // PURE: the one version spelling the long-lived-token gate reads
+const { helperFactOfText, SETTINGS_READ_MAX } = require('./helper-fact.js'); // PURE: a settings file's key-helper fact — the hub's own rule (B-bc9f)
 
 // windowsHide (lane win-run-hide-console): `claude --version` on a Windows device is a console program the console-less
 // daemon starts — without it, a console window per probe
@@ -52,6 +53,18 @@ const _saidNotRun = new Set();
 function sayNotRun(probe, why) { if (_saidNotRun.has(probe)) return; _saidNotRun.add(probe); console.log(`[cli-probe] ${probe} ${why}`); }
 
 function readJson(p) { try { return JSON.parse(fs.readFileSync(p, 'utf-8')); } catch { return null; } }
+/** the claude descriptor's creds.keyHelper (src/harnesses/claude.js — a leg holds the two equal) */
+const HELPER_ROW = { setting: 'apiKeyHelper', file: 'settings.json' };
+/** ~/.claude/settings.json, bounded as this machine's start bounds its read (src/ws-create.js readOneFact): a regular file of at
+ *  most SETTINGS_READ_MAX bytes — else it cannot be read (it is stat'd first: a FIFO or a folder is never opened); no such file =
+ *  missing. (That start also reads CLAUDE_CONFIG_DIR's file, the project's two and the person's own; a paired machine's are not) */
+function settingsRead(file) {
+  try {
+    const st = fs.statSync(file);
+    return st.isFile() && st.size <= SETTINGS_READ_MAX ? { text: fs.readFileSync(file, 'utf-8') } : { text: null };
+  } catch (e) { return e && e.code === 'ENOENT' ? { missing: true } : { text: null }; }
+}
+const helperFact = () => helperFactOfText(settingsRead(path.join(os.homedir(), '.claude', HELPER_ROW.file)), HELPER_ROW);
 function statMtime(p) { try { return Math.floor(fs.statSync(p).mtimeMs / 1000); } catch { return null; } }
 
 function which(cmd) {
@@ -77,11 +90,14 @@ function classifyInstall(cmdPath) {
 /** The claude login ladder — ONE home for the semantics that drifted between
  *  the local route and the ssh script. keyHelper is an INDEPENDENT flag (the
  *  CLI's precedence puts a configured helper ABOVE OAuth — reporting it only
- *  as an elif rung hid the actual billing path). */
+ *  as an elif rung hid the actual billing path). keyHelperUnread (B-bc9f): the
+ *  settings file cannot be read (not JSON, not an object, not a regular file,
+ *  a failed read) — the third state; the hub's start lets billing win there. */
 function claudeLoginFacts() {
   const home = os.homedir();
   const r = { loggedIn: false, loginMethod: null, machineLoginState: null, keyHelper: false };
-  try { if (readJson(path.join(home, '.claude', 'settings.json'))?.apiKeyHelper) r.keyHelper = true; } catch { }
+  const helper = helperFact();
+  if (helper === true) r.keyHelper = true; else if (helper === null) r.keyHelperUnread = true;
   if (process.platform === 'darwin') {
     // keychain probe is an exec, but a bounded read-only one
     return exec('security', ['find-generic-password', '-s', 'Claude Code-credentials'], 3000).then((out) => {
@@ -141,7 +157,6 @@ async function credsFacts() {
   const home = os.homedir();
   const creds = readJson(path.join(home, '.claude', '.credentials.json'));
   const cfg = readJson(path.join(home, '.claude.json'));
-  const settings = readJson(path.join(home, '.claude', 'settings.json'));
   const cxAuth = readJson(path.join(home, '.codex', 'auth.json'));
 
   let codexEmail = null, codexPlan = null;
@@ -184,7 +199,7 @@ async function credsFacts() {
     platform: process.platform === 'darwin' ? 'darwin' : process.platform,
     subscription: { loggedIn: subLoggedIn, email: cfg?.oauthAccount?.emailAddress || null },
     cliKey: key ? { present: true, tail: key.slice(-8) } : { present: false },
-    keyHelper: !!settings?.apiKeyHelper,
+    keyHelper: helperFact() === true,   // the page's warning reads the helper the start's rule reads (B-bc9f)
     codex: { email: codexEmail, plan: codexPlan },
     credsMtime: statMtime(path.join(home, '.claude', '.credentials.json')),
     codexAuthMtime: statMtime(path.join(home, '.codex', 'auth.json')),
