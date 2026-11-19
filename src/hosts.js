@@ -441,14 +441,19 @@ class HostManager {
    *  throttled one once a minute per machine under exit commands. ONE writer of the file, so a later state always lands last.
    *  A failure is the writer's to say (and it retries); `persisted()` = the file holds the state saved so far (a reader of it). */
   _save() {
+    // THE MEETING (B-f276's held store × B-48a4's queued save; 主开发 23:21Z): law 1 — a HELD hosts.json takes no write: this check is
+    // the FIRST line, before anything is queued
     if (this._unread) { if (!this._unreadSaveSaid) { this._unreadSaveSaid = true; console.warn('[hosts] a hosts.json write was refused: the file could not be read, and nothing is written over it until it reads'); } return false; }
     const W = this._storeWriter || require('./store-writer.js').storeWriter();
-    W.dirty(this._file, { name: 'hosts.write', produce: () => JSON.stringify(this._state, null, 2) });
+    // law 2 — the bytes are made AT the write (lazily): a write queued before a hold must never land the held, EMPTY list. The
+    // producer refuses while held: the writer keeps the write owed and retries it, and once the file reads again it writes the
+    // state READ (the file's own machines), never the empty one
+    W.dirty(this._file, { name: 'hosts.write', produce: () => { if (this._unread) throw Object.assign(new Error('hosts.json is held (its read failed) — nothing is written over it until it reads'), { code: 'EHELD' }); return JSON.stringify(this._state, null, 2); } });
     W.durable(this._file).catch(() => { });
   }
-  persisted() { return (this._storeWriter || require('./store-writer.js').storeWriter()).durable(this._file); }
+  persisted() { if (this._unread) return Promise.resolve(false); return (this._storeWriter || require('./store-writer.js').storeWriter()).durable(this._file); }   // law 3 of the meeting with B-f276: a HELD store is never «on disk» (its saves are refused)
   /** B-48a4 cure: why the last save is not on disk yet (the writer's own words: queued behind N writes, or its failure) — null when it is */
-  whyNotDurable() { const W = this._storeWriter || require('./store-writer.js').storeWriter(); return (typeof W.whyNotDurable === 'function' && W.whyNotDurable(this._file)) || null; }
+  whyNotDurable() { if (this._unread) return { why: 'held', code: this._unread.code }; const W = this._storeWriter || require('./store-writer.js').storeWriter(); return (typeof W.whyNotDurable === 'function' && W.whyNotDurable(this._file)) || null; }
 
   list() {
     // dial hosts carry a live `online` field (server wires dialOnline to the
@@ -589,7 +594,7 @@ class HostManager {
   }
   /** B-48a4 cure: hosts.json written NOW (the named flush) → true only when the writer's own answer says nothing of it is left
    *  owed (never «not failed»: a write still queued or held is not on disk either) */
-  _flushLanded() { const r = this.flushThrottled(); return !!r && !r.deferred && !(r.left || []).some((x) => x && x.file === this._file) && !this.whyNotDurable(); }   // its read (N1): another store's held write is not this file's
+  _flushLanded() { if (this._unread) return false; const r = this.flushThrottled(); return !!r && !r.deferred && !(r.left || []).some((x) => x && x.file === this._file) && !this.whyNotDurable(); }   // its read (N1): another store's held write is not this file's
 
   /**
    * A WRITE THAT CAN WITHDRAW REACH TELLS THE ONE RE-JUDGE (verify-r3 A-r3a). A machine's `exit` lists live on its

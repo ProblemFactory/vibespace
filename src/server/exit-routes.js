@@ -312,7 +312,7 @@ app.get('/api/hosts/:id/public-key', async (req, res) => {
   const who = personVerdict(req);
   if (!who.ok) return res.status(403).json({ error: who.code === 'human_only' ? 'a machine\'s public key is shown to the person — an agent\'s token may not read it' : 'a machine\'s public key is shown only on this instance\'s own page', code: who.code });
   try { const r = await hosts.publicKeyOf(req.params.id); res.status(r.ok ? 200 : 404).json(r.ok ? { ok: true, keys: r.keys } : { ok: false, code: r.code }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { res.status(e && e.status === 503 ? 503 : 400).json({ error: e.message, ...(e && e.code === 'hosts-unread' ? { code: e.code } : {}) }); }   // the B-f276 remainder meets the public-key door: a held list keeps its 503 and name
 });
 app.post('/api/hosts/key', async (req, res) => {
   try { res.json({ success: true, key: await hosts.generateKey() }); }

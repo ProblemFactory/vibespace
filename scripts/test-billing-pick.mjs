@@ -550,6 +550,7 @@ function hostsStub({ helper = true, answer = true, sshOut = null, hang = false, 
     },
     _hostShell: async (h, script) => { if (String(script).includes('__VS_DIR_OK__')) return '__VS_DIR_OK__'; if (sshOut !== null) return sshOut; throw new Error('ssh: no route to host'); },
     homeDir: async () => '/home/u', conversationOwner: () => owner, findKeeperFor: async () => keeper, accountsStatus: async () => ({}), invalidateDiscovery: () => { },
+    held: () => false, unreadWords: () => null,   // the meeting with B-f276's held hosts store: its hold is a SYNC answer (the Proxy below answers an unknown method with an async null — a Promise reads as «held»)
   };
   me.backendStatus = async (id, opts) => { me.asked.push(id); me.helpers.push(opts && opts.helper); try { return await HostManager.prototype.backendStatus.call(me, id, opts); } finally { me._onFact(); } };
   return new Proxy(me, { get: (t, k) => (k in t ? t[k] : (typeof k === 'string' && k !== 'then' && /^[a-z]/.test(k) ? async () => null : undefined)) });

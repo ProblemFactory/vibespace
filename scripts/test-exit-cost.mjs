@@ -32,7 +32,9 @@
 //      the user's ask is refused at the stillGranted verdict; (f) THE CHECKPOINT CURE (2.369.412): the dial-token migration renames its
 //      legacy file only once hosts.json holds the hashes (read AT the rename), and a flush that left the file keeps it — renamed in this
 //      process once the writer says it is on disk; (g) a reshape the writer left is a FAILED migration (the REAL runner stamps no ledger;
-//      the exit's deferred flush and a silent writer too) — each with its red control
+//      the exit's deferred flush and a silent writer too); (h) THE MEETING with B-f276's HELD hosts store: the save asks the writer
+//      nothing while held, a write queued before a hold never lands the held, empty list, and a held store is never «landed» nor
+//      «on disk» — each with its red control
 //   ⑥ U3 — THE AMPLIFIER LAW (a slow hub is never sent more requests because it is slow): the REAL CLI `vibespace-exit run` against a
 //      stand-in hub that answers the run only after the 1 s note was said ⇒ ONE request; RED CONTROL: today's note (a copy outside the
 //      tree, scripts/mutant-copy.mjs), side by side ⇒ a second request, GET /api/agent/exit (causal: the hub answers its run after it)
@@ -180,7 +182,7 @@ console.log('② RED CONTROLS — today\'s lines back in');
   const r3 = tally(await countDuring(w3.dataDir, async () => { for (let i = 0; i < N; i++) w3.hm.keyInfo(); }));
   ok(r3['readFileSync ssh/id_ed25519.pub'] === N, `CONTROL (RED): keyInfo reading the key file at every call ⇒ ${r3['readFileSync ssh/id_ed25519.pub']} reads for ${N} calls`);
   const HMs = compileAt('src/hosts.js', [[
-    "    const W = this._storeWriter || require('./store-writer.js').storeWriter();\n    W.dirty(this._file, { name: 'hosts.write', produce: () => JSON.stringify(this._state, null, 2) });\n    W.durable(this._file).catch(() => { });",
+    "    const W = this._storeWriter || require('./store-writer.js').storeWriter();\n    // law 2 — the bytes are made AT the write (lazily): a write queued before a hold must never land the held, EMPTY list. The\n    // producer refuses while held: the writer keeps the write owed and retries it, and once the file reads again it writes the\n    // state READ (the file's own machines), never the empty one\n    W.dirty(this._file, { name: 'hosts.write', produce: () => { if (this._unread) throw Object.assign(new Error('hosts.json is held (its read failed) — nothing is written over it until it reads'), { code: 'EHELD' }); return JSON.stringify(this._state, null, 2); } });\n    W.durable(this._file).catch(() => { });",   // the meeting with B-f276: the store writer's save with the held producer
     "    const tmp = this._file + '.tmp';\n    fs.writeFileSync(tmp, JSON.stringify(this._state, null, 2));\n    fs.renameSync(tmp, this._file);",   // stale-pins: kept — today's hosts.js _save, compiled back in as the red control
   ]]);
   const w4 = await world({ HM: HMs.HostManager }); w4.hm.keyInfo();
@@ -541,6 +543,52 @@ console.log('⑦ the cure — the readers\' SHOULDs');
   const sgc = await stampOf(HMg.HostManager, 'gc');
   ok(sgd === 'failed' && sgn === 'failed' && sgo === 'ran', `the exit's deferred flush (${sgd}) and a writer that answers nothing (${sgn}) are not «on disk» either; another store's held write is not this file's (${sgo})`);
   ok(sg.status === 'failed' && !sg.stamped && sgc.status === 'ran' && sgc.stamped, `a reshape the writer LEFT: the migration counts as failed (${sg.status}) and the ledger is NOT stamped (${sg.stamped}) — it runs again at the next boot; CONTROL (RED: the flush's answer ignored): «${sgc.status}», stamped (${sgc.stamped}) over a file not on disk`);
+  // (h) THE MEETING with bl-jobs' HELD hosts store (B-f276; 主开发 23:21Z): a hosts.json the process cannot read HOLDS the store.
+  // Law 1: a save is refused BEFORE anything is queued (the writer is never asked). Law 2: a write queued before a hold never lands
+  // the held, EMPTY list — its producer refuses while held (the writer keeps it owed). Law 3: «landed» is false while held, so the
+  // dial migration keeps its legacy file — each with its RED control
+  const asRoot = typeof process.getuid === 'function' && process.getuid() === 0;
+  const heldBody = JSON.stringify({ hosts: [{ id: 'host-dial-standin', name: 'standin', transport: 'dial', deviceId: 'standin', dialTokenHash: 'c'.repeat(64), createdAt: 1 }] });
+  const unplants = [];
+  const heldOf = (HMx) => {
+    const d = path.join(SCR, 'held' + (++wn)); fs.mkdirSync(d, { recursive: true });
+    const F = path.join(d, 'hosts.json');
+    if (asRoot) fs.mkdirSync(F); else { fs.writeFileSync(F, heldBody); fs.chmodSync(F, 0o000); }   // the read FAILS (EACCES / EISDIR), as bl-jobs' own suite plants it
+    unplants.push(() => { try { if (asRoot) fs.rmdirSync(F); else fs.chmodSync(F, 0o644); } catch { } });
+    const H = new HMx({ dataDir: d });
+    H._unreadStopped = true; if (H._unreadT) { clearTimeout(H._unreadT); H._unreadT = null; }   // no read-again timer in a suite
+    return { H, d, F };
+  };
+  const asked = (H) => { const a = []; H._storeWriter = { dirty: (f) => a.push(f), durable: async () => true, whyNotDurable: () => null, flushSync: () => ({ written: [], left: [] }) }; return a; };
+  try {
+    const law1 = (HMx) => { const { H } = heldOf(HMx); const a = asked(H); const r = H._save(); return { held: !!H.held && H.held(), r, asked: a.length }; };
+    const l1 = law1(HostManager);
+    const HM1 = compileAt('src/hosts.js', [["    if (this._unread) { if (!this._unreadSaveSaid) {", "    if (false) { if (!this._unreadSaveSaid) {"]]);
+    const l1c = law1(HM1.HostManager);
+    ok(l1.held === true && l1.r === false && l1.asked === 0 && l1c.asked === 1, `law 1: a HELD store's save is refused before anything is queued (the writer asked ${l1.asked} times); CONTROL (RED, the check gone): the writer is asked (${l1c.asked}) — a write of the held, empty list is owed`);
+    const law2 = async (HMx) => {
+      const w = await world({ HM: HMx }); await w.hm.persisted();
+      let produce = null; w.hm._storeWriter = { dirty: (f, o) => { produce = o.produce; }, durable: async () => true, whyNotDurable: () => null, flushSync: () => ({ written: [], left: [] }) };
+      w.hm._save();   // queued while the store reads fine
+      w.hm._unreadHold({ code: 'EACCES', why: 'the read failed' }); w.hm._unreadStopped = true; if (w.hm._unreadT) { clearTimeout(w.hm._unreadT); w.hm._unreadT = null; }   // then a hold (its own road)
+      let bytes = null, code = null; try { bytes = produce(); } catch (e) { code = e && e.code; }
+      return { bytes, code };
+    };
+    const l2 = await law2(HostManager);
+    const HM2 = compileAt('src/hosts.js', [["produce: () => { if (this._unread) throw Object.assign(", "produce: () => { if (false) throw Object.assign("]]);
+    const l2c = await law2(HM2.HostManager);
+    ok(l2.code === 'EHELD' && l2.bytes === null && typeof l2c.bytes === 'string' && JSON.parse(l2c.bytes).hosts.length === 0, `law 2: a write queued BEFORE a hold refuses at its write (${l2.code}) — never the held, empty list; CONTROL (RED, the producer's check gone): it would write «${String(l2c.bytes).replace(/\s+/g, '')}»`);
+    const law3 = async (HMx) => {
+      const { H, d } = heldOf(HMx); asked(H);
+      const legacy = path.join(d, 'agentd', 'dial-tokens.json'); fs.mkdirSync(path.dirname(legacy), { recursive: true }); fs.writeFileSync(legacy, JSON.stringify({ standin: 'c'.repeat(64) }));
+      let migrated = null; try { migrated = H.migrateDialTokenFile(legacy); } catch (e) { migrated = e && e.code; }
+      return { landed: H._flushLanded(), persisted: await H.persisted(), why: H.whyNotDurable(), legacyKept: fs.existsSync(legacy), migrated };
+    };
+    const l3 = await law3(HostManager);
+    const HM3 = compileAt('src/hosts.js', [["  _flushLanded() { if (this._unread) return false; const r", "  _flushLanded() { const r"], ["  persisted() { if (this._unread) return Promise.resolve(false); return", "  persisted() { return"], ["  whyNotDurable() { if (this._unread) return { why: 'held', code: this._unread.code }; const W", "  whyNotDurable() { const W"]]);   // stale-pins: kept (law 3's control plants the pre-meeting lines in a compiled copy)
+    const l3c = await law3(HM3.HostManager);
+    ok(l3.landed === false && l3.persisted === false && !!l3.why && l3.why.why === 'held' && l3.legacyKept && l3c.landed === true && l3c.persisted === true, `law 3: a HELD store is never «landed» (${l3.landed}) nor «on disk» (persisted ${l3.persisted}, why «${l3.why && l3.why.why}») — the legacy file is kept (${l3.legacyKept}; here the hold's own lookup refuses first, «${l3.migrated}»); CONTROL (RED, the three held checks gone — the landing, persisted, whyNotDurable): a flush that wrote nothing reads as landed (${l3c.landed}) and on disk (${l3c.persisted})`);
+  } finally { for (const u of unplants) u(); }
 }
 
 // ═══ ⑧ ═══

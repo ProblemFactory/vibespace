@@ -163,7 +163,7 @@ console.log('§1 hosts.json (src/hosts.js) — every paired machine and its dial
       const F = path.join(d, 'hosts.json'); plant(F, body);
       const H = new Mod.HostManager({ dataDir: d });
       H._state.hosts.push({ id: 'h-x', name: 'x', transport: 'ssh', host: 'x.invalid', user: 'u' });
-      H._save();
+      H._save(); H.flushThrottled();   // the meeting with B-48a4 (hub-loop-stalls): a save is the store writer's, QUEUED — what it owes is written NOW, so a write that slipped the guards would be on disk here
       const kept = bodyOf(F) === (asRoot ? '(a folder)' : body);
       clearTimeout(H._unreadT); H._unreadT = null; if (!asRoot) { try { fs.chmodSync(F, 0o644); } catch { } }
       return kept;
@@ -171,8 +171,13 @@ console.log('§1 hosts.json (src/hosts.js) — every paired machine and its dial
     const SAVEH = "    if (this._unread) { if (!this._unreadSaveSaid) { this._unreadSaveSaid = true; console.warn('[hosts] a hosts.json write was refused: the file could not be read, and nothing is written over it until it reads'); } return false; }\n";
     ok(HSRC.split(SAVEH).length === 2, 'control setup: the anchor of the control «the save\'s guard» is in hosts.js');
     const k = saveH({ HostManager: require(path.join(ROOT, 'src/hosts.js')).HostManager }, 'hosts-save-guard');
-    const kx = saveH(MJ.load('src/hosts.js', HSRC.replace(SAVEH, '    /* MUTANT: no save guard */\n'), 'hosts-no-save-guard'), 'hosts-save-guard-mut');
-    ok(k && (asRoot || !kx), 'the save itself refuses while held (a timer\'s save, the stop\'s flush); CONTROL (only that guard removed, in a copy): the save WRITES OVER the held file', { k, kx });
+    // the meeting with B-48a4: the queued write's PRODUCER refuses while held too (law 2: a write queued before a hold never lands
+    // the held, empty list) — so the control removes BOTH guards, and a second one shows the producer's alone still keeps the file
+    const PRODH = "produce: () => { if (this._unread) throw Object.assign(";
+    ok(HSRC.split(PRODH).length === 2, 'control setup: the anchor of the control «the producer\'s guard» is in hosts.js');
+    const k1 = saveH(MJ.load('src/hosts.js', HSRC.replace(SAVEH, '    /* MUTANT: no save guard */\n'), 'hosts-no-save-guard'), 'hosts-save-guard-first');
+    const kx = saveH(MJ.load('src/hosts.js', HSRC.replace(SAVEH, '    /* MUTANT: no save guard */\n').replace(PRODH, 'produce: () => { if (false) throw Object.assign('), 'hosts-no-guards'), 'hosts-save-guard-mut');
+    ok(k && k1 && (asRoot || !kx), 'the save itself refuses while held (a timer\'s save, the stop\'s flush), and the queued write\'s producer refuses too (the first guard removed: still kept); CONTROL (both guards removed, in a copy): the save WRITES OVER the held file', { k, k1, kx });
   }
   // the cure: the lift re-judges reach ONLY for what it read — a read with machines does, an empty lift (the file gone) does not
   {
@@ -493,8 +498,8 @@ console.log('§2 machine-mounts.json (src/machine-mounts.js) — every mount of 
   const rmx = await raceM(MJ.load('src/machine-mounts.js', MSRC.replace(RACEM, '      /* MUTANT: no re-check after the copy */\n'), 'no-race-check-mounts'), 'mounts-race-mut');
   ok(!!rmx && (rmx.list === '' || !!rmx.olderErr), 'CONTROL (no re-check after the copy, in a copy): the older try loads the mounts EMPTY over the lifted list (or throws on a hold already gone)', rmx);
   const DPM = fs.readFileSync(path.join(ROOT, 'src/server/dial-pairing.js'), 'utf8'), ERM = fs.readFileSync(path.join(ROOT, 'src/server/exit-routes.js'), 'utf8');
-  ok(/async function unpairDialDevice\(deviceId\) \{\n(?:  \/\/[^\n]*\n)*  if \(machineMounts\.unreadWords && machineMounts\.unreadWords\(\)\) throw /.test(DPM) && /res\.status\(e && e\.status === 503 \? 503 : 400\)/.test(ERM),
-    'WIRING (its read r1, M3): removing a dial machine while machine-mounts.json is held is refused BEFORE any side effect (its push tokens would never be revoked) — 503 with the words');
+  ok(/async function unpairDialDevice\(deviceId\) \{\n(?:  if \(hosts\.held && hosts\.held\(\)\) throw [^\n]*\n)?(?:  \/\/[^\n]*\n)*  if \(machineMounts\.unreadWords && machineMounts\.unreadWords\(\)\) throw /.test(DPM) && /res\.status\(e && e\.status === 503 \? 503 : 400\)/.test(ERM),
+    'WIRING (its read r1, M3): removing a dial machine while machine-mounts.json is held is refused BEFORE any side effect (its push tokens would never be revoked) — 503 with the words (the meeting with hosts.json\'s cure: its own belt, the held machines, may stand first)');
   const SV = fs.readFileSync(path.join(ROOT, 'server.js'), 'utf8');
   ok(SV.includes("app.get('/api/machine-mounts', (req, res) => res.json({ mounts: machineMounts.list(), ...(machineMounts.unreadWords() ? { unread: machineMounts.unreadWords() } : {}) }));"), 'WIRING: the mounts list answers WHY it is empty while held (GET /api/machine-mounts `unread`)');
 }

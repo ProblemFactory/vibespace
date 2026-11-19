@@ -1410,7 +1410,7 @@ if (CL) {
     const MA = fs.readFileSync(path.join(REPO, 'src/lib/manage-agents.js'), 'utf8');
     ok(!!a1 && a1 === a2 && n1 === 1 && n2 === 1 && n3 === 0 && a2.textContent === 'Could not open it: forbidden' && a2.getAttribute('role') === 'alert' && a2.parentNode === null
       && /door: 'add-ssh-host', run: async \(\) => \{ const hd = await fetchJson\('\/api\/hosts'\); if \(hd && hd\.key\) \{[^}]*\} sayOnLine\(noneLine, t\('Could not open it: \{why\}', \{ why: hd && hd\.error \? String\(hd\.error\) : t\('Could not reach the server'\) \}\)\);/.test(MA)
-      && /const noneLine = body\.appendChild\(needLine\(\{ words: t\('No machines yet/.test(MA),
+      && /const noneLine = body\.appendChild\(!hostsHeld \? needLine\(\{ words: t\('No machines yet/.test(MA),   // the B-f276 remainder's meeting: this line unless the list is HELD (then why none are listed, no door)
       'agents-accounts-6 (verifier #6, picks 3–6): «Add an SSH machine…» that cannot open the form SAYS why on its line (sayOnLine: one .need-said, role=alert, replaced, taken away) — the hub\'s error, or «Could not reach the server»', { n1, n2, n3, said: a2 && a2.textContent });
   }
 }

@@ -979,8 +979,11 @@ class MachineMounts {
       const mp = this._pullFolders(m).find((x) => x !== '/' && (rp === x || rp.startsWith(x + '/')));   // a whole path segment (…/mac is not …/macbook)
       if (!mp) continue;
       if (this._live.has(m.id)) return null;
-      let h = null; try { h = this.hosts.get(m.hostId); } catch { h = null; }
-      if (!h || this._held.has(m.id) || (!writer && this._bare?.get(m.id) !== 'empty')) continue;   // a held record: its holder answers   // a READER: probed empty only (a folder with files of its own shows them); a WRITER: any folder not live (what it adds is hidden under the next mount, or blocks it)
+      // the B-f276 remainder meets B-fcc7: the MACHINES LIST held (hosts.json unread — `hostsHeld`, never «removed») — the record still
+      // shadows its bare folder (named by its id), so a write there is refused by the hold's name. Another meaning, kept apart: a
+      // PAIR-held record (`this._held`: two records on one folder — bl-machines-a) is skipped, its holder answers
+      let h = null; try { h = this.hosts.get(m.hostId); } catch (e) { h = e && e.code === 'hosts-unread' ? { id: m.hostId, name: m.hostId, hostsHeld: true } : null; }
+      if (!h || this._held.has(m.id) || (!writer && this._bare?.get(m.id) !== 'empty')) continue;   // a pair-held record: its holder answers   // a READER: probed empty only (a folder with files of its own shows them); a WRITER: any folder not live (what it adds is hidden under the next mount, or blocks it)
       if (!best || mp.length > best.mp.length) best = { m, mp, h };
     }
     if (!best) return null;
