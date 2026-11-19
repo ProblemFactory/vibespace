@@ -1335,6 +1335,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // ORIGIN is stated by the ladder and recorded beside the value.
             let pin = { profileId: '', dir: null, origin: 'harness' };
             let forkParentKey = ''; // VERIFY S5: the fork's copy of the parent's pin needs the parent's KEY below
+            let pinOwed = null; // the B-f276 remainder, its read r2 (M3): the facts a create the held registry could not judge owes to its read
             try {
               const kp = require('./server/browser-keeper.js').keeper();
               // B-55dc THE SPAWN ROAD DECIDES: the Task Group store's first reads for this create (the cwd's realpath, a
@@ -1344,47 +1345,26 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 forkParentKey = (data.fork && be0) ? be0.priorKeyFor(data.forkedFromId || data.resumeId) : '';
                 // the Task-Group rung asks the store with the facts a create has (cwd + the dialog's taskId)
                 const taskGroupDefault = kp.taskGroupDefaultFor({ cwd, hostId: data.hostId || null, initialGroupId: spawnGroups[0] || null, initialGroupIds: spawnGroups });
-                pin = kp.pinForCreate({ explicit: data.browserProfileId || '', priorKey: prior, forkParentKey, taskGroupDefault, resume: !!(data.resume && data.resumeId), fork: !!data.fork });
-                // the B-f276 remainder (bl-jobs): a HELD profile registry names no profile — the pin is never «no longer exists» (a null pin
-                // was written): the ladder is judged ONCE THE REGISTRY READS, over this create's own facts (its read r1, M1: a new
-                // conversation has no pin to keep — the pick, a fork's parent, the group's / the instance default were lost for good); the
-                // waiter is this conversation's, runs once, and a conversation gone by then is left alone
+                // THE verdict (the keeper's ONE helper — the B-f276 remainder, its read r2 S2: the same for a create judged now and
+                // one the held registry owes to its read): the ladder; then B-6b6d r3 — the New Session dialog sends the value it
+                // filled in on the user's behalf (the group's / the instance default) as an EXPLICIT string, and its hint may only
+                // DOWNGRADE the ladder's own 'chosen' to that rung; then lane new-session-form — the two-column form (it sends
+                // `taskIds`) lists ONLY the profiles its groups admit, and a pick it sends is judged by the SAME verdict here
+                // (mayAttach over those groups), never added to the profile's "Who can use it" at create
+                const pinFacts = { explicit: data.browserProfileId || '', priorKey: prior, forkParentKey, taskGroupDefault, resume: !!(data.resume && data.resumeId), fork: !!data.fork };
+                const hint = data.spawnOriginHint && typeof data.spawnOriginHint === 'object' ? data.spawnOriginHint.browserProfile : null;
+                const formGroups = Array.isArray(data.taskIds) ? spawnGroups : null;
+                pin = typeof kp.pinVerdictForCreate === 'function' ? kp.pinVerdictForCreate({ facts: pinFacts, hint, formGroups }) : kp.pinForCreate(pinFacts);
+                // the B-f276 remainder (bl-jobs): a HELD profile registry names no profile — the pin is never «no longer exists»: this
+                // create OWES its pin to the registry's read (its read r2, M3: keyed by the conversation's browser key in the keeper,
+                // carried by the conversation's record for a restart — never a live session's closure), judged by the same verdict
                 if (pin.held) {
                   console.warn(`[browser] ${id}: ${pin.refused} — its pin is judged once the registry reads`);
-                  const pinFacts = { explicit: data.browserProfileId || '', priorKey: prior, forkParentKey, taskGroupDefault, resume: !!(data.resume && data.resumeId), fork: !!data.fork };
-                  const remoteHost = !!data.hostId;
-                  let off = null;
-                  off = typeof kp.onReadAgain === 'function' ? kp.onReadAgain(() => {
-                    try { if (off) off(); } catch { }
-                    try {
-                      if (activeSessions.get(id) !== session) return;
-                      const p2 = kp.pinForCreate(pinFacts);
-                      if (!p2 || p2.held || !p2.profileId) { if (p2 && p2.refused && !p2.held) console.warn(`[browser] ${id}: ${p2.refused} — after the registry's read`); return; }
-                      session._browserProfileId = p2.profileId; session._browserPinOrigin = p2.origin;
-                      if (session._browserKey && p2.origin !== 'conversation') kp.setPin(session._browserKey, p2.profileId, { origin: p2.origin, remote: remoteHost });
-                      console.log(`[browser] ${id}: the profile registry read — its pin ${p2.profileId} (${p2.origin}) applied`);
-                    } catch (e) { console.warn(`[browser] ${id}: its pin after the registry's read was not applied — ${e && e.message}`); }
-                  }) : null;
+                  pinOwed = { facts: pinFacts, hint: hint || null, formGroups, remote: !!data.hostId, groupFacts: { cwd, hostId: data.hostId || null, initialGroupId: spawnGroups[0] || null, initialGroupIds: spawnGroups } };
                   pin = { profileId: '', dir: null, origin: 'harness', held: true };
                 }
+                else if (pin.formRefused) console.warn(`[browser] ${id}: the New Session pick ${pin.formRefused} is not open to this conversation (${pin.refused}) — starting without it`);
                 else if (pin.refused) console.warn(`[browser] ${id}: ${pin.refused} — starting ephemeral`);
-                // B-6b6d r3 for this knob: the New Session dialog sends the value it
-                // filled in on the user's behalf (the group's / the instance default)
-                // as an EXPLICIT string, so the ladder can only read it as 'chosen';
-                // the client says which fact it was and the server may only DOWNGRADE
-                // its own 'chosen' to that rung, and only when the value IS that rung's.
-                const hint = data.spawnOriginHint && typeof data.spawnOriginHint === 'object' ? data.spawnOriginHint.browserProfile : null;
-                if (pin.origin === 'chosen' && (hint === 'task-group' || hint === 'instance')) {
-                  const rungValue = hint === 'task-group' ? taskGroupDefault : kp.instanceDefault();
-                  if (rungValue && pin.profileId === rungValue) pin = { ...pin, origin: hint };
-                }
-                // lane new-session-form: the two-column form (it sends `taskIds`) lists ONLY the profiles its groups admit —
-                // a pick it sends is judged by the SAME verdict here (mayAttach over those groups), never added to the
-                // profile's "Who can use it" at create (the Agent browser panel keeps that road, with its toast)
-                if (pin.origin === 'chosen' && pin.profileId && Array.isArray(data.taskIds) && typeof kp.mayAttachAtCreate === 'function') {
-                  const may = kp.mayAttachAtCreate(pin.profileId, { taskIds: spawnGroups });
-                  if (!may.ok) { console.warn(`[browser] ${id}: the New Session pick ${pin.profileId} is not open to this conversation (${may.code}) — starting without it`); pin = { profileId: '', dir: null, origin: 'harness', refused: may.code }; }
-                }
               }
             } catch (e) { console.warn('[browser] pin ladder unavailable — ' + (e && e.message)); }
             // OWNER RULING A (2026-09-26): the pin is the conversation's DEFAULT ATTACHMENT, opened through the keeper by
@@ -1405,6 +1385,10 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             if (!be.variant && spawnPinWitness) {
               // + the Task Group's default cap in force NOW (stampGroupCap's read, unstamped — there is no key to stamp it on)
               try { const kc = require('./server/browser-keeper.js').keeper(); spawnPinWitness.cap = kc && typeof kc.taskGroupCapFor === 'function' ? kc.taskGroupCapFor({ cwd, hostId: data.hostId || null, initialGroupId: spawnGroups[0] || null, initialGroupIds: spawnGroups }) : null; } catch { spawnPinWitness.cap = null; }
+            } else if (!be.variant && pinOwed) {
+              // its read r2 (S5): a KEYLESS create the held registry could not judge — its WITNESS is the facts it owes, judged by the
+              // late key (the same verdict) once the registry reads: the start's pick, a fork's parent row, never the default by then
+              spawnPinWitness = { owed: pinOwed, at: Date.now() };
             } else if (!be.variant && be0 && integrationOn && !pin.held) {   // held: no empty start record (a late key judges afresh then)
               // the ladder ran and picked NOTHING: witnessed too (a cap may still be in force), so the late key knows the
               // start had no default rather than guessing from the default the user has by then
@@ -1419,6 +1403,9 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               // browses with, so the live view of an EPHEMERAL browser asks its stream port under exactly these, never
               // a re-run of the ladder): ONE writer shared with a live session's late key (B-f7ab)
               browserKeyMod.applyKey(session, { key: bk.key, env: be, pin });
+              // its read r2 (M3): a keyed create the held registry could not judge OWES its pin under its key (judged at the read whatever
+              // becomes of this session); the record carries the facts for a restart before then (`browserPinOwed`, re-owed at the boot)
+              if (pinOwed) { session._browserPinOwed = pinOwed; try { require('./server/browser-keeper.js').keeper()?.owePin?.(bk.key, pinOwed); } catch (e) { console.warn(`[browser] ${id}: its owed pin was not registered — ${e && e.message}`); } }
               // A pin that came from anywhere but this conversation's own record
               // becomes its record now, ORIGIN kept — that is what makes the
               // `conversation` rung answer on the next resume (and a fork's copy
@@ -1869,6 +1856,9 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // B-f7ab verify r2: a keyless spawn's WITNESS of its pin ladder's pick (+ the group cap) at the start — the late
             // key restores exactly this, never the default the user has by then (browser-key.js; PURE lateDefaultPin)
             browserPinAtStart: (!session._browserKey && spawnPinWitness) ? spawnPinWitness : undefined,
+            // the B-f276 remainder, its read r2 (M3 c): a keyed create the held profile registry could not judge — the facts its pin
+            // owes to the read (re-owed at a boot that restores this conversation before then; cleared once judged)
+            browserPinOwed: session._browserPinOwed || undefined,
             // implicit-fork adoption (2.218.0) is armed by _resumeSpawn and
             // disarmed by _sawFirstId — neither survived a restart, so a
             // restored resume whose claude implicitly forked could never be

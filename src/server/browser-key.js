@@ -71,6 +71,24 @@ const rawMint = () => B.mintBrowserKey(crypto.randomBytes(4).toString('hex'));
  * READ is said by name and the mint proceeds unchecked (a create is never refused for it); an exhausted loop (`named`
  * broken) is said by name too. `facts` (optional) overrides the registered ones — the ladder calls `mint()` bare.
  */
+
+/** The B-f276 remainder, its read r2 (S5): an OWED start record (`browserPinAtStart: { owed, at }` — a keyless create the held profile
+ *  registry could not judge) → the pin witness the create's own verdict makes of it now (the keeper's `pinVerdictForCreate`: the
+ *  ladder, the hint's downgrade, the form's verdict); a fork's = its parent's row verbatim (as the keyless fork's spawn records it);
+ *  nothing picked = the empty witness (no landing on the default the person has by now). The group cap is read now. */
+function owedWitness(k, w) {
+  const o = (w.owed && typeof w.owed === 'object') ? w.owed : {}, f = (o.facts && typeof o.facts === 'object') ? o.facts : {};
+  const at = Number(w.at) >= 0 ? Math.min(Number(w.at), Date.now()) : 0;
+  let cap = null; try { cap = typeof k.taskGroupCapFor === 'function' ? k.taskGroupCapFor(o.groupFacts || {}) : null; } catch { cap = null; }
+  let pin = { profileId: '', origin: 'harness' };
+  try { if (typeof k.pinVerdictForCreate === 'function') pin = k.pinVerdictForCreate({ facts: f, hint: o.hint || null, formGroups: Array.isArray(o.formGroups) ? o.formGroups : null }); } catch { pin = { profileId: '', origin: 'harness' }; }
+  if (pin.profileId && pin.origin === 'conversation' && f.fork && f.forkParentKey && typeof k.pinFor === 'function') {
+    const pp = k.pinFor(String(f.forkParentKey));
+    if (pp && pp.profileId) return { profileId: pp.profileId, origin: 'conversation', at: Number(pp.at) || 0, by: pp.by === 'agent' ? 'agent' : 'user', cap };
+  }
+  if (pin.profileId && pin.origin !== 'conversation') return { profileId: pin.profileId, origin: pin.origin, at, by: 'user', cap };
+  return { profileId: '', origin: 'harness', at, by: 'user', cap };
+}
 function mintKey(facts) {
   const f = { ...mintFacts, ...(facts && typeof facts === 'object' ? facts : {}) };
   const get = (fn) => { try { return typeof fn === 'function' ? fn() || null : fn || null; } catch { return null; } };
@@ -189,7 +207,11 @@ function create({ browserEnv = () => null, keeper = () => null, activeSessions =
     // restores; without one, the default the user has now is a LANDING. Either is a PREFERENCE — whether the profile
     // admits this conversation is the list's answer at every command (`whoMayUse`); the group cap is the witness's, never
     // the group's live value (PURE lateDefaultPin)
-    const witness = f.meta && f.meta.browserPinAtStart !== undefined ? f.meta.browserPinAtStart : null;
+    let witness = f.meta && f.meta.browserPinAtStart !== undefined ? f.meta.browserPinAtStart : null;
+    // the B-f276 remainder, its read r2 (S5): a KEYLESS create the HELD profile registry could not judge left the facts its pin owes
+    // as its witness — judged now (the registry reads: a held one is refused above) by the create's own verdict, as the start would
+    // have judged it: the start's pick, a fork's parent row verbatim — never the default the person has by now
+    if (witness && typeof witness === 'object' && witness.owed && k) witness = owedWitness(k, witness);
     let late = { profileId: '', origin: 'harness', at: null, by: null, source: 'none' };
     try {
       if (k && typeof k.pinForCreate === 'function') {
@@ -260,4 +282,4 @@ function create({ browserEnv = () => null, keeper = () => null, activeSessions =
   return { ensureBrowserKey, keylessFactOf };
 }
 
-module.exports = { create, mintKey, applyKey, conversationIdOfSession };
+module.exports = { create, mintKey, applyKey, conversationIdOfSession, owedWitness };

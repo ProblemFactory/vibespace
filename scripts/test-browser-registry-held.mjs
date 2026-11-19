@@ -138,7 +138,7 @@ console.log('§4 WIRING: the route door, Housekeeping, a build\'s removal, the s
   ok((BT.match(/refuseIfKeeperHeld\(\);/g) || []).length === 4 && BT.includes("if (keeper && typeof keeper.held === 'function' && keeper.held()) throw Object.assign(new Error('the profile registry is held"),
     'Housekeeping\'s orphan list, Forget and Adopt refuse by name, the panel says the hold, and the trace boot leaves the sessions open');
   ok(BB.includes("ctx.refuseIfHeld('removing a Chrome build')"), 'a Chrome build\'s removal refuses while held (no profile choosing it, no browser running it is known)');
-  ok(MP.includes("if (r && r.held) { heldBoot = true;") && MP.includes('browserKeeper.onReadAgain?.(() => afterBoot())') && MP.includes('.then(() => { if (!heldBoot) return afterBoot(); });'),
+  ok(MP.includes("if (r && r.held) { heldBoot = true;") && MP.includes('browserKeeper.onReadAgain?.(() => afterBoot())') && MP.includes('.then(() => { reOweRestored(); if (!heldBoot) return afterBoot(); });'),
     'the steps after the keeper\'s boot (pins, the pin heal, the recorder, the kept sweep) run once the registry reads');
   ok(BK.includes("if (k && typeof k.held === 'function' && k.held()) return refused(session, f.id, { ok: false, code: 'store_unread'") && WC.includes('if (pin.held) {') && WC.includes("pin.origin !== 'conversation' && !pin.held"),
     'the late key mints nothing while held; a create keeps the conversation\'s pin as it was (never «no longer exists», never re-pinned)');
@@ -146,11 +146,98 @@ console.log('§4 WIRING: the route door, Housekeeping, a build\'s removal, the s
   // its read r1: M1 — a create while held judges its pin ONCE THE REGISTRY READS (over its own facts); S1 — browser-env's own registry
   // reader is unknown (null, fail closed) for a parse that is not a registry; N1 — the trace routes' doors answer the hold by name
   const BE = fs.readFileSync(path.join(ROOT, 'src/server/browser-env.js'), 'utf8'), RT = fs.readFileSync(path.join(ROOT, 'src/routes/browser-trace.js'), 'utf8');
-  ok(WC.includes('const p2 = kp.pinForCreate(pinFacts);') && WC.includes("off = typeof kp.onReadAgain === 'function' ? kp.onReadAgain(() => {") && WC.includes('if (activeSessions.get(id) !== session) return;') && WC.includes('integrationOn && !pin.held)'),
-    'a create while held: its pin ladder runs once the registry reads (its own facts; a conversation gone by then left alone); a keyless spawn writes no empty start record');
+  // its read r2 (M3 / S5 / N11): the wiring of the OWED pin — the keyed create owes it under its key and its record carries the facts;
+  // a keyless create's witness carries them; a restored conversation owes it again; the live session's copy follows the verdict
+  const BR = fs.readFileSync(path.join(ROOT, 'src/server/boot-restore.js'), 'utf8');
+  ok(WC.includes("if (pinOwed) { session._browserPinOwed = pinOwed; try { require('./server/browser-keeper.js').keeper()?.owePin?.(bk.key, pinOwed); }") && WC.includes('browserPinOwed: session._browserPinOwed || undefined,')
+    && WC.includes('spawnPinWitness = { owed: pinOwed, at: Date.now() };') && WC.includes('integrationOn && !pin.held)') && WC.includes('kp.pinVerdictForCreate({ facts: pinFacts, hint, formGroups })'),
+    'a create while held OWES its pin: under its key (the keeper judges it at the read, whatever became of the session) and in its record; a keyless one in its start witness; both roads judge through ONE verdict');
+  ok(BR.includes("_browserPinOwed: meta.browserPinOwed && typeof meta.browserPinOwed === 'object'") && MP.includes('browserKeeper.owePin?.(s._browserKey, s._browserPinOwed)') && MP.includes('browserKeeper.onOwedPin?.((key, res) => {')
+    && BK.includes('if (witness && typeof witness === \'object\' && witness.owed && k) witness = owedWitness(k, witness);'),
+    'a restart before the read: the restored conversation owes its pin again (judged at once if the registry reads); the live session\'s copy and record follow the verdict; the late key judges an owed witness');
   ok(BE.includes("if (!doc || typeof doc !== 'object' || Array.isArray(doc) || !Array.isArray(doc.profiles)) return null;"), 'browser-env\'s registry reader answers UNKNOWN (null — its sweep spares every folder) for a parse that is not a registry');
   ok((RT.match(/k\.held\(\)\) \{ res\.status\(503\)\.json\(\{ error: k\.heldWords\(\), code: 'store_unread'/g) || []).length === 1 && RT.includes("ctx.keeper.held()) { res.status(503).json({ error: ctx.keeper.heldWords(), code: 'store_unread'"),
     'the trace routes\' two doors (keeperOr503, traceOr503) answer the hold by name — never «no profile bp-…»');
+}
+
+console.log('§5 its read r2: a create the held registry could not judge OWES its pin — keyed by its browser key, judged right after the read');
+{
+  const PARENT = 'bk-0000aaaa';   // pinned to «work» in the file
+  const K1 = 'bk-0000bbbb', KF = 'bk-0000cccc', KW = 'bk-0000dddd';
+  const BODY5 = JSON.stringify({ ...JSON.parse(BODY), pins: { [PARENT]: { profileId: 'bp-0000b001', origin: 'chosen', at: 1, by: 'user' } } });
+  const owedScene = async (Mod, name) => {
+    const d = path.join(D, name), H = path.join(d, 'home'); fs.mkdirSync(H, { recursive: true });
+    const F = path.join(d, 'browser-profiles.json'); plant(F, BODY5);
+    const k = Mod.create({ dataDir: d, homeDir: H, env: () => ({ HOME: H }), serverSetting: () => undefined, install: false, log: quiet, unreadRetry: { firstMs: 15, maxMs: 30 }, taskGroupCap: () => 2 });
+    const order = [];
+    const out = { held: k.held() };
+    out.owe = [
+      k.owePin(K1, { facts: { explicit: 'bp-0000b001' }, groupFacts: { cwd: '/w' } }),   // a New Session pick (the conversation stopped since: no session to ask)
+      k.owePin(K1, { facts: { priorKey: K1, resume: true } }),   // its resume while still held: weaker facts never replace the pick
+      k.owePin(KF, { facts: { fork: true, forkParentKey: PARENT } }),   // a fork of the pinned conversation
+      k.owePin(PARENT, { facts: { priorKey: PARENT, resume: true } }),   // a resume of the pinned conversation itself
+      k.owePin(KW, { facts: {} }),   // nothing to pick
+    ].map((x) => !!(x && x.owed));
+    out.pinnedWhileHeld = [K1, KF, KW].filter((x) => k.pinFor(x)).length;
+    k.onOwedPin((key, res) => order.push(`${key.slice(-4)}:${res.pin ? res.pin.profileId + '/' + res.pin.origin : 'none'}`));
+    k.onReadAgain(() => { order.push('lift'); });
+    await k.boot().catch(() => null);
+    unplant(F, BODY5);
+    const keep = setInterval(() => { }, 1000);
+    try { for (let i = 0; i < 300 && !order.includes('lift'); i++) await new Promise((r) => setTimeout(r, 10)); } finally { clearInterval(keep); }
+    await flush();
+    const pf = (x) => { const v = k.pinFor(x); return v ? `${v.profileId}/${v.origin}/${v.at === 1 ? 'at1' : 'now'}` : null; };
+    Object.assign(out, { k1: pf(K1), kf: pf(KF), parent: pf(PARENT), kw: pf(KW), cap: k.groupCapOf ? k.groupCapOf(K1) : null, order: order.join(' ') });
+    try { k.shutdown(); } catch { }
+    return out;
+  };
+  const o = await owedScene(require(path.join(ROOT, 'src/server/browser-keeper.js')), 'owed');
+  ok(o.held && o.owe.every(Boolean) && o.pinnedWhileHeld === 0, 'while held each create OWES its pin (nothing pinned yet)', o);
+  ok(o.k1 === 'bp-0000b001/chosen/now' && o.cap === 2, 'at the read the New Session pick is pinned under the conversation\'s key — though no session was there to ask (M3) — and its Task Group cap is stamped (S4); the resume\'s weaker facts did not replace it', o);
+  ok(o.kf === 'bp-0000b001/conversation/at1' && o.parent === 'bp-0000b001/chosen/at1' && o.kw === null, 'a fork made while held takes its parent\'s pin as the keeper\'s copy (the parent\'s row verbatim — M1r); the resume of the pinned conversation keeps its own; nothing to pick pins nothing', o);
+  ok(/^(\S+:\S+ ){4}lift$/.test(o.order), 'the owed pins are judged right after the read — before the owed boot and the waiters (S3) — each told to the session\'s copy (N11)', o);
+  const JUDGE = "    if (!heldReg) { try { judgeOwedPins(); }", FORK = "      if (pin.profileId && pin.origin === 'conversation' && f.fork && f.forkParentKey && f.forkParentKey !== browserKey) out = copyPin(";
+  ok(KSRC.split(JUDGE).length === 2 && KSRC.split(FORK).length === 2, 'control setup: the read\'s judge and the fork\'s copy are found once');
+  const ox = await owedScene(MJ.load('src/server/browser-keeper.js', KSRC.replace(JUDGE, '    if (false) { try { judgeOwedPins(); }'), 'owed-not-judged'), 'owed-not-judged');
+  const of = await owedScene(MJ.load('src/server/browser-keeper.js', KSRC.replace(FORK, '      if (false) out = copyPin('), 'owed-no-fork-copy'), 'owed-no-fork-copy');
+  ok(ox.k1 === null && ox.kf === null && of.kf === null && of.k1 === 'bp-0000b001/chosen/now', 'CONTROLS: a read that judges no owed pin leaves the pick and the fork unpinned for good (r2 M3); a judge with no fork copy leaves the fork unpinned (r2 M1r) — each RED', { ox, of });
+  // S5: a KEYLESS create's owed start record → the witness the late key restores (the create's own verdict, read now)
+  const BKm = require(path.join(ROOT, 'src/server/browser-key.js')), Bp = require(path.join(ROOT, 'src/browser-profiles.js'));
+  const d5 = path.join(D, 'owed-witness'), H5 = path.join(d5, 'home'); fs.mkdirSync(H5, { recursive: true }); fs.writeFileSync(path.join(d5, 'browser-profiles.json'), BODY5);
+  const k5 = require(path.join(ROOT, 'src/server/browser-keeper.js')).create({ dataDir: d5, homeDir: H5, env: () => ({ HOME: H5 }), serverSetting: () => undefined, install: false, log: quiet, taskGroupCap: () => 3 });
+  const wPick = BKm.owedWitness(k5, { owed: { facts: { explicit: 'bp-0000b001' }, groupFacts: {} }, at: 5 });
+  const wFork = BKm.owedWitness(k5, { owed: { facts: { fork: true, forkParentKey: PARENT } }, at: 5 });
+  const wNone = BKm.owedWitness(k5, { owed: { facts: {} }, at: 5 });
+  try { k5.shutdown(); } catch { }
+  ok(Bp.isPinWitness(wPick) && wPick.profileId === 'bp-0000b001' && wPick.origin === 'chosen' && wPick.at === 5 && wPick.cap === 3 && Bp.isPinWitness(wFork) && wFork.origin === 'conversation' && wFork.at === 1 && Bp.isEmptyPinWitness(wNone),
+    'a keyless create\'s owed start record becomes the witness its late key restores: the start\'s pick, a fork\'s parent row verbatim, none = the empty witness (no landing on today\'s default) — S5', { wPick, wFork, wNone });
+}
+
+console.log('§6 its read r2 (N17): a load that THROWS at the read holds the store again — never the owed boot over an empty registry');
+{
+  const HEAD = '  function loadFrom(read) {\n    let rawDoc = null;\n';
+  const REHOLD = "holdRegistry({ code: 'load-threw', why: String((e && e.message) || e) }); return; }";
+  ok(KSRC.split(HEAD).length === 2 && KSRC.split(REHOLD).length === 2, 'control setup: the load\'s head and the re-hold are found once');
+  const FAULT = HEAD + "    if (read && typeof read.text === 'string') throw new Error('a planted load fault');   /* PLANTED: the read again's load throws */\n";
+  const faultScene = async (src, name) => {
+    const d = path.join(D, name), H = path.join(d, 'home'); fs.mkdirSync(H, { recursive: true });
+    const F = path.join(d, 'browser-profiles.json'); plant(F, BODY);
+    const k = MJ.load('src/server/browser-keeper.js', src, name).create({ dataDir: d, homeDir: H, env: () => ({ HOME: H }), serverSetting: () => undefined, install: false, log: quiet, unreadRetry: { firstMs: 15, maxMs: 30 } });
+    const held0 = k.held(); await k.boot().catch(() => null);
+    let lifts = 0; k.onReadAgain(() => { lifts++; });
+    unplant(F, BODY);
+    const keep = setInterval(() => { }, 1000);
+    try { for (let i = 0; i < 40 && !lifts; i++) await new Promise((r) => setTimeout(r, 10)); } finally { clearInterval(keep); }
+    await flush();
+    const out = { held0, heldAfter: k.held(), lifts };
+    try { k.shutdown(); } catch { }
+    out.file = (() => { try { return JSON.parse(fs.readFileSync(F, 'utf8')).profiles.length; } catch (e) { return '(' + (e.code || 'unparsed') + ')'; } })();
+    return out;
+  };
+  const f1 = await faultScene(KSRC.replace(HEAD, FAULT), 'load-fault');
+  const f0 = await faultScene(KSRC.replace(HEAD, FAULT).replace(REHOLD, '}'), 'load-fault-no-rehold');
+  ok(f1.held0 && f1.heldAfter && f1.lifts === 0 && f1.file === 1, 'a load that throws at the read: the store is HELD again, nothing judged, the file keeps its profile', f1);
+  ok(f0.lifts === 1 && f0.file === 0, 'CONTROL (no re-hold, in a copy): the owed boot runs over the EMPTY registry and commits it — every profile gone from the file — RED', f0);
 }
 
 for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 1, label: 'browser-registry-held ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));

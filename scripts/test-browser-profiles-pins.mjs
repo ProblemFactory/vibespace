@@ -199,8 +199,12 @@ console.log('\n⑳ r5: the floor notice latches on DELIVERY · the conversation 
 console.log('\n㉓ lane new-session-form: mayAttach at create (the form\'s profile list + the create\'s judge)');
 {
   const wc = read('src/ws-create.js');
-  ok(/if \(pin\.origin === 'chosen' && pin\.profileId && Array\.isArray\(data\.taskIds\) && typeof kp\.mayAttachAtCreate === 'function'\) \{\s*\n\s*const may = kp\.mayAttachAtCreate\(pin\.profileId, \{ taskIds: spawnGroups \}\);\s*\n\s*if \(!may\.ok\) \{[^\n]*pin = \{ profileId: '', dir: null, origin: 'harness', refused: may\.code \}; \}/.test(wc)
-    && wc.indexOf('kp.mayAttachAtCreate(') < wc.indexOf("keeper()?.setPin(bk.key, pin.profileId"), 'WIRING: ws-create judges the form\'s explicit pick (it sends taskIds) by the same verdict BEFORE the pin is written — a pick its groups do not admit starts without it, never added to the list');
+  // the B-f276 remainder, its read r2 (S2): the form's verdict lives in the keeper's ONE create verdict (`pinVerdictForCreate` — the
+  // same for a create judged now and one the held registry owes to its read); ws-create hands it the groups the form sends
+  const kp = read('src/server/browser-keeper.js');
+  ok(wc.includes('const formGroups = Array.isArray(data.taskIds) ? spawnGroups : null;') && wc.includes('kp.pinVerdictForCreate({ facts: pinFacts, hint, formGroups })')
+    && /if \(pin\.origin === 'chosen' && pin\.profileId && Array\.isArray\(formGroups\)\) \{\s*\n\s*const may = mayAttachAtCreate\(pin\.profileId, \{ taskIds: formGroups \}\);\s*\n\s*if \(!may\.ok\) pin = \{ profileId: '', dir: null, origin: 'harness', refused: may\.code, formRefused: pin\.profileId \};/.test(kp)
+    && wc.indexOf('kp.pinVerdictForCreate(') < wc.indexOf("keeper()?.setPin(bk.key, pin.profileId"), 'WIRING: ws-create judges the form\'s explicit pick (it sends taskIds) by the same verdict BEFORE the pin is written — a pick its groups do not admit starts without it, never added to the list');
   const routes = read('src/routes/browser.js');
   ok(/router\.get\('\/api\/browser\/admits', \(req, res\) => \{[\s\S]{0,400}k\.admitsAtCreate\(\{ taskIds \}\)/.test(routes), 'WIRING: GET /api/browser/admits answers the keeper\'s admitsAtCreate (the form\'s list)');
   const picker = read('src/lib/browser-profile-picker.js');

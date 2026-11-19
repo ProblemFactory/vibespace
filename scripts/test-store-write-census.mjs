@@ -885,7 +885,7 @@ const STORE_READS = [
   // NAMED WITHOUT A SET-ASIDE (the scan cannot see a store that never sets bytes aside — known ones are rows here): torn or
   // unreadable = empty, the next save overwrites → lane bl-jobs batch 12 (B-6721 holds that store)
   // the browser registry (lane bl-jobs, the B-f276 remainder, its read r1 N9): through the store-read law — a failed read and torn bytes HOLD
-  { file: 'src/server/browser-keeper.js', store: 'browser-profiles.json', state: 'answer', mark: /const a = SR\.storeAnswer\(read, \{ valid: REG_VALID \}\);/ },
+  { file: 'src/server/browser-keeper.js', store: 'browser-profiles.json', state: 'answer', mark: /if \(a\.state === 'data'\) \{ rawDoc = a\.value; reg = B\.normalizeRegistry\(rawDoc\); \}/ },   // its read r2 (N16): the LOAD's line (the read again's storeAnswer is a second, unrelated match)
   { file: 'src/jobs.js', store: 'job-notifications.json', state: 'debt', why: '_loadNotifs: any failure is an empty map (catch { }) — the next save writes over it', mark: /_loadNotifs\(\) \{\s*try \{\s*const obj = JSON\.parse\(fs\.readFileSync\(this\.notifsFile, 'utf-8'\)\);/ },
 ];
 const READ_DEBT_CAP = 8;     // lower it as each debt row flips to `answer` — never raise it

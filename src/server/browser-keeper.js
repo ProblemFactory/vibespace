@@ -620,7 +620,12 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     if (heldT) { clearTimeout(heldT); heldT = null; }
     // its read r1 (N4): a throw in the load or the notices never skips the owed boot and the waiters (the release's throw reached the
     // wiring's catch, and the steps after the boot still ran)
-    try { loadFrom(read); } catch (e) { log.warn?.(`[browser] ${STORE_FILE}: the read's load failed: ${e && e.message}`); }   // the READ answer — no second read
+    // its read r2 (N17): a load that THROWS holds the store again (fail closed) — it may have thrown before the registry took the read,
+    // and the owed boot would then judge and commit the EMPTY registry (the original harm); the next try reads afresh
+    try { loadFrom(read); } catch (e) { log.warn?.(`[browser] ${STORE_FILE}: the read's load failed: ${e && e.message} — held again`); holdRegistry({ code: 'load-threw', why: String((e && e.message) || e) }); return; }   // the READ answer — no second read
+    // its read r2 (S3): the creates the hold owed are judged FIRST — before the owed boot and the waiters (an agent's command in that
+    // window found no pin and took a temporary browser; a pin made in it was overwritten)
+    if (!heldReg) { try { judgeOwedPins(); } catch (e) { log.warn?.(`[browser] the pins the creates owed after the read: ${e && e.message}`); } }
     log.warn?.(`[browser] ${STORE_FILE} read again (held since ${new Date(was.at).toISOString()}, ${was.code}): ${a.state === 'data' ? `${reg.profiles.length} profile(s)` : 'the file is GONE — the registry starts empty'}`);
     try { reclaimFolderNotices(); } catch (e) { log.warn?.(`[browser] the folder notices after the read failed: ${e && e.message}`); }
     if (bootOwed) { bootOwed = false; try { await boot(); } catch (e) { log.warn?.(`[browser] the boot's path after the read failed: ${e && e.message}`); } }
@@ -2000,6 +2005,60 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     // hands the spawn no pinned directory any more); a mediated profile is pinned like any other (P6's skip is gone)
     return { profileId: p ? p.id : '', dir: p ? p.dir : null, origin: p ? pick.origin : 'harness', label: p ? p.label : null };
   }
+  /** THE verdict of a create's pin — ONE helper for both roads (the B-f276 remainder, its read r2 S2: a create judged now, and one
+   *  the HELD registry owed to its read): the ladder; then the dialog's hint may only DOWNGRADE its own 'chosen' to the rung the value
+   *  IS (B-6b6d r3: the New Session dialog sends the group's / the instance default it filled in as an explicit id); then the New
+   *  Session form's pick is judged by the groups it sends (lane new-session-form: never added to «Who can use it» at create).
+   *  → the pin; `refused` names why none, `formRefused` the form's pick its groups do not admit */
+  function pinVerdictForCreate({ facts = {}, hint = null, formGroups = null } = {}) {
+    let pin = pinForCreate(facts || {});
+    if (pin.held) return pin;
+    if (pin.origin === 'chosen' && (hint === 'task-group' || hint === 'instance')) {
+      const rungValue = hint === 'task-group' ? (facts && facts.taskGroupDefault) : instanceDefault();
+      if (rungValue && pin.profileId === rungValue) pin = { ...pin, origin: hint };
+    }
+    if (pin.origin === 'chosen' && pin.profileId && Array.isArray(formGroups)) {
+      const may = mayAttachAtCreate(pin.profileId, { taskIds: formGroups });
+      if (!may.ok) pin = { profileId: '', dir: null, origin: 'harness', refused: may.code, formRefused: pin.profileId };
+    }
+    return pin;
+  }
+  // ── the B-f276 remainder, its read r2 (M1r / M3 / S3 / S4): a create the HELD registry could not judge OWES its pin ──
+  // keyed by the CONVERSATION's browser key (never a live session's closure: a stop, a resume, the spawn's own awaits outran it),
+  // judged right after the read (before the owed boot: an agent command in between found no pin), whatever became of the session:
+  // the same verdict as a create's, a fork's copy of its parent's pin, the Task Group's cap stamped. A restart before the read: the
+  // conversation's record carries the facts (`browserPinOwed`), owed again then
+  const owedPins = new Map();
+  const owedHooks = new Set();
+  function owePin(browserKey, owed) {
+    if (!B.isBrowserKey(browserKey) || !owed || typeof owed !== 'object' || Array.isArray(owed)) return null;
+    if (!loaded) ensureLoaded();
+    if (!heldReg) return judgeOwedPin(browserKey, owed);   // read by now (a restored record at a boot that reads)
+    const had = owedPins.get(browserKey);
+    // a resume while still held carries weaker facts (no pick of its own): it never replaces the create's pick
+    if (!had || (owed.facts && owed.facts.explicit)) owedPins.set(browserKey, owed);
+    return { owed: true };
+  }
+  function judgeOwedPin(browserKey, owed) {
+    owedPins.delete(browserKey);
+    const f = (owed && owed.facts && typeof owed.facts === 'object') ? owed.facts : {};
+    // judged in the SAME turn as the read's load (S3): nothing can pin this key in between (every act refused while held), so the
+    // verdict is the create's own — a resume's explicit pick over its conversation's pin included, as the ladder ranks them
+    let pin; try { pin = pinVerdictForCreate({ facts: f, hint: owed.hint || null, formGroups: Array.isArray(owed.formGroups) ? owed.formGroups : null }); } catch (e) { pin = { profileId: '', origin: 'harness', refused: String(e && e.message) }; }
+    let out = null;
+    try {
+      if (pin.profileId && pin.origin === 'conversation' && f.fork && f.forkParentKey && f.forkParentKey !== browserKey) out = copyPin(String(f.forkParentKey), browserKey);   // M1r: a fork copies its parent's
+      else if (pin.profileId && pin.origin !== 'conversation') out = setPin(browserKey, pin.profileId, { origin: pin.origin, remote: !!owed.remote });
+      else if (pin.profileId) out = pinFor(browserKey);   // a resume's own pin (the ladder's conversation rung): kept as it is
+    } catch (e) { pin = { ...pin, refused: String(e && e.message) }; }
+    const res = { pin: out, refused: out ? null : (pin.refused || null), formRefused: pin.formRefused || null };
+    try { if (owed && owed.groupFacts && typeof owed.groupFacts === 'object') stampGroupCap(browserKey, owed.groupFacts); } catch (e) { log.warn?.(`[browser] ${browserKey}: the Task Group's cap after the read was not stamped — ${e && e.message}`); }   // S4
+    res.cap = capOf(browserKey);
+    log.log?.(`[browser] ${browserKey}: the pin its create owed to the registry's read — ${res.pin ? `${res.pin.profileId} (${res.pin.origin})` : `none${res.refused ? ` (${res.refused})` : ''}`}`);
+    for (const fn of owedHooks) { try { fn(browserKey, res); } catch (e) { log.warn?.(`[browser] a session's copy of its owed pin was not updated — ${e && e.message}`); } }
+    return res;
+  }
+  function judgeOwedPins() { for (const [k, o] of [...owedPins]) judgeOwedPin(k, o); }
 
   // ── the browser: reuse-or-spawn ──
   function idleMs() { return B.idleTimeoutMs(setting('browser.idleTimeoutMs', B.DEFAULT_IDLE_TIMEOUT_MS)); }
@@ -8432,7 +8491,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     lineageKeyOf, moveDirLineage, // verify r8 (T2 ②): the product's own move of a directory (a Forget) carries its lineage
 
     // lane browser-resume (§3.9): the relay's tab list of a conversation's own browser, the CDP read at a stop, the store
-    held: () => { if (!loaded) ensureLoaded(); return !!heldReg; }, heldWords, onReadAgain: (fn) => { heldLifts.add(fn); return () => heldLifts.delete(fn); },   // the B-f276 remainder
+    held: () => { if (!loaded) ensureLoaded(); return !!heldReg; }, heldWords, onReadAgain: (fn) => { heldLifts.add(fn); return () => heldLifts.delete(fn); }, owePin, onOwedPin: (fn) => { owedHooks.add(fn); return () => owedHooks.delete(fn); }, pinVerdictForCreate,   // the B-f276 remainder
     profileDirRegistered: (dir) => { ensureLoaded(); refuseIfHeld('is this folder a profile\'s'); return !!dir && named().some((p) => p.dir && !p.host && (B.sameDir(p.dir, dir) || F.sameRealDir(p.dir, dir) !== false)); }, // lane browser-resume: a kept directory a named profile registered in place is never removed by the kept store — verify F1: by REAL identity, unknown ⇒ registered (fail closed)
     noteTabs, captureKeptTabs: (profileId, seenBy) => { const pp = profile(String(profileId || '')); return captureKeptTabs(pp, pp ? reg.browsers[pp.id] : null, seenBy || 'a read'); }, keptStore: () => keptStore(),
     // lane browser-resume B (§3.9, ruling 2): Resume, the reopen, the hand-back's two halves

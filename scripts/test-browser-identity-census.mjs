@@ -170,7 +170,6 @@ const KNOWN_CALLERS = [
   ['attach', 'src/routes/browser.js', 'profileId: jv.profileId, browserKey: f.browserKey', 'resolveForJob (lane jobs-browser) — a Background Work job\'s OWN lease in its owner conversation\'s pinned / default profile; the key is a child handle, so admission is the owner\'s (src/browser-job-principal.js)'],
   ['setPin', 'src/routes/browser.js', "origin: 'chosen'", 'pinAnswer — the ONE pin implementation (user + agent)'],
   ['setPin', 'src/ws-create.js', 'remote: !!data.hostId', 'ws create — the New Session dialog\'s explicit pick, the remote flag carried'],
-  ['setPin', 'src/ws-create.js', 'remote: remoteHost', 'ws create — a create the unread profile registry held: its pin judged once the registry reads (pinForCreate again over the same facts), the remote flag carried'],
   ['copyPin', 'src/ws-create.js', 'copyPin(forkParentKey, bk.key)', 'ws create — a fork\'s copy'],
   ['restorePin', 'src/server/browser-key.js', "late.source === 'witness'", 'the late key — the pick its spawn witnessed, restored (a preference: restorePin writes no owner)'],
   ['setPin', 'src/server/browser-key.js', "late.source === 'landing'", 'the late key — the current default as a landing (a default origin: setPin adds nothing to the list)'],
@@ -183,7 +182,7 @@ const KNOWN_CALLERS = [
   const sites = CALLER_FILES.filter((f) => fs.existsSync(path.join(REPO, f))).flatMap((f) => callerSites(f, read(f)));
   const unknown = sites.filter((s) => !KNOWN_CALLERS.some(([prim, file, needle]) => prim === s.prim && file === s.file && (!needle || s.text.includes(needle))));
   const missing = KNOWN_CALLERS.filter(([prim, file, needle]) => file !== 'src/server/browser-keeper.js' && !sites.some((s) => s.prim === prim && s.file === file && s.text.includes(needle)));
-  ok(sites.length >= 10 && !unknown.length, `every caller of a lease / pin / list primitive across ${CALLER_FILES.length} files (${sites.length} calls) is KNOWN (attach ×5, setPin ×4, copyPin, restorePin, ensureEphemeral ×2, updateProfile)`, unknown.map((s) => `${s.file}:${s.line} ${s.prim}( ${s.text}`));
+  ok(sites.length >= 10 && !unknown.length, `every caller of a lease / pin / list primitive across ${CALLER_FILES.length} files (${sites.length} calls) is KNOWN (attach ×5, setPin ×3, copyPin, restorePin, ensureEphemeral ×2, updateProfile)`, unknown.map((s) => `${s.file}:${s.line} ${s.prim}( ${s.text}`));
   ok(!missing.length, '…and every known caller is still there (a moved door is a door to re-judge)', missing);
   // the raw doors: reshapeStore / _reg are never called outside the keeper, the migrations and the suites
   const rawCallers = [];
