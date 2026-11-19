@@ -591,7 +591,7 @@ class Sidebar {
     return {
       term, backendFilter: [...this._backendFilter], hostFilter: [...this._hostFilter], kindFilter: this._agentKindFilter || null,
       stoppedOnly: !!this._stoppedOnly, tasksTab: this._activeTab === 'tasks', showArchived: this._statusFilter.has('archived'),
-      statusFilter: [...this._statusFilter], activeView: this._activeView || null,
+      statusFilter: [...this._statusFilter], statusOn: [...this._statusFilter].filter((x) => x !== 'archived'), activeView: this._activeView || null,   // statusOn: once a draw, not once a row
     };
   }
 
@@ -603,7 +603,7 @@ class Sidebar {
       backend: s.backend || 'claude', backendFilter: ctx.backendFilter, host: s.host || 'local', hostFilter: ctx.hostFilter,
       kindPass: !ctx.kindFilter || passesAgentKindFilter(s, ctx.kindFilter), stoppedOnly: ctx.stoppedOnly, stoppedBy: ctx.stoppedOnly ? isStoppedBy(s) : false,
       tasksTab: ctx.tasksTab, archived: !!this.isArchived(s), showArchived: ctx.showArchived, status: s.status, statusFilter: ctx.statusFilter,
-      activeView: ctx.activeView,
+      statusOn: ctx.statusOn, activeView: ctx.activeView,
     };
   }
 

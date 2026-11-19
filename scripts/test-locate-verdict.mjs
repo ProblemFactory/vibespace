@@ -74,6 +74,10 @@ console.log('① THE VERDICT: each reason in its place, the first filter that dr
     [{ stoppedOnly: true }, 'stopped'], [{ stoppedOnly: true, stoppedBy: true }, true], [{ stoppedOnly: true, tasksTab: true }, true],
     [{ kindPass: false, stoppedOnly: true }, 'kind'], [{ stoppedOnly: true, archived: true, statusFilter: ['stopped'] }, 'stopped'],
     [{ tasksTab: true, statusFilter: ['stopped'], activeView: 'stopped' }, true], [{ tasksTab: true, archived: true }, 'archived'], [{ tasksTab: true, archived: true, showArchived: true }, true],
+    // 主开发's read of B-b842 (04:09Z): ONE status rule, Archived on or off — all four on never narrows (a row of no known status
+    // included); the list's once-a-draw array of the statuses on (statusOn) is what the verdict reads when it is given
+    [{ showArchived: true, statusFilter: [...FOUR, 'archived'], status: undefined }, true], [{ showArchived: true, statusFilter: ['live', 'archived'], status: undefined }, 'status'],
+    [{ statusFilter: FOUR, statusOn: ['live'], status: 'stopped' }, 'status'], [{ statusFilter: ['live'], statusOn: FOUR, status: 'stopped' }, true],
   ];
   const bad = rows.filter(([o, want]) => { const v = V(o); return want === true ? v.show !== true : (v.show !== false || v.why !== want); });
   ok(!bad.length, `${rows.length} rows: every reason where the list puts it, the FIRST filter that drops the row named, a row in a collapsed or far folder shown`, bad.map(([o]) => J(o) + ' → ' + J(V(o))).join(' | '));
@@ -95,6 +99,8 @@ console.log('② THE LIST FILTERS WITH THE VERDICT (B-b842): one predicate — s
   ok(/const filtered = this\._filterSessions\(f\);\n\s*let sessions = filtered\.sessions;/.test(RI) && OWN.every((k) => !RI.includes(k)), `_renderInner lists what _filterSessions shows and holds no matcher of its own (${OWN.length} named) — the second copy of the chain is gone`, OWN.filter((k) => RI.includes(k)).join(' · '));
   ok(/const v = locateVerdict\(this\._listRowFacts\(s, ctx\)\);/.test(FS) && /if \(v\.show\) sessions\.push\(s\);/.test(FS) && /for \(const s of this\._allSessions \|\| \[\]\)/.test(FS), '_filterSessions judges EVERY row with the verdict over _listRowFacts and lists exactly what it shows');
   ok(/return this\._listRowFacts\(s, this\._listFilterCtx\(/.test(LF), 'Locate\'s facts come from the SAME builder (_locateFacts → _listRowFacts over _listFilterCtx)');
+  ok(/statusOn: \[\.\.\.this\._statusFilter\]\.filter\(\(x\) => x !== 'archived'\)/.test(methodText(SIDEBAR, '  _listFilterCtx(term) {')) && /statusOn: ctx\.statusOn/.test(RF) && /Array\.isArray\(f\.statusOn\) \? f\.statusOn :/.test(read('src/locate-verdict.js')),
+    'the statuses on are built ONCE a draw (_listFilterCtx) and handed to every row (_listRowFacts) — never an array a row a draw (主开发 04:09Z)');
   ok(['sessionMatchesFilter(s, ctx.term)', 'passesAgentKindFilter(s, ctx.kindFilter)', 'isStoppedBy(s)', 'this.isArchived(s)'].every((k) => RF.includes(k)), 'the row facts ask the list\'s own matchers: the search box\'s, the agent kind\'s, the stopped pill\'s, Archived');
   const SU = methodText(SIDEBAR, '  _stoppedUnderFilters() {');
   ok(/stoppedOnly: true \};/.test(SU) && /isStoppedBy\(s\) && locateVerdict\(this\._listRowFacts\(s, ctx\)\)\.show/.test(SU) && !/sessionMatchesFilter\(|_statusFilter|_activeView|_backendFilter|_hostFilter/.test(SU), 'the pill\'s count (_stoppedUnderFilters) is the same predicate with the pill on — no third copy of the chain');
@@ -113,10 +119,10 @@ console.log('② THE LIST FILTERS WITH THE VERDICT (B-b842): one predicate — s
     const showArchived = fk._statusFilter.has('archived');
     if (fk._activeTab === 'tasks') { if (!showArchived) step('archived', (x) => !x._arch); }
     else {
-      if (showArchived) step('status', (x) => x._arch || fk._statusFilter.has(x.status));
+      const on = new Set(fk._statusFilter); on.delete('archived');   // the status filter narrows only below all four — Archived on or off (主开发 04:09Z)
+      if (showArchived) { if (on.size < 4) step('status', (x) => x._arch || on.has(x.status)); }
       else {
         const n0 = ss.length; step('archived', (x) => !x._arch); archivedHid = n0 - ss.length;
-        const on = new Set(fk._statusFilter); on.delete('archived');
         if (on.size < 4) step('status', (x) => on.has(x.status));
       }
       statusLeft = ss.length;
@@ -182,14 +188,33 @@ console.log('② THE LIST FILTERS WITH THE VERDICT (B-b842): one predicate — s
   ok(!!C1.bad, `RED CONTROL: a verdict without the status filter — the list (it filters with it) and Locate both disagree with the rules (${C1.bad ? 'listed ' + C1.bad.got.ids + ' vs ' + C1.bad.want.ids : 'NOT CAUGHT'})`);
   // THE «ALL FOUR» RULE (the status filter narrows only below all four non-archived statuses) changes nothing for a row of one of the
   // four — it is seen only on a row whose status the list does not know: kept while all four are on, dropped once the person narrows
-  const VSRC = read('src/locate-verdict.js'), VSRC0 = VSRC.replace('on.length < NON_ARCHIVED && ', '');
+  const VSRC = read('src/locate-verdict.js'), VSRC0 = VSRC.replace('const narrows = on.length < NON_ARCHIVED;', 'const narrows = true;');
   const always = VSRC0 !== VSRC ? new Function('module', VSRC0 + '\nreturn module.exports;')({ exports: {} }).locateVerdict : null;
-  const unknown = cartesian([FOUR, ['live'], [...FOUR, 'archived']], [false, true], ['folders', 'tasks']).map(([sf, arch, tab]) => ({ term: '', s: { sessionId: 'c1', _match: true, _kind: true, _arch: arch, status: undefined, _stopped: false }, more: MORE, bf: [], hf: [], kf: null, so: false, sf, av: null, tab, pill: false }));
+  const unknown = cartesian([FOUR, ['live'], [...FOUR, 'archived'], ['live', 'archived']], [false, true], ['folders', 'tasks']).map(([sf, arch, tab]) => ({ term: '', s: { sessionId: 'c1', _match: true, _kind: true, _arch: arch, status: undefined, _stopped: false }, more: MORE, bf: [], hf: [], kf: null, so: false, sf, av: null, tab, pill: false }));
   const keep = states.splice(0, states.length, ...unknown);
   const U = run(), C3 = always ? run({ verdict: always, filter: bind('  _filterSessions(term) {', always) }) : { bad: null };
   states.splice(0, states.length, ...keep);
   ok(!U.bad && U.shown > 0 && U.shown < U.n, `a row of no known status: kept while all four are on, dropped once the person narrows — the list and Locate agree with the rules (${U.shown} of ${U.n} shown)`, U.bad && J(U.bad));
   ok(!!always && !!C3.bad, 'RED CONTROL: a verdict without its «all four» rule (it always narrows) drops that row while all four are on — the rules disagree', C3.bad && J(C3.bad.want));
+  // …and THE DOOR SHOWS IT (主开发 04:09Z: with Archived on, «Show every status» added the four and the row of no known status stayed
+  // hidden — the next press found the same reason): over those rows, every door shows the row or moves it to a LATER reason
+  const doorsShow = (verdict) => { let stuck = null;
+    for (const st of unknown) {
+      env.term = st.term; const fk = fakeOf({ ...st, bf: [...st.bf], hf: [...st.hf], sf: [...st.sf] });
+      let v = verdict(FACTS.call(fk, 'c1')), presses = 0;
+      while (!v.show && presses < ORDER.length + 1) {
+        DOOR.call(fk, v.why); presses++;
+        const next = verdict(FACTS.call(fk, 'c1'));
+        if (!next.show && ORDER.indexOf(next.why) <= ORDER.indexOf(v.why)) { stuck = stuck || { sf: st.sf, arch: st.s._arch, tab: st.tab, why: v.why, next: next.why }; break; }
+        v = next;
+      }
+    }
+    return stuck; };
+  const D0 = doorsShow(locateVerdict);
+  ok(!D0, 'a row of no known status: every door shows it or moves it to a LATER reason — Archived on included («Show every status» is enough)', D0 && J(D0));
+  const baseArch = (fx) => (fx && fx.present && !fx.tasksTab && fx.showArchived && !fx.archived && !(fx.statusFilter || []).includes(fx.status) && locateVerdict(fx).show !== false ? { show: false, why: 'status', name: fx.status } : locateVerdict(fx));
+  const D1 = doorsShow(baseArch);
+  ok(!!D1 && D1.why === 'status' && D1.next === 'status', 'RED CONTROL: the base\'s rule (Archived on: no «all four» exception) — «Show every status» leaves that row hidden and the next press finds the same reason', D1 && J(D1));
   const RF0 = RF.replace('stoppedBy: ctx.stoppedOnly ? isStoppedBy(s) : false', 'stoppedBy: true');
   const C2 = RF0 !== RF ? run({ rowFacts: bindText(RF0), first: true }) : { bad: null };
   ok(RF0 !== RF && !!C2.bad, 'RED CONTROL: row facts that forget the stopped pill (the release\'s blind spot — every row «stopped») disagree with the rules', C2.bad && J(C2.bad.want));

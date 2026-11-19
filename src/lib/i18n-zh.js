@@ -3400,6 +3400,7 @@ export default {
   "Hidden by the conversation-kind filter": "被对话类型筛选隐藏",
   "Show all kinds": "显示全部类型",
   "Hidden by the «Stopped by a limit or overload» filter": "被「因用量上限/过载停止」筛选隐藏",
+  "Turn off the «Stopped by a limit or overload» filter": "关闭「因用量上限/过载停止」筛选",
   "This conversation is archived": "这个对话已归档",
   "Show archived": "显示已归档",
   "Hidden by the status filter: {name}": "被状态筛选隐藏：{name}",

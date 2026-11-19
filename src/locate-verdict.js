@@ -12,7 +12,10 @@
 // membership — its own view filters). A row inside a collapsed folder is no reason at all: Locate opens the folder.
 //   locateVerdict(facts) → { show: true } | { show: false, why, name?, term? }
 //   facts: { present, term, matchesTerm, backend, backendFilter[], host, hostFilter[], kindPass, stoppedOnly, stoppedBy,
-//            tasksTab, archived, showArchived, status, statusFilter[], activeView }
+//            tasksTab, archived, showArchived, status, statusFilter[], statusOn[]?, activeView }
+//   (statusOn: the non-archived statuses on — the list builds it ONCE a draw; Locate's one row may leave it out)
+//   THE STATUS FILTER NARROWS ONLY BELOW ALL FOUR non-archived statuses, Archived on or off (主开发's read of B-b842: with
+//   Archived on, a row whose status is none of the four stayed hidden after «Show every status» — the door found the same reason)
 //   LOCATE_WORDS[why] → { words, door } — English keys the client says through t(); `door` = the one act that shows the row
 //   (null: nothing in the sidebar can — the conversation is not in this list). {name} is said in the words the list's own
 //   controls show (src/lib/sidebar.js _locateName: the filter menu's rows, the quick tabs) — never a raw id.
@@ -25,7 +28,7 @@ const LOCATE_WORDS = Object.freeze({
   backend: Object.freeze({ words: 'Hidden by the agent filter: {name}', door: 'Show all agents' }),   // ui-words: an English KEY — the client words it through t() where it is drawn (session-lifecycle.js; zh / ja rows)
   host: Object.freeze({ words: 'Hidden by the location filter: {name}', door: 'Show all locations' }),   // ui-words: an English KEY — the client words it through t() where it is drawn (session-lifecycle.js; zh / ja rows)
   kind: Object.freeze({ words: 'Hidden by the conversation-kind filter', door: 'Show all kinds' }),   // ui-words: an English KEY — the client words it through t() where it is drawn (session-lifecycle.js; zh / ja rows)
-  stopped: Object.freeze({ words: 'Hidden by the «Stopped by a limit or overload» filter', door: 'Show all' }),   // ui-words: an English KEY — the client words it through t() where it is drawn (session-lifecycle.js; zh / ja rows)
+  stopped: Object.freeze({ words: 'Hidden by the «Stopped by a limit or overload» filter', door: 'Turn off the «Stopped by a limit or overload» filter' }),   // ui-words: an English KEY — the client words it through t() where it is drawn (session-lifecycle.js; zh / ja rows)
   archived: Object.freeze({ words: 'This conversation is archived', door: 'Show archived' }),   // ui-words: an English KEY — the client words it through t() where it is drawn (session-lifecycle.js; zh / ja rows)
   status: Object.freeze({ words: 'Hidden by the status filter: {name}', door: 'Show every status' }),   // ui-words: an English KEY — the client words it through t() where it is drawn (session-lifecycle.js; zh / ja rows)
   view: Object.freeze({ words: 'Hidden by the «{name}» view', door: 'Show all' }),   // ui-words: an English KEY — the client words it through t() where it is drawn (session-lifecycle.js; zh / ja rows)
@@ -46,15 +49,11 @@ function locateVerdict(f) {
   if (f.kindPass === false) return { show: false, why: 'kind' };
   if (f.stoppedOnly && !f.tasksTab && !f.stoppedBy) return { show: false, why: 'stopped' };   // «因限额/过载停止 (N)» — never the Tasks board
   if (f.tasksTab) return f.archived && !f.showArchived ? { show: false, why: 'archived' } : { show: true };   // the Tasks board: archived only
-  const statuses = Array.isArray(f.statusFilter) ? f.statusFilter : [];
+  const on = Array.isArray(f.statusOn) ? f.statusOn : (Array.isArray(f.statusFilter) ? f.statusFilter : []).filter((x) => x !== 'archived');
+  const narrows = on.length < NON_ARCHIVED;
   if (f.archived) {
     if (!f.showArchived) return { show: false, why: 'archived' };
-  } else if (f.showArchived) {
-    if (!statuses.includes(f.status)) return { show: false, why: 'status', name: f.status };
-  } else {
-    const on = statuses.filter((x) => x !== 'archived');
-    if (on.length < NON_ARCHIVED && !on.includes(f.status)) return { show: false, why: 'status', name: f.status };
-  }
+  } else if (narrows && !on.includes(f.status)) return { show: false, why: 'status', name: f.status };   // Archived on or off: one rule
   if (f.activeView && f.status !== f.activeView) return { show: false, why: 'view', name: f.activeView };
   return { show: true };
 }

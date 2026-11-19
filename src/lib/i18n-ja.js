@@ -3400,6 +3400,7 @@ export default {
   "Hidden by the conversation-kind filter": "会話の種類の絞り込みで非表示",
   "Show all kinds": "すべての種類を表示",
   "Hidden by the «Stopped by a limit or overload» filter": "「上限・過負荷で停止」の絞り込みで非表示",
+  "Turn off the «Stopped by a limit or overload» filter": "「上限・過負荷で停止」の絞り込みを解除",
   "This conversation is archived": "この会話はアーカイブ済みです",
   "Show archived": "アーカイブ済みを表示",
   "Hidden by the status filter: {name}": "状態の絞り込みで非表示：{name}",
