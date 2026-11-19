@@ -585,6 +585,24 @@ const TOKEN_FILE = path.join(STATE, 'token');
 // the `dial-status` op, written by the dial loop at every outcome (atomic tmp+rename, 0600; never the token)
 const DIAL_STATUS_FILE = path.join(STATE, 'dial-status.json');
 function readDialStatus() { try { return JSON.parse(fs.readFileSync(DIAL_STATUS_FILE, 'utf-8')); } catch { return null; } }
+/** B-4d71: THIS DEVICE RETIRES ITS OWN START (src/agentd/self-retire.js) — the dial config and token first, the boot-hook block,
+ *  the launch item / unit / logon task, the supervisor's own stop LAST — then it ends. Only a dial device (its dial.json):
+ *  the hub's own agent and a hand-made root retire nothing; nor does a root whose dial config no longer holds `provenDialToken`
+ *  (a pairing made again into this root since the proof was checked). The supervisor's stop ends what this agent runs too (its
+ *  unit's processes), as the installer's own retire does. */
+function retireOwnStart(why, provenDialToken) {
+  const SR = require('./self-retire.js');
+  let now = null; try { now = JSON.parse(fs.readFileSync(path.join(STATE, 'dial.json'), 'utf-8')); } catch { }
+  if (!now || !provenDialToken || now.token !== provenDialToken) return false;
+  const uid = typeof process.getuid === 'function' ? process.getuid() : null;
+  const steps = SR.retireSteps({ root: ROOT, platform: process.platform, home: os.homedir(), uid });
+  const run = (c, a) => new Promise((r) => { try { require('child_process').execFile(c, a, { windowsHide: true, timeout: 10000, env: spawnEnv() }, (err) => r(!err)); } catch { r(false); } });
+  SR.runRetire(steps.filter((s) => !s.last), { fs, supervisor: run, uid }).then((r) => {
+    log(`retire: ${why} — removed: ${r.done.join(', ') || 'nothing'}${r.left.length ? `; left: ${r.left.map((x) => `${x.what} (${x.why})`).join(', ')}` : ''}`);
+    setTimeout(() => { SR.runRetire(steps.filter((s) => s.last), { fs, supervisor: run, uid }).then((z) => { if (z.left.length) log(`retire: the supervisor's stop did not answer (${z.left.map((x) => x.why).join(', ')}) — this agent ends itself; with no dial config it dials nothing if its supervisor starts it again`); }).finally(() => process.exit(0)); }, 500).unref?.();   // the supervisor's stop last (it ends this agent), then the agent ends itself
+  });
+  return true;
+}
 // lane win-input-elevated: the daemon's record of every act injected into an ELEVATED window (the fence's audit) —
 // state/input-audit.jsonl, a bounded ring. Fields: at, actor, windowClass, windowTitle, keys, clicks, ok, why.
 const INPUT_AUDIT_FILE = path.join(STATE, 'input-audit.jsonl');
@@ -3003,7 +3021,8 @@ const DIAL_FILE = path.join(STATE, 'dial.json');
     // lane-pairing ③: every attempt tells the server its failure streak + the previous failure (untrusted hints the
     // server records at accept AND at refusal), and every outcome is CLASSIFIED (PURE dialFailureOf), written to
     // state/dial-status.json (atomic, 0600) and logged as ONE line naming the class — "dial-out failed — dns: …".
-    const ws = wsMin.connect(cfg.url, { headers: { 'x-vibespace-dial-token': cfg.token || '', ...DF.dialHeadersOf({ streak: status.streak || 0, lastFail: status.lastFail, version: VERSION, boot: BOOT_ID, dialUrl: cfg.url, platform: process.platform }) } }); // verify-r4 F1/F7: + the address it dials and its OS (the device's own facts)
+    const dialNonce = require('crypto').randomBytes(16).toString('hex');   // B-4d71: a «retired» answer's proof is made over THIS dial's nonce
+    const ws = wsMin.connect(cfg.url, { headers: { 'x-vibespace-dial-token': cfg.token || '', 'x-vibespace-dial-nonce': dialNonce, ...DF.dialHeadersOf({ streak: status.streak || 0, lastFail: status.lastFail, version: VERSION, boot: BOOT_ID, dialUrl: cfg.url, platform: process.platform }) } }); // verify-r4 F1/F7: + the address it dials and its OS (the device's own facts)
     let up = false, upAt = 0, lastErr = null;
     const host = DF.hostOf(cfg.url);
     ws.on('error', (e) => { lastErr = e; });
@@ -3023,6 +3042,13 @@ const DIAL_FILE = path.join(STATE, 'dial.json');
       const delay = [1000, 2000, 5000, 15000, 30000][Math.min(4, attempts++)];
       const now = Date.now();
       const f = DF.dialFailureOf(lastErr, { up, upMs: up ? now - upAt : 0 });
+      // B-4d71: the hub that held this pairing says it is gone — WITH its proof (made over this dial's nonce from the token's
+      // hash): this device retires its own start and ends; a «retired» without a valid proof (not this pairing's hub) changes nothing
+      if (f.code === 'refused-retired') {
+        let hostTok = ''; try { hostTok = fs.readFileSync(TOKEN_FILE, 'utf-8').trim(); } catch { }   // the proof's key: the HOST token, never sent on a dial
+        if (lastErr && require('../pairing-token.js').retireProofMatches(hostTok, dialNonce, lastErr.retireProof)) { if (retireOwnStart('the hub this device was paired with unpaired it (its proof checked)', cfg.token)) return; }
+        else log('dial refused as «retired» without a valid proof — not this pairing\'s hub: this device keeps its start');
+      }
       const outcome = f.code === 'lost' ? 'lost' : 'failed';
       status = DF.nextDialStatus(status, { at: now, outcome, code: f.code, detail: f.detail, status: f.status, host });
       writeDialStatus(status);

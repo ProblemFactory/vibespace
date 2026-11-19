@@ -326,7 +326,7 @@ console.log('③ dialFailureOf');
   ok(!/vsdt_[a-f0-9]{8}/.test(DF.dialFailureOf(E('EWHATEVER', 'token vsdt_0123456789abcdef leaked')).detail), 'a token never rides a detail');
   const hostile = DF.dialFailureOf(R(401, 'token-mismatch', 'x'.repeat(10 * 1024)));
   ok(hostile.detail.length <= 200, 'a 10 KiB hostile body reduces to ≤ 200 chars (attack 20)');
-  ok(DF.DIAL_FAIL_CODES.includes('refused-token-mismatch') && DF.DIAL_FAIL_CODES.length === 15, 'the closed code set (15 since B9: refused-duplicate-device)');
+  ok(DF.DIAL_FAIL_CODES.includes('refused-token-mismatch') && DF.DIAL_FAIL_CODES.includes('refused-retired') && DF.DIAL_FAIL_CODES.length === 16, 'the closed code set (16 since B-4d71: refused-retired)');
 }
 console.log('③ headers');
 {

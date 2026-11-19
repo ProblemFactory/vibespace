@@ -79,6 +79,7 @@ function connect(url, { headers = {}, timeoutMs = 15000 } = {}) {
         code: 'UPGRADE_REFUSED', status: res.statusCode,
         refusal: String(res.headers['x-vibespace-dial-refusal'] || '').slice(0, 40) || null,
         probe: String(res.headers['x-vibespace-dial-probe'] || '').slice(0, 40) || null,
+        retireProof: String(res.headers['x-vibespace-retire-proof'] || '').slice(0, 128) || null,   // B-4d71
         body: text,
       }));
       emit('close');

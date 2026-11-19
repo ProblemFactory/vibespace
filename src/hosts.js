@@ -145,6 +145,7 @@ function installAgentdAnswer(out) {
   return null;
 }
 
+const RETIRED_MAX = 512, RETIRED_DAYS = 180;   // B-4d71: the unpaired dial tokens' tombstones (noteRetiredDial)
 class HostManager {
   constructor({ dataDir }) {
     this.convIndex = new (require('./conversation-index.js').ConversationIndex)({ dataDir });
@@ -323,6 +324,23 @@ class HostManager {
     return h.id;
   }
   dialTokenHash(deviceId) { return this.findByDeviceId(deviceId)?.dialTokenHash || null; }
+  /** B-4d71: THE UNPAIRED DIAL TOKENS — a tombstone per unpaired pairing: the name, its DIAL token's hash (what the device dials
+   *  with), the hash of its HOST token (the retire proof's key, src/pairing-token.js) and when. A device unpaired while offline dials
+   *  again with that exact token and is answered «retired» with the proof (src/server/dial-pairing.js). Several a name (an unpair, a
+   *  re-pair, an unpair again: each pairing's device is told); a new pairing drops none (a fresh token never matches one). At most
+   *  RETIRED_MAX, the oldest out; past RETIRED_DAYS a tombstone is forgotten. Not carried by exportBundle (a moved hub forgets them). */
+  noteRetiredDial(deviceId, hash, proofKey = null) {
+    if (!deviceId || !hash) return;
+    const now = Date.now(), keep = (this._state.retiredDials || []).filter((r) => r && now - (Number(r.at) || 0) < RETIRED_DAYS * 864e5);   // (a pairing is unpaired once: its record goes with it)
+    keep.push({ deviceId: String(deviceId).slice(0, 64), hash: String(hash), ...(proofKey ? { proofKey: String(proofKey) } : {}), at: now });
+    this._state.retiredDials = keep.slice(-RETIRED_MAX);
+    this._save();
+  }
+  /** the tombstone of `deviceId` whose dial token `token` is (`matches(token, hash)`: the constant-time compare), or null */
+  retiredDialFor(deviceId, token, matches) {
+    const now = Date.now();
+    return (this._state.retiredDials || []).find((x) => x && x.deviceId === deviceId && now - (Number(x.at) || 0) < RETIRED_DAYS * 864e5 && matches(token, x.hash)) || null;
+  }
 
   /** THE store's door for a one-shot reshaping (src/server/migrations.js): `fn(state)` mutates the in-memory
    *  `{hosts: […]}` and returns a report; ONE atomic save follows. The migration goes through the LIVE manager

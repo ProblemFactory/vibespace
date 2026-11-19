@@ -2518,7 +2518,7 @@ export default {
   "Open in Files": "在文件中打开",
   "Unmount": "卸载",
   "Mount point here (optional)": "本地挂载点（可选）",
-  "Its dial token is revoked; re-pairing mints a new one. Its mounted folders here are unmounted.": "其拨入令牌将被吊销；重新配对会生成新令牌。它挂载到这里的文件夹会被卸载。",
+  "Its dial token is revoked; re-pairing mints a new one. Its mounted folders here are unmounted. An agent of this release then removes its own start and stops, with what it runs.": "其拨入令牌将被吊销；重新配对会生成新令牌。它挂载到这里的文件夹会被卸载。此版本的设备代理随后会删除自己的开机启动并停止，它运行的一切也随之结束。",
   "Remount now": "立即重挂",
   "using imported key": "使用导入的私钥",
   "using VibeSpace key": "使用 VibeSpace 密钥",

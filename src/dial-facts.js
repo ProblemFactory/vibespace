@@ -23,9 +23,9 @@ const CANDIDATE_KINDS = Object.freeze(['origin', 'relay', 'tailscale', 'lan', 'p
 const BASE_REFUSALS = Object.freeze(['scheme', 'host', 'port', 'path', 'query', 'empty']);
 /** The daemon's failure classes (§4.2) — CLOSED; `http-<status>` is the one parameterised family. */
 const DIAL_FAIL_CODES = Object.freeze(['dns', 'tls', 'not-ws', 'refused-connect', 'timeout', 'unreachable', 'reset',
-  'refused-token-mismatch', 'refused-no-pairing', 'refused-no-device-id', 'refused-duplicate-device', 'refused-unknown', 'closed-before-hello', 'lost', 'other']);
+  'refused-token-mismatch', 'refused-no-pairing', 'refused-no-device-id', 'refused-duplicate-device', 'refused-retired', 'refused-unknown', 'closed-before-hello', 'lost', 'other']);
 /** The server's named refusals at the upgrade (the X-VibeSpace-Dial-Refusal header). */
-const DIAL_REFUSAL_CODES = Object.freeze(['token-mismatch', 'no-pairing', 'no-device-id', 'duplicate-device']);
+const DIAL_REFUSAL_CODES = Object.freeze(['token-mismatch', 'no-pairing', 'no-device-id', 'duplicate-device', 'retired']);   // retired: B-4d71 (an unpaired device's own token, with the proof)
 /** THE row's states (§4.6), in the order they are judged. */
 const DIAL_ROW_STATES = Object.freeze(['auth-fail', 'connected', 'refused', 'silent', 'never', 'unknown']);
 /** The closed reasons the row words (§11.2). */
@@ -389,6 +389,7 @@ function refusalSentence(code, deviceId) {
   const id = clean(deviceId, 64) || '?';
   if (code === 'token-mismatch') return `the dial token does not match the pairing on record for "${id}" — generate a new command in the pairing dialog (the command is older than the pairing), or pair again if it is no longer listed`;
   if (code === 'no-pairing') return `this server has no pairing named "${id}" — it was unpaired; pair the device again`;
+  if (code === 'retired') return `this device was unpaired from the hub — an agent that checks the hub's proof removes its own start and stops (pair it again with a new command to use it)`;
   if (code === 'duplicate-device') return `pair this machine under its own name — another device is dialed in as "${id}" and answering; this one holds a copy of its pairing (one command run on two machines, or a copied home folder)`;
   return 'the dial URL names no device (?device=<id> is missing)';
 }
@@ -444,7 +445,7 @@ function dialCheckLines({ ok = false, code = 'other', detail = '', host = '', de
   if (code === 'tls') return { exit: CHECK_EXITS.tls, lines: [`dial-check failed — tls: ${d}`, `→ ${h} does not speak TLS (wss://) — or its certificate is not trusted here. Pick the http/ws address, or fix the certificate.`] };
   if (['refused-connect', 'timeout', 'unreachable', 'reset'].includes(code)) return { exit: CHECK_EXITS.reach, lines: [`dial-check failed — ${code}: ${d}`, `→ nothing answers at ${h} from this network. Is VibeSpace running there, and is this device on a network that reaches it? Pick another address.`] };
   if (code === 'not-ws' || isStatusCode(code)) return { exit: CHECK_EXITS['not-vibespace'], lines: [`dial-check failed — ${code}: ${d}`, `→ ${h} answered, but not as a VibeSpace dial endpoint (status ${Number(status) || String(code).replace(/^http-/, '') || '?'}). A relay with no backend, a proxy page, or the wrong port.`] };
-  if (code === 'refused-token-mismatch' || code === 'refused-no-pairing' || code === 'refused-no-device-id' || code === 'refused-unknown') return { exit: CHECK_EXITS.refused, lines: [`dial-check failed — ${code}: ${d}`, '→ generate a new command in the pairing dialog and run that one.'] };
+  if (code === 'refused-token-mismatch' || code === 'refused-no-pairing' || code === 'refused-no-device-id' || code === 'refused-retired' || code === 'refused-unknown') return { exit: CHECK_EXITS.refused, lines: [`dial-check failed — ${code}: ${d}`, '→ generate a new command in the pairing dialog and run that one.'] };
   return { exit: CHECK_EXITS.other, lines: [`dial-check failed — other: ${d || code}`] };
 }
 

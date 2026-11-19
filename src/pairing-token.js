@@ -48,4 +48,14 @@ function sameToken(presented, secret) {
   return tokenMatches(presented, tokenHash(secret));
 }
 
-module.exports = { KINDS, mintToken, tokenHash, tokenMatches, sameToken };
+/** B-4d71: THE RETIRE PROOF — a hub that held a device's pairing answers that device's dial (its exact, now unpaired DIAL token)
+ *  with an HMAC of the device's own per-dial nonce, keyed by the hash of the device's HOST token (vsht_: the hub sends it only
+ *  inside the live link's hello, never on a dial — whoever merely receives a dial, a lapsed name, a relay, cannot make the
+ *  proof; the dial token itself rides every dial and keys nothing). The device checks it from the host token it holds. */
+function retireProof(hostTokenHashHex, nonce) { return crypto.createHmac('sha256', String(hostTokenHashHex || '')).update(String(nonce || '')).digest('hex'); }
+function retireProofMatches(hostToken, nonce, proof) {
+  if (typeof hostToken !== 'string' || !hostToken || !nonce) return false;   // no token, no nonce: no proof can hold
+  const want = Buffer.from(retireProof(tokenHash(hostToken), nonce), 'hex'), got = Buffer.from(String(proof || ''), 'hex');
+  return got.length === want.length && crypto.timingSafeEqual(got, want);
+}
+module.exports = { KINDS, mintToken, tokenHash, tokenMatches, sameToken, retireProof, retireProofMatches };

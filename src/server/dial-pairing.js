@@ -105,10 +105,10 @@ function noteDialEvent(deviceId, event, facts = {}) {
 }
 /** The refusal FRAME: 401 + `X-VibeSpace-Dial-Refusal: <code>` + a JSON body with the sentence (§4.4). `end()`,
  *  never a bare destroy — the bytes must reach the device before the socket closes. */
-function refuseDial(socket, code, deviceId) {
+function refuseDial(socket, code, deviceId, proof = '') {   // proof: B-4d71's retire proof (hex), only on a `retired` answer
   const body = JSON.stringify({ code, error: DF.refusalSentence(code, deviceId), deviceId: String(deviceId || '').slice(0, 64), serverVersion: SERVER_VERSION });
   try {
-    socket.end(`HTTP/1.1 401 Unauthorized\r\nX-VibeSpace-Dial-Refusal: ${code}\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`);
+    socket.end(`HTTP/1.1 401 Unauthorized\r\nX-VibeSpace-Dial-Refusal: ${code}\r\n${/^[0-9a-f]{64}$/.test(proof) ? `X-VibeSpace-Retire-Proof: ${proof}\r\n` : ''}Content-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`);
   } catch { }
   setTimeout(() => { try { socket.destroy(); } catch { } }, 2000).unref?.();
 }
@@ -159,6 +159,15 @@ function gateDialUpgrade(req, socket) {
   // only); `dialed` = the address the DEVICE states it dials (verify-r4 F1: the receiver's fact the pairing sheet reads)
   const facts = { at: Date.now(), from: (req.socket && req.socket.remoteAddress) || '', attempt: hints.attempt, last: hints.last, daemon: hints.daemon, boot: hints.boot, dialed: hints.dialed, platform: hints.platform, host: String(req.headers.host || '').slice(0, 120) };
   // verify-r3: THE ONE DOOR — a constant-time compare over the two digests (never `!==`)
+  // B-4d71: a device UNPAIRED while offline dials with its exact old token — it is told «retired» with the proof that only the
+  // hub that held its pairing can make (an HMAC of its own nonce, keyed by that token's hash): it removes its own start and ends
+  const tomb = deviceId && !(want && PT.tokenMatches(tok, want)) ? hosts.retiredDialFor?.(deviceId, tok, PT.tokenMatches) : null;
+  if (tomb) {
+    const nonce = String(req.headers['x-vibespace-dial-nonce'] || '').slice(0, 64);
+    refuseDial(socket, 'retired', deviceId, nonce && tomb.proofKey ? PT.retireProof(tomb.proofKey, nonce) : '');
+    logRefusal(facts, deviceId, `[device] dial from '${String(deviceId).replace(/[\u0000-\u001f\u007f\u2028\u2029]/g, '?')}' — this device was unpaired: told to retire its own start${nonce ? '' : ' (no nonce: an agent older than this answer — it keeps dialing)'}`);
+    return null;
+  }
   if (!deviceId || !want || !PT.tokenMatches(tok, want)) {
     const why = !deviceId ? 'no-device-id' : !want ? 'no-pairing' : 'token-mismatch';
     // verify-r2 (the dial endpoint): a stranger hears ONE answer for an unknown name and a wrong token — `no-pairing`
@@ -232,6 +241,12 @@ async function admitDial(deviceId, facts, socket) {
  *  mounts torn down, vsht_ token file gone, live stream destroyed. The token
  *  hash dies with the host record itself. */
 async function unpairDialDevice(deviceId) {
+  // B-4d71: its token's TOMBSTONE — the device's next dial (at once for a device dialed in now: its link ends below; an offline
+  // one whenever it comes back) is told «retired» with the proof, and its own agent removes its start and ends
+  // (the HOST token's hash keys the proof: read before dropHostToken below; a vault locked now leaves no key — that device is
+  // told «retired» without a proof and keeps its start, as before)
+  let proofKey = null; try { proofKey = PT.tokenHash(agentdHostToken('dial-' + deviceId)); } catch { }
+  try { hosts.noteRetiredDial?.(deviceId, hosts.dialTokenHash(deviceId), proofKey); } catch { }
   try { await machineMounts.onMachineUnpaired(hosts.findByDeviceId(deviceId)?.id); } catch { }
   try { portForwards.onMachineUnpaired(hosts.findByDeviceId(deviceId)?.id); } catch { }
   try { exitProxy.onMachineUnpaired(hosts.findByDeviceId(deviceId)?.id); } catch { }

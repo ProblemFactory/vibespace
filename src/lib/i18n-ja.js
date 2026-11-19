@@ -2518,7 +2518,7 @@ export default {
   "Open in Files": "ファイルで開く",
   "Unmount": "アンマウント",
   "Mount point here (optional)": "ローカルのマウントポイント（任意）",
-  "Its dial token is revoked; re-pairing mints a new one. Its mounted folders here are unmounted.": "接続トークンは失効します。再ペアリングで新トークンが発行されます。ここへのマウントは解除されます。",
+  "Its dial token is revoked; re-pairing mints a new one. Its mounted folders here are unmounted. An agent of this release then removes its own start and stops, with what it runs.": "接続トークンは失効します。再ペアリングで新トークンが発行されます。ここへのマウントは解除されます。このリリースのエージェントはその後、自分の起動設定を消して停止し、動かしているものも終了します。",
   "Remount now": "今すぐ再マウント",
   "using imported key": "インポートした鍵を使用",
   "using VibeSpace key": "VibeSpace の鍵を使用",

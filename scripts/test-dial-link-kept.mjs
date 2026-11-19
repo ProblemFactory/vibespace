@@ -333,6 +333,62 @@ const rstLeg = async (DPmod) => {
   for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 1, label: 'mutant-copy: ' })) ok(x.pass, x.name, x.detail);
 }
 
+// ── B-4d71 AN UNPAIRED DEVICE IS TOLD «retired», WITH THE PROOF — the hub keeps the unpaired token's TOMBSTONE (its hash); the
+// device's next dial with that EXACT token hears «retired» and an HMAC of its own per-dial nonce keyed by the token's hash,
+// which its agent checks from the token it holds before it removes its own start; anyone else hears the one answer ──
+console.log('— B-4d71 an unpaired device: «retired» with the proof to its own token, the one answer to anyone else —');
+{
+  const { HostManager } = require('../src/hosts.js');
+  const PT = require('../src/pairing-token.js');
+  const crypto = require('node:crypto');
+  const mkGate = (DPmod) => {
+    const dataDir = path.join(tmp, 'retire-' + Math.random().toString(36).slice(2, 8)); fs.mkdirSync(dataDir, { recursive: true });
+    const H = new HostManager({ dataDir });
+    const DP = DPmod.create({ rootDir: tmp, AGENTD_DIR: path.join(dataDir, 'agentd'), agentdHostToken: () => 'vsht_ok', getHosts: () => H, getMounts: () => null, getMachineMounts: () => ({ onMachineUnpaired() {} }), getPortForwards: () => ({ onMachineUnpaired() {} }), getExitProxy: () => ({ onMachineUnpaired() {} }), bcastAll: () => {} });
+    H.dialOnline = (d) => DP.agentdDials.has(d);
+    return { H, DP, dataDir };
+  };
+  const sock = () => ({ destroyed: false, frame: '', on() { }, end(s) { this.frame = String(s || ''); }, destroy() { this.destroyed = true; } });
+  const dial = (DP, device, token, nonce = null) => { const s = sock(); const o = console.log; console.log = () => { }; try { DP.gateDialUpgrade({ url: `/api/device-dial?device=${encodeURIComponent(device)}`, headers: { 'x-vibespace-dial-token': token, host: 'hub:3456', ...(nonce ? { 'x-vibespace-dial-nonce': nonce } : {}) }, socket: { remoteAddress: '203.0.113.9' } }, s); } finally { console.log = o; } return s; };
+  const heard = (s) => ({ code: (/X-VibeSpace-Dial-Refusal: (\S+)/.exec(s.frame) || [])[1] || null, proof: (/X-VibeSpace-Retire-Proof: (\S+)/.exec(s.frame) || [])[1] || null });
+  const unpair = async (g, deviceId) => { await g.DP.unpairDialDevice(deviceId); const h = g.H.findByDeviceId(deviceId); if (h) g.H.remove(h.id); };   // exit-routes removeHost's order: the unpair, then the record
+  const g = mkGate(require('../src/server/dial-pairing.js'));
+  const HOST_TOKEN = 'vsht_ok';   // (this rig's agentdHostToken: the host token the hub sends inside a live link's hello, never on a dial)
+  const { dialToken: tok } = g.DP.agentdMintDialPair('mini', { host: 'hub:3456' });
+  await unpair(g, 'mini');
+  const nonce = crypto.randomBytes(16).toString('hex');
+  const r1 = heard(dial(g.DP, 'mini', tok, nonce));
+  ok(r1.code === 'retired' && !!r1.proof && PT.retireProofMatches(HOST_TOKEN, nonce, r1.proof), 'an unpaired device dials with its own token: «retired», and the proof its agent checks from its HOST token holds', r1);
+  ok(!PT.retireProofMatches(HOST_TOKEN, crypto.randomBytes(16).toString('hex'), r1.proof) && !PT.retireProofMatches('vsht_' + crypto.randomBytes(24).toString('hex'), nonce, r1.proof) && !PT.retireProofMatches(tok, nonce, r1.proof),
+    '…the proof holds for THAT dial\'s nonce and THAT host token only — a replay to another dial, another device, and the DIAL token (it rides every dial: whoever receives one dial knows it) all refused');
+  await g.H.persisted();   // (the store writes on its own thread)
+  const reloaded = new HostManager({ dataDir: g.dataDir }), rt = reloaded.retiredDialFor('mini', tok, PT.tokenMatches);
+  ok(!!rt && rt.hash === PT.tokenHash(tok) && rt.proofKey === PT.tokenHash(HOST_TOKEN), '…the tombstone keeps the two HASHES (the dial token\'s, the host token\'s) and outlives a hub restart (hosts.json)', rt);
+  const r2 = heard(dial(g.DP, 'mini', 'vsdt_' + crypto.randomBytes(18).toString('hex'), nonce));
+  ok(r2.code === 'token-mismatch' && !r2.proof, 'the same name with ANY other token: the one answer every stranger hears (no word that the name was ever paired)', r2);
+  const r3 = heard(dial(g.DP, 'mini', tok));
+  ok(r3.code === 'retired' && !r3.proof, 'a dial with no nonce (an agent older than the answer): «retired» and NO proof — such an agent keeps its start, as before', r3);
+  // the name paired again (another machine, or this one with a new command): the OLD pairing's token is still told «retired» — a new
+  // pairing drops no tombstone (its fresh token never matches one); unpaired again, both are
+  const { dialToken: tok2 } = g.DP.agentdMintDialPair('mini', { host: 'hub:3456' });
+  ok(heard(dial(g.DP, 'mini', tok, nonce)).code === 'retired', 'the name paired again: the old pairing\'s device is still told «retired» (never «token-mismatch» for ever, nor a «second agent» warning on the new row)');
+  await unpair(g, 'mini');
+  ok(heard(dial(g.DP, 'mini', tok, nonce)).code === 'retired' && heard(dial(g.DP, 'mini', tok2, nonce)).code === 'retired', 'unpaired again: both pairings\' devices are told (a tombstone per token)');
+  const tomb2 = mkGate(require('../src/server/dial-pairing.js'));
+  for (let i = 0; i < 3; i++) { tomb2.DP.agentdMintDialPair('d' + i, { host: 'hub:3456' }); await unpair(tomb2, 'd' + i); }
+  ok((tomb2.H._state.retiredDials || []).length === 3 && (tomb2.H._state.retiredDials || []).every((x) => x.proofKey === PT.tokenHash(HOST_TOKEN)), 'one tombstone per unpaired pairing, each with its proof key');
+  // RED CONTROL (anchored: the gate without the tombstone, as released) — the unpaired device hears «token-mismatch» for ever
+  const M = mutantCopies('dialretire', REPO);
+  const dpSrc = fs.readFileSync(path.join(REPO, 'src/server/dial-pairing.js'), 'utf8');
+  const anchorT = "  const tomb = deviceId && !(want && PT.tokenMatches(tok, want)) ? hosts.retiredDialFor?.(deviceId, tok, PT.tokenMatches) : null;\n";
+  ok(dpSrc.includes(anchorT), 'the control\'s anchor is in the source');
+  const gm = mkGate(M.load('src/server/dial-pairing.js', dpSrc.replace(anchorT, '  const tomb = null;\n'), 'no-tomb'));
+  const { dialToken: tokM } = gm.DP.agentdMintDialPair('mini', { host: 'hub:3456' });
+  await unpair(gm, 'mini');
+  ok(heard(dial(gm.DP, 'mini', tokM, nonce)).code === 'token-mismatch', 'CONTROL (the gate without the tombstone, as released): the unpaired device hears «token-mismatch» — its agent dials a refusing hub for ever ⇒ RED');
+  for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 1, label: 'mutant-copy: ' })) ok(x.pass, x.name, x.detail);
+}
+
 // WIRING: server.js runs the hello on every dial-in through deviceForDial (where the refused stream is remembered)
 ok(/deviceForDial\(deviceId\)\.catch\(\(\) => \{ \}\); \/\/ the mux hello NOW/.test(fs.readFileSync(path.join(REPO, 'server.js'), 'utf8')), 'WIRING: server.js hands every dial-in to deviceForDial (the refused-stream memo lives there)');
 ok(/authFailedStreams\.set\(deviceId, \{ stream: curStream, at: Date\.now\(\) \}\)/.test(fs.readFileSync(path.join(REPO, 'src/server/dial-pairing.js'), 'utf8')), 'WIRING: deviceForDial remembers the refused stream');

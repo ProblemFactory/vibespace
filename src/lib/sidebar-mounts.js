@@ -1193,7 +1193,7 @@ export function installSidebarMounts(Sidebar) {
         ibtn(MI.termNew, isDial ? tr('New session on this device') : 'New session on this host', () => { this.app.showNewSessionDialog?.({ hostId: h.id, hostName: h.name }); }),
         ibtn(MI.cross, isDial ? tr('Unpair (the device can no longer dial in)') : 'Remove host', async () => {
           const ok = await showConfirmDialog(isDial
-            ? { title: tr('Unpair "{id}"?', { id: h.name }), message: tr('Its dial token is revoked; re-pairing mints a new one. Its mounted folders here are unmounted.'), confirmText: tr('Unpair'), danger: true }
+            ? { title: tr('Unpair "{id}"?', { id: h.name }), message: tr('Its dial token is revoked; re-pairing mints a new one. Its mounted folders here are unmounted. An agent of this release then removes its own start and stops, with what it runs.'), confirmText: tr('Unpair'), danger: true }
             : { title: `Remove "${h.name}"?`, message: 'Only the registry entry goes away — nothing on the remote machine is touched.', confirmText: 'Remove', danger: true });
           // verify-r6 U1: a refused / failed removal is SAID (the api() throw was unguarded — the click did nothing, silently)
           if (ok) {
