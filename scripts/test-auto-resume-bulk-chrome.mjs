@@ -325,13 +325,23 @@ try {
   // THE DIALOG'S WORDS, RENDERED (主开发 2026-11-18 21:55Z (2)): a crafted plan through the page's own fetch — (c) the quiet preview
   // read NOTHING (overage null) ⇒ «现在读不到…是否会被拒绝», never «仍会被拒绝»; (d) an instance that ALLOWS paid overage and NO estimate ⇒
   // the account billed is still named. Each scene proves its plant first (the crafted plan is what the dialog read)
+  // THE PLANT REACHES THE PAGE INTACT (the block's hosted proof, checkpoint 61): a regex LITERAL written inside this template lost
+  // its escapes on the way (`\/` → `/`, `\?` → `?`) — the page got `(//api/…`, a comment that ate the line: the eval failed, fetch was
+  // never swapped, the dialog read the REAL plan (nothing stopped there yet) and every leg below read nothing. The pattern now rides
+  // as a QUOTED source and the page builds it; the page code is compiled here first, and the release's form beside it must not compile
+  const STOPPED_SRC = '/api/sessions/stopped(\\?|$)';
+  const plantSrc = (plan) => `(() => { window.__arbOrigFetch = window.__arbOrigFetch || window.fetch; window.__arbPlanReads = 0; const P = ${JSON.stringify(JSON.stringify(plan))}; const RE = new RegExp(${JSON.stringify(STOPPED_SRC)}); window.fetch = (u, o) => (RE.test(String((u && u.url) || u)) ? (window.__arbPlanReads++, Promise.resolve(new Response(P, { status: 200, headers: { 'Content-Type': 'application/json' } }))) : window.__arbOrigFetch(u, o)); return true; })()`;
+  const compiles = (src) => { try { new Function(`return ${src};`); return true; } catch { return false; } };
+  const releaseSrc = `(() => { window.fetch = (u, o) => (/\/api\/sessions\/stopped(\?|$)/.test(String(u)) ? 1 : 0); return true; })()`;   // the release's literal, as the page received it
+  check('desk: THE PLANT\'S page code compiles — its pattern reaches the page as a quoted source, built there', compiles(plantSrc({ ok: true })) && new RegExp(STOPPED_SRC).test('/api/sessions/stopped?x=1') && new RegExp(STOPPED_SRC).test('/api/sessions/stopped') && !new RegExp(STOPPED_SRC).test('/api/sessions/stoppedX'), plantSrc({ ok: true }).slice(0, 260));
+  check('desk: RED CONTROL — the release\'s regex literal inside a template reaches the page as «(//api…» (a comment) and does not compile', releaseSrc.includes('(//api/sessions/stopped(?|$)/') && !compiles(releaseSrc), releaseSrc.slice(0, 160));
   for (const [tag, overage] of [['(c)', null], ['(d)', { allowed: true, billed: [{ name: 'B', n: 1 }] }]]) {
     const PLAN = { ok: true, counts: { total: 1, on: 0, off: 1, globalDefault: false }, eligible: [{ id: 'crafted-1', name: 'Crafted', kind: 'overload', at: Date.now() - 60000, member: null }], skipped: [], total: 1, running: null, estimate: null, overage, presses: [] };
-    await D.ev(`(() => { window.__arbOrigFetch = window.__arbOrigFetch || window.fetch; window.__arbPlanReads = 0; const P = ${JSON.stringify(JSON.stringify(PLAN))}; window.fetch = (u, o) => (/\/api\/sessions\/stopped(\?|$)/.test(String((u && u.url) || u)) ? (window.__arbPlanReads++, Promise.resolve(new Response(P, { status: 200, headers: { 'Content-Type': 'application/json' } }))) : window.__arbOrigFetch(u, o)); return true; })()`);
+    const planted = await D.ev(plantSrc(PLAN));   // the page's own answer: true only when the plant compiled and ran
     await D.ev(`(document.getElementById('resume-stopped-dialog')?.remove(), true)`);
     await press(D.S, D.ev, '.auto-resume-bulk .resume-stopped-open');
-    const r = await until(() => D.ev(`(() => { const o = document.getElementById('resume-stopped-dialog'); const l = o && o.querySelector('.resume-stopped-lead'); return l ? { reads: window.__arbPlanReads, lead: l.textContent, members: [...o.querySelectorAll('.resume-stopped-member')].map((x) => x.textContent), dollars: !!o.querySelector('.resume-stopped-dollars') } : null; })()`), 8000, 150);
-    check(`desk: ${tag} RENDERED — CONTROL FIRST: the dialog read the crafted plan`, !!r && r.reads >= 1, r);
+    const r = await until(() => D.ev(`(() => { const o = document.getElementById('resume-stopped-dialog'); const l = o && o.querySelector('.resume-stopped-lead'); return l ? { reads: window.__arbPlanReads, lead: l.textContent, members: [...o.querySelectorAll('.resume-stopped-member')].map((x) => x.textContent), dollars: !!o.querySelector('.resume-stopped-dollars'), all: (o.querySelector('.resume-stopped-all') || {}).textContent || '' } : null; })()`), 8000, 150);
+    check(`desk: ${tag} RENDERED — CONTROL FIRST: the plant ran in the page and the dialog drew the CRAFTED plan (its one session: «全部恢复 (1)»)`, planted === true && !!r && r.reads >= 1 && /\(1\)/.test(r.all), { planted, r });
     if (tag === '(c)') check('desk: (c) RENDERED — no quiet preview read ⇒ «现在读不到正在使用付费超额的账号是否会被拒绝», never «仍会被拒绝»', !!r && /现在读不到正在使用付费超额的账号是否会被拒绝/.test(r.lead) && !/仍会被拒绝/.test(r.lead), r);
     else check('desk: (d) RENDERED — paid overage ALLOWED and NO estimate ⇒ the account billed is still named («B：其中 1 个继续按付费超额计费»), no dollars drawn', !!r && /本实例允许在付费超额时运行/.test(r.lead) && r.members.some((x) => x === 'B：其中 1 个继续按付费超额计费') && r.dollars === false, r);
     await D.ev(`(document.getElementById('resume-stopped-dialog')?.remove(), window.__arbOrigFetch && (window.fetch = window.__arbOrigFetch), true)`);
