@@ -113,8 +113,9 @@ const frontA = async () => {
   await evalJs(`(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); const ws = [...app.sessions.keys()].filter((k) => app.wm.windows.get(k)?._openSpec?.backendSessionId === ${JSON.stringify(A_SID)}); const dm = app.desktopManager; const w = ws.find((k) => (app.wm.windows.get(k)._desktopId || dm.activeDesktopId) === dm.activeDesktopId) || ws[0]; if (w) app.goToWinId(w); return !!w; })()`);
   await sleep(400);
 };
-/** a press on a link in A's chat: A in front, then the link ITSELF under the still door's point (the rect's centre) before the press */
-const pressLink = async (sel) => {
+/** the BASE's press on a link (kept for the red control below): A raised ONCE, a bounded wait for the link under its point, then the
+ *  still door's press — never raising A again (the release's hosted red: C's window rose after the one raise and covered the link) */
+const pressLinkOnce = async (sel) => {
   await frontA();
   // the state the page shows before the press: the link's FIRST line fragment under its press point — a link that wraps (its icon and
   // label on one line, its real name on the next) has its bounding box's centre on the message list, never on the link (the UI train's
@@ -122,6 +123,39 @@ const pressLink = async (sel) => {
   await until(`(() => { const e = [...document.querySelectorAll(${JSON.stringify(sel)})].filter(${VISIBLE}).pop(); if (!e) return false; e.scrollIntoView({ block: 'center' }); const r = e.getClientRects()[0]; if (!r || !(r.width > 0)) return false; const h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !!h && (h === e || e.contains(h)); })()`, { timeout: 4000 });
   return press(sel);
 };
+/** what stands at a link's own press point (its FIRST line fragment's centre): the link itself, or the element and the WINDOW over it
+ *  (its id and its title) — a covered press is named by the window that covers it, never a bare «covered» */
+const COVERED_BY = (sel) => `(() => { const e = [...document.querySelectorAll(${JSON.stringify(sel)})].filter(${VISIBLE}).pop(); if (!e) return { why: 'no link drawn' };
+  e.scrollIntoView({ block: 'center' }); const r = e.getClientRects()[0]; if (!r || !(r.width > 0)) return { why: 'the link has no box' };
+  const h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); if (h && (h === e || e.contains(h))) return { hit: true };
+  const w = h && h.closest('.window'); let win = null, title = null;
+  if (w) for (const [k, x] of app.wm.windows) if (x.element === w) { win = k; title = ((x.titleBar && x.titleBar.textContent) || '').trim().slice(0, 60); }
+  return { hit: false, under: h ? h.tagName.toLowerCase() + (typeof h.className === 'string' && h.className ? '.' + h.className.split(' ')[0] : '') : null, win, title }; })()`;
+/** a press on a link in A's chat (the release's hosted red, 2026-11-19): THE LINK IS THE TOPMOST ELEMENT AT ITS OWN POINT, VERIFIED —
+ *  raise A, look; covered ⇒ raise A again and look again; the press happens only on a look where the hit is the link (each press bounded
+ *  — a window that rose between the look and the press is met by the next try's raise); still covered after the last try ⇒ a red
+ *  NAMING the covering window. Bounded below the base's own (one raise + 4 s + a 5 s press). */
+const pressLink = async (sel, { tries = 4 } = {}) => {
+  let look = null;
+  for (let i = 0; i < tries; i++) {
+    await frontA();
+    look = await evalJs(COVERED_BY(sel));
+    if (!look || !look.hit) continue;
+    if (await still(`JS:[...document.querySelectorAll(${JSON.stringify(sel)})].filter(${VISIBLE}).pop()`, { timeoutMs: 1200 })) { await sleep(300); return true; }
+    look = await evalJs(COVERED_BY(sel));
+  }
+  check(`a press on ${sel}: the link is the topmost element at its own point — still covered after ${tries} raises of A, by ${look && look.win ? `window ${look.win} «${look.title}»` : (look && (look.under || look.why)) || 'nothing read'}`, false, look);
+  return false;
+};
+/** a leg that opens a window ends only when that window's open has FINISHED — attached (in app.sessions) and its chat drawn, then two
+ *  frames: nothing it started can rise after the next leg's raise of A */
+const openDone = (sid, srv) => until(`(() => { const k = [...app.sessions.keys()].find((w) => app.wm.windows.get(w)?._openSpec?.backendSessionId === ${JSON.stringify(sid)}${srv ? ` || app.sessions.get(w)?.sessionId === ${JSON.stringify(srv)}` : ''}); const el = k && app.wm.windows.get(k)?.element; return !!el && !!el.querySelector('.chat-message-list') && new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(true)))); })()`, { timeout: 15000 });
+/** the red control's plant: ONE late raise of C's window, 450 ms after A's next raise (after frontA's 400 ms, before the press) — what the
+ *  hosted runner did once on its own; armed through the go-to door, restored after it fires */
+const armLateRaise = (cSid, cSrv) => evalJs(`(() => { const find = (sid, srv) => [...app.sessions.keys()].find((k) => app.wm.windows.get(k)?._openSpec?.backendSessionId === sid || (srv && app.sessions.get(k)?.sessionId === srv));
+  const aWin = find(${JSON.stringify(A_SID)}), cWin = find(${JSON.stringify(cSid)}, ${JSON.stringify(cSrv)}); if (!aWin || !cWin) return null;
+  const prev = app.goToWinId; app.goToWinId = function (id) { const r = prev.call(app, id); if (id === aWin) { app.goToWinId = prev; setTimeout(() => prev.call(app, cWin), 450); } return r; };
+  return { aWin, cWin }; })()`);
 const active = () => evalJs('app.desktopManager.activeDesktopId');
 const winsOf = (sid) => evalJs(`[...app.sessions.keys()].filter((w) => { const s = app.wm.windows.get(w)?._openSpec; return s && s.backendSessionId === ${JSON.stringify(sid)}; }).map((w) => ({ w, desk: app.wm.windows.get(w)._desktopId || null }))`);
 const toasts = () => evalJs(`[...document.querySelectorAll('.global-toast, .toast')].map((t) => t.textContent.trim())`);
@@ -192,12 +226,26 @@ try {
   await evalJs(`app.desktopManager.switchTo(${JSON.stringify(D1)})`); await until(`app.desktopManager.activeDesktopId === ${JSON.stringify(D1)}`);
   check('C (running, no window): the press opens it on the desktop on show', (await pressLink(linkSel(C.sid))) === true && !!(await until(`[...app.sessions.keys()].some((w) => app.wm.windows.get(w)?._openSpec?.backendSessionId === ${JSON.stringify(C.sid)} || app.sessions.get(w)?.sessionId === ${JSON.stringify(C.srv)})`, { timeout: 10000 })) && (await active()) === D1);
   check('…and a toast says which desktop', !!(await until(`[...document.querySelectorAll('.global-toast, .toast')].some((t) => /已在 .+ 打开——它之前没有窗口。/.test(t.textContent))`, { timeout: 5000 })), await toasts());
+  check('…and C\'s open FINISHED (attached, its chat drawn) before the next leg raises A', !!(await openDone(C.sid, C.srv)));
   await shot('zh-press-opened-toast');
+  // RED CONTROL (the release's hosted red, reproduced here): a LATE raise of C's window — 450 ms after A's raise, after frontA's 400 ms
+  // and before the press. The BASE's press (A raised once, never again) is covered and fails, and what covers D's link is C's WINDOW
+  // (named by its id and title, never «A's own list over its link» — the skeptic's risk ruled out); the new pressLink below, armed the
+  // same way, raises A again and presses (the D leg itself)
+  const armed0 = await armLateRaise(C.sid, C.srv);
+  const oldPress = await pressLinkOnce(linkSel(SID_D));
+  const cover = await evalJs(COVERED_BY(linkSel(SID_D)));
+  check(`RED CONTROL: C's window raised late — the BASE's press on D's link is covered and fails (${oldPress}), and what covers it is C's window (${cover && cover.win ? `${cover.win} «${cover.title}»` : JSON.stringify(cover)})`, !!armed0 && oldPress === false && !!cover && cover.win === armed0.cWin && /Links C/.test(cover.title || ''), { armed0, oldPress, cover });
+  await evalJs(`document.querySelectorAll('.context-menu').forEach((m) => m.remove()); true`);
+  check('the late raise is armed again for the D leg below (the new press must meet it)', !!(await armLateRaise(C.sid, C.srv)));
   check('D (ended, no window): the press opens «在这里恢复» · «查看历史记录» at the link — nothing started', (await pressLink(linkSel(SID_D))) === true && JSON.stringify(await (async () => { for (let i = 0; i < 30; i++) { const l = await menuLabels(); if (l.length) return l; await sleep(100); } return menuLabels(); })()) === JSON.stringify(['在这里恢复', '查看历史记录']) && stubRuns().length === runs0,
     { menu: await menuLabels(), runs: stubRuns().length - runs0 });
   await shot('zh-press-ended-menu');
-  check('«查看历史记录»: the history opens read-only — still no process for D', (await press(`.context-menu .context-menu-item:last-child, .context-menu [role=menuitem]:last-child`)) === true && !!(await until(`[...app.sessions.keys()].some((w) => app.wm.windows.get(w)?._openSpec?.backendSessionId === ${JSON.stringify(SID_D)})`, { timeout: 10000 })) && !stubRuns().some((r) => (r.args || []).join(' ').includes(SID_D)),
+  const menuUp = (await menuLabels()).length > 0;
+  if (!menuUp) check('«查看历史记录»: its PRECONDITION is not met — no menu: the D press did not land (the leg above is the red; nothing is pressed here)', false);
+  else check('«查看历史记录»: the history opens read-only — still no process for D', (await press(`.context-menu .context-menu-item:last-child, .context-menu [role=menuitem]:last-child`)) === true && !!(await until(`[...app.sessions.keys()].some((w) => app.wm.windows.get(w)?._openSpec?.backendSessionId === ${JSON.stringify(SID_D)})`, { timeout: 10000 })) && !stubRuns().some((r) => (r.args || []).join(' ').includes(SID_D)),
     { wins: await winsOf(SID_D) });
+  if (menuUp) check('…and D\'s history window\'s open FINISHED (attached, its chat drawn) before the next leg raises A', !!(await openDone(SID_D, null)));
   check('RED CONTROL: a press on a conversation link no message draws presses nothing — the menu leg fails without its link', (await press(linkSel('5e551000-0000-4000-8000-0000000000ff'))) === false);
   const dWins = (await winsOf(SID_D)).length;
   check('D again (ENDED, with a window): the press lands on that window — one window, nothing started', (await pressLink(linkSel(SID_D))) === true && (await winsOf(SID_D)).length === dWins && !stubRuns().some((r) => (r.args || []).join(' ').includes(SID_D)));
