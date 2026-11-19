@@ -1064,13 +1064,13 @@ hosts.onUsageEvents = (hostId, text) => {
       if (!hostId || serverSetting('agentd.autoGraduate') === false) return;
       const h = hosts.get(hostId);
       if (!h || h.transport === 'dial' || h.deviceId || h.autoGraduate === false) return; // already graduated / opted out
-      if (!instanceUrl.url() || instanceUrl.effective().source === 'https') return; // nothing OPERATOR-DECLARED to dial back to (the hub's own https address is not) (was agentdDeps.publicUrl — a ghost binding since the split; auto-graduation silently never fired)
+      if (!instanceUrl.operatorUrl()) return; // nothing OPERATOR-DECLARED to dial back to: neither the hub's own https address nor an automatic relay publish (frp-auto) is (B-f55a, instance-url.js operatorUrl) (was agentdDeps.publicUrl — a ghost binding since the split; auto-graduation silently never fired)
       const last = gradTried.get(hostId) || 0;
       if (Date.now() - last < 6 * 60 * 60 * 1000) return;               // one attempt per machine per 6h
       gradTried.set(hostId, Date.now());
       setTimeout(async () => {
         try {
-          const out = await graduateHostToDial(hosts.get(hostId), { by: 'system:graduate' });
+          const base = instanceUrl.operatorUrl(); if (!base) return; const out = await graduateHostToDial(hosts.get(hostId), { by: 'system:graduate', serverUrl: base }); // the address judged as it dials (never url()'s fallback)
           serverNotice('grad-' + hostId, `"${h.name}" now talks to VibeSpace over its own ws link${out.dialedIn ? '' : ' (dialing in shortly)'} — ssh stays as the rescue channel.`);
         } catch (e) {
           // Never silent: the operator asked for ws and did not get it.

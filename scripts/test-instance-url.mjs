@@ -53,6 +53,7 @@ const mk = (opts = {}) => {
     serverSetting: (k) => settings[k],
     authEnabled: () => opts.auth !== false,
     broadcast: (m) => events.push(m),
+    ...(opts.httpsUrl ? { httpsUrl: opts.httpsUrl } : {}),
   });
   return { iu, dir, settings, events };
 };
@@ -90,6 +91,29 @@ const mk = (opts = {}) => {
   // with NO setting at all, a live auto URL is still better than nothing
   delete settings['agentd.publicUrl'];
   ok('with nothing configured, the auto URL is used (source says so)', iu.url() === 'https://remembered.relay.example' && iu.effective().source === 'frp-auto');
+}
+
+// ── 2b. THE OPERATOR'S ADDRESS (B-f55a): what auto-graduation dials machines back to — the effective address only when the
+// operator declared it (an explicit Publish, the setting, the env); never the hub's own https address nor an automatic relay
+// publish (frp-auto). RED: the guard before B-f55a (an address, and not https) let the automatic relay address through.
+{
+  const oldGuard = (iu) => !!iu.url() && iu.effective().source !== 'https';
+  process.env.VIBESPACE_PUBLIC_URL = '';
+  const a = mk();
+  ok('2b: nothing declared ⇒ no operator address', a.iu.operatorUrl() === null);
+  await a.iu.ensurePublished();
+  ok('2b: an AUTOMATIC relay publish alone is NOT the operator\'s address (frp-auto ⇒ null), though url() names it', a.iu.effective().source === 'frp-auto' && a.iu.url() === 'https://remembered.relay.example' && a.iu.operatorUrl() === null);
+  ok('2b RED CONTROL: the guard before B-f55a passed that automatic relay address (the row\'s harm)', oldGuard(a.iu) === true);
+  a.settings['agentd.publicUrl'] = 'https://configured.example/';
+  ok('2b: the setting is the operator\'s address, over an auto publish', a.iu.operatorUrl() === 'https://configured.example');
+  delete a.settings['agentd.publicUrl'];
+  process.env.VIBESPACE_PUBLIC_URL = 'http://from-env:3456/';
+  ok('2b: the env is the operator\'s address', a.iu.operatorUrl() === 'http://from-env:3456');
+  process.env.VIBESPACE_PUBLIC_URL = '';
+  await a.iu.publish({ sub: 'mybox' });
+  ok('2b: an EXPLICIT Publish is the operator\'s address', a.iu.effective().source === 'frp' && a.iu.operatorUrl() === 'https://mybox.relay.example');
+  const h = mk({ httpsUrl: () => 'https://hub.tail.example:3456/' });
+  ok('2b: the hub\'s own https address is NOT the operator\'s address (and the old guard refused it too)', h.iu.effective().source === 'https' && h.iu.operatorUrl() === null && oldGuard(h.iu) === false);
 }
 
 // ── 3. one publisher, stable subdomain, second call is free ──

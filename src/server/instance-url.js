@@ -72,6 +72,12 @@ function create({ dataDir, plugins, port, serverSetting, httpsUrl = () => null, 
     return { url: null, source: null };
   }
   const url = () => effective().url;
+  // THE OPERATOR'S ADDRESS (B-f55a): the effective address only when the operator declared it — an explicit Publish (frp),
+  // agentd.publicUrl, VIBESPACE_PUBLIC_URL — else null. The hub's own https address and an automatic relay publish
+  // (frp-auto, a side effect: see the header) never are. Auto-graduation dials machines back to THIS (server.js), so a
+  // side effect never moves a machine onto the public relay.
+  const OPERATOR_SOURCES = new Set(['frp', 'setting', 'env']);
+  const operatorUrl = () => { const e = effective(); return OPERATOR_SOURCES.has(e.source) ? e.url : null; };
 
   function status() {
     const f = frp() || {};
@@ -186,7 +192,7 @@ function create({ dataDir, plugins, port, serverSetting, httpsUrl = () => null, 
     });
   }
 
-  return { url, effective, status, publish, ensurePublished, unpublish, restore, stop, registerRoutes, onChange, PROXY_NAME };
+  return { url, effective, operatorUrl, status, publish, ensurePublished, unpublish, restore, stop, registerRoutes, onChange, PROXY_NAME };
 }
 
 module.exports = { create, PROXY_NAME };
