@@ -368,21 +368,41 @@ spec:
           #   restarted at (91 − 1) × 10 s = 900 s (15 min) from the container's start (a boot that resumed
           #   ~80 conversations held /login ~4 min, 2026-11-05).
           # - readiness: a held hub LEAVES the load balancer at (3 − 1) × 10 s = 20 s after its first failed
-          #   probe (20–35 s after the hold began) and comes back at its first answer. It never kills.
+          #   probe — 25–35 s after the hold began: the third failed try starts 20 s after the first (which
+          #   starts 0–10 s into the hold) and fails 5 s later — and the kubelet marks it unready; the
+          #   endpoints and the ingress follow on their own sync. It comes back at its first answer. It never kills. A failureThreshold of 1 takes a hub out on
+          #   one slow probe; 3 waits for three in a row.
           # - liveness: the last resort, for a hub that never comes back: a kill only after
           #   (31 − 1) × 30 s = 900 s (15 min) of continuous failure. Never shorter than the startup budget: a
           #   hub that restarts itself inside the container (an update, a crash) boots under liveness alone.
-          # The render REFUSES a startup or a liveness window of 600 s or less, and a liveness window shorter
-          # than the startup budget.
+          # The render REFUSES any of the nine numbers under 1 (a typed 0 or a negative, named — no default
+          # replaces it), a startup or a liveness window of 600 s or less, and a liveness window shorter than
+          # the startup budget, and a timeoutSeconds over its periodSeconds (the kubelet runs a probe's tries
+          # one after another, so every window would grow past its arithmetic — a startup with a long
+          # timeout could quietly outgrow the liveness window the render compared it with).
           {{- $probes := .Values.probes | default dict }}
-          {{- $sp := $probes.startup | default dict }}
-          {{- $rp := $probes.readiness | default dict }}
-          {{- $lp := $probes.liveness | default dict }}
-          {{- $sPeriod := $sp.periodSeconds | default 10 | int }}
-          {{- $sFail := $sp.failureThreshold | default 91 | int }}
+          {{- $pr := dict }}
+          {{- range $probe, $dflt := dict "startup" (dict "periodSeconds" 10 "timeoutSeconds" 5 "failureThreshold" 91) "readiness" (dict "periodSeconds" 10 "timeoutSeconds" 5 "failureThreshold" 3) "liveness" (dict "periodSeconds" 30 "timeoutSeconds" 5 "failureThreshold" 31) }}
+          {{- $given := index $probes $probe | default dict }}
+          {{- $one := dict }}
+          {{- range $k, $d := $dflt }}
+          {{- $v := $d }}
+          {{- $raw := index $given $k }}
+          {{- if not (kindIs "invalid" $raw) }}{{ $v = $raw }}{{ end }}
+          {{- if lt (int $v) 1 }}{{ fail (printf "probes.%s.%s: %v is not a whole number of 1 or more (seconds, a count; a 0 is never replaced by a default) (B-b1f7)" $probe $k $v) }}{{ end }}
+          {{- $_ := set $one $k (int $v) }}
+          {{- end }}
+          {{- if gt $one.timeoutSeconds $one.periodSeconds }}{{ fail (printf "probes.%s: timeoutSeconds %d is over its periodSeconds %d — the kubelet runs a probe's tries one after another, so its window would grow past its arithmetic (B-b1f7)" $probe $one.timeoutSeconds $one.periodSeconds) }}{{ end }}
+          {{- $_ := set $pr $probe $one }}
+          {{- end }}
+          {{- $sp := $pr.startup }}
+          {{- $rp := $pr.readiness }}
+          {{- $lp := $pr.liveness }}
+          {{- $sPeriod := $sp.periodSeconds }}
+          {{- $sFail := $sp.failureThreshold }}
           {{- $sBoot := mul (sub $sFail 1) $sPeriod }}
-          {{- $lPeriod := $lp.periodSeconds | default 30 | int }}
-          {{- $lFail := $lp.failureThreshold | default 31 | int }}
+          {{- $lPeriod := $lp.periodSeconds }}
+          {{- $lFail := $lp.failureThreshold }}
           {{- $lHeld := mul (sub $lFail 1) $lPeriod }}
           {{- if le $lHeld 600 }}{{ fail (printf "probes.liveness: (failureThreshold − 1) × periodSeconds = %d s, ten minutes (600 s) or less — a held hub must live over ten minutes before a kill ends every conversation in the pod (B-b1f7)" $lHeld) }}{{ end }}
           {{- if le $sBoot 600 }}{{ fail (printf "probes.startup: (failureThreshold − 1) × periodSeconds = %d s, ten minutes (600 s) or less — a boot that resumes its conversations holds /login for minutes, and a startup failure restarts the container too (B-b1f7)" $sBoot) }}{{ end }}
@@ -390,17 +410,17 @@ spec:
           startupProbe:
             httpGet: { path: /login, port: 3456 }
             periodSeconds: {{ $sPeriod }}
-            timeoutSeconds: {{ $sp.timeoutSeconds | default 5 | int }}
+            timeoutSeconds: {{ $sp.timeoutSeconds }}
             failureThreshold: {{ $sFail }}
           readinessProbe:
             httpGet: { path: /login, port: 3456 }
-            periodSeconds: {{ $rp.periodSeconds | default 10 | int }}
-            timeoutSeconds: {{ $rp.timeoutSeconds | default 5 | int }}
-            failureThreshold: {{ $rp.failureThreshold | default 3 | int }}
+            periodSeconds: {{ $rp.periodSeconds }}
+            timeoutSeconds: {{ $rp.timeoutSeconds }}
+            failureThreshold: {{ $rp.failureThreshold }}
           livenessProbe:
             httpGet: { path: /login, port: 3456 }
             periodSeconds: {{ $lPeriod }}
-            timeoutSeconds: {{ $lp.timeoutSeconds | default 5 | int }}
+            timeoutSeconds: {{ $lp.timeoutSeconds }}
             failureThreshold: {{ $lFail }}
           resources:
             requests: {{- toYaml .Values.resources.requests | nindent 14 }}

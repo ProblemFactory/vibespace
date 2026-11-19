@@ -80,7 +80,8 @@
 // R THE PROBES (bl-machines-b, B-b1f7 — the owner's decision 2026-11-18): a startup probe for the boot, liveness over ten
 //   minutes and never under the startup budget, readiness takes a held hub out of the load balancer; every number from
 //   values (probes.*), the chart's and values.yaml's comments state the render's arithmetic, the render refuses a short
-//   window; controls: no startup probe, the liveness as it was, the refusals removed, a comment out of step. Older charts'
+//   window and any of the nine numbers under 1; controls: no startup probe, the liveness as it was, the refusals removed,
+//   the floor removed (a readiness 0, two negatives), a comment out of step. Older charts'
 //   byte legs read R's block as one more stated difference (noProbes). NOTHING here is applied to a cluster.
 // CONTROLS (chart copies in scratch): the relay env back in the template, the fleet items rendered only when a relay is
 //   set (a pod roll per relay change), the old key not aliased — each turns its L assert red; a subPath mount, a source without
@@ -625,7 +626,7 @@ console.log('R THE PROBES (bl-machines-b, B-b1f7 — the owner\'s decision 2026-
 const PROBE_KEYS = ['httpGet', 'periodSeconds', 'timeoutSeconds', 'failureThreshold'];
 const probeOf = (dep, kind) => {
   const m = new RegExp(`^ {10}${kind}Probe:\\n((?: {12}\\S[^\\n]*\\n?)+)`, 'm').exec(dep); if (!m) return null;
-  const num = (k) => { const x = new RegExp(`^ {12}${k}: (\\d+)$`, 'm').exec(m[1]); return x ? Number(x[1]) : null; };
+  const num = (k) => { const x = new RegExp(`^ {12}${k}: (-?\\d+)$`, 'm').exec(m[1]); return x ? Number(x[1]) : null; };
   const keys = [...m[1].matchAll(/^ {12}(\w+):/gm)].map((x) => x[1]);
   return { get: /^ {12}httpGet: \{ path: \/login, port: 3456 \}$/m.test(m[1]), period: num('periodSeconds'), timeout: num('timeoutSeconds'), fail: num('failureThreshold'), keys };
 };
@@ -639,6 +640,8 @@ function probesVerdict(out, { boot = 900, lbOut = 20, held = 900, timeouts = [5,
     if (!p.get) bad.push(`the ${name} probe does not ask GET /login on 3456`);
     if (p.keys.join() !== PROBE_KEYS.join()) bad.push(`the ${name} probe holds ${p.keys.join(', ')} (want ${PROBE_KEYS.join(', ')})`);
     if (p.timeout !== t) bad.push(`the ${name} probe's timeout is ${p.timeout} s (want ${t})`);
+    if ([p.period, p.timeout, p.fail].some((n) => n !== null && !(n >= 1))) bad.push(`the ${name} probe renders a number under 1 (${p.period} / ${p.timeout} / ${p.fail})`);
+    if (p.timeout !== null && p.period !== null && p.timeout > p.period) bad.push(`the ${name} probe's timeout (${p.timeout} s) is over its period (${p.period} s)`);
   }
   if (s) { if (flip(s) !== boot) bad.push(`the startup probe gives a boot ${flip(s)} s (want ${boot})`); if (!(flip(s) > 600)) bad.push(`the startup probe restarts a boot after ${flip(s)} s — ten minutes or less`); }
   if (r && flip(r) !== lbOut) bad.push(`readiness takes a held hub out ${flip(r)} s after its first failure (want ${lbOut})`);
@@ -662,6 +665,11 @@ function saidVerdict(chart) {
       const [fl, pe, sum] = m.slice(1).map(Number);
       if ((fl - 1) * pe !== sum) bad.push(`${f}: ${kind} says (${fl} − 1) × ${pe} s = ${sum} s`);
       if (!p || p.fail !== fl || p.period !== pe) bad.push(`${f}: ${kind} says ${fl} × ${pe} s, the render has ${p && p.fail} × ${p && p.period} s`);
+      if (kind === 'readiness' && p) {   // «a–b s after the hold began»: the last failing try starts (f − 1) × p after the first, which starts 0..p into the hold, and fails t later
+        const w = new RegExp('# - readiness:[\\s\\S]*?(\\d+)–(\\d+) s after the hold began').exec(txt);
+        const want = [(p.fail - 1) * p.period + p.timeout, (p.fail - 1) * p.period + p.period + p.timeout];
+        if (!w || Number(w[1]) !== want[0] || Number(w[2]) !== want[1]) bad.push(`${f}: readiness says ${w ? w[1] + '–' + w[2] : 'nothing'} s after the hold began, the render gives ${want.join('–')}`);
+      }
     }
   }
   return bad;
@@ -677,11 +685,19 @@ ok(!!eBoot && /probes\.startup: \(failureThreshold − 1\) × periodSeconds = 50
 ok(!!eBoot600 && /probes\.startup: [^\n]*= 600 s, ten minutes/.test(eBoot600), 'R the startup edge: a budget of exactly (61 − 1) × 10 s = 600 s is refused', eBoot600);
 ok(!!eUnder && /probes\.liveness: 720 s is shorter than the startup budget 900 s/.test(eUnder), 'R a liveness of (25 − 1) × 30 s = 720 s under the default startup budget of 900 s ⇒ REFUSED (an in-place restart boots under liveness alone)', eUnder);
 ok(!probesVerdict(render(CHART, { ...C, probes: { startup: { failureThreshold: 62 }, liveness: { failureThreshold: 22 } } }), { boot: 610, held: 630 }).length, 'R just over the edges renders: startup (62 − 1) × 10 s = 610 s, liveness (22 − 1) × 30 s = 630 s');
-const NINE = { startup: { periodSeconds: 60, timeoutSeconds: 7, failureThreshold: 16 }, readiness: { periodSeconds: 5, timeoutSeconds: 8, failureThreshold: 6 }, liveness: { periodSeconds: 20, timeoutSeconds: 9, failureThreshold: 46 } };
+// THE FLOOR (主开发's read, 00:22Z): every number of the three probes is 1 or more, refused at render by name — two negatives
+// would multiply into a window that passes, readiness has no window guard, and a typed 0 was silently the default
+const eR0 = err({ readiness: { failureThreshold: 0 } }), eNeg = err({ liveness: { periodSeconds: -30, failureThreshold: -31 } }), eT0 = err({ startup: { timeoutSeconds: 0 } });
+ok(!!eR0 && /probes\.readiness\.failureThreshold: 0 is not a whole number of 1 or more/.test(eR0), 'R a readiness failureThreshold of 0 ⇒ REFUSED by name (never replaced by the default 3)', eR0);
+ok(!!eNeg && /probes\.liveness\.failureThreshold: -31 is not a whole number of 1 or more/.test(eNeg), 'R two negatives (liveness -30 s × -31, which multiply into (−32) × (−30) = 960 s) ⇒ REFUSED by name before any window', eNeg);
+ok(!!eT0 && /probes\.startup\.timeoutSeconds: 0 is not a whole number of 1 or more/.test(eT0), 'R a typed 0 timeout ⇒ REFUSED by name (no default replaces it)', eT0);
+const eTo = err({ startup: { timeoutSeconds: 30 } });
+ok(!!eTo && /probes\.startup: timeoutSeconds 30 is over its periodSeconds 10/.test(eTo), 'R a startup timeout (30 s) over its period (10 s) ⇒ REFUSED (its real window would be (91 − 1) × 30 s, past the liveness it was compared with)', eTo);
+const NINE = { startup: { periodSeconds: 60, timeoutSeconds: 7, failureThreshold: 16 }, readiness: { periodSeconds: 8, timeoutSeconds: 8, failureThreshold: 6 }, liveness: { periodSeconds: 20, timeoutSeconds: 9, failureThreshold: 46 } };
 {
   const dep = depOf(render(CHART, { ...C, probes: NINE }));
   const got = Object.fromEntries(['startup', 'readiness', 'liveness'].map((k) => { const p = probeOf(dep, k); return [k, p && { periodSeconds: p.period, timeoutSeconds: p.timeout, failureThreshold: p.fail }]; }));
-  ok(JSON.stringify(got) === JSON.stringify(NINE) && !probesVerdict(render(CHART, { ...C, probes: NINE }), { boot: 900, lbOut: 25, held: 900, timeouts: [7, 8, 9] }).length, 'R all nine numbers ride values, each to its own line (startup (16 − 1) × 60 s, readiness (6 − 1) × 5 s, liveness (46 − 1) × 20 s; timeouts 7 / 8 / 9)', JSON.stringify(got));
+  ok(JSON.stringify(got) === JSON.stringify(NINE) && !probesVerdict(render(CHART, { ...C, probes: NINE }), { boot: 900, lbOut: 40, held: 900, timeouts: [7, 8, 9] }).length, 'R all nine numbers ride values, each to its own line (startup (16 − 1) × 60 s, readiness (6 − 1) × 8 s, liveness (46 − 1) × 20 s; timeouts 7 / 8 / 9)', JSON.stringify(got));
 }
 ok((depOf(rP).match(/^ {10}(startup|readiness|liveness)Probe:$/gm) || []).length === 3 && (depOf(rP).match(/^ {10}startupProbe:$/gm) || []).length === 1, 'R the Deployment carries three probes, each once (no probe twice)');
 const noStartup = chartCopy('probes-no-startup', (x) => x.replace(/ {10}startupProbe:\n(?: {12}[^\n]*\n){4}/, ''));
@@ -690,6 +706,11 @@ const asWas = chartCopy('probes-liveness-as-was', (x) => x.replace(/( {10}livene
 ok(probesVerdict(render(asWas, C)).some((b) => /kills a hub held 270 s/.test(b)), 'CONTROL: the liveness block as it was (a 60 s delay, then (10 − 1) × 30 s = 270 s: a hub held 4.5 min is killed) is RED');
 const noGuard = chartCopy('probes-no-guard', (x) => x.replace(/(?: {10}\{\{- if (?:le|lt) \$[a-zA-Z]+ [^\n]*\{\{ fail [^\n]*\n){3}/, ''));
 ok(probesVerdict(render(noGuard, { ...C, probes: { liveness: { failureThreshold: 10 } } }), { held: 270 }).some((b) => /ten minutes or less/.test(b)), 'CONTROL: without the render\'s refusals, a values set under ten minutes renders a killing liveness — RED (the refusal is what holds the law)');
+const noFloor = chartCopy('probes-no-floor', (x) => x.replace(/ {10}\{\{- if lt \(int \$v\) 1 \}\}[^\n]*\n/, ''));
+ok(probesVerdict(render(noFloor, { ...C, probes: { readiness: { failureThreshold: 0 } } })).some((b) => /readiness probe renders a number under 1/.test(b)), 'CONTROL: without the floor, a readiness failureThreshold of 0 renders as it is — RED');
+ok(probesVerdict(render(noFloor, { ...C, probes: { liveness: { periodSeconds: -30, failureThreshold: -31 } } }), { held: 960 }).some((b) => /liveness probe renders a number under 1/.test(b)), 'CONTROL: without the floor, two negatives pass every window guard and render — RED');
+const noTimeoutGuard = chartCopy('probes-no-timeout-guard', (x) => x.replace(/ {10}\{\{- if gt \$one\.timeoutSeconds \$one\.periodSeconds \}\}[^\n]*\n/, ''));
+ok(probesVerdict(render(noTimeoutGuard, { ...C, probes: { startup: { timeoutSeconds: 30 } } }), { timeouts: [30, 5, 5] }).some((b) => /startup probe's timeout \(30 s\) is over its period \(10 s\)/.test(b)), 'CONTROL: without the timeout refusal, a startup timeout over its period renders — RED');
 const offStep = chartCopy('probes-comment-off', (x) => x.replace('(31 − 1) × 30 s = 900 s', '(25 − 1) × 30 s = 720 s'));
 ok(saidVerdict(offStep).some((b) => /templates\/main\.yaml: liveness says 25 × 30 s/.test(b)), 'CONTROL: the chart\'s comment out of step with the render (the first cut\'s 25) is RED');
 const offValues = chartCopy('probes-values-comment-off', (x) => x.replace('(31 − 1) × 30 s = 900 s', '(25 − 1) × 30 s = 720 s'), 'values.yaml');

@@ -107,7 +107,7 @@ a request and a higher priority. So the chart declares, per pod
 | value | default | why |
 |---|---|---|
 | `resources.requests.ephemeral-storage` | `2Gi` | above what an instance writes there — a fleet of 17 measured on 2026-10-15: median 0, p90 8 MiB, all but one ≤ 59 MiB; the scheduler reserves it on the node |
-| `resources.limits.ephemeral-storage` | `20Gi` | 2.4× the largest instance measured (8.3 GiB), so none is evicted by its own limit; one that writes more is evicted ALONE (its sessions restart, the home PVC is untouched) instead of filling the node for every user |
+| `resources.limits.ephemeral-storage` | `20Gi` | 2.4× the largest instance measured (8.3 GiB), so none is evicted by its own limit; one that writes more is evicted ALONE (its running conversations end and come back stopped, the home PVC is untouched) instead of filling the node for every user |
 
 An instance ALREADY over the request — that fleet's 8.3 GiB one (browser
 profiles, tmp files and caches in `/tmp`) — still ranks among the pods over
@@ -155,27 +155,35 @@ helm upgrade u-<user> deploy/helm/vibespace-user -n vibespace --reuse-values \
 ≥ 3.14) would pick the defaults up by itself, but with every other default
 added since that release's chart — use it only after a render diff.
 
-- **Each upgrade recreates the pod** (strategy `Recreate`, one RWO volume):
-  the user's running sessions restart; the home PVC stays. Ride the next
+- **Each upgrade that changes the pod template recreates the pod** (this
+  chart's does; strategy `Recreate`, one RWO volume): the pod goes down once,
+  and EVERY RUNNING CONVERSATION IN IT ENDS — each comes back stopped, to be
+  resumed; the home PVC stays. Ride the next
   planned roll (an image bump), or tell the user first.
 - **Dry-run first**: `--dry-run` prints the manifest. For a release whose
   chart is otherwise current, its Deployment differs from
   `helm get manifest u-<user>` only in the two `ephemeral-storage` lines (and
   `priorityClassName`); anything else in the diff is an older chart's change
   arriving with it — read it before you roll.
-- **The probes (B-b1f7)**: from this chart on, the dry-run diff also shows a
+- **The probes (B-b1f7)**: applying this chart CHANGES THE POD TEMPLATE, so
+  each pod goes down once at the rollout (`Recreate`) and every running
+  conversation in it ends and comes back stopped, to be resumed — say so to
+  its user first. From this chart on, the dry-run diff also shows a
   `startupProbe`, both `initialDelaySeconds` gone and the liveness
   `failureThreshold` 10 → 31 (a kill only after 15 min of failure; a held hub
   leaves the load balancer instead), readiness stating `failureThreshold: 3`
   (the Kubernetes default: no change) and the new comment block above them. `--reuse-values` needs no `--set` for them
-  (the template's defaults equal values.yaml's), and the render refuses a
-  `probes.*` set under the chart's floors. A boot may take up to 15 min before
+  (the template's defaults equal values.yaml's), and the render refuses any
+  probe number under 1, a window of 600 s or less, a liveness under the startup
+  budget and a timeout over its period. A boot may take up to 15 min before
   its first answer, past the Deployment's default progress deadline (600 s):
   `kubectl rollout status` can report a slow boot as failed while the pod is
   still starting — read the pod, not the deadline. `helm upgrade --wait` gives
   up at its own `--timeout` (5m by default): pass `--timeout 16m`, and never
   `--atomic` (its rollback recreates the pod — the booting hub and every
   conversation it was resuming — and brings back the old liveness).
+  Whether the cluster's ingress keeps a live connection open when readiness
+  takes a pod out was NOT measured (that is today's behaviour, unchanged here).
 - **Check the Deployment, not the helm values** (they drift):
   `kubectl -n vibespace get deploy vibespace-<user> -o jsonpath='{.spec.template.spec.containers[0].resources}'`.
 

@@ -64,10 +64,12 @@ resources:
 # - startup: liveness and readiness wait for its first answer; a boot that never answers is restarted at
 #   (91 − 1) × 10 s = 900 s (15 min) from the container's start (a boot resuming ~80 conversations held /login ~4 min).
 # - readiness: a hub that stops answering leaves the load balancer at (3 − 1) × 10 s = 20 s after its first failed
-#   probe and comes back at its first answer; nothing is killed.
+#   probe (25–35 s after the hold began) and comes back at its first answer; nothing is killed.
 # - liveness: a kill only after (31 − 1) × 30 s = 900 s (15 min) of continuous failure, never shorter than the
 #   startup budget (a hub that restarts itself inside the container boots under liveness alone).
-# The render refuses a startup or a liveness window of 600 s or less, and a liveness window under the startup budget.
+# The render refuses any number under 1 (a typed 0 or a negative), a startup or a liveness window of 600 s or less,
+# a liveness window under the startup budget, and a timeoutSeconds over its periodSeconds (the windows would outgrow
+# their arithmetic: the kubelet runs a probe's tries one after another).
 # templates/main.yaml states the same arithmetic beside the probes; test-helm-render (R) holds both to the render.
 probes:
   startup: { periodSeconds: 10, timeoutSeconds: 5, failureThreshold: 91 }
