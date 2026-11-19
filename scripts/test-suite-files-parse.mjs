@@ -189,13 +189,15 @@ console.log('\n§3 A RED CONTROL THAT BUILDS NOTHING FAILS BY NAME (B-0d3e) — 
   const total = Object.values(per).reduce((a, b) => a + b, 0);
   const judge = (p, listed) => ({ added: Object.entries(p).filter(([f, n]) => n > (listed[f] || 0)).map(([f]) => f), fell: Object.keys(listed).filter((f) => (p[f] || 0) < listed[f]) });
   // THE WHOLE LIST (checkpoint 60): a red names EVERY file over its count, one file a line with all its items. The old
-  // message kept six files and ok() cut its detail at 600 characters, so a file behind the cut stayed red unseen.
+  // edits message kept six files and ok() cut its detail at 600 characters (about two files read), so a file behind the cut
+  // stayed red unseen; the helper census kept six. Each over-count line is printed whole by sayOver.
   const overLines = (added, n, listed, items, say) => added.map((f) => `${f}: ${n[f]} > ${listed[f] || 0} — ${items[f].map(say).join(' · ')}`);
+  const sayOver = (lines, log = console.log) => { for (const l of lines) log('      ' + l); };
   const j = judge(per, LISTED);
   ok(total > 1000 && Object.keys(per).length > 200, `${total} unanchored control edits in ${Object.keys(per).length} scripts (non-vacuous: the walk reads the tree)`);
   const overE = overLines(j.added, per, LISTED, EDITS, (e) => `line ${e.line} ${e.text}`);
   ok(!overE.length, `the unanchored control edits never rise without a row's id beside it (the list ${Object.values(LISTED).reduce((a, b) => a + b, 0)} in ${Object.keys(LISTED).length} files)${overE.length ? ` — ${overE.length} file(s) over their count, EVERY ONE on its own line below with all its edits: build the new edit with anchored() from scripts/scratch.mjs, or raise the file's count under YOUR backlog row's id in scripts/fixtures/unanchored-controls.json «rows» (a plain number is refused)` : ''}`);
-  for (const l of overE) console.log('      ' + l);
+  sayOver(overE);
   if (j.fell.length) console.log(`    (${j.fell.length} listed file(s) now carry fewer — not red; lower their rows when convenient: ${j.fell.slice(0, 8).join(', ')}${j.fell.length > 8 ? ', …' : ''})`);
   // THE CONTROLS — the door, the guard, the walk, the one-way rule
   const T = 'const x = 1;\nconst y = 2;\n';
@@ -223,10 +225,12 @@ console.log('\n§3 A RED CONTROL THAT BUILDS NOTHING FAILS BY NAME (B-0d3e) — 
   const many = Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`test-over-${i}.mjs`, Array.from({ length: 30 }, (_, k) => ({ line: k + 1, text: 'src.replace(' + 'x'.repeat(90) + ')' }))]));
   const mper = Object.fromEntries(Object.entries(many).map(([f, e]) => [f, e.length])), mj = judge(mper, {});
   const whole = overLines(mj.added, mper, {}, many, (e) => `line ${e.line} ${e.text}`);
-  const oldCut = JSON.stringify(mj.added.slice(0, 6).map((f) => `${f}: ${mper[f]} > 0 — a new edit: ${many[f].slice(0, 2).map((e) => `line ${e.line} ${e.text}`).join(' · ')}`)).slice(0, 600);
+  // RED: the old edits message exactly — six files, each with its advice, through ok()'s 600-character cut of the detail
+  const oldCut = JSON.stringify(mj.added.slice(0, 6).map((f) => `${f}: ${mper[f]} > 0 — a new edit: ${many[f].slice(0, 2).map((e) => `line ${e.line} ${e.text}`).join(' · ')} — build it with anchored() from scripts/scratch.mjs, or raise its count to ${mper[f]} under YOUR backlog row\'s id in scripts/fixtures/unanchored-controls.json «rows» (a plain number is refused)`)).slice(0, 600);
+  const printed = []; sayOver(whole, (x) => printed.push(x));
   const named = (s) => Object.keys(many).filter((f) => s.includes(f)).length;
-  ok(whole.length === 9 && whole.every((l, i) => l.startsWith(`test-over-${i}.mjs: 30 > 0 — line 1 `) && l.includes(' · line 30 ')) && named(whole.join('\n')) === 9 && named(oldCut) < 9,
-    `CONTROL: an over-count red names EVERY file, one a line with all its items — 9 files over their counts ⇒ ${whole.length} lines naming ${named(whole.join('\n'))}; RED (the old message: six files, its detail cut at 600 characters) named ${named(oldCut)}`);
+  ok(whole.length === 9 && whole.every((l, i) => l.startsWith(`test-over-${i}.mjs: 30 > 0 — line 1 `) && l.includes(' · line 30 ')) && printed.length === 9 && named(printed.join('\n')) === 9 && named(oldCut) < 6,
+    `CONTROL: an over-count red names EVERY file, one printed line each with all its items — 9 files over their counts ⇒ ${printed.length} printed lines naming ${named(printed.join('\n'))}; RED (the old edits message: six files, its detail cut at 600 characters) named ${named(oldCut)}, under the six its slice kept`);
   const W19 = 'a why of nineteen c'.slice(0, 19), W20 = 'a why of twenty char'.slice(0, 20), row = (why, files) => ({ why, files });
   const cA = capsOf({ files: { 'test-a.mjs': 2 } }), cB = capsOf({ rows: { 'X-1': row('a row id that is no backlog id at all', { 'test-a.mjs': 2 }) } });
   const cC = capsOf({ rows: { 'B-0001': row(W19, { 'test-a.mjs': 2 }) } }), cC20 = capsOf({ rows: { 'B-0001': row(W20, { 'test-a.mjs': 2 }) } });
@@ -259,7 +263,7 @@ console.log('\n§3 A RED CONTROL THAT BUILDS NOTHING FAILS BY NAME (B-0d3e) — 
   console.log(`    ${htotal} anchor helper(s) in ${Object.keys(hper).length} script(s) answer null or an unpatched copy when their anchor moves (the controls below prove the walk finds one)`);
   const overH = overLines(hj.added, hper, HLISTED, HELPERS, (h) => `line ${h.line} ${h.name}`);
   ok(!overH.length, `the anchor helpers that do not fail by name never rise without a row's id beside it (the list ${Object.values(HLISTED).reduce((a, b) => a + b, 0)} in ${Object.keys(HLISTED).length} files)${overH.length ? ` — ${overH.length} file(s) over their count, EVERY ONE on its own line below with all its helpers: build the new one through scripts/scratch.mjs anchored() (it throws «ANCHOR GONE» by the control's name), or raise the file's count under YOUR backlog row's id in scripts/fixtures/anchor-helpers.json «rows»` : ''}`);
-  for (const l of overH) console.log('      ' + l);
+  sayOver(overH);
   if (hj.fell.length) console.log(`    (${hj.fell.length} listed file(s) now carry fewer helpers — not red; lower their rows when convenient: ${hj.fell.slice(0, 8).join(', ')}${hj.fell.length > 8 ? ', …' : ''})`);
   // a listed helper that stays on purpose says why («<file>#<name>»: a control skipped by name on a base without its line, or a caller that names the anchor)
   const HWHY = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts', 'fixtures', 'anchor-helpers.json'), 'utf-8')).why || {};
