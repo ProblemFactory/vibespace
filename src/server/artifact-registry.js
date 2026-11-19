@@ -363,8 +363,9 @@ function registries() {
   for (const [sessionId, s] of sessions()) if (s && s._artifacts) out.push({ sessionId, rows: s._artifacts });
   return out;
 }
-/** THE CONTRACT (doc-window): the newest conversation whose registry holds {host, path}. */
-function ownerOf({ host, path } = {}) { return AF.ownerOfIn(registries(), { host, path }); }
+/** THE CONTRACT (doc-window): the conversation `prefer` names (the window's own `from`) when its registry holds {host, path},
+ *  else the newest conversation whose registry holds it (B-b0e3). */
+function ownerOf({ host, path, prefer = null } = {}) { return AF.ownerOfIn(registries(), { host, path, prefer }); }
 /** THE CONTRACT (doc-window): ONE next-turn note to the conversation through the stash — free, never a billed wake. */
 function noteEdit({ sessionId, conversationId = null, host, path, summary } = {}) {
   require('./search-index.js').noteArtifact({ sessionId, host, path }); // lane global-search: the saved file is re-read into the index

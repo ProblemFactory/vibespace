@@ -32,7 +32,8 @@
 //           sends the verdict on every block (`cardBlock` `intent`) — the chip, the popover and the window group by it.
 //
 // THE CONTRACT TOWARD doc-window (the Doc window lane — it calls both; spelled here and in kb-file-structure):
-//   ownerOf({host, path}) → {sessionId, row} | null   — the newest conversation whose registry holds the path
+//   ownerOf({host, path, prefer}) → {sessionId, row} | null — `prefer`'s conversation when ITS registry holds the path
+//                                                         (the Doc window's own `from`, B-b0e3), else the newest holder
 //   noteEdit({sessionId, host, path, summary})          — ONE next-turn note to that conversation through the stash
 //                                                         (free, never a billed wake): "[Doc edit] <path>: <summary>"
 // Both live on the server (src/server/artifact-registry.js); this file owns their PURE halves: `ownerOfIn` (the pick
@@ -307,13 +308,18 @@ function cardFacts(b) {
 }
 /** AUTO-OPEN (setting artifacts.autoOpenDocs): only the BIRTH of a doc by the agent's write — an edit never re-opens. */
 const autoOpenVerdict = ({ born, row } = {}) => !!(born && row && row.kind === 'doc' && row.by === 'agent' && row.lastOp === 'write');
-/** The newest conversation whose registry holds {host, path}: `registries` = [{sessionId, rows}]. */
-function ownerOfIn(registries, { host, path } = {}) {
+/** The conversation that owns {host, path}: `prefer` (a session id — the Doc window's own `from`) when ITS registry holds
+ *  the path, else the newest conversation whose registry holds it. B-b0e3: with two writers, the newest alone sent a
+ *  comment made in a window opened from the OLDER one's card to the other conversation, and the one it was about never
+ *  heard it. `registries` = [{sessionId, rows}]. */
+function ownerOfIn(registries, { host, path, prefer = null } = {}) {
   const key = keyOf(host, String(path || ''));
   let best = null;
   for (const r of registries || []) {
     const row = r && r.rows && r.rows[key];
-    if (row && (!best || (row.lastAt || 0) > (best.row.lastAt || 0))) best = { sessionId: r.sessionId, row };
+    if (!row) continue;
+    if (prefer != null && prefer !== '' && String(r.sessionId) === String(prefer)) return { sessionId: r.sessionId, row };
+    if (!best || (row.lastAt || 0) > (best.row.lastAt || 0)) best = { sessionId: r.sessionId, row };
   }
   return best;
 }

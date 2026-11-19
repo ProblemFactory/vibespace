@@ -226,6 +226,46 @@ const { addressableId } = require('../src/claude-lock-capture.js');
   const row = wr.activeSessions.get('w1')._artifacts[':/w/BRIEF.md'];
   ok(real.ownerOf({ path: '/w/BRIEF.md' }).via === 'registry' && er.ok && er.row === true && row && row.by === 'user' && row.edits === 1 && row.writes === 1 && wr.rec.stashed.length === 1 && wr.rec.stashed[0].text.startsWith('[Doc edit] /w/BRIEF.md: +2 −1 lines; sections: Intro'), 'the registry owns the row ⇒ touch: by user, edits+1, ONE note (no `from` needed)', [er, row, wr.rec.stashed]);
   ok(real.edited({ path: '/w/other.md', from: 'w1', summary: 's' }).ok && wr.rec.stashed.length === 2, 'a `from`-owned file (no row) ⇒ the note alone');
+  // B-b0e3 — THE TWO-WRITER CHECK, over the REAL registry: conversations A (w1, the OLDER write) and B (w2, the newer) both hold
+  // /w/PLAN.md. A window opened from A's card speaks to A, never to the newest holder; no `from` (or a `from` holding nothing) ⇒ the
+  // newest, as before. On the release the newest alone decided: A never heard a comment made in ITS window.
+  {
+    const two = (DEm) => {
+      const rec = { sent: [], stashed: [] };
+      const act = new Map([['w1', { mode: 'chat', backend: 'claude', claudeSessionId: 'conv-1' }], ['w2', { mode: 'chat', backend: 'claude', claudeSessionId: 'conv-2' }], ['w3', { mode: 'chat', backend: 'claude', claudeSessionId: 'conv-3' }]]);
+      act.get('w1')._artifacts = AF.apply({}, { path: '/w/PLAN.md', op: 'write', by: 'agent', at: 5, id: 'a1' }).rows;
+      act.get('w2')._artifacts = AF.apply({}, { path: '/w/PLAN.md', op: 'write', by: 'agent', at: 9, id: 'b1' }).rows;
+      AR.configure({ activeSessions: () => act, deliver: { stashFor: (cid, e) => { rec.stashed.push({ cid, ...e }); return { stored: true }; } }, sessionMeta: null, log: quiet });
+      const doc = DEm.create({ activeSessions: act, getDeliver: () => null, sendUserInput: (sid, text, opts) => { rec.sent.push({ sid, text, opts }); return { ok: true, msgId: 'm' + rec.sent.length }; }, artifacts: AR, now: () => 7 });
+      return { rec, act, doc };
+    };
+    const T = two(DE);
+    const oA = T.doc.ownerOf({ path: '/w/PLAN.md', from: 'w1' }), oNone = T.doc.ownerOf({ path: '/w/PLAN.md', from: '' }), oOther = T.doc.ownerOf({ path: '/w/PLAN.md', from: 'w3' });
+    const cA = T.doc.comments({ path: '/w/PLAN.md', from: 'w1', items: [{ quote: 'q', note: 'about A' }] });
+    const eA = T.doc.edited({ path: '/w/PLAN.md', from: 'w1', summary: '+1 −0 lines' });
+    const rowA = T.act.get('w1')._artifacts[':/w/PLAN.md'], rowB = T.act.get('w2')._artifacts[':/w/PLAN.md'];
+    ok(!!(oA && oA.sessionId === 'w1' && oA.via === 'registry' && oNone && oNone.sessionId === 'w2' && oOther && oOther.sessionId === 'w2'
+      && cA.ok && T.rec.sent.length === 1 && T.rec.sent[0].sid === 'w1' && eA.ok && rowA && rowA.by === 'user' && rowA.edits === 1 && rowB && !(rowB.edits > 0) && T.rec.stashed.length === 1 && T.rec.stashed[0].cid === 'conv-1'),
+      'B-b0e3 two writers (A older, B newer, both hold the file): a window opened from A\'s card types its comments into A and its save touches A\'s row and notes conv-1; no `from`, or a `from` holding nothing, ⇒ the newest holder B',
+      { oA, oNone, oOther, sent: T.rec.sent.map((x) => x.sid), stashed: T.rec.stashed.map((x) => x.cid) });
+    // the PURE pick: `prefer` decides only when ITS registry holds the path
+    const REGS = [{ sessionId: 'a', rows: { ':/x.md': { lastAt: 1 } } }, { sessionId: 'b', rows: { ':/x.md': { lastAt: 2 } } }, { sessionId: 'c', rows: {} }];
+    const pick = (m, prefer) => { const r = m.ownerOfIn(REGS, { path: '/x.md', prefer }); return r ? r.sessionId : null; };
+    ok(pick(AF, 'a') === 'a' && pick(AF, 'c') === 'b' && pick(AF, null) === 'b' && pick(AF, '') === 'b', 'ownerOfIn: `prefer` wins only when its own registry holds the path; else the newest');
+    // RED CONTROLS — each proves its plant first (the line stands once, the copy lacks it)
+    const MC = mutantCopies('docmodel-b0e3', REPO);
+    const DESRC = fs.readFileSync(path.join(REPO, 'src/server/doc-engine.js'), 'utf8'), PL1 = ', prefer: from ? String(from) : null';
+    const de0 = DESRC.split(PL1).length === 2 ? DESRC.replace(PL1, '') : null;
+    ok(!!de0 && !de0.includes(PL1), 'CONTROL plant: the engine hands the window\'s `from` to the registry at ONE site, and the copy does not');
+    const R0 = de0 ? two(MC.load('src/server/doc-engine.js', de0, 'no-prefer')) : null;
+    const o0 = R0 ? R0.doc.ownerOf({ path: '/w/PLAN.md', from: 'w1' }) : null;
+    ok(!!o0 && o0.sessionId === 'w2', 'RED CONTROL: an engine that drops the window\'s `from` sends A\'s comment to the newest holder B (the release)', o0);
+    const AFSRC = fs.readFileSync(path.join(REPO, 'src/artifacts.js'), 'utf8'), PL2 = "    if (prefer != null && prefer !== '' && String(r.sessionId) === String(prefer)) return { sessionId: r.sessionId, row };\n";
+    const af0 = AFSRC.split(PL2).length === 2 ? AFSRC.replace(PL2, '') : null;
+    ok(!!af0 && !af0.includes(PL2), 'CONTROL plant: ownerOfIn\'s `prefer` line stands once in artifacts.js, and the copy lacks it');
+    ok(!!af0 && pick(MC.load('src/artifacts.js', af0, 'no-prefer-pick'), 'a') === 'b', 'RED CONTROL: a pick without `prefer` answers the newest holder (b) for a window opened from a');
+    for (const r of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 2, label: 'B-b0e3 ' })) ok(r.pass, r.name, r.detail);
+  }
   ok(w.doc.edited({ path: '/w/x.txt', from: 'w1', summary: 's' }).code === 'bad_path' && w.doc.edited({ path: '/w/a.md', from: 'w1', summary: ' ' }).code === 'bad_summary' && w.doc.edited({ path: '/w/a.md', from: '', summary: 's' }).code === 'no_owner', 'the edit note refuses a non-markdown path, an empty summary, no owner — by name');
   // the routes: an agent bearer is refused on every one
   const routes = {}; const app = { get: (p, h) => { routes['GET ' + p] = h; }, post: (p, h) => { routes['POST ' + p] = h; } };

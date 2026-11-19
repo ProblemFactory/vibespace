@@ -30,7 +30,7 @@
 - **设置** `artifacts.autoOpenDocs`（Chat，默认开）：智能体**写**出新的 doc 行且聊天在屏幕上时，在聊天旁打开它；Edit 不会再次打开；关 = 只有卡片。
 
 ## 对 doc-window 的契约（兄弟车道）
-- `ownerOf({host, path}) → {sessionId, row} | null`——持有该路径的最新对话。
+- `ownerOf({host, path, prefer}) → {sessionId, row} | null`——`prefer` 指的对话（Doc 窗口自己的 `from`）若其登记表持有该路径就是它，否则是持有该路径的最新对话（B-b0e3：两个对话都写过时，评论送到打开这个窗口的那个对话）。
 - `noteEdit({sessionId, host, path, summary})`——经 stash 给那个对话一条下一轮注记："[Doc edit] <path>: <summary>"。
 两者都在 src/server/artifact-registry.js；纯半部在 src/artifacts.js（ownerOfIn、editNoteText、lineDelta）。doc-window 用富 markdown 窗口替换了 `.md` 的原始查看器并调用这两个函数（lane artifacts-e2e 接入）；其他文件的原始代码编辑器保存仍以 "+a −b lines" 走 `artifact-touch`。
 

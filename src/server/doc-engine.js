@@ -9,7 +9,8 @@
  *              like chat input), else the durable stash (source `doc-comment`, drained into the next turn).
  *   THE EDIT   a save from the window → `artifacts.noteEdit({sessionId, host, path, summary})` — a FREE next-turn note
  *              (src/server/artifact-registry.js; a registry-owned row is `touch`ed first: by: user, edits+1, the card patched).
- * THE OWNER = `artifacts.ownerOf({host, path})` (the registry's row) else the window's `from` chat (a live session),
+ * THE OWNER = `artifacts.ownerOf({host, path, prefer: from})` (the registry's row — the window's own `from` conversation when
+ * ITS registry holds the file, else the newest holder: B-b0e3, two writers) else the window's `from` chat (a live session),
  * else (lane doc-comments-stopped-owner, B-b51a) the conversation either of those named while it lived — a STOPPED
  * owner is an addressee: its comments wait in its stash and land at its next turn (ownerMemo below);
  * none ⇒ `no_owner` by name, which now means no conversation at all (the strip says so) — never a silent drop.
@@ -80,7 +81,7 @@ function create({ activeSessions = new Map(), getDeliver = () => null, sendUserI
    *  either of those named while it lived. → {sessionId, conversationId, via: 'registry'|'from'|'stopped'} | null */
   function ownerOf({ host = null, path, from = '' } = {}) {
     let row = null;
-    try { row = artifacts && typeof artifacts.ownerOf === 'function' ? artifacts.ownerOf({ host: hostOf(host), path }) : null; } catch (e) { log('[doc] ownerOf failed:', e.message); }
+    try { row = artifacts && typeof artifacts.ownerOf === 'function' ? artifacts.ownerOf({ host: hostOf(host), path, prefer: from ? String(from) : null }) : null; } catch (e) { log('[doc] ownerOf failed:', e.message); }
     if (row && (row.sessionId || row.conversationId)) {
       const o = { sessionId: row.sessionId ? String(row.sessionId) : null, conversationId: row.conversationId ? String(row.conversationId) : null, via: 'registry' };
       memo.note({ sessionId: o.sessionId, conversationId: o.conversationId || addressableId(o.sessionId && activeSessions.get(o.sessionId)) }, docKeyOf(host, path), now());
