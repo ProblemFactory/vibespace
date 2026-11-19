@@ -11597,6 +11597,7 @@ export default {
   "Your folders": "あなたのフォルダ",
   // lane stop-refills-composer: Stop puts the dropped queue back into the composer (the toast)
   "Stop put {n} queued message(s) back into the input box": "停止 — キュー待ちの {n} 件のメッセージを入力欄に戻しました",
+  "The conversation ended — {n} queued message(s) put back into the input box": "会話が終了しました — 待機中の {n} 件のメッセージを入力欄に戻しました",
   ", {n} had already started and was stopped — put back too": "（うち {n} 件はすでに実行が始まっていて停止されました —— それも戻しました）",
   "{k} attached image(s) were not put back — attach them again": "添付画像 {k} 件は戻せません — もう一度添付してください",
   "{k} other attachment(s) were not put back — attach them again": "ほかの添付 {k} 件は戻せません — もう一度添付してください",

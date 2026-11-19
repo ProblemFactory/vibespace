@@ -186,7 +186,7 @@ let child = null, shuttingDown = false, restarting = false, sessionRecorded = fa
 // B-bba6: the process whose OWN exit is being handled while its last stderr words drain (a new process waits for it), and
 // how long that drain may hold the exit (a grandchild of agy can keep the pipe open)
 let childEnding = null;
-const ERR_TAIL_MS = 500;
+const ERR_TAIL_MS = Number(process.env.AGY_WEBUI_ERR_TAIL_MS) > 0 ? Number(process.env.AGY_WEBUI_ERR_TAIL_MS) : 500;   // (the env: a suite's seam)
 /** Resolves when a user line may be written to agy (see AUTH_GATE): agy spoke, or the grace passed with no sign-in request. */
 function authGate() {
   return new Promise((resolve) => {
@@ -265,6 +265,7 @@ function startChild() {
     // line decides the exit's own words), at most ERR_TAIL_MS
     childEnding = mine;
     if (errEnded) { childExited(code, signal); return; }
+    log(`agy exited (${signal || code}) — its last stderr words are read first (at most ${ERR_TAIL_MS} ms)`);
     let once = false, t = null;
     const go = () => { if (once) return; once = true; clearTimeout(t); flushErr(); childExited(code, signal); };
     t = setTimeout(go, ERR_TAIL_MS);
@@ -615,7 +616,8 @@ function noOutputSkippedNothing() {
   return null;
 }
 let authUrl = null;
-function handleStderr(line, from = null, { ending = false } = {}) {
+function handleStderr(line, from = null, { ending: endingIn = false } = {}) {
+  const ending = endingIn || (!!from && from === childEnding);   // B-bba6 cure: a WHOLE line read after its process exited is an ending's too
   log(`[stderr] ${clip(line, 2000)}`);
   if (stoppedChild(from)) { lateError(line, from); return; }   // bug 5: a process asked to stop says nothing to the chat (logged above) — B-bba6: but a late error of one replaced after its turn, once
   if (AUTH_URL_RE.test(line)) authUrl = line.trim();
@@ -1095,7 +1097,12 @@ function handleQueueOp(msg) {
 
 function finalizeExit(code) {
   shuttingDown = true;
-  for (const q of promptQueue.splice(0, promptQueue.length)) peerBack(q, 'Antigravity ended before it was delivered'); // the queue dies with this process: its peers' words go back
+  const dying = promptQueue.splice(0, promptQueue.length);
+  for (const q of dying) peerBack(q, 'Antigravity ended before it was delivered'); // the queue dies with this process: its peers' words go back
+  // B-bba6 cure: a PERSON's line still queued (typed while agy's last words were read, after its exit) comes back into the box — the
+  // put-back road Stop uses (src/server/queue-putback.js writes the draft), marked by: 'exit' so the toast says the conversation ended
+  const theirs = dying.filter((q) => !q.opts?.peer && !q.opts?.nudge && !q.opts?.retry && !q.opts?.silentQueue && typeof q.text === 'string');
+  if (theirs.length) record('queue_dropped', { ...droppedRecordFor(theirs.map((q) => ({ id: q.id, msgId: q.opts?.msgId || '', ts: q.ts || null, text: q.text, attachments: [] })), { dropId: `${process.pid}-${++dropSeq}`, turnId: null }), by: 'exit' });
   meta.streaming = false; meta.activePromptId = null;
   if (writeTimer) clearTimeout(writeTimer);
   if (metaTimer) clearTimeout(metaTimer);

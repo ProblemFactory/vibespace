@@ -5151,6 +5151,14 @@ class ChatView {
     // STOP PUT THE DROPPED QUEUE BACK (lane stop-refills-composer): the words are already in the composer (the draft op
     // landed first); ONE toast on every open client says how many, and what could not come back. No transcript card —
     // the bubbles already read Removed.
+    // B-bba6 cure: a put-back at the conversation's END (no Stop — its process ended; text only): its own one toast
+    if (op.subtype === 'queue-putback' && op.by === 'exit' && op.n > 0) {
+      const said = [t('The conversation ended — {n} queued message(s) put back into the input box', { n: op.n })];
+      if (op.cut > 0) said.push(t('{m} message(s) came back shortened', { m: op.cut }));
+      if (op.omitted > 0) said.push(t('{k} more queued message(s) were too long to put back', { k: op.omitted }));
+      showToast(said.join(' · '), { duration: 6000 });
+      return;
+    }
     if (op.subtype === 'queue-putback') {
       const parts = [];
       if (op.n > 0) parts.push(t('Stop put {n} queued message(s) back into the input box', { n: op.n }) + (op.started > 0 ? t(', {n} had already started and was stopped — put back too', { n: op.started }) : '')); // codex: a drained row this Stop cut off (lane codex-interrupted-putback)

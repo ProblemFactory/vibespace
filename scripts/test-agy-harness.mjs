@@ -185,12 +185,16 @@ function startWrapper({ env = {}, wrapper = WRAPPER, dir: inDir = null } = {}) {
 const bba6Lane = (async () => {
   const src = fs.readFileSync(WRAPPER, 'utf8');
   const mutant = (name, anchor, to) => { const f = path.join(MUTBIN, `agy-wrapper-bba6-${name}.js`); fs.writeFileSync(f, anchored(src, anchor, to, `B-bba6 ${name}`)); return f; };
-  const NO_WAIT = mutant('nowait', '    if (errEnded) { childExited(code, signal); return; }\n    let once = false, t = null;\n', '    { childExited(code, signal); return; }\n    let once = false, t = null;\n');
+  const NO_WAIT = mutant('nowait', '    if (errEnded) { childExited(code, signal); return; }\n    log(`agy exited', '    { childExited(code, signal); return; }\n    log(`agy exited');
   const NO_BOUND = mutant('nobound', '    t = setTimeout(go, ERR_TAIL_MS);\n', '    t = null;\n');
   const NO_END_FLUSH = mutant('noendflush', "  child.stderr.on('end', () => { errEnded = true; log('agy stderr ended'); flushErr(); });\n", "  child.stderr.on('end', () => { errEnded = true; log('agy stderr ended'); });\n");
   const NO_LATE = mutant('nolate', '  if (stoppedChild(from)) { lateError(line, from); return; }', '  if (stoppedChild(from)) { return; }');
   const NO_TURN_GUARD = mutant('noturnguard', '  if (!turnOpenOn.has(old)) lateErrorOf.set(old, servedModel());', '  lateErrorOf.set(old, servedModel());');
-  const LATE_ENDING = mutant('lateending', '    childEnding = mine;\n    if (errEnded) { childExited(code, signal); return; }\n', '    if (errEnded) { childExited(code, signal); return; }\n');
+  const NO_EPIPE = mutant('noepipe', "  child.stdin.on('error', (err) => log(", '  void (0, (err) => log(');
+  const NO_RUN_GUARD = mutant('norunguard', '    if (!child && !restarting && !shuttingDown && !childEnding) startChild();', '    if (!child && !restarting && !shuttingDown) startChild();');
+  const NO_ONCE = mutant('noonce', '  lateErrorOf.delete(from);\n', '');
+  const SERVED_LATE = mutant('servedlate', "notice('error', `Antigravity: ${said}`, 'agy-error', served ? { servedModel: served } : {});", "notice('error', `Antigravity: ${said}`, 'agy-error', servedField());");
+  const NO_ENDING_MARK = mutant('noendingmark', '    childEnding = mine;\n    if (errEnded) { childExited(code, signal); return; }\n', '    if (errEnded) { childExited(code, signal); return; }\n');
   const NO_QUIET = mutant('noquiet', '  if (!said || /interrupt|cancel/i.test(said)) return;', '  if (!said) return;');
   const wlog = (w) => { try { return fs.readFileSync(path.join(w.dir, 'agy-wrapper.log'), 'utf8'); } catch { return ''; } };
   let seq = 0;
@@ -269,9 +273,56 @@ const bba6Lane = (async () => {
       return { exited: w.exited, end: w.find('prompt_end'), spawned: (wlog(w).match(/spawned [^\n]*--input-format/g) || []).length };
     } finally { fs.writeFileSync(resultGate, ''); await w.stop(); }
   };
-  const [cr, cLate] = await Promise.all([crash(), crash(LATE_ENDING)]);
+  const [cr, cLate] = await Promise.all([crash(), crash(NO_ENDING_MARK)]);
+  // (4) THE CURE OF THE CURE (主开发 04:23Z): a write to a process that closed its stdin (EPIPE) is logged, never a crash; a person's
+  // line typed INSIDE the exit wait starts no agy and comes back into the box (by: 'exit'); a late line read after the NEXT process
+  // started is filed under the model of the process that wrote it
+  const deaf = async (wrapper = WRAPPER) => {
+    const w = startWrapper({ wrapper });
+    try {
+      await w.until(() => w.find('session'), 8000, 'session');
+      w.send({ type: 'chat-input', text: 'this turn goes deaf', msgId: `df${++seq}` });
+      await w.until(() => w.find('prompt_end'), 8000, 'the deaf turn ends');
+      w.send({ type: 'chat-input', text: 'and this one meets a closed pipe', msgId: `df${++seq}` });
+      await w.until(() => /agy stdin: EPIPE/.test(wlog(w)) || w.exited, 8000, 'the write meets the closed pipe').catch(() => null);
+      return { epipe: /agy stdin: EPIPE/.test(wlog(w)), exited: w.exited };
+    } finally { await w.stop(); }
+  };
+  const typedInWait = async (wrapper = WRAPPER) => {
+    const release = gateFile('release');
+    const w = startWrapper({ wrapper, env: { AGY_STUB_NOEOL_ORDER: 'held', AGY_STUB_HOLDER_RELEASE: release, AGY_WEBUI_ERR_TAIL_MS: '8000' } });
+    try {
+      await w.until(() => w.find('session'), 8000, 'session');
+      w.send({ type: 'chat-input', text: 'this will noeol', msgId: `tw${++seq}` });
+      await w.until(() => /agy exited \(1\) — its last stderr words are read first/.test(wlog(w)), 8000, 'the exit wait begins');
+      w.send({ type: 'chat-input', text: 'typed while it ends', msgId: 'tw-late' });
+      await w.until(() => w.find('queued_input', (r) => r.msg_id === 'tw-late'), 8000, 'the late line queued');
+      fs.writeFileSync(release, '');
+      await w.until(() => w.exited, 8000, 'the wrapper ends').catch(() => null);
+      return { dropped: w.find('queue_dropped'), spawned: (wlog(w).match(/spawned [^\n]*--input-format/g) || []).length, exited: w.exited };
+    } finally { fs.writeFileSync(release, ''); await w.stop(); }
+  };
+  const lateServed = async (wrapper = WRAPPER) => {
+    const resultGate = gateFile('result'), release = gateFile('late');
+    const w = startWrapper({ wrapper, env: { AGY_STUB_RESULT_GATE: resultGate, AGY_STUB_LATE_RELEASE: release, AGY_WEBUI_MODEL: 'claude-sonnet-4-6' } });
+    const metaOf = () => { try { return JSON.parse(fs.readFileSync(path.join(w.dir, 's.json'), 'utf8')); } catch { return null; } };
+    try {
+      await w.until(() => w.find('session'), 8000, 'session');
+      w.send({ type: 'chat-input', text: 'a turn that will faillate', msgId: `ls${++seq}` });
+      await w.until(() => w.find('prompt_start'), 8000, 'the turn starts');
+      w.send({ type: 'set-model', model: 'gemini-3.8-flash-medium' });
+      await w.until(() => w.find('notice', (r) => r.noticeKind === 'command_applied'), 8000, 'the switch waits');
+      fs.writeFileSync(resultGate, '');
+      await w.until(() => metaOf()?.agy?.model === 'gemini-3.8-flash-medium', 8000, 'the NEXT process started and named its model');
+      fs.writeFileSync(release, '');   // only now the old process's grandchild writes the late line on the old pipe
+      const n = await w.until(() => w.find('notice', (r) => r.noticeKind === 'agy-error'), 8000, 'the late notice').catch(() => null);
+      return { served: n ? (n.servedModel || null) : undefined, text: n && n.text };
+    } finally { fs.writeFileSync(resultGate, ''); fs.writeFileSync(release, ''); await w.stop(); }
+  };
+  const [df, cDf, tw, cTw, ls, cLs] = await Promise.all([deaf(), deaf(NO_EPIPE), typedInWait(), typedInWait(NO_RUN_GUARD), lateServed(), lateServed(SERVED_LATE)]);
   const [sw, st, quiet, cNoLate, cNoGuard, cNoQuiet] = await Promise.all([lateErr({}), lateErr({ stop: true }), lateErr({ short: 'interrupted' }), lateErr({ wrapper: NO_LATE }), lateErr({ wrapper: NO_TURN_GUARD, stop: true }), lateErr({ wrapper: NO_QUIET, short: 'interrupted' })]);
-  return { ef, held, signin, skipped, cNoEnd, cNoWait, cNoBound, sw, st, quiet, cNoLate, cNoGuard, cNoQuiet, cr, cLate };
+  const cOnce = await lateErr({ wrapper: NO_ONCE });
+  return { ef, held, signin, skipped, cNoEnd, cNoWait, cNoBound, sw, st, quiet, cNoLate, cNoGuard, cNoQuiet, cr, cLate, df, cDf, tw, cTw, ls, cLs, cOnce };
 })();
 bba6Lane.catch(() => { });   // a throw (an anchor gone) is raised where ⑦c awaits it, by name
 
@@ -1030,7 +1081,7 @@ console.log('— ⑦b B-518e: the AGY_ERROR line after the result (two pipes in 
 // Every control is a mutant built through anchored(): it fails by name when its line moves.
 console.log('— ⑦c B-bba6: the last stderr words, and the late error of a replaced process');
 {
-  const { ef, held, signin, skipped, cNoEnd, cNoWait, cNoBound, sw, st, quiet, cNoLate, cNoGuard, cNoQuiet, cr, cLate } = await bba6Lane;
+  const { ef, held, signin, skipped, cNoEnd, cNoWait, cNoBound, sw, st, quiet, cNoLate, cNoGuard, cNoQuiet, cr, cLate, df, cDf, tw, cTw, ls, cLs, cOnce } = await bba6Lane;
   const before = (r) => r.notices.indexOf('agy-error') >= 0 && r.notices.indexOf('agy-error') < r.notices.indexOf('agent-exited');
   ok('⑦c the last stderr line with NO newline is said — the wrapper read the pipe\'s END while agy still ran (the exit held behind it): «Antigravity: quota exhausted, said last» before the exit\'s own notice, the turn ends error, the wrapper exits 1',
     ef.endLogged && !!ef.last && before(ef) && ef.end?.stopReason === 'error' && ef.exited?.code === 1, ef);
@@ -1043,7 +1094,15 @@ console.log('— ⑦c B-bba6: the last stderr words, and the late error of a rep
   ok('⑦c RED CONTROL (no flush at the pipe\'s end): the end read first (logged), the line is NEVER said — only the exit\'s notice', cNoEnd.endLogged && !cNoEnd.last && cNoEnd.notices.includes('agent-exited'), cNoEnd);
   ok('⑦c RED CONTROL (no wait for the pipe\'s end at the exit): with the pipe held, the last line is NEVER said', !cNoWait.last && cNoWait.notices.includes('agent-exited'), cNoWait);
   ok('⑦c a CRASH mid-turn while a model switch waits for the turn\'s end: the turn ends error, the wrapper ends, and NO second agy is started on its way out (one spawn)', cr.end?.stopReason === 'error' && !!cr.exited && cr.spawned === 1, cr);
-  ok('⑦c RED CONTROL (the ending mark set only on the drain\'s road): the switch waiting at the crash spawns a SECOND agy just before the exit', cLate.spawned === 2, cLate);
+  ok('⑦c RED CONTROL (no ending mark at the process\'s own exit — its one assignment removed): the switch waiting at the crash spawns a SECOND agy just before the exit', cLate.spawned === 2, cLate);
+  ok('⑦c a write to a process that CLOSED its stdin (EPIPE) is a journal line, never a crash — the wrapper lives on', df.epipe && !df.exited, df);
+  ok('⑦c RED CONTROL (no stdin error listener): that write kills the wrapper', !!cDf.exited && !cDf.epipe, cDf);
+  ok('⑦c a person\'s line typed INSIDE the exit wait starts no agy (one spawn) and comes back into the box — one `queue_dropped` by «exit» carrying its words (the toast: «The conversation ended — 1 queued message(s) put back into the input box»)',
+    tw.spawned === 1 && !!tw.dropped && tw.dropped.by === 'exit' && Array.isArray(tw.dropped.items) && tw.dropped.items.length === 1 && tw.dropped.items[0].text === 'typed while it ends', tw);
+  ok('⑦c RED CONTROL (the runPrompt guard dropped): that line starts a SECOND agy during the exit wait', cTw.spawned === 2, cTw);
+  ok('⑦c a late line read after the NEXT process started is filed under the model of the process that WROTE it (claude-sonnet-4-6), not the new one', ls.served === 'claude-sonnet-4-6' && /model unavailable/.test(ls.text || ''), ls);
+  ok('⑦c RED CONTROL (the served model read when the notice is said): it is filed under the NEW process\'s model', cLs.served === 'gemini-3.8-flash-medium', cLs);
+  ok('⑦c RED CONTROL («said once» removed): the replaced process\'s two late lines say TWO notices', cOnce.said.length === 2, cOnce);
   ok('⑦c RED CONTROL (the wait has no bound): while the grandchild holds the pipe the wrapper never ends — it ends only once released', cNoBound.heldAtEnd === false && !!cNoBound.exited, cNoBound);
   const plant = (r) => !r.held.said && r.held.starts === 1 && r.held.restarting && r.read === 2;
   ok('⑦c the plant: the switch (or the Stop) taken in BEFORE the turn answers, then its end and the restart read with the old process still alive, nothing said yet — then the old process writes its AGY_ERROR line twice',

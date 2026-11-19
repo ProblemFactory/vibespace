@@ -28,6 +28,10 @@
 //                                   order $AGY_STUB_NOEOL_ORDER places (B-bba6): `end-first` closes stderr and exits only once
 //                                   the file $AGY_STUB_EXIT_GATE exists; `held` leaves a grandchild holding stderr until the
 //                                   file $AGY_STUB_HOLDER_RELEASE exists, so the exit comes first (its pid in the stub log)
+//       text naming `deaf`        → this process CLOSES its stdin (fd 0) and answers the turn: the wrapper's next write meets a pipe
+//                                   with no reader (EPIPE) — B-bba6's cure (the stdin error listener)
+//                                   (`faillate` with $AGY_STUB_LATE_RELEASE: the AGY_ERROR line is written by a grandchild that holds
+//                                   stderr until that file exists — so it lands after this process exited and the NEXT one started)
 //       text naming `crash`       → no result, no stderr: the process exits 1 once the file $AGY_STUB_RESULT_GATE exists (B-bba6:
 //                                   a crash mid-turn while a switch waits for the turn's end)
 //       text naming `stuck`       → a run_command step ACTIVE, then nothing: no DONE, no result, the process alive (lane queued-is-not-woke)
@@ -175,6 +179,7 @@ async function turn(text) {
   if (/\bstuck\b/.test(text)) { const i = step++; modelCall(i); out({ event: 'step_update', step_update: { conversation_id: cid, step_index: i, state: 'ACTIVE', step_type: 'tool', tool_name: 'run_command', tool_info: { name: 'run_command', parameters: { CommandLine: 'node driver.mjs' } } } }); await new Promise(() => { }); }
   if (/\bslow\b/.test(text)) await sleep(Number(process.env.AGY_STUB_SLOW_MS || 1500));
   const gateWait = async (f) => { for (let k = 0; f && k < 750 && !fs.existsSync(f); k++) await sleep(20); };   // 15 s cap: a stand-in never lingers
+  if (/\bdeaf\b/.test(text)) { process.stdin.removeAllListeners('end'); process.stdin.removeAllListeners('data'); process.stdin.on('error', () => { }); process.stdin.pause(); try { fs.closeSync(0); } catch { } const pp = process.ppid; setInterval(() => { if (process.ppid !== pp) process.exit(0); }, 100); }   // alive and deaf (no read end) until its wrapper is gone
   if (/\bcrash\b/.test(text)) { await gateWait(process.env.AGY_STUB_RESULT_GATE || ''); process.exit(1); }
   if (/\bnoeol\b/.test(text)) {
     const last = /\bsignin\b/.test(text) ? 'You are not logged into Antigravity' : /\bskipped\b/.test(text) ? 'Tool run_command(rm -rf build) requires approval and was skipped.' : 'AGY_ERROR: {"short_error":"quota exhausted, said last","status":"RESOURCE_EXHAUSTED","code":429}';
@@ -185,7 +190,7 @@ async function turn(text) {
     }
     process.stderr.write(last); fs.closeSync(2); await gateWait(process.env.AGY_STUB_EXIT_GATE || ''); process.exit(1);
   }
-  if (/\bfaillate\b/.test(text)) { await gateWait(process.env.AGY_STUB_RESULT_GATE || ''); out({ event: 'result', result: { conversation_id: cid, status: 'ERROR', response: '', error: 'model unavailable', duration_seconds: 0.1, num_turns: turns, usage: usage(turns) } }); const gate = process.env.AGY_STUB_ERR_GATE || ''; for (let k = 0; gate && k < 400 && !fs.existsSync(gate); k++) await sleep(20); const line = `AGY_ERROR: {"short_error":${JSON.stringify(process.env.AGY_STUB_ERR_SHORT || 'model unavailable')},"status":"UNAVAILABLE","code":503,"retryable":true}\n`; process.stderr.write(process.env.AGY_STUB_ERR_TWICE === '1' ? line + line : line); return; }
+  if (/\bfaillate\b/.test(text)) { await gateWait(process.env.AGY_STUB_RESULT_GATE || ''); out({ event: 'result', result: { conversation_id: cid, status: 'ERROR', response: '', error: 'model unavailable', duration_seconds: 0.1, num_turns: turns, usage: usage(turns) } }); const gate = process.env.AGY_STUB_ERR_GATE || ''; for (let k = 0; gate && k < 400 && !fs.existsSync(gate); k++) await sleep(20); const line = `AGY_ERROR: {"short_error":${JSON.stringify(process.env.AGY_STUB_ERR_SHORT || 'model unavailable')},"status":"UNAVAILABLE","code":503,"retryable":true}\n`; if (process.env.AGY_STUB_LATE_RELEASE) { const g = require('child_process').spawn(process.execPath, ['-e', "const [f, l] = process.argv.slice(1); const t = setInterval(() => { if (require('fs').existsSync(f)) { clearInterval(t); process.stderr.write(l); process.exit(0); } }, 20); setTimeout(() => process.exit(0), 15000);", process.env.AGY_STUB_LATE_RELEASE, line], { stdio: ['ignore', 'ignore', 'inherit'] }); logLine({ holder: g.pid }); return; } process.stderr.write(process.env.AGY_STUB_ERR_TWICE === '1' ? line + line : line); return; }
   if (/\bfail\b/.test(text)) { process.stderr.write('AGY_ERROR: {"short_error":"model unavailable","status":"UNAVAILABLE","code":503,"retryable":true}\n'); out({ event: 'result', result: { conversation_id: cid, status: 'ERROR', response: '', error: 'model unavailable', duration_seconds: 0.1, num_turns: turns, usage: usage(turns) } }); return; }
   const reply = `Antigravity (${model}${effort ? ', ' + effort : ''}, ${mode}): ${text}`;
   const i = step++;

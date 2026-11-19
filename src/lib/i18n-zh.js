@@ -11598,6 +11598,7 @@ export default {
   "Your folders": "你的文件夹",
   // lane stop-refills-composer: Stop puts the dropped queue back into the composer (the toast)
   "Stop put {n} queued message(s) back into the input box": "已停止 — {n} 条排队的消息已放回输入框",
+  "The conversation ended — {n} queued message(s) put back into the input box": "对话已结束——{n} 条排队的消息已放回输入框",
   ", {n} had already started and was stopped — put back too": "，{n} 条已开始运行、被停止，也放回了",
   "{k} attached image(s) were not put back — attach them again": "{k} 张附带的图片没有放回 — 请重新附加",
   "{k} other attachment(s) were not put back — attach them again": "另有 {k} 个附件没有放回 — 请重新附加",
