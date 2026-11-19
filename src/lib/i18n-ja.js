@@ -100,6 +100,7 @@ export default {
   "Connecting to the browser window…": "ブラウザのウィンドウに接続中…",
   "The browser window is not available": "ブラウザのウィンドウを利用できません",
   "Chrome asks you to sign in — in its window below": "Chrome がサインインを求めています — 下のウィンドウで",
+  "Chrome asks you to sign in — in its own window, which this view does not show": "Chrome がサインインを求めています — このビューには映らない Chrome 自身のウィンドウで",
   "Take over and type the username and password into Chrome’s sheet — the agent never sees them": "引き継いで Chrome のシートにユーザー名とパスワードを入力してください — エージェントには見えません",
   // lane chat-mermaid: the diagram card
   "Diagram": "図",
@@ -8868,6 +8869,7 @@ export default {
   "The page asks for a file": "ページがファイルを求めています", // lane browser-ui-prompts
   "No file window opens here — the agent uploads it with vibespace-browser upload": "ここではファイル選択画面は開きません — エージェントが vibespace-browser upload でアップロードします", // lane browser-ui-prompts
   "The page asks you to sign in": "ページがサインインを求めています", // lane browser-ui-prompts
+  "Type the username and password into the browser’s own sheet in its window — VibeSpace never sees them": "ブラウザ自身のウィンドウのシートにユーザー名とパスワードを入力してください — VibeSpace には見えません", // B-b56d (2.369.413)
   "A sign-in is answered by a person — a view opened with a token cannot answer it": "サインインは人が応答するものです — トークンで開いたビューからは応答できません", // B-b56d
   "The sign-in was not sent: answer it from VibeSpace’s own page": "サインインは送信されませんでした：VibeSpace 自身のページから応答してください", // B-b56d
   "A proxy asks you to sign in": "プロキシがサインインを求めています", // B-b56d

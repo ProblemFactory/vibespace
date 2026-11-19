@@ -488,12 +488,56 @@ for (const lang of ['en', 'zh', 'ja']) {
 console.log('— (g) B-b56d: a profile only the person browses; a stand-in site asks for an HTTP sign-in ⇒ the form in their window, Sign in and Cancel');
 if (!require('../src/server/browser-dialogs.js').PERSON_SIGNIN_HOOK) skip("(g) B-b56d, every leg: the person's sign-in hook is OUT of this release (PERSON_SIGNIN_HOOK false, the coordinator's order 2026-11-18 23:56Z) — (g) runs again when the hook is back, and proves it on the box");
 else {
+  // B-b56d (2.369.413, the coordinator's ruling 2026-11-19 01:42Z): (g) proves BOTH ROADS BY NAME, each started on purpose, so a box with
+  // a display and a runner without one judge the same. (g2) THE DISPLAY ROAD first (the browser's own sheet, the true words, a picture);
+  // (g1) THE DRIVER ROAD after it (the form — its law 8 ends by killing this suite's own hub, so it runs last)
+  const SITE0 = `http://127.0.0.1:${CP}`;
+  console.log('— (g2) the DISPLAY road: «alone-x» started with the hub\'s default (a display here ⇒ the attach road, the X picture)');
+  const mkX = await api('POST', '/api/browser/profiles', { label: 'alone-x' });
+  const PIDX = mkX.json && mkX.json.profile ? mkX.json.profile.id : null;
+  const AX = PIDX ? await page({ lang: 'en' }) : null;
+  if (ok(!!PIDX && AX && AX.ready, `a second profile no conversation uses ("alone-x", ${PIDX}) and its viewer page`, JSON.stringify(mkX.json))) {
+    await AX.ev(`window.app.browseYourself(${JSON.stringify(PIDX)}, { label: 'alone-x' }); true`);
+    const liveX = await until(() => AX.h('if (!L) return null; const s = L.state(); return s.mode === "takeover" && s.mine && s.frames >= 1 ? true : null;').catch(() => null), 60000, 200);
+    const onAttach = journal.split('\n').some((l) => l.includes(`${PIDX} "alone-x" started on the ATTACH road`));
+    // the road is the profile's RECORD (launch + display session: pictureSourceOf's own facts), never L.x().source — the person's
+    // window keeps the page's picture by design (renderPicture returns before it sets a source when H)
+    const recOf = (pid) => `(() => { const b = window.app && window.app._browserProfiles && window.app._browserProfiles.browsers; const r = b ? b[${JSON.stringify(pid)}] : null; return r ? { launch: r.launch || null, ds: r.displaySession && r.displaySession.id ? String(r.displaySession.id) : null, state: r.state || null } : null; })()`;
+    const recX = liveX ? await until(() => AX.ev(recOf(PIDX)).then((r) => (r && r.launch ? r : null)).catch(() => null), 10000, 200) : null;
+    if (!liveX) ok(false, 'the person browses "alone-x"');
+    else if (!onAttach || !recX || recX.launch !== 'attach' || !recX.ds) skip(`(g2) the display road: this machine started «alone-x» on the driver road (launch ${recX ? recX.launch : 'unknown'}${recX && recX.ds ? '' : ', no display session'}${onAttach ? '' : ', no «started on the ATTACH road» line'}) — no display here; the box with xpra judges it`);
+    else {
+      ok(true, `(g2) «alone-x» runs on the DISPLAY road: started on the ATTACH road, its record names display session ${recX.ds}`);
+      const typeX = async (url) => { await AX.h('const i = L.el().querySelector(".browser-live-address-input"); if (!i) return false; i.focus(); i.select(); return true;'); await AX.call('Input.insertText', { text: url }); await AX.key('Enter', { code: 'Enter', vk: 13, text: '\r' }); };
+      const toastsNow = () => AX.ev('[...document.querySelectorAll(".global-toast")].map((n) => n.textContent).join(" | ")').catch(() => '');
+      await typeX(`${SITE0}/auth?n=x1`);
+      const barX = await until(() => AX.h('const b = L.el().querySelector(".browser-live-dialog"); return b && b.style.display !== "none" && /in its own window/.test(b.textContent) ? b.textContent : null;').catch(() => null), 30000, 200);
+      ok(!!barX && /Chrome asks you to sign in — in its own window, which this view does not show/.test(barX) && /VibeSpace never sees them/.test(barX) && !/Take over/.test(barX) && barX.includes(`127.0.0.1:${CP}`),
+        `(g2) the site asks ⇒ the person's window SAYS the browser's own sheet in its window, who asks named, the person's own hint ("${String(barX || '').slice(0, 140)}")`, String(barX));
+      const said = await until(() => journal.split('\n').some((l) => l.includes(`${PIDX}: the user's open asks for a sign-in — the browser shows its own sheet in its window`)), 15000, 200);
+      const toasts = await toastsNow();
+      ok(!!said && !journal.split('\n').some((l) => l.includes(`${PIDX}: the user's open did not go through`)) && !/Could not open it/.test(String(toasts)),
+        '(g2) the open is SAID as the sheet — the keeper\'s «asks for a sign-in — the browser shows its own sheet in its window», never «did not go through»; no «Could not open it» toast', JSON.stringify({ said, toasts }));
+      const doorX = await until(() => AX.h('const d = L.el().querySelector(".browser-live-deskdoor"); return d && d.style.display !== "none" && d.dataset.ds ? d.dataset.ds : null;').catch(() => null), 10000, 200);
+      ok(!!doorX && doorX === recX.ds, `(g2) the door to that window: «Open in Desktop» drawn in the person's window, naming the profile's display session (${doorX} vs ${recX.ds})`);
+      // (c) the picture of the person's window on the display road — read by the coordinator (int361 sets B56D_SHOT_DIR on the box)
+      if (process.env.B56D_SHOT_DIR) {
+        try { fs.mkdirSync(process.env.B56D_SHOT_DIR, { recursive: true }); const shot = await AX.call('Page.captureScreenshot', { format: 'png' }); const f = path.join(process.env.B56D_SHOT_DIR, 'b56d-display-road-sheet.png'); fs.writeFileSync(f, Buffer.from(shot.result.data, 'base64')); ok(fs.statSync(f).size > 0, `(c) PICTURE of the person's window: ${f}`); } catch (e) { ok(false, `(c) the picture was asked (B56D_SHOT_DIR) and not taken: ${e && e.message}`); }
+      } else console.log('    PICTURE: not asked (B56D_SHOT_DIR unset)');
+    }
+    try { await api('POST', `/api/browser/browse/${HM.humanKeyFor(PIDX)}/quit`); } catch { }
+  }
+  try { AX && AX.close(); } catch { }
+  console.log('— (g1) the DRIVER road: «alone» started HEADLESS on purpose (the hub\'s browser.headed false for its launch) ⇒ the screencast and VibeSpace\'s form');
+  await api('PATCH', '/api/settings', { 'browser.headed': false });
   const mk = await api('POST', '/api/browser/profiles', { label: 'alone' });
   const PID2 = mk.json && mk.json.profile ? mk.json.profile.id : null;
   const A = await page({ lang: 'en' });
   if (ok(!!PID2 && A.ready, `a profile no conversation uses ("alone", ${PID2}) and a viewer page`, JSON.stringify(mk.json))) {
     await A.ev(`window.app.browseYourself(${JSON.stringify(PID2)}, { label: 'alone' }); true`);
     const liveA = await until(() => A.h('if (!L) return null; const s = L.state(); return s.mode === "takeover" && s.mine && s.frames >= 1 ? true : null;').catch(() => null), 60000, 200);
+    const recA = liveA ? await until(() => A.ev(recOf(PID2)).then((r) => (r && r.launch ? r : null)).catch(() => null), 10000, 200) : null;
+    ok(!!liveA && !journal.split('\n').some((l) => l.includes(`${PID2} "alone" started on the ATTACH road`)) && !!recA && recA.launch !== 'attach', `(g1) «alone» runs on the DRIVER road (started headless on purpose; its record's launch ${recA ? recA.launch : '?'}) — the form's road on every machine`, JSON.stringify(srcA));
     if (ok(!!liveA, 'the person browses "alone" — its browser launched by their press, no conversation holds it (the watch is the person\'s)')) {
       // the close's rule (c): A RAW PRESS AT A COORDINATE checks the top element at that point FIRST — a counted step that says what
       // stands there; a press whose point another element covers is not made (and the leg goes red by name)

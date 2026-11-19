@@ -442,7 +442,21 @@ function humanStateLine(h, tIn) {
   return h.state === 'driving' ? t('You are browsing it') : t('You were browsing it — Continue');
 }
 
+/** B-b56d (2.369.413, the coordinator's ruling 2026-11-19 01:42Z): THE PERSON'S OPEN THAT A SIGN-IN SHEET HOLDS IS NO FAILED OPEN.
+ *  On the DISPLAY road (the attach road's X picture) the dialog watch answers an HTTP sign-in `Default` (B2's law) and Chrome draws
+ *  its OWN sheet in its window; the driver's `open` then reports the MEASURED `net::ERR_INVALID_AUTH_CREDENTIALS` (the 401 commits an
+ *  error page under the sheet — browser-dialogs.js, NATIVE_SHEET_PAGE_RE's note). PURE: `why` = the driver's words, `stuck` = the
+ *  person's key's stuck fact (the watch's stuckForKey) ⇒ `{ sheet: true, origin, realm }` when that sheet stands, else null (a real
+ *  failure stays one). */
+function openSignInVerdict({ why = '', stuck = null } = {}) {
+  if (!/ERR_INVALID_AUTH_CREDENTIALS/.test(String(why || ''))) return null;
+  const p = stuck && stuck.state === 'prompt' && stuck.prompt ? stuck.prompt : null;
+  if (!p || p.type !== 'http-auth' || p.native !== true) return null;
+  return { sheet: true, origin: str(p.origin), realm: str(p.realm) };
+}
+
 module.exports = {
+  openSignInVerdict, // B-b56d (2.369.413): the person's open held by Chrome's own sign-in sheet is said as the sheet
   HUMAN_KEY_RE, HUMAN_HOLDER, HUMAN_SYNC_PREFIX, HUMAN_STATES, HUMAN_END_REASONS, NAV_VERBS, TAB_REF_RE, REFUSAL_CODES, LAUNCH_CODES,
   DEFAULT_HUMAN_KEEP_MS, MIN_HUMAN_KEEP_MS, HUMAN_KEEP_SETTING, TYPE_IDLE_MS, WHEEL_IDLE_MS, CLICK_SLOP_PX,
   humanKeyFor, isHumanKey, profileOfHumanKey, humanSyncId, recordsMine, humanKeepMs, keepFor,

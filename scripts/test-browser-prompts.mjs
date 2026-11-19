@@ -240,7 +240,7 @@ ok(dLines.length > 0 && dLines.every((l) => !/say\(|log\.|console\.|emit\(|push\
 const sFn = (ssrc.match(/function answerPromptFor[\s\S]*?\n {2}\}\n/) || [''])[0];
 ok(sFn && !/console\.|say\(|trace|record\(/.test(sFn) && /prompt-ack/.test(sFn) && !/password[^:]*\}\)\)$/.test(sFn), 'the stream: answerPromptFor never logs or traces the message; the ack carries no credential');
 ok(/msg\.type === 'prompt-answer'\) \{ answerPromptFor\(relay, viewer, msg\); return; \}/.test(ssrc) && ssrc.indexOf("msg.type === 'prompt-answer'") < ssrc.indexOf('function onViewerMessage') + 600, 'the stream hands prompt-answer off first thing (before any later handler sees it)');
-ok(/promptWords\(pr, t\)/.test(lsrc) && /send\(\{ type: 'prompt-answer', id: key, username: user\.value, password: pass\.value \}\); pass\.value = '';/.test(lsrc) && /box\('password', prw\.password/.test(lsrc), 'the live view: the bar from promptWords; the password box is a password input, cleared once sent');
+ok(/promptWords\(pr, t, \{ person: !!H \}\)/.test(lsrc) && /send\(\{ type: 'prompt-answer', id: key, username: user\.value, password: pass\.value \}\); pass\.value = '';/.test(lsrc) && /box\('password', prw\.password/.test(lsrc), 'the live view: the bar from promptWords; the password box is a password input, cleared once sent');
 ok(/after\.prompt && after\.prompt\.text\) console\.error\(`note: \$\{after\.prompt\.text\} \[page_prompt\]`\)/.test(read('data/bin/vibespace-browser')) && /prompt: fct\.prompt \|\| null/.test(read('src/routes/browser.js')), 'the agent: the audit carries the prompt; the CLI prints THE SENTENCE as a [page_prompt] note');
 ok(/'loop-cleared', 'passkey', 'prompt'\]\.includes\(ev\.kind\)/.test(read('src/server/mounts-plugins-wiring.js')), 'a prompt event re-publishes the digest (the chip and the live view read it)');
 
@@ -459,7 +459,7 @@ if (!HOOK6) {
   ok(o6.window.state === null, 'B-b56d OUT (the second reader): the person\'s window state says nothing with a window open — no bound\'s line, no «cannot see sign-in requests» line', o6.window.state);
   const m6 = await scene6(D, { agentFirst: true, windowsAtMove: 1 });
   ok(m6.moved.cwa.some((x) => x.id === 'M1' && x.r === 'Default') && !m6.moved.form, 'B-b56d OUT (the third reader): a sign-in a conversation\'s watch held is handed back to Chrome (Default) when the person takes the browser — even with a window of the person open', m6.moved);
-  const dsrcO = read('src/server/browser-dialogs.js'); const SWITCH = 'const PERSON_SIGNIN_HOOK = false;';
+  const dsrcO = read('src/server/browser-dialogs.js'); const SWITCH = 'const PERSON_SIGNIN_HOOK = false;';   // stale-pins: kept — the OUT block's anchor: that block runs only with the switch OFF, when this line is what stands
   if (dsrcO.split(SWITCH).length !== 2) throw new Error('B-b56d OUT control setup: the switch line is not found once in src/server/browser-dialogs.js');
   const MO = mutantCopies('uiprompts-b56d-out', REPO);
   const on6 = await scene6(MO.load('src/server/browser-dialogs.js', anchored(dsrcO, SWITCH, 'const PERSON_SIGNIN_HOOK = true;', 'b56d-out-hook-on'), 'hook-on'), { stop: 'window' });
@@ -590,6 +590,13 @@ ok(s6.fy6.length === 0, 'B-b56d (its read): the person\'s own browsing files NO 
   const lp = ST.personPromptLines({ ended: { id: 'e2', how: 'expired', origin: 'http://proxy.example.test:3128', proxy: true, boundMs: 600000 } }, tFor('en'));
   ok(pw.title === 'A proxy asks you to sign in' && /proxy\.example\.test:3128 — Corp/.test(pw.body) && ST.promptWords({ type: 'http-auth', origin: ORIGIN6, realm: 'Team' }, tFor('en')).title === 'The page asks you to sign in',
     'B-b56d (law 3): the form says who asks — a proxy\'s challenge is titled as a proxy\'s, its origin and realm in the body', pw);
+  { // B-b56d (2.369.413): the person's OWN window's words for the browser's own sheet (the display road) — no «take over»: the person holds the controls already
+    const nat = { type: 'http-auth', native: true, origin: 'http://127.0.0.1:9', realm: 'Team' };
+    const own = ['en', 'zh', 'ja'].map((lang) => ST.promptWords(nat, tFor(lang), { person: true }));
+    const agent = ST.promptWords(nat, tFor('en'));
+    ok(own.every((w) => w && w.native && w.form === false && w.hint && !/take over|Take over/.test(w.hint)) && /VibeSpace never sees them/.test(own[0].hint) && /Take over/.test(agent.hint) && own[0].title === 'Chrome asks you to sign in — in its own window, which this view does not show' && agent.title === 'Chrome asks you to sign in — in its window below' && own.slice(1).every((w) => w.title !== own[0].title),
+      'B-b56d (2.369.413): on the display road the person\'s own window says the browser\'s own sheet in Chrome\'s own window, which the view does not show, with the person\'s hint (en / zh / ja, never «take over»); a conversation\'s view keeps «in its window below» and its «Take over» hint', { own: own[0], agent: agent });
+  }
   ok(lines.every((l) => l.ended && l.ended.line.includes('signin.example.test') && l.ended.line.includes('10') && l.hook && l.hook.line) && /cancelled it/.test(lines[0].ended.line) && /may wait/.test(lines[0].hook.line) && /open it in Desktop/.test(lx.hook.line) && /proxy sign-in/.test(lp.ended.line) && ST.personPromptLines({ hook: { armed: true } }, tFor('en')).hook === null,
     'B-b56d (laws 4 / 5): the person\'s window\'s two lines — the bound said with its host and minutes, a refused hook said (the X road\'s names Desktop) — every one in en / zh / ja; an armed hook says nothing', { en: lines[0], lx: lx.hook, lp: lp.ended });
   const lsrc6 = read('src/lib/browser-live-window.js');
@@ -653,7 +660,7 @@ if (HOOK6) {
   const RESYNC = "    if (w.mode === 'person') { const e = w.targets.get(rec.targetId); if (e && e.sid && e.enabled) syncTabFetchMode(w, e); }";
   const KEEP = "      if (PERSON_SIGNIN_HOOK && rec.type === 'http-auth' && w.authReq.has(rec.id) && !w.kernel && (personViews.get(w.profileId) || 0) > 0) continue;";
   const M6 = mutantCopies('uiprompts-b56d', REPO);
-  const c1 = await scene6(M6.load('src/server/browser-dialogs.js', cut("    if (w.mode !== 'person') return true;\n" + WIN, "    if (w.mode !== 'person') return true;\n    return false;\n", 'b56d-person-never'), 'person-never'), { stop: 'window' });
+  const c1 = await scene6(M6.load('src/server/browser-dialogs.js', cut('const PERSON_SIGNIN_HOOK = true;', 'const PERSON_SIGNIN_HOOK = false;', 'b56d-person-never'), 'person-never'), { stop: 'window' });   // stale-pins: kept — the RED control writes the switch OFF (the base rule: the person's watch never hooks)
   ok(!c1.window.fe, 'CONTROL (B-b56d): the base\'s rule (the person\'s watch never hooks a sign-in) — a window of the person open, and no hook (RED for the leg above)', c1.window);
   const c2 = await scene6(M6.load('src/server/browser-dialogs.js', cut(WIN, '    return true;\n', 'b56d-person-always'), 'person-always'), { stop: 'nowindow' });
   ok(c2.noWindow.fetch > 0, 'CONTROL (B-b56d): a rule without the window count hooks the person\'s browser with NO window open (RED for law 6\'s leg)', c2.noWindow);

@@ -5725,6 +5725,11 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const j = r && r.json;
     if (!(r && r.ok) || (j && j.success === false)) {
       const why = String((j && j.error) || (r && (r.stderr || r.error)) || 'the browser did not answer').trim().slice(0, 300);
+      // B-b56d (2.369.413): on the DISPLAY road a sign-in is Chrome's own sheet in its window — the driver's open reports the measured
+      // ERR_INVALID_AUTH_CREDENTIALS while that sheet asks. The watch's record of it (set before Chrome fails the load: the watch's
+      // own `Default` answer is what lets Chrome go on) makes it no failure: said as the sheet, the tab kept
+      let sheet = null; if (stuckSource) { try { sheet = HM.openSignInVerdict({ why, stuck: stuckSource(key) }); } catch { sheet = null; } }
+      if (sheet) { log.log?.(`[browser] ${h.profileId}: the user's ${v.act} asks for a sign-in — the browser shows its own sheet in its window (${String(sheet.origin || '').slice(0, 80)})`); return { ok: true, act: v.act, url: v.url || null, signIn: sheet, ...(tv && tv.adopt ? { adopted: true } : {}) }; }
       log.log?.(`[browser] ${h.profileId}: the user's ${v.act} did not go through — ${why}`);
       unadopt();
       throw namedError('nav_failed', why);

@@ -1167,7 +1167,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     // lane browser-ui-prompts: the browser's OWN prompt (a file chooser, an HTTP sign-in) — no pixel of it reaches the screencast;
     // the sign-in's two boxes go over this socket to the bridge and on to Chrome only (never to the agent, never logged)
     const pr = !d && stuckNow() && stuckNow().state === 'prompt' ? stuckNow().prompt : null; // B-37a1: the person's window's relay record too
-    const prw = pr ? promptWords(pr, t) : null;
+    const prw = pr ? promptWords(pr, t, { person: !!H }) : null; // B-b56d (2.369.413): the person's own window's words for Chrome's own sheet
     if (prw) {
       const key = String(pr.id || '');
       if (dialogBar.dataset.prompt !== key) {

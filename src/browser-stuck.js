@@ -970,11 +970,11 @@ function promptAnsweredNote(a) {
   return `the HTTP sign-in the page asked for (${quoted(a.prompt.origin)}) was answered: ${how} at ${hhmm(a.at)}`;
 }
 /** The live view's bar (t = the client's i18n; every key a literal t('…')). */
-function promptWords(p, tIn) {
+function promptWords(p, tIn, { person = false } = {}) {
   if (!p) return null;
   const t = typeof tIn === 'function' ? (s, q) => tIn(s, q) : fill;
   if (p.type === 'file') return { title: t('The page asks for a file'), body: t('No file window opens here — the agent uploads it with vibespace-browser upload'), form: false, dismiss: t('Dismiss') };
-  if (p.type === 'http-auth' && p.native) return { title: t('Chrome asks you to sign in — in its window below'), body: `${pageText(p.origin, URL_MAX)}${p.realm ? ` — ${pageText(p.realm, 200)}` : ''}`, form: false, native: true, hint: t('Take over and type the username and password into Chrome’s sheet — the agent never sees them'), dismiss: null }; // lane browser-x-in-window: Chrome's own sheet is IN the picture
+  if (p.type === 'http-auth' && p.native) return { title: person ? t('Chrome asks you to sign in — in its own window, which this view does not show') : t('Chrome asks you to sign in — in its window below'), body: `${pageText(p.origin, URL_MAX)}${p.realm ? ` — ${pageText(p.realm, 200)}` : ''}`, form: false, native: true, hint: person ? t('Type the username and password into the browser’s own sheet in its window — VibeSpace never sees them') : t('Take over and type the username and password into Chrome’s sheet — the agent never sees them'), dismiss: null }; // B-b56d (2.369.413): the person's own window holds the controls already — no «take over» // lane browser-x-in-window: Chrome's own sheet is IN the picture
   if (p.type === 'http-auth') return { title: p.proxy ? t('A proxy asks you to sign in') : t('The page asks you to sign in'), body: `${pageText(p.origin, URL_MAX)}${p.realm ? ` — ${pageText(p.realm, 200)}` : ''}`, form: true, user: t('Username'), password: t('Password'), accept: t('Sign in'), dismiss: t('Cancel'), hint: t('Sent to this page only — never to the agent, never written down') };
   return null;
 }

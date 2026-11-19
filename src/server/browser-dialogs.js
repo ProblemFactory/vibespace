@@ -125,11 +125,11 @@ const KERNEL_GONE_CODES = Object.freeze(['no_such_request', 'no_such_surface', '
 const KERNEL_PROBE_MS = 2000; // VibeSpace.getVersion — standard Chrome refuses it in ms (-32601); a socket that never answers is today's road
 
 const ANSWERED_KEEP = 32;
-/** B-b56d OUT (the coordinator, 2026-11-18 23:56Z — the owner's decision stands: built, ships only proven): THE PERSON'S SIGN-IN HOOK
- *  IS OFF in this release. Its heavy leg (test-browser-human-ui (g)) was red on the box; until that leg is green there, the
- *  person's own watch arms NO HTTP sign-in hook (the release before B-b56d: Chrome's own handling). Everything else of the unit
- *  stays and is unreachable without the hook. Turned back on by this one line, with its suites' legs, once (g) is proven. */
-const PERSON_SIGNIN_HOOK = false;
+/** B-b56d's ONE SWITCH (the person's sign-in hook). It was OFF in 2.369.412 (the coordinator, 2026-11-18 23:56Z: its box leg was red
+ *  — the box runs the DISPLAY road, where the watch answers a sign-in `Default` by B2's law and Chrome draws its own sheet, and the
+ *  keeper said the open «did not go through»). ON again (2.369.413, the coordinator's ruling 2026-11-19 01:42Z) with the open's
+ *  verdict said as the sheet (browser-human openSignInVerdict) and its box leg proving BOTH roads by name. */
+const PERSON_SIGNIN_HOOK = true;
 const AUTH_FETCH_MODES = new Set(['doc-auth', 'all-auth', 'fill-auth']); // B-b56d: the Fetch modes that hook an HTTP sign-in
 const ENDED_SHOW_MS = 60 * 60 * 1000; // B-b56d (its read, S2): a sign-in cancelled at its bound is said in the person's window for an hour at most
 const OUTCOMES_KEEP = 16;

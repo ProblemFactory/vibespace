@@ -12,6 +12,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { anchored } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = new URL('..', import.meta.url).pathname;
 const HM = require('../src/browser-human.js');
@@ -293,6 +294,27 @@ console.log('— ④ the words: en through the module, zh + ja from the dictiona
   const tJa = (s, p) => String(ja[s] || s).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] !== undefined ? String(p[x]) : m));
   const rendered = [tZh, tJa].flatMap((tt) => [...HM.REFUSAL_CODES, 'not_browsing', 'not_web'].map((c) => HM.humanRefusalText(c, { label: 'Work', machine: 'dev-1', pid: 7, n: 6 }, tt)).concat(Object.values(HM.humanEndChoices({ conversations: 2, names: ['A'] }, tt)).flatMap((x) => (x && typeof x === 'object' ? Object.values(x) : [x])).filter((x) => typeof x === 'string')));
   ok(rendered.every((x) => x && !/\{\w+\}/.test(x)) && rendered.filter((x, i) => i >= rendered.length / 2).every((x) => !/[“”]/.test(x)), 'every refusal and end-button sentence renders in zh and ja with no {param} left; ja never carries “ ”', rendered.filter((x) => !x || /\{\w+\}/.test(x)));
+}
+
+// ── ⑤ B-b56d (2.369.413, the coordinator's ruling 2026-11-19 01:42Z): THE PERSON'S OPEN HELD BY THE BROWSER'S OWN SIGN-IN SHEET ──
+console.log('— ⑤ B-b56d: the person’s open that the browser’s own sign-in sheet holds is said as the sheet, never «did not go through»');
+{
+  const WHY = 'Navigation failed: net::ERR_INVALID_AUTH_CREDENTIALS';   // the driver's words on the box's display road (int361's log, 2026-11-19)
+  const native = { state: 'prompt', prompt: { id: 'prm-x', type: 'http-auth', native: true, origin: 'http://127.0.0.1:9', realm: 'Team' } };
+  const form = { state: 'prompt', prompt: { id: 'prm-f', type: 'http-auth', origin: 'http://127.0.0.1:9', realm: 'Team' } };
+  const v1 = HM.openSignInVerdict({ why: WHY, stuck: native });
+  ok(v1 && v1.sheet === true && v1.origin === 'http://127.0.0.1:9' && v1.realm === 'Team', 'B-b56d: the driver\'s ERR_INVALID_AUTH_CREDENTIALS while the person\'s key holds the browser\'s OWN sheet ⇒ the sheet (who asks named)', v1);
+  ok(HM.openSignInVerdict({ why: WHY, stuck: null }) === null && HM.openSignInVerdict({ why: WHY, stuck: form }) === null && HM.openSignInVerdict({ why: 'Navigation failed: net::ERR_NAME_NOT_RESOLVED', stuck: native }) === null && HM.openSignInVerdict({ why: WHY, stuck: { state: 'passkey' } }) === null,
+    'B-b56d: a real failure stays one — no sheet recorded, VibeSpace\'s own form (not the browser\'s sheet), another error, another stuck state');
+  const ks = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+  const nav = (ks.match(/  async function navigateHuman\(key, act = \{\}\) \{[\s\S]*?\n  \}\n/) || [''])[0];
+  const iVerdict = nav.indexOf('HM.openSignInVerdict({ why, stuck: stuckSource(key) })'), iFail = nav.indexOf("the user's ${v.act} did not go through"), iThrow = nav.indexOf("throw namedError('nav_failed', why)");
+  ok(nav && iVerdict > 0 && iVerdict < iFail && iFail < iThrow && /if \(sheet\) \{[^\n]*return \{ ok: true, act: v\.act, url: v\.url \|\| null, signIn: sheet/.test(nav),
+    'B-b56d: the keeper\'s navigateHuman reads the verdict BEFORE it says «did not go through» and answers {ok, signIn} — the tab kept (no unadopt), no nav_failed', { iVerdict, iFail, iThrow });
+  // RED CONTROL — the base's keeper (no verdict) reaches the failure line with the same facts: it proves its plant first
+  const baseNav = anchored(nav, /      let sheet = null; if \(stuckSource\)[^\n]*\n      if \(sheet\) \{[^\n]*\n/, '', 'b56d-keeper-no-verdict');   // scratch.mjs anchored(): a moved line fails BY NAME
+  ok(nav.length > 0 && baseNav.length < nav.length && !/openSignInVerdict/.test(baseNav) && /did not go through/.test(baseNav), 'CONTROL plant: the copy is the keeper\'s navigateHuman with the verdict\'s two lines taken out (what 2.369.412 runs)');
+  ok(!/signIn: sheet/.test(baseNav) && /throw namedError\('nav_failed', why\)/.test(baseNav), 'CONTROL (B-b56d): without the verdict the same open throws nav_failed — the person read «Could not open it» while the browser asked them to sign in (RED for the leg above)');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

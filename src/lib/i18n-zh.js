@@ -100,6 +100,7 @@ export default {
   "Connecting to the browser window…": "正在连接浏览器窗口…",
   "The browser window is not available": "浏览器窗口不可用",
   "Chrome asks you to sign in — in its window below": "Chrome 请你登录 — 在下面它自己的窗口里",
+  "Chrome asks you to sign in — in its own window, which this view does not show": "Chrome 请你登录 — 在它自己的窗口里，这个视图里看不到它",
   "Take over and type the username and password into Chrome’s sheet — the agent never sees them": "接管后在 Chrome 的登录框里输入用户名和密码 — agent 永远看不到",
   // lane chat-mermaid: the diagram card
   "Diagram": "图",
@@ -8869,6 +8870,7 @@ export default {
   "The page asks for a file": "网页要一个文件", // lane browser-ui-prompts
   "No file window opens here — the agent uploads it with vibespace-browser upload": "这里不会弹出文件窗口 — agent 用 vibespace-browser upload 上传", // lane browser-ui-prompts
   "The page asks you to sign in": "网页要求你登录", // lane browser-ui-prompts
+  "Type the username and password into the browser’s own sheet in its window — VibeSpace never sees them": "在浏览器自己的窗口里的登录框中输入用户名和密码——VibeSpace 看不到它们", // B-b56d (2.369.413)
   "A sign-in is answered by a person — a view opened with a token cannot answer it": "登录只能由人来回答 — 用令牌打开的视图不能回答", // B-b56d
   "The sign-in was not sent: answer it from VibeSpace’s own page": "登录没有发送：请在 VibeSpace 自己的页面上回答", // B-b56d
   "A proxy asks you to sign in": "代理服务器要求你登录", // B-b56d
