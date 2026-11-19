@@ -9,6 +9,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Settings → Default browser engine offers «Download kernel» for an engine whose kernel is missing or unreadable, with progress and why a download was refused.
 - For you now says when a storage stopped answering and was disconnected (it reconnects by itself), and when files written meanwhile were moved aside.
 - A Background Work job can close its own question in For you once its cause is gone (vibespace-job withdraw); it used to stay open.
+- A waiting message whose agent is too old to be held back is now said once in For you, with the conversation it waits behind.
 - A run request's card now says who started the turn running when it asked, beside «Allow for 1 hour»: you, another session, or «not recorded» when unknown.
 - While an agent is in a turn, the strip above the message box can hand it the waiting group messages now; if that turn is just ending, they run right after it.
 - On a phone turned sideways two windows can stand side by side: «Split» beside a window in the window list; held upright, the phone says to turn it.
@@ -51,8 +52,12 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Conversations and background jobs now start below VibeSpace's CPU priority, so a busy build yields to the page; see Session Properties, turn off in Settings.
 - A conversation on another machine no longer joins a Task Group through a symbolic link on the server's disk; only its folder as written counts.
 - Your channel messages are kept in a folder only your own account on this computer can open; only your channel sign-ins are locked in the vault.
-- Settings → Plugins: an installed plugin's Update… and Uninstall… are now in its row's ⋯ menu, so the plugin's name keeps its room.
 - The resume dialog's closing notice, the Integrations card's Test line and the hand-over refusal now carry their own button or link instead of a menu path.
+- A command the vault runs for an agent now runs below VibeSpace's CPU priority too, like conversations and jobs (the same setting turns it off).
+- A background job running in its own memory-bounded scope now also yields the CPU to VibeSpace, as its lower priority meant.
+- Settings → Plugins: an installed plugin's Update… and Uninstall… are now in its row's ⋯ menu, and its name keeps its room.
+- A spending limit holding anything but a number (a text, a negative number) now holds every turn nobody typed, as an empty one does; never the default.
+- A spending limit cleared in Settings stays «none» through later changes of other settings and the end of a timed raise; it never turns back into the default.
 - On a phone the For you button shows a single number; on a wider screen its numbers fold into one when the window's name needs the room.
 - A Background Work job says which machine it runs on; an agent on another machine asking for a folder this one lacks is refused at once.
 - Ending or archiving a conversation that still runs background jobs shows a notice naming them, with Stop these too.
@@ -136,8 +141,23 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - When an agent's new tab loses its window before it is ready, VibeSpace opens it in a new window of the agent's own; it used to ask the agent to run it again.
 - While a conversation waits for its folder's storage to come up, VibeSpace says what it is waiting for instead of «taking unusually long».
 - Messages waiting behind an agent's running turn are no longer lost when VibeSpace cannot read their record after a restart: it is not written over.
-- A quota reading another machine made for an account it holds is no longer labelled «own /usage panel»: the usage popup names the machine that read it.
 - When an agent program is not found on a paired machine, the dialog's button now opens that machine in Manage agents › Machines.
+- Clear content… on Background Work jobs now says when archived records could not be reached, so their words were not cleared.
+- «Locate in sidebar» on a session the «Stopped by a limit or overload» filter hides now says so, with «Show all», instead of waiting and failing.
+- A window's «Open the session list» turns the «Stopped by a limit or overload» filter off, as it does a quick view, so its conversation is listed.
+- With many past Codex conversations, reading one saved on this computer no longer makes VibeSpace look through all of them each time.
+- A machine's Commands and Activity lists now say when the hub, since it started, dropped lines of their records it could not write in time.
+- A Chinese or Japanese character cut between two chunks of a terminal's or a conversation's output no longer shows as �.
+- In an Antigravity chat, an error said as its process ends, or by a turn that failed while a model switch waited for it, is now shown instead of only logged.
+- With a storage folder on the PATH that stops answering, the desktop apps list no longer hangs while it looks for programs.
+- Properties of a conversation on a machine that does not answer now says so, with the reason, instead of showing that the agent kept no steps.
+- Search now says when some cleared group messages could not be read yet, since their words may still be found until they are.
+- A published Background Work service no longer says at a restart that its public link changed to tcp://… while its https link still works.
+- Saving a login with a two-step code the vault does not hold says so in the dialog; a listed name typed in full closes the list.
+- A message you type into an Antigravity chat just as it ends comes back into the input box instead of being lost.
+- The ⋯ menus and most right-click menus now work with the keyboard: they open on the first item, the arrows move, Enter chooses, Esc closes.
+- A request a machine's own allow list keeps refusing also shows in its Activity as one line with a count, not a new line each time.
+- An agent update refused at every reconnect (by the machine's list or by Hub automation) shows as one line with a count too.
 - When a desktop app's saved login cannot be written to disk, the app is told it was not saved instead of being told it was.
 - An Unlock button pressed right after the page loads now always opens the vault; it no longer does nothing or asks for the password while already unlocked.
 - After a restart, Resume all no longer calls a folder gone when its machine or storage mount waits for the vault or is not up; it asks you to unlock first.
@@ -159,6 +179,11 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - When two agents propose a reply to the same message, each card now names the other, and Approve asks once more before a second reply is sent.
 - A usage wall seen again after a restart no longer reads the Antigravity account a second time.
 - In Files, a machine's mounted folder says the machine is offline (or not mounted right now) instead of showing an empty folder.
+- Stopping the server no longer leaves a stray «Waiting for the debugger to disconnect…» line in its log.
+- Dialogs for automation keys now fit a narrow phone screen.
+- A quota read for an account another machine holds is no longer labelled «own /usage panel»: the usage popup says it was read through that machine.
+- On a paired machine whose Claude settings can't be read, a subscription you picked now sets your own settings file aside for that start and says so, as here.
+- A Gmail or Google Drive storage folder keeps working when the OAuth client under its preset name is replaced — it keeps the client it signed in with.
 - A picture you paste, pick or take in a chat is checked at once: an empty file, a HEIC, a non-picture or one too large for the model is refused with its reason.
 - A subscription you pick now pays on a machine whose Claude settings name an apiKeyHelper; the helper's key used to pay. Its first start says so.
 - A session's own auto-continue choice now survives a VibeSpace restart instead of falling back to the default.
