@@ -2584,7 +2584,10 @@ export const rerunSaid = (tag, suite, first, again, file) => `  [${tag}] RERUN L
 // newest RERUNS_KEEP commits — a commit dated by its NEWEST line (an old commit re-run now is new), as pruneMarkers and
 // pruneFailLogs keep theirs; a ledger line with no sha is one group («nosha»); a line that is not the ledger's own (not
 // JSON, no suite) is never touched. The file is rewritten (tmp + rename) only when a commit falls out: one commit past the
-// bound at a time, rare. → the number of lines removed
+// bound at a time, rare. A bound that cannot be written (ENOSPC, EACCES) removes its tmp and answers -1 — the line is
+// appended either way (never «not written» for a line that is in the file). ONE WRITER A FILE is assumed: the fast lanes
+// append from one process, the heavy tier holds the machine lock, shards and ci-remote keep their own files — two gates in
+// ONE worktree at once could lose a line only in the instant a commit falls out. → the number of lines removed (-1: none)
 export const RERUNS_KEEP = 30;
 export function boundReruns(file, keep = RERUNS_KEEP) {
   let text = ''; try { text = fs.readFileSync(file, 'utf-8'); } catch { return 0; }
@@ -2595,7 +2598,8 @@ export function boundReruns(file, keep = RERUNS_KEEP) {
   const kept = lines.filter((l, i) => groups[i] === null || newest.has(groups[i]));
   if (kept.length === lines.length) return 0;
   const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, kept.join('\n') + '\n'); fs.renameSync(tmp, file);
+  try { fs.writeFileSync(tmp, kept.join('\n') + '\n'); fs.renameSync(tmp, file); }
+  catch { try { fs.unlinkSync(tmp); } catch { } return -1; }
   return lines.length - kept.length;
 }
 export function appendRerun(file, rec, { keep = RERUNS_KEEP } = {}) {
