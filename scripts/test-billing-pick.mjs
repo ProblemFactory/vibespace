@@ -272,6 +272,44 @@ const saidKind = (x, k) => x.notices.filter((n) => n.key.startsWith(`settings-fi
   else skip('the bare case + a settings file against the release create\'s line');
 }
 
+// B-e7c0 — WHERE THIS MACHINE CAN READ THE PERSON'S OWN SETTINGS FILE, A PICK THAT MUST SET IT ASIDE MERGES IT INSTEAD: the start's one
+// --settings names a file of the conversation's own (<buffers>/<id>.settings, 0600) = the person's file (its hooks, its deny rules, its
+// env) + the override + what this start adds; NOTHING of the person's rides argv; nothing is set aside, so nothing of billing is said.
+// A file that is no JSON object is set aside as before (said); a merged file that cannot be written sets the file aside the same way
+// (only what this start adds — never the person's values on the line).
+const OWN = path.join(CWD, 'my-own-settings.json'), OWN_MARK = `person-${process.pid}-${Date.now().toString(36)}`;
+const PAID_KEY = ['sk', 'ant', 'api03', 'stand-in'].join('-');   // built at run time: a person's file that also names who bills
+const PERSON = { hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo checked' }] }] }, permissions: { deny: ['Bash(rm -rf:*)'] }, env: { PERSON_MARK: OWN_MARK, ANTHROPIC_API_KEY: PAID_KEY } };
+const ownLine = (x) => { const l = lineOf(x); const at = l.line ? l.line[l.line.indexOf('--settings') + 1] : null; let disk = null, mode = null; try { disk = JSON.parse(fs.readFileSync(at, 'utf8')); mode = fs.statSync(at).mode & 0o777; } catch { } return { ...l, at, disk, mode }; };
+const merged = (o, x) => !o.why && o.at === path.join(BUF, `${x.id}.settings`) && !!o.disk && o.disk.apiKeyHelper === '' && JSON.stringify(o.disk.hooks) === JSON.stringify(PERSON.hooks) && JSON.stringify(o.disk.permissions && o.disk.permissions.deny) === JSON.stringify(PERSON.permissions.deny) && (o.disk.permissions.allow || []).some((r) => /^Bash\(vibespace-/.test(r)) && o.disk.env?.PERSON_MARK === OWN_MARK && o.mode === 0o600 && !o.line.join(' ').includes(OWN_MARK) && o.line.filter((w) => w === '--settings').length === 1;
+{
+  helperOn(true);
+  fs.writeFileSync(OWN, JSON.stringify(PERSON));
+  const x = await drive(wsCreate, { accountId: 'sub-a1', extraArgs: ['--settings', OWN], outputStyle: 'Explanatory' });
+  const o = ownLine(x);
+  ok(merged(o, x) && o.disk.outputStyle === 'Explanatory' && !('ANTHROPIC_API_KEY' in o.disk.env) && !JSON.stringify(o.disk).includes(PAID_KEY) && saidKind(x, 'billing') + saidKind(x, 'billingUnread') + saidKind(x, 'outputStyle') === 0 && x.reads.filter((f) => f === OWN).length === 1,
+    'B-e7c0 a pick + the person\'s settings file on a machine whose settings NAME a helper: MERGED, not set aside — the line\'s one --settings is <id>.settings (0600): the person\'s hooks, deny rules and env + apiKeyHelper "" + what this start adds (the output style, the agent tools\' allow rules beside the person\'s deny); an env name that decides who bills is NOT carried (the pick decides); none of the person\'s values on argv; nothing of billing said; the file read ONCE (the fact\'s own read)', { at: o.at, mode: o.mode, disk: o.disk, notices: x.notices.map((n) => n.key), reads: x.reads.filter((f) => f === OWN).length });
+  helperOn('garbled');
+  const u = ownLine(await drive(wsCreate, { accountId: 'sub-a1', extraArgs: ['--settings', OWN] }));
+  helperOn(true);
+  ok(!u.why && u.disk && u.disk.env?.PERSON_MARK === OWN_MARK && u.disk.apiKeyHelper === '', 'B-e7c0 …the machine\'s fact cannot be read (billing wins): merged the same way, never set aside', { at: u.at, disk: u.disk });
+  fs.writeFileSync(OWN, JSON.stringify([PERSON]));
+  const a = await drive(wsCreate, { accountId: 'sub-a1', extraArgs: ['--settings', OWN] });
+  const al = lineOf(a);
+  ok(neutralized(al) && !al.line.includes(OWN) && !fs.existsSync(path.join(BUF, `${a.id}.settings`)) && saidKind(a, 'billing') === 1, 'B-e7c0 a person\'s file that is no JSON object (an array) is set aside as before — the override inline, said «billing», no file of the conversation\'s own', [al.settings, a.notices.map((n) => n.key)]);
+  // a person's file that ITSELF says apiKeyHelper "" (the reader's case: a value equal to the override must never drop it)
+  fs.writeFileSync(OWN, JSON.stringify({ ...PERSON, apiKeyHelper: '' }));
+  if (typeof process.getuid === 'function' && process.getuid() === 0) skip('B-e7c0 the unwritable buffers folder (run as root, a chmod cannot refuse)');
+  else {
+    fs.chmodSync(BUF, 0o500);
+    let w = null;
+    try { w = await drive(wsCreate, { accountId: 'sub-a1', extraArgs: ['--settings', OWN] }); } finally { fs.chmodSync(BUF, 0o700); }
+    const wl = lineOf(w), deny = (wl.settings && wl.settings.permissions && wl.settings.permissions.deny) || [];
+    ok(neutralized(wl) && !wl.line.join(' ').includes(OWN_MARK) && !wl.line.join(' ').includes(PAID_KEY) && !(wl.settings && wl.settings.hooks) && !deny.includes('Bash(rm -rf:*)') && !fs.existsSync(path.join(BUF, `${w.id}.settings`)) && saidKind(w, 'billing') === 1,
+      'B-e7c0 a merged file that cannot be written (the buffers folder read-only): the RELEASE\'S SET-ASIDE — the override kept (even when the person\'s own file says apiKeyHelper ""), none of the person\'s values (hooks, deny rules, env) on the line, and the set-aside SAID («billing»)', [wl.settings || wl.why, w.notices.map((n) => n.key)]);
+  }
+}
+
 console.log('— ③ the DAEMON PIPE road (agentd.localPipeSessions)');
 {
   const x = await drive(wsCreate, { accountId: 'sub-a1' }, { pipe: true });
@@ -394,7 +432,7 @@ console.log('— ⑤ SAID ONCE, where the person looks');
     };
     const j = await run2(wsCreate);
     ok(j.d2 && j.b.reads.length === 0 && saidKind(j.b, 'billingUnread') === 1, 'a second start against the same stuck files opens NOTHING (it joins the reads in flight) and goes on at its bound, said «billingUnread»', j.b && j.b.reads);
-    const JOIN = '    return BILLPICK.combinedFact(await Promise.all(files.map((f) => readOneFactOnce(f, row))));';
+    const JOIN = '    const reads = await Promise.all(files.map((f) => readOneFactOnce(f, row)));';   // B-e7c0: the joined reads now also hand the person's own text to its start
     ok(SRC.split(JOIN).length === 2, 'setup: the fact\'s reads go through ONE joiner (the control edits it)');
     const jr = await run2(M.load('src/ws-create.js', SRC.replace(JOIN, JOIN.replace('readOneFactOnce(f, row)', 'readOneFact(f, row)')), 'no-join'));
     ok(jr.d2 && jr.b.reads.length > 0, 'RED CONTROL: without the joiner every start opens the stuck files again (one more hung thread each) — the leg above can go red', jr.b && jr.b.reads);
@@ -642,6 +680,10 @@ console.log('— ⑥ RED CONTROLS');
     // the cure's own
     ['the file set aside at every pick (the unit before its cure)', ['            keyHelperNamed,\n', ''],
       async (mod) => { helperOn(false); const l = lineOf(await drive(mod, { accountId: 'sub-a1', extraArgs: FILE })); helperOn(true); return !fileKept(l); }],
+    ['B-e7c0: the person\'s file set aside where it could be merged (the release road)', ['            ownSettings,   // B-e7c0: the person\'s file to merge (this machine only), else null\n', ''],
+      async (mod) => { fs.writeFileSync(OWN, JSON.stringify(PERSON)); const x = await drive(mod, { accountId: 'sub-a1', extraArgs: ['--settings', OWN] }); const l = lineOf(x); return neutralized(l) && !(l.settings && l.settings.hooks) && saidKind(x, 'billing') === 1; }],
+    ['B-e7c0: the merged settings on the command line (no file of its own)', ['            if (sessionSpec.ownFileMerged) spawnArgs = await ownSettingsOnDisk(spawnArgs, id, sessionSpec);\n', ''],
+      async (mod) => { fs.writeFileSync(OWN, JSON.stringify(PERSON)); const x = await drive(mod, { accountId: 'sub-a1', extraArgs: ['--settings', OWN] }); return lineOf(x).line.join(' ').includes(OWN_MARK); }],
     ['the said-once memo dropped', ['            if (said && !helperSaidKeys.has(said.key)) try { helperFact().then((on) => {', '            if (said) try { helperFact().then((on) => {'],
       async (mod) => { const one = makeCreate(mod); await one.create({ accountId: 'sub-a1' }, { wait: 5000 }); const b = await one.create({ accountId: 'sub-a1' }, { wait: 5000 }); return b.reads.length > 0; }],
     ['«cannot be read» read as «names none» (the file applies whole where billing must win)', ['(data.keeperSid ? false : await helperFact())', '(data.keeperSid ? false : (await helperFact()) === true)'],

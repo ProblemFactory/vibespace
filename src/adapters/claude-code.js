@@ -165,6 +165,15 @@ class ClaudeCodeAdapter extends BackendAdapter {
     // applies WHOLE, as on the release. Otherwise the file governs: the output style, the no-fallback setting and the Background
     // Work inbound accept stand down. Each said by name, once per start (`settingsNotes`).
     const settingsNotes = [];
+    // B-e7c0: a file this machine read (ownSettings) is MERGED, not set aside — the create writes it to <id>.settings (engineering log)
+    let ownFileMerged = false;
+    const own = options.ownSettings && typeof options.ownSettings === 'object' && !Array.isArray(options.ownSettings) ? options.ownSettings : null;
+    if (!userSettingsMergeable && neutralizeKeyHelper && keyHelperNamed !== false && own) {
+      const i = xa.indexOf('--settings');
+      notes.push(`subscription pick: the session's own --settings ${JSON.stringify(String(xa[i + 1] || ''))} is merged with the override into the conversation's own settings file`);
+      xa[i + 1] = JSON.stringify(own);
+      userSettingsMergeable = true; ownFileMerged = true;
+    }
     if (!userSettingsMergeable && neutralizeKeyHelper && keyHelperNamed !== false) {
       const i = xa.indexOf('--settings');
       notes.push(`subscription pick: the session's own --settings ${JSON.stringify(String(xa[i + 1] || ''))} is set aside for this start (${keyHelperNamed === true ? 'the machine\'s Claude settings name a key helper, which never bills a subscription pick' : 'whether the machine\'s Claude settings name a key helper could not be read — the pick bills'})`);
@@ -400,7 +409,9 @@ class ClaudeCodeAdapter extends BackendAdapter {
     }
 
     // a stand-down is SAID (lane L r2) — the server journal carries it
-    for (const n of notes) console.warn(`[claude-adapter] ${n}`);
+    if (!options._aside) for (const n of notes) console.warn(`[claude-adapter] ${n}`);
+    // B-e7c0: a merged start also carries the release's set-aside (this build without the person's file) — for a file the create cannot write
+    const aside = ownFileMerged ? this.buildSessionArgs({ ...options, ownSettings: null, _aside: true }) : null;
     return {
       cmd: this.config.claudeCmd,
       args,
@@ -411,6 +422,7 @@ class ClaudeCodeAdapter extends BackendAdapter {
       ...(notes.length ? { notes } : {}),
       ...(settingsNotes.length ? { settingsNotes } : {}),   // B-8dcf item two: the kinds the create SAYS to the person (src/settings-file-words.js)
       ...(fileGoverns ? { settingsFileGoverns: true } : {}),   // batch 21's cure: the file governs EVERY kind it covers (the create records them all)
+      ...(ownFileMerged ? { ownFileMerged: true, setAside: { merged: args[args.indexOf('--settings') + 1], settings: aside.args[aside.args.indexOf('--settings') + 1], settingsNotes: aside.settingsNotes || [] } } : {}),   // B-e7c0 (the create writes <id>.settings)
     };
   }
 

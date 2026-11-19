@@ -71,6 +71,23 @@ function projectSettingsFilesOf(cwd, ownFile = null) {
   if (f) { if (f.startsWith('/')) out.push(f); else if (base) out.push(`${base}/${f}`); }
   return out;
 }
+/** B-e7c0: the person's own settings FILE as the CLI reads it — absolute, or under the conversation's cwd (the rule above) — or null */
+function ownSettingsPathOf(cwd, ownFile = null) {
+  const base = typeof cwd === 'string' && cwd.startsWith('/') ? cwd.replace(/\/+$/, '') : '';
+  const f = typeof ownFile === 'string' ? ownFile.trim() : '';
+  return !f ? null : f.startsWith('/') ? f : base ? `${base}/${f}` : null;
+}
+/** B-e7c0: the env names a merged copy never carries from the person's file — each decides WHO BILLS, and the pick decides that */
+const MERGE_DROPS_ENV = Object.freeze(['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR', 'CLAUDE_SECURESTORAGE_CONFIG_DIR', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX']);
+/** B-e7c0: that file's text → its settings object (a plain JSON object) without those env names, else null — no object is never merged */
+function settingsObjectOf(text) {
+  if (typeof text !== 'string') return null;
+  let o = null;
+  try { o = JSON.parse(text); } catch { return null; }
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return null;
+  if (!o.env || typeof o.env !== 'object' || Array.isArray(o.env)) return o;
+  return { ...o, env: Object.fromEntries(Object.entries(o.env).filter(([k]) => !MERGE_DROPS_ENV.includes(k))) };
+}
 /** ONE start's fact over every file read: a helper named in ANY ⇒ true; else one that cannot be read ⇒ null (billing wins); else false */
 const combinedFact = (facts) => (facts.some((f) => f === true) ? true : facts.some((f) => f !== false) ? null : false);
 
@@ -110,4 +127,4 @@ function helperNotice({ name, account, accountId, host = null, hostId = null, pr
   return { key: noticeKey(accountId, hostId), words, params, text };
 }
 
-module.exports = { setsHelperAside, settingsFileOf, projectSettingsFilesOf, combinedFact, namesHelper, localHelperFact, remoteHelperFact, SETTINGS_READ_MAX, HELPER_SET_ASIDE, noticeKey, helperNotice };
+module.exports = { setsHelperAside, settingsFileOf, projectSettingsFilesOf, ownSettingsPathOf, settingsObjectOf, MERGE_DROPS_ENV, combinedFact, namesHelper, localHelperFact, remoteHelperFact, SETTINGS_READ_MAX, HELPER_SET_ASIDE, noticeKey, helperNotice };

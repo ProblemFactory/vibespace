@@ -147,7 +147,7 @@ function notificationSteerOf(wc, { inBand = null, published = false } = {}) {
  *  pattern (AGED_WRAPPER_FILE) and every end path — a kill (ws-handler endSession), the wrapper's exit teardown
  *  (session-stdout), a duplicate retired at boot (boot-restore retireDuplicate) — read THIS, never a list of their own
  *  (round 4 added `.receipts` to two of the three end paths by hand and missed the third). */
-const WRAPPER_FILE_KINDS = ['buf', 'json', 'img', 'receipts'];   // img = the copies' kept pictures (lane claude-steer-inject r5): a folder
+const WRAPPER_FILE_KINDS = ['buf', 'json', 'img', 'receipts', 'settings'];   // img = the copies' kept pictures (lane claude-steer-inject r5): a folder; settings = B-e7c0's merged settings file (0600)
 const SAME_BREATH = new Set(['buf', 'json']);   // removed at once, as every end path always did (test-exit-forensics §4 reads their absence on the next line)
 /** A session's wrapper files go with it: the buffer and the sidecar at once, every other kind OFF THE LOOP (`fs.rm` with
  *  a callback — a file or a folder alike); one already gone is no error. */

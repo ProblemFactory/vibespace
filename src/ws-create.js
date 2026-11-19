@@ -127,14 +127,17 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
   // BOTH roads are bounded (its reader's S1: a config dir on a stuck mount never holds a start): no answer in HELPER_FACT_MS = cannot be read
   const HELPER_FACT_MS = Number(helperFactMs) > 0 ? Number(helperFactMs) : 8000;   // (helperFactMs: the factory's seam for a suite — the bound's own leg; never a ctx key)
   // (a stuck mount: the race below frees the START at the bound, never the libuv threadpool thread a hung open holds — named in the kb)
-  const readHelperFactOf = async ({ hostId, backend, creds, env, cwd = null, ownFile = null }) => {
+  const readHelperFactOf = async ({ hostId, backend, creds, env, cwd = null, ownFile = null, sink = null }) => {
     const row = creds && creds.keyHelper;
     if (hostId) return BILLPICK.remoteHelperFact(await hosts.backendStatus(hostId), backend);
     const file = BILLPICK.settingsFileOf(row, { creds, env, home: (env && env.HOME) || os.homedir() });
     if (!file) return null;
     // cure 2 (主开发 11:18Z): every file the CLI reads a helper from on this machine — its config dir's, the project's two, the person's own
     const files = [file, ...BILLPICK.projectSettingsFilesOf(cwd, ownFile)];
-    return BILLPICK.combinedFact(await Promise.all(files.map((f) => readOneFactOnce(f, row))));
+    const reads = await Promise.all(files.map((f) => readOneFactOnce(f, row)));
+    const own = BILLPICK.ownSettingsPathOf(cwd, ownFile), k = own ? files.indexOf(own) : -1;
+    if (sink) sink.text = k >= 0 ? reads[k].text : null;   // B-e7c0: the person's own file's text, for THIS start (a late read lands after it moved on)
+    return BILLPICK.combinedFact(reads.map((x) => x.fact));
   };
   // ONE READ IN FLIGHT PER FILE across starts (cure 2, its readers' should): a start that finds a read of the same file still pending
   // joins it — a hung open on a stuck mount holds ONE threadpool thread, never one more per start; the entry leaves when the read ends
@@ -146,13 +149,36 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
     factReadsInFlight.set(file, p);
     return p;
   };
-  const readOneFact = async (file, row) => {
+  const readOneFact = async (file, row) => {   // → { fact, text } (B-e7c0: the text it read, for the start whose own file it is)
     let fh = null;
     try {
       fh = await fs.promises.open(file, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
       const st = await fh.stat();
-      return st.isFile() && st.size <= BILLPICK.SETTINGS_READ_MAX ? BILLPICK.localHelperFact({ text: await fh.readFile('utf8') }, row) : null;
-    } catch (e) { return e && e.code === 'ENOENT' ? BILLPICK.localHelperFact({ missing: true }, row) : null; } finally { try { await fh?.close(); } catch { } }
+      if (!(st.isFile() && st.size <= BILLPICK.SETTINGS_READ_MAX)) return { fact: null, text: null };   // B-bc9f's bound
+      const text = await fh.readFile('utf8');
+      return { fact: BILLPICK.localHelperFact({ text }, row), text };
+    } catch (e) { return { fact: e && e.code === 'ENOENT' ? BILLPICK.localHelperFact({ missing: true }, row) : null, text: null }; } finally { try { await fh?.close(); } catch { } }
+  };
+  /** B-e7c0: the one --settings value → <BUFFERS_DIR>/<id>.settings (created 0600, exclusive — no temp file); the line carries the path.
+   *  Cannot write ⇒ the RELEASE'S SET-ASIDE (the adapter's own build without the person's file: the override kept, nothing of the person's)
+   *  + what a later step of this start added — and SAID like it (its settingsNotes). */
+  const ownSettingsOnDisk = async (args, id, spec) => {   // off the loop (the sync-fs and store-write censuses): the create is async
+    const i = args.indexOf('--settings');
+    if (i < 0 || !BUFFERS_DIR) return args;
+    const out = args.slice(), file = path.join(BUFFERS_DIR, `${id}.settings`);
+    try {
+      await fs.promises.unlink(file).catch(() => { });
+      await fs.promises.writeFile(file, String(out[i + 1]), { mode: 0o600, flag: 'wx' });
+      out[i + 1] = file;
+    } catch (e) {
+      const parse = (v) => { try { const o = JSON.parse(v); return o && typeof o === 'object' ? o : {}; } catch { return {}; } };
+      const built = parse(spec.setAside && spec.setAside.merged), fin = parse(out[i + 1]);
+      const later = Object.fromEntries(Object.entries(fin).filter(([k, v]) => JSON.stringify(built[k]) !== JSON.stringify(v)));
+      out[i + 1] = JSON.stringify({ ...parse(spec.setAside && spec.setAside.settings), ...later });
+      spec.settingsNotes = (spec.setAside && spec.setAside.settingsNotes) || [];
+      console.warn(`[ws-create] ${id}: the merged settings file could not be written (${(e && e.code) || (e && e.message)}) — the person's settings file is set aside for this start`);
+    }
+    return out;
   };
   const readHelperFact = (o) => {
     let timer = null;
@@ -1009,12 +1035,20 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           // the fact for this start (shared with the notice below), asked BEFORE the build only by a start that carries such a file (a
           // start without one never waits on a machine); the spawn's own env places the CLI's settings (agentEnv + the account's env)
           let helperFactP = null;
-          const helperFact = () => (helperFactP = helperFactP || readHelperFact({ hostId: data.hostId || null, backend, creds: harness && harness.creds,
+          const ownRead = {};   // B-e7c0: the fact's read of the person's own file leaves its text here (this start's)
+          const helperFact = () => (helperFactP = helperFactP || readHelperFact({ hostId: data.hostId || null, backend, creds: harness && harness.creds, sink: ownRead,
             env: { ...agentEnv(), ...((spawnAccount && spawnAccount.localEnv) || {}) },
             cwd, ownFile: typeof adapter.ownSettingsFile === 'function' ? adapter.ownSettingsFile(extraArgs) : null }));
           // (an ADOPTED process — keeperSid known here — keeps the argv it started with: nothing is asked, and its record reads the file as
           // GOVERNING — false — so no later push to the running CLI writes over a file it may hold; its reader's m1)
           const keyHelperNamed = keyHelperOff && typeof adapter.ownSettingsFile === 'function' && adapter.ownSettingsFile(extraArgs) !== null ? (data.keeperSid ? false : await helperFact()) : undefined;
+          // B-e7c0: where the person's own settings FILE would be set aside (a helper named, or that fact unread) on THIS machine, the
+          // text the fact's read found is merged instead (src/adapters/claude-code.js) — a paired machine keeps the set-aside (its file
+          // is not this hub's to read); a file that is no JSON object, or was not read in time, is set aside as before
+          // …only for a SUBSCRIPTION pick (a provider's start keeps its own road) whose own file does not ITSELF name a helper (that file is
+          // about billing: set aside and said, as the release does)
+          const ownObj = keyHelperNamed !== undefined && keyHelperNamed !== false && !data.hostId && !onProvider ? BILLPICK.settingsObjectOf(ownRead.text) : null;
+          const ownSettings = ownObj && !BILLPICK.namesHelper(ownObj, harness && harness.creds && harness.creds.keyHelper) ? ownObj : null;
           const sessionSpec = adapter.buildSessionArgs({
             cwd,
             model: commandModel,
@@ -1084,6 +1118,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             neutralizeKeyHelper: keyHelperOff,
             // the fact (true / false / null = cannot be read; undefined = not read: the start carries no settings file of the person's)
             keyHelperNamed,
+            ownSettings,   // B-e7c0: the person's file to merge (this machine only), else null
           });
           // Resume: the harness's persisted fork chain (store.forkChain → store.forkChainEnv; codex's forked_from).
           // MODEL CONTINUITY (2.369.32) and EFFORT CONTINUITY (B-21e4 item 4)
@@ -1682,6 +1717,9 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // THE ONE LINE: `node <wrapper> <buf> <meta> <spawnCmd> …spawnArgs`; the names ride r6Env. B-460d: a LOCAL
             // conversation's line starts with `nice -n 5` (both roads run it: dtach below, the daemon pipe above it) — the
             // setting read at THIS start; the fact rides the session (Session Properties) and its meta (a restart keeps it)
+            // B-e7c0: the merged settings (the person's file + the override) go to <id>.settings (0600, THE ONE LIST's kind) — the line
+            // carries its path; a file that cannot be written sets the person's file aside as before (only what this start adds)
+            if (sessionSpec.ownFileMerged) spawnArgs = await ownSettingsOnDisk(spawnArgs, id, sessionSpec);
             const r6Pri = SPRI.priorityFor({ serverSetting, local: !session.host });
             session._cpuNice = ocPty ? null : r6Pri.fact;   // an OpenCode serve terminal runs in the serve's pty, not this line: no fact
             const r6Line = sessionSpawnLine({ node: NODE_CMD, wrapper, bufFile, metaFile: metaFileW, env: r6Base, pairs: r6Pairs,
