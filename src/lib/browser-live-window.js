@@ -172,7 +172,7 @@ import { patchPasskeyButtons } from './browser-proposal-card.js'; // lane passke
 import { passkeyWords } from '../browser-passkey.js'; // lane browser-passkey: a page waiting for a passkey — ONE button, Cancel (PURE words) // lane site-reset: the navigation loop, keyed + patched in place
 import { displayFactOf, displayFactText } from './browser-display-words.js'; // lane headless-fallback: a headless browser (no desktop session) says so under the bar
 import { enterSubmits } from './chat-enter-keys.js';
-import { pictureSourceOf } from '../browser-picture.js'; // lane browser-x-in-window (B2): THE picture source verdict (PURE — the keeper's own)
+import { pictureSourceOf, pictureForView } from '../browser-picture.js'; // lane browser-x-in-window (B2): THE picture source verdict (PURE — the keeper's own)
 import { deskDoorOf, deskDoorStuck } from '../browser-picture.js'; // lane desktop-x-seat-browser: the raw fallback's door (PURE); deskDoorStuck = the .367 seam
 import { createXpraView, keyInputOf, workerUrlFor, streamUrl as xStreamUrl } from './xpra-view.js'; // lane browser-x-in-window: the desktop app window's view draws the browser's OWN window
 import { bufferRefresh as xBufferRefresh, focusPacket as xFocusPacket } from './xpra-proto.js'; // lane browser-x-in-window: a repaint after a resize, the window's focus at a takeover
@@ -631,6 +631,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     driver: () => t("the page's picture — this browser was not started on VibeSpace's display"),
     'no-display-session': () => t("the page's picture — the browser's display session is gone"),
     'not-running': () => t("the page's picture"),
+    'background-tab': () => t("the tab's own picture, a new one every half second — its window shows another tab in front"),
     untold: () => t("the page's picture — this conversation's window could not be told apart on the display"),
   };
   const xOn = () => !!xp.view;
@@ -642,7 +643,8 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     const r = (st.rows || []).find((x) => x && x.ref === curRef()) || null;
     const pid = (r && r.profileId) || (st.target && st.target.profileId) || null;
     const rec = pid && app._browserProfiles && app._browserProfiles.browsers ? app._browserProfiles.browsers[pid] : null;
-    return pictureSourceOf(rec || null);
+    // the owner's report 2026-11-19: a hidden background tab's OWN picture (the hub polls it), never its window's front tab
+    return pictureForView(pictureSourceOf(rec || null), { bg: st.bg, driving: st.mode === 'takeover' && st.mine && st.connected });
   }
   /** The source in WORDS for the badge's tooltip: X ⇒ the window; X wanted but this window not told ⇒ said so; else the why. */
   function pictureWords() {
@@ -1523,6 +1525,17 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       if (want0 !== el) tabRowList.insertBefore(el, want0);
       prev = el;
     }
+    // the owner's report 2026-11-19: a ONE-window row folds its spare blanks with no divider to say them — said at its end
+    if (!m.grouped && m.blanks > 0) {
+      let bl = have.get('g:blanks');
+      if (!bl) { bl = document.createElement('div'); bl.className = 'browser-live-tabrow-divider'; bl.dataset.group = 'blanks'; }
+      const txt = t('+{n} blank', { n: m.blanks }), tip = t('{n} blank tab(s) beside its pages — nothing on them', { n: m.blanks });
+      if (bl.textContent !== txt) bl.textContent = txt;
+      if (bl.title !== tip) bl.title = tip;
+      keep.add('g:blanks');
+      const w2 = prev ? prev.nextSibling : tabRowList.firstChild;
+      if (w2 !== bl) tabRowList.insertBefore(bl, w2);
+    }
     for (const [id, el] of have) if (!keep.has(id)) el.remove();
     if (st.watch) renderWatchLine(); // live-watch-polish G2: the line names the tabs — a retitled or moved tab re-says it
     const q = quitRowOf();
@@ -2222,6 +2235,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
         st.mode = m.mode || 'watch'; st.holder = m.holder || null; st.mine = !!m.mine; st.modeSince = Number(m.since) || 0; st.modeCause = m.cause || null;
         st.wakes = Number.isInteger(m.wakes) ? m.wakes : null; // r6 A-F9: what a Hand back from this view wakes
         renderMode(); renderFit(); // builder r2: the fit chip's words name who drives (a shared browser held while YOU drive)
+        renderPicture(); // the owner's report 2026-11-19: a takeover drives the window (the X picture); a handback re-judges it
         if (st.mode === 'takeover' && st.mine && st.watch) st.watch = null; // lane browser-windows (U3): a takeover drives the agent's tab — the bridge ended this view's watch
         renderTabRow(); renderWatchLine(); // lane browser-windows: the chips' clicks and the watch line's words follow who drives
         // lane browser-resume C: a takeover / handback moves who drives this browser — the strip's rows (and the tab row's
@@ -2339,7 +2353,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       // lane browser-windows (U0b): the tab on show paints nothing (a background tab of its window) — or it does again
       case 'tab-background':
         st.bg = m.targetId ? { targetId: String(m.targetId), since: Number(m.since) || Date.now(), state: m.state === 'unresponsive' ? 'unresponsive' : 'hidden' } : null; // B-d635: or a tab that never answers
-        renderWatchLine();
+        renderWatchLine(); renderPicture(); // the owner's report 2026-11-19: the picture follows the verdict (the tab's own, while hidden)
         break;
       case 'tabs':
         st.tabsStale = tabsStaleStep(st.tabsStale, 'tabs'); // B-26bb: the new run's own tabs end the stopped run's

@@ -30,7 +30,8 @@ import path from 'node:path';
 import http from 'node:http';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { scratch, freePort } from './scratch.mjs';
+import { scratch, freePort, anchored } from './scratch.mjs';
+import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const { WebSocketServer, WebSocket } = require('ws');
@@ -71,7 +72,7 @@ console.log('§1 the source verdict (PURE pictureSourceOf)');
   for (const [name, rec, why, words, ctx] of rows) { const r = PIC.pictureSourceOf(rec, ctx); ok(r.source === 'screencast' && r.why === why && (words === null || r.words === words) && r.displaySession === null, `${name} ⇒ the screencast (${r.why}${words ? `, "${r.words}"` : ''})`, r); }
   ok(PIC.pictureSourceOf({ ...attach, host: 'some-other-name' }).source === 'x', "MEASURED TRAP: a record's `host` names the machine that LAUNCHED it (this one) — never \"another machine\" (only `hostId` is)");
   ok(AT.HIDDEN_WINDOW_WHY.startsWith(PIC.NO_XPRA_WHY_HEAD), `the no-display why is browser-attach's own sentence head ("${PIC.NO_XPRA_WHY_HEAD}")`);
-  ok(Object.keys(PIC.SOURCE_WORDS).length === 6 && Object.values(PIC.SOURCE_WORDS).every((w) => typeof w === 'string' && w.length > 10), 'one phrase per why (6)');
+  ok(Object.keys(PIC.SOURCE_WORDS).length === 7 && Object.values(PIC.SOURCE_WORDS).every((w) => typeof w === 'string' && w.length > 10), 'one phrase per why (7)');
 }
 
 // ═══ §2 THE DISPLAY'S ROWS ═══
@@ -552,6 +553,31 @@ console.log('§9 the wiring (source pins)');
   const live = read('src/lib/browser-live-window.js');
   ok(/import \{ pictureSourceOf \} from '\.\.\/browser-picture\.js';/.test(live) && /send\(\{ type: 'x-ticket' \}\)/.test(live) && /case 'x-seat':/.test(live) && /canvas\.style\.display = 'none'; xHost\.style\.display = '';/.test(live), 'the live view asks the source, the ticket and its seat, and swaps the canvas for the X picture');
   ok(/if \(H\) \{ if \(xp\.view\) unmountX\(\); return; \}/.test(live) && /if \(H\) return ''; \/\/ BROWSE YOURSELF/.test(live), 'BROWSE YOURSELF keeps the page\'s picture in this lane (his window is built on it — a follow-up), and its own badge words');
+}
+
+console.log('§10 the picture the view says it shows, in ONE window (the owner\'s report 2026-11-19, the second of its kind)');
+{
+  // the X picture is a WINDOW: it shows its FRONT tab. While the hub says the tab on show is a hidden background tab of its
+  // window (its own picture polled every half second), the view draws THAT tab's own picture — never the front tab under the
+  // shown tab's name and address; a takeover keeps the window (the person brings the tab forward there); a tab that never
+  // answers keeps it too (nothing is polled for it)
+  const X = PIC.pictureSourceOf({ launch: 'attach', state: 'ready', displaySession: { id: 'ds-1' } }), S0 = PIC.pictureSourceOf(null);
+  const hid = { targetId: 'TAB-A', state: 'hidden' };
+  const a = PIC.pictureForView(X, { bg: hid }), b = PIC.pictureForView(X, { bg: hid, driving: true }), c = PIC.pictureForView(X, { bg: { targetId: 'TAB-A', state: 'unresponsive' } });
+  const d = PIC.pictureForView(X, { bg: null }), e = PIC.pictureForView(S0, { bg: hid }), f = PIC.pictureForView(X, { bg: { state: 'hidden' } });
+  ok(X.source === PIC.PICTURE_X && a.source === PIC.PICTURE_SCREENCAST && a.why === 'background-tab' && a.displaySession === null && a.words === PIC.SOURCE_WORDS['background-tab'] && b === X && c === X && d === X && e === S0 && f === X,
+    `the tab on show hidden in its window: its own picture (${a.source}, ${a.why}); a takeover keeps the window (${b.source}); a tab that never answers keeps it (${c.source}); no verdict keeps it (${d.source}); a page picture stays one (${e.source})`);
+  const psrc = fs.readFileSync(path.join(REPO, 'src/browser-picture.js'), 'utf8'), RULE = "  if (!isX(v) || driving || !bg || bg.state !== 'hidden' || !bg.targetId) return v;\n";
+  const PICr = mutantCopies('picture-one-window', REPO).load('src/browser-picture.js', anchored(psrc, RULE, '  return v;\n', 'no-background-rule'), 'no-background-rule');
+  const r = PICr.pictureForView(PICr.pictureSourceOf({ launch: 'attach', state: 'ready', displaySession: { id: 'ds-1' } }), { bg: hid });
+  ok(psrc.split(RULE).length === 2 && r.source === PIC.PICTURE_X, `RED (the copy without the background rule): the X window (${r.source}) — its FRONT tab under the shown tab's name, the owner's report`);
+  // the live view's wiring (pins): the picture reads the hub's verdict; the verdict and a takeover / handback re-judge it; a
+  // one-window row says the blanks it folds
+  const live = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
+  ok(live.includes("return pictureForView(pictureSourceOf(rec || null), { bg: st.bg, driving: st.mode === 'takeover' && st.mine && st.connected });")
+    && live.includes("renderWatchLine(); renderPicture(); // the owner's report 2026-11-19") && live.includes("renderPicture(); // the owner's report 2026-11-19: a takeover drives the window"),
+    'PIN: the view\'s picture is pictureForView over the hub\'s background verdict, re-judged when the verdict or the takeover moves');
+  ok(live.includes('if (!m.grouped && m.blanks > 0) {') && live.includes("const txt = t('+{n} blank', { n: m.blanks })"), 'PIN: a one-window tab row says the blank tabs it folds (the lease held three tabs, the row showed one chip)');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

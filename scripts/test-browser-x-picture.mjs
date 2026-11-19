@@ -611,4 +611,33 @@ console.log('— ⑦ the X picture shows the tab the view says it shows: a tab i
   void redId;
 }
 
+// ═══ ⑧ ONE WINDOW (the owner's report 2026-11-19, the second of its kind: «这个标签栏的页面和实际画面里的页面又不匹配了»): the tab
+//     on show pushed BEHIND another tab of its own window — the hub says it is a background tab (its own picture polled every
+//     half second) — the view draws THAT tab's own picture (red), never the window's front tab (black) under the red tab's name
+//     and address; brought to the front again ⇒ the X picture comes back. WRITTEN BY READING: its first run is int361's (a box row).
+console.log('— ⑧ one window: the tab on show behind another tab of its window ⇒ the view draws ITS picture, never the front tab');
+{
+  const geomOf = (Q) => Q.ev(`(() => { const b = document.getElementById('blk').getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()`).then((r) => (r && r.result && r.result.result ? r.result.result.value : r));
+  const imgPx = (cx, cy) => P.l(`const im = L.img(); const G = L.geometry(); if (!im || !im.naturalWidth || !G || !G.cssW) return null; const k = im.naturalWidth / G.cssW; const c = document.createElement('canvas'); c.width = im.naturalWidth; c.height = im.naturalHeight; const g = c.getContext('2d'); g.drawImage(im, 0, 0); const d = g.getImageData(Math.round(${cx} * k), Math.round(${cy} * k), 1, 1).data; return [d[0], d[1], d[2]];`);
+  const view = async () => { const x = await P.l('return L.x();'); const url = await P.l("const e = L.el().querySelector('.browser-live-url'); return e ? e.textContent : '';"); const tip = await P.l("const e = L.el().querySelector('.browser-live-mode'); return e ? e.title : '';"); return { mounted: !!(x && x.mounted), why: x && x.source && x.source.why, url: String(url || ''), tip: String(tip || '') }; };
+  // the agent back on its red tab (⑦'s tab new, in the first window) — the tab on show, in front
+  const list = await S1.vb(['tab'], 60000);
+  const ref = ((String(list.stdout || '').split('\n').find((l) => /\/red\?n=7/.test(l)) || '').match(/^\s*(t\d+)\b/) || [])[1] || null;
+  const sw = ref ? await S1.vb(['tab', ref], 60000) : { ok: false };
+  const R = DIR ? await agentPage(DIR, '/red') : null;
+  const g = R ? await geomOf(R) : null;
+  const front0 = R ? await until(async () => { const q = await view(); return q.mounted && /\/red\?n=7/.test(q.url) ? q : null; }, 15000, 250) : null;
+  // ANOTHER tab of the same window to its front — the first tab (black), brought forward over CDP, never by the agent
+  const bf = A ? await A.call('Page.bringToFront', {}) : null;
+  const t0 = Date.now(); let own = null, pxOwn = null;
+  while (Date.now() - t0 < 20000) { const q = await view(); if (!q.mounted && q.why === 'background-tab' && g) { const px = await imgPx(g.x, g.y); if (px && near(px, RED, 40)) { own = q; pxOwn = px; break; } } await sleep(250); }
+  ok(!!sw.ok && !!front0 && !!bf && !!own && /\/red\?n=7/.test(own.url) && /its window shows another tab in front/.test(own.tip),
+    `the red tab on show, pushed behind the black tab of its own window: the view leaves the X window and draws the red tab's OWN picture (${JSON.stringify(pxOwn)} at its block), under its own address (${own && own.url}) and the badge's words (${own && own.tip.slice(-80)})`, JSON.stringify({ sw: !!sw.ok, front0: !!front0, bf: !!bf, now: await view() }));
+  // the red tab brought to the front again (CDP): it paints again ⇒ the X picture comes back, on its window
+  const back = R ? await R.call('Page.bringToFront', {}) : null;
+  const xBack = back ? await until(async () => { const q = await view(); return q.mounted ? q : null; }, 20000, 250) : null;
+  ok(!!xBack, `brought to the front again: the hub's verdict clears and the X picture is the view's again (${xBack && xBack.why})`, JSON.stringify(await view()));
+  if (R) R.close();
+}
+
 await done();
