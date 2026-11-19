@@ -1241,10 +1241,27 @@ try {
   // Allow records «let through once by you · waiting for it to run again · HH:MM»; the 24 h end of a late card «expired»
   const ended = { ...ask('vault-run-ask'), status: 'done', resolvedBy: 'ask-expired', resolvedAt: T0 + 60e3 };
   const lateAllow = { ...ask('vault-run-ask'), status: 'done', resolvedBy: 'allowed', resolvedAt: T0 + 90e3, resolvedFact: { decidedBy: 'person', decidedAt: T0 + 90e3, late: true } };
-  const words = (it, l) => ({ status: ROW3.statusWords(it, T[l]), by: ROW3.resolvedByText(it.resolvedBy, T[l], it), card: FA.decisionCard(it, { t: T[l], now: T0 + 91e3 }).stamp });
+  // ONE clock for both sides (int361's checkpoint 23: red in UTC only — the run was 90 s before UTC midnight, so the late Allow fell on
+  // the NEXT day: the row read the REAL clock and wrote «11/19 00:00», the card held now = T0 + 91 s and wrote «00:00»). The words
+  // are read with the clock HELD at the leg's instant — the row's decidedStamp and the card both judge «today» against it — and the
+  // time they carry is built from that instant by the page's own clockWords, in the run's zone (never a literal pattern)
+  const words = (it, l, now = T0 + 91e3) => { const was = Date.now; Date.now = () => now; try { return { status: ROW3.statusWords(it, T[l]), by: ROW3.resolvedByText(it.resolvedBy, T[l], it), card: FA.decisionCard(it, { t: T[l], now }).stamp }; } finally { Date.now = was; } };
   const e3 = ['en', 'zh', 'ja'].map((l) => words(ended, l)), la = words(lateAllow, 'zh'), late24 = words({ ...lateAllow, resolvedBy: 'expired', resolvedFact: null }, 'zh');
-  ok(e3[0].status === 'timed out — the agent\'s command was refused (it may ask again)' && e3[1].status === '已超时 — agent 的命令被拒绝（它可能会再问）' && /^タイムアウト/.test(e3[2].status) && e3.every((x) => x.by === '' && x.card === x.status) && /^你已放行 1 次 · 等它重跑 · \d\d:\d\d$/.test(la.card) && la.by === la.card && /^已过期/.test(late24.card),
+  ok(e3[0].status === 'timed out — the agent\'s command was refused (it may ask again)' && e3[1].status === '已超时 — agent 的命令被拒绝（它可能会再问）' && /^タイムアウト/.test(e3[2].status) && e3.every((x) => x.by === '' && x.card === x.status) && la.card === '你已放行 1 次 · 等它重跑 · ' + FA.clockWords(T0 + 90e3, T0 + 91e3) && la.by === la.card && /^已过期/.test(late24.card),
     'ITS END STAYS IN WORDS — an ask nobody answered (\'ask-expired\') reads «已超时 — agent 的命令被拒绝（它可能会再问）» on the row, the window and the chat card (en / ja too; RED: the base said «expired (no answer in 60 s)» — the raw outcome\'s words); a late Allow «你已放行 1 次 · 等它重跑 · HH:MM» (the person mark); the late card\'s 24 h end «已过期»', { e3, la, late24 });
+  // THE MIDNIGHT EDGE, in the run's own zone: a late Allow 30 s before the local midnight after T0, read 30 s after it — the row and
+  // the card both carry its DATED time («M/D HH:MM», clockWords of that instant against that now); RED control (the base's road: the
+  // row on ANOTHER clock than the card's) first proves its plant — the two clocks fall on different local days — then reads otherwise
+  {
+    const MID = (() => { const m = new Date(T0); m.setHours(24, 0, 0, 0); return m.getTime(); })();
+    const edge = { ...lateAllow, resolvedAt: MID - 30e3, resolvedFact: { ...lateAllow.resolvedFact, decidedAt: MID - 30e3 } };
+    const le = words(edge, 'zh', MID + 30e3), want = '你已放行 1 次 · 等它重跑 · ' + FA.clockWords(MID - 30e3, MID + 30e3);
+    ok(le.by === want && le.card === want && /\d+\/\d+ \d\d:\d\d$/.test(want), `the midnight edge in the run's zone: the late Allow 30 s before midnight, read 30 s after, says its DATED time on the row and the card alike («${want}»)`, le);
+    const dayOf = (ms) => { const d = new Date(ms); return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`; };
+    const otherBy = words(edge, 'zh', MID - 60e3).by;   // the base's road: the row read on a clock that is not the card's
+    ok(dayOf(MID - 60e3) !== dayOf(MID + 30e3) && dayOf(MID - 30e3) === dayOf(MID - 60e3), 'RED control, its plant first: the row\'s clock and the card\'s fall on different local days, the instant on the row\'s');
+    ok(otherBy !== le.card, 'RED control: a row read on another clock than the card\'s reads otherwise at the edge — the one held clock is what keeps them equal', { otherBy, card: le.card });
+  }
 } catch (e) { ok(false, '⑮ threw on this tree (an API it asks for is missing): ' + ((e && e.stack) || e)); } finally { Date.now = REAL_DATE_NOW_15; }
 
 // ── ⑯ ROUND 8 ──────────────────────────────────────────────────────────────────────────────────────────────────────
