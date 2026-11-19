@@ -99,6 +99,24 @@ check(`② B-db5d: at every width of the ladder an installed plugin's name stand
 check(`② CONTROL: B-db5d's 9 em row (the measured walk the law was read on) is caught — the name grew at ${linesGrew(NL.before, NL.nineEm).map((g) => g.at).join(', ')}`, linesGrew(NL.before, NL.nineEm).length >= 1);
 check('② B-db5d: the installed row\'s rule and its mark stand (the 16 em basis; plugins-ui marks only the installed rows)', roomRule(STYLE, PLUG));
 check('② CONTROL: the 9 em basis back (the rule gone) or the mark gone is refused', !roomRule(STYLE.replace('\n.rail-row.plugin-row-installed > .rail-row-main { flex-basis: 16em; }', ''), PLUG) && !roomRule(STYLE, PLUG.replace("  if (installed) row.classList.add('plugin-row-installed');\n", '')));
+// B-a139 (the release scoped it to the three web-login dialogs; «the general law: B-a139»): THE LOCK'S WORDS ARE NEVER CUT, ON ANY
+// DOOR — the house picker's block wraps a locked row's words and a locked chip's words (and the row / chip with short room), no door
+// keeps a scoped copy, and the automation-key dialogs' 320 px floor is never wider than a phone. Every door that hands the picker
+// LOCKED rows (a principalPicker call with a `locked` option) is named here with the chrome suite that fits it at 280 and 360.
+const lockRules = (css) => /\n\.pp-row\.pp-locked > \.pp-lock-why \{ white-space: normal; overflow-wrap: anywhere; \}/.test(css) && /\n\.pp-row\.pp-locked \{ flex-wrap: wrap; \}/.test(css)
+  && /\n\.pp-chip-locked \{ flex-wrap: wrap; \}/.test(css) && /\n\.pp-chip-locked > \.pp-chip-why \{ white-space: normal; overflow-wrap: anywhere; \}/.test(css) && /\n\.pp-chip-locked > \.pp-chip-name \{ white-space: normal; overflow-wrap: anywhere; \}/.test(css)
+  && !/\.vw-login-(grant-dialog|site-pick|totp-dialog) \.pp-(row|chip)/.test(css)
+  && /\.vw-ak-dialog \.dialog-body \{[^}]*min-width: min\(320px, calc\(100vw - 48px\)\);/.test(css);
+check('② B-a139: the lock\'s words wrap on EVERY door (the picker\'s own rules, no scoped copy) and the automation-key dialogs\' floor is never wider than a phone', lockRules(STYLE));
+check('② CONTROL: the release\'s sheet (the wrap scoped to the three login dialogs, the 320 px floor) is refused', !lockRules(STYLE.replace('\n.pp-row.pp-locked > .pp-lock-why { white-space: normal; overflow-wrap: anywhere; }', '')) && !lockRules(STYLE.replace('min-width: min(320px, calc(100vw - 48px));', 'min-width: 320px;')) && !lockRules(STYLE + '\n.vw-login-grant-dialog .pp-row.pp-locked { flex-wrap: wrap; }\n'));
+const LOCK_DOORS = { 'src/lib/vault-login-grants.js': 'scripts/test-login-grant-chrome.mjs' };   // a door that passes locked rows → the suite that fits it
+const pickerCalls = (src) => [...src.matchAll(/\bprincipalPicker\(/g)].map((m) => { let d = 0, j = m.index + m[0].length - 1; for (; j < src.length; j++) { const ch = src[j]; if (ch === '(') d++; else if (ch === ')' && --d === 0) break; } return src.slice(m.index, j + 1); });   // each call's own text, balanced
+const lockDoors = (srcs) => Object.entries(srcs).filter(([f, src]) => f !== 'src/lib/principal-picker.js' && pickerCalls(src).some((c) => /[,{(]\s*locked\s*[,}:)]/.test(c) || /^principalPicker\(\s*(\{\s*\.\.\.|[A-Za-z_$])/.test(c))).map(([f]) => f).sort();   // an options object spread in, or passed by name, is counted too: it may carry `locked`
+const doorsNamed = (srcs) => { const found = lockDoors(srcs); return { found, unnamed: found.filter((f) => !LOCK_DOORS[f]), unfit: found.filter((f) => LOCK_DOORS[f] && !(() => { const t = read(LOCK_DOORS[f]); return /\[280, \d+, true\]/.test(t) && /\[360, \d+, true\]/.test(t) && t.includes('.pp-row.pp-locked .pp-lock-why'); })()) }; };
+{ const SRC = clientSources(repo), d = doorsNamed(SRC);
+  check(`② B-a139: every door that hands the picker locked rows is named with a chrome suite that fits its lock's words at 280 and 360 (${d.found.join(', ')})`, d.found.length >= 1 && !d.unnamed.length && !d.unfit.length, d);
+  const planted = doorsNamed({ ...SRC, 'src/lib/zz-new-door.js': "const p = principalPicker({ items, multi: true, locked });\n" });
+  check('② CONTROL: a new door passing locked rows with no fit suite named is caught', planted.unnamed.includes('src/lib/zz-new-door.js'), planted); }
 check('② railRow folds more than ROW_INLINE_MAX controls into ONE «⋯» (the PURE rowActionsFold) whose rows are their own words',
   /import \{ rowActionsFold, ROW_INLINE_MAX \} from '\.\/row-fold-model\.js'/.test(ROW) && /rowActionsFold\(/.test(ROW) && /showContextMenu\(/.test(ROW) && /max = ROW_INLINE_MAX/.test(ROW));
 // the census: the classes rail renderers give a BUTTON, and the rules that would cut its words

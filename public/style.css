@@ -7853,6 +7853,15 @@ label.chan-cap-row { cursor: default; }
 /* a locked row: its «through» note stands in for the row's own hint, and its name is never crushed («Ev…») by the note and the door */
 .pp-row.pp-locked > .pp-hint:not(.pp-lock-why) { display: none; }
 .pp-row.pp-locked .pp-name { flex: 0 0 auto; max-width: 45%; }
+/* THE LOCK'S WORDS ARE NEVER CUT, ON ANY DOOR (B-a139 — the release scoped this to the three web-login dialogs; the house picker is
+   every door's): a locked row's words and a locked chip's words WRAP — they are the lock's meaning (which grant, its «除了», «not
+   running now») — and with short room (280) the row and the chip wrap too: words that do not fit move whole onto a line of their own,
+   the door after them. No grow, no basis: where the words fit the line is drawn as before (at 768 and wider nothing moves). */
+.pp-row.pp-locked > .pp-lock-why { white-space: normal; overflow-wrap: anywhere; }
+.pp-row.pp-locked { flex-wrap: wrap; }
+.pp-chip-locked { flex-wrap: wrap; }
+.pp-chip-locked > .pp-chip-why { white-space: normal; overflow-wrap: anywhere; }
+.pp-chip-locked > .pp-chip-name { white-space: normal; overflow-wrap: anywhere; }   /* …and a locked chip's NAME: who the lock is on (an unlocked chip keeps its one-line ellipsis and its tip) */
 .pp-input { width: 100%; box-sizing: border-box; font: inherit; font-size: 12px; padding: 6px 9px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-input); color: var(--text); }
 .pp-input:focus { outline: none; border-color: var(--accent); }
 .pp-list { display: flex; flex-direction: column; max-height: 260px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 3px; }
@@ -9738,17 +9747,10 @@ button.vw-chip { cursor: pointer; }
 /* the grant dialogs are form windows of their own, outside the Vault window's `.vw [hidden]`: a hidden press stays hidden (.vw-btn sets display) */
 .vw-login-grant-dialog [hidden], .vw-login-site-pick [hidden], .vw-login-totp-dialog [hidden] { display: none; }
 /* THE GRANT DIALOGS ON A PHONE (the train's hosted run, 2026-11-18): their body narrows with the window — they carry the automation-key
-   class, whose body keeps a 320 px floor (that floor stays the automation-key dialogs' own) — and a locked row's words WRAP inside the
-   row, never cut: they are the lock's meaning (which grant, its «除了», «not running now»). Scoped to these three dialogs: the house
-   picker is every door's. */
+   class, whose body kept a 320 px floor — B-a139: that floor is min(320px, the viewport less its margins) now, on every automation-key
+   dialog — and a locked row's words WRAP inside the row, never cut: the house picker's own rule (B-a139, «THE LOCK'S WORDS» in its
+   block), no longer these three dialogs' alone. */
 .dialog.vw-login-grant-dialog .dialog-body, .dialog.vw-login-site-pick .dialog-body, .dialog.vw-login-totp-dialog .dialog-body { min-width: 0; }
-.vw-login-grant-dialog .pp-row.pp-locked > .pp-lock-why, .vw-login-site-pick .pp-row.pp-locked > .pp-lock-why, .vw-login-totp-dialog .pp-row.pp-locked > .pp-lock-why { white-space: normal; overflow-wrap: anywhere; }
-/* …and with short room (280) the row and the chip WRAP: words that do not fit move whole onto a line of their own, the door after them
-   (the chip's name and words had no tip: cut; the row's words were squeezed into a 16 px column, 0 px in English). No grow, no basis:
-   where the words fit, the line is drawn as before — at 768 and wider nothing moves (the same pixels). */
-.vw-login-grant-dialog .pp-row.pp-locked, .vw-login-site-pick .pp-row.pp-locked, .vw-login-totp-dialog .pp-row.pp-locked { flex-wrap: wrap; }
-.vw-login-grant-dialog .pp-chip-locked, .vw-login-site-pick .pp-chip-locked, .vw-login-totp-dialog .pp-chip-locked { flex-wrap: wrap; }
-.vw-login-grant-dialog .pp-chip-locked > .pp-chip-why, .vw-login-site-pick .pp-chip-locked > .pp-chip-why, .vw-login-totp-dialog .pp-chip-locked > .pp-chip-why { white-space: normal; overflow-wrap: anywhere; }
 .pp-lock-door { margin-left: auto; flex: 0 0 auto; }
 /* lane vault-use-grants: «Who may use it» — the members as the key / login chips, the door under them (the door column keeps its width) */
 .vw-use-host { display: flex; flex-direction: column; gap: 3px; }
@@ -9784,7 +9786,7 @@ button.vw-chip { cursor: pointer; }
 .vw-ring::after { content: ''; position: absolute; inset: 4px; border-radius: 50%; background: var(--bg-window); }
 .vw-code-left { font-size: 11px; font-weight: normal; letter-spacing: normal; color: var(--text-dim); }
 .vw-value:has(> .vw-code-view) { flex-wrap: wrap; row-gap: 4px; }
-.vw-ak-dialog .dialog-body { display: flex; flex-direction: column; gap: 6px; min-width: 320px; max-height: 60vh; overflow: auto; }
+.vw-ak-dialog .dialog-body { display: flex; flex-direction: column; gap: 6px; min-width: min(320px, calc(100vw - 48px)); max-height: 60vh; overflow: auto; }   /* B-a139: a 280 phone draws the body inside the window (the floor never wider than the viewport less the dialog's margins) */
 .vw-ak-dialog label.vw-ak-pick, .vw-ak-pick { flex-direction: row; display: flex; align-items: center; gap: 8px; }
 .vw-ak-sec { margin-top: 6px; font-weight: 600; color: var(--text); }
 .vw-ak-hint { color: var(--text-dim); font-size: 11px; }
