@@ -1010,10 +1010,13 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   // broadcast carry the SAME `spend` (budgetLimits over what the server now holds, a CAP_MAX clamp included — the 2.309.0
   // cache law: the invalidation pushes the RESULT), so every tab's «in force now» has ONE source (a tab kept saying its
   // own last echo, 50, after another device raised the cap to 100)
-  // B-0a33 (3) (the follow-up ruling): a PERSON'S request that sets a spending CAP to nothing stores nothing — never the default.
-  // Stored BLANK (no number: refused, said), not null — so a timed raise's «before» (src/server/setting-holds.js) keeps it, while
-  // the internal door's null (patchSettings) stays «the row's default», which that return writes for a row at its default
+  // B-0a33 (3) (the follow-up ruling; the cure, 主开发 04:23Z): a PERSON'S «nothing» for a spending CAP stores nothing — never the
+  // default — on EVERY door of a person: the page's POST (the whole file — the Settings page saves this way), the config import's
+  // settings part and a PATCH. Stored BLANK (no number: refused, said), never a null an internal patch could read as «the row's
+  // default». The internal door (patchSettings) drops only a null it CARRIES (setting-holds' return to an absent «before»): a cap's
+  // stored blank or null it does not carry stays as it is
   const SPEND_CAP_KEYS = new Set(require('../spend-authorizer.js').CAP_SETTING_KEYS);
+  const blankCaps = (d) => { if (d && typeof d === 'object') for (const k of SPEND_CAP_KEYS) if (Object.prototype.hasOwnProperty.call(d, k) && d[k] === null) d[k] = ''; return d; };
   function spendOf(data) { try { return require('../spend-authorizer.js').budgetLimits((k) => (data || {})[k]); } catch { return null; } }
   function writeSettings(data) {
     ensureDir(dataDir);
@@ -1048,7 +1051,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   router.patchSettings = (patch) => {
     if (!patch || typeof patch !== 'object') throw new Error('patchSettings: expected an object');
     const merged = { ...readSettings(), ...patch };
-    for (const [k, v] of Object.entries(merged)) { if (v === null) delete merged[k]; }   // the internal door: a null is the row's DEFAULT (setting-holds' return to an absent «before») — a person's «nothing» is the PATCH's (blank)
+    for (const [k, v] of Object.entries(merged)) { if (v === null && (!SPEND_CAP_KEYS.has(k) || Object.prototype.hasOwnProperty.call(patch, k))) delete merged[k]; }   // the internal door: a null it CARRIES is the row's DEFAULT (setting-holds' return to an absent «before»); a cap's stored null it does not carry stays
     writeSettings(merged);
     return true;
   };
@@ -1125,6 +1128,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   router.post('/api/settings', (req, res) => {
     const data = req.body;
     if (!data || typeof data !== 'object') return res.status(400).json({ error: 'Expected object' });
+    blankCaps(data);   // B-0a33 cure: the Settings page's cleared cap field (null) is stored BLANK — refused and said, never the default
     const refused = setAsideExitUrl(req, data); // the exit check: a person's refused address set aside, said — the rest lands
     if (refuseEngineRows(req, res, data)) return; // lane engine-spi-egress L1b (V3) — r2: the whole file it would leave (an omitted row = dropped)
     if (refuseSpendRows(req, res, data)) return; // lane setting-doors pick 0: the spending rows are the owner's press
@@ -1139,8 +1143,8 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     const current = readSettings();
     const patch = req.body;
     if (!patch || typeof patch !== 'object') return res.status(400).json({ error: 'Expected object' });
-    const merged = { ...current, ...patch };
-    for (const [k, v] of Object.entries(merged)) { if (v === null) { if (SPEND_CAP_KEYS.has(k)) merged[k] = ''; else delete merged[k]; } }   // B-0a33 (3): a cap set to nothing stays nothing — stored blank (refused, said), never the default restored in silence
+    const merged = { ...current, ...blankCaps({ ...patch }) };   // B-0a33 (3): a cap the patch sets to nothing is stored blank (refused, said)
+    for (const [k, v] of Object.entries(merged)) { if (v === null && !SPEND_CAP_KEYS.has(k)) delete merged[k]; }   // the cure: a cap's stored null the patch does not carry is never rewritten nor dropped — a patch of another row touches no spend row
     const refused = setAsideExitUrl(req, merged); // the exit check: a person's refused address set aside, said — the rest lands
     if (refuseEngineRows(req, res, merged)) return; // lane engine-spi-egress L1b (V3) — r2: the file the patch would leave
     if (refuseSpendRows(req, res, merged)) return; // lane setting-doors pick 0: the spending rows are the owner's press
@@ -1301,6 +1305,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     if (!sections || !includeSensitive) return res.status(400).json({ error: `${!sections ? 'sections' : 'includeSensitive'} must be a section name or a list of section names`, code: 'import_sections_invalid' });
     // lane engine-spi-egress L1b r2 (V3): a bearer's import whose settings section would set, change or drop an engine's program / site
     // list row is refused WHOLE — all or nothing: no section of it is applied
+    if (sections.includes('settings') && file.sections.settings && typeof file.sections.settings === 'object') blankCaps(file.sections.settings);   // B-0a33 cure: an imported cap of nothing is stored blank too
     if (sections.includes('settings') && file.sections.settings && typeof file.sections.settings === 'object' && refuseEngineRows(req, res, file.sections.settings)) return;
     if (sections.includes('settings') && file.sections.settings && typeof file.sections.settings === 'object' && refuseSpendRows(req, res, file.sections.settings)) return; // lane setting-doors pick 0: all or nothing, as the engine rows
     { const held = sections.includes('tasks') && file.sections.tasks !== undefined ? getTasks?.()?.unreadRefusal?.('an import of Task Groups') : null; if (held) return res.status(503).json({ error: held, code: 'TASK_GROUPS_UNREAD' }); }   // THE STORE HELD UNREAD: refused WHOLE before any section is applied

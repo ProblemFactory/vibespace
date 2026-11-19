@@ -407,11 +407,12 @@ export function inboxModel(app) {
       return false;
     }
     const value = num(r.value), untilAt = Number.isFinite(num(r.untilAt)) ? num(r.untilAt) : null;
-    const back = Number.isFinite(num(r.before)) ? num(r.before) : PROPOSABLE[key] ? PROPOSABLE[key].def : null;   // `before` null = the row's default
+    const noBack = r.before != null && !(Number.isFinite(num(r.before)) && num(r.before) >= 0);   // B-0a33 cure: back to a row holding no number — «none», never the default
+    const back = noBack ? t('none') : Number.isFinite(num(r.before)) ? num(r.before) : PROPOSABLE[key] ? PROPOSABLE[key].def : null;   // `before` null = the row's default
     // the agent's words (the reply road — plain English, like a grant's): what the row holds now and, when timed, the moment (the
     // owner's clock, and the instant itself) and what it returns to by itself
     const text = untilAt != null
-      ? `${value > showed ? 'Set' : 'Lowered'} ${key} to ${value} until ${clockOf(untilAt)} (then ${back}; ${new Date(untilAt).toISOString().slice(0, 16)}Z)`
+      ? `${value > showed ? 'Set' : 'Lowered'} ${key} to ${value} until ${clockOf(untilAt)} (then ${noBack ? 'none — no number, every turn nobody typed refused' : back}; ${new Date(untilAt).toISOString().slice(0, 16)}Z)`
       : `${value > showed ? 'Set' : 'Lowered'} ${key} to ${value}`;
     return postReply(rec.id, text, {
       sentToast: untilAt != null ? t('{label}: {value} until {time}, then {back} — the agent was told', { label: card.label, value, time: untilClock(untilAt, t), back })

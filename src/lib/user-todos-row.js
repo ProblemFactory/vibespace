@@ -441,7 +441,11 @@ const grantAskHtml = (i, t) => {
 let settingFacts = null;
 const num = (v) => (v === null || v === undefined || v === '' || typeof v === 'boolean' ? NaN : Number(v));   // ask-setting's NUM: Number(null) is 0 — an absent field is NO number
 export function registerSettingFacts(f) { settingFacts = f && typeof f === 'object' ? f : null; }
-const factValue = (key) => { let v = NaN; try { v = settingFacts && typeof settingFacts.value === 'function' ? num(settingFacts.value(key)) : NaN; } catch { v = NaN; } return Number.isFinite(v) ? v : PROPOSABLE[key] ? PROPOSABLE[key].def : NaN; };
+const factRaw = (key) => { try { return settingFacts && typeof settingFacts.value === 'function' ? settingFacts.value(key) : undefined; } catch { return undefined; } };
+// B-0a33 cure (主开发 04:23Z): a row the store holds with NO NUMBER (blank — an absent row reads its default) is «no limit is set»: 0 for the
+// verdict (every turn nobody typed refused — a proposal over it is a raise), «none» in words; never the default
+const factNone = (key) => { const v = factRaw(key); return v !== undefined && !(Number.isFinite(num(v)) && num(v) >= 0); };
+const factValue = (key) => { const v = num(factRaw(key)); return Number.isFinite(v) && v >= 0 ? v : factNone(key) ? 0 : PROPOSABLE[key] ? PROPOSABLE[key].def : NaN; };
 // LAW B (the check, 2026-11-15): a hold is LIVE only while the row holds its value — a row the owner changed by hand has no hold
 // here at once (no held line, no «then …», no «End now»), before the hub's `setting-holds` broadcast that ends it arrives
 const factHold = (key) => { try { const h = settingFacts && typeof settingFacts.holdOf === 'function' ? settingFacts.holdOf(key) : null; return h && typeof h === 'object' && Number.isFinite(num(h.value)) && Number.isFinite(num(h.untilAt)) && holdIsLive(h, factValue(key)) ? h : null; } catch { return null; } };
@@ -459,11 +463,12 @@ export function untilClock(at, t, { now = Date.now() } = {}) {
   return clockAt(at, { now, locale });
 }
 const spanWords = (ms, t) => { const m = Math.max(1, Math.round(ms / 60000)); if (m < 60) return t('{n} min', { n: m }); const h = Math.floor(m / 60), r = m % 60; return r ? t('{h} h {m} min', { h, m: r }) : t('{n} h', { n: h }); };
-const holdBack = (key, h) => (Number.isFinite(num(h.before)) ? num(h.before) : PROPOSABLE[key].def);   // `before` null = the row's default
+const holdBack = (key, h) => (Number.isFinite(num(h.before)) && num(h.before) >= 0 ? num(h.before) : h.before != null ? 0 : PROPOSABLE[key].def);   // `before` null = the row's default; B-0a33 cure: a blank «before» = none (0)
+const backNone = (h) => h.before != null && !(Number.isFinite(num(h.before)) && num(h.before) >= 0);
 /** A STANDING HOLD IN WORDS — «1600 until 22:00, then 800» — the card's held line and the Settings row's (settings-ui) say it ONE way; '' = none. */
 export function holdWords(key, t, { now = Date.now() } = {}) {
   const h = isProposable(key) ? factHold(key) : null;
-  return h ? t('{value} until {time}, then {back}', { value: num(h.value), time: untilClock(num(h.untilAt), t, { now }), back: holdBack(key, h) }) : '';
+  return h ? t('{value} until {time}, then {back}', { value: num(h.value), time: untilClock(num(h.untilAt), t, { now }), back: backNone(h) ? t('none') : holdBack(key, h) }) : '';
 }
 /** THE CARD'S FACTS against the value NOW → null | { key, label, value, now, was, moved, held, back, verdict, button: {words, title,
  *  raise} | null, nowWords, heldWords, whyWords, whyLink, vol: {prop, asked} (the words that move with the clock — patched in place,
@@ -479,14 +484,15 @@ export function settingCardOf(i, t, { now = hubNow() } = {}) {
   const at = rel == null && Number.isFinite(num(a.untilAt)) ? num(a.untilAt) : null;
   const timed = rel != null || at != null;
   const back = held ? holdBack(key, held) : cur;   // a hold keeps its FIRST «before» (src/server/setting-holds.js amendment 4)
+  const curW = factNone(key) ? t('none') : cur, backW = held ? (backNone(held) ? t('none') : back) : curW;   // B-0a33 cure: a row holding no number is said «none», never the default
   const moved = Number.isFinite(was) && was !== cur;
-  const nowWords = moved ? t('It is {now} now — it was {was} when asked', { now: cur, was }) : t('Now: {value}', { value: cur });
-  const prop = rel != null ? t('Proposed: {value} for {span} from your press (until about {time}), then {back}', { value, span: spanWords(rel, t), time: untilClock(now + rel, t, { now }), back })
-    : at != null ? t('Proposed: {value} until {time}, then {back}', { value, time: untilClock(at, t, { now }), back })
+  const nowWords = moved ? t('It is {now} now — it was {was} when asked', { now: curW, was }) : t('Now: {value}', { value: curW });
+  const prop = rel != null ? t('Proposed: {value} for {span} from your press (until about {time}), then {back}', { value, span: spanWords(rel, t), time: untilClock(now + rel, t, { now }), back: backW })
+    : at != null ? t('Proposed: {value} until {time}, then {back}', { value, time: untilClock(at, t, { now }), back: backW })
     : t('Proposed: {value} — it stays until you change it', { value });
   const hold = held ? holdWords(key, t, { now }) : '';
   const heldWords = !held ? '' : !verdict.press ? t('Held at {hold}', { hold })   // no press: what stands, nothing it would replace
-    : timed ? t('Held at {hold} — this press replaces the hold\'s value and moment; it still returns to {back}', { hold, back })
+    : timed ? t('Held at {hold} — this press replaces the hold\'s value and moment; it still returns to {back}', { hold, back: backW })
     : t('Held at {hold} — this press ends the hold; it stays at {value}', { hold, value });
   let button = null, whyWords = '', whyLink = false;
   if (verdict.press) {
@@ -496,8 +502,8 @@ export function settingCardOf(i, t, { now = hubNow() } = {}) {
       : rel != null ? (raise ? t('Raise to {value} for {span}', p) : t('Lower to {value} for {span}', p))
       : held ? t('Set to {value} for good — the hold ends', p)   // a lasting change on a held row: at or below its «before» (law A)
       : t('Lower to {value}', p);   // a lasting change with no hold is never a raise (the verdict refuses one)
-    button = { words, raise, title: timed ? t('Sets it to {value} now and back to {back} at that moment, then tells the agent', { value, back }) : t('Sets it to {value} now, then tells the agent', { value }) };
-  } else if (verdict.why === 'same') whyWords = t('It is already {value} — nothing to change', { value: cur });
+    button = { words, raise, title: timed ? t('Sets it to {value} now and back to {back} at that moment, then tells the agent', { value, back: backW }) : t('Sets it to {value} now, then tells the agent', { value }) };
+  } else if (verdict.why === 'same') whyWords = t('It is already {value} — nothing to change', { value: curW });
   else if (verdict.why === 'passed') { whyWords = t('That moment ({time}) has passed — change it on the row', { time: at != null ? untilClock(at, t, { now }) : '' }); whyLink = true; }
   else if (verdict.why === 'raise-needs-until') { whyWords = t('A raise needs its «until» — change it on the row'); whyLink = true; }
   else if (verdict.why === 'raise-over-hold') { whyWords = t('{value} would stay above {back}, the value before the hold — a raise needs its «until»; change it on the row', { value, back: verdict.lasting }); whyLink = true; }

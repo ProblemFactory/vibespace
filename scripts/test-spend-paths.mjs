@@ -3251,16 +3251,73 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
         afterHttp['spend.unattendedPerIdentityHour'] === '' && afterHttp['spend.unattendedPerIdentityDay'] === 90 && !Object.prototype.hasOwnProperty.call(afterAct, 'spend.unattendedPerIdentityDay') && L.perIdentityHour === 0 && L.perIdentityDay === A.BUDGET_DEFAULTS.perIdentityDay && JSON.stringify(L.unset) === '["perIdentityHour"]'
         && !Object.prototype.hasOwnProperty.call(afterHttp, 'ui.someOtherRow'), JSON.stringify({ afterHttp, afterAct }));
       // (r2, N4) THE ROUTER'S OWN RED COPY: the PATCH's cap rule back to «a null removes the key»
-      const mr = mutantModule('src/routes/persistence.js', [["if (SPEND_CAP_KEYS.has(k)) merged[k] = ''; else delete merged[k];", 'delete merged[k];']]);
-      ok('§5g (3) CONTROL: the PATCH\'s cap rule back to the release in a copy (the patch hit)', !mr.err && mr.hits === 1, mr.err || '');
+      const mr = mutantModule('src/routes/persistence.js', [['    const merged = { ...current, ...blankCaps({ ...patch }) };', '    const merged = { ...current, ...patch };'], ['if (v === null && !SPEND_CAP_KEYS.has(k)) delete merged[k]; }   // the cure:', 'if (v === null) delete merged[k]; }   // the cure:']]);   // stale-pins: kept (the OLD line is the copy compiled back in, never an anchor)
+      ok('§5g (3) CONTROL: the PATCH\'s cap rules back to the release in a copy (both lines hit)', !mr.err && mr.hits === 2, mr.err || '');
       if (!mr.err) { const rm = await routerRun(mr.mod); const Lr = A.budgetLimits((k) => rm.afterHttp[k]); ok('§5g (3) CONTROL: with it, the PATCH REMOVES the cap — the default 30 comes back in silence — RED', !('spend.unattendedPerIdentityHour' in rm.afterHttp) && Lr.perIdentityHour === 30, JSON.stringify(rm.afterHttp)); }
       // THE MEETING: a timed raise of a cap at its default returns to the default — never «no limit is set»
       const hr = await holdRun(require(path.join(REPO, 'src/routes/persistence.js')));
       ok('§5g (3) THE PORT\'S MEETING (setting-holds): a timed raise of the hour cap from its default (30 → 50) RETURNS to the default — the key removed through patchSettings, the cap 30 again, never «no limit is set» (every turn nobody typed refused)',
         hr.took && hr.during === 50 && !Object.prototype.hasOwnProperty.call(hr.after, HOURK) && hr.L.perIdentityHour === 30 && !hr.L.unset, JSON.stringify(hr));
-      const mh = mutantModule('src/routes/persistence.js', [["{ if (v === null) delete merged[k]; }   // the internal door", "{ if (v === null && !SPEND_CAP_KEYS.has(k)) delete merged[k]; }   // the internal door"]]);
+      const mh = mutantModule('src/routes/persistence.js', [["{ if (v === null && (!SPEND_CAP_KEYS.has(k) || Object.prototype.hasOwnProperty.call(patch, k))) delete merged[k]; }   // the internal door", "{ if (v === null && !SPEND_CAP_KEYS.has(k)) delete merged[k]; }   // the internal door"]]);
       ok('§5g (3) CONTROL: the follow-up\'s first rule (patchSettings keeps a cap\'s null) in a copy (the patch hit)', !mh.err && mh.hits === 1, mh.err || '');
       if (!mh.err) { const hm = await holdRun(mh.mod); ok('§5g (3) CONTROL: with it, the raise\'s return STORES null — the hour cap reads «no limit is set», every turn nobody typed refused — RED', hm.took && hm.after[HOURK] === null && hm.L.perIdentityHour === 0 && JSON.stringify(hm.L.unset) === '["perIdentityHour"]', JSON.stringify(hm)); }
+      // THE CURE (主开发 04:23Z, round wrhah7kp5's MUST): the Settings page saves the WHOLE file by POST — a person's cleared cap is
+      // stored BLANK there too, and no later internal patch (another row's write, a timed raise and its return) drops it
+      const refusedSaid = (st) => { const L = A.budgetLimits((k) => st[k]); const v = A.authorizeUnattendedSpend({ reason: 'auto-resume', identity: IDg, state: A.emptyBudget(), limits: L }); return !v.ok && v.why === 'hour-cap' && v.capUnset === true && /no cap is set for unattended turns per identity per hour/.test(v.detail); };
+      const pageRun = async (pmod, { file = null } = {}) => {
+        const express = require(path.join(REPO, 'node_modules/express')), http = require('node:http');
+        const dir = tmpdir('vs-spend-5g-page-');
+        if (file) fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify(file));
+        const notices = [];
+        const router = pmod.setup({ dataDir: dir, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => null, getMounts: () => null, getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { } });
+        const app = express(); app.use(express.json()); app.use(router);
+        const srv = await new Promise((res) => { const sv = app.listen(0, '127.0.0.1', () => res(sv)); });
+        const send = (method, body, headers = { 'sec-fetch-site': 'same-origin' }) => new Promise((res) => { const rq = http.request({ host: '127.0.0.1', port: srv.address().port, path: '/api/settings', method, headers: { 'content-type': 'application/json', ...headers } }, (r) => { r.resume(); r.on('end', () => res(r.statusCode)); }); rq.end(JSON.stringify(body)); });
+        const disk = () => JSON.parse(fs.readFileSync(path.join(dir, 'settings.json'), 'utf8'));
+        const SHm = require(path.join(REPO, 'src/server/setting-holds.js'));
+        const H = SHm.create({ dataDir: dir, readSettings: () => router.readSettings(), patchSettings: (q) => router.patchSettings(q), broadcast: (m) => notices.push(m), now: () => 1_900_000_000_000, writer: { dirty: () => { }, durable: async () => true }, setTimer: () => ({}), clearTimer: () => { } });
+        return { router, send, disk, H, notices, close: () => new Promise((r) => srv.close(r)) };
+      };
+      {
+        const pg = await pageRun(require(path.join(REPO, 'src/routes/persistence.js')));
+        const posted = await pg.send('POST', { [HOURK]: null, 'spend.unattendedPerIdentityDay': 90, 'ui.someRow': 1 });   // the page: the whole file, the cleared field null
+        const afterPost = pg.disk();
+        pg.router.patchSettings({ 'ui.anotherRow': 2 });   // (1) a patch of another row (a plugin's write, a boot migration)
+        const afterPatch = pg.disk();
+        const took = await pg.H.take({ key: HOURK, value: 50, untilRel: 3600e3, shown: 0 });   // (2) a timed raise over the blank — its «now» is 0 (none)
+        const during = A.budgetLimits((k) => pg.router.readSettings()[k]).perIdentityHour;
+        await pg.H.returnHold(HOURK, 'moment');
+        const afterHold = pg.disk(), back = pg.notices.find((m) => m && m.type === 'server-notice');
+        await pg.close();
+        ok('§5g (3) THE CURE: the Settings page\'s POST of a cleared hour cap stores it BLANK — «no limit is set», every unattended turn refused and said', posted === 200 && afterPost[HOURK] === '' && refusedSaid(afterPost), JSON.stringify(afterPost));
+        ok('§5g (3) …(1) a later patch of ANOTHER row keeps the blank — still refused and said', afterPatch[HOURK] === '' && afterPatch['ui.anotherRow'] === 2 && refusedSaid(afterPatch), JSON.stringify(afterPatch));
+        ok('§5g (3) …(2) a timed raise over the blank (its «now» read as none = 0: a raise) and its return — the blank comes back, still refused and said; the notice says «none» with the row\'s link, never an empty value',
+          !!took && took.ok && took.before === '' && during === 50 && afterHold[HOURK] === '' && refusedSaid(afterHold) && !!back && back.i18n && back.i18n.key === '{label} is back to none — the hold ended: every turn nobody typed is held until a number is set: {link}' && /vibespace:\/\/settings\/spend\.unattendedPerIdentityHour/.test(back.i18n.params.link), JSON.stringify({ took, during, afterHold, back }));
+      }
+      {
+        // a cap's NULL already on disk (an older build, a hand edit): a patch of another row never drops it, and (b) a tool's PATCH of an
+        // unrelated row is not refused for a spend row nobody touched (the stored null is not rewritten under its feet)
+        const pg = await pageRun(require(path.join(REPO, 'src/routes/persistence.js')), { file: { [HOURK]: null, 'ui.someRow': 1 } });
+        pg.router.patchSettings({ 'ui.anotherRow': 2 });
+        const afterPatch = pg.disk();
+        const tool = await pg.send('PATCH', { 'ui.someRow': 3 }, { authorization: 'Bearer agent-key' });
+        const afterTool = pg.disk();
+        await pg.close();
+        ok('§5g (3) THE CURE: a cap\'s stored NULL survives a patch of another row (the internal door drops only a null it carries) — refused and said', afterPatch[HOURK] === null && refusedSaid(afterPatch), JSON.stringify(afterPatch));
+        ok('§5g (3) (b) a tool\'s PATCH of an UNRELATED row is not refused by a spend row nobody touched — the stored null stays as it was', tool === 200 && afterTool['ui.someRow'] === 3 && afterTool[HOURK] === null, JSON.stringify({ tool, afterTool }));
+      }
+      // RED COPIES (setup-checked anchors; a copy whose line is gone fails by name)
+      {
+        const PSRC = read('src/routes/persistence.js');
+        const POSTB = "    blankCaps(data);   // B-0a33 cure:", PATCHI = "if (v === null && (!SPEND_CAP_KEYS.has(k) || Object.prototype.hasOwnProperty.call(patch, k))) delete merged[k]; }", PATCHB = "    const merged = { ...current, ...blankCaps({ ...patch }) };";
+        ok('§5g (3) setup: the POST\'s blank, the internal door\'s carried-null rule and the PATCH\'s own-blank are each in persistence.js once', PSRC.split(POSTB).length === 2 && PSRC.split(PATCHI).length === 2 && PSRC.split(PATCHB).length === 2);
+        const m1 = mutantModule('src/routes/persistence.js', [[POSTB, '    // no blank:']]);
+        if (!m1.err) { const pg = await pageRun(m1.mod); await pg.send('POST', { [HOURK]: null }); const d1 = pg.disk(); await pg.close(); ok('§5g (3) CONTROL: without the POST\'s blank the cleared cap is stored NULL — the leg above goes red', d1[HOURK] === null, JSON.stringify(d1)); } else ok('§5g (3) CONTROL: the POST copy loads', false, m1.err);
+        const m2 = mutantModule('src/routes/persistence.js', [[PATCHI, 'if (v === null) delete merged[k]; }']]);   // stale-pins: kept (the OLD line is the copy compiled back in, never an anchor)
+        if (!m2.err) { const pg = await pageRun(m2.mod, { file: { [HOURK]: null, 'ui.someRow': 1 } }); pg.router.patchSettings({ 'ui.anotherRow': 2 }); const d2 = pg.disk(); await pg.close(); ok('§5g (3) CONTROL: with every null dropped, another row\'s patch removes the cap — the default 30 again, in silence — RED', !(HOURK in d2) && A.budgetLimits((k) => d2[k]).perIdentityHour === 30, JSON.stringify(d2)); } else ok('§5g (3) CONTROL: the patch copy loads', false, m2.err);
+        const m3 = mutantModule('src/routes/persistence.js', [[PATCHB, '    const merged = blankCaps({ ...current, ...patch });']]);
+        if (!m3.err) { const pg = await pageRun(m3.mod, { file: { [HOURK]: null, 'ui.someRow': 1 } }); const st = await pg.send('PATCH', { 'ui.someRow': 3 }, { authorization: 'Bearer agent-key' }); await pg.close(); ok('§5g (3) CONTROL (b): a PATCH that rewrites the stored null refuses the tool\'s unrelated PATCH (403, a spend row nobody touched) — RED', st === 403, String(st)); } else ok('§5g (3) CONTROL: the PATCH copy loads', false, m3.err);
+      }
     }
     const m = mutantModule('src/spend-authorizer.js', [["      if (!Number.isFinite(n) || n < 0) { unset.push(field); return 0; }\n", "      if (!Number.isFinite(n) || n < 0) return v === null || (typeof v === 'string' && !v.trim()) ? 0 : dflt;\n"]]);
     ok('§5g (3) CONTROL: the release\'s reading re-applied to a copy (the patch hit)', !m.err && m.hits === 1, m.err || '');

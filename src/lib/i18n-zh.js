@@ -11057,6 +11057,7 @@ export default {
   "{label} could not go back: it stays at {value}": "{label}没能改回：它仍是 {value}", // lane setting-doors pick 2 (the check)
   "The hold said it would go back to {back} at {at}; the settings file could not be written ({why}) — tried {n} times, a minute apart. The next start of VibeSpace tries again. Change it on the row: {link}": "保持原本会在 {at} 回到 {back}；设置文件无法写入（{why}）——已每隔一分钟试了 {n} 次。VibeSpace 下次启动时会再试。请到那一行修改：{link}", // lane setting-doors pick 2 (the check)
   "{label} is back to {value} — the hold ended: {link}": "{label}已回到 {value}——保持已结束：{link}", // lane setting-doors pick 2 (the check)
+  "{label} is back to none — the hold ended: every turn nobody typed is held until a number is set: {link}": "{label} 已恢复为「无」— 保留结束：在设置一个数字之前，所有无人输入的轮次都会被暂扣：{link}",
   "The setting holds could not be read": "无法读取设置的保持记录", // lane setting-doors pick 2 (the check)
   "data/setting-holds.json could not be read ({why}). A raised ceiling may not go back by itself — check the three ceilings: {links}": "无法读取 data/setting-holds.json（{why}）。被调高的上限可能不会自动改回——请检查这三个上限：{links}", // lane setting-doors pick 2 (the check)
   "{label} may not go back by itself": "{label}可能不会自动改回", // lane setting-doors pick 2 (the check)

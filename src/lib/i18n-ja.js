@@ -11056,6 +11056,7 @@ export default {
   "{label} could not go back: it stays at {value}": "{label}を元に戻せませんでした：{value} のままです", // lane setting-doors pick 2 (the check)
   "The hold said it would go back to {back} at {at}; the settings file could not be written ({why}) — tried {n} times, a minute apart. The next start of VibeSpace tries again. Change it on the row: {link}": "保持では {at} に {back} へ戻る予定でした。設定ファイルを書き込めませんでした（{why}）— 1 分おきに {n} 回試しました。VibeSpace の次回起動時にもう一度試します。その行で変更してください：{link}", // lane setting-doors pick 2 (the check)
   "{label} is back to {value} — the hold ended: {link}": "{label}が {value} に戻りました — 保持は終了しました：{link}", // lane setting-doors pick 2 (the check)
+  "{label} is back to none — the hold ended: every turn nobody typed is held until a number is set: {link}": "{label} は「なし」に戻りました — 保留は終わりました：数値を設定するまで、誰も入力していないターンはすべて保留されます：{link}",
   "The setting holds could not be read": "設定の保持を読み込めませんでした", // lane setting-doors pick 2 (the check)
   "data/setting-holds.json could not be read ({why}). A raised ceiling may not go back by itself — check the three ceilings: {links}": "data/setting-holds.json を読み込めませんでした（{why}）。引き上げた上限が自動で戻らない可能性があります — 3 つの上限を確認してください：{links}", // lane setting-doors pick 2 (the check)
   "{label} may not go back by itself": "{label}が自動で戻らない可能性があります", // lane setting-doors pick 2 (the check)

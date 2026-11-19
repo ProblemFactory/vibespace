@@ -56,8 +56,12 @@ function create({ dataDir, readSettings, patchSettings, broadcast = () => { }, u
   /** the holds on disk — the store writer's own act; false = not durable (the caller refuses the press) */
   async function save() { try { W().dirty(file, { name: 'setting-holds.write', produce, allowEmpty: true }); return (await W().durable(file)) !== false; } catch { return false; } }
   const saveLater = (what) => { save().then((ok) => { if (!ok) log(`[setting-holds] ${what} is not on disk yet — the next start reads the row and ends what it no longer holds`); }); };
-  const stored = (key) => { const s = readSettings() || {}; return Object.prototype.hasOwnProperty.call(s, key) ? s[key] : null; };
-  const valueIn = (s, key) => { const v = s && Object.prototype.hasOwnProperty.call(s, key) ? s[key] : null; return NUM(v) != null ? v : AS.PROPOSABLE[key] ? AS.PROPOSABLE[key].def : null; };
+  // B-0a33 cure (主开发 04:23Z): a ceiling the row holds with NO NUMBER (blank, a stored null, a text, a negative) is «no limit is set»
+  // — refused, read 0 (as budgetLimits reads it), never the default; its «before» is BLANK, so a return writes it back as it was. null
+  // stays «absent — the row's default» (a sparse store), the only value a return drops
+  const noNumber = (v) => !(Number.isFinite(AS.NUM(v)) && AS.NUM(v) >= 0);
+  const stored = (key) => { const s = readSettings() || {}; return Object.prototype.hasOwnProperty.call(s, key) ? (s[key] === null ? '' : s[key]) : null; };
+  const valueIn = (s, key) => { const has = !!s && Object.prototype.hasOwnProperty.call(s, key), v = has ? s[key] : null; return NUM(v) != null ? v : has && AS.PROPOSABLE[key] && noNumber(v) ? 0 : has && AS.PROPOSABLE[key] ? AS.NUM(v) : AS.PROPOSABLE[key] ? AS.PROPOSABLE[key].def : null; };
   const presentOf = (key) => valueIn(readSettings() || {}, key);
   const backOf = (key, h) => (h.before == null ? (AS.PROPOSABLE[key] ? AS.PROPOSABLE[key].def : null) : h.before);
   const disarm = (key) => { const t = timers.get(key); if (t) clearTimer(t); timers.delete(key); };
@@ -110,9 +114,10 @@ function create({ dataDir, readSettings, patchSettings, broadcast = () => { }, u
     delete holds[key]; disarm(key); tries.delete(key);
     saveLater(`${key}: the hold's end`);
     const back = backOf(key, h);
-    log(`[setting-holds] ${key}: back to ${h.before == null ? `the default (${back})` : h.before} (${why})`);
-    const i18n = { key: '{label} is back to {value} — the hold ended: {link}', params: { label: LABEL(key), value: String(back), link: AS.LINK(key) } };
-    try { broadcast({ type: 'server-notice', key: `setting-hold-return:${key}:${now()}`, level: 1, text: `${labelEn(key)} is back to ${back} — the hold ended: ${AS.LINK(key)}`, i18n }); } catch { /* no clients */ }
+    const none = h.before != null && noNumber(h.before);   // B-0a33 cure: back to «no limit is set» — said as «none», never an empty value
+    log(`[setting-holds] ${key}: back to ${h.before == null ? `the default (${back})` : none ? 'none (no number: every turn nobody typed refused)' : h.before} (${why})`);
+    const i18n = none ? { key: '{label} is back to none — the hold ended: every turn nobody typed is held until a number is set: {link}', params: { label: LABEL(key), link: AS.LINK(key) } } : { key: '{label} is back to {value} — the hold ended: {link}', params: { label: LABEL(key), value: String(back), link: AS.LINK(key) } };
+    try { broadcast({ type: 'server-notice', key: `setting-hold-return:${key}:${now()}`, level: 1, text: none ? `${labelEn(key)} is back to none — the hold ended: every turn nobody typed is held until a number is set: ${AS.LINK(key)}` : `${labelEn(key)} is back to ${back} — the hold ended: ${AS.LINK(key)}`, i18n }); } catch { /* no clients */ }
     tell();
     return { ok: true, returned: true, value: back };
   }

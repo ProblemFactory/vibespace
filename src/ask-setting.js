@@ -70,7 +70,7 @@ function parseUntil(spec, { now = Date.now(), tzOffsetMin = -new Date(now).getTi
  *  between keeps the hold live on the old value, never stranded). PURE: the store, the card and Settings ask THIS. */
 const holdIsLive = (h, present) => !!h && typeof h === 'object' && Number.isFinite(NUM(present)) && (NUM(h.value) === NUM(present) || (h.pending !== undefined && NUM(h.pending) === NUM(present)));
 /** WHILE A HOLD IS LIVE, THE ROW'S LASTING VALUE IS THE HOLD'S «BEFORE» (law A) — null = the row's default. */
-const lastingOf = (key, h) => (h && h.before != null && Number.isFinite(NUM(h.before)) ? NUM(h.before) : PROPOSABLE[key] ? PROPOSABLE[key].def : NaN);
+const lastingOf = (key, h) => (h && h.before != null ? (Number.isFinite(NUM(h.before)) && NUM(h.before) >= 0 ? NUM(h.before) : 0) : PROPOSABLE[key] ? PROPOSABLE[key].def : NaN);   // B-0a33 cure: a «before» holding no number (blank) lasts as 0 — «no limit is set», never the default
 
 /** THE ASK'S VERDICT → { ok, action } | refusal. `present` = the row's value now (the server's own reading); `lasting` = the row's
  *  LASTING value when a live hold stands (its «before», law A). Amendment 1: a value above the lasting one with no «until» is a
@@ -78,7 +78,9 @@ const lastingOf = (key, h) => (h && h.before != null && Number.isFinite(NUM(h.be
 function askVerdict({ propose, until }, { present, now = Date.now(), tzOffsetMin, lasting } = {}) {
   const p = parsePropose(propose); if (!p.ok) return p;
   const u = parseUntil(until, { now, tzOffsetMin }); if (!u.ok) return u;
-  const cur = Number.isFinite(NUM(present)) ? NUM(present) : PROPOSABLE[p.key].def;
+  // B-0a33 cure: a row the settings hold with NO NUMBER (blank, null — `present` undefined is an absent row: its default) is «no limit
+  // is set», 0 — every turn nobody typed refused — so any value over it is a RAISE, never a «lower» from the default
+  const cur = Number.isFinite(NUM(present)) && NUM(present) >= 0 ? NUM(present) : present !== undefined ? 0 : PROPOSABLE[p.key].def;
   const base = Number.isFinite(NUM(lasting)) ? NUM(lasting) : null;
   if (base != null && u.none && p.value > base && p.value !== cur) return { ok: false, code: 'raise-over-hold', error: `--propose ${p.key}=${p.value}: the row is held at ${cur} for now and goes back to ${base} — a lasting ${p.value} above ${base} is a RAISE and always time-boxed: add --until (5 min – 48 h); a lasting raise is the owner's own, on the row: ${LINK(p.key)}; nothing was filed` };
   if (p.value > cur && u.none && base == null) return { ok: false, code: 'raise-needs-until', error: `--propose ${p.key}=${p.value}: a RAISE (it is ${cur} now) is always time-boxed — add --until (5 min – 48 h), e.g. --until 6h; a lasting raise is the owner's own, on the row: ${LINK(p.key)}; nothing was filed` };
@@ -116,4 +118,4 @@ function proposedLine(action) {
 const isProposable = (key) => Object.prototype.hasOwnProperty.call(PROPOSABLE, key);
 /** THE one test every surface asks: an item's action is a proposed change of a row on the closed list */
 const isSettingChange = (a) => !!a && typeof a === 'object' && a.type === TYPE && isProposable(a.key);
-module.exports = { TYPE, isSettingChange, PROPOSABLE, MIN_MS, MAX_MS, LINK, parsePropose, parseUntil, askVerdict, pressVerdict, proposedLine, isProposable, holdIsLive, lastingOf };
+module.exports = { TYPE, isSettingChange, PROPOSABLE, MIN_MS, MAX_MS, LINK, parsePropose, parseUntil, askVerdict, pressVerdict, proposedLine, isProposable, holdIsLive, lastingOf, NUM };

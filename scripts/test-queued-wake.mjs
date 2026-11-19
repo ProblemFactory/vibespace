@@ -32,7 +32,7 @@ const X = 'bbbbbbbb-0000-4000-8000-00000000000b';   // the addressee
 const T_TURN = Date.parse('2026-11-11T17:10:03Z');   // the incident's run_command
 
 /** a hub with ONE addressee session (`be`), in a turn or idle, its wrapper replaced by the hooks the stdout consumers call */
-function world(be = 'antigravity', { streaming = true, dataDir = null, store = null, mod = DELIVER, ge = GE, guard = null, caps = null, pid = process.pid } = {}) {
+function world(be = 'antigravity', { streaming = true, dataDir = null, store = null, mod = DELIVER, ge = GE, guard = null, caps = null, pid = process.pid, overCap = false } = {}) {
   const dir = dataDir || fs.mkdtempSync(path.join(ROOT, be + '-'));
   fs.mkdirSync(path.join(dir, 'session-buffers'), { recursive: true });
   const st = store || createChannelStore({ dir: path.join(dir, 'channels') });
@@ -46,6 +46,7 @@ function world(be = 'antigravity', { streaming = true, dataDir = null, store = n
     peerMsg: { findPeer: (cid) => (be === 'claude' && cid === X ? { name: 'xray', socketPath: '/dev/null', pid: process.pid } : null), postToPeer: async (peer, text) => { posts.push(text); return { ok: true }; }, postChannelEvent: async () => ({ ok: false }) },
     emitPeerCard: () => true,
     reservationState: guard ? (rid) => guard.reservationState(rid) : null,
+    waitingReservations: guard && overCap ? () => guard.waitingReservations() : null,   // B-0a33 cure (c): the guard's waiting reservations (and overCap) — opt-in, as server.js wires it
     authorizeSpend: (req) => { money.auth++; if (guard) return guard.authorize(req); return { ok: true, identity: { key: 'slot-1', name: 'slot one' }, hold: 'h' + money.auth }; },
     noteSpend: (rec) => { money.notes.push({ reason: rec && rec.reason, identity: rec && rec.identity && rec.identity.key, reservation: (rec && rec.reservation) || null, carried: !!(rec && rec.carried) }); if (guard) guard.note(rec); }, releaseSpend: (rec) => { money.releases++; if (rec && rec.reservation) money.returned.add(rec.reservation); if (guard) guard.release(rec); },
     log: () => { },
@@ -750,6 +751,50 @@ const lastWrite = (w) => (w.writes.length ? JSON.parse(w.writes[w.writes.length 
   ok('㉒ F: a readable file is written at once, its frame kept beside the new one — the guard holds only what could not be read', !!fw && fw.entries.length === 2 && fw.entries.some((x) => x.id === 'old-1') && f.reads === 1, S({ fw }));
   ok('㉒ persist() asks stillUnread() before every write, and the boot and the re-read share ONE reader (readHeld)',
     /function persist\(\) \{\n    if \(stillUnread\(\)\) \{/.test(read('src/server/queued-wakes.js')) && read('src/server/queued-wakes.js').split('readHeld()').length === 3);
+}
+
+console.log('㉔ AN OLD AGENT\'S FRAME, SAID FOR REAL (B-0a33 cure (c)) — the REAL ladder\'s pullQueued answers «no-remove», the REAL guard files the For-you line');
+{
+  const GUARDm = require(path.join(REPO, 'src/server/spend-guard.js'));
+  const run = async (mod) => {
+    const dir = fs.mkdtempSync(path.join(ROOT, 'unheld-')); const settings = { 'spend.unattendedPerIdentityHour': 5 }; const filed = [];
+    const ut = { add: (key, it) => { filed.push({ key, it }); return { id: 'u' + filed.length }; }, idsWhere: () => [], setStatus: () => { } };
+    const guard = GUARDm.create({ dataDir: dir, serverSetting: (k) => settings[k], identityOf: () => ({ key: 'slot-1', name: 'slot one' }), getUserTodos: () => ut, log: () => { } });
+    const W = world('antigravity', { dataDir: dir, guard, mod, overCap: true });   // the agy advert serves no «remove»: an agent too old to give a frame back
+    const gid = (await W.eng.sendToAgent({ from: A, to: X, text: 'hello', wake: false })).group.id;
+    await W.eng.post({ group: gid, from: A, text: 'held behind the turn', wake: true });
+    W.deliver.noteQueueItems(X, [{ id: 'q1', kind: 'peer', from: 'alpha' }], { fresh: true }); W.settle('queued');
+    settings['spend.unattendedPerIdentityHour'] = 0;   // the cap lowered below what waits
+    W.deliver.queuedEntries(X);   // a sweep: ageOut → rejudge → the real pullQueued
+    return filed.filter((f) => f.it && typeof f.it.itemKey === 'string' && f.it.itemKey.startsWith('spend-unheld:'));
+  };
+  const got = await run(DELIVER);
+  ok('㉔ a frame waiting in an agent that serves no «remove», the cap lowered below it: the REAL pullQueued answers no-remove and the REAL guard files ONE For-you line, under the conversation it waits behind',
+    got.length === 1 && /could not be held: its agent is too old to give a queued message back/.test(got[0].it.text) && got[0].it.sessionName === 'Spending', JSON.stringify(got.map((g) => ({ key: g.key, text: g.it.text, itemKey: g.it.itemKey }))));
+  const dsrc = read('src/server/conversation-deliver.js'), NR = "return 'no-remove';";
+  ok('㉔ setup: pullQueued\'s «no-remove» is in the ladder once', dsrc.split(NR).length === 2);
+  const NoNR = mutantCopies('queued-wake-nr', REPO).load('src/server/conversation-deliver.js', dsrc.replace(NR, 'return false;'), 'no-remove-false');
+  ok('㉔ CONTROL: a ladder whose pullQueued still answers false files NO line — the person is never told (㉔ can go red)', (await run(NoNR)).length === 0);
+}
+
+console.log('㉕ A SETTINGS WRITE ASKS AGAIN (B-0a33 cure (d)) — the re-judge paces its asks; `fresh` (a write that moved the caps) asks every frame over a cap once more');
+{
+  const QWm = require(path.join(REPO, 'src/server/queued-wakes.js'));
+  const run = (mod) => {
+    const pulls = []; let over = [];
+    const q = mod.create({ dataDir: fs.mkdtempSync(path.join(ROOT, 'qw-fresh-')), writer: { dirty() { } }, noteSpend: () => { }, releaseSpend: () => { }, waitingOverCap: () => over, pull: (cid, item) => { pulls.push(item); return true; }, log: () => { } });
+    const e = q.noteWritten('conv-f', { charged: { reason: 'peer-message' }, text: 'F', fromName: 'alpha', holder: '4242' });
+    q.answer(e.id, { mode: 'queued' }); over = [e.id];
+    q.noteQueue('conv-f', [{ id: 'f1', kind: 'peer', from: 'alpha' }], '4242', { fresh: true });   // bound — and judged (one ask)
+    const afterBind = pulls.length; q.rejudge(); const afterSweep = pulls.length; q.rejudge({ fresh: true }); const afterWrite = pulls.length;
+    return { afterBind, afterSweep, afterWrite };
+  };
+  const r = run(QWm);
+  ok('㉕ a frame over the cap is asked back ONCE for what it is (bound: one ask); a sweep asks nothing more; a settings write (`fresh`) asks it once more', r.afterBind === 1 && r.afterSweep === 1 && r.afterWrite === 2, JSON.stringify(r));
+  const qsrc = read('src/server/queued-wakes.js'), FR = 'if (!fresh && e.pulled && (';
+  ok('㉕ setup: the re-judge\'s fresh test is in queued-wakes once', qsrc.split(FR).length === 2);
+  const NoFresh = mutantCopies('queued-wake-fresh', REPO).load('src/server/queued-wakes.js', qsrc.replace(FR, 'if (e.pulled && ('), 'no-fresh');
+  ok('㉕ CONTROL: a re-judge that ignores `fresh` never asks again after a settings write (㉕ can go red)', run(NoFresh).afterWrite === 1, JSON.stringify(run(NoFresh)));
 }
 
 console.log('⑩ RED CONTROLS — patched copies: each law-1 rule removed, its leg goes red');
