@@ -1393,8 +1393,9 @@ app.get('/api/agent/task', function taskShowRoute(req, res) {
 // EXCEPT (the U4/U5 cure, 主开发's as-if-musts) an act that TAKES ACCESS AWAY (a group-admin unbind; an update — it can narrow
 // the folders or the context folder, or archive the group) and a backlog CLAIM (two agents are never both told they own a
 // row): those answer once task-groups.json holds them, on the writer's synchronous road (bounded 20 s, under the CLI's 30 s;
-// not landed ⇒ notOnDisk in the answer — the act stays applied in memory and the writer retries). An act that only ADDS
-// (create, bind) answers at once: a kill that loses it gives less access, never more.
+// not landed ⇒ notOnDisk in the answer — the act stays applied in memory and the writer retries). The deferred-save census (lane
+// lg-store-writes, 主开发 03:00Z): the group-admin create and bind and a progress note wait too — «done» is never said for what a kill
+// would lose; a backlog ADD keeps its own law (it answers in its run: the row is the caller's alone — test-backlog-no-truncation).
 function answerOnDisk(res, body) {
   if (typeof tasks.persisted !== 'function') return void res.json(body);
   tasks.persisted((saved) => { try { require('./store-writer.js').identityAtExit(res); res.json(saved ? body : { ...body, notOnDisk: true }); } catch { } });
@@ -1415,7 +1416,7 @@ app.post('/api/agent/task-progress', function taskProgressRoute(req, res) {
     // lane cli-call-timeouts: the answer follows the STORE's hand-off (lane lg-store-writes U5: to the store writer, as an act — on disk within its next writes); the shared folder's TASK.md is mirrored after it, bounded
     // (task-groups _queueMirror) — when that copy is behind (a write slower than its bound, or failed), the answer says so
     const mirror = tasks.mirrorStateOf ? tasks.mirrorStateOf(gid) : null;
-    res.json({ success: true, progress: t.progress.slice(-3).map(taskEntryAnswer), entry: taskEntryAnswer(t.progress[t.progress.length - 1] || null), ...(kept ? { chars: cliText.chars(kept.note), ...(kept.detail ? { detailChars: cliText.chars(kept.detail) } : {}) } : {}), ...(mirror && mirror.behind ? { mirror: { behind: true, since: mirror.since, why: mirror.why } } : {}) });   // verify r4 F1: the last three entries are other sessions' too
+    answerOnDisk(res, { success: true, progress: t.progress.slice(-3).map(taskEntryAnswer), entry: taskEntryAnswer(t.progress[t.progress.length - 1] || null), ...(kept ? { chars: cliText.chars(kept.note), ...(kept.detail ? { detailChars: cliText.chars(kept.detail) } : {}) } : {}), ...(mirror && mirror.behind ? { mirror: { behind: true, since: mirror.since, why: mirror.why } } : {}) });   // verify r4 F1: the last three entries are other sessions' too
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 // `vibespace-task progress-redact <P-id|at>` ("Clear content…", 2026-09-28): an
@@ -1584,8 +1585,8 @@ app.post('/api/agent/task-backlog', function taskBacklogRoute(req, res) {
       const n = backlogNudge(updated.backlog, key, { threshold: nudgeThreshold(raw) });
       if (n) nudge = { text: nudgeText(n, String(req.query?.group || req.body?.group || '').trim() ? `--group ${gid} ` : ''), owned: n.owned, stale: n.stale, threshold: n.threshold };
     }
-    // the U4/U5 cure: a CLAIM answers once on disk (a claim lost at a kill would let a second agent claim the row); every
-    // other backlog verb answers at once
+    // the U4/U5 cure: a CLAIM answers once on disk (a claim lost at a kill would let a second agent claim the row); every other backlog
+    // verb answers in its own run — an ADD gives the caller a row nobody else holds (test-backlog-no-truncation's law; the census row says it)
     (claim !== undefined ? answerOnDisk : (r0, b0) => r0.json(b0))(res, {
       success: true,
       backlog: sortBacklog(updated.backlog.filter((b) => b.status === 'open')).map(taskItemAnswer),   // verify r4 F1: through the belt
@@ -1650,7 +1651,7 @@ app.post('/api/agent/group-admin', (req, res) => {
         color: create.color ? String(create.color) : undefined,
       });
       audit(t.id, '[group-admin] group created by manager agent');
-      return res.json({ success: true, group: brief(tasks.view(t.id)) });
+      return answerOnDisk(res, { success: true, group: brief(tasks.view(t.id)) });   // the deferred-save census: waits for the store
     }
     if (update && update.id) {
       const patch = {};
@@ -1669,7 +1670,7 @@ app.post('/api/agent/group-admin', (req, res) => {
       const sk = String(bind.sessionKey || key);
       convOps.forDeps({ tasks }).bindConversation({ sessionKey: sk }, bind.id, { kind: 'agent', cid: s.claudeSessionId || s.backendSessionId || null }); // lane automation-verbs: THE seam, over the task store these routes were handed (an in-process hub has its own); the audit line below stays the manager's
       audit(bind.id, `[group-admin] session ${sk} bound by manager agent`);
-      return res.json({ success: true, group: brief(tasks.view(bind.id)) });
+      return answerOnDisk(res, { success: true, group: brief(tasks.view(bind.id)) });   // the deferred-save census: waits for the store
     }
     if (unbind && unbind.id) {
       const sk = String(unbind.sessionKey || key);

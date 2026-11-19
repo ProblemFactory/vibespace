@@ -135,6 +135,8 @@ const VAULT_FILL_TICKET_MAX = 256;
 // not yet ⇒ said by its code — the step that cannot be undone follows by itself at the landing (src/lib/utils.js sayNotOnDisk)
 const REPLY_LAND_MS = 20000;
 const FINISHES = Object.freeze({ notOnDisk: true, code: 'finishes-on-landing' });
+/** the registry as it is now, LANDED (bounded) — a create's answer waits for it (the deferred-save census: «created» never said for a queued record) */
+const landedOf = (k) => (typeof k.whenLanded === 'function' ? k.whenLanded({ timeoutMs: REPLY_LAND_MS }) : Promise.resolve({ landed: true }));
 function setup(deps) {
   ctx = deps;
   vaultFillTickets.clear();
@@ -634,7 +636,8 @@ router.post('/api/browser/profiles', async (req, res) => {
     const opts = { owner: { kind: 'instance', id: null }, by: 'user', builds, engine, ...(u.use ? { use: u.use, knownKeys: u.knownKeys } : {}) };
     // lane browser-profile-clone (B-9669): "Copy logins from" — the copy of a stopped profile's folder (a running one is stopped first)
     if (input.cloneFrom != null) return res.json({ profile: await k.cloneProfile(input, { ...opts, nameOf: cloneHolderName }) });
-    res.json({ profile: k.createProfile(input, opts) });
+    const created = k.createProfile(input, opts);
+    return landedOf(k).then((L) => res.json({ profile: created, ...(L && L.landed ? {} : FINISHES) }));   // the deferred-save census: waits for the record
   } catch (e) { fail(res, e); }
 });
 /** lane browser-profile-clone: a lease holder's name as the user sees it (the live conversation's), null when not running. */
@@ -2717,7 +2720,8 @@ router.post('/api/agent/browser/new', (req, res) => {
     }
     // owner ruling A ("A吧"): an agent's `new` makes a profile EVERY conversation of the owner can use — the study's path A
     // (`new work` in one chat, `use work` in the next ⇒ not_owner) is gone; only the user's row switch keeps one to one chat
-    res.json({ profile: view(k.createProfile(req.body || {}, { owner: { kind: 'instance', id: null }, createdBy: f.browserKey, by: 'agent' })) });
+    const created = view(k.createProfile(req.body || {}, { owner: { kind: 'instance', id: null }, createdBy: f.browserKey, by: 'agent' }));
+    return landedOf(k).then((L) => res.json({ profile: created, ...(L && L.landed ? {} : FINISHES) }));   // the deferred-save census: waits for the record
   } catch (e) { fail(res, e); }
 });
 /** lane e2a: the desktop-app door's launch — the engine's facts from the SAME session token the belt admitted. */

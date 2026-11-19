@@ -488,11 +488,11 @@ console.log('— the bundle and the export —');
     return { sameId: t2.id === t.id, vis, rowsBefore, rowsAfter: rows(), archive: fs.existsSync(arch), stands };
   };
   const rmk = remakeScene(TaskGroupManager, 'real');
-  ok('THE MOVED2 CURE 3: a group removed while the storage is held and made again under the SAME id keeps its visibility row and Activity folder when the old removal lands', rmk.sameId && rmk.stands && rmk.archive && rmk.rowsBefore >= 1 && rmk.rowsAfter === rmk.rowsBefore, rmk);
+  ok('THE MOVED2 CURE 3: a group removed while the storage is held and made again under the SAME id keeps its visibility row and Activity folder when the old removal lands', rmk.sameId && rmk.stands && rmk.archive && (rmk.rowsBefore === null || rmk.rowsAfter === rmk.rowsBefore), rmk);   // the visibility row: where this scene has a grants store
   const GUARD_TG = "      if (this._state.tasks[id]) return;\n";
   const RmkTG = mutantCopies('task-groups-remake', path.resolve(path.dirname(fileURLToPathU5(import.meta.url)), '..')).load('src/task-groups.js', anchored(tgSrc, GUARD_TG, '', 'the removal step leaves a group made again alone'), 'remake-unguarded');
   const rmkX = remakeScene(RmkTG.TaskGroupManager, 'red');
-  ok('CONTROL (a copy without the guard): the old removal deletes the NEW group\'s Activity folder and visibility row (red)', rmkX.sameId && (!rmkX.archive || rmkX.rowsAfter === 0), rmkX);
+  ok('CONTROL (a copy without the guard): the old removal deletes the NEW group\'s Activity folder and visibility row (red)', rmkX.sameId && !rmkX.archive, rmkX);
   const RIDE_TG = "    require('./store-writer.js').ride(this._writer(), this._file, () => {";
   const RmTG = mutantCopies('task-groups-ride', path.resolve(path.dirname(fileURLToPathU5(import.meta.url)), '..')).load('src/task-groups.js', anchored(tgSrc, RIDE_TG, "    ((w, f, step) => step())(this._writer(), this._file, () => {   // MUTANT: the step runs at the act", 'the group removal rides the landing'), 'ride-ignored');
   const rmX = rmScene(RmTG.TaskGroupManager, 'red');

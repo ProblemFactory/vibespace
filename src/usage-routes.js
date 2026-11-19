@@ -1103,7 +1103,9 @@ app.post('/api/usage/refresh', async (req, res) => {
         // enumerating producer (r5) — see refreshViaCliPanel
         authoritativeScopes: authoritativeScopesOf(u), absentWindows: quotaModel.absentWindowsOf(u),
       });
-      res.json({ success: true, origin: 'device' });
+      // the deferred-save census (its usage pass): the answer waits for the reading to LAND (bounded) — never «done» for a queued reading
+      return usageWrite.afterLanded(usageWrite.cacheFileFor(USAGE_CACHE_DIR, 'host-' + hid.replace(/[^\w-]/g, '_')), () => true, { timeoutMs: 20000 })
+        .then((L) => res.json({ success: true, origin: 'device', ...(L && L.landed ? {} : { notOnDisk: true }) }));
     }).catch((e) => _deviceSaid(e, () => hosts.readRemoteOAuth(hid)).then((token) => {
       _onDemandUsageAt['host:' + hid] = Date.now(); // stamp only after the probe reached the host
       if (!token) return res.json({ error: 'no currently-valid login token on the host — log in / run claude there first' });

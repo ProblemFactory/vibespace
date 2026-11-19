@@ -109,7 +109,9 @@ function createCliUsageDoor({ accounts, harnessOf, cliCmds, cacheDir, usageWrite
     // the file names its harness (`backend`): its projected buckets must never be lifted as claude's (usage-cache-write)
     const w = usageWrite.writeReading({ cacheDir, key: id, set, extras: { backend: be }, source: od.source, backend: be });
     if (!w || !w.ok) return { ok: false, status: 500, code: 'write-refused', error: (w && (w.why || (w.errors || []).join('; '))) || 'the write path refused the reading' };
-    return { ok: true, status: 200, key: id, shape: j.shape, fetchedAt: set.fetchedAt, limits: set.limits.length };
+    // the deferred-save census (its usage pass): the person's Re-check is answered once the reading LANDED (bounded) — not yet ⇒ said
+    const L = typeof usageWrite.afterLanded === 'function' ? await usageWrite.afterLanded(usageWrite.cacheFileFor(cacheDir, id), () => true, { timeoutMs: 20000 }) : { landed: true };
+    return { ok: true, status: 200, key: id, shape: j.shape, fetchedAt: set.fetchedAt, limits: set.limits.length, ...(L && L.landed ? {} : { notOnDisk: true }) };
   }
   return {
     PACE_MS: paceMs,

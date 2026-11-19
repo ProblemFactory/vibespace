@@ -674,6 +674,13 @@ function writeSidecar(cacheDir, name, payload, { offLoop = false } = {}) {
     return _hub.ride(file, () => true, { timeoutMs: SIDECAR_LAND_MS }).then((r) => !!(r && r.landed), () => false);
   }
   if (offLoop) return Promise.resolve(writeSidecar(cacheDir, name, payload));
+  // ONE ROAD PER FILE (the deferred-save census, hunt 3's (d)): a sidecar whose bytes are still QUEUED at the hub (an offLoop write not
+  // landed yet) takes the same queue — the newest bytes replace the queued ones; a synchronous write beside them would be landed over
+  // by the older queued copy
+  if (_hub && typeof _hub.pendingText === 'function' && typeof _hub.handOff === 'function' && _hub.pendingText(path.join(cacheDir, name)) != null) {
+    _hub.handOff(path.join(cacheDir, name), null, typeof payload === 'string' ? payload : JSON.stringify(payload), { sidecar: true });
+    return true;
+  }
   try {
     fs.mkdirSync(cacheDir, { recursive: true });
     atomicWrite(path.join(cacheDir, name), typeof payload === 'string' ? payload : JSON.stringify(payload));
@@ -685,8 +692,8 @@ const SIDECAR_LAND_MS = 20000;   // an offLoop sidecar's wait for its landing (t
 /** THE STEP THAT CANNOT BE UNDONE RIDES THE READING'S LANDING (lane lg-store-writes, the moved2 cure 2 — store-writer afterLanding,
  *  the ONE helper): `step` runs once the hub's pending copy of `file` is on disk; no hub ⇒ the reading was written at once, the step
  *  runs now (the move's hunt, B3: a verified panel clears a member's lapse in the accounts store only on its reading's landing) */
-function afterLanded(file, step) {
-  if (_hub && typeof _hub.ride === 'function') return _hub.ride(file, step, { timeoutMs: null });
+function afterLanded(file, step, { timeoutMs = null } = {}) {   // `timeoutMs`: a reply's bound (the promise says {landed:false} then; the step still rides)
+  if (_hub && typeof _hub.ride === 'function') return _hub.ride(file, step, { timeoutMs });
   let v = null; try { v = step(); } catch { }
   return Promise.resolve({ landed: true, value: v });
 }

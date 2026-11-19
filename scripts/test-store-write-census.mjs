@@ -464,18 +464,18 @@ console.log('② the moved stores hand their bytes to the writer by name; nothin
   // clear's two routes answer from the clear's own answer; a job's announce stays PACED (a watch job announces in a loop)
   const cureT = { ar: src('src/agent-routes.js'), jw: src('src/server/jobs-wiring.js'), tw: src('src/server/task-groups-wiring.js'), rcr: src('src/routes/records-clear.js'), jb };
   const cnt = (t, re) => (t.match(re) || []).length;
-  const cureAnswers = (t) => cnt(t.ar, /\ba\.jm\.persisted\(\(saved\) => \{/g) === 4 && cnt(t.jw, /\bjm\.persisted\(\(saved\) => \{/g) === 3
+  const cureAnswers = (t) => cnt(t.ar, /\ba\.jm\.persisted\(\(saved\) => \{/g) === 4 && cnt(t.jw, /\bjm\.persisted\(\(saved\) => \{/g) === 5
     && /tasks\.persisted\(\(saved\) => \{ try \{ require\('\.\.\/store-writer\.js'\)\.identityAtExit\(res\); res\.json\(saved \? body : \{ \.\.\.body, notOnDisk: true(?:, \.\.\.\(notYet \|\| \{\}\))? \}\); \} catch \{ \} \}\)/.test(t.tw) && cnt(t.tw, /\bonDisk\(res, /g) === 7
     // an answer made while the hub stops goes out UNENCODED (compression's zlib is asynchronous — process.exit comes first):
     // every answer on the synchronous road calls identityAtExit — agent-routes 6 (jobs 4, answerOnDisk, the clear verbs), the
-    // jobs panel 3, the Task Group panel's helper 1, the record clear's 2
-    && cnt(t.ar, /\bidentityAtExit\(res\)/g) === 6 && cnt(t.jw, /\bidentityAtExit\(res\)/g) === 3 && cnt(t.tw, /\bidentityAtExit\(res\)/g) === 1 && cnt(t.rcr, /\bidentityAtExit\(res\)/g) === 2
+    // jobs panel 5 (the deferred-save census: + the two seen marks), the Task Group panel's helper 1, the record clear's 2
+    && cnt(t.ar, /\bidentityAtExit\(res\)/g) === 6 && cnt(t.jw, /\bidentityAtExit\(res\)/g) === 5 && cnt(t.tw, /\bidentityAtExit\(res\)/g) === 1 && cnt(t.rcr, /\bidentityAtExit\(res\)/g) === 2
     && /await rc\.clear\(item, \{ caller: agentClearCaller\(hit\), answer \}\)/.test(t.ar)
     && /return answerOnDisk\(res, \{ success: true, group: brief\(tasks\.view\(update\.id\)\) \}\)/.test(t.ar) && /return answerOnDisk\(res, \{ success: true, group: brief\(tasks\.view\(unbind\.id\)\) \}\)/.test(t.ar)
-    && /\(claim !== undefined \? answerOnDisk : /.test(t.ar) && /return res\.json\(\{ success: true, group: brief\(tasks\.view\(bind\.id\)\) \}\)/.test(t.ar)
+    && /\(claim !== undefined \? answerOnDisk : /.test(t.ar) && /return answerOnDisk\(res, \{ success: true, group: brief\(tasks\.view\(bind\.id\)\) \}\)/.test(t.ar)
     && cnt(t.rcr, /answer: \(r\) => \{ try \{/g) === 2 && /  announce\(job, text\) \{[\s\S]{0,1600}?this\._save\(stashed \? \{\} : \{ paced: true \}\);/.test(t.jb)
     && ![t.ar, t.jw, t.tw, t.rcr].some((x) => /persisted\(\)\.then\(/.test(x));
-  ok(cureAnswers(cureT), 'the U4/U5 cure: every waiting route answers on the writer\'s synchronous road (jobs 4 + 3, the Task Group panel\'s 7, the record clear\'s 2); a group-admin unbind / update and a backlog claim wait, create / bind answer at once; announce paced (urgent only when its owner copy was only stashed — the moved2 cure 2); no persisted().then( left');
+  ok(cureAnswers(cureT), 'the U4/U5 cure: every waiting route answers on the writer\'s synchronous road (jobs 4 + 5, the Task Group panel\'s 7, the record clear\'s 2); a group-admin unbind / update / create / bind and a backlog claim wait (the deferred-save census: create and bind too); a backlog add answers at once (its own law); announce paced (urgent only when its owner copy was only stashed — the moved2 cure 2); no persisted().then( left');
   ok(!cureAnswers({ ...cureT, jw: cureT.jw.replace('jm.persisted((saved) => {', 'jm.persisted().then((saved) => {') }), 'NEGATIVE CONTROL (the U4/U5 cure): one jobs route back on the promise road is red');   // stale-pins: kept — a negative control: the route as it was before the cure
   ok(!cureAnswers({ ...cureT, ar: cureT.ar.replace('return answerOnDisk(res, { success: true, group: brief(tasks.view(unbind.id)) })', 'return res.json({ success: true, group: brief(tasks.view(unbind.id)) })') }), 'NEGATIVE CONTROL (the U4/U5 cure): a group-admin unbind answered at once is red');   // stale-pins: kept — a negative control: the route as it was before the cure
   ok(!cureAnswers({ ...cureT, jw: cureT.jw.replace("require('../store-writer.js').identityAtExit(res); ", '') }), 'NEGATIVE CONTROL (the U4/U5 cure): a jobs panel answer that may be gzipped at the stop (no identityAtExit) is red');
@@ -516,8 +516,9 @@ console.log('② the moved stores hand their bytes to the writer by name; nothin
   const uw = src('src/usage-cache-write.js'), ucHub = src('src/server/usage-cache-hub.js'), swr = src('src/store-writer.js');
   // the move's hunt (B1, LAW II): a SIDECAR is written at once, at the hub too — the statusline (another process) reads it raw
   // the moved2 cure 2: a caller that CAN wait asks `offLoop` — handed to the writer AND awaited at its landing (_hub.ride); every
-  // other road writes at once — no hand-off outside that one awaited block
-  const sideAtOnce = (t) => { const b = (t.split('function writeSidecar(')[1] || '').split('\nfunction ')[0]; const rest = b.replace(/  if \(offLoop && _hub && typeof _hub\.ride === 'function'\) \{\n[^\n]*\n[^\n]*_hub\.handOff\([^\n]*\n\s*return _hub\.ride\([^\n]*\n  \}\n/, ''); return /atomicWrite\(path\.join\(cacheDir, name\)/.test(b) && rest !== b && !/handOff\(/.test(rest); };
+  // other road writes at once — no hand-off outside that one awaited block (and the census's one-road branch: bytes still queued for that
+  // file take the same queue)
+  const sideAtOnce = (t) => { const b = (t.split('function writeSidecar(')[1] || '').split('\nfunction ')[0]; const rest = b.replace(/  if \(offLoop && _hub && typeof _hub\.ride === 'function'\) \{\n[^\n]*\n[^\n]*_hub\.handOff\([^\n]*\n\s*return _hub\.ride\([^\n]*\n  \}\n/, '').replace(/  if \(_hub && typeof _hub\.pendingText === 'function' && typeof _hub\.handOff === 'function' && _hub\.pendingText\(path\.join\(cacheDir, name\)\) != null\) \{\n[^\n]*_hub\.handOff\([^\n]*\n\s*return true;\n  \}\n/, ''); return /atomicWrite\(path\.join\(cacheDir, name\)/.test(b) && rest !== b && !/handOff\(/.test(rest); };
   const ucMoved = (t, h, b) => /  if \(_hub\) _hub\.handOff\(file, \{ at, args: \{ cacheDir, key, obj,/.test(t) && sideAtOnce(t)
     && /_W\.dirty\(file, \{ name: 'usage-cache\.write', rank: 0, makeDir: true,/.test(h) && /require\('\.\/server\/usage-cache-hub\.js'\)\.useStoreWriter\(w, \{ dropRun: require\('\.\/run-reads\.js'\)\.dropRun \}\)/.test(b);
   ok(ucMoved(uw, ucHub, swr), 'the usage readings through the store writer at the hub (U6.5: src/server/usage-cache-hub.js, injected at the server\'s boot with run-reads\' dropRun) — their SIDECARS written at once (another process reads them: the move\'s hunt, LAW II); the synchronous road only where nothing was injected (the device agent)');

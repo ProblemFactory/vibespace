@@ -292,7 +292,8 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
       if (jm.markAck(job, 'user-opened', undefined, { quiet: true })) acked.push(id);
     }
     if (acked.length) { jm._save(); try { jm.d.broadcast('jobs-updated', { acked }); } catch { } }
-    res.json({ success: true, requested: ids.length, acked: acked.length, ids: acked });
+    // the moved2 census (its jobs pass): the answer waits for the store, as every act's (a kill first: the marks were never said done)
+    jm.persisted((saved) => { try { require('../store-writer.js').identityAtExit(res); res.json({ success: true, requested: ids.length, acked: acked.length, ids: acked, ...(saved ? {} : { notOnDisk: true }) }); } catch { } });
   });
   app.post('/api/jobs/:id/:act', (req, res) => {
     const job = jm.jobs.get(req.params.id);
@@ -320,7 +321,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
       else if (act === 'wake-grant') { r = jm.setWakeGrant(job, req.body?.grant === true, { by: personHere(req) ? { kind: 'person', by: 'person' } : null }); if (r.error) return res.status(r.code === 'wake_grant_person_only' ? 403 : 400).json({ error: r.error, code: r.code }); } // lane jobs-memory-bound: the job's properties (0 = unbounded: the owner's call)
       // the user EXPANDED the row (triage §13 rule 1c): a terminal one-shot is
       // acknowledged by the person who opened it; anything else is a no-op
-      else if (act === 'seen') { const changed = jm.markAck(job, 'user-opened'); if (changed) jm._save(); return res.json({ success: true, changed, ack: M.ackState(job) }); }
+      else if (act === 'seen') { const changed = jm.markAck(job, 'user-opened'); if (!changed) return res.json({ success: true, changed, ack: M.ackState(job) }); jm._save(); return void jm.persisted((saved) => { try { require('../store-writer.js').identityAtExit(res); res.json({ success: true, changed, ack: M.ackState(job), ...(saved ? {} : { notOnDisk: true }) }); } catch { } }); }   // the moved2 census: waits for the store
       else if (act === 'access') {
         for (const k of ['view', 'control']) if (req.body?.[k] && ['session', 'group', 'all'].includes(req.body[k])) job.access[k] = req.body[k];
         job.access.lockedBy = req.body?.lock === false ? null : req.body?.lock === true ? 'user' : job.access.lockedBy;

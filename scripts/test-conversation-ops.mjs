@@ -328,8 +328,8 @@ console.log('⑥ THE WIRED AUTOMATION VERBS (automationVerbs — the engine\'s `
   ok(V['conversations.rename']({ target: id, name: 'x' }, other).code === 'not_granted' && V['conversations.end']({ target: 'dd44' }, ctx) instanceof Promise, 'another key does not reach it; a stranger conversation needs a grant');
   const strangerEnd = await V['conversations.end']({ target: 'dd44' }, ctx);
   ok(strangerEnd.code === 'not_granted' && !W.ends.some((e) => e.d.sessionId === 'sess-0-8'), 'end on a conversation the key does not reach ⇒ not_granted, nothing ended', strangerEnd);
-  const bd = V['conversations.bind']({ target: id, task: 'T-1-x' }, ctx);
-  const bdOut = V['conversations.bind']({ target: id, task: 'T-other' }, ctx);
+  const bd = await V['conversations.bind']({ target: id, task: 'T-1-x' }, ctx);   // async (the deferred-save census): «bound» once the store holds it
+  const bdOut = await V['conversations.bind']({ target: id, task: 'T-other' }, ctx);
   ok(bd.ok && JSON.stringify(W.tasks.binds.at(-1)) === JSON.stringify(['T-1-x', 'claude:ee55']) && /\[automation\] session ee55 bound by coordinator \(key ak-000000000001\)/.test(W.tasks.notes.at(-1)[1].note) && bdOut.code === 'not_granted',
     "bind: into the CALLER's own Task Group (one activity line names it and the key); another Task Group ⇒ not_granted", { bd, bdOut });
   const iv = await V['groups.invite']({ group: 'g-1', target: id }, ctx);

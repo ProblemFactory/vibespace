@@ -1058,7 +1058,7 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   const lawRm = lawRun(MJ.load('src/jobs.js', rideNow(jsrc, 'the removal'), 'law-rm-now'), 'mut-rm');
   ok(lawRm.rm.askedBefore === 1, 'CONTROL (a copy whose removal runs its step at the act): its asks are resolved while NOTHING is on disk — red', lawRm.rm);
   const CLEAR_A = "    if (askGone.length) this._ride(this.file, 'the cleared asks', () => {";
-  const lawCl = lawRun(MJ.load('src/jobs.js', anchored(jsrc, CLEAR_A, "    if (askGone.length) ((f, w, step) => step())(this.file, 'the cleared asks', () => {   // MUTANT: the step runs at the act", 'the cleared asks ride the landing'), 'law-clear-now'), 'mut-clear');
+  const lawCl = lawRun(MJ.load('src/jobs.js', anchored(jsrc, CLEAR_A, "    if (askGone.length) ((f, w, step) => step())(this.file, 'the cleared asks', () => { /* MUTANT: the step runs at the act */", 'the cleared asks ride the landing'), 'law-clear-now'), 'mut-clear');
   ok(lawCl.clear.askedBefore === 1, 'CONTROL (a copy whose clear runs its step at the act): the asked job\'s For-you item closes while NOTHING is on disk — red', lawCl.clear);
   const DRAIN_A = "    // stays, a write that does not land is the writer's to retry (_onDisk says it)\n    this._saveNotifs();\n";
   const lawDr = lawRun(MJ.load('src/jobs.js', anchored(jsrc, DRAIN_A, "    // stays, a write that does not land is the writer's to retry (_onDisk says it)\n    if (this._writer().pending(this.notifsFile)) this.pendingNotifs.set(cid, [...(this.pendingNotifs.get(cid) || []), ...q]);   // MUTANT: the first cure's put-back\n    this._saveNotifs();\n", 'the drain puts nothing back'), 'law-drain-back'), 'mut-drain');
@@ -1189,6 +1189,7 @@ console.log('§17 B-8bd5: the job that filed a panel withdraws it once its cause
     const waiting = J.waitFor(J.ansWaiters, job.id, 60_000).then(() => 'woken');
     const asked = job.state;
     const w = J.withdrawAsk(job);
+    landedU4();   // the deferred-save census: the withdraw's steps (the mirror, the wait, the For-you item) ride its landing — landed here
     const woke = await Promise.race([waiting, new Promise((r) => setImmediate(() => r('still waiting')))]);
     const again = J.withdrawAsk(job);
     let tail = ''; for (let k = 0; k < 50 && !tail; k++) { try { tail = fs.readFileSync(path.join(ctl, 'answers.jsonl'), 'utf8'); } catch { } if (!tail) await new Promise((r) => setTimeout(r, 10)); }   // the mirror appends OFF the loop
@@ -1199,14 +1200,15 @@ console.log('§17 B-8bd5: the job that filed a panel withdraws it once its cause
   ok(r.asked === 'awaiting-user' && r.w.ok && r.w.version === r.posted && r.pending === null && r.state === 'up' && r.resolved.join() === 'jb-8bd50001' && r.woke === 'woken' && r.recorded.join() === String(r.posted), 'B-8bd5: a job WITHDRAWS its own panel — closed, its For-you item resolved, a waiting `answers --wait` woken (the answers record the withdraw, as an expiry), back to «up»', r);
   ok(r.again.ok && /no panel of this job is open/.test(r.again.already || ''), 'B-8bd5: withdrawn twice — answered, nothing changed');
   ok(r.stdin === 1, 'B-8bd5 (主开发 21:46Z): a stdin-open job reads the withdraw on its stdin (the wrapper\'s answers tail file), as it reads an answer', r.stdin);
-  const JSRC = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8'), RES = "    try { this.d.resolveJobAsk && this.d.resolveJobAsk(job.id); } catch { }\n    this._touch(job, { what: `withdrew its panel #${p.version} (its cause is gone)`, verb: 'answers' });\n";
-  ok(JSRC.split(RES).length === 2, 'B-8bd5 control setup: the withdraw\'s resolve is one place in jobs.js (the plant the control cuts)');
+  const JSRC = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8');
+  // the deferred-save census: the withdraw's resolve and its stdin mirror RIDE its landing (inside the step) — the controls cut them there,
+  // each plant asserted by anchored()
+  const RES = "      this._resolveAns(job);\n      try { this.d.resolveJobAsk && this.d.resolveJobAsk(job.id); } catch { }\n    });";
   const MJ8 = mutantCopies('jobs-withdraw-8bd5', ROOT);
-  const rx = await scene(MJ8.load('src/jobs.js', JSRC.replace(RES, "    this._touch(job, { what: `withdrew its panel #${p.version} (its cause is gone)`, verb: 'answers' });   /* MUTANT: no resolve — the item stays */\n"), 'no-resolve'), 'jobs-triage-withdraw-mut');
+  const rx = await scene(MJ8.load('src/jobs.js', anchored(JSRC, RES, "      this._resolveAns(job);\n      /* MUTANT: no resolve — the item stays */\n    });", 'the withdraw\'s resolve'), 'no-resolve'), 'jobs-triage-withdraw-mut');
   ok(rx.resolved.length === 0, 'B-8bd5 CONTROL (the withdraw without its resolve, in a copy): the For-you item STAYS open — what the row reported', rx.resolved);
-  const MIR = "      if (run) { try { fs.promises.appendFile(path.join(this._ctlDir(job, run.startedAt), 'answers.jsonl'), JSON.stringify(wrec) + '\\n').catch(() => { }); } catch { } }";
-  ok(JSRC.split(MIR).length === 2, 'B-8bd5 control setup: the anchor of the control «the stdin mirror of a withdraw» is in jobs.js');
-  const rm = await scene(MJ8.load('src/jobs.js', JSRC.replace(MIR, '      /* MUTANT: no stdin mirror */'), 'no-mirror'), 'jobs-triage-withdraw-mut2');
+  const MIR = "      if (ctl) { try { fs.promises.appendFile(path.join(ctl, 'answers.jsonl'), JSON.stringify(wrec) + '\\n').catch(() => { }); } catch { } }";
+  const rm = await scene(MJ8.load('src/jobs.js', anchored(JSRC, MIR, '      /* MUTANT: no stdin mirror */', 'the stdin mirror of a withdraw'), 'no-mirror'), 'jobs-triage-withdraw-mut2');
   ok(rm.stdin === 0, 'B-8bd5 CONTROL (no mirror, in a copy): the stdin-open job never sees the withdraw', rm.stdin);
   for (const rr of copiesCensus(MJ8.files, MJ8.dir, ROOT, { minCopies: 1, label: 'B-8bd5 ' })) ok(rr.pass, rr.name + (rr.pass ? '' : ' — ' + rr.detail));
   const ar = fs.readFileSync(path.join(ROOT, 'src/agent-routes.js'), 'utf8'), cli = fs.readFileSync(path.join(ROOT, 'data/bin/vibespace-job'), 'utf8');

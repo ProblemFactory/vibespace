@@ -1,0 +1,1005 @@
+[
+ {
+  "key": "jobs · src/agent-routes.js · setupAgentRoutes > route:POST /api/agent/jobs/:ref/:act · _save()",
+  "verdict": "waits",
+  "why": "access and notify both answer through a.jm.persisted() after _touch+_save — the agent is told only once both files landed (or notOnDisk is said).",
+  "at": "src/agent-routes.js:return void a.jm.persisted((saved) => { try { require('./store-writer.js').identityAtExit(res); res.json({ success: true, access: job.access, ...(saved ? {} : { notOnDisk: true }) }); } catch { } });   // an authority change: answered once on disk"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager.init · _save()",
+  "verdict": "sync",
+  "why": "The recovered skeletons are written and waited for (_onDisk) before adopt/replay runs (its _onDisk result is not checked; boot goes on); line 258 is the plain 2 s paced tick with nothing after it."
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager.shutdown · _save()",
+  "verdict": "rides",
+  "why": "The one irreversible step after the exit save, removing the engine lock, runs only on jobs.json's landing (_unlockWhenLanded, cleared in _storeWritten); outside an exit both files are _onDisk-waited first.",
+  "at": "src/jobs.js:if (this._unlockWhenLanded) { this._unlockWhenLanded = false; this._unlockNow(); }"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._unreadRetry · _dirty = true",
+  "verdict": "none",
+  "why": "records read already on disk"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._loadNotifs · _saveNotifs()",
+  "verdict": "none",
+  "why": "boot strips stamps; idempotent again"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._archiveAnswer · _dirty = true",
+  "verdict": "none",
+  "why": "skeleton drop, re-decided at load"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager.archiveSweep · _dirty = true",
+  "verdict": "none",
+  "why": "archive written synchronously first; idempotent"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager.archiveSweep · _save()",
+  "verdict": "none",
+  "why": "dropped logs follow sync archive write"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager.clearJobs · _dirty = true",
+  "verdict": "waits",
+  "why": "The clear answers only through record-clear's whenStored (jm.persisted); the cleared asks' waits/For-you resolve ride the landing; the spill/stash/For-you redactions run the person's way (more cleared), never a false done.",
+  "at": "src/server/record-clear.js:st.persisted((ok) => {"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager.clearJobs · _save()",
+  "verdict": "waits",
+  "why": "Same act as the _dirty row: urgent _save, the cleared asks ride (this._ride), the reply waits for jm.persisted through record-clear's whenStored.",
+  "at": "src/server/record-clear.js:st.persisted((ok) => {"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._deliverTo · _dirty = true",
+  "verdict": "none",
+  "why": "outcome journal/stash; nothing after"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._deliverTo · _save()",
+  "verdict": "none",
+  "why": "a failed delivery's only copy, urgent"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._onRetryEvent · _dirty = true",
+  "verdict": "none",
+  "why": "journal lines; delivery already happened"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._onRetryEvent · _save()",
+  "verdict": "rides",
+  "why": "the park's copy leaves msg-retry.json at the notifications' landing (_taken)",
+  "at": "src/jobs.js:_taken() { return { taken: true, ride: (step) => this._ride(this.notifsFile"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._notifyLogPush · _dirty = true",
+  "verdict": "none",
+  "why": "delivery journal line; re-derived"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager.subscribe · _save()",
+  "verdict": "waits",
+  "why": "subscribe is not a paced verb: the agent route answers it through a.jm.persisted() (the shared tail).",
+  "at": "src/agent-routes.js:a.jm.persisted((saved) => { try { require('./store-writer.js').identityAtExit(res); res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true, ...(act === 'rm' ? { code: 'finishes-on-landing' } : {}) }) }); } catch { } });   // lane lg-store-writes U4: the act's answer waits for the store (the loop never does); a write not landed is SAID in the answer, the act stays applied in memory and the writer retries"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager.unsubscribe · _save()",
+  "verdict": "waits",
+  "why": "Answered through a.jm.persisted() like subscribe.",
+  "at": "src/agent-routes.js:a.jm.persisted((saved) => { try { require('./store-writer.js').identityAtExit(res); res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true, ...(act === 'rm' ? { code: 'finishes-on-landing' } : {}) }) }); } catch { } });   // lane lg-store-writes U4: the act's answer waits for the store (the loop never does); a write not landed is SAID in the answer, the act stays applied in memory and the writer retries"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager.announce · _save()",
+  "verdict": "waits",
+  "why": "its reply waits when its copy was only stashed (the rate floor)",
+  "at": "src/agent-routes.js:if (r.landing) delete r.landing;"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._judgeHeldView · _saveNotifs()",
+  "verdict": "none",
+  "why": "dropped lines re-judged after kill"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._judgeHeldView · _dirty = true",
+  "verdict": "none",
+  "why": "dropped lines re-judged after kill"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager.claimNotifs · _saveNotifs()",
+  "verdict": "none",
+  "why": "stamp only changes boot's log"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager.restoreNotifs · _saveNotifs()",
+  "verdict": "rides",
+  "why": "the hand-over drops its kept copy at the put-back's landing",
+  "at": "src/server/stash-handover.js:jm.afterNotifsLanded(() => {"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager.drainNotifs · _saveNotifs()",
+  "verdict": "sync",
+  "why": "The drain must stay synchronous: the drained text goes out right after (prompt injection, hand-over record persistDelivered); _saveNotifs waits (_onDisk) but discards a not-ok result, so a failed bounded landing + kill re-delivers once (accepted by must 4, 'nothing is put back')."
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager.drainNotifs · _dirty = true",
+  "verdict": "none",
+  "why": "ack bookkeeping; next tick carries"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager.markAck · _dirty = true",
+  "verdict": "none",
+  "why": "ack bookkeeping; next tick carries"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._touch · _dirty = true",
+  "verdict": "none",
+  "why": "generic mark; poll replies are reads"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._clearKeptOnce · _dirty = true",
+  "verdict": "none",
+  "why": "kill precedes; next decision re-walks"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._doubtBlocks · _dirty = true",
+  "verdict": "none",
+  "why": "notice re-filed by fact; re-judged"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._stopDoubt · _dirty = true",
+  "verdict": "none",
+  "why": "kill precedes; doubt re-judged at boot"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._refuseRun · _save()",
+  "verdict": "none",
+  "why": "refusal re-judged; error answered"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._settleWait · _save()",
+  "verdict": "none",
+  "why": "wait ended; re-judged at boot"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._vaultGate · _save()",
+  "verdict": "none",
+  "why": "refusal re-judged; error answered"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._waitFor · _save()",
+  "verdict": "waits",
+  "why": "The wait's only reply is the start/create answer, which goes through persisted(); boot/cron/vault callers reply nothing and the wait is re-judged at every boot.",
+  "at": "src/server/jobs-wiring.js:jm.persisted((saved) => { try { require('../store-writer.js').identityAtExit(res); res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true, ...(act === 'rm' || act === 'answer' ? { code: 'finishes-on-landing' } : {}) }) }); } catch { } });   // the moved2 cure 2: a removal / an answer not landed finishes by itself at the landing (said by its code)   // lane lg-store-writes U4: the act's answer waits for the store (the loop never does); a write not landed is SAID"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._spawn · _save()",
+  "verdict": "sync",
+  "why": "The run's intent (2238) is waited by _onDisk before any child exists — not landed => no child, refused by name; 2275 records that refusal and throws (an error answered, nothing spawned)."
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._adoptAndReplay · _dirty = true",
+  "verdict": "none",
+  "why": "collapse re-decided identically at boot"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._finalizeRun · _save()",
+  "verdict": "rides",
+  "why": "the end's For-you item and the owner's message ride the ended run's landing"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._startAskedAtStop > say · _save()",
+  "verdict": "none",
+  "why": "told fact stays true after kill"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._listenRead · _dirty = true",
+  "verdict": "none",
+  "why": "port re-read from /proc"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._cronTick · _dirty = true",
+  "verdict": "none",
+  "why": "first slot computed; nothing follows"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._cronTick · _save()",
+  "verdict": "sync",
+  "why": "the fired slot lands before the next tick (_onDisk); a missed one-shot's notices ride"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._gc · _dirty = true",
+  "verdict": "rides",
+  "why": "the log folders ride the removal's landing; owed removals keep their logs in the sweep"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._gc · _save()",
+  "verdict": "rides",
+  "why": "the log folders ride the removal's landing; owed removals keep their logs in the sweep"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager.create · _save()",
+  "verdict": "waits",
+  "why": "The child is spawned only after _spawn's _onDisk; the create answer goes through persisted() on both doors.",
+  "at": "src/agent-routes.js:a.jm.persisted((saved) => { try { require('./store-writer.js').identityAtExit(res); res.json({ machine: hubMachine, where: where.words,  success: true, job: jobWhen(r.job), renamed: r.renamed, notify, ...(r.vaultWait ? { vaultWait: r.vaultWait } : {}), ...(saved ? {} : { notOnDisk: true }) }); } catch (e) { answerCreateFailed(res, e); } });   // lane lg-store-writes U4: the answer waits for the store, never the loop; a throw while it is built is answered 500 create-failed by the wrapper's own helper (B-70f9: every throw answered)   // lane vault-job-road r2: a scheduled job whose fires would wait for their vault values"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager.stop · _save()",
+  "verdict": "waits",
+  "why": "The stop answers through persisted() (notOnDisk said when it did not land); the SIGTERM precedes the landing, so after a kill an unlanded stop's service is replayed per its old record — the reply never said done.",
+  "at": "src/server/jobs-wiring.js:jm.persisted((saved) => { try { require('../store-writer.js').identityAtExit(res); res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true, ...(act === 'rm' || act === 'answer' ? { code: 'finishes-on-landing' } : {}) }) }); } catch { } });   // the moved2 cure 2: a removal / an answer not landed finishes by itself at the landing (said by its code)   // lane lg-store-writes U4: the act's answer waits for the store (the loop never does); a write not landed is SAID"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager.start · _save()",
+  "verdict": "waits",
+  "why": "Every spawn waits its intent (_onDisk); the start answers through persisted() on both doors.",
+  "at": "src/server/jobs-wiring.js:jm.persisted((saved) => { try { require('../store-writer.js').identityAtExit(res); res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true, ...(act === 'rm' || act === 'answer' ? { code: 'finishes-on-landing' } : {}) }) }); } catch { } });   // the moved2 cure 2: a removal / an answer not landed finishes by itself at the landing (said by its code)   // lane lg-store-writes U4: the act's answer waits for the store (the loop never does); a write not landed is SAID"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager.setMemory · _save()",
+  "verdict": "waits",
+  "why": "Applies from the next run only (nothing irreversible); the answer goes through persisted() on both doors.",
+  "at": "src/server/jobs-wiring.js:jm.persisted((saved) => { try { require('../store-writer.js').identityAtExit(res); res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true, ...(act === 'rm' || act === 'answer' ? { code: 'finishes-on-landing' } : {}) }) }); } catch { } });   // the moved2 cure 2: a removal / an answer not landed finishes by itself at the landing (said by its code)   // lane lg-store-writes U4: the act's answer waits for the store (the loop never does); a write not landed is SAID"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager.rm · _dirty = true",
+  "verdict": "rides",
+  "why": "clearKept and resolveJobAsk run inside this._ride(this.file, 'the removal'); the reply waits (persisted). No logs pass runs in this run (a LATER pass while the write is still held reads the same memory keep set — shared cure with _gc)."
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager.rm · _save()",
+  "verdict": "rides",
+  "why": "Same line as the _dirty row: the removal's irreversible steps ride the landing, the reply waits persisted()."
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager.ask · _save()",
+  "verdict": "rides",
+  "why": "the For-you item and the owner's note ride the panel's landing"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager.withdrawAsk · _save()",
+  "verdict": "rides",
+  "why": "the answers file, the wait and the For-you item ride the withdraw's landing"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager.answerPanel · _save()",
+  "verdict": "rides",
+  "why": "The answers.jsonl mirror, the waiters, the For-you resolve and the owner notice all run inside this._ride(this.file, 'the panel's answer'); the 3619 save is inside that step; the reply waits persisted()."
+ },
+ {
+  "key": "usage-cache · src/quota-model-migrate.js · backfillLimits · writeCacheObject()",
+  "verdict": "waits",
+  "why": "A boot migration's replace-mode stamp (replace fires no callback); the runner lands every store the migrations dirtied (landStores → flushSync) before it stamps the ledger, and the archive line after it is only the old copy.",
+  "at": "src/migration-runner.js:if (ranNow.length && typeof landStores === 'function') {"
+ },
+ {
+  "key": "usage-cache · src/rate-limit-capture.js · captureRateLimitEvent · writeCacheObject()",
+  "verdict": "none",
+  "why": "steps follow the event, not file"
+ },
+ {
+  "key": "usage-cache · src/reading-repair.js · _writeCacheAtomic · writeCacheObject()",
+  "verdict": "none",
+  "why": "replace repair; reruns at boot, hourly"
+ },
+ {
+  "key": "usage-cache · src/reading-repair.js · repairCachesByWindow · writeWindowStamp()",
+  "verdict": "none",
+  "why": "sync at boot; ledger waits landing"
+ },
+ {
+  "key": "usage-cache · src/reading-repair.js · repairSidecarsByApiPhase · writeWindowStamp()",
+  "verdict": "none",
+  "why": "sync write; hourly repair re-judges it"
+ },
+ {
+  "key": "task-groups · src/task-groups.js · TaskGroupManager.constructor · _save()",
+  "verdict": "none",
+  "why": "boot flushSync; TASK.md re-derived at boot"
+ },
+ {
+  "key": "task-groups · src/task-groups.js · TaskGroupManager._load · _save()",
+  "verdict": "none",
+  "why": "boot flushSync; legacy file re-migrates"
+ },
+ {
+  "key": "task-groups · src/task-groups.js · TaskGroupManager.migrateContextRows · _save()",
+  "verdict": "waits",
+  "why": "A boot migration: the save is flushed synchronously (boot:true) and the runner also lands every store the migrations dirtied (landStores) before it stamps the ledger.",
+  "at": "src/task-groups.js:if (rep.groups) { this._save({ boot: true }); this._notify(); }   // lane lg-store-writes U5: the boot migration's rows are on disk when it returns (the ledger records it next)"
+ },
+ {
+  "key": "task-groups · src/task-groups.js · TaskGroupManager.create · _save()",
+  "verdict": "waits",
+  "why": "the agent's answer waits for the store (answerOnDisk; the panel's onDisk)",
+  "at": "src/agent-routes.js:return answerOnDisk(res, { success: true, group: brief(tasks.view(t.id)) });"
+ },
+ {
+  "key": "task-groups · src/task-groups.js · TaskGroupManager.update · _save()",
+  "verdict": "waits",
+  "why": "a claim, the group-admin update and unbind answer once on disk; a backlog ADD answers in its run (its row is the caller's alone — test-backlog-no-truncation's law)",
+  "at": "src/agent-routes.js:(claim !== undefined ? answerOnDisk : (r0, b0) => r0.json(b0))(res, {"
+ },
+ {
+  "key": "task-groups · src/task-groups.js · TaskGroupManager.remove · _save()",
+  "verdict": "rides",
+  "why": "The archived Activity-log rmSync and the group-visibility grant removal run inside store-writer ride() at the landing (and skip a group made again under the id); the DELETE route's reply waits through onDisk."
+ },
+ {
+  "key": "task-groups · src/task-groups.js · TaskGroupManager.bind · _save()",
+  "verdict": "waits",
+  "why": "the group-admin bind and the automation verb answer once the store holds it",
+  "at": "src/agent-routes.js:return answerOnDisk(res, { success: true, group: brief(tasks.view(bind.id)) });"
+ },
+ {
+  "key": "task-groups · src/task-groups.js · TaskGroupManager.unbindKeys · _save()",
+  "verdict": "waits",
+  "why": "Every road waits for the landing: both unbind routes (onDisk / answerOnDisk), noteArchived through the bounded _landNow, and the archived-members migration through landStores before the ledger (its archive file is written first).",
+  "at": "src/server/task-groups-wiring.js:try { onDisk(res, { success: true, task: tasks.unbind(req.params.id, req.body?.sessionKey) }); }"
+ },
+ {
+  "key": "task-groups · src/task-groups.js · TaskGroupManager.addProgress · _save()",
+  "verdict": "waits",
+  "why": "the progress note's answer waits for the store (answerOnDisk)",
+  "at": "src/agent-routes.js:    answerOnDisk(res, { success: true, progress: t.progress.slice(-3).map(taskEntryAnswer)"
+ },
+ {
+  "key": "task-groups · src/task-groups.js · TaskGroupManager.clearProgress · _save()",
+  "verdict": "waits",
+  "why": "The clear's answer (owner route and agent progress-redact) is sent only from whenStored → tasks.persisted(); the archive month files are cleared before the record (safe order).",
+  "at": "src/server/record-clear.js:st.persisted((ok) => {"
+ },
+ {
+  "key": "task-groups · src/task-groups.js · TaskGroupManager.importFromFile · _save()",
+  "verdict": "waits",
+  "why": "POST /api/tasks/import answers through onDisk (bounded landing, notOnDisk said).",
+  "at": "src/server/task-groups-wiring.js:try { onDisk(res, { success: true, task: tasks.importFromFile(req.body?.path) }); }"
+ },
+ {
+  "key": "task-groups · src/task-groups.js · TaskGroupManager.importBundle · _save()",
+  "verdict": "sync",
+  "why": "the groups land before the import writes other stores (_landNow)"
+ },
+ {
+  "key": "usage-cache · src/usage-routes.js · setupUsage > ingestPassiveUsage · writeCacheObject()",
+  "verdict": "none",
+  "why": "settle write; marker re-said idempotently"
+ },
+ {
+  "key": "usage-cache · src/usage-routes.js · setupUsage > refreshViaCliPanel · writeWindowStamp()",
+  "verdict": "sync",
+  "why": "written at once; a sidecar with queued bytes takes their queue (one road per file)",
+  "at": "src/usage-cache-write.js:ONE ROAD PER FILE"
+ },
+ {
+  "key": "usage-cache · src/usage-routes.js · setupUsage > refreshViaCliPanel · writeCacheObject()",
+  "verdict": "rides",
+  "why": "the lapse clears at the reading's landing (afterLanded)"
+ },
+ {
+  "key": "usage-cache · src/usage-routes.js · setupUsage > route:POST /api/usage/refresh · writeCacheObject()",
+  "verdict": "rides",
+  "why": "the lapse clears at the reading's landing (onMemberReadingFresh)",
+  "at": "src/server/usage-pool-engine.js:usageWrite.afterLanded(f, () => { try { memberServeLapsed(memberId); } catch { } });"
+ },
+ {
+  "key": "usage-cache · src/usage-routes.js · setupUsage > route:POST /api/usage/refresh > deviceLegG · writeCacheObject()",
+  "verdict": "waits",
+  "why": "the device answer waits for the host reading's landing",
+  "at": "src/usage-routes.js:() => true, { timeoutMs: 20000 })"
+ },
+ {
+  "key": "usage-cache · src/usage-routes.js · setupUsage > summarizeCodexRateLimits · writeCacheObject()",
+  "verdict": "none",
+  "why": "passive write-through; GET answers summary only"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > load · dirty = true",
+  "verdict": "none",
+  "why": "load re-derives it every boot"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > saveNow · save()",
+  "verdict": "sync",
+  "why": "save() is landed at once by landNow() (a bounded named wait; a held write refuses the caller by name) - its one caller (moveDirLineage) lets the Forget rename the directory only on a landed save."
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > commit · save()",
+  "verdict": "none",
+  "why": "generic; each caller judged per row"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > batched · save()",
+  "verdict": "none",
+  "why": "batch end; callers judged per row"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > commitSync · commit()",
+  "verdict": "sync",
+  "why": "the helper: commit, then the bounded landing (landNow)"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > createProfile · commit()",
+  "verdict": "waits",
+  "why": "the user's and the agent's create answer once the record landed (landedOf)",
+  "at": "src/routes/browser.js:return landedOf(k).then((L) => res.json({ profile: created,"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > launchBuildOf · dirty = true",
+  "verdict": "none",
+  "why": "build mark re-judged every launch"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > launchEngineOf · dirty = true",
+  "verdict": "none",
+  "why": "build mark re-judged every launch"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > noteBuildMissing · commit()",
+  "verdict": "none",
+  "why": "notice mark; worst case duplicate item"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > noteEngineLive · commit()",
+  "verdict": "none",
+  "why": "kernel mark re-judged next answer"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > removeProfile · sweepDirty = true",
+  "verdict": "none",
+  "why": "ephemeral re-retired by boot sweep"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > removeProfile · commit()",
+  "verdict": "rides",
+  "why": "grant row, marked config, passkeys, listeners, the engine's mark and the machine's folder ride the landing; the Forget lands it at once"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > updateProfileNow · commitSync()",
+  "verdict": "sync",
+  "why": "a person's or agent's act lands before its reply or next step (commitSync)"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > clearPin · commit()",
+  "verdict": "waits",
+  "why": "Its answering callers (DELETE profile and Forget with unpin) await the removal's landing, which carries these pin clears; the boot's healDanglingPins answers nobody and re-heals next boot.",
+  "at": "src/routes/browser.js:const u = unpin ? unpinProfile(req.params.id) : { cleared: 0, sessions: [] };"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > closeLeaseSession · commit()",
+  "verdict": "none",
+  "why": "tab-lost mark after the close"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > setPin · commitSync()",
+  "verdict": "sync",
+  "why": "a person's or agent's act lands before its reply or next step (commitSync)"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > restorePin · commitSync()",
+  "verdict": "sync",
+  "why": "a person's or agent's act lands before its reply or next step (commitSync)"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > copyPin · commitSync()",
+  "verdict": "sync",
+  "why": "a person's or agent's act lands before its reply or next step (commitSync)"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > stampGroupCap · commit()",
+  "verdict": "none",
+  "why": "cap stamp; next start stamps again"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > setCap · commitSync()",
+  "verdict": "sync",
+  "why": "a person's or agent's act lands before its reply or next step (commitSync)"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > markEphemeralGone · dirty = true",
+  "verdict": "none",
+  "why": "run record; boot re-judges dead daemon"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > markDaemonGone · dirty = true",
+  "verdict": "none",
+  "why": "run record; boot re-judges dead daemon"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > moveDirLineage · dirty = true",
+  "verdict": "sync",
+  "why": "The re-key mark is landed by saveNow() on the next statement (the Forget renames only on ok); the roll-back mark after a refusal is followed by nothing - the directory is not moved."
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > moveDirLineage · saveNow()",
+  "verdict": "sync",
+  "why": "Bounded synchronous landing before the caller renames the directory; a held or deferred write refuses the Forget by name (nothing moved)."
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > takeRebound · commit()",
+  "verdict": "none",
+  "why": "rebound note; worst case said twice"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > tabsLost · dirty = true",
+  "verdict": "none",
+  "why": "lease tab marks; next save carries"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > recaptureBrowser · dirty = true",
+  "verdict": "none",
+  "why": "run record re-captured from /proc"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > followRelaunch · dirty = true",
+  "verdict": "none",
+  "why": "close marks; tick re-judges them"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > userStoppedDisplay · dirty = true",
+  "verdict": "sync",
+  "why": "the person's stop lands before the display is torn down (commitSync)"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > userStoppedDisplay · commitSync()",
+  "verdict": "sync",
+  "why": "a person's or agent's act lands before its reply or next step (commitSync)"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > setClosed · dirty = true",
+  "verdict": "none",
+  "why": "close verdict; tick re-judges it"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > noteHeal · dirty = true",
+  "verdict": "none",
+  "why": "heal ledger; next save carries it"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > noteAnswer · dirty = true",
+  "verdict": "none",
+  "why": "hang fact; re-asked within a minute"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > noteAnswer · commit()",
+  "verdict": "none",
+  "why": "hang fact; re-asked within a minute"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > hangCause · dirty = true",
+  "verdict": "none",
+  "why": "hang cause; re-probed at next hang"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > hangCause · commit()",
+  "verdict": "none",
+  "why": "hang cause; re-probed at next hang"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > noticeUnresponsive · dirty = true",
+  "verdict": "none",
+  "why": "notice claim; worst case duplicate item"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > resolveUnresponsive · dirty = true",
+  "verdict": "none",
+  "why": "notice cleared; re-resolved next answer"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > restartProfile · commit()",
+  "verdict": "none",
+  "why": "stop/start saved their own records"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > healBrowser · dirty = true",
+  "verdict": "none",
+  "why": "heal marks; boot and tick re-judge"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > healBrowser · commit()",
+  "verdict": "none",
+  "why": "heal verdicts; boot and tick re-judge"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > rejudgeUnstable · commit()",
+  "verdict": "none",
+  "why": "re-ask key; boot grants one ask"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > freshDaemon · dirty = true",
+  "verdict": "none",
+  "why": "new record's ledger; start saved record"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > freshDaemon · commit()",
+  "verdict": "none",
+  "why": "new record's ledger; start saved record"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > reapOrphan · dirty = true",
+  "verdict": "none",
+  "why": "run record after the process ended"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > judgeEphemeral · commit()",
+  "verdict": "none",
+  "why": "run record; boot re-judges dead daemon"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > endOrphan · dirty = true",
+  "verdict": "none",
+  "why": "row note after the daemon ended"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > bootReown · dirty = true",
+  "verdict": "none",
+  "why": "boot re-own; next boot repeats it"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > orphanCensus · commit()",
+  "verdict": "none",
+  "why": "census records; re-judged every census"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > remoteOrphans · dirty = true",
+  "verdict": "none",
+  "why": "row note after the remote end"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > startEphemeral · commit()",
+  "verdict": "none",
+  "why": "run record; boot census re-owns daemon"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > ensureEphemeral · commit()",
+  "verdict": "none",
+  "why": "ephemeral record; next verb re-creates it"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > keepTabRoots · save()",
+  "verdict": "none",
+  "why": "lease tab roots; re-read from browser"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > agentTabAct · save()",
+  "verdict": "none",
+  "why": "lease roots; tab act already ran"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > userTabAct · save()",
+  "verdict": "none",
+  "why": "lease roots; tab act already ran"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > closeHumanTab · commit()",
+  "verdict": "none",
+  "why": "its tab set; tab already closed"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > retireInSteps > flush · commit()",
+  "verdict": "none",
+  "why": "sweep piece; next boot sweep redoes"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > start · commit()",
+  "verdict": "none",
+  "why": "run record; boot census reconciles daemons"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > start > failed · commit()",
+  "verdict": "none",
+  "why": "failure record; reply is a refusal"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > leaseCdpUrl · commit()",
+  "verdict": "none",
+  "why": "cached CDP url; re-asked when null"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > healAttach · dirty = true",
+  "verdict": "none",
+  "why": "lastError words; no reply depends"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > attachStart > failed · commit()",
+  "verdict": "none",
+  "why": "failure record; reply is a refusal"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > attachStart · commit()",
+  "verdict": "none",
+  "why": "run record; launch mark ends orphan"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > stop · commit()",
+  "verdict": "none",
+  "why": "process ended first; boot re-marks stopped"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > ownWindowAtAttach · commit()",
+  "verdict": "none",
+  "why": "lease window bookkeeping; re-bound next attach"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > attach · commit()",
+  "verdict": "none",
+  "why": "lease record; grant row already stored"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > detach · commit()",
+  "verdict": "none",
+  "why": "lease drop; the list re-judges anyway"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > browse · commit()",
+  "verdict": "none",
+  "why": "human holder; restored away at boot"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > humanTake · commit()",
+  "verdict": "none",
+  "why": "holder state; restored away at boot"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > humanRelease · commit()",
+  "verdict": "none",
+  "why": "holder state; restored away at boot"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > endHuman · commit()",
+  "verdict": "none",
+  "why": "holder ended; boot ends unreachable holders"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > adoptOrphan · commit()",
+  "verdict": "none",
+  "why": "adopted tab ids; holder bookkeeping"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > navigateHuman > unadopt · commit()",
+  "verdict": "none",
+  "why": "adopted tab ids; holder bookkeeping"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > mirrorLeaseInput · commit()",
+  "verdict": "none",
+  "why": "view of in-memory input state"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > noteLeaseUrl · dirty = true",
+  "verdict": "none",
+  "why": "last url; next save carries it"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > jobHandleFor · commit()",
+  "verdict": "none",
+  "why": "job handle re-resolved every verb"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > releaseJobHandle · commit()",
+  "verdict": "none",
+  "why": "left-tab entry; job already ended"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > tell · save()",
+  "verdict": "none",
+  "why": "told fingerprint; worst case retold"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > newChild · commitSync()",
+  "verdict": "sync",
+  "why": "a person's or agent's act lands before its reply or next step (commitSync)"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > dropChild · commit()",
+  "verdict": "none",
+  "why": "child record; reconcile reaps it again"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > adoptScratch · commit()",
+  "verdict": "rides",
+  "why": "The folder move and the kept entry's end ride the new record's landing (rideLanding 6616) and the route waits for it. Residue (rare): on a failed move the record's removal (6623) is queued while its grant row is already removed and the route answers adopt_failed - a kill there leaves a folderless record no list admits."
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > adoptScratch · commitSync()",
+  "verdict": "sync",
+  "why": "a person's or agent's act lands before its reply or next step (commitSync)"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > keepEgress · commitSync()",
+  "verdict": "sync",
+  "why": "a person's or agent's act lands before its reply or next step (commitSync)"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > moveProxyPassword · save()",
+  "verdict": "sync",
+  "why": "the answer waits for the landing (landNow); a FAILED write puts the row back (not_written), a held one says it finishes by itself"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > switchBackend · commitSync()",
+  "verdict": "sync",
+  "why": "a person's or agent's act lands before its reply or next step (commitSync)"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > blocked · commitSync()",
+  "verdict": "sync",
+  "why": "a person's or agent's act lands before its reply or next step (commitSync)"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > stepProposal · commitSync()",
+  "verdict": "sync",
+  "why": "a person's or agent's act lands before its reply or next step (commitSync)"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > noteProposal · commit()",
+  "verdict": "none",
+  "why": "item id; worst case duplicate item"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > noteOwnTab · commit()",
+  "verdict": "none",
+  "why": "lease tab witness; pruned at connect"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > forgetOwnTab · commit()",
+  "verdict": "none",
+  "why": "lease tab witness; pruned at connect"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > pruneOwnTabs · commit()",
+  "verdict": "none",
+  "why": "witness prune; repeated next connect"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > notePermission · commit()",
+  "verdict": "none",
+  "why": "permission witness; Chrome holds the decision"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > dropLeaseTabs · commit()",
+  "verdict": "none",
+  "why": "witness drop; fresh Chrome forgot anyway"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > saveLoginFenceState · commit()",
+  "verdict": "waits",
+  "why": "The fill types the vault value only after keeper.whenLanded (FENCE_LAND_MS) - not on disk = nothing typed, said by its code; a fence clear is fail-closed (an old fence back = more scrubbing).",
+  "at": "src/server/browser-dialogs.js:if (keeper && typeof keeper.whenLanded === 'function') {"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > proposeSiteReset · commitSync()",
+  "verdict": "sync",
+  "why": "a person's or agent's act lands before its reply or next step (commitSync)"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > openInLease · commit()",
+  "verdict": "none",
+  "why": "lease tab id; the tab exists"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > clearBlocked · commitSync()",
+  "verdict": "sync",
+  "why": "a person's or agent's act lands before its reply or next step (commitSync)"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > addSiteHint · commitSync()",
+  "verdict": "sync",
+  "why": "a person's or agent's act lands before its reply or next step (commitSync)"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > dropSiteHint · commitSync()",
+  "verdict": "sync",
+  "why": "a person's or agent's act lands before its reply or next step (commitSync)"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > endMarked · dirty = true",
+  "verdict": "none",
+  "why": "boot mark; re-end by identity idempotent"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > adoptAll · dirty = true",
+  "verdict": "none",
+  "why": "boot marks; next boot repeats them"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > boot · commit()",
+  "verdict": "none",
+  "why": "boot reconcile; re-derived next boot"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > tick · dirty = true",
+  "verdict": "none",
+  "why": "tick bookkeeping; next save carries it"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > tick · commit()",
+  "verdict": "none",
+  "why": "tick bookkeeping; re-judged next tick"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > shutdown · save()",
+  "verdict": "none",
+  "why": "exit flush writes rank-0 before exit"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > streamPortFor · commit()",
+  "verdict": "none",
+  "why": "run record; answer is a refusal"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > noteViewport · save()",
+  "verdict": "none",
+  "why": "viewport note; no reply depends"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > reshapeStore · commit()",
+  "verdict": "sync",
+  "why": "A migration's reshape is landed by landedOrThrow() before the runner records it (EVSNOTONDISK otherwise, the later migrations held).",
+  "at": "src/server/browser-keeper.js:const landedOrThrow = () => { if (!landNow()) throw"
+ },
+ {
+  "key": "usage-cache · src/server/cli-usage-door.js · createCliUsageDoor > readOnce · writeReading()",
+  "verdict": "waits",
+  "why": "the person's Re-check is answered once the reading landed",
+  "at": "src/server/cli-usage-door.js:usageWrite.afterLanded(usageWrite.cacheFileFor(cacheDir, id), () => true, { timeoutMs: 20000 })"
+ },
+ {
+  "key": "jobs · src/server/jobs-wiring.js · create > route:POST /api/jobs/seen · _save()",
+  "verdict": "waits",
+  "why": "the answer waits for the store (persisted)",
+  "at": "src/server/jobs-wiring.js:res.json({ success: true, requested: ids.length, acked: acked.length, ids: acked, ...(saved ? {} : { notOnDisk: true }) })"
+ },
+ {
+  "key": "jobs · src/server/jobs-wiring.js · create > route:POST /api/jobs/:id/:act · _save()",
+  "verdict": "waits",
+  "why": "the answer waits for the store (persisted)",
+  "at": "src/server/jobs-wiring.js:res.json({ success: true, changed, ack: M.ackState(job), ...(saved ? {} : { notOnDisk: true }) })"
+ },
+ {
+  "key": "usage-cache · src/server/stream-wall.js · createStreamWallRoad > onRecord · writeCacheObject()",
+  "verdict": "none",
+  "why": "wall replays at attach; count durable"
+ },
+ {
+  "key": "usage-cache · src/server/usage-pool-engine.js · create > writeUsageCacheForKey · writeCacheObject()",
+  "verdict": "rides",
+  "why": "the lapse clears at the reading's landing (onMemberReadingFresh)",
+  "at": "src/server/usage-pool-engine.js:usageWrite.afterLanded(f, () => { try { memberServeLapsed(memberId); } catch { } });"
+ },
+ {
+  "key": "usage-cache · src/server/usage-pool-engine.js · create > noteApiDerivedWindow · writeWindowStamp()",
+  "verdict": "sync",
+  "why": "written at once; a sidecar with queued bytes takes their queue (one road per file)",
+  "at": "src/usage-cache-write.js:ONE ROAD PER FILE"
+ },
+ {
+  "key": "usage-cache · src/server/usage-pool-engine.js · create > noteApiDerivedWindow · writeSidecar()",
+  "verdict": "sync",
+  "why": "written at once; a sidecar with queued bytes takes their queue (one road per file)",
+  "at": "src/usage-cache-write.js:ONE ROAD PER FILE"
+ },
+ {
+  "key": "usage-cache · src/server/usage-pool-engine.js · create > writeCodexReading · writeCacheObject()",
+  "verdict": "none",
+  "why": "steps use the snapshot, not file"
+ },
+ {
+  "key": "usage-cache · src/server/usage-pool-engine.js · create > markLimitBannerNow · writeCacheObject()",
+  "verdict": "none",
+  "why": "steps follow the banner, not file"
+ },
+ {
+  "key": "usage-cache · src/server/usage-pool-engine.js · create > reanchorLapsedMember · writeWindowStamp()",
+  "verdict": "waits",
+  "why": "The offLoop .window- write is awaited and its answer checked: not landed within the 20 s bound ⇒ return false, nothing re-anchored and the panel stays refused.",
+  "at": "src/server/usage-pool-engine.js:if (!(await windowStamp.writeWindowStamp(USAGE_CACHE_DIR, key, stamp, producer, { offLoop: true }))) return false; // the ONE writer (null = the folder could not be read: nobody can tell)"
+ },
+ {
+  "key": "usage-cache · src/server/usage-pool-engine.js · create > reanchorLapsedMember · writeSidecar()",
+  "verdict": "waits",
+  "why": "the reanchor goes on only once both sidecars landed (awaited offLoop)",
+  "at": "src/server/usage-pool-engine.js:if (!(await usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key)"
+ }
+]

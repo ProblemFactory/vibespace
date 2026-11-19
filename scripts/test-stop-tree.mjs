@@ -362,7 +362,7 @@ const svcScene = async (Mod, tag) => {
       J.stop(job); answer = J.start(job);   // the second press, inside the stop's grace
       // its read r2 (N1): the asked start is RUNTIME only — never in jobs.json (a stale one re-ran a finished job after a restart);
       // the plant: a plain key written beside it IS read back (the check can see a field)
-      job.zzProbe = 1; J._save();
+      job.zzProbe = 1; J._save(); (J.d.writer || createRequire(import.meta.url)('../src/store-writer.js').storeWriter()).flushSync();   // lane lg-store-writes U4 (a meeting met at the census's gate): jobs.json is the store writer's — landed before the file is read
       const rec = (JSON.parse(fs.readFileSync(path.join(dd, 'jobs.json'), 'utf8')) || []).find((x) => x && x.id === job.id) || {};
       delete job.zzProbe;
       flagAfter = { inMemory: job._startAfterStop === true, onDisk: Object.keys(rec).filter((k) => /startAfterStop/.test(k)), plantRead: rec.zzProbe === 1 };

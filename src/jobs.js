@@ -1376,12 +1376,13 @@ class JobManager {
       } else {
         this._stashNotif(cid, job, ev, (r && r.reason) || 'unreachable', { stampLast: !subscriber, held: heldOf(r, (r && r.reason) || 'unreachable'), mark });
         if (r && r.notRunning === true) this._oweWake(cid, job, ev, { subscriber });   // the manager design's piece 7: the words are stashed (durable) FIRST
+        this._save();   // the moved2 census (its jobs pass): a copy STASHED after its delivery failed is that notice's only copy — urgent, never the paced tick
       }
       this._dirty = true;
       try { this.d.broadcast('jobs-updated', { id: job.id }); } catch { }
     }).catch((e) => {
       this._stashNotif(cid, job, ev, e.message, { stampLast: !subscriber, held: { kind: 'not-reachable' }, mark }); // degrade path logs verbatim inside
-      this._dirty = true;
+      this._save();   // the moved2 census: the stashed copy is the notice's only one — urgent
     });
   }
   /** THE ONE WRITE of the per-conversation flood floor (record-clear census §I, verify r9 ⑥: a DIGEST of the last text,
@@ -3283,11 +3284,17 @@ class JobManager {
           : memCause ? `${job.state}: ${M.memoryEndWhat(run)} (${Math.round((run.endedAt - run.startedAt) / 60000)}m)`
             : `${job.state} exit=${run.exit ?? '—'} ${run.cause} (${Math.round((run.endedAt - run.startedAt) / 60000)}m)${endWords ? ` — ${endWords}` : ''}`;
       this._touch(job, routineCronOk ? null : { what: evText, alarm: job.state === 'failed' });
-      if (M.notifyUserOf(job) && !windowEnd) this._forYou(job, M.forYouCopy(job, 'end', { cause: run.cause }));
-      // owner auto-notify honors the same quiet-success law: routine scheduled
-      // success never messages anyone; agent-stopped ('interrupted') skips too
-      // — the owner just did it and a message would echo their own action.
-      if (!routineCronOk && job.state !== 'interrupted') this._notifyOwner(job, { what: evText, wake: 'result' });
+      // the moved2 census (its jobs pass — a gap the save sites did not show): the run's END is recorded, then its For-you item and the
+      // owner's message RIDE that record's landing — a kill first re-judges the end at boot from exit.json and says it once, never twice
+      this._save();
+      const forYouEnd = M.notifyUserOf(job) && !windowEnd, tellOwner = !routineCronOk && job.state !== 'interrupted';
+      this._ride(this.file, 'a run\'s end', () => {
+        if (forYouEnd) this._forYou(job, M.forYouCopy(job, 'end', { cause: run.cause }));
+        // owner auto-notify honors the same quiet-success law: routine scheduled
+        // success never messages anyone; agent-stopped ('interrupted') skips too
+        // — the owner just did it and a message would echo their own action.
+        if (tellOwner) this._notifyOwner(job, { what: evText, wake: 'result' });
+      });
     }
     // round 5 (the ruling): a service keeps what its run left only while it runs — stopped or parked, they are stopped too
     if (job.kind === 'service' && left && left.kept && (!job.desiredUp || job.state === 'failed')) this._clearKept(job, run).then(() => this._cutSaid(job, run)).catch(() => { });
@@ -3473,8 +3480,12 @@ class JobManager {
             // past, so the owner notify re-fired every dedupe window)
             job.state = 'missed'; job.desiredUp = false; job.nextFireAt = null;
             this._touch(job, { what: 'missed its {at} time while the server was down', alarm: true });
-            this._forYou(job, M.forYouCopy(job, 'missed'));
-            this._notifyOwner(job, { what: 'MISSED its scheduled {at} time (server was down) — reschedule if it still matters', wake: 'missed' });
+            // the moved2 census (its jobs pass): the notices RIDE the parked record's landing — a kill first re-judges it, never says it twice
+            this._save();
+            this._ride(this.file, 'a missed one-shot parked', () => {
+              this._forYou(job, M.forYouCopy(job, 'missed'));
+              this._notifyOwner(job, { what: 'MISSED its scheduled {at} time (server was down) — reschedule if it still matters', wake: 'missed' });
+            });
             continue;
           }
         }
@@ -3491,6 +3502,9 @@ class JobManager {
         job.nextFireAt = job.schedule.at ? null : M.nextFire(job.schedule, now(), undefined, job.nextFireAt); // lane int361: the slot it fired for — a fall-back's repeated time never fires twice
         if (job.schedule.at) { job.state = 'done'; }
         this._touch(job);
+        // the moved2 census (its jobs pass): the slot it fired for is ON DISK before the next tick — a synchronous landing (bounded):
+        // the fire cannot ride (a spawn waits on its own intent), so the release's window after a fire stays this short, never paced
+        this._save(); this._onDisk(this.file, 'a schedule\'s next time');
       } catch (e) { this.d.log(`[jobs] cron fire failed for ${job.id}:`, e.message); }
     }
   }
@@ -3560,6 +3574,7 @@ class JobManager {
         if (run && run.endedAt && run.endedAt < cutoff) {
           if (this._notifsUnread && job.clearedAt) continue;   // the B-f276 remainder (5), its read r3 (S2): its record judges the held notices
           this.jobs.delete(id); this._dirty = true;
+          (this._removalOwed || (this._removalOwed = new Map())).set(id, job);   // the moved2 census: its logs kept until the removal lands
           whole.push(id); gone.push(id);
         }
       }
@@ -3576,7 +3591,7 @@ class JobManager {
     // lane job-logs-sweep: the two legs' verdicts stay theirs; their removals and THE LAW's pass run in the remover's worker
     const goneSet = new Set(gone), sweepLogs = (ids) => { if (ids.length) this._logsWhole(ids); };   // ONE site of the remover's whole-dir verdicts (test-job-logs-sweep counts them)
     sweepLogs(whole.filter((id) => !goneSet.has(id)));
-    if (gone.length) { this._save(); this._ride(this.file, 'the gc\'s removals', () => sweepLogs(gone)); }
+    if (gone.length) { this._save(); this._ride(this.file, 'the gc\'s removals', () => { for (const id of gone) { if (this._removalOwed) this._removalOwed.delete(id); } sweepLogs(gone); }); }
     // an open catch-up keeps its own pace (its timer armed); a stalled one is picked up here. Round 3 §3: a pass that throws never
     // fails the gc (its other work is done above)
     if (!this._logsGapT) { try { await this.sweepLogs({ now: at, why: 'gc' }); } catch (e) { this.d.log('[jobs] job-logs pass (gc) threw:', e && e.message); } }
@@ -3643,7 +3658,9 @@ class JobManager {
     // the runs the hub still holds work for: a scope reap that has not finished re-reads its run's pid.json every tick
     const held = [...this._reapLater].map(([run, v]) => (run && v && v.job ? `${v.job.id}/${run.startedAt}` : null)).filter(Boolean);
     // the archive from memory when it is loaded; otherwise the worker reads its file (never _loadArchive's synchronous read here)
-    const keep = LS.keepSetOf({ jobs: [...this.jobs.values()], archive: this.archive || [], held });
+    // the moved2 census (its jobs pass): a record whose REMOVAL is still owed to jobs.json (rm, the gc — their steps ride the landing)
+    // keeps its run folders until that landing: a kill first brings the record back, and its logs with it
+    const keep = LS.keepSetOf({ jobs: [...this.jobs.values(), ...(this._removalOwed ? this._removalOwed.values() : [])], archive: this.archive || [], held });
     for (const id of keep.unreadable) if (!(this._logsUnreadSaid || (this._logsUnreadSaid = new Set())).has(id)) { this._logsUnreadSaid.add(id); this.d.log(`[jobs] job-logs: the record ${id} lists its runs in a shape that cannot be read — every dir of it is kept`); }   // round 3 §3: said once, by id
     const loaded = this._logsState !== null, counting = loaded ? !this._logsState.catchUp : true;
     const ans = await this._logsRemover().sweep({ keep, cutoff: at - cfg.retentionMs, max: cfg.max, count: loaded ? counting : 'auto', stateFile: loaded ? null : this.logsSweepFile,   // `counting` walks on past B by NAME only (no stat, no /proc)
@@ -4055,10 +4072,12 @@ class JobManager {
     const last = job.runs && job.runs[job.runs.length - 1];
     if (job.kind === 'cron') for (const k of this.jobs.values()) if (k.cronParent === job.id) this._settleWait(k, 'its schedule was removed'); // lane vault-job-road: a removed cron's waiting run never starts
     this.jobs.delete(job.id); this._dirty = true; this._save();
+    (this._removalOwed || (this._removalOwed = new Map())).set(job.id, job);   // its logs stay in the sweep's keep set until the landing
     // lane lg-store-writes (the moved2 cure 2 — THE STEP RIDES THE LANDING, no roll back): what cannot be undone — its kept processes
     // ended, its For-you items resolved — runs once jobs.json holds the removal; a kill first brings the job back whole. The
     // route's reply waits its bound (persisted): not landed yet ⇒ said, and the rest follows by itself at the landing
     this._ride(this.file, 'the removal', () => {
+      if (this._removalOwed && this._removalOwed.get(job.id) === job) this._removalOwed.delete(job.id);
       if (last && last.endedAt) this._clearKept(job, last).catch(() => { }); // round 5: a removed service keeps nothing running
       try { this.d.resolveJobAsk && this.d.resolveJobAsk(job.id, { onlyAsk: false }); } catch { } // removed job leaves no orphan inbox items
     });
@@ -4076,9 +4095,16 @@ class JobManager {
     job.interaction.pending = { panel, version, postedAt: now(), timeoutS: panel.timeoutS || 1800 };
     if (job.kind === 'task' && ['up', 'starting'].includes(job.state)) job.state = 'awaiting-user';
     this._touch(job, { what: 'needs your input — open its panel', verb: 'answers' });
-    this._forYou(job, M.forYouCopy(job, 'ask'));
-    this._notifyOwner(job, { what: 'posted an interaction panel and is awaiting an answer' });
     this._save();
+    // the moved2 census (its jobs pass): THE STEP RIDES THE LANDING — the For-you item filed and the owner told only once jobs.json holds
+    // the panel (a kill first leaves no item open for a panel the disk never held); a panel answered or withdrawn meanwhile files nothing
+    this._ride(this.file, 'the panel asked', () => {
+      const pend = job.interaction && job.interaction.pending;
+      if (!pend || pend.version !== version) return;
+      this._forYou(job, M.forYouCopy(job, 'ask'));
+      this._notifyOwner(job, { what: 'posted an interaction panel and is awaiting an answer' });
+      this._save();
+    });
     return { ok: true, version };
   }
   /** B-8bd5: the job that FILED a panel may WITHDRAW it once its cause is gone (a monitor's alarm that cleared) — the panel closed,
@@ -4093,16 +4119,20 @@ class JobManager {
     const wrec = { withdrawn: true, version: p.version, ts: now() };
     job.interaction.answers.push(wrec);
     if (job.interaction.answers.length > 50) job.interaction.answers.splice(0, job.interaction.answers.length - 50);   // its read r2: the same cap as an answer's
-    if (job.stdinOpen && !self) { // 主开发 21:46Z: a stdin-open job reads a withdraw BY ITS OWNER on its stdin, as it reads an answer (the wrapper's answers tail file) — never an echo of its own
-      const run = job.runs && job.runs[job.runs.length - 1];
-      if (run) { try { fs.promises.appendFile(path.join(this._ctlDir(job, run.startedAt), 'answers.jsonl'), JSON.stringify(wrec) + '\n').catch(() => { }); } catch { } }   // OFF the loop (test-store-write-census: no new synchronous store write)
-    }
+    // the moved2 census (主开发 03:00Z; hunt 3's withdrawAsk, named twice): THE STEP RIDES THE LANDING, as answerPanel's — the record in
+    // memory holds the withdraw at once; the stdin-open job's answers file (its wrapper tails it), its wait woken and the For-you item
+    // resolved follow once jobs.json holds it (a kill first leaves the panel open on disk and none of them happened)
+    const run = job.stdinOpen && !self && job.runs && job.runs[job.runs.length - 1];   // 主开发 21:46Z: a stdin-open job reads a withdraw BY ITS OWNER on its stdin — never an echo of its own
+    const ctl = run ? this._ctlDir(job, run.startedAt) : null;
     job.interaction.pending = null;
     if (job.state === 'awaiting-user') job.state = 'up';
-    this._resolveAns(job);
-    try { this.d.resolveJobAsk && this.d.resolveJobAsk(job.id); } catch { }
     this._touch(job, { what: `withdrew its panel #${p.version} (its cause is gone)`, verb: 'answers' });
     this._save();
+    this._ride(this.file, 'the panel\'s withdraw', () => {
+      if (ctl) { try { fs.promises.appendFile(path.join(ctl, 'answers.jsonl'), JSON.stringify(wrec) + '\n').catch(() => { }); } catch { } }   // OFF the loop (test-store-write-census: no new synchronous store write)
+      this._resolveAns(job);
+      try { this.d.resolveJobAsk && this.d.resolveJobAsk(job.id); } catch { }
+    });
     return { ok: true, version: p.version };
   }
   answerPanel(job, answers) { // user-side (routes verify user auth)

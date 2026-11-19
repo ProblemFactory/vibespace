@@ -44,6 +44,9 @@ import { scratch } from './scratch.mjs';
 import { writeFakeAgentBrowser } from './fixtures/fake-agent-browser.mjs';
 import { checker } from './lib/check.mjs';
 const require = createRequire(import.meta.url);
+// lane lg-store-writes (U5b, met at its gate): browser-profiles.json is the store writer's — a read of the FILE lands what the process owes
+// first, LOUDLY (a write left owed would make the disk check prove nothing)
+const landReg = () => { const r = require('../src/store-writer.js').storeWriter().flushSync(); if (r.deferred || (r.left && r.left.length)) throw new Error(`the store writer left owed writes: ${JSON.stringify(r.deferred ? 'deferred' : r.left).slice(0, 300)}`); };
 const Module = require('node:module');
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
@@ -291,7 +294,7 @@ let NOT_SET_UP = null;   // round 3: the server's own answers for a vault never 
   const args = (L.config && Array.isArray(L.config.args) ? L.config.args : String((L.config && L.config.args) || '').split(/\s*[,\n]\s*/)).filter(Boolean);
   const sw = args.find((a) => /^--proxy-server=/.test(a)) || '';
   const port = Number((/^--proxy-server=http:\/\/127\.0\.0\.1:(\d+)$/.exec(sw) || [])[1] || 0);
-  const store = fs.readFileSync(path.join(D1, 'browser-profiles.json'), 'utf8');
+  const store = (landReg(), fs.readFileSync(path.join(D1, 'browser-profiles.json'), 'utf8'));
   const recEg = (JSON.parse(store).browsers || {})[p.id]?.egress || null;
   ok(!!(args.includes(require('../src/browser-engines.js').PROXY_UDP_ARG)), 'the driver\'s road: the launch\'s config also carries the WebRTC policy (UDP only through a proxy) beside the switch', args.filter((a) => /proxy|webrtc/.test(a)));
   ok(!!(fake.launches().length === n0 + 1 && port > 0 && recEg && recEg.port === port && recEg.proxy && recEg.proxy.credential === ref),
@@ -332,7 +335,7 @@ let NOT_SET_UP = null;   // round 3: the server's own answers for a vault never 
   const D2 = path.join(ROOT, 'data-2');
   const k2a = mkKeeper(D2, { proxyLogins: pl });
   const pm = k2a.createProfile({ label: 'Legacy', proxy: proxyUrl });
-  const doc = JSON.parse(fs.readFileSync(path.join(D2, 'browser-profiles.json'), 'utf8'));
+  const doc = JSON.parse((landReg(), fs.readFileSync(path.join(D2, 'browser-profiles.json'), 'utf8')));
   doc.profiles.find((x) => x.id === pm.id).proxy = withLogin('http', `127.0.0.1:${HTTP_UP}`);
   fs.writeFileSync(path.join(D2, 'browser-profiles.json'), JSON.stringify(doc));
   const k2 = mkKeeper(D2, { proxyLogins: pl });
@@ -342,7 +345,7 @@ let NOT_SET_UP = null;   // round 3: the server's own answers for a vault never 
   ok(!!(eP && eP.code === 'proxy_password_in_profile' && /Move the password to the vault/.test(eP.message) && !eP.message.includes(PASS) && fake.launches().length === n3 && !view.includes(PASS)),
     'a password saved IN the address before this law ⇒ never used: the launch refused by name, its sentence naming «Move the password to the vault» — nothing launched', eP && eP.code);
   ok(!!(view.includes('"proxyPasswordInProfile":true') && !view.includes(PASS)), 'the keeper\'s list masks it: the card\'s row flags the password in the address and never carries it', view.slice(0, 200));
-  const storeL0 = fs.readFileSync(path.join(D2, 'browser-profiles.json'), 'utf8'), entriesL0 = vault.entries.size;
+  const storeL0 = (landReg(), fs.readFileSync(path.join(D2, 'browser-profiles.json'), 'utf8')), entriesL0 = vault.entries.size;
   vault.locked = true;
   const mL = await k2.moveProxyPassword(pm.id);
   vault.locked = false;
@@ -350,7 +353,7 @@ let NOT_SET_UP = null;   // round 3: the server's own answers for a vault never 
     '«Move the password to the vault» with the vault locked ⇒ NOTHING changed: the profiles store byte for byte, the vault\'s entries, the card\'s flag', mL.code);
   const before = vault.entries.size;
   const mv = await k2.moveProxyPassword(pm.id);
-  const store2 = fs.readFileSync(path.join(D2, 'browser-profiles.json'), 'utf8');
+  const store2 = (landReg(), fs.readFileSync(path.join(D2, 'browser-profiles.json'), 'utf8'));
   const row = JSON.parse(store2).profiles.find((x) => x.id === pm.id);
   ok(!!(!mL.ok && mL.code === 'vault_locked' && store2.length > 0 && mv.ok && mv.credential === `proxy-login:http://127.0.0.1:${HTTP_UP}#${USER}` && vault.entries.get(mv.credential).toString() === PASS && vault.entries.size <= before + 1
      && row.proxy === `http://127.0.0.1:${HTTP_UP}` && row.proxyCredential === mv.credential && !store2.includes(PASS) && !JSON.stringify(mv).includes(PASS)),
@@ -360,12 +363,12 @@ let NOT_SET_UP = null;   // round 3: the server's own answers for a vault never 
   try { await k2.stop(pm.id, { why: 'user' }); } catch { }
   try { await k.stop(p.id, { why: 'user' }); } catch { }
   // B-8b87 cure — a store that cannot be written ⇒ not_written: the vault entry kept, the file and the card as they were
-  const legacyIn = (dir, label) => { const kk = mkKeeper(dir, { proxyLogins: pl }); const pp = kk.createProfile({ label, proxy: proxyUrl }); const d0 = JSON.parse(fs.readFileSync(path.join(dir, 'browser-profiles.json'), 'utf8')); d0.profiles.find((x) => x.id === pp.id).proxy = withLogin('http', `127.0.0.1:${HTTP_UP}`); fs.writeFileSync(path.join(dir, 'browser-profiles.json'), JSON.stringify(d0)); return pp.id; };
-  const moveUnwritten = async (dir, mod) => { const id = legacyIn(dir, 'Unwritten'); const kk = mkKeeper(dir, { proxyLogins: pl }, mod); kk.list(); const f0 = fs.readFileSync(path.join(dir, 'browser-profiles.json'), 'utf8'); fs.chmodSync(dir, 0o500); let m; try { m = await kk.moveProxyPassword(id); } finally { fs.chmodSync(dir, 0o700); } return { m, same: fs.readFileSync(path.join(dir, 'browser-profiles.json'), 'utf8') === f0, card: JSON.stringify(kk.list().profiles.find((x) => x.id === id)) }; };
+  const legacyIn = (dir, label) => { const kk = mkKeeper(dir, { proxyLogins: pl }); const pp = kk.createProfile({ label, proxy: proxyUrl }); const d0 = JSON.parse((landReg(), fs.readFileSync(path.join(dir, 'browser-profiles.json'), 'utf8'))); d0.profiles.find((x) => x.id === pp.id).proxy = withLogin('http', `127.0.0.1:${HTTP_UP}`); fs.writeFileSync(path.join(dir, 'browser-profiles.json'), JSON.stringify(d0)); return pp.id; };
+  const moveUnwritten = async (dir, mod) => { const id = legacyIn(dir, 'Unwritten'); const kk = mkKeeper(dir, { proxyLogins: pl }, mod); kk.list(); const f0 = (landReg(), fs.readFileSync(path.join(dir, 'browser-profiles.json'), 'utf8')); fs.chmodSync(dir, 0o500); let m; try { m = await kk.moveProxyPassword(id); } finally { fs.chmodSync(dir, 0o700); } return { m, same: fs.readFileSync(path.join(dir, 'browser-profiles.json'), 'utf8') === f0, card: JSON.stringify(kk.list().profiles.find((x) => x.id === id)) }; };
   const u4 = await moveUnwritten(path.join(ROOT, 'data-4'));
   ok(!!(u4.m && !u4.m.ok && u4.m.code === 'not_written' && u4.same && vault.entries.has(u4.m.credential) && u4.card.includes('"proxyPasswordInProfile":true')),
     '«Move the password to the vault» with a profiles store that cannot be written ⇒ not_written: the vault entry kept, the file and the card still say the password is in the profile (never «done»)', u4.m);
-  const u4r = await moveUnwritten(path.join(ROOT, 'data-4r'), mutant('src/server/browser-keeper.js', '      if (save() === false) { p.proxy = was.proxy;', '      if (false) { p.proxy = was.proxy;'));
+  const u4r = await moveUnwritten(path.join(ROOT, 'data-4r'), mutant('src/server/browser-keeper.js', '      if (failed) { p.proxy = was.proxy;', '      if (false) { p.proxy = was.proxy;')   /* the deferred-save census: the guard is the landed write's failure now */);
   ok(!!(u4r.m && u4r.m.ok === true && u4r.same), 'RED: a move that does not ask its write — «done» while the file still holds the password (the leg above goes red on it)', u4r.m && u4r.m.ok);
   // B-8b87 cure — A HUB RESTART: the browser of a profile with a proxy is ADOPTED, its forwarder re-bound on the SAME port
   const D3 = path.join(ROOT, 'data-3'), k3 = mkKeeper(D3, { proxyLogins: pl });
@@ -512,7 +515,7 @@ let NOT_SET_UP = null;   // round 3: the server's own answers for a vault never 
   {
     const vN = standinVault({ setUp: false }), plN = PL.create({ vault: vN, log: { log() { }, warn() { } } });
     const sN = plN.save({ proxy: proxyUrl, user: USER, password: PASS });
-    const DN = path.join(ROOT, 'data-n'), idN = (() => { const kk = mkKeeper(DN, { proxyLogins: plN }); const pp = kk.createProfile({ label: 'Never set up', proxy: proxyUrl }); const d0 = JSON.parse(fs.readFileSync(path.join(DN, 'browser-profiles.json'), 'utf8')); d0.profiles.find((x) => x.id === pp.id).proxy = withLogin('http', `127.0.0.1:${HTTP_UP}`); fs.writeFileSync(path.join(DN, 'browser-profiles.json'), JSON.stringify(d0)); return pp.id; })();
+    const DN = path.join(ROOT, 'data-n'), idN = (() => { const kk = mkKeeper(DN, { proxyLogins: plN }); const pp = kk.createProfile({ label: 'Never set up', proxy: proxyUrl }); const d0 = JSON.parse((landReg(), fs.readFileSync(path.join(DN, 'browser-profiles.json'), 'utf8'))); d0.profiles.find((x) => x.id === pp.id).proxy = withLogin('http', `127.0.0.1:${HTTP_UP}`); fs.writeFileSync(path.join(DN, 'browser-profiles.json'), JSON.stringify(d0)); return pp.id; })();
     const mN = await mkKeeper(DN, { proxyLogins: plN }).moveProxyPassword(idN);
     NOT_SET_UP = { save: sN, move: mN };
     ok(!!(!sN.ok && sN.code === 'vault_not_set_up' && /not set up/.test(sN.error) && !mN.ok && mN.code === 'vault_not_set_up' && vN.entries.size === 0),
@@ -521,7 +524,7 @@ let NOT_SET_UP = null;   // round 3: the server's own answers for a vault never 
   // the move: a user name the vault entry cannot carry ⇒ its own code (the page has the sentence)
   {
     const DU = path.join(ROOT, 'data-u'), kk = mkKeeper(DU, { proxyLogins: pl }), pp = kk.createProfile({ label: 'Odd user', proxy: proxyUrl });
-    const d0 = JSON.parse(fs.readFileSync(path.join(DU, 'browser-profiles.json'), 'utf8')); d0.profiles.find((x) => x.id === pp.id).proxy = 'http://' + ['a%20b', PASS].join(':') + `@127.0.0.1:${HTTP_UP}`; fs.writeFileSync(path.join(DU, 'browser-profiles.json'), JSON.stringify(d0));
+    const d0 = JSON.parse((landReg(), fs.readFileSync(path.join(DU, 'browser-profiles.json'), 'utf8'))); d0.profiles.find((x) => x.id === pp.id).proxy = 'http://' + ['a%20b', PASS].join(':') + `@127.0.0.1:${HTTP_UP}`; fs.writeFileSync(path.join(DU, 'browser-profiles.json'), JSON.stringify(d0));
     const mU = await mkKeeper(DU, { proxyLogins: pl }).moveProxyPassword(pp.id);
     ok(!mU.ok && mU.code === 'proxy_user_unusable', 'a move whose user name a vault entry cannot carry (a space) ⇒ proxy_user_unusable — the page\'s user-name sentence, not «could not be used (bad-request)»', mU.code);
   }

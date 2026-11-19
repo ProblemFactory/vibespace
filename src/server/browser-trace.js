@@ -841,6 +841,9 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
       : exists ? 'forgotten by the user (directory moved aside, never deleted by itself)' : 'forgotten by the user (its directory was already gone)';
     const row = fileForgotten({ profileId: id, label: p.label, dir: p.dir, to, bytes, why });
     const r = r0 || keeper.removeProfile(id, { unpin, replyMs: 20000 });
+    // the moved2 census (its keeper pass): the folder is already moved aside and the ledger row written (both synchronous, above) — the
+    // record's removal LANDS right after them (bounded), as the release's synchronous save did, never left for the writer's pace
+    if (!r0 && typeof keeper.landNow === 'function') { try { keeper.landNow(); } catch { /* said by the reply below */ } }
     const L = L0 || (r && r.landing ? await r.landing : null);
     log.log?.(`[browser-trace] profile ${id} "${p.label}" forgotten: ${p.dir} → ${to || '(no directory)'} (ledger ${row.id})`);
     bc({ type: 'browser-housekeeping-updated', forgotten: row });

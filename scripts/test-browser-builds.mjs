@@ -1091,12 +1091,12 @@ const ke = mkKeeper(path.join(ROOT, 'data-eng'), { engines: ENGR, serverSetting:
       const idX = todos.length === t0 + 1 ? 'u' + todos.length : null;
       kx.noteEngineLive(pa.id, { ...SX, why: null, live: ALL3 });
       const openWhileB = todoDone.length === d0;
-      await kx.removeProfile(pb.id);
+      await kx.removeProfile(pb.id).landing;   // lane lg-store-writes (the deferred-save census): the engine mark clears at the removal's landing
       const doneX = todoDone.slice(d0);
       kx.noteEngineLive(pa.id, SY); const idY = 'u' + todos.length; const d1 = todoDone.length;
       kx.noteEngineLive(pa.id, { ...SY, why: null, live: ALL3 });
       const doneY = todoDone.slice(d1);
-      await kx.removeProfile(pa.id);
+      await kx.removeProfile(pa.id).landing;
       return { idX, openWhileB, doneX, idY, doneY };
     };
     const cr = await cureRun(ke);

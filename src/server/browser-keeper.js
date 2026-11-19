@@ -844,8 +844,14 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   function batched(fn) {
     batchDepth++;
     try { return fn(); }
-    finally { if (--batchDepth === 0 && batchDirty) { batchDirty = false; save(); notify(); } }
+    finally { if (--batchDepth === 0 && batchDirty) { batchDirty = false; save(); notify(); if (batchSync) { batchSync = false; landNow(); } } }
   }
+  /** THIS SITE'S SAVE STAYS SYNCHRONOUS (lane lg-store-writes — the deferred-save census, a verdict of its table, 主开发 03:00Z): a
+   *  person's or an agent's act whose reply or next step (a session started, a meta written, a card filed, a display stopped) follows
+   *  at once — its registry write LANDS before that, under the writer's own bound (landNow), as the release's synchronous save did;
+   *  inside a batch the batch's one commit lands. → whether it is on disk (false: held past the bound or failed — owed, said) */
+  let batchSync = false;
+  function commitSync() { if (batchDepth > 0) { batchDirty = true; batchSync = true; return true; } commit(); return landNow(); }
 
   // ── views ──
   /** The daemon namespace of a profile's browser: `vs-<profileId>` — or, for a
@@ -1331,7 +1337,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     if (clonedFrom) rec.clonedFrom = { ...clonedFrom }; // lane browser-profile-clone: born with where its logins came from (ONE write)
     reg.profiles.push(rec);
     if (!legacy) bornWithRow(rec, useRow, by); else bornWithRow(rec, { to: [{ kind: 'everyone' }], except: [] }, by);   // lane grants-unify: the list is the store's row
-    commit();
+    commit();   // U5b: a create is OWED (test-browser-pin) — the routes wait for its landing (src/routes/browser.js landedOf)
     log.log?.(`[browser] profile ${id} "${rec.label}" created${choice.kind === 'build' ? ' (Chrome ' + choice.version + ')' : choice.kind === 'path' ? ' (chrome at ' + choice.path + ')' : ''} (${rec.provider}${rec.host ? ' on ' + rec.host : ''}${rec.cdpPort ? ', cdp port ' + rec.cdpPort : ''}${isMediated(rec) ? ', separate tabs (mediated)' : ''}, ${legacy ? 'legacy shared' : 'usable by ' + whoWords(rec)}${rec.createdBy ? ', created by ' + rec.createdBy : ''})${d ? ' at ' + d : ''}`);
     return pview(rec);
   }
@@ -1674,7 +1680,6 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     if (p.dir && reg.browsers[id]) { const rr = reg.browsers[id]; if (rr.state !== 'failed') rememberDir(p.dir, launchHostsFor(rr, p.dir), { retire: true }); else lineageLedger('retire-skipped-refused', { dir: dirKeyOf(p.dir), id }); }
     const goneRec = reg.profiles.find((x) => x.id === id) || null;
     reg.profiles = reg.profiles.filter((x) => x.id !== id);
-    if (goneRec && goneRec.kernelLive) markCleared(goneRec.kernelLive, goneRec);   // B-cf42 cure: a removed profile's mark goes with it
     delete reg.browsers[id];
     for (const [k, v] of Object.entries(reg.pins)) if (v && v.profileId === id) reg.pins[k] = { profileId: null, origin: 'harness', at: now(), cleared: { id, label: p.label, at: now() } }; // lane S2: the cleared MARK (read by the browser fact)
     ephPairs.delete(id); ephSessions.delete(id); humans.delete(id); rung2Refusals.delete(String(id)); delete reg.leftTabs[id]; if (reg.loginFences) delete reg.loginFences[id]; // BROWSE YOURSELF: never outlives its record; verify r5 ②: nor the refusals told at a drive's end; vault-login Shape S: nor its persisted fences
@@ -1689,6 +1694,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     // follows by itself at the landing — a second press finds it gone and nothing left half taken). The sweep's ephemeral retire
     // keeps its piece (its removal is written with the walk's piece; an ephemeral record retires again at the next boot's sweep)
     const step = () => {
+      if (goneRec && goneRec.kernelLive) markCleared(goneRec.kernelLive, goneRec);   // B-cf42 cure: a removed profile's mark goes with it — the moved2 census: at the landing (the engine's For-you notice is marked done only then)
       // lane grants-unify: its list goes with it (a record re-made under its id starts at its own default)
       if (!isEph(p)) { try { const g = grantsOf(); if (g) g.remove('browser-profile', id, 'user'); } catch (e) { log.warn?.(`[browser] the grant row of ${id} was not removed — ${e && e.message}`); } }
       // r4: the keeper's own marked config for this record goes with it (nothing runs on it — removal needs a stopped browser)
@@ -1812,7 +1818,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
         changed.sharing = { was: p.sharing, now: sv.value }; p.sharing = sv.value;
       }
     }
-    if (Object.keys(changed).length) { commit(); log.log?.(`[browser] profile ${id} "${p.label}" updated: ${Object.keys(changed).join(', ')}${changed.use ? ` (who can use it: ${whoWords(p)})` : ''}${detached.length ? ` (narrowed: ${detached.length} conversation(s) detached — ${detached.map((d) => d.browserKey).join(', ')})` : ''}${undecided.length ? ` (kept, undecided — the Task Group list could not be read: ${undecided.join(', ')})` : ''}`); emitLease({ kind: 'profile-updated', profileId: id, changed }); }
+    if (Object.keys(changed).length) { commitSync(); log.log?.(`[browser] profile ${id} "${p.label}" updated: ${Object.keys(changed).join(', ')}${changed.use ? ` (who can use it: ${whoWords(p)})` : ''}${detached.length ? ` (narrowed: ${detached.length} conversation(s) detached — ${detached.map((d) => d.browserKey).join(', ')})` : ''}${undecided.length ? ` (kept, undecided — the Task Group list could not be read: ${undecided.join(', ')})` : ''}`); emitLease({ kind: 'profile-updated', profileId: id, changed }); }
     return { profile: pview(p), changed, detached, undecided, added };
   }
 
@@ -2013,7 +2019,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   function setPin(browserKey, profileId, { origin = 'chosen', by = 'user', taskIds = null, groupsUnreadable = false, remote = false } = {}) {
     ensureLoaded();
     if (!B.isBrowserKey(browserKey)) throw namedError('bad-request', 'a pin needs a browser key');
-    if (!profileId) { const had = !!reg.pins[browserKey]; delete reg.pins[browserKey]; pinFailures.delete(browserKey); if (had) commit(); return null; }
+    if (!profileId) { const had = !!reg.pins[browserKey]; delete reg.pins[browserKey]; pinFailures.delete(browserKey); if (had) commitSync(); return null; }
     const p = profile(profileId);
     if (!p || isEph(p)) throw namedError('not-found', `no profile ${profileId}`);
     const facts = Array.isArray(taskIds) ? { ids: taskIds.map(String), unreadable: !!groupsUnreadable } : null;
@@ -2021,7 +2027,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const added = by !== 'agent' && origin === 'chosen' ? addConversation(p, browserKey, facts, { remote }) : null;
     reg.pins[browserKey] = { profileId: p.id, origin, at: now(), by: by === 'agent' ? 'agent' : 'user' };
     pinFailures.delete(browserKey);
-    commit();
+    commitSync();
     const out = pinFor(browserKey);
     return added && out ? { ...out, added } : out;
   }
@@ -2043,7 +2049,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     if (!p || isEph(p)) return null;
     reg.pins[browserKey] = { profileId: p.id, origin: witness.origin, at: Math.min(now(), Number(witness.at) || 0), by: witness.by === 'agent' ? 'agent' : 'user' };
     pinFailures.delete(browserKey);
-    commit();
+    commitSync();
     return pinFor(browserKey);
   }
   /**
@@ -2063,7 +2069,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     if (!p || isEph(p)) return null;
     reg.pins[toKey] = { profileId: p.id, origin: 'conversation', at: Number(v.at) || 0, by: v.by === 'agent' ? 'agent' : 'user' };
     pinFailures.delete(toKey);
-    commit();
+    commitSync();
     log.log?.(`[browser] ${toKey}: inherits the pin of ${fromKey} (${p.id} "${p.label}", ${reg.pins[toKey].by}'s) — a fork's copy`);
     return pinFor(toKey);
   }
@@ -2282,7 +2288,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const group = groupCapOf(bk);
     const w = reg.caps[bk] && reg.caps[bk].waiting === true ? { waiting: true, facts: reg.caps[bk].facts || {} } : {};   // a person's cap never ends a group cap's wait
     if (c === null && group === null && !w.waiting) delete reg.caps[bk]; else reg.caps[bk] = { cap: c, group, at: now(), ...w };
-    commit();
+    commitSync();
     return { ...capFor(bk), own: ownLive(bk), explicit: c };
   }
   /** Is this live browser record THIS conversation's (its ephemeral, a helper's, or a profile it or a helper leases)?
@@ -2717,7 +2723,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const holders = B.attachedHolders(leasesOn(rec.profileId));
     log.log?.(`[browser] ${rec.profileId} "${label}": the person stopped its display window (${displayId}) — its Chrome goes with it and is NOT started again by itself (user-stopped); ${holders.length} holding conversation(s) told: their next browser command starts it`);
     emitLease({ kind: 'browser-user-stopped', profileId: rec.profileId, label, holders, displayId, local: true });
-    commit();
+    commitSync();
     return browserView(rec);
   }
   /** The desktop keeper's reader: who holds the browser whose display record is `displayId` — the conversations attached
@@ -6813,7 +6819,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     if (n > 999) throw namedError('cap', 'this conversation has minted 999 child handles — detach some');
     const handle = B.childHandleFor(browserKey, n);
     reg.children[handle] = { parent: browserKey, since: now(), sessionId: sessionId || null, carrierLostAt: null };
-    commit();
+    commitSync();
     ensureTimer();
     log.log?.(`[browser] ${browserKey}: child handle ${handle} minted (its own ephemeral browser; reaped with the parent)`);
     return { handle, parent: browserKey, n };
@@ -6875,8 +6881,8 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       catch (e) {
         log.warn?.(`[browser] profile ${id} "${rec.label}": its folder could not be moved from ${scratchDir} (${e.message}) — the record goes again; the conversation's browser keeps its folder`);
         reg.profiles = reg.profiles.filter((x) => x.id !== id);
+        commitSync();   // the moved2 census: the record's removal LANDS before its grant row goes (a kill between never leaves a record nobody may use)
         try { const g = grantsOf(); if (g) g.remove('browser-profile', id, 'user'); } catch { /* the row of a gone record admits nobody */ }
-        commit();
         // (the moved2 cure 3: a late failure is BROADCAST — commit() above republishes the list without it — and said in the log line)
         return { moved: false, error: `could not move ${scratchDir} to ${target}: ${e.message}` };
       }
@@ -7027,11 +7033,11 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       ensureLoaded();
       const p = profile(profileId);
       if (!p || isEph(p)) return { ok: false, code: 'not-found', error: `no profile ${profileId}` };
-      if (input && input.clear === true) { if (p.egress) { delete p.egress; commit(); } return { ok: true, profile: pview(p) }; }
+      if (input && input.clear === true) { if (p.egress) { delete p.egress; commitSync(); } return { ok: true, profile: pview(p) }; }
       const v = EXIT.egressRecordOf(input || {}, { now: now() });
       if (!v.ok) return v;
       p.egress = v.value;
-      commit();
+      commitSync();
       log.log?.(`[browser] ${p.id}: its exit kept (${v.value.source})`);
       return { ok: true, profile: pview(p) };
     });
@@ -7099,12 +7105,16 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       if (!r.ok) return r;
       const was = { proxy: p.proxy, proxyCredential: p.proxyCredential };
       p.proxy = addr.value; p.proxyCredential = r.name;
-      // B-8b87 cure: the write ASKED (commit() inside batched drops save()'s answer) — a failed write is said, the row put back to what
-      // the file still holds (its password), the vault entry kept (the next press reuses it)
-      if (save() === false) { p.proxy = was.proxy; p.proxyCredential = was.proxyCredential; log.warn?.(`[browser] ${p.id} "${p.label}": its proxy's password is in the vault (${r.name}), but the profiles store could not be written — it still holds the password`); return { ok: false, code: 'not_written', credential: r.name, error: `"${p.label}"'s proxy login is saved in the vault, but the profiles store could not be written — it still holds the password; press «Move the password to the vault» again` }; }
+      // B-8b87 cure: the write ASKED — the moved2 census (its keeper pass: save() only marks now, so this guard was dead): the write is
+      // LANDED (bounded) first; a FAILED write (the storage refused it) is the cure's road — the row put back (the writer's retry then
+      // writes what memory holds), the vault entry kept, not_written said; a write HELD past the bound is not a failed one: nothing put
+      // back, the answer says it finishes by itself
+      const landed = save() !== false && landNow();
+      const failed = !landed && (() => { const nd = typeof writerOf().whyNotDurable === 'function' ? writerOf().whyNotDurable(storeKey) : null; return !!(nd && nd.why === 'failed'); })();
+      if (failed) { p.proxy = was.proxy; p.proxyCredential = was.proxyCredential; save(); log.warn?.(`[browser] ${p.id} "${p.label}": its proxy's password is in the vault (${r.name}), but the profiles store could not be written — it still holds the password`); return { ok: false, code: 'not_written', credential: r.name, error: `"${p.label}"'s proxy login is saved in the vault, but the profiles store could not be written — it still holds the password; press «Move the password to the vault» again` }; }
       notify();
-      log.log?.(`[browser] ${p.id} "${p.label}": its proxy's password moved to the vault (${r.name}) — the profiles store no longer holds it`);
-      return { ok: true, profile: pview(p), credential: r.name };
+      log.log?.(`[browser] ${p.id} "${p.label}": its proxy's password moved to the vault (${r.name}) — the profiles store no longer holds it${landed ? '' : ' (once the storage answers: not on disk yet)'}`);
+      return { ok: true, profile: pview(p), credential: r.name, ...(landed ? {} : { notOnDisk: true, code: 'finishes-on-landing' }) };
     });
   }
   /** What ONE profile's wrapped browser may reach right now and what was refused (no secrets): its proxy's url, the list it
@@ -7528,7 +7538,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       p.provider = to;
       if (makeDefault) p.defaultBackend = to;
       p.lastSwitchAt = now();
-      commit();
+      commitSync();
       let browser;
       try { browser = await start(p.id, { why: `switch ${from} → ${to}` }); }
       catch (e) {
@@ -7537,7 +7547,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
         // arrived with the profile stranded on a backend that cannot start. Put it back, try the old one ONCE, and
         // answer the original refusal with the facts: restored (did the old backend come back), from, to.
         p.provider = from;
-        commit();
+        commitSync();
         // `restored` = the profile is as it was: back on `from`, and its browser running again when it ran before the
         // switch (a browser that was not running is not started by a rollback — nobody asked for it)
         let restored = !wasLive;
@@ -7551,10 +7561,10 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       }
       reopened.push(...await reopenLeaseTabs(p, leases));
       if (v.ladder && Number.isInteger(v.ladder.recordMajor)) p.lastChromiumMajor = Math.max(Number(p.lastChromiumMajor) || 0, v.ladder.recordMajor);
-      commit();
+      commitSync();
       log.log?.(`[browser] ${p.id} "${p.label}" switched ${from} → ${to} by ${by.kind}${browserKey ? ' ' + browserKey : ''}: ${reopened.length} lease tab(s) re-opened${v.ladder && v.ladder.disagreement ? ', version stamps disagreed (' + v.ladder.disagreement.recorded + ' vs ' + v.ladder.disagreement.dir + ', took ' + v.ladder.disagreement.taken + ')' : ''}`);
       return { ok: true, mode: 'switch', from, to, ladder: v.ladder, seats: v.seats, reopened, browser, chip: chipFor(p), profile: B.publicProfileView(p) };
-    } finally { switching.delete(p.id); commit(); }
+    } finally { switching.delete(p.id); commitSync(); }
   }
   /** §7.4 step 4, shared by the backend switch and Change build… (lane browser-admin 2a): every lease's tab re-opened in
    *  the NEW browser at its last URL, under the lease's own session over the CDP url (never the directory), the SAME
@@ -7611,7 +7621,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const prior = [...reg.blocked].reverse().find((b) => mineOn(b) && b.proposal) || null;
     const cv = SW.claimVerdict({ existing: prior, tier: v.value.tier });
     if (cv === 'same' || cv === 'rejected') {
-      if (cv === 'rejected') { const st = SW.proposalStep(prior.proposal, { event: 'told' }); if (st.ok) { prior.proposal = st.next; commit(); emitProposal(prior); } }
+      if (cv === 'rejected') { const st = SW.proposalStep(prior.proposal, { event: 'told' }); if (st.ok) { prior.proposal = st.next; commitSync(); emitProposal(prior); } }
       log.log?.(`[browser] ${browserKey || '?'} claims blocked on ${v.value.host} again — ${cv === 'same' ? 'the proposal ' + prior.id + ' stands (' + prior.proposal.state + ')' : 'the user rejected ' + prior.id + ' (told now)'}`);
       return { claim: { ...prior }, text: SW.blockedText(prior), hint: SW.siteHintFor(reg.siteHints, prior.host), proposal: { ...prior.proposal }, duplicate: cv === 'same', rejected: cv === 'rejected' };
     }
@@ -7629,7 +7639,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     // proposal to make room for a claim; one that must still go (50 undecided) is SAID: its listeners hear `dropped`
     const kept = SW.blockedKeep([...reg.blocked.filter((b) => !(mineOn(b) && !b.proposal)), entry]);
     reg.blocked = kept.keep;
-    commit();
+    commitSync();
     for (const d of kept.dropped) if (d.proposal && SW.blockedRank(d) >= 2) { log.warn?.(`[browser] the claim store is full — proposal ${d.id} (${d.proposal.state}, ${d.host}) was dropped to make room`); emitProposal({ ...d, dropped: true }); }
     log.log?.(`[browser] ${browserKey || '?'} claims blocked on ${v.value.host}${why ? ' (' + why + ')' : ''}, suggests tier ${v.value.tier}${proposal ? ` — proposal ${entry.id}: ${proposal.plan.kind}${proposal.plan.why ? ' (' + proposal.plan.why + ')' : ''}` : ''}`);
     if (proposal) emitProposal(entry);
@@ -7665,7 +7675,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const v = SW.proposalStep(e.proposal, { ...ev, at: ev.at || now() });
     if (!v.ok) return v;
     e.proposal = v.next;
-    commit();
+    commitSync();
     emitProposal(e);
     return { ok: true, entry: { ...e, proposal: { ...e.proposal } } };
   }
@@ -7916,7 +7926,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const prior = [...reg.siteResets].reverse().find(mine) || null;
     const cv = SW.siteResetClaimVerdict({ existing: prior });
     if (cv === 'same' || cv === 'rejected') {
-      if (cv === 'rejected') { const st = SW.proposalStep(prior.proposal, { event: 'told' }); if (st.ok) { prior.proposal = st.next; commit(); emitProposal(prior); } }
+      if (cv === 'rejected') { const st = SW.proposalStep(prior.proposal, { event: 'told' }); if (st.ok) { prior.proposal = st.next; commitSync(); emitProposal(prior); } }
       return { ok: true, entry: { ...prior, proposal: { ...prior.proposal } }, duplicate: cv === 'same', rejected: cv === 'rejected' };
     }
     const who = siteResetHolders(p.id);
@@ -7926,7 +7936,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const entry = { id, at: now(), browserKey: browserKey || null, sessionId: sessionId || null, profileId: p.id, host: h, url: proposal.url, by: 'agent', proposal };
     const kept = SW.blockedKeep([...reg.siteResets, entry]);
     reg.siteResets = kept.keep;
-    commit();
+    commitSync();
     for (const d of kept.dropped) if (d.proposal && SW.blockedRank(d) >= 2) { log.warn?.(`[browser] the site-reset store is full — proposal ${d.id} (${d.proposal.state}, ${d.host}) was dropped to make room`); emitProposal({ ...d, dropped: true }); }
     log.log?.(`[browser] ${browserKey || '?'} proposes clearing ${h}'s stored login in the shared profile ${p.id} ("${label}") — proposal ${id}, ${who.holders} conversation(s)${who.human ? ' + the user\'s own tab' : ''}`);
     emitProposal(entry);
@@ -7956,7 +7966,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     ensureLoaded();
     const n = reg.blocked.length;
     reg.blocked = reg.blocked.filter((b) => b.id !== String(id));
-    if (reg.blocked.length !== n) commit();
+    if (reg.blocked.length !== n) commitSync();
     return reg.blocked.length !== n;
   }
   /** Per-site memory (§7.4 / §7.6 rule 2): a claim keyed by EXACT host, with
@@ -7967,7 +7977,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const v = SW.siteHintVerdict({ ...h, at: now(), providerIds: providerIds() });
     if (!v.ok) throw namedError(v.code, v.error);
     reg.siteHints = [...reg.siteHints.filter((x) => x.host !== v.value.host), v.value];
-    commit();
+    commitSync();
     return { ...v.value };
   }
   function dropSiteHint(host) {
@@ -7975,7 +7985,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const h = SW.normalizeHost(host);
     const n = reg.siteHints.length;
     reg.siteHints = reg.siteHints.filter((x) => x.host !== h);
-    if (reg.siteHints.length !== n) commit();
+    if (reg.siteHints.length !== n) commitSync();
     return reg.siteHints.length !== n;
   }
   function siteHints() { ensureLoaded(); return reg.siteHints.map((h) => ({ ...h })); }

@@ -399,7 +399,10 @@ function opsOver(getDeps) {
 
   /** THE STORE HELD UNREAD (lane bl-windows): the task store's refusal words while it is held (else null) — the verbs ask it first */
   const tasksUnread = (act) => { const t = D().tasks; return t && typeof t.unreadRefusal === 'function' ? t.unreadRefusal(act) : null; };
-  return { conversationStatus, openConversation, renameConversation, bindConversation, settleBirthGroups, endConversation, inviteToGroup, tasksUnread };
+  /** the deferred-save census (lane lg-store-writes): a bind's store AS IT IS NOW on disk — the task store's own bounded wait; a store
+   *  without one (a suite's stand-in) answers true. → Promise<boolean> */
+  function bindLanded() { const tasks = D().tasks; return tasks && typeof tasks.persisted === 'function' ? Promise.resolve(tasks.persisted()).then((v) => v !== false, () => false) : Promise.resolve(true); }
+  return { conversationStatus, openConversation, renameConversation, bindConversation, bindLanded, settleBirthGroups, endConversation, inviteToGroup, tasksUnread };
 }
 const sharedOps = opsOver(() => shared);
 /** ws-handler's own instance: its parts first, the provided ones (the task store, the spend guard…) behind them. */
@@ -528,7 +531,7 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
       const r = callOp('rename', { webuiId: t.id, name: args.name });
       return r && r.ok ? { ok: true, target: idOf(t.s) || t.id, name: r.name } : r;
     },
-    'conversations.bind': (args, ctx) => {
+    'conversations.bind': async (args, ctx) => {   // async (the deferred-save census, lane lg-store-writes): its answer waits for the store
       const t = reached(args.target, ctx);
       if (!t.ok) return t;
       const { caller, keyId } = ctx;
@@ -537,7 +540,10 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
       if (!(caller.groups || []).includes(args.task)) return { ok: false, code: 'not_granted', reach: 'member', callerMistake: true, why: 'the calling conversation is not in that Task Group' };
       try {
         O().bindConversation({ webuiId: t.id }, args.task, byOf(caller, keyId), { note: boundNote(idOf(t.s) || t.id, { name: caller.name || caller.sessionKey || caller.conversationId, key: keyId }), noteSession: caller.sessionKey || null });
-        return { ok: true, target: idOf(t.s) || t.id, task: args.task };
+        // the deferred-save census: «bound» is said once task-groups.json holds it (bounded, as every Task Group act's answer); not yet ⇒
+        // said (`notOnDisk`) — the bind stays applied in memory and the writer lands it
+        const saved = typeof O().bindLanded === 'function' ? await O().bindLanded() : true;   // an ops stand-in without it: nothing deferred to wait for
+        return { ok: true, target: idOf(t.s) || t.id, task: args.task, ...(saved ? {} : { notOnDisk: true }) };
       } catch (e) {
         return { ok: false, code: e.code || (e.message === 'task not found' ? 'not_found' : 'bad_args'), why: e.message };
       }

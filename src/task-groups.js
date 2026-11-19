@@ -3262,7 +3262,9 @@ class TaskGroupManager {
       };
       n++;
     }
-    if (n) { this._save(); this._notify(); }
+    // the deferred-save census (its Task Groups pass): the config import writes other stores (credentials, hosts, the password) right after
+    // this section — the groups LAND first (bounded), as the release's synchronous save did
+    if (n) { this._save(); this._landNow('a config import'); this._notify(); }
     return n;
   }
 }

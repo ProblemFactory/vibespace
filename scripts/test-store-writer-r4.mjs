@@ -495,7 +495,7 @@ const m = new Module(SWF, null); m.filename = SWF; m.paths = Module._nodeModuleP
 const w = m.exports.create({ log: { warn() {}, log() {} }, workerPath: HOLD });
 const f = path.join(dir, 'rec.json');
 w.dirty(f, { name: 'rec.write', produce: () => '{"v":"new"}' });
-w.afterLanding(f, () => fs.writeFileSync(path.join(dir, 'stepped'), '1'), { timeoutMs: null });
+w.afterLanding(f, () => fs.writeFileSync(path.join(dir, 'stepped'), '1'), { timeoutMs: null });   // stale-pins: kept — the child's own call, no pin on a product file
 process.stdout.write('armed\\n');
 setInterval(() => { }, 1000);
 `);
