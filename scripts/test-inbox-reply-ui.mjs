@@ -82,7 +82,8 @@
 //   ④ an arrival while open joins its band's fold (the head counts it; a shown row never moves)
 //   ⑨/⑩b a title-bar badge counts that conversation's rows in bands 1–4 (a band-4 decision; band-5 asks only grow the list)
 //   ⑮ THE BAND FOLD: band 5's fold opens IN PLACE; 「全部标为已看」 on ONE band strikes every row in place; the taskbar's
-//      bands 1–4 do not move
+//      bands 1–4 do not move; B-7a51: three real toasts raised over the open panel stand clear of it (read on the PLACED stack),
+//      and a RED control proves the plant — the panel unseen by the step, the same toasts stand on it
 //   ⑯ the board chip left the tray (a blocked board PLACES a row now); a status broadcast rebuilds no row
 //   ⑱ only a band 1–2 arrival toasts; a band-5 ask files silently
 //   ⑳ THE FIRST SCREEN, MEASURED: the 480 px popup at 1280×800 shows ≤ 6 rows + every band's fold head WITHOUT scrolling
@@ -679,9 +680,22 @@ try {
     // panel; the three presses below stay raw at that point
     const topAt = (x, y) => `(() => { const e = document.elementFromPoint(${x}, ${y}); if (!e) return { fold: false, what: 'nothing' }; const t = e.closest('.global-toast'); const inPanel = !!e.closest('#user-todos-popup'); return { fold: !!e.closest('.ut-fold') && inPanel, what: t ? 'a toast: ' + (e.className || e.tagName) + ' «' + t.textContent.trim().slice(0, 60) + '»' : (inPanel ? 'in the panel: ' : 'outside the panel: ') + (e.className || e.tagName) }; })()`;
     await evalJs(`(() => { for (let k = 0; k < 3; k++) for (const h of app.ws.globalHandlers) { try { h({ type: 'server-notice', key: 'b7a51-' + k + '-' + Date.now(), level: 1, text: 'B-7a51 stand-in notice ' + (k + 1) }); } catch { } } return true; })()`);
-    await sleep(900);   // the stack's placement runs on its next frame (and again as each toast lands)
-    const clear15 = await evalJs(`(() => { const p = document.getElementById('user-todos-popup').getBoundingClientRect(); const st = document.getElementById('global-toasts'); const seen = !!st && getComputedStyle(st).visibility !== 'hidden'; const ts = seen ? [...st.querySelectorAll(':scope > .global-toast')].map((t) => t.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0) : []; return { toasts: ts.length, meet: ts.filter((r) => r.left < p.right && r.right > p.left && r.top < p.bottom && r.bottom > p.top).length, out: ts.filter((r) => r.left < 0 || r.right > innerWidth || r.top < 0 || r.bottom > innerHeight).length }; })()`);
-    check(`B-7a51: ${clear15 && clear15.toasts} toast(s) seen while the panel is open (at 1280 there is room beside it) — none stands on the panel (${clear15 && clear15.meet} meet it), none off screen (${clear15 && clear15.out})`, !!clear15 && clear15.toasts >= 3 && clear15.meet === 0 && clear15.out === 0, clear15);
+    // WAIT ON THE PLACED STACK (its round's MUST — not a fixed 900 ms): the placement runs on the frame after each toast lands, so
+    // two frames, then every toast's entrance (toast-in: a transform) finished, then one more frame — the rects read are the placed ones
+    const PLACED15 = `(async () => { const fr = () => new Promise((r) => requestAnimationFrame(r)); await fr(); await fr(); const st = document.getElementById('global-toasts'); if (st) await Promise.all([...st.children].flatMap((t) => t.getAnimations()).map((a) => a.finished.catch(() => null))); await fr(); return true; })()`;
+    const READ15 = `(() => { const real = document.querySelector('#user-todos-popup:not(.zz-decoy-15)'), p = real.getBoundingClientRect(); const st = document.getElementById('global-toasts'); const all = st ? [...st.querySelectorAll(':scope > .global-toast')] : []; const ts = all.filter((t) => getComputedStyle(t).display !== 'none' && getComputedStyle(st).visibility !== 'hidden').map((t) => t.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0); return { toasts: ts.length, held: all.filter((t) => t.classList.contains('global-toast-held')).length, open: !real.classList.contains('hidden'), meet: ts.filter((r) => r.left < p.right && r.right > p.left && r.top < p.bottom && r.bottom > p.top).length, out: ts.filter((r) => r.left < 0 || r.right > innerWidth || r.top < 0 || r.bottom > innerHeight).length }; })()`;
+    await evalJs(PLACED15);
+    const clear15 = await evalJs(READ15);
+    check(`B-7a51: ${clear15 && clear15.toasts} toast(s) drawn while the panel is open (at 1280 there is room beside it: ${clear15 && clear15.held} held) — none stands on the panel (${clear15 && clear15.meet} meet it), none off screen (${clear15 && clear15.out})`, !!clear15 && clear15.open && clear15.toasts >= 3 && clear15.held === 0 && clear15.meet === 0 && clear15.out === 0, clear15);
+    // RED CONTROL — THE PLANT PROVES ITSELF (its round's MUST): would these three toasts stand ON the panel without B-7a51's step? A
+    // hidden decoy `#user-todos-popup` first in <body> is the panel the step reads (getElementById: the first in the tree) — the
+    // real panel stays open, untouched; the decoy's arrival re-places the stack (the body's child list is watched) at its own place:
+    // the same toasts MEET the panel there. The decoy gone, the stack is placed clear again before the point is read
+    const plant15 = await evalJs(`(async () => { const d = document.createElement('div'); d.id = 'user-todos-popup'; d.className = 'hidden zz-decoy-15'; document.body.prepend(d); await ${PLACED15}; const r = ${READ15}; d.remove(); return r; })()`);
+    check(`CONTROL PROVES ITS PLANT: the panel unseen by the step (a hidden decoy first in the tree), the same ${plant15 && plant15.toasts} toast(s) stand ON the open panel (${plant15 && plant15.meet} meet it) — the check above is RED without B-7a51`, !!plant15 && plant15.open && plant15.toasts >= 3 && plant15.meet >= 1, plant15);
+    await evalJs(PLACED15);
+    const back15 = await evalJs(READ15), gone15 = await evalJs(`!document.querySelector('.zz-decoy-15')`);
+    check(`…the decoy gone (${gone15}), the stack is placed clear again (${back15 && back15.meet} meet the panel)`, gone15 === true && !!back15 && back15.toasts >= 3 && back15.meet === 0, back15);
     const fb = await evalJs(`(() => { const f = document.querySelector(${JSON.stringify(bSel + ' .ut-fold')}); f.scrollIntoView({ block: 'nearest' }); const q = f.getBoundingClientRect(); return { x: q.left + q.width / 2, y: q.top + q.height / 2 }; })()`);
     // RED CONTROL — IT PROVES ITSELF FIRST (主开发 15:21Z, the runner: the first plant never stood at the point — .global-toast's
     // entrance animation (toast-in, a transform) made the planted box the containing block of its fixed button, so the point still

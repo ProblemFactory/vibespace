@@ -393,7 +393,7 @@ export function inboxModel(app) {
     const r = await fetchJson('/api/setting-holds/press', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (!(r && r.ok)) {
       if (r && !r.presentNone && Number.isFinite(num(r.present))) noteSettingPresent(key, num(r.present));   // the card follows the hub's present value — never a 0 the hub said for a row holding no number (B-0a33, owed 08:03Z: the card keeps «none»)
-      if (r && r.code === 'moved') { showToast(t('It changed meanwhile — look again'), { duration: 9000 }); return false; }
+      if (r && r.code === 'moved') { showToast(t('It changed meanwhile — look again'), { type: 'warn', duration: 9000 }); return false; }   // B-7a51: a refused press — the person's failed act never yields
       // worded BY ITS CODE in the page's language (the check's words-6: never the hub's English sentence inside zh / ja)
       const said = {
         same: () => t('It is already {value} — nothing to change', { value: r.presentNone ? t('none') : num(r.present) }),   // cure 2: «none» over a blank, never 0

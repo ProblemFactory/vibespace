@@ -11,14 +11,23 @@
 //   §3 the taskbar at a small screen (src/lib/taskbar-fit.js stripHidden / wheelScroll / switcherForm + TILE_MIN_PX = the
 //      stylesheet's tile floor)
 //   §4 the cascade that buries nothing (src/lib/window-min-size.js cascadeBox)
-//   §5 the desktop tier's toast spot (src/lib/utils.js toastDeskSpot) + B-7a51: the stack beside the OPEN For-you panel
-//      (toastBesidePanel; the panel in _toastAvoid, its open / close re-placing the stack, a toast press no outside press)
+//   §5 the desktop tier's toast spot (src/lib/utils.js toastDeskSpot) + B-7a51: the stack beside the OPEN For-you panel — its
+//      left, else its right (toastBesidePanel) — else its plain toasts HELD (toastMayYield: an error, an action toast, a pinned
+//      notice never yield); their time stopped while held and started whole when drawn (§6 pins; the browser leg: heavy
+//      test-desktop-small-chrome ⑳ + its RED control)
 //   §6 the wiring — every door asks its rule (source pins over the comment-stripped files), acceptance r2 included: the
 //      compact list's rows carry the desktop's doors and take a window's drop, the «+N» list is placed by menuPlace, the
 //      resize's release, the brand observer's lifetime, the narrow-title observer's own field; acceptance r3: ONE spring
 //      lifecycle for the title-bar and the tile (HTML5) roads, a stale row refused by name, a cancelled Rename… stays shut
 //      (their RED controls run in the chrome suite's third bundle — DOM wiring, no PURE rule to patch)
 //   §7 controls — patched copies outside the tree (scripts/mutant-copy.mjs): each rule's base form goes RED on its table
+//   §8 B-7a51 round 3 — THE TOAST'S STATES, DRIVEN: the REAL showToast / hold / show / placement / cap (fresh copies of utils.js)
+//      over a DOM stand-in (the stack, the For-you panel, the toolbar, the anchor; a toast's box from its words, a held one drawn
+//      nowhere — the stylesheet's rule) and a fake clock (every setTimeout of the module): the cap scene (four held, an error
+//      born: drawn, the OLDEST held one dropped, its history line unseen) + law 2 (an error drawn, three held, a second error: a
+//      plain one goes, the error stays) + a toast's whole time (drawn, held while the panel grows, drawn again: its time WHOLE) +
+//      the smalls (a refusal, a timed toast born held-scene: drawn); each with its RED control (round 2's cap, the release's
+//      oldest-first, a hold that keeps the timer)
 // Prerequisite: `npm run build` (src/lib/build-version.js). Run: node scripts/test-desktop-small.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -40,9 +49,40 @@ const besideTable = (f) => {
     ['a stack clear of the panel keeps its place', f({ rect: { ...over, left: 400, right: 750 }, panel, vw: 1280 }), null],
     ['a stack below the panel keeps its place', f({ rect: { ...over, top: 745, bottom: 889 }, panel, vw: 1280 }), null],
     ['no open panel ⇒ its place', f({ rect: over, panel: null, vw: 1280 }), null],
-    ['no room on the panel\'s left ⇒ its place (never off screen)', f({ rect: over, panel: { ...panel, left: 300 }, vw: 1280 }), null],
+    // its round's MUST: the For-you button moved to a LEFT bar — the panel opens at the left, the stack meets it there
+    ['the panel at the left (a left bar): the stack stands 8 px RIGHT of it', f({ rect: { ...over, left: 10, right: 360 }, panel: { ...panel, left: 10, right: 380 }, vw: 1280 }), { left: 388 }],
+    ['…in layout px at a 1.25 UI scale', f({ rect: { ...over, left: 10, right: 360 }, panel: { ...panel, left: 10, right: 380 }, vw: 1280, scale: 1.25 }), { left: 310.4 }],
+    ['room on both sides ⇒ the left first (where it stood)', f({ rect: { ...over, left: 450, right: 800 }, panel: { ...panel, left: 400, right: 800 }, vw: 1280 }), { right: 888 }],
+    ['no room on either side ⇒ null (the caller holds its plain toasts — never off screen)', f({ rect: over, panel: { ...panel, left: 300 }, vw: 1280 }), null],
+    ['a long toast in a window under 1000 px (its round\'s scene) ⇒ null', f({ rect: { left: 380, right: 940, top: 500, bottom: 540, width: 560, height: 40 }, panel: { left: 545, right: 945, top: 61, bottom: 541 }, vw: 951 }), null],
   ];
 };
+// B-7a51 (its round's MUST): which toast may be HELD while the stack has no room clear of the open panel — [name, got, want]
+// B-7a51 round 3 (THE CAP DROPPED THE NEWBORN): which of the stack's OTHER toasts goes when a fifth arrives — [name, got, want]
+// (the caller never offers the toast being born nor a pinned notice: §6 pins it, §8 drives it)
+const capTable = (f) => {
+  const P = { yields: true, drawn: false }, PD = { yields: true, drawn: true }, E = { yields: false, drawn: true }, EH = { yields: false, drawn: false };
+  return [
+    ['four plain toasts held (the panel open, no room): the OLDEST goes', f([P, P, P, P]), 0],
+    ['a plain toast the person has seen (drawn) goes before a held one', f([P, PD, P]), 1],
+    ['a toast that may yield goes before one that may not — the older error stays', f([E, P, P]), 1],
+    ['…an Undo or an error never while a plain one stands, wherever it sits', f([E, EH, PD]), 2],
+    ['only toasts that may not yield: the drawn one first, the oldest', f([EH, E, E]), 1],
+    ['only never-drawn ones that may not yield: the oldest', f([EH, EH]), 0],
+    ['nothing offered ⇒ none (the stack keeps them all)', f([]), -1],
+  ];
+};
+const yieldTable = (f) => [
+  ['a plain notice yields (held: its time stopped, drawn again whole)', f({ type: 'info', action: false, pinned: false }), true],
+  ['a success yields', f({ type: 'success' }), true],
+  ['the person\'s failed act (an error) never yields', f({ type: 'error', action: false, pinned: false }), false],
+  ['a refusal of the person\'s press (warn: «… moved under the pointer just now — press it again») never yields', f({ type: 'warn' }), false],
+  ['a door («Marked done · Undo», a setting link, the For-you tap) never yields', f({ type: 'info', action: true, pinned: false }), false],
+  ['an error with an action never yields', f({ type: 'error', action: true }), false],
+  ['a pinned notice (no time at all) never yields', f({ type: 'info', pinned: true }), false],
+  ['a toast that names a time («press ✕ again within n s») never yields — held, its words would turn false', f({ type: 'info', timed: true }), false],
+  ['nothing said ⇒ a plain toast', f({}), true],
+];
 if (!fs.existsSync(path.join(repo, 'src/lib/build-version.js'))) { console.error('  ✗ src/lib/build-version.js missing — run `npm run build` first'); process.exit(1); }
 const MUT = mutantCopies('desksmall', repo);
 const copies = [];
@@ -274,8 +314,10 @@ console.log('§5 the desktop tier\'s toast spot (utils.js toastDeskSpot)');
   // B-7a51 (the 2.369.410 train's K41: three «Marked done · Undo» toasts across the open For-you panel's band bar — a press for
   // «26 more — expand» landed on a toast's Undo, outside the panel, and the panel closed): the OPEN panel is in the avoid list,
   // and a stack that still meets it (no room above it) stands BESIDE it, on its left — toastBesidePanel's table
-  const { toastBesidePanel } = await import('../src/lib/utils.js');
-  ok(besideTable(toastBesidePanel).every(([, g, w]) => same(g, w)), 'toastBesidePanel: a stack over the open panel stands 8 px left of it (÷ the UI scale); clear of it, below it, no panel or no room on its left ⇒ its place', besideTable(toastBesidePanel).filter(([, g, w]) => !same(g, w)));
+  const { toastBesidePanel, toastMayYield, toastCapPick } = await import('../src/lib/utils.js');
+  ok(capTable(toastCapPick).every(([, g, w]) => g === w), 'toastCapPick (round 3): a toast that may yield goes before one that may not, a seen one before one never drawn, the oldest first; nothing offered ⇒ none', capTable(toastCapPick).filter(([, g, w]) => g !== w));
+  ok(besideTable(toastBesidePanel).every(([, g, w]) => same(g, w)), 'toastBesidePanel: a stack over the open panel stands 8 px left of it, else 8 px right of it (a left bar — its round\'s MUST) (÷ the UI scale); clear of it, below it, no panel ⇒ its place; no room on either side ⇒ null', besideTable(toastBesidePanel).filter(([, g, w]) => !same(g, w)));
+  ok(yieldTable(toastMayYield).every(([, g, w]) => g === w), 'toastMayYield (its round\'s MUST): a plain toast may be held while the stack has no room; an error, an action toast and a pinned notice never', yieldTable(toastMayYield).filter(([, g, w]) => g !== w));
 }
 
 // ── §6 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -400,18 +442,62 @@ console.log('§6 the wiring — every door asks its rule');
     && !keyed(U.replace(' if (isMenuKey(e)) _menuOwnKeyAt = Date.now(); }, true);', ' }, true);'), VCSS),
     'CONTROL: the checkpoint\'s shapes and the reader\'s finds — a key-opened menu that takes no focus, a close that leaves the focus nowhere, a redrawn menu that forgets its opener, a pointer press painting a row, a page-long document listener of the menu\'s own (103af4972: the block checkpoint\'s red), the first focus skipping an off row for a live one, the guard counting fields only (its round ① ②), the guard judging the opener alone (the person\'s menu key in a field took no focus — 09:53Z), the menu key never stamped, its stamp never consumed — are each refused');
   ok(/if \(shown && !_toastTier\(\) && !_openModalDialog\(\)\) \{ _placeDeskToasts\(stack\); return; \}/.test(U) && /const rect = stack\.getBoundingClientRect\(\);\n  const desk = toastDeskSpot\(\{ rect, avoid: _toastAvoid\(rect\),/.test(U), 'the desktop tier\'s toast stack (anchored or centred) is placed off every open menu and composer');
-  const PANEL = strip(read('src/lib/user-todos-panel.js'));
-  const yields = (u, panelSrc) => /const up = toastDeskSpot\(\{ rect: r2, avoid: \[\.\.\._toastAvoid\(r2\), fr\], topY, vh: window\.innerHeight, scale: uiScale\(\) \}\);/.test(u)
-    && /const beside = up \? null : toastBesidePanel\(\{ rect: r2, panel: fr, vw: window\.innerWidth, scale: uiScale\(\) \}\);/.test(u)
+  const PANEL = strip(read('src/lib/user-todos-panel.js')), CSS = read('public/style.css');
+  // B-7a51 + its round's MUST (A TOAST THAT YIELDS IS NEVER LOST): above the open panel → beside it (left, else right) → its PLAIN
+  // toasts held (their time stopped), what stays placed clear when it now fits; every placement measures the whole stack and
+  // draws again (time WHOLE) what it no longer holds; the panel's open / close / GROWTH re-place it; a toast press is no outside press
+  const yields = (u, panelSrc, css) => /const up = toastDeskSpot\(\{ rect: r2, avoid: \[\.\.\._toastAvoid\(r2\), fr\], topY, vh: window\.innerHeight, scale: uiScale\(\) \}\);/.test(u)
+    && /if \(up\) \{ stack\.style\.top = 'auto'; stack\.style\.bottom = up\.bottom \+ 'px'; return true; \}\s*const beside = toastBesidePanel\(\{ rect: r2, panel: fr, vw: window\.innerWidth, scale: uiScale\(\) \}\);\s*if \(!beside\) return false;/.test(u)
+    && /if \(beside\.right != null\) \{ stack\.style\.left = 'auto'; stack\.style\.right = beside\.right \+ 'px'; \} else \{ stack\.style\.right = 'auto'; stack\.style\.left = beside\.left \+ 'px'; \}/.test(u)
     && /const r3 = stack\.getBoundingClientRect\(\), there = toastDeskSpot\(\{ rect: r3, avoid: \[\.\.\._toastAvoid\(r3\), fr\],[^\n]*\n\s+if \(there\) \{ stack\.style\.top = 'auto'; stack\.style\.bottom = there\.bottom \+ 'px'; \}/.test(u)
-    && /\} else stack\.style\.visibility = 'hidden';/.test(u) && /if \(stack && stack\.style\.visibility === 'hidden'\) stack\.style\.visibility = '';/.test(u)
+    && /if \(!clear\(\)\) \{\s*for \(const t of stack\.children\) if \(_toastYields\(t\)\) _toastHold\(t\);\s*if \(\[\.\.\.stack\.children\]\.some\(\(t\) => !t\.classList\.contains\('global-toast-held'\)\) && onPanel\(stack\.getBoundingClientRect\(\)\) && !clear\(\)\) \{\s*stack\.style\.transform = 'none';\s*if \(fr\.left \+ fr\.right > window\.innerWidth\) \{ stack\.style\.right = 'auto'; stack\.style\.left = \(8 \/ uiScale\(\)\) \+ 'px'; \}\s*else \{ stack\.style\.left = 'auto'; stack\.style\.right = \(8 \/ uiScale\(\)\) \+ 'px'; \}/.test(u)
+    && /const _toastYields = \(t\) => toastMayYield\(\{ \.\.\.\(t\._toastKind \|\| \{\}\), action: !!\(t\._toastKind && t\._toastKind\.action\) \|\| !!t\.querySelector\('\.global-toast-setting, \.global-toast-tap'\) \}\);/.test(u)
+    && /const others = \[\.\.\.stack\.children\]\.filter\(\(c\) => c !== el && !c\.classList\.contains\('global-toast-pinned'\)\);\s*const at = toastCapPick\(others\.map\(\(c\) => \(\{ yields: _toastYields\(c\), drawn: !!c\._toastDrawn \}\)\)\);\s*if \(at < 0\) break;\s*const drop = others\[at\];\s*if \(!drop\._toastDrawn && drop\._toastKey\) _markToastSeen\(drop\._toastKey, false\);\s*drop\.remove\(\);/.test(u)
+    && (panelSrc.match(/press it again'\), \{ type: 'warn' \}\); return; \}/g) || []).length === 6
+    && !/stack\.style\.visibility = 'hidden'/.test(u)   // stale-pins: kept (an absence check: the base's whole-stack yield is gone)
+    && /const held = stack \? \[\.\.\.stack\.children\]\.filter\(\(t\) => t\.classList\.contains\('global-toast-held'\)\) : \[\];\s*for \(const t of held\) t\.classList\.remove\('global-toast-held'\);\s*try \{ _placeToastStackNow\(\); \} catch \{\s*\}\s*for \(const t of held\) if \(t\.isConnected && !t\.classList\.contains\('global-toast-held'\)\) _toastShow\(t\);/.test(u)
+    && /function _toastHold\(el\) \{\s*clearTimeout\(el\._toastTimer\); el\._toastTimer = null;\s*el\.classList\.add\('global-toast-held'\);\s*if \(!el\._toastBorn && el\._toastKey\) \{ el\._toastJudge = true; _markToastSeen\(el\._toastKey, false\); \}/.test(u)
+    && /function _toastShow\(el\) \{\s*el\.classList\.remove\('global-toast-held'\);\s*_toastRun\(el\);\s*el\._toastDrawn = true;\s*if \(el\._toastJudge\) \{ el\._toastJudge = false; if \(_seenAtShow\(el\._toastRef\)\) _markToastSeen\(el\._toastKey, true\); \}/.test(u)
+    && /el\._toastKind = \{ type, action: acts\.length > 0, pinned, timed: !!timed \};/.test(u)
+    && /el\._toastTtl = pinned \? 0 : ttl;\s*_placeToastStack\(\); _queueToastPlace\(\);\s*if \(!el\.classList\.contains\('global-toast-held'\)\) \{ _toastRun\(el\); el\._toastDrawn = true; \}\s*el\._toastBorn = true;/.test(u)
+    && (u.match(/el\.classList\.add\('global-toast-out'\)/g) || []).length === 1
     && /if \(fy\) _toastWatch\.observe\(fy, \{ attributes: true, attributeFilter: \['class', 'style'\] \}\);/.test(u)
+    && /if \(fy && !_toastPanelSize && typeof ResizeObserver === 'function'\) \{ _toastPanelSize = new ResizeObserver\(_queueToastPlace\); _toastPanelSize\.observe\(fy\); \}/.test(u)
     && /document\.querySelectorAll\('\.context-menu, \.taskbar-context-menu, \[data-popover\], \.ut-announce'\)/.test(u)
-    && /ignore: \(t\) => !!t\?\.closest\?\.\('[^']*#global-toasts[^']*'\)/.test(panelSrc);
-  ok(yields(U, PANEL), 'B-7a51: a stack still meeting the OPEN For-you panel rises above it (clear of everything else) when there is room, else stands beside it and off what stands there, else yields (hidden while the panel is open, shown again at the next placement); the panel\'s open / close re-places it; the panel is no obstacle in the general list (a stack that cannot clear it is never sent back onto a composer); a toast press is no press outside the panel');
-  ok(!yields(U.replace("} else stack.style.visibility = 'hidden';", '}'), PANEL) && !yields(U.replace("if (fy) _toastWatch.observe(fy,", "if (false) _toastWatch.observe(fy,"), PANEL)
-    && !yields(U.replace("      if (there) { stack.style.top = 'auto'; stack.style.bottom = there.bottom + 'px'; }\n", ''), PANEL)
-    && !yields(U, PANEL.replace('.context-menu, #global-toasts, #record-clear-dialog', '.context-menu, #record-clear-dialog')), 'CONTROL: no yield when there is no room, the panel\'s open never re-placing the stack, the beside place never checked against the chrome there, a toast press closing the panel — each is refused');   // stale-pins: kept (the base's text, planted)
+    && /ignore: \(t\) => !!t\?\.closest\?\.\('[^']*#global-toasts[^']*'\)/.test(panelSrc)
+    && /\n#global-toasts > \.global-toast\.global-toast-held \{ display: none; \}/.test(css);
+  ok(yields(U, PANEL, CSS), 'B-7a51 + its round\'s MUST: a stack still meeting the OPEN For-you panel rises above it when there is room, else stands beside it (left, else right) and off what stands there, else its PLAIN toasts are HELD (not drawn, their time stopped) while an error / an action toast / a pinned notice stays (placed clear when the smaller stack fits); every placement measures the whole stack and draws again — time WHOLE — what it no longer holds; a toast held at its birth loses `seen` and is judged when first drawn; the panel\'s open / close / growth re-place it; the panel is no obstacle in the general list; a toast press is no press outside the panel');
+  const sub = (src, from, to) => { if (src.split(from).length !== 2) throw new Error('§6 control anchor: ' + from.slice(0, 70)); return src.replace(from, to); };
+  // round 3's smalls: every refusal of a press in the panel is warn (the setting card's seventh too), the toast that names a time says
+  // so, the jobs panel's failed acts are errors (the flag `error: true` showToast never read)
+  const UA = strip(read('src/lib/user-todos-actions.js')), DA = strip(read('src/lib/desktop-app-window.js')), JP = strip(read('src/lib/jobs-panel.js'));
+  const typed = (ua, da, jp) => /showToast\(t\('It changed meanwhile — look again'\), \{ type: 'warn', duration: 9000 \}\); return false; \}/.test(ua)
+    && /n: Math\.round\(OUTER_CLOSE_AGAIN_MS \/ 1000\) \}\), \{ duration: OUTER_CLOSE_AGAIN_MS, timed: true \}\);/.test(da)
+    && (jp.match(/showToast\(r2?\.error, \{ type: 'error' \}\)/g) || []).length === 5 && !/\{ error: true \}/.test(jp);   // stale-pins: kept (an absence check: the flag showToast never read)
+  ok(typed(UA, DA, JP), 'B-7a51 round 3: the setting card\'s «It changed meanwhile» is warn like the six; the app window\'s «press ✕ again within n s» is timed; the jobs panel\'s five failed acts are errors — none of them yields');
+  ok(!typed(UA.replace("{ type: 'warn', duration: 9000 }", '{ duration: 9000 }'), DA, JP) && !typed(UA, DA.replace(', timed: true });', ' });'), JP) && !typed(UA, DA, JP.replace("{ type: 'error' })", '{ error: true })')),   // stale-pins: kept (the base's text, planted)
+    'CONTROL: the seventh refusal untyped, the timed toast unmarked, one jobs error back to its unread flag — each is refused');
+  const C6 = [
+    ['the base\'s yield (the whole stack hidden, every toast\'s time running)', sub(U, "      for (const t of stack.children) if (_toastYields(t)) _toastHold(t);", "      stack.style.visibility = 'hidden';")],
+    ['every toast yields (an error, an Undo held too)', sub(U, "if (_toastYields(t)) _toastHold(t);", '_toastHold(t);')],
+    ['a door drawn in the words (a setting link, the For-you tap) not counted', sub(U, " || !!t.querySelector('.global-toast-setting, .global-toast-tap')", '')],
+    ['what stays left on the panel when nothing fits (its anchored place: the lowest rows)', sub(U, "        if (fr.left + fr.right > window.innerWidth) { stack.style.right = 'auto'; stack.style.left = (8 / uiScale()) + 'px'; }\n", '')],
+    ['the newborn offered to the cap (round 2: it went at its birth)', sub(U, ".filter((c) => c !== el && !c.classList", ".filter((c) => !c.classList")],
+    ['a toast dropped never drawn left «seen» in the history', sub(U, "    if (!drop._toastDrawn && drop._toastKey) _markToastSeen(drop._toastKey, false);\n", '')],
+    ['a drawn toast never remembered as seen by the cap', sub(U, " { _toastRun(el); el._toastDrawn = true; }", ' _toastRun(el);')],
+    ['a held toast never drawn again', sub(U, "  for (const t of held) if (t.isConnected && !t.classList.contains('global-toast-held')) _toastShow(t);", '')],
+    ['a held toast drawn again without its time (it never expires)', sub(U, '  el.classList.remove(\'global-toast-held\');\n  _toastRun(el);', "  el.classList.remove('global-toast-held');")],
+    ['a held toast\'s time still running', sub(U, '  clearTimeout(el._toastTimer); el._toastTimer = null;\n  el.classList.add', '  el.classList.add')],
+    ['a toast held at its birth still called seen', sub(U, '  if (!el._toastBorn && el._toastKey) { el._toastJudge = true; _markToastSeen(el._toastKey, false); }\n', '')],
+    ['the time started at birth whatever the placement', sub(U, "  if (!el.classList.contains('global-toast-held')) { _toastRun(el); el._toastDrawn = true; }", '  { _toastRun(el); el._toastDrawn = true; }')],
+    ['the panel\'s growth never re-placing the stack', sub(U, "if (fy && !_toastPanelSize && typeof ResizeObserver === 'function')", 'if (false)')],
+    ['the panel\'s open never re-placing the stack', sub(U, 'if (fy) _toastWatch.observe(fy,', 'if (false) _toastWatch.observe(fy,')],
+    ['the beside place never checked against the chrome there', sub(U, "      if (there) { stack.style.top = 'auto'; stack.style.bottom = there.bottom + 'px'; }\n", '')],
+    ['the right side never tried', sub(U, " else { stack.style.right = 'auto'; stack.style.left = beside.left + 'px'; }", '')],
+  ];
+  const c6 = C6.filter(([, u]) => yields(u, PANEL, CSS)).map(([n]) => n);
+  ok(c6.length === 0 && !yields(U, PANEL.replace('.context-menu, #global-toasts, #record-clear-dialog', '.context-menu, #record-clear-dialog'), CSS) && !yields(U, PANEL, CSS.replace('#global-toasts > .global-toast.global-toast-held { display: none; }', '')) && !yields(U, PANEL.replace("press it again'), { type: 'warn' }); return; }", "press it again')); return; }"), CSS),   // stale-pins: kept (the base's text, planted)   // stale-pins: kept (the base's text, planted)
+    `CONTROL: ${C6.length} planted shapes of the wiring (the base's whole-stack yield among them), a toast press closing the panel, a held toast still drawn — each is refused`, c6);
 }
 
 // ── §7 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -443,12 +529,213 @@ console.log('§7 controls — each rule\'s base form, on its own table');
   ok(typingTable(mtFields.menuOpenerTyping).filter(([, g, w]) => g !== w).length === 3, 'CONTROL menuOpenerTyping counting fields and frames only (the base\'s guard — its round ②): a desktop\'s canvas, a stream\'s video, the live browser view lose their keys to the menu (RED)');
   const mkNoBack = await patched('src/lib/menu-place.js', [["  if (key === 'Escape') return v({ close: true, back: true });", "  if (key === 'Escape') return v({ close: true });"]], 'keys-no-back');
   ok(keyTable(mkNoBack.menuKeyStep).filter(([, g, w]) => !same(g, w)).length >= 2, 'CONTROL menuKeyStep whose Escape leaves the focus nowhere (RED)');
-  const tbNoMeet = await patched('src/lib/utils.js', [['  if (!meets || panel.left - gap - rect.width < 0) return null;', '  if (panel.left - gap - rect.width < 0) return null;']], 'beside-any');
+  const tbNoMeet = await patched('src/lib/utils.js', [['  if (!meets) return null;\n', '']], 'beside-any');
   ok(besideTable(tbNoMeet.toastBesidePanel).filter(([, g, w]) => !same(g, w)).length >= 2, 'CONTROL toastBesidePanel moving a stack that meets no panel: a stack clear of the panel, or below it, is pushed aside (RED)');
+  const tbLeftOnly = await patched('src/lib/utils.js', [['  if (panel.right + gap + rect.width <= vw) return { left: (panel.right + gap) / (scale || 1) };\n', '']], 'beside-left-only');
+  ok(besideTable(tbLeftOnly.toastBesidePanel).filter(([n, g, w]) => /at the left \(a left bar\)|^…in layout px at a 1\.25 UI scale$/.test(n) && !same(g, w)).length >= 2, 'CONTROL toastBesidePanel trying the left alone (672158c6c — its round\'s MUST): a stack meeting a panel on a left bar finds no place (RED)');
+  const tyAll = await patched('src/lib/utils.js', [["export function toastMayYield({ type = 'info', action = false, pinned = false, timed = false } = {}) { return type !== 'error' && type !== 'warn' && !action && !pinned && !timed; }", "export function toastMayYield({ type = 'info', action = false, pinned = false, timed = false } = {}) { return true; }"]], 'yield-all');
+  const capOld = await patched('src/lib/utils.js', [['  facts.forEach((f, i) => { const rank = (f && f.yields ? 0 : 2) + (f && f.drawn ? 0 : 1); if (rank < best) { best = rank; at = i; } });', '  facts.forEach((f, i) => { const rank = 0; if (rank < best) { best = rank; at = i; } });']], 'cap-oldest');
+  ok(capTable(capOld.toastCapPick).filter(([, g, w]) => g !== w).length >= 3, 'CONTROL toastCapPick = the release\'s oldest-first: the older error goes while plain toasts stand, a held toast before a seen one (RED)');
+  const capDrawn = await patched('src/lib/utils.js', [['  facts.forEach((f, i) => { const rank = (f && f.yields ? 0 : 2) + (f && f.drawn ? 0 : 1); if (rank < best) { best = rank; at = i; } });', '  facts.forEach((f, i) => { const rank = (f && f.drawn ? 0 : 1); if (rank < best) { best = rank; at = i; } });']], 'cap-drawn-first');
+  ok(capTable(capDrawn.toastCapPick).filter(([, g, w]) => g !== w).length >= 2, 'CONTROL toastCapPick = round 2\'s «a drawn toast before a held one» alone: a drawn error goes while held plain toasts stand (RED)');
+  ok(yieldTable(tyAll.toastMayYield).filter(([, g, w]) => g !== w).length === 6, 'CONTROL toastMayYield holding every toast (the base: the whole stack went): the error, the action door, the pinned notice are held (RED)');
   const msSlid = await patched('src/lib/window-min-size.js', [['  if (covered(first) <= cover) return first;', '  return first;']], 'cascade-slid');
   const r = cascadeRun(msSlid.cascadeBox, { w: 1020, h: 555 }, { w: 700, h: 500 });
   ok(r.buried.some((x) => x > 0.2), `CONTROL cascadeBox = the slid slot (the base): an earlier title bar is buried (${r.buried.map((x) => Math.round(x * 100)).join(' / ')} %) (RED)`);
 }
+
+// ── §8 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+console.log('§8 THE TOAST\'S STATES, DRIVEN — the real showToast / hold / show / place / cap over a DOM stand-in and a fake clock (B-7a51 round 3)');
+{
+  // THE CLOCK: every setTimeout the module asks for (a toast's time, its fade, the placement's frame) is ours, run by advance()
+  const REAL = { setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout };
+  let now = 0, seq = 0, queue = [];
+  const clock = {
+    install() { now = 0; queue = []; globalThis.setTimeout = (fn, ms = 0) => { const id = ++seq; queue.push({ id, at: now + (Number(ms) || 0), fn }); return id; }; globalThis.clearTimeout = (id) => { queue = queue.filter((q) => q.id !== id); }; },
+    advance(ms) { const end = now + ms; for (;;) { queue.sort((a, b) => a.at - b.at || a.id - b.id); const q = queue[0]; if (!q || q.at > end) break; queue.shift(); now = q.at; q.fn(); } now = end; },
+    restore() { globalThis.setTimeout = REAL.setTimeout; globalThis.clearTimeout = REAL.clearTimeout; },
+  };
+  // THE DOM STAND-IN: what the toast stack's code touches. A toast is TH px high and as wide as its words (≤ 560 — the stylesheet's
+  // cap); the stack stacks its DRAWN toasts (a held one is `display: none` — the rule §6 pins) from its own place (right / bottom
+  // / left / top in px, else the stylesheet's centred strip); the panel, the toolbar and the For-you button are boxes of their own
+  const VW = 951, VH = 585, TH = 40, GAP = 6;
+  const R = (l, t, w, h) => ({ left: l, top: t, right: l + w, bottom: t + h, width: w, height: h, x: l, y: t });
+  const px = (v) => (typeof v === 'string' && /^-?[\d.]+px$/.test(v) ? parseFloat(v) : null);
+  const GROWN = R(545, 16, 400, 527), SHORT = R(545, 380, 400, 163);   // the panel grown from its content / with little in it
+  let DOC = null;
+  const drawnOf = (st) => st.children.filter((c) => !c._cls.has('global-toast-held'));
+  const wOf = (t) => Math.min(560, 60 + 7 * t.textContent.length);
+  class El {
+    constructor(tag) { this.tagName = String(tag).toUpperCase(); this.children = []; this.parentNode = null; this._cls = new Set(); this.style = {}; this.dataset = {}; this.attrs = new Map(); this.id = ''; this._text = ''; this._box = null; }
+    get className() { return [...this._cls].join(' '); }
+    set className(v) { this._cls = new Set(String(v).split(/\s+/).filter(Boolean)); }
+    get classList() { const c = this._cls; return { add: (...xs) => xs.forEach((x) => c.add(x)), remove: (...xs) => xs.forEach((x) => c.delete(x)), contains: (x) => c.has(x), toggle: (x, f) => { const on = f === undefined ? !c.has(x) : !!f; if (on) c.add(x); else c.delete(x); return on; } }; }
+    get textContent() { return this._text + this.children.map((c) => c.textContent).join(''); }
+    set textContent(v) { this._text = String(v); this.children = []; }
+    setAttribute(k, v) { this.attrs.set(k, String(v)); }
+    getAttribute(k) { return this.attrs.has(k) ? this.attrs.get(k) : null; }
+    removeAttribute(k) { this.attrs.delete(k); }
+    appendChild(c) { if (c.parentNode) c.remove(); c.parentNode = this; this.children.push(c); return c; }
+    append(...xs) { for (const x of xs) { if (typeof x === 'string') this._text += x; else this.appendChild(x); } }
+    prepend(x) { if (x.parentNode) x.remove(); x.parentNode = this; this.children.unshift(x); }
+    remove() { if (this.parentNode) { this.parentNode.children = this.parentNode.children.filter((c) => c !== this); this.parentNode = null; } }
+    get isConnected() { let n = this; while (n.parentNode) n = n.parentNode; return !!DOC && n === DOC.body; }
+    get parentElement() { return this.parentNode; }
+    contains(t) { for (let n = t; n; n = n.parentNode) if (n === this) return true; return false; }
+    matches(sel) { return String(sel).split(',').map((x) => x.trim()).some((x) => (/^\.[\w-]+(\.[\w-]+)*$/.test(x) ? x.slice(1).split('.').every((c) => this._cls.has(c)) : /^#[\w-]+$/.test(x) ? this.id === x.slice(1) : false)); }
+    closest(sel) { for (let n = this; n; n = n.parentNode) if (n.matches(sel)) return n; return null; }
+    querySelectorAll(sel) { const scope = /^\s*:scope > /.test(sel), q = String(sel).replace(/:scope > /g, ''), out = []; const walk = (n) => { for (const c of n.children) { if (c.matches(q)) out.push(c); if (!scope) walk(c); } }; walk(this); return out; }
+    querySelector(sel) { return this.querySelectorAll(sel)[0] || null; }
+    addEventListener() {}
+    removeEventListener() {}
+    get offsetParent() { return this.isConnected ? DOC.body : null; }
+    get offsetHeight() { return this.getBoundingClientRect().height; }
+    getClientRects() { const r = this.getBoundingClientRect(); return r.width > 0 && r.height > 0 ? [r] : []; }
+    getBoundingClientRect() {
+      if (this._box) return this._box();
+      if (!this.isConnected) return R(0, 0, 0, 0);
+      if (this.id === 'global-toasts') {
+        const d = drawnOf(this), w = d.length ? Math.max(...d.map(wOf)) : 0, h = d.length ? d.length * TH + (d.length - 1) * GAP : 0;
+        const l = px(this.style.left) ?? (px(this.style.right) != null ? VW - px(this.style.right) - w : VW / 2 - w / 2);
+        const tp = px(this.style.top) ?? (px(this.style.bottom) != null ? VH - px(this.style.bottom) - h : VH - 50 - h);
+        return R(l, tp, w, h);
+      }
+      if (this._cls.has('global-toast') && this.parentNode) {
+        const st = this.parentNode, i = drawnOf(st).indexOf(this);
+        if (i < 0) return R(0, 0, 0, 0);
+        const sr = st.getBoundingClientRect(), w = wOf(this);
+        return R(sr.right - w, sr.top + i * (TH + GAP), w, TH);
+      }
+      return R(0, 0, 0, 0);
+    }
+  }
+  let OBS = [];
+  const page = ({ panelOpen = false, box = GROWN } = {}) => {
+    const body = new El('body');
+    DOC = { body, documentElement: new El('html'), visibilityState: 'visible', hasFocus: () => true, activeElement: null,
+      createElement: (tg) => new El(tg),
+      getElementById: (id) => { const walk = (n) => { for (const c of n.children) { if (c.id === id) return c; const f = walk(c); if (f) return f; } return null; }; return walk(body); },
+      querySelectorAll: (q) => body.querySelectorAll(q), querySelector: (q) => body.querySelector(q), addEventListener() {}, removeEventListener() {} };
+    globalThis.document = DOC;
+    const tb = new El('div'); tb.id = 'toolbar'; tb._box = () => R(0, 0, VW, 41); body.appendChild(tb);
+    const panel = new El('div'); panel.id = 'user-todos-popup'; panel.className = 'usage-popup ut-popup' + (panelOpen ? '' : ' hidden'); panel.at = box;
+    panel._box = () => (panel._cls.has('hidden') ? R(0, 0, 0, 0) : panel.at); body.appendChild(panel);
+    const btn = new El('div'); btn.id = 'taskbar-user-todos'; btn._box = () => R(900, 549, 40, 32); body.appendChild(btn);
+    OBS = [];
+    return { panel, btn };
+  };
+  const fire = () => { for (const o of [...OBS]) o.cb([]); };   // the panel's class / size changed: what the page's observers report
+  const store = new Map();
+  const G = {
+    window: globalThis, innerWidth: VW, innerHeight: VH, devicePixelRatio: 1,
+    localStorage: { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => { store.set(k, String(v)); }, removeItem: (k) => { store.delete(k); }, clear: () => store.clear() },
+    matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }),
+    MutationObserver: class { constructor(cb) { this.cb = cb; OBS.push(this); } observe() {} disconnect() {} },
+    ResizeObserver: class { constructor(cb) { this.cb = cb; OBS.push(this); } observe() {} disconnect() {} },
+    requestAnimationFrame: (fn) => globalThis.setTimeout(fn, 16),
+    dispatchEvent: () => true,
+  };
+  const SAVED = Object.fromEntries(Object.keys(G).concat(['document']).map((k) => [k, Object.getOwnPropertyDescriptor(globalThis, k)]));
+  for (const [k, v] of Object.entries(G)) Object.defineProperty(globalThis, k, { value: v, configurable: true, writable: true });
+  const LONG = 'is a stand-in notice long enough to fill the widest toast a window this narrow allows, so that no side of the open panel has room';
+  const history = () => { try { return JSON.parse(store.get('vibespace.toastHistory') || '[]'); } catch { return []; } };
+  const lineOf = (k) => history().find((h) => String(h.m).startsWith(k + ' '));
+  const kids = () => { const st = DOC.getElementById('global-toasts'); return st ? [...st.children] : []; };
+  const tag = (t) => (t ? t.textContent.slice(0, 2) : null);
+  const drawn = (t) => kids().includes(t) && !t.classList.contains('global-toast-held') && t.getBoundingClientRect().width > 0;
+  const held = (t) => kids().includes(t) && t.classList.contains('global-toast-held');
+  const TTL = 3000;
+  const arm = (M) => { M.configureToasts({ getAnchor: () => DOC.getElementById('taskbar-user-todos'), getSeconds: () => TTL / 1000 }); };
+  /** the CAP scene: the panel open and grown (no room above it nor beside it), a person's press, four plain toasts born — held;
+   *  then the person's failed act (an error) born */
+  const capScene = (M) => {
+    clock.install(); store.clear(); page({ panelOpen: true }); arm(M);
+    try {
+      M.noteOwnGesture();   // every birth below judged «seen» by the verdict (a press a moment ago) — held at birth un-sees it
+      const P = ['p1', 'p2', 'p3', 'p4'].map((k) => M.showToast(`${k} ${LONG}`));
+      clock.advance(20);
+      const heldAll = P.every(held);
+      const E = M.showToast(`e1 ${LONG}`, { type: 'error' });
+      clock.advance(20);
+      return { heldAll, eDrawn: drawn(E), eThere: kids().includes(E), dropped: P.filter((t) => !kids().includes(t)).map(tag), n: kids().length, p1Line: lineOf('p1') ? !!lineOf('p1').seen : 'none', e1Line: lineOf('e1') ? !!lineOf('e1').seen : 'none' };
+    } finally { clock.restore(); }
+  };
+  /** law 2: an error drawn (over the panel's edge), three plain toasts held, a second error born */
+  const law2Scene = (M) => {
+    clock.install(); store.clear(); page({ panelOpen: true }); arm(M);
+    try {
+      const E1 = M.showToast(`e1 ${LONG}`, { type: 'error' });
+      const P = ['p1', 'p2', 'p3'].map((k) => M.showToast(`${k} ${LONG}`));
+      clock.advance(20);
+      const before = { e1Drawn: drawn(E1), pHeld: P.every(held) };
+      const E2 = M.showToast(`e2 ${LONG}`, { type: 'error' });
+      clock.advance(20);
+      return { ...before, e1There: kids().includes(E1), e2Drawn: drawn(E2), dropped: [E1, ...P].filter((t) => !kids().includes(t)).map(tag) };
+    } finally { clock.restore(); }
+  };
+  /** a toast's WHOLE time: born drawn (the panel short: room above it), half its time gone, the panel GROWS (no room) — held through
+   *  ten seconds; the panel closes — drawn again, still there just before its whole time, gone after it */
+  const timeScene = (M) => {
+    clock.install(); store.clear(); const { panel } = page({ panelOpen: true, box: SHORT }); arm(M);
+    try {
+      const T = M.showToast(`t1 ${LONG}`);
+      clock.advance(20);
+      const born = drawn(T);
+      clock.advance(TTL / 2);
+      panel.at = GROWN; fire(); clock.advance(20);
+      const heldNow = held(T);
+      clock.advance(10000);
+      const afterHold = kids().includes(T) && held(T);
+      panel.classList.add('hidden'); fire(); clock.advance(20);
+      const back = drawn(T);
+      clock.advance(TTL - 120);
+      const stillWhole = drawn(T);
+      clock.advance(400);
+      return { born, heldNow, afterHold, back, stillWhole, gone: !kids().includes(T) };
+    } finally { clock.restore(); }
+  };
+  /** the smalls: in the no-room scene a refusal (warn) and a toast that names a time are drawn at once; a plain one is held */
+  const smallsScene = (M) => {
+    clock.install(); store.clear(); page({ panelOpen: true }); arm(M);
+    try {
+      const W = M.showToast(`w1 ${LONG}`, { type: 'warn' }), T = M.showToast(`t1 ${LONG}`, { timed: true, duration: 4000 }), P = M.showToast(`p1 ${LONG}`);
+      clock.advance(20);
+      return { warnDrawn: drawn(W), timedDrawn: drawn(T), plainHeld: held(P) };
+    } finally { clock.restore(); }
+  };
+  const fresh = (name) => { const f = MUT.write('src/lib/utils.js', read('src/lib/utils.js'), name, { esm: true, same: true }); copies.push(f); return import(pathToFileURL(f).href); };   // a fresh, deliberately UNPATCHED copy of this tree's utils.js: its own stack state
+  // every copy is IMPORTED before a scene builds its page: at import a module with a `document` arms its page-long chrome
+  // (the instant tooltip's listeners) — the copies load as on a page that has none yet, the scenes' DOM comes after
+  const MODS = { cap: await fresh('s8-cap'), capRed: await patched('src/lib/utils.js', [[`  for (let k = stack.children.length; k > 4; k--) {
+    const others = [...stack.children].filter((c) => c !== el && !c.classList.contains('global-toast-pinned'));
+    const at = toastCapPick(others.map((c) => ({ yields: _toastYields(c), drawn: !!c._toastDrawn })));
+    if (at < 0) break;
+    const drop = others[at];
+    if (!drop._toastDrawn && drop._toastKey) _markToastSeen(drop._toastKey, false);
+    drop.remove();
+  }`, "  for (let k = stack.children.length; k > 4; k--) { const drop = [...stack.children].find((c) => !c.classList.contains('global-toast-pinned') && !c.classList.contains('global-toast-held')) || [...stack.children].find((c) => !c.classList.contains('global-toast-pinned')); if (!drop) break; drop.remove(); }"]], 's8-cap-round2'), law2: await fresh('s8-law2'), law2Red: await patched('src/lib/utils.js', [['  facts.forEach((f, i) => { const rank = (f && f.yields ? 0 : 2) + (f && f.drawn ? 0 : 1); if (rank < best) { best = rank; at = i; } });', '  facts.forEach((f, i) => { const rank = 0; if (rank < best) { best = rank; at = i; } });']], 's8-law2-oldest'), time: await fresh('s8-time'), timeRed: await patched('src/lib/utils.js', [["  clearTimeout(el._toastTimer); el._toastTimer = null;\n  el.classList.add('global-toast-held');", "  el.classList.add('global-toast-held');"]], 's8-time-hold-runs'), smalls: await fresh('s8-smalls') };
+  try {
+    const c = capScene(MODS.cap);
+    ok(c.heldAll && c.eThere && c.eDrawn && JSON.stringify(c.dropped) === '["p1"]' && c.n === 4 && c.p1Line === false && c.e1Line === true,
+      'THE CAP (round 3\'s MUST): four plain toasts HELD (the panel open, no room), the person\'s failed act born — it is DRAWN, the OLDEST held one goes, its history line UNSEEN (it was never drawn); the error\'s line seen (drawn a moment after the press)', c);
+    const cRed = capScene(MODS.capRed);
+    ok(cRed.heldAll && !cRed.eThere && cRed.e1Line === true, 'CONTROL the cap of round 2 («a drawn toast before a held one» — the newborn counted as drawn): the error goes at its BIRTH, never drawn, its history line «seen» (RED)', cRed);
+    const l = law2Scene(MODS.law2);
+    ok(l.e1Drawn && l.pHeld && l.e1There && l.e2Drawn && JSON.stringify(l.dropped) === '["p1"]', 'LAW 2: an error drawn over the panel\'s edge, three plain toasts held, a second error born — a PLAIN one goes (the oldest), the error stays, the new one is drawn', l);
+    const lRed = law2Scene(MODS.law2Red);
+    ok(lRed.e1Drawn && !lRed.e1There && JSON.stringify(lRed.dropped) === '["e1"]', 'CONTROL the release\'s oldest-first cap: the person\'s first error goes while plain toasts stand (RED)', lRed);
+    const tm = timeScene(MODS.time);
+    ok(tm.born && tm.heldNow && tm.afterHold && tm.back && tm.stillWhole && tm.gone, 'A TOAST\'S WHOLE TIME: drawn, half its time gone, the panel GROWS — held (ten seconds pass: still there), the panel closes — drawn again and still there just before its WHOLE time, gone after it', tm);
+    const tmRed = timeScene(MODS.timeRed);
+    ok(tmRed.born && tmRed.heldNow && !tmRed.afterHold, 'CONTROL a hold that keeps the timer: the toast expires while it cannot be seen (RED)', tmRed);
+    const sm = smallsScene(MODS.smalls);
+    ok(sm.warnDrawn && sm.timedDrawn && sm.plainHeld, 'the smalls in the no-room scene: a refusal (warn) and a toast that names a time are DRAWN at once; a plain one is held', sm);
+  } finally {
+    clock.restore();
+    for (const [k, d] of Object.entries(SAVED)) { if (d) Object.defineProperty(globalThis, k, d); else delete globalThis[k]; }
+  }
+}
+
 for (const c of copiesCensus(copies, MUT.dir, repo, { minCopies: 5, label: 'controls: ' })) ok(c.pass, c.name, c.detail);
 
 console.log(`\n${fail ? 'FAIL' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);

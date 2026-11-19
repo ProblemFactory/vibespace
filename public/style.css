@@ -3327,6 +3327,7 @@ html[data-vc="regular"] #all-sessions-list { overflow: visible !important; flex:
 .global-toast-wide .global-toast-x { order: 1; }
 .global-toast-wide .global-toast-action { order: 2; }
 .global-toast-out { opacity: 0; transition: opacity 0.25s; }
+#global-toasts > .global-toast.global-toast-held { display: none; }   /* B-7a51: a plain toast yielding to the open For-you panel — held, its time stopped (utils.js _toastHold) */
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 /* lane phone-refusal-wrap: a toast that names a control shows the control's own SVG (the port notice: the plug of the
    machine row's Forward button — it said 🔌) */

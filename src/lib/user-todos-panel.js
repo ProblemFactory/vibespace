@@ -1088,7 +1088,7 @@ export function installUserTodos(app) {
       if (ans === 'install' && rec && rec.card) {
         armExitButtons();
         const pv = pressVerdict({ since: appBtn._armSince ?? null, now: performance.now() });
-        if (!pv.ok) { showToast(t('That Install moved under the pointer just now — read it, then press it again')); return; }
+        if (!pv.ok) { showToast(t('That Install moved under the pointer just now — read it, then press it again'), { type: 'warn' }); return; }   // B-7a51: a refused press is the person's failed act — it never yields to the panel it stands over
       }
       if ((ans === 'install' && !(rec && rec.card)) || ans === 'open') hidePopup('answer');
       appBtn.disabled = true;
@@ -1117,7 +1117,7 @@ export function installUserTodos(app) {
       // the value the button drew as `shown`) — a button that appeared, moved or was reworded a moment ago is not the one the user read
       armExitButtons();
       const pv = pressVerdict({ since: setBtn._armSince ?? null, now: performance.now() });
-      if (!pv.ok) { showToast(t('That button moved under the pointer just now — read it, then press it again')); return; }
+      if (!pv.ok) { showToast(t('That button moved under the pointer just now — read it, then press it again'), { type: 'warn' }); return; }
       setBtn.disabled = true;
       Promise.resolve(model.runAction(todos.open.find((i) => i.id === id), 'setting', { shown: setBtn.dataset.shown })).finally(() => { setBtn.disabled = false; });
       return;
@@ -1128,7 +1128,7 @@ export function installUserTodos(app) {
       // answered) — a grant that appeared or moved under the pointer a moment ago is not the one the user read
       armExitButtons();
       const pv = pressVerdict({ since: grantBtn._armSince ?? null, now: performance.now() });
-      if (!pv.ok) { showToast(t('That button moved under the pointer just now — read it, then press it again')); return; }
+      if (!pv.ok) { showToast(t('That button moved under the pointer just now — read it, then press it again'), { type: 'warn' }); return; }
       grantBtn.disabled = true;
       Promise.resolve(model.runAction(todos.open.find((i) => i.id === id), 'grant')).finally(() => { grantBtn.disabled = false; });
       return;
@@ -1140,12 +1140,12 @@ export function installUserTodos(app) {
       if (String(propBtn.dataset.answer || '').startsWith('pk:') && propBtn.classList.contains('ut-proposal-approve')) { // lane passkey-ui: a passkey card's primary (Allow once) obeys the same rule
         armExitButtons();
         const pk = pressVerdict({ since: propBtn._armSince ?? null, now: performance.now() });
-        if (!pk.ok) { showToast(t('That Approve moved under the pointer just now — read it, then press it again')); return; }
+        if (!pk.ok) { showToast(t('That Approve moved under the pointer just now — read it, then press it again'), { type: 'warn' }); return; }
       }
       if (propBtn.dataset.answer === 'approve') {
         armExitButtons();
         const pv = pressVerdict({ since: propBtn._armSince ?? null, now: performance.now() });
-        if (!pv.ok) { showToast(t('That Approve moved under the pointer just now — read it, then press it again')); return; }
+        if (!pv.ok) { showToast(t('That Approve moved under the pointer just now — read it, then press it again'), { type: 'warn' }); return; }
       }
       propBtn.disabled = true;
       Promise.resolve(model.runAction(todos.open.find((i) => i.id === id), propBtn.dataset.answer)).finally(() => { propBtn.disabled = false; });
@@ -1156,7 +1156,7 @@ export function installUserTodos(app) {
       // verify-r6 V1: an Allow that appeared or moved under the pointer a moment ago is not the one the user read
       armExitButtons();
       const pv = pressVerdict({ since: exitBtn._armSince ?? null, now: performance.now() });
-      if (!pv.ok) { showToast(t('That Allow moved under the pointer just now — read it, then press it again')); return; }
+      if (!pv.ok) { showToast(t('That Allow moved under the pointer just now — read it, then press it again'), { type: 'warn' }); return; }
     }
     if (exitBtn) {
       // lane-pairing ⑥: an exit's "ask me" answered where it appears (Allow / Deny)

@@ -151,7 +151,7 @@ async function jobAction(app, j, act, refresh) {
   if (act === 'rm' && r?.logsKept === 'running') showToast(t('Removed. One of its runs is still running; its log files are deleted 14 days after it ends.')); // round 2: the ✕'s promise is true or not made
   if (act === 'rm' && r?.logsKept === 'unjudgeable') showToast(t('Removed. One of its runs could not be checked; its log files are deleted once VibeSpace can tell it has ended.'));
   if (r?.code === 'hub-is-main') r.error = t('This job is the running VibeSpace: it is not stopped here');   // B-2c5c: the job IS this VibeSpace — its stop refused by name, in the reader's language
-  if (r?.error) showToast(r.error, { error: true });
+  if (r?.error) showToast(r.error, { type: 'error' });
   refresh?.();
 }
 /** THE ROW'S VERBS — one table: the row's buttons and its menu (right-click / long-press) draw the same acts (lane
@@ -380,7 +380,7 @@ async function expandDetail(app, el, j, refresh) {
     const lbl = document.createElement('span'); lbl.textContent = t(dim === 'view' ? 'view' : 'control') + ':';
     const sel = document.createElement('select'); sel.className = 'toolbar-select';
     for (const v of ['session', 'group', 'all']) { const o = document.createElement('option'); o.value = v; o.textContent = valueWord('job-access', v, t); if ((job.access || {})[dim] === v) o.selected = true; sel.appendChild(o); }
-    sel.onchange = async () => { const r2 = await fetchJson(`/api/jobs/${j.id}/access`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [dim]: sel.value }) }); if (r2?.error) showToast(r2.error, { error: true }); };
+    sel.onchange = async () => { const r2 = await fetchJson(`/api/jobs/${j.id}/access`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [dim]: sel.value }) }); if (r2?.error) showToast(r2.error, { type: 'error' }); };
     acc.append(lbl, sel);
   }
   const lock = document.createElement('button'); lock.className = 'jobs-btn';
@@ -410,7 +410,7 @@ async function expandDetail(app, el, j, refresh) {
     const value = memorySetValue(job, memIn.value);
     if (value === null) { showToast(t('Memory bound: {size}', { size: job.memoryMb ? memoryWords(job.memoryMb) : t('unbounded') })); return; } // unchanged: nothing is written
     const r2 = await fetchJson(`/api/jobs/${j.id}/memory`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }) });
-    if (r2?.error) showToast(r2.error, { error: true }); else { showToast(t('Memory bound: {size}', { size: r2.memoryMb ? memoryWords(r2.memoryMb) : t('unbounded') }) + (r2.memoryCap?.limitMb ? ' · ' + memoryCapWords(r2.memoryCap, t) : '')); refresh?.(); } // the effective bound, and the limit that lowered the asked one
+    if (r2?.error) showToast(r2.error, { type: 'error' }); else { showToast(t('Memory bound: {size}', { size: r2.memoryMb ? memoryWords(r2.memoryMb) : t('unbounded') }) + (r2.memoryCap?.limitMb ? ' · ' + memoryCapWords(r2.memoryCap, t) : '')); refresh?.(); } // the effective bound, and the limit that lowered the asked one
   };
   // round 4: beside the stored value, read-only — the bound the next run gets and the limit that lowers it («effective 6 GB ·
   // the instance’s limit 8 GB»)
@@ -513,7 +513,7 @@ function openCreateDialog(app, onDone) {
     const task = { cmd: { argv: ['sh', '-c', f.cmd.value], cwd: f.cwd.value || undefined }, restart: 'on-failure' };
     const body2 = { kind: schedule ? 'cron' : kind, name: f.name.value || 'job', context: f.ctx.value ? { payload: f.ctx.value } : null, access: { view: 'group', control: 'session' }, ...(schedule ? { schedule, action: { type: 'spawn-task', task } } : task) };
     const r = await fetchJson('/api/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body2) });
-    if (r?.error) return showToast(r.error, { error: true });
+    if (r?.error) return showToast(r.error, { type: 'error' });
     close(); onDone?.();
   };
 }
@@ -657,7 +657,7 @@ function renderPanelBlocks(app, root, jobId, pending, { onAnswered } = {}) {
             const r2 = await fetchJson(`/api/jobs/${jobId}/answer`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answers: { ...values, button: o.id, version } }) });
             // r6 D-F5: an answer names its panel (`version`, which only grows per job); a panel the job no longer waits on
             // is refused by name (stale-panel) — the toast says so and the form re-reads the panel the job DOES wait on
-            if (r2?.error) { showToast(r2.error, { error: true }); if (r2.code === 'stale-panel' || r2.code === 'no-pending-panel') onAnswered?.(); return; }
+            if (r2?.error) { showToast(r2.error, { type: 'error' }); if (r2.code === 'stale-panel' || r2.code === 'no-pending-panel') onAnswered?.(); return; }
             root.textContent = '';
             const okEl = document.createElement('div'); okEl.className = 'empty-hint'; okEl.textContent = t('Submitted — the job continues.');
             root.appendChild(okEl);

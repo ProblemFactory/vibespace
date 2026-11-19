@@ -64,6 +64,16 @@
 //      the viewport grown to 951×900 (a deleted desktop keeps its row, so the room is what lets the list fit), a desktop
 //      renamed on another client: the offset kept, the pointer's row unmoved, the list grown downward as far as its rows
 //      allow; wheeled back to the top, the next remote change lifts the cap whole and no row moves
+//   ⑳ A TOAST THAT YIELDS IS NEVER LOST (B-7a51's round MUST, 951×585, toasts of 3 s): the For-you panel opened by a press; a
+//      long plain toast A drawn clear of the short panel (and `seen`: the plant of the seen verdict); the panel GROWS from its
+//      content (a block planted in it) — no room above it nor on either side (the scene proves itself against A's own size) —
+//      A is HELD (not drawn); a press inside the panel, then a plain toast B born while the stack yields: held at its birth, its
+//      history entry NOT seen; the person's failed act (an error toast E) born then: DRAWN at once, inside the viewport; past
+//      A's whole time A and B are still there, held; the panel closed by its button: A and B drawn, B judged seen at its draw,
+//      both still there at 2/3 of their time and gone after it (their time started WHOLE at the close)
+//   RED CONTROL r7 — a seventh esbuild bundle of THIS tree with 672158c6c's yield put back (the whole stack hidden while every
+//   toast's time runs, the panel's growth unwatched, the left side alone): ⑳ goes RED there (A left on the grown panel, B
+//   called seen while hidden, E not drawn, A expired unseen).
 //   RED CONTROL r6 — a sixth esbuild bundle of THIS tree with 5a98bf0f's _placeList put back (the offset neither read nor
 //   kept): ⑲ r5 ① goes RED there (the cap lifted whole, the offset 0, the pointer's row 100 px down).
 //   RED CONTROL r5 — a fifth esbuild bundle of THIS tree with daf19adf's placement put back (the open placed before its words,
@@ -273,6 +283,23 @@ const MUTANT6 = {};
   MUTANT6.bundle = fs.readFileSync(path.join(MUT6, 'bundle-mut.js'));
 }
 
+// ── the RED CONTROL r7: this source with 672158c6c's yield put back (B-7a51's round MUST undone), one esbuild ──
+const MUT7 = scratch('desk-small-mut7');
+const MUTANT7 = {};
+{
+  fs.mkdirSync(MUT7, { recursive: true });
+  execSync(`cp -r ${repo}/src ${MUT7}/src`);
+  fs.symlinkSync(path.join(repo, 'node_modules'), path.join(MUT7, 'node_modules'));
+  const sub = (rel, from, to) => { const f = path.join(MUT7, rel); const s = fs.readFileSync(f, 'utf8'); if (s.split(from).length !== 2) throw new Error(`mutant r7 anchor ${rel}: ${from.slice(0, 70)}`); fs.writeFileSync(f, s.replace(from, to)); };
+  // the whole stack hidden (every toast's time running), shown again first at every placement; the growth unwatched; the left alone
+  sub('src/lib/utils.js', "      for (const t of stack.children) if (_toastYields(t)) _toastHold(t);\n", "      stack.style.visibility = 'hidden'; if (false)\n");
+  sub('src/lib/utils.js', "function _placeToastStackNow() {\n  const stack = document.getElementById('global-toasts');\n", "function _placeToastStackNow() {\n  const stack = document.getElementById('global-toasts');\n  if (stack && stack.style.visibility === 'hidden') stack.style.visibility = '';\n");
+  sub('src/lib/utils.js', "  if (fy && !_toastPanelSize && typeof ResizeObserver === 'function') { _toastPanelSize = new ResizeObserver(_queueToastPlace); _toastPanelSize.observe(fy); }\n", '');
+  sub('src/lib/utils.js', '  if (panel.right + gap + rect.width <= vw) return { left: (panel.right + gap) / (scale || 1) };\n', '');
+  execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: MUT7 });
+  MUTANT7.bundle = fs.readFileSync(path.join(MUT7, 'bundle-mut.js'));
+}
+
 // ── throwaway server in a worktree (the tree's src/ + built public/) ──
 try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
@@ -287,7 +314,7 @@ const cleanup = () => {
   try { srv.kill('SIGKILL'); } catch { }
   for (const root of [wt, fakeHome, stubDir, chromeDir]) { try { endRootedProcesses(root); } catch { } } // the server, dtach, the wrapper, the stub, Chrome (§57b)
   try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
-  for (const d of [chromeDir, fakeHome, stubDir, fontsDir, MUT, MUT2, MUT3, MUT4, MUT5, MUT6]) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { } }
+  for (const d of [chromeDir, fakeHome, stubDir, fontsDir, MUT, MUT2, MUT3, MUT4, MUT5, MUT6, MUT7]) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { } }
 };
 process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
@@ -1279,7 +1306,103 @@ const offKept = (o) => offNear(o) && !!o.o2 && Math.abs(o.o2.st - o.o1.st) < 1 &
 /** r5 ②: back at the top, the next remote change lifts the cap whole — nothing left to scroll, both ends reachable, no row moved */
 const offTop = (o) => offNear(o) && !!o.o4 && o.o4.st === 0 && !!o.rid2 && o.renamed2 && !!o.o5 && o.o5.st === 0 && !!o.p5 && !o.p5.scrolls && o.p5.inside && o.p5.firstHit && o.p5.lastHit && rowStays(o.p4, o.p5);
 
+/** ⑳ A TOAST THAT YIELDS IS NEVER LOST (B-7a51's round MUST) — the scene in the header; the facts of each step, read on the PLACED
+ *  stack (two frames, every entrance finished, one more frame); toasts of 3 s for the leg (the setting put back after it) */
+const legToastYield = async () => {
+  const out = {};
+  const prevSecs = await evalJs(`app.settings.get('taskbar.toastSeconds') ?? null`);
+  await evalJs(`app.settings.set('taskbar.toastSeconds', 3)`); await sleep(250);
+  const TTL = 3000;
+  await cdp('Emulation.setFocusEmulationEnabled', { enabled: true });   // a focused page — the seen verdict's condition, as a person's
+  try {
+    const PLACED = `(async () => { const fr = () => new Promise((r) => requestAnimationFrame(r)); await fr(); await fr(); const st = document.getElementById('global-toasts'); if (st) await Promise.all([...st.children].flatMap((t) => t.getAnimations()).map((a) => a.finished.catch(() => null))); await fr(); return true; })()`;
+    const READ = `(() => { const st = document.getElementById('global-toasts'), p = document.getElementById('user-todos-popup'), tb = document.getElementById('toolbar');
+      const pr = p && !p.classList.contains('hidden') && p.getClientRects().length ? p.getBoundingClientRect() : null, tr = tb ? tb.getBoundingClientRect() : null;
+      let H = []; try { H = JSON.parse(localStorage.getItem('vibespace.toastHistory') || '[]'); } catch { }
+      const one = (mark) => { const t = st ? [...st.children].find((x) => x.textContent.includes(mark)) : null, e = H.find((x) => String(x.m).includes(mark)); if (!t) return { there: false, seen: e ? !!e.seen : null };
+        const r = t.getBoundingClientRect(), drawn = getComputedStyle(t).display !== 'none' && getComputedStyle(st).visibility !== 'hidden' && r.width > 0 && r.height > 0;
+        return { there: true, held: t.classList.contains('global-toast-held'), drawn, onPanel: !!pr && drawn && r.left < pr.right && r.right > pr.left && r.top < pr.bottom && r.bottom > pr.top, inView: drawn && r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight, w: Math.round(r.width), h: Math.round(r.height), seen: e ? !!e.seen : null }; };
+      return { open: !!pr, grown: !!document.querySelector('.zz-grow-20'), panel: pr && [Math.round(pr.left), Math.round(pr.top), Math.round(pr.right), Math.round(pr.bottom)], toolbarBottom: tr ? Math.round(tr.bottom) : 0, vw: innerWidth, A: one('zz-A20'), B: one('zz-B20'), E: one('zz-E20') }; })()`;
+    const LONG = 'is a stand-in notice long enough to fill the widest toast this window allows, so that no side of the open panel has room for it';
+    const notice = (mark, level) => evalJs(`(() => { for (const h of app.ws.globalHandlers) { try { h({ type: 'server-notice', key: ${J(mark)} + '-' + Date.now(), level: ${level}, text: ${J(mark + ' ' + LONG)} }); } catch { } } return true; })()`);
+    const forYou = async () => { if (await centre('#taskbar-user-todos')) { await press('#taskbar-user-todos'); return 'press'; } await evalJs(`document.getElementById('taskbar-user-todos').click(), true`); return 'click (the button not on screen)'; };
+    await evalJs(`(() => { const p = document.getElementById('user-todos-popup'); if (p && !p.classList.contains('hidden')) document.getElementById('taskbar-user-todos').click(); document.querySelectorAll('#global-toasts > .global-toast').forEach((t) => t.remove()); localStorage.removeItem('vibespace.toastHistory'); return true; })()`);
+    await sleep(300);
+    out.opened = await forYou();
+    out.openSeen = await waitFor(`!document.getElementById('user-todos-popup').classList.contains('hidden')`, 5000);
+    await sleep(300);
+    // A: a long plain toast, drawn clear of the short panel (the plant of the seen verdict: drawn within 4 s of the press)
+    await notice('zz-A20', 1); const a0 = Date.now(); await evalJs(PLACED);
+    out.s1 = await evalJs(READ);
+    // the panel GROWS from its content — a block planted in it (no class, no style of the panel touched)
+    await evalJs(`(() => { const g = document.createElement('div'); g.className = 'zz-grow-20'; g.style.cssText = 'width:376px;height:900px'; document.getElementById('user-todos-popup').appendChild(g); return true; })()`);
+    await evalJs(PLACED);
+    out.s2 = await evalJs(READ);
+    // a press INSIDE the panel (on the planted block's visible part — the panel stays open), then B born while the stack yields
+    const inside = await evalJs(`(() => { const g = document.querySelector('.zz-grow-20'), p = document.getElementById('user-todos-popup'); if (!g || !p) return null; const a = g.getBoundingClientRect(), b = p.getBoundingClientRect(); const x = (Math.max(a.left, b.left) + Math.min(a.right, b.right)) / 2, y = (Math.max(a.top, b.top) + Math.min(a.bottom, b.bottom)) / 2; return document.elementFromPoint(x, y) === g ? { x, y } : null; })()`);
+    out.pressedInside = !!inside;
+    if (inside) await click(inside);
+    await notice('zz-B20', 1); await evalJs(PLACED);
+    out.s3 = await evalJs(READ);
+    // E: the person's failed act, born while the stack yields
+    await notice('zz-E20', 2); await evalJs(PLACED);
+    out.s4 = await evalJs(READ);
+    await sleep(Math.max(0, a0 + TTL + 700 - Date.now()));
+    out.s5 = await evalJs(READ);   // past A's whole time
+    out.closed = await forYou(); await evalJs(PLACED);
+    const c0 = Date.now();
+    out.s6 = await evalJs(READ);
+    await sleep(Math.max(0, c0 + TTL * 2 / 3 - Date.now()));
+    out.s7 = await evalJs(READ);   // 2/3 of their time after the close
+    await sleep(Math.max(0, c0 + TTL + 700 - Date.now()));
+    out.s8 = await evalJs(READ);   // past their whole time after the close
+  } finally {
+    await evalJs(`(() => { document.querySelectorAll('.zz-grow-20').forEach((g) => g.remove()); const p = document.getElementById('user-todos-popup'); if (p && !p.classList.contains('hidden')) document.getElementById('taskbar-user-todos').click(); return true; })()`).catch(() => null);
+    await evalJs(`app.settings.set('taskbar.toastSeconds', ${J(prevSecs == null ? 6 : prevSecs)})`).catch(() => null);
+    await cdp('Emulation.setFocusEmulationEnabled', { enabled: false }).catch(() => null);
+  }
+  // THE SCENE PROVES ITSELF: against A's own drawn size (s1), the grown panel (s2) leaves no room above it under the toolbar, none on
+  // its left, none on its right
+  const A1 = out.s1 && out.s1.A, P2 = out.s2 && out.s2.panel;
+  out.noRoom = !!A1 && A1.drawn && !!P2 ? { above: P2[1] - out.s2.toolbarBottom < A1.h + 16, left: P2[0] - 8 < A1.w, right: out.s2.vw - P2[2] - 8 < A1.w } : null;
+  return out;
+};
+const yieldNoRoom = (y) => !!y.noRoom && y.noRoom.above && y.noRoom.left && y.noRoom.right;
+
 const acceptanceAndControls = async () => {
+  console.log('\n═══ acceptance B-7a51 ⑳ — a toast that yields to the open For-you panel is never lost (951×585) ═══');
+  await step('acceptance ⑳', async () => {
+    pageErrors.length = 0;
+    await load(951, 585); await closeAll(); await sleep(400);
+    const y = await legToastYield();
+    const { s1, s2, s3, s4, s5, s6, s7, s8 } = y;
+    check(`⑳ the plant: the panel opened by a ${y.opened}; A (a long plain toast, ${s1 && s1.A.w}×${s1 && s1.A.h}) drawn clear of the short panel and SEEN (drawn within 4 s of the press)`, y.opened === 'press' && y.openSeen && !!s1 && s1.open && s1.A.drawn && !s1.A.onPanel && s1.A.seen === true, { opened: y.opened, s1 });
+    check(`⑳ THE SCENE PROVES ITSELF: the panel grown from its content (${J(s2 && s2.panel)}) leaves no room for A above it, on its left or its right (${J(y.noRoom)})`, yieldNoRoom(y), { noRoom: y.noRoom, s2 });
+    check('⑳ the panel GROWING re-places the stack: A is HELD — not drawn, still there', !!s2 && s2.open && s2.grown && s2.A.there && s2.A.held && !s2.A.drawn, s2);
+    check('⑳ B, a plain toast born after a press while the stack yields, is held at its birth — and its history entry is NOT seen', y.pressedInside && !!s3 && s3.open && s3.B.there && s3.B.held && !s3.B.drawn && s3.B.seen === false, { pressedInside: y.pressedInside, s3 });
+    check(`⑳ E, the person's failed act (an error toast) born while the stack yields, is DRAWN at once inside the viewport (${s4 && s4.E.onPanel ? 'over the panel\'s edge — nothing else fits' : 'clear of the panel'}); A and B stay held`, !!s4 && s4.grown && s4.E.there && !s4.E.held && s4.E.drawn && s4.E.inView && s4.A.held && s4.B.held, s4);
+    check('⑳ past A\'s whole time, A and B are still THERE (held: their time stopped) — the panel still grown (its planted block in it)', !!s5 && s5.open && s5.grown && s5.A.there && s5.A.held && s5.B.there && s5.B.held, s5);
+    check('⑳ the panel closed by its button: A and B DRAWN; B judged at its draw (drawn within 4 s of the close press ⇒ seen)', !!s6 && !s6.open && s6.A.drawn && !s6.A.held && s6.B.drawn && !s6.B.held && s6.B.seen === true, { closed: y.closed, s6 });
+    check('⑳ their time started WHOLE at the close: still drawn at 2/3 of it, gone after it', !!s7 && s7.A.drawn && s7.B.drawn && !!s8 && !s8.A.there && !s8.B.there, { s7, s8 });
+    check('⑳ zero page errors', pageErrors.length === 0, pageErrors.slice(0, 4));
+  });
+
+  // ═════════════════════════════════════════ THE RED CONTROL r7 (951×585) ═════════════════════════════════════════
+  console.log('\n═══ RED CONTROL r7 — 672158c6c\'s yield put back (the whole stack hidden, every toast\'s time running, the growth unwatched), 951×585 ═══');
+  await step('RED CONTROL r7', async () => {
+    mutantOn = MUTANT7;
+    await load(951, 585); await closeAll(); await sleep(400);
+    const y = await legToastYield();
+    const { s1, s2, s3, s4, s5 } = y;
+    check('RED r7: the plant took (A drawn clear of the short panel and seen) and the scene is a yield scene', y.opened === 'press' && !!s1 && s1.A.drawn && !s1.A.onPanel && s1.A.seen === true && yieldNoRoom(y), { s1, noRoom: y.noRoom });
+    check('RED r7 ①: the panel\'s growth never re-places the stack — A stands ON the grown panel', !!s2 && s2.A.drawn && s2.A.onPanel, s2);
+    check('RED r7 ②: B, hidden with the whole stack, is called SEEN in the history', !!s3 && s3.B.there && !s3.B.drawn && s3.B.seen === true, s3);
+    check('RED r7 ③: E, the person\'s failed act, is NOT drawn (the whole stack hidden)', !!s4 && s4.E.there && !s4.E.drawn, s4);
+    check('RED r7 ④: past its whole time A is GONE — it expired unseen', !!s5 && !s5.A.there, s5);
+    mutantOn = null;
+  });
+
+
   console.log('\n═══ acceptance r2 — the compact form\'s doors, the «+N» list\'s tail, the resize\'s release (951×585) ═══');
   await step('acceptance r2', async () => {
     pageErrors.length = 0;
