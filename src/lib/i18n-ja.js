@@ -8744,7 +8744,7 @@ export default {
   "Could not reconnect the storage": "ストレージを再接続できませんでした",
   // B-e3fe follow-up: the unreadable record of waiting messages (src/server/queued-file-for-you.js, its For-you row)
   "VibeSpace could not read {file}, its record of messages waiting behind running turns: the messages waiting now are kept in memory only until it reads again": "VibeSpace は {file}（実行中のターンの後ろで待つメッセージの記録）を読めませんでした：今待っているメッセージは、再び読めるまでメモリにだけ保持されます",
-  "A restart before then loses their words. Repair the file, or press Set it aside: the file is renamed beside it (nothing is deleted) and the record is written again from what waits now.": "それまでに再起動すると、その内容は失われます。ファイルを修復するか、「脇に移す」を押してください：ファイルは同じ場所で名前が変わり（何も削除されません）、記録は今待っているものから書き直されます。",
+  "A restart before then loses their words. Repair the file, or press Set it aside: the file is renamed beside it (nothing is deleted), messages recorded only in it are no longer waited for, and the record is written again from what waits now.": "それまでに再起動すると、その内容は失われます。ファイルを修復するか、「脇に移す」を押してください：ファイルは同じ場所で名前が変わり（何も削除されません）、そのファイルにだけ記録されたメッセージは待たれなくなり、記録は今待っているものから書き直されます。",
   "Rename the unreadable file aside now — nothing is deleted, and the record of waiting messages is written again": "読めないファイルを今すぐ名前を変えて脇に移す — 何も削除されず、待機中メッセージの記録が書き直されます",
   "Set it aside": "脇に移す",
   "Set aside — the record of waiting messages is written again": "脇に移しました — 待機中メッセージの記録を書き直しました",

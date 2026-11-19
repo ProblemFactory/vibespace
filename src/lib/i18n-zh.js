@@ -8745,7 +8745,7 @@ export default {
   "Could not reconnect the storage": "无法重新连接该存储",
   // B-e3fe follow-up: the unreadable record of waiting messages (src/server/queued-file-for-you.js, its For-you row)
   "VibeSpace could not read {file}, its record of messages waiting behind running turns: the messages waiting now are kept in memory only until it reads again": "VibeSpace 无法读取 {file}（它记录排在运行中回合后面的等待消息）：现在等待的消息只保存在内存中，直到它能再次读取",
-  "A restart before then loses their words. Repair the file, or press Set it aside: the file is renamed beside it (nothing is deleted) and the record is written again from what waits now.": "在那之前重启会丢失这些消息的内容。请修复该文件，或点「放到一旁」：文件会在原处改名（不删除任何内容），记录会根据现在等待的消息重新写入。",
+  "A restart before then loses their words. Repair the file, or press Set it aside: the file is renamed beside it (nothing is deleted), messages recorded only in it are no longer waited for, and the record is written again from what waits now.": "在那之前重启会丢失这些消息的内容。请修复该文件，或点「放到一旁」：文件会在原处改名（不删除任何内容），只记录在其中的消息不再等待，记录会根据现在等待的消息重新写入。",
   "Rename the unreadable file aside now — nothing is deleted, and the record of waiting messages is written again": "现在把无法读取的文件改名放到一旁 — 不删除任何内容，等待消息的记录会重新写入",
   "Set it aside": "放到一旁",
   "Set aside — the record of waiting messages is written again": "已放到一旁 — 等待消息的记录已重新写入",

@@ -762,14 +762,16 @@ console.log('㉓ THE HOLD IS SAID, WITH ITS DOOR (B-e3fe follow-up, 主开发 04
   // a For-you store that records what a producer files and resolves (the store's own add / setStatus / forSession shape)
   const store = () => { const items = []; return { items, add: (key, it) => { const ex = items.find((x) => x.key === key && x.itemKey && x.itemKey === it.itemKey && x.status === 'open'); if (ex) return { id: ex.id }; const x = { id: 'ut' + (items.length + 1), key, status: 'open', ...it }; items.push(x); return { id: x.id }; }, setStatus: (id, st) => { const x = items.find((y) => y.id === id); if (x) x.status = st; }, forSession: (keys) => items.filter((x) => keys.includes(x.key)) }; };
   // one hub: the REAL queued-wakes over a REAL data dir (its default reader), the REAL producer wired to it as jobs-wiring does
-  const hub = (mod = QW, qf = QF, onDisk = TORN_QW) => {
+  const hub = (mod = QW, qf = QF, onDisk = TORN_QW, { ut: ut0 = null, rename = null } = {}) => {
     const dir = fs.mkdtempSync(path.join(ROOT, 'qw-hold-')); if (onDisk != null) fs.writeFileSync(path.join(dir, 'msg-queued.json'), onDisk);
     let clock = T22; const writes = [];
-    const q = mod.create({ dataDir: dir, now: () => clock, writer: { dirty: (f, o) => writes.push(o.produce()) }, noteSpend: () => { }, releaseSpend: () => { }, log: () => { } });
-    const ut = store(), deliver = { queuedFileState: () => q.fileState(), onQueuedFileState: (fn) => q.onFileState(fn), queuedSetAside: () => q.setAside() };
+    const q = mod.create({ dataDir: dir, now: () => clock, writer: { dirty: (f, o) => writes.push(o.produce()) }, noteSpend: () => { }, releaseSpend: () => { }, log: () => { }, ...(rename ? { rename } : {}) });
+    const ut = ut0 || store(), deliver = { queuedFileState: () => q.fileState(), onQueuedFileState: (fn) => q.onFileState(fn), queuedSetAside: () => q.setAside() };
     qf.create({ getUserTodos: () => ut, deliver, log: () => { } });
     return { dir, q, ut, writes, adv: (ms) => { clock += ms; }, open: () => ut.items.filter((x) => x.status === 'open') };
   };
+  // an EARLIER RUN's open item already in the store (the store outlives a restart)
+  const earlier = () => { const u = store(); u.add('queued-wakes', { origin: 'server', kind: 'action', sessionName: 'Agent messages', text: 'x', action: { type: 'queued-file-unread' }, itemKey: 'queued-file-unread' }); return u; };
   // A — the boot finds it torn: ONE item, «This machine», naming the file, with the door's type; nothing written
   const a = hub(); unreadFrame(a, 'held words');
   const it = a.open()[0];
@@ -799,17 +801,47 @@ console.log('㉓ THE HOLD IS SAID, WITH ITS DOOR (B-e3fe follow-up, 主开发 04
   const WO = require(path.join(REPO, 'src/write-origin.js'));
   ok('㉓ E: the route is a PERSON\'S press — the owner\'s page verdict (ownerPageWhy) refuses before the ladder is asked; a bearer is refused by it',
     /app\.post\('\/api\/queued-wakes\/set-aside', async \(req, res\) => \{\n    const w = require\('\.\.\/write-origin\.js'\)\.ownerPageWhy\(req\);[^\n]*\n    if \(w\) return res\.status\(403\)/.test(jw) && WO.ownerPageWhy({ headers: { authorization: 'Bearer x', 'sec-fetch-site': 'same-origin' } }) === 'bearer' && WO.ownerPageWhy({ headers: { 'sec-fetch-site': 'same-origin' } }) === null);
+  // THE CURE (round wz96dfzt3's MUST): an earlier run's open item is CLOSED — by a boot that reads the file (or finds it gone), and
+  // by a press that finds no hold (its own button answers «nothing to set aside» AND closes it)
+  const f1 = hub(QW, QF, OLD_QW, { ut: earlier() }), f2 = hub(QW, QF, null, { ut: earlier() });
+  ok('㉓ F: the store holds an earlier run\'s open item; this boot READS the file (or finds it gone) ⇒ the item is closed at wiring — never left open with words now false',
+    f1.open().length === 0 && f2.open().length === 0 && f1.ut.items.length === 1, S({ f1: f1.ut.items.map((x) => x.status), f2: f2.ut.items.map((x) => x.status) }));
+  const g = hub(QW, QF, OLD_QW); g.ut.add('queued-wakes', { origin: 'server', kind: 'action', text: 'x', action: { type: 'queued-file-unread' }, itemKey: 'queued-file-unread' });
+  const rg = await g.q.setAside();
+  ok('㉓ G: a press with NO hold behind it (the item outlived its cause) answers «nothing to set aside» and closes the item', rg.ok && rg.state === 'none' && g.open().length === 0, S({ rg, open: g.open().length }));
+  // small 3: two presses racing on one torn file — only the press whose rename moved it says «set aside»
+  const h = hub(); const [p1, p2] = await Promise.all([h.q.setAside(), h.q.setAside()]);
+  const asideH = fs.readdirSync(h.dir).filter((f2x) => f2x.startsWith('msg-queued.json.unreadable-'));
+  ok('㉓ H: two presses racing — exactly ONE says «set aside» (its rename moved the file, its dest exists), the other «nothing to set aside»; the item is closed',
+    [p1, p2].filter((x) => x.state === 'pass').length === 1 && [p1, p2].filter((x) => x.state === 'none').length === 1 && asideH.length === 1 && asideH[0] === [p1, p2].find((x) => x.state === 'pass').dest && h.open().length === 0, S({ p1, p2, asideH }));
+  // small 2: a refused rename answers its CODE only — the toast says the row's declared sentence first, the code after it
+  const iH = hub(QW, QF, TORN_QW, { rename: async () => { throw Object.assign(new Error('EACCES: permission denied, rename'), { code: 'EACCES' }); } });
+  const ri = await iH.q.setAside();
+  const acts = read('src/lib/user-todos-actions.js');
+  ok('㉓ I: a refused rename answers {ok:false, code} (no bare text), the file stays where it was, the item stays open — and the press\'s toast is the declared sentence, then the code',
+    ri.ok === false && ri.code === 'EACCES' && !('error' in ri) && fs.readFileSync(path.join(iH.dir, 'msg-queued.json'), 'utf8') === TORN_QW && iH.open().length === 1
+      && /showToast\(\(r && r\.error\) \|\| t\(said\.failed\) \+ \(r && r\.code \? ` \(\$\{String\(r\.code\)\.slice\(0, 40\)\}\)` : ''\), \{ type: 'error' \}\);/.test(acts), S(ri));
+  // small 1: the press reads the file OFF the loop — setAside awaits the async reader and never calls the bounded synchronous re-read
+  const qsrc0 = read('src/server/queued-wakes.js'), sa = qsrc0.slice(qsrc0.indexOf('  async function setAside() {'), qsrc0.indexOf('\n  }\n', qsrc0.indexOf('  async function setAside() {')));
+  ok('㉓ J: the press\'s re-read is OFF the loop — setAside awaits readHeldAsync (fs.promises) and calls neither stillUnread() nor readHeld()', sa.length > 200 && /await readHeldAsync\(\)/.test(sa) && !/stillUnread\(\)|readHeld\(\)/.test(sa) && /await require\('fs'\)\.promises\.readFile\(file, 'utf8'\)/.test(qsrc0));
   // RED CONTROLS (setup-checked anchors; each fails by name when its anchor is gone)
   const MH = mutantCopies('queued-wake-hold', REPO);
   const qsrc = read('src/server/queued-wakes.js'), fsrc = read('src/server/queued-file-for-you.js');
-  const REN = "    try { await require('fs').promises.rename(file, dest); }", SUB = "  if (deliver && typeof deliver.onQueuedFileState === 'function') deliver.onQueuedFileState((ev) => { if (ev && ev.unread === false) settled(ev.how); });";
+  const REN = "    try { await ren(file, dest); moved = true; }", SUB = "  if (deliver && typeof deliver.onQueuedFileState === 'function') deliver.onQueuedFileState((ev) => { if (ev && ev.unread === false) settled(ev.how); });";
   ok('㉓ setup: the rename and the item\'s resolve are each in their module once', qsrc.split(REN).length === 2 && fsrc.split(SUB).length === 2);
-  const NoRen = MH.load('src/server/queued-wakes.js', qsrc.replace(REN, '    try { /* no rename */ }'), 'no-rename');
+  const NoRen = MH.load('src/server/queued-wakes.js', qsrc.replace(REN, '    try { /* no rename */ moved = true; }'), 'no-rename');
   const ar = hub(NoRen); await ar.q.setAside();
   ok('㉓ CONTROL: without the rename the torn file stays where it was, under its own name — nothing is set aside (㉓ B can go red)', fs.readdirSync(ar.dir).filter((f) => f.includes('.unreadable-')).length === 0 && fs.readFileSync(path.join(ar.dir, 'msg-queued.json'), 'utf8') === TORN_QW);
   const NoSub = MH.load('src/server/queued-file-for-you.js', fsrc.replace(SUB, ''), 'no-resolve');
   const as = hub(QW, NoSub); await as.q.setAside();
   ok('㉓ CONTROL: without the producer\'s listener the item stays open after the file is set aside (㉓ B can go red)', as.open().length === 1);
+  const BOOT = "else if (st) settled('boot'); }", NONE = "    if (!unread) { fileSettled('none'); return { ok: true, state: 'none' }; }";
+  ok('㉓ setup: the boot\'s close and the no-hold press\'s close are each in their module once', fsrc.split(BOOT).length === 2 && qsrc.split(NONE).length === 2);
+  const NoBoot = MH.load('src/server/queued-file-for-you.js', fsrc.replace(BOOT, '}'), 'no-boot-close');
+  ok('㉓ CONTROL: without the boot\'s close an earlier run\'s item stays open at a boot that reads the file (㉓ F can go red)', hub(QW, NoBoot, OLD_QW, { ut: earlier() }).open().length === 1);
+  const NoNone = MH.load('src/server/queued-wakes.js', qsrc.replace(NONE, "    if (!unread) return { ok: true, state: 'none' };"), 'no-none-close');
+  const gn = hub(NoNone, QF, OLD_QW); gn.ut.add('queued-wakes', { origin: 'server', kind: 'action', text: 'x', action: { type: 'queued-file-unread' }, itemKey: 'queued-file-unread' }); await gn.q.setAside();
+  ok('㉓ CONTROL: a no-hold press that only answers «none» leaves the item open — its button closes nothing (㉓ G can go red)', gn.open().length === 1);
 }
 
 console.log('㉔ AN OLD AGENT\'S FRAME, SAID FOR REAL (B-0a33 cure (c)) — the REAL ladder\'s pullQueued answers «no-remove», the REAL guard files the For-you line');

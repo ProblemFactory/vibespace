@@ -13,7 +13,7 @@ const i18nKey = (s) => s;   // a DECLARED human-visible string (scripts/i18n-ext
 const ITEM_KEY = 'queued-wakes';
 const TYPE = 'queued-file-unread';
 const TEXT = i18nKey('VibeSpace could not read {file}, its record of messages waiting behind running turns: the messages waiting now are kept in memory only until it reads again');
-const DETAIL = i18nKey('A restart before then loses their words. Repair the file, or press Set it aside: the file is renamed beside it (nothing is deleted) and the record is written again from what waits now.');
+const DETAIL = i18nKey('A restart before then loses their words. Repair the file, or press Set it aside: the file is renamed beside it (nothing is deleted), messages recorded only in it are no longer waited for, and the record is written again from what waits now.');   // round wz96dfzt3 small 4: what the press costs, in one clause
 
 /** The item's words (PURE): {text, detail, i18n}. */
 function itemOf(file) {
@@ -41,7 +41,9 @@ function create({ getUserTodos, deliver, log = () => { } }) {
     return n;
   }
   if (deliver && typeof deliver.onQueuedFileState === 'function') deliver.onQueuedFileState((ev) => { if (ev && ev.unread === false) settled(ev.how); });
-  said();   // at wiring: the boot found it unread (queued-wakes reads its file when the ladder is built, before this wiring)
+  // at wiring: the boot found it unread ⇒ the item (an earlier run's merges by its itemKey); it READS or is gone ⇒ an earlier run's open
+  // item is closed now (round wz96dfzt3's MUST: no file-state event fires at a boot that reads the file)
+  { const st = deliver && typeof deliver.queuedFileState === 'function' ? deliver.queuedFileState() : null; if (st && st.unread) said(); else if (st) settled('boot'); }
   return { said, settled };
 }
 

@@ -66,7 +66,7 @@ const digestOf = (text) => crypto.createHash('sha256').update(String(text || '')
 const idsOf = (items) => (Array.isArray(items) ? items.map((it) => (it && typeof it === 'object' ? it.id : it)).filter((x) => typeof x === 'string' && x) : []);
 const live = (e) => e.state === 'pending' || e.state === 'queued';
 
-function create({ dataDir, noteSpend = null, releaseSpend = null, reservationState = null, waitingReservations = null, waitingOverCap = null, pull = null, stashHas = null, log = () => { }, now = () => Date.now(), writer = null, readFile = null, rand = () => crypto.randomBytes(4).toString('hex') } = {}) {
+function create({ rename = null, dataDir, noteSpend = null, releaseSpend = null, reservationState = null, waitingReservations = null, waitingOverCap = null, pull = null, stashHas = null, log = () => { }, now = () => Date.now(), writer = null, readFile = null, rand = () => crypto.randomBytes(4).toString('hex') } = {}) {
   const file = path.join(dataDir, FILE);
   const storeWriter = () => writer || require('../store-writer.js').storeWriter();
   const boot = rand();   // ids never repeat across processes: a reservation is idempotent by its id
@@ -93,8 +93,8 @@ function create({ dataDir, noteSpend = null, releaseSpend = null, reservationSta
   const fileListeners = new Set();   // B-e3fe follow-up: told when the file stops being unread (it reads, it is gone, it is set aside)
   // the ONE reading of the file (the boot, and B-e3fe's re-read while it is unread) — throws when it is not there or not a record.
   // B-e3fe: JSON that holds no `entries` list (another build's shape, a stray value) is unread too, never an empty record
-  const readHeld = () => {
-    const j = JSON.parse(typeof readFile === 'function' ? readFile(file) : require('fs').readFileSync(file, 'utf8'));
+  const parseHeld = (text) => {
+    const j = JSON.parse(text);
     if (!j || !Array.isArray(j.entries)) throw new Error('not a queued-wakes record (no entries list)');
     return {
       entries: j.entries.filter((e) => e && typeof e.cid === 'string' && typeof e.id === 'string' && STATES.includes(e.state))
@@ -102,6 +102,10 @@ function create({ dataDir, noteSpend = null, releaseSpend = null, reservationSta
       gone: (Array.isArray(j.gone) ? j.gone : []).filter((g) => g && typeof g.cid === 'string' && typeof g.id === 'string' && Array.isArray(g.bind) && typeof g.bind[0] === 'string' && now() - Number(g.at || 0) <= LIVE_MAX_AGE_MS).map((g) => ({ ...g, seenSeq: 0, pulledAt: 0 })).slice(-MAX_ENTRIES),   // a sequence is this process's
     };
   };
+  const readHeld = () => parseHeld(typeof readFile === 'function' ? readFile(file) : require('fs').readFileSync(file, 'utf8'));
+  // B-e3fe follow-up cure (round wz96dfzt3, small 1): the PERSON'S press reads the file OFF the loop
+  const readHeldAsync = async () => parseHeld(typeof readFile === 'function' ? readFile(file) : await require('fs').promises.readFile(file, 'utf8'));
+  const ren = typeof rename === 'function' ? rename : (a, b) => require('fs').promises.rename(a, b);   // a seam: a refused rename in a suite
   try {
     const held = readHeld();
     entries = held.entries.filter((e) => { const old = isOld(e, now()); if (old) droppedAtLoad.push(e); return !old; });   // by age (rounds 3–4) — said
@@ -123,6 +127,12 @@ function create({ dataDir, noteSpend = null, releaseSpend = null, reservationSta
     recheckAt = t;
     let held = null;
     try { held = readHeld(); } catch (err) { if (!(err && err.code === 'ENOENT')) return true; }
+    joinHeld(held);
+    return false;
+  }
+  /** the file reads again (`held`) or is gone (null): what it holds joins this process's entries (by id, this process's own kept)
+   *  and the writes resume — the bounded re-read's and the press's ONE ending */
+  function joinHeld(held) {
     if (held) {
       const ids = new Set(entries.map((e) => e.id)), gids = new Set(gone.map((g) => g.id));
       entries = [...entries, ...held.entries.filter((e) => !ids.has(e.id))];   // the old ones leave at the next sweep (ageOut: counted, said)
@@ -130,7 +140,6 @@ function create({ dataDir, noteSpend = null, releaseSpend = null, reservationSta
     }
     unread = false; fileSettled(held ? 'reads' : 'gone');
     log(held ? '[queued] msg-queued.json reads again — what it holds joins this process\'s entries; it is written again' : '[queued] msg-queued.json was removed — it is written again with this process\'s entries');
-    return false;
   }
   let saidUnwritten = false;
   /** B-e3fe follow-up (主开发's verdict 04:02Z: THE HOLD IS NOT SILENT): the file stopped being unread — its For-you item resolves */
@@ -139,16 +148,26 @@ function create({ dataDir, noteSpend = null, releaseSpend = null, reservationSta
    *  record is written again from what this process holds. → { ok, state: 'pass' (set aside) | 'none' (it reads again or is gone —
    *  nothing to set aside), dest } | { ok: false, error } */
   async function setAside() {
-    if (unread) recheckAt = -Infinity;   // the press reads the file once more first, whatever the bound: a file repaired a moment ago joins, never moves
-    if (!unread || stillUnread() === false) return { ok: true, state: 'none' };
+    // THE CURE (round wz96dfzt3's MUST): a press that finds NO hold closes the item it was pressed from (an earlier run's) — the
+    // listeners hear «none», nothing is read or moved
+    if (!unread) { fileSettled('none'); return { ok: true, state: 'none' }; }
+    // the press reads the file once more first, whatever the bound, OFF the loop (small 1): a file repaired a moment ago joins, never moves
+    let held = null, readsNow = false;
+    try { held = await readHeldAsync(); readsNow = true; } catch (err) { if (err && err.code === 'ENOENT') readsNow = true; }
+    if (!unread) return { ok: true, state: 'none' };   // settled meanwhile — its own event closed the item
+    if (readsNow) { joinHeld(held); persist(); return { ok: true, state: 'none' }; }
+    recheckAt = now();
     const stamp = new Date(now()).toISOString().replace(/[:.]/g, '-');
     const dest = file + '.unreadable-' + stamp;
-    try { await require('fs').promises.rename(file, dest); }
+    let moved = false;
+    try { await ren(file, dest); moved = true; }
     catch (err) {
-      if (!(err && err.code === 'ENOENT')) { log('[queued] setting msg-queued.json aside failed:', err && err.message); return { ok: false, error: String((err && err.code) || 'rename failed') }; }
+      // small 2: the CODE only — the press's toast says the row's declared sentence first, the code after it
+      if (!(err && err.code === 'ENOENT')) { log('[queued] setting msg-queued.json aside failed:', err && err.message); return { ok: false, code: String((err && err.code) || 'rename-failed').slice(0, 40) }; }
     }
-    if (!unread) return { ok: true, state: 'none' };   // a re-read settled it meanwhile
-    unread = false; fileSettled('aside');
+    // small 3: another press (or the person's hand) moved or removed it first — THIS press moved nothing and says «nothing to set aside»
+    if (!moved) { if (unread) joinHeld(null); return { ok: true, state: 'none' }; }
+    if (unread) { unread = false; fileSettled('aside'); }   // the press whose rename DID move the file says so, whatever settled first
     log(`[queued] msg-queued.json set aside by the person as ${path.basename(dest)} — written again from this process's entries`);
     persist();
     return { ok: true, state: 'pass', dest: path.basename(dest) };
