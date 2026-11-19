@@ -538,9 +538,13 @@ export function toastSeenAtShow({ now, gestureAt, visible, focused, ref = null }
   return !ref && !!visible && !!focused && gestureAt > 0 && now >= gestureAt && now - gestureAt < OWN_GESTURE_MS;
 }
 const _editable = (el) => !!(el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName || '')));
+// B-6944's stamp rides the same two listeners: did a KEY lead to the menu that opens now (showContextMenu, MENU_KEY_MS) — a gesture
+// key stamps it, a pointer press takes it back. NO LISTENER OF ITS OWN (the block checkpoint's red: test-needs-doors' move-mode legs
+// count the document's keydown listeners — a page-long one added at module load stood there after every Esc)
+let _menuKeyAt = 0;
 if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
-  window.addEventListener('pointerdown', () => { _gestureAt = Date.now(); }, true);
-  window.addEventListener('keydown', (e) => { if (isGestureKey(e, _editable(e.target))) _gestureAt = Date.now(); }, true);
+  window.addEventListener('pointerdown', () => { _gestureAt = Date.now(); _menuKeyAt = 0; }, true);
+  window.addEventListener('keydown', (e) => { if (isGestureKey(e, _editable(e.target))) _gestureAt = _menuKeyAt = Date.now(); }, true);
 }
 /** A gesture neither listener above sees — the phone's back swipe (lane mobile-back-guard) — is the person's own act too:
  *  a toast it shows next is not an unread notification. */
@@ -1467,14 +1471,10 @@ function armMenuKeys(pop, { opener = null, fromKey = false, keep = null } = {}) 
 /** B-6944: a menu row that is a STOP for the keys (a live row) — role menuitem, focusable by script; a dead one is aria-disabled */
 function menuStop(el, live) { el.setAttribute('role', 'menuitem'); el.tabIndex = -1; el.dataset.menuStop = '1'; if (!live) el.setAttribute('aria-disabled', 'true'); }   // a dead row is a stop too (read, never pressed)
 // B-6944: did a KEY lead to the menu that opens now? A gesture key (Enter / Space on a focused button, an arrow, a shortcut — never
-// plain typing in a field: isGestureKey) within MENU_KEY_MS; a pointer press takes it back — one pair of capture listeners for the
-// page's life (a menu a timer opens long after a key takes no focus)
+// plain typing in a field: isGestureKey) within MENU_KEY_MS; a pointer press takes it back — `_menuKeyAt`, stamped by the page's two
+// gesture listeners beside `_gestureAt` (above: no listener of its own); a menu a timer opens long after a key takes no focus
 const MENU_KEY_MS = 1000;
-let _menuKeyAt = 0, _menuWhySeq = 0;
-if (typeof document !== 'undefined' && document && typeof document.addEventListener === 'function') {
-  document.addEventListener('keydown', (e) => { if (isGestureKey(e, _editable(e.target))) _menuKeyAt = Date.now(); }, true);
-  document.addEventListener('pointerdown', () => { _menuKeyAt = 0; }, true);
-}
+let _menuWhySeq = 0;
 
 /** A MENU IS BOUNDED BY THE SCREEN (lane ui-controls-and-bugs, 主开发's width-sweep rule 4, 2026-11-13) — THE ONE placement of
  *  every context menu (showContextMenu and the file explorer's own builder): PURE menuPlace (below the point, above it when
