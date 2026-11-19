@@ -1,5 +1,5 @@
 {
- "_": "B-db5d (the coordinator's law, 2026-11-19 04:47Z): an installed plugin row's NAME lines per width — measured by bl-chat-b's walk (a scratch hub of each built tree, the stand-in «Custom Browser Kernel» installed from Git, ON, one setting — measured while the name still carried its id in brackets, «Custom Browser Kernel (consent.kernel)»: since the plain-words unit the name is the label alone, the id on hover, so these lines are an upper bound until the next walk measures the label alone): the rail at sidebar 200/260/280/320 on a 1280 page and 260 at 1440, the phone dialog at 280/320/390/768, en + zh. before = the checkpoint f6ad84f50 (Update… / Uninstall… inline); nineEm = B-db5d 7e6402597 (the 9 em name basis: the law was read on its 390); after = the 16 em cure. Judged by scripts/lib/fit-ladder.mjs linesGrew in test-ui-fit ②.",
+ "_": "B-db5d (the coordinator's law, 2026-11-19 04:47Z): an installed plugin row's NAME lines per width — measured by bl-chat-b's walk (a scratch hub of each built tree, the stand-in «Custom Browser Kernel» installed from Git, ON, one setting)»: since the plain-words unit the name is the label alone, the id on hover, so these lines are an upper bound until the next walk measures the label alone): the rail at sidebar 200/260/280/320 on a 1280 page and 260 at 1440, the phone dialog at 280/320/390/768, en + zh. before = the checkpoint f6ad84f50 (Update… / Uninstall… inline); nineEm = B-db5d 7e6402597 (the 9 em name basis: the law was read on its 390); after = the 16 em cure, measured AGAIN 2026-11-19 10:3xZ on a tree with the plain-words unit (the name is the label alone, the id on hover — the coordinator, 08:50Z: measure again at the next walk); with the id in brackets it stood on 1–4 lines, the label alone on 1–2. Judged by scripts/lib/fit-ladder.mjs linesGrew in test-ui-fit ②.",
  "before": [
   {
    "lang": "en",
@@ -224,37 +224,37 @@
   {
    "lang": "en",
    "label": "rail-sidebar200-1280",
-   "nameLines": 4,
+   "nameLines": 2,
    "controlsUnder": true
   },
   {
    "lang": "en",
    "label": "rail-sidebar260-1280",
-   "nameLines": 2,
+   "nameLines": 1,
    "controlsUnder": true
   },
   {
    "lang": "en",
    "label": "rail-sidebar280-1280",
-   "nameLines": 2,
+   "nameLines": 1,
    "controlsUnder": true
   },
   {
    "lang": "en",
    "label": "rail-sidebar320-1280",
-   "nameLines": 2,
+   "nameLines": 1,
    "controlsUnder": true
   },
   {
    "lang": "en",
    "label": "rail-sidebar260-1440",
-   "nameLines": 2,
+   "nameLines": 1,
    "controlsUnder": true
   },
   {
    "lang": "en",
    "label": "dialog-280",
-   "nameLines": 2,
+   "nameLines": 1,
    "controlsUnder": true
   },
   {
@@ -278,37 +278,37 @@
   {
    "lang": "zh",
    "label": "rail-sidebar200-1280",
-   "nameLines": 4,
+   "nameLines": 2,
    "controlsUnder": true
   },
   {
    "lang": "zh",
    "label": "rail-sidebar260-1280",
-   "nameLines": 2,
+   "nameLines": 1,
    "controlsUnder": true
   },
   {
    "lang": "zh",
    "label": "rail-sidebar280-1280",
-   "nameLines": 2,
+   "nameLines": 1,
    "controlsUnder": true
   },
   {
    "lang": "zh",
    "label": "rail-sidebar320-1280",
-   "nameLines": 2,
+   "nameLines": 1,
    "controlsUnder": true
   },
   {
    "lang": "zh",
    "label": "rail-sidebar260-1440",
-   "nameLines": 2,
+   "nameLines": 1,
    "controlsUnder": true
   },
   {
    "lang": "zh",
    "label": "dialog-280",
-   "nameLines": 2,
+   "nameLines": 1,
    "controlsUnder": true
   },
   {
