@@ -13,8 +13,11 @@
 //   ⑥ 「未生效：…」 — a few letters with no path, left: the text stays, the reason is said; 「用第一名」 commits the best
 //   ⑦ the commit waits past pointer-up: a press on another button — ITS click lands first, then the commit
 //   ⑧ «不存在 — 创建？»: a missing folder says so and is NOT taken until ticked; ticked ⇒ committed, ensure() makes it on
-//      disk; its parent missing ⇒ said, no tick
+//      disk; its parent missing ⇒ said AND its tick offered, the create makes both levels (read back from the disk)
 //   ⑨ two Task Groups + a name ⇒ ② = one <group folder>/<name> per group in selection order + ~/<name>; the chips row too
+//   ⑨b setDerived with a STALL PLACED in the listing's reply (B-ckpt61 LAW 1): while held, «正在问这台机器…» — no 不存在, no
+//      raw path, no tick; released, the folder with its facts · ⑨c the home's first read fails once (LAW 2): never «missing»,
+//      and a later ask reads the home again
 //   ⑩ a remote machine (my-mac) gets the same recommendations computed for it: the IR folder probed there, the one
 //      declared for it, compute-deal greyed «在 my-mac 上不存在 · 新建？», its recents with counts
 //   ⑪ THE PICKER: the folder button opens a dialog over the dialog — the groups' folders pinned with badges, home's tree
@@ -72,6 +75,17 @@ hm._ssh = (h, cmd) => new Promise((resolve, reject) => execFile('sh', ['-c', cmd
 const jsonList = (v) => { try { const a = JSON.parse(v || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } };
 const app = express();
 app.use(express.json());
+// B-ckpt61 (lane bl-tests-a): the suite's OWN server can HOLD a reply on a path until the leg releases it (a stall PLACED in the
+// listing's reply — never load), and can FAIL the home's next read (a 500 with no home)
+const HOLD = new Map();
+let homeFailsLeft = 0;
+app.use((req, res, next) => {
+  if (req.path === '/api/home' && homeFailsLeft > 0) { homeFailsLeft--; res.status(500).json({ error: 'the home read failed (the leg\'s plant)' }); return; }
+  const h = HOLD.get(req.path);
+  if (h) { h.p.then(() => next()); return; }
+  next();
+});
+const holdPath = (p) => { let open = null; const h = { p: new Promise((r) => { open = r; }) }; h.open = () => { HOLD.delete(p); open(); }; HOLD.set(p, h); return h; };
 app.get('/api/hosts/:id/dir-complete', async (req, res) => { try { res.json(await hm.dirSlice(req.params.id, { text: String(req.query.path || ''), bases: jsonList(req.query.bases), probe: jsonList(req.query.probe), q: String(req.query.q || ''), kind: String(req.query.kind || 'folder') })); } catch (e) { res.json({ suggestions: [], error: e.message }); } });
 const NOW = Date.now();
 app.get('/api/hosts/:id/recent-cwds', (req, res) => res.json({ cwds: [], recent: PC.recentCounts([{ cwd: MAC + '/Projects/website', mtime: NOW / 1000 - 3 * 86400 }, { cwd: MAC + '/Projects/website', mtime: NOW / 1000 - 4 * 86400 }, { cwd: MAC + '/Projects/website', mtime: NOW / 1000 - 5 * 86400 }, { cwd: MAC + '/Downloads', mtime: NOW / 1000 - 7 * 86400 }]) }));
@@ -287,9 +301,19 @@ console.log('\n── ⑧ «不存在 — 创建？» ──');
   ok('ticked ⇒ committed with create (exists false)', c && c.create === true && c.exists === false && c.path === HOME + '/work/新项目', c);
   ok('ensure() makes it on disk', (await ev('window.pf.ensure()')) === true && fs.existsSync(path.join(HOME, 'work/新项目')), fs.existsSync(path.join(HOME, 'work/新项目')));
   await reset();
-  await press('#cwd'); await type('~/nope/x'); await sleep(450);
-  const u2 = await under();
-  ok('its parent missing ⇒ said, no tick to give', /上一级 ~\/nope 也不存在/.test(u2) && !(await ev(`!!document.querySelector('.pf-under input[data-act="tick"]')`)), u2);
+  // B-ckpt61 (leg 8 as ruled — the ui-needs-a-button chain gave a missing PARENT its create tick, b2f2399c7): the missing parent is
+  // SAID and the tick is OFFERED, and the create then makes BOTH levels (read back from the disk); the line waited for, never a sleep
+  await press('#cwd'); await type('~/nope/x');
+  const u2 = await until(async () => { const t = await under(); return /上一级 ~\/nope 也不存在/.test(t) ? t : null; }, 4000);
+  ok('its parent missing ⇒ said, AND the create tick offered', !!u2 && (await ev(`!!document.querySelector('.pf-under input[data-act="tick"]')`)), u2 || (await under()));
+  ok('before the tick neither level is on the disk (the read-back below is the create\'s own)', !fs.existsSync(path.join(HOME, 'nope')), fs.existsSync(path.join(HOME, 'nope')));
+  await press('#other');
+  const un = await until(async () => { const t = await under(); return /未生效/.test(t) ? t : null; }, 4000);
+  ok('left without the tick: not taken (未生效), nothing committed', !!un && !(await log()).some((x) => x.ev === 'commit'), un || (await under()));
+  await press('.pf-under input[data-act="tick"]');
+  const cn = await until(async () => (await log()).find((x) => x.ev === 'commit'), 4000);
+  const madeBoth = !!cn && cn.create === true && cn.path === HOME + '/nope/x' && (await ev('window.pf.ensure()')) === true && fs.existsSync(path.join(HOME, 'nope', 'x')) && fs.statSync(path.join(HOME, 'nope')).isDirectory();
+  ok('ticked ⇒ committed with create, and ensure() makes BOTH levels on the disk (read back)', madeBoth, { cn, nope: fs.existsSync(path.join(HOME, 'nope')), x: fs.existsSync(path.join(HOME, 'nope', 'x')) });
   await reset();
 }
 
@@ -316,9 +340,21 @@ console.log('\n── ⑨b setDerived + the live 由名字 chips (lane new-sessi
   await ev('window.pf.refresh(); true');
   ok('CONTROL: refresh() paints it (the home\'s folders asked once)', await until(async () => (await homeFolders()) >= 1, 3000), await homeFolders());
   const IR = HOME + '/work/investor-relations';
+  // B-ckpt61 (the block's hosted red, both tries): THE STALL PLACED in the listing's reply (the suite's own server holds
+  // /api/dir-complete) — while the machine has not answered for the text, the line says the pending words (LAW 1): no «不存在», no
+  // raw absolute path, no create tick. Then THE LEG'S LAW: it waits for the machine's FULL reply (a dir-complete reply landed after
+  // the set, the field no longer pending) before it judges, and prints the field's state when it fails
+  const dirReplies = () => ev(`performance.getEntriesByType('resource').filter((e) => e.name.includes('/api/dir-complete')).length`);
+  const pfState = () => ev(`(() => { const w = document.querySelector('.path-field'); return { line: document.querySelector('.pf-under').innerText, pending: !!(w && w.dataset.pending), state: w && w.dataset.state, verdict: window.pf.verdict(), dirReplies: performance.getEntriesByType('resource').filter((e) => e.name.includes('/api/dir-complete')).length }; })()`);
+  const held = holdPath('/api/dir-complete'), before = await dirReplies();
   await ev(`window.sel = ['g-ir']; window.pf.refresh(); window.pf.setDerived(${JSON.stringify(IR)}, { note: '（来自任务组「投资者关系」）' }); true`);
-  const u1 = await until(async () => { const u = await under(); return u.includes('来自任务组') && u.includes('个文件') ? u : null; }, 4000);
-  ok('setDerived fills the field and its line says «= ~/work/investor-relations（来自任务组「投资者关系」）»', (await cwd()) === IR && !!u1 && u1.includes('= ~/work/investor-relations（来自任务组「投资者关系」）'), u1 || (await under()));
+  const askedOut = await until(() => ev(`!!document.querySelector('.path-field')?.dataset.pending`), 8000);   // the field's ask is out — held
+  const during = await pfState(), tickDuring = await ev(`!!document.querySelector('.pf-under input[data-act="tick"]')`);
+  ok('⑨b HELD (the stall placed in the listing\'s reply): the line says «正在问这台机器…» — no «不存在», no raw absolute path, no create tick (LAW 1)', !!askedOut && /正在问这台机器/.test(during.line) && !/不存在/.test(during.line) && !during.line.includes(HOME) && !tickDuring, { askedOut, during, tickDuring });
+  held.open();
+  const landed = await until(async () => (await dirReplies()) > before && !(await ev(`!!document.querySelector('.path-field')?.dataset.pending`)), 30000);
+  const u1 = await under();
+  ok('setDerived fills the field and its line says «= ~/work/investor-relations（来自任务组「投资者关系」）» with its facts — judged once the machine answered', (await cwd()) === IR && !!landed && u1.includes('= ~/work/investor-relations（来自任务组「投资者关系」）') && u1.includes('个文件'), landed ? u1 : await pfState());
   ok('…the list did not pop, nothing was committed', !(await listOpen()) && !(await log()).some((x) => x.ev === 'commit'), await log());
   const c1 = await ev('window.pf.commit().then((i) => i && { path: i.path, derived: i.derived, how: i.how })');
   ok('a commit of that untouched text says derived: true', !!c1 && c1.derived === true && c1.path === IR, c1);
@@ -356,6 +392,32 @@ console.log('\n── ⑨b setDerived + the live 由名字 chips (lane new-sessi
   }
   await shot('09b-derived-and-name-chips');
   await reset();
+}
+
+console.log('\n── ⑨c the home\'s first read FAILS once (B-ckpt61 LAW 2) ──');
+{
+  // a fresh page (the field's own home unknown, no app answer for it); the suite's server answers the home's NEXT read with a 500.
+  // The line never says «missing» on the way, the machine's reply still names the folder (its listing carries the home), and the
+  // next ask (a new text — the same text within 2 s is not asked again) reads the home AGAIN: a failed read is never kept. The
+  // control is the old code by construction (its kept promise answered '' for the page — the re-read never left the page)
+  const IR = HOME + '/work/investor-relations';
+  const dirReplies = () => ev(`performance.getEntriesByType('resource').filter((e) => e.name.includes('/api/dir-complete')).length`);
+  const homeReads = () => ev(`performance.getEntriesByType('resource').filter((e) => /\\/api\\/home(\\?|$)/.test(e.name)).length`);
+  const pending = () => ev(`!!document.querySelector('.path-field')?.dataset.pending`);
+  await load();
+  homeFailsLeft = 1;
+  const b2 = await dirReplies();
+  await ev(`window.sel = ['g-ir']; window.pf.setDerived(${JSON.stringify(IR)}, { note: '（来自任务组「投资者关系」）' }); true`);
+  const sawLines = [];
+  const landed = await until(async () => { sawLines.push(await under()); return (await dirReplies()) > b2 && !(await pending()); }, 30000);
+  const u3 = await under();
+  ok('⑨c the home\'s first read answered 500: the field still asked the machine, and its line names the folder with its facts — never «不存在» on the way', homeFailsLeft === 0 && !!landed && u3.includes('= ~/work/investor-relations') && u3.includes('个文件') && !sawLines.some((l) => /不存在/.test(l)), { homeFailsLeft, u3, sawLines: [...new Set(sawLines)].slice(0, 4), reads: await homeReads() });
+  const reads1 = await homeReads();
+  await ev(`window.pf.set(${JSON.stringify(HOME + '/work')}, { commit: false }); true`);
+  const reread = await until(async () => ((await homeReads()) >= 2 ? true : null), 8000);   // (a partial re-ask may have read it already)
+  ok('…and a later ask reads the home AGAIN (LAW 2: a failed read is never kept — the old kept promise read it once for the page)', !!reread, { reads1, now: await homeReads() });
+  homeFailsLeft = 0;
+  await load();
 }
 
 console.log('\n── ⑩ a remote machine (my-mac): the same recommendations, computed for it ──');
@@ -425,8 +487,8 @@ console.log('\n── ⑬ never offered unasked ──');
   await press('#cwd'); await type('~/');
   const r = await until(async () => { const x = await rows(); return x.some((y) => y.path === '~/work') ? x : null; }, 5000);
   ok('~/ lists the home without ~/vibespace (the checkout) or ~/.config', !!r && !r.some((x) => x.path === '~/vibespace' || x.path === '~/.config'), r);
-  await clear(); await type('~/vibespace'); await sleep(450);
-  const vv = await ev('window.pf.verdict()');
+  await clear(); await type('~/vibespace');
+  const vv = await until(async () => { const v = await ev('window.pf.verdict()'); return v && v.status === 'ok' ? v : null; }, 5000) || await ev('window.pf.verdict()');   // (B-ckpt61: the machine's answer waited for, never a 450 ms sleep)
   ok('typed explicitly, it resolves', vv.status === 'ok' && vv.path === HOME + '/vibespace', vv);
   await key('Escape'); await reset();
 }

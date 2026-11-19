@@ -1301,7 +1301,9 @@ await step('㊽', async () => {
   const under0 = await evalJs(`(() => { const i = document.querySelector('.ctx-add-input'); i.dataset.dyOld = '1'; i.dataset.dy = 'dy-add'; return i.closest('.path-field').querySelector('.pf-under').textContent; })()`);
   await realClick('[data-dy="dy-add"]');
   await typeText(path.join(home, 'dy-addB'));
-  await sleep(1800);
+  // (B-ckpt61 THE CLASS: the line read once the machine ANSWERED for the typed text — the field says «Asking the machine…» until
+  // then — never after a fixed 1.8 s; the bound only ends a wait that never comes)
+  await waitFor(`/dy-addB/.test(document.querySelector('.ctx-add-input').closest('.path-field').querySelector('.pf-under').textContent)`, 15000);
   const underTyped = await evalJs(`document.querySelector('.ctx-add-input').closest('.path-field').querySelector('.pf-under').textContent`);
   await key('Enter', 'Enter', 13);
   await waitFor(`(app.sidebar._taskById(${J(tid)}).ctx || []).length === 2 && document.querySelectorAll('.ctx-row[data-row] .ctx-path-input').length === 2`, 10000);

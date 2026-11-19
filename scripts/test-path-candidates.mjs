@@ -23,6 +23,7 @@
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const api = require('../src/path-candidates.js');
+import { anchored } from './scratch.mjs';
 
 let bad = 0, n = 0;
 const ok = (name, cond, got) => { n++; if (!cond) bad++; console.log(`${cond ? 'ok ' : 'BAD'} ${name}${cond ? '' : '  got ' + JSON.stringify(got)}`); };
@@ -268,6 +269,67 @@ console.log('\n── ⑥ the resolution line, missingVerdict, groupOn here, fuz
   ok('fuzzyFilter (the hub\'s side) keeps the field\'s best first', ff[0] === '~/work/investor-relations/Q3-董事会材料', ff.slice(0, 3));
   ok('fuzzyFilter: nothing typed = nothing', api.fuzzyFilter(Object.keys(L.dirs), '').length === 0, null);
   ok('joinPath normalises . and ..; toTilde / fromTilde round-trip', api.joinPath('~/work', '../code/./x') === '~/code/x' && api.joinPath('/a', 'b/../c') === '/a/c' && api.fromTilde('/home/me', api.toTilde('/home/me', '/home/me/work')) === '/home/me/work' && api.toTilde('/home/me', '/srv/x') === '/srv/x', null);
+}
+
+/* ═══ ⑦ B-ckpt61 — THE FIELD'S TWO LAWS (the coordinator's, 2026-11-19; the block's hosted red of test-path-field-chrome ⑨b) ═══
+   The PURE part of src/lib/path-field.js (homeReader, missingGate) compiled from the SHIPPED source — the browser module itself
+   is not loadable here — and driven without a browser. Each law has its red control, an anchored edit of that same source.
+   LAW 1: a text judged before the machine answered for it is PENDING from the moment the text is set (set() paints before it
+     asks) — never «missing»; «missing» needs the machine's listing for THIS text with the home known; asked with no listing (or
+     no home) ⇒ «the machine did not answer». CONTROL: the old judgement (no gate) — the first paint says «missing».
+   LAW 2: one failed read of the home does not end asking: the next ask reads it again (one read in flight; bounded at
+     HOME_READ_FAILS failed reads). CONTROL: the kept failed promise (the old LOCAL.p) — the second ask never reads */
+{
+  const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
+  const PF = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src', 'lib', 'path-field.js'), 'utf8');
+  const pureOf = (src) => {
+    const a = src.indexOf('export const HOME_READ_FAILS'), b = src.indexOf('const HOME_READ = homeReader(');
+    if (a < 0 || b < a) throw new Error('the PURE part of src/lib/path-field.js moved — move this leg with it');
+    const ctx = vm.createContext({});
+    vm.runInContext(src.slice(a, b).replace(/^export /gm, '') + '\n;globalThis.__pure = { HOME_READ_FAILS, homeReader, missingGate };', ctx);
+    return ctx.__pure;
+  };
+  const P = pureOf(PF);
+
+  // LAW 1 — the field's paints, in its order: target() asks the gate with what st.answered holds for THIS text (pinned below)
+  const judge = (G, st, text, homeKnown) => G.missingGate({ listed: !!(st.answered && st.answered.text === text && st.answered.listed), homeKnown, asked: !!(st.answered && st.answered.text === text) });
+  const paints = (G) => {
+    const st = { answered: { text: '~/work', listed: true } };    // the machine answered an EARLIER text
+    const seen = [judge(G, st, '~/nope/x', true)];                // set('~/nope/x'): the first paint, before the ask goes out
+    st.answered = { text: '~/nope/x', listed: true };              // its listing lands (no ~/nope in it)
+    seen.push(judge(G, st, '~/nope/x', true));
+    return seen;
+  };
+  const law1 = paints(P);
+  ok('⑦ LAW 1: set a text the machine has not answered for ⇒ the first paint is PENDING (never «missing»); its listing landed ⇒ «missing»', JSON.stringify(law1) === '["pending","missing"]', law1);
+  const g = (o) => P.missingGate(o);
+  ok('⑦ LAW 1/2: asked with NO listing ⇒ «unanswered»; a listing with the home UNKNOWN ⇒ «unanswered»; nothing asked yet ⇒ «pending»; never «missing» in any', g({ asked: true }) === 'unanswered' && g({ asked: true, listed: true, homeKnown: false }) === 'unanswered' && g({}) === 'pending' && g({ homeKnown: true }) === 'pending' && g({ listed: true, homeKnown: true, asked: true }) === 'missing', [g({ asked: true }), g({ asked: true, listed: true }), g({}), g({ homeKnown: true })]);
+  const oldJudge = pureOf(anchored(PF, "if (listed && homeKnown) return 'missing';", "return 'missing';", 'the old judgement: «missing» whenever the model misses'));
+  const ctl1 = paints(oldJudge);
+  ok('⑦ CONTROL (LAW 1): the old judgement (no gate) says «missing» at the FIRST paint — before the machine answered', ctl1[0] === 'missing', ctl1);
+  ok('⑦ the field wires it: target() asks the gate for an answer to THIS text on THIS machine, the answer records its listing, and the line / the verdict / a commit say the pending or unanswered words BEFORE any «missing» branch',
+    /missingGate\(\{ listed: !!\(st\.answered && st\.answered\.text === text && st\.answered\.h === hk\(\) && st\.answered\.listed\), homeKnown: [^}]+, asked: !!\(st\.answered && st\.answered\.text === text && st\.answered\.h === hk\(\)\) \}\);\s*if \(gate !== 'missing'\) return \{ \[gate\]: true, m \};/.test(PF)
+    && /st\.answered = \{ text, h, at: Date\.now\(\), listed: !!\(d && d\.listing\) \};/.test(PF)
+    && /if \(x\.pending\) return \{ status: 'pending'[^\n]*\n\s*if \(x\.unanswered\) return \{ status: 'unanswered'[^\n]*\n\s*if \(x\.missing\)/.test(PF)
+    && /\} else if \(x\.pending \|\| x\.unanswered\) \{\n\s*h \+= [^\n]*\n\s*\} else if \(x\.missing\) \{/.test(PF)
+    && /\} else if \(x\.pending \|\| x\.unanswered\) \{\n\s*st\.err = [^\n]*\n\s*\} else if \(x\.missing\) \{/.test(PF)
+    && /st\.asking = p;/.test(PF) && /for \(let n = 0; n < 4 && textNow\(\) === text && st\.asking && !\(st\.answered && st\.answered\.text === text && st\.answered\.h === hk\(\)\); n\+\+\) \{ const p = st\.asking; try \{ await p; \} catch \{ \} if \(st\.asking === p\) break; \}/.test(PF), 'the wiring moved');
+
+  // LAW 2 — a scripted home read: each call answers the plan's next step ('fail' = fetchJson's null, 'err' = a 500's body, 'throw')
+  const fakeHome = (plan) => { const f = () => { const s = plan[Math.min(f.calls++, plan.length - 1)]; return s === 'throw' ? Promise.reject(new Error('down')) : s === 'fail' ? Promise.resolve(null) : s === 'err' ? Promise.resolve({ error: 'the home read failed' }) : Promise.resolve({ home: '/home/me' }); }; f.calls = 0; return f; };
+  const reread = async (G) => { const f = fakeHome(['fail', 'ok']); const read = G.homeReader(f); const a = await read(), b = await read(); return { a, b, calls: f.calls }; };
+  const r2 = await reread(P);
+  ok('⑦ LAW 2: the home\'s first read failed ⇒ the NEXT ask reads it again and gets it (no kept failure)', r2.a === '' && r2.b === '/home/me' && r2.calls === 2, r2);
+  const kinds = [];
+  for (const k of ['err', 'throw']) { const f = fakeHome([k, 'ok']); const read = P.homeReader(f); kinds.push([await read(), await read(), f.calls]); }
+  ok('⑦ LAW 2: a 500\'s body (no home) and a thrown read are failures too — answered \'\' (never a rejection), then read again', JSON.stringify(kinds) === JSON.stringify([['', '/home/me', 2], ['', '/home/me', 2]]), kinds);
+  { const f = fakeHome(['ok']); const read = P.homeReader(f); const both = await Promise.all([read(), read()]);
+    ok('⑦ LAW 2: one read in flight at a time — two asks at once share it', f.calls === 1 && both.every((h) => h === '/home/me'), { calls: f.calls, both }); }
+  { const f = fakeHome(['fail']); const read = P.homeReader(f); const got = []; for (let i = 0; i < P.HOME_READ_FAILS + 3; i++) got.push(await read());
+    ok(`⑦ LAW 2 is BOUNDED: a home that never answers is read ${P.HOME_READ_FAILS} times, then the page stops asking`, f.calls === P.HOME_READ_FAILS && P.HOME_READ_FAILS >= 2 && got.every((h) => h === ''), { calls: f.calls, got }); }
+  const kept = pureOf(anchored(PF, '(d) => { inflight = null; const home', '(d) => { const home', 'the kept failed promise (the old LOCAL.p)'));
+  const c2 = await reread(kept);
+  ok('⑦ CONTROL (LAW 2): the kept failed promise — the second ask never reads the home (one call, \'\' for the page)', c2.b === '' && c2.calls === 1, c2);
 }
 
 console.log(`\n${n - bad}/${n} ok${bad ? ` — ${bad} BAD` : ''}`);

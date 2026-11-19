@@ -67,14 +67,38 @@ const world = (hk) => {
   if (!WORLD.has(hk)) WORLD.set(hk, { L: { home: hk ? '' : LOCAL.home, machine: hk || null, dirs: {}, links: {}, localized: {}, mounts: [], nondirs: {} }, self: null, recent: null, error: '' });
   return WORLD.get(hk);
 };
-const LOCAL = { home: '', p: null };
-/* this machine's home: the app's own answer when it has one (app.js reads /api/home at boot), else asked once — lazily, on the
-   field's first question, never while the page boots (a field is built during the app's init) */
+const LOCAL = { home: '' };
+/* B-ckpt61 LAW 2 (PURE; the coordinator's law, 2026-11-19): this machine's home is read AGAIN after a read that failed — a failed
+   read is never kept (one failure no longer ends the field's asking for the page: the old kept promise answered '' for good);
+   one read in flight at a time; BOUNDED: after HOME_READ_FAILS failed reads the page stops asking. → read(): a promise of the
+   home ('' while it is unknown) */
+export const HOME_READ_FAILS = 3;
+export function homeReader(fetchHome, { maxFails = HOME_READ_FAILS } = {}) {
+  let inflight = null, fails = 0;
+  return () => {
+    if (inflight) return inflight;
+    if (fails >= maxFails) return Promise.resolve('');
+    inflight = Promise.resolve().then(fetchHome).then(
+      (d) => { inflight = null; const home = d && typeof d.home === 'string' ? d.home : ''; if (!home) fails++; return home; },
+      () => { inflight = null; fails++; return ''; });
+    return inflight;
+  };
+}
+/* B-ckpt61 LAW 1 + LAW 2 (PURE): may the line say a path DOES NOT EXIST? Only about a listing the machine gave for THIS text, with
+   the home known. Before that the line says the pending words (no answer yet for this text — from the moment the text is set),
+   or that the machine did not answer (it was asked and gave no listing, or the home is still unknown): never «missing», never a
+   raw absolute path, never a create tick. → 'missing' | 'pending' | 'unanswered' */
+export function missingGate({ listed = false, homeKnown = false, asked = false } = {}) {
+  if (listed && homeKnown) return 'missing';
+  return asked ? 'unanswered' : 'pending';
+}
+const HOME_READ = homeReader(() => fetchJson('/api/home'));
+/* this machine's home: the app's own answer when it has one (app.js reads /api/home at boot), else asked — lazily, on the field's
+   first question, never while the page boots (a field is built during the app's init); a failed read is asked again (LAW 2) */
 function localHome() {
   if (!LOCAL.home && window.app?._localHome) { LOCAL.home = window.app._localHome; const W = WORLD.get(''); if (W && !W.L.home) W.L.home = LOCAL.home; }
-  if (LOCAL.home || LOCAL.p) return LOCAL.p || Promise.resolve(LOCAL.home);
-  LOCAL.p = fetchJson('/api/home').then((d) => { if (d && d.home) { LOCAL.home = d.home; const W = WORLD.get(''); if (W && !W.L.home) W.L.home = d.home; } return LOCAL.home; });
-  return LOCAL.p;
+  if (LOCAL.home) return Promise.resolve(LOCAL.home);
+  return HOME_READ().then((home) => { if (home && !LOCAL.home) { LOCAL.home = home; const W = WORLD.get(''); if (W && !W.L.home) W.L.home = home; } return LOCAL.home; });
 }
 const stripSlash = (p) => { const s = String(p || '').trim(); return s.length > 1 ? s.replace(/\/+$/, '') : s; };
 /* a machine's NAME for the words (my-mac, never its id): GET /api/hosts once, else the page's host picker. Until the list
@@ -220,7 +244,7 @@ export function pathField(input, opts = {}) {
   // Browse… again raises its own.
   const pickKey = `${fid}#${++pickerSeq}`;
   const call = (fn, dflt) => { try { const v = typeof fn === 'function' ? fn() : fn; return v == null ? dflt : v; } catch { return dflt; } };
-  const st = { open: false, active: -1, err: '', errBest: '', tick: false, flash: false, committed: null, answered: null, seq: 0, ctl: null, timer: null, verdict: null, destroyed: false, chipsAt: '', derived: null, probeTimer: null };
+  const st = { open: false, active: -1, err: '', errBest: '', tick: false, flash: false, committed: null, answered: null, asking: null, seq: 0, ctl: null, timer: null, verdict: null, destroyed: false, chipsAt: '', derived: null, probeTimer: null };
 
   /* ── DOM ── */
   const wrap = document.createElement('div');
@@ -346,22 +370,29 @@ export function pathField(input, opts = {}) {
         if (d && d.listing) { W.asked = W.asked || new Map(); for (const p of probe) W.asked.set(p, Date.now()); }
         W.error = (d && d.error) || (d ? '' : t('the machine did not answer'));
         W.unreachable = (d && d.unreachable) || null;
-        st.answered = { text, h, at: Date.now() };
+        st.answered = { text, h, at: Date.now(), listed: !!(d && d.listing) };   // (LAW 1: a «missing» needs a listing for this text)
         if (d && d.partial && !st.reasked) { st.reasked = true; setTimeout(() => { st.reasked = false; if (textNow() === text) ask(text, { force: true }); }, 450); }
         paint();
       });
     };
-    return !h && !LOCAL.home ? localHome().then(go) : go();
+    const p = !h && !LOCAL.home ? localHome().then(go) : go();
+    st.asking = p;   // the newest ask (a commit waits for the answer to its own text — LAW 1)
+    return p;
   }
   const askSoon = () => { clearTimeout(st.timer); st.timer = setTimeout(() => ask(), DEBOUNCE_MS); };
 
+  /* the machine was asked and gave no listing (or the home is unknown): its error when it said one, else «the machine did not answer» */
+  const unansweredWords = () => { const err = world(hk()).error, plain = t('the machine did not answer'); return err && err !== plain ? t('The machine did not answer: {err}', { err }) : plain.charAt(0).toUpperCase() + plain.slice(1); };
   /* ── the verdict (what the line says; what a form's footer may say) ── */
   function target(text = textNow()) {
     const m = model(text);
     if (!text) return { empty: true, m };
     if (m.resolved.length) return { ok: true, r: m.resolved[0], all: m.resolved, m };
     const pathLike = /^[~/.]/.test(text) || text.includes('/');
-    if (m.missing && pathLike) { const mv = missingVerdict(m.missing.path, world(hk()).L); return { missing: true, path: m.missing.path, base: m.missing.base, parentOk: mv.parentExists, parent: mv.parent, file: !!(world(hk()).L.nondirs || {})[m.missing.path], m }; }
+    if (m.missing && pathLike) {
+      const gate = missingGate({ listed: !!(st.answered && st.answered.text === text && st.answered.h === hk() && st.answered.listed), homeKnown: !!(world(hk()).L.home || (!hk() && LOCAL.home)), asked: !!(st.answered && st.answered.text === text && st.answered.h === hk()) });
+      if (gate !== 'missing') return { [gate]: true, m };
+      const mv = missingVerdict(m.missing.path, world(hk()).L); return { missing: true, path: m.missing.path, base: m.missing.base, parentOk: mv.parentExists, parent: mv.parent, file: !!(world(hk()).L.nondirs || {})[m.missing.path], m }; }
     return { search: true, m };
   }
   function verdictNow() {
@@ -371,6 +402,8 @@ export function pathField(input, opts = {}) {
     if (x.empty) return { status: 'empty', text: '' };
     if (x.ok) return { status: 'ok', text: '= ' + x.r.path, path: abs(x.r.path), alts: x.all.length - 1 };
     if (wrap.dataset.pending && !st.answered) return { status: 'pending', text: t('Asking the machine…') };
+    if (x.pending) return { status: 'pending', text: t('Asking the machine…') };
+    if (x.unanswered) return { status: 'unanswered', text: unansweredWords() };
     if (x.missing) return { status: 'missing', text: x.parentOk ? t('{path} does not exist — create it?', { path: x.path }) : t('{path} does not exist, nor the folder above ({parent})', { path: x.path, parent: x.parent || '' }), path: abs(x.path), parentExists: !!x.parentOk };
     return { status: 'searching', text: t('«{text}» is not a path yet — pick a folder from the list', { text }) };
   }
@@ -424,6 +457,8 @@ export function pathField(input, opts = {}) {
         const same = text.replace(/\/+$/, '') === r.path && !derivedNow();
         h += `<div class="pf-res"><div class="pf-ln">${same ? '' : `<span class="pf-eq">= <b>${escHtml(r.path)}</b>${fromHTML()}</span>`}${r.kind === 'complete' ? `<span class="pf-tag">${escHtml(t('completed from the start · Tab'))}</span>` : ''}${r.kind === 'link' ? `<span class="pf-tag">${escHtml(t('through the link {via}', { via: r.via }))}</span>` : ''}${r.relative && !same ? `<span class="pf-meta">${escHtml(t('relative to {base}', { base: r.base }))}</span>` : ''}${facts ? `<span class="pf-meta ok">${UI_ICONS.check} ${escHtml(facts)}</span>` : ''}</div></div>`;
       }
+    } else if (x.pending || x.unanswered) {
+      h += `<div class="pf-res pf-pending"><span class="pf-hint">${escHtml(x.pending ? t('Asking the machine…') : unansweredWords())}</span>${fromHTML()}</div>`;   // (LAW 1 / 2: never «missing», no path, no tick)
     } else if (x.missing) {
       if (x.file && kind === 'folder') h += `<div class="pf-res"><span class="pf-hint">${escHtml(t('{path} is a file — this needs a folder.', { path: x.path }))}</span></div>`;
       else if (createMode === 'never') h += `<div class="pf-res"><span class="pf-hint">${escHtml(t('{path} does not exist.', { path: x.path }))}</span></div>`;
@@ -549,12 +584,16 @@ export function pathField(input, opts = {}) {
     st.err = ''; st.errBest = '';
     if (!text) { st.committed = null; paint(); return null; }
     if (!st.answered || st.answered.text !== text || st.answered.h !== hk()) { try { await ask(text, { force: true }); } catch { } }
+    // LAW 1: a commit judges the machine's answer for ITS text — an ask a newer one superseded hands over to the newest (bounded)
+    for (let n = 0; n < 4 && textNow() === text && st.asking && !(st.answered && st.answered.text === text && st.answered.h === hk()); n++) { const p = st.asking; try { await p; } catch { } if (st.asking === p) break; }
     if (textNow() !== text) return st.committed;   // typed on while the machine answered
     const x = target(text);
     let info = null;
     if (x.ok) {
       const r = x.r;
       info = infoOf(r.path, { isFile: !!r.file, via: { base: r.base, relative: !!r.relative, kind: how === 'picker' ? 'picker' : how === 'pick' ? 'pick' : r.kind, alias: '' }, how });
+    } else if (x.pending || x.unanswered) {
+      st.err = x.pending ? t('Asking the machine…') : unansweredWords();   // (nothing set: the machine has not answered for this text)
     } else if (x.missing) {
       if (x.file && kind === 'folder') st.err = t('{path} is a file — this needs a folder.', { path: x.path });
       else if (createMode === 'never') st.err = t('{path} does not exist.', { path: x.path });
@@ -610,7 +649,7 @@ export function pathField(input, opts = {}) {
   const onInput = (e) => {
     if (e && (e.isComposing || input._pfComposing)) return;
     st.err = ''; st.errBest = ''; st.derived = null;   // the person's text now
-    const x = target(); if (!x.missing) st.tick = false;
+    const x = target(); if (!x.missing && !x.pending && !x.unanswered) st.tick = false;   // (a tick stands while the machine's answer for the text is owed)
     if (!st.open) st.open = true;
     st.active = -1;
     paint(); askSoon();
