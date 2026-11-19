@@ -1662,7 +1662,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
    *  by THE door's verdict (`R.reachFor`, as `sharedRows` asks it) — `facts` = { conversationKeys, groupIds, groupsUnreadable }
    *  — as may-use-model answer rows (the window's label). */
   function mayUseFor(facts = {}) {
-    const ctx = { conversationKeys: (facts.conversationKeys || []).map(String), groupIds: (facts.groupIds || []).map(String), unreadable: !!facts.groupsUnreadable };
+    const ctx = { conversationKeys: (facts.conversationKeys || []).map(String), groupIds: (facts.groupIds || []).map(String), inheritedGroupIds: (facts.inheritedGroupIds || []).map(String), unreadable: !!facts.groupsUnreadable };
     const out = [];
     for (const rec of (keeper.listApps() || [])) {
       if (!rec || rec.origin === 'desktop') continue;

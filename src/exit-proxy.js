@@ -185,14 +185,14 @@ class ExitProxyManager {
   _ctxAgain(session, sessionId, judged, grantNow) {
     const namesGroup = !!grantNow && [...(Array.isArray(grantNow.who) ? grantNow.who : []), ...(Array.isArray(grantNow.except) ? grantNow.except : [])].some((e) => e && e.kind === 'group');
     if (namesGroup) return this.ctxFor(session, sessionId);
-    return { ...this.ctxFor(session, sessionId, { groups: false }), groupIds: (judged && judged.groupIds) || [], ...(judged && judged.unreadable ? { unreadable: true } : {}), ...(judged && judged.unread ? { unread: true } : {}) };
+    return { ...this.ctxFor(session, sessionId, { groups: false }), groupIds: (judged && judged.groupIds) || [], inheritedGroupIds: (judged && Array.isArray(judged.inheritedGroupIds)) ? judged.inheritedGroupIds : [], ...(judged && judged.unreadable ? { unreadable: true } : {}), ...(judged && judged.unread ? { unread: true } : {}) };   // lane lg-group-parents: the judged lineage kept
   }
   /** «WHAT IT MAY USE» (Session Properties, unit what-it-may-use): every machine's two lists (use its exit / run through it)
    *  judged for ONE conversation by THE door's verdict (`E.exitVerdict` over the machine's access, as `_judge` asks it) —
    *  `facts` = { sessionKeys, conversationKeys, groupIds, groupsUnreadable } — as may-use-model answer rows (the machine's
    *  name, the grant, its list's mode). */
   mayUseFor(facts = {}) {
-    const ctx = { sessionKeys: (facts.sessionKeys || []).map(String), conversationKeys: (facts.conversationKeys || []).map(String), groupIds: (facts.groupIds || []).map(String), ...(facts.groupsUnreadable ? { unreadable: true } : {}) };
+    const ctx = { sessionKeys: (facts.sessionKeys || []).map(String), conversationKeys: (facts.conversationKeys || []).map(String), groupIds: (facts.groupIds || []).map(String), inheritedGroupIds: (facts.inheritedGroupIds || []).map(String), ...(facts.groupsUnreadable ? { unreadable: true } : {}) };
     const out = [];
     for (const h of this._hosts()) {
       if (!h || h.id == null) continue;

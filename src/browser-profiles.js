@@ -1741,9 +1741,9 @@ function grantRowOf(p) {
 }
 /** WHICH 「除了」 took this caller out of `p`'s list (unit what-it-may-use — mayAttach's `excepted` refusal names no entry): the
  *  exception THE model decided by, over the same row and the same facts mayAttach judged with → a bare principal | null. */
-function exceptEntryOf(p, { conversationKeys = [], taskIds = [], groupsUnreadable = false } = {}) {
+function exceptEntryOf(p, { conversationKeys = [], taskIds = [], inheritedTaskIds = [], groupsUnreadable = false } = {}) {   // lane lg-group-parents: + the lineage (a parent's 「除了」 covers its children)
   const row = grantRowOf(p);
-  const v = row ? GM.admits([row], { conversationKeys, groupIds: Array.isArray(taskIds) ? taskIds : [], groupsUnreadable: !!groupsUnreadable }) : null;
+  const v = row ? GM.admits([row], { conversationKeys, groupIds: Array.isArray(taskIds) ? taskIds : [], inheritedGroupIds: Array.isArray(inheritedTaskIds) ? inheritedTaskIds.map(String) : [], groupsUnreadable: !!groupsUnreadable }) : null;
   return v && v.code === 'excepted' && v.entry ? GM.bareOf(v.entry) : null;
 }
 /** The closed set of words the digest's `scope` speaks (derived from `owner`, never stored twice). */

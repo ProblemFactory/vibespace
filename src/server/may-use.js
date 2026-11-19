@@ -33,7 +33,7 @@ const ms = (t0) => Number(process.hrtime.bigint() - t0) / 1e6;
 function create({
   activeSessions = new Map(), sessionKeyOf = () => '', addressableId = () => null, storedRow = async () => null, groupsOf = () => [],
   groupName = (g) => (g && (g.title || g.name)) || str(g && g.id), noAgentOf = () => false, browserKeyOf = () => '', grants = null,
-  doors = {}, log = () => { },
+  doors = {}, log = () => { }, lineageOf = null,   // lane lg-group-parents: the Task Group store's ONE lineage reader (ids → ancestors)
 } = {}) {
   /** A live session for this key (its webui id when the page gave it, else the one whose status key it is). */
   function liveOf(key, webuiId) {
@@ -64,7 +64,11 @@ function create({
       groups = (groupsOf({ sessionKey: key, cwd: s.cwd || '', hostId: str(s.host || s.hostId) || null, initialGroupId: live ? s._initialGroupId : undefined, initialGroupIds: live ? s._initialGroupIds : undefined }) || [])
         .filter((g) => g && g.id).map((g) => ({ id: str(g.id), name: groupName(g) }));
     } catch (e) { groupsUnreadable = true; log(`[may-use] ${key}: the Task Group list could not be read (${e && e.message}) — group grants said «unknown»`); }
-    return { ok: true, ms: swept ? null : ms(t0), swept, facts: { key, live: !!live, webuiId: live ? live.id : null, cid, browserKey: bk, conversationKeys, sessionKeys, groups, groupIds: groups.map((g) => g.id), groupsUnreadable,
+    // lane lg-group-parents (restack 412): the ancestors of those groups — a parent's row admits the child at every door; a lineage
+    // that cannot be read is unreadable too, never «no parents»
+    let inheritedGroupIds = [];
+    if (!groupsUnreadable && typeof lineageOf === 'function') { try { inheritedGroupIds = (lineageOf(groups.map((g) => g.id)) || []).map(str); } catch (e) { groupsUnreadable = true; log(`[may-use] ${key}: the Task Groups' parents could not be read (${e && e.message}) — group grants said «unknown»`); } }
+    return { ok: true, ms: swept ? null : ms(t0), swept, facts: { key, live: !!live, webuiId: live ? live.id : null, cid, browserKey: bk, conversationKeys, sessionKeys, groups, groupIds: groups.map((g) => g.id), inheritedGroupIds, groupsUnreadable,
       remote: !!(s.hostId || s.host), host: str(s.hostId || s.host) || null, noAgent: !!noAgentOf(backend), backend } };
   }
 
@@ -72,7 +76,7 @@ function create({
   function answersOf(f) {
     const answers = [], parts = {};
     let accounts = [];
-    const doorFacts = { cid: f.cid, conversationKeys: f.conversationKeys, sessionKeys: f.sessionKeys, groupIds: f.groupIds, groupsUnreadable: f.groupsUnreadable };
+    const doorFacts = { cid: f.cid, conversationKeys: f.conversationKeys, sessionKeys: f.sessionKeys, groupIds: f.groupIds, inheritedGroupIds: Array.isArray(f.inheritedGroupIds) ? f.inheritedGroupIds : [], groupsUnreadable: f.groupsUnreadable };
     const part = (name, door, fn) => {
       const t0 = process.hrtime.bigint();
       try { const r = fn(); if (Array.isArray(r)) answers.push(...r); }

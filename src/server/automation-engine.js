@@ -724,7 +724,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
    *  value; the refusals a person must see (a 「除了」, Task Groups that could not be read, a row this release cannot read). */
   function mayUseFor(facts = {}) {
     db = read();
-    const F = { conversationKeys: (facts.conversationKeys || []).map(String), groupIds: (facts.groupIds || []).map(String), groupsUnreadable: !!facts.groupsUnreadable };
+    const F = { conversationKeys: (facts.conversationKeys || []).map(String), groupIds: (facts.groupIds || []).map(String), inheritedGroupIds: (facts.inheritedGroupIds || []).map(String), groupsUnreadable: !!facts.groupsUnreadable };
     const out = [];
     for (const k of db.keys) {
       if (k.revokedAt) continue;

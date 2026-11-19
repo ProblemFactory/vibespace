@@ -2027,11 +2027,11 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const out = [];
     for (const p of reg.profiles) {
       if (isEph(p)) continue;
-      const v = B.mayAttach(p, { browserKey: String(browserKey || ''), conversationKeys, taskIds: Array.isArray(taskIds) ? taskIds.map(String) : [], groupsUnreadable: !!groupsUnreadable });
+      const v = mayAttachL(p, { browserKey: String(browserKey || ''), conversationKeys, taskIds: Array.isArray(taskIds) ? taskIds.map(String) : [], groupsUnreadable: !!groupsUnreadable });   // lane lg-group-parents: THE keeper's one judge (the lineage)
       const base = { door: 'browser-profile', resource: String(p.id), name: String(p.label || p.id) };
       if (v.ok) { out.push({ ...base, ok: true, via: v.via, ...(v.taskId ? { groupId: String(v.taskId) } : {}) }); continue; }
       if (v.code === 'excepted') {
-        const e = B.exceptEntryOf(p, { conversationKeys, taskIds, groupsUnreadable });
+        const e = B.exceptEntryOf(p, { conversationKeys, taskIds, inheritedTaskIds: lineOf(taskIds).inherited, groupsUnreadable });
         out.push({ ...base, ok: false, code: 'excepted', ...(e ? { except: e } : {}) });
       } else if (v.code === 'groups_unreadable') out.push({ ...base, ok: false, code: 'groups_unreadable' });
       else if (v.code === 'not_owner' && (v.unknown || !B.grantRowOf(p))) out.push({ ...base, ok: false, code: 'unknown_shape' });   // B-e630: a row this release cannot read is said as that, never «not open»

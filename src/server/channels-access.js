@@ -3027,9 +3027,9 @@ function create(engineCtx) {
    */
   function mayUseFor(facts = {}) {
     const cid = facts.cid ? String(facts.cid) : '';
-    const groups = (facts.groupIds || []).map(String);
-    const ctx = { kind: 'agent', id: cid, groups, ...(facts.groupsUnreadable ? { groupsUnreadable: true } : {}) };   // THE channel door's asker (channel-acl / channel-filter) — the facts' hold rides it (the follow's census: an unread list is never «in no group»)
-    const RF = { conversationKey: cid, groupIds: groups, groupsUnreadable: !!facts.groupsUnreadable };
+    const groups = (facts.groupIds || []).map(String), inh = (facts.inheritedGroupIds || []).map(String);   // lane lg-group-parents: + the lineage
+    const ctx = { kind: 'agent', id: cid, groups, inheritedGroups: inh, ...(facts.groupsUnreadable ? { groupsUnreadable: true } : {}) };   // THE channel door's asker (channel-acl / channel-filter) — the facts' hold rides it (the follow's census: an unread list is never «in no group»)
+    const RF = { conversationKey: cid, groupIds: groups, inheritedGroupIds: inh, groupsUnreadable: !!facts.groupsUnreadable };
     const VIA = { agent: 'conversation', group: 'group', everyone: 'everyone' };
     const best = (ps) => ps.find((p) => p.kind === 'agent') || ps.find((p) => p.kind === 'group') || ps[0];
     const okOf = (ps, extra = {}) => { const b = best(ps); return { ok: true, via: VIA[b.kind] || 'unknown', ...(b.kind === 'group' ? { groupId: String(b.id) } : {}), ...extra }; };
@@ -3097,7 +3097,7 @@ function create(engineCtx) {
     for (const res of CG.resourcesOf(CG.DOORS.watch)) {
       const g = grainOf(res);
       if (!g) continue;
-      const v0 = cid ? CG.watchAdmitsFor(res, { cid, groups, groupsUnreadable: RF.groupsUnreadable }) : { ok: false, code: 'not_granted' };
+      const v0 = cid ? CG.watchAdmitsFor(res, { cid, groups, inherited: inh, groupsUnreadable: RF.groupsUnreadable }) : { ok: false, code: 'not_granted' };
       const v = v0.ok ? { ok: true, via: v0.via, ...(v0.groupId ? { groupId: v0.groupId } : {}) } : refusal(v0);
       if (listed(v)) answers.push({ door: 'channel-watch', resource: res, name: g.name, parent: g.parent, ...v, detail: { grain: g.kind } });
     }

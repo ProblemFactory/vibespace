@@ -499,7 +499,7 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
   ok(msgAcl.levelFor({ cid: 'k1', groups: ['tg-c'], inheritedGroups: ['tg-p'] }, ['g-out'], (g) => st.rowsFor('group-visibility', g)) === 'none' && msgAcl.levelFor({ cid: 'p1', groups: ['tg-p'] }, ['g-out'], (g) => st.rowsFor('group-visibility', g)) === 'messageable', 'rule ④: a public PARENT never shows its child\'s members (group-visibility reads own groups only)');
   // the producers: the server hands the exit and window doors the ONE reader; vault-use's facts carry it
   const server = fs.readFileSync(path.join(REPO, 'server.js'), 'utf-8'), wiring = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf-8'), eng = fs.readFileSync(path.join(REPO, 'src/server/window-targets-engine.js'), 'utf-8');
-  ok((server.match(/lineageOf: \(ids\) => tasks\.grantGroupsOf\(ids\)\.inherited/g) || []).length === 2 && /broadcast: leaseBroadcast, groupsOf, lineageOf, log \}\)/.test(fs.readFileSync(path.join(REPO, 'src/server/window-live-wiring.js'), 'utf-8')) && /inheritedGroupIds = \(lineageOf\(groupIds\) \|\| \[\]\)\.map\(String\)/.test(eng) && /const gg = tasks\.grantGroupsOf\(tasks\.groupsForSession\(/.test(wiring) && /groupIds, inheritedGroupIds, groupsUnreadable \};/.test(wiring), 'the producers: server.js hands exit + window the ONE reader (tasks.grantGroupsOf); the window engine asks it; vaultUseFacts carries it (vault-run-door spreads those facts into every vault-use verdict)');
+  ok((server.match(/lineageOf: \(ids\) => tasks\.grantGroupsOf\(ids\)\.inherited/g) || []).length === 2 && /broadcast: leaseBroadcast, groupsOf, lineageOf, log \}\)/.test(fs.readFileSync(path.join(REPO, 'src/server/window-live-wiring.js'), 'utf-8')) && /inheritedGroupIds = \(lineageOf\(groupIds\) \|\| \[\]\)\.map\(String\)/.test(eng) && /const gg = tasks\.grantGroupsOf\(gs\); groupIds = gg\.ids; inheritedGroupIds = gg\.inherited; if \(gs\.unread\) groupsUnreadable = true;/.test(wiring) && /groupIds, inheritedGroupIds, groupsUnreadable, turnBy:/.test(wiring), 'the producers: server.js hands exit + window the ONE reader (tasks.grantGroupsOf); the window engine asks it; vaultUseFacts carries it (vault-run-door spreads those facts into every vault-use verdict)');
   // THE CENSUS: every facts builder that names a caller's groups in a file that asks the grant model carries the lineage, or
   // is NAMED here — exempt (with why) or PENDING (the unit that wires it). A stale entry is red too (the table stays true).
   const EXEMPT = [
@@ -816,6 +816,47 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
       const bx = BLx.byWhatOf({ rows: rowsW({ kind: 'group', id: 'tg-p' }), subjects: BLx.byWhatSubjects(subjW) });
       ok(!bx['conversation:k1'] && J(bx['group:tg-c']) === J(['this-account']), 'CONTROL: «by what» without the session\'s ancestors draws the child conversation as NOT admitted by the parent\'s row — the leg above would be red', bx);
     } finally { try { fs.rmSync(MW.dir, { recursive: true, force: true }); } catch { } }
+  }
+  // restack 412 — the meeting with block 1's «What it may use»: its facts carry the ancestors (the ONE reader the wiring hands) and every
+  // door hears them; a parent's 「除了」 is named for a child at the browser door; RED control (its plant proven first): no reader ⇒ no ancestors
+  {
+    const MU = require('../src/server/may-use.js');
+    const seenF = [];
+    const doorStub = { mayUseFor: (f) => { seenF.push(f); return []; } };
+    const mkMU = (lineageOf) => MU.create({ activeSessions: new Map([['w-0001', { claudeSessionId: 'k1', backend: 'claude', cwd: '/tmp/x' }]]), sessionKeyOf: () => 'claude:k1', addressableId: () => 'k1', groupsOf: () => [{ id: 'tg-c', title: 'Child' }], ...(lineageOf ? { lineageOf } : {}), doors: { automation: doorStub, exits: () => doorStub, windows: () => doorStub, vaultUse: doorStub, logins: doorStub } });
+    const fr = await mkMU((ids) => (ids.includes('tg-c') ? ['tg-p'] : [])).factsOf('claude:k1', { webuiId: 'w-0001' });
+    const ans = fr.ok ? mkMU((ids) => (ids.includes('tg-c') ? ['tg-p'] : [])).answersOf(fr.facts) : null;
+    const frThrew = await mkMU(() => { throw new Error('the store'); }).factsOf('claude:k1', { webuiId: 'w-0001' });
+    ok(fr.ok && J(fr.facts.inheritedGroupIds) === J(['tg-p']) && J(fr.facts.groupIds) === J(['tg-c']) && !!ans && seenF.length >= 3 && seenF.every((f) => J(f.inheritedGroupIds) === J(['tg-p'])) && frThrew.ok && frThrew.facts.groupsUnreadable === true && J(frThrew.facts.inheritedGroupIds) === J([]), 'what it may use (restack 412): the facts carry the ancestors from the ONE reader and every door hears them; a lineage that cannot be read is unreadable, never «no parents»', { inh: fr.facts && fr.facts.inheritedGroupIds, doors: seenF.length });
+    const BPx = require('../src/browser-profiles.js');
+    const profEx = { id: 'bp-0000e001', label: 'shop', grantUse: BPx.useOfRows([{ door: 'browser-profile', resource: 'bp-0000e001', to: [{ kind: 'everyone' }], except: [{ kind: 'group', id: 'tg-p' }] }]) };
+    const exOf = BPx.exceptEntryOf(profEx, { conversationKeys: ['k1'], taskIds: ['tg-c'], inheritedTaskIds: ['tg-p'] }), exNoLine = BPx.exceptEntryOf(profEx, { conversationKeys: ['k1'], taskIds: ['tg-c'] });
+    const mpw2 = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf-8'), bk2 = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf-8');
+    ok(!!exOf && exOf.kind === 'group' && exOf.id === 'tg-p' && exNoLine === null && /lineageOf: \(ids\) => \{ const tasks = getTasks \? getTasks\(\) : null; if \(!tasks\) throw new Error\('the Task Group store is not ready'\); return tasks\.grantGroupsOf\(ids\)\.inherited; \}, noAgentOf:/.test(mpw2) && /const v = mayAttachL\(p, \{ browserKey: String\(browserKey \|\| ''\), conversationKeys,/.test(bk2) && /B\.exceptEntryOf\(p, \{ conversationKeys, taskIds, inheritedTaskIds: lineOf\(taskIds\)\.inherited, groupsUnreadable \}\)/.test(bk2), 'what it may use: a parent\'s 「除了」 is named for its child with the lineage (and not without it); the wiring hands the ONE reader; the keeper answers through mayAttachL', { exOf, exNoLine });
+    // RED CONTROL — the plant first: a may-use with NO lineage reader (the block's own) hands its doors no ancestors
+    const frNo = await mkMU(null).factsOf('claude:k1', { webuiId: 'w-0001' });
+    ok(frNo.ok && !('inheritedGroupIds' in frNo.facts && frNo.facts.inheritedGroupIds.length), 'CONTROL: may-use without the reader (the plant: no lineageOf) hands no ancestors — the leg above would be red', frNo.facts && frNo.facts.inheritedGroupIds);
+  }
+  // restack 412 (主开发 03:48Z, the may-use meeting ruled as carried): THROUGH A REAL DOOR — may-use fed to the channels engine's own
+  // mayUseFor: a child's conversation is shown the parent's account grant; a «this group only» row is not shown; RED control below
+  {
+    const P10 = { kind: 'group', id: 'tg-p', name: 'Parent' };
+    const w10 = await world({ live: [{ cid: 'k1', name: 'Kid', groups: ['tg-c'], inherited: ['tg-p'] }] });
+    const MU10 = require('../src/server/may-use.js');
+    const mk10 = (lineageOf) => MU10.create({ activeSessions: new Map([['w-0001', { claudeSessionId: 'k1', backend: 'claude', cwd: '/tmp/x' }]]), sessionKeyOf: () => 'claude:k1', addressableId: () => 'k1', groupsOf: () => [{ id: 'tg-c', title: 'Child' }], ...(lineageOf ? { lineageOf } : {}), doors: { channels: () => w10.e } });
+    const stateOf = async (mu) => { const fr = await mu.factsOf('claude:k1', { webuiId: 'w-0001' }); if (!fr.ok) return { fr, st: 'facts-failed' }; const r = mu.answersOf(fr.facts); const a = (r.accounts || []).find((x) => x && x.id === w10.A); return { fr, st: a ? a.state : 'no-row', groups: a ? a.groups : null }; };
+    const line10 = (ids) => (ids.includes('tg-c') ? ['tg-p'] : []);
+    const g10 = await w10.e.setAccess(w10.A, { kind: 'account' }, [{ principal: P10, authority: 'draft' }]);
+    const shown = await stateOf(mk10(line10));
+    const o10 = await w10.e.setAccess(w10.A, { kind: 'account' }, [{ principal: { ...P10, only: true }, authority: 'draft' }]);
+    const onlyRow = await stateOf(mk10(line10));
+    ok(!!g10 && g10.ok === true && shown.st === 'granted' && J(shown.groups) === J(['tg-p']) && !!o10 && o10.ok === true && onlyRow.st === 'none', 'what it may use THROUGH A REAL DOOR (the channels engine): a child\'s conversation is shown the parent\'s account grant; a row for «this group only» is not shown', { shown: shown.st, onlyRow: onlyRow.st });
+    // RED CONTROL — the plant first (the lineage dropped at the facts: a may-use with no reader), then the verdict: the child is shown as refused
+    await w10.e.setAccess(w10.A, { kind: 'account' }, [{ principal: P10, authority: 'draft' }]);
+    const dropped = await stateOf(mk10(null));
+    ok(dropped.fr.ok && J(dropped.fr.facts.inheritedGroupIds) === J([]), 'CONTROL plant: the facts carry NO ancestors (the lineage dropped at the facts) — the plant is where it claims', dropped.fr.facts && dropped.fr.facts.inheritedGroupIds);
+    ok(dropped.st === 'none', 'CONTROL: with the lineage dropped at the facts the same child is shown as REFUSED by that door — the leg above would be red', dropped.st);
+    try { w10.e.stop(); } catch { }
   }
   // CONTROL: a planted file through the SAME census — each spelling the read found blind is caught; a carrying line is not
   const planted = [['src/planted.js', [
