@@ -2208,7 +2208,7 @@ async function dialogAnswerFor(k, f, profileId, { arm = true, started = arm, out
     // verify r1: `loopShared` — some tab of a shared browser loops and this conversation's cannot be told apart (a kind only)
     const scrubOut = !!((arm || started) && typeof D.hasScrubSecrets === 'function' && D.hasScrubSecrets(t.profileId));
     const fencedTabs = (arm || started) && verb && typeof D.fencedTargetsFor === 'function' ? D.fencedTargetsFor(t) : [];
-    const checkActiveTabFence = !!(fencedTabs.length && !require('../browser-login.js').liveFillVerdict({ verb, origin: fencedTabs[0].origin }).ok);
+    const checkActiveTabFence = !!(fencedTabs.held || (fencedTabs.length && !require('../browser-login.js').liveFillVerdict({ verb, origin: fencedTabs[0].origin }).ok));   // round wm6qxcqcw (3): held ⇒ checked
     return { ...(scrubOut ? { scrubOutput: true } : {}), ...(checkActiveTabFence ? { checkActiveTabFence: true } : {}), dialog: { watched: fct.watched, profileId: t.profileId, passkey: fct.passkey || null /* lane browser-passkey */, prompt: fct.prompt || null /* lane browser-ui-prompts */, open: fct.open, text: fct.text || '', notes: fct.notes, stuck: stuck ? stuck.text : null, blind: !!fct.blind, unattributed: !!fct.unattributed, loading: loading ? require('../browser-stuck.js').loadingText(loading, { now: loading.at }) : null, loop: loop || null, loopShared: !!fresh.loopShared, ...(bound ? { tabBound: { ok: !!bound.ok, code: bound.code || null } } : {}), ...(pageBusy ? { pageBusy } : {}), ...(native ? { native } : {}) } };
   } catch (e) { console.warn(`[browser-dialog] ${f.browserKey}: the dialog fact was not read — ${e && e.message}`); return {}; }
 }

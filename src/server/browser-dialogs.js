@@ -4513,7 +4513,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const w = watches.get(pid);
     if (!w || w.state !== 'open') {
       if (keeper && typeof keeper.loginFenceStateOf === 'function') {
-        let st = null; try { st = keeper.loginFenceStateOf(pid); } catch { st = null; }
+        // round wm6qxcqcw (3): a HELD profile registry is no «no fences» — fail CLOSED (the answer says held; its caller checks the tab)
+        let st = null; try { st = keeper.loginFenceStateOf(pid); } catch (e) { if (e && e.code === 'store_unread') return Object.assign([], { held: true }); st = null; }
         const fences = st && Array.isArray(st.fences) ? st.fences : [];
         return fences.filter((f) => f && f.targetId && f.origin).map((f) => ({ targetId: String(f.targetId), origin: String(f.origin) }));
       }
@@ -4603,7 +4604,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const w = watches.get(pid);
     if (!fencesLive(w)) {   // (lane chrome-157, round 32: until the fences are re-armed every road answers from the record)
       if (keeper && typeof keeper.loginFenceStateOf === 'function') {
-        let st = null; try { st = keeper.loginFenceStateOf(pid); } catch { st = null; }
+        // round wm6qxcqcw (3): a HELD profile registry is no «no live fill» — fail CLOSED: a held fence (its callers scrub, mask, refuse)
+        let st = null; try { st = keeper.loginFenceStateOf(pid); } catch (e) { if (e && e.code === 'store_unread') return { targetId: targetId ? String(targetId) : null, origin: null, held: true, holdReason: 'store_unread' }; st = null; }
         const fences = st && Array.isArray(st.fences) ? st.fences : [];
         if (fences.length) {
           const hit = targetId

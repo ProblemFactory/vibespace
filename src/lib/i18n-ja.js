@@ -4727,6 +4727,7 @@ export default {
   "stale": "長期未使用",
   "kept": "保持",
   "Agent browser": "エージェントブラウザ",
+  "VibeSpace cannot read {file}, the file of your browser profiles, right now — so the agent browsers wait. Nothing is lost and nothing is written over it; VibeSpace reads it again by itself.": "VibeSpace はいま {file}（ブラウザープロファイルのファイル）を読めないため、エージェントのブラウザーは待機しています。何も失われず、上書きもしません。VibeSpace が自動で読み直します。",
   "Sweep now": "今すぐスイープ",
   "{n} unregistered director(ies)": "未登録ディレクトリ {n} 件",
   "legacy": "レガシー",

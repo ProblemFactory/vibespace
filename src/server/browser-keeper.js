@@ -587,9 +587,25 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   const heldRetryMs = { first: (unreadRetry && Number(unreadRetry.firstMs) > 0) ? Number(unreadRetry.firstMs) : 30000, max: (unreadRetry && Number(unreadRetry.maxMs) > 0) ? Number(unreadRetry.maxMs) : 300000 };
   let heldReg = null, heldSaid = false, heldSaveSaid = false, heldT = null, heldP = null, heldTries = 0, heldMissingAt = 0, heldStopped = false, bootOwed = false;
   const heldLifts = new Set();
+  // 主开发 03:35Z (round wm6qxcqcw, its MUST): the hold is TOLD ONCE in For you — the person's own surface says why every agent browser
+  // waits (the journal alone told nobody); one item a hold, resolved at the read
+  const HELD_NOTICE = 'VibeSpace cannot read {file}, the file of your browser profiles, right now — so the agent browsers wait. Nothing is lost and nothing is written over it; VibeSpace reads it again by itself.';
+  let heldItemId = null;
+  function fileHeldNotice() {
+    if (heldItemId) return;
+    const text = HELD_NOTICE.replace('{file}', STORE_FILE);
+    if (!userTodos || typeof userTodos.add !== 'function') { log.warn?.(`[browser] ${text} (no For-you store is wired, so only this journal says so)`); return; }
+    try { const it = userTodos.add('browser', { origin: 'browser', kind: 'notice', urgency: 'normal', by: 'agent', text, sessionName: 'Agent browser', i18n: { text: { key: HELD_NOTICE, params: { file: STORE_FILE } } } }); heldItemId = it && typeof it.id === 'string' ? it.id : null; }
+    catch (e) { log.warn?.(`[browser] the held registry's For-you notice was not filed (${e && e.message})`); }
+  }
+  function resolveHeldNotice() {
+    const id = heldItemId; heldItemId = null;
+    if (!id || !userTodos || typeof userTodos.setStatus !== 'function') return;
+    try { const it = typeof userTodos.get === 'function' ? userTodos.get(id) : null; if (!it || it.status === 'open') userTodos.setStatus(id, 'done', 'agent'); } catch (e) { log.warn?.(`[browser] the held registry's For-you notice was not resolved (${e && e.message})`); }
+  }
   function holdRegistry(a) {
     heldReg = { code: a.code, why: a.why, at: (heldReg && heldReg.at) || now() };
-    if (!heldSaid) { heldSaid = true; log.warn?.(`[browser] ${STORE_FILE} could not be read (${a.code}: ${a.why}) — HELD: no profile is shown, nothing is written over it, every act that would record is refused by name, and it is read again off the main loop`); }
+    if (!heldSaid) { heldSaid = true; fileHeldNotice(); log.warn?.(`[browser] ${STORE_FILE} could not be read (${a.code}: ${a.why}) — HELD: no profile is shown, nothing is written over it, every act that would record is refused by name, and it is read again off the main loop`); }
     heldRetrySoon();
   }
   /** the words a person reads while the registry is held */
@@ -623,6 +639,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     // and the owed boot would then judge and commit the EMPTY registry (the original harm); the next try reads afresh
     try { loadFrom(read); } catch (e) { reg = B.normalizeRegistry(null); heldReg = was; log.warn?.(`[browser] ${STORE_FILE}: the read's load failed: ${e && e.message} — held again`); holdRegistry({ code: 'load-threw', why: String((e && e.message) || e) }); return; }   // the READ answer — no second read (r3 N19: a half-loaded registry is not kept while held)
     heldTries = 0; heldSaid = false; heldSaveSaid = false;
+    resolveHeldNotice();   // round wm6qxcqcw: the notice the hold filed goes with it
     // its read r2 (S3): the creates the hold owed are judged FIRST — before the owed boot and the waiters (an agent's command in that
     // window found no pin and took a temporary browser; a pin made in it was overwritten)
     if (!heldReg) { try { judgeOwedPins(); } catch (e) { log.warn?.(`[browser] the pins the creates owed after the read: ${e && e.message}`); } }
@@ -2047,7 +2064,9 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const f = (owed && owed.facts && typeof owed.facts === 'object') ? owed.facts : {};
     // its read r3 (M4): a RESTORED record's facts are judged only when its key has no pin — a pin it has was judged before (the read
     // landed while its create was still spawning: the record kept the facts) or made since by the person; re-judging would revert it
-    if (owed && owed.restored && pinFor(browserKey)) {
+    // round wm6qxcqcw (1): kept only when that pin is NEWER than the owe — a resume while held (an explicit pick over the file's older
+    // pin) then a restart still held re-judges the owe, never the file's older pin over the person's newer pick
+    if (owed && owed.restored && pinFor(browserKey) && Number(pinFor(browserKey).at || 0) >= Number(owed.at || 0)) {
       const kept = { pin: pinFor(browserKey), refused: null, formRefused: null, kept: true, cap: capOf(browserKey) };
       for (const fn of owedHooks) { try { fn(browserKey, kept); } catch (e) { log.warn?.(`[browser] a session's copy of its owed pin was not updated — ${e && e.message}`); } }
       return kept;
@@ -2071,7 +2090,15 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     for (const fn of owedHooks) { try { fn(browserKey, res); } catch (e) { log.warn?.(`[browser] a session's copy of its owed pin was not updated — ${e && e.message}`); } }
     return res;
   }
-  function judgeOwedPins() { for (const [k, o] of [...owedPins]) judgeOwedPin(k, o); }
+  // round wm6qxcqcw (2): an owe whose fork parent is itself owed is judged AFTER that parent (after a restart the owes come in restore
+  // order — a fork judged first copied no pin: its parent had none yet)
+  function judgeOwedPins() {
+    const all = [...owedPins], done = new Set(), order = [];
+    const parentOf = (o) => (o && o.facts && o.facts.fork && o.facts.forkParentKey) ? String(o.facts.forkParentKey) : '';
+    const visit = (k, depth) => { if (done.has(k) || depth > 64) return; done.add(k); const o = owedPins.get(k); const pk = parentOf(o); if (pk && owedPins.has(pk)) visit(pk, depth + 1); order.push(k); };
+    for (const [k] of all) visit(k, 0);
+    for (const k of order) { const o = owedPins.get(k); if (o) judgeOwedPin(k, o); }
+  }
 
   // ── the browser: reuse-or-spawn ──
   function idleMs() { return B.idleTimeoutMs(setting('browser.idleTimeoutMs', B.DEFAULT_IDLE_TIMEOUT_MS)); }

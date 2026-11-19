@@ -4728,6 +4728,7 @@ export default {
   "stale": "久未使用",
   "kept": "保留",
   "Agent browser": "Agent 浏览器",
+  "VibeSpace cannot read {file}, the file of your browser profiles, right now — so the agent browsers wait. Nothing is lost and nothing is written over it; VibeSpace reads it again by itself.": "VibeSpace 暂时读不到 {file}（你的浏览器配置文件所在的文件），所以智能体浏览器都在等待。什么都没有丢失，也不会覆盖它；VibeSpace 会自己再读一次。",
   "Sweep now": "立即清扫",
   "{n} unregistered director(ies)": "{n} 个未登记目录",
   "legacy": "旧版",

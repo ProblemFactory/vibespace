@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { checker } from './lib/check.mjs';
 const require = createRequire(import.meta.url);
@@ -21,6 +21,9 @@ process.on('exit', () => { try { fs.rmSync(D, { recursive: true, force: true });
 const MJ = mutantCopies('browser-registry-held', ROOT);
 const asRoot = typeof process.getuid === 'function' && process.getuid() === 0;
 const plant = (F, body) => { if (asRoot) fs.mkdirSync(F); else { fs.writeFileSync(F, body); fs.chmodSync(F, 0o000); } };
+// round wm6qxcqcw (4): a leg root cannot make red (root reads a 000 file — the stand-in is a folder, which no save's rename replaces)
+// is SKIPPED BY NAME under root, never green by an early true
+const rootSkip = (name) => console.log(`  ○ SKIPPED under root (by name, never a green): ${name} — root reads a 000 file, so the stand-in is a folder no save can replace`);
 const unplant = (F, body) => { if (asRoot) { fs.rmdirSync(F); fs.writeFileSync(F, body); } else fs.chmodSync(F, 0o644); };
 const bodyOf = (F) => { try { return fs.statSync(F).isDirectory() ? '(a folder)' : (fs.chmodSync(F, 0o644), fs.readFileSync(F, 'utf8')); } catch (e) { return '(' + e.code + ')'; } };
 const quiet = { log() { }, warn() { }, error() { } };
@@ -62,18 +65,20 @@ console.log('§1 an UNREADABLE registry is HELD — nothing written over it, the
   const r = await scene(require(path.join(ROOT, 'src/server/browser-keeper.js')), 'held');
   ok(r.held && /could not be read/.test(r.words), 'browser-profiles.json unreadable at load: HELD, and its words say so', r);
   ok(r.create === 'store_unread' && r.registered === 'store_unread' && r.pin && r.pin.held === true, 'while held a create is refused by name, «is this folder a profile\'s» answers by name (the kept sweep\'s catch then keeps the folder), the create\'s pin ladder answers «held» — never «no longer exists»', r);
-  ok(r.boot === 'held' && (asRoot || r.keptWhileHeld), 'the boot judges NOTHING on the held registry (no reconcile, no orphan census, no first commit) — nothing is written over the file', r);
+  ok(r.boot === 'held', 'the boot judges NOTHING on the held registry (no reconcile, no orphan census, no first commit)', r);
+  if (asRoot) rootSkip('the held file is kept byte for byte (the boot wrote nothing over it)'); else ok(r.keptWhileHeld, 'nothing is written over the held file', r);
   ok(r.lifted && r.profile && r.lifts === 1 && r.file === 1 && r.rewritten, 'read again OFF the loop: the hold lifts, the profile is back, the OWED boot runs (its commit re-saves the file — the writer stamped), the steps after the boot run once (onReadAgain), the file still holds its profile', r);
   // its read r1 (N3a): a copy whose read skips the owed boot — the file is never re-saved by the boot (nothing judged after the read)
   const OWED = '    if (bootOwed) { bootOwed = false; try { await boot(); }';
   ok(KSRC.split(OWED).length === 2, 'control setup: the anchor of the control «the owed boot at the read» is in browser-keeper.js');
-  const ro = await scene(MJ.load('src/server/browser-keeper.js', KSRC.replace(OWED, '    if (false) { bootOwed = false; try { await boot(); }'), 'registry-no-owed-boot'), 'held-no-owed-boot');
+  const ro = await scene(MJ.load('src/server/browser-keeper.js', anchored(KSRC, OWED, '    if (false) { bootOwed = false; try { await boot(); }', 'no-owed-boot'), 'registry-no-owed-boot'), 'held-no-owed-boot');
   ok(ro.lifted && !ro.rewritten, 'CONTROL (the owed boot cut, in a copy): the read lifts the hold but the boot\'s path never runs over what it read', { lifted: ro.lifted, rewritten: ro.rewritten });
   // CONTROL: the release's load (any failure ⇒ an empty registry) — the boot's commit writes the EMPTY registry over the file
   const LOADH = "    else { reg = B.normalizeRegistry(null); if (a.state !== 'missing') holdRegistry(a); }";
   ok(KSRC.split(LOADH).length === 2, 'control setup: the anchor of the control «the release\'s load» is in browser-keeper.js');
-  const rx = await scene(MJ.load('src/server/browser-keeper.js', KSRC.replace(LOADH, "    else { reg = B.normalizeRegistry(null); }   /* MUTANT: the release — any failure is an empty registry */"), 'registry-release'), 'held-release', { lift: false });
-  ok(!rx.held && rx.boot === 'ran' && (asRoot || rx.file === 0), 'CONTROL (the release\'s load, in a copy): no hold — the boot runs on the EMPTY registry and writes over the file (the original profile gone from it)', rx);
+  const rx = await scene(MJ.load('src/server/browser-keeper.js', anchored(KSRC, LOADH, "    else { reg = B.normalizeRegistry(null); }   /* MUTANT: the release — any failure is an empty registry */", 'release-load'), 'registry-release'), 'held-release', { lift: false });
+  if (asRoot) rootSkip('CONTROL the release\'s load: the boot writes the empty registry over the file');
+  ok(!rx.held && rx.boot === 'ran' && (asRoot ? true /* its file half: SKIPPED by name above */ : rx.file === 0), 'CONTROL (the release\'s load, in a copy): no hold — the boot runs on the EMPTY registry and writes over the file (the original profile gone from it)', rx);
   // CONTROL: the save's guard alone cut — a held registry's save writes (the boot is held here, so an act's commit is the road)
   const SAVEG = "    if (heldReg) { if (!heldSaveSaid) { heldSaveSaid = true; log.warn?.(`[browser] a ${STORE_FILE} write was refused: the file could not be read, and nothing is written over it until it reads`); } return false; }";
   ok(KSRC.split(SAVEG).length === 2, 'control setup: the anchor of the control «the save\'s guard» is in browser-keeper.js');
@@ -90,9 +95,10 @@ console.log('§1 an UNREADABLE registry is HELD — nothing written over it, the
     try { k.shutdown(); } catch { }
     return bodyOf(F) === (asRoot ? '(a folder)' : BODY);
   };
-  const g1 = await saveScene(KSRC.replace(cref + '\n', ''), 'save-guard-only');
-  const g0 = await saveScene(KSRC.replace(cref + '\n', '').replace(SAVEG, '    /* MUTANT: no save guard */'), 'save-guard-cut');
-  ok(g1 && (asRoot || !g0), 'the save\'s held check is its FIRST line: with the create\'s refusal cut, nothing is written over the held file; CONTROL (the guard cut too, in a copy): the new registry is written over it', { g1, g0 });
+  const g1 = await saveScene(anchored(KSRC, cref + '\n', '', 'create-refusal-cut'), 'save-guard-only');
+  const g0 = await saveScene(anchored(anchored(KSRC, cref + '\n', '', 'create-refusal-cut'), SAVEG, '    /* MUTANT: no save guard */', 'save-guard-cut'), 'save-guard-cut');
+  ok(g1, 'the save\'s held check is its FIRST line: with the create\'s refusal cut, nothing is written over the held file', { g1 });
+  if (asRoot) rootSkip('CONTROL the save\'s guard cut too: the new registry is written over the held file'); else ok(!g0, 'CONTROL (the guard cut too, in a copy): the new registry is written over the held file — RED', { g0 });
 }
 
 console.log('§2 TORN bytes HOLD too — never set aside into an empty, writable registry (here an empty registry deletes folders)');
@@ -121,7 +127,7 @@ console.log('§3 the kept sweep reads no absence while the registry is held');
   const KM = require(path.join(ROOT, 'src/server/browser-kept.js'));
   const heldKeeper = { held: () => true, heldWords: () => 'browser-profiles.json could not be read', ephemeralFor: () => null, profileDirRegistered: () => { throw Object.assign(new Error('held'), { code: 'store_unread' }); } };
   const sweepOf = async (Mod, name) => { const d = path.join(D, name); fs.mkdirSync(d, { recursive: true }); const ks = Mod.create({ dataDir: d, keeper: heldKeeper, log: quiet, sweepEveryMs: 0 }); const r = await ks.sweep(); try { ks.stop && ks.stop(); } catch { } return r; };
-  const sw = await sweepOf(KM, 'kept-held'), swx = await sweepOf(MJ.load('src/server/browser-kept.js', KP.replace(SW, '    /* MUTANT: the sweep runs on a held registry */'), 'kept-no-held'), 'kept-held-mut');
+  const sw = await sweepOf(KM, 'kept-held'), swx = await sweepOf(MJ.load('src/server/browser-kept.js', anchored(KP, SW, '    /* MUTANT: the sweep runs on a held registry */', 'kept-no-held'), 'kept-no-held'), 'kept-held-mut');
   ok(sw && sw.held === true && !(swx && swx.held), 'the kept sweep makes NO pass while the registry is held (a named profile\'s folder, a running browser\'s caches); CONTROL (the check cut, in a copy): the pass runs', { sw, swx: swx && Object.keys(swx) });
   ok(/registeredDir\(dir\) \{\n    const k = kp\(\);\n    if \(!k \|\| typeof k\.profileDirRegistered !== 'function'\) return true;\n    try \{ return !!k\.profileDirRegistered\(dir\); \} catch \{ return true; \}/.test(KP),
     'WIRING: the kept sweep\'s «a registered folder» fails CLOSED on the keeper\'s refusal (the held registry throws store_unread there — §1)');
@@ -217,7 +223,7 @@ console.log('§5 its reads r2 + r3: a create the held registry could not judge O
   const KEEP = "    if (owed && owed.restored && pinFor(browserKey)) {", HINT = "pin = pinVerdictForCreate({ facts: f, hint: owed.hint || null,", CAPV = "owed.cap !== undefined ? { value: owed.cap } : {}";
   const FORMV = 'formGroups: Array.isArray(owed.formGroups) ? owed.formGroups : null })';
   ok([JUDGE, BOOTL, BOOTJ, FORK, KEEP, HINT, CAPV, FORMV].every((x) => KSRC.split(x).length === 2), 'control setup: the read\'s judge, the owed boot, the boot\'s judge, the fork\'s copy, the restored keep, the hint and the start\'s cap are found once');
-  const mut = (pairs, tag) => MJ.load('src/server/browser-keeper.js', pairs.reduce((t, [a, b]) => t.replace(a, b), KSRC), tag);
+  const mut = (pairs, tag) => MJ.load('src/server/browser-keeper.js', pairs.reduce((t, [a, b]) => anchored(t, a, b, tag), KSRC), tag);
   const ox = await owedScene(mut([[JUDGE, ''], [BOOTJ, '    if (false) { try { judgeOwedPins(); }']], 'owed-not-judged'), 'owed-not-judged');
   const of = await owedScene(mut([[FORK, '      if (false) out = copyPin(']], 'owed-no-fork-copy'), 'owed-no-fork-copy');
   const okp = await owedScene(mut([[KEEP, '    if (false) {']], 'owed-no-restored-keep'), 'owed-no-restored-keep');
@@ -291,11 +297,115 @@ console.log('§6 its reads r2 (N17) + r3 (N19): a load that THROWS at the read h
     out.file = (() => { try { return JSON.parse(fs.readFileSync(F, 'utf8')).profiles.length; } catch (e) { return '(' + (e.code || 'unparsed') + ')'; } })();
     return out;
   };
-  const f1 = await faultScene(KSRC.replace(HEAD, FAULT), 'load-fault', (k) => /load-threw/.test(String(k.heldWords() || '')));
+  const f1 = await faultScene(anchored(KSRC, HEAD, FAULT, 'load-fault'), 'load-fault', (k) => /load-threw/.test(String(k.heldWords() || '')));
   ok(KSRC.split('heldReg = was; ').length === 2, 'control setup: the catch\'s hold kept (heldReg = was) is found once');
-  const f0 = await faultScene(KSRC.replace(HEAD, FAULT).replace(REHOLD, '}').replace('heldReg = was; ', ''), 'load-fault-no-rehold', (k, lifts) => lifts > 0);   // the r2-era catch: it only says the throw
+  const f0 = await faultScene(anchored(anchored(anchored(KSRC, HEAD, FAULT, 'load-fault'), REHOLD, '}', 'no-rehold'), 'heldReg = was; ', '', 'no-kept-hold'), 'load-fault-no-rehold', (k, lifts) => lifts > 0);   // the r2-era catch: it only says the throw
   ok(f1.held0 && f1.heldAfter && /load-threw/.test(f1.words) && f1.lifts === 0 && f1.file === 1, 'a load that throws at the read (the read again DID come: its words say load-threw): the store is HELD again, nothing judged, the file keeps its profile', f1);
   ok(f0.lifts === 1 && f0.file === 0, 'CONTROL (no re-hold, in a copy): the owed boot runs over the EMPTY registry and commits it — every profile gone from the file — RED', f0);
+}
+
+console.log('§7 round wm6qxcqcw (主开发 03:35Z): the hold is TOLD once in For you; the owes after a restart; the guards whose removal harms most');
+{
+  const lift = async (k, F, body, until) => { unplant(F, body); const keep = setInterval(() => { }, 1000); try { for (let i = 0; i < 300 && !until(); i++) await new Promise((r) => setTimeout(r, 10)); } finally { clearInterval(keep); } await flush(); };
+  const mk = (Mod, d, H, extra = {}) => Mod.create({ dataDir: d, homeDir: H, env: () => ({ HOME: H }), serverSetting: () => undefined, install: false, log: quiet, unreadRetry: { firstMs: 15, maxMs: 30 }, ...extra });
+  const dirOf = (name) => { const d = path.join(D, name), H = path.join(d, 'home'); fs.mkdirSync(H, { recursive: true }); return { d, H, F: path.join(d, 'browser-profiles.json') }; };
+  // (MUST) ONE For-you item when the hold begins — origin browser, under «Agent browser», its words keyed (zh / ja) — resolved at the read
+  const NOTICE_KEY = "VibeSpace cannot read {file}, the file of your browser profiles, right now — so the agent browsers wait. Nothing is lost and nothing is written over it; VibeSpace reads it again by itself.";
+  const noticeScene = async (Mod, name) => {
+    const { d, H, F } = dirOf(name); plant(F, BODY);
+    const items = [], done = [];
+    const userTodos = { add: (sk, o) => { items.push({ sk, o }); return { id: 'it-b' + items.length }; }, get: (id) => ({ id, status: 'open' }), setStatus: (id, st) => done.push(`${id}:${st}`) };
+    const k = mk(Mod, d, H, { userTodos });
+    const held = k.held(); await k.boot().catch(() => null); k.held();   // a second look while held files nothing more
+    let lifts = 0; k.onReadAgain(() => { lifts++; });
+    await lift(k, F, BODY, () => lifts > 0);
+    const it = items[0] && items[0].o;
+    const out = { held, filed: items.length, group: items[0] && items[0].sk, origin: it && it.origin, head: it && it.sessionName, key: it && it.i18n && it.i18n.text && it.i18n.text.key, file: it && it.i18n && it.i18n.text && it.i18n.text.params && it.i18n.text.params.file, done: done.join() };
+    try { k.shutdown(); } catch { }
+    return out;
+  };
+  const FILE_N = '    if (!heldSaid) { heldSaid = true; fileHeldNotice();', RES_N = '    resolveHeldNotice();   // round wm6qxcqcw: the notice the hold filed goes with it\n';
+  ok(KSRC.split(FILE_N).length === 2 && KSRC.split(RES_N).length === 2, 'control setup: the notice\'s filing and its resolving are found once');
+  const n1 = await noticeScene(require(path.join(ROOT, 'src/server/browser-keeper.js')), 'notice');
+  const n1x = await noticeScene(MJ.load('src/server/browser-keeper.js', anchored(anchored(KSRC, FILE_N, '    if (!heldSaid) { heldSaid = true;', 'notice-file-cut'), RES_N, '', 'notice-resolve-cut'), 'notice-cut'), 'notice-cut');
+  ok(n1.held && n1.filed === 1 && n1.group === 'browser' && n1.origin === 'browser' && n1.head === 'Agent browser' && n1.key === NOTICE_KEY && n1.file === 'browser-profiles.json' && n1.done === 'it-b1:done',
+    'the hold is told ONCE in For you (origin browser, under «Agent browser», its words keyed with the file named) — and that item is resolved at the read', n1);
+  ok(n1x.filed === 0 && n1x.done === '', 'CONTROL (no filing, no resolving, in a copy): the hold tells the person nothing — every agent browser stops unsaid — RED', n1x);
+  for (const lang of ['zh', 'ja']) ok(fs.readFileSync(path.join(ROOT, `src/lib/i18n-${lang}.js`), 'utf8').includes(JSON.stringify(NOTICE_KEY) + ':'), `the notice has its ${lang} row`);
+  // (1) a RESUME's explicit pick while held, then a restart still held: the restored owe is NEWER than the file's pin — judged, never the
+  //     file's older pin kept over the person's newer pick; (2) a restored FORK is judged after its owed parent
+  const PA = 'bk-00004444', FK = 'bk-00005555', KX = 'bk-00006666';
+  const BODY7 = JSON.stringify({ ...JSON.parse(BODY), profiles: [...JSON.parse(BODY).profiles, { id: 'bp-0000b002', label: 'home', provider: 'chromium', dir: '/var/empty/vs-home-profile', createdAt: 2 }], pins: { [KX]: { profileId: 'bp-0000b001', origin: 'chosen', at: 1, by: 'user' } } });
+  const restartScene = async (Mod, name) => {
+    const { d, H, F } = dirOf(name); plant(F, BODY7);
+    const k = mk(Mod, d, H);
+    k.owePin(FK, { restored: true, facts: { fork: true, forkParentKey: PA } });   // restore order: the fork first
+    k.owePin(PA, { restored: true, at: 5, facts: { explicit: 'bp-0000b002' } });
+    k.owePin(KX, { restored: true, at: 5, facts: { explicit: 'bp-0000b002', priorKey: KX, resume: true } });   // newer than the file's pin (at 1)
+    await k.boot().catch(() => null);
+    let lifts = 0; k.onReadAgain(() => { lifts++; });
+    await lift(k, F, BODY7, () => lifts > 0);
+    const pf = (x) => { const v = k.pinFor(x); return v ? `${v.profileId}/${v.origin}` : null; };
+    const out = { pa: pf(PA), fk: pf(FK), kx: pf(KX) };
+    try { k.shutdown(); } catch { }
+    return out;
+  };
+  const NEWER = '&& Number(pinFor(browserKey).at || 0) >= Number(owed.at || 0)) {', ORDER = '    for (const k of order) { const o = owedPins.get(k); if (o) judgeOwedPin(k, o); }';
+  ok(KSRC.split(NEWER).length === 2 && KSRC.split(ORDER).length === 2, 'control setup: the owe-time compare and the parent-first order are found once');
+  const r7 = await restartScene(require(path.join(ROOT, 'src/server/browser-keeper.js')), 'restart-held');
+  const r7a = await restartScene(MJ.load('src/server/browser-keeper.js', anchored(KSRC, NEWER, ') {', 'restart-no-time'), 'restart-no-time'), 'restart-no-time');
+  const r7b = await restartScene(MJ.load('src/server/browser-keeper.js', anchored(KSRC, ORDER, '    for (const [k, o] of all) if (owedPins.has(k)) judgeOwedPin(k, o);', 'restart-no-order'), 'restart-no-order'), 'restart-no-order');
+  ok(r7.kx === 'bp-0000b002/chosen' && r7.pa === 'bp-0000b002/chosen' && r7.fk === 'bp-0000b002/conversation', 'after a restart still held: the resume\'s newer explicit pick wins over the file\'s older pin (1); the restored fork is judged after its owed parent and copies its pin (2)', r7);
+  ok(r7a.kx === 'bp-0000b001/chosen' && r7b.fk === null, 'CONTROLS: without the time compare the file\'s older pin is kept over the person\'s newer pick (1); in restore order the fork is judged first and copies nothing (2) — each RED', { r7a, r7b });
+  // (5a) the orphan census and the tick while held: a daemon of ours that no record keeps is NOT ended (the held registry names none)
+  const AB = '/opt/x/agent-browser-linux-x64', NOW7 = Date.now();
+  const censusScene = async (Mod, name) => {
+    const { d, H, F } = dirOf(name); plant(F, BODY);
+    const CFG = path.join(d, 'browser-env'); fs.mkdirSync(CFG, { recursive: true });
+    let rows = [{ pid: 9904, ppid: 1, starttime: 444, startedAt: NOW7 - 3 * 3600e3, argv: [AB], env: { AGENT_BROWSER_DAEMON: '1', AGENT_BROWSER_CONFIG: path.join(CFG, 'machine-ephemeral-bk-0000000d.json') } }];
+    const ended = [];
+    const k = mk(Mod, d, H, { liveKeys: () => new Set(), now: () => NOW7, daemonTable: async () => rows, endIdentity: async (pid, st) => { ended.push(`${pid}:${st}`); rows = []; return 'ended'; } });
+    await k.boot().catch(() => null);
+    await k.tick().catch(() => null);
+    await k.orphanCensus('the tick', NOW7 + 3600e3, { force: true });
+    const out = { held: k.held(), ended: ended.join() };
+    if (!asRoot) fs.chmodSync(F, 0o644);
+    try { k.shutdown(); } catch { }
+    return out;
+  };
+  const CG = '    if (heldReg) return Promise.resolve(null);   // the B-f276 remainder: a held registry names no record', TG = "    if (heldReg) return;   // the B-f276 remainder: nothing is judged on a held registry\n";
+  ok(KSRC.split(CG).length === 2 && KSRC.split(TG).length === 2, 'control setup: the census\'s and the tick\'s held guards are found once');
+  const c7 = await censusScene(require(path.join(ROOT, 'src/server/browser-keeper.js')), 'census-held');
+  const c7x = await censusScene(MJ.load('src/server/browser-keeper.js', anchored(anchored(KSRC, CG, '    if (false) return Promise.resolve(null);', 'census-guard-cut'), TG, '', 'tick-guard-cut'), 'census-held-cut'), 'census-held-cut');
+  ok(c7.held && c7.ended === '', 'while held the tick and the orphan census end NO daemon (the held registry names no record — every one would read «unkept»)', c7);
+  ok(c7x.ended === '9904:444', 'CONTROL (both guards cut, in a copy): the census ENDS a live browser daemon on the held registry — RED', c7x);
+  // (5b) ONE read in flight while the storage hangs; (5c) a «missing» answer right after an unreadable one is read once more
+  const readScene = async (Mod, name, mode) => {
+    const { d, H, F } = dirOf(name); plant(F, BODY);
+    const realRead = fs.promises.readFile; let calls = 0, missingReads = 0;
+    const k = mk(Mod, d, H);
+    k.held();
+    if (mode === 'missing') { fs.rmSync(F, { recursive: true, force: true }); }
+    fs.promises.readFile = (f, ...a) => { if (String(f) !== F) return realRead.call(fs.promises, f, ...a); calls++; if (mode === 'hang') return new Promise(() => { }); if (mode === 'missing') { missingReads++; } return realRead.call(fs.promises, f, ...a); };
+    let lifted = 0; k.onReadAgain(() => { lifted = missingReads; });
+    const keep = setInterval(() => { }, 1000);
+    try { for (let i = 0; i < 40 && !(mode === 'missing' && lifted); i++) await new Promise((r) => setTimeout(r, 10)); } finally { clearInterval(keep); fs.promises.readFile = realRead; }
+    const out = { calls, liftedAfter: lifted, held: k.held() };
+    try { k.shutdown(); } catch { }
+    return out;
+  };
+  const SLOT = '    if (heldP) return;\n    const p = heldP = fs.promises.readFile(storeFile', MISS = "    if (a.state === 'missing' && !heldMissingAt) { heldMissingAt = now(); return; }\n";
+  ok(KSRC.split(SLOT).length === 2 && KSRC.split(MISS).length === 2, 'control setup: the one slot and the read once more are found once');
+  const h7 = await readScene(require(path.join(ROOT, 'src/server/browser-keeper.js')), 'read-hang', 'hang');
+  const h7x = await readScene(MJ.load('src/server/browser-keeper.js', anchored(KSRC, SLOT, '    const p = heldP = fs.promises.readFile(storeFile', 'read-slot-cut'), 'read-hang-cut'), 'read-hang-cut', 'hang');
+  ok(h7.calls === 1 && h7.held && h7x.calls > 2, 'ONE read in flight while the storage hangs (the next tries re-arm and wait); CONTROL (the slot cut, in a copy): a new read per try, each holding a pool thread — RED', { h7, h7x });
+  // (3) the two other fence readers fail CLOSED on the hold, as liveFillVerdictFor does (a held registry is no «no fences»)
+  const BDs = fs.readFileSync(path.join(ROOT, 'src/server/browser-dialogs.js'), 'utf8'), RBs = fs.readFileSync(path.join(ROOT, 'src/routes/browser.js'), 'utf8');
+  ok(BDs.includes("catch (e) { if (e && e.code === 'store_unread') return Object.assign([], { held: true }); st = null; }") && BDs.includes("catch (e) { if (e && e.code === 'store_unread') return { targetId: targetId ? String(targetId) : null, origin: null, held: true, holdReason: 'store_unread' }; st = null; }")
+    && RBs.includes('const checkActiveTabFence = !!(fencedTabs.held || (fencedTabs.length &&'), 'round wm6qxcqcw (3): fencedTargetsFor answers HELD (the route checks the active tab), liveFillOnTarget a held fence (its callers scrub / mask / refuse) — never «no fences»');
+  const m7 = await readScene(require(path.join(ROOT, 'src/server/browser-keeper.js')), 'read-missing', 'missing');
+  const m7x = await readScene(MJ.load('src/server/browser-keeper.js', anchored(KSRC, MISS, '', 'read-once-more-cut'), 'read-missing-cut'), 'read-missing-cut', 'missing');
+  ok(m7.liftedAfter === 2 && m7x.liftedAfter === 1, 'a «missing» answer right after an unreadable one is read ONCE MORE before an empty start; CONTROL (cut, in a copy): the first «missing» starts empty — RED', { m7, m7x });
 }
 
 for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 1, label: 'browser-registry-held ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
