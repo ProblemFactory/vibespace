@@ -361,13 +361,17 @@ export function installUsageMeter(App, ctx = {}) {
     const cgl = this._usageCodexGlobal || {};
     const cBuckets = this._codexAccountUsage || {};
     const codexDefId = this._accounts?.defaultCodexAccountId;
+    // B-87fd: a codex POOL as the default holds no reading of its own (the server files a pooled conversation's reading under
+    // the member its process holds) — 'auto' shows the pool's CURRENT member, the one a new conversation starts on
+    const codexDefRow = codexDefId ? (this._accounts?.accounts || []).find(a => a.id === codexDefId) : null;
+    const codexDefKey = codexDefRow && codexDefRow.type === 'pooled' ? (codexDefRow.current || null) : codexDefId;
     let cSel = this._usageAcctSelCodex || 'auto';
     if (cSel === '__global_codex__' && cgl.accountId) cSel = cgl.accountId;
     if (cSel !== 'auto' && cSel !== '__global_codex__' && !codexSubs.some(a => a.id === cSel)) cSel = 'auto';
     let codex, codexLabel = 'Codex', codexNote = '';
     if (cSel === 'auto') {
-      const defAcct = codexDefId ? codexSubs.find(a => a.id === codexDefId) : null;
-      codex = (codexDefId && cBuckets[codexDefId]) ? cBuckets[codexDefId] : this._codexRateLimit;
+      const defAcct = codexDefKey ? codexSubs.find(a => a.id === codexDefKey) : null;
+      codex = (codexDefKey && cBuckets[codexDefKey]) ? cBuckets[codexDefKey] : this._codexRateLimit;
       codexLabel = defAcct ? defAcct.name : 'Codex';
       if (defAcct) codexNote = t('Default account · refreshes as its sessions run');
     } else if (cSel === '__global_codex__') {
@@ -381,7 +385,7 @@ export function installUsageMeter(App, ctx = {}) {
     // Dead-reckoned overlay for the selected codex identity (P1 — same
     // estimator, codex-prefixed identities; keys match codexAccounts)
     let cEstSel = null;
-    if (cSel === 'auto') cEstSel = (codexDefId && cBuckets[codexDefId]) ? estimates[codexDefId] : estimates.__global_codex__;
+    if (cSel === 'auto') cEstSel = (codexDefKey && cBuckets[codexDefKey]) ? estimates[codexDefKey] : estimates.__global_codex__;
     else cEstSel = estimates[cSel] || null;
     const cEstPop = popupEst(cEstSel);
     const hasSwitch = claudeSubs.length > 0;

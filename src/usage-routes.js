@@ -1465,9 +1465,26 @@ function summarizeCodexRateLimits() {
       } catch {}
     }
   } catch {}
+  // B-87fd (the census's raw key, 主开发 2026-11-19 05:27Z): a codex reading is filed under the ACCOUNT that produced it. A pool is
+  // no account: a pooled conversation's reading is its MEMBER's — the one its process holds (the shared rule
+  // accounts.poolMemberOfSession: held, else its link) while it lives; a pooled thread no live conversation holds is filed
+  // nowhere (its member is not known then — never under the pool's id, which named the pool after a member's reading). The
+  // rule's 'unknown' answer (no spawn stamp, no ledger row that names the start) names nobody either: filed nowhere — in THIS
+  // summary's reads (the wrapper's sidecar, the rollouts); the engine's live push files a reading by its own resolver
+  const codexKeyOf = (acctId, session = null) => {
+    const own = acctId || '__global_codex__';
+    let a = null; try { a = accounts.get(own); } catch { a = null; }
+    if (!a || a.type !== 'pooled') return own;
+    if (!session) return null;
+    try { const m = accounts.poolMemberOfSession(a.id, session, session._webuiId || null); return (m && m.origin !== 'unknown' && m.id) || null; } catch { return null; }
+  };
+  const liveByThread = {};
   for (const [id, session] of activeSessions) {
-    if (session.backend !== 'codex' || session.mode !== 'chat') continue;
-    keep(session._accountId || '__global_codex__', readCodexWrapperRateLimit(id), 'codex-rate-limits');
+    if (session.backend !== 'codex') continue;
+    if (session.backendSessionId) liveByThread[String(session.backendSessionId).toLowerCase()] = session;
+    if (session.mode !== 'chat') continue;   // the wrapper's sidecar is a chat process's
+    const key = codexKeyOf(session._accountId, session);
+    if (key) keep(key, readCodexWrapperRateLimit(id), 'codex-rate-limits');
   }
   {
     const threadAcct = codexThreadAccountMap();
@@ -1477,8 +1494,19 @@ function summarizeCodexRateLimits() {
       const tm = /rollout-.*-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i.exec(entry.path);
       const snapshot = readLatestCodexRateLimitFromJsonl(entry.path);
       if (!snapshot) continue;
-      const acct = tm ? (threadAcct[tm[1].toLowerCase()] || null) : null;
-      keep(acct || '__global_codex__', snapshot, 'codex-rollout');
+      // B-87fd: a rollout line is the LIVE process's only when that process made it — at or after its start (`createdAt`, the
+      // spawn instant). Then it is filed by the live conversation's own account (a pooled one: the member its process holds).
+      // A line from before the start is the thread's EARLIER process, on an account the live one may not hold (a pool's other
+      // member, an account the conversation left) — and the thread's recorded account cannot name it then (a killed process's
+      // meta is deleted: the record names the live one): filed nowhere. The earlier process filed its own readings while it
+      // lived; the disk seed above keeps them. A thread no live conversation holds goes by its recorded account, never a pool
+      // (codexKeyOf, no session ⇒ nowhere)
+      const thread = tm ? tm[1].toLowerCase() : null;
+      const live = thread ? liveByThread[thread] || null : null;
+      const t0 = live ? Number(live.createdAt) || 0 : 0;
+      const ownLine = !!live && t0 > 0 && (Number(snapshot.fetchedAt) || 0) >= t0;
+      const key = live ? (ownLine ? codexKeyOf(live._accountId || null, live) : null) : codexKeyOf(thread ? (threadAcct[thread] || null) : null, null);
+      if (key) keep(key, snapshot, 'codex-rollout');
       if (snapshot.fetchedAt && (now - snapshot.fetchedAt) < 5 * 60 * 1000 && ++freshEnough >= 3) break;
     }
   }

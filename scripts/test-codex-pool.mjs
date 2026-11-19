@@ -191,6 +191,13 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
   ok('server.js sessionAuth: a codex pool reports source pooled + poolTarget (the status-bar chip / title badge / session props render it as a pool)', count(read('src/harnesses/claude.js') + read('src/harnesses/codex.js'), /if \(a && a\.type === 'pooled'\) return poolAuth\(a\);/g) === 2 && /const poolAuth = \(a\) =>/.test(sv) && /h\.billingIdentity\(s, \{ accounts, withHost, poolAuth \}\)/.test(sv));
   ok('chat-status-bar + window.js consume source pooled with the pool glyph + target (unchanged consumers)', /isPooled \? '⣿ ' \+ \(a\.name \|\| t\('Pool'\)\) \+ \(a\.poolTarget/.test(read('src/lib/chat-status-bar.js')) && /const isPooled = auth\.source === 'pooled';/.test(read('src/lib/window.js')));
   ok('usage-meter: codex account chips exclude pools (a pool is not a quota holder — same rule as claudeSubs)', /billingRow\(a\.backend\)\.usage === 'codexAccounts' && a\.type === 'subscription'\)/.test(read('src/lib/usage-meter.js')));
+  {
+    // B-87fd: a pool files no reading of its own — 'auto' with a codex POOL as the default reads its CURRENT member's bucket (the
+    // accounts list's `current`), the reading and the estimate both; the pool's own id is never the bucket's key
+    const umB = read('src/lib/usage-meter.js');
+    ok('usage-meter: \'auto\' with a codex POOL as the default reads the pool\'s CURRENT member (reading + estimate), never a bucket under the pool\'s id',
+      /const codexDefKey = codexDefRow && codexDefRow\.type === 'pooled' \? \(codexDefRow\.current \|\| null\) : codexDefId;/.test(umB) && count(umB, /cBuckets\[codexDefKey\]/g) === 3 && !/cBuckets\[codexDefId\]/.test(umB));   // stale-pins: kept (the gone key)
+  }
   ok('session-card ⚙ account list: a pool row names its target (was "— API …undefined")', /\(a\.pooled \|\| a\.type === 'pooled'\) \? a\.name \+ \(a\.currentName \? ` → \$\{a\.currentName\}` : ' · ' \+ tr\('pool'\)\)/.test(read('src/lib/session-card.js')));
   ok('session-props billing row: pooled / codex-subscription / codex-cli are labeled, never "Unknown"', /a\.source === 'pooled' \? t\('Pooled account — \{name\}'/.test(read('src/lib/session-props.js')) && /a\.source === 'codex-subscription' \? t\('ChatGPT account — \{name\}'/.test(read('src/lib/session-props.js')) && /a\.source === 'codex-cli' \? t\('ChatGPT login \(the machine’s own\)'\)/.test(read('src/lib/session-props.js')));
   // i18n: every new human-visible string has zh + ja entries
@@ -1297,6 +1304,118 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
       quietly(() => wn.eng.recordCodexQuotaSignal(wn.s1, { type: 'reset_credit_result', error: 'Invalid request: missing field `idempotencyKey`' }));
       quietly(() => wn.wall(wn.s1, wn.nowS + 9000));
       ok('R21 NEGATIVE CONTROL: without the stale skip the refused conversation is asked again at the next event — R21a sees the skip', wn.verbs() === 2, `verbs=${wn.verbs()}`);
+    }
+  }
+  // (22) B-87fd (the census's raw key, 主开发 2026-11-19 05:27Z): a POOLED codex conversation's live limits are filed under the MEMBER
+  //      its process holds (the shared rule accounts.poolMemberOfSession), never under the pool's id — the conversation holds A while
+  //      the pool points at B: A's row carries the reading, neither the pool nor B does. RED: the release's line (the pool's id).
+  {
+    const { setupUsage } = require(path.join(REPO, 'src/usage-routes.js'));
+    const runP = (setup = setupUsage) => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cxpool-key-')); worlds.push(root);
+      const prevHome = process.env.CODEX_HOME; process.env.CODEX_HOME = path.join(root, 'shared-codex');
+      const wam = new AccountManager({ dataDir: path.join(root, 'data') });
+      const { id: A } = wam.createCodexSubscription({ name: 'Cx A' }), { id: B } = wam.createCodexSubscription({ name: 'Cx B' });
+      for (const id of [A, B]) fs.writeFileSync(path.join(wam.codexSubDir(id), 'auth.json'), JSON.stringify({ auth_mode: 'chatgpt', tokens: { access_token: 't' } }));
+      const pool = wam.createPool({ name: 'Cx pool', members: [A, B], backend: 'codex' }); const P = (pool && pool.id) || pool;
+      wam.setPoolTarget(P, B);
+      process.env.CODEX_HOME = prevHome;
+      const cacheDir = path.join(root, 'data', 'usage-cache'); fs.mkdirSync(cacheDir, { recursive: true });
+      const buffers = path.join(root, 'data', 'session-buffers'); fs.mkdirSync(buffers, { recursive: true });
+      const nowS = Math.floor(Date.now() / 1000);
+      fs.writeFileSync(path.join(buffers, 'cx1.json'), JSON.stringify({ startedAt: Date.now() - 60000, rateLimits: { primary: { used_percent: 61, window_minutes: 10080, resets_at: nowS + 3 * 86400 }, secondary: null }, rateLimitsFetchedAt: Date.now() }));
+      const routes = {};
+      const app = { get: (p, h) => { routes['GET ' + p] = h; }, post: (p, h) => { routes['POST ' + p] = h; }, put() { }, delete() { }, use() { }, locals: {} };
+      quietly(() => setup({ app, accounts: wam, hosts: null, usageHistory: { scan() { }, warm() { } }, activeSessions: new Map([['cx1', { backend: 'codex', mode: 'chat', _accountId: P, _webuiId: 'w1', _heldPoolMember: A }]]), serverSetting: () => undefined, ensureDir: (d) => fs.mkdirSync(d, { recursive: true }), USAGE_CACHE_FILE: path.join(root, 'data', 'usage-cache.json'), USAGE_CACHE_DIR: cacheDir, CODEX_SESSIONS_DIR: path.join(root, 'nocodex'), META_DIR: path.join(root, 'data', 'session-meta'), AVAILABLE_MODELS: [], BUFFERS_DIR: buffers, apiDerivedWindow: () => null, establishedWindows: () => null }));
+      const res = { body: null, json(o) { this.body = o; return this; }, status() { return this; } };
+      quietly(() => routes['GET /api/usage']({ query: {}, headers: {} }, res));
+      const acc = (res.body && res.body.codexAccounts) || {};
+      return { A, B, P, a: acc[A] || null, b: acc[B] || null, p: acc[P] || null, target: wam.poolCurrent(P) };
+    };
+    const r = runP();
+    ok('B-87fd: a pooled codex conversation that HOLDS member A while the pool points at B — its live reading is filed under A (61%), never under the pool, nor under B',
+      r.target === r.B && !!r.a && !!r.a.sevenDay && !r.p && !r.b, JSON.stringify({ target: r.target, a: !!r.a, p: !!r.p, b: !!r.b, a7: r.a && r.a.sevenDay }));
+    const { anchored } = await import('./scratch.mjs');
+    const src = read('src/usage-routes.js');
+    let redOut = null, redErr = null;
+    try {
+      const f = copyPath('src/usage-routes.js', 'poolkey');
+      writeCopy(f, anchored(src, "    const key = codexKeyOf(session._accountId, session);\n    if (key) keep(key, readCodexWrapperRateLimit(id), 'codex-rate-limits');", "    keep(session._accountId || '__global_codex__', readCodexWrapperRateLimit(id), 'codex-rate-limits');", 'B-87fd: the release\'s raw key'));   // stale-pins: kept — the RED copy plants the release's line
+      redOut = runP(require(f).setupUsage);
+    } catch (e) { redErr = e.message; }
+    ok('B-87fd RED: a copy with the release\'s line (the conversation\'s own account id) files the member\'s reading under the POOL — the leg sees it', !!redOut && !!redOut.p && !redOut.a, redErr || JSON.stringify({ p: !!(redOut && redOut.p), a: !!(redOut && redOut.a) }));
+  }
+  // (23) B-87fd, the reader's cures — a ROLLOUT line is filed by the process that MADE it. A thread a live conversation holds: a
+  //      line at or after the live process's start (`createdAt`, the spawn instant) is that process's — filed by the
+  //      conversation's OWN account (a pooled one: the member its process holds), never the thread's recorded one; a line from
+  //      before the start (or with no start known) is the thread's EARLIER process — filed nowhere (the record names the live
+  //      one by then). A pooled thread no live conversation holds is filed nowhere. The rule's 'unknown' answer (no spawn
+  //      stamp, no ledger row that names the start) names nobody: filed nowhere. Every live codex conversation names its thread,
+  //      a terminal one too. Each world loads a FRESH copy of usage-routes (its thread map is a 60 s module cache); each
+  //      refusal has its RED copy; «nowhere» = no bucket at all.
+  {
+    const { anchored } = await import('./scratch.mjs');
+    const SRC = read('src/usage-routes.js');
+    const TH = '0193a1b2-c3d4-4e5f-8a9b-0c1d2e3f4a5b';
+    const roll = (o, mut = null) => {
+      const f = copyPath('src/usage-routes.js', mut ? mut.tag : 'rollout');
+      writeCopy(f, mut ? anchored(SRC, mut.from, mut.to, mut.why) : SRC);
+      const { setupUsage } = require(f);
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cxroll-')); worlds.push(root);
+      const prevHome = process.env.CODEX_HOME; process.env.CODEX_HOME = path.join(root, 'shared-codex');
+      const wam = new AccountManager({ dataDir: path.join(root, 'data') });
+      const { id: A } = wam.createCodexSubscription({ name: 'Cx A' }), { id: B } = wam.createCodexSubscription({ name: 'Cx B' });
+      for (const id of [A, B]) fs.writeFileSync(path.join(wam.codexSubDir(id), 'auth.json'), JSON.stringify({ auth_mode: 'chatgpt', tokens: { access_token: 't' } }));
+      const pool = wam.createPool({ name: 'Cx pool', members: [A, B], backend: 'codex' }); const P = (pool && pool.id) || pool;
+      wam.setPoolTarget(P, B);
+      process.env.CODEX_HOME = prevHome;
+      const ids = { A, B, P };
+      const cacheDir = path.join(root, 'data', 'usage-cache'); fs.mkdirSync(cacheDir, { recursive: true });
+      const buffers = path.join(root, 'data', 'session-buffers'); fs.mkdirSync(buffers, { recursive: true });   // no sidecar: the rollout is the only reading
+      const metaDir = path.join(root, 'data', 'session-meta'); fs.mkdirSync(metaDir, { recursive: true });
+      fs.writeFileSync(path.join(metaDir, 'm1.json'), JSON.stringify({ backend: 'codex', backendSessionId: TH, accountId: ids[o.meta] }));   // the thread's RECORDED account
+      const now = Date.now(), nowS = Math.floor(now / 1000), d = new Date(now);
+      const day = path.join(root, 'codex-sessions', String(d.getFullYear()), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0'));
+      fs.mkdirSync(day, { recursive: true });
+      fs.writeFileSync(path.join(day, `rollout-2026-11-19T00-00-00-${TH}.jsonl`), JSON.stringify({ timestamp: new Date(now - o.lineAgo).toISOString(), type: 'event_msg', payload: { type: 'token_count', rate_limits: { primary: { used_percent: 47, window_minutes: 10080, resets_at: nowS + 3 * 86400 }, secondary: null } } }) + '\n');
+      const sessions = new Map();
+      if (o.live) sessions.set('cx1', { backend: 'codex', mode: o.live.mode || 'chat', backendSessionId: TH, _accountId: ids[o.live.acct], _webuiId: 'w1', ...(o.live.noStart ? {} : { createdAt: now - 60000 }), ...(o.live.held ? { _heldPoolMember: ids[o.live.held] } : {}) });
+      const routes = {};
+      const app = { get: (p, h) => { routes['GET ' + p] = h; }, post: (p, h) => { routes['POST ' + p] = h; }, put() { }, delete() { }, use() { }, locals: {} };
+      quietly(() => setupUsage({ app, accounts: wam, hosts: null, usageHistory: { scan() { }, warm() { } }, activeSessions: sessions, serverSetting: () => undefined, ensureDir: (dd) => fs.mkdirSync(dd, { recursive: true }), USAGE_CACHE_FILE: path.join(root, 'data', 'usage-cache.json'), USAGE_CACHE_DIR: cacheDir, CODEX_SESSIONS_DIR: path.join(root, 'codex-sessions'), META_DIR: metaDir, AVAILABLE_MODELS: [], BUFFERS_DIR: buffers, apiDerivedWindow: () => null, establishedWindows: () => null }));
+      const res = { body: null, json(x) { this.body = x; return this; }, status() { return this; } };
+      quietly(() => routes['GET /api/usage']({ query: {}, headers: {} }, res));
+      const acc = (res.body && res.body.codexAccounts) || {};
+      const nameOf = (key) => (Object.entries(ids).find(([, id]) => id === key) || [key === '__global_codex__' ? 'global' : 'other:' + key])[0];
+      return Object.keys(acc).filter((k) => !!acc[k]).map(nameOf).sort().join(',') || 'nowhere';
+    };
+    const CASES = [
+      { name: 'a live pooled conversation holding A (the pool points at B): its own line (10 s ago, after its start) is filed under A', o: { meta: 'P', live: { acct: 'P', held: 'A' }, lineAgo: 10000 }, want: 'A',
+        red: { tag: 'rollrel', why: 'B-87fd: the release\'s rollout key (the recorded account, a pool too)', from: "      const key = live ? (ownLine ? codexKeyOf(live._accountId || null, live) : null) : codexKeyOf(thread ? (threadAcct[thread] || null) : null, null);\n      if (key) keep(key, snapshot, 'codex-rollout');", to: "      keep((thread ? (threadAcct[thread] || null) : null) || '__global_codex__', snapshot, 'codex-rollout');", redWant: 'P' } },
+      { name: 'the same conversation, a line from BEFORE its start (120 s ago: the thread\'s earlier process, on a member it may not hold) is filed nowhere', o: { meta: 'P', live: { acct: 'P', held: 'A' }, lineAgo: 120000 }, want: 'nowhere',
+        red: { tag: 'rollnostart', why: 'B-87fd: a live thread takes every line', from: '      const ownLine = !!live && t0 > 0 && (Number(snapshot.fetchedAt) || 0) >= t0;', to: '      const ownLine = !!live;', redWant: 'A' } },
+      { name: 'a pooled thread no live conversation holds is filed nowhere (its member is not known then)', o: { meta: 'P', live: null, lineAgo: 10000 }, want: 'nowhere',
+        red: { tag: 'rollrel2', why: 'B-87fd: the release\'s rollout key (the recorded account, a pool too)', from: "      const key = live ? (ownLine ? codexKeyOf(live._accountId || null, live) : null) : codexKeyOf(thread ? (threadAcct[thread] || null) : null, null);\n      if (key) keep(key, snapshot, 'codex-rollout');", to: "      keep((thread ? (threadAcct[thread] || null) : null) || '__global_codex__', snapshot, 'codex-rollout');", redWant: 'P' } },
+      { name: 'a conversation that LEFT the pool (now on A; its thread still recorded under the pool): its own line is filed under A', o: { meta: 'P', live: { acct: 'A' }, lineAgo: 10000 }, want: 'A',
+        red: { tag: 'rollmeta', why: 'B-87fd: a live thread keyed by its recorded account', from: 'codexKeyOf(live._accountId || null, live)', to: 'codexKeyOf(thread ? (threadAcct[thread] || null) : null, live)', redWant: 'B' } },
+      { name: 'a live pooled conversation whose member NOTHING names (no spawn stamp, no ledger row before its start): filed nowhere', o: { meta: 'P', live: { acct: 'P' }, lineAgo: 10000 }, want: 'nowhere',
+        red: { tag: 'rollunknown', why: 'B-87fd: the rule\'s unknown answer taken as a member', from: "return (m && m.origin !== 'unknown' && m.id) || null;", to: 'return (m && m.id) || null;', redWant: 'B' } },
+      { name: 'a conversation resumed on A after a process on ANOTHER account (the record names A now): a line from before its start is filed nowhere', o: { meta: 'A', live: { acct: 'A' }, lineAgo: 120000 }, want: 'nowhere',
+        red: { tag: 'rollprestart', why: 'B-87fd: an earlier process\'s line goes by the record', from: '(ownLine ? codexKeyOf(live._accountId || null, live) : null)', to: '(ownLine ? codexKeyOf(live._accountId || null, live) : codexKeyOf(thread ? (threadAcct[thread] || null) : null, null))', redWant: 'A' } },
+      { name: 'a live pooled TERMINAL conversation holding A names its thread too: its own line is filed under A', o: { meta: 'P', live: { acct: 'P', held: 'A', mode: 'terminal' }, lineAgo: 10000 }, want: 'A',
+        red: { tag: 'rollchat', why: 'B-87fd: only chat conversations name their thread', from: "    if (session.backend !== 'codex') continue;\n    if (session.backendSessionId) liveByThread", to: "    if (session.backend !== 'codex' || session.mode !== 'chat') continue;\n    if (session.backendSessionId) liveByThread", redWant: 'nowhere' } },
+      { name: 'a live pooled conversation whose start is not known (no createdAt): its line is not proven its own — filed nowhere', o: { meta: 'P', live: { acct: 'P', held: 'A', noStart: true }, lineAgo: 10000 }, want: 'nowhere',
+        red: { tag: 'rollnot0', why: 'B-87fd: no start read as the epoch', from: '      const ownLine = !!live && t0 > 0 && (Number(snapshot.fetchedAt) || 0) >= t0;', to: '      const ownLine = !!live && (Number(snapshot.fetchedAt) || 0) >= t0;', redWant: 'A' } },
+      { name: 'a thread recorded under A, no live conversation: filed under A (unchanged)', o: { meta: 'A', live: null, lineAgo: 10000 }, want: 'A', red: null },
+    ];
+    for (const c of CASES) {
+      let got = null, err = null;
+      try { got = roll(c.o); } catch (e) { err = e.message; }
+      ok(`B-87fd rollout: ${c.name}`, got === c.want, err || `filed: ${got}`);
+      if (!c.red) continue;
+      let redGot = null, redErr = null;
+      try { redGot = roll(c.o, c.red); } catch (e) { redErr = e.message; }
+      ok(`B-87fd rollout RED (${c.red.why}): the copy files it under ${c.red.redWant} — the leg sees it`, redGot === c.red.redWant, redErr || `filed: ${redGot}`);
     }
   }
   for (const r of worlds) fs.rmSync(r, { recursive: true, force: true });

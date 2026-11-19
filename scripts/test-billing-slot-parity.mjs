@@ -3,7 +3,7 @@
 // is this conversation billing» over the transition record (src/slot-transitions.js), retiring the pile of resolvers one
 // consumer at a time — the way the three-tier table asks for facts about a machine: a census that makes a one-sided edit red.
 //
-// (a) THE CENSUS (this leg; the lane's census file lists every line). Every call of the resolvers (55 names since the census cure 2)
+// (a) THE CENSUS (this leg; the lane's census file lists every line). Every call of the resolvers (64 names at B-87fd's product unit; 55 at the census cure 2)
 //     below in the tracked source (src/ + server.js, git ls-files) is a DECLARED ROW — (resolver, file, enclosing function,
 //     stage, count). A call the table does not name is red BY NAME (a new consumer of a resolver the programme retires must
 //     say its stage); a row the tree no longer has is red (a dead row: the census shrinks as stages land). The stages, money
@@ -37,11 +37,13 @@ export const RESOLVERS = Object.freeze(['fireIdentityFor', 'sessionBillingMember
   // engine's chooser as server.js's poolChooser → ws-create's chooseMember → accounts' opts.chooseMember (the member a new pooled
   // start bills); and a dependency row or closure that hands the answer on in ITS file (the net reads a caller by name AND file)
   'poolChooser@src/ws-create.js', 'chooseMember@src/ws-create.js', 'chooseMember@src/accounts.js', 'chooseDefault@src/server/account-usage-routes.js',
-  'fireIdentity@server.js', 'identityOf@src/server/usage-pool-engine.js', 'poolAuth@server.js', 'spendGuard.authorize',
+  'fireIdentity@server.js', 'identityOf@src/server/usage-pool-engine.js', 'poolAuth@server.js',
+  // B-87fd's product cure (the pooled codex reading): the account a codex reading is FILED under — a pool's member through the shared rule
+  'codexKeyOf@src/usage-routes.js', 'spendGuard.authorize',
   'authorizeSpend', 'spendGuard.authorizeBatch', 'authorizeSpendBatch', 'stoppedRows', 'stoppedPlan', 'writeSnap@src/server/usage-pool-engine.js', 'billingIndex@src/server/auto-cli-loop.js',
   'chooseDefault@src/accounts.js', 'authorize@src/server/spend-guard.js', 'authorizeBatch@src/server/spend-guard.js']);
 export const STAGES = Object.freeze(['spend', 'cost', 'readings', 'pool', 'routes', 'pile']);
-// [resolver, file, enclosing function, stage, calls] — derived by THIS suite's own scan (225 calls: the ten 66, the census cure's nine 80, the cure 2's net 72, the cure 3's handed-on names 7); the census file names each line
+// [resolver, file, enclosing function, stage, calls] — derived by THIS suite's own scan (229 calls in 202 rows: the ten 66, the census cure's nine 80, the cure 2's net 72, the cure 3's handed-on names 7, the product cure's codexKeyOf 4); the census file names each line
 export const ROWS = Object.freeze([
   ['poolCurrentFor', 'src/server/usage-attribution.js', 'recordUsageAttribution', 'cost', 1],
   ['poolMemberOfSession', 'src/server/usage-attribution.js', 'recordUsageAttribution', 'cost', 1],
@@ -246,6 +248,9 @@ export const ROWS = Object.freeze([
   ['chooseMember@src/accounts.js', 'src/accounts.js', '_resolveHomeSpawn', 'pile', 1],
   ['chooseMember@src/accounts.js', 'src/accounts.js', 'activeAlt', 'pile', 1],   // resolveForSpawn's own closure (INNER)
   ['chooseMember@src/accounts.js', 'src/accounts.js', 'updatePool', 'pool', 1],   // the pool's default pointed at the chooser's pick
+  // ── B-87fd's product cure: the pooled codex reading filed under the member its process holds ──
+  ['poolMemberOfSession', 'src/usage-routes.js', 'codexKeyOf', 'pile', 1],
+  ['codexKeyOf@src/usage-routes.js', 'src/usage-routes.js', 'summarizeCodexRateLimits', 'readings', 3],   // the live wrapper's limits; a rollout line its live process made, else the thread's recorded account
 ]);
 
 // THE HOMES (主开发 2026-11-19 09:12Z: the net reads a caller by name AND file): the file(s) where each resolver not scoped by «@file»
@@ -345,7 +350,7 @@ export const CALL_FORMS = Object.freeze(['(', '?.(', '.call(', '.apply(', '.bind
 //   · an arrow whose body starts on the NEXT line — `const pick = (s) =>\n  poolCurrent(s)`: the call is a row, filed under the
 //     function around the arrow (a head without a brace on its line is no enclosing head);
 //   · an arrow assigned to a FIELD — `o.pick = (s) => poolCurrent(s)`: the same, filed under the function around it.
-export const GAPS = Object.freeze(['an alias of a resolver in a variable (account-usage-routes\' «decide», handed on as chooseMember: its receiver is declared)', 'an arrow whose body starts on the next line (filed under the function around it)', 'an arrow assigned to a field (filed under the function around it)', 'an arrow inside a conditional expression (filed under the function around it — account-usage-routes\' decide, under (module))', 'a resolver handed on through a variable, not its own name (the handed-on leg reads a resolver\'s own name only)']);
+export const GAPS = Object.freeze(['a handed-on name declared in another file than the one that receives it (§f reads the name)', 'an alias of a resolver in a variable (account-usage-routes\' «decide», handed on as chooseMember: its receiver is declared)', 'an arrow whose body starts on the next line (filed under the function around it)', 'an arrow assigned to a field (filed under the function around it)', 'an arrow inside a conditional expression (filed under the function around it — account-usage-routes\' decide, under (module))', 'a resolver handed on through a variable, not its own name (the handed-on leg reads a resolver\'s own name only)']);
 // ONE regex pass per file says which names it holds (a substring search per name and form, per file, cost seconds)
 const NAMES_RE = new Map();
 export function namesIn(text, names) {
@@ -497,8 +502,7 @@ console.log('§c THE RAW KEYS AT READING SITES — a reading filed under an acco
 // They call no resolver, so no census sees them: each such site is a DECLARED ROW — its file, its anchor (the line's own text, found
 // exactly once), its stage and its reason. A row whose anchor moved or left is red (the table follows the tree).
 export const RAW_KEYS = Object.freeze([
-  ['src/usage-routes.js', "keep(session._accountId || '__global_codex__', readCodexWrapperRateLimit(id), 'codex-rate-limits');", 'readings', 'a live codex conversation\'s wrapper limits are filed under its OWN account id: a POOLED one lands under the POOL\'s id, not under the member its process holds (liveQuotaKeyFor says the member) — the product cure is B-87fd\'s next unit'],
-  ['src/usage-routes.js', "if ((m.backend || 'claude') === 'codex' && m.backendSessionId) map[m.backendSessionId] = m.accountId || null;", 'readings', 'the codex thread → account map, read from the conversations\' meta files as stored (a pooled one stores the pool id): the rollout limits it keys land under it — the same cure'],
+  ['src/usage-routes.js', "if ((m.backend || 'claude') === 'codex' && m.backendSessionId) map[m.backendSessionId] = m.accountId || null;", 'readings', 'the codex thread → account map, read from the conversations\' meta files as stored (a pooled one stores the pool id): B-87fd\'s product cure judges it through codexKeyOf — a rollout line the LIVE process made goes by the live conversation\'s own account (a pooled one: the member it holds); any other line by this recorded account, a pool\'s nowhere'],
   ['src/server/stream-wall.js', 'const key = session._accountId || null;', 'readings', 'a usage wall the stream named is written under the conversation\'s own account id — harmless today: that harness has no pool'],
   ['src/usage-history.js', 'map[sid] = { acct: m.accountId || m._accountId || null,', 'cost', 'the history\'s session → account map from the meta files (whose records a session\'s cost is filed under): the account id as stored — not yet followed to its end'],
 ]);
@@ -597,11 +601,12 @@ export const CONSUMERS = Object.freeze({
   "setupAgentRoutes": {"file": "src/agent-routes.js", "fields": null, "why": "the stop-nudge route asks the guard before it nudges; the answer is a response, nothing returned", "gap": "route setup: the verdict goes into an HTTP response, not a return whose fields can be named"},
   "spendOk": {"file": "src/server/auto-resume.js", "fields": [], "why": "auto-resume's spend check before a continue: asks the guard and returns true / false — the charge is noted inside, nothing handed on"},
   "stopped": {"file": "src/server/bulk-resume-routes.js", "fields": null, "why": "the bulk resume's GET route: hands the stopped plan to the page — the rows' identities are the page's words", "gap": "a route handler: the plan (its rows carry each identity) goes into the HTTP response, not a return"},
+  "summarizeCodexRateLimits": {"file": "src/usage-routes.js", "fields": ["byAccount", "overall"], "why": "the codex usage summary for the page and the cache: each reading filed under codexKeyOf's account — a map keyed BY account and the newest reading, not an answer of which account a conversation bills"},
   "sweepNonMemberLinks": {"file": "src/server/usage-pool-engine.js", "fields": ["pool", "removed", "moved", "stayed", "held", "defaultMoved"], "why": "Runs memberRemoved for each pool with stale links; returns the array of those reports, which echo members for the journal and suites."},
   "tick": {"file": "src/server/auto-cli-loop.js", "fields": [], "why": "the auto-cli loop's tick reads the member → sessions index to choose due reads; returns nothing"},
   "turnAskedFamily": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Returns a boolean (did this turn ask key for the family); requestSlotFor's key is only compared against it."},
   "unplacedOf": {"file": "src/accounts.js", "fields": ["member", "name"], "why": "Returns the UNPLACED mark (the deleted member; the conversation bills nobody); poolCurrent only checks whether it was re-placed."},
-  "updatePool": {"file": "src/accounts.js", "fields": [], "why": "writes a pool's members and points its default at the chooser's pick (setPoolTarget); returns the pool record — its config, not a conversation's account"},
+  "updatePool": {"file": "src/accounts.js", "fields": ["members"], "why": "writes a pool's members and points its default at the chooser's pick (setPoolTarget); returns the pool record — its members are the accounts it may bill on, watched by §e"},
   "walkLadderAfterCredit": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Runs the switch rung and notes a wall signal keyed by liveQuotaKeyFor(s), a decision and a write; returns nothing."},
   "writeResetCreditViaHelper": {"file": "src/server/usage-pool-engine.js", "fields": ["identity"], "why": "Helper-path credit spend: writeCodexReading files the read-first reading; the returned identity is the guard's echo of the input key."},
 });
@@ -695,7 +700,10 @@ console.log('§f THE HANDED-ON NAMES — a resolver passed BY REFERENCE under an
 // property value that ENDS there (`key: name,` / `key: x.name }`), never a call or a test (`x.name ? …`). WHY decideDefaultTarget IS
 // NO RESOLVER: it DECIDES the pool default's next member from the readings and calls no resolver; its answer bills only after the
 // write it feeds (updatePool / setPoolTarget), which poolCurrent then reads — the chooser it is handed through (chooseDefault,
-// chooseMember) is declared.
+// chooseMember) is declared. WHY removalTargetFor IS NO RESOLVER (主开发 09:40Z): it DECIDES where a removed member's conversations go
+// (the soonest usable member) from the readings and calls no resolver; it is handed on as chooseLink, whose answer bills only after
+// the link write it feeds — which poolCurrentFor then reads. THE RECEIVER'S FILE, said: §f checks that the receiving NAME is a
+// declared resolver somewhere, not that it is declared in the very file that receives it (a gap by name).
 export function handedOn(files, readOf, names = RESOLVERS) {
   const out = [];
   const ents = names.map((e) => { const full = String(e).split('@')[0]; return { full, last: full.split('.').pop(), only: String(e).includes('@') ? String(e).slice(String(e).indexOf('@') + 1) : null }; });
