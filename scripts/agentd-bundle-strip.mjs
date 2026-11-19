@@ -1,6 +1,9 @@
 #!/usr/bin/env node
-// THE DEVICE BUNDLE WITHOUT ITS ESSAYS (B-e55c) — a step of `npm run build:agentd`, right after esbuild writes
-// data/bin/vibespace-agentd.js and before scripts/agentd-release.mjs hashes it.
+// THE DEVICE BUNDLE WITHOUT ITS ESSAYS (B-e55c) — a step of `npm run build:agentd`, right after esbuild writes its RAW bundle
+// to a SIDE name (data/bin/.vibespace-agentd.raw.js) and before scripts/agentd-release.mjs hashes the final one.
+// `node scripts/agentd-bundle-strip.mjs <in> <out>` (B-315a): the stripped text is written beside <out> and RENAMED over it, then
+// <in> goes — the final name only ever holds a whole stripped bundle (the old one until the rename, then the new one; esbuild
+// wrote the raw bytes to the final name before, read for ~2 s by anything that opened it). One argument: in place (a hand run).
 //
 // esbuild's unminified output carries every source comment and every level of indentation: measured on the 2.369.407
 // sources, 6 145 073 bytes of which comments were ~300 KB and leading indentation ~1.0 MB — and the §107 size cap
@@ -121,16 +124,18 @@ export function stripBundle(src, acorn = require('acorn'), { protect = PROTECTED
 // run as a script: compared by REAL path (a symlinked scripts/ or checkout must not turn the step into a silent no-op)
 const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
 if (process.argv[1] && real(process.argv[1]) === real(fileURLToPath(import.meta.url))) {
-  const file = path.resolve(process.argv[2] || 'data/bin/vibespace-agentd.js');
-  const src = fs.readFileSync(file, 'utf8');
+  const from = path.resolve(process.argv[2] || 'data/bin/vibespace-agentd.js'), file = path.resolve(process.argv[3] || from);
+  const src = fs.readFileSync(from, 'utf8');
   let out;
   try { out = stripBundle(src); } catch (e) {
-    // the build fails by name; esbuild's unstripped bytes stay, so a manifest copy left by an earlier SIGNED build must not sit
-    // beside them (agentd-release.mjs, which would have judged them, never runs) — the hub then says unsigned and pushes nothing
+    // the build fails by name; the final name keeps what it held (or esbuild's unstripped bytes, in place), so a manifest copy
+    // left by an earlier SIGNED build must not sit beside it (agentd-release.mjs, which would have judged the new build, never
+    // runs) — the hub then says unsigned and pushes nothing
     try { fs.unlinkSync(file.replace(/\.js$/, '') + '.manifest.json'); } catch { }
     throw e;
   }
   const tmp = file + '.' + process.pid + '.tmp';
   try { fs.writeFileSync(tmp, out); fs.renameSync(tmp, file); } catch (e) { try { fs.unlinkSync(tmp); } catch { } throw e; }
+  if (from !== file) { try { fs.unlinkSync(from); } catch { } }   // the side name goes once the final name holds the stripped bundle
   console.log(`agentd-bundle-strip: ${path.basename(file)} ${Buffer.byteLength(src)} → ${Buffer.byteLength(out)} bytes (comments and indentation; the token stream checked equal)`);
 }

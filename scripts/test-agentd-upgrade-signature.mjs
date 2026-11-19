@@ -604,8 +604,33 @@ try {
   const G = fs.readFileSync(path.join(REPO, 'scripts/gen-release-key.mjs'), 'utf8');
   ok(enc.status === 0 && /BEGIN ENCRYPTED PRIVATE KEY/.test(fs.readFileSync(encOut, 'utf8')) && /passphrase-encrypted/.test(enc.stdout) && /when stdin is NOT a terminal the FIRST\n\/\/ stdin line is the passphrase and there is no confirmation/.test(G) && /--encrypt \(USE IT on any machine that also runs a VibeSpace or agent sessions/.test(G), 'low ⑤: --encrypt from a non-terminal stdin takes the FIRST line (no confirmation) — and the header says so, and says to use it', enc.stdout + enc.stderr);
   const BUILD = JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8')).scripts;
-  ok(/esbuild src\/agentd\/agentd\.js [^&]*--preserve-symlinks[^&]*--outfile=data\/bin\/vibespace-agentd\.js/.test(BUILD['build:agentd']) && /&& node scripts\/agentd-release\.mjs$/.test(BUILD['build:agentd']) && BUILD['sign:agentd'] === 'npm run build:agentd && node scripts/sign-agentd.mjs', 'package.json: build:agentd builds with --preserve-symlinks (the same bytes in any checkout) and ends with the release check; sign:agentd exists');
+  ok(/esbuild src\/agentd\/agentd\.js [^&]*--preserve-symlinks[^&]*--outfile=data\/bin\/\.vibespace-agentd\.raw\.js && node scripts\/agentd-bundle-strip\.mjs data\/bin\/\.vibespace-agentd\.raw\.js data\/bin\/vibespace-agentd\.js && /.test(BUILD['build:agentd']) && /&& node scripts\/agentd-release\.mjs$/.test(BUILD['build:agentd']) && BUILD['sign:agentd'] === 'npm run build:agentd && node scripts/sign-agentd.mjs', 'package.json: build:agentd builds with --preserve-symlinks (the same bytes in any checkout) to a side name the strip renames into data/bin/vibespace-agentd.js (B-315a), and ends with the release check; sign:agentd exists');
   ok(fs.readFileSync(path.join(REPO, '.gitignore'), 'utf8').includes('\ndata/bin/vibespace-agentd.manifest.json\n'), '.gitignore: the copy beside the bundle is never tracked (a clean seed after the image build)');
+  // B-315a: THE FINAL NAME ONLY EVER HOLDS A WHOLE STRIPPED BUNDLE — esbuild writes a SIDE name, the strip renames its checked
+  // text over the final one (esbuild wrote the raw bytes to the final name before; anything that read it in the ~2 s the strip
+  // took read them). The release's line (its esbuild outfile the final name) does not pass this pin:
+  const BUILD_RE315 = /--outfile=data\/bin\/\.vibespace-agentd\.raw\.js && node scripts\/agentd-bundle-strip\.mjs data\/bin\/\.vibespace-agentd\.raw\.js data\/bin\/vibespace-agentd\.js && /;
+  ok(BUILD_RE315.test(BUILD['build:agentd']) && !BUILD_RE315.test('--outfile=data/bin/vibespace-agentd.js && node scripts/agentd-bundle-strip.mjs data/bin/vibespace-agentd.js && '), 'B-315a: build:agentd strips the side name INTO the final one — and the release\'s line (esbuild to the final name, stripped in place) fails this pin');
+  ok(fs.readFileSync(path.join(REPO, '.gitignore'), 'utf8').includes('\ndata/bin/.vibespace-agentd.raw.js\n'), 'B-315a: .gitignore: the side name is never tracked');
+  {
+    const SD = path.join(tmp, 'strip-315a'); fs.mkdirSync(SD, { recursive: true });
+    const side = path.join(SD, '.vibespace-agentd.raw.js'), fin = path.join(SD, 'vibespace-agentd.js'), man = path.join(SD, 'vibespace-agentd.manifest.json');
+    const strip = (...a) => spawnSync(process.execPath, [path.join(REPO, 'scripts/agentd-bundle-strip.mjs'), ...a], { encoding: 'utf8', timeout: 20000 });
+    fs.writeFileSync(fin, '// the OLD stripped bundle\nmodule.exports = 1;\n'); fs.writeFileSync(man, '{}');
+    const ino0 = fs.statSync(fin).ino;
+    fs.writeFileSync(side, '// src/a.js\nfunction f() {\n    // an essay\n    return 1;\n}\nmodule.exports = f;\n');
+    const s1 = strip(side, fin), got1 = fs.readFileSync(fin, 'utf8');
+    ok(s1.status === 0 && !fs.existsSync(side) && !got1.includes('an essay') && got1.includes('\nreturn 1;\n') && got1.startsWith('// src/a.js\n') && fs.statSync(fin).ino !== ino0,
+      'B-315a: the strip reads the side name and RENAMES its checked text over the final one (a new file, never the old one rewritten in place); the side name then goes', { status: s1.status, err: s1.stderr.slice(0, 300), got1 });
+    fs.writeFileSync(side, 'function (\n'); fs.writeFileSync(man, '{}');
+    const before = fs.readFileSync(fin, 'utf8'), s2 = strip(side, fin);
+    ok(s2.status !== 0 && fs.readFileSync(fin, 'utf8') === before && !fs.existsSync(man) && fs.existsSync(side),
+      'B-315a: a strip that fails leaves the final name as it held it (never raw bytes), the signed manifest copy beside it goes (the hub says unsigned, pushes nothing), the side name stays to be read', { status: s2.status });
+    fs.writeFileSync(fin, '// src/b.js\nconst x = 1;\n    // gone\nmodule.exports = x;\n');
+    const s3 = strip(fin);
+    ok(s3.status === 0 && !fs.readFileSync(fin, 'utf8').includes('gone'), 'B-315a: one argument still strips in place (a hand run)', { status: s3.status });
+    fs.rmSync(SD, { recursive: true, force: true });
+  }
   ok(/rm -f "\$ROOT\/state\/trusted-keys\.json" "\$ROOT\/state\/release-floor\.json"/.test(fs.readFileSync(path.join(REPO, 'scripts/vibespace-agentd-install.sh'), 'utf8')) && /Remove-Item \(Join-Path \$root 'state\\trusted-keys\.json'\)/.test(fs.readFileSync(path.join(REPO, 'scripts/vibespace-agentd-install.ps1'), 'utf8')) && /Remove-Item \(Join-Path \$root 'state\\release-floor\.json'\)/.test(fs.readFileSync(path.join(REPO, 'scripts/vibespace-agentd-install.ps1'), 'utf8')), 'both installers reset the pin AND the version floor: a (re-)pair is a new trust-on-first-use (the lost-key recovery)');
 
   // ── ⑥ THE CENSUS ──

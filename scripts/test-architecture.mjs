@@ -7688,7 +7688,7 @@ await section(async () => {
   // (it was the .398 release's unstripped 6 037 978 + 2 %, and left a unit 14 KB). The strip runs right after esbuild writes the
   // bundle and BEFORE agentd-release.mjs hashes it (the signed release names the stripped bytes).
   const { stripBundle: strip107, tokenPrint: print107, bannersOf: banners107 } = await import('./agentd-bundle-strip.mjs');
-  const strips107 = /--outfile=data\/bin\/vibespace-agentd\.js && node scripts\/agentd-bundle-strip\.mjs data\/bin\/vibespace-agentd\.js && /.test(script107)
+  const strips107 = /--outfile=data\/bin\/\.vibespace-agentd\.raw\.js && node scripts\/agentd-bundle-strip\.mjs data\/bin\/\.vibespace-agentd\.raw\.js data\/bin\/vibespace-agentd\.js && /.test(script107)   // B-315a: esbuild writes a SIDE name, the strip renames into the final one
     && script107.indexOf('agentd-bundle-strip.mjs') < script107.indexOf('scripts/agentd-release.mjs');
   const shipped107 = (r) => (strips107 ? strip107(r.outputFiles[0].text, undefined, { check: false }) : r.outputFiles[0].text);   // a size reading (the build's own step checks)
   // RESTATED at 2.369.412's second checkpoint (lane bl-loop-a, the restack-411 chain moved onto 8f96c01eb): the size this leg printed
@@ -7696,7 +7696,7 @@ await section(async () => {
   // (a starter seam, the X env names), B-299b A2's warm road in session-store.js, the usage walker's yields, proc-identity's statOf.
   // Was the 2.369.407 sources' 4866886 (as build:agentd ships it, stripped); + 2 % for this tree's own code
   const RELEASE_BUNDLE_BYTES = 4965563, DEVICE_BUNDLE_MARGIN = 0.02;
-  ok(strips107, '§107 build:agentd strips the device bundle (scripts/agentd-bundle-strip.mjs) right after esbuild writes it and before agentd-release.mjs hashes it', script107);
+  ok(strips107, '§107 build:agentd strips the device bundle (scripts/agentd-bundle-strip.mjs) right after esbuild writes it to a side name, renaming it into data/bin/vibespace-agentd.js, and before agentd-release.mjs hashes it', script107);
   const r107 = await build107(ext107);
   const got107 = libs107(r107), extra107 = got107.filter((l) => !Object.hasOwn(DEVICE_LIBS, l));
   const plain107 = r107.outputFiles[0].text, text107 = shipped107(r107), size107 = Buffer.byteLength(text107);

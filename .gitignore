@@ -77,6 +77,8 @@ data/uploads-sync.json
 .claude/worktrees/
 data/bin/vibespace-agentd.js
 data/bin/vibespace-agentd.js.*.tmp
+# B-315a: esbuild's raw device bundle, before scripts/agentd-bundle-strip.mjs renames its stripped text into the final name
+data/bin/.vibespace-agentd.raw.js
 # lane device-bundle-signing: the release manifest beside the bundle — copied by scripts/agentd-release.mjs at build ONLY
 # when this build IS the signed release (release/agentd/manifest.json is the tracked original)
 data/bin/vibespace-agentd.manifest.json
