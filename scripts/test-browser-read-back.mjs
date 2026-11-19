@@ -18,6 +18,9 @@
 //   r2 (主开发 23:28Z, THE MUST): the verb's TARGET is judged, never what holds the focus after it — a one-time-code box that
 //   moves the focus on, a card number that jumps to the expiry, an earlier date field; an empty fill clears; each kind compared
 //   in its normal form; a failed run is never the field's refusal; the answer read whole; ONE 10 s bound; the cost counted.
+//   B-7108 (box, test-browser-live ⑫): Chrome's tree can give a native date field NO @ref of its own, only its parts (spinbuttons
+//   «Month» / «Day» / «Year»): a fill by a part's @ref set nothing and answered exit 0 [read_back_unavailable]. Now REFUSED
+//   [field_part] with the recipe — the whole field by its own selector — when the part's box lies inside the focused field's.
 //   RED CONTROLS (patched copies, the tree untouched): a readBack that trusts the driver (the release's behaviour — Done over
 //   an empty date field) fails ⑤; the read-back that judges the FOCUSED field (68da75fa2) fails the three scenes; a wrapper
 //   without the read-back hook fails ⑥.
@@ -28,6 +31,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 import { createRequire } from 'node:module';
 import { mutantCopies, treeLitter } from './mutant-copy.mjs';
+import { anchored } from './scratch.mjs';
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -84,22 +88,26 @@ console.log('③ FIELD_FORMS — each kind holds its value in ONE form');
 console.log('④ the page-side JS over a fake DOM');
 /** A fake page of fields by id (one may hold the focus, optionally inside a same-origin frame); a field's value setter takes
  *  what it accepts in its normal form (`norm`), else '' — or keeps its old value (`keep`) — like a browser's sanitizer. */
-function fakePage(fields, { focused = null, inFrame = false } = {}) {
+function fakePage(fields, { focused = null, inFrame = false, scroll = null } = {}) {
   const events = [];
   const mkWin = () => {
     const proto = {};
     Object.defineProperty(proto, 'value', { get() { return this._v; }, set(v) { const s = String(v); if (s === '' || this._accept(s)) this._v = s === '' ? '' : this._norm(s); else if (!this._keep) this._v = ''; }, configurable: true });
     function Event(type, init) { this.type = type; this.bubbles = !!(init && init.bubbles); }
-    return { HTMLInputElement: { prototype: proto }, Event };
+    return { HTMLInputElement: { prototype: proto }, Event, CSS: { escape: (x) => String(x).replace(/[^\w-]/g, (c) => '\\' + c) }, scrollX: scroll ? scroll.x : 0, scrollY: scroll ? scroll.y : 0 };
   };
   const win = mkWin();
   const nodes = {};
   for (const [id, f] of Object.entries(fields)) {
-    const node = { id, tagName: (f.tag || 'input').toUpperCase(), type: f.kind, readOnly: !!f.readOnly, disabled: !!f.disabled, _v: f.value ?? '', _accept: f.accept || (() => true), _norm: f.norm || ((x) => x), _keep: !!f.keep, ownerDocument: { defaultView: win }, dispatchEvent(e) { events.push(`${id}:${e.type}`); return true; } };
+    const r = f.rect || { x: 0, y: 0, width: 0, height: 0 };
+    const node = { id: f.noId ? '' : id, name: f.name || '', _rect: r, getBoundingClientRect: () => ({ left: r.x, top: r.y, width: r.width, height: r.height }), tagName: (f.tag || 'input').toUpperCase(), type: f.kind, readOnly: !!f.readOnly, disabled: !!f.disabled, _v: f.noValue ? undefined : (f.value ?? ''), _accept: f.accept || (() => true), _norm: f.norm || ((x) => x), _keep: !!f.keep, ownerDocument: { defaultView: win }, dispatchEvent(e) { events.push(`${id}:${e.type}`); return true; } };
     Object.setPrototypeOf(node, win.HTMLInputElement.prototype);
     nodes[id] = node;
   }
-  const doc = { activeElement: null, querySelector(sel) { if (/^#[\w-]+$/.test(sel)) return nodes[sel.slice(1)] || null; if (/^[a-z]+$/i.test(sel)) return null; throw new Error('not a selector: ' + sel); } };
+  // B-7108's probe asks #id, input[name="…"] and input[type="…"] (a field without an id keeps its key in `nodes` only)
+  const inputs = () => Object.values(nodes).filter((n) => n.tagName === 'INPUT');
+  const all = (sel) => { let m; if ((m = /^#([\w-]+)$/.exec(sel))) return Object.values(nodes).filter((n) => n.id === m[1]); if ((m = /^input\[(name|type)="([\w.:-]+)"\]$/.exec(sel))) return inputs().filter((n) => (m[1] === 'name' ? n.name : n.type) === m[2]); return null; };
+  const doc = { activeElement: null, querySelectorAll(sel) { const a = all(sel); if (!a) throw new Error('not a selector: ' + sel); return a; }, querySelector(sel) { if (/^#[\w-]+$/.test(sel)) return nodes[sel.slice(1)] || null; if (/^[a-z]+$/i.test(sel)) return null; const a = all(sel); if (a) return a[0] || null; throw new Error('not a selector: ' + sel); } };
   const focus = (id) => { const n = nodes[id] || null; doc.activeElement = inFrame && n ? { tagName: 'IFRAME', contentDocument: { activeElement: n } } : n; };
   if (focused) focus(focused);
   const ctx = vm.createContext({ document: doc, window: win, JSON });
@@ -170,7 +178,7 @@ function byGrammar(args) {
  *  `attrFails` = the attribute read fails; `pretty` prints an eval's object over several lines; `clock` + `cost` advance a
  *  fake clock per run. */
 const REFUSED_CALLS = [];
-function fakeDriver(page, { refs = {}, redirect = {}, fail = [], attrFails = false, pretty = false, clock = null, cost = 0 } = {}) {
+function fakeDriver(page, { refs = {}, redirect = {}, fail = [], attrFails = false, pretty = false, clock = null, cost = 0, boxes = {}, boxFails = false } = {}) {
   const calls = [];
   const idOf = (sel) => refs[sel] || (/^#[\w-]+$/.test(sel) ? sel.slice(1) : null);
   const run = async (args, o) => {
@@ -184,6 +192,7 @@ function fakeDriver(page, { refs = {}, redirect = {}, fail = [], attrFails = fal
     if (!id || !page.nodes[id]) return { code: 1, out: '', err: '✗ element not found' };
     if (g.verb === 'focus') { page.focus(redirect[id] || id); return { code: 0, out: '✓ Done\n', err: '' }; }
     if (g.sub === 'value') return { code: 0, out: JSON.stringify({ success: true, data: { value: page.nodes[id]._v } }) + '\n', err: '' };
+    if (g.sub === 'box') { const b = boxes[id] || page.nodes[id]._rect; if (boxFails || !b || !(b.width > 0)) return { code: 1, out: '', err: '✗ element has no box' }; return { code: 0, out: JSON.stringify({ success: true, data: b }) + '\n', err: '' }; }
     if (g.sub === 'attr') { if (attrFails) return { code: 1, out: '', err: '✗ CDP command timed out' }; return { code: 0, out: JSON.stringify({ success: true, data: { value: g.named.name === 'type' ? (page.nodes[id].type || null) : null } }) + '\n', err: '' }; }
     return { code: 9, out: '', err: 'not faked: ' + args.join(' ') };
   };
@@ -274,6 +283,38 @@ async function readBackCensus(readBack) {
   say('a selector the page cannot read (the driver\'s own form) ⇒ read through the driver — the answer stands', t.r === null && t.d.calls.some((c) => c.args[0] === 'get'), t.r);
   t = await judge(readBack, { verb: 'fill', sel: '#d', asked: '2027-01-07' }, fakePage({ d: DATE() }), { json: true });
   { let j = null; try { j = JSON.parse(t.r.out); } catch { /* */ } say('--json ⇒ ONE JSON object: success, the value, via the setter', t.r && t.r.code === 0 && j && j.success === true && j.data.value === '2027-01-07' && j.data.via === 'setter' && t.r.out.trim().split('\n').length === 1, t.r); }
+  // ── B-7108: a fill by the @ref of a PART of a native date field (the box's Chrome gives the field no ref of its own) ──
+  const DUE = { x: 100, y: 200, width: 160, height: 24 }, MON = { x: 104, y: 202, width: 24, height: 20 };
+  const parts = (due = {}, { part = {}, more = {}, focused = 'due', scroll = null } = {}) => fakePage({ due: DATE({ rect: DUE, ...due }), mon: { tag: 'div', noValue: true, rect: MON, ...part }, ...more }, { focused, scroll });
+  const PART = { refs: { '@e7': 'mon' } };
+  t = await judge(readBack, { verb: 'fill', sel: '@e7', asked: '2027-01-07' }, parts(), PART);
+  say('B-7108 a fill by the Month part\'s @ref (no value the driver reads; the focus on its date field, the part\'s box inside it) ⇒ REFUSED field_part, exit 1, with the recipe: the whole field by its own selector', t.r && t.r.code === 1 && t.r.as === 'field_part' && t.r.out.startsWith('nothing was set: @e7 is one part of a date field') && t.r.out.includes("vibespace-browser fill '#due' 2027-01-07") && t.r.err === '[field_part]\n' && t.page.nodes.due._v === '' && t.d.calls.map((c) => (c.args[0] === 'get' ? c.args.slice(0, 2).join(' ') : c.args[0])).join(' · ') === 'get value · eval · get box', { r: t.r, calls: t.d.calls.map((c) => (c.args[0] === 'get' ? c.args.join(' ') : c.args[0])) });
+  cost['B-7108 a fill by a date part\'s @ref (refused)'] = t.d.calls.length;
+  t = await judge(readBack, { verb: 'fill', sel: '@e7', asked: '2027-01-07' }, parts({}, { part: { noValue: false, value: '' } }), PART);
+  say('B-7108 …and when the driver reads the part EMPTY with no type attribute ⇒ the same refusal (never «could not be confirmed»)', t.r && t.r.code === 1 && t.r.as === 'field_part' && t.d.calls.some((c) => c.args[1] === 'attr'), t.r);
+  t = await judge(readBack, { verb: 'fill', sel: '@e7', asked: '2027-01-07' }, parts(), { ...PART, json: true });
+  { let j = null; try { j = JSON.parse(t.r.out); } catch { /* */ } say('B-7108 --json ⇒ ONE JSON object: success false, code field_part, the field\'s selector and kind', t.r && t.r.code === 1 && j && j.success === false && j.code === 'field_part' && j.data.field === '#due' && j.data.kind === 'date' && j.data.value === '', t.r); }
+  t = await judge(readBack, { verb: 'fill', sel: '@e7', asked: '01/07/2027' }, parts(), PART);
+  say('B-7108 a value not in the field\'s form ⇒ the recipe carries the form\'s example and says it', t.r && t.r.as === 'field_part' && t.r.out.includes("vibespace-browser fill '#due' 2027-01-07") && t.r.out.includes('your "01/07/2027" is not in that form'), t.r);
+  t = await judge(readBack, { verb: 'fill', sel: '@e7', asked: '2027-01-07' }, parts({ noId: true, name: 'dueDate' }, { more: { other: DATE({ rect: { x: 0, y: 400, width: 160, height: 24 } }) } }), PART);
+  say('B-7108 a field with no id ⇒ named by its name, checked in the page to name it alone', t.r && t.r.as === 'field_part' && t.r.out.includes("vibespace-browser fill 'input[name=\"dueDate\"]' 2027-01-07"), t.r);
+  t = await judge(readBack, { verb: 'fill', sel: '@e7', asked: '2027-01-07' }, parts({ noId: true }), PART);
+  say('B-7108 no id, no name, the only date field ⇒ named by its kind', t.r && t.r.as === 'field_part' && t.r.out.includes("vibespace-browser fill 'input[type=\"date\"]' 2027-01-07"), t.r);
+  t = await judge(readBack, { verb: 'fill', sel: '@e7', asked: '2027-01-07' }, parts({ noId: true }, { more: { other: DATE({ noId: true, rect: { x: 0, y: 400, width: 160, height: 24 } }) } }), PART);
+  say('B-7108 no selector names it alone ⇒ the recipe asks for the field\'s CSS selector, never a wrong one', t.r && t.r.as === 'field_part' && t.r.out.includes("vibespace-browser fill '<the field selector>' 2027-01-07") && t.r.out.includes('an @ref of one of its parts never reaches it'), t.r);
+  t = await judge(readBack, { verb: 'fill', sel: '@e7', asked: '2027-01-07' }, parts({ value: '2027-01-07' }), PART);
+  say('B-7108 the field already holds the asked date ⇒ the driver\'s answer stands', t.r === null, t.r);
+  t = await judge(readBack, { verb: 'fill', sel: '@e7', asked: '2027-01-07' }, parts({}, { scroll: { x: 0, y: 500 } }), { ...PART, boxes: { mon: { x: 104, y: 702, width: 24, height: 20 } } });
+  say('B-7108 a scrolled page whose driver box is in PAGE coordinates ⇒ the part is still found inside its field', t.r && t.r.as === 'field_part', t.r);
+  // the r2 must kept: the TARGET, never the focus — a part is refused only when its own box lies inside the focused field
+  t = await judge(readBack, { verb: 'fill', sel: '@e7', asked: '2027-01-07' }, parts({}, { focused: 'd1', more: { d1: DATE({ value: '2026-01-01', rect: { x: 0, y: 600, width: 160, height: 24 } }) } }), PART);
+  say('B-7108 the focus on ANOTHER date field (the part\'s box outside it) ⇒ never «a part of that field»: the note as before, nothing set anywhere', t.r && t.r.note && /\[read_back_unavailable\]$/.test(t.r.note) && t.page.nodes.d1._v === '2026-01-01' && t.page.nodes.due._v === '', t.r);
+  t = await judge(readBack, { verb: 'fill', sel: '@e7', asked: '2027-01-07' }, parts({}, { focused: 'tx', more: { tx: { kind: 'text', rect: DUE } } }), PART);
+  say('B-7108 the focus on a TEXT field ⇒ the note as before', t.r && t.r.note && /\[read_back_unavailable\]$/.test(t.r.note), t.r);
+  t = await judge(readBack, { verb: 'fill', sel: '@e7', asked: '2027-01-07' }, parts(), { ...PART, boxFails: true });
+  say('B-7108 the part\'s box cannot be read ⇒ not shown to be a part: the note as before', t.r && t.r.note && /\[read_back_unavailable\]$/.test(t.r.note), t.r);
+  t = await judge(readBack, { verb: 'type', sel: '@e7', asked: '01072027' }, parts(), PART);
+  say('B-7108 a `type` by a part\'s @ref (its keys may set the part) ⇒ not refused: the note as before', t.r && t.r.note && /\[read_back_unavailable\]$/.test(t.r.note), t.r);
   return { bad, cost };
 }
 ok(JSON.stringify(GRAMMAR.get.attr) === '["selector","name"]' && JSON.stringify(GRAMMAR.get.value) === '["selector"]' && JSON.stringify(GRAMMAR.focus) === '["selector"]' && JSON.stringify(GRAMMAR.eval) === '["script"]',
@@ -344,6 +385,20 @@ const MUT = mutantCopies('read-back', REPO);
   const VM = require(f);
   const { bad } = await readBackCensus(VM.readBack);
   ok(SRC.includes(from) && bad.some((b) => b.startsWith('scene 1:')) && bad.some((b) => b.startsWith('scene 2:')) && bad.some((b) => b.startsWith('scene 3:')), 'CONTROL: the read-back that judges the FOCUSED field (68da75fa2) FAILS the three scenes — a one-time-code box, a card number, an earlier date field', bad.filter((b) => b.startsWith('scene')).map((b) => b.slice(0, 120)));
+}
+{
+  // B-7108, the release's road: a fill by a date part's @ref is never shown to be a part — exit 0 [read_back_unavailable]
+  const SRC = fs.readFileSync(path.join(REPO, 'src/browser-read-back.js'), 'utf8');
+  const f = MUT.write('src/browser-read-back.js', anchored(SRC, ' const pt = await partOf(); if (pt) return pt.landed ? null : pt;', '', 'B-7108 the release: no part check', { count: 2 }), 'no-part');
+  const { bad } = await readBackCensus(require(f).readBack);
+  ok(bad.some((b) => b.startsWith('B-7108 a fill by the Month part')) && bad.some((b) => b.startsWith('B-7108 …and when the driver reads the part EMPTY')), 'CONTROL (the release\'s read-back): a fill by the Month part\'s @ref answers exit 0 [read_back_unavailable] over the EMPTY date field — the box\'s finding — FAILS ⑤', bad.filter((b) => b.startsWith('B-7108')).slice(0, 2));
+}
+{
+  // B-7108 without its box check: whatever date field holds the focus is taken for the part's — the r2 must broken
+  const SRC = fs.readFileSync(path.join(REPO, 'src/browser-read-back.js'), 'utf8');
+  const f = MUT.write('src/browser-read-back.js', anchored(SRC, "    if (!boxInside(driverBox(await call(['get', 'box', plan.sel, '--json'])), o.box, o.scroll)) return null;\n", '', 'B-7108 no box check'), 'no-box');
+  const { bad } = await readBackCensus(require(f).readBack);
+  ok(bad.some((b) => b.startsWith('B-7108 the focus on ANOTHER date field')), 'CONTROL (a part judged by the FOCUS alone): the focus on another date field is refused as «a part of it» — FAILS ⑤', bad.filter((b) => b.startsWith('B-7108')).slice(0, 2));
 }
 {
   const from = "    if (code === 0 && readPlan && !dialogHit && !loopHit && !shotCut && !passkeyHit && !promptHit) {";

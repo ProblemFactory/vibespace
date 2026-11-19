@@ -160,6 +160,12 @@ Exit codes: `0` ok · `1` a typed refusal, or the page command itself failed ·
   (range); `fill @ref ''` clears it. Any other form (`01/07/2027`, `01072027`, `9:05 AM`) is refused `[field_form]` with the
   form the field wants (a bare `keyboard type` into a focused field says it instead of refusing). A person's way works too:
   click the field and `press` each digit in the order the field shows it (`press 0`, `press 1`, …).
+* When the snapshot gives a date field **no @ref of its own**, only its parts (spinbuttons «Month», «Day», «Year»), fill the
+  field by its CSS selector, never by a part's @ref: `vibespace-browser fill '#due' 2027-01-07`. A fill by a part's @ref sets
+  nothing and is refused `[field_part]`, with the field's selector when one names it alone.
+* **A one-time-code row** whose boxes move the focus on as you type: `fill` lands in the box that holds the focus, which is not
+  always the box you named, and the read-back says so (`[nothing_landed]`). Click the first box, then `press` each digit in
+  order: the page moves the focus from box to box.
 * `press` takes a key's **name** — `press 0`, `press a`, `press Enter`, `press Control+a`. A key's code (`Digit0`, `KeyA`)
   types nothing and is refused `[key_code_name]` with the name to use.
 * **A file input inside a frame:** `upload` by a selector does not reach into a frame. Enter the frame by ITS selector, upload

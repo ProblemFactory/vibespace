@@ -36,6 +36,32 @@ function fieldSetJs(value, target = null, expect = null) {
   const check = expect ? `if(String(el.type||'').toLowerCase()!==${JSON.stringify(String(expect.kind))}||el.value!==${JSON.stringify(String(expect.value))})return JSON.stringify({set:false,why:'not-target'});` : '';
   return `(()=>{${findJs(target)}if(!el||!el.tagName||el.tagName.toLowerCase()!=='input')return JSON.stringify({set:false,why:'not-input'});${check}if(el.readOnly||el.disabled)return JSON.stringify({set:false,locked:true});const before=el.value;const w=(el.ownerDocument&&el.ownerDocument.defaultView)||window;const d=Object.getOwnPropertyDescriptor(w.HTMLInputElement.prototype,'value');d.set.call(el,${JSON.stringify(String(value))});el.dispatchEvent(new w.Event('input',{bubbles:true}));el.dispatchEvent(new w.Event('change',{bubbles:true}));return JSON.stringify({set:true,kind:String(el.type||'').toLowerCase(),value:el.value,before})})()`;
 }
+// B-7108: a PART of a native date / time field. Chrome's tree can give a date field no @ref of its own, only its parts
+// (spinbuttons «Month» / «Day» / «Year»; measured on the box, test-browser-live ⑫). A fill by a part's @ref sets nothing,
+// and the part holds no value the driver can read. Its focus is the field's own, so the probe reads the FOCUSED input: its
+// kind, its value, its box (viewport and page) and a selector that names it alone (its id, its name, or its kind when it is
+// the only one), checked IN the page.
+const PART_KINDS = new Set(['date', 'time', 'datetime-local', 'month', 'week']);
+function partOwnerProbeJs() {
+  return `(()=>{${FOCUSED_JS}if(!el||!el.tagName||el.tagName.toLowerCase()!=='input')return JSON.stringify({tag:null});const kind=String(el.type||'').toLowerCase();const r=el.getBoundingClientRect();const tries=[];if(el.id&&window.CSS&&window.CSS.escape)tries.push('#'+window.CSS.escape(el.id));if(el.name&&/^[A-Za-z0-9_.:-]+$/.test(el.name))tries.push('input[name="'+el.name+'"]');if(/^[a-z-]+$/.test(kind))tries.push('input[type="'+kind+'"]');let sel=null;for(const t of tries){try{if(document.querySelectorAll(t).length===1&&document.querySelector(t)===el){sel=t;break}}catch(e){}}return JSON.stringify({tag:'input',kind,value:typeof el.value==='string'?el.value:null,box:{x:r.left,y:r.top,width:r.width,height:r.height},scroll:{x:window.scrollX||0,y:window.scrollY||0},sel})})()`;
+}
+/** The driver's `get box <sel> --json` answer → { x, y, width, height } in CSS px, else null. */
+function driverBox(r) {
+  if (!r || r.code !== 0) return null;
+  for (const text of jsonReadings(r)) {
+    let j = null; try { j = JSON.parse(text); } catch { continue; }
+    const d = j && j.success === true && j.data && typeof j.data === 'object' ? j.data : null;
+    if (d && [d.x, d.y, d.width, d.height].every(Number.isFinite)) return { x: d.x, y: d.y, width: d.width, height: d.height };
+  }
+  return null;
+}
+/** The part's centre inside the field's box, read in the viewport or in the page (1 px of rounding either way). */
+function boxInside(part, field, scroll) {
+  if (!part || !field || !(field.width > 0) || !(field.height > 0)) return false;
+  const cx = part.x + part.width / 2, cy = part.y + part.height / 2;
+  const at = (dx, dy) => cx >= field.x + dx - 1 && cx <= field.x + dx + field.width + 1 && cy >= field.y + dy - 1 && cy <= field.y + dy + field.height + 1;
+  return at(0, 0) || (!!scroll && at(Number(scroll.x) || 0, Number(scroll.y) || 0));
+}
 const shown = (v) => { const s = String(v ?? ''); return JSON.stringify(s.length > READ_BACK_TEXT_MAX ? s.slice(0, READ_BACK_TEXT_MAX) + '…' : s); };
 const jsonReadings = (r) => { const whole = String((r && r.out) || '').trim(); const lines = whole.split('\n').filter(Boolean); return [whole, lines[lines.length - 1] || '']; };
 /** The driver's eval answer → its object (the whole answer first, then its last line; a JSON string read once more). */
@@ -74,6 +100,22 @@ async function readBack({ plan, run, json = false, now = Date.now, budgetMs = RE
     ? { code, as, runs, out: JSON.stringify(code === 0 ? { success: true, data: { ...(data || {}), readBack: as }, error: null } : { success: false, data, code: as, error: text }) + '\n', err: code === 0 ? `note: ${text} [${as}]\n` : `[${as}]\n` }
     : { code, as, runs, out: text + '\n', err: `[${as}]\n` });
   const matches = (v) => (plan.verb === 'fill' ? v === plan.asked : v.includes(plan.asked));
+  // B-7108: the TARGET (an @ref) read as no field of its own. When it is a part of the date / time field that holds the
+  // focus (its box inside the field's), a fill set nothing: REFUSED with the recipe, the whole field by its own selector.
+  // { landed } when that field holds what was asked; null when it is not shown to be a part (the answer stays as it was).
+  const partOf = async () => {
+    if (plan.verb !== 'fill' || !String(plan.sel || '').startsWith('@')) return null;
+    const o = evalAnswer(await call(['eval', partOwnerProbeJs()]));
+    if (!o || o.tag !== 'input' || !PART_KINDS.has(o.kind) || typeof o.value !== 'string') return null;
+    if (!boxInside(driverBox(await call(['get', 'box', plan.sel, '--json'])), o.box, o.scroll)) return null;
+    const form = FIELD_FORMS[o.kind];
+    if (o.value === plan.asked || (plan.asked !== '' && form.re.test(plan.asked) && form.norm(o.value) === form.norm(plan.asked))) return { landed: true };
+    const inForm = plan.asked === '' || form.re.test(plan.asked);
+    const value = plan.asked === '' ? "''" : inForm ? plan.asked : form.example;
+    const run = o.sel ? `vibespace-browser fill '${o.sel}' ${value}` : `vibespace-browser fill '<the field selector>' ${value}`;
+    // ui-words: agent-facing CLI refusal
+    return answer(1, 'field_part', `nothing was set: ${plan.sel} is one part of a ${o.kind} field, and a fill by one of its parts sets nothing — the field holds ${shown(o.value)}. Fill the whole field by ${o.sel ? 'its own selector' : 'a CSS selector that names the input itself (an @ref of one of its parts never reaches it)'}, in its form ${form.example} (${form.words})${inForm ? '' : ` — your ${shown(plan.asked)} is not in that form`}: ${run} — the field's own setter sets it and reads it back`, { kind: o.kind, value: o.value, field: o.sel || null });
+  };
   let f = null, setVia = null;
   if (plan.sel == null) {
     f = evalAnswer(await call(['eval', fieldProbeJs(plan.asked)]));
@@ -88,12 +130,13 @@ async function readBack({ plan, run, json = false, now = Date.now, budgetMs = RE
     }
     if (!f) {
       const v = driverRead(await call(['get', 'value', plan.sel, '--json']));
-      if (v === null) return unavailable('its target could not be read back through the browser');
+      if (v === null) { const pt = await partOf(); if (pt) return pt.landed ? null : pt; return unavailable('its target could not be read back through the browser'); }
       if (matches(v)) return null;
       if (plan.verb !== 'fill' && /[\n\r\t]/.test(plan.asked)) return null;
       const kind = driverRead(await call(['get', 'attr', plan.sel, 'type', '--json']), { absentIsEmpty: true }); // get attr <selector> <name>
       // a kind the browser could not read is never judged as a field: «could not confirm», the value never shown
       if (kind === null) return unavailable('its kind could not be read through the browser, so what it holds could not be confirmed');
+      if (kind === '') { const pt = await partOf(); if (pt) return pt.landed ? null : pt; }
       if (kind === '' && v === '' && plan.asked !== '') return unavailable('it carries no type attribute (a textarea, a list or a rich editor reads empty here) and reads empty, so what landed could not be confirmed');
       const k = String(kind).toLowerCase() || 'text';
       if (FIELD_FORMS[k]) {
@@ -136,4 +179,4 @@ async function readBack({ plan, run, json = false, now = Date.now, budgetMs = RE
   return answer(0, 'field_differs', `${strict ? '' : 'note: '}${what === 'fill' ? 'filled' : 'typed'} — but the ${strict ? '' : 'focused '}${f.kind} field holds ${holds}, not ${plan.verb === 'fill' ? 'exactly ' : 'a text containing '}${secret ? `the ${plan.asked.length} characters you gave` : shown(plan.asked)} (the page reformatted, cut or moved it)`, { kind: f.kind, value: secret ? null : f.value });
 }
 
-module.exports = { FIELD_FORMS, READ_BACK_TEXT_MAX, fieldProbeJs, fieldSetJs, evalAnswer, driverRead, readBack };
+module.exports = { FIELD_FORMS, READ_BACK_TEXT_MAX, PART_KINDS, fieldProbeJs, fieldSetJs, partOwnerProbeJs, evalAnswer, driverRead, driverBox, boxInside, readBack };
