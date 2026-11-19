@@ -113,12 +113,17 @@ function journal({ file, bound = AUDIT_MAX_BYTES, mode = null, ask, durable, log
   return jr;
 }
 /** A record's OWN id in a raw line, for reading each record once: `own` = 'first' (exit-proxy writes {at, id, …}) or 'last'
- *  (this file writes {…line, at, id}); a field inside a JSON string has its quotes escaped, so it never matches */
+ *  (this file writes {…line, at, id}); a field inside a JSON string has its quotes escaped, so it never matches. TOP-LEVEL ONLY
+ *  (B-e6c1): an older line with no top-level id never answers a NESTED one (two records sharing it would read as one) — 'first'
+ *  takes the match only when no object or list opened before it, 'last' only when nothing but the record's closing brace
+ *  follows it; else null (the line is read, not deduplicated) */
 function idIn(raw, own = 'last') {
   const k = '"id":"', i = own === 'first' ? raw.indexOf(k) : raw.lastIndexOf(k);
   if (i < 0) return null;
   const j = raw.indexOf('"', i + k.length);
-  return j > i ? raw.slice(i + k.length, j) : null;
+  if (!(j > i)) return null;
+  if (own === 'first' ? /[{[]/.test(raw.slice(1, i)) : raw.slice(j + 1).trim() !== '}') return null;   // a nested id: not the record's own
+  return raw.slice(i + k.length, j);
 }
 
 function create({ dataDir = null, maxBytes = AUDIT_MAX_BYTES, now = () => Date.now(), log = () => {}, onLine = null, writer = null } = {}) {

@@ -300,6 +300,30 @@ console.log('③ the one appender (src/device-audit.js journal) over a stand-in 
   ok(!!(midRead && midRead.length === 4 && new Set(midRead.map((r) => r.id)).size === 4), `a line on disk and still queued is read ONCE (${midRead && midRead.length} of 4)`);
   const after = store.tail({ hostId: 'h1' });
   ok(after.length === 4 && after[0].at === 1002, 'after the answer the lines are read from the file', after.map((r) => r.at));
+  // B-e6c1: a record's OWN id is a TOP-LEVEL field — an older line with no top-level id never answers a nested one
+  const LEG_FIRST = '{"at":1,"kind":"run","payload":{"id":"nested-1"}}', OWN_FIRST = '{"at":1,"id":"own-1","payload":{"id":"nested-1"}}';
+  const LEG_LAST = '{"op":"run-cmd","payload":{"x":1,"id":"nested-2"},"at":2}', OWN_LAST = '{"op":"run-cmd","payload":{"id":"nested-2"},"at":2,"id":"own-2"}';
+  ok(DAU.idIn(OWN_FIRST, 'first') === 'own-1' && DAU.idIn(LEG_FIRST, 'first') === null && DAU.idIn(OWN_LAST, 'last') === 'own-2' && DAU.idIn(LEG_LAST, 'last') === null,
+    'B-e6c1: the own id is read only at the TOP level — the exit audit\'s first field, the device audit\'s last — and an older line with only a nested id answers none', [DAU.idIn(LEG_FIRST, 'first'), DAU.idIn(LEG_LAST, 'last')]);
+  {
+    // THE EXIT READER (the row's road): lines from before the exit audit had ids (0e7dc5b4f) carry NESTED ones — an access
+    // change's `changed` names its who list ({kind, id}) — so two such lines naming one group read as ONE; now both are read
+    const OLD = (at) => JSON.stringify({ at, origin: 'exit', hostId: 'host-dial-standin', machine: 'standin', verb: 'access-changed', by: { key: 'k', name: '' }, ok: true, changed: { run: { mode: 'only', who: [{ kind: 'group', id: 'G' }] } }, summary: 'old ' + at }) + '\n';
+    const plantOld = async (w) => { await w.mgr.auditWritten(); fs.appendFileSync(path.join(w.dataDir, 'exit-audit.jsonl'), OLD(1000) + OLD(1001)); };
+    const oldRead = (w) => w.mgr.auditTail({ hostId: 'host-dial-standin', limit: 100, filter: (l) => l.verb === 'access-changed' && l.at < 5000 }).map((l) => l.at);
+    const wo = await world(); await plantOld(wo);
+    const got = oldRead(wo);
+    ok(got.length === 2 && got[0] === 1000 && got[1] === 1001, `B-e6c1: two older exit lines (no top-level id) naming one group are BOTH read by auditTail (${got.length} of 2)`, got);
+    // RED CONTROL: exit-proxy compiled with the release's idIn (the first "id":" anywhere) — the SHIPPED reader, the plant first
+    const EPo = compileAt('src/exit-proxy.js', [["idIn = require('./device-audit.js').idIn;",
+      "idIn = (raw, own = 'last') => { const k = '\"id\":\"', i = own === 'first' ? raw.indexOf(k) : raw.lastIndexOf(k); if (i < 0) return null; const j = raw.indexOf('\"', i + k.length); return j > i ? raw.slice(i + k.length, j) : null; };"]]);
+    const wr = await world({ Mgr: EPo.ExitProxyManager }); await plantOld(wr);
+    const onDisk = fs.readFileSync(path.join(wr.dataDir, 'exit-audit.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((l) => l.verb === 'access-changed' && l.at < 5000);
+    ok(onDisk.length === 2 && onDisk[0].summary !== onDisk[1].summary && onDisk.every((l) => !('id' in l) && l.changed.run.who[0].id === 'G'), 'CONTROL B-e6c1 proves its plant first: two different older exit lines on disk, no top-level id, one nested group id');
+    const gotR = oldRead(wr);
+    ok(gotR.length === 1, `CONTROL B-e6c1 (the release's idIn in the shipped reader): the second older line is read as the first and dropped (${gotR.length} of 2, red)`, gotR);
+    for (const w of [wo, wr]) { await w.mgr.auditWritten(); await w.hm.deviceAudit.whenWritten(); }
+  }
 }
 
 // ═══ ④ ═══
