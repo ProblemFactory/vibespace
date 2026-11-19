@@ -71,6 +71,13 @@ const NEEDS = Object.freeze([
   { id: 'hub-machine', need: 'the hub machine\'s own system (strace 6.6 or newer, setpriv, unzip, a tracing permission, a private folder outside the home)', platforms: ['linux'], kind: 'b',
     match: /^(this machine has no strace|this machine does not let strace|the check needs strace|this machine has no setpriv|this machine has no private folder|unzip is missing)/,
     door: { none: 'the hub machine\'s own system tools (for a check, for a download): the sentence names the package and its apt line; VibeSpace runs sudo only without a password prompt (sudo -n) and installs none of these tools itself; a kernel setting or a folder is the administrator\'s to change' } }, // B-bd27 H
+  // lane lg-providers (B-d578 cure 3, the checkpoint's red of 2.369.412 — 主开发 09:03Z): a third-party provider's Test on Claude Code
+  // reads the machine's Windows policy through Windows' own reg.exe; on a WSL hub that needs WSL interop on (Windows programs runnable
+  // from WSL). A person CAN meet it — the switch is said in the sentence (B-ee0a words it by platform) — but no door of VibeSpace's
+  // can: the hub runs inside that very WSL
+  { id: 'windows-policy-helper', need: 'Windows\' own reg.exe, run by the hub to read the Windows policy for Claude Code — on a WSL hub, WSL interop on', platforms: ['linux', 'win32'], kind: 'c',
+    match: /could not find or start the Windows helper \(reg\.exe\)/,
+    door: { none: 'the WSL distribution\'s own switch (its /etc/wsl.conf «[interop] enabled», then a WSL restart from Windows) — or, on a native Windows hub, its System32 reg.exe — is outside the hub, which runs inside that machine: the sentence says what to turn on and where, and the provider\'s start on another account stays open' } },
 ]);
 /** The net's catches that state no need of a machine — each with its reason. */
 const NOT_NEEDS = Object.freeze([
