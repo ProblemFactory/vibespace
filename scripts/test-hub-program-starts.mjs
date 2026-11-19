@@ -182,6 +182,31 @@ try {
   const REC = "start: pid ? ((PI.statOf(pid) || [])[1] || null) : null";
   const t2 = await alive2({ MountManager }), t2r = await alive2(MC.load('src/mounts.js', msrc.replace(REC, () => "start: pid ? 'not-the-field' : null"), 'red-rec'));
   ok(msrc.split(REC).length === 2 && t2 === 'hung → hung/held' && t2r === 'hung → hung', `a child that timed out and lives: the next probe says held («${t2}») — its recorded start time is the live child's; RED (the wrong field recorded): «${t2r}» — a second probe stacked`);
+  // the moved chain's cure (主开发 23:58Z, a must): THE RECORDED START IS THE CHILD'S OWN, and a RECYCLED pid is gone. The silent
+  // break the move cured — the onTimeout asking B-e783's async procStat(root, pid): a Promise read as a list ⇒ the start null, so
+  // a pid the kernel gave to another process was never compared — was found by an anchor; this leg finds it by behaviour
+  const recycle = async (M) => {
+    const st = CS.createChildStarter({ script: TALIVE }); CS.setChildStarter(st);
+    const mm = Object.create(M.MountManager.prototype);
+    const r1 = await mm._probeMountpoint(T, 2000, 'attr');
+    const h = mm._heldProbes.get('attr:' + T) || {}, pid0 = h.pid;
+    let own = null; try { const s = fs.readFileSync(`/proc/${h.pid}/stat`, 'utf8'); own = s.slice(s.lastIndexOf(')') + 2).split(' ')[19]; } catch { }   // the child's own start, read here
+    const start = h.start;
+    st.closePipe();
+    h.pid = process.pid;   // the kernel's reuse, planted: the mark's pid now names ANOTHER live process (this one — another start)
+    const real = CS.createChildStarter(); CS.setChildStarter(real);
+    const r2 = await mm._probeMountpoint(T, 5000, 'attr');
+    real.closePipe();
+    return { first: r1.health, pid0, start, own, again: `${r2.health}${r2.held ? '/held' : ''}` };
+  };
+  const NULL_START = "start: pid ? ((procStat(pid) || [])[1] || null) : null";   // the move's own break, verbatim (B-e783's async procStat)
+  const nullSrc = msrc.replace(REC, () => NULL_START);
+  ok(msrc.split(REC).length === 2 && nullSrc !== msrc && /const procStat = async \(root, pid\)/.test(msrc), 'CONTROL (the null start): its plant — the recorded-start line — is spelled exactly once, and the async procStat it would call is the module\'s');
+  const v1 = await recycle({ MountManager }), v1r = await recycle(MC.load('src/mounts.js', nullSrc, 'red-null-start'));
+  ok(v1.first === 'hung' && v1.pid0 > 1 && v1.own != null && v1.start === v1.own && v1.again === 'ok',
+    `the held mark records its child's OWN start (${v1.start} = /proc's ${v1.own}, pid ${v1.pid0}); its pid then naming another process (another start): asked again — gone, the mount probed again («${v1.again}»)`, v1);
+  ok(v1r.first === 'hung' && v1r.start === null && v1r.again === 'hung/held',
+    `CONTROL (the start recorded null — the move's own break planted): the recycled pid is never compared — «${v1r.again}» for good ⇒ RED`, v1r);
   const gone = await new Promise((r) => { const c = CP.spawn('true', [], { stdio: 'ignore' }); c.on('exit', () => r(c.pid)); });
   const S6 = CS.createChildStarter(); CS.setChildStarter(S6);
   const lost = async (M) => { const mm = Object.create(M.MountManager.prototype); mm._heldProbes = new Map([['attr:' + T, { t0: Date.now() - 1000, pid: gone }]]); return (await mm._probeMountpoint(T, 5000, 'attr')).health; };
