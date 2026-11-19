@@ -21,7 +21,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { EventEmitter } from 'node:events';
-import { scratchHome } from './scratch.mjs';
+import { scratchHome, anchored } from './scratch.mjs';
+import { mutantCopies } from './mutant-copy.mjs';
 import { stripComments } from './ci.mjs';
 import { checker } from './lib/check.mjs';
 
@@ -65,11 +66,9 @@ console.log('§1 the door — a refused watch is a poll; the limit said once, ne
       `a machine at 1 048 576 (this owner's since today) is offered ${WD.raiseCmd(1048576).split(' ').pop()} — never the fixed 524 288 that would halve it; an unread limit falls back to 524 288`, { big: big.detail, unread: unread.detail });
     // CONTROL (in memory, never a file in src/): the hotfix's fixed number put back into the door — the same machine is offered 524 288
     const DSRC = fs.readFileSync(path.join(REPO, 'src/watch-door.js'), 'utf8'), RC = "const raiseCmd = (current) => `sudo sysctl -w ${LIMIT_NAME}=${Math.max(524288, 2 * (Number(current) > 0 ? Math.floor(Number(current)) : 0))}`;";
-    if (DSRC.split(RC).length !== 2) ok(false, 'the anchor of the control «the fixed command» is not in src/watch-door.js (once)');
-    else {
-      const Module = require('node:module'), fake = path.join(REPO, 'src/watch-door.fixed-mutant.js'), m = new Module(fake, null);
-      m.filename = fake; m.paths = Module._nodeModulePaths(path.dirname(fake)); m._compile(DSRC.replace(RC, () => 'const raiseCmd = () => `sudo sysctl -w ${LIMIT_NAME}=524288`;'), fake);
-      const mb = m.exports.noticeItem({ container: false, current: 1048576 });
+    let mx = null; try { mx = mutantCopies('watch-door-fixed', REPO).load('src/watch-door.js', anchored(DSRC, RC, 'const raiseCmd = () => `sudo sysctl -w ${LIMIT_NAME}=524288`;', 'the fixed command'), 'fixed'); } catch (e) { ok(false, `the control «the fixed command» built nothing — ${e && e.message}`); }
+    if (mx) {
+      const mb = mx.noticeItem({ container: false, current: 1048576 });
       ok(mb.detail.includes(FIXED) && !mb.detail.includes('=2097152'), 'CONTROL (the hotfix\'s fixed number put back): a machine at 1 048 576 is offered 524 288 — the leg above is red on it', mb.detail);
     }
   }
@@ -142,6 +141,162 @@ console.log('§1 the door — a refused watch is a poll; the limit said once, ne
   ok(b.calls >= 120 && b.peak <= WD.LIMITS.inflight && b.pollers === 120 && b.cadence > WD.ACTIVE_MS && b.slowest >= b.cadence,
     `120 refused watches: every poll read its file (${b.calls} calls) with at most ${b.peak} in flight at once (the bound ${WD.LIMITS.inflight}, counted by the stand-in itself); every poll's own cadence (its seam) is at least the slowed ${b.cadence} ms (the least: ${b.slowest} ms)`, b);
   ok(c.peak > WD.LIMITS.inflight, `CONTROL (the bounds lifted): the same 120 polls put ${c.peak} file calls in flight at once — the count can see an unbounded pool`, c);
+}
+
+console.log('§1b the block\'s follow (its readers\' S1 / S3 / N4 / N8 / N9 / N10) — a notice adopted after a restart; the probe, the arms in a row and the running bound each with a control');
+{
+  const M = mutantCopies('watch-door-follow', REPO);
+  const DSRC = fs.readFileSync(path.join(REPO, 'src/watch-door.js'), 'utf8');
+  const mutant = (anchor, to, name) => { try { return M.load('src/watch-door.js', anchored(DSRC, anchor, to, name), name.replace(/\W+/g, '-')); } catch (e) { return { error: String((e && e.message) || e).slice(0, 160) }; } };
+  const f = path.join(TMP, 'follow.jsonl'); fs.writeFileSync(f, 'one\n');
+  const refusing = { ...fs, watch() { throw enospc(); } };
+  const arming = { ...fs, watch() { const e = new EventEmitter(); e.close = () => {}; return e; } };
+  { // S1 A NOTICE THAT OUTLIVED A RESTART is adopted: no second item; lifted by the same rule (arms in a row after the quiet time)
+    const adopt = (D) => {
+      D.resetForTest(); let T0 = 1e12;
+      const T = todosStub(); T.items.set('fy-before', { id: 'fy-before', status: 'open' }); T.openItems = () => [{ id: 'fy-before', sessionKey: D.NOTICE_KEY, status: 'open' }];
+      D.configure({ getUserTodos: () => T, log: () => {}, clock: () => T0, container: false, limitNow: () => 65536 });
+      const at = D.status(), w0 = D.watch(f, () => {}, { fs: refusing });   // the limit still met: no second item
+      T0 += D.LIMITS.liftQuietMs; const ws = [1, 2, 3].map(() => D.watch(f, () => {}, { fs: arming }));
+      const out = { itemId: at.itemId, limited: at.limited, adds: T.adds.length, done: T.done.map((d) => d.id) };
+      for (const w of [w0, ...ws]) w.close(); D.resetForTest();
+      return out;
+    };
+    const a = adopt(WD);
+    ok(a.itemId === 'fy-before' && a.limited === true && a.adds === 0 && a.done.join() === 'fy-before',
+      'S1: the open watch-limit item from before a restart is ADOPTED (its id, the limit taken as met) — no second item filed at the next refusal; three arms in a row after the quiet time lift THAT item', a);
+    const cut = mutant('  if (!open) return true;\n', '  return true;\n', 'S1 adoption cut');
+    const c = cut.error ? null : adopt(cut);
+    ok(!!c && (c.itemId !== 'fy-before' || c.adds > 0) && !c.done.includes('fy-before'),
+      `CONTROL (the adoption cut${cut.error ? ` — NOT BUILT: ${cut.error}` : ''}): the restart's item is never lifted and a second one is filed beside it`, c);
+  }
+  { // S1 (its second reader's must) THE STORE ARRIVES AFTER configure() — as in the hub's boot, where the system-resource module
+    // configures the door before the store exists (its getter throws until then): the item is adopted at the next turns
+    const late = async (D) => {
+      D.resetForTest(); let ready = false;
+      const T = todosStub(); T.items.set('fy-before', { id: 'fy-before', status: 'open' }); T.openItems = () => [{ id: 'fy-before', sessionKey: D.NOTICE_KEY, status: 'open' }];
+      D.configure({ getUserTodos: () => { if (!ready) throw new ReferenceError('Cannot access \'userTodos\' before initialization'); return T; }, log: () => {}, container: false });
+      const before = D.status().itemId;
+      ready = true;
+      await until(() => D.status().itemId === 'fy-before', 40, 10);
+      const out = { before, after: D.status().itemId, limited: D.status().limited, adds: T.adds.length };
+      D.resetForTest();
+      return out;
+    };
+    const l = await late(WD);
+    ok(l.before === null && l.after === 'fy-before' && l.limited === true && l.adds === 0, 'S1 the store that is not there at configure() (its getter throws, as in the hub\'s boot) is asked again at the next turns: the item from before the restart is adopted then', l);
+    const cutLate = mutant('  if (!adoptOpen()) adoptSoon(0);\n', '  adoptOpen();\n', 'S1 the later turns cut');
+    const cl = cutLate.error ? null : await late(cutLate);
+    ok(!!cl && cl.after !== 'fy-before', `CONTROL (adoption tried at configure() only${cutLate.error ? ` — NOT BUILT: ${cutLate.error}` : ''}): the item is never adopted — the reader's must, as it shipped in the first form`, cl);
+  }
+  { // S1 an adopted item on a machine that ARMS NOTHING ELSE is lifted by the PROBE alone (the limit fine after the restart)
+    const byProbe = async (D) => {
+      D.resetForTest(); let tries = 0;
+      const T = todosStub(); T.items.set('fy-before', { id: 'fy-before', status: 'open' }); T.openItems = () => [{ id: 'fy-before', sessionKey: D.NOTICE_KEY, status: 'open' }];
+      Object.assign(D.LIMITS, { probeMs: 5, liftArms: 3, liftQuietMs: 0 });
+      D.configure({ getUserTodos: () => T, log: () => {}, container: false, probeFs: { ...arming, watch(...a) { tries++; return arming.watch(...a); } } });
+      await until(() => !D.status().limited || tries >= 6, 60, 10);
+      const out = { tries, limited: D.status().limited, done: T.done.map((d) => d.id) };
+      D.resetForTest();
+      return out;
+    };
+    const p = await byProbe(WD);
+    ok(p.limited === false && p.done.join() === 'fy-before' && p.tries >= 3, `S1 the adopted item on a machine that arms nothing else: ${p.tries} probe watches lift it`, p);
+    const cutP = mutant("log('[watch] a watch-limit notice from before the restart is kept until watches have been set again for a while'); armProbe(); }", "log('[watch] a watch-limit notice from before the restart is kept until watches have been set again for a while'); }", 'S1 the adoption probe cut');
+    const cp = cutP.error ? null : await byProbe(cutP);
+    ok(!!cp && cp.limited === true && cp.tries === 0 && !cp.done.length, `CONTROL (the adoption arms no probe${cutP.error ? ` — NOT BUILT: ${cutP.error}` : ''}): nothing lifts the item`, cp);
+  }
+  { // S3 (a) THE PROBE: a hub that arms nothing else still learns the limit cleared — one watch tried every probeMs and closed at once
+    const probe = async (D, pf) => {
+      D.resetForTest(); let tries = 0;
+      const counted = { ...pf, watch(...a) { tries++; return pf.watch(...a); } };
+      D.configure({ getUserTodos: () => todosStub(), log: () => {}, container: false, probeFs: counted });
+      Object.assign(D.LIMITS, { probeMs: 5, liftArms: 3, liftQuietMs: 0 });
+      const w = D.watch(f, () => {}, { fs: refusing });
+      await until(() => tries >= 4 || !D.status().limited, 200, 10);
+      const out = { tries, limited: D.status().limited, lifted: D.status().lifted };
+      w.close(); D.resetForTest();
+      return out;
+    };
+    const lifted = await probe(WD, arming), held = await probe(WD, refusing);
+    ok(lifted.tries >= 3 && lifted.limited === false && lifted.lifted === 1 && held.tries >= 4 && held.limited === true,
+      `S3 (a) the probe: nothing else arms, yet ${lifted.tries} probe watches armed in a row lift the limit; CONTROL — a probe the system still refuses (${held.tries} tries) keeps it`, { lifted, held });
+  }
+  { // S3 (b) THE ARMS COUNT IN A ROW: a refusal between them starts the count again
+    const row = (D) => {
+      D.resetForTest(); let T0 = 1e12;
+      D.configure({ getUserTodos: () => todosStub(), log: () => {}, clock: () => T0, container: false });
+      const ws = [D.watch(f, () => {}, { fs: refusing })];
+      T0 += D.LIMITS.liftQuietMs;
+      ws.push(D.watch(f, () => {}, { fs: arming }), D.watch(f, () => {}, { fs: arming }));
+      ws.push(D.watch(f, () => {}, { fs: refusing }));   // the row broken
+      T0 += D.LIMITS.liftQuietMs;
+      ws.push(D.watch(f, () => {}, { fs: arming }));      // three arms in all since the quiet time, one in a row
+      const broken = D.status().limited;
+      ws.push(D.watch(f, () => {}, { fs: arming }), D.watch(f, () => {}, { fs: arming }));
+      const out = { brokenStillLimited: broken, liftedAfterRow: !D.status().limited };
+      for (const w of ws) w.close(); D.resetForTest();
+      return out;
+    };
+    const r = row(WD);
+    ok(r.brokenStillLimited === true && r.liftedAfterRow === true, 'S3 (b) a refusal between the arms starts the count again: three arms with one refusal among them keep the limit; three IN A ROW lift it', r);
+    const cut = mutant('  state.lastRefusalAt = now(); state.armsInRow = 0;\n  if (!state.limited) {', '  state.lastRefusalAt = now();\n  if (!state.limited) {', 'S3b the row reset cut');
+    const c = cut.error ? null : row(cut);
+    ok(!!c && c.brokenStillLimited === false, `CONTROL (a refusal no longer resets the count${cut.error ? ` — NOT BUILT: ${cut.error}` : ''}): the broken row lifts the limit`, c);
+  }
+  { // S3 (c) THE RUNNING BOUND: at most LIMITS.running polls' ticks at once — counted by the stand-in itself (a tick = its folder's
+    // stat … its entry's stat), the in-flight bound lifted so only the running one holds
+    const run = async (limits) => {
+      WD.resetForTest(); WD.configure({ log: () => {} }); Object.assign(WD.LIMITS, { inflight: 1e9, ...limits });
+      let open = 0, peak = 0;
+      const dirs = { ...fs, watch() { throw enospc(); }, promises: {
+        stat: async (p) => { const entry = String(p).endsWith(`${path.sep}e`); if (!entry) { open++; if (open > peak) peak = open; } await sleep(3); if (entry) open--; return entry ? { isDirectory: () => false, size: 1, mtimeMs: 1 } : { isDirectory: () => true, size: 1, mtimeMs: 1 }; },
+        readdir: async () => ['e'] } };
+      const ws = []; for (let i = 0; i < 120; i++) ws.push(WD.watch(path.join(TMP, `r${i}`), () => {}, { fs: dirs }));
+      await Promise.all(ws.map((w) => w.ready));
+      for (const w of ws) w.close(); WD.resetForTest();
+      return { peak };
+    };
+    const b = await run({}), c = await run({ running: 1e9 });
+    ok(b.peak <= 32 && b.peak >= 2 && c.peak > 32, `S3 (c) 120 polls of folders: at most ${b.peak} ticks at once (the bound 32, counted by the stand-in); CONTROL — the bound lifted: ${c.peak} at once`, { b, c });
+  }
+  { // N10 (its delta reader's F2) A RESET WHILE TICKS HOLD THEIR TURNS gives the new state nothing: two polls' first ticks take
+    // their turns at once, they close and the reset lands BEFORE their continuations run; 120 polls of folders then start in the
+    // same turn — at most 32 ticks at once (counted by the stand-in). The order of S3 (b) then (c) found it; this leg names it
+    const n10 = async (D) => {
+      D.resetForTest(); D.configure({ log: () => {} });
+      const old = [D.watch(f, () => {}, { fs: refusing }), D.watch(f, () => {}, { fs: refusing })];
+      for (const w of old) w.close();
+      D.resetForTest(); D.configure({ log: () => {} }); Object.assign(D.LIMITS, { inflight: 1e9 });
+      let open = 0, peak = 0;
+      const dirs = { ...fs, watch() { throw enospc(); }, promises: {
+        stat: async (p) => { const entry = String(p).endsWith(`${path.sep}e`); if (!entry) { open++; if (open > peak) peak = open; } await sleep(3); if (entry) open--; return { isDirectory: () => !entry, size: 1, mtimeMs: 1 }; },
+        readdir: async () => ['e'] } };
+      const ws = []; for (let i = 0; i < 120; i++) ws.push(D.watch(path.join(TMP, `n${i}`), () => {}, { fs: dirs }));
+      await Promise.all(ws.map((w) => w.ready));
+      for (const w of ws) w.close(); D.resetForTest();
+      return { peak };
+    };
+    const r = await n10(WD);
+    ok(r.peak <= 32 && r.peak >= 2, `N10 two ticks holding their turns at a reset give the new state nothing: 120 polls then run at most ${r.peak} at once (the bound 32)`, r);
+    const back = mutant('    if (g !== gen) return;   // a reset came while it held its turn', '    if (g !== gen) { give(runWait, \'running\', gen); return; }   // a reset came while it held its turn', 'N10 the turn handed to the new state');
+    const c = back.error ? null : await n10(back);
+    ok(!!c && c.peak > 32, `CONTROL (the stale turn handed to the new state, as this unit's first cure had it${back.error ? ` — NOT BUILT: ${back.error}` : ''}): ${c && c.peak} at once — over the bound`, c);
+  }
+  { // N4 «every few seconds at most» stays true however many poll; N9 a filing that keeps failing is said ONCE a limit
+    ok(WD.cadenceFor(1e6) === WD.CADENCE_MAX_MS && WD.CADENCE_MAX_MS <= 5000 && WD.cadenceFor(1) === WD.ACTIVE_MS, `N4 the cadence is capped at ${WD.CADENCE_MAX_MS} ms (a million pollers) — the notice's «every few seconds at most» holds`, { big: WD.cadenceFor(1e6) });
+    WD.resetForTest(); const said = [];
+    const T = todosStub(); T.add = () => { throw new Error('the store is busy'); };
+    WD.configure({ getUserTodos: () => T, log: (l) => said.push(l), container: false });
+    const ws = [1, 2, 3].map(() => WD.watch(f, () => {}, { fs: refusing }));
+    ok(said.filter((l) => /was not filed/.test(l)).length === 1 && WD.status().filesDue, 'N9 a filing that keeps failing is said ONCE while the limit lasts (three refusals, one journal line), still due', said);
+    for (const w of ws) w.close(); WD.resetForTest();
+  }
+  { // N8 the tailer keeps no second poll beside its own; N10 a reset's generation — source pins (the tailer reads the real directory)
+    const TAIL = fs.readFileSync(path.join(REPO, 'src/workflow-usage-tailer.js'), 'utf8');
+    ok(/if \(st\.watcher && st\.watcher\.polled\) \{ st\.watcher\.close\(\); st\.watcher = null; \}/.test(TAIL) && /const give = \(q, key, g\) => \{ if \(g !== gen\) return;/.test(DSRC) && /gen\+\+; Object\.assign\(state, fresh\(\)\)/.test(DSRC),
+      'N8 the workflow tailer closes a door poll that stands in (its own poll carries the folder); N10 a tick of an older reset never gives a slot into the new one (its generation)');
+  }
 }
 
 console.log('§2 the census — no fs.watch of the hub\'s code outside the door');
@@ -232,7 +387,8 @@ async function parserRoad(consumer, { control = false } = {}) {
     r.armed = armed; r.uncaught = uncaught.map((e) => e && e.code);
     const helperMsgs = () => bcast.filter((m) => m && m.type === 'subagent-message' && m.parentToolUseId === 'tu-wd-1').map((m) => m.message && m.message.uuid);
     if (!control) {
-      await sleep(30);
+      let baseTaken = false; Promise.resolve(((s.subagentWatchers.get('tu-wd-1') || {}).watcher || {}).ready).then(() => { baseTaken = true; });
+      await until(() => baseTaken, 80, 25);   // (its reader's S4) the poll's baseline taken — a fact, never a fixed wait; bounded, so a poll that never takes it is a named red, never a hang
       fs.appendFileSync(file, rec(2));
       await until(() => helperMsgs().length >= 2, 80, 50);
     }

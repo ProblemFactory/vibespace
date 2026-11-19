@@ -15,7 +15,8 @@
  *   · THE POLLERS ARE BOUNDED (主开发 01:30Z, 2): hundreds of refused watches never become hundreds of pollers hammering the
  *     hub's small thread pool — at most LIMITS.running polls run at once (the rest wait their turn), at most LIMITS.inflight
  *     file calls are in flight across ALL of them (each stat / readdir waits for a slot), and the active cadence slows as the
- *     pollers grow (cadenceFor: ACTIVE_MS × ⌈pollers / POLLERS_PER_STEP⌉, never under ACTIVE_MS).
+ *     pollers grow (cadenceFor: ACTIVE_MS × ⌈pollers / POLLERS_PER_STEP⌉, never under ACTIVE_MS, never over CADENCE_MAX_MS — the
+ *     timer's gap; past 32 polls a tick also waits its turn for the running and in-flight bounds).
  *   · THE LIMIT IS SAID, AND NEVER FLAPS (主开发 01:30Z, 1): the system's limit of watches reached (ENOSPC) is said ONCE in the
  *     journal and ONCE to the person — one For-you notice (en, zh, ja) with the limit's name and the one command that raises
  *     it (on a container, that it is raised on the host — never a command; no claim about who holds the watches) — and LIFTED only when the limit has stayed clear: LIMITS.liftArms watches armed IN A ROW and LIMITS.liftQuietMs since
@@ -52,7 +53,8 @@ let probeFs = fs;
 let containerOverride = null;   // the suite's seam; else read once at the notice
 const readLimit = () => { try { return Number(fs.readFileSync(LIMIT_FILE, 'utf8').trim()) || null; } catch { return null; } };   // procfs, read at a notice only
 let limitNow = readLimit;
-const fresh = () => ({ limited: false, code: null, itemId: null, pollers: 0, refusals: 0, listenerSaid: false, saidOther: false,
+let gen = 0;   // a reset's generation: a tick of an older one never gives a slot back into the new one (its reader's N10)
+const fresh = () => ({ limited: false, code: null, itemId: null, pollers: 0, refusals: 0, listenerSaid: false, saidOther: false, failSaid: false,
   lastRefusalAt: 0, armsInRow: 0, lastFiledAt: -Infinity, filesDue: false, gapSaid: false, filed: 0, lifted: 0, probe: null, running: 0, inflight: 0, maxInflight: 0, maxRunning: 0 });
 const state = fresh();
 const runWait = [], slotWait = [];
@@ -74,8 +76,10 @@ function noticeItem({ container = inContainer(), current = limitNow() } = {}) {
   const text = 'The system’s limit of file watches is reached — VibeSpace follows files more slowly until it is raised';
   return { text, detail: rows.map(fill).join('\n'), i18n: { text: { key: i18nKey('The system’s limit of file watches is reached — VibeSpace follows files more slowly until it is raised'), params: {} }, detail: rows } };
 }
-/** PURE: the active cadence for `n` pollers — slower as they grow. */
-const cadenceFor = (n) => ACTIVE_MS * Math.max(1, Math.ceil((Number(n) || 0) / POLLERS_PER_STEP));
+/** PURE: the active cadence for `n` pollers — slower as they grow, never past CADENCE_MAX_MS: «every few seconds at most» (the
+ *  notice's own words) stays true however many poll (its reader's N4). */
+const CADENCE_MAX_MS = 5000;
+const cadenceFor = (n) => Math.min(CADENCE_MAX_MS, ACTIVE_MS * Math.max(1, Math.ceil((Number(n) || 0) / POLLERS_PER_STEP)));
 
 function fileNotice() {
   if (state.itemId) return;
@@ -91,7 +95,7 @@ function fileNotice() {
     const r = todos.add(NOTICE_KEY, { origin: 'server', kind: 'notice', urgency: 'high', by: 'agent', sessionName: 'File watches', text: it.text, detail: it.detail, i18n: it.i18n });
     state.itemId = (r && (r.id || (r.item && r.item.id))) || null;
     state.lastFiledAt = now(); state.filesDue = false; state.gapSaid = false; state.filed++;
-  } catch (e) { state.filesDue = true; log(`[watch] the For-you notice of the watch limit was not filed — ${e && e.message}; it is tried again while the limit lasts`); }   // (主开发 01:35Z, 5) retried: the next refusal, the probe, configure()
+  } catch (e) { state.filesDue = true; if (!state.failSaid) { state.failSaid = true; log(`[watch] the For-you notice of the watch limit was not filed — ${e && e.message}; it is tried again while the limit lasts`); } }   // (主开发 01:35Z, 5) retried: the next refusal, the probe, configure() — said ONCE a limit (its reader's N9)
 }
 function liftNotice() {
   const todos = todosOf();
@@ -119,7 +123,7 @@ function noteRefused(e) {
   if (code !== 'ENOSPC') { if (!state.saidOther) { state.saidOther = true; log(`[watch] a file watch could not be set (${code}) — that file is followed by polling`); } return; }
   state.lastRefusalAt = now(); state.armsInRow = 0;
   if (!state.limited) {
-    state.limited = true; state.code = code;
+    state.limited = true; state.code = code; state.failSaid = false;
     log(`[watch] the system's limit of file watches is reached (${LIMIT_NAME}, ENOSPC) — files are followed by polling until a watch can be set again${inContainer() ? ' (a container: the limit is raised on its host)' : `; to raise it: ${raiseCmd(limitNow())}`}`);
   }
   if (!state.itemId) fileNotice();
@@ -135,6 +139,28 @@ function noteArmed() {
   log('[watch] file watches have been set again for a while — the limit notice is lifted');
   liftNotice();
 }
+/** (its readers' S1) THE ITEM A PREVIOUS PROCESS LEFT OPEN: adopted — the limit taken as met from then (its filing time the item's
+ *  own), the probe armed, lifted by the same rule; never a second item beside it, never one left open for good.
+ *  → true when the store answered (adopted, or nothing to adopt), false when there is no store yet. */
+function adoptOpen() {
+  if (state.itemId) return true;
+  const t = todosOf();
+  if (!t || typeof t.openItems !== 'function') return false;
+  let open = null;
+  try { open = t.openItems().find((x) => x && x.sessionKey === NOTICE_KEY) || null; } catch { return false; }
+  if (!open) return true;
+  state.itemId = open.id; state.lastFiledAt = Number.isFinite(open.createdAt) ? open.createdAt : now(); state.filesDue = false;
+  if (!state.limited) { state.limited = true; state.code = 'ENOSPC'; state.lastRefusalAt = now(); state.armsInRow = 0; log('[watch] a watch-limit notice from before the restart is kept until watches have been set again for a while'); armProbe(); }
+  return true;
+}
+// the store's later turns: the next loop turn (the hub's boot has made it by then), then a few more, each timer unref'd
+const ADOPT_RETRY_MS = Object.freeze([0, 1000, 5000, 30000]);
+let adoptTimer = null;
+function adoptSoon(k) {
+  if (adoptTimer || k >= ADOPT_RETRY_MS.length) return;
+  adoptTimer = setTimeout(() => { adoptTimer = null; if (!adoptOpen()) adoptSoon(k + 1); else if (state.limited && !state.itemId) fileNotice(); }, ADOPT_RETRY_MS[k]);
+  if (adoptTimer.unref) adoptTimer.unref();
+}
 /** Hand the door the For-you store (the system-resource notices' module, at boot). A limit already met files its notice now. */
 function configure({ getUserTodos = null, log: lg = null, clock = null, probeFs: pf = null, container = undefined, limitNow: ln = null } = {}) {
   if (container !== undefined) containerOverride = container;   // the suite's seam
@@ -143,6 +169,9 @@ function configure({ getUserTodos = null, log: lg = null, clock = null, probeFs:
   if (typeof lg === 'function') log = lg;
   if (typeof clock === 'function') now = clock;   // the suite's clock (the flap legs)
   if (pf) probeFs = pf;
+  // (its reader's S1) A NOTICE THAT OUTLIVED A RESTART is adopted — now if the store answers, else at the first turns after the
+  // boot (the system-resource module configures the door BEFORE the hub's store exists: its getter throws until then)
+  if (!adoptOpen()) adoptSoon(0);
   if (state.limited && !state.itemId) fileNotice();
 }
 
@@ -152,28 +181,30 @@ const safeCall = (listener, ev, name) => {
 };
 // THE BOUNDS: a poll's tick waits for a RUNNING turn; each of its file calls waits for an IN-FLIGHT slot
 const take = (q, key, max, maxKey) => new Promise((res) => { const go = () => { state[key]++; if (state[key] > state[maxKey]) state[maxKey] = state[key]; res(); }; if (state[key] < LIMITS[max]) go(); else q.push(go); });
-const give = (q, key) => { state[key]--; const next = q.shift(); if (next) next(); };
-async function call(fn) { await take(slotWait, 'inflight', 'inflight', 'maxInflight'); try { return await fn(); } finally { give(slotWait, 'inflight'); } }
+const give = (q, key, g) => { if (g !== gen) return; state[key] = Math.max(0, state[key] - 1); const next = q.shift(); if (next) next(); };
+async function call(fn, g) { if (g !== gen) throw new Error('an older reset'); await take(slotWait, 'inflight', 'inflight', 'maxInflight'); if (g !== gen) throw new Error('an older reset'); try { return await fn(); } finally { give(slotWait, 'inflight', g); } }   // a tick of an older reset takes nothing from the new one, and gives nothing into it (its reader's N10)
 
 /** The bounded poll that stands in for a watch: the target's stat (a folder: its entries'), compared tick to tick. */
 function startPoll(target, listener, F) {
   let timer = null, closed = false, waitMs = cadenceFor(state.pollers + 1), last = null, baseline = null;
+  const g = gen;
   const ready = new Promise((r) => { baseline = r; });
   state.pollers++;
   const sig = async () => {
-    const st = await call(() => F.promises.stat(target));
+    const st = await call(() => F.promises.stat(target), g);
     if (!st.isDirectory()) return { [path.basename(String(target))]: `${st.size}:${st.mtimeMs}` };
     const out = {};
-    const names = (await call(() => F.promises.readdir(target))).slice(0, POLL_ENTRIES);
-    for (const n of names) { if (closed) break; try { const s = await call(() => F.promises.stat(path.join(String(target), n))); out[n] = `${s.size}:${s.mtimeMs}`; } catch { out[n] = 'gone'; } }
+    const names = (await call(() => F.promises.readdir(target), g)).slice(0, POLL_ENTRIES);
+    for (const n of names) { if (closed) break; try { const s = await call(() => F.promises.stat(path.join(String(target), n)), g); out[n] = `${s.size}:${s.mtimeMs}`; } catch { out[n] = 'gone'; } }
     return out;
   };
   const tick = async () => {
-    if (closed) return;
+    if (closed || g !== gen) return;   // a poll of an older reset ticks no more (N10)
     await take(runWait, 'running', 'running', 'maxRunning');
+    if (g !== gen) return;   // a reset came while it held its turn: that turn was the OLD state's (wiped) — giving it to the new one would over-release
     let cur = null;
-    try { cur = closed ? null : await sig(); } catch { cur = {}; } finally { give(runWait, 'running'); }   // a target gone (or not there yet) is polled on, quietly
-    if (closed || !cur) { if (baseline) { baseline(); baseline = null; } return; }
+    try { cur = closed ? null : await sig(); } catch { cur = {}; } finally { give(runWait, 'running', g); }   // a target gone (or not there yet) is polled on, quietly
+    if (closed || !cur || g !== gen) { if (baseline) { baseline(); baseline = null; } return; }   // an older reset's tick calls no listener (its delta reader's F4)
     const changed = last ? Object.keys({ ...last, ...cur }).filter((k) => last[k] !== cur[k]) : [];
     last = cur;
     if (baseline) { baseline(); baseline = null; }   // the baseline is taken: changes from here on are heard
@@ -184,7 +215,7 @@ function startPoll(target, listener, F) {
   };
   const schedule = () => { if (closed) return; timer = setTimeout(() => { tick().catch(() => {}); }, waitMs); if (timer.unref) timer.unref(); };
   tick().catch(() => {});   // the baseline at once (in its turn)
-  return { ready, cadenceMs: () => waitMs, close() { if (closed) return; closed = true; state.pollers--; if (timer) clearTimeout(timer); timer = null; if (baseline) { baseline(); baseline = null; } } };
+  return { ready, cadenceMs: () => waitMs, close() { if (closed) return; closed = true; if (g === gen) state.pollers--; if (timer) clearTimeout(timer); timer = null; if (baseline) { baseline(); baseline = null; } } };
 }
 
 /**
@@ -223,9 +254,10 @@ function watch(target, options, listener, seam = {}) {
 const status = () => ({ limited: state.limited, code: state.code, itemId: state.itemId, pollers: state.pollers, refusals: state.refusals, filed: state.filed, lifted: state.lifted, armsInRow: state.armsInRow, maxInflight: state.maxInflight, maxRunning: state.maxRunning, filesDue: state.filesDue });
 function resetForTest() {
   if (state.probe) clearTimeout(state.probe);
-  Object.assign(state, fresh()); runWait.length = 0; slotWait.length = 0;
+  if (adoptTimer) { clearTimeout(adoptTimer); adoptTimer = null; }
+  gen++; Object.assign(state, fresh()); runWait.length = 0; slotWait.length = 0;
   Object.assign(LIMITS, { running: 32, inflight: 4, liftArms: 3, liftQuietMs: 10 * 60e3, probeMs: 5 * 60e3, fileGapMs: 60 * 60e3 });
   todosOf = () => null; log = (line) => { try { console.warn(line); } catch { } }; now = () => Date.now(); probeFs = fs; containerOverride = null; limitNow = readLimit;
 }
 
-module.exports = { watch, configure, status, noticeItem, cadenceFor, resetForTest, LIMITS, ACTIVE_MS, QUIET_MS, POLLERS_PER_STEP, POLL_ENTRIES, NOTICE_KEY, LIMIT_NAME, raiseCmd };
+module.exports = { watch, configure, status, noticeItem, cadenceFor, resetForTest, LIMITS, ACTIVE_MS, QUIET_MS, CADENCE_MAX_MS, POLLERS_PER_STEP, POLL_ENTRIES, NOTICE_KEY, LIMIT_NAME, raiseCmd };

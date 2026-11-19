@@ -96,6 +96,7 @@ function createWorkflowTailer({
         if (st.debounce || st.stopped) return;
         st.debounce = setTimeout(() => { st.debounce = null; drain(); }, debounceMs);
       });
+      if (st.watcher && st.watcher.polled) { st.watcher.close(); st.watcher = null; }   // refused: the tailer's own poll below carries it — no second poll beside it (the watch door's reader, N8)
     } catch { /* watch unsupported — the poll below is the belt */ }
     st.poll = setInterval(() => {
       if (st.stopped) return;
