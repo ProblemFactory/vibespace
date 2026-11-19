@@ -15,6 +15,7 @@ import http from 'node:http';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { mutantCopies } from './mutant-copy.mjs';
+import { anchored } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const FIX = path.join(REPO, 'scripts/fixtures/global-search');
@@ -521,9 +522,9 @@ console.log('§10 a cleared group message is not found (B-b291): judged at every
       return n;
     };
     const ra = await retryScene(SI);
-    ok(ra === 14, `a whole hand-over gives a later partial set its ten tries again: 2 partial + the whole, then 1 + 10 tries after a worker restart (${ra} asks)`);
-    const rac = await retryScene(MUT.load('src/server/search-index.js', O2.replace(pin(O2, 'if (partial.length) retryCleared(); else clearedRetries = 0;'), 'if (partial.length) retryCleared();'), 'noreset'));
-    ok(rac === 12, `CONTROL (the counter never reset): the partial set after the restart gets only the tries left over — the leg goes RED (${rac} asks)`);
+    ok(ra === 14, `a whole hand-over (and a new worker's start, B-4543) gives a later partial set its ten tries again: 2 partial + the whole, then 1 + 10 tries after a worker restart (${ra} asks)`);
+    const rac = await retryScene(MUT.load('src/server/search-index.js', anchored(O2.replace(pin(O2, 'if (partial.length) retryCleared(mine); else clearedRetries = 0;'), 'if (partial.length) retryCleared(mine);'), 'const mine = worker; clearedRetries = 0; clearedPartial = true;', 'const mine = worker; clearedPartial = true;', 'B-4543 no reset at the start either'), 'noreset'));
+    ok(rac === 12, `CONTROL (the counter never reset — neither by a whole hand-over nor by a new worker's start): the partial set after the restart gets only the tries left over — the leg goes RED (${rac} asks)`);
     // the cure's second reader: a Rebuild pressed DURING a walk — that walk ends without «built» (the drop removed what it had
     // walked) and a fresh walk follows it; a walk broken off by the final close builds nothing either
     const genScene = async (O, { closeMid = false } = {}) => {
@@ -555,6 +556,145 @@ console.log('§10 a cleared group message is not found (B-b291): judged at every
     ok(cl.end === null, `a walk broken off by the final close builds nothing (${cl.end})`, cl);
     const clc = await genScene(MUT.load('src/server/search-index.js', O2.replace(pin(O2, "if (gen === buildGen && st !== 'closed' && st !== 'disabled') {"), "if (gen === buildGen) {"), 'noclosed'), { closeMid: true });
     ok(clc.end !== null, `CONTROL (no state guard): the broken-off walk says «built» — the leg goes RED (${clc.end})`, clc);
+  }
+  // B-4543 — ONLY A FAILED READ SPENDS A TRY; A CHAIN BELONGS TO ITS WORKER; A SET THE WORKER LACKS IS SAID. The retry
+  // timers go through the index's seam (`retryTimer`): the leg fires each one in the order it places, never a clock. A worker
+  // copy logs every op it is handed and EXITS in the middle of a whole delivery while a kill file exists (once).
+  {
+    const killF = path.join(os.tmpdir(), `gs-kill-${process.pid}`), opLog = path.join(os.tmpdir(), `gs-ops-${process.pid}`);
+    const wOps = MUT.write('src/search-index-worker.js', anchored(anchored(W2, '      if (!OPS[op]) throw', `      require('fs').appendFileSync(${JSON.stringify(opLog)}, op + ':' + String(payload && payload.whole) + '\\n');\n      if (!OPS[op]) throw`, 'B-4543 the op log'),
+      'function addCleared({ groups, whole = false } = {}) {', `function addCleared({ groups, whole = false } = {}) {\n  if (whole && require('fs').existsSync(${JSON.stringify(killF)})) { require('fs').unlinkSync(${JSON.stringify(killF)}); process.exit(3); }\n  if (whole && require('fs').existsSync(${JSON.stringify(path.join(os.tmpdir(), `gs-throw-${process.pid}`))})) { require('fs').unlinkSync(${JSON.stringify(path.join(os.tmpdir(), `gs-throw-${process.pid}`))}); throw new Error('a delivery the worker refused (stand-in)'); }`, 'B-4543 the worker exits mid-delivery'), 'b4543-ops');
+    const RETRY = "    retryTimer(() => { if (!worker || worker !== mine) return; Promise.resolve().then(() => clearedCopiesAll()).then((r) => (r && worker === mine ? handOver(r, mine) : null), () => (worker === mine ? retryCleared(mine) : null)).catch(() => { }); }, clearedRetryMs);";
+    const LAND = "      clearedReady = all.then((r) => (worker === mine ? handOver(r, mine) : null),";
+    const NO_PREMISE = mutantCopies('b4543-nopremise', REPO).load('src/server/search-index.js', anchored(O2, LAND, '      clearedReady = all.then((r) => null,', 'B-4543 the start hands nothing over'), 'b4543-nopremise');
+    const NO_LAND = mutantCopies('b4543-noland', REPO).load('src/server/search-index.js', anchored(O2, LAND, '      clearedReady = all.then((r) => handOver(r, mine),', 'B-4543 the start read not bound to its worker'), 'b4543-noland');
+    const NO_START_RESET = mutantCopies('b4543-nostartreset', REPO).load('src/server/search-index.js', anchored(O2, 'const mine = worker; clearedRetries = 0; clearedPartial = true;', 'const mine = worker; clearedPartial = true;', 'B-4543 no reset at the start'), 'b4543-nostartreset');
+    const NO_REFUSED = mutantCopies('b4543-norefused', REPO).load('src/server/search-index.js', anchored(O2, '.catch((e) => { if (worker === mine) clearedPartial = true; throw e; });', '.catch((e) => { throw e; });', 'B-4543 a refused delivery not said'), 'b4543-norefused');
+    const throwF = path.join(os.tmpdir(), `gs-throw-${process.pid}`), dirs4543 = [];
+    const OLD_CHAIN = mutantCopies('b4543-old', REPO).load('src/server/search-index.js', anchored(O2, RETRY, "    retryTimer(() => { if (!worker) return; Promise.resolve().then(() => clearedCopiesAll()).then((r) => (r ? handOver(r, mine) : null)).catch(() => retryCleared(mine)); }, clearedRetryMs);", 'B-4543 the release chain'), 'b4543-old');
+    const SPENDS = mutantCopies('b4543-spends', REPO).load('src/server/search-index.js', anchored(O2, RETRY, "    retryTimer(() => { if (!worker || worker !== mine) return; Promise.resolve().then(() => clearedCopiesAll()).then((r) => (r && worker === mine ? handOver(r, mine) : null)).catch(() => retryCleared(mine)); }, clearedRetryMs);", 'B-4543 a delivery spends a try'), 'b4543-spends');
+    const UNBOUND = mutantCopies('b4543-unbound', REPO).load('src/server/search-index.js', anchored(O2, RETRY, "    retryTimer(() => { if (!worker) return; Promise.resolve().then(() => clearedCopiesAll()).then((r) => (r ? handOver(r, mine) : null), () => retryCleared(mine)).catch(() => { }); }, clearedRetryMs);", 'B-4543 a chain not bound to its worker'), 'b4543-unbound');
+    const ops = () => { try { return fs.readFileSync(opLog, 'utf8').trim().split('\n').filter(Boolean); } catch { return []; } };
+    const tick = () => new Promise((r) => setImmediate(r));
+    const until = async (pred, what) => { for (let k = 0; k < 250; k++) { if (pred()) return true; await new Promise((r) => setTimeout(r, 20)); } throw new Error(`B-4543: timeout — ${what}`); };
+    const mk = (O, answers) => {
+      const st = { asks: 0, timers: [] };
+      const dd = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-4543-')); dirs4543.push(dd);
+      st.x = O.create({ dataDir: dd, homeDir: home, log: quiet, exitHook: false, bootDelayMs: 1e9, workerFile: wOps, clearedRetryMs: 1,
+        retryTimer: (fn) => { st.timers.push(fn); return null; },
+        clearedCopiesAll: async () => { const a = answers[Math.min(st.asks++, answers.length - 1)]; if (a === 'fail') throw new Error('a group log could not be read (stand-in)'); if (typeof a === 'function') return a(); return a; } });
+      return st;
+    };
+    const PART = { groups: {}, partial: ['g-unread'] }, WHOLE = { groups: {}, partial: [] };
+    // (1)+(2) A DELIVERY LOST TO AN EXITING WORKER: a partial read, its try fired, a whole read whose delivery the worker dies in;
+    // then the NEXT worker starts — its first ops hand the whole set over (the premise); every timer still armed is fired after it
+    const lost = async (O) => {
+      fs.writeFileSync(opLog, ''); try { fs.unlinkSync(killF); } catch { }
+      const st = mk(O, [PART, WHOLE, WHOLE]); const x = st.x;
+      x.start(); await x.call('status', {}); await x.call('status', {});
+      fs.writeFileSync(killF, '');
+      st.timers.shift()();   // the partial read's try
+      await until(() => x.stats().state === 'off', 'the worker exits in the middle of the whole delivery');
+      await tick();
+      const armedAfterLoss = st.timers.length, opsA = ops().length;
+      x.start(); await x.call('status', {}); await x.call('status', {});
+      const nextOps = ops().slice(opsA);
+      const asksBefore = st.asks;
+      for (const fn of st.timers.splice(0)) fn();
+      await tick(); await x.call('status', {}); await x.call('status', {});
+      const out = { armedAfterLoss, killed: !fs.existsSync(killF), nextOps, strayAsks: st.asks - asksBefore, asks: st.asks, partialAfter: x.stats().clearedPartial };
+      await x.close({ final: true });
+      return out;
+    };
+    // (3) A TIMER BORN UNDER ONE WORKER: the first read FAILS (its try armed), the worker is closed, the next starts (whole);
+    // then the first worker's timer fires
+    const born = async (O) => {
+      fs.writeFileSync(opLog, '');
+      const st = mk(O, ['fail', WHOLE, WHOLE]); const x = st.x;
+      x.start(); await x.call('status', {}); await x.call('status', {});
+      const armed = st.timers.length, flagAfterFail = x.stats().clearedPartial;
+      await x.close(); x.start(); await x.call('status', {}); await x.call('status', {});
+      const asksBefore = st.asks;
+      for (const fn of st.timers.splice(0)) fn();
+      await tick(); await x.call('status', {}); await x.call('status', {});
+      const out = { armed, flagAfterFail, strayAsks: st.asks - asksBefore, whole: ops().filter((o) => o === 'addCleared:true').length };
+      await x.close({ final: true });
+      return out;
+    };
+    const L = await lost(SI), Lold = await lost(OLD_CHAIN), Lsp = await lost(SPENDS);
+    ok(L.killed && L.nextOps[0] === 'setCleared:false' && L.nextOps.includes('addCleared:true'),
+      `B-4543 THE PREMISE: the worker died in the middle of the whole delivery, and the NEXT worker's first ops hand the whole set over by themselves («${L.nextOps.join(' ')}»)`, L);
+    ok(L.armedAfterLoss === 0 && L.strayAsks === 0 && L.asks === 3 && L.partialAfter === false,
+      `B-4543 a delivery lost to an exiting worker SPENDS NOTHING: no try armed by it, no second chain beside the next worker's own (${L.asks} reads: partial, whole, the next worker's whole); the set is whole again`, L);
+    ok(Lold.armedAfterLoss === 1 && Lold.strayAsks === 1 && Lsp.armedAfterLoss === 1,
+      `B-4543 RED CONTROLS: the release's chain spends a try on the lost delivery and that try runs a SECOND chain on the next worker (${Lold.strayAsks} stray read); a chain bound to its worker but whose delivery spends a try still arms one (${Lsp.armedAfterLoss})`, { Lold, Lsp });
+    // the premise's own control: a worker's first ops, as the next worker after a loss runs them
+    const firstOps = async (O) => { fs.writeFileSync(opLog, ''); const st = mk(O, [WHOLE]); st.x.start(); await st.x.call('status', {}); await st.x.call('status', {}); const o = ops(); await st.x.close({ final: true }); return o; };
+    const F0 = await firstOps(SI), Fnp = await firstOps(NO_PREMISE);
+    ok(F0[0] === 'setCleared:false' && F0.includes('addCleared:true') && !Fnp.includes('addCleared:true'), `B-4543 RED CONTROL for the premise (a start that hands nothing over): the worker never gets the whole set («${Fnp.join(' ')}» against «${F0.join(' ')}»)`, { F0, Fnp });
+    // the START's read lands after its worker is gone (closed): nothing is handed over and NO worker is started for it
+    const landLate = async (O) => {
+      fs.writeFileSync(opLog, '');
+      let release; const held = new Promise((r) => { release = r; });
+      const st = mk(O, [() => held]); const x = st.x;
+      x.start(); await x.call('status', {}); await x.call('status', {});
+      await x.close();
+      const opsAt = ops().length;
+      release(WHOLE); await tick(); await tick();
+      const out = { state: x.stats().state, after: ops().slice(opsAt) };
+      await x.close({ final: true });
+      return out;
+    };
+    const LL = await landLate(SI), LLc = await landLate(NO_LAND);
+    ok(LL.state === 'off' && LL.after.length === 0 && LLc.state !== 'off',
+      `B-4543 the start's read landing after its worker is gone hands nothing over and starts no worker (${LL.state}, ${LL.after.length} ops); RED CONTROL (not bound to its worker): it boots a new worker for a dead one's read (${LLc.state})`, { LL, LLc });
+    // the START's reset alone: ten tries spent on one worker (never a whole set), then a restart — the next worker has ten of its own
+    const again = async (O) => {
+      const st = mk(O, [PART]); const x = st.x;
+      x.start(); await x.call('status', {}); await x.call('status', {});
+      for (let k = 0; k < 12 && st.timers.length; k++) { st.timers.shift()(); await tick(); await x.call('status', {}); }
+      const first = st.asks;
+      await x.close(); x.start(); await x.call('status', {}); await x.call('status', {});
+      for (let k = 0; k < 12 && st.timers.length; k++) { st.timers.shift()(); await tick(); await x.call('status', {}); }
+      const out = { first, second: st.asks - first };
+      await x.close({ final: true });
+      return out;
+    };
+    const AG = await again(SI), AGc = await again(NO_START_RESET);
+    ok(AG.first === 11 && AG.second === 11 && AGc.second === 1, `B-4543 each worker start has ten tries of its own: 1 + 10 reads, then after a restart 1 + 10 again (${AG.first} + ${AG.second}); RED CONTROL (no reset at the start): the next worker reads once and gives up (${AGc.second})`, { AG, AGc });
+    // a whole delivery the LIVE worker refused: the set it holds is partial — said
+    const refused = async (O) => {
+      fs.writeFileSync(throwF, '');
+      const st = mk(O, [WHOLE]); const x = st.x;
+      x.start(); await x.call('status', {}); await x.call('status', {});
+      const out = { flag: x.stats().clearedPartial, thrown: !fs.existsSync(throwF), state: x.stats().state };
+      try { fs.unlinkSync(throwF); } catch { }
+      await x.close({ final: true });
+      return out;
+    };
+    const RF = await refused(SI), RFc = await refused(NO_REFUSED);
+    ok(RF.thrown && RF.state === 'ready' && RF.flag === true && RFc.thrown && RFc.flag === false, `B-4543 a whole delivery the live worker refused leaves the set partial — said (${RF.flag}); RED CONTROL (the refusal not said): the answer would say nothing (${RFc.flag})`, { RF, RFc });
+    const B = await born(SI), Bun = await born(UNBOUND);
+    ok(B.armed === 1 && B.flagAfterFail === true && B.strayAsks === 0 && B.whole === 1 && Bun.strayAsks === 1 && Bun.whole === 2,
+      `B-4543 a timer born under one worker never runs a chain on the next: the failed read's try, fired after a restart, reads nothing (${B.strayAsks}); RED CONTROL (a chain not bound to its worker): it reads again and hands the set over a second time (${Bun.strayAsks} read, ${Bun.whole} whole deliveries)`, { B, Bun });
+    // (4) WHO IS TOLD: while the worker lacks part of the cleared set — a read partial or failed, through its ten tries and after
+    // them — the search answer's index says `clearedPartial`, and the count line says so in plain words; a whole set clears it
+    const spent = mk(SI, [PART]); const xs = spent.x;
+    xs.start(); await xs.call('status', {}); await xs.call('status', {});
+    for (let k = 0; k < 12 && spent.timers.length; k++) { spent.timers.shift()(); await tick(); await xs.call('status', {}); }
+    const routes4 = {}; SI.mount({ get: (p0, h) => { routes4['GET ' + p0] = h; }, post: () => { } }, xs);
+    const ans = await new Promise((resolve) => { const res = { code: 200, status(c) { this.code = c; return this; }, json(b) { resolve(b); } }; routes4['GET /api/search']({ query: { q: 'anything' }, headers: {} }, res); });
+    const SW4 = await import(pathToFileURL(path.join(REPO, 'src/lib/search-window.js')).href);
+    const said = SW4.searchStatusText({ total: ans.total, took: 1, index: ans.index }), plain = SW4.searchStatusText({ total: 0, index: { state: 'ready', lastBuild: 1 } });
+    const ok4 = mk(SI, [WHOLE]); ok4.x.start(); await ok4.x.call('status', {}); await ok4.x.call('status', {});
+    const routes5 = {}; SI.mount({ get: (p0, h) => { routes5['GET ' + p0] = h; }, post: () => { } }, ok4.x);
+    const ans5 = await new Promise((resolve) => { const res = { code: 200, status(c) { this.code = c; return this; }, json(b) { resolve(b); } }; routes5['GET /api/search']({ query: { q: 'anything' }, headers: {} }, res); });
+    const said5 = SW4.searchStatusText({ total: ans5.total, took: 1, index: ans5.index });
+    ok(spent.asks === 11 && spent.timers.length === 0 && ans.index && ans.index.clearedPartial === true && /Some cleared messages could not be read yet — their words may still be found$/.test(said) && plain === 'No matches' && ok4.x.stats().clearedPartial === false && !('clearedPartial' in (ans5.index || {})) && !/Some cleared messages/.test(said5),
+      `B-4543 WHO IS TOLD: the tries spent (${spent.asks} reads), the search answer carries clearedPartial and the count line says «${said}»; a whole set says nothing more («${plain}»)`, { asks: spent.asks, index: ans.index, said });
+    await xs.close({ final: true }); await ok4.x.close({ final: true });
+    for (const f of [opLog, killF, throwF]) { try { fs.unlinkSync(f); } catch { } }
+    for (const d of dirs4543) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } }
   }
   // the wiring (channels-wiring: the ONE place the engine and the index meet) + the device words the sentence
   const CWT = read('src/server/channels-wiring.js');

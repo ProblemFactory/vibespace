@@ -52,7 +52,9 @@ export function indexStateText(st) {
 export function searchStatusText(r) {
   const base = r && r.total ? t('{n} matches · {ms} ms', { n: num(r.total), ms: r.took }) : t('No matches');
   const ix = r && r.index;
-  return indexBuilding(ix) ? `${base} · ${indexStateText({ state: ix.state, backfill: ix.backfill, index: { lastBuild: null } })}` : base;
+  const line = indexBuilding(ix) ? `${base} · ${indexStateText({ state: ix.state, backfill: ix.backfill, index: { lastBuild: null } })}` : base;
+  // B-4543: while the index lacks part of the cleared group messages (a log could not be read), their words may still be found
+  return ix && ix.clearedPartial ? `${line} · ${t('Some cleared messages could not be read yet — their words may still be found')}` : line;
 }
 /** No build has finished since this index was (re)created — a periodic walk over a whole index is not «building». */
 export const indexBuilding = (ix) => !!ix && ix.state !== 'disabled' && !ix.lastBuild;

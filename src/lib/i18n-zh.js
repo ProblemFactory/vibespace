@@ -975,6 +975,7 @@ export default {
   "No color": "无颜色",
   "No linked folders. Sessions under a linked folder join this task automatically. Link via the file explorer right-click menu or drag a folder onto the task.": "没有已关联的文件夹。已关联文件夹下的会话会自动加入此任务。可通过文件管理器右键菜单关联，或将文件夹拖到任务上。",
   "No matches": "无匹配",
+  "Some cleared messages could not be read yet — their words may still be found": "部分已清除的消息暂时读不到 —— 它们的文字可能仍会被搜到",
   "No messages in this session's transcript yet.": "此会话的记录中还没有消息。",
   "No results": "无结果",
   "No saved presets. Save current workspace as a preset.": "没有已存预设。将当前工作区保存为预设。",

@@ -57,7 +57,8 @@ function localDiskVerdict(dir, dataReal, { statfs = fs.statfsSync } = {}) {
 function create({ dataDir, homeDir = os.homedir(), workerFile = path.join(__dirname, '..', 'search-index-worker.js'), buffersDir = null,
   listConversations = async () => [], activeSessions = () => new Map(), log = console, heapMb = 1536, idleExitMs = 10 * 60 * 1000,
   bootDelayMs = 60 * 1000, backfillEveryMs = 30 * 60 * 1000, clearedRetryMs = 60 * 1000, liveDebounceMs = 1500, closeBoundMs = 2000, exitHook = true, statfs, now = () => Date.now(),
-  clearedCopies = (gid, o) => (clearedSource ? clearedSource(gid, o) : {}), clearedCopiesAll = () => (clearedSourceAll ? clearedSourceAll() : null) } = {}) {
+  clearedCopies = (gid, o) => (clearedSource ? clearedSource(gid, o) : {}), clearedCopiesAll = () => (clearedSourceAll ? clearedSourceAll() : null),
+  retryTimer = (fn, ms) => { const t = setTimeout(fn, ms); t.unref?.(); return t; } } = {}) {
   let worker = null, dir = null, dataReal = null, st = 'off', reason = REASON.OFF, code = null, ready = null;
   let seq = 1, idleTimer = null, lastCallAt = 0, backfillTimer = null, walking = null;
   const calls = new Map();
@@ -133,18 +134,23 @@ function create({ dataDir, homeDir = os.homedir(), workerFile = path.join(__dirn
     // (read off the loop) and a search waits for it (clearedReady).
     const all = (() => { try { return clearedCopiesAll(); } catch { return null; } })();
     if (all && typeof all.then === 'function') {
+      // B-4543: this worker's OWN chain — ten tries of its own, and until its whole set lands a search says a cleared word may be found
+      const mine = worker; clearedRetries = 0; clearedPartial = true;
       call('setCleared', { groups: copiesOf(null, { cachedOnly: true }), whole: false }).catch(() => { });
-      clearedReady = all.then((r) => handOver(r), (e) => { log.warn?.(`[search-index] the cleared group messages were not read: ${e && e.message}`); retryCleared(); return call('addCleared', { groups: copiesOf(null, { cachedOnly: true }), whole: false }); }).catch(() => { }); // a failed read never falls back to the loop's synchronous reads (the readers' should)
-    } else { call('setCleared', { groups: copiesOf(null), whole: true }).catch(() => { }); clearedReady = null; }
+      clearedReady = all.then((r) => (worker === mine ? handOver(r, mine) : null), (e) => { log.warn?.(`[search-index] the cleared group messages were not read: ${e && e.message}`); if (worker !== mine) return null; retryCleared(mine); return call('addCleared', { groups: copiesOf(null, { cachedOnly: true }), whole: false }); }).catch(() => { }); // a failed read never falls back to the loop's synchronous reads (the readers' should)
+    } else { call('setCleared', { groups: copiesOf(null), whole: true }).catch(() => { }); clearedReady = null; clearedPartial = false; }
     return api;
   }
-  let clearedReady = null;
+  let clearedReady = null, clearedPartial = false;   // B-4543: the worker holds less than the whole cleared set — a search answer says so
   /** The async set handed over: `whole` only when every group was read (a group whose log could not be read is asked again). */
-  const handOver = (r) => { const groups = (r && r.groups) || {}, partial = (r && Array.isArray(r.partial)) ? r.partial : []; if (partial.length) retryCleared(); else clearedRetries = 0; return call('addCleared', { groups, whole: !partial.length }); }; // a whole set gives a later partial its ten tries again (cure 2)
-  function retryCleared() {
-    if (clearedRetries >= 10) { log.warn?.('[search-index] the cleared group messages are still partial after 10 tries — the next worker start asks again'); return; }
+  const handOver = (r, mine) => { const groups = (r && r.groups) || {}, partial = (r && Array.isArray(r.partial)) ? r.partial : []; if (partial.length) retryCleared(mine); else clearedRetries = 0; clearedPartial = partial.length > 0; return call('addCleared', { groups, whole: !partial.length }).catch((e) => { if (worker === mine) clearedPartial = true; throw e; }); }; // a whole set gives a later partial its ten tries again (cure 2); a delivery the live worker refused is said
+  /** B-4543: ONLY A FAILED READ SPENDS A TRY, and a chain belongs to ITS worker. A delivery lost to an exiting worker spends
+   *  nothing — the next worker's first op hands the whole set over — and a timer born under one worker never runs a chain
+   *  on the next (two chains on one counter). Spent tries: a search answer keeps saying a cleared word may be found. */
+  function retryCleared(mine) {
+    if (clearedRetries >= 10) { log.warn?.('[search-index] the cleared group messages are still partial after 10 tries — a search answer says so; the next worker start asks again'); return; }
     clearedRetries++;
-    const t = setTimeout(() => { if (!worker) return; Promise.resolve().then(() => clearedCopiesAll()).then((r) => (r ? handOver(r) : null)).catch(() => retryCleared()); }, clearedRetryMs); t.unref?.();
+    retryTimer(() => { if (!worker || worker !== mine) return; Promise.resolve().then(() => clearedCopiesAll()).then((r) => (r && worker === mine ? handOver(r, mine) : null), () => (worker === mine ? retryCleared(mine) : null)).catch(() => { }); }, clearedRetryMs);
   }
   const CLEARED_WAIT_MS = 5000;
   const copiesOf = (gid, o) => { try { return clearedCopies(gid, o) || {}; } catch (e) { log.warn?.(`[search-index] the cleared group messages were not read: ${e && e.message}`); return {}; } };
@@ -311,7 +317,7 @@ function create({ dataDir, homeDir = os.homedir(), workerFile = path.join(__dirn
     return r;
   }
 
-  const api = { start, schedule, backfill, noteLive, noteArtifact, noteCleared, search, status, rebuild, forget, close, call, stats: () => ({ state: st, reason, code, dir, ready, lastBuild: lastBuildAt, ...counts, backfill: { ...progress } }), get dir() { return dir; } };
+  const api = { start, schedule, backfill, noteLive, noteArtifact, noteCleared, search, status, rebuild, forget, close, call, stats: () => ({ state: st, reason, code, dir, ready, lastBuild: lastBuildAt, clearedPartial, ...counts, backfill: { ...progress } }), get dir() { return dir; } };
   return api;
 }
 
@@ -327,7 +333,7 @@ function mount(app, ix) {
       const q = String(req.query.q || '');
       const r = await ix.search({ q, scope: req.query.scope, limit: Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20)), offset: Math.max(0, parseInt(req.query.offset, 10) || 0) });
       const s = ix.stats();
-      res.json({ hits: r.hits, groups: r.groups, total: r.total, took: Date.now() - t0, empty: r.empty || null, index: { state: s.state, backfill: s.backfill, lastBuild: s.lastBuild || null } }); // lastBuild (B-b291 cure): a window says «Indexing…» until one build has finished
+      res.json({ hits: r.hits, groups: r.groups, total: r.total, took: Date.now() - t0, empty: r.empty || null, index: { state: s.state, backfill: s.backfill, lastBuild: s.lastBuild || null, ...(s.clearedPartial ? { clearedPartial: true } : {}) } }); // lastBuild (B-b291 cure): a window says «Indexing…» until one build has finished
     } catch (e) { res.status(e.status || 500).json({ error: e.message, reason: e.reason || null, hits: [], total: 0 }); }
   });
   app.get('/api/search/status', async (req, res) => {
