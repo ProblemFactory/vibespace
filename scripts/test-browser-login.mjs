@@ -1159,16 +1159,23 @@ if (typeof LF?.resolveSnapshotRef === 'function' && Dm.SCAN_LIMITS) {
     // 3. m2: once same-origin submit wipes and lifts the fence, `Network.disable` runs and 0 `Network.*` events reach hub
     const markBeforeLift = fkStd.mark();
     await fkStd.simulateSubmitRequest({ targetId: tidB, url: 'https://shop.example.test/api/login', postData: `pw=${encodeURIComponent(PW_N1)}`, resourceType: 'Fetch', finish: true });
-    for (let i = 0; i < 40; i++) {
-      if (wB.liveFillVerdictFor({ profileId: 'bp-r24', browserKey: 'bk-r24' }, { verb: 'eval', argv: ['eval', '1'] }).ok) break;
-      await new Promise((r) => setTimeout(r, 10));
+    // (B-518e, also — the gate's red on 5e3f0cd26 and earlier: a 40 × 10 ms limit on the lift. The lift is waited for by the facts
+    // the leg reads: the fence gone (the verdict ok), Network.disable sent, and the tab's Fetch mode back off the credential
+    // patterns (the tab's own state) — asked a bounded COUNT of times; the bound only ends a wait that never comes)
+    const tabB = () => { const w = wB._watches && wB._watches.get('bp-r24'); return w ? [...w.targets.values()].find((x) => x && String(x.targetId).toUpperCase() === String(tidB).toUpperCase()) || null : null; };
+    let m2Settled = false;
+    for (let i = 0; i < 600 && !m2Settled; i++) {
+      m2Settled = wB.liveFillVerdictFor({ profileId: 'bp-r24', browserKey: 'bk-r24' }, { verb: 'eval', argv: ['eval', '1'] }).ok
+        && fkStd.calls().some((c) => c.seq > markBeforeLift && c.method === 'Network.disable')
+        && Boolean(tabB()) && !tabB().credNetEnabled && !/^all-/.test(String(tabB().fetchMode || ''));
+      if (!m2Settled) await new Promise((r) => setTimeout(r, 10));
     }
     const netDisableCalls = fkStd.calls().filter((c) => c.seq > markBeforeLift && c.method === 'Network.disable');
     const rawCheck = await fkStd.simulateSubmitRequest({ targetId: tidB, url: 'https://shop.example.test/api/poll', postData: 'ping=1', resourceType: 'Fetch', finish: true });
     await new Promise((r) => setTimeout(r, 20));
-    ok(netDisableCalls.length >= 1 && rawCheck.action === 'unwatched',
+    ok(m2Settled && netDisableCalls.length >= 1 && rawCheck.action === 'unwatched',
       'm2: lifting the live-fill fence sends Network.disable and restores Document-only Fetch (subsequent XHR unwatched, 0 Network.* events)',
-      { netDisables: netDisableCalls.length, rawCheck });
+      { m2Settled, netDisables: netDisableCalls.length, fetchMode: tabB() && tabB().fetchMode, rawCheck });
 
     // 4. N2: 3,000-row page (`axPadBytes: 6000` => `getFullAXTree` would be > 18 MiB > 16 MiB watch maxPayload!)
     const rows3000 = [];
