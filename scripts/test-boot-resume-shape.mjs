@@ -316,7 +316,14 @@ const GREEN_RESTORE = fs.readFileSync(RESTORE, 'utf8');
 const RELEASE_BACKFILL = fs.readFileSync(path.join(repo, 'scripts', 'fixtures', 'boot-restore-backfill-release.txt'), 'utf8');
 const BACKFILL_FROM = '  // Backfill billing identity for sessions restored WITHOUT a recorded\n', BACKFILL_TO = '\n  }, 3000);\n';
 const once = (t, x) => t.split(x).length === 2;
+const SCENE_ADD = '{"type":"result","subtype":"success","result":"written in the window"}\n{"type":"system","subtype":"session_state_changed","state":"idle"}\n';
 const PLANTS = {
+  // THE SCENE (round wed0m8jzl — the loop law re-measured): each survivor's ring REWRITTEN inside the window, at its cap — its head cut,
+  // two records appended, written whole (tmp + rename) as the wrapper does — a write PLACED just before each attach in the copy
+  // (no load made); the catch-up then reads the whole ring and finds the read's end in it. The placed write's own cost is in the
+  // batch it measures (an upper bound)
+  'rewritten-ring': (t) => { const at = '    const cu = restoreCatchUp(session._restoreBuf);'; if (!once(t, at)) return null;
+    return t.replace(at, `    try { const f = session._restoreBuf && session._restoreBuf.file; if (f) { const fsx = require('fs'); const old = fsx.readFileSync(f); const add = Buffer.from(${S(SCENE_ADD)}); fsx.writeFileSync(f + '.scene', Buffer.concat([old.subarray(Math.min(old.length, add.length + 4096)), add])); fsx.renameSync(f + '.scene', f); } } catch { }   // CD4B SCENE: the placed write\n` + at); },
   'one-pass-attach': (t) => (once(t, 'const ATTACH_BATCH = 8,') ? t.replace('const ATTACH_BATCH = 8,', 'const ATTACH_BATCH = Infinity,') : null),
   'forking-backfill': (t) => { if (!once(t, BACKFILL_FROM)) return null; const i = t.indexOf(BACKFILL_FROM), j = t.indexOf(BACKFILL_TO, i); return j < 0 ? null : t.slice(0, i) + RELEASE_BACKFILL + t.slice(j + BACKFILL_TO.length); },
 };
@@ -375,8 +382,8 @@ async function deadShape(tag, { red = null } = {}) {
 }
 
 // ── ③ SURVIVE — a hub restart where dtach lives ──
-async function surviveShape(tag, { red = null } = {}) {
-  const label = red ? `RED ${red} (${tag})` : tag;
+async function surviveShape(tag, { red = null, scene = null } = {}) {
+  const label = red ? `RED ${red} (${tag})` : scene ? `SCENE ${scene} (${tag})` : tag;
   console.log(`③ ${label} — a hub restart where dtach lives: every buffer full, the boot re-attaches them all; the page returns ${PAGE === 'held' ? 'once the restore\'s last effect landed (W1 = the restore alone)' : 'at ready (the field\'s order)'}`);
   check(`${label}: the live conversations to restore: ${liveIds.size}`, liveIds.size > 0);
   await stopHub('SIGKILL', { hubOnly: true });
@@ -418,6 +425,14 @@ async function surviveShape(tag, { red = null } = {}) {
   }
   const rl = restoreLine(logOf(tag));
   console.log(`  the restore's own line: ${rl ? rl.line : 'NONE'}`);
+  if (scene) {   // a green scene: W1 under the whole law, and the restore says every survivor caught up what was written in the window
+    await asksAnswered(tag, Date.now());
+    await stopAux();
+    const caughtN = (() => { const m = rl && / (\d+) caught up what they wrote since the read/.exec(rl.line + (logOf(tag).match(/\[boot-restore\] \d+ survivor\(s\): [^\n]*/) || [''])[0]); return m ? Number(m[1]) : 0; })();
+    check(`${label}: the restore caught up EVERY survivor's rewritten ring (${caughtN} of ${liveIds.size}) and each batch stayed under ${HOLD_LAW_MS} ms (the longest ${rl ? rl.longest : '?'} ms, the placed write's own cost in it)`, !!rl && caughtN === liveIds.size && rl.longest < HOLD_LAW_MS, rl);
+    await report(tag, tBoot, tW1 || Date.now(), `W1 — the spawn → ready → the restore, each ring rewritten in the window and caught up (${liveIds.size} survivors)`, { label });
+    return rl;
+  }
   if (red) {
     await asksAnswered(tag, Date.now());
     await stopAux();
@@ -461,7 +476,9 @@ console.log(`  memory: ${memGiB().toFixed(1)} GiB available now (${memAvailGiB.t
 
 // ── ④ THE RED CONTROLS (the pin's; CD4B_PAGE=held): the release's one synchronous pass planted back, each run judged on its window
 // alone — the law must BREAK there. Each control differs from the green run above by its plant only ──
-if (REDS && SHAPES.includes('survive') && !hubDied && left() > 200000) {
+if (REDS && SHAPES.includes('survive') && !hubDied && left() > 260000) {
+  check('SCENE rewritten-ring: planted (a placed write before each attach in the copy)', plant('rewritten-ring'));
+  await surviveShape('ring', { scene: 'rewritten-ring' });
   check('RED one-pass-attach: planted (the restore\'s ATTACH_BATCH = Infinity)', plant('one-pass-attach'));
   const r1 = await surviveShape('red-attach', { red: 'one-pass-attach' });
   check('RED one-pass-attach: the restore says it attached every survivor in ONE batch — the release\'s pass', !!r1 && r1.batches === 1 && r1.n === liveIds.size, r1);

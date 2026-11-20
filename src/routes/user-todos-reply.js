@@ -17,7 +17,7 @@
  *       (`resolvedBy:'reply'`, the reply kept on it) — ONE store broadcast
  *     | {error, code} by NAME: agent_forbidden 403 · not_found 404 ·
  *       empty / too_long / input_rejected / too_large 400 ·
- *       no_session / job_item / card_item / exit_ask / no_live_session / not_chat / host_unreachable 409 ·
+ *       no_session / job_item / card_item / exit_ask / no_live_session / not_chat / attach_failed / host_unreachable 409 ·
  *       send_failed 500. A refusal resolves nothing.
  *     A CONVERSATION THAT ENDED IS REOPENED (lane inbox-reply-dead-session, userW inc-mvfuzlom-nwav 2026-10-19:
  *       「在 inbox 里面回复 session 的时候, 如果那个 session 已经挂了, 就回不了了.」): with the `reopen` dep wired
@@ -61,7 +61,7 @@ const { conversationOfKey } = require('../inbox-reopen.js');   // …a reopened 
 const STATUS = Object.freeze({
   agent_forbidden: 403, not_found: 404, 'todos-unread': 503,   // B-44f3: For you held unread — refused by name
   empty: 400, too_long: 400, input_rejected: 400, too_large: 400, bad_image: 400,
-  no_session: 409, job_item: 409, card_item: 409, exit_ask: 409, no_live_session: 409, not_chat: 409, host_unreachable: 409,
+  no_session: 409, job_item: 409, card_item: 409, exit_ask: 409, no_live_session: 409, not_chat: 409, attach_failed: 409, host_unreachable: 409,   // B-cd4b: a restored survivor whose attach threw
   resume_failed: 409, rewind_out: 409, send_failed: 500,
 });
 // who pressed it (a sign-in's handle, never the cookie) — the act a reopen starts on a device names it (src/device-audit.js)

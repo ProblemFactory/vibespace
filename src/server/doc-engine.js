@@ -144,7 +144,7 @@ function create({ activeSessions = new Map(), getDeliver = () => null, sendUserI
     for (let k = 0; k < lines.length; k++) {
       const r = sessionId && typeof sendUserInput === 'function' ? sendUserInput(sessionId, lines[k], { msgId: `${now()}-doc${lines.length > 1 ? '-' + (k + 1) : ''}`, origin: 'doc-comment', door: 'enter' }) : { ok: false, code: 'no_session' };
       if (r && r.ok) { msgIds.push(r.msgId); sent += v.batches[k].count; continue; }
-      if (k > 0 || !r || (r.code !== 'no_session' && r.code !== 'not_chat')) return fail((r && r.code) || 'send_failed', (r && r.error) || 'the comments were not sent', { sent, ...(r && r.i18n ? { i18n: r.i18n } : {}) });
+      if (k > 0 || !r || (r.code !== 'no_session' && r.code !== 'not_chat' && r.code !== 'attach_failed')) return fail((r && r.code) || 'send_failed', (r && r.error) || 'the comments were not sent', { sent, ...(r && r.i18n ? { i18n: r.i18n } : {}) });
       break;   // the first message found no typing session ⇒ every message waits in the stash
     }
     if (msgIds.length === lines.length) return { ok: true, delivered: 'sent', msgId: msgIds[0], msgIds, ...done, text: lines.join('\n\n') };

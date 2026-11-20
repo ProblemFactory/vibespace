@@ -646,7 +646,7 @@ function create({
     const sessionId = liveSessionFor(windowSessionId, host, dir, prefer);
     const r = typeof sendUserInput === 'function' ? sendUserInput(sessionId, line, { msgId: now() + '-design', origin: 'design-comment', door: 'enter' }) : { ok: false, code: 'no_session' };
     if (r && r.ok) return { ok: true, delivered: 'sent', msgId: r.msgId, text: line };
-    if (!r || (r.code !== 'no_session' && r.code !== 'not_chat')) return fail((r && r.code) || 'send_failed', (r && r.error) || 'the comment was not sent', r && r.i18n ? { i18n: r.i18n } : {});
+    if (!r || (r.code !== 'no_session' && r.code !== 'not_chat' && r.code !== 'attach_failed')) return fail((r && r.code) || 'send_failed', (r && r.error) || 'the comment was not sent', r && r.i18n ? { i18n: r.i18n } : {});
     const cid = conversationFor(sessionId, host, dir, prefer);
     if (!cid) return fail('no_conversation', 'this conversation is not running and has no id yet — open its chat and send the comment there');
     const deliver = getDeliver();

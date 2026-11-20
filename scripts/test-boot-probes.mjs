@@ -277,6 +277,36 @@ try {
       `20 survivors: all 20 in the live set when restoreSessions returns, ${g.atReturn.attached} attached in that turn (the first batch), ${g.atReturn.pending} waiting with their attach-at-first-use; one USED before its batch attached at once (and once: ${g.usedOnce}); then the batches, the one that ended never, the one whose attach threw said and kept pending — its next use attached it; every attach on the local road; said: ${g.said}`, g);
     ok(r1.atReturn.attached >= 19 && r2.usedPend === false && r2.usedAtOnce === false,
       `RED: one batch of all ⇒ every attach in the listen turn (${r1.atReturn.attached}); the attach-at-first-use taken away ⇒ a survivor used before its batch is not attached (${r2.usedAtOnce})`, { r1: r1.atReturn, r2: { usedPend: r2.usedPend, usedAtOnce: r2.usedAtOnce } });
+    // ONE CARD, ONE CHAIN (round wed0m8jzl): a survivor whose attach ALWAYS throws — its retries shortened in a copy (20, 40,
+    // 60 ms) — used twice while its first retry is armed, then once after the chain is spent: 1 batch + 2 uses + 3 retries + 1
+    // use = 7 tries, ONE card, and each use while the retry is armed SAYS it arms none (the retries are counted once, so a second
+    // chain shows as these words gone, not as more tries). RED: the chain's guard taken away ⇒ the two uses arm their own
+    // retries (the words gone); the card's guard taken away ⇒ a second card at the use after the chain is spent
+    const N5 = require(path.join(REPO, 'src/normalizers'));
+    const chain = async (BRm, tag) => {
+      const cards = []; const feed0 = N5.feedPeerCard; N5.feedPeerCard = (s, c) => { cards.push(c && c.text); return true; };
+      try {
+        let tries = 0; let bad = null;
+        const X = instance(BRm, dataDir(tag), { onAttach: (id) => { if (id === bad) { tries++; throw new Error('spawn EAGAIN (planted, always)'); } } });
+        const socks = Array.from({ length: 3 }, (_, i) => X.add(400 + i)); bad = socks[1].id;
+        await logged(async () => X.api.restoreSessions());
+        const s1 = X.activeSessions.get(bad);
+        const u2 = await logged(async () => { s1._attachPending(); s1._attachPending(); });   // two uses while the first retry is armed
+        const armedSaid = (u2.lines || []).filter((l) => /its retry is armed already/.test(l));
+        await logged(() => new Promise((r) => setTimeout(r, 400)));                  // the shortened chain runs out
+        await logged(async () => { s1._attachPending(); });                          // a use after the chain is spent
+        await logged(() => new Promise((r) => setTimeout(r, 150)));
+        return { tries, cards: cards.length, pending: typeof s1._attachPending === 'function', failed: s1._attachFailed || null, armedSaid: armedSaid.length, uses: (u2.lines || []).slice(0, 2) };
+      } finally { N5.feedPeerCard = feed0; }
+    };
+    const SHORT = (src) => anchored(src, 'ATTACH_RETRY_MS = [2000, 10000, 30000]', 'ATTACH_RETRY_MS = [20, 40, 60]', 'b-cd4b-short');
+    const cg = await chain(require(M.write('src/server/boot-restore.js', SHORT(brSrc), 'cd4b-short')), 'chain');
+    const noChain = anchored(SHORT(brSrc), "      if (entry.timer) { console.warn(", "      if (false) { console.warn(", 'b-cd4b-no-chain-guard');
+    const cr1 = await chain(require(M.write('src/server/boot-restore.js', noChain, 'cd4b-no-chain-guard')), 'chain-red1');
+    const cr2 = await chain(require(M.write('src/server/boot-restore.js', anchored(SHORT(brSrc), '      if (entry.carded) return;\n', '', 'b-cd4b-no-card-guard'), 'cd4b-no-card-guard')), 'chain-red2');
+    ok(cg.tries === 7 && cg.cards === 1 && cg.armedSaid === 2 && cg.pending && /spawn EAGAIN/.test(cg.failed || ''),
+      `ONE CARD, ONE CHAIN: an attach that always throws — 1 batch + 2 uses while its retry is armed + 3 retries + 1 use after = ${cg.tries} tries, ${cg.cards} card; each use said it armed none (${JSON.stringify(cg.uses)}); it stays pending, its failure named`, cg);
+    ok(cr1.armedSaid === 0 && cr2.cards > 1, `RED: the chain's guard away ⇒ each failed use arms its own retry (none says it armed none: ${JSON.stringify(cr1.uses)}); the card's guard away ⇒ a card again (${cr2.cards} cards)`, { cr1, cr2 });
     // THE DOOR: the real sender, a chat survivor whose attach still waits
     const UI_HOOK = "    if (!session.pty && typeof session._attachPending === 'function') session._attachPending();";
     const uiSrc = fs.readFileSync(path.join(REPO, 'src/server/user-input.js'), 'utf8');

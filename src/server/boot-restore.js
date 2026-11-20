@@ -656,7 +656,7 @@ function drainSurvivorAttaches(queue, { tRestore, tBuilt }) {
   const total = queue.length;
   if (!total) return;
   let batches = 0, longest = 0, attachMs = 0, used = 0, caught = 0;
-  const release = (entry) => { entry.done = true; if (entry[2]._attachPending === entry.pend) entry[2]._attachPending = null; };
+  const release = (entry) => { entry.done = true; if (entry.timer) { clearTimeout(entry.timer); entry.timer = null; } if (entry[2]._attachPending === entry.pend) entry[2]._attachPending = null; };
   const attach = (entry, { use = false } = {}) => {
     const [id, socketPath, session] = entry;
     if (entry.done) return;
@@ -670,15 +670,20 @@ function drainSurvivorAttaches(queue, { tRestore, tBuilt }) {
       if (cu && cu.text) caught++;
       if (use) used++;
     } catch (e) {
-      const why = String((e && e.message) || e).slice(0, 200), wait = ATTACH_RETRY_MS[entry.tries++];
+      const why = String((e && e.message) || e).slice(0, 200);
       session._attachFailed = why;   // the next chat send says it in these words (src/server/user-input.js), never «not a live chat session»
-      console.warn(`[boot-restore] ${session.name || id}: the attach failed (${why}) — it stays pending: its next use attaches it${wait ? `, or a retry in ${wait / 1000} s` : ''}`);
-      if (wait) { const t = setTimeout(() => attach(entry), wait); if (t.unref) t.unref(); return; }
-      // the retries spent: the PERSON is told at the conversation (the card road a dead bridge's catch-up already has), once
+      // ONE retry chain (round wed0m8jzl): a failed USE never arms a second beside the one already armed
+      if (entry.timer) { console.warn(`[boot-restore] ${session.name || id}: the attach failed (${why}) — it stays pending: its next use attaches it, and its retry is armed already`); return; }
+      const wait = ATTACH_RETRY_MS[entry.tries];
+      console.warn(`[boot-restore] ${session.name || id}: the attach failed (${why}) — it stays pending: its next use attaches it${wait ? `, or a retry in ${wait / 1000} s` : ' (its retries are spent)'}`);
+      if (wait) { entry.tries++; entry.timer = setTimeout(() => { entry.timer = null; attach(entry); }, wait); if (entry.timer.unref) entry.timer.unref(); return; }
+      // the retries spent: the PERSON is told at the conversation (the card road a dead bridge's catch-up already has) — ONCE
+      if (entry.carded) return;
+      entry.carded = true;
       try { require('../normalizers').feedPeerCard(session, { fromName: 'VibeSpace', kind: 'notification', text: `This conversation could not be reconnected after the restart (${why}). It keeps running; sending a message tries again.` }); } catch { }
     }
   };
-  for (const entry of queue) { entry.tries = 0; entry.done = false; entry.pend = () => attach(entry, { use: true }); entry[2]._attachPending = entry.pend; }
+  for (const entry of queue) { entry.tries = 0; entry.done = false; entry.timer = null; entry.carded = false; entry.pend = () => attach(entry, { use: true }); entry[2]._attachPending = entry.pend; }
   const one = () => {
     const t0 = performance.now();
     for (const entry of queue.splice(0, ATTACH_BATCH)) attach(entry);
@@ -1262,14 +1267,18 @@ async function readoptOrphanKeeperSessions() {
     consumeKeptOf }; // B-a5a4 (2): a turn ended on a live session — its conversation's kept copy goes at once (server.js noteTurnEnd)
 }
 // B-cd4b (round wzvgb5033, the MUST): WHAT A SURVIVOR WROTE BETWEEN THE RESTORE'S READ AND ITS ATTACH. A dtach master DROPS what it
-// reads while no client is attached (bridge-watch.js, measured): the wrapper's tee to the buffer file is the only copy. At the
-// release the read and the attach ran in ONE turn; with the batches a survivor waits up to its batch (~200 ms at 80 on the first
-// test machine, longer under load), and a permission request, a turn's result or its idle state written then never reached the
-// conversation. So EVERY attach of the restore (a batch, a retry, a first use) reads, IN THE SAME TURN, the file from where the
-// registration's read ended — from the start of that read's last partial line, so the conversation receives whole records — and
-// feeds it before the pty's first byte (session-stdout setupSessionPty `catchUp`). A file the wrapper REWROTE meanwhile (its ring
-// trimmed: shorter, or its bytes before that point changed) is searched for the read's last whole-line end (a ≤ 256 B guard);
-// not found ⇒ nothing fed, said. Bounded: at most RESTORE_CATCHUP_MAX bytes are read (a chat ring is ≤ 500 KB).
+// reads while no client is attached (bridge-watch.js, measured). At the release the read and the attach ran in ONE turn; with the
+// batches a survivor waits up to its batch (~200 ms at 80 on the first test machine, longer under load). So EVERY attach of the
+// restore (a batch, a retry, a first use) reads, IN THE SAME TURN, the buffer file from where the registration's read ended — from
+// the start of that read's partial last line, so the conversation receives whole records — and feeds it before the pty's first
+// byte (session-stdout setupSessionPty `catchUp`). THE FILE IS NOT A TEE (round wed0m8jzl): the chat wrapper keeps its ring in
+// memory and REWRITES the file whole (tmp + rename) on a timer (2 s; 250 ms while a CLI follows it); only the queue's own records
+// (its DURABLE_RECORDS) are written BEFORE they are said. So a line said inside the window and not yet written at the attach (a
+// permission ask rides the timer) is still lost, as at the release — its own unit (row B-cd4b's detail). No record is read twice:
+// the order is read, then spawn, then connect, and dtach drops what is said before the client connects. The file also holds lines
+// the live output never carries (a held copy of a person's frame): the catch-up feeds them as the registration's read holds them.
+// A ring rewritten meanwhile (trimmed: shorter, the same size, or its bytes before that point changed) is searched for the read's
+// last whole-line end (a ≤ 256 B guard); not found ⇒ nothing fed, said. Bounded: at most RESTORE_CATCHUP_MAX bytes are read.
 const RESTORE_CATCHUP_MAX = 2 * 1024 * 1024, RESTORE_GUARD = 256;
 function restoreBufOf(file, raw) {
   const lineAt = raw.lastIndexOf(10) + 1;   // the byte after the read's last '\n' (0: no whole line yet)
@@ -1283,10 +1292,13 @@ function restoreCatchUp(rb, { max = RESTORE_CATCHUP_MAX } = {}) {
   try {
     fd = fs.openSync(rb.file, 'r');
     const size = fs.fstatSync(fd).size;
-    if (size === rb.len) return null;
     const read = (at, n) => { const b = Buffer.alloc(Math.max(0, n)); const got = n > 0 ? fs.readSync(fd, b, 0, n, at) : 0; return b.subarray(0, got); };
+    // the read's end still where it was: its guard and its partial line, byte for byte (a ring REWRITTEN to the very same size
+    // is told from an unchanged file by these bytes, never by the size alone — round wed0m8jzl)
+    const inPlace = () => size >= rb.len && read(rb.lineAt - rb.guard.length, rb.guard.length).equals(rb.guard) && read(rb.lineAt, rb.len - rb.lineAt).toString('utf-8') === rb.partial;
+    if (size === rb.len && inPlace()) return null;   // nothing written since the read
     let start = -1;
-    if (size > rb.len && read(rb.lineAt - rb.guard.length, rb.guard.length).equals(rb.guard) && read(rb.lineAt, rb.len - rb.lineAt).toString('utf-8') === rb.partial) start = rb.lineAt;   // appended: the plain case
+    if (size > rb.len && inPlace()) start = rb.lineAt;   // appended: the plain case
     else if (rb.guard.length) {   // rewritten (the ring trimmed): find where the read's whole lines ended
       const all = read(Math.max(0, size - max), Math.min(size, max)), k = all.lastIndexOf(rb.guard);
       if (k >= 0) start = Math.max(0, size - max) + k + rb.guard.length;
