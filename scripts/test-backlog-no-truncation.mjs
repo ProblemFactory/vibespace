@@ -196,6 +196,28 @@ check('a CLAIM is answered only once task-groups.json holds it (not in the route
   const b = post({ add: 'B-6edc control row', detail: 'kept evidence' }), bid = b.out.item.id;
   oldPost({ edit: bid, detail: 'one more line' });
   checkP('B-6edc CONTROL: with the old replace in a copy of the route, the plain --detail WIPES the old detail — RED (the add leg can go red)', detailOf(bid) === 'one more line', J({ d: detailOf(bid), was: 'kept evidence' }));
+  // r2 (主开发 r246): …AND NEVER DOUBLES IT — the replace era's habit (read the row, send the old text and the new together)
+  const c0 = post({ add: 'B-6edc r2: the old + new habit', detail: 'the old evidence, dated' }), cid = c0.out.item.id;
+  const r7 = post({ edit: cid, detail: '  the old evidence, dated\none more line\n' });
+  checkP('B-6edc r2: a plain detail that already holds the WHOLE old detail at its start TAKES ITS PLACE (after the same trim) — nothing lost, nothing doubled, said «contained»',
+    r7.code === 200 && detailOf(cid) === 'the old evidence, dated\none more line' && J(r7.out.detailEdit) === J({ mode: 'contained', was: 23, now: 37 }), J({ code: r7.code, d: detailOf(cid), de: r7.out && r7.out.detailEdit }));
+  const r8 = post({ edit: cid, detail: 'the old evidence, dated\none more line' });
+  checkP('B-6edc r2: the same whole detail sent again changes nothing (contained, 0 characters added)',
+    r8.code === 200 && detailOf(cid) === 'the old evidence, dated\none more line' && J(r8.out.detailEdit) === J({ mode: 'contained', was: 37, now: 37 }), J({ code: r8.code, d: detailOf(cid), de: r8.out && r8.out.detailEdit }));
+  const r9 = post({ edit: cid, detail: 'a note first\nthe old evidence, dated\none more line' });
+  checkP('B-6edc r2: the old text NOT at the start is no «contained» — the plain add (the old kept whole above)',
+    r9.code === 200 && detailOf(cid) === 'the old evidence, dated\none more line\na note first\nthe old evidence, dated\none more line' && r9.out.detailEdit && r9.out.detailEdit.mode === 'added', J({ code: r9.code, d: detailOf(cid), de: r9.out && r9.out.detailEdit }));
+  post({ edit: cid, detail: 'y'.repeat(5990), replaceDetail: true });
+  const r10 = post({ edit: cid, detail: 'y'.repeat(5990) + '\ntail' });
+  checkP('B-6edc r2: near the cap the old + new habit is NOT refused (5990 held, 5995 sent: contained, 5 characters added)',
+    r10.code === 200 && detailOf(cid) === 'y'.repeat(5990) + '\ntail' && J(r10.out.detailEdit) === J({ mode: 'contained', was: 5990, now: 5995 }), J({ code: r10.code, error: r10.out && r10.out.error, detailLength: (detailOf(cid) || '').length, de: r10.out && r10.out.detailEdit }));
+  // RED CONTROL: the tip's join compiled back (no «contained») — the habit doubles the old text
+  const JOIN = anchored(AR, "contained = oldT !== '' && d.startsWith(oldT);", 'contained = false;', 'b6edc-tip-join');
+  const joinPost = drive(M.load('src/agent-routes.js', JOIN, 'b6edc-tip-join').setupAgentRoutes);
+  const k0 = post({ add: 'B-6edc r2 control row', detail: 'kept evidence' }), kid = k0.out.item.id;
+  joinPost({ edit: kid, detail: 'kept evidence\none more line' });
+  checkP('B-6edc r2 CONTROL: with the tip\'s join in a copy of the route, the old + new habit DOUBLES the old text — RED (the «contained» leg can go red)',
+    detailOf(kid) === 'kept evidence\nkept evidence\none more line', J({ d: detailOf(kid), sent: 'kept evidence\none more line' }));
 }
 
 // (4) source pins
@@ -270,6 +292,9 @@ check('control: the r.item-only CLI reports "not stored" for an item the older s
   sent = null;
   e = await runCli(CLI, ['backlog-edit', 'B-1111', '--replace-detail']);
   checkP('B-6edc CLI: --replace-detail with no --detail is refused before anything is sent (exit 1)', e.code === 1 && sent === null && /--replace-detail says how --detail is used/.test(e.out), JSON.stringify({ code: e.code, sent, out: e.out }));
+  reply = { success: true, item: { id: 'B-1111', text: 'my parked item', status: 'open' }, backlog: [], detailEdit: { mode: 'contained', was: 23, now: 37 } };
+  e = await runCli(CLI, ['backlog-edit', 'B-1111', '--detail', 'the old evidence, dated\none more line']);
+  checkP('B-6edc r2 CLI: a detail that already held the old one is said in its own word — «the old text was already in it: 14 characters added (now 37)»', e.code === 0 && sent && !('replaceDetail' in sent) && /detail: the old text was already in it: 14 characters added \(now 37\)/.test(e.out), JSON.stringify({ code: e.code, sent, out: e.out }));
   reply = { success: true, item: { id: 'B-1111', text: 'my parked item', status: 'open' }, backlog: [] };   // an older server: no detailEdit
   e = await runCli(CLI, ['backlog-edit', 'B-1111', '--detail', 'x']);
   checkP('B-6edc CLI: an older server (no detailEdit in its answer) — the CLI says it REPLACED the whole detail, never «added»', e.code === 0 && /detail REPLACED — this server is older than the add form/.test(e.out) && !/added below/.test(e.out), JSON.stringify({ code: e.code, out: e.out }));
@@ -277,8 +302,8 @@ check('control: the r.item-only CLI reports "not stored" for an item the older s
   const man = fs.readFileSync(path.join(REPO, 'docs/agent/task-manual.md'), 'utf8');
   checkP('B-6edc: the tool\'s help and the agents\' manual say BOTH forms (--detail adds; --replace-detail replaces, by name)',
     /--detail ADDS a paragraph below the old detail/.test(help.out) && /--replace-detail with --detail REPLACES the whole detail/.test(help.out)
-      && /--detail "one more line" +# ADDS below the old detail/.test(man) && /--replace-detail +# REPLACES it — by name/.test(man) && /--detail "" --replace-detail +# clears it — by name/.test(man),
-    JSON.stringify({ help: help.out.split('\n').filter((l) => /--detail ADDS|--replace-detail with --detail/.test(l)), manual: man.split('\n').filter((l) => /# (ADDS below the old detail|REPLACES it — by name|clears it — by name)$/.test(l)) }));
+      && /--detail "one more line" +# ADDS below the old detail/.test(man) && /a `--detail` that already starts with the whole old detail takes its place \(nothing lost, nothing doubled/.test(man) && /--replace-detail +# REPLACES it — by name/.test(man) && /--detail "" --replace-detail +# clears it — by name/.test(man),
+    JSON.stringify({ help: help.out.split('\n').filter((l) => /--detail ADDS|--replace-detail with --detail/.test(l)), manual: man.split('\n').filter((l) => /# (ADDS below the old detail|REPLACES it — by name|clears it — by name)$|takes its place \(nothing lost, nothing doubled/.test(l)) }));
 }
 srv.close();
 

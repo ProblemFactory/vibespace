@@ -62,6 +62,7 @@ vibespace-task --group <id> backlog-edit <B-id> --detail "" --replace-detail    
 - A plain `--detail` ADDS: the old text is kept and your paragraph goes below
   it. The answer says how many characters you added and how many the detail
   holds now. A plain `--detail ""` is refused (there is nothing to add).
+- Sending the old detail back with your new text is safe: a `--detail` that already starts with the whole old detail takes its place (nothing lost, nothing doubled; the answer says «the old text was already in it»).
 - Replacing or clearing the WHOLE detail is asked for by name with
   `--replace-detail`, and the answer says how many characters were replaced.
 - `--detail-file <path>` (or `--detail-file -` for stdin) gives a long detail

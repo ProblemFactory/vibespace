@@ -1538,7 +1538,10 @@ app.post('/api/agent/task-backlog', function taskBacklogRoute(req, res) {
       // B-6edc (agent feedback fb-f5f3c65a9d; 主开发's law): AN EDIT NEVER LOSES A DETAIL BY ACCIDENT. The plain --detail ADDS — the
       // old text kept, the new paragraph below it; replacing (or clearing) the WHOLE detail is asked for by name (`replaceDetail`, the
       // CLI's --replace-detail) and answered with how many characters it replaced. An older CLI that sends the plain form gets the
-      // safe add, never the lossy replace. Judged BEFORE anything is applied: a refusal changes nothing
+      // safe add, never the lossy replace. Judged BEFORE anything is applied: a refusal changes nothing.
+      // r2 (主开发 r246): …AND NEVER DOUBLES IT. The habit of the replace era (read the row, send the old text and the new together)
+      // must not give old + old + new: a plain detail that already holds the WHOLE old detail at its start (compared after the same
+      // trim) TAKES ITS PLACE — nothing lost, nothing doubled — and the answer says so (mode 'contained')
       let nextDetail;   // undefined = the detail is not touched; null = cleared
       if (hasDetail) {
         const d = detail.trim(), old = typeof backlog[r].detail === 'string' ? backlog[r].detail : '', blank = d === '' || d === '-';
@@ -1547,10 +1550,11 @@ app.post('/api/agent/task-backlog', function taskBacklogRoute(req, res) {
           detailEdit = { mode: blank ? 'cleared' : 'replaced', was: cliText.chars(old), now: blank ? 0 : cliText.chars(d) };
         } else {
           if (blank) return res.status(400).json({ error: `nothing to add — a plain --detail ADDS to the detail and never clears it; to clear the whole detail (${cliText.chars(old)} characters) ask by name: --detail "" --replace-detail — nothing changed`, code: 'detail-clear-by-name' });
-          const joined = old ? `${old}\n${d}` : d;
+          const oldT = old.trim(), contained = oldT !== '' && d.startsWith(oldT);
+          const joined = contained ? d : old ? `${old}\n${d}` : d;
           if (joined.length > BACKLOG_CAPS.detail) return res.status(400).json({ error: `the detail would be ${joined.length} characters (${old.length} kept + ${joined.length - old.length} added) — a detail holds at most ${BACKLOG_CAPS.detail}; add less, or replace the whole detail by name (--replace-detail) — nothing changed`, code: 'detail-too-long' });
           nextDetail = joined;
-          detailEdit = { mode: old ? 'added' : 'set', was: cliText.chars(old), now: cliText.chars(joined) };
+          detailEdit = { mode: contained ? 'contained' : old ? 'added' : 'set', was: cliText.chars(old), now: cliText.chars(joined) };
         }
       }
       if (hasText) backlog[r].text = newText.trim();

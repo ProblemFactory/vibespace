@@ -306,6 +306,7 @@ async function main() {
     if (hasDetailFlag) {   // B-6edc: what the edit did to the detail, said in characters (the server's own count)
       const de = r.detailEdit;
       if (de && de.mode === 'added') changed.push(`detail: ${de.now - de.was} characters added below the old ${de.was} (now ${de.now})`);
+      else if (de && de.mode === 'contained') changed.push(`detail: the old text was already in it: ${de.now - de.was} characters added (now ${de.now})`);
       else if (de && de.mode === 'set') changed.push(`detail set (${de.now} characters)`);
       else if (de && de.mode === 'replaced') changed.push(`detail REPLACED: ${de.was} characters replaced by ${de.now}`);
       else if (de && de.mode === 'cleared') changed.push(`detail CLEARED (${de.was} characters removed)`);
