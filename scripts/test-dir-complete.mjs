@@ -52,7 +52,7 @@ process.on('exit', () => { try { fs.rmSync(TMP, { recursive: true, force: true }
 const HOME = path.join(TMP, 'home', 'me');
 const mk = (rel, files = 0) => { const d = path.join(HOME, rel); fs.mkdirSync(d, { recursive: true }); for (let i = 0; i < files; i++) fs.writeFileSync(path.join(d, `f${i}.txt`), 'x'); return d; };
 for (const [d, f] of [['work/investor-relations/Q3-董事会材料', 5], ['work/investor-relations/会议纪要', 3], ['work/investor-relations/草稿', 2], ['work/investor-relations/共享资料', 4], ['work/compute-deal/条款版本', 2], ['work/contracts', 23], ['work/payments/发票', 2], ['work/weekly-admin', 3], ['work/草稿', 2], ['code/ir-dashboard/src', 1], ['Downloads', 3], ['.config/vibespace', 1]]) mk(d, f);
-fs.mkdirSync(path.join(HOME, 'code/ir-dashboard/.git')); fs.writeFileSync(path.join(HOME, 'code/ir-dashboard/README.md'), '#'); fs.writeFileSync(path.join(HOME, 'code/ir-dashboard/package.json'), '{"name":"ir-dashboard"}');
+fs.mkdirSync(path.join(HOME, 'code/ir-dashboard/.git')); fs.writeFileSync(path.join(HOME, 'code/ir-dashboard/notes.txt'), '#'); fs.writeFileSync(path.join(HOME, 'code/ir-dashboard/package.json'), '{"name":"ir-dashboard"}');
 fs.symlinkSync(path.join(HOME, 'work/contracts'), path.join(HOME, '合同'));
 /* the instance's own checkout in the home (a fresh pod): the folder with the MOST files, package.json names vibespace */
 mk('vibespace/src', 60); fs.writeFileSync(path.join(HOME, 'vibespace/package.json'), JSON.stringify({ name: 'vibespace', version: '2.369.345' }));
@@ -103,9 +103,9 @@ console.log('── ① GET /api/dir-complete over a real tree: bases, q, probe,
   ok('a link to a folder is a LINK (~/合同 → ~/work/contracts), not a second row', mem.links['~/合同'] === '~/work/contracts' && !mem.dirs['~/合同'], [mem.links, !!mem.dirs['~/合同']]);
   const ht = PC.rankCandidates('合同', inp());
   ok('合同 → ~/work/contracts through the link alias', ht.best && ht.best.path === '~/work/contracts' && ht.best.alias && ht.best.alias.from.key === 'link', ht.best);
-  const g = await ask('', { probe: ['~/code/ir-dashboard', '~/nope', '~/code/ir-dashboard/README.md'] });
+  const g = await ask('', { probe: ['~/code/ir-dashboard', '~/nope', '~/code/ir-dashboard/notes.txt'] });
   const ird = g.listing.dirs['~/code/ir-dashboard'] || {};
-  ok('probe = each folder\'s facts: exists + git + fileCount + mtime; a missing one is absent; a file is a nondir', ird.git === true && ird.fileCount === 2 && ird.mtime > 0 && !g.listing.dirs['~/nope'] && g.listing.nondirs['~/code/ir-dashboard/README.md'] === true, [ird, g.listing.nondirs]);
+  ok('probe = each folder\'s facts: exists + git + fileCount + mtime; a missing one is absent; a file is a nondir', ird.git === true && ird.fileCount === 2 && ird.mtime > 0 && !g.listing.dirs['~/nope'] && g.listing.nondirs['~/code/ir-dashboard/notes.txt'] === true, [ird, g.listing.nondirs]);
   ok('self = the checkout the server runs from + its data dir + ~/vibespace (package.json names vibespace)', g.self.roots.includes(REPO) && g.self.roots.includes(path.join(REPO, 'data')) && g.self.roots.includes(path.join(HOME, 'vibespace')), g.self.roots);
   const legacy = await get(`/api/dir-complete?path=${encodeURIComponent(HOME + '/wo')}`);
   ok('a caller sending none of the new params gets the old shape (suggestions only)', JSON.stringify(Object.keys(legacy)) === '["suggestions"]' && legacy.suggestions.includes(path.join(HOME, 'work')), legacy);
@@ -397,9 +397,11 @@ console.log('\n── ③b the hung source and the slow one (B-0f3d, kept) · �
   // typed absolutely reads «is a file», never «create it?». And EVERY base is a candidate (N5): with 44 bases and the home last, a folder only
   // the home holds still EXISTS. CONTROLS: the candidates absolute; the candidates cut at 40
   {
-    const ex = async (D2) => { const d = mkDS(D2, standIn()); const a = await d.slice({ text: path.join(HOME, 'work', 'payments'), bases: ['~'], budgetMs: 450 }); const f = await d.slice({ text: path.join(HOME, 'code', 'ir-dashboard', 'README.md'), bases: ['~'], budgetMs: 450 }); return { path: a.verdict && a.verdict.path, missing: f.verdict && f.verdict.missing && f.verdict.missing.path, file: !!f.listing.nondirs['~/code/ir-dashboard/README.md'] }; };
+    // (主开发 r304: the fixture's file is notes.txt, never README.md — a bare root file name on a path.join line is that ROOT file to the
+    // push gate's deriver, test-ci-gate-push: the root readme became a gate input)
+    const ex = async (D2) => { const d = mkDS(D2, standIn()); const a = await d.slice({ text: path.join(HOME, 'work', 'payments'), bases: ['~'], budgetMs: 450 }); const f = await d.slice({ text: path.join(HOME, 'code', 'ir-dashboard', 'notes.txt'), bases: ['~'], budgetMs: 450 }); return { path: a.verdict && a.verdict.path, missing: f.verdict && f.verdict.missing && f.verdict.missing.path, file: !!f.listing.nondirs['~/code/ir-dashboard/notes.txt'] }; };
     const [tl, tlC] = await Promise.all([ex(DS), ex(mutant('s4-abs', [['return { c: PC.toTilde(home, a), a };', 'return { c, a };', 'the candidates absolute']]))]);
-    ok('③c an absolute text under the home: «exists» as ~/work/payments; a file typed absolutely is where the listing names it a file (~/code/ir-dashboard/README.md) — CONTROL the candidates absolute: the keys never meet', tl.path === '~/work/payments' && tl.missing === '~/code/ir-dashboard/README.md' && tl.file && tlC.path !== '~/work/payments' && tlC.missing !== '~/code/ir-dashboard/README.md', { real: tl, control: tlC });
+    ok('③c an absolute text under the home: «exists» as ~/work/payments; a file typed absolutely is where the listing names it a file (~/code/ir-dashboard/notes.txt) — CONTROL the candidates absolute: the keys never meet', tl.path === '~/work/payments' && tl.missing === '~/code/ir-dashboard/notes.txt' && tl.file && tlC.path !== '~/work/payments' && tlC.missing !== '~/code/ir-dashboard/notes.txt', { real: tl, control: tlC });
     const MANY = Array.from({ length: 44 }, (_, i) => { const d = path.join(TMP, 'many', 'b' + i); fs.mkdirSync(d, { recursive: true }); return d; });
     const many = async (D2) => (await mkDS(D2, standIn()).slice({ text: 'work', bases: [...MANY, '~'], budgetMs: 2000 })).verdict;
     const [mv, mvC] = await Promise.all([many(DS), many(mutant('s4-cut40', [['    const cands = PC.textCandidates(text, tAll).map(', '    const cands = PC.textCandidates(text, tAll.slice(0, 40)).map(', 'the candidates cut at 40']]))]);
