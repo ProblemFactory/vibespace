@@ -130,6 +130,10 @@ const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
     ['before the send: the connect', '    const conn = await this.connect();'],
     ['before the send: the device\'s allow list', '    const noFlag = this._policyError(conn, payload, true); if (noFlag) return Promise.reject(gateRefusal(noFlag));'],
     ['an ANSWER (the device\'s error, or the lost link\'s synthetic answer)', '        return m.error ? reject(replyError(m)) : resolve(m);'],
+    // lane lg-remote-hardening (B-7f0b D8) meets this census: TWO roads more, each by name — an answer over its op's cap, and a
+    // request the Mux will not send (over the line's bound)
+    ['an ANSWER over its op\'s cap (answer-too-large, the link kept)', "          return reject(Object.assign(new Error(`${this._machineName() || 'the machine'}: its answer to ${payload.op} is "],
+    ['before the send: a request the Mux will not send (control-line-too-large, nothing pending)', '      try { conn.mux.control({ ...payload, id }); } catch (e) {'],
     ['LEFT, no reply: the request\'s own bound', "reject(new Error(payload.op + ' timeout')); } }, payload.waitMs || payload.timeoutMs || 30000);"],
   ];
   const roadsOf = (src) => {
@@ -137,9 +141,9 @@ const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
     const body = a >= 0 && b > a ? src.slice(a, b) : '';
     return { body, pinned: ROADS.every(([, line]) => body.split(line).length === 2), rejects: (body.match(/\breject\(/g) || []).length, awaits: (body.match(/\bawait\b/g) || []).length, returns: (body.match(/\breturn this\._refuseAct\(|\breturn Promise\.reject\(/g) || []).length };
   };
-  const census = (src) => { const r = roadsOf(src); return r.pinned && r.rejects === 3 && r.awaits === 2 && r.returns === 2 && src.split("for (const r of pending.values()) { try { r({ error: 'device link lost', linkLost: true }); } catch { } }").length === 2 && src.includes("m.linkLost ? { code: 'link_lost' } : {}") && src.includes("const r = await this._request({ op: 'peer-post', cid, text, timeoutMs: 15000, by });"); };
-  ok(census(CLSRC), 'census (B-6721, the MUST): the client\'s request maker ends a request on exactly SIX roads, pinned by name — four before the send, the answer (the lost link\'s own `linkLost` answer among them, code link_lost), the request\'s own bound (`peer-post timeout`); the rung\'s «unanswered» judges the last two', JSON.stringify((() => { const r = roadsOf(CLSRC); return { pinned: r.pinned, rejects: r.rejects, awaits: r.awaits, returns: r.returns }; })()));
-  ok(!census(anchored(CLSRC, '      conn.mux.control({ ...payload, id });', "      if (payload.op === 'x') { conn.pending.delete(id); reject(new Error('x')); return; }\n      conn.mux.control({ ...payload, id });", 'B-6721: a new way for a request to fail')), 'RED control: a NEW way for a request to end (an added reject) is red until the rung says which side it is on');
+  const census = (src) => { const r = roadsOf(src); return r.pinned && r.rejects === 5 && r.awaits === 2 && r.returns === 2 && src.split("for (const r of pending.values()) { try { r({ error: 'device link lost', linkLost: true }); } catch { } }").length === 2 && src.includes("m.linkLost ? { code: 'link_lost' } : {}") && src.includes("const r = await this._request({ op: 'peer-post', cid, text, timeoutMs: 15000, by });"); };
+  ok(census(CLSRC), 'census (B-6721, the MUST): the client\'s request maker ends a request on exactly EIGHT roads, pinned by name — five before the send (B-7f0b D8: a request the Mux will not send), the answer (the lost link\'s own `linkLost` answer among them, code link_lost), the request\'s own bound (`peer-post timeout`); the rung\'s «unanswered» judges the last two', JSON.stringify((() => { const r = roadsOf(CLSRC); return { pinned: r.pinned, rejects: r.rejects, awaits: r.awaits, returns: r.returns }; })()));
+  ok(!census(anchored(CLSRC, '      try { conn.mux.control({ ...payload, id }); } catch (e) {', "      if (payload.op === 'x') { conn.pending.delete(id); reject(new Error('x')); return; }\n      try { conn.mux.control({ ...payload, id }); } catch (e) {", 'B-6721: a new way for a request to fail')), 'RED control: a NEW way for a request to end (an added reject) is red until the rung says which side it is on');
   // unknown everywhere
   const r4 = await D.deliverToConversation('cid-nowhere', 'x');
   ok(!r4.ok && /no live inbox/.test(r4.reason), 'unroutable conversation fails with a named reason');

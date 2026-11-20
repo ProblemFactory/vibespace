@@ -4291,6 +4291,8 @@ export default {
   "Provided by the cluster": "由集群提供",
   "Replace": "替换",
   "Test connection": "测试连接",
+  "the machine's answer is {size} — over the {cap} this view may take, so it is not shown": "这台机器的回复有 {size}，超过了这里能收的 {cap}，所以没有显示",
+  "this is {size} — over the {cap} one transfer to the machine may carry, so it was not sent": "这有 {size}，超过了向这台机器一次传送能带的 {cap}，所以没有发送",
   "Test could not run — {reason}": "测试无法运行 — {reason}",
   "Test reachability": "测试可达性",
   "Testing…": "测试中…",

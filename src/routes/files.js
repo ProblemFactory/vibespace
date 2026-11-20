@@ -675,7 +675,7 @@ router.post('/api/upload', uploadFiles, async (req, res) => {
       return res.json({ success: true, files: results, ...(keptFrom ? { keptWithConversation: true, keptFrom, dir: destDir } : {}) });
     } catch (e) {
       for (const f of req.files || []) { try { fs.unlinkSync(f.path); } catch {} }
-      return res.status(400).json({ error: e.message });
+      return res.status(400).json(fsErrorBody(e));   // B-7f0b D8: a refusal by code (a file over the device link's line) is worded on the page
     }
   }
   try {

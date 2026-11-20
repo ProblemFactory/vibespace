@@ -39,7 +39,7 @@ function daemonInfoOf(dm) { try { const st = typeof dm.status === 'function' ? d
 const named = (code, message, status, params) => Object.assign(new Error(message), { code, status, params });
 // verify-r2: the Files view's refusals travel as a CODE (+ its params) beside the English `error` — the client words them
 // in the reader's language (src/lib/file-explorer-ops.js fsErrorText); every other error: `{ error }` as before
-const FS_REFUSALS = Object.freeze(['device_agent_outdated', 'windows_unsupported', 'windows_no_shell', 'host-unreachable']); // host-unreachable: a paired ssh machine refused BY NAME (lane hub-dies-dead-ssh-host)
+const FS_REFUSALS = Object.freeze(['device_agent_outdated', 'windows_unsupported', 'windows_no_shell', 'host-unreachable', 'answer-too-large', 'control-line-too-large']); // host-unreachable: a paired ssh machine refused BY NAME (lane hub-dies-dead-ssh-host); answer-too-large: a reply over its op's cap (B-7f0b D8)
 const fsErrorBody = (e) => ({ error: String((e && e.message) || e), ...(e && FS_REFUSALS.includes(e.code) ? { code: e.code, params: e.params || {} } : {}) });
 
 // ONE archive-listing parser for local AND remote (B-b87b: RemoteFs used to
@@ -261,7 +261,7 @@ class RemoteFs {
           path: abs,
           items: r.entries.map((e) => ({ name: e.name, isDirectory: !!e.isDir, isSymlink: false, size: e.size || 0, modified: e.mtimeMs || 0, created: 0 })),
         };
-      } catch { /* legacy ssh below */ }
+      } catch (e) { if (e && e.code === 'answer-too-large') throw e; /* legacy ssh below (B-7f0b D8: a reply refused over its cap is said — never a partial list from the fallback) */ }
     }
     const d = dir && dir !== '~' ? dir : await this.home(id);
     // find -printf is GNU-only — on a macOS/BSD ssh host it errored into
@@ -375,8 +375,17 @@ class RemoteFs {
         const abs = await this._devAbs(id, dm, filePath);
         await dm.fsWrite(abs, contentBuffer, { by: this._actBy });
         return;
-      } catch { /* legacy */ }
+      } catch (e) {
+        // B-7f0b D8 (r310 (3)): a write over the device link's line, on a machine with NO ssh road (dialed), is said by name —
+        // never an ssh attempt; a machine with ssh writes it by its ssh road below, which answers with its own words
+        if (e && e.code === 'control-line-too-large') { let dial = false; try { dial = this.hosts.get(id)?.transport === 'dial'; } catch { } if (dial) throw e; }
+        /* legacy */
+      }
     }
+    return this._sshWrite(id, filePath, contentBuffer);
+  }
+
+  async _sshWrite(id, filePath, contentBuffer) {
     const h = this._host(id);
     const { feedStdin, sshRefusal } = require('./hosts.js'); // THE ONE STDIN FEED (lane hub-dies-dead-ssh-host): a dead machine's EPIPE is an answer, never the hub's death
     await new Promise((resolve, reject) => {

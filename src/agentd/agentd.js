@@ -1973,7 +1973,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'transcript-picture', 'pipe-detach' /* B-beaf: a CLOSE on a pipe session's channel ends its tail */, 'device-key', 'hub-key', 'usage-scan', 'usage-scan-hub-cursor', 'discovery-claims', 'place-secret', 'quota-refresh', 'quota-refresh-bearer-law' /* B-5e0d: this agent's quota-refresh never sends a long-lived token */, 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'left-behind' /* B-69a7: a READ of what a stopped turn's tool left (pid, name, start only) */, 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'cli-level' /* B-24e2: probe-cli answers `level` for the build a conversation runs (an agent without it is asked nothing) — placed before the stream run: suites pin the list's head, its last twelve and its tail */, 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input', 'stream-mic', 'stream-audio'],
+          capabilities: ['probe', 'transcript-op', 'transcript-picture', 'pipe-detach' /* B-beaf: a CLOSE on a pipe session's channel ends its tail */, 'device-key', 'hub-key', 'answer-bounds' /* lane lg-remote-hardening (q-042 D8): an over-long answer or push is refused by name, the link kept */, 'usage-scan', 'usage-scan-hub-cursor', 'discovery-claims', 'place-secret', 'quota-refresh', 'quota-refresh-bearer-law' /* B-5e0d: this agent's quota-refresh never sends a long-lived token */, 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'left-behind' /* B-69a7: a READ of what a stopped turn's tool left (pid, name, start only) */, 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'cli-level' /* B-24e2: probe-cli answers `level` for the build a conversation runs (an agent without it is asked nothing) — placed before the stream run: suites pin the list's head, its last twelve and its tail */, 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input', 'stream-mic', 'stream-audio'],
         }));
         return;
       }
@@ -2253,6 +2253,13 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
             const cursorFile = msg.cursorFile || path.join(STATE, 'usage-push-cursor.json');
             const st = { cursorFile, running: false, again: false, seq: 0, pendingCursors: new Map(), watches: [] };
             this._usageEvWatch = st;
+            st.commit = (cur) => {   // the cursor file, written temp-plus-rename (a walk with no new events, or the hub's ack)
+              try {
+                fs.mkdirSync(path.dirname(cursorFile), { recursive: true });
+                fs.writeFileSync(cursorFile + '.tmp', JSON.stringify(cur));
+                fs.renameSync(cursorFile + '.tmp', cursorFile);
+              } catch { }
+            };
             const runWalk = () => {
               if (st.dead) return; // its link died (U1): no walk, no push, no cursor written for a link nobody hears
               if (st.running) { st.again = true; return; }
@@ -2262,29 +2269,9 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
                   st.running = false;
                   try {
                     if (err) log('usage-events walk failed: ' + err.message);
-                    if (!err && stdout) {
-                      const lines = String(stdout).split('\n').filter(Boolean);
-                      const last = lines.pop();
-                      let manifest = null; try { manifest = JSON.parse(last || ''); } catch { }
-                      if (manifest && manifest.__cursors__ && lines.length) {
-                        const seq = ++st.seq;
-                        st.pendingCursors.set(seq, manifest.__cursors__);
-                        // ≤500-event chunks; the FINAL chunk carries the seq
-                        // the server must ack for the cursor to commit
-                        for (let i = 0; i < lines.length; i += 500) {
-                          const slice = lines.slice(i, i + 500);
-                          const isLast = i + 500 >= lines.length;
-                          try { mux.control({ op: 'usage-events', batch: slice, ...(isLast ? { seq } : {}) }); } catch { }
-                        }
-                      } else if (manifest && manifest.__cursors__) {
-                        // no new events — commit directly (nothing to lose)
-                        try {
-                          fs.mkdirSync(path.dirname(cursorFile), { recursive: true });
-                          fs.writeFileSync(cursorFile + '.tmp', JSON.stringify(manifest.__cursors__));
-                          fs.renameSync(cursorFile + '.tmp', cursorFile);
-                        } catch { }
-                      }
-                    }
+                    // the batch law is answer-caps.js usagePushWalked (B-7f0b D8; the suite runs it): chunks under the line's bound,
+                    // the seq on the LAST one, a refused chunk ends the batch before it and drops its pending cursor
+                    if (!err && stdout) require('./answer-caps.js').usagePushWalked(st, stdout, (obj) => mux.control(obj), st.commit);
                   } catch (e) { log('usage-events push failed: ' + e.message); }
                   if (st.again && !st.dead) { st.again = false; setTimeout(runWalk, 200); }
                 });
@@ -2305,13 +2292,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
         // the server confirmed durable ingest of batch `seq` → commit cursor
         try {
           const st = this._usageEvWatch;
-          const cur = st && st.pendingCursors.get(msg.seq);
-          if (st && cur) {
-            for (const k of [...st.pendingCursors.keys()]) if (k <= msg.seq) st.pendingCursors.delete(k);
-            fs.mkdirSync(path.dirname(st.cursorFile), { recursive: true });
-            fs.writeFileSync(st.cursorFile + '.tmp', JSON.stringify(cur));
-            fs.renameSync(st.cursorFile + '.tmp', st.cursorFile);
-          }
+          if (st) require('./answer-caps.js').usagePushAcked(st, msg.seq, st.commit);   // that batch's cursor commits (B-7f0b D8: one law, run by the suite)
         } catch { }
         return;
       }
@@ -3021,6 +3002,10 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
       if (this._sessEvWatch) { try { clearInterval(this._sessEvWatch.timer); } catch { } try { this._sessEvWatch.tails.clear(); } catch { } this._sessEvWatch = null; }
       pipeSessions.detachAll(mux);
     },
+    // lane lg-remote-hardening (B-7f0b D8): an answer or a push over the line's bound is refused BY NAME — that ONE op (its id
+    // kept) or a `line-refused` naming the push, the link kept (the usage push's worst case used to end the link); the
+    // capability `answer-bounds` says so to the hub (src/agentd/answer-caps.js refusalOf)
+    overLong: (obj, bytes, cap) => require('./answer-caps.js').refusalOf(obj, bytes, cap),
   });
   mux._tcpChans = tcpChans; // reverse-forward accepts push sockets into the owner's map
 }

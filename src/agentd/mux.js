@@ -15,6 +15,13 @@ const T = { DATA: 0, CLOSE: 1, CREDIT: 2, PING: 3, PONG: 4 };
 const INITIAL_WINDOW = 262144; // bytes, per byte-channel per direction
 const PING_INTERVAL = 10000;
 const PING_DEAD_MISSES = 3;
+// lane lg-remote-hardening (B-7f0b, design q-042 D8): THE LINE'S BOUND. A frame's length field over FRAME_MAX ends the link (the
+// release's bound); a control line rides ONE frame, so no line is longer than LINE_MAX. The SENDER refuses an over-long line BY
+// NAME before it sends a frame the peer must die on (an `overLong` hook may send a refusal in its place — the agent's: that ONE
+// op refused, the link kept); the RECEIVER ends the link BY NAME on a line still open past it (a line split over frames used to
+// grow without bound). The same numbers as src/agentd/answer-caps.js (scripts/test-answer-caps.mjs pins them equal).
+const FRAME_MAX = 64 * 1024 * 1024;
+const LINE_MAX = FRAME_MAX - 5;
 
 function encodeFrame(type, chan, payload = Buffer.alloc(0)) {
   const head = Buffer.alloc(9);
@@ -27,7 +34,7 @@ function encodeFrame(type, chan, payload = Buffer.alloc(0)) {
 /**
  * Mux — wraps a duplex stream (net.Socket or any {write, on('data'/'close')}).
  * Events via callbacks:
- *   onControl(obj)              — parsed chan-0 JSON line
+ *   onControl(obj, bytes)       — parsed chan-0 JSON line (bytes: the line's length — the hub judges an answer's cap by it)
  *   onData(chan, buf)           — byte-channel data (consumer MUST call
  *                                 mux.credit(chan, n) as it consumes)
  *   onClose(chan)               — peer half-closed a byte channel
@@ -38,8 +45,10 @@ function encodeFrame(type, chan, payload = Buffer.alloc(0)) {
  *                                 wire change.
  */
 class Mux {
-  constructor(stream, { onControl, onData, onClose, onDead, onWritable, heartbeat = true } = {}) {
+  constructor(stream, { onControl, onData, onClose, onDead, onWritable, heartbeat = true, lineMax = LINE_MAX, overLong = null } = {}) {
     this.stream = stream;
+    this._lineMax = Number(lineMax) > 0 ? Math.min(Number(lineMax), LINE_MAX) : LINE_MAX;   // a suite may lower it; never above the frame
+    this._overLong = typeof overLong === 'function' ? overLong : null;
     this.onControl = onControl || (() => {});
     this.onData = onData || (() => {});
     this.onCloseChan = onClose || (() => {});
@@ -69,8 +78,21 @@ class Mux {
     try { return this.stream.write(encodeFrame(type, chan, payload)); } catch { this._die('write failed'); return false; }
   }
 
-  /** chan-0 control message (JSON line). */
-  control(obj) { this._raw(T.DATA, 0, Buffer.from(JSON.stringify(obj) + '\n')); }
+  /** chan-0 control message (JSON line). A line over the link's bound is never sent: the `overLong` hook's refusal goes in its
+   *  place, or it THROWS by name (control-line-too-large) — the caller's refusal, never a frame the peer must die on.
+   *  → true when the line went as it was, false when its refusal went instead. */
+  control(obj) {
+    let b = Buffer.from(JSON.stringify(obj) + '\n');
+    if (b.length > this._lineMax) {
+      let sub = null; if (this._overLong) { try { sub = this._overLong(obj, b.length, this._lineMax); } catch { sub = null; } }
+      const sb = sub ? Buffer.from(JSON.stringify(sub) + '\n') : null;
+      if (!sb || sb.length > this._lineMax) throw Object.assign(new Error(`a control line of ${b.length} bytes (${(obj && obj.op) || 'a line'}) is over the device link's ${this._lineMax} — not sent`), { code: 'control-line-too-large', op: (obj && obj.op) || null, bytes: b.length, cap: this._lineMax });
+      this._raw(T.DATA, 0, sb);
+      return false;
+    }
+    this._raw(T.DATA, 0, b);
+    return true;
+  }
 
   /** Is the peer answering RIGHT NOW? One PING, true on the next PONG (the heartbeat's counts too), false at the
    *  deadline or on a dead mux. Never throws (verify-r1 B9: the duplicate-device probe). */
@@ -153,11 +175,11 @@ class Mux {
   }
 
   _feed(d) {
-    if (this._detached) return;
+    if (this._detached || this._lineDead) return;   // the line bound ended the link: nothing more is held
     this._acc = this._acc.length ? Buffer.concat([this._acc, d]) : d;
-    while (!this._detached && this._acc.length >= 4) {
+    while (!this._detached && !this._lineDead && this._acc.length >= 4) {
       const len = this._acc.readUInt32BE(0);
-      if (len < 5 || len > 64 * 1024 * 1024) return this._die('bad frame length ' + len);
+      if (len < 5 || len > FRAME_MAX) return this._die('bad frame length ' + len);
       if (this._acc.length < 4 + len) return; // incomplete
       const type = this._acc.readUInt8(4);
       const chan = this._acc.readUInt32BE(5);
@@ -174,12 +196,15 @@ class Mux {
           this._ctlAcc = this._ctlAcc.length ? Buffer.concat([this._ctlAcc, payload]) : Buffer.from(payload);
           let i;
           while (!this._detached && (i = this._ctlAcc.indexOf(10)) !== -1) {
-            const line = this._ctlAcc.subarray(0, i).toString('utf-8').trim();
+            const line = this._ctlAcc.subarray(0, i).toString('utf-8').trim(), bytes = i;
             this._ctlAcc = this._ctlAcc.subarray(i + 1);
+            if (bytes > this._lineMax) { this._lineDead = true; this._ctlAcc = Buffer.alloc(0); return this._die(`control-line-too-large: a control line of ${bytes} bytes is over the device link's ${this._lineMax}`); }
             if (!line) continue;
             let obj; try { obj = JSON.parse(line); } catch { continue; }
-            this.onControl(obj);
+            this.onControl(obj, bytes);
           }
+          // a line still open past the bound (split over frames, no newline yet) ends the link BY NAME — it never grows for ever
+          if (!this._detached && this._ctlAcc.length > this._lineMax) { this._lineDead = true; this._ctlAcc = Buffer.alloc(0); return this._die(`control-line-too-large: a control line still open past the device link's ${this._lineMax} bytes`); }
         } else {
           this.onData(chan, Buffer.from(payload));
         }
@@ -202,4 +227,4 @@ class Mux {
   }
 }
 
-module.exports = { Mux, PROTO_VERSION, INITIAL_WINDOW, T, encodeFrame };
+module.exports = { Mux, PROTO_VERSION, INITIAL_WINDOW, T, encodeFrame, FRAME_MAX, LINE_MAX };

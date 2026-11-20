@@ -17,6 +17,7 @@ const { spawn } = require('child_process');
 const { Mux, PROTO_VERSION } = require('./mux.js');
 const { daemonEnv, serviceEnv, SSH_ENV_KEEP } = require('../agent-env.js');
 const DA = require('../device-acts.js'); // lane device-act-audit: the op layers + `by` + THE audit line (PURE)
+const AC = require('./answer-caps.js'); // lane lg-remote-hardening (B-7f0b D8): the line's bound and each op's answer cap, one PURE table
 // B-c632 cure (batch 71's reader): the act's WHOLE argv — the summary is cut at SUMMARY_MAX, so two long commands alike in their
 // first 240 characters were one subject; a hash of the whole argv (cmd + args, or the shell line, + cwd) tells them apart
 const argvIdOf = (p) => (p && (p.cmd != null || p.shell != null) ? crypto.createHash('sha256').update(JSON.stringify([p.shell == null ? null : String(p.shell), p.cmd == null ? null : String(p.cmd), Array.isArray(p.args) ? p.args.map(String) : null, p.cwd == null ? null : String(p.cwd)])).digest('hex').slice(0, 16) : '');
@@ -97,7 +98,7 @@ const gateRefusal = (e) => stageMark(e, 'gate');
 /** THE ERROR OF AN AGENT'S ERROR REPLY (`_request` rejects with it): its words, a lost link's code, an op refused by the
  *  device's own allow flags (code / flag / remedy), and the reason an op named for itself (`refused`, B-5e0d's quota-refresh). */
 function replyError(m) {
-  return Object.assign(new Error(m.error), m.linkLost ? { code: 'link_lost' } : {}, m.op === 'op-refused' ? { code: m.code, flag: m.flag, remedy: m.remedy } : {}, typeof m.refused === 'string' ? { refused: m.refused } : {});
+  return Object.assign(new Error(m.error), m.code === 'answer-too-large' ? { code: m.code, bytes: m.bytes, cap: m.cap, op: m.op, params: { op: m.op, size: AC.sizeOf(m.bytes), cap: AC.sizeOf(m.cap) } } : {}, m.linkLost ? { code: 'link_lost' } : {}, m.op === 'op-refused' ? { code: m.code, flag: m.flag, remedy: m.remedy } : {}, typeof m.refused === 'string' ? { refused: m.refused } : {});
 }
 /** B-5e0d: the quota-refresh op's own reason, by name (a reply or the error of one) — 'long-lived' | 'no-valid-login' | null */
 const quotaReasonOf = (x) => (x && (x.refused === 'long-lived' || x.refused === 'no-valid-login') ? x.refused : null);
@@ -587,9 +588,10 @@ class DeviceManager {
             };
             mux.onWritable = (chan) => { sessions.get(chan)?.onWritable?.(); };
             const prevControl = mux.onControl;
-            mux.onControl = (m) => {
+            mux.onControl = (m, bytes) => {
+              if (m.op === 'line-refused') { this._lineRefused(m); return; }   // lane lg-remote-hardening (D8): a push the agent refused by name
               if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'session-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'desktop-apps-list-result' || m.op === 'design-fs-result' || m.op === 'dial-status-result' || m.op === 'proc-list-result' || m.op === 'left-behind-result' /* B-69a7 */ || m.op === 'opencode-serve-result' || m.op === 'browser-serve-result' || m.op === 'desktop-serve-result' || m.op === 'window-track-result' || m.op === 'window-untrack-result' || m.op === 'window-pin-result' || m.op === 'display-facts-result' || m.op === 'remoteapp-facts-result' || m.op === 'stream-offer-result' || m.op === 'stream-answer-result' || m.op === 'stream-stop-result' || m.op === 'stream-stats-result' || m.op === 'input-events-result' || m.op === 'stream-facts-result' || m.op === 'stream-windows-result' || m.op === 'settings-open-result' || m.op === 'desktop-grab-result' || m.op === 'desktop-input-result' || m.op === 'stream-mic-result' || m.op === 'stream-audio-result' || m.op === 'peer-post-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result' || m.op === 'op-refused') {
-                const r = pending.get(m.id); if (r) { pending.delete(m.id); r(m); }
+                const r = pending.get(m.id); if (r) { pending.delete(m.id); r(m, bytes); }
                 if (m.op === 'tcp-open' && !m.error) return; // channel stays live
                 return;
               }
@@ -597,7 +599,7 @@ class DeviceManager {
               // on a listener we registered — pipe it to our local target
               if (m.op === 'tcp-accept') { this._onTcpAccept(m); return; }
               if (m.op === 'fs-done') { sessions.get(m.chan)?.onDone?.(m); return; }
-              if (m.op === 'stream-start') { const r = pending.get(m.id); if (r) { pending.delete(m.id); r(m); } return; }
+              if (m.op === 'stream-start') { const r = pending.get(m.id); if (r) { pending.delete(m.id); r(m, bytes); } return; }
               // stream-exit rides the control channel and can OVERTAKE queued
               // stdout (same class as the fs-done truncation) — a handler that
               // sets onExitMsg keeps its registration and settles itself once
@@ -619,7 +621,8 @@ class DeviceManager {
               if (m.op === 'session-error') { const h = sessions.get(m.chan); sessions.delete(m.chan); h?.onError?.(m.error); return; }
               prevControl(m);
             };
-            mux.onDead = () => {
+            mux.onDead = (why) => {
+              if (/^control-line-too-large/.test(String(why || ''))) { try { this._log(`[agentd] ${this._machineName() || 'the machine'}: the link ended — ${String(why).slice(0, 200)}`); } catch { } }   // B-7f0b D8: said by name
               if (this._transport.kind === 'stream') keptMuxOf.set(sock, mux); // unit 4's cure r3: a dead link's Mux leaves the stream at the next handshake on it
               // Tear down local sockets we opened for reverse-forward accepts
               // (mirrors the daemon's own onDead). Without this, each accepted
@@ -710,12 +713,12 @@ class DeviceManager {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { said(false, 'timeout'); reject(new Error('upgrade timeout')); }, 30000);
       const origOnControl = mux.onControl;
-      mux.onControl = (msg) => {
+      mux.onControl = (msg, bytes) => {
         if (msg.op === 'upgrade-done') { clearTimeout(timer); mux.onControl = origOnControl; said(true, null); resolve(msg); }
         // lane device-upgrade-stuck: a daemon that could not LAND the bundle says so (≥ 2.369.203) — the attempt ends
         // now with the device's own reason, never a silent 30 s timeout
         else if (msg.op === 'upgrade-failed') { clearTimeout(timer); mux.onControl = origOnControl; said(false, msg.code || 'upgrade_failed'); const e = new Error('the device could not land the upgrade — ' + String(msg.error || '?').replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 200)); if (typeof msg.code === 'string') e.code = msg.code.slice(0, 40); if (typeof msg.keyId === 'string') e.keyId = msg.keyId.replace(/[^0-9a-f]/g, '').slice(0, 16); if (typeof msg.floor === 'string' && SIG.VERSION_RE.test(msg.floor)) e.floor = msg.floor; reject(e); }
-        else origOnControl(msg);
+        else origOnControl(msg, bytes);   // the line's length rides on (the answer caps judge every answer, an upgrade's too)
       };
       // the version the daemon lands under and REPORTS after its re-exec (VIBESPACE_AGENTD_VERSION) is the
       // BUNDLE's own — the one `_expectedVersion()` compares against. Naming the package version here made a
@@ -841,13 +844,40 @@ class DeviceManager {
     const line = audit && act && DA.auditable(payload);
     const t0 = Date.now();
     return new Promise((resolve, reject) => {
-      conn.pending.set(id, (m) => {
+      conn.pending.set(id, (m, bytes) => {
+        // lane lg-remote-hardening (B-7f0b D8): an answer over its op's cap (src/agentd/answer-caps.js — the largest its own code
+        // can make) is refused BY NAME, the link kept — a runaway or malformed device never hands its caller more than that
+        const cap = AC.capOf(payload.op);
+        if (Number(bytes) > cap) {
+          if (line) this._act(payload, { ok: false, code: 'answer-too-large', ms: Date.now() - t0, ...askFacts(facts) });
+          return reject(Object.assign(new Error(`${this._machineName() || 'the machine'}: its answer to ${payload.op} is ${AC.sizeOf(bytes)} — over the ${AC.sizeOf(cap)} this op may answer; refused (answer-too-large)`), { code: 'answer-too-large', op: payload.op, bytes: Number(bytes), cap, params: { op: payload.op, size: AC.sizeOf(bytes), cap: AC.sizeOf(cap) } }));
+        }
         if (line) this._act(payload, { ...DA.answerOf(m), outHead: DA.outHeadOf(m), ms: Date.now() - t0, ...askFacts(facts) });
         return m.error ? reject(replyError(m)) : resolve(m);
       });
-      conn.mux.control({ ...payload, id });
+      // a request over the line's bound is never sent (the Mux refuses it by name: control-line-too-large) — the caller's refusal
+      try { conn.mux.control({ ...payload, id }); } catch (e) {
+        conn.pending.delete(id);
+        if (line) this._act(payload, { ok: false, code: (e && e.code) || 'request-not-sent', ms: Date.now() - t0, ...askFacts(facts) });
+        if (e && e.code === 'control-line-too-large' && !e.params) e.params = { op: payload.op, size: AC.sizeOf(e.bytes), cap: AC.sizeOf(e.cap) };   // r310 (3): worded by code on the page
+        return reject(e && e.code ? e : Object.assign(new Error(`${payload.op}: not sent — ${(e && e.message) || e}`), { code: 'request-not-sent', op: payload.op }));
+      }
       setTimeout(() => { if (conn.pending.delete(id)) { if (line) this._act(payload, { ok: false, code: 'timeout', ms: Date.now() - t0, ...askFacts(facts) }); reject(new Error(payload.op + ' timeout')); } }, payload.waitMs || payload.timeoutMs || 30000);
     });
+  }
+  /** lane lg-remote-hardening (B-7f0b D8): the agent refused one of its OWN pushes by name (over the line's bound) — said in the
+   *  journal, once a push kind a minute (bounding the producer itself is row B-5278). Never throws. */
+  _lineRefused(m) {
+    try {
+      const clean = (x, n) => String(x || '').replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, n);   // the device's own words: no control character, bounded
+      const k = clean((m && m.of) || 'a push', 64), now = Date.now();
+      if (!this._lineRefusedAt || this._lineRefusedAt.size > 32) this._lineRefusedAt = new Map();   // a device naming a new kind each time gets no growing memory
+      if (now - (this._lineRefusedAt.get(k) || 0) < 60000) return;
+      if (!this._lineRefusedMinute || now - this._lineRefusedMinute.at >= 60000) this._lineRefusedMinute = { at: now, n: 0 };
+      if (++this._lineRefusedMinute.n > 5) return;   // at most five such lines a device a minute, whatever kinds it names
+      this._lineRefusedAt.set(k, now);
+      this._log(`[device] ${this._machineName() || 'the machine'} refused its own ${k} push: ${clean((m && m.error) || 'over the line', 240)}`);
+    } catch { }
   }
   /** One audit line of an act sent through this client (never throws). */
   _act(payload, facts = {}) {
@@ -1052,7 +1082,16 @@ class DeviceManager {
   fsStat(p) { return this._request({ op: 'fs-op', action: 'stat', path: p }); }
   fsList(p) { return this._request({ op: 'fs-op', action: 'list', path: p }); }
   // lane device-act-audit: every write / rename / mkdir / rm names who asked (`{by}` — the ONE send point refuses it without)
-  fsWrite(p, buf, { by } = {}) { return this._request({ op: 'fs-op', action: 'write', path: p, data64: Buffer.from(buf).toString('base64'), by }); }
+  fsWrite(p, buf, { by } = {}) {
+    // B-7f0b D8: a file whose request would be over the device link's line is refused BEFORE it is encoded (its base64 alone
+    // is 4/3 of the file in memory, and past ~384 MiB that string cannot be made at all) — the file's size and the largest
+    // one this request may carry, by name (control-line-too-large, as the Mux's own refusal)
+    const b = Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
+    const room = AC.LINE_MAX - Buffer.byteLength(JSON.stringify({ op: 'fs-op', action: 'write', path: p, data64: '', by, id: 2 ** 31 }) + '\n');
+    const most = Math.max(0, Math.floor(room / 4) * 3);
+    if (b.length > most) return Promise.reject(Object.assign(new Error(`${this._machineName() || 'the machine'}: a write of ${AC.sizeOf(b.length)} is over the ${AC.sizeOf(most)} one request to it may carry — not sent (control-line-too-large)`), { code: 'control-line-too-large', op: 'fs-op', bytes: b.length, cap: most, params: { op: 'fs-op', size: AC.sizeOf(b.length), cap: AC.sizeOf(most) } }));
+    return this._request({ op: 'fs-op', action: 'write', path: p, data64: b.toString('base64'), by });
+  }
   fsRename(p, to, { by } = {}) { return this._request({ op: 'fs-op', action: 'rename', path: p, to, by }); }
   fsMkdir(p, { by } = {}) { return this._request({ op: 'fs-op', action: 'mkdir', path: p, by }); }
   fsRm(p, recursive = false, { by } = {}) { return this._request({ op: 'fs-op', action: 'rm', path: p, recursive, by }); }

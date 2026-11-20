@@ -173,6 +173,7 @@ function create({ dataDir, activeSessions, log = console, now = Date.now, tickMs
     return out;
   }
   function errOfDevice(e) {
+    if (e && e.code === 'answer-too-large') return named('answer-too-large', String(e.message || 'the machine\'s answer is over its cap'), { origin: ORIGIN });   // B-7f0b D8: its size and the cap, by name
     if (e && e.code === 'host_needs_daemon') return named('host_needs_update', 'the machine\'s agent predates the hand-over (it was never asked) — it updates itself with the hub; ask the owner', { origin: ORIGIN });
     return named('device_unreachable', `the machine did not answer (${(e && e.message) || e})`, { origin: ORIGIN });
   }

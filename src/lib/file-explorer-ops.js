@@ -42,6 +42,10 @@ export function fsErrorText(d) {
   // B-fcc7: a pull mount's folder while it is not mounted (src/routes/files.js pullShadowBody) — the row's state, never an empty folder
   // the B-f276 remainder (round wojcq4hn4): the machines list is HELD — said as the hold, never «offline»
   if (d && d.code === 'hosts-unread') return t('“{machine}”’s folder: {why}', { machine: p.machine || '?', why: hostsHeldWords() });
+  // lane lg-remote-hardening (B-7f0b D8): a reply over its op's cap (src/agentd/answer-caps.js) — its size and the cap, never a bare error
+  if (d && d.code === 'answer-too-large') return t("the machine's answer is {size} — over the {cap} this view may take, so it is not shown", { size: p.size || '?', cap: p.cap || '?' });
+  // …and the hub's own refusal of a request over the device link's line (a write whose data is over it): nothing was sent
+  if (d && d.code === 'control-line-too-large') return t('this is {size} — over the {cap} one transfer to the machine may carry, so it was not sent', { size: p.size || '?', cap: p.cap || '?' });
   if (d && d.code === 'machine_offline') return t('“{machine}” is offline — this folder shows its files only while the machine is connected', { machine: p.machine || '?' });
   // B-02f6: a write under a pull folder HELD by its pair (another row holds its place) — the row's hold, in the reader's language
   if (d && d.code === 'machine_folder_held') return t('“{machine}”’s folder {mountpoint} is not mounted — {why}', { machine: p.machine || '?', mountpoint: p.mountpoint || '', why: mountWords(p.heldCode, p.heldParams || {}, { t, lang: resolveLang() }) || t('another pull row holds this folder — remove one of the two rows') });

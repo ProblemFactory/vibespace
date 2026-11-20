@@ -1,0 +1,106 @@
+'use strict';
+// lane lg-remote-hardening (B-7f0b, design q-042 D8 — the coordinator's word r228): THE DEVICE LINK'S BOUNDS, one PURE table.
+// A request and its answer each ride ONE control line (src/agentd/mux.js: one JSON line, one frame). The frame's length field
+// is bounded (FRAME_MAX: a frame over it ends the link), so no line may be longer than LINE_MAX — the sender refuses an
+// over-long line BY NAME before it sends a frame the peer must die on, and the receiver ends the link BY NAME on a line still
+// open past it. Each op the agent answers has its CAP: the largest answer its own code can make, with headroom (the
+// inventory of 2026-11-20, read from the code's own bounds) — an answer over its op's cap is refused by name at the hub
+// (client.js _request), the link kept. THE CENSUS (scripts/test-answer-caps.mjs): every op of the agent has a row here, or
+// the suite is red — a new op without a cap is the hole this table closes. An op whose producer has NO bound of its own
+// is capped at the line for now (row B-5278: bound each producer). No answer the code can legitimately make is refused.
+// Bundled into the device agent (agentd.js requires it; client.js on the hub; mux.js keeps its own copy of the two bounds,
+// pinned equal by the suite): a change here rides the next signed agent update.
+
+const MiB = 1024 * 1024;
+const FRAME_MAX = 64 * MiB;            // mux.js: a frame's length field over this ends the link (the release's bound)
+const LINE_MAX = FRAME_MAX - 5;        // one control line rides one DATA frame: its type byte and channel word take 5
+const SMALL = 1 * MiB;                 // the design's line bound: an op whose answer is small by construction
+
+// op → its answer's cap in bytes (the producer's bound it rests on, in the comment)
+const CAPS = Object.freeze({
+  // the large answers, each from its code's own bound
+  'desktop-grab': 48 * MiB,        // a still up to stream-model's stillMaxBytes (32 MiB), base64 ≈ 42.7 MiB
+  'design-fs': 40 * MiB,           // read: 24 MiB in total (design-model), base64 ≈ 32 MiB; meta two 2 MiB files
+  'fs-op': 12 * MiB,               // list: 5000 entries × a 255-byte name escaped ≈ 8 MB; reads and writes ride a data channel
+  'stream-windows': 12 * MiB,      // the helper's 4 MiB stdout, re-escaped
+  'run-cmd': 8 * MiB,              // stdout cut to 1 Mi units of a 2 MiB maxBuffer, escaped ≈ 6.4 MiB; stderr 64 Ki units
+  'proc-list': 4 * MiB,            // 2000 rows × a 400-unit cmd ≈ 2.7 MB
+  'desktop-apps-list': 2 * MiB,    // 500 rows × (a 200-unit name + a 1000-unit launch line, 3 bytes a unit at worst) + fields ≈ 1.75 MiB
+                                   // — the tightest margin: the suite computes it from installed-apps' and the run door's bounds
+  // the producers with NO bound of their own: the line for now (row B-5278 bounds each producer)
+  'discovery-snapshot': LINE_MAX,  // its child is capped at 64 MiB, its inline fallback has no total bound (locks, codexOpen)
+  'discovery-claims': LINE_MAX,    // rows of the same snapshot
+  'quota-refresh': LINE_MAX,       // `passive`: every usage-cache file, no count or size cap
+  'pool-orders': LINE_MAX,         // `events`: the whole pool-orders log until the hub acks
+  'opencode-serve': LINE_MAX,      // read: the whole conversation; status: no cap
+  'probe-creds': LINE_MAX,         // one entry per subs folder (small in practice)
+  'desktop-serve': LINE_MAX,       // list / status: one row per app record, no count cap
+  // small by construction (an ack, a fact, a short list) — the design's line bound
+  'attach-pipe-session': SMALL, 'browser-serve': SMALL, 'desktop-input': SMALL, 'dial-status': SMALL, 'discovery-watch': SMALL,
+  'display-facts': SMALL, 'hello': SMALL, 'input-events': SMALL, 'kill-pipe-session': SMALL, 'kill-session': SMALL,
+  'left-behind': SMALL, 'ok': SMALL, 'open-pipe-session': SMALL, 'open-session': SMALL, 'peer-post': SMALL, 'ping-info': SMALL,
+  'place-secret': SMALL, 'pool-orders-log-ack': SMALL, 'probe-cli': SMALL, 'remoteapp-facts': SMALL, 'resize-session': SMALL,
+  'run-stream': SMALL, 'serve-folder': SMALL, 'serve-socks': SMALL, 'session-events-watch': SMALL, 'settings-open': SMALL,
+  'stream-answer': SMALL, 'stream-audio': SMALL, 'stream-facts': SMALL, 'stream-mic': SMALL, 'stream-offer': SMALL,
+  'stream-stats': SMALL, 'stream-stop': SMALL, 'sysinfo': SMALL, 'tcp-connect': SMALL, 'tcp-listen': SMALL, 'tcp-unlisten': SMALL,
+  'transcript-op': SMALL, 'unserve-folder': SMALL, 'unserve-socks': SMALL, 'upgrade': SMALL, 'usage-events-ack': SMALL,
+  'usage-events-watch': SMALL, 'usage-scan': SMALL, 'window-pin': SMALL, 'window-track': SMALL, 'window-untrack': SMALL,
+});
+
+/** the cap of an op's answer in bytes (an op with no row: the line itself — the census keeps that set empty) */
+const capOf = (op) => (Object.prototype.hasOwnProperty.call(CAPS, op) ? CAPS[op] : LINE_MAX);
+/** bytes as a person reads them (KiB / MiB, one decimal) */
+const sizeOf = (n) => { const b = Number(n) || 0; return b >= MiB ? `${(b / MiB).toFixed(1)} MiB` : b >= 1024 ? `${(b / 1024).toFixed(1)} KiB` : `${b} B`; };
+/** THE AGENT'S REFUSAL of an over-long line (mux.js `overLong`): an answer becomes a refusal of that ONE op by name (its id
+ *  kept, the link kept); a push (no id) becomes a `line-refused` naming the push. Never throws; never carries the payload. */
+function refusalOf(obj, bytes, cap = LINE_MAX) {
+  const op = obj && typeof obj.op === 'string' ? obj.op.slice(0, 64) : 'a line';
+  const error = `this machine's answer (${op}) is ${sizeOf(bytes)} — over the ${sizeOf(cap)} a line of the device link may carry: refused (answer-too-large)`;
+  if (obj && obj.id != null) return { op, id: obj.id, error, code: 'answer-too-large', bytes, cap };
+  return { op: 'line-refused', of: op, error, code: 'answer-too-large', bytes, cap };
+}
+
+// THE USAGE PUSH's batch law (agentd.js usage-events-watch; the coordinator's r310 (1): run by the suite, not read):
+// a walk's stdout — its NDJSON events, then the cursor manifest as its LAST line — goes out in chunks of ≤ PUSH_LINES
+// lines and ≤ PUSH_TEXT bytes of their text (a JSON line escapes its quotes, so a chunk stays far under the line's bound
+// and an ordinary walk is never refused; one line longer than that alone is its producer's, row B-5278). The LAST chunk
+// carries the seq the hub acks for the cursor to commit (usagePushAcked). `send` answers false (its refusal went in the
+// line's place) or throws (refused by name, nothing sent): the batch ends THERE, before the chunk that carries the seq,
+// and its pending cursor is dropped — nothing is acked past refused events, and the next walk starts from the cursor
+// saved before. A walk with no new events commits its cursor at once. `commit(cursors)` writes the agent's cursor file.
+const PUSH_LINES = 500, PUSH_TEXT = 8 * MiB;
+function pushChunksOf(lines, maxLines = PUSH_LINES, maxText = PUSH_TEXT) {
+  const chunks = [];
+  for (let i = 0, n = 0, start = 0; i <= lines.length; i++) {
+    const len = i < lines.length ? Buffer.byteLength(String(lines[i])) : 0;
+    if (i === lines.length || (i > start && (i - start >= maxLines || n + len > maxText))) { if (i > start) chunks.push(lines.slice(start, i)); start = i; n = 0; }
+    n += len;
+  }
+  return chunks;
+}
+function usagePushWalked(st, stdout, send, commit, { maxLines, maxText } = {}) {
+  const lines = String(stdout || '').split('\n').filter(Boolean);
+  const last = lines.pop();
+  let manifest = null; try { manifest = JSON.parse(last || ''); } catch { }
+  if (!manifest || !manifest.__cursors__) return { chunks: 0 };
+  if (!lines.length) { commit(manifest.__cursors__); return { committed: true, chunks: 0 }; }   // no new events: nothing to lose
+  const seq = ++st.seq;
+  st.pendingCursors.set(seq, manifest.__cursors__);
+  const chunks = pushChunksOf(lines, maxLines, maxText);
+  for (let c = 0; c < chunks.length; c++) {
+    const isLast = c === chunks.length - 1;
+    let sent = true; try { sent = send({ op: 'usage-events', batch: chunks[c], ...(isLast ? { seq } : {}) }) !== false; } catch { sent = false; }
+    if (!sent) { st.pendingCursors.delete(seq); return { seq, refusedAt: c, chunks: chunks.length }; }
+  }
+  return { seq, sent: true, chunks: chunks.length };
+}
+// the hub's ack of batch `seq` (its durable ingest): that batch's cursor commits, and every older pending one is dropped
+function usagePushAcked(st, seq, commit) {
+  const cur = st && st.pendingCursors.get(seq);
+  if (!cur) return false;
+  for (const k of [...st.pendingCursors.keys()]) if (k <= seq) st.pendingCursors.delete(k);
+  commit(cur);
+  return true;
+}
+
+module.exports = { MiB, FRAME_MAX, LINE_MAX, SMALL, CAPS, capOf, sizeOf, refusalOf, PUSH_LINES, PUSH_TEXT, pushChunksOf, usagePushWalked, usagePushAcked };

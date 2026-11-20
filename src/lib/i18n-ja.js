@@ -4290,6 +4290,8 @@ export default {
   "Provided by the cluster": "クラスターが提供",
   "Replace": "置き換え",
   "Test connection": "接続をテスト",
+  "the machine's answer is {size} — over the {cap} this view may take, so it is not shown": "マシンの応答は {size} で、ここで受け取れる {cap} を超えているため表示しません",
+  "this is {size} — over the {cap} one transfer to the machine may carry, so it was not sent": "{size} あり、このマシンへの 1 回の転送で送れる {cap} を超えるため、送信しませんでした",
   "Test could not run — {reason}": "テストを実行できませんでした — {reason}",
   "Test reachability": "到達性をテスト",
   "Testing…": "テスト中…",

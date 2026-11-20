@@ -331,7 +331,7 @@ console.log('§13 the three touches, by source');
   ok(/'stream-offer'/.test(caps) && /'input-events'/.test(caps), '① the hello-ack names stream-offer and input-events (by content)');
   for (const op of ['stream-offer', 'stream-answer', 'stream-stop', 'stream-stats', 'input-events']) ok(new RegExp(`if \\(msg\\.op === '${op}'\\) \\{[\\s\\S]{0,900}?op: '${op}-result', id: msg\\.id`).test(ad) && new RegExp(`m\\.op === '${op}-result'`).test(cl), `① ${op}: the handler replies \`${op}-result\` by id; ② the client routes it by id`);
   const pushAt = cl.indexOf("if (m.op === 'stream-ice' || m.op === 'stream-stats')"), prevAt = cl.indexOf('prevControl(m);', pushAt);
-  const branchStart = cl.lastIndexOf('mux.onControl = (m) => {', pushAt);
+  const branchStart = cl.lastIndexOf('mux.onControl = (m, bytes) => {', pushAt);   // lane lg-remote-hardening (B-7f0b D8): the handler hears the line's length
   ok(pushAt > 0 && branchStart > 0 && prevAt > pushAt && cl.slice(branchStart, pushAt).includes("m.op === 'stream-stats-result'"), '③ the pushes (stream-ice / stream-stats) have their own branch BEFORE prevControl — after the id-keyed routing set (stream-stats-result is a reply, stream-stats a push)');
   ok(/for \(const sid of \[\.\.\.\(this\._streamWatches\?\.keys\(\) \|\| \[\]\)\]\) this\._rearmStream\(sid\);/.test(cl) && /op: 'stream-stats', sid, watch: true/.test(cl), '③ a reconnect re-arms every stream session (stream-stats with watch: this link owns its pushes again)');
   ok(/if \(streamHost\) streamHost\.linkDead\(mux\);/.test(ad), 'the daemon makes a dead link\'s sessions orphans (their media keeps flowing) until the re-arm');
