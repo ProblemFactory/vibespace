@@ -2238,6 +2238,14 @@ html.vs-kb-open .dialog-overlay:not(#dialog-overlay) > .dialog { max-height: cal
 .learn-actions > .learn-save { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
 @media (max-width: 600px) { .learn-row-main > .learn-tick { width: 20px; height: 20px; } .learn-actions > .settings-link-btn { min-height: 32px; padding: 4px 14px; font-size: 12px; } }
 /* end: settings rows never squeeze their words */
+/* A CONTROL NEVER OUTGROWS ITS ROW (B-0406 — usage-predict's hosted heavy run, 2026-11-15: a select is as wide as its
+   longest option, so one long option label pushed a row 48 px past a 390 px phone). The control is capped at its row and
+   may shrink — the rail above still wraps it under the words first, so a row that fits lays out as before; a select in it
+   shrinks with it: the CLOSED select cuts its words, the open list (the browser's own) shows them whole.
+   test-settings-row-layout ④b (the phone) + ⑥ (280–1440 px, both faces, en / zh / ja). */
+.settings-row-control { max-width: 100%; min-width: 0; flex-shrink: 1; }
+.settings-row-control > .settings-select, .settings-combobox > .settings-select { flex: 0 1 auto; max-width: 100%; min-width: min(120px, 100%); text-overflow: ellipsis; }
+/* end: a control never outgrows its row */
 .btn-create {
   padding: 5px 14px; background: var(--accent); border: 1px solid var(--accent);
   color: var(--accent-fg, #fff); border-radius: var(--radius-sm); cursor: pointer; font-size: 12px; font-weight: 500;

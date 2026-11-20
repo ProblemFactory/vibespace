@@ -12,6 +12,12 @@
 //   ③ THE RAIL (style.css: flex-wrap + the words' min-width 40 %): a fixture plugin row whose select carries one long
 //     option wraps its control under the words, at the right, at 600 px — and stays beside them at 1200 px
 //   ④ the phone (390 px): the textarea rows stacked the same; no row wider than the window
+//   ④b A CONTROL NEVER OUTGROWS ITS ROW (B-0406 — a select is as wide as its longest option: one long option label pushed a
+//     row 48 px past a 390 px phone): the phone with THE RAIL's fixture — every row, its control and every select inside
+//     the window; the fixture's CLOSED select cut (narrower than its longest option), its options whole; CONTROL: the page
+//     without style.css's B-0406 block — the fixture's control runs past the window
+//   ⑥ the same law swept: 280 / 360 / 390 / 600 / 1024 / 1440 px × the light and the dark face × en / zh / ja, the fixture on:
+//     no row, no control, no select past its row or the window, the window's content never scrolls sideways
 //   ⑤ CONTROL — the pre-fix page (style.css without the lane's block, the renderer without the stack class): the box
 //     beside the words at one fixed width at 600 / 760 / 1200, the words < 40 % of the row at 600 px and on the phone
 //     (the owner's shape), and the fixture's words < 40 % at 600 px (③)
@@ -41,6 +47,9 @@ const CSS = fs.readFileSync(path.join(repo, 'public/style.css'), 'utf8');
 const LANE_CSS = /\/\* SETTINGS ROWS NEVER SQUEEZE THEIR WORDS[\s\S]*?\/\* end: settings rows never squeeze their words \*\/\n?/;
 ok(LANE_CSS.test(CSS), 'style.css carries the lane\'s block (the stack + the rail) between its two markers');
 const CSS_PRE = CSS.replace(LANE_CSS, '');
+const CAP_CSS = /\/\* A CONTROL NEVER OUTGROWS ITS ROW \(B-0406[\s\S]*?\/\* end: a control never outgrows its row \*\/\n?/;
+ok(CAP_CSS.test(CSS), 'style.css carries B-0406\'s block (a control capped at its row, a select that shrinks with it) between its two markers');
+const CSS_NOCAP = CSS.replace(CAP_CSS, '');
 const UI = path.join(repo, 'src/lib/settings-ui.js');
 const UI_SRC = fs.readFileSync(UI, 'utf8');
 const STACK_LINE = "if (control.tagName === 'TEXTAREA' || control.querySelector('textarea')) row.classList.add('settings-row-stack');";
@@ -77,11 +86,13 @@ await build('pre.js', [preRenderer]);
 const web = express();
 web.get('/style.css', (req, res) => res.type('css').send(CSS));
 web.get('/style-pre.css', (req, res) => res.type('css').send(CSS_PRE));
+web.get('/style-nocap.css', (req, res) => res.type('css').send(CSS_NOCAP));
 web.get('/:b.js', (req, res) => res.type('js').send(fs.readFileSync(path.join(dir, req.params.b + '.js'))));
 web.all(/^\/api\//, (req, res) => res.json({}));
 web.get('/', (req, res) => {
-  const pre = req.query.pre === '1';
-  res.type('html').send(`<!doctype html><html data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><link rel="stylesheet" href="/${pre ? 'style-pre' : 'style'}.css"><style>body{margin:0;background:var(--bg-root)} #win{background:var(--bg-window);width:${Number(req.query.w)}px;height:${Number(req.query.h)}px;overflow:hidden}</style><script>try{localStorage.setItem('vibespace.lang','zh');localStorage.setItem('vibespace.settingsAdvanced','1')}catch{}</script></head><body><div id="win"></div><script src="/${pre ? 'pre' : 'ui'}.js"></script></body></html>`);
+  const pre = req.query.pre === '1', nocap = req.query.nocap === '1';
+  const lang = ['en', 'zh', 'ja'].includes(req.query.lang) ? req.query.lang : 'zh', theme = req.query.theme === 'dark' ? 'dark' : 'light';
+  res.type('html').send(`<!doctype html><html data-theme="${theme}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><link rel="stylesheet" href="/${pre ? 'style-pre' : nocap ? 'style-nocap' : 'style'}.css"><style>body{margin:0;background:var(--bg-root)} #win{background:var(--bg-window);width:${Number(req.query.w)}px;height:${Number(req.query.h)}px;overflow:hidden}</style><script>try{localStorage.setItem('vibespace.lang','${lang}');localStorage.setItem('vibespace.settingsAdvanced','1')}catch{}</script></head><body><div id="win"></div><script src="/${pre ? 'pre' : 'ui'}.js"></script></body></html>`);
 });
 const PORT = await freePort();
 const srv = await new Promise((r) => { const s = web.listen(PORT, '127.0.0.1', () => r(s)); });
@@ -95,7 +106,7 @@ for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { clean
 for (let i = 0; i < 120; i++) { try { await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json(); break; } catch { await sleep(250); } }
 
 /** one tab: viewport vw × vh, the Settings window's content w × h, the page now or pre-fix */
-async function page({ vw, vh, w, h, pre = false, fixture = false, mobile = false }) {
+async function page({ vw, vh, w, h, pre = false, fixture = false, mobile = false, nocap = false, lang = 'zh', theme = 'light' }) {
   const tg = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
   const ws = new WebSocket(tg.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
   await new Promise((r) => ws.on('open', r));
@@ -106,7 +117,7 @@ async function page({ vw, vh, w, h, pre = false, fixture = false, mobile = false
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
   await cdp('Emulation.setDeviceMetricsOverride', { width: vw, height: vh, deviceScaleFactor: 2, mobile });
   const ev = async (expr) => { const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result?.exceptionDetails) throw new Error('page threw: ' + JSON.stringify(r.result.exceptionDetails).slice(0, 600)); return r.result?.result?.value; };
-  await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/?w=${w}&h=${h}${pre ? '&pre=1' : ''}${fixture ? '&fixture=1' : ''}` });
+  await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/?w=${w}&h=${h}${pre ? '&pre=1' : ''}${fixture ? '&fixture=1' : ''}${nocap ? '&nocap=1' : ''}&lang=${lang}&theme=${theme}` });
   for (let i = 0; i < 200 && !(await ev('window.__ready === true && document.querySelectorAll(".settings-content .settings-row").length > 20').catch(() => false)); i++) await sleep(50);
   await ev('document.fonts.ready.then(() => true)');
   await sleep(150);   // the facts' {} answers and the rows they redraw settle
@@ -252,6 +263,63 @@ console.log('④ the phone — 390 px');
   await pre.shot('phone-390-before.png', ROW_OF(ATT));
   await now.shot('phone-390-after.png', ROW_OF(ATT));
   now.close(); pre.close();
+}
+
+// B-0406: every row, its control and every select in it inside its row and the window; the fixture's select, closed and open
+const FIT = (w) => `(() => {
+  const R = (e) => { const r = e.getBoundingClientRect(); return { x: r.left, w: r.width, r: r.right }; };
+  const c = document.querySelector('.settings-content'), out = [];
+  for (const row of document.querySelectorAll('.settings-content .settings-row')) {
+    const rr = R(row); if (!rr.w) continue;
+    const key = row.querySelector('.settings-row-path')?.textContent || row.className;
+    if (rr.r > ${w} + 0.5) out.push(key + ': the row ends at ' + Math.round(rr.r));
+    const ctl = row.querySelector(':scope > .settings-row-control');
+    if (ctl && ctl.getClientRects().length && R(ctl).r > rr.r + 0.5) out.push(key + ': its control ends ' + Math.round(R(ctl).r - rr.r) + ' px past the row');
+    for (const sel of row.querySelectorAll('select')) if (sel.getClientRects().length && R(sel).r > rr.r + 0.5) out.push(key + ': a select ends ' + Math.round(R(sel).r - rr.r) + ' px past the row');
+  }
+  const fx = [...document.querySelectorAll('.settings-content .settings-row-path')].find((e) => e.textContent === 'plugin.layout-fixture.pick')?.closest('.settings-row');
+  const sel = fx && fx.querySelector('select'), cs = sel && getComputedStyle(sel);
+  const cv = document.createElement('canvas').getContext('2d'); if (cs) cv.font = cs.fontWeight + ' ' + cs.fontSize + ' ' + cs.fontFamily;
+  const opts = sel ? [...sel.options].map((o) => ({ t: o.textContent, w: Math.round(cv.measureText(o.textContent).width) })) : [];
+  return { bad: out, sideways: c ? c.scrollWidth - c.clientWidth : null, rows: document.querySelectorAll('.settings-content .settings-row').length,
+    fixture: fx ? { row: Math.round(R(fx).w), ctl: Math.round(R(fx.querySelector(':scope > .settings-row-control')).w), sel: Math.round(R(sel).w), longest: Math.max(...opts.map((o) => o.w)), opts: opts.map((o) => o.t) } : null };
+})()`;
+const LONG_OPT = 'Keep each window of this kind on the screen it was last on, across restarts';
+
+console.log('④b A CONTROL NEVER OUTGROWS ITS ROW (B-0406) — the phone, 390 px, with a select whose one option is long');
+{
+  const now = await page({ vw: 390, vh: 844, w: 390, h: 844, mobile: true, fixture: true });
+  const raw = await page({ vw: 390, vh: 844, w: 390, h: 844, mobile: true, fixture: true, nocap: true });
+  const A = await now.ev(FIT(390)), B = await raw.ev(FIT(390));
+  const fx = (f) => f ? `row ${f.row} px, control ${f.ctl} px, the closed select ${f.sel} px of its longest option's ${f.longest}` : 'no fixture row';
+  console.log(`      now: ${fx(A.fixture)} · sideways ${A.sideways} px · ${A.bad.length} past · without the cap: ${fx(B.fixture)} · sideways ${B.sideways} px · ${B.bad.length} past${B.bad.length ? ' (' + B.bad.slice(0, 3).join('; ') + ')' : ''}`);
+  ok(A.rows > 20 && !A.bad.length && A.sideways <= 1, `phone: every row, its control and every select inside the row and the window (${A.rows} rows, sideways ${A.sideways} px)`, A.bad);
+  ok(!!A.fixture && A.fixture.sel <= A.fixture.row + 0.5 && A.fixture.sel < A.fixture.longest && A.fixture.opts.includes(LONG_OPT),
+    `phone: the long option's CLOSED select is cut to its row (${fx(A.fixture)}); the list keeps the option whole («${LONG_OPT.slice(0, 24)}…»)`, A.fixture);
+  ok(!!B.fixture && B.bad.some((x) => x.startsWith('plugin.layout-fixture.pick')),
+    `CONTROL: without style.css's B-0406 block the same control runs past the window (${B.bad.filter((x) => x.startsWith('plugin.layout-fixture.pick')).join('; ') || 'NOT — the control is vacuous'})`, B);
+  await now.shot('cap-390-after.png', ROW_OF('plugin.layout-fixture.pick'));
+  await raw.shot('cap-390-before.png', ROW_OF('plugin.layout-fixture.pick'));
+  RESULT.cap390 = { now: A.fixture, raw: B.fixture, rawPast: B.bad };
+  now.close(); raw.close();
+}
+
+console.log('⑥ the same law, swept — 280 … 1440 px × light / dark × en / zh / ja, the fixture on');
+{
+  const bad = [], seen = [];
+  for (const lang of ['en', 'zh', 'ja']) for (const theme of ['light', 'dark']) for (const w of [280, 360, 390, 600, 1024, 1440]) {
+    const phone = w <= 768;
+    const pg = await page(phone ? { vw: w, vh: 844, w, h: 844, mobile: true, fixture: true, lang, theme } : { vw: Math.max(w + 160, 1600), vh: 1400, w, h: 1360, fixture: true, lang, theme });
+    const m = await pg.ev(FIT(w));
+    seen.push(`${lang}/${theme}/${w}: ${m.rows} rows, fixture control ${m.fixture ? m.fixture.ctl : '—'} px of ${m.fixture ? m.fixture.row : '—'}, sideways ${m.sideways}`);
+    if (m.rows < 20 || !m.fixture) bad.push(`${lang}/${theme}/${w}: the page drew ${m.rows} rows${m.fixture ? '' : ', no fixture row'}`);
+    for (const x of m.bad) bad.push(`${lang}/${theme}/${w}: ${x}`);
+    if (m.sideways > 1) bad.push(`${lang}/${theme}/${w}: the window's content scrolls ${m.sideways} px sideways`);
+    if (lang === 'zh' && theme === 'light' && w === 390) await pg.shot('cap-sweep-zh-390.png', SECTION_OF('plugin.layout-fixture.pick'));
+    pg.close();
+  }
+  for (const line of seen) console.log('      ' + line);
+  ok(seen.length === 36 && !bad.length, `36 pages (6 widths × 2 faces × 3 languages): no row, control or select past its row or the window, nothing scrolls sideways`, bad.slice(0, 12));
 }
 
 console.log('⑤ CONTROL — the pre-fix page (the owner\'s shape)');
