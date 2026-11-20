@@ -35,7 +35,7 @@
 //    plus optional `fields` rendered between the hint and the button (the
 //    channel side's OAuth-client select: switching the client IS a
 //    re-authorization).
-import { createModalShell, showToast, copyText } from './utils.js';
+import { createModalShell, showToast, copyText, hostsHeldWords, mountsHeldWords } from './utils.js';
 import { pathField } from './path-field.js'; // lane path-field: THE path field
 import { t as tr, resolveLang } from './i18n.js';
 import { wordsFor as mountWords } from '../mount-error-words.js'; // B-af94 (2 of 2): a mounts route's refusal BY CODE, in the reader's language
@@ -55,7 +55,9 @@ export async function api(url, opts = {}) {
   // carry the server's machine-readable `code` (the key-import flow maps it to
   // localized text — a bare message string can't be translated)
   // B-af94 (2 of 2): a MOUNTS route's coded refusal is worded here, once, for every dialog door (another route's code names its own thing)
-  const worded = d.code && /^\/api\/(machine-mounts|mounts|mount-tokens)(\/|$|\?)/.test(String(url)) ? mountWords(d.code, d.params || {}, { t: tr, lang: resolveLang() }) : null;
+  // …and a HOLD by its store's name on ANY route (a mount's doors, a machine's removal): the page's one sentence, never the hub's English
+  const worded = d.code === 'hosts-unread' ? hostsHeldWords() : d.code === 'mounts-unread' ? mountsHeldWords()
+    : d.code && /^\/api\/(machine-mounts|mounts|mount-tokens)(\/|$|\?)/.test(String(url)) ? mountWords(d.code, d.params || {}, { t: tr, lang: resolveLang() }) : null;
   if (!res.ok || d.error) { const e = new Error(worded || d.error || `HTTP ${res.status}`); e.code = d.code; e.body = d; throw e; } // verify-r5 A1: + the whole answer (a 409's facts)
   return d;
 }

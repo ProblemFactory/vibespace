@@ -2568,6 +2568,7 @@ export default {
   "cannot be read right now": "いまは読み込めません",
   "Your paired machines cannot be read right now — nothing is lost; they come back here when they read.": "ペアリング済みのマシンをいま読み込めません — 失われてはいません。読み込めた時点でここに戻ります。",
   "VibeSpace cannot read its paired machines right now — nothing was paired or changed. Try again in a few minutes (it reads them again by itself).": "VibeSpace はいまペアリング済みのマシンを読み込めません — 何もペアリング・変更されていません。数分後にもう一度お試しください（自動で再読み込みします）。",
+  "VibeSpace cannot read the machines’ mounts right now — nothing was changed. Try again in a few minutes (it reads them again by itself).": "VibeSpace はいまマシンのマウントを読み込めません — 何も変更されていません。数分後にもう一度お試しください（自動で再読み込みします）。",
   "VibeSpace cannot read its paired machines right now, so none are listed. Nothing is lost: they come back here when they read (it tries again every few minutes); changes to machines wait until then.": "VibeSpace はいまペアリング済みのマシンを読み込めないため、ここには一台も表示されていません。失われてはいません。読み込めた時点でここに戻ります（数分ごとに再試行します）。マシンの変更はそれまで待機します。",
   "VibeSpace cannot read the machines’ mounts right now, so none are listed. Nothing is lost: they come back here when they read (it tries again every few minutes); changes to mounts wait until then.": "VibeSpace はいまマシンのマウントを読み込めないため、ここには一つも表示されていません。失われてはいません。読み込めた時点でここに戻ります（数分ごとに再試行します）。マウントの変更はそれまで待機します。",
   "(removed machine)": "(削除済みマシン)",

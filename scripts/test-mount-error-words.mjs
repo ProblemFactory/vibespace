@@ -200,8 +200,8 @@ console.log('⑥ the dialog\'s refusals');
   const blk = PWs.slice(PWs.indexOf("app.post('/api/mounts', "), PWs.indexOf('\n', PWs.indexOf("app.delete('/api/mounts/:id', ") + 40) + 200);
   ok(!blk.includes('.json({ error: e.message })') && !blk.includes('json({ error: e.message, mounts') && (blk.match(/errorBody\(e\)/g) || []).length >= 25, '⑥ every /api/mounts route answers errorBody (a sentence of ours carries its code + params)', (blk.match(/errorBody\(e\)/g) || []).length);
   const MD = read('src/lib/mounts-dialog.js');
-  ok(MD.includes("const worded = d.code && /^\\/api\\/(machine-mounts|mounts|mount-tokens)(\\/|$|\\?)/.test(String(url)) ? mountWords(d.code, d.params || {}, { t: tr, lang: resolveLang() }) : null;") && MD.includes('const e = new Error(worded || d.error ||'),
-    '⑥ the dialogs\' one fetch wrapper (mounts-dialog api()) words a MOUNTS route\'s code for every door — another route\'s code is left as its own');
+  ok(MD.includes("  const worded = d.code === 'hosts-unread' ? hostsHeldWords() : d.code === 'mounts-unread' ? mountsHeldWords()\n    : d.code && /^\\/api\\/(machine-mounts|mounts|mount-tokens)(\\/|$|\\?)/.test(String(url)) ? mountWords(d.code, d.params || {}, { t: tr, lang: resolveLang() }) : null;") && MD.includes('const e = new Error(worded || d.error ||'),
+    '⑥ the dialogs\' one fetch wrapper (mounts-dialog api()) words a MOUNTS route\'s code for every door — another route\'s code is left as its own (a hold by its store\'s name is the page\'s own sentence on any route — test-hosts-held-census §8)');
 }
 
 // ═══ RED CONTROLS ═══

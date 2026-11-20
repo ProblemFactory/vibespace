@@ -625,6 +625,36 @@ console.log('§8 the page words `hosts-unread` itself: a usage refresh, the dial
     'the exit dialog (opened and saved, and the dial status through exitCodeWords) words `hosts-unread` by its code');
   ok(SM.includes("why: e && e.code === 'hosts-unread' ? hostsHeldWords() : (e && e.message) || tr('server unreachable')"), 'a machine\'s removal words `hosts-unread` by its code');
   for (const lang of ['zh', 'ja']) ok(fs.readFileSync(path.join(ROOT, `src/lib/i18n-${lang}.js`), 'utf8').includes(JSON.stringify(SENT) + ':'), `the sentence has its ${lang} row`);
+  // the stores chain's read on 921c0de17 (its should): a MOUNTS hold is worded too, and both holds on the mount doors' one api() —
+  // a mount's add / remove / mount-again and a machine's removal showed the hub's English
+  const MSENT = 'VibeSpace cannot read the machines’ mounts right now — nothing was changed. Try again in a few minutes (it reads them again by itself).';
+  const MHELD = { error: 'adding a push mount: machine-mounts.json in VibeSpace\'s data folder could not be read (EACCES); …', code: 'mounts-unread' };
+  const ROWM = "  if (body && typeof body === 'object' && body.code === 'mounts-unread') return { ...body, said: body.error, error: mountsHeldWords() };\n";
+  const wm = RW && RW(MHELD), RWX = wordsOf(anchored(U, ROWM, '', 'hhc-8m1')), wmx = RWX && RWX(MHELD);
+  ok(wm && wm.error === `«${MSENT}»` && wm.said === MHELD.error && wm.code === 'mounts-unread' && wmx && wmx.error === MHELD.error,
+    'fetchJson\'s refusalWords words `mounts-unread` by its code (the server\'s words kept as `said`); CONTROL (the row cut, in a copy): the server\'s English — RED', { wm, wmx });
+  const MDS = fs.readFileSync(path.join(ROOT, 'src/lib/mounts-dialog.js'), 'utf8');
+  const AH = 'export async function api(url, opts = {}) {', HW = "  const worded = d.code === 'hosts-unread' ? hostsHeldWords() : d.code === 'mounts-unread' ? mountsHeldWords()\n    : d.code";
+  ok(MDS.includes(AH) && MDS.split(HW).length === 2, 'control setup: the mount doors\' api() and its hold branch are in mounts-dialog.js');
+  const ANS = {
+    '/api/machine-mounts/h-0001': { status: 503, body: MHELD },
+    '/api/hosts/h-0001': { status: 503, body: { error: 'removing a machine: hosts.json in VibeSpace\'s data folder could not be read (EACCES); …', code: 'hosts-unread' } },
+    '/api/machine-mounts/mm-1/remount': { status: 400, body: { error: 'machine is offline — start its daemon first', code: 'machine_offline_start' } },
+  };
+  const doorsSay = async (src) => {
+    const i = src.indexOf(AH), j = src.indexOf('\n}\n', i);
+    // eslint-disable-next-line no-new-func
+    const api = new Function('fetch', 'hostsHeldWords', 'mountsHeldWords', 'mountWords', 'tr', 'resolveLang', `${src.slice(i, j + 2).replace('export async function', 'async function')}\nreturn api;`)(
+      async (url) => ({ ok: false, status: ANS[url].status, json: async () => ANS[url].body }), () => `«${SENT}»`, () => `«${MSENT}»`,
+      (c) => (c === 'machine_offline_start' ? '«machine_offline_start»' : null), (k) => k, () => 'en');
+    const out = [];
+    for (const url of Object.keys(ANS)) { try { await api(url, { method: 'POST' }); out.push('answered'); } catch (e) { out.push(e.message); } }
+    return out;
+  };
+  const ds = await doorsSay(MDS), dsx = await doorsSay(anchored(MDS, HW, '  const worded = d.code', 'hhc-8m2'));
+  ok(JSON.stringify(ds) === JSON.stringify([`«${MSENT}»`, `«${SENT}»`, '«machine_offline_start»']) && JSON.stringify(dsx) === JSON.stringify([MHELD.error, ANS['/api/hosts/h-0001'].body.error, '«machine_offline_start»']),
+    'the mount doors\' one api(): a mount refused while machine-mounts.json is held and a machine\'s removal while hosts.json is held say the page\'s sentence (by the hold\'s code, on any route); a coded mount refusal keeps B-af94\'s words; CONTROL (the hold branch cut, in a copy): the hub\'s English for both — RED', { ds, dsx });
+  for (const lang of ['zh', 'ja']) ok(fs.readFileSync(path.join(ROOT, `src/lib/i18n-${lang}.js`), 'utf8').includes(JSON.stringify(MSENT) + ':'), `the mounts hold's sentence has its ${lang} row`);
 }
 
 // ── §9 round wojcq4hn4 (its MUST): a held list is unknown BY NAME on the two doors the meeting cured — never «offline», never a bare 400

@@ -1899,8 +1899,12 @@ export function anchorFixedPopup(popup, anchor, { gap = 6 } = {}) {
 /** The hub HOLDS its paired machines (hosts.json could not be read — 503 `hosts-unread`): ONE sentence the page words by code
  *  (主开发 01:20Z (5): the server's own words are English) — the exit dialog, a usage refresh, the dial status, a machine's removal. */
 export function hostsHeldWords() { return t('VibeSpace cannot read its paired machines right now — nothing was paired or changed. Try again in a few minutes (it reads them again by itself).'); }
+/** …and its machines' MOUNTS (machine-mounts.json could not be read — 503 `mounts-unread`): ONE sentence the page words by code — a
+ *  mount's add, remove and mount-again, a machine's removal (the stores chain's read on 921c0de17: they showed the hub's English). */
+export function mountsHeldWords() { return t('VibeSpace cannot read the machines’ mounts right now — nothing was changed. Try again in a few minutes (it reads them again by itself).'); }
 function refusalWords(body) {
   if (body && typeof body === 'object' && body.code === 'hosts-unread') return { ...body, said: body.error, error: hostsHeldWords() };   // the server's words kept as `said`
+  if (body && typeof body === 'object' && body.code === 'mounts-unread') return { ...body, said: body.error, error: mountsHeldWords() };
   return body && typeof body === 'object' && body.error === 'cross-site' ? { ...body, code: 'cross-site', error: t('This action came from another site and was refused') } : body;
 }
 
