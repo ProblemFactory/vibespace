@@ -251,7 +251,7 @@ export function realClicker({ evalJs, cdp, log = (line) => console.log(line), sl
   // B-8b8c (lane dialog-press): the same door's two halves — it waits while its target MOVES (THE still verdict: its rect on
   // two looks a frame apart, a running box-moving transition on it or an ancestor), then checks where the press LANDED. A
   // disabled or covered target is not waited on (a suite may press one on purpose; the re-aim below handles a cover).
-  const ARM_REAL = `(() => { ${desc} const e = window.__vsRealClickEl; const S = window.__vsStillSeen = { down: null, up: null, click: null }; const rec = { down: (ev) => ({ mine: !!e && (ev.target === e || e.contains(ev.target)), what: desc(ev.target) }), up: (ev) => { if (!e || !e.isConnected) return { gone: true }; const h = document.elementFromPoint(ev.clientX, ev.clientY); return { mine: !!h && (h === e || e.contains(h)), what: desc(h) }; }, click: (ev) => ({ mine: !!e && (ev.target === e || e.contains(ev.target)), anc: !!e && ev.target !== e && typeof ev.target.contains === 'function' && ev.target.contains(e), what: desc(ev.target) }) }; const on = (type, key) => { const f = (ev) => { if (!S[key]) S[key] = rec[key](ev); document.removeEventListener(type, f, true); }; document.addEventListener(type, f, true); }; on('pointerdown', 'down'); on('pointerup', 'up'); on('click', 'click'); return true; })()`;
+  const ARM_REAL = `(() => { ${desc} const e = window.__vsRealClickEl; const S = window.__vsStillSeen = { down: null, up: null, click: null }; const rec = { down: (ev) => ({ mine: !!e && (ev.target === e || e.contains(ev.target)), what: desc(ev.target) }), up: (ev) => { if (!e || !e.isConnected) return { gone: true }; const h = document.elementFromPoint(ev.clientX, ev.clientY); return { mine: !!h && (h === e || e.contains(h)), what: desc(h) }; }, click: (ev) => ({ mine: !!e && (ev.target === e || e.contains(ev.target)), anc: !!e && ev.target !== e && typeof ev.target.contains === 'function' && ev.target.contains(e), what: desc(ev.target) }) }; const on = (type, key) => { const f = (ev) => { if (!S[key]) S[key] = rec[key](ev); document.removeEventListener(type, f, true); }; document.addEventListener(type, f, true); }; on('pointerdown', 'down'); on('pointerup', 'up'); on('click', 'click'); const own = () => (e && typeof e._armSince === 'number' ? e._armSince : null); const sd = () => { S.stampDown = own(); document.removeEventListener('pointerdown', sd, true); }; document.addEventListener('pointerdown', sd, true); const sc = () => { document.removeEventListener('click', sc, true); setTimeout(() => { S.stampAfter = own(); }, 0); }; document.addEventListener('click', sc, true); return true; })()`;
   const realClick = async (sel, { beforePress = null, stillMs = 3000, scroll = 'center', aimLeft = null, uncover = null } = {}) => {
     realClick.lastMiss = null; realClick.reaimed = null; realClick.landed = null; realClick.armed = null;
     const mo = { scroll, aimLeft };
@@ -291,7 +291,7 @@ export function realClicker({ evalJs, cdp, log = (line) => console.log(line), sl
       const ARM = await armMsOf();
       let waited = 0;
       for (let step = armStep(arm, ARM); step !== 'press'; step = armStep(arm, ARM)) {
-        if (waited >= 3 * ARM) { const mv = arm.marks.some((m) => m.moved); realClick.lastMiss = { ...r, arm, why: `ARMED (${marksSaid(arm)}) and not ${ARM} ms still after ${waited} ms${mv ? ' — it moved since the product last read it: its press would re-arm it and count for nothing' : ''} — not pressed` }; log(`  [realClick] ${sel}: ${realClick.lastMiss.why}`); return false; }
+        if (waited >= 3 * ARM) { const mv = arm.marks.some((m) => m.moved); realClick.lastMiss = { ...r, arm, why: `ARMED (${marksSaid(arm)}) and not ${ARM} ms still after ${waited} ms${mv ? ' — a STALE stamp: it moved since the product last read it and no pass of the product read it again (a person would press, be told, and press again)' : ''} — not pressed` }; log(`  [realClick] ${sel}: ${realClick.lastMiss.why}`); return false; }
         const w = Math.min(step.wait + 30, 3 * ARM - waited); await sleep(w); waited += w;
         arm = await evalJs(armProbeSource());
       }
@@ -301,7 +301,7 @@ export function realClicker({ evalJs, cdp, log = (line) => console.log(line), sl
         if (!u2 || !u2.hits) { realClick.lastMiss = { ...r, atPress: u2, why: `not under the pointer after the arm's ${waited} ms — not pressed` }; log(`  [realClick] ${sel}: ${realClick.lastMiss.why} (${u2 && u2.hit})`); return false; }
       }
     }
-    const ownStamp = armedNow(arm) ? (arm.marks.find((m) => m.mark === '_armSince' && m.self) || null) : null;   // the target's OWN stamp, read right before the press
+    const ownStamp = armedNow(arm) ? (arm.marks.find((m) => m.mark === '_armSince' && m.self) || null) : null;   // the target carries its OWN stamp: judged at the press itself (ARM_REAL)
     await evalJs(ARM_REAL);
     await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: r.x, y: r.y, button: 'left', clickCount: 1 });
     await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: r.x, y: r.y, button: 'left', clickCount: 1 });
@@ -309,10 +309,11 @@ export function realClicker({ evalJs, cdp, log = (line) => console.log(line), sl
     for (let i = 0; i < 40; i++) { seen = await evalJs('window.__vsStillSeen || null'); if (seen && seen.down) break; await sleep(25); }
     realClick.landed = landingVerdict(seen, { click: 'any' });
     if (!realClick.landed.ok) { realClick.lastMiss = { ...r, seen, why: realClick.landed.why }; log(`  [realClick] ${sel}: MISSED — ${realClick.landed.why}`); return false; }
-    if (ownStamp) {   // the product re-stamped the target's OWN arm AT the press (it moved): the press counted for nothing — said here, never as a cascade
-      const after = await evalJs(armProbeSource());
-      const own = after && (after.marks || []).find((m) => m.mark === '_armSince' && m.self);
-      if (own && Number(own.since) > Number(ownStamp.since)) { realClick.lastMiss = { ...r, arm, after, why: 'the product RE-ARMED it at the press (_armSince) — the press counted for nothing' }; log(`  [realClick] ${sel}: ${realClick.lastMiss.why}`); return false; }
+    if (ownStamp) {   // the product re-stamped the target's OWN arm AT the press (it moved): the press counted for nothing — said here, never as a cascade.
+      // The stamp is read at the INSTANT of the press (the capture listener, before any handler) and right after the click's dispatch —
+      // never a round trip later, where a later row pass that moved the same element would read as a re-arm of a press that counted
+      for (let i = 0; i < 20 && !(seen && Object.prototype.hasOwnProperty.call(seen, 'stampAfter')); i++) { await sleep(25); seen = await evalJs('window.__vsStillSeen || null'); }
+      if (seen && Number.isFinite(seen.stampDown) && Number.isFinite(seen.stampAfter) && seen.stampAfter > seen.stampDown) { realClick.lastMiss = { ...r, arm, seen, why: 'the product RE-ARMED it at the press (_armSince) — the press counted for nothing' }; log(`  [realClick] ${sel}: ${realClick.lastMiss.why}`); return false; }
     }
     return true;
   };

@@ -215,10 +215,10 @@ console.log('⑥ B-4f03: the door\'s measure — an EXPRESSION target, the three
 // ⑥b the DOOR itself over a scripted page (B-4f03, the read's should: the source legs alone let a realClicker that dropped its
 // options, the aim's override or the once-a-call rule pass) — the evalJs answers by what each source asks
 // the DOOR over a scripted page (⑥b, ⑦): the evalJs answers by what each source asks
-const drive6 = async ({ measures, unders, uncover = null, opts = {}, arms = [{ marks: [] }], sleep = undefined, hidden = false }) => {
+const drive6 = async ({ measures, unders, uncover = null, opts = {}, arms = [{ marks: [] }], sleep = undefined, hidden = false, stamps = { stampDown: 1000, stampAfter: 1000 } }) => {
   const asked = [], sent = [], logs = [], asks = { hidden: 0 }; let m = 0, u = 0, a = 0;
   const LOOK = { found: true, rect: [100, 300, 300, 40], x: 250, y: 320, hits: true, under: 'button.b', disabled: false, movers: [] };
-  const SEEN = { down: { mine: true, what: 'button.b' }, up: { mine: true, what: 'button.b' }, click: { mine: true, what: 'button.b' } };
+  const SEEN = { down: { mine: true, what: 'button.b' }, up: { mine: true, what: 'button.b' }, click: { mine: true, what: 'button.b' }, ...stamps };   // the target's own stamp at the press and after it (ARM_REAL)
   const evalJs = async (s) => {
     if (s.startsWith('window.__vsStillSeen')) return SEEN;
     if (s.includes('__vsStillSeen = {')) return true;
@@ -280,9 +280,11 @@ console.log('⑦ the press arm — the product\'s own marks, its ARM_MS, never a
   const c1 = clock(), A = await drive6({ measures: [HIT], unders: [{ hits: true }], sleep: c1.sleep, arms: [{ marks: [own(ARM_MS - 300)] }, { marks: [own(ARM_MS + 30)] }, { marks: [own(ARM_MS + 60)] }] });
   ok(A.r === true && A.armed && A.armed.waitedMs === 330 && A.sent.includes('mousePressed@250,320'), `an armed control ${ARM_MS - 300} ms old: the door WAITS out the arm (${A.armed && A.armed.waitedMs} ms on the clock), proves the point again, then presses`, A);
   const c2 = clock(), B = await drive6({ measures: [HIT], unders: [{ hits: true }], sleep: c2.sleep, arms: [{ marks: [own(99999, 1000, { moved: true })] }] });
-  ok(B.r === false && !B.sent.includes('mousePressed@250,320') && /ARMED \(_armSince \(moved\)\).*moved since the product last read it.*not pressed/.test(B.miss && B.miss.why), 'a control that moved and was never re-read by the product: NOT pressed — it fails BY NAME at the press, never a press that counts for nothing', B.miss);
-  const c3 = clock(), C = await drive6({ measures: [HIT], unders: [{ hits: true }], sleep: c3.sleep, arms: [{ marks: [own(ARM_MS + 100)] }, { marks: [own(1, 1900)] }] });
-  ok(C.r === false && C.sent.includes('mousePressed@250,320') && /RE-ARMED it at the press/.test(C.miss && C.miss.why), 'a press at which the product re-stamped the target\'s OWN arm (it moved under the pointer): said by name — the press counted for nothing', C.miss);
+  ok(B.r === false && !B.sent.includes('mousePressed@250,320') && /ARMED \(_armSince \(moved\)\).*STALE stamp.*no pass of the product read it again.*not pressed/.test(B.miss && B.miss.why), 'a STALE stamp (it moved; no pass of the product read it again): NOT pressed — it fails BY NAME at the press, in words that point at the stamp, never at timing', B.miss);
+  const c3 = clock(), C = await drive6({ measures: [HIT], unders: [{ hits: true }], sleep: c3.sleep, arms: [{ marks: [own(ARM_MS + 100)] }], stamps: { stampDown: 1000, stampAfter: 1900 } });
+  ok(C.r === false && C.sent.includes('mousePressed@250,320') && /RE-ARMED it at the press/.test(C.miss && C.miss.why), 'a press at which the product re-stamped the target\'s OWN arm — read at the INSTANT of the press and right after its click: said by name, the press counted for nothing', C.miss);
+  const c3b = clock(), C2 = await drive6({ measures: [HIT], unders: [{ hits: true }], sleep: c3b.sleep, arms: [{ marks: [own(ARM_MS + 100)] }, { marks: [own(1, 1900)] }], stamps: { stampDown: 1000, stampAfter: 1000 } });
+  ok(C2.r === true, 'a stamp a LATER row pass made (the element moved after the press — the probe a round trip later reads it younger) is NO re-arm: the press counted, the door says so', C2.miss);
   const c4 = clock(), D = await drive6({ measures: [HIT], unders: [{ hits: true }], sleep: c4.sleep });
   ok(D.r === true && D.armed === null && c4.waits.join() === '40', 'an unarmed control: no arm wait at all — the scripted clock holds only the still look\'s one 40 ms pause', { armed: D.armed, waits: c4.waits });
   const c5 = clock(), E = await drive6({ measures: [HIT], unders: [{ hits: true }, { hits: false, hit: 'DIV.global-toast' }], sleep: c5.sleep, arms: [{ marks: [own(ARM_MS - 300)] }, { marks: [own(ARM_MS + 30)] }] });
