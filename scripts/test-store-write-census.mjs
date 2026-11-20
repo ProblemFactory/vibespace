@@ -242,7 +242,7 @@ const ROWS = [
   ["src/server/session-stdout.js","*",7,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/session-stdout.js","writeSessionMeta",3,"durable","boot-restore, browser-env, usage-routes, channels liveness, weekly-lanes-unfold, reading-repair (each reads the files itself)","NOT idempotent: a live socket without its meta is restored as a stranger","a session's FIRST meta (a new socket) — its UPDATES go through the store writer"],
   ["src/server/spend-guard.js","*",11,"durable","—","NOT idempotent: money / authority / a credential","the unattended-spend budget + its journal (money) + its birth marker (B-23c3: written after every ledger write, so a removed ledger or an older copy is told apart from a first start) — must be on disk before the answer; B-ef83 +7: the ledger's LOCK (data/spend-budget.lock — authority: a lock lost is two processes counting one ledger): its temp linked into place (or created exclusively and written where the folder makes no hard link), a stale lock set aside and removed, and its removal at the process's exit"],
-  ["src/store-hold.js","*",5,"durable","—","a person's own store (layouts, the conversation list, bookmarks, themes, settings with the spend caps): a lost write is what the person made","THE STORE HOLD (lane lg-store-writes, B-225b): the ONE write of the persistence stores — whole bytes through a pid temp name, an exclusive create for a store read missing; persistence.js's own rows fall as each store moves onto it"],
+  ["src/store-hold.js","*",7,"durable","—","a person's own store (layouts, the conversation list, bookmarks, themes, settings with the spend caps): a lost write is what the person made","THE STORE HOLD (lane lg-store-writes, B-225b): the ONE write of the persistence stores — whole bytes through a pid temp name, an exclusive create for a store read missing; persistence.js's own rows fall as each store moves onto it"],
   ["src/server/stash-handover.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/sync-fs-witness-worker.js","*",1,"not-main","—","—","the witness's watchdog thread (its journal line on fd 2)"],
   ["src/store-exit-keeper.js","*",1,"not-main","—","—","round 4 (MUST 2): the writer's exit keeper thread — its ONE line on fd 2 at the exit's bound, then the process ends"],
@@ -2165,17 +2165,35 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
     }
     // REDs (anchored, in copies)
     const HOLD_A = "    held = { kind: kindOf(a), code: a.code || null, why: a.why || null, since: now(), rung: 'silent' };\n    tries = 0; arm();\n    return 'held';";
-    const EXCL_A = "      try { fs.linkSync(tmp, file); }";
+    const EXCL_A = "      try { fs.linkSync(tmp, file); linked = true; }";
     ok([HOLD_A, EXCL_A].every((x) => HSRC.split(x).length === 2), 'control setup: the hold and the exclusive create are found once each in src/store-hold.js');
     const xh = scene(mutantCopies('swc-hold-cut', REPO).load('src/store-hold.js', anchored(HSRC, HOLD_A, "    value = undefined; missing = false;   /* MUTANT: the release — a failed read starts EMPTY and is written over */\n    return 'data';", 'hold-cut'), 'hold-cut'), 'eio-red', 'EIO');
     ok(!xh.held && !xh.wr && !xh.bytesKept, 'CONTROL (the hold cut, in a copy — the release): the failed read starts EMPTY and the one write saves the defaults OVER the file (red)', { held: xh.held, wr: xh.wr });
     {
-      const XM = mutantCopies('swc-excl-cut', REPO).load('src/store-hold.js', anchored(HSRC, EXCL_A, "      try { fs.renameSync(tmp, file); }   /* MUTANT: a rename over whatever is there */", 'excl-cut'), 'excl-cut');
+      const XM = mutantCopies('swc-excl-cut', REPO).load('src/store-hold.js', anchored(HSRC, EXCL_A, "      try { fs.renameSync(tmp, file); linked = true; }   /* MUTANT: a rename over whatever is there */", 'excl-cut'), 'excl-cut');
       const d = scratchDir('hold-missing-red'); roots.push(d); const F = path.join(d, 'store.json');
       const h = XM.create({ file: F, valid, log: { warn() { } }, schedule: () => 0 }); h.readAtStart();
       fs.writeFileSync(F, SEED);
       tried(() => h.write({ v: 1, kept: 'a first-run default' }));
       ok(fs.readFileSync(F, 'utf8') !== SEED, 'CONTROL (the exclusive create cut, in a copy): the first-run default is renamed OVER the real file that arrived late (red)');
+    }
+    // (c2) A FILESYSTEM WITHOUT HARD LINKS (a link refused by name — EPERM): the first change still creates the file (the rename after
+    // a last look) and a file found there is still ADOPTED, never written over. RED (anchored, in a copy): the last look cut.
+    {
+      const noLink = (fn) => { const lk = fs.linkSync; fs.linkSync = function () { throw Object.assign(new Error('EPERM: operation not permitted, link (a stand-in)'), { code: 'EPERM' }); }; try { return fn(); } finally { fs.linkSync = lk; } };
+      const nl = (Mod, tag, late) => {
+        const d = scratchDir('hold-nolink-' + tag); roots.push(d); const F = path.join(d, 'store.json');
+        const h = Mod.create({ file: F, valid, log: { warn() { } }, schedule: () => 0 }); h.readAtStart();
+        if (late) fs.writeFileSync(F, SEED);
+        const r = noLink(() => tried(() => h.write({ v: 1, kept: 'born' })));
+        return { F, r, bytes: fs.existsSync(F) ? fs.readFileSync(F, 'utf8') : null, temps: fs.readdirSync(d).filter((x) => x.endsWith('.tmp')) };
+      };
+      const born = nl(HMOD, 'born', false), late = nl(HMOD, 'late', true);
+      ok(!born.r && born.bytes && JSON.parse(born.bytes).kept === 'born' && !born.temps.length && late.r && late.r.code === 'store_appeared' && late.bytes === SEED && !late.temps.length, '⑪ a filesystem WITHOUT HARD LINKS (link refused, EPERM): the first change creates the file by the rename after a last look; a file found there is ADOPTED all the same — no temp left', { born: born.r, late: late.r });
+      const LOOK_A = "        if (fs.existsSync(file)) throw appeared();\n";
+      ok(HSRC.split(LOOK_A).length === 2, 'control setup: the last look before the rename is found once in src/store-hold.js');
+      const xl = nl(mutantCopies('swc-look-cut', REPO).load('src/store-hold.js', anchored(HSRC, LOOK_A, "        /* MUTANT: no last look */\n", 'look-cut'), 'look-cut'), 'late-red', true);
+      ok(!xl.r && xl.bytes !== SEED, 'CONTROL (the last look cut, in a copy): on a filesystem without links the first-run default is renamed OVER the file that arrived late (red)', xl.r);
     }
     // (d) THE CONVERSATION LIST ON THE HOLD (cut 2 — src/routes/persistence.js, data/user-state.json; R1–R3, R6): a list the start
     // could not read answers every door by NAME (503 store_unread — never a 200 with the defaults), nothing is written over it, and

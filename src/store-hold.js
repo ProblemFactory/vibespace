@@ -17,6 +17,7 @@ const fs = require('fs');
 const path = require('path');
 const SR = require('./store-read.js');
 
+const NO_LINK = new Set(['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EXDEV']);   // a link the FILESYSTEM refuses (not a file there)
 const SILENT_RUNGS_MS = Object.freeze([1000, 2000, 4000, 8000]);   // ≈15 s of quick, silent reads again
 const LADDER = Object.freeze({ firstMs: 30000, maxMs: 300000 });
 
@@ -105,19 +106,26 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
     fs.mkdirSync(path.dirname(file), { recursive: true });
     for (let i = 0; i < parts.length; i++) fs.writeFileSync(tmp, parts[i], { flag: i ? 'a' : 'w' });
     if (missing) {
-      try { fs.linkSync(tmp, file); }
-      catch (e) {
+      /** a file arrived where the read found none (a late mount): READ and ADOPTED, never written over — this change refused by name */
+      const appeared = () => {
         try { fs.unlinkSync(tmp); } catch { /* gone */ }
-        if (e && e.code === 'EEXIST') {   // a file arrived where the read found none (a late mount): adopted, never written over
-          missing = false; value = undefined;
-          const read = readSync(file);
-          const a = answerOf(read);
-          if (a.state === 'data') { value = a.value; text = read.text; } else { held = { kind: kindOf(a), code: a.code || null, why: a.why || null, since: now(), rung: 'silent' }; tries = 0; arm(); }
-          throw Object.assign(new Error(`${path.basename(file)} appeared since the start — it is read and kept; this change was not made`), { status: 409, code: 'store_appeared' });
-        }
-        throw e;
+        missing = false; value = undefined;
+        const read = readSync(file);
+        const a = answerOf(read);
+        if (a.state === 'data') { value = a.value; text = read.text; } else { held = { kind: kindOf(a), code: a.code || null, why: a.why || null, since: now(), rung: 'silent' }; tries = 0; arm(); }
+        return Object.assign(new Error(`${path.basename(file)} appeared since the start — it is read and kept; this change was not made`), { status: 409, code: 'store_appeared' });
+      };
+      let linked = false;
+      try { fs.linkSync(tmp, file); linked = true; }
+      catch (e) {
+        if (e && e.code === 'EEXIST') throw appeared();
+        // A FILESYSTEM WITHOUT HARD LINKS (some mounts refuse a link by name): the rename after a last look — a file found there is
+        // adopted all the same; only a file that arrives inside that instant is not seen (a create with no link has no exclusive door)
+        if (!(e && NO_LINK.has(e.code))) { try { fs.unlinkSync(tmp); } catch { /* gone */ } throw e; }
+        if (fs.existsSync(file)) throw appeared();
+        fs.renameSync(tmp, file);
       }
-      try { fs.unlinkSync(tmp); } catch { /* the link stands */ }
+      if (linked) { try { fs.unlinkSync(tmp); } catch { /* the link stands */ } }
       missing = false;
     } else fs.renameSync(tmp, file);
     value = next; text = null;
