@@ -2122,10 +2122,20 @@ console.log('⑱g (B-9ff2 step 3, the coordinator\'s ruling r180) a main card th
   const v7 = H.answerVerdict(HA.settledState(s7, 'req-wd'));
   check('⑱g the withdrawn card offers no Allow, and a stale press on it is REFUSED by the table (nothing written to the CLI): ' + JSON.stringify(v7), HA.settledState(s7, 'req-wd') === 'cancelled' && v7.write === false && v7.code === 'permission-settled', v7);
   // RED CONTROL: the 3ad452df5 line (the withdrawal written `denied`) reads «Denied» for the cancel-first order
-  const mmSrc = read('src/message-manager.js'), CUT = "        if (m.permission.resolved !== 'stopped') m.permission.resolved = 'cancelled';\n";
+  const mmSrc = read('src/message-manager.js'), CUT = "        if (m.permission.resolved !== 'stopped' && !ran) m.permission.resolved = 'cancelled';\n";
   const OldMM = mutantCopies('withdrawn-denied', REPO).load('src/message-manager.js', anchored(mmSrc, CUT, "        m.permission.resolved = 'denied';\n", 'withdrawn-denied'), 'withdrawn-denied').MessageManager;   // stale-pins: kept — the red control REBUILDS the 3ad452df5 line on purpose
   const old = run(OldMM, orders['cancel first, then the result'], 'sess-wd-old');
   check('⑱g RED CONTROL: the 3ad452df5 line reads the same withdrawal «' + wordsOf(old) + '» — the word this cures', old === 'denied' && wordsOf(old) === 'Denied', old);
+  // THE FOLLOW-UP (the round wpuahmyim's should, the coordinator's r237): a result that PROVES the call ran moves a withdrawn card to
+  // the result's word — a success reads allowed, one stopped while it ran reads stopped — in either order; «not run» results leave it
+  const okRes = { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_wd', content: 'deployed', is_error: false }] }, uuid: 'u-wdok' };
+  const proved = { 'the cancel, then a SUCCESS': [use, ask, cancel, okRes], 'a success, then the cancel': [use, ask, okRes, cancel], 'the cancel, then «stopped while it ran»': [use, ask, cancel, res(M9T.text)] };
+  const pv = Object.fromEntries(Object.entries(proved).flatMap(([k, v]) => [[k + ' (live)', run(MessageManager, v, 'sess-wd-pl')], [k + ' (rebuilt)', run(MessageManager, v, 'sess-wd-pr', 'history')]]));
+  check('⑱g FOLLOW-UP: a result that PROVES the call ran moves the withdrawn card to its word — a success reads «' + wordsOf('allowed') + '», «stopped while it ran» reads stopped — in either order, live and rebuilt: ' + JSON.stringify(pv), Object.entries(pv).every(([k, w]) => (/stopped/.test(k) ? w === 'stopped' : w === 'allowed')), pv);
+  const RESULT_MOVE = "      } else if (existing.permission && existing.permission.resolved === 'cancelled' && ['allowed', 'stopped'].includes(this._resolutionFromResult(resultText, tr.is_error))) {\n";
+  const NoMove = mutantCopies('withdrawn-no-move', REPO).load('src/message-manager.js', anchored(mmSrc, RESULT_MOVE, '      } else if (false) {\n', 'withdrawn-no-move'), 'withdrawn-no-move').MessageManager;
+  const stuck = run(NoMove, proved['the cancel, then a SUCCESS'], 'sess-wd-nomove');
+  check('⑱g RED CONTROL (the follow-up): without the move, the call that RAN still reads «' + wordsOf(stuck) + '» on its withdrawn card', stuck === 'cancelled', stuck);
 }
 
 console.log(`\n${failed ? '✗' : 'ALL PASS'} (${passed} passed${failed ? `, ${failed} failed` : ''})`);

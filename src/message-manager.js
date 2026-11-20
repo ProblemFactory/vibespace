@@ -2195,6 +2195,12 @@ class MessageManager extends MessageWindow {
         // lane cli-2-1-314-records: the call we allowed RAN and a Stop cut it off (2.1.314's m9t) — the same card says so, patched in place
         existing.permission.resolved = 'stopped';
         permResolved = true;
+      } else if (existing.permission && existing.permission.resolved === 'cancelled' && ['allowed', 'stopped'].includes(this._resolutionFromResult(resultText, tr.is_error))) {
+        // B-9ff2 step 3's follow-up (the round wpuahmyim's should, the coordinator's r237): a card WITHDRAWN (`cancelled`, «Not run»)
+        // whose call then RAN — a successful result, or one that says it ran and was stopped — is PROVED wrong by that result: the card
+        // moves to the result's word. No build is shown to do this; a result that says the call did not run leaves «Not run» as it is.
+        existing.permission.resolved = this._resolutionFromResult(resultText, tr.is_error);
+        permResolved = true;
       }
       if (this._autoAllowLines) this._autoAllowRefused(toolUseId, resultText, tr.is_error, emit); // lane bypass-no-prompts
       // Replace tool_call content with tool_result (keeps input + adds output)
@@ -2771,7 +2777,11 @@ class MessageManager extends MessageWindow {
         // the words the other order already uses (a cancelled-turn result first: «Not run — the request was withdrawn or the turn ended
         // before an answer»), whichever of the two records comes first; «Denied» only when somebody denied. As a helper's ask, the
         // withdrawal stands over an answer of ours (the CLI dropped it); a call that already RAN and was stopped keeps «stopped».
-        if (m.permission.resolved !== 'stopped') m.permission.resolved = 'cancelled';
+        // …unless the call's own result is already here and PROVES it ran (ok, or stopped while it ran — the follow-up, r237): the
+        // result's word stands, whichever of the two came first
+        const res = Array.isArray(m.content) && m.content[0] && m.content[0].type === 'tool_result' ? m.content[0] : null;
+        const ran = !!res && (res.status === 'ok' || res.stoppedWhileRunning === true);
+        if (m.permission.resolved !== 'stopped' && !ran) m.permission.resolved = 'cancelled';
         if (emit) this._emit({ op: 'edit', id: m.id, fields: { permission: m.permission } });
         break;
       }
