@@ -800,20 +800,20 @@ try {
     ok(Math.abs(rowPx[0] - 255) < 12 && rowPx[1] < 24 && Math.abs(rowPx[2] - 170) < 12, `the bottom row is VISIBLE: the screenshot pixel at its middle is rgb(${rowPx.slice(0, 3).join(', ')}) — the row's own rgb(255, 0, 170)`, { rowAt, rowPx });
     // zoom in (past contain) then out: the frame keeps the artboard's height; Fit = the whole board again. Each click is
     // waited for by WHAT HAPPENED — the canvas's view on the ladder step the model names (zoomStep) — never a fixed sleep.
-    const zIn = CM.zoomStep(a.z, +1), zOut = CM.zoomStep(zIn, -1);
+    const zStepUp = CM.zoomStep(a.z, +1), zOut = CM.zoomStep(zStepUp, -1);
     const settled = (z) => until(async () => { const v = await look(); return Math.abs(v.z - z) < 1e-9 ? v : null; }, 4000, 100);
     const view = () => ev(`const c = ${W2}._designCanvas; return { ...c.view(), focused: c.focused() };`); // the view AND that it is still the focused view
     const bIn = await rectOf('.design-btn-in', W2 + '.element'), bOut = await rectOf('.design-btn-out', W2 + '.element');
     ok(!!bIn && !!bOut, 'the duo window\'s bar carries .design-btn-in and .design-btn-out');
     if (bIn) await click(bIn);
-    const zi = await settled(zIn) || await look();
+    const zi = await settled(zStepUp) || await look();
     evidence.focusWhole.zoomedIn = zi;
-    ok(zi.z === zIn && zi.z > a.z && zi.cssH === '585px' && Math.abs(zi.f.h - 585 * zi.z) < 1, `zoom in past contain (${a.z.toFixed(4)} → ${zi.z}, the ladder's ${zIn}): the frame stays the artboard's 585 px — never cut again`, zi);
+    ok(zi.z === zStepUp && zi.z > a.z && zi.cssH === '585px' && Math.abs(zi.f.h - 585 * zi.z) < 1, `zoom in past contain (${a.z.toFixed(4)} → ${zi.z}, the ladder's ${zStepUp}): the frame stays the artboard's 585 px — never cut again`, zi);
     if (bOut) await click(bOut);
     const b2 = await settled(zOut) || await look();
     evidence.focusWhole.zoomedOut = b2;
     // THE PREMISE, its own assertion (hosted 44786427248 folded it into the Fit row: b2 read back the contained 0.918)
-    ok(b2.z === zOut && CM.ZOOM_STEPS.includes(b2.z) && Math.abs(b2.z - a.z) > 1e-6, `THE PREMISE: + then − lands on a ladder step (${zIn} → ${b2.z}, the model's ${zOut}) that differs from the contained ${a.z.toFixed(4)}`, { a: a.z, zIn, zOut, b2: b2.z });
+    ok(b2.z === zOut && CM.ZOOM_STEPS.includes(b2.z) && Math.abs(b2.z - a.z) > 1e-6, `THE PREMISE: + then − lands on a ladder step (${zStepUp} → ${b2.z}, the model's ${zOut}) that differs from the contained ${a.z.toFixed(4)}`, { a: a.z, zStepUp, zOut, b2: b2.z });
     ok(b2.cssH === '585px' && b2.f.t >= b2.vp.t - 0.5 && b2.f.t + b2.f.h <= b2.vp.t + b2.vp.h + 0.5 && b2.f.l >= b2.vp.l - 0.5 && b2.f.l + b2.f.w <= b2.vp.l + b2.vp.w + 0.5, `…and back out (${b2.z}): the whole board inside the pane again`, b2);
     // THE LAW end to end (B-1217 member 12): the folder re-read and the pane resized — the person's zoom stands
     const v2 = await view();
