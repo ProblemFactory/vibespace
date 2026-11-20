@@ -295,13 +295,36 @@ const PAYLOAD = (recs) => ({
     const o6 = mk4(d5); await o6.replayed; await new Promise((r) => setTimeout(r, 30)); await SW.durable(path.join(d5, 'usage-history', 'otel-truth.ndjson')).catch(() => false);
     ok(o5.observedOrgForRid('req_u4stop') === 'sub-true' && once5 === 1 && (spill5 || '') === '' && o6.observedOrgForRid('req_u4stop') === 'sub-true' && countIn(stashOf(d5), 'req_u4stop') === 1, `U4 a hub that stopped with a post waiting: the next boot takes the spilled record ONCE (${once5} stash line), the spill empties, a second boot adds nothing (${countIn(stashOf(d5), 'req_u4stop')})`);
     { // a post that comes DURING the replay's slices (the buffer read, the map half filled) waits too — never a replay finished in its tick
-      const d8 = mkDir4('e'), o8 = mk4(d8);
-      for (let k = 0; k < 4000 && !(o8.stats().rids > 0); k++) await new Promise((r) => setImmediate(r));
-      const mid = o8.stats().rids, p8 = midPost(o8, PAYLOAD([REC({ request_id: { stringValue: 'req_u4mid' } })]));
-      const right = o8.stats().rids;
-      const out8 = await p8.out; await o8.replayed;
-      ok(mid > 0 && mid < 40000 && right === mid && p8.bytes === 0 && typeof p8.out.then === 'function' && out8.kept === 1 && o8.observedOrgForRid('req_u4mid') === 'sub-true', `U4 a post during the replay's slices (${mid} of 40 000 rows replayed) waits: the map unmoved in its tick (${right}), 0 stash bytes read on the loop, taken after the replay`);
-      try { SW.forget(path.join(d8, 'usage-history', 'otel-truth.ndjson')); SW.forget(path.join(d8, 'usage-history', 'otel-truth.pending.ndjson')); } catch { } fs.rmSync(d8, { recursive: true, force: true });
+      // (B-1217 member 14, 主开发 r464: red in whole fast-tier runs on the first test machine, «40000 of 40 000 rows replayed» — the post
+      // came after the replay had ENDED, nothing was left to wait behind). THE RACE IS PLACED, never hoped: the replay runs over a copy of
+      // the ingest with ONE seam — after a slice that did not end the stash, before its next turn, it waits on a hold this leg opens; the
+      // post is sent while the replay is held between two slices, and the replay is released after. A setup line says the hold was reached
+      const SLICE = '    while (!replay.done && !replayTake(performance.now() + REPLAY_SLICE_MS)) await nextTurn();';
+      const src8 = fs.readFileSync(path.join(REPO, 'src/server/otel-ingest.js'), 'utf8');
+      const hold8 = src8.split(SLICE).length === 2 ? src8.replace(SLICE, () => '    while (!replay.done && !replayTake(performance.now() + REPLAY_SLICE_MS)) { if (globalThis.__u4SliceHold) await globalThis.__u4SliceHold(); await nextTurn(); }') : null;
+      const sliced = async (src, tag) => {
+        const M8 = mutantCopies(`otel-truth-u4-${tag}`, REPO).load('src/server/otel-ingest.js', src, tag);
+        let o8 = null, reached = null, open = null; const gate = new Promise((r) => { open = r; });
+        globalThis.__u4SliceHold = () => { if (reached) return null; reached = { rids: o8 ? o8.stats().rids : -1 }; return gate; };
+        const d8 = mkDir4(`e-${tag}`); o8 = mk4(d8, M8);
+        for (let k = 0; k < 1000000 && !reached; k++) await new Promise((r) => setImmediate(r));   // the replay reaches its hold (bounded by a count of turns)
+        const mid = o8.stats().rids, p8 = midPost(o8, PAYLOAD([REC({ request_id: { stringValue: `req_u4mid${tag}` } })]));
+        const right = o8.stats().rids, waits = !!(p8.out && typeof p8.out.then === 'function');
+        globalThis.__u4SliceHold = null; open();
+        const out8 = await p8.out; await o8.replayed;
+        const res = { reached, mid, right, bytes: p8.bytes, waits, kept: out8 && out8.kept, org: o8.observedOrgForRid(`req_u4mid${tag}`) };
+        try { SW.forget(path.join(d8, 'usage-history', 'otel-truth.ndjson')); SW.forget(path.join(d8, 'usage-history', 'otel-truth.pending.ndjson')); } catch { } fs.rmSync(d8, { recursive: true, force: true });
+        return res;
+      };
+      const s8 = hold8 ? await sliced(hold8, 'hold') : null;
+      ok(!!s8 && !!s8.reached && s8.reached.rids > 0 && s8.reached.rids < 40000, `U4 setup: the replay HELD between two slices (${s8 && s8.reached ? s8.reached.rids : 'never reached'} of 40 000 rows replayed) — a seam of the suite: a copy of the ingest whose replay, after a slice that did not end the stash, waits on this leg's hold`, s8);
+      const mid = s8 ? s8.mid : -1, right = s8 ? s8.right : -1;
+      ok(!!s8 && mid > 0 && mid < 40000 && right === mid && s8.bytes === 0 && s8.waits && s8.kept === 1 && s8.org === 'sub-true', `U4 a post during the replay's slices (${mid} of 40 000 rows replayed) waits: the map unmoved in its tick (${right}), 0 stash bytes read on the loop, taken after the replay`, s8);
+      // CONTROL, red for its own reason: the same placed race over the release's finishReplay at the top of the ingest — the post finishes
+      // the replay in its own tick (the map moves in the post's tick) and does not wait
+      const FIN = '    if (replay.done) return take(records, seen);';
+      const c8 = hold8 && hold8.split(FIN).length === 2 ? await sliced(hold8.replace(FIN, () => '    finishReplay(); return take(records, seen);'), 'fin') : null;
+      ok(!!c8 && !!c8.reached && c8.reached.rids > 0 && c8.right > c8.mid && !c8.waits, `CONTROL: the same placed race over the release's finishReplay at the top of the ingest — the post finished the held replay in its own tick (the map ${c8 && c8.mid} → ${c8 && c8.right}) and did not wait ⇒ RED`, c8);
     }
     { // a write the writer never confirmed (its thread restarted and asked again) is OFFERED AGAIN, on a new line
       const d9 = mkDir4('f'), o9 = mk4(d9); await o9.replayed;
